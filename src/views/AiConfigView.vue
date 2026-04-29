@@ -9,7 +9,7 @@
         <input
           v-model.trim="form.endpoint"
           type="text"
-          placeholder="/api/v1/chat/completions"
+          placeholder="https://fufu.iqach.top/v1/chat/completions"
         />
       </label>
 
@@ -64,7 +64,7 @@ interface AiConfigForm {
 const STORAGE_KEY = "ai-config";
 
 const form = reactive<AiConfigForm>({
-  endpoint: "/api/v1/chat/completions",
+  endpoint: "https://fufu.iqach.top/v1/chat/completions",
   model: "mimo-v2.5-pro",
   prompt: "你好",
   stream: true,

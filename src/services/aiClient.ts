@@ -16,6 +16,7 @@ export interface AiTestResult {
 
 function buildPayload(model: string, prompt: string, stream: boolean) {
   return {
+    endpoint: "",
     model,
     messages: [{ role: "user", content: prompt }],
     stream,
@@ -44,12 +45,15 @@ function parseStreamContentFromLine(line: string): string {
 
 export async function testAiModel(request: AiTestRequest): Promise<AiTestResult> {
   try {
-    const response = await fetch(request.endpoint, {
+    const payload = buildPayload(request.model, request.prompt, request.stream);
+    payload.endpoint = request.endpoint;
+
+    const response = await fetch("/backend/ai/test", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(buildPayload(request.model, request.prompt, request.stream)),
+      body: JSON.stringify(payload),
     });
 
     if (request.stream && response.ok && response.body) {
@@ -110,8 +114,7 @@ export async function testAiModel(request: AiTestRequest): Promise<AiTestResult>
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "未知网络错误";
-    const hint =
-      "浏览器可能触发跨域限制。开发环境建议使用 /api/v1/chat/completions 代理地址；Tauri 生产环境建议走后端命令代理。";
+    const hint = "当前请求走本地后端转发，请检查接口地址、网络连通性和后端日志。";
     return {
       ok: false,
       status: 0,
