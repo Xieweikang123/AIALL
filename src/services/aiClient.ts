@@ -1,5 +1,6 @@
 export interface AiTestRequest {
   endpoint: string;
+  apiKey?: string;
   model: string;
   prompt: string;
   stream: boolean;
@@ -14,9 +15,39 @@ export interface AiTestResult {
   error?: string;
 }
 
+export interface AiModelsRequest {
+  endpoint: string;
+  apiKey?: string;
+}
+
+export interface AiModelsResult {
+  ok: boolean;
+  status: number;
+  models: string[];
+  rawText: string;
+  error?: string;
+}
+
+export interface AiTtsRequest {
+  endpoint: string;
+  apiKey?: string;
+  model: string;
+  input: string;
+  voice: string;
+  format: "mp3" | "wav" | "opus";
+}
+
+export interface AiTtsResult {
+  ok: boolean;
+  status: number;
+  audioBlob?: Blob;
+  error?: string;
+}
+
 function buildPayload(model: string, prompt: string, stream: boolean) {
   return {
     endpoint: "",
+    apiKey: "",
     model,
     messages: [{ role: "user", content: prompt }],
     stream,
@@ -47,6 +78,7 @@ export async function testAiModel(request: AiTestRequest): Promise<AiTestResult>
   try {
     const payload = buildPayload(request.model, request.prompt, request.stream);
     payload.endpoint = request.endpoint;
+    payload.apiKey = request.apiKey || "";
 
     const response = await fetch("/backend/ai/test", {
       method: "POST",
@@ -120,6 +152,168 @@ export async function testAiModel(request: AiTestRequest): Promise<AiTestResult>
       status: 0,
       rawText: "",
       error: `${errorMessage}\n${hint}`,
+    };
+  }
+}
+
+function resolveModelsEndpoint(endpoint: string): string {
+  const input = endpoint.trim();
+  if (!input) return input;
+
+  try {
+    const url = new URL(input);
+    const path = url.pathname;
+
+    if (path.endsWith("/chat/completions")) {
+      url.pathname = path.replace(/\/chat\/completions$/, "/models");
+      return url.toString();
+    }
+
+    if (path.endsWith("/models")) {
+      return url.toString();
+    }
+
+    const normalizedPath = path.endsWith("/") ? path.slice(0, -1) : path;
+    url.pathname = normalizedPath ? `${normalizedPath}/models` : "/models";
+    return url.toString();
+  } catch {
+    if (input.endsWith("/chat/completions")) {
+      return input.replace(/\/chat\/completions$/, "/models");
+    }
+    if (input.endsWith("/models")) {
+      return input;
+    }
+    return `${input.replace(/\/$/, "")}/models`;
+  }
+}
+
+export async function fetchAvailableModels(request: AiModelsRequest): Promise<AiModelsResult> {
+  try {
+    const modelsEndpoint = resolveModelsEndpoint(request.endpoint);
+    const response = await fetch("/backend/ai/models", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        endpoint: modelsEndpoint,
+        apiKey: request.apiKey || "",
+      }),
+    });
+
+    const rawText = await response.text();
+    let modelNames: string[] = [];
+
+    try {
+      const parsed = JSON.parse(rawText) as {
+        data?: Array<{ id?: string }>;
+        models?: Array<{ id?: string }>;
+      };
+      const source = parsed.data || parsed.models || [];
+      modelNames = source.map((item) => item.id || "").filter(Boolean);
+    } catch {
+      modelNames = [];
+    }
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      models: modelNames,
+      rawText,
+      error: response.ok ? undefined : `获取模型失败，HTTP ${response.status}`,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "未知网络错误";
+    return {
+      ok: false,
+      status: 0,
+      models: [],
+      rawText: "",
+      error: `${errorMessage}\n请检查接口地址与网络连通性。`,
+    };
+  }
+}
+
+function resolveTtsEndpoint(endpoint: string): string {
+  const input = endpoint.trim();
+  if (!input) return input;
+
+  try {
+    const url = new URL(input);
+    const path = url.pathname;
+
+    if (path.endsWith("/chat/completions")) {
+      url.pathname = path.replace(/\/chat\/completions$/, "/audio/speech");
+      return url.toString();
+    }
+
+    if (path.endsWith("/audio/speech")) {
+      return url.toString();
+    }
+
+    const normalizedPath = path.endsWith("/") ? path.slice(0, -1) : path;
+    url.pathname = normalizedPath ? `${normalizedPath}/audio/speech` : "/audio/speech";
+    return url.toString();
+  } catch {
+    if (input.endsWith("/chat/completions")) {
+      return input.replace(/\/chat\/completions$/, "/audio/speech");
+    }
+    if (input.endsWith("/audio/speech")) {
+      return input;
+    }
+    return `${input.replace(/\/$/, "")}/audio/speech`;
+  }
+}
+
+export async function testTtsModel(request: AiTtsRequest): Promise<AiTtsResult> {
+  try {
+    const ttsEndpoint = resolveTtsEndpoint(request.endpoint);
+    const response = await fetch("/backend/ai/tts", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        endpoint: ttsEndpoint,
+        apiKey: request.apiKey || "",
+        model: request.model,
+        input: request.input,
+        voice: request.voice,
+        format: request.format,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorMessage = errorText || `TTS 请求失败，HTTP ${response.status}`;
+      try {
+        const parsed = JSON.parse(errorText) as {
+          error?: { message?: string };
+          message?: string;
+        };
+        errorMessage = parsed.error?.message || parsed.message || errorMessage;
+      } catch {
+        // 保持原始错误文本。
+      }
+      return {
+        ok: false,
+        status: response.status,
+        error: errorMessage,
+      };
+    }
+
+    const audioBlob = await response.blob();
+    return {
+      ok: true,
+      status: response.status,
+      audioBlob,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "未知网络错误";
+    return {
+      ok: false,
+      status: 0,
+      error: `${errorMessage}\n请检查 TTS 接口地址与网络连通性。`,
     };
   }
 }
