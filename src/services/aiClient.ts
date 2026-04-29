@@ -3,6 +3,7 @@ export interface AiTestRequest {
   apiKey?: string;
   model: string;
   prompt: string;
+  imageDataUrl?: string;
   stream: boolean;
   onStreamChunk?: (chunkText: string) => void;
 }
@@ -18,6 +19,7 @@ export interface AiTestResult {
 export interface AiModelsRequest {
   endpoint: string;
   apiKey?: string;
+  forceRefresh?: boolean;
 }
 
 export interface AiModelsResult {
@@ -26,7 +28,18 @@ export interface AiModelsResult {
   models: string[];
   rawText: string;
   error?: string;
+  fromCache?: boolean;
 }
+
+interface CachedModelsPayload {
+  cachedAt: number;
+  models: string[];
+  rawText: string;
+}
+
+const MODELS_CACHE_TTL_MS = 5 * 60 * 1000;
+const MODELS_CACHE_PREFIX = "ai-models-cache:";
+const memoryModelsCache = new Map<string, CachedModelsPayload>();
 
 export interface AiTtsRequest {
   endpoint: string;
@@ -44,12 +57,32 @@ export interface AiTtsResult {
   error?: string;
 }
 
-function buildPayload(model: string, prompt: string, stream: boolean) {
+type ChatMessage =
+  | { role: string; content: string }
+  | {
+      role: string;
+      content: Array<
+        | { type: "text"; text: string }
+        | { type: "image_url"; image_url: { url: string } }
+      >;
+    };
+
+function buildPayload(model: string, prompt: string, stream: boolean, imageDataUrl?: string) {
+  const message: ChatMessage = imageDataUrl
+    ? {
+        role: "user",
+        content: [
+          { type: "text", text: prompt },
+          { type: "image_url", image_url: { url: imageDataUrl } },
+        ],
+      }
+    : { role: "user", content: prompt };
+
   return {
     endpoint: "",
     apiKey: "",
     model,
-    messages: [{ role: "user", content: prompt }],
+    messages: [message],
     stream,
   };
 }
@@ -76,7 +109,7 @@ function parseStreamContentFromLine(line: string): string {
 
 export async function testAiModel(request: AiTestRequest): Promise<AiTestResult> {
   try {
-    const payload = buildPayload(request.model, request.prompt, request.stream);
+    const payload = buildPayload(request.model, request.prompt, request.stream, request.imageDataUrl);
     payload.endpoint = request.endpoint;
     payload.apiKey = request.apiKey || "";
 
@@ -187,9 +220,59 @@ function resolveModelsEndpoint(endpoint: string): string {
   }
 }
 
+function buildModelsCacheKey(modelsEndpoint: string, apiKey?: string): string {
+  const keyPart = `${modelsEndpoint}|${apiKey || ""}`;
+  return `${MODELS_CACHE_PREFIX}${keyPart}`;
+}
+
+function readModelsCache(cacheKey: string): CachedModelsPayload | undefined {
+  const now = Date.now();
+
+  const memoryHit = memoryModelsCache.get(cacheKey);
+  if (memoryHit && now - memoryHit.cachedAt <= MODELS_CACHE_TTL_MS) {
+    return memoryHit;
+  }
+
+  const raw = localStorage.getItem(cacheKey);
+  if (!raw) return;
+  try {
+    const parsed = JSON.parse(raw) as CachedModelsPayload;
+    if (!parsed || typeof parsed.cachedAt !== "number" || !Array.isArray(parsed.models)) return;
+    if (now - parsed.cachedAt > MODELS_CACHE_TTL_MS) return;
+    memoryModelsCache.set(cacheKey, parsed);
+    return parsed;
+  } catch {
+    return;
+  }
+}
+
+function writeModelsCache(cacheKey: string, payload: CachedModelsPayload) {
+  memoryModelsCache.set(cacheKey, payload);
+  try {
+    localStorage.setItem(cacheKey, JSON.stringify(payload));
+  } catch {
+    // localStorage 可能满了或被禁用，忽略即可。
+  }
+}
+
 export async function fetchAvailableModels(request: AiModelsRequest): Promise<AiModelsResult> {
   try {
     const modelsEndpoint = resolveModelsEndpoint(request.endpoint);
+    const cacheKey = buildModelsCacheKey(modelsEndpoint, request.apiKey);
+
+    if (!request.forceRefresh) {
+      const cached = readModelsCache(cacheKey);
+      if (cached) {
+        return {
+          ok: true,
+          status: 200,
+          models: cached.models,
+          rawText: cached.rawText,
+          fromCache: true,
+        };
+      }
+    }
+
     const response = await fetch("/backend/ai/models", {
       method: "POST",
       headers: {
@@ -215,12 +298,21 @@ export async function fetchAvailableModels(request: AiModelsRequest): Promise<Ai
       modelNames = [];
     }
 
+    if (response.ok && modelNames.length) {
+      writeModelsCache(cacheKey, {
+        cachedAt: Date.now(),
+        models: modelNames,
+        rawText,
+      });
+    }
+
     return {
       ok: response.ok,
       status: response.status,
       models: modelNames,
       rawText,
       error: response.ok ? undefined : `获取模型失败，HTTP ${response.status}`,
+      fromCache: false,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "未知网络错误";
@@ -230,6 +322,7 @@ export async function fetchAvailableModels(request: AiModelsRequest): Promise<Ai
       models: [],
       rawText: "",
       error: `${errorMessage}\n请检查接口地址与网络连通性。`,
+      fromCache: false,
     };
   }
 }
