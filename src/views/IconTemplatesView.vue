@@ -4,7 +4,7 @@
       <div>
         <h1>图标模板库</h1>
         <p class="desc">
-          录入任务栏/桌面等位置的<strong>小范围截图</strong>；对话里「打开某应用」会按模板在<strong>全屏</strong>范围内匹配并点击（算法对顶部区域降权，减轻浏览器顶栏等误匹配）。数据仅在运行
+          录入任务栏/桌面等位置的<strong>小范围截图</strong>；对话里「打开某应用」会按模板在<strong>主显示器画面</strong>范围内匹配并点击。数据仅在运行
           <code class="inline-code">npm run dev</code> 时由本机开发服读写。
         </p>
         <p class="desc subtle">
@@ -127,7 +127,7 @@
               type="button"
               class="secondary"
               :disabled="!row.imageUrl || screenDebugLoadingId === row.id"
-              :title="row.imageUrl ? '截取当前主屏并在画面中查找该模板（不点击）' : '请先为该条目保存模板图'"
+              :title="row.imageUrl ? '截取当前主显示器画面并在其中查找该模板（不点击）' : '请先为该条目保存模板图'"
               @click="testScreenMatch(row)"
             >
               {{ screenDebugLoadingId === row.id ? "测试中…" : "屏幕调试" }}
@@ -137,9 +137,19 @@
               {{ deletingId === row.id ? "删除中…" : "删除" }}
             </button>
           </div>
-          <div v-if="screenDebugCapture[row.id]" class="item-screen-capture">
-            <div class="screen-debug-cap-title">本次匹配使用的整屏截屏（与算法中一致）</div>
-            <img :src="screenDebugCapture[row.id]" alt="整屏截屏" class="screen-debug-cap-img" />
+            <div v-if="screenDebugCapture[row.id]" class="item-screen-capture">
+            <div class="screen-debug-cap-title">
+              本次匹配使用的截屏（主显示器，与算法一致）。长图可在此区域上下滚动；点击图可在新标签页看原图。
+            </div>
+            <div class="screen-debug-cap-frame">
+              <img
+                :src="screenDebugCapture[row.id]"
+                alt="主显示器截屏"
+                class="screen-debug-cap-img"
+                title="点击新标签页打开原图"
+                @click="openScreenDebugFull(row.id)"
+              />
+            </div>
           </div>
         </li>
       </ul>
@@ -528,6 +538,11 @@ const MATCH_ALGO_LABEL: Record<string, string> = {
 
 function matchAlgorithmLabel(code: string): string {
   return MATCH_ALGO_LABEL[code] || code;
+}
+
+function openScreenDebugFull(id: string) {
+  const u = screenDebugCapture.value[id];
+  if (u) window.open(u, "_blank", "noopener,noreferrer");
 }
 
 async function testScreenMatch(row: IconTemplateItem & { imageUrl: string | null }) {
@@ -924,17 +939,24 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: var(--muted);
   margin-bottom: 8px;
+  line-height: 1.45;
+}
+
+/* 可滚动，避免长截图被 max-height 裁成「显示不全」的错觉 */
+.screen-debug-cap-frame {
+  max-height: min(80vh, 1200px);
+  overflow: auto;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(17, 24, 39, 0.04);
 }
 
 .screen-debug-cap-img {
   display: block;
   width: 100%;
-  max-height: min(70vh, 900px);
   height: auto;
-  object-fit: contain;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: rgba(17, 24, 39, 0.04);
+  vertical-align: top;
+  cursor: zoom-in;
 }
 
 @media (max-width: 720px) {

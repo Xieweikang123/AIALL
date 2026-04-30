@@ -30,10 +30,27 @@ function formatExecError(e: unknown): string {
 
 /**
  * 独立 .ps1 文件执行，避免 -Command 单行过长或被错误拆分；
- * 使用 CopyFromScreen 的另一重载，并正确 Dispose。
+ * 仅截取主显示器 PrimaryScreen（匹配范围限定在主屏）。
+ * 在加载 WinForms 之前声明 DPI 感知，避免 125%/150% 缩放下 Bounds（逻辑像素）与 CopyFromScreen（物理像素）不一致导致截图缺边、裁切。
  */
 const SCREEN_CAPTURE_PS1 = `
 $ErrorActionPreference = 'Stop'
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class AiallDpi {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll", SetLastError = true)] public static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
+  public static readonly IntPtr PerMonitorAwareV2 = (IntPtr)(-4);
+}
+"@
+try {
+  if (-not [AiallDpi]::SetProcessDpiAwarenessContext([AiallDpi]::PerMonitorAwareV2)) {
+    [void][AiallDpi]::SetProcessDPIAware()
+  }
+} catch {
+  [void][AiallDpi]::SetProcessDPIAware()
+}
 Add-Type -AssemblyName System.Windows.Forms | Out-Null
 Add-Type -AssemblyName System.Drawing | Out-Null
 $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
@@ -89,7 +106,10 @@ async function captureScreenWithPs1File(): Promise<Buffer | { error: string }> {
   }
 }
 
-/** 可选：本机已安装 ffmpeg 时用 gdigrab 截屏（不依赖 System.Drawing） */
+/**
+ * 可选：本机已安装 ffmpeg 时用 gdigrab 截屏。
+ * 注意：`-i desktop` 为整桌虚拟屏，与「仅主屏」不一致；仅在 PowerShell 截屏失败时作兜底。
+ */
 async function captureScreenWithFfmpeg(): Promise<Buffer | { error: string }> {
   const outPath = path.join(os.tmpdir(), `aiall-ff-${process.pid}-${Date.now()}.png`);
   try {
@@ -107,7 +127,7 @@ async function captureScreenWithFfmpeg(): Promise<Buffer | { error: string }> {
   }
 }
 
-/** 主显示器全屏 PNG（Buffer） */
+/** 主显示器整幅 PNG（匹配与调试预览均以此为搜索范围） */
 export async function capturePrimaryScreenPng(): Promise<Buffer | { error: string }> {
   if (!isWin()) return { error: "仅支持 Windows" };
 
@@ -119,13 +139,13 @@ export async function capturePrimaryScreenPng(): Promise<Buffer | { error: strin
 
   return {
     error: [
-      "PowerShell + System.Drawing 截屏失败：",
+      "PowerShell + System.Drawing（主屏）截屏失败：",
       ps.error,
       "",
-      "已自动尝试 ffmpeg（gdigrab）仍失败：",
+      "已自动尝试 ffmpeg（gdigrab，截图为整桌虚拟屏，与主屏限定不完全一致）：",
       ff.error,
       "",
-      "可尝试：1）在本机图形桌面会话运行 npm run dev（勿在无会话服务里跑）；2）安装 ffmpeg 并加入 PATH 作为备选；3）查看上方 stderr 是否含 CopyFromScreen / GDI+ 报错。",
+      "可尝试：1）在本机图形桌面会话运行 npm run dev；2）安装 ffmpeg 并加入 PATH；3）查看 stderr 是否含 CopyFromScreen / GDI+ 报错。",
     ].join("\n"),
   };
 }
