@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-04-30T03:07:23.977Z",
+  "updatedAt": "2026-04-30T05:06:59.655Z",
   "items": [
     {
       "id": "wechat",
@@ -15,12 +15,12 @@
     },
     {
       "id": "unknown_app",
-      "name": "未识别",
+      "name": "linuxdo",
       "aliases": [],
       "note": "无法识别应用图标，图标为圆形有黑、白、橙三条水平线，无明确匹配常见应用。",
       "imageFile": "unknown_app.png",
       "createdAt": "2026-04-30T03:07:23.974Z",
-      "updatedAt": "2026-04-30T03:07:23.974Z"
+      "updatedAt": "2026-04-30T05:06:59.654Z"
     }
   ]
 }

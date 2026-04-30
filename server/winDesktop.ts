@@ -160,6 +160,11 @@ $Y = ${y}
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
+public class AiallDpi {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll", SetLastError = true)] public static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
+  public static readonly IntPtr PerMonitorAwareV2 = (IntPtr)(-4);
+}
 public class WinMouse {
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
@@ -167,6 +172,13 @@ public class WinMouse {
   public const uint MOUSEEVENTF_LEFTUP = 0x0004;
 }
 "@
+try {
+  if (-not [AiallDpi]::SetProcessDpiAwarenessContext([AiallDpi]::PerMonitorAwareV2)) {
+    [void][AiallDpi]::SetProcessDPIAware()
+  }
+} catch {
+  [void][AiallDpi]::SetProcessDPIAware()
+}
 [void][WinMouse]::SetCursorPos($X, $Y)
 Start-Sleep -Milliseconds 60
 [WinMouse]::mouse_event([WinMouse]::MOUSEEVENTF_LEFTDOWN,0,0,0,[UIntPtr]::Zero)
@@ -175,8 +187,9 @@ Start-Sleep -Milliseconds 60
 
 export async function clickLeftAtScreen(x: number, y: number): Promise<void | { error: string }> {
   if (!isWin()) return { error: "仅支持 Windows" };
-  const xi = Math.round(Math.max(0, x));
-  const yi = Math.round(Math.max(0, y));
+  // 这里必须允许负坐标：多显示器或主屏不在虚拟屏左上角时，屏幕坐标可能为负。
+  const xi = Math.round(x);
+  const yi = Math.round(y);
 
   const scriptPath = path.join(os.tmpdir(), `aiall-click-${process.pid}-${Date.now()}.ps1`);
   await fs.writeFile(scriptPath, MOUSE_CLICK_PS1(xi, yi), "utf8");
