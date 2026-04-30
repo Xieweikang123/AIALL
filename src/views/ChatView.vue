@@ -284,7 +284,7 @@ async function handleSend() {
 
     state.message = "抓取网页中...";
     assistantMsg.meta = "抓取网页中...";
-    assistantMsg.content = `正在抓取：${cmd.url}\n`;
+    assistantMsg.content = `正在抓取：${cmd.url}\n\n【抓取进度】\n`;
     await scrollToBottom();
 
     const extracted = await extractWebText({
@@ -292,6 +292,12 @@ async function handleSend() {
       mode: "auto",
       limit: 15,
       proxyUrl: config.proxyUrl?.trim() || undefined,
+      onProgress: (msg) => {
+        assistantMsg.content += `• ${msg}\n`;
+        assistantMsg.meta = msg;
+        state.message = msg;
+        void scrollToBottom();
+      },
     });
     if (!extracted.ok || !extracted.text) {
       state.phase = "fail";
@@ -306,6 +312,7 @@ async function handleSend() {
     const prompt = buildSummaryPrompt(extracted.text, cmd.raw);
     state.message = "请求模型中...";
     assistantMsg.meta = "请求模型中...";
+    assistantMsg.content += "\n【模型】\n";
     assistantMsg.content += "抓取成功，开始请求模型（流式输出）...\n\n";
     await scrollToBottom();
 

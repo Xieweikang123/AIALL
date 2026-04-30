@@ -1,26 +1,143 @@
 export interface WebExtractRequest {
   url: string;
-  mode?: "auto" | "discourse_latest" | "html";
+  mode?: "auto" | "discourse_latest" | "html" | "browser";
   limit?: number;
   proxyUrl?: string;
+  /** 为 true 时走 SSE 流（通常与 onProgress 一起用） */
+  stream?: boolean;
+  /** 若提供，则启用 stream 并在每条进度回调中更新 UI */
+  onProgress?: (message: string) => void;
 }
 
 export interface WebExtractResult {
   ok: boolean;
   status: number;
-  kind?: "discourse_latest" | "html";
+  kind?: "discourse_latest" | "html" | "browser";
   title?: string;
   text?: string;
   rawText?: string;
   error?: string;
 }
 
-export async function extractWebText(request: WebExtractRequest): Promise<WebExtractResult> {
+/** 解析 /backend/web/extract 的 SSE（progress + result） */
+async function readExtractSse(
+  response: Response,
+  onProgress: (message: string) => void,
+): Promise<WebExtractResult> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    return { ok: false, status: 0, error: "无法读取响应流" };
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+
+    let sep: number;
+    while ((sep = buffer.indexOf("\n\n")) >= 0) {
+      const block = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+
+      let eventName = "message";
+      const dataLines: string[] = [];
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event:")) eventName = line.slice(6).trim();
+        else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+      }
+      const dataStr = dataLines.join("\n");
+      if (!dataStr) continue;
+
+      try {
+        const payload = JSON.parse(dataStr) as {
+          message?: string;
+          httpStatus?: number;
+          body?: Record<string, unknown>;
+        };
+
+        if (eventName === "progress" && typeof payload.message === "string") {
+          onProgress(payload.message);
+        }
+
+        if (eventName === "result") {
+          const httpStatus = typeof payload.httpStatus === "number" ? payload.httpStatus : 200;
+          const body = payload.body ?? {};
+          if (typeof body.ok === "boolean") {
+            const r = body as unknown as WebExtractResult;
+            return {
+              ...r,
+              status: r.status ?? httpStatus,
+            };
+          }
+          const errOnly = body as { error?: string };
+          if (typeof errOnly.error === "string") {
+            return {
+              ok: false,
+              status: httpStatus,
+              error: errOnly.error,
+              rawText: typeof body.rawText === "string" ? body.rawText : undefined,
+            };
+          }
+          return {
+            ok: false,
+            status: httpStatus,
+            error: `HTTP ${httpStatus}`,
+          };
+        }
+      } catch {
+        // 跳过损坏的分片
+      }
+    }
+
+    if (done) break;
+  }
+
+  return { ok: false, status: 0, error: "流结束但未收到结果（result）" };
+}
+
+export async function extractWebText(
+  request: WebExtractRequest & { onProgress?: (message: string) => void },
+): Promise<WebExtractResult> {
+  const { onProgress, stream: _stream, ...rest } = request;
+
+  if (onProgress) {
+    try {
+      const response = await fetch("/backend/web/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+        body: JSON.stringify({ ...rest, stream: true }),
+      });
+
+      if (!response.ok) {
+        const rawText = await response.text();
+        let parsed: { error?: string } | undefined;
+        try {
+          parsed = JSON.parse(rawText) as { error?: string };
+        } catch {
+          parsed = undefined;
+        }
+        return {
+          ok: false,
+          status: response.status,
+          rawText,
+          error: parsed?.error || `抓取失败，HTTP ${response.status}`,
+        };
+      }
+
+      return await readExtractSse(response, onProgress);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "未知网络错误";
+      return { ok: false, status: 0, error: message };
+    }
+  }
+
   try {
     const response = await fetch("/backend/web/extract", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
+      body: JSON.stringify(rest),
     });
 
     const rawText = await response.text();
@@ -56,4 +173,3 @@ export async function extractWebText(request: WebExtractRequest): Promise<WebExt
     return { ok: false, status: 0, error: message };
   }
 }
-
