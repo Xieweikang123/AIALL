@@ -1,5 +1,7 @@
 /** 本机开发服：按图标模板 id 截屏匹配并点击（仅 Windows 有效） */
 
+import type { MatchAlgorithm } from "./iconTemplatesClient";
+
 export interface OpenByTemplateResult {
   ok: true;
   id: string;
@@ -9,6 +11,7 @@ export interface OpenByTemplateResult {
   clickY: number;
   topLeftX: number;
   topLeftY: number;
+  matchAlgorithm: MatchAlgorithm;
 }
 
 export async function openAppByIconTemplateId(id: string): Promise<OpenByTemplateResult> {

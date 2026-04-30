@@ -116,16 +116,30 @@
             </div>
             <div v-if="row.aliases?.length" class="item-meta">别名：{{ row.aliases.join("，") }}</div>
             <div v-if="row.note" class="item-meta">{{ row.note }}</div>
+            <div v-if="screenDebugHint[row.id]" class="item-meta debug-line">{{ screenDebugHint[row.id] }}</div>
           </div>
           <div class="item-thumb" @click="row.imageUrl && openPreview(row.imageUrl)">
             <img v-if="row.imageUrl" :src="row.imageUrl" alt="" />
             <span v-else class="no-img">无图</span>
           </div>
           <div class="item-actions">
+            <button
+              type="button"
+              class="secondary"
+              :disabled="!row.imageUrl || screenDebugLoadingId === row.id"
+              :title="row.imageUrl ? '截取当前主屏并在画面中查找该模板（不点击）' : '请先为该条目保存模板图'"
+              @click="testScreenMatch(row)"
+            >
+              {{ screenDebugLoadingId === row.id ? "测试中…" : "屏幕调试" }}
+            </button>
             <button type="button" class="secondary" @click="startEdit(row)">编辑</button>
             <button type="button" class="secondary danger" :disabled="deletingId === row.id" @click="handleDelete(row.id)">
               {{ deletingId === row.id ? "删除中…" : "删除" }}
             </button>
+          </div>
+          <div v-if="screenDebugCapture[row.id]" class="item-screen-capture">
+            <div class="screen-debug-cap-title">本次匹配使用的整屏截屏（与算法中一致）</div>
+            <img :src="screenDebugCapture[row.id]" alt="整屏截屏" class="screen-debug-cap-img" />
           </div>
         </li>
       </ul>
@@ -139,6 +153,7 @@ import type { IconTemplateItem } from "../types/iconTemplates";
 import {
   deleteIconTemplate,
   fetchIconTemplateList,
+  testIconTemplateMatch,
   upsertIconTemplate,
 } from "../services/iconTemplatesClient";
 import { testAiModel } from "../services/aiClient";
@@ -167,6 +182,10 @@ const saving = ref(false);
 const formError = ref("");
 const saveOk = ref("");
 const deletingId = ref("");
+/** 列表项「屏幕调试」：提示文案与整屏预览 data URL */
+const screenDebugHint = ref<Record<string, string>>({});
+const screenDebugCapture = ref<Record<string, string>>({});
+const screenDebugLoadingId = ref("");
 const clipboardLoading = ref(false);
 const pasteZoneRef = ref<HTMLElement | null>(null);
 const aiFillLoading = ref(false);
@@ -496,6 +515,52 @@ async function handleSave() {
     formError.value = e instanceof Error ? e.message : String(e);
   } finally {
     saving.value = false;
+  }
+}
+
+/** 与后端 MatchAlgorithm 对应的中文说明 */
+const MATCH_ALGO_LABEL: Record<string, string> = {
+  rgba_smart_probe_reservoir: "RGBA 智能探针 + 蓄水池 + 整图一致比例",
+  rgba_legacy_probe_reservoir: "RGBA 两轮固定探针 + 蓄水池 + 整图一致比例",
+  rgb_tolerant_sparse_sad: "RGB 容错探针候选 + 完整相似度验证",
+  rgb_tolerant_multiscale_sad: "RGB 容错探针候选 + 多尺度完整相似度验证",
+};
+
+function matchAlgorithmLabel(code: string): string {
+  return MATCH_ALGO_LABEL[code] || code;
+}
+
+async function testScreenMatch(row: IconTemplateItem & { imageUrl: string | null }) {
+  if (!row.imageUrl) return;
+  screenDebugLoadingId.value = row.id;
+  const hintNext = { ...screenDebugHint.value };
+  delete hintNext[row.id];
+  screenDebugHint.value = hintNext;
+  const capNext = { ...screenDebugCapture.value };
+  delete capNext[row.id];
+  screenDebugCapture.value = capNext;
+  try {
+    const r = await testIconTemplateMatch(row.id);
+    const capUrl = r.screenPngBase64 ? `data:image/png;base64,${r.screenPngBase64}` : "";
+    if (r.ok) {
+      screenDebugHint.value = {
+        ...screenDebugHint.value,
+        [row.id]: `已匹配：得分 ${r.score.toFixed(3)}（当前算法相似度，0～1）。采用：${matchAlgorithmLabel(r.matchAlgorithm)} [${r.matchAlgorithm}]。左上 (${r.topLeftX}, ${r.topLeftY})；建议点击 (${r.clickX}, ${r.clickY})（未执行点击）。`,
+      };
+      if (capUrl) {
+        screenDebugCapture.value = { ...screenDebugCapture.value, [row.id]: capUrl };
+      }
+    } else {
+      screenDebugHint.value = {
+        ...screenDebugHint.value,
+        [row.id]: `未匹配或失败：${r.error}`,
+      };
+      if (capUrl) {
+        screenDebugCapture.value = { ...screenDebugCapture.value, [row.id]: capUrl };
+      }
+    }
+  } finally {
+    screenDebugLoadingId.value = "";
   }
 }
 
@@ -848,6 +913,30 @@ onBeforeUnmount(() => {
   background: rgba(17, 24, 39, 0.02);
 }
 
+.item-screen-capture {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+
+.screen-debug-cap-title {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.screen-debug-cap-img {
+  display: block;
+  width: 100%;
+  max-height: min(70vh, 900px);
+  height: auto;
+  object-fit: contain;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(17, 24, 39, 0.04);
+}
+
 @media (max-width: 720px) {
   .item-row {
     grid-template-columns: 1fr;
@@ -869,6 +958,15 @@ onBeforeUnmount(() => {
   margin-top: 4px;
   font-size: 12px;
   color: var(--muted);
+}
+
+.item-meta.debug-line {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(31, 111, 235, 0.08);
+  color: var(--text);
+  line-height: 1.45;
 }
 
 .item-thumb {
@@ -929,6 +1027,11 @@ onBeforeUnmount(() => {
 
   .item-row {
     background: rgba(0, 0, 0, 0.12);
+  }
+
+  .item-meta.debug-line {
+    background: rgba(31, 111, 235, 0.14);
+    color: rgba(255, 255, 255, 0.88);
   }
 
   .link-btn,
