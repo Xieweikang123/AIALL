@@ -3,6 +3,8 @@ import vue from "@vitejs/plugin-vue";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { execFile, spawn } from "node:child_process";
 import path from "node:path";
+import dns from "node:dns";
+import { ProxyAgent } from "undici";
 
 interface ForwardRequestBody {
   endpoint: string;
@@ -72,10 +74,28 @@ function buildHeaders(apiKey?: string): HeadersInit {
   return headers;
 }
 
+// 某些网络环境下 IPv6 优先会导致连接失败/等待过久，这里优先 IPv4。
+try {
+  dns.setDefaultResultOrder("ipv4first");
+} catch {
+  // Node 版本不支持时忽略即可。
+}
+
+async function fetchWithTimeout(input: string, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal } as any);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 interface WebExtractRequestBody {
   url: string;
   mode?: "auto" | "discourse_latest" | "html";
   limit?: number;
+  proxyUrl?: string;
 }
 
 function stripHtmlToText(html: string): string {
@@ -111,6 +131,21 @@ function safeUrl(input: string): URL | null {
     return null;
   }
 }
+
+function safeProxyUrl(input: string | undefined): string {
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    // 仅支持 http/https 代理（更通用；socks5 需要额外实现）
+    if (!/^https?:$/.test(url.protocol)) return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+const proxyAgentCache = new Map<string, ProxyAgent>();
 
 export default defineConfig({
   plugins: [
@@ -276,6 +311,7 @@ export default defineConfig({
 
           const limit = Math.min(50, Math.max(1, Number(body.limit || 15)));
           const mode = body.mode || "auto";
+          const proxyUrl = safeProxyUrl(body.proxyUrl);
 
           const origin = url.origin;
           const headers: HeadersInit = {
@@ -283,11 +319,23 @@ export default defineConfig({
               "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
             Accept: "text/html,application/json;q=0.9,*/*;q=0.8",
           };
+          const timeoutMs = 25_000;
+          const dispatcher = proxyUrl
+            ? (proxyAgentCache.get(proxyUrl) ?? (() => {
+                const agent = new ProxyAgent(proxyUrl);
+                proxyAgentCache.set(proxyUrl, agent);
+                return agent;
+              })())
+            : undefined;
 
           const tryDiscourseLatest = async () => {
             const latestUrl = new URL("/latest.json", origin);
             latestUrl.searchParams.set("no_definitions", "true");
-            const upstream = await fetch(latestUrl.toString(), { method: "GET", headers });
+            const upstream = await fetchWithTimeout(
+              latestUrl.toString(),
+              { method: "GET", headers, ...(dispatcher ? ({ dispatcher } as any) : {}) },
+              timeoutMs,
+            );
             const rawText = await upstream.text();
             if (!upstream.ok) {
               return {
@@ -353,7 +401,11 @@ export default defineConfig({
             }
 
             // 兜底：抓 HTML 转纯文本
-            const upstream = await fetch(url.toString(), { method: "GET", headers });
+            const upstream = await fetchWithTimeout(
+              url.toString(),
+              { method: "GET", headers, ...(dispatcher ? ({ dispatcher } as any) : {}) },
+              timeoutMs,
+            );
             const rawText = await upstream.text();
             if (!upstream.ok) {
               sendJson(res, upstream.status, { ok: false, status: upstream.status, error: `抓取失败，HTTP ${upstream.status}`, rawText });
@@ -369,10 +421,14 @@ export default defineConfig({
               text: text.slice(0, 120_000), // 控制体积，避免一次性喂给模型过长
             });
           } catch (error) {
+            const baseMessage = error instanceof Error ? error.message : "抓取失败";
+            const cause = (error as any)?.cause;
+            const causeMessage =
+              cause instanceof Error ? cause.message : typeof cause === "string" ? cause : cause ? JSON.stringify(cause) : "";
             sendJson(res, 500, {
               ok: false,
               status: 500,
-              error: error instanceof Error ? error.message : "抓取失败",
+              error: causeMessage ? `${baseMessage}\n原因：${causeMessage}` : baseMessage,
             });
           }
         });

@@ -6,6 +6,7 @@
         <p class="desc">配置模型接口并测试连通性。</p>
       </div>
       <div class="head-actions">
+        <button type="button" class="secondary" @click="handleGoChat">去聊天</button>
         <button type="button" class="secondary" @click="handleExportConfig">导出</button>
         <button type="button" class="secondary" @click="handleImportConfig">导入</button>
         <button type="button" class="secondary danger" @click="handleResetConfig">重置</button>
@@ -28,8 +29,8 @@
     <section class="card">
       <h2 class="card-title">基础配置</h2>
 
-      <div class="config-form">
-        <label class="field">
+      <div class="config-form grid-2">
+        <label class="field span-2">
           <div class="field-row">
             <span>接口地址</span>
             <span class="badge" :class="endpointReady ? 'ok' : 'fail'">
@@ -59,6 +60,19 @@
             </div>
           </div>
           <input v-model.trim="form.apiKey" :type="apiKeyVisible ? 'text' : 'password'" placeholder="sk-xxxx（如需鉴权请填写）" />
+        </label>
+
+        <label class="field">
+          <div class="field-row">
+            <span>网页抓取代理（HTTP，可选）</span>
+            <div class="field-tools">
+              <button type="button" class="link" :disabled="!web.proxyUrl" @click="copyText(web.proxyUrl)">复制</button>
+            </div>
+          </div>
+          <input v-model.trim="web.proxyUrl" type="text" placeholder="例如：http://127.0.0.1:7890" />
+          <small class="tips">
+            仅用于“总结 URL / 抓取网页”场景，解决 Node 无法直连网站的问题（浏览器能打开不代表 Node 能直连）。
+          </small>
         </label>
       </div>
 
@@ -166,7 +180,7 @@
     <section v-show="activeTab === 'tts'" class="card">
       <h2 class="card-title">TTS 测试</h2>
 
-      <div class="config-form">
+      <div class="config-form grid-2">
         <label class="field">
           <span>TTS 模型</span>
           <input v-model.trim="ttsForm.model" type="text" placeholder="mimo-v2.5-tts" />
@@ -187,7 +201,7 @@
             <option value="opus">opus</option>
           </select>
         </label>
-        <label class="field">
+        <label class="field span-2">
           <span>朗读文本</span>
           <textarea v-model="ttsForm.input" rows="3" placeholder="你好，这是一段 TTS 测试音频。" />
         </label>
@@ -291,6 +305,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 import { fetchAvailableModels, testAiModel, testTtsModel } from "../services/aiClient";
 import { checkClaudeCli, runClaudeCodeSse, type ClaudeRunRequest, type ClaudeSseEvent } from "../services/claudeCodeClient";
 
@@ -310,9 +325,12 @@ interface TtsForm {
 }
 
 interface PersistedAiConfig {
-  version: 2;
+  version: 3;
   activeTab?: TabKey;
   base: Pick<AiConfigForm, "endpoint" | "apiKey" | "model" | "prompt" | "stream">;
+  web: {
+    proxyUrl: string;
+  };
   tts: TtsForm;
   claude: ClaudeRunRequest;
 }
@@ -322,10 +340,16 @@ const STORAGE_KEY = "ai-config";
 type TestPhase = "idle" | "running" | "success" | "fail";
 type TabKey = "chat" | "tts" | "claude";
 
+const router = useRouter();
+
 const activeTab = ref<TabKey>("chat");
 const apiKeyVisible = ref(false);
 const saveHint = ref("");
 let saveHintTimer: number | undefined;
+
+function handleGoChat() {
+  router.push({ path: "/chat" });
+}
 
 const form = reactive<AiConfigForm>({
   endpoint: "https://fufu.iqach.top/v1/chat/completions",
@@ -333,6 +357,9 @@ const form = reactive<AiConfigForm>({
   model: "mimo-v2.5-pro",
   prompt: "你好",
   stream: true,
+});
+const web = reactive({
+  proxyUrl: "",
 });
 
 const loading = ref(false);
@@ -670,7 +697,7 @@ function stopClaudeRun() {
 
 function saveConfig() {
   const payload: PersistedAiConfig = {
-    version: 2,
+    version: 3,
     activeTab: activeTab.value,
     base: {
       endpoint: form.endpoint,
@@ -678,6 +705,9 @@ function saveConfig() {
       model: form.model,
       prompt: form.prompt,
       stream: form.stream,
+    },
+    web: {
+      proxyUrl: web.proxyUrl,
     },
     tts: {
       model: ttsForm.model,
@@ -710,7 +740,7 @@ function loadConfig() {
     const parsed = JSON.parse(raw) as Partial<PersistedAiConfig> | Partial<AiConfigForm>;
 
     // 兼容旧版：直接存了 base 表单。
-    if ((parsed as PersistedAiConfig).version !== 2) {
+    if (![2, 3].includes((parsed as any).version)) {
       const legacy = parsed as Partial<AiConfigForm>;
       form.endpoint = legacy.endpoint || form.endpoint;
       form.apiKey = legacy.apiKey || form.apiKey;
@@ -731,6 +761,12 @@ function loadConfig() {
       form.model = payload.base.model || form.model;
       form.prompt = payload.base.prompt || form.prompt;
       form.stream = typeof payload.base.stream === "boolean" ? payload.base.stream : form.stream;
+    }
+
+    if ((payload as any).web) {
+      web.proxyUrl = String((payload as any).web?.proxyUrl || "");
+    } else {
+      web.proxyUrl = "";
     }
 
     if (payload.tts) {
@@ -977,11 +1013,33 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+:global(body) {
+  margin: 0;
+  background: radial-gradient(900px 520px at 18% 8%, rgba(31, 111, 235, 0.09), transparent 56%),
+    radial-gradient(900px 560px at 90% 0%, rgba(130, 80, 223, 0.14), transparent 55%),
+    radial-gradient(900px 560px at 50% 100%, rgba(26, 127, 55, 0.12), transparent 50%),
+    #f6f8fa;
+  color: #111827;
+}
+
 .ai-config-page {
-  max-width: 900px;
+  --bg: #ffffff;
+  --text: #111827;
+  --muted: rgba(17, 24, 39, 0.72);
+  --subtle: rgba(17, 24, 39, 0.56);
+  --border: rgba(17, 24, 39, 0.12);
+  --border-2: rgba(17, 24, 39, 0.18);
+  --ring: rgba(31, 111, 235, 0.22);
+  --primary: #1f6feb;
+  --danger: #cf222e;
+  --ok: #1a7f37;
+  --card-shadow: 0 10px 30px rgba(15, 23, 42, 0.08), 0 2px 8px rgba(15, 23, 42, 0.05);
+  --card-shadow-hover: 0 14px 40px rgba(15, 23, 42, 0.12), 0 4px 12px rgba(15, 23, 42, 0.06);
+
+  max-width: 980px;
   margin: 0 auto;
-  padding: 20px;
-  font-family: Arial, sans-serif;
+  padding: 22px 18px 40px;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
 }
 
 .page-head {
@@ -989,7 +1047,7 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
 
 .head-actions {
@@ -999,43 +1057,73 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 
+.page-head h1 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: 0.2px;
+}
+
 .desc {
-  color: #666;
-  margin-bottom: 16px;
+  color: var(--muted);
+  margin: 6px 0 0;
+  line-height: 1.5;
 }
 
 .tabs {
   display: flex;
-  gap: 8px;
-  margin: 10px 0 16px;
+  gap: 10px;
+  margin: 14px 0 18px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(8px);
 }
 
 .tab {
-  border: 1px solid #d0d7de;
-  background: #fff;
-  color: #24292f;
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgba(17, 24, 39, 0.86);
   border-radius: 999px;
-  padding: 8px 12px;
+  padding: 9px 14px;
   cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
 }
 
 .tab.active {
-  border-color: #1f6feb;
-  background: rgba(31, 111, 235, 0.08);
-  color: #1f6feb;
+  border-color: rgba(31, 111, 235, 0.35);
+  background: rgba(31, 111, 235, 0.1);
+  color: var(--primary);
+}
+
+.tab:hover {
+  background: rgba(17, 24, 39, 0.04);
+}
+
+.tab:active {
+  transform: translateY(1px);
 }
 
 .card {
-  border: 1px solid #d0d7de;
-  border-radius: 12px;
-  padding: 14px;
-  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--card-shadow);
   margin-top: 14px;
+  transition: box-shadow 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.card:hover {
+  border-color: var(--border-2);
+  box-shadow: var(--card-shadow-hover);
 }
 
 .card-title {
   margin: 0 0 10px;
-  font-size: 16px;
+  font-size: 15px;
+  letter-spacing: 0.2px;
 }
 
 .config-form {
@@ -1043,9 +1131,23 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 
+.config-form.grid-2 {
+  grid-template-columns: 1fr 1fr;
+  align-items: start;
+}
+
+.field.span-2 {
+  grid-column: 1 / -1;
+}
+
 .field {
   display: grid;
   gap: 6px;
+}
+
+.field > span {
+  color: rgba(17, 24, 39, 0.84);
+  font-size: 13px;
 }
 
 .field-row {
@@ -1064,10 +1166,27 @@ onBeforeUnmount(() => {
 .field textarea,
 .field select {
   width: 100%;
-  border: 1px solid #d0d7de;
-  border-radius: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
   padding: 10px;
   font-size: 14px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text);
+  outline: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+
+.field input::placeholder,
+.field textarea::placeholder {
+  color: rgba(17, 24, 39, 0.42);
+}
+
+.field input:focus,
+.field textarea:focus,
+.field select:focus {
+  border-color: rgba(31, 111, 235, 0.55);
+  box-shadow: 0 0 0 4px var(--ring);
+  background: #fff;
 }
 
 .file-input {
@@ -1075,24 +1194,26 @@ onBeforeUnmount(() => {
 }
 
 .drop-zone {
-  border: 1px dashed #d0d7de;
-  border-radius: 10px;
-  background: #f6f8fa;
+  border: 1px dashed rgba(17, 24, 39, 0.28);
+  border-radius: 14px;
+  background: rgba(17, 24, 39, 0.03);
   padding: 12px;
   min-height: 86px;
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
 }
 
 .drop-zone.active {
-  border-color: #1f6feb;
-  background: rgba(31, 111, 235, 0.06);
+  border-color: rgba(31, 111, 235, 0.8);
+  background: rgba(31, 111, 235, 0.08);
+  box-shadow: 0 0 0 4px rgba(31, 111, 235, 0.12);
 }
 
 .drop-zone-text {
   text-align: center;
-  color: #57606a;
+  color: rgba(17, 24, 39, 0.64);
   font-size: 13px;
 }
 
@@ -1106,9 +1227,9 @@ onBeforeUnmount(() => {
   width: 100%;
   max-height: 260px;
   object-fit: contain;
-  border-radius: 10px;
-  background: #fff;
-  border: 1px solid #d0d7de;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--border);
 }
 
 .model-row {
@@ -1131,36 +1252,60 @@ onBeforeUnmount(() => {
 
 button {
   border: none;
-  background: #1f6feb;
+  background: var(--primary);
   color: #fff;
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 10px 16px;
   cursor: pointer;
+  box-shadow: 0 8px 18px rgba(31, 111, 235, 0.18);
+  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease, opacity 120ms ease;
+}
+
+button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 26px rgba(31, 111, 235, 0.22);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(0px);
 }
 
 button.primary {
-  background: #1f6feb;
+  background: var(--primary);
 }
 
 button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 button.secondary {
-  background: #57606a;
+  background: rgba(17, 24, 39, 0.72);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.18);
+}
+
+button.secondary:hover:not(:disabled) {
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.22);
 }
 
 button.danger {
-  background: #cf222e;
+  background: var(--danger);
+  box-shadow: 0 8px 18px rgba(207, 34, 46, 0.16);
+}
+
+button.danger:hover:not(:disabled) {
+  box-shadow: 0 12px 26px rgba(207, 34, 46, 0.2);
 }
 
 .link {
   background: transparent;
-  color: #1f6feb;
+  color: var(--primary);
   padding: 0;
   border-radius: 0;
   text-decoration: underline;
+  box-shadow: none;
+  transition: opacity 120ms ease, color 120ms ease;
 }
 
 .link:disabled {
@@ -1177,16 +1322,16 @@ button.danger {
 }
 
 .tips {
-  color: #666;
+  color: var(--subtle);
   font-size: 12px;
 }
 
 .tips.error {
-  color: #cf222e;
+  color: var(--danger);
 }
 
 .tips.ok {
-  color: #1a7f37;
+  color: var(--ok);
 }
 
 .badge {
@@ -1195,22 +1340,22 @@ button.danger {
   gap: 6px;
   border-radius: 999px;
   padding: 2px 10px;
-  border: 1px solid #d0d7de;
+  border: 1px solid var(--border);
   font-size: 12px;
-  color: #57606a;
-  background: #fff;
+  color: rgba(17, 24, 39, 0.66);
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .badge.ok {
-  border-color: rgba(26, 127, 55, 0.35);
-  color: #1a7f37;
-  background: rgba(26, 127, 55, 0.06);
+  border-color: rgba(26, 127, 55, 0.38);
+  color: var(--ok);
+  background: rgba(26, 127, 55, 0.08);
 }
 
 .badge.fail {
-  border-color: rgba(207, 34, 46, 0.35);
-  color: #cf222e;
-  background: rgba(207, 34, 46, 0.06);
+  border-color: rgba(207, 34, 46, 0.4);
+  color: var(--danger);
+  background: rgba(207, 34, 46, 0.08);
 }
 
 .audio-player {
@@ -1220,17 +1365,17 @@ button.danger {
 .download-link {
   display: inline-flex;
   align-items: center;
-  color: #1f6feb;
+  color: var(--primary);
   text-decoration: none;
   font-size: 14px;
 }
 
 .status.ok {
-  color: #1a7f37;
+  color: var(--ok);
 }
 
 .status.fail {
-  color: #cf222e;
+  color: var(--danger);
 }
 
 .file-list {
@@ -1254,9 +1399,9 @@ button.danger {
 }
 
 pre {
-  background: #f6f8fa;
-  border: 1px solid #d0d7de;
-  border-radius: 8px;
+  background: rgba(17, 24, 39, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 14px;
   padding: 12px;
   overflow-x: auto;
   white-space: pre-wrap;
@@ -1278,8 +1423,87 @@ pre {
     flex-direction: column;
   }
 
+  .config-form.grid-2 {
+    grid-template-columns: 1fr;
+  }
+
   .model-row {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :global(body) {
+    background: radial-gradient(900px 520px at 18% 8%, rgba(31, 111, 235, 0.14), transparent 62%),
+      radial-gradient(900px 560px at 90% 0%, rgba(130, 80, 223, 0.18), transparent 60%),
+      radial-gradient(900px 560px at 50% 100%, rgba(26, 127, 55, 0.16), transparent 55%),
+      #0b1220;
+    color: rgba(255, 255, 255, 0.92);
+  }
+
+  .ai-config-page {
+    --bg: rgba(17, 24, 39, 0.78);
+    --text: rgba(255, 255, 255, 0.92);
+    --muted: rgba(255, 255, 255, 0.72);
+    --subtle: rgba(255, 255, 255, 0.6);
+    --border: rgba(255, 255, 255, 0.14);
+    --border-2: rgba(255, 255, 255, 0.2);
+    --ring: rgba(31, 111, 235, 0.28);
+    --card-shadow: 0 18px 44px rgba(0, 0, 0, 0.35), 0 2px 10px rgba(0, 0, 0, 0.2);
+    --card-shadow-hover: 0 22px 56px rgba(0, 0, 0, 0.42), 0 4px 16px rgba(0, 0, 0, 0.24);
+  }
+
+  .tabs,
+  .card {
+    background: rgba(17, 24, 39, 0.72);
+  }
+
+  .tab {
+    color: rgba(255, 255, 255, 0.86);
+  }
+
+  .tab:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .field > span {
+    color: rgba(255, 255, 255, 0.86);
+  }
+
+  .field input,
+  .field textarea,
+  .field select {
+    background: rgba(2, 6, 23, 0.55);
+    color: rgba(255, 255, 255, 0.92);
+    border-color: rgba(255, 255, 255, 0.16);
+  }
+
+  .field input::placeholder,
+  .field textarea::placeholder {
+    color: rgba(255, 255, 255, 0.42);
+  }
+
+  .field input:focus,
+  .field textarea:focus,
+  .field select:focus {
+    background: rgba(2, 6, 23, 0.72);
+  }
+
+  pre {
+    background: rgba(2, 6, 23, 0.55);
+  }
+
+  .badge {
+    background: rgba(2, 6, 23, 0.35);
+  }
+
+  .drop-zone {
+    background: rgba(2, 6, 23, 0.35);
+    border-color: rgba(255, 255, 255, 0.22);
+  }
+
+  .image-preview img {
+    background: rgba(2, 6, 23, 0.45);
   }
 }
 </style>
