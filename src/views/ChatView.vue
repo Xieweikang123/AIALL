@@ -11,11 +11,13 @@
           </span>
         </div>
         <p class="desc">
-          支持指令：<code class="inline-code">总结 https://linux.do/ 的最近信息</code>（自动抓取网页/最新列表后再总结）。
+          支持：<code class="inline-code">总结 + URL</code> 抓取后由模型总结；<code class="inline-code">打开 微信</code> 等（需「图标模板」+ 本机
+          Windows 开发服）在屏幕上匹配并点击。
         </p>
       </div>
 
       <div class="head-actions">
+        <router-link class="secondary link-btn" to="/icon-templates">图标模板</router-link>
         <router-link class="secondary link-btn" to="/ai-config">去配置</router-link>
         <button type="button" class="secondary" :disabled="sending || !messages.length" @click="clearAll">清空</button>
       </div>
@@ -30,6 +32,7 @@
             <button type="button" class="chip" :disabled="sending" @click="applyExample('总结 https://linux.do/ 的最近信息')">
               总结 linux.do 最近信息
             </button>
+            <button type="button" class="chip" :disabled="sending" @click="applyExample('打开微信')">打开微信</button>
           </div>
         </div>
 
@@ -63,7 +66,7 @@
           class="composer-input"
           rows="3"
           :disabled="sending"
-          placeholder="输入：总结 + URL（Ctrl/⌘ + Enter 发送）"
+          placeholder="例如：总结 https://… 或 打开微信（Ctrl/⌘ + Enter 发送）"
           @keydown="onInputKeydown"
         />
         <div class="composer-bottom">
@@ -90,6 +93,9 @@
 import { computed, nextTick, onMounted, reactive, ref } from "vue";
 import { extractWebText } from "../services/webExtractClient";
 import { testAiModel } from "../services/aiClient";
+import { fetchIconTemplateList } from "../services/iconTemplatesClient";
+import { openAppByIconTemplateId } from "../services/desktopAutomationClient";
+import { parseOpenAppIntent, resolveIconTemplateId } from "../utils/openAppCommand";
 
 type Phase = "idle" | "running" | "success" | "fail";
 type ChatRole = "user" | "assistant";
@@ -272,12 +278,87 @@ async function handleSend() {
   await scrollToBottom();
 
   try {
+    const openIntent = parseOpenAppIntent(userRaw);
+    if (openIntent) {
+      state.message = "解析打开指令…";
+      assistantMsg.meta = "打开应用…";
+      assistantMsg.content = `正在根据「${openIntent.targetPhrase}」查找图标模板…\n`;
+      await scrollToBottom();
+
+      let list;
+      try {
+        list = await fetchIconTemplateList();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        state.phase = "fail";
+        state.message = "读取模板库失败";
+        assistantMsg.meta = "失败";
+        assistantMsg.content += `\n无法读取图标模板库（请先 npm run dev）：${msg}`;
+        await scrollToBottom();
+        return;
+      }
+
+      const templateId = resolveIconTemplateId(openIntent.targetPhrase, list.items);
+      if (!templateId) {
+        state.phase = "fail";
+        state.message = "未匹配模板";
+        assistantMsg.meta = "无匹配";
+        assistantMsg.content += `\n未找到与「${openIntent.targetPhrase}」匹配的条目。请到「图标模板」录入，名称或别名需能对应（例如显示名为「微信」）。`;
+        await scrollToBottom();
+        return;
+      }
+
+      const row = list.items.find((x) => x.id === templateId);
+      if (!row?.imageUrl && !row?.imageFile) {
+        state.phase = "fail";
+        state.message = "缺少模板图";
+        assistantMsg.meta = "失败";
+        assistantMsg.content += `\n条目「${templateId}」没有模板图，请到「图标模板」上传截图。`;
+        await scrollToBottom();
+        return;
+      }
+
+      assistantMsg.content += `已匹配模板 id：「${templateId}」，正在截屏并查找点击位置…\n`;
+      assistantMsg.meta = "桌面自动化…";
+      state.message = "桌面自动化…";
+      await scrollToBottom();
+
+      try {
+        const r = await openAppByIconTemplateId(templateId);
+        state.phase = "success";
+        state.message = "完成";
+        assistantMsg.meta = "完成";
+        assistantMsg.content += `\n已在屏幕坐标 (${r.clickX}, ${r.clickY}) 模拟左键点击。\n`;
+        assistantMsg.content += `模板：${r.name}（${r.id}），匹配相似度 ${r.score.toFixed(3)}。\n`;
+        assistantMsg.content +=
+          "匹配在全屏范围内进行（含顶部区域加权以降低浏览器顶栏等误匹配）。若未唤起应用，请确认图标在当前主屏可见，且模板截图与现在分辨率/主题一致。";
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        state.phase = "fail";
+        state.message = "打开失败";
+        assistantMsg.meta = "失败";
+        assistantMsg.content += `\n自动化失败：${msg}\n`;
+        assistantMsg.content +=
+          "提示：仅在本机 Windows 且运行 npm run dev 时可用；需已录入模板图且屏幕上能看到对应图标。";
+      }
+      await scrollToBottom();
+      return;
+    }
+
     const cmd = parseSummarizeCommand(userRaw);
     if (!cmd) {
       state.phase = "fail";
-      state.message = "仅支持“总结 + URL”指令";
-      assistantMsg.meta = "输入不符合指令";
-      assistantMsg.content = "当前仅实现了“总结 + URL”的指令。\n示例：总结 https://linux.do/ 的最近信息";
+      state.message = "指令无法识别";
+      assistantMsg.meta = "不支持";
+      assistantMsg.content = [
+        "当前支持：",
+        "1）总结 + 网页 URL（自动抓取后由模型总结）",
+        "2）打开 / 启动 / 运行 + 应用名（按图标模板在全屏范围内匹配并点击）",
+        "",
+        "示例：",
+        "总结 https://linux.do/ 的最近信息",
+        "打开微信",
+      ].join("\n");
       await scrollToBottom();
       return;
     }

@@ -1,5 +1,7 @@
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
+import { registerAutomationMiddleware } from "./vite.automationMiddleware";
+import { registerIconTemplatesMiddleware } from "./vite.iconTemplatesMiddleware";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { execFile, spawn } from "node:child_process";
 import path from "node:path";
@@ -272,6 +274,84 @@ async function extractWithPlaywright(
   }
 }
 
+/** 有头/无头 Playwright 整页截图（MVP：等待若干毫秒供用户手动登录） */
+async function screenshotPageWithPlaywright(
+  targetUrl: string,
+  proxyUrl: string,
+  options: {
+    headed: boolean;
+    waitAfterGotoMs: number;
+    navigationTimeoutMs: number;
+  },
+): Promise<
+  | { ok: true; mime: string; base64: string; byteLength: number }
+  | { ok: false; error: string }
+> {
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+  try {
+    browser = await chromium.launch({
+      headless: !options.headed,
+      slowMo: options.headed ? 40 : 0,
+    });
+    const proxy = buildPlaywrightProxy(proxyUrl);
+    const context = await browser.newContext({
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      locale: "zh-CN",
+      viewport: { width: 1280, height: 800 },
+      ...(proxy ? { proxy } : {}),
+    });
+    const page = await context.newPage();
+    await page.goto(targetUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: options.navigationTimeoutMs,
+    });
+
+    if (options.waitAfterGotoMs > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, options.waitAfterGotoMs));
+    } else {
+      await page.waitForLoadState("networkidle", { timeout: Math.min(20_000, options.navigationTimeoutMs) }).catch(() => {});
+    }
+
+    const buf = await page.screenshot({ fullPage: true, type: "jpeg", quality: 78 });
+    const b64 = buf.toString("base64");
+    const maxB64Chars = 14 * 1024 * 1024;
+    if (b64.length > maxB64Chars) {
+      return {
+        ok: false,
+        error:
+          "整页 JPEG 体积过大（Base64 超限）。请减小等待时间、换较短页面，或后续改用视口截图/压缩策略。",
+      };
+    }
+    return { ok: true, mime: "image/jpeg", base64: b64, byteLength: buf.length };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/Executable doesn't exist|browserType\.launch|Could not find browser/i.test(msg)) {
+      return {
+        ok: false,
+        error: "未检测到 Chromium，请在项目根目录执行：npx playwright install chromium",
+      };
+    }
+    return { ok: false, error: `截图异常：${msg}` };
+  } finally {
+    try {
+      await browser?.close();
+    } catch {
+      // ignore
+    }
+  }
+}
+
+interface ScreenshotPageRequestBody {
+  url: string;
+  proxyUrl?: string;
+  /** 默认 true：弹出可交互窗口，便于登录 */
+  headed?: boolean;
+  /** 首屏加载完成后额外等待（毫秒），用于手动登录 */
+  waitAfterGotoMs?: number;
+  navigationTimeoutMs?: number;
+}
+
 type WebExtractRunPayload = Record<string, unknown>;
 
 interface RunExtractOutcome {
@@ -527,6 +607,9 @@ export default defineConfig({
     {
       name: "ai-forward-middleware",
       configureServer(server) {
+        registerIconTemplatesMiddleware(server.middlewares, server.config.root);
+        registerAutomationMiddleware(server.middlewares, server.config.root);
+
         server.middlewares.use("/backend/claude/check", async (req, res) => {
           if (req.method !== "GET") {
             sendJson(res, 405, { ok: false, error: "仅支持 GET 请求" });
@@ -714,6 +797,50 @@ export default defineConfig({
               error: causeMessage ? `${baseMessage}\n原因：${causeMessage}` : baseMessage,
             });
           }
+        });
+
+        server.middlewares.use("/backend/web/screenshot-page", async (req, res) => {
+          if (req.method !== "POST") {
+            sendJson(res, 405, { error: "仅支持 POST 请求" });
+            return;
+          }
+
+          let body: ScreenshotPageRequestBody;
+          try {
+            body = (await readJsonBody(req)) as ScreenshotPageRequestBody;
+          } catch (error) {
+            sendJson(res, 400, { error: error instanceof Error ? error.message : "解析请求体失败" });
+            return;
+          }
+
+          const url = safeUrl(body.url);
+          if (!url) {
+            sendJson(res, 400, { ok: false, error: "url 不合法，请提供完整 http/https URL" });
+            return;
+          }
+
+          const proxyUrl = safeProxyUrl(body.proxyUrl);
+          const headed = body.headed !== false;
+          const waitAfterGotoMs = Math.min(300_000, Math.max(0, Number(body.waitAfterGotoMs || 0)));
+          const navigationTimeoutMs = Math.min(180_000, Math.max(10_000, Number(body.navigationTimeoutMs || 90_000)));
+
+          const shot = await screenshotPageWithPlaywright(url.toString(), proxyUrl, {
+            headed,
+            waitAfterGotoMs,
+            navigationTimeoutMs,
+          });
+
+          if (!shot.ok) {
+            sendJson(res, 500, { ok: false, error: shot.error });
+            return;
+          }
+
+          sendJson(res, 200, {
+            ok: true,
+            mime: shot.mime,
+            base64: shot.base64,
+            byteLength: shot.byteLength,
+          });
         });
 
         server.middlewares.use("/backend/ai/test", async (req, res) => {

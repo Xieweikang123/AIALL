@@ -1,6 +1,7 @@
 import { createRouter, createWebHashHistory, RouteRecordRaw } from "vue-router";
 import AiConfigView from "../views/AiConfigView.vue";
 import ChatView from "../views/ChatView.vue";
+import IconTemplatesView from "../views/IconTemplatesView.vue";
 
 const routes: RouteRecordRaw[] = [
   {
@@ -16,6 +17,11 @@ const routes: RouteRecordRaw[] = [
     path: "/ai-config",
     name: "AiConfig",
     component: AiConfigView,
+  },
+  {
+    path: "/icon-templates",
+    name: "IconTemplates",
+    component: IconTemplatesView,
   },
 ];
 

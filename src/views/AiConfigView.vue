@@ -7,6 +7,7 @@
       </div>
       <div class="head-actions">
         <button type="button" class="secondary" @click="handleGoChat">去聊天</button>
+        <router-link class="secondary link-btn" to="/icon-templates">图标模板</router-link>
         <button type="button" class="secondary" @click="handleExportConfig">导出</button>
         <button type="button" class="secondary" @click="handleImportConfig">导入</button>
         <button type="button" class="secondary danger" @click="handleResetConfig">重置</button>
@@ -177,6 +178,69 @@
       </div>
     </section>
 
+    <section v-show="activeTab === 'chat'" class="card">
+      <h2 class="card-title">页面长图 + 视觉总结（MVP）</h2>
+      <p class="desc">
+        仅在<strong>本机</strong>运行 <code class="inline-code">npm run dev</code> 时有效：后端会启动 Playwright
+        Chromium。勾选「有头模式」后弹出真实窗口，可在下方等待时间内<strong>手动登录</strong>，再截取<strong>整页长图</strong>；随后用支持图片的<strong>多模态模型</strong>总结（与上方「输入图片」测试共用同一套接口）。
+      </p>
+
+      <div class="config-form">
+        <label class="field">
+          <span>页面 URL</span>
+          <input v-model.trim="visionMvp.url" type="text" placeholder="https://linux.do/" />
+        </label>
+
+        <label class="checkbox">
+          <input v-model="visionMvp.headed" type="checkbox" />
+          <span>有头模式（弹出可操作的浏览器窗口；关闭则为无头，无法现场登录）</span>
+        </label>
+
+        <label class="field">
+          <span>首屏加载后等待（秒）</span>
+          <input v-model.number="visionMvp.waitSeconds" type="number" min="0" max="300" step="5" />
+          <small class="tips">用于在窗口内完成登录。公开页可填 0；需要登录建议 60～120。</small>
+        </label>
+
+        <div class="actions">
+          <button type="button" class="primary" :disabled="visionMvpLoading || !visionMvpUrlOk" @click="handleVisionMvpScreenshot">
+            {{ visionMvpLoading ? "截图中（等待结束时会较久）..." : "截取整页长图" }}
+          </button>
+          <button type="button" class="secondary" :disabled="!visionMvpDataUrl" @click="clearVisionMvpScreenshot">清除截图</button>
+        </div>
+
+        <p v-if="visionMvpHint" class="tips">{{ visionMvpHint }}</p>
+        <p v-if="visionMvpError" class="tips error">{{ visionMvpError }}</p>
+
+        <div v-if="visionMvpDataUrl" class="vision-mvp-preview">
+          <img :src="visionMvpDataUrl" alt="整页截图预览" />
+        </div>
+
+        <template v-if="visionMvpDataUrl">
+          <label class="field">
+            <span>视觉总结提示词</span>
+            <textarea v-model="visionMvp.summaryPrompt" rows="3" placeholder="描述希望模型如何从截图里提炼信息" />
+          </label>
+
+          <div class="actions">
+            <button
+              type="button"
+              class="primary"
+              :disabled="visionMvpSummaryLoading || !canVisionMvpSummary"
+              @click="handleVisionMvpSummarize"
+            >
+              {{ visionMvpSummaryLoading ? "请求模型中..." : "用当前模型做视觉总结" }}
+            </button>
+          </div>
+
+          <div v-if="visionMvpSummaryText" class="result vision-mvp-summary">
+            <h3 class="result-title">视觉总结输出</h3>
+            <pre>{{ visionMvpSummaryText }}</pre>
+          </div>
+        </template>
+      </div>
+    </section>
+
     <section v-show="activeTab === 'tts'" class="card">
       <h2 class="card-title">TTS 测试</h2>
 
@@ -308,6 +372,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { useRouter } from "vue-router";
 import { fetchAvailableModels, testAiModel, testTtsModel } from "../services/aiClient";
 import { checkClaudeCli, runClaudeCodeSse, type ClaudeRunRequest, type ClaudeSseEvent } from "../services/claudeCodeClient";
+import { requestPageScreenshot } from "../services/pageScreenshotClient";
 
 interface AiConfigForm {
   endpoint: string;
@@ -396,6 +461,110 @@ const imageMeta = reactive({
   sizeText: "",
 });
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+
+const visionMvp = reactive({
+  url: "https://linux.do/",
+  headed: true,
+  waitSeconds: 90,
+  summaryPrompt:
+    "请根据截图中的可见内容，用中文分条总结：页面类型、可见的帖子标题或区块、你认为的热点或注意事项。若文字过小无法辨认请说明。",
+});
+const visionMvpLoading = ref(false);
+const visionMvpError = ref("");
+const visionMvpHint = ref("");
+const visionMvpDataUrl = ref("");
+const visionMvpSummaryLoading = ref(false);
+const visionMvpSummaryText = ref("");
+
+const visionMvpUrlOk = computed(() => {
+  try {
+    const u = new URL(visionMvp.url.trim());
+    return /^https?:$/.test(u.protocol);
+  } catch {
+    return false;
+  }
+});
+
+const canVisionMvpSummary = computed(
+  () => endpointReady.value && Boolean(form.model.trim()) && Boolean(visionMvp.summaryPrompt.trim()) && Boolean(visionMvpDataUrl.value),
+);
+
+function clearVisionMvpScreenshot() {
+  visionMvpDataUrl.value = "";
+  visionMvpError.value = "";
+  visionMvpHint.value = "";
+  visionMvpSummaryText.value = "";
+}
+
+async function handleVisionMvpScreenshot() {
+  if (!visionMvpUrlOk.value) {
+    visionMvpError.value = "请先填写合法的 http/https URL。";
+    return;
+  }
+  visionMvpError.value = "";
+  visionMvpHint.value = "";
+  visionMvpSummaryText.value = "";
+  visionMvpLoading.value = true;
+  try {
+    const waitMs = Math.round(Math.min(300, Math.max(0, visionMvp.waitSeconds)) * 1000);
+    visionMvpHint.value =
+      visionMvp.headed && waitMs > 0
+        ? `将在约 ${visionMvp.waitSeconds} 秒内保持窗口开启，请在 Chromium 中完成登录；结束后自动截整页图。`
+        : "正在截取整页图…";
+    const res = await requestPageScreenshot({
+      url: visionMvp.url.trim(),
+      proxyUrl: web.proxyUrl?.trim() || undefined,
+      headed: visionMvp.headed,
+      waitAfterGotoMs: waitMs,
+    });
+    if (!res.ok) {
+      visionMvpError.value = res.error;
+      visionMvpHint.value = "";
+      return;
+    }
+    visionMvpDataUrl.value = res.dataUrl;
+    visionMvpHint.value =
+      res.byteLength > 0
+        ? `截图完成（约 ${formatBytes(res.byteLength)}）。若视觉接口报错，可缩短页面高度或改用更小视口（后续版本优化）。`
+        : "截图完成。";
+  } catch (error) {
+    visionMvpError.value = error instanceof Error ? error.message : "截图异常";
+    visionMvpHint.value = "";
+  } finally {
+    visionMvpLoading.value = false;
+  }
+}
+
+async function handleVisionMvpSummarize() {
+  if (!canVisionMvpSummary.value) return;
+  visionMvpSummaryLoading.value = true;
+  visionMvpSummaryText.value = form.stream ? "" : "请求中...\n";
+  try {
+    const response = await testAiModel({
+      endpoint: form.endpoint,
+      apiKey: form.apiKey,
+      model: form.model,
+      prompt: visionMvp.summaryPrompt.trim(),
+      imageDataUrl: visionMvpDataUrl.value,
+      stream: form.stream,
+      onStreamChunk: (chunkText) => {
+        visionMvpSummaryText.value += chunkText;
+      },
+    });
+
+    if (!response.ok) {
+      visionMvpSummaryText.value = response.error || response.rawText || "视觉总结请求失败。";
+      return;
+    }
+
+    visionMvpSummaryText.value = response.rawText || visionMvpSummaryText.value || "未返回内容。";
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "未知错误";
+    visionMvpSummaryText.value = `请求异常：${message}`;
+  } finally {
+    visionMvpSummaryLoading.value = false;
+  }
+}
 
 function openImagePicker() {
   imageInputRef.value?.click();
@@ -1232,6 +1401,24 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border);
 }
 
+.vision-mvp-preview {
+  max-height: 320px;
+  overflow: auto;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.vision-mvp-preview img {
+  width: 100%;
+  display: block;
+  vertical-align: top;
+}
+
+.vision-mvp-summary {
+  margin-top: 8px;
+}
+
 .model-row {
   display: grid;
   grid-template-columns: 1fr auto auto;
@@ -1287,6 +1474,14 @@ button.secondary {
 
 button.secondary:hover:not(:disabled) {
   box-shadow: 0 12px 26px rgba(15, 23, 42, 0.22);
+}
+
+a.secondary.link-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  box-sizing: border-box;
 }
 
 button.danger {

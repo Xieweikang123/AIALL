@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-30T01:14:50.972Z",
+  "items": [
+    {
+      "id": "wechat",
+      "name": "微信",
+      "aliases": [
+        "WeChat"
+      ],
+      "note": "桌面应用图标",
+      "imageFile": "wechat.png",
+      "createdAt": "2026-04-30T01:14:50.968Z",
+      "updatedAt": "2026-04-30T01:14:50.968Z"
+    }
+  ]
+}
