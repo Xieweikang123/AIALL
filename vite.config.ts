@@ -15,6 +15,20 @@ export default defineConfig({
       "/backend": {
         target: "http://127.0.0.1:37891",
         changeOrigin: true,
+        configure: (proxy) => {
+          proxy.on("proxyRes", (proxyRes, req) => {
+            const url = req.url || "";
+            const contentType = String(proxyRes.headers["content-type"] || "");
+            const isSse =
+              url.includes("/vibe/agent/run") ||
+              url.includes("/web/extract") ||
+              contentType.includes("text/event-stream");
+            if (!isSse) return;
+            proxyRes.headers["cache-control"] = "no-cache, no-transform";
+            proxyRes.headers["x-accel-buffering"] = "no";
+            delete proxyRes.headers["content-length"];
+          });
+        },
       },
     },
   },

@@ -7,7 +7,7 @@ import VibeCodingView from "../views/VibeCodingView.vue";
 const routes: RouteRecordRaw[] = [
   {
     path: "/",
-    redirect: "/chat",
+    redirect: "/vibe-coding",
   },
   {
     path: "/chat",

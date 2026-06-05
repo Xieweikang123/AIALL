@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { sendSseEvent, sendSseHeaders } from "./server/httpUtils";
 import { runVibeAgent } from "./server/vibeAgent";
 import {
   listDirectory,
@@ -14,6 +15,12 @@ import {
 } from "./server/vibeFs";
 
 const execFileAsync = promisify(execFile);
+
+const DEBUG_LOG = path.join(os.tmpdir(), "aiall-debug.log");
+function debugLog(msg: string) {
+  fs.appendFileSync(DEBUG_LOG, `[${new Date().toISOString()}] ${msg}\n`);
+}
+debugLog("=== middleware loaded ===");
 
 function readJsonBody(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
@@ -38,67 +45,84 @@ function sendJson(res: ServerResponse, status: number, payload: unknown) {
   res.end(JSON.stringify(payload));
 }
 
-function sendSseHeaders(res: ServerResponse) {
-  res.statusCode = 200;
-  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-  res.setHeader("Cache-Control", "no-cache, no-transform");
-  res.setHeader("Connection", "keep-alive");
-  res.setHeader("X-Accel-Buffering", "no");
-}
-
-function sendSseEvent(res: ServerResponse, event: string, data: unknown) {
-  res.write(`event: ${event}\n`);
-  res.write(`data: ${JSON.stringify(data)}\n\n`);
-}
-
 function powershellExe(): string {
   const root = process.env.SystemRoot || "C:\\Windows";
   return path.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
 }
 
-/** ASCII-only script; Chinese title comes from env to avoid .ps1 encoding issues. */
+/** ASCII-only script; custom WinForms dialog with path input + browse button. */
 const FOLDER_PICKER_PS1 = `
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $title = if ($env:AIALL_DIALOG_DESC) { $env:AIALL_DIALOG_DESC } else { 'Select project folder' }
 $initial = $env:AIALL_INITIAL_DIR
-$selected = $null
 
-function Try-ModernFolderPicker {
-  [void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms')
-  $dialog = New-Object System.Windows.Forms.OpenFileDialog
-  $dialog.Title = $title
-  $dialog.Filter = 'Folders|no.files'
-  $dialog.FileName = 'Folder Selection.'
-  $dialog.CheckFileExists = $false
-  $dialog.CheckPathExists = $true
-  $dialog.ValidateNames = $false
-  $dialog.Multiselect = $false
-  if ($initial -and (Test-Path -LiteralPath $initial -PathType Container)) {
-    $dialog.InitialDirectory = $initial
+[void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms')
+[void][System.Reflection.Assembly]::LoadWithPartialName('System.Drawing')
+
+$form = New-Object System.Windows.Forms.Form
+$form.Text = $title
+$form.Size = New-Object System.Drawing.Size(520, 120)
+$form.StartPosition = 'CenterScreen'
+$form.FormBorderStyle = 'FixedDialog'
+$form.MaximizeBox = $false
+$form.MinimizeBox = $false
+$form.TopMost = $true
+
+$label = New-Object System.Windows.Forms.Label
+$label.Text = 'Folder path:'
+$label.Location = New-Object System.Drawing.Point(12, 16)
+$label.Size = New-Object System.Drawing.Size(80, 20)
+$form.Controls.Add($label)
+
+$textBox = New-Object System.Windows.Forms.TextBox
+$textBox.Location = New-Object System.Drawing.Point(95, 13)
+$textBox.Size = New-Object System.Drawing.Size(300, 20)
+if ($initial -and (Test-Path -LiteralPath $initial -PathType Container)) {
+  $textBox.Text = $initial
+}
+$form.Controls.Add($textBox)
+
+$browseBtn = New-Object System.Windows.Forms.Button
+$browseBtn.Text = 'Browse...'
+$browseBtn.Location = New-Object System.Drawing.Point(402, 12)
+$browseBtn.Size = New-Object System.Drawing.Size(90, 24)
+$browseBtn.Add_Click({
+  $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+  $dialog.Description = $title
+  $dialog.ShowNewFolderButton = $true
+  if ($textBox.Text -and (Test-Path -LiteralPath $textBox.Text -PathType Container)) {
+    $dialog.SelectedPath = $textBox.Text
   }
-  if ($dialog.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return $null }
-  $name = $dialog.FileName
-  if ([System.IO.Directory]::Exists($name)) { return $name }
-  $parent = [System.IO.Path]::GetDirectoryName($name)
-  if ($parent -and [System.IO.Directory]::Exists($parent)) { return $parent }
-  return $null
-}
+  if ($dialog.ShowDialog() -eq 'OK') {
+    $textBox.Text = $dialog.SelectedPath
+  }
+})
+$form.Controls.Add($browseBtn)
 
-function Try-LegacyFolderPicker {
-  $shell = New-Object -ComObject Shell.Application
-  $root = 0
-  if ($initial -and (Test-Path -LiteralPath $initial -PathType Container)) { $root = $initial }
-  $folder = $shell.BrowseForFolder(0, $title, 0x41, $root)
-  if ($null -ne $folder) { return $folder.Self.Path }
-  return $null
-}
+$okBtn = New-Object System.Windows.Forms.Button
+$okBtn.Text = 'OK'
+$okBtn.DialogResult = 'OK'
+$okBtn.Location = New-Object System.Drawing.Point(320, 55)
+$okBtn.Size = New-Object System.Drawing.Size(85, 28)
+$form.Controls.Add($okBtn)
 
-try { $selected = Try-ModernFolderPicker } catch { }
-if (-not $selected) {
-  try { $selected = Try-LegacyFolderPicker } catch { }
+$cancelBtn = New-Object System.Windows.Forms.Button
+$cancelBtn.Text = 'Cancel'
+$cancelBtn.DialogResult = 'Cancel'
+$cancelBtn.Location = New-Object System.Drawing.Point(410, 55)
+$cancelBtn.Size = New-Object System.Drawing.Size(85, 28)
+$form.Controls.Add($cancelBtn)
+
+$form.AcceptButton = $okBtn
+$form.CancelButton = $cancelBtn
+
+if ($form.ShowDialog() -ne 'OK') { exit 0 }
+
+$selected = $textBox.Text.Trim()
+if ($selected -and (Test-Path -LiteralPath $selected -PathType Container)) {
+  [Console]::Out.Write($selected)
 }
-if ($selected) { [Console]::Out.Write($selected) }
 `.trim();
 
 function formatExecError(error: unknown): string {
@@ -112,26 +136,38 @@ function formatExecError(error: unknown): string {
 async function pickFolderWindows(initialPath?: string): Promise<{ ok: boolean; path?: string; cancelled?: boolean; error?: string }> {
   const scriptPath = path.join(os.tmpdir(), `aiall-folder-picker-${process.pid}-${Date.now()}.ps1`);
   await fs.promises.writeFile(scriptPath, `\uFEFF${FOLDER_PICKER_PS1}`, "utf8");
+  debugLog(`script written to ${scriptPath}`);
+  debugLog(`script content:\n${FOLDER_PICKER_PS1}`);
+  console.log(`[aiall-debug] pickFolderWindows start, initialPath=${initialPath}, script=${scriptPath}`);
+  debugLog(`pickFolderWindows start, initialPath=${initialPath}, script=${scriptPath}`);
 
   try {
     const env = { ...process.env, AIALL_DIALOG_DESC: "选择项目文件夹" };
     if (initialPath?.trim()) env.AIALL_INITIAL_DIR = path.resolve(initialPath.trim());
+    console.log(`[aiall-debug] spawning powershell...`);
+    debugLog(`spawning powershell...`);
 
     const { stdout, stderr } = await execFileAsync(
       powershellExe(),
-      ["-NoProfile", "-Sta", "-ExecutionPolicy", "Bypass", "-File", scriptPath],
+      ["-NoProfile", "-Sta", "-WindowStyle", "Hidden", "-ExecutionPolicy", "Bypass", "-File", scriptPath],
       { windowsHide: false, maxBuffer: 4 * 1024 * 1024, env },
     );
 
     const errText = stderr ? String(stderr).trim() : "";
+    console.log(`[aiall-debug] powershell done, stdout=${JSON.stringify(stdout)}, stderr=${JSON.stringify(errText)}`);
+    debugLog(`powershell done, stdout=${JSON.stringify(stdout)}, stderr=${JSON.stringify(errText)}`);
     if (errText && !stdout) {
       return { ok: false, error: errText };
     }
 
     const selected = (stdout ? String(stdout) : "").trim();
+    console.log(`[aiall-debug] selected=${JSON.stringify(selected)}`);
+    debugLog(`selected=${JSON.stringify(selected)}`);
     if (!selected) return { ok: false, cancelled: true };
     return { ok: true, path: selected };
   } catch (error) {
+    console.log(`[aiall-debug] pickFolderWindows error:`, error);
+    debugLog(`pickFolderWindows error: ${error}`);
     return { ok: false, error: formatExecError(error) };
   } finally {
     await fs.promises.unlink(scriptPath).catch(() => {});
@@ -297,14 +333,19 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       return;
     }
 
+    // Open SSE immediately so the client leaves "connecting_local" before slow validation/agent work.
+    sendSseHeaders(res);
+    sendSseEvent(res, "status", { phase: "connected" });
+
     const resolvedRoot = path.resolve(projectPath);
     const rootStat = await fs.promises.stat(resolvedRoot).catch(() => null);
     if (!rootStat?.isDirectory()) {
-      sendJson(res, 400, { error: "projectPath 不是有效目录" });
+      sendSseEvent(res, "error", { message: "projectPath 不是有效目录" });
+      sendSseEvent(res, "done", { writtenFiles: [], turns: 0 });
+      res.end();
       return;
     }
 
-    sendSseHeaders(res);
     const controller = new AbortController();
     const abort = () => controller.abort();
     req.on("close", abort);
@@ -378,6 +419,8 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       return;
     }
 
+    console.log(`[aiall-debug] /backend/vibe/pick-folder hit`);
+    debugLog(`/backend/vibe/pick-folder hit`);
     try {
       let initialPath = "";
       try {
@@ -387,7 +430,11 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         // empty body is fine
       }
 
+      console.log(`[aiall-debug] calling pickProjectFolder(initialPath=${JSON.stringify(initialPath)})`);
+      debugLog(`calling pickProjectFolder(initialPath=${JSON.stringify(initialPath)})`);
       const result = await pickProjectFolder(initialPath);
+      console.log(`[aiall-debug] pickProjectFolder result:`, JSON.stringify(result));
+      debugLog(`pickProjectFolder result: ${JSON.stringify(result)}`);
       if (result.cancelled) {
         sendJson(res, 200, { ok: false, cancelled: true });
         return;
@@ -574,7 +621,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       }
 
       if (stat.isDirectory()) {
-        await fs.promises.rmdir(resolved);
+        await fs.promises.rm(resolved, { recursive: true, force: true });
       } else {
         await fs.promises.unlink(resolved);
       }
@@ -582,6 +629,40 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       sendJson(res, 200, { ok: true, path: resolved });
     } catch (error) {
       sendJson(res, 500, { error: error instanceof Error ? error.message : "删除失败" });
+    }
+  });
+
+  // POST /backend/vibe/rename
+  middlewares.use("/backend/vibe/rename", async (req, res) => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "仅支持 POST 请求" });
+      return;
+    }
+
+    try {
+      const body = (await readJsonBody(req)) as { from?: string; to?: string };
+      const fromPath = (body.from || "").trim();
+      const toPath = (body.to || "").trim();
+
+      if (!fromPath || !toPath) {
+        sendJson(res, 400, { error: "缺少 from 或 to 参数" });
+        return;
+      }
+
+      const resolvedFrom = path.resolve(fromPath);
+      const resolvedTo = path.resolve(toPath);
+
+      const stat = await fs.promises.stat(resolvedFrom).catch(() => null);
+      if (!stat) {
+        sendJson(res, 404, { error: "源路径不存在" });
+        return;
+      }
+
+      await fs.promises.mkdir(path.dirname(resolvedTo), { recursive: true });
+      await fs.promises.rename(resolvedFrom, resolvedTo);
+      sendJson(res, 200, { ok: true, from: resolvedFrom, to: resolvedTo });
+    } catch (error) {
+      sendJson(res, 500, { error: error instanceof Error ? error.message : "重命名失败" });
     }
   });
 }

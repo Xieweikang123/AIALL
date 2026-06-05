@@ -1,5 +1,15 @@
 import { backendUrl } from "./backendBase";
 
+const DEV_SIDECAR_ORIGIN = "http://127.0.0.1:37891";
+
+/** Agent SSE must not go through Vite's dev proxy (it buffers until the response ends). */
+function agentRunUrl(): string {
+  const envBase = (import.meta.env.VITE_BACKEND_URL || "").replace(/\/$/, "");
+  if (envBase) return `${envBase}/backend/vibe/agent/run`;
+  if (import.meta.env.DEV) return `${DEV_SIDECAR_ORIGIN}/backend/vibe/agent/run`;
+  return backendUrl("/backend/vibe/agent/run");
+}
+
 export interface VibeAgentRunRequest {
   prompt: string;
   projectPath: string;
@@ -11,10 +21,20 @@ export interface VibeAgentRunRequest {
 }
 
 export type VibeAgentSseEvent =
-  | { type: "status"; data: { phase: string; turn?: number; maxTurns?: number } }
+  | {
+      type: "status";
+      data: {
+        phase: string;
+        turn?: number;
+        maxTurns?: number;
+        openFile?: string;
+        model?: string;
+      };
+    }
   | { type: "tool_start"; data: { id: string; name: string; args: Record<string, unknown> } }
   | { type: "tool_end"; data: { id: string; name: string; ok: boolean; summary: string } }
   | { type: "message"; data: { text: string } }
+  | { type: "message_delta"; data: { delta: string } }
   | { type: "error"; data: { message: string } }
   | { type: "done"; data: { writtenFiles: string[]; turns: number } }
   | { type: "unknown"; data: unknown };
@@ -32,7 +52,9 @@ export function runVibeAgentSse(request: VibeAgentRunRequest, onEvent: (event: V
   let doneReceived = false;
 
   (async () => {
-    const response = await fetch(backendUrl("/backend/vibe/agent/run"), {
+    onEvent({ type: "status", data: { phase: "connecting_local" } });
+
+    const response = await fetch(agentRunUrl(), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
@@ -47,6 +69,8 @@ export function runVibeAgentSse(request: VibeAgentRunRequest, onEvent: (event: V
       });
       return;
     }
+
+    onEvent({ type: "status", data: { phase: "stream_connected" } });
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder("utf-8");
@@ -64,6 +88,7 @@ export function runVibeAgentSse(request: VibeAgentRunRequest, onEvent: (event: V
       else if (type === "tool_start") onEvent({ type: "tool_start", data: (parsed || {}) as any });
       else if (type === "tool_end") onEvent({ type: "tool_end", data: (parsed || {}) as any });
       else if (type === "message") onEvent({ type: "message", data: (parsed || {}) as any });
+      else if (type === "message_delta") onEvent({ type: "message_delta", data: (parsed || {}) as any });
       else if (type === "error") onEvent({ type: "error", data: (parsed || {}) as any });
       else if (type === "done") {
         doneReceived = true;

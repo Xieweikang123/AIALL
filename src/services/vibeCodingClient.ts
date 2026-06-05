@@ -1,4 +1,5 @@
 import { backendUrl } from "./backendBase";
+import { open } from "@tauri-apps/plugin-dialog";
 
 export interface FileEntry {
   name: string;
@@ -56,6 +57,13 @@ export interface DeleteResult {
   error?: string;
 }
 
+export interface RenameResult {
+  ok: boolean;
+  from: string;
+  to: string;
+  error?: string;
+}
+
 export interface PickFolderResult {
   ok: boolean;
   path?: string;
@@ -93,15 +101,18 @@ export async function fetchProjectContext(projectPath: string): Promise<ProjectC
 
 export async function pickProjectFolder(initialPath?: string): Promise<PickFolderResult> {
   try {
-    const response = await fetch(backendUrl("/backend/vibe/pick-folder"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ initialPath: initialPath || "" }),
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "选择项目文件夹",
+      defaultPath: initialPath || undefined,
     });
-    const data = (await response.json()) as PickFolderResult;
-    return data;
+    if (selected === null) {
+      return { ok: false, cancelled: true };
+    }
+    return { ok: true, path: selected };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "网络错误" };
+    return { ok: false, error: error instanceof Error ? error.message : "打开文件夹选择器失败" };
   }
 }
 
@@ -177,5 +188,24 @@ export async function deleteItem(itemPath: string): Promise<DeleteResult> {
     return data;
   } catch (error) {
     return { ok: false, path: itemPath, error: error instanceof Error ? error.message : "网络错误" };
+  }
+}
+
+export async function renameItem(fromPath: string, toPath: string): Promise<RenameResult> {
+  try {
+    const response = await fetch(backendUrl("/backend/vibe/rename"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ from: fromPath, to: toPath }),
+    });
+    const data = (await response.json()) as RenameResult;
+    return data;
+  } catch (error) {
+    return {
+      ok: false,
+      from: fromPath,
+      to: toPath,
+      error: error instanceof Error ? error.message : "网络错误",
+    };
   }
 }

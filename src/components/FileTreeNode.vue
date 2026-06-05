@@ -1,6 +1,12 @@
 <template>
   <div v-if="node.isDirectory" class="tree-dir">
-    <button type="button" class="file-item dir" :style="{ paddingLeft }" @click="$emit('toggle', node.path)">
+    <button
+      type="button"
+      class="file-item dir"
+      :class="{ selected: node.path === selectedPath }"
+      :style="{ paddingLeft }"
+      @click="onDirClick"
+    >
       <span class="file-icon">{{ expanded ? "📂" : "📁" }}</span>
       <span class="file-name">{{ node.name }}</span>
     </button>
@@ -10,10 +16,12 @@
         :key="child.path"
         :node="child"
         :active-path="activePath"
+        :selected-path="selectedPath"
         :expanded-dirs="expandedDirs"
         :depth="depth + 1"
         @toggle="$emit('toggle', $event)"
         @open="$emit('open', $event)"
+        @select="$emit('select', $event)"
       />
     </div>
   </div>
@@ -21,9 +29,9 @@
     v-else
     type="button"
     class="file-item"
-    :class="{ active: node.path === activePath }"
+    :class="{ active: node.path === activePath, selected: node.path === selectedPath }"
     :style="{ paddingLeft }"
-    @click="$emit('open', node.path)"
+    @click="onFileClick"
   >
     <span class="file-icon">📄</span>
     <span class="file-name">{{ node.name }}</span>
@@ -42,14 +50,26 @@ export interface TreeNode extends FileEntry {
 const props = defineProps<{
   node: TreeNode;
   activePath: string;
+  selectedPath: string;
   expandedDirs: Set<string>;
   depth?: number;
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   toggle: [path: string];
   open: [path: string];
+  select: [path: string];
 }>();
+
+function onDirClick() {
+  emit("select", props.node.path);
+  emit("toggle", props.node.path);
+}
+
+function onFileClick() {
+  emit("select", props.node.path);
+  emit("open", props.node.path);
+}
 
 const depth = computed(() => props.depth ?? 0);
 const paddingLeft = computed(() => `${8 + depth.value * 14}px`);

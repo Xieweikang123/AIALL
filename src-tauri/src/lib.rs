@@ -99,6 +99,7 @@ pub fn run() {
         )?;
       }
       start_backend_process(app)?;
+      app.handle().plugin(tauri_plugin_dialog::init())?;
       Ok(())
     })
     .invoke_handler(tauri::generate_handler![get_backend_url])

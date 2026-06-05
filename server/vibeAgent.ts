@@ -12,7 +12,16 @@ import {
 } from "./vibeFs";
 
 export type VibeAgentEvent =
-  | { type: "status"; data: { phase: string; turn?: number; maxTurns?: number } }
+  | {
+      type: "status";
+      data: {
+        phase: string;
+        turn?: number;
+        maxTurns?: number;
+        openFile?: string;
+        model?: string;
+      };
+    }
   | { type: "tool_start"; data: { id: string; name: string; args: Record<string, unknown> } }
   | { type: "tool_end"; data: { id: string; name: string; ok: boolean; summary: string } }
   | { type: "message"; data: { text: string } }
@@ -133,6 +142,41 @@ function parseToolArgs(raw: string): Record<string, unknown> {
 }
 
 function toolSummary(name: string, result: string): string {
+  if (result.startsWith("错误：")) {
+    return result.replace(/^错误：/, "").trim();
+  }
+
+  if (name === "list_dir") {
+    if (result === "（空目录）") return "空目录";
+    const lines = result.split("\n").filter(Boolean);
+    const dirs = lines.filter((l) => l.startsWith("[dir]")).length;
+    const files = lines.filter((l) => l.startsWith("[file]")).length;
+    return `${dirs} 个目录，${files} 个文件`;
+  }
+
+  if (name === "read_file") {
+    const lineCount = result.split("\n").filter((l) => l.length > 0).length;
+    return `读取 ${lineCount} 行内容`;
+  }
+
+  if (name === "grep") {
+    if (result === "（无匹配）") return "未找到匹配";
+    const n = result.split("\n").filter(Boolean).length;
+    return `找到 ${n} 处匹配`;
+  }
+
+  if (name === "search_files") {
+    if (result === "（无匹配文件）") return "未找到文件";
+    const n = result.split("\n").filter(Boolean).length;
+    return `找到 ${n} 个文件`;
+  }
+
+  if (name === "write_file") {
+    const m = result.match(/已写入\s+(.+?)（(\d+)\s*字符）/);
+    if (m) return `已写入 ${m[1]}（${m[2]} 字符）`;
+    return result;
+  }
+
   const oneLine = result.replace(/\s+/g, " ").trim();
   return oneLine.length > 120 ? `${oneLine.slice(0, 120)}…` : oneLine;
 }
@@ -223,13 +267,25 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     signal,
   } = params;
 
+  const openFileRel =
+    openFilePath?.trim() &&
+    path.relative(projectRoot, path.resolve(openFilePath)).replace(/\\/g, "/");
+
+  onEvent({
+    type: "status",
+    data: {
+      phase: "preparing",
+      maxTurns,
+      model,
+      ...(openFileRel ? { openFile: openFileRel } : {}),
+    },
+  });
+
   const writtenFiles: string[] = [];
   const messages: ChatCompletionMessage[] = [
     { role: "system", content: buildSystemPrompt(projectRoot, openFilePath) },
     { role: "user", content: prompt },
   ];
-
-  onEvent({ type: "status", data: { phase: "starting", maxTurns } });
 
   for (let turn = 1; turn <= maxTurns; turn += 1) {
     if (signal?.aborted) {
@@ -238,15 +294,31 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       return;
     }
 
-    onEvent({ type: "status", data: { phase: "thinking", turn, maxTurns } });
+    onEvent({ type: "status", data: { phase: "waiting_model", turn, maxTurns, model } });
 
-    const completion = await chatCompletionWithTools({
-      endpoint,
-      apiKey,
-      model,
-      messages,
-      tools: VIBE_AGENT_TOOLS,
-    });
+    const heartbeat = setInterval(() => {
+      if (signal?.aborted) return;
+      onEvent({ type: "status", data: { phase: "waiting_model", turn, maxTurns, model } });
+    }, 12_000);
+
+    let streamedChars = 0;
+    let completion: Awaited<ReturnType<typeof chatCompletionWithTools>>;
+    try {
+      completion = await chatCompletionWithTools({
+        endpoint,
+        apiKey,
+        model,
+        messages,
+        tools: VIBE_AGENT_TOOLS,
+        signal,
+        onContentDelta: (delta) => {
+          streamedChars += delta.length;
+          onEvent({ type: "message_delta", data: { delta } });
+        },
+      });
+    } finally {
+      clearInterval(heartbeat);
+    }
 
     if (!completion.ok || !completion.message) {
       onEvent({ type: "error", data: { message: completion.error || "模型请求失败" } });
@@ -259,7 +331,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
     if (!toolCalls.length) {
       const text = String(assistant.content || "").trim();
-      if (text) {
+      if (text && !streamedChars) {
         onEvent({ type: "message", data: { text } });
       }
       onEvent({ type: "status", data: { phase: "finished", turn, maxTurns } });

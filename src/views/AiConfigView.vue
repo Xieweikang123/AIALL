@@ -69,12 +69,19 @@
               <button type="button" class="link" @click="apiKeyVisible = !apiKeyVisible">
                 {{ apiKeyVisible ? "隐藏" : "显示" }}
               </button>
+              <button type="button" class="link" @click="pasteApiKey">粘贴</button>
               <button type="button" class="link" :disabled="!form.apiKey" @click="copyText(form.apiKey)">
                 复制
               </button>
             </div>
           </div>
-          <input v-model.trim="form.apiKey" :type="apiKeyVisible ? 'text' : 'password'" placeholder="sk-xxxx（如需鉴权请填写）" />
+          <input
+            v-model.trim="form.apiKey"
+            :type="apiKeyVisible ? 'text' : 'password'"
+            placeholder="sk-xxxx（如需鉴权请填写）"
+            autocomplete="off"
+            @paste="handleApiKeyPaste"
+          />
         </label>
 
         <label class="field">
@@ -573,8 +580,41 @@ async function handleImageDrop(event: DragEvent) {
   await setImageFile(file);
 }
 
+function isTextInputTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return true;
+  return target.isContentEditable;
+}
+
+function handleApiKeyPaste(event: ClipboardEvent) {
+  const text = event.clipboardData?.getData("text/plain")?.trim();
+  if (!text) return;
+  event.preventDefault();
+  form.apiKey = text;
+}
+
+async function pasteApiKey() {
+  try {
+    const text = (await navigator.clipboard.readText()).trim();
+    if (!text) {
+      saveHint.value = "剪贴板为空或非文本内容。";
+      return;
+    }
+    form.apiKey = text;
+    saveHint.value = "已从剪贴板粘贴 API Key。";
+  } catch {
+    saveHint.value = "粘贴失败，请在输入框内使用 Ctrl+V。";
+  } finally {
+    window.clearTimeout(saveHintTimer);
+    saveHintTimer = window.setTimeout(() => {
+      saveHint.value = "";
+    }, 1800);
+  }
+}
+
 async function handlePaste(event: ClipboardEvent) {
   if (activeTab.value !== "chat") return;
+  if (isTextInputTarget(event.target)) return;
   const items = event.clipboardData?.items || [];
   const imageItem = Array.from(items).find((item) => item.kind === "file" && item.type.startsWith("image/"));
   const file = imageItem?.getAsFile();
