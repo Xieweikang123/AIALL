@@ -17,6 +17,7 @@
       </div>
 
       <div class="head-actions">
+        <router-link class="secondary link-btn" to="/vibe-coding">Vibe Coding</router-link>
         <router-link class="secondary link-btn" to="/icon-templates">图标模板</router-link>
         <router-link class="secondary link-btn" to="/ai-config">去配置</router-link>
         <button type="button" class="secondary" :disabled="sending || !messages.length" @click="clearAll">清空</button>

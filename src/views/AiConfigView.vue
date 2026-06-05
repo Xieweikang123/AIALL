@@ -6,12 +6,18 @@
         <p class="desc">配置模型接口并测试连通性。</p>
       </div>
       <div class="head-actions">
-        <button type="button" class="secondary" @click="handleGoChat">去聊天</button>
-        <router-link class="secondary link-btn" to="/icon-templates">图标模板</router-link>
-        <button type="button" class="secondary" @click="handleExportConfig">导出</button>
-        <button type="button" class="secondary" @click="handleImportConfig">导入</button>
-        <button type="button" class="secondary danger" @click="handleResetConfig">重置</button>
-        <button type="button" class="primary" @click="saveConfig">保存配置</button>
+        <div class="action-group nav-group">
+          <button type="button" class="secondary" @click="handleGoChat">去聊天</button>
+          <router-link class="secondary link-btn" to="/vibe-coding">Vibe Coding</router-link>
+          <router-link class="secondary link-btn" to="/icon-templates">图标模板</router-link>
+        </div>
+        <div class="action-divider"></div>
+        <div class="action-group">
+          <button type="button" class="secondary" @click="handleExportConfig">导出</button>
+          <button type="button" class="secondary" @click="handleImportConfig">导入</button>
+          <button type="button" class="secondary danger outline" @click="handleResetConfig">重置</button>
+          <button type="button" class="primary" @click="saveConfig">保存配置</button>
+        </div>
       </div>
     </div>
 
@@ -34,13 +40,23 @@
         <label class="field span-2">
           <div class="field-row">
             <span>接口地址</span>
-            <span class="badge" :class="endpointReady ? 'ok' : 'fail'">
-              {{ endpointReady ? "可用" : "需修正" }}
-            </span>
+            <div class="field-tools">
+              <button v-if="canSimplifyEndpoint" type="button" class="link" @click="simplifyEndpoint">
+                简化为 Base URL
+              </button>
+              <span class="badge" :class="endpointReady ? 'ok' : 'fail'">
+                {{ endpointReady ? "可用" : "需修正" }}
+              </span>
+            </div>
           </div>
-          <input v-model.trim="form.endpoint" type="text" placeholder="https://fufu.iqach.top/v1/chat/completions" />
+          <input v-model.trim="form.endpoint" type="text" placeholder="https://example.com/v1（或完整地址 .../v1/chat/completions）" />
           <small v-if="endpointError" class="tips error">{{ endpointError }}</small>
           <small v-else class="tips">
+            支持填写 Base URL（如 <code class="inline-code">/v1</code>），系统会自动补全 <code class="inline-code">/chat/completions</code>；也可直接填写完整地址。
+          </small>
+          <small v-if="endpointReady" class="tips">
+            chat：<code class="inline-code">{{ derivedChatEndpoint }}</code>
+            &nbsp;|&nbsp;
             models：<code class="inline-code">{{ derivedModelsEndpoint }}</code>
           </small>
           <small v-if="endpointReady" class="tips">
@@ -243,6 +259,7 @@
 
     <section v-show="activeTab === 'tts'" class="card">
       <h2 class="card-title">TTS 测试</h2>
+      <p class="tips">MiMo TTS 使用 <code class="inline-code">/chat/completions</code> 接口（非 OpenAI 的 <code class="inline-code">/audio/speech</code>），朗读文本会作为 assistant 消息发送。</p>
 
       <div class="config-form grid-2">
         <label class="field">
@@ -417,7 +434,7 @@ function handleGoChat() {
 }
 
 const form = reactive<AiConfigForm>({
-  endpoint: "https://fufu.iqach.top/v1/chat/completions",
+  endpoint: "https://fufu.iqach.top/v1",
   apiKey: "",
   model: "mimo-v2.5-pro",
   prompt: "你好",
@@ -660,6 +677,17 @@ function validateEndpoint(value: string): string {
 const endpointError = computed(() => validateEndpoint(form.endpoint));
 const endpointReady = computed(() => !endpointError.value);
 
+const canSimplifyEndpoint = computed(() => {
+  const ep = form.endpoint.trim();
+  return ep.endsWith("/chat/completions") || ep.endsWith("/completions");
+});
+
+function simplifyEndpoint() {
+  const ep = form.endpoint.trim();
+  if (ep.endsWith("/chat/completions")) form.endpoint = ep.replace(/\/chat\/completions$/, "");
+  else if (ep.endsWith("/completions")) form.endpoint = ep.replace(/\/completions$/, "");
+}
+
 function resolveModelsEndpointForDisplay(endpoint: string): string {
   const input = endpoint.trim();
   if (!input) return "";
@@ -677,22 +705,18 @@ function resolveModelsEndpointForDisplay(endpoint: string): string {
 }
 
 function resolveTtsEndpointForDisplay(endpoint: string): string {
-  const input = endpoint.trim();
-  if (!input) return "";
-  try {
-    const url = new URL(input);
-    const path = url.pathname;
-    if (path.endsWith("/chat/completions")) url.pathname = path.replace(/\/chat\/completions$/, "/audio/speech");
-    else if (!path.endsWith("/audio/speech"))
-      url.pathname = (path.endsWith("/") ? path.slice(0, -1) : path) + "/audio/speech";
-    return url.toString();
-  } catch {
-    if (input.endsWith("/chat/completions")) return input.replace(/\/chat\/completions$/, "/audio/speech");
-    if (input.endsWith("/audio/speech")) return input;
-    return `${input.replace(/\/$/, "")}/audio/speech`;
-  }
+  return resolveChatEndpointForDisplay(endpoint);
 }
 
+function resolveChatEndpointForDisplay(endpoint: string): string {
+  const input = endpoint.trim();
+  if (!input) return "";
+  if (input.endsWith("/chat/completions")) return input;
+  if (input.endsWith("/completions")) return input.replace(/\/completions$/, "/chat/completions");
+  return `${input.replace(/\/+$/, "")}/chat/completions`;
+}
+
+const derivedChatEndpoint = computed(() => resolveChatEndpointForDisplay(form.endpoint));
 const derivedModelsEndpoint = computed(() => resolveModelsEndpointForDisplay(form.endpoint));
 const derivedTtsEndpoint = computed(() => resolveTtsEndpointForDisplay(form.endpoint));
 
@@ -1194,16 +1218,16 @@ onBeforeUnmount(() => {
 .ai-config-page {
   --bg: #ffffff;
   --text: #111827;
-  --muted: rgba(17, 24, 39, 0.72);
-  --subtle: rgba(17, 24, 39, 0.56);
-  --border: rgba(17, 24, 39, 0.12);
-  --border-2: rgba(17, 24, 39, 0.18);
-  --ring: rgba(31, 111, 235, 0.22);
+  --muted: rgba(17, 24, 39, 0.7);
+  --subtle: rgba(17, 24, 39, 0.55);
+  --border: rgba(17, 24, 39, 0.1);
+  --border-2: rgba(17, 24, 39, 0.16);
+  --ring: rgba(31, 111, 235, 0.2);
   --primary: #1f6feb;
   --danger: #cf222e;
   --ok: #1a7f37;
-  --card-shadow: 0 10px 30px rgba(15, 23, 42, 0.08), 0 2px 8px rgba(15, 23, 42, 0.05);
-  --card-shadow-hover: 0 14px 40px rgba(15, 23, 42, 0.12), 0 4px 12px rgba(15, 23, 42, 0.06);
+  --card-shadow: 0 2px 8px rgba(15, 23, 42, 0.04), 0 1px 2px rgba(15, 23, 42, 0.06);
+  --card-shadow-hover: 0 4px 16px rgba(15, 23, 42, 0.06), 0 2px 4px rgba(15, 23, 42, 0.08);
 
   max-width: 980px;
   margin: 0 auto;
@@ -1213,10 +1237,14 @@ onBeforeUnmount(() => {
 
 .page-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.page-head > div:first-child {
+  flex-shrink: 0;
 }
 
 .head-actions {
@@ -1226,78 +1254,159 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 
+.action-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.action-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--border-2);
+  margin: 0 4px;
+}
+
+.nav-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(130, 80, 223, 0.08);
+  border: 1px solid rgba(130, 80, 223, 0.15);
+}
+
+.nav-group .secondary,
+.nav-group .link-btn {
+  background: transparent;
+  color: #8250df;
+  box-shadow: none;
+  border: none;
+  border-radius: 7px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.nav-group .secondary:hover:not(:disabled),
+.nav-group .link-btn:hover:not(:disabled) {
+  background: rgba(130, 80, 223, 0.15);
+  box-shadow: none;
+}
+
+.nav-group .secondary:active:not(:disabled),
+.nav-group .link-btn:active:not(:disabled) {
+  background: rgba(130, 80, 223, 0.22);
+}
+
+button.secondary {
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 8px;
+}
+
+button.danger.outline {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid rgba(207, 34, 46, 0.3);
+  box-shadow: none;
+}
+
+button.danger.outline:hover:not(:disabled) {
+  background: rgba(207, 34, 46, 0.08);
+  box-shadow: none;
+}
+
+button.primary {
+  padding: 7px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 8px;
+}
+
 .page-head h1 {
   margin: 0;
-  font-size: 22px;
-  letter-spacing: 0.2px;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  color: var(--text);
 }
 
 .desc {
   color: var(--muted);
-  margin: 6px 0 0;
+  margin: 4px 0 0;
+  font-size: 14px;
   line-height: 1.5;
 }
 
 .tabs {
   display: flex;
-  gap: 10px;
-  margin: 14px 0 18px;
-  padding: 6px;
+  gap: 4px;
+  margin: 0 0 20px;
+  padding: 4px;
   border: 1px solid var(--border);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.62);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.65);
   backdrop-filter: blur(8px);
 }
 
 .tab {
   border: 1px solid transparent;
   background: transparent;
-  color: rgba(17, 24, 39, 0.86);
-  border-radius: 999px;
-  padding: 9px 14px;
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+  transition: all 150ms ease;
 }
 
 .tab.active {
-  border-color: rgba(31, 111, 235, 0.35);
-  background: rgba(31, 111, 235, 0.1);
+  border-color: rgba(31, 111, 235, 0.3);
+  background: rgba(31, 111, 235, 0.08);
   color: var(--primary);
+  font-weight: 600;
 }
 
-.tab:hover {
+.tab:hover:not(.active) {
   background: rgba(17, 24, 39, 0.04);
+  color: var(--text);
 }
 
-.tab:active {
-  transform: translateY(1px);
+.tab:active:not(.disabled) {
+  transform: scale(0.98);
 }
 
 .card {
   border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 16px;
-  background: rgba(255, 255, 255, 0.78);
+  border-radius: 14px;
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.82);
   backdrop-filter: blur(10px);
-  box-shadow: var(--card-shadow);
-  margin-top: 14px;
-  transition: box-shadow 160ms ease, border-color 160ms ease, transform 160ms ease;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04), 0 1px 2px rgba(15, 23, 42, 0.06);
+  margin-top: 16px;
+  transition: box-shadow 200ms ease, border-color 200ms ease;
 }
 
 .card:hover {
   border-color: var(--border-2);
-  box-shadow: var(--card-shadow-hover);
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06), 0 2px 4px rgba(15, 23, 42, 0.08);
 }
 
 .card-title {
-  margin: 0 0 10px;
+  margin: 0 0 14px;
   font-size: 15px;
-  letter-spacing: 0.2px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+  color: var(--text);
 }
 
 .config-form {
   display: grid;
-  gap: 12px;
+  gap: 14px;
 }
 
 .config-form.grid-2 {
@@ -1315,8 +1424,9 @@ onBeforeUnmount(() => {
 }
 
 .field > span {
-  color: rgba(17, 24, 39, 0.84);
+  color: var(--text);
   font-size: 13px;
+  font-weight: 500;
 }
 
 .field-row {
@@ -1328,7 +1438,7 @@ onBeforeUnmount(() => {
 
 .field-tools {
   display: inline-flex;
-  gap: 10px;
+  gap: 8px;
 }
 
 .field input,
@@ -1336,25 +1446,25 @@ onBeforeUnmount(() => {
 .field select {
   width: 100%;
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 10px;
+  border-radius: 10px;
+  padding: 10px 12px;
   font-size: 14px;
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.95);
   color: var(--text);
   outline: none;
-  transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+  transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
 }
 
 .field input::placeholder,
 .field textarea::placeholder {
-  color: rgba(17, 24, 39, 0.42);
+  color: rgba(17, 24, 39, 0.4);
 }
 
 .field input:focus,
 .field textarea:focus,
 .field select:focus {
-  border-color: rgba(31, 111, 235, 0.55);
-  box-shadow: 0 0 0 4px var(--ring);
+  border-color: rgba(31, 111, 235, 0.5);
+  box-shadow: 0 0 0 3px var(--ring);
   background: #fff;
 }
 
@@ -1363,15 +1473,15 @@ onBeforeUnmount(() => {
 }
 
 .drop-zone {
-  border: 1px dashed rgba(17, 24, 39, 0.28);
-  border-radius: 14px;
-  background: rgba(17, 24, 39, 0.03);
-  padding: 12px;
-  min-height: 86px;
+  border: 1px dashed rgba(17, 24, 39, 0.22);
+  border-radius: 12px;
+  background: rgba(17, 24, 39, 0.02);
+  padding: 16px;
+  min-height: 88px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+  transition: border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
 }
 
 .drop-zone.active {
@@ -1396,7 +1506,7 @@ onBeforeUnmount(() => {
   width: 100%;
   max-height: 260px;
   object-fit: contain;
-  border-radius: 14px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.92);
   border: 1px solid var(--border);
 }
@@ -1404,7 +1514,7 @@ onBeforeUnmount(() => {
 .vision-mvp-preview {
   max-height: 320px;
   overflow: auto;
-  border-radius: 14px;
+  border-radius: 10px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.92);
 }
@@ -1441,39 +1551,46 @@ button {
   border: none;
   background: var(--primary);
   color: #fff;
-  border-radius: 12px;
+  border-radius: 8px;
   padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
-  box-shadow: 0 8px 18px rgba(31, 111, 235, 0.18);
-  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease, opacity 120ms ease;
+  box-shadow: 0 1px 2px rgba(31, 111, 235, 0.2);
+  transition: all 150ms ease;
 }
 
 button:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 12px 26px rgba(31, 111, 235, 0.22);
+  box-shadow: 0 4px 8px rgba(31, 111, 235, 0.25);
 }
 
 button:active:not(:disabled) {
-  transform: translateY(0px);
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(31, 111, 235, 0.2);
 }
 
 button.primary {
   background: var(--primary);
+  font-weight: 600;
 }
 
 button:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
   box-shadow: none;
 }
 
 button.secondary {
-  background: rgba(17, 24, 39, 0.72);
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.18);
+  background: rgba(17, 24, 39, 0.06);
+  color: var(--text);
+  box-shadow: none;
+  border: 1px solid var(--border);
 }
 
 button.secondary:hover:not(:disabled) {
-  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.22);
+  background: rgba(17, 24, 39, 0.1);
+  box-shadow: none;
 }
 
 a.secondary.link-btn {
@@ -1482,15 +1599,24 @@ a.secondary.link-btn {
   justify-content: center;
   text-decoration: none;
   box-sizing: border-box;
+  background: rgba(17, 24, 39, 0.06);
+  color: var(--text);
+  box-shadow: none;
+  border: 1px solid var(--border);
+}
+
+a.secondary.link-btn:hover:not(:disabled) {
+  background: rgba(17, 24, 39, 0.1);
+  box-shadow: none;
 }
 
 button.danger {
   background: var(--danger);
-  box-shadow: 0 8px 18px rgba(207, 34, 46, 0.16);
+  box-shadow: 0 1px 2px rgba(207, 34, 46, 0.2);
 }
 
 button.danger:hover:not(:disabled) {
-  box-shadow: 0 12px 26px rgba(207, 34, 46, 0.2);
+  box-shadow: 0 4px 8px rgba(207, 34, 46, 0.25);
 }
 
 .link {
@@ -1500,7 +1626,7 @@ button.danger:hover:not(:disabled) {
   border-radius: 0;
   text-decoration: underline;
   box-shadow: none;
-  transition: opacity 120ms ease, color 120ms ease;
+  transition: opacity 150ms ease, color 150ms ease;
 }
 
 .link:disabled {
@@ -1537,8 +1663,9 @@ button.danger:hover:not(:disabled) {
   padding: 2px 10px;
   border: 1px solid var(--border);
   font-size: 12px;
-  color: rgba(17, 24, 39, 0.66);
-  background: rgba(255, 255, 255, 0.72);
+  font-weight: 500;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.7);
 }
 
 .badge.ok {
@@ -1596,16 +1723,21 @@ button.danger:hover:not(:disabled) {
 pre {
   background: rgba(17, 24, 39, 0.03);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 10px;
   padding: 12px;
   overflow-x: auto;
   white-space: pre-wrap;
   word-break: break-word;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .inline-code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 12px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(17, 24, 39, 0.05);
 }
 
 .models-pre {
@@ -1641,64 +1773,135 @@ pre {
     --text: rgba(255, 255, 255, 0.92);
     --muted: rgba(255, 255, 255, 0.72);
     --subtle: rgba(255, 255, 255, 0.6);
-    --border: rgba(255, 255, 255, 0.14);
-    --border-2: rgba(255, 255, 255, 0.2);
+    --border: rgba(255, 255, 255, 0.12);
+    --border-2: rgba(255, 255, 255, 0.18);
     --ring: rgba(31, 111, 235, 0.28);
-    --card-shadow: 0 18px 44px rgba(0, 0, 0, 0.35), 0 2px 10px rgba(0, 0, 0, 0.2);
-    --card-shadow-hover: 0 22px 56px rgba(0, 0, 0, 0.42), 0 4px 16px rgba(0, 0, 0, 0.24);
+    --card-shadow: 0 4px 12px rgba(0, 0, 0, 0.25), 0 1px 3px rgba(0, 0, 0, 0.15);
+    --card-shadow-hover: 0 6px 20px rgba(0, 0, 0, 0.3), 0 2px 4px rgba(0, 0, 0, 0.2);
   }
 
-  .tabs,
+  .tabs {
+    background: rgba(17, 24, 39, 0.6);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+
   .card {
-    background: rgba(17, 24, 39, 0.72);
+    background: rgba(17, 24, 39, 0.65);
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.15);
+  }
+
+  .card:hover {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25), 0 2px 4px rgba(0, 0, 0, 0.2);
   }
 
   .tab {
-    color: rgba(255, 255, 255, 0.86);
+    color: rgba(255, 255, 255, 0.65);
   }
 
-  .tab:hover {
-    background: rgba(255, 255, 255, 0.08);
+  .tab.active {
+    background: rgba(31, 111, 235, 0.15);
+    border-color: rgba(31, 111, 235, 0.35);
+    color: rgba(100, 160, 255, 0.95);
+  }
+
+  .tab:hover:not(.active) {
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.85);
   }
 
   .field > span {
-    color: rgba(255, 255, 255, 0.86);
+    color: rgba(255, 255, 255, 0.85);
   }
 
   .field input,
   .field textarea,
   .field select {
-    background: rgba(2, 6, 23, 0.55);
+    background: rgba(2, 6, 23, 0.5);
     color: rgba(255, 255, 255, 0.92);
-    border-color: rgba(255, 255, 255, 0.16);
+    border-color: rgba(255, 255, 255, 0.14);
   }
 
   .field input::placeholder,
   .field textarea::placeholder {
-    color: rgba(255, 255, 255, 0.42);
+    color: rgba(255, 255, 255, 0.4);
   }
 
   .field input:focus,
   .field textarea:focus,
   .field select:focus {
-    background: rgba(2, 6, 23, 0.72);
+    background: rgba(2, 6, 23, 0.7);
+    border-color: rgba(31, 111, 235, 0.5);
+  }
+
+  button.secondary {
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.85);
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+
+  button.secondary:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  a.secondary.link-btn {
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.85);
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+
+  a.secondary.link-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
   }
 
   pre {
-    background: rgba(2, 6, 23, 0.55);
+    background: rgba(2, 6, 23, 0.5);
+    border-color: rgba(255, 255, 255, 0.1);
   }
 
   .badge {
-    background: rgba(2, 6, 23, 0.35);
+    background: rgba(2, 6, 23, 0.3);
+    border-color: rgba(255, 255, 255, 0.1);
   }
 
   .drop-zone {
-    background: rgba(2, 6, 23, 0.35);
-    border-color: rgba(255, 255, 255, 0.22);
+    background: rgba(2, 6, 23, 0.3);
+    border-color: rgba(255, 255, 255, 0.18);
   }
 
   .image-preview img {
-    background: rgba(2, 6, 23, 0.45);
+    background: rgba(2, 6, 23, 0.4);
+  }
+
+  .action-divider {
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  .nav-group {
+    background: rgba(130, 80, 223, 0.1);
+    border-color: rgba(130, 80, 223, 0.18);
+  }
+
+  .nav-group .secondary,
+  .nav-group .link-btn {
+    color: #b392f0;
+  }
+
+  .nav-group .secondary:hover:not(:disabled),
+  .nav-group .link-btn:hover:not(:disabled) {
+    background: rgba(130, 80, 223, 0.18);
+  }
+
+  button.danger.outline {
+    border-color: rgba(207, 34, 46, 0.35);
+  }
+
+  button.danger.outline:hover:not(:disabled) {
+    background: rgba(207, 34, 46, 0.1);
+  }
+
+  .file-list code {
+    background: rgba(255, 255, 255, 0.08);
   }
 }
 </style>

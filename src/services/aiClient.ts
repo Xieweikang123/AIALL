@@ -87,6 +87,26 @@ function buildPayload(model: string, prompt: string, stream: boolean, imageDataU
   };
 }
 
+export function formatAiHttpError(status: number, rawText: string): string {
+  let detail = "";
+  try {
+    const parsed = JSON.parse(rawText) as { error?: { message?: string }; message?: string };
+    detail = String(parsed.error?.message || parsed.message || "").trim();
+  } catch {
+    const trimmed = rawText.trim();
+    if (trimmed) detail = trimmed.slice(0, 500);
+  }
+
+  const base = detail ? `请求失败，HTTP ${status}：${detail}` : `请求失败，HTTP ${status}`;
+  if (status === 401) {
+    return `${base}\n鉴权失败：请到「AI 配置」填写正确的 API Key，点击「保存配置」后再试。`;
+  }
+  if (status === 403) {
+    return `${base}\n访问被拒绝：请检查 API Key 权限或模型是否可用。`;
+  }
+  return base;
+}
+
 function parseStreamContentFromLine(line: string): string {
   const cleanLine = line.trim();
   if (!cleanLine.startsWith("data:")) return "";
@@ -121,7 +141,17 @@ export async function testAiModel(request: AiTestRequest): Promise<AiTestResult>
       body: JSON.stringify(payload),
     });
 
-    if (request.stream && response.ok && response.body) {
+    if (request.stream && response.body) {
+      if (!response.ok) {
+        const rawText = await response.text();
+        return {
+          ok: false,
+          status: response.status,
+          rawText,
+          error: formatAiHttpError(response.status, rawText),
+        };
+      }
+
       const reader = response.body.getReader();
       const decoder = new TextDecoder("utf-8");
       let pending = "";
@@ -175,7 +205,7 @@ export async function testAiModel(request: AiTestRequest): Promise<AiTestResult>
       status: response.status,
       rawText,
       parsed,
-      error: response.ok ? undefined : `请求失败，HTTP ${response.status}`,
+      error: response.ok ? undefined : formatAiHttpError(response.status, rawText),
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "未知网络错误";
@@ -336,25 +366,21 @@ function resolveTtsEndpoint(endpoint: string): string {
     const path = url.pathname;
 
     if (path.endsWith("/chat/completions")) {
-      url.pathname = path.replace(/\/chat\/completions$/, "/audio/speech");
       return url.toString();
     }
 
     if (path.endsWith("/audio/speech")) {
+      url.pathname = path.replace(/\/audio\/speech$/, "/chat/completions");
       return url.toString();
     }
 
     const normalizedPath = path.endsWith("/") ? path.slice(0, -1) : path;
-    url.pathname = normalizedPath ? `${normalizedPath}/audio/speech` : "/audio/speech";
+    url.pathname = normalizedPath ? `${normalizedPath}/chat/completions` : "/chat/completions";
     return url.toString();
   } catch {
-    if (input.endsWith("/chat/completions")) {
-      return input.replace(/\/chat\/completions$/, "/audio/speech");
-    }
-    if (input.endsWith("/audio/speech")) {
-      return input;
-    }
-    return `${input.replace(/\/$/, "")}/audio/speech`;
+    if (input.endsWith("/chat/completions")) return input;
+    if (input.endsWith("/audio/speech")) return input.replace(/\/audio\/speech$/, "/chat/completions");
+    return `${input.replace(/\/$/, "")}/chat/completions`;
   }
 }
 

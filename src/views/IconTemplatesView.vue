@@ -16,6 +16,7 @@
       </div>
       <div class="head-actions">
         <router-link class="secondary link-btn" to="/chat">去对话</router-link>
+        <router-link class="secondary link-btn" to="/vibe-coding">Vibe Coding</router-link>
         <router-link class="secondary link-btn" to="/ai-config">AI 配置</router-link>
         <button type="button" class="secondary" :disabled="loading" @click="loadList">刷新</button>
       </div>

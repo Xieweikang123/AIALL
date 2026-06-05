@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import { registerAutomationMiddleware } from "./vite.automationMiddleware";
 import { registerIconTemplatesMiddleware } from "./vite.iconTemplatesMiddleware";
+import { registerVibeCodingMiddleware } from "./vite.vibeCodingMiddleware";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { execFile, spawn } from "node:child_process";
 import path from "node:path";
@@ -67,6 +68,15 @@ function sendSseEvent(res: ServerResponse, event: string, data: unknown) {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
+function resolveChatEndpoint(endpoint: string): string {
+  const input = endpoint.trim();
+  if (!input) return input;
+  if (input.endsWith("/chat/completions")) return input;
+  if (input.endsWith("/completions")) return input.replace(/\/completions$/, "/chat/completions");
+  if (input.endsWith("/audio/speech")) return input.replace(/\/audio\/speech$/, "/chat/completions");
+  return `${input.replace(/\/+$/, "")}/chat/completions`;
+}
+
 function buildHeaders(apiKey?: string): HeadersInit {
   const headers: HeadersInit = {
     "Content-Type": "application/json",
@@ -75,6 +85,12 @@ function buildHeaders(apiKey?: string): HeadersInit {
     headers.Authorization = `Bearer ${apiKey}`;
   }
   return headers;
+}
+
+function ttsFormatToMime(format?: string): string {
+  if (format === "wav") return "audio/wav";
+  if (format === "opus") return "audio/opus";
+  return "audio/mpeg";
 }
 
 // 某些网络环境下 IPv6 优先会导致连接失败/等待过久，这里优先 IPv4。
@@ -602,6 +618,12 @@ async function runWebExtract(body: WebExtractRequestBody, emit: (message: string
 }
 
 export default defineConfig({
+  optimizeDeps: {
+    include: ["monaco-editor"],
+  },
+  worker: {
+    format: "es",
+  },
   plugins: [
     vue(),
     {
@@ -609,6 +631,7 @@ export default defineConfig({
       configureServer(server) {
         registerIconTemplatesMiddleware(server.middlewares, server.config.root);
         registerAutomationMiddleware(server.middlewares, server.config.root);
+        registerVibeCodingMiddleware(server.middlewares);
 
         server.middlewares.use("/backend/claude/check", async (req, res) => {
           if (req.method !== "GET") {
@@ -856,7 +879,10 @@ export default defineConfig({
               return;
             }
 
-            const upstream = await fetch(body.endpoint, {
+            // 自动补全 /chat/completions：用户填写 base URL 也能正常工作
+            const chatEndpoint = resolveChatEndpoint(body.endpoint);
+
+            const upstream = await fetch(chatEndpoint, {
               method: "POST",
               headers: buildHeaders(body.apiKey),
               body: JSON.stringify({
@@ -931,7 +957,66 @@ export default defineConfig({
               return;
             }
 
-            const upstream = await fetch(body.endpoint, {
+            const chatEndpoint = resolveChatEndpoint(body.endpoint);
+            const model = body.model || "";
+            const useMimoTts = /mimo.*tts|tts.*mimo/i.test(model);
+
+            if (useMimoTts) {
+              const upstream = await fetch(chatEndpoint, {
+                method: "POST",
+                headers: buildHeaders(body.apiKey),
+                body: JSON.stringify({
+                  model,
+                  messages: [
+                    { role: "user", content: "" },
+                    { role: "assistant", content: body.input },
+                  ],
+                  audio: {
+                    format: body.format || "mp3",
+                    voice: body.voice,
+                  },
+                }),
+              });
+
+              const rawText = await upstream.text();
+              if (!upstream.ok) {
+                res.statusCode = upstream.status;
+                res.setHeader("Content-Type", upstream.headers.get("content-type") || "application/json; charset=utf-8");
+                res.end(rawText);
+                return;
+              }
+
+              let audioBase64 = "";
+              try {
+                const parsed = JSON.parse(rawText) as {
+                  choices?: Array<{ message?: { audio?: { data?: string } } }>;
+                };
+                audioBase64 = parsed.choices?.[0]?.message?.audio?.data || "";
+              } catch {
+                sendJson(res, 502, { error: "TTS 响应解析失败" });
+                return;
+              }
+
+              if (!audioBase64) {
+                sendJson(res, 502, { error: "TTS 响应中未找到音频数据" });
+                return;
+              }
+
+              res.statusCode = 200;
+              res.setHeader("Content-Type", ttsFormatToMime(body.format));
+              res.end(Buffer.from(audioBase64, "base64"));
+              return;
+            }
+
+            let speechEndpoint = body.endpoint.trim();
+            if (!speechEndpoint.endsWith("/audio/speech")) {
+              speechEndpoint = speechEndpoint.replace(/\/chat\/completions$/, "/audio/speech");
+              if (!speechEndpoint.endsWith("/audio/speech")) {
+                speechEndpoint = `${speechEndpoint.replace(/\/+$/, "")}/audio/speech`;
+              }
+            }
+
+            const upstream = await fetch(speechEndpoint, {
               method: "POST",
               headers: buildHeaders(body.apiKey),
               body: JSON.stringify({
