@@ -77,7 +77,8 @@ export async function listDirectory(dirPath: string) {
 }
 
 export async function readFileContent(filePath: string) {
-  const stat = await fs.promises.stat(filePath);
+  const stat = await fs.promises.stat(filePath).catch(() => null);
+  if (!stat) return { ok: false as const, error: "文件不存在", size: 0 };
 
   if (stat.size > 2 * 1024 * 1024) {
     return { ok: false as const, error: "文件过大（超过 2MB）", size: stat.size };

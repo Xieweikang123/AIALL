@@ -110,17 +110,21 @@ export async function chatCompletionWithTools(params: {
   const chatEndpoint = resolveChatEndpoint(params.endpoint);
   const useStream = Boolean(params.onContentDelta);
 
+  const requestBody: Record<string, unknown> = {
+    model: params.model,
+    messages: params.messages,
+    stream: useStream,
+  };
+  if (params.tools.length > 0) {
+    requestBody.tools = params.tools;
+    requestBody.tool_choice = "auto";
+  }
+
   const response = await fetch(chatEndpoint, {
     method: "POST",
     headers: buildHeaders(params.apiKey),
     signal: params.signal,
-    body: JSON.stringify({
-      model: params.model,
-      messages: params.messages,
-      tools: params.tools,
-      tool_choice: "auto",
-      stream: useStream,
-    }),
+    body: JSON.stringify(requestBody),
   });
 
   if (!response.ok) {

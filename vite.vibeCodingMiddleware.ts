@@ -7,12 +7,15 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { sendSseEvent, sendSseHeaders } from "./server/httpUtils";
 import { runVibeAgent } from "./server/vibeAgent";
+import { buildProjectContext } from "./server/vibeProjectContext";
 import {
+  grepInProject,
   listDirectory,
   readFileContent,
   searchFiles,
   writeFileContent,
 } from "./server/vibeFs";
+import { gitStatus, gitDiff, gitDiffFile, gitCommit, gitLog, gitIsRepo, gitAdd, gitReset, gitDiscard, gitDiscardAll } from "./server/vibeGit";
 
 const execFileAsync = promisify(execFile);
 
@@ -219,85 +222,6 @@ async function pickProjectFolder(initialPath?: string) {
   return pickFolderLinux(initialPath);
 }
 
-const KEY_PROJECT_FILES = [
-  "package.json",
-  "README.md",
-  "README",
-  "tsconfig.json",
-  "vite.config.ts",
-  "index.html",
-  "src/main.ts",
-  "src/main.js",
-  "src/App.vue",
-  "src/router/index.ts",
-  "pyproject.toml",
-  "requirements.txt",
-  "Cargo.toml",
-  "go.mod",
-];
-
-const PROJECT_CONTEXT_MAX_NODES = 200;
-const PROJECT_CONTEXT_MAX_DEPTH = 4;
-const PROJECT_CONTEXT_MAX_CHARS = 100_000;
-const PROJECT_CONTEXT_FILE_SLICE = 12_000;
-
-async function buildProjectTree(rootPath: string): Promise<string[]> {
-  const lines: string[] = [];
-  let nodeCount = 0;
-
-  async function walk(dirPath: string, depth: number, prefix: string) {
-    if (depth > PROJECT_CONTEXT_MAX_DEPTH || nodeCount >= PROJECT_CONTEXT_MAX_NODES) return;
-    const items = await listDirectory(dirPath);
-    for (const item of items) {
-      if (nodeCount >= PROJECT_CONTEXT_MAX_NODES) break;
-      lines.push(`${prefix}${item.isDirectory ? "[dir] " : ""}${item.name}`);
-      nodeCount += 1;
-      if (item.isDirectory) {
-        await walk(item.path, depth + 1, `${prefix}  `);
-      }
-    }
-  }
-
-  await walk(rootPath, 0, "");
-  if (nodeCount >= PROJECT_CONTEXT_MAX_NODES) {
-    lines.push("...（目录过多，已截断）");
-  }
-  return lines;
-}
-
-async function buildProjectContext(projectPath: string) {
-  const resolved = path.resolve(projectPath);
-  const stat = await fs.promises.stat(resolved).catch(() => null);
-  if (!stat || !stat.isDirectory()) {
-    return { ok: false as const, error: "路径不存在或不是目录" };
-  }
-
-  const treeLines = await buildProjectTree(resolved);
-  const tree = treeLines.join("\n");
-  let usedChars = tree.length;
-
-  const keyFiles: Array<{ path: string; content: string }> = [];
-  for (const rel of KEY_PROJECT_FILES) {
-    if (usedChars >= PROJECT_CONTEXT_MAX_CHARS) break;
-    const fullPath = path.join(resolved, rel);
-    const result = await readFileContent(fullPath);
-    if (!result.ok) continue;
-    const budget = Math.min(PROJECT_CONTEXT_FILE_SLICE, PROJECT_CONTEXT_MAX_CHARS - usedChars);
-    if (budget <= 0) break;
-    const content = result.content.slice(0, budget);
-    keyFiles.push({ path: rel.replace(/\\/g, "/"), content });
-    usedChars += content.length + rel.length;
-  }
-
-  return {
-    ok: true as const,
-    path: resolved,
-    tree,
-    keyFiles,
-    truncated: usedChars >= PROJECT_CONTEXT_MAX_CHARS || treeLines.length >= PROJECT_CONTEXT_MAX_NODES,
-  };
-}
-
 export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
   // POST /backend/vibe/agent/run
   middlewares.use("/backend/vibe/agent/run", async (req, res) => {
@@ -308,10 +232,12 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
 
     let body: {
       prompt?: string;
+      history?: Array<{ role?: string; content?: string }>;
       projectPath?: string;
       endpoint?: string;
       apiKey?: string;
       model?: string;
+      mode?: "ask" | "build";
       maxTurns?: number;
       openFilePath?: string;
     };
@@ -352,13 +278,26 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
     res.on("close", abort);
 
     try {
+      const mode = body.mode === "ask" ? "ask" : "build";
+
+      const history = Array.isArray(body.history)
+        ? body.history
+            .filter(
+              (m): m is { role: "user" | "assistant"; content: string } =>
+                (m.role === "user" || m.role === "assistant") && Boolean(String(m.content || "").trim()),
+            )
+            .map((m) => ({ role: m.role, content: String(m.content).trim() }))
+        : undefined;
+
       await runVibeAgent({
         projectRoot: resolvedRoot,
         prompt,
+        history,
         openFilePath: body.openFilePath?.trim() || undefined,
         endpoint,
         apiKey: body.apiKey || "",
         model,
+        mode,
         maxTurns: body.maxTurns,
         signal: controller.signal,
         onEvent: (event) => {
@@ -567,6 +506,50 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
     }
   });
 
+  // GET /backend/vibe/grep
+  middlewares.use("/backend/vibe/grep", async (req, res) => {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { error: "仅支持 GET 请求" });
+      return;
+    }
+
+    try {
+      const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+      const dirPath = url.searchParams.get("path") || "";
+      const pattern = url.searchParams.get("q") || "";
+
+      if (!dirPath || !pattern.trim()) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 或 q 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(dirPath);
+      const stat = await fs.promises.stat(resolved).catch(() => null);
+      if (!stat || !stat.isDirectory()) {
+        sendJson(res, 400, { ok: false, error: "路径不存在或不是目录" });
+        return;
+      }
+
+      const result = await grepInProject(resolved, pattern.trim());
+      if (!result.ok) {
+        sendJson(res, 400, { ok: false, error: result.error });
+        return;
+      }
+
+      sendJson(res, 200, {
+        ok: true,
+        results: result.matches.map((m) => ({
+          path: m.file,
+          relative: m.relative,
+          line: m.line,
+          text: m.text,
+        })),
+      });
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "搜索失败" });
+    }
+  });
+
   // POST /backend/vibe/create
   middlewares.use("/backend/vibe/create", async (req, res) => {
     if (req.method !== "POST") {
@@ -663,6 +646,182 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       sendJson(res, 200, { ok: true, from: resolvedFrom, to: resolvedTo });
     } catch (error) {
       sendJson(res, 500, { error: error instanceof Error ? error.message : "重命名失败" });
+    }
+  });
+
+  // GET /backend/vibe/git/status
+  middlewares.use("/backend/vibe/git/status", async (req, res) => {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { error: "仅支持 GET 请求" });
+      return;
+    }
+
+    try {
+      const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+      const projectPath = url.searchParams.get("path") || "";
+
+      if (!projectPath) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(projectPath);
+      const stat = await fs.promises.stat(resolved).catch(() => null);
+      if (!stat || !stat.isDirectory()) {
+        sendJson(res, 400, { ok: false, error: "路径不存在或不是目录" });
+        return;
+      }
+
+      const isRepo = await gitIsRepo(resolved);
+      if (!isRepo) {
+        sendJson(res, 200, { ok: true, branch: "", files: [], isRepo: false });
+        return;
+      }
+
+      const result = await gitStatus(resolved);
+      sendJson(res, 200, { ...result, isRepo: true });
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "获取 Git 状态失败" });
+    }
+  });
+
+  // GET /backend/vibe/git/diff
+  middlewares.use("/backend/vibe/git/diff", async (req, res) => {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { error: "仅支持 GET 请求" });
+      return;
+    }
+
+    try {
+      const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+      const projectPath = url.searchParams.get("path") || "";
+      const filePath = url.searchParams.get("file") || undefined;
+
+      if (!projectPath) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(projectPath);
+      const result = filePath ? await gitDiffFile(resolved, filePath) : await gitDiff(resolved);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "获取 diff 失败" });
+    }
+  });
+
+  // POST /backend/vibe/git/commit
+  middlewares.use("/backend/vibe/git/commit", async (req, res) => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "仅支持 POST 请求" });
+      return;
+    }
+
+    try {
+      const body = (await readJsonBody(req)) as { path?: string; message?: string };
+      if (!body.path?.trim() || !body.message?.trim()) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 或 message 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(body.path.trim());
+      const result = await gitCommit(resolved, body.message.trim());
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "提交失败" });
+    }
+  });
+
+  // GET /backend/vibe/git/log
+  middlewares.use("/backend/vibe/git/log", async (req, res) => {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { error: "仅支持 GET 请求" });
+      return;
+    }
+
+    try {
+      const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+      const projectPath = url.searchParams.get("path") || "";
+      const count = Number(url.searchParams.get("count")) || 20;
+
+      if (!projectPath) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(projectPath);
+      const result = await gitLog(resolved, count);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "获取提交历史失败" });
+    }
+  });
+
+  // POST /backend/vibe/git/add
+  middlewares.use("/backend/vibe/git/add", async (req, res) => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "仅支持 POST 请求" });
+      return;
+    }
+
+    try {
+      const body = (await readJsonBody(req)) as { path?: string; files?: string[] };
+      if (!body.path?.trim()) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(body.path.trim());
+      const result = await gitAdd(resolved, body.files || []);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "暂存失败" });
+    }
+  });
+
+  // POST /backend/vibe/git/reset
+  middlewares.use("/backend/vibe/git/reset", async (req, res) => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "仅支持 POST 请求" });
+      return;
+    }
+
+    try {
+      const body = (await readJsonBody(req)) as { path?: string; files?: string[] };
+      if (!body.path?.trim()) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(body.path.trim());
+      const result = await gitReset(resolved, body.files || []);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "取消暂存失败" });
+    }
+  });
+
+  // POST /backend/vibe/git/discard
+  middlewares.use("/backend/vibe/git/discard", async (req, res) => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "仅支持 POST 请求" });
+      return;
+    }
+
+    try {
+      const body = (await readJsonBody(req)) as { path?: string; files?: string[] };
+      if (!body.path?.trim()) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(body.path.trim());
+      const result = body.files && body.files.length > 0
+        ? await gitDiscard(resolved, body.files)
+        : await gitDiscardAll(resolved);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "丢弃更改失败" });
     }
   });
 }

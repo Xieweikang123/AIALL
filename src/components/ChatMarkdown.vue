@@ -1,16 +1,40 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted, onUpdated, ref, nextTick } from "vue";
 import { renderMarkdown } from "../utils/renderMarkdown";
 
 const props = defineProps<{
   content: string;
 }>();
 
+const emit = defineEmits<{
+  (e: "apply-block", index: number): void;
+}>();
+
+const markdownRef = ref<HTMLElement | null>(null);
+
 const html = computed(() => renderMarkdown(props.content));
+
+function bindButtons() {
+  if (!markdownRef.value) return;
+  markdownRef.value.querySelectorAll(".code-block-apply-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idx = Number((btn as HTMLElement).dataset.blockIndex);
+      emit("apply-block", idx);
+    });
+  });
+}
+
+onMounted(() => {
+  nextTick(bindButtons);
+});
+
+onUpdated(() => {
+  nextTick(bindButtons);
+});
 </script>
 
 <template>
-  <div v-if="html" class="msg-markdown" v-html="html" />
+  <div v-if="html" ref="markdownRef" class="msg-markdown" v-html="html" />
 </template>
 
 <style scoped>
@@ -124,5 +148,36 @@ const html = computed(() => renderMarkdown(props.content));
 
 .msg-markdown :deep(th) {
   background: rgba(255, 255, 255, 0.06);
+}
+
+.msg-markdown :deep(.code-block-wrapper) {
+  position: relative;
+  margin: 0.75em 0;
+}
+
+.msg-markdown :deep(.code-block-wrapper pre) {
+  margin: 0;
+}
+
+.msg-markdown :deep(.code-block-apply-btn) {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-family: inherit;
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(31, 111, 235, 0.2);
+  border: 1px solid rgba(31, 111, 235, 0.4);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  z-index: 1;
+}
+
+.msg-markdown :deep(.code-block-apply-btn:hover) {
+  background: rgba(31, 111, 235, 0.35);
+  border-color: rgba(31, 111, 235, 0.6);
+  color: #fff;
 }
 </style>

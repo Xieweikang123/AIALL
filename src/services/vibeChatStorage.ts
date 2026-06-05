@@ -1,3 +1,8 @@
+export type PersistedFileDiff = {
+  before: string;
+  after: string;
+};
+
 export type PersistedChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -12,6 +17,11 @@ export type PersistedChatMessage = {
     summary: string;
     ok: boolean;
   }>;
+  writtenFiles?: string[];
+  turnFileDiffs?: Record<string, PersistedFileDiff>;
+  pendingApproval?: boolean;
+  rejected?: boolean;
+  reverted?: boolean;
 };
 
 export type VibeChatSessionMeta = {
@@ -85,6 +95,10 @@ function sanitizeMessages(messages: PersistedChatMessage[]): PersistedChatMessag
         summary: t.summary,
         ok: t.ok,
       })),
+      writtenFiles: m.writtenFiles?.length ? [...m.writtenFiles] : undefined,
+      pendingApproval: m.pendingApproval || undefined,
+      rejected: m.rejected || undefined,
+      reverted: m.reverted || undefined,
     }));
 }
 
@@ -134,8 +148,8 @@ function readStore(): ChatStore {
 function writeStore(store: ChatStore) {
   try {
     localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(store));
-  } catch {
-    // localStorage 可能已满或被禁用
+  } catch (e) {
+    console.warn("[vibeChatStorage] localStorage write failed:", e);
   }
 }
 

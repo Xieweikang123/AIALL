@@ -1,6 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
-import { chatCompletionWithTools, type ChatCompletionMessage } from "./aiForward";
+import { chatCompletionWithTools, type ChatCompletionMessage, type ChatToolCall } from "./aiForward";
+import {
+  TextToolCallStreamFilter,
+  hasTextToolCallMarkup,
+  stripTextToolCallMarkup,
+  synthesizeToolCallsFromText,
+} from "./textToolCalls";
+import { buildProjectContext, formatProjectContextForPrompt } from "./vibeProjectContext";
 import {
   grepInProject,
   listDirectory,
@@ -8,7 +15,6 @@ import {
   resolveProjectPath,
   searchFiles,
   sliceFileLines,
-  writeFileContent,
 } from "./vibeFs";
 
 export type VibeAgentEvent =
@@ -25,19 +31,52 @@ export type VibeAgentEvent =
   | { type: "tool_start"; data: { id: string; name: string; args: Record<string, unknown> } }
   | { type: "tool_end"; data: { id: string; name: string; ok: boolean; summary: string } }
   | { type: "message"; data: { text: string } }
+  | { type: "message_delta"; data: { delta: string } }
+  | { type: "file_diff"; data: { path: string; before: string; after: string } }
   | { type: "error"; data: { message: string } }
-  | { type: "done"; data: { writtenFiles: string[]; turns: number } };
+  | { type: "done"; data: { writtenFiles: string[]; pendingFiles: string[]; turns: number } };
+
+export type VibeChatMode = "ask" | "build";
+
+export type VibeChatHistoryMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
 
 export interface RunVibeAgentParams {
   projectRoot: string;
   prompt: string;
+  history?: VibeChatHistoryMessage[];
   openFilePath?: string;
   endpoint: string;
   apiKey?: string;
   model: string;
+  mode?: VibeChatMode;
   maxTurns?: number;
   onEvent: (event: VibeAgentEvent) => void;
   signal?: AbortSignal;
+}
+
+const MAX_HISTORY_MESSAGES = 40;
+const MAX_HISTORY_CHARS = 120_000;
+
+function buildHistoryMessages(history?: VibeChatHistoryMessage[]): ChatCompletionMessage[] {
+  if (!history?.length) return [];
+
+  const trimmed = history
+    .filter((m) => (m.role === "user" || m.role === "assistant") && m.content.trim())
+    .slice(-MAX_HISTORY_MESSAGES);
+
+  let totalChars = 0;
+  const result: ChatCompletionMessage[] = [];
+  for (let i = trimmed.length - 1; i >= 0; i -= 1) {
+    const item = trimmed[i];
+    const len = item.content.length;
+    if (totalChars + len > MAX_HISTORY_CHARS && result.length > 0) break;
+    totalChars += len;
+    result.unshift({ role: item.role, content: item.content });
+  }
+  return result;
 }
 
 const VIBE_AGENT_TOOLS = [
@@ -104,7 +143,7 @@ const VIBE_AGENT_TOOLS = [
     type: "function",
     function: {
       name: "write_file",
-      description: "写入或覆盖文件内容。",
+      description: "暂存文件修改（用户确认后才真正写入磁盘）。",
       parameters: {
         type: "object",
         properties: {
@@ -123,7 +162,9 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string): string {
     "回答请使用中文。",
     "工作流程：先 list_dir / grep / read_file 收集必要信息，再回答或 write_file 修改代码。",
     "解释项目时：从 package.json、README、入口文件等关键文件入手，不要臆测。",
-    "修改代码时：先 read_file 确认现状，再 write_file 写入完整文件。",
+    "修改代码时：先 read_file 确认现状，再 write_file 暂存完整文件内容；用户确认后才会真正落盘。",
+    "重要：必须通过 API 工具接口调用 list_dir、read_file 等，禁止在正文里输出 <function>、<parameter> 等标记。",
+    "工具 path 参数使用相对项目根的路径（如 package.json、src/main.ts），不要用绝对路径。",
     `项目根目录：${projectRoot}`,
   ];
   if (openFilePath?.trim()) {
@@ -133,12 +174,127 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string): string {
   return lines.join("\n");
 }
 
+function buildAskSystemPrompt(
+  projectRoot: string,
+  openFilePath?: string,
+  openFileSnippet?: string,
+): string {
+  const lines = [
+    "你是一个编程问答助手（Ask 模式）。",
+    "回答请使用中文。",
+    "你只能基于已有上下文回答问题、解释代码、讨论方案，不能声称已修改任何文件。",
+    "若信息不足，请明确说明需要用户打开相关文件或切换到 Build 模式。",
+    `项目根目录：${projectRoot}`,
+  ];
+  if (openFilePath?.trim()) {
+    const rel = path.relative(projectRoot, path.resolve(openFilePath)).replace(/\\/g, "/");
+    lines.push(`用户当前打开的文件：${rel}`);
+    if (openFileSnippet?.trim()) {
+      lines.push("", "当前打开文件内容（节选）：", "```", openFileSnippet.trim(), "```");
+    }
+  }
+  return lines.join("\n");
+}
+
+async function runVibeAsk(params: RunVibeAgentParams): Promise<void> {
+  const { projectRoot, prompt, openFilePath, endpoint, apiKey, model, onEvent, signal } = params;
+
+  const openFileRel =
+    openFilePath?.trim() &&
+    path.relative(projectRoot, path.resolve(openFilePath)).replace(/\\/g, "/");
+
+  onEvent({
+    type: "status",
+    data: {
+      phase: "preparing",
+      model,
+      ...(openFileRel ? { openFile: openFileRel } : {}),
+    },
+  });
+
+  let openFileSnippet = "";
+  if (openFilePath?.trim()) {
+    const resolved = path.resolve(openFilePath);
+    const result = await readFileContent(resolved).catch(() => null);
+    if (result?.ok) {
+      openFileSnippet = sliceFileLines(result.content, 1, 400);
+    }
+  }
+
+  let projectContextBlock = "";
+  const projectContext = await buildProjectContext(projectRoot);
+  if (projectContext.ok) {
+    projectContextBlock = formatProjectContextForPrompt(projectContext);
+  }
+
+  const messages: ChatCompletionMessage[] = [
+    {
+      role: "system",
+      content: buildAskSystemPrompt(projectRoot, openFilePath, openFileSnippet) + projectContextBlock,
+    },
+    ...buildHistoryMessages(params.history),
+    { role: "user", content: prompt },
+  ];
+
+  if (signal?.aborted) {
+    onEvent({ type: "status", data: { phase: "aborted" } });
+    onEvent({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 0 } });
+    return;
+  }
+
+  onEvent({ type: "status", data: { phase: "waiting_model", model } });
+
+  const heartbeat = setInterval(() => {
+    if (signal?.aborted) return;
+    onEvent({ type: "status", data: { phase: "waiting_model", model } });
+  }, 12_000);
+
+  let streamedChars = 0;
+  let completion: Awaited<ReturnType<typeof chatCompletionWithTools>>;
+  try {
+    completion = await chatCompletionWithTools({
+      endpoint,
+      apiKey,
+      model,
+      messages,
+      tools: [],
+      signal,
+      onContentDelta: (delta) => {
+        streamedChars += delta.length;
+        onEvent({ type: "message_delta", data: { delta } });
+      },
+    });
+  } finally {
+    clearInterval(heartbeat);
+  }
+
+  if (!completion.ok || !completion.message) {
+    onEvent({ type: "error", data: { message: completion.error || "模型请求失败" } });
+    onEvent({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 0 } });
+    return;
+  }
+
+  const text = String(completion.message.content || "").trim();
+  if (text && !streamedChars) {
+    onEvent({ type: "message", data: { text } });
+  }
+
+  onEvent({ type: "status", data: { phase: "finished" } });
+  onEvent({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 1 } });
+}
+
 function parseToolArgs(raw: string): Record<string, unknown> {
   try {
     return JSON.parse(raw) as Record<string, unknown>;
   } catch {
     return {};
   }
+}
+
+function resolveToolCallsFromAssistant(content: string, apiToolCalls: ChatToolCall[]): ChatToolCall[] {
+  if (apiToolCalls.length) return apiToolCalls;
+  if (!hasTextToolCallMarkup(content)) return [];
+  return synthesizeToolCallsFromText(content);
 }
 
 function toolSummary(name: string, result: string): string {
@@ -172,6 +328,8 @@ function toolSummary(name: string, result: string): string {
   }
 
   if (name === "write_file") {
+    const staged = result.match(/已暂存\s+(.+?)（(\d+)\s*字符）/);
+    if (staged) return `已暂存 ${staged[1]}（${staged[2]} 字符），待确认`;
     const m = result.match(/已写入\s+(.+?)（(\d+)\s*字符）/);
     if (m) return `已写入 ${m[1]}（${m[2]} 字符）`;
     return result;
@@ -181,11 +339,31 @@ function toolSummary(name: string, result: string): string {
   return oneLine.length > 120 ? `${oneLine.slice(0, 120)}…` : oneLine;
 }
 
+type WriteStage = {
+  files: Map<string, string>;
+  pendingList: string[];
+};
+
+function createWriteStage(): WriteStage {
+  return { files: new Map(), pendingList: [] };
+}
+
+async function readStagedFileContent(
+  root: string,
+  relative: string,
+  absPath: string,
+  stage: WriteStage,
+): Promise<string | null> {
+  if (stage.files.has(relative)) return stage.files.get(relative)!;
+  const result = await readFileContent(absPath).catch(() => null);
+  return result?.ok ? result.content : null;
+}
+
 async function executeTool(
   projectRoot: string,
   name: string,
   args: Record<string, unknown>,
-  writtenFiles: string[],
+  stage: WriteStage,
 ): Promise<string> {
   const root = path.resolve(projectRoot);
 
@@ -209,11 +387,11 @@ async function executeTool(
     if (!filePath) return "错误：缺少 path";
     const resolved = resolveProjectPath(root, filePath);
     if (!resolved.ok) return `错误：${resolved.error}`;
-    const result = await readFileContent(resolved.path);
-    if (!result.ok) return `错误：${result.error}`;
+    const content = await readStagedFileContent(root, resolved.relative, resolved.path, stage);
+    if (content === null) return `错误：${resolved.relative} 不存在或无法读取`;
     const offset = Number(args.offset) || 1;
     const limit = Math.min(800, Math.max(1, Number(args.limit) || 500));
-    return sliceFileLines(result.content, offset, limit);
+    return sliceFileLines(content, offset, limit);
   }
 
   if (name === "grep") {
@@ -244,17 +422,23 @@ async function executeTool(
     if (typeof content !== "string") return "错误：缺少 content";
     const resolved = resolveProjectPath(root, filePath);
     if (!resolved.ok) return `错误：${resolved.error}`;
-    await writeFileContent(resolved.path, content);
-    if (!writtenFiles.includes(resolved.relative)) {
-      writtenFiles.push(resolved.relative);
+    stage.files.set(resolved.relative, content);
+    if (!stage.pendingList.includes(resolved.relative)) {
+      stage.pendingList.push(resolved.relative);
     }
-    return `已写入 ${resolved.relative}（${content.length} 字符）`;
+    return `已暂存 ${resolved.relative}（${content.length} 字符），待用户确认后写入`;
   }
 
   return `错误：未知工具 ${name}`;
 }
 
 export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
+  const mode = params.mode ?? "build";
+  if (mode === "ask") {
+    await runVibeAsk(params);
+    return;
+  }
+
   const {
     projectRoot,
     prompt,
@@ -281,16 +465,20 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     },
   });
 
-  const writtenFiles: string[] = [];
+  const writeStage = createWriteStage();
   const messages: ChatCompletionMessage[] = [
     { role: "system", content: buildSystemPrompt(projectRoot, openFilePath) },
+    ...buildHistoryMessages(params.history),
     { role: "user", content: prompt },
   ];
 
   for (let turn = 1; turn <= maxTurns; turn += 1) {
     if (signal?.aborted) {
       onEvent({ type: "status", data: { phase: "aborted", turn, maxTurns } });
-      onEvent({ type: "done", data: { writtenFiles, turns: turn - 1 } });
+      onEvent({
+        type: "done",
+        data: { writtenFiles: [], pendingFiles: [...writeStage.pendingList], turns: turn - 1 },
+      });
       return;
     }
 
@@ -302,6 +490,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     }, 12_000);
 
     let streamedChars = 0;
+    const streamFilter = new TextToolCallStreamFilter();
     let completion: Awaited<ReturnType<typeof chatCompletionWithTools>>;
     try {
       completion = await chatCompletionWithTools({
@@ -312,8 +501,11 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         tools: VIBE_AGENT_TOOLS,
         signal,
         onContentDelta: (delta) => {
-          streamedChars += delta.length;
-          onEvent({ type: "message_delta", data: { delta } });
+          const userDelta = streamFilter.push(delta);
+          if (userDelta) {
+            streamedChars += userDelta.length;
+            onEvent({ type: "message_delta", data: { delta: userDelta } });
+          }
         },
       });
     } finally {
@@ -322,26 +514,34 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
     if (!completion.ok || !completion.message) {
       onEvent({ type: "error", data: { message: completion.error || "模型请求失败" } });
-      onEvent({ type: "done", data: { writtenFiles, turns: turn } });
+      onEvent({
+        type: "done",
+        data: { writtenFiles: [], pendingFiles: [...writeStage.pendingList], turns: turn },
+      });
       return;
     }
 
     const assistant = completion.message;
-    const toolCalls = assistant.tool_calls || [];
+    const rawContent = String(assistant.content || "");
+    const toolCalls = resolveToolCallsFromAssistant(rawContent, assistant.tool_calls || []);
+    const visibleContent = stripTextToolCallMarkup(rawContent);
 
     if (!toolCalls.length) {
-      const text = String(assistant.content || "").trim();
+      const text = visibleContent.trim();
       if (text && !streamedChars) {
         onEvent({ type: "message", data: { text } });
       }
       onEvent({ type: "status", data: { phase: "finished", turn, maxTurns } });
-      onEvent({ type: "done", data: { writtenFiles, turns: turn } });
+      onEvent({
+        type: "done",
+        data: { writtenFiles: [], pendingFiles: [...writeStage.pendingList], turns: turn },
+      });
       return;
     }
 
     messages.push({
       role: "assistant",
-      content: assistant.content ?? null,
+      content: visibleContent || null,
       tool_calls: toolCalls,
     });
 
@@ -353,9 +553,34 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
       onEvent({ type: "tool_start", data: { id: call.id, name: toolName, args: toolArgs } });
 
+      let writeBefore = "";
+      if (toolName === "write_file") {
+        const filePath = String(toolArgs.path || "").trim();
+        if (filePath) {
+          const resolved = resolveProjectPath(projectRoot, filePath);
+          if (resolved.ok) {
+            const staged = await readStagedFileContent(
+              projectRoot,
+              resolved.relative,
+              resolved.path,
+              writeStage,
+            );
+            writeBefore = staged ?? "";
+            onEvent({
+              type: "file_diff",
+              data: {
+                path: resolved.relative,
+                before: writeBefore,
+                after: String(toolArgs.content ?? ""),
+              },
+            });
+          }
+        }
+      }
+
       let result = "";
       try {
-        result = await executeTool(projectRoot, toolName, toolArgs, writtenFiles);
+        result = await executeTool(projectRoot, toolName, toolArgs, writeStage);
       } catch (error) {
         result = `错误：${error instanceof Error ? error.message : String(error)}`;
       }
@@ -379,5 +604,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   }
 
   onEvent({ type: "error", data: { message: `已达最大轮次（${maxTurns}），任务可能未完成。` } });
-  onEvent({ type: "done", data: { writtenFiles, turns: maxTurns } });
+  onEvent({
+    type: "done",
+    data: { writtenFiles: [], pendingFiles: [...writeStage.pendingList], turns: maxTurns },
+  });
 }

@@ -10,12 +10,21 @@ function agentRunUrl(): string {
   return backendUrl("/backend/vibe/agent/run");
 }
 
+export type VibeChatMode = "ask" | "build";
+
+export type VibeChatHistoryMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
 export interface VibeAgentRunRequest {
   prompt: string;
+  history?: VibeChatHistoryMessage[];
   projectPath: string;
   endpoint: string;
   apiKey?: string;
   model: string;
+  mode?: VibeChatMode;
   maxTurns?: number;
   openFilePath?: string;
 }
@@ -35,8 +44,9 @@ export type VibeAgentSseEvent =
   | { type: "tool_end"; data: { id: string; name: string; ok: boolean; summary: string } }
   | { type: "message"; data: { text: string } }
   | { type: "message_delta"; data: { delta: string } }
+  | { type: "file_diff"; data: { path: string; before: string; after: string } }
   | { type: "error"; data: { message: string } }
-  | { type: "done"; data: { writtenFiles: string[]; turns: number } }
+  | { type: "done"; data: { writtenFiles: string[]; pendingFiles: string[]; turns: number } }
   | { type: "unknown"; data: unknown };
 
 function safeJsonParse(input: string): unknown | undefined {
@@ -89,6 +99,7 @@ export function runVibeAgentSse(request: VibeAgentRunRequest, onEvent: (event: V
       else if (type === "tool_end") onEvent({ type: "tool_end", data: (parsed || {}) as any });
       else if (type === "message") onEvent({ type: "message", data: (parsed || {}) as any });
       else if (type === "message_delta") onEvent({ type: "message_delta", data: (parsed || {}) as any });
+      else if (type === "file_diff") onEvent({ type: "file_diff", data: (parsed || {}) as any });
       else if (type === "error") onEvent({ type: "error", data: (parsed || {}) as any });
       else if (type === "done") {
         doneReceived = true;
@@ -131,21 +142,21 @@ export function runVibeAgentSse(request: VibeAgentRunRequest, onEvent: (event: V
   })()
     .then(() => {
       if (!controller.signal.aborted && !doneReceived) {
-        onEvent({ type: "done", data: { writtenFiles: [], turns: 0 } });
+        onEvent({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 0 } });
       }
     })
     .catch((error) => {
       if (controller.signal.aborted) {
         if (!doneReceived) {
           onEvent({ type: "status", data: { phase: "aborted" } });
-          onEvent({ type: "done", data: { writtenFiles: [], turns: 0 } });
+          onEvent({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 0 } });
         }
         return;
       }
       const message = error instanceof Error ? error.message : "未知错误";
       onEvent({ type: "error", data: { message } });
       if (!doneReceived) {
-        onEvent({ type: "done", data: { writtenFiles: [], turns: 0 } });
+        onEvent({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 0 } });
       }
     });
 

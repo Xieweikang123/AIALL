@@ -44,6 +44,19 @@ export interface SearchResults {
   error?: string;
 }
 
+export interface GrepMatch {
+  path: string;
+  relative: string;
+  line: number;
+  text: string;
+}
+
+export interface GrepResults {
+  ok: boolean;
+  results: GrepMatch[];
+  error?: string;
+}
+
 export interface CreateResult {
   ok: boolean;
   path: string;
@@ -160,6 +173,19 @@ export async function searchFiles(dirPath: string, query: string): Promise<Searc
     const url = backendUrl(`/backend/vibe/search?path=${encodeURIComponent(dirPath)}&q=${encodeURIComponent(query)}`);
     const response = await fetch(url);
     const data = (await response.json()) as SearchResults;
+    return data;
+  } catch (error) {
+    return { ok: false, results: [], error: error instanceof Error ? error.message : "网络错误" };
+  }
+}
+
+export async function grepContent(dirPath: string, pattern: string): Promise<GrepResults> {
+  try {
+    const url = backendUrl(
+      `/backend/vibe/grep?path=${encodeURIComponent(dirPath)}&q=${encodeURIComponent(pattern)}`,
+    );
+    const response = await fetch(url);
+    const data = (await response.json()) as GrepResults;
     return data;
   } catch (error) {
     return { ok: false, results: [], error: error instanceof Error ? error.message : "网络错误" };

@@ -21,6 +21,7 @@ const emit = defineEmits<{
   "update:modelValue": [value: string];
   change: [value: string];
   save: [];
+  select: [text: string];
 }>();
 
 const containerRef = ref<HTMLElement | null>(null);
@@ -115,6 +116,14 @@ function createEditor() {
     emit("save");
   });
 
+  editor.onDidChangeCursorSelection(() => {
+    if (!editor) return;
+    const selection = editor.getModel()?.getValueInRange(editor.getSelection() || { startLineNumber: 0, startColumn: 0, endLineNumber: 0, endColumn: 0 });
+    if (selection && selection.trim()) {
+      emit("select", selection);
+    }
+  });
+
   resizeObserver = new ResizeObserver(() => {
     editor?.layout();
   });
@@ -173,6 +182,15 @@ onBeforeUnmount(() => {
   model?.dispose();
   model = null;
 });
+
+function getSelectedText(): string {
+  if (!editor) return "";
+  const selection = editor.getSelection();
+  if (!selection) return "";
+  return editor.getModel()?.getValueInRange(selection) || "";
+}
+
+defineExpose({ getSelectedText });
 </script>
 
 <style scoped>

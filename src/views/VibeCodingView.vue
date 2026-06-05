@@ -23,15 +23,98 @@
         {{ pickingFolder ? "选择文件夹…" : loadingTree ? "加载中..." : "打开项目" }}
       </button>
       <button type="button" class="secondary" :disabled="!projectPath.trim()" @click="refreshTree">刷新</button>
+      <div ref="projectHistoryRef" class="project-history-wrap">
+        <button
+          type="button"
+          class="ghost small"
+          :disabled="loadingTree || pickingFolder"
+          @click="toggleProjectHistory"
+        >
+          最近项目
+        </button>
+        <div v-if="projectHistoryOpen" class="project-history-dropdown">
+          <div class="project-history-head">
+            <div>
+              <h3 class="project-history-title">最近打开的项目</h3>
+              <p class="project-history-desc">点击可快速重新打开</p>
+            </div>
+            <button
+              v-if="projectHistoryList.length"
+              type="button"
+              class="ghost small"
+              @click="clearRecentProjects"
+            >
+              清空
+            </button>
+          </div>
+          <div v-if="!projectHistoryList.length" class="project-history-empty">还没有打开过项目</div>
+          <ul v-else class="project-history-list">
+            <li
+              v-for="item in projectHistoryList"
+              :key="item.path"
+              class="project-history-item"
+              :class="{ active: isCurrentProject(item.path) }"
+            >
+              <button
+                type="button"
+                class="project-history-item-main"
+                :disabled="loadingTree || pickingFolder"
+                @click="openRecentProject(item.path)"
+              >
+                <span class="project-history-item-title">{{ item.displayName }}</span>
+                <span class="project-history-item-path" :title="item.path">{{ item.path }}</span>
+                <span class="project-history-item-meta">{{ formatSessionTime(item.lastOpenedAt) }}</span>
+              </button>
+              <button
+                type="button"
+                class="ghost small project-history-delete"
+                title="从历史中移除"
+                @click="removeRecentProject(item.path, $event)"
+              >
+                移除
+              </button>
+            </li>
+          </ul>
+        </div>
+      </div>
       <span v-if="treeError" class="bar-error">{{ treeError }}</span>
     </section>
 
     <main ref="workspaceRef" class="workspace" :class="{ 'no-project': !projectOpened, 'editor-collapsed': editorCollapsed }">
       <aside class="file-panel" :style="{ width: filePanelWidth + 'px' }">
-        <div class="panel-head">
-          <span class="panel-title">文件</span>
+        <div class="panel-head file-panel-head">
+          <div class="file-panel-tabs" role="group">
+            <button
+              type="button"
+              class="file-panel-tab"
+              :class="{ active: gitPanelMode === 'files' }"
+              @click="gitPanelMode = 'files'"
+            >
+              文件
+            </button>
+            <button
+              type="button"
+              class="file-panel-tab"
+              :class="{ active: gitPanelMode === 'git' }"
+              :disabled="!projectOpened"
+              @click="gitPanelMode = 'git'; refreshGitStatus()"
+            >
+              Git
+              <span v-if="gitStatus.length" class="git-badge">{{ gitStatus.length }}</span>
+            </button>
+          </div>
+          <div v-if="projectOpened && gitPanelMode === 'files'" class="file-toolbar">
+            <button type="button" class="ghost tiny" title="新建文件" @click="createNewFile">+文件</button>
+            <button type="button" class="ghost tiny" title="新建文件夹" @click="createNewFolder">+目录</button>
+            <button type="button" class="ghost tiny" title="重命名" :disabled="!selectedTreePath" @click="renameSelectedItem">
+              重命名
+            </button>
+            <button type="button" class="ghost tiny danger" title="删除" :disabled="!selectedTreePath" @click="deleteSelectedItem">
+              删除
+            </button>
+          </div>
           <button
-            v-if="editorCollapsed"
+            v-if="editorCollapsed && gitPanelMode === 'files'"
             type="button"
             class="ghost small"
             title="展开编辑器"
@@ -39,19 +122,123 @@
           >
             编辑器
           </button>
+          <div v-if="gitPanelMode === 'files'" class="search-mode-switch" role="group" aria-label="搜索模式">
+            <button
+              type="button"
+              class="search-mode-btn"
+              :class="{ active: searchMode === 'file' }"
+              :disabled="!projectOpened"
+              @click="searchMode = 'file'"
+            >
+              文件
+            </button>
+            <button
+              type="button"
+              class="search-mode-btn"
+              :class="{ active: searchMode === 'content' }"
+              :disabled="!projectOpened"
+              @click="searchMode = 'content'"
+            >
+              内容
+            </button>
+          </div>
           <input
+            v-if="gitPanelMode === 'files'"
+            ref="searchInputRef"
             v-model="searchQuery"
             class="search-input"
             type="text"
-            placeholder="搜索文件名…"
+            :placeholder="searchMode === 'file' ? '搜索文件名…' : '搜索代码内容…'"
             :disabled="!projectOpened"
             @keydown.enter="handleSearch"
           />
         </div>
 
+        <div v-if="gitPanelMode === 'git'">
+          <div v-if="!projectOpened" class="panel-empty">请先打开项目文件夹</div>
+          <div v-else-if="gitLoading" class="panel-empty">加载中…</div>
+          <div v-else-if="!gitIsRepo" class="panel-empty">当前目录不是 Git 仓库</div>
+          <div v-else class="git-panel-content">
+            <div class="git-branch-bar">
+              <span class="git-branch-icon">⎇</span>
+              <span class="git-branch-name">{{ gitBranch }}</span>
+              <button type="button" class="ghost tiny" :disabled="gitLoading" @click="refreshGitStatus">刷新</button>
+            </div>
+            <div v-if="gitError" class="git-error">{{ gitError }}</div>
+            <div class="git-commit-box">
+              <input
+                v-model="gitCommitMessage"
+                class="git-commit-input"
+                type="text"
+                placeholder="提交信息…"
+                :disabled="gitCommitting || gitGenerating"
+                @keydown.enter="commitGit"
+              />
+              <button
+                type="button"
+                class="ghost small"
+                :disabled="gitCommitting || gitGenerating || !gitStatus.length"
+                @click="generateCommitMessage"
+              >
+                {{ gitGenerating ? "生成中…" : "AI 生成" }}
+              </button>
+              <button
+                type="button"
+                class="primary small"
+                :disabled="gitCommitting || !gitCommitMessage.trim()"
+                @click="commitGit"
+              >
+                {{ gitCommitting ? "提交中…" : "提交" }}
+              </button>
+            </div>
+            <div v-if="!gitStatus.length" class="panel-empty">无本地改动</div>
+            <div v-else class="git-file-list">
+              <div
+                v-for="file in gitStatus"
+                :key="file.path"
+                class="git-file-item"
+                :class="{ active: selectedGitFile === file.path }"
+                @click="showGitFileDiff(file.path)"
+              >
+                <span
+                  class="git-file-status"
+                  :style="{ color: gitStatusColor(file.status) }"
+                >
+                  {{ gitStatusIcon(file.status) }}
+                </span>
+                <span class="git-file-path" :title="file.path">{{ file.path }}</span>
+              </div>
+            </div>
+            <div v-if="selectedGitFile && gitDiffPatch" class="git-diff-panel">
+              <div class="git-diff-header">
+                <span class="git-diff-title">{{ selectedGitFile }}</span>
+                <button type="button" class="ghost tiny" @click="selectedGitFile = ''; gitDiffPatch = ''">关闭</button>
+              </div>
+              <pre class="git-diff-content">{{ gitDiffPatch }}</pre>
+            </div>
+          </div>
+        </div>
+
         <div v-if="!projectOpened" class="panel-empty">请先打开项目文件夹</div>
 
-        <div v-else-if="searchResults.length" class="file-list">
+        <div v-else-if="searchMode === 'content' && contentSearchResults.length" class="file-list">
+          <button
+            v-for="item in contentSearchResults"
+            :key="`${item.path}:${item.line}`"
+            type="button"
+            class="file-item content-result"
+            :class="{ active: item.path === activeFilePath }"
+            @click="openFile(item.path)"
+          >
+            <span class="file-icon">📄</span>
+            <span class="file-result-body">
+              <span class="file-name">{{ item.relative }}:{{ item.line }}</span>
+              <span class="file-result-text">{{ item.text }}</span>
+            </span>
+          </button>
+        </div>
+
+        <div v-else-if="searchMode === 'file' && searchResults.length" class="file-list">
           <button
             v-for="item in searchResults"
             :key="item.path"
@@ -71,9 +258,15 @@
             :key="node.path"
             :node="node"
             :active-path="activeFilePath"
+            :selected-path="selectedTreePath"
+            :renaming-path="renamingPath"
             :expanded-dirs="expandedDirs"
             @toggle="toggleDir"
             @open="openFile"
+            @select="selectTreeItem"
+            @contextmenu="showContextMenu"
+            @rename="commitRename"
+            @rename-cancel="cancelRename"
           />
         </div>
       </aside>
@@ -81,14 +274,53 @@
       <div class="resize-handle" @mousedown="startResize('file', $event)"></div>
 
       <section v-show="!editorCollapsed" class="editor-panel">
+        <div v-if="openTabs.length" class="editor-tabs">
+          <button
+            v-for="tab in openTabs"
+            :key="tab.path"
+            type="button"
+            class="editor-tab"
+            :class="{ active: tab.path === activeFilePath, dirty: tab.dirty }"
+            :title="tab.path"
+            @click="switchTab(tab.path)"
+          >
+            <span class="editor-tab-name">{{ fileName(tab.path) }}</span>
+            <span v-if="tab.dirty" class="editor-tab-dot" aria-hidden="true">•</span>
+            <span
+              class="editor-tab-close"
+              role="button"
+              tabindex="0"
+              title="关闭"
+              @click.stop="closeTab(tab.path)"
+              @keydown.enter.stop.prevent="closeTab(tab.path)"
+            >
+              ×
+            </span>
+          </button>
+        </div>
         <div class="panel-head">
           <span class="panel-title">{{ activeFilePath ? fileName(activeFilePath) : "未打开文件" }}</span>
           <div class="panel-actions">
-            <span v-if="fileDirty" class="dirty-badge">未保存</span>
-            <button type="button" class="secondary" :disabled="!activeFilePath || !fileDirty" @click="saveFile">
+            <button
+              v-if="activeFileDiff"
+              type="button"
+              class="secondary"
+              @click="toggleDiffMode"
+            >
+              {{ showDiffMode ? "编辑" : "对比" }}
+            </button>
+            <span v-if="fileDirty && !showDiffMode" class="dirty-badge">未保存</span>
+            <button
+              type="button"
+              class="secondary"
+              :disabled="!activeFilePath || !fileDirty || showDiffMode"
+              @click="saveFile"
+            >
               保存
             </button>
-            <button type="button" class="secondary" :disabled="!activeFilePath" @click="reloadFile">重新加载</button>
+            <button type="button" class="secondary" :disabled="!activeFilePath || showDiffMode" @click="reloadFile">
+              重新加载
+            </button>
             <button type="button" class="ghost small" title="收起编辑器" @click="collapseEditor">收起</button>
           </div>
         </div>
@@ -100,14 +332,27 @@
 
         <div v-else-if="fileLoadError" class="editor-empty error">{{ fileLoadError }}</div>
 
+        <CodeMonacoDiffEditor
+          v-else-if="showDiffMode && activeFileDiff"
+          class="code-editor"
+          :original="activeFileDiff.before"
+          :modified="activeFileDiff.after"
+          :file-path="activeFilePath"
+        />
+
         <CodeMonacoEditor
+          ref="editorRef"
           v-else
           v-model="fileContent"
           class="code-editor"
           :file-path="activeFilePath"
-          @change="fileDirty = true"
+          @change="onEditorChange"
           @save="saveFile"
+          @select="onEditorSelect"
         />
+        <div v-if="selectedCode" class="ask-ai-floating" @click="askAiWithCode">
+          💬 问 AI
+        </div>
       </section>
 
       <div
@@ -198,7 +443,7 @@
 
         <div ref="chatScrollRef" class="chat-scroll">
           <div v-if="!chatMessages.length" class="chat-empty">
-            <p>Agent 会自行探索项目（list / read / grep / write），直接提问即可。</p>
+            <p>Agent 会探索项目；Build 模式修改需你确认后才落盘。输入 <code>@</code> 可引用文件。</p>
             <div class="chips">
               <button type="button" class="chip" :disabled="chatSending" @click="applyExample('解释这个项目是做什么的')">
                 解释项目
@@ -216,7 +461,7 @@
           </div>
 
           <div v-else class="msg-list">
-            <div v-for="m in chatMessages" :key="m.id" class="msg" :class="m.role">
+            <div v-for="m in chatMessages" :key="m.id" class="msg" :class="m.role" @mouseup="onMessageSelect($event, m)">
               <div class="msg-head">
                 <div class="msg-role">{{ m.role === "user" ? "你" : "Agent" }}</div>
                 <div v-if="!chatSending" class="msg-toolbar">
@@ -235,7 +480,7 @@
                 </div>
               </div>
               <div
-                v-if="m.role === 'assistant' && hasAgentActivity(m)"
+                v-if="m.role === 'assistant' && m.chatMode !== 'ask' && hasAgentActivity(m)"
                 class="agent-activity"
                 :class="{ collapsed: !isActivityExpanded(m) }"
               >
@@ -290,36 +535,162 @@
                   </ol>
                 </div>
               </div>
-              <ChatMarkdown v-if="m.content" :content="m.content" />
-              <div v-if="m.role === 'assistant' && extractCodeBlocks(m.content).length" class="msg-actions">
+              <div
+                v-if="m.role === 'assistant' && !m.content && (m.status || isAgentRunning(m))"
+                class="msg-status"
+              >
+                <span v-if="isAgentRunning(m)" class="status-pulse" aria-hidden="true" />
+                <span class="msg-status-text">
+                  {{ m.status || (m.chatMode === 'ask' ? '思考中…' : 'Agent 运行中…') }}
+                </span>
+              </div>
+              <pre v-if="m.content && m.streaming" class="msg-streaming">{{ m.content }}<span v-if="isAgentRunning(m)" class="stream-cursor" aria-hidden="true">▍</span></pre>
+              <ChatMarkdown v-else-if="m.content" :content="m.content" @apply-block="(idx: number) => applyCodeBlock(extractCodeBlocks(m.content)[idx])" />
+              <div
+                v-if="
+                  m.role === 'assistant' &&
+                  !m.streaming &&
+                  (m.pendingApproval || m.writtenFiles?.length || extractCodeBlocks(m.content).length)
+                "
+                class="msg-actions"
+              >
+                <template v-if="m.pendingApproval && m.turnFileDiffs">
+                  <span class="pending-badge">待确认 {{ Object.keys(m.turnFileDiffs).length }} 个文件修改</span>
+                  <button
+                    type="button"
+                    class="primary small-action"
+                    :disabled="!projectOpened || chatSending || m.reverting"
+                    @click="acceptAgentTurn(m.id)"
+                  >
+                    {{ m.reverting ? "应用中…" : "接受全部" }}
+                  </button>
+                  <button
+                    type="button"
+                    class="ghost"
+                    :disabled="chatSending || m.reverting"
+                    @click="rejectAgentTurn(m.id)"
+                  >
+                    拒绝
+                  </button>
+                  <button
+                    v-for="relPath in Object.keys(m.turnFileDiffs)"
+                    :key="relPath"
+                    type="button"
+                    class="ghost"
+                    :disabled="!projectOpened"
+                    @click="previewAgentFile(m.id, relPath)"
+                  >
+                    预览 {{ relPath }}
+                  </button>
+                </template>
                 <button
-                  v-for="(block, idx) in extractCodeBlocks(m.content)"
-                  :key="idx"
+                  v-else-if="m.writtenFiles?.length && m.turnFileDiffs && !m.reverted && !m.rejected"
                   type="button"
-                  class="ghost"
-                  :disabled="!activeFilePath"
-                  @click="applyCodeBlock(block)"
+                  class="ghost danger"
+                  :disabled="!projectOpened || chatSending || m.reverting"
+                  @click="revertAgentTurn(m.id)"
                 >
-                  应用代码块 {{ idx + 1 }}
+                  {{ m.reverting ? "回滚中…" : `回滚本轮修改（${m.writtenFiles.length} 个文件）` }}
                 </button>
+                <span v-else-if="m.reverted" class="reverted-badge">已回滚</span>
+                <span v-else-if="m.rejected" class="rejected-badge">已拒绝</span>
               </div>
             </div>
           </div>
         </div>
 
-        <footer class="chat-composer">
+        <div
+          v-if="showQuoteButton"
+          class="quote-floating"
+          :style="{ left: quoteButtonPosition.x + 'px', top: quoteButtonPosition.y + 'px' }"
+          @mousedown.prevent="quoteSelectedText"
+          @mouseleave="hideQuoteButton"
+        >
+          <span class="quote-icon">❝</span> 引用
+        </div>
+
+        <footer
+          class="chat-composer"
+          :class="{ 'drag-over': isDragging }"
+          @dragenter.prevent="onDragEnter"
+          @dragover.prevent="onDragOver"
+          @dragleave.prevent="onDragLeave"
+          @drop.prevent="onDrop"
+        >
+          <div v-if="droppedFiles.length || referencedFiles.length" class="dropped-files">
+            <span
+              v-for="(file, idx) in droppedFiles"
+              :key="`drop-${idx}`"
+              class="dropped-file-tag"
+            >
+              📄 {{ file.name }}
+              <button type="button" class="drop-file-remove" @click="removeDroppedFile(idx)">×</button>
+            </span>
+            <span
+              v-for="(file, idx) in referencedFiles"
+              :key="`ref-${file.path}`"
+              class="dropped-file-tag ref-tag"
+            >
+              @ {{ file.relative }}
+              <button type="button" class="drop-file-remove" @click="removeReferencedFile(idx)">×</button>
+            </span>
+          </div>
+          <div v-if="quotedMessage" class="quoted-preview">
+            <div class="quoted-preview-header">
+              <span class="quoted-preview-label">
+                <span class="quoted-preview-icon">❝</span>
+                引用 {{ quotedMessage.role === "assistant" ? "Agent" : "你" }}
+              </span>
+              <button type="button" class="quoted-preview-close" @click="quotedMessage = null">×</button>
+            </div>
+            <div class="quoted-preview-body">{{ quotedMessage.content }}</div>
+          </div>
+          <div v-if="mentionOpen && mentionResults.length" class="mention-dropdown">
+            <button
+              v-for="(item, idx) in mentionResults"
+              :key="item.path"
+              type="button"
+              class="mention-item"
+              :class="{ active: idx === mentionActiveIndex }"
+              @mousedown.prevent="selectMention(item)"
+            >
+              <span class="mention-item-name">{{ item.name }}</span>
+              <span class="mention-item-path">{{ item.relative }}</span>
+            </button>
+          </div>
+          <div class="chat-mode-switch" role="group" aria-label="对话模式">
+            <button
+              type="button"
+              class="mode-btn"
+              :class="{ active: chatMode === 'ask' }"
+              :disabled="chatSending"
+              @click="chatMode = 'ask'"
+            >
+              Ask
+            </button>
+            <button
+              type="button"
+              class="mode-btn"
+              :class="{ active: chatMode === 'build' }"
+              :disabled="chatSending"
+              @click="chatMode = 'build'"
+            >
+              Build
+            </button>
+          </div>
           <textarea
+            ref="chatInputRef"
             v-model="chatInput"
             class="chat-input"
             rows="3"
-            :disabled="chatSending"
-            placeholder="例如：解释这个项目 / 优化这段代码（Enter 发送，Shift+Enter 换行）"
+            :placeholder="chatPlaceholder"
+            @input="onChatInput"
             @keydown="onChatKeydown"
           />
           <div class="chat-bottom">
             <span v-if="chatError" class="chat-error">{{ chatError }}</span>
-            <span v-else-if="chatSending" class="chat-running">Agent 运行中…</span>
-            <span v-else class="chat-hint">Agent 自行探索项目 · Enter 发送</span>
+            <span v-else-if="chatSending" class="chat-running">{{ chatRunningText }}</span>
+            <span v-else class="chat-hint">{{ chatHintText }}</span>
             <div class="chat-actions">
               <button v-if="chatSending" type="button" class="secondary" @click="stopAgent">停止</button>
               <button type="button" class="primary" :disabled="chatSending || !canSendChat" @click="sendChat">
@@ -330,12 +701,25 @@
         </footer>
       </aside>
     </main>
+
+    <Teleport to="body">
+      <div v-if="contextMenu.show" class="ctx-overlay" @click="hideContextMenu" @contextmenu.prevent="hideContextMenu">
+        <div class="ctx-menu" :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }" @click.stop>
+          <button type="button" class="ctx-item" @click="contextMenuCreateFile">+ 新建文件</button>
+          <button type="button" class="ctx-item" @click="contextMenuCreateFolder">+ 新建文件夹</button>
+          <div class="ctx-sep" />
+          <button type="button" class="ctx-item" @click="contextMenuRename">重命名</button>
+          <button type="button" class="ctx-item danger" @click="contextMenuDelete">删除</button>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import ChatMarkdown from "../components/ChatMarkdown.vue";
+import CodeMonacoDiffEditor from "../components/CodeMonacoDiffEditor.vue";
 import CodeMonacoEditor from "../components/CodeMonacoEditor.vue";
 import FileTreeNode, { type TreeNode } from "../components/FileTreeNode.vue";
 import { loadAiChatBaseFromStorage } from "../services/aiLocalConfig";
@@ -351,19 +735,48 @@ import {
   type PersistedChatMessage,
   type VibeChatSessionMeta,
 } from "../services/vibeChatStorage";
-import { runVibeAgentSse, type VibeAgentSseEvent } from "../services/vibeAgentClient";
 import {
+  runVibeAgentSse,
+  type VibeAgentSseEvent,
+  type VibeChatHistoryMessage,
+  type VibeChatMode,
+} from "../services/vibeAgentClient";
+import {
+  addProjectToHistory,
+  clearProjectHistory,
+  listProjectHistory,
+  removeProjectFromHistory,
+  type ProjectHistoryEntry,
+} from "../services/vibeProjectHistory";
+import {
+  createItem,
+  deleteItem,
+  grepContent,
   listDirectory,
   pickProjectFolder,
   readFile,
+  renameItem,
   searchFiles,
   writeFile,
   type FileEntry,
+  type GrepMatch,
 } from "../services/vibeCodingClient";
+import {
+  fetchGitStatus,
+  fetchGitDiff,
+  commitGitChanges,
+  fetchGitLog,
+  stageGitFiles,
+  unstageGitFiles,
+  discardGitFiles,
+  type GitStatusFile,
+  type GitLogEntry,
+} from "../services/vibeGitClient";
 
 const STORAGE_KEY = "vibe-coding-project";
 const PANEL_WIDTH_KEY = "vibe-coding-panel-widths";
 const EDITOR_COLLAPSED_KEY = "vibe-coding-editor-collapsed";
+const CHAT_MODE_KEY = "vibe-coding-chat-mode";
 const FILE_MIN_WIDTH = 180;
 const FILE_MAX_WIDTH = 500;
 const CHAT_MIN_WIDTH = 260;
@@ -384,11 +797,21 @@ type AgentToolStep = {
 };
 type ChatMessage = Omit<PersistedChatMessage, "tools"> & {
   tools?: AgentToolStep[];
+  chatMode?: VibeChatMode;
   status?: string;
   agentPhase?: string;
   agentTurn?: number;
   agentMaxTurns?: number;
   activityExpanded?: boolean;
+  streaming?: boolean;
+  reverting?: boolean;
+  pendingApproval?: boolean;
+  rejected?: boolean;
+};
+
+type FileDiff = {
+  before: string;
+  after: string;
 };
 
 type AgentStatusData = Extract<VibeAgentSseEvent, { type: "status" }>["data"] & {
@@ -423,24 +846,111 @@ const treeError = ref("");
 const fileTree = ref<TreeNode[]>([]);
 const expandedDirs = ref<Set<string>>(new Set());
 
+type OpenTab = {
+  path: string;
+  content: string;
+  dirty: boolean;
+};
+
+type SearchMode = "file" | "content";
+
+const openTabs = ref<OpenTab[]>([]);
 const activeFilePath = ref("");
+const selectedTreePath = ref("");
 const fileContent = ref("");
 const fileDirty = ref(false);
 const fileLoadError = ref("");
+const fileDiffs = ref<Record<string, FileDiff>>({});
+const showDiffMode = ref(false);
+const editorRef = ref<InstanceType<typeof CodeMonacoEditor> | null>(null);
+const selectedCode = ref("");
+
+interface QuotedMessage {
+  messageId: string;
+  content: string;
+  role: "user" | "assistant";
+}
+
+const pendingQuote = ref<QuotedMessage | null>(null);
+const quotedMessage = ref<QuotedMessage | null>(null);
+const quoteButtonPosition = ref({ x: 0, y: 0 });
+const showQuoteButton = ref(false);
 
 const searchQuery = ref("");
+const searchMode = ref<SearchMode>("file");
 const searchResults = ref<Array<{ name: string; path: string; isDirectory: boolean }>>([]);
+const contentSearchResults = ref<GrepMatch[]>([]);
 
+function loadChatMode(): VibeChatMode {
+  try {
+    const saved = localStorage.getItem(CHAT_MODE_KEY);
+    return saved === "ask" ? "ask" : "build";
+  } catch {
+    return "build";
+  }
+}
+
+const chatMode = ref<VibeChatMode>(loadChatMode());
 const chatInput = ref("");
 const chatMessages = ref<ChatMessage[]>([]);
 const chatSending = ref(false);
 const chatError = ref("");
 const chatScrollRef = ref<HTMLElement | null>(null);
+const searchInputRef = ref<HTMLInputElement | null>(null);
 const workspaceRef = ref<HTMLElement | null>(null);
 let scrollChatRaf = 0;
 const historyOpen = ref(false);
 const activeSessionId = ref("");
+const pendingPrompts: string[] = [];
+
+interface DroppedFile {
+  name: string;
+  path: string;
+  content: string;
+}
+
+interface ReferencedFile {
+  name: string;
+  path: string;
+  relative: string;
+}
+
+interface ProjectFileItem {
+  name: string;
+  path: string;
+  relative: string;
+}
+
+const droppedFiles = ref<DroppedFile[]>([]);
+const referencedFiles = ref<ReferencedFile[]>([]);
+const chatInputRef = ref<HTMLTextAreaElement | null>(null);
+const mentionOpen = ref(false);
+const mentionQuery = ref("");
+const mentionActiveIndex = ref(0);
+const mentionRemoteResults = ref<ProjectFileItem[]>([]);
+let mentionSearchTimer: ReturnType<typeof setTimeout> | null = null;
+const isDragging = ref(false);
+let dragCounter = 0;
 const sessionList = ref<VibeChatSessionMeta[]>([]);
+const projectHistoryOpen = ref(false);
+const projectHistoryList = ref<ProjectHistoryEntry[]>([]);
+const projectHistoryRef = ref<HTMLElement | null>(null);
+
+const gitPanelMode = ref<"files" | "git">("files");
+const gitStatus = ref<GitStatusFile[]>([]);
+const gitBranch = ref("");
+const gitIsRepo = ref(false);
+const gitLoading = ref(false);
+const gitError = ref("");
+const gitCommitMessage = ref("");
+const gitCommitting = ref(false);
+const gitGenerating = ref(false);
+const gitLogEntries = ref<GitLogEntry[]>([]);
+const selectedGitFile = ref("");
+const gitDiffPatch = ref("");
+
+const contextMenu = ref({ show: false, x: 0, y: 0, path: "" });
+const renamingPath = ref("");
 
 const aiConfig = ref({ endpoint: "", apiKey: "", model: "" });
 
@@ -453,8 +963,29 @@ const aiConfigStatusText = computed(() => {
   return modelNameForDisplay.value;
 });
 const canSendChat = computed(
-  () => Boolean(chatInput.value.trim()) && configReady.value && projectOpened.value,
+  () =>
+    (Boolean(chatInput.value.trim()) || droppedFiles.value.length > 0 || referencedFiles.value.length > 0) &&
+    configReady.value &&
+    projectOpened.value,
 );
+
+const chatPlaceholder = computed(() =>
+  chatMode.value === "ask"
+    ? "提问、解释代码（输入 @ 引用文件，Enter 发送）"
+    : "描述要改什么（输入 @ 引用文件，Enter 发送，Shift+Enter 换行）",
+);
+
+const chatHintText = computed(() =>
+  chatMode.value === "ask"
+    ? "Ask 模式 · 含项目结构，不改文件 · 输入 @ 引用文件"
+    : "Build 模式 · 修改需确认后落盘 · 输入 @ 引用文件",
+);
+
+const chatRunningText = computed(() =>
+  chatMode.value === "ask" ? "思考中…" : "Agent 运行中…",
+);
+
+const activeFileDiff = computed(() => getFileDiff(activeFilePath.value));
 
 const activeAssistantMsgId = computed(() => {
   for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
@@ -645,6 +1176,9 @@ function formatAgentStatus(data: AgentStatusData): string {
   if (phase === "stream_connected") return "本地服务已连接，等待 Agent 启动…";
   if (phase === "connected") return "本地 Agent 服务已就绪，正在启动任务…";
   if (phase === "preparing" || phase === "starting") {
+    if (chatMode.value === "ask") {
+      return openFile ? `正在准备问答上下文（当前文件：${openFile}）…` : "正在准备问答上下文…";
+    }
     return openFile
       ? `正在组装 Agent 上下文与工具定义（当前文件：${openFile}）…`
       : "正在组装 Agent 上下文与工具定义…";
@@ -676,6 +1210,7 @@ function isAgentRunning(msg: ChatMessage): boolean {
 }
 
 function hasAgentActivity(msg: ChatMessage): boolean {
+  if (msg.chatMode === "ask") return false;
   return Boolean(msg.status || msg.tools?.length || msg.agentTurn);
 }
 
@@ -711,6 +1246,50 @@ function refreshSessionList(path = projectPath.value.trim()) {
   }
   sessionList.value = listVibeChatSessions(path);
   activeSessionId.value = getActiveVibeChatSessionId(path);
+}
+
+function refreshProjectHistoryList() {
+  projectHistoryList.value = listProjectHistory();
+}
+
+function isCurrentProject(path: string): boolean {
+  const current = projectPath.value.trim();
+  if (!current || !path.trim()) return false;
+  const norm = (p: string) => p.trim().replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
+  return norm(current) === norm(path);
+}
+
+function toggleProjectHistory() {
+  projectHistoryOpen.value = !projectHistoryOpen.value;
+  if (projectHistoryOpen.value) refreshProjectHistoryList();
+}
+
+function closeProjectHistory() {
+  projectHistoryOpen.value = false;
+}
+
+function openRecentProject(path: string) {
+  closeProjectHistory();
+  void openProjectByPath(path);
+}
+
+function removeRecentProject(path: string, event?: MouseEvent) {
+  event?.stopPropagation();
+  removeProjectFromHistory(path);
+  refreshProjectHistoryList();
+}
+
+function clearRecentProjects() {
+  clearProjectHistory();
+  refreshProjectHistoryList();
+}
+
+function onDocumentClick(event: MouseEvent) {
+  if (!projectHistoryOpen.value) return;
+  const el = projectHistoryRef.value;
+  if (el && !el.contains(event.target as Node)) {
+    closeProjectHistory();
+  }
 }
 
 function formatSessionTime(iso: string): string {
@@ -774,7 +1353,7 @@ function persistChatNow(path = projectPath.value.trim()) {
 }
 
 function schedulePersistChat() {
-  if (!projectPath.value.trim() || chatSending.value) return;
+  if (!projectPath.value.trim()) return;
   if (saveChatTimer) clearTimeout(saveChatTimer);
   saveChatTimer = setTimeout(() => {
     saveChatTimer = null;
@@ -818,6 +1397,13 @@ async function openProjectByPath(dirPath: string) {
   treeError.value = "";
   searchQuery.value = "";
   searchResults.value = [];
+  contentSearchResults.value = [];
+  openTabs.value = [];
+  activeFilePath.value = "";
+  fileContent.value = "";
+  fileDirty.value = false;
+  fileLoadError.value = "";
+  showDiffMode.value = false;
 
   try {
     const items = await loadDirChildren(normalized);
@@ -825,9 +1411,13 @@ async function openProjectByPath(dirPath: string) {
     expandedDirs.value = new Set([normalized]);
     projectOpened.value = true;
     projectPath.value = normalized;
+    selectedTreePath.value = normalized;
     localStorage.setItem(STORAGE_KEY, normalized);
+    addProjectToHistory(normalized);
+    refreshProjectHistoryList();
     chatMessages.value = normalizeChatMessages(loadVibeChatHistory(normalized));
     refreshSessionList(normalized);
+    refreshGitStatus();
     await scrollChatToBottom(true);
   } catch (e) {
     projectOpened.value = false;
@@ -866,6 +1456,155 @@ async function refreshTree() {
   if (current) await openFile(current);
 }
 
+async function refreshGitStatus() {
+  if (!projectOpened.value) return;
+  gitLoading.value = true;
+  gitError.value = "";
+  try {
+    const result = await fetchGitStatus(projectPath.value.trim());
+    if (!result.ok) {
+      gitError.value = result.error || "获取 Git 状态失败";
+      gitIsRepo.value = false;
+      return;
+    }
+    gitIsRepo.value = result.isRepo;
+    gitBranch.value = result.branch;
+    gitStatus.value = result.files;
+  } catch (e) {
+    gitError.value = e instanceof Error ? e.message : "获取 Git 状态失败";
+  } finally {
+    gitLoading.value = false;
+  }
+}
+
+async function commitGit() {
+  if (!projectOpened.value || !gitCommitMessage.value.trim()) return;
+  gitCommitting.value = true;
+  gitError.value = "";
+  try {
+    const result = await commitGitChanges(projectPath.value.trim(), gitCommitMessage.value.trim());
+    if (!result.ok) {
+      gitError.value = result.error || "提交失败";
+      return;
+    }
+    gitCommitMessage.value = "";
+    await refreshGitStatus();
+    await refreshTree();
+  } catch (e) {
+    gitError.value = e instanceof Error ? e.message : "提交失败";
+  } finally {
+    gitCommitting.value = false;
+  }
+}
+
+async function generateCommitMessage() {
+  if (!projectOpened.value || !gitStatus.value.length) return;
+  if (!configReady.value) {
+    gitError.value = "请先配置 AI 模型";
+    return;
+  }
+  gitGenerating.value = true;
+  gitError.value = "";
+  try {
+    const diffResult = await fetchGitDiff(projectPath.value.trim());
+    if (!diffResult.ok) {
+      gitError.value = diffResult.error || "获取 diff 失败";
+      return;
+    }
+    const diffText = diffResult.patch || "";
+    if (!diffText.trim()) {
+      gitError.value = "没有可提交的变更";
+      return;
+    }
+    const fileList = gitStatus.value.map((f) => `${f.status}: ${f.path}`).join("\n");
+    const prompt = `你是一个 Git 提交信息生成器。根据以下文件变更生成一条简洁的中文提交信息（一行，不超过 72 个字符）。
+
+变更文件列表：
+${fileList}
+
+Diff 内容：
+${diffText.slice(0, 8000)}
+
+要求：
+- 使用中文
+- 简明扼要描述做了什么
+- 不要加前缀如 "feat:" 或 "fix:"，直接描述变更内容
+- 不要加引号或句号`;
+
+    const endpoint = aiConfig.value.endpoint.trim();
+    const url = endpoint.replace(/\/+$/, "") + (endpoint.endsWith("/chat/completions") ? "" : "/chat/completions");
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(aiConfig.value.apiKey.trim() ? { Authorization: `Bearer ${aiConfig.value.apiKey.trim()}` } : {}),
+      },
+      body: JSON.stringify({
+        model: aiConfig.value.model.trim(),
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.3,
+        max_tokens: 100,
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => "");
+      gitError.value = `AI 请求失败：HTTP ${response.status}${errText ? ` - ${errText.slice(0, 200)}` : ""}`;
+      return;
+    }
+
+    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const content = data.choices?.[0]?.message?.content?.trim() || "";
+    if (!content) {
+      gitError.value = "AI 未返回内容";
+      return;
+    }
+    gitCommitMessage.value = content.replace(/^["'"']|["'"']$/g, "").trim();
+  } catch (e) {
+    gitError.value = e instanceof Error ? e.message : "AI 生成提交信息失败";
+  } finally {
+    gitGenerating.value = false;
+  }
+}
+
+function gitStatusIcon(status: string): string {
+  switch (status) {
+    case "modified": return "M";
+    case "added": return "A";
+    case "deleted": return "D";
+    case "renamed": return "R";
+    case "untracked": return "?";
+    default: return "!";
+  }
+}
+
+function gitStatusColor(status: string): string {
+  switch (status) {
+    case "modified": return "#e2c08c";
+    case "added": return "#73daca";
+    case "deleted": return "#f7768e";
+    case "renamed": return "#bb9af7";
+    case "untracked": return "#7aa2f7";
+    default: return "#9aa5ce";
+  }
+}
+
+async function showGitFileDiff(filePath: string) {
+  if (!projectOpened.value) return;
+  selectedGitFile.value = filePath;
+  try {
+    const result = await fetchGitDiff(projectPath.value.trim(), filePath);
+    if (result.ok) {
+      gitDiffPatch.value = result.patch;
+    } else {
+      gitDiffPatch.value = result.error || "获取 diff 失败";
+    }
+  } catch (e) {
+    gitDiffPatch.value = e instanceof Error ? e.message : "获取 diff 失败";
+  }
+}
+
 async function toggleDir(dirPath: string) {
   const expanded = expandedDirs.value;
   if (expanded.has(dirPath)) {
@@ -899,9 +1638,320 @@ function findNode(nodes: TreeNode[], targetPath: string): TreeNode | null {
   return null;
 }
 
-async function openFile(filePath: string) {
-  expandEditor();
+function normalizePathKey(p: string): string {
+  return p.replace(/\\/g, "/").toLowerCase();
+}
+
+function joinProjectPath(base: string, relative: string): string {
+  const rel = relative.trim().replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!rel) return base;
+  if (/^[a-zA-Z]:/.test(rel)) return rel;
+  const baseNorm = base.replace(/\\/g, "/").replace(/\/$/, "");
+  return `${baseNorm}/${rel}`;
+}
+
+function resolveFullPathFromRel(rel: string): string {
+  const joined = joinProjectPath(projectPath.value, rel);
+  const key = normalizePathKey(joined);
+  const node = findNodeByKey(fileTree.value, key);
+  return node?.path || joined;
+}
+
+function findNodeByKey(nodes: TreeNode[], key: string): TreeNode | null {
+  for (const node of nodes) {
+    if (normalizePathKey(node.path) === key) return node;
+    if (node.children?.length) {
+      const found = findNodeByKey(node.children, key);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function setFileDiff(path: string, diff: FileDiff) {
+  fileDiffs.value = { ...fileDiffs.value, [normalizePathKey(path)]: diff };
+}
+
+function getFileDiff(path: string): FileDiff | null {
+  if (!path) return null;
+  return fileDiffs.value[normalizePathKey(path)] || null;
+}
+
+function parentDirForCreate(): string {
+  const sel = selectedTreePath.value || activeFilePath.value || projectPath.value;
+  const node = findNode(fileTree.value, sel);
+  if (node?.isDirectory) return sel;
+  const norm = sel.replace(/\\/g, "/");
+  const idx = norm.lastIndexOf("/");
+  return idx > 0 ? norm.slice(0, idx) : projectPath.value;
+}
+
+function selectTreeItem(path: string) {
+  selectedTreePath.value = path;
+}
+
+function toggleDiffMode() {
+  if (!activeFileDiff.value) return;
+  showDiffMode.value = !showDiffMode.value;
+}
+
+function storeFileDiff(relPath: string, before: string, after: string) {
+  const full = resolveFullPathFromRel(relPath);
+  setFileDiff(full, { before, after });
+}
+
+function findOpenTab(path: string): OpenTab | undefined {
+  return openTabs.value.find((tab) => tab.path === path);
+}
+
+function syncActiveTabToCache() {
+  if (!activeFilePath.value) return;
+  const tab = findOpenTab(activeFilePath.value);
+  if (!tab) return;
+  tab.content = fileContent.value;
+  tab.dirty = fileDirty.value;
+}
+
+async function ensureCanLeaveCurrentTab(): Promise<boolean> {
+  if (!fileDirty.value || !activeFilePath.value) return true;
+  const name = fileName(activeFilePath.value);
+  const choice = window.confirm(`「${name}」未保存。确定保存？\n\n确定 = 保存后切换\n取消 = 留在当前文件`);
+  if (choice) {
+    await saveFile();
+    return !fileDirty.value;
+  }
+  return false;
+}
+
+function switchTab(path: string) {
+  if (path === activeFilePath.value) return;
+  void openFile(path);
+}
+
+async function closeTab(path: string) {
+  const tab = findOpenTab(path);
+  if (!tab) return;
+
+  if (tab.dirty) {
+    const name = fileName(path);
+    const save = window.confirm(`「${name}」未保存。确定保存？\n\n确定 = 保存后关闭\n取消 = 留在当前文件`);
+    if (save) {
+      if (activeFilePath.value !== path) {
+        syncActiveTabToCache();
+        activeFilePath.value = path;
+        fileContent.value = tab.content;
+        fileDirty.value = tab.dirty;
+      }
+      await saveFile();
+      if (fileDirty.value) return;
+    } else {
+      return;
+    }
+  }
+
+  const idx = openTabs.value.findIndex((item) => item.path === path);
+  if (idx < 0) return;
+  openTabs.value.splice(idx, 1);
+
+  if (activeFilePath.value !== path) return;
+
+  const nextTab = openTabs.value[idx] || openTabs.value[idx - 1];
+  if (nextTab) {
+    activeFilePath.value = nextTab.path;
+    fileContent.value = nextTab.content;
+    fileDirty.value = nextTab.dirty;
+    fileLoadError.value = "";
+    showDiffMode.value = false;
+    selectedTreePath.value = nextTab.path;
+    return;
+  }
+
+  activeFilePath.value = "";
+  fileContent.value = "";
+  fileDirty.value = false;
   fileLoadError.value = "";
+  showDiffMode.value = false;
+}
+
+function updateOpenTabPath(from: string, to: string) {
+  const tab = findOpenTab(from);
+  if (tab) tab.path = to;
+}
+
+async function createNewFile() {
+  if (!projectOpened.value) return;
+  const name = window.prompt("新建文件（可含子目录，如 src/utils/helper.ts）", "new-file.ts");
+  if (!name?.trim()) return;
+  const target = joinProjectPath(parentDirForCreate(), name.trim());
+  const result = await createItem(target, false, "");
+  if (!result.ok) {
+    treeError.value = result.error || "创建失败";
+    return;
+  }
+  treeError.value = "";
+  await refreshTree();
+  selectedTreePath.value = target;
+  await openFile(target);
+}
+
+async function createNewFolder() {
+  if (!projectOpened.value) return;
+  const name = window.prompt("新建文件夹（可含子目录）", "new-folder");
+  if (!name?.trim()) return;
+  const target = joinProjectPath(parentDirForCreate(), name.trim());
+  const result = await createItem(target, true);
+  if (!result.ok) {
+    treeError.value = result.error || "创建失败";
+    return;
+  }
+  treeError.value = "";
+  selectedTreePath.value = target;
+  await refreshTree();
+  await toggleDir(target);
+}
+
+async function renameSelectedItem() {
+  const from = selectedTreePath.value;
+  if (!from) return;
+  renamingPath.value = from;
+}
+
+async function commitRename(path: string, newName: string) {
+  renamingPath.value = "";
+  const from = path;
+  const parent = from.replace(/\\/g, "/").replace(/\/[^/]+$/, "");
+  const to = joinProjectPath(parent, newName);
+  const result = await renameItem(from, to);
+  if (!result.ok) {
+    treeError.value = result.error || "重命名失败";
+    return;
+  }
+  treeError.value = "";
+  if (activeFilePath.value === from) {
+    activeFilePath.value = to;
+    const fromDiff = getFileDiff(from);
+    if (fromDiff) {
+      setFileDiff(to, fromDiff);
+      const next = { ...fileDiffs.value };
+      delete next[normalizePathKey(from)];
+      fileDiffs.value = next;
+    }
+  }
+  updateOpenTabPath(from, to);
+  selectedTreePath.value = to;
+  await refreshTree();
+}
+
+function cancelRename() {
+  renamingPath.value = "";
+}
+
+async function deleteSelectedItem() {
+  const target = selectedTreePath.value;
+  if (!target) return;
+  const root = projectPath.value.replace(/\\/g, "/").replace(/\/$/, "");
+  const normalized = target.replace(/\\/g, "/");
+  if (normalized === root) {
+    treeError.value = "不能删除项目根目录";
+    return;
+  }
+  if (!window.confirm(`确定删除「${fileName(target)}」？`)) return;
+
+  const result = await deleteItem(target);
+  if (!result.ok) {
+    treeError.value = result.error || "删除失败";
+    return;
+  }
+  treeError.value = "";
+  const tabIdx = openTabs.value.findIndex((tab) => tab.path === target);
+  if (tabIdx >= 0) openTabs.value.splice(tabIdx, 1);
+  if (activeFilePath.value === target) {
+    const nextTab = openTabs.value[tabIdx] || openTabs.value[tabIdx - 1];
+    if (nextTab) {
+      activeFilePath.value = nextTab.path;
+      fileContent.value = nextTab.content;
+      fileDirty.value = nextTab.dirty;
+    } else {
+      activeFilePath.value = "";
+      fileContent.value = "";
+      fileDirty.value = false;
+    }
+    showDiffMode.value = false;
+  }
+  if (getFileDiff(target)) {
+    const next = { ...fileDiffs.value };
+    delete next[normalizePathKey(target)];
+    fileDiffs.value = next;
+  }
+  selectedTreePath.value = projectPath.value;
+  await refreshTree();
+}
+
+function showContextMenu(path: string, x: number, y: number) {
+  selectedTreePath.value = path;
+  const menuW = 180;
+  const menuH = 160;
+  const clampedX = Math.min(x, window.innerWidth - menuW);
+  const clampedY = Math.min(y, window.innerHeight - menuH);
+  contextMenu.value = { show: true, x: Math.max(0, clampedX), y: Math.max(0, clampedY), path };
+}
+
+function hideContextMenu() {
+  contextMenu.value.show = false;
+}
+
+function contextMenuCreateFile() {
+  const dir = contextMenu.value.path;
+  const node = findNode(fileTree.value, dir);
+  const parent = node?.isDirectory ? dir : dir.replace(/\\/g, "/").replace(/\/[^/]+$/, "");
+  selectedTreePath.value = parent;
+  hideContextMenu();
+  void createNewFile();
+}
+
+function contextMenuCreateFolder() {
+  const dir = contextMenu.value.path;
+  const node = findNode(fileTree.value, dir);
+  const parent = node?.isDirectory ? dir : dir.replace(/\\/g, "/").replace(/\/[^/]+$/, "");
+  selectedTreePath.value = parent;
+  hideContextMenu();
+  void createNewFolder();
+}
+
+function contextMenuRename() {
+  selectedTreePath.value = contextMenu.value.path;
+  renamingPath.value = contextMenu.value.path;
+  hideContextMenu();
+}
+
+function contextMenuDelete() {
+  selectedTreePath.value = contextMenu.value.path;
+  hideContextMenu();
+  void deleteSelectedItem();
+}
+
+async function openFile(filePath: string, options?: { force?: boolean; skipUnsavedCheck?: boolean }) {
+  if (!options?.skipUnsavedCheck && activeFilePath.value && activeFilePath.value !== filePath) {
+    const canLeave = await ensureCanLeaveCurrentTab();
+    if (!canLeave) return;
+    syncActiveTabToCache();
+  } else {
+    syncActiveTabToCache();
+  }
+
+  expandEditor();
+  showDiffMode.value = false;
+  fileLoadError.value = "";
+  selectedTreePath.value = filePath;
+
+  const cached = findOpenTab(filePath);
+  if (cached && !options?.force) {
+    activeFilePath.value = filePath;
+    fileContent.value = cached.content;
+    fileDirty.value = cached.dirty;
+    return;
+  }
+
   activeFilePath.value = filePath;
   fileDirty.value = false;
 
@@ -909,15 +1959,25 @@ async function openFile(filePath: string) {
   if (!result.ok) {
     fileContent.value = "";
     fileLoadError.value = result.error || "读取失败";
+    if (cached) {
+      cached.content = "";
+      cached.dirty = false;
+    }
     return;
   }
 
   fileContent.value = result.content;
+  if (cached) {
+    cached.content = result.content;
+    cached.dirty = false;
+  } else {
+    openTabs.value.push({ path: filePath, content: result.content, dirty: false });
+  }
 }
 
 async function reloadFile() {
   if (!activeFilePath.value) return;
-  await openFile(activeFilePath.value);
+  await openFile(activeFilePath.value, { force: true, skipUnsavedCheck: true });
 }
 
 async function saveFile() {
@@ -929,30 +1989,327 @@ async function saveFile() {
   }
   fileDirty.value = false;
   fileLoadError.value = "";
+  const tab = findOpenTab(activeFilePath.value);
+  if (tab) {
+    tab.content = fileContent.value;
+    tab.dirty = false;
+  }
 }
 
 async function handleSearch() {
   const q = searchQuery.value.trim();
   if (!q || !projectPath.value.trim()) {
     searchResults.value = [];
+    contentSearchResults.value = [];
     return;
   }
+
+  if (searchMode.value === "content") {
+    const result = await grepContent(projectPath.value.trim(), q);
+    contentSearchResults.value = result.ok ? result.results : [];
+    searchResults.value = [];
+    if (!result.ok && result.error) treeError.value = result.error;
+    return;
+  }
+
   const result = await searchFiles(projectPath.value.trim(), q);
   searchResults.value = result.ok ? result.results : [];
+  contentSearchResults.value = [];
 }
 
+let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
 watch(searchQuery, (val) => {
-  if (!val.trim()) searchResults.value = [];
+  if (!val.trim()) {
+    searchResults.value = [];
+    contentSearchResults.value = [];
+    return;
+  }
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(() => {
+    void handleSearch();
+  }, 300);
 });
+
+watch(searchMode, () => {
+  if (searchQuery.value.trim()) void handleSearch();
+});
+
+function onEditorChange() {
+  fileDirty.value = true;
+  const tab = findOpenTab(activeFilePath.value);
+  if (tab) tab.dirty = true;
+}
+
+function onEditorSelect(text: string) {
+  selectedCode.value = text.trim();
+}
+
+function askAiWithCode() {
+  if (!selectedCode.value) return;
+  const filePath = activeFilePath.value || "未知文件";
+  chatInput.value = `请帮我分析以下代码（${filePath}）：\n\n\`\`\`\n${selectedCode.value}\n\`\`\``;
+  selectedCode.value = "";
+}
+
+function onMessageSelect(event: MouseEvent, message: ChatMessage) {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || !selection.toString().trim()) {
+    showQuoteButton.value = false;
+    return;
+  }
+
+  const selectedText = selection.toString().trim();
+  if (!selectedText) {
+    showQuoteButton.value = false;
+    return;
+  }
+
+  const range = selection.getRangeAt(0);
+  const rect = range.getBoundingClientRect();
+  
+  pendingQuote.value = {
+    messageId: message.id,
+    content: selectedText,
+    role: message.role,
+  };
+  
+  quoteButtonPosition.value = {
+    x: rect.left + rect.width / 2,
+    y: rect.top - 10,
+  };
+  
+  showQuoteButton.value = true;
+}
+
+function quoteSelectedText() {
+  if (!pendingQuote.value) return;
+  
+  quotedMessage.value = pendingQuote.value;
+  pendingQuote.value = null;
+  showQuoteButton.value = false;
+  
+  const selection = window.getSelection();
+  if (selection) {
+    selection.removeAllRanges();
+  }
+  
+  nextTick(() => {
+    chatInputRef.value?.focus();
+  });
+}
+
+function hideQuoteButton() {
+  setTimeout(() => {
+    showQuoteButton.value = false;
+  }, 200);
+}
 
 function applyExample(text: string) {
   chatInput.value = text;
 }
 
+function collectProjectFiles(nodes: TreeNode[], base = projectPath.value): ProjectFileItem[] {
+  const items: ProjectFileItem[] = [];
+  const root = base.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
+
+  function walk(list: TreeNode[]) {
+    for (const node of list) {
+      if (node.isDirectory) {
+        if (node.children?.length) walk(node.children);
+        continue;
+      }
+      const full = node.path.replace(/\\/g, "/");
+      const relative = full.toLowerCase().startsWith(`${root}/`)
+        ? full.slice(root.length + 1)
+        : fileName(full);
+      items.push({ name: node.name, path: node.path, relative });
+    }
+  }
+
+  walk(nodes);
+  return items;
+}
+
+const allProjectFiles = computed(() => collectProjectFiles(fileTree.value));
+
+const mentionResults = computed(() => {
+  if (!mentionOpen.value || !projectOpened.value) return [];
+  const q = mentionQuery.value.trim().toLowerCase();
+  if (q && mentionRemoteResults.value.length) {
+    return mentionRemoteResults.value.slice(0, 12);
+  }
+  return allProjectFiles.value
+    .filter((item) => {
+      if (!q) return true;
+      return item.relative.toLowerCase().includes(q) || item.name.toLowerCase().includes(q);
+    })
+    .slice(0, 12);
+});
+
+async function refreshMentionRemoteResults(query: string) {
+  if (!projectPath.value.trim()) {
+    mentionRemoteResults.value = [];
+    return;
+  }
+  const result = await searchFiles(projectPath.value.trim(), query);
+  if (!result.ok) {
+    mentionRemoteResults.value = [];
+    return;
+  }
+  const root = projectPath.value.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
+  mentionRemoteResults.value = result.results
+    .filter((item) => !item.isDirectory)
+    .map((item) => {
+      const full = item.path.replace(/\\/g, "/");
+      const relative = full.toLowerCase().startsWith(`${root}/`)
+        ? full.slice(root.length + 1)
+        : item.name;
+      return { name: item.name, path: item.path, relative };
+    });
+}
+
+function scheduleMentionSearch() {
+  if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
+  const q = mentionQuery.value.trim();
+  if (!q) {
+    mentionRemoteResults.value = [];
+    return;
+  }
+  mentionSearchTimer = setTimeout(() => {
+    mentionSearchTimer = null;
+    void refreshMentionRemoteResults(q);
+  }, 200);
+}
+
+function updateMentionState() {
+  const el = chatInputRef.value;
+  const value = chatInput.value;
+  const pos = el?.selectionStart ?? value.length;
+  const before = value.slice(0, pos);
+  const match = /(^|\s)@([^\s@]*)$/.exec(before);
+  if (match) {
+    mentionOpen.value = true;
+    mentionQuery.value = match[2];
+    mentionActiveIndex.value = 0;
+    scheduleMentionSearch();
+    return;
+  }
+  mentionOpen.value = false;
+  mentionQuery.value = "";
+  mentionRemoteResults.value = [];
+}
+
+function onChatInput() {
+  updateMentionState();
+}
+
+function removeMentionQueryFromInput() {
+  const el = chatInputRef.value;
+  const value = chatInput.value;
+  const pos = el?.selectionStart ?? value.length;
+  const before = value.slice(0, pos);
+  const after = value.slice(pos);
+  const match = /(^|\s)@([^\s@]*)$/.exec(before);
+  if (!match) return;
+  const prefix = before.slice(0, match.index + (match[1] ? match[1].length : 0));
+  chatInput.value = `${prefix}${after}`.replace(/\s{2,}/g, " ");
+  mentionOpen.value = false;
+  mentionQuery.value = "";
+}
+
+function selectMention(item: ProjectFileItem) {
+  if (!referencedFiles.value.some((f) => f.path === item.path)) {
+    referencedFiles.value.push({
+      name: item.name,
+      path: item.path,
+      relative: item.relative,
+    });
+  }
+  removeMentionQueryFromInput();
+  void nextTick(() => chatInputRef.value?.focus());
+}
+
+function removeReferencedFile(idx: number) {
+  referencedFiles.value.splice(idx, 1);
+}
+
 function onChatKeydown(e: KeyboardEvent) {
+  if (mentionOpen.value && mentionResults.value.length) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      mentionActiveIndex.value = (mentionActiveIndex.value + 1) % mentionResults.value.length;
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      mentionActiveIndex.value =
+        (mentionActiveIndex.value - 1 + mentionResults.value.length) % mentionResults.value.length;
+      return;
+    }
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      const item = mentionResults.value[mentionActiveIndex.value];
+      if (item) selectMention(item);
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      mentionOpen.value = false;
+      return;
+    }
+  }
+
   if (e.key !== "Enter" || e.shiftKey) return;
   e.preventDefault();
   void sendChat();
+}
+
+function onDragOver(e: DragEvent) {
+  isDragging.value = true;
+}
+
+function onDragEnter(e: DragEvent) {
+  dragCounter++;
+  isDragging.value = true;
+}
+
+function onDragLeave(e: DragEvent) {
+  dragCounter--;
+  if (dragCounter <= 0) {
+    isDragging.value = false;
+    dragCounter = 0;
+  }
+}
+
+async function onDrop(e: DragEvent) {
+  isDragging.value = false;
+  dragCounter = 0;
+
+  const files = e.dataTransfer?.files;
+  if (!files || !files.length) return;
+
+  for (const file of Array.from(files)) {
+    const path = (file as any).path || "";
+    if (!path) continue;
+
+    try {
+      const result = await readFile(path);
+      if (result.ok) {
+        droppedFiles.value.push({
+          name: file.name,
+          path,
+          content: result.content,
+        });
+      }
+    } catch {
+      // ignore unreadable files
+    }
+  }
+}
+
+function removeDroppedFile(idx: number) {
+  droppedFiles.value.splice(idx, 1);
 }
 
 function extractCodeBlocks(text: string): string[] {
@@ -965,9 +2322,36 @@ function extractCodeBlocks(text: string): string[] {
   return blocks;
 }
 
-function applyCodeBlock(code: string) {
-  fileContent.value = code;
-  fileDirty.value = true;
+async function applyCodeBlock(code: string) {
+  expandEditor();
+  if (activeFilePath.value) {
+    const before = fileContent.value;
+    fileContent.value = code;
+    fileDirty.value = true;
+    setFileDiff(activeFilePath.value, { before, after: code });
+    return;
+  }
+  if (!projectOpened.value) return;
+  const rel = window.prompt("未打开文件。请输入相对路径（如 src/example.ts）", "new-file.ts");
+  if (!rel?.trim()) return;
+  const fullPath = resolveFullPathFromRel(rel.trim());
+  const existing = await readFile(fullPath);
+  const before = existing.ok ? existing.content : "";
+  const writeResult = existing.ok
+    ? await writeFile(fullPath, code)
+    : await createItem(fullPath, false, code);
+  if (!writeResult.ok) {
+    treeError.value = writeResult.error || "写入失败";
+    return;
+  }
+  treeError.value = "";
+  setFileDiff(fullPath, { before, after: code });
+  await refreshTree();
+  const openPath = resolveFullPathFromRel(rel.trim());
+  selectedTreePath.value = openPath;
+  await openFile(openPath);
+  showDiffMode.value = true;
+  fileDirty.value = false;
 }
 
 function formatToolMeta(
@@ -986,7 +2370,7 @@ function formatToolMeta(
   }
   if (name === "write_file") {
     const detail = path || "";
-    return { name, icon: "✏️", title: "写入文件", detail, label: detail ? `写入文件 ${detail}` : "写入文件" };
+    return { name, icon: "✏️", title: "暂存修改", detail, label: detail ? `暂存修改 ${detail}` : "暂存修改" };
   }
   if (name === "list_dir") {
     const detail = path || "项目根目录";
@@ -1014,28 +2398,62 @@ function activeFileRelativePath(): string {
 
 async function handleAgentWrittenFiles(files: string[]) {
   if (!files.length) return;
+  await refreshTree();
+
   const activeRel = activeFileRelativePath();
+  let handled = false;
+
   for (const rel of files) {
     const normalized = rel.replace(/\\/g, "/").toLowerCase();
     if (activeRel && normalized === activeRel) {
       await reloadFile();
       fileDirty.value = false;
+      if (getFileDiff(activeFilePath.value)) {
+        showDiffMode.value = true;
+      }
+      handled = true;
       break;
     }
   }
-  await refreshTree();
+
+  if (!handled) {
+    const firstRel = files[0];
+    const full = resolveFullPathFromRel(firstRel);
+    if (getFileDiff(full)) {
+      await openFile(full);
+      showDiffMode.value = true;
+    }
+  }
+}
+
+function patchAssistantMsg(msgId: string, patch: Partial<ChatMessage>) {
+  const idx = chatMessages.value.findIndex((m) => m.id === msgId);
+  if (idx < 0) return;
+  chatMessages.value[idx] = { ...chatMessages.value[idx], ...patch };
 }
 
 function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
+  const msgId = assistantMsg.id;
+
   if (event.type === "status") {
     const { phase } = event.data;
     setAgentStatus(assistantMsg, phase, event.data);
-    if (phase === "finished") {
-      assistantMsg.agentPhase = undefined;
-    }
+    patchAssistantMsg(msgId, {
+      agentPhase: assistantMsg.agentPhase,
+      status: assistantMsg.status,
+      agentTurn: assistantMsg.agentTurn,
+      agentMaxTurns: assistantMsg.agentMaxTurns,
+      ...(phase === "finished" ? { agentPhase: undefined, streaming: false } : {}),
+    });
     if (phase === "aborted") {
       chatSending.value = false;
       collapseAgentActivity(assistantMsg);
+      patchAssistantMsg(msgId, { activityExpanded: false });
+
+      if (pendingPrompts.length) {
+        const next = pendingPrompts.shift()!;
+        void runAgentTurn(next);
+      }
     }
     void scrollChatToBottom(true);
     return;
@@ -1057,7 +2475,22 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       turn: assistantMsg.agentTurn,
       maxTurns: assistantMsg.agentMaxTurns,
     });
+    patchAssistantMsg(msgId, {
+      tools: [...assistantMsg.tools],
+      status: assistantMsg.status,
+      agentPhase: assistantMsg.agentPhase,
+    });
     void scrollChatToBottom(true);
+    return;
+  }
+
+  if (event.type === "file_diff") {
+    const relPath = event.data.path;
+    const diff = { before: event.data.before, after: event.data.after };
+    storeFileDiff(relPath, diff.before, diff.after);
+    if (!assistantMsg.turnFileDiffs) assistantMsg.turnFileDiffs = {};
+    assistantMsg.turnFileDiffs[relPath] = diff;
+    patchAssistantMsg(msgId, { turnFileDiffs: { ...assistantMsg.turnFileDiffs } });
     return;
   }
 
@@ -1073,23 +2506,55 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       turn: assistantMsg.agentTurn,
       maxTurns: assistantMsg.agentMaxTurns,
     });
+    patchAssistantMsg(msgId, {
+      tools: assistantMsg.tools ? [...assistantMsg.tools] : undefined,
+      status: assistantMsg.status,
+      agentPhase: assistantMsg.agentPhase,
+    });
+    void scrollChatToBottom(true);
+    return;
+  }
+
+  if (event.type === "message_delta") {
+    const delta = event.data.delta || "";
+    if (!delta) return;
+    const nextContent = `${assistantMsg.content || ""}${delta}`;
+    assistantMsg.streaming = true;
+    assistantMsg.content = nextContent;
+    assistantMsg.status = "";
+    patchAssistantMsg(msgId, { streaming: true, content: nextContent, status: "" });
     void scrollChatToBottom(true);
     return;
   }
 
   if (event.type === "message") {
     assistantMsg.content = event.data.text;
+    assistantMsg.streaming = false;
     assistantMsg.status = "";
     assistantMsg.agentPhase = undefined;
+    patchAssistantMsg(msgId, {
+      content: event.data.text,
+      streaming: false,
+      status: "",
+      agentPhase: undefined,
+    });
     void scrollChatToBottom(true);
     return;
   }
 
   if (event.type === "error") {
     chatError.value = event.data.message;
-    if (!assistantMsg.content) assistantMsg.content = event.data.message;
+    const content = assistantMsg.content || event.data.message;
+    assistantMsg.content = content;
     collapseAgentActivity(assistantMsg);
+    patchAssistantMsg(msgId, { content, activityExpanded: false });
     void scrollChatToBottom(true);
+    chatSending.value = false;
+
+    if (pendingPrompts.length) {
+      const next = pendingPrompts.shift()!;
+      void runAgentTurn(next);
+    }
     return;
   }
 
@@ -1098,10 +2563,175 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
     agentAbortHandle = null;
     assistantMsg.status = "";
     assistantMsg.agentPhase = undefined;
+    assistantMsg.streaming = false;
+
+    const pending = event.data.pendingFiles || [];
+    if (pending.length && assistantMsg.turnFileDiffs && Object.keys(assistantMsg.turnFileDiffs).length) {
+      assistantMsg.pendingApproval = true;
+      assistantMsg.writtenFiles = [...pending];
+    } else {
+      assistantMsg.pendingApproval = false;
+      assistantMsg.writtenFiles = event.data.writtenFiles?.length ? [...event.data.writtenFiles] : undefined;
+    }
+
     collapseAgentActivity(assistantMsg);
+    patchAssistantMsg(msgId, {
+      status: "",
+      agentPhase: undefined,
+      streaming: false,
+      activityExpanded: false,
+      writtenFiles: assistantMsg.writtenFiles,
+      pendingApproval: assistantMsg.pendingApproval,
+    });
     persistChatNow();
-    void handleAgentWrittenFiles(event.data.writtenFiles || []);
+
+    if (!assistantMsg.pendingApproval) {
+      void handleAgentWrittenFiles(event.data.writtenFiles || []);
+    } else {
+      const firstRel = pending[0];
+      if (firstRel && assistantMsg.turnFileDiffs?.[firstRel]) {
+        const full = resolveFullPathFromRel(firstRel);
+        void openFile(full);
+        showDiffMode.value = true;
+      }
+    }
     void scrollChatToBottom(true);
+
+    if (pendingPrompts.length) {
+      const next = pendingPrompts.shift()!;
+      void runAgentTurn(next);
+    }
+  }
+}
+
+function clearTurnFileDiffsFromStore(turnFileDiffs: Record<string, FileDiff>) {
+  const next = { ...fileDiffs.value };
+  for (const relPath of Object.keys(turnFileDiffs)) {
+    const fullPath = resolveFullPathFromRel(relPath);
+    delete next[normalizePathKey(fullPath)];
+  }
+  fileDiffs.value = next;
+}
+
+async function acceptAgentTurn(messageId: string) {
+  if (chatSending.value || !projectOpened.value) return;
+  const idx = chatMessages.value.findIndex((m) => m.id === messageId);
+  if (idx < 0) return;
+
+  const msg = chatMessages.value[idx];
+  if (!msg.pendingApproval || !msg.turnFileDiffs) return;
+
+  msg.reverting = true;
+  chatError.value = "";
+
+  try {
+    const applied: string[] = [];
+    for (const [relPath, diff] of Object.entries(msg.turnFileDiffs)) {
+      const fullPath = resolveFullPathFromRel(relPath);
+      const existing = await readFile(fullPath);
+      const writeResult = existing.ok
+        ? await writeFile(fullPath, diff.after)
+        : await createItem(fullPath, false, diff.after);
+      if (!writeResult.ok) throw new Error(writeResult.error || `写入 ${relPath} 失败`);
+      applied.push(relPath);
+    }
+
+    msg.pendingApproval = false;
+    msg.reverting = false;
+    msg.writtenFiles = applied;
+    patchAssistantMsg(messageId, {
+      pendingApproval: false,
+      reverting: false,
+      writtenFiles: applied,
+    });
+    await refreshTree();
+    void handleAgentWrittenFiles(applied);
+    persistChatNow();
+  } catch (error) {
+    msg.reverting = false;
+    patchAssistantMsg(messageId, { reverting: false });
+    chatError.value = error instanceof Error ? error.message : "应用修改失败";
+  }
+}
+
+function rejectAgentTurn(messageId: string) {
+  if (chatSending.value) return;
+  const idx = chatMessages.value.findIndex((m) => m.id === messageId);
+  if (idx < 0) return;
+
+  const msg = chatMessages.value[idx];
+  if (!msg.pendingApproval || !msg.turnFileDiffs) return;
+  if (!window.confirm("确定拒绝本轮所有暂存修改？")) return;
+
+  clearTurnFileDiffsFromStore(msg.turnFileDiffs);
+  msg.pendingApproval = false;
+  msg.rejected = true;
+  msg.writtenFiles = undefined;
+  showDiffMode.value = false;
+  patchAssistantMsg(messageId, {
+    pendingApproval: false,
+    rejected: true,
+    writtenFiles: undefined,
+  });
+  persistChatNow();
+}
+
+function previewAgentFile(messageId: string, relPath: string) {
+  const msg = chatMessages.value.find((m) => m.id === messageId);
+  const diff = msg?.turnFileDiffs?.[relPath];
+  if (!diff) return;
+  const fullPath = resolveFullPathFromRel(relPath);
+  setFileDiff(fullPath, diff);
+  void openFile(fullPath);
+  showDiffMode.value = true;
+}
+
+async function revertAgentTurn(messageId: string) {
+  if (chatSending.value || !projectOpened.value) return;
+  const idx = chatMessages.value.findIndex((m) => m.id === messageId);
+  if (idx < 0) return;
+
+  const msg = chatMessages.value[idx];
+  if (!msg.turnFileDiffs || msg.reverted || msg.pendingApproval) return;
+
+  const fileCount = Object.keys(msg.turnFileDiffs).length;
+  if (!window.confirm(`确定回滚本轮 Agent 对 ${fileCount} 个文件的修改？`)) return;
+
+  msg.reverting = true;
+  chatError.value = "";
+
+  try {
+    for (const [relPath, diff] of Object.entries(msg.turnFileDiffs)) {
+      const fullPath = resolveFullPathFromRel(relPath);
+      if (!diff.before && diff.after) {
+        const result = await deleteItem(fullPath);
+        if (!result.ok) throw new Error(result.error || `删除 ${relPath} 失败`);
+      } else {
+        const result = await writeFile(fullPath, diff.before);
+        if (!result.ok) throw new Error(result.error || `恢复 ${relPath} 失败`);
+      }
+
+      const key = normalizePathKey(fullPath);
+      if (fileDiffs.value[key]) {
+        const next = { ...fileDiffs.value };
+        delete next[key];
+        fileDiffs.value = next;
+      }
+      if (activeFilePath.value && normalizePathKey(activeFilePath.value) === key) {
+        await openFile(fullPath);
+        showDiffMode.value = false;
+      }
+    }
+
+    msg.reverted = true;
+    msg.reverting = false;
+    patchAssistantMsg(messageId, { reverted: true, reverting: false });
+    await refreshTree();
+    persistChatNow();
+  } catch (error) {
+    msg.reverting = false;
+    patchAssistantMsg(messageId, { reverting: false });
+    chatError.value = error instanceof Error ? error.message : "回滚失败";
   }
 }
 
@@ -1174,6 +2804,16 @@ async function resendFromMessage(messageId: string) {
   await runAgentTurn(userText);
 }
 
+function buildAgentHistory(): VibeChatHistoryMessage[] {
+  return chatMessages.value
+    .slice(0, -2)
+    .filter(
+      (m): m is ChatMessage & { role: "user" | "assistant" } =>
+        (m.role === "user" || m.role === "assistant") && Boolean(m.content.trim()),
+    )
+    .map((m) => ({ role: m.role, content: m.content.trim() }));
+}
+
 async function runAgentTurn(userText: string) {
   const prompt = userText.trim();
   if (!prompt || !configReady.value || !projectOpened.value) return;
@@ -1182,13 +2822,17 @@ async function runAgentTurn(userText: string) {
   chatSending.value = true;
   chatError.value = "";
 
+  const history = buildAgentHistory();
+
   chatMessages.value.push({ id: genId(), role: "user", content: prompt });
+  const mode = chatMode.value;
   const assistantMsg: ChatMessage = {
     id: genId(),
     role: "assistant",
     content: "",
-    tools: [],
-    activityExpanded: true,
+    chatMode: mode,
+    tools: mode === "build" ? [] : undefined,
+    activityExpanded: mode === "build",
     agentPhase: "connecting_local",
     status: formatAgentStatus({ phase: "connecting_local" }),
   };
@@ -1199,26 +2843,91 @@ async function runAgentTurn(userText: string) {
   agentAbortHandle = runVibeAgentSse(
     {
       prompt,
+      history,
       projectPath: projectPath.value.trim(),
       endpoint: aiConfig.value.endpoint,
       apiKey: aiConfig.value.apiKey,
       model: aiConfig.value.model,
+      mode,
       openFilePath: activeFilePath.value || undefined,
     },
     (event) => handleAgentEvent(event, assistantMsg),
   );
 }
 
+async function buildReferencedFileSection(): Promise<string> {
+  if (!referencedFiles.value.length) return "";
+  const chunks: string[] = [];
+  for (const file of referencedFiles.value) {
+    const result = await readFile(file.path);
+    if (result.ok) {
+      chunks.push(`--- ${file.relative} ---\n${result.content}`);
+    } else {
+      chunks.push(`--- ${file.relative} ---\n（读取失败：${result.error || "未知错误"}）`);
+    }
+  }
+  return chunks.join("\n\n");
+}
+
 async function sendChat() {
   if (!canSendChat.value) return;
   const userText = chatInput.value.trim();
   chatInput.value = "";
-  await runAgentTurn(userText);
+  mentionOpen.value = false;
+
+  let fullPrompt = userText || "请结合引用的文件回答。";
+  
+  if (quotedMessage.value) {
+    const prefix = quotedMessage.value.role === "assistant" ? "Agent" : "你";
+    const quotedContent = `> ${prefix}: ${quotedMessage.value.content.replace(/\n/g, "\n> ")}`;
+    fullPrompt = `${quotedContent}\n\n${fullPrompt}`;
+    quotedMessage.value = null;
+  }
+  
+  const refSection = await buildReferencedFileSection();
+  const dropSection = droppedFiles.value.length
+    ? droppedFiles.value.map((f) => `--- ${f.path} ---\n${f.content}`).join("\n\n")
+    : "";
+
+  const sections = [refSection, dropSection].filter(Boolean);
+  if (sections.length) {
+    fullPrompt = `${fullPrompt}\n\n## 参考文件\n\n${sections.join("\n\n")}`;
+  }
+
+  droppedFiles.value = [];
+  referencedFiles.value = [];
+
+  if (chatSending.value) {
+    pendingPrompts.push(fullPrompt);
+    return;
+  }
+
+  await runAgentTurn(fullPrompt);
 }
 
 function onWindowFocus() {
   reloadAiConfig();
 }
+
+function onGlobalKeydown(e: KeyboardEvent) {
+  if ((e.ctrlKey || e.metaKey) && e.key === "p") {
+    e.preventDefault();
+    searchInputRef.value?.focus();
+    searchInputRef.value?.select();
+  }
+  if (e.key === "Escape" && historyOpen.value) {
+    e.preventDefault();
+    historyOpen.value = false;
+  }
+}
+
+watch(chatMode, (mode) => {
+  try {
+    localStorage.setItem(CHAT_MODE_KEY, mode);
+  } catch {
+    // ignore
+  }
+});
 
 watch(
   chatMessages,
@@ -1231,17 +2940,24 @@ watch(
 
 onMounted(() => {
   reloadAiConfig();
+  refreshProjectHistoryList();
   loadSavedProject();
   chatPanelWidth.value = Math.min(chatPanelWidth.value, getChatPanelMaxWidth());
   window.addEventListener("focus", onWindowFocus);
+  document.addEventListener("click", onDocumentClick);
+  document.addEventListener("keydown", onGlobalKeydown);
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("focus", onWindowFocus);
+  document.removeEventListener("click", onDocumentClick);
+  document.removeEventListener("keydown", onGlobalKeydown);
   agentAbortHandle?.abort();
   stopResize();
   if (scrollChatRaf) cancelAnimationFrame(scrollChatRaf);
   if (saveChatTimer) clearTimeout(saveChatTimer);
+  if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+  if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
   persistChatNow();
 });
 </script>
@@ -1255,10 +2971,33 @@ onBeforeUnmount(() => {
   color: rgba(255, 255, 255, 0.92);
 }
 
+:global(::-webkit-scrollbar) {
+  width: 6px;
+  height: 6px;
+}
+
+:global(::-webkit-scrollbar-track) {
+  background: transparent;
+}
+
+:global(::-webkit-scrollbar-thumb) {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+  transition: background 200ms ease;
+}
+
+:global(::-webkit-scrollbar-thumb:hover) {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+:global(::-webkit-scrollbar-corner) {
+  background: transparent;
+}
+
 .vibe-page {
   --bg: #0b1220;
   --panel: rgba(17, 24, 39, 0.72);
-  --panel-2: rgba(2, 6, 23, 0.55);
+  --panel-2: rgb(2, 6, 23);
   --text: rgba(255, 255, 255, 0.92);
   --muted: rgba(255, 255, 255, 0.7);
   --border: rgba(255, 255, 255, 0.12);
@@ -1278,8 +3017,8 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 14px 20px 12px;
+  gap: 20px;
+  padding: 16px 24px 14px;
   border-bottom: 1px solid var(--border);
   background: rgba(11, 18, 32, 0.8);
   backdrop-filter: blur(10px);
@@ -1291,28 +3030,28 @@ onBeforeUnmount(() => {
 
 .title {
   margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.2px;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
 }
 
 .desc {
-  margin: 3px 0 0;
+  margin: 4px 0 0;
   font-size: 12px;
   color: var(--muted);
-  line-height: 1.4;
+  line-height: 1.5;
 }
 
 .head-actions {
   display: flex;
-  gap: 6px;
+  gap: 8px;
 }
 
 .project-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 20px;
+  gap: 10px;
+  padding: 12px 24px;
   border-bottom: 1px solid var(--border);
   background: rgba(11, 18, 32, 0.6);
   flex-wrap: wrap;
@@ -1323,12 +3062,13 @@ onBeforeUnmount(() => {
   min-width: 200px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: 9px 14px;
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
   font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   outline: none;
-  transition: border-color 150ms ease, background 150ms ease;
+  transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
 }
 
 .path-input:focus {
@@ -1343,6 +3083,122 @@ onBeforeUnmount(() => {
 .bar-error {
   color: var(--danger);
   font-size: 12px;
+}
+
+.project-history-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.project-history-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  width: min(420px, calc(100vw - 40px));
+  max-height: 360px;
+  display: flex;
+  flex-direction: column;
+  background: #111827;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.project-history-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.project-history-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.project-history-desc {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.project-history-empty {
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+  padding: 20px 12px;
+}
+
+.project-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  display: grid;
+  gap: 6px;
+}
+
+.project-history-item {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.project-history-item.active {
+  border-color: rgba(31, 111, 235, 0.45);
+  background: rgba(31, 111, 235, 0.1);
+}
+
+.project-history-item-main {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: inherit;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.project-history-item-title {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-history-item-path {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: rgba(145, 190, 255, 0.75);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-history-item-meta {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.project-history-delete {
+  align-self: center;
+  margin-right: 6px;
+  flex-shrink: 0;
 }
 
 .workspace {
@@ -1377,10 +3233,240 @@ onBeforeUnmount(() => {
   border-right: 1px solid var(--border);
 }
 
+.file-panel-tabs {
+  display: flex;
+  gap: 2px;
+  margin-right: 8px;
+}
+
+.file-panel-tab {
+  padding: 5px 12px;
+  font-size: 12px;
+  background: transparent;
+  color: var(--text-dim);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 150ms ease;
+  position: relative;
+}
+
+.file-panel-tab:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.file-panel-tab.active {
+  color: var(--text);
+  background: rgba(31, 111, 235, 0.22);
+}
+
+.git-badge {
+  margin-left: 4px;
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 600;
+  background: rgba(31, 111, 235, 0.45);
+  color: #fff;
+  border-radius: 8px;
+  line-height: 17px;
+}
+
+.git-panel-content {
+  display: flex;
+  flex-direction: column;
+  height: calc(100% - 40px);
+  overflow: hidden;
+}
+
+.git-branch-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.git-branch-icon {
+  color: var(--text-dim);
+}
+
+.git-branch-name {
+  color: #7aa2f7;
+  font-family: monospace;
+}
+
+.git-error {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #f7768e;
+  background: rgba(247, 118, 142, 0.1);
+  border-bottom: 1px solid var(--border);
+}
+
+.git-commit-box {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.git-commit-input {
+  flex: 1;
+  padding: 7px 12px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  outline: none;
+  transition: border-color 180ms ease;
+}
+
+.git-commit-input:focus {
+  border-color: rgba(31, 111, 235, 0.5);
+}
+
+.git-commit-input::placeholder {
+  color: var(--text-dim);
+}
+
+.git-file-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.git-file-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background 100ms ease;
+}
+
+.git-file-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.git-file-status {
+  font-family: monospace;
+  font-size: 12px;
+  font-weight: 600;
+  width: 14px;
+  text-align: center;
+}
+
+.git-file-path {
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-file-item.active {
+  background: rgba(31, 111, 235, 0.15);
+}
+
+.git-diff-panel {
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  max-height: 40%;
+  overflow: hidden;
+}
+
+.git-diff-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.git-diff-title {
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-diff-content {
+  flex: 1;
+  overflow: auto;
+  margin: 0;
+  padding: 8px 12px;
+  font-family: monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre;
+  tab-size: 4;
+}
+
 .editor-panel {
   background: rgba(2, 6, 23, 0.35);
   flex: 1;
   min-width: 0;
+  position: relative;
+}
+
+.ask-ai-floating {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  padding: 8px 16px;
+  background: rgba(31, 111, 235, 0.9);
+  color: white;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  transition: background 200ms ease, transform 200ms ease;
+}
+
+.ask-ai-floating:hover {
+  background: rgba(31, 111, 235, 1);
+  transform: translateY(-2px);
+}
+
+.quote-floating {
+  position: fixed;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  background: rgba(2, 6, 23, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--text);
+  cursor: pointer;
+  z-index: 1000;
+  transform: translate(-50%, -100%);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  transition: all 150ms ease;
+  white-space: nowrap;
+  backdrop-filter: blur(8px);
+}
+
+.quote-floating:hover {
+  background: rgba(31, 111, 235, 0.2);
+  border-color: rgba(31, 111, 235, 0.5);
+  color: rgba(255, 255, 255, 0.95);
+  transform: translate(-50%, -100%) translateY(-2px);
+  box-shadow: 0 6px 20px rgba(31, 111, 235, 0.3);
+}
+
+.quote-icon {
+  font-size: 13px;
+  line-height: 1;
 }
 
 .chat-panel {
@@ -1455,12 +3541,129 @@ onBeforeUnmount(() => {
   }
 }
 
+.file-panel-head {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.file-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+button.ghost.tiny {
+  padding: 4px 8px;
+  font-size: 11px;
+  border-radius: 6px;
+}
+
+button.ghost.danger {
+  color: #ff9a9a;
+  border-color: rgba(255, 120, 120, 0.35);
+}
+
+button.ghost.danger:hover:not(:disabled) {
+  background: rgba(255, 80, 80, 0.12);
+  color: #ffb4b4;
+}
+
+.ctx-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+}
+
+.ctx-menu {
+  position: fixed;
+  min-width: 160px;
+  background: #1a2236;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  padding: 4px 0;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+
+.ctx-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 14px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.92);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: background 100ms ease;
+}
+
+.ctx-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.ctx-item.danger {
+  color: #ff9a9a;
+}
+
+.ctx-item.danger:hover {
+  background: rgba(255, 80, 80, 0.12);
+  color: #ffb4b4;
+}
+
+.ctx-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.msg-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0 2px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.62);
+  line-height: 1.5;
+}
+
+.msg-status-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.msg-streaming {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: rgba(255, 255, 255, 0.92);
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  font-family: inherit;
+}
+
+.stream-cursor {
+  display: inline-block;
+  color: #91beff;
+  animation: stream-blink 1s step-end infinite;
+}
+
+@keyframes stream-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
 .panel-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--border);
   background: rgba(17, 24, 39, 0.4);
 }
@@ -1624,22 +3827,48 @@ button.ghost.small {
   border-radius: 4px;
 }
 
-.search-input {
-  width: 120px;
+.search-mode-switch {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 5px 8px;
+}
+
+.search-mode-btn {
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  border-radius: 5px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.search-mode-btn.active {
+  background: rgba(31, 111, 235, 0.25);
+  color: #aad0ff;
+}
+
+.search-input {
+  width: 130px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 5px 10px;
   font-size: 12px;
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
   outline: none;
-  transition: border-color 150ms ease, background 150ms ease;
+  transition: border-color 180ms ease, background 180ms ease, width 200ms ease;
 }
 
 .search-input:focus {
   border-color: rgba(31, 111, 235, 0.5);
   background: rgba(255, 255, 255, 0.06);
-  width: 160px;
+  width: 180px;
 }
 
 .search-input::placeholder {
@@ -1709,6 +3938,88 @@ button.ghost.small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.file-item.content-result {
+  align-items: flex-start;
+}
+
+.file-result-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.file-result-text {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 6px 8px 0;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  background: rgba(17, 24, 39, 0.35);
+}
+
+.editor-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 180px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.72);
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.editor-tab:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.editor-tab.active {
+  background: rgba(31, 111, 235, 0.18);
+  border-color: rgba(31, 111, 235, 0.35);
+  color: #d6e8ff;
+}
+
+.editor-tab.dirty .editor-tab-name {
+  font-style: italic;
+}
+
+.editor-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-tab-dot {
+  color: #f0c674;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.editor-tab-close {
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.editor-tab-close:hover {
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .code-editor {
@@ -1782,10 +4093,43 @@ button.ghost.small {
 .msg-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
   margin-top: 10px;
   padding-top: 10px;
   border-top: 1px solid var(--border);
+}
+
+.reverted-badge {
+  font-size: 11px;
+  color: rgba(126, 231, 135, 0.9);
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(46, 160, 67, 0.15);
+  border: 1px solid rgba(46, 160, 67, 0.28);
+}
+
+.rejected-badge {
+  font-size: 11px;
+  color: rgba(255, 180, 180, 0.9);
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(248, 81, 73, 0.12);
+  border: 1px solid rgba(248, 81, 73, 0.28);
+}
+
+.pending-badge {
+  font-size: 11px;
+  color: #f0c674;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(240, 198, 116, 0.12);
+  border: 1px solid rgba(240, 198, 116, 0.28);
+}
+
+button.primary.small-action {
+  padding: 5px 12px;
+  font-size: 12px;
 }
 
 .file-item:hover {
@@ -1890,11 +4234,11 @@ button.ghost.small {
   background: rgba(31, 111, 235, 0.12);
   color: #91beff;
   border: 1px solid rgba(31, 111, 235, 0.25);
-  padding: 6px 12px;
+  padding: 6px 14px;
   border-radius: 999px;
   font-size: 12px;
   font-weight: 500;
-  transition: all 150ms ease;
+  transition: all 180ms ease;
 }
 
 .chip:hover:not(:disabled) {
@@ -1902,29 +4246,219 @@ button.ghost.small {
   border-color: rgba(31, 111, 235, 0.4);
 }
 
+.chat-mode-switch {
+  display: inline-flex;
+  gap: 4px;
+  margin-bottom: 10px;
+  padding: 3px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+}
+
+.mode-btn {
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  border-radius: 6px;
+  padding: 5px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 180ms ease;
+}
+
+.mode-btn:hover:not(:disabled):not(.active) {
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.mode-btn.active {
+  background: rgba(31, 111, 235, 0.25);
+  color: #aad0ff;
+  box-shadow: inset 0 0 0 1px rgba(31, 111, 235, 0.35);
+}
+
+.mode-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .chat-composer {
+  position: relative;
   border-top: 1px solid var(--border);
   padding: 12px;
   background: rgba(11, 18, 32, 0.5);
+  transition: background 200ms ease, border-color 200ms ease;
+}
+
+.quoted-preview {
+  margin-bottom: 10px;
+  border: 1px solid rgba(179, 146, 240, 0.3);
+  border-radius: 8px;
+  background: rgba(179, 146, 240, 0.06);
+  overflow: hidden;
+}
+
+.quoted-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: rgba(179, 146, 240, 0.1);
+  border-bottom: 1px solid rgba(179, 146, 240, 0.2);
+}
+
+.quoted-preview-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(179, 146, 240, 0.9);
+}
+
+.quoted-preview-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.quoted-preview-close {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 16px;
+  line-height: 1;
+  transition: color 150ms ease;
+}
+
+.quoted-preview-close:hover {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.quoted-preview-body {
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.7);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 80px;
+  overflow: hidden;
+}
+
+.mention-dropdown {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: calc(100% - 4px);
+  z-index: 12;
+  max-height: 220px;
+  overflow: auto;
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+}
+
+.mention-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: inherit;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.mention-item:hover,
+.mention-item.active {
+  background: rgba(31, 111, 235, 0.14);
+  border-color: rgba(31, 111, 235, 0.28);
+}
+
+.mention-item-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mention-item-path {
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: rgba(145, 190, 255, 0.82);
+}
+
+.dropped-file-tag.ref-tag {
+  background: rgba(179, 146, 240, 0.18);
+  border-color: rgba(179, 146, 240, 0.32);
+}
+
+.chat-composer.drag-over {
+  background: rgba(31, 111, 235, 0.15);
+  border-top-color: rgba(31, 111, 235, 0.6);
+}
+
+.dropped-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.dropped-file-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: rgba(31, 111, 235, 0.2);
+  border: 1px solid rgba(31, 111, 235, 0.3);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.drop-file-remove {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.drop-file-remove:hover {
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .chat-input {
   width: 100%;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
+  border-radius: 10px;
+  padding: 10px 14px;
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
   font-size: 13px;
   resize: vertical;
   min-height: 72px;
   outline: none;
-  transition: border-color 150ms ease, background 150ms ease;
+  transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
 }
 
 .chat-input:focus {
   border-color: rgba(31, 111, 235, 0.5);
   background: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.08);
 }
 
 .chat-input::placeholder {
@@ -2178,11 +4712,11 @@ button {
   background: var(--primary);
   color: #fff;
   border-radius: 8px;
-  padding: 8px 14px;
+  padding: 8px 16px;
   cursor: pointer;
   font-size: 13px;
   font-weight: 500;
-  transition: all 150ms ease;
+  transition: all 180ms ease;
 }
 
 button:hover:not(:disabled) {
@@ -2207,7 +4741,7 @@ button.secondary:hover:not(:disabled) {
 button.ghost {
   background: transparent;
   border: 1px solid var(--border);
-  padding: 5px 10px;
+  padding: 5px 12px;
   font-size: 11px;
   color: var(--muted);
 }
@@ -2218,7 +4752,7 @@ button.ghost:hover:not(:disabled) {
 }
 
 button:disabled {
-  opacity: 0.45;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
@@ -2230,10 +4764,10 @@ button:disabled {
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 8px 14px;
+  padding: 8px 16px;
   font-size: 13px;
   font-weight: 500;
-  transition: all 150ms ease;
+  transition: all 180ms ease;
 }
 
 .link-btn:hover {

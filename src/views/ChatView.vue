@@ -454,7 +454,7 @@ onMounted(() => {
 .chat-page {
   --bg: #0b1220;
   --panel: rgba(17, 24, 39, 0.72);
-  --panel-2: rgba(2, 6, 23, 0.55);
+  --panel-2: rgb(2, 6, 23);
   --text: rgba(255, 255, 255, 0.92);
   --muted: rgba(255, 255, 255, 0.72);
   --subtle: rgba(255, 255, 255, 0.6);
