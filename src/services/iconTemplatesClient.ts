@@ -1,6 +1,7 @@
 import type { IconTemplateItem, IconTemplateListResponse } from "../types/iconTemplates";
+import { backendUrl } from "./backendBase";
 
-const BASE = "/backend/icon-templates";
+const BASE = backendUrl("/backend/icon-templates");
 
 export async function fetchIconTemplateList(): Promise<IconTemplateListResponse> {
   const res = await fetch(BASE, { method: "GET" });
@@ -71,7 +72,7 @@ export type TestIconTemplateMatchResult =
 
 /** 不抛错：成功 / 失败均可能带整屏截屏 Base64，便于界面展示 */
 export async function testIconTemplateMatch(id: string): Promise<TestIconTemplateMatchResult> {
-  const res = await fetch("/backend/automation/test-match", {
+  const res = await fetch(backendUrl("/backend/automation/test-match"), {
     method: "POST",
     headers: { "Content-Type": "application/json; charset=utf-8" },
     body: JSON.stringify({ id }),

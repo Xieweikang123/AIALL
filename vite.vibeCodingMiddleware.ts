@@ -5,6 +5,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { runVibeAgent } from "./server/vibeAgent";
+import {
+  listDirectory,
+  readFileContent,
+  searchFiles,
+  writeFileContent,
+} from "./server/vibeFs";
 
 const execFileAsync = promisify(execFile);
 
@@ -31,123 +38,17 @@ function sendJson(res: ServerResponse, status: number, payload: unknown) {
   res.end(JSON.stringify(payload));
 }
 
-const TEXT_EXTENSIONS = new Set([
-  ".ts", ".tsx", ".js", ".jsx", ".vue", ".json", ".html", ".css", ".scss", ".less",
-  ".md", ".txt", ".yaml", ".yml", ".toml", ".xml", ".svg", ".sql", ".sh", ".bash",
-  ".py", ".rb", ".go", ".rs", ".java", ".c", ".cpp", ".h", ".hpp", ".cs",
-  ".php", ".swift", ".kt", ".r", ".m", ".mm", ".lua", ".pl",
-  ".env", ".gitignore", ".dockerignore", ".editorconfig", ".prettierrc",
-  ".eslintrc", ".babelrc", ".log", ".csv", ".ini", ".cfg",
-  ".svelte", ".astro", ".mdx",
-]);
-
-const IGNORE_DIRS = new Set([
-  "node_modules", ".git", ".svn", ".hg", "__pycache__", ".cache",
-  "dist", "build", ".next", ".nuxt", "target",
-]);
-
-/** List directory entries */
-async function listDirectory(dirPath: string) {
-  const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
-  const items: Array<{
-    name: string;
-    path: string;
-    isDirectory: boolean;
-    isFile: boolean;
-    extension: string;
-    size?: number;
-  }> = [];
-
-  for (const entry of entries) {
-    if (entry.name.startsWith(".")) continue;
-    if (IGNORE_DIRS.has(entry.name)) continue;
-
-    const fullPath = path.join(dirPath, entry.name);
-    const stat = await fs.promises.stat(fullPath).catch(() => null);
-
-    items.push({
-      name: entry.name,
-      path: fullPath,
-      isDirectory: entry.isDirectory(),
-      isFile: entry.isFile(),
-      extension: entry.isFile() ? path.extname(entry.name).toLowerCase() : "",
-      size: stat?.size,
-    });
-  }
-
-  items.sort((a, b) => {
-    if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  });
-
-  return items;
+function sendSseHeaders(res: ServerResponse) {
+  res.statusCode = 200;
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
 }
 
-/** Read file content */
-async function readFileContent(filePath: string) {
-  const stat = await fs.promises.stat(filePath);
-
-  if (stat.size > 2 * 1024 * 1024) {
-    return { ok: false as const, error: "文件过大（超过 2MB），无法预览", size: stat.size };
-  }
-
-  const ext = path.extname(filePath).toLowerCase();
-  if (!TEXT_EXTENSIONS.has(ext) && stat.size > 0) {
-    const fd = await fs.promises.open(filePath, "r");
-    try {
-      const buf = Buffer.alloc(512);
-      const { bytesRead } = await fd.read(buf, 0, 512, 0);
-      if (buf.subarray(0, bytesRead).includes(0)) {
-        return { ok: false as const, error: "二进制文件，无法预览", size: stat.size };
-      }
-    } finally {
-      await fd.close();
-    }
-  }
-
-  const content = await fs.promises.readFile(filePath, "utf-8");
-  return { ok: true as const, content, size: stat.size, encoding: "utf-8" };
-}
-
-/** Write file content */
-async function writeFileContent(filePath: string, content: string) {
-  const dir = path.dirname(filePath);
-  await fs.promises.mkdir(dir, { recursive: true });
-  await fs.promises.writeFile(filePath, content, "utf-8");
-  const stat = await fs.promises.stat(filePath);
-  return { ok: true, size: stat.size };
-}
-
-/** Search files by name pattern */
-async function searchFiles(dirPath: string, query: string, maxResults = 30) {
-  const results: Array<{ name: string; path: string; isDirectory: boolean }> = [];
-  const lowerQuery = query.toLowerCase();
-
-  async function walk(currentDir: string, depth: number) {
-    if (depth > 6 || results.length >= maxResults) return;
-    try {
-      const entries = await fs.promises.readdir(currentDir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (results.length >= maxResults) break;
-        if (entry.name.startsWith(".") || IGNORE_DIRS.has(entry.name)) continue;
-        if (entry.name.toLowerCase().includes(lowerQuery)) {
-          results.push({
-            name: entry.name,
-            path: path.join(currentDir, entry.name),
-            isDirectory: entry.isDirectory(),
-          });
-        }
-        if (entry.isDirectory()) {
-          await walk(path.join(currentDir, entry.name), depth + 1);
-        }
-      }
-    } catch {
-      // Skip unreadable directories
-    }
-  }
-
-  await walk(dirPath, 0);
-  return results;
+function sendSseEvent(res: ServerResponse, event: string, data: unknown) {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
 function powershellExe(): string {
@@ -362,6 +263,88 @@ async function buildProjectContext(projectPath: string) {
 }
 
 export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
+  // POST /backend/vibe/agent/run
+  middlewares.use("/backend/vibe/agent/run", async (req, res) => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "仅支持 POST 请求" });
+      return;
+    }
+
+    let body: {
+      prompt?: string;
+      projectPath?: string;
+      endpoint?: string;
+      apiKey?: string;
+      model?: string;
+      maxTurns?: number;
+      openFilePath?: string;
+    };
+
+    try {
+      body = (await readJsonBody(req)) as typeof body;
+    } catch (error) {
+      sendJson(res, 400, { error: error instanceof Error ? error.message : "解析请求体失败" });
+      return;
+    }
+
+    const prompt = (body.prompt || "").trim();
+    const projectPath = (body.projectPath || "").trim();
+    const endpoint = (body.endpoint || "").trim();
+    const model = (body.model || "").trim();
+
+    if (!prompt || !projectPath || !endpoint || !model) {
+      sendJson(res, 400, { error: "缺少 prompt、projectPath、endpoint 或 model" });
+      return;
+    }
+
+    const resolvedRoot = path.resolve(projectPath);
+    const rootStat = await fs.promises.stat(resolvedRoot).catch(() => null);
+    if (!rootStat?.isDirectory()) {
+      sendJson(res, 400, { error: "projectPath 不是有效目录" });
+      return;
+    }
+
+    sendSseHeaders(res);
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    req.on("close", abort);
+    res.on("close", abort);
+
+    try {
+      await runVibeAgent({
+        projectRoot: resolvedRoot,
+        prompt,
+        openFilePath: body.openFilePath?.trim() || undefined,
+        endpoint,
+        apiKey: body.apiKey || "",
+        model,
+        maxTurns: body.maxTurns,
+        signal: controller.signal,
+        onEvent: (event) => {
+          try {
+            sendSseEvent(res, event.type, event.data);
+          } catch {
+            // client disconnected
+          }
+        },
+      });
+    } catch (error) {
+      try {
+        sendSseEvent(res, "error", {
+          message: error instanceof Error ? error.message : "Agent 运行失败",
+        });
+      } catch {
+        // ignore
+      }
+    }
+
+    try {
+      res.end();
+    } catch {
+      // ignore
+    }
+  });
+
   // POST /backend/vibe/project-context
   middlewares.use("/backend/vibe/project-context", async (req, res) => {
     if (req.method !== "POST") {

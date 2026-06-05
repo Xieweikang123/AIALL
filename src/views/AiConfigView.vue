@@ -28,9 +28,7 @@
       <button type="button" class="tab" :class="{ active: activeTab === 'tts' }" @click="activeTab = 'tts'">
         TTS
       </button>
-      <button type="button" class="tab" :class="{ active: activeTab === 'claude' }" @click="activeTab = 'claude'">
-        Claude CLI
-      </button>
+
     </nav>
 
     <section class="card">
@@ -304,83 +302,7 @@
       </div>
     </section>
 
-    <section v-show="activeTab === 'claude'" class="card">
-      <h2 class="card-title">Claude Code（CLI）</h2>
-      <p class="desc">
-        复用本机已安装的 Claude Code CLI（命令 `claude`），通过本地转发层实时显示 stdout/stderr 与 git 变更。
-      </p>
 
-      <div class="config-form">
-        <div class="actions">
-          <button type="button" class="secondary" @click="handleCheckClaudeCli">
-            检测 claude 命令
-          </button>
-          <span class="tips">{{ claudeCliStatus.text }}</span>
-        </div>
-
-        <label class="field">
-          <span>工作目录（可选）</span>
-          <input v-model.trim="claudeForm.cwd" type="text" placeholder="默认使用当前项目根目录" />
-          <small class="tips">不填则在当前 Vite 进程工作目录执行。</small>
-        </label>
-
-        <label class="field">
-          <span>任务描述（prompt）</span>
-          <textarea v-model="claudeForm.prompt" rows="5" placeholder="描述你希望 Claude Code 完成的工作..." />
-        </label>
-
-        <label class="checkbox">
-          <input v-model="claudeForm.bare" type="checkbox" />
-          <span>使用 --bare（启动更快、上下文更可控）</span>
-        </label>
-
-        <label class="field">
-          <span>allowedTools（可选）</span>
-          <input v-model.trim="claudeForm.allowedTools" type="text" placeholder='例如：Bash,Read,Edit' />
-          <small class="tips">用于非交互模式自动允许工具调用（按你的风险偏好调整）。</small>
-        </label>
-
-        <label class="field">
-          <span>permissionMode（可选）</span>
-          <select v-model="claudeForm.permissionMode">
-            <option value="">（不设置）</option>
-            <option value="acceptEdits">acceptEdits</option>
-            <option value="dontAsk">dontAsk</option>
-          </select>
-        </label>
-
-        <label class="field">
-          <span>maxTurns（可选）</span>
-          <input v-model.number="claudeForm.maxTurns" type="number" min="1" step="1" />
-        </label>
-
-        <div class="actions">
-          <button type="button" class="primary" :disabled="claudeRunning" @click="startClaudeRun">
-            {{ claudeRunning ? "运行中..." : "启动 Claude Code" }}
-          </button>
-          <button type="button" class="secondary" :disabled="!claudeRunning" @click="stopClaudeRun">
-            停止
-          </button>
-          <button type="button" class="secondary" :disabled="claudeRunning" @click="saveConfig">
-            保存当前配置
-          </button>
-          <span class="tips">阶段：{{ claudePhase }}</span>
-        </div>
-
-        <div v-if="claudeChangedFiles.length" class="tips">
-          <strong>工作区变更：</strong>
-          <ul class="file-list">
-            <li v-for="item in claudeChangedFiles" :key="item.status + item.file">
-              <code>{{ item.status }}</code>
-              <span>{{ item.file }}</span>
-            </li>
-          </ul>
-        </div>
-
-        <p v-if="claudeStderr" class="status fail">stderr：{{ claudeStderr }}</p>
-        <pre>{{ claudeOutput }}</pre>
-      </div>
-    </section>
   </div>
 </template>
 
@@ -388,7 +310,6 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { fetchAvailableModels, testAiModel, testTtsModel } from "../services/aiClient";
-import { checkClaudeCli, runClaudeCodeSse, type ClaudeRunRequest, type ClaudeSseEvent } from "../services/claudeCodeClient";
 import { requestPageScreenshot } from "../services/pageScreenshotClient";
 
 interface AiConfigForm {
@@ -414,13 +335,12 @@ interface PersistedAiConfig {
     proxyUrl: string;
   };
   tts: TtsForm;
-  claude: ClaudeRunRequest;
 }
 
 const STORAGE_KEY = "ai-config";
 
 type TestPhase = "idle" | "running" | "success" | "fail";
-type TabKey = "chat" | "tts" | "claude";
+type TabKey = "chat" | "tts";
 
 const router = useRouter();
 
@@ -750,29 +670,6 @@ const ttsStatusClass = computed(() => ({
   fail: ttsResult.phase === "fail",
 }));
 
-// ===== Claude Code（CLI）集成 =====
-const claudeCliStatus = reactive({
-  ok: false,
-  text: "未检测",
-});
-
-const claudeForm = reactive<ClaudeRunRequest>({
-  prompt: "请阅读本项目，并在不破坏现有功能的前提下新增一个示例页面：展示 Hello + 当前时间。",
-  cwd: "",
-  bare: true,
-  allowedTools: "Bash,Read,Edit",
-  permissionMode: "acceptEdits",
-  maxTurns: 6,
-});
-
-const claudeRunning = ref(false);
-const claudeOutput = ref("");
-const claudeStderr = ref("");
-const claudePhase = ref("idle");
-const claudeChangedFiles = ref<Array<{ status: string; file: string }>>([]);
-let claudeAbortHandle: { abort: () => void } | null = null;
-let claudeAutoChecked = false;
-
 async function copyText(text: string) {
   const value = String(text ?? "");
   if (!value) return;
@@ -805,89 +702,6 @@ async function copyText(text: string) {
   }
 }
 
-async function handleCheckClaudeCli() {
-  claudeCliStatus.ok = false;
-  claudeCliStatus.text = "检测中...";
-  try {
-    const result = await checkClaudeCli();
-    claudeCliStatus.ok = result.ok;
-    claudeCliStatus.text = result.ok ? `已安装：${result.version || "未知版本"}` : `不可用：${result.error || "未知原因"}`;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "未知错误";
-    claudeCliStatus.ok = false;
-    claudeCliStatus.text = `检测失败：${message}`;
-  }
-}
-
-function appendOutputLine(text: string) {
-  claudeOutput.value += text.endsWith("\n") ? text : `${text}\n`;
-}
-
-function handleClaudeEvent(event: ClaudeSseEvent) {
-  if (event.type === "status") {
-    claudePhase.value = String(event.data.phase || "status");
-    appendOutputLine(`[status] ${JSON.stringify(event.data)}`);
-    if (event.data.phase === "finished" || event.data.phase === "error" || event.data.phase === "http_error") {
-      claudeRunning.value = false;
-      claudeAbortHandle = null;
-    }
-    return;
-  }
-
-  if (event.type === "stderr") {
-    claudeStderr.value += event.data.text;
-    return;
-  }
-
-  if (event.type === "git_status") {
-    claudeChangedFiles.value = event.data.files || [];
-    return;
-  }
-
-  if (event.type === "claude") {
-    // 为了兼容不同版本的输出格式，先原样展示 raw；如果你后面想“更像进度条”，我们再基于 parsed.type 做解析。
-    appendOutputLine(event.data.raw);
-    return;
-  }
-
-  appendOutputLine(`[unknown] ${JSON.stringify(event.data)}`);
-}
-
-function startClaudeRun() {
-  if (!claudeForm.prompt.trim()) {
-    claudeOutput.value = "请先填写 prompt。\n";
-    return;
-  }
-
-  claudeAbortHandle?.abort();
-  claudeAbortHandle = null;
-
-  claudeRunning.value = true;
-  claudePhase.value = "starting";
-  claudeOutput.value = "";
-  claudeStderr.value = "";
-  claudeChangedFiles.value = [];
-
-  claudeAbortHandle = runClaudeCodeSse(
-    {
-      ...claudeForm,
-      cwd: claudeForm.cwd?.trim() || undefined,
-      permissionMode: claudeForm.permissionMode?.trim() || undefined,
-      allowedTools: claudeForm.allowedTools?.trim() || undefined,
-      maxTurns: claudeForm.maxTurns || undefined,
-    },
-    handleClaudeEvent,
-  );
-}
-
-function stopClaudeRun() {
-  claudeAbortHandle?.abort();
-  claudeAbortHandle = null;
-  claudeRunning.value = false;
-  claudePhase.value = "aborted";
-  appendOutputLine("[status] 用户已停止");
-}
-
 function saveConfig() {
   const payload: PersistedAiConfig = {
     version: 3,
@@ -907,15 +721,6 @@ function saveConfig() {
       voice: ttsForm.voice,
       input: ttsForm.input,
       format: ttsForm.format,
-    },
-    claude: {
-      prompt: claudeForm.prompt,
-      cwd: claudeForm.cwd?.trim() || undefined,
-      bare: Boolean(claudeForm.bare),
-      allowedTools: claudeForm.allowedTools?.trim() || undefined,
-      permissionMode: claudeForm.permissionMode?.trim() || undefined,
-      maxTurns: claudeForm.maxTurns || undefined,
-      model: claudeForm.model?.trim() || undefined,
     },
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -944,7 +749,7 @@ function loadConfig() {
     }
 
     const payload = parsed as Partial<PersistedAiConfig>;
-    if (payload.activeTab && ["chat", "tts", "claude"].includes(payload.activeTab)) {
+    if (payload.activeTab && ["chat", "tts"].includes(payload.activeTab)) {
       activeTab.value = payload.activeTab;
     }
 
@@ -967,16 +772,6 @@ function loadConfig() {
       ttsForm.voice = payload.tts.voice || ttsForm.voice;
       ttsForm.input = payload.tts.input || ttsForm.input;
       ttsForm.format = payload.tts.format || ttsForm.format;
-    }
-
-    if (payload.claude) {
-      claudeForm.prompt = payload.claude.prompt || claudeForm.prompt;
-      claudeForm.cwd = payload.claude.cwd || "";
-      claudeForm.bare = typeof payload.claude.bare === "boolean" ? payload.claude.bare : claudeForm.bare;
-      claudeForm.allowedTools = payload.claude.allowedTools || claudeForm.allowedTools;
-      claudeForm.permissionMode = payload.claude.permissionMode || claudeForm.permissionMode;
-      claudeForm.maxTurns = payload.claude.maxTurns || claudeForm.maxTurns;
-      claudeForm.model = payload.claude.model || claudeForm.model;
     }
   } catch {
     // 忽略损坏的本地配置，保留默认值。
@@ -1185,22 +980,11 @@ watch(
   },
 );
 
-watch(
-  () => activeTab.value,
-  (tab) => {
-    if (tab === "claude" && !claudeAutoChecked) {
-      claudeAutoChecked = true;
-      handleCheckClaudeCli();
-    }
-  },
-  { immediate: true },
-);
 onBeforeUnmount(() => {
   if (ttsAudioUrl.value) {
     URL.revokeObjectURL(ttsAudioUrl.value);
   }
   window.removeEventListener("paste", handlePaste);
-  claudeAbortHandle?.abort();
   window.clearTimeout(saveHintTimer);
 });
 </script>
@@ -1700,26 +1484,6 @@ button.danger:hover:not(:disabled) {
   color: var(--danger);
 }
 
-.file-list {
-  margin: 8px 0 0;
-  padding-left: 18px;
-}
-
-.file-list li {
-  display: flex;
-  gap: 10px;
-  align-items: baseline;
-  font-size: 13px;
-}
-
-.file-list code {
-  display: inline-block;
-  min-width: 24px;
-  padding: 1px 6px;
-  border-radius: 6px;
-  background: #eaeef2;
-}
-
 pre {
   background: rgba(17, 24, 39, 0.03);
   border: 1px solid var(--border);
@@ -1898,10 +1662,6 @@ pre {
 
   button.danger.outline:hover:not(:disabled) {
     background: rgba(207, 34, 46, 0.1);
-  }
-
-  .file-list code {
-    background: rgba(255, 255, 255, 0.08);
   }
 }
 </style>

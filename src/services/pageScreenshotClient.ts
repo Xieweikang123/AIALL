@@ -1,3 +1,5 @@
+import { backendUrl } from "./backendBase";
+
 export interface PageScreenshotRequest {
   url: string;
   proxyUrl?: string;
@@ -14,7 +16,7 @@ export type PageScreenshotResult =
 
 export async function requestPageScreenshot(req: PageScreenshotRequest): Promise<PageScreenshotResult> {
   try {
-    const response = await fetch("/backend/web/screenshot-page", {
+    const response = await fetch(backendUrl("/backend/web/screenshot-page"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

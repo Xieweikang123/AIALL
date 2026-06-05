@@ -150,7 +150,7 @@ export function registerAutomationMiddleware(
     }
 
     if (process.platform !== "win32") {
-      sendJson(res, 501, { ok: false, error: "仅在本机 Windows + npm run dev 下可用" });
+      sendJson(res, 501, { ok: false, error: "仅在本机 Windows 桌面环境下可用" });
       return;
     }
 

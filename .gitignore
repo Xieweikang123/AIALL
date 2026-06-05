@@ -4,6 +4,8 @@ node_modules/
 ## build output
 dist/
 dist-ssr/
+sidecar/dist/
+src-tauri/target/
 *.local
 
 ## logs

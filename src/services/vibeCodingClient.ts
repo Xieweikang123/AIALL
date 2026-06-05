@@ -1,3 +1,5 @@
+import { backendUrl } from "./backendBase";
+
 export interface FileEntry {
   name: string;
   path: string;
@@ -77,7 +79,7 @@ export interface ProjectContextResult {
 
 export async function fetchProjectContext(projectPath: string): Promise<ProjectContextResult> {
   try {
-    const response = await fetch("/backend/vibe/project-context", {
+    const response = await fetch(backendUrl("/backend/vibe/project-context"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: projectPath }),
@@ -91,7 +93,7 @@ export async function fetchProjectContext(projectPath: string): Promise<ProjectC
 
 export async function pickProjectFolder(initialPath?: string): Promise<PickFolderResult> {
   try {
-    const response = await fetch("/backend/vibe/pick-folder", {
+    const response = await fetch(backendUrl("/backend/vibe/pick-folder"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ initialPath: initialPath || "" }),
@@ -105,7 +107,7 @@ export async function pickProjectFolder(initialPath?: string): Promise<PickFolde
 
 export async function listDirectory(dirPath: string): Promise<ListResult> {
   try {
-    const url = `/backend/vibe/list?path=${encodeURIComponent(dirPath)}`;
+    const url = backendUrl(`/backend/vibe/list?path=${encodeURIComponent(dirPath)}`);
     const response = await fetch(url);
     const data = (await response.json()) as ListResult;
     return data;
@@ -116,7 +118,7 @@ export async function listDirectory(dirPath: string): Promise<ListResult> {
 
 export async function readFile(filePath: string): Promise<ReadResult> {
   try {
-    const response = await fetch("/backend/vibe/read", {
+    const response = await fetch(backendUrl("/backend/vibe/read"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: filePath }),
@@ -130,7 +132,7 @@ export async function readFile(filePath: string): Promise<ReadResult> {
 
 export async function writeFile(filePath: string, content: string): Promise<WriteResult> {
   try {
-    const response = await fetch("/backend/vibe/write", {
+    const response = await fetch(backendUrl("/backend/vibe/write"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: filePath, content }),
@@ -144,7 +146,7 @@ export async function writeFile(filePath: string, content: string): Promise<Writ
 
 export async function searchFiles(dirPath: string, query: string): Promise<SearchResults> {
   try {
-    const url = `/backend/vibe/search?path=${encodeURIComponent(dirPath)}&q=${encodeURIComponent(query)}`;
+    const url = backendUrl(`/backend/vibe/search?path=${encodeURIComponent(dirPath)}&q=${encodeURIComponent(query)}`);
     const response = await fetch(url);
     const data = (await response.json()) as SearchResults;
     return data;
@@ -155,7 +157,7 @@ export async function searchFiles(dirPath: string, query: string): Promise<Searc
 
 export async function createItem(itemPath: string, isDirectory: boolean, content?: string): Promise<CreateResult> {
   try {
-    const response = await fetch("/backend/vibe/create", {
+    const response = await fetch(backendUrl("/backend/vibe/create"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: itemPath, isDirectory, content }),
@@ -169,7 +171,7 @@ export async function createItem(itemPath: string, isDirectory: boolean, content
 
 export async function deleteItem(itemPath: string): Promise<DeleteResult> {
   try {
-    const url = `/backend/vibe/delete?path=${encodeURIComponent(itemPath)}`;
+    const url = backendUrl(`/backend/vibe/delete?path=${encodeURIComponent(itemPath)}`);
     const response = await fetch(url, { method: "DELETE" });
     const data = (await response.json()) as DeleteResult;
     return data;

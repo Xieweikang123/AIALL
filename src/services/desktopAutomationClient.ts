@@ -1,5 +1,6 @@
 /** 本机开发服：按图标模板 id 截屏匹配并点击（仅 Windows 有效） */
 
+import { backendUrl } from "./backendBase";
 import type { MatchAlgorithm } from "./iconTemplatesClient";
 
 export interface OpenByTemplateResult {
@@ -15,7 +16,7 @@ export interface OpenByTemplateResult {
 }
 
 export async function openAppByIconTemplateId(id: string): Promise<OpenByTemplateResult> {
-  const res = await fetch("/backend/automation/open-by-template", {
+  const res = await fetch(backendUrl("/backend/automation/open-by-template"), {
     method: "POST",
     headers: { "Content-Type": "application/json; charset=utf-8" },
     body: JSON.stringify({ id }),

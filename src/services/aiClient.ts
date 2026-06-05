@@ -1,3 +1,5 @@
+import { backendUrl } from "./backendBase";
+
 export interface AiTestRequest {
   endpoint: string;
   apiKey?: string;
@@ -133,7 +135,7 @@ export async function testAiModel(request: AiTestRequest): Promise<AiTestResult>
     payload.endpoint = request.endpoint;
     payload.apiKey = request.apiKey || "";
 
-    const response = await fetch("/backend/ai/test", {
+    const response = await fetch(backendUrl("/backend/ai/test"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -303,7 +305,7 @@ export async function fetchAvailableModels(request: AiModelsRequest): Promise<Ai
       }
     }
 
-    const response = await fetch("/backend/ai/models", {
+    const response = await fetch(backendUrl("/backend/ai/models"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -387,7 +389,7 @@ function resolveTtsEndpoint(endpoint: string): string {
 export async function testTtsModel(request: AiTtsRequest): Promise<AiTtsResult> {
   try {
     const ttsEndpoint = resolveTtsEndpoint(request.endpoint);
-    const response = await fetch("/backend/ai/tts", {
+    const response = await fetch(backendUrl("/backend/ai/tts"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

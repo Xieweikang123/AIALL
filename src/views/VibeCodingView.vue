@@ -104,14 +104,25 @@
       <aside class="chat-panel" :style="{ width: chatPanelWidth + 'px' }">
         <div class="panel-head">
           <span class="panel-title">AI 助手</span>
-          <span class="panel-meta" :class="{ warn: !configReady || !apiKeyReady }">
-            {{ aiConfigStatusText }}
-          </span>
+          <div class="panel-head-right">
+            <button
+              v-if="chatMessages.length"
+              type="button"
+              class="ghost small"
+              :disabled="chatSending"
+              @click="clearChat"
+            >
+              清空
+            </button>
+            <span class="panel-meta" :class="{ warn: !configReady || !apiKeyReady }">
+              {{ aiConfigStatusText }}
+            </span>
+          </div>
         </div>
 
         <div ref="chatScrollRef" class="chat-scroll">
           <div v-if="!chatMessages.length" class="chat-empty">
-            <p>直接提问即可，系统会自动判断附带项目结构或当前文件。</p>
+            <p>Agent 会自行探索项目（list / read / grep / write），直接提问即可。</p>
             <div class="chips">
               <button type="button" class="chip" :disabled="chatSending" @click="applyExample('解释这个项目是做什么的')">
                 解释项目
@@ -130,8 +141,19 @@
 
           <div v-else class="msg-list">
             <div v-for="m in chatMessages" :key="m.id" class="msg" :class="m.role">
-              <div class="msg-role">{{ m.role === "user" ? "你" : "AI" }}</div>
-              <pre class="msg-text">{{ m.content }}</pre>
+              <div class="msg-role">{{ m.role === "user" ? "你" : "Agent" }}</div>
+              <div v-if="m.tools?.length" class="tool-steps">
+                <div
+                  v-for="step in m.tools"
+                  :key="step.id"
+                  class="tool-step"
+                  :class="{ fail: !step.ok && !step.running, running: step.running }"
+                >
+                  {{ step.running ? "…" : step.ok ? "✓" : "✗" }} {{ step.label }}
+                </div>
+              </div>
+              <div v-if="m.status" class="msg-status">{{ m.status }}</div>
+              <pre v-if="m.content" class="msg-text">{{ m.content }}</pre>
               <div v-if="m.role === 'assistant' && extractCodeBlocks(m.content).length" class="msg-actions">
                 <button
                   v-for="(block, idx) in extractCodeBlocks(m.content)"
@@ -159,11 +181,14 @@
           />
           <div class="chat-bottom">
             <span v-if="chatError" class="chat-error">{{ chatError }}</span>
-            <span v-else-if="chatSending" class="chat-running">AI 思考中…</span>
-            <span v-else class="chat-hint">{{ contextHint }} · Ctrl/⌘ + Enter 发送</span>
-            <button type="button" class="primary" :disabled="chatSending || !canSendChat" @click="sendChat">
-              {{ chatSending ? "发送中…" : "发送" }}
-            </button>
+            <span v-else-if="chatSending" class="chat-running">Agent 运行中…</span>
+            <span v-else class="chat-hint">Agent 自行探索项目 · Ctrl/⌘ + Enter 发送</span>
+            <div class="chat-actions">
+              <button v-if="chatSending" type="button" class="secondary" @click="stopAgent">停止</button>
+              <button type="button" class="primary" :disabled="chatSending || !canSendChat" @click="sendChat">
+                {{ chatSending ? "运行中…" : "发送" }}
+              </button>
+            </div>
           </div>
         </footer>
       </aside>
@@ -175,11 +200,15 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import CodeMonacoEditor from "../components/CodeMonacoEditor.vue";
 import FileTreeNode, { type TreeNode } from "../components/FileTreeNode.vue";
-import { testAiModel } from "../services/aiClient";
 import { loadAiChatBaseFromStorage } from "../services/aiLocalConfig";
-import { detectChatContextIntent } from "../utils/chatContextIntent";
 import {
-  fetchProjectContext,
+  clearVibeChatHistory,
+  loadVibeChatHistory,
+  saveVibeChatHistory,
+  type PersistedChatMessage,
+} from "../services/vibeChatStorage";
+import { runVibeAgentSse, type VibeAgentSseEvent } from "../services/vibeAgentClient";
+import {
   listDirectory,
   pickProjectFolder,
   readFile,
@@ -190,7 +219,20 @@ import {
 
 const STORAGE_KEY = "vibe-coding-project";
 type ChatRole = "user" | "assistant";
-type ChatMessage = { id: string; role: ChatRole; content: string };
+type AgentToolStep = {
+  id: string;
+  label: string;
+  summary: string;
+  ok: boolean;
+  running?: boolean;
+};
+type ChatMessage = Omit<PersistedChatMessage, "tools"> & {
+  tools?: AgentToolStep[];
+  status?: string;
+};
+
+let agentAbortHandle: { abort: () => void } | null = null;
+let saveChatTimer: ReturnType<typeof setTimeout> | null = null;
 
 const projectPath = ref("");
 const projectOpened = ref(false);
@@ -224,14 +266,9 @@ const aiConfigStatusText = computed(() => {
   if (!apiKeyReady.value) return `${modelNameForDisplay.value}（未保存 API Key）`;
   return modelNameForDisplay.value;
 });
-const canSendChat = computed(() => Boolean(chatInput.value.trim()) && configReady.value);
-
-const contextHint = computed(() => {
-  return detectChatContextIntent(chatInput.value, {
-    hasProject: projectOpened.value,
-    hasOpenFile: Boolean(activeFilePath.value && fileContent.value && !fileLoadError.value),
-  }).hint;
-});
+const canSendChat = computed(
+  () => Boolean(chatInput.value.trim()) && configReady.value && projectOpened.value,
+);
 
 const filePanelWidth = ref(280);
 const chatPanelWidth = ref(360);
@@ -308,6 +345,29 @@ async function scrollChatToBottom() {
   if (el) el.scrollTop = el.scrollHeight;
 }
 
+function persistChatNow(path = projectPath.value.trim()) {
+  if (!path) return;
+  saveVibeChatHistory(path, chatMessages.value);
+}
+
+function schedulePersistChat() {
+  if (!projectPath.value.trim() || chatSending.value) return;
+  if (saveChatTimer) clearTimeout(saveChatTimer);
+  saveChatTimer = setTimeout(() => {
+    saveChatTimer = null;
+    persistChatNow();
+  }, 400);
+}
+
+function clearChat() {
+  if (chatSending.value) return;
+  chatMessages.value = [];
+  chatError.value = "";
+  if (projectPath.value.trim()) {
+    clearVibeChatHistory(projectPath.value.trim());
+  }
+}
+
 function entryToNode(entry: FileEntry): TreeNode {
   return { ...entry, children: entry.isDirectory ? [] : undefined, loaded: !entry.isDirectory };
 }
@@ -325,6 +385,11 @@ async function openProjectByPath(dirPath: string) {
     return;
   }
 
+  const previousPath = projectPath.value.trim();
+  if (projectOpened.value && previousPath && previousPath !== normalized) {
+    persistChatNow(previousPath);
+  }
+
   loadingTree.value = true;
   treeError.value = "";
   searchQuery.value = "";
@@ -337,6 +402,8 @@ async function openProjectByPath(dirPath: string) {
     projectOpened.value = true;
     projectPath.value = normalized;
     localStorage.setItem(STORAGE_KEY, normalized);
+    chatMessages.value = loadVibeChatHistory(normalized);
+    await scrollChatToBottom();
   } catch (e) {
     projectOpened.value = false;
     fileTree.value = [];
@@ -480,44 +547,110 @@ function applyCodeBlock(code: string) {
   fileDirty.value = true;
 }
 
-async function buildChatPrompt(userMessage: string, intent: ReturnType<typeof detectChatContextIntent>): Promise<string> {
-  const parts = [
-    "你是一个专业的编程助手，帮助用户理解和修改代码。",
-    "回答请使用中文。",
-    "如果需要给出修改后的代码，请用 markdown 代码块包裹完整代码。",
-    "",
-    `用户问题：${userMessage}`,
-  ];
+function formatToolLabel(name: string, args: Record<string, unknown>): string {
+  if (name === "read_file") return `Read ${String(args.path || "")}`;
+  if (name === "write_file") return `Write ${String(args.path || "")}`;
+  if (name === "list_dir") return `List ${String(args.path || ".")}`;
+  if (name === "grep") return `Grep "${String(args.pattern || "")}"`;
+  if (name === "search_files") return `Search "${String(args.query || "")}"`;
+  return name;
+}
 
-  if (intent.includeProject && projectPath.value.trim()) {
-    const ctx = await fetchProjectContext(projectPath.value.trim());
-    if (ctx.ok && ctx.tree) {
-      parts.push("", `项目路径：${ctx.path}`, "【目录结构】", ctx.tree);
-      if (ctx.truncated) {
-        parts.push("（说明：项目较大，目录或文件内容已部分截断）");
-      }
-      if (ctx.keyFiles?.length) {
-        parts.push("", "【关键文件内容】");
-        for (const file of ctx.keyFiles) {
-          parts.push(`--- ${file.path} ---`, file.content, "");
-        }
-      }
-    } else if (!ctx.ok) {
-      parts.push("", `（未能读取项目上下文：${ctx.error || "未知原因"}）`);
+function activeFileRelativePath(): string {
+  if (!activeFilePath.value || !projectPath.value) return "";
+  const root = projectPath.value.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
+  const full = activeFilePath.value.replace(/\\/g, "/").toLowerCase();
+  if (!full.startsWith(root)) return "";
+  return full.slice(root.length).replace(/^\//, "");
+}
+
+async function handleAgentWrittenFiles(files: string[]) {
+  if (!files.length) return;
+  const activeRel = activeFileRelativePath();
+  for (const rel of files) {
+    const normalized = rel.replace(/\\/g, "/").toLowerCase();
+    if (activeRel && normalized === activeRel) {
+      await reloadFile();
+      fileDirty.value = false;
+      break;
     }
   }
+  await refreshTree();
+}
 
-  if (intent.includeFile && activeFilePath.value && fileContent.value) {
-    parts.push(
-      "",
-      `当前文件：${activeFilePath.value}`,
-      "【文件内容开始】",
-      fileContent.value,
-      "【文件内容结束】",
-    );
+function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
+  if (event.type === "status") {
+    const { phase, turn, maxTurns } = event.data;
+    if (phase === "thinking" && turn) {
+      assistantMsg.status = `思考中（第 ${turn}/${maxTurns || "?"} 轮）…`;
+    } else if (phase === "starting") {
+      assistantMsg.status = "Agent 启动中…";
+    } else if (phase === "finished") {
+      assistantMsg.status = "";
+    } else if (phase === "aborted") {
+      assistantMsg.status = "已停止";
+      chatSending.value = false;
+    }
+    void scrollChatToBottom();
+    return;
   }
 
-  return parts.join("\n");
+  if (event.type === "tool_start") {
+    if (!assistantMsg.tools) assistantMsg.tools = [];
+    assistantMsg.tools.push({
+      id: event.data.id,
+      label: formatToolLabel(event.data.name, event.data.args),
+      summary: "",
+      ok: true,
+      running: true,
+    });
+    assistantMsg.status = "";
+    void scrollChatToBottom();
+    return;
+  }
+
+  if (event.type === "tool_end") {
+    const step = assistantMsg.tools?.find((t) => t.id === event.data.id);
+    if (step) {
+      step.running = false;
+      step.ok = event.data.ok;
+      step.summary = event.data.summary;
+      if (event.data.summary) {
+        step.label = `${step.label} — ${event.data.summary}`;
+      }
+    }
+    void scrollChatToBottom();
+    return;
+  }
+
+  if (event.type === "message") {
+    assistantMsg.content = event.data.text;
+    assistantMsg.status = "";
+    void scrollChatToBottom();
+    return;
+  }
+
+  if (event.type === "error") {
+    chatError.value = event.data.message;
+    if (!assistantMsg.content) assistantMsg.content = event.data.message;
+    void scrollChatToBottom();
+    return;
+  }
+
+  if (event.type === "done") {
+    chatSending.value = false;
+    agentAbortHandle = null;
+    assistantMsg.status = "";
+    persistChatNow();
+    void handleAgentWrittenFiles(event.data.writtenFiles || []);
+    void scrollChatToBottom();
+  }
+}
+
+function stopAgent() {
+  agentAbortHandle?.abort();
+  agentAbortHandle = null;
+  chatSending.value = false;
 }
 
 async function sendChat() {
@@ -531,52 +664,41 @@ async function sendChat() {
   chatInput.value = "";
 
   chatMessages.value.push({ id: genId(), role: "user", content: userText });
-  const assistantMsg: ChatMessage = { id: genId(), role: "assistant", content: "" };
+  const assistantMsg: ChatMessage = {
+    id: genId(),
+    role: "assistant",
+    content: "",
+    tools: [],
+    status: "Agent 启动中…",
+  };
   chatMessages.value.push(assistantMsg);
   await scrollChatToBottom();
 
-  const intent = detectChatContextIntent(userText, {
-    hasProject: projectOpened.value,
-    hasOpenFile: Boolean(activeFilePath.value && fileContent.value && !fileLoadError.value),
-  });
-
-  try {
-    if (intent.includeProject) {
-      assistantMsg.content = "正在扫描项目结构与关键文件…\n";
-      await scrollChatToBottom();
-    }
-
-    const prompt = await buildChatPrompt(userText, intent);
-    assistantMsg.content = intent.includeProject ? "" : assistantMsg.content;
-
-    const result = await testAiModel({
+  agentAbortHandle?.abort();
+  agentAbortHandle = runVibeAgentSse(
+    {
+      prompt: userText,
+      projectPath: projectPath.value.trim(),
       endpoint: aiConfig.value.endpoint,
       apiKey: aiConfig.value.apiKey,
       model: aiConfig.value.model,
-      prompt,
-      stream: true,
-      onStreamChunk: (chunk) => {
-        assistantMsg.content += chunk;
-        void scrollChatToBottom();
-      },
-    });
-
-    if (!result.ok) {
-      chatError.value = result.error || "AI 请求失败";
-      if (!assistantMsg.content) assistantMsg.content = chatError.value;
-    }
-  } catch (e) {
-    chatError.value = e instanceof Error ? e.message : "发送失败";
-    if (!assistantMsg.content) assistantMsg.content = chatError.value;
-  } finally {
-    chatSending.value = false;
-    await scrollChatToBottom();
-  }
+      openFilePath: activeFilePath.value || undefined,
+    },
+    (event) => handleAgentEvent(event, assistantMsg),
+  );
 }
 
 function onWindowFocus() {
   reloadAiConfig();
 }
+
+watch(
+  chatMessages,
+  () => {
+    schedulePersistChat();
+  },
+  { deep: true },
+);
 
 onMounted(() => {
   reloadAiConfig();
@@ -586,6 +708,10 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener("focus", onWindowFocus);
+  agentAbortHandle?.abort();
+  stopResize();
+  if (saveChatTimer) clearTimeout(saveChatTimer);
+  persistChatNow();
 });
 </script>
 
@@ -798,6 +924,19 @@ onBeforeUnmount(() => {
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   background: rgba(17, 24, 39, 0.4);
+}
+
+.panel-head-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+button.ghost.small {
+  padding: 3px 8px;
+  font-size: 11px;
+  flex-shrink: 0;
 }
 
 .panel-title {
@@ -1115,6 +1254,47 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 8px;
   margin-top: 10px;
+}
+
+.chat-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.tool-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.tool-step {
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: rgba(145, 190, 255, 0.9);
+  padding: 4px 8px;
+  background: rgba(31, 111, 235, 0.08);
+  border-radius: 6px;
+  border-left: 2px solid rgba(31, 111, 235, 0.5);
+}
+
+.tool-step.running {
+  color: rgba(255, 255, 255, 0.6);
+  border-left-color: rgba(255, 255, 255, 0.25);
+}
+
+.tool-step.fail {
+  color: #ff8a8a;
+  border-left-color: rgba(255, 100, 100, 0.6);
+  background: rgba(255, 80, 80, 0.08);
+}
+
+.msg-status {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 6px;
 }
 
 .chat-hint,

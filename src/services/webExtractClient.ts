@@ -1,3 +1,5 @@
+import { backendUrl } from "./backendBase";
+
 export interface WebExtractRequest {
   url: string;
   mode?: "auto" | "discourse_latest" | "html" | "browser";
@@ -104,7 +106,7 @@ export async function extractWebText(
 
   if (onProgress) {
     try {
-      const response = await fetch("/backend/web/extract", {
+      const response = await fetch(backendUrl("/backend/web/extract"), {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
         body: JSON.stringify({ ...rest, stream: true }),
@@ -134,7 +136,7 @@ export async function extractWebText(
   }
 
   try {
-    const response = await fetch("/backend/web/extract", {
+    const response = await fetch(backendUrl("/backend/web/extract"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(rest),
