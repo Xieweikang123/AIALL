@@ -2,6 +2,7 @@ import { backendUrl } from "./backendBase";
 
 export interface GitStatusFile {
   path: string;
+  oldPath?: string;
   status: string;
   indexStatus: string;
   worktreeStatus: string;
@@ -239,7 +240,12 @@ export async function generateCommitMessage(
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");
-      return { ok: false, message: "", error: text || `请求失败，HTTP ${response.status}` };
+      try {
+        const parsed = JSON.parse(text) as { error?: string; message?: string };
+        return { ok: false, message: "", error: parsed.error || parsed.message || `请求失败，HTTP ${response.status}` };
+      } catch {
+        return { ok: false, message: "", error: text || `请求失败，HTTP ${response.status}` };
+      }
     }
 
     const contentType = response.headers.get("content-type") || "";

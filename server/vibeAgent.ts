@@ -1,13 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
-import { chatCompletionWithTools, type ChatCompletionMessage, type ChatToolCall } from "./aiForward";
+import { chatCompletionWithTools, type ChatCompletionMessage, type ChatToolCall, type ModelStreamProgress } from "./aiForward";
 import {
   TextToolCallStreamFilter,
   hasTextToolCallMarkup,
   stripTextToolCallMarkup,
   synthesizeToolCallsFromText,
 } from "./textToolCalls";
-import { resolveAgentMaxTurns } from "./agentTurnBudget";
+import { AGENT_SAFETY_MAX_TURNS } from "./agentTurnBudget";
 import {
   buildProjectContext,
   formatProjectContextForBuild,
@@ -34,6 +34,13 @@ export type VibeAgentEvent =
         retryAttempt?: number;
         retryMaxAttempts?: number;
         retryError?: string;
+        detail?: string;
+        contextMessages?: number;
+        contextChars?: number;
+        streamChars?: number;
+        streamChunks?: number;
+        toolCallCount?: number;
+        elapsedMs?: number;
       };
     }
   | { type: "tool_start"; data: { id: string; name: string; args: Record<string, unknown> } }
@@ -85,9 +92,62 @@ const MAX_HISTORY_MESSAGES = 40;
 const MAX_HISTORY_CHARS = 120_000;
 const MAX_SSE_TEXT_CHARS = 24_000;
 const MAX_TOOL_RESULT_SSE_CHARS = 16_000;
-function truncateForSse(text: string, max = MAX_SSE_TEXT_CHARS): string {
+const MAX_TOOL_RESULT_MODEL_CHARS = 10_000;
+const MAX_AGENT_CONTEXT_CHARS = 200_000;
+const PROTECTED_RECENT_TOOL_RESULTS = 2;
+
+function truncateText(text: string, max: number, suffix: string): string {
   if (text.length <= max) return text;
-  return `${text.slice(0, max)}\n\n…（已截断，共 ${text.length} 字符）`;
+  return `${text.slice(0, max)}\n\n${suffix.replace("{n}", String(text.length))}`;
+}
+
+function truncateForSse(text: string, max = MAX_SSE_TEXT_CHARS): string {
+  return truncateText(text, max, "…（已截断，共 {n} 字符）");
+}
+
+function truncateToolResultForModel(text: string): string {
+  return truncateText(
+    text,
+    MAX_TOOL_RESULT_MODEL_CHARS,
+    "…（内容已截断，共 {n} 字符。如需更多请用 read_file 的 offset/limit 分段读取）",
+  );
+}
+
+function messageCharSize(message: ChatCompletionMessage): number {
+  let size = String(message.content || "").length;
+  if (message.tool_calls?.length) {
+    size += JSON.stringify(message.tool_calls).length;
+  }
+  return size;
+}
+
+export function compactMessagesForModel(messages: ChatCompletionMessage[]): ChatCompletionMessage[] {
+  const result = messages.map((message) => {
+    if (message.role !== "tool" || !message.content) return { ...message };
+    return { ...message, content: truncateToolResultForModel(String(message.content)) };
+  });
+
+  let total = result.reduce((sum, message) => sum + messageCharSize(message), 0);
+  if (total <= MAX_AGENT_CONTEXT_CHARS) return result;
+
+  const toolIndexes = result
+    .map((message, index) => (message.role === "tool" ? index : -1))
+    .filter((index) => index >= 0);
+  const compressible = Math.max(0, toolIndexes.length - PROTECTED_RECENT_TOOL_RESULTS);
+
+  for (let ti = 0; ti < compressible; ti += 1) {
+    const index = toolIndexes[ti];
+    const raw = String(result[index].content || "");
+    const lineHint = raw.match(/lines \d+-\d+/)?.[0] || "";
+    result[index] = {
+      ...result[index],
+      content: `（较早的工具输出已压缩${lineHint ? `，${lineHint}` : ""}，约 ${raw.length} 字符）`,
+    };
+    total = result.reduce((sum, message) => sum + messageCharSize(message), 0);
+    if (total <= MAX_AGENT_CONTEXT_CHARS) break;
+  }
+
+  return result;
 }
 
 function historyForDisplay(history?: VibeChatHistoryMessage[]): Array<{ role: string; content: string }> {
@@ -128,6 +188,57 @@ function buildHistoryMessages(history?: VibeChatHistoryMessage[]): ChatCompletio
     result.unshift({ role: item.role, content: item.content });
   }
   return result;
+}
+
+function formatCharCount(chars: number): string {
+  if (chars >= 10_000) return `${(chars / 10_000).toFixed(1)} 万字符`;
+  if (chars >= 1000) return `${(chars / 1000).toFixed(1)}k 字符`;
+  return `${chars} 字符`;
+}
+
+function formatElapsedMs(ms: number): string {
+  const sec = Math.max(0, Math.floor(ms / 1000));
+  if (sec < 60) return `${sec}s`;
+  return `${Math.floor(sec / 60)}m ${sec % 60}s`;
+}
+
+function toolDisplayName(name: string): string {
+  const map: Record<string, string> = {
+    read_file: "读取文件",
+    list_dir: "列出目录",
+    grep: "搜索内容",
+    search_files: "搜索文件",
+    write_file: "写入文件",
+    delete_file: "删除文件",
+  };
+  return map[name] || name;
+}
+
+function streamProgressDetail(progress: ModelStreamProgress): string {
+  const elapsed = formatElapsedMs(progress.elapsedMs);
+  if (progress.phase === "request_sent") return "正在发送请求…";
+  if (progress.phase === "waiting_first_byte") return `等待模型首包 · ${elapsed}`;
+  if (progress.phase === "planning_tools") {
+    const names = progress.toolNames.map(toolDisplayName).join("、");
+    return names
+      ? `规划工具：${names}${progress.toolCallCount > progress.toolNames.length ? "…" : ""} · ${elapsed}`
+      : `规划工具调用 · ${elapsed}`;
+  }
+  if (progress.streamChars > 0) {
+    return `流式输出 ${progress.streamChars} 字 · ${progress.streamChunks} 包 · ${elapsed}`;
+  }
+  if (progress.phase === "streaming") {
+    return `流式通道已连接 · 等待内容 · ${elapsed}`;
+  }
+  return `已等待 ${elapsed}`;
+}
+
+function streamProgressPhase(progress: ModelStreamProgress): string {
+  if (progress.phase === "request_sent") return "sending_request";
+  if (progress.phase === "waiting_first_byte") return "waiting_model";
+  if (progress.phase === "planning_tools") return "planning_tools";
+  if (progress.streamChars > 0) return "streaming_model";
+  return "waiting_model";
 }
 
 const VIBE_AGENT_TOOLS = [
@@ -261,6 +372,8 @@ function buildAskSystemPrompt(
     "回答请使用中文。",
     "你可以使用 list_dir、read_file、grep、search_files 工具来探索项目、读取文件，但不能修改任何文件。",
     "若信息不足，请主动使用工具查找相关内容，而不是要求用户打开文件。",
+    "读取文件时：优先 grep / search_files 定位，再用 read_file 的 offset/limit 分段读取（单次约 200 行）；避免连续大块读取同一文件。",
+    "收集到足够信息后立即用自然语言回答，不要无意义地继续读文件。",
     `项目根目录：${projectRoot}`,
   ];
   const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
@@ -405,7 +518,9 @@ async function executeTool(
     const content = await readStagedFileContent(root, resolved.relative, resolved.path, stage);
     if (content === null) return `错误：${resolved.relative} 不存在或无法读取`;
     const offset = Number(args.offset) || 1;
-    const limit = Math.min(800, Math.max(1, Number(args.limit) || 500));
+    const defaultLimit = mode === "ask" ? 200 : 500;
+    const maxLimit = mode === "ask" ? 400 : 800;
+    const limit = Math.min(maxLimit, Math.max(1, Number(args.limit) || defaultLimit));
     return sliceFileLines(content, offset, limit);
   }
 
@@ -431,6 +546,7 @@ async function executeTool(
   }
 
   if (name === "write_file") {
+    if (!stage) return "错误：当前模式不支持写文件";
     const filePath = String(args.path || "").trim();
     const content = args.content;
     if (!filePath) return "错误：缺少 path";
@@ -446,6 +562,7 @@ async function executeTool(
   }
 
   if (name === "delete_file") {
+    if (!stage) return "错误：当前模式不支持删除文件";
     const filePath = String(args.path || "").trim();
     if (!filePath) return "错误：缺少 path";
     const resolved = resolveProjectPath(root, filePath);
@@ -477,9 +594,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     signal,
   } = params;
 
-  const maxTurns =
-    params.maxTurns ??
-    resolveAgentMaxTurns({ mode, prompt, history: params.history });
+  const explicitMaxTurns = params.maxTurns;
+  const statusMaxTurns = explicitMaxTurns;
 
   const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
   const openFileRel = openFile?.relative;
@@ -488,7 +604,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     type: "status",
     data: {
       phase: "preparing",
-      maxTurns,
+      ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
       model,
       ...(openFileRel ? { openFile: openFileRel } : {}),
     },
@@ -496,10 +612,28 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
   let openFileSnippet = "";
   if (openFile) {
+    onEvent({
+      type: "status",
+      data: {
+        phase: "building_context",
+        model,
+        detail: openFileRel ? `读取当前文件 ${openFileRel}…` : "扫描项目结构与关键文件…",
+        ...(openFileRel ? { openFile: openFileRel } : {}),
+      },
+    });
     const result = await readFileContent(openFile.path).catch(() => null);
     if (result?.ok) {
       openFileSnippet = sliceFileLines(result.content, 1, 400);
     }
+  } else {
+    onEvent({
+      type: "status",
+      data: {
+        phase: "building_context",
+        model,
+        detail: "扫描项目结构与关键文件…",
+      },
+    });
   }
 
   let projectContextBlock = "";
@@ -528,7 +662,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     systemPrompt,
     history: historyForDisplay(params.history),
     projectContext: projectContextBlock || undefined,
-    maxTurns,
+    ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
     model,
     ...(openFileRel ? { openFile: openFileRel } : {}),
   });
@@ -539,34 +673,105 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     return;
   }
 
-  for (let turn = 1; turn <= maxTurns; turn += 1) {
+  for (let turn = 1; ; turn += 1) {
+    if (turn > AGENT_SAFETY_MAX_TURNS) {
+      onEvent({
+        type: "status",
+        data: { phase: "finished", turn: AGENT_SAFETY_MAX_TURNS, maxTurns: AGENT_SAFETY_MAX_TURNS },
+      });
+      onEvent({
+        type: "error",
+        data: { message: `已达安全上限（${AGENT_SAFETY_MAX_TURNS} 轮），任务可能未完成。` },
+      });
+      onEvent({ type: "done", data: buildDoneData(writeStage, AGENT_SAFETY_MAX_TURNS) });
+      return;
+    }
+
     if (signal?.aborted) {
-      onEvent({ type: "status", data: { phase: "aborted", turn, maxTurns } });
+      onEvent({
+        type: "status",
+        data: {
+          phase: "aborted",
+          turn,
+          ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+        },
+      });
       onEvent({ type: "done", data: buildDoneData(writeStage, turn - 1) });
       return;
     }
 
-    onEvent({ type: "status", data: { phase: "waiting_model", turn, maxTurns, model } });
+    onEvent({
+      type: "status",
+      data: {
+        phase: "waiting_model",
+        turn,
+        ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+        model,
+      },
+    });
 
     let streamedChars = 0;
     const streamFilter = new TextToolCallStreamFilter();
-    let modelStatusPhase: "waiting_model" | "retrying_model" = "waiting_model";
+    let modelStatusPhase: "waiting_model" | "retrying_model" | "sending_request" | "streaming_model" | "planning_tools" =
+      "waiting_model";
+    const modelWaitStartedAt = Date.now();
     const heartbeat = setInterval(() => {
       if (signal?.aborted) return;
+      if (modelStatusPhase === "streaming_model" || modelStatusPhase === "planning_tools") return;
       onEvent({
         type: "status",
-        data: { phase: modelStatusPhase, turn, maxTurns, model },
+        data: {
+          phase: modelStatusPhase,
+          turn,
+          ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+          model,
+          detail: `已等待 ${formatElapsedMs(Date.now() - modelWaitStartedAt)}`,
+          elapsedMs: Date.now() - modelWaitStartedAt,
+        },
       });
-    }, 12_000);
+    }, 2000);
+    const compactedMessages = compactMessagesForModel(messages);
+    const contextChars = compactedMessages.reduce((sum, message) => sum + messageCharSize(message), 0);
+    onEvent({
+      type: "status",
+      data: {
+        phase: "compacting_context",
+        turn,
+        ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+        model,
+        detail: `${compactedMessages.length} 条消息 · ${formatCharCount(contextChars)} 上下文`,
+        contextMessages: compactedMessages.length,
+        contextChars,
+      },
+    });
     let completion: Awaited<ReturnType<typeof chatCompletionWithTools>>;
     try {
       completion = await chatCompletionWithTools({
         endpoint,
         apiKey,
         model,
-        messages,
+        messages: compactedMessages,
         tools: activeTools,
         signal,
+        onStreamProgress: (progress) => {
+          modelStatusPhase = streamProgressPhase(progress) as typeof modelStatusPhase;
+          onEvent({
+            type: "status",
+            data: {
+              phase: modelStatusPhase,
+              turn,
+              ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+              model,
+              detail: streamProgressDetail(progress),
+              streamChars: progress.streamChars,
+              streamChunks: progress.streamChunks,
+              toolCallCount: progress.toolCallCount,
+              elapsedMs: progress.elapsedMs,
+              contextMessages: compactedMessages.length,
+              contextChars,
+            },
+          });
+        },
         onContentDelta: (delta) => {
           const userDelta = streamFilter.push(delta);
           if (userDelta) {
@@ -576,7 +781,15 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         },
         onAttemptStart: () => {
           modelStatusPhase = "waiting_model";
-          onEvent({ type: "status", data: { phase: "waiting_model", turn, maxTurns, model } });
+          onEvent({
+            type: "status",
+            data: {
+              phase: "waiting_model",
+              turn,
+              ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+              model,
+            },
+          });
         },
         onRetry: ({ attempt, maxAttempts, error }) => {
           modelStatusPhase = "retrying_model";
@@ -585,7 +798,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
             data: {
               phase: "retrying_model",
               turn,
-              maxTurns,
+              ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
               model,
               retryAttempt: attempt,
               retryMaxAttempts: maxAttempts,
@@ -614,7 +827,14 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       if (text && !streamedChars) {
         onEvent({ type: "message", data: { text } });
       }
-      onEvent({ type: "status", data: { phase: "finished", turn, maxTurns } });
+      onEvent({
+        type: "status",
+        data: {
+          phase: "finished",
+          turn,
+          ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+        },
+      });
       onEvent({ type: "done", data: buildDoneData(writeStage, turn) });
       return;
     }
@@ -622,7 +842,12 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     if (visibleContent.trim()) {
       onEvent({
         type: "turn_trace",
-        data: { turn, maxTurns, assistantText: visibleContent.trim(), hasToolCalls: true },
+        data: {
+          turn,
+          ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+          assistantText: visibleContent.trim(),
+          hasToolCalls: true,
+        },
       });
     }
 
@@ -691,14 +916,23 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       messages.push({
         role: "tool",
         tool_call_id: call.id,
-        content: result,
+        content: truncateToolResultForModel(result),
       });
     }
-  }
 
-  onEvent({ type: "status", data: { phase: "finished", turn: maxTurns, maxTurns } });
-  if (!isAsk && writeStage?.pendingList.length) {
-    onEvent({ type: "error", data: { message: `已达最大轮次（${maxTurns}），任务可能未完成。` } });
+    if (explicitMaxTurns !== undefined && turn >= explicitMaxTurns) {
+      onEvent({
+        type: "status",
+        data: { phase: "finished", turn, maxTurns: explicitMaxTurns },
+      });
+      if (!isAsk && writeStage?.pendingList.length) {
+        onEvent({
+          type: "error",
+          data: { message: `已达最大轮次（${explicitMaxTurns}），任务可能未完成。` },
+        });
+      }
+      onEvent({ type: "done", data: buildDoneData(writeStage, turn) });
+      return;
+    }
   }
-  onEvent({ type: "done", data: buildDoneData(writeStage, maxTurns) });
 }

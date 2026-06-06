@@ -2,9 +2,36 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+const MAX_DIFF_PREVIEW_CHARS = 2 * 1024 * 1024;
+
+function isLikelyBinaryText(text: string): boolean {
+  return text.includes("\0");
+}
+
+function ensurePreviewableText(text: string, label: string): string {
+  if (text.length > MAX_DIFF_PREVIEW_CHARS) {
+    throw new Error(`${label} 过大，无法预览`);
+  }
+  if (isLikelyBinaryText(text)) {
+    throw new Error(`${label} 是二进制文件，无法预览`);
+  }
+  return text;
+}
+
+async function readGitObjectForPreview(projectRoot: string, ref: string, label: string): Promise<string | null> {
+  try {
+    const { stdout } = await gitExec(projectRoot, ["show", ref]);
+    return ensurePreviewableText(stdout, label);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message.includes("过大") || message.includes("二进制")) throw error;
+    return null;
+  }
+}
 
 export interface GitStatusFile {
   path: string;
+  oldPath?: string;
   status: string;
   indexStatus: string;
   worktreeStatus: string;
@@ -90,14 +117,19 @@ export async function gitStatus(projectRoot: string): Promise<GitStatusResult> {
     const { stdout: branchOut } = await gitExec(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]);
     const branch = branchOut.trim();
 
-    const { stdout } = await gitExec(projectRoot, ["status", "--porcelain=v1"]);
+    const { stdout } = await gitExec(projectRoot, ["status", "--porcelain=v1", "-z"]);
     const files: GitStatusFile[] = [];
+    const entries = stdout.split("\0").filter(Boolean);
 
-    for (const line of stdout.split("\n")) {
-      if (!line.trim()) continue;
+    for (let i = 0; i < entries.length; i += 1) {
+      const line = entries[i];
+      if (!line) continue;
       const indexStatus = line[0] || " ";
       const worktreeStatus = line[1] || " ";
-      const filePath = line.slice(3).trim();
+      const filePath = line.slice(3);
+      const oldPath = indexStatus === "R" || indexStatus === "C" || worktreeStatus === "R" || worktreeStatus === "C"
+        ? entries[++i]
+        : undefined;
       if (!filePath) continue;
 
       const hasIndexChange = indexStatus !== " " && indexStatus !== "?";
@@ -118,6 +150,7 @@ export async function gitStatus(projectRoot: string): Promise<GitStatusResult> {
           indexStatus,
           worktreeStatus: " ",
           staged: true,
+          ...(oldPath ? { oldPath } : {}),
         });
       }
 
@@ -128,6 +161,7 @@ export async function gitStatus(projectRoot: string): Promise<GitStatusResult> {
           indexStatus: " ",
           worktreeStatus,
           staged: false,
+          ...(oldPath ? { oldPath } : {}),
         });
       }
 
@@ -213,36 +247,23 @@ export interface GitDiffContentResult {
 
 export async function gitDiffContent(projectRoot: string, filePath: string, staged = false): Promise<GitDiffContentResult> {
   try {
-    let before = "";
-    try {
-      const { stdout } = await gitExec(projectRoot, ["show", staged ? `HEAD:${filePath}` : `:${filePath}`]);
-      before = stdout;
-    } catch {
-      if (!staged) {
-        try {
-          const { stdout } = await gitExec(projectRoot, ["show", `HEAD:${filePath}`]);
-          before = stdout;
-        } catch {
-          before = "";
-        }
-      }
+    let before = (await readGitObjectForPreview(projectRoot, staged ? `HEAD:${filePath}` : `:${filePath}`, filePath)) ?? "";
+    if (!before && !staged) {
+      before = (await readGitObjectForPreview(projectRoot, `HEAD:${filePath}`, filePath)) ?? "";
     }
 
     let after = "";
     if (staged) {
-      try {
-        const { stdout } = await gitExec(projectRoot, ["show", `:${filePath}`]);
-        after = stdout;
-      } catch {
-        after = "";
-      }
+      after = (await readGitObjectForPreview(projectRoot, `:${filePath}`, filePath)) ?? "";
     } else {
       const fs = await import("node:fs");
       const fullPath = await import("node:path").then((p) => p.resolve(projectRoot, filePath));
-      try {
-        after = fs.readFileSync(fullPath, "utf-8");
-      } catch {
-        after = "";
+      if (fs.existsSync(fullPath)) {
+        const stat = fs.statSync(fullPath);
+        if (stat.size > MAX_DIFF_PREVIEW_CHARS) throw new Error(`${filePath} 过大，无法预览`);
+        const buffer = fs.readFileSync(fullPath);
+        if (buffer.includes(0)) throw new Error(`${filePath} 是二进制文件，无法预览`);
+        after = buffer.toString("utf-8");
       }
     }
 
@@ -266,19 +287,10 @@ export async function gitCommitFileDiff(
 
     let before = "";
     if (beforeRef) {
-      try {
-        before = (await gitExec(projectRoot, ["show", beforeRef])).stdout;
-      } catch {
-        before = "";
-      }
+      before = (await readGitObjectForPreview(projectRoot, beforeRef, oldPath || filePath)) ?? "";
     }
 
-    let after = "";
-    try {
-      after = (await gitExec(projectRoot, ["show", afterRef])).stdout;
-    } catch {
-      after = "";
-    }
+    const after = (await readGitObjectForPreview(projectRoot, afterRef, filePath)) ?? "";
 
     return { ok: true, before, after };
   } catch (error) {
@@ -377,7 +389,7 @@ export async function gitDiscard(projectRoot: string, files: string[]): Promise<
       if (tracked) {
         await gitExec(projectRoot, ["checkout", "--", file]);
       } else {
-        await gitExec(projectRoot, ["clean", "-f", "--", file]);
+        await gitExec(projectRoot, ["clean", "-fd", "--", file]);
       }
     }
     return { ok: true };

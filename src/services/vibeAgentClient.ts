@@ -41,6 +41,13 @@ export type VibeAgentSseEvent =
         retryAttempt?: number;
         retryMaxAttempts?: number;
         retryError?: string;
+        detail?: string;
+        contextMessages?: number;
+        contextChars?: number;
+        streamChars?: number;
+        streamChunks?: number;
+        toolCallCount?: number;
+        elapsedMs?: number;
       };
     }
   | { type: "tool_start"; data: { id: string; name: string; args: Record<string, unknown> } }

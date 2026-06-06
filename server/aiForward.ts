@@ -36,6 +36,8 @@ export function isRetryableAiError(input: {
   const status = input.status ?? 0;
   if ([408, 429, 502, 503, 504].includes(status)) return true;
 
+  if ((input.error || "").includes("模型返回为空")) return true;
+
   const haystack = `${input.error || ""} ${input.rawText || ""}`.toLowerCase();
   return /gateway error|请求超时|timeout|timed out|econnreset|etimedout|socket hang up|fetch failed|network error|overload|rate.?limit|too many requests|service unavailable|bad gateway/.test(
     haystack,
@@ -108,6 +110,15 @@ export interface ChatCompletionResult {
   error?: string;
 }
 
+export type ModelStreamProgress = {
+  phase: "request_sent" | "waiting_first_byte" | "streaming" | "planning_tools";
+  elapsedMs: number;
+  streamChars: number;
+  streamChunks: number;
+  toolCallCount: number;
+  toolNames: string[];
+};
+
 function parseStreamToolCalls(
   toolCallsMap: Map<number, { id: string; name: string; arguments: string }>,
   deltaToolCalls: Array<{
@@ -156,9 +167,20 @@ async function chatCompletionWithToolsOnce(params: {
   tools: unknown[];
   signal?: AbortSignal;
   onContentDelta?: (delta: string) => void;
+  onStreamProgress?: (progress: ModelStreamProgress) => void;
 }): Promise<ChatCompletionResult> {
   const chatEndpoint = resolveChatEndpoint(params.endpoint);
   const useStream = Boolean(params.onContentDelta);
+  const startedAt = Date.now();
+  let lastProgressAt = 0;
+
+  const emitProgress = (progress: ModelStreamProgress, force = false) => {
+    if (!params.onStreamProgress) return;
+    const now = Date.now();
+    if (!force && now - lastProgressAt < 350) return;
+    lastProgressAt = now;
+    params.onStreamProgress(progress);
+  };
 
   const requestBody: Record<string, unknown> = {
     model: params.model,
@@ -170,12 +192,36 @@ async function chatCompletionWithToolsOnce(params: {
     requestBody.tool_choice = "auto";
   }
 
+  emitProgress(
+    {
+      phase: "request_sent",
+      elapsedMs: 0,
+      streamChars: 0,
+      streamChunks: 0,
+      toolCallCount: 0,
+      toolNames: [],
+    },
+    true,
+  );
+
   const response = await fetch(chatEndpoint, {
     method: "POST",
     headers: buildHeaders(params.apiKey),
     signal: params.signal,
     body: JSON.stringify(requestBody),
   });
+
+  emitProgress(
+    {
+      phase: "waiting_first_byte",
+      elapsedMs: Date.now() - startedAt,
+      streamChars: 0,
+      streamChunks: 0,
+      toolCallCount: 0,
+      toolNames: [],
+    },
+    true,
+  );
 
   if (!response.ok) {
     const rawText = await response.text();
@@ -217,12 +263,34 @@ async function chatCompletionWithToolsOnce(params: {
   const decoder = new TextDecoder();
   let buffer = "";
   let content = "";
+  let streamChunks = 0;
   const toolCallsMap = new Map<number, { id: string; name: string; arguments: string }>();
+  let sawFirstChunk = false;
+
+  const reportStreamProgress = (phase: ModelStreamProgress["phase"], force = false) => {
+    const toolNames = [...toolCallsMap.values()].map((tc) => tc.name).filter(Boolean);
+    emitProgress(
+      {
+        phase,
+        elapsedMs: Date.now() - startedAt,
+        streamChars: content.length,
+        streamChunks,
+        toolCallCount: toolNames.length,
+        toolNames,
+      },
+      force,
+    );
+  };
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
+    if (!sawFirstChunk) {
+      sawFirstChunk = true;
+      reportStreamProgress("streaming", true);
+    }
     buffer += decoder.decode(value, { stream: true });
+    streamChunks += 1;
 
     const lines = buffer.split(/\r?\n/);
     buffer = lines.pop() || "";
@@ -262,9 +330,11 @@ async function chatCompletionWithToolsOnce(params: {
         if (delta?.content) {
           content += delta.content;
           params.onContentDelta?.(delta.content);
+          reportStreamProgress(delta.tool_calls?.length || toolCallsMap.size ? "planning_tools" : "streaming");
         }
         if (delta?.tool_calls?.length) {
           parseStreamToolCalls(toolCallsMap, delta.tool_calls);
+          reportStreamProgress("planning_tools", true);
         }
       } catch {
         // skip malformed SSE chunk
@@ -288,6 +358,7 @@ export async function chatCompletionWithTools(params: {
   tools: unknown[];
   signal?: AbortSignal;
   onContentDelta?: (delta: string) => void;
+  onStreamProgress?: (progress: ModelStreamProgress) => void;
   maxRetries?: number;
   onAttemptStart?: (info: { attempt: number; maxAttempts: number }) => void;
   onRetry?: (info: { attempt: number; maxAttempts: number; delayMs: number; error: string }) => void;
@@ -322,6 +393,7 @@ export async function chatCompletionWithTools(params: {
         tools: params.tools,
         signal: params.signal,
         onContentDelta,
+        onStreamProgress: params.onStreamProgress,
       });
 
       if (result.ok) return result;

@@ -221,7 +221,7 @@
                         v-for="file in gitStagedFiles"
                         :key="file.path"
                         class="git-file-item"
-                        :class="{ active: selectedGitFile === file.path, loading: gitDiffLoadingKey === file.path, 'file-item-draggable': true }"
+                        :class="{ active: selectedGitFile === gitWorkingTreeDiffKey(file.path, file.staged), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
                         @pointerdown="onGitFilePointerDown($event, file.path, file.staged)"
                       >
                       <span class="git-file-check" @pointerdown.stop @click.stop="unstageFile(file.path)">✓</span>
@@ -249,7 +249,7 @@
                         v-for="file in gitUnstagedFiles"
                         :key="file.path"
                         class="git-file-item"
-                        :class="{ active: selectedGitFile === file.path, loading: gitDiffLoadingKey === file.path, 'file-item-draggable': true }"
+                        :class="{ active: selectedGitFile === gitWorkingTreeDiffKey(file.path, file.staged), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
                         @pointerdown="onGitFilePointerDown($event, file.path, file.staged)"
                       >
                       <span class="git-file-check" @pointerdown.stop @click.stop="stageFile(file.path)">+</span>
@@ -650,28 +650,40 @@
                     {{ activitySummary(m) }}
                   </span>
                 </button>
-                <div v-show="isActivityExpanded(m)" class="agent-activity-body">
-                  <div
-                    v-if="isAgentRunning(m) && (m.status || m.agentPhase)"
-                    class="agent-step-hero"
-                    aria-live="polite"
-                  >
-                    <div class="agent-step-hero-main">
+                <div v-show="isActivityExpanded(m)" class="agent-activity-body" :class="{ compact: isAgentRunning(m) }">
+                  <template v-if="isAgentRunning(m)">
+                    <div class="agent-run-strip" aria-live="polite">
                       <span class="status-pulse" aria-hidden="true" />
                       <span v-if="m.agentPhase" class="agent-phase-badge">{{ phaseBadgeLabel(m.agentPhase) }}</span>
-                      <span class="agent-step-hero-text">{{ agentStatusDisplay(m) }}</span>
+                      <span class="agent-run-strip-text">{{ agentStatusDisplay(m) }}</span>
+                      <span v-if="m.agentTurn" class="agent-run-turn">R{{ m.agentTurn }}</span>
                     </div>
-                    <div v-if="agentActiveModel(m) || (m.agentTurn && m.agentMaxTurns)" class="agent-step-hero-meta">
-                      <span v-if="agentActiveModel(m)" class="agent-model-pill">{{ agentActiveModel(m) }}</span>
-                      <span v-if="m.agentTurn && m.agentMaxTurns" class="agent-turn-pill">
-                        {{ m.agentTurn }}/{{ m.agentMaxTurns }}
+                    <div v-if="compactToolSteps(m).length" class="agent-tool-strip">
+                      <span
+                        v-for="step in compactToolSteps(m)"
+                        :key="step.id"
+                        class="agent-tool-chip"
+                        :class="{ running: step.running, fail: !step.ok && !step.running }"
+                      >
+                        <span aria-hidden="true">{{ step.icon || "⚙️" }}</span>
+                        <span class="agent-tool-chip-text">{{ step.title || step.label }}</span>
+                        <span v-if="step.detail" class="agent-tool-chip-detail">{{ step.detail }}</span>
+                        <span v-if="step.running" class="agent-tool-chip-state">…</span>
                       </span>
                     </div>
-                  </div>
-                  <ol v-if="isAgentRunning(m) && agentHistoryLines(m).length" class="agent-step-history">
-                    <li v-for="(line, hi) in agentHistoryLines(m)" :key="hi">{{ line }}</li>
-                  </ol>
-                  <div v-else-if="!isAgentRunning(m) && m.totalTurns" class="agent-status-bar">
+                    <div v-if="m.statusLog?.length" class="status-log-scroll-wrap compact">
+                      <div
+                        :ref="(el) => bindStatusLogScroll(el as HTMLElement | null, m.id)"
+                        class="status-log-scroll"
+                      >
+                        <ol class="status-log">
+                          <li v-for="(line, si) in m.statusLog" :key="si">{{ line }}</li>
+                        </ol>
+                      </div>
+                    </div>
+                  </template>
+                  <template v-else>
+                  <div v-if="m.totalTurns" class="agent-status-bar">
                     <span class="agent-turn-pill">共 {{ m.totalTurns }} 轮</span>
                   </div>
                   <details v-if="m.agentContext" class="trace-block">
@@ -704,11 +716,18 @@
                       </details>
                     </div>
                   </details>
-                  <details v-if="m.statusLog?.length && !isAgentRunning(m)" class="trace-block">
+                  <details v-if="m.statusLog?.length" class="trace-block">
                     <summary class="trace-block-title">阶段日志（{{ m.statusLog.length }}）</summary>
-                    <ol class="status-log">
-                      <li v-for="(line, si) in m.statusLog" :key="si">{{ line }}</li>
-                    </ol>
+                    <div class="status-log-scroll-wrap">
+                      <div
+                        :ref="(el) => bindStatusLogScroll(el as HTMLElement | null, m.id)"
+                        class="status-log-scroll"
+                      >
+                        <ol class="status-log">
+                          <li v-for="(line, si) in m.statusLog" :key="si">{{ line }}</li>
+                        </ol>
+                      </div>
+                    </div>
                   </details>
                   <details v-if="m.turnTraces?.length" class="trace-block">
                     <summary class="trace-block-title">轮次中间输出（{{ m.turnTraces.length }}）</summary>
@@ -724,7 +743,6 @@
                   <details
                     v-if="m.tools?.length"
                     class="trace-block tool-timeline-block"
-                    :open="isAgentRunning(m)"
                   >
                     <summary class="trace-block-title">工具调用（{{ m.tools.length }}）</summary>
                     <ol class="tool-timeline">
@@ -771,15 +789,21 @@
                       </li>
                     </ol>
                   </details>
+                  </template>
                 </div>
               </div>
               <div
-                v-if="m.role === 'assistant' && !m.content && (m.status || isAgentRunning(m))"
+                v-if="
+                  m.role === 'assistant' &&
+                  !m.content &&
+                  (m.status || isAgentRunning(m)) &&
+                  !(isAgentRunning(m) && isActivityExpanded(m))
+                "
                 class="msg-status"
               >
                 <span v-if="isAgentRunning(m)" class="status-pulse" aria-hidden="true" />
                 <span class="msg-status-text">
-                  {{ m.status || (m.chatMode === 'ask' ? '思考中…' : 'Agent 运行中…') }}
+                  {{ agentStatusDisplay(m) || (m.chatMode === 'ask' ? '思考中…' : 'Agent 运行中…') }}
                 </span>
               </div>
               <div v-if="m.content && m.streaming" class="msg-streaming">
@@ -1121,6 +1145,10 @@ type ChatMessage = Omit<PersistedChatMessage, "tools"> & {
   agentTurn?: number;
   agentMaxTurns?: number;
   agentModel?: string;
+  agentDetail?: string;
+  streamChars?: number;
+  contextChars?: number;
+  agentWaitStartedAt?: number;
   streaming?: boolean;
   reverting?: boolean;
   applying?: boolean;
@@ -1163,6 +1191,8 @@ function normalizeChatMessages(messages: PersistedChatMessage[]): ChatMessage[] 
 let agentAbortHandle: { abort: () => void } | null = null;
 let saveChatTimer: ReturnType<typeof setTimeout> | null = null;
 let syncStoreTimer: ReturnType<typeof setTimeout> | null = null;
+let agentUiTickTimer: ReturnType<typeof setInterval> | null = null;
+const agentUiTick = ref(0);
 
 const projectPath = ref("");
 const projectOpened = ref(false);
@@ -1552,11 +1582,19 @@ function phaseBadgeLabel(phase?: string): string {
       return "连接";
     case "preparing":
     case "starting":
+    case "building_context":
       return "准备";
+    case "compacting_context":
+      return "上下文";
     case "waiting_model":
     case "thinking":
     case "retrying_model":
+    case "sending_request":
       return "模型";
+    case "streaming_model":
+      return "输出";
+    case "planning_tools":
+      return "规划";
     case "executing_tool":
     case "executing_tools":
       return "工具";
@@ -1569,35 +1607,71 @@ function phaseBadgeLabel(phase?: string): string {
   }
 }
 
+function appendStatusDetail(base: string, detail?: string): string {
+  const extra = detail?.trim();
+  return extra ? `${base} · ${extra}` : base;
+}
+
 function formatAgentStatus(data: AgentStatusData, compact = false): string {
-  const { phase, turn, maxTurns, openFile, model, toolTitle, toolDetail } = data;
+  const { phase, turn, maxTurns, openFile, model, toolTitle, toolDetail, detail } = data;
 
   if (phase === "connecting_local") return "正在连接本地服务（127.0.0.1:37891）…";
   if (phase === "stream_connected") return "本地服务已连接，等待 Agent 启动…";
   if (phase === "connected") return "本地 Agent 服务已就绪，正在启动任务…";
+  if (phase === "building_context") {
+    return appendStatusDetail("正在扫描项目上下文…", detail);
+  }
+  if (phase === "compacting_context") {
+    return appendStatusDetail("正在压缩并准备模型上下文…", detail);
+  }
+  if (phase === "sending_request") {
+    return appendStatusDetail("正在发送模型请求…", detail);
+  }
   if (phase === "preparing" || phase === "starting") {
     if (chatMode.value === "ask") {
-      return openFile ? `正在准备问答上下文（当前文件：${openFile}）…` : "正在准备问答上下文…";
+      return openFile
+        ? appendStatusDetail(`正在准备问答上下文（当前文件：${openFile}）…`, detail)
+        : appendStatusDetail("正在准备问答上下文…", detail);
     }
     return openFile
-      ? `正在组装 Agent 上下文与工具定义（当前文件：${openFile}）…`
-      : "正在组装 Agent 上下文与工具定义…";
+      ? appendStatusDetail(`正在组装 Agent 上下文与工具定义（当前文件：${openFile}）…`, detail)
+      : appendStatusDetail("正在组装 Agent 上下文与工具定义…", detail);
+  }
+  if (phase === "streaming_model") {
+    if (compact) return appendStatusDetail("模型输出中…", detail);
+    const modelHint = model ? ` · ${model}` : "";
+    const turnHint = turn ? `（第 ${turn} 轮${modelHint}）` : modelHint;
+    return appendStatusDetail(`模型输出中${turnHint}`, detail);
+  }
+  if (phase === "planning_tools") {
+    if (compact) return appendStatusDetail("模型规划工具…", detail);
+    const modelHint = model ? ` · ${model}` : "";
+    const turnHint = turn ? `（第 ${turn} 轮${modelHint}）` : modelHint;
+    return appendStatusDetail(`模型规划工具${turnHint}`, detail);
   }
   if (phase === "waiting_model" || phase === "thinking") {
-    if (compact) return "正在等待模型响应…";
+    if (compact) return appendStatusDetail("正在等待模型响应…", detail);
     const modelHint = model ? ` · ${model}` : "";
-    const turnHint = turn && maxTurns ? `（第 ${turn}/${maxTurns} 轮${modelHint}）` : modelHint;
-    return `正在等待模型响应${turnHint}…`;
+    const turnHint = turn
+      ? maxTurns
+        ? `（第 ${turn}/${maxTurns} 轮${modelHint}）`
+        : `（第 ${turn} 轮${modelHint}）`
+      : modelHint;
+    return appendStatusDetail(`正在等待模型响应${turnHint}…`, detail);
   }
   if (phase === "retrying_model") {
     const modelHint = model ? ` · ${model}` : "";
-    const turnHint = turn && maxTurns ? `（第 ${turn}/${maxTurns} 轮${modelHint}）` : modelHint;
+    const turnHint = turn
+      ? maxTurns
+        ? `（第 ${turn}/${maxTurns} 轮${modelHint}）`
+        : `（第 ${turn} 轮${modelHint}）`
+      : modelHint;
     const retryHint =
       data.retryAttempt && data.retryMaxAttempts
         ? `，第 ${data.retryAttempt}/${data.retryMaxAttempts - 1} 次重试`
         : "";
     const reason = data.retryError ? `：${data.retryError}` : "";
-    return `模型请求失败${reason}，正在重试${turnHint}${retryHint}…`;
+    return appendStatusDetail(`模型请求失败${reason}，正在重试${turnHint}${retryHint}…`, detail);
   }
   if (phase === "executing_tool") {
     return toolDetail ? `正在执行：${toolTitle}（${toolDetail}）` : `正在执行：${toolTitle}…`;
@@ -1609,14 +1683,38 @@ function formatAgentStatus(data: AgentStatusData, compact = false): string {
   return "";
 }
 
-function setAgentStatus(msg: ChatMessage, phase: string, extra?: Partial<AgentStatusData>) {
+function startAgentUiTick() {
+  stopAgentUiTick();
+  agentUiTickTimer = setInterval(() => {
+    agentUiTick.value += 1;
+  }, 1000);
+}
+
+function stopAgentUiTick() {
+  if (agentUiTickTimer) {
+    clearInterval(agentUiTickTimer);
+    agentUiTickTimer = null;
+  }
+}
+
+function setAgentStatus(msg: ChatMessage, phase: string, extra?: Partial<AgentStatusData>, options?: { log?: boolean }) {
+  const prevPhase = msg.agentPhase;
   msg.agentPhase = phase;
-  const statusText = formatAgentStatus({ phase, ...extra });
-  msg.status = statusText;
-  appendStatusLog(msg, statusText);
+  if (extra?.detail !== undefined) msg.agentDetail = extra.detail;
+  if (extra?.streamChars !== undefined) msg.streamChars = extra.streamChars;
+  if (extra?.contextChars !== undefined) msg.contextChars = extra.contextChars;
   if (extra?.turn) msg.agentTurn = extra.turn;
   if (extra?.maxTurns) msg.agentMaxTurns = extra.maxTurns;
   if (extra?.model) msg.agentModel = extra.model;
+  if (phase === "waiting_model" || phase === "sending_request" || phase === "retrying_model") {
+    if (!msg.agentWaitStartedAt) msg.agentWaitStartedAt = Date.now();
+  } else if (phase === "streaming_model" || phase === "planning_tools" || phase === "executing_tool") {
+    msg.agentWaitStartedAt = undefined;
+  }
+  const statusText = formatAgentStatus({ phase, ...extra, turn: msg.agentTurn, maxTurns: msg.agentMaxTurns, model: msg.agentModel || extra?.model });
+  msg.status = statusText;
+  const shouldLog = options?.log ?? phase !== prevPhase;
+  if (shouldLog) appendStatusLog(msg, statusText);
 }
 
 function isAgentRunning(msg: ChatMessage): boolean {
@@ -1641,6 +1739,27 @@ function appendStatusLog(msg: ChatMessage, line: string) {
   if (!msg.statusLog) msg.statusLog = [];
   const last = msg.statusLog[msg.statusLog.length - 1];
   if (last !== text) msg.statusLog.push(text);
+}
+
+const statusLogScrollRefs = new Map<string, HTMLElement>();
+
+function bindStatusLogScroll(el: HTMLElement | null, msgId: string) {
+  if (el) {
+    statusLogScrollRefs.set(msgId, el);
+    if (chatSending.value && msgId === activeAssistantMsgId.value) {
+      scrollStatusLogToBottom(msgId);
+    }
+  } else {
+    statusLogScrollRefs.delete(msgId);
+  }
+}
+
+function scrollStatusLogToBottom(msgId: string) {
+  void nextTick(() => {
+    const el = statusLogScrollRefs.get(msgId);
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  });
 }
 
 function formatToolArgsPreview(name: string, args: Record<string, unknown>): string {
@@ -1710,12 +1829,33 @@ function activitySummary(msg: ChatMessage): string {
 }
 
 function agentRunningHint(msg: ChatMessage): string {
+  if (msg.streamChars && msg.streamChars > 0) return `${msg.streamChars} 字`;
+  if (msg.agentDetail) return msg.agentDetail;
   if (msg.agentTurn && msg.agentMaxTurns) return `${msg.agentTurn}/${msg.agentMaxTurns}`;
+  if (msg.agentTurn) return `第 ${msg.agentTurn} 轮`;
   return "运行中…";
 }
 
 function agentStatusDisplay(msg: ChatMessage): string {
-  return msg.status || (msg.agentPhase ? formatAgentStatus({ phase: msg.agentPhase }, true) : "正在运行…");
+  void agentUiTick.value;
+  if (msg.status) {
+    if (
+      msg.agentWaitStartedAt &&
+      (msg.agentPhase === "waiting_model" ||
+        msg.agentPhase === "sending_request" ||
+        msg.agentPhase === "retrying_model") &&
+      !msg.agentDetail
+    ) {
+      const elapsed = Math.max(0, Math.floor((Date.now() - msg.agentWaitStartedAt) / 1000));
+      return `${msg.status} · 已等待 ${elapsed}s`;
+    }
+    return msg.status;
+  }
+  return msg.agentPhase ? formatAgentStatus({ phase: msg.agentPhase, detail: msg.agentDetail }, true) : "正在运行…";
+}
+
+function compactToolSteps(msg: ChatMessage): AgentToolStep[] {
+  return (msg.tools || []).slice(-2);
 }
 
 function agentActiveModel(msg: ChatMessage): string {
@@ -1726,32 +1866,37 @@ function agentHistoryLines(msg: ChatMessage): string[] {
   const current = agentStatusDisplay(msg);
   return (msg.statusLog || [])
     .filter((line) => line.trim() && line !== current)
-    .slice(-4);
+    .slice(-6);
 }
 
-function activityFeedItems(msg: ChatMessage): Array<{ key: string; kind: "status" | "tool"; text: string }> {
-  const items: Array<{ key: string; kind: "status" | "tool"; text: string }> = [];
+function activityFeedItems(msg: ChatMessage): Array<{ key: string; kind: "status" | "tool"; text: string; active?: boolean }> {
+  const items: Array<{ key: string; kind: "status" | "tool"; text: string; active?: boolean }> = [];
   const seen = new Set<string>();
 
-  for (const [idx, line] of (msg.statusLog || []).slice(-4).entries()) {
+  for (const [idx, line] of (msg.statusLog || []).slice(-8).entries()) {
     const text = line.trim();
     if (!text || seen.has(text)) continue;
     seen.add(text);
     items.push({ key: `status-${idx}-${text}`, kind: "status", text });
   }
 
-  if (msg.status && !seen.has(msg.status)) {
-    seen.add(msg.status);
-    items.push({ key: `status-current-${msg.status}`, kind: "status", text: msg.status });
+  const current = agentStatusDisplay(msg);
+  if (current && !seen.has(current)) {
+    items.push({ key: `status-current-${current}`, kind: "status", text: current, active: true });
   }
 
-  for (const tool of (msg.tools || []).slice(-3)) {
+  for (const tool of msg.tools || []) {
     const state = tool.running ? "执行中" : tool.ok ? "完成" : "失败";
     const detail = tool.detail ? ` · ${tool.detail}` : "";
-    items.push({ key: `tool-${tool.id}-${state}`, kind: "tool", text: `${state}：${tool.title || tool.label}${detail}` });
+    items.push({
+      key: `tool-${tool.id}-${state}`,
+      kind: "tool",
+      text: `${state}：${tool.title || tool.label}${detail}`,
+      active: Boolean(tool.running),
+    });
   }
 
-  return items.slice(-5);
+  return items.slice(-8);
 }
 
 function refreshSessionList(path = projectPath.value.trim()) {
@@ -2391,7 +2536,7 @@ async function openGitLogFile(entry: GitLogEntry, file: GitLogFile) {
     }
 
     const displayPath = file.oldPath ? `${file.oldPath} → ${file.path}` : file.path;
-    const previewPath = joinProjectPath(projectPath.value, `.git-history/${entry.shortHash}/${displayPath}`);
+    const previewPath = `git-history://${entry.shortHash}/${displayPath}`;
     const nextReadOnly = new Set(readOnlyFileKeys.value);
     nextReadOnly.add(normalizePathKey(previewPath));
     readOnlyFileKeys.value = nextReadOnly;
@@ -2405,15 +2550,15 @@ async function openGitLogFile(entry: GitLogEntry, file: GitLogFile) {
 
 async function showGitFileDiff(filePath: string, staged = false) {
   if (!projectOpened.value) return;
-  selectedGitFile.value = filePath;
+  const cacheKey = gitWorkingTreeDiffKey(filePath, staged);
+  selectedGitFile.value = cacheKey;
   gitError.value = "";
-  const fullPath = resolveFullPathFromRel(filePath);
-  const cacheKey = `${staged ? "staged" : "worktree"}:${filePath}`;
+  const previewPath = gitWorkingTreePreviewPath(filePath, staged);
   const cached = gitDiffContentCache.value[cacheKey];
   try {
     let diff = cached;
     if (!diff) {
-      gitDiffLoadingKey.value = filePath;
+      gitDiffLoadingKey.value = cacheKey;
       const result = await fetchGitDiffContent(projectPath.value.trim(), filePath, staged);
       if (!result.ok) {
         gitError.value = result.error || "获取 diff 失败";
@@ -2422,16 +2567,40 @@ async function showGitFileDiff(filePath: string, staged = false) {
       diff = { before: result.before, after: result.after };
       gitDiffContentCache.value = { ...gitDiffContentCache.value, [cacheKey]: diff };
     }
-    await openDiffPreview(fullPath, diff);
+    await openDiffPreview(previewPath, diff, { readOnly: staged });
   } catch (e) {
     gitError.value = e instanceof Error ? e.message : "获取 diff 失败";
   } finally {
-    if (gitDiffLoadingKey.value === filePath) gitDiffLoadingKey.value = "";
+    if (gitDiffLoadingKey.value === cacheKey) gitDiffLoadingKey.value = "";
   }
 }
 
 function gitHistoryDiffKey(hash: string, filePath: string, oldPath?: string): string {
   return `history:${hash}:${oldPath || ""}:${filePath}`;
+}
+
+function gitWorkingTreeDiffKey(filePath: string, staged = false): string {
+  return `${staged ? "staged" : "worktree"}:${filePath}`;
+}
+
+function gitWorkingTreePreviewPath(filePath: string, staged = false): string {
+  if (!staged) return resolveFullPathFromRel(filePath);
+  return `git-index://${filePath}`;
+}
+
+function isVirtualSchemePath(path: string): boolean {
+  return path.startsWith("git-index://") || path.startsWith("git-history://");
+}
+
+function displayFilePath(path: string): string {
+  if (!path) return "";
+  if (path.startsWith("git-index://")) return path.slice("git-index://".length);
+  if (path.startsWith("git-history://")) {
+    const rest = path.slice("git-history://".length);
+    const slash = rest.indexOf("/");
+    return slash >= 0 ? rest.slice(slash + 1) : rest;
+  }
+  return path;
 }
 
 async function openDiffPreview(path: string, diff: FileDiff, options?: { readOnly?: boolean }) {
@@ -2919,6 +3088,12 @@ async function openFile(filePath: string, options?: { force?: boolean; skipUnsav
   activeFilePath.value = filePath;
   fileDirty.value = false;
 
+  if (isVirtualSchemePath(filePath)) {
+    fileContent.value = cached?.content || "";
+    fileLoadError.value = cached ? "" : "预览文件不可直接读取";
+    return;
+  }
+
   const result = await readFile(filePath);
   if (!result.ok) {
     fileContent.value = "";
@@ -3014,7 +3189,8 @@ function onEditorSelect(text: string) {
 
 function askAiWithCode() {
   if (!selectedCode.value) return;
-  const filePath = activeFilePath.value || "未知文件";
+  const raw = activeFilePath.value || "";
+  const filePath = displayFilePath(raw) || "未知文件";
   composerRef.value?.setPlainText(
     `请帮我分析以下代码（${filePath}）：\n\n\`\`\`\n${selectedCode.value}\n\`\`\``,
   );
@@ -3535,17 +3711,24 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
 
   if (event.type === "status") {
     const { phase } = event.data;
-    setAgentStatus(assistantMsg, phase, event.data);
+    const prevPhase = assistantMsg.agentPhase;
+    setAgentStatus(assistantMsg, phase, event.data, { log: phase !== prevPhase });
     patchAssistantMsg(msgId, {
       agentPhase: assistantMsg.agentPhase,
       status: assistantMsg.status,
+      agentDetail: assistantMsg.agentDetail,
+      streamChars: assistantMsg.streamChars,
+      contextChars: assistantMsg.contextChars,
+      agentWaitStartedAt: assistantMsg.agentWaitStartedAt,
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
       agentTurn: assistantMsg.agentTurn,
       agentMaxTurns: assistantMsg.agentMaxTurns,
       agentModel: assistantMsg.agentModel,
-      ...(phase === "finished" ? { agentPhase: undefined, streaming: false } : {}),
+      ...(phase === "finished" ? { agentPhase: undefined, streaming: false, agentWaitStartedAt: undefined } : {}),
     });
+    if (isAgentRunning(assistantMsg)) scrollStatusLogToBottom(msgId);
     if (phase === "aborted") {
+      stopAgentUiTick();
       chatSending.value = false;
       persistChatNow();
       if (pendingPromptQueue.value.length) {
@@ -3581,6 +3764,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
       agentPhase: assistantMsg.agentPhase,
     });
+    if (isAgentRunning(assistantMsg)) scrollStatusLogToBottom(msgId);
     void scrollChatToBottom(true);
     return;
   }
@@ -3615,6 +3799,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
       agentPhase: assistantMsg.agentPhase,
     });
+    if (isAgentRunning(assistantMsg)) scrollStatusLogToBottom(msgId);
     void scrollChatToBottom(true);
     return;
   }
@@ -3647,6 +3832,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
   }
 
   if (event.type === "error") {
+    stopAgentUiTick();
     chatError.value = event.data.message;
     const content = assistantMsg.content || event.data.message;
     assistantMsg.content = content;
@@ -3668,6 +3854,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
   }
 
   if (event.type === "done") {
+    stopAgentUiTick();
     chatSending.value = false;
     agentAbortHandle = null;
     assistantMsg.streaming = false;
@@ -3999,6 +4186,7 @@ async function runAgentTurn(userText: string, options?: { skipUserBubble?: boole
   reloadAiConfig();
   chatSending.value = true;
   chatError.value = "";
+  startAgentUiTick();
 
   const history = buildAgentHistory();
 
@@ -6428,6 +6616,104 @@ button.compact {
   padding: 0 10px 10px;
 }
 
+.agent-activity-body.compact {
+  padding: 0 8px 8px;
+}
+
+.agent-run-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(31, 111, 235, 0.08);
+  border: 1px solid rgba(88, 166, 255, 0.16);
+  min-width: 0;
+}
+
+.agent-run-strip-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-run-turn {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.agent-tool-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.agent-tool-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.3;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.agent-tool-chip.running {
+  border-color: rgba(179, 146, 240, 0.35);
+  background: rgba(179, 146, 240, 0.1);
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.agent-tool-chip.fail {
+  border-color: rgba(248, 81, 73, 0.35);
+  color: #ff9a9a;
+}
+
+.agent-tool-chip-text {
+  font-weight: 600;
+}
+
+.agent-tool-chip-detail {
+  opacity: 0.72;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+}
+
+.agent-tool-chip-state {
+  opacity: 0.55;
+}
+
+.status-log-scroll-wrap.compact {
+  margin: 0;
+}
+
+.status-log-scroll-wrap.compact .status-log-scroll {
+  max-height: 88px;
+}
+
+.status-log-scroll-wrap.compact::before,
+.status-log-scroll-wrap.compact::after {
+  height: 16px;
+}
+
 .agent-step-hero {
   display: flex;
   align-items: center;
@@ -6485,6 +6771,76 @@ button.compact {
   list-style: none;
   display: grid;
   gap: 3px;
+}
+
+.agent-live-feed {
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+  max-height: 160px;
+  overflow: auto;
+}
+
+.agent-live-feed-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.agent-live-feed-item.active {
+  border-color: rgba(88, 166, 255, 0.28);
+  background: rgba(31, 111, 235, 0.08);
+}
+
+.agent-live-feed-item.tool.active {
+  border-color: rgba(179, 146, 240, 0.28);
+  background: rgba(179, 146, 240, 0.08);
+}
+
+.agent-live-feed-dot {
+  width: 6px;
+  height: 6px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.25);
+  flex-shrink: 0;
+}
+
+.agent-live-feed-item.active .agent-live-feed-dot {
+  background: #58a6ff;
+  box-shadow: 0 0 8px rgba(88, 166, 255, 0.65);
+  animation: agent-feed-pulse 1.2s ease-in-out infinite;
+}
+
+.agent-live-feed-item.tool.active .agent-live-feed-dot {
+  background: #b392f0;
+  box-shadow: 0 0 8px rgba(179, 146, 240, 0.65);
+}
+
+.agent-live-feed-text {
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.72);
+  word-break: break-word;
+}
+
+@keyframes agent-feed-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.85);
+  }
 }
 
 .agent-step-history li {
@@ -6755,12 +7111,84 @@ button.compact {
   margin-bottom: 4px;
 }
 
+.status-log-scroll-wrap {
+  position: relative;
+  margin: 0 8px 8px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.status-log-scroll-wrap::before,
+.status-log-scroll-wrap::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 22px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.status-log-scroll-wrap::before {
+  top: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(10, 14, 22, 0.96) 0%,
+    rgba(10, 14, 22, 0.55) 45%,
+    transparent 100%
+  );
+}
+
+.status-log-scroll-wrap::after {
+  bottom: 0;
+  background: linear-gradient(
+    to top,
+    rgba(10, 14, 22, 0.88) 0%,
+    rgba(10, 14, 22, 0.35) 50%,
+    transparent 100%
+  );
+}
+
+.status-log-scroll {
+  max-height: 132px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.status-log-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+
+.status-log-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.status-log-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
 .status-log {
   margin: 0;
-  padding: 0 10px 10px 24px;
+  padding: 10px 12px 10px 26px;
   font-size: 11px;
-  line-height: 1.5;
+  line-height: 1.55;
   color: rgba(255, 255, 255, 0.72);
+  list-style: decimal;
+}
+
+.status-log li {
+  padding: 2px 0;
+  word-break: break-word;
+}
+
+.status-log li:last-child {
+  color: rgba(255, 255, 255, 0.92);
 }
 
 .turn-trace-item {
