@@ -4,12 +4,28 @@ export type AgentModelStep = {
   phase: string;
 };
 
+export type AgentTurnRequestDetail = {
+  model?: string;
+  contextMessages: number;
+  contextChars: number;
+  messages: Array<{ role: string; content: string; toolCalls?: string }>;
+};
+
+export type AgentTurnResponseDetail = {
+  assistantText: string;
+  toolCalls: Array<{ id: string; name: string; arguments: string }>;
+  hasToolCalls: boolean;
+  isFinal: boolean;
+};
+
 export type AgentRoundGroup = {
   turn: number;
   maxTurns?: number;
   narrative?: string;
   modelSteps: AgentModelStep[];
   toolIds: string[];
+  request?: AgentTurnRequestDetail;
+  response?: AgentTurnResponseDetail;
 };
 
 export type AgentRoundTool = {
@@ -39,6 +55,7 @@ const MODEL_LOOP_PHASES = new Set([
   "retrying_model",
   "streaming_model",
   "planning_tools",
+  "summarizing_tools",
 ]);
 
 const SETUP_PHASES = new Set([
@@ -111,6 +128,10 @@ export function recordAgentRoundStatus(
     ...group,
     modelSteps: group.modelSteps.map((step) => ({ ...step })),
     toolIds: [...group.toolIds],
+    request: group.request ? { ...group.request, messages: group.request.messages.map((m) => ({ ...m })) } : undefined,
+    response: group.response
+      ? { ...group.response, toolCalls: group.response.toolCalls.map((call) => ({ ...call })) }
+      : undefined,
   })) : [];
 
   const group = ensureGroup(next, resolvedTurn);
@@ -132,6 +153,10 @@ export function recordAgentRoundNarrative(
     ...group,
     modelSteps: group.modelSteps.map((step) => ({ ...step })),
     toolIds: [...group.toolIds],
+    request: group.request ? { ...group.request, messages: group.request.messages.map((m) => ({ ...m })) } : undefined,
+    response: group.response
+      ? { ...group.response, toolCalls: group.response.toolCalls.map((call) => ({ ...call })) }
+      : undefined,
   })) : [];
 
   const group = ensureGroup(next, turn);
@@ -152,10 +177,86 @@ export function recordAgentRoundToolStart(
     ...group,
     modelSteps: group.modelSteps.map((step) => ({ ...step })),
     toolIds: [...group.toolIds],
+    request: group.request ? { ...group.request, messages: group.request.messages.map((m) => ({ ...m })) } : undefined,
+    response: group.response
+      ? { ...group.response, toolCalls: group.response.toolCalls.map((call) => ({ ...call })) }
+      : undefined,
   })) : [];
 
   const group = ensureGroup(next, resolvedTurn);
   if (!group.toolIds.includes(toolId)) group.toolIds.push(toolId);
+  return next;
+}
+
+function cloneRoundGroups(groups: AgentRoundGroup[] | undefined): AgentRoundGroup[] {
+  return groups
+    ? groups.map((group) => ({
+        ...group,
+        modelSteps: group.modelSteps.map((step) => ({ ...step })),
+        toolIds: [...group.toolIds],
+        request: group.request
+          ? {
+              ...group.request,
+              messages: group.request.messages.map((message) => ({ ...message })),
+            }
+          : undefined,
+        response: group.response
+          ? {
+              ...group.response,
+              toolCalls: group.response.toolCalls.map((call) => ({ ...call })),
+            }
+          : undefined,
+      }))
+    : [];
+}
+
+export function recordAgentRoundRequest(
+  groups: AgentRoundGroup[] | undefined,
+  turn: number,
+  detail: AgentTurnRequestDetail,
+  maxTurns?: number,
+): AgentRoundGroup[] {
+  if (turn <= 0) return groups ? cloneRoundGroups(groups) : [];
+  const next = cloneRoundGroups(groups);
+  const group = ensureGroup(next, turn);
+  group.request = {
+    ...detail,
+    messages: detail.messages.map((message) => ({ ...message })),
+  };
+  if (maxTurns) group.maxTurns = maxTurns;
+  return next;
+}
+
+export function recordAgentRoundResponse(
+  groups: AgentRoundGroup[] | undefined,
+  turn: number,
+  detail: AgentTurnResponseDetail,
+  maxTurns?: number,
+): AgentRoundGroup[] {
+  if (turn <= 0) return groups ? cloneRoundGroups(groups) : [];
+  const next = cloneRoundGroups(groups);
+  const group = ensureGroup(next, turn);
+  group.response = {
+    ...detail,
+    toolCalls: detail.toolCalls.map((call) => ({ ...call })),
+  };
+  if (detail.assistantText.trim()) group.narrative = detail.assistantText.trim();
+  if (maxTurns) group.maxTurns = maxTurns;
+  return next;
+}
+
+export function recordAgentRoundStreamDelta(
+  groups: AgentRoundGroup[] | undefined,
+  turn: number,
+  delta: string,
+  maxTurns?: number,
+): AgentRoundGroup[] {
+  const chunk = delta;
+  if (!chunk || turn <= 0) return groups ? cloneRoundGroups(groups) : [];
+  const next = cloneRoundGroups(groups);
+  const group = ensureGroup(next, turn);
+  group.narrative = `${group.narrative || ""}${delta}`;
+  if (maxTurns) group.maxTurns = maxTurns;
   return next;
 }
 
@@ -224,7 +325,14 @@ export function buildAgentRoundGroupViews(input: {
       tools: group.toolIds.map((id) => toolMap.get(id)).filter((tool): tool is AgentRoundTool => Boolean(tool)),
       active: input.activeTurn === group.turn && Boolean(input.activePhase),
     }))
-    .filter((group) => group.turn === 0 || group.narrative || group.modelSteps.length || group.tools.length);
+    .filter((group) =>
+      group.turn === 0 ||
+      group.narrative ||
+      group.modelSteps.length ||
+      group.tools.length ||
+      group.request ||
+      group.response,
+    );
 }
 
 export function isModelLoopPhase(phase?: string): boolean {

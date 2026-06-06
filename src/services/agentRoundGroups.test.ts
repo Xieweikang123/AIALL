@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildAgentRoundGroupViews,
   recordAgentRoundNarrative,
+  recordAgentRoundRequest,
+  recordAgentRoundResponse,
   recordAgentRoundStatus,
   recordAgentRoundToolStart,
   resetAgentRoundGroupIds,
@@ -54,5 +56,25 @@ describe("agentRoundGroups", () => {
     expect(views[0].narrative).toContain("VibeCodingView");
     expect(views[0].modelSteps).toHaveLength(1);
     expect(views[0].tools).toHaveLength(1);
+  });
+
+  it("stores request and response details on a round group", () => {
+    resetAgentRoundGroupIds();
+    let groups = recordAgentRoundRequest(undefined, 2, {
+      model: "mimo-v2.5-pro",
+      contextMessages: 48,
+      contextChars: 98000,
+      messages: [{ role: "system", content: "sys" }, { role: "user", content: "hi" }],
+    }, 20);
+    groups = recordAgentRoundResponse(groups, 2, {
+      assistantText: "让我看看 VibeCodingView",
+      toolCalls: [{ id: "1", name: "grep", arguments: "{\"pattern\":\"runVibe\"}" }],
+      hasToolCalls: true,
+      isFinal: false,
+    }, 20);
+
+    expect(groups[0].request?.contextMessages).toBe(48);
+    expect(groups[0].response?.toolCalls).toHaveLength(1);
+    expect(groups[0].narrative).toContain("VibeCodingView");
   });
 });

@@ -71,6 +71,28 @@ export type VibeAgentSseEvent =
       type: "turn_trace";
       data: { turn: number; maxTurns?: number; assistantText: string; hasToolCalls: boolean };
     }
+  | {
+      type: "turn_request";
+      data: {
+        turn: number;
+        maxTurns?: number;
+        model?: string;
+        contextMessages: number;
+        contextChars: number;
+        messages: Array<{ role: string; content: string; toolCalls?: string }>;
+      };
+    }
+  | {
+      type: "turn_response";
+      data: {
+        turn: number;
+        maxTurns?: number;
+        assistantText: string;
+        toolCalls: Array<{ id: string; name: string; arguments: string }>;
+        hasToolCalls: boolean;
+        isFinal: boolean;
+      };
+    }
   | { type: "error"; data: { message: string } }
   | { type: "done"; data: { writtenFiles: string[]; pendingFiles: string[]; turns: number } }
   | { type: "unknown"; data: unknown };
@@ -140,6 +162,8 @@ export function runVibeAgentSse(request: VibeAgentRunRequest, onEvent: (event: V
       else if (type === "file_diff") onEvent({ type: "file_diff", data: (parsed || {}) as any });
       else if (type === "agent_context") onEvent({ type: "agent_context", data: (parsed || {}) as any });
       else if (type === "turn_trace") onEvent({ type: "turn_trace", data: (parsed || {}) as any });
+      else if (type === "turn_request") onEvent({ type: "turn_request", data: (parsed || {}) as any });
+      else if (type === "turn_response") onEvent({ type: "turn_response", data: (parsed || {}) as any });
       else if (type === "error") onEvent({ type: "error", data: (parsed || {}) as any });
       else if (type === "done") {
         doneReceived = true;

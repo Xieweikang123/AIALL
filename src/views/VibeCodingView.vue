@@ -298,10 +298,12 @@
                     <button type="button" class="git-log-entry-head" @click="toggleGitLogEntry(entry.hash)">
                       <span class="git-log-chevron">{{ isGitLogEntryOpen(entry.hash) ? "▾" : "▸" }}</span>
                       <span class="git-log-hash">{{ entry.shortHash }}</span>
-                      <span class="git-log-msg">{{ entry.message }}</span>
+                      <span class="git-log-msg" :title="entry.message">{{ entry.message }}</span>
                       <span class="git-log-count">{{ entry.files.length }}</span>
                     </button>
-                    <div v-if="isGitLogEntryOpen(entry.hash)" class="git-log-files">
+                    <div v-if="isGitLogEntryOpen(entry.hash)" class="git-log-detail">
+                      <div v-if="entry.message.includes('\n')" class="git-log-full-msg">{{ entry.message }}</div>
+                      <div class="git-log-files">
                       <button
                         v-for="file in entry.files"
                         :key="`${entry.hash}:${file.oldPath || ''}:${file.path}`"
@@ -316,6 +318,7 @@
                         </span>
                         <span class="git-file-path">{{ file.oldPath ? `${file.oldPath} → ${file.path}` : file.path }}</span>
                       </button>
+                    </div>
                     </div>
                   </div>
                 </div>
@@ -654,145 +657,127 @@
               </div>
               <div
                 v-if="m.role === 'assistant' && hasAgentActivity(m)"
-                class="agent-activity"
-                :class="{ collapsed: !isActivityExpanded(m) }"
+                class="cursor-agent-wrap"
               >
                 <button
+                  v-if="!isAgentRunning(m) && !isActivityExpanded(m)"
                   type="button"
-                  class="agent-activity-toggle"
-                  :aria-expanded="isActivityExpanded(m)"
+                  class="cursor-activity-toggle"
                   @click="toggleActivityExpanded(m)"
                 >
-                  <span class="agent-activity-chevron" aria-hidden="true">
-                    {{ isActivityExpanded(m) ? "▼" : "▶" }}
-                  </span>
-                  <span class="agent-activity-title">{{ m.chatMode === "ask" ? "Ask 执行过程" : "Agent 执行过程" }}</span>
-                  <span v-if="isAgentRunning(m)" class="agent-activity-hint">{{ agentRunningHint(m) }}</span>
-                  <span v-else-if="!isActivityExpanded(m)" class="agent-activity-summary">
-                    {{ activitySummary(m) }}
-                  </span>
+                  {{ cursorActivitySummary(m) }}
                 </button>
-                <div v-show="isActivityExpanded(m)" class="agent-activity-body" :class="{ compact: isAgentRunning(m) }">
-                  <div v-if="isAgentRunning(m)" class="agent-run-strip" aria-live="polite">
-                    <span class="status-pulse" aria-hidden="true" />
-                    <span v-if="m.agentPhase" class="agent-phase-badge">{{ phaseBadgeLabel(m.agentPhase) }}</span>
-                    <span class="agent-run-strip-text">{{ agentStatusDisplay(m) }}</span>
-                    <span v-if="m.agentTurn" class="agent-run-turn">R{{ m.agentTurn }}</span>
-                  </div>
-                  <div v-if="!isAgentRunning(m) && m.totalTurns" class="agent-status-bar">
-                    <span class="agent-turn-pill">共 {{ m.totalTurns }} 轮</span>
-                  </div>
-                  <details v-if="m.agentContext" class="trace-block">
-                    <summary class="trace-block-title">上下文（系统提示 + 历史 + 项目）</summary>
-                    <div class="trace-block-body">
-                      <div class="trace-meta">
-                        模式 {{ m.agentContext.mode === "ask" ? "Ask" : "Build" }}
-                        <span v-if="m.agentContext.model"> · 模型 {{ m.agentContext.model }}</span>
-                        <span v-if="m.agentContext.openFile"> · 当前文件 {{ m.agentContext.openFile }}</span>
-                        <span v-if="m.agentContext.maxTurns"> · 最多 {{ m.agentContext.maxTurns }} 轮</span>
-                      </div>
-                      <details class="trace-nested">
-                        <summary>系统提示词</summary>
-                        <pre class="trace-pre">{{ m.agentContext.systemPrompt }}</pre>
-                      </details>
-                      <details v-if="m.agentContext.history.length" class="trace-nested">
-                        <summary>对话历史（{{ m.agentContext.history.length }} 条）</summary>
-                        <div
-                          v-for="(h, hi) in m.agentContext.history"
-                          :key="hi"
-                          class="trace-history-item"
-                        >
-                          <span class="trace-history-role">{{ h.role === "user" ? "你" : "助手" }}</span>
-                          <pre class="trace-pre compact">{{ h.content }}</pre>
+                <div
+                  v-show="isAgentRunning(m) || isActivityExpanded(m)"
+                  class="cursor-agent-feed-wrap"
+                >
+                  <div
+                    :ref="(el) => bindStatusLogScroll(el as HTMLElement | null, m.id)"
+                    class="cursor-agent-feed"
+                    aria-live="polite"
+                  >
+                    <template v-for="item in cursorAgentFeed(m)" :key="item.key">
+                      <p v-if="item.kind === 'thought'" class="cursor-thought">{{ item.text }}</p>
+                      <details
+                        v-else-if="item.kind === 'action' && shouldShowToolExpand(item.step)"
+                        class="cursor-action-details"
+                      >
+                        <summary class="cursor-action" :class="cursorActionClass(item.step)">
+                          {{ formatCursorActionLabel(item.step) }}
+                        </summary>
+                        <div class="cursor-action-expand">
+                          <pre v-if="shouldShowToolResult(item.step)" class="trace-pre compact">{{ item.step.fullResult }}</pre>
+                          <pre
+                            v-if="formatToolArgsPreview(item.step.name, item.step.args || {})"
+                            class="trace-pre compact"
+                          >{{ formatToolArgsPreview(item.step.name, item.step.args || {}) }}</pre>
                         </div>
                       </details>
-                      <details v-if="m.agentContext.projectContext" class="trace-nested">
-                        <summary>注入的项目上下文</summary>
-                        <pre class="trace-pre">{{ m.agentContext.projectContext }}</pre>
-                      </details>
-                    </div>
-                  </details>
-                  <div
-                    v-if="agentRoundGroupViews(m).length"
-                    class="status-log-scroll-wrap"
-                    :class="{ compact: isAgentRunning(m) }"
-                  >
-                    <div
-                      :ref="(el) => bindStatusLogScroll(el as HTMLElement | null, m.id)"
-                      class="status-log-scroll"
-                    >
-                      <div class="agent-round-timeline">
-                        <section
-                          v-for="group in agentRoundGroupViews(m)"
-                          :key="`round-${group.turn}`"
-                          class="agent-round-group"
-                          :class="{ active: group.active, setup: group.turn === 0 }"
-                        >
-                          <div v-if="group.turn === 0" class="agent-round-head">
-                            <span class="agent-round-turn">{{ roundGroupSetupLabel(group) }}</span>
-                          </div>
-                          <p v-if="group.narrative" class="agent-round-narrative">{{ group.narrative }}</p>
-                          <ul v-if="group.modelSteps.length" class="agent-round-model-steps">
+                      <div
+                        v-else-if="item.kind === 'action'"
+                        class="cursor-action"
+                        :class="cursorActionClass(item.step)"
+                      >
+                        {{ formatCursorActionLabel(item.step) }}
+                      </div>
+                      <p v-else-if="item.kind === 'status'" class="cursor-action planning">{{ item.text }}</p>
+                    </template>
+                  </div>
+                  <details v-if="hasAgentDebugDetails(m)" class="cursor-debug-panel">
+                    <summary>调试详情</summary>
+                    <div class="cursor-debug-body">
+                      <section
+                        v-for="group in agentRoundGroupViews(m).filter((g) => g.turn > 0)"
+                        :key="`debug-${group.turn}`"
+                        class="cursor-debug-round"
+                      >
+                        <div class="cursor-debug-round-title">第 {{ group.turn }} 轮</div>
+                        <details v-if="group.modelSteps.length" class="cursor-debug-nested">
+                          <summary>模型链路 · {{ group.modelSteps.length }} 步</summary>
+                          <ul class="agent-round-model-steps">
                             <li
                               v-for="step in group.modelSteps"
                               :key="step.id"
                               class="agent-round-model-step status-log-entry"
-                              :class="[
-                                statusLogPhaseClass(step.text),
-                                { active: isActiveModelStep(m, group, step) },
-                              ]"
                             >
-                              <span class="status-log-dot" />
-                              <span class="status-log-text">{{ liveModelStepText(m, group, step) }}</span>
+                              <span class="status-log-text">{{ cleanStatusLogText(step.text) }}</span>
                             </li>
                           </ul>
-                          <ol v-if="group.tools.length" class="agent-round-tools tool-timeline">
-                            <li
-                              v-for="step in group.tools"
-                              :key="step.id"
-                              class="tool-item"
-                              :class="{
-                                running: step.running,
-                                fail: !step.ok && !step.running,
-                                done: !step.running && step.ok,
-                              }"
+                        </details>
+                        <details v-if="group.request" class="cursor-debug-nested">
+                          <summary>
+                            请求详情 · {{ group.request.contextMessages }} 条 · {{ formatContextChars(group.request.contextChars) }}
+                          </summary>
+                          <div class="agent-round-message-list">
+                            <div
+                              v-for="(message, mi) in group.request.messages"
+                              :key="`${group.turn}-req-${mi}`"
+                              class="agent-round-message"
                             >
-                              <details v-if="shouldShowToolExpand(step)" class="tool-item-details">
-                                <summary class="tool-item-row">
-                                  <span class="tool-item-icon" aria-hidden="true">{{ step.icon || "⚙️" }}</span>
-                                  <span class="tool-item-line">
-                                    <span class="tool-item-action">{{ step.title || step.label }}</span>
-                                    <span v-if="step.detail" class="tool-item-target">{{ step.detail }}</span>
-                                    <span v-if="step.summary" class="tool-item-status" :class="{ fail: !step.ok }">
-                                      {{ step.summary }}
-                                    </span>
-                                  </span>
+                              <details
+                                v-if="shouldCollapseRequestMessage(message.role, message.content || '')"
+                                class="agent-round-message-collapsible"
+                              >
+                                <summary class="agent-round-message-summary">
+                                  <span class="agent-round-message-role">{{ turnMessageRoleLabel(message.role) }}</span>
+                                  <span class="agent-round-message-meta">{{ messagePreviewLength(message.content || "") }}</span>
                                 </summary>
-                                <div class="tool-item-expand-body">
-                                  <pre v-if="shouldShowToolResult(step)" class="trace-pre compact">{{ step.fullResult }}</pre>
-                                  <pre
-                                    v-if="formatToolArgsPreview(step.name, step.args || {})"
-                                    class="trace-pre compact"
-                                  >{{ formatToolArgsPreview(step.name, step.args || {}) }}</pre>
-                                </div>
+                                <pre v-if="message.content" class="trace-pre compact">{{ message.content }}</pre>
+                                <pre v-if="message.toolCalls" class="trace-pre compact tool-call-preview">{{ message.toolCalls }}</pre>
                               </details>
-                              <div v-else class="tool-item-row">
-                                <span class="tool-item-icon" aria-hidden="true">{{ step.icon || "⚙️" }}</span>
-                                <span class="tool-item-line">
-                                  <span class="tool-item-action">{{ step.title || step.label }}</span>
-                                  <span v-if="step.detail" class="tool-item-target">{{ step.detail }}</span>
-                                  <span v-if="step.running" class="tool-item-status running">执行中</span>
-                                  <span v-else-if="step.summary" class="tool-item-status" :class="{ fail: !step.ok }">
-                                    {{ step.summary }}
-                                  </span>
-                                </span>
-                              </div>
-                            </li>
-                          </ol>
-                        </section>
-                      </div>
+                              <template v-else>
+                                <div class="agent-round-message-head">
+                                  <span class="agent-round-message-role">{{ turnMessageRoleLabel(message.role) }}</span>
+                                </div>
+                                <pre v-if="message.content" class="trace-pre compact">{{ message.content }}</pre>
+                              </template>
+                            </div>
+                          </div>
+                        </details>
+                        <details v-if="group.response" class="cursor-debug-nested">
+                          <summary>回复详情</summary>
+                          <pre v-if="group.response.assistantText" class="trace-pre compact">{{ group.response.assistantText }}</pre>
+                          <pre
+                            v-for="call in group.response.toolCalls"
+                            :key="call.id"
+                            class="trace-pre compact tool-call-preview"
+                          >{{ call.name }}({{ call.arguments }})</pre>
+                        </details>
+                      </section>
+                      <details v-if="m.agentContext" class="cursor-debug-nested">
+                        <summary>初始上下文</summary>
+                        <pre class="trace-pre compact">{{ m.agentContext.systemPrompt }}</pre>
+                      </details>
                     </div>
-                  </div>
+                  </details>
+                  <button
+                    v-if="!isAgentRunning(m)"
+                    type="button"
+                    class="cursor-activity-collapse"
+                    @click="collapseAgentActivity(m)"
+                  >
+                    收起
+                  </button>
                 </div>
               </div>
               <div
@@ -800,7 +785,7 @@
                   m.role === 'assistant' &&
                   !m.content &&
                   (m.status || isAgentRunning(m)) &&
-                  !(isAgentRunning(m) && isActivityExpanded(m))
+                  !(isAgentRunning(m) && hasAgentActivity(m))
                 "
                 class="msg-status"
               >
@@ -809,11 +794,15 @@
                   {{ agentStatusDisplay(m) || (m.chatMode === 'ask' ? '思考中…' : 'Agent 运行中…') }}
                 </span>
               </div>
-              <div v-if="m.content && m.streaming" class="msg-streaming">
+              <div v-if="m.content && m.streaming && shouldShowAssistantBubbleContent(m)" class="msg-streaming">
                 <ChatMarkdown :content="m.content" @apply-block="(idx: number) => applyCodeBlock(extractCodeBlocks(m.content)[idx])" />
                 <span v-if="isAgentRunning(m)" class="stream-cursor" aria-hidden="true">▍</span>
               </div>
-              <ChatMarkdown v-else-if="m.content" :content="m.content" @apply-block="(idx: number) => applyCodeBlock(extractCodeBlocks(m.content)[idx])" />
+              <ChatMarkdown
+                v-else-if="m.content && shouldShowAssistantBubbleContent(m)"
+                :content="m.content"
+                @apply-block="(idx: number) => applyCodeBlock(extractCodeBlocks(m.content)[idx])"
+              />
               <div
                 v-if="m.role === 'assistant' && m.turnFileDiffs && Object.keys(m.turnFileDiffs).length"
                 class="inline-diff-list"
@@ -1073,11 +1062,23 @@ import {
 import {
   buildAgentRoundGroupViews,
   recordAgentRoundNarrative,
+  recordAgentRoundRequest,
+  recordAgentRoundResponse,
   recordAgentRoundStatus,
+  recordAgentRoundStreamDelta,
   recordAgentRoundToolStart,
   type AgentRoundGroup,
   type AgentRoundGroupView,
 } from "../services/agentRoundGroups";
+import {
+  buildCursorAgentFeed,
+  cursorActionClass,
+  formatCursorActionLabel,
+} from "../services/agentCursorFeed";
+import {
+  messagePreviewLength,
+  shouldCollapseRequestMessage,
+} from "../services/agentNarrativeSegments";
 import {
   addProjectToHistory,
   clearProjectHistory,
@@ -1206,6 +1207,12 @@ function normalizeChatMessages(messages: PersistedChatMessage[]): ChatMessage[] 
       narrative: group.narrative,
       modelSteps: group.modelSteps.map((step) => ({ ...step })),
       toolIds: [...group.toolIds],
+      request: group.request
+        ? { ...group.request, messages: group.request.messages.map((message) => ({ ...message })) }
+        : undefined,
+      response: group.response
+        ? { ...group.response, toolCalls: group.response.toolCalls.map((call) => ({ ...call })) }
+        : undefined,
     })),
   }));
 }
@@ -1831,7 +1838,8 @@ function shouldShowToolResult(step: AgentToolStep): boolean {
 
 function shouldShowToolExpand(step: AgentToolStep): boolean {
   if (step.running) return false;
-  return shouldShowToolResult(step) || Boolean(formatToolArgsPreview(step.name, step.args || {}));
+  if (step.fullResult?.trim()) return true;
+  return Boolean(formatToolArgsPreview(step.name, step.args || {}));
 }
 
 function truncateDiffPreview(text: string, max = 1200): string {
@@ -1846,6 +1854,36 @@ function isActivityExpanded(msg: ChatMessage): boolean {
 
 function collapseAgentActivity(msg: ChatMessage) {
   msg.activityExpanded = false;
+  patchAssistantMsg(msg.id, { activityExpanded: false });
+  schedulePersistChat();
+}
+
+function cursorAgentFeed(msg: ChatMessage) {
+  void agentUiTick.value;
+  return buildCursorAgentFeed({
+    groups: agentRoundGroupViews(msg),
+    isRunning: isAgentRunning(msg),
+    agentPhase: msg.agentPhase,
+    agentDetail: msg.agentDetail || msg.status,
+  });
+}
+
+function hasAgentDebugDetails(msg: ChatMessage): boolean {
+  return Boolean(
+    msg.agentContext ||
+      msg.roundGroups?.some((group) => group.turn > 0 && (group.request || group.response || group.modelSteps.length)),
+  );
+}
+
+function cursorActivitySummary(msg: ChatMessage): string {
+  const actions = msg.tools?.length ?? 0;
+  const last = msg.tools?.[msg.tools.length - 1];
+  if (last && !last.running) {
+    return `${actions} steps · ${formatCursorActionLabel(last)}`;
+  }
+  if (actions > 0) return `${actions} steps`;
+  if (msg.totalTurns) return `${msg.totalTurns} turns`;
+  return "Show steps";
 }
 
 function toggleActivityExpanded(msg: ChatMessage) {
@@ -1934,8 +1972,51 @@ function roundGroupSetupLabel(group: AgentRoundGroupView): string {
   return group.turn === 0 ? "准备阶段" : `第 ${group.turn} 轮`;
 }
 
+function shouldShowAssistantBubbleContent(msg: ChatMessage): boolean {
+  if (!msg.content?.trim()) return false;
+  if (!isAgentRunning(msg)) return true;
+  const groups = msg.roundGroups || [];
+  const last = groups[groups.length - 1];
+  return Boolean(last?.response?.isFinal);
+}
+
 function isActiveModelStep(msg: ChatMessage, group: AgentRoundGroupView, step: { phase: string }): boolean {
-  return isAgentRunning(msg) && group.active && msg.agentPhase === step.phase;
+  return isAgentRunning(msg) && !!group.active && msg.agentPhase === step.phase;
+}
+
+function modelStepPhaseLabel(phase: string): string {
+  switch (phase) {
+    case "compacting_context":
+      return "上下文";
+    case "sending_request":
+      return "请求";
+    case "waiting_model":
+    case "retrying_model":
+      return "等待";
+    case "streaming_model":
+      return "输出";
+    case "planning_tools":
+      return "规划";
+    case "summarizing_tools":
+      return "整理";
+    case "connecting_local":
+    case "stream_connected":
+    case "connected":
+    case "reconnecting":
+      return "连接";
+    case "preparing":
+    case "starting":
+    case "building_context":
+      return "准备";
+    default:
+      return "步骤";
+  }
+}
+
+function isRoundGroupComplete(msg: ChatMessage, group: AgentRoundGroupView): boolean {
+  if (isAgentRunning(msg) && group.active) return false;
+  if (group.tools.some((tool) => tool.running)) return false;
+  return true;
 }
 
 function liveModelStepText(msg: ChatMessage, group: AgentRoundGroupView, step: { text: string; phase: string }): string {
@@ -1959,8 +2040,35 @@ function syncRoundGroupsPatch(msg: ChatMessage): Pick<ChatMessage, "roundGroups"
       ...group,
       modelSteps: group.modelSteps.map((step) => ({ ...step })),
       toolIds: [...group.toolIds],
+      request: group.request
+        ? { ...group.request, messages: group.request.messages.map((message) => ({ ...message })) }
+        : undefined,
+      response: group.response
+        ? { ...group.response, toolCalls: group.response.toolCalls.map((call) => ({ ...call })) }
+        : undefined,
     })),
   };
+}
+
+function formatContextChars(chars: number): string {
+  if (chars >= 10_000) return `${(chars / 10_000).toFixed(1)} 万字符`;
+  if (chars >= 1000) return `${(chars / 1000).toFixed(1)}k 字符`;
+  return `${chars} 字符`;
+}
+
+function turnMessageRoleLabel(role: string): string {
+  switch (role) {
+    case "system":
+      return "系统";
+    case "user":
+      return "用户";
+    case "assistant":
+      return "助手";
+    case "tool":
+      return "工具结果";
+    default:
+      return role;
+  }
 }
 
 function refreshSessionList(path = projectPath.value.trim()) {
@@ -2424,7 +2532,7 @@ async function stageAll() {
   if (!filesToStage.length) return;
   gitStatus.value = gitStatus.value.map((f) => ({ ...f, staged: true }));
   try {
-    const result = await stageGitFiles(projectPath.value.trim(), []);
+    const result = await stageGitFiles(projectPath.value.trim(), filesToStage);
     if (!result.ok) {
       gitError.value = result.error || "暂存失败";
       await refreshGitStatus();
@@ -2482,7 +2590,7 @@ async function discardAll(event?: MouseEvent) {
   if (!unstagedPaths.length) return;
   gitStatus.value = gitStagedFiles.value;
   try {
-    const result = await discardGitFiles(projectPath.value.trim(), []);
+    const result = await discardGitFiles(projectPath.value.trim(), unstagedPaths);
     if (!result.ok) {
       gitError.value = result.error || "丢弃更改失败";
       await refreshGitStatus();
@@ -3830,6 +3938,51 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
     return;
   }
 
+  if (event.type === "turn_request") {
+    assistantMsg.roundGroups = recordAgentRoundRequest(
+      assistantMsg.roundGroups,
+      event.data.turn,
+      {
+        model: event.data.model,
+        contextMessages: event.data.contextMessages,
+        contextChars: event.data.contextChars,
+        messages: event.data.messages,
+      },
+      event.data.maxTurns,
+    );
+    patchAssistantMsg(msgId, syncRoundGroupsPatch(assistantMsg));
+    if (isAgentRunning(assistantMsg)) scrollStatusLogToBottom(msgId);
+    return;
+  }
+
+  if (event.type === "turn_response") {
+    assistantMsg.roundGroups = recordAgentRoundResponse(
+      assistantMsg.roundGroups,
+      event.data.turn,
+      {
+        assistantText: event.data.assistantText,
+        toolCalls: event.data.toolCalls,
+        hasToolCalls: event.data.hasToolCalls,
+        isFinal: event.data.isFinal,
+      },
+      event.data.maxTurns,
+    );
+    if (event.data.hasToolCalls) {
+      assistantMsg.content = "";
+      assistantMsg.streaming = false;
+    } else if (event.data.isFinal && event.data.assistantText) {
+      assistantMsg.content = event.data.assistantText;
+      assistantMsg.streaming = false;
+    }
+    patchAssistantMsg(msgId, {
+      ...syncRoundGroupsPatch(assistantMsg),
+      content: assistantMsg.content,
+      streaming: assistantMsg.streaming,
+    });
+    if (isAgentRunning(assistantMsg)) scrollStatusLogToBottom(msgId);
+    return;
+  }
+
   if (event.type === "turn_trace") {
     if (!assistantMsg.turnTraces) assistantMsg.turnTraces = [];
     assistantMsg.turnTraces.push({ ...event.data });
@@ -3957,10 +4110,21 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
   if (event.type === "message_delta") {
     const delta = event.data.delta || "";
     if (!delta) return;
-    const nextContent = `${assistantMsg.content || ""}${delta}`;
+    const turn = assistantMsg.agentTurn ?? 1;
+    assistantMsg.roundGroups = recordAgentRoundStreamDelta(
+      assistantMsg.roundGroups,
+      turn,
+      delta,
+      assistantMsg.agentMaxTurns,
+    );
+    assistantMsg.streamChars = (assistantMsg.streamChars || 0) + delta.length;
     assistantMsg.streaming = true;
-    assistantMsg.content = nextContent;
-    patchAssistantMsg(msgId, { streaming: true, content: nextContent });
+    patchAssistantMsg(msgId, {
+      streaming: true,
+      streamChars: assistantMsg.streamChars,
+      ...syncRoundGroupsPatch(assistantMsg),
+    });
+    if (isAgentRunning(assistantMsg)) scrollStatusLogToBottom(msgId);
     void scrollChatToBottom(true);
     return;
   }
@@ -5299,6 +5463,22 @@ button.ghost.danger:hover:not(:disabled) {
   color: var(--text-dim);
   font-size: 11px;
   text-align: center;
+}
+
+.git-log-detail {
+  padding: 0 0 5px 27px;
+}
+
+.git-log-full-msg {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 8px 12px;
+  margin-bottom: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
 }
 
 .git-log-files {
@@ -6794,6 +6974,135 @@ button.compact {
   overflow: hidden;
 }
 
+.cursor-agent-wrap {
+  margin: 4px 0 10px;
+}
+
+.cursor-agent-feed-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cursor-agent-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: min(50vh, 420px);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.cursor-thought {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.86);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.cursor-action {
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.cursor-action.done {
+  color: rgba(126, 231, 135, 0.9);
+}
+
+.cursor-action.running {
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.cursor-action.fail {
+  color: #ff9a9a;
+}
+
+.cursor-action.planning {
+  color: rgba(255, 255, 255, 0.34);
+}
+
+.cursor-action-details {
+  margin: 0;
+}
+
+.cursor-action-details > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.cursor-action-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.cursor-action-expand {
+  margin: 4px 0 2px 8px;
+  padding-left: 8px;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.cursor-activity-toggle,
+.cursor-activity-collapse {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.cursor-activity-toggle:hover,
+.cursor-activity-collapse:hover {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.cursor-debug-panel {
+  margin-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 6px;
+}
+
+.cursor-debug-panel > summary {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.38);
+  cursor: pointer;
+}
+
+.cursor-debug-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.cursor-debug-round-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.35);
+  margin-bottom: 4px;
+}
+
+.cursor-debug-nested {
+  margin-left: 4px;
+}
+
+.cursor-debug-nested > summary {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.48);
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+
 .agent-activity.collapsed {
   background: transparent;
   border-color: transparent;
@@ -6942,12 +7251,267 @@ button.compact {
   opacity: 0.55;
 }
 
+.agent-run-mini {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: rgba(31, 111, 235, 0.06);
+  border: 1px solid rgba(88, 166, 255, 0.12);
+  min-width: 0;
+}
+
+.agent-run-mini-turn {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  color: #91beff;
+}
+
+.agent-run-mini-model {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.45);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-run-mini-status {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.72);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-round-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.agent-round-group {
+  position: relative;
+  padding: 10px 10px 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.agent-round-group.active {
+  border-color: rgba(88, 166, 255, 0.28);
+  background: rgba(31, 111, 235, 0.05);
+  box-shadow: inset 3px 0 0 rgba(88, 166, 255, 0.55);
+}
+
+.agent-round-group.setup {
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.agent-round-group.done:not(.setup) {
+  opacity: 0.92;
+}
+
+.agent-round-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.42);
+  margin-bottom: 8px;
+}
+
+.agent-round-max {
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.28);
+}
+
+.agent-round-narrative {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(179, 146, 240, 0.08);
+  border-left: 3px solid rgba(179, 146, 240, 0.55);
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.88);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-round-section + .agent-round-section {
+  margin-top: 10px;
+}
+
+.agent-round-section-label {
+  margin-bottom: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: rgba(255, 255, 255, 0.38);
+}
+
+.agent-round-model-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 8px;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.agent-round-model-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding-left: 0;
+}
+
+.agent-round-model-step:last-child {
+  margin-bottom: 0;
+}
+
+.agent-round-model-step .status-log-dot {
+  margin-top: 5px;
+}
+
+.agent-round-step-tag {
+  flex-shrink: 0;
+  min-width: 34px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.55);
+  text-align: center;
+}
+
+.agent-round-model-step.active .agent-round-step-tag {
+  background: rgba(88, 166, 255, 0.18);
+  color: #91beff;
+}
+
+.agent-round-model-step.active .status-log-text {
+  color: #c8e1ff;
+}
+
+.agent-round-model-step.done:not(.active) .status-log-text {
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.agent-round-tools {
+  margin: 0;
+  padding: 0 0 0 8px;
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.agent-round-tools .tool-item {
+  margin-bottom: 5px;
+}
+
+.agent-round-tools .tool-item.done .tool-item-action {
+  color: rgba(126, 231, 135, 0.92);
+}
+
+.agent-round-tools .tool-item.running .tool-item-action {
+  color: #91beff;
+}
+
+.agent-round-detail {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+}
+
+.agent-round-detail[open] {
+  border-color: rgba(88, 166, 255, 0.18);
+}
+
+.agent-round-detail-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+  list-style: none;
+}
+
+.agent-round-detail-summary::-webkit-details-marker {
+  display: none;
+}
+
+.agent-round-detail-meta {
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.agent-round-message-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 10px 10px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.agent-round-message {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 8px;
+}
+
+.agent-round-message:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.agent-round-message-head {
+  margin-bottom: 4px;
+}
+
+.agent-round-message-role {
+  display: inline-flex;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.agent-round-response-body {
+  padding: 0 10px 10px;
+}
+
+.agent-round-tool-plan {
+  margin-top: 8px;
+}
+
+.tool-call-preview {
+  color: rgba(126, 231, 135, 0.88);
+}
+
 .status-log-scroll-wrap.compact {
   margin: 0;
 }
 
 .status-log-scroll-wrap.compact .status-log-scroll {
-  max-height: 88px;
+  max-height: min(42vh, 360px);
 }
 
 .status-log-scroll-wrap.compact::before,

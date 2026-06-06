@@ -34,6 +34,18 @@ export type PersistedAgentRoundGroup = {
   narrative?: string;
   modelSteps: PersistedAgentModelStep[];
   toolIds: string[];
+  request?: {
+    model?: string;
+    contextMessages: number;
+    contextChars: number;
+    messages: Array<{ role: string; content: string; toolCalls?: string }>;
+  };
+  response?: {
+    assistantText: string;
+    toolCalls: Array<{ id: string; name: string; arguments: string }>;
+    hasToolCalls: boolean;
+    isFinal: boolean;
+  };
 };
 
 export type PersistedChatMessage = {
@@ -209,6 +221,18 @@ function sanitizeMessages(messages: PersistedChatMessage[]): PersistedChatMessag
             narrative: group.narrative,
             modelSteps: group.modelSteps.map((step) => ({ ...step })),
             toolIds: [...group.toolIds],
+            request: group.request
+              ? {
+                  ...group.request,
+                  messages: group.request.messages.map((message) => ({ ...message })),
+                }
+              : undefined,
+            response: group.response
+              ? {
+                  ...group.response,
+                  toolCalls: group.response.toolCalls.map((call) => ({ ...call })),
+                }
+              : undefined,
           }))
         : undefined,
       totalTurns: m.totalTurns,

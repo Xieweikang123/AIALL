@@ -316,17 +316,23 @@ export async function gitLog(projectRoot: string, count = 20): Promise<GitLogRes
       "log",
       `--max-count=${count}`,
       "--name-status",
-      "--format=%x1e%H%x1f%h%x1f%an%x1f%ai%x1f%s",
+      "--format=%x1e%H%x1f%h%x1f%an%x1f%ai%x1f%B%x00",
     ]);
 
     const entries: GitLogEntry[] = [];
     const blocks = stdout.split("\x1e").filter((block) => block.trim());
 
     for (const block of blocks) {
-      const [header = "", ...fileLines] = block.split("\n");
-      const headerParts = header.split("\x1f");
+      const nullIdx = block.indexOf("\x00");
+      if (nullIdx === -1) continue;
+
+      const headerStr = block.substring(0, nullIdx);
+      const fileStr = block.substring(nullIdx + 1);
+      const headerParts = headerStr.split("\x1f");
+
       if (headerParts.length >= 5) {
         const files: GitLogFile[] = [];
+        const fileLines = fileStr.split("\n");
         for (const line of fileLines) {
           if (!line.trim()) continue;
           const parts = line.split("\t");
@@ -344,7 +350,7 @@ export async function gitLog(projectRoot: string, count = 20): Promise<GitLogRes
           shortHash: headerParts[1].trim(),
           author: headerParts[2].trim(),
           date: headerParts[3].trim(),
-          message: headerParts.slice(4).join("\x1f").trim(),
+          message: headerParts.slice(4).join("\x1f").replace(/\n+$/, "").trim(),
           files,
         });
       }

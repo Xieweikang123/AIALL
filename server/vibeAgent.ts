@@ -64,6 +64,28 @@ export type VibeAgentEvent =
       type: "turn_trace";
       data: { turn: number; maxTurns?: number; assistantText: string; hasToolCalls: boolean };
     }
+  | {
+      type: "turn_request";
+      data: {
+        turn: number;
+        maxTurns?: number;
+        model?: string;
+        contextMessages: number;
+        contextChars: number;
+        messages: Array<{ role: string; content: string; toolCalls?: string }>;
+      };
+    }
+  | {
+      type: "turn_response";
+      data: {
+        turn: number;
+        maxTurns?: number;
+        assistantText: string;
+        toolCalls: Array<{ id: string; name: string; arguments: string }>;
+        hasToolCalls: boolean;
+        isFinal: boolean;
+      };
+    }
   | { type: "error"; data: { message: string } }
   | { type: "done"; data: { writtenFiles: string[]; pendingFiles: string[]; turns: number } };
 
@@ -155,6 +177,27 @@ function historyForDisplay(history?: VibeChatHistoryMessage[]): Array<{ role: st
     role: m.role,
     content: truncateForSse(String(m.content || ""), 4000),
   }));
+}
+
+const TURN_DISPLAY_MESSAGE_CHARS = 2_400;
+
+function messagesForTurnDisplay(messages: ChatCompletionMessage[]): Array<{ role: string; content: string; toolCalls?: string }> {
+  return messages.map((message) => {
+    const item: { role: string; content: string; toolCalls?: string } = {
+      role: message.role,
+      content: truncateForSse(String(message.content || ""), TURN_DISPLAY_MESSAGE_CHARS),
+    };
+    if (message.tool_calls?.length) {
+      item.toolCalls = message.tool_calls
+        .map((call) => {
+          const args = call.function.arguments || "{}";
+          const argsPreview = args.length > 600 ? `${args.slice(0, 600)}…` : args;
+          return `${call.function.name}(${argsPreview})`;
+        })
+        .join("\n");
+    }
+    return item;
+  });
 }
 
 function emitAgentContext(
@@ -744,6 +787,17 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         contextChars,
       },
     });
+    onEvent({
+      type: "turn_request",
+      data: {
+        turn,
+        ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+        model,
+        contextMessages: compactedMessages.length,
+        contextChars,
+        messages: messagesForTurnDisplay(compactedMessages),
+      },
+    });
     let completion: Awaited<ReturnType<typeof chatCompletionWithTools>>;
     try {
       completion = await chatCompletionWithTools({
@@ -824,6 +878,17 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
     if (!toolCalls.length) {
       const text = visibleContent.trim();
+      onEvent({
+        type: "turn_response",
+        data: {
+          turn,
+          ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+          assistantText: text,
+          toolCalls: [],
+          hasToolCalls: false,
+          isFinal: true,
+        },
+      });
       if (text && !streamedChars) {
         onEvent({ type: "message", data: { text } });
       }
@@ -850,6 +915,22 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         },
       });
     }
+
+    onEvent({
+      type: "turn_response",
+      data: {
+        turn,
+        ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+        assistantText: visibleContent.trim(),
+        toolCalls: toolCalls.map((call) => ({
+          id: call.id,
+          name: call.function.name,
+          arguments: call.function.arguments || "{}",
+        })),
+        hasToolCalls: true,
+        isFinal: false,
+      },
+    });
 
     messages.push({
       role: "assistant",
