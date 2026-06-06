@@ -22,6 +22,20 @@ export type PersistedTurnTrace = {
   hasToolCalls: boolean;
 };
 
+export type PersistedAgentModelStep = {
+  id: string;
+  text: string;
+  phase: string;
+};
+
+export type PersistedAgentRoundGroup = {
+  turn: number;
+  maxTurns?: number;
+  narrative?: string;
+  modelSteps: PersistedAgentModelStep[];
+  toolIds: string[];
+};
+
 export type PersistedChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -36,12 +50,14 @@ export type PersistedChatMessage = {
     label: string;
     summary: string;
     ok: boolean;
+    turn?: number;
     fullResult?: string;
     args?: Record<string, unknown>;
   }>;
   agentContext?: PersistedAgentContext;
   statusLog?: string[];
   turnTraces?: PersistedTurnTrace[];
+  roundGroups?: PersistedAgentRoundGroup[];
   totalTurns?: number;
   writtenFiles?: string[];
   turnFileDiffs?: Record<string, PersistedFileDiff>;
@@ -181,10 +197,20 @@ function sanitizeMessages(messages: PersistedChatMessage[]): PersistedChatMessag
         label: t.label,
         summary: t.summary,
         ok: t.ok,
+        turn: t.turn,
         args: t.args,
       })),
       statusLog: m.statusLog?.length ? [...m.statusLog] : undefined,
       turnTraces: m.turnTraces?.length ? m.turnTraces.map((t) => ({ ...t })) : undefined,
+      roundGroups: m.roundGroups?.length
+        ? m.roundGroups.map((group) => ({
+            turn: group.turn,
+            maxTurns: group.maxTurns,
+            narrative: group.narrative,
+            modelSteps: group.modelSteps.map((step) => ({ ...step })),
+            toolIds: [...group.toolIds],
+          }))
+        : undefined,
       totalTurns: m.totalTurns,
       writtenFiles: m.writtenFiles?.length ? [...m.writtenFiles] : undefined,
       turnFileDiffs:
