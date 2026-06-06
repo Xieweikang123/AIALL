@@ -86,9 +86,21 @@ function safeJsonParse(input: string): unknown | undefined {
 export function runVibeAgentSse(request: VibeAgentRunRequest, onEvent: (event: VibeAgentSseEvent) => void) {
   const controller = new AbortController();
   let doneReceived = false;
+  let retryCount = 0;
+  const MAX_RETRIES = 3;
+  const RETRY_DELAYS = [1000, 2000, 4000];
 
-  (async () => {
-    onEvent({ type: "status", data: { phase: "connecting_local" } });
+  const isRetryableNetworkError = (error: unknown): boolean => {
+    if (error instanceof Error) {
+      if (error.name === "AbortError" || error.message === "Aborted") return false;
+      const msg = error.message.toLowerCase();
+      if (msg.includes("failed to fetch") || msg.includes("networkerror") || msg.includes("network error") || msg.includes("econnreset") || msg.includes("socket hang up") || msg.includes("fetch failed")) return true;
+    }
+    return false;
+  };
+
+  const connect = async (): Promise<void> => {
+    onEvent({ type: "status", data: { phase: retryCount > 0 ? "reconnecting" : "connecting_local", ...(retryCount > 0 ? { retryAttempt: retryCount, retryMaxAttempts: MAX_RETRIES + 1 } : {}) } });
 
     const response = await fetch(agentRunUrl(), {
       method: "POST",
@@ -167,26 +179,44 @@ export function runVibeAgentSse(request: VibeAgentRunRequest, onEvent: (event: V
       currentDataLines.push(pending.trim());
       flush();
     }
-  })()
-    .then(() => {
-      if (!controller.signal.aborted && !doneReceived) {
-        onEvent({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 0 } });
-      }
-    })
-    .catch((error) => {
-      if (controller.signal.aborted) {
+  };
+
+  (async () => {
+    while (true) {
+      try {
+        await connect();
+        return;
+      } catch (error) {
+        if (controller.signal.aborted) {
+          if (!doneReceived) {
+            onEvent({ type: "status", data: { phase: "aborted" } });
+            onEvent({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 0 } });
+          }
+          return;
+        }
+
+        if (isRetryableNetworkError(error) && retryCount < MAX_RETRIES) {
+          retryCount++;
+          const delay = RETRY_DELAYS[retryCount - 1];
+          await new Promise<void>((resolve) => {
+            const timer = setTimeout(resolve, delay);
+            controller.signal.addEventListener("abort", () => {
+              clearTimeout(timer);
+              resolve();
+            }, { once: true });
+          });
+          continue;
+        }
+
+        const message = error instanceof Error ? error.message : "未知错误";
+        onEvent({ type: "error", data: { message } });
         if (!doneReceived) {
-          onEvent({ type: "status", data: { phase: "aborted" } });
           onEvent({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 0 } });
         }
         return;
       }
-      const message = error instanceof Error ? error.message : "未知错误";
-      onEvent({ type: "error", data: { message } });
-      if (!doneReceived) {
-        onEvent({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 0 } });
-      }
-    });
+    }
+  })();
 
   return {
     abort: () => controller.abort(),

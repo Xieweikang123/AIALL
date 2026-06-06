@@ -200,14 +200,14 @@
                 rows="2"
                 placeholder="提交信息…"
                 :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep"
-                @keydown.ctrl.enter="commitGit"
-                @keydown.meta.enter="commitGit"
+                @keydown.ctrl.enter="() => { if (!gitAiPushStep) commitGit() }"
+                @keydown.meta.enter="() => { if (!gitAiPushStep) commitGit() }"
               />
               <div class="git-commit-actions">
                 <button
                   type="button"
                   class="secondary small git-commit-ai"
-                  :disabled="gitCommitting || !!gitGenStep || !gitStagedFiles.length"
+                  :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep || !gitStagedFiles.length || !configReady"
                   @click="generateCommitMessage"
                 >
                   {{ gitGenStep || "✦ AI 生成" }}
@@ -216,20 +216,21 @@
                   type="button"
                   class="small"
                   :class="canGitCommit ? 'primary' : 'secondary'"
-                  :disabled="!canGitCommit"
+                  :disabled="!canGitCommit || !!gitAiPushStep"
                   @click="commitGit"
                 >
                   {{ gitCommitting ? "提交中…" : `提交 (${gitStagedFiles.length})` }}
                 </button>
-                <button
-                  type="button"
-                  class="primary small git-ai-push"
-                  :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep || !gitStagedFiles.length || !configReady"
-                  @click="aiCommitAndPush"
-                >
-                  {{ gitAiPushStep || "✦ AI 一键推送" }}
-                </button>
               </div>
+              <div class="git-ai-push-sep"></div>
+              <button
+                type="button"
+                class="primary small git-ai-push"
+                :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep || !gitStagedFiles.length || !configReady"
+                @click="aiCommitAndPush"
+              >
+                {{ gitAiPushStep || "✦ AI 一键推送" }}
+              </button>
             </div>
             <div class="git-scroll-area">
               <div v-if="!gitStatus.length" class="panel-empty">无本地改动</div>
@@ -1624,6 +1625,8 @@ function phaseBadgeLabel(phase?: string): string {
     case "stream_connected":
     case "connected":
       return "连接";
+    case "reconnecting":
+      return "重连";
     case "preparing":
     case "starting":
     case "building_context":
@@ -1662,6 +1665,12 @@ function formatAgentStatus(data: AgentStatusData, compact = false): string {
   if (phase === "connecting_local") return "正在连接本地服务（127.0.0.1:37891）…";
   if (phase === "stream_connected") return "本地服务已连接，等待 Agent 启动…";
   if (phase === "connected") return "本地 Agent 服务已就绪，正在启动任务…";
+  if (phase === "reconnecting") {
+    const retryHint = data.retryAttempt && data.retryMaxAttempts
+      ? `（第 ${data.retryAttempt}/${data.retryMaxAttempts - 1} 次）`
+      : "";
+    return `正在重连${retryHint}…`;
+  }
   if (phase === "building_context") {
     return appendStatusDetail("正在扫描项目上下文…", detail);
   }
@@ -4844,7 +4853,7 @@ onBeforeUnmount(() => {
 .git-badge {
   margin-left: 4px;
   padding: 0 6px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   background: rgba(31, 111, 235, 0.45);
   color: #fff;
@@ -4880,8 +4889,8 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 12px;
-  font-size: 13px;
+  padding: 9px 14px;
+  font-size: 14px;
 }
 
 .git-header-row + .git-header-row {
@@ -4890,7 +4899,7 @@ onBeforeUnmount(() => {
 }
 
 .git-sync-row {
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .git-branch-info {
@@ -4925,7 +4934,7 @@ onBeforeUnmount(() => {
 
 .git-sync-stat {
   font-family: monospace;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-dim);
   flex-shrink: 0;
 }
@@ -4938,7 +4947,7 @@ onBeforeUnmount(() => {
 .git-remote-tracking {
   color: #9aa5ce;
   font-family: monospace;
-  font-size: 11px;
+  font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4950,8 +4959,8 @@ onBeforeUnmount(() => {
 }
 
 .git-error {
-  padding: 8px 12px;
-  font-size: 12px;
+  padding: 8px 14px;
+  font-size: 13px;
   color: #f7768e;
   background: rgba(247, 118, 142, 0.1);
   border-bottom: 1px solid var(--border);
@@ -4960,20 +4969,20 @@ onBeforeUnmount(() => {
 .git-commit-box {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: 6px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.02);
 }
 
 .git-commit-input {
   width: 100%;
-  padding: 8px 10px;
-  font-size: 12px;
+  padding: 9px 11px;
+  font-size: 13px;
   line-height: 1.45;
   font-family: inherit;
   resize: vertical;
-  min-height: 52px;
+  min-height: 56px;
   max-height: 120px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border);
@@ -5002,6 +5011,16 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
+.git-ai-push {
+  width: 100%;
+}
+
+.git-ai-push-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 2px 0;
+}
+
 .git-commit-ai:not(:disabled) {
   color: #9eceff;
   border-color: rgba(31, 111, 235, 0.35);
@@ -5023,7 +5042,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 12px;
+  padding: 8px 14px;
   cursor: pointer;
   transition: background 120ms ease;
   min-width: 0;
@@ -5035,7 +5054,7 @@ onBeforeUnmount(() => {
 
 .git-file-status {
   font-family: monospace;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   width: 14px;
   text-align: center;
@@ -5044,7 +5063,7 @@ onBeforeUnmount(() => {
 .git-file-path {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5069,16 +5088,16 @@ onBeforeUnmount(() => {
   content: "加载中";
   margin-left: 8px;
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .git-file-check {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
-  font-size: 12px;
+  width: 22px;
+  height: 22px;
+  font-size: 13px;
   font-weight: 600;
   border-radius: 4px;
   border: 1px solid var(--border);
@@ -5100,15 +5119,15 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   padding: 0 !important;
-  font-size: 13px !important;
+  font-size: 14px !important;
   border-radius: 5px !important;
   border: 1px solid transparent !important;
   background: transparent !important;
   color: var(--muted) !important;
-  opacity: 0;
+  opacity: 0.6;
   transition: all 120ms ease;
   flex-shrink: 0;
 }
@@ -5143,7 +5162,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 7px 12px;
+  padding: 8px 14px;
   background: rgba(255, 255, 255, 0.03);
   position: sticky;
   top: 0;
@@ -5152,7 +5171,7 @@ onBeforeUnmount(() => {
 }
 
 .git-section-title {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-dim);
   letter-spacing: 0.02em;
@@ -5176,6 +5195,8 @@ button.ghost.danger:hover:not(:disabled) {
 
 .git-log-section {
   border-top: 1px solid var(--border);
+  margin-top: 4px;
+  background: rgba(255, 255, 255, 0.015);
 }
 
 .git-log-toggle {
@@ -5184,8 +5205,8 @@ button.ghost.danger:hover:not(:disabled) {
   text-align: left;
   border-radius: 0;
   border: none !important;
-  padding: 8px 12px !important;
-  font-size: 11px !important;
+  padding: 9px 14px !important;
+  font-size: 12px !important;
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--text-dim) !important;
@@ -5199,7 +5220,7 @@ button.ghost.danger:hover:not(:disabled) {
 .git-log-item {
   display: flex;
   flex-direction: column;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .git-log-item:hover {
@@ -5211,7 +5232,7 @@ button.ghost.danger:hover:not(:disabled) {
   align-items: center;
   gap: 7px;
   width: 100%;
-  padding: 6px 12px;
+  padding: 7px 14px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -5251,12 +5272,12 @@ button.ghost.danger:hover:not(:disabled) {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
   color: var(--text-dim);
-  font-size: 10px;
+  font-size: 11px;
   text-align: center;
 }
 
 .git-log-files {
-  padding: 0 0 5px 25px;
+  padding: 0 0 5px 27px;
 }
 
 .git-log-file {
@@ -5264,7 +5285,7 @@ button.ghost.danger:hover:not(:disabled) {
   align-items: center;
   gap: 7px;
   width: 100%;
-  padding: 4px 12px 4px 8px;
+  padding: 5px 12px 5px 8px;
   border: 0;
   border-radius: 6px;
   background: transparent;
@@ -5579,8 +5600,8 @@ button.ghost.danger:hover:not(:disabled) {
 }
 
 button.ghost.tiny {
-  padding: 4px 9px;
-  font-size: 11px;
+  padding: 5px 10px;
+  font-size: 12px;
   border-radius: 6px;
   white-space: nowrap;
 }
@@ -5799,8 +5820,8 @@ button.ghost.danger:hover:not(:disabled) {
 button.ghost.small,
 button.secondary.small,
 button.primary.small {
-  padding: 6px 12px;
-  font-size: 12px;
+  padding: 7px 14px;
+  font-size: 13px;
   flex-shrink: 0;
   border-radius: 6px;
 }
