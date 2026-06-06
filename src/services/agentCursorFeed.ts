@@ -6,6 +6,135 @@ export type CursorFeedItem =
   | { kind: "action"; key: string; step: AgentRoundTool }
   | { kind: "status"; key: string; text: string; active: boolean };
 
+export type CursorFeedBlock =
+  | { kind: "thought"; key: string; text: string }
+  | {
+      kind: "actions";
+      key: string;
+      visible: Extract<CursorFeedItem, { kind: "action" }>[];
+      collapsed: Extract<CursorFeedItem, { kind: "action" }>[];
+    }
+  | { kind: "status"; key: string; text: string; active: boolean };
+
+const DEFAULT_KEEP_VISIBLE = 4;
+const DEFAULT_COLLAPSE_AFTER = 5;
+const COMPACT_FEED_MIN_STEPS = 6;
+
+export type AgentExplorationStats = {
+  reads: number;
+  searches: number;
+  explores: number;
+  edits: number;
+  total: number;
+};
+
+const EXPLORATION_TOOL_NAMES = new Set(["read_file", "grep", "search_files", "list_dir"]);
+
+export function computeExplorationStats(steps: AgentRoundTool[]): AgentExplorationStats {
+  const stats: AgentExplorationStats = {
+    reads: 0,
+    searches: 0,
+    explores: 0,
+    edits: 0,
+    total: steps.length,
+  };
+  for (const step of steps) {
+    if (step.name === "read_file") stats.reads += 1;
+    else if (step.name === "grep" || step.name === "search_files") stats.searches += 1;
+    else if (step.name === "list_dir") stats.explores += 1;
+    else if (step.name === "write_file" || step.name === "delete_file") stats.edits += 1;
+  }
+  return stats;
+}
+
+export function formatExplorationSummary(stats: AgentExplorationStats, running = false): string {
+  const parts: string[] = [];
+  if (stats.reads) parts.push(`读 ${stats.reads} 个文件`);
+  if (stats.searches) parts.push(`搜索 ${stats.searches} 次`);
+  if (stats.explores) parts.push(`浏览 ${stats.explores} 个目录`);
+  if (stats.edits) parts.push(`修改 ${stats.edits} 处`);
+  if (!parts.length) return running ? "准备中…" : "无工具步骤";
+  const body = parts.join(" · ");
+  return running ? `探索代码库 · ${body}` : `已完成 · ${body}`;
+}
+
+export function formatCollapsedStepsSummary(steps: AgentRoundTool[]): string {
+  const stats = computeExplorationStats(steps);
+  if (stats.total <= 1) return `更早的 ${stats.total} 步`;
+  const summary = formatExplorationSummary(stats, false);
+  return `更早的 ${stats.total} 步（${summary.replace(/^已完成 · /, "")}）`;
+}
+
+export function shouldUseCompactAgentFeed(stepCount: number, isRunning: boolean, showDetailed: boolean): boolean {
+  return isRunning && stepCount >= COMPACT_FEED_MIN_STEPS && !showDetailed;
+}
+
+export function getLatestFeedThought(items: CursorFeedItem[]): string | null {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item.kind === "thought" && item.text.trim()) return item.text.trim();
+  }
+  return null;
+}
+
+export function getRunningFeedAction(items: CursorFeedItem[]): Extract<CursorFeedItem, { kind: "action" }> | null {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item.kind === "action" && item.step.running) return item;
+  }
+  return null;
+}
+
+export function getLatestFeedStatus(items: CursorFeedItem[]): Extract<CursorFeedItem, { kind: "status" }> | null {
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item.kind === "status") return item;
+  }
+  return null;
+}
+
+export function layoutCursorFeedBlocks(
+  items: CursorFeedItem[],
+  options?: { keepVisible?: number; collapseAfter?: number; compactWhileRunning?: boolean },
+): CursorFeedBlock[] {
+  const compactWhileRunning = options?.compactWhileRunning ?? false;
+  const keepVisible = compactWhileRunning ? 1 : (options?.keepVisible ?? DEFAULT_KEEP_VISIBLE);
+  const collapseAfter = compactWhileRunning ? 2 : (options?.collapseAfter ?? DEFAULT_COLLAPSE_AFTER);
+  const blocks: CursorFeedBlock[] = [];
+  let actionBatch: Extract<CursorFeedItem, { kind: "action" }>[] = [];
+  let batchIndex = 0;
+
+  const flushActions = () => {
+    if (!actionBatch.length) return;
+    const shouldCollapse = actionBatch.length > collapseAfter;
+    const visible = shouldCollapse ? actionBatch.slice(-keepVisible) : actionBatch;
+    const collapsed = shouldCollapse ? actionBatch.slice(0, actionBatch.length - keepVisible) : [];
+    blocks.push({
+      kind: "actions",
+      key: `actions-${batchIndex}`,
+      visible,
+      collapsed,
+    });
+    actionBatch = [];
+    batchIndex += 1;
+  };
+
+  for (const item of items) {
+    if (item.kind === "action") {
+      actionBatch.push(item);
+      continue;
+    }
+    flushActions();
+    if (item.kind === "thought") {
+      blocks.push({ kind: "thought", key: item.key, text: item.text });
+    } else if (item.kind === "status") {
+      blocks.push({ kind: "status", key: item.key, text: item.text, active: item.active });
+    }
+  }
+  flushActions();
+  return blocks;
+}
+
 export function computeLineDelta(before: string, after: string, created?: boolean): number {
   const beforeLines = before ? before.split(/\r?\n/).length : 0;
   const afterLines = after ? after.split(/\r?\n/).length : 0;
@@ -75,7 +204,8 @@ export function cursorPlanningLabel(phase?: string, detail?: string): string | n
   if (!phase) return "Planning next moves";
 
   if (phase === "waiting_model" || phase === "sending_request" || phase === "retrying_model") {
-    return detail?.trim() ? `Planning next moves · ${detail.trim()}` : "Planning next moves";
+    if (detail?.trim()) return `整合信息中 · ${detail.trim()}`;
+    return "整合信息中…";
   }
   if (phase === "streaming_model" || phase === "planning_tools") return "Thinking…";
   if (phase === "summarizing_tools") return "Summarizing tool results…";

@@ -77,6 +77,7 @@ export type PersistedChatMessage = {
   rejected?: boolean;
   reverted?: boolean;
   activityExpanded?: boolean;
+  activityDetailed?: boolean;
 };
 
 export type VibeChatSessionMeta = {
@@ -252,6 +253,7 @@ function sanitizeMessages(messages: PersistedChatMessage[]): PersistedChatMessag
       rejected: m.rejected || undefined,
       reverted: m.reverted || undefined,
       activityExpanded: m.activityExpanded || undefined,
+      activityDetailed: m.activityDetailed || undefined,
     }));
 }
 

@@ -672,35 +672,95 @@
                   class="cursor-agent-feed-wrap"
                 >
                   <div
+                    v-if="shouldUseCompactAgentFeed(m)"
+                    class="cursor-agent-compact"
+                    aria-live="polite"
+                  >
+                    <p v-if="cursorCompactThought(m)" class="cursor-thought">{{ cursorCompactThought(m) }}</p>
+                    <p class="cursor-compact-summary">{{ cursorCompactExplorationSummary(m) }}</p>
+                    <div
+                      v-if="cursorCompactRunningAction(m)"
+                      class="cursor-action running"
+                    >
+                      {{ formatCursorActionLabel(cursorCompactRunningAction(m)!) }}
+                    </div>
+                    <p v-else-if="cursorCompactPlanning(m)" class="cursor-action planning">
+                      {{ cursorCompactPlanning(m) }}
+                    </p>
+                    <button
+                      type="button"
+                      class="cursor-activity-toggle"
+                      @click="toggleActivityDetailed(m)"
+                    >
+                      查看详细步骤（{{ m.tools?.length ?? 0 }}）
+                    </button>
+                  </div>
+                  <div
+                    v-else
                     :ref="(el) => bindStatusLogScroll(el as HTMLElement | null, m.id)"
                     class="cursor-agent-feed"
                     aria-live="polite"
                   >
-                    <template v-for="item in cursorAgentFeed(m)" :key="item.key">
-                      <p v-if="item.kind === 'thought'" class="cursor-thought">{{ item.text }}</p>
-                      <details
-                        v-else-if="item.kind === 'action' && shouldShowToolExpand(item.step)"
-                        class="cursor-action-details"
-                      >
-                        <summary class="cursor-action" :class="cursorActionClass(item.step)">
-                          {{ formatCursorActionLabel(item.step) }}
-                        </summary>
-                        <div class="cursor-action-expand">
-                          <pre v-if="shouldShowToolResult(item.step)" class="trace-pre compact">{{ item.step.fullResult }}</pre>
-                          <pre
-                            v-if="formatToolArgsPreview(item.step.name, item.step.args || {})"
-                            class="trace-pre compact"
-                          >{{ formatToolArgsPreview(item.step.name, item.step.args || {}) }}</pre>
-                        </div>
-                      </details>
-                      <div
-                        v-else-if="item.kind === 'action'"
-                        class="cursor-action"
-                        :class="cursorActionClass(item.step)"
-                      >
-                        {{ formatCursorActionLabel(item.step) }}
+                    <button
+                      v-if="isAgentRunning(m) && isActivityDetailed(m)"
+                      type="button"
+                      class="cursor-activity-collapse"
+                      @click="collapseActivityDetailed(m)"
+                    >
+                      收起步骤
+                    </button>
+                    <template v-for="block in cursorAgentFeedBlocks(m)" :key="block.key">
+                      <p v-if="block.kind === 'thought'" class="cursor-thought">{{ block.text }}</p>
+                      <div v-else-if="block.kind === 'actions'" class="cursor-actions-block">
+                        <details v-if="block.collapsed.length" class="cursor-actions-fold">
+                          <summary class="cursor-actions-fold-summary">
+                            {{ formatCollapsedStepsSummary(block.collapsed.map((item) => item.step)) }}
+                          </summary>
+                          <div class="cursor-actions-fold-body">
+                            <template v-for="item in block.collapsed" :key="item.key">
+                              <details
+                                v-if="shouldShowToolExpand(item.step)"
+                                class="cursor-action-details"
+                              >
+                                <summary class="cursor-action" :class="cursorActionClass(item.step)">
+                                  {{ formatCursorActionLabel(item.step) }}
+                                </summary>
+                                <div class="cursor-action-expand">
+                                  <pre v-if="shouldShowToolResult(item.step)" class="trace-pre compact">{{ item.step.fullResult }}</pre>
+                                  <pre
+                                    v-if="formatToolArgsPreview(item.step.name, item.step.args || {})"
+                                    class="trace-pre compact"
+                                  >{{ formatToolArgsPreview(item.step.name, item.step.args || {}) }}</pre>
+                                </div>
+                              </details>
+                              <div v-else class="cursor-action" :class="cursorActionClass(item.step)">
+                                {{ formatCursorActionLabel(item.step) }}
+                              </div>
+                            </template>
+                          </div>
+                        </details>
+                        <template v-for="item in block.visible" :key="item.key">
+                          <details
+                            v-if="shouldShowToolExpand(item.step)"
+                            class="cursor-action-details"
+                          >
+                            <summary class="cursor-action" :class="cursorActionClass(item.step)">
+                              {{ formatCursorActionLabel(item.step) }}
+                            </summary>
+                            <div class="cursor-action-expand">
+                              <pre v-if="shouldShowToolResult(item.step)" class="trace-pre compact">{{ item.step.fullResult }}</pre>
+                              <pre
+                                v-if="formatToolArgsPreview(item.step.name, item.step.args || {})"
+                                class="trace-pre compact"
+                              >{{ formatToolArgsPreview(item.step.name, item.step.args || {}) }}</pre>
+                            </div>
+                          </details>
+                          <div v-else class="cursor-action" :class="cursorActionClass(item.step)">
+                            {{ formatCursorActionLabel(item.step) }}
+                          </div>
+                        </template>
                       </div>
-                      <p v-else-if="item.kind === 'status'" class="cursor-action planning">{{ item.text }}</p>
+                      <p v-else-if="block.kind === 'status'" class="cursor-action planning">{{ block.text }}</p>
                     </template>
                   </div>
                   <details v-if="hasAgentDebugDetails(m)" class="cursor-debug-panel">
@@ -1074,9 +1134,18 @@ import {
 } from "../services/agentRoundGroups";
 import {
   buildCursorAgentFeed,
+  computeExplorationStats,
   computeLineDelta,
   cursorActionClass,
+  formatCollapsedStepsSummary,
   formatCursorActionLabel,
+  formatExplorationSummary,
+  getLatestFeedStatus,
+  getLatestFeedThought,
+  getRunningFeedAction,
+  layoutCursorFeedBlocks,
+  shouldUseCompactAgentFeed as shouldUseCompactAgentFeedByCount,
+  type CursorFeedBlock,
 } from "../services/agentCursorFeed";
 import {
   messagePreviewLength,
@@ -1193,6 +1262,7 @@ function normalizeChatMessages(messages: PersistedChatMessage[]): ChatMessage[] 
   return messages.map((m) => ({
     ...m,
     activityExpanded: m.activityExpanded ?? false,
+    activityDetailed: m.activityDetailed ?? false,
     tools: m.tools?.map((t) => ({
       id: t.id,
       name: t.name || "",
@@ -1894,6 +1964,54 @@ function cursorAgentFeed(msg: ChatMessage) {
     agentPhase: msg.agentPhase,
     agentDetail: msg.agentDetail || msg.status,
   });
+}
+
+function cursorAgentFeedBlocks(msg: ChatMessage): CursorFeedBlock[] {
+  return layoutCursorFeedBlocks(cursorAgentFeed(msg), {
+    keepVisible: isAgentRunning(msg) ? 4 : 6,
+    collapseAfter: 5,
+    compactWhileRunning: isAgentRunning(msg) && isActivityDetailed(msg),
+  });
+}
+
+function isActivityDetailed(msg: ChatMessage): boolean {
+  return msg.activityDetailed === true;
+}
+
+function shouldUseCompactAgentFeed(msg: ChatMessage): boolean {
+  const stepCount = msg.tools?.length ?? 0;
+  return shouldUseCompactAgentFeedByCount(stepCount, isAgentRunning(msg), isActivityDetailed(msg));
+}
+
+function toggleActivityDetailed(msg: ChatMessage) {
+  msg.activityDetailed = true;
+  patchAssistantMsg(msg.id, { activityDetailed: true });
+  schedulePersistChat();
+}
+
+function collapseActivityDetailed(msg: ChatMessage) {
+  msg.activityDetailed = false;
+  patchAssistantMsg(msg.id, { activityDetailed: false });
+  schedulePersistChat();
+}
+
+function cursorCompactThought(msg: ChatMessage): string | null {
+  return getLatestFeedThought(cursorAgentFeed(msg));
+}
+
+function cursorCompactExplorationSummary(msg: ChatMessage): string {
+  const stats = computeExplorationStats(msg.tools ?? []);
+  return formatExplorationSummary(stats, isAgentRunning(msg));
+}
+
+function cursorCompactRunningAction(msg: ChatMessage) {
+  const action = getRunningFeedAction(cursorAgentFeed(msg));
+  return action?.step ?? null;
+}
+
+function cursorCompactPlanning(msg: ChatMessage): string | null {
+  const status = getLatestFeedStatus(cursorAgentFeed(msg));
+  return status?.text ?? null;
 }
 
 function hasAgentDebugDetails(msg: ChatMessage): boolean {
@@ -4238,6 +4356,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
     assistantMsg.status = "";
     assistantMsg.agentPhase = undefined;
     assistantMsg.activityExpanded = false;
+    assistantMsg.activityDetailed = false;
     if (!assistantMsg.content?.trim()) {
       const lastResponse = assistantMsg.roundGroups
         ?.filter((group) => group.response?.isFinal && group.response.assistantText.trim())
@@ -4251,6 +4370,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       agentPhase: undefined,
       streaming: false,
       activityExpanded: false,
+      activityDetailed: false,
       content: assistantMsg.content,
       totalTurns: assistantMsg.totalTurns,
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
@@ -4568,6 +4688,7 @@ async function runAgentTurn(userText: string, options?: { skipUserBubble?: boole
     tools: [],
     roundGroups: [],
     activityExpanded: false,
+    activityDetailed: false,
     agentPhase: "connecting_local",
     status: formatAgentStatus({ phase: "connecting_local" }),
   };
@@ -7025,55 +7146,134 @@ button.compact {
 }
 
 .cursor-agent-wrap {
-  margin: 4px 0 10px;
+  margin: 2px 0 8px;
+}
+
+.cursor-agent-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(13, 17, 23, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.cursor-compact-summary {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(139, 148, 158, 0.88);
 }
 
 .cursor-agent-feed-wrap {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .cursor-agent-feed {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  max-height: min(50vh, 420px);
+  gap: 6px;
+  max-height: min(38vh, 280px);
   overflow: auto;
-  padding-right: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(13, 17, 23, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+
+.cursor-agent-feed::-webkit-scrollbar {
+  width: 6px;
+}
+
+.cursor-agent-feed::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .cursor-thought {
-  margin: 0;
+  margin: 0 0 2px;
   font-size: 13px;
   line-height: 1.55;
-  color: rgba(255, 255, 255, 0.86);
+  color: rgba(230, 237, 243, 0.88);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
+.cursor-actions-block {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-left: 10px;
+  border-left: 2px solid rgba(88, 166, 255, 0.14);
+}
+
+.cursor-actions-fold {
+  margin: 0 0 2px;
+}
+
+.cursor-actions-fold-summary {
+  list-style: none;
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(139, 148, 158, 0.9);
+  cursor: pointer;
+  user-select: none;
+}
+
+.cursor-actions-fold-summary::-webkit-details-marker {
+  display: none;
+}
+
+.cursor-actions-fold-summary::before {
+  content: "▸ ";
+  font-size: 10px;
+  color: rgba(139, 148, 158, 0.7);
+}
+
+.cursor-actions-fold[open] > .cursor-actions-fold-summary::before {
+  content: "▾ ";
+}
+
+.cursor-actions-fold-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  padding-left: 4px;
+  max-height: 140px;
+  overflow: auto;
+}
+
 .cursor-action {
   margin: 0;
-  padding: 0;
+  padding: 1px 0;
   font-size: 12px;
-  line-height: 1.45;
-  color: rgba(255, 255, 255, 0.42);
+  line-height: 1.5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: rgba(139, 148, 158, 0.92);
 }
 
 .cursor-action.done {
-  color: rgba(126, 231, 135, 0.9);
+  color: rgba(126, 164, 138, 0.92);
 }
 
 .cursor-action.running {
-  color: rgba(255, 255, 255, 0.58);
+  color: rgba(121, 184, 255, 0.92);
 }
 
 .cursor-action.fail {
-  color: #ff9a9a;
+  color: rgba(248, 143, 143, 0.92);
 }
 
 .cursor-action.planning {
-  color: rgba(255, 255, 255, 0.34);
+  font-family: inherit;
+  font-style: italic;
+  color: rgba(139, 148, 158, 0.72);
 }
 
 .cursor-action-details {
