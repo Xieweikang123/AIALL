@@ -51,7 +51,7 @@ const SETUP_PHASES = new Set([
   "building_context",
 ]);
 
-const ROUND_AUX_PHASES = new Set(["executing_tools", "summarizing_tools", "executing_tool"]);
+const ROUND_AUX_PHASES = new Set<string>();
 
 let stepIdCounter = 0;
 

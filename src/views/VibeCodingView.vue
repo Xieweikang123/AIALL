@@ -673,47 +673,13 @@
                   </span>
                 </button>
                 <div v-show="isActivityExpanded(m)" class="agent-activity-body" :class="{ compact: isAgentRunning(m) }">
-                  <template v-if="isAgentRunning(m)">
-                    <div class="agent-run-strip" aria-live="polite">
-                      <span class="status-pulse" aria-hidden="true" />
-                      <span v-if="m.agentPhase" class="agent-phase-badge">{{ phaseBadgeLabel(m.agentPhase) }}</span>
-                      <span class="agent-run-strip-text">{{ agentStatusDisplay(m) }}</span>
-                      <span v-if="m.agentTurn" class="agent-run-turn">R{{ m.agentTurn }}</span>
-                    </div>
-                    <div v-if="compactToolSteps(m).length" class="agent-tool-strip">
-                      <span
-                        v-for="step in compactToolSteps(m)"
-                        :key="step.id"
-                        class="agent-tool-chip"
-                        :class="{ running: step.running, fail: !step.ok && !step.running }"
-                      >
-                        <span aria-hidden="true">{{ step.icon || "⚙️" }}</span>
-                        <span class="agent-tool-chip-text">{{ step.title || step.label }}</span>
-                        <span v-if="step.detail" class="agent-tool-chip-detail">{{ step.detail }}</span>
-                        <span v-if="step.running" class="agent-tool-chip-state">…</span>
-                      </span>
-                    </div>
-                    <div v-if="agentHistoryLines(m).length" class="status-log-scroll-wrap compact">
-                      <div
-                        :ref="(el) => bindStatusLogScroll(el as HTMLElement | null, m.id)"
-                        class="status-log-scroll"
-                      >
-                        <ul class="status-log-timeline">
-                          <li
-                            v-for="(line, si) in agentHistoryLines(m)"
-                            :key="si"
-                            class="status-log-entry"
-                            :class="statusLogPhaseClass(line)"
-                          >
-                            <span class="status-log-dot" />
-                            <span class="status-log-text">{{ cleanStatusLogText(line) }}</span>
-                          </li>
-                        </ul>
-                      </div>
-                    </div>
-                  </template>
-                  <template v-else>
-                  <div v-if="m.totalTurns" class="agent-status-bar">
+                  <div v-if="isAgentRunning(m)" class="agent-run-strip" aria-live="polite">
+                    <span class="status-pulse" aria-hidden="true" />
+                    <span v-if="m.agentPhase" class="agent-phase-badge">{{ phaseBadgeLabel(m.agentPhase) }}</span>
+                    <span class="agent-run-strip-text">{{ agentStatusDisplay(m) }}</span>
+                    <span v-if="m.agentTurn" class="agent-run-turn">R{{ m.agentTurn }}</span>
+                  </div>
+                  <div v-if="!isAgentRunning(m) && m.totalTurns" class="agent-status-bar">
                     <span class="agent-turn-pill">共 {{ m.totalTurns }} 轮</span>
                   </div>
                   <details v-if="m.agentContext" class="trace-block">
@@ -746,88 +712,87 @@
                       </details>
                     </div>
                   </details>
-                  <details v-if="m.statusLog?.length" class="trace-block">
-                    <summary class="trace-block-title">阶段日志（{{ m.statusLog.length }}）</summary>
-                    <div class="status-log-scroll-wrap">
-                      <div
-                        :ref="(el) => bindStatusLogScroll(el as HTMLElement | null, m.id)"
-                        class="status-log-scroll"
-                      >
-                        <ul class="status-log-timeline">
-                          <li
-                            v-for="(line, si) in m.statusLog"
-                            :key="si"
-                            class="status-log-entry"
-                            :class="statusLogPhaseClass(line)"
-                          >
-                            <span class="status-log-dot" />
-                            <span class="status-log-text">{{ cleanStatusLogText(line) }}</span>
-                          </li>
-                        </ul>
-                      </div>
-                    </div>
-                  </details>
-                  <details v-if="m.turnTraces?.length" class="trace-block">
-                    <summary class="trace-block-title">轮次中间输出（{{ m.turnTraces.length }}）</summary>
-                    <div v-for="(trace, ti) in m.turnTraces" :key="ti" class="turn-trace-item">
-                      <div class="turn-trace-head">
-                        第 {{ trace.turn }} 轮
-                        <span v-if="trace.maxTurns">/ {{ trace.maxTurns }}</span>
-                        <span v-if="trace.hasToolCalls"> · 随后调用工具</span>
-                      </div>
-                      <pre class="trace-pre compact">{{ trace.assistantText }}</pre>
-                    </div>
-                  </details>
-                  <details
-                    v-if="m.tools?.length"
-                    class="trace-block tool-timeline-block"
+                  <div
+                    v-if="agentRoundGroupViews(m).length"
+                    class="status-log-scroll-wrap"
+                    :class="{ compact: isAgentRunning(m) }"
                   >
-                    <summary class="trace-block-title">工具调用（{{ m.tools.length }}）</summary>
-                    <ol class="tool-timeline">
-                      <li
-                        v-for="step in m.tools"
-                        :key="step.id"
-                        class="tool-item"
-                        :class="{
-                          running: step.running,
-                          fail: !step.ok && !step.running,
-                          done: !step.running && step.ok,
-                        }"
-                      >
-                        <details v-if="shouldShowToolExpand(step)" class="tool-item-details">
-                          <summary class="tool-item-row">
-                            <span class="tool-item-icon" aria-hidden="true">{{ step.icon || "⚙️" }}</span>
-                            <span class="tool-item-line">
-                              <span class="tool-item-action">{{ step.title || step.label }}</span>
-                              <span v-if="step.detail" class="tool-item-target">{{ step.detail }}</span>
-                              <span v-if="step.summary" class="tool-item-status" :class="{ fail: !step.ok }">
-                                {{ step.summary }}
-                              </span>
-                            </span>
-                          </summary>
-                          <div class="tool-item-expand-body">
-                            <pre v-if="shouldShowToolResult(step)" class="trace-pre compact">{{ step.fullResult }}</pre>
-                            <pre
-                              v-if="formatToolArgsPreview(step.name, step.args || {})"
-                              class="trace-pre compact"
-                            >{{ formatToolArgsPreview(step.name, step.args || {}) }}</pre>
+                    <div
+                      :ref="(el) => bindStatusLogScroll(el as HTMLElement | null, m.id)"
+                      class="status-log-scroll"
+                    >
+                      <div class="agent-round-timeline">
+                        <section
+                          v-for="group in agentRoundGroupViews(m)"
+                          :key="`round-${group.turn}`"
+                          class="agent-round-group"
+                          :class="{ active: group.active, setup: group.turn === 0 }"
+                        >
+                          <div v-if="group.turn === 0" class="agent-round-head">
+                            <span class="agent-round-turn">{{ roundGroupSetupLabel(group) }}</span>
                           </div>
-                        </details>
-                        <div v-else class="tool-item-row">
-                          <span class="tool-item-icon" aria-hidden="true">{{ step.icon || "⚙️" }}</span>
-                          <span class="tool-item-line">
-                            <span class="tool-item-action">{{ step.title || step.label }}</span>
-                            <span v-if="step.detail" class="tool-item-target">{{ step.detail }}</span>
-                            <span v-if="step.running" class="tool-item-status running">执行中</span>
-                            <span v-else-if="step.summary" class="tool-item-status" :class="{ fail: !step.ok }">
-                              {{ step.summary }}
-                            </span>
-                          </span>
-                        </div>
-                      </li>
-                    </ol>
-                  </details>
-                  </template>
+                          <p v-if="group.narrative" class="agent-round-narrative">{{ group.narrative }}</p>
+                          <ul v-if="group.modelSteps.length" class="agent-round-model-steps">
+                            <li
+                              v-for="step in group.modelSteps"
+                              :key="step.id"
+                              class="agent-round-model-step status-log-entry"
+                              :class="[
+                                statusLogPhaseClass(step.text),
+                                { active: isActiveModelStep(m, group, step) },
+                              ]"
+                            >
+                              <span class="status-log-dot" />
+                              <span class="status-log-text">{{ liveModelStepText(m, group, step) }}</span>
+                            </li>
+                          </ul>
+                          <ol v-if="group.tools.length" class="agent-round-tools tool-timeline">
+                            <li
+                              v-for="step in group.tools"
+                              :key="step.id"
+                              class="tool-item"
+                              :class="{
+                                running: step.running,
+                                fail: !step.ok && !step.running,
+                                done: !step.running && step.ok,
+                              }"
+                            >
+                              <details v-if="shouldShowToolExpand(step)" class="tool-item-details">
+                                <summary class="tool-item-row">
+                                  <span class="tool-item-icon" aria-hidden="true">{{ step.icon || "⚙️" }}</span>
+                                  <span class="tool-item-line">
+                                    <span class="tool-item-action">{{ step.title || step.label }}</span>
+                                    <span v-if="step.detail" class="tool-item-target">{{ step.detail }}</span>
+                                    <span v-if="step.summary" class="tool-item-status" :class="{ fail: !step.ok }">
+                                      {{ step.summary }}
+                                    </span>
+                                  </span>
+                                </summary>
+                                <div class="tool-item-expand-body">
+                                  <pre v-if="shouldShowToolResult(step)" class="trace-pre compact">{{ step.fullResult }}</pre>
+                                  <pre
+                                    v-if="formatToolArgsPreview(step.name, step.args || {})"
+                                    class="trace-pre compact"
+                                  >{{ formatToolArgsPreview(step.name, step.args || {}) }}</pre>
+                                </div>
+                              </details>
+                              <div v-else class="tool-item-row">
+                                <span class="tool-item-icon" aria-hidden="true">{{ step.icon || "⚙️" }}</span>
+                                <span class="tool-item-line">
+                                  <span class="tool-item-action">{{ step.title || step.label }}</span>
+                                  <span v-if="step.detail" class="tool-item-target">{{ step.detail }}</span>
+                                  <span v-if="step.running" class="tool-item-status running">执行中</span>
+                                  <span v-else-if="step.summary" class="tool-item-status" :class="{ fail: !step.ok }">
+                                    {{ step.summary }}
+                                  </span>
+                                </span>
+                              </div>
+                            </li>
+                          </ol>
+                        </section>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
               <div
@@ -1106,6 +1071,14 @@ import {
   type VibeChatMode,
 } from "../services/vibeAgentClient";
 import {
+  buildAgentRoundGroupViews,
+  recordAgentRoundNarrative,
+  recordAgentRoundStatus,
+  recordAgentRoundToolStart,
+  type AgentRoundGroup,
+  type AgentRoundGroupView,
+} from "../services/agentRoundGroups";
+import {
   addProjectToHistory,
   clearProjectHistory,
   listProjectHistory,
@@ -1155,6 +1128,7 @@ const PANEL_WIDTH_KEY = "vibe-coding-panel-widths";
 const EDITOR_COLLAPSED_KEY = "vibe-coding-editor-collapsed";
 const CHAT_MODE_KEY = "vibe-coding-chat-mode";
 const PENDING_QUEUE_KEY = "vibe-coding-pending-queue";
+const GIT_PANEL_MODE_KEY = "vibe-coding-git-panel-mode";
 const SYNC_STORE_DEBOUNCE_MS = 2000;
 const FILE_MIN_WIDTH = 180;
 const FILE_MAX_WIDTH = 500;
@@ -1173,11 +1147,13 @@ type AgentToolStep = {
   summary: string;
   ok: boolean;
   running?: boolean;
+  turn?: number;
   fullResult?: string;
   args?: Record<string, unknown>;
 };
-type ChatMessage = Omit<PersistedChatMessage, "tools"> & {
+type ChatMessage = Omit<PersistedChatMessage, "tools" | "roundGroups"> & {
   tools?: AgentToolStep[];
+  roundGroups?: AgentRoundGroup[];
   status?: string;
   agentPhase?: string;
   agentTurn?: number;
@@ -1220,8 +1196,16 @@ function normalizeChatMessages(messages: PersistedChatMessage[]): ChatMessage[] 
       label: t.label,
       summary: t.summary,
       ok: t.ok,
+      turn: t.turn,
       fullResult: t.fullResult,
       args: t.args,
+    })),
+    roundGroups: m.roundGroups?.map((group) => ({
+      turn: group.turn,
+      maxTurns: group.maxTurns,
+      narrative: group.narrative,
+      modelSteps: group.modelSteps.map((step) => ({ ...step })),
+      toolIds: [...group.toolIds],
     })),
   }));
 }
@@ -1377,7 +1361,9 @@ const projectHistoryOpen = ref(false);
 const projectHistoryList = ref<ProjectHistoryEntry[]>([]);
 const projectHistoryRef = ref<HTMLElement | null>(null);
 
-const gitPanelMode = ref<"files" | "git">("files");
+const gitPanelMode = ref<"files" | "git">(
+  localStorage.getItem(GIT_PANEL_MODE_KEY) === "git" ? "git" : "files"
+);
 const gitStatus = ref<GitStatusFile[]>([]);
 const gitBranch = ref("");
 const gitIsRepo = ref(false);
@@ -1777,6 +1763,7 @@ function isAgentRunning(msg: ChatMessage): boolean {
 function hasAgentActivity(msg: ChatMessage): boolean {
   return Boolean(
     msg.agentContext ||
+      msg.roundGroups?.length ||
       msg.statusLog?.length ||
       msg.turnTraces?.length ||
       msg.status ||
@@ -1907,19 +1894,8 @@ function agentStatusDisplay(msg: ChatMessage): string {
   return msg.agentPhase ? formatAgentStatus({ phase: msg.agentPhase, detail: msg.agentDetail }, true) : "正在运行…";
 }
 
-function compactToolSteps(msg: ChatMessage): AgentToolStep[] {
-  return (msg.tools || []).slice(-2);
-}
-
 function agentActiveModel(msg: ChatMessage): string {
   return msg.agentModel || msg.agentContext?.model || "";
-}
-
-function agentHistoryLines(msg: ChatMessage): string[] {
-  const current = agentStatusDisplay(msg);
-  return (msg.statusLog || [])
-    .filter((line) => line.trim() && line !== current)
-    .slice(-6);
 }
 
 function statusLogPhaseClass(text: string): string {
@@ -1942,34 +1918,49 @@ function cleanStatusLogText(text: string): string {
     .trim();
 }
 
-function activityFeedItems(msg: ChatMessage): Array<{ key: string; kind: "status" | "tool"; text: string; active?: boolean }> {
-  const items: Array<{ key: string; kind: "status" | "tool"; text: string; active?: boolean }> = [];
-  const seen = new Set<string>();
+function agentRoundGroupViews(msg: ChatMessage): AgentRoundGroupView[] {
+  void agentUiTick.value;
+  return buildAgentRoundGroupViews({
+    roundGroups: msg.roundGroups,
+    turnTraces: msg.turnTraces,
+    statusLog: msg.statusLog,
+    tools: msg.tools,
+    activeTurn: isAgentRunning(msg) ? msg.agentTurn : undefined,
+    activePhase: isAgentRunning(msg) ? msg.agentPhase : undefined,
+  });
+}
 
-  for (const [idx, line] of (msg.statusLog || []).slice(-8).entries()) {
-    const text = line.trim();
-    if (!text || seen.has(text)) continue;
-    seen.add(text);
-    items.push({ key: `status-${idx}-${text}`, kind: "status", text });
+function roundGroupSetupLabel(group: AgentRoundGroupView): string {
+  return group.turn === 0 ? "准备阶段" : `第 ${group.turn} 轮`;
+}
+
+function isActiveModelStep(msg: ChatMessage, group: AgentRoundGroupView, step: { phase: string }): boolean {
+  return isAgentRunning(msg) && group.active && msg.agentPhase === step.phase;
+}
+
+function liveModelStepText(msg: ChatMessage, group: AgentRoundGroupView, step: { text: string; phase: string }): string {
+  void agentUiTick.value;
+  const base = cleanStatusLogText(step.text);
+  if (!isActiveModelStep(msg, group, step)) return base;
+  if (msg.agentDetail?.trim()) return `${base} · ${msg.agentDetail.trim()}`;
+  if (
+    (step.phase === "waiting_model" || step.phase === "sending_request" || step.phase === "retrying_model") &&
+    msg.agentWaitStartedAt
+  ) {
+    const elapsed = Math.max(0, Math.floor((Date.now() - msg.agentWaitStartedAt) / 1000));
+    return `${base} · 已等待 ${elapsed}s`;
   }
+  return base;
+}
 
-  const current = agentStatusDisplay(msg);
-  if (current && !seen.has(current)) {
-    items.push({ key: `status-current-${current}`, kind: "status", text: current, active: true });
-  }
-
-  for (const tool of msg.tools || []) {
-    const state = tool.running ? "执行中" : tool.ok ? "完成" : "失败";
-    const detail = tool.detail ? ` · ${tool.detail}` : "";
-    items.push({
-      key: `tool-${tool.id}-${state}`,
-      kind: "tool",
-      text: `${state}：${tool.title || tool.label}${detail}`,
-      active: Boolean(tool.running),
-    });
-  }
-
-  return items.slice(-8);
+function syncRoundGroupsPatch(msg: ChatMessage): Pick<ChatMessage, "roundGroups"> {
+  return {
+    roundGroups: msg.roundGroups?.map((group) => ({
+      ...group,
+      modelSteps: group.modelSteps.map((step) => ({ ...step })),
+      toolIds: [...group.toolIds],
+    })),
+  };
 }
 
 function refreshSessionList(path = projectPath.value.trim()) {
@@ -3842,7 +3833,17 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
   if (event.type === "turn_trace") {
     if (!assistantMsg.turnTraces) assistantMsg.turnTraces = [];
     assistantMsg.turnTraces.push({ ...event.data });
-    patchAssistantMsg(msgId, { turnTraces: [...assistantMsg.turnTraces] });
+    assistantMsg.roundGroups = recordAgentRoundNarrative(
+      assistantMsg.roundGroups,
+      event.data.turn,
+      event.data.assistantText,
+      event.data.maxTurns,
+    );
+    patchAssistantMsg(msgId, {
+      turnTraces: [...assistantMsg.turnTraces],
+      ...syncRoundGroupsPatch(assistantMsg),
+    });
+    if (isAgentRunning(assistantMsg)) scrollStatusLogToBottom(msgId);
     return;
   }
 
@@ -3850,6 +3851,13 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
     const { phase } = event.data;
     const prevPhase = assistantMsg.agentPhase;
     setAgentStatus(assistantMsg, phase, event.data, { log: phase !== prevPhase });
+    assistantMsg.roundGroups = recordAgentRoundStatus(
+      assistantMsg.roundGroups,
+      phase,
+      assistantMsg.status || "",
+      assistantMsg.agentTurn ?? event.data.turn,
+      assistantMsg.agentMaxTurns ?? event.data.maxTurns,
+    );
     patchAssistantMsg(msgId, {
       agentPhase: assistantMsg.agentPhase,
       status: assistantMsg.status,
@@ -3861,6 +3869,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       agentTurn: assistantMsg.agentTurn,
       agentMaxTurns: assistantMsg.agentMaxTurns,
       agentModel: assistantMsg.agentModel,
+      ...syncRoundGroupsPatch(assistantMsg),
       ...(phase === "finished" ? { agentPhase: undefined, streaming: false, agentWaitStartedAt: undefined } : {}),
     });
     if (isAgentRunning(assistantMsg)) scrollStatusLogToBottom(msgId);
@@ -3881,6 +3890,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
   if (event.type === "tool_start") {
     if (!assistantMsg.tools) assistantMsg.tools = [];
     const meta = formatToolMeta(event.data.name, event.data.args);
+    const toolTurn = assistantMsg.agentTurn ?? 1;
     assistantMsg.tools.push({
       id: event.data.id,
       ...meta,
@@ -3888,7 +3898,9 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       summary: "",
       ok: true,
       running: true,
+      turn: toolTurn,
     });
+    assistantMsg.roundGroups = recordAgentRoundToolStart(assistantMsg.roundGroups, event.data.id, toolTurn);
     setAgentStatus(assistantMsg, "executing_tool", {
       toolTitle: meta.title,
       toolDetail: meta.detail,
@@ -3900,6 +3912,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       status: assistantMsg.status,
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
       agentPhase: assistantMsg.agentPhase,
+      ...syncRoundGroupsPatch(assistantMsg),
     });
     if (isAgentRunning(assistantMsg)) scrollStatusLogToBottom(msgId);
     void scrollChatToBottom(true);
@@ -3977,6 +3990,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
     patchAssistantMsg(msgId, {
       content,
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
+      ...syncRoundGroupsPatch(assistantMsg),
     });
     persistChatNow();
     void scrollChatToBottom(true);
@@ -4027,6 +4041,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       activityExpanded: false,
       totalTurns: assistantMsg.totalTurns,
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
+      ...syncRoundGroupsPatch(assistantMsg),
       writtenFiles: assistantMsg.writtenFiles,
       pendingApproval: assistantMsg.pendingApproval,
     });
@@ -4337,11 +4352,17 @@ async function runAgentTurn(userText: string, options?: { skipUserBubble?: boole
     content: "",
     chatMode: mode,
     tools: [],
+    roundGroups: [],
     activityExpanded: false,
     agentPhase: "connecting_local",
     status: formatAgentStatus({ phase: "connecting_local" }),
   };
   chatMessages.value.push(assistantMsg);
+  assistantMsg.roundGroups = recordAgentRoundStatus(
+    assistantMsg.roundGroups,
+    "connecting_local",
+    assistantMsg.status || "",
+  );
   persistChatNow();
   await scrollChatToBottom(true);
 
@@ -4487,6 +4508,10 @@ watch(
   },
   { deep: true },
 );
+
+watch(gitPanelMode, (mode) => {
+  localStorage.setItem(GIT_PANEL_MODE_KEY, mode);
+});
 
 onMounted(() => {
   reloadAiConfig();
