@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { sendSseEvent, sendSseHeaders } from "./server/httpUtils";
+import { readJsonBody, sendJson, sendSseEvent, sendSseHeaders } from "./server/httpUtils";
 import { chatCompletionWithTools, resolveChatEndpoint } from "./server/aiForward";
 import { runVibeAgent } from "./server/vibeAgent";
 import { buildProjectContext } from "./server/vibeProjectContext";
@@ -25,29 +25,6 @@ function debugLog(msg: string) {
   fs.appendFileSync(DEBUG_LOG, `[${new Date().toISOString()}] ${msg}\n`);
 }
 debugLog("=== middleware loaded ===");
-
-function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    let data = "";
-    req.on("data", (chunk) => {
-      data += chunk.toString();
-    });
-    req.on("end", () => {
-      try {
-        resolve(JSON.parse(data) as unknown);
-      } catch (error) {
-        reject(error);
-      }
-    });
-    req.on("error", reject);
-  });
-}
-
-function sendJson(res: ServerResponse, status: number, payload: unknown) {
-  res.statusCode = status;
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.end(JSON.stringify(payload));
-}
 
 function powershellExe(): string {
   const root = process.env.SystemRoot || "C:\\Windows";

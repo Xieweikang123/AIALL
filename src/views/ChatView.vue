@@ -91,7 +91,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { extractWebText } from "../services/webExtractClient";
 import { testAiModel } from "../services/aiClient";
 import { fetchIconTemplateList } from "../services/iconTemplatesClient";
@@ -120,6 +120,8 @@ type UiMessage = {
 };
 
 const STORAGE_KEY = "ai-config";
+const CHAT_STORAGE_KEY = "ai-chat-history";
+const MAX_PERSISTED_MESSAGES = 200;
 
 const inputText = ref("");
 const sending = ref(false);
@@ -130,6 +132,38 @@ const state = reactive({
 
 const messages = ref<UiMessage[]>([]);
 const scrollWrapRef = ref<HTMLElement | null>(null);
+
+function persistChatMessages() {
+  try {
+    const data = messages.value.slice(-MAX_PERSISTED_MESSAGES);
+    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(data));
+  } catch (e) {
+    console.warn("[ChatView] Failed to save chat history:", e);
+  }
+}
+
+function loadPersistedChatMessages(): UiMessage[] {
+  try {
+    const raw = localStorage.getItem(CHAT_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (m: any) => m && typeof m.id === "string" && (m.role === "user" || m.role === "assistant") && typeof m.content === "string",
+    );
+  } catch {
+    return [];
+  }
+}
+
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+function schedulePersistChat() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    persistChatMessages();
+  }, 400);
+}
 
 const config = reactive({
   endpoint: "",
@@ -243,6 +277,11 @@ function clearAll() {
   messages.value = [];
   state.phase = "idle";
   state.message = "未开始";
+  try {
+    localStorage.removeItem(CHAT_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
 }
 
 function applyExample(example: string) {
@@ -268,6 +307,7 @@ async function handleSend() {
   const userRaw = inputText.value.trim();
   messages.value.push({ id: genId(), role: "user", content: userRaw });
   inputText.value = "";
+  persistChatMessages();
 
   const assistantMsg: UiMessage = {
     id: genId(),
@@ -434,11 +474,30 @@ async function handleSend() {
     await scrollToBottom();
   } finally {
     sending.value = false;
+    persistChatMessages();
   }
 }
 
 onMounted(() => {
   loadAiConfig();
+  const saved = loadPersistedChatMessages();
+  if (saved.length) {
+    messages.value = saved;
+    void scrollToBottom();
+  }
+});
+
+watch(
+  messages,
+  () => {
+    schedulePersistChat();
+  },
+  { deep: true },
+);
+
+onBeforeUnmount(() => {
+  if (saveTimer) clearTimeout(saveTimer);
+  persistChatMessages();
 });
 </script>
 
@@ -562,7 +621,8 @@ onMounted(() => {
 
 .chat-scroll {
   flex: 1;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 14px 18px;
 }
 
@@ -724,7 +784,10 @@ button:disabled {
   background: transparent;
   border: none;
   padding: 0;
+  max-width: 100%;
+  min-width: 0;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
   font-size: 13px;
   line-height: 1.55;

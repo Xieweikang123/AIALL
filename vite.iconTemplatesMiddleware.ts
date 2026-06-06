@@ -5,6 +5,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { readJsonBody, sendJson } from "./server/httpUtils";
 
 const STORE_VERSION = 1 as const;
 
@@ -22,29 +23,6 @@ interface StoreFile {
   version: typeof STORE_VERSION;
   updatedAt: string;
   items: IconTemplateItem[];
-}
-
-function sendJson(res: ServerResponse, status: number, payload: unknown) {
-  res.statusCode = status;
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.end(JSON.stringify(payload));
-}
-
-function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    let data = "";
-    req.on("data", (chunk) => {
-      data += chunk.toString();
-    });
-    req.on("end", () => {
-      try {
-        resolve(JSON.parse(data) as unknown);
-      } catch (error) {
-        reject(error);
-      }
-    });
-    req.on("error", reject);
-  });
 }
 
 const ID_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;

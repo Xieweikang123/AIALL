@@ -29,10 +29,26 @@ export type VibeAgentEvent =
       };
     }
   | { type: "tool_start"; data: { id: string; name: string; args: Record<string, unknown> } }
-  | { type: "tool_end"; data: { id: string; name: string; ok: boolean; summary: string } }
+  | { type: "tool_end"; data: { id: string; name: string; ok: boolean; summary: string; result?: string } }
   | { type: "message"; data: { text: string } }
   | { type: "message_delta"; data: { delta: string } }
-  | { type: "file_diff"; data: { path: string; before: string; after: string } }
+  | { type: "file_diff"; data: { path: string; before: string; after: string; deleted?: boolean } }
+  | {
+      type: "agent_context";
+      data: {
+        mode: VibeChatMode;
+        systemPrompt: string;
+        history: Array<{ role: string; content: string }>;
+        projectContext?: string;
+        maxTurns?: number;
+        model?: string;
+        openFile?: string;
+      };
+    }
+  | {
+      type: "turn_trace";
+      data: { turn: number; maxTurns?: number; assistantText: string; hasToolCalls: boolean };
+    }
   | { type: "error"; data: { message: string } }
   | { type: "done"; data: { writtenFiles: string[]; pendingFiles: string[]; turns: number } };
 
@@ -59,6 +75,34 @@ export interface RunVibeAgentParams {
 
 const MAX_HISTORY_MESSAGES = 40;
 const MAX_HISTORY_CHARS = 120_000;
+const MAX_SSE_TEXT_CHARS = 24_000;
+const MAX_TOOL_RESULT_SSE_CHARS = 16_000;
+
+function truncateForSse(text: string, max = MAX_SSE_TEXT_CHARS): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}\n\n…（已截断，共 ${text.length} 字符）`;
+}
+
+function historyForDisplay(history?: VibeChatHistoryMessage[]): Array<{ role: string; content: string }> {
+  return buildHistoryMessages(history).map((m) => ({
+    role: m.role,
+    content: truncateForSse(String(m.content || ""), 4000),
+  }));
+}
+
+function emitAgentContext(
+  onEvent: RunVibeAgentParams["onEvent"],
+  data: Extract<VibeAgentEvent, { type: "agent_context" }>["data"],
+) {
+  onEvent({
+    type: "agent_context",
+    data: {
+      ...data,
+      systemPrompt: truncateForSse(data.systemPrompt),
+      projectContext: data.projectContext ? truncateForSse(data.projectContext) : undefined,
+    },
+  });
+}
 
 function buildHistoryMessages(history?: VibeChatHistoryMessage[]): ChatCompletionMessage[] {
   if (!history?.length) return [];
@@ -154,6 +198,20 @@ const VIBE_AGENT_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "delete_file",
+      description: "暂存删除文件（用户确认后才真正从磁盘删除）。",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "相对项目根的文件路径" },
+        },
+        required: ["path"],
+      },
+    },
+  },
 ];
 
 function buildSystemPrompt(projectRoot: string, openFilePath?: string): string {
@@ -163,6 +221,7 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string): string {
     "工作流程：先 list_dir / grep / read_file 收集必要信息，再回答或 write_file 修改代码。",
     "解释项目时：从 package.json、README、入口文件等关键文件入手，不要臆测。",
     "修改代码时：先 read_file 确认现状，再 write_file 暂存完整文件内容；用户确认后才会真正落盘。",
+    "删除文件时：使用 delete_file 工具，不要用 write_file 清空内容来替代删除。",
     "重要：必须通过 API 工具接口调用 list_dir、read_file 等，禁止在正文里输出 <function>、<parameter> 等标记。",
     "工具 path 参数使用相对项目根的路径（如 package.json、src/main.ts），不要用绝对路径。",
     `项目根目录：${projectRoot}`,
@@ -227,14 +286,21 @@ async function runVibeAsk(params: RunVibeAgentParams): Promise<void> {
     projectContextBlock = formatProjectContextForPrompt(projectContext);
   }
 
+  const systemPrompt = buildAskSystemPrompt(projectRoot, openFilePath, openFileSnippet) + projectContextBlock;
   const messages: ChatCompletionMessage[] = [
-    {
-      role: "system",
-      content: buildAskSystemPrompt(projectRoot, openFilePath, openFileSnippet) + projectContextBlock,
-    },
+    { role: "system", content: systemPrompt },
     ...buildHistoryMessages(params.history),
     { role: "user", content: prompt },
   ];
+
+  emitAgentContext(onEvent, {
+    mode: "ask",
+    systemPrompt,
+    history: historyForDisplay(params.history),
+    projectContext: projectContextBlock || undefined,
+    model,
+    ...(openFileRel ? { openFile: openFileRel } : {}),
+  });
 
   if (signal?.aborted) {
     onEvent({ type: "status", data: { phase: "aborted" } });
@@ -285,6 +351,13 @@ async function runVibeAsk(params: RunVibeAgentParams): Promise<void> {
   const visibleContent = stripTextToolCallMarkup(rawContent);
 
   if (toolCalls.length) {
+    if (visibleContent.trim()) {
+      onEvent({
+        type: "turn_trace",
+        data: { turn: 1, assistantText: visibleContent.trim(), hasToolCalls: true },
+      });
+    }
+
     messages.push({
       role: "assistant",
       content: visibleContent || null,
@@ -295,7 +368,14 @@ async function runVibeAsk(params: RunVibeAgentParams): Promise<void> {
       if (signal?.aborted) break;
 
       const toolName = call.function.name;
-      if (toolName === "write_file") continue;
+      if (toolName === "write_file" || toolName === "delete_file") {
+        messages.push({
+          role: "tool",
+          tool_call_id: call.id,
+          content: "Ask 模式下不支持文件修改操作，请仅使用只读工具查询项目内容。",
+        });
+        continue;
+      }
 
       const toolArgs = parseToolArgs(call.function.arguments || "{}");
       onEvent({ type: "tool_start", data: { id: call.id, name: toolName, args: toolArgs } });
@@ -314,6 +394,7 @@ async function runVibeAsk(params: RunVibeAgentParams): Promise<void> {
           name: toolName,
           ok: !result.startsWith("错误："),
           summary: toolSummary(toolName, result),
+          result: truncateForSse(result, MAX_TOOL_RESULT_SSE_CHARS),
         },
       });
 
@@ -345,6 +426,8 @@ async function runVibeAsk(params: RunVibeAgentParams): Promise<void> {
       if (secondText && !secondStreamedChars) {
         onEvent({ type: "message", data: { text: secondText } });
       }
+    } else if (!secondCompletion.ok) {
+      onEvent({ type: "error", data: { message: secondCompletion.error || "第二轮请求失败" } });
     }
   } else {
     const text = visibleContent.trim();
@@ -409,17 +492,24 @@ function toolSummary(name: string, result: string): string {
     return result;
   }
 
+  if (name === "delete_file") {
+    const m = result.match(/已暂存删除\s+(.+?)，/);
+    if (m) return `待删除 ${m[1]}`;
+    return result;
+  }
+
   const oneLine = result.replace(/\s+/g, " ").trim();
   return oneLine.length > 120 ? `${oneLine.slice(0, 120)}…` : oneLine;
 }
 
 type WriteStage = {
   files: Map<string, string>;
+  deletions: Set<string>;
   pendingList: string[];
 };
 
 function createWriteStage(): WriteStage {
-  return { files: new Map(), pendingList: [] };
+  return { files: new Map(), deletions: new Set(), pendingList: [] };
 }
 
 async function readStagedFileContent(
@@ -496,11 +586,27 @@ async function executeTool(
     if (typeof content !== "string") return "错误：缺少 content";
     const resolved = resolveProjectPath(root, filePath);
     if (!resolved.ok) return `错误：${resolved.error}`;
+    stage.deletions.delete(resolved.relative);
     stage.files.set(resolved.relative, content);
     if (!stage.pendingList.includes(resolved.relative)) {
       stage.pendingList.push(resolved.relative);
     }
     return `已暂存 ${resolved.relative}（${content.length} 字符），待用户确认后写入`;
+  }
+
+  if (name === "delete_file") {
+    const filePath = String(args.path || "").trim();
+    if (!filePath) return "错误：缺少 path";
+    const resolved = resolveProjectPath(root, filePath);
+    if (!resolved.ok) return `错误：${resolved.error}`;
+    const stat = await fs.promises.stat(resolved.path).catch(() => null);
+    if (!stat?.isFile()) return `错误：${resolved.relative} 不是文件或不存在`;
+    stage.files.delete(resolved.relative);
+    stage.deletions.add(resolved.relative);
+    if (!stage.pendingList.includes(resolved.relative)) {
+      stage.pendingList.push(resolved.relative);
+    }
+    return `已暂存删除 ${resolved.relative}，待用户确认后执行`;
   }
 
   return `错误：未知工具 ${name}`;
@@ -540,18 +646,28 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   });
 
   const writeStage = createWriteStage();
+  const systemPrompt = buildSystemPrompt(projectRoot, openFilePath);
   const messages: ChatCompletionMessage[] = [
-    { role: "system", content: buildSystemPrompt(projectRoot, openFilePath) },
+    { role: "system", content: systemPrompt },
     ...buildHistoryMessages(params.history),
     { role: "user", content: prompt },
   ];
+
+  emitAgentContext(onEvent, {
+    mode: "build",
+    systemPrompt,
+    history: historyForDisplay(params.history),
+    maxTurns,
+    model,
+    ...(openFileRel ? { openFile: openFileRel } : {}),
+  });
 
   for (let turn = 1; turn <= maxTurns; turn += 1) {
     if (signal?.aborted) {
       onEvent({ type: "status", data: { phase: "aborted", turn, maxTurns } });
       onEvent({
         type: "done",
-        data: { writtenFiles: [], pendingFiles: [...writeStage.pendingList], turns: turn - 1 },
+        data: { writtenFiles: [...writeStage.files.keys(), ...writeStage.deletions], pendingFiles: [...writeStage.pendingList], turns: turn - 1 },
       });
       return;
     }
@@ -608,9 +724,16 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       onEvent({ type: "status", data: { phase: "finished", turn, maxTurns } });
       onEvent({
         type: "done",
-        data: { writtenFiles: [], pendingFiles: [...writeStage.pendingList], turns: turn },
+        data: { writtenFiles: [...writeStage.files.keys(), ...writeStage.deletions], pendingFiles: [...writeStage.pendingList], turns: turn },
       });
       return;
+    }
+
+    if (visibleContent.trim()) {
+      onEvent({
+        type: "turn_trace",
+        data: { turn, maxTurns, assistantText: visibleContent.trim(), hasToolCalls: true },
+      });
     }
 
     messages.push({
@@ -628,7 +751,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       onEvent({ type: "tool_start", data: { id: call.id, name: toolName, args: toolArgs } });
 
       let writeBefore = "";
-      if (toolName === "write_file") {
+      if (toolName === "write_file" || toolName === "delete_file") {
         const filePath = String(toolArgs.path || "").trim();
         if (filePath) {
           const resolved = resolveProjectPath(projectRoot, filePath);
@@ -645,7 +768,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
               data: {
                 path: resolved.relative,
                 before: writeBefore,
-                after: String(toolArgs.content ?? ""),
+                after: toolName === "delete_file" ? "" : String(toolArgs.content ?? ""),
+                deleted: toolName === "delete_file",
               },
             });
           }
@@ -666,6 +790,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
           name: toolName,
           ok: !result.startsWith("错误："),
           summary: toolSummary(toolName, result),
+          result: truncateForSse(result, MAX_TOOL_RESULT_SSE_CHARS),
         },
       });
 
@@ -677,9 +802,10 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     }
   }
 
+  onEvent({ type: "status", data: { phase: "finished", turn: maxTurns, maxTurns } });
   onEvent({ type: "error", data: { message: `已达最大轮次（${maxTurns}），任务可能未完成。` } });
   onEvent({
     type: "done",
-    data: { writtenFiles: [], pendingFiles: [...writeStage.pendingList], turns: maxTurns },
+    data: { writtenFiles: [...writeStage.files.keys(), ...writeStage.deletions], pendingFiles: [...writeStage.pendingList], turns: maxTurns },
   });
 }

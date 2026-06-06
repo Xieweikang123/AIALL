@@ -39,8 +39,11 @@ onUpdated(() => {
 
 <style scoped>
 .msg-markdown {
+  min-width: 0;
+  max-width: 100%;
   font-size: 13px;
   line-height: 1.65;
+  overflow-wrap: anywhere;
   word-break: break-word;
   color: rgba(255, 255, 255, 0.92);
 }
@@ -99,12 +102,15 @@ onUpdated(() => {
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 4px;
   padding: 0.1em 0.35em;
+  overflow-wrap: anywhere;
+  word-break: break-all;
 }
 
 .msg-markdown :deep(pre) {
   margin: 0.75em 0;
   padding: 10px 12px;
-  overflow: auto;
+  max-width: 100%;
+  overflow-x: auto;
   background: rgba(0, 0, 0, 0.35);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
@@ -134,6 +140,8 @@ onUpdated(() => {
 
 .msg-markdown :deep(table) {
   width: 100%;
+  max-width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   margin: 0.75em 0;
   font-size: 12px;
@@ -144,6 +152,8 @@ onUpdated(() => {
   border: 1px solid rgba(255, 255, 255, 0.12);
   padding: 6px 8px;
   text-align: left;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .msg-markdown :deep(th) {
@@ -153,6 +163,8 @@ onUpdated(() => {
 .msg-markdown :deep(.code-block-wrapper) {
   position: relative;
   margin: 0.75em 0;
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .msg-markdown :deep(.code-block-wrapper pre) {

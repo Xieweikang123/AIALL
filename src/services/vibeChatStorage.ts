@@ -1,12 +1,31 @@
 export type PersistedFileDiff = {
   before: string;
   after: string;
+  deleted?: boolean;
+};
+
+export type PersistedAgentContext = {
+  mode: "ask" | "build";
+  systemPrompt: string;
+  history: Array<{ role: string; content: string }>;
+  projectContext?: string;
+  maxTurns?: number;
+  model?: string;
+  openFile?: string;
+};
+
+export type PersistedTurnTrace = {
+  turn: number;
+  maxTurns?: number;
+  assistantText: string;
+  hasToolCalls: boolean;
 };
 
 export type PersistedChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  chatMode?: "ask" | "build";
   tools?: Array<{
     id: string;
     name?: string;
@@ -16,12 +35,19 @@ export type PersistedChatMessage = {
     label: string;
     summary: string;
     ok: boolean;
+    fullResult?: string;
+    args?: Record<string, unknown>;
   }>;
+  agentContext?: PersistedAgentContext;
+  statusLog?: string[];
+  turnTraces?: PersistedTurnTrace[];
+  totalTurns?: number;
   writtenFiles?: string[];
   turnFileDiffs?: Record<string, PersistedFileDiff>;
   pendingApproval?: boolean;
   rejected?: boolean;
   reverted?: boolean;
+  activityExpanded?: boolean;
 };
 
 export type VibeChatSessionMeta = {
@@ -85,6 +111,7 @@ function sanitizeMessages(messages: PersistedChatMessage[]): PersistedChatMessag
       id: m.id,
       role: m.role,
       content: m.content,
+      chatMode: m.chatMode,
       tools: m.tools?.map((t) => ({
         id: t.id,
         name: t.name,
@@ -94,11 +121,19 @@ function sanitizeMessages(messages: PersistedChatMessage[]): PersistedChatMessag
         label: t.label,
         summary: t.summary,
         ok: t.ok,
+        fullResult: t.fullResult,
+        args: t.args,
       })),
+      agentContext: m.agentContext,
+      statusLog: m.statusLog?.length ? [...m.statusLog] : undefined,
+      turnTraces: m.turnTraces?.length ? m.turnTraces.map((t) => ({ ...t })) : undefined,
+      totalTurns: m.totalTurns,
       writtenFiles: m.writtenFiles?.length ? [...m.writtenFiles] : undefined,
+      turnFileDiffs: m.turnFileDiffs ? { ...m.turnFileDiffs } : undefined,
       pendingApproval: m.pendingApproval || undefined,
       rejected: m.rejected || undefined,
       reverted: m.reverted || undefined,
+      activityExpanded: m.activityExpanded || undefined,
     }));
 }
 
@@ -145,11 +180,21 @@ function readStore(): ChatStore {
   }
 }
 
-function writeStore(store: ChatStore) {
+let storageErrorCallback: ((msg: string) => void) | null = null;
+
+export function onStorageError(cb: (msg: string) => void) {
+  storageErrorCallback = cb;
+}
+
+function writeStore(store: ChatStore): boolean {
   try {
     localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(store));
+    return true;
   } catch (e) {
     console.warn("[vibeChatStorage] localStorage write failed:", e);
+    const msg = "聊天记录保存失败（存储空间可能已满），刷新或关闭页面后记录会丢失。";
+    storageErrorCallback?.(msg);
+    return false;
   }
 }
 
@@ -213,14 +258,14 @@ export function loadVibeChatHistory(projectPath: string): PersistedChatMessage[]
   return sanitizeMessages(getActiveSession(record).messages);
 }
 
-export function saveVibeChatHistory(projectPath: string, messages: PersistedChatMessage[]) {
+export function saveVibeChatHistory(projectPath: string, messages: PersistedChatMessage[]): boolean {
   const key = normalizeProjectKey(projectPath);
-  if (!key) return;
+  if (!key) return false;
   const store = readStore();
   const record = ensureProjectRecord(store, key);
   const session = getActiveSession(record);
   touchSession(session, messages);
-  writeStore(store);
+  return writeStore(store);
 }
 
 export function switchVibeChatSession(projectPath: string, sessionId: string): PersistedChatMessage[] {

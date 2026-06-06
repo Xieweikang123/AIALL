@@ -41,10 +41,26 @@ export type VibeAgentSseEvent =
       };
     }
   | { type: "tool_start"; data: { id: string; name: string; args: Record<string, unknown> } }
-  | { type: "tool_end"; data: { id: string; name: string; ok: boolean; summary: string } }
+  | { type: "tool_end"; data: { id: string; name: string; ok: boolean; summary: string; result?: string } }
   | { type: "message"; data: { text: string } }
   | { type: "message_delta"; data: { delta: string } }
-  | { type: "file_diff"; data: { path: string; before: string; after: string } }
+  | { type: "file_diff"; data: { path: string; before: string; after: string; deleted?: boolean } }
+  | {
+      type: "agent_context";
+      data: {
+        mode: VibeChatMode;
+        systemPrompt: string;
+        history: Array<{ role: string; content: string }>;
+        projectContext?: string;
+        maxTurns?: number;
+        model?: string;
+        openFile?: string;
+      };
+    }
+  | {
+      type: "turn_trace";
+      data: { turn: number; maxTurns?: number; assistantText: string; hasToolCalls: boolean };
+    }
   | { type: "error"; data: { message: string } }
   | { type: "done"; data: { writtenFiles: string[]; pendingFiles: string[]; turns: number } }
   | { type: "unknown"; data: unknown };
@@ -100,6 +116,8 @@ export function runVibeAgentSse(request: VibeAgentRunRequest, onEvent: (event: V
       else if (type === "message") onEvent({ type: "message", data: (parsed || {}) as any });
       else if (type === "message_delta") onEvent({ type: "message_delta", data: (parsed || {}) as any });
       else if (type === "file_diff") onEvent({ type: "file_diff", data: (parsed || {}) as any });
+      else if (type === "agent_context") onEvent({ type: "agent_context", data: (parsed || {}) as any });
+      else if (type === "turn_trace") onEvent({ type: "turn_trace", data: (parsed || {}) as any });
       else if (type === "error") onEvent({ type: "error", data: (parsed || {}) as any });
       else if (type === "done") {
         doneReceived = true;

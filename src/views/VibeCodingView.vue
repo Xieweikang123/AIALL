@@ -563,7 +563,7 @@
                 </div>
               </div>
               <div
-                v-if="m.role === 'assistant' && m.chatMode !== 'ask' && hasAgentActivity(m)"
+                v-if="m.role === 'assistant' && hasAgentActivity(m)"
                 class="agent-activity"
                 :class="{ collapsed: !isActivityExpanded(m) }"
               >
@@ -577,7 +577,7 @@
                   <span class="agent-activity-chevron" aria-hidden="true">
                     {{ isActivityExpanded(m) ? "▼" : "▶" }}
                   </span>
-                  <span class="agent-activity-title">Agent 执行过程</span>
+                  <span class="agent-activity-title">{{ m.chatMode === "ask" ? "Ask 执行过程" : "Agent 执行过程" }}</span>
                   <span v-if="isAgentRunning(m)" class="agent-activity-hint">运行中…</span>
                   <span v-else-if="!isActivityExpanded(m)" class="agent-activity-summary">
                     {{ activitySummary(m) }}
@@ -591,7 +591,55 @@
                     <span v-if="m.agentTurn && m.agentMaxTurns" class="agent-turn-pill">
                       第 {{ m.agentTurn }}/{{ m.agentMaxTurns }} 轮
                     </span>
+                    <span v-else-if="m.totalTurns" class="agent-turn-pill">共 {{ m.totalTurns }} 轮</span>
                   </div>
+                  <details v-if="m.agentContext" class="trace-block" open>
+                    <summary class="trace-block-title">上下文（系统提示 + 历史 + 项目）</summary>
+                    <div class="trace-block-body">
+                      <div class="trace-meta">
+                        模式 {{ m.agentContext.mode === "ask" ? "Ask" : "Build" }}
+                        <span v-if="m.agentContext.model"> · 模型 {{ m.agentContext.model }}</span>
+                        <span v-if="m.agentContext.openFile"> · 当前文件 {{ m.agentContext.openFile }}</span>
+                        <span v-if="m.agentContext.maxTurns"> · 最多 {{ m.agentContext.maxTurns }} 轮</span>
+                      </div>
+                      <details class="trace-nested">
+                        <summary>系统提示词</summary>
+                        <pre class="trace-pre">{{ m.agentContext.systemPrompt }}</pre>
+                      </details>
+                      <details v-if="m.agentContext.history.length" class="trace-nested">
+                        <summary>对话历史（{{ m.agentContext.history.length }} 条）</summary>
+                        <div
+                          v-for="(h, hi) in m.agentContext.history"
+                          :key="hi"
+                          class="trace-history-item"
+                        >
+                          <span class="trace-history-role">{{ h.role === "user" ? "你" : "助手" }}</span>
+                          <pre class="trace-pre compact">{{ h.content }}</pre>
+                        </div>
+                      </details>
+                      <details v-if="m.agentContext.projectContext" class="trace-nested">
+                        <summary>注入的项目上下文</summary>
+                        <pre class="trace-pre">{{ m.agentContext.projectContext }}</pre>
+                      </details>
+                    </div>
+                  </details>
+                  <details v-if="m.statusLog?.length" class="trace-block" open>
+                    <summary class="trace-block-title">阶段日志（{{ m.statusLog.length }}）</summary>
+                    <ol class="status-log">
+                      <li v-for="(line, si) in m.statusLog" :key="si">{{ line }}</li>
+                    </ol>
+                  </details>
+                  <details v-if="m.turnTraces?.length" class="trace-block" open>
+                    <summary class="trace-block-title">轮次中间输出（{{ m.turnTraces.length }}）</summary>
+                    <div v-for="(trace, ti) in m.turnTraces" :key="ti" class="turn-trace-item">
+                      <div class="turn-trace-head">
+                        第 {{ trace.turn }} 轮
+                        <span v-if="trace.maxTurns">/ {{ trace.maxTurns }}</span>
+                        <span v-if="trace.hasToolCalls"> · 随后调用工具</span>
+                      </div>
+                      <pre class="trace-pre compact">{{ trace.assistantText }}</pre>
+                    </div>
+                  </details>
                   <ol v-if="m.tools?.length" class="tool-timeline">
                     <li
                       v-for="step in m.tools"
@@ -613,6 +661,17 @@
                         </div>
                         <div v-if="step.detail" class="tool-item-detail">{{ step.detail }}</div>
                         <div v-if="step.summary && !step.running" class="tool-item-summary">{{ step.summary }}</div>
+                        <details
+                          v-if="formatToolArgsPreview(step.name, step.args || {})"
+                          class="tool-item-expand"
+                        >
+                          <summary>暂存参数</summary>
+                          <pre class="trace-pre compact">{{ formatToolArgsPreview(step.name, step.args || {}) }}</pre>
+                        </details>
+                        <details v-if="step.fullResult && !step.running" class="tool-item-expand" open>
+                          <summary>完整返回</summary>
+                          <pre class="trace-pre compact">{{ step.fullResult }}</pre>
+                        </details>
                       </div>
                     </li>
                   </ol>
@@ -630,6 +689,43 @@
               <pre v-if="m.content && m.streaming" class="msg-streaming">{{ m.content }}<span v-if="isAgentRunning(m)" class="stream-cursor" aria-hidden="true">▍</span></pre>
               <ChatMarkdown v-else-if="m.content" :content="m.content" @apply-block="(idx: number) => applyCodeBlock(extractCodeBlocks(m.content)[idx])" />
               <div
+                v-if="m.role === 'assistant' && m.turnFileDiffs && Object.keys(m.turnFileDiffs).length"
+                class="inline-diff-list"
+              >
+                <div
+                  v-for="relPath in Object.keys(m.turnFileDiffs)"
+                  :key="relPath"
+                  class="inline-diff-card"
+                >
+                  <div class="inline-diff-head">
+                    <span class="inline-diff-path">{{ relPath }}</span>
+                    <span v-if="m.turnFileDiffs[relPath].deleted" class="inline-diff-tag delete">删除</span>
+                    <span v-else class="inline-diff-tag modify">修改</span>
+                    <button
+                      type="button"
+                      class="ghost small"
+                      :disabled="!projectOpened"
+                      @click="previewAgentFile(m.id, relPath)"
+                    >
+                      编辑器预览
+                    </button>
+                  </div>
+                  <details class="inline-diff-details" open>
+                    <summary>变更内容</summary>
+                    <div class="inline-diff-cols">
+                      <div class="inline-diff-col">
+                        <div class="inline-diff-label">修改前</div>
+                        <pre class="trace-pre compact">{{ truncateDiffPreview(m.turnFileDiffs[relPath].before || "（空 / 新文件）") }}</pre>
+                      </div>
+                      <div class="inline-diff-col">
+                        <div class="inline-diff-label">{{ m.turnFileDiffs[relPath].deleted ? "删除后" : "修改后" }}</div>
+                        <pre class="trace-pre compact">{{ truncateDiffPreview(m.turnFileDiffs[relPath].deleted ? "（文件将删除）" : m.turnFileDiffs[relPath].after) }}</pre>
+                      </div>
+                    </div>
+                  </details>
+                </div>
+              </div>
+              <div
                 v-if="
                   m.role === 'assistant' &&
                   !m.streaming &&
@@ -638,7 +734,7 @@
                 class="msg-actions"
               >
                 <template v-if="m.pendingApproval && m.turnFileDiffs">
-                  <span class="pending-badge">待确认 {{ Object.keys(m.turnFileDiffs).length }} 个文件修改</span>
+                  <span class="pending-badge">{{ formatPendingApprovalLabel(m.turnFileDiffs) }}</span>
                   <button
                     type="button"
                     class="primary small-action"
@@ -694,6 +790,15 @@
         </div>
 
         <footer class="chat-composer">
+          <div v-if="pendingPromptQueue.length" class="pending-queue">
+            <div class="pending-queue-head">
+              <span>排队中 {{ pendingPromptQueue.length }} 条消息</span>
+              <button type="button" class="ghost small" @click="pendingPromptQueue = []">清空队列</button>
+            </div>
+            <ol class="pending-queue-list">
+              <li v-for="(q, qi) in pendingPromptQueue" :key="qi">{{ q }}</li>
+            </ol>
+          </div>
           <div v-if="quotedMessage" class="quoted-preview">
             <div class="quoted-preview-header">
               <span class="quoted-preview-label">
@@ -812,6 +917,7 @@ import {
   getActiveVibeChatSessionId,
   listVibeChatSessions,
   loadVibeChatHistory,
+  onStorageError,
   saveVibeChatHistory,
   switchVibeChatSession,
   type PersistedChatMessage,
@@ -866,6 +972,7 @@ const STORAGE_KEY = "vibe-coding-project";
 const PANEL_WIDTH_KEY = "vibe-coding-panel-widths";
 const EDITOR_COLLAPSED_KEY = "vibe-coding-editor-collapsed";
 const CHAT_MODE_KEY = "vibe-coding-chat-mode";
+const PENDING_QUEUE_KEY = "vibe-coding-pending-queue";
 const FILE_MIN_WIDTH = 180;
 const FILE_MAX_WIDTH = 500;
 const CHAT_MIN_WIDTH = 260;
@@ -883,24 +990,23 @@ type AgentToolStep = {
   summary: string;
   ok: boolean;
   running?: boolean;
+  fullResult?: string;
+  args?: Record<string, unknown>;
 };
 type ChatMessage = Omit<PersistedChatMessage, "tools"> & {
   tools?: AgentToolStep[];
-  chatMode?: VibeChatMode;
   status?: string;
   agentPhase?: string;
   agentTurn?: number;
   agentMaxTurns?: number;
-  activityExpanded?: boolean;
   streaming?: boolean;
   reverting?: boolean;
-  pendingApproval?: boolean;
-  rejected?: boolean;
 };
 
 type FileDiff = {
   before: string;
   after: string;
+  deleted?: boolean;
 };
 
 type AgentStatusData = Extract<VibeAgentSseEvent, { type: "status" }>["data"] & {
@@ -911,6 +1017,7 @@ type AgentStatusData = Extract<VibeAgentSseEvent, { type: "status" }>["data"] & 
 function normalizeChatMessages(messages: PersistedChatMessage[]): ChatMessage[] {
   return messages.map((m) => ({
     ...m,
+    activityExpanded: m.activityExpanded ?? (m.role === "assistant" && Boolean(m.tools?.length || m.agentContext)),
     tools: m.tools?.map((t) => ({
       id: t.id,
       name: t.name || "",
@@ -920,6 +1027,8 @@ function normalizeChatMessages(messages: PersistedChatMessage[]): ChatMessage[] 
       label: t.label,
       summary: t.summary,
       ok: t.ok,
+      fullResult: t.fullResult,
+      args: t.args,
     })),
   }));
 }
@@ -989,7 +1098,30 @@ const workspaceRef = ref<HTMLElement | null>(null);
 let scrollChatRaf = 0;
 const historyOpen = ref(false);
 const activeSessionId = ref("");
-const pendingPrompts: string[] = [];
+const pendingPromptQueue = ref<string[]>([]);
+
+function persistPendingQueue() {
+  try {
+    if (pendingPromptQueue.value.length) {
+      localStorage.setItem(PENDING_QUEUE_KEY, JSON.stringify(pendingPromptQueue.value));
+    } else {
+      localStorage.removeItem(PENDING_QUEUE_KEY);
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function loadPendingQueue(): string[] {
+  try {
+    const raw = localStorage.getItem(PENDING_QUEUE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x: unknown) => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
 
 interface ReferencedFile {
   name: string;
@@ -1301,7 +1433,9 @@ function formatAgentStatus(data: AgentStatusData): string {
 
 function setAgentStatus(msg: ChatMessage, phase: string, extra?: Partial<AgentStatusData>) {
   msg.agentPhase = phase;
-  msg.status = formatAgentStatus({ phase, ...extra });
+  const statusText = formatAgentStatus({ phase, ...extra });
+  msg.status = statusText;
+  appendStatusLog(msg, statusText);
   if (extra?.turn) msg.agentTurn = extra.turn;
   if (extra?.maxTurns) msg.agentMaxTurns = extra.maxTurns;
 }
@@ -1311,8 +1445,42 @@ function isAgentRunning(msg: ChatMessage): boolean {
 }
 
 function hasAgentActivity(msg: ChatMessage): boolean {
-  if (msg.chatMode === "ask") return false;
-  return Boolean(msg.status || msg.tools?.length || msg.agentTurn);
+  return Boolean(
+    msg.agentContext ||
+      msg.statusLog?.length ||
+      msg.turnTraces?.length ||
+      msg.status ||
+      msg.tools?.length ||
+      msg.agentTurn ||
+      msg.totalTurns,
+  );
+}
+
+function appendStatusLog(msg: ChatMessage, line: string) {
+  const text = line.trim();
+  if (!text) return;
+  if (!msg.statusLog) msg.statusLog = [];
+  const last = msg.statusLog[msg.statusLog.length - 1];
+  if (last !== text) msg.statusLog.push(text);
+}
+
+function formatToolArgsPreview(name: string, args: Record<string, unknown>): string {
+  if (name === "write_file") {
+    const path = String(args.path ?? "").trim();
+    const content = typeof args.content === "string" ? args.content : "";
+    const preview = content.length > 600 ? `${content.slice(0, 600)}\n…（共 ${content.length} 字符）` : content;
+    return path ? `路径：${path}\n\n${preview}` : preview;
+  }
+  if (name === "delete_file") {
+    const path = String(args.path ?? "").trim();
+    return path ? `将删除：${path}` : "";
+  }
+  return "";
+}
+
+function truncateDiffPreview(text: string, max = 1200): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}\n…（共 ${text.length} 字符）`;
 }
 
 function isActivityExpanded(msg: ChatMessage): boolean {
@@ -1327,16 +1495,22 @@ function collapseAgentActivity(msg: ChatMessage) {
 function toggleActivityExpanded(msg: ChatMessage) {
   if (isAgentRunning(msg)) return;
   msg.activityExpanded = !msg.activityExpanded;
+  patchAssistantMsg(msg.id, { activityExpanded: msg.activityExpanded });
+  schedulePersistChat();
 }
 
 function activitySummary(msg: ChatMessage): string {
   const toolCount = msg.tools?.length ?? 0;
+  const parts: string[] = [];
+  if (msg.totalTurns) parts.push(`${msg.totalTurns} 轮`);
   if (toolCount > 0) {
     const failed = msg.tools?.filter((t) => !t.ok).length ?? 0;
-    return failed > 0 ? `已执行 ${toolCount} 个工具（${failed} 个失败）` : `已执行 ${toolCount} 个工具`;
+    parts.push(failed > 0 ? `${toolCount} 个工具（${failed} 失败）` : `${toolCount} 个工具`);
   }
-  if (msg.agentTurn && msg.agentMaxTurns) return `共 ${msg.agentMaxTurns} 轮`;
-  return "查看执行过程";
+  if (msg.turnFileDiffs && Object.keys(msg.turnFileDiffs).length) {
+    parts.push(`${Object.keys(msg.turnFileDiffs).length} 个文件变更`);
+  }
+  return parts.length ? parts.join(" · ") : "查看执行过程";
 }
 
 function refreshSessionList(path = projectPath.value.trim()) {
@@ -1466,6 +1640,8 @@ function clearChat() {
   if (chatSending.value) return;
   chatMessages.value = [];
   chatError.value = "";
+  pendingPromptQueue.value = [];
+  persistPendingQueue();
   if (projectPath.value.trim()) {
     clearVibeChatHistory(projectPath.value.trim());
     refreshSessionList();
@@ -1492,6 +1668,8 @@ async function openProjectByPath(dirPath: string) {
   const previousPath = projectPath.value.trim();
   if (projectOpened.value && previousPath && previousPath !== normalized) {
     persistChatNow(previousPath);
+    pendingPromptQueue.value = [];
+    persistPendingQueue();
   }
 
   loadingTree.value = true;
@@ -1616,60 +1794,67 @@ async function commitGit() {
 async function stageFile(filePath: string) {
   if (!projectOpened.value) return;
   gitError.value = "";
+  gitStatus.value = gitStatus.value.map((f) => (f.path === filePath ? { ...f, staged: true } : f));
   try {
     const result = await stageGitFiles(projectPath.value.trim(), [filePath]);
     if (!result.ok) {
       gitError.value = result.error || "暂存失败";
-      return;
+      await refreshGitStatus();
     }
-    await refreshGitStatus();
   } catch (e) {
     gitError.value = e instanceof Error ? e.message : "暂存失败";
+    await refreshGitStatus();
   }
 }
 
 async function unstageFile(filePath: string) {
   if (!projectOpened.value) return;
   gitError.value = "";
+  gitStatus.value = gitStatus.value.map((f) => (f.path === filePath ? { ...f, staged: false } : f));
   try {
     const result = await unstageGitFiles(projectPath.value.trim(), [filePath]);
     if (!result.ok) {
       gitError.value = result.error || "取消暂存失败";
-      return;
+      await refreshGitStatus();
     }
-    await refreshGitStatus();
   } catch (e) {
     gitError.value = e instanceof Error ? e.message : "取消暂存失败";
+    await refreshGitStatus();
   }
 }
 
 async function stageAll() {
   if (!projectOpened.value) return;
   gitError.value = "";
+  const filesToStage = gitUnstagedFiles.value.map((f) => f.path);
+  if (!filesToStage.length) return;
+  gitStatus.value = gitStatus.value.map((f) => ({ ...f, staged: true }));
   try {
     const result = await stageGitFiles(projectPath.value.trim(), []);
     if (!result.ok) {
       gitError.value = result.error || "暂存失败";
-      return;
+      await refreshGitStatus();
     }
-    await refreshGitStatus();
   } catch (e) {
     gitError.value = e instanceof Error ? e.message : "暂存失败";
+    await refreshGitStatus();
   }
 }
 
 async function unstageAll() {
   if (!projectOpened.value) return;
   gitError.value = "";
+  if (!gitStagedFiles.value.length) return;
+  gitStatus.value = gitStatus.value.map((f) => ({ ...f, staged: false }));
   try {
     const result = await unstageGitFiles(projectPath.value.trim(), []);
     if (!result.ok) {
       gitError.value = result.error || "取消暂存失败";
-      return;
+      await refreshGitStatus();
     }
-    await refreshGitStatus();
   } catch (e) {
     gitError.value = e instanceof Error ? e.message : "取消暂存失败";
+    await refreshGitStatus();
   }
 }
 
@@ -1952,9 +2137,9 @@ function toggleDiffMode() {
   showDiffMode.value = !showDiffMode.value;
 }
 
-function storeFileDiff(relPath: string, before: string, after: string) {
+function storeFileDiff(relPath: string, before: string, after: string, deleted?: boolean) {
   const full = resolveFullPathFromRel(relPath);
-  setFileDiff(full, { before, after });
+  setFileDiff(full, { before, after, deleted });
 }
 
 function findOpenTab(path: string): OpenTab | undefined {
@@ -2742,8 +2927,13 @@ function formatToolMeta(
     return { name, icon: "📄", title: "读取文件", detail, label: detail ? `读取文件 ${detail}` : "读取文件" };
   }
   if (name === "write_file") {
-    const detail = path || "";
+    const content = typeof args.content === "string" ? args.content : "";
+    const detail = path ? `${path}${content ? ` · ${content.length} 字符` : ""}` : "";
     return { name, icon: "✏️", title: "暂存修改", detail, label: detail ? `暂存修改 ${detail}` : "暂存修改" };
+  }
+  if (name === "delete_file") {
+    const detail = path || "";
+    return { name, icon: "🗑️", title: "暂存删除", detail, label: detail ? `暂存删除 ${detail}` : "暂存删除" };
   }
   if (name === "list_dir") {
     const detail = path || "项目根目录";
@@ -2808,24 +2998,43 @@ function patchAssistantMsg(msgId: string, patch: Partial<ChatMessage>) {
 function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
   const msgId = assistantMsg.id;
 
+  if (event.type === "agent_context") {
+    assistantMsg.agentContext = event.data;
+    assistantMsg.activityExpanded = true;
+    patchAssistantMsg(msgId, { agentContext: event.data, activityExpanded: true });
+    void scrollChatToBottom(true);
+    return;
+  }
+
+  if (event.type === "turn_trace") {
+    if (!assistantMsg.turnTraces) assistantMsg.turnTraces = [];
+    assistantMsg.turnTraces.push({ ...event.data });
+    assistantMsg.activityExpanded = true;
+    patchAssistantMsg(msgId, { turnTraces: [...assistantMsg.turnTraces], activityExpanded: true });
+    void scrollChatToBottom(true);
+    return;
+  }
+
   if (event.type === "status") {
     const { phase } = event.data;
     setAgentStatus(assistantMsg, phase, event.data);
     patchAssistantMsg(msgId, {
       agentPhase: assistantMsg.agentPhase,
       status: assistantMsg.status,
+      statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
       agentTurn: assistantMsg.agentTurn,
       agentMaxTurns: assistantMsg.agentMaxTurns,
+      activityExpanded: true,
       ...(phase === "finished" ? { agentPhase: undefined, streaming: false } : {}),
     });
     if (phase === "aborted") {
       chatSending.value = false;
-      collapseAgentActivity(assistantMsg);
-      patchAssistantMsg(msgId, { activityExpanded: false });
+      persistChatNow();
+      patchAssistantMsg(msgId, { activityExpanded: true });
 
-      if (pendingPrompts.length) {
-        const next = pendingPrompts.shift()!;
-        void runAgentTurn(next);
+      if (pendingPromptQueue.value.length) {
+        const next = pendingPromptQueue.value.shift()!;
+        void runAgentTurn(next, { skipUserBubble: true });
       }
     }
     void scrollChatToBottom(true);
@@ -2838,6 +3047,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
     assistantMsg.tools.push({
       id: event.data.id,
       ...meta,
+      args: { ...event.data.args },
       summary: "",
       ok: true,
       running: true,
@@ -2851,7 +3061,9 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
     patchAssistantMsg(msgId, {
       tools: [...assistantMsg.tools],
       status: assistantMsg.status,
+      statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
       agentPhase: assistantMsg.agentPhase,
+      activityExpanded: true,
     });
     void scrollChatToBottom(true);
     return;
@@ -2859,11 +3071,13 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
 
   if (event.type === "file_diff") {
     const relPath = event.data.path;
-    const diff = { before: event.data.before, after: event.data.after };
-    storeFileDiff(relPath, diff.before, diff.after);
+    const diff = { before: event.data.before, after: event.data.after, deleted: event.data.deleted };
+    storeFileDiff(relPath, diff.before, diff.after, diff.deleted);
     if (!assistantMsg.turnFileDiffs) assistantMsg.turnFileDiffs = {};
     assistantMsg.turnFileDiffs[relPath] = diff;
-    patchAssistantMsg(msgId, { turnFileDiffs: { ...assistantMsg.turnFileDiffs } });
+    assistantMsg.activityExpanded = true;
+    patchAssistantMsg(msgId, { turnFileDiffs: { ...assistantMsg.turnFileDiffs }, activityExpanded: true });
+    void scrollChatToBottom(true);
     return;
   }
 
@@ -2873,6 +3087,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       step.running = false;
       step.ok = event.data.ok;
       step.summary = event.data.summary;
+      if (event.data.result) step.fullResult = event.data.result;
     }
     const pending = assistantMsg.tools?.some((t) => t.running);
     setAgentStatus(assistantMsg, pending ? "executing_tools" : "summarizing_tools", {
@@ -2882,7 +3097,9 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
     patchAssistantMsg(msgId, {
       tools: assistantMsg.tools ? [...assistantMsg.tools] : undefined,
       status: assistantMsg.status,
+      statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
       agentPhase: assistantMsg.agentPhase,
+      activityExpanded: true,
     });
     void scrollChatToBottom(true);
     return;
@@ -2894,8 +3111,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
     const nextContent = `${assistantMsg.content || ""}${delta}`;
     assistantMsg.streaming = true;
     assistantMsg.content = nextContent;
-    assistantMsg.status = "";
-    patchAssistantMsg(msgId, { streaming: true, content: nextContent, status: "" });
+    patchAssistantMsg(msgId, { streaming: true, content: nextContent });
     void scrollChatToBottom(true);
     return;
   }
@@ -2911,6 +3127,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       status: "",
       agentPhase: undefined,
     });
+    persistChatNow();
     void scrollChatToBottom(true);
     return;
   }
@@ -2919,14 +3136,19 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
     chatError.value = event.data.message;
     const content = assistantMsg.content || event.data.message;
     assistantMsg.content = content;
-    collapseAgentActivity(assistantMsg);
-    patchAssistantMsg(msgId, { content, activityExpanded: false });
+    appendStatusLog(assistantMsg, `错误：${event.data.message}`);
+    patchAssistantMsg(msgId, {
+      content,
+      activityExpanded: true,
+      statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
+    });
+    persistChatNow();
     void scrollChatToBottom(true);
     chatSending.value = false;
 
-    if (pendingPrompts.length) {
-      const next = pendingPrompts.shift()!;
-      void runAgentTurn(next);
+    if (pendingPromptQueue.value.length) {
+      const next = pendingPromptQueue.value.shift()!;
+      void runAgentTurn(next, { skipUserBubble: true });
     }
     return;
   }
@@ -2934,9 +3156,9 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
   if (event.type === "done") {
     chatSending.value = false;
     agentAbortHandle = null;
-    assistantMsg.status = "";
-    assistantMsg.agentPhase = undefined;
     assistantMsg.streaming = false;
+    assistantMsg.totalTurns = event.data.turns;
+    appendStatusLog(assistantMsg, `完成（共 ${event.data.turns} 轮）`);
 
     const pending = event.data.pendingFiles || [];
     if (pending.length && assistantMsg.turnFileDiffs && Object.keys(assistantMsg.turnFileDiffs).length) {
@@ -2947,12 +3169,16 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       assistantMsg.writtenFiles = event.data.writtenFiles?.length ? [...event.data.writtenFiles] : undefined;
     }
 
-    collapseAgentActivity(assistantMsg);
+    assistantMsg.status = "";
+    assistantMsg.agentPhase = undefined;
+    assistantMsg.activityExpanded = true;
     patchAssistantMsg(msgId, {
       status: "",
       agentPhase: undefined,
       streaming: false,
-      activityExpanded: false,
+      activityExpanded: true,
+      totalTurns: assistantMsg.totalTurns,
+      statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
       writtenFiles: assistantMsg.writtenFiles,
       pendingApproval: assistantMsg.pendingApproval,
     });
@@ -2970,10 +3196,44 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
     }
     void scrollChatToBottom(true);
 
-    if (pendingPrompts.length) {
-      const next = pendingPrompts.shift()!;
-      void runAgentTurn(next);
+    if (pendingPromptQueue.value.length) {
+      const next = pendingPromptQueue.value.shift()!;
+      void runAgentTurn(next, { skipUserBubble: true });
     }
+  }
+}
+
+function formatPendingApprovalLabel(turnFileDiffs: Record<string, FileDiff>): string {
+  const entries = Object.values(turnFileDiffs);
+  const deleteCount = entries.filter((diff) => diff.deleted).length;
+  const modifyCount = entries.length - deleteCount;
+  const parts: string[] = [];
+  if (deleteCount) parts.push(`${deleteCount} 个文件删除`);
+  if (modifyCount) parts.push(`${modifyCount} 个文件修改`);
+  return `待确认 ${parts.join("、")}`;
+}
+
+function removeOpenTabForPath(targetPath: string) {
+  const tabIdx = openTabs.value.findIndex((tab) => tab.path === targetPath);
+  if (tabIdx >= 0) openTabs.value.splice(tabIdx, 1);
+  if (activeFilePath.value === targetPath) {
+    const nextTab = openTabs.value[tabIdx] || openTabs.value[tabIdx - 1];
+    if (nextTab) {
+      activeFilePath.value = nextTab.path;
+      fileContent.value = nextTab.content;
+      fileDirty.value = nextTab.dirty;
+    } else {
+      activeFilePath.value = "";
+      fileContent.value = "";
+      fileDirty.value = false;
+      syncEditorPanelForOpenFiles();
+    }
+    showDiffMode.value = false;
+  }
+  if (getFileDiff(targetPath)) {
+    const next = { ...fileDiffs.value };
+    delete next[normalizePathKey(targetPath)];
+    fileDiffs.value = next;
   }
 }
 
@@ -3001,11 +3261,17 @@ async function acceptAgentTurn(messageId: string) {
     const applied: string[] = [];
     for (const [relPath, diff] of Object.entries(msg.turnFileDiffs)) {
       const fullPath = resolveFullPathFromRel(relPath);
-      const existing = await readFile(fullPath);
-      const writeResult = existing.ok
-        ? await writeFile(fullPath, diff.after)
-        : await createItem(fullPath, false, diff.after);
-      if (!writeResult.ok) throw new Error(writeResult.error || `写入 ${relPath} 失败`);
+      if (diff.deleted) {
+        const deleteResult = await deleteItem(fullPath);
+        if (!deleteResult.ok) throw new Error(deleteResult.error || `删除 ${relPath} 失败`);
+        removeOpenTabForPath(fullPath);
+      } else {
+        const existing = await readFile(fullPath);
+        const writeResult = existing.ok
+          ? await writeFile(fullPath, diff.after)
+          : await createItem(fullPath, false, diff.after);
+        if (!writeResult.ok) throw new Error(writeResult.error || `写入 ${relPath} 失败`);
+      }
       applied.push(relPath);
     }
 
@@ -3018,7 +3284,8 @@ async function acceptAgentTurn(messageId: string) {
       writtenFiles: applied,
     });
     await refreshTree();
-    void handleAgentWrittenFiles(applied);
+    const toPreview = applied.filter((rel) => !msg.turnFileDiffs?.[rel]?.deleted);
+    void handleAgentWrittenFiles(toPreview);
     persistChatNow();
   } catch (error) {
     msg.reverting = false;
@@ -3076,9 +3343,13 @@ async function revertAgentTurn(messageId: string) {
   try {
     for (const [relPath, diff] of Object.entries(msg.turnFileDiffs)) {
       const fullPath = resolveFullPathFromRel(relPath);
-      if (!diff.before && diff.after) {
+      if (diff.deleted) {
+        const result = await writeFile(fullPath, diff.before);
+        if (!result.ok) throw new Error(result.error || `恢复 ${relPath} 失败`);
+      } else if (!diff.before && diff.after) {
         const result = await deleteItem(fullPath);
         if (!result.ok) throw new Error(result.error || `删除 ${relPath} 失败`);
+        removeOpenTabForPath(fullPath);
       } else {
         const result = await writeFile(fullPath, diff.before);
         if (!result.ok) throw new Error(result.error || `恢复 ${relPath} 失败`);
@@ -3187,7 +3458,7 @@ function buildAgentHistory(): VibeChatHistoryMessage[] {
     .map((m) => ({ role: m.role, content: m.content.trim() }));
 }
 
-async function runAgentTurn(userText: string) {
+async function runAgentTurn(userText: string, options?: { skipUserBubble?: boolean }) {
   const prompt = userText.trim();
   if (!prompt || !configReady.value || !projectOpened.value) return;
 
@@ -3197,19 +3468,22 @@ async function runAgentTurn(userText: string) {
 
   const history = buildAgentHistory();
 
-  chatMessages.value.push({ id: genId(), role: "user", content: prompt });
+  if (!options?.skipUserBubble) {
+    chatMessages.value.push({ id: genId(), role: "user", content: prompt });
+  }
   const mode = chatMode.value;
   const assistantMsg: ChatMessage = {
     id: genId(),
     role: "assistant",
     content: "",
     chatMode: mode,
-    tools: mode === "build" ? [] : undefined,
-    activityExpanded: mode === "build",
+    tools: [],
+    activityExpanded: true,
     agentPhase: "connecting_local",
     status: formatAgentStatus({ phase: "connecting_local" }),
   };
   chatMessages.value.push(assistantMsg);
+  persistChatNow();
   await scrollChatToBottom(true);
 
   agentAbortHandle?.abort();
@@ -3237,9 +3511,9 @@ async function buildReferencedFileSection(refs: ReferencedFile[]): Promise<strin
     seen.add(file.path);
     const result = await readFile(file.path);
     if (result.ok) {
-      chunks.push(`--- ${file.relative} ---\n${result.content}`);
+      chunks.push(`### 📄 ${file.relative}\n\`\`\`\n${result.content}\n\`\`\``);
     } else {
-      chunks.push(`--- ${file.relative} ---\n（读取失败：${result.error || "未知错误"}）`);
+      chunks.push(`### 📄 ${file.relative}\n> ⚠️ 读取失败：${result.error || "未知错误"}`);
     }
   }
   return chunks.join("\n\n");
@@ -3266,16 +3540,19 @@ async function sendChat() {
 
   const refSection = await buildReferencedFileSection(payload.refs);
   const dropSection = payload.drops.length
-    ? payload.drops.map((f) => `--- ${f.path} ---\n${f.content}`).join("\n\n")
+    ? payload.drops.map((f) => `### 📄 ${f.name}\n\`\`\`\n${f.content}\n\`\`\``).join("\n\n")
     : "";
 
   const sections = [refSection, dropSection].filter(Boolean);
   if (sections.length) {
-    fullPrompt = `${fullPrompt}\n\n## 参考文件\n\n${sections.join("\n\n")}`;
+    fullPrompt = `${fullPrompt}\n\n## 📎 参考文件\n\n${sections.join("\n\n")}`;
   }
 
   if (chatSending.value) {
-    pendingPrompts.push(fullPrompt);
+    pendingPromptQueue.value.push(fullPrompt);
+    chatMessages.value.push({ id: genId(), role: "user", content: fullPrompt });
+    persistChatNow();
+    void scrollChatToBottom(true);
     return;
   }
 
@@ -3347,6 +3624,9 @@ onMounted(() => {
   document.addEventListener("keydown", onGlobalKeydown);
   document.addEventListener("dragover", onDocumentDragOverCapture, true);
   document.addEventListener("drop", onDocumentDropCapture, true);
+  onStorageError((msg) => {
+    chatError.value = msg;
+  });
 });
 
 onBeforeUnmount(() => {
@@ -4277,9 +4557,12 @@ button.ghost.danger:hover:not(:disabled) {
 .msg-streaming {
   margin: 0;
   padding: 10px 14px;
+  max-width: 100%;
+  min-width: 0;
   font-size: 13px;
   line-height: 1.65;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
   color: rgba(255, 255, 255, 0.92);
   background: rgba(0, 0, 0, 0.2);
@@ -4791,19 +5074,22 @@ button.ghost.small {
 
 .chat-scroll {
   flex: 1;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 12px 14px;
 }
 
 .msg-list {
   display: grid;
   gap: 14px;
+  min-width: 0;
 }
 
 .msg {
   display: flex;
   gap: 10px;
   align-items: flex-start;
+  min-width: 0;
   background: transparent;
   border: none;
   border-radius: 0;
@@ -5227,9 +5513,13 @@ button.compact {
 .agent-activity-hint,
 .agent-activity-summary {
   margin-left: auto;
+  min-width: 0;
   font-size: 11px;
   font-weight: 500;
   color: rgba(255, 255, 255, 0.5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agent-activity-hint {
@@ -5348,9 +5638,12 @@ button.compact {
 }
 
 .tool-item-title {
+  min-width: 0;
   font-size: 12px;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.92);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .tool-item-state {
@@ -5385,6 +5678,212 @@ button.compact {
   font-size: 11px;
   color: rgba(255, 255, 255, 0.58);
   line-height: 1.45;
+}
+
+.tool-item-expand {
+  margin-top: 6px;
+  font-size: 11px;
+}
+
+.tool-item-expand summary {
+  cursor: pointer;
+  color: rgba(145, 190, 255, 0.9);
+  user-select: none;
+}
+
+.trace-block {
+  margin-bottom: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.trace-block-title {
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.78);
+  cursor: pointer;
+  user-select: none;
+}
+
+.trace-block-body {
+  padding: 0 10px 10px;
+}
+
+.trace-nested {
+  margin-top: 6px;
+  font-size: 11px;
+}
+
+.trace-nested summary {
+  cursor: pointer;
+  color: rgba(145, 190, 255, 0.88);
+  margin-bottom: 4px;
+}
+
+.trace-meta {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+  margin-bottom: 6px;
+}
+
+.trace-pre {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-height: 280px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.trace-pre.compact {
+  max-height: 200px;
+}
+
+.trace-history-item {
+  margin-top: 6px;
+}
+
+.trace-history-role {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  color: #91beff;
+  margin-bottom: 4px;
+}
+
+.status-log {
+  margin: 0;
+  padding: 0 10px 10px 24px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.turn-trace-item {
+  padding: 0 10px 8px;
+}
+
+.turn-trace-head {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(179, 146, 240, 0.95);
+  margin-bottom: 4px;
+}
+
+.inline-diff-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.inline-diff-card {
+  border: 1px solid rgba(31, 111, 235, 0.28);
+  border-radius: 10px;
+  background: rgba(31, 111, 235, 0.06);
+  overflow: hidden;
+}
+
+.inline-diff-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.inline-diff-path {
+  font-size: 12px;
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #91beff;
+}
+
+.inline-diff-tag {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.inline-diff-tag.delete {
+  background: rgba(248, 81, 73, 0.15);
+  color: #ff9a9a;
+}
+
+.inline-diff-tag.modify {
+  background: rgba(240, 198, 116, 0.15);
+  color: #f0c674;
+}
+
+.inline-diff-details {
+  padding: 8px 10px 10px;
+}
+
+.inline-diff-details summary {
+  font-size: 11px;
+  color: rgba(145, 190, 255, 0.9);
+  cursor: pointer;
+  margin-bottom: 6px;
+}
+
+.inline-diff-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .inline-diff-cols {
+    grid-template-columns: 1fr;
+  }
+}
+
+.inline-diff-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.55);
+  margin-bottom: 4px;
+}
+
+.pending-queue {
+  margin-bottom: 10px;
+  border: 1px solid rgba(240, 198, 116, 0.35);
+  border-radius: 10px;
+  background: rgba(240, 198, 116, 0.08);
+  overflow: hidden;
+}
+
+.pending-queue-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #f0c674;
+  border-bottom: 1px solid rgba(240, 198, 116, 0.2);
+}
+
+.pending-queue-list {
+  margin: 0;
+  padding: 8px 10px 8px 24px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.75);
+  max-height: 100px;
+  overflow: auto;
 }
 
 .chat-hint,
