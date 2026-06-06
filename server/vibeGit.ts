@@ -45,11 +45,25 @@ export interface GitLogEntry {
   author: string;
   date: string;
   message: string;
+  files: GitLogFile[];
+}
+
+export interface GitLogFile {
+  path: string;
+  status: string;
+  oldPath?: string;
 }
 
 export interface GitLogResult {
   ok: boolean;
   entries: GitLogEntry[];
+  error?: string;
+}
+
+export interface GitCommitFileDiffResult {
+  ok: boolean;
+  before: string;
+  after: string;
   error?: string;
 }
 
@@ -218,6 +232,40 @@ export async function gitDiffContent(projectRoot: string, filePath: string): Pro
   }
 }
 
+export async function gitCommitFileDiff(
+  projectRoot: string,
+  hash: string,
+  filePath: string,
+  oldPath?: string,
+): Promise<GitCommitFileDiffResult> {
+  try {
+    const { stdout: parentOut } = await gitExec(projectRoot, ["rev-list", "--parents", "-n", "1", hash]);
+    const [, parentHash] = parentOut.trim().split(/\s+/);
+    const beforeRef = parentHash ? `${parentHash}:${oldPath || filePath}` : "";
+    const afterRef = `${hash}:${filePath}`;
+
+    let before = "";
+    if (beforeRef) {
+      try {
+        before = (await gitExec(projectRoot, ["show", beforeRef])).stdout;
+      } catch {
+        before = "";
+      }
+    }
+
+    let after = "";
+    try {
+      after = (await gitExec(projectRoot, ["show", afterRef])).stdout;
+    } catch {
+      after = "";
+    }
+
+    return { ok: true, before, after };
+  } catch (error) {
+    return { ok: false, before: "", after: "", error: error instanceof Error ? error.message : "获取提交文件 diff 失败" };
+  }
+}
+
 export async function gitCommit(projectRoot: string, message: string): Promise<GitCommitResult> {
   try {
     const { stdout } = await gitExec(projectRoot, ["commit", "-m", message]);
@@ -235,21 +283,37 @@ export async function gitLog(projectRoot: string, count = 20): Promise<GitLogRes
     const { stdout } = await gitExec(projectRoot, [
       "log",
       `--max-count=${count}`,
-      "--format=%H%n%h%n%an%n%ai%n%s%n---",
+      "--name-status",
+      "--format=%x1e%H%x1f%h%x1f%an%x1f%ai%x1f%s",
     ]);
 
     const entries: GitLogEntry[] = [];
-    const blocks = stdout.split("---\n");
+    const blocks = stdout.split("\x1e").filter((block) => block.trim());
 
     for (const block of blocks) {
-      const lines = block.split("\n").filter((l) => l.trim());
-      if (lines.length >= 5) {
+      const [header = "", ...fileLines] = block.split("\n");
+      const headerParts = header.split("\x1f");
+      if (headerParts.length >= 5) {
+        const files: GitLogFile[] = [];
+        for (const line of fileLines) {
+          if (!line.trim()) continue;
+          const parts = line.split("\t");
+          const status = parts[0]?.trim() || "";
+          if (!status) continue;
+          if ((status.startsWith("R") || status.startsWith("C")) && parts.length >= 3) {
+            files.push({ status: status[0], oldPath: parts[1].trim(), path: parts[2].trim() });
+          } else if (parts[1]?.trim()) {
+            files.push({ status: status[0], path: parts[1].trim() });
+          }
+        }
+
         entries.push({
-          hash: lines[0].trim(),
-          shortHash: lines[1].trim(),
-          author: lines[2].trim(),
-          date: lines[3].trim(),
-          message: lines.slice(4).join("\n").trim(),
+          hash: headerParts[0].trim(),
+          shortHash: headerParts[1].trim(),
+          author: headerParts[2].trim(),
+          date: headerParts[3].trim(),
+          message: headerParts.slice(4).join("\x1f").trim(),
+          files,
         });
       }
     }

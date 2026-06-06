@@ -131,6 +131,28 @@ export async function syncChatSession(projectPath: string, sessionId: string, da
   }
 }
 
+export type ChatStoreLoadResult =
+  | { ok: true; data: import("./vibeChatStorage").VibeChatProjectSnapshot }
+  | { ok: false; error: string };
+
+export async function fetchChatStoreFromDisk(projectPath: string): Promise<ChatStoreLoadResult> {
+  try {
+    const response = await fetch(
+      backendUrl(`/backend/vibe/chat-store-load?projectPath=${encodeURIComponent(projectPath)}`),
+    );
+    if (response.status === 404) {
+      return { ok: false, error: "磁盘上没有会话备份" };
+    }
+    if (!response.ok) {
+      return { ok: false, error: `读取会话备份失败：HTTP ${response.status}` };
+    }
+    const result = (await response.json()) as ChatStoreLoadResult;
+    return result;
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "读取会话备份失败" };
+  }
+}
+
 export async function syncChatStore(projectPath: string, data: unknown): Promise<ChatStoreSyncResult> {
   try {
     const response = await fetch(backendUrl("/backend/vibe/chat-store-sync"), {

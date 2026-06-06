@@ -103,23 +103,58 @@ function genSessionId(): string {
 }
 
 export function formatSessionTitle(raw: string): string {
-  let text = raw.trim();
-  const refIdx = text.search(/\n\n## 📎/);
-  if (refIdx >= 0) text = text.slice(0, refIdx).trim();
+  let text = stripReferenceAttachments(raw);
   text = text.replace(/\s+/g, " ");
   if (!text) return "新会话";
   return text.length > 36 ? `${text.slice(0, 36)}…` : text;
 }
 
+/** Strip composer-attached reference file blocks from user prompts. */
+export function stripReferenceAttachments(content: string): string {
+  const refIdx = content.search(/\n\n## 📎/);
+  return refIdx >= 0 ? content.slice(0, refIdx).trim() : content.trim();
+}
+
+export type AgentHistorySourceMessage = {
+  role: string;
+  content: string;
+  tools?: Array<{
+    name?: string;
+    title?: string;
+    summary?: string;
+    ok?: boolean;
+    running?: boolean;
+  }>;
+};
+
+function summarizeToolsForHistory(
+  tools: AgentHistorySourceMessage["tools"],
+): string {
+  if (!tools?.length) return "";
+  const lines = tools
+    .filter((t) => !t.running && t.summary)
+    .map((t) => {
+      const label = t.title || t.name || "工具";
+      const status = t.ok === false ? "（失败）" : "";
+      return `- ${label}: ${t.summary}${status}`;
+    });
+  return lines.length ? `\n\n[工具摘要]\n${lines.join("\n")}` : "";
+}
+
 export function buildAgentHistoryFromMessages(
-  messages: Array<{ role: string; content: string }>,
+  messages: AgentHistorySourceMessage[],
 ): Array<{ role: "user" | "assistant"; content: string }> {
   return messages
-    .filter(
-      (m): m is { role: "user" | "assistant"; content: string } =>
-        (m.role === "user" || m.role === "assistant") && Boolean(m.content.trim()),
-    )
-    .map((m) => ({ role: m.role, content: m.content.trim() }));
+    .map((m) => {
+      if (m.role !== "user" && m.role !== "assistant") return null;
+      let content = m.role === "user" ? stripReferenceAttachments(m.content) : m.content.trim();
+      if (m.role === "assistant") {
+        content = `${content}${summarizeToolsForHistory(m.tools)}`.trim();
+      }
+      if (!content) return null;
+      return { role: m.role, content };
+    })
+    .filter((m): m is { role: "user" | "assistant"; content: string } => m !== null);
 }
 
 function sessionTitleFromMessages(messages: PersistedChatMessage[]): string {
@@ -146,15 +181,23 @@ function sanitizeMessages(messages: PersistedChatMessage[]): PersistedChatMessag
         label: t.label,
         summary: t.summary,
         ok: t.ok,
-        fullResult: t.fullResult,
         args: t.args,
       })),
-      agentContext: m.agentContext,
       statusLog: m.statusLog?.length ? [...m.statusLog] : undefined,
       turnTraces: m.turnTraces?.length ? m.turnTraces.map((t) => ({ ...t })) : undefined,
       totalTurns: m.totalTurns,
       writtenFiles: m.writtenFiles?.length ? [...m.writtenFiles] : undefined,
-      turnFileDiffs: m.turnFileDiffs ? { ...m.turnFileDiffs } : undefined,
+      turnFileDiffs:
+        m.pendingApproval && m.turnFileDiffs
+          ? { ...m.turnFileDiffs }
+          : m.writtenFiles?.length && m.turnFileDiffs
+            ? Object.fromEntries(
+                Object.entries(m.turnFileDiffs).map(([p, d]) => [
+                  p,
+                  { before: d.before, after: d.after, deleted: d.deleted, created: d.created },
+                ]),
+              )
+            : undefined,
       pendingApproval: m.pendingApproval || undefined,
       rejected: m.rejected || undefined,
       reverted: m.reverted || undefined,
@@ -310,6 +353,35 @@ export function loadVibeChatHistory(projectPath: string): PersistedChatMessage[]
   const record = store.byProject[key];
   if (!record?.sessions?.length) return [];
   return sanitizeMessages(getActiveSession(record).messages);
+}
+
+export function hasVibeChatHistory(projectPath: string): boolean {
+  const key = normalizeProjectKey(projectPath);
+  if (!key) return false;
+  const store = readStore();
+  const record = store.byProject[key];
+  return Boolean(record?.sessions?.some((s) => s.messages.length > 0));
+}
+
+export function restoreChatStoreFromSnapshot(snapshot: VibeChatProjectSnapshot): boolean {
+  const key = normalizeProjectKey(snapshot.projectPath);
+  if (!key || !snapshot.sessions?.length) return false;
+  const store = readStore();
+  const sessions: VibeChatSession[] = snapshot.sessions.map((s) => ({
+    id: s.id,
+    title: s.title || "新会话",
+    createdAt: s.createdAt || new Date().toISOString(),
+    updatedAt: s.updatedAt || new Date().toISOString(),
+    messages: sanitizeMessages(s.messages),
+  }));
+  store.byProject[key] = {
+    activeSessionId:
+      snapshot.activeSessionId && sessions.some((s) => s.id === snapshot.activeSessionId)
+        ? snapshot.activeSessionId
+        : sessions[0].id,
+    sessions,
+  };
+  return writeStore(store);
 }
 
 export function saveVibeChatHistory(

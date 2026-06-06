@@ -104,3 +104,35 @@ export function formatProjectContextForPrompt(context: Extract<ProjectContextRes
   }
   return lines.join("\n");
 }
+
+const BUILD_CONTEXT_MAX_CHARS = 32_000;
+const BUILD_CONTEXT_FILE_SLICE = 4_000;
+
+/** Shorter project context for Build mode agent loop (saves tokens for tool rounds). */
+export function formatProjectContextForBuild(context: Extract<ProjectContextResult, { ok: true }>): string {
+  let tree = context.tree;
+  if (tree.length > 12_000) {
+    tree = `${tree.slice(0, 12_000)}\n...（目录树已截断）`;
+  }
+  const lines = ["", "项目目录结构（节选）：", "```", tree, "```"];
+  let used = tree.length;
+  const keyFiles: Array<{ path: string; content: string }> = [];
+  for (const file of context.keyFiles) {
+    if (used >= BUILD_CONTEXT_MAX_CHARS) break;
+    const budget = Math.min(BUILD_CONTEXT_FILE_SLICE, BUILD_CONTEXT_MAX_CHARS - used);
+    if (budget <= 0) break;
+    const content = file.content.slice(0, budget);
+    keyFiles.push({ path: file.path, content });
+    used += content.length + file.path.length;
+  }
+  if (keyFiles.length) {
+    lines.push("", "关键文件（节选）：");
+    for (const file of keyFiles) {
+      lines.push("", `### ${file.path}`, "```", file.content, "```");
+    }
+  }
+  if (context.truncated || keyFiles.length < context.keyFiles.length) {
+    lines.push("", "（项目上下文已截断，细节请用 list_dir / read_file / grep 查询。）");
+  }
+  return lines.join("\n");
+}

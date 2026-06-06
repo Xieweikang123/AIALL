@@ -324,6 +324,9 @@ function removeChipBeforeCursor(): boolean {
   if (startContainer.nodeType === Node.TEXT_NODE && startOffset === 0) {
     const prev = startContainer.previousSibling;
     if (isChip(prev as Element)) chip = prev as HTMLElement;
+  } else if (startContainer.nodeType === Node.TEXT_NODE && startOffset === 1 && startContainer.textContent === "\u00A0") {
+    const prev = startContainer.previousSibling;
+    if (isChip(prev as Element)) chip = prev as HTMLElement;
   } else if (startContainer === root) {
     const prev = startOffset > 0 ? root.childNodes[startOffset - 1] : null;
     if (isChip(prev as Element)) chip = prev as HTMLElement;

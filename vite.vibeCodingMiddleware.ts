@@ -16,7 +16,7 @@ import {
   searchFiles,
   writeFileContent,
 } from "./server/vibeFs";
-import { gitStatus, gitDiff, gitDiffFile, gitDiffContent, gitCommit, gitLog, gitIsRepo, gitAdd, gitReset, gitDiscard, gitDiscardAll, gitRemotes, gitFetch, gitPull, gitPush } from "./server/vibeGit";
+import { gitStatus, gitDiff, gitDiffFile, gitDiffContent, gitCommitFileDiff, gitCommit, gitLog, gitIsRepo, gitAdd, gitReset, gitDiscard, gitDiscardAll, gitRemotes, gitFetch, gitPull, gitPush } from "./server/vibeGit";
 
 const execFileAsync = promisify(execFile);
 
@@ -218,6 +218,93 @@ function resolvePathInsideOptionalRoot(inputPath: string, projectRoot?: string):
 }
 
 export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
+  // GET /backend/vibe/chat-store-load
+  middlewares.use("/backend/vibe/chat-store-load", async (req, res) => {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { ok: false, error: "仅支持 GET 请求" });
+      return;
+    }
+
+    try {
+      const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+      const projectPath = (url.searchParams.get("projectPath") || "").trim();
+      if (!projectPath) {
+        sendJson(res, 400, { ok: false, error: "缺少 projectPath" });
+        return;
+      }
+
+      const resolved = path.resolve(projectPath);
+      const chatDir = path.join(resolved, ".aiall", "vibe-chat-sessions");
+      const storeFile = path.join(chatDir, "chat-store.json");
+      const raw = await fs.promises.readFile(storeFile, "utf-8").catch(() => null);
+      if (!raw) {
+        sendJson(res, 404, { ok: false, error: "未找到 chat-store.json" });
+        return;
+      }
+
+      const index = JSON.parse(raw) as {
+        version?: number;
+        projectPath?: string;
+        activeSessionId?: string;
+        sessions?: Array<{
+          id?: string;
+          title?: string;
+          createdAt?: string;
+          updatedAt?: string;
+          messageCount?: number;
+          file?: string;
+        }>;
+      };
+      const metas = Array.isArray(index.sessions) ? index.sessions : [];
+      const sessions: Array<{
+        id: string;
+        title: string;
+        createdAt: string;
+        updatedAt: string;
+        messageCount: number;
+        messages: unknown[];
+      }> = [];
+
+      for (const meta of metas) {
+        const id = (meta.id || "").trim();
+        const fileName = (meta.file || (id ? `chat-${safeFilePart(id)}.json` : "")).trim();
+        if (!fileName) continue;
+        const sessionFile = path.join(chatDir, fileName);
+        const sessionRaw = await fs.promises.readFile(sessionFile, "utf-8").catch(() => null);
+        if (!sessionRaw) continue;
+        const sessionData = JSON.parse(sessionRaw) as { messages?: unknown[] };
+        sessions.push({
+          id,
+          title: meta.title || "新会话",
+          createdAt: meta.createdAt || "",
+          updatedAt: meta.updatedAt || "",
+          messageCount: Array.isArray(sessionData.messages) ? sessionData.messages.length : 0,
+          messages: Array.isArray(sessionData.messages) ? sessionData.messages : [],
+        });
+      }
+
+      if (!sessions.length) {
+        sendJson(res, 404, { ok: false, error: "会话目录为空" });
+        return;
+      }
+
+      sendJson(res, 200, {
+        ok: true,
+        data: {
+          version: index.version || 2,
+          projectPath,
+          activeSessionId: index.activeSessionId || sessions[0].id,
+          sessions,
+        },
+      });
+    } catch (error) {
+      sendJson(res, 500, {
+        ok: false,
+        error: error instanceof Error ? error.message : "读取会话库失败",
+      });
+    }
+  });
+
   // POST /backend/vibe/chat-store-sync
   middlewares.use("/backend/vibe/chat-store-sync", async (req, res) => {
     if (req.method !== "POST") {
@@ -869,6 +956,33 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       sendJson(res, 200, result);
     } catch (error) {
       sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "获取文件内容失败" });
+    }
+  });
+
+  // GET /backend/vibe/git/commit-file-diff
+  middlewares.use("/backend/vibe/git/commit-file-diff", async (req, res) => {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { error: "仅支持 GET 请求" });
+      return;
+    }
+
+    try {
+      const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+      const projectPath = url.searchParams.get("path") || "";
+      const hash = url.searchParams.get("hash") || "";
+      const filePath = url.searchParams.get("file") || "";
+      const oldPath = url.searchParams.get("oldFile") || undefined;
+
+      if (!projectPath || !hash || !filePath) {
+        sendJson(res, 400, { ok: false, error: "缺少 path、hash 或 file 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(projectPath);
+      const result = await gitCommitFileDiff(resolved, hash, filePath, oldPath);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "获取提交文件 diff 失败" });
     }
   });
 

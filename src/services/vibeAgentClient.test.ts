@@ -70,7 +70,7 @@ describe("runVibeAgentSse", () => {
     await waitForDone(events);
 
     expect(events).toContainEqual({ type: "error", data: { message: "backend unavailable" } });
-    expect(events.at(-1)).toEqual({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 0 } });
+    expect(events[events.length - 1]).toEqual({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 0 } });
   });
 
   it("adds a synthetic done event when the stream ends without done", async () => {
@@ -81,7 +81,7 @@ describe("runVibeAgentSse", () => {
     await waitForDone(events);
 
     expect(events).toContainEqual({ type: "message", data: { text: "complete" } });
-    expect(events.at(-1)).toEqual({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 0 } });
+    expect(events[events.length - 1]).toEqual({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 0 } });
   });
 
   it("reports unknown events with raw data when JSON parsing fails", async () => {
@@ -110,6 +110,6 @@ describe("runVibeAgentSse", () => {
     await waitForDone(events);
 
     expect(events).toContainEqual({ type: "status", data: { phase: "aborted" } });
-    expect(events.at(-1)).toEqual({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 0 } });
+    expect(events[events.length - 1]).toEqual({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 0 } });
   });
 });

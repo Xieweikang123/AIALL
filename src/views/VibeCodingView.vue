@@ -273,8 +273,27 @@
                 <div v-if="gitLogOpen" class="git-log-list">
                   <div v-if="!gitLogEntries.length" class="panel-empty">无历史</div>
                   <div v-for="entry in gitLogEntries" :key="entry.hash" class="git-log-item">
-                    <span class="git-log-hash">{{ entry.shortHash }}</span>
-                    <span class="git-log-msg">{{ entry.message }}</span>
+                    <button type="button" class="git-log-entry-head" @click="toggleGitLogEntry(entry.hash)">
+                      <span class="git-log-chevron">{{ isGitLogEntryOpen(entry.hash) ? "▾" : "▸" }}</span>
+                      <span class="git-log-hash">{{ entry.shortHash }}</span>
+                      <span class="git-log-msg">{{ entry.message }}</span>
+                      <span class="git-log-count">{{ entry.files.length }}</span>
+                    </button>
+                    <div v-if="isGitLogEntryOpen(entry.hash)" class="git-log-files">
+                      <button
+                        v-for="file in entry.files"
+                        :key="`${entry.hash}:${file.oldPath || ''}:${file.path}`"
+                        type="button"
+                        class="git-log-file"
+                        :title="file.oldPath ? `${file.oldPath} → ${file.path}` : file.path"
+                        @click="openGitLogFile(entry, file)"
+                      >
+                        <span class="git-file-status" :style="{ color: gitStatusColor(file.status) }">
+                          {{ gitStatusIcon(file.status) }}
+                        </span>
+                        <span class="git-file-path">{{ file.oldPath ? `${file.oldPath} → ${file.path}` : file.path }}</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -375,6 +394,7 @@
               v-if="activeFileDiff"
               type="button"
               class="ghost tiny"
+              :disabled="activeFileReadOnly"
               @click="toggleDiffMode"
             >
               {{ showDiffMode ? "编辑" : "对比" }}
@@ -383,12 +403,12 @@
             <button
               type="button"
               class="ghost tiny"
-              :disabled="!activeFilePath || !fileDirty || showDiffMode"
+              :disabled="!activeFilePath || !fileDirty || showDiffMode || activeFileReadOnly"
               @click="saveFile"
             >
               保存
             </button>
-            <button type="button" class="ghost tiny" :disabled="!activeFilePath || showDiffMode" @click="reloadFile">
+            <button type="button" class="ghost tiny" :disabled="!activeFilePath || showDiffMode || activeFileReadOnly" @click="reloadFile">
               重载
             </button>
             <button type="button" class="ghost tiny" title="收起编辑器" @click="collapseEditor">收起</button>
@@ -418,6 +438,7 @@
           v-model="fileContent"
           class="code-editor"
           :file-path="activeFilePath"
+          :read-only="activeFileReadOnly"
           @change="onEditorChange"
           @save="saveFile"
           @select="onEditorSelect"
@@ -444,21 +465,101 @@
         :style="chatPanelStyle"
       >
         <div class="panel-head">
-          <span class="panel-title">AI 助手</span>
+          <div class="panel-head-left">
+            <span class="panel-label">AI 助手</span>
+            <div ref="sessionPickerRef" class="session-picker-wrap">
+              <div class="session-picker-row">
+                <button
+                  v-if="sessionList.length > 1"
+                  type="button"
+                  class="session-nav-btn"
+                  :disabled="!projectOpened || chatSending || !canSwitchToNewerSession"
+                  title="较新的会话 (Ctrl+Alt+↑)"
+                  @click="switchToAdjacentSession(-1)"
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  class="session-picker-trigger"
+                  :class="{ open: sessionPickerOpen }"
+                  :disabled="!projectOpened || chatSending"
+                  :title="sessionPickerTitle"
+                  @click="toggleSessionPicker"
+                >
+                  <span class="session-picker-title">{{ activeSessionTitle || "新会话" }}</span>
+                  <span class="session-picker-chevron" aria-hidden="true">▾</span>
+                </button>
+                <button
+                  v-if="sessionList.length > 1"
+                  type="button"
+                  class="session-nav-btn"
+                  :disabled="!projectOpened || chatSending || !canSwitchToOlderSession"
+                  title="较旧的会话 (Ctrl+Alt+↓)"
+                  @click="switchToAdjacentSession(1)"
+                >
+                  ›
+                </button>
+              </div>
+              <div v-if="sessionPickerOpen" class="session-picker-dropdown">
+                <div class="session-picker-head">
+                  <span class="session-picker-head-title">会话记录</span>
+                  <button
+                    type="button"
+                    class="ghost small session-picker-new"
+                    :disabled="chatSending"
+                    @click="startNewSession"
+                  >
+                    + 新会话
+                  </button>
+                </div>
+                <div v-if="chatStoreSyncMessage" class="history-sync-message">{{ chatStoreSyncMessage }}</div>
+                <div v-if="!sessionList.length" class="history-empty">当前项目还没有会话记录</div>
+                <ul v-else class="history-list session-picker-list">
+                  <li
+                    v-for="s in sessionList"
+                    :key="s.id"
+                    class="history-item"
+                    :class="{ active: s.id === activeSessionId }"
+                  >
+                    <button type="button" class="history-item-main" @click="switchSession(s.id)">
+                      <span class="history-item-title">{{ s.title }}</span>
+                      <span class="history-item-meta">
+                        {{ formatSessionTime(s.updatedAt) }} · {{ s.messageCount }} 条
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      class="ghost small history-delete"
+                      :disabled="chatSending"
+                      title="删除此会话"
+                      @click.stop="removeSession(s.id)"
+                    >
+                      删除
+                    </button>
+                  </li>
+                </ul>
+                <div class="session-picker-foot">
+                  <button
+                    type="button"
+                    class="ghost small session-picker-sync"
+                    :disabled="chatSending || syncingChatStore || !projectOpened"
+                    @click="syncChatStoreToDisk"
+                  >
+                    {{ syncingChatStore ? "同步中…" : "同步到本地" }}
+                  </button>
+                  <span class="session-picker-hint">Ctrl+Alt+↑↓ 切换</span>
+                </div>
+              </div>
+            </div>
+          </div>
           <div class="panel-head-right">
             <button
               type="button"
               class="ghost small"
               :disabled="!projectOpened || chatSending"
-              @click="openHistory"
-            >
-              历史
-            </button>
-            <button
-              type="button"
-              class="ghost small"
-              :disabled="!projectOpened || chatSending"
               @click="startNewSession"
+              title="新会话 (Ctrl+Shift+N)"
             >
               新会话
             </button>
@@ -474,62 +575,6 @@
             <span class="panel-meta" :class="{ warn: !configReady || !apiKeyReady }">
               {{ aiConfigStatusText }}
             </span>
-          </div>
-        </div>
-
-        <div v-if="historyOpen" class="history-overlay" @click.self="historyOpen = false">
-          <div class="history-panel">
-            <div class="history-head">
-              <div>
-                <h3 class="history-title">会话记录</h3>
-                <p class="history-desc">按项目保存，可切换或新建会话。</p>
-              </div>
-              <button type="button" class="ghost small" @click="historyOpen = false">关闭</button>
-            </div>
-            <div class="history-actions">
-              <button
-                type="button"
-                class="secondary history-new"
-                :disabled="chatSending"
-                @click="startNewSession"
-              >
-                + 新会话
-              </button>
-              <button
-                type="button"
-                class="ghost small history-sync"
-                :disabled="chatSending || syncingChatStore || !projectOpened"
-                @click="syncChatStoreToDisk"
-              >
-                {{ syncingChatStore ? "同步中…" : "同步到本地" }}
-              </button>
-            </div>
-            <div v-if="chatStoreSyncMessage" class="history-sync-message">{{ chatStoreSyncMessage }}</div>
-            <div v-if="!sessionList.length" class="history-empty">当前项目还没有会话记录</div>
-            <ul v-else class="history-list">
-              <li
-                v-for="s in sessionList"
-                :key="s.id"
-                class="history-item"
-                :class="{ active: s.id === activeSessionId }"
-              >
-                <button type="button" class="history-item-main" @click="switchSession(s.id)">
-                  <span class="history-item-title">{{ s.title }}</span>
-                  <span class="history-item-meta">
-                    {{ formatSessionTime(s.updatedAt) }} · {{ s.messageCount }} 条
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  class="ghost small history-delete"
-                  :disabled="chatSending"
-                  title="删除此会话"
-                  @click="removeSession(s.id)"
-                >
-                  删除
-                </button>
-              </li>
-            </ul>
           </div>
         </div>
 
@@ -590,31 +635,34 @@
                     {{ isActivityExpanded(m) ? "▼" : "▶" }}
                   </span>
                   <span class="agent-activity-title">{{ m.chatMode === "ask" ? "Ask 执行过程" : "Agent 执行过程" }}</span>
-                  <span v-if="isAgentRunning(m)" class="agent-activity-hint">运行中…</span>
+                  <span v-if="isAgentRunning(m)" class="agent-activity-hint">{{ agentRunningHint(m) }}</span>
                   <span v-else-if="!isActivityExpanded(m)" class="agent-activity-summary">
                     {{ activitySummary(m) }}
                   </span>
                 </button>
                 <div v-show="isActivityExpanded(m)" class="agent-activity-body">
-                  <div v-if="isAgentRunning(m) && activityFeedItems(m).length" class="agent-live-feed" aria-live="polite">
-                    <div
-                      v-for="item in activityFeedItems(m)"
-                      :key="item.key"
-                      class="agent-live-feed-item"
-                      :class="item.kind"
-                    >
-                      <span class="agent-live-feed-dot" aria-hidden="true" />
-                      <span class="agent-live-feed-text">{{ item.text }}</span>
+                  <div
+                    v-if="isAgentRunning(m) && (m.status || m.agentPhase)"
+                    class="agent-step-hero"
+                    aria-live="polite"
+                  >
+                    <div class="agent-step-hero-main">
+                      <span class="status-pulse" aria-hidden="true" />
+                      <span v-if="m.agentPhase" class="agent-phase-badge">{{ phaseBadgeLabel(m.agentPhase) }}</span>
+                      <span class="agent-step-hero-text">{{ agentStatusDisplay(m) }}</span>
+                    </div>
+                    <div v-if="agentActiveModel(m) || (m.agentTurn && m.agentMaxTurns)" class="agent-step-hero-meta">
+                      <span v-if="agentActiveModel(m)" class="agent-model-pill">{{ agentActiveModel(m) }}</span>
+                      <span v-if="m.agentTurn && m.agentMaxTurns" class="agent-turn-pill">
+                        {{ m.agentTurn }}/{{ m.agentMaxTurns }}
+                      </span>
                     </div>
                   </div>
-                  <div v-if="m.status || m.agentTurn" class="agent-status-bar">
-                    <span v-if="isAgentRunning(m)" class="status-pulse" aria-hidden="true" />
-                    <span v-if="m.agentPhase" class="agent-phase-badge">{{ phaseBadgeLabel(m.agentPhase) }}</span>
-                    <span v-if="m.status" class="agent-status-text">{{ m.status }}</span>
-                    <span v-if="m.agentTurn && m.agentMaxTurns" class="agent-turn-pill">
-                      第 {{ m.agentTurn }}/{{ m.agentMaxTurns }} 轮
-                    </span>
-                    <span v-else-if="m.totalTurns" class="agent-turn-pill">共 {{ m.totalTurns }} 轮</span>
+                  <ol v-if="isAgentRunning(m) && agentHistoryLines(m).length" class="agent-step-history">
+                    <li v-for="(line, hi) in agentHistoryLines(m)" :key="hi">{{ line }}</li>
+                  </ol>
+                  <div v-else-if="!isAgentRunning(m) && m.totalTurns" class="agent-status-bar">
+                    <span class="agent-turn-pill">共 {{ m.totalTurns }} 轮</span>
                   </div>
                   <details v-if="m.agentContext" class="trace-block">
                     <summary class="trace-block-title">上下文（系统提示 + 历史 + 项目）</summary>
@@ -646,7 +694,7 @@
                       </details>
                     </div>
                   </details>
-                  <details v-if="m.statusLog?.length" class="trace-block">
+                  <details v-if="m.statusLog?.length && !isAgentRunning(m)" class="trace-block">
                     <summary class="trace-block-title">阶段日志（{{ m.statusLog.length }}）</summary>
                     <ol class="status-log">
                       <li v-for="(line, si) in m.statusLog" :key="si">{{ line }}</li>
@@ -759,15 +807,22 @@
                 "
                 class="msg-actions"
               >
+                <span v-if="m.applying" class="applying-badge">正在应用文件…</span>
+                <span
+                  v-else-if="m.writtenFiles?.length && !m.pendingApproval && !m.reverted && !m.rejected && m.chatMode === 'build'"
+                  class="applied-badge"
+                >
+                  已自动应用 {{ m.writtenFiles.length }} 个文件
+                </span>
                 <template v-if="m.pendingApproval && m.turnFileDiffs">
                   <span class="pending-badge">{{ formatPendingApprovalLabel(m.turnFileDiffs) }}</span>
                   <button
                     type="button"
                     class="primary small-action"
-                    :disabled="!projectOpened || chatSending || m.reverting"
+                    :disabled="!projectOpened || chatSending || m.reverting || m.applying"
                     @click="acceptAgentTurn(m.id)"
                   >
-                    {{ m.reverting ? "应用中…" : "接受全部" }}
+                    {{ m.applying || m.reverting ? "应用中…" : "接受全部" }}
                   </button>
                   <button
                     type="button"
@@ -792,7 +847,7 @@
                   v-else-if="m.writtenFiles?.length && m.turnFileDiffs && !m.reverted && !m.rejected"
                   type="button"
                   class="ghost danger"
-                  :disabled="!projectOpened || chatSending || m.reverting"
+                  :disabled="!projectOpened || chatSending || m.reverting || m.applying"
                   @click="revertAgentTurn(m.id, $event)"
                 >
                   {{ m.reverting ? "回滚中…" : `回滚本轮修改（${m.writtenFiles.length} 个文件）` }}
@@ -854,6 +909,18 @@
             >
               Build
             </button>
+            <label class="agent-turns-setting" title="Agent 最多推理轮次">
+              <span class="agent-turns-label">轮次</span>
+              <input
+                v-model.number="agentMaxTurns"
+                type="number"
+                min="1"
+                max="24"
+                step="1"
+                class="agent-turns-input"
+                :disabled="chatSending"
+              />
+            </label>
           </div>
           <div class="chat-input-field" @keydown.capture="onComposerFieldKeydown">
             <div v-if="mentionOpen && mentionResults.length" class="mention-dropdown">
@@ -941,18 +1008,22 @@ import { useConfirm } from "../composables/useConfirm";
 import { loadAiChatBaseFromStorage } from "../services/aiLocalConfig";
 import {
   buildAgentHistoryFromMessages,
+  formatSessionTitle,
   clearVibeChatHistory,
   deleteVibeChatSession,
   getActiveVibeChatSessionId,
   getVibeChatProjectSnapshot,
+  hasVibeChatHistory,
   listVibeChatSessions,
   loadVibeChatHistory,
   onStorageError,
+  restoreChatStoreFromSnapshot,
   saveVibeChatHistory,
   switchVibeChatSession,
   type PersistedChatMessage,
   type VibeChatSessionMeta,
 } from "../services/vibeChatStorage";
+import { isDeleteNotFoundError } from "../services/vibeAgentTurnApply";
 import {
   runVibeAgentSse,
   type VibeAgentSseEvent,
@@ -975,6 +1046,7 @@ import {
   readFile,
   renameItem,
   searchFiles,
+  fetchChatStoreFromDisk,
   syncChatStore,
   writeFile,
   type FileEntry,
@@ -984,6 +1056,7 @@ import {
   fetchGitStatus,
   fetchGitDiff,
   fetchGitDiffContent,
+  fetchGitCommitFileDiff,
   commitGitChanges,
   fetchGitLog,
   stageGitFiles,
@@ -996,6 +1069,7 @@ import {
   gitPushRemote,
   type GitStatusFile,
   type GitLogEntry,
+  type GitLogFile,
   type GitRemoteInfo,
 } from "../services/vibeGitClient";
 
@@ -1005,7 +1079,9 @@ const STORAGE_KEY = "vibe-coding-project";
 const PANEL_WIDTH_KEY = "vibe-coding-panel-widths";
 const EDITOR_COLLAPSED_KEY = "vibe-coding-editor-collapsed";
 const CHAT_MODE_KEY = "vibe-coding-chat-mode";
+const AGENT_MAX_TURNS_KEY = "vibe-coding-agent-max-turns";
 const PENDING_QUEUE_KEY = "vibe-coding-pending-queue";
+const SYNC_STORE_DEBOUNCE_MS = 2000;
 const FILE_MIN_WIDTH = 180;
 const FILE_MAX_WIDTH = 500;
 const CHAT_MIN_WIDTH = 260;
@@ -1032,8 +1108,10 @@ type ChatMessage = Omit<PersistedChatMessage, "tools"> & {
   agentPhase?: string;
   agentTurn?: number;
   agentMaxTurns?: number;
+  agentModel?: string;
   streaming?: boolean;
   reverting?: boolean;
+  applying?: boolean;
 };
 
 type FileDiff = {
@@ -1069,6 +1147,7 @@ function normalizeChatMessages(messages: PersistedChatMessage[]): ChatMessage[] 
 
 let agentAbortHandle: { abort: () => void } | null = null;
 let saveChatTimer: ReturnType<typeof setTimeout> | null = null;
+let syncStoreTimer: ReturnType<typeof setTimeout> | null = null;
 
 const projectPath = ref("");
 const projectOpened = ref(false);
@@ -1093,6 +1172,7 @@ const fileContent = ref("");
 const fileDirty = ref(false);
 const fileLoadError = ref("");
 const fileDiffs = ref<Record<string, FileDiff>>({});
+const readOnlyFileKeys = ref<Set<string>>(new Set());
 const showDiffMode = ref(false);
 const editorRef = ref<InstanceType<typeof CodeMonacoEditor> | null>(null);
 const selectedCode = ref("");
@@ -1123,6 +1203,18 @@ function loadChatMode(): VibeChatMode {
 }
 
 const chatMode = ref<VibeChatMode>(loadChatMode());
+
+function loadAgentMaxTurns(): number {
+  try {
+    const saved = Number(localStorage.getItem(AGENT_MAX_TURNS_KEY));
+    if (Number.isFinite(saved) && saved >= 1 && saved <= 24) return Math.round(saved);
+  } catch {
+    // ignore
+  }
+  return 12;
+}
+
+const agentMaxTurns = ref(loadAgentMaxTurns());
 const chatMessages = ref<ChatMessage[]>([]);
 const chatSending = ref(false);
 const chatError = ref("");
@@ -1130,7 +1222,8 @@ const chatScrollRef = ref<HTMLElement | null>(null);
 const searchInputRef = ref<HTMLInputElement | null>(null);
 const workspaceRef = ref<HTMLElement | null>(null);
 let scrollChatRaf = 0;
-const historyOpen = ref(false);
+const sessionPickerOpen = ref(false);
+const sessionPickerRef = ref<HTMLElement | null>(null);
 const activeSessionId = ref("");
 const syncingChatStore = ref(false);
 const chatStoreSyncMessage = ref("");
@@ -1184,6 +1277,31 @@ const isDragging = ref(false);
 const fileDragGhost = ref<{ relative: string; x: number; y: number } | null>(null);
 let dragCounter = 0;
 const sessionList = ref<VibeChatSessionMeta[]>([]);
+const activeSessionTitle = computed(() => {
+  const fromList = sessionList.value.find((s) => s.id === activeSessionId.value)?.title;
+  if (fromList) return fromList;
+  const firstUser = chatMessages.value.find((m) => m.role === "user" && m.content.trim());
+  if (firstUser) return formatSessionTitle(firstUser.content);
+  return "";
+});
+const activeSessionIndex = computed(() => {
+  if (!activeSessionId.value) return -1;
+  return sessionList.value.findIndex((s) => s.id === activeSessionId.value);
+});
+const canSwitchToNewerSession = computed(() => {
+  const idx = activeSessionIndex.value;
+  return idx > 0;
+});
+const canSwitchToOlderSession = computed(() => {
+  const idx = activeSessionIndex.value;
+  if (idx < 0) return sessionList.value.length > 0;
+  return idx < sessionList.value.length - 1;
+});
+const sessionPickerTitle = computed(() => {
+  if (!projectOpened.value) return "请先打开项目";
+  if (sessionList.value.length) return "点击切换会话";
+  return "点击新建或查看会话";
+});
 const projectHistoryOpen = ref(false);
 const projectHistoryList = ref<ProjectHistoryEntry[]>([]);
 const projectHistoryRef = ref<HTMLElement | null>(null);
@@ -1199,6 +1317,7 @@ const gitCommitting = ref(false);
 const gitGenStep = ref("");
 const gitLogEntries = ref<GitLogEntry[]>([]);
 const gitLogOpen = ref(false);
+const expandedGitLogEntries = ref<Set<string>>(new Set());
 const selectedGitFile = ref("");
 const gitRemotes = ref<GitRemoteInfo[]>([]);
 const gitTrackingBranch = ref("");
@@ -1249,6 +1368,7 @@ const chatRunningText = computed(() =>
 );
 
 const activeFileDiff = computed(() => getFileDiff(activeFilePath.value));
+const activeFileReadOnly = computed(() => readOnlyFileKeys.value.has(normalizePathKey(activeFilePath.value)));
 
 const activeAssistantMsgId = computed(() => {
   for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
@@ -1438,7 +1558,7 @@ function phaseBadgeLabel(phase?: string): string {
   }
 }
 
-function formatAgentStatus(data: AgentStatusData): string {
+function formatAgentStatus(data: AgentStatusData, compact = false): string {
   const { phase, turn, maxTurns, openFile, model, toolTitle, toolDetail } = data;
 
   if (phase === "connecting_local") return "正在连接本地服务（127.0.0.1:37891）…";
@@ -1453,6 +1573,7 @@ function formatAgentStatus(data: AgentStatusData): string {
       : "正在组装 Agent 上下文与工具定义…";
   }
   if (phase === "waiting_model" || phase === "thinking") {
+    if (compact) return "正在等待模型响应…";
     const modelHint = model ? ` · ${model}` : "";
     const turnHint = turn && maxTurns ? `（第 ${turn}/${maxTurns} 轮${modelHint}）` : modelHint;
     return `正在等待模型响应${turnHint}…`;
@@ -1474,6 +1595,7 @@ function setAgentStatus(msg: ChatMessage, phase: string, extra?: Partial<AgentSt
   appendStatusLog(msg, statusText);
   if (extra?.turn) msg.agentTurn = extra.turn;
   if (extra?.maxTurns) msg.agentMaxTurns = extra.maxTurns;
+  if (extra?.model) msg.agentModel = extra.model;
 }
 
 function isAgentRunning(msg: ChatMessage): boolean {
@@ -1548,6 +1670,26 @@ function activitySummary(msg: ChatMessage): string {
   return parts.length ? parts.join(" · ") : "查看执行过程";
 }
 
+function agentRunningHint(msg: ChatMessage): string {
+  if (msg.agentTurn && msg.agentMaxTurns) return `${msg.agentTurn}/${msg.agentMaxTurns}`;
+  return "运行中…";
+}
+
+function agentStatusDisplay(msg: ChatMessage): string {
+  return msg.status || (msg.agentPhase ? formatAgentStatus({ phase: msg.agentPhase }, true) : "正在运行…");
+}
+
+function agentActiveModel(msg: ChatMessage): string {
+  return msg.agentModel || msg.agentContext?.model || "";
+}
+
+function agentHistoryLines(msg: ChatMessage): string[] {
+  const current = agentStatusDisplay(msg);
+  return (msg.statusLog || [])
+    .filter((line) => line.trim() && line !== current)
+    .slice(-4);
+}
+
 function activityFeedItems(msg: ChatMessage): Array<{ key: string; kind: "status" | "tool"; text: string }> {
   const items: Array<{ key: string; kind: "status" | "tool"; text: string }> = [];
   const seen = new Set<string>();
@@ -1620,10 +1762,14 @@ function clearRecentProjects() {
 }
 
 function onDocumentClick(event: MouseEvent) {
-  if (!projectHistoryOpen.value) return;
-  const el = projectHistoryRef.value;
-  if (el && !el.contains(event.target as Node)) {
-    closeProjectHistory();
+  const target = event.target as Node;
+  if (projectHistoryOpen.value) {
+    const el = projectHistoryRef.value;
+    if (el && !el.contains(target)) closeProjectHistory();
+  }
+  if (sessionPickerOpen.value) {
+    const el = sessionPickerRef.value;
+    if (el && !el.contains(target)) closeSessionPicker();
   }
 }
 
@@ -1646,9 +1792,23 @@ function formatSessionTime(iso: string): string {
   });
 }
 
-function openHistory() {
-  refreshSessionList();
-  historyOpen.value = true;
+function toggleSessionPicker() {
+  if (!projectOpened.value || chatSending.value) return;
+  sessionPickerOpen.value = !sessionPickerOpen.value;
+  if (sessionPickerOpen.value) refreshSessionList();
+}
+
+function closeSessionPicker() {
+  sessionPickerOpen.value = false;
+}
+
+function switchToAdjacentSession(delta: number) {
+  if (chatSending.value || !projectPath.value.trim() || !sessionList.value.length) return;
+  persistChatNow();
+  let nextIdx = activeSessionIndex.value + delta;
+  if (activeSessionIndex.value < 0 && delta > 0) nextIdx = 0;
+  if (nextIdx < 0 || nextIdx >= sessionList.value.length) return;
+  switchSession(sessionList.value[nextIdx].id);
 }
 
 function startNewSession() {
@@ -1659,18 +1819,23 @@ function startNewSession() {
   chatError.value = "";
   refreshSessionList();
   activeSessionId.value = "";
-  historyOpen.value = false;
+  closeSessionPicker();
   void scrollChatToBottom(true);
+  void nextTick(() => composerRef.value?.focus());
 }
 
 function switchSession(sessionId: string) {
   if (chatSending.value || !projectPath.value.trim()) return;
+  if (sessionId === activeSessionId.value) {
+    closeSessionPicker();
+    return;
+  }
   persistChatNow();
   chatMessages.value = normalizeChatMessages(switchVibeChatSession(projectPath.value.trim(), sessionId));
   activeSessionId.value = sessionId;
   chatError.value = "";
   refreshSessionList();
-  historyOpen.value = false;
+  closeSessionPicker();
   void scrollChatToBottom(true);
 }
 
@@ -1700,13 +1865,21 @@ async function syncChatStoreToDisk() {
   }
 }
 
+function scheduleSyncChatStore(path: string) {
+  if (syncStoreTimer) clearTimeout(syncStoreTimer);
+  syncStoreTimer = setTimeout(() => {
+    syncStoreTimer = null;
+    void syncChatStore(path, getVibeChatProjectSnapshot(path));
+  }, SYNC_STORE_DEBOUNCE_MS);
+}
+
 function persistChatNow(path = projectPath.value.trim()) {
   if (!path) return;
   const isEmptyDraft = !activeSessionId.value && !chatMessages.value.length;
   const result = saveVibeChatHistory(path, chatMessages.value, activeSessionId.value);
   if (result.sessionId) activeSessionId.value = result.sessionId;
   refreshSessionList(path);
-  void syncChatStore(path, getVibeChatProjectSnapshot(path));
+  scheduleSyncChatStore(path);
   if (isEmptyDraft) activeSessionId.value = "";
 }
 
@@ -1717,6 +1890,7 @@ function clearPendingPromptQueue() {
 
 function schedulePersistChat() {
   if (!projectPath.value.trim()) return;
+  if (chatSending.value) return;
   if (saveChatTimer) clearTimeout(saveChatTimer);
   saveChatTimer = setTimeout(() => {
     saveChatTimer = null;
@@ -1782,9 +1956,16 @@ async function openProjectByPath(dirPath: string) {
     localStorage.setItem(STORAGE_KEY, normalized);
     addProjectToHistory(normalized);
     refreshProjectHistoryList();
+    if (!hasVibeChatHistory(normalized)) {
+      const diskStore = await fetchChatStoreFromDisk(normalized);
+      if (diskStore.ok && diskStore.data.sessions.length) {
+        restoreChatStoreFromSnapshot(diskStore.data);
+      }
+    }
     chatMessages.value = normalizeChatMessages(loadVibeChatHistory(normalized));
+    activeSessionId.value = getActiveVibeChatSessionId(normalized);
     refreshSessionList(normalized);
-    syncChatStore(normalized, getVibeChatProjectSnapshot(normalized));
+    scheduleSyncChatStore(normalized);
     refreshGitStatus();
     syncEditorPanelForOpenFiles();
     await scrollChatToBottom(true);
@@ -1820,9 +2001,13 @@ function openProjectByInput() {
 
 async function refreshTree() {
   if (!projectOpened.value) return;
-  const current = activeFilePath.value;
-  await openProjectByPath(projectPath.value.trim());
-  if (current) await openFile(current);
+  const normalized = projectPath.value.trim();
+  if (!normalized) return;
+  try {
+    fileTree.value = await loadDirChildren(normalized);
+  } catch (e) {
+    treeError.value = e instanceof Error ? e.message : "刷新目录失败";
+  }
 }
 
 async function refreshGitStatus() {
@@ -2035,10 +2220,16 @@ async function generateCommitMessage() {
 
 function gitStatusIcon(status: string): string {
   switch (status) {
+    case "M":
     case "modified": return "M";
+    case "A":
     case "added": return "A";
+    case "D":
     case "deleted": return "D";
+    case "R":
     case "renamed": return "R";
+    case "C":
+      return "C";
     case "untracked": return "?";
     default: return "!";
   }
@@ -2046,12 +2237,69 @@ function gitStatusIcon(status: string): string {
 
 function gitStatusColor(status: string): string {
   switch (status) {
+    case "M":
     case "modified": return "#e2c08c";
+    case "A":
     case "added": return "#73daca";
+    case "D":
     case "deleted": return "#f7768e";
+    case "R":
     case "renamed": return "#bb9af7";
+    case "C":
+      return "#bb9af7";
     case "untracked": return "#7aa2f7";
     default: return "#9aa5ce";
+  }
+}
+
+function isGitLogEntryOpen(hash: string): boolean {
+  return expandedGitLogEntries.value.has(hash);
+}
+
+function toggleGitLogEntry(hash: string) {
+  const next = new Set(expandedGitLogEntries.value);
+  if (next.has(hash)) next.delete(hash);
+  else next.add(hash);
+  expandedGitLogEntries.value = next;
+}
+
+async function openGitLogFile(entry: GitLogEntry, file: GitLogFile) {
+  if (!projectOpened.value) return;
+  gitError.value = "";
+  try {
+    const result = await fetchGitCommitFileDiff(projectPath.value.trim(), entry.hash, file.path, file.oldPath);
+    if (!result.ok) {
+      gitError.value = result.error || "获取提交文件 diff 失败";
+      return;
+    }
+
+    if (!await ensureCanLeaveCurrentTab()) return;
+    syncActiveTabToCache();
+
+    const displayPath = file.oldPath ? `${file.oldPath} → ${file.path}` : file.path;
+    const previewPath = joinProjectPath(projectPath.value, `.git-history/${entry.shortHash}/${displayPath}`);
+    const nextReadOnly = new Set(readOnlyFileKeys.value);
+    nextReadOnly.add(normalizePathKey(previewPath));
+    readOnlyFileKeys.value = nextReadOnly;
+
+    expandEditor();
+    setFileDiff(previewPath, { before: result.before, after: result.after, deleted: file.status === "D" });
+    selectedTreePath.value = "";
+    activeFilePath.value = previewPath;
+    fileContent.value = result.after;
+    fileDirty.value = false;
+    fileLoadError.value = "";
+    showDiffMode.value = true;
+
+    const cached = findOpenTab(previewPath);
+    if (cached) {
+      cached.content = result.after;
+      cached.dirty = false;
+    } else {
+      openTabs.value.push({ path: previewPath, content: result.after, dirty: false });
+    }
+  } catch (e) {
+    gitError.value = e instanceof Error ? e.message : "获取提交文件 diff 失败";
   }
 }
 
@@ -2267,7 +2515,25 @@ async function ensureCanLeaveCurrentTab(): Promise<boolean> {
 
 function switchTab(path: string) {
   if (path === activeFilePath.value) return;
+  if (readOnlyFileKeys.value.has(normalizePathKey(path))) {
+    void switchReadOnlyTab(path);
+    return;
+  }
   void openFile(path);
+}
+
+async function switchReadOnlyTab(path: string) {
+  const canLeave = await ensureCanLeaveCurrentTab();
+  if (!canLeave) return;
+  syncActiveTabToCache();
+  const tab = findOpenTab(path);
+  if (!tab) return;
+  activeFilePath.value = path;
+  fileContent.value = tab.content;
+  fileDirty.value = false;
+  fileLoadError.value = "";
+  selectedTreePath.value = "";
+  showDiffMode.value = Boolean(getFileDiff(path));
 }
 
 async function closeTab(path: string) {
@@ -2294,6 +2560,14 @@ async function closeTab(path: string) {
   const idx = openTabs.value.findIndex((item) => item.path === path);
   if (idx < 0) return;
   openTabs.value.splice(idx, 1);
+  if (readOnlyFileKeys.value.has(normalizePathKey(path))) {
+    const nextReadOnly = new Set(readOnlyFileKeys.value);
+    nextReadOnly.delete(normalizePathKey(path));
+    readOnlyFileKeys.value = nextReadOnly;
+    const nextDiffs = { ...fileDiffs.value };
+    delete nextDiffs[normalizePathKey(path)];
+    fileDiffs.value = nextDiffs;
+  }
 
   if (activeFilePath.value !== path) return;
 
@@ -2303,8 +2577,8 @@ async function closeTab(path: string) {
     fileContent.value = nextTab.content;
     fileDirty.value = nextTab.dirty;
     fileLoadError.value = "";
-    showDiffMode.value = false;
-    selectedTreePath.value = nextTab.path;
+    showDiffMode.value = readOnlyFileKeys.value.has(normalizePathKey(nextTab.path)) && Boolean(getFileDiff(nextTab.path));
+    selectedTreePath.value = showDiffMode.value ? "" : nextTab.path;
     return;
   }
 
@@ -2529,11 +2803,13 @@ async function openFile(filePath: string, options?: { force?: boolean; skipUnsav
 
 async function reloadFile() {
   if (!activeFilePath.value) return;
+  if (activeFileReadOnly.value) return;
   await openFile(activeFilePath.value, { force: true, skipUnsavedCheck: true });
 }
 
 async function saveFile() {
   if (!activeFilePath.value) return;
+  if (activeFileReadOnly.value) return;
   const result = await writeFile(activeFilePath.value, fileContent.value);
   if (!result.ok) {
     fileLoadError.value = result.error || "保存失败";
@@ -2588,6 +2864,7 @@ watch(searchMode, () => {
 });
 
 function onEditorChange() {
+  if (activeFileReadOnly.value) return;
   fileDirty.value = true;
   const tab = findOpenTab(activeFilePath.value);
   if (tab) tab.dirty = true;
@@ -3127,6 +3404,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
       agentTurn: assistantMsg.agentTurn,
       agentMaxTurns: assistantMsg.agentMaxTurns,
+      agentModel: assistantMsg.agentModel,
       ...(phase === "finished" ? { agentPhase: undefined, streaming: false } : {}),
     });
     if (phase === "aborted") {
@@ -3260,7 +3538,16 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
     appendStatusLog(assistantMsg, `完成（共 ${completedTurns} 轮）`);
 
     const pending = event.data.pendingFiles || [];
-    if (pending.length && assistantMsg.turnFileDiffs && Object.keys(assistantMsg.turnFileDiffs).length) {
+    const hasPendingDiffs =
+      pending.length > 0 &&
+      !!assistantMsg.turnFileDiffs &&
+      Object.keys(assistantMsg.turnFileDiffs).length > 0;
+    const autoApplyBuild = hasPendingDiffs && assistantMsg.chatMode === "build";
+
+    if (autoApplyBuild) {
+      assistantMsg.pendingApproval = false;
+      assistantMsg.writtenFiles = undefined;
+    } else if (hasPendingDiffs) {
       assistantMsg.pendingApproval = true;
       assistantMsg.writtenFiles = [...pending];
     } else {
@@ -3283,7 +3570,9 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
     });
     persistChatNow();
 
-    if (!assistantMsg.pendingApproval) {
+    if (autoApplyBuild) {
+      void completeAgentTurnApplication(msgId);
+    } else if (!assistantMsg.pendingApproval) {
       void handleAgentWrittenFiles(event.data.writtenFiles || []);
     } else {
       const firstRel = pending[0];
@@ -3346,52 +3635,59 @@ function clearTurnFileDiffsFromStore(turnFileDiffs: Record<string, FileDiff>) {
   fileDiffs.value = next;
 }
 
-async function acceptAgentTurn(messageId: string) {
-  if (chatSending.value || !projectOpened.value) return;
-  const idx = chatMessages.value.findIndex((m) => m.id === messageId);
-  if (idx < 0) return;
+async function applyAgentTurnFiles(turnFileDiffs: Record<string, FileDiff>): Promise<string[]> {
+  const applied: string[] = [];
+  for (const [relPath, diff] of Object.entries(turnFileDiffs)) {
+    const fullPath = resolveFullPathFromRel(relPath);
+    if (diff.deleted) {
+      const deleteResult = await deleteItem(fullPath, projectPath.value.trim());
+      if (!deleteResult.ok && !isDeleteNotFoundError(deleteResult.error)) {
+        throw new Error(deleteResult.error || `删除 ${relPath} 失败`);
+      }
+      removeOpenTabForPath(fullPath);
+    } else {
+      const existing = await readFile(fullPath, projectPath.value.trim());
+      const writeResult = existing.ok
+        ? await writeFile(fullPath, diff.after, projectPath.value.trim())
+        : await createItem(fullPath, false, diff.after, projectPath.value.trim());
+      if (!writeResult.ok) throw new Error(writeResult.error || `写入 ${relPath} 失败`);
+    }
+    applied.push(relPath);
+  }
+  return applied;
+}
 
-  const msg = chatMessages.value[idx];
-  if (!msg.pendingApproval || !msg.turnFileDiffs) return;
+async function completeAgentTurnApplication(messageId: string) {
+  const msg = chatMessages.value.find((m) => m.id === messageId);
+  if (!msg?.turnFileDiffs) return;
 
-  msg.reverting = true;
+  patchAssistantMsg(messageId, { applying: true, reverting: false });
   chatError.value = "";
 
   try {
-    const applied: string[] = [];
-    for (const [relPath, diff] of Object.entries(msg.turnFileDiffs)) {
-      const fullPath = resolveFullPathFromRel(relPath);
-      if (diff.deleted) {
-        const deleteResult = await deleteItem(fullPath, projectPath.value.trim());
-        if (!deleteResult.ok) throw new Error(deleteResult.error || `删除 ${relPath} 失败`);
-        removeOpenTabForPath(fullPath);
-      } else {
-        const existing = await readFile(fullPath, projectPath.value.trim());
-        const writeResult = existing.ok
-          ? await writeFile(fullPath, diff.after, projectPath.value.trim())
-          : await createItem(fullPath, false, diff.after, projectPath.value.trim());
-        if (!writeResult.ok) throw new Error(writeResult.error || `写入 ${relPath} 失败`);
-      }
-      applied.push(relPath);
-    }
-
-    msg.pendingApproval = false;
-    msg.reverting = false;
-    msg.writtenFiles = applied;
+    const applied = await applyAgentTurnFiles(msg.turnFileDiffs);
+    clearTurnFileDiffsFromStore(msg.turnFileDiffs);
     patchAssistantMsg(messageId, {
       pendingApproval: false,
+      applying: false,
       reverting: false,
       writtenFiles: applied,
     });
+    persistChatNow();
     await refreshTree();
     const toPreview = applied.filter((rel) => !msg.turnFileDiffs?.[rel]?.deleted);
     void handleAgentWrittenFiles(toPreview);
-    persistChatNow();
   } catch (error) {
-    msg.reverting = false;
-    patchAssistantMsg(messageId, { reverting: false });
+    patchAssistantMsg(messageId, { applying: false, reverting: false });
     chatError.value = error instanceof Error ? error.message : "应用修改失败";
   }
+}
+
+async function acceptAgentTurn(messageId: string) {
+  if (chatSending.value || !projectOpened.value) return;
+  const msg = chatMessages.value.find((m) => m.id === messageId);
+  if (!msg?.pendingApproval || !msg.turnFileDiffs) return;
+  await completeAgentTurnApplication(messageId);
 }
 
 async function rejectAgentTurn(messageId: string, event?: MouseEvent) {
@@ -3437,7 +3733,7 @@ async function revertAgentTurn(messageId: string, event?: MouseEvent) {
   const fileCount = Object.keys(msg.turnFileDiffs).length;
   if (!await confirm(`确定回滚本轮 Agent 对 ${fileCount} 个文件的修改？`, event)) return;
 
-  msg.reverting = true;
+  patchAssistantMsg(messageId, { reverting: true });
   chatError.value = "";
 
   try {
@@ -3467,13 +3763,10 @@ async function revertAgentTurn(messageId: string, event?: MouseEvent) {
       }
     }
 
-    msg.reverted = true;
-    msg.reverting = false;
     patchAssistantMsg(messageId, { reverted: true, reverting: false });
-    await refreshTree();
     persistChatNow();
+    await refreshTree();
   } catch (error) {
-    msg.reverting = false;
     patchAssistantMsg(messageId, { reverting: false });
     chatError.value = error instanceof Error ? error.message : "回滚失败";
   }
@@ -3590,6 +3883,7 @@ async function runAgentTurn(userText: string, options?: { skipUserBubble?: boole
   await scrollChatToBottom(true);
 
   agentAbortHandle?.abort();
+  const maxTurns = Math.min(24, Math.max(1, Math.round(agentMaxTurns.value || 12)));
   agentAbortHandle = runVibeAgentSse(
     {
       prompt,
@@ -3599,6 +3893,7 @@ async function runAgentTurn(userText: string, options?: { skipUserBubble?: boole
       apiKey: aiConfig.value.apiKey,
       model: aiConfig.value.model,
       mode,
+      maxTurns,
       openFilePath: activeFilePath.value || undefined,
     },
     (event) => handleAgentEvent(event, assistantMsg),
@@ -3673,14 +3968,29 @@ function onGlobalKeydown(e: KeyboardEvent) {
     searchInputRef.value?.focus();
     searchInputRef.value?.select();
   }
+  if ((e.ctrlKey || e.metaKey) && e.altKey && e.key === "ArrowUp") {
+    e.preventDefault();
+    switchToAdjacentSession(-1);
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.altKey && e.key === "ArrowDown") {
+    e.preventDefault();
+    switchToAdjacentSession(1);
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "n" || e.key === "N")) {
+    e.preventDefault();
+    startNewSession();
+    return;
+  }
   if (e.key === "Escape") {
     // 优先关闭最顶层弹窗（按z-index层级从高到低）
     if (contextMenu.value.show) {
       e.preventDefault();
       hideContextMenu();
-    } else if (historyOpen.value) {
+    } else if (sessionPickerOpen.value) {
       e.preventDefault();
-      historyOpen.value = false;
+      closeSessionPicker();
     } else if (mentionOpen.value) {
       e.preventDefault();
       mentionOpen.value = false;
@@ -3694,6 +4004,19 @@ function onGlobalKeydown(e: KeyboardEvent) {
 watch(chatMode, (mode) => {
   try {
     localStorage.setItem(CHAT_MODE_KEY, mode);
+  } catch {
+    // ignore
+  }
+});
+
+watch(agentMaxTurns, (value) => {
+  const clamped = Math.min(24, Math.max(1, Math.round(value || 12)));
+  if (clamped !== value) {
+    agentMaxTurns.value = clamped;
+    return;
+  }
+  try {
+    localStorage.setItem(AGENT_MAX_TURNS_KEY, String(clamped));
   } catch {
     // ignore
   }
@@ -4363,14 +4686,35 @@ button.ghost.danger:hover:not(:disabled) {
 
 .git-log-item {
   display: flex;
-  gap: 8px;
-  padding: 5px 12px;
+  flex-direction: column;
   font-size: 11px;
-  cursor: default;
 }
 
 .git-log-item:hover {
   background: rgba(255, 255, 255, 0.03);
+}
+
+.git-log-entry-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.git-log-entry-head:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.git-log-chevron {
+  width: 10px;
+  color: var(--text-dim);
+  flex-shrink: 0;
 }
 
 .git-log-hash {
@@ -4380,10 +4724,45 @@ button.ghost.danger:hover:not(:disabled) {
 }
 
 .git-log-msg {
+  flex: 1;
+  min-width: 0;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.git-log-count {
+  flex-shrink: 0;
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-dim);
+  font-size: 10px;
+  text-align: center;
+}
+
+.git-log-files {
+  padding: 0 0 5px 25px;
+}
+
+.git-log-file {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 4px 12px 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.git-log-file:hover {
+  background: rgba(31, 111, 235, 0.12);
 }
 
 .git-diff-panel {
@@ -4822,64 +5201,6 @@ button.ghost.danger:hover:not(:disabled) {
   min-width: 0;
 }
 
-.history-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 20;
-  background: rgba(5, 10, 20, 0.72);
-  display: flex;
-  align-items: stretch;
-  justify-content: center;
-  padding: 10px;
-}
-
-.history-panel {
-  width: 100%;
-  max-height: 100%;
-  display: flex;
-  flex-direction: column;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 14px;
-  overflow: hidden;
-  backdrop-filter: blur(12px);
-}
-
-.history-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.history-title {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.history-desc {
-  margin: 4px 0 0;
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.history-actions {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.history-new {
-  flex: 1;
-}
-
-.history-sync {
-  white-space: nowrap;
-}
-
 .history-sync-message {
   margin: -2px 0 10px;
   padding: 8px 10px;
@@ -4963,6 +5284,171 @@ button.ghost.small {
   padding: 5px 12px;
   font-size: 12px;
   flex-shrink: 0;
+}
+
+.panel-head-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.panel-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.session-picker-wrap {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.session-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.session-nav-btn {
+  flex-shrink: 0;
+  width: 22px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.session-nav-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.88);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.session-nav-btn:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+
+.session-picker-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 3px 8px 3px 6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.session-picker-trigger:hover:not(:disabled),
+.session-picker-trigger.open {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.session-picker-trigger:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.session-picker-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-picker-chevron {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.45);
+  transition: transform 150ms ease;
+}
+
+.session-picker-trigger.open .session-picker-chevron {
+  transform: rotate(180deg);
+}
+
+.session-picker-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  width: min(340px, calc(100vw - 48px));
+  max-height: min(420px, calc(100vh - 180px));
+  display: flex;
+  flex-direction: column;
+  background: #111827;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  backdrop-filter: blur(16px);
+}
+
+.session-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.session-picker-head-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.session-picker-new {
+  flex-shrink: 0;
+}
+
+.session-picker-list {
+  flex: 1;
+  min-height: 0;
+  max-height: 300px;
+}
+
+.session-picker-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.session-picker-sync {
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
+.session-picker-hint {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.35);
+  white-space: nowrap;
 }
 
 .panel-title {
@@ -5461,6 +5947,43 @@ button.ghost.small {
   border: 1px solid rgba(240, 198, 116, 0.28);
 }
 
+.applying-badge {
+  font-size: 11px;
+  color: #79c0ff;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: rgba(121, 192, 255, 0.1);
+  border: 1px solid rgba(121, 192, 255, 0.28);
+}
+
+.applied-badge {
+  font-size: 11px;
+  color: #7ee787;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: rgba(126, 231, 135, 0.1);
+  border: 1px solid rgba(126, 231, 135, 0.28);
+}
+
+.agent-turns-setting {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--muted, #8b949e);
+}
+
+.agent-turns-input {
+  width: 48px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.2);
+  color: inherit;
+  font-size: 12px;
+}
+
 button.primary.small-action {
   padding: 5px 14px;
   font-size: 12px;
@@ -5719,14 +6242,15 @@ button.compact {
 
 .agent-activity {
   margin-bottom: 8px;
-  border-radius: 8px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.025);
-  border: 1px solid rgba(255, 255, 255, 0.065);
+  border: 1px solid rgba(255, 255, 255, 0.07);
   overflow: hidden;
 }
 
 .agent-activity.collapsed {
   background: transparent;
+  border-color: transparent;
 }
 
 .agent-activity-toggle {
@@ -5785,6 +6309,87 @@ button.compact {
 
 .agent-activity-body {
   padding: 0 10px 10px;
+}
+
+.agent-step-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(31, 111, 235, 0.1), rgba(179, 146, 240, 0.05));
+  border: 1px solid rgba(88, 166, 255, 0.22);
+}
+
+.agent-step-hero-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.agent-step-hero-text {
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.92);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-step-hero-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.agent-model-pill {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-step-history {
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 3px;
+}
+
+.agent-step-history li {
+  position: relative;
+  padding-left: 14px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.42);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-step-history li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 6px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.22);
 }
 
 .agent-status-bar {
@@ -5949,10 +6554,17 @@ button.compact {
 }
 
 .trace-block {
-  margin-bottom: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  margin-top: 6px;
+  margin-bottom: 0;
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 8px;
-  background: rgba(0, 0, 0, 0.15);
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.trace-block + .trace-block,
+.agent-step-history + .trace-block,
+.tool-timeline {
+  margin-top: 8px;
 }
 
 .trace-block-title {

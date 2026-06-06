@@ -38,6 +38,13 @@ export interface GitDiffContentResult {
   error?: string;
 }
 
+export interface GitCommitFileDiffResult {
+  ok: boolean;
+  before: string;
+  after: string;
+  error?: string;
+}
+
 export interface GitCommitResult {
   ok: boolean;
   hash: string;
@@ -50,6 +57,13 @@ export interface GitLogEntry {
   author: string;
   date: string;
   message: string;
+  files: GitLogFile[];
+}
+
+export interface GitLogFile {
+  path: string;
+  status: string;
+  oldPath?: string;
 }
 
 export interface GitLogResult {
@@ -142,9 +156,26 @@ export async function fetchGitLog(projectPath: string, count = 20): Promise<GitL
     const url = backendUrl(`/backend/vibe/git/log?path=${encodeURIComponent(projectPath)}&count=${count}`);
     const response = await fetch(url);
     const data = (await response.json()) as GitLogResult;
-    return data;
+    return { ...data, entries: data.entries?.map((entry) => ({ ...entry, files: entry.files || [] })) || [] };
   } catch (error) {
     return { ok: false, entries: [], error: error instanceof Error ? error.message : "网络错误" };
+  }
+}
+
+export async function fetchGitCommitFileDiff(
+  projectPath: string,
+  hash: string,
+  filePath: string,
+  oldPath?: string,
+): Promise<GitCommitFileDiffResult> {
+  try {
+    let url = backendUrl(`/backend/vibe/git/commit-file-diff?path=${encodeURIComponent(projectPath)}&hash=${encodeURIComponent(hash)}&file=${encodeURIComponent(filePath)}`);
+    if (oldPath) url += `&oldFile=${encodeURIComponent(oldPath)}`;
+    const response = await fetch(url);
+    const data = (await response.json()) as GitCommitFileDiffResult;
+    return data;
+  } catch (error) {
+    return { ok: false, before: "", after: "", error: error instanceof Error ? error.message : "网络错误" };
   }
 }
 

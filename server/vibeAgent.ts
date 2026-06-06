@@ -7,7 +7,11 @@ import {
   stripTextToolCallMarkup,
   synthesizeToolCallsFromText,
 } from "./textToolCalls";
-import { buildProjectContext, formatProjectContextForPrompt } from "./vibeProjectContext";
+import {
+  buildProjectContext,
+  formatProjectContextForBuild,
+  formatProjectContextForPrompt,
+} from "./vibeProjectContext";
 import {
   grepInProject,
   listDirectory,
@@ -77,6 +81,8 @@ const MAX_HISTORY_MESSAGES = 40;
 const MAX_HISTORY_CHARS = 120_000;
 const MAX_SSE_TEXT_CHARS = 24_000;
 const MAX_TOOL_RESULT_SSE_CHARS = 16_000;
+const DEFAULT_BUILD_MAX_TURNS = 12;
+const DEFAULT_ASK_MAX_TURNS = 6;
 
 function truncateForSse(text: string, max = MAX_SSE_TEXT_CHARS): string {
   if (text.length <= max) return text;
@@ -187,7 +193,7 @@ const VIBE_AGENT_TOOLS = [
     type: "function",
     function: {
       name: "write_file",
-      description: "暂存文件修改（用户确认后才真正写入磁盘）。",
+      description: "写入或覆盖文件（Build 模式下本轮 Agent 结束后自动落盘）。",
       parameters: {
         type: "object",
         properties: {
@@ -202,7 +208,7 @@ const VIBE_AGENT_TOOLS = [
     type: "function",
     function: {
       name: "delete_file",
-      description: "暂存删除文件（用户确认后才真正从磁盘删除）。",
+      description: "删除文件（Build 模式下本轮 Agent 结束后自动执行）。",
       parameters: {
         type: "object",
         properties: {
@@ -214,14 +220,18 @@ const VIBE_AGENT_TOOLS = [
   },
 ];
 
+const READ_ONLY_AGENT_TOOLS = VIBE_AGENT_TOOLS.filter((t) =>
+  ["list_dir", "read_file", "grep", "search_files"].includes(t.function.name),
+);
+
 function buildSystemPrompt(projectRoot: string, openFilePath?: string): string {
   const lines = [
-    "你是一个专业的编程 Agent，可以调用工具探索并修改本地项目。",
+    "你是一个专业的编程 Agent（Build 模式），可以调用工具探索并修改本地项目。",
     "回答请使用中文。",
-    "工作流程：先 list_dir / grep / read_file 收集必要信息，再回答或 write_file 修改代码。",
+    "工作流程：先 list_dir / grep / read_file 收集必要信息，再回答或 write_file / delete_file 修改代码。",
     "解释项目时：从 package.json、README、入口文件等关键文件入手，不要臆测。",
-    "修改代码时：先 read_file 确认现状，再 write_file 暂存完整文件内容；用户确认后才会真正落盘。",
-    "删除文件时：使用 delete_file 工具，不要用 write_file 清空内容来替代删除。",
+    "修改代码时：先 read_file 确认现状，再 write_file 写入完整文件内容；本轮 Agent 结束后修改会自动落盘，无需用户确认。",
+    "删除文件时：使用 delete_file 工具，不要用 write_file 清空内容来替代删除；删除同样会在本轮结束时自动执行。",
     "重要：必须通过 API 工具接口调用 list_dir、read_file 等，禁止在正文里输出 <function>、<parameter> 等标记。",
     "工具 path 参数使用相对项目根的路径（如 package.json、src/main.ts），不要用绝对路径。",
     `项目根目录：${projectRoot}`,
@@ -262,191 +272,15 @@ function buildAskSystemPrompt(
   return lines.join("\n");
 }
 
-async function runVibeAsk(params: RunVibeAgentParams): Promise<void> {
-  const { projectRoot, prompt, openFilePath, endpoint, apiKey, model, onEvent, signal } = params;
-
-  const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
-  const openFileRel = openFile?.relative;
-
-  onEvent({
-    type: "status",
-    data: {
-      phase: "preparing",
-      model,
-      ...(openFileRel ? { openFile: openFileRel } : {}),
-    },
-  });
-
-  let openFileSnippet = "";
-  if (openFile) {
-    const result = await readFileContent(openFile.path).catch(() => null);
-    if (result?.ok) {
-      openFileSnippet = sliceFileLines(result.content, 1, 400);
-    }
+function buildDoneData(stage: WriteStage | null, turns: number) {
+  if (!stage) {
+    return { writtenFiles: [] as string[], pendingFiles: [] as string[], turns };
   }
-
-  let projectContextBlock = "";
-  const projectContext = await buildProjectContext(projectRoot);
-  if (projectContext.ok) {
-    projectContextBlock = formatProjectContextForPrompt(projectContext);
-  }
-
-  const systemPrompt = buildAskSystemPrompt(projectRoot, openFilePath, openFileSnippet) + projectContextBlock;
-  const messages: ChatCompletionMessage[] = [
-    { role: "system", content: systemPrompt },
-    ...buildHistoryMessages(params.history),
-    { role: "user", content: prompt },
-  ];
-
-  emitAgentContext(onEvent, {
-    mode: "ask",
-    systemPrompt,
-    history: historyForDisplay(params.history),
-    projectContext: projectContextBlock || undefined,
-    model,
-    ...(openFileRel ? { openFile: openFileRel } : {}),
-  });
-
-  if (signal?.aborted) {
-    onEvent({ type: "status", data: { phase: "aborted" } });
-    onEvent({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 0 } });
-    return;
-  }
-
-  onEvent({ type: "status", data: { phase: "waiting_model", model } });
-
-  const heartbeat = setInterval(() => {
-    if (signal?.aborted) return;
-    onEvent({ type: "status", data: { phase: "waiting_model", model } });
-  }, 12_000);
-
-  let streamedChars = 0;
-  const streamFilter = new TextToolCallStreamFilter();
-  let completion: Awaited<ReturnType<typeof chatCompletionWithTools>>;
-  try {
-    completion = await chatCompletionWithTools({
-      endpoint,
-      apiKey,
-      model,
-      messages,
-      tools: [
-        VIBE_AGENT_TOOLS.find((t) => t.function.name === "list_dir")!,
-        VIBE_AGENT_TOOLS.find((t) => t.function.name === "read_file")!,
-        VIBE_AGENT_TOOLS.find((t) => t.function.name === "grep")!,
-        VIBE_AGENT_TOOLS.find((t) => t.function.name === "search_files")!,
-      ],
-      signal,
-      onContentDelta: (delta) => {
-        const userDelta = streamFilter.push(delta);
-        if (userDelta) {
-          streamedChars += userDelta.length;
-          onEvent({ type: "message_delta", data: { delta: userDelta } });
-        }
-      },
-    });
-  } finally {
-    clearInterval(heartbeat);
-  }
-
-  if (!completion.ok || !completion.message) {
-    onEvent({ type: "error", data: { message: completion.error || "模型请求失败" } });
-    onEvent({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 0 } });
-    return;
-  }
-
-  const assistant = completion.message;
-  const rawContent = String(assistant.content || "");
-  const toolCalls = resolveToolCallsFromAssistant(rawContent, assistant.tool_calls || []);
-  const visibleContent = stripTextToolCallMarkup(rawContent);
-
-  if (toolCalls.length) {
-    if (visibleContent.trim()) {
-      onEvent({
-        type: "turn_trace",
-        data: { turn: 1, assistantText: visibleContent.trim(), hasToolCalls: true },
-      });
-    }
-
-    messages.push({
-      role: "assistant",
-      content: visibleContent || null,
-      tool_calls: toolCalls,
-    });
-
-    for (const call of toolCalls) {
-      if (signal?.aborted) break;
-
-      const toolName = call.function.name;
-      if (toolName === "write_file" || toolName === "delete_file") {
-        messages.push({
-          role: "tool",
-          tool_call_id: call.id,
-          content: "Ask 模式下不支持文件修改操作，请仅使用只读工具查询项目内容。",
-        });
-        continue;
-      }
-
-      const toolArgs = parseToolArgs(call.function.arguments || "{}");
-      onEvent({ type: "tool_start", data: { id: call.id, name: toolName, args: toolArgs } });
-
-      let result = "";
-      try {
-        result = await executeTool(projectRoot, toolName, toolArgs, createWriteStage());
-      } catch (error) {
-        result = `错误：${error instanceof Error ? error.message : String(error)}`;
-      }
-
-      onEvent({
-        type: "tool_end",
-        data: {
-          id: call.id,
-          name: toolName,
-          ok: !result.startsWith("错误："),
-          summary: toolSummary(toolName, result),
-          result: truncateForSse(result, MAX_TOOL_RESULT_SSE_CHARS),
-        },
-      });
-
-      messages.push({
-        role: "tool",
-        tool_call_id: call.id,
-        content: result,
-      });
-    }
-
-    onEvent({ type: "status", data: { phase: "waiting_model", model } });
-
-    let secondStreamedChars = 0;
-    const secondCompletion = await chatCompletionWithTools({
-      endpoint,
-      apiKey,
-      model,
-      messages,
-      tools: [],
-      signal,
-      onContentDelta: (delta) => {
-        secondStreamedChars += delta.length;
-        onEvent({ type: "message_delta", data: { delta } });
-      },
-    });
-
-    if (secondCompletion.ok && secondCompletion.message) {
-      const secondText = String(secondCompletion.message.content || "").trim();
-      if (secondText && !secondStreamedChars) {
-        onEvent({ type: "message", data: { text: secondText } });
-      }
-    } else if (!secondCompletion.ok) {
-      onEvent({ type: "error", data: { message: secondCompletion.error || "第二轮请求失败" } });
-    }
-  } else {
-    const text = visibleContent.trim();
-    if (text && !streamedChars) {
-      onEvent({ type: "message", data: { text } });
-    }
-  }
-
-  onEvent({ type: "status", data: { phase: "finished" } });
-  onEvent({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 1 } });
+  return {
+    writtenFiles: [...stage.files.keys(), ...stage.deletions],
+    pendingFiles: [...stage.pendingList],
+    turns,
+  };
 }
 
 function parseToolArgs(raw: string): Record<string, unknown> {
@@ -525,9 +359,9 @@ async function readStagedFileContent(
   root: string,
   relative: string,
   absPath: string,
-  stage: WriteStage,
+  stage: WriteStage | null,
 ): Promise<string | null> {
-  if (stage.files.has(relative)) return stage.files.get(relative)!;
+  if (stage?.files.has(relative)) return stage.files.get(relative)!;
   const result = await readFileContent(absPath).catch(() => null);
   return result?.ok ? result.content : null;
 }
@@ -536,8 +370,15 @@ async function executeTool(
   projectRoot: string,
   name: string,
   args: Record<string, unknown>,
-  stage: WriteStage,
+  stage: WriteStage | null,
+  mode: VibeChatMode = "build",
 ): Promise<string> {
+  if (mode === "ask" && (name === "write_file" || name === "delete_file")) {
+    return "Ask 模式下不支持文件修改，请仅使用只读工具查询项目。";
+  }
+  if (!stage && (name === "write_file" || name === "delete_file")) {
+    return "错误：当前模式不支持写文件";
+  }
   const root = path.resolve(projectRoot);
 
   if (name === "list_dir") {
@@ -600,7 +441,7 @@ async function executeTool(
     if (!stage.pendingList.includes(resolved.relative)) {
       stage.pendingList.push(resolved.relative);
     }
-    return `已暂存 ${resolved.relative}（${content.length} 字符），待用户确认后写入`;
+    return `已记录 ${resolved.relative}（${content.length} 字符），本轮结束后将自动写入磁盘`;
   }
 
   if (name === "delete_file") {
@@ -615,7 +456,7 @@ async function executeTool(
     if (!stage.pendingList.includes(resolved.relative)) {
       stage.pendingList.push(resolved.relative);
     }
-    return `已暂存删除 ${resolved.relative}，待用户确认后执行`;
+    return `已记录删除 ${resolved.relative}，本轮结束后将自动执行`;
   }
 
   return `错误：未知工具 ${name}`;
@@ -623,11 +464,7 @@ async function executeTool(
 
 export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   const mode = params.mode ?? "build";
-  if (mode === "ask") {
-    await runVibeAsk(params);
-    return;
-  }
-
+  const isAsk = mode === "ask";
   const {
     projectRoot,
     prompt,
@@ -635,7 +472,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     endpoint,
     apiKey,
     model,
-    maxTurns = 12,
+    maxTurns = isAsk ? DEFAULT_ASK_MAX_TURNS : DEFAULT_BUILD_MAX_TURNS,
     onEvent,
     signal,
   } = params;
@@ -653,8 +490,29 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     },
   });
 
-  const writeStage = createWriteStage();
-  const systemPrompt = buildSystemPrompt(projectRoot, openFilePath);
+  let openFileSnippet = "";
+  if (openFile) {
+    const result = await readFileContent(openFile.path).catch(() => null);
+    if (result?.ok) {
+      openFileSnippet = sliceFileLines(result.content, 1, 400);
+    }
+  }
+
+  let projectContextBlock = "";
+  const projectContext = await buildProjectContext(projectRoot);
+  if (projectContext.ok) {
+    projectContextBlock = isAsk
+      ? formatProjectContextForPrompt(projectContext)
+      : formatProjectContextForBuild(projectContext);
+  }
+
+  const systemPrompt =
+    (isAsk
+      ? buildAskSystemPrompt(projectRoot, openFilePath, openFileSnippet)
+      : buildSystemPrompt(projectRoot, openFilePath)) + projectContextBlock;
+
+  const writeStage = isAsk ? null : createWriteStage();
+  const activeTools = isAsk ? READ_ONLY_AGENT_TOOLS : VIBE_AGENT_TOOLS;
   const messages: ChatCompletionMessage[] = [
     { role: "system", content: systemPrompt },
     ...buildHistoryMessages(params.history),
@@ -662,21 +520,25 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   ];
 
   emitAgentContext(onEvent, {
-    mode: "build",
+    mode,
     systemPrompt,
     history: historyForDisplay(params.history),
+    projectContext: projectContextBlock || undefined,
     maxTurns,
     model,
     ...(openFileRel ? { openFile: openFileRel } : {}),
   });
 
+  if (signal?.aborted) {
+    onEvent({ type: "status", data: { phase: "aborted" } });
+    onEvent({ type: "done", data: buildDoneData(writeStage, 0) });
+    return;
+  }
+
   for (let turn = 1; turn <= maxTurns; turn += 1) {
     if (signal?.aborted) {
       onEvent({ type: "status", data: { phase: "aborted", turn, maxTurns } });
-      onEvent({
-        type: "done",
-        data: { writtenFiles: [...writeStage.files.keys(), ...writeStage.deletions], pendingFiles: [...writeStage.pendingList], turns: turn - 1 },
-      });
+      onEvent({ type: "done", data: buildDoneData(writeStage, turn - 1) });
       return;
     }
 
@@ -696,7 +558,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         apiKey,
         model,
         messages,
-        tools: VIBE_AGENT_TOOLS,
+        tools: activeTools,
         signal,
         onContentDelta: (delta) => {
           const userDelta = streamFilter.push(delta);
@@ -712,10 +574,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
     if (!completion.ok || !completion.message) {
       onEvent({ type: "error", data: { message: completion.error || "模型请求失败" } });
-      onEvent({
-        type: "done",
-        data: { writtenFiles: [], pendingFiles: [...writeStage.pendingList], turns: turn },
-      });
+      onEvent({ type: "done", data: buildDoneData(writeStage, turn) });
       return;
     }
 
@@ -730,10 +589,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         onEvent({ type: "message", data: { text } });
       }
       onEvent({ type: "status", data: { phase: "finished", turn, maxTurns } });
-      onEvent({
-        type: "done",
-        data: { writtenFiles: [...writeStage.files.keys(), ...writeStage.deletions], pendingFiles: [...writeStage.pendingList], turns: turn },
-      });
+      onEvent({ type: "done", data: buildDoneData(writeStage, turn) });
       return;
     }
 
@@ -759,7 +615,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       onEvent({ type: "tool_start", data: { id: call.id, name: toolName, args: toolArgs } });
 
       let pendingDiff: Extract<VibeAgentEvent, { type: "file_diff" }> | null = null;
-      if (toolName === "write_file" || toolName === "delete_file") {
+      if (writeStage && (toolName === "write_file" || toolName === "delete_file")) {
         const filePath = String(toolArgs.path || "").trim();
         if (filePath) {
           const resolved = resolveProjectPath(projectRoot, filePath);
@@ -786,7 +642,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
       let result = "";
       try {
-        result = await executeTool(projectRoot, toolName, toolArgs, writeStage);
+        result = await executeTool(projectRoot, toolName, toolArgs, writeStage, mode);
       } catch (error) {
         result = `错误：${error instanceof Error ? error.message : String(error)}`;
       }
@@ -815,9 +671,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   }
 
   onEvent({ type: "status", data: { phase: "finished", turn: maxTurns, maxTurns } });
-  onEvent({ type: "error", data: { message: `已达最大轮次（${maxTurns}），任务可能未完成。` } });
-  onEvent({
-    type: "done",
-    data: { writtenFiles: [...writeStage.files.keys(), ...writeStage.deletions], pendingFiles: [...writeStage.pendingList], turns: maxTurns },
-  });
+  if (!isAsk && writeStage?.pendingList.length) {
+    onEvent({ type: "error", data: { message: `已达最大轮次（${maxTurns}），任务可能未完成。` } });
+  }
+  onEvent({ type: "done", data: buildDoneData(writeStage, maxTurns) });
 }
