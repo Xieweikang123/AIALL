@@ -217,13 +217,13 @@
                     <button type="button" class="ghost tiny" @click="unstageAll">取消全部</button>
                   </div>
                   <div class="git-file-list">
-                    <div
-                      v-for="file in gitStagedFiles"
-                      :key="file.path"
-                      class="git-file-item"
-                      :class="{ active: selectedGitFile === file.path, 'file-item-draggable': true }"
-                      @pointerdown="onGitFilePointerDown($event, file.path)"
-                    >
+                      <div
+                        v-for="file in gitStagedFiles"
+                        :key="file.path"
+                        class="git-file-item"
+                        :class="{ active: selectedGitFile === file.path, loading: gitDiffLoadingKey === file.path, 'file-item-draggable': true }"
+                        @pointerdown="onGitFilePointerDown($event, file.path)"
+                      >
                       <span class="git-file-check" @pointerdown.stop @click.stop="unstageFile(file.path)">✓</span>
                       <span
                         class="git-file-status"
@@ -245,13 +245,13 @@
                     </div>
                   </div>
                   <div class="git-file-list">
-                    <div
-                      v-for="file in gitUnstagedFiles"
-                      :key="file.path"
-                      class="git-file-item"
-                      :class="{ active: selectedGitFile === file.path, 'file-item-draggable': true }"
-                      @pointerdown="onGitFilePointerDown($event, file.path)"
-                    >
+                      <div
+                        v-for="file in gitUnstagedFiles"
+                        :key="file.path"
+                        class="git-file-item"
+                        :class="{ active: selectedGitFile === file.path, loading: gitDiffLoadingKey === file.path, 'file-item-draggable': true }"
+                        @pointerdown="onGitFilePointerDown($event, file.path)"
+                      >
                       <span class="git-file-check" @pointerdown.stop @click.stop="stageFile(file.path)">+</span>
                       <span
                         class="git-file-status"
@@ -285,6 +285,7 @@
                         :key="`${entry.hash}:${file.oldPath || ''}:${file.path}`"
                         type="button"
                         class="git-log-file"
+                        :class="{ loading: gitDiffLoadingKey === gitHistoryDiffKey(entry.hash, file.path, file.oldPath) }"
                         :title="file.oldPath ? `${file.oldPath} → ${file.path}` : file.path"
                         @click="openGitLogFile(entry, file)"
                       >
@@ -700,7 +701,7 @@
                       <li v-for="(line, si) in m.statusLog" :key="si">{{ line }}</li>
                     </ol>
                   </details>
-                  <details v-if="m.turnTraces?.length" class="trace-block" open>
+                  <details v-if="m.turnTraces?.length" class="trace-block">
                     <summary class="trace-block-title">轮次中间输出（{{ m.turnTraces.length }}）</summary>
                     <div v-for="(trace, ti) in m.turnTraces" :key="ti" class="turn-trace-item">
                       <div class="turn-trace-head">
@@ -711,41 +712,56 @@
                       <pre class="trace-pre compact">{{ trace.assistantText }}</pre>
                     </div>
                   </details>
-                  <ol v-if="m.tools?.length" class="tool-timeline">
-                    <li
-                      v-for="step in m.tools"
-                      :key="step.id"
-                      class="tool-item"
-                      :class="{
-                        running: step.running,
-                        fail: !step.ok && !step.running,
-                        done: !step.running && step.ok,
-                      }"
-                    >
-                      <div class="tool-item-icon" aria-hidden="true">{{ step.icon || "⚙️" }}</div>
-                      <div class="tool-item-body">
-                        <div class="tool-item-head">
-                          <span class="tool-item-title">{{ step.title || step.label }}</span>
-                          <span class="tool-item-state">
-                            {{ step.running ? "执行中" : step.ok ? "完成" : "失败" }}
+                  <details
+                    v-if="m.tools?.length"
+                    class="trace-block tool-timeline-block"
+                    :open="isAgentRunning(m)"
+                  >
+                    <summary class="trace-block-title">工具调用（{{ m.tools.length }}）</summary>
+                    <ol class="tool-timeline">
+                      <li
+                        v-for="step in m.tools"
+                        :key="step.id"
+                        class="tool-item"
+                        :class="{
+                          running: step.running,
+                          fail: !step.ok && !step.running,
+                          done: !step.running && step.ok,
+                        }"
+                      >
+                        <details v-if="shouldShowToolExpand(step)" class="tool-item-details">
+                          <summary class="tool-item-row">
+                            <span class="tool-item-icon" aria-hidden="true">{{ step.icon || "⚙️" }}</span>
+                            <span class="tool-item-line">
+                              <span class="tool-item-action">{{ step.title || step.label }}</span>
+                              <span v-if="step.detail" class="tool-item-target">{{ step.detail }}</span>
+                              <span v-if="step.summary" class="tool-item-status" :class="{ fail: !step.ok }">
+                                {{ step.summary }}
+                              </span>
+                            </span>
+                          </summary>
+                          <div class="tool-item-expand-body">
+                            <pre v-if="shouldShowToolResult(step)" class="trace-pre compact">{{ step.fullResult }}</pre>
+                            <pre
+                              v-if="formatToolArgsPreview(step.name, step.args || {})"
+                              class="trace-pre compact"
+                            >{{ formatToolArgsPreview(step.name, step.args || {}) }}</pre>
+                          </div>
+                        </details>
+                        <div v-else class="tool-item-row">
+                          <span class="tool-item-icon" aria-hidden="true">{{ step.icon || "⚙️" }}</span>
+                          <span class="tool-item-line">
+                            <span class="tool-item-action">{{ step.title || step.label }}</span>
+                            <span v-if="step.detail" class="tool-item-target">{{ step.detail }}</span>
+                            <span v-if="step.running" class="tool-item-status running">执行中</span>
+                            <span v-else-if="step.summary" class="tool-item-status" :class="{ fail: !step.ok }">
+                              {{ step.summary }}
+                            </span>
                           </span>
                         </div>
-                        <div v-if="step.detail" class="tool-item-detail">{{ step.detail }}</div>
-                        <div v-if="step.summary && !step.running" class="tool-item-summary">{{ step.summary }}</div>
-                        <details
-                          v-if="formatToolArgsPreview(step.name, step.args || {})"
-                          class="tool-item-expand"
-                        >
-                          <summary>暂存参数</summary>
-                          <pre class="trace-pre compact">{{ formatToolArgsPreview(step.name, step.args || {}) }}</pre>
-                        </details>
-                        <details v-if="step.fullResult && !step.running" class="tool-item-expand" open>
-                          <summary>完整返回</summary>
-                          <pre class="trace-pre compact">{{ step.fullResult }}</pre>
-                        </details>
-                      </div>
-                    </li>
-                  </ol>
+                      </li>
+                    </ol>
+                  </details>
                 </div>
               </div>
               <div
@@ -909,18 +925,6 @@
             >
               Build
             </button>
-            <label class="agent-turns-setting" title="Agent 最多推理轮次">
-              <span class="agent-turns-label">轮次</span>
-              <input
-                v-model.number="agentMaxTurns"
-                type="number"
-                min="1"
-                max="24"
-                step="1"
-                class="agent-turns-input"
-                :disabled="chatSending"
-              />
-            </label>
           </div>
           <div class="chat-input-field" @keydown.capture="onComposerFieldKeydown">
             <div v-if="mentionOpen && mentionResults.length" class="mention-dropdown">
@@ -1079,7 +1083,6 @@ const STORAGE_KEY = "vibe-coding-project";
 const PANEL_WIDTH_KEY = "vibe-coding-panel-widths";
 const EDITOR_COLLAPSED_KEY = "vibe-coding-editor-collapsed";
 const CHAT_MODE_KEY = "vibe-coding-chat-mode";
-const AGENT_MAX_TURNS_KEY = "vibe-coding-agent-max-turns";
 const PENDING_QUEUE_KEY = "vibe-coding-pending-queue";
 const SYNC_STORE_DEBOUNCE_MS = 2000;
 const FILE_MIN_WIDTH = 180;
@@ -1203,18 +1206,6 @@ function loadChatMode(): VibeChatMode {
 }
 
 const chatMode = ref<VibeChatMode>(loadChatMode());
-
-function loadAgentMaxTurns(): number {
-  try {
-    const saved = Number(localStorage.getItem(AGENT_MAX_TURNS_KEY));
-    if (Number.isFinite(saved) && saved >= 1 && saved <= 24) return Math.round(saved);
-  } catch {
-    // ignore
-  }
-  return 12;
-}
-
-const agentMaxTurns = ref(loadAgentMaxTurns());
 const chatMessages = ref<ChatMessage[]>([]);
 const chatSending = ref(false);
 const chatError = ref("");
@@ -1319,12 +1310,19 @@ const gitLogEntries = ref<GitLogEntry[]>([]);
 const gitLogOpen = ref(false);
 const expandedGitLogEntries = ref<Set<string>>(new Set());
 const selectedGitFile = ref("");
+const gitDiffLoadingKey = ref("");
+const gitDiffContentCache = ref<Record<string, FileDiff>>({});
 const gitRemotes = ref<GitRemoteInfo[]>([]);
 const gitTrackingBranch = ref("");
 const gitAhead = ref(0);
 const gitBehind = ref(0);
 const gitRemoteLoading = ref(false);
 const gitRemoteAction = ref("");
+
+function clearGitDiffCache() {
+  gitDiffContentCache.value = {};
+  gitDiffLoadingKey.value = "";
+}
 
 const gitStagedFiles = computed(() => gitStatus.value.filter((f) => f.staged));
 const gitUnstagedFiles = computed(() => gitStatus.value.filter((f) => !f.staged));
@@ -1634,6 +1632,24 @@ function formatToolArgsPreview(name: string, args: Record<string, unknown>): str
     return path ? `将删除：${path}` : "";
   }
   return "";
+}
+
+const TRIVIAL_TOOL_RESULTS = new Set(["（无匹配文件）", "（无匹配）", "（空目录）"]);
+
+function isTrivialToolResult(result?: string): boolean {
+  const text = result?.trim() || "";
+  if (!text) return true;
+  return TRIVIAL_TOOL_RESULTS.has(text);
+}
+
+function shouldShowToolResult(step: AgentToolStep): boolean {
+  if (step.running || !step.fullResult?.trim()) return false;
+  return !isTrivialToolResult(step.fullResult);
+}
+
+function shouldShowToolExpand(step: AgentToolStep): boolean {
+  if (step.running) return false;
+  return shouldShowToolResult(step) || Boolean(formatToolArgsPreview(step.name, step.args || {}));
 }
 
 function truncateDiffPreview(text: string, max = 1200): string {
@@ -2014,6 +2030,7 @@ async function refreshGitStatus() {
   if (!projectOpened.value) return;
   gitLoading.value = true;
   gitError.value = "";
+  clearGitDiffCache();
   try {
     const result = await fetchGitStatus(projectPath.value.trim());
     if (!result.ok) {
@@ -2049,6 +2066,7 @@ async function commitGit() {
   }
   gitCommitting.value = true;
   gitError.value = "";
+  clearGitDiffCache();
   const stagedCount = gitStagedFiles.value.length;
   const commitMessage = gitCommitMessage.value.trim();
   gitStatus.value = gitStatus.value.filter((f) => !f.staged);
@@ -2073,6 +2091,7 @@ async function commitGit() {
 async function stageFile(filePath: string) {
   if (!projectOpened.value) return;
   gitError.value = "";
+  clearGitDiffCache();
   gitStatus.value = gitStatus.value.map((f) => (f.path === filePath ? { ...f, staged: true } : f));
   try {
     const result = await stageGitFiles(projectPath.value.trim(), [filePath]);
@@ -2089,6 +2108,7 @@ async function stageFile(filePath: string) {
 async function unstageFile(filePath: string) {
   if (!projectOpened.value) return;
   gitError.value = "";
+  clearGitDiffCache();
   gitStatus.value = gitStatus.value.map((f) => (f.path === filePath ? { ...f, staged: false } : f));
   try {
     const result = await unstageGitFiles(projectPath.value.trim(), [filePath]);
@@ -2105,6 +2125,7 @@ async function unstageFile(filePath: string) {
 async function stageAll() {
   if (!projectOpened.value) return;
   gitError.value = "";
+  clearGitDiffCache();
   const filesToStage = gitUnstagedFiles.value.map((f) => f.path);
   if (!filesToStage.length) return;
   gitStatus.value = gitStatus.value.map((f) => ({ ...f, staged: true }));
@@ -2123,6 +2144,7 @@ async function stageAll() {
 async function unstageAll() {
   if (!projectOpened.value) return;
   gitError.value = "";
+  clearGitDiffCache();
   if (!gitStagedFiles.value.length) return;
   gitStatus.value = gitStatus.value.map((f) => ({ ...f, staged: false }));
   try {
@@ -2141,6 +2163,7 @@ async function discardFile(filePath: string, event?: MouseEvent) {
   if (!projectOpened.value) return;
   if (!await confirm(`确定丢弃 ${filePath} 的更改？`, event)) return;
   gitError.value = "";
+  clearGitDiffCache();
   gitStatus.value = gitStatus.value.filter((f) => f.path !== filePath);
   try {
     const result = await discardGitFiles(projectPath.value.trim(), [filePath]);
@@ -2160,6 +2183,7 @@ async function discardAll(event?: MouseEvent) {
   if (!projectOpened.value) return;
   if (!await confirm("确定丢弃所有未暂存的更改？", event)) return;
   gitError.value = "";
+  clearGitDiffCache();
   const unstagedPaths = gitUnstagedFiles.value.map((f) => f.path);
   if (!unstagedPaths.length) return;
   gitStatus.value = gitStagedFiles.value;
@@ -2266,40 +2290,31 @@ function toggleGitLogEntry(hash: string) {
 async function openGitLogFile(entry: GitLogEntry, file: GitLogFile) {
   if (!projectOpened.value) return;
   gitError.value = "";
+  const cacheKey = gitHistoryDiffKey(entry.hash, file.path, file.oldPath);
+  const cached = gitDiffContentCache.value[cacheKey];
   try {
-    const result = await fetchGitCommitFileDiff(projectPath.value.trim(), entry.hash, file.path, file.oldPath);
-    if (!result.ok) {
-      gitError.value = result.error || "获取提交文件 diff 失败";
-      return;
+    let diff = cached;
+    if (!diff) {
+      gitDiffLoadingKey.value = cacheKey;
+      const result = await fetchGitCommitFileDiff(projectPath.value.trim(), entry.hash, file.path, file.oldPath);
+      if (!result.ok) {
+        gitError.value = result.error || "获取提交文件 diff 失败";
+        return;
+      }
+      diff = { before: result.before, after: result.after, deleted: file.status === "D" };
+      gitDiffContentCache.value = { ...gitDiffContentCache.value, [cacheKey]: diff };
     }
-
-    if (!await ensureCanLeaveCurrentTab()) return;
-    syncActiveTabToCache();
 
     const displayPath = file.oldPath ? `${file.oldPath} → ${file.path}` : file.path;
     const previewPath = joinProjectPath(projectPath.value, `.git-history/${entry.shortHash}/${displayPath}`);
     const nextReadOnly = new Set(readOnlyFileKeys.value);
     nextReadOnly.add(normalizePathKey(previewPath));
     readOnlyFileKeys.value = nextReadOnly;
-
-    expandEditor();
-    setFileDiff(previewPath, { before: result.before, after: result.after, deleted: file.status === "D" });
-    selectedTreePath.value = "";
-    activeFilePath.value = previewPath;
-    fileContent.value = result.after;
-    fileDirty.value = false;
-    fileLoadError.value = "";
-    showDiffMode.value = true;
-
-    const cached = findOpenTab(previewPath);
-    if (cached) {
-      cached.content = result.after;
-      cached.dirty = false;
-    } else {
-      openTabs.value.push({ path: previewPath, content: result.after, dirty: false });
-    }
+    await openDiffPreview(previewPath, diff, { readOnly: true });
   } catch (e) {
     gitError.value = e instanceof Error ? e.message : "获取提交文件 diff 失败";
+  } finally {
+    if (gitDiffLoadingKey.value === cacheKey) gitDiffLoadingKey.value = "";
   }
 }
 
@@ -2307,18 +2322,56 @@ async function showGitFileDiff(filePath: string) {
   if (!projectOpened.value) return;
   selectedGitFile.value = filePath;
   gitError.value = "";
+  const fullPath = resolveFullPathFromRel(filePath);
+  const cacheKey = `worktree:${filePath}`;
+  const cached = gitDiffContentCache.value[cacheKey];
   try {
-    const result = await fetchGitDiffContent(projectPath.value.trim(), filePath);
-    if (result.ok) {
-      const fullPath = resolveFullPathFromRel(filePath);
-      setFileDiff(fullPath, { before: result.before, after: result.after });
-      await openFile(fullPath);
-      showDiffMode.value = true;
-    } else {
-      gitError.value = result.error || "获取 diff 失败";
+    let diff = cached;
+    if (!diff) {
+      gitDiffLoadingKey.value = filePath;
+      const result = await fetchGitDiffContent(projectPath.value.trim(), filePath);
+      if (!result.ok) {
+        gitError.value = result.error || "获取 diff 失败";
+        return;
+      }
+      diff = { before: result.before, after: result.after };
+      gitDiffContentCache.value = { ...gitDiffContentCache.value, [cacheKey]: diff };
     }
+    await openDiffPreview(fullPath, diff);
   } catch (e) {
     gitError.value = e instanceof Error ? e.message : "获取 diff 失败";
+  } finally {
+    if (gitDiffLoadingKey.value === filePath) gitDiffLoadingKey.value = "";
+  }
+}
+
+function gitHistoryDiffKey(hash: string, filePath: string, oldPath?: string): string {
+  return `history:${hash}:${oldPath || ""}:${filePath}`;
+}
+
+async function openDiffPreview(path: string, diff: FileDiff, options?: { readOnly?: boolean }) {
+  if (!await ensureCanLeaveCurrentTab()) return;
+  syncActiveTabToCache();
+  if (options?.readOnly) {
+    const nextReadOnly = new Set(readOnlyFileKeys.value);
+    nextReadOnly.add(normalizePathKey(path));
+    readOnlyFileKeys.value = nextReadOnly;
+  }
+  expandEditor();
+  setFileDiff(path, diff);
+  selectedTreePath.value = options?.readOnly ? "" : path;
+  activeFilePath.value = path;
+  fileContent.value = diff.after;
+  fileDirty.value = false;
+  fileLoadError.value = "";
+  showDiffMode.value = true;
+
+  const cached = findOpenTab(path);
+  if (cached) {
+    cached.content = diff.after;
+    cached.dirty = false;
+  } else {
+    openTabs.value.push({ path, content: diff.after, dirty: false });
   }
 }
 
@@ -3883,7 +3936,6 @@ async function runAgentTurn(userText: string, options?: { skipUserBubble?: boole
   await scrollChatToBottom(true);
 
   agentAbortHandle?.abort();
-  const maxTurns = Math.min(24, Math.max(1, Math.round(agentMaxTurns.value || 12)));
   agentAbortHandle = runVibeAgentSse(
     {
       prompt,
@@ -3893,7 +3945,6 @@ async function runAgentTurn(userText: string, options?: { skipUserBubble?: boole
       apiKey: aiConfig.value.apiKey,
       model: aiConfig.value.model,
       mode,
-      maxTurns,
       openFilePath: activeFilePath.value || undefined,
     },
     (event) => handleAgentEvent(event, assistantMsg),
@@ -4004,19 +4055,6 @@ function onGlobalKeydown(e: KeyboardEvent) {
 watch(chatMode, (mode) => {
   try {
     localStorage.setItem(CHAT_MODE_KEY, mode);
-  } catch {
-    // ignore
-  }
-});
-
-watch(agentMaxTurns, (value) => {
-  const clamped = Math.min(24, Math.max(1, Math.round(value || 12)));
-  if (clamped !== value) {
-    agentMaxTurns.value = clamped;
-    return;
-  }
-  try {
-    localStorage.setItem(AGENT_MAX_TURNS_KEY, String(clamped));
   } catch {
     // ignore
   }
@@ -4567,6 +4605,20 @@ onBeforeUnmount(() => {
 
 .git-file-item.active {
   background: rgba(31, 111, 235, 0.15);
+}
+
+.git-file-item.loading,
+.git-log-file.loading {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.git-file-item.loading .git-file-path::after,
+.git-log-file.loading .git-file-path::after {
+  content: "加载中";
+  margin-left: 8px;
+  color: var(--text-dim);
+  font-size: 11px;
 }
 
 .git-file-check {
@@ -5965,25 +6017,6 @@ button.ghost.small {
   border: 1px solid rgba(126, 231, 135, 0.28);
 }
 
-.agent-turns-setting {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: 8px;
-  font-size: 11px;
-  color: var(--muted, #8b949e);
-}
-
-.agent-turns-input {
-  width: 48px;
-  padding: 4px 6px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.2);
-  color: inherit;
-  font-size: 12px;
-}
-
 button.primary.small-action {
   padding: 5px 14px;
   font-size: 12px;
@@ -6449,108 +6482,116 @@ button.compact {
   flex-shrink: 0;
 }
 
+.tool-timeline-block > .tool-timeline {
+  padding: 0 8px 6px;
+}
+
 .tool-timeline {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 6px;
+  gap: 1px;
 }
 
 .tool-item {
-  display: flex;
-  gap: 10px;
-  padding: 8px 12px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-radius: 6px;
+  background: transparent;
 }
 
 .tool-item.running {
-  border-color: rgba(88, 166, 255, 0.35);
-  background: rgba(31, 111, 235, 0.1);
+  background: rgba(31, 111, 235, 0.08);
 }
 
-.tool-item.done {
-  border-color: rgba(46, 160, 67, 0.28);
+.tool-item.fail:not(.running) {
+  background: rgba(248, 81, 73, 0.06);
 }
 
-.tool-item.fail {
-  border-color: rgba(248, 81, 73, 0.35);
-  background: rgba(248, 81, 73, 0.08);
+.tool-item-details > summary.tool-item-row {
+  display: flex;
+}
+
+.tool-item-details > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.tool-item-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-item-details > summary::after {
+  content: "▸";
+  flex-shrink: 0;
+  margin-left: 4px;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.tool-item-details[open] > summary::after {
+  content: "▾";
+}
+
+.tool-item-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 6px;
 }
 
 .tool-item-icon {
-  font-size: 16px;
-  line-height: 1.2;
+  font-size: 11px;
+  line-height: 1;
   flex-shrink: 0;
-  margin-top: 1px;
 }
 
-.tool-item-body {
-  min-width: 0;
+.tool-item-line {
   flex: 1;
-}
-
-.tool-item-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.tool-item-title {
   min-width: 0;
-  font-size: 12px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.92);
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  font-size: 11px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.tool-item-state {
-  font-size: 10px;
+.tool-item-action {
   font-weight: 600;
-  flex-shrink: 0;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgba(255, 255, 255, 0.8);
 }
 
-.tool-item.running .tool-item-state {
+.tool-item-target {
+  margin-left: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: rgba(145, 190, 255, 0.82);
+}
+
+.tool-item-status {
+  margin-left: 4px;
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.tool-item-status.running {
   color: #91beff;
 }
 
-.tool-item.done .tool-item-state {
-  color: #7ee787;
+.tool-item-status.fail {
+  color: #ff9a9a;
 }
 
-.tool-item.fail .tool-item-state {
-  color: #ff8a8a;
+.tool-item-expand-body {
+  padding: 0 6px 4px 22px;
 }
 
-.tool-item-detail {
-  margin-top: 3px;
-  font-size: 11px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  color: rgba(145, 190, 255, 0.88);
-  word-break: break-all;
-}
-
-.tool-item-summary {
-  margin-top: 4px;
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.58);
-  line-height: 1.45;
-}
-
-.tool-item-expand {
-  margin-top: 6px;
-  font-size: 11px;
-}
-
-.tool-item-expand summary {
-  cursor: pointer;
-  color: rgba(145, 190, 255, 0.9);
-  user-select: none;
+.tool-item-expand-body .trace-pre {
+  max-height: 160px;
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.4;
 }
 
 .trace-block {

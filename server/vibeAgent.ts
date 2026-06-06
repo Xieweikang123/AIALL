@@ -7,6 +7,7 @@ import {
   stripTextToolCallMarkup,
   synthesizeToolCallsFromText,
 } from "./textToolCalls";
+import { resolveAgentMaxTurns } from "./agentTurnBudget";
 import {
   buildProjectContext,
   formatProjectContextForBuild,
@@ -81,9 +82,6 @@ const MAX_HISTORY_MESSAGES = 40;
 const MAX_HISTORY_CHARS = 120_000;
 const MAX_SSE_TEXT_CHARS = 24_000;
 const MAX_TOOL_RESULT_SSE_CHARS = 16_000;
-const DEFAULT_BUILD_MAX_TURNS = 12;
-const DEFAULT_ASK_MAX_TURNS = 6;
-
 function truncateForSse(text: string, max = MAX_SSE_TEXT_CHARS): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max)}\n\n…（已截断，共 ${text.length} 字符）`;
@@ -472,10 +470,13 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     endpoint,
     apiKey,
     model,
-    maxTurns = isAsk ? DEFAULT_ASK_MAX_TURNS : DEFAULT_BUILD_MAX_TURNS,
     onEvent,
     signal,
   } = params;
+
+  const maxTurns =
+    params.maxTurns ??
+    resolveAgentMaxTurns({ mode, prompt, history: params.history });
 
   const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
   const openFileRel = openFile?.relative;
