@@ -378,6 +378,7 @@ void nextTick(() => syncEmpty());
 
 <style scoped>
 .composer-editor {
+  position: relative;
   flex: 1 1 120px;
   min-width: 120px;
   min-height: 24px;
@@ -393,8 +394,11 @@ void nextTick(() => syncEmpty());
 
 .composer-editor.empty::before {
   content: attr(data-placeholder);
+  position: absolute;
+  inset: 0 auto auto 0;
   color: rgba(255, 255, 255, 0.4);
   pointer-events: none;
+  user-select: none;
 }
 
 .composer-editor.disabled {

@@ -149,9 +149,10 @@ export async function gitStatus(projectRoot: string): Promise<GitStatusResult> {
   }
 }
 
-export async function gitDiff(projectRoot: string, filePath?: string): Promise<GitDiffResult> {
+export async function gitDiff(projectRoot: string, filePath?: string, staged = false): Promise<GitDiffResult> {
   try {
     const args = ["diff", "--stat=200", "--stat-graph-width=0"];
+    if (staged) args.push("--cached");
     if (filePath) args.push("--", filePath);
     const { stdout: statOut } = await gitExec(projectRoot, args);
 
@@ -168,6 +169,7 @@ export async function gitDiff(projectRoot: string, filePath?: string): Promise<G
     }
 
     const patchArgs = ["diff"];
+    if (staged) patchArgs.push("--cached");
     if (filePath) patchArgs.push("--", filePath);
     const { stdout: patchOut } = await gitExec(projectRoot, patchArgs);
 
@@ -177,11 +179,13 @@ export async function gitDiff(projectRoot: string, filePath?: string): Promise<G
   }
 }
 
-export async function gitDiffFile(projectRoot: string, filePath: string): Promise<GitDiffResult> {
+export async function gitDiffFile(projectRoot: string, filePath: string, staged = false): Promise<GitDiffResult> {
   try {
-    const { stdout: patchOut } = await gitExec(projectRoot, ["diff", "--", filePath]);
+    const diffArgs = staged ? ["diff", "--cached", "--", filePath] : ["diff", "--", filePath];
+    const { stdout: patchOut } = await gitExec(projectRoot, diffArgs);
 
-    const { stdout: statOut } = await gitExec(projectRoot, ["diff", "--numstat", "--", filePath]);
+    const statArgs = staged ? ["diff", "--cached", "--numstat", "--", filePath] : ["diff", "--numstat", "--", filePath];
+    const { stdout: statOut } = await gitExec(projectRoot, statArgs);
     const files: GitDiffFile[] = [];
     for (const line of statOut.split("\n")) {
       const parts = line.split("\t");
@@ -207,23 +211,39 @@ export interface GitDiffContentResult {
   error?: string;
 }
 
-export async function gitDiffContent(projectRoot: string, filePath: string): Promise<GitDiffContentResult> {
+export async function gitDiffContent(projectRoot: string, filePath: string, staged = false): Promise<GitDiffContentResult> {
   try {
     let before = "";
     try {
-      const { stdout } = await gitExec(projectRoot, ["show", `HEAD:${filePath}`]);
+      const { stdout } = await gitExec(projectRoot, ["show", staged ? `HEAD:${filePath}` : `:${filePath}`]);
       before = stdout;
     } catch {
-      before = "";
+      if (!staged) {
+        try {
+          const { stdout } = await gitExec(projectRoot, ["show", `HEAD:${filePath}`]);
+          before = stdout;
+        } catch {
+          before = "";
+        }
+      }
     }
 
-    const fs = await import("node:fs");
-    const fullPath = await import("node:path").then((p) => p.resolve(projectRoot, filePath));
     let after = "";
-    try {
-      after = fs.readFileSync(fullPath, "utf-8");
-    } catch {
-      after = "";
+    if (staged) {
+      try {
+        const { stdout } = await gitExec(projectRoot, ["show", `:${filePath}`]);
+        after = stdout;
+      } catch {
+        after = "";
+      }
+    } else {
+      const fs = await import("node:fs");
+      const fullPath = await import("node:path").then((p) => p.resolve(projectRoot, filePath));
+      try {
+        after = fs.readFileSync(fullPath, "utf-8");
+      } catch {
+        after = "";
+      }
     }
 
     return { ok: true, before, after };
@@ -353,7 +373,12 @@ export async function gitReset(projectRoot: string, files: string[]): Promise<{ 
 export async function gitDiscard(projectRoot: string, files: string[]): Promise<{ ok: boolean; error?: string }> {
   try {
     for (const file of files) {
-      await gitExec(projectRoot, ["checkout", "--", file]);
+      const tracked = await gitExec(projectRoot, ["ls-files", "--error-unmatch", "--", file]).then(() => true).catch(() => false);
+      if (tracked) {
+        await gitExec(projectRoot, ["checkout", "--", file]);
+      } else {
+        await gitExec(projectRoot, ["clean", "-f", "--", file]);
+      }
     }
     return { ok: true };
   } catch (error) {

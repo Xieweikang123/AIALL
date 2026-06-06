@@ -114,10 +114,11 @@ export async function fetchGitStatus(projectPath: string): Promise<GitStatusResu
   }
 }
 
-export async function fetchGitDiff(projectPath: string, filePath?: string): Promise<GitDiffResult> {
+export async function fetchGitDiff(projectPath: string, filePath?: string, staged = false): Promise<GitDiffResult> {
   try {
     let url = backendUrl(`/backend/vibe/git/diff?path=${encodeURIComponent(projectPath)}`);
     if (filePath) url += `&file=${encodeURIComponent(filePath)}`;
+    if (staged) url += "&staged=1";
     const response = await fetch(url);
     const data = (await response.json()) as GitDiffResult;
     return data;
@@ -126,9 +127,10 @@ export async function fetchGitDiff(projectPath: string, filePath?: string): Prom
   }
 }
 
-export async function fetchGitDiffContent(projectPath: string, filePath: string): Promise<GitDiffContentResult> {
+export async function fetchGitDiffContent(projectPath: string, filePath: string, staged = false): Promise<GitDiffContentResult> {
   try {
-    const url = backendUrl(`/backend/vibe/git/diff-content?path=${encodeURIComponent(projectPath)}&file=${encodeURIComponent(filePath)}`);
+    const stagedParam = staged ? "&staged=1" : "";
+    const url = backendUrl(`/backend/vibe/git/diff-content?path=${encodeURIComponent(projectPath)}&file=${encodeURIComponent(filePath)}${stagedParam}`);
     const response = await fetch(url);
     const data = (await response.json()) as GitDiffContentResult;
     return data;

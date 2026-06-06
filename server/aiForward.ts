@@ -17,6 +17,56 @@ export function buildHeaders(apiKey?: string): HeadersInit {
   return headers;
 }
 
+export const DEFAULT_AI_MAX_RETRIES = 3;
+
+export function isRetryableAiError(input: {
+  status?: number;
+  error?: string;
+  rawText?: string;
+  fetchError?: unknown;
+}): boolean {
+  if (input.fetchError) {
+    const err = input.fetchError;
+    if (err instanceof Error && (err.name === "AbortError" || err.message === "Aborted")) {
+      return false;
+    }
+    return true;
+  }
+
+  const status = input.status ?? 0;
+  if ([408, 429, 502, 503, 504].includes(status)) return true;
+
+  const haystack = `${input.error || ""} ${input.rawText || ""}`.toLowerCase();
+  return /gateway error|请求超时|timeout|timed out|econnreset|etimedout|socket hang up|fetch failed|network error|overload|rate.?limit|too many requests|service unavailable|bad gateway/.test(
+    haystack,
+  );
+}
+
+function delayMs(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(Object.assign(new Error("Aborted"), { name: "AbortError" }));
+  }
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      cleanup();
+      reject(Object.assign(new Error("Aborted"), { name: "AbortError" }));
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function retryDelayForAttempt(attempt: number): number {
+  return Math.min(30_000, 2000 * 2 ** (attempt - 1));
+}
+
 export function formatAiHttpError(status: number, rawText: string): string {
   let detail = "";
   try {
@@ -98,7 +148,7 @@ function buildMessageFromStream(
   };
 }
 
-export async function chatCompletionWithTools(params: {
+async function chatCompletionWithToolsOnce(params: {
   endpoint: string;
   apiKey?: string;
   model: string;
@@ -228,4 +278,98 @@ export async function chatCompletionWithTools(params: {
   }
 
   return { ok: true, status: response.status, message, rawText: "" };
+}
+
+export async function chatCompletionWithTools(params: {
+  endpoint: string;
+  apiKey?: string;
+  model: string;
+  messages: ChatCompletionMessage[];
+  tools: unknown[];
+  signal?: AbortSignal;
+  onContentDelta?: (delta: string) => void;
+  maxRetries?: number;
+  onAttemptStart?: (info: { attempt: number; maxAttempts: number }) => void;
+  onRetry?: (info: { attempt: number; maxAttempts: number; delayMs: number; error: string }) => void;
+}): Promise<ChatCompletionResult> {
+  const maxRetries = params.maxRetries ?? DEFAULT_AI_MAX_RETRIES;
+  const maxAttempts = maxRetries + 1;
+  let lastResult: ChatCompletionResult | undefined;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    if (params.signal?.aborted) {
+      return { ok: false, status: 0, rawText: "", error: "已取消" };
+    }
+
+    if (attempt > 1) {
+      params.onAttemptStart?.({ attempt, maxAttempts });
+    }
+
+    let streamStarted = false;
+    const onContentDelta = params.onContentDelta
+      ? (delta: string) => {
+          streamStarted = true;
+          params.onContentDelta?.(delta);
+        }
+      : undefined;
+
+    try {
+      const result = await chatCompletionWithToolsOnce({
+        endpoint: params.endpoint,
+        apiKey: params.apiKey,
+        model: params.model,
+        messages: params.messages,
+        tools: params.tools,
+        signal: params.signal,
+        onContentDelta,
+      });
+
+      if (result.ok) return result;
+
+      lastResult = result;
+      const retryable =
+        !streamStarted &&
+        isRetryableAiError({
+          status: result.status,
+          error: result.error,
+          rawText: result.rawText,
+        });
+      if (!retryable || attempt >= maxAttempts) return result;
+
+      const delay = retryDelayForAttempt(attempt);
+      params.onRetry?.({
+        attempt,
+        maxAttempts,
+        delayMs: delay,
+        error: result.error || "模型请求失败",
+      });
+      await delayMs(delay, params.signal);
+    } catch (fetchError) {
+      if (
+        fetchError instanceof Error &&
+        (fetchError.name === "AbortError" || fetchError.message === "Aborted")
+      ) {
+        return { ok: false, status: 0, rawText: "", error: "已取消" };
+      }
+
+      const message = fetchError instanceof Error ? fetchError.message : "网络请求失败";
+      if (
+        !isRetryableAiError({ fetchError }) ||
+        attempt >= maxAttempts
+      ) {
+        return { ok: false, status: 0, rawText: "", error: message };
+      }
+
+      const delay = retryDelayForAttempt(attempt);
+      params.onRetry?.({
+        attempt,
+        maxAttempts,
+        delayMs: delay,
+        error: message,
+      });
+      await delayMs(delay, params.signal);
+    }
+  }
+
+  return lastResult || { ok: false, status: 0, rawText: "", error: "模型请求失败" };
 }

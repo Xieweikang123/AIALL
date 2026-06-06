@@ -222,7 +222,7 @@
                         :key="file.path"
                         class="git-file-item"
                         :class="{ active: selectedGitFile === file.path, loading: gitDiffLoadingKey === file.path, 'file-item-draggable': true }"
-                        @pointerdown="onGitFilePointerDown($event, file.path)"
+                        @pointerdown="onGitFilePointerDown($event, file.path, file.staged)"
                       >
                       <span class="git-file-check" @pointerdown.stop @click.stop="unstageFile(file.path)">✓</span>
                       <span
@@ -250,7 +250,7 @@
                         :key="file.path"
                         class="git-file-item"
                         :class="{ active: selectedGitFile === file.path, loading: gitDiffLoadingKey === file.path, 'file-item-draggable': true }"
-                        @pointerdown="onGitFilePointerDown($event, file.path)"
+                        @pointerdown="onGitFilePointerDown($event, file.path, file.staged)"
                       >
                       <span class="git-file-check" @pointerdown.stop @click.stop="stageFile(file.path)">+</span>
                       <span
@@ -528,6 +528,15 @@
                       <span class="history-item-meta">
                         {{ formatSessionTime(s.updatedAt) }} · {{ s.messageCount }} 条
                       </span>
+                    </button>
+                    <button
+                      type="button"
+                      class="ghost small history-copy"
+                      :disabled="chatSending"
+                      title="复制会话信息（便于粘贴给 AI 排查）"
+                      @click.stop="copySessionInfo(s)"
+                    >
+                      复制
                     </button>
                     <button
                       type="button"
@@ -1127,6 +1136,9 @@ type FileDiff = {
 type AgentStatusData = Extract<VibeAgentSseEvent, { type: "status" }>["data"] & {
   toolTitle?: string;
   toolDetail?: string;
+  retryAttempt?: number;
+  retryMaxAttempts?: number;
+  retryError?: string;
 };
 
 function normalizeChatMessages(messages: PersistedChatMessage[]): ChatMessage[] {
@@ -1543,6 +1555,7 @@ function phaseBadgeLabel(phase?: string): string {
       return "准备";
     case "waiting_model":
     case "thinking":
+    case "retrying_model":
       return "模型";
     case "executing_tool":
     case "executing_tools":
@@ -1575,6 +1588,16 @@ function formatAgentStatus(data: AgentStatusData, compact = false): string {
     const modelHint = model ? ` · ${model}` : "";
     const turnHint = turn && maxTurns ? `（第 ${turn}/${maxTurns} 轮${modelHint}）` : modelHint;
     return `正在等待模型响应${turnHint}…`;
+  }
+  if (phase === "retrying_model") {
+    const modelHint = model ? ` · ${model}` : "";
+    const turnHint = turn && maxTurns ? `（第 ${turn}/${maxTurns} 轮${modelHint}）` : modelHint;
+    const retryHint =
+      data.retryAttempt && data.retryMaxAttempts
+        ? `，第 ${data.retryAttempt}/${data.retryMaxAttempts - 1} 次重试`
+        : "";
+    const reason = data.retryError ? `：${data.retryError}` : "";
+    return `模型请求失败${reason}，正在重试${turnHint}${retryHint}…`;
   }
   if (phase === "executing_tool") {
     return toolDetail ? `正在执行：${toolTitle}（${toolDetail}）` : `正在执行：${toolTitle}…`;
@@ -1862,6 +1885,66 @@ function removeSession(sessionId: string) {
   void scrollChatToBottom(true);
 }
 
+function sessionLocalFileName(sessionId: string): string {
+  const safe = sessionId.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return `chat-${safe}.json`;
+}
+
+function formatSessionInfoForCopy(session: VibeChatSessionMeta, project: string): string {
+  const relFile = `.aiall/vibe-chat-sessions/${sessionLocalFileName(session.id)}`;
+  const lines = [
+    "请排查以下 AI 助手本地会话：",
+    `- 标题: ${session.title}`,
+    `- 项目: ${project}`,
+    `- 会话 ID: ${session.id}`,
+    `- 本地文件: ${relFile}`,
+    `- 更新: ${session.updatedAt}`,
+    `- 消息数: ${session.messageCount}`,
+  ];
+  if (session.id === activeSessionId.value) {
+    lines.push("- 状态: 当前活跃会话");
+  }
+  return lines.join("\n");
+}
+
+async function copyText(text: string) {
+  const value = String(text ?? "");
+  if (!value) return;
+  try {
+    await navigator.clipboard.writeText(value);
+  } catch {
+    const textarea = document.createElement("textarea");
+    textarea.value = value;
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    textarea.style.top = "-9999px";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    try {
+      document.execCommand("copy");
+    } finally {
+      document.body.removeChild(textarea);
+    }
+  }
+}
+
+let sessionCopyHintTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function copySessionInfo(session: VibeChatSessionMeta) {
+  const project = projectPath.value.trim();
+  if (!project) return;
+  await copyText(formatSessionInfoForCopy(session, project));
+  if (sessionCopyHintTimer) clearTimeout(sessionCopyHintTimer);
+  chatStoreSyncMessage.value = `已复制「${session.title}」的会话信息`;
+  sessionCopyHintTimer = setTimeout(() => {
+    sessionCopyHintTimer = null;
+    if (chatStoreSyncMessage.value.startsWith("已复制「")) {
+      chatStoreSyncMessage.value = "";
+    }
+  }, 2500);
+}
+
 async function syncChatStoreToDisk() {
   const path = projectPath.value.trim();
   if (!path || syncingChatStore.value) return;
@@ -2077,7 +2160,9 @@ async function commitGit() {
       gitError.value = result.error || "提交失败";
       gitCommitMessage.value = commitMessage;
       await refreshGitStatus();
+      return;
     }
+    await refreshGitStatus();
     await refreshTree();
   } catch (e) {
     gitError.value = e instanceof Error ? e.message : "提交失败";
@@ -2318,18 +2403,18 @@ async function openGitLogFile(entry: GitLogEntry, file: GitLogFile) {
   }
 }
 
-async function showGitFileDiff(filePath: string) {
+async function showGitFileDiff(filePath: string, staged = false) {
   if (!projectOpened.value) return;
   selectedGitFile.value = filePath;
   gitError.value = "";
   const fullPath = resolveFullPathFromRel(filePath);
-  const cacheKey = `worktree:${filePath}`;
+  const cacheKey = `${staged ? "staged" : "worktree"}:${filePath}`;
   const cached = gitDiffContentCache.value[cacheKey];
   try {
     let diff = cached;
     if (!diff) {
       gitDiffLoadingKey.value = filePath;
-      const result = await fetchGitDiffContent(projectPath.value.trim(), filePath);
+      const result = await fetchGitDiffContent(projectPath.value.trim(), filePath, staged);
       if (!result.ok) {
         gitError.value = result.error || "获取 diff 失败";
         return;
@@ -3215,10 +3300,10 @@ function onSearchResultPointerDown(
   });
 }
 
-function onGitFilePointerDown(e: PointerEvent, relativePath: string) {
+function onGitFilePointerDown(e: PointerEvent, relativePath: string, staged = false) {
   const fullPath = resolveFullPathFromRel(relativePath);
   startPathDrag(fullPath, fileName(relativePath), e, () => {
-    void showGitFileDiff(relativePath);
+    void showGitFileDiff(relativePath, staged);
   });
 }
 
@@ -4731,11 +4816,6 @@ button.ghost.danger:hover:not(:disabled) {
   padding: 7px 12px !important;
 }
 
-.git-log-list {
-  max-height: 200px;
-  overflow-y: auto;
-}
-
 .git-log-item {
   display: flex;
   flex-direction: column;
@@ -5326,10 +5406,14 @@ button.ghost.danger:hover:not(:disabled) {
   color: var(--muted);
 }
 
+.history-copy,
 .history-delete {
   align-self: center;
-  margin-right: 6px;
   flex-shrink: 0;
+}
+
+.history-delete {
+  margin-right: 6px;
 }
 
 button.ghost.small {

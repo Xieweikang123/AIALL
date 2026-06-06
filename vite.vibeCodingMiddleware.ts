@@ -920,6 +920,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
       const projectPath = url.searchParams.get("path") || "";
       const filePath = url.searchParams.get("file") || undefined;
+      const staged = url.searchParams.get("staged") === "1";
 
       if (!projectPath) {
         sendJson(res, 400, { ok: false, error: "缺少 path 参数" });
@@ -927,7 +928,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       }
 
       const resolved = path.resolve(projectPath);
-      const result = filePath ? await gitDiffFile(resolved, filePath) : await gitDiff(resolved);
+      const result = filePath ? await gitDiffFile(resolved, filePath, staged) : await gitDiff(resolved, undefined, staged);
       sendJson(res, 200, result);
     } catch (error) {
       sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "获取 diff 失败" });
@@ -945,6 +946,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
       const projectPath = url.searchParams.get("path") || "";
       const filePath = url.searchParams.get("file") || "";
+      const staged = url.searchParams.get("staged") === "1";
 
       if (!projectPath || !filePath) {
         sendJson(res, 400, { ok: false, error: "缺少 path 或 file 参数" });
@@ -952,7 +954,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       }
 
       const resolved = path.resolve(projectPath);
-      const result = await gitDiffContent(resolved, filePath);
+      const result = await gitDiffContent(resolved, filePath, staged);
       sendJson(res, 200, result);
     } catch (error) {
       sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "获取文件内容失败" });
@@ -1011,7 +1013,15 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
 
       const resolved = path.resolve(body.path.trim());
       const statusResult = await gitStatus(resolved);
-      const diffResult = await gitDiff(resolved);
+      if (!statusResult.ok) {
+        sendJson(res, 400, { ok: false, error: statusResult.error || "获取 Git 状态失败" });
+        return;
+      }
+      const diffResult = await gitDiff(resolved, undefined, true);
+      if (!diffResult.ok) {
+        sendJson(res, 400, { ok: false, error: diffResult.error || "获取已暂存 diff 失败" });
+        return;
+      }
 
       const stagedFiles = statusResult.files.filter((f) => f.staged);
       if (!stagedFiles.length) {

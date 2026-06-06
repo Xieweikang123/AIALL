@@ -38,6 +38,9 @@ export type VibeAgentSseEvent =
         maxTurns?: number;
         openFile?: string;
         model?: string;
+        retryAttempt?: number;
+        retryMaxAttempts?: number;
+        retryError?: string;
       };
     }
   | { type: "tool_start"; data: { id: string; name: string; args: Record<string, unknown> } }

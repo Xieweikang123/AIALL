@@ -31,6 +31,9 @@ export type VibeAgentEvent =
         maxTurns?: number;
         openFile?: string;
         model?: string;
+        retryAttempt?: number;
+        retryMaxAttempts?: number;
+        retryError?: string;
       };
     }
   | { type: "tool_start"; data: { id: string; name: string; args: Record<string, unknown> } }
@@ -545,13 +548,16 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
     onEvent({ type: "status", data: { phase: "waiting_model", turn, maxTurns, model } });
 
-    const heartbeat = setInterval(() => {
-      if (signal?.aborted) return;
-      onEvent({ type: "status", data: { phase: "waiting_model", turn, maxTurns, model } });
-    }, 12_000);
-
     let streamedChars = 0;
     const streamFilter = new TextToolCallStreamFilter();
+    let modelStatusPhase: "waiting_model" | "retrying_model" = "waiting_model";
+    const heartbeat = setInterval(() => {
+      if (signal?.aborted) return;
+      onEvent({
+        type: "status",
+        data: { phase: modelStatusPhase, turn, maxTurns, model },
+      });
+    }, 12_000);
     let completion: Awaited<ReturnType<typeof chatCompletionWithTools>>;
     try {
       completion = await chatCompletionWithTools({
@@ -567,6 +573,25 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
             streamedChars += userDelta.length;
             onEvent({ type: "message_delta", data: { delta: userDelta } });
           }
+        },
+        onAttemptStart: () => {
+          modelStatusPhase = "waiting_model";
+          onEvent({ type: "status", data: { phase: "waiting_model", turn, maxTurns, model } });
+        },
+        onRetry: ({ attempt, maxAttempts, error }) => {
+          modelStatusPhase = "retrying_model";
+          onEvent({
+            type: "status",
+            data: {
+              phase: "retrying_model",
+              turn,
+              maxTurns,
+              model,
+              retryAttempt: attempt,
+              retryMaxAttempts: maxAttempts,
+              retryError: error,
+            },
+          });
         },
       });
     } finally {
