@@ -309,7 +309,7 @@
       </div>
     </section>
 
-
+    <InputPrompt />
   </div>
 </template>
 
@@ -317,6 +317,8 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { fetchAvailableModels, testAiModel, testTtsModel } from "../services/aiClient";
+import InputPrompt from "../components/InputPrompt.vue";
+import { useInputPrompt } from "../composables/useInputPrompt";
 import { requestPageScreenshot } from "../services/pageScreenshotClient";
 
 interface AiConfigForm {
@@ -350,6 +352,7 @@ type TestPhase = "idle" | "running" | "success" | "fail";
 type TabKey = "chat" | "tts";
 
 const router = useRouter();
+const inputPrompt = useInputPrompt();
 
 const activeTab = ref<TabKey>("chat");
 const apiKeyVisible = ref(false);
@@ -835,10 +838,12 @@ function handleExportConfig() {
   }
 }
 
-function handleImportConfig() {
-  const input = window.prompt("请粘贴导出的配置 JSON（会覆盖当前表单）", "");
+async function handleImportConfig() {
+  const input = await inputPrompt.prompt("请粘贴导出的配置 JSON（会覆盖当前表单）", {
+    placeholder: "粘贴 JSON...",
+  });
   if (input == null) return;
-  const text = String(input).trim();
+  const text = input.trim();
   if (!text) return;
   try {
     const parsed = JSON.parse(text) as Partial<PersistedAiConfig> | Partial<AiConfigForm>;

@@ -39,6 +39,7 @@ export type AgentRoundTool = {
   summary: string;
   ok: boolean;
   running?: boolean;
+  lineDelta?: number;
   fullResult?: string;
   args?: Record<string, unknown>;
 };

@@ -5,19 +5,26 @@ export type NarrativeSegment = {
   tools: AgentRoundTool[];
 };
 
-const SEGMENT_START =
-  /(?:(?<=[。！？!?])\s+|(?<=[：:])\s*(?=现在|让我|Let me|Now let me|I will )|(?=\s*(?:好的[，,、]?|现在|接下来|然后|另外|此外|我来|让我|先看|先读取|首先|其次|Finally|First|Next|Also|Now let me|Let me check|Let me look|Let me find|Let me see|Let me read|I will |I need to )))/i;
+const SPLIT_PATTERNS = [
+  /\n(?=#{1,3}\s+)/,
+  /(?<=[。！？!?])(?=\S)/,
+  /(?<=[.!?])\s+(?=I |Let me |Now let me |I'll |First,|Next,|Also )/i,
+  /(?<=[：:])\s*(?=现在|让我|Let me|Now let me|I noticed|I need)/i,
+  /\s+(?=现在让我|接下来|然后|另外|此外|Now let me|Let me check|Let me look|Let me find|Let me read|Let me fix|I noticed|I need to)/i,
+];
+
 export function splitAssistantNarrative(text: string): string[] {
   const trimmed = text.trim();
   if (!trimmed) return [];
 
-  const parts = trimmed
-    .split(SEGMENT_START)
-    .map((part) => part.trim())
-    .filter(Boolean);
+  let parts = [trimmed];
+  for (const pattern of SPLIT_PATTERNS) {
+    parts = parts.flatMap((part) =>
+      part.split(pattern).map((segment) => segment.trim()).filter(Boolean),
+    );
+  }
 
-  if (parts.length <= 1) return [trimmed];
-  return parts;
+  return parts.length ? parts : [trimmed];
 }
 
 export function assignToolsToNarrativeSegments(
@@ -28,9 +35,15 @@ export function assignToolsToNarrativeSegments(
     return tools.length ? [{ text: "", tools: [...tools] }] : [];
   }
 
-  const result: NarrativeSegment[] = segments.map((text) => ({ text, tools: [] }));
-  if (!tools.length) return result;
+  if (!tools.length) {
+    return segments.map((text) => ({ text, tools: [] }));
+  }
 
+  if (segments.length === tools.length) {
+    return segments.map((text, index) => ({ text, tools: [tools[index]] }));
+  }
+
+  const result: NarrativeSegment[] = segments.map((text) => ({ text, tools: [] }));
   let toolIdx = 0;
   for (let si = 0; si < result.length && toolIdx < tools.length; si += 1) {
     const remainingSegments = result.length - si;

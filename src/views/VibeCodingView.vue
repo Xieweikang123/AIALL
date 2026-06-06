@@ -613,7 +613,7 @@
           </div>
         </div>
 
-        <div ref="chatScrollRef" class="chat-scroll">
+        <div ref="chatScrollRef" class="chat-scroll" @scroll="onChatScroll">
           <div v-if="!chatMessages.length" class="chat-empty">
             <div class="chat-empty-icon" aria-hidden="true">🤖</div>
             <p class="chat-empty-title">AI 编程助手</p>
@@ -825,7 +825,7 @@
                       编辑器预览
                     </button>
                   </div>
-                  <details class="inline-diff-details" open>
+                  <details class="inline-diff-details">
                     <summary>变更内容</summary>
                     <div class="inline-diff-cols">
                       <div class="inline-diff-col">
@@ -996,6 +996,7 @@
 
     <Teleport to="body">
       <ConfirmPopup />
+      <InputPrompt />
       <div
         v-if="fileDragGhost"
         class="file-drag-ghost"
@@ -1034,6 +1035,7 @@ import CodeMonacoEditor from "../components/CodeMonacoEditor.vue";
 import ConfirmPopup from "../components/ConfirmPopup.vue";
 import FileTreeNode, { type TreeNode } from "../components/FileTreeNode.vue";
 import { useConfirm } from "../composables/useConfirm";
+import { useInputPrompt } from "../composables/useInputPrompt";
 import { loadAiChatBaseFromStorage } from "../services/aiLocalConfig";
 import {
   buildAgentHistoryFromMessages,
@@ -1072,6 +1074,7 @@ import {
 } from "../services/agentRoundGroups";
 import {
   buildCursorAgentFeed,
+  computeLineDelta,
   cursorActionClass,
   formatCursorActionLabel,
 } from "../services/agentCursorFeed";
@@ -1123,6 +1126,7 @@ import {
 } from "../services/vibeGitClient";
 
 const { confirm } = useConfirm();
+const inputPrompt = useInputPrompt();
 
 const STORAGE_KEY = "vibe-coding-project";
 const PANEL_WIDTH_KEY = "vibe-coding-panel-widths";
@@ -1149,6 +1153,7 @@ type AgentToolStep = {
   ok: boolean;
   running?: boolean;
   turn?: number;
+  lineDelta?: number;
   fullResult?: string;
   args?: Record<string, unknown>;
 };
@@ -1284,6 +1289,8 @@ const chatScrollRef = ref<HTMLElement | null>(null);
 const searchInputRef = ref<HTMLInputElement | null>(null);
 const workspaceRef = ref<HTMLElement | null>(null);
 let scrollChatRaf = 0;
+const CHAT_SCROLL_PIN_THRESHOLD = 80;
+let chatPinnedToBottom = true;
 const sessionPickerOpen = ref(false);
 const sessionPickerRef = ref<HTMLElement | null>(null);
 const activeSessionId = ref("");
@@ -1585,8 +1592,28 @@ function fileName(p: string) {
   return parts[parts.length - 1] || p;
 }
 
+function isChatNearBottom(): boolean {
+  const el = chatScrollRef.value;
+  if (!el) return true;
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= CHAT_SCROLL_PIN_THRESHOLD;
+}
+
+function onChatScroll() {
+  chatPinnedToBottom = isChatNearBottom();
+}
+
+function resetChatScrollPin() {
+  chatPinnedToBottom = true;
+}
+
 async function scrollChatToBottom(force = false) {
-  if (!force && !chatSending.value) return;
+  if (force) {
+    resetChatScrollPin();
+  } else if (!chatSending.value) {
+    return;
+  } else if (!chatPinnedToBottom) {
+    return;
+  }
   await nextTick();
   if (scrollChatRaf) cancelAnimationFrame(scrollChatRaf);
   scrollChatRaf = requestAnimationFrame(() => {
@@ -1793,7 +1820,7 @@ const statusLogScrollRefs = new Map<string, HTMLElement>();
 function bindStatusLogScroll(el: HTMLElement | null, msgId: string) {
   if (el) {
     statusLogScrollRefs.set(msgId, el);
-    if (chatSending.value && msgId === activeAssistantMsgId.value) {
+    if (chatSending.value && chatPinnedToBottom && msgId === activeAssistantMsgId.value) {
       scrollStatusLogToBottom(msgId);
     }
   } else {
@@ -1802,6 +1829,7 @@ function bindStatusLogScroll(el: HTMLElement | null, msgId: string) {
 }
 
 function scrollStatusLogToBottom(msgId: string) {
+  if (!chatPinnedToBottom) return;
   void nextTick(() => {
     const el = statusLogScrollRefs.get(msgId);
     if (!el) return;
@@ -1974,10 +2002,7 @@ function roundGroupSetupLabel(group: AgentRoundGroupView): string {
 
 function shouldShowAssistantBubbleContent(msg: ChatMessage): boolean {
   if (!msg.content?.trim()) return false;
-  if (!isAgentRunning(msg)) return true;
-  const groups = msg.roundGroups || [];
-  const last = groups[groups.length - 1];
-  return Boolean(last?.response?.isFinal);
+  return !isAgentRunning(msg);
 }
 
 function isActiveModelStep(msg: ChatMessage, group: AgentRoundGroupView, step: { phase: string }): boolean {
@@ -3140,8 +3165,10 @@ function updateOpenTabPath(from: string, to: string) {
 
 async function createNewFile() {
   if (!projectOpened.value) return;
-  const name = window.prompt("新建文件（可含子目录，如 src/utils/helper.ts）", "new-file.ts");
-  if (!name?.trim()) return;
+  const name = await inputPrompt.prompt("新建文件（可含子目录，如 src/utils/helper.ts）", {
+    defaultValue: "new-file.ts",
+  });
+  if (!name) return;
   const target = joinProjectPath(parentDirForCreate(), name.trim());
   const result = await createItem(target, false, "");
   if (!result.ok) {
@@ -3156,8 +3183,10 @@ async function createNewFile() {
 
 async function createNewFolder() {
   if (!projectOpened.value) return;
-  const name = window.prompt("新建文件夹（可含子目录）", "new-folder");
-  if (!name?.trim()) return;
+  const name = await inputPrompt.prompt("新建文件夹（可含子目录）", {
+    defaultValue: "new-folder",
+  });
+  if (!name) return;
   const target = joinProjectPath(parentDirForCreate(), name.trim());
   const result = await createItem(target, true);
   if (!result.ok) {
@@ -3824,9 +3853,11 @@ async function applyCodeBlock(code: string) {
     return;
   }
   if (!projectOpened.value) return;
-  const rel = window.prompt("未打开文件。请输入相对路径（如 src/example.ts）", "new-file.ts");
-  if (!rel?.trim()) return;
-  const fullPath = resolveFullPathFromRel(rel.trim());
+  const rel = await inputPrompt.prompt("未打开文件。请输入相对路径（如 src/example.ts）", {
+    defaultValue: "new-file.ts",
+  });
+  if (!rel) return;
+  const fullPath = resolveFullPathFromRel(rel);
   const existing = await readFile(fullPath);
   const before = existing.ok ? existing.content : "";
   const writeResult = existing.ok
@@ -3970,9 +4001,6 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
     if (event.data.hasToolCalls) {
       assistantMsg.content = "";
       assistantMsg.streaming = false;
-    } else if (event.data.isFinal && event.data.assistantText) {
-      assistantMsg.content = event.data.assistantText;
-      assistantMsg.streaming = false;
     }
     patchAssistantMsg(msgId, {
       ...syncRoundGroupsPatch(assistantMsg),
@@ -4036,7 +4064,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
         void runAgentTurn(next, { skipUserBubble: true });
       }
     }
-    void scrollChatToBottom(true);
+    void scrollChatToBottom();
     return;
   }
 
@@ -4068,7 +4096,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       ...syncRoundGroupsPatch(assistantMsg),
     });
     if (isAgentRunning(assistantMsg)) scrollStatusLogToBottom(msgId);
-    void scrollChatToBottom(true);
+    void scrollChatToBottom();
     return;
   }
 
@@ -4078,8 +4106,20 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
     storeFileDiff(relPath, diff.before, diff.after, diff.deleted);
     if (!assistantMsg.turnFileDiffs) assistantMsg.turnFileDiffs = {};
     assistantMsg.turnFileDiffs[relPath] = diff;
-    patchAssistantMsg(msgId, { turnFileDiffs: { ...assistantMsg.turnFileDiffs } });
-    void scrollChatToBottom(true);
+    const normalizedPath = relPath.replace(/\\/g, "/");
+    const writeStep = [...(assistantMsg.tools || [])].reverse().find((tool) => {
+      if (tool.name !== "write_file") return false;
+      const toolPath = String(tool.args?.path ?? tool.detail.split(" · ")[0] ?? "").replace(/\\/g, "/");
+      return toolPath === normalizedPath;
+    });
+    if (writeStep) {
+      writeStep.lineDelta = computeLineDelta(diff.before, diff.after, diff.created);
+    }
+    patchAssistantMsg(msgId, {
+      turnFileDiffs: { ...assistantMsg.turnFileDiffs },
+      tools: assistantMsg.tools ? [...assistantMsg.tools] : undefined,
+    });
+    void scrollChatToBottom();
     return;
   }
 
@@ -4103,7 +4143,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       agentPhase: assistantMsg.agentPhase,
     });
     if (isAgentRunning(assistantMsg)) scrollStatusLogToBottom(msgId);
-    void scrollChatToBottom(true);
+    void scrollChatToBottom();
     return;
   }
 
@@ -4125,7 +4165,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       ...syncRoundGroupsPatch(assistantMsg),
     });
     if (isAgentRunning(assistantMsg)) scrollStatusLogToBottom(msgId);
-    void scrollChatToBottom(true);
+    void scrollChatToBottom();
     return;
   }
 
@@ -4141,7 +4181,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       agentPhase: undefined,
     });
     persistChatNow();
-    void scrollChatToBottom(true);
+    void scrollChatToBottom();
     return;
   }
 
@@ -4157,7 +4197,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       ...syncRoundGroupsPatch(assistantMsg),
     });
     persistChatNow();
-    void scrollChatToBottom(true);
+    void scrollChatToBottom();
     chatSending.value = false;
 
     if (pendingPromptQueue.value.length) {
@@ -4198,11 +4238,20 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
     assistantMsg.status = "";
     assistantMsg.agentPhase = undefined;
     assistantMsg.activityExpanded = false;
+    if (!assistantMsg.content?.trim()) {
+      const lastResponse = assistantMsg.roundGroups
+        ?.filter((group) => group.response?.isFinal && group.response.assistantText.trim())
+        .at(-1)?.response;
+      if (lastResponse?.assistantText) {
+        assistantMsg.content = lastResponse.assistantText;
+      }
+    }
     patchAssistantMsg(msgId, {
       status: "",
       agentPhase: undefined,
       streaming: false,
       activityExpanded: false,
+      content: assistantMsg.content,
       totalTurns: assistantMsg.totalTurns,
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
       ...syncRoundGroupsPatch(assistantMsg),
@@ -4223,7 +4272,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
         showDiffMode.value = true;
       }
     }
-    void scrollChatToBottom(true);
+    void scrollChatToBottom();
 
     if (pendingPromptQueue.value.length) {
       const next = pendingPromptQueue.value.shift()!;
@@ -4502,6 +4551,7 @@ async function runAgentTurn(userText: string, options?: { skipUserBubble?: boole
   reloadAiConfig();
   chatSending.value = true;
   chatError.value = "";
+  resetChatScrollPin();
   startAgentUiTick();
 
   const history = buildAgentHistory();
@@ -4668,7 +4718,7 @@ watch(
   chatMessages,
   () => {
     schedulePersistChat();
-    if (chatSending.value) void scrollChatToBottom(true);
+    if (chatSending.value) void scrollChatToBottom();
   },
   { deep: true },
 );

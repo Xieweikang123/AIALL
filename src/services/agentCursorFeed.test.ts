@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCursorAgentFeed, formatCursorActionLabel } from "./agentCursorFeed";
+import { buildCursorAgentFeed, computeLineDelta, formatCursorActionLabel } from "./agentCursorFeed";
 import type { AgentRoundGroupView } from "./agentRoundGroups";
 
 describe("agentCursorFeed", () => {
@@ -9,12 +9,18 @@ describe("agentCursorFeed", () => {
       name: "write_file",
       icon: "✏️",
       title: "写入",
-      detail: "src/views/VibeCodingView.vue",
+      detail: "src/components/ChatComposerEditor.vue",
       label: "写入",
       summary: "已写入",
       ok: true,
-      args: { path: "src/views/VibeCodingView.vue", content: "abcde" },
-    })).toBe("Edited src/views/VibeCodingView.vue +5");
+      lineDelta: 5,
+      args: { path: "src/components/ChatComposerEditor.vue", content: "a\nb\nc\nd\ne" },
+    })).toBe("Edited src/components/ChatComposerEditor.vue +5");
+  });
+
+  it("computes line delta from before and after", () => {
+    expect(computeLineDelta("a\nb", "a\nb\nc\nd\ne")).toBe(3);
+    expect(computeLineDelta("", "new file", true)).toBe(1);
   });
 
   it("builds thought then action sequence", () => {

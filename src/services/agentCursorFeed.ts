@@ -6,6 +6,13 @@ export type CursorFeedItem =
   | { kind: "action"; key: string; step: AgentRoundTool }
   | { kind: "status"; key: string; text: string; active: boolean };
 
+export function computeLineDelta(before: string, after: string, created?: boolean): number {
+  const beforeLines = before ? before.split(/\r?\n/).length : 0;
+  const afterLines = after ? after.split(/\r?\n/).length : 0;
+  if (created || !before) return Math.max(afterLines, 1);
+  return Math.max(Math.abs(afterLines - beforeLines), 1);
+}
+
 export function formatCursorActionLabel(step: AgentRoundTool): string {
   const path = String(step.args?.path ?? step.detail.split(" · ")[0] ?? "").trim();
   const pattern = String(step.args?.pattern ?? "").trim();
@@ -26,8 +33,8 @@ export function formatCursorActionLabel(step: AgentRoundTool): string {
     const target = path || step.detail || "file";
     if (running) return `Editing ${target}`;
     if (failed) return `Edit failed ${target}`;
-    const chars = content.length || step.summary?.match(/(\d+)\s*字符/)?.[1];
-    return chars ? `Edited ${target} +${chars}` : `Edited ${target}`;
+    const delta = step.lineDelta ?? (content ? Math.min(content.split(/\r?\n/).length, 999) : 0);
+    return delta ? `Edited ${target} +${delta}` : `Edited ${target}`;
   }
 
   if (step.name === "delete_file") {
@@ -110,7 +117,8 @@ export function buildCursorAgentFeed(input: {
   }
 
   if (input.isRunning) {
-    const planning = cursorPlanningLabel(input.agentPhase, input.agentDetail);
+    const hasRunningTool = input.groups.some((group) => group.tools.some((tool) => tool.running));
+    const planning = hasRunningTool ? null : cursorPlanningLabel(input.agentPhase, input.agentDetail);
     if (planning) {
       items.push({ kind: "status", key: "planning-current", text: planning, active: true });
     }

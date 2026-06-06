@@ -14,9 +14,30 @@ describe("splitAssistantNarrative", () => {
     expect(parts[0]).toContain("好的");
     expect(parts.some((part) => part.includes("ChatComposerEditor"))).toBe(true);
   });
+
+  it("splits markdown headers and English follow-ups", () => {
+    const text =
+      "### 1. 修改 ChatComposerEditor.vue —— 添加图片支持\nI noticed some typos in my write. Let me fix them:";
+    const parts = splitAssistantNarrative(text);
+    expect(parts.length).toBeGreaterThan(1);
+    expect(parts[0]).toContain("ChatComposerEditor");
+    expect(parts.some((part) => part.includes("I noticed"))).toBe(true);
+  });
 });
 
 describe("buildNarrativeSegments", () => {
+  it("assigns tools one-to-one when segment count matches", () => {
+    const segments = assignToolsToNarrativeSegments(
+      ["### 1. edit a", "### 2. edit b"],
+      [
+        { id: "1", name: "write_file", icon: "✏️", title: "写入", detail: "a.ts", label: "写入", summary: "ok", ok: true },
+        { id: "2", name: "write_file", icon: "✏️", title: "写入", detail: "b.ts", label: "写入", summary: "ok", ok: true },
+      ],
+    );
+    expect(segments[0].tools[0].id).toBe("1");
+    expect(segments[1].tools[0].id).toBe("2");
+  });
+
   it("assigns tools to segments in order", () => {
     const segments = buildNarrativeSegments("第一句。现在第二句。现在第三句。", [
       { id: "1", name: "read_file", icon: "📄", title: "读取", detail: "a.ts", label: "读取", summary: "ok", ok: true },
