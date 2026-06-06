@@ -32,7 +32,7 @@ export type VibeAgentEvent =
   | { type: "tool_end"; data: { id: string; name: string; ok: boolean; summary: string; result?: string } }
   | { type: "message"; data: { text: string } }
   | { type: "message_delta"; data: { delta: string } }
-  | { type: "file_diff"; data: { path: string; before: string; after: string; deleted?: boolean } }
+  | { type: "file_diff"; data: { path: string; before: string; after: string; deleted?: boolean; created?: boolean } }
   | {
       type: "agent_context";
       data: {
@@ -226,11 +226,18 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string): string {
     "工具 path 参数使用相对项目根的路径（如 package.json、src/main.ts），不要用绝对路径。",
     `项目根目录：${projectRoot}`,
   ];
-  if (openFilePath?.trim()) {
-    const rel = path.relative(projectRoot, path.resolve(openFilePath)).replace(/\\/g, "/");
-    lines.push(`用户当前打开的文件：${rel}`);
+  const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
+  if (openFile) {
+    lines.push(`用户当前打开的文件：${openFile.relative}`);
   }
   return lines.join("\n");
+}
+
+function resolveOpenFileInProject(projectRoot: string, openFilePath?: string): { path: string; relative: string } | null {
+  if (!openFilePath?.trim()) return null;
+  const resolved = resolveProjectPath(projectRoot, openFilePath.trim());
+  if (!resolved.ok || !resolved.relative) return null;
+  return { path: resolved.path, relative: resolved.relative };
 }
 
 function buildAskSystemPrompt(
@@ -245,9 +252,9 @@ function buildAskSystemPrompt(
     "若信息不足，请主动使用工具查找相关内容，而不是要求用户打开文件。",
     `项目根目录：${projectRoot}`,
   ];
-  if (openFilePath?.trim()) {
-    const rel = path.relative(projectRoot, path.resolve(openFilePath)).replace(/\\/g, "/");
-    lines.push(`用户当前打开的文件：${rel}`);
+  const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
+  if (openFile) {
+    lines.push(`用户当前打开的文件：${openFile.relative}`);
     if (openFileSnippet?.trim()) {
       lines.push("", "当前打开文件内容（节选）：", "```", openFileSnippet.trim(), "```");
     }
@@ -258,9 +265,8 @@ function buildAskSystemPrompt(
 async function runVibeAsk(params: RunVibeAgentParams): Promise<void> {
   const { projectRoot, prompt, openFilePath, endpoint, apiKey, model, onEvent, signal } = params;
 
-  const openFileRel =
-    openFilePath?.trim() &&
-    path.relative(projectRoot, path.resolve(openFilePath)).replace(/\\/g, "/");
+  const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
+  const openFileRel = openFile?.relative;
 
   onEvent({
     type: "status",
@@ -272,9 +278,8 @@ async function runVibeAsk(params: RunVibeAgentParams): Promise<void> {
   });
 
   let openFileSnippet = "";
-  if (openFilePath?.trim()) {
-    const resolved = path.resolve(openFilePath);
-    const result = await readFileContent(resolved).catch(() => null);
+  if (openFile) {
+    const result = await readFileContent(openFile.path).catch(() => null);
     if (result?.ok) {
       openFileSnippet = sliceFileLines(result.content, 1, 400);
     }
@@ -316,6 +321,7 @@ async function runVibeAsk(params: RunVibeAgentParams): Promise<void> {
   }, 12_000);
 
   let streamedChars = 0;
+  const streamFilter = new TextToolCallStreamFilter();
   let completion: Awaited<ReturnType<typeof chatCompletionWithTools>>;
   try {
     completion = await chatCompletionWithTools({
@@ -331,8 +337,11 @@ async function runVibeAsk(params: RunVibeAgentParams): Promise<void> {
       ],
       signal,
       onContentDelta: (delta) => {
-        streamedChars += delta.length;
-        onEvent({ type: "message_delta", data: { delta } });
+        const userDelta = streamFilter.push(delta);
+        if (userDelta) {
+          streamedChars += userDelta.length;
+          onEvent({ type: "message_delta", data: { delta: userDelta } });
+        }
       },
     });
   } finally {
@@ -631,9 +640,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     signal,
   } = params;
 
-  const openFileRel =
-    openFilePath?.trim() &&
-    path.relative(projectRoot, path.resolve(openFilePath)).replace(/\\/g, "/");
+  const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
+  const openFileRel = openFile?.relative;
 
   onEvent({
     type: "status",
@@ -750,7 +758,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
       onEvent({ type: "tool_start", data: { id: call.id, name: toolName, args: toolArgs } });
 
-      let writeBefore = "";
+      let pendingDiff: Extract<VibeAgentEvent, { type: "file_diff" }> | null = null;
       if (toolName === "write_file" || toolName === "delete_file") {
         const filePath = String(toolArgs.path || "").trim();
         if (filePath) {
@@ -762,16 +770,16 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
               resolved.path,
               writeStage,
             );
-            writeBefore = staged ?? "";
-            onEvent({
+            pendingDiff = {
               type: "file_diff",
               data: {
                 path: resolved.relative,
-                before: writeBefore,
+                before: staged ?? "",
                 after: toolName === "delete_file" ? "" : String(toolArgs.content ?? ""),
                 deleted: toolName === "delete_file",
+                created: toolName === "write_file" && staged === null,
               },
-            });
+            };
           }
         }
       }
@@ -781,6 +789,10 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         result = await executeTool(projectRoot, toolName, toolArgs, writeStage);
       } catch (error) {
         result = `错误：${error instanceof Error ? error.message : String(error)}`;
+      }
+
+      if (pendingDiff && !result.startsWith("错误：")) {
+        onEvent(pendingDiff);
       }
 
       onEvent({

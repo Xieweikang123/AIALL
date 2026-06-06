@@ -2,6 +2,7 @@ export type PersistedFileDiff = {
   before: string;
   after: string;
   deleted?: boolean;
+  created?: boolean;
 };
 
 export type PersistedAgentContext = {
@@ -58,6 +59,13 @@ export type VibeChatSessionMeta = {
   messageCount: number;
 };
 
+export type VibeChatProjectSnapshot = {
+  version: typeof STORE_VERSION;
+  projectPath: string;
+  activeSessionId: string;
+  sessions: Array<VibeChatSessionMeta & { messages: PersistedChatMessage[] }>;
+};
+
 type VibeChatSession = {
   id: string;
   title: string;
@@ -94,12 +102,29 @@ function genSessionId(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+export function formatSessionTitle(raw: string): string {
+  let text = raw.trim();
+  const refIdx = text.search(/\n\n## 📎/);
+  if (refIdx >= 0) text = text.slice(0, refIdx).trim();
+  text = text.replace(/\s+/g, " ");
+  if (!text) return "新会话";
+  return text.length > 36 ? `${text.slice(0, 36)}…` : text;
+}
+
+export function buildAgentHistoryFromMessages(
+  messages: Array<{ role: string; content: string }>,
+): Array<{ role: "user" | "assistant"; content: string }> {
+  return messages
+    .filter(
+      (m): m is { role: "user" | "assistant"; content: string } =>
+        (m.role === "user" || m.role === "assistant") && Boolean(m.content.trim()),
+    )
+    .map((m) => ({ role: m.role, content: m.content.trim() }));
+}
+
 function sessionTitleFromMessages(messages: PersistedChatMessage[]): string {
   const firstUser = messages.find((m) => m.role === "user" && m.content.trim());
-  if (firstUser) {
-    const text = firstUser.content.trim().replace(/\s+/g, " ");
-    return text.length > 36 ? `${text.slice(0, 36)}…` : text;
-  }
+  if (firstUser) return formatSessionTitle(firstUser.content);
   return "新会话";
 }
 
@@ -186,6 +211,25 @@ export function onStorageError(cb: (msg: string) => void) {
   storageErrorCallback = cb;
 }
 
+export function getVibeChatProjectSnapshot(projectPath: string): VibeChatProjectSnapshot {
+  const key = normalizeProjectKey(projectPath);
+  const store = readStore();
+  const record = key ? getProjectRecord(store, key) : undefined;
+  return {
+    version: STORE_VERSION,
+    projectPath,
+    activeSessionId: record?.activeSessionId || "",
+    sessions: record?.sessions.map((s) => ({
+      id: s.id,
+      title: s.title,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+      messageCount: s.messages.length,
+      messages: sanitizeMessages(s.messages),
+    })) || [],
+  };
+}
+
 function writeStore(store: ChatStore): boolean {
   try {
     localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(store));
@@ -212,6 +256,16 @@ function ensureProjectRecord(store: ChatStore, key: string): ProjectChatRecord {
   return record;
 }
 
+function getProjectRecord(store: ChatStore, key: string): ProjectChatRecord | undefined {
+  const record = store.byProject[key];
+  if (!record?.sessions?.length) return undefined;
+  const activeExists = record.sessions.some((s) => s.id === record.activeSessionId);
+  if (!activeExists) {
+    record.activeSessionId = record.sessions[0]?.id || "";
+  }
+  return record;
+}
+
 function getActiveSession(record: ProjectChatRecord): VibeChatSession {
   const session = record.sessions.find((s) => s.id === record.activeSessionId);
   return session || record.sessions[0];
@@ -230,6 +284,7 @@ export function listVibeChatSessions(projectPath: string): VibeChatSessionMeta[]
   const record = store.byProject[key];
   if (!record?.sessions?.length) return [];
   return [...record.sessions]
+    .filter((s) => s.messages.length > 0)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .map((s) => ({
       id: s.id,
@@ -244,9 +299,8 @@ export function getActiveVibeChatSessionId(projectPath: string): string {
   const key = normalizeProjectKey(projectPath);
   if (!key) return "";
   const store = readStore();
-  const record = ensureProjectRecord(store, key);
-  writeStore(store);
-  return record.activeSessionId;
+  const record = getProjectRecord(store, key);
+  return record?.activeSessionId || "";
 }
 
 export function loadVibeChatHistory(projectPath: string): PersistedChatMessage[] {
@@ -258,21 +312,45 @@ export function loadVibeChatHistory(projectPath: string): PersistedChatMessage[]
   return sanitizeMessages(getActiveSession(record).messages);
 }
 
-export function saveVibeChatHistory(projectPath: string, messages: PersistedChatMessage[]): boolean {
+export function saveVibeChatHistory(
+  projectPath: string,
+  messages: PersistedChatMessage[],
+  sessionId?: string,
+): { ok: boolean; sessionId: string } {
   const key = normalizeProjectKey(projectPath);
-  if (!key) return false;
+  if (!key) return { ok: false, sessionId: "" };
+  const sanitized = sanitizeMessages(messages);
+  if (!sanitized.length) return { ok: true, sessionId: sessionId || "" };
+
   const store = readStore();
-  const record = ensureProjectRecord(store, key);
-  const session = getActiveSession(record);
-  touchSession(session, messages);
-  return writeStore(store);
+  let record = getProjectRecord(store, key);
+  if (!record) {
+    const session = createSession(sanitized);
+    store.byProject[key] = { activeSessionId: session.id, sessions: [session] };
+    return { ok: writeStore(store), sessionId: session.id };
+  }
+
+  let session = sessionId ? record.sessions.find((s) => s.id === sessionId) : undefined;
+  if (!session) {
+    session = createSession(sanitized);
+    record.sessions.unshift(session);
+  } else {
+    touchSession(session, sanitized);
+  }
+
+  if (record.sessions.length > MAX_SESSIONS_PER_PROJECT) {
+    record.sessions = record.sessions.slice(0, MAX_SESSIONS_PER_PROJECT);
+  }
+  record.activeSessionId = session.id;
+  return { ok: writeStore(store), sessionId: session.id };
 }
 
 export function switchVibeChatSession(projectPath: string, sessionId: string): PersistedChatMessage[] {
   const key = normalizeProjectKey(projectPath);
   if (!key) return [];
   const store = readStore();
-  const record = ensureProjectRecord(store, key);
+  const record = getProjectRecord(store, key);
+  if (!record) return [];
   const target = record.sessions.find((s) => s.id === sessionId);
   if (!target) return sanitizeMessages(getActiveSession(record).messages);
   record.activeSessionId = sessionId;
@@ -284,7 +362,11 @@ export function createVibeChatSession(projectPath: string): { id: string; messag
   const key = normalizeProjectKey(projectPath);
   if (!key) return { id: "", messages: [] };
   const store = readStore();
-  const record = ensureProjectRecord(store, key);
+  let record = getProjectRecord(store, key);
+  if (!record) {
+    record = { activeSessionId: "", sessions: [] };
+    store.byProject[key] = record;
+  }
   const session = createSession();
   record.sessions.unshift(session);
   if (record.sessions.length > MAX_SESSIONS_PER_PROJECT) {
@@ -306,9 +388,7 @@ export function deleteVibeChatSession(projectPath: string, sessionId: string): P
   if (!record?.sessions?.length) return [];
 
   if (record.sessions.length === 1) {
-    const session = createSession();
-    record.sessions = [session];
-    record.activeSessionId = session.id;
+    delete store.byProject[key];
     writeStore(store);
     return [];
   }
@@ -327,7 +407,11 @@ export function clearVibeChatHistory(projectPath: string) {
   const store = readStore();
   const record = store.byProject[key];
   if (!record?.sessions?.length) return;
-  const session = getActiveSession(record);
-  touchSession(session, []);
+  record.sessions = record.sessions.filter((s) => s.id !== record.activeSessionId);
+  if (!record.sessions.length) {
+    delete store.byProject[key];
+  } else {
+    record.activeSessionId = record.sessions[0].id;
+  }
   writeStore(store);
 }

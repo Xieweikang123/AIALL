@@ -33,3 +33,6 @@ Thumbs.db
 .temp/
 tmp/
 *.tsbuildinfo
+
+## local app state
+.aiall/

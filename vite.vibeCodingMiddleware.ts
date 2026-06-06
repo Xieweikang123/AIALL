@@ -26,6 +26,10 @@ function debugLog(msg: string) {
 }
 debugLog("=== middleware loaded ===");
 
+function safeFilePart(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
 function powershellExe(): string {
   const root = process.env.SystemRoot || "C:\\Windows";
   return path.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
@@ -200,7 +204,135 @@ async function pickProjectFolder(initialPath?: string) {
   return pickFolderLinux(initialPath);
 }
 
+function resolvePathInsideOptionalRoot(inputPath: string, projectRoot?: string): { ok: true; path: string } | { ok: false; error: string } {
+  const resolved = path.resolve(inputPath);
+  const rootInput = projectRoot?.trim();
+  if (!rootInput) return { ok: true, path: resolved };
+
+  const root = path.resolve(rootInput);
+  const relative = path.relative(root, resolved);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    return { ok: false, error: "路径超出项目根目录" };
+  }
+  return { ok: true, path: resolved };
+}
+
 export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
+  // POST /backend/vibe/chat-store-sync
+  middlewares.use("/backend/vibe/chat-store-sync", async (req, res) => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "仅支持 POST 请求" });
+      return;
+    }
+
+    try {
+      const body = (await readJsonBody(req)) as {
+        projectPath?: string;
+        data?: {
+          version?: number;
+          projectPath?: string;
+          activeSessionId?: string;
+          sessions?: Array<{
+            id?: string;
+            title?: string;
+            createdAt?: string;
+            updatedAt?: string;
+            messageCount?: number;
+            messages?: unknown;
+          }>;
+        };
+      };
+      const projectPath = (body.projectPath || "").trim();
+      debugLog(`/backend/vibe/chat-store-sync hit, projectPath="${projectPath}"`);
+      if (!projectPath) {
+        sendJson(res, 400, { ok: false, error: "缺少 projectPath" });
+        return;
+      }
+
+      const resolved = path.resolve(projectPath);
+      const chatDir = path.join(resolved, ".aiall", "vibe-chat-sessions");
+      await fs.promises.mkdir(chatDir, { recursive: true });
+      const storeFile = path.join(chatDir, "chat-store.json");
+      const sessions = Array.isArray(body.data?.sessions) ? body.data.sessions : [];
+      debugLog(`chat-store-sync writing ${sessions.length} sessions to ${chatDir}`);
+      const index = {
+        syncedAt: new Date().toISOString(),
+        version: body.data?.version || 2,
+        projectPath,
+        activeSessionId: body.data?.activeSessionId || "",
+        sessions: sessions.map((session) => {
+          const id = session.id || "";
+          return {
+            id,
+            title: session.title || "新会话",
+            createdAt: session.createdAt || "",
+            updatedAt: session.updatedAt || "",
+            messageCount: typeof session.messageCount === "number" ? session.messageCount : 0,
+            file: id ? `chat-${safeFilePart(id)}.json` : "",
+          };
+        }),
+      };
+      await fs.promises.writeFile(
+        storeFile,
+        JSON.stringify(index, null, 2),
+        "utf-8",
+      );
+      for (const session of sessions) {
+        const id = (session.id || "").trim();
+        if (!id) continue;
+        const sessionFile = path.join(chatDir, `chat-${safeFilePart(id)}.json`);
+        await fs.promises.writeFile(
+          sessionFile,
+          JSON.stringify(
+            {
+              id,
+              title: session.title || "新会话",
+              createdAt: session.createdAt || "",
+              updatedAt: session.updatedAt || "",
+              messages: Array.isArray(session.messages) ? session.messages : [],
+            },
+            null,
+            2,
+          ),
+          "utf-8",
+        );
+      }
+      debugLog(`chat-store-sync done, path=${chatDir}`);
+      sendJson(res, 200, { ok: true, path: chatDir, sessionCount: sessions.length });
+    } catch (error) {
+      debugLog(`chat-store-sync error: ${error instanceof Error ? error.message : String(error)}`);
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "写入会话库失败" });
+    }
+  });
+
+  // POST /backend/vibe/chat-session-sync
+  middlewares.use("/backend/vibe/chat-session-sync", async (req, res) => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "仅支持 POST 请求" });
+      return;
+    }
+
+    try {
+      const body = (await readJsonBody(req)) as { projectPath?: string; sessionId?: string; data?: unknown };
+      const projectPath = (body.projectPath || "").trim();
+      const sessionId = (body.sessionId || "").trim();
+      if (!projectPath || !sessionId) {
+        sendJson(res, 400, { ok: false, error: "缺少 projectPath 或 sessionId" });
+        return;
+      }
+
+      const resolved = path.resolve(projectPath);
+      const chatDir = path.join(resolved, ".aiall", "vibe-chat-sessions");
+      await fs.promises.mkdir(chatDir, { recursive: true });
+      const safeId = safeFilePart(sessionId);
+      const sessionFile = path.join(chatDir, `chat-${safeId}.json`);
+      await fs.promises.writeFile(sessionFile, JSON.stringify(body.data, null, 2), "utf-8");
+      sendJson(res, 200, { ok: true });
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "写入会话文件失败" });
+    }
+  });
+
   // POST /backend/vibe/agent/run
   middlewares.use("/backend/vibe/agent/run", async (req, res) => {
     if (req.method !== "POST") {
@@ -412,13 +544,18 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
     }
 
     try {
-      const body = (await readJsonBody(req)) as { path?: string };
+      const body = (await readJsonBody(req)) as { path?: string; projectRoot?: string };
       if (!body.path) {
         sendJson(res, 400, { error: "缺少 path 参数" });
         return;
       }
 
-      const resolved = path.resolve(body.path);
+      const resolvedPath = resolvePathInsideOptionalRoot(body.path, body.projectRoot);
+      if (!resolvedPath.ok) {
+        sendJson(res, 400, { error: resolvedPath.error });
+        return;
+      }
+      const resolved = resolvedPath.path;
       const stat = await fs.promises.stat(resolved).catch(() => null);
       if (!stat || !stat.isFile()) {
         sendJson(res, 400, { error: "文件不存在" });
@@ -445,13 +582,18 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
     }
 
     try {
-      const body = (await readJsonBody(req)) as { path?: string; content?: string };
+      const body = (await readJsonBody(req)) as { path?: string; content?: string; projectRoot?: string };
       if (!body.path || body.content === undefined) {
         sendJson(res, 400, { error: "缺少 path 或 content 参数" });
         return;
       }
 
-      const resolved = path.resolve(body.path);
+      const resolvedPath = resolvePathInsideOptionalRoot(body.path, body.projectRoot);
+      if (!resolvedPath.ok) {
+        sendJson(res, 400, { error: resolvedPath.error });
+        return;
+      }
+      const resolved = resolvedPath.path;
       const result = await writeFileContent(resolved, body.content);
       sendJson(res, 200, { ok: true, size: result.size, path: resolved });
     } catch (error) {
@@ -536,13 +678,18 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
     }
 
     try {
-      const body = (await readJsonBody(req)) as { path?: string; isDirectory?: boolean; content?: string };
+      const body = (await readJsonBody(req)) as { path?: string; isDirectory?: boolean; content?: string; projectRoot?: string };
       if (!body.path) {
         sendJson(res, 400, { error: "缺少 path 参数" });
         return;
       }
 
-      const resolved = path.resolve(body.path);
+      const resolvedPath = resolvePathInsideOptionalRoot(body.path, body.projectRoot);
+      if (!resolvedPath.ok) {
+        sendJson(res, 400, { error: resolvedPath.error });
+        return;
+      }
+      const resolved = resolvedPath.path;
 
       if (body.isDirectory) {
         await fs.promises.mkdir(resolved, { recursive: true });
@@ -568,13 +715,19 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
     try {
       const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
       const targetPath = url.searchParams.get("path") || "";
+      const projectRoot = url.searchParams.get("projectRoot") || undefined;
 
       if (!targetPath) {
         sendJson(res, 400, { error: "缺少 path 参数" });
         return;
       }
 
-      const resolved = path.resolve(targetPath);
+      const resolvedPath = resolvePathInsideOptionalRoot(targetPath, projectRoot);
+      if (!resolvedPath.ok) {
+        sendJson(res, 400, { error: resolvedPath.error });
+        return;
+      }
+      const resolved = resolvedPath.path;
       const stat = await fs.promises.stat(resolved).catch(() => null);
       if (!stat) {
         sendJson(res, 404, { error: "文件或目录不存在" });
@@ -601,7 +754,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
     }
 
     try {
-      const body = (await readJsonBody(req)) as { from?: string; to?: string };
+      const body = (await readJsonBody(req)) as { from?: string; to?: string; projectRoot?: string };
       const fromPath = (body.from || "").trim();
       const toPath = (body.to || "").trim();
 
@@ -610,8 +763,14 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         return;
       }
 
-      const resolvedFrom = path.resolve(fromPath);
-      const resolvedTo = path.resolve(toPath);
+      const resolvedFromPath = resolvePathInsideOptionalRoot(fromPath, body.projectRoot);
+      const resolvedToPath = resolvePathInsideOptionalRoot(toPath, body.projectRoot);
+      if (!resolvedFromPath.ok || !resolvedToPath.ok) {
+        sendJson(res, 400, { error: !resolvedFromPath.ok ? resolvedFromPath.error : resolvedToPath.error });
+        return;
+      }
+      const resolvedFrom = resolvedFromPath.path;
+      const resolvedTo = resolvedToPath.path;
 
       const stat = await fs.promises.stat(resolvedFrom).catch(() => null);
       if (!stat) {

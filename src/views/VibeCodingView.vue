@@ -152,7 +152,7 @@
           </div>
         </div>
 
-        <div v-if="gitPanelMode === 'git'">
+        <div v-if="gitPanelMode === 'git'" class="git-panel">
           <div v-if="!projectOpened" class="panel-empty">请先打开项目文件夹</div>
           <div v-else-if="gitLoading" class="panel-empty">加载中…</div>
           <div v-else-if="!gitIsRepo" class="panel-empty">当前目录不是 Git 仓库</div>
@@ -208,72 +208,74 @@
                 </button>
               </div>
             </div>
-            <div v-if="!gitStatus.length" class="panel-empty">无本地改动</div>
-            <template v-else>
-              <div v-if="gitStagedFiles.length" class="git-section">
-                <div class="git-section-head">
-                  <span class="git-section-title">已暂存 ({{ gitStagedFiles.length }})</span>
-                  <button type="button" class="ghost tiny" @click="unstageAll">取消全部</button>
-                </div>
-                <div class="git-file-list">
-                  <div
-                    v-for="file in gitStagedFiles"
-                    :key="file.path"
-                    class="git-file-item"
-                    :class="{ active: selectedGitFile === file.path }"
-                    @click="showGitFileDiff(file.path)"
-                  >
-                    <span class="git-file-check" @click.stop="unstageFile(file.path)">✓</span>
-                    <span
-                      class="git-file-status"
-                      :style="{ color: gitStatusColor(file.status) }"
+            <div class="git-scroll-area">
+              <div v-if="!gitStatus.length" class="panel-empty">无本地改动</div>
+              <template v-else>
+                <div v-if="gitStagedFiles.length" class="git-section">
+                  <div class="git-section-head">
+                    <span class="git-section-title">已暂存 ({{ gitStagedFiles.length }})</span>
+                    <button type="button" class="ghost tiny" @click="unstageAll">取消全部</button>
+                  </div>
+                  <div class="git-file-list">
+                    <div
+                      v-for="file in gitStagedFiles"
+                      :key="file.path"
+                      class="git-file-item"
+                      :class="{ active: selectedGitFile === file.path, 'file-item-draggable': true }"
+                      @pointerdown="onGitFilePointerDown($event, file.path)"
                     >
-                      {{ gitStatusIcon(file.status) }}
-                    </span>
-                    <span class="git-file-path" :title="file.path">{{ file.path }}</span>
-                    <button type="button" class="ghost tiny git-file-btn" title="取消暂存" @click.stop="unstageFile(file.path)">−</button>
+                      <span class="git-file-check" @pointerdown.stop @click.stop="unstageFile(file.path)">✓</span>
+                      <span
+                        class="git-file-status"
+                        :style="{ color: gitStatusColor(file.status) }"
+                      >
+                        {{ gitStatusIcon(file.status) }}
+                      </span>
+                      <span class="git-file-path" :title="file.path">{{ file.path }}</span>
+                      <button type="button" class="ghost tiny git-file-btn" title="取消暂存" @pointerdown.stop @click.stop="unstageFile(file.path)">−</button>
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div v-if="gitUnstagedFiles.length" class="git-section">
-                <div class="git-section-head">
-                  <span class="git-section-title">未暂存 ({{ gitUnstagedFiles.length }})</span>
-                  <div class="git-section-actions">
-                    <button type="button" class="ghost tiny" @click="stageAll">全部暂存</button>
-                    <button type="button" class="ghost tiny danger" @click="discardAll">丢弃全部</button>
+                <div v-if="gitUnstagedFiles.length" class="git-section">
+                  <div class="git-section-head">
+                    <span class="git-section-title">未暂存 ({{ gitUnstagedFiles.length }})</span>
+                    <div class="git-section-actions">
+                      <button type="button" class="ghost tiny" @click="stageAll">全部暂存</button>
+                      <button type="button" class="ghost tiny danger" @click="discardAll($event)">丢弃全部</button>
+                    </div>
                   </div>
-                </div>
-                <div class="git-file-list">
-                  <div
-                    v-for="file in gitUnstagedFiles"
-                    :key="file.path"
-                    class="git-file-item"
-                    :class="{ active: selectedGitFile === file.path }"
-                    @click="showGitFileDiff(file.path)"
-                  >
-                    <span class="git-file-check" @click.stop="stageFile(file.path)">+</span>
-                    <span
-                      class="git-file-status"
-                      :style="{ color: gitStatusColor(file.status) }"
+                  <div class="git-file-list">
+                    <div
+                      v-for="file in gitUnstagedFiles"
+                      :key="file.path"
+                      class="git-file-item"
+                      :class="{ active: selectedGitFile === file.path, 'file-item-draggable': true }"
+                      @pointerdown="onGitFilePointerDown($event, file.path)"
                     >
-                      {{ gitStatusIcon(file.status) }}
-                    </span>
-                    <span class="git-file-path" :title="file.path">{{ file.path }}</span>
-                    <button type="button" class="ghost tiny git-file-btn" title="暂存" @click.stop="stageFile(file.path)">+</button>
-                    <button type="button" class="ghost tiny danger git-file-btn" title="丢弃更改" @click.stop="discardFile(file.path)">✕</button>
+                      <span class="git-file-check" @pointerdown.stop @click.stop="stageFile(file.path)">+</span>
+                      <span
+                        class="git-file-status"
+                        :style="{ color: gitStatusColor(file.status) }"
+                      >
+                        {{ gitStatusIcon(file.status) }}
+                      </span>
+                      <span class="git-file-path" :title="file.path">{{ file.path }}</span>
+                      <button type="button" class="ghost tiny git-file-btn" title="暂存" @pointerdown.stop @click.stop="stageFile(file.path)">+</button>
+                      <button type="button" class="ghost tiny danger git-file-btn" title="丢弃更改" @pointerdown.stop @click.stop="discardFile(file.path, $event)">✕</button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </template>
-            <div class="git-log-section">
-              <button type="button" class="ghost tiny" style="width:100%;text-align:left" @click="gitLogOpen = !gitLogOpen">
-                {{ gitLogOpen ? "▾" : "▸" }} 提交历史
-              </button>
-              <div v-if="gitLogOpen" class="git-log-list">
-                <div v-if="!gitLogEntries.length" class="panel-empty">无历史</div>
-                <div v-for="entry in gitLogEntries" :key="entry.hash" class="git-log-item">
-                  <span class="git-log-hash">{{ entry.shortHash }}</span>
-                  <span class="git-log-msg">{{ entry.message }}</span>
+              </template>
+              <div class="git-log-section">
+                <button type="button" class="ghost tiny git-log-toggle" @click="gitLogOpen = !gitLogOpen">
+                  {{ gitLogOpen ? "▾" : "▸" }} 提交历史
+                </button>
+                <div v-if="gitLogOpen" class="git-log-list">
+                  <div v-if="!gitLogEntries.length" class="panel-empty">无历史</div>
+                  <div v-for="entry in gitLogEntries" :key="entry.hash" class="git-log-item">
+                    <span class="git-log-hash">{{ entry.shortHash }}</span>
+                    <span class="git-log-msg">{{ entry.message }}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -484,14 +486,25 @@
               </div>
               <button type="button" class="ghost small" @click="historyOpen = false">关闭</button>
             </div>
-            <button
-              type="button"
-              class="secondary history-new"
-              :disabled="chatSending"
-              @click="startNewSession"
-            >
-              + 新会话
-            </button>
+            <div class="history-actions">
+              <button
+                type="button"
+                class="secondary history-new"
+                :disabled="chatSending"
+                @click="startNewSession"
+              >
+                + 新会话
+              </button>
+              <button
+                type="button"
+                class="ghost small history-sync"
+                :disabled="chatSending || syncingChatStore || !projectOpened"
+                @click="syncChatStoreToDisk"
+              >
+                {{ syncingChatStore ? "同步中…" : "同步到本地" }}
+              </button>
+            </div>
+            <div v-if="chatStoreSyncMessage" class="history-sync-message">{{ chatStoreSyncMessage }}</div>
             <div v-if="!sessionList.length" class="history-empty">当前项目还没有会话记录</div>
             <ul v-else class="history-list">
               <li
@@ -570,7 +583,6 @@
                 <button
                   type="button"
                   class="agent-activity-toggle"
-                  :disabled="isAgentRunning(m)"
                   :aria-expanded="isActivityExpanded(m)"
                   @click="toggleActivityExpanded(m)"
                 >
@@ -584,6 +596,17 @@
                   </span>
                 </button>
                 <div v-show="isActivityExpanded(m)" class="agent-activity-body">
+                  <div v-if="isAgentRunning(m) && activityFeedItems(m).length" class="agent-live-feed" aria-live="polite">
+                    <div
+                      v-for="item in activityFeedItems(m)"
+                      :key="item.key"
+                      class="agent-live-feed-item"
+                      :class="item.kind"
+                    >
+                      <span class="agent-live-feed-dot" aria-hidden="true" />
+                      <span class="agent-live-feed-text">{{ item.text }}</span>
+                    </div>
+                  </div>
                   <div v-if="m.status || m.agentTurn" class="agent-status-bar">
                     <span v-if="isAgentRunning(m)" class="status-pulse" aria-hidden="true" />
                     <span v-if="m.agentPhase" class="agent-phase-badge">{{ phaseBadgeLabel(m.agentPhase) }}</span>
@@ -593,7 +616,7 @@
                     </span>
                     <span v-else-if="m.totalTurns" class="agent-turn-pill">共 {{ m.totalTurns }} 轮</span>
                   </div>
-                  <details v-if="m.agentContext" class="trace-block" open>
+                  <details v-if="m.agentContext" class="trace-block">
                     <summary class="trace-block-title">上下文（系统提示 + 历史 + 项目）</summary>
                     <div class="trace-block-body">
                       <div class="trace-meta">
@@ -623,7 +646,7 @@
                       </details>
                     </div>
                   </details>
-                  <details v-if="m.statusLog?.length" class="trace-block" open>
+                  <details v-if="m.statusLog?.length" class="trace-block">
                     <summary class="trace-block-title">阶段日志（{{ m.statusLog.length }}）</summary>
                     <ol class="status-log">
                       <li v-for="(line, si) in m.statusLog" :key="si">{{ line }}</li>
@@ -686,7 +709,10 @@
                   {{ m.status || (m.chatMode === 'ask' ? '思考中…' : 'Agent 运行中…') }}
                 </span>
               </div>
-              <pre v-if="m.content && m.streaming" class="msg-streaming">{{ m.content }}<span v-if="isAgentRunning(m)" class="stream-cursor" aria-hidden="true">▍</span></pre>
+              <div v-if="m.content && m.streaming" class="msg-streaming">
+                <ChatMarkdown :content="m.content" @apply-block="(idx: number) => applyCodeBlock(extractCodeBlocks(m.content)[idx])" />
+                <span v-if="isAgentRunning(m)" class="stream-cursor" aria-hidden="true">▍</span>
+              </div>
               <ChatMarkdown v-else-if="m.content" :content="m.content" @apply-block="(idx: number) => applyCodeBlock(extractCodeBlocks(m.content)[idx])" />
               <div
                 v-if="m.role === 'assistant' && m.turnFileDiffs && Object.keys(m.turnFileDiffs).length"
@@ -747,7 +773,7 @@
                     type="button"
                     class="ghost"
                     :disabled="chatSending || m.reverting"
-                    @click="rejectAgentTurn(m.id)"
+                    @click="rejectAgentTurn(m.id, $event)"
                   >
                     拒绝
                   </button>
@@ -767,7 +793,7 @@
                   type="button"
                   class="ghost danger"
                   :disabled="!projectOpened || chatSending || m.reverting"
-                  @click="revertAgentTurn(m.id)"
+                  @click="revertAgentTurn(m.id, $event)"
                 >
                   {{ m.reverting ? "回滚中…" : `回滚本轮修改（${m.writtenFiles.length} 个文件）` }}
                 </button>
@@ -793,7 +819,7 @@
           <div v-if="pendingPromptQueue.length" class="pending-queue">
             <div class="pending-queue-head">
               <span>排队中 {{ pendingPromptQueue.length }} 条消息</span>
-              <button type="button" class="ghost small" @click="pendingPromptQueue = []">清空队列</button>
+              <button type="button" class="ghost small" @click="clearPendingPromptQueue">清空队列</button>
             </div>
             <ol class="pending-queue-list">
               <li v-for="(q, qi) in pendingPromptQueue" :key="qi">{{ q }}</li>
@@ -873,6 +899,7 @@
     </main>
 
     <Teleport to="body">
+      <ConfirmPopup />
       <div
         v-if="fileDragGhost"
         class="file-drag-ghost"
@@ -908,13 +935,16 @@ import ChatComposerEditor from "../components/ChatComposerEditor.vue";
 import ChatMarkdown from "../components/ChatMarkdown.vue";
 import CodeMonacoDiffEditor from "../components/CodeMonacoDiffEditor.vue";
 import CodeMonacoEditor from "../components/CodeMonacoEditor.vue";
+import ConfirmPopup from "../components/ConfirmPopup.vue";
 import FileTreeNode, { type TreeNode } from "../components/FileTreeNode.vue";
+import { useConfirm } from "../composables/useConfirm";
 import { loadAiChatBaseFromStorage } from "../services/aiLocalConfig";
 import {
+  buildAgentHistoryFromMessages,
   clearVibeChatHistory,
-  createVibeChatSession,
   deleteVibeChatSession,
   getActiveVibeChatSessionId,
+  getVibeChatProjectSnapshot,
   listVibeChatSessions,
   loadVibeChatHistory,
   onStorageError,
@@ -945,6 +975,7 @@ import {
   readFile,
   renameItem,
   searchFiles,
+  syncChatStore,
   writeFile,
   type FileEntry,
   type GrepMatch,
@@ -967,6 +998,8 @@ import {
   type GitLogEntry,
   type GitRemoteInfo,
 } from "../services/vibeGitClient";
+
+const { confirm } = useConfirm();
 
 const STORAGE_KEY = "vibe-coding-project";
 const PANEL_WIDTH_KEY = "vibe-coding-panel-widths";
@@ -1007,6 +1040,7 @@ type FileDiff = {
   before: string;
   after: string;
   deleted?: boolean;
+  created?: boolean;
 };
 
 type AgentStatusData = Extract<VibeAgentSseEvent, { type: "status" }>["data"] & {
@@ -1017,7 +1051,7 @@ type AgentStatusData = Extract<VibeAgentSseEvent, { type: "status" }>["data"] & 
 function normalizeChatMessages(messages: PersistedChatMessage[]): ChatMessage[] {
   return messages.map((m) => ({
     ...m,
-    activityExpanded: m.activityExpanded ?? (m.role === "assistant" && Boolean(m.tools?.length || m.agentContext)),
+    activityExpanded: m.activityExpanded ?? false,
     tools: m.tools?.map((t) => ({
       id: t.id,
       name: t.name || "",
@@ -1098,6 +1132,8 @@ const workspaceRef = ref<HTMLElement | null>(null);
 let scrollChatRaf = 0;
 const historyOpen = ref(false);
 const activeSessionId = ref("");
+const syncingChatStore = ref(false);
+const chatStoreSyncMessage = ref("");
 const pendingPromptQueue = ref<string[]>([]);
 
 function persistPendingQueue() {
@@ -1493,7 +1529,6 @@ function collapseAgentActivity(msg: ChatMessage) {
 }
 
 function toggleActivityExpanded(msg: ChatMessage) {
-  if (isAgentRunning(msg)) return;
   msg.activityExpanded = !msg.activityExpanded;
   patchAssistantMsg(msg.id, { activityExpanded: msg.activityExpanded });
   schedulePersistChat();
@@ -1511,6 +1546,31 @@ function activitySummary(msg: ChatMessage): string {
     parts.push(`${Object.keys(msg.turnFileDiffs).length} 个文件变更`);
   }
   return parts.length ? parts.join(" · ") : "查看执行过程";
+}
+
+function activityFeedItems(msg: ChatMessage): Array<{ key: string; kind: "status" | "tool"; text: string }> {
+  const items: Array<{ key: string; kind: "status" | "tool"; text: string }> = [];
+  const seen = new Set<string>();
+
+  for (const [idx, line] of (msg.statusLog || []).slice(-4).entries()) {
+    const text = line.trim();
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    items.push({ key: `status-${idx}-${text}`, kind: "status", text });
+  }
+
+  if (msg.status && !seen.has(msg.status)) {
+    seen.add(msg.status);
+    items.push({ key: `status-current-${msg.status}`, kind: "status", text: msg.status });
+  }
+
+  for (const tool of (msg.tools || []).slice(-3)) {
+    const state = tool.running ? "执行中" : tool.ok ? "完成" : "失败";
+    const detail = tool.detail ? ` · ${tool.detail}` : "";
+    items.push({ key: `tool-${tool.id}-${state}`, kind: "tool", text: `${state}：${tool.title || tool.label}${detail}` });
+  }
+
+  return items.slice(-5);
 }
 
 function refreshSessionList(path = projectPath.value.trim()) {
@@ -1594,11 +1654,11 @@ function openHistory() {
 function startNewSession() {
   if (chatSending.value || !projectPath.value.trim()) return;
   persistChatNow();
-  const { id, messages } = createVibeChatSession(projectPath.value.trim());
-  activeSessionId.value = id;
-  chatMessages.value = normalizeChatMessages(messages);
+  activeSessionId.value = "";
+  chatMessages.value = [];
   chatError.value = "";
   refreshSessionList();
+  activeSessionId.value = "";
   historyOpen.value = false;
   void scrollChatToBottom(true);
 }
@@ -1621,10 +1681,38 @@ function removeSession(sessionId: string) {
   void scrollChatToBottom(true);
 }
 
+async function syncChatStoreToDisk() {
+  const path = projectPath.value.trim();
+  if (!path || syncingChatStore.value) return;
+  persistChatNow(path);
+  syncingChatStore.value = true;
+  chatError.value = "";
+  chatStoreSyncMessage.value = "正在同步会话到本地...";
+  try {
+    const result = await syncChatStore(path, getVibeChatProjectSnapshot(path));
+    if (!result.ok) {
+      chatStoreSyncMessage.value = result.error || "同步会话到本地失败";
+      return;
+    }
+    chatStoreSyncMessage.value = `已同步 ${result.sessionCount ?? sessionList.value.length} 条会话到 ${result.path || ".aiall/vibe-chat-sessions"}`;
+  } finally {
+    syncingChatStore.value = false;
+  }
+}
+
 function persistChatNow(path = projectPath.value.trim()) {
   if (!path) return;
-  saveVibeChatHistory(path, chatMessages.value);
+  const isEmptyDraft = !activeSessionId.value && !chatMessages.value.length;
+  const result = saveVibeChatHistory(path, chatMessages.value, activeSessionId.value);
+  if (result.sessionId) activeSessionId.value = result.sessionId;
   refreshSessionList(path);
+  void syncChatStore(path, getVibeChatProjectSnapshot(path));
+  if (isEmptyDraft) activeSessionId.value = "";
+}
+
+function clearPendingPromptQueue() {
+  pendingPromptQueue.value = [];
+  persistPendingQueue();
 }
 
 function schedulePersistChat() {
@@ -1696,6 +1784,7 @@ async function openProjectByPath(dirPath: string) {
     refreshProjectHistoryList();
     chatMessages.value = normalizeChatMessages(loadVibeChatHistory(normalized));
     refreshSessionList(normalized);
+    syncChatStore(normalized, getVibeChatProjectSnapshot(normalized));
     refreshGitStatus();
     syncEditorPanelForOpenFiles();
     await scrollChatToBottom(true);
@@ -1775,17 +1864,22 @@ async function commitGit() {
   }
   gitCommitting.value = true;
   gitError.value = "";
+  const stagedCount = gitStagedFiles.value.length;
+  const commitMessage = gitCommitMessage.value.trim();
+  gitStatus.value = gitStatus.value.filter((f) => !f.staged);
+  gitCommitMessage.value = "";
   try {
-    const result = await commitGitChanges(projectPath.value.trim(), gitCommitMessage.value.trim());
+    const result = await commitGitChanges(projectPath.value.trim(), commitMessage);
     if (!result.ok) {
       gitError.value = result.error || "提交失败";
-      return;
+      gitCommitMessage.value = commitMessage;
+      await refreshGitStatus();
     }
-    gitCommitMessage.value = "";
-    await refreshGitStatus();
     await refreshTree();
   } catch (e) {
     gitError.value = e instanceof Error ? e.message : "提交失败";
+    await refreshGitStatus();
+    await refreshTree();
   } finally {
     gitCommitting.value = false;
   }
@@ -1858,37 +1952,43 @@ async function unstageAll() {
   }
 }
 
-async function discardFile(filePath: string) {
+async function discardFile(filePath: string, event?: MouseEvent) {
   if (!projectOpened.value) return;
-  if (!window.confirm(`确定丢弃 ${filePath} 的更改？`)) return;
+  if (!await confirm(`确定丢弃 ${filePath} 的更改？`, event)) return;
   gitError.value = "";
+  gitStatus.value = gitStatus.value.filter((f) => f.path !== filePath);
   try {
     const result = await discardGitFiles(projectPath.value.trim(), [filePath]);
     if (!result.ok) {
       gitError.value = result.error || "丢弃更改失败";
-      return;
+      await refreshGitStatus();
     }
-    await refreshGitStatus();
     await refreshTree();
   } catch (e) {
     gitError.value = e instanceof Error ? e.message : "丢弃更改失败";
+    await refreshGitStatus();
+    await refreshTree();
   }
 }
 
-async function discardAll() {
+async function discardAll(event?: MouseEvent) {
   if (!projectOpened.value) return;
-  if (!window.confirm("确定丢弃所有未暂存的更改？")) return;
+  if (!await confirm("确定丢弃所有未暂存的更改？", event)) return;
   gitError.value = "";
+  const unstagedPaths = gitUnstagedFiles.value.map((f) => f.path);
+  if (!unstagedPaths.length) return;
+  gitStatus.value = gitStagedFiles.value;
   try {
     const result = await discardGitFiles(projectPath.value.trim(), []);
     if (!result.ok) {
       gitError.value = result.error || "丢弃更改失败";
-      return;
+      await refreshGitStatus();
     }
-    await refreshGitStatus();
     await refreshTree();
   } catch (e) {
     gitError.value = e instanceof Error ? e.message : "丢弃更改失败";
+    await refreshGitStatus();
+    await refreshTree();
   }
 }
 
@@ -2157,7 +2257,7 @@ function syncActiveTabToCache() {
 async function ensureCanLeaveCurrentTab(): Promise<boolean> {
   if (!fileDirty.value || !activeFilePath.value) return true;
   const name = fileName(activeFilePath.value);
-  const choice = window.confirm(`「${name}」未保存。确定保存？\n\n确定 = 保存后切换\n取消 = 留在当前文件`);
+  const choice = await confirm(`「${name}」未保存。确定保存？\n\n确定 = 保存后切换\n取消 = 留在当前文件`);
   if (choice) {
     await saveFile();
     return !fileDirty.value;
@@ -2176,7 +2276,7 @@ async function closeTab(path: string) {
 
   if (tab.dirty) {
     const name = fileName(path);
-    const save = window.confirm(`「${name}」未保存。确定保存？\n\n确定 = 保存后关闭\n取消 = 留在当前文件`);
+    const save = await confirm(`「${name}」未保存。确定保存？\n\n确定 = 保存后关闭\n取消 = 留在当前文件`);
     if (save) {
       if (activeFilePath.value !== path) {
         syncActiveTabToCache();
@@ -2298,7 +2398,7 @@ async function deleteSelectedItem() {
     treeError.value = "不能删除项目根目录";
     return;
   }
-  if (!window.confirm(`确定删除「${fileName(target)}」？`)) return;
+  if (!await confirm(`确定删除「${fileName(target)}」？`)) return;
 
   const result = await deleteItem(target);
   if (!result.ok) {
@@ -2785,6 +2885,13 @@ function onSearchResultPointerDown(
   });
 }
 
+function onGitFilePointerDown(e: PointerEvent, relativePath: string) {
+  const fullPath = resolveFullPathFromRel(relativePath);
+  startPathDrag(fullPath, fileName(relativePath), e, () => {
+    void showGitFileDiff(relativePath);
+  });
+}
+
 function onDocumentDragOverCapture(e: DragEvent) {
   if (!isPointOverChatDropZone(e.clientX, e.clientY)) return;
   acceptChatFileDrag(e);
@@ -3000,18 +3107,14 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
 
   if (event.type === "agent_context") {
     assistantMsg.agentContext = event.data;
-    assistantMsg.activityExpanded = true;
-    patchAssistantMsg(msgId, { agentContext: event.data, activityExpanded: true });
-    void scrollChatToBottom(true);
+    patchAssistantMsg(msgId, { agentContext: event.data });
     return;
   }
 
   if (event.type === "turn_trace") {
     if (!assistantMsg.turnTraces) assistantMsg.turnTraces = [];
     assistantMsg.turnTraces.push({ ...event.data });
-    assistantMsg.activityExpanded = true;
-    patchAssistantMsg(msgId, { turnTraces: [...assistantMsg.turnTraces], activityExpanded: true });
-    void scrollChatToBottom(true);
+    patchAssistantMsg(msgId, { turnTraces: [...assistantMsg.turnTraces] });
     return;
   }
 
@@ -3024,16 +3127,14 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
       agentTurn: assistantMsg.agentTurn,
       agentMaxTurns: assistantMsg.agentMaxTurns,
-      activityExpanded: true,
       ...(phase === "finished" ? { agentPhase: undefined, streaming: false } : {}),
     });
     if (phase === "aborted") {
       chatSending.value = false;
       persistChatNow();
-      patchAssistantMsg(msgId, { activityExpanded: true });
-
       if (pendingPromptQueue.value.length) {
         const next = pendingPromptQueue.value.shift()!;
+        persistPendingQueue();
         void runAgentTurn(next, { skipUserBubble: true });
       }
     }
@@ -3063,7 +3164,6 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       status: assistantMsg.status,
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
       agentPhase: assistantMsg.agentPhase,
-      activityExpanded: true,
     });
     void scrollChatToBottom(true);
     return;
@@ -3071,12 +3171,11 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
 
   if (event.type === "file_diff") {
     const relPath = event.data.path;
-    const diff = { before: event.data.before, after: event.data.after, deleted: event.data.deleted };
+    const diff = { before: event.data.before, after: event.data.after, deleted: event.data.deleted, created: event.data.created };
     storeFileDiff(relPath, diff.before, diff.after, diff.deleted);
     if (!assistantMsg.turnFileDiffs) assistantMsg.turnFileDiffs = {};
     assistantMsg.turnFileDiffs[relPath] = diff;
-    assistantMsg.activityExpanded = true;
-    patchAssistantMsg(msgId, { turnFileDiffs: { ...assistantMsg.turnFileDiffs }, activityExpanded: true });
+    patchAssistantMsg(msgId, { turnFileDiffs: { ...assistantMsg.turnFileDiffs } });
     void scrollChatToBottom(true);
     return;
   }
@@ -3099,7 +3198,6 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       status: assistantMsg.status,
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
       agentPhase: assistantMsg.agentPhase,
-      activityExpanded: true,
     });
     void scrollChatToBottom(true);
     return;
@@ -3139,7 +3237,6 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
     appendStatusLog(assistantMsg, `错误：${event.data.message}`);
     patchAssistantMsg(msgId, {
       content,
-      activityExpanded: true,
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
     });
     persistChatNow();
@@ -3148,6 +3245,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
 
     if (pendingPromptQueue.value.length) {
       const next = pendingPromptQueue.value.shift()!;
+      persistPendingQueue();
       void runAgentTurn(next, { skipUserBubble: true });
     }
     return;
@@ -3157,8 +3255,9 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
     chatSending.value = false;
     agentAbortHandle = null;
     assistantMsg.streaming = false;
-    assistantMsg.totalTurns = event.data.turns;
-    appendStatusLog(assistantMsg, `完成（共 ${event.data.turns} 轮）`);
+    const completedTurns = resolveCompletedTurns(event.data.turns, assistantMsg);
+    assistantMsg.totalTurns = completedTurns;
+    appendStatusLog(assistantMsg, `完成（共 ${completedTurns} 轮）`);
 
     const pending = event.data.pendingFiles || [];
     if (pending.length && assistantMsg.turnFileDiffs && Object.keys(assistantMsg.turnFileDiffs).length) {
@@ -3171,12 +3270,12 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
 
     assistantMsg.status = "";
     assistantMsg.agentPhase = undefined;
-    assistantMsg.activityExpanded = true;
+    assistantMsg.activityExpanded = false;
     patchAssistantMsg(msgId, {
       status: "",
       agentPhase: undefined,
       streaming: false,
-      activityExpanded: true,
+      activityExpanded: false,
       totalTurns: assistantMsg.totalTurns,
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
       writtenFiles: assistantMsg.writtenFiles,
@@ -3198,6 +3297,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
 
     if (pendingPromptQueue.value.length) {
       const next = pendingPromptQueue.value.shift()!;
+      persistPendingQueue();
       void runAgentTurn(next, { skipUserBubble: true });
     }
   }
@@ -3262,14 +3362,14 @@ async function acceptAgentTurn(messageId: string) {
     for (const [relPath, diff] of Object.entries(msg.turnFileDiffs)) {
       const fullPath = resolveFullPathFromRel(relPath);
       if (diff.deleted) {
-        const deleteResult = await deleteItem(fullPath);
+        const deleteResult = await deleteItem(fullPath, projectPath.value.trim());
         if (!deleteResult.ok) throw new Error(deleteResult.error || `删除 ${relPath} 失败`);
         removeOpenTabForPath(fullPath);
       } else {
-        const existing = await readFile(fullPath);
+        const existing = await readFile(fullPath, projectPath.value.trim());
         const writeResult = existing.ok
-          ? await writeFile(fullPath, diff.after)
-          : await createItem(fullPath, false, diff.after);
+          ? await writeFile(fullPath, diff.after, projectPath.value.trim())
+          : await createItem(fullPath, false, diff.after, projectPath.value.trim());
         if (!writeResult.ok) throw new Error(writeResult.error || `写入 ${relPath} 失败`);
       }
       applied.push(relPath);
@@ -3294,14 +3394,14 @@ async function acceptAgentTurn(messageId: string) {
   }
 }
 
-function rejectAgentTurn(messageId: string) {
+async function rejectAgentTurn(messageId: string, event?: MouseEvent) {
   if (chatSending.value) return;
   const idx = chatMessages.value.findIndex((m) => m.id === messageId);
   if (idx < 0) return;
 
   const msg = chatMessages.value[idx];
   if (!msg.pendingApproval || !msg.turnFileDiffs) return;
-  if (!window.confirm("确定拒绝本轮所有暂存修改？")) return;
+  if (!await confirm("确定拒绝本轮所有暂存修改？", event)) return;
 
   clearTurnFileDiffsFromStore(msg.turnFileDiffs);
   msg.pendingApproval = false;
@@ -3326,7 +3426,7 @@ function previewAgentFile(messageId: string, relPath: string) {
   showDiffMode.value = true;
 }
 
-async function revertAgentTurn(messageId: string) {
+async function revertAgentTurn(messageId: string, event?: MouseEvent) {
   if (chatSending.value || !projectOpened.value) return;
   const idx = chatMessages.value.findIndex((m) => m.id === messageId);
   if (idx < 0) return;
@@ -3335,7 +3435,7 @@ async function revertAgentTurn(messageId: string) {
   if (!msg.turnFileDiffs || msg.reverted || msg.pendingApproval) return;
 
   const fileCount = Object.keys(msg.turnFileDiffs).length;
-  if (!window.confirm(`确定回滚本轮 Agent 对 ${fileCount} 个文件的修改？`)) return;
+  if (!await confirm(`确定回滚本轮 Agent 对 ${fileCount} 个文件的修改？`, event)) return;
 
   msg.reverting = true;
   chatError.value = "";
@@ -3344,14 +3444,14 @@ async function revertAgentTurn(messageId: string) {
     for (const [relPath, diff] of Object.entries(msg.turnFileDiffs)) {
       const fullPath = resolveFullPathFromRel(relPath);
       if (diff.deleted) {
-        const result = await writeFile(fullPath, diff.before);
+        const result = await writeFile(fullPath, diff.before, projectPath.value.trim());
         if (!result.ok) throw new Error(result.error || `恢复 ${relPath} 失败`);
-      } else if (!diff.before && diff.after) {
-        const result = await deleteItem(fullPath);
+      } else if (diff.created) {
+        const result = await deleteItem(fullPath, projectPath.value.trim());
         if (!result.ok) throw new Error(result.error || `删除 ${relPath} 失败`);
         removeOpenTabForPath(fullPath);
       } else {
-        const result = await writeFile(fullPath, diff.before);
+        const result = await writeFile(fullPath, diff.before, projectPath.value.trim());
         if (!result.ok) throw new Error(result.error || `恢复 ${relPath} 失败`);
       }
 
@@ -3449,13 +3549,16 @@ async function resendFromMessage(messageId: string) {
 }
 
 function buildAgentHistory(): VibeChatHistoryMessage[] {
-  return chatMessages.value
-    .slice(0, -2)
-    .filter(
-      (m): m is ChatMessage & { role: "user" | "assistant" } =>
-        (m.role === "user" || m.role === "assistant") && Boolean(m.content.trim()),
-    )
-    .map((m) => ({ role: m.role, content: m.content.trim() }));
+  return buildAgentHistoryFromMessages(chatMessages.value);
+}
+
+function resolveCompletedTurns(reported: number, msg: ChatMessage): number {
+  if (reported > 0) return reported;
+  const fromTraces = msg.turnTraces?.length ?? 0;
+  if (fromTraces > 0) return fromTraces;
+  if (msg.agentTurn && msg.agentTurn > 1) return msg.agentTurn - 1;
+  if ((msg.tools?.length ?? 0) > 0) return 1;
+  return reported;
 }
 
 async function runAgentTurn(userText: string, options?: { skipUserBubble?: boolean }) {
@@ -3478,7 +3581,7 @@ async function runAgentTurn(userText: string, options?: { skipUserBubble?: boole
     content: "",
     chatMode: mode,
     tools: [],
-    activityExpanded: true,
+    activityExpanded: false,
     agentPhase: "connecting_local",
     status: formatAgentStatus({ phase: "connecting_local" }),
   };
@@ -3550,6 +3653,7 @@ async function sendChat() {
 
   if (chatSending.value) {
     pendingPromptQueue.value.push(fullPrompt);
+    persistPendingQueue();
     chatMessages.value.push({ id: genId(), role: "user", content: fullPrompt });
     persistChatNow();
     void scrollChatToBottom(true);
@@ -3616,6 +3720,7 @@ watch(
 onMounted(() => {
   reloadAiConfig();
   refreshProjectHistoryList();
+  pendingPromptQueue.value = loadPendingQueue();
   loadSavedProject();
   chatPanelWidth.value = Math.min(chatPanelWidth.value, getChatPanelMaxWidth());
   window.addEventListener("focus", onWindowFocus);
@@ -3702,6 +3807,7 @@ onBeforeUnmount(() => {
 .app-toolbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   padding: 8px 16px;
   border-bottom: 1px solid var(--border);
@@ -3736,12 +3842,15 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 6px;
   flex: 1;
+  flex-basis: 420px;
   min-width: 0;
 }
 
 .toolbar-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 6px;
   flex-shrink: 0;
 }
@@ -3935,6 +4044,13 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
+.git-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .file-panel-tabs {
   display: flex;
   gap: 2px;
@@ -3981,8 +4097,16 @@ onBeforeUnmount(() => {
 .git-panel-content {
   display: flex;
   flex-direction: column;
-  height: calc(100% - 40px);
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
+}
+
+.git-scroll-area {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 8px;
 }
 
 .git-branch-bar {
@@ -4093,6 +4217,7 @@ onBeforeUnmount(() => {
   padding: 7px 12px;
   cursor: pointer;
   transition: background 120ms ease;
+  min-width: 0;
 }
 
 .git-file-item:hover {
@@ -4108,6 +4233,8 @@ onBeforeUnmount(() => {
 }
 
 .git-file-path {
+  flex: 1;
+  min-width: 0;
   font-size: 13px;
   color: var(--text);
   overflow: hidden;
@@ -4123,17 +4250,18 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   font-size: 12px;
   font-weight: 600;
-  border-radius: 3px;
+  border-radius: 4px;
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.04);
   color: var(--text-dim);
   cursor: pointer;
   flex-shrink: 0;
   transition: all 120ms ease;
+  line-height: 1;
 }
 
 .git-file-check:hover {
@@ -4143,14 +4271,41 @@ onBeforeUnmount(() => {
 }
 
 .git-file-btn {
-  padding: 2px 4px !important;
-  font-size: 11px !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0 !important;
+  font-size: 13px !important;
+  border-radius: 5px !important;
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  color: var(--muted) !important;
   opacity: 0;
-  transition: opacity 120ms ease;
+  transition: all 120ms ease;
+  flex-shrink: 0;
 }
 
 .git-file-item:hover .git-file-btn {
   opacity: 1;
+}
+
+.git-file-btn:hover:not(:disabled) {
+  background: rgba(31, 111, 235, 0.18) !important;
+  color: #7aa2f7 !important;
+  border-color: rgba(31, 111, 235, 0.3) !important;
+}
+
+.git-file-btn.danger {
+  color: var(--muted) !important;
+  border-color: transparent !important;
+}
+
+.git-file-btn.danger:hover:not(:disabled) {
+  background: rgba(255, 77, 94, 0.15) !important;
+  color: #ff6b7a !important;
+  border-color: rgba(255, 77, 94, 0.3) !important;
 }
 
 .git-section {
@@ -4163,6 +4318,10 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   padding: 6px 12px;
   background: rgba(255, 255, 255, 0.03);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  backdrop-filter: blur(8px);
 }
 
 .git-section-title {
@@ -4187,6 +4346,14 @@ button.ghost.danger:hover:not(:disabled) {
 
 .git-log-section {
   border-top: 1px solid var(--border);
+}
+
+.git-log-toggle {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+  border-radius: 0;
+  padding: 7px 12px !important;
 }
 
 .git-log-list {
@@ -4343,7 +4510,7 @@ button.ghost.danger:hover:not(:disabled) {
   background: rgba(31, 111, 235, 0.6);
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 980px) {
   .workspace {
     flex-direction: column;
   }
@@ -4373,23 +4540,70 @@ button.ghost.danger:hover:not(:disabled) {
   }
 }
 
+@media (max-width: 1100px) and (min-width: 981px) {
+  .file-panel {
+    min-width: 220px;
+  }
+
+  .chat-panel {
+    min-width: 300px;
+  }
+
+  .toolbar-project {
+    flex-basis: 360px;
+  }
+}
+
 @media (max-width: 720px) {
+  .app-toolbar {
+    align-items: stretch;
+    padding: 8px 10px;
+  }
+
+  .toolbar-project,
+  .toolbar-actions {
+    flex-basis: 100%;
+  }
+
+  .toolbar-actions {
+    justify-content: flex-start;
+  }
+
   .workspace {
     flex-direction: column;
   }
 
   .file-panel {
     width: 100% !important;
-    height: 180px;
+    height: 200px;
     border-right: none;
     border-bottom: 1px solid var(--border);
   }
 
   .chat-panel {
     width: 100% !important;
-    height: 240px;
+    height: 300px;
     border-left: none;
     border-top: 1px solid var(--border);
+  }
+
+  .panel-head {
+    align-items: flex-start;
+  }
+
+  .panel-head-right,
+  .chat-actions {
+    justify-content: flex-start;
+  }
+
+  .editor-header {
+    align-items: stretch;
+  }
+
+  .editor-header-actions {
+    border-left: none;
+    border-top: 1px solid var(--border);
+    flex-basis: 100%;
   }
 }
 
@@ -4556,24 +4770,29 @@ button.ghost.danger:hover:not(:disabled) {
 
 .msg-streaming {
   margin: 0;
-  padding: 10px 14px;
+  padding: 0;
   max-width: 100%;
   min-width: 0;
   font-size: 13px;
   line-height: 1.65;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
   color: rgba(255, 255, 255, 0.92);
-  background: rgba(0, 0, 0, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
   font-family: inherit;
 }
 
 .stream-cursor {
   display: inline-block;
+  width: 7px;
+  height: 15px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  overflow: hidden;
   color: #91beff;
+  background: #91beff;
   animation: stream-blink 1s step-end infinite;
 }
 
@@ -4587,6 +4806,7 @@ button.ghost.danger:hover:not(:disabled) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
@@ -4596,6 +4816,8 @@ button.ghost.danger:hover:not(:disabled) {
 .panel-head-right {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
   min-width: 0;
 }
@@ -4644,9 +4866,30 @@ button.ghost.danger:hover:not(:disabled) {
   color: var(--muted);
 }
 
-.history-new {
-  width: 100%;
+.history-actions {
+  display: flex;
+  gap: 8px;
   margin-bottom: 10px;
+}
+
+.history-new {
+  flex: 1;
+}
+
+.history-sync {
+  white-space: nowrap;
+}
+
+.history-sync-message {
+  margin: -2px 0 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(31, 111, 235, 0.22);
+  border-radius: 8px;
+  background: rgba(31, 111, 235, 0.08);
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-all;
 }
 
 .history-empty {
@@ -4960,8 +5203,8 @@ button.ghost.small {
 
 .editor-header {
   display: flex;
-  align-items: flex-end;
-  min-height: 74px;
+  align-items: center;
+  min-height: 44px;
   border-bottom: 1px solid var(--border);
   background: rgba(17, 24, 39, 0.45);
   flex-shrink: 0;
@@ -4975,18 +5218,17 @@ button.ghost.small {
   color: var(--muted);
   flex: 1;
   min-width: 0;
-  height: 36px;
-  margin-bottom: 1px;
+  min-height: 42px;
 }
 
 .editor-header-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 4px;
-  padding: 0 8px;
+  padding: 6px 8px;
   flex-shrink: 0;
-  height: 36px;
-  margin-bottom: 1px;
   border-left: 1px solid var(--border);
 }
 
@@ -4996,7 +5238,7 @@ button.ghost.small {
   gap: 1px;
   flex: 1;
   min-width: 0;
-  align-self: flex-end;
+  align-self: stretch;
   padding: 0 4px;
   overflow-x: auto;
 }
@@ -5011,7 +5253,7 @@ button.ghost.small {
   border-radius: 0;
   background: transparent;
   color: rgba(255, 255, 255, 0.62);
-  padding: 8px 12px;
+  padding: 9px 12px;
   font-size: 12px;
   cursor: pointer;
   transition: all 150ms ease;
@@ -5074,6 +5316,7 @@ button.ghost.small {
 
 .chat-scroll {
   flex: 1;
+  min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
   padding: 12px 14px;
@@ -5081,30 +5324,34 @@ button.ghost.small {
 
 .msg-list {
   display: grid;
-  gap: 14px;
+  gap: 10px;
   min-width: 0;
 }
 
 .msg {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   align-items: flex-start;
   min-width: 0;
   background: transparent;
   border: none;
   border-radius: 0;
-  padding: 0;
+  padding: 2px 0;
+}
+
+.msg.user {
+  flex-direction: row-reverse;
 }
 
 .msg-avatar {
   flex-shrink: 0;
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
-  font-size: 10px;
+  border-radius: 6px;
+  font-size: 9px;
   font-weight: 700;
   letter-spacing: -0.3px;
 }
@@ -5124,15 +5371,22 @@ button.ghost.small {
 .msg-body {
   flex: 1;
   min-width: 0;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 10px 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 4px 2px 8px;
 }
 
 .msg.user .msg-body {
-  border-color: rgba(31, 111, 235, 0.28);
-  background: rgba(31, 111, 235, 0.06);
+  flex: 0 1 auto;
+  max-width: min(88%, 760px);
+  padding: 8px 10px;
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.msg.assistant .msg-body {
+  padding-right: 0;
 }
 
 .msg-head {
@@ -5140,7 +5394,7 @@ button.ghost.small {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .msg-role {
@@ -5244,11 +5498,11 @@ button.compact {
 .chat-mode-switch {
   display: inline-flex;
   gap: 4px;
-  margin-bottom: 10px;
-  padding: 4px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid var(--border);
+  margin-bottom: 8px;
+  padding: 2px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .mode-btn {
@@ -5256,7 +5510,7 @@ button.compact {
   background: transparent;
   color: rgba(255, 255, 255, 0.55);
   border-radius: 6px;
-  padding: 5px 16px;
+  padding: 4px 12px;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -5281,9 +5535,10 @@ button.compact {
 
 .chat-composer {
   position: relative;
+  flex-shrink: 0;
   border-top: 1px solid var(--border);
-  padding: 12px 14px;
-  background: rgba(11, 18, 32, 0.65);
+  padding: 10px 12px 12px;
+  background: linear-gradient(180deg, rgba(11, 18, 32, 0.2), rgba(11, 18, 32, 0.78));
   backdrop-filter: blur(8px);
   transition: background 200ms ease, border-color 200ms ease;
 }
@@ -5342,7 +5597,7 @@ button.compact {
   white-space: pre-wrap;
   word-break: break-word;
   max-height: 80px;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .chat-input-field {
@@ -5427,19 +5682,19 @@ button.compact {
 
 .chat-input-box {
   width: 100%;
-  min-height: 44px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.04);
+  min-height: 48px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 9px 11px;
+  background: rgba(255, 255, 255, 0.055);
   transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
   cursor: text;
 }
 
 .chat-input-box.focused {
-  border-color: rgba(31, 111, 235, 0.5);
-  background: rgba(255, 255, 255, 0.06);
-  box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.08);
+  border-color: rgba(145, 190, 255, 0.58);
+  background: rgba(255, 255, 255, 0.075);
+  box-shadow: 0 0 0 1px rgba(145, 190, 255, 0.12), 0 12px 28px rgba(0, 0, 0, 0.18);
 }
 
 .chat-composer-editor {
@@ -5450,8 +5705,9 @@ button.compact {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .chat-actions {
@@ -5462,15 +5718,15 @@ button.compact {
 }
 
 .agent-activity {
-  margin-bottom: 10px;
-  border-radius: 12px;
-  background: rgba(0, 0, 0, 0.22);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.065);
   overflow: hidden;
 }
 
 .agent-activity.collapsed {
-  background: rgba(0, 0, 0, 0.14);
+  background: transparent;
 }
 
 .agent-activity-toggle {
@@ -5478,11 +5734,11 @@ button.compact {
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 8px 10px;
+  padding: 6px 8px;
   background: transparent;
   border: none;
   border-radius: 0;
-  color: rgba(255, 255, 255, 0.82);
+  color: rgba(255, 255, 255, 0.68);
   font-size: 12px;
   font-weight: 600;
   text-align: left;
@@ -5508,6 +5764,7 @@ button.compact {
 
 .agent-activity-title {
   flex-shrink: 0;
+  color: rgba(255, 255, 255, 0.72);
 }
 
 .agent-activity-hint,

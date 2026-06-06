@@ -44,7 +44,7 @@ export type VibeAgentSseEvent =
   | { type: "tool_end"; data: { id: string; name: string; ok: boolean; summary: string; result?: string } }
   | { type: "message"; data: { text: string } }
   | { type: "message_delta"; data: { delta: string } }
-  | { type: "file_diff"; data: { path: string; before: string; after: string; deleted?: boolean } }
+  | { type: "file_diff"; data: { path: string; before: string; after: string; deleted?: boolean; created?: boolean } }
   | {
       type: "agent_context";
       data: {

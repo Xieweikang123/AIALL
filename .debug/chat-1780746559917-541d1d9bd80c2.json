@@ -1,0 +1,63 @@
+[
+  {
+    "id": "1780746571769-082b6be650712",
+    "role": "user",
+    "content": "你好啊"
+  },
+  {
+    "id": "1780746571769-f3856580e17d38",
+    "role": "assistant",
+    "content": "你好！👋 很高兴见到你！\n\n让我先看看项目的整体结构，了解一下这个项目的情况：看起来这是一个 **Tauri + Vite** 项目，包含前端（`src`）和 Rust 后端（`src-tauri`），还有 sidecar 和 server 目录。\n\n你好！👋 我是你的编程助手，可以帮你：\n\n- 🔍 **探索项目** — 查看代码结构、阅读文件、搜索关键词\n- ✏️ **修改代码** — 编写、修改、重构代码\n- 🐛 **排查问题** — 分析错误日志、定位 Bug\n- 📖 **理解项目** — 解释代码逻辑、架构设计\n\n请问有什么我可以帮你的吗？😊",
+    "chatMode": "build",
+    "tools": [
+      {
+        "id": "call_d213df279ccf46c3a440c4fd",
+        "name": "list_dir",
+        "icon": "📁",
+        "title": "浏览目录",
+        "detail": "项目根目录",
+        "label": "浏览目录 项目根目录",
+        "args": {
+          "path": ""
+        },
+        "summary": "5 个目录，12 个文件",
+        "ok": true,
+        "running": false,
+        "fullResult": "[dir] data\n[dir] server\n[dir] sidecar\n[dir] src\n[dir] src-tauri\n[file] AGENTS.md\n[file] index.html\n[file] new-file121.ts\n[file] opencode.json\n[file] package-lock.json\n[file] package.json\n[file] sidecar.log\n[file] tsconfig.json\n[file] vite.automationMiddleware.ts\n[file] vite.config.ts\n[file] vite.iconTemplatesMiddleware.ts\n[file] vite.vibeCodingMiddleware.ts"
+      }
+    ],
+    "activityExpanded": true,
+    "status": "",
+    "statusLog": [
+      "正在连接本地服务（127.0.0.1:37891）…",
+      "本地服务已连接，等待 Agent 启动…",
+      "本地 Agent 服务已就绪，正在启动任务…",
+      "正在组装 Agent 上下文与工具定义…",
+      "正在等待模型响应（第 1/12 轮 · mimo-v2.5-pro）…",
+      "正在执行：浏览目录（项目根目录）",
+      "正在整理工具结果，准备下一轮推理…",
+      "正在等待模型响应（第 2/12 轮 · mimo-v2.5-pro）…",
+      "完成（共 2 轮）"
+    ],
+    "agentTurn": 2,
+    "agentMaxTurns": 12,
+    "agentContext": {
+      "mode": "build",
+      "systemPrompt": "你是一个专业的编程 Agent，可以调用工具探索并修改本地项目。\n回答请使用中文。\n工作流程：先 list_dir / grep / read_file 收集必要信息，再回答或 write_file 修改代码。\n解释项目时：从 package.json、README、入口文件等关键文件入手，不要臆测。\n修改代码时：先 read_file 确认现状，再 write_file 暂存完整文件内容；用户确认后才会真正落盘。\n删除文件时：使用 delete_file 工具，不要用 write_file 清空内容来替代删除。\n重要：必须通过 API 工具接口调用 list_dir、read_file 等，禁止在正文里输出 <function>、<parameter> 等标记。\n工具 path 参数使用相对项目根的路径（如 package.json、src/main.ts），不要用绝对路径。\n项目根目录：D:\\project\\AIALL",
+      "history": [],
+      "maxTurns": 12,
+      "model": "mimo-v2.5-pro"
+    },
+    "streaming": false,
+    "turnTraces": [
+      {
+        "turn": 1,
+        "maxTurns": 12,
+        "assistantText": "你好！👋 很高兴见到你！\n\n让我先看看项目的整体结构，了解一下这个项目的情况：",
+        "hasToolCalls": true
+      }
+    ],
+    "totalTurns": 2,
+    "pendingApproval": false
+  }
+]

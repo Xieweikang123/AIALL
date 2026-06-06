@@ -98,6 +98,13 @@ export interface ProjectContextResult {
   error?: string;
 }
 
+export interface ChatStoreSyncResult {
+  ok: boolean;
+  path?: string;
+  sessionCount?: number;
+  error?: string;
+}
+
 export async function fetchProjectContext(projectPath: string): Promise<ProjectContextResult> {
   try {
     const response = await fetch(backendUrl("/backend/vibe/project-context"), {
@@ -109,6 +116,35 @@ export async function fetchProjectContext(projectPath: string): Promise<ProjectC
     return data;
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "网络错误" };
+  }
+}
+
+export async function syncChatSession(projectPath: string, sessionId: string, data: unknown): Promise<void> {
+  try {
+    await fetch(backendUrl("/backend/vibe/chat-session-sync"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectPath, sessionId, data }),
+    });
+  } catch {
+    // best-effort, ignore errors
+  }
+}
+
+export async function syncChatStore(projectPath: string, data: unknown): Promise<ChatStoreSyncResult> {
+  try {
+    const response = await fetch(backendUrl("/backend/vibe/chat-store-sync"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectPath, data }),
+    });
+    if (!response.ok) {
+      return { ok: false, error: `同步会话到本地失败：HTTP ${response.status}` };
+    }
+    const result = (await response.json()) as ChatStoreSyncResult;
+    return result;
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "同步会话到本地失败" };
   }
 }
 
@@ -140,12 +176,12 @@ export async function listDirectory(dirPath: string): Promise<ListResult> {
   }
 }
 
-export async function readFile(filePath: string): Promise<ReadResult> {
+export async function readFile(filePath: string, projectRoot?: string): Promise<ReadResult> {
   try {
     const response = await fetch(backendUrl("/backend/vibe/read"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: filePath }),
+      body: JSON.stringify({ path: filePath, projectRoot }),
     });
     const data = (await response.json()) as ReadResult;
     return data;
@@ -154,12 +190,12 @@ export async function readFile(filePath: string): Promise<ReadResult> {
   }
 }
 
-export async function writeFile(filePath: string, content: string): Promise<WriteResult> {
+export async function writeFile(filePath: string, content: string, projectRoot?: string): Promise<WriteResult> {
   try {
     const response = await fetch(backendUrl("/backend/vibe/write"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: filePath, content }),
+      body: JSON.stringify({ path: filePath, content, projectRoot }),
     });
     const data = (await response.json()) as WriteResult;
     return data;
@@ -192,12 +228,12 @@ export async function grepContent(dirPath: string, pattern: string): Promise<Gre
   }
 }
 
-export async function createItem(itemPath: string, isDirectory: boolean, content?: string): Promise<CreateResult> {
+export async function createItem(itemPath: string, isDirectory: boolean, content?: string, projectRoot?: string): Promise<CreateResult> {
   try {
     const response = await fetch(backendUrl("/backend/vibe/create"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: itemPath, isDirectory, content }),
+      body: JSON.stringify({ path: itemPath, isDirectory, content, projectRoot }),
     });
     const data = (await response.json()) as CreateResult;
     return data;
@@ -206,9 +242,10 @@ export async function createItem(itemPath: string, isDirectory: boolean, content
   }
 }
 
-export async function deleteItem(itemPath: string): Promise<DeleteResult> {
+export async function deleteItem(itemPath: string, projectRoot?: string): Promise<DeleteResult> {
   try {
-    const url = backendUrl(`/backend/vibe/delete?path=${encodeURIComponent(itemPath)}`);
+    const rootParam = projectRoot ? `&projectRoot=${encodeURIComponent(projectRoot)}` : "";
+    const url = backendUrl(`/backend/vibe/delete?path=${encodeURIComponent(itemPath)}${rootParam}`);
     const response = await fetch(url, { method: "DELETE" });
     const data = (await response.json()) as DeleteResult;
     return data;
