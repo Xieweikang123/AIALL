@@ -100,8 +100,16 @@
                 @click="gitPanelMode = 'git'; refreshGitStatus()"
               >
                 Git
-                <span v-if="gitStagedFiles.length" class="git-badge git-badge-staged">{{ gitStagedFiles.length }}</span>
-                <span v-if="gitUnstagedFiles.length" class="git-badge">{{ gitUnstagedFiles.length }}</span>
+                <span
+                  v-if="gitChangeCount"
+                  class="git-badge"
+                  :class="{ 'git-badge-staged': !gitUnstagedFiles.length }"
+                  :title="gitUnstagedFiles.length && gitStagedFiles.length
+                    ? `${gitStagedFiles.length} 已暂存 · ${gitUnstagedFiles.length} 未暂存`
+                    : gitStagedFiles.length
+                      ? `${gitStagedFiles.length} 已暂存`
+                      : `${gitUnstagedFiles.length} 未暂存`"
+                >{{ gitChangeCount }}</span>
               </button>
             </div>
             <div v-if="projectOpened && gitPanelMode === 'files'" class="file-toolbar">
@@ -157,54 +165,69 @@
           <div v-else-if="gitLoading" class="panel-empty">加载中…</div>
           <div v-else-if="!gitIsRepo" class="panel-empty">当前目录不是 Git 仓库</div>
           <div v-else class="git-panel-content">
-            <div class="git-branch-bar">
-              <span class="git-branch-icon">⎇</span>
-              <span class="git-branch-name">{{ gitBranch }}</span>
-              <button type="button" class="ghost tiny" :disabled="gitLoading" @click="refreshGitStatus">刷新</button>
-            </div>
-            <div v-if="gitRemotes.length" class="git-remote-bar">
-              <div class="git-remote-info">
-                <span class="git-remote-label">↑{{ gitAhead }} ↓{{ gitBehind }}</span>
-                <span v-if="gitTrackingBranch" class="git-remote-tracking">{{ gitTrackingBranch }}</span>
+            <div class="git-header">
+              <div class="git-header-row">
+                <div class="git-branch-info">
+                  <span class="git-branch-icon" aria-hidden="true">⎇</span>
+                  <span class="git-branch-name" :title="gitBranch">{{ gitBranch }}</span>
+                </div>
+                <button type="button" class="ghost tiny" :disabled="gitLoading" @click="() => refreshGitStatus()">刷新</button>
               </div>
-              <div class="git-remote-actions">
-                <button type="button" class="ghost tiny" :disabled="!!gitRemoteAction" @click="doFetch">
-                  {{ gitRemoteAction === 'fetch' ? '…' : 'Fetch' }}
-                </button>
-                <button type="button" class="ghost tiny" :disabled="!!gitRemoteAction" @click="doPull">
-                  {{ gitRemoteAction === 'pull' ? '…' : 'Pull' }}
-                </button>
-                <button type="button" class="ghost tiny" :disabled="!!gitRemoteAction" @click="doPush">
-                  {{ gitRemoteAction === 'push' ? '…' : 'Push' }}
-                </button>
+              <div v-if="gitRemotes.length" class="git-header-row git-sync-row">
+                <div class="git-remote-info">
+                  <span class="git-sync-stat" :class="{ active: gitAhead > 0 }">↑ {{ gitAhead }}</span>
+                  <span class="git-sync-stat" :class="{ active: gitBehind > 0 }">↓ {{ gitBehind }}</span>
+                  <span v-if="gitTrackingBranch" class="git-remote-tracking">{{ gitTrackingBranch }}</span>
+                </div>
+                <div class="git-remote-actions">
+                  <button type="button" class="ghost tiny" :disabled="!!gitRemoteAction" @click="doFetch">
+                    {{ gitRemoteAction === 'fetch' ? '…' : 'Fetch' }}
+                  </button>
+                  <button type="button" class="ghost tiny" :disabled="!!gitRemoteAction" @click="doPull">
+                    {{ gitRemoteAction === 'pull' ? '…' : 'Pull' }}
+                  </button>
+                  <button type="button" class="ghost tiny" :disabled="!!gitRemoteAction" @click="doPush">
+                    {{ gitRemoteAction === 'push' ? '…' : 'Push' }}
+                  </button>
+                </div>
               </div>
             </div>
             <div v-if="gitError" class="git-error">{{ gitError }}</div>
             <div class="git-commit-box">
-              <input
+              <textarea
                 v-model="gitCommitMessage"
                 class="git-commit-input"
-                type="text"
+                rows="2"
                 placeholder="提交信息…"
-                :disabled="gitCommitting || !!gitGenStep"
-                @keydown.enter="commitGit"
+                :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep"
+                @keydown.ctrl.enter="commitGit"
+                @keydown.meta.enter="commitGit"
               />
               <div class="git-commit-actions">
                 <button
                   type="button"
-                  class="ghost small"
+                  class="secondary small git-commit-ai"
                   :disabled="gitCommitting || !!gitGenStep || !gitStagedFiles.length"
                   @click="generateCommitMessage"
                 >
-                  {{ gitGenStep || "AI 生成" }}
+                  {{ gitGenStep || "✦ AI 生成" }}
                 </button>
                 <button
                   type="button"
-                  class="primary small"
-                  :disabled="gitCommitting || !gitCommitMessage.trim() || !gitStagedFiles.length"
+                  class="small"
+                  :class="canGitCommit ? 'primary' : 'secondary'"
+                  :disabled="!canGitCommit"
                   @click="commitGit"
                 >
                   {{ gitCommitting ? "提交中…" : `提交 (${gitStagedFiles.length})` }}
+                </button>
+                <button
+                  type="button"
+                  class="primary small git-ai-push"
+                  :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep || !gitStagedFiles.length || !configReady"
+                  @click="aiCommitAndPush"
+                >
+                  {{ gitAiPushStep || "✦ AI 一键推送" }}
                 </button>
               </div>
             </div>
@@ -232,7 +255,6 @@
                         {{ gitStatusIcon(file.status) }}
                       </span>
                       <span class="git-file-path" :title="file.path">{{ file.path }}</span>
-                      <button type="button" class="ghost tiny git-file-btn" title="取消暂存" @pointerdown.stop @click.stop="unstageFile(file.path)">−</button>
                     </div>
                   </div>
                 </div>
@@ -260,7 +282,6 @@
                         {{ gitStatusIcon(file.status) }}
                       </span>
                       <span class="git-file-path" :title="file.path">{{ file.path }}</span>
-                      <button type="button" class="ghost tiny git-file-btn" title="暂存" @pointerdown.stop @click.stop="stageFile(file.path)">+</button>
                       <button type="button" class="ghost tiny danger git-file-btn" title="丢弃更改" @pointerdown.stop @click.stop="discardFile(file.path, $event)">✕</button>
                     </div>
                   </div>
@@ -671,14 +692,22 @@
                         <span v-if="step.running" class="agent-tool-chip-state">…</span>
                       </span>
                     </div>
-                    <div v-if="m.statusLog?.length" class="status-log-scroll-wrap compact">
+                    <div v-if="agentHistoryLines(m).length" class="status-log-scroll-wrap compact">
                       <div
                         :ref="(el) => bindStatusLogScroll(el as HTMLElement | null, m.id)"
                         class="status-log-scroll"
                       >
-                        <ol class="status-log">
-                          <li v-for="(line, si) in m.statusLog" :key="si">{{ line }}</li>
-                        </ol>
+                        <ul class="status-log-timeline">
+                          <li
+                            v-for="(line, si) in agentHistoryLines(m)"
+                            :key="si"
+                            class="status-log-entry"
+                            :class="statusLogPhaseClass(line)"
+                          >
+                            <span class="status-log-dot" />
+                            <span class="status-log-text">{{ cleanStatusLogText(line) }}</span>
+                          </li>
+                        </ul>
                       </div>
                     </div>
                   </template>
@@ -723,9 +752,17 @@
                         :ref="(el) => bindStatusLogScroll(el as HTMLElement | null, m.id)"
                         class="status-log-scroll"
                       >
-                        <ol class="status-log">
-                          <li v-for="(line, si) in m.statusLog" :key="si">{{ line }}</li>
-                        </ol>
+                        <ul class="status-log-timeline">
+                          <li
+                            v-for="(line, si) in m.statusLog"
+                            :key="si"
+                            class="status-log-entry"
+                            :class="statusLogPhaseClass(line)"
+                          >
+                            <span class="status-log-dot" />
+                            <span class="status-log-text">{{ cleanStatusLogText(line) }}</span>
+                          </li>
+                        </ul>
                       </div>
                     </div>
                   </details>
@@ -1360,6 +1397,7 @@ const gitAhead = ref(0);
 const gitBehind = ref(0);
 const gitRemoteLoading = ref(false);
 const gitRemoteAction = ref("");
+const gitAiPushStep = ref("");
 
 function clearGitDiffCache() {
   gitDiffContentCache.value = {};
@@ -1368,6 +1406,12 @@ function clearGitDiffCache() {
 
 const gitStagedFiles = computed(() => gitStatus.value.filter((f) => f.staged));
 const gitUnstagedFiles = computed(() => gitStatus.value.filter((f) => !f.staged));
+const gitChangeCount = computed(() => gitStatus.value.length);
+const canGitCommit = computed(() =>
+  !gitCommitting.value
+  && !!gitCommitMessage.value.trim()
+  && gitStagedFiles.value.length > 0,
+);
 
 const contextMenu = ref({ show: false, x: 0, y: 0, path: "" });
 
@@ -1869,6 +1913,26 @@ function agentHistoryLines(msg: ChatMessage): string[] {
     .slice(-6);
 }
 
+function statusLogPhaseClass(text: string): string {
+  if (text.includes("连接") || text.includes("已连接")) return "phase-connecting";
+  if (text.includes("扫描") || text.includes("项目上下文") || text.includes("准备问答") || text.includes("组装")) return "phase-context";
+  if (text.includes("压缩") || text.includes("准备模型上下文")) return "phase-compacting";
+  if (text.includes("发送模型请求") || text.includes("等待模型") || text.includes("重试")) return "phase-model";
+  if (text.includes("模型输出") || text.includes("规划工具")) return "phase-streaming";
+  if (text.includes("执行") && text.includes("工具")) return "phase-tool";
+  if (text.includes("整理")) return "phase-summarize";
+  if (text.includes("停止")) return "phase-aborted";
+  return "phase-default";
+}
+
+function cleanStatusLogText(text: string): string {
+  return text
+    .replace(/^正在/, "")
+    .replace(/…$/, "")
+    .replace(/\.\.\.\s*$/, "")
+    .trim();
+}
+
 function activityFeedItems(msg: ChatMessage): Array<{ key: string; kind: "status" | "tool"; text: string; active?: boolean }> {
   const items: Array<{ key: string; kind: "status" | "tool"; text: string; active?: boolean }> = [];
   const seen = new Set<string>();
@@ -2254,9 +2318,10 @@ async function refreshTree() {
   }
 }
 
-async function refreshGitStatus() {
+async function refreshGitStatus(options?: { showLoading?: boolean }) {
   if (!projectOpened.value) return;
-  gitLoading.value = true;
+  const showLoading = options?.showLoading !== false;
+  if (showLoading) gitLoading.value = true;
   gitError.value = "";
   clearGitDiffCache();
   try {
@@ -2282,7 +2347,7 @@ async function refreshGitStatus() {
   } catch (e) {
     gitError.value = e instanceof Error ? e.message : "获取 Git 状态失败";
   } finally {
-    gitLoading.value = false;
+    if (showLoading) gitLoading.value = false;
   }
 }
 
@@ -2307,8 +2372,7 @@ async function commitGit() {
       await refreshGitStatus();
       return;
     }
-    await refreshGitStatus();
-    await refreshTree();
+    await refreshGitStatus({ showLoading: false });
   } catch (e) {
     gitError.value = e instanceof Error ? e.message : "提交失败";
     await refreshGitStatus();
@@ -2469,6 +2533,70 @@ async function generateCommitMessage() {
     gitError.value = e instanceof Error ? e.message : "AI 生成提交信息失败";
   } finally {
     gitGenStep.value = "";
+  }
+}
+
+async function aiCommitAndPush() {
+  if (!projectOpened.value || !gitStagedFiles.value.length) return;
+  if (!configReady.value) {
+    gitError.value = "请先配置 AI 模型";
+    return;
+  }
+  gitError.value = "";
+  try {
+    gitAiPushStep.value = "AI 生成提交信息…";
+    await new Promise((r) => setTimeout(r, 100));
+
+    let streamText = "";
+    const genResult = await generateCommitMessageApi(
+      projectPath.value.trim(),
+      aiConfig.value.endpoint.trim(),
+      aiConfig.value.apiKey.trim(),
+      aiConfig.value.model.trim(),
+      (delta) => {
+        streamText += delta;
+        gitCommitMessage.value = streamText.replace(/^["'"']|["'"']$/g, "").trim();
+      },
+    );
+    if (!genResult.ok) {
+      gitError.value = genResult.error || "AI 生成提交信息失败";
+      return;
+    }
+    if (!genResult.message) {
+      gitError.value = "AI 未返回内容";
+      return;
+    }
+    gitCommitMessage.value = genResult.message;
+
+    gitAiPushStep.value = "提交中…";
+    await new Promise((r) => setTimeout(r, 100));
+    clearGitDiffCache();
+    const commitResult = await commitGitChanges(projectPath.value.trim(), gitCommitMessage.value.trim());
+    if (!commitResult.ok) {
+      gitError.value = commitResult.error || "提交失败";
+      await refreshGitStatus();
+      return;
+    }
+    await refreshGitStatus({ showLoading: false });
+
+    gitAiPushStep.value = "推送中…";
+    await new Promise((r) => setTimeout(r, 100));
+    const pushResult = await gitPushRemote(projectPath.value.trim());
+    if (!pushResult.ok) {
+      gitError.value = pushResult.error || "推送失败";
+      await refreshGitRemotes();
+      return;
+    }
+    await refreshGitRemotes();
+
+    gitAiPushStep.value = "完成 ✓";
+    gitCommitMessage.value = "";
+    await new Promise((r) => setTimeout(r, 800));
+  } catch (e) {
+    gitError.value = e instanceof Error ? e.message : "AI 一键推送失败";
+    await refreshGitStatus();
+  } finally {
+    gitAiPushStep.value = "";
   }
 }
 
@@ -4743,48 +4871,77 @@ onBeforeUnmount(() => {
   padding-bottom: 8px;
 }
 
-.git-branch-bar {
+.git-header {
+  border-bottom: 1px solid var(--border);
+}
+
+.git-header-row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
+  padding: 8px 12px;
   font-size: 13px;
+}
+
+.git-header-row + .git-header-row {
+  padding-top: 0;
+  padding-bottom: 8px;
+}
+
+.git-sync-row {
+  font-size: 12px;
+}
+
+.git-branch-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
 }
 
 .git-branch-icon {
   color: var(--text-dim);
+  flex-shrink: 0;
 }
 
 .git-branch-name {
   color: #7aa2f7;
   font-family: monospace;
-}
-
-.git-remote-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
-  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .git-remote-info {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   color: var(--text-dim);
+  min-width: 0;
+  flex: 1;
 }
 
-.git-remote-label {
+.git-sync-stat {
   font-family: monospace;
   font-size: 11px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.git-sync-stat.active {
+  color: #7aa2f7;
+  font-weight: 600;
 }
 
 .git-remote-tracking {
   color: #9aa5ce;
   font-family: monospace;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .git-remote-actions {
@@ -4803,15 +4960,21 @@ onBeforeUnmount(() => {
 .git-commit-box {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 12px;
+  gap: 8px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .git-commit-input {
   width: 100%;
-  padding: 6px 10px;
+  padding: 8px 10px;
   font-size: 12px;
+  line-height: 1.45;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 52px;
+  max-height: 120px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -4836,6 +4999,18 @@ onBeforeUnmount(() => {
 
 .git-commit-actions button {
   flex: 1;
+  min-width: 0;
+}
+
+.git-commit-ai:not(:disabled) {
+  color: #9eceff;
+  border-color: rgba(31, 111, 235, 0.35);
+  background: rgba(31, 111, 235, 0.1);
+}
+
+.git-commit-ai:not(:disabled):hover {
+  background: rgba(31, 111, 235, 0.18);
+  color: #c0d9ff;
 }
 
 .git-file-list {
@@ -4869,11 +5044,14 @@ onBeforeUnmount(() => {
 .git-file-path {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  unicode-bidi: plaintext;
 }
 
 .git-file-item.active {
@@ -4964,7 +5142,8 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 12px;
+  gap: 8px;
+  padding: 7px 12px;
   background: rgba(255, 255, 255, 0.03);
   position: sticky;
   top: 0;
@@ -4973,9 +5152,12 @@ onBeforeUnmount(() => {
 }
 
 .git-section-title {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text-dim);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  flex-shrink: 0;
 }
 
 .git-section-actions {
@@ -5001,7 +5183,17 @@ button.ghost.danger:hover:not(:disabled) {
   justify-content: flex-start;
   text-align: left;
   border-radius: 0;
-  padding: 7px 12px !important;
+  border: none !important;
+  padding: 8px 12px !important;
+  font-size: 11px !important;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-dim) !important;
+}
+
+.git-log-toggle:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.04) !important;
+  color: var(--text) !important;
 }
 
 .git-log-item {
@@ -5604,10 +5796,13 @@ button.ghost.danger:hover:not(:disabled) {
   margin-right: 6px;
 }
 
-button.ghost.small {
-  padding: 5px 12px;
+button.ghost.small,
+button.secondary.small,
+button.primary.small {
+  padding: 6px 12px;
   font-size: 12px;
   flex-shrink: 0;
+  border-radius: 6px;
 }
 
 .panel-head-left {
@@ -7189,6 +7384,71 @@ button.compact {
 
 .status-log li:last-child {
   color: rgba(255, 255, 255, 0.92);
+}
+
+.status-log-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.status-log-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.58);
+  position: relative;
+}
+
+.status-log-entry:last-child {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.status-log-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 5px;
+  background: rgba(255, 255, 255, 0.25);
+  position: relative;
+  z-index: 1;
+}
+
+.status-log-entry:not(:last-child) .status-log-dot::after {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 8px;
+  width: 2px;
+  height: calc(100% + 2px);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.status-log-entry:last-child .status-log-dot::after {
+  display: none;
+}
+
+.status-log-entry.phase-connecting .status-log-dot { background: #56d4dd; }
+.status-log-entry.phase-context .status-log-dot { background: #57ab5a; }
+.status-log-entry.phase-compacting .status-log-dot { background: #d29922; }
+.status-log-entry.phase-model .status-log-dot { background: #b390f0; }
+.status-log-entry.phase-streaming .status-log-dot { background: #58a6ff; }
+.status-log-entry.phase-tool .status-log-dot { background: #f78166; }
+.status-log-entry.phase-summarize .status-log-dot { background: #8b949e; }
+.status-log-entry.phase-aborted .status-log-dot { background: #f85149; }
+.status-log-entry.phase-default .status-log-dot { background: rgba(255, 255, 255, 0.3); }
+
+.status-log-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
 }
 
 .turn-trace-item {
