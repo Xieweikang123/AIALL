@@ -182,8 +182,8 @@ function buildAskSystemPrompt(
   const lines = [
     "你是一个编程问答助手（Ask 模式）。",
     "回答请使用中文。",
-    "你只能基于已有上下文回答问题、解释代码、讨论方案，不能声称已修改任何文件。",
-    "若信息不足，请明确说明需要用户打开相关文件或切换到 Build 模式。",
+    "你可以使用 list_dir、read_file、grep、search_files 工具来探索项目、读取文件，但不能修改任何文件。",
+    "若信息不足，请主动使用工具查找相关内容，而不是要求用户打开文件。",
     `项目根目录：${projectRoot}`,
   ];
   if (openFilePath?.trim()) {
@@ -257,7 +257,12 @@ async function runVibeAsk(params: RunVibeAgentParams): Promise<void> {
       apiKey,
       model,
       messages,
-      tools: [],
+      tools: [
+        VIBE_AGENT_TOOLS.find((t) => t.function.name === "list_dir")!,
+        VIBE_AGENT_TOOLS.find((t) => t.function.name === "read_file")!,
+        VIBE_AGENT_TOOLS.find((t) => t.function.name === "grep")!,
+        VIBE_AGENT_TOOLS.find((t) => t.function.name === "search_files")!,
+      ],
       signal,
       onContentDelta: (delta) => {
         streamedChars += delta.length;
@@ -274,9 +279,78 @@ async function runVibeAsk(params: RunVibeAgentParams): Promise<void> {
     return;
   }
 
-  const text = String(completion.message.content || "").trim();
-  if (text && !streamedChars) {
-    onEvent({ type: "message", data: { text } });
+  const assistant = completion.message;
+  const rawContent = String(assistant.content || "");
+  const toolCalls = resolveToolCallsFromAssistant(rawContent, assistant.tool_calls || []);
+  const visibleContent = stripTextToolCallMarkup(rawContent);
+
+  if (toolCalls.length) {
+    messages.push({
+      role: "assistant",
+      content: visibleContent || null,
+      tool_calls: toolCalls,
+    });
+
+    for (const call of toolCalls) {
+      if (signal?.aborted) break;
+
+      const toolName = call.function.name;
+      if (toolName === "write_file") continue;
+
+      const toolArgs = parseToolArgs(call.function.arguments || "{}");
+      onEvent({ type: "tool_start", data: { id: call.id, name: toolName, args: toolArgs } });
+
+      let result = "";
+      try {
+        result = await executeTool(projectRoot, toolName, toolArgs, createWriteStage());
+      } catch (error) {
+        result = `错误：${error instanceof Error ? error.message : String(error)}`;
+      }
+
+      onEvent({
+        type: "tool_end",
+        data: {
+          id: call.id,
+          name: toolName,
+          ok: !result.startsWith("错误："),
+          summary: toolSummary(toolName, result),
+        },
+      });
+
+      messages.push({
+        role: "tool",
+        tool_call_id: call.id,
+        content: result,
+      });
+    }
+
+    onEvent({ type: "status", data: { phase: "waiting_model", model } });
+
+    let secondStreamedChars = 0;
+    const secondCompletion = await chatCompletionWithTools({
+      endpoint,
+      apiKey,
+      model,
+      messages,
+      tools: [],
+      signal,
+      onContentDelta: (delta) => {
+        secondStreamedChars += delta.length;
+        onEvent({ type: "message_delta", data: { delta } });
+      },
+    });
+
+    if (secondCompletion.ok && secondCompletion.message) {
+      const secondText = String(secondCompletion.message.content || "").trim();
+      if (secondText && !secondStreamedChars) {
+        onEvent({ type: "message", data: { text: secondText } });
+      }
+    }
+  } else {
+    const text = visibleContent.trim();
+    if (text && !streamedChars) {
+      onEvent({ type: "message", data: { text } });
+    }
   }
 
   onEvent({ type: "status", data: { phase: "finished" } });

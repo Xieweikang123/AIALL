@@ -53,6 +53,11 @@ function bindModels() {
   );
 
   diffEditor.setModel({ original: originalModel, modified: modifiedModel });
+
+  setTimeout(() => {
+    if (!diffEditor) return;
+    diffEditor.revealFirstDiff();
+  }, 200);
 }
 
 function createDiffEditor() {

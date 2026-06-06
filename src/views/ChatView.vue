@@ -396,6 +396,7 @@ async function handleSend() {
     assistantMsg.meta = "请求模型中...";
     assistantMsg.content += "\n【模型】\n";
     assistantMsg.content += "抓取成功，开始请求模型（流式输出）...\n\n";
+    assistantMsg.content += `【发送给模型的提示词】\n\`\`\`\n${prompt}\n\`\`\`\n\n`;
     await scrollToBottom();
 
     const ai = await testAiModel({

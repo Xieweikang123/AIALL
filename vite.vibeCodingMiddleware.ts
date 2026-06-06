@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { sendSseEvent, sendSseHeaders } from "./server/httpUtils";
+import { chatCompletionWithTools, resolveChatEndpoint } from "./server/aiForward";
 import { runVibeAgent } from "./server/vibeAgent";
 import { buildProjectContext } from "./server/vibeProjectContext";
 import {
@@ -15,7 +16,7 @@ import {
   searchFiles,
   writeFileContent,
 } from "./server/vibeFs";
-import { gitStatus, gitDiff, gitDiffFile, gitCommit, gitLog, gitIsRepo, gitAdd, gitReset, gitDiscard, gitDiscardAll } from "./server/vibeGit";
+import { gitStatus, gitDiff, gitDiffFile, gitDiffContent, gitCommit, gitLog, gitIsRepo, gitAdd, gitReset, gitDiscard, gitDiscardAll, gitRemotes, gitFetch, gitPull, gitPush } from "./server/vibeGit";
 
 const execFileAsync = promisify(execFile);
 
@@ -710,6 +711,152 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
     }
   });
 
+  // GET /backend/vibe/git/diff-content
+  middlewares.use("/backend/vibe/git/diff-content", async (req, res) => {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { error: "仅支持 GET 请求" });
+      return;
+    }
+
+    try {
+      const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+      const projectPath = url.searchParams.get("path") || "";
+      const filePath = url.searchParams.get("file") || "";
+
+      if (!projectPath || !filePath) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 或 file 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(projectPath);
+      const result = await gitDiffContent(resolved, filePath);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "获取文件内容失败" });
+    }
+  });
+
+  // POST /backend/vibe/git/generate-message
+  middlewares.use("/backend/vibe/git/generate-message", async (req, res) => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "仅支持 POST 请求" });
+      return;
+    }
+
+    try {
+      const body = (await readJsonBody(req)) as {
+        path?: string;
+        endpoint?: string;
+        apiKey?: string;
+        model?: string;
+      };
+      if (!body.path?.trim()) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 参数" });
+        return;
+      }
+      if (!body.endpoint?.trim() || !body.model?.trim()) {
+        sendJson(res, 400, { ok: false, error: "缺少 AI 配置" });
+        return;
+      }
+
+      const resolved = path.resolve(body.path.trim());
+      const statusResult = await gitStatus(resolved);
+      const diffResult = await gitDiff(resolved);
+
+      const stagedFiles = statusResult.files.filter((f) => f.staged);
+      if (!stagedFiles.length) {
+        sendJson(res, 200, { ok: true, message: "" });
+        return;
+      }
+
+      const diffText = diffResult.patch || "";
+      const fileList = stagedFiles.map((f) => `${f.status}: ${f.path}`).join("\n");
+      const prompt = `你是一个 Git 提交信息生成器。根据以下已暂存的文件变更生成一条简洁的中文提交信息（一行，不超过 72 个字符）。
+
+已暂存文件列表：
+${fileList}
+
+Diff 内容：
+${diffText.slice(0, 8000)}
+
+要求：
+- 使用中文
+- 简明扼要描述做了什么
+- 不要加前缀如 "feat:" 或 "fix:"，直接描述变更内容
+- 不要加引号或句号`;
+
+      const chatEndpoint = resolveChatEndpoint(body.endpoint);
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (body.apiKey) headers.Authorization = `Bearer ${body.apiKey}`;
+
+      sendSseHeaders(res);
+
+      const aiResponse = await fetch(chatEndpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: body.model,
+          messages: [{ role: "user", content: prompt }],
+          stream: true,
+        }),
+      });
+
+      if (!aiResponse.ok) {
+        const errText = await aiResponse.text().catch(() => "");
+        sendSseEvent(res, "error", { message: `AI 请求失败，HTTP ${aiResponse.status}${errText ? `: ${errText.slice(0, 200)}` : ""}` });
+        res.end();
+        return;
+      }
+
+      const reader = aiResponse.body?.getReader();
+      if (!reader) {
+        sendSseEvent(res, "error", { message: "AI 响应体为空" });
+        res.end();
+        return;
+      }
+
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+      let content = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) continue;
+          const data = trimmed.slice(5).trim();
+          if (!data || data === "[DONE]") continue;
+
+          try {
+            const parsed = JSON.parse(data) as {
+              choices?: Array<{ delta?: { content?: string } }>;
+            };
+            const delta = parsed.choices?.[0]?.delta?.content;
+            if (delta) {
+              content += delta;
+              sendSseEvent(res, "delta", { text: delta });
+            }
+          } catch {
+            // skip malformed
+          }
+        }
+      }
+
+      const cleaned = content.trim().replace(/^["'"']|["'"']$/g, "").trim();
+      sendSseEvent(res, "done", { message: cleaned });
+      res.end();
+    } catch (error) {
+      sendSseEvent(res, "error", { message: error instanceof Error ? error.message : "生成提交信息失败" });
+      res.end();
+    }
+  });
+
   // POST /backend/vibe/git/commit
   middlewares.use("/backend/vibe/git/commit", async (req, res) => {
     if (req.method !== "POST") {
@@ -822,6 +969,96 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       sendJson(res, 200, result);
     } catch (error) {
       sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "丢弃更改失败" });
+    }
+  });
+
+  // GET /backend/vibe/git/remotes
+  middlewares.use("/backend/vibe/git/remotes", async (req, res) => {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { error: "仅支持 GET 请求" });
+      return;
+    }
+
+    try {
+      const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+      const projectPath = url.searchParams.get("path") || "";
+
+      if (!projectPath) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(projectPath);
+      const result = await gitRemotes(resolved);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "获取远程信息失败" });
+    }
+  });
+
+  // POST /backend/vibe/git/fetch
+  middlewares.use("/backend/vibe/git/fetch", async (req, res) => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "仅支持 POST 请求" });
+      return;
+    }
+
+    try {
+      const body = (await readJsonBody(req)) as { path?: string; remote?: string };
+      if (!body.path?.trim()) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(body.path.trim());
+      const result = await gitFetch(resolved, body.remote?.trim() || undefined);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "Fetch 失败" });
+    }
+  });
+
+  // POST /backend/vibe/git/pull
+  middlewares.use("/backend/vibe/git/pull", async (req, res) => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "仅支持 POST 请求" });
+      return;
+    }
+
+    try {
+      const body = (await readJsonBody(req)) as { path?: string; remote?: string; branch?: string };
+      if (!body.path?.trim()) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(body.path.trim());
+      const result = await gitPull(resolved, body.remote?.trim() || undefined, body.branch?.trim() || undefined);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "Pull 失败" });
+    }
+  });
+
+  // POST /backend/vibe/git/push
+  middlewares.use("/backend/vibe/git/push", async (req, res) => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "仅支持 POST 请求" });
+      return;
+    }
+
+    try {
+      const body = (await readJsonBody(req)) as { path?: string; remote?: string; branch?: string; setUpstream?: boolean };
+      if (!body.path?.trim()) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(body.path.trim());
+      const result = await gitPush(resolved, body.remote?.trim() || undefined, body.branch?.trim() || undefined, body.setUpstream);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "Push 失败" });
     }
   });
 }

@@ -53,6 +53,12 @@ export function registerAiRoutes(middlewares: ConnectApp) {
       const contentType = upstream.headers.get("content-type") || "application/json; charset=utf-8";
       res.setHeader("Content-Type", contentType);
 
+      if (body.stream) {
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("X-Accel-Buffering", "no");
+        if (res.socket) res.socket.setNoDelay(true);
+      }
+
       if (!upstream.body) {
         res.end();
         return;
@@ -62,7 +68,10 @@ export function registerAiRoutes(middlewares: ConnectApp) {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        if (value) res.write(Buffer.from(value));
+        if (value) {
+          res.write(Buffer.from(value));
+          if (typeof (res as any).flush === "function") (res as any).flush();
+        }
       }
       res.end();
     } catch (error) {

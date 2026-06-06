@@ -1,37 +1,33 @@
 <template>
   <div class="vibe-page">
-    <header class="page-head">
-      <div class="head-left">
+    <header class="app-toolbar">
+      <div class="toolbar-brand">
+        <span class="brand-icon" aria-hidden="true">⚡</span>
         <h1 class="title">Vibe Coding</h1>
-        <p class="desc">打开项目文件夹，浏览代码，用 AI 对话改代码、问问题。</p>
       </div>
-      <div class="head-actions">
-        <router-link class="secondary link-btn" to="/chat">AI 对话</router-link>
-        <router-link class="secondary link-btn" to="/ai-config">AI 配置</router-link>
-      </div>
-    </header>
-
-    <section class="project-bar">
-      <input
-        v-model="projectPath"
-        class="path-input"
-        type="text"
-        placeholder="可在此输入路径，或点击「打开项目」在弹窗地址栏输入"
-        @keydown.enter="openProjectByInput"
-      />
-      <button type="button" class="primary" :disabled="pickingFolder || loadingTree" @click="handleOpenProject">
-        {{ pickingFolder ? "选择文件夹…" : loadingTree ? "加载中..." : "打开项目" }}
-      </button>
-      <button type="button" class="secondary" :disabled="!projectPath.trim()" @click="refreshTree">刷新</button>
-      <div ref="projectHistoryRef" class="project-history-wrap">
-        <button
-          type="button"
-          class="ghost small"
-          :disabled="loadingTree || pickingFolder"
-          @click="toggleProjectHistory"
-        >
-          最近项目
+      <div class="toolbar-project">
+        <input
+          v-model="projectPath"
+          class="path-input"
+          type="text"
+          placeholder="输入项目路径，或点击「打开项目」"
+          @keydown.enter="openProjectByInput"
+        />
+        <button type="button" class="primary compact" :disabled="pickingFolder || loadingTree" @click="handleOpenProject">
+          {{ pickingFolder ? "选择…" : loadingTree ? "加载中" : "打开项目" }}
         </button>
+        <button type="button" class="secondary compact" :disabled="!projectPath.trim()" @click="refreshTree" title="刷新文件树">↻</button>
+      </div>
+      <div class="toolbar-actions">
+        <div ref="projectHistoryRef" class="project-history-wrap">
+          <button
+            type="button"
+            class="ghost small"
+            :disabled="loadingTree || pickingFolder"
+            @click="toggleProjectHistory"
+          >
+            最近
+          </button>
         <div v-if="projectHistoryOpen" class="project-history-dropdown">
           <div class="project-history-head">
             <div>
@@ -76,82 +72,84 @@
             </li>
           </ul>
         </div>
+        </div>
+        <span v-if="treeError" class="bar-error" :title="treeError">!</span>
+        <router-link class="ghost small link-btn" to="/chat">AI 对话</router-link>
+        <router-link class="ghost small link-btn" to="/ai-config">配置</router-link>
       </div>
-      <span v-if="treeError" class="bar-error">{{ treeError }}</span>
-    </section>
+    </header>
 
     <main ref="workspaceRef" class="workspace" :class="{ 'no-project': !projectOpened, 'editor-collapsed': editorCollapsed }">
       <aside class="file-panel" :style="{ width: filePanelWidth + 'px' }">
-        <div class="panel-head file-panel-head">
-          <div class="file-panel-tabs" role="group">
-            <button
-              type="button"
-              class="file-panel-tab"
-              :class="{ active: gitPanelMode === 'files' }"
-              @click="gitPanelMode = 'files'"
-            >
-              文件
-            </button>
-            <button
-              type="button"
-              class="file-panel-tab"
-              :class="{ active: gitPanelMode === 'git' }"
-              :disabled="!projectOpened"
-              @click="gitPanelMode = 'git'; refreshGitStatus()"
-            >
-              Git
-              <span v-if="gitStatus.length" class="git-badge">{{ gitStatus.length }}</span>
-            </button>
+        <div class="file-panel-head">
+          <div class="file-panel-row file-panel-top-row">
+            <div class="file-panel-tabs" role="group">
+              <button
+                type="button"
+                class="file-panel-tab"
+                :class="{ active: gitPanelMode === 'files' }"
+                @click="gitPanelMode = 'files'"
+              >
+                文件
+              </button>
+              <button
+                type="button"
+                class="file-panel-tab"
+                :class="{ active: gitPanelMode === 'git' }"
+                :disabled="!projectOpened"
+                @click="gitPanelMode = 'git'; refreshGitStatus()"
+              >
+                Git
+                <span v-if="gitStagedFiles.length" class="git-badge git-badge-staged">{{ gitStagedFiles.length }}</span>
+                <span v-if="gitUnstagedFiles.length" class="git-badge">{{ gitUnstagedFiles.length }}</span>
+              </button>
+            </div>
+            <div v-if="projectOpened && gitPanelMode === 'files'" class="file-toolbar">
+              <button type="button" class="icon-btn" title="新建文件" @click="createNewFile">+</button>
+              <button type="button" class="icon-btn" title="新建文件夹" @click="createNewFolder">📁</button>
+              <span v-if="editorCollapsed" class="toolbar-sep" />
+              <button
+                v-if="editorCollapsed"
+                type="button"
+                class="icon-btn"
+                title="展开编辑器"
+                @click="expandEditor"
+              >
+                ◧
+              </button>
+            </div>
           </div>
-          <div v-if="projectOpened && gitPanelMode === 'files'" class="file-toolbar">
-            <button type="button" class="ghost tiny" title="新建文件" @click="createNewFile">+文件</button>
-            <button type="button" class="ghost tiny" title="新建文件夹" @click="createNewFolder">+目录</button>
-            <button type="button" class="ghost tiny" title="重命名" :disabled="!selectedTreePath" @click="renameSelectedItem">
-              重命名
-            </button>
-            <button type="button" class="ghost tiny danger" title="删除" :disabled="!selectedTreePath" @click="deleteSelectedItem">
-              删除
-            </button>
-          </div>
-          <button
-            v-if="editorCollapsed && gitPanelMode === 'files'"
-            type="button"
-            class="ghost small"
-            title="展开编辑器"
-            @click="expandEditor"
-          >
-            编辑器
-          </button>
-          <div v-if="gitPanelMode === 'files'" class="search-mode-switch" role="group" aria-label="搜索模式">
-            <button
-              type="button"
-              class="search-mode-btn"
-              :class="{ active: searchMode === 'file' }"
+          <div v-if="gitPanelMode === 'files'" class="file-panel-row file-panel-search-row">
+            <div class="search-mode-switch" role="group" aria-label="搜索模式">
+              <button
+                type="button"
+                class="search-mode-btn"
+                :class="{ active: searchMode === 'file' }"
+                :disabled="!projectOpened"
+                @click="searchMode = 'file'"
+              >
+                文件
+              </button>
+              <button
+                type="button"
+                class="search-mode-btn"
+                :class="{ active: searchMode === 'content' }"
+                :disabled="!projectOpened"
+                @click="searchMode = 'content'"
+              >
+                内容
+              </button>
+            </div>
+            <input
+              ref="searchInputRef"
+              v-model="searchQuery"
+              class="search-input"
+              type="text"
+              :placeholder="searchMode === 'file' ? '搜索文件名…' : '搜索代码内容…'"
               :disabled="!projectOpened"
-              @click="searchMode = 'file'"
-            >
-              文件
-            </button>
-            <button
-              type="button"
-              class="search-mode-btn"
-              :class="{ active: searchMode === 'content' }"
-              :disabled="!projectOpened"
-              @click="searchMode = 'content'"
-            >
-              内容
-            </button>
+              @keydown.enter="handleSearch"
+            />
           </div>
-          <input
-            v-if="gitPanelMode === 'files'"
-            ref="searchInputRef"
-            v-model="searchQuery"
-            class="search-input"
-            type="text"
-            :placeholder="searchMode === 'file' ? '搜索文件名…' : '搜索代码内容…'"
-            :disabled="!projectOpened"
-            @keydown.enter="handleSearch"
-          />
         </div>
 
         <div v-if="gitPanelMode === 'git'">
@@ -164,6 +162,23 @@
               <span class="git-branch-name">{{ gitBranch }}</span>
               <button type="button" class="ghost tiny" :disabled="gitLoading" @click="refreshGitStatus">刷新</button>
             </div>
+            <div v-if="gitRemotes.length" class="git-remote-bar">
+              <div class="git-remote-info">
+                <span class="git-remote-label">↑{{ gitAhead }} ↓{{ gitBehind }}</span>
+                <span v-if="gitTrackingBranch" class="git-remote-tracking">{{ gitTrackingBranch }}</span>
+              </div>
+              <div class="git-remote-actions">
+                <button type="button" class="ghost tiny" :disabled="!!gitRemoteAction" @click="doFetch">
+                  {{ gitRemoteAction === 'fetch' ? '…' : 'Fetch' }}
+                </button>
+                <button type="button" class="ghost tiny" :disabled="!!gitRemoteAction" @click="doPull">
+                  {{ gitRemoteAction === 'pull' ? '…' : 'Pull' }}
+                </button>
+                <button type="button" class="ghost tiny" :disabled="!!gitRemoteAction" @click="doPush">
+                  {{ gitRemoteAction === 'push' ? '…' : 'Push' }}
+                </button>
+              </div>
+            </div>
             <div v-if="gitError" class="git-error">{{ gitError }}</div>
             <div class="git-commit-box">
               <input
@@ -171,57 +186,103 @@
                 class="git-commit-input"
                 type="text"
                 placeholder="提交信息…"
-                :disabled="gitCommitting || gitGenerating"
+                :disabled="gitCommitting || !!gitGenStep"
                 @keydown.enter="commitGit"
               />
-              <button
-                type="button"
-                class="ghost small"
-                :disabled="gitCommitting || gitGenerating || !gitStatus.length"
-                @click="generateCommitMessage"
-              >
-                {{ gitGenerating ? "生成中…" : "AI 生成" }}
-              </button>
-              <button
-                type="button"
-                class="primary small"
-                :disabled="gitCommitting || !gitCommitMessage.trim()"
-                @click="commitGit"
-              >
-                {{ gitCommitting ? "提交中…" : "提交" }}
-              </button>
+              <div class="git-commit-actions">
+                <button
+                  type="button"
+                  class="ghost small"
+                  :disabled="gitCommitting || !!gitGenStep || !gitStagedFiles.length"
+                  @click="generateCommitMessage"
+                >
+                  {{ gitGenStep || "AI 生成" }}
+                </button>
+                <button
+                  type="button"
+                  class="primary small"
+                  :disabled="gitCommitting || !gitCommitMessage.trim() || !gitStagedFiles.length"
+                  @click="commitGit"
+                >
+                  {{ gitCommitting ? "提交中…" : `提交 (${gitStagedFiles.length})` }}
+                </button>
+              </div>
             </div>
             <div v-if="!gitStatus.length" class="panel-empty">无本地改动</div>
-            <div v-else class="git-file-list">
-              <div
-                v-for="file in gitStatus"
-                :key="file.path"
-                class="git-file-item"
-                :class="{ active: selectedGitFile === file.path }"
-                @click="showGitFileDiff(file.path)"
-              >
-                <span
-                  class="git-file-status"
-                  :style="{ color: gitStatusColor(file.status) }"
-                >
-                  {{ gitStatusIcon(file.status) }}
-                </span>
-                <span class="git-file-path" :title="file.path">{{ file.path }}</span>
+            <template v-else>
+              <div v-if="gitStagedFiles.length" class="git-section">
+                <div class="git-section-head">
+                  <span class="git-section-title">已暂存 ({{ gitStagedFiles.length }})</span>
+                  <button type="button" class="ghost tiny" @click="unstageAll">取消全部</button>
+                </div>
+                <div class="git-file-list">
+                  <div
+                    v-for="file in gitStagedFiles"
+                    :key="file.path"
+                    class="git-file-item"
+                    :class="{ active: selectedGitFile === file.path }"
+                    @click="showGitFileDiff(file.path)"
+                  >
+                    <span class="git-file-check" @click.stop="unstageFile(file.path)">✓</span>
+                    <span
+                      class="git-file-status"
+                      :style="{ color: gitStatusColor(file.status) }"
+                    >
+                      {{ gitStatusIcon(file.status) }}
+                    </span>
+                    <span class="git-file-path" :title="file.path">{{ file.path }}</span>
+                    <button type="button" class="ghost tiny git-file-btn" title="取消暂存" @click.stop="unstageFile(file.path)">−</button>
+                  </div>
+                </div>
               </div>
-            </div>
-            <div v-if="selectedGitFile && gitDiffPatch" class="git-diff-panel">
-              <div class="git-diff-header">
-                <span class="git-diff-title">{{ selectedGitFile }}</span>
-                <button type="button" class="ghost tiny" @click="selectedGitFile = ''; gitDiffPatch = ''">关闭</button>
+              <div v-if="gitUnstagedFiles.length" class="git-section">
+                <div class="git-section-head">
+                  <span class="git-section-title">未暂存 ({{ gitUnstagedFiles.length }})</span>
+                  <div class="git-section-actions">
+                    <button type="button" class="ghost tiny" @click="stageAll">全部暂存</button>
+                    <button type="button" class="ghost tiny danger" @click="discardAll">丢弃全部</button>
+                  </div>
+                </div>
+                <div class="git-file-list">
+                  <div
+                    v-for="file in gitUnstagedFiles"
+                    :key="file.path"
+                    class="git-file-item"
+                    :class="{ active: selectedGitFile === file.path }"
+                    @click="showGitFileDiff(file.path)"
+                  >
+                    <span class="git-file-check" @click.stop="stageFile(file.path)">+</span>
+                    <span
+                      class="git-file-status"
+                      :style="{ color: gitStatusColor(file.status) }"
+                    >
+                      {{ gitStatusIcon(file.status) }}
+                    </span>
+                    <span class="git-file-path" :title="file.path">{{ file.path }}</span>
+                    <button type="button" class="ghost tiny git-file-btn" title="暂存" @click.stop="stageFile(file.path)">+</button>
+                    <button type="button" class="ghost tiny danger git-file-btn" title="丢弃更改" @click.stop="discardFile(file.path)">✕</button>
+                  </div>
+                </div>
               </div>
-              <pre class="git-diff-content">{{ gitDiffPatch }}</pre>
+            </template>
+            <div class="git-log-section">
+              <button type="button" class="ghost tiny" style="width:100%;text-align:left" @click="gitLogOpen = !gitLogOpen">
+                {{ gitLogOpen ? "▾" : "▸" }} 提交历史
+              </button>
+              <div v-if="gitLogOpen" class="git-log-list">
+                <div v-if="!gitLogEntries.length" class="panel-empty">无历史</div>
+                <div v-for="entry in gitLogEntries" :key="entry.hash" class="git-log-item">
+                  <span class="git-log-hash">{{ entry.shortHash }}</span>
+                  <span class="git-log-msg">{{ entry.message }}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        <div v-if="!projectOpened" class="panel-empty">请先打开项目文件夹</div>
+        <div v-if="gitPanelMode === 'files' && !projectOpened" class="panel-empty">请先打开项目文件夹</div>
 
-        <div v-else-if="searchMode === 'content' && contentSearchResults.length" class="file-list">
+        <div v-else-if="gitPanelMode === 'files' && searchMode === 'content' && contentSearchResults.length" class="file-list">
           <button
             v-for="item in contentSearchResults"
             :key="`${item.path}:${item.line}`"
@@ -238,21 +299,24 @@
           </button>
         </div>
 
-        <div v-else-if="searchMode === 'file' && searchResults.length" class="file-list">
-          <button
+        <div v-else-if="gitPanelMode === 'files' && searchMode === 'file' && searchResults.length" class="file-list">
+          <div
             v-for="item in searchResults"
             :key="item.path"
-            type="button"
+            role="button"
+            tabindex="0"
             class="file-item"
-            :class="{ active: item.path === activeFilePath }"
-            @click="openFile(item.path)"
+            :class="{ active: item.path === activeFilePath, 'file-item-draggable': !item.isDirectory }"
+            @keydown.enter="openFile(item.path)"
+            @keydown.space.prevent="openFile(item.path)"
+            @pointerdown="onSearchResultPointerDown($event, item)"
           >
             <span class="file-icon">{{ item.isDirectory ? "📁" : "📄" }}</span>
             <span class="file-name">{{ item.name }}</span>
-          </button>
+          </div>
         </div>
 
-        <div v-else class="file-tree">
+        <div v-else-if="gitPanelMode === 'files'" class="file-tree">
           <FileTreeNode
             v-for="node in fileTree"
             :key="node.path"
@@ -261,12 +325,16 @@
             :selected-path="selectedTreePath"
             :renaming-path="renamingPath"
             :expanded-dirs="expandedDirs"
+            :project-path="projectPath"
             @toggle="toggleDir"
             @open="openFile"
             @select="selectTreeItem"
             @contextmenu="showContextMenu"
             @rename="commitRename"
             @rename-cancel="cancelRename"
+            @file-drag-start="onFileDragStart"
+            @file-drag-move="onFileDragMove"
+            @file-drag-end="onFileDragEnd"
           />
         </div>
       </aside>
@@ -274,37 +342,37 @@
       <div class="resize-handle" @mousedown="startResize('file', $event)"></div>
 
       <section v-show="!editorCollapsed" class="editor-panel">
-        <div v-if="openTabs.length" class="editor-tabs">
-          <button
-            v-for="tab in openTabs"
-            :key="tab.path"
-            type="button"
-            class="editor-tab"
-            :class="{ active: tab.path === activeFilePath, dirty: tab.dirty }"
-            :title="tab.path"
-            @click="switchTab(tab.path)"
-          >
-            <span class="editor-tab-name">{{ fileName(tab.path) }}</span>
-            <span v-if="tab.dirty" class="editor-tab-dot" aria-hidden="true">•</span>
-            <span
-              class="editor-tab-close"
-              role="button"
-              tabindex="0"
-              title="关闭"
-              @click.stop="closeTab(tab.path)"
-              @keydown.enter.stop.prevent="closeTab(tab.path)"
+        <div class="editor-header">
+          <div v-if="openTabs.length" class="editor-tabs">
+            <button
+              v-for="tab in openTabs"
+              :key="tab.path"
+              type="button"
+              class="editor-tab"
+              :class="{ active: tab.path === activeFilePath, dirty: tab.dirty }"
+              :title="tab.path"
+              @click="switchTab(tab.path)"
             >
-              ×
-            </span>
-          </button>
-        </div>
-        <div class="panel-head">
-          <span class="panel-title">{{ activeFilePath ? fileName(activeFilePath) : "未打开文件" }}</span>
-          <div class="panel-actions">
+              <span class="editor-tab-name">{{ fileName(tab.path) }}</span>
+              <span v-if="tab.dirty" class="editor-tab-dot" aria-hidden="true">•</span>
+              <span
+                class="editor-tab-close"
+                role="button"
+                tabindex="0"
+                title="关闭"
+                @click.stop="closeTab(tab.path)"
+                @keydown.enter.stop.prevent="closeTab(tab.path)"
+              >
+                ×
+              </span>
+            </button>
+          </div>
+          <div v-else class="editor-header-title">未打开文件</div>
+          <div class="editor-header-actions">
             <button
               v-if="activeFileDiff"
               type="button"
-              class="secondary"
+              class="ghost tiny"
               @click="toggleDiffMode"
             >
               {{ showDiffMode ? "编辑" : "对比" }}
@@ -312,22 +380,24 @@
             <span v-if="fileDirty && !showDiffMode" class="dirty-badge">未保存</span>
             <button
               type="button"
-              class="secondary"
+              class="ghost tiny"
               :disabled="!activeFilePath || !fileDirty || showDiffMode"
               @click="saveFile"
             >
               保存
             </button>
-            <button type="button" class="secondary" :disabled="!activeFilePath || showDiffMode" @click="reloadFile">
-              重新加载
+            <button type="button" class="ghost tiny" :disabled="!activeFilePath || showDiffMode" @click="reloadFile">
+              重载
             </button>
-            <button type="button" class="ghost small" title="收起编辑器" @click="collapseEditor">收起</button>
+            <button type="button" class="ghost tiny" title="收起编辑器" @click="collapseEditor">收起</button>
           </div>
         </div>
 
         <div v-if="!activeFilePath" class="editor-empty">
-          <p>从左侧选择文件开始编辑</p>
-          <button type="button" class="secondary" @click="collapseEditor">收起编辑器</button>
+          <div class="editor-empty-icon" aria-hidden="true">📂</div>
+          <p class="editor-empty-title">从左侧选择文件开始编辑</p>
+          <p class="editor-empty-hint">支持多标签、Diff 对比、Ctrl+S 保存</p>
+          <button type="button" class="secondary compact" @click="collapseEditor">收起编辑器</button>
         </div>
 
         <div v-else-if="fileLoadError" class="editor-empty error">{{ fileLoadError }}</div>
@@ -361,7 +431,16 @@
         @mousedown="startResize('chat', $event)"
       ></div>
 
-      <aside class="chat-panel" :class="{ 'chat-expanded': editorCollapsed }" :style="chatPanelStyle">
+      <aside
+        ref="chatDropZoneRef"
+        class="chat-panel"
+        :class="{ 'chat-expanded': editorCollapsed, 'drag-over': isDragging }"
+        @dragenter="onChatDragEnter"
+        @dragover="onChatDragOver"
+        @dragleave="onChatDragLeave"
+        @drop="onChatDrop"
+        :style="chatPanelStyle"
+      >
         <div class="panel-head">
           <span class="panel-title">AI 助手</span>
           <div class="panel-head-right">
@@ -443,7 +522,9 @@
 
         <div ref="chatScrollRef" class="chat-scroll">
           <div v-if="!chatMessages.length" class="chat-empty">
-            <p>Agent 会探索项目；Build 模式修改需你确认后才落盘。输入 <code>@</code> 可引用文件。</p>
+            <div class="chat-empty-icon" aria-hidden="true">🤖</div>
+            <p class="chat-empty-title">AI 编程助手</p>
+            <p class="chat-empty-desc">Agent 会探索项目；Build 模式修改需你确认后才落盘。输入 <code>@</code> 可引用文件。</p>
             <div class="chips">
               <button type="button" class="chip" :disabled="chatSending" @click="applyExample('解释这个项目是做什么的')">
                 解释项目
@@ -462,6 +543,8 @@
 
           <div v-else class="msg-list">
             <div v-for="m in chatMessages" :key="m.id" class="msg" :class="m.role" @mouseup="onMessageSelect($event, m)">
+              <div class="msg-avatar" aria-hidden="true">{{ m.role === "user" ? "你" : "AI" }}</div>
+              <div class="msg-body">
               <div class="msg-head">
                 <div class="msg-role">{{ m.role === "user" ? "你" : "Agent" }}</div>
                 <div v-if="!chatSending" class="msg-toolbar">
@@ -595,6 +678,7 @@
                 <span v-else-if="m.reverted" class="reverted-badge">已回滚</span>
                 <span v-else-if="m.rejected" class="rejected-badge">已拒绝</span>
               </div>
+              </div>
             </div>
           </div>
         </div>
@@ -609,32 +693,7 @@
           <span class="quote-icon">❝</span> 引用
         </div>
 
-        <footer
-          class="chat-composer"
-          :class="{ 'drag-over': isDragging }"
-          @dragenter.prevent="onDragEnter"
-          @dragover.prevent="onDragOver"
-          @dragleave.prevent="onDragLeave"
-          @drop.prevent="onDrop"
-        >
-          <div v-if="droppedFiles.length || referencedFiles.length" class="dropped-files">
-            <span
-              v-for="(file, idx) in droppedFiles"
-              :key="`drop-${idx}`"
-              class="dropped-file-tag"
-            >
-              📄 {{ file.name }}
-              <button type="button" class="drop-file-remove" @click="removeDroppedFile(idx)">×</button>
-            </span>
-            <span
-              v-for="(file, idx) in referencedFiles"
-              :key="`ref-${file.path}`"
-              class="dropped-file-tag ref-tag"
-            >
-              @ {{ file.relative }}
-              <button type="button" class="drop-file-remove" @click="removeReferencedFile(idx)">×</button>
-            </span>
-          </div>
+        <footer class="chat-composer">
           <div v-if="quotedMessage" class="quoted-preview">
             <div class="quoted-preview-header">
               <span class="quoted-preview-label">
@@ -644,19 +703,6 @@
               <button type="button" class="quoted-preview-close" @click="quotedMessage = null">×</button>
             </div>
             <div class="quoted-preview-body">{{ quotedMessage.content }}</div>
-          </div>
-          <div v-if="mentionOpen && mentionResults.length" class="mention-dropdown">
-            <button
-              v-for="(item, idx) in mentionResults"
-              :key="item.path"
-              type="button"
-              class="mention-item"
-              :class="{ active: idx === mentionActiveIndex }"
-              @mousedown.prevent="selectMention(item)"
-            >
-              <span class="mention-item-name">{{ item.name }}</span>
-              <span class="mention-item-path">{{ item.relative }}</span>
-            </button>
           </div>
           <div class="chat-mode-switch" role="group" aria-label="对话模式">
             <button
@@ -678,15 +724,34 @@
               Build
             </button>
           </div>
-          <textarea
-            ref="chatInputRef"
-            v-model="chatInput"
-            class="chat-input"
-            rows="3"
-            :placeholder="chatPlaceholder"
-            @input="onChatInput"
-            @keydown="onChatKeydown"
-          />
+          <div class="chat-input-field" @keydown.capture="onComposerFieldKeydown">
+            <div v-if="mentionOpen && mentionResults.length" class="mention-dropdown">
+              <button
+                v-for="(item, idx) in mentionResults"
+                :key="item.path"
+                type="button"
+                class="mention-item"
+                :class="{ active: idx === mentionActiveIndex }"
+                @mousedown.prevent="selectMention(item)"
+              >
+                <span class="mention-item-name">{{ item.name }}</span>
+                <span class="mention-item-path">{{ item.relative }}</span>
+              </button>
+            </div>
+            <div class="chat-input-box" :class="{ focused: chatInputFocused }">
+              <ChatComposerEditor
+                ref="composerRef"
+                class="chat-composer-editor"
+                :placeholder="chatPlaceholder"
+                :disabled="chatSending"
+                @mention-change="onComposerMentionChange"
+                @enter-send="sendChat"
+                @update:empty="composerEmpty = $event"
+                @focus="chatInputFocused = true"
+                @blur="chatInputFocused = false"
+              />
+            </div>
+          </div>
           <div class="chat-bottom">
             <span v-if="chatError" class="chat-error">{{ chatError }}</span>
             <span v-else-if="chatSending" class="chat-running">{{ chatRunningText }}</span>
@@ -703,8 +768,24 @@
     </main>
 
     <Teleport to="body">
+      <div
+        v-if="fileDragGhost"
+        class="file-drag-ghost"
+        :style="{ left: fileDragGhost.x + 12 + 'px', top: fileDragGhost.y + 12 + 'px' }"
+      >
+        @ {{ fileDragGhost.relative }}
+      </div>
       <div v-if="contextMenu.show" class="ctx-overlay" @click="hideContextMenu" @contextmenu.prevent="hideContextMenu">
         <div class="ctx-menu" :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }" @click.stop>
+          <button
+            v-if="contextMenuTargetIsFile"
+            type="button"
+            class="ctx-item"
+            @click="contextMenuAttachToChat"
+          >
+            引用到对话
+          </button>
+          <div v-if="contextMenuTargetIsFile" class="ctx-sep" />
           <button type="button" class="ctx-item" @click="contextMenuCreateFile">+ 新建文件</button>
           <button type="button" class="ctx-item" @click="contextMenuCreateFolder">+ 新建文件夹</button>
           <div class="ctx-sep" />
@@ -718,6 +799,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import ChatComposerEditor from "../components/ChatComposerEditor.vue";
 import ChatMarkdown from "../components/ChatMarkdown.vue";
 import CodeMonacoDiffEditor from "../components/CodeMonacoDiffEditor.vue";
 import CodeMonacoEditor from "../components/CodeMonacoEditor.vue";
@@ -764,13 +846,20 @@ import {
 import {
   fetchGitStatus,
   fetchGitDiff,
+  fetchGitDiffContent,
   commitGitChanges,
   fetchGitLog,
   stageGitFiles,
   unstageGitFiles,
   discardGitFiles,
+  generateCommitMessage as generateCommitMessageApi,
+  fetchGitRemotes,
+  gitFetchRemote,
+  gitPullRemote,
+  gitPushRemote,
   type GitStatusFile,
   type GitLogEntry,
+  type GitRemoteInfo,
 } from "../services/vibeGitClient";
 
 const STORAGE_KEY = "vibe-coding-project";
@@ -891,7 +980,6 @@ function loadChatMode(): VibeChatMode {
 }
 
 const chatMode = ref<VibeChatMode>(loadChatMode());
-const chatInput = ref("");
 const chatMessages = ref<ChatMessage[]>([]);
 const chatSending = ref(false);
 const chatError = ref("");
@@ -902,12 +990,6 @@ let scrollChatRaf = 0;
 const historyOpen = ref(false);
 const activeSessionId = ref("");
 const pendingPrompts: string[] = [];
-
-interface DroppedFile {
-  name: string;
-  path: string;
-  content: string;
-}
 
 interface ReferencedFile {
   name: string;
@@ -921,15 +1003,17 @@ interface ProjectFileItem {
   relative: string;
 }
 
-const droppedFiles = ref<DroppedFile[]>([]);
-const referencedFiles = ref<ReferencedFile[]>([]);
-const chatInputRef = ref<HTMLTextAreaElement | null>(null);
+const composerRef = ref<InstanceType<typeof ChatComposerEditor> | null>(null);
+const composerEmpty = ref(true);
+const chatDropZoneRef = ref<HTMLElement | null>(null);
+const chatInputFocused = ref(false);
 const mentionOpen = ref(false);
 const mentionQuery = ref("");
 const mentionActiveIndex = ref(0);
 const mentionRemoteResults = ref<ProjectFileItem[]>([]);
 let mentionSearchTimer: ReturnType<typeof setTimeout> | null = null;
 const isDragging = ref(false);
+const fileDragGhost = ref<{ relative: string; x: number; y: number } | null>(null);
 let dragCounter = 0;
 const sessionList = ref<VibeChatSessionMeta[]>([]);
 const projectHistoryOpen = ref(false);
@@ -944,12 +1028,26 @@ const gitLoading = ref(false);
 const gitError = ref("");
 const gitCommitMessage = ref("");
 const gitCommitting = ref(false);
-const gitGenerating = ref(false);
+const gitGenStep = ref("");
 const gitLogEntries = ref<GitLogEntry[]>([]);
+const gitLogOpen = ref(false);
 const selectedGitFile = ref("");
-const gitDiffPatch = ref("");
+const gitRemotes = ref<GitRemoteInfo[]>([]);
+const gitTrackingBranch = ref("");
+const gitAhead = ref(0);
+const gitBehind = ref(0);
+const gitRemoteLoading = ref(false);
+const gitRemoteAction = ref("");
+
+const gitStagedFiles = computed(() => gitStatus.value.filter((f) => f.staged));
+const gitUnstagedFiles = computed(() => gitStatus.value.filter((f) => !f.staged));
 
 const contextMenu = ref({ show: false, x: 0, y: 0, path: "" });
+
+const contextMenuTargetIsFile = computed(() => {
+  const node = findNode(fileTree.value, contextMenu.value.path);
+  return Boolean(node && !node.isDirectory);
+});
 const renamingPath = ref("");
 
 const aiConfig = ref({ endpoint: "", apiKey: "", model: "" });
@@ -963,22 +1061,19 @@ const aiConfigStatusText = computed(() => {
   return modelNameForDisplay.value;
 });
 const canSendChat = computed(
-  () =>
-    (Boolean(chatInput.value.trim()) || droppedFiles.value.length > 0 || referencedFiles.value.length > 0) &&
-    configReady.value &&
-    projectOpened.value,
+  () => !composerEmpty.value && configReady.value && projectOpened.value,
 );
 
 const chatPlaceholder = computed(() =>
   chatMode.value === "ask"
-    ? "提问、解释代码（输入 @ 引用文件，Enter 发送）"
-    : "描述要改什么（输入 @ 引用文件，Enter 发送，Shift+Enter 换行）",
+    ? "提问、解释代码（拖动文件到右侧或 @ 引用，Enter 发送）"
+    : "描述要改什么（拖动文件到右侧或 @ 引用，Enter 发送，Shift+Enter 换行）",
 );
 
 const chatHintText = computed(() =>
   chatMode.value === "ask"
-    ? "Ask 模式 · 含项目结构，不改文件 · 输入 @ 引用文件"
-    : "Build 模式 · 修改需确认后落盘 · 输入 @ 引用文件",
+    ? "Ask 模式 · 按住文件拖到 AI 面板 · 或输入 @ 引用"
+    : "Build 模式 · 按住文件拖到 AI 面板 · 或输入 @ 引用",
 );
 
 const chatRunningText = computed(() =>
@@ -1143,6 +1238,12 @@ function collapseEditor() {
 function expandEditor() {
   editorCollapsed.value = false;
   saveEditorCollapsed();
+}
+
+function syncEditorPanelForOpenFiles() {
+  if (!activeFilePath.value && projectOpened.value) {
+    collapseEditor();
+  }
 }
 
 function phaseBadgeLabel(phase?: string): string {
@@ -1418,6 +1519,7 @@ async function openProjectByPath(dirPath: string) {
     chatMessages.value = normalizeChatMessages(loadVibeChatHistory(normalized));
     refreshSessionList(normalized);
     refreshGitStatus();
+    syncEditorPanelForOpenFiles();
     await scrollChatToBottom(true);
   } catch (e) {
     projectOpened.value = false;
@@ -1470,6 +1572,16 @@ async function refreshGitStatus() {
     gitIsRepo.value = result.isRepo;
     gitBranch.value = result.branch;
     gitStatus.value = result.files;
+
+    if (result.isRepo) {
+      refreshGitRemotes();
+      if (gitLogOpen.value) {
+        const logResult = await fetchGitLog(projectPath.value.trim(), 20);
+        if (logResult.ok) {
+          gitLogEntries.value = logResult.entries;
+        }
+      }
+    }
   } catch (e) {
     gitError.value = e instanceof Error ? e.message : "获取 Git 状态失败";
   } finally {
@@ -1479,6 +1591,10 @@ async function refreshGitStatus() {
 
 async function commitGit() {
   if (!projectOpened.value || !gitCommitMessage.value.trim()) return;
+  if (!gitStagedFiles.value.length) {
+    gitError.value = "请先暂存要提交的文件";
+    return;
+  }
   gitCommitting.value = true;
   gitError.value = "";
   try {
@@ -1497,74 +1613,138 @@ async function commitGit() {
   }
 }
 
+async function stageFile(filePath: string) {
+  if (!projectOpened.value) return;
+  gitError.value = "";
+  try {
+    const result = await stageGitFiles(projectPath.value.trim(), [filePath]);
+    if (!result.ok) {
+      gitError.value = result.error || "暂存失败";
+      return;
+    }
+    await refreshGitStatus();
+  } catch (e) {
+    gitError.value = e instanceof Error ? e.message : "暂存失败";
+  }
+}
+
+async function unstageFile(filePath: string) {
+  if (!projectOpened.value) return;
+  gitError.value = "";
+  try {
+    const result = await unstageGitFiles(projectPath.value.trim(), [filePath]);
+    if (!result.ok) {
+      gitError.value = result.error || "取消暂存失败";
+      return;
+    }
+    await refreshGitStatus();
+  } catch (e) {
+    gitError.value = e instanceof Error ? e.message : "取消暂存失败";
+  }
+}
+
+async function stageAll() {
+  if (!projectOpened.value) return;
+  gitError.value = "";
+  try {
+    const result = await stageGitFiles(projectPath.value.trim(), []);
+    if (!result.ok) {
+      gitError.value = result.error || "暂存失败";
+      return;
+    }
+    await refreshGitStatus();
+  } catch (e) {
+    gitError.value = e instanceof Error ? e.message : "暂存失败";
+  }
+}
+
+async function unstageAll() {
+  if (!projectOpened.value) return;
+  gitError.value = "";
+  try {
+    const result = await unstageGitFiles(projectPath.value.trim(), []);
+    if (!result.ok) {
+      gitError.value = result.error || "取消暂存失败";
+      return;
+    }
+    await refreshGitStatus();
+  } catch (e) {
+    gitError.value = e instanceof Error ? e.message : "取消暂存失败";
+  }
+}
+
+async function discardFile(filePath: string) {
+  if (!projectOpened.value) return;
+  if (!window.confirm(`确定丢弃 ${filePath} 的更改？`)) return;
+  gitError.value = "";
+  try {
+    const result = await discardGitFiles(projectPath.value.trim(), [filePath]);
+    if (!result.ok) {
+      gitError.value = result.error || "丢弃更改失败";
+      return;
+    }
+    await refreshGitStatus();
+    await refreshTree();
+  } catch (e) {
+    gitError.value = e instanceof Error ? e.message : "丢弃更改失败";
+  }
+}
+
+async function discardAll() {
+  if (!projectOpened.value) return;
+  if (!window.confirm("确定丢弃所有未暂存的更改？")) return;
+  gitError.value = "";
+  try {
+    const result = await discardGitFiles(projectPath.value.trim(), []);
+    if (!result.ok) {
+      gitError.value = result.error || "丢弃更改失败";
+      return;
+    }
+    await refreshGitStatus();
+    await refreshTree();
+  } catch (e) {
+    gitError.value = e instanceof Error ? e.message : "丢弃更改失败";
+  }
+}
+
 async function generateCommitMessage() {
-  if (!projectOpened.value || !gitStatus.value.length) return;
+  if (!projectOpened.value || !gitStagedFiles.value.length) return;
   if (!configReady.value) {
     gitError.value = "请先配置 AI 模型";
     return;
   }
-  gitGenerating.value = true;
   gitError.value = "";
   try {
-    const diffResult = await fetchGitDiff(projectPath.value.trim());
-    if (!diffResult.ok) {
-      gitError.value = diffResult.error || "获取 diff 失败";
-      return;
-    }
-    const diffText = diffResult.patch || "";
-    if (!diffText.trim()) {
-      gitError.value = "没有可提交的变更";
-      return;
-    }
-    const fileList = gitStatus.value.map((f) => `${f.status}: ${f.path}`).join("\n");
-    const prompt = `你是一个 Git 提交信息生成器。根据以下文件变更生成一条简洁的中文提交信息（一行，不超过 72 个字符）。
+    gitGenStep.value = "获取变更…";
+    await new Promise((r) => setTimeout(r, 100));
 
-变更文件列表：
-${fileList}
-
-Diff 内容：
-${diffText.slice(0, 8000)}
-
-要求：
-- 使用中文
-- 简明扼要描述做了什么
-- 不要加前缀如 "feat:" 或 "fix:"，直接描述变更内容
-- 不要加引号或句号`;
-
-    const endpoint = aiConfig.value.endpoint.trim();
-    const url = endpoint.replace(/\/+$/, "") + (endpoint.endsWith("/chat/completions") ? "" : "/chat/completions");
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(aiConfig.value.apiKey.trim() ? { Authorization: `Bearer ${aiConfig.value.apiKey.trim()}` } : {}),
+    gitGenStep.value = "AI 生成中…";
+    let streamText = "";
+    const result = await generateCommitMessageApi(
+      projectPath.value.trim(),
+      aiConfig.value.endpoint.trim(),
+      aiConfig.value.apiKey.trim(),
+      aiConfig.value.model.trim(),
+      (delta) => {
+        streamText += delta;
+        gitCommitMessage.value = streamText.replace(/^["'"']|["'"']$/g, "").trim();
       },
-      body: JSON.stringify({
-        model: aiConfig.value.model.trim(),
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.3,
-        max_tokens: 100,
-      }),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => "");
-      gitError.value = `AI 请求失败：HTTP ${response.status}${errText ? ` - ${errText.slice(0, 200)}` : ""}`;
+    );
+    if (!result.ok) {
+      gitError.value = result.error || "AI 生成失败";
       return;
     }
-
-    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    const content = data.choices?.[0]?.message?.content?.trim() || "";
-    if (!content) {
+    if (!result.message) {
       gitError.value = "AI 未返回内容";
       return;
     }
-    gitCommitMessage.value = content.replace(/^["'"']|["'"']$/g, "").trim();
+    gitGenStep.value = "完成 ✓";
+    gitCommitMessage.value = result.message;
+    await new Promise((r) => setTimeout(r, 600));
   } catch (e) {
     gitError.value = e instanceof Error ? e.message : "AI 生成提交信息失败";
   } finally {
-    gitGenerating.value = false;
+    gitGenStep.value = "";
   }
 }
 
@@ -1593,15 +1773,92 @@ function gitStatusColor(status: string): string {
 async function showGitFileDiff(filePath: string) {
   if (!projectOpened.value) return;
   selectedGitFile.value = filePath;
+  gitError.value = "";
   try {
-    const result = await fetchGitDiff(projectPath.value.trim(), filePath);
+    const result = await fetchGitDiffContent(projectPath.value.trim(), filePath);
     if (result.ok) {
-      gitDiffPatch.value = result.patch;
+      const fullPath = resolveFullPathFromRel(filePath);
+      setFileDiff(fullPath, { before: result.before, after: result.after });
+      await openFile(fullPath);
+      showDiffMode.value = true;
     } else {
-      gitDiffPatch.value = result.error || "获取 diff 失败";
+      gitError.value = result.error || "获取 diff 失败";
     }
   } catch (e) {
-    gitDiffPatch.value = e instanceof Error ? e.message : "获取 diff 失败";
+    gitError.value = e instanceof Error ? e.message : "获取 diff 失败";
+  }
+}
+
+async function refreshGitRemotes() {
+  if (!projectOpened.value || !gitIsRepo.value) return;
+  gitRemoteLoading.value = true;
+  try {
+    const result = await fetchGitRemotes(projectPath.value.trim());
+    if (result.ok) {
+      gitRemotes.value = result.remotes;
+      gitTrackingBranch.value = result.trackingBranch;
+      gitAhead.value = result.ahead;
+      gitBehind.value = result.behind;
+    }
+  } catch {
+    // ignore
+  } finally {
+    gitRemoteLoading.value = false;
+  }
+}
+
+async function doFetch() {
+  if (!projectOpened.value) return;
+  gitRemoteAction.value = "fetch";
+  gitError.value = "";
+  try {
+    const result = await gitFetchRemote(projectPath.value.trim());
+    if (!result.ok) {
+      gitError.value = result.error || "Fetch 失败";
+      return;
+    }
+    await refreshGitRemotes();
+  } catch (e) {
+    gitError.value = e instanceof Error ? e.message : "Fetch 失败";
+  } finally {
+    gitRemoteAction.value = "";
+  }
+}
+
+async function doPull() {
+  if (!projectOpened.value) return;
+  gitRemoteAction.value = "pull";
+  gitError.value = "";
+  try {
+    const result = await gitPullRemote(projectPath.value.trim());
+    if (!result.ok) {
+      gitError.value = result.error || "Pull 失败";
+      return;
+    }
+    await refreshGitStatus();
+    await refreshGitRemotes();
+  } catch (e) {
+    gitError.value = e instanceof Error ? e.message : "Pull 失败";
+  } finally {
+    gitRemoteAction.value = "";
+  }
+}
+
+async function doPush() {
+  if (!projectOpened.value) return;
+  gitRemoteAction.value = "push";
+  gitError.value = "";
+  try {
+    const result = await gitPushRemote(projectPath.value.trim());
+    if (!result.ok) {
+      gitError.value = result.error || "Push 失败";
+      return;
+    }
+    await refreshGitRemotes();
+  } catch (e) {
+    gitError.value = e instanceof Error ? e.message : "Push 失败";
+  } finally {
+    gitRemoteAction.value = "";
   }
 }
 
@@ -1771,6 +2028,7 @@ async function closeTab(path: string) {
   fileDirty.value = false;
   fileLoadError.value = "";
   showDiffMode.value = false;
+  syncEditorPanelForOpenFiles();
 }
 
 function updateOpenTabPath(from: string, to: string) {
@@ -1875,6 +2133,7 @@ async function deleteSelectedItem() {
       activeFilePath.value = "";
       fileContent.value = "";
       fileDirty.value = false;
+      syncEditorPanelForOpenFiles();
     }
     showDiffMode.value = false;
   }
@@ -1916,6 +2175,14 @@ function contextMenuCreateFolder() {
   selectedTreePath.value = parent;
   hideContextMenu();
   void createNewFolder();
+}
+
+function contextMenuAttachToChat() {
+  const path = contextMenu.value.path;
+  const node = findNode(fileTree.value, path);
+  hideContextMenu();
+  if (!path || node?.isDirectory) return;
+  attachFileToChat(path, node?.name);
 }
 
 function contextMenuRename() {
@@ -2048,7 +2315,9 @@ function onEditorSelect(text: string) {
 function askAiWithCode() {
   if (!selectedCode.value) return;
   const filePath = activeFilePath.value || "未知文件";
-  chatInput.value = `请帮我分析以下代码（${filePath}）：\n\n\`\`\`\n${selectedCode.value}\n\`\`\``;
+  composerRef.value?.setPlainText(
+    `请帮我分析以下代码（${filePath}）：\n\n\`\`\`\n${selectedCode.value}\n\`\`\``,
+  );
   selectedCode.value = "";
 }
 
@@ -2095,7 +2364,7 @@ function quoteSelectedText() {
   }
   
   nextTick(() => {
-    chatInputRef.value?.focus();
+    composerRef.value?.focus();
   });
 }
 
@@ -2106,7 +2375,7 @@ function hideQuoteButton() {
 }
 
 function applyExample(text: string) {
-  chatInput.value = text;
+  composerRef.value?.setPlainText(text);
 }
 
 function collectProjectFiles(nodes: TreeNode[], base = projectPath.value): ProjectFileItem[] {
@@ -2182,99 +2451,193 @@ function scheduleMentionSearch() {
   }, 200);
 }
 
-function updateMentionState() {
-  const el = chatInputRef.value;
-  const value = chatInput.value;
-  const pos = el?.selectionStart ?? value.length;
-  const before = value.slice(0, pos);
-  const match = /(^|\s)@([^\s@]*)$/.exec(before);
-  if (match) {
-    mentionOpen.value = true;
-    mentionQuery.value = match[2];
+function onComposerMentionChange(payload: { open: boolean; query: string }) {
+  mentionOpen.value = payload.open;
+  mentionQuery.value = payload.query;
+  if (payload.open) {
     mentionActiveIndex.value = 0;
     scheduleMentionSearch();
     return;
   }
-  mentionOpen.value = false;
-  mentionQuery.value = "";
   mentionRemoteResults.value = [];
 }
 
-function onChatInput() {
-  updateMentionState();
+function onComposerFieldKeydown(e: KeyboardEvent) {
+  if (!mentionOpen.value || !mentionResults.value.length) return;
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    mentionActiveIndex.value = (mentionActiveIndex.value + 1) % mentionResults.value.length;
+    return;
+  }
+  if (e.key === "ArrowUp") {
+    e.preventDefault();
+    mentionActiveIndex.value =
+      (mentionActiveIndex.value - 1 + mentionResults.value.length) % mentionResults.value.length;
+    return;
+  }
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    const item = mentionResults.value[mentionActiveIndex.value];
+    if (item) selectMention(item);
+    return;
+  }
+  if (e.key === "Escape") {
+    e.preventDefault();
+    mentionOpen.value = false;
+  }
 }
 
-function removeMentionQueryFromInput() {
-  const el = chatInputRef.value;
-  const value = chatInput.value;
-  const pos = el?.selectionStart ?? value.length;
-  const before = value.slice(0, pos);
-  const after = value.slice(pos);
-  const match = /(^|\s)@([^\s@]*)$/.exec(before);
-  if (!match) return;
-  const prefix = before.slice(0, match.index + (match[1] ? match[1].length : 0));
-  chatInput.value = `${prefix}${after}`.replace(/\s{2,}/g, " ");
-  mentionOpen.value = false;
-  mentionQuery.value = "";
+function buildReferencedFile(path: string, name: string): ReferencedFile {
+  const root = projectPath.value.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
+  const full = path.replace(/\\/g, "/");
+  const relative =
+    root && full.toLowerCase().startsWith(`${root}/`) ? full.slice(root.length + 1) : name;
+  return { name, path, relative };
+}
+
+function isPointOverChatDropZone(x: number, y: number): boolean {
+  const el = chatDropZoneRef.value;
+  if (!el) return false;
+  const rect = el.getBoundingClientRect();
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+}
+
+function canAcceptChatDrag(e: DragEvent): boolean {
+  const types = Array.from(e.dataTransfer?.types ?? []);
+  return types.includes("Files");
+}
+
+function acceptChatFileDrag(e: DragEvent) {
+  if (!canAcceptChatDrag(e)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.dataTransfer) {
+    e.dataTransfer.dropEffect = "copy";
+  }
+  isDragging.value = true;
+}
+
+function attachFileToChat(path: string, name?: string) {
+  if (!projectPath.value.trim()) return;
+  composerRef.value?.insertFileRef(buildReferencedFile(path, name ?? fileName(path)));
+  void nextTick(() => composerRef.value?.focus());
+}
+
+function onFileDragStart(node: TreeNode, x: number, y: number) {
+  const file = buildReferencedFile(node.path, node.name);
+  fileDragGhost.value = { relative: file.relative, x, y };
+  isDragging.value = isPointOverChatDropZone(x, y);
+}
+
+function onFileDragMove(x: number, y: number) {
+  if (!fileDragGhost.value) return;
+  fileDragGhost.value = { ...fileDragGhost.value, x, y };
+  isDragging.value = isPointOverChatDropZone(x, y);
+}
+
+function onFileDragEnd(node: TreeNode, x: number, y: number) {
+  if (isPointOverChatDropZone(x, y)) {
+    attachFileToChat(node.path, node.name);
+  }
+  fileDragGhost.value = null;
+  isDragging.value = false;
+}
+
+const FILE_DRAG_THRESHOLD_PX = 5;
+
+function startPathDrag(path: string, name: string, e: PointerEvent, onTap: () => void) {
+  if (e.button !== 0) return;
+  e.preventDefault();
+
+  const el = e.currentTarget as HTMLElement;
+  el.setPointerCapture(e.pointerId);
+
+  const startX = e.clientX;
+  const startY = e.clientY;
+  let dragging = false;
+  const stubNode = { path, name, isDirectory: false } as TreeNode;
+
+  const cleanup = (ev: PointerEvent) => {
+    el.releasePointerCapture(ev.pointerId);
+    el.removeEventListener("pointermove", onMove);
+    el.removeEventListener("pointerup", onUp);
+    el.removeEventListener("pointercancel", onUp);
+  };
+
+  const onMove = (ev: PointerEvent) => {
+    if (ev.pointerId !== e.pointerId) return;
+    if (!dragging && Math.hypot(ev.clientX - startX, ev.clientY - startY) < FILE_DRAG_THRESHOLD_PX) return;
+    if (!dragging) {
+      dragging = true;
+      onFileDragStart(stubNode, ev.clientX, ev.clientY);
+    }
+    onFileDragMove(ev.clientX, ev.clientY);
+  };
+
+  const onUp = (ev: PointerEvent) => {
+    if (ev.pointerId !== e.pointerId) return;
+    cleanup(ev);
+    if (dragging) {
+      onFileDragEnd(stubNode, ev.clientX, ev.clientY);
+    } else {
+      onTap();
+    }
+  };
+
+  el.addEventListener("pointermove", onMove);
+  el.addEventListener("pointerup", onUp);
+  el.addEventListener("pointercancel", onUp);
+}
+
+function onSearchResultPointerDown(
+  e: PointerEvent,
+  item: { path: string; name: string; isDirectory: boolean },
+) {
+  if (item.isDirectory) return;
+  startPathDrag(item.path, item.name, e, () => {
+    void openFile(item.path);
+  });
+}
+
+function onDocumentDragOverCapture(e: DragEvent) {
+  if (!isPointOverChatDropZone(e.clientX, e.clientY)) return;
+  acceptChatFileDrag(e);
+}
+
+function onDocumentDropCapture(e: DragEvent) {
+  if (!isPointOverChatDropZone(e.clientX, e.clientY)) return;
+  if (!canAcceptChatDrag(e)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  void handleChatFileDrop(e);
 }
 
 function selectMention(item: ProjectFileItem) {
-  if (!referencedFiles.value.some((f) => f.path === item.path)) {
-    referencedFiles.value.push({
-      name: item.name,
-      path: item.path,
-      relative: item.relative,
-    });
-  }
-  removeMentionQueryFromInput();
-  void nextTick(() => chatInputRef.value?.focus());
+  composerRef.value?.insertFileRef({
+    name: item.name,
+    path: item.path,
+    relative: item.relative,
+  });
+  mentionOpen.value = false;
+  mentionQuery.value = "";
+  void nextTick(() => composerRef.value?.focus());
 }
 
-function removeReferencedFile(idx: number) {
-  referencedFiles.value.splice(idx, 1);
-}
-
-function onChatKeydown(e: KeyboardEvent) {
-  if (mentionOpen.value && mentionResults.value.length) {
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      mentionActiveIndex.value = (mentionActiveIndex.value + 1) % mentionResults.value.length;
-      return;
-    }
-    if (e.key === "ArrowUp") {
-      e.preventDefault();
-      mentionActiveIndex.value =
-        (mentionActiveIndex.value - 1 + mentionResults.value.length) % mentionResults.value.length;
-      return;
-    }
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      const item = mentionResults.value[mentionActiveIndex.value];
-      if (item) selectMention(item);
-      return;
-    }
-    if (e.key === "Escape") {
-      e.preventDefault();
-      mentionOpen.value = false;
-      return;
-    }
-  }
-
-  if (e.key !== "Enter" || e.shiftKey) return;
-  e.preventDefault();
-  void sendChat();
-}
-
-function onDragOver(e: DragEvent) {
-  isDragging.value = true;
-}
-
-function onDragEnter(e: DragEvent) {
+function onChatDragEnter(e: DragEvent) {
+  if (!canAcceptChatDrag(e)) return;
   dragCounter++;
-  isDragging.value = true;
+  acceptChatFileDrag(e);
 }
 
-function onDragLeave(e: DragEvent) {
+function onChatDragOver(e: DragEvent) {
+  acceptChatFileDrag(e);
+}
+
+function onChatDragLeave(e: DragEvent) {
+  const zone = chatDropZoneRef.value;
+  const related = e.relatedTarget as Node | null;
+  if (zone && related && zone.contains(related)) return;
   dragCounter--;
   if (dragCounter <= 0) {
     isDragging.value = false;
@@ -2282,7 +2645,7 @@ function onDragLeave(e: DragEvent) {
   }
 }
 
-async function onDrop(e: DragEvent) {
+async function handleChatFileDrop(e: DragEvent) {
   isDragging.value = false;
   dragCounter = 0;
 
@@ -2290,13 +2653,13 @@ async function onDrop(e: DragEvent) {
   if (!files || !files.length) return;
 
   for (const file of Array.from(files)) {
-    const path = (file as any).path || "";
+    const path = (file as File & { path?: string }).path || "";
     if (!path) continue;
 
     try {
       const result = await readFile(path);
       if (result.ok) {
-        droppedFiles.value.push({
+        composerRef.value?.insertDroppedFile({
           name: file.name,
           path,
           content: result.content,
@@ -2306,10 +2669,20 @@ async function onDrop(e: DragEvent) {
       // ignore unreadable files
     }
   }
+
+  await nextTick(() => composerRef.value?.focus());
 }
 
-function removeDroppedFile(idx: number) {
-  droppedFiles.value.splice(idx, 1);
+function onChatDrop(e: DragEvent) {
+  if (!canAcceptChatDrag(e) && !(e.dataTransfer?.files?.length)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  void handleChatFileDrop(e);
+}
+
+function onWindowDragEnd() {
+  isDragging.value = false;
+  dragCounter = 0;
 }
 
 function extractCodeBlocks(text: string): string[] {
@@ -2855,10 +3228,13 @@ async function runAgentTurn(userText: string) {
   );
 }
 
-async function buildReferencedFileSection(): Promise<string> {
-  if (!referencedFiles.value.length) return "";
+async function buildReferencedFileSection(refs: ReferencedFile[]): Promise<string> {
+  if (!refs.length) return "";
   const chunks: string[] = [];
-  for (const file of referencedFiles.value) {
+  const seen = new Set<string>();
+  for (const file of refs) {
+    if (seen.has(file.path)) continue;
+    seen.add(file.path);
     const result = await readFile(file.path);
     if (result.ok) {
       chunks.push(`--- ${file.relative} ---\n${result.content}`);
@@ -2871,31 +3247,32 @@ async function buildReferencedFileSection(): Promise<string> {
 
 async function sendChat() {
   if (!canSendChat.value) return;
-  const userText = chatInput.value.trim();
-  chatInput.value = "";
+  const composer = composerRef.value;
+  if (!composer) return;
+
+  const payload = composer.extractPayload();
+  composer.clear();
   mentionOpen.value = false;
 
+  const userText = payload.text.trim();
   let fullPrompt = userText || "请结合引用的文件回答。";
-  
+
   if (quotedMessage.value) {
     const prefix = quotedMessage.value.role === "assistant" ? "Agent" : "你";
     const quotedContent = `> ${prefix}: ${quotedMessage.value.content.replace(/\n/g, "\n> ")}`;
     fullPrompt = `${quotedContent}\n\n${fullPrompt}`;
     quotedMessage.value = null;
   }
-  
-  const refSection = await buildReferencedFileSection();
-  const dropSection = droppedFiles.value.length
-    ? droppedFiles.value.map((f) => `--- ${f.path} ---\n${f.content}`).join("\n\n")
+
+  const refSection = await buildReferencedFileSection(payload.refs);
+  const dropSection = payload.drops.length
+    ? payload.drops.map((f) => `--- ${f.path} ---\n${f.content}`).join("\n\n")
     : "";
 
   const sections = [refSection, dropSection].filter(Boolean);
   if (sections.length) {
     fullPrompt = `${fullPrompt}\n\n## 参考文件\n\n${sections.join("\n\n")}`;
   }
-
-  droppedFiles.value = [];
-  referencedFiles.value = [];
 
   if (chatSending.value) {
     pendingPrompts.push(fullPrompt);
@@ -2915,9 +3292,21 @@ function onGlobalKeydown(e: KeyboardEvent) {
     searchInputRef.value?.focus();
     searchInputRef.value?.select();
   }
-  if (e.key === "Escape" && historyOpen.value) {
-    e.preventDefault();
-    historyOpen.value = false;
+  if (e.key === "Escape") {
+    // 优先关闭最顶层弹窗（按z-index层级从高到低）
+    if (contextMenu.value.show) {
+      e.preventDefault();
+      hideContextMenu();
+    } else if (historyOpen.value) {
+      e.preventDefault();
+      historyOpen.value = false;
+    } else if (mentionOpen.value) {
+      e.preventDefault();
+      mentionOpen.value = false;
+    } else if (projectHistoryOpen.value) {
+      e.preventDefault();
+      projectHistoryOpen.value = false;
+    }
   }
 }
 
@@ -2926,6 +3315,15 @@ watch(chatMode, (mode) => {
     localStorage.setItem(CHAT_MODE_KEY, mode);
   } catch {
     // ignore
+  }
+});
+
+watch(gitLogOpen, async (open) => {
+  if (open && projectOpened.value && gitIsRepo.value) {
+    const logResult = await fetchGitLog(projectPath.value.trim(), 20);
+    if (logResult.ok) {
+      gitLogEntries.value = logResult.entries;
+    }
   }
 });
 
@@ -2944,14 +3342,21 @@ onMounted(() => {
   loadSavedProject();
   chatPanelWidth.value = Math.min(chatPanelWidth.value, getChatPanelMaxWidth());
   window.addEventListener("focus", onWindowFocus);
+  window.addEventListener("dragend", onWindowDragEnd);
   document.addEventListener("click", onDocumentClick);
   document.addEventListener("keydown", onGlobalKeydown);
+  document.addEventListener("dragover", onDocumentDragOverCapture, true);
+  document.addEventListener("drop", onDocumentDropCapture, true);
 });
 
 onBeforeUnmount(() => {
+  fileDragGhost.value = null;
   window.removeEventListener("focus", onWindowFocus);
+  window.removeEventListener("dragend", onWindowDragEnd);
   document.removeEventListener("click", onDocumentClick);
   document.removeEventListener("keydown", onGlobalKeydown);
+  document.removeEventListener("dragover", onDocumentDragOverCapture, true);
+  document.removeEventListener("drop", onDocumentDropCapture, true);
   agentAbortHandle?.abort();
   stopResize();
   if (scrollChatRaf) cancelAnimationFrame(scrollChatRaf);
@@ -3000,6 +3405,7 @@ onBeforeUnmount(() => {
   --panel-2: rgb(2, 6, 23);
   --text: rgba(255, 255, 255, 0.92);
   --muted: rgba(255, 255, 255, 0.7);
+  --text-dim: rgba(255, 255, 255, 0.55);
   --border: rgba(255, 255, 255, 0.12);
   --primary: #1f6feb;
   --danger: #ff4d5e;
@@ -3013,59 +3419,62 @@ onBeforeUnmount(() => {
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
 }
 
-.page-head {
+.app-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 16px 24px 14px;
+  gap: 12px;
+  padding: 8px 16px;
   border-bottom: 1px solid var(--border);
-  background: rgba(11, 18, 32, 0.8);
-  backdrop-filter: blur(10px);
+  background: rgba(11, 18, 32, 0.92);
+  backdrop-filter: blur(12px);
+  flex-shrink: 0;
+  min-height: 44px;
 }
 
-.head-left {
+.toolbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex-shrink: 0;
+}
+
+.brand-icon {
+  font-size: 16px;
+  line-height: 1;
 }
 
 .title {
   margin: 0;
-  font-size: 17px;
+  font-size: 14px;
   font-weight: 700;
-  letter-spacing: -0.3px;
+  letter-spacing: -0.2px;
+  white-space: nowrap;
 }
 
-.desc {
-  margin: 4px 0 0;
-  font-size: 12px;
-  color: var(--muted);
-  line-height: 1.5;
-}
-
-.head-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.project-bar {
+.toolbar-project {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px 24px;
-  border-bottom: 1px solid var(--border);
-  background: rgba(11, 18, 32, 0.6);
-  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .path-input {
   flex: 1;
-  min-width: 200px;
+  min-width: 120px;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 9px 14px;
+  border-radius: 7px;
+  padding: 6px 12px;
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
-  font-size: 13px;
+  font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   outline: none;
   transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
@@ -3074,6 +3483,7 @@ onBeforeUnmount(() => {
 .path-input:focus {
   border-color: rgba(31, 111, 235, 0.5);
   background: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.08);
 }
 
 .path-input::placeholder {
@@ -3081,8 +3491,18 @@ onBeforeUnmount(() => {
 }
 
 .bar-error {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(255, 77, 94, 0.2);
   color: var(--danger);
   font-size: 12px;
+  font-weight: 700;
+  cursor: help;
+  flex-shrink: 0;
 }
 
 .project-history-wrap {
@@ -3101,10 +3521,11 @@ onBeforeUnmount(() => {
   flex-direction: column;
   background: #111827;
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 12px;
+  border-radius: 14px;
+  padding: 14px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
   overflow: hidden;
+  backdrop-filter: blur(16px);
 }
 
 .project-history-head {
@@ -3148,7 +3569,7 @@ onBeforeUnmount(() => {
   align-items: stretch;
   gap: 6px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.02);
 }
 
@@ -3231,6 +3652,7 @@ onBeforeUnmount(() => {
 .file-panel {
   background: rgba(11, 18, 32, 0.4);
   border-right: 1px solid var(--border);
+  overflow: hidden;
 }
 
 .file-panel-tabs {
@@ -3240,12 +3662,12 @@ onBeforeUnmount(() => {
 }
 
 .file-panel-tab {
-  padding: 5px 12px;
-  font-size: 12px;
+  padding: 6px 13px;
+  font-size: 13px;
   background: transparent;
   color: var(--text-dim);
   border: none;
-  border-radius: 6px;
+  border-radius: 5px;
   cursor: pointer;
   transition: all 150ms ease;
   position: relative;
@@ -3264,12 +3686,16 @@ onBeforeUnmount(() => {
 .git-badge {
   margin-left: 4px;
   padding: 0 6px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   background: rgba(31, 111, 235, 0.45);
   color: #fff;
   border-radius: 8px;
-  line-height: 17px;
+  line-height: 18px;
+}
+
+.git-badge-staged {
+  background: rgba(115, 218, 202, 0.45);
 }
 
 .git-panel-content {
@@ -3282,10 +3708,10 @@ onBeforeUnmount(() => {
 .git-branch-bar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
+  gap: 8px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .git-branch-icon {
@@ -3295,6 +3721,37 @@ onBeforeUnmount(() => {
 .git-branch-name {
   color: #7aa2f7;
   font-family: monospace;
+}
+
+.git-remote-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.git-remote-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+}
+
+.git-remote-label {
+  font-family: monospace;
+  font-size: 11px;
+}
+
+.git-remote-tracking {
+  color: #9aa5ce;
+  font-family: monospace;
+}
+
+.git-remote-actions {
+  display: flex;
+  gap: 4px;
 }
 
 .git-error {
@@ -3307,14 +3764,15 @@ onBeforeUnmount(() => {
 
 .git-commit-box {
   display: flex;
+  flex-direction: column;
   gap: 6px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
 }
 
 .git-commit-input {
-  flex: 1;
-  padding: 7px 12px;
+  width: 100%;
+  padding: 6px 10px;
   font-size: 12px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border);
@@ -3322,6 +3780,7 @@ onBeforeUnmount(() => {
   color: var(--text);
   outline: none;
   transition: border-color 180ms ease;
+  box-sizing: border-box;
 }
 
 .git-commit-input:focus {
@@ -3330,6 +3789,15 @@ onBeforeUnmount(() => {
 
 .git-commit-input::placeholder {
   color: var(--text-dim);
+}
+
+.git-commit-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.git-commit-actions button {
+  flex: 1;
 }
 
 .git-file-list {
@@ -3342,13 +3810,13 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 12px;
+  padding: 7px 12px;
   cursor: pointer;
-  transition: background 100ms ease;
+  transition: background 120ms ease;
 }
 
 .git-file-item:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .git-file-status {
@@ -3360,7 +3828,7 @@ onBeforeUnmount(() => {
 }
 
 .git-file-path {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3369,6 +3837,106 @@ onBeforeUnmount(() => {
 
 .git-file-item.active {
   background: rgba(31, 111, 235, 0.15);
+}
+
+.git-file-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-dim);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 120ms ease;
+}
+
+.git-file-check:hover {
+  background: rgba(31, 111, 235, 0.2);
+  border-color: rgba(31, 111, 235, 0.4);
+  color: #7aa2f7;
+}
+
+.git-file-btn {
+  padding: 2px 4px !important;
+  font-size: 11px !important;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.git-file-item:hover .git-file-btn {
+  opacity: 1;
+}
+
+.git-section {
+  border-bottom: 1px solid var(--border);
+}
+
+.git-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.git-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.git-section-actions {
+  display: flex;
+  gap: 4px;
+}
+
+button.ghost.danger {
+  color: #f7768e;
+}
+
+button.ghost.danger:hover:not(:disabled) {
+  background: rgba(247, 118, 142, 0.12);
+  color: #ff9a9a;
+}
+
+.git-log-section {
+  border-top: 1px solid var(--border);
+}
+
+.git-log-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.git-log-item {
+  display: flex;
+  gap: 8px;
+  padding: 5px 12px;
+  font-size: 11px;
+  cursor: default;
+}
+
+.git-log-item:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.git-log-hash {
+  font-family: monospace;
+  color: #7aa2f7;
+  flex-shrink: 0;
+}
+
+.git-log-msg {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .git-diff-panel {
@@ -3410,9 +3978,12 @@ onBeforeUnmount(() => {
 }
 
 .editor-panel {
+  display: flex;
+  flex-direction: column;
   background: rgba(2, 6, 23, 0.35);
   flex: 1;
   min-width: 0;
+  min-height: 0;
   position: relative;
 }
 
@@ -3420,20 +3991,21 @@ onBeforeUnmount(() => {
   position: absolute;
   bottom: 16px;
   right: 16px;
-  padding: 8px 16px;
+  padding: 8px 18px;
   background: rgba(31, 111, 235, 0.9);
   color: white;
-  border-radius: 8px;
+  border-radius: 10px;
   font-size: 13px;
   cursor: pointer;
   z-index: 10;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  transition: background 200ms ease, transform 200ms ease;
+  transition: all 180ms ease;
 }
 
 .ask-ai-floating:hover {
   background: rgba(31, 111, 235, 1);
   transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
 }
 
 .quote-floating {
@@ -3441,19 +4013,19 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 5px 10px;
+  padding: 6px 12px;
   background: rgba(2, 6, 23, 0.92);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 11px;
   color: var(--text);
   cursor: pointer;
   z-index: 1000;
   transform: translate(-50%, -100%);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-  transition: all 150ms ease;
+  transition: all 180ms ease;
   white-space: nowrap;
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(10px);
 }
 
 .quote-floating:hover {
@@ -3542,21 +4114,90 @@ onBeforeUnmount(() => {
 }
 
 .file-panel-head {
-  flex-wrap: wrap;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(17, 24, 39, 0.4);
+  flex-shrink: 0;
+}
+
+.file-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.file-panel-top-row {
+  justify-content: space-between;
+}
+
+.file-panel-search-row {
   gap: 8px;
+}
+
+.file-panel-tabs {
+  flex-shrink: 0;
 }
 
 .file-toolbar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-left: auto;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 120ms ease;
+  flex-shrink: 0;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.icon-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.icon-btn.danger:hover:not(:disabled) {
+  background: rgba(255, 80, 80, 0.12);
+  color: #ffb4b4;
+  border-color: rgba(255, 120, 120, 0.35);
+}
+
+.toolbar-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+  margin: 0 2px;
+  flex-shrink: 0;
 }
 
 button.ghost.tiny {
-  padding: 4px 8px;
+  padding: 4px 9px;
   font-size: 11px;
   border-radius: 6px;
+  white-space: nowrap;
 }
 
 button.ghost.danger {
@@ -3580,9 +4221,10 @@ button.ghost.danger:hover:not(:disabled) {
   min-width: 160px;
   background: #1a2236;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 4px 0;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(12px);
 }
 
 .ctx-item {
@@ -3634,7 +4276,7 @@ button.ghost.danger:hover:not(:disabled) {
 
 .msg-streaming {
   margin: 0;
-  padding: 10px 12px;
+  padding: 10px 14px;
   font-size: 13px;
   line-height: 1.65;
   white-space: pre-wrap;
@@ -3642,7 +4284,7 @@ button.ghost.danger:hover:not(:disabled) {
   color: rgba(255, 255, 255, 0.92);
   background: rgba(0, 0, 0, 0.2);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: 10px;
   font-family: inherit;
 }
 
@@ -3663,7 +4305,7 @@ button.ghost.danger:hover:not(:disabled) {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 10px 14px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   background: rgba(17, 24, 39, 0.4);
 }
@@ -3693,9 +4335,10 @@ button.ghost.danger:hover:not(:disabled) {
   flex-direction: column;
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 12px;
+  border-radius: 14px;
+  padding: 14px;
   overflow: hidden;
+  backdrop-filter: blur(12px);
 }
 
 .history-head {
@@ -3748,7 +4391,7 @@ button.ghost.danger:hover:not(:disabled) {
   align-items: stretch;
   gap: 6px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.02);
 }
 
@@ -3791,13 +4434,13 @@ button.ghost.danger:hover:not(:disabled) {
 }
 
 button.ghost.small {
-  padding: 3px 8px;
-  font-size: 11px;
+  padding: 5px 12px;
+  font-size: 12px;
   flex-shrink: 0;
 }
 
 .panel-title {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--muted);
   text-transform: uppercase;
@@ -3805,7 +4448,7 @@ button.ghost.small {
 }
 
 .panel-meta {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
 }
 
@@ -3822,18 +4465,19 @@ button.ghost.small {
 .dirty-badge {
   font-size: 11px;
   color: #f0c674;
-  padding: 1px 6px;
+  padding: 2px 8px;
   background: rgba(240, 198, 116, 0.15);
-  border-radius: 4px;
+  border-radius: 6px;
 }
 
 .search-mode-switch {
   display: inline-flex;
   gap: 2px;
   padding: 3px;
-  border-radius: 8px;
+  border-radius: 7px;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .search-mode-btn {
@@ -3841,8 +4485,8 @@ button.ghost.small {
   background: transparent;
   color: rgba(255, 255, 255, 0.55);
   border-radius: 5px;
-  padding: 4px 10px;
-  font-size: 11px;
+  padding: 5px 11px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition: all 150ms ease;
@@ -3854,21 +4498,22 @@ button.ghost.small {
 }
 
 .search-input {
-  width: 130px;
+  flex: 1;
+  min-width: 0;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 5px 10px;
-  font-size: 12px;
+  border-radius: 7px;
+  padding: 6px 11px;
+  font-size: 13px;
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
   outline: none;
-  transition: border-color 180ms ease, background 180ms ease, width 200ms ease;
+  transition: border-color 180ms ease, background 180ms ease;
 }
 
 .search-input:focus {
   border-color: rgba(31, 111, 235, 0.5);
   background: rgba(255, 255, 255, 0.06);
-  width: 180px;
+  box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.08);
 }
 
 .search-input::placeholder {
@@ -3880,7 +4525,7 @@ button.ghost.small {
 .chat-empty {
   padding: 24px 14px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
   text-align: center;
 }
 
@@ -3889,8 +4534,65 @@ button.ghost.small {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 8px;
   flex: 1;
+}
+
+.editor-empty-icon {
+  font-size: 36px;
+  opacity: 0.5;
+  margin-bottom: 4px;
+}
+
+.editor-empty-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.editor-empty-hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.chat-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  padding: 32px 20px;
+}
+
+.chat-empty-icon {
+  font-size: 32px;
+  margin-bottom: 8px;
+  opacity: 0.7;
+}
+
+.chat-empty-title {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.chat-empty-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+  max-width: 320px;
+}
+
+.chat-empty-desc code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(31, 111, 235, 0.15);
+  color: #91beff;
+  font-size: 11px;
 }
 
 .editor-empty.error {
@@ -3913,9 +4615,10 @@ button.ghost.small {
   background: transparent;
   color: var(--text);
   text-align: left;
-  padding: 6px 12px;
+  padding: 7px 12px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
+  line-height: 1.4;
   transition: background 100ms ease;
 }
 
@@ -3928,10 +4631,23 @@ button.ghost.small {
   color: #aad0ff;
 }
 
+.file-item-draggable {
+  cursor: grab;
+}
+
+.file-item-draggable:active {
+  cursor: grabbing;
+}
+
+.file-item-draggable {
+  touch-action: none;
+}
+
 .file-icon {
-  font-size: 14px;
-  width: 18px;
+  font-size: 15px;
+  width: 20px;
   text-align: center;
+  flex-shrink: 0;
 }
 
 .file-name {
@@ -3952,46 +4668,81 @@ button.ghost.small {
 }
 
 .file-result-text {
-  font-size: 11px;
+  font-size: 12px;
   color: rgba(255, 255, 255, 0.55);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.editor-header {
+  display: flex;
+  align-items: flex-end;
+  min-height: 74px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(17, 24, 39, 0.45);
+  flex-shrink: 0;
+}
+
+.editor-header-title {
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  font-size: 12px;
+  color: var(--muted);
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  margin-bottom: 1px;
+}
+
+.editor-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  flex-shrink: 0;
+  height: 36px;
+  margin-bottom: 1px;
+  border-left: 1px solid var(--border);
+}
+
 .editor-tabs {
   display: flex;
   align-items: stretch;
-  gap: 2px;
-  padding: 6px 8px 0;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+  align-self: flex-end;
+  padding: 0 4px;
   overflow-x: auto;
-  border-bottom: 1px solid var(--border);
-  background: rgba(17, 24, 39, 0.35);
 }
 
 .editor-tab {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  max-width: 180px;
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: 8px 8px 0 0;
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.72);
-  padding: 6px 10px;
+  max-width: 160px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.62);
+  padding: 8px 12px;
   font-size: 12px;
   cursor: pointer;
   transition: all 150ms ease;
+  flex-shrink: 0;
 }
 
 .editor-tab:hover {
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.88);
 }
 
 .editor-tab.active {
-  background: rgba(31, 111, 235, 0.18);
-  border-color: rgba(31, 111, 235, 0.35);
+  background: rgba(31, 111, 235, 0.1);
+  border-bottom-color: var(--primary);
   color: #d6e8ff;
 }
 
@@ -4025,9 +4776,10 @@ button.ghost.small {
 .code-editor {
   flex: 1;
   width: 100%;
+  min-height: 0;
   border: none;
   resize: none;
-  padding: 14px 16px;
+  padding: 14px 18px;
   background: var(--panel-2);
   color: var(--text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -4040,144 +4792,61 @@ button.ghost.small {
 .chat-scroll {
   flex: 1;
   overflow: auto;
-  padding: 12px;
+  padding: 12px 14px;
 }
 
 .msg-list {
   display: grid;
-  gap: 12px;
+  gap: 14px;
 }
 
 .msg {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+}
+
+.msg-avatar {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+
+.msg.user .msg-avatar {
+  background: rgba(31, 111, 235, 0.25);
+  color: #91beff;
+  border: 1px solid rgba(31, 111, 235, 0.35);
+}
+
+.msg.assistant .msg-avatar {
+  background: rgba(179, 146, 240, 0.2);
+  color: #d2b8ff;
+  border: 1px solid rgba(179, 146, 240, 0.3);
+}
+
+.msg-body {
+  flex: 1;
+  min-width: 0;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px;
-}
-
-.msg.user {
-  border-color: rgba(31, 111, 235, 0.3);
-  background: rgba(31, 111, 235, 0.06);
-}
-
-.msg.assistant {
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.msg-role {
-  font-size: 11px;
-  font-weight: 600;
-  margin-bottom: 6px;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
-
-.msg.user .msg-role {
-  color: #91beff;
-}
-
-.msg.assistant .msg-role {
-  color: #b392f0;
-}
-
-.msg-text {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 13px;
-  line-height: 1.55;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
-
-.msg-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-}
-
-.reverted-badge {
-  font-size: 11px;
-  color: rgba(126, 231, 135, 0.9);
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: rgba(46, 160, 67, 0.15);
-  border: 1px solid rgba(46, 160, 67, 0.28);
-}
-
-.rejected-badge {
-  font-size: 11px;
-  color: rgba(255, 180, 180, 0.9);
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: rgba(248, 81, 73, 0.12);
-  border: 1px solid rgba(248, 81, 73, 0.28);
-}
-
-.pending-badge {
-  font-size: 11px;
-  color: #f0c674;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: rgba(240, 198, 116, 0.12);
-  border: 1px solid rgba(240, 198, 116, 0.28);
-}
-
-button.primary.small-action {
-  padding: 5px 12px;
-  font-size: 12px;
-}
-
-.file-item:hover {
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.file-item.active {
-  background: rgba(31, 111, 235, 0.2);
-  color: #aad0ff;
-}
-
-.file-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.editor-panel {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.code-editor {
-  flex: 1;
-  min-height: 0;
-}
-
-.chat-scroll {
-  flex: 1;
-  overflow: auto;
+  border-radius: 12px;
   padding: 10px 12px;
 }
 
-.msg-list {
-  display: grid;
-  gap: 10px;
-}
-
-.msg {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px;
-}
-
-.msg.user {
-  border-color: rgba(31, 111, 235, 0.35);
+.msg.user .msg-body {
+  border-color: rgba(31, 111, 235, 0.28);
+  background: rgba(31, 111, 235, 0.06);
 }
 
 .msg-head {
@@ -4194,11 +4863,19 @@ button.primary.small-action {
   color: var(--muted);
 }
 
+.msg.user .msg-role {
+  color: #91beff;
+}
+
+.msg.assistant .msg-role {
+  color: #b392f0;
+}
+
 .msg-toolbar {
   display: flex;
   align-items: center;
   gap: 4px;
-  opacity: 0.72;
+  opacity: 0;
   transition: opacity 120ms ease;
 }
 
@@ -4207,20 +4884,52 @@ button.primary.small-action {
   opacity: 1;
 }
 
-.msg-text {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-size: 12px;
-  line-height: 1.5;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
-
 .msg-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
-  margin-top: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.reverted-badge {
+  font-size: 11px;
+  color: rgba(126, 231, 135, 0.9);
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: rgba(46, 160, 67, 0.15);
+  border: 1px solid rgba(46, 160, 67, 0.28);
+}
+
+.rejected-badge {
+  font-size: 11px;
+  color: rgba(255, 180, 180, 0.9);
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: rgba(248, 81, 73, 0.12);
+  border: 1px solid rgba(248, 81, 73, 0.28);
+}
+
+.pending-badge {
+  font-size: 11px;
+  color: #f0c674;
+  padding: 3px 10px;
+  border-radius: 6px;
+  background: rgba(240, 198, 116, 0.12);
+  border: 1px solid rgba(240, 198, 116, 0.28);
+}
+
+button.primary.small-action {
+  padding: 5px 14px;
+  font-size: 12px;
+}
+
+button.compact {
+  padding: 5px 12px;
+  font-size: 12px;
+  border-radius: 7px;
 }
 
 .chips {
@@ -4242,7 +4951,7 @@ button.primary.small-action {
 }
 
 .chip:hover:not(:disabled) {
-  background: rgba(31, 111, 235, 0.2);
+  background: rgba(31, 111, 235, 0.22);
   border-color: rgba(31, 111, 235, 0.4);
 }
 
@@ -4250,8 +4959,8 @@ button.primary.small-action {
   display: inline-flex;
   gap: 4px;
   margin-bottom: 10px;
-  padding: 3px;
-  border-radius: 8px;
+  padding: 4px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--border);
 }
@@ -4287,8 +4996,9 @@ button.primary.small-action {
 .chat-composer {
   position: relative;
   border-top: 1px solid var(--border);
-  padding: 12px;
-  background: rgba(11, 18, 32, 0.5);
+  padding: 12px 14px;
+  background: rgba(11, 18, 32, 0.65);
+  backdrop-filter: blur(8px);
   transition: background 200ms ease, border-color 200ms ease;
 }
 
@@ -4349,11 +5059,15 @@ button.primary.small-action {
   overflow: hidden;
 }
 
+.chat-input-field {
+  position: relative;
+}
+
 .mention-dropdown {
   position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: calc(100% - 4px);
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
   z-index: 12;
   max-height: 220px;
   overflow: auto;
@@ -4362,8 +5076,9 @@ button.primary.small-action {
   padding: 6px;
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(12px);
 }
 
 .mention-item {
@@ -4376,14 +5091,15 @@ button.primary.small-action {
   background: transparent;
   color: inherit;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 8px 10px;
   cursor: pointer;
+  transition: all 150ms ease;
 }
 
 .mention-item:hover,
 .mention-item.active {
-  background: rgba(31, 111, 235, 0.14);
+  background: rgba(31, 111, 235, 0.16);
   border-color: rgba(31, 111, 235, 0.28);
 }
 
@@ -4398,71 +5114,50 @@ button.primary.small-action {
   color: rgba(145, 190, 255, 0.82);
 }
 
-.dropped-file-tag.ref-tag {
-  background: rgba(179, 146, 240, 0.18);
-  border-color: rgba(179, 146, 240, 0.32);
+.file-drag-ghost {
+  position: fixed;
+  z-index: 10000;
+  pointer-events: none;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: rgba(179, 146, 240, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  color: #fff;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  white-space: nowrap;
 }
 
-.chat-composer.drag-over {
+.chat-panel.drag-over {
+  outline: 2px solid rgba(31, 111, 235, 0.55);
+  outline-offset: -2px;
+}
+
+.chat-panel.drag-over .chat-composer {
   background: rgba(31, 111, 235, 0.15);
   border-top-color: rgba(31, 111, 235, 0.6);
 }
 
-.dropped-files {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 8px;
-}
-
-.dropped-file-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  background: rgba(31, 111, 235, 0.2);
-  border: 1px solid rgba(31, 111, 235, 0.3);
-  border-radius: 6px;
-  font-size: 12px;
-  color: var(--text);
-}
-
-.drop-file-remove {
-  background: none;
-  border: none;
-  color: rgba(255, 255, 255, 0.6);
-  cursor: pointer;
-  padding: 0 2px;
-  font-size: 14px;
-  line-height: 1;
-}
-
-.drop-file-remove:hover {
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.chat-input {
+.chat-input-box {
   width: 100%;
+  min-height: 44px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 10px 14px;
+  padding: 8px 10px;
   background: rgba(255, 255, 255, 0.04);
-  color: var(--text);
-  font-size: 13px;
-  resize: vertical;
-  min-height: 72px;
-  outline: none;
   transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
+  cursor: text;
 }
 
-.chat-input:focus {
+.chat-input-box.focused {
   border-color: rgba(31, 111, 235, 0.5);
   background: rgba(255, 255, 255, 0.06);
   box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.08);
 }
 
-.chat-input::placeholder {
-  color: rgba(255, 255, 255, 0.4);
+.chat-composer-editor {
+  width: 100%;
 }
 
 .chat-bottom {
@@ -4482,7 +5177,7 @@ button.primary.small-action {
 
 .agent-activity {
   margin-bottom: 10px;
-  border-radius: 10px;
+  border-radius: 12px;
   background: rgba(0, 0, 0, 0.22);
   border: 1px solid rgba(255, 255, 255, 0.08);
   overflow: hidden;
@@ -4583,7 +5278,7 @@ button.primary.small-action {
 .agent-turn-pill {
   font-size: 10px;
   font-weight: 600;
-  padding: 2px 8px;
+  padding: 2px 10px;
   border-radius: 999px;
   background: rgba(31, 111, 235, 0.18);
   color: #91beff;
@@ -4594,8 +5289,8 @@ button.primary.small-action {
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.04em;
-  padding: 2px 7px;
-  border-radius: 6px;
+  padding: 2px 8px;
+  border-radius: 8px;
   background: rgba(179, 146, 240, 0.16);
   color: #d2b8ff;
   border: 1px solid rgba(179, 146, 240, 0.32);
@@ -4613,8 +5308,8 @@ button.primary.small-action {
 .tool-item {
   display: flex;
   gap: 10px;
-  padding: 8px 10px;
-  border-radius: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
@@ -4760,18 +5455,27 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   text-decoration: none;
-  color: rgba(255, 255, 255, 0.85);
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 16px;
-  font-size: 13px;
-  font-weight: 500;
-  transition: all 180ms ease;
+  white-space: nowrap;
 }
 
-.link-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
+.link-btn.ghost {
+  color: var(--muted);
+}
+
+.link-btn.ghost:hover {
+  color: var(--text);
+}
+
+@media (max-width: 900px) {
+  .app-toolbar {
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    gap: 8px;
+  }
+
+  .toolbar-project {
+    order: 3;
+    width: 100%;
+  }
 }
 </style>

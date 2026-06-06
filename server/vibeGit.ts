@@ -86,21 +86,44 @@ export async function gitStatus(projectRoot: string): Promise<GitStatusResult> {
       const filePath = line.slice(3).trim();
       if (!filePath) continue;
 
-      const staged = indexStatus !== " " && indexStatus !== "?";
-      let status = "untracked";
-      if (indexStatus === "?" && worktreeStatus === "?") {
-        status = "untracked";
-      } else if (indexStatus === "!" && worktreeStatus === "!") {
-        status = "ignored";
-      } else {
-        if (indexStatus === "A") status = "added";
-        else if (indexStatus === "D" || worktreeStatus === "D") status = "deleted";
-        else if (indexStatus === "R" || indexStatus === "C") status = "renamed";
-        else if (indexStatus === "M" || worktreeStatus === "M") status = "modified";
-        else if (worktreeStatus === "?" ) status = "untracked";
+      const hasIndexChange = indexStatus !== " " && indexStatus !== "?";
+      const hasWorktreeChange = worktreeStatus !== " " && worktreeStatus !== "?" && worktreeStatus !== "!";
+
+      function getStatus(s: string): string {
+        if (s === "A") return "added";
+        if (s === "D") return "deleted";
+        if (s === "R" || s === "C") return "renamed";
+        if (s === "M") return "modified";
+        return "modified";
       }
 
-      files.push({ path: filePath, status, indexStatus, worktreeStatus, staged });
+      if (hasIndexChange) {
+        files.push({
+          path: filePath,
+          status: getStatus(indexStatus),
+          indexStatus,
+          worktreeStatus: " ",
+          staged: true,
+        });
+      }
+
+      if (hasWorktreeChange) {
+        files.push({
+          path: filePath,
+          status: getStatus(worktreeStatus),
+          indexStatus: " ",
+          worktreeStatus,
+          staged: false,
+        });
+      }
+
+      if (!hasIndexChange && !hasWorktreeChange) {
+        if (indexStatus === "?" && worktreeStatus === "?") {
+          files.push({ path: filePath, status: "untracked", indexStatus, worktreeStatus, staged: false });
+        } else if (indexStatus === "!" && worktreeStatus === "!") {
+          files.push({ path: filePath, status: "ignored", indexStatus, worktreeStatus, staged: false });
+        }
+      }
     }
 
     const stagedCount = files.filter((f) => f.staged).length;
@@ -160,6 +183,38 @@ export async function gitDiffFile(projectRoot: string, filePath: string): Promis
     return { ok: true, files, patch: patchOut };
   } catch (error) {
     return { ok: false, files: [], patch: "", error: error instanceof Error ? error.message : "获取文件 diff 失败" };
+  }
+}
+
+export interface GitDiffContentResult {
+  ok: boolean;
+  before: string;
+  after: string;
+  error?: string;
+}
+
+export async function gitDiffContent(projectRoot: string, filePath: string): Promise<GitDiffContentResult> {
+  try {
+    let before = "";
+    try {
+      const { stdout } = await gitExec(projectRoot, ["show", `HEAD:${filePath}`]);
+      before = stdout;
+    } catch {
+      before = "";
+    }
+
+    const fs = await import("node:fs");
+    const fullPath = await import("node:path").then((p) => p.resolve(projectRoot, filePath));
+    let after = "";
+    try {
+      after = fs.readFileSync(fullPath, "utf-8");
+    } catch {
+      after = "";
+    }
+
+    return { ok: true, before, after };
+  } catch (error) {
+    return { ok: false, before: "", after: "", error: error instanceof Error ? error.message : "获取文件内容失败" };
   }
 }
 
@@ -258,5 +313,102 @@ export async function gitIsRepo(projectRoot: string): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+export interface GitRemoteInfo {
+  name: string;
+  url: string;
+}
+
+export interface GitRemotesResult {
+  ok: boolean;
+  remotes: GitRemoteInfo[];
+  trackingBranch: string;
+  ahead: number;
+  behind: number;
+  error?: string;
+}
+
+export interface GitRemoteActionResult {
+  ok: boolean;
+  output: string;
+  error?: string;
+}
+
+export async function gitRemotes(projectRoot: string): Promise<GitRemotesResult> {
+  try {
+    const { stdout: remoteOut } = await gitExec(projectRoot, ["remote", "-v"]);
+    const remotes: GitRemoteInfo[] = [];
+    const seen = new Set<string>();
+    for (const line of remoteOut.split("\n")) {
+      const match = line.match(/^(\S+)\s+(\S+)\s+\((push|fetch)\)/);
+      if (match && !seen.has(match[1])) {
+        seen.add(match[1]);
+        remotes.push({ name: match[1], url: match[2] });
+      }
+    }
+
+    let trackingBranch = "";
+    let ahead = 0;
+    let behind = 0;
+    try {
+      const [tbOut, abOut] = await Promise.all([
+        gitExec(projectRoot, ["rev-parse", "--abbrev-ref", "@{upstream}"]).catch(() => ({ stdout: "" })),
+        gitExec(projectRoot, ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"]).catch(() => ({ stdout: "0\t0" })),
+      ]);
+      trackingBranch = tbOut.stdout.trim();
+      const parts = abOut.stdout.trim().split(/\s+/);
+      ahead = Number(parts[0]) || 0;
+      behind = Number(parts[1]) || 0;
+    } catch {
+      // no upstream set
+    }
+
+    return { ok: true, remotes, trackingBranch, ahead, behind };
+  } catch (error) {
+    return { ok: false, remotes: [], trackingBranch: "", ahead: 0, behind: 0, error: error instanceof Error ? error.message : "获取远程信息失败" };
+  }
+}
+
+export async function gitFetch(projectRoot: string, remote?: string): Promise<GitRemoteActionResult> {
+  try {
+    const args = ["fetch"];
+    if (remote) args.push(remote);
+    const { stdout, stderr } = await gitExec(projectRoot, args);
+    return { ok: true, output: (stdout + stderr).trim() };
+  } catch (error) {
+    return { ok: false, output: "", error: error instanceof Error ? error.message : "Fetch 失败" };
+  }
+}
+
+export async function gitPull(projectRoot: string, remote?: string, branch?: string): Promise<GitRemoteActionResult> {
+  try {
+    const args = ["pull"];
+    if (remote && branch) {
+      args.push(remote, branch);
+    } else if (remote) {
+      args.push(remote);
+    }
+    const { stdout, stderr } = await gitExec(projectRoot, args);
+    return { ok: true, output: (stdout + stderr).trim() };
+  } catch (error) {
+    return { ok: false, output: "", error: error instanceof Error ? error.message : "Pull 失败" };
+  }
+}
+
+export async function gitPush(projectRoot: string, remote?: string, branch?: string, setUpstream?: boolean): Promise<GitRemoteActionResult> {
+  try {
+    const args = ["push"];
+    if (setUpstream && remote) args.push("-u");
+    if (remote && branch) {
+      args.push(remote, branch);
+    } else if (remote) {
+      args.push(remote);
+    }
+    const { stdout, stderr } = await gitExec(projectRoot, args);
+    return { ok: true, output: (stdout + stderr).trim() };
+  } catch (error) {
+    return { ok: false, output: "", error: error instanceof Error ? error.message : "Push 失败" };
   }
 }
