@@ -237,10 +237,13 @@
               <template v-else>
                 <div v-if="gitStagedFiles.length" class="git-section">
                   <div class="git-section-head">
-                    <span class="git-section-title">已暂存 ({{ gitStagedFiles.length }})</span>
+                    <button type="button" class="git-section-toggle" @click="gitStagedOpen = !gitStagedOpen">
+                      <span class="git-section-chevron">{{ gitStagedOpen ? "▾" : "▸" }}</span>
+                      <span class="git-section-title">已暂存 ({{ gitStagedFiles.length }})</span>
+                    </button>
                     <button type="button" class="ghost tiny" @click="unstageAll">取消全部</button>
                   </div>
-                  <div class="git-file-list">
+                  <div v-if="gitStagedOpen" class="git-file-list">
                       <div
                         v-for="file in gitStagedFiles"
                         :key="file.path"
@@ -261,13 +264,16 @@
                 </div>
                 <div v-if="gitUnstagedFiles.length" class="git-section">
                   <div class="git-section-head">
-                    <span class="git-section-title">未暂存 ({{ gitUnstagedFiles.length }})</span>
+                    <button type="button" class="git-section-toggle" @click="gitUnstagedOpen = !gitUnstagedOpen">
+                      <span class="git-section-chevron">{{ gitUnstagedOpen ? "▾" : "▸" }}</span>
+                      <span class="git-section-title">未暂存 ({{ gitUnstagedFiles.length }})</span>
+                    </button>
                     <div class="git-section-actions">
                       <button type="button" class="ghost tiny" @click="stageAll">全部暂存</button>
                       <button type="button" class="ghost tiny danger" @click="discardAll($event)">丢弃全部</button>
                     </div>
                   </div>
-                  <div class="git-file-list">
+                  <div v-if="gitUnstagedOpen" class="git-file-list">
                       <div
                         v-for="file in gitUnstagedFiles"
                         :key="file.path"
@@ -679,20 +685,31 @@
                     <p v-if="cursorCompactThought(m)" class="cursor-thought">{{ cursorCompactThought(m) }}</p>
                     <p class="cursor-compact-summary">{{ cursorCompactExplorationSummary(m) }}</p>
                     <div
-                      v-if="cursorCompactRunningAction(m)"
-                      class="cursor-action running"
+                      :ref="(el) => bindStatusLogScroll(el as HTMLElement | null, m.id)"
+                      class="cursor-compact-recent"
                     >
-                      {{ formatCursorActionLabel(cursorCompactRunningAction(m)!) }}
+                      <p v-if="cursorCompactHiddenCount(m) > 0" class="cursor-compact-older">
+                        ↑ 另有 {{ cursorCompactHiddenCount(m) }} 步
+                      </p>
+                      <div
+                        v-for="item in cursorCompactRecentActions(m)"
+                        :key="item.key"
+                        class="cursor-action"
+                        :class="cursorActionClass(item.step)"
+                      >
+                        {{ formatCursorActionLabel(item.step) }}
+                      </div>
                     </div>
-                    <p v-else-if="cursorCompactPlanning(m)" class="cursor-action planning">
-                      {{ cursorCompactPlanning(m) }}
-                    </p>
+                    <div v-if="cursorCompactLiveStatus(m)" class="cursor-compact-live">
+                      <span class="cursor-compact-live-dot" aria-hidden="true" />
+                      <p class="cursor-action planning">{{ cursorCompactLiveStatus(m) }}</p>
+                    </div>
                     <button
                       type="button"
                       class="cursor-activity-toggle"
                       @click="toggleActivityDetailed(m)"
                     >
-                      查看详细步骤（{{ m.tools?.length ?? 0 }}）
+                      查看全部步骤（{{ m.tools?.length ?? 0 }}）
                     </button>
                   </div>
                   <div
@@ -1093,9 +1110,15 @@ import ChatMarkdown from "../components/ChatMarkdown.vue";
 import CodeMonacoDiffEditor from "../components/CodeMonacoDiffEditor.vue";
 import CodeMonacoEditor from "../components/CodeMonacoEditor.vue";
 import ConfirmPopup from "../components/ConfirmPopup.vue";
+import InputPrompt from "../components/InputPrompt.vue";
 import FileTreeNode, { type TreeNode } from "../components/FileTreeNode.vue";
 import { useConfirm } from "../composables/useConfirm";
 import { useInputPrompt } from "../composables/useInputPrompt";
+import {
+  buildAgentPromptForProfile,
+  resolveAgentRunProfile,
+  shapeAgentHistoryForProfile,
+} from "../services/agentRunProfile";
 import { loadAiChatBaseFromStorage } from "../services/aiLocalConfig";
 import {
   buildAgentHistoryFromMessages,
@@ -1140,8 +1163,8 @@ import {
   formatCollapsedStepsSummary,
   formatCursorActionLabel,
   formatExplorationSummary,
-  getLatestFeedStatus,
   getLatestFeedThought,
+  getRecentFeedActions,
   getRunningFeedAction,
   layoutCursorFeedBlocks,
   shouldUseCompactAgentFeed as shouldUseCompactAgentFeedByCount,
@@ -1458,6 +1481,8 @@ const gitCommitting = ref(false);
 const gitGenStep = ref("");
 const gitLogEntries = ref<GitLogEntry[]>([]);
 const gitLogOpen = ref(false);
+const gitStagedOpen = ref(true);
+const gitUnstagedOpen = ref(true);
 const expandedGitLogEntries = ref<Set<string>>(new Set());
 const selectedGitFile = ref("");
 const gitDiffLoadingKey = ref("");
@@ -2009,9 +2034,46 @@ function cursorCompactRunningAction(msg: ChatMessage) {
   return action?.step ?? null;
 }
 
-function cursorCompactPlanning(msg: ChatMessage): string | null {
-  const status = getLatestFeedStatus(cursorAgentFeed(msg));
-  return status?.text ?? null;
+function cursorCompactRecentActions(msg: ChatMessage) {
+  void agentUiTick.value;
+  return getRecentFeedActions(cursorAgentFeed(msg)).recent;
+}
+
+function cursorCompactHiddenCount(msg: ChatMessage): number {
+  void agentUiTick.value;
+  return getRecentFeedActions(cursorAgentFeed(msg)).hiddenCount;
+}
+
+function cursorCompactLiveStatus(msg: ChatMessage): string | null {
+  void agentUiTick.value;
+  if (!isAgentRunning(msg)) return null;
+  if (cursorCompactRunningAction(msg)) return null;
+
+  if (msg.agentPhase === "streaming_model" || msg.agentPhase === "planning_tools") {
+    return msg.streamChars && msg.streamChars > 0
+      ? `思考中 · 已生成 ${msg.streamChars} 字`
+      : "思考中…";
+  }
+
+  const parts: string[] = [];
+  if (msg.agentPhase === "compacting_context") parts.push("压缩上下文…");
+  else if (msg.agentPhase === "summarizing_tools") parts.push("整理工具结果…");
+  else if (msg.agentPhase === "executing_tool" || msg.agentPhase === "executing_tools") return null;
+  else parts.push("整合信息中…");
+
+  if (msg.agentTurn) parts.push(`第 ${msg.agentTurn} 轮`);
+  if (
+    msg.agentWaitStartedAt &&
+    (msg.agentPhase === "waiting_model" ||
+      msg.agentPhase === "sending_request" ||
+      msg.agentPhase === "retrying_model")
+  ) {
+    const elapsed = Math.max(0, Math.floor((Date.now() - msg.agentWaitStartedAt) / 1000));
+    parts.push(`已等待 ${elapsed}s`);
+  } else if (msg.agentDetail?.trim()) {
+    parts.push(msg.agentDetail.trim());
+  }
+  return parts.join(" · ");
 }
 
 function hasAgentDebugDetails(msg: ChatMessage): boolean {
@@ -4651,8 +4713,16 @@ async function resendFromMessage(messageId: string) {
   await runAgentTurn(userText);
 }
 
-function buildAgentHistory(): VibeChatHistoryMessage[] {
-  return buildAgentHistoryFromMessages(chatMessages.value);
+function findLastAssistantContent(): string | undefined {
+  return [...chatMessages.value].reverse().find((m) => m.role === "assistant" && m.content.trim())?.content;
+}
+
+function buildAgentHistory(
+  currentPrompt: string,
+  profile: ReturnType<typeof resolveAgentRunProfile>,
+): VibeChatHistoryMessage[] {
+  const base = buildAgentHistoryFromMessages(chatMessages.value);
+  return shapeAgentHistoryForProfile(base, profile, currentPrompt);
 }
 
 function resolveCompletedTurns(reported: number, msg: ChatMessage): number {
@@ -4665,8 +4735,17 @@ function resolveCompletedTurns(reported: number, msg: ChatMessage): number {
 }
 
 async function runAgentTurn(userText: string, options?: { skipUserBubble?: boolean }) {
-  const prompt = userText.trim();
-  if (!prompt || !configReady.value || !projectOpened.value) return;
+  const rawPrompt = userText.trim();
+  if (!rawPrompt || !configReady.value || !projectOpened.value) return;
+
+  const lastAssistant = findLastAssistantContent();
+  const mode = chatMode.value;
+  const runProfile = resolveAgentRunProfile({
+    prompt: rawPrompt,
+    mode,
+    lastAssistantContent: lastAssistant,
+  });
+  const prompt = buildAgentPromptForProfile(rawPrompt, runProfile);
 
   reloadAiConfig();
   chatSending.value = true;
@@ -4674,12 +4753,11 @@ async function runAgentTurn(userText: string, options?: { skipUserBubble?: boole
   resetChatScrollPin();
   startAgentUiTick();
 
-  const history = buildAgentHistory();
+  const history = buildAgentHistory(rawPrompt, runProfile);
 
   if (!options?.skipUserBubble) {
-    chatMessages.value.push({ id: genId(), role: "user", content: prompt });
+    chatMessages.value.push({ id: genId(), role: "user", content: rawPrompt });
   }
-  const mode = chatMode.value;
   const assistantMsg: ChatMessage = {
     id: genId(),
     role: "assistant",
@@ -4712,6 +4790,7 @@ async function runAgentTurn(userText: string, options?: { skipUserBubble?: boole
       model: aiConfig.value.model,
       mode,
       openFilePath: activeFilePath.value || undefined,
+      runProfile: runProfile.kind === "execute_plan" ? runProfile : undefined,
     },
     (event) => handleAgentEvent(event, assistantMsg),
   );
@@ -5528,6 +5607,32 @@ onBeforeUnmount(() => {
   top: 0;
   z-index: 2;
   backdrop-filter: blur(8px);
+}
+
+.git-section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.git-section-toggle:hover .git-section-title {
+  color: var(--text);
+}
+
+.git-section-chevron {
+  flex-shrink: 0;
+  width: 12px;
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1;
 }
 
 .git-section-title {
@@ -7164,6 +7269,64 @@ button.compact {
   font-size: 12px;
   line-height: 1.45;
   color: rgba(139, 148, 158, 0.88);
+}
+
+.cursor-compact-recent {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 148px;
+  overflow: auto;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.18);
+  border-left: 2px solid rgba(88, 166, 255, 0.18);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+
+.cursor-compact-older {
+  margin: 0 0 4px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(139, 148, 158, 0.65);
+}
+
+.cursor-compact-live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+}
+
+.cursor-compact-live .cursor-action {
+  margin: 0;
+}
+
+.cursor-compact-live-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(121, 184, 255, 0.95);
+  animation: cursor-compact-pulse 1.15s ease-in-out infinite;
+}
+
+@keyframes cursor-compact-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.82);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.cursor-compact-recent .cursor-action.running::before {
+  content: "› ";
+  color: rgba(121, 184, 255, 0.85);
 }
 
 .cursor-agent-feed-wrap {

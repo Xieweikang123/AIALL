@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { shapeAgentHistoryForProfile } from "./agentRunProfile";
 import {
   buildAgentHistoryFromMessages,
   formatSessionTitle,
@@ -57,5 +58,21 @@ describe("buildAgentHistoryFromMessages", () => {
     expect(history[0].content).toContain("找到了文件。");
     expect(history[0].content).toContain("[工具摘要]");
     expect(history[0].content).toContain("搜索文件: 找到 1 个文件");
+  });
+
+  it("shapes history for execute_plan profile", () => {
+    const plan = "## 修改方案\n改 `src/foo.ts`：\n```ts\nconst x = 1;\n```";
+    const base = buildAgentHistoryFromMessages([
+      { role: "user", content: "能改吗" },
+      { role: "assistant", content: plan },
+    ]);
+    const history = shapeAgentHistoryForProfile(
+      base,
+      { kind: "execute_plan", targetFiles: ["src/foo.ts"] },
+      "改吧",
+    );
+    expect(history).toHaveLength(2);
+    expect(history[1].content).toContain("[已确认方案]");
+    expect(history[1].content).toContain("const x = 1");
   });
 });

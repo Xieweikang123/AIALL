@@ -19,6 +19,7 @@ export type CursorFeedBlock =
 const DEFAULT_KEEP_VISIBLE = 4;
 const DEFAULT_COLLAPSE_AFTER = 5;
 const COMPACT_FEED_MIN_STEPS = 6;
+const COMPACT_RECENT_VISIBLE = 6;
 
 export type AgentExplorationStats = {
   reads: number;
@@ -42,7 +43,7 @@ export function computeExplorationStats(steps: AgentRoundTool[]): AgentExplorati
     if (step.name === "read_file") stats.reads += 1;
     else if (step.name === "grep" || step.name === "search_files") stats.searches += 1;
     else if (step.name === "list_dir") stats.explores += 1;
-    else if (step.name === "write_file" || step.name === "delete_file") stats.edits += 1;
+    else if (step.name === "write_file" || step.name === "patch_file" || step.name === "delete_file") stats.edits += 1;
   }
   return stats;
 }
@@ -91,6 +92,17 @@ export function getLatestFeedStatus(items: CursorFeedItem[]): Extract<CursorFeed
     if (item.kind === "status") return item;
   }
   return null;
+}
+
+export function getRecentFeedActions(
+  items: CursorFeedItem[],
+  maxVisible = COMPACT_RECENT_VISIBLE,
+): { recent: Extract<CursorFeedItem, { kind: "action" }>[]; hiddenCount: number } {
+  const actions = items.filter(
+    (item): item is Extract<CursorFeedItem, { kind: "action" }> => item.kind === "action",
+  );
+  const hiddenCount = Math.max(0, actions.length - maxVisible);
+  return { recent: actions.slice(-maxVisible), hiddenCount };
 }
 
 export function layoutCursorFeedBlocks(
@@ -158,7 +170,7 @@ export function formatCursorActionLabel(step: AgentRoundTool): string {
     return lines ? `Read ${target} · ${lines} lines` : `Read ${target}`;
   }
 
-  if (step.name === "write_file") {
+  if (step.name === "write_file" || step.name === "patch_file") {
     const target = path || step.detail || "file";
     if (running) return `Editing ${target}`;
     if (failed) return `Edit failed ${target}`;

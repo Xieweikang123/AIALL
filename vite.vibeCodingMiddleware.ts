@@ -437,6 +437,12 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       mode?: "ask" | "build";
       maxTurns?: number;
       openFilePath?: string;
+      runProfile?: {
+        kind?: "interactive" | "execute_plan";
+        targetFiles?: string[];
+        userIntent?: string;
+      };
+      executionMode?: boolean;
     };
 
     try {
@@ -496,6 +502,19 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         model,
         mode,
         maxTurns: body.maxTurns,
+        runProfile:
+          body.runProfile?.kind === "execute_plan"
+            ? {
+                kind: "execute_plan",
+                targetFiles: Array.isArray(body.runProfile.targetFiles)
+                  ? body.runProfile.targetFiles.map((p) => String(p).trim()).filter(Boolean)
+                  : undefined,
+                userIntent: body.runProfile.userIntent?.trim() || undefined,
+              }
+            : body.executionMode
+              ? { kind: "execute_plan" }
+              : undefined,
+        executionMode: body.executionMode === true,
         signal: controller.signal,
         onEvent: (event) => {
           try {

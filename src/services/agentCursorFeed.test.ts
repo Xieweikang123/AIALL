@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCursorAgentFeed,
+  computeExplorationStats,
   computeLineDelta,
   formatCursorActionLabel,
+  formatExplorationSummary,
   layoutCursorFeedBlocks,
+  getRecentFeedActions,
+  shouldUseCompactAgentFeed,
 } from "./agentCursorFeed";
 import type { CursorFeedItem } from "./agentCursorFeed";
 import type { AgentRoundGroupView } from "./agentRoundGroups";
@@ -78,5 +82,59 @@ describe("agentCursorFeed", () => {
     if (blocks[0].kind !== "actions") return;
     expect(blocks[0].collapsed).toHaveLength(4);
     expect(blocks[0].visible).toHaveLength(4);
+  });
+
+  it("summarizes exploration stats for compact feed", () => {
+    const stats = computeExplorationStats([
+      {
+        id: "1",
+        turn: 1,
+        name: "read_file",
+        icon: "📄",
+        title: "读取",
+        detail: "a.ts",
+        label: "读取",
+        summary: "ok",
+        ok: true,
+      },
+      {
+        id: "2",
+        turn: 1,
+        name: "grep",
+        icon: "🔍",
+        title: "搜索",
+        detail: "foo",
+        label: "搜索",
+        summary: "ok",
+        ok: true,
+      },
+    ]);
+    expect(formatExplorationSummary(stats, true)).toContain("读 1 个文件");
+    expect(formatExplorationSummary(stats, true)).toContain("搜索 1 次");
+    expect(shouldUseCompactAgentFeed(6, true, false)).toBe(true);
+    expect(shouldUseCompactAgentFeed(6, true, true)).toBe(false);
+  });
+
+  it("keeps recent actions visible in compact feed", () => {
+    const actions: CursorFeedItem[] = Array.from({ length: 10 }, (_, index) => ({
+      kind: "action" as const,
+      key: `a-${index}`,
+      step: {
+        id: `a-${index}`,
+        turn: 1,
+        name: "read_file",
+        icon: "📄",
+        title: "读取",
+        detail: `file-${index}.ts`,
+        label: "读取",
+        summary: "ok",
+        ok: true,
+        args: { path: `file-${index}.ts` },
+      },
+    }));
+    const { recent, hiddenCount } = getRecentFeedActions(actions, 6);
+    expect(recent).toHaveLength(6);
+    expect(hiddenCount).toBe(4);
+    expect(recent[5]?.key).toBe("a-9");
   });
 });

@@ -27,6 +27,11 @@ export interface VibeAgentRunRequest {
   mode?: VibeChatMode;
   maxTurns?: number;
   openFilePath?: string;
+  runProfile?: {
+    kind: "interactive" | "execute_plan";
+    targetFiles?: string[];
+    userIntent?: string;
+  };
 }
 
 export type VibeAgentSseEvent =

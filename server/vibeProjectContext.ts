@@ -58,8 +58,24 @@ export type ProjectContextResult =
     }
   | { ok: false; error: string };
 
+const CONTEXT_CACHE_TTL_MS = 45_000;
+const contextCache = new Map<string, { builtAt: number; result: ProjectContextResult }>();
+
+export function invalidateProjectContextCache(projectPath?: string): void {
+  if (!projectPath) {
+    contextCache.clear();
+    return;
+  }
+  contextCache.delete(path.resolve(projectPath));
+}
+
 export async function buildProjectContext(projectPath: string): Promise<ProjectContextResult> {
   const resolved = path.resolve(projectPath);
+  const cached = contextCache.get(resolved);
+  if (cached && Date.now() - cached.builtAt < CONTEXT_CACHE_TTL_MS) {
+    return cached.result;
+  }
+
   const stat = await fs.promises.stat(resolved).catch(() => null);
   if (!stat || !stat.isDirectory()) {
     return { ok: false, error: "路径不存在或不是目录" };
@@ -82,13 +98,15 @@ export async function buildProjectContext(projectPath: string): Promise<ProjectC
     usedChars += content.length + rel.length;
   }
 
-  return {
+  const result: ProjectContextResult = {
     ok: true,
     path: resolved,
     tree,
     keyFiles,
     truncated: usedChars >= PROJECT_CONTEXT_MAX_CHARS || treeLines.length >= PROJECT_CONTEXT_MAX_NODES,
   };
+  contextCache.set(resolved, { builtAt: Date.now(), result });
+  return result;
 }
 
 export function formatProjectContextForPrompt(context: Extract<ProjectContextResult, { ok: true }>): string {
