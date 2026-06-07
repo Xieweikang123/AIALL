@@ -27,6 +27,7 @@ export interface VibeAgentRunRequest {
   mode?: VibeChatMode;
   maxTurns?: number;
   openFilePath?: string;
+  imageDataUrls?: string[];
   runProfile?: {
     kind: "interactive" | "execute_plan";
     targetFiles?: string[];
@@ -110,21 +111,40 @@ function safeJsonParse(input: string): unknown | undefined {
   }
 }
 
+export function shouldRetryAgentFetch(
+  error: unknown,
+  serverEventsReceived: boolean,
+  retryCount: number,
+  maxRetries = 3,
+): boolean {
+  return isRetryableNetworkError(error) && !serverEventsReceived && retryCount < maxRetries;
+}
+
+export function isRetryableNetworkError(error: unknown): boolean {
+  if (error instanceof Error) {
+    if (error.name === "AbortError" || error.message === "Aborted") return false;
+    const msg = error.message.toLowerCase();
+    if (
+      msg.includes("failed to fetch") ||
+      msg.includes("networkerror") ||
+      msg.includes("network error") ||
+      msg.includes("econnreset") ||
+      msg.includes("socket hang up") ||
+      msg.includes("fetch failed")
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function runVibeAgentSse(request: VibeAgentRunRequest, onEvent: (event: VibeAgentSseEvent) => void) {
   const controller = new AbortController();
   let doneReceived = false;
   let retryCount = 0;
+  let serverEventsReceived = false;
   const MAX_RETRIES = 3;
   const RETRY_DELAYS = [1000, 2000, 4000];
-
-  const isRetryableNetworkError = (error: unknown): boolean => {
-    if (error instanceof Error) {
-      if (error.name === "AbortError" || error.message === "Aborted") return false;
-      const msg = error.message.toLowerCase();
-      if (msg.includes("failed to fetch") || msg.includes("networkerror") || msg.includes("network error") || msg.includes("econnreset") || msg.includes("socket hang up") || msg.includes("fetch failed")) return true;
-    }
-    return false;
-  };
 
   const connect = async (): Promise<void> => {
     onEvent({ type: "status", data: { phase: retryCount > 0 ? "reconnecting" : "connecting_local", ...(retryCount > 0 ? { retryAttempt: retryCount, retryMaxAttempts: MAX_RETRIES + 1 } : {}) } });
@@ -142,6 +162,9 @@ export function runVibeAgentSse(request: VibeAgentRunRequest, onEvent: (event: V
         type: "error",
         data: { message: text || `Agent 请求失败，HTTP ${response.status}` },
       });
+      if (!doneReceived) {
+        onEvent({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 0 } });
+      }
       return;
     }
 
@@ -155,6 +178,7 @@ export function runVibeAgentSse(request: VibeAgentRunRequest, onEvent: (event: V
 
     const flush = () => {
       if (!currentDataLines.length) return;
+      serverEventsReceived = true;
       const dataStr = currentDataLines.join("\n");
       const parsed = safeJsonParse(dataStr);
       const type = currentEvent || "message";
@@ -214,6 +238,15 @@ export function runVibeAgentSse(request: VibeAgentRunRequest, onEvent: (event: V
     while (true) {
       try {
         await connect();
+        if (!doneReceived) {
+          if (serverEventsReceived) {
+            onEvent({
+              type: "error",
+              data: { message: "连接中断（流已结束但未收到完成信号）" },
+            });
+          }
+          onEvent({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 0 } });
+        }
         return;
       } catch (error) {
         if (controller.signal.aborted) {
@@ -224,7 +257,7 @@ export function runVibeAgentSse(request: VibeAgentRunRequest, onEvent: (event: V
           return;
         }
 
-        if (isRetryableNetworkError(error) && retryCount < MAX_RETRIES) {
+        if (shouldRetryAgentFetch(error, serverEventsReceived, retryCount, MAX_RETRIES)) {
           retryCount++;
           const delay = RETRY_DELAYS[retryCount - 1];
           await new Promise<void>((resolve) => {

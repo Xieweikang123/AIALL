@@ -73,7 +73,12 @@
           </ul>
         </div>
         </div>
-        <span v-if="treeError" class="bar-error" :title="treeError">!</span>
+        <div v-if="treeError" class="toolbar-error" role="alert">
+          <span class="toolbar-error-text">{{ treeError }}</span>
+          <button type="button" class="toolbar-error-dismiss" aria-label="关闭提示" @click="treeError = ''">
+            ×
+          </button>
+        </div>
         <router-link class="ghost small link-btn" to="/chat">AI 对话</router-link>
         <router-link class="ghost small link-btn" to="/ai-config">配置</router-link>
       </div>
@@ -659,7 +664,33 @@
                   >
                     重发
                   </button>
+                  <button
+                    v-if="canResumeAgentRun(m)"
+                    type="button"
+                    class="ghost small resume-btn"
+                    title="从断点继续运行，保留已完成步骤"
+                    :disabled="!configReady || !projectOpened || chatSending"
+                    @click="resumeAgentRun(m.id)"
+                  >
+                    恢复运行
+                  </button>
                 </div>
+              </div>
+              <div
+                v-if="m.role === 'assistant' && canResumeAgentRun(m) && !chatSending"
+                class="agent-recovery-banner"
+              >
+                <span class="agent-recovery-text">
+                  {{ recoverableAgentErrorHint(m, m.agentFailureReason || m.content || '连接中断') }}
+                </span>
+                <button
+                  type="button"
+                  class="secondary compact"
+                  :disabled="!configReady || !projectOpened || chatSending"
+                  @click="resumeAgentRun(m.id)"
+                >
+                  恢复运行
+                </button>
               </div>
               <div
                 v-if="m.role === 'assistant' && hasAgentActivity(m)"
@@ -684,29 +715,14 @@
                     aria-live="polite"
                   >
                     <p class="cursor-compact-summary">{{ cursorCompactExplorationSummary(m) }}</p>
-                    <div
-                      :ref="(el) => bindStatusLogScroll(el as HTMLElement | null, m.id)"
-                      class="cursor-compact-recent"
-                    >
-                      <p v-if="cursorCompactHiddenCount(m) > 0" class="cursor-compact-older">
-                        ↑ 另有 {{ cursorCompactHiddenCount(m) }} 步
-                      </p>
-                      <div
-                        v-for="item in cursorCompactRecentActions(m)"
-                        :key="item.key"
-                        class="cursor-action"
-                        :class="cursorActionClass(item.step)"
-                      >
-                        {{ formatCursorActionLabel(item.step) }}
-                      </div>
-                    </div>
-                    <div v-if="cursorCompactLiveStatus(m)" class="cursor-compact-live">
-                      <span class="cursor-compact-live-dot" aria-hidden="true" />
-                      <p class="cursor-action planning">{{ cursorCompactLiveStatus(m) }}</p>
-                    </div>
+                    <AgentActivityLogStream
+                      :items="compactLogItems(m)"
+                      :live-status="cursorCompactLiveStatus(m)"
+                      :hidden-count="cursorCompactHiddenCount(m)"
+                    />
                     <button
                       type="button"
-                      class="cursor-activity-toggle"
+                      class="cursor-activity-toggle cursor-compact-expand"
                       @click="toggleActivityDetailed(m)"
                     >
                       查看全部步骤（{{ m.tools?.length ?? 0 }}）
@@ -786,7 +802,10 @@
                       <p v-else-if="block.kind === 'status'" class="cursor-action planning">{{ block.text }}</p>
                     </template>
                   </div>
-                  <details v-if="hasAgentDebugDetails(m)" class="cursor-debug-panel">
+                  <details
+                    v-if="hasAgentDebugDetails(m) && !shouldUseCompactAgentFeed(m)"
+                    class="cursor-debug-panel"
+                  >
                     <summary>调试详情</summary>
                     <div class="cursor-debug-body">
                       <section
@@ -1036,10 +1055,22 @@
             </div>
           </div>
           <div class="chat-bottom">
-            <span v-if="chatError" class="chat-error">{{ chatError }}</span>
+            <span v-if="recoverableAssistantMsg && !chatSending" class="chat-recovery-hint">
+              Agent 已中断，可恢复运行继续任务
+            </span>
+            <span v-else-if="chatError" class="chat-error">{{ chatError }}</span>
             <span v-else-if="chatSending" class="chat-running">{{ chatRunningText }}</span>
             <span v-else class="chat-hint">{{ chatHintText }}</span>
             <div class="chat-actions">
+              <button
+                v-if="recoverableAssistantMsg && !chatSending"
+                type="button"
+                class="secondary resume-bottom-btn"
+                :disabled="!configReady || !projectOpened"
+                @click="resumeAgentRun(recoverableAssistantMsg.id)"
+              >
+                恢复运行
+              </button>
               <button v-if="chatSending" type="button" class="secondary" @click="stopAgent">停止</button>
               <button type="button" class="primary" :disabled="chatSending || !canSendChat" @click="sendChat">
                 {{ chatSending ? "运行中…" : "发送" }}
@@ -1084,6 +1115,9 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import AgentActivityLogStream, {
+  type AgentLogLineItem,
+} from "../components/AgentActivityLogStream.vue";
 import ChatComposerEditor from "../components/ChatComposerEditor.vue";
 import ChatMarkdown from "../components/ChatMarkdown.vue";
 import CodeMonacoDiffEditor from "../components/CodeMonacoDiffEditor.vue";
@@ -1098,6 +1132,15 @@ import {
   resolveAgentRunProfile,
   shapeAgentHistoryForProfile,
 } from "../services/agentRunProfile";
+import {
+  buildAgentResumePrompt,
+  canResumeAgentRun,
+  inferAgentRecoveryFlags,
+  isRecoverableAgentError,
+  recoverableAgentErrorHint,
+  resolveAgentCompletedTurns,
+  resolveAgentFailureBubbleContent,
+} from "../services/agentRecovery";
 import { loadAiChatBaseFromStorage } from "../services/aiLocalConfig";
 import {
   buildAgentHistoryFromMessages,
@@ -1112,6 +1155,7 @@ import {
   onStorageError,
   restoreChatStoreFromSnapshot,
   saveVibeChatHistory,
+  stripReferenceAttachments,
   switchVibeChatSession,
   type PersistedChatMessage,
   type VibeChatSessionMeta,
@@ -1177,6 +1221,7 @@ import {
   renameItem,
   searchFiles,
   fetchChatStoreFromDisk,
+  formatFetchError,
   syncChatStore,
   writeFile,
   type FileEntry,
@@ -1251,6 +1296,10 @@ type ChatMessage = Omit<PersistedChatMessage, "tools" | "roundGroups"> & {
   reverting?: boolean;
   applying?: boolean;
   agentAborted?: boolean;
+  agentFailed?: boolean;
+  agentRecoverable?: boolean;
+  agentFailureReason?: string;
+  agentRecoveryDismissed?: boolean;
 };
 
 type FileDiff = {
@@ -1269,37 +1318,52 @@ type AgentStatusData = Extract<VibeAgentSseEvent, { type: "status" }>["data"] & 
 };
 
 function normalizeChatMessages(messages: PersistedChatMessage[]): ChatMessage[] {
-  return messages.map((m) => ({
-    ...m,
-    activityExpanded: m.activityExpanded ?? false,
-    activityDetailed: m.activityDetailed ?? false,
-    tools: m.tools?.map((t) => ({
-      id: t.id,
-      name: t.name || "",
-      icon: t.icon || "⚙️",
-      title: t.title || t.label,
-      detail: t.detail || "",
-      label: t.label,
-      summary: t.summary,
-      ok: t.ok,
-      turn: t.turn,
-      fullResult: t.fullResult,
-      args: t.args,
-    })),
-    roundGroups: m.roundGroups?.map((group) => ({
-      turn: group.turn,
-      maxTurns: group.maxTurns,
-      narrative: group.narrative,
-      modelSteps: group.modelSteps.map((step) => ({ ...step })),
-      toolIds: [...group.toolIds],
-      request: group.request
-        ? { ...group.request, messages: group.request.messages.map((message) => ({ ...message })) }
-        : undefined,
-      response: group.response
-        ? { ...group.response, toolCalls: group.response.toolCalls.map((call) => ({ ...call })) }
-        : undefined,
-    })),
-  }));
+  return messages.map((m) => {
+    const normalized: ChatMessage = {
+      ...m,
+      activityExpanded: m.activityExpanded ?? false,
+      activityDetailed: m.activityDetailed ?? false,
+      tools: m.tools?.map((t) => ({
+        id: t.id,
+        name: t.name || "",
+        icon: t.icon || "⚙️",
+        title: t.title || t.label,
+        detail: t.detail || "",
+        label: t.label,
+        summary: t.summary,
+        ok: t.ok,
+        turn: t.turn,
+        fullResult: t.fullResult,
+        args: t.args,
+      })),
+      roundGroups: m.roundGroups?.map((group) => ({
+        turn: group.turn,
+        maxTurns: group.maxTurns,
+        narrative: group.narrative,
+        modelSteps: group.modelSteps.map((step) => ({ ...step })),
+        toolIds: [...group.toolIds],
+        request: group.request
+          ? { ...group.request, messages: group.request.messages.map((message) => ({ ...message })) }
+          : undefined,
+        response: group.response
+          ? { ...group.response, toolCalls: group.response.toolCalls.map((call) => ({ ...call })) }
+          : undefined,
+      })),
+    };
+
+    if (m.role === "assistant" && !m.agentRecoveryDismissed) {
+      const inferred = inferAgentRecoveryFlags(normalized);
+      if (inferred) {
+        normalized.agentFailed = inferred.agentFailed;
+        normalized.agentRecoverable = inferred.agentRecoverable;
+        normalized.agentFailureReason = inferred.agentFailureReason;
+        normalized.content = resolveAgentFailureBubbleContent(normalized);
+        normalized.activityExpanded = normalized.activityExpanded || true;
+      }
+    }
+
+    return normalized;
+  });
 }
 
 let agentAbortHandle: { abort: () => void } | null = null;
@@ -1533,6 +1597,15 @@ const chatHintText = computed(() =>
 const chatRunningText = computed(() =>
   chatMode.value === "ask" ? "思考中…" : "Agent 运行中…",
 );
+
+const recoverableAssistantMsg = computed(() => {
+  if (chatSending.value) return null;
+  for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
+    const m = chatMessages.value[i]!;
+    if (m.role === "assistant" && canResumeAgentRun(m)) return m;
+  }
+  return null;
+});
 
 const activeFileDiff = computed(() => getFileDiff(activeFilePath.value));
 const activeFileReadOnly = computed(() => readOnlyFileKeys.value.has(normalizePathKey(activeFilePath.value)));
@@ -2088,6 +2161,15 @@ function cursorCompactRecentActions(msg: ChatMessage) {
   return getRecentFeedActions(cursorAgentFeed(msg)).recent;
 }
 
+function compactLogItems(msg: ChatMessage): AgentLogLineItem[] {
+  void agentUiTick.value;
+  return cursorCompactRecentActions(msg).map((item) => ({
+    key: item.key,
+    label: formatCursorActionLabel(item.step),
+    state: cursorActionClass(item.step) as AgentLogLineItem["state"],
+  }));
+}
+
 function cursorCompactHiddenCount(msg: ChatMessage): number {
   void agentUiTick.value;
   return getRecentFeedActions(cursorAgentFeed(msg)).hiddenCount;
@@ -2235,6 +2317,7 @@ function shouldShowAssistantBubbleContent(msg: ChatMessage): boolean {
 
 function messageDisplayContent(msg: ChatMessage): string {
   if (msg.role === "user") return msg.content?.trim() || "";
+  if (canResumeAgentRun(msg)) return resolveAgentFailureBubbleContent(msg);
   return resolveAssistantBubbleContent(msg);
 }
 
@@ -2646,7 +2729,7 @@ async function openProjectByPath(dirPath: string) {
   } catch (e) {
     projectOpened.value = false;
     fileTree.value = [];
-    treeError.value = e instanceof Error ? e.message : "打开项目失败";
+    treeError.value = formatFetchError(e, "打开项目失败");
   } finally {
     loadingTree.value = false;
   }
@@ -2680,7 +2763,7 @@ async function refreshTree() {
   try {
     fileTree.value = await loadDirChildren(normalized);
   } catch (e) {
-    treeError.value = e instanceof Error ? e.message : "刷新目录失败";
+    treeError.value = formatFetchError(e, "刷新目录失败");
   }
 }
 
@@ -4433,12 +4516,39 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
   if (event.type === "error") {
     clearStreamDeltaBuffer();
     stopAgentUiTick();
-    chatError.value = event.data.message;
-    const content = assistantMsg.content || event.data.message;
-    assistantMsg.content = content;
-    appendStatusLog(assistantMsg, `错误：${event.data.message}`);
+    const recoverable = isRecoverableAgentError(event.data.message);
+    assistantMsg.agentFailed = true;
+    assistantMsg.agentRecoverable = recoverable;
+    assistantMsg.agentFailureReason = event.data.message;
+    assistantMsg.agentRecoveryDismissed = false;
+    assistantMsg.streaming = false;
+
+    const progressContent = resolveAgentFailureBubbleContent(assistantMsg);
+    assistantMsg.content = progressContent;
+    appendStatusLog(
+      assistantMsg,
+      recoverable
+        ? `连接中断：${event.data.message}（可恢复运行）`
+        : `错误：${event.data.message}`,
+    );
+    if (recoverable) {
+      assistantMsg.activityExpanded = true;
+      assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
+    }
+
+    chatError.value = recoverable
+      ? recoverableAgentErrorHint(assistantMsg, event.data.message)
+      : event.data.message;
+
     patchAssistantMsg(msgId, {
-      content,
+      agentFailed: true,
+      agentRecoverable: recoverable,
+      agentFailureReason: event.data.message,
+      agentRecoveryDismissed: false,
+      content: assistantMsg.content,
+      streaming: false,
+      activityExpanded: recoverable ? true : assistantMsg.activityExpanded,
+      totalTurns: assistantMsg.totalTurns,
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
       ...syncRoundGroupsPatch(assistantMsg),
     });
@@ -4446,7 +4556,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
     void scrollChatToBottom();
     chatSending.value = false;
 
-    if (pendingPromptQueue.value.length) {
+    if (!recoverable && pendingPromptQueue.value.length) {
       const next = pendingPromptQueue.value.shift()!;
       persistPendingQueue();
       void runAgentTurn(next, { skipUserBubble: true });
@@ -4460,6 +4570,19 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
     chatSending.value = false;
     agentAbortHandle = null;
     assistantMsg.streaming = false;
+
+    if (assistantMsg.agentFailed) {
+      const completedTurns = resolveCompletedTurns(event.data.turns, assistantMsg);
+      if (!assistantMsg.totalTurns) assistantMsg.totalTurns = completedTurns;
+      patchAssistantMsg(msgId, {
+        streaming: false,
+        totalTurns: assistantMsg.totalTurns,
+        ...syncRoundGroupsPatch(assistantMsg),
+      });
+      persistChatNow();
+      void scrollChatToBottom();
+      return;
+    }
     const completedTurns = resolveCompletedTurns(event.data.turns, assistantMsg);
     assistantMsg.totalTurns = completedTurns;
     const wasAborted = !!assistantMsg.agentAborted;
@@ -4481,6 +4604,10 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
 
     assistantMsg.pendingApproval = fileAction.pendingApproval;
     assistantMsg.writtenFiles = fileAction.writtenFiles;
+    assistantMsg.agentFailed = false;
+    assistantMsg.agentRecoverable = false;
+    assistantMsg.agentFailureReason = undefined;
+    assistantMsg.agentRecoveryDismissed = true;
 
     assistantMsg.status = "";
     assistantMsg.agentPhase = undefined;
@@ -4503,6 +4630,10 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       writtenFiles: assistantMsg.writtenFiles,
       pendingApproval: assistantMsg.pendingApproval,
       agentAborted: assistantMsg.agentAborted || undefined,
+      agentFailed: undefined,
+      agentRecoverable: undefined,
+      agentFailureReason: undefined,
+      agentRecoveryDismissed: true,
     });
     persistChatNow();
 
@@ -4775,14 +4906,119 @@ function buildAgentHistory(
 
 function resolveCompletedTurns(reported: number, msg: ChatMessage): number {
   if (reported > 0) return reported;
-  const fromTraces = msg.turnTraces?.length ?? 0;
-  if (fromTraces > 0) return fromTraces;
-  if (msg.agentTurn && msg.agentTurn > 1) return msg.agentTurn - 1;
-  if ((msg.tools?.length ?? 0) > 0) return 1;
-  return reported;
+  return resolveAgentCompletedTurns(msg);
 }
 
-async function runAgentTurn(userText: string, options?: { skipUserBubble?: boolean }) {
+function buildAgentHistoryForResume(assistantMsgId: string): VibeChatHistoryMessage[] {
+  const idx = chatMessages.value.findIndex((m) => m.id === assistantMsgId);
+  if (idx < 0) return buildAgentHistoryFromMessages(chatMessages.value);
+  return buildAgentHistoryFromMessages(chatMessages.value.slice(0, idx + 1));
+}
+
+function resolveOriginalUserPrompt(assistantMsgId: string): string {
+  const assistantIdx = chatMessages.value.findIndex((m) => m.id === assistantMsgId);
+  if (assistantIdx <= 0) return "";
+  for (let i = assistantIdx - 1; i >= 0; i -= 1) {
+    const msg = chatMessages.value[i];
+    if (msg.role === "user") return stripReferenceAttachments(msg.content);
+  }
+  return "";
+}
+
+async function resumeAgentRun(assistantMsgId: string) {
+  if (chatSending.value || !configReady.value || !projectOpened.value) return;
+
+  const assistantIdx = chatMessages.value.findIndex((m) => m.id === assistantMsgId);
+  if (assistantIdx < 0) return;
+
+  const assistantMsg = chatMessages.value[assistantIdx];
+  if (!canResumeAgentRun(assistantMsg)) return;
+
+  const originalPrompt = resolveOriginalUserPrompt(assistantMsgId);
+  if (!originalPrompt) return;
+
+  const failureReason =
+    assistantMsg.agentFailureReason ||
+    inferAgentRecoveryFlags(assistantMsg)?.agentFailureReason ||
+    "连接中断";
+  const resumePrompt = buildAgentResumePrompt(assistantMsg, originalPrompt, failureReason);
+  const mode = assistantMsg.chatMode ?? chatMode.value;
+  const runProfile = resolveAgentRunProfile({
+    prompt: originalPrompt,
+    mode,
+    lastAssistantContent: findLastAssistantContent(),
+  });
+
+  reloadAiConfig();
+  clearStreamDeltaBuffer();
+  chatSending.value = true;
+  chatError.value = "";
+  resetChatScrollPin();
+  startAgentUiTick();
+
+  assistantMsg.agentFailed = false;
+  assistantMsg.agentRecoverable = false;
+  assistantMsg.agentFailureReason = undefined;
+  assistantMsg.agentRecoveryDismissed = true;
+  assistantMsg.agentAborted = false;
+  assistantMsg.streaming = false;
+  const resumedContent = resolveAssistantBubbleContent({ ...assistantMsg, content: "" });
+  if (resumedContent) assistantMsg.content = resumedContent;
+  assistantMsg.activityExpanded = true;
+  assistantMsg.activityDetailed = false;
+  assistantMsg.agentPhase = "connecting_local";
+  assistantMsg.status = formatAgentStatus({ phase: "connecting_local" });
+  appendStatusLog(assistantMsg, "正在恢复运行…");
+  assistantMsg.roundGroups = recordAgentRoundStatus(
+    assistantMsg.roundGroups,
+    "connecting_local",
+    assistantMsg.status || "",
+  );
+  patchAssistantMsg(assistantMsgId, {
+    agentFailed: false,
+    agentRecoverable: false,
+    agentFailureReason: undefined,
+    agentRecoveryDismissed: true,
+    content: assistantMsg.content,
+    agentAborted: false,
+    streaming: false,
+    activityExpanded: true,
+    activityDetailed: false,
+    agentPhase: assistantMsg.agentPhase,
+    status: assistantMsg.status,
+    statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
+    ...syncRoundGroupsPatch(assistantMsg),
+  });
+  persistChatNow();
+  await scrollChatToBottom(true);
+
+  const history = shapeAgentHistoryForProfile(
+    buildAgentHistoryForResume(assistantMsgId),
+    runProfile,
+    resumePrompt,
+  );
+
+  agentAbortHandle?.abort();
+  agentAbortHandle = runVibeAgentSse(
+    {
+      prompt: resumePrompt,
+      history,
+      projectPath: projectPath.value.trim(),
+      endpoint: aiConfig.value.endpoint,
+      apiKey: aiConfig.value.apiKey,
+      model: aiConfig.value.model,
+      mode,
+      openFilePath: activeFilePath.value || undefined,
+      runProfile: runProfile.kind === "execute_plan" ? runProfile : undefined,
+    },
+    (event) => handleAgentEvent(event, assistantMsg),
+  );
+}
+
+async function runAgentTurn(
+  userText: string,
+  options?: { skipUserBubble?: boolean; resumeAssistantMsg?: ChatMessage; referencedFiles?: string[] },
+) {
   const rawPrompt = userText.trim();
   if (!rawPrompt || !configReady.value || !projectOpened.value) return;
 
@@ -4792,6 +5028,7 @@ async function runAgentTurn(userText: string, options?: { skipUserBubble?: boole
     prompt: rawPrompt,
     mode,
     lastAssistantContent: lastAssistant,
+    referencedFiles: options?.referencedFiles,
   });
   const prompt = buildAgentPromptForProfile(rawPrompt, runProfile);
 
@@ -4804,29 +5041,34 @@ async function runAgentTurn(userText: string, options?: { skipUserBubble?: boole
 
   const history = buildAgentHistory(rawPrompt, runProfile);
 
-  if (!options?.skipUserBubble) {
-    chatMessages.value.push({ id: genId(), role: "user", content: rawPrompt });
+  let assistantMsg: ChatMessage;
+  if (options?.resumeAssistantMsg) {
+    assistantMsg = options.resumeAssistantMsg;
+  } else {
+    if (!options?.skipUserBubble) {
+      chatMessages.value.push({ id: genId(), role: "user", content: rawPrompt });
+    }
+    assistantMsg = {
+      id: genId(),
+      role: "assistant",
+      content: "",
+      chatMode: mode,
+      tools: [],
+      roundGroups: [],
+      activityExpanded: false,
+      activityDetailed: false,
+      agentPhase: "connecting_local",
+      status: formatAgentStatus({ phase: "connecting_local" }),
+    };
+    chatMessages.value.push(assistantMsg);
+    assistantMsg.roundGroups = recordAgentRoundStatus(
+      assistantMsg.roundGroups,
+      "connecting_local",
+      assistantMsg.status || "",
+    );
+    persistChatNow();
+    await scrollChatToBottom(true);
   }
-  const assistantMsg: ChatMessage = {
-    id: genId(),
-    role: "assistant",
-    content: "",
-    chatMode: mode,
-    tools: [],
-    roundGroups: [],
-    activityExpanded: false,
-    activityDetailed: false,
-    agentPhase: "connecting_local",
-    status: formatAgentStatus({ phase: "connecting_local" }),
-  };
-  chatMessages.value.push(assistantMsg);
-  assistantMsg.roundGroups = recordAgentRoundStatus(
-    assistantMsg.roundGroups,
-    "connecting_local",
-    assistantMsg.status || "",
-  );
-  persistChatNow();
-  await scrollChatToBottom(true);
 
   agentAbortHandle?.abort();
   agentAbortHandle = runVibeAgentSse(
@@ -4906,7 +5148,9 @@ async function sendChat() {
     return;
   }
 
-  await runAgentTurn(fullPrompt);
+  await runAgentTurn(fullPrompt, {
+    referencedFiles: payload.refs.map((r) => r.relative || r.path).filter(Boolean),
+  });
 }
 
 function onWindowFocus() {
@@ -5155,19 +5399,44 @@ onBeforeUnmount(() => {
   color: rgba(255, 255, 255, 0.4);
 }
 
-.bar-error {
+.toolbar-error {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: rgba(255, 77, 94, 0.2);
-  color: var(--danger);
-  font-size: 12px;
-  font-weight: 700;
-  cursor: help;
+  gap: 6px;
+  max-width: min(360px, 42vw);
+  padding: 4px 8px 4px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 77, 94, 0.35);
+  background: rgba(255, 77, 94, 0.12);
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.toolbar-error-text {
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(255, 180, 186, 0.95);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolbar-error-dismiss {
   flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(255, 180, 186, 0.85);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.toolbar-error-dismiss:hover {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .project-history-wrap {
@@ -6235,6 +6504,8 @@ button.ghost.danger:hover:not(:disabled) {
 
 .msg-answer--final,
 .msg-answer--streaming {
+  position: relative;
+  z-index: 0;
   margin-top: 8px;
   padding: 12px 14px;
   border-radius: 10px;
@@ -7028,6 +7299,29 @@ button.primary.small {
   opacity: 1;
 }
 
+.msg-toolbar .resume-btn {
+  color: #91beff;
+}
+
+.agent-recovery-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(145, 190, 255, 0.35);
+  background: rgba(31, 111, 235, 0.12);
+}
+
+.agent-recovery-text {
+  flex: 1 1 200px;
+  font-size: 12px;
+  color: #91beff;
+  line-height: 1.45;
+}
+
 .msg-actions {
   display: flex;
   flex-wrap: wrap;
@@ -7356,16 +7650,24 @@ button.compact {
 }
 
 .cursor-agent-wrap.running {
-  margin-bottom: 2px;
+  margin-bottom: 6px;
 }
 
 .cursor-agent-wrap.running .cursor-agent-compact,
 .cursor-agent-wrap.running .cursor-agent-feed {
   max-height: min(22vh, 160px);
+  overflow: hidden;
+}
+
+.cursor-agent-wrap.running .cursor-agent-compact {
   padding: 6px 10px;
 }
 
-.cursor-agent-wrap.running .cursor-thought {
+.cursor-agent-wrap.running .cursor-agent-feed {
+  padding: 6px 10px;
+}
+
+.cursor-agent-wrap.running .cursor-agent-feed .cursor-thought {
   display: none;
 }
 
@@ -7373,81 +7675,32 @@ button.compact {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-height: 0;
+  overflow: hidden;
   padding: 10px 12px;
   border-radius: 8px;
-  background: rgba(13, 17, 23, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(1, 4, 9, 0.65);
+  border: 1px solid rgba(48, 54, 61, 0.75);
+}
+
+.cursor-compact-expand {
+  flex-shrink: 0;
+  margin-top: 2px;
 }
 
 .cursor-compact-summary {
   margin: 0;
+  flex-shrink: 0;
   font-size: 12px;
   line-height: 1.45;
   color: rgba(139, 148, 158, 0.88);
-}
-
-.cursor-compact-recent {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 148px;
-  overflow: auto;
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.18);
-  border-left: 2px solid rgba(88, 166, 255, 0.18);
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
-}
-
-.cursor-compact-older {
-  margin: 0 0 4px;
-  font-size: 11px;
-  line-height: 1.35;
-  color: rgba(139, 148, 158, 0.65);
-}
-
-.cursor-compact-live {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 20px;
-}
-
-.cursor-compact-live .cursor-action {
-  margin: 0;
-}
-
-.cursor-compact-live-dot {
-  flex-shrink: 0;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: rgba(121, 184, 255, 0.95);
-  animation: cursor-compact-pulse 1.15s ease-in-out infinite;
-}
-
-@keyframes cursor-compact-pulse {
-  0%,
-  100% {
-    opacity: 0.35;
-    transform: scale(0.82);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-.cursor-compact-recent .cursor-action.running::before {
-  content: "› ";
-  color: rgba(121, 184, 255, 0.85);
 }
 
 .cursor-agent-feed-wrap {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-height: 0;
 }
 
 .cursor-agent-feed {
@@ -7458,8 +7711,8 @@ button.compact {
   overflow: auto;
   padding: 8px 10px;
   border-radius: 8px;
-  background: rgba(13, 17, 23, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(1, 4, 9, 0.65);
+  border: 1px solid rgba(48, 54, 61, 0.75);
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
 }
@@ -7556,18 +7809,19 @@ button.compact {
 .cursor-action {
   margin: 0;
   padding: 1px 0;
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: 11.5px;
+  line-height: 1.55;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: rgba(139, 148, 158, 0.92);
+  letter-spacing: 0.01em;
+  color: rgba(171, 178, 191, 0.88);
 }
 
 .cursor-action.done {
-  color: rgba(126, 164, 138, 0.92);
+  color: rgba(139, 148, 158, 0.72);
 }
 
 .cursor-action.running {
-  color: rgba(121, 184, 255, 0.92);
+  color: rgba(126, 182, 255, 0.95);
 }
 
 .cursor-action.fail {
@@ -7575,9 +7829,9 @@ button.compact {
 }
 
 .cursor-action.planning {
-  font-family: inherit;
-  font-style: italic;
-  color: rgba(139, 148, 158, 0.72);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-style: normal;
+  color: rgba(121, 192, 255, 0.55);
 }
 
 .cursor-action-details {
@@ -7978,11 +8232,11 @@ button.compact {
 }
 
 .agent-round-tools .tool-item.done .tool-item-action {
-  color: rgba(126, 231, 135, 0.92);
+  color: rgba(139, 148, 158, 0.78);
 }
 
 .agent-round-tools .tool-item.running .tool-item-action {
-  color: #91beff;
+  color: rgba(126, 182, 255, 0.95);
 }
 
 .agent-round-detail {
@@ -8061,7 +8315,7 @@ button.compact {
 }
 
 .tool-call-preview {
-  color: rgba(126, 231, 135, 0.88);
+  color: rgba(126, 182, 255, 0.72);
 }
 
 .status-log-scroll-wrap.compact {
@@ -8749,6 +9003,21 @@ button.compact {
 .chat-error {
   font-size: 11px;
   color: var(--danger);
+}
+
+.chat-recovery-hint {
+  font-size: 11px;
+  color: rgba(121, 192, 255, 0.88);
+}
+
+.chat-actions .resume-bottom-btn {
+  border: 1px solid rgba(88, 166, 255, 0.45);
+  background: rgba(88, 166, 255, 0.12);
+  color: rgba(180, 215, 255, 0.95);
+}
+
+.chat-actions .resume-bottom-btn:hover:not(:disabled) {
+  background: rgba(88, 166, 255, 0.2);
 }
 
 button {

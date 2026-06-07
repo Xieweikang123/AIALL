@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  formatFetchError,
   grepContent,
   listDirectory,
   readFile,
@@ -91,5 +92,25 @@ describe("vibeCodingClient", () => {
     });
     await expect(searchFiles("D:/demo", "foo")).resolves.toEqual({ ok: false, results: [], error: "network down" });
     await expect(grepContent("D:/demo", "foo")).resolves.toEqual({ ok: false, results: [], error: "network down" });
+  });
+
+  it("handles empty backend responses without raw json parse errors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("", { status: 502, statusText: "Bad Gateway" })),
+    );
+
+    await expect(listDirectory("D:/demo")).resolves.toEqual({
+      ok: false,
+      path: "D:/demo",
+      items: [],
+      error: "后端服务未启动或已崩溃（HTTP 502），请运行 npm run dev 重启",
+    });
+  });
+
+  it("maps json parse failures to friendly backend messages", () => {
+    expect(formatFetchError(new Error("Failed to execute 'json' on 'Response': Unexpected end of JSON input"), "x")).toBe(
+      "后端无有效响应，请确认开发服务已启动",
+    );
   });
 });

@@ -1,0 +1,44 @@
+---
+description: Agent 编排/分类器/系统提示词须通用，禁止绑定具体功能或需求词
+alwaysApply: true
+---
+
+# Agent 编排与提示词（通用性）
+
+修改 **Agent 编排、路由、分类器、system prompt 分支** 时，必须保持**与具体业务需求解耦**。
+
+## 适用范围
+
+- `src/services/agentContinuation.ts`、`src/services/agentRunProfile.ts`
+- `server/agentRunProfile.ts`、`server/vibeAgent.ts`（system prompt、execute_plan 相关）
+- 以及任何 `*Signal*`、`*Continuation*`、`*RunProfile*`、`*TurnBudget*` 类逻辑
+
+## 禁止
+
+- 在 `PLAN_SIGNAL_RE`、路由正则、if/分支里写**当前任务/功能**相关词  
+  例：`粘贴图片`、`imageDataUrl`、某页面名、某 API 字段、用户原话里的专有名词
+- 用「正文里**出现**某 API/功能名」当作「已是可执行方案」的唯一依据
+- 在 system prompt 里写死「若用户要 X 功能则…」（X 为具体需求）；任务细节应来自**用户消息 + 工具结果**
+- 测试 fixture 使用真实需求文案（如「能粘贴图片吗」）绑定到分类器行为
+
+## 应使用（结构 / 契约，而非话题）
+
+判断「是否为可执行方案」时，优先看**形态**：
+
+1. **可执行细节**： fenced 代码块，或明确的步骤结构（如 `## 修改方案`、`第一步` / `详细改动`）
+2. **目标文件**：至少一个可解析的相对路径（已有 `extractPlanFilePaths`）
+3. **非征求确认**：排除「是否需要我…」「要不要…」「确认后我开始…」等仍在提问的结尾
+4. **（可选）显式标记**：真正出方案时使用固定前缀如 `[PLAN]` 或 `<!-- agent-plan -->`，分析/答疑禁止带该标记
+
+用户确认执行（`改吧`、`实现…`）与「上一条是否为方案」应分开判断；**分析型长文 + 提问** 不是方案。
+
+## 测试
+
+- 用通用占位：`src/foo.ts`、`featureFlag`、`## 修改方案` + 代码块
+- 覆盖：真方案应触发 `execute_plan`；分析+提问、仅提到某 API 名、无代码块的长文应**不**触发
+
+## Code Review 三问
+
+1. 这条规则/常量里有没有具体功能名或本次需求的词？
+2. 换成 unrelated 需求（如改路由、加重试），规则仍成立吗？
+3. 分析回复里**提到**某标识符，会不会误触发？

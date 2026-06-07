@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { runVibeAgentSse, type VibeAgentRunRequest, type VibeAgentSseEvent } from "./vibeAgentClient";
+import {
+  runVibeAgentSse,
+  shouldRetryAgentFetch,
+  type VibeAgentRunRequest,
+  type VibeAgentSseEvent,
+} from "./vibeAgentClient";
 
 const baseRequest: VibeAgentRunRequest = {
   prompt: "implement feature",
@@ -92,6 +97,12 @@ describe("runVibeAgentSse", () => {
     await waitForDone(events);
 
     expect(events).toContainEqual({ type: "unknown", data: "not-json" });
+  });
+
+  it("skips auto-retry once server events were already received", () => {
+    const error = new TypeError("Failed to fetch");
+    expect(shouldRetryAgentFetch(error, false, 0)).toBe(true);
+    expect(shouldRetryAgentFetch(error, true, 0)).toBe(false);
   });
 
   it("emits aborted status and done when abort is called", async () => {

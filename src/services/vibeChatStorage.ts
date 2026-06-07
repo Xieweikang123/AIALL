@@ -75,6 +75,10 @@ export type PersistedChatMessage = {
   turnFileDiffs?: Record<string, PersistedFileDiff>;
   pendingApproval?: boolean;
   agentAborted?: boolean;
+  agentFailed?: boolean;
+  agentRecoverable?: boolean;
+  agentFailureReason?: string;
+  agentRecoveryDismissed?: boolean;
   rejected?: boolean;
   reverted?: boolean;
   activityExpanded?: boolean;
@@ -195,7 +199,13 @@ function sessionTitleFromMessages(messages: PersistedChatMessage[]): string {
 
 function sanitizeMessages(messages: PersistedChatMessage[]): PersistedChatMessage[] {
   return messages
-    .filter((m) => m.role === "user" || m.content.trim() || (m.tools?.length ?? 0) > 0)
+    .filter(
+      (m) =>
+        m.role === "user" ||
+        m.content.trim() ||
+        (m.tools?.length ?? 0) > 0 ||
+        m.agentRecoverable,
+    )
     .slice(-MAX_MESSAGES_PER_SESSION)
     .map((m) => ({
       id: m.id,
@@ -252,6 +262,10 @@ function sanitizeMessages(messages: PersistedChatMessage[]): PersistedChatMessag
             : undefined,
       pendingApproval: m.pendingApproval || undefined,
       agentAborted: m.agentAborted || undefined,
+      agentFailed: m.agentFailed || undefined,
+      agentRecoverable: m.agentRecoverable || undefined,
+      agentFailureReason: m.agentFailureReason || undefined,
+      agentRecoveryDismissed: m.agentRecoveryDismissed || undefined,
       rejected: m.rejected || undefined,
       reverted: m.reverted || undefined,
       activityExpanded: m.activityExpanded || undefined,

@@ -34,11 +34,13 @@ export interface ComposerPayload {
   text: string;
   refs: ComposerReferencedFile[];
   drops: ComposerDroppedFile[];
+  imageDataUrls: string[];
 }
 
 const CHIP = "composer-chip";
 const CHIP_REF = "composer-chip-ref";
 const CHIP_DROP = "composer-chip-drop";
+const CHIP_IMAGE = "composer-chip-image";
 
 const props = defineProps<{
   placeholder?: string;
@@ -56,6 +58,7 @@ const emit = defineEmits<{
 const editorRef = ref<HTMLDivElement | null>(null);
 const focused = ref(false);
 const isEmpty = ref(true);
+const pendingImages = ref<string[]>([]);
 
 watch(
   () => props.disabled,
@@ -148,6 +151,19 @@ function createDropChip(file: ComposerDroppedFile): HTMLSpanElement {
   return chip;
 }
 
+function createImageChip(dataUrl: string): HTMLSpanElement {
+  const chip = document.createElement("span");
+  chip.className = `${CHIP} ${CHIP_IMAGE}`;
+  chip.contentEditable = "false";
+  chip.dataset.imageUrl = dataUrl;
+  const img = document.createElement("img");
+  img.src = dataUrl;
+  img.className = "composer-image-preview";
+  img.draggable = false;
+  chip.appendChild(img);
+  return chip;
+}
+
 function insertFileRef(file: ComposerReferencedFile) {
   removeMentionQueryBeforeCursor();
   insertNodesAtCursor([createRefChip(file)]);
@@ -157,6 +173,11 @@ function insertFileRef(file: ComposerReferencedFile) {
 
 function insertDroppedFile(file: ComposerDroppedFile) {
   insertNodesAtCursor([createDropChip(file)]);
+  syncEmpty();
+}
+
+function insertImage(dataUrl: string) {
+  insertNodesAtCursor([createImageChip(dataUrl)]);
   syncEmpty();
 }
 
@@ -170,7 +191,6 @@ function getPlainTextBeforeCursor(): string {
   pre.setEnd(range.endContainer, range.endOffset);
   return pre.toString();
 }
-
 function removeMentionQueryBeforeCursor(): boolean {
   const before = getPlainTextBeforeCursor();
   const match = /(^|\s)@([^\s@]*)$/.exec(before);
@@ -192,10 +212,11 @@ function extractPayload(): ComposerPayload {
   const root = editorRef.value;
   const refs: ComposerReferencedFile[] = [];
   const drops: ComposerDroppedFile[] = [];
+  const imageDataUrls: string[] = [];
   const textParts: string[] = [];
 
   if (!root) {
-    return { text: "", refs, drops };
+    return { text: "", refs, drops, imageDataUrls };
   }
 
   function walk(node: Node) {
@@ -226,6 +247,14 @@ function extractPayload(): ComposerPayload {
       return;
     }
 
+    if (el.classList.contains(CHIP_IMAGE)) {
+      const url = el.dataset.imageUrl ?? "";
+      if (url) {
+        imageDataUrls.push(url);
+      }
+      return;
+    }
+
     if (el.tagName === "BR") {
       textParts.push("\n");
       return;
@@ -246,6 +275,7 @@ function extractPayload(): ComposerPayload {
     text: textParts.join("").replace(/\u00A0/g, " ").replace(/\n+$/, ""),
     refs,
     drops,
+    imageDataUrls,
   };
 }
 
@@ -269,8 +299,8 @@ function setPlainText(text: string) {
 }
 
 function hasContent(): boolean {
-  const { text, refs, drops } = extractPayload();
-  return Boolean(text.trim() || refs.length || drops.length);
+  const { text, refs, drops, imageDataUrls } = extractPayload();
+  return Boolean(text.trim() || refs.length || drops.length || imageDataUrls.length);
 }
 
 function syncEmpty() {
@@ -302,8 +332,48 @@ function onMouseDown(e: MouseEvent) {
   }
 }
 
-function onPaste(e: ClipboardEvent) {
+/** Read an image file into a data URL. */
+function readImageAsDataUrl(file: File): Promise<string | null> {
+  if (!file.type.startsWith("image/")) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+}
+
+/** Extract image data URLs from ClipboardEvent (paste). */
+async function extractImagesFromClipboard(e: ClipboardEvent): Promise<string[]> {
+  const items = e.clipboardData?.items;
+  if (!items) return [];
+  const urls: string[] = [];
+  for (const item of Array.from(items)) {
+    if (item.kind === "file" && item.type.startsWith("image/")) {
+      const file = item.getAsFile();
+      if (file) {
+        const url = await readImageAsDataUrl(file);
+        if (url) urls.push(url);
+      }
+    }
+  }
+  return urls;
+}
+
+async function onPaste(e: ClipboardEvent) {
   e.preventDefault();
+
+  // Try images first
+  const imageUrls = await extractImagesFromClipboard(e);
+  if (imageUrls.length) {
+    for (const url of imageUrls) {
+      insertImage(url);
+    }
+    syncEmpty();
+    return;
+  }
+
+  // Fall back to text
   const text = e.clipboardData?.getData("text/plain") ?? "";
   if (!text) return;
   insertNodesAtCursor([document.createTextNode(text)], false);
@@ -366,6 +436,7 @@ defineExpose({
   focus,
   insertFileRef,
   insertDroppedFile,
+  insertImage,
   extractPayload,
   clear,
   setPlainText,
@@ -429,5 +500,25 @@ void nextTick(() => syncEmpty());
   background: rgba(31, 111, 235, 0.2);
   border: 1px solid rgba(31, 111, 235, 0.32);
   color: #d6e8ff;
+}
+
+.composer-editor :deep(.composer-chip-image) {
+  display: inline-block;
+  padding: 2px;
+  margin: 2px 1px;
+  border-radius: 6px;
+  background: rgba(31, 111, 235, 0.15);
+  border: 1px solid rgba(31, 111, 235, 0.3);
+  vertical-align: bottom;
+  line-height: 0;
+}
+
+.composer-editor :deep(.composer-image-preview) {
+  display: block;
+  max-width: 120px;
+  max-height: 80px;
+  border-radius: 4px;
+  object-fit: contain;
+  pointer-events: none;
 }
 </style>

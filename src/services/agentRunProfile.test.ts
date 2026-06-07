@@ -38,6 +38,23 @@ describe("resolveAgentRunProfile", () => {
     });
     expect(profile.kind).toBe("interactive");
   });
+
+  it("uses execute_plan when user @ references files with edit intent", () => {
+    const profile = resolveAgentRunProfile({
+      prompt: "支持一下粘贴图片\n\n## 📎 参考文件\n\n### 📄 src/components/ChatComposerEditor.vue",
+      mode: "build",
+    });
+    expect(profile.kind).toBe("execute_plan");
+    expect(profile.targetFiles).toContain("src/components/ChatComposerEditor.vue");
+  });
+
+  it("stays interactive for pure questions even with @ refs", () => {
+    const profile = resolveAgentRunProfile({
+      prompt: "有没有发图功能\n\n## 📎 参考文件\n\n### 📄 src/views/VibeCodingView.vue",
+      mode: "build",
+    });
+    expect(profile.kind).toBe("interactive");
+  });
 });
 
 describe("buildAgentPromptForProfile", () => {

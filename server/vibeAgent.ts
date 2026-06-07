@@ -8,6 +8,7 @@ import {
   synthesizeToolCallsFromText,
 } from "./textToolCalls";
 import { AGENT_SAFETY_MAX_TURNS } from "./agentTurnBudget";
+import { buildExploreBudgetNudge, INTERACTIVE_EXPLORE_TURN_BUDGET } from "./agentExplorationBudget";
 import {
   buildExecutePlanSystemHint,
   buildTargetFileManifest,
@@ -412,6 +413,14 @@ const READ_ONLY_AGENT_TOOLS = VIBE_AGENT_TOOLS.filter((t) =>
 const READ_ONLY_AGENT_TOOL_NAMES = new Set(["list_dir", "read_file", "grep", "search_files"]);
 const WRITE_AGENT_TOOL_NAMES = new Set(["write_file", "patch_file", "delete_file"]);
 
+const LARGE_FILE_LINE_THRESHOLD = 500;
+
+function requirePriorRead(stage: WriteStage, relative: string, existsOnDisk: boolean): string | null {
+  if (!existsOnDisk) return null;
+  if (stage.readPaths.has(relative)) return null;
+  return `错误：请先 read_file 核对 ${relative} 的真实内容，再修改该文件`;
+}
+
 function canParallelizeToolBatch(calls: ChatToolCall[]): boolean {
   if (calls.length <= 1) return false;
   const names = calls.map((call) => call.function.name);
@@ -428,6 +437,7 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string): string {
     "回答请使用中文。",
     "工作流程：先 list_dir / grep / search_files 定位，再按需 read_file 读取关键片段，最后 write_file / delete_file 修改。",
     "探索时：优先 grep / search_files 缩小范围，read_file 用 offset/limit 分段读取（单次约 200 行）；不要重复读取已读过的文件；信息足够后立即进入修改或回答，避免无意义地连续读文件。",
+    "修改前必须先 read_file 核对目标文件；patch_file 前 old_string 须与磁盘内容完全一致。",
     "解释项目时：从 package.json、README、入口文件等关键文件入手，不要臆测。",
     "修改代码时：小范围改动优先 patch_file（old_string 须唯一匹配）；全文件重写或新文件才用 write_file；大文件禁止 write_file 整文件覆盖。",
     "需要确认现状时 read_file 用 offset/limit 读相关片段即可，不要读整个大文件。",
@@ -556,10 +566,11 @@ type WriteStage = {
   files: Map<string, string>;
   deletions: Set<string>;
   writtenList: string[];
+  readPaths: Set<string>;
 };
 
 export function createWriteStage(): WriteStage {
-  return { files: new Map(), deletions: new Set(), writtenList: [] };
+  return { files: new Map(), deletions: new Set(), writtenList: [], readPaths: new Set() };
 }
 
 function trackWrittenFile(stage: WriteStage, relative: string) {
@@ -586,6 +597,7 @@ export async function executeTool(
   stage: WriteStage | null,
   mode: VibeChatMode = "build",
   readCache?: Map<string, string>,
+  readSliceCache?: Map<string, string>,
 ): Promise<string> {
   if (mode === "ask" && WRITE_AGENT_TOOL_NAMES.has(name)) {
     return "Ask 模式下不支持文件修改，请仅使用只读工具查询项目。";
@@ -625,7 +637,15 @@ export async function executeTool(
     const defaultLimit = mode === "ask" ? 200 : 500;
     const maxLimit = mode === "ask" ? 400 : 800;
     const limit = Math.min(maxLimit, Math.max(1, Number(args.limit) || defaultLimit));
-    return sliceFileLines(content, offset, limit);
+    const sliceKey = `${resolved.relative}:${offset}:${limit}`;
+    const cachedSlice = readSliceCache?.get(sliceKey);
+    if (cachedSlice) {
+      return `${cachedSlice}\n（与上次 read_file 相同，已省略重复读取）`;
+    }
+    const sliced = sliceFileLines(content, offset, limit);
+    readSliceCache?.set(sliceKey, sliced);
+    stage?.readPaths.add(resolved.relative);
+    return sliced;
   }
 
   if (name === "grep") {
@@ -657,6 +677,22 @@ export async function executeTool(
     if (typeof content !== "string") return "错误：缺少 content";
     const resolved = resolveProjectPath(root, filePath);
     if (!resolved.ok) return `错误：${resolved.error}`;
+    const stat = await fs.promises.stat(resolved.path).catch(() => null);
+    const existsOnDisk = !!stat?.isFile();
+    const readErr = requirePriorRead(stage, resolved.relative, existsOnDisk);
+    if (readErr) return readErr;
+    if (existsOnDisk) {
+      const existing =
+        stage.files.get(resolved.relative) ??
+        readCache?.get(resolved.relative) ??
+        (await readFileContent(resolved.path).catch(() => null))?.content ??
+        "";
+      const existingLines = existing ? existing.split(/\r?\n/).length : 0;
+      const newLines = content.split(/\r?\n/).length;
+      if (existingLines >= LARGE_FILE_LINE_THRESHOLD || newLines >= LARGE_FILE_LINE_THRESHOLD) {
+        return `错误：${resolved.relative} 为大文件（${existingLines || newLines} 行），请用 patch_file 局部修改`;
+      }
+    }
     stage.deletions.delete(resolved.relative);
     stage.files.set(resolved.relative, content);
     readCache?.set(resolved.relative, content);
@@ -680,6 +716,9 @@ export async function executeTool(
     if (typeof newString !== "string") return "错误：缺少 new_string";
     const resolved = resolveProjectPath(root, filePath);
     if (!resolved.ok) return `错误：${resolved.error}`;
+    const stat = await fs.promises.stat(resolved.path).catch(() => null);
+    const readErr = requirePriorRead(stage, resolved.relative, !!stat?.isFile());
+    if (readErr) return readErr;
     let content = stage.files.get(resolved.relative) ?? readCache?.get(resolved.relative) ?? null;
     if (content === null) {
       content = await readStagedFileContent(root, resolved.relative, resolved.path, stage);
@@ -815,6 +854,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
   const writeStage = isAsk ? null : createWriteStage();
   const readCache = new Map<string, string>();
+  const readSliceCache = new Map<string, string>();
+  let consecutiveExploreTurns = 0;
   const activeTools = isAsk ? READ_ONLY_AGENT_TOOLS : VIBE_AGENT_TOOLS;
   const messages: ChatCompletionMessage[] = [
     { role: "system", content: systemPrompt },
@@ -1111,7 +1152,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
       let result = "";
       try {
-        result = await executeTool(projectRoot, toolName, toolArgs, writeStage, mode, readCache);
+        result = await executeTool(projectRoot, toolName, toolArgs, writeStage, mode, readCache, readSliceCache);
       } catch (error) {
         result = `错误：${error instanceof Error ? error.message : String(error)}`;
       }
@@ -1169,6 +1210,19 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       }
 
       index = end;
+    }
+
+    const turnHadWrite = toolCalls.some((call) => WRITE_AGENT_TOOL_NAMES.has(call.function.name));
+    const turnExploreOnly =
+      toolCalls.length > 0 && toolCalls.every((call) => READ_ONLY_AGENT_TOOL_NAMES.has(call.function.name));
+    if (turnHadWrite) {
+      consecutiveExploreTurns = 0;
+    } else if (turnExploreOnly) {
+      consecutiveExploreTurns += 1;
+    }
+    if (!isExecutePlan && !isAsk && consecutiveExploreTurns >= INTERACTIVE_EXPLORE_TURN_BUDGET) {
+      messages.push({ role: "system", content: buildExploreBudgetNudge(consecutiveExploreTurns) });
+      consecutiveExploreTurns = 0;
     }
 
     if (explicitMaxTurns !== undefined && turn >= explicitMaxTurns) {

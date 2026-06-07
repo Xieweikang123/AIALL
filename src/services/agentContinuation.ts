@@ -10,7 +10,12 @@ const PLAN_FILE_PATH_RE =
   /(?:^|[\s`"'(（\[])((?:[\w@.-]+\/)+[\w.-]+\.(?:vue|ts|tsx|js|jsx|json|md|css|scss|html|py|rs|go|toml)|[\w.-]+\.(?:vue|ts|tsx|js|jsx|json|md|css|scss|html|py|rs|go|toml))\b/gi;
 
 const PLAN_SIGNAL_RE =
-  /修改方案|改动方案|涉及文件|制定计划|详细改动|确认后.*实施|write_file|patch_file|第一步|第二步|需要改|按方案|完整文件|粘贴图片|imageDataUrl/i;
+  /修改方案|改动方案|涉及文件|制定计划|详细改动|确认后.*实施|第一步|第二步|按方案|完整文件/i;
+
+const SCOPED_EDIT_INTENT_RE =
+  /(?:改|修|加|支持|接入|添加|实现|做|优化|调整|更新|完善|支持一下)/;
+
+const ASK_ONLY_RE = /^(什么是|是什么|怎么|如何|为什么|有没有|是否|能不能|可以吗)[\s\S]{0,120}$/i;
 
 const HISTORY_PLAN_KEEP_CHARS = 2_400;
 const PLAN_CODE_BLOCK_MAX_CHARS = 6_000;
@@ -43,17 +48,46 @@ export function isExecutionContinuation(text: string): boolean {
   return false;
 }
 
+export function hasDirectImplementationIntent(text: string): boolean {
+  const body = stripQuotedReplyPrefix(text.trim());
+  if (!body || ASK_ONLY_RE.test(body)) return false;
+  if (body.length <= 200 && IMPLEMENTATION_INTENT_RE.test(body)) return true;
+  if (body.length <= 400 && SCOPED_EDIT_INTENT_RE.test(body)) return true;
+  return false;
+}
+
 export function looksLikeModificationPlan(content: string): boolean {
   const text = content.trim();
   if (!text) return false;
-  if (PLAN_SIGNAL_RE.test(text)) return true;
-  return extractPlanFilePaths(text).length >= 1 && text.includes("```");
+  if (/是否需要我|需要我帮你|你想让我|是否要|是否开始/.test(text) && !text.includes("```")) {
+    return false;
+  }
+
+  const paths = extractPlanFilePaths(text);
+  const hasCodeBlock = text.includes("```");
+  const hasPlanStructure = PLAN_SIGNAL_RE.test(text);
+
+  if (hasCodeBlock && paths.length >= 1) return true;
+  if (hasPlanStructure && paths.length >= 1 && hasCodeBlock) return true;
+  if (hasPlanStructure && paths.length >= 2) return true;
+
+  return false;
 }
 
 export function extractPlanFilePaths(content: string): string[] {
   const candidates: string[] = [];
   for (const match of content.matchAll(PLAN_FILE_PATH_RE)) {
     const raw = match[1]?.replace(/\\/g, "/");
+    if (raw) candidates.push(raw);
+  }
+  return normalizePlanPaths(candidates);
+}
+
+/** Paths from composer `## 📎 参考文件` attachment section. */
+export function extractReferencedFilePaths(prompt: string): string[] {
+  const candidates: string[] = [];
+  for (const match of prompt.matchAll(/###\s*📄\s*([^\n`]+)/g)) {
+    const raw = match[1]?.trim().replace(/\\/g, "/");
     if (raw) candidates.push(raw);
   }
   return normalizePlanPaths(candidates);

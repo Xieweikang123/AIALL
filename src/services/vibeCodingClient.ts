@@ -1,6 +1,32 @@
 import { backendUrl } from "./backendBase";
 import { open } from "@tauri-apps/plugin-dialog";
 
+export function formatFetchError(error: unknown, fallback: string): string {
+  const msg = error instanceof Error ? error.message : fallback;
+  if (/unexpected end of json input/i.test(msg) || /failed to execute 'json'/i.test(msg)) {
+    return "后端无有效响应，请确认开发服务已启动";
+  }
+  if (/failed to fetch|networkerror|network error/i.test(msg)) {
+    return "无法连接后端服务，请检查网络或开发服务是否已启动";
+  }
+  return msg.trim() || fallback;
+}
+
+async function readJsonResponse<T>(response: Response): Promise<T> {
+  const text = await response.text();
+  if (!text.trim()) {
+    if (response.status >= 500) {
+      throw new Error(`后端服务未启动或已崩溃（HTTP ${response.status}），请运行 npm run dev 重启`);
+    }
+    throw new Error(`后端返回空响应（HTTP ${response.status}）`);
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`后端返回无效 JSON（HTTP ${response.status}）`);
+  }
+}
+
 export interface FileEntry {
   name: string;
   path: string;
@@ -112,10 +138,10 @@ export async function fetchProjectContext(projectPath: string): Promise<ProjectC
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: projectPath }),
     });
-    const data = (await response.json()) as ProjectContextResult;
+    const data = await readJsonResponse<ProjectContextResult>(response);
     return data;
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "网络错误" };
+    return { ok: false, error: formatFetchError(error, "网络错误") };
   }
 }
 
@@ -146,10 +172,10 @@ export async function fetchChatStoreFromDisk(projectPath: string): Promise<ChatS
     if (!response.ok) {
       return { ok: false, error: `读取会话备份失败：HTTP ${response.status}` };
     }
-    const result = (await response.json()) as ChatStoreLoadResult;
+    const result = await readJsonResponse<ChatStoreLoadResult>(response);
     return result;
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "读取会话备份失败" };
+    return { ok: false, error: formatFetchError(error, "读取会话备份失败") };
   }
 }
 
@@ -163,10 +189,10 @@ export async function syncChatStore(projectPath: string, data: unknown): Promise
     if (!response.ok) {
       return { ok: false, error: `同步会话到本地失败：HTTP ${response.status}` };
     }
-    const result = (await response.json()) as ChatStoreSyncResult;
+    const result = await readJsonResponse<ChatStoreSyncResult>(response);
     return result;
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "同步会话到本地失败" };
+    return { ok: false, error: formatFetchError(error, "同步会话到本地失败") };
   }
 }
 
@@ -191,10 +217,10 @@ export async function listDirectory(dirPath: string): Promise<ListResult> {
   try {
     const url = backendUrl(`/backend/vibe/list?path=${encodeURIComponent(dirPath)}`);
     const response = await fetch(url);
-    const data = (await response.json()) as ListResult;
+    const data = await readJsonResponse<ListResult>(response);
     return data;
   } catch (error) {
-    return { ok: false, path: dirPath, items: [], error: error instanceof Error ? error.message : "网络错误" };
+    return { ok: false, path: dirPath, items: [], error: formatFetchError(error, "网络错误") };
   }
 }
 
@@ -205,10 +231,9 @@ export async function readFile(filePath: string, projectRoot?: string): Promise<
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: filePath, projectRoot }),
     });
-    const data = (await response.json()) as ReadResult;
-    return data;
+    return await readJsonResponse<ReadResult>(response);
   } catch (error) {
-    return { ok: false, content: "", path: filePath, size: 0, error: error instanceof Error ? error.message : "网络错误" };
+    return { ok: false, content: "", path: filePath, size: 0, error: formatFetchError(error, "网络错误") };
   }
 }
 
@@ -219,10 +244,9 @@ export async function writeFile(filePath: string, content: string, projectRoot?:
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: filePath, content, projectRoot }),
     });
-    const data = (await response.json()) as WriteResult;
-    return data;
+    return await readJsonResponse<WriteResult>(response);
   } catch (error) {
-    return { ok: false, path: filePath, size: 0, error: error instanceof Error ? error.message : "网络错误" };
+    return { ok: false, path: filePath, size: 0, error: formatFetchError(error, "网络错误") };
   }
 }
 
@@ -230,10 +254,9 @@ export async function searchFiles(dirPath: string, query: string): Promise<Searc
   try {
     const url = backendUrl(`/backend/vibe/search?path=${encodeURIComponent(dirPath)}&q=${encodeURIComponent(query)}`);
     const response = await fetch(url);
-    const data = (await response.json()) as SearchResults;
-    return data;
+    return await readJsonResponse<SearchResults>(response);
   } catch (error) {
-    return { ok: false, results: [], error: error instanceof Error ? error.message : "网络错误" };
+    return { ok: false, results: [], error: formatFetchError(error, "网络错误") };
   }
 }
 
@@ -243,10 +266,9 @@ export async function grepContent(dirPath: string, pattern: string): Promise<Gre
       `/backend/vibe/grep?path=${encodeURIComponent(dirPath)}&q=${encodeURIComponent(pattern)}`,
     );
     const response = await fetch(url);
-    const data = (await response.json()) as GrepResults;
-    return data;
+    return await readJsonResponse<GrepResults>(response);
   } catch (error) {
-    return { ok: false, results: [], error: error instanceof Error ? error.message : "网络错误" };
+    return { ok: false, results: [], error: formatFetchError(error, "网络错误") };
   }
 }
 
@@ -257,10 +279,9 @@ export async function createItem(itemPath: string, isDirectory: boolean, content
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: itemPath, isDirectory, content, projectRoot }),
     });
-    const data = (await response.json()) as CreateResult;
-    return data;
+    return await readJsonResponse<CreateResult>(response);
   } catch (error) {
-    return { ok: false, path: itemPath, type: "", error: error instanceof Error ? error.message : "网络错误" };
+    return { ok: false, path: itemPath, type: "", error: formatFetchError(error, "网络错误") };
   }
 }
 
@@ -269,10 +290,9 @@ export async function deleteItem(itemPath: string, projectRoot?: string): Promis
     const rootParam = projectRoot ? `&projectRoot=${encodeURIComponent(projectRoot)}` : "";
     const url = backendUrl(`/backend/vibe/delete?path=${encodeURIComponent(itemPath)}${rootParam}`);
     const response = await fetch(url, { method: "DELETE" });
-    const data = (await response.json()) as DeleteResult;
-    return data;
+    return await readJsonResponse<DeleteResult>(response);
   } catch (error) {
-    return { ok: false, path: itemPath, error: error instanceof Error ? error.message : "网络错误" };
+    return { ok: false, path: itemPath, error: formatFetchError(error, "网络错误") };
   }
 }
 
@@ -283,14 +303,13 @@ export async function renameItem(fromPath: string, toPath: string): Promise<Rena
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ from: fromPath, to: toPath }),
     });
-    const data = (await response.json()) as RenameResult;
-    return data;
+    return await readJsonResponse<RenameResult>(response);
   } catch (error) {
     return {
       ok: false,
       from: fromPath,
       to: toPath,
-      error: error instanceof Error ? error.message : "网络错误",
+      error: formatFetchError(error, "网络错误"),
     };
   }
 }

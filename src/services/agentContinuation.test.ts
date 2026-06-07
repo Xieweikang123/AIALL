@@ -42,6 +42,12 @@ describe("looksLikeModificationPlan", () => {
     expect(looksLikeModificationPlan(SAMPLE_PLAN)).toBe(true);
     expect(looksLikeModificationPlan("项目介绍如下…")).toBe(false);
   });
+
+  it("rejects analysis that only asks whether to implement", () => {
+    expect(
+      looksLikeModificationPlan("当前不支持发图。是否需要我帮你实现粘贴图片？"),
+    ).toBe(false);
+  });
 });
 
 describe("extractPlanFilePaths", () => {
