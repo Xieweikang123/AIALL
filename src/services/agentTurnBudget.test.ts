@@ -4,7 +4,9 @@ import {
   ASK_MAX_TURNS,
   EXECUTE_PLAN_MAX_TURNS,
   INTERACTIVE_BUILD_MAX_TURNS,
+  RESUME_MAX_TURNS_CAP,
   resolveAgentMaxTurns,
+  resolveResumeMaxTurns,
 } from "../../server/agentTurnBudget";
 
 describe("AGENT_SAFETY_MAX_TURNS", () => {
@@ -16,18 +18,34 @@ describe("AGENT_SAFETY_MAX_TURNS", () => {
 describe("resolveAgentMaxTurns", () => {
   it("limits execute_plan build runs", () => {
     expect(resolveAgentMaxTurns("build", { kind: "execute_plan" })).toBe(EXECUTE_PLAN_MAX_TURNS);
-    expect(EXECUTE_PLAN_MAX_TURNS).toBe(8);
+    expect(EXECUTE_PLAN_MAX_TURNS).toBe(20);
   });
 
   it("limits interactive build runs", () => {
     expect(resolveAgentMaxTurns("build", { kind: "interactive" })).toBe(INTERACTIVE_BUILD_MAX_TURNS);
     expect(resolveAgentMaxTurns("build", undefined)).toBe(INTERACTIVE_BUILD_MAX_TURNS);
-    expect(INTERACTIVE_BUILD_MAX_TURNS).toBe(12);
+    expect(INTERACTIVE_BUILD_MAX_TURNS).toBe(24);
   });
 
   it("limits ask mode runs", () => {
     expect(resolveAgentMaxTurns("ask", { kind: "execute_plan" })).toBe(ASK_MAX_TURNS);
     expect(resolveAgentMaxTurns("ask", undefined)).toBe(ASK_MAX_TURNS);
-    expect(ASK_MAX_TURNS).toBe(10);
+    expect(ASK_MAX_TURNS).toBe(12);
+  });
+});
+
+describe("resolveResumeMaxTurns", () => {
+  it("returns base budget when nothing completed yet", () => {
+    expect(resolveResumeMaxTurns("build", undefined, 0)).toBe(INTERACTIVE_BUILD_MAX_TURNS);
+  });
+
+  it("grants bonus turns after partial or full exhaustion", () => {
+    expect(resolveResumeMaxTurns("build", undefined, 12)).toBe(48);
+    expect(resolveResumeMaxTurns("build", undefined, 24)).toBe(RESUME_MAX_TURNS_CAP);
+  });
+
+  it("never exceeds resume cap or safety ceiling", () => {
+    expect(resolveResumeMaxTurns("build", undefined, 100)).toBe(RESUME_MAX_TURNS_CAP);
+    expect(RESUME_MAX_TURNS_CAP).toBeLessThanOrEqual(AGENT_SAFETY_MAX_TURNS);
   });
 });

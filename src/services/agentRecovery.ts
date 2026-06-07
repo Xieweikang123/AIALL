@@ -25,11 +25,42 @@ export type AgentProgressSource = {
 /** No meaningful agent progress for this long → treat run as stalled (server heartbeats don't count). */
 export const AGENT_STALL_PROGRESS_MS = 120_000;
 
+export function buildAgentMaxTurnsExhaustedMessage(maxTurns: number): string {
+  return `已达最大轮次（${maxTurns}），任务可能未完成。`;
+}
+
+export function resolveAgentMaxTurnsFromProgress(
+  msg: AgentProgressSource & { agentMaxTurns?: number },
+): number | undefined {
+  if (msg.agentMaxTurns && msg.agentMaxTurns > 0) return msg.agentMaxTurns;
+  const fromGroups = (msg.roundGroups ?? [])
+    .map((group) => group.maxTurns)
+    .filter((value): value is number => typeof value === "number" && value > 0);
+  return fromGroups.at(-1);
+}
+
+/** True when the run ended on the turn cap while still executing tools (not a final answer). */
+export function isAgentMaxTurnsExhausted(
+  msg: AgentProgressSource & { agentMaxTurns?: number },
+  completedTurns: number,
+): boolean {
+  const maxTurns = resolveAgentMaxTurnsFromProgress(msg);
+  if (!maxTurns || completedTurns < maxTurns) return false;
+  const completedToolTurns = (msg.tools ?? [])
+    .filter((t) => !t.running && (t.turn ?? 0) > 0)
+    .map((t) => t.turn ?? 0);
+  if (!completedToolTurns.length) return false;
+  const lastToolTurn = Math.max(...completedToolTurns);
+  return lastToolTurn >= completedTurns;
+}
+
 /** Transient network / transport failures that can be resumed manually. */
 export function isRecoverableAgentError(message: string): boolean {
   const msg = message.trim().toLowerCase();
   if (!msg) return false;
   return (
+    msg.includes("已达最大轮次") ||
+    msg.includes("任务可能未完成") ||
     msg.includes("failed to fetch") ||
     msg.includes("networkerror") ||
     msg.includes("network error") ||
@@ -107,7 +138,19 @@ export function inferAgentRecoveryFlags(msg: AgentProgressSource & {
   statusLog?: string[];
 }): AgentRecoveryFlags | null {
   if (msg.role && msg.role !== "assistant") return null;
-  if (msg.agentAborted || msg.streaming || msg.agentRecoveryDismissed) return null;
+  if (msg.agentAborted || msg.streaming) return null;
+
+  const completedTurns = resolveAgentCompletedTurns(msg);
+  const maxTurns = resolveAgentMaxTurnsFromProgress(msg);
+  if (maxTurns && isAgentMaxTurnsExhausted(msg, completedTurns)) {
+    return {
+      agentFailed: true,
+      agentRecoverable: true,
+      agentFailureReason: buildAgentMaxTurnsExhaustedMessage(maxTurns),
+    };
+  }
+
+  if (msg.agentRecoveryDismissed) return null;
 
   if (msg.agentFailed && msg.agentRecoverable) {
     return {
@@ -229,6 +272,7 @@ export function buildAgentResumePrompt(
   const progress = summarizeAgentProgress(msg);
   return [
     "【恢复运行】上次 Agent 运行因连接中断而停止。请从断点继续完成原始任务，不要重复已完成的工具步骤或已写入的修改。",
+    "【效率】你已探索足够：禁止重复上述 grep/read；直接 patch_file/write_file 完成剩余改动；最多 1 次 grep 定位遗漏。",
     `中断原因：${errorMessage.trim()}`,
     "",
     progress,

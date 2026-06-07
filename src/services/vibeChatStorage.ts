@@ -52,6 +52,10 @@ export type PersistedChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  /** Shown in chat UI; stripped from localStorage to save quota. */
+  imageDataUrls?: string[];
+  /** Persisted when imageDataUrls are stripped on save. */
+  imageCount?: number;
   chatMode?: "ask" | "build";
   tools?: Array<{
     id: string;
@@ -116,7 +120,12 @@ type ProjectChatRecord = {
 const CHAT_STORAGE_KEY = "vibe-coding-chat";
 const STORE_VERSION = 2;
 const MAX_MESSAGES_PER_SESSION = 80;
-const MAX_SESSIONS_PER_PROJECT = 30;
+const MAX_SESSIONS_PER_PROJECT = 20;
+const MAX_STATUS_LOG_LINES = 48;
+const MAX_TURN_TRACES = 24;
+const MAX_NARRATIVE_CHARS = 800;
+const MAX_MODEL_STEP_CHARS = 500;
+const MAX_TOOL_CALL_ARGS_CHARS = 240;
 
 type ChatStoreV1 = {
   version: 1;
@@ -197,17 +206,79 @@ function sessionTitleFromMessages(messages: PersistedChatMessage[]): string {
   return "新会话";
 }
 
+function truncateText(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}…`;
+}
+
+function compactRoundGroupsForStorage(
+  groups: PersistedAgentRoundGroup[] | undefined,
+): PersistedAgentRoundGroup[] | undefined {
+  if (!groups?.length) return undefined;
+  return groups.map((group) => ({
+    turn: group.turn,
+    maxTurns: group.maxTurns,
+    narrative: group.narrative ? truncateText(group.narrative, MAX_NARRATIVE_CHARS) : undefined,
+    modelSteps: group.modelSteps.map((step) => ({
+      id: step.id,
+      phase: step.phase,
+      text: truncateText(step.text, MAX_MODEL_STEP_CHARS),
+    })),
+    toolIds: [...group.toolIds],
+    request: group.request
+      ? {
+          model: group.request.model,
+          contextMessages: group.request.contextMessages,
+          contextChars: group.request.contextChars,
+          messages: [],
+        }
+      : undefined,
+    response: group.response
+      ? {
+          assistantText: truncateText(group.response.assistantText, MAX_NARRATIVE_CHARS),
+          hasToolCalls: group.response.hasToolCalls,
+          isFinal: group.response.isFinal,
+          toolCalls: group.response.toolCalls.map((call) => ({
+            id: call.id,
+            name: call.name,
+            arguments: truncateText(call.arguments, MAX_TOOL_CALL_ARGS_CHARS),
+          })),
+        }
+      : undefined,
+  }));
+}
+
+const MAX_PERSISTED_IMAGES = 4;
+const MAX_PERSISTED_IMAGE_CHARS = 120_000;
+
+function compactImageDataUrls(urls: string[] | undefined): string[] | undefined {
+  if (!urls?.length) return undefined;
+  const kept: string[] = [];
+  let total = 0;
+  for (const url of urls.slice(0, MAX_PERSISTED_IMAGES)) {
+    if (!url.startsWith("data:image/")) continue;
+    if (total + url.length > MAX_PERSISTED_IMAGE_CHARS) break;
+    kept.push(url);
+    total += url.length;
+  }
+  return kept.length ? kept : undefined;
+}
+
 function sanitizeMessages(messages: PersistedChatMessage[]): PersistedChatMessage[] {
   return messages
     .filter(
       (m) =>
         m.role === "user" ||
         m.content.trim() ||
+        (m.imageDataUrls?.length ?? 0) > 0 ||
+        (m.imageCount ?? 0) > 0 ||
         (m.tools?.length ?? 0) > 0 ||
         m.agentRecoverable,
     )
     .slice(-MAX_MESSAGES_PER_SESSION)
-    .map((m) => ({
+    .map((m) => {
+      const compactImages = m.role === "user" ? compactImageDataUrls(m.imageDataUrls) : undefined;
+      return {
       id: m.id,
       role: m.role,
       content: m.content,
@@ -224,29 +295,14 @@ function sanitizeMessages(messages: PersistedChatMessage[]): PersistedChatMessag
         turn: t.turn,
         args: t.args,
       })),
-      statusLog: m.statusLog?.length ? [...m.statusLog] : undefined,
-      turnTraces: m.turnTraces?.length ? m.turnTraces.map((t) => ({ ...t })) : undefined,
-      roundGroups: m.roundGroups?.length
-        ? m.roundGroups.map((group) => ({
-            turn: group.turn,
-            maxTurns: group.maxTurns,
-            narrative: group.narrative,
-            modelSteps: group.modelSteps.map((step) => ({ ...step })),
-            toolIds: [...group.toolIds],
-            request: group.request
-              ? {
-                  ...group.request,
-                  messages: group.request.messages.map((message) => ({ ...message })),
-                }
-              : undefined,
-            response: group.response
-              ? {
-                  ...group.response,
-                  toolCalls: group.response.toolCalls.map((call) => ({ ...call })),
-                }
-              : undefined,
+      statusLog: m.statusLog?.length ? m.statusLog.slice(-MAX_STATUS_LOG_LINES) : undefined,
+      turnTraces: m.turnTraces?.length
+        ? m.turnTraces.slice(-MAX_TURN_TRACES).map((t) => ({
+            ...t,
+            assistantText: t.assistantText ? truncateText(t.assistantText, MAX_NARRATIVE_CHARS) : t.assistantText,
           }))
         : undefined,
+      roundGroups: compactRoundGroupsForStorage(m.roundGroups),
       totalTurns: m.totalTurns,
       writtenFiles: m.writtenFiles?.length ? [...m.writtenFiles] : undefined,
       turnFileDiffs:
@@ -270,7 +326,15 @@ function sanitizeMessages(messages: PersistedChatMessage[]): PersistedChatMessag
       reverted: m.reverted || undefined,
       activityExpanded: m.activityExpanded || undefined,
       activityDetailed: m.activityDetailed || undefined,
-    }));
+      ...(compactImages
+        ? { imageDataUrls: compactImages }
+        : m.imageDataUrls?.length
+          ? { imageCount: m.imageDataUrls.length }
+          : m.imageCount
+            ? { imageCount: m.imageCount }
+            : {}),
+    };
+    });
 }
 
 function createSession(messages: PersistedChatMessage[] = []): VibeChatSession {
@@ -341,16 +405,46 @@ export function getVibeChatProjectSnapshot(projectPath: string): VibeChatProject
   };
 }
 
-function writeStore(store: ChatStore): boolean {
-  try {
-    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(store));
-    return true;
-  } catch (e) {
-    console.warn("[vibeChatStorage] localStorage write failed:", e);
-    const msg = "聊天记录保存失败（存储空间可能已满），刷新或关闭页面后记录会丢失。";
-    storageErrorCallback?.(msg);
-    return false;
+function pruneStoreForQuota(store: ChatStore): ChatStore {
+  const byProject: Record<string, ProjectChatRecord> = {};
+  for (const [key, record] of Object.entries(store.byProject)) {
+    const sessions = [...record.sessions]
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, 8)
+      .map((session) => ({
+        ...session,
+        messages: sanitizeMessages(session.messages).slice(-40),
+      }));
+    if (!sessions.length) continue;
+    byProject[key] = {
+      activeSessionId: sessions.some((s) => s.id === record.activeSessionId)
+        ? record.activeSessionId
+        : sessions[0].id,
+      sessions,
+    };
   }
+  return { version: store.version, byProject };
+}
+
+function writeStore(store: ChatStore): boolean {
+  const attempts = [store, pruneStoreForQuota(store)];
+  for (let i = 0; i < attempts.length; i += 1) {
+    try {
+      localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(attempts[i]));
+      if (i > 0) {
+        storageErrorCallback?.("浏览器存储空间不足，已自动精简旧会话后保存。");
+      }
+      return true;
+    } catch (e) {
+      if (i === attempts.length - 1) {
+        console.warn("[vibeChatStorage] localStorage write failed:", e);
+        storageErrorCallback?.(
+          "聊天记录保存失败（浏览器存储空间可能已满）。正在尝试备份到项目目录…",
+        );
+      }
+    }
+  }
+  return false;
 }
 
 function ensureProjectRecord(store: ChatStore, key: string): ProjectChatRecord {
@@ -412,6 +506,10 @@ export function getActiveVibeChatSessionId(projectPath: string): string {
   const store = readStore();
   const record = getProjectRecord(store, key);
   return record?.activeSessionId || "";
+}
+
+export function sanitizePersistedChatMessages(messages: PersistedChatMessage[]): PersistedChatMessage[] {
+  return sanitizeMessages(messages);
 }
 
 export function loadVibeChatHistory(projectPath: string): PersistedChatMessage[] {

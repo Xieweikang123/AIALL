@@ -117,6 +117,8 @@ onMounted(() => scrollToBottom(true));
   flex-direction: column;
   gap: 4px;
   min-height: 0;
+  min-width: 0;
+  max-width: 100%;
   flex: 1 1 auto;
   overflow: hidden;
   padding: 6px 8px;
@@ -200,6 +202,7 @@ onMounted(() => scrollToBottom(true));
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
 .log-line {
@@ -320,9 +323,13 @@ onMounted(() => scrollToBottom(true));
 }
 
 .log-stream-live-text {
+  flex: 1;
+  min-width: 0;
   font-size: 11.5px;
   line-height: 1.5;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color: rgba(121, 192, 255, 0.55);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 </style>

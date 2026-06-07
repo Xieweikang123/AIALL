@@ -7,6 +7,7 @@ import {
   looksLikeModificationPlan,
   stripQuotedReplyPrefix,
 } from "./agentContinuation";
+import { resolveAgentCompletedTurns, type AgentProgressSource, type AgentProgressTool } from "./agentRecovery";
 
 export type AgentRunKind = "interactive" | "execute_plan";
 
@@ -15,6 +16,7 @@ export {
   EXECUTE_PLAN_MAX_TURNS,
   INTERACTIVE_BUILD_MAX_TURNS,
   resolveAgentMaxTurns,
+  resolveResumeMaxTurns,
 } from "../../server/agentTurnBudget";
 
 export interface AgentRunProfile {
@@ -67,10 +69,10 @@ export function resolveAgentRunProfile(input: ResolveAgentRunProfileInput): Agen
 
   if (mode === "build") {
     const scopedFiles = resolveScopedTargetFiles(input);
-    if (scopedFiles.length && hasDirectImplementationIntent(body || trimmed)) {
+    if (hasDirectImplementationIntent(body || trimmed)) {
       return {
         kind: "execute_plan",
-        targetFiles: scopedFiles,
+        targetFiles: scopedFiles.length ? scopedFiles : undefined,
         userIntent: summarizeIntent(body || trimmed),
       };
     }
@@ -81,13 +83,15 @@ export function resolveAgentRunProfile(input: ResolveAgentRunProfileInput): Agen
 
 export function buildAgentPromptForProfile(prompt: string, profile: AgentRunProfile): string {
   if (profile.kind !== "execute_plan") return prompt;
-  const files = profile.targetFiles?.length ? profile.targetFiles.join("、") : "见上一轮方案";
+  const files = profile.targetFiles?.length
+    ? profile.targetFiles.join("、")
+    : "（未 @ 指定；用 1 次 grep 定位后立即 patch_file/write_file）";
   return [
     stripQuotedReplyPrefix(prompt.trim()) || prompt.trim(),
     "",
-    "[精准修改] 用户已 @ 引用或明确要求修改，请直接动手，不要再次询问是否开始。",
-    "流程：read_file 核对目标文件 → patch_file / write_file；大文件禁止整文件 write_file。",
-    "探索仅限定位未知路径（grep/search），不要重复 read 已 @ 的文件全文。",
+    "[精准修改] 用户要求实施功能，请直接动手，不要再次询问是否开始。",
+    "流程：grep 定位（如需）→ read_file 核对片段 → patch_file / write_file；大文件禁止整文件 write_file。",
+    "探索最多 1–2 轮，然后必须写入代码；同一轮可并行多个 read_file。",
     `目标文件（待服务端校验）：${files}`,
   ].join("\n");
 }
@@ -105,4 +109,63 @@ function summarizeIntent(content: string): string {
   const trimmed = content.trim();
   if (trimmed.length <= 160) return trimmed;
   return `${trimmed.slice(0, 160)}…`;
+}
+
+function extractTargetFilesFromTools(tools: AgentProgressTool[]): string[] {
+  const paths = new Set<string>();
+  const pathRe =
+    /((?:[\w@.-]+\/)+[\w.-]+\.(?:vue|ts|tsx|js|jsx|json|md|css|scss|html|py|rs|go|toml))/gi;
+  for (const tool of tools) {
+    const args = (tool as AgentProgressTool & { args?: { path?: string } }).args;
+    const fromArgs = args?.path?.replace(/\\/g, "/").trim();
+    if (fromArgs) paths.add(fromArgs);
+    for (const field of [tool.label, tool.detail, tool.title]) {
+      if (!field) continue;
+      for (const match of field.matchAll(pathRe)) {
+        const rel = match[1]?.replace(/\\/g, "/").trim();
+        if (rel) paths.add(rel);
+      }
+    }
+  }
+  return [...paths].slice(0, MAX_SCOPED_TARGET_FILES);
+}
+
+/** After partial runs, switch to execute_plan so resume skips broad exploration. */
+export function resolveAgentResumeRunProfile(
+  msg: AgentProgressSource,
+  originalPrompt: string,
+  mode: "ask" | "build",
+  lastAssistantContent?: string,
+): AgentRunProfile {
+  const base = resolveAgentRunProfile({
+    prompt: originalPrompt,
+    mode,
+    lastAssistantContent,
+  });
+  if (mode !== "build") return base;
+
+  const turns = resolveAgentCompletedTurns(msg);
+  const completedTools = msg.tools?.filter((t) => !t.running) ?? [];
+  const fromWritten = [
+    ...(msg.writtenFiles ?? []),
+    ...Object.keys(msg.turnFileDiffs ?? {}),
+  ].map((p) => p.replace(/\\/g, "/").trim());
+  const fromTools = extractTargetFilesFromTools(completedTools);
+  const mergedTargets = [...new Set([...(base.targetFiles ?? []), ...fromWritten, ...fromTools])].slice(
+    0,
+    MAX_SCOPED_TARGET_FILES,
+  );
+
+  if (base.kind === "execute_plan") {
+    if (!mergedTargets.length) return base;
+    return { ...base, targetFiles: mergedTargets };
+  }
+
+  if (turns < 2 && completedTools.length < 4) return base;
+
+  return {
+    kind: "execute_plan",
+    targetFiles: mergedTargets.length ? mergedTargets : undefined,
+    userIntent: summarizeIntent(originalPrompt),
+  };
 }

@@ -437,6 +437,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       mode?: "ask" | "build";
       maxTurns?: number;
       openFilePath?: string;
+      imageDataUrls?: string[];
       runProfile?: {
         kind?: "interactive" | "execute_plan";
         targetFiles?: string[];
@@ -456,8 +457,11 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
     const projectPath = (body.projectPath || "").trim();
     const endpoint = (body.endpoint || "").trim();
     const model = (body.model || "").trim();
+    const imageDataUrls = Array.isArray(body.imageDataUrls)
+      ? body.imageDataUrls.filter((url): url is string => typeof url === "string" && url.startsWith("data:image/"))
+      : undefined;
 
-    if (!prompt || !projectPath || !endpoint || !model) {
+    if ((!prompt && !imageDataUrls?.length) || !projectPath || !endpoint || !model) {
       sendJson(res, 400, { error: "缺少 prompt、projectPath、endpoint 或 model" });
       return;
     }
@@ -502,6 +506,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         model,
         mode,
         maxTurns: body.maxTurns,
+        imageDataUrls,
         runProfile:
           body.runProfile?.kind === "execute_plan"
             ? {

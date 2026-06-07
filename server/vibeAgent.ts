@@ -7,7 +7,11 @@ import {
   stripTextToolCallMarkup,
   synthesizeToolCallsFromText,
 } from "./textToolCalls";
-import { AGENT_SAFETY_MAX_TURNS, resolveAgentMaxTurns } from "./agentTurnBudget";
+import {
+  AGENT_SAFETY_MAX_TURNS,
+  buildAgentTurnsLowNudge,
+  resolveAgentMaxTurns,
+} from "./agentTurnBudget";
 import {
   buildExploreBudgetNudge,
   EXECUTE_PLAN_EXPLORE_TURN_BUDGET,
@@ -34,6 +38,13 @@ import {
   sliceFileLines,
   writeFileContent,
 } from "./vibeFs";
+import {
+  buildVisionUserContent,
+  contentCharSize,
+  contentDisplayText,
+  isVisionUnsupportedError,
+  sanitizeImageDataUrls,
+} from "./visionMessage";
 
 export type VibeAgentEvent =
   | {
@@ -119,6 +130,7 @@ export interface RunVibeAgentParams {
   model: string;
   mode?: VibeChatMode;
   maxTurns?: number;
+  imageDataUrls?: string[];
   /** Run orchestration profile (interactive vs plan execution). */
   runProfile?: AgentRunProfileInput;
   /** @deprecated Use runProfile.kind === "execute_plan" */
@@ -154,7 +166,7 @@ function truncateToolResultForModel(text: string): string {
 }
 
 function messageCharSize(message: ChatCompletionMessage): number {
-  let size = String(message.content || "").length;
+  let size = contentCharSize(message.content);
   if (message.tool_calls?.length) {
     size += JSON.stringify(message.tool_calls).length;
   }
@@ -206,7 +218,7 @@ function messagesForTurnDisplay(messages: ChatCompletionMessage[]): Array<{ role
   return messages.map((message) => {
     const item: { role: string; content: string; toolCalls?: string } = {
       role: message.role,
-      content: truncateForSse(String(message.content || ""), TURN_DISPLAY_MESSAGE_CHARS),
+      content: truncateForSse(contentDisplayText(message.content), TURN_DISPLAY_MESSAGE_CHARS),
     };
     if (message.tool_calls?.length) {
       item.toolCalls = message.tool_calls
@@ -443,8 +455,10 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string): string {
   const lines = [
     "你是一个专业的编程 Agent（Build 模式），可以调用工具探索并修改本地项目。",
     "回答请使用中文。",
-    "工作流程：先 list_dir / grep / search_files 定位，再按需 read_file 读取关键片段，最后 write_file / delete_file 修改。",
-    "探索时：优先 grep / search_files 缩小范围，read_file 用 offset/limit 分段读取（单次约 200 行）；不要重复读取已读过的文件；信息足够后立即进入修改或回答，避免无意义地连续读文件。",
+    "用户可能在消息中附带截图或图片；若已附带，请结合图片内容理解需求并回答，不要声称无法查看图片。",
+    "工作流程：先 grep / search_files 快速定位（通常 1 轮），read_file 读关键片段，然后 patch_file / write_file 修改。",
+    "效率：探索不超过 2 轮；信息足够后必须写入，不要连续多轮只读；同一轮可并行多个 read_file / grep。",
+    "探索时：read_file 用 offset/limit 分段读取（单次约 200 行）；不要重复读取已读过的文件；用中文简短说明后立即调用工具。",
     "修改前必须先 read_file 核对目标文件；patch_file 前 old_string 须与磁盘内容完全一致。",
     "解释项目时：从 package.json、README、入口文件等关键文件入手，不要臆测。",
     "修改代码时：小范围改动优先 patch_file（old_string 须唯一匹配）；全文件重写或新文件才用 write_file；大文件禁止 write_file 整文件覆盖。",
@@ -477,6 +491,7 @@ function buildAskSystemPrompt(
   const lines = [
     "你是一个编程问答助手（Ask 模式）。",
     "回答请使用中文。",
+    "用户可能在消息中附带截图或图片；若已附带，请结合图片内容理解需求并回答，不要声称无法查看图片。",
     "你可以使用 list_dir、read_file、grep、search_files 工具来探索项目、读取文件，但不能修改任何文件。",
     "若信息不足，请主动使用工具查找相关内容，而不是要求用户打开文件。",
     "读取文件时：优先 grep / search_files 定位，再用 read_file 的 offset/limit 分段读取（单次约 200 行）；避免连续大块读取同一文件。",
@@ -606,6 +621,7 @@ export async function executeTool(
   mode: VibeChatMode = "build",
   readCache?: Map<string, string>,
   readSliceCache?: Map<string, string>,
+  grepCache?: Map<string, string>,
 ): Promise<string> {
   if (mode === "ask" && WRITE_AGENT_TOOL_NAMES.has(name)) {
     return "Ask 模式下不支持文件修改，请仅使用只读工具查询项目。";
@@ -642,8 +658,8 @@ export async function executeTool(
     }
     if (content === null) return `错误：${resolved.relative} 不存在或无法读取`;
     const offset = Number(args.offset) || 1;
-    const defaultLimit = mode === "ask" ? 200 : 500;
-    const maxLimit = mode === "ask" ? 400 : 800;
+    const defaultLimit = mode === "ask" ? 200 : 200;
+    const maxLimit = mode === "ask" ? 400 : 350;
     const limit = Math.min(maxLimit, Math.max(1, Number(args.limit) || defaultLimit));
     const sliceKey = `${resolved.relative}:${offset}:${limit}`;
     const cachedSlice = readSliceCache?.get(sliceKey);
@@ -660,12 +676,23 @@ export async function executeTool(
     const pattern = String(args.pattern || "").trim();
     if (!pattern) return "错误：缺少 pattern";
     const maxMatches = Math.min(80, Math.max(1, Number(args.max_matches) || 40));
+    const grepKey = `${pattern}:${maxMatches}`;
+    const cached = grepCache?.get(grepKey);
+    if (cached) {
+      return `${cached}\n（与上次 grep 相同，已省略重复搜索）`;
+    }
     const result = await grepInProject(root, pattern, maxMatches);
     if (!result.ok) return `错误：${result.error}`;
-    if (!result.matches.length) return "（无匹配）";
-    return result.matches
+    if (!result.matches.length) {
+      const empty = "（无匹配）";
+      grepCache?.set(grepKey, empty);
+      return empty;
+    }
+    const output = result.matches
       .map((m) => `${m.relative}:${m.line}: ${m.text}`)
       .join("\n");
+    grepCache?.set(grepKey, output);
+    return output;
   }
 
   if (name === "search_files") {
@@ -796,6 +823,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     onEvent,
     signal,
   } = params;
+  const imageDataUrls = sanitizeImageDataUrls(params.imageDataUrls);
 
   const explicitMaxTurns = params.maxTurns ?? resolveAgentMaxTurns(mode, runProfile);
   const statusMaxTurns = explicitMaxTurns;
@@ -865,13 +893,17 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   const writeStage = isAsk ? null : createWriteStage();
   const readCache = new Map<string, string>();
   const readSliceCache = new Map<string, string>();
+  const grepCache = new Map<string, string>();
   let consecutiveExploreTurns = 0;
+  let turnsLowNudgeSent = false;
   const activeTools = isAsk ? READ_ONLY_AGENT_TOOLS : VIBE_AGENT_TOOLS;
+  const userContent = buildVisionUserContent(prompt, imageDataUrls);
   const messages: ChatCompletionMessage[] = [
     { role: "system", content: systemPrompt },
     ...buildHistoryMessages(params.history),
-    { role: "user", content: prompt },
+    { role: "user", content: userContent },
   ];
+  let visionFallbackApplied = false;
 
   emitAgentContext(onEvent, {
     mode,
@@ -914,6 +946,16 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       });
       onEvent({ type: "done", data: buildDoneData(writeStage, turn - 1) });
       return;
+    }
+
+    if (
+      !isAsk &&
+      explicitMaxTurns !== undefined &&
+      !turnsLowNudgeSent &&
+      turn >= explicitMaxTurns - 3
+    ) {
+      messages.push({ role: "system", content: buildAgentTurnsLowNudge(turn, explicitMaxTurns) });
+      turnsLowNudgeSent = true;
     }
 
     onEvent({
@@ -1039,6 +1081,32 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     }
 
     if (!completion.ok || !completion.message) {
+      if (
+        !visionFallbackApplied &&
+        imageDataUrls.length > 0 &&
+        isVisionUnsupportedError(completion.error)
+      ) {
+        visionFallbackApplied = true;
+        const userIndex = messages.findIndex((message) => message.role === "user");
+        if (userIndex >= 0) {
+          messages[userIndex] = {
+            role: "user",
+            content: `${prompt}\n\n（注：当前模型不支持图片输入，已忽略 ${imageDataUrls.length} 张附带图片，请仅根据文字继续。）`,
+          };
+        }
+        onEvent({
+          type: "status",
+          data: {
+            phase: "vision_fallback",
+            turn,
+            ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+            model,
+            detail: "当前模型不支持视觉输入，已降级为纯文本请求",
+          },
+        });
+        turn -= 1;
+        continue;
+      }
       onEvent({ type: "error", data: { message: completion.error || "模型请求失败" } });
       onEvent({ type: "done", data: buildDoneData(writeStage, turn) });
       return;
@@ -1162,7 +1230,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
       let result = "";
       try {
-        result = await executeTool(projectRoot, toolName, toolArgs, writeStage, mode, readCache, readSliceCache);
+        result = await executeTool(projectRoot, toolName, toolArgs, writeStage, mode, readCache, readSliceCache, grepCache);
       } catch (error) {
         result = `错误：${error instanceof Error ? error.message : String(error)}`;
       }
@@ -1240,7 +1308,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         type: "status",
         data: { phase: "finished", turn, maxTurns: explicitMaxTurns },
       });
-      if (!isAsk && writeStage?.writtenList.length) {
+      if (!isAsk) {
         onEvent({
           type: "error",
           data: { message: `已达最大轮次（${explicitMaxTurns}），任务可能未完成。` },

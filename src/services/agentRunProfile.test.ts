@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildAgentPromptForProfile, resolveAgentMaxTurns, resolveAgentRunProfile } from "./agentRunProfile";
+import {
+  buildAgentPromptForProfile,
+  resolveAgentMaxTurns,
+  resolveAgentResumeRunProfile,
+  resolveAgentRunProfile,
+} from "./agentRunProfile";
 
 const SAMPLE_PLAN = [
   "## 修改方案",
@@ -55,6 +60,39 @@ describe("resolveAgentRunProfile", () => {
     });
     expect(profile.kind).toBe("interactive");
   });
+
+  it("uses execute_plan for implement intent without @ refs", () => {
+    const profile = resolveAgentRunProfile({
+      prompt: "Vibe Coding 支持一下粘贴图片",
+      mode: "build",
+    });
+    expect(profile.kind).toBe("execute_plan");
+    expect(profile.userIntent).toContain("支持");
+    expect(profile.targetFiles).toBeUndefined();
+  });
+
+  it("uses execute_plan for 继续 after partial progress on resume", () => {
+    const profile = resolveAgentResumeRunProfile(
+      {
+        totalTurns: 12,
+        tools: [
+          {
+            running: false,
+            name: "read_file",
+            turn: 3,
+            label: "读取文件 src/foo.ts",
+            ok: true,
+            args: { path: "src/foo.ts" },
+          },
+          { running: false, name: "grep", turn: 2, ok: true },
+        ],
+      },
+      "输入框支持发送图片吗？",
+      "build",
+    );
+    expect(profile.kind).toBe("execute_plan");
+    expect(profile.targetFiles).toContain("src/foo.ts");
+  });
 });
 
 describe("buildAgentPromptForProfile", () => {
@@ -71,6 +109,6 @@ describe("buildAgentPromptForProfile", () => {
 
 describe("resolveAgentMaxTurns export", () => {
   it("re-exports turn budget helper from server module", () => {
-    expect(resolveAgentMaxTurns("build", { kind: "execute_plan" })).toBe(8);
+    expect(resolveAgentMaxTurns("build", { kind: "execute_plan" })).toBe(20);
   });
 });

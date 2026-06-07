@@ -108,6 +108,7 @@ export function buildExecutePlanSystemHint(manifest: TargetFileManifestEntry[], 
   return [
     "",
     "【方案执行阶段】用户已确认或明确要求实施，请直接动手，不要再次询问是否开始。",
+    "探索最多 1–2 轮（grep 定位 + read 核对），然后必须 patch_file / write_file。",
     "建议流程（工具均可按需调用，以完成任务为准）：",
     "1. 先 read_file 核对目标文件真实内容，以磁盘为准，方案代码块仅供参考；",
     "2. old_string 确认无误后再 patch_file；小文件或新文件可用 write_file；",

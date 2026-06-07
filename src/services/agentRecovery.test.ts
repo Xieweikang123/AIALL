@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   agentStallRecoveryReason,
+  buildAgentMaxTurnsExhaustedMessage,
   buildAgentResumePrompt,
   canResumeAgentRun,
   hasRecoverableAgentProgress,
   inferAgentRecoveryFlags,
+  isAgentMaxTurnsExhausted,
   isAgentRunStalled,
   isRecoverableAgentError,
   recoverableAgentErrorHint,
@@ -30,6 +32,40 @@ describe("isRecoverableAgentError", () => {
     expect(isRecoverableAgentError("模型响应超时（等待首包超过 60s）")).toBe(true);
     expect(isRecoverableAgentError("连接中断（流已结束但未收到完成信号）")).toBe(true);
     expect(isRecoverableAgentError(agentStallRecoveryReason())).toBe(true);
+  });
+
+  it("detects max-turn exhaustion as recoverable", () => {
+    const message = buildAgentMaxTurnsExhaustedMessage(12);
+    expect(isRecoverableAgentError(message)).toBe(true);
+  });
+});
+
+describe("isAgentMaxTurnsExhausted", () => {
+  it("flags runs that ended on the cap while still calling tools", () => {
+    expect(
+      isAgentMaxTurnsExhausted(
+        {
+          agentMaxTurns: 12,
+          tools: [
+            { running: false, turn: 11, name: "grep" },
+            { running: false, turn: 12, name: "read_file" },
+          ],
+        },
+        12,
+      ),
+    ).toBe(true);
+  });
+
+  it("allows successful completion on the final allowed turn", () => {
+    expect(
+      isAgentMaxTurnsExhausted(
+        {
+          agentMaxTurns: 12,
+          tools: [{ running: false, turn: 11, name: "grep" }],
+        },
+        12,
+      ),
+    ).toBe(false);
   });
 });
 
@@ -130,7 +166,7 @@ describe("inferAgentRecoveryFlags", () => {
     expect(flags?.agentFailureReason).toBe("Failed to fetch");
   });
 
-  it("skips inference after recovery was dismissed", () => {
+  it("skips inference after recovery was dismissed for network errors", () => {
     expect(
       inferAgentRecoveryFlags({
         role: "assistant",
@@ -139,6 +175,18 @@ describe("inferAgentRecoveryFlags", () => {
         tools: [{ running: false, summary: "ok" }],
       }),
     ).toBeNull();
+  });
+
+  it("re-infers max-turn exhaustion even when recovery was dismissed", () => {
+    const flags = inferAgentRecoveryFlags({
+      role: "assistant",
+      agentRecoveryDismissed: true,
+      totalTurns: 12,
+      roundGroups: [{ turn: 12, maxTurns: 12, modelSteps: [], toolIds: [] }],
+      tools: [{ running: false, turn: 12, summary: "ok" }],
+    });
+    expect(flags?.agentRecoverable).toBe(true);
+    expect(flags?.agentFailureReason).toContain("已达最大轮次（12）");
   });
 });
 

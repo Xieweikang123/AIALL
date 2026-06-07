@@ -3,6 +3,7 @@ import { shapeAgentHistoryForProfile } from "./agentRunProfile";
 import {
   buildAgentHistoryFromMessages,
   formatSessionTitle,
+  sanitizePersistedChatMessages,
   stripReferenceAttachments,
 } from "./vibeChatStorage";
 
@@ -74,5 +75,54 @@ describe("buildAgentHistoryFromMessages", () => {
     expect(history).toHaveLength(2);
     expect(history[1].content).toContain("[已确认方案]");
     expect(history[1].content).toContain("const x = 1");
+  });
+});
+
+describe("sanitizePersistedChatMessages", () => {
+  it("strips heavy agent debug payloads before persistence", () => {
+    const huge = "x".repeat(20_000);
+    const sanitized = sanitizePersistedChatMessages([
+      {
+        id: "1",
+        role: "assistant",
+        content: "done",
+        agentContext: {
+          mode: "build",
+          systemPrompt: huge,
+          history: [{ role: "user", content: "hi" }],
+        },
+        roundGroups: [
+          {
+            turn: 1,
+            modelSteps: [{ id: "s1", phase: "streaming_model", text: "thinking" }],
+            toolIds: ["t1"],
+            request: {
+              contextMessages: 3,
+              contextChars: 999,
+              messages: [{ role: "user", content: huge }],
+            },
+            response: {
+              assistantText: "ok",
+              hasToolCalls: true,
+              isFinal: false,
+              toolCalls: [{ id: "t1", name: "read_file", arguments: huge }],
+            },
+          },
+        ],
+      },
+    ]);
+    const msg = sanitized[0];
+    expect(msg.agentContext).toBeUndefined();
+    expect(msg.roundGroups?.[0]?.request?.messages).toEqual([]);
+    expect(JSON.stringify(sanitized).length).toBeLessThan(5000);
+  });
+
+  it("keeps compact user image previews for chat reload", () => {
+    const dataUrl = `data:image/png;base64,${"a".repeat(1000)}`;
+    const sanitized = sanitizePersistedChatMessages([
+      { id: "u1", role: "user", content: "看这张图", imageDataUrls: [dataUrl] },
+    ]);
+    expect(sanitized[0].imageDataUrls?.[0]).toBe(dataUrl);
+    expect(sanitized[0].content).toBe("看这张图");
   });
 });

@@ -99,9 +99,11 @@ export interface ChatToolCall {
   function: { name: string; arguments: string };
 }
 
+import type { ChatContentPart } from "./visionMessage";
+
 export interface ChatCompletionMessage {
   role: string;
-  content?: string | null;
+  content?: string | ChatContentPart[] | null;
   tool_calls?: ChatToolCall[];
   tool_call_id?: string;
 }

@@ -109,6 +109,28 @@ describe("runVibeAgentSse", () => {
     expect(shouldRetryAgentFetch(error, true, 0)).toBe(false);
   });
 
+  it("forwards imageDataUrls in the agent run request body", async () => {
+    const events: VibeAgentSseEvent[] = [];
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse(['event: done\ndata: {"writtenFiles":[],"pendingFiles":[],"turns":0}\n\n']),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    runVibeAgentSse(
+      {
+        ...baseRequest,
+        imageDataUrls: ["data:image/png;base64,abc"],
+      },
+      (event) => events.push(event),
+    );
+    await waitForDone(events);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+    const body = JSON.parse(String(init?.body)) as VibeAgentRunRequest;
+    expect(body.imageDataUrls).toEqual(["data:image/png;base64,abc"]);
+  });
+
   it("emits aborted status and done when abort is called", async () => {
     const events: VibeAgentSseEvent[] = [];
     vi.stubGlobal(

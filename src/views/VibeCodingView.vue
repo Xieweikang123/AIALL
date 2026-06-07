@@ -918,8 +918,21 @@
                   </button>
                 </div>
               </div>
+              <div
+                v-if="m.role === 'user' && userMessageImages(m).length"
+                class="msg-user-images"
+              >
+                <img
+                  v-for="(url, imageIdx) in userMessageImages(m)"
+                  :key="`${m.id}-img-${imageIdx}`"
+                  :src="url"
+                  alt="发送的图片"
+                  class="msg-user-image"
+                  loading="lazy"
+                />
+              </div>
               <ChatMarkdown
-                v-if="shouldShowAssistantBubbleContent(m)"
+                v-if="shouldShowMessageBubble(m)"
                 class="msg-answer"
                 :class="{
                   'msg-answer--streaming': m.role === 'assistant' && isAgentRunning(m),
@@ -1178,15 +1191,19 @@ import { useInputPrompt } from "../composables/useInputPrompt";
 import {
   buildAgentPromptForProfile,
   resolveAgentMaxTurns,
+  resolveAgentResumeRunProfile,
+  resolveResumeMaxTurns,
   resolveAgentRunProfile,
   shapeAgentHistoryForProfile,
 } from "../services/agentRunProfile";
 import {
   agentStallRecoveryReason,
+  buildAgentMaxTurnsExhaustedMessage,
   buildAgentResumePrompt,
   canResumeAgentRun,
   hasRecoverableAgentProgress,
   inferAgentRecoveryFlags,
+  isAgentMaxTurnsExhausted,
   isAgentRunStalled,
   isRecoverableAgentError,
   recoverableAgentErrorHint,
@@ -1409,12 +1426,13 @@ function normalizeChatMessages(messages: PersistedChatMessage[]): ChatMessage[] 
       })),
     };
 
-    if (m.role === "assistant" && !m.agentRecoveryDismissed) {
+    if (m.role === "assistant") {
       const inferred = inferAgentRecoveryFlags(normalized);
       if (inferred) {
         normalized.agentFailed = inferred.agentFailed;
         normalized.agentRecoverable = inferred.agentRecoverable;
         normalized.agentFailureReason = inferred.agentFailureReason;
+        normalized.agentRecoveryDismissed = false;
         normalized.content = resolveAgentFailureBubbleContent(normalized);
         normalized.activityExpanded = normalized.activityExpanded || true;
       }
@@ -2510,12 +2528,25 @@ function roundGroupSetupLabel(group: AgentRoundGroupView): string {
   return group.turn === 0 ? "准备阶段" : `第 ${group.turn} 轮`;
 }
 
-function shouldShowAssistantBubbleContent(msg: ChatMessage): boolean {
+function shouldShowMessageBubble(msg: ChatMessage): boolean {
+  if (msg.role === "user") {
+    return Boolean(msg.content?.trim() || userMessageImages(msg).length);
+  }
   return Boolean(messageDisplayContent(msg));
 }
 
+function userMessageImages(msg: ChatMessage): string[] {
+  return msg.imageDataUrls?.filter(Boolean) ?? [];
+}
+
 function messageDisplayContent(msg: ChatMessage): string {
-  if (msg.role === "user") return msg.content?.trim() || "";
+  if (msg.role === "user") {
+    const text = stripReferenceAttachments(msg.content || "").trim();
+    if (text) return text;
+    if (userMessageImages(msg).length) return "";
+    if (msg.imageCount && msg.imageCount > 0) return `（已发送 ${msg.imageCount} 张图片）`;
+    return msg.content?.trim() || "";
+  }
   if (canResumeAgentRun(msg)) return resolveAgentFailureBubbleContent(msg);
   return resolveAssistantBubbleContent(msg);
 }
@@ -2835,8 +2866,38 @@ function persistChatNow(path = projectPath.value.trim()) {
   const result = saveVibeChatHistory(path, chatMessages.value, activeSessionId.value);
   if (result.sessionId) activeSessionId.value = result.sessionId;
   refreshSessionList(path);
-  scheduleSyncChatStore(path);
+  if (!result.ok) {
+    if (syncStoreTimer) clearTimeout(syncStoreTimer);
+    syncStoreTimer = null;
+    void flushChatStoreToDisk(path);
+  } else {
+    scheduleSyncChatStore(path);
+  }
   if (isEmptyDraft) activeSessionId.value = "";
+}
+
+async function flushChatStoreToDisk(path: string) {
+  if (!path || syncingChatStore.value) return;
+  syncingChatStore.value = true;
+  try {
+    const result = await syncChatStore(path, getVibeChatProjectSnapshot(path));
+    if (result.ok) {
+      chatError.value = "";
+      chatStoreSyncMessage.value =
+        "浏览器存储已满，当前会话已备份到 .aiall/vibe-chat-sessions（刷新后可从磁盘恢复）";
+      if (sessionCopyHintTimer) clearTimeout(sessionCopyHintTimer);
+      sessionCopyHintTimer = setTimeout(() => {
+        sessionCopyHintTimer = null;
+        if (chatStoreSyncMessage.value.includes("浏览器存储已满")) {
+          chatStoreSyncMessage.value = "";
+        }
+      }, 6000);
+    } else {
+      chatError.value = `聊天记录保存失败：${result.error || "浏览器与磁盘备份均失败"}`;
+    }
+  } finally {
+    syncingChatStore.value = false;
+  }
 }
 
 function clearPendingPromptQueue() {
@@ -2916,6 +2977,16 @@ async function openProjectByPath(dirPath: string) {
       const diskStore = await fetchChatStoreFromDisk(normalized);
       if (diskStore.ok && diskStore.data.sessions.length) {
         restoreChatStoreFromSnapshot(diskStore.data);
+      }
+    } else {
+      const diskStore = await fetchChatStoreFromDisk(normalized);
+      if (diskStore.ok && diskStore.data.sessions.length) {
+        const diskLatest =
+          [...diskStore.data.sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]?.updatedAt || "";
+        const localLatest = listVibeChatSessions(normalized)[0]?.updatedAt || "";
+        if (diskLatest && diskLatest.localeCompare(localLatest) > 0) {
+          restoreChatStoreFromSnapshot(diskStore.data);
+        }
       }
     }
     chatMessages.value = normalizeChatMessages(loadVibeChatHistory(normalized));
@@ -4773,6 +4844,10 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
       !wasAborted &&
       hadProgress &&
       (hasRunningTools || (completedTurns === 0 && event.data.turns === 0));
+    const maxTurnsExhausted =
+      !wasAborted &&
+      !assistantMsg.agentFailed &&
+      isAgentMaxTurnsExhausted(assistantMsg, completedTurns);
 
     if (incompleteRun) {
       applyRecoverableAgentFailure(assistantMsg, "连接中断（运行未完成）", { logStatus: true });
@@ -4784,6 +4859,16 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
         totalTurns: assistantMsg.totalTurns,
         ...syncRoundGroupsPatch(assistantMsg),
       });
+      persistChatNow();
+      void scrollChatToBottom();
+      return;
+    }
+
+    if (maxTurnsExhausted) {
+      const reason = buildAgentMaxTurnsExhaustedMessage(assistantMsg.agentMaxTurns ?? completedTurns);
+      applyRecoverableAgentFailure(assistantMsg, reason, { logStatus: true });
+      assistantMsg.totalTurns = completedTurns;
+      patchAssistantMsg(msgId, { totalTurns: completedTurns, ...syncRoundGroupsPatch(assistantMsg) });
       persistChatNow();
       void scrollChatToBottom();
       return;
@@ -5113,13 +5198,18 @@ async function resendFromMessage(messageId: string) {
   const userIdx = resolveUserMessageIndex(messageId);
   if (userIdx < 0) return;
 
-  const userText = chatMessages.value[userIdx].content.trim();
-  if (!userText) return;
+  const userMsg = chatMessages.value[userIdx];
+  const userText = stripReferenceAttachments(userMsg.content).trim();
+  const imageDataUrls = userMsg.imageDataUrls?.filter(Boolean);
+  if (!userText && !imageDataUrls?.length) return;
 
   chatMessages.value = chatMessages.value.slice(0, userIdx);
   chatError.value = "";
   persistChatNow();
-  await runAgentTurn(userText);
+  await runAgentTurn(userText || "请结合附带的图片回答。", {
+    userBubbleContent: userText,
+    imageDataUrls: imageDataUrls?.length ? imageDataUrls : undefined,
+  });
 }
 
 function findLastAssistantContent(): string | undefined {
@@ -5173,11 +5263,12 @@ async function resumeAgentRun(assistantMsgId: string) {
     "连接中断";
   const resumePrompt = buildAgentResumePrompt(assistantMsg, originalPrompt, failureReason);
   const mode = assistantMsg.chatMode ?? chatMode.value;
-  const runProfile = resolveAgentRunProfile({
-    prompt: originalPrompt,
+  const runProfile = resolveAgentResumeRunProfile(
+    assistantMsg,
+    originalPrompt,
     mode,
-    lastAssistantContent: findLastAssistantContent(),
-  });
+    findLastAssistantContent(),
+  );
 
   reloadAiConfig();
   clearStreamDeltaBuffer();
@@ -5240,7 +5331,7 @@ async function resumeAgentRun(assistantMsgId: string) {
       apiKey: aiConfig.value.apiKey,
       model: aiConfig.value.model,
       mode,
-      maxTurns: resolveAgentMaxTurns(mode, runProfile),
+      maxTurns: resolveResumeMaxTurns(mode, runProfile, resolveAgentCompletedTurns(assistantMsg)),
       openFilePath: activeFilePath.value || undefined,
       runProfile: runProfile.kind === "execute_plan" ? runProfile : undefined,
     },
@@ -5250,10 +5341,17 @@ async function resumeAgentRun(assistantMsgId: string) {
 
 async function runAgentTurn(
   userText: string,
-  options?: { skipUserBubble?: boolean; resumeAssistantMsg?: ChatMessage; referencedFiles?: string[] },
+  options?: {
+    skipUserBubble?: boolean;
+    resumeAssistantMsg?: ChatMessage;
+    referencedFiles?: string[];
+    imageDataUrls?: string[];
+    userBubbleContent?: string;
+  },
 ) {
   const rawPrompt = userText.trim();
-  if (!rawPrompt || !configReady.value || !projectOpened.value) return;
+  const hasImages = Boolean(options?.imageDataUrls?.length);
+  if ((!rawPrompt && !hasImages) || !configReady.value || !projectOpened.value) return;
 
   const lastAssistant = findLastAssistantContent();
   const mode = chatMode.value;
@@ -5279,7 +5377,12 @@ async function runAgentTurn(
     assistantMsg = options.resumeAssistantMsg;
   } else {
     if (!options?.skipUserBubble) {
-      chatMessages.value.push({ id: genId(), role: "user", content: rawPrompt });
+      chatMessages.value.push({
+        id: genId(),
+        role: "user",
+        content: options?.userBubbleContent ?? stripReferenceAttachments(rawPrompt),
+        imageDataUrls: options?.imageDataUrls?.length ? [...options.imageDataUrls] : undefined,
+      });
     }
     assistantMsg = {
       id: genId(),
@@ -5318,6 +5421,7 @@ async function runAgentTurn(
       maxTurns: resolveAgentMaxTurns(mode, runProfile),
       openFilePath: activeFilePath.value || undefined,
       runProfile: runProfile.kind === "execute_plan" ? runProfile : undefined,
+      imageDataUrls: options?.imageDataUrls?.length ? options.imageDataUrls : undefined,
     },
     (event) => handleAgentEvent(event, assistantMsg, runGen),
   );
@@ -5363,7 +5467,8 @@ async function sendChat() {
   mentionOpen.value = false;
 
   const userText = payload.text.trim();
-  let fullPrompt = userText || "请结合引用的文件回答。";
+  const imageDataUrls = payload.imageDataUrls.filter(Boolean);
+  let fullPrompt = userText || (imageDataUrls.length ? "请结合附带的图片回答。" : "请结合引用的文件回答。");
 
   if (quotedMessage.value) {
     const prefix = quotedMessage.value.role === "assistant" ? "Agent" : "你";
@@ -5402,6 +5507,8 @@ async function sendChat() {
 
   await runAgentTurn(fullPrompt, {
     referencedFiles: payload.refs.map((r) => r.relative || r.path).filter(Boolean),
+    imageDataUrls: imageDataUrls.length ? imageDataUrls : undefined,
+    userBubbleContent: userText,
   });
 }
 
@@ -5827,6 +5934,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   min-height: 0;
   min-width: 0;
+  overflow-x: clip;
 }
 
 .file-panel {
@@ -6748,6 +6856,24 @@ button.ghost.danger:hover:not(:disabled) {
   min-width: 0;
 }
 
+.msg-user-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 8px;
+  max-width: 100%;
+}
+
+.msg-user-image {
+  display: block;
+  max-width: min(220px, 100%);
+  max-height: 180px;
+  object-fit: contain;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.25);
+}
+
 .msg-answer--final,
 .msg-answer--streaming {
   position: relative;
@@ -6817,6 +6943,8 @@ button.ghost.danger:hover:not(:disabled) {
   padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   background: rgba(17, 24, 39, 0.4);
+  min-width: 0;
+  overflow-x: clip;
 }
 
 .panel-head-right {
@@ -6855,7 +6983,8 @@ button.ghost.danger:hover:not(:disabled) {
   list-style: none;
   margin: 0;
   padding: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   display: grid;
   gap: 6px;
 }
@@ -6864,6 +6993,8 @@ button.ghost.danger:hover:not(:disabled) {
   display: flex;
   align-items: stretch;
   gap: 6px;
+  min-width: 0;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.02);
@@ -6899,6 +7030,9 @@ button.ghost.danger:hover:not(:disabled) {
   margin-top: 4px;
   font-size: 11px;
   color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .history-copy,
@@ -7068,10 +7202,12 @@ button.primary.small {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
+  min-width: 0;
 }
 
 .session-picker-sync {
@@ -7082,6 +7218,9 @@ button.primary.small {
 .session-picker-hint {
   font-size: 10px;
   color: rgba(255, 255, 255, 0.35);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -8040,6 +8179,7 @@ button.compact {
   gap: 6px;
   padding: 8px 10px 10px;
   min-height: min-content;
+  min-width: 0;
 }
 
 .cursor-agent-wrap.running .cursor-agent-feed-viewport {
@@ -8121,6 +8261,7 @@ button.compact {
   gap: 3px;
   padding-left: 10px;
   border-left: 2px solid rgba(88, 166, 255, 0.14);
+  min-width: 0;
 }
 
 .cursor-actions-fold {
@@ -8134,6 +8275,9 @@ button.compact {
   color: rgba(139, 148, 158, 0.9);
   cursor: pointer;
   user-select: none;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .cursor-actions-fold-summary::-webkit-details-marker {
@@ -8168,6 +8312,9 @@ button.compact {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   letter-spacing: 0.01em;
   color: rgba(171, 178, 191, 0.88);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .cursor-action.done {
@@ -9060,8 +9207,10 @@ button.compact {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
+  max-width: 100%;
   max-height: 280px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   color: rgba(255, 255, 255, 0.86);
 }
