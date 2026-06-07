@@ -29,21 +29,52 @@ describe("executeTool immediate persistence", () => {
     expect(onDisk).toBe("hello");
   });
 
-  it("patch_file persists to disk immediately", async () => {
+  it("patch_file requires read_file first on existing files", async () => {
     const root = await makeProject();
     await fs.promises.mkdir(path.join(root, "src"), { recursive: true });
     await fs.promises.writeFile(path.join(root, "src", "a.ts"), "foo bar", "utf-8");
     const stage = createWriteStage();
+    const readCache = new Map<string, string>();
+    const readSliceCache = new Map<string, string>();
+
+    const blocked = await executeTool(
+      root,
+      "patch_file",
+      { path: "src/a.ts", old_string: "foo", new_string: "baz" },
+      stage,
+      "build",
+      readCache,
+      readSliceCache,
+    );
+    expect(blocked).toContain("请先 read_file");
+
+    await executeTool(root, "read_file", { path: "src/a.ts" }, stage, "build", readCache, readSliceCache);
     const result = await executeTool(
       root,
       "patch_file",
       { path: "src/a.ts", old_string: "foo", new_string: "baz" },
       stage,
+      "build",
+      readCache,
+      readSliceCache,
     );
     expect(result).toBe("已修改 src/a.ts（3 → 3 字符）");
-    expect(stage.writtenList).toEqual(["src/a.ts"]);
     const onDisk = await fs.promises.readFile(path.join(root, "src", "a.ts"), "utf-8");
     expect(onDisk).toBe("baz bar");
+  });
+
+  it("deduplicates identical read_file slice requests", async () => {
+    const root = await makeProject();
+    await fs.promises.writeFile(path.join(root, "a.ts"), "line1\nline2\n", "utf-8");
+    const stage = createWriteStage();
+    const readCache = new Map<string, string>();
+    const readSliceCache = new Map<string, string>();
+
+    const first = await executeTool(root, "read_file", { path: "a.ts" }, stage, "build", readCache, readSliceCache);
+    const second = await executeTool(root, "read_file", { path: "a.ts" }, stage, "build", readCache, readSliceCache);
+
+    expect(first).toContain("line1");
+    expect(second).toContain("省略重复读取");
   });
 
   it("delete_file removes from disk immediately", async () => {

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUpdated, ref, watch } from "vue";
+import { nextTick, onMounted, ref, watch } from "vue";
+import { isScrollNearBottom, scrollElementToBottom } from "../utils/scrollViewport";
 
 export type AgentLogLineItem = {
   key: string;
@@ -17,21 +18,54 @@ const props = withDefaults(
 );
 
 const viewportRef = ref<HTMLElement | null>(null);
+const pinnedToBottom = ref(true);
+const showJumpToLatest = ref(false);
 
 function prefersReducedMotion(): boolean {
   if (typeof window === "undefined") return false;
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-function scrollToBottom() {
+function updateJumpVisibility() {
+  const el = viewportRef.value;
+  if (!el) {
+    showJumpToLatest.value = false;
+    return;
+  }
+  showJumpToLatest.value =
+    !isScrollNearBottom(el) && el.scrollHeight > el.clientHeight + 8;
+}
+
+function onViewportScroll() {
+  const el = viewportRef.value;
+  if (!el) return;
+  pinnedToBottom.value = isScrollNearBottom(el);
+  updateJumpVisibility();
+}
+
+function scrollToBottom(force = false) {
   void nextTick(() => {
     const el = viewportRef.value;
     if (!el) return;
+    if (!force && !pinnedToBottom.value) {
+      updateJumpVisibility();
+      return;
+    }
     el.scrollTo({
       top: el.scrollHeight,
-      behavior: prefersReducedMotion() ? "auto" : "smooth",
+      behavior: force || prefersReducedMotion() ? "auto" : "smooth",
     });
+    pinnedToBottom.value = true;
+    showJumpToLatest.value = false;
   });
+}
+
+function jumpToLatest() {
+  const el = viewportRef.value;
+  if (!el) return;
+  scrollElementToBottom(el, prefersReducedMotion() ? "auto" : "smooth");
+  pinnedToBottom.value = true;
+  showJumpToLatest.value = false;
 }
 
 watch(
@@ -40,24 +74,35 @@ watch(
   { deep: true },
 );
 
-onMounted(() => scrollToBottom());
-onUpdated(() => scrollToBottom());
+onMounted(() => scrollToBottom(true));
 </script>
 
 <template>
   <div class="log-stream">
     <p v-if="hiddenCount > 0" class="log-stream-ghost">↑ 另有 {{ hiddenCount }} 步</p>
-    <div ref="viewportRef" class="log-stream-viewport">
-      <TransitionGroup name="log-line" tag="div" class="log-stream-lines">
-        <div
-          v-for="item in items"
-          :key="item.key"
-          class="log-line"
-          :class="item.state"
-        >
-          {{ item.label }}
-        </div>
-      </TransitionGroup>
+    <div class="log-stream-viewport-wrap">
+      <div ref="viewportRef" class="log-stream-viewport" @scroll="onViewportScroll">
+        <TransitionGroup name="log-line" tag="div" class="log-stream-lines">
+          <div
+            v-for="item in items"
+            :key="item.key"
+            class="log-line"
+            :class="item.state"
+          >
+            {{ item.label }}
+          </div>
+        </TransitionGroup>
+      </div>
+      <button
+        v-if="showJumpToLatest"
+        type="button"
+        class="log-stream-jump"
+        title="回到最新"
+        aria-label="回到最新"
+        @click="jumpToLatest"
+      >
+        ↓
+      </button>
     </div>
     <div v-if="liveStatus" class="log-stream-live">
       <span class="log-stream-live-dot" aria-hidden="true" />
@@ -90,16 +135,65 @@ onUpdated(() => scrollToBottom());
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+.log-stream-viewport-wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .log-stream-viewport {
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
-  max-height: 148px;
+  max-height: 168px;
   overflow: hidden auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
-  mask-image: linear-gradient(to bottom, transparent 0%, #000 14%, #000 100%);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 14%, #000 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 12px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 16px, #000 calc(100% - 12px), transparent 100%);
+}
+
+.log-stream-viewport::before {
+  content: "";
+  position: sticky;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: block;
+  height: 16px;
+  margin: 0 0 -16px;
+  pointer-events: none;
+  z-index: 1;
+  background: linear-gradient(to bottom, rgba(1, 4, 9, 0.94) 0%, rgba(1, 4, 9, 0.5) 60%, transparent 100%);
+}
+
+.log-stream-jump {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(88, 166, 255, 0.42);
+  background: rgba(1, 8, 18, 0.92);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.32);
+  color: rgba(126, 182, 255, 0.96);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transform: translateX(-50%);
+}
+
+.log-stream-jump:hover {
+  border-color: rgba(126, 182, 255, 0.65);
+  background: rgba(14, 28, 48, 0.96);
 }
 
 .log-stream-lines {

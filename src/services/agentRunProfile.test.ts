@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAgentPromptForProfile, resolveAgentRunProfile } from "./agentRunProfile";
+import { buildAgentPromptForProfile, resolveAgentMaxTurns, resolveAgentRunProfile } from "./agentRunProfile";
 
 const SAMPLE_PLAN = [
   "## 修改方案",
@@ -66,5 +66,11 @@ describe("buildAgentPromptForProfile", () => {
     expect(prompt).toContain("read_file");
     expect(prompt).toContain("不要再次询问是否开始");
     expect(prompt).not.toContain("禁止 read_file");
+  });
+});
+
+describe("resolveAgentMaxTurns export", () => {
+  it("re-exports turn budget helper from server module", () => {
+    expect(resolveAgentMaxTurns("build", { kind: "execute_plan" })).toBe(8);
   });
 });

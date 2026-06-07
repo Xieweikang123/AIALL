@@ -7,8 +7,12 @@ import {
   stripTextToolCallMarkup,
   synthesizeToolCallsFromText,
 } from "./textToolCalls";
-import { AGENT_SAFETY_MAX_TURNS } from "./agentTurnBudget";
-import { buildExploreBudgetNudge, INTERACTIVE_EXPLORE_TURN_BUDGET } from "./agentExplorationBudget";
+import { AGENT_SAFETY_MAX_TURNS, resolveAgentMaxTurns } from "./agentTurnBudget";
+import {
+  buildExploreBudgetNudge,
+  EXECUTE_PLAN_EXPLORE_TURN_BUDGET,
+  INTERACTIVE_EXPLORE_TURN_BUDGET,
+} from "./agentExplorationBudget";
 import {
   buildExecutePlanSystemHint,
   buildTargetFileManifest,
@@ -129,6 +133,7 @@ const MAX_SSE_TEXT_CHARS = 24_000;
 const MAX_TOOL_RESULT_SSE_CHARS = 16_000;
 const MAX_TOOL_RESULT_MODEL_CHARS = 10_000;
 const MAX_AGENT_CONTEXT_CHARS = 200_000;
+export const EXECUTE_PLAN_MAX_CONTEXT_CHARS = 100_000;
 const PROTECTED_RECENT_TOOL_RESULTS = 2;
 
 function truncateText(text: string, max: number, suffix: string): string {
@@ -156,14 +161,17 @@ function messageCharSize(message: ChatCompletionMessage): number {
   return size;
 }
 
-export function compactMessagesForModel(messages: ChatCompletionMessage[]): ChatCompletionMessage[] {
+export function compactMessagesForModel(
+  messages: ChatCompletionMessage[],
+  maxContextChars = MAX_AGENT_CONTEXT_CHARS,
+): ChatCompletionMessage[] {
   const result = messages.map((message) => {
     if (message.role !== "tool" || !message.content) return { ...message };
     return { ...message, content: truncateToolResultForModel(String(message.content)) };
   });
 
   let total = result.reduce((sum, message) => sum + messageCharSize(message), 0);
-  if (total <= MAX_AGENT_CONTEXT_CHARS) return result;
+  if (total <= maxContextChars) return result;
 
   const toolIndexes = result
     .map((message, index) => (message.role === "tool" ? index : -1))
@@ -179,7 +187,7 @@ export function compactMessagesForModel(messages: ChatCompletionMessage[]): Chat
       content: `（较早的工具输出已压缩${lineHint ? `，${lineHint}` : ""}，约 ${raw.length} 字符）`,
     };
     total = result.reduce((sum, message) => sum + messageCharSize(message), 0);
-    if (total <= MAX_AGENT_CONTEXT_CHARS) break;
+    if (total <= maxContextChars) break;
   }
 
   return result;
@@ -789,8 +797,10 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     signal,
   } = params;
 
-  const explicitMaxTurns = params.maxTurns;
+  const explicitMaxTurns = params.maxTurns ?? resolveAgentMaxTurns(mode, runProfile);
   const statusMaxTurns = explicitMaxTurns;
+  const exploreTurnBudget = isExecutePlan ? EXECUTE_PLAN_EXPLORE_TURN_BUDGET : INTERACTIVE_EXPLORE_TURN_BUDGET;
+  const maxContextChars = isExecutePlan ? EXECUTE_PLAN_MAX_CONTEXT_CHARS : MAX_AGENT_CONTEXT_CHARS;
 
   const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
   const openFileRel = openFile?.relative;
@@ -936,7 +946,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         },
       });
     }, 2000);
-    const compactedMessages = compactMessagesForModel(messages);
+    const compactedMessages = compactMessagesForModel(messages, maxContextChars);
     const contextChars = compactedMessages.reduce((sum, message) => sum + messageCharSize(message), 0);
     onEvent({
       type: "status",
@@ -1220,7 +1230,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     } else if (turnExploreOnly) {
       consecutiveExploreTurns += 1;
     }
-    if (!isExecutePlan && !isAsk && consecutiveExploreTurns >= INTERACTIVE_EXPLORE_TURN_BUDGET) {
+    if (!isAsk && consecutiveExploreTurns >= exploreTurnBudget) {
       messages.push({ role: "system", content: buildExploreBudgetNudge(consecutiveExploreTurns) });
       consecutiveExploreTurns = 0;
     }

@@ -3,7 +3,7 @@
     <div class="page-head">
       <div>
         <h1>AI 配置</h1>
-        <p class="desc">配置模型接口并测试连通性。</p>
+        <p class="desc">配置模型接口并测试连通性。快捷键：Ctrl/⌘ + S 保存。</p>
       </div>
       <div class="head-actions">
         <div class="action-group nav-group">
@@ -32,9 +32,51 @@
     </nav>
 
     <section class="card">
-      <h2 class="card-title">基础配置</h2>
+      <h2 class="card-title">模型供应商</h2>
+      <p class="desc">可配置多个 OpenAI 兼容接口，并选择其中一个作为聊天与其它功能的默认供应商。</p>
+
+      <div class="provider-bar" role="tablist" aria-label="模型供应商列表">
+        <button
+          v-for="provider in providers"
+          :key="provider.id"
+          type="button"
+          class="provider-chip"
+          :class="{ active: editingProviderId === provider.id, default: activeProviderId === provider.id }"
+          role="tab"
+          :aria-selected="editingProviderId === provider.id"
+          @click="selectProvider(provider.id)"
+        >
+          <span class="provider-chip-name">{{ provider.name || "未命名" }}</span>
+          <span v-if="activeProviderId === provider.id" class="provider-default-badge">默认</span>
+        </button>
+        <button type="button" class="provider-add" @click="addProvider">+ 添加</button>
+      </div>
+
+      <div class="provider-actions">
+        <button
+          v-if="editingProviderId && editingProviderId !== activeProviderId"
+          type="button"
+          class="secondary"
+          @click="setActiveProvider(editingProviderId)"
+        >
+          设为默认供应商
+        </button>
+        <button
+          type="button"
+          class="secondary danger outline"
+          :disabled="providers.length <= 1"
+          @click="removeProvider(editingProviderId)"
+        >
+          删除当前供应商
+        </button>
+      </div>
 
       <div class="config-form grid-2">
+        <label class="field span-2">
+          <span>供应商名称</span>
+          <input v-model.trim="form.name" type="text" placeholder="例如：MiMo 官方 / 本地 Ollama" />
+        </label>
+
         <label class="field span-2">
           <div class="field-row">
             <span>接口地址</span>
@@ -320,8 +362,20 @@ import { fetchAvailableModels, testAiModel, testTtsModel } from "../services/aiC
 import InputPrompt from "../components/InputPrompt.vue";
 import { useInputPrompt } from "../composables/useInputPrompt";
 import { requestPageScreenshot } from "../services/pageScreenshotClient";
+import {
+  AI_CONFIG_VERSION,
+  AI_LOCAL_CONFIG_KEY,
+  type AiConfigTabKey,
+  type AiProvider,
+  type AiTtsConfig,
+  createDefaultProvider,
+  loadPersistedAiConfigFromStorage,
+  migratePersistedAiConfig,
+  savePersistedAiConfigToStorage,
+} from "../services/aiLocalConfig";
 
 interface AiConfigForm {
+  name: string;
   endpoint: string;
   apiKey: string;
   model: string;
@@ -329,27 +383,8 @@ interface AiConfigForm {
   stream: boolean;
 }
 
-interface TtsForm {
-  model: string;
-  voice: string;
-  input: string;
-  format: "mp3" | "wav" | "opus";
-}
-
-interface PersistedAiConfig {
-  version: 3;
-  activeTab?: TabKey;
-  base: Pick<AiConfigForm, "endpoint" | "apiKey" | "model" | "prompt" | "stream">;
-  web: {
-    proxyUrl: string;
-  };
-  tts: TtsForm;
-}
-
-const STORAGE_KEY = "ai-config";
-
 type TestPhase = "idle" | "running" | "success" | "fail";
-type TabKey = "chat" | "tts";
+type TabKey = AiConfigTabKey;
 
 const router = useRouter();
 const inputPrompt = useInputPrompt();
@@ -359,17 +394,94 @@ const apiKeyVisible = ref(false);
 const saveHint = ref("");
 let saveHintTimer: number | undefined;
 
+const providers = ref<AiProvider[]>([createDefaultProvider()]);
+const activeProviderId = ref(providers.value[0].id);
+const editingProviderId = ref(providers.value[0].id);
+
 function handleGoChat() {
   router.push({ path: "/chat" });
 }
 
 const form = reactive<AiConfigForm>({
+  name: "默认供应商",
   endpoint: "https://fufu.iqach.top/v1",
   apiKey: "",
   model: "mimo-v2.5-pro",
   prompt: "你好",
   stream: true,
 });
+
+function syncFormToProvider(providerId: string) {
+  const provider = providers.value.find((item) => item.id === providerId);
+  if (!provider) return;
+  provider.name = form.name;
+  provider.endpoint = form.endpoint;
+  provider.apiKey = form.apiKey;
+  provider.model = form.model;
+  provider.prompt = form.prompt;
+  provider.stream = form.stream;
+}
+
+function syncProviderToForm(providerId: string) {
+  const provider = providers.value.find((item) => item.id === providerId);
+  if (!provider) return;
+  form.name = provider.name;
+  form.endpoint = provider.endpoint;
+  form.apiKey = provider.apiKey;
+  form.model = provider.model;
+  form.prompt = provider.prompt;
+  form.stream = provider.stream;
+}
+
+function selectProvider(providerId: string) {
+  if (editingProviderId.value === providerId) return;
+  syncFormToProvider(editingProviderId.value);
+  editingProviderId.value = providerId;
+  syncProviderToForm(providerId);
+  availableModels.value = [];
+  modelsStatusText.value = "已切换供应商，可重新获取模型列表。";
+}
+
+function addProvider() {
+  syncFormToProvider(editingProviderId.value);
+  const provider = createDefaultProvider(`供应商 ${providers.value.length + 1}`);
+  providers.value.push(provider);
+  editingProviderId.value = provider.id;
+  syncProviderToForm(provider.id);
+  availableModels.value = [];
+  modelsStatusText.value = "已添加新供应商，请填写接口信息。";
+}
+
+function setActiveProvider(providerId: string) {
+  if (!providers.value.some((item) => item.id === providerId)) return;
+  activeProviderId.value = providerId;
+  saveHint.value = "已设为默认供应商，记得点击「保存配置」。";
+  window.clearTimeout(saveHintTimer);
+  saveHintTimer = window.setTimeout(() => {
+    saveHint.value = "";
+  }, 2000);
+}
+
+function removeProvider(providerId: string) {
+  if (providers.value.length <= 1) return;
+  const ok = window.confirm("确认删除该供应商？删除后无法恢复。");
+  if (!ok) return;
+
+  syncFormToProvider(editingProviderId.value);
+  const index = providers.value.findIndex((item) => item.id === providerId);
+  if (index < 0) return;
+
+  providers.value.splice(index, 1);
+  if (activeProviderId.value === providerId) {
+    activeProviderId.value = providers.value[0].id;
+  }
+  if (editingProviderId.value === providerId) {
+    editingProviderId.value = providers.value[0].id;
+    syncProviderToForm(editingProviderId.value);
+  }
+  availableModels.value = [];
+  modelsStatusText.value = "已删除供应商。";
+}
 const web = reactive({
   proxyUrl: "",
 });
@@ -383,7 +495,7 @@ const result = reactive({
   status: 0,
   text: "点击“测试模型”开始请求。",
 });
-const ttsForm = reactive<TtsForm>({
+const ttsForm = reactive<AiTtsConfig>({
   model: "mimo-v2.5-tts",
   voice: "mimo_default",
   input: "你好，这是一段 TTS 测试音频。",
@@ -745,17 +857,20 @@ async function copyText(text: string) {
   }
 }
 
+function handleSaveShortcut(event: KeyboardEvent) {
+  if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return;
+  if (event.key !== "s" && event.key !== "S") return;
+  event.preventDefault();
+  saveConfig();
+}
+
 function saveConfig() {
-  const payload: PersistedAiConfig = {
-    version: 3,
+  syncFormToProvider(editingProviderId.value);
+  savePersistedAiConfigToStorage({
+    version: AI_CONFIG_VERSION,
+    activeProviderId: activeProviderId.value,
+    providers: providers.value.map((provider) => ({ ...provider })),
     activeTab: activeTab.value,
-    base: {
-      endpoint: form.endpoint,
-      apiKey: form.apiKey,
-      model: form.model,
-      prompt: form.prompt,
-      stream: form.stream,
-    },
     web: {
       proxyUrl: web.proxyUrl,
     },
@@ -765,8 +880,7 @@ function saveConfig() {
       input: ttsForm.input,
       format: ttsForm.format,
     },
-  };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  });
   saveHint.value = "配置已保存到本地 localStorage。";
   window.clearTimeout(saveHintTimer);
   saveHintTimer = window.setTimeout(() => {
@@ -775,55 +889,40 @@ function saveConfig() {
 }
 
 function loadConfig() {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return;
-  try {
-    const parsed = JSON.parse(raw) as Partial<PersistedAiConfig> | Partial<AiConfigForm>;
-
-    // 兼容旧版：直接存了 base 表单。
-    if (![2, 3].includes((parsed as any).version)) {
-      const legacy = parsed as Partial<AiConfigForm>;
-      form.endpoint = legacy.endpoint || form.endpoint;
-      form.apiKey = legacy.apiKey || form.apiKey;
-      form.model = legacy.model || form.model;
-      form.prompt = legacy.prompt || form.prompt;
-      form.stream = typeof legacy.stream === "boolean" ? legacy.stream : form.stream;
-      return;
+  const stored = loadPersistedAiConfigFromStorage();
+  if (!stored) {
+    const raw = localStorage.getItem(AI_LOCAL_CONFIG_KEY);
+    if (!raw) return;
+    try {
+      const migrated = migratePersistedAiConfig(JSON.parse(raw) as unknown);
+      applyPersistedConfig(migrated);
+    } catch {
+      // 忽略损坏的本地配置，保留默认值。
     }
-
-    const payload = parsed as Partial<PersistedAiConfig>;
-    if (payload.activeTab && ["chat", "tts"].includes(payload.activeTab)) {
-      activeTab.value = payload.activeTab;
-    }
-
-    if (payload.base) {
-      form.endpoint = payload.base.endpoint || form.endpoint;
-      form.apiKey = payload.base.apiKey || form.apiKey;
-      form.model = payload.base.model || form.model;
-      form.prompt = payload.base.prompt || form.prompt;
-      form.stream = typeof payload.base.stream === "boolean" ? payload.base.stream : form.stream;
-    }
-
-    if ((payload as any).web) {
-      web.proxyUrl = String((payload as any).web?.proxyUrl || "");
-    } else {
-      web.proxyUrl = "";
-    }
-
-    if (payload.tts) {
-      ttsForm.model = payload.tts.model || ttsForm.model;
-      ttsForm.voice = payload.tts.voice || ttsForm.voice;
-      ttsForm.input = payload.tts.input || ttsForm.input;
-      ttsForm.format = payload.tts.format || ttsForm.format;
-    }
-  } catch {
-    // 忽略损坏的本地配置，保留默认值。
+    return;
   }
+  applyPersistedConfig(stored);
+}
+
+function applyPersistedConfig(payload: ReturnType<typeof migratePersistedAiConfig>) {
+  providers.value = payload.providers.map((provider) => ({ ...provider }));
+  activeProviderId.value = payload.activeProviderId;
+  editingProviderId.value = payload.activeProviderId;
+  if (payload.activeTab && ["chat", "tts"].includes(payload.activeTab)) {
+    activeTab.value = payload.activeTab;
+  }
+  web.proxyUrl = payload.web.proxyUrl;
+  ttsForm.model = payload.tts.model;
+  ttsForm.voice = payload.tts.voice;
+  ttsForm.input = payload.tts.input;
+  ttsForm.format = payload.tts.format;
+  syncProviderToForm(editingProviderId.value);
 }
 
 function handleExportConfig() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY) || "";
+    saveConfig();
+    const raw = localStorage.getItem(AI_LOCAL_CONFIG_KEY) || "";
     if (!raw) {
       saveHint.value = "当前没有可导出的配置（localStorage 为空）。";
       window.clearTimeout(saveHintTimer);
@@ -846,8 +945,9 @@ async function handleImportConfig() {
   const text = input.trim();
   if (!text) return;
   try {
-    const parsed = JSON.parse(text) as Partial<PersistedAiConfig> | Partial<AiConfigForm>;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+    const parsed = JSON.parse(text) as unknown;
+    const migrated = migratePersistedAiConfig(parsed);
+    savePersistedAiConfigToStorage(migrated);
     loadConfig();
     saveHint.value = "已导入配置。";
   } catch {
@@ -862,7 +962,7 @@ function handleResetConfig() {
   const ok = window.confirm("确认重置？这会清空本页已保存的本地配置，并恢复默认值。");
   if (!ok) return;
   try {
-    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(AI_LOCAL_CONFIG_KEY);
   } catch {
     // ignore
   }
@@ -1014,14 +1114,23 @@ async function handleTestTts() {
 onMounted(() => {
   loadConfig();
   window.addEventListener("paste", handlePaste);
+  window.addEventListener("keydown", handleSaveShortcut);
 });
 
 watch(
-  () => [form.endpoint, form.apiKey] as const,
+  () => [form.endpoint, form.apiKey, editingProviderId.value] as const,
   () => {
     // 输入变化时，模型缓存展示可能已过期，避免误导。
     availableModels.value = [];
     modelsStatusText.value = "接口或 Key 已变更，可重新获取模型列表。";
+  },
+);
+
+watch(
+  () => form.name,
+  (name) => {
+    const provider = providers.value.find((item) => item.id === editingProviderId.value);
+    if (provider) provider.name = name;
   },
 );
 
@@ -1030,13 +1139,17 @@ onBeforeUnmount(() => {
     URL.revokeObjectURL(ttsAudioUrl.value);
   }
   window.removeEventListener("paste", handlePaste);
+  window.removeEventListener("keydown", handleSaveShortcut);
   window.clearTimeout(saveHintTimer);
 });
 </script>
 
 <style scoped>
+:global(html),
 :global(body) {
   margin: 0;
+  overflow: auto;
+  overscroll-behavior: auto;
   background: radial-gradient(900px 520px at 18% 8%, rgba(31, 111, 235, 0.09), transparent 56%),
     radial-gradient(900px 560px at 90% 0%, rgba(130, 80, 223, 0.14), transparent 55%),
     radial-gradient(900px 560px at 50% 100%, rgba(26, 127, 55, 0.12), transparent 50%),
@@ -1231,6 +1344,80 @@ button.primary {
   font-weight: 600;
   letter-spacing: -0.1px;
   color: var(--text);
+}
+
+.provider-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.provider-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: none;
+  transition: all 150ms ease;
+}
+
+.provider-chip.active {
+  border-color: rgba(31, 111, 235, 0.35);
+  background: rgba(31, 111, 235, 0.1);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.provider-chip.default:not(.active) {
+  border-color: rgba(26, 127, 55, 0.28);
+}
+
+.provider-chip-name {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-default-badge {
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(26, 127, 55, 0.12);
+  color: var(--ok);
+  border: 1px solid rgba(26, 127, 55, 0.28);
+}
+
+.provider-add {
+  border: 1px dashed var(--border-2);
+  background: transparent;
+  color: var(--primary);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  box-shadow: none;
+}
+
+.provider-add:hover:not(:disabled) {
+  background: rgba(31, 111, 235, 0.06);
+  transform: none;
+  box-shadow: none;
+}
+
+.provider-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
 }
 
 .config-form {
@@ -1569,6 +1756,7 @@ pre {
 }
 
 @media (prefers-color-scheme: dark) {
+  :global(html),
   :global(body) {
     background: radial-gradient(900px 520px at 18% 8%, rgba(31, 111, 235, 0.14), transparent 62%),
       radial-gradient(900px 560px at 90% 0%, rgba(130, 80, 223, 0.18), transparent 60%),
@@ -1617,6 +1805,23 @@ pre {
   .tab:hover:not(.active) {
     background: rgba(255, 255, 255, 0.06);
     color: rgba(255, 255, 255, 0.85);
+  }
+
+  .provider-chip {
+    background: rgba(2, 6, 23, 0.35);
+    border-color: rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.72);
+  }
+
+  .provider-chip.active {
+    background: rgba(31, 111, 235, 0.18);
+    border-color: rgba(31, 111, 235, 0.35);
+    color: rgba(100, 160, 255, 0.95);
+  }
+
+  .provider-add {
+    border-color: rgba(255, 255, 255, 0.18);
+    color: rgba(100, 160, 255, 0.95);
   }
 
   .field > span {

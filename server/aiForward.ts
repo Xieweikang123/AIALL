@@ -19,6 +19,9 @@ export function buildHeaders(apiKey?: string): HeadersInit {
 
 export const DEFAULT_AI_MAX_RETRIES = 3;
 
+/** Abort fetch if the model does not send the first response byte within this window. */
+export const MODEL_FIRST_BYTE_TIMEOUT_MS = 60_000;
+
 export function isRetryableAiError(input: {
   status?: number;
   error?: string;
@@ -37,6 +40,7 @@ export function isRetryableAiError(input: {
   if ([408, 429, 502, 503, 504].includes(status)) return true;
 
   if ((input.error || "").includes("模型返回为空")) return true;
+  if ((input.error || "").includes("模型响应超时")) return true;
 
   const haystack = `${input.error || ""} ${input.rawText || ""}`.toLowerCase();
   return /gateway error|请求超时|timeout|timed out|econnreset|etimedout|socket hang up|fetch failed|network error|overload|rate.?limit|too many requests|service unavailable|bad gateway/.test(
@@ -159,6 +163,17 @@ function buildMessageFromStream(
   };
 }
 
+function linkAbortSignal(parent: AbortSignal | undefined, child: AbortController): () => void {
+  if (!parent) return () => {};
+  if (parent.aborted) {
+    child.abort();
+    return () => {};
+  }
+  const onAbort = () => child.abort();
+  parent.addEventListener("abort", onAbort, { once: true });
+  return () => parent.removeEventListener("abort", onAbort);
+}
+
 async function chatCompletionWithToolsOnce(params: {
   endpoint: string;
   apiKey?: string;
@@ -204,12 +219,41 @@ async function chatCompletionWithToolsOnce(params: {
     true,
   );
 
-  const response = await fetch(chatEndpoint, {
-    method: "POST",
-    headers: buildHeaders(params.apiKey),
-    signal: params.signal,
-    body: JSON.stringify(requestBody),
-  });
+  const timeoutController = new AbortController();
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    timeoutController.abort();
+  }, MODEL_FIRST_BYTE_TIMEOUT_MS);
+  const unlinkParent = linkAbortSignal(params.signal, timeoutController);
+
+  let response: Response;
+  try {
+    response = await fetch(chatEndpoint, {
+      method: "POST",
+      headers: buildHeaders(params.apiKey),
+      signal: timeoutController.signal,
+      body: JSON.stringify(requestBody),
+    });
+  } catch (fetchError) {
+    clearTimeout(timeoutId);
+    unlinkParent();
+    if (params.signal?.aborted) {
+      return { ok: false, status: 0, rawText: "", error: "已取消" };
+    }
+    if (timedOut) {
+      return {
+        ok: false,
+        status: 0,
+        rawText: "",
+        error: "模型响应超时（等待首包超过 60s）",
+      };
+    }
+    throw fetchError;
+  } finally {
+    clearTimeout(timeoutId);
+    unlinkParent();
+  }
 
   emitProgress(
     {

@@ -1,11 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { isRetryableAiError } from "../../server/aiForward";
-import { compactMessagesForModel } from "../../server/vibeAgent";
+import { isRetryableAiError, MODEL_FIRST_BYTE_TIMEOUT_MS } from "../../server/aiForward";
+import { compactMessagesForModel, EXECUTE_PLAN_MAX_CONTEXT_CHARS } from "../../server/vibeAgent";
 import type { ChatCompletionMessage } from "../../server/aiForward";
 
 describe("isRetryableAiError", () => {
   it("retries empty model responses", () => {
     expect(isRetryableAiError({ error: "模型返回为空" })).toBe(true);
+  });
+
+  it("retries first-byte model timeouts", () => {
+    expect(isRetryableAiError({ error: "模型响应超时（等待首包超过 60s）" })).toBe(true);
+  });
+});
+
+describe("MODEL_FIRST_BYTE_TIMEOUT_MS", () => {
+  it("caps first-byte wait at one minute", () => {
+    expect(MODEL_FIRST_BYTE_TIMEOUT_MS).toBe(60_000);
   });
 });
 
@@ -33,5 +43,18 @@ describe("compactMessagesForModel", () => {
     expect(compacted[2].content).toContain("已压缩");
     expect(compacted[3].content).toContain("lines 201-400");
     expect(compacted[4].content).toContain("lines 401-600");
+  });
+
+  it("uses a lower context ceiling for execute_plan runs", () => {
+    const messages: ChatCompletionMessage[] = [
+      { role: "system", content: "s".repeat(40_000) },
+      { role: "user", content: "u".repeat(40_000) },
+      { role: "tool", tool_call_id: "1", content: `lines 1-100\n${"a".repeat(30_000)}` },
+      { role: "tool", tool_call_id: "2", content: `lines 101-200\n${"b".repeat(30_000)}` },
+      { role: "tool", tool_call_id: "3", content: `lines 201-300\n${"c".repeat(30_000)}` },
+    ];
+    expect(EXECUTE_PLAN_MAX_CONTEXT_CHARS).toBe(100_000);
+    expect(compactMessagesForModel(messages)[2].content).not.toContain("已压缩");
+    expect(compactMessagesForModel(messages, EXECUTE_PLAN_MAX_CONTEXT_CHARS)[2].content).toContain("已压缩");
   });
 });

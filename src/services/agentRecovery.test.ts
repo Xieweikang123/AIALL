@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  agentStallRecoveryReason,
   buildAgentResumePrompt,
   canResumeAgentRun,
+  hasRecoverableAgentProgress,
   inferAgentRecoveryFlags,
+  isAgentRunStalled,
   isRecoverableAgentError,
   recoverableAgentErrorHint,
   resolveAgentCompletedTurns,
@@ -21,6 +24,32 @@ describe("isRecoverableAgentError", () => {
   it("rejects non-network errors", () => {
     expect(isRecoverableAgentError("模型返回格式错误")).toBe(false);
     expect(isRecoverableAgentError("HTTP 401")).toBe(false);
+  });
+
+  it("detects Chinese timeout and stream-interruption messages", () => {
+    expect(isRecoverableAgentError("模型响应超时（等待首包超过 60s）")).toBe(true);
+    expect(isRecoverableAgentError("连接中断（流已结束但未收到完成信号）")).toBe(true);
+    expect(isRecoverableAgentError(agentStallRecoveryReason())).toBe(true);
+  });
+});
+
+describe("isAgentRunStalled", () => {
+  it("flags runs with no progress beyond the threshold", () => {
+    const now = Date.now();
+    expect(isAgentRunStalled(now - 130_000, true, now)).toBe(true);
+    expect(isAgentRunStalled(now - 30_000, true, now)).toBe(false);
+    expect(isAgentRunStalled(now - 130_000, false, now)).toBe(false);
+  });
+});
+
+describe("hasRecoverableAgentProgress", () => {
+  it("requires completed steps, not an empty run", () => {
+    expect(hasRecoverableAgentProgress({ tools: [] })).toBe(false);
+    expect(
+      hasRecoverableAgentProgress({
+        tools: [{ running: false, label: "读取文件", summary: "ok" }],
+      }),
+    ).toBe(true);
   });
 });
 

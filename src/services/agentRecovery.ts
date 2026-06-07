@@ -22,6 +22,9 @@ export type AgentProgressSource = {
   writtenFiles?: string[];
 };
 
+/** No meaningful agent progress for this long → treat run as stalled (server heartbeats don't count). */
+export const AGENT_STALL_PROGRESS_MS = 120_000;
+
 /** Transient network / transport failures that can be resumed manually. */
 export function isRecoverableAgentError(message: string): boolean {
   const msg = message.trim().toLowerCase();
@@ -35,13 +38,41 @@ export function isRecoverableAgentError(message: string): boolean {
     msg.includes("fetch failed") ||
     msg.includes("timeout") ||
     msg.includes("timed out") ||
+    msg.includes("超时") ||
+    msg.includes("首包") ||
     msg.includes("连接中断") ||
     msg.includes("连接失败") ||
+    msg.includes("未收到完成信号") ||
+    msg.includes("运行未完成") ||
+    msg.includes("长时间无进展") ||
+    msg.includes("可能已卡住") ||
     msg.includes("网络") ||
     /\bhttp\s*(502|503|504|408)\b/.test(msg) ||
     msg.includes("bad gateway") ||
     msg.includes("service unavailable")
   );
+}
+
+export function hasRecoverableAgentProgress(msg: AgentProgressSource): boolean {
+  if (resolveAgentCompletedTurns(msg) > 0) return true;
+  if ((msg.roundGroups?.length ?? 0) > 0) return true;
+  return Boolean(
+    msg.tools?.some((t) => !t.running && (t.summary || t.label || t.title || t.name)),
+  );
+}
+
+export function isAgentRunStalled(
+  lastProgressAt: number,
+  chatSending: boolean,
+  now = Date.now(),
+  thresholdMs = AGENT_STALL_PROGRESS_MS,
+): boolean {
+  if (!chatSending || lastProgressAt <= 0) return false;
+  return now - lastProgressAt >= thresholdMs;
+}
+
+export function agentStallRecoveryReason(): string {
+  return "运行长时间无进展（可能已卡住）";
 }
 
 export type AgentRecoveryFlags = {

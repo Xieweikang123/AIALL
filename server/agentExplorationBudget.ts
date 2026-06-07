@@ -1,5 +1,8 @@
-/** Consecutive read-only tool turns in interactive mode before nudging the model to edit. */
+/** Consecutive read-only tool turns in interactive build mode before nudging the model to edit. */
 export const INTERACTIVE_EXPLORE_TURN_BUDGET = 3;
+
+/** Consecutive read-only tool turns in execute_plan mode before nudging the model to edit. */
+export const EXECUTE_PLAN_EXPLORE_TURN_BUDGET = 2;
 
 export function buildExploreBudgetNudge(consecutiveExploreTurns: number): string {
   return [

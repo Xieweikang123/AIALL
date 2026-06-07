@@ -86,6 +86,10 @@ describe("runVibeAgentSse", () => {
     await waitForDone(events);
 
     expect(events).toContainEqual({ type: "message", data: { text: "complete" } });
+    expect(events).toContainEqual({
+      type: "error",
+      data: { message: "连接中断（流已结束但未收到完成信号）" },
+    });
     expect(events[events.length - 1]).toEqual({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 0 } });
   });
 

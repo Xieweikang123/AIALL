@@ -97,20 +97,10 @@ import { testAiModel } from "../services/aiClient";
 import { fetchIconTemplateList } from "../services/iconTemplatesClient";
 import { openAppByIconTemplateId } from "../services/desktopAutomationClient";
 import { parseOpenAppIntent, resolveIconTemplateId } from "../utils/openAppCommand";
+import { loadAiChatBaseFromStorage, loadPersistedAiConfigFromStorage } from "../services/aiLocalConfig";
 
 type Phase = "idle" | "running" | "success" | "fail";
 type ChatRole = "user" | "assistant";
-
-interface PersistedAiConfig {
-  version?: number;
-  base?: {
-    endpoint?: string;
-    apiKey?: string;
-    model?: string;
-    prompt?: string;
-    stream?: boolean;
-  };
-}
 
 type UiMessage = {
   id: string;
@@ -119,7 +109,6 @@ type UiMessage = {
   meta?: string;
 };
 
-const STORAGE_KEY = "ai-config";
 const CHAT_STORAGE_KEY = "ai-chat-history";
 const MAX_PERSISTED_MESSAGES = 200;
 
@@ -169,27 +158,33 @@ const config = reactive({
   endpoint: "",
   apiKey: "",
   model: "",
+  providerName: "",
   proxyUrl: "",
 });
 
 function loadAiConfig() {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return;
-  try {
-    const parsed = JSON.parse(raw) as PersistedAiConfig | any;
-    const base = parsed?.base || parsed || {};
-    const web = parsed?.web || {};
-    config.endpoint = String(base.endpoint || "");
-    config.apiKey = String(base.apiKey || "");
-    config.model = String(base.model || "");
-    config.proxyUrl = String(web.proxyUrl || "");
-  } catch {
-    // ignore
+  const base = loadAiChatBaseFromStorage();
+  const persisted = loadPersistedAiConfigFromStorage();
+  if (base) {
+    config.endpoint = base.endpoint;
+    config.apiKey = base.apiKey;
+    config.model = base.model;
+    config.providerName = base.providerName || "";
+  } else {
+    config.endpoint = "";
+    config.apiKey = "";
+    config.model = "";
+    config.providerName = "";
   }
+  config.proxyUrl = persisted?.web?.proxyUrl || "";
 }
 
 const configReady = computed(() => Boolean(config.endpoint.trim()) && Boolean(config.model.trim()));
-const modelNameForDisplay = computed(() => config.model.trim() || "（未设置）");
+const modelNameForDisplay = computed(() => {
+  const model = config.model.trim() || "（未设置）";
+  const provider = config.providerName.trim();
+  return provider ? `${provider} / ${model}` : model;
+});
 const canSend = computed(() => Boolean(inputText.value.trim()) && configReady.value);
 
 const statusPillClass = computed(() => ({

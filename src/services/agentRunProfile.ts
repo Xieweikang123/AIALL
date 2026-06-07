@@ -10,6 +10,13 @@ import {
 
 export type AgentRunKind = "interactive" | "execute_plan";
 
+export {
+  ASK_MAX_TURNS,
+  EXECUTE_PLAN_MAX_TURNS,
+  INTERACTIVE_BUILD_MAX_TURNS,
+  resolveAgentMaxTurns,
+} from "../../server/agentTurnBudget";
+
 export interface AgentRunProfile {
   kind: AgentRunKind;
   targetFiles?: string[];
