@@ -939,7 +939,7 @@
                   'msg-answer--final': m.role === 'assistant' && !isAgentRunning(m),
                 }"
                 :content="messageDisplayContent(m)"
-                :apply-buttons="m.role === 'assistant'"
+                :apply-buttons="shouldShowApplyButtons(m)"
                 :streaming="m.role === 'assistant' && !!m.streaming && isAgentRunning(m)"
                 @apply-block="(idx: number) => applyCodeBlock(extractCodeBlocks(messageDisplayContent(m))[idx])"
               />
@@ -2533,6 +2533,12 @@ function shouldShowMessageBubble(msg: ChatMessage): boolean {
     return Boolean(msg.content?.trim() || userMessageImages(msg).length);
   }
   return Boolean(messageDisplayContent(msg));
+}
+
+function shouldShowApplyButtons(msg: ChatMessage): boolean {
+  if (msg.role !== "assistant") return false;
+  if (msg.chatMode === "ask") return false;
+  return true;
 }
 
 function userMessageImages(msg: ChatMessage): string[] {

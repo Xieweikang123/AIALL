@@ -39,6 +39,7 @@ import {
   writeFileContent,
 } from "./vibeFs";
 import {
+  buildModelIdentityHint,
   buildVisionUserContent,
   contentCharSize,
   contentDisplayText,
@@ -451,11 +452,12 @@ function canParallelizeToolBatch(calls: ChatToolCall[]): boolean {
   return new Set(paths).size === paths.length;
 }
 
-function buildSystemPrompt(projectRoot: string, openFilePath?: string): string {
+function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: string): string {
   const lines = [
     "你是一个专业的编程 Agent（Build 模式），可以调用工具探索并修改本地项目。",
     "回答请使用中文。",
     "用户可能在消息中附带截图或图片；若已附带，请结合图片内容理解需求并回答，不要声称无法查看图片。",
+    "用户附截图询问界面/功能时：先描述截图所见，再判断是否属于本项目（优先查 src/views、src/components），勿默认是 GitHub Desktop、VS Code 等外部应用。",
     "工作流程：先 grep / search_files 快速定位（通常 1 轮），read_file 读关键片段，然后 patch_file / write_file 修改。",
     "效率：探索不超过 2 轮；信息足够后必须写入，不要连续多轮只读；同一轮可并行多个 read_file / grep。",
     "探索时：read_file 用 offset/limit 分段读取（单次约 200 行）；不要重复读取已读过的文件；用中文简短说明后立即调用工具。",
@@ -469,6 +471,9 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string): string {
     "工具 path 参数使用相对项目根的路径（如 package.json、src/main.ts），不要用绝对路径。",
     `项目根目录：${projectRoot}`,
   ];
+  if (model?.trim()) {
+    lines.push("", buildModelIdentityHint(model));
+  }
   const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
   if (openFile) {
     lines.push(`用户当前打开的文件：${openFile.relative}`);
@@ -487,17 +492,22 @@ function buildAskSystemPrompt(
   projectRoot: string,
   openFilePath?: string,
   openFileSnippet?: string,
+  model?: string,
 ): string {
   const lines = [
     "你是一个编程问答助手（Ask 模式）。",
     "回答请使用中文。",
     "用户可能在消息中附带截图或图片；若已附带，请结合图片内容理解需求并回答，不要声称无法查看图片。",
+    "用户附截图询问界面/功能时：先描述截图所见，再判断是否属于本项目（优先查 src/views、src/components），勿默认是外部应用。",
     "你可以使用 list_dir、read_file、grep、search_files 工具来探索项目、读取文件，但不能修改任何文件。",
     "若信息不足，请主动使用工具查找相关内容，而不是要求用户打开文件。",
     "读取文件时：优先 grep / search_files 定位，再用 read_file 的 offset/limit 分段读取（单次约 200 行）；避免连续大块读取同一文件。",
     "收集到足够信息后立即用自然语言回答，不要无意义地继续读文件。",
     `项目根目录：${projectRoot}`,
   ];
+  if (model?.trim()) {
+    lines.push("", buildModelIdentityHint(model));
+  }
   const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
   if (openFile) {
     lines.push(`用户当前打开的文件：${openFile.relative}`);
@@ -887,8 +897,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
   const systemPrompt =
     (isAsk
-      ? buildAskSystemPrompt(projectRoot, openFilePath, openFileSnippet)
-      : buildSystemPrompt(projectRoot, openFilePath)) + projectContextBlock;
+      ? buildAskSystemPrompt(projectRoot, openFilePath, openFileSnippet, model)
+      : buildSystemPrompt(projectRoot, openFilePath, model)) + projectContextBlock;
 
   const writeStage = isAsk ? null : createWriteStage();
   const readCache = new Map<string, string>();
