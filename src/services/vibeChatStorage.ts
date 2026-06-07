@@ -74,6 +74,7 @@ export type PersistedChatMessage = {
   writtenFiles?: string[];
   turnFileDiffs?: Record<string, PersistedFileDiff>;
   pendingApproval?: boolean;
+  agentAborted?: boolean;
   rejected?: boolean;
   reverted?: boolean;
   activityExpanded?: boolean;
@@ -250,6 +251,7 @@ function sanitizeMessages(messages: PersistedChatMessage[]): PersistedChatMessag
               )
             : undefined,
       pendingApproval: m.pendingApproval || undefined,
+      agentAborted: m.agentAborted || undefined,
       rejected: m.rejected || undefined,
       reverted: m.reverted || undefined,
       activityExpanded: m.activityExpanded || undefined,

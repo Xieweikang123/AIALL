@@ -623,6 +623,7 @@ onBeforeUnmount(() => {
   flex: 1;
   overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 14px 18px;
 }
 

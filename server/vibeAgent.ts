@@ -11,18 +11,14 @@ import { AGENT_SAFETY_MAX_TURNS } from "./agentTurnBudget";
 import {
   buildExecutePlanSystemHint,
   buildTargetFileManifest,
-  checkToolAllowed,
-  createRunToolPolicy,
   normalizeRunProfile,
-  noteReadFileCall,
   type AgentRunProfileInput,
-  type AgentRunToolPolicy,
-  type AgentRunToolStats,
 } from "./agentRunProfile";
 import {
   buildProjectContext,
   formatProjectContextForBuild,
   formatProjectContextForPrompt,
+  invalidateProjectContextCache,
 } from "./vibeProjectContext";
 import {
   grepInProject,
@@ -31,6 +27,7 @@ import {
   resolveProjectPath,
   searchFiles,
   sliceFileLines,
+  writeFileContent,
 } from "./vibeFs";
 
 export type VibeAgentEvent =
@@ -364,7 +361,7 @@ const VIBE_AGENT_TOOLS = [
     type: "function",
     function: {
       name: "write_file",
-      description: "写入或覆盖整个文件（Build 模式下本轮 Agent 结束后自动落盘）。大文件优先用 patch_file。",
+      description: "写入或覆盖整个文件（Build 模式下立即落盘）。大文件优先用 patch_file。",
       parameters: {
         type: "object",
         properties: {
@@ -396,7 +393,7 @@ const VIBE_AGENT_TOOLS = [
     type: "function",
     function: {
       name: "delete_file",
-      description: "删除文件（Build 模式下本轮 Agent 结束后自动执行）。",
+      description: "删除文件（Build 模式下立即执行）。",
       parameters: {
         type: "object",
         properties: {
@@ -434,8 +431,8 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string): string {
     "解释项目时：从 package.json、README、入口文件等关键文件入手，不要臆测。",
     "修改代码时：小范围改动优先 patch_file（old_string 须唯一匹配）；全文件重写或新文件才用 write_file；大文件禁止 write_file 整文件覆盖。",
     "需要确认现状时 read_file 用 offset/limit 读相关片段即可，不要读整个大文件。",
-    "本轮 Agent 结束后修改会自动落盘，无需用户确认。",
-    "删除文件时：使用 delete_file 工具，不要用 write_file 清空内容来替代删除；删除同样会在本轮结束时自动执行。",
+    "write_file / patch_file / delete_file 会立即写入磁盘，无需用户确认。",
+    "删除文件时：使用 delete_file 工具，不要用 write_file 清空内容来替代删除。",
     "重要：必须通过 API 工具接口调用 list_dir、read_file 等，禁止在正文里输出 <function>、<parameter> 等标记。",
     "工具 path 参数使用相对项目根的路径（如 package.json、src/main.ts），不要用绝对路径。",
     `项目根目录：${projectRoot}`,
@@ -483,8 +480,8 @@ function buildDoneData(stage: WriteStage | null, turns: number) {
     return { writtenFiles: [] as string[], pendingFiles: [] as string[], turns };
   }
   return {
-    writtenFiles: [...stage.files.keys(), ...stage.deletions],
-    pendingFiles: [...stage.pendingList],
+    writtenFiles: [...stage.writtenList],
+    pendingFiles: [] as string[],
     turns,
   };
 }
@@ -534,22 +531,20 @@ function toolSummary(name: string, result: string): string {
   }
 
   if (name === "write_file") {
-    const staged = result.match(/已暂存\s+(.+?)（(\d+)\s*字符）/);
-    if (staged) return `已暂存 ${staged[1]}（${staged[2]} 字符），待确认`;
     const m = result.match(/已写入\s+(.+?)（(\d+)\s*字符）/);
     if (m) return `已写入 ${m[1]}（${m[2]} 字符）`;
     return result;
   }
 
   if (name === "patch_file") {
-    const m = result.match(/已记录补丁\s+(.+?)（/);
+    const m = result.match(/已修改\s+(.+?)（/);
     if (m) return `已修改 ${m[1]}`;
     return result;
   }
 
   if (name === "delete_file") {
-    const m = result.match(/已暂存删除\s+(.+?)，/);
-    if (m) return `待删除 ${m[1]}`;
+    const m = result.match(/已删除\s+(.+)$/);
+    if (m) return `已删除 ${m[1]}`;
     return result;
   }
 
@@ -560,11 +555,17 @@ function toolSummary(name: string, result: string): string {
 type WriteStage = {
   files: Map<string, string>;
   deletions: Set<string>;
-  pendingList: string[];
+  writtenList: string[];
 };
 
-function createWriteStage(): WriteStage {
-  return { files: new Map(), deletions: new Set(), pendingList: [] };
+export function createWriteStage(): WriteStage {
+  return { files: new Map(), deletions: new Set(), writtenList: [] };
+}
+
+function trackWrittenFile(stage: WriteStage, relative: string) {
+  if (!stage.writtenList.includes(relative)) {
+    stage.writtenList.push(relative);
+  }
 }
 
 async function readStagedFileContent(
@@ -578,22 +579,14 @@ async function readStagedFileContent(
   return result?.ok ? result.content : null;
 }
 
-async function executeTool(
+export async function executeTool(
   projectRoot: string,
   name: string,
   args: Record<string, unknown>,
   stage: WriteStage | null,
   mode: VibeChatMode = "build",
   readCache?: Map<string, string>,
-  toolPolicy: AgentRunToolPolicy | null = null,
-  toolStats: AgentRunToolStats | null = null,
 ): Promise<string> {
-  if (toolPolicy && toolStats) {
-    const policyError = checkToolAllowed(name, args, toolPolicy, toolStats);
-    if (policyError) {
-      return policyError.startsWith("错误：") ? policyError : `错误：${policyError}`;
-    }
-  }
   if (mode === "ask" && WRITE_AGENT_TOOL_NAMES.has(name)) {
     return "Ask 模式下不支持文件修改，请仅使用只读工具查询项目。";
   }
@@ -629,15 +622,9 @@ async function executeTool(
     }
     if (content === null) return `错误：${resolved.relative} 不存在或无法读取`;
     const offset = Number(args.offset) || 1;
-    const executePlan = toolPolicy?.kind === "execute_plan";
-    const defaultLimit = executePlan ? 200 : mode === "ask" ? 200 : 500;
-    const maxLimit = executePlan
-      ? toolPolicy!.readFileMaxLines
-      : mode === "ask"
-        ? 400
-        : 800;
+    const defaultLimit = mode === "ask" ? 200 : 500;
+    const maxLimit = mode === "ask" ? 400 : 800;
     const limit = Math.min(maxLimit, Math.max(1, Number(args.limit) || defaultLimit));
-    if (toolStats) noteReadFileCall(toolStats);
     return sliceFileLines(content, offset, limit);
   }
 
@@ -670,22 +657,17 @@ async function executeTool(
     if (typeof content !== "string") return "错误：缺少 content";
     const resolved = resolveProjectPath(root, filePath);
     if (!resolved.ok) return `错误：${resolved.error}`;
-    if (toolPolicy?.kind === "execute_plan") {
-      const existing = await readStagedFileContent(root, resolved.relative, resolved.path, stage);
-      if (existing) {
-        const existingLines = existing.split(/\r?\n/).length;
-        if (existingLines >= 500) {
-          return `错误：${resolved.relative} 有 ${existingLines} 行，方案执行阶段请用 patch_file 局部修改。`;
-        }
-      }
-    }
     stage.deletions.delete(resolved.relative);
     stage.files.set(resolved.relative, content);
     readCache?.set(resolved.relative, content);
-    if (!stage.pendingList.includes(resolved.relative)) {
-      stage.pendingList.push(resolved.relative);
+    try {
+      await writeFileContent(resolved.path, content);
+    } catch (error) {
+      return `错误：写入 ${resolved.relative} 失败：${error instanceof Error ? error.message : String(error)}`;
     }
-    return `已记录 ${resolved.relative}（${content.length} 字符），本轮结束后将自动写入磁盘`;
+    trackWrittenFile(stage, resolved.relative);
+    invalidateProjectContextCache(root);
+    return `已写入 ${resolved.relative}（${content.length} 字符）`;
   }
 
   if (name === "patch_file") {
@@ -713,10 +695,14 @@ async function executeTool(
     stage.deletions.delete(resolved.relative);
     stage.files.set(resolved.relative, patched);
     readCache?.set(resolved.relative, patched);
-    if (!stage.pendingList.includes(resolved.relative)) {
-      stage.pendingList.push(resolved.relative);
+    try {
+      await writeFileContent(resolved.path, patched);
+    } catch (error) {
+      return `错误：写入 ${resolved.relative} 失败：${error instanceof Error ? error.message : String(error)}`;
     }
-    return `已记录补丁 ${resolved.relative}（${oldString.length} → ${newString.length} 字符），本轮结束后将自动写入磁盘`;
+    trackWrittenFile(stage, resolved.relative);
+    invalidateProjectContextCache(root);
+    return `已修改 ${resolved.relative}（${oldString.length} → ${newString.length} 字符）`;
   }
 
   if (name === "delete_file") {
@@ -729,10 +715,15 @@ async function executeTool(
     if (!stat?.isFile()) return `错误：${resolved.relative} 不是文件或不存在`;
     stage.files.delete(resolved.relative);
     stage.deletions.add(resolved.relative);
-    if (!stage.pendingList.includes(resolved.relative)) {
-      stage.pendingList.push(resolved.relative);
+    readCache?.delete(resolved.relative);
+    try {
+      await fs.promises.unlink(resolved.path);
+    } catch (error) {
+      return `错误：删除 ${resolved.relative} 失败：${error instanceof Error ? error.message : String(error)}`;
     }
-    return `已记录删除 ${resolved.relative}，本轮结束后将自动执行`;
+    trackWrittenFile(stage, resolved.relative);
+    invalidateProjectContextCache(root);
+    return `已删除 ${resolved.relative}`;
   }
 
   return `错误：未知工具 ${name}`;
@@ -778,9 +769,6 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   const targetManifest = isExecutePlan
     ? await buildTargetFileManifest(projectRoot, runProfile.targetFiles || [])
     : [];
-  const toolPolicy = isExecutePlan ? createRunToolPolicy(runProfile, targetManifest) : null;
-  const toolStats: AgentRunToolStats = { readFileCalls: 0 };
-
   let openFileSnippet = "";
   if (!isExecutePlan && openFile) {
     onEvent({
@@ -1123,7 +1111,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
       let result = "";
       try {
-        result = await executeTool(projectRoot, toolName, toolArgs, writeStage, mode, readCache, toolPolicy, toolStats);
+        result = await executeTool(projectRoot, toolName, toolArgs, writeStage, mode, readCache);
       } catch (error) {
         result = `错误：${error instanceof Error ? error.message : String(error)}`;
       }
@@ -1188,7 +1176,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         type: "status",
         data: { phase: "finished", turn, maxTurns: explicitMaxTurns },
       });
-      if (!isAsk && writeStage?.pendingList.length) {
+      if (!isAsk && writeStage?.writtenList.length) {
         onEvent({
           type: "error",
           data: { message: `已达最大轮次（${explicitMaxTurns}），任务可能未完成。` },

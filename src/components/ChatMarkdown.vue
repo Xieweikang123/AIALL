@@ -2,9 +2,15 @@
 import { computed, onMounted, onUpdated, ref, nextTick } from "vue";
 import { renderMarkdown } from "../utils/renderMarkdown";
 
-const props = defineProps<{
-  content: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    content: string;
+    applyButtons?: boolean;
+    /** Skip markdown parsing while text is still streaming (much cheaper). */
+    streaming?: boolean;
+  }>(),
+  { applyButtons: true, streaming: false },
+);
 
 const emit = defineEmits<{
   (e: "apply-block", index: number): void;
@@ -12,10 +18,13 @@ const emit = defineEmits<{
 
 const markdownRef = ref<HTMLElement | null>(null);
 
-const html = computed(() => renderMarkdown(props.content));
+const html = computed(() => {
+  if (props.streaming) return "";
+  return renderMarkdown(props.content, { applyButtons: props.applyButtons });
+});
 
 function bindButtons() {
-  if (!markdownRef.value) return;
+  if (!props.applyButtons || !markdownRef.value) return;
   markdownRef.value.querySelectorAll(".code-block-apply-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       const idx = Number((btn as HTMLElement).dataset.blockIndex);
@@ -34,7 +43,8 @@ onUpdated(() => {
 </script>
 
 <template>
-  <div v-if="html" ref="markdownRef" class="msg-markdown" v-html="html" />
+  <div v-if="streaming && content" class="msg-markdown msg-plain-stream">{{ content }}</div>
+  <div v-else-if="html" ref="markdownRef" class="msg-markdown" v-html="html" />
 </template>
 
 <style scoped>
@@ -46,6 +56,10 @@ onUpdated(() => {
   overflow-wrap: anywhere;
   word-break: break-word;
   color: rgba(255, 255, 255, 0.92);
+}
+
+.msg-plain-stream {
+  white-space: pre-wrap;
 }
 
 .msg-markdown :deep(p) {

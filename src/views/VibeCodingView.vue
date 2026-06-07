@@ -623,7 +623,7 @@
           <div v-if="!chatMessages.length" class="chat-empty">
             <div class="chat-empty-icon" aria-hidden="true">🤖</div>
             <p class="chat-empty-title">AI 编程助手</p>
-            <p class="chat-empty-desc">Agent 会探索项目；Build 模式修改需你确认后才落盘。输入 <code>@</code> 可引用文件。</p>
+            <p class="chat-empty-desc">Agent 会探索项目；Build 模式下每次文件修改会立即写入磁盘。输入 <code>@</code> 可引用文件。</p>
             <div class="chips">
               <button type="button" class="chip" :disabled="chatSending" @click="applyExample('解释这个项目是做什么的')">
                 解释项目
@@ -682,7 +682,13 @@
                     class="cursor-agent-compact"
                     aria-live="polite"
                   >
-                    <p v-if="cursorCompactThought(m)" class="cursor-thought">{{ cursorCompactThought(m) }}</p>
+                    <div v-if="cursorCompactThought(m)" class="cursor-thought">
+                      <ChatMarkdown
+                        :content="cursorCompactThought(m)!"
+                        :apply-buttons="false"
+                        :streaming="isAgentRunning(m)"
+                      />
+                    </div>
                     <p class="cursor-compact-summary">{{ cursorCompactExplorationSummary(m) }}</p>
                     <div
                       :ref="(el) => bindStatusLogScroll(el as HTMLElement | null, m.id)"
@@ -727,7 +733,13 @@
                       收起步骤
                     </button>
                     <template v-for="block in cursorAgentFeedBlocks(m)" :key="block.key">
-                      <p v-if="block.kind === 'thought'" class="cursor-thought">{{ block.text }}</p>
+                      <div v-if="block.kind === 'thought'" class="cursor-thought">
+                        <ChatMarkdown
+                          :content="block.text"
+                          :apply-buttons="false"
+                          :streaming="isAgentRunning(m)"
+                        />
+                      </div>
                       <div v-else-if="block.kind === 'actions'" class="cursor-actions-block">
                         <details v-if="block.collapsed.length" class="cursor-actions-fold">
                           <summary class="cursor-actions-fold-summary">
@@ -872,7 +884,11 @@
                 </span>
               </div>
               <div v-if="m.content && m.streaming && shouldShowAssistantBubbleContent(m)" class="msg-streaming">
-                <ChatMarkdown :content="m.content" @apply-block="(idx: number) => applyCodeBlock(extractCodeBlocks(m.content)[idx])" />
+                <ChatMarkdown
+                  :content="m.content"
+                  streaming
+                  @apply-block="(idx: number) => applyCodeBlock(extractCodeBlocks(m.content)[idx])"
+                />
                 <span v-if="isAgentRunning(m)" class="stream-cursor" aria-hidden="true">▍</span>
               </div>
               <ChatMarkdown
@@ -911,7 +927,7 @@
                       </div>
                       <div class="inline-diff-col">
                         <div class="inline-diff-label">{{ m.turnFileDiffs[relPath].deleted ? "删除后" : "修改后" }}</div>
-                        <pre class="trace-pre compact">{{ truncateDiffPreview(m.turnFileDiffs[relPath].deleted ? "（文件将删除）" : m.turnFileDiffs[relPath].after) }}</pre>
+                        <pre class="trace-pre compact">{{ truncateDiffPreview(m.turnFileDiffs[relPath].deleted ? "（文件已删除）" : m.turnFileDiffs[relPath].after) }}</pre>
                       </div>
                     </div>
                   </details>
@@ -921,51 +937,21 @@
                 v-if="
                   m.role === 'assistant' &&
                   !m.streaming &&
-                  (m.pendingApproval || m.writtenFiles?.length || extractCodeBlocks(m.content).length)
+                  (m.writtenFiles?.length || extractCodeBlocks(m.content).length)
                 "
                 class="msg-actions"
               >
-                <span v-if="m.applying" class="applying-badge">正在应用文件…</span>
                 <span
-                  v-else-if="m.writtenFiles?.length && !m.pendingApproval && !m.reverted && !m.rejected && m.chatMode === 'build'"
+                  v-if="m.writtenFiles?.length && !m.reverted && !m.rejected && m.chatMode === 'build'"
                   class="applied-badge"
                 >
-                  已自动应用 {{ m.writtenFiles.length }} 个文件
+                  已写入 {{ m.writtenFiles.length }} 个文件
                 </span>
-                <template v-if="m.pendingApproval && m.turnFileDiffs">
-                  <span class="pending-badge">{{ formatPendingApprovalLabel(m.turnFileDiffs) }}</span>
-                  <button
-                    type="button"
-                    class="primary small-action"
-                    :disabled="!projectOpened || chatSending || m.reverting || m.applying"
-                    @click="acceptAgentTurn(m.id)"
-                  >
-                    {{ m.applying || m.reverting ? "应用中…" : "接受全部" }}
-                  </button>
-                  <button
-                    type="button"
-                    class="ghost"
-                    :disabled="chatSending || m.reverting"
-                    @click="rejectAgentTurn(m.id, $event)"
-                  >
-                    拒绝
-                  </button>
-                  <button
-                    v-for="relPath in Object.keys(m.turnFileDiffs)"
-                    :key="relPath"
-                    type="button"
-                    class="ghost"
-                    :disabled="!projectOpened"
-                    @click="previewAgentFile(m.id, relPath)"
-                  >
-                    预览 {{ relPath }}
-                  </button>
-                </template>
                 <button
-                  v-else-if="m.writtenFiles?.length && m.turnFileDiffs && !m.reverted && !m.rejected"
+                  v-if="m.writtenFiles?.length && m.turnFileDiffs && !m.reverted && !m.rejected"
                   type="button"
                   class="ghost danger"
-                  :disabled="!projectOpened || chatSending || m.reverting || m.applying"
+                  :disabled="!projectOpened || chatSending || m.reverting"
                   @click="revertAgentTurn(m.id, $event)"
                 >
                   {{ m.reverting ? "回滚中…" : `回滚本轮修改（${m.writtenFiles.length} 个文件）` }}
@@ -1137,7 +1123,10 @@ import {
   type PersistedChatMessage,
   type VibeChatSessionMeta,
 } from "../services/vibeChatStorage";
-import { isDeleteNotFoundError } from "../services/vibeAgentTurnApply";
+import {
+  isDeleteNotFoundError,
+  resolveAgentDoneFileAction,
+} from "../services/vibeAgentTurnApply";
 import {
   runVibeAgentSse,
   type VibeAgentSseEvent,
@@ -1170,6 +1159,7 @@ import {
   shouldUseCompactAgentFeed as shouldUseCompactAgentFeedByCount,
   type CursorFeedBlock,
 } from "../services/agentCursorFeed";
+import { truncatePromptAttachment } from "../utils/truncatePromptAttachment";
 import {
   messagePreviewLength,
   shouldCollapseRequestMessage,
@@ -1264,6 +1254,7 @@ type ChatMessage = Omit<PersistedChatMessage, "tools" | "roundGroups"> & {
   streaming?: boolean;
   reverting?: boolean;
   applying?: boolean;
+  agentAborted?: boolean;
 };
 
 type FileDiff = {
@@ -1863,6 +1854,68 @@ function stopAgentUiTick() {
     clearInterval(agentUiTickTimer);
     agentUiTickTimer = null;
   }
+}
+
+const STREAM_DELTA_FLUSH_MS = 80;
+const STREAM_SCROLL_THROTTLE_MS = 120;
+let streamDeltaFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let streamScrollTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingStreamDelta: { msgId: string; assistantMsg: ChatMessage; pending: string } | null = null;
+
+function scheduleStreamScroll() {
+  if (!chatSending.value || !chatPinnedToBottom) return;
+  if (streamScrollTimer) return;
+  streamScrollTimer = setTimeout(() => {
+    streamScrollTimer = null;
+    void scrollChatToBottom();
+  }, STREAM_SCROLL_THROTTLE_MS);
+}
+
+function flushPendingStreamDelta() {
+  if (streamDeltaFlushTimer) {
+    clearTimeout(streamDeltaFlushTimer);
+    streamDeltaFlushTimer = null;
+  }
+  if (!pendingStreamDelta?.pending) return;
+
+  const { msgId, assistantMsg } = pendingStreamDelta;
+  const delta = pendingStreamDelta.pending;
+  pendingStreamDelta.pending = "";
+
+  const turn = assistantMsg.agentTurn ?? 1;
+  assistantMsg.roundGroups = recordAgentRoundStreamDelta(
+    assistantMsg.roundGroups,
+    turn,
+    delta,
+    assistantMsg.agentMaxTurns,
+  );
+  assistantMsg.streamChars = (assistantMsg.streamChars || 0) + delta.length;
+  assistantMsg.streaming = true;
+  patchAssistantMsg(msgId, {
+    streaming: true,
+    streamChars: assistantMsg.streamChars,
+    ...syncRoundGroupsPatch(assistantMsg),
+  });
+  if (isAgentRunning(assistantMsg)) scrollStatusLogToBottom(msgId);
+  scheduleStreamScroll();
+}
+
+function enqueueStreamDelta(msgId: string, assistantMsg: ChatMessage, delta: string) {
+  if (!pendingStreamDelta || pendingStreamDelta.msgId !== msgId) {
+    flushPendingStreamDelta();
+    pendingStreamDelta = { msgId, assistantMsg, pending: "" };
+  }
+  pendingStreamDelta.pending += delta;
+  if (streamDeltaFlushTimer) return;
+  streamDeltaFlushTimer = setTimeout(() => {
+    streamDeltaFlushTimer = null;
+    flushPendingStreamDelta();
+  }, STREAM_DELTA_FLUSH_MS);
+}
+
+function clearStreamDeltaBuffer() {
+  flushPendingStreamDelta();
+  pendingStreamDelta = null;
 }
 
 function setAgentStatus(msg: ChatMessage, phase: string, extra?: Partial<AgentStatusData>, options?: { log?: boolean }) {
@@ -3238,6 +3291,24 @@ function storeFileDiff(relPath: string, before: string, after: string, deleted?:
   setFileDiff(full, { before, after, deleted });
 }
 
+async function syncEditorAfterAgentFileChange(relPath: string, diff: FileDiff) {
+  await refreshTree();
+  const fullPath = resolveFullPathFromRel(relPath);
+  if (diff.deleted) {
+    removeOpenTabForPath(fullPath);
+    return;
+  }
+  const tab = findOpenTab(fullPath);
+  if (tab) {
+    tab.content = diff.after;
+    tab.dirty = false;
+  }
+  if (normalizePathKey(activeFilePath.value) === normalizePathKey(fullPath)) {
+    fileContent.value = diff.after;
+    fileDirty.value = false;
+  }
+}
+
 function findOpenTab(path: string): OpenTab | undefined {
   return openTabs.value.find((tab) => tab.path === path);
 }
@@ -4074,11 +4145,15 @@ function formatToolMeta(
   if (name === "write_file") {
     const content = typeof args.content === "string" ? args.content : "";
     const detail = path ? `${path}${content ? ` · ${content.length} 字符` : ""}` : "";
-    return { name, icon: "✏️", title: "暂存修改", detail, label: detail ? `暂存修改 ${detail}` : "暂存修改" };
+    return { name, icon: "✏️", title: "写入文件", detail, label: detail ? `写入文件 ${detail}` : "写入文件" };
+  }
+  if (name === "patch_file") {
+    const detail = path || "";
+    return { name, icon: "🔧", title: "局部修改", detail, label: detail ? `局部修改 ${detail}` : "局部修改" };
   }
   if (name === "delete_file") {
     const detail = path || "";
-    return { name, icon: "🗑️", title: "暂存删除", detail, label: detail ? `暂存删除 ${detail}` : "暂存删除" };
+    return { name, icon: "🗑️", title: "删除文件", detail, label: detail ? `删除文件 ${detail}` : "删除文件" };
   }
   if (name === "list_dir") {
     const detail = path || "项目根目录";
@@ -4235,6 +4310,9 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
     });
     if (isAgentRunning(assistantMsg)) scrollStatusLogToBottom(msgId);
     if (phase === "aborted") {
+      clearStreamDeltaBuffer();
+      assistantMsg.agentAborted = true;
+      patchAssistantMsg(msgId, { agentAborted: true });
       stopAgentUiTick();
       chatSending.value = false;
       persistChatNow();
@@ -4299,6 +4377,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       turnFileDiffs: { ...assistantMsg.turnFileDiffs },
       tools: assistantMsg.tools ? [...assistantMsg.tools] : undefined,
     });
+    void syncEditorAfterAgentFileChange(relPath, diff);
     void scrollChatToBottom();
     return;
   }
@@ -4330,26 +4409,12 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
   if (event.type === "message_delta") {
     const delta = event.data.delta || "";
     if (!delta) return;
-    const turn = assistantMsg.agentTurn ?? 1;
-    assistantMsg.roundGroups = recordAgentRoundStreamDelta(
-      assistantMsg.roundGroups,
-      turn,
-      delta,
-      assistantMsg.agentMaxTurns,
-    );
-    assistantMsg.streamChars = (assistantMsg.streamChars || 0) + delta.length;
-    assistantMsg.streaming = true;
-    patchAssistantMsg(msgId, {
-      streaming: true,
-      streamChars: assistantMsg.streamChars,
-      ...syncRoundGroupsPatch(assistantMsg),
-    });
-    if (isAgentRunning(assistantMsg)) scrollStatusLogToBottom(msgId);
-    void scrollChatToBottom();
+    enqueueStreamDelta(msgId, assistantMsg, delta);
     return;
   }
 
   if (event.type === "message") {
+    clearStreamDeltaBuffer();
     assistantMsg.content = event.data.text;
     assistantMsg.streaming = false;
     assistantMsg.status = "";
@@ -4366,6 +4431,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
   }
 
   if (event.type === "error") {
+    clearStreamDeltaBuffer();
     stopAgentUiTick();
     chatError.value = event.data.message;
     const content = assistantMsg.content || event.data.message;
@@ -4389,31 +4455,32 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
   }
 
   if (event.type === "done") {
+    clearStreamDeltaBuffer();
     stopAgentUiTick();
     chatSending.value = false;
     agentAbortHandle = null;
     assistantMsg.streaming = false;
     const completedTurns = resolveCompletedTurns(event.data.turns, assistantMsg);
     assistantMsg.totalTurns = completedTurns;
-    appendStatusLog(assistantMsg, `完成（共 ${completedTurns} 轮）`);
+    const wasAborted = !!assistantMsg.agentAborted;
+    appendStatusLog(
+      assistantMsg,
+      wasAborted ? `已停止（共 ${completedTurns} 轮）` : `完成（共 ${completedTurns} 轮）`,
+    );
 
-    const pending = event.data.pendingFiles || [];
-    const hasPendingDiffs =
-      pending.length > 0 &&
-      !!assistantMsg.turnFileDiffs &&
-      Object.keys(assistantMsg.turnFileDiffs).length > 0;
-    const autoApplyBuild = hasPendingDiffs && assistantMsg.chatMode === "build";
+    const turnFileDiffPaths = assistantMsg.turnFileDiffs
+      ? Object.keys(assistantMsg.turnFileDiffs)
+      : [];
+    const fileAction = resolveAgentDoneFileAction({
+      chatMode: assistantMsg.chatMode ?? "build",
+      wasAborted,
+      serverPendingFiles: event.data.pendingFiles || [],
+      serverWrittenFiles: event.data.writtenFiles || [],
+      turnFileDiffPaths,
+    });
 
-    if (autoApplyBuild) {
-      assistantMsg.pendingApproval = false;
-      assistantMsg.writtenFiles = undefined;
-    } else if (hasPendingDiffs) {
-      assistantMsg.pendingApproval = true;
-      assistantMsg.writtenFiles = [...pending];
-    } else {
-      assistantMsg.pendingApproval = false;
-      assistantMsg.writtenFiles = event.data.writtenFiles?.length ? [...event.data.writtenFiles] : undefined;
-    }
+    assistantMsg.pendingApproval = fileAction.pendingApproval;
+    assistantMsg.writtenFiles = fileAction.writtenFiles;
 
     assistantMsg.status = "";
     assistantMsg.agentPhase = undefined;
@@ -4439,20 +4506,15 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       ...syncRoundGroupsPatch(assistantMsg),
       writtenFiles: assistantMsg.writtenFiles,
       pendingApproval: assistantMsg.pendingApproval,
+      agentAborted: assistantMsg.agentAborted || undefined,
     });
     persistChatNow();
 
-    if (autoApplyBuild) {
-      void completeAgentTurnApplication(msgId);
-    } else if (!assistantMsg.pendingApproval) {
-      void handleAgentWrittenFiles(event.data.writtenFiles || []);
-    } else {
-      const firstRel = pending[0];
-      if (firstRel && assistantMsg.turnFileDiffs?.[firstRel]) {
-        const full = resolveFullPathFromRel(firstRel);
-        void openFile(full);
-        showDiffMode.value = true;
+    if (fileAction.writtenFiles?.length) {
+      if (assistantMsg.turnFileDiffs) {
+        clearTurnFileDiffsFromStore(assistantMsg.turnFileDiffs);
       }
+      void handleAgentWrittenFiles(fileAction.writtenFiles);
     }
     void scrollChatToBottom();
 
@@ -4462,16 +4524,6 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
       void runAgentTurn(next, { skipUserBubble: true });
     }
   }
-}
-
-function formatPendingApprovalLabel(turnFileDiffs: Record<string, FileDiff>): string {
-  const entries = Object.values(turnFileDiffs);
-  const deleteCount = entries.filter((diff) => diff.deleted).length;
-  const modifyCount = entries.length - deleteCount;
-  const parts: string[] = [];
-  if (deleteCount) parts.push(`${deleteCount} 个文件删除`);
-  if (modifyCount) parts.push(`${modifyCount} 个文件修改`);
-  return `待确认 ${parts.join("、")}`;
 }
 
 function removeOpenTabForPath(targetPath: string) {
@@ -4748,6 +4800,7 @@ async function runAgentTurn(userText: string, options?: { skipUserBubble?: boole
   const prompt = buildAgentPromptForProfile(rawPrompt, runProfile);
 
   reloadAiConfig();
+  clearStreamDeltaBuffer();
   chatSending.value = true;
   chatError.value = "";
   resetChatScrollPin();
@@ -4805,7 +4858,8 @@ async function buildReferencedFileSection(refs: ReferencedFile[]): Promise<strin
     seen.add(file.path);
     const result = await readFile(file.path);
     if (result.ok) {
-      chunks.push(`### 📄 ${file.relative}\n\`\`\`\n${result.content}\n\`\`\``);
+      const content = truncatePromptAttachment(result.content);
+      chunks.push(`### 📄 ${file.relative}\n\`\`\`\n${content}\n\`\`\``);
     } else {
       chunks.push(`### 📄 ${file.relative}\n> ⚠️ 读取失败：${result.error || "未知错误"}`);
     }
@@ -4834,7 +4888,12 @@ async function sendChat() {
 
   const refSection = await buildReferencedFileSection(payload.refs);
   const dropSection = payload.drops.length
-    ? payload.drops.map((f) => `### 📄 ${f.name}\n\`\`\`\n${f.content}\n\`\`\``).join("\n\n")
+    ? payload.drops
+        .map((f) => {
+          const content = truncatePromptAttachment(f.content);
+          return `### 📄 ${f.name}\n\`\`\`\n${content}\n\`\`\``;
+        })
+        .join("\n\n")
     : "";
 
   const sections = [refSection, dropSection].filter(Boolean);
@@ -4918,7 +4977,7 @@ watch(
   chatMessages,
   () => {
     schedulePersistChat();
-    if (chatSending.value) void scrollChatToBottom();
+    if (chatSending.value) scheduleStreamScroll();
   },
   { deep: true },
 );
@@ -4953,9 +5012,12 @@ onBeforeUnmount(() => {
   document.removeEventListener("dragover", onDocumentDragOverCapture, true);
   document.removeEventListener("drop", onDocumentDropCapture, true);
   agentAbortHandle?.abort();
+  clearStreamDeltaBuffer();
   stopResize();
   if (scrollChatRaf) cancelAnimationFrame(scrollChatRaf);
   if (saveChatTimer) clearTimeout(saveChatTimer);
+  if (streamDeltaFlushTimer) clearTimeout(streamDeltaFlushTimer);
+  if (streamScrollTimer) clearTimeout(streamScrollTimer);
   if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
   if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
   persistChatNow();
@@ -4963,8 +5025,15 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+:global(html) {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 :global(body) {
   margin: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
   background: radial-gradient(900px 520px at 18% 8%, rgba(31, 111, 235, 0.16), transparent 62%),
     radial-gradient(900px 560px at 92% 0%, rgba(130, 80, 223, 0.18), transparent 60%),
     #0b1220;
@@ -5012,6 +5081,7 @@ onBeforeUnmount(() => {
   background: var(--bg);
   color: var(--text);
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  overscroll-behavior: none;
 }
 
 .app-toolbar {
@@ -6826,6 +6896,7 @@ button.primary.small {
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: none;
   padding: 12px 14px;
 }
 
@@ -7363,8 +7434,34 @@ button.compact {
   font-size: 13px;
   line-height: 1.55;
   color: rgba(230, 237, 243, 0.88);
-  white-space: pre-wrap;
   word-break: break-word;
+}
+
+.cursor-thought :deep(.msg-markdown) {
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+}
+
+.cursor-thought :deep(.msg-markdown p) {
+  margin: 0 0 0.5em;
+}
+
+.cursor-thought :deep(.msg-markdown p:last-child) {
+  margin-bottom: 0;
+}
+
+.cursor-thought :deep(.msg-markdown h1),
+.cursor-thought :deep(.msg-markdown h2),
+.cursor-thought :deep(.msg-markdown h3),
+.cursor-thought :deep(.msg-markdown h4) {
+  margin: 0.6em 0 0.35em;
+  font-size: inherit;
+  font-weight: 600;
+}
+
+.cursor-thought :deep(.msg-markdown h3) {
+  font-size: 1.02em;
 }
 
 .cursor-actions-block {
