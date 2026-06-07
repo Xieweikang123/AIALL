@@ -20,6 +20,16 @@ describe("resolveAgentRunProfile", () => {
     expect(profile.targetFiles).toContain("src/components/ChatComposerEditor.vue");
   });
 
+  it("uses execute_plan when user asks to implement after quoting the plan", () => {
+    const profile = resolveAgentRunProfile({
+      prompt: "> Agent: …\n\n实现 vibe coding 页的发图功能",
+      mode: "build",
+      lastAssistantContent: SAMPLE_PLAN,
+    });
+    expect(profile.kind).toBe("execute_plan");
+    expect(profile.userIntent).toContain("实现");
+  });
+
   it("stays interactive for ask mode even after 改吧", () => {
     const profile = resolveAgentRunProfile({
       prompt: "改吧",
@@ -37,6 +47,7 @@ describe("buildAgentPromptForProfile", () => {
       targetFiles: ["src/foo.ts"],
     });
     expect(prompt).toContain("read_file");
+    expect(prompt).toContain("不要再次询问是否开始");
     expect(prompt).not.toContain("禁止 read_file");
   });
 });

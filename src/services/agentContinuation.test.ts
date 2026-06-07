@@ -24,8 +24,16 @@ describe("isExecutionContinuation", () => {
     expect(isExecutionContinuation("执行吧")).toBe(true);
   });
 
-  it("rejects long prompts", () => {
+  it("rejects long exploratory prompts", () => {
     expect(isExecutionContinuation("请把聊天框改成支持粘贴图片")).toBe(false);
+  });
+
+  it("matches implementation intent after a quoted reply", () => {
+    expect(
+      isExecutionContinuation("> Agent: 2. Vibe Coding 页 (/vibe-coding → VibeCodingView.vue)\n\n实现 vibe coding页的"),
+    ).toBe(true);
+    expect(isExecutionContinuation("帮我实现一下发图功能")).toBe(true);
+    expect(isExecutionContinuation("那就做吧")).toBe(true);
   });
 });
 

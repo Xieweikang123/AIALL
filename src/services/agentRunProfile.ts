@@ -3,6 +3,7 @@ import {
   extractPlanFilePaths,
   isExecutionContinuation,
   looksLikeModificationPlan,
+  stripQuotedReplyPrefix,
 } from "./agentContinuation";
 
 export type AgentRunKind = "interactive" | "execute_plan";
@@ -31,7 +32,7 @@ export function resolveAgentRunProfile(input: ResolveAgentRunProfileInput): Agen
     looksLikeModificationPlan(lastAssistantContent)
   ) {
     const targetFiles = extractPlanFilePaths(lastAssistantContent);
-    const lastUserIntent = summarizeIntent(trimmed);
+    const lastUserIntent = summarizeIntent(stripQuotedReplyPrefix(trimmed) || trimmed);
     return {
       kind: "execute_plan",
       targetFiles: targetFiles.length ? targetFiles : undefined,
@@ -46,9 +47,9 @@ export function buildAgentPromptForProfile(prompt: string, profile: AgentRunProf
   if (profile.kind !== "execute_plan") return prompt;
   const files = profile.targetFiles?.length ? profile.targetFiles.join("、") : "见上一轮方案";
   return [
-    prompt.trim(),
+    stripQuotedReplyPrefix(prompt.trim()) || prompt.trim(),
     "",
-    "[方案执行] 按已确认方案修改代码。",
+    "[方案执行] 用户已明确要求实施，请直接修改代码，不要再次询问是否开始。",
     "请先 read_file 核对目标文件真实内容，再 patch_file / write_file；方案代码块仅供参考。",
     `目标文件（待服务端校验）：${files}`,
   ].join("\n");

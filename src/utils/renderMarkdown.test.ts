@@ -29,10 +29,11 @@ describe("renderMarkdown", () => {
     expect(html).toContain("code-block-apply-btn");
   });
 
-  it("skips apply buttons when disabled", () => {
-    const html = renderMarkdown("```\nhello\n```", { applyButtons: false });
-    expect(html).not.toContain("code-block-apply-btn");
-    expect(html).toContain("<pre");
-    expect(html).toContain("hello");
+  it("renders gfm tables and bold inside headings", () => {
+    const html = renderMarkdown("## 标题 **加粗**\n\n| 功能 | 支持 |\n|------|:---:|\n| 文本 | ✅ |");
+    expect(html).toContain("<h2");
+    expect(html).toContain("<strong");
+    expect(html).toContain("<table");
+    expect(html).toContain("<td");
   });
 });

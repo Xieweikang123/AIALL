@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, onUpdated, ref, nextTick } from "vue";
+import { computed, onBeforeUnmount, onMounted, onUpdated, ref, nextTick, watch } from "vue";
 import { renderMarkdown } from "../utils/renderMarkdown";
 
 const props = withDefaults(
   defineProps<{
     content: string;
     applyButtons?: boolean;
-    /** Skip markdown parsing while text is still streaming (much cheaper). */
+    /** Throttle markdown re-parsing while content is still growing. */
     streaming?: boolean;
   }>(),
   { applyButtons: true, streaming: false },
@@ -17,11 +17,44 @@ const emit = defineEmits<{
 }>();
 
 const markdownRef = ref<HTMLElement | null>(null);
+const renderSource = ref(props.content);
+let streamDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+const STREAM_RENDER_MS = 320;
 
-const html = computed(() => {
-  if (props.streaming) return "";
-  return renderMarkdown(props.content, { applyButtons: props.applyButtons });
+watch(
+  () => props.content,
+  (value) => {
+    if (!props.streaming) {
+      renderSource.value = value;
+      return;
+    }
+    if (streamDebounceTimer) clearTimeout(streamDebounceTimer);
+    streamDebounceTimer = setTimeout(() => {
+      renderSource.value = value;
+      streamDebounceTimer = null;
+    }, STREAM_RENDER_MS);
+  },
+  { immediate: true },
+);
+
+watch(
+  () => props.streaming,
+  (streaming) => {
+    if (!streaming) {
+      if (streamDebounceTimer) {
+        clearTimeout(streamDebounceTimer);
+        streamDebounceTimer = null;
+      }
+      renderSource.value = props.content;
+    }
+  },
+);
+
+onBeforeUnmount(() => {
+  if (streamDebounceTimer) clearTimeout(streamDebounceTimer);
 });
+
+const html = computed(() => renderMarkdown(renderSource.value, { applyButtons: props.applyButtons }));
 
 function bindButtons() {
   if (!props.applyButtons || !markdownRef.value) return;
@@ -43,8 +76,8 @@ onUpdated(() => {
 </script>
 
 <template>
-  <div v-if="streaming && content" class="msg-markdown msg-plain-stream">{{ content }}</div>
-  <div v-else-if="html" ref="markdownRef" class="msg-markdown" v-html="html" />
+  <div v-if="html" ref="markdownRef" class="msg-markdown" v-html="html" />
+  <div v-else-if="streaming && content" class="msg-markdown msg-plain-stream">{{ content }}</div>
 </template>
 
 <style scoped>

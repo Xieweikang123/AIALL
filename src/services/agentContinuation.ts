@@ -2,11 +2,15 @@
 const EXECUTION_CONTINUATION_RE =
   /^(改吧|好的?|行|可以|执行(吧|一下)?|开始(改|做)?|动手(吧)?|按方案(改|执行)?|go|do it|yes|ok|okay|sure)\.?$/i;
 
+/** Explicit “go implement” phrasing (may appear after a quoted reply block). */
+const IMPLEMENTATION_INTENT_RE =
+  /(?:请|帮我)?(?:实现|开发|接入|加上|做一下|做吧|做掉|开工|开干|那就(?:做|改|来)|按(?:上面|此|这个|方案)?(?:改|做|实现)?)/i;
+
 const PLAN_FILE_PATH_RE =
   /(?:^|[\s`"'(（\[])((?:[\w@.-]+\/)+[\w.-]+\.(?:vue|ts|tsx|js|jsx|json|md|css|scss|html|py|rs|go|toml)|[\w.-]+\.(?:vue|ts|tsx|js|jsx|json|md|css|scss|html|py|rs|go|toml))\b/gi;
 
 const PLAN_SIGNAL_RE =
-  /修改方案|改动文件|write_file|patch_file|第一步|第二步|需要改|按方案|完整文件|粘贴图片|imageDataUrl/i;
+  /修改方案|改动方案|涉及文件|制定计划|详细改动|确认后.*实施|write_file|patch_file|第一步|第二步|需要改|按方案|完整文件|粘贴图片|imageDataUrl/i;
 
 const HISTORY_PLAN_KEEP_CHARS = 2_400;
 const PLAN_CODE_BLOCK_MAX_CHARS = 6_000;
@@ -14,10 +18,29 @@ const PLAN_CODE_BLOCKS_MAX_TOTAL = 18_000;
 
 export type AgentHistoryEntry = { role: "user" | "assistant"; content: string };
 
+/** Remove markdown-style quote lines (`> …`) from a reply that references prior assistant text. */
+export function stripQuotedReplyPrefix(text: string): string {
+  const body = text
+    .split("\n")
+    .filter((line) => !/^\s*>/.test(line))
+    .join("\n")
+    .trim();
+  return body || text.trim();
+}
+
 export function isExecutionContinuation(text: string): boolean {
   const trimmed = text.trim();
-  if (!trimmed || trimmed.length > 24) return false;
-  return EXECUTION_CONTINUATION_RE.test(trimmed);
+  if (!trimmed) return false;
+
+  if (trimmed.length <= 24 && EXECUTION_CONTINUATION_RE.test(trimmed)) return true;
+
+  const body = stripQuotedReplyPrefix(trimmed);
+  if (!body) return false;
+
+  if (body.length <= 32 && EXECUTION_CONTINUATION_RE.test(body)) return true;
+  if (body.length <= 200 && IMPLEMENTATION_INTENT_RE.test(body)) return true;
+
+  return false;
 }
 
 export function looksLikeModificationPlan(content: string): boolean {

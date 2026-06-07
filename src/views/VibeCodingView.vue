@@ -664,6 +664,7 @@
               <div
                 v-if="m.role === 'assistant' && hasAgentActivity(m)"
                 class="cursor-agent-wrap"
+                :class="{ running: isAgentRunning(m), collapsed: !isAgentRunning(m) && !isActivityExpanded(m) }"
               >
                 <button
                   v-if="!isAgentRunning(m) && !isActivityExpanded(m)"
@@ -682,13 +683,6 @@
                     class="cursor-agent-compact"
                     aria-live="polite"
                   >
-                    <div v-if="cursorCompactThought(m)" class="cursor-thought">
-                      <ChatMarkdown
-                        :content="cursorCompactThought(m)!"
-                        :apply-buttons="false"
-                        :streaming="isAgentRunning(m)"
-                      />
-                    </div>
                     <p class="cursor-compact-summary">{{ cursorCompactExplorationSummary(m) }}</p>
                     <div
                       :ref="(el) => bindStatusLogScroll(el as HTMLElement | null, m.id)"
@@ -869,10 +863,22 @@
                   </button>
                 </div>
               </div>
+              <ChatMarkdown
+                v-if="shouldShowAssistantBubbleContent(m)"
+                class="msg-answer"
+                :class="{
+                  'msg-answer--streaming': m.role === 'assistant' && isAgentRunning(m),
+                  'msg-answer--final': m.role === 'assistant' && !isAgentRunning(m),
+                }"
+                :content="messageDisplayContent(m)"
+                :apply-buttons="m.role === 'assistant'"
+                :streaming="m.role === 'assistant' && !!m.streaming && isAgentRunning(m)"
+                @apply-block="(idx: number) => applyCodeBlock(extractCodeBlocks(messageDisplayContent(m))[idx])"
+              />
               <div
                 v-if="
                   m.role === 'assistant' &&
-                  !m.content &&
+                  !messageDisplayContent(m) &&
                   (m.status || isAgentRunning(m)) &&
                   !(isAgentRunning(m) && hasAgentActivity(m))
                 "
@@ -883,19 +889,6 @@
                   {{ agentStatusDisplay(m) || (m.chatMode === 'ask' ? '思考中…' : 'Agent 运行中…') }}
                 </span>
               </div>
-              <div v-if="m.content && m.streaming && shouldShowAssistantBubbleContent(m)" class="msg-streaming">
-                <ChatMarkdown
-                  :content="m.content"
-                  streaming
-                  @apply-block="(idx: number) => applyCodeBlock(extractCodeBlocks(m.content)[idx])"
-                />
-                <span v-if="isAgentRunning(m)" class="stream-cursor" aria-hidden="true">▍</span>
-              </div>
-              <ChatMarkdown
-                v-else-if="m.content && shouldShowAssistantBubbleContent(m)"
-                :content="m.content"
-                @apply-block="(idx: number) => applyCodeBlock(extractCodeBlocks(m.content)[idx])"
-              />
               <div
                 v-if="m.role === 'assistant' && m.turnFileDiffs && Object.keys(m.turnFileDiffs).length"
                 class="inline-diff-list"
@@ -937,7 +930,7 @@
                 v-if="
                   m.role === 'assistant' &&
                   !m.streaming &&
-                  (m.writtenFiles?.length || extractCodeBlocks(m.content).length)
+                  (m.writtenFiles?.length || extractCodeBlocks(messageDisplayContent(m)).length)
                 "
                 class="msg-actions"
               >
@@ -1152,13 +1145,16 @@ import {
   formatCollapsedStepsSummary,
   formatCursorActionLabel,
   formatExplorationSummary,
-  getLatestFeedThought,
   getRecentFeedActions,
   getRunningFeedAction,
   layoutCursorFeedBlocks,
   shouldUseCompactAgentFeed as shouldUseCompactAgentFeedByCount,
   type CursorFeedBlock,
 } from "../services/agentCursorFeed";
+import {
+  filterDuplicateFeedThoughts,
+  resolveAssistantBubbleContent,
+} from "../services/agentMessageDisplay";
 import { truncatePromptAttachment } from "../utils/truncatePromptAttachment";
 import {
   messagePreviewLength,
@@ -2036,11 +2032,15 @@ function collapseAgentActivity(msg: ChatMessage) {
 
 function cursorAgentFeed(msg: ChatMessage) {
   void agentUiTick.value;
-  return buildCursorAgentFeed({
+  const items = buildCursorAgentFeed({
     groups: agentRoundGroupViews(msg),
     isRunning: isAgentRunning(msg),
     agentPhase: msg.agentPhase,
     agentDetail: msg.agentDetail || msg.status,
+  });
+  const bubble = messageDisplayContent(msg);
+  return filterDuplicateFeedThoughts(items, bubble, {
+    suppressAllWhenBubble: isAgentRunning(msg),
   });
 }
 
@@ -2071,10 +2071,6 @@ function collapseActivityDetailed(msg: ChatMessage) {
   msg.activityDetailed = false;
   patchAssistantMsg(msg.id, { activityDetailed: false });
   schedulePersistChat();
-}
-
-function cursorCompactThought(msg: ChatMessage): string | null {
-  return getLatestFeedThought(cursorAgentFeed(msg));
 }
 
 function cursorCompactExplorationSummary(msg: ChatMessage): string {
@@ -2140,11 +2136,11 @@ function cursorActivitySummary(msg: ChatMessage): string {
   const actions = msg.tools?.length ?? 0;
   const last = msg.tools?.[msg.tools.length - 1];
   if (last && !last.running) {
-    return `${actions} steps · ${formatCursorActionLabel(last)}`;
+    return `查看步骤 · ${actions} 步 · ${formatCursorActionLabel(last)}`;
   }
-  if (actions > 0) return `${actions} steps`;
-  if (msg.totalTurns) return `${msg.totalTurns} turns`;
-  return "Show steps";
+  if (actions > 0) return `查看步骤 · ${actions} 步`;
+  if (msg.totalTurns) return `查看步骤 · ${msg.totalTurns} 轮`;
+  return "查看步骤";
 }
 
 function toggleActivityExpanded(msg: ChatMessage) {
@@ -2234,8 +2230,12 @@ function roundGroupSetupLabel(group: AgentRoundGroupView): string {
 }
 
 function shouldShowAssistantBubbleContent(msg: ChatMessage): boolean {
-  if (!msg.content?.trim()) return false;
-  return !isAgentRunning(msg);
+  return Boolean(messageDisplayContent(msg));
+}
+
+function messageDisplayContent(msg: ChatMessage): string {
+  if (msg.role === "user") return msg.content?.trim() || "";
+  return resolveAssistantBubbleContent(msg);
 }
 
 function isActiveModelStep(msg: ChatMessage, group: AgentRoundGroupView, step: { phase: string }): boolean {
@@ -4487,12 +4487,8 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage) {
     assistantMsg.activityExpanded = false;
     assistantMsg.activityDetailed = false;
     if (!assistantMsg.content?.trim()) {
-      const lastResponse = assistantMsg.roundGroups
-        ?.filter((group) => group.response?.isFinal && group.response.assistantText.trim())
-        .at(-1)?.response;
-      if (lastResponse?.assistantText) {
-        assistantMsg.content = lastResponse.assistantText;
-      }
+      const resolved = resolveAssistantBubbleContent(assistantMsg);
+      if (resolved) assistantMsg.content = resolved;
     }
     patchAssistantMsg(msgId, {
       status: "",
@@ -6231,6 +6227,36 @@ button.ghost.danger:hover:not(:disabled) {
   min-width: 0;
 }
 
+.msg-answer {
+  margin: 0;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.msg-answer--final,
+.msg-answer--streaming {
+  margin-top: 8px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.msg-answer--streaming {
+  border-color: rgba(145, 190, 255, 0.22);
+  background: rgba(31, 111, 235, 0.06);
+}
+
+.msg-answer--final :deep(.msg-markdown) {
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.msg-answer--streaming :deep(.msg-markdown) {
+  font-size: 13px;
+  line-height: 1.65;
+}
+
 .msg-streaming {
   margin: 0;
   padding: 0;
@@ -7322,7 +7348,25 @@ button.compact {
 }
 
 .cursor-agent-wrap {
-  margin: 2px 0 8px;
+  margin: 0 0 4px;
+}
+
+.cursor-agent-wrap.collapsed {
+  margin-bottom: 0;
+}
+
+.cursor-agent-wrap.running {
+  margin-bottom: 2px;
+}
+
+.cursor-agent-wrap.running .cursor-agent-compact,
+.cursor-agent-wrap.running .cursor-agent-feed {
+  max-height: min(22vh, 160px);
+  padding: 6px 10px;
+}
+
+.cursor-agent-wrap.running .cursor-thought {
+  display: none;
 }
 
 .cursor-agent-compact {
@@ -7560,18 +7604,22 @@ button.compact {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin: 0 0 6px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.45);
-  font-size: 12px;
+  margin: 0 0 4px;
+  padding: 3px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(255, 255, 255, 0.48);
+  font-size: 11px;
   cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
 }
 
 .cursor-activity-toggle:hover,
 .cursor-activity-collapse:hover {
-  color: rgba(255, 255, 255, 0.72);
+  color: rgba(255, 255, 255, 0.78);
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .cursor-debug-panel {
