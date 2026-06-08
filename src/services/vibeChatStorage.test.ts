@@ -181,6 +181,31 @@ describe("sanitizePersistedChatMessages", () => {
     expect(sanitized[0].imageDataUrls?.[0]).toBe(dataUrl);
     expect(sanitized[0].content).toBe("看这张图");
   });
+
+  it("forDisk payload retains imageDataUrls for server externalize", () => {
+    const dataUrl = `data:image/png;base64,${"a".repeat(1000)}`;
+    const sanitized = sanitizePersistedChatMessages(
+      [{ id: "u1", role: "user", content: "看这张图", imageDataUrls: [dataUrl] }],
+      { forDisk: true },
+    );
+    expect(sanitized[0].imageDataUrls?.[0]).toBe(dataUrl);
+    expect(sanitized[0].imageCount).toBe(1);
+  });
+
+  it("drops turnFileDiffs after approval completes", () => {
+    const sanitized = sanitizePersistedChatMessages([
+      {
+        id: "a1",
+        role: "assistant",
+        content: "done",
+        writtenFiles: ["src/a.ts"],
+        turnFileDiffs: {
+          "src/a.ts": { before: "a", after: "b" },
+        },
+      },
+    ]);
+    expect(sanitized[0].turnFileDiffs).toBeUndefined();
+  });
 });
 
 describe("v3 chat storage (index + memory)", () => {

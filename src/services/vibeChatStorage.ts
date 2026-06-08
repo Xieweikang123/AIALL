@@ -1,3 +1,8 @@
+export type PersistedImageRef = {
+  /** Relative to `.aiall/vibe-chat-sessions/` (e.g. images/{sessionId}/{messageId}-0.png) */
+  path: string;
+};
+
 export type PersistedFileDiff = {
   before: string;
   after: string;
@@ -52,8 +57,10 @@ export type PersistedChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
-  /** Kept in memory / on disk; never written to localStorage index. */
+  /** In-memory preview; stripped on disk after externalize. */
   imageDataUrls?: string[];
+  /** On-disk image paths under `.aiall/vibe-chat-sessions/`. */
+  imageRefs?: PersistedImageRef[];
   imageCount?: number;
   chatMode?: "ask" | "build";
   tools?: Array<{
@@ -213,6 +220,19 @@ function summarizeToolsForHistory(
   return lines.length ? `\n\n[工具摘要]\n${lines.join("\n")}` : "";
 }
 
+/** Most recent user message that has stored image refs (for follow-up runs without a new attachment). */
+export function findRecentUserImageRefs(
+  messages: Array<Pick<PersistedChatMessage, "role" | "imageRefs" | "imageDataUrls">>,
+): PersistedImageRef[] {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (m.role !== "user") continue;
+    if (m.imageRefs?.length) return [...m.imageRefs];
+    if (m.imageDataUrls?.length) return [];
+  }
+  return [];
+}
+
 export function buildAgentHistoryFromMessages(
   messages: AgentHistorySourceMessage[],
 ): Array<{ role: "user" | "assistant"; content: string }> {
@@ -220,6 +240,13 @@ export function buildAgentHistoryFromMessages(
     .map((m) => {
       if (m.role !== "user" && m.role !== "assistant") return null;
       let content = m.role === "user" ? stripReferenceAttachments(m.content) : m.content.trim();
+      if (m.role === "user") {
+        const imageHint = m.imageRefs?.length || m.imageCount;
+        if (imageHint) {
+          const n = m.imageRefs?.length ?? m.imageCount ?? 0;
+          content = `${content}\n[该条用户消息附 ${n} 张截图]`.trim();
+        }
+      }
       if (m.role === "assistant") {
         content = stripToolSummaryFromAssistantContent(content);
         content = `${content}${summarizeToolsForHistory(m.tools)}`.trim();
@@ -323,6 +350,7 @@ function sanitizeMessages(
         m.role === "user" ||
         m.content.trim() ||
         (m.imageDataUrls?.length ?? 0) > 0 ||
+        (m.imageRefs?.length ?? 0) > 0 ||
         (m.imageCount ?? 0) > 0 ||
         (m.tools?.length ?? 0) > 0 ||
         m.agentRecoverable,
@@ -330,7 +358,14 @@ function sanitizeMessages(
     .slice(-MAX_MESSAGES_PER_SESSION)
     .map((m) => {
       const compactImages =
-        m.role === "user" ? compactImageDataUrls(m.imageDataUrls, options) : undefined;
+        m.role === "user" && !options?.forDisk
+          ? compactImageDataUrls(m.imageDataUrls, options)
+          : undefined;
+      const imageCount =
+        m.imageRefs?.length ||
+        m.imageCount ||
+        m.imageDataUrls?.length ||
+        undefined;
       return {
         id: m.id,
         role: m.role,
@@ -361,16 +396,7 @@ function sanitizeMessages(
         totalTurns: m.totalTurns,
         writtenFiles: m.writtenFiles?.length ? [...m.writtenFiles] : undefined,
         turnFileDiffs:
-          m.pendingApproval && m.turnFileDiffs
-            ? { ...m.turnFileDiffs }
-            : m.writtenFiles?.length && m.turnFileDiffs
-              ? Object.fromEntries(
-                  Object.entries(m.turnFileDiffs).map(([p, d]) => [
-                    p,
-                    { before: d.before, after: d.after, deleted: d.deleted, created: d.created },
-                  ]),
-                )
-              : undefined,
+          m.pendingApproval && m.turnFileDiffs ? { ...m.turnFileDiffs } : undefined,
         pendingApproval: m.pendingApproval || undefined,
         agentAborted: m.agentAborted || undefined,
         agentFailed: m.agentFailed || undefined,
@@ -382,13 +408,21 @@ function sanitizeMessages(
         reverted: m.reverted || undefined,
         activityExpanded: m.activityExpanded || undefined,
         activityDetailed: m.activityDetailed || undefined,
-        ...(compactImages
-          ? { imageDataUrls: compactImages }
-          : m.imageDataUrls?.length
-            ? { imageCount: m.imageDataUrls.length }
-            : m.imageCount
-              ? { imageCount: m.imageCount }
-              : {}),
+        ...(options?.forDisk
+          ? {
+              ...(m.imageRefs?.length ? { imageRefs: m.imageRefs.map((r) => ({ path: r.path })) } : {}),
+              ...(m.imageDataUrls?.length ? { imageDataUrls: [...m.imageDataUrls] } : {}),
+              ...(imageCount ? { imageCount } : {}),
+            }
+          : compactImages
+            ? { imageDataUrls: compactImages, ...(imageCount ? { imageCount } : {}) }
+            : m.imageRefs?.length
+              ? { imageRefs: m.imageRefs.map((r) => ({ path: r.path })), ...(imageCount ? { imageCount } : {}) }
+              : m.imageDataUrls?.length
+                ? { imageCount: m.imageDataUrls.length }
+                : m.imageCount
+                  ? { imageCount: m.imageCount }
+                  : {}),
       };
     });
 }

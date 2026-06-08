@@ -1303,6 +1303,12 @@ import {
   type VibeChatSessionMeta,
 } from "../services/vibeChatStorage";
 import {
+  hydrateChatMessagesImages,
+  hydrateChatMessageImages,
+  resolveImagesForAgentTurn,
+  stampImageRefsAfterSync,
+} from "../services/vibeChatImageStore";
+import {
   isDeleteNotFoundError,
   resolveAgentDoneFileAction,
 } from "../services/vibeAgentTurnApply";
@@ -3117,13 +3123,18 @@ function switchSession(sessionId: string) {
     return;
   }
   persistChatNow();
-  chatMessages.value = normalizeChatMessages(switchVibeChatSession(projectPath.value.trim(), sessionId));
-  activeSessionId.value = sessionId;
-  chatError.value = "";
-  refreshSessionList();
-  closeSessionPicker();
-  maybeAutoResumeLastRecoverableAssistant();
-  void scrollChatToBottom(true);
+  void (async () => {
+    const project = projectPath.value.trim();
+    let messages = switchVibeChatSession(project, sessionId);
+    messages = await hydrateChatMessagesImages(project, messages);
+    chatMessages.value = normalizeChatMessages(messages);
+    activeSessionId.value = sessionId;
+    chatError.value = "";
+    refreshSessionList();
+    closeSessionPicker();
+    maybeAutoResumeLastRecoverableAssistant();
+    await scrollChatToBottom(true);
+  })();
 }
 
 function removeSession(sessionId: string) {
@@ -3226,13 +3237,21 @@ function persistChatNow(path = projectPath.value.trim()) {
   const result = saveVibeChatHistory(path, chatMessages.value, activeSessionId.value);
   if (result.sessionId) activeSessionId.value = result.sessionId;
   refreshSessionList(path);
-  if (result.sessionId) {
-    const snapshot = getActiveSessionSnapshot(path, result.sessionId);
-    if (snapshot) {
-      void syncChatSession(path, result.sessionId, snapshot);
+  const sessionId = result.sessionId;
+  void (async () => {
+    if (sessionId) {
+      const snapshot = getActiveSessionSnapshot(path, sessionId);
+      if (snapshot) {
+        await syncChatSession(path, sessionId, snapshot);
+        if (activeSessionId.value === sessionId && projectPath.value.trim() === path) {
+          chatMessages.value = normalizeChatMessages(
+            stampImageRefsAfterSync(sessionId, chatMessages.value),
+          );
+        }
+      }
     }
-  }
-  scheduleSyncChatStore(path);
+    scheduleSyncChatStore(path);
+  })();
   if (isEmptyDraft) activeSessionId.value = "";
 }
 
@@ -3348,7 +3367,9 @@ async function openProjectByPath(dirPath: string) {
         }
       }
     }
-    chatMessages.value = normalizeChatMessages(loadVibeChatHistory(normalized));
+    let loaded = loadVibeChatHistory(normalized);
+    loaded = await hydrateChatMessagesImages(normalized, loaded);
+    chatMessages.value = normalizeChatMessages(loaded);
     activeSessionId.value = getActiveVibeChatSessionId(normalized);
     refreshSessionList(normalized);
     scheduleSyncChatStore(normalized);
@@ -5640,8 +5661,12 @@ async function resendFromMessage(messageId: string) {
 
   const userMsg = chatMessages.value[userIdx];
   const userText = stripReferenceAttachments(userMsg.content).trim();
-  const imageDataUrls = userMsg.imageDataUrls?.filter(Boolean);
-  if (!userText && !imageDataUrls?.length) return;
+  const project = projectPath.value.trim();
+  const hydratedUrls = await hydrateChatMessageImages(project, userMsg);
+  const imageDataUrls = userMsg.imageDataUrls?.filter(Boolean)?.length
+    ? userMsg.imageDataUrls.filter(Boolean)
+    : hydratedUrls;
+  if (!userText && !imageDataUrls.length) return;
 
   chatMessages.value = chatMessages.value.slice(0, userIdx);
   chatError.value = "";
@@ -5797,8 +5822,12 @@ async function runAgentTurn(
   },
 ) {
   const rawPrompt = userText.trim();
-  const compressedImages = options?.imageDataUrls?.length
-    ? await compressImageDataUrlsForAgent(options.imageDataUrls)
+  const project = projectPath.value.trim();
+  const imageSources = options?.imageDataUrls?.length
+    ? options.imageDataUrls
+    : await resolveImagesForAgentTurn(project, chatMessages.value);
+  const compressedImages = imageSources.length
+    ? await compressImageDataUrlsForAgent(imageSources)
     : undefined;
   const hasImages = Boolean(compressedImages?.length);
   if ((!rawPrompt && !hasImages) || !configReady.value || !projectOpened.value) return;
@@ -5964,7 +5993,17 @@ async function sendChat() {
   }
 
   if (chatSending.value) {
-    interruptAgentRun();
+    chatMessages.value.push({
+      id: genId(),
+      role: "user",
+      content: userText || (imageDataUrls.length ? "（附图）" : ""),
+      imageDataUrls: imageDataUrls.length ? [...imageDataUrls] : undefined,
+    });
+    pendingPromptQueue.value.push(fullPrompt);
+    persistPendingQueue();
+    persistChatNow();
+    void scrollChatToBottom(true);
+    return;
   }
 
   await runAgentTurn(fullPrompt, {

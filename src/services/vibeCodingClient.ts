@@ -157,6 +157,29 @@ export async function syncChatSession(projectPath: string, sessionId: string, da
   }
 }
 
+export async function fetchChatImageDataUrl(
+  projectPath: string,
+  refPath: string,
+): Promise<{ ok: true; dataUrl: string } | { ok: false; error?: string }> {
+  try {
+    const qs = new URLSearchParams({
+      projectPath,
+      path: refPath,
+    });
+    const response = await fetch(backendUrl(`/backend/vibe/chat-image?${qs.toString()}`));
+    if (!response.ok) {
+      return { ok: false, error: `HTTP ${response.status}` };
+    }
+    const data = await readJsonResponse<{ ok?: boolean; dataUrl?: string; error?: string }>(response);
+    if (!data.ok || !data.dataUrl) {
+      return { ok: false, error: data.error || "读取图片失败" };
+    }
+    return { ok: true, dataUrl: data.dataUrl };
+  } catch (error) {
+    return { ok: false, error: formatFetchError(error, "读取图片失败") };
+  }
+}
+
 export type ChatStoreLoadResult =
   | { ok: true; data: import("./vibeChatStorage").VibeChatProjectSnapshot }
   | { ok: false; error: string };

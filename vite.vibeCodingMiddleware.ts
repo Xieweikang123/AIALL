@@ -17,6 +17,7 @@ import {
   writeFileContent,
 } from "./server/vibeFs";
 import { gitStatus, gitDiff, gitDiffFile, gitDiffContent, gitCommitFileDiff, gitCommit, gitLog, gitIsRepo, gitAdd, gitReset, gitDiscard, gitDiscardAll, gitRemotes, gitFetch, gitPull, gitPush, gitStashList, gitStashSave, gitStashPop, gitStashApply, gitStashDrop } from "./server/vibeGit";
+import { externalizeSessionPayload, readImageRefAsDataUrl } from "./server/vibeChatImages";
 
 const execFileAsync = promisify(execFile);
 
@@ -308,6 +309,37 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
     }
   });
 
+  // GET /backend/vibe/chat-image
+  middlewares.use("/backend/vibe/chat-image", async (req, res) => {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { ok: false, error: "仅支持 GET 请求" });
+      return;
+    }
+
+    try {
+      const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+      const projectPath = (url.searchParams.get("projectPath") || "").trim();
+      const relPath = (url.searchParams.get("path") || "").trim();
+      if (!projectPath || !relPath) {
+        sendJson(res, 400, { ok: false, error: "缺少 projectPath 或 path" });
+        return;
+      }
+
+      const chatDir = path.join(path.resolve(projectPath), ".aiall", "vibe-chat-sessions");
+      const dataUrl = await readImageRefAsDataUrl(chatDir, relPath);
+      if (!dataUrl) {
+        sendJson(res, 404, { ok: false, error: "图片不存在" });
+        return;
+      }
+      sendJson(res, 200, { ok: true, dataUrl });
+    } catch (error) {
+      sendJson(res, 500, {
+        ok: false,
+        error: error instanceof Error ? error.message : "读取图片失败",
+      });
+    }
+  });
+
   // POST /backend/vibe/chat-store-sync
   middlewares.use("/backend/vibe/chat-store-sync", async (req, res) => {
     if (req.method !== "POST") {
@@ -371,21 +403,14 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         const id = (session.id || "").trim();
         if (!id) continue;
         const sessionFile = path.join(chatDir, `chat-${safeFilePart(id)}.json`);
-        await fs.promises.writeFile(
-          sessionFile,
-          JSON.stringify(
-            {
-              id,
-              title: session.title || "新会话",
-              createdAt: session.createdAt || "",
-              updatedAt: session.updatedAt || "",
-              messages: Array.isArray(session.messages) ? session.messages : [],
-            },
-            null,
-            2,
-          ),
-          "utf-8",
-        );
+        const sessionPayload = await externalizeSessionPayload(chatDir, id, {
+          id,
+          title: session.title || "新会话",
+          createdAt: session.createdAt || "",
+          updatedAt: session.updatedAt || "",
+          messages: Array.isArray(session.messages) ? session.messages : [],
+        });
+        await fs.promises.writeFile(sessionFile, JSON.stringify(sessionPayload, null, 2), "utf-8");
       }
       debugLog(`chat-store-sync done, path=${chatDir}`);
       sendJson(res, 200, { ok: true, path: chatDir, sessionCount: sessions.length });
@@ -416,7 +441,11 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       await fs.promises.mkdir(chatDir, { recursive: true });
       const safeId = safeFilePart(sessionId);
       const sessionFile = path.join(chatDir, `chat-${safeId}.json`);
-      await fs.promises.writeFile(sessionFile, JSON.stringify(body.data, null, 2), "utf-8");
+      const payload =
+        body.data && typeof body.data === "object"
+          ? await externalizeSessionPayload(chatDir, sessionId, body.data as { messages?: unknown[] })
+          : body.data;
+      await fs.promises.writeFile(sessionFile, JSON.stringify(payload, null, 2), "utf-8");
       sendJson(res, 200, { ok: true });
     } catch (error) {
       sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "写入会话文件失败" });
