@@ -39,6 +39,14 @@ describe("resolveAssistantBubbleContent", () => {
       }),
     ).toBe("## 总结\n表格");
   });
+
+  it("strips leaked tool summaries from bubble content", () => {
+    expect(
+      resolveAssistantBubbleContent({
+        content: "已完成修改。\n\n[工具摘要]\n- 读取文件: 读取 20 行内容",
+      }),
+    ).toBe("已完成修改。");
+  });
 });
 
 describe("finalizeAssistantBubbleContent", () => {

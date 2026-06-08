@@ -1049,15 +1049,7 @@
                 >
                   已写入 {{ m.writtenFiles.length }} 个文件
                 </span>
-                <button
-                  v-if="m.writtenFiles?.length && m.turnFileDiffs && !m.reverted && !m.rejected"
-                  type="button"
-                  class="ghost danger"
-                  :disabled="!projectOpened || chatSending || m.reverting"
-                  @click="revertAgentTurn(m.id, $event)"
-                >
-                  {{ m.reverting ? "回滚中…" : `回滚本轮修改（${m.writtenFiles.length} 个文件）` }}
-                </button>
+
                 <span v-else-if="m.reverted" class="reverted-badge">已回滚</span>
                 <span v-else-if="m.rejected" class="rejected-badge">已拒绝</span>
               </div>
@@ -1243,6 +1235,7 @@ import { useConfirm } from "../composables/useConfirm";
 import { useInputPrompt } from "../composables/useInputPrompt";
 import {
   buildAgentPromptForProfile,
+  enrichAgentUserPrompt,
   resolveAgentMaxTurns,
   resolveAgentResumeRunProfile,
   resolveResumeMaxTurns,
@@ -1250,9 +1243,12 @@ import {
   shapeAgentHistoryForProfile,
 } from "../services/agentRunProfile";
 import {
+  AGENT_SILENT_CONTINUE_DELAY_MS,
+  AGENT_SILENT_CONTINUE_MAX,
   agentStallRecoveryReason,
   buildAgentMaxTurnsExhaustedMessage,
   buildAgentResumePrompt,
+  buildSilentContinueStatusLog,
   canResumeAgentRun,
   hasRecoverableAgentProgress,
   inferAgentRecoveryFlags,
@@ -1262,7 +1258,7 @@ import {
   recoverableAgentErrorHint,
   resolveAgentCompletedTurns,
   resolveAgentFailureBubbleContent,
-  shouldAutoResumeAgentError,
+  shouldSilentAutoContinue,
   resolveAutoResumeSeconds,
 } from "../services/agentRecovery";
 import { loadAiChatBaseFromStorage } from "../services/aiLocalConfig";
@@ -1280,6 +1276,7 @@ import {
   restoreChatStoreFromSnapshot,
   saveVibeChatHistory,
   stripReferenceAttachments,
+  stripToolSummaryFromAssistantContent,
   switchVibeChatSession,
   type PersistedChatMessage,
   type VibeChatSessionMeta,
@@ -2046,6 +2043,8 @@ function phaseBadgeLabel(phase?: string): string {
       return "工具";
     case "summarizing_tools":
       return "整理";
+    case "continuing":
+      return "续跑";
     case "aborted":
       return "停止";
     default:
@@ -2130,6 +2129,7 @@ function formatAgentStatus(data: AgentStatusData, compact = false): string {
   }
   if (phase === "executing_tools") return "正在执行工具调用…";
   if (phase === "summarizing_tools") return "正在整理工具结果，准备下一轮推理…";
+  if (phase === "continuing") return appendStatusDetail("任务较长，自动续跑下一段…", detail);
   if (phase === "finished") return "";
   if (phase === "aborted") return "已停止运行";
   return "";
@@ -2165,9 +2165,7 @@ function cancelAutoResume() {
   autoResumeTargetId.value = "";
 }
 
-function scheduleAutoResume(assistantMsgId: string, errorMessage = "") {
-  cancelAutoResume();
-  if (!assistantMsgId || chatSending.value || !configReady.value || !projectOpened.value) return;
+function startAutoResumeCountdown(assistantMsgId: string, errorMessage: string) {
   const msg = chatMessages.value.find((m) => m.id === assistantMsgId);
   if (!msg || !canResumeAgentRun(msg)) return;
 
@@ -2184,6 +2182,84 @@ function scheduleAutoResume(assistantMsgId: string, errorMessage = "") {
     }
     autoResumeSecondsLeft.value -= 1;
   }, 1000);
+}
+
+function scheduleAutoResume(assistantMsgId: string, errorMessage = "") {
+  cancelAutoResume();
+  if (!assistantMsgId || !configReady.value || !projectOpened.value) return;
+
+  const run = () => {
+    if (!assistantMsgId || chatSending.value || !configReady.value || !projectOpened.value) return;
+    startAutoResumeCountdown(assistantMsgId, errorMessage);
+  };
+
+  // error 事件里 applyRecoverableAgentFailure 早于 chatSending=false，需延后一拍再倒计时
+  if (chatSending.value) {
+    queueMicrotask(run);
+    return;
+  }
+  run();
+}
+
+function maybeAutoResumeLastRecoverableAssistant() {
+  if (chatSending.value || !configReady.value || !projectOpened.value) return;
+  for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
+    const m = chatMessages.value[i]!;
+    if (m.role === "assistant" && canResumeAgentRun(m)) {
+      const reason = m.agentFailureReason || "";
+      if (reason && shouldSilentAutoContinue(reason)) {
+        trySilentContinue(m, reason);
+      }
+      return;
+    }
+  }
+}
+
+function prepareAssistantForSilentContinue(assistantMsg: ChatMessage) {
+  for (const tool of assistantMsg.tools || []) {
+    if (tool.running) tool.running = false;
+  }
+  assistantMsg.streaming = false;
+  assistantMsg.agentPhase = undefined;
+  assistantMsg.status = "";
+}
+
+function trySilentContinue(assistantMsg: ChatMessage, reason: string): boolean {
+  if (!shouldSilentAutoContinue(reason)) return false;
+  const count = assistantMsg.agentContinueCount ?? 0;
+  if (count >= AGENT_SILENT_CONTINUE_MAX) return false;
+  if (!configReady.value || !projectOpened.value) return false;
+  if (!resolveOriginalUserPrompt(assistantMsg.id)) return false;
+
+  prepareAssistantForSilentContinue(assistantMsg);
+  assistantMsg.agentContinueCount = count + 1;
+  chatError.value = "";
+  appendStatusLog(assistantMsg, buildSilentContinueStatusLog(reason, assistantMsg.agentContinueCount));
+  patchAssistantMsg(assistantMsg.id, {
+    agentContinueCount: assistantMsg.agentContinueCount,
+    streaming: false,
+    agentPhase: undefined,
+    status: "",
+    statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
+    activityExpanded: true,
+    activityDetailed: true,
+    tools: assistantMsg.tools ? [...assistantMsg.tools] : undefined,
+    ...syncRoundGroupsPatch(assistantMsg),
+  });
+
+  window.setTimeout(() => {
+    if (!chatSending.value) void resumeAgentRun(assistantMsg.id, { silent: true });
+  }, AGENT_SILENT_CONTINUE_DELAY_MS);
+  return true;
+}
+
+function handleRecoverableInterruption(
+  assistantMsg: ChatMessage,
+  reason: string,
+  options?: { logStatus?: boolean },
+) {
+  if (trySilentContinue(assistantMsg, reason)) return;
+  applyRecoverableAgentFailure(assistantMsg, reason, options);
 }
 
 function applyRecoverableAgentFailure(
@@ -2228,11 +2304,7 @@ function applyRecoverableAgentFailure(
     ...syncRoundGroupsPatch(assistantMsg),
   });
 
-  if (recoverable && shouldAutoResumeAgentError(message)) {
-    scheduleAutoResume(assistantMsg.id, message);
-  } else {
-    cancelAutoResume();
-  }
+  cancelAutoResume();
 }
 
 function recoverAgentRunFromStall(assistantMsg: ChatMessage, reason: string) {
@@ -2243,12 +2315,7 @@ function recoverAgentRunFromStall(assistantMsg: ChatMessage, reason: string) {
   agentAbortHandle = null;
   agentLastProgressAt = 0;
   chatSending.value = false;
-
-  for (const tool of assistantMsg.tools || []) {
-    if (tool.running) tool.running = false;
-  }
-
-  applyRecoverableAgentFailure(assistantMsg, reason);
+  handleRecoverableInterruption(assistantMsg, reason);
   persistChatNow();
   void scrollChatToBottom();
 }
@@ -2933,6 +3000,7 @@ function switchSession(sessionId: string) {
   chatError.value = "";
   refreshSessionList();
   closeSessionPicker();
+  maybeAutoResumeLastRecoverableAssistant();
   void scrollChatToBottom(true);
 }
 
@@ -3167,6 +3235,7 @@ async function openProjectByPath(dirPath: string) {
     // Start file watcher for automatic Git status updates
     startFileWatcherForProject(normalized);
     syncEditorPanelForOpenFiles();
+    maybeAutoResumeLastRecoverableAssistant();
     await scrollChatToBottom(true);
   } catch (e) {
     projectOpened.value = false;
@@ -4996,12 +5065,13 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
 
   if (event.type === "message") {
     clearStreamDeltaBuffer();
-    assistantMsg.content = event.data.text;
+    const cleanText = stripToolSummaryFromAssistantContent(event.data.text);
+    assistantMsg.content = cleanText;
     assistantMsg.streaming = false;
     assistantMsg.status = "";
     assistantMsg.agentPhase = undefined;
     patchAssistantMsg(msgId, {
-      content: event.data.text,
+      content: cleanText,
       streaming: false,
       status: "",
       agentPhase: undefined,
@@ -5015,10 +5085,15 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
     clearStreamDeltaBuffer();
     stopAgentUiTick();
     agentLastProgressAt = 0;
+    chatSending.value = false;
+    if (trySilentContinue(assistantMsg, event.data.message)) {
+      persistChatNow();
+      void scrollChatToBottom();
+      return;
+    }
     applyRecoverableAgentFailure(assistantMsg, event.data.message);
     persistChatNow();
     void scrollChatToBottom();
-    chatSending.value = false;
 
     const recoverable = isRecoverableAgentError(event.data.message);
     if (!recoverable && pendingPromptQueue.value.length) {
@@ -5064,7 +5139,20 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
       isAgentMaxTurnsExhausted(assistantMsg, completedTurns);
 
     if (incompleteRun) {
-      applyRecoverableAgentFailure(assistantMsg, "连接中断（运行未完成）", { logStatus: true });
+      if (trySilentContinue(assistantMsg, "连接中断（运行未完成）")) {
+        if (!assistantMsg.totalTurns) {
+          assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
+        }
+        patchAssistantMsg(msgId, {
+          streaming: false,
+          totalTurns: assistantMsg.totalTurns,
+          ...syncRoundGroupsPatch(assistantMsg),
+        });
+        persistChatNow();
+        void scrollChatToBottom();
+        return;
+      }
+      handleRecoverableInterruption(assistantMsg, "连接中断（运行未完成）", { logStatus: true });
       if (!assistantMsg.totalTurns) {
         assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
       }
@@ -5080,7 +5168,14 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
 
     if (maxTurnsExhausted) {
       const reason = buildAgentMaxTurnsExhaustedMessage(assistantMsg.agentMaxTurns ?? completedTurns);
-      applyRecoverableAgentFailure(assistantMsg, reason, { logStatus: true });
+      if (trySilentContinue(assistantMsg, reason)) {
+        assistantMsg.totalTurns = completedTurns;
+        patchAssistantMsg(msgId, { totalTurns: completedTurns, ...syncRoundGroupsPatch(assistantMsg) });
+        persistChatNow();
+        void scrollChatToBottom();
+        return;
+      }
+      handleRecoverableInterruption(assistantMsg, reason, { logStatus: true });
       assistantMsg.totalTurns = completedTurns;
       patchAssistantMsg(msgId, { totalTurns: completedTurns, ...syncRoundGroupsPatch(assistantMsg) });
       persistChatNow();
@@ -5111,6 +5206,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
     assistantMsg.agentRecoverable = false;
     assistantMsg.agentFailureReason = undefined;
     assistantMsg.agentRecoveryDismissed = true;
+    assistantMsg.agentContinueCount = undefined;
 
     assistantMsg.status = "";
     assistantMsg.agentPhase = undefined;
@@ -5134,6 +5230,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
       agentRecoverable: undefined,
       agentFailureReason: undefined,
       agentRecoveryDismissed: true,
+      agentContinueCount: undefined,
     });
     persistChatNow();
 
@@ -5463,7 +5560,7 @@ function resolveOriginalUserPrompt(assistantMsgId: string): string {
   return "";
 }
 
-async function resumeAgentRun(assistantMsgId: string) {
+async function resumeAgentRun(assistantMsgId: string, options?: { silent?: boolean }) {
   cancelAutoResume();
   if (chatSending.value || !configReady.value || !projectOpened.value) return;
 
@@ -5471,7 +5568,8 @@ async function resumeAgentRun(assistantMsgId: string) {
   if (assistantIdx < 0) return;
 
   const assistantMsg = chatMessages.value[assistantIdx];
-  if (!canResumeAgentRun(assistantMsg)) return;
+  if (!options?.silent && !canResumeAgentRun(assistantMsg)) return;
+  if (options?.silent && !hasRecoverableAgentProgress(assistantMsg)) return;
 
   const originalPrompt = resolveOriginalUserPrompt(assistantMsgId);
   if (!originalPrompt) return;
@@ -5508,7 +5606,12 @@ async function resumeAgentRun(assistantMsgId: string) {
   assistantMsg.activityDetailed = true;
   assistantMsg.agentPhase = "connecting_local";
   assistantMsg.status = formatAgentStatus({ phase: "connecting_local" });
-  appendStatusLog(assistantMsg, "正在恢复运行…");
+  appendStatusLog(
+    assistantMsg,
+    options?.silent
+      ? `继续执行（自动续跑 ${assistantMsg.agentContinueCount ?? 1}/${AGENT_SILENT_CONTINUE_MAX}）…`
+      : "正在恢复运行…",
+  );
   assistantMsg.roundGroups = recordAgentRoundStatus(
     assistantMsg.roundGroups,
     "connecting_local",
@@ -5580,7 +5683,13 @@ async function runAgentTurn(
     lastAssistantContent: lastAssistant,
     referencedFiles: options?.referencedFiles,
   });
-  const prompt = buildAgentPromptForProfile(rawPrompt, runProfile);
+  const prompt = buildAgentPromptForProfile(
+    enrichAgentUserPrompt(rawPrompt, {
+      lastAssistantContent: lastAssistant,
+      hasImages,
+    }),
+    runProfile,
+  );
 
   reloadAiConfig();
   clearStreamDeltaBuffer();
@@ -6339,14 +6448,17 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 10px 14px;
+  padding: 8px 14px;
   font-size: 14px;
 }
 
 .git-stash-title {
   color: var(--text);
-  font-weight: 500;
-  font-size: 13px;
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.7;
 }
 
 .git-stash-list {
@@ -6358,7 +6470,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 14px;
+  padding: 5px 14px;
   font-size: 13px;
   border-top: 1px solid var(--border);
   transition: background 0.15s ease;
@@ -6371,13 +6483,14 @@ onBeforeUnmount(() => {
 .git-stash-label {
   color: #bb9af7;
   font-family: monospace;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 500;
   flex-shrink: 0;
-  padding: 2px 6px;
-  background: rgba(187, 154, 247, 0.1);
-  border: 1px solid rgba(187, 154, 247, 0.15);
-  border-radius: 4px;
+  padding: 1px 5px;
+  background: rgba(187, 154, 247, 0.08);
+  border: 1px solid rgba(187, 154, 247, 0.12);
+  border-radius: 3px;
+  line-height: 1.4;
 }
 
 .git-stash-msg {
@@ -6392,54 +6505,71 @@ onBeforeUnmount(() => {
 
 .git-stash-actions {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   flex-shrink: 0;
+  opacity: 0.5;
+  transition: opacity 0.2s ease;
+}
+
+.git-stash-item:hover .git-stash-actions {
+  opacity: 1;
 }
 
 .git-stash-empty {
-  padding: 6px 14px 10px;
+  padding: 4px 14px 8px;
   font-size: 12px;
   color: var(--text-dim);
-  opacity: 0.6;
+  opacity: 0.4;
+  font-style: italic;
 }
 
 .git-error {
-  padding: 8px 14px;
-  font-size: 13px;
+  padding: 6px 14px;
+  font-size: 12px;
   color: #f7768e;
-  background: rgba(247, 118, 142, 0.1);
+  background: rgba(247, 118, 142, 0.08);
   border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.git-error::before {
+  content: '⚠';
+  font-size: 12px;
+  flex-shrink: 0;
 }
 
 .git-commit-box {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.02);
+  padding: 8px 14px 10px;
+  border-top: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.015);
 }
 
 .git-commit-input {
   width: 100%;
-  padding: 9px 11px;
+  padding: 8px 10px;
   font-size: 13px;
   line-height: 1.45;
   font-family: inherit;
   resize: vertical;
-  min-height: 56px;
+  min-height: 48px;
   max-height: 120px;
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--text);
   outline: none;
-  transition: border-color 180ms ease;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
   box-sizing: border-box;
 }
 
 .git-commit-input:focus {
   border-color: rgba(31, 111, 235, 0.5);
+  box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.1);
 }
 
 .git-commit-input::placeholder {
@@ -6454,6 +6584,7 @@ onBeforeUnmount(() => {
 .git-commit-actions button {
   flex: 1;
   min-width: 0;
+  font-weight: 500;
 }
 
 .git-ai-push {
@@ -6480,29 +6611,30 @@ onBeforeUnmount(() => {
 .git-file-list {
   flex: 1;
   overflow-y: auto;
-  padding: 4px 0;
+  padding: 2px 0;
 }
 
 .git-file-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 14px;
+  padding: 6px 14px;
   cursor: pointer;
   transition: background 120ms ease;
   min-width: 0;
 }
 
 .git-file-item:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .git-file-status {
   font-family: monospace;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 700;
   width: 14px;
   text-align: center;
+  flex-shrink: 0;
 }
 
 .git-file-path {
@@ -6607,12 +6739,13 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 14px;
-  background: rgba(255, 255, 255, 0.03);
+  padding: 6px 14px;
+  background: rgba(255, 255, 255, 0.025);
   position: sticky;
   top: 0;
   z-index: 2;
   backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
 }
 
 .git-section-toggle {
@@ -8048,8 +8181,8 @@ button.primary.small {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  margin-top: 10px;
-  padding-top: 10px;
+  margin-top: 8px;
+  padding-top: 8px;
   border-top: 1px solid var(--border);
 }
 
@@ -8096,6 +8229,12 @@ button.primary.small {
   border-radius: 6px;
   background: rgba(126, 231, 135, 0.1);
   border: 1px solid rgba(126, 231, 135, 0.28);
+  animation: applied-fade-out 0.6s ease 3s forwards;
+}
+
+@keyframes applied-fade-out {
+  from { opacity: 1; max-width: 200px; padding: 3px 10px; margin: 0; }
+  to   { opacity: 0; max-width: 0; padding: 3px 0; margin: 0; border-width: 0; overflow: hidden; }
 }
 
 button.primary.small-action {

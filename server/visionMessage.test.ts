@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildModelIdentityHint,
+  buildUiScopeFollowUpHint,
   buildVisionTaskText,
   buildVisionUserContent,
   contentCharSize,
@@ -32,6 +33,48 @@ describe("visionMessage", () => {
     const text = buildVisionTaskText("你知道截图的是哪块内容吗？", 1);
     expect(text).toContain("附图为本消息重点");
     expect(text).toContain("不要跳过读图");
+  });
+
+  it("buildVisionTaskText scopes narrow UI color questions to visible region", () => {
+    const text = buildVisionTaskText("看到按钮配色了吗，有几种颜色", 1);
+    expect(text).toContain("附图为本消息重点");
+    expect(text).toContain("讨论时");
+    expect(text).toContain("勿擅自扩大");
+  });
+
+  it("buildVisionTaskText allows scoped implementation with images", () => {
+    const text = buildVisionTaskText("帮我把 diff 区这几条按钮配色精简一下", 1);
+    expect(text).toContain("实施时");
+    expect(text).toContain("grep/read");
+  });
+
+  it("buildUiScopeFollowUpHint keeps opinion follow-up on prior screenshot scope", () => {
+    const prior =
+      "## 截图中的按钮配色\n\n从截图可以看到 3 种颜色的按钮……你是想调整这些按钮的配色方案吗？";
+    const hint = buildUiScopeFollowUpHint("配色感觉有点多了，是吗", prior);
+    expect(hint).toContain("延续上一轮截图范围·讨论");
+    expect(hint).toContain("勿全盘盘点");
+    expect(hint).toContain("配色感觉有点多了");
+  });
+
+  it("buildUiScopeFollowUpHint allows scoped implementation follow-up", () => {
+    const prior = "## 截图中的按钮配色\n\n从截图可以看到 diff 区有 4 种颜色的按钮。";
+    const hint = buildUiScopeFollowUpHint("对，帮我精简一下这几条按钮的配色", prior);
+    expect(hint).toContain("延续上一轮截图范围·实施");
+    expect(hint).toContain("grep/read");
+    expect(hint).not.toContain("勿全盘盘点");
+  });
+
+  it("buildUiScopeFollowUpHint respects explicit expand intent", () => {
+    const prior = "## 截图中的按钮配色\n\n从截图可以看到 diff 区按钮。";
+    const hint = buildUiScopeFollowUpHint("帮我把整个 Git 面板配色统一一下", prior);
+    expect(hint).toContain("延续上一轮截图范围·实施");
+    expect(hint).toContain("扩大改动范围");
+  });
+
+  it("buildUiScopeFollowUpHint skips unrelated follow-ups", () => {
+    const prior = "## 修改完成\n\n已写入 a.ts";
+    expect(buildUiScopeFollowUpHint("配色感觉有点多了", prior)).toBe("配色感觉有点多了");
   });
 
   it("buildModelIdentityHint uses configured model id", () => {

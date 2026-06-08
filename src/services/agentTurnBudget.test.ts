@@ -5,6 +5,7 @@ import {
   EXECUTE_PLAN_MAX_TURNS,
   INTERACTIVE_BUILD_MAX_TURNS,
   RESUME_MAX_TURNS_CAP,
+  extendSegmentMaxTurns,
   resolveAgentMaxTurns,
   resolveResumeMaxTurns,
 } from "../../server/agentTurnBudget";
@@ -47,5 +48,12 @@ describe("resolveResumeMaxTurns", () => {
   it("never exceeds resume cap or safety ceiling", () => {
     expect(resolveResumeMaxTurns("build", undefined, 100)).toBe(RESUME_MAX_TURNS_CAP);
     expect(RESUME_MAX_TURNS_CAP).toBeLessThanOrEqual(AGENT_SAFETY_MAX_TURNS);
+  });
+});
+
+describe("extendSegmentMaxTurns", () => {
+  it("extends within the safety ceiling", () => {
+    expect(extendSegmentMaxTurns(20, EXECUTE_PLAN_MAX_TURNS)).toBe(40);
+    expect(extendSegmentMaxTurns(190, INTERACTIVE_BUILD_MAX_TURNS)).toBe(AGENT_SAFETY_MAX_TURNS);
   });
 });

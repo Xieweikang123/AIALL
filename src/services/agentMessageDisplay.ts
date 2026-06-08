@@ -1,5 +1,6 @@
 import type { AgentRoundGroup } from "./agentRoundGroups";
 import type { CursorFeedItem } from "./agentCursorFeed";
+import { stripToolSummaryFromAssistantContent } from "./vibeChatStorage";
 
 export type AssistantBubbleSource = {
   content?: string;
@@ -16,17 +17,18 @@ export type FinalizeAssistantBubbleSource = AssistantBubbleSource & {
 /** Resolve the text shown in the assistant chat bubble (with fallbacks for agent runs). */
 export function resolveAssistantBubbleContent(msg: AssistantBubbleSource): string {
   const direct = msg.content?.trim();
-  if (direct) return direct;
+  if (direct) return stripToolSummaryFromAssistantContent(direct);
 
   const fromFinal = msg.roundGroups
     ?.filter((group) => group.response?.isFinal && group.response.assistantText.trim())
     .at(-1)?.response?.assistantText.trim();
-  if (fromFinal) return fromFinal;
+  if (fromFinal) return stripToolSummaryFromAssistantContent(fromFinal);
 
   const narratives = msg.roundGroups?.map((group) => group.narrative?.trim()).filter(Boolean) ?? [];
-  if (narratives.length) return narratives[narratives.length - 1]!;
+  if (narratives.length) return stripToolSummaryFromAssistantContent(narratives[narratives.length - 1]!);
 
-  return msg.turnTraces?.at(-1)?.assistantText.trim() || "";
+  const trace = msg.turnTraces?.at(-1)?.assistantText.trim() || "";
+  return stripToolSummaryFromAssistantContent(trace);
 }
 
 function resolveFinalAssistantText(msg: AssistantBubbleSource): string {

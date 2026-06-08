@@ -60,6 +60,12 @@ export const AGENT_AUTO_RESUME_SECONDS = 5;
 /** Shorter delay for obvious transport blips (Failed to fetch / network error). */
 export const AGENT_AUTO_RESUME_IMMEDIATE_SECONDS = 2;
 
+/** Max silent client-side continuations after transport interruption (per assistant message). */
+export const AGENT_SILENT_CONTINUE_MAX = 8;
+
+/** Brief backoff before chaining the next SSE segment on the client. */
+export const AGENT_SILENT_CONTINUE_DELAY_MS = 400;
+
 /** Pick auto-resume countdown from the failure message. */
 export function resolveAutoResumeSeconds(errorMessage: string): number {
   const msg = errorMessage.trim().toLowerCase();
@@ -107,11 +113,19 @@ export function isRecoverableAgentError(message: string): boolean {
   );
 }
 
-/** Auto-resume after disconnect; excludes turn-cap exhaustion (user may want to review first). */
+/** Auto-resume after disconnect; prefer silent continuation in the UI layer. */
 export function shouldAutoResumeAgentError(message: string): boolean {
-  if (!isRecoverableAgentError(message)) return false;
-  const msg = message.trim().toLowerCase();
-  return !msg.includes("已达最大轮次");
+  return shouldSilentAutoContinue(message);
+}
+
+/** Whether the client should chain another SSE segment without asking the user. */
+export function shouldSilentAutoContinue(message: string): boolean {
+  return isRecoverableAgentError(message);
+}
+
+export function buildSilentContinueStatusLog(reason: string, attempt: number): string {
+  const detail = reason.trim() || "连接中断";
+  return `自动续跑（第 ${attempt} 次）：${detail}`;
 }
 
 export function hasRecoverableAgentProgress(msg: AgentProgressSource): boolean {
@@ -301,7 +315,7 @@ export function buildAgentResumePrompt(
 ): string {
   const progress = summarizeAgentProgress(msg);
   return [
-    "【恢复运行】上次 Agent 运行因连接中断而停止。请从断点继续完成原始任务，不要重复已完成的工具步骤或已写入的修改。",
+    "【自动续跑】上次运行因连接中断而暂停。请从断点继续完成原始任务，不要重复已完成的工具步骤或已写入的修改。",
     "【效率】你已探索足够：禁止重复上述 grep/read；直接 patch_file/write_file 完成剩余改动；最多 1 次 grep 定位遗漏。",
     `中断原因：${errorMessage.trim()}`,
     "",
@@ -327,10 +341,9 @@ export function canResumeAgentRun(msg: AgentProgressSource & {
 export function recoverableAgentErrorHint(msg: AgentProgressSource, errorMessage: string): string {
   const turns = resolveAgentCompletedTurns(msg);
   const toolCount = msg.tools?.filter((t) => !t.running).length ?? 0;
-  const parts = [`Agent 因网络中断停止`];
-  if (turns > 0) parts.push(`（已完成 ${turns} 轮`);
-  if (toolCount > 0) parts.push(`${turns > 0 ? "，" : "（"}${toolCount} 个工具步骤`);
-  if (turns > 0 || toolCount > 0) parts.push("）");
-  parts.push(`：${errorMessage.trim()}。可点击「恢复运行」继续。`);
-  return parts.join("");
+  const progress =
+    turns > 0 || toolCount > 0
+      ? `（已完成 ${turns} 轮${toolCount > 0 ? `，${toolCount} 个工具步骤` : ""}）`
+      : "";
+  return `Agent 自动续跑后仍未能完成${progress}：${errorMessage.trim()}。可点击「恢复运行」重试。`;
 }

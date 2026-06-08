@@ -1,3 +1,4 @@
+import { buildUiScopeFollowUpHint } from "../../server/visionMessage";
 import {
   compressHistoryForExecution,
   extractPlanFilePaths,
@@ -79,6 +80,14 @@ export function resolveAgentRunProfile(input: ResolveAgentRunProfileInput): Agen
   }
 
   return { kind: "interactive" };
+}
+
+export function enrichAgentUserPrompt(
+  prompt: string,
+  options?: { lastAssistantContent?: string; hasImages?: boolean },
+): string {
+  if (options?.hasImages) return prompt;
+  return buildUiScopeFollowUpHint(prompt, options?.lastAssistantContent);
 }
 
 export function buildAgentPromptForProfile(prompt: string, profile: AgentRunProfile): string {

@@ -5,6 +5,7 @@ import {
   formatSessionTitle,
   sanitizePersistedChatMessages,
   stripReferenceAttachments,
+  stripToolSummaryFromAssistantContent,
 } from "./vibeChatStorage";
 
 describe("formatSessionTitle", () => {
@@ -59,6 +60,32 @@ describe("buildAgentHistoryFromMessages", () => {
     expect(history[0].content).toContain("找到了文件。");
     expect(history[0].content).toContain("[工具摘要]");
     expect(history[0].content).toContain("搜索文件: 找到 1 个文件");
+  });
+
+  it("strips leaked tool summaries before rebuilding assistant history", () => {
+    const leaked =
+      "完成了。\n\n[工具摘要]\n- 读取文件: 读取 200 行内容\n\n[工具摘要]\n- 搜索代码: 找到 1 处匹配";
+    const history = buildAgentHistoryFromMessages([
+      {
+        role: "assistant",
+        content: leaked,
+        tools: [{ name: "patch_file", title: "局部修改", summary: "已修改 a.ts", ok: true }],
+      },
+    ]);
+    expect(history[0].content).toBe(
+      "完成了。\n\n[工具摘要]\n- 局部修改: 已修改 a.ts",
+    );
+  });
+
+  it("sanitizes persisted assistant bubbles", () => {
+    const cleaned = sanitizePersistedChatMessages([
+      {
+        id: "1",
+        role: "assistant",
+        content: "正文\n\n[工具摘要]\n- 读取文件: 读取 20 行内容",
+      },
+    ]);
+    expect(cleaned[0].content).toBe("正文");
   });
 
   it("shapes history for execute_plan profile", () => {

@@ -3,6 +3,7 @@ import {
   agentStallRecoveryReason,
   buildAgentMaxTurnsExhaustedMessage,
   buildAgentResumePrompt,
+  buildSilentContinueStatusLog,
   canResumeAgentRun,
   hasRecoverableAgentProgress,
   inferAgentRecoveryFlags,
@@ -10,8 +11,10 @@ import {
   isAgentRunStalled,
   isRecoverableAgentError,
   shouldAutoResumeAgentError,
+  shouldSilentAutoContinue,
   AGENT_AUTO_RESUME_SECONDS,
   AGENT_AUTO_RESUME_IMMEDIATE_SECONDS,
+  AGENT_SILENT_CONTINUE_MAX,
   resolveAutoResumeSeconds,
   recoverableAgentErrorHint,
   resolveAgentCompletedTurns,
@@ -45,10 +48,10 @@ describe("isRecoverableAgentError", () => {
 });
 
 describe("shouldAutoResumeAgentError", () => {
-  it("auto-resumes transient disconnects but not max-turn exhaustion", () => {
+  it("auto-continues transient disconnects and turn-cap exhaustion", () => {
     expect(shouldAutoResumeAgentError("Failed to fetch")).toBe(true);
     expect(shouldAutoResumeAgentError("连接中断（运行未完成）")).toBe(true);
-    expect(shouldAutoResumeAgentError(buildAgentMaxTurnsExhaustedMessage(12))).toBe(false);
+    expect(shouldAutoResumeAgentError(buildAgentMaxTurnsExhaustedMessage(12))).toBe(true);
     expect(shouldAutoResumeAgentError("模型返回格式错误")).toBe(false);
   });
 
@@ -156,7 +159,7 @@ describe("buildAgentResumePrompt", () => {
       "实现粘贴图片功能",
       "Failed to fetch",
     );
-    expect(prompt).toContain("【恢复运行】");
+    expect(prompt).toContain("【自动续跑】");
     expect(prompt).toContain("Failed to fetch");
     expect(prompt).toContain("搜索文件");
     expect(prompt).toContain("实现粘贴图片功能");
@@ -232,13 +235,24 @@ describe("resolveAgentFailureBubbleContent", () => {
 });
 
 describe("recoverableAgentErrorHint", () => {
-  it("mentions turns and resume action", () => {
+  it("mentions turns and manual retry after silent continue gives up", () => {
     const hint = recoverableAgentErrorHint(
       { turnTraces: [{ turn: 1 }, { turn: 2 }], tools: [{ running: false, summary: "ok" }] },
       "Failed to fetch",
     );
-    expect(hint).toContain("网络中断");
+    expect(hint).toContain("自动续跑");
     expect(hint).toContain("恢复运行");
     expect(hint).toContain("Failed to fetch");
+  });
+});
+
+describe("silent continue helpers", () => {
+  it("builds status log for seamless continuation", () => {
+    expect(buildSilentContinueStatusLog("network error", 2)).toContain("自动续跑（第 2 次）");
+  });
+
+  it("caps silent attempts", () => {
+    expect(AGENT_SILENT_CONTINUE_MAX).toBeGreaterThanOrEqual(3);
+    expect(shouldSilentAutoContinue(buildAgentMaxTurnsExhaustedMessage(20))).toBe(true);
   });
 });

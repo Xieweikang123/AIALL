@@ -678,81 +678,113 @@ button:disabled {
 }
 
 .empty {
-  margin: 22px auto 0;
-  max-width: 720px;
+  margin: 64px auto 0;
+  max-width: 520px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 18px;
+  border-radius: 20px;
+  padding: 40px 32px;
+  text-align: center;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
 }
 
 .empty-title {
-  font-weight: 600;
-  font-size: 14px;
+  font-weight: 700;
+  font-size: 20px;
+  color: var(--text);
+  letter-spacing: -0.02em;
+  margin-bottom: 6px;
 }
 
 .empty-desc {
   color: var(--muted);
-  margin-top: 6px;
+  margin-top: 8px;
   font-size: 13px;
+  line-height: 1.6;
 }
 
 .suggestions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin-top: 12px;
+  margin-top: 18px;
+  justify-content: center;
 }
 
 .chip {
-  background: rgba(31, 111, 235, 0.16);
+  background: rgba(31, 111, 235, 0.12);
   color: rgba(170, 208, 255, 0.98);
-  border: 1px solid rgba(31, 111, 235, 0.35);
+  border: 1px solid rgba(31, 111, 235, 0.28);
+  transition: background 0.2s, transform 0.15s, box-shadow 0.2s;
+}
+
+.chip:hover:not(:disabled) {
+  background: rgba(31, 111, 235, 0.22);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(31, 111, 235, 0.15);
+}
+
+.chip:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 .msg-list {
   display: grid;
-  gap: 12px;
+  gap: 20px;
 }
 
 .msg {
   display: grid;
   grid-template-columns: 34px 1fr;
-  gap: 10px;
+  gap: 12px;
   align-items: flex-start;
+  animation: msg-in 0.2s ease-out;
+}
+
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 .avatar {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   border: 1px solid var(--border);
-  background: rgba(17, 24, 39, 0.62);
+  background: rgba(17, 24, 39, 0.7);
   color: rgba(255, 255, 255, 0.86);
+  flex-shrink: 0;
 }
 
 .msg.user .avatar {
   border-color: rgba(31, 111, 235, 0.45);
   color: rgba(170, 208, 255, 0.98);
-  background: rgba(31, 111, 235, 0.12);
+  background: rgba(31, 111, 235, 0.15);
+  box-shadow: 0 0 8px rgba(31, 111, 235, 0.12);
 }
 
 .bubble {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 12px 12px 10px;
+  border-radius: 16px;
+  padding: 16px 18px 14px;
   min-width: 0;
+  transition: border-color 0.25s, box-shadow 0.25s;
+}
+
+.bubble:hover {
+  border-color: rgba(255, 255, 255, 0.12);
 }
 
 .msg.user .bubble {
-  border-color: rgba(31, 111, 235, 0.4);
-  background: rgba(31, 111, 235, 0.12);
+  border-color: rgba(31, 111, 235, 0.35);
+  background: linear-gradient(135deg, rgba(31, 111, 235, 0.12), rgba(31, 111, 235, 0.06));
+  box-shadow: 0 2px 12px rgba(31, 111, 235, 0.1);
 }
 
 .bubble-top {
@@ -767,12 +799,16 @@ button:disabled {
   font-size: 12px;
   font-weight: 700;
   color: var(--text);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  opacity: 0.75;
 }
 
 .bubble-meta {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
   white-space: nowrap;
+  opacity: 0.8;
 }
 
 .bubble-text {
@@ -786,8 +822,9 @@ button:disabled {
   overflow-wrap: anywhere;
   word-break: break-word;
   font-size: 13px;
-  line-height: 1.55;
+  line-height: 1.65;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  color: rgba(255, 255, 255, 0.92);
 }
 
 .bubble-actions {
@@ -804,10 +841,10 @@ button:disabled {
   position: sticky;
   bottom: 0;
   z-index: 2;
-  padding: 12px 18px 16px;
+  padding: 12px 18px 18px;
   border-top: 1px solid var(--border);
-  background: rgba(11, 18, 32, 0.76);
-  backdrop-filter: blur(10px);
+  background: linear-gradient(to top, rgba(11, 18, 32, 0.92), rgba(11, 18, 32, 0.76));
+  backdrop-filter: blur(12px);
 }
 
 .composer-card {
@@ -815,32 +852,41 @@ button:disabled {
   margin: 0 auto;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 12px;
+  border-radius: 18px;
+  padding: 16px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.22);
+  transition: box-shadow 0.25s;
+}
+
+.composer-card:focus-within {
+  box-shadow: 0 4px 32px rgba(31, 111, 235, 0.12);
+  border-color: rgba(31, 111, 235, 0.2);
 }
 
 .composer-input {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 10px 12px;
+  padding: 12px 14px;
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.6;
   outline: none;
   resize: vertical;
-  min-height: 78px;
+  min-height: 80px;
+  max-height: 240px;
   background: var(--panel-2);
   color: var(--text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  transition: border-color 0.25s, box-shadow 0.25s, background 0.25s;
 }
 
 .composer-input::placeholder {
-  color: rgba(255, 255, 255, 0.42);
+  color: rgba(255, 255, 255, 0.35);
 }
 
 .composer-input:focus {
-  border-color: rgba(31, 111, 235, 0.6);
-  box-shadow: 0 0 0 4px var(--ring);
+  border-color: rgba(31, 111, 235, 0.55);
+  box-shadow: 0 0 0 3px var(--ring);
   background: rgba(2, 6, 23, 0.7);
 }
 
@@ -875,8 +921,28 @@ button:disabled {
 
 .actions {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
+}
+
+.actions button {
+  padding: 9px 16px;
+  border-radius: 10px;
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.actions button.primary {
+  box-shadow: 0 2px 8px rgba(31, 111, 235, 0.25);
+}
+
+.actions button.primary:hover:not(:disabled) {
+  box-shadow: 0 4px 16px rgba(31, 111, 235, 0.35);
+  transform: translateY(-1px);
+}
+
+.actions button.secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.18);
 }
 
 .inline-code {

@@ -83,6 +83,7 @@ export type PersistedChatMessage = {
   agentRecoverable?: boolean;
   agentFailureReason?: string;
   agentRecoveryDismissed?: boolean;
+  agentContinueCount?: number;
   rejected?: boolean;
   reverted?: boolean;
   activityExpanded?: boolean;
@@ -170,6 +171,14 @@ export type AgentHistorySourceMessage = {
   }>;
 };
 
+const TOOL_SUMMARY_BLOCK_RE = /\n*(?:\[工具摘要\]\n(?:- .*(?:\n|$))+)+\n*/g;
+
+/** Strip [工具摘要] blocks echoed by the model or leaked into stored assistant content. */
+export function stripToolSummaryFromAssistantContent(text: string): string {
+  if (!text || !text.includes("[工具摘要]")) return text;
+  return text.replace(TOOL_SUMMARY_BLOCK_RE, "\n").trim();
+}
+
 function summarizeToolsForHistory(
   tools: AgentHistorySourceMessage["tools"],
 ): string {
@@ -192,6 +201,7 @@ export function buildAgentHistoryFromMessages(
       if (m.role !== "user" && m.role !== "assistant") return null;
       let content = m.role === "user" ? stripReferenceAttachments(m.content) : m.content.trim();
       if (m.role === "assistant") {
+        content = stripToolSummaryFromAssistantContent(content);
         content = `${content}${summarizeToolsForHistory(m.tools)}`.trim();
       }
       if (!content) return null;
@@ -218,7 +228,9 @@ function compactRoundGroupsForStorage(
   return groups.map((group) => ({
     turn: group.turn,
     maxTurns: group.maxTurns,
-    narrative: group.narrative ? truncateText(group.narrative, MAX_NARRATIVE_CHARS) : undefined,
+    narrative: group.narrative
+      ? truncateText(stripToolSummaryFromAssistantContent(group.narrative), MAX_NARRATIVE_CHARS)
+      : undefined,
     modelSteps: group.modelSteps.map((step) => ({
       id: step.id,
       phase: step.phase,
@@ -235,7 +247,10 @@ function compactRoundGroupsForStorage(
       : undefined,
     response: group.response
       ? {
-          assistantText: truncateText(group.response.assistantText, MAX_NARRATIVE_CHARS),
+          assistantText: truncateText(
+            stripToolSummaryFromAssistantContent(group.response.assistantText),
+            MAX_NARRATIVE_CHARS,
+          ),
           hasToolCalls: group.response.hasToolCalls,
           isFinal: group.response.isFinal,
           toolCalls: group.response.toolCalls.map((call) => ({
@@ -281,7 +296,7 @@ function sanitizeMessages(messages: PersistedChatMessage[]): PersistedChatMessag
       return {
       id: m.id,
       role: m.role,
-      content: m.content,
+      content: m.role === "assistant" ? stripToolSummaryFromAssistantContent(m.content) : m.content,
       chatMode: m.chatMode,
       tools: m.tools?.map((t) => ({
         id: t.id,
@@ -299,7 +314,9 @@ function sanitizeMessages(messages: PersistedChatMessage[]): PersistedChatMessag
       turnTraces: m.turnTraces?.length
         ? m.turnTraces.slice(-MAX_TURN_TRACES).map((t) => ({
             ...t,
-            assistantText: t.assistantText ? truncateText(t.assistantText, MAX_NARRATIVE_CHARS) : t.assistantText,
+            assistantText: t.assistantText
+              ? truncateText(stripToolSummaryFromAssistantContent(t.assistantText), MAX_NARRATIVE_CHARS)
+              : t.assistantText,
           }))
         : undefined,
       roundGroups: compactRoundGroupsForStorage(m.roundGroups),
@@ -322,6 +339,7 @@ function sanitizeMessages(messages: PersistedChatMessage[]): PersistedChatMessag
       agentRecoverable: m.agentRecoverable || undefined,
       agentFailureReason: m.agentFailureReason || undefined,
       agentRecoveryDismissed: m.agentRecoveryDismissed || undefined,
+      agentContinueCount: m.agentContinueCount || undefined,
       rejected: m.rejected || undefined,
       reverted: m.reverted || undefined,
       activityExpanded: m.activityExpanded || undefined,

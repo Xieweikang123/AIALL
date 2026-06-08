@@ -17,6 +17,8 @@ import {
 import {
   AGENT_SAFETY_MAX_TURNS,
   buildAgentTurnsLowNudge,
+  buildSegmentContinueNudge,
+  extendSegmentMaxTurns,
   resolveAgentMaxTurns,
 } from "./agentTurnBudget";
 import {
@@ -466,6 +468,7 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "回答请使用中文。",
     "用户可能在消息中附带截图或图片；若已附带，请结合图片内容理解需求并回答，不要声称无法查看图片。",
     "用户附截图询问界面/功能时：先描述截图所见，再判断是否属于本项目（优先查 src/views、src/components），勿默认是 GitHub Desktop、VS Code 等外部应用。",
+    "用户针对截图局部提问（配色、按钮、某块区域）时：讨论阶段只谈其所指可见范围，勿擅自扩大到整页/全项目样式盘点；若用户明确要求修改，可在该范围内 grep/read 对应组件后 patch_file；用户明确说「整个/整页/全面板」时可按扩大后的范围实施。",
     "工作流程：先 grep / search_files 快速定位（通常 1 轮），read_file 读关键片段，然后 patch_file / write_file 修改。",
     "效率：探索不超过 2 轮；信息足够后必须写入，不要连续多轮只读；同一轮可并行多个 read_file / grep。",
     "探索时：read_file 用 offset/limit 分段读取（单次约 200 行）；不要重复读取已读过的文件；用中文简短说明后立即调用工具。",
@@ -507,6 +510,7 @@ function buildAskSystemPrompt(
     "回答请使用中文。",
     "用户可能在消息中附带截图或图片；若已附带，请结合图片内容理解需求并回答，不要声称无法查看图片。",
     "用户附截图询问界面/功能时：先描述截图所见，再判断是否属于本项目（优先查 src/views、src/components），勿默认是外部应用。",
+    "用户针对截图局部提问（配色、按钮、某块区域）时：讨论阶段只谈其所指可见范围，勿擅自扩大到整页/全项目样式盘点；若用户明确要求修改，可在该范围内定位源码并说明改法；用户明确说「整个/整页/全面板」时可按扩大后的范围回答。",
     "你可以使用 list_dir、read_file、grep、search_files 工具来探索项目、读取文件，但不能修改任何文件。",
     "若信息不足，请主动使用工具查找相关内容，而不是要求用户打开文件。",
     "读取文件时：优先 grep / search_files 定位，再用 read_file 的 offset/limit 分段读取（单次约 200 行）；避免连续大块读取同一文件。",
@@ -840,8 +844,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   } = params;
   const imageDataUrls = sanitizeImageDataUrls(params.imageDataUrls);
 
-  const explicitMaxTurns = params.maxTurns ?? resolveAgentMaxTurns(mode, runProfile);
-  const statusMaxTurns = explicitMaxTurns;
+  const segmentBudget = resolveAgentMaxTurns(mode, runProfile);
+  let segmentMaxTurns = params.maxTurns ?? segmentBudget;
+  let segmentIndex = 1;
   const exploreTurnBudget = isExecutePlan ? EXECUTE_PLAN_EXPLORE_TURN_BUDGET : INTERACTIVE_EXPLORE_TURN_BUDGET;
   const maxContextChars = isExecutePlan ? EXECUTE_PLAN_MAX_CONTEXT_CHARS : MAX_AGENT_CONTEXT_CHARS;
 
@@ -852,7 +857,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     type: "status",
     data: {
       phase: "preparing",
-      ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+      ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
       model,
       ...(openFileRel ? { openFile: openFileRel } : {}),
     },
@@ -925,7 +930,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     systemPrompt,
     history: historyForDisplay(params.history),
     projectContext: projectContextBlock || undefined,
-    ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+    ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
     model,
     ...(openFileRel ? { openFile: openFileRel } : {}),
   });
@@ -956,7 +961,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         data: {
           phase: "aborted",
           turn,
-          ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+          ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
         },
       });
       onEvent({ type: "done", data: buildDoneData(writeStage, turn - 1) });
@@ -965,11 +970,11 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
     if (
       !isAsk &&
-      explicitMaxTurns !== undefined &&
+      segmentMaxTurns !== undefined &&
       !turnsLowNudgeSent &&
-      turn >= explicitMaxTurns - 3
+      turn >= segmentMaxTurns - 3
     ) {
-      messages.push({ role: "system", content: buildAgentTurnsLowNudge(turn, explicitMaxTurns) });
+      messages.push({ role: "system", content: buildAgentTurnsLowNudge(turn, segmentMaxTurns) });
       turnsLowNudgeSent = true;
     }
 
@@ -978,7 +983,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       data: {
         phase: "waiting_model",
         turn,
-        ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+        ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
         model,
       },
     });
@@ -996,7 +1001,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         data: {
           phase: modelStatusPhase,
           turn,
-          ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+          ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
           model,
           detail: `已等待 ${formatElapsedMs(Date.now() - modelWaitStartedAt)}`,
           elapsedMs: Date.now() - modelWaitStartedAt,
@@ -1010,7 +1015,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       data: {
         phase: "compacting_context",
         turn,
-        ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+        ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
         model,
         detail: `${compactedMessages.length} 条消息 · ${formatCharCount(contextChars)} 上下文`,
         contextMessages: compactedMessages.length,
@@ -1021,7 +1026,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       type: "turn_request",
       data: {
         turn,
-        ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+        ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
         model,
         contextMessages: compactedMessages.length,
         contextChars,
@@ -1046,7 +1051,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
             data: {
               phase: modelStatusPhase,
               turn,
-              ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+              ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
               model,
               detail: streamProgressDetail(progress),
               streamChars: progress.streamChars,
@@ -1072,7 +1077,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
             data: {
               phase: "waiting_model",
               turn,
-              ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+              ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
               model,
             },
           });
@@ -1084,7 +1089,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
             data: {
               phase: "retrying_model",
               turn,
-              ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+              ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
               model,
               retryAttempt: attempt,
               retryMaxAttempts: maxAttempts,
@@ -1116,7 +1121,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
           data: {
             phase: "vision_fallback",
             turn,
-            ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+            ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
             model,
             detail: "当前模型不支持视觉输入，已降级为纯文本请求",
           },
@@ -1140,7 +1145,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         type: "turn_response",
         data: {
           turn,
-          ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+          ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
           assistantText: text,
           toolCalls: [],
           hasToolCalls: false,
@@ -1155,7 +1160,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         data: {
           phase: "finished",
           turn,
-          ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+          ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
         },
       });
       onEvent({ type: "done", data: buildDoneData(writeStage, turn) });
@@ -1167,7 +1172,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         type: "turn_trace",
         data: {
           turn,
-          ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+          ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
           assistantText: visibleContent.trim(),
           hasToolCalls: true,
         },
@@ -1178,7 +1183,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       type: "turn_response",
       data: {
         turn,
-        ...(statusMaxTurns !== undefined ? { maxTurns: statusMaxTurns } : {}),
+        ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
         assistantText: visibleContent.trim(),
         toolCalls: toolCalls.map((call) => ({
           id: call.id,
@@ -1321,19 +1326,35 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       consecutiveExploreTurns = 0;
     }
 
-    if (explicitMaxTurns !== undefined && turn >= explicitMaxTurns) {
+    if (segmentMaxTurns !== undefined && turn >= segmentMaxTurns) {
+      if (turn >= AGENT_SAFETY_MAX_TURNS) {
+        onEvent({
+          type: "status",
+          data: { phase: "finished", turn, maxTurns: AGENT_SAFETY_MAX_TURNS },
+        });
+        if (!isAsk) {
+          onEvent({
+            type: "error",
+            data: { message: `已达安全上限（${AGENT_SAFETY_MAX_TURNS} 轮），任务可能未完成。` },
+          });
+        }
+        onEvent({ type: "done", data: buildDoneData(writeStage, turn) });
+        return;
+      }
+
+      segmentIndex += 1;
+      segmentMaxTurns = extendSegmentMaxTurns(turn, segmentBudget);
+      turnsLowNudgeSent = false;
+      messages.push({ role: "system", content: buildSegmentContinueNudge(turn, segmentIndex) });
       onEvent({
         type: "status",
-        data: { phase: "finished", turn, maxTurns: explicitMaxTurns },
+        data: {
+          phase: "continuing",
+          turn,
+          maxTurns: segmentMaxTurns,
+          detail: `自动续跑第 ${segmentIndex} 段（累计 ${turn} 轮）…`,
+        },
       });
-      if (!isAsk) {
-        onEvent({
-          type: "error",
-          data: { message: `已达最大轮次（${explicitMaxTurns}），任务可能未完成。` },
-        });
-      }
-      onEvent({ type: "done", data: buildDoneData(writeStage, turn) });
-      return;
     }
   }
 }

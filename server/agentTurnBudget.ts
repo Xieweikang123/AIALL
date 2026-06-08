@@ -38,3 +38,20 @@ export function buildAgentTurnsLowNudge(turn: number, maxTurns: number): string 
     "请优先完成必要的 patch_file / write_file，然后给出简要总结；避免再开新的广泛探索。",
   ].join("");
 }
+
+/** Injected when a segment budget is exhausted but the safety ceiling allows another segment. */
+export function buildSegmentContinueNudge(completedTurn: number, segmentIndex: number): string {
+  return [
+    `【系统自动续跑·第 ${segmentIndex} 段】仍在同一次任务中（累计 ${completedTurn} 轮）。`,
+    "不要重复已完成的 read/grep；直接 patch_file / write_file 完成剩余修改，然后给出最终总结。",
+  ].join("");
+}
+
+/** Extend the per-segment turn ceiling without ending the SSE session. */
+export function extendSegmentMaxTurns(
+  completedTurn: number,
+  segmentBudget: number,
+  safetyMax = AGENT_SAFETY_MAX_TURNS,
+): number {
+  return Math.min(completedTurn + segmentBudget, safetyMax);
+}

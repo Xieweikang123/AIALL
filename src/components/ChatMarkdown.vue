@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onUpdated, ref, watch } from "vue";
 import { renderMarkdown } from "../utils/renderMarkdown";
 
 const props = withDefaults(
@@ -49,7 +49,65 @@ onBeforeUnmount(() => {
   if (streamDebounceTimer) clearTimeout(streamDebounceTimer);
 });
 
+/** Wrap tool summary blocks (h3[工具摘要] + following ul) into collapsible cards. */
+function wrapToolSummaryBlocks(el: HTMLElement) {
+  const h3s = el.querySelectorAll("h3");
+  h3s.forEach((h3) => {
+    if (!h3.textContent?.includes("工具摘要")) return;
+    if (h3.closest(".tool-summary-block")) return; // already wrapped
+
+    // Collect h3 + following siblings until next heading or non-list element
+    const wrapper = document.createElement("div");
+    wrapper.className = "tool-summary-block";
+    wrapper.setAttribute("data-collapsed", "false");
+
+    // Header (clickable)
+    const header = document.createElement("div");
+    header.className = "tool-summary-header";
+    header.innerHTML = `<span class="tool-summary-icon">⚙️</span><span class="tool-summary-title">工具摘要</span><span class="tool-summary-toggle">▾</span>`;
+
+    // Content (collapsible)
+    const content = document.createElement("div");
+    content.className = "tool-summary-content";
+
+    // Move h3's siblings into content
+    let next = h3.nextElementSibling;
+    const toMove: Element[] = [];
+    while (next) {
+      if (next.tagName === "H3" || next.tagName === "H2" || next.tagName === "H1") break;
+      toMove.push(next);
+      next = next.nextElementSibling;
+    }
+
+    // Replace h3 with wrapper
+    h3.parentNode!.insertBefore(wrapper, h3);
+    wrapper.appendChild(header);
+    wrapper.appendChild(content);
+    content.appendChild(h3); // put h3 inside content (hidden)
+    toMove.forEach((el) => content.appendChild(el));
+
+    // Toggle click
+    header.addEventListener("click", () => {
+      const collapsed = wrapper.getAttribute("data-collapsed") === "true";
+      wrapper.setAttribute("data-collapsed", String(!collapsed));
+    });
+  });
+}
+
 const html = computed(() => renderMarkdown(renderSource.value));
+
+// After render, wrap tool summary blocks
+function postProcess() {
+  nextTick(() => {
+    if (markdownRef.value) {
+      wrapToolSummaryBlocks(markdownRef.value);
+    }
+  });
+}
+
+// Trigger on html change
+watch(html, () => postProcess(), { immediate: true });
+onUpdated(() => postProcess());
 </script>
 
 <template>
@@ -182,5 +240,103 @@ const html = computed(() => renderMarkdown(renderSource.value));
 
 .msg-markdown :deep(th) {
   background: rgba(255, 255, 255, 0.06);
+}
+
+/* ===== Tool Summary Block ===== */
+.msg-markdown :deep(.tool-summary-block) {
+  margin: 8px 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+  transition: border-color 0.2s ease;
+}
+
+.msg-markdown :deep(.tool-summary-block:hover) {
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.msg-markdown :deep(.tool-summary-header) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease;
+}
+
+.msg-markdown :deep(.tool-summary-header:hover) {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.msg-markdown :deep(.tool-summary-icon) {
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+.msg-markdown :deep(.tool-summary-title) {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.55);
+  letter-spacing: 0.3px;
+  flex: 1;
+}
+
+.msg-markdown :deep(.tool-summary-toggle) {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.35);
+  transition: transform 0.25s ease;
+}
+
+.msg-markdown :deep(.tool-summary-block[data-collapsed="false"] .tool-summary-toggle) {
+  transform: rotate(0deg);
+}
+
+.msg-markdown :deep(.tool-summary-block[data-collapsed="true"] .tool-summary-toggle) {
+  transform: rotate(-90deg);
+}
+
+/* Collapsible content */
+.msg-markdown :deep(.tool-summary-content) {
+  max-height: 300px;
+  overflow: hidden;
+  transition: max-height 0.3s ease, opacity 0.25s ease, padding 0.25s ease;
+  opacity: 1;
+  padding: 0 12px 6px;
+}
+
+.msg-markdown :deep(.tool-summary-block[data-collapsed="true"] .tool-summary-content) {
+  max-height: 0;
+  opacity: 0;
+  padding: 0 12px;
+}
+
+/* Hide the h3 inside the summary (replaced by header) */
+.msg-markdown :deep(.tool-summary-content > h3) {
+  display: none;
+}
+
+/* Style list items inside tool summary */
+.msg-markdown :deep(.tool-summary-content > ul) {
+  margin: 0;
+  padding-left: 1.2em;
+  list-style: none;
+}
+
+.msg-markdown :deep(.tool-summary-content > ul > li) {
+  margin: 3px 0;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+  line-height: 1.5;
+  position: relative;
+  padding-left: 0;
+}
+
+.msg-markdown :deep(.tool-summary-content > ul > li::before) {
+  content: "·";
+  position: absolute;
+  left: -12px;
+  color: rgba(255, 255, 255, 0.25);
 }
 </style>
