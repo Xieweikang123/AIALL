@@ -18,6 +18,7 @@ import {
 } from "./server/vibeFs";
 import { gitStatus, gitDiff, gitDiffFile, gitDiffContent, gitCommitFileDiff, gitCommit, gitLog, gitIsRepo, gitAdd, gitReset, gitDiscard, gitDiscardAll, gitRemotes, gitFetch, gitPull, gitPush, gitStashList, gitStashSave, gitStashPop, gitStashApply, gitStashDrop } from "./server/vibeGit";
 import { upsertChatStoreIndex } from "./server/chatStoreIndex";
+import { mergeSessionPayloadForDisk } from "./server/chatStoreMerge";
 
 const execFileAsync = promisify(execFile);
 
@@ -377,41 +378,61 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       const storeFile = path.join(chatDir, "chat-store.json");
       const sessions = Array.isArray(body.data?.sessions) ? body.data.sessions : [];
       debugLog(`chat-store-sync writing ${sessions.length} sessions to ${chatDir}`);
+      const indexSessions: Array<{
+        id: string;
+        title: string;
+        createdAt: string;
+        updatedAt: string;
+        messageCount: number;
+        file: string;
+      }> = [];
+
+      for (const session of sessions) {
+        const id = (session.id || "").trim();
+        if (!id) continue;
+        const sessionFile = path.join(chatDir, `chat-${safeFilePart(id)}.json`);
+        const existingRaw = await fs.promises.readFile(sessionFile, "utf-8").catch(() => null);
+        let existingPayload: { messages?: unknown[] } | null = null;
+        if (existingRaw) {
+          try {
+            existingPayload = JSON.parse(existingRaw) as { messages?: unknown[] };
+          } catch {
+            existingPayload = null;
+          }
+        }
+        const incomingPayload = {
+          id,
+          title: session.title || "新会话",
+          createdAt: session.createdAt || "",
+          updatedAt: session.updatedAt || "",
+          messages: Array.isArray(session.messages) ? session.messages : [],
+        };
+        const mergedPayload = mergeSessionPayloadForDisk(incomingPayload, existingPayload);
+        const sessionPayload = await externalizeSessionPayload(chatDir, id, mergedPayload);
+        await fs.promises.writeFile(sessionFile, JSON.stringify(sessionPayload, null, 2), "utf-8");
+        const messageCount = Array.isArray(sessionPayload.messages) ? sessionPayload.messages.length : 0;
+        indexSessions.push({
+          id,
+          title: sessionPayload.title || "新会话",
+          createdAt: sessionPayload.createdAt || "",
+          updatedAt: sessionPayload.updatedAt || "",
+          messageCount,
+          file: `chat-${safeFilePart(id)}.json`,
+        });
+      }
+
       const index = {
         syncedAt: new Date().toISOString(),
         version: body.data?.version || 2,
         projectPath,
         activeSessionId: body.data?.activeSessionId || "",
-        sessions: sessions.map((session) => {
-          const id = session.id || "";
-          return {
-            id,
-            title: session.title || "新会话",
-            createdAt: session.createdAt || "",
-            updatedAt: session.updatedAt || "",
-            messageCount: typeof session.messageCount === "number" ? session.messageCount : 0,
-            file: id ? `chat-${safeFilePart(id)}.json` : "",
-          };
-        }),
+        sessions: indexSessions,
       };
       await fs.promises.writeFile(
         storeFile,
         JSON.stringify(index, null, 2),
         "utf-8",
       );
-      for (const session of sessions) {
-        const id = (session.id || "").trim();
-        if (!id) continue;
-        const sessionFile = path.join(chatDir, `chat-${safeFilePart(id)}.json`);
-        const sessionPayload = await externalizeSessionPayload(chatDir, id, {
-          id,
-          title: session.title || "新会话",
-          createdAt: session.createdAt || "",
-          updatedAt: session.updatedAt || "",
-          messages: Array.isArray(session.messages) ? session.messages : [],
-        });
-        await fs.promises.writeFile(sessionFile, JSON.stringify(sessionPayload, null, 2), "utf-8");
-      }
       debugLog(`chat-store-sync done, path=${chatDir}`);
       sendJson(res, 200, { ok: true, path: chatDir, sessionCount: sessions.length });
     } catch (error) {

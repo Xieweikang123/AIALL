@@ -22,6 +22,7 @@ export function buildConsultativeBuildHint(): string {
     "",
     "【咨询任务·只读】用户本条仅为提问/解释，未要求改代码。",
     "只允许 list_dir / read_file / grep / search_files；禁止 patch_file / write_file / delete_file。",
+    "优先 1 次 grep 定位，必要时 read_file 1 个相关文件后即回答；勿连环读取多个无关文件。",
     "用自然语言直接回答；若用户之后要明确修改，请其切换到 Build 并说明改什么，或改用 Ask 继续讨论。",
   ].join("\n");
 }

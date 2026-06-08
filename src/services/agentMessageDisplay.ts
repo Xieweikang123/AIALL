@@ -17,14 +17,27 @@ export type FinalizeAssistantBubbleSource = AssistantBubbleSource & {
 const SUBSTANTIVE_MIN_CHARS = 48;
 const THIN_EPILOGUE_MAX_CHARS = 96;
 
+const ENGLISH_TOOL_NARRATION_RE = /^(?:Now let me|Let me|I'll|I need to|First,?\s+I)\b/i;
+
 function normalizeBubbleText(text: string): string {
   return stripToolSummaryFromAssistantContent(text).trim();
+}
+
+/** Short English planning lines emitted before tool calls — not user-facing answers. */
+export function isEnglishToolNarration(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (ENGLISH_TOOL_NARRATION_RE.test(trimmed)) return true;
+  const cjk = (trimmed.match(/[\u4e00-\u9fff]/g) || []).length;
+  const latin = (trimmed.match(/[a-zA-Z]/g) || []).length;
+  return latin >= 24 && cjk < 8 && trimmed.length <= 220;
 }
 
 /** Merge streaming turn text without dropping a longer substantive answer. */
 export function mergeAssistantTurnText(existing: string, incoming: string): string {
   const prev = normalizeBubbleText(existing);
   const next = normalizeBubbleText(incoming);
+  if (isEnglishToolNarration(next)) return prev;
   if (!prev) return next;
   if (!next) return prev;
   if (prev === next) return prev;
@@ -43,7 +56,7 @@ function collectAssistantTextCandidates(msg: AssistantBubbleSource): string[] {
   const out: string[] = [];
   const push = (raw?: string) => {
     const text = normalizeBubbleText(raw || "");
-    if (!text || seen.has(text)) return;
+    if (!text || seen.has(text) || isEnglishToolNarration(text)) return;
     seen.add(text);
     out.push(text);
   };
@@ -100,6 +113,41 @@ function resolveFinalAssistantText(msg: AssistantBubbleSource): string {
   );
 }
 
+function resolveVisionRegionPreamble(msg: AssistantBubbleSource): string {
+  const group = msg.roundGroups?.find((item) => item.turn === 1);
+  const raw = group?.narrative?.trim() || group?.response?.assistantText?.trim() || "";
+  if (!raw) return "";
+  if (!/据此|判断|表明|属于|截图|图中|占位符|「/i.test(raw)) return "";
+  return normalizeBubbleText(raw);
+}
+
+function regionAnchorPresentInText(anchor: string, text: string): boolean {
+  if (!anchor || !text) return false;
+  const quoted = anchor.match(/[「『"']([^」』"']{4,})[」』"']/)?.[1];
+  if (quoted && text.includes(quoted.slice(0, Math.min(quoted.length, 16)))) return true;
+  return /截图|图中|占位符|助手|Vibe|输入框|Composer/i.test(text);
+}
+
+/** Prefer the final agent turn; prepend vision region when the final answer omits it. */
+export function resolveCompletedAgentBubbleContent(msg: AssistantBubbleSource): string {
+  const finalText = normalizeBubbleText(resolveFinalAssistantText(msg));
+  const visionPreamble = resolveVisionRegionPreamble(msg);
+
+  if (finalText) {
+    if (visionPreamble && !regionAnchorPresentInText(visionPreamble, finalText)) {
+      return `${visionPreamble}\n\n${finalText}`;
+    }
+    return finalText;
+  }
+
+  const candidates = collectAssistantTextCandidates(msg);
+  const direct = normalizeBubbleText(msg.content || "");
+  const filteredDirect = isEnglishToolNarration(direct)
+    ? candidates.sort((a, b) => b.length - a.length)[0] || ""
+    : direct;
+  return pickBestAssistantBubbleText(candidates, filteredDirect);
+}
+
 const COMPLETION_SUMMARY_RE = /(?:修改完成|已完成|已写入|总结|变更如下|完成了)/;
 
 /** Whether the model already gave a substantive completion summary. */
@@ -125,7 +173,9 @@ export function buildWrittenFilesSummary(writtenFiles: string[], wasAborted = fa
 
 /** Append file-write summary when the run ended without a model completion message. */
 export function finalizeAssistantBubbleContent(msg: FinalizeAssistantBubbleSource): string {
-  const base = resolveAssistantBubbleContent(msg);
+  const base = msg.roundGroups?.some((g) => g.response?.isFinal)
+    ? resolveCompletedAgentBubbleContent(msg)
+    : resolveAssistantBubbleContent(msg);
   const writtenFiles = msg.writtenFiles?.filter(Boolean) ?? [];
   if (!writtenFiles.length) return base;
   if (msg.agentFailed) return base;

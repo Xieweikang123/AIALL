@@ -4,7 +4,10 @@ import {
   filterDuplicateFeedThoughts,
   finalizeAssistantBubbleContent,
   hasSubstantiveAgentSummary,
+  isEnglishToolNarration,
+  mergeAssistantTurnText,
   resolveAssistantBubbleContent,
+  resolveCompletedAgentBubbleContent,
   thoughtDuplicatesBubble,
 } from "./agentMessageDisplay";
 import type { CursorFeedItem } from "./agentCursorFeed";
@@ -116,6 +119,52 @@ describe("resolveAssistantBubbleContent", () => {
         ],
       }),
     ).toContain(shortFinal);
+  });
+
+  it("ignores english tool narration when merging turns", () => {
+    const chinese = "## 读图描述\n\n占位符「描述要改什么」表明这是 Vibe 助手输入框。";
+    const english = "Now let me search for the chat-input-box styles:";
+    expect(mergeAssistantTurnText(chinese, english)).toBe(chinese);
+    expect(isEnglishToolNarration(english)).toBe(true);
+  });
+});
+
+describe("resolveCompletedAgentBubbleContent", () => {
+  it("uses final turn and prepends vision region when missing", () => {
+    const vision =
+      "占位符「描述要改什么」表明这是 Vibe 助手 Build 模式底栏的对话输入框。";
+    const finalAnswer = "## 回答\n\n点击整个矩形区域即可聚焦，::before 不会拦截点击。";
+    const result = resolveCompletedAgentBubbleContent({
+      content: `${vision}\n\nNow let me read the component\n\n${finalAnswer}`,
+      roundGroups: [
+        {
+          turn: 1,
+          narrative: vision,
+          modelSteps: [],
+          toolIds: [],
+          response: {
+            assistantText: vision,
+            toolCalls: [],
+            hasToolCalls: false,
+            isFinal: false,
+          },
+        },
+        {
+          turn: 5,
+          modelSteps: [],
+          toolIds: [],
+          response: {
+            assistantText: finalAnswer,
+            toolCalls: [],
+            hasToolCalls: false,
+            isFinal: true,
+          },
+        },
+      ],
+    });
+    expect(result).toContain("Vibe 助手");
+    expect(result).toContain("## 回答");
+    expect(result).not.toContain("Now let me");
   });
 });
 

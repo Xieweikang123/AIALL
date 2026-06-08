@@ -28,26 +28,76 @@ const NARROW_UI_TOPIC_RE = /配色|颜色|按钮|badge|几种|太多|有点多|�
 
 export const VISION_FIRST_TURN_MIN_DESCRIPTION_CHARS = 24;
 
+/** Visible copy in screenshots (placeholder, label, tab title, button). */
+const VISIBLE_ANCHOR_QUOTE_RE =
+  /[「『"']([^」』"']{3,})[」』"']|占位符[^，。；\n]{0,16}[「『"']([^」』"']{3,})[」』"']?|(?:标签|按钮|标题|Tab)[:：]?\s*[「『"']([^」』"']{3,})[」』"']?/;
+
+/** Links quoted / visible text to which UI region or module it belongs to. */
+const ANCHOR_TO_REGION_RE =
+  /(判断|可判断|可推断|据此|由此|说明|对应|属于|定位为|应是|应该是|像是|表明|可定位)[^。\n]{0,48}(助手|Vibe|聊天|输入框|Composer|面板|模块|区域|Build|Ask|底栏|侧栏|编辑器|对话|占位)/i;
+
+/** Names the screenshot region without necessarily quoting anchor text. */
+const UI_REGION_STATEMENT_RE =
+  /(截图|图中|图里|从图|可见|画面)[^。\n]{0,72}(区域|模块|面板|输入|按钮|编辑器|侧栏|底|顶|助手|聊天|Composer)/i;
+
+const UI_MODULE_STATEMENT_RE =
+  /这是[^。\n]{0,48}(助手|Vibe|聊天|输入|面板|模块|区域|Composer|编辑器|底栏|侧栏)/i;
+
 export function buildVisionFirstTurnRule(): string {
   return [
     "【附图·首轮必读图】你必须先仔细查看附带图片，用中文描述所见：",
-    "- 界面区域、控件/按钮/标签文字、布局关系；",
-    "- 若用户反馈拥挤/重叠/不好看，须点名哪两个（或哪组）元素及其关系（重叠、贴边、间距过小等）。",
-    "本轮禁止调用任何工具；仅输出读图描述，下一轮再定位源码或修改。",
+    "- 先说明截图对应应用中的哪一块（模块/面板/区域）；画面若只裁到局部，也要根据占位符、按钮、标签等可见文案推断归属；",
+    "- 须引用图中可辨识的占位符或标签原文（用「」括起），并写明「据此可判断这是 …」；",
+    "- 再补充控件类型、布局关系；若用户反馈拥挤/重叠/不好看，须点名哪两个（或哪组）元素及其关系。",
+    "本轮禁止调用任何工具；仅输出读图描述，下一轮可用 grep 图中摘录的文案定位源码。",
     "布局问题后续修改时优先检查 flex-shrink、min-width、overflow、gap、margin，勿先加装饰性分隔线。",
   ].join("\n");
 }
 
 export function buildVisionFirstTurnContinueHint(): string {
-  return "【读图完成】已记录你对附图的理解。下一轮请结合上述描述与用户需求调用工具；若需改代码，先 read_file 核对再 patch_file。";
+  return [
+    "【读图完成】已记录你对附图的理解。",
+    "下一轮请结合上述描述与用户需求调用工具；",
+    "若读图时摘录了占位符/按钮/标签等可见文案，优先 grep 该字符串定位组件，再 read_file 核对；",
+    "回答用户时先一句点明「截图对应哪块界面」，再讲操作或改代码。",
+  ].join("");
+}
+
+/** After vision-first turn for ask / consultative prompts (no code changes requested). */
+export function buildVisionConsultativeContinueHint(): string {
+  return [
+    "【读图完成·咨询】用户仅为提问/说明，未要求改代码。",
+    "优先 grep 读图时摘录的占位符或标签（1 次）定位组件，必要时 read_file 1 个相关文件核对；",
+    "然后给出最终中文回答：先一句点明截图对应哪块界面，再答用户问题。",
+    "禁止连环 read_file/grep 多个无关文件；核对后立即输出最终答案。",
+  ].join("");
 }
 
 export function buildVisionFirstTurnRetryHint(): string {
-  return "【附图首轮】回复过短或未描述所见。请重新查看附图，说明界面元素与布局/重叠/间距问题，本轮仍不要调用工具。";
+  return [
+    "【附图首轮】读图描述不合格：过短，或只描述了外观却没有说明截图对应哪块界面。",
+    "请重新查看附图：引用占位符/标签原文，并写明据此判断属于哪个模块或区域（如 Vibe 助手底栏输入框）；",
+    "若画面只裁到局部，也要根据可见文案推断，不要只复述颜色与边框。本轮仍不要调用工具。",
+  ].join("");
+}
+
+function hasVisibleAnchorQuote(text: string): boolean {
+  return VISIBLE_ANCHOR_QUOTE_RE.test(text);
+}
+
+function describesScreenshotUiRegion(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (hasVisibleAnchorQuote(trimmed)) {
+    return ANCHOR_TO_REGION_RE.test(trimmed);
+  }
+  return UI_REGION_STATEMENT_RE.test(trimmed) || UI_MODULE_STATEMENT_RE.test(trimmed);
 }
 
 export function isAdequateVisionFirstTurnDescription(text: string): boolean {
-  return text.trim().length >= VISION_FIRST_TURN_MIN_DESCRIPTION_CHARS;
+  const trimmed = text.trim();
+  if (trimmed.length < VISION_FIRST_TURN_MIN_DESCRIPTION_CHARS) return false;
+  return describesScreenshotUiRegion(trimmed);
 }
 
 export function shouldRequireVisionFirstTurn(imageCount: number, visionFallbackApplied: boolean): boolean {
@@ -66,10 +116,10 @@ const UI_IMPLEMENTATION_INTENT_RE =
 const UI_EXPLICIT_EXPAND_RE = /整个|整页|全面板|全面板|整块|全局|所有/i;
 
 const UI_SCOPE_DISCUSS =
-  "讨论时：范围限定为用户所指的可视区域（通常即截图可见部分），勿擅自扩大到未展示区域或整页/全项目样式盘点；用户明确要求扩大时再扩大。";
+  "讨论时：范围限定为用户所指的可视区域（通常即截图可见部分），勿擅自扩大到未展示区域或整页/全项目样式盘点；用户明确要求扩大时再扩大。读图时若见占位符/标签/按钮文字，须据此说明截图是哪块界面。";
 
 const UI_SCOPE_IMPLEMENT =
-  "实施时：仍以上一轮截图所指的同一可视区域为默认改动范围，可 grep/read 该区域对应组件与样式后 patch_file；勿擅自改动用户未提及的区域。";
+  "实施时：仍以上一轮截图所指的同一可视区域为默认改动范围；优先 grep 读图时摘录的占位符或标签文案定位组件，再 read/patch；勿擅自改动用户未提及的区域。";
 
 const UI_SCOPE_IMPLEMENT_EXPANDED =
   "实施时：用户已明确要求扩大改动范围，按其所述区域实施，勿超出其描述。";
@@ -103,8 +153,8 @@ export function buildVisionTaskText(text: string, imageCount: number): string {
       : UI_SCOPE_IMPLEMENT
     : UI_SCOPE_DISCUSS;
   const toolHint = implementing
-    ? "读图描述完成后，下一轮再在该区域对应源码内定位并修改。"
-    : "读图描述须覆盖用户所指可见范围；不要跳过读图先去全盘 grep/search。";
+    ? "读图描述须先根据占位符/标签说明截图是哪块界面，下一轮再 grep 该文案并在对应源码内修改。"
+    : "读图须说明截图对应哪块界面（可据占位符/标签推断），并覆盖用户所指可见范围；不要跳过读图先去全盘 grep/search。";
   const prefix = `【附图为本消息重点】${scopeRule} ${toolHint} 若界面像 Git/设置/聊天等，优先在 src/views 中查找，勿默认是外部应用。`;
   return `${firstTurnRule}\n\n${prefix}\n\n${body}`;
 }

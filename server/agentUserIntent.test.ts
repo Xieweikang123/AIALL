@@ -22,5 +22,6 @@ describe("isConsultativeUserPrompt", () => {
 describe("buildConsultativeBuildHint", () => {
   it("mentions read-only tools", () => {
     expect(buildConsultativeBuildHint()).toContain("禁止 patch_file");
+    expect(buildConsultativeBuildHint()).toContain("grep");
   });
 });

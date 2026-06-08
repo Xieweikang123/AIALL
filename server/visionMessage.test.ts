@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildModelIdentityHint,
   buildUiScopeFollowUpHint,
+  buildVisionConsultativeContinueHint,
   buildVisionTaskText,
   buildVisionUserContent,
   contentCharSize,
@@ -50,11 +51,35 @@ describe("visionMessage", () => {
     expect(shouldRequireVisionFirstTurn(0, false)).toBe(false);
   });
 
-  it("isAdequateVisionFirstTurnDescription enforces minimum length", () => {
+  it("isAdequateVisionFirstTurnDescription enforces length and region identification", () => {
     expect(
       isAdequateVisionFirstTurnDescription("图中 Git 同步行的 main 分支标签与 Fetch 按钮边框重叠"),
     ).toBe(true);
+    expect(
+      isAdequateVisionFirstTurnDescription(
+        "占位符「描述要改什么」表明这是 Vibe 助手 Build 模式底栏的对话输入框（ChatComposer）。",
+      ),
+    ).toBe(true);
     expect(isAdequateVisionFirstTurnDescription("看到了")).toBe(false);
+    expect(
+      isAdequateVisionFirstTurnDescription(
+        "截图显示深色圆角输入框，占位符为「描述要改什么 (拖动文件到右侧)」，浅灰色文字占满区域。",
+      ),
+    ).toBe(false);
+  });
+
+  it("buildVisionFirstTurnRule requires anchor-based region identification", () => {
+    const text = buildVisionTaskText("这个输入框，点哪里能聚焦？", 1);
+    expect(text).toContain("占位符");
+    expect(text).toContain("据此可判断");
+    expect(text).toContain("grep");
+  });
+
+  it("buildVisionConsultativeContinueHint limits tool exploration", () => {
+    const hint = buildVisionConsultativeContinueHint();
+    expect(hint).toContain("咨询");
+    expect(hint).toContain("grep");
+    expect(hint).toContain("禁止连环");
   });
 
   it("buildVisionTaskText prioritizes screenshot description for UI questions", () => {
@@ -73,7 +98,8 @@ describe("visionMessage", () => {
   it("buildVisionTaskText allows scoped implementation with images", () => {
     const text = buildVisionTaskText("帮我把 diff 区这几条按钮配色精简一下", 1);
     expect(text).toContain("实施时");
-    expect(text).toContain("grep/read");
+    expect(text).toContain("grep");
+    expect(text).toContain("read/patch");
   });
 
   it("buildUiScopeFollowUpHint keeps opinion follow-up on prior screenshot scope", () => {
@@ -89,7 +115,8 @@ describe("visionMessage", () => {
     const prior = "## 截图中的按钮配色\n\n从截图可以看到 diff 区有 4 种颜色的按钮。";
     const hint = buildUiScopeFollowUpHint("对，帮我精简一下这几条按钮的配色", prior);
     expect(hint).toContain("延续上一轮截图范围·实施");
-    expect(hint).toContain("grep/read");
+    expect(hint).toContain("grep");
+    expect(hint).toContain("read/patch");
     expect(hint).not.toContain("勿全盘盘点");
   });
 

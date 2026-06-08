@@ -51,6 +51,7 @@ import {
 } from "./vibeFs";
 import {
   buildModelIdentityHint,
+  buildVisionConsultativeContinueHint,
   buildVisionFirstTurnContinueHint,
   buildVisionFirstTurnRetryHint,
   buildVisionUserContent,
@@ -935,6 +936,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   let visionFirstTurnPending = shouldRequireVisionFirstTurn(imageDataUrls.length, false);
   let visionFirstTurnRetries = 0;
   const MAX_VISION_FIRST_TURN_RETRIES = 2;
+  const consultativeVisionRun = imageDataUrls.length > 0 && (isAsk || readOnlyBuildRun);
 
   emitAgentContext(onEvent, {
     mode,
@@ -1231,7 +1233,14 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
       visionFirstTurnPending = false;
       completeVisionFirstTurn(text, false);
-      messages.push({ role: "system", content: buildVisionFirstTurnContinueHint() });
+      if (consultativeVisionRun) {
+        messages.push({ role: "system", content: buildVisionConsultativeContinueHint() });
+        if (segmentMaxTurns !== undefined) {
+          segmentMaxTurns = Math.min(segmentMaxTurns, turn + 4);
+        }
+      } else {
+        messages.push({ role: "system", content: buildVisionFirstTurnContinueHint() });
+      }
       onEvent({
         type: "status",
         data: {
@@ -1239,7 +1248,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
           turn,
           ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
           model,
-          detail: "读图描述完成，开始定位与修改",
+          detail: consultativeVisionRun ? "读图描述完成，准备简要核对后回答" : "读图描述完成，开始定位与修改",
         },
       });
       continue;
