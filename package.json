@@ -20,6 +20,7 @@
   "dependencies": {
     "@tauri-apps/api": "^2.11.0",
     "@tauri-apps/plugin-dialog": "^2.7.1",
+    "chokidar": "^5.0.0",
     "connect": "^3.7.0",
     "dompurify": "^3.4.8",
     "marked": "^18.0.5",

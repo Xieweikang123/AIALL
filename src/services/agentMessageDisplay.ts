@@ -7,6 +7,12 @@ export type AssistantBubbleSource = {
   turnTraces?: Array<{ assistantText: string }>;
 };
 
+export type FinalizeAssistantBubbleSource = AssistantBubbleSource & {
+  writtenFiles?: string[];
+  wasAborted?: boolean;
+  agentFailed?: boolean;
+};
+
 /** Resolve the text shown in the assistant chat bubble (with fallbacks for agent runs). */
 export function resolveAssistantBubbleContent(msg: AssistantBubbleSource): string {
   const direct = msg.content?.trim();
@@ -21,6 +27,50 @@ export function resolveAssistantBubbleContent(msg: AssistantBubbleSource): strin
   if (narratives.length) return narratives[narratives.length - 1]!;
 
   return msg.turnTraces?.at(-1)?.assistantText.trim() || "";
+}
+
+function resolveFinalAssistantText(msg: AssistantBubbleSource): string {
+  return (
+    msg.roundGroups
+      ?.filter((group) => group.response?.isFinal && group.response.assistantText.trim())
+      .at(-1)?.response?.assistantText.trim() || ""
+  );
+}
+
+const COMPLETION_SUMMARY_RE = /(?:修改完成|已完成|已写入|总结|变更如下|完成了)/;
+
+/** Whether the model already gave a substantive completion summary. */
+export function hasSubstantiveAgentSummary(msg: AssistantBubbleSource): boolean {
+  const finalText = resolveFinalAssistantText(msg);
+  if (finalText.length >= 48) return true;
+  if (COMPLETION_SUMMARY_RE.test(finalText)) return true;
+  const bubble = resolveAssistantBubbleContent(msg);
+  return COMPLETION_SUMMARY_RE.test(bubble);
+}
+
+/** Build a short summary when tools wrote files but the model skipped a final answer turn. */
+export function buildWrittenFilesSummary(writtenFiles: string[], wasAborted = false): string {
+  if (!writtenFiles.length) return "";
+  const list = writtenFiles.map((file) => `- \`${file}\``).join("\n");
+  const heading = wasAborted ? "## 运行中断（部分修改已落盘）" : "## 修改完成";
+  const lead = wasAborted
+    ? `连接在总结前结束，但以下 ${writtenFiles.length} 个文件已写入：`
+    : `已写入 ${writtenFiles.length} 个文件：`;
+  return `${heading}\n\n${lead}\n\n${list}`;
+}
+
+/** Append file-write summary when the run ended without a model completion message. */
+export function finalizeAssistantBubbleContent(msg: FinalizeAssistantBubbleSource): string {
+  const base = resolveAssistantBubbleContent(msg);
+  const writtenFiles = msg.writtenFiles?.filter(Boolean) ?? [];
+  if (!writtenFiles.length) return base;
+  if (msg.agentFailed) return base;
+  if (!msg.wasAborted && hasSubstantiveAgentSummary(msg)) return base;
+
+  const summary = buildWrittenFilesSummary(writtenFiles, Boolean(msg.wasAborted));
+  if (!base.trim()) return summary;
+  if (base.includes(summary)) return base;
+  return `${base.trim()}\n\n${summary}`;
 }
 
 export function normalizeComparableText(text: string): string {

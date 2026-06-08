@@ -412,6 +412,20 @@ export async function gitStashPopRemote(projectPath: string, stashIndex?: number
   }
 }
 
+export async function gitStashApplyRemote(projectPath: string, stashIndex: number): Promise<GitStashResult> {
+  try {
+    const response = await fetch(backendUrl("/backend/vibe/git/stash-apply"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: projectPath, stashIndex }),
+    });
+    const data = (await response.json()) as GitStashResult;
+    return data;
+  } catch (error) {
+    return { ok: false, output: "", error: error instanceof Error ? error.message : "网络错误" };
+  }
+}
+
 export async function gitStashDropRemote(projectPath: string, stashIndex: number): Promise<GitStashResult> {
   try {
     const response = await fetch(backendUrl("/backend/vibe/git/stash-drop"), {

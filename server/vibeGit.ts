@@ -566,6 +566,15 @@ export async function gitStashPop(projectRoot: string, stashIndex?: number): Pro
   }
 }
 
+export async function gitStashApply(projectRoot: string, stashIndex: number): Promise<GitStashResult> {
+  try {
+    const { stdout, stderr } = await gitExec(projectRoot, ["stash", "apply", `stash@{${stashIndex}}`]);
+    return { ok: true, output: (stdout + stderr).trim() };
+  } catch (error) {
+    return { ok: false, output: "", error: error instanceof Error ? error.message : "应用贮藏失败" };
+  }
+}
+
 export async function gitStashDrop(projectRoot: string, stashIndex: number): Promise<GitStashResult> {
   try {
     const { stdout, stderr } = await gitExec(projectRoot, ["stash", "drop", `stash@{${stashIndex}}`]);

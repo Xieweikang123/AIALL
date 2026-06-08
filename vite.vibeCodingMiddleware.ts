@@ -1079,19 +1079,28 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
 
       const diffText = diffResult.patch || "";
       const fileList = stagedFiles.map((f) => `${f.status}: ${f.path}`).join("\n");
-      const prompt = `你是一个 Git 提交信息生成器。根据以下已暂存的文件变更生成一条简洁的中文提交信息（一行，不超过 72 个字符）。
+      const prompt = `你是一个 Git 提交信息生成器。根据以下已暂存的文件变更生成一条准确的中文提交信息。
 
 已暂存文件列表：
 ${fileList}
 
 Diff 内容：
-${diffText.slice(0, 8000)}
+${diffText.slice(0, 12000)}
 
 要求：
 - 使用中文
-- 简明扼要描述做了什么
+- 第一行：简洁概括变更（不超过72字符），使用动词开头，描述"做了什么"
+- 如果需要，在第一行后空一行，提供更详细的说明（可选）
+- 分析变更类型：新功能、修复、重构、文档、样式、测试、构建、配置等
+- 描述变更的目的和影响，而不仅仅是代码改动
 - 不要加前缀如 "feat:" 或 "fix:"，直接描述变更内容
-- 不要加引号或句号`;
+- 不要加引号或句号
+
+示例：
+添加用户登录功能，支持邮箱和手机号验证
+修复订单支付状态同步问题，确保库存及时更新
+重构用户模块代码结构，提升可维护性和测试覆盖率
+更新项目文档，补充API接口使用说明`;
 
       const chatEndpoint = resolveChatEndpoint(body.endpoint);
       const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -1437,6 +1446,32 @@ ${diffText.slice(0, 8000)}
     }
   });
 
+  // POST /backend/vibe/git/stash-apply
+  middlewares.use("/backend/vibe/git/stash-apply", async (req, res) => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "仅支持 POST 请求" });
+      return;
+    }
+
+    try {
+      const body = (await readJsonBody(req)) as { path?: string; stashIndex?: number };
+      if (!body.path?.trim()) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 参数" });
+        return;
+      }
+      if (body.stashIndex === undefined) {
+        sendJson(res, 400, { ok: false, error: "缺少 stashIndex 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(body.path.trim());
+      const result = await gitStashApply(resolved, body.stashIndex);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, output: "", error: error instanceof Error ? error.message : "应用贮藏失败" });
+    }
+  });
+
   // POST /backend/vibe/git/stash-drop
   middlewares.use("/backend/vibe/git/stash-drop", async (req, res) => {
     if (req.method !== "POST") {
@@ -1460,6 +1495,90 @@ ${diffText.slice(0, 8000)}
       sendJson(res, 200, result);
     } catch (error) {
       sendJson(res, 500, { ok: false, output: "", error: error instanceof Error ? error.message : "删除贮藏失败" });
+    }
+  });
+
+  // POST /backend/vibe/file-watcher/start
+  middlewares.use("/backend/vibe/file-watcher/start", async (req, res) => {
+    try {
+      const body = (await readJsonBody(req)) as { path?: string; watchPaths?: string[] };
+      if (!body.path?.trim()) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(body.path.trim());
+      const watchPaths = body.watchPaths || [resolved];
+      
+      const { startGlobalWatcher, getGlobalWatcher } = await import("./server/fileWatcher");
+      const watcher = getGlobalWatcher();
+      
+      if (watcher.isWatching()) {
+        await watcher.stop();
+      }
+      
+      await startGlobalWatcher(watchPaths);
+      sendJson(res, 200, { ok: true, message: "文件监听已启动", watchedPaths: watcher.getWatchedPaths() });
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "启动文件监听失败" });
+    }
+  });
+
+  // POST /backend/vibe/file-watcher/stop
+  middlewares.use("/backend/vibe/file-watcher/stop", async (req, res) => {
+    try {
+      const { stopGlobalWatcher } = await import("./server/fileWatcher");
+      await stopGlobalWatcher();
+      sendJson(res, 200, { ok: true, message: "文件监听已停止" });
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "停止文件监听失败" });
+    }
+  });
+
+  // GET /backend/vibe/file-watcher/changes
+  middlewares.use("/backend/vibe/file-watcher/changes", async (req, res) => {
+    try {
+      const { getGlobalWatcher } = await import("./server/fileWatcher");
+      const watcher = getGlobalWatcher();
+      
+      if (!watcher.isWatching()) {
+        sendJson(res, 200, { ok: true, changes: [], isWatching: false });
+        return;
+      }
+
+      // Get changes from the watcher
+      const changes: Array<{ type: string; path: string; timestamp: number }> = [];
+      
+      // Listen for changes for a short period
+      const timeout = 1000; // 1 second timeout
+      const startTime = Date.now();
+      
+      const onChanges = (newChanges: Array<{ type: string; path: string; timestamp: number }>) => {
+        changes.push(...newChanges);
+      };
+      
+      watcher.on("changes", onChanges);
+      
+      // Wait for changes or timeout
+      await new Promise<void>((resolve) => {
+        const checkInterval = setInterval(() => {
+          if (Date.now() - startTime >= timeout) {
+            clearInterval(checkInterval);
+            resolve();
+          }
+        }, 100);
+      });
+      
+      watcher.removeListener("changes", onChanges);
+      
+      sendJson(res, 200, { 
+        ok: true, 
+        changes, 
+        isWatching: watcher.isWatching(),
+        watchedPaths: watcher.getWatchedPaths()
+      });
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "获取文件变化失败" });
     }
   });
 }

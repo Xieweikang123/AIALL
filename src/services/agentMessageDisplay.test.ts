@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildWrittenFilesSummary,
   filterDuplicateFeedThoughts,
+  finalizeAssistantBubbleContent,
+  hasSubstantiveAgentSummary,
   resolveAssistantBubbleContent,
   thoughtDuplicatesBubble,
 } from "./agentMessageDisplay";
@@ -35,6 +38,57 @@ describe("resolveAssistantBubbleContent", () => {
         ],
       }),
     ).toBe("## 总结\n表格");
+  });
+});
+
+describe("finalizeAssistantBubbleContent", () => {
+  it("appends written-files summary after planning-only text", () => {
+    const result = finalizeAssistantBubbleContent({
+      content: "现在开始批量修改：",
+      writtenFiles: ["src/views/VibeCodingView.vue"],
+      roundGroups: [
+        {
+          turn: 1,
+          modelSteps: [],
+          toolIds: [],
+          response: {
+            assistantText: "现在开始批量修改：",
+            toolCalls: [{ id: "1", name: "patch_file", arguments: "{}" }],
+            hasToolCalls: true,
+            isFinal: false,
+          },
+        },
+      ],
+    });
+    expect(result).toContain("现在开始批量修改：");
+    expect(result).toContain("## 修改完成");
+    expect(result).toContain("`src/views/VibeCodingView.vue`");
+  });
+
+  it("keeps substantive final summaries", () => {
+    const msg = {
+      content: "中间说明",
+      writtenFiles: ["a.ts"],
+      roundGroups: [
+        {
+          turn: 2,
+          modelSteps: [],
+          toolIds: [],
+          response: {
+            assistantText: "## 修改完成\n已将 Pop 改为 Apply，并更新了后端路由与前端客户端。",
+            toolCalls: [],
+            hasToolCalls: false,
+            isFinal: true,
+          },
+        },
+      ],
+    };
+    expect(hasSubstantiveAgentSummary(msg)).toBe(true);
+    expect(finalizeAssistantBubbleContent(msg)).toBe(resolveAssistantBubbleContent(msg));
+  });
+
+  it("builds aborted partial-write summary", () => {
+    expect(buildWrittenFilesSummary(["a.ts"], true)).toContain("运行中断");
   });
 });
 

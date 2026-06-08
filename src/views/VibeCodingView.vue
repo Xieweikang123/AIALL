@@ -220,10 +220,10 @@
                       type="button"
                       class="ghost tiny"
                       :disabled="!!gitStashAction"
-                      @click="doStashPop(stash.index)"
-                      title="应用并移除此贮藏"
+                      @click="doStashApply(stash.index)"
+                      title="应用贮藏（保留贮藏）"
                     >
-                      {{ gitStashAction === 'pop-' + stash.index ? '…' : 'Pop' }}
+                      {{ gitStashAction === 'apply-' + stash.index ? '…' : 'Apply' }}
                     </button>
                     <button
                       type="button"
@@ -1321,6 +1321,7 @@ import {
 } from "../services/agentCursorFeed";
 import {
   filterDuplicateFeedThoughts,
+  finalizeAssistantBubbleContent,
   resolveAssistantBubbleContent,
 } from "../services/agentMessageDisplay";
 import { isScrollNearBottom, scrollElementToBottom } from "../utils/scrollViewport";
@@ -1369,13 +1370,19 @@ import {
   gitPushRemote,
   gitStashListRemote,
   gitStashSaveRemote,
-  gitStashPopRemote,
+  gitStashApplyRemote,
   gitStashDropRemote,
   type GitStatusFile,
   type GitLogEntry,
   type GitLogFile,
   type GitRemoteInfo,
 } from "../services/vibeGitClient";
+import {
+  startFileWatcher,
+  stopFileWatcher,
+  getFileWatcherChanges,
+  type FileChangeEvent,
+} from "../services/fileWatcherClient";
 
 const { confirm } = useConfirm();
 const inputPrompt = useInputPrompt();
@@ -2650,7 +2657,7 @@ function messageDisplayContent(msg: ChatMessage): string {
     return msg.content?.trim() || "";
   }
   if (canResumeAgentRun(msg)) return resolveAgentFailureBubbleContent(msg);
-  return resolveAssistantBubbleContent(msg);
+  return finalizeAssistantBubbleContent(msg);
 }
 
 function isActiveModelStep(msg: ChatMessage, group: AgentRoundGroupView, step: { phase: string }): boolean {
@@ -3697,12 +3704,12 @@ async function doStashSave() {
   }
 }
 
-async function doStashPop(stashIndex: number) {
+async function doStashApply(stashIndex: number) {
   if (!projectOpened.value) return;
-  gitStashAction.value = `pop-${stashIndex}`;
+  gitStashAction.value = `apply-${stashIndex}`;
   gitError.value = "";
   try {
-    const result = await gitStashPopRemote(projectPath.value.trim(), stashIndex);
+    const result = await gitStashApplyRemote(projectPath.value.trim(), stashIndex);
     if (!result.ok) {
       gitError.value = result.error || "应用贮藏失败";
       return;
@@ -5055,10 +5062,11 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
 
     assistantMsg.status = "";
     assistantMsg.agentPhase = undefined;
-    if (!assistantMsg.content?.trim()) {
-      const resolved = resolveAssistantBubbleContent(assistantMsg);
-      if (resolved) assistantMsg.content = resolved;
-    }
+    assistantMsg.content = finalizeAssistantBubbleContent({
+      ...assistantMsg,
+      wasAborted,
+      writtenFiles: fileAction.writtenFiles,
+    });
     patchAssistantMsg(msgId, {
       status: "",
       agentPhase: undefined,
