@@ -53,11 +53,13 @@ import {
   buildModelIdentityHint,
   buildVisionConsultativeContinueHint,
   buildVisionFirstTurnContinueHint,
+  buildVisionFirstTurnPrematureCompletionRetryHint,
   buildVisionFirstTurnRetryHint,
   buildVisionUserContent,
   contentCharSize,
   contentDisplayText,
   isAdequateVisionFirstTurnDescription,
+  isPrematureVisionCompletionClaim,
   isVisionUnsupportedError,
   sanitizeImageDataUrls,
   shouldRequireVisionFirstTurn,
@@ -476,6 +478,7 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "用户附截图询问界面/功能时：先描述截图所见，再判断是否属于本项目（优先查 src/views、src/components），勿默认是 GitHub Desktop、VS Code 等外部应用。",
     "用户针对截图局部提问（配色、按钮、某块区域）时：讨论阶段只谈其所指可见范围，勿擅自扩大到整页/全项目样式盘点；若用户明确要求修改，可在该范围内 grep/read 对应组件后 patch_file；用户明确说「整个/整页/全面板」时可按扩大后的范围实施。",
     "若用户仅为提问/解释（如「是什么」「为什么」「点哪里」「怎么工作」）且未明确要求改代码：只读探索后用自然语言回答，禁止 patch_file / write_file / delete_file；需要改代码时请用户明确说明改什么。",
+    "用户要求「点击输入框任意位置可输入/聚焦」时：先 read_file 核对父容器（如 chat-input-box）与 contenteditable 子元素的 DOM 层级与命中区域；常见修复为外层 mousedown 转发 focus 或子元素 min-height:100% 填满，勿默认只加 padding。",
     "工作流程（用户已要求实施改动时）：先 grep / search_files 快速定位（通常 1 轮），read_file 读关键片段，然后 patch_file / write_file 修改。",
     "效率：探索不超过 2 轮；在已确认要改代码的任务中，信息足够后必须写入，不要连续多轮只读；同一轮可并行多个 read_file / grep。",
     "探索时：read_file 用 offset/limit 分段读取（单次约 200 行）；不要重复读取已读过的文件；用中文简短说明后立即调用工具。",
@@ -1213,7 +1216,12 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
           });
           continue;
         }
-        messages.push({ role: "system", content: buildVisionFirstTurnRetryHint() });
+        messages.push({
+          role: "system",
+          content: isPrematureVisionCompletionClaim(text)
+            ? buildVisionFirstTurnPrematureCompletionRetryHint()
+            : buildVisionFirstTurnRetryHint(),
+        });
         onEvent({
           type: "turn_response",
           data: {

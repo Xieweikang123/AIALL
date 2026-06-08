@@ -17,8 +17,9 @@ import {
   writeFileContent,
 } from "./server/vibeFs";
 import { gitStatus, gitDiff, gitDiffFile, gitDiffContent, gitCommitFileDiff, gitCommit, gitLog, gitIsRepo, gitAdd, gitReset, gitDiscard, gitDiscardAll, gitRemotes, gitFetch, gitPull, gitPush, gitStashList, gitStashSave, gitStashPop, gitStashApply, gitStashDrop } from "./server/vibeGit";
-import { upsertChatStoreIndex } from "./server/chatStoreIndex";
+import { upsertChatStoreIndexEntry } from "./server/chatStoreIndex";
 import { mergeSessionPayloadForDisk } from "./server/chatStoreMerge";
+import { externalizeSessionPayload, readImageRefAsBuffer, readImageRefAsDataUrl } from "./server/vibeChatImages";
 
 const execFileAsync = promisify(execFile);
 
@@ -341,6 +342,40 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
     }
   });
 
+  // GET /backend/vibe/chat-image-file — raw bytes for <img src> (no base64 JSON hop)
+  middlewares.use("/backend/vibe/chat-image-file", async (req, res) => {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { ok: false, error: "仅支持 GET 请求" });
+      return;
+    }
+
+    try {
+      const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+      const projectPath = (url.searchParams.get("projectPath") || "").trim();
+      const relPath = (url.searchParams.get("path") || "").trim();
+      if (!projectPath || !relPath) {
+        sendJson(res, 400, { ok: false, error: "缺少 projectPath 或 path" });
+        return;
+      }
+
+      const chatDir = path.join(path.resolve(projectPath), ".aiall", "vibe-chat-sessions");
+      const loaded = await readImageRefAsBuffer(chatDir, relPath);
+      if (!loaded) {
+        sendJson(res, 404, { ok: false, error: "图片不存在" });
+        return;
+      }
+      res.statusCode = 200;
+      res.setHeader("Content-Type", loaded.mime);
+      res.setHeader("Cache-Control", "private, max-age=3600");
+      res.end(loaded.buffer);
+    } catch (error) {
+      sendJson(res, 500, {
+        ok: false,
+        error: error instanceof Error ? error.message : "读取图片失败",
+      });
+    }
+  });
+
   // POST /backend/vibe/chat-store-sync
   middlewares.use("/backend/vibe/chat-store-sync", async (req, res) => {
     if (req.method !== "POST") {
@@ -474,7 +509,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
           : body.data;
       await fs.promises.writeFile(sessionFile, JSON.stringify(payload, null, 2), "utf-8");
       if (payload && typeof payload === "object") {
-        await upsertChatStoreIndex(chatDir, resolved, payload as Record<string, unknown>, sessionId, {
+        await upsertChatStoreIndexEntry(chatDir, resolved, payload as Record<string, unknown>, sessionId, {
           activeSessionId,
         });
       }

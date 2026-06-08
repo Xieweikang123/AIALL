@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAgentPromptForProfile,
+  enrichAgentUserPrompt,
   resolveAgentMaxTurns,
   resolveAgentResumeRunProfile,
   resolveAgentRunProfile,
@@ -69,6 +70,26 @@ describe("resolveAgentRunProfile", () => {
     expect(profile.kind).toBe("execute_plan");
     expect(profile.userIntent).toContain("支持");
     expect(profile.targetFiles).toBeUndefined();
+  });
+
+  it("uses execute_plan when user clarifies click-anywhere input requirement", () => {
+    const profile = resolveAgentRunProfile({
+      prompt: "我要的效果是，点击输入框任何位置，都能输入",
+      mode: "build",
+      lastAssistantContent: "已修复聚焦描边样式。",
+    });
+    expect(profile.kind).toBe("execute_plan");
+    expect(profile.userIntent).toContain("任何位置");
+  });
+
+  it("enrichAgentUserPrompt keeps scope hint even when images are attached", () => {
+    const prior = "已修复。添加了 `.composer-editor.focused` 聚焦描边。";
+    const hint = enrichAgentUserPrompt("我要的效果是，点击输入框任何位置，都能输入", {
+      lastAssistantContent: prior,
+      hasImages: true,
+    });
+    expect(hint).toContain("点击/聚焦交互");
+    expect(hint).not.toBe("我要的效果是，点击输入框任何位置，都能输入");
   });
 
   it("uses execute_plan for 继续 after partial progress on resume", () => {

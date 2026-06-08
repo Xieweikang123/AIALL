@@ -5,6 +5,7 @@ import {
   finalizeAssistantBubbleContent,
   hasSubstantiveAgentSummary,
   isEnglishToolNarration,
+  isTruncatedAssistantAnswer,
   mergeAssistantTurnText,
   resolveAssistantBubbleContent,
   resolveCompletedAgentBubbleContent,
@@ -216,6 +217,41 @@ describe("finalizeAssistantBubbleContent", () => {
 
   it("builds aborted partial-write summary", () => {
     expect(buildWrittenFilesSummary(["a.ts"], true)).toContain("运行中断");
+  });
+
+  it("detects truncated final answers ending with a colon", () => {
+    expect(
+      isTruncatedAssistantAnswer(
+        "已添加 padding: 6px 10px，确保输入框内有足够点击区域。同时确保占位文字覆盖全宽，点击任意位置都能聚焦输入：",
+      ),
+    ).toBe(true);
+  });
+
+  it("appends written-files summary when final answer is truncated", () => {
+    const msg = {
+      content:
+        "已添加 padding: 6px 10px，确保输入框内有足够点击区域。同时确保占位文字覆盖全宽，点击任意位置都能聚焦输入：",
+      writtenFiles: ["src/components/ChatComposerEditor.vue"],
+      roundGroups: [
+        {
+          turn: 7,
+          modelSteps: [],
+          toolIds: ["t1"],
+          narrative: "需要在父容器转发 focus，而不是只改 padding。",
+          response: {
+            assistantText:
+              "已添加 padding: 6px 10px，确保输入框内有足够点击区域。同时确保占位文字覆盖全宽，点击任意位置都能聚焦输入：",
+            toolCalls: [],
+            hasToolCalls: false,
+            isFinal: true,
+          },
+        },
+      ],
+    };
+    expect(hasSubstantiveAgentSummary(msg)).toBe(false);
+    const result = finalizeAssistantBubbleContent(msg);
+    expect(result).toContain("## 修改完成");
+    expect(result).toContain("ChatComposerEditor.vue");
   });
 });
 

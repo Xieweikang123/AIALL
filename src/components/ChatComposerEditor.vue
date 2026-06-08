@@ -463,6 +463,7 @@ void nextTick(() => syncEmpty());
   color: var(--text, rgba(255, 255, 255, 0.92));
   word-break: break-word;
   white-space: pre-wrap;
+  padding: 6px 10px;
 }
 
 .composer-editor.empty::before {
@@ -472,6 +473,11 @@ void nextTick(() => syncEmpty());
   color: rgba(255, 255, 255, 0.4);
   pointer-events: none;
   user-select: none;
+}
+
+.composer-editor.focused {
+  outline: 1.5px solid rgba(99, 147, 255, 0.65);
+  outline-offset: -1px;
 }
 
 .composer-editor.disabled {

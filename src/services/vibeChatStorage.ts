@@ -415,7 +415,11 @@ function sanitizeMessages(
               ...(imageCount ? { imageCount } : {}),
             }
           : compactImages
-            ? { imageDataUrls: compactImages, ...(imageCount ? { imageCount } : {}) }
+            ? {
+                imageDataUrls: compactImages,
+                ...(m.imageRefs?.length ? { imageRefs: m.imageRefs.map((r) => ({ path: r.path })) } : {}),
+                ...(imageCount ? { imageCount } : {}),
+              }
             : m.imageRefs?.length
               ? { imageRefs: m.imageRefs.map((r) => ({ path: r.path })), ...(imageCount ? { imageCount } : {}) }
               : m.imageDataUrls?.length
@@ -659,6 +663,36 @@ export function hasVibeChatHistory(projectPath: string): boolean {
   if (record?.sessions.some((s) => s.messages.length > 0)) return true;
   const indexed = readIndex().byProject[key];
   return Boolean(indexed?.sessions.some((s) => s.messageCount > 0));
+}
+
+/** True when localStorage index says a session has messages but memory is empty or missing image refs. */
+export function projectChatNeedsDiskRestore(projectPath: string, sessionId?: string): boolean {
+  const key = normalizeProjectKey(projectPath);
+  if (!key) return false;
+  const record = getProjectRecord(key);
+  const indexed = readIndex().byProject[key];
+  if (!indexed?.sessions?.length) return false;
+
+  const metas = sessionId
+    ? indexed.sessions.filter((s) => s.id === sessionId)
+    : indexed.sessions;
+
+  for (const meta of metas) {
+    const expected = meta.messageCount ?? 0;
+    if (expected <= 0) continue;
+    const session = record?.sessions.find((s) => s.id === meta.id);
+    if (!session || session.messages.length === 0) return true;
+    if (session.messages.length < expected) return true;
+    const missingImages = session.messages.some(
+      (m) =>
+        m.role === "user" &&
+        ((m.imageCount ?? 0) > 0 || (m.imageRefs?.length ?? 0) > 0) &&
+        !m.imageRefs?.length &&
+        !m.imageDataUrls?.length,
+    );
+    if (missingImages) return true;
+  }
+  return false;
 }
 
 export function restoreChatStoreFromSnapshot(snapshot: VibeChatProjectSnapshot): boolean {

@@ -71,14 +71,22 @@ export async function writeImageRef(
 }
 
 export async function readImageRefAsDataUrl(chatDir: string, refPath: string): Promise<string | null> {
+  const loaded = await readImageRefAsBuffer(chatDir, refPath);
+  if (!loaded) return null;
+  return `data:${loaded.mime};base64,${loaded.buffer.toString("base64")}`;
+}
+
+export async function readImageRefAsBuffer(
+  chatDir: string,
+  refPath: string,
+): Promise<{ buffer: Buffer; mime: string } | null> {
   const normalized = refPath.replace(/\\/g, "/").replace(/^\/+/, "");
   if (!normalized.startsWith("images/") || normalized.includes("..")) return null;
   const abs = path.join(chatDir, normalized.split("/").join(path.sep));
   const buf = await fs.promises.readFile(abs).catch(() => null);
   if (!buf?.length) return null;
   const ext = path.extname(abs).slice(1).toLowerCase();
-  const mime = mimeFromExt(ext);
-  return `data:${mime};base64,${buf.toString("base64")}`;
+  return { buffer: buf, mime: mimeFromExt(ext) };
 }
 
 /** Persist user-message images to disk; strip base64 from serialized payload. */

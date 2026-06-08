@@ -86,7 +86,6 @@ export function enrichAgentUserPrompt(
   prompt: string,
   options?: { lastAssistantContent?: string; hasImages?: boolean },
 ): string {
-  if (options?.hasImages) return prompt;
   return buildUiScopeFollowUpHint(prompt, options?.lastAssistantContent);
 }
 

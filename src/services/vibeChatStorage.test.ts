@@ -182,6 +182,21 @@ describe("sanitizePersistedChatMessages", () => {
     expect(sanitized[0].content).toBe("看这张图");
   });
 
+  it("retains imageRefs alongside compact in-memory image previews", () => {
+    const dataUrl = `data:image/png;base64,${"a".repeat(1000)}`;
+    const sanitized = sanitizePersistedChatMessages([
+      {
+        id: "u1",
+        role: "user",
+        content: "看这张图",
+        imageDataUrls: [dataUrl],
+        imageRefs: [{ path: "images/sess/u1-0.png" }],
+      },
+    ]);
+    expect(sanitized[0].imageDataUrls?.[0]).toBe(dataUrl);
+    expect(sanitized[0].imageRefs).toEqual([{ path: "images/sess/u1-0.png" }]);
+  });
+
   it("forDisk payload retains imageDataUrls for server externalize", () => {
     const dataUrl = `data:image/png;base64,${"a".repeat(1000)}`;
     const sanitized = sanitizePersistedChatMessages(

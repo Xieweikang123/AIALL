@@ -19,6 +19,14 @@ export function buildModelIdentityHint(model: string): string {
 const UI_IMAGE_QUESTION_RE =
   /截图|图片|界面|面板|哪块|哪里|看到的|发图|粘贴|screen|screenshot|ui/i;
 
+/** Click-to-focus / hit-target interaction (distinct from padding-only layout tweaks). */
+export const UI_CLICK_FOCUS_INTERACTION_RE =
+  /任何位置|任意位置|点到哪|点哪里|点击.{0,8}(输入|聚焦|focus)|都能输入|都能聚焦|点.{0,6}空白|点不到|没反应|聚焦输入/i;
+
+/** User clarifies desired behavior — treat as implementation in Build follow-ups. */
+export const UI_REQUIREMENT_SPEC_RE =
+  /我要的效果|我期望|期望效果|应该是|需要能|要能|得能|想要的效果/i;
+
 /** Layout/spacing feedback often paired with screenshots ("你看挤一块了"). */
 const UI_LAYOUT_FEEDBACK_RE =
   /挤|贴|挨|重叠|太紧|间距|spacing|overlap|cramped|你看|看一下|一块|不好看|丑/i;
@@ -43,6 +51,14 @@ const UI_REGION_STATEMENT_RE =
 const UI_MODULE_STATEMENT_RE =
   /这是[^。\n]{0,48}(助手|Vibe|聊天|输入|面板|模块|区域|Composer|编辑器|底栏|侧栏)/i;
 
+export function buildClickFocusInteractionHint(): string {
+  return [
+    "【点击/聚焦交互】用户要求点击输入区域任意位置即可输入或聚焦。",
+    "这通常不是单纯加大 padding：须核对父容器（如 chat-input-box）与内层 contenteditable 的命中区域是否一致；",
+    "常见修复：外层 mousedown 转发 focus、或让 editable 用 min-height:100% 填满父容器；改 padding 前先 read_file 看清 DOM 层级。",
+  ].join("");
+}
+
 export function buildVisionFirstTurnRule(): string {
   return [
     "【附图·首轮必读图】你必须先仔细查看附带图片，用中文描述所见：",
@@ -50,7 +66,8 @@ export function buildVisionFirstTurnRule(): string {
     "- 须引用图中可辨识的占位符或标签原文（用「」括起），并写明「据此可判断这是 …」；",
     "- 再补充控件类型、布局关系；若用户反馈拥挤/重叠/不好看，须点名哪两个（或哪组）元素及其关系。",
     "本轮禁止调用任何工具；仅输出读图描述，下一轮可用 grep 图中摘录的文案定位源码。",
-    "布局问题后续修改时优先检查 flex-shrink、min-width、overflow、gap、margin，勿先加装饰性分隔线。",
+    "读图首轮禁止写「已修改/已修复/已添加/已做」等完成时态，禁止描述尚未执行的 patch。",
+    "布局问题后续修改时优先检查 flex-shrink、min-width、overflow、gap、margin；点击/聚焦问题另查 DOM 层级与 focus 转发，勿默认只加 padding。",
   ].join("\n");
 }
 
@@ -81,6 +98,20 @@ export function buildVisionFirstTurnRetryHint(): string {
   ].join("");
 }
 
+export function buildVisionFirstTurnPrematureCompletionRetryHint(): string {
+  return [
+    "【附图首轮·禁止抢答】你在尚未调用工具前写了「已修改/已修复/已添加/已做」等完成表述。",
+    "读图首轮只能描述截图所见与控件类型，不得声称已改代码。请重写读图描述，本轮仍不要调用工具。",
+  ].join("");
+}
+
+/** Vision-first turn must not claim code changes before any tool runs. */
+export function isPrematureVisionCompletionClaim(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  return /已(?:经)?(?:修复|修改|添加|完成|写入|调整|做)|已做的修改|现在点击输入框任何位置/i.test(trimmed);
+}
+
 function hasVisibleAnchorQuote(text: string): boolean {
   return VISIBLE_ANCHOR_QUOTE_RE.test(text);
 }
@@ -97,6 +128,7 @@ function describesScreenshotUiRegion(text: string): boolean {
 export function isAdequateVisionFirstTurnDescription(text: string): boolean {
   const trimmed = text.trim();
   if (trimmed.length < VISION_FIRST_TURN_MIN_DESCRIPTION_CHARS) return false;
+  if (isPrematureVisionCompletionClaim(trimmed)) return false;
   return describesScreenshotUiRegion(trimmed);
 }
 
@@ -110,7 +142,7 @@ const UI_OPINION_FOLLOWUP_RE =
 
 /** User wants code changes; allow scoped grep/patch within the prior screenshot region. */
 const UI_IMPLEMENTATION_INTENT_RE =
-  /帮我|改一下|修改|实现|统一|调整|动手|写入|应用|做成|换成|去掉|减少|精简一下|收敛到|只留|合并|优化一下/i;
+  /帮我|改一下|修改|修复|实现|统一|调整|动手|写入|应用|做成|换成|去掉|减少|精简一下|收敛到|只留|合并|优化一下|我要的效果|期望效果|要能|需要能/i;
 
 /** User explicitly widens scope beyond the prior screenshot region. */
 const UI_EXPLICIT_EXPAND_RE = /整个|整页|全面板|全面板|整块|全局|所有/i;
@@ -124,28 +156,50 @@ const UI_SCOPE_IMPLEMENT =
 const UI_SCOPE_IMPLEMENT_EXPANDED =
   "实施时：用户已明确要求扩大改动范围，按其所述区域实施，勿超出其描述。";
 
+function isUiInputInteractionThread(content: string): boolean {
+  return /输入框|Composer|composer-editor|chat-input|聚焦|focus|contenteditable|点击.{0,6}输入|padding|占位/.test(
+    content,
+  );
+}
+
 function isScreenshotScopedUiThread(lastAssistantContent: string): boolean {
   const priorMentionsScreenshot = /截图|如图所示|从截图|截图中|截图里|从图|图里|图中/.test(
     lastAssistantContent,
   );
   const priorUiTopic =
-    NARROW_UI_TOPIC_RE.test(lastAssistantContent) || UI_IMAGE_QUESTION_RE.test(lastAssistantContent);
+    NARROW_UI_TOPIC_RE.test(lastAssistantContent) ||
+    UI_IMAGE_QUESTION_RE.test(lastAssistantContent) ||
+    isUiInputInteractionThread(lastAssistantContent);
+  if (isUiInputInteractionThread(lastAssistantContent)) return true;
   return priorMentionsScreenshot && priorUiTopic;
+}
+
+function hasUiImplementationIntent(body: string): boolean {
+  return (
+    UI_IMPLEMENTATION_INTENT_RE.test(body) ||
+    UI_REQUIREMENT_SPEC_RE.test(body) ||
+    UI_CLICK_FOCUS_INTERACTION_RE.test(body)
+  );
 }
 
 export function buildVisionTaskText(text: string, imageCount: number): string {
   if (imageCount <= 0) return text;
   const body = text.trim() || "请描述并分析附带的图片。";
   const firstTurnRule = buildVisionFirstTurnRule();
+  const clickFocusHint = UI_CLICK_FOCUS_INTERACTION_RE.test(body)
+    ? `\n\n${buildClickFocusInteractionHint()}`
+    : "";
   const isUiQuestion =
     UI_IMAGE_QUESTION_RE.test(body) ||
     NARROW_UI_TOPIC_RE.test(body) ||
-    UI_LAYOUT_FEEDBACK_RE.test(body);
+    UI_LAYOUT_FEEDBACK_RE.test(body) ||
+    UI_CLICK_FOCUS_INTERACTION_RE.test(body) ||
+    UI_REQUIREMENT_SPEC_RE.test(body);
   if (!isUiQuestion) {
-    return `${firstTurnRule}\n\n${body}`;
+    return `${firstTurnRule}${clickFocusHint}\n\n${body}`;
   }
 
-  const implementing = UI_IMPLEMENTATION_INTENT_RE.test(body);
+  const implementing = hasUiImplementationIntent(body);
   const expanded = UI_EXPLICIT_EXPAND_RE.test(body);
   const scopeRule = implementing
     ? expanded
@@ -153,10 +207,10 @@ export function buildVisionTaskText(text: string, imageCount: number): string {
       : UI_SCOPE_IMPLEMENT
     : UI_SCOPE_DISCUSS;
   const toolHint = implementing
-    ? "读图描述须先根据占位符/标签说明截图是哪块界面，下一轮再 grep 该文案并在对应源码内修改。"
+    ? "读图描述须先根据占位符/标签说明截图是哪块界面，下一轮再 grep 该文案并在对应源码内修改；修改前先 read_file 父/子 DOM 层级，勿在未读代码前声称已改完。"
     : "读图须说明截图对应哪块界面（可据占位符/标签推断），并覆盖用户所指可见范围；不要跳过读图先去全盘 grep/search。";
   const prefix = `【附图为本消息重点】${scopeRule} ${toolHint} 若界面像 Git/设置/聊天等，优先在 src/views 中查找，勿默认是外部应用。`;
-  return `${firstTurnRule}\n\n${prefix}\n\n${body}`;
+  return `${firstTurnRule}${clickFocusHint}\n\n${prefix}\n\n${body}`;
 }
 
 /**
@@ -168,16 +222,24 @@ export function buildUiScopeFollowUpHint(prompt: string, lastAssistantContent?: 
   if (!body || !lastAssistantContent?.trim()) return prompt;
   if (!isScreenshotScopedUiThread(lastAssistantContent)) return prompt;
 
-  const implementing = UI_IMPLEMENTATION_INTENT_RE.test(body);
+  const implementing = hasUiImplementationIntent(body);
   const expanded = UI_EXPLICIT_EXPAND_RE.test(body);
   const opinionFollowUp =
     UI_OPINION_FOLLOWUP_RE.test(body) || (NARROW_UI_TOPIC_RE.test(body) && !implementing);
 
-  if (!implementing && !opinionFollowUp) return prompt;
+  if (!implementing && !opinionFollowUp) {
+    if (UI_CLICK_FOCUS_INTERACTION_RE.test(body)) {
+      return ["【延续 UI 交互需求·实施】", buildClickFocusInteractionHint(), "", body].join("\n");
+    }
+    return prompt;
+  }
 
   if (implementing) {
     const scopeRule = expanded ? UI_SCOPE_IMPLEMENT_EXPANDED : UI_SCOPE_IMPLEMENT;
-    return ["【延续上一轮截图范围·实施】", scopeRule, "", body].join("\n");
+    const clickFocusHint = UI_CLICK_FOCUS_INTERACTION_RE.test(body)
+      ? `\n${buildClickFocusInteractionHint()}`
+      : "";
+    return ["【延续上一轮截图范围·实施】", scopeRule, clickFocusHint, "", body].filter(Boolean).join("\n");
   }
 
   return [

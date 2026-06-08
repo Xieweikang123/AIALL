@@ -8,6 +8,7 @@ import {
   contentCharSize,
   contentDisplayText,
   isAdequateVisionFirstTurnDescription,
+  isPrematureVisionCompletionClaim,
   isVisionUnsupportedError,
   sanitizeImageDataUrls,
   shouldRequireVisionFirstTurn,
@@ -130,6 +131,30 @@ describe("visionMessage", () => {
   it("buildUiScopeFollowUpHint skips unrelated follow-ups", () => {
     const prior = "## 修改完成\n\n已写入 a.ts";
     expect(buildUiScopeFollowUpHint("配色感觉有点多了", prior)).toBe("配色感觉有点多了");
+  });
+
+  it("buildUiScopeFollowUpHint continues input interaction thread without screenshot keyword", () => {
+    const prior = "已修复。在 ChatComposerEditor.vue 添加了 `.composer-editor.focused` 聚焦描边。";
+    const hint = buildUiScopeFollowUpHint("我要的效果是，点击输入框任何位置，都能输入", prior);
+    expect(hint).toContain("延续");
+    expect(hint).toContain("点击/聚焦交互");
+    expect(hint).toContain("任何位置");
+  });
+
+  it("buildVisionTaskText adds click-focus hint for hit-target requirements", () => {
+    const text = buildVisionTaskText("我要的效果是，点击输入框任何位置，都能输入", 1);
+    expect(text).toContain("点击/聚焦交互");
+    expect(text).toContain("chat-input-box");
+    expect(text).not.toMatch(/勿默认只加 padding.*勿默认只加 padding/);
+  });
+
+  it("isPrematureVisionCompletionClaim rejects done-state before tools", () => {
+    expect(isPrematureVisionCompletionClaim("已做的修改：padding 改为 8px")).toBe(true);
+    expect(
+      isAdequateVisionFirstTurnDescription(
+        "占位符「描述要改什么」表明这是 Vibe 助手输入框。已修复 padding。",
+      ),
+    ).toBe(false);
   });
 
   it("buildModelIdentityHint uses configured model id", () => {

@@ -1,5 +1,6 @@
 import type { AgentRoundGroup } from "./agentRoundGroups";
 import type { CursorFeedItem } from "./agentCursorFeed";
+import { isPrematureVisionCompletionClaim } from "../../server/visionMessage";
 import { stripToolSummaryFromAssistantContent } from "./vibeChatStorage";
 
 export type AssistantBubbleSource = {
@@ -85,6 +86,9 @@ function pickBestAssistantBubbleText(candidates: string[], direct: string): stri
   }
 
   const longest = [...candidates].sort((a, b) => b.length - a.length)[0]!;
+  if (isTruncatedAssistantAnswer(direct) && longest.length > direct.length) {
+    return longest;
+  }
   if (direct.length >= SUBSTANTIVE_MIN_CHARS && direct.length >= longest.length * 0.85) {
     return direct;
   }
@@ -134,6 +138,10 @@ export function resolveCompletedAgentBubbleContent(msg: AssistantBubbleSource): 
   const visionPreamble = resolveVisionRegionPreamble(msg);
 
   if (finalText) {
+    if (isTruncatedAssistantAnswer(finalText)) {
+      const fallback = pickFallbackWhenFinalTruncated(msg, finalText);
+      if (fallback) return fallback;
+    }
     if (visionPreamble && !regionAnchorPresentInText(visionPreamble, finalText)) {
       return `${visionPreamble}\n\n${finalText}`;
     }
@@ -150,9 +158,32 @@ export function resolveCompletedAgentBubbleContent(msg: AssistantBubbleSource): 
 
 const COMPLETION_SUMMARY_RE = /(?:修改完成|已完成|已写入|总结|变更如下|完成了)/;
 
+/** Final model answer cut off mid-sentence (e.g. ends with a colon). */
+export function isTruncatedAssistantAnswer(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (/[：:]\s*$/.test(trimmed)) return true;
+  if (
+    trimmed.length < SUBSTANTIVE_MIN_CHARS &&
+    /已添加|已修复|已修改/.test(trimmed) &&
+    !/[。.!！?？]$/.test(trimmed)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function pickFallbackWhenFinalTruncated(msg: AssistantBubbleSource, finalText: string): string {
+  const candidates = collectAssistantTextCandidates(msg).filter(
+    (text) => text !== finalText && !isPrematureVisionCompletionClaim(text) && !isTruncatedAssistantAnswer(text),
+  );
+  return candidates.sort((a, b) => b.length - a.length)[0] || "";
+}
+
 /** Whether the model already gave a substantive completion summary. */
 export function hasSubstantiveAgentSummary(msg: AssistantBubbleSource): boolean {
   const finalText = resolveFinalAssistantText(msg);
+  if (finalText && isTruncatedAssistantAnswer(finalText)) return false;
   if (finalText.length >= SUBSTANTIVE_MIN_CHARS) return true;
   if (COMPLETION_SUMMARY_RE.test(finalText)) return true;
   const bubble = resolveAssistantBubbleContent(msg);

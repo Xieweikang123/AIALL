@@ -167,6 +167,14 @@ export async function syncChatSession(
   }
 }
 
+export function buildChatImageFileUrl(projectPath: string, refPath: string): string {
+  const qs = new URLSearchParams({
+    projectPath,
+    path: refPath,
+  });
+  return backendUrl(`/backend/vibe/chat-image-file?${qs.toString()}`);
+}
+
 export async function fetchChatImageDataUrl(
   projectPath: string,
   refPath: string,

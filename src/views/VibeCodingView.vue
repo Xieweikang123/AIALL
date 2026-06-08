@@ -214,14 +214,24 @@
                   <span class="git-stash-title">贮藏</span>
                   <span v-if="gitStashes.length" class="git-stash-count">{{ gitStashes.length }}</span>
                 </div>
-                <button
-                  type="button"
-                  class="ghost tiny stash-save-btn"
-                  :disabled="!!gitStashAction"
-                  @click="doStashSave"
-                >
-                  {{ gitStashAction === 'save' ? '…' : '贮藏当前更改' }}
-                </button>
+                <div class="git-stash-save-row">
+                  <input
+                    v-model="gitStashMessage"
+                    class="git-stash-msg-input"
+                    type="text"
+                    placeholder="贮藏信息（可选）"
+                    :disabled="!!gitStashAction"
+                    @keydown.enter="doStashSave"
+                  />
+                  <button
+                    type="button"
+                    class="ghost tiny stash-save-btn"
+                    :disabled="!!gitStashAction"
+                    @click="doStashSave"
+                  >
+                    {{ gitStashAction === 'save' ? '…' : '贮藏' }}
+                  </button>
+                </div>
               </div>
               <div v-if="gitStashes.length" class="git-stash-list">
                 <div v-for="stash in gitStashes" :key="stash.index" class="git-stash-item">
@@ -1248,7 +1258,10 @@ import ConfirmPopup from "../components/ConfirmPopup.vue";
 import InputPrompt from "../components/InputPrompt.vue";
 import FileTreeNode, { type TreeNode } from "../components/FileTreeNode.vue";
 import { useConfirm } from "../composables/useConfirm";
+import { useFileDrag } from "../composables/useFileDrag";
+import { useGitPanel, type GitFileDiff } from "../composables/useGitPanel";
 import { useInputPrompt } from "../composables/useInputPrompt";
+import { useSessionManager } from "../composables/useSessionManager";
 import {
   buildAgentPromptForProfile,
   enrichAgentUserPrompt,
@@ -1284,27 +1297,27 @@ import { compressImageDataUrlsForAgent } from "../services/imageCompress";
 import { loadAiChatBaseFromStorage } from "../services/aiLocalConfig";
 import {
   buildAgentHistoryFromMessages,
-  formatSessionTitle,
   clearVibeChatHistory,
-  deleteVibeChatSession,
-  getActiveVibeChatSessionId,
   getActiveSessionSnapshot,
   getVibeChatProjectSnapshot,
   hasVibeChatHistory,
-  listVibeChatSessions,
   loadVibeChatHistory,
   onStorageError,
+  projectChatNeedsDiskRestore,
   restoreChatStoreFromSnapshot,
   saveVibeChatHistory,
   stripReferenceAttachments,
   stripToolSummaryFromAssistantContent,
   switchVibeChatSession,
+  getActiveVibeChatSessionId,
   type PersistedChatMessage,
   type VibeChatSessionMeta,
 } from "../services/vibeChatStorage";
 import {
   hydrateChatMessagesImages,
   hydrateChatMessageImages,
+  chatMessagesNeedImageHydration,
+  resolveChatMessageImageUrls,
   resolveImagesForAgentTurn,
   stampImageRefsAfterSync,
 } from "../services/vibeChatImageStore";
@@ -1380,28 +1393,11 @@ import {
   type GrepMatch,
 } from "../services/vibeCodingClient";
 import {
-  fetchGitStatus,
-  fetchGitDiff,
   fetchGitDiffContent,
   fetchGitCommitFileDiff,
-  commitGitChanges,
   fetchGitLog,
-  stageGitFiles,
-  unstageGitFiles,
-  discardGitFiles,
-  generateCommitMessage as generateCommitMessageApi,
-  fetchGitRemotes,
-  gitFetchRemote,
-  gitPullRemote,
-  gitPushRemote,
-  gitStashListRemote,
-  gitStashSaveRemote,
-  gitStashApplyRemote,
-  gitStashDropRemote,
-  type GitStatusFile,
   type GitLogEntry,
   type GitLogFile,
-  type GitRemoteInfo,
 } from "../services/vibeGitClient";
 import {
   startFileWatcher,
@@ -1413,6 +1409,21 @@ import {
 
 const { confirm } = useConfirm();
 const inputPrompt = useInputPrompt();
+
+const git = useGitPanel(
+  () => projectPath.value.trim(),
+  () => projectOpened.value,
+  () => aiConfig.value,
+  () => configReady.value,
+  confirm,
+  () => void refreshTree(),
+);
+const session = useSessionManager(() => projectPath.value.trim());
+const fileDrag = useFileDrag(
+  () => projectPath.value.trim(),
+  (ref) => composerRef.value?.insertFileRef(ref),
+  (file) => composerRef.value?.insertDroppedFile(file),
+);
 
 const STORAGE_KEY = "vibe-coding-project";
 const PANEL_WIDTH_KEY = "vibe-coding-panel-widths";
@@ -1614,13 +1625,10 @@ const workspaceRef = ref<HTMLElement | null>(null);
 let scrollChatRaf = 0;
 const CHAT_SCROLL_PIN_THRESHOLD = 80;
 let chatPinnedToBottom = true;
-const sessionPickerOpen = ref(false);
 const sessionPickerRef = ref<HTMLElement | null>(null);
-const activeSessionId = ref("");
 const syncingChatStore = ref(false);
 const chatStoreSyncMessage = ref("");
 const pendingPromptQueue = ref<string[]>([]);
-
 function persistPendingQueue() {
   try {
     if (pendingPromptQueue.value.length) {
@@ -1644,11 +1652,7 @@ function loadPendingQueue(): string[] {
   }
 }
 
-interface ReferencedFile {
-  name: string;
-  path: string;
-  relative: string;
-}
+import { type ReferencedFile } from "../composables/useFileDrag";
 
 interface ProjectFileItem {
   name: string;
@@ -1665,68 +1669,103 @@ const mentionQuery = ref("");
 const mentionActiveIndex = ref(0);
 const mentionRemoteResults = ref<ProjectFileItem[]>([]);
 let mentionSearchTimer: ReturnType<typeof setTimeout> | null = null;
-const isDragging = ref(false);
-const fileDragGhost = ref<{ relative: string; x: number; y: number } | null>(null);
-let dragCounter = 0;
-const sessionList = ref<VibeChatSessionMeta[]>([]);
-const activeSessionTitle = computed(() => {
-  const fromList = sessionList.value.find((s) => s.id === activeSessionId.value)?.title;
-  if (fromList) return fromList;
-  const firstUser = chatMessages.value.find((m) => m.role === "user" && m.content.trim());
-  if (firstUser) return formatSessionTitle(firstUser.content);
-  return "";
-});
-const activeSessionIndex = computed(() => {
-  if (!activeSessionId.value) return -1;
-  return sessionList.value.findIndex((s) => s.id === activeSessionId.value);
-});
-const canSwitchToNewerSession = computed(() => {
-  const idx = activeSessionIndex.value;
-  return idx > 0;
-});
-const canSwitchToOlderSession = computed(() => {
-  const idx = activeSessionIndex.value;
-  if (idx < 0) return sessionList.value.length > 0;
-  return idx < sessionList.value.length - 1;
-});
-const sessionPickerTitle = computed(() => {
-  if (!projectOpened.value) return "请先打开项目";
-  if (sessionList.value.length) return "点击切换会话";
-  return "点击新建或查看会话";
-});
 const projectHistoryOpen = ref(false);
 const projectHistoryList = ref<ProjectHistoryEntry[]>([]);
 const projectHistoryRef = ref<HTMLElement | null>(null);
 
-const gitPanelMode = ref<"files" | "git">(
-  localStorage.getItem(GIT_PANEL_MODE_KEY) === "git" ? "git" : "files"
-);
-const gitStatus = ref<GitStatusFile[]>([]);
-const gitBranch = ref("");
-const gitIsRepo = ref(false);
-const gitLoading = ref(false);
-const gitError = ref("");
-const gitCommitMessage = ref("");
-const gitCommitting = ref(false);
-const gitGenStep = ref("");
-const gitLogEntries = ref<GitLogEntry[]>([]);
-const gitLogOpen = ref(false);
-const gitStagedOpen = ref(true);
-const gitUnstagedOpen = ref(true);
-const expandedGitLogEntries = ref<Set<string>>(new Set());
-const selectedGitFile = ref("");
-const gitDiffLoadingKey = ref("");
-const gitDiffContentCache = ref<Record<string, FileDiff>>({});
-const gitRemotes = ref<GitRemoteInfo[]>([]);
-const gitTrackingBranch = ref("");
-const gitAhead = ref(0);
-const gitBehind = ref(0);
-const gitRemoteLoading = ref(false);
-const gitRemoteAction = ref("");
-const gitStashes = ref<Array<{ index: number; name: string; ref: string; message: string }>>([]);
-const gitStashAction = ref("");
-const gitStashMessage = ref("");
-const gitAiPushStep = ref("");
+// Git panel composable
+const {
+  gitPanelMode, gitStatus, gitBranch, gitIsRepo, gitLoading, gitError,
+  gitCommitMessage, gitCommitting, gitGenStep, gitLogEntries, gitLogOpen,
+  gitStagedOpen, gitUnstagedOpen, expandedGitLogEntries, selectedGitFile,
+  gitDiffLoadingKey, gitDiffContentCache, gitRemotes, gitTrackingBranch,
+  gitAhead, gitBehind, gitRemoteLoading, gitRemoteAction, gitStashes,
+  gitStashAction, gitStashMessage, gitAiPushStep,
+  gitStagedFiles, gitUnstagedFiles, gitChangeCount, canGitCommit,
+  clearGitDiffCache, gitStatusIcon, gitStatusColor,
+  isGitLogEntryOpen, toggleGitLogEntry, gitHistoryDiffKey, gitWorkingTreeDiffKey,
+  refreshGitStatus, commitGit, stageFile, unstageFile,
+  stageAll, unstageAll, discardFile, discardAll,
+  generateCommitMessage, aiCommitAndPush, refreshGitRemotes,
+  doFetch, doPull, doPush,
+  refreshGitStashes, doStashSave, doStashApply, doStashDrop,
+} = git;
+
+// Session manager composable
+const {
+  sessionPickerOpen,
+  activeSessionId,
+  sessionList,
+  activeSessionTitle,
+  activeSessionIndex,
+  canSwitchToNewerSession,
+  canSwitchToOlderSession,
+  sessionPickerTitle,
+  removeSession: removeSessionBase,
+  sessionLocalFileName,
+  formatSessionInfoForCopy,
+} = session;
+
+// File drag composable
+const {
+  isDragging,
+  fileDragGhost,
+  buildReferencedFile,
+  canAcceptChatDrag,
+  acceptChatFileDrag,
+  attachFileToChat,
+  startPathDrag,
+  onChatDragEnter: onChatDragEnterBase,
+  onChatDragOver: onChatDragOverBase,
+  onChatDragLeave: onChatDragLeaveBase,
+  onChatDrop: onChatDropBase,
+  onWindowDragEnd,
+  onDocumentDragOverCapture: onDocumentDragOverCaptureBase,
+  onDocumentDropCapture: onDocumentDropCaptureBase,
+} = fileDrag;
+
+// Session convenience functions
+function refreshSessionList(path?: string) {
+  session.refreshSessionList(path);
+}
+
+function toggleSessionPicker() {
+  session.toggleSessionPicker(chatSending.value);
+}
+
+function closeSessionPicker() {
+  session.closeSessionPicker();
+}
+
+function switchToAdjacentSession(delta: number) {
+  const nextId = session.switchToAdjacentSession(delta, chatSending.value);
+  if (nextId) switchSession(nextId);
+}
+
+function removeSession(sessionId: string) {
+  const result = removeSessionBase(sessionId, chatSending.value);
+  if (result) chatMessages.value = normalizeChatMessages(result);
+  refreshSessionList();
+  void scrollChatToBottom(true);
+}
+function onChatDragEnter(e: DragEvent) {
+  onChatDragEnterBase(e);
+}
+function onChatDragOver(e: DragEvent) {
+  onChatDragOverBase(e);
+}
+function onChatDragLeave(e: DragEvent) {
+  onChatDragLeaveBase(e, chatDropZoneRef.value);
+}
+function onChatDrop(e: DragEvent) {
+  onChatDropBase(e, chatDropZoneRef.value);
+}
+function onDocumentDragOverCapture(e: DragEvent) {
+  onDocumentDragOverCaptureBase(e, chatDropZoneRef.value);
+}
+function onDocumentDropCapture(e: DragEvent) {
+  onDocumentDropCaptureBase(e, chatDropZoneRef.value);
+}
 
 // File watcher state
 const fileWatcherActive = ref(false);
@@ -1737,16 +1776,12 @@ async function startFileWatcherForProject(projectPath: string) {
     const result = await startFileWatcher(projectPath);
     if (result.ok) {
       fileWatcherActive.value = true;
-      // Connect SSE stream for real-time updates
       fileWatcherCleanup.value = connectFileWatcherStream(
         (changes) => {
-          // Filter for relevant changes (ignore .git directory changes)
           const relevantChanges = changes.filter(
             (change) => !change.path.includes(".git") && !change.path.includes("node_modules")
           );
-          
           if (relevantChanges.length > 0) {
-            // Refresh Git status when files change
             refreshGitStatus({ showLoading: false });
           }
         },
@@ -1761,12 +1796,10 @@ async function startFileWatcherForProject(projectPath: string) {
 }
 
 async function stopFileWatcherForProject() {
-  // Disconnect SSE stream
   if (fileWatcherCleanup.value) {
     fileWatcherCleanup.value();
     fileWatcherCleanup.value = null;
   }
-  
   try {
     await stopFileWatcher();
     fileWatcherActive.value = false;
@@ -1774,20 +1807,6 @@ async function stopFileWatcherForProject() {
     console.error("Failed to stop file watcher:", e);
   }
 }
-
-function clearGitDiffCache() {
-  gitDiffContentCache.value = {};
-  gitDiffLoadingKey.value = "";
-}
-
-const gitStagedFiles = computed(() => gitStatus.value.filter((f) => f.staged));
-const gitUnstagedFiles = computed(() => gitStatus.value.filter((f) => !f.staged));
-const gitChangeCount = computed(() => gitStatus.value.length);
-const canGitCommit = computed(() =>
-  !gitCommitting.value
-  && !!gitCommitMessage.value.trim()
-  && gitStagedFiles.value.length > 0,
-);
 
 const contextMenu = ref({ show: false, x: 0, y: 0, path: "" });
 
@@ -2889,7 +2908,27 @@ function shouldShowMessageBubble(msg: ChatMessage): boolean {
 }
 
 function userMessageImages(msg: ChatMessage): string[] {
-  return msg.imageDataUrls?.filter(Boolean) ?? [];
+  return resolveChatMessageImageUrls(
+    projectPath.value.trim(),
+    msg,
+    activeSessionId.value || undefined,
+  );
+}
+
+async function ensureProjectChatLoadedFromDisk(project: string, sessionId?: string): Promise<void> {
+  if (!project.trim() || !projectChatNeedsDiskRestore(project, sessionId)) return;
+  const diskStore = await fetchChatStoreFromDisk(project);
+  if (!diskStore.ok || !diskStore.data.sessions.length) return;
+  restoreChatStoreFromSnapshot(diskStore.data);
+}
+
+async function applyChatMessageImageHydration(messages: PersistedChatMessage[]): Promise<ChatMessage[]> {
+  const project = projectPath.value.trim();
+  if (!project || !chatMessagesNeedImageHydration(messages)) {
+    return normalizeChatMessages(messages);
+  }
+  const hydrated = await hydrateChatMessagesImages(project, messages);
+  return normalizeChatMessages(hydrated);
 }
 
 function messageDisplayContent(msg: ChatMessage): string {
@@ -2995,16 +3034,6 @@ function turnMessageRoleLabel(role: string): string {
   }
 }
 
-function refreshSessionList(path = projectPath.value.trim()) {
-  if (!path) {
-    sessionList.value = [];
-    activeSessionId.value = "";
-    return;
-  }
-  sessionList.value = listVibeChatSessions(path);
-  activeSessionId.value = getActiveVibeChatSessionId(path);
-}
-
 function refreshProjectHistoryList() {
   projectHistoryList.value = listProjectHistory();
 }
@@ -3085,25 +3114,6 @@ function formatSessionTime(iso: string): string {
   });
 }
 
-function toggleSessionPicker() {
-  if (!projectOpened.value || chatSending.value) return;
-  sessionPickerOpen.value = !sessionPickerOpen.value;
-  if (sessionPickerOpen.value) refreshSessionList();
-}
-
-function closeSessionPicker() {
-  sessionPickerOpen.value = false;
-}
-
-function switchToAdjacentSession(delta: number) {
-  if (chatSending.value || !projectPath.value.trim() || !sessionList.value.length) return;
-  persistChatNow();
-  let nextIdx = activeSessionIndex.value + delta;
-  if (activeSessionIndex.value < 0 && delta > 0) nextIdx = 0;
-  if (nextIdx < 0 || nextIdx >= sessionList.value.length) return;
-  switchSession(sessionList.value[nextIdx].id);
-}
-
 function startNewSession() {
   if (chatSending.value || !projectPath.value.trim()) return;
   persistChatNow();
@@ -3126,8 +3136,8 @@ function switchSession(sessionId: string) {
   persistChatNow();
   void (async () => {
     const project = projectPath.value.trim();
-    let messages = switchVibeChatSession(project, sessionId);
-    messages = await hydrateChatMessagesImages(project, messages);
+    await ensureProjectChatLoadedFromDisk(project, sessionId);
+    const messages = switchVibeChatSession(project, sessionId);
     chatMessages.value = normalizeChatMessages(messages);
     activeSessionId.value = sessionId;
     chatError.value = "";
@@ -3136,45 +3146,6 @@ function switchSession(sessionId: string) {
     maybeAutoResumeLastRecoverableAssistant();
     await scrollChatToBottom(true);
   })();
-}
-
-function removeSession(sessionId: string) {
-  if (chatSending.value || !projectPath.value.trim()) return;
-  chatMessages.value = normalizeChatMessages(deleteVibeChatSession(projectPath.value.trim(), sessionId));
-  refreshSessionList();
-  void scrollChatToBottom(true);
-}
-
-function sessionLocalFileName(sessionId: string): string {
-  const safe = sessionId.replace(/[^a-zA-Z0-9_-]/g, "_");
-  return `chat-${safe}.json`;
-}
-
-function formatSessionInfoForCopy(session: VibeChatSessionMeta, project: string): string {
-  const chatDir = ".aiall/vibe-chat-sessions";
-  const relFile = `${chatDir}/${sessionLocalFileName(session.id)}`;
-  const storeFile = `${chatDir}/chat-store.json`;
-  const lines = [
-    "【任务】请自行排查以下 AIALL Vibe 本地会话记录是否存在异常（存储、索引、展示、Agent 行为等均可）。不要回答会话消息里的业务或编程问题。",
-    "",
-    "【相关文件】",
-    `- 会话文件：${relFile}`,
-    `- 索引文件：${storeFile}`,
-    "",
-    "【会话定位】",
-    `- 标题: ${session.title}`,
-    `- 项目: ${project}`,
-    `- 会话 ID: ${session.id}`,
-    `- 本地文件: ${relFile}`,
-    `- 索引目录: ${chatDir}/`,
-    `- 创建: ${session.createdAt}`,
-    `- 更新: ${session.updatedAt}`,
-    `- 消息数: ${session.messageCount}`,
-  ];
-  if (session.id === activeSessionId.value) {
-    lines.push("- 状态: 当前活跃会话");
-  }
-  return lines.join("\n");
 }
 
 async function copyText(text: string) {
@@ -3374,20 +3345,13 @@ async function openProjectByPath(dirPath: string) {
         restoreChatStoreFromSnapshot(diskStore.data);
       }
     } else {
-      const diskStore = await fetchChatStoreFromDisk(normalized);
-      if (diskStore.ok && diskStore.data.sessions.length) {
-        const diskLatest =
-          [...diskStore.data.sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]?.updatedAt || "";
-        const localLatest = listVibeChatSessions(normalized)[0]?.updatedAt || "";
-        if (diskLatest && diskLatest.localeCompare(localLatest) > 0) {
-          restoreChatStoreFromSnapshot(diskStore.data);
-        } else if (!loadVibeChatHistory(normalized).length) {
-          restoreChatStoreFromSnapshot(diskStore.data);
-        }
-      }
+      await ensureProjectChatLoadedFromDisk(normalized);
     }
     let loaded = loadVibeChatHistory(normalized);
-    loaded = await hydrateChatMessagesImages(normalized, loaded);
+    if (!loaded.length) {
+      await ensureProjectChatLoadedFromDisk(normalized);
+      loaded = loadVibeChatHistory(normalized);
+    }
     chatMessages.value = normalizeChatMessages(loaded);
     activeSessionId.value = getActiveVibeChatSessionId(normalized);
     refreshSessionList(normalized);
@@ -3437,334 +3401,6 @@ async function refreshTree() {
   } catch (e) {
     treeError.value = formatFetchError(e, "刷新目录失败");
   }
-}
-
-async function refreshGitStatus(options?: { showLoading?: boolean }) {
-  if (!projectOpened.value) return;
-  const showLoading = options?.showLoading !== false;
-  if (showLoading) gitLoading.value = true;
-  gitError.value = "";
-  clearGitDiffCache();
-  try {
-    const result = await fetchGitStatus(projectPath.value.trim());
-    if (!result.ok) {
-      gitError.value = result.error || "获取 Git 状态失败";
-      gitIsRepo.value = false;
-      return;
-    }
-    gitIsRepo.value = result.isRepo;
-    gitBranch.value = result.branch;
-    gitStatus.value = result.files;
-
-    if (result.isRepo) {
-      refreshGitRemotes();
-      refreshGitStashes();
-      if (gitLogOpen.value) {
-        const logResult = await fetchGitLog(projectPath.value.trim(), 20);
-        if (logResult.ok) {
-          gitLogEntries.value = logResult.entries;
-        }
-      }
-    }
-  } catch (e) {
-    gitError.value = e instanceof Error ? e.message : "获取 Git 状态失败";
-  } finally {
-    if (showLoading) gitLoading.value = false;
-  }
-}
-
-async function commitGit() {
-  if (!projectOpened.value || !gitCommitMessage.value.trim()) return;
-  if (!gitStagedFiles.value.length) {
-    gitError.value = "请先暂存要提交的文件";
-    return;
-  }
-  gitCommitting.value = true;
-  gitError.value = "";
-  clearGitDiffCache();
-  const stagedCount = gitStagedFiles.value.length;
-  const commitMessage = gitCommitMessage.value.trim();
-  gitStatus.value = gitStatus.value.filter((f) => !f.staged);
-  gitCommitMessage.value = "";
-  try {
-    const result = await commitGitChanges(projectPath.value.trim(), commitMessage);
-    if (!result.ok) {
-      gitError.value = result.error || "提交失败";
-      gitCommitMessage.value = commitMessage;
-      await refreshGitStatus();
-      return;
-    }
-    await refreshGitStatus({ showLoading: false });
-  } catch (e) {
-    gitError.value = e instanceof Error ? e.message : "提交失败";
-    await refreshGitStatus();
-    await refreshTree();
-  } finally {
-    gitCommitting.value = false;
-  }
-}
-
-async function stageFile(filePath: string) {
-  if (!projectOpened.value) return;
-  gitError.value = "";
-  clearGitDiffCache();
-  gitStatus.value = gitStatus.value.map((f) => (f.path === filePath ? { ...f, staged: true } : f));
-  try {
-    const result = await stageGitFiles(projectPath.value.trim(), [filePath]);
-    if (!result.ok) {
-      gitError.value = result.error || "暂存失败";
-      await refreshGitStatus();
-    }
-  } catch (e) {
-    gitError.value = e instanceof Error ? e.message : "暂存失败";
-    await refreshGitStatus();
-  }
-}
-
-async function unstageFile(filePath: string) {
-  if (!projectOpened.value) return;
-  gitError.value = "";
-  clearGitDiffCache();
-  gitStatus.value = gitStatus.value.map((f) => (f.path === filePath ? { ...f, staged: false } : f));
-  try {
-    const result = await unstageGitFiles(projectPath.value.trim(), [filePath]);
-    if (!result.ok) {
-      gitError.value = result.error || "取消暂存失败";
-      await refreshGitStatus();
-    }
-  } catch (e) {
-    gitError.value = e instanceof Error ? e.message : "取消暂存失败";
-    await refreshGitStatus();
-  }
-}
-
-async function stageAll() {
-  if (!projectOpened.value) return;
-  gitError.value = "";
-  clearGitDiffCache();
-  const filesToStage = gitUnstagedFiles.value.map((f) => f.path);
-  if (!filesToStage.length) return;
-  gitStatus.value = gitStatus.value.map((f) => ({ ...f, staged: true }));
-  try {
-    const result = await stageGitFiles(projectPath.value.trim(), filesToStage);
-    if (!result.ok) {
-      gitError.value = result.error || "暂存失败";
-      await refreshGitStatus();
-    }
-  } catch (e) {
-    gitError.value = e instanceof Error ? e.message : "暂存失败";
-    await refreshGitStatus();
-  }
-}
-
-async function unstageAll() {
-  if (!projectOpened.value) return;
-  gitError.value = "";
-  clearGitDiffCache();
-  if (!gitStagedFiles.value.length) return;
-  gitStatus.value = gitStatus.value.map((f) => ({ ...f, staged: false }));
-  try {
-    const result = await unstageGitFiles(projectPath.value.trim(), []);
-    if (!result.ok) {
-      gitError.value = result.error || "取消暂存失败";
-      await refreshGitStatus();
-    }
-  } catch (e) {
-    gitError.value = e instanceof Error ? e.message : "取消暂存失败";
-    await refreshGitStatus();
-  }
-}
-
-async function discardFile(filePath: string, event?: MouseEvent) {
-  if (!projectOpened.value) return;
-  if (!await confirm(`确定丢弃 ${filePath} 的更改？`, event)) return;
-  gitError.value = "";
-  clearGitDiffCache();
-  gitStatus.value = gitStatus.value.filter((f) => f.path !== filePath);
-  try {
-    const result = await discardGitFiles(projectPath.value.trim(), [filePath]);
-    if (!result.ok) {
-      gitError.value = result.error || "丢弃更改失败";
-      await refreshGitStatus();
-    }
-    await refreshTree();
-  } catch (e) {
-    gitError.value = e instanceof Error ? e.message : "丢弃更改失败";
-    await refreshGitStatus();
-    await refreshTree();
-  }
-}
-
-async function discardAll(event?: MouseEvent) {
-  if (!projectOpened.value) return;
-  if (!await confirm("确定丢弃所有未暂存的更改？", event)) return;
-  gitError.value = "";
-  clearGitDiffCache();
-  const unstagedPaths = gitUnstagedFiles.value.map((f) => f.path);
-  if (!unstagedPaths.length) return;
-  gitStatus.value = gitStagedFiles.value;
-  try {
-    const result = await discardGitFiles(projectPath.value.trim(), unstagedPaths);
-    if (!result.ok) {
-      gitError.value = result.error || "丢弃更改失败";
-      await refreshGitStatus();
-    }
-    await refreshTree();
-  } catch (e) {
-    gitError.value = e instanceof Error ? e.message : "丢弃更改失败";
-    await refreshGitStatus();
-    await refreshTree();
-  }
-}
-
-async function generateCommitMessage() {
-  if (!projectOpened.value || !gitStagedFiles.value.length) return;
-  if (!configReady.value) {
-    gitError.value = "请先配置 AI 模型";
-    return;
-  }
-  gitError.value = "";
-  try {
-    gitGenStep.value = "获取变更…";
-    await new Promise((r) => setTimeout(r, 100));
-
-    gitGenStep.value = "AI 生成中…";
-    let streamText = "";
-    const result = await generateCommitMessageApi(
-      projectPath.value.trim(),
-      aiConfig.value.endpoint.trim(),
-      aiConfig.value.apiKey.trim(),
-      aiConfig.value.model.trim(),
-      (delta) => {
-        streamText += delta;
-        gitCommitMessage.value = streamText.replace(/^["'"']|["'"']$/g, "").trim();
-      },
-    );
-    if (!result.ok) {
-      gitError.value = result.error || "AI 生成失败";
-      return;
-    }
-    if (!result.message) {
-      gitError.value = "AI 未返回内容";
-      return;
-    }
-    gitGenStep.value = "完成 ✓";
-    gitCommitMessage.value = result.message;
-    await new Promise((r) => setTimeout(r, 600));
-  } catch (e) {
-    gitError.value = e instanceof Error ? e.message : "AI 生成提交信息失败";
-  } finally {
-    gitGenStep.value = "";
-  }
-}
-
-async function aiCommitAndPush() {
-  if (!projectOpened.value || !gitStagedFiles.value.length) return;
-  if (!configReady.value) {
-    gitError.value = "请先配置 AI 模型";
-    return;
-  }
-  gitError.value = "";
-  try {
-    gitAiPushStep.value = "AI 生成提交信息…";
-    await new Promise((r) => setTimeout(r, 100));
-
-    let streamText = "";
-    const genResult = await generateCommitMessageApi(
-      projectPath.value.trim(),
-      aiConfig.value.endpoint.trim(),
-      aiConfig.value.apiKey.trim(),
-      aiConfig.value.model.trim(),
-      (delta) => {
-        streamText += delta;
-        gitCommitMessage.value = streamText.replace(/^["'"']|["'"']$/g, "").trim();
-      },
-    );
-    if (!genResult.ok) {
-      gitError.value = genResult.error || "AI 生成提交信息失败";
-      return;
-    }
-    if (!genResult.message) {
-      gitError.value = "AI 未返回内容";
-      return;
-    }
-    gitCommitMessage.value = genResult.message;
-
-    gitAiPushStep.value = "提交中…";
-    await new Promise((r) => setTimeout(r, 100));
-    clearGitDiffCache();
-    const commitResult = await commitGitChanges(projectPath.value.trim(), gitCommitMessage.value.trim());
-    if (!commitResult.ok) {
-      gitError.value = commitResult.error || "提交失败";
-      await refreshGitStatus();
-      return;
-    }
-    await refreshGitStatus({ showLoading: false });
-
-    gitAiPushStep.value = "推送中…";
-    await new Promise((r) => setTimeout(r, 100));
-    const pushResult = await gitPushRemote(projectPath.value.trim());
-    if (!pushResult.ok) {
-      gitError.value = pushResult.error || "推送失败";
-      await refreshGitRemotes();
-      return;
-    }
-    await refreshGitRemotes();
-
-    gitAiPushStep.value = "完成 ✓";
-    gitCommitMessage.value = "";
-    await new Promise((r) => setTimeout(r, 800));
-  } catch (e) {
-    gitError.value = e instanceof Error ? e.message : "AI 一键推送失败";
-    await refreshGitStatus();
-  } finally {
-    gitAiPushStep.value = "";
-  }
-}
-
-function gitStatusIcon(status: string): string {
-  switch (status) {
-    case "M":
-    case "modified": return "M";
-    case "A":
-    case "added": return "A";
-    case "D":
-    case "deleted": return "D";
-    case "R":
-    case "renamed": return "R";
-    case "C":
-      return "C";
-    case "untracked": return "?";
-    default: return "!";
-  }
-}
-
-function gitStatusColor(status: string): string {
-  switch (status) {
-    case "M":
-    case "modified": return "#e2c08c";
-    case "A":
-    case "added": return "#73daca";
-    case "D":
-    case "deleted": return "#f7768e";
-    case "R":
-    case "renamed": return "#bb9af7";
-    case "C":
-      return "#bb9af7";
-    case "untracked": return "#7aa2f7";
-    default: return "#9aa5ce";
-  }
-}
-
-function isGitLogEntryOpen(hash: string): boolean {
-  return expandedGitLogEntries.value.has(hash);
-}
-
-function toggleGitLogEntry(hash: string) {
-  const next = new Set(expandedGitLogEntries.value);
-  if (next.has(hash)) next.delete(hash);
-  else next.add(hash);
-  expandedGitLogEntries.value = next;
 }
 
 async function openGitLogFile(entry: GitLogEntry, file: GitLogFile) {
@@ -3825,14 +3461,6 @@ async function showGitFileDiff(filePath: string, staged = false) {
   }
 }
 
-function gitHistoryDiffKey(hash: string, filePath: string, oldPath?: string): string {
-  return `history:${hash}:${oldPath || ""}:${filePath}`;
-}
-
-function gitWorkingTreeDiffKey(filePath: string, staged = false): string {
-  return `${staged ? "staged" : "worktree"}:${filePath}`;
-}
-
 function gitWorkingTreePreviewPath(filePath: string, staged = false): string {
   if (!staged) return resolveFullPathFromRel(filePath);
   return `git-index://${filePath}`;
@@ -3876,150 +3504,6 @@ async function openDiffPreview(path: string, diff: FileDiff, options?: { readOnl
     cached.dirty = false;
   } else {
     openTabs.value.push({ path, content: diff.after, dirty: false });
-  }
-}
-
-async function refreshGitRemotes() {
-  if (!projectOpened.value || !gitIsRepo.value) return;
-  gitRemoteLoading.value = true;
-  try {
-    const result = await fetchGitRemotes(projectPath.value.trim());
-    if (result.ok) {
-      gitRemotes.value = result.remotes;
-      gitTrackingBranch.value = result.trackingBranch;
-      gitAhead.value = result.ahead;
-      gitBehind.value = result.behind;
-    }
-  } catch {
-    // ignore
-  } finally {
-    gitRemoteLoading.value = false;
-  }
-}
-
-async function doFetch() {
-  if (!projectOpened.value) return;
-  gitRemoteAction.value = "fetch";
-  gitError.value = "";
-  try {
-    const result = await gitFetchRemote(projectPath.value.trim());
-    if (!result.ok) {
-      gitError.value = result.error || "Fetch 失败";
-      return;
-    }
-    await refreshGitRemotes();
-  } catch (e) {
-    gitError.value = e instanceof Error ? e.message : "Fetch 失败";
-  } finally {
-    gitRemoteAction.value = "";
-  }
-}
-
-async function doPull() {
-  if (!projectOpened.value) return;
-  gitRemoteAction.value = "pull";
-  gitError.value = "";
-  try {
-    const result = await gitPullRemote(projectPath.value.trim());
-    if (!result.ok) {
-      gitError.value = result.error || "Pull 失败";
-      return;
-    }
-    await refreshGitStatus();
-    await refreshGitRemotes();
-  } catch (e) {
-    gitError.value = e instanceof Error ? e.message : "Pull 失败";
-  } finally {
-    gitRemoteAction.value = "";
-  }
-}
-
-async function doPush() {
-  if (!projectOpened.value) return;
-  gitRemoteAction.value = "push";
-  gitError.value = "";
-  try {
-    const result = await gitPushRemote(projectPath.value.trim());
-    if (!result.ok) {
-      gitError.value = result.error || "Push 失败";
-      return;
-    }
-    await refreshGitRemotes();
-  } catch (e) {
-    gitError.value = e instanceof Error ? e.message : "Push 失败";
-  } finally {
-    gitRemoteAction.value = "";
-  }
-}
-
-async function refreshGitStashes() {
-  if (!projectOpened.value) return;
-  try {
-    const result = await gitStashListRemote(projectPath.value.trim());
-    if (result.ok) {
-      gitStashes.value = result.stashes || [];
-    }
-  } catch {
-    // ignore
-  }
-}
-
-async function doStashSave() {
-  if (!projectOpened.value) return;
-  gitStashAction.value = "save";
-  gitError.value = "";
-  try {
-    const result = await gitStashSaveRemote(projectPath.value.trim(), gitStashMessage.value.trim() || undefined);
-    if (!result.ok) {
-      gitError.value = result.error || "贮藏失败";
-      return;
-    }
-    gitStashMessage.value = "";
-    await refreshGitStashes();
-    await refreshGitStatus({ showLoading: false });
-  } catch (e) {
-    gitError.value = e instanceof Error ? e.message : "贮藏失败";
-  } finally {
-    gitStashAction.value = "";
-  }
-}
-
-async function doStashApply(stashIndex: number) {
-  if (!projectOpened.value) return;
-  gitStashAction.value = `apply-${stashIndex}`;
-  gitError.value = "";
-  try {
-    const result = await gitStashApplyRemote(projectPath.value.trim(), stashIndex);
-    if (!result.ok) {
-      gitError.value = result.error || "应用贮藏失败";
-      return;
-    }
-    await refreshGitStashes();
-    await refreshGitStatus({ showLoading: false });
-  } catch (e) {
-    gitError.value = e instanceof Error ? e.message : "应用贮藏失败";
-  } finally {
-    gitStashAction.value = "";
-  }
-}
-
-async function doStashDrop(stashIndex: number) {
-  if (!projectOpened.value) return;
-  const ok = await confirm(`确定要删除 stash@{${stashIndex}} 吗？此操作不可撤销。`, undefined, { confirmText: "删除", cancelText: "取消" });
-  if (!ok) return;
-  gitStashAction.value = `drop-${stashIndex}`;
-  gitError.value = "";
-  try {
-    const result = await gitStashDropRemote(projectPath.value.trim(), stashIndex);
-    if (!result.ok) {
-      gitError.value = result.error || "删除贮藏失败";
-      return;
-    }
-    await refreshGitStashes();
-  } catch (e) {
-    gitError.value = e instanceof Error ? e.message : "删除贮藏失败";
-  } finally {
-    gitStashAction.value = "";
   }
 }
 
@@ -4721,108 +4205,6 @@ function onComposerFieldKeydown(e: KeyboardEvent) {
   }
 }
 
-function buildReferencedFile(path: string, name: string): ReferencedFile {
-  const root = projectPath.value.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
-  const full = path.replace(/\\/g, "/");
-  const relative =
-    root && full.toLowerCase().startsWith(`${root}/`) ? full.slice(root.length + 1) : name;
-  return { name, path, relative };
-}
-
-function isPointOverChatDropZone(x: number, y: number): boolean {
-  const el = chatDropZoneRef.value;
-  if (!el) return false;
-  const rect = el.getBoundingClientRect();
-  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
-}
-
-function canAcceptChatDrag(e: DragEvent): boolean {
-  const types = Array.from(e.dataTransfer?.types ?? []);
-  return types.includes("Files");
-}
-
-function acceptChatFileDrag(e: DragEvent) {
-  if (!canAcceptChatDrag(e)) return;
-  e.preventDefault();
-  e.stopPropagation();
-  if (e.dataTransfer) {
-    e.dataTransfer.dropEffect = "copy";
-  }
-  isDragging.value = true;
-}
-
-function attachFileToChat(path: string, name?: string) {
-  if (!projectPath.value.trim()) return;
-  composerRef.value?.insertFileRef(buildReferencedFile(path, name ?? fileName(path)));
-  void nextTick(() => composerRef.value?.focus());
-}
-
-function onFileDragStart(node: TreeNode, x: number, y: number) {
-  const file = buildReferencedFile(node.path, node.name);
-  fileDragGhost.value = { relative: file.relative, x, y };
-  isDragging.value = isPointOverChatDropZone(x, y);
-}
-
-function onFileDragMove(x: number, y: number) {
-  if (!fileDragGhost.value) return;
-  fileDragGhost.value = { ...fileDragGhost.value, x, y };
-  isDragging.value = isPointOverChatDropZone(x, y);
-}
-
-function onFileDragEnd(node: TreeNode, x: number, y: number) {
-  if (isPointOverChatDropZone(x, y)) {
-    attachFileToChat(node.path, node.name);
-  }
-  fileDragGhost.value = null;
-  isDragging.value = false;
-}
-
-const FILE_DRAG_THRESHOLD_PX = 5;
-
-function startPathDrag(path: string, name: string, e: PointerEvent, onTap: () => void) {
-  if (e.button !== 0) return;
-  e.preventDefault();
-
-  const el = e.currentTarget as HTMLElement;
-  el.setPointerCapture(e.pointerId);
-
-  const startX = e.clientX;
-  const startY = e.clientY;
-  let dragging = false;
-  const stubNode = { path, name, isDirectory: false } as TreeNode;
-
-  const cleanup = (ev: PointerEvent) => {
-    el.releasePointerCapture(ev.pointerId);
-    el.removeEventListener("pointermove", onMove);
-    el.removeEventListener("pointerup", onUp);
-    el.removeEventListener("pointercancel", onUp);
-  };
-
-  const onMove = (ev: PointerEvent) => {
-    if (ev.pointerId !== e.pointerId) return;
-    if (!dragging && Math.hypot(ev.clientX - startX, ev.clientY - startY) < FILE_DRAG_THRESHOLD_PX) return;
-    if (!dragging) {
-      dragging = true;
-      onFileDragStart(stubNode, ev.clientX, ev.clientY);
-    }
-    onFileDragMove(ev.clientX, ev.clientY);
-  };
-
-  const onUp = (ev: PointerEvent) => {
-    if (ev.pointerId !== e.pointerId) return;
-    cleanup(ev);
-    if (dragging) {
-      onFileDragEnd(stubNode, ev.clientX, ev.clientY);
-    } else {
-      onTap();
-    }
-  };
-
-  el.addEventListener("pointermove", onMove);
-  el.addEventListener("pointerup", onUp);
-  el.addEventListener("pointercancel", onUp);
-}
-
 function onSearchResultPointerDown(
   e: PointerEvent,
   item: { path: string; name: string; isDirectory: boolean },
@@ -4830,27 +4212,14 @@ function onSearchResultPointerDown(
   if (item.isDirectory) return;
   startPathDrag(item.path, item.name, e, () => {
     void openFile(item.path);
-  });
+  }, chatDropZoneRef.value);
 }
 
 function onGitFilePointerDown(e: PointerEvent, relativePath: string, staged = false) {
   const fullPath = resolveFullPathFromRel(relativePath);
   startPathDrag(fullPath, fileName(relativePath), e, () => {
     void showGitFileDiff(relativePath, staged);
-  });
-}
-
-function onDocumentDragOverCapture(e: DragEvent) {
-  if (!isPointOverChatDropZone(e.clientX, e.clientY)) return;
-  acceptChatFileDrag(e);
-}
-
-function onDocumentDropCapture(e: DragEvent) {
-  if (!isPointOverChatDropZone(e.clientX, e.clientY)) return;
-  if (!canAcceptChatDrag(e)) return;
-  e.preventDefault();
-  e.stopPropagation();
-  void handleChatFileDrop(e);
+  }, chatDropZoneRef.value);
 }
 
 function selectMention(item: ProjectFileItem) {
@@ -4864,65 +4233,14 @@ function selectMention(item: ProjectFileItem) {
   void nextTick(() => composerRef.value?.focus());
 }
 
-function onChatDragEnter(e: DragEvent) {
-  if (!canAcceptChatDrag(e)) return;
-  dragCounter++;
-  acceptChatFileDrag(e);
+function onFileDragStart(node: TreeNode, x: number, y: number) {
+  fileDrag.onFileDragStart(node, x, y, chatDropZoneRef.value);
 }
-
-function onChatDragOver(e: DragEvent) {
-  acceptChatFileDrag(e);
+function onFileDragMove(x: number, y: number) {
+  fileDrag.onFileDragMove(x, y, chatDropZoneRef.value);
 }
-
-function onChatDragLeave(e: DragEvent) {
-  const zone = chatDropZoneRef.value;
-  const related = e.relatedTarget as Node | null;
-  if (zone && related && zone.contains(related)) return;
-  dragCounter--;
-  if (dragCounter <= 0) {
-    isDragging.value = false;
-    dragCounter = 0;
-  }
-}
-
-async function handleChatFileDrop(e: DragEvent) {
-  isDragging.value = false;
-  dragCounter = 0;
-
-  const files = e.dataTransfer?.files;
-  if (!files || !files.length) return;
-
-  for (const file of Array.from(files)) {
-    const path = (file as File & { path?: string }).path || "";
-    if (!path) continue;
-
-    try {
-      const result = await readFile(path);
-      if (result.ok) {
-        composerRef.value?.insertDroppedFile({
-          name: file.name,
-          path,
-          content: result.content,
-        });
-      }
-    } catch {
-      // ignore unreadable files
-    }
-  }
-
-  await nextTick(() => composerRef.value?.focus());
-}
-
-function onChatDrop(e: DragEvent) {
-  if (!canAcceptChatDrag(e) && !(e.dataTransfer?.files?.length)) return;
-  e.preventDefault();
-  e.stopPropagation();
-  void handleChatFileDrop(e);
-}
-
-function onWindowDragEnd() {
-  isDragging.value = false;
-  dragCounter = 0;
+function onFileDragEnd(node: TreeNode, x: number, y: number) {
+  fileDrag.onFileDragEnd(node, x, y, chatDropZoneRef.value);
 }
 
 function formatToolMeta(
@@ -6102,6 +5420,27 @@ watch(
   { deep: true },
 );
 
+let chatImageHydrateToken = 0;
+watch(
+  () =>
+    `${projectPath.value.trim()}|${chatMessages.value
+      .map((m) =>
+        m.role === "user"
+          ? `${m.id}:${m.imageRefs?.length ?? 0}:${m.imageDataUrls?.length ?? 0}`
+          : "",
+      )
+      .join(";")}`,
+  () => {
+    if (!projectPath.value.trim() || !chatMessagesNeedImageHydration(chatMessages.value)) return;
+    const token = ++chatImageHydrateToken;
+    void (async () => {
+      const next = await applyChatMessageImageHydration(chatMessages.value);
+      if (token !== chatImageHydrateToken) return;
+      chatMessages.value = next;
+    })();
+  },
+);
+
 watch(gitPanelMode, (mode) => {
   localStorage.setItem(GIT_PANEL_MODE_KEY, mode);
 });
@@ -6706,9 +6045,37 @@ onBeforeUnmount(() => {
   line-height: 1.4;
 }
 
+.git-stash-save-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.git-stash-msg-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  outline: none;
+  transition: border-color 180ms ease;
+}
+
+.git-stash-msg-input:focus {
+  border-color: rgba(31, 111, 235, 0.5);
+}
+
+.git-stash-msg-input::placeholder {
+  color: var(--text-dim);
+}
+
 .stash-save-btn {
   font-size: 11px !important;
   padding: 4px 10px !important;
+  flex-shrink: 0;
 }
 
 .git-stash-list {

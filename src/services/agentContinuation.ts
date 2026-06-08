@@ -15,6 +15,9 @@ const PLAN_SIGNAL_RE =
 const SCOPED_EDIT_INTENT_RE =
   /(?:改|修|加|支持|接入|添加|实现|做|优化|调整|更新|完善|支持一下)/;
 
+const INTERACTION_REQUIREMENT_RE =
+  /我要的效果|期望(?:的)?是|任何位置|任意位置|都能输入|都能聚焦|点击.{0,8}输入/i;
+
 const ASK_ONLY_RE = /^(什么是|是什么|怎么|如何|为什么|有没有|是否|能不能|可以吗)[\s\S]{0,120}$/i;
 
 const HISTORY_PLAN_KEEP_CHARS = 2_400;
@@ -56,6 +59,7 @@ export function hasDirectImplementationIntent(text: string): boolean {
   }
   if (body.length <= 200 && IMPLEMENTATION_INTENT_RE.test(body)) return true;
   if (body.length <= 400 && SCOPED_EDIT_INTENT_RE.test(body)) return true;
+  if (body.length <= 400 && INTERACTION_REQUIREMENT_RE.test(body)) return true;
   return false;
 }
 

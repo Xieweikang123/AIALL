@@ -1,5 +1,5 @@
 import type { PersistedChatMessage, PersistedImageRef } from "./vibeChatStorage";
-import { fetchChatImageDataUrl } from "./vibeCodingClient";
+import { fetchChatImageDataUrl, buildChatImageFileUrl } from "./vibeCodingClient";
 
 function safeFilePart(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -11,6 +11,32 @@ function extensionForDataUrl(dataUrl: string): string {
   if (mime.includes("webp")) return "webp";
   if (mime.includes("gif")) return "gif";
   return "png";
+}
+
+export function resolveChatMessageImageUrls(
+  projectPath: string,
+  message: Pick<PersistedChatMessage, "imageDataUrls" | "imageRefs" | "imageCount" | "id">,
+  sessionId?: string,
+): string[] {
+  const inline = message.imageDataUrls?.filter(Boolean) ?? [];
+  if (inline.length) return inline;
+  if (!projectPath.trim()) return [];
+
+  if (message.imageRefs?.length) {
+    return message.imageRefs.map((ref) => buildChatImageFileUrl(projectPath, ref.path));
+  }
+
+  const count = message.imageCount ?? 0;
+  if (count > 0 && sessionId && message.id) {
+    const refs = buildImageRefsForMessage(
+      sessionId,
+      message.id,
+      Array.from({ length: count }, () => "data:image/png;base64,"),
+    );
+    return refs.map((ref) => buildChatImageFileUrl(projectPath, ref.path));
+  }
+
+  return [];
 }
 
 export function buildImageRefsForMessage(
@@ -51,7 +77,11 @@ export async function hydrateChatMessagesImages(
 ): Promise<PersistedChatMessage[]> {
   const out: PersistedChatMessage[] = [];
   for (const message of messages) {
-    if (message.role !== "user" || message.imageDataUrls?.length || !message.imageRefs?.length) {
+    if (message.role !== "user" || message.imageDataUrls?.length) {
+      out.push(message);
+      continue;
+    }
+    if (!message.imageRefs?.length) {
       out.push(message);
       continue;
     }
@@ -59,6 +89,13 @@ export async function hydrateChatMessagesImages(
     out.push(imageDataUrls.length ? { ...message, imageDataUrls } : message);
   }
   return out;
+}
+
+/** True when any user message has on-disk refs but no in-memory preview URLs. */
+export function chatMessagesNeedImageHydration(messages: PersistedChatMessage[]): boolean {
+  return messages.some(
+    (m) => m.role === "user" && !m.imageDataUrls?.length && Boolean(m.imageRefs?.length),
+  );
 }
 
 export async function resolveImagesForAgentTurn(
