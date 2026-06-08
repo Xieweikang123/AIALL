@@ -3725,6 +3725,8 @@ async function doStashApply(stashIndex: number) {
 
 async function doStashDrop(stashIndex: number) {
   if (!projectOpened.value) return;
+  const ok = await confirm(`确定要删除 stash@{${stashIndex}} 吗？此操作不可撤销。`, undefined, { confirmText: "删除", cancelText: "取消" });
+  if (!ok) return;
   gitStashAction.value = `drop-${stashIndex}`;
   gitError.value = "";
   try {
