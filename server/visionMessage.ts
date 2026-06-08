@@ -19,8 +19,40 @@ export function buildModelIdentityHint(model: string): string {
 const UI_IMAGE_QUESTION_RE =
   /截图|图片|界面|面板|哪块|哪里|看到的|发图|粘贴|screen|screenshot|ui/i;
 
+/** Layout/spacing feedback often paired with screenshots ("你看挤一块了"). */
+const UI_LAYOUT_FEEDBACK_RE =
+  /挤|贴|挨|重叠|太紧|间距|spacing|overlap|cramped|你看|看一下|一块|不好看|丑/i;
+
 /** Color/button topics that should stay within the visible region the user points at. */
 const NARROW_UI_TOPIC_RE = /配色|颜色|按钮|badge|几种|太多|有点多|杂乱|花哨/i;
+
+export const VISION_FIRST_TURN_MIN_DESCRIPTION_CHARS = 24;
+
+export function buildVisionFirstTurnRule(): string {
+  return [
+    "【附图·首轮必读图】你必须先仔细查看附带图片，用中文描述所见：",
+    "- 界面区域、控件/按钮/标签文字、布局关系；",
+    "- 若用户反馈拥挤/重叠/不好看，须点名哪两个（或哪组）元素及其关系（重叠、贴边、间距过小等）。",
+    "本轮禁止调用任何工具；仅输出读图描述，下一轮再定位源码或修改。",
+    "布局问题后续修改时优先检查 flex-shrink、min-width、overflow、gap、margin，勿先加装饰性分隔线。",
+  ].join("\n");
+}
+
+export function buildVisionFirstTurnContinueHint(): string {
+  return "【读图完成】已记录你对附图的理解。下一轮请结合上述描述与用户需求调用工具；若需改代码，先 read_file 核对再 patch_file。";
+}
+
+export function buildVisionFirstTurnRetryHint(): string {
+  return "【附图首轮】回复过短或未描述所见。请重新查看附图，说明界面元素与布局/重叠/间距问题，本轮仍不要调用工具。";
+}
+
+export function isAdequateVisionFirstTurnDescription(text: string): boolean {
+  return text.trim().length >= VISION_FIRST_TURN_MIN_DESCRIPTION_CHARS;
+}
+
+export function shouldRequireVisionFirstTurn(imageCount: number, visionFallbackApplied: boolean): boolean {
+  return imageCount > 0 && !visionFallbackApplied;
+}
 
 /** User is confirming a feeling or asking a short question — not asking to implement yet. */
 const UI_OPINION_FOLLOWUP_RE =
@@ -54,9 +86,13 @@ function isScreenshotScopedUiThread(lastAssistantContent: string): boolean {
 export function buildVisionTaskText(text: string, imageCount: number): string {
   if (imageCount <= 0) return text;
   const body = text.trim() || "请描述并分析附带的图片。";
-  const isUiQuestion = UI_IMAGE_QUESTION_RE.test(body) || NARROW_UI_TOPIC_RE.test(body);
+  const firstTurnRule = buildVisionFirstTurnRule();
+  const isUiQuestion =
+    UI_IMAGE_QUESTION_RE.test(body) ||
+    NARROW_UI_TOPIC_RE.test(body) ||
+    UI_LAYOUT_FEEDBACK_RE.test(body);
   if (!isUiQuestion) {
-    return `【附带图片】请先结合图片理解并回答；仅在信息不足时再调用工具。\n\n${body}`;
+    return `${firstTurnRule}\n\n${body}`;
   }
 
   const implementing = UI_IMPLEMENTATION_INTENT_RE.test(body);
@@ -67,10 +103,10 @@ export function buildVisionTaskText(text: string, imageCount: number): string {
       : UI_SCOPE_IMPLEMENT
     : UI_SCOPE_DISCUSS;
   const toolHint = implementing
-    ? "先结合图片确认所指区域，再在该区域对应源码内定位并修改。"
-    : "先根据图片直接回答（描述所见界面、按钮、文字、布局），仅在需要对应源码时再调用工具；不要跳过读图先去全盘 grep/search。";
+    ? "读图描述完成后，下一轮再在该区域对应源码内定位并修改。"
+    : "读图描述须覆盖用户所指可见范围；不要跳过读图先去全盘 grep/search。";
   const prefix = `【附图为本消息重点】${scopeRule} ${toolHint} 若界面像 Git/设置/聊天等，优先在 src/views 中查找，勿默认是外部应用。`;
-  return `${prefix}\n\n${body}`;
+  return `${firstTurnRule}\n\n${prefix}\n\n${body}`;
 }
 
 /**

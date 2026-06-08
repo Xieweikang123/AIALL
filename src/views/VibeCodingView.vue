@@ -171,18 +171,26 @@
           <div v-else-if="!gitIsRepo" class="panel-empty">当前目录不是 Git 仓库</div>
           <div v-else class="git-panel-content">
             <div class="git-header">
-              <div class="git-header-row">
+              <!-- 第一行：分支名 + 操作按钮 -->
+              <div class="git-header-row git-branch-row">
                 <div class="git-branch-info">
                   <span class="git-branch-icon" aria-hidden="true">⎇</span>
                   <span class="git-branch-name" :title="gitBranch">{{ gitBranch }}</span>
+                  <span v-if="gitTrackingBranch" class="git-tracking-badge" :title="'跟踪: ' + gitTrackingBranch">
+                    ⟶ {{ gitTrackingBranch.replace(/^[^/]+\//, '') }}
+                  </span>
                 </div>
                 <button type="button" class="ghost tiny" :disabled="gitLoading" @click="() => refreshGitStatus()">刷新</button>
               </div>
+              <!-- 第二行：同步操作 -->
               <div v-if="gitRemotes.length" class="git-header-row git-sync-row">
-                <div class="git-remote-info">
-                  <span class="git-sync-stat" :class="{ active: gitAhead > 0 }">↑ {{ gitAhead }}</span>
-                  <span class="git-sync-stat" :class="{ active: gitBehind > 0 }">↓ {{ gitBehind }}</span>
-                  <span v-if="gitTrackingBranch" class="git-remote-tracking">{{ gitTrackingBranch }}</span>
+                <div class="git-sync-info">
+                  <span class="git-sync-stat" :class="{ ahead: gitAhead > 0, behind: gitBehind > 0 }">
+                    <span class="git-sync-arrow">↑</span>{{ gitAhead }}
+                  </span>
+                  <span class="git-sync-stat" :class="{ ahead: gitAhead > 0, behind: gitBehind > 0 }">
+                    <span class="git-sync-arrow">↓</span>{{ gitBehind }}
+                  </span>
                 </div>
                 <div class="git-remote-actions">
                   <button type="button" class="ghost tiny" :disabled="!!gitRemoteAction" @click="doFetch">
@@ -201,10 +209,14 @@
             <!-- Stash 区域 -->
             <div class="git-stash-section">
               <div class="git-stash-header">
-                <span class="git-stash-title">📦 贮藏</span>
+                <div class="git-stash-title-row">
+                  <span class="git-stash-icon">📦</span>
+                  <span class="git-stash-title">贮藏</span>
+                  <span v-if="gitStashes.length" class="git-stash-count">{{ gitStashes.length }}</span>
+                </div>
                 <button
                   type="button"
-                  class="ghost tiny"
+                  class="ghost tiny stash-save-btn"
                   :disabled="!!gitStashAction"
                   @click="doStashSave"
                 >
@@ -2035,6 +2047,11 @@ function phaseBadgeLabel(phase?: string): string {
       return "准备";
     case "compacting_context":
       return "上下文";
+    case "vision_first_turn":
+      return "读图";
+    case "vision_first_turn_done":
+    case "vision_first_turn_skipped":
+      return "读图";
     case "waiting_model":
     case "thinking":
     case "retrying_model":
@@ -2080,6 +2097,15 @@ function formatAgentStatus(data: AgentStatusData, compact = false): string {
   }
   if (phase === "compacting_context") {
     return appendStatusDetail("正在压缩并准备模型上下文…", detail);
+  }
+  if (phase === "vision_first_turn") {
+    return appendStatusDetail("正在查看附图并描述所见…", detail);
+  }
+  if (phase === "vision_first_turn_done") {
+    return appendStatusDetail("读图完成，开始定位与修改…", detail);
+  }
+  if (phase === "vision_first_turn_skipped") {
+    return appendStatusDetail("读图描述不足，继续执行任务…", detail);
   }
   if (phase === "sending_request") {
     return appendStatusDetail("正在发送模型请求…", detail);
@@ -6391,15 +6417,16 @@ onBeforeUnmount(() => {
 }
 
 .file-panel-tab {
-  padding: 6px 13px;
+  padding: 6px 14px;
   font-size: 13px;
   background: transparent;
   color: var(--text-dim);
   border: none;
-  border-radius: 5px;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 150ms ease;
   position: relative;
+  font-weight: 500;
 }
 
 .file-panel-tab:hover {
@@ -6410,6 +6437,7 @@ onBeforeUnmount(() => {
 .file-panel-tab.active {
   color: var(--text);
   background: rgba(31, 111, 235, 0.22);
+  font-weight: 600;
 }
 
 .git-badge {
@@ -6450,7 +6478,6 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
   padding: 10px 14px;
   font-size: 14px;
 }
@@ -6460,8 +6487,9 @@ onBeforeUnmount(() => {
   padding-bottom: 10px;
 }
 
-.git-sync-row {
-  font-size: 13px;
+/* ---- 分支行 ---- */
+.git-branch-row {
+  gap: 8px;
 }
 
 .git-branch-info {
@@ -6497,13 +6525,31 @@ onBeforeUnmount(() => {
   background: rgba(122, 162, 247, 0.18);
 }
 
-.git-remote-info {
+.git-tracking-badge {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+  cursor: default;
+}
+
+.git-tracking-badge:hover {
+  opacity: 1;
+}
+
+/* ---- 同步行 ---- */
+.git-sync-row {
+  gap: 12px;
+}
+
+.git-sync-info {
   display: flex;
   align-items: center;
-  gap: 8px;
-  color: var(--text-dim);
-  min-width: 0;
-  flex: 1;
+  gap: 6px;
 }
 
 .git-sync-stat {
@@ -6511,32 +6557,45 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: var(--text-dim);
   flex-shrink: 0;
-  padding: 2px 6px;
-  border-radius: 4px;
+  padding: 3px 7px;
+  border-radius: 5px;
   background: rgba(255, 255, 255, 0.04);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  transition: all 0.2s ease;
 }
 
-.git-sync-stat.active {
+.git-sync-arrow {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.git-sync-stat.active,
+.git-sync-stat.ahead {
   color: #7aa2f7;
   font-weight: 600;
   background: rgba(122, 162, 247, 0.12);
 }
 
-.git-remote-tracking {
-  color: #9aa5ce;
-  font-family: monospace;
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 2px 6px;
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 4px;
+.git-sync-stat.ahead .git-sync-arrow,
+.git-sync-stat.active .git-sync-arrow {
+  opacity: 1;
+}
+
+.git-sync-stat.behind {
+  color: #e0af68;
+  font-weight: 600;
+  background: rgba(224, 175, 104, 0.12);
+}
+
+.git-sync-stat.behind .git-sync-arrow {
+  opacity: 1;
 }
 
 .git-remote-actions {
   display: flex;
-  gap: 4px;
+  gap: 6px;
 }
 
 /* ---- Stash 区域 ---- */
@@ -6549,17 +6608,41 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 14px;
+  padding: 10px 14px;
   font-size: 14px;
+}
+
+.git-stash-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.git-stash-icon {
+  font-size: 14px;
+  line-height: 1;
 }
 
 .git-stash-title {
   color: var(--text);
   font-weight: 600;
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  opacity: 0.7;
+  font-size: 13px;
+  letter-spacing: 0.3px;
+}
+
+.git-stash-count {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 6px;
+  border-radius: 8px;
+  line-height: 1.4;
+}
+
+.stash-save-btn {
+  font-size: 11px !important;
+  padding: 4px 10px !important;
 }
 
 .git-stash-list {
@@ -6571,7 +6654,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 14px;
+  padding: 6px 14px;
   font-size: 13px;
   border-top: 1px solid var(--border);
   transition: background 0.15s ease;
@@ -6587,10 +6670,10 @@ onBeforeUnmount(() => {
   font-size: 11px;
   font-weight: 500;
   flex-shrink: 0;
-  padding: 1px 5px;
+  padding: 2px 6px;
   background: rgba(187, 154, 247, 0.08);
   border: 1px solid rgba(187, 154, 247, 0.12);
-  border-radius: 3px;
+  border-radius: 4px;
   line-height: 1.4;
 }
 
@@ -6606,9 +6689,9 @@ onBeforeUnmount(() => {
 
 .git-stash-actions {
   display: flex;
-  gap: 2px;
+  gap: 3px;
   flex-shrink: 0;
-  opacity: 0.5;
+  opacity: 0.4;
   transition: opacity 0.2s ease;
 }
 
@@ -6617,11 +6700,12 @@ onBeforeUnmount(() => {
 }
 
 .git-stash-empty {
-  padding: 4px 14px 8px;
+  padding: 6px 14px 10px;
   font-size: 12px;
   color: var(--text-dim);
-  opacity: 0.4;
+  opacity: 0.35;
   font-style: italic;
+  letter-spacing: 0.2px;
 }
 
 .git-error {

@@ -50,11 +50,15 @@ import {
 } from "./vibeFs";
 import {
   buildModelIdentityHint,
+  buildVisionFirstTurnContinueHint,
+  buildVisionFirstTurnRetryHint,
   buildVisionUserContent,
   contentCharSize,
   contentDisplayText,
+  isAdequateVisionFirstTurnDescription,
   isVisionUnsupportedError,
   sanitizeImageDataUrls,
+  shouldRequireVisionFirstTurn,
 } from "./visionMessage";
 
 export type VibeAgentEvent =
@@ -924,6 +928,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     { role: "user", content: userContent },
   ];
   let visionFallbackApplied = false;
+  let visionFirstTurnPending = shouldRequireVisionFirstTurn(imageDataUrls.length, false);
+  let visionFirstTurnRetries = 0;
+  const MAX_VISION_FIRST_TURN_RETRIES = 2;
 
   emitAgentContext(onEvent, {
     mode,
@@ -981,12 +988,17 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     onEvent({
       type: "status",
       data: {
-        phase: "waiting_model",
+        phase: visionFirstTurnPending ? "vision_first_turn" : "waiting_model",
         turn,
         ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
         model,
+        ...(visionFirstTurnPending
+          ? { detail: "先查看附图并描述所见（本轮不调用工具）" }
+          : {}),
       },
     });
+
+    const toolsForTurn = visionFirstTurnPending ? [] : activeTools;
 
     let streamedChars = 0;
     const streamFilter = new TextToolCallStreamFilter();
@@ -1040,7 +1052,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         apiKey,
         model,
         messages: compactedMessages,
-        tools: activeTools,
+        tools: toolsForTurn,
         signal,
         maxRetries: AGENT_AI_MAX_RETRIES,
         firstByteTimeoutMs: resolveFirstByteTimeoutMs(contextChars),
@@ -1109,6 +1121,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         isVisionUnsupportedError(completion.error)
       ) {
         visionFallbackApplied = true;
+        visionFirstTurnPending = false;
         const userIndex = messages.findIndex((message) => message.role === "user");
         if (userIndex >= 0) {
           messages[userIndex] = {
@@ -1138,6 +1151,94 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     const rawContent = String(assistant.content || "");
     const toolCalls = resolveToolCallsFromAssistant(rawContent, assistant.tool_calls || []);
     const visibleContent = stripTextToolCallMarkup(rawContent);
+
+    const completeVisionFirstTurn = (text: string, isFinalTurn: boolean) => {
+      onEvent({
+        type: "turn_response",
+        data: {
+          turn,
+          ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+          assistantText: text,
+          toolCalls: [],
+          hasToolCalls: false,
+          isFinal: isFinalTurn,
+        },
+      });
+      if (text && !streamedChars) {
+        onEvent({ type: "message", data: { text } });
+      }
+      messages.push({ role: "assistant", content: text });
+    };
+
+    if (visionFirstTurnPending) {
+      const text = visibleContent.trim();
+      if (toolCalls.length) {
+        onEvent({
+          type: "turn_trace",
+          data: {
+            turn,
+            ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+            assistantText: text || "（模型试图在附图首轮调用工具，已忽略）",
+            hasToolCalls: false,
+          },
+        });
+      }
+      if (!isAdequateVisionFirstTurnDescription(text)) {
+        visionFirstTurnRetries += 1;
+        if (text) {
+          messages.push({ role: "assistant", content: text });
+        }
+        if (visionFirstTurnRetries > MAX_VISION_FIRST_TURN_RETRIES) {
+          visionFirstTurnPending = false;
+          messages.push({
+            role: "system",
+            content:
+              "【读图轮次结束】模型未能充分描述附图，已跳过强制读图轮次。请结合用户文字与附图继续完成任务。",
+          });
+          onEvent({
+            type: "status",
+            data: {
+              phase: "vision_first_turn_skipped",
+              turn,
+              ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+              model,
+            },
+          });
+          continue;
+        }
+        messages.push({ role: "system", content: buildVisionFirstTurnRetryHint() });
+        onEvent({
+          type: "turn_response",
+          data: {
+            turn,
+            ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+            assistantText: text,
+            toolCalls: [],
+            hasToolCalls: false,
+            isFinal: false,
+          },
+        });
+        if (text && !streamedChars) {
+          onEvent({ type: "message", data: { text } });
+        }
+        continue;
+      }
+
+      visionFirstTurnPending = false;
+      completeVisionFirstTurn(text, false);
+      messages.push({ role: "system", content: buildVisionFirstTurnContinueHint() });
+      onEvent({
+        type: "status",
+        data: {
+          phase: "vision_first_turn_done",
+          turn,
+          ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+          model,
+          detail: "读图描述完成，开始定位与修改",
+        },
+      });
+      continue;
+    }
 
     if (!toolCalls.length) {
       const text = visibleContent.trim();

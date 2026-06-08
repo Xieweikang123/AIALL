@@ -6,8 +6,10 @@ import {
   buildVisionUserContent,
   contentCharSize,
   contentDisplayText,
+  isAdequateVisionFirstTurnDescription,
   isVisionUnsupportedError,
   sanitizeImageDataUrls,
+  shouldRequireVisionFirstTurn,
 } from "./visionMessage";
 
 const PNG_DATA_URL = "data:image/png;base64,iVBORw0KGgo=";
@@ -24,9 +26,35 @@ describe("visionMessage", () => {
   it("buildVisionUserContent builds multimodal parts with default text", () => {
     const content = buildVisionUserContent("", [PNG_DATA_URL]);
     expect(content).toEqual([
-      { type: "text", text: expect.stringContaining("请描述并分析附带的图片") },
+      { type: "text", text: expect.stringContaining("首轮必读图") },
       { type: "image_url", image_url: { url: PNG_DATA_URL } },
     ]);
+  });
+
+  it("buildVisionTaskText requires vision-first for layout feedback with images", () => {
+    const text = buildVisionTaskText("是好看了，但是你看挤一块了", 1);
+    expect(text).toContain("首轮必读图");
+    expect(text).toContain("附图为本消息重点");
+    expect(text).toContain("禁止调用任何工具");
+  });
+
+  it("buildVisionFirstTurnRule is required for any attached image", () => {
+    const text = buildVisionTaskText("这段报错什么意思", 1);
+    expect(text).toContain("首轮必读图");
+    expect(text).toContain("禁止调用任何工具");
+  });
+
+  it("shouldRequireVisionFirstTurn respects vision fallback", () => {
+    expect(shouldRequireVisionFirstTurn(1, false)).toBe(true);
+    expect(shouldRequireVisionFirstTurn(1, true)).toBe(false);
+    expect(shouldRequireVisionFirstTurn(0, false)).toBe(false);
+  });
+
+  it("isAdequateVisionFirstTurnDescription enforces minimum length", () => {
+    expect(
+      isAdequateVisionFirstTurnDescription("图中 Git 同步行的 main 分支标签与 Fetch 按钮边框重叠"),
+    ).toBe(true);
+    expect(isAdequateVisionFirstTurnDescription("看到了")).toBe(false);
   });
 
   it("buildVisionTaskText prioritizes screenshot description for UI questions", () => {
