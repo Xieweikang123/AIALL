@@ -47,6 +47,76 @@ describe("resolveAssistantBubbleContent", () => {
       }),
     ).toBe("已完成修改。");
   });
+
+  it("prefers long narrative over thin final content after tool turns", () => {
+    const longAnswer =
+      "从截图看，这是一个输入框。聚焦方式：点击输入框内部任何区域都会聚焦。如果点击没有反应，可能是因为 disabled。";
+    const shortFinal = "修改后，即使输入框被禁用，点击时也会允许聚焦，方便查看内容。";
+    expect(
+      resolveAssistantBubbleContent({
+        content: shortFinal,
+        turnTraces: [{ assistantText: longAnswer }],
+        roundGroups: [
+          {
+            turn: 12,
+            narrative: longAnswer,
+            modelSteps: [],
+            toolIds: [],
+            response: {
+              assistantText: longAnswer,
+              toolCalls: [{ id: "1", name: "patch_file", arguments: "{}" }],
+              hasToolCalls: true,
+              isFinal: false,
+            },
+          },
+          {
+            turn: 13,
+            narrative: shortFinal,
+            modelSteps: [],
+            toolIds: [],
+            response: {
+              assistantText: shortFinal,
+              toolCalls: [],
+              hasToolCalls: false,
+              isFinal: true,
+            },
+          },
+        ],
+      }),
+    ).toContain("聚焦方式");
+    expect(
+      resolveAssistantBubbleContent({
+        content: shortFinal,
+        turnTraces: [{ assistantText: longAnswer }],
+        roundGroups: [
+          {
+            turn: 12,
+            narrative: longAnswer,
+            modelSteps: [],
+            toolIds: [],
+            response: {
+              assistantText: longAnswer,
+              toolCalls: [{ id: "1", name: "patch_file", arguments: "{}" }],
+              hasToolCalls: true,
+              isFinal: false,
+            },
+          },
+          {
+            turn: 13,
+            narrative: shortFinal,
+            modelSteps: [],
+            toolIds: [],
+            response: {
+              assistantText: shortFinal,
+              toolCalls: [],
+              hasToolCalls: false,
+              isFinal: true,
+            },
+          },
+        ],
+      }),
+    ).toContain(shortFinal);
+  });
 });
 
 describe("finalizeAssistantBubbleContent", () => {

@@ -17,7 +17,7 @@ import {
   writeFileContent,
 } from "./server/vibeFs";
 import { gitStatus, gitDiff, gitDiffFile, gitDiffContent, gitCommitFileDiff, gitCommit, gitLog, gitIsRepo, gitAdd, gitReset, gitDiscard, gitDiscardAll, gitRemotes, gitFetch, gitPull, gitPush, gitStashList, gitStashSave, gitStashPop, gitStashApply, gitStashDrop } from "./server/vibeGit";
-import { externalizeSessionPayload, readImageRefAsDataUrl } from "./server/vibeChatImages";
+import { upsertChatStoreIndex } from "./server/chatStoreIndex";
 
 const execFileAsync = promisify(execFile);
 
@@ -428,9 +428,15 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
     }
 
     try {
-      const body = (await readJsonBody(req)) as { projectPath?: string; sessionId?: string; data?: unknown };
+      const body = (await readJsonBody(req)) as {
+        projectPath?: string;
+        sessionId?: string;
+        activeSessionId?: string;
+        data?: unknown;
+      };
       const projectPath = (body.projectPath || "").trim();
       const sessionId = (body.sessionId || "").trim();
+      const activeSessionId = (body.activeSessionId || sessionId).trim();
       if (!projectPath || !sessionId) {
         sendJson(res, 400, { ok: false, error: "缺少 projectPath 或 sessionId" });
         return;
@@ -446,6 +452,11 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
           ? await externalizeSessionPayload(chatDir, sessionId, body.data as { messages?: unknown[] })
           : body.data;
       await fs.promises.writeFile(sessionFile, JSON.stringify(payload, null, 2), "utf-8");
+      if (payload && typeof payload === "object") {
+        await upsertChatStoreIndex(chatDir, resolved, payload as Record<string, unknown>, sessionId, {
+          activeSessionId,
+        });
+      }
       sendJson(res, 200, { ok: true });
     } catch (error) {
       sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "写入会话文件失败" });

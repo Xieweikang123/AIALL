@@ -1346,6 +1346,7 @@ import {
 import {
   filterDuplicateFeedThoughts,
   finalizeAssistantBubbleContent,
+  mergeAssistantTurnText,
   resolveAssistantBubbleContent,
 } from "../services/agentMessageDisplay";
 import { isScrollNearBottom, scrollElementToBottom } from "../utils/scrollViewport";
@@ -3150,13 +3151,35 @@ function sessionLocalFileName(sessionId: string): string {
 }
 
 function formatSessionInfoForCopy(session: VibeChatSessionMeta, project: string): string {
-  const relFile = `.aiall/vibe-chat-sessions/${sessionLocalFileName(session.id)}`;
+  const chatDir = ".aiall/vibe-chat-sessions";
+  const relFile = `${chatDir}/${sessionLocalFileName(session.id)}`;
+  const storeFile = `${chatDir}/chat-store.json`;
   const lines = [
-    "请排查以下 AI 助手本地会话：",
+    "【任务】排查 AIALL Vibe 本地会话的存储与展示问题。忽略会话标题/消息中的业务或编程问题，只分析会话 JSON、索引与 Agent 行为是否异常。",
+    "",
+    "【请先阅读】",
+    `1. 会话文件：${relFile}`,
+    `2. 索引文件：${storeFile}`,
+    "",
+    "【检查项】",
+    "1. 越界改码：用户仅为咨询/提问时，assistant 的 tools 是否出现 patch_file / write_file / delete_file",
+    "2. 正文一致：messages[].content（气泡）与 turnTraces[].assistantText、roundGroups[].response.assistantText 是否一致；有无答非所问或正文被工具轮次清空",
+    "3. 索引同步：chat-store.json 中该会话的 messageCount、updatedAt 与会话 JSON 内 messages 是否一致",
+    "4. 图片与冗余：imageRefs 是否有效、imageDataUrls 是否应已外置剥离；有无消息丢失或重复存储",
+    "",
+    "【请按此格式回复】",
+    "- 结论：（有无问题）",
+    "- 证据：（文件路径 + 字段/消息 id）",
+    "- 根因推测：",
+    "- 建议修复：（可指向 VibeCodingView.vue / vibeChatStorage.ts 等）",
+    "",
+    "【会话定位】",
     `- 标题: ${session.title}`,
     `- 项目: ${project}`,
     `- 会话 ID: ${session.id}`,
     `- 本地文件: ${relFile}`,
+    `- 索引目录: ${chatDir}/`,
+    `- 创建: ${session.createdAt}`,
     `- 更新: ${session.updatedAt}`,
     `- 消息数: ${session.messageCount}`,
   ];
@@ -3231,7 +3254,7 @@ function scheduleSyncChatStore(path: string) {
   }, SYNC_STORE_DEBOUNCE_MS);
 }
 
-function persistChatNow(path = projectPath.value.trim()) {
+function persistChatNow(path = projectPath.value.trim(), options?: { flushStore?: boolean }) {
   if (!path) return;
   const isEmptyDraft = !activeSessionId.value && !chatMessages.value.length;
   const result = saveVibeChatHistory(path, chatMessages.value, activeSessionId.value);
@@ -3242,7 +3265,7 @@ function persistChatNow(path = projectPath.value.trim()) {
     if (sessionId) {
       const snapshot = getActiveSessionSnapshot(path, sessionId);
       if (snapshot) {
-        await syncChatSession(path, sessionId, snapshot);
+        await syncChatSession(path, sessionId, snapshot, { activeSessionId: activeSessionId.value || sessionId });
         if (activeSessionId.value === sessionId && projectPath.value.trim() === path) {
           chatMessages.value = normalizeChatMessages(
             stampImageRefsAfterSync(sessionId, chatMessages.value),
@@ -3250,7 +3273,15 @@ function persistChatNow(path = projectPath.value.trim()) {
         }
       }
     }
-    scheduleSyncChatStore(path);
+    if (options?.flushStore) {
+      if (syncStoreTimer) {
+        clearTimeout(syncStoreTimer);
+        syncStoreTimer = null;
+      }
+      await flushChatStoreToDisk(path, { quiet: true });
+    } else {
+      scheduleSyncChatStore(path);
+    }
   })();
   if (isEmptyDraft) activeSessionId.value = "";
 }
@@ -5046,10 +5077,11 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
       },
       event.data.maxTurns,
     );
-    if (event.data.hasToolCalls) {
-      assistantMsg.content = "";
-      assistantMsg.streaming = false;
+    const turnText = stripToolSummaryFromAssistantContent(event.data.assistantText || "");
+    if (turnText) {
+      assistantMsg.content = mergeAssistantTurnText(assistantMsg.content || "", turnText);
     }
+    assistantMsg.streaming = false;
     patchAssistantMsg(msgId, {
       ...syncRoundGroupsPatch(assistantMsg),
       content: assistantMsg.content,
@@ -5212,7 +5244,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
   if (event.type === "message") {
     clearStreamDeltaBuffer();
     const cleanText = stripToolSummaryFromAssistantContent(event.data.text);
-    assistantMsg.content = cleanText;
+    assistantMsg.content = mergeAssistantTurnText(assistantMsg.content || "", cleanText);
     assistantMsg.streaming = false;
     assistantMsg.status = "";
     assistantMsg.agentPhase = undefined;
@@ -5378,7 +5410,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
       agentRecoveryDismissed: true,
       agentContinueCount: undefined,
     });
-    persistChatNow();
+    persistChatNow(undefined, { flushStore: true });
 
     if (fileAction.writtenFiles?.length) {
       if (assistantMsg.turnFileDiffs) {

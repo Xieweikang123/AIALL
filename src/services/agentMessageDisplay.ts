@@ -14,21 +14,82 @@ export type FinalizeAssistantBubbleSource = AssistantBubbleSource & {
   agentFailed?: boolean;
 };
 
+const SUBSTANTIVE_MIN_CHARS = 48;
+const THIN_EPILOGUE_MAX_CHARS = 96;
+
+function normalizeBubbleText(text: string): string {
+  return stripToolSummaryFromAssistantContent(text).trim();
+}
+
+/** Merge streaming turn text without dropping a longer substantive answer. */
+export function mergeAssistantTurnText(existing: string, incoming: string): string {
+  const prev = normalizeBubbleText(existing);
+  const next = normalizeBubbleText(incoming);
+  if (!prev) return next;
+  if (!next) return prev;
+  if (prev === next) return prev;
+  if (prev.includes(next)) return prev;
+  if (next.includes(prev)) return next;
+  if (next.length >= prev.length * 0.85) return next;
+  if (prev.length >= SUBSTANTIVE_MIN_CHARS && next.length <= THIN_EPILOGUE_MAX_CHARS) {
+    return `${prev}\n\n${next}`;
+  }
+  if (prev.length > next.length * 2 && next.length <= THIN_EPILOGUE_MAX_CHARS) return prev;
+  return `${prev}\n\n${next}`;
+}
+
+function collectAssistantTextCandidates(msg: AssistantBubbleSource): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const push = (raw?: string) => {
+    const text = normalizeBubbleText(raw || "");
+    if (!text || seen.has(text)) return;
+    seen.add(text);
+    out.push(text);
+  };
+
+  push(msg.content);
+  for (const group of msg.roundGroups ?? []) {
+    push(group.narrative);
+    push(group.response?.assistantText);
+  }
+  for (const trace of msg.turnTraces ?? []) {
+    push(trace.assistantText);
+  }
+  return out;
+}
+
+function isThinEpilogue(short: string, anchor: string): boolean {
+  if (short.length >= SUBSTANTIVE_MIN_CHARS) return false;
+  if (anchor.length < SUBSTANTIVE_MIN_CHARS) return false;
+  return short.length <= THIN_EPILOGUE_MAX_CHARS && anchor.length > short.length * 2;
+}
+
+function pickBestAssistantBubbleText(candidates: string[], direct: string): string {
+  if (!candidates.length) return "";
+  if (!direct) {
+    return [...candidates].sort((a, b) => b.length - a.length)[0]!;
+  }
+
+  const longest = [...candidates].sort((a, b) => b.length - a.length)[0]!;
+  if (direct.length >= SUBSTANTIVE_MIN_CHARS && direct.length >= longest.length * 0.85) {
+    return direct;
+  }
+  if (isThinEpilogue(direct, longest)) {
+    return mergeAssistantTurnText(longest, direct);
+  }
+  if (longest.length > direct.length * 1.5) {
+    return mergeAssistantTurnText(longest, direct);
+  }
+  return direct;
+}
+
 /** Resolve the text shown in the assistant chat bubble (with fallbacks for agent runs). */
 export function resolveAssistantBubbleContent(msg: AssistantBubbleSource): string {
-  const direct = msg.content?.trim();
-  if (direct) return stripToolSummaryFromAssistantContent(direct);
-
-  const fromFinal = msg.roundGroups
-    ?.filter((group) => group.response?.isFinal && group.response.assistantText.trim())
-    .at(-1)?.response?.assistantText.trim();
-  if (fromFinal) return stripToolSummaryFromAssistantContent(fromFinal);
-
-  const narratives = msg.roundGroups?.map((group) => group.narrative?.trim()).filter(Boolean) ?? [];
-  if (narratives.length) return stripToolSummaryFromAssistantContent(narratives[narratives.length - 1]!);
-
-  const trace = msg.turnTraces?.at(-1)?.assistantText.trim() || "";
-  return stripToolSummaryFromAssistantContent(trace);
+  const direct = normalizeBubbleText(msg.content || "");
+  const candidates = collectAssistantTextCandidates(msg);
+  if (!direct && !candidates.length) return "";
+  return pickBestAssistantBubbleText(candidates, direct);
 }
 
 function resolveFinalAssistantText(msg: AssistantBubbleSource): string {
@@ -44,9 +105,10 @@ const COMPLETION_SUMMARY_RE = /(?:修改完成|已完成|已写入|总结|变更
 /** Whether the model already gave a substantive completion summary. */
 export function hasSubstantiveAgentSummary(msg: AssistantBubbleSource): boolean {
   const finalText = resolveFinalAssistantText(msg);
-  if (finalText.length >= 48) return true;
+  if (finalText.length >= SUBSTANTIVE_MIN_CHARS) return true;
   if (COMPLETION_SUMMARY_RE.test(finalText)) return true;
   const bubble = resolveAssistantBubbleContent(msg);
+  if (bubble.length >= SUBSTANTIVE_MIN_CHARS) return true;
   return COMPLETION_SUMMARY_RE.test(bubble);
 }
 
@@ -86,7 +148,7 @@ export function thoughtDuplicatesBubble(thought: string, bubbleContent: string):
   if (!thoughtNorm || !bubbleNorm) return false;
   if (thoughtNorm === bubbleNorm) return true;
   const minLen = Math.min(thoughtNorm.length, bubbleNorm.length);
-  if (minLen < 48) return false;
+  if (minLen < SUBSTANTIVE_MIN_CHARS) return false;
   if (bubbleNorm.includes(thoughtNorm) || thoughtNorm.includes(bubbleNorm)) return true;
   const prefixLen = Math.min(thoughtNorm.length, bubbleNorm.length, 160);
   return thoughtNorm.slice(0, prefixLen) === bubbleNorm.slice(0, prefixLen);

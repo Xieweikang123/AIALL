@@ -329,6 +329,8 @@ function onInput() {
 function onMouseDown(e: MouseEvent) {
   if (props.disabled) {
     e.preventDefault();
+    // 仍然允许聚焦以便查看内容
+    editorRef.value?.focus();
   }
 }
 

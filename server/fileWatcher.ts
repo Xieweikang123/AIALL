@@ -29,6 +29,7 @@ export class FileWatcher extends EventEmitter {
       ignored: [
         "**/node_modules/**",
         "**/.git/**",
+        "**/*.lock",
         "**/dist/**",
         "**/.DS_Store",
         "**/Thumbs.db",
@@ -79,7 +80,19 @@ export class FileWatcher extends EventEmitter {
     });
 
     this.watcher.on("error", (error) => {
-      this.emit("error", error);
+      const err = error as NodeJS.ErrnoException;
+      const target = err.path || err.filename || "";
+      const benign =
+        (err.code === "EPERM" || err.code === "EACCES" || err.code === "ENOENT") &&
+        (target.includes(".git") || target.endsWith(".lock"));
+      if (benign) {
+        console.warn("[fileWatcher] ignored watch error:", target || err.message);
+        return;
+      }
+      console.error("[fileWatcher]", error);
+      if (this.listenerCount("error") > 0) {
+        this.emit("error", error);
+      }
     });
   }
 

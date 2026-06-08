@@ -26,6 +26,7 @@ import {
   EXECUTE_PLAN_EXPLORE_TURN_BUDGET,
   INTERACTIVE_EXPLORE_TURN_BUDGET,
 } from "./agentExplorationBudget";
+import { buildConsultativeBuildHint, isConsultativeUserPrompt } from "./agentUserIntent";
 import {
   buildExecutePlanSystemHint,
   buildTargetFileManifest,
@@ -473,8 +474,9 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "用户可能在消息中附带截图或图片；若已附带，请结合图片内容理解需求并回答，不要声称无法查看图片。",
     "用户附截图询问界面/功能时：先描述截图所见，再判断是否属于本项目（优先查 src/views、src/components），勿默认是 GitHub Desktop、VS Code 等外部应用。",
     "用户针对截图局部提问（配色、按钮、某块区域）时：讨论阶段只谈其所指可见范围，勿擅自扩大到整页/全项目样式盘点；若用户明确要求修改，可在该范围内 grep/read 对应组件后 patch_file；用户明确说「整个/整页/全面板」时可按扩大后的范围实施。",
-    "工作流程：先 grep / search_files 快速定位（通常 1 轮），read_file 读关键片段，然后 patch_file / write_file 修改。",
-    "效率：探索不超过 2 轮；信息足够后必须写入，不要连续多轮只读；同一轮可并行多个 read_file / grep。",
+    "若用户仅为提问/解释（如「是什么」「为什么」「点哪里」「怎么工作」）且未明确要求改代码：只读探索后用自然语言回答，禁止 patch_file / write_file / delete_file；需要改代码时请用户明确说明改什么。",
+    "工作流程（用户已要求实施改动时）：先 grep / search_files 快速定位（通常 1 轮），read_file 读关键片段，然后 patch_file / write_file 修改。",
+    "效率：探索不超过 2 轮；在已确认要改代码的任务中，信息足够后必须写入，不要连续多轮只读；同一轮可并行多个 read_file / grep。",
     "探索时：read_file 用 offset/limit 分段读取（单次约 200 行）；不要重复读取已读过的文件；用中文简短说明后立即调用工具。",
     "修改前必须先 read_file 核对目标文件；patch_file 前 old_string 须与磁盘内容完全一致。",
     "解释项目时：从 package.json、README、入口文件等关键文件入手，不要臆测。",
@@ -836,6 +838,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         : undefined),
   );
   const isExecutePlan = !isAsk && runProfile.kind === "execute_plan";
+  const readOnlyBuildRun = !isAsk && !isExecutePlan && isConsultativeUserPrompt(prompt);
   const {
     projectRoot,
     prompt,
@@ -912,15 +915,16 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   const systemPrompt =
     (isAsk
       ? buildAskSystemPrompt(projectRoot, openFilePath, openFileSnippet, model)
-      : buildSystemPrompt(projectRoot, openFilePath, model)) + projectContextBlock;
+      : buildSystemPrompt(projectRoot, openFilePath, model) +
+        (readOnlyBuildRun ? buildConsultativeBuildHint() : "")) + projectContextBlock;
 
-  const writeStage = isAsk ? null : createWriteStage();
+  const writeStage = isAsk || readOnlyBuildRun ? null : createWriteStage();
   const readCache = new Map<string, string>();
   const readSliceCache = new Map<string, string>();
   const grepCache = new Map<string, string>();
   let consecutiveExploreTurns = 0;
   let turnsLowNudgeSent = false;
-  const activeTools = isAsk ? READ_ONLY_AGENT_TOOLS : VIBE_AGENT_TOOLS;
+  const activeTools = isAsk || readOnlyBuildRun ? READ_ONLY_AGENT_TOOLS : VIBE_AGENT_TOOLS;
   const userContent = buildVisionUserContent(prompt, imageDataUrls);
   const messages: ChatCompletionMessage[] = [
     { role: "system", content: systemPrompt },
@@ -977,6 +981,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
     if (
       !isAsk &&
+      !readOnlyBuildRun &&
       segmentMaxTurns !== undefined &&
       !turnsLowNudgeSent &&
       turn >= segmentMaxTurns - 3
@@ -1422,7 +1427,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     } else if (turnExploreOnly) {
       consecutiveExploreTurns += 1;
     }
-    if (!isAsk && consecutiveExploreTurns >= exploreTurnBudget) {
+    if (!isAsk && !readOnlyBuildRun && consecutiveExploreTurns >= exploreTurnBudget) {
       messages.push({ role: "system", content: buildExploreBudgetNudge(consecutiveExploreTurns) });
       consecutiveExploreTurns = 0;
     }
@@ -1446,7 +1451,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       segmentIndex += 1;
       segmentMaxTurns = extendSegmentMaxTurns(turn, segmentBudget);
       turnsLowNudgeSent = false;
-      messages.push({ role: "system", content: buildSegmentContinueNudge(turn, segmentIndex) });
+      if (!readOnlyBuildRun) {
+        messages.push({ role: "system", content: buildSegmentContinueNudge(turn, segmentIndex) });
+      }
       onEvent({
         type: "status",
         data: {

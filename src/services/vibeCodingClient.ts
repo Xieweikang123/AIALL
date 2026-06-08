@@ -145,12 +145,22 @@ export async function fetchProjectContext(projectPath: string): Promise<ProjectC
   }
 }
 
-export async function syncChatSession(projectPath: string, sessionId: string, data: unknown): Promise<void> {
+export async function syncChatSession(
+  projectPath: string,
+  sessionId: string,
+  data: unknown,
+  options?: { activeSessionId?: string },
+): Promise<void> {
   try {
     await fetch(backendUrl("/backend/vibe/chat-session-sync"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectPath, sessionId, data }),
+      body: JSON.stringify({
+        projectPath,
+        sessionId,
+        data,
+        activeSessionId: options?.activeSessionId || sessionId,
+      }),
     });
   } catch {
     // best-effort, ignore errors
