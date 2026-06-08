@@ -769,7 +769,6 @@
                       <div v-if="block.kind === 'thought'" class="cursor-thought">
                         <ChatMarkdown
                           :content="block.text"
-                          :apply-buttons="false"
                           :streaming="isAgentRunning(m)"
                         />
                       </div>
@@ -939,9 +938,7 @@
                   'msg-answer--final': m.role === 'assistant' && !isAgentRunning(m),
                 }"
                 :content="messageDisplayContent(m)"
-                :apply-buttons="shouldShowApplyButtons(m)"
                 :streaming="m.role === 'assistant' && !!m.streaming && isAgentRunning(m)"
-                @apply-block="(idx: number) => applyCodeBlock(extractCodeBlocks(messageDisplayContent(m))[idx])"
               />
               <div
                 v-if="
@@ -998,7 +995,7 @@
                 v-if="
                   m.role === 'assistant' &&
                   !m.streaming &&
-                  (m.writtenFiles?.length || extractCodeBlocks(messageDisplayContent(m)).length)
+                  (m.writtenFiles?.length)
                 "
                 class="msg-actions"
               >
@@ -1027,6 +1024,7 @@
 
         <div
           v-if="showQuoteButton"
+          ref="quoteButtonRef"
           class="quote-floating"
           :style="{ left: quoteButtonPosition.x + 'px', top: quoteButtonPosition.y + 'px' }"
           @mousedown.prevent="quoteSelectedText"
@@ -1104,7 +1102,10 @@
             </div>
           </div>
           <div class="chat-bottom">
-            <span v-if="stalledAssistantMsg" class="chat-recovery-hint chat-stall-hint">
+            <span v-if="autoResumeSecondsLeft > 0" class="chat-recovery-hint chat-auto-resume-hint">
+              {{ autoResumeSecondsLeft }} 秒后自动恢复运行（可取消）
+            </span>
+            <span v-else-if="stalledAssistantMsg" class="chat-recovery-hint chat-stall-hint">
               运行似乎已卡住（长时间无进展）
             </span>
             <span v-else-if="recoverableAssistantMsg && !chatSending" class="chat-recovery-hint">
@@ -1114,6 +1115,14 @@
             <span v-else-if="chatSending" class="chat-running">{{ chatRunningText }}</span>
             <span v-else class="chat-hint">{{ chatHintText }}</span>
             <div class="chat-actions">
+              <button
+                v-if="autoResumeSecondsLeft > 0"
+                type="button"
+                class="secondary"
+                @click="cancelAutoResume"
+              >
+                取消自动恢复
+              </button>
               <button
                 v-if="stalledAssistantMsg"
                 type="button"
@@ -1130,7 +1139,7 @@
                 :disabled="!configReady || !projectOpened"
                 @click="resumeAgentRun(recoverableAssistantMsg.id)"
               >
-                恢复运行
+                {{ autoResumeSecondsLeft > 0 ? "立即恢复" : "恢复运行" }}
               </button>
               <button v-if="chatSending" type="button" class="secondary" @click="stopAgent">停止</button>
               <button type="button" class="primary" :disabled="!canSendChat" @click="sendChat">
@@ -1209,6 +1218,8 @@ import {
   recoverableAgentErrorHint,
   resolveAgentCompletedTurns,
   resolveAgentFailureBubbleContent,
+  shouldAutoResumeAgentError,
+  AGENT_AUTO_RESUME_SECONDS,
 } from "../services/agentRecovery";
 import { loadAiChatBaseFromStorage } from "../services/aiLocalConfig";
 import {
@@ -1447,6 +1458,9 @@ let agentRunGeneration = 0;
 let saveChatTimer: ReturnType<typeof setTimeout> | null = null;
 let syncStoreTimer: ReturnType<typeof setTimeout> | null = null;
 let agentUiTickTimer: ReturnType<typeof setInterval> | null = null;
+let autoResumeTimer: ReturnType<typeof setInterval> | null = null;
+const autoResumeSecondsLeft = ref(0);
+const autoResumeTargetId = ref("");
 const agentUiTick = ref(0);
 /** Timestamp of last meaningful agent progress (not heartbeat status). */
 let agentLastProgressAt = 0;
@@ -1489,6 +1503,7 @@ const pendingQuote = ref<QuotedMessage | null>(null);
 const quotedMessage = ref<QuotedMessage | null>(null);
 const quoteButtonPosition = ref({ x: 0, y: 0 });
 const showQuoteButton = ref(false);
+const quoteButtonRef = ref<HTMLElement | null>(null);
 
 const searchQuery = ref("");
 const searchMode = ref<SearchMode>("file");
@@ -2035,6 +2050,34 @@ function checkAgentStall() {
   recoverAgentRunFromStall(msg, agentStallRecoveryReason());
 }
 
+function cancelAutoResume() {
+  if (autoResumeTimer) {
+    clearInterval(autoResumeTimer);
+    autoResumeTimer = null;
+  }
+  autoResumeSecondsLeft.value = 0;
+  autoResumeTargetId.value = "";
+}
+
+function scheduleAutoResume(assistantMsgId: string) {
+  cancelAutoResume();
+  if (!assistantMsgId || chatSending.value || !configReady.value || !projectOpened.value) return;
+  const msg = chatMessages.value.find((m) => m.id === assistantMsgId);
+  if (!msg || !canResumeAgentRun(msg)) return;
+
+  autoResumeTargetId.value = assistantMsgId;
+  autoResumeSecondsLeft.value = AGENT_AUTO_RESUME_SECONDS;
+  autoResumeTimer = setInterval(() => {
+    if (autoResumeSecondsLeft.value <= 1) {
+      const targetId = autoResumeTargetId.value;
+      cancelAutoResume();
+      if (targetId && !chatSending.value) void resumeAgentRun(targetId);
+      return;
+    }
+    autoResumeSecondsLeft.value -= 1;
+  }, 1000);
+}
+
 function applyRecoverableAgentFailure(
   assistantMsg: ChatMessage,
   message: string,
@@ -2076,6 +2119,12 @@ function applyRecoverableAgentFailure(
     statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
     ...syncRoundGroupsPatch(assistantMsg),
   });
+
+  if (recoverable && shouldAutoResumeAgentError(message)) {
+    scheduleAutoResume(assistantMsg.id);
+  } else {
+    cancelAutoResume();
+  }
 }
 
 function recoverAgentRunFromStall(assistantMsg: ChatMessage, reason: string) {
@@ -2535,12 +2584,6 @@ function shouldShowMessageBubble(msg: ChatMessage): boolean {
   return Boolean(messageDisplayContent(msg));
 }
 
-function shouldShowApplyButtons(msg: ChatMessage): boolean {
-  if (msg.role !== "assistant") return false;
-  if (msg.chatMode === "ask") return false;
-  return true;
-}
-
 function userMessageImages(msg: ChatMessage): string[] {
   return msg.imageDataUrls?.filter(Boolean) ?? [];
 }
@@ -2704,6 +2747,19 @@ function onDocumentClick(event: MouseEvent) {
     const el = sessionPickerRef.value;
     if (el && !el.contains(target)) closeSessionPicker();
   }
+  if (showQuoteButton.value) {
+    const btn = quoteButtonRef.value;
+    if (btn && btn.contains(target)) return;
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.toString().trim()) {
+      hideQuoteButtonNow();
+    }
+  }
+}
+
+function hideQuoteButtonNow() {
+  showQuoteButton.value = false;
+  pendingQuote.value = null;
 }
 
 function formatSessionTime(iso: string): string {
@@ -4125,6 +4181,20 @@ function hideQuoteButton() {
   }, 200);
 }
 
+let selectionChangeTimer: ReturnType<typeof setTimeout> | null = null;
+function onSelectionChange() {
+  if (!showQuoteButton.value) return;
+  if (selectionChangeTimer) clearTimeout(selectionChangeTimer);
+  selectionChangeTimer = setTimeout(() => {
+    selectionChangeTimer = null;
+    if (!showQuoteButton.value) return;
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.toString().trim()) {
+      hideQuoteButtonNow();
+    }
+  }, 120);
+}
+
 function applyExample(text: string) {
   composerRef.value?.setPlainText(text);
 }
@@ -4441,50 +4511,6 @@ function onChatDrop(e: DragEvent) {
 function onWindowDragEnd() {
   isDragging.value = false;
   dragCounter = 0;
-}
-
-function extractCodeBlocks(text: string): string[] {
-  const blocks: string[] = [];
-  const re = /```[\w]*\n([\s\S]*?)```/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    if (m[1]?.trim()) blocks.push(m[1].trimEnd());
-  }
-  return blocks;
-}
-
-async function applyCodeBlock(code: string) {
-  expandEditor();
-  if (activeFilePath.value) {
-    const before = fileContent.value;
-    fileContent.value = code;
-    fileDirty.value = true;
-    setFileDiff(activeFilePath.value, { before, after: code });
-    return;
-  }
-  if (!projectOpened.value) return;
-  const rel = await inputPrompt.prompt("未打开文件。请输入相对路径（如 src/example.ts）", {
-    defaultValue: "new-file.ts",
-  });
-  if (!rel) return;
-  const fullPath = resolveFullPathFromRel(rel);
-  const existing = await readFile(fullPath);
-  const before = existing.ok ? existing.content : "";
-  const writeResult = existing.ok
-    ? await writeFile(fullPath, code)
-    : await createItem(fullPath, false, code);
-  if (!writeResult.ok) {
-    treeError.value = writeResult.error || "写入失败";
-    return;
-  }
-  treeError.value = "";
-  setFileDiff(fullPath, { before, after: code });
-  await refreshTree();
-  const openPath = resolveFullPathFromRel(rel.trim());
-  selectedTreePath.value = openPath;
-  await openFile(openPath);
-  showDiffMode.value = true;
-  fileDirty.value = false;
 }
 
 function formatToolMeta(
@@ -5017,6 +5043,7 @@ async function completeAgentTurnApplication(messageId: string) {
     });
     persistChatNow();
     await refreshTree();
+    await refreshGitStatus({ showLoading: false });
     const toPreview = applied.filter((rel) => !msg.turnFileDiffs?.[rel]?.deleted);
     void handleAgentWrittenFiles(toPreview);
   } catch (error) {
@@ -5108,6 +5135,7 @@ async function revertAgentTurn(messageId: string, event?: MouseEvent) {
     patchAssistantMsg(messageId, { reverted: true, reverting: false });
     persistChatNow();
     await refreshTree();
+    await refreshGitStatus({ showLoading: false });
   } catch (error) {
     patchAssistantMsg(messageId, { reverting: false });
     chatError.value = error instanceof Error ? error.message : "回滚失败";
@@ -5122,6 +5150,7 @@ function findRunningAssistantMsg(): ChatMessage | null {
 }
 
 function interruptAgentRun(options?: { logStatus?: boolean }) {
+  cancelAutoResume();
   agentRunGeneration += 1;
   agentLastProgressAt = 0;
   const running = findRunningAssistantMsg();
@@ -5252,6 +5281,7 @@ function resolveOriginalUserPrompt(assistantMsgId: string): string {
 }
 
 async function resumeAgentRun(assistantMsgId: string) {
+  cancelAutoResume();
   if (chatSending.value || !configReady.value || !projectOpened.value) return;
 
   const assistantIdx = chatMessages.value.findIndex((m) => m.id === assistantMsgId);
@@ -5601,6 +5631,7 @@ onMounted(() => {
   window.addEventListener("dragend", onWindowDragEnd);
   document.addEventListener("click", onDocumentClick);
   document.addEventListener("keydown", onGlobalKeydown);
+  document.addEventListener("selectionchange", onSelectionChange);
   document.addEventListener("dragover", onDocumentDragOverCapture, true);
   document.addEventListener("drop", onDocumentDropCapture, true);
   onStorageError((msg) => {
@@ -5614,6 +5645,8 @@ onBeforeUnmount(() => {
   window.removeEventListener("dragend", onWindowDragEnd);
   document.removeEventListener("click", onDocumentClick);
   document.removeEventListener("keydown", onGlobalKeydown);
+  document.removeEventListener("selectionchange", onSelectionChange);
+  if (selectionChangeTimer) clearTimeout(selectionChangeTimer);
   document.removeEventListener("dragover", onDocumentDragOverCapture, true);
   document.removeEventListener("drop", onDocumentDropCapture, true);
   agentAbortHandle?.abort();
@@ -5625,6 +5658,7 @@ onBeforeUnmount(() => {
   if (streamScrollTimer) clearTimeout(streamScrollTimer);
   if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
   if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
+  cancelAutoResume();
   persistChatNow();
 });
 </script>
@@ -6023,13 +6057,13 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 9px 14px;
+  padding: 10px 14px;
   font-size: 14px;
 }
 
 .git-header-row + .git-header-row {
   padding-top: 0;
-  padding-bottom: 8px;
+  padding-bottom: 10px;
 }
 
 .git-sync-row {
@@ -6039,7 +6073,7 @@ onBeforeUnmount(() => {
 .git-branch-info {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
   flex: 1;
 }
@@ -6047,20 +6081,32 @@ onBeforeUnmount(() => {
 .git-branch-icon {
   color: var(--text-dim);
   flex-shrink: 0;
+  font-size: 15px;
 }
 
 .git-branch-name {
   color: #7aa2f7;
   font-family: monospace;
+  font-weight: 600;
+  font-size: 13px;
+  padding: 3px 8px;
+  background: rgba(122, 162, 247, 0.1);
+  border: 1px solid rgba(122, 162, 247, 0.15);
+  border-radius: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: background 0.2s ease;
+}
+
+.git-branch-name:hover {
+  background: rgba(122, 162, 247, 0.18);
 }
 
 .git-remote-info {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   color: var(--text-dim);
   min-width: 0;
   flex: 1;
@@ -6071,11 +6117,15 @@ onBeforeUnmount(() => {
   font-size: 12px;
   color: var(--text-dim);
   flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .git-sync-stat.active {
   color: #7aa2f7;
   font-weight: 600;
+  background: rgba(122, 162, 247, 0.12);
 }
 
 .git-remote-tracking {
@@ -6085,6 +6135,9 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  padding: 2px 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 4px;
 }
 
 .git-remote-actions {

@@ -9,6 +9,8 @@ import {
   isAgentMaxTurnsExhausted,
   isAgentRunStalled,
   isRecoverableAgentError,
+  shouldAutoResumeAgentError,
+  AGENT_AUTO_RESUME_SECONDS,
   recoverableAgentErrorHint,
   resolveAgentCompletedTurns,
   resolveAgentFailureBubbleContent,
@@ -37,6 +39,20 @@ describe("isRecoverableAgentError", () => {
   it("detects max-turn exhaustion as recoverable", () => {
     const message = buildAgentMaxTurnsExhaustedMessage(12);
     expect(isRecoverableAgentError(message)).toBe(true);
+  });
+});
+
+describe("shouldAutoResumeAgentError", () => {
+  it("auto-resumes transient disconnects but not max-turn exhaustion", () => {
+    expect(shouldAutoResumeAgentError("Failed to fetch")).toBe(true);
+    expect(shouldAutoResumeAgentError("连接中断（运行未完成）")).toBe(true);
+    expect(shouldAutoResumeAgentError(buildAgentMaxTurnsExhaustedMessage(12))).toBe(false);
+    expect(shouldAutoResumeAgentError("模型返回格式错误")).toBe(false);
+  });
+
+  it("uses a 5–10 second countdown window", () => {
+    expect(AGENT_AUTO_RESUME_SECONDS).toBeGreaterThanOrEqual(5);
+    expect(AGENT_AUTO_RESUME_SECONDS).toBeLessThanOrEqual(10);
   });
 });
 

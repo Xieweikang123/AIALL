@@ -7,7 +7,7 @@ vi.mock("dompurify", () => ({
   },
 }));
 
-import { renderMarkdown, shouldShowCodeBlockApplyButton } from "./renderMarkdown";
+import { renderMarkdown } from "./renderMarkdown";
 
 describe("renderMarkdown", () => {
   it("renders headings and inline code", () => {
@@ -25,16 +25,10 @@ describe("renderMarkdown", () => {
     expect(html).toContain("const x = 1;");
   });
 
-  it("adds apply buttons for typescript-like blocks", () => {
+  it("does not add apply buttons to code blocks", () => {
     const html = renderMarkdown("```ts\nconst x = 1;\n```");
-    expect(html).toContain("code-block-apply-btn");
-  });
-
-  it("skips apply buttons for vue/html reference blocks", () => {
-    const vue = "```vue\n<template>\n  <button @click=\"doFetch\">Fetch</button>\n  {{ gitBranch }}\n</template>\n```";
-    const html = renderMarkdown(vue);
     expect(html).not.toContain("code-block-apply-btn");
-    expect(html).toContain("&lt;template");
+    expect(html).not.toContain("写入代码块");
   });
 
   it("renders gfm tables and bold inside headings", () => {
@@ -43,15 +37,5 @@ describe("renderMarkdown", () => {
     expect(html).toContain("<strong");
     expect(html).toContain("<table");
     expect(html).toContain("<td");
-  });
-});
-
-describe("shouldShowCodeBlockApplyButton", () => {
-  it("detects vue markup without language tag", () => {
-    expect(shouldShowCodeBlockApplyButton("<button>Fetch</button>\n{{ gitBranch }}")).toBe(false);
-  });
-
-  it("allows plain typescript blocks", () => {
-    expect(shouldShowCodeBlockApplyButton("export const x = 1;", "ts")).toBe(true);
   });
 });

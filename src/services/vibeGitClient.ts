@@ -353,3 +353,75 @@ export async function gitPushRemote(projectPath: string, remote?: string, branch
     return { ok: false, output: "", error: error instanceof Error ? error.message : "网络错误" };
   }
 }
+
+// ---- Stash ----
+
+export interface GitStashEntry {
+  index: string;
+  message: string;
+}
+
+export interface GitStashListResult {
+  ok: boolean;
+  stashes: GitStashEntry[];
+  error?: string;
+}
+
+export interface GitStashResult {
+  ok: boolean;
+  output: string;
+  error?: string;
+}
+
+export async function gitStashListRemote(projectPath: string): Promise<GitStashListResult> {
+  try {
+    const url = backendUrl(`/backend/vibe/git/stash-list?path=${encodeURIComponent(projectPath)}`);
+    const response = await fetch(url);
+    const data = (await response.json()) as GitStashListResult;
+    return data;
+  } catch (error) {
+    return { ok: false, stashes: [], error: error instanceof Error ? error.message : "网络错误" };
+  }
+}
+
+export async function gitStashSaveRemote(projectPath: string, message?: string): Promise<GitStashResult> {
+  try {
+    const response = await fetch(backendUrl("/backend/vibe/git/stash-save"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: projectPath, message }),
+    });
+    const data = (await response.json()) as GitStashResult;
+    return data;
+  } catch (error) {
+    return { ok: false, output: "", error: error instanceof Error ? error.message : "网络错误" };
+  }
+}
+
+export async function gitStashPopRemote(projectPath: string, stashIndex?: number): Promise<GitStashResult> {
+  try {
+    const response = await fetch(backendUrl("/backend/vibe/git/stash-pop"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: projectPath, stashIndex }),
+    });
+    const data = (await response.json()) as GitStashResult;
+    return data;
+  } catch (error) {
+    return { ok: false, output: "", error: error instanceof Error ? error.message : "网络错误" };
+  }
+}
+
+export async function gitStashDropRemote(projectPath: string, stashIndex: number): Promise<GitStashResult> {
+  try {
+    const response = await fetch(backendUrl("/backend/vibe/git/stash-drop"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: projectPath, stashIndex }),
+    });
+    const data = (await response.json()) as GitStashResult;
+    return data;
+  } catch (error) {
+    return { ok: false, output: "", error: error instanceof Error ? error.message : "网络错误" };
+  }
+}

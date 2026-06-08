@@ -54,6 +54,9 @@ export function isAgentMaxTurnsExhausted(
   return lastToolTurn >= completedTurns;
 }
 
+/** Delay before auto-resuming after transient disconnect (seconds). */
+export const AGENT_AUTO_RESUME_SECONDS = 10;
+
 /** Transient network / transport failures that can be resumed manually. */
 export function isRecoverableAgentError(message: string): boolean {
   const msg = message.trim().toLowerCase();
@@ -82,6 +85,13 @@ export function isRecoverableAgentError(message: string): boolean {
     msg.includes("bad gateway") ||
     msg.includes("service unavailable")
   );
+}
+
+/** Auto-resume after disconnect; excludes turn-cap exhaustion (user may want to review first). */
+export function shouldAutoResumeAgentError(message: string): boolean {
+  if (!isRecoverableAgentError(message)) return false;
+  const msg = message.trim().toLowerCase();
+  return !msg.includes("已达最大轮次");
 }
 
 export function hasRecoverableAgentProgress(msg: AgentProgressSource): boolean {

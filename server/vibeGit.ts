@@ -504,6 +504,77 @@ export async function gitPull(projectRoot: string, remote?: string, branch?: str
   }
 }
 
+export interface GitStashEntry {
+  index: string;
+  message: string;
+}
+
+export interface GitStashListResult {
+  ok: boolean;
+  stashes: GitStashEntry[];
+  error?: string;
+}
+
+export async function gitStashList(projectRoot: string): Promise<GitStashListResult> {
+  try {
+    const { stdout } = await gitExec(projectRoot, ["stash", "list"]);
+    const stashes: GitStashEntry[] = stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        const match = line.match(/^(stash@\{(\d+)\}):\s*(.*)$/);
+        if (!match) return null;
+        return { index: match[2], message: match[3].trim() };
+      })
+      .filter((e): e is GitStashEntry => e !== null);
+    return { ok: true, stashes };
+  } catch (error) {
+    return { ok: false, stashes: [], error: error instanceof Error ? error.message : "获取贮藏列表失败" };
+  }
+}
+
+export interface GitStashResult {
+  ok: boolean;
+  output: string;
+  error?: string;
+}
+
+export async function gitStashSave(projectRoot: string, message?: string): Promise<GitStashResult> {
+  try {
+    const args = ["stash", "push"];
+    if (message?.trim()) {
+      args.push("-m", message.trim());
+    }
+    const { stdout, stderr } = await gitExec(projectRoot, args);
+    return { ok: true, output: (stdout + stderr).trim() };
+  } catch (error) {
+    return { ok: false, output: "", error: error instanceof Error ? error.message : "贮藏失败" };
+  }
+}
+
+export async function gitStashPop(projectRoot: string, stashIndex?: number): Promise<GitStashResult> {
+  try {
+    const args = ["stash", "pop"];
+    if (stashIndex !== undefined) {
+      args.push(`stash@{${stashIndex}}`);
+    }
+    const { stdout, stderr } = await gitExec(projectRoot, args);
+    return { ok: true, output: (stdout + stderr).trim() };
+  } catch (error) {
+    return { ok: false, output: "", error: error instanceof Error ? error.message : "弹出贮藏失败" };
+  }
+}
+
+export async function gitStashDrop(projectRoot: string, stashIndex: number): Promise<GitStashResult> {
+  try {
+    const { stdout, stderr } = await gitExec(projectRoot, ["stash", "drop", `stash@{${stashIndex}}`]);
+    return { ok: true, output: (stdout + stderr).trim() };
+  } catch (error) {
+    return { ok: false, output: "", error: error instanceof Error ? error.message : "删除贮藏失败" };
+  }
+}
+
 export async function gitPush(projectRoot: string, remote?: string, branch?: string, setUpstream?: boolean): Promise<GitRemoteActionResult> {
   try {
     const args = ["push"];
