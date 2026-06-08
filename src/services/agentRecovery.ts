@@ -25,6 +25,34 @@ export type AgentProgressSource = {
 /** No meaningful agent progress for this long → treat run as stalled (server heartbeats don't count). */
 export const AGENT_STALL_PROGRESS_MS = 120_000;
 
+/** Stuck on local connect / upload with no SSE status for this long. */
+export const AGENT_CONNECT_STALL_MS = 45_000;
+
+const CONNECT_PHASES = new Set(["connecting_local", "stream_connected", "connected", "reconnecting"]);
+
+export function isAgentConnectPhase(phase?: string): boolean {
+  return Boolean(phase && CONNECT_PHASES.has(phase));
+}
+
+export function isAgentConnectStalled(
+  connectStartedAt: number,
+  phase: string | undefined,
+  chatSending: boolean,
+  now = Date.now(),
+  thresholdMs = AGENT_CONNECT_STALL_MS,
+): boolean {
+  if (!chatSending || connectStartedAt <= 0) return false;
+  if (!isAgentConnectPhase(phase)) return false;
+  return now - connectStartedAt >= thresholdMs;
+}
+
+export function agentConnectStallMessage(hasImages = false): string {
+  if (hasImages) {
+    return "连接本地 Agent 超时（可能因图片过大或 sidecar 未运行）。请确认已执行 npm run sidecar，或缩小截图后重试。";
+  }
+  return "无法连接本地 Agent（127.0.0.1:37891）。请在项目目录运行 npm run sidecar 或 npm run dev。";
+}
+
 export function buildAgentMaxTurnsExhaustedMessage(maxTurns: number): string {
   return `已达最大轮次（${maxTurns}），任务可能未完成。`;
 }

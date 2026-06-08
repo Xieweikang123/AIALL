@@ -219,13 +219,17 @@ export function cursorPlanningLabel(phase?: string, detail?: string): string | n
     if (detail?.trim()) return `整合信息中 · ${detail.trim()}`;
     return "整合信息中…";
   }
-  if (phase === "streaming_model" || phase === "planning_tools") return "Thinking…";
-  if (phase === "summarizing_tools") return "Summarizing tool results…";
-  if (phase === "connecting_local" || phase === "stream_connected" || phase === "connected") {
-    return "Starting…";
+  if (phase === "streaming_model" || phase === "planning_tools") return "思考中…";
+  if (phase === "summarizing_tools") return "整理工具结果…";
+  if (phase === "connecting_local") {
+    return detail?.trim() ? `连接本地服务 · ${detail.trim()}` : "连接本地服务…";
   }
+  if (phase === "stream_connected" || phase === "connected") {
+    return detail?.trim() ? `启动 Agent · ${detail.trim()}` : "启动 Agent…";
+  }
+  if (phase === "reconnecting") return "正在重连…";
   if (phase === "preparing" || phase === "starting" || phase === "building_context") {
-    return "Preparing context…";
+    return detail?.trim() ? `准备上下文 · ${detail.trim()}` : "准备上下文…";
   }
   if (phase === "executing_tool" || phase === "executing_tools") return null;
   if (phase === "compacting_context") return null;

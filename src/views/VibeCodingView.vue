@@ -1243,6 +1243,7 @@ import {
   AGENT_SILENT_CONTINUE_DELAY_MS,
   AGENT_SILENT_CONTINUE_MAX,
   agentStallRecoveryReason,
+  agentConnectStallMessage,
   buildAgentMaxTurnsExhaustedMessage,
   buildAgentResumePrompt,
   buildSilentContinueStatusLog,
@@ -1250,6 +1251,8 @@ import {
   hasRecoverableAgentProgress,
   inferAgentRecoveryFlags,
   isAgentMaxTurnsExhausted,
+  isAgentConnectPhase,
+  isAgentConnectStalled,
   isAgentRunStalled,
   isRecoverableAgentError,
   recoverableAgentErrorHint,
@@ -1258,6 +1261,7 @@ import {
   shouldSilentAutoContinue,
   resolveAutoResumeSeconds,
 } from "../services/agentRecovery";
+import { compressImageDataUrlsForAgent } from "../services/imageCompress";
 import { loadAiChatBaseFromStorage } from "../services/aiLocalConfig";
 import {
   buildAgentHistoryFromMessages,
@@ -1516,6 +1520,9 @@ const autoResumeTargetId = ref("");
 const agentUiTick = ref(0);
 /** Timestamp of last meaningful agent progress (not heartbeat status). */
 let agentLastProgressAt = 0;
+/** When the current agent run started waiting on local connect / upload. */
+let agentConnectStartedAt = 0;
+let agentConnectHasImages = false;
 
 const projectPath = ref("");
 const projectOpened = ref(false);
@@ -2141,6 +2148,7 @@ function touchAgentProgress() {
 function startAgentUiTick() {
   stopAgentUiTick();
   touchAgentProgress();
+  agentConnectStartedAt = Date.now();
   agentUiTickTimer = setInterval(() => {
     agentUiTick.value += 1;
     checkAgentStall();
@@ -2148,11 +2156,44 @@ function startAgentUiTick() {
 }
 
 function checkAgentStall() {
-  if (!chatSending.value || agentLastProgressAt <= 0) return;
-  if (!isAgentRunStalled(agentLastProgressAt, true)) return;
+  if (!chatSending.value) return;
   const msg = findRunningAssistantMsg();
-  if (!msg || !hasRecoverableAgentProgress(msg)) return;
+  if (!msg) return;
+
+  if (
+    isAgentConnectStalled(agentConnectStartedAt, msg.agentPhase, true) &&
+    isAgentConnectPhase(msg.agentPhase)
+  ) {
+    abortAgentConnectStall(msg);
+    return;
+  }
+
+  if (agentLastProgressAt <= 0) return;
+  if (!isAgentRunStalled(agentLastProgressAt, true)) return;
+  if (!hasRecoverableAgentProgress(msg)) return;
   recoverAgentRunFromStall(msg, agentStallRecoveryReason());
+}
+
+function abortAgentConnectStall(msg: ChatMessage) {
+  agentAbortHandle?.abort();
+  agentAbortHandle = null;
+  chatSending.value = false;
+  agentConnectStartedAt = 0;
+  agentLastProgressAt = 0;
+  stopAgentUiTick();
+  const reason = agentConnectStallMessage(agentConnectHasImages);
+  chatError.value = reason;
+  msg.agentFailed = true;
+  msg.agentRecoverable = true;
+  msg.agentFailureReason = reason;
+  patchAssistantMsg(msg.id, {
+    agentFailed: true,
+    agentRecoverable: true,
+    agentFailureReason: reason,
+    agentPhase: undefined,
+    status: reason,
+  });
+  persistChatNow();
 }
 
 function cancelAutoResume() {
@@ -2580,11 +2621,23 @@ function collapseAgentActivity(msg: ChatMessage) {
 
 function cursorAgentFeed(msg: ChatMessage) {
   void agentUiTick.value;
+  let agentDetail = msg.agentDetail || msg.status;
+  if (
+    isAgentRunning(msg) &&
+    isAgentConnectPhase(msg.agentPhase) &&
+    agentConnectStartedAt > 0
+  ) {
+    const elapsed = Math.max(0, Math.floor((Date.now() - agentConnectStartedAt) / 1000));
+    const base =
+      msg.agentDetail ||
+      (msg.agentPhase === "connecting_local" ? "连接本地服务" : "启动 Agent");
+    agentDetail = `${base} · ${elapsed}s`;
+  }
   const items = buildCursorAgentFeed({
     groups: agentRoundGroupViews(msg),
     isRunning: isAgentRunning(msg),
     agentPhase: msg.agentPhase,
-    agentDetail: msg.agentDetail || msg.status,
+    agentDetail,
   });
   const bubble = messageDisplayContent(msg);
   return filterDuplicateFeedThoughts(items, bubble, {
@@ -4891,6 +4944,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
   const msgId = assistantMsg.id;
 
   const isProgressEvent =
+    event.type === "status" ||
     event.type === "turn_request" ||
     event.type === "turn_response" ||
     event.type === "turn_trace" ||
@@ -4970,6 +5024,9 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
 
   if (event.type === "status") {
     const { phase } = event.data;
+    if (phase && !isAgentConnectPhase(phase)) {
+      agentConnectStartedAt = 0;
+    }
     const prevPhase = assistantMsg.agentPhase;
     setAgentStatus(assistantMsg, phase, event.data, { log: phase !== prevPhase });
     assistantMsg.roundGroups = recordAgentRoundStatus(
@@ -5707,8 +5764,13 @@ async function runAgentTurn(
   },
 ) {
   const rawPrompt = userText.trim();
-  const hasImages = Boolean(options?.imageDataUrls?.length);
+  const compressedImages = options?.imageDataUrls?.length
+    ? await compressImageDataUrlsForAgent(options.imageDataUrls)
+    : undefined;
+  const hasImages = Boolean(compressedImages?.length);
   if ((!rawPrompt && !hasImages) || !configReady.value || !projectOpened.value) return;
+
+  agentConnectHasImages = hasImages;
 
   const lastAssistant = findLastAssistantContent();
   const mode = chatMode.value;
@@ -5744,7 +5806,7 @@ async function runAgentTurn(
         id: genId(),
         role: "user",
         content: options?.userBubbleContent ?? stripReferenceAttachments(rawPrompt),
-        imageDataUrls: options?.imageDataUrls?.length ? [...options.imageDataUrls] : undefined,
+        imageDataUrls: compressedImages?.length ? [...compressedImages] : undefined,
       });
     }
     assistantMsg = {
@@ -5757,7 +5819,11 @@ async function runAgentTurn(
       activityExpanded: true,
       activityDetailed: true,
       agentPhase: "connecting_local",
-      status: formatAgentStatus({ phase: "connecting_local" }),
+      agentDetail: hasImages ? "上传图片中…" : undefined,
+      status: formatAgentStatus({
+        phase: "connecting_local",
+        detail: hasImages ? "上传图片中…" : undefined,
+      }),
     };
     chatMessages.value.push(assistantMsg);
     assistantMsg.roundGroups = recordAgentRoundStatus(
@@ -5784,7 +5850,7 @@ async function runAgentTurn(
       maxTurns: resolveAgentMaxTurns(mode, runProfile),
       openFilePath: activeFilePath.value || undefined,
       runProfile: runProfile.kind === "execute_plan" ? runProfile : undefined,
-      imageDataUrls: options?.imageDataUrls?.length ? options.imageDataUrls : undefined,
+      imageDataUrls: compressedImages?.length ? compressedImages : undefined,
     },
     (event) => handleAgentEvent(event, assistantMsg, runGen),
   );

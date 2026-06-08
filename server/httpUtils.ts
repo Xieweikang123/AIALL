@@ -1,14 +1,24 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-export function readJsonBody(req: IncomingMessage): Promise<unknown> {
+const DEFAULT_JSON_BODY_MAX_BYTES = 48 * 1024 * 1024;
+
+export function readJsonBody(req: IncomingMessage, maxBytes = DEFAULT_JSON_BODY_MAX_BYTES): Promise<unknown> {
   return new Promise((resolve, reject) => {
-    let data = "";
-    req.on("data", (chunk) => {
-      data += chunk.toString();
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        reject(new Error(`请求体超过 ${Math.round(maxBytes / 1024 / 1024)}MB 限制`));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
     });
     req.on("end", () => {
       try {
-        resolve(JSON.parse(data) as unknown);
+        const raw = Buffer.concat(chunks).toString("utf8");
+        resolve(JSON.parse(raw) as unknown);
       } catch (error) {
         reject(error);
       }

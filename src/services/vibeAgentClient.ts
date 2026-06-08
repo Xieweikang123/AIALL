@@ -1,6 +1,18 @@
 import { backendUrl } from "./backendBase";
 
 const DEV_SIDECAR_ORIGIN = "http://127.0.0.1:37891";
+const AGENT_CONNECT_TIMEOUT_MS = 45_000;
+const AGENT_CONNECT_TIMEOUT_WITH_IMAGES_MS = 120_000;
+
+function resolveConnectTimeoutMs(request: VibeAgentRunRequest): number {
+  return request.imageDataUrls?.length ? AGENT_CONNECT_TIMEOUT_WITH_IMAGES_MS : AGENT_CONNECT_TIMEOUT_MS;
+}
+
+function isConnectTimeoutError(error: unknown, timedOut: boolean): boolean {
+  if (!timedOut) return false;
+  if (error instanceof Error && error.name === "AbortError") return true;
+  return false;
+}
 
 /** Agent SSE must not go through Vite's dev proxy (it buffers until the response ends). */
 function agentRunUrl(): string {
@@ -145,16 +157,29 @@ export function runVibeAgentSse(request: VibeAgentRunRequest, onEvent: (event: V
   let serverEventsReceived = false;
   const MAX_RETRIES = 3;
   const RETRY_DELAYS = [1000, 2000, 4000];
+  let connectTimedOut = false;
 
   const connect = async (): Promise<void> => {
     onEvent({ type: "status", data: { phase: retryCount > 0 ? "reconnecting" : "connecting_local", ...(retryCount > 0 ? { retryAttempt: retryCount, retryMaxAttempts: MAX_RETRIES + 1 } : {}) } });
 
-    const response = await fetch(agentRunUrl(), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
-      signal: controller.signal,
-    });
+    connectTimedOut = false;
+    const connectTimeoutMs = resolveConnectTimeoutMs(request);
+    const connectTimer = setTimeout(() => {
+      connectTimedOut = true;
+      controller.abort();
+    }, connectTimeoutMs);
+
+    let response: Response;
+    try {
+      response = await fetch(agentRunUrl(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(connectTimer);
+    }
 
     if (!response.ok || !response.body) {
       const text = await response.text().catch(() => "");
@@ -251,7 +276,33 @@ export function runVibeAgentSse(request: VibeAgentRunRequest, onEvent: (event: V
       } catch (error) {
         if (controller.signal.aborted) {
           if (!doneReceived) {
-            onEvent({ type: "status", data: { phase: "aborted" } });
+            if (connectTimedOut) {
+              onEvent({
+                type: "error",
+                data: {
+                  message: request.imageDataUrls?.length
+                    ? "连接本地 Agent 超时（可能因图片过大或 sidecar 未运行）"
+                    : "连接本地 Agent 超时，请确认 sidecar 已启动（npm run sidecar）",
+                },
+              });
+            } else {
+              onEvent({ type: "status", data: { phase: "aborted" } });
+            }
+            onEvent({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 0 } });
+          }
+          return;
+        }
+
+        if (isConnectTimeoutError(error, connectTimedOut)) {
+          onEvent({
+            type: "error",
+            data: {
+              message: request.imageDataUrls?.length
+                ? "连接本地 Agent 超时（可能因图片过大或 sidecar 未运行）"
+                : "连接本地 Agent 超时，请确认 sidecar 已启动（npm run sidecar）",
+            },
+          });
+          if (!doneReceived) {
             onEvent({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 0 } });
           }
           return;

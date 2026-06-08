@@ -5,6 +5,7 @@ import {
   computeLineDelta,
   formatCursorActionLabel,
   formatExplorationSummary,
+  cursorPlanningLabel,
   layoutCursorFeedBlocks,
   getRecentFeedActions,
   shouldUseCompactAgentFeed,
@@ -31,6 +32,12 @@ describe("agentCursorFeed", () => {
   it("computes line delta from before and after", () => {
     expect(computeLineDelta("a\nb", "a\nb\nc\nd\ne")).toBe(3);
     expect(computeLineDelta("", "new file", true)).toBe(1);
+  });
+
+  it("localizes planning labels for connect phases", () => {
+    expect(cursorPlanningLabel("connecting_local")).toBe("连接本地服务…");
+    expect(cursorPlanningLabel("connected", "读取项目上下文")).toContain("启动 Agent");
+    expect(cursorPlanningLabel("building_context")).toBe("准备上下文…");
   });
 
   it("builds thought then action sequence", () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  agentConnectStallMessage,
   agentStallRecoveryReason,
   buildAgentMaxTurnsExhaustedMessage,
   buildAgentResumePrompt,
@@ -8,6 +9,8 @@ import {
   hasRecoverableAgentProgress,
   inferAgentRecoveryFlags,
   isAgentMaxTurnsExhausted,
+  isAgentConnectPhase,
+  isAgentConnectStalled,
   isAgentRunStalled,
   isRecoverableAgentError,
   shouldAutoResumeAgentError,
@@ -254,5 +257,23 @@ describe("silent continue helpers", () => {
   it("caps silent attempts", () => {
     expect(AGENT_SILENT_CONTINUE_MAX).toBeGreaterThanOrEqual(3);
     expect(shouldSilentAutoContinue(buildAgentMaxTurnsExhaustedMessage(20))).toBe(true);
+  });
+});
+
+describe("agent connect stall", () => {
+  it("detects connect phases", () => {
+    expect(isAgentConnectPhase("connecting_local")).toBe(true);
+    expect(isAgentConnectPhase("waiting_model")).toBe(false);
+  });
+
+  it("flags long connect waits", () => {
+    const now = 1_000_000;
+    expect(isAgentConnectStalled(now - 50_000, "connecting_local", true, now)).toBe(true);
+    expect(isAgentConnectStalled(now - 10_000, "connecting_local", true, now)).toBe(false);
+  });
+
+  it("builds helpful connect stall message", () => {
+    expect(agentConnectStallMessage(true)).toContain("sidecar");
+    expect(agentConnectStallMessage(false)).toContain("37891");
   });
 });
