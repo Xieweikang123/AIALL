@@ -1,12 +1,41 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { shapeAgentHistoryForProfile } from "./agentRunProfile";
 import {
   buildAgentHistoryFromMessages,
   formatSessionTitle,
+  getActiveSessionSnapshot,
+  getVibeChatProjectSnapshot,
+  loadVibeChatHistory,
+  restoreChatStoreFromSnapshot,
   sanitizePersistedChatMessages,
+  saveVibeChatHistory,
+  STORE_VERSION,
   stripReferenceAttachments,
   stripToolSummaryFromAssistantContent,
 } from "./vibeChatStorage";
+
+const CHAT_STORAGE_KEY = "vibe-coding-chat";
+
+function installLocalStorageMock() {
+  const storage: Record<string, string> = {};
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => (key in storage ? storage[key] : null),
+    setItem: (key: string, value: string) => {
+      storage[key] = value;
+    },
+    removeItem: (key: string) => {
+      delete storage[key];
+    },
+    clear: () => {
+      for (const key of Object.keys(storage)) delete storage[key];
+    },
+    key: (index: number) => Object.keys(storage)[index] ?? null,
+    get length() {
+      return Object.keys(storage).length;
+    },
+  });
+  return storage;
+}
 
 describe("formatSessionTitle", () => {
   it("strips attached reference file blocks", () => {
@@ -151,5 +180,97 @@ describe("sanitizePersistedChatMessages", () => {
     ]);
     expect(sanitized[0].imageDataUrls?.[0]).toBe(dataUrl);
     expect(sanitized[0].content).toBe("看这张图");
+  });
+});
+
+describe("v3 chat storage (index + memory)", () => {
+  beforeEach(() => {
+    installLocalStorageMock();
+  });
+
+  it("persists message bodies in memory, not in localStorage message payloads", () => {
+    const projectPath = "D:/projects/v3-index-test";
+    const body = "SECRET_MESSAGE_BODY_xyz";
+    const { sessionId } = saveVibeChatHistory(projectPath, [
+      { id: "u1", role: "user", content: "hello" },
+      { id: "a1", role: "assistant", content: body },
+    ]);
+
+    expect(loadVibeChatHistory(projectPath)).toEqual([
+      { id: "u1", role: "user", content: "hello" },
+      { id: "a1", role: "assistant", content: body },
+    ]);
+
+    const raw = localStorage.getItem(CHAT_STORAGE_KEY);
+    expect(raw).toBeTruthy();
+    expect(raw).not.toContain('"messages"');
+    expect(raw).not.toContain(body);
+    const parsed = JSON.parse(raw!) as { version: number; byProject: Record<string, { sessions: Array<{ messageCount: number }> }> };
+    expect(parsed.version).toBe(STORE_VERSION);
+    const indexed = Object.values(parsed.byProject)[0]?.sessions[0];
+    expect(indexed?.messageCount).toBe(2);
+
+    const snapshot = getActiveSessionSnapshot(projectPath, sessionId);
+    expect(snapshot?.messages).toHaveLength(2);
+  });
+
+  it("migrates v2 full store into memory and writes a lightweight v3 index", () => {
+    const projectKey = "d:/projects/v2-migrate";
+    const payload = {
+      version: 2,
+      byProject: {
+        [projectKey]: {
+          activeSessionId: "sess-v2",
+          sessions: [
+            {
+              id: "sess-v2",
+              title: "旧会话",
+              createdAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-02T00:00:00.000Z",
+              messages: [
+                { id: "u1", role: "user", content: "v2 迁移正文" },
+                { id: "a1", role: "assistant", content: "v2 回复" },
+              ],
+            },
+          ],
+        },
+      },
+    };
+    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(payload));
+
+    const loaded = loadVibeChatHistory("D:/projects/v2-migrate");
+    expect(loaded).toEqual([
+      { id: "u1", role: "user", content: "v2 迁移正文" },
+      { id: "a1", role: "assistant", content: "v2 回复" },
+    ]);
+
+    const migratedRaw = localStorage.getItem(CHAT_STORAGE_KEY)!;
+    expect(migratedRaw).not.toContain("v2 迁移正文");
+    expect(JSON.parse(migratedRaw).version).toBe(STORE_VERSION);
+  });
+
+  it("restores disk snapshot into memory for reload", () => {
+    const projectPath = "D:/projects/disk-restore";
+    restoreChatStoreFromSnapshot({
+      version: STORE_VERSION,
+      projectPath,
+      activeSessionId: "disk-s1",
+      sessions: [
+        {
+          id: "disk-s1",
+          title: "磁盘会话",
+          createdAt: "2026-03-01T00:00:00.000Z",
+          updatedAt: "2026-03-02T00:00:00.000Z",
+          messageCount: 1,
+          messages: [{ id: "u1", role: "user", content: "从磁盘恢复" }],
+        },
+      ],
+    });
+
+    expect(loadVibeChatHistory(projectPath)).toEqual([
+      { id: "u1", role: "user", content: "从磁盘恢复" },
+    ]);
+    const snapshot = getVibeChatProjectSnapshot(projectPath);
+    expect(snapshot.sessions[0]?.messages[0]?.content).toBe("从磁盘恢复");
   });
 });

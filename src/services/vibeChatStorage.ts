@@ -52,9 +52,8 @@ export type PersistedChatMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
-  /** Shown in chat UI; stripped from localStorage to save quota. */
+  /** Kept in memory / on disk; never written to localStorage index. */
   imageDataUrls?: string[];
-  /** Persisted when imageDataUrls are stripped on save. */
   imageCount?: number;
   chatMode?: "ask" | "build";
   tools?: Array<{
@@ -118,24 +117,45 @@ type ProjectChatRecord = {
   sessions: VibeChatSession[];
 };
 
+type SessionIndexEntry = {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+};
+
+type ProjectIndexRecord = {
+  activeSessionId: string;
+  sessions: SessionIndexEntry[];
+};
+
 const CHAT_STORAGE_KEY = "vibe-coding-chat";
-const STORE_VERSION = 2;
-const MAX_MESSAGES_PER_SESSION = 80;
-const MAX_SESSIONS_PER_PROJECT = 20;
+export const STORE_VERSION = 3 as const;
+const MAX_MESSAGES_PER_SESSION = 120;
+const MAX_SESSIONS_PER_PROJECT = 40;
 const MAX_STATUS_LOG_LINES = 48;
 const MAX_TURN_TRACES = 24;
 const MAX_NARRATIVE_CHARS = 800;
 const MAX_MODEL_STEP_CHARS = 500;
 const MAX_TOOL_CALL_ARGS_CHARS = 240;
 
+/** Full session payloads live in memory (and on disk); not in localStorage. */
+const memoryByProject = new Map<string, ProjectChatRecord>();
+
 type ChatStoreV1 = {
   version: 1;
   byProject: Record<string, PersistedChatMessage[]>;
 };
 
-type ChatStore = {
-  version: typeof STORE_VERSION;
+type ChatStoreV2 = {
+  version: 2;
   byProject: Record<string, ProjectChatRecord>;
+};
+
+type ChatStoreIndex = {
+  version: typeof STORE_VERSION;
+  byProject: Record<string, ProjectIndexRecord>;
 };
 
 function normalizeProjectKey(path: string): string {
@@ -265,21 +285,38 @@ function compactRoundGroupsForStorage(
 
 const MAX_PERSISTED_IMAGES = 4;
 const MAX_PERSISTED_IMAGE_CHARS = 120_000;
+const MAX_DISK_IMAGES = 8;
+const MAX_DISK_IMAGE_CHARS = 600_000;
 
-function compactImageDataUrls(urls: string[] | undefined): string[] | undefined {
+function compactImageDataUrls(
+  urls: string[] | undefined,
+  options?: { forDisk?: boolean },
+): string[] | undefined {
   if (!urls?.length) return undefined;
+  const maxImages = options?.forDisk ? MAX_DISK_IMAGES : MAX_PERSISTED_IMAGES;
+  const maxChars = options?.forDisk ? MAX_DISK_IMAGE_CHARS : MAX_PERSISTED_IMAGE_CHARS;
   const kept: string[] = [];
   let total = 0;
-  for (const url of urls.slice(0, MAX_PERSISTED_IMAGES)) {
+  for (const url of urls.slice(0, maxImages)) {
     if (!url.startsWith("data:image/")) continue;
-    if (total + url.length > MAX_PERSISTED_IMAGE_CHARS) break;
+    if (total + url.length > maxChars) break;
     kept.push(url);
     total += url.length;
   }
   return kept.length ? kept : undefined;
 }
 
-function sanitizeMessages(messages: PersistedChatMessage[]): PersistedChatMessage[] {
+export function sanitizePersistedChatMessages(
+  messages: PersistedChatMessage[],
+  options?: { forDisk?: boolean },
+): PersistedChatMessage[] {
+  return sanitizeMessages(messages, options);
+}
+
+function sanitizeMessages(
+  messages: PersistedChatMessage[],
+  options?: { forDisk?: boolean },
+): PersistedChatMessage[] {
   return messages
     .filter(
       (m) =>
@@ -292,66 +329,67 @@ function sanitizeMessages(messages: PersistedChatMessage[]): PersistedChatMessag
     )
     .slice(-MAX_MESSAGES_PER_SESSION)
     .map((m) => {
-      const compactImages = m.role === "user" ? compactImageDataUrls(m.imageDataUrls) : undefined;
+      const compactImages =
+        m.role === "user" ? compactImageDataUrls(m.imageDataUrls, options) : undefined;
       return {
-      id: m.id,
-      role: m.role,
-      content: m.role === "assistant" ? stripToolSummaryFromAssistantContent(m.content) : m.content,
-      chatMode: m.chatMode,
-      tools: m.tools?.map((t) => ({
-        id: t.id,
-        name: t.name,
-        icon: t.icon,
-        title: t.title,
-        detail: t.detail,
-        label: t.label,
-        summary: t.summary,
-        ok: t.ok,
-        turn: t.turn,
-        args: t.args,
-      })),
-      statusLog: m.statusLog?.length ? m.statusLog.slice(-MAX_STATUS_LOG_LINES) : undefined,
-      turnTraces: m.turnTraces?.length
-        ? m.turnTraces.slice(-MAX_TURN_TRACES).map((t) => ({
-            ...t,
-            assistantText: t.assistantText
-              ? truncateText(stripToolSummaryFromAssistantContent(t.assistantText), MAX_NARRATIVE_CHARS)
-              : t.assistantText,
-          }))
-        : undefined,
-      roundGroups: compactRoundGroupsForStorage(m.roundGroups),
-      totalTurns: m.totalTurns,
-      writtenFiles: m.writtenFiles?.length ? [...m.writtenFiles] : undefined,
-      turnFileDiffs:
-        m.pendingApproval && m.turnFileDiffs
-          ? { ...m.turnFileDiffs }
-          : m.writtenFiles?.length && m.turnFileDiffs
-            ? Object.fromEntries(
-                Object.entries(m.turnFileDiffs).map(([p, d]) => [
-                  p,
-                  { before: d.before, after: d.after, deleted: d.deleted, created: d.created },
-                ]),
-              )
-            : undefined,
-      pendingApproval: m.pendingApproval || undefined,
-      agentAborted: m.agentAborted || undefined,
-      agentFailed: m.agentFailed || undefined,
-      agentRecoverable: m.agentRecoverable || undefined,
-      agentFailureReason: m.agentFailureReason || undefined,
-      agentRecoveryDismissed: m.agentRecoveryDismissed || undefined,
-      agentContinueCount: m.agentContinueCount || undefined,
-      rejected: m.rejected || undefined,
-      reverted: m.reverted || undefined,
-      activityExpanded: m.activityExpanded || undefined,
-      activityDetailed: m.activityDetailed || undefined,
-      ...(compactImages
-        ? { imageDataUrls: compactImages }
-        : m.imageDataUrls?.length
-          ? { imageCount: m.imageDataUrls.length }
-          : m.imageCount
-            ? { imageCount: m.imageCount }
-            : {}),
-    };
+        id: m.id,
+        role: m.role,
+        content: m.role === "assistant" ? stripToolSummaryFromAssistantContent(m.content) : m.content,
+        chatMode: m.chatMode,
+        tools: m.tools?.map((t) => ({
+          id: t.id,
+          name: t.name,
+          icon: t.icon,
+          title: t.title,
+          detail: t.detail,
+          label: t.label,
+          summary: t.summary,
+          ok: t.ok,
+          turn: t.turn,
+          args: t.args,
+        })),
+        statusLog: m.statusLog?.length ? m.statusLog.slice(-MAX_STATUS_LOG_LINES) : undefined,
+        turnTraces: m.turnTraces?.length
+          ? m.turnTraces.slice(-MAX_TURN_TRACES).map((t) => ({
+              ...t,
+              assistantText: t.assistantText
+                ? truncateText(stripToolSummaryFromAssistantContent(t.assistantText), MAX_NARRATIVE_CHARS)
+                : t.assistantText,
+            }))
+          : undefined,
+        roundGroups: compactRoundGroupsForStorage(m.roundGroups),
+        totalTurns: m.totalTurns,
+        writtenFiles: m.writtenFiles?.length ? [...m.writtenFiles] : undefined,
+        turnFileDiffs:
+          m.pendingApproval && m.turnFileDiffs
+            ? { ...m.turnFileDiffs }
+            : m.writtenFiles?.length && m.turnFileDiffs
+              ? Object.fromEntries(
+                  Object.entries(m.turnFileDiffs).map(([p, d]) => [
+                    p,
+                    { before: d.before, after: d.after, deleted: d.deleted, created: d.created },
+                  ]),
+                )
+              : undefined,
+        pendingApproval: m.pendingApproval || undefined,
+        agentAborted: m.agentAborted || undefined,
+        agentFailed: m.agentFailed || undefined,
+        agentRecoverable: m.agentRecoverable || undefined,
+        agentFailureReason: m.agentFailureReason || undefined,
+        agentRecoveryDismissed: m.agentRecoveryDismissed || undefined,
+        agentContinueCount: m.agentContinueCount || undefined,
+        rejected: m.rejected || undefined,
+        reverted: m.reverted || undefined,
+        activityExpanded: m.activityExpanded || undefined,
+        activityDetailed: m.activityDetailed || undefined,
+        ...(compactImages
+          ? { imageDataUrls: compactImages }
+          : m.imageDataUrls?.length
+            ? { imageCount: m.imageDataUrls.length }
+            : m.imageCount
+              ? { imageCount: m.imageCount }
+              : {}),
+      };
     });
 }
 
@@ -367,32 +405,69 @@ function createSession(messages: PersistedChatMessage[] = []): VibeChatSession {
   };
 }
 
-function migrateV1Store(raw: ChatStoreV1): ChatStore {
-  const byProject: Record<string, ProjectChatRecord> = {};
+function cloneRecord(record: ProjectChatRecord): ProjectChatRecord {
+  return {
+    activeSessionId: record.activeSessionId,
+    sessions: record.sessions.map((session) => ({
+      ...session,
+      messages: sanitizeMessages(session.messages),
+    })),
+  };
+}
+
+function projectIndexFromRecord(record: ProjectChatRecord): ProjectIndexRecord {
+  return {
+    activeSessionId: record.activeSessionId,
+    sessions: record.sessions.map((session) => ({
+      id: session.id,
+      title: session.title,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      messageCount: session.messages.length,
+    })),
+  };
+}
+
+function migrateV1Store(raw: ChatStoreV1): ChatStoreIndex {
+  const byProject: Record<string, ProjectIndexRecord> = {};
   for (const [key, messages] of Object.entries(raw.byProject || {})) {
     const session = createSession(messages);
-    byProject[key] = {
-      activeSessionId: session.id,
-      sessions: [session],
-    };
+    memoryByProject.set(key, { activeSessionId: session.id, sessions: [session] });
+    byProject[key] = projectIndexFromRecord({ activeSessionId: session.id, sessions: [session] });
   }
   return { version: STORE_VERSION, byProject };
 }
 
-function readStore(): ChatStore {
+function migrateV2Store(raw: ChatStoreV2): ChatStoreIndex {
+  const byProject: Record<string, ProjectIndexRecord> = {};
+  for (const [key, record] of Object.entries(raw.byProject || {})) {
+    if (!record?.sessions?.length) continue;
+    const cloned = cloneRecord(record);
+    memoryByProject.set(key, cloned);
+    byProject[key] = projectIndexFromRecord(cloned);
+  }
+  return { version: STORE_VERSION, byProject };
+}
+
+function readIndex(): ChatStoreIndex {
   const raw = localStorage.getItem(CHAT_STORAGE_KEY);
   if (!raw) return { version: STORE_VERSION, byProject: {} };
   try {
-    const parsed = JSON.parse(raw) as Partial<ChatStore | ChatStoreV1>;
+    const parsed = JSON.parse(raw) as Partial<ChatStoreIndex | ChatStoreV2 | ChatStoreV1>;
     if (!parsed || typeof parsed !== "object" || !parsed.byProject) {
       return { version: STORE_VERSION, byProject: {} };
     }
     if (parsed.version === 1) {
       const migrated = migrateV1Store(parsed as ChatStoreV1);
-      writeStore(migrated);
+      writeIndex(migrated);
       return migrated;
     }
-    return { version: STORE_VERSION, byProject: parsed.byProject as Record<string, ProjectChatRecord> };
+    if (parsed.version === 2) {
+      const migrated = migrateV2Store(parsed as ChatStoreV2);
+      writeIndex(migrated);
+      return migrated;
+    }
+    return { version: STORE_VERSION, byProject: parsed.byProject as Record<string, ProjectIndexRecord> };
   } catch {
     return { version: STORE_VERSION, byProject: {} };
   }
@@ -404,87 +479,58 @@ export function onStorageError(cb: (msg: string) => void) {
   storageErrorCallback = cb;
 }
 
-export function getVibeChatProjectSnapshot(projectPath: string): VibeChatProjectSnapshot {
-  const key = normalizeProjectKey(projectPath);
-  const store = readStore();
-  const record = key ? getProjectRecord(store, key) : undefined;
-  return {
-    version: STORE_VERSION,
-    projectPath,
-    activeSessionId: record?.activeSessionId || "",
-    sessions: record?.sessions.map((s) => ({
-      id: s.id,
-      title: s.title,
-      createdAt: s.createdAt,
-      updatedAt: s.updatedAt,
-      messageCount: s.messages.length,
-      messages: sanitizeMessages(s.messages),
-    })) || [],
+function writeIndex(index: ChatStoreIndex): boolean {
+  try {
+    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(index));
+    return true;
+  } catch (e) {
+    console.warn("[vibeChatStorage] localStorage index write failed:", e);
+    storageErrorCallback?.("浏览器索引写入失败，会话已保存到项目目录。");
+    return false;
+  }
+}
+
+function persistRecord(key: string, record: ProjectChatRecord): boolean {
+  memoryByProject.set(key, cloneRecord(record));
+  const index = readIndex();
+  index.byProject[key] = projectIndexFromRecord(record);
+  return writeIndex(index);
+}
+
+function getProjectRecord(key: string): ProjectChatRecord | undefined {
+  const cached = memoryByProject.get(key);
+  if (cached?.sessions?.length) return cloneRecord(cached);
+
+  readIndex();
+  const migrated = memoryByProject.get(key);
+  if (migrated?.sessions?.length) return cloneRecord(migrated);
+
+  const index = readIndex().byProject[key];
+  if (!index?.sessions?.length) return undefined;
+
+  const record: ProjectChatRecord = {
+    activeSessionId: index.activeSessionId,
+    sessions: index.sessions.map((entry) => ({
+      id: entry.id,
+      title: entry.title,
+      createdAt: entry.createdAt,
+      updatedAt: entry.updatedAt,
+      messages: [],
+    })),
   };
-}
-
-function pruneStoreForQuota(store: ChatStore): ChatStore {
-  const byProject: Record<string, ProjectChatRecord> = {};
-  for (const [key, record] of Object.entries(store.byProject)) {
-    const sessions = [...record.sessions]
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      .slice(0, 8)
-      .map((session) => ({
-        ...session,
-        messages: sanitizeMessages(session.messages).slice(-40),
-      }));
-    if (!sessions.length) continue;
-    byProject[key] = {
-      activeSessionId: sessions.some((s) => s.id === record.activeSessionId)
-        ? record.activeSessionId
-        : sessions[0].id,
-      sessions,
-    };
-  }
-  return { version: store.version, byProject };
-}
-
-function writeStore(store: ChatStore): boolean {
-  const attempts = [store, pruneStoreForQuota(store)];
-  for (let i = 0; i < attempts.length; i += 1) {
-    try {
-      localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(attempts[i]));
-      if (i > 0) {
-        storageErrorCallback?.("浏览器存储空间不足，已自动精简旧会话后保存。");
-      }
-      return true;
-    } catch (e) {
-      if (i === attempts.length - 1) {
-        console.warn("[vibeChatStorage] localStorage write failed:", e);
-        storageErrorCallback?.(
-          "聊天记录保存失败（浏览器存储空间可能已满）。正在尝试备份到项目目录…",
-        );
-      }
-    }
-  }
-  return false;
-}
-
-function ensureProjectRecord(store: ChatStore, key: string): ProjectChatRecord {
-  let record = store.byProject[key];
-  if (!record?.sessions?.length) {
-    const session = createSession();
-    record = { activeSessionId: session.id, sessions: [session] };
-    store.byProject[key] = record;
-  }
   const activeExists = record.sessions.some((s) => s.id === record.activeSessionId);
-  if (!activeExists) {
+  if (!activeExists && record.sessions.length) {
     record.activeSessionId = record.sessions[0].id;
   }
   return record;
 }
 
-function getProjectRecord(store: ChatStore, key: string): ProjectChatRecord | undefined {
-  const record = store.byProject[key];
-  if (!record?.sessions?.length) return undefined;
-  const activeExists = record.sessions.some((s) => s.id === record.activeSessionId);
-  if (!activeExists) {
-    record.activeSessionId = record.sessions[0]?.id || "";
+function ensureProjectRecord(key: string): ProjectChatRecord {
+  let record = getProjectRecord(key);
+  if (!record?.sessions?.length) {
+    const session = createSession();
+    record = { activeSessionId: session.id, sessions: [session] };
+    persistRecord(key, record);
   }
   return record;
 }
@@ -500,41 +546,74 @@ function touchSession(session: VibeChatSession, messages: PersistedChatMessage[]
   session.title = sessionTitleFromMessages(session.messages);
 }
 
+export function getVibeChatProjectSnapshot(projectPath: string): VibeChatProjectSnapshot {
+  const key = normalizeProjectKey(projectPath);
+  const record = key ? getProjectRecord(key) : undefined;
+  return {
+    version: STORE_VERSION,
+    projectPath,
+    activeSessionId: record?.activeSessionId || "",
+    sessions:
+      record?.sessions.map((s) => ({
+        id: s.id,
+        title: s.title,
+        createdAt: s.createdAt,
+        updatedAt: s.updatedAt,
+        messageCount: s.messages.length,
+        messages: sanitizeMessages(s.messages, { forDisk: true }),
+      })) || [],
+  };
+}
+
+export function getActiveSessionSnapshot(
+  projectPath: string,
+  sessionId: string,
+): { id: string; title: string; createdAt: string; updatedAt: string; messages: PersistedChatMessage[] } | null {
+  const key = normalizeProjectKey(projectPath);
+  if (!key) return null;
+  const record = getProjectRecord(key);
+  const session = record?.sessions.find((s) => s.id === sessionId);
+  if (!session) return null;
+  return {
+    id: session.id,
+    title: session.title,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    messages: sanitizeMessages(session.messages, { forDisk: true }),
+  };
+}
+
 export function listVibeChatSessions(projectPath: string): VibeChatSessionMeta[] {
   const key = normalizeProjectKey(projectPath);
   if (!key) return [];
-  const store = readStore();
-  const record = store.byProject[key];
+  const record = getProjectRecord(key);
   if (!record?.sessions?.length) return [];
   return [...record.sessions]
-    .filter((s) => s.messages.length > 0)
+    .filter((s) => s.messages.length > 0 || readIndex().byProject[key]?.sessions.some((m) => m.id === s.id && m.messageCount > 0))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-    .map((s) => ({
-      id: s.id,
-      title: s.title,
-      createdAt: s.createdAt,
-      updatedAt: s.updatedAt,
-      messageCount: s.messages.length,
-    }));
+    .map((s) => {
+      const indexed = readIndex().byProject[key]?.sessions.find((m) => m.id === s.id);
+      return {
+        id: s.id,
+        title: s.title,
+        createdAt: s.createdAt,
+        updatedAt: s.updatedAt,
+        messageCount: s.messages.length || indexed?.messageCount || 0,
+      };
+    });
 }
 
 export function getActiveVibeChatSessionId(projectPath: string): string {
   const key = normalizeProjectKey(projectPath);
   if (!key) return "";
-  const store = readStore();
-  const record = getProjectRecord(store, key);
-  return record?.activeSessionId || "";
-}
-
-export function sanitizePersistedChatMessages(messages: PersistedChatMessage[]): PersistedChatMessage[] {
-  return sanitizeMessages(messages);
+  const record = getProjectRecord(key);
+  return record?.activeSessionId || readIndex().byProject[key]?.activeSessionId || "";
 }
 
 export function loadVibeChatHistory(projectPath: string): PersistedChatMessage[] {
   const key = normalizeProjectKey(projectPath);
   if (!key) return [];
-  const store = readStore();
-  const record = store.byProject[key];
+  const record = getProjectRecord(key);
   if (!record?.sessions?.length) return [];
   return sanitizeMessages(getActiveSession(record).messages);
 }
@@ -542,30 +621,31 @@ export function loadVibeChatHistory(projectPath: string): PersistedChatMessage[]
 export function hasVibeChatHistory(projectPath: string): boolean {
   const key = normalizeProjectKey(projectPath);
   if (!key) return false;
-  const store = readStore();
-  const record = store.byProject[key];
-  return Boolean(record?.sessions?.some((s) => s.messages.length > 0));
+  const record = getProjectRecord(key);
+  if (record?.sessions.some((s) => s.messages.length > 0)) return true;
+  const indexed = readIndex().byProject[key];
+  return Boolean(indexed?.sessions.some((s) => s.messageCount > 0));
 }
 
 export function restoreChatStoreFromSnapshot(snapshot: VibeChatProjectSnapshot): boolean {
   const key = normalizeProjectKey(snapshot.projectPath);
   if (!key || !snapshot.sessions?.length) return false;
-  const store = readStore();
   const sessions: VibeChatSession[] = snapshot.sessions.map((s) => ({
     id: s.id,
     title: s.title || "新会话",
     createdAt: s.createdAt || new Date().toISOString(),
     updatedAt: s.updatedAt || new Date().toISOString(),
-    messages: sanitizeMessages(s.messages),
+    messages: sanitizeMessages(s.messages, { forDisk: true }),
   }));
-  store.byProject[key] = {
+  const record: ProjectChatRecord = {
     activeSessionId:
       snapshot.activeSessionId && sessions.some((s) => s.id === snapshot.activeSessionId)
         ? snapshot.activeSessionId
         : sessions[0].id,
     sessions,
   };
-  return writeStore(store);
+  persistRecord(key, record);
+  return true;
 }
 
 export function saveVibeChatHistory(
@@ -578,12 +658,11 @@ export function saveVibeChatHistory(
   const sanitized = sanitizeMessages(messages);
   if (!sanitized.length) return { ok: true, sessionId: sessionId || "" };
 
-  const store = readStore();
-  let record = getProjectRecord(store, key);
+  let record = getProjectRecord(key);
   if (!record) {
     const session = createSession(sanitized);
-    store.byProject[key] = { activeSessionId: session.id, sessions: [session] };
-    return { ok: writeStore(store), sessionId: session.id };
+    record = { activeSessionId: session.id, sessions: [session] };
+    return { ok: persistRecord(key, record), sessionId: session.id };
   }
 
   let session = sessionId ? record.sessions.find((s) => s.id === sessionId) : undefined;
@@ -598,30 +677,27 @@ export function saveVibeChatHistory(
     record.sessions = record.sessions.slice(0, MAX_SESSIONS_PER_PROJECT);
   }
   record.activeSessionId = session.id;
-  return { ok: writeStore(store), sessionId: session.id };
+  return { ok: persistRecord(key, record), sessionId: session.id };
 }
 
 export function switchVibeChatSession(projectPath: string, sessionId: string): PersistedChatMessage[] {
   const key = normalizeProjectKey(projectPath);
   if (!key) return [];
-  const store = readStore();
-  const record = getProjectRecord(store, key);
+  const record = getProjectRecord(key);
   if (!record) return [];
   const target = record.sessions.find((s) => s.id === sessionId);
   if (!target) return sanitizeMessages(getActiveSession(record).messages);
   record.activeSessionId = sessionId;
-  writeStore(store);
+  persistRecord(key, record);
   return sanitizeMessages(target.messages);
 }
 
 export function createVibeChatSession(projectPath: string): { id: string; messages: PersistedChatMessage[] } {
   const key = normalizeProjectKey(projectPath);
   if (!key) return { id: "", messages: [] };
-  const store = readStore();
-  let record = getProjectRecord(store, key);
+  let record = getProjectRecord(key);
   if (!record) {
     record = { activeSessionId: "", sessions: [] };
-    store.byProject[key] = record;
   }
   const session = createSession();
   record.sessions.unshift(session);
@@ -632,20 +708,21 @@ export function createVibeChatSession(projectPath: string): { id: string; messag
     }
   }
   record.activeSessionId = session.id;
-  writeStore(store);
+  persistRecord(key, record);
   return { id: session.id, messages: [] };
 }
 
 export function deleteVibeChatSession(projectPath: string, sessionId: string): PersistedChatMessage[] {
   const key = normalizeProjectKey(projectPath);
   if (!key) return [];
-  const store = readStore();
-  const record = store.byProject[key];
+  const record = getProjectRecord(key);
   if (!record?.sessions?.length) return [];
 
   if (record.sessions.length === 1) {
-    delete store.byProject[key];
-    writeStore(store);
+    memoryByProject.delete(key);
+    const index = readIndex();
+    delete index.byProject[key];
+    writeIndex(index);
     return [];
   }
 
@@ -653,21 +730,23 @@ export function deleteVibeChatSession(projectPath: string, sessionId: string): P
   if (record.activeSessionId === sessionId) {
     record.activeSessionId = record.sessions[0].id;
   }
-  writeStore(store);
+  persistRecord(key, record);
   return sanitizeMessages(getActiveSession(record).messages);
 }
 
 export function clearVibeChatHistory(projectPath: string) {
   const key = normalizeProjectKey(projectPath);
   if (!key) return;
-  const store = readStore();
-  const record = store.byProject[key];
+  const record = getProjectRecord(key);
   if (!record?.sessions?.length) return;
   record.sessions = record.sessions.filter((s) => s.id !== record.activeSessionId);
   if (!record.sessions.length) {
-    delete store.byProject[key];
+    memoryByProject.delete(key);
+    const index = readIndex();
+    delete index.byProject[key];
+    writeIndex(index);
   } else {
     record.activeSessionId = record.sessions[0].id;
+    persistRecord(key, record);
   }
-  writeStore(store);
 }

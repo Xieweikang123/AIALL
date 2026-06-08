@@ -1020,19 +1020,16 @@
                       编辑器预览
                     </button>
                   </div>
-                  <details class="inline-diff-details">
-                    <summary>变更内容</summary>
-                    <div class="inline-diff-cols">
-                      <div class="inline-diff-col">
-                        <div class="inline-diff-label">修改前</div>
-                        <pre class="trace-pre compact">{{ truncateDiffPreview(m.turnFileDiffs[relPath].before || "（空 / 新文件）") }}</pre>
-                      </div>
-                      <div class="inline-diff-col">
-                        <div class="inline-diff-label">{{ m.turnFileDiffs[relPath].deleted ? "删除后" : "修改后" }}</div>
-                        <pre class="trace-pre compact">{{ truncateDiffPreview(m.turnFileDiffs[relPath].deleted ? "（文件已删除）" : m.turnFileDiffs[relPath].after) }}</pre>
-                      </div>
+                  <div class="inline-diff-cols">
+                    <div class="inline-diff-col">
+                      <div class="inline-diff-label">修改前</div>
+                      <pre class="trace-pre compact">{{ truncateDiffPreview(m.turnFileDiffs[relPath].before || "（空 / 新文件）") }}</pre>
                     </div>
-                  </details>
+                    <div class="inline-diff-col">
+                      <div class="inline-diff-label">{{ m.turnFileDiffs[relPath].deleted ? "删除后" : "修改后" }}</div>
+                      <pre class="trace-pre compact">{{ truncateDiffPreview(m.turnFileDiffs[relPath].deleted ? "（文件已删除）" : m.turnFileDiffs[relPath].after) }}</pre>
+                    </div>
+                  </div>
                 </div>
               </div>
               <div
@@ -1268,6 +1265,7 @@ import {
   clearVibeChatHistory,
   deleteVibeChatSession,
   getActiveVibeChatSessionId,
+  getActiveSessionSnapshot,
   getVibeChatProjectSnapshot,
   hasVibeChatHistory,
   listVibeChatSessions,
@@ -1345,6 +1343,7 @@ import {
   searchFiles,
   fetchChatStoreFromDisk,
   formatFetchError,
+  syncChatSession,
   syncChatStore,
   writeFile,
   type FileEntry,
@@ -2526,6 +2525,43 @@ function shouldShowToolExpand(step: AgentToolStep): boolean {
   return Boolean(formatToolArgsPreview(step.name, step.args || {}));
 }
 
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function computeDiffHtml(before: string, after: string, maxLines = 80): { htmlBefore: string; htmlAfter: string } {
+  const aLines = before.split("\n");
+  const bLines = after.split("\n");
+  const maxLen = Math.max(aLines.length, bLines.length);
+  const aResult: string[] = [];
+  const bResult: string[] = [];
+  for (let i = 0; i < maxLen && (aResult.length < maxLines || bResult.length < maxLines); i++) {
+    const aLine = i < aLines.length ? aLines[i] : undefined;
+    const bLine = i < bLines.length ? bLines[i] : undefined;
+    if (aLine === undefined) {
+      aResult.push(`<span class="diff-line diff-add">${escapeHtml(bLine!)}</span>`);
+      bResult.push(`<span class="diff-line diff-add">${escapeHtml(bLine!)}</span>`);
+    } else if (bLine === undefined) {
+      aResult.push(`<span class="diff-line diff-del">${escapeHtml(aLine)}</span>`);
+      bResult.push(`<span class="diff-line diff-del">${escapeHtml(aLine)}</span>`);
+    } else if (aLine === bLine) {
+      aResult.push(`<span class="diff-line">${escapeHtml(aLine)}</span>`);
+      bResult.push(`<span class="diff-line">${escapeHtml(bLine)}</span>`);
+    } else {
+      aResult.push(`<span class="diff-line diff-del">${escapeHtml(aLine)}</span>`);
+      bResult.push(`<span class="diff-line diff-add">${escapeHtml(bLine)}</span>`);
+    }
+  }
+  const tail = maxLen > maxLines ? `\n<span class="diff-overflow">… 共 ${aLines.length} / ${bLines.length} 行</span>` : "";
+  return {
+    htmlBefore: aResult.join("\n") + tail,
+    htmlAfter: bResult.join("\n") + tail,
+  };
+}
+
 function truncateDiffPreview(text: string, max = 1200): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max)}\n…（共 ${text.length} 字符）`;
@@ -3094,7 +3130,7 @@ function scheduleSyncChatStore(path: string) {
   if (syncStoreTimer) clearTimeout(syncStoreTimer);
   syncStoreTimer = setTimeout(() => {
     syncStoreTimer = null;
-    void syncChatStore(path, getVibeChatProjectSnapshot(path));
+    void flushChatStoreToDisk(path, { quiet: true });
   }, SYNC_STORE_DEBOUNCE_MS);
 }
 
@@ -3104,34 +3140,31 @@ function persistChatNow(path = projectPath.value.trim()) {
   const result = saveVibeChatHistory(path, chatMessages.value, activeSessionId.value);
   if (result.sessionId) activeSessionId.value = result.sessionId;
   refreshSessionList(path);
-  if (!result.ok) {
-    if (syncStoreTimer) clearTimeout(syncStoreTimer);
-    syncStoreTimer = null;
-    void flushChatStoreToDisk(path);
-  } else {
-    scheduleSyncChatStore(path);
+  if (result.sessionId) {
+    const snapshot = getActiveSessionSnapshot(path, result.sessionId);
+    if (snapshot) {
+      void syncChatSession(path, result.sessionId, snapshot);
+    }
   }
+  scheduleSyncChatStore(path);
   if (isEmptyDraft) activeSessionId.value = "";
 }
 
-async function flushChatStoreToDisk(path: string) {
+async function flushChatStoreToDisk(path: string, options?: { quiet?: boolean }) {
   if (!path || syncingChatStore.value) return;
   syncingChatStore.value = true;
   try {
     const result = await syncChatStore(path, getVibeChatProjectSnapshot(path));
-    if (result.ok) {
-      chatError.value = "";
-      chatStoreSyncMessage.value =
-        "浏览器存储已满，当前会话已备份到 .aiall/vibe-chat-sessions（刷新后可从磁盘恢复）";
-      if (sessionCopyHintTimer) clearTimeout(sessionCopyHintTimer);
-      sessionCopyHintTimer = setTimeout(() => {
-        sessionCopyHintTimer = null;
-        if (chatStoreSyncMessage.value.includes("浏览器存储已满")) {
-          chatStoreSyncMessage.value = "";
-        }
-      }, 6000);
-    } else {
-      chatError.value = `聊天记录保存失败：${result.error || "浏览器与磁盘备份均失败"}`;
+    if (!result.ok) {
+      if (!options?.quiet) {
+        chatStoreSyncMessage.value = result.error || "同步会话到本地失败";
+      } else {
+        chatError.value = result.error || "会话未能写入项目目录，请检查后端服务是否运行";
+      }
+      return;
+    }
+    if (!options?.quiet) {
+      chatStoreSyncMessage.value = `已同步 ${result.sessionCount ?? sessionList.value.length} 条会话到 ${result.path || ".aiall/vibe-chat-sessions"}`;
     }
   } finally {
     syncingChatStore.value = false;
@@ -3223,6 +3256,8 @@ async function openProjectByPath(dirPath: string) {
           [...diskStore.data.sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]?.updatedAt || "";
         const localLatest = listVibeChatSessions(normalized)[0]?.updatedAt || "";
         if (diskLatest && diskLatest.localeCompare(localLatest) > 0) {
+          restoreChatStoreFromSnapshot(diskStore.data);
+        } else if (!loadVibeChatHistory(normalized).length) {
           restoreChatStoreFromSnapshot(diskStore.data);
         }
       }

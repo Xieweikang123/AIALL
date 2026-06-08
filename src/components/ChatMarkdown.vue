@@ -339,4 +339,34 @@ onUpdated(() => postProcess());
   left: -12px;
   color: rgba(255, 255, 255, 0.25);
 }
+
+/* ─── 语法高亮 ─────────────────────────────────────── */
+.msg-markdown :deep(.tok-keyword) {
+  color: #c678dd; /* 紫色 - 关键字 */
+}
+.msg-markdown :deep(.tok-string) {
+  color: #98c379; /* 绿色 - 字符串 */
+}
+.msg-markdown :deep(.tok-number) {
+  color: #d19a66; /* 橙色 - 数字 */
+}
+.msg-markdown :deep(.tok-comment) {
+  color: #5c6370; /* 灰色 - 注释 */
+  font-style: italic;
+}
+.msg-markdown :deep(.tok-type) {
+  color: #e5c07b; /* 黄色 - 类型/类名 */
+}
+.msg-markdown :deep(.tok-function) {
+  color: #61afef; /* 蓝色 - 函数调用 */
+}
+.msg-markdown :deep(.tok-boolean) {
+  color: #d19a66; /* 橙色 - 布尔值 */
+}
+.msg-markdown :deep(.tok-decorator) {
+  color: #e06c75; /* 红色 - 装饰器/注解 */
+}
+.msg-markdown :deep(.tok-variable) {
+  color: #56b6c2; /* 青色 - 变量引用 $var */
+}
 </style>
