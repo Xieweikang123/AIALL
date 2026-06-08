@@ -55,7 +55,27 @@ export function isAgentMaxTurnsExhausted(
 }
 
 /** Delay before auto-resuming after transient disconnect (seconds). */
-export const AGENT_AUTO_RESUME_SECONDS = 10;
+export const AGENT_AUTO_RESUME_SECONDS = 5;
+
+/** Shorter delay for obvious transport blips (Failed to fetch / network error). */
+export const AGENT_AUTO_RESUME_IMMEDIATE_SECONDS = 2;
+
+/** Pick auto-resume countdown from the failure message. */
+export function resolveAutoResumeSeconds(errorMessage: string): number {
+  const msg = errorMessage.trim().toLowerCase();
+  if (
+    msg === "network error" ||
+    msg.includes("failed to fetch") ||
+    msg.includes("fetch failed") ||
+    msg.includes("econnreset") ||
+    msg.includes("socket hang up") ||
+    msg.includes("未收到完成信号") ||
+    msg.includes("运行未完成")
+  ) {
+    return AGENT_AUTO_RESUME_IMMEDIATE_SECONDS;
+  }
+  return AGENT_AUTO_RESUME_SECONDS;
+}
 
 /** Transient network / transport failures that can be resumed manually. */
 export function isRecoverableAgentError(message: string): boolean {

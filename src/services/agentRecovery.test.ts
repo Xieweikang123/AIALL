@@ -11,6 +11,8 @@ import {
   isRecoverableAgentError,
   shouldAutoResumeAgentError,
   AGENT_AUTO_RESUME_SECONDS,
+  AGENT_AUTO_RESUME_IMMEDIATE_SECONDS,
+  resolveAutoResumeSeconds,
   recoverableAgentErrorHint,
   resolveAgentCompletedTurns,
   resolveAgentFailureBubbleContent,
@@ -50,9 +52,20 @@ describe("shouldAutoResumeAgentError", () => {
     expect(shouldAutoResumeAgentError("模型返回格式错误")).toBe(false);
   });
 
-  it("uses a 5–10 second countdown window", () => {
+  it("uses a 2–10 second countdown window", () => {
+    expect(AGENT_AUTO_RESUME_IMMEDIATE_SECONDS).toBeGreaterThanOrEqual(1);
+    expect(AGENT_AUTO_RESUME_IMMEDIATE_SECONDS).toBeLessThan(AGENT_AUTO_RESUME_SECONDS);
     expect(AGENT_AUTO_RESUME_SECONDS).toBeGreaterThanOrEqual(5);
     expect(AGENT_AUTO_RESUME_SECONDS).toBeLessThanOrEqual(10);
+  });
+
+  it("shortens auto-resume for transport errors", () => {
+    expect(resolveAutoResumeSeconds("network error")).toBe(AGENT_AUTO_RESUME_IMMEDIATE_SECONDS);
+    expect(resolveAutoResumeSeconds("Failed to fetch")).toBe(AGENT_AUTO_RESUME_IMMEDIATE_SECONDS);
+    expect(resolveAutoResumeSeconds("连接中断（流已结束但未收到完成信号）")).toBe(
+      AGENT_AUTO_RESUME_IMMEDIATE_SECONDS,
+    );
+    expect(resolveAutoResumeSeconds("模型响应超时（等待首包超过 60s）")).toBe(AGENT_AUTO_RESUME_SECONDS);
   });
 });
 

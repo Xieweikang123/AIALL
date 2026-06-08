@@ -111,6 +111,69 @@ export function sliceFileLines(content: string, offset = 1, limit = 500): string
   return header + slice.join("\n");
 }
 
+export type FileEOL = "\r\n" | "\n";
+
+/** Detect predominant line ending style in file content. */
+export function detectFileEOL(content: string): FileEOL {
+  return content.includes("\r\n") ? "\r\n" : "\n";
+}
+
+/** Normalize arbitrary line endings to match the target file's EOL style. */
+export function adaptPatchLineEndings(text: string, eol: FileEOL): string {
+  if (!text) return text;
+  const normalized = text.replace(/\r\n/g, "\n");
+  return eol === "\r\n" ? normalized.replace(/\n/g, "\r\n") : normalized;
+}
+
+function countSubstringOccurrences(haystack: string, needle: string): number {
+  if (!needle) return 0;
+  let count = 0;
+  let pos = 0;
+  while ((pos = haystack.indexOf(needle, pos)) !== -1) {
+    count += 1;
+    pos += needle.length;
+  }
+  return count;
+}
+
+export type UniquePatchResult =
+  | { ok: true; patched: string }
+  | { ok: false; error: string; occurrences: number };
+
+/**
+ * Apply a unique old_string → new_string replacement.
+ * Falls back to EOL-normalized matching when read_file (LF) differs from disk (CRLF).
+ */
+export function applyUniquePatch(content: string, oldString: string, newString: string): UniquePatchResult {
+  let oldToMatch = oldString;
+  let newToInsert = newString;
+  let occurrences = countSubstringOccurrences(content, oldToMatch);
+
+  if (occurrences === 0) {
+    const eol = detectFileEOL(content);
+    oldToMatch = adaptPatchLineEndings(oldString, eol);
+    newToInsert = adaptPatchLineEndings(newString, eol);
+    occurrences = countSubstringOccurrences(content, oldToMatch);
+  }
+
+  if (occurrences === 0) {
+    return {
+      ok: false,
+      error: "错误：old_string 在文件中未找到，请检查空格与缩进是否完全一致",
+      occurrences: 0,
+    };
+  }
+  if (occurrences > 1) {
+    return {
+      ok: false,
+      error: `错误：old_string 在文件中出现 ${occurrences} 次，请扩大 old_string 使匹配唯一`,
+      occurrences,
+    };
+  }
+
+  return { ok: true, patched: content.replace(oldToMatch, newToInsert) };
+}
+
 export async function writeFileContent(filePath: string, content: string) {
   const dir = path.dirname(filePath);
   await fs.promises.mkdir(dir, { recursive: true });

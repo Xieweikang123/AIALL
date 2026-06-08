@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { readJsonBody, sendJson, sendSseEvent, sendSseHeaders } from "./server/httpUtils";
+import { readJsonBody, sendJson, sendSseEvent, sendSseComment, sendSseHeaders } from "./server/httpUtils";
 import { chatCompletionWithTools, resolveChatEndpoint } from "./server/aiForward";
 import { runVibeAgent } from "./server/vibeAgent";
 import { buildProjectContext } from "./server/vibeProjectContext";
@@ -16,7 +16,7 @@ import {
   searchFiles,
   writeFileContent,
 } from "./server/vibeFs";
-import { gitStatus, gitDiff, gitDiffFile, gitDiffContent, gitCommitFileDiff, gitCommit, gitLog, gitIsRepo, gitAdd, gitReset, gitDiscard, gitDiscardAll, gitRemotes, gitFetch, gitPull, gitPush } from "./server/vibeGit";
+import { gitStatus, gitDiff, gitDiffFile, gitDiffContent, gitCommitFileDiff, gitCommit, gitLog, gitIsRepo, gitAdd, gitReset, gitDiscard, gitDiscardAll, gitRemotes, gitFetch, gitPull, gitPush, gitStashList, gitStashSave, gitStashPop, gitStashDrop } from "./server/vibeGit";
 
 const execFileAsync = promisify(execFile);
 
@@ -24,7 +24,10 @@ const DEBUG_LOG = path.join(os.tmpdir(), "aiall-debug.log");
 function debugLog(msg: string) {
   fs.appendFileSync(DEBUG_LOG, `[${new Date().toISOString()}] ${msg}\n`);
 }
-debugLog("=== middleware loaded ===");
+debugLog("=== middleware loaded v2 ===");
+
+/** SSE comment interval while agent run is open (prevents idle connection drops). */
+const AGENT_SSE_KEEPALIVE_MS = 15_000;
 
 function safeFilePart(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -480,9 +483,28 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
     }
 
     const controller = new AbortController();
+    let keepaliveTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
+      try {
+        sendSseComment(res);
+      } catch {
+        if (keepaliveTimer) {
+          clearInterval(keepaliveTimer);
+          keepaliveTimer = null;
+        }
+      }
+    }, AGENT_SSE_KEEPALIVE_MS);
+    const stopKeepalive = () => {
+      if (keepaliveTimer) {
+        clearInterval(keepaliveTimer);
+        keepaliveTimer = null;
+      }
+    };
     const abort = () => controller.abort();
     req.on("close", abort);
-    res.on("close", abort);
+    res.on("close", () => {
+      stopKeepalive();
+      abort();
+    });
 
     try {
       const mode = body.mode === "ask" ? "ask" : "build";
@@ -537,6 +559,8 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       } catch {
         // ignore
       }
+    } finally {
+      stopKeepalive();
     }
 
     try {
@@ -1343,6 +1367,99 @@ ${diffText.slice(0, 8000)}
       sendJson(res, 200, result);
     } catch (error) {
       sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "Push 失败" });
+    }
+  });
+
+  // GET /backend/vibe/git/stash-list
+  middlewares.use("/backend/vibe/git/stash-list", async (req, res) => {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { error: "仅支持 GET 请求" });
+      return;
+    }
+
+    try {
+      const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+      const projectPath = url.searchParams.get("path");
+      if (!projectPath?.trim()) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(projectPath.trim());
+      const result = await gitStashList(resolved);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, stashes: [], error: error instanceof Error ? error.message : "获取贮藏列表失败" });
+    }
+  });
+
+  // POST /backend/vibe/git/stash-save
+  middlewares.use("/backend/vibe/git/stash-save", async (req, res) => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "仅支持 POST 请求" });
+      return;
+    }
+
+    try {
+      const body = (await readJsonBody(req)) as { path?: string; message?: string };
+      if (!body.path?.trim()) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(body.path.trim());
+      const result = await gitStashSave(resolved, body.message);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, output: "", error: error instanceof Error ? error.message : "贮藏失败" });
+    }
+  });
+
+  // POST /backend/vibe/git/stash-pop
+  middlewares.use("/backend/vibe/git/stash-pop", async (req, res) => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "仅支持 POST 请求" });
+      return;
+    }
+
+    try {
+      const body = (await readJsonBody(req)) as { path?: string; stashIndex?: number };
+      if (!body.path?.trim()) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(body.path.trim());
+      const result = await gitStashPop(resolved, body.stashIndex);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, output: "", error: error instanceof Error ? error.message : "弹出贮藏失败" });
+    }
+  });
+
+  // POST /backend/vibe/git/stash-drop
+  middlewares.use("/backend/vibe/git/stash-drop", async (req, res) => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "仅支持 POST 请求" });
+      return;
+    }
+
+    try {
+      const body = (await readJsonBody(req)) as { path?: string; stashIndex?: number };
+      if (!body.path?.trim()) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 参数" });
+        return;
+      }
+      if (body.stashIndex === undefined) {
+        sendJson(res, 400, { ok: false, error: "缺少 stashIndex 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(body.path.trim());
+      const result = await gitStashDrop(resolved, body.stashIndex);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, output: "", error: error instanceof Error ? error.message : "删除贮藏失败" });
     }
   });
 }

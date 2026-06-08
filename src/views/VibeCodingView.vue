@@ -197,6 +197,50 @@
                 </div>
               </div>
             </div>
+
+            <!-- Stash 区域 -->
+            <div class="git-stash-section">
+              <div class="git-stash-header">
+                <span class="git-stash-title">📦 贮藏</span>
+                <button
+                  type="button"
+                  class="ghost tiny"
+                  :disabled="!!gitStashAction"
+                  @click="doStashSave"
+                >
+                  {{ gitStashAction === 'save' ? '…' : '贮藏当前更改' }}
+                </button>
+              </div>
+              <div v-if="gitStashes.length" class="git-stash-list">
+                <div v-for="stash in gitStashes" :key="stash.index" class="git-stash-item">
+                  <span class="git-stash-label">{{ 'stash@{' + stash.index + '}' }}</span>
+                  <span class="git-stash-msg">{{ stash.message }}</span>
+                  <div class="git-stash-actions">
+                    <button
+                      type="button"
+                      class="ghost tiny"
+                      :disabled="!!gitStashAction"
+                      @click="doStashPop(stash.index)"
+                      title="应用并移除此贮藏"
+                    >
+                      {{ gitStashAction === 'pop-' + stash.index ? '…' : 'Pop' }}
+                    </button>
+                    <button
+                      type="button"
+                      class="ghost tiny danger"
+                      :disabled="!!gitStashAction"
+                      @click="doStashDrop(stash.index)"
+                      title="移除此贮藏（不应用）"
+                    >
+                      {{ gitStashAction === 'drop-' + stash.index ? '…' : 'Drop' }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div v-else-if="gitStashAction === 'list'" class="git-stash-empty">加载中…</div>
+              <div v-else class="git-stash-empty">暂无贮藏</div>
+            </div>
+
             <div v-if="gitError" class="git-error">{{ gitError }}</div>
             <div class="git-commit-box">
               <textarea
@@ -1219,7 +1263,7 @@ import {
   resolveAgentCompletedTurns,
   resolveAgentFailureBubbleContent,
   shouldAutoResumeAgentError,
-  AGENT_AUTO_RESUME_SECONDS,
+  resolveAutoResumeSeconds,
 } from "../services/agentRecovery";
 import { loadAiChatBaseFromStorage } from "../services/aiLocalConfig";
 import {
@@ -1323,6 +1367,10 @@ import {
   gitFetchRemote,
   gitPullRemote,
   gitPushRemote,
+  gitStashListRemote,
+  gitStashSaveRemote,
+  gitStashPopRemote,
+  gitStashDropRemote,
   type GitStatusFile,
   type GitLogEntry,
   type GitLogFile,
@@ -1638,6 +1686,9 @@ const gitAhead = ref(0);
 const gitBehind = ref(0);
 const gitRemoteLoading = ref(false);
 const gitRemoteAction = ref("");
+const gitStashes = ref<Array<{ index: number; name: string; ref: string; message: string }>>([]);
+const gitStashAction = ref("");
+const gitStashMessage = ref("");
 const gitAiPushStep = ref("");
 
 function clearGitDiffCache() {
@@ -2059,14 +2110,16 @@ function cancelAutoResume() {
   autoResumeTargetId.value = "";
 }
 
-function scheduleAutoResume(assistantMsgId: string) {
+function scheduleAutoResume(assistantMsgId: string, errorMessage = "") {
   cancelAutoResume();
   if (!assistantMsgId || chatSending.value || !configReady.value || !projectOpened.value) return;
   const msg = chatMessages.value.find((m) => m.id === assistantMsgId);
   if (!msg || !canResumeAgentRun(msg)) return;
 
   autoResumeTargetId.value = assistantMsgId;
-  autoResumeSecondsLeft.value = AGENT_AUTO_RESUME_SECONDS;
+  autoResumeSecondsLeft.value = resolveAutoResumeSeconds(
+    errorMessage || msg.agentFailureReason || "",
+  );
   autoResumeTimer = setInterval(() => {
     if (autoResumeSecondsLeft.value <= 1) {
       const targetId = autoResumeTargetId.value;
@@ -2121,7 +2174,7 @@ function applyRecoverableAgentFailure(
   });
 
   if (recoverable && shouldAutoResumeAgentError(message)) {
-    scheduleAutoResume(assistantMsg.id);
+    scheduleAutoResume(assistantMsg.id, message);
   } else {
     cancelAutoResume();
   }
@@ -3118,6 +3171,7 @@ async function refreshGitStatus(options?: { showLoading?: boolean }) {
 
     if (result.isRepo) {
       refreshGitRemotes();
+      refreshGitStashes();
       if (gitLogOpen.value) {
         const logResult = await fetchGitLog(projectPath.value.trim(), 20);
         if (logResult.ok) {
@@ -3608,6 +3662,75 @@ async function doPush() {
     gitError.value = e instanceof Error ? e.message : "Push 失败";
   } finally {
     gitRemoteAction.value = "";
+  }
+}
+
+async function refreshGitStashes() {
+  if (!projectOpened.value) return;
+  try {
+    const result = await gitStashListRemote(projectPath.value.trim());
+    if (result.ok) {
+      gitStashes.value = result.stashes || [];
+    }
+  } catch {
+    // ignore
+  }
+}
+
+async function doStashSave() {
+  if (!projectOpened.value) return;
+  gitStashAction.value = "save";
+  gitError.value = "";
+  try {
+    const result = await gitStashSaveRemote(projectPath.value.trim(), gitStashMessage.value.trim() || undefined);
+    if (!result.ok) {
+      gitError.value = result.error || "贮藏失败";
+      return;
+    }
+    gitStashMessage.value = "";
+    await refreshGitStashes();
+    await refreshGitStatus({ showLoading: false });
+  } catch (e) {
+    gitError.value = e instanceof Error ? e.message : "贮藏失败";
+  } finally {
+    gitStashAction.value = "";
+  }
+}
+
+async function doStashPop(stashIndex: number) {
+  if (!projectOpened.value) return;
+  gitStashAction.value = `pop-${stashIndex}`;
+  gitError.value = "";
+  try {
+    const result = await gitStashPopRemote(projectPath.value.trim(), stashIndex);
+    if (!result.ok) {
+      gitError.value = result.error || "应用贮藏失败";
+      return;
+    }
+    await refreshGitStashes();
+    await refreshGitStatus({ showLoading: false });
+  } catch (e) {
+    gitError.value = e instanceof Error ? e.message : "应用贮藏失败";
+  } finally {
+    gitStashAction.value = "";
+  }
+}
+
+async function doStashDrop(stashIndex: number) {
+  if (!projectOpened.value) return;
+  gitStashAction.value = `drop-${stashIndex}`;
+  gitError.value = "";
+  try {
+    const result = await gitStashDropRemote(projectPath.value.trim(), stashIndex);
+    if (!result.ok) {
+      gitError.value = result.error || "删除贮藏失败";
+      return;
+    }
+    await refreshGitStashes();
+  } catch (e) {
+    gitError.value = e instanceof Error ? e.message : "删除贮藏失败";
+  } finally {
+    gitStashAction.value = "";
   }
 }
 
@@ -6143,6 +6266,80 @@ onBeforeUnmount(() => {
 .git-remote-actions {
   display: flex;
   gap: 4px;
+}
+
+/* ---- Stash 区域 ---- */
+.git-stash-section {
+  border-top: 1px solid var(--border);
+}
+
+.git-stash-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px;
+  font-size: 14px;
+}
+
+.git-stash-title {
+  color: var(--text);
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.git-stash-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.git-stash-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  font-size: 13px;
+  border-top: 1px solid var(--border);
+  transition: background 0.15s ease;
+}
+
+.git-stash-item:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.git-stash-label {
+  color: #bb9af7;
+  font-family: monospace;
+  font-size: 12px;
+  font-weight: 500;
+  flex-shrink: 0;
+  padding: 2px 6px;
+  background: rgba(187, 154, 247, 0.1);
+  border: 1px solid rgba(187, 154, 247, 0.15);
+  border-radius: 4px;
+}
+
+.git-stash-msg {
+  color: var(--text-dim);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.git-stash-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.git-stash-empty {
+  padding: 6px 14px 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+  opacity: 0.6;
 }
 
 .git-error {

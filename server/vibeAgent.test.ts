@@ -63,6 +63,33 @@ describe("executeTool immediate persistence", () => {
     expect(onDisk).toBe("baz bar");
   });
 
+  it("patch_file applies LF old_string to CRLF files after read_file", async () => {
+    const root = await makeProject();
+    const filePath = path.join(root, "routes.ts");
+    await fs.promises.writeFile(filePath, "before\r\n  push();\r\nafter\r\n", "utf-8");
+    const stage = createWriteStage();
+    const readCache = new Map<string, string>();
+    const readSliceCache = new Map<string, string>();
+
+    await executeTool(root, "read_file", { path: "routes.ts" }, stage, "build", readCache, readSliceCache);
+    const result = await executeTool(
+      root,
+      "patch_file",
+      {
+        path: "routes.ts",
+        old_string: "  push();\nafter",
+        new_string: "  push();\n  stash();\nafter",
+      },
+      stage,
+      "build",
+      readCache,
+      readSliceCache,
+    );
+    expect(result).toContain("已修改 routes.ts");
+    const onDisk = await fs.promises.readFile(filePath, "utf-8");
+    expect(onDisk).toBe("before\r\n  push();\r\n  stash();\r\nafter\r\n");
+  });
+
   it("deduplicates identical read_file slice requests", async () => {
     const root = await makeProject();
     await fs.promises.writeFile(path.join(root, "a.ts"), "line1\nline2\n", "utf-8");

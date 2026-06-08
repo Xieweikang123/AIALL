@@ -1,6 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
-import { chatCompletionWithTools, type ChatCompletionMessage, type ChatToolCall, type ModelStreamProgress } from "./aiForward";
+import {
+  AGENT_AI_MAX_RETRIES,
+  chatCompletionWithTools,
+  resolveFirstByteTimeoutMs,
+  type ChatCompletionMessage,
+  type ChatToolCall,
+  type ModelStreamProgress,
+} from "./aiForward";
 import {
   TextToolCallStreamFilter,
   hasTextToolCallMarkup,
@@ -30,6 +37,7 @@ import {
   invalidateProjectContextCache,
 } from "./vibeProjectContext";
 import {
+  applyUniquePatch,
   grepInProject,
   listDirectory,
   readFileContent,
@@ -770,12 +778,9 @@ export async function executeTool(
       if (content !== null) readCache?.set(resolved.relative, content);
     }
     if (content === null) return `错误：${resolved.relative} 不存在或无法读取`;
-    const occurrences = content.split(oldString).length - 1;
-    if (occurrences === 0) return "错误：old_string 在文件中未找到，请检查空格与缩进是否完全一致";
-    if (occurrences > 1) {
-      return `错误：old_string 在文件中出现 ${occurrences} 次，请扩大 old_string 使匹配唯一`;
-    }
-    const patched = content.replace(oldString, newString);
+    const patchResult = applyUniquePatch(content, oldString, newString);
+    if (!patchResult.ok) return patchResult.error;
+    const patched = patchResult.patched;
     stage.deletions.delete(resolved.relative);
     stage.files.set(resolved.relative, patched);
     readCache?.set(resolved.relative, patched);
@@ -1032,6 +1037,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         messages: compactedMessages,
         tools: activeTools,
         signal,
+        maxRetries: AGENT_AI_MAX_RETRIES,
+        firstByteTimeoutMs: resolveFirstByteTimeoutMs(contextChars),
         onStreamProgress: (progress) => {
           modelStatusPhase = streamProgressPhase(progress) as typeof modelStatusPhase;
           onEvent({
@@ -1220,8 +1227,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
             } else if (toolName === "patch_file") {
               const oldString = String(toolArgs.old_string ?? "");
               const newString = String(toolArgs.new_string ?? "");
-              if (oldString && before.split(oldString).length === 2) {
-                after = before.replace(oldString, newString);
+              if (oldString) {
+                const patchPreview = applyUniquePatch(before, oldString, newString);
+                if (patchPreview.ok) after = patchPreview.patched;
               }
             }
             pendingDiff = {

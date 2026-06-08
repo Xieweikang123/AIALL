@@ -19,8 +19,17 @@ export function buildHeaders(apiKey?: string): HeadersInit {
 
 export const DEFAULT_AI_MAX_RETRIES = 3;
 
+/** Default agent runs use one extra retry for long multi-turn tasks. */
+export const AGENT_AI_MAX_RETRIES = DEFAULT_AI_MAX_RETRIES + 1;
+
 /** Abort fetch if the model does not send the first response byte within this window. */
 export const MODEL_FIRST_BYTE_TIMEOUT_MS = 60_000;
+
+/** Scale first-byte timeout for large agent contexts (up to +120s). */
+export function resolveFirstByteTimeoutMs(contextChars = 0): number {
+  const extraSeconds = Math.min(120, Math.floor(Math.max(0, contextChars) / 1500));
+  return MODEL_FIRST_BYTE_TIMEOUT_MS + extraSeconds * 1000;
+}
 
 export function isRetryableAiError(input: {
   status?: number;
@@ -185,6 +194,7 @@ async function chatCompletionWithToolsOnce(params: {
   signal?: AbortSignal;
   onContentDelta?: (delta: string) => void;
   onStreamProgress?: (progress: ModelStreamProgress) => void;
+  firstByteTimeoutMs?: number;
 }): Promise<ChatCompletionResult> {
   const chatEndpoint = resolveChatEndpoint(params.endpoint);
   const useStream = Boolean(params.onContentDelta);
@@ -223,10 +233,11 @@ async function chatCompletionWithToolsOnce(params: {
 
   const timeoutController = new AbortController();
   let timedOut = false;
+  const firstByteTimeoutMs = params.firstByteTimeoutMs ?? MODEL_FIRST_BYTE_TIMEOUT_MS;
   const timeoutId = setTimeout(() => {
     timedOut = true;
     timeoutController.abort();
-  }, MODEL_FIRST_BYTE_TIMEOUT_MS);
+  }, firstByteTimeoutMs);
   const unlinkParent = linkAbortSignal(params.signal, timeoutController);
 
   let response: Response;
@@ -248,7 +259,7 @@ async function chatCompletionWithToolsOnce(params: {
         ok: false,
         status: 0,
         rawText: "",
-        error: "模型响应超时（等待首包超过 60s）",
+        error: `模型响应超时（等待首包超过 ${Math.round(firstByteTimeoutMs / 1000)}s）`,
       };
     }
     throw fetchError;
@@ -406,6 +417,7 @@ export async function chatCompletionWithTools(params: {
   onContentDelta?: (delta: string) => void;
   onStreamProgress?: (progress: ModelStreamProgress) => void;
   maxRetries?: number;
+  firstByteTimeoutMs?: number;
   onAttemptStart?: (info: { attempt: number; maxAttempts: number }) => void;
   onRetry?: (info: { attempt: number; maxAttempts: number; delayMs: number; error: string }) => void;
 }): Promise<ChatCompletionResult> {
@@ -440,6 +452,7 @@ export async function chatCompletionWithTools(params: {
         signal: params.signal,
         onContentDelta,
         onStreamProgress: params.onStreamProgress,
+        firstByteTimeoutMs: params.firstByteTimeoutMs,
       });
 
       if (result.ok) return result;
