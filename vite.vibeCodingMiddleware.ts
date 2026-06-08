@@ -1535,50 +1535,38 @@ ${diffText.slice(0, 12000)}
     }
   });
 
-  // GET /backend/vibe/file-watcher/changes
-  middlewares.use("/backend/vibe/file-watcher/changes", async (req, res) => {
+  // GET /backend/vibe/file-watcher/stream (SSE)
+  middlewares.use("/backend/vibe/file-watcher/stream", async (req, res) => {
     try {
       const { getGlobalWatcher } = await import("./server/fileWatcher");
       const watcher = getGlobalWatcher();
       
       if (!watcher.isWatching()) {
-        sendJson(res, 200, { ok: true, changes: [], isWatching: false });
+        sendJson(res, 200, { ok: false, error: "文件监听未启动" });
         return;
       }
 
-      // Get changes from the watcher
-      const changes: Array<{ type: string; path: string; timestamp: number }> = [];
-      
-      // Listen for changes for a short period
-      const timeout = 1000; // 1 second timeout
-      const startTime = Date.now();
-      
-      const onChanges = (newChanges: Array<{ type: string; path: string; timestamp: number }>) => {
-        changes.push(...newChanges);
+      sendSseHeaders(res);
+      sendSseEvent(res, "status", { connected: true });
+
+      const onChanges = (changes: Array<{ type: string; path: string; timestamp: number }>) => {
+        sendSseEvent(res, "changes", { changes });
       };
-      
+
       watcher.on("changes", onChanges);
-      
-      // Wait for changes or timeout
-      await new Promise<void>((resolve) => {
-        const checkInterval = setInterval(() => {
-          if (Date.now() - startTime >= timeout) {
-            clearInterval(checkInterval);
-            resolve();
-          }
-        }, 100);
-      });
-      
-      watcher.removeListener("changes", onChanges);
-      
-      sendJson(res, 200, { 
-        ok: true, 
-        changes, 
-        isWatching: watcher.isWatching(),
-        watchedPaths: watcher.getWatchedPaths()
+
+      // Keepalive ping every 15 seconds
+      const keepalive = setInterval(() => {
+        sendSseComment(res, "keepalive");
+      }, 15_000);
+
+      req.on("close", () => {
+        clearInterval(keepalive);
+        watcher.removeListener("changes", onChanges);
       });
     } catch (error) {
-      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "获取文件变化失败" });
+      sendSseEvent(res, "error", { message: error instanceof Error ? error.message : "SSE 连接失败" });
+      res.end();
     }
   });
 }

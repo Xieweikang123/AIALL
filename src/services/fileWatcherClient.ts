@@ -19,14 +19,6 @@ export interface FileWatcherStopResult {
   error?: string;
 }
 
-export interface FileWatcherChangesResult {
-  ok: boolean;
-  changes: FileChangeEvent[];
-  isWatching: boolean;
-  watchedPaths: string[];
-  error?: string;
-}
-
 export async function startFileWatcher(
   projectPath: string,
   watchPaths?: string[]
@@ -66,18 +58,64 @@ export async function stopFileWatcher(): Promise<FileWatcherStopResult> {
   }
 }
 
-export async function getFileWatcherChanges(): Promise<FileWatcherChangesResult> {
-  try {
-    const url = backendUrl("/backend/vibe/file-watcher/changes");
-    const response = await fetch(url);
-    return await response.json();
-  } catch (error) {
-    return {
-      ok: false,
-      changes: [],
-      isWatching: false,
-      watchedPaths: [],
-      error: error instanceof Error ? error.message : "获取文件变化失败",
-    };
+export type FileWatcherChangeCallback = (changes: FileChangeEvent[]) => void;
+export type FileWatcherErrorCallback = (error: string) => void;
+
+let eventSource: EventSource | null = null;
+let changeCallback: FileWatcherChangeCallback | null = null;
+let errorCallback: FileWatcherErrorCallback | null = null;
+
+export function connectFileWatcherStream(
+  onChanges: FileWatcherChangeCallback,
+  onError?: FileWatcherErrorCallback
+): () => void {
+  // Disconnect existing connection
+  disconnectFileWatcherStream();
+
+  changeCallback = onChanges;
+  errorCallback = onError || null;
+
+  const url = backendUrl("/backend/vibe/file-watcher/stream");
+  eventSource = new EventSource(url);
+
+  eventSource.addEventListener("status", (event) => {
+    const data = JSON.parse(event.data);
+    if (!data.connected) {
+      errorCallback?.("文件监听连接失败");
+    }
+  });
+
+  eventSource.addEventListener("changes", (event) => {
+    const data = JSON.parse(event.data);
+    if (data.changes && data.changes.length > 0) {
+      changeCallback?.(data.changes);
+    }
+  });
+
+  eventSource.addEventListener("error", (event) => {
+    if (event instanceof MessageEvent) {
+      const data = JSON.parse(event.data);
+      errorCallback?.(data.message || "文件监听错误");
+    } else {
+      errorCallback?.("文件监听连接断开");
+    }
+  });
+
+  eventSource.onerror = () => {
+    errorCallback?.("文件监听连接错误");
+  };
+
+  // Return cleanup function
+  return () => {
+    disconnectFileWatcherStream();
+  };
+}
+
+export function disconnectFileWatcherStream(): void {
+  if (eventSource) {
+    eventSource.close();
+    eventSource = null;
   }
+  changeCallback = null;
+  errorCallback = null;
 }

@@ -1,4 +1,5 @@
-import chokidar, { type FSWatcher } from "node:fs/promises";
+import chokidar from "chokidar";
+import type { FSWatcher } from "chokidar";
 import { EventEmitter } from "node:events";
 
 export interface FileChangeEvent {
@@ -49,7 +50,8 @@ export class FileWatcher extends EventEmitter {
     const validPaths: string[] = [];
     for (const p of paths) {
       try {
-        const stat = await import("node:fs/promises").then((fs) => fs.stat(p));
+        const fs = await import("node:fs/promises");
+        const stat = await fs.stat(p);
         if (stat) {
           validPaths.push(p);
           this.watchedPaths.add(p);

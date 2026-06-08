@@ -3,7 +3,7 @@
     <header class="app-toolbar">
       <div class="toolbar-brand">
         <span class="brand-icon" aria-hidden="true">⚡</span>
-        <h1 class="title">Vibe Coding</h1>
+        <h1 class="title">Vibe Coding✨</h1>
       </div>
       <div class="toolbar-project">
         <input
@@ -1380,7 +1380,8 @@ import {
 import {
   startFileWatcher,
   stopFileWatcher,
-  getFileWatcherChanges,
+  connectFileWatcherStream,
+  disconnectFileWatcherStream,
   type FileChangeEvent,
 } from "../services/fileWatcherClient";
 
@@ -1697,6 +1698,53 @@ const gitStashes = ref<Array<{ index: number; name: string; ref: string; message
 const gitStashAction = ref("");
 const gitStashMessage = ref("");
 const gitAiPushStep = ref("");
+
+// File watcher state
+const fileWatcherActive = ref(false);
+const fileWatcherCleanup = ref<(() => void) | null>(null);
+
+async function startFileWatcherForProject(projectPath: string) {
+  try {
+    const result = await startFileWatcher(projectPath);
+    if (result.ok) {
+      fileWatcherActive.value = true;
+      // Connect SSE stream for real-time updates
+      fileWatcherCleanup.value = connectFileWatcherStream(
+        (changes) => {
+          // Filter for relevant changes (ignore .git directory changes)
+          const relevantChanges = changes.filter(
+            (change) => !change.path.includes(".git") && !change.path.includes("node_modules")
+          );
+          
+          if (relevantChanges.length > 0) {
+            // Refresh Git status when files change
+            refreshGitStatus({ showLoading: false });
+          }
+        },
+        (error) => {
+          console.error("File watcher stream error:", error);
+        }
+      );
+    }
+  } catch (e) {
+    console.error("Failed to start file watcher:", e);
+  }
+}
+
+async function stopFileWatcherForProject() {
+  // Disconnect SSE stream
+  if (fileWatcherCleanup.value) {
+    fileWatcherCleanup.value();
+    fileWatcherCleanup.value = null;
+  }
+  
+  try {
+    await stopFileWatcher();
+    fileWatcherActive.value = false;
+  } catch (e) {
+    console.error("Failed to stop file watcher:", e);
+  }
+}
 
 function clearGitDiffCache() {
   gitDiffContentCache.value = {};
@@ -3116,6 +3164,8 @@ async function openProjectByPath(dirPath: string) {
     refreshSessionList(normalized);
     scheduleSyncChatStore(normalized);
     refreshGitStatus();
+    // Start file watcher for automatic Git status updates
+    startFileWatcherForProject(normalized);
     syncEditorPanelForOpenFiles();
     await scrollChatToBottom(true);
   } catch (e) {
@@ -5793,6 +5843,7 @@ onBeforeUnmount(() => {
   if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
   cancelAutoResume();
   persistChatNow();
+  stopFileWatcherForProject();
 });
 </script>
 
