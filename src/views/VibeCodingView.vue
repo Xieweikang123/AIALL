@@ -1031,8 +1031,15 @@
                     >
                       编辑器预览
                     </button>
+                    <button
+                      type="button"
+                      class="ghost small diff-toggle-btn"
+                      @click="m._expandedDiffs = m._expandedDiffs || {}; m._expandedDiffs[relPath] = !m._expandedDiffs[relPath]"
+                    >
+                      {{ m._expandedDiffs?.[relPath] ? '收起' : '展开' }}
+                    </button>
                   </div>
-                  <div class="inline-diff-cols">
+                  <div class="inline-diff-wrap" :class="{ open: m._expandedDiffs?.[relPath] }">
                     <div class="inline-diff-col">
                       <div class="inline-diff-label">修改前</div>
                       <pre class="trace-pre compact">{{ truncateDiffPreview(m.turnFileDiffs[relPath].before || "（空 / 新文件）") }}</pre>
@@ -10083,6 +10090,18 @@ button.compact {
   color: rgba(145, 190, 255, 0.9);
   cursor: pointer;
   margin-bottom: 6px;
+}
+
+.inline-diff-wrap {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.28s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
+  opacity: 0;
+}
+.inline-diff-wrap.open {
+  max-height: 3000px;
+  opacity: 1;
+  margin-top: 8px;
 }
 
 .inline-diff-cols {
