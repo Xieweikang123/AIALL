@@ -28,50 +28,50 @@
           >
             最近
           </button>
-        <div v-if="projectHistoryOpen" class="project-history-dropdown">
-          <div class="project-history-head">
-            <div>
-              <h3 class="project-history-title">最近打开的项目</h3>
-              <p class="project-history-desc">点击可快速重新打开</p>
+          <div v-if="projectHistoryOpen" class="project-history-dropdown">
+            <div class="project-history-head">
+              <div>
+                <h3 class="project-history-title">最近打开的项目</h3>
+                <p class="project-history-desc">点击可快速重新打开</p>
+              </div>
+              <button
+                v-if="projectHistoryList.length"
+                type="button"
+                class="ghost small"
+                @click="clearRecentProjects"
+              >
+                清空
+              </button>
             </div>
-            <button
-              v-if="projectHistoryList.length"
-              type="button"
-              class="ghost small"
-              @click="clearRecentProjects"
-            >
-              清空
-            </button>
+            <div v-if="!projectHistoryList.length" class="project-history-empty">还没有打开过项目</div>
+            <ul v-else class="project-history-list">
+              <li
+                v-for="item in projectHistoryList"
+                :key="item.path"
+                class="project-history-item"
+                :class="{ active: isCurrentProject(item.path) }"
+              >
+                <button
+                  type="button"
+                  class="project-history-item-main"
+                  :disabled="loadingTree || pickingFolder"
+                  @click="openRecentProject(item.path)"
+                >
+                  <span class="project-history-item-title">{{ item.displayName }}</span>
+                  <span class="project-history-item-path" :title="item.path">{{ item.path }}</span>
+                  <span class="project-history-item-meta">{{ formatSessionTime(item.lastOpenedAt) }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="ghost small project-history-delete"
+                  title="从历史中移除"
+                  @click="removeRecentProject(item.path, $event)"
+                >
+                  移除
+                </button>
+              </li>
+            </ul>
           </div>
-          <div v-if="!projectHistoryList.length" class="project-history-empty">还没有打开过项目</div>
-          <ul v-else class="project-history-list">
-            <li
-              v-for="item in projectHistoryList"
-              :key="item.path"
-              class="project-history-item"
-              :class="{ active: isCurrentProject(item.path) }"
-            >
-              <button
-                type="button"
-                class="project-history-item-main"
-                :disabled="loadingTree || pickingFolder"
-                @click="openRecentProject(item.path)"
-              >
-                <span class="project-history-item-title">{{ item.displayName }}</span>
-                <span class="project-history-item-path" :title="item.path">{{ item.path }}</span>
-                <span class="project-history-item-meta">{{ formatSessionTime(item.lastOpenedAt) }}</span>
-              </button>
-              <button
-                type="button"
-                class="ghost small project-history-delete"
-                title="从历史中移除"
-                @click="removeRecentProject(item.path, $event)"
-              >
-                移除
-              </button>
-            </li>
-          </ul>
-        </div>
         </div>
         <div v-if="treeError" class="toolbar-error" role="alert">
           <span class="toolbar-error-text">{{ treeError }}</span>
@@ -726,6 +726,9 @@
               <div class="msg-head">
                 <div class="msg-role">{{ m.role === "user" ? "你" : "Agent" }}</div>
                 <div v-if="!chatSending" class="msg-toolbar">
+                  <button type="button" class="ghost small" title="编辑此消息" @click="editUserMessage(m.id)">
+                    编辑
+                  </button>
                   <button type="button" class="ghost small" title="删除本条问答" @click="undoExchange(m.id)">
                     撤销
                   </button>
@@ -5039,6 +5042,30 @@ function undoExchange(messageId: string) {
   chatError.value = "";
   persistChatNow();
   void scrollChatToBottom();
+}
+
+function editUserMessage(messageId: string) {
+  if (chatSending.value) return;
+  const userIdx = resolveUserMessageIndex(messageId);
+  if (userIdx < 0) return;
+
+  const userMsg = chatMessages.value[userIdx];
+  const userText = stripReferenceAttachments(userMsg.content).trim();
+  const images = userMsg.imageDataUrls?.filter(Boolean) ?? [];
+  
+  const { start, end } = findExchangeBounds(userIdx);
+  chatMessages.value.splice(start, end - start + 1);
+  
+  composerRef.value?.setPlainText(userText);
+  for (const url of images) {
+    composerRef.value?.insertImage(url);
+  }
+  
+  chatError.value = "";
+  persistChatNow();
+  void scrollChatToBottom();
+  
+  nextTick(() => composerRef.value?.focus());
 }
 
 function resolveUserMessageIndex(messageId: string): number {
