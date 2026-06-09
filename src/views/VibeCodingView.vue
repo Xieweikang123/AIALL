@@ -732,13 +732,14 @@
               <div class="msg-head">
                 <div class="msg-role">{{ m.role === "user" ? "你" : "Agent" }}</div>
                 <div v-if="!chatSending" class="msg-toolbar">
-                  <button type="button" class="ghost small" title="编辑此消息" @click="editUserMessage(m.id)">
+                  <button v-if="m.role === 'user'" type="button" class="ghost small" title="编辑此消息" @click="editUserMessage(m.id)">
                     编辑
                   </button>
-                  <button type="button" class="ghost small" title="删除本条问答" @click="undoExchange(m.id)">
+                  <button type="button" class="ghost small" title="删除本条问答" @click="undoExchange(m.id, $event)">
                     撤销
                   </button>
                   <button
+                    v-if="m.role === 'user'"
                     type="button"
                     class="ghost small"
                     title="从此问题重新生成"
@@ -1136,26 +1137,6 @@
             </div>
             <div class="quoted-preview-body">{{ quotedMessage.content }}</div>
           </div>
-          <div class="chat-mode-switch" role="group" aria-label="对话模式">
-            <button
-              type="button"
-              class="mode-btn"
-              :class="{ active: chatMode === 'ask' }"
-              :disabled="chatSending"
-              @click="chatMode = 'ask'"
-            >
-              Ask
-            </button>
-            <button
-              type="button"
-              class="mode-btn"
-              :class="{ active: chatMode === 'build' }"
-              :disabled="chatSending"
-              @click="chatMode = 'build'"
-            >
-              Build
-            </button>
-          </div>
           <div class="chat-input-field" @keydown.capture="onComposerFieldKeydown">
             <div v-if="mentionOpen && mentionResults.length" class="mention-dropdown">
               <button
@@ -1185,49 +1166,73 @@
             </div>
           </div>
           <div class="chat-bottom">
-            <span v-if="autoResumeSecondsLeft > 0" class="chat-recovery-hint chat-auto-resume-hint">
-              {{ autoResumeSecondsLeft }} 秒后自动恢复运行（可取消）
-            </span>
-            <span v-else-if="stalledAssistantMsg" class="chat-recovery-hint chat-stall-hint">
-              运行似乎已卡住（长时间无进展）
-            </span>
-            <span v-else-if="recoverableAssistantMsg && !chatSending" class="chat-recovery-hint">
-              Agent 已中断，可恢复运行继续任务
-            </span>
-            <span v-else-if="chatError" class="chat-error">{{ chatError }}</span>
-            <span v-else-if="chatSending" class="chat-running">{{ chatRunningText }}</span>
-            <span v-else class="chat-hint">{{ chatHintText }}</span>
-            <div class="chat-actions">
-              <button
-                v-if="autoResumeSecondsLeft > 0"
-                type="button"
-                class="secondary"
-                @click="cancelAutoResume"
-              >
-                取消自动恢复
-              </button>
-              <button
-                v-if="stalledAssistantMsg"
-                type="button"
-                class="secondary resume-bottom-btn"
-                :disabled="!configReady || !projectOpened"
-                @click="forceRecoverStalledRun(stalledAssistantMsg.id)"
-              >
-                恢复运行
-              </button>
-              <button
-                v-else-if="recoverableAssistantMsg && !chatSending"
-                type="button"
-                class="secondary resume-bottom-btn"
-                :disabled="!configReady || !projectOpened"
-                @click="resumeAgentRun(recoverableAssistantMsg.id)"
-              >
-                {{ autoResumeSecondsLeft > 0 ? "立即恢复" : "恢复运行" }}
-              </button>
-              <button v-if="chatSending" type="button" class="secondary" @click="stopAgent">停止</button>
-              <button type="button" class="primary" :disabled="!canSendChat" @click="sendChat">
-                {{ chatSending ? "打断并发送" : "发送" }}
-              </button>
+            <div class="chat-status-row">
+              <span v-if="autoResumeSecondsLeft > 0" class="chat-recovery-hint chat-auto-resume-hint">
+                {{ autoResumeSecondsLeft }}s 后自动恢复（可取消）
+              </span>
+              <span v-else-if="stalledAssistantMsg" class="chat-recovery-hint chat-stall-hint">
+                运行似乎已卡住
+              </span>
+              <span v-else-if="recoverableAssistantMsg && !chatSending" class="chat-recovery-hint">
+                Agent 已中断，可恢复
+              </span>
+              <span v-else-if="chatError" class="chat-error">{{ chatError }}</span>
+              <span v-else-if="chatSending" class="chat-running">{{ chatRunningText }}</span>
+              <span v-else class="chat-hint">{{ chatHintText }}</span>
+            </div>
+            <div class="chat-action-row">
+              <div class="chat-mode-switch" role="group" aria-label="对话模式">
+                <button
+                  type="button"
+                  class="mode-btn"
+                  :class="{ active: chatMode === 'ask' }"
+                  :disabled="chatSending"
+                  @click="chatMode = 'ask'"
+                >
+                  Ask
+                </button>
+                <button
+                  type="button"
+                  class="mode-btn"
+                  :class="{ active: chatMode === 'build' }"
+                  :disabled="chatSending"
+                  @click="chatMode = 'build'"
+                >
+                  Build
+                </button>
+              </div>
+              <div class="chat-actions">
+                <button
+                  v-if="autoResumeSecondsLeft > 0"
+                  type="button"
+                  class="secondary"
+                  @click="cancelAutoResume"
+                >
+                  取消恢复
+                </button>
+                <button
+                  v-if="stalledAssistantMsg"
+                  type="button"
+                  class="secondary resume-bottom-btn"
+                  :disabled="!configReady || !projectOpened"
+                  @click="forceRecoverStalledRun(stalledAssistantMsg.id)"
+                >
+                  恢复运行
+                </button>
+                <button
+                  v-else-if="recoverableAssistantMsg && !chatSending"
+                  type="button"
+                  class="secondary resume-bottom-btn"
+                  :disabled="!configReady || !projectOpened"
+                  @click="resumeAgentRun(recoverableAssistantMsg.id)"
+                >
+                  {{ autoResumeSecondsLeft > 0 ? "立即恢复" : "恢复运行" }}
+                </button>
+                <button v-if="chatSending" type="button" class="secondary" @click="stopAgent">停止</button>
+                <button type="button" class="primary send-btn" :disabled="!canSendChat" @click="sendChat">
+                  {{ chatSending ? "打断并发送" : "发送" }}
+                </button>
+              </div>
             </div>
           </div>
         </footer>
@@ -5074,16 +5079,20 @@ function findExchangeBounds(index: number): { start: number; end: number } {
   return { start: index, end: index };
 }
 
-function undoExchange(messageId: string) {
+function undoExchange(messageId: string, event?: MouseEvent) {
   if (chatSending.value) return;
   const idx = chatMessages.value.findIndex((m) => m.id === messageId);
   if (idx < 0) return;
 
   const { start, end } = findExchangeBounds(idx);
-  chatMessages.value.splice(start, end - start + 1);
-  chatError.value = "";
-  persistChatNow();
-  void scrollChatToBottom();
+  const count = end - start + 1;
+  void confirm(`确定要撤销这组对话吗？将删除其中 ${count} 条消息。`, event).then((ok) => {
+    if (!ok) return;
+    chatMessages.value.splice(start, count);
+    chatError.value = "";
+    persistChatNow();
+    void scrollChatToBottom();
+  });
 }
 
 function editUserMessage(messageId: string) {
@@ -6911,6 +6920,10 @@ button.ghost.danger:hover:not(:disabled) {
     justify-content: flex-start;
   }
 
+  .chat-action-row {
+    flex-wrap: wrap;
+  }
+
   .editor-header {
     align-items: stretch;
   }
@@ -8056,12 +8069,12 @@ button.compact {
 
 .chat-mode-switch {
   display: inline-flex;
-  gap: 4px;
-  margin-bottom: 8px;
+  gap: 2px;
   padding: 2px;
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.18);
   border: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
 }
 
 .mode-btn {
@@ -8069,7 +8082,7 @@ button.compact {
   background: transparent;
   color: rgba(255, 255, 255, 0.55);
   border-radius: 6px;
-  padding: 4px 12px;
+  padding: 3px 10px;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -8097,7 +8110,7 @@ button.compact {
   flex-shrink: 0;
   min-width: 0;
   border-top: 1px solid var(--border);
-  padding: 10px 12px 12px;
+  padding: 8px 12px 10px;
   overflow: hidden;
 
   backdrop-filter: blur(8px);
@@ -8245,7 +8258,7 @@ button.compact {
 
 .chat-input-box {
   width: 100%;
-  min-height: 64px;
+  min-height: 56px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
   padding: 0;
@@ -8273,11 +8286,23 @@ button.compact {
 
 .chat-bottom {
   display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.chat-status-row {
+  display: flex;
+  align-items: center;
+  min-height: 16px;
+  font-size: 11px;
+}
+
+.chat-action-row {
+  display: flex;
   align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
   gap: 8px;
-  margin-top: 8px;
 }
 
 .chat-actions {
@@ -8408,22 +8433,8 @@ button.compact {
   overflow: hidden auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
-  mask-image: linear-gradient(to bottom, transparent 0, #000 18px, #000 calc(100% - 14px), transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 18px, #000 calc(100% - 14px), transparent 100%);
-}
-
-.cursor-agent-feed-viewport::before {
-  content: "";
-  position: sticky;
-  top: 0;
-  left: 0;
-  right: 0;
-  display: block;
-  height: 18px;
-  margin: 0 0 -18px;
-  pointer-events: none;
-  z-index: 1;
-  background: linear-gradient(to bottom, rgba(1, 4, 9, 0.94) 0%, rgba(1, 4, 9, 0.55) 55%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 10px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 10px), transparent 100%);
 }
 
 .cursor-agent-feed-viewport::-webkit-scrollbar {
