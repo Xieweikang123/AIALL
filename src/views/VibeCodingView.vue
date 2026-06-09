@@ -819,7 +819,7 @@
                       查看全部步骤（{{ m.tools?.length ?? 0 }}）
                     </button>
                   </div>
-                  <div v-else class="cursor-agent-feed-shell" aria-live="polite">
+                  <div v-else class="cursor-agent-feed-shell" :class="{ collapsed: shouldCollapseFeed(m) }" aria-live="polite">
                     <div class="cursor-agent-feed-head">
                       <span class="cursor-agent-feed-title">链路</span>
                       <span v-if="m.tools?.length" class="cursor-agent-feed-meta">{{ m.tools.length }} 步</span>
@@ -832,7 +832,7 @@
                       >
                         <div class="cursor-agent-feed">
                     <button
-                      v-if="isAgentRunning(m) && isActivityDetailed(m)"
+                      v-if="isAgentRunning(m) && isActivityDetailed(m) && (m.tools?.length ?? 0) > 0"
                       type="button"
                       class="cursor-activity-collapse cursor-activity-collapse--inline"
                       @click="collapseActivityDetailed(m)"
@@ -2579,6 +2579,12 @@ function setAgentStatus(msg: ChatMessage, phase: string, extra?: Partial<AgentSt
 
 function isAgentRunning(msg: ChatMessage): boolean {
   return chatSending.value && msg.id === activeAssistantMsgId.value;
+}
+
+function shouldCollapseFeed(msg: ChatMessage): boolean {
+  if (isAgentRunning(msg)) return false;
+  if (isActivityExpanded(msg)) return false;
+  return true;
 }
 
 function hasAgentActivity(msg: ChatMessage): boolean {
@@ -8153,7 +8159,7 @@ button.compact {
 
 .chat-input-box {
   width: 100%;
-  min-height: 48px;
+  min-height: 64px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
   padding: 0;
@@ -8257,6 +8263,15 @@ button.compact {
   background: rgba(1, 4, 9, 0.72);
   border: 1px solid rgba(48, 54, 61, 0.78);
   overflow: hidden;
+  transition: max-height 0.3s ease, opacity 0.3s ease;
+}
+
+.cursor-agent-feed-shell.collapsed {
+  max-height: 0;
+  opacity: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
 }
 
 .cursor-agent-feed-head {
@@ -8486,7 +8501,29 @@ button.compact {
 .cursor-action.planning {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-style: normal;
-  color: rgba(121, 192, 255, 0.55);
+  color: rgba(88, 166, 255, 0.85);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(88, 166, 255, 0.06);
+  border-radius: 4px;
+  margin: 4px 0;
+}
+
+.cursor-action.planning::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(88, 166, 255, 0.3);
+  border-top-color: #58a6ff;
+  border-radius: 50%;
+  animation: planning-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes planning-spin {
+  to { transform: rotate(360deg); }
 }
 
 .cursor-action-details {

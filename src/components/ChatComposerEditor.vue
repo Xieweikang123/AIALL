@@ -454,7 +454,7 @@ void nextTick(() => syncEmpty());
   position: relative;
   flex: 1 1 120px;
   min-width: 120px;
-  min-height: 24px;
+  min-height: 40px;
   max-height: 160px;
   overflow-y: auto;
   outline: none;
@@ -463,7 +463,7 @@ void nextTick(() => syncEmpty());
   color: var(--text, rgba(255, 255, 255, 0.92));
   word-break: break-word;
   white-space: pre-wrap;
-  padding: 6px 10px;
+  padding: 8px 12px;
 }
 
 .composer-editor.empty::before {
