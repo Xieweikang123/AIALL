@@ -469,10 +469,12 @@ void nextTick(() => syncEmpty());
 .composer-editor.empty::before {
   content: attr(data-placeholder);
   position: absolute;
-  inset: 0 auto auto 0;
+  inset: 0;
+  padding: 8px 12px;
   color: rgba(255, 255, 255, 0.4);
   pointer-events: none;
   user-select: none;
+  line-height: inherit;
 }
 
 .composer-editor.focused {
