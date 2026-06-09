@@ -1,4 +1,4 @@
-import { computed, reactive, ref } from "vue";
+import { computed, onUnmounted, reactive, ref, watch } from "vue";
 import {
   fetchGitStatus,
   fetchGitDiff,
@@ -47,8 +47,10 @@ export function useGitPanel(
   const gitStatus = ref<GitStatusFile[]>([]);
   const gitBranch = ref("");
   const gitIsRepo = ref(false);
+  const gitStatusKnown = ref(false);
   const gitLoading = ref(false);
   const gitError = ref("");
+  let gitStatusRefreshToken = 0;
   const gitCommitMessage = ref("");
   const gitCommitting = ref(false);
   const gitGenStep = ref("");
@@ -164,37 +166,54 @@ export function useGitPanel(
     return `${staged ? "staged" : "worktree"}:${filePath}`;
   }
 
+  function resetGitPanelState() {
+    gitStatusRefreshToken += 1;
+    gitIsRepo.value = false;
+    gitStatusKnown.value = false;
+    gitLoading.value = false;
+    gitError.value = "";
+    gitBranch.value = "";
+    gitStatus.value = [];
+    gitLogEntries.value = [];
+    clearGitDiffCache();
+  }
+
   async function refreshGitStatus(options?: { showLoading?: boolean }) {
     if (!projectOpened()) return;
     const showLoading = options?.showLoading !== false;
+    const pathAtStart = projectPath();
+    const token = ++gitStatusRefreshToken;
     if (showLoading) gitLoading.value = true;
-    gitError.value = "";
-    clearGitDiffCache();
+    if (showLoading) gitError.value = "";
     try {
-      const result = await fetchGitStatus(projectPath());
+      const result = await fetchGitStatus(pathAtStart);
+      if (token !== gitStatusRefreshToken || projectPath() !== pathAtStart) return;
       if (!result.ok) {
         gitError.value = result.error || "获取 Git 状态失败";
-        gitIsRepo.value = false;
         return;
       }
+      gitStatusKnown.value = true;
       gitIsRepo.value = result.isRepo;
       gitBranch.value = result.branch;
       gitStatus.value = result.files;
+      gitError.value = "";
+      clearGitDiffCache();
 
       if (result.isRepo) {
         refreshGitRemotes();
         refreshGitStashes();
         if (gitLogOpen.value) {
-          const logResult = await fetchGitLog(projectPath(), 20);
+          const logResult = await fetchGitLog(pathAtStart, 20);
           if (logResult.ok) {
             gitLogEntries.value = logResult.entries;
           }
         }
       }
     } catch (e) {
+      if (token !== gitStatusRefreshToken || projectPath() !== pathAtStart) return;
       gitError.value = e instanceof Error ? e.message : "获取 Git 状态失败";
     } finally {
-      if (showLoading) gitLoading.value = false;
+      if (token === gitStatusRefreshToken && showLoading) gitLoading.value = false;
     }
   }
 
@@ -622,6 +641,7 @@ export function useGitPanel(
     gitStatus,
     gitBranch,
     gitIsRepo,
+    gitStatusKnown,
     gitLoading,
     gitError,
     gitCommitMessage,
@@ -662,6 +682,7 @@ export function useGitPanel(
     toggleGitLogEntry,
     gitHistoryDiffKey,
     gitWorkingTreeDiffKey,
+    resetGitPanelState,
     refreshGitStatus,
     commitGit,
     stageFile,

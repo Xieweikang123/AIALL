@@ -508,6 +508,7 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "重要：必须通过 API 工具接口调用 list_dir、read_file 等，禁止在正文里输出 <function>、<parameter> 等标记。",
     "工具 path 参数使用相对项目根的路径（如 package.json、src/main.ts），不要用绝对路径。",
     "run_command 可在项目目录执行 shell 命令（如 npm run dev、python main.py、go test），超时默认 30 秒，长时间命令请设置 timeout_ms；不要执行危险命令。",
+    "如果系统提示你上一次回复被截断，请从截断处继续输出，不要重复已输出的内容。",
     `项目根目录：${projectRoot}`,
   ];
   if (model?.trim()) {
@@ -1001,6 +1002,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   let visionFirstTurnPending = shouldRequireVisionFirstTurn(imageDataUrls.length, false);
   let visionFirstTurnRetries = 0;
   const MAX_VISION_FIRST_TURN_RETRIES = 2;
+  let truncationRetried = false;
   const consultativeVisionRun = imageDataUrls.length > 0 && (isAsk || readOnlyBuildRun);
 
   emitAgentContext(onEvent, {
@@ -1217,6 +1219,36 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       onEvent({ type: "error", data: { message: completion.error || "模型请求失败" } });
       onEvent({ type: "done", data: buildDoneData(writeStage, turn) });
       return;
+    }
+
+    // --- 检测模型输出被截断（finish_reason === "length"）---
+    if (
+      completion.finish_reason === "length" &&
+      !completion.message.tool_calls?.length &&
+      !truncationRetried
+    ) {
+      truncationRetried = true;
+      onEvent({
+        type: "status",
+        data: {
+          phase: "streaming_model",
+          turn,
+          ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+          model,
+          detail: "模型输出被截断（达到 token 上限），正在重试…",
+        },
+      });
+      // 将已截断的内容作为 assistant 消息推入上下文，让模型继续
+      const truncatedText = String(completion.message.content || "");
+      if (truncatedText.trim()) {
+        messages.push({ role: "assistant", content: truncatedText });
+        messages.push({
+          role: "user",
+          content:
+            "你的上一次回复被截断了（达到输出 token 上限）。请从被截断的地方继续，不要重复已输出的内容。",
+        });
+      }
+      continue;
     }
 
     const assistant = completion.message;

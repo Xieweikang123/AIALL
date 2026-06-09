@@ -14,7 +14,13 @@ export type CursorFeedBlock =
       visible: Extract<CursorFeedItem, { kind: "action" }>[];
       collapsed: Extract<CursorFeedItem, { kind: "action" }>[];
     }
-  | { kind: "status"; key: string; text: string; active: boolean };
+  | { kind: "status"; key: string; text: string; active: boolean }
+  | { kind: "answer"; key: string; text: string; streaming: boolean };
+
+export type CursorAgentTimeline = {
+  processBlocks: Exclude<CursorFeedBlock, { kind: "answer" }>[];
+  answer: { text: string; streaming: boolean } | null;
+};
 
 const DEFAULT_KEEP_VISIBLE = 4;
 const DEFAULT_COLLAPSE_AFTER = 5;
@@ -145,6 +151,24 @@ export function layoutCursorFeedBlocks(
   }
   flushActions();
   return blocks;
+}
+
+export function buildCursorAgentTimeline(
+  items: CursorFeedItem[],
+  answerText: string,
+  options?: {
+    keepVisible?: number;
+    collapseAfter?: number;
+    compactWhileRunning?: boolean;
+    streaming?: boolean;
+  },
+): CursorAgentTimeline {
+  const blocks = layoutCursorFeedBlocks(items, options);
+  const trimmed = answerText.trim();
+  return {
+    processBlocks: blocks,
+    answer: trimmed ? { text: trimmed, streaming: options?.streaming ?? false } : null,
+  };
 }
 
 export function computeLineDelta(before: string, after: string, created?: boolean): number {

@@ -503,10 +503,27 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       await fs.promises.mkdir(chatDir, { recursive: true });
       const safeId = safeFilePart(sessionId);
       const sessionFile = path.join(chatDir, `chat-${safeId}.json`);
-      const payload =
-        body.data && typeof body.data === "object"
-          ? await externalizeSessionPayload(chatDir, sessionId, body.data as { messages?: unknown[] })
-          : body.data;
+
+      // 合并磁盘已有消息，防止前端发送空数组覆盖已有数据
+      const incomingData = body.data && typeof body.data === "object"
+        ? body.data as { messages?: unknown[]; [key: string]: unknown }
+        : undefined;
+      let mergedData = incomingData;
+      if (incomingData) {
+        const existingRaw = await fs.promises.readFile(sessionFile, "utf-8").catch(() => null);
+        let existingPayload: { messages?: unknown[] } | null = null;
+        if (existingRaw) {
+          try { existingPayload = JSON.parse(existingRaw) as { messages?: unknown[] }; } catch { existingPayload = null; }
+        }
+        mergedData = mergeSessionPayloadForDisk(
+          { id: sessionId, ...incomingData },
+          existingPayload,
+        );
+      }
+
+      const payload = mergedData
+        ? await externalizeSessionPayload(chatDir, sessionId, mergedData as { messages?: unknown[] })
+        : mergedData;
       await fs.promises.writeFile(sessionFile, JSON.stringify(payload, null, 2), "utf-8");
       if (payload && typeof payload === "object") {
         await upsertChatStoreIndexEntry(chatDir, resolved, payload as Record<string, unknown>, sessionId, {

@@ -123,6 +123,8 @@ export interface ChatCompletionResult {
   message?: ChatCompletionMessage;
   rawText: string;
   error?: string;
+  /** "stop" | "length" | "tool_calls" | null — only populated from streaming path */
+  finish_reason?: string | null;
 }
 
 export type ModelStreamProgress = {
@@ -323,6 +325,7 @@ async function chatCompletionWithToolsOnce(params: {
   let streamChunks = 0;
   const toolCallsMap = new Map<number, { id: string; name: string; arguments: string }>();
   let sawFirstChunk = false;
+  let lastFinishReason: string | null = null;
 
   const reportStreamProgress = (phase: ModelStreamProgress["phase"], force = false) => {
     const toolNames = [...toolCallsMap.values()].map((tc) => tc.name).filter(Boolean);
@@ -393,6 +396,8 @@ async function chatCompletionWithToolsOnce(params: {
           parseStreamToolCalls(toolCallsMap, delta.tool_calls);
           reportStreamProgress("planning_tools", true);
         }
+        const fr = parsed.choices?.[0]?.finish_reason;
+        if (fr) lastFinishReason = fr;
       } catch {
         // skip malformed SSE chunk
       }
@@ -401,10 +406,10 @@ async function chatCompletionWithToolsOnce(params: {
 
   const message = buildMessageFromStream(content, toolCallsMap);
   if (!message.content && !message.tool_calls?.length) {
-    return { ok: false, status: response.status, rawText: "", error: "模型返回为空" };
+    return { ok: false, status: response.status, rawText: "", error: "模型返回为空", finish_reason: lastFinishReason };
   }
 
-  return { ok: true, status: response.status, message, rawText: "" };
+  return { ok: true, status: response.status, message, rawText: "", finish_reason: lastFinishReason };
 }
 
 export async function chatCompletionWithTools(params: {

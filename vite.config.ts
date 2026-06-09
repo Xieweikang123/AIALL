@@ -11,6 +11,9 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     host: host || false,
+    watch: {
+      ignored: ["**/.aiall/**", "**/node_modules/**", "**/.git/**"],
+    },
     proxy: {
       "/backend": {
         target: "http://127.0.0.1:37891",

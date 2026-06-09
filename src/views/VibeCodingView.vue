@@ -73,9 +73,10 @@
             </ul>
           </div>
         </div>
-        <div v-if="treeError" class="toolbar-error" role="alert">
-          <span class="toolbar-error-text">{{ treeError }}</span>
-          <button type="button" class="toolbar-error-dismiss" aria-label="关闭提示" @click="treeError = ''">
+        <div v-if="treeError || retryCountdown > 0" class="toolbar-error" role="alert">
+          <span v-if="retryCountdown > 0" class="toolbar-error-countdown">⟳</span>
+          <span class="toolbar-error-text">{{ retryCountdown > 0 ? (treeError ? treeError.replace(/。?$/, ' ') : '无法连接后端服务，') + `正在重试… ${retryCountdown}s` : treeError }}</span>
+          <button type="button" class="toolbar-error-dismiss" aria-label="关闭提示" @click="clearRetryTimer(); treeError = ''">
             ×
           </button>
         </div>
@@ -102,7 +103,7 @@
                 class="file-panel-tab"
                 :class="{ active: gitPanelMode === 'git' }"
                 :disabled="!projectOpened"
-                @click="gitPanelMode = 'git'; refreshGitStatus()"
+                @click="gitPanelMode = 'git'; refreshGitStatus(gitIsRepo ? { showLoading: false } : undefined)"
               >
                 Git
                 <span
@@ -168,8 +169,7 @@
         <div v-if="gitPanelMode === 'git'" class="git-panel">
           <div v-if="!projectOpened" class="panel-empty">请先打开项目文件夹</div>
           <div v-else-if="gitLoading" class="panel-empty">加载中…</div>
-          <div v-else-if="!gitIsRepo" class="panel-empty">当前目录不是 Git 仓库</div>
-          <div v-else class="git-panel-content">
+          <div v-else-if="gitIsRepo" class="git-panel-content">
             <div class="git-header">
               <!-- 第一行：分支名 + 操作按钮 -->
               <div class="git-header-row git-branch-row">
@@ -416,6 +416,13 @@
               </div>
             </div>
           </div>
+          <div v-else-if="gitStatusKnown" class="panel-empty">当前目录不是 Git 仓库</div>
+          <div v-else-if="gitError" class="panel-empty git-panel-fetch-error">
+            <p>获取 Git 状态失败</p>
+            <p class="git-fetch-error-detail">{{ gitError }}</p>
+            <button type="button" class="secondary small" @click="() => refreshGitStatus()">重试</button>
+          </div>
+          <div v-else class="panel-empty">加载中…</div>
         </div>
 
         <div v-if="gitPanelMode === 'files' && !projectOpened" class="panel-empty">请先打开项目文件夹</div>
@@ -798,8 +805,13 @@
                 class="cursor-agent-wrap"
                 :class="{ running: isAgentRunning(m), collapsed: !isAgentRunning(m) && !isActivityExpanded(m) }"
               >
+                <ChatMarkdown
+                  v-if="!isAgentRunning(m) && !isActivityExpanded(m) && timelineAnswerContent(m)"
+                  class="cursor-timeline-answer msg-answer msg-answer--final"
+                  :content="timelineAnswerContent(m)"
+                />
                 <button
-                  v-if="!isAgentRunning(m) && !isActivityExpanded(m)"
+                  v-if="!isAgentRunning(m) && !isActivityExpanded(m) && hasAgentProcessSteps(m)"
                   type="button"
                   class="cursor-activity-toggle"
                   @click="toggleActivityExpanded(m)"
@@ -828,6 +840,16 @@
                     >
                       查看全部步骤（{{ m.tools?.length ?? 0 }}）
                     </button>
+                    <ChatMarkdown
+                      v-if="cursorAgentFeedAnswer(m)"
+                      class="cursor-timeline-answer msg-answer"
+                      :class="{
+                        'msg-answer--streaming': cursorAgentFeedAnswer(m)!.streaming,
+                        'msg-answer--final': !cursorAgentFeedAnswer(m)!.streaming,
+                      }"
+                      :content="cursorAgentFeedAnswer(m)!.text"
+                      :streaming="cursorAgentFeedAnswer(m)!.streaming"
+                    />
                   </div>
                   <div v-else class="cursor-agent-feed-shell" :class="{ collapsed: shouldCollapseFeed(m) }" aria-live="polite">
                     <div class="cursor-agent-feed-head">
@@ -924,6 +946,16 @@
                         ↓
                       </button>
                     </div>
+                    <ChatMarkdown
+                      v-if="cursorAgentFeedAnswer(m)"
+                      class="cursor-timeline-answer msg-answer cursor-timeline-answer--inline"
+                      :class="{
+                        'msg-answer--streaming': cursorAgentFeedAnswer(m)!.streaming,
+                        'msg-answer--final': !cursorAgentFeedAnswer(m)!.streaming,
+                      }"
+                      :content="cursorAgentFeedAnswer(m)!.text"
+                      :streaming="cursorAgentFeedAnswer(m)!.streaming"
+                    />
                   </div>
                   <details
                     v-if="hasAgentDebugDetails(m) && !shouldUseCompactAgentFeed(m)"
@@ -1001,7 +1033,7 @@
                     class="cursor-activity-collapse"
                     @click="collapseAgentActivity(m)"
                   >
-                    收起链路
+                    收起过程
                   </button>
                 </div>
               </div>
@@ -1319,6 +1351,13 @@ import {
   shouldSilentAutoContinue,
   resolveAutoResumeSeconds,
 } from "../services/agentRecovery";
+import {
+  persistAgentRunForHmr,
+  popPendingAgentRun,
+  clearPendingAgentRun,
+  registerHmrPreReloadHook,
+  type PendingAgentRun,
+} from "../services/agentHmrRecovery";
 import { compressImageDataUrlsForAgent } from "../services/imageCompress";
 import { loadAiChatBaseFromStorage } from "../services/aiLocalConfig";
 import {
@@ -1378,8 +1417,9 @@ import {
   formatExplorationSummary,
   getRecentFeedActions,
   getRunningFeedAction,
-  layoutCursorFeedBlocks,
+  buildCursorAgentTimeline,
   shouldUseCompactAgentFeed as shouldUseCompactAgentFeedByCount,
+  type CursorAgentTimeline,
   type CursorFeedBlock,
 } from "../services/agentCursorFeed";
 
@@ -1567,11 +1607,9 @@ function normalizeChatMessages(messages: PersistedChatMessage[]): ChatMessage[] 
       ...m,
       activityExpanded:
         m.activityExpanded ??
-        (m.role === "assistant" &&
-          Boolean(m.tools?.length || m.roundGroups?.some((g) => g.turn > 0))),
+        false,
       activityDetailed:
-        m.activityDetailed ??
-        (m.role === "assistant" && Boolean(m.tools?.length || m.roundGroups?.some((g) => g.turn > 0))),
+        m.activityDetailed ?? false,
       tools: m.tools?.map((t) => ({
         id: t.id,
         name: t.name || "",
@@ -1636,6 +1674,54 @@ const projectOpened = ref(false);
 const loadingTree = ref(false);
 const pickingFolder = ref(false);
 const treeError = ref("");
+const retryCountdown = ref(0);
+let retryTimer: ReturnType<typeof setInterval> | null = null;
+let retryAbort: AbortController | null = null;
+
+function isNetworkError(e: unknown): boolean {
+  const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
+  return /failed to fetch|networkerror|network error|fetcherror|load failed/.test(msg);
+}
+
+function clearRetryTimer() {
+  if (retryTimer) { clearInterval(retryTimer); retryTimer = null; }
+  retryCountdown.value = 0;
+  if (retryAbort) { retryAbort.abort(); retryAbort = null; }
+}
+
+async function autoRetryWithCountdown<T>(
+  fn: () => Promise<T>,
+  opts: { maxRetries?: number; delayMs?: number; onRetry?: (remaining: number, attempt: number, max: number) => void } = {}
+): Promise<T> {
+  const { maxRetries = 3, delayMs = 2000, onRetry } = opts;
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      clearRetryTimer();
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      if (!isNetworkError(e) || attempt >= maxRetries) throw e;
+      // Start countdown
+      let remaining = Math.ceil(delayMs / 1000);
+      retryCountdown.value = remaining;
+      onRetry?.(remaining, attempt + 1, maxRetries);
+      await new Promise<void>((resolve) => {
+        retryTimer = setInterval(() => {
+          remaining--;
+          if (remaining <= 0) {
+            clearRetryTimer();
+            resolve();
+          } else {
+            retryCountdown.value = remaining;
+            onRetry?.(remaining, attempt + 1, maxRetries);
+          }
+        }, 1000);
+      });
+    }
+  }
+  throw lastErr;
+}
 const fileTree = ref<TreeNode[]>([]);
 const expandedDirs = ref<Set<string>>(new Set());
 
@@ -1748,7 +1834,7 @@ const projectHistoryRef = ref<HTMLElement | null>(null);
 
 // Git panel composable
 const {
-  gitPanelMode, gitStatus, gitBranch, gitIsRepo, gitLoading, gitError,
+  gitPanelMode, gitStatus, gitBranch, gitIsRepo, gitStatusKnown, gitLoading, gitError,
   gitCommitMessage, gitCommitting, gitGenStep, gitLogEntries, gitLogOpen,
   gitStagedOpen, gitUnstagedOpen, expandedGitLogEntries, selectedGitFile,
   gitDiffLoadingKey, gitDiffContentCache, gitRemotes, gitTrackingBranch,
@@ -1757,7 +1843,7 @@ const {
   gitStagedFiles, gitUnstagedFiles, gitChangeCount, canGitCommit,
   clearGitDiffCache, evictOldestCacheEntry, gitStagingInProgress, gitLastStagingAt, gitStatusIcon, gitStatusColor,
   isGitLogEntryOpen, toggleGitLogEntry, gitHistoryDiffKey, gitWorkingTreeDiffKey,
-  refreshGitStatus, commitGit, stageFile, unstageFile,
+  resetGitPanelState, refreshGitStatus, commitGit, stageFile, unstageFile,
   stageAll, unstageAll, discardFile, discardAll,
   generateCommitMessage, aiCommitAndPush, refreshGitRemotes,
   doFetch, doPull, doPush,
@@ -2327,6 +2413,7 @@ function abortAgentConnectStall(msg: ChatMessage) {
   chatSending.value = false;
   agentConnectStartedAt = 0;
   agentLastProgressAt = 0;
+  clearPendingAgentRun();
   stopAgentUiTick();
   const reason = agentConnectStallMessage(agentConnectHasImages);
   chatError.value = reason;
@@ -2799,12 +2886,34 @@ function cursorAgentFeed(msg: ChatMessage) {
 }
 
 function cursorAgentFeedBlocks(msg: ChatMessage): CursorFeedBlock[] {
+  return cursorAgentTimeline(msg).processBlocks;
+}
+
+function cursorAgentTimeline(msg: ChatMessage): CursorAgentTimeline {
   const detailed = isActivityDetailed(msg);
-  return layoutCursorFeedBlocks(cursorAgentFeed(msg), {
+  return buildCursorAgentTimeline(cursorAgentFeed(msg), messageDisplayContent(msg), {
     keepVisible: detailed ? 8 : 6,
     collapseAfter: detailed ? 10 : 5,
     compactWhileRunning: isAgentRunning(msg) && detailed,
+    streaming: isAgentRunning(msg),
   });
+}
+
+function timelineAnswerContent(msg: ChatMessage): string {
+  if (msg.role !== "assistant" || !hasAgentActivity(msg)) return "";
+  return messageDisplayContent(msg);
+}
+
+function hasAgentProcessSteps(msg: ChatMessage): boolean {
+  return Boolean(
+    msg.tools?.length ||
+      msg.roundGroups?.some((group) => group.turn > 0 && (group.tools.length || group.modelSteps.length)),
+  );
+}
+
+function cursorAgentFeedAnswer(msg: ChatMessage) {
+  void agentUiTick.value;
+  return cursorAgentTimeline(msg).answer;
 }
 
 function isActivityDetailed(msg: ChatMessage): boolean {
@@ -2901,11 +3010,11 @@ function cursorActivitySummary(msg: ChatMessage): string {
   const actions = msg.tools?.length ?? 0;
   const last = msg.tools?.[msg.tools.length - 1];
   if (last && !last.running) {
-    return `查看步骤 · ${actions} 步 · ${formatCursorActionLabel(last)}`;
+    return `展开过程 · ${actions} 步 · ${formatCursorActionLabel(last)}`;
   }
-  if (actions > 0) return `查看步骤 · ${actions} 步`;
-  if (msg.totalTurns) return `查看步骤 · ${msg.totalTurns} 轮`;
-  return "查看步骤";
+  if (actions > 0) return `展开过程 · ${actions} 步`;
+  if (msg.totalTurns) return `展开过程 · ${msg.totalTurns} 轮`;
+  return "展开过程";
 }
 
 function toggleActivityExpanded(msg: ChatMessage) {
@@ -2998,6 +3107,7 @@ function shouldShowMessageBubble(msg: ChatMessage): boolean {
   if (msg.role === "user") {
     return Boolean(msg.content?.trim() || userMessageImages(msg).length);
   }
+  if (hasAgentActivity(msg)) return false;
   return Boolean(messageDisplayContent(msg));
 }
 
@@ -3422,9 +3532,18 @@ async function openProjectByPath(dirPath: string) {
   fileDirty.value = false;
   fileLoadError.value = "";
   showDiffMode.value = false;
+  resetGitPanelState();
 
   try {
-    const items = await loadDirChildren(normalized);
+    const items = await autoRetryWithCountdown(
+      () => loadDirChildren(normalized),
+      {
+        onRetry: (remaining, attempt, max) => {
+          treeError.value = `打开项目失败，正在重试… ${remaining}s (${attempt}/${max})`;
+        },
+      },
+    );
+    treeError.value = "";
     fileTree.value = items;
     expandedDirs.value = new Set([normalized]);
     projectOpened.value = true;
@@ -3459,7 +3578,7 @@ async function openProjectByPath(dirPath: string) {
   } catch (e) {
     projectOpened.value = false;
     fileTree.value = [];
-    treeError.value = formatFetchError(e, "打开项目失败");
+    treeError.value = formatFetchError(e, "打开项目失败（已重试）");
   } finally {
     loadingTree.value = false;
   }
@@ -3491,7 +3610,15 @@ async function refreshTree() {
   const normalized = projectPath.value.trim();
   if (!normalized) return;
   try {
-    fileTree.value = await loadDirChildren(normalized);
+    fileTree.value = await autoRetryWithCountdown(
+      () => loadDirChildren(normalized),
+      {
+        onRetry: (remaining, attempt, max) => {
+          treeError.value = `刷新目录失败，正在重试… ${remaining}s (${attempt}/${max})`;
+        },
+      },
+    );
+    treeError.value = "";
   } catch (e) {
     treeError.value = formatFetchError(e, "刷新目录失败");
   }
@@ -4710,6 +4837,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
     chatSending.value = false;
     agentAbortHandle = null;
     assistantMsg.streaming = false;
+    clearPendingAgentRun();
 
     if (assistantMsg.agentFailed) {
       const completedTurns = resolveCompletedTurns(event.data.turns, assistantMsg);
@@ -4809,6 +4937,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
 
     assistantMsg.status = "";
     assistantMsg.agentPhase = undefined;
+    assistantMsg.activityExpanded = false;
     assistantMsg.content = finalizeAssistantBubbleContent({
       ...assistantMsg,
       wasAborted,
@@ -4818,6 +4947,7 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
       status: "",
       agentPhase: undefined,
       streaming: false,
+      activityExpanded: false,
       content: assistantMsg.content,
       totalTurns: assistantMsg.totalTurns,
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
@@ -5030,6 +5160,7 @@ function findRunningAssistantMsg(): ChatMessage | null {
 
 function interruptAgentRun(options?: { logStatus?: boolean }) {
   cancelAutoResume();
+  clearPendingAgentRun();
   agentRunGeneration += 1;
   agentLastProgressAt = 0;
   const running = findRunningAssistantMsg();
@@ -5173,6 +5304,32 @@ function buildAgentHistory(
 function resolveCompletedTurns(reported: number, msg: ChatMessage): number {
   if (reported > 0) return reported;
   return resolveAgentCompletedTurns(msg);
+}
+
+function findLastUserMessage(): { content: string } | null {
+  for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
+    const m = chatMessages.value[i];
+    if (m.role === "user") return { content: m.content };
+  }
+  return null;
+}
+
+function tryResumeHmrInterruptedRun(): void {
+  const pending = popPendingAgentRun();
+  if (!pending) return;
+  // 如果已经有活跃的 Agent 运行，不恢复
+  if (chatSending.value || agentAbortHandle) return;
+  // 如果项目路径不匹配，不恢复
+  const currentProject = projectPath.value.trim();
+  if (pending.projectPath && pending.projectPath !== currentProject) return;
+  const prompt = (pending.request?.prompt as string) || "";
+  if (!prompt) return;
+  // 如果配置尚未就绪，不恢复
+  if (!configReady.value || !projectOpened.value) return;
+
+  // 恢复运行：显示提示并自动重发
+  chatError.value = "检测到之前因页面刷新中断的 Agent 运行，正在恢复…";
+  void runAgentTurn(prompt);
 }
 
 function buildAgentHistoryForResume(assistantMsgId: string): VibeChatHistoryMessage[] {
@@ -5381,20 +5538,27 @@ async function runAgentTurn(
   agentAbortHandle?.abort();
   agentAbortHandle = null;
   const runGen = ++agentRunGeneration;
+  const agentRequest = {
+    prompt,
+    history,
+    projectPath: projectPath.value.trim(),
+    endpoint: aiConfig.value.endpoint,
+    apiKey: aiConfig.value.apiKey,
+    model: aiConfig.value.model,
+    mode,
+    maxTurns: resolveAgentMaxTurns(mode, runProfile),
+    openFilePath: activeFilePath.value || undefined,
+    runProfile: runProfile.kind === "execute_plan" ? runProfile : undefined,
+    imageDataUrls: compressedImages?.length ? compressedImages : undefined,
+  };
+  // 持久化请求状态，以便 HMR 重载后恢复
+  persistAgentRunForHmr({
+    request: agentRequest as unknown as Record<string, unknown>,
+    projectPath: agentRequest.projectPath,
+    sessionId: activeSessionId.value || undefined,
+  });
   agentAbortHandle = runVibeAgentSse(
-    {
-      prompt,
-      history,
-      projectPath: projectPath.value.trim(),
-      endpoint: aiConfig.value.endpoint,
-      apiKey: aiConfig.value.apiKey,
-      model: aiConfig.value.model,
-      mode,
-      maxTurns: resolveAgentMaxTurns(mode, runProfile),
-      openFilePath: activeFilePath.value || undefined,
-      runProfile: runProfile.kind === "execute_plan" ? runProfile : undefined,
-      imageDataUrls: compressedImages?.length ? compressedImages : undefined,
-    },
+    agentRequest,
     (event) => handleAgentEvent(event, assistantMsg, runGen),
   );
 }
@@ -5604,6 +5768,24 @@ onMounted(() => {
   onStorageError((msg) => {
     chatError.value = msg;
   });
+
+  // --- HMR 恢复：注册 Vite 重载前钩子 + 检查待恢复运行 ---
+  registerHmrPreReloadHook(() => {
+    // 在 Vite full reload 前，如果 Agent 正在运行且尚未持久化，补充保存
+    // （runAgentTurn 已在启动时持久化完整请求，此处作为兜底）
+    if (chatSending.value && agentAbortHandle) {
+      const lastUser = findLastUserMessage();
+      if (lastUser) {
+        persistAgentRunForHmr({
+          request: { prompt: lastUser.content },
+          projectPath: projectPath.value.trim(),
+          sessionId: activeSessionId.value || undefined,
+        });
+      }
+    }
+  });
+  // 页面加载后检查是否有因 HMR 中断的 Agent 运行
+  nextTick(() => tryResumeHmrInterruptedRun());
 });
 
 onBeforeUnmount(() => {
@@ -5771,6 +5953,19 @@ onBeforeUnmount(() => {
   background: rgba(255, 77, 94, 0.12);
   flex-shrink: 1;
   min-width: 0;
+}
+
+.toolbar-error-countdown {
+  flex-shrink: 0;
+  font-size: 13px;
+  line-height: 1;
+  color: rgba(255, 180, 186, 0.9);
+  animation: countdown-spin 1.2s linear infinite;
+}
+
+@keyframes countdown-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .toolbar-error-text {
@@ -7148,6 +7343,26 @@ button.ghost.danger:hover:not(:disabled) {
   line-height: 1.65;
 }
 
+.cursor-timeline-answer {
+  margin: 0;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.cursor-timeline-answer--inline.msg-answer--final,
+.cursor-timeline-answer--inline.msg-answer--streaming {
+  margin-top: 0;
+  border: none;
+  border-top: 1px solid rgba(48, 54, 61, 0.55);
+  border-radius: 0;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.cursor-agent-feed-shell:has(.cursor-timeline-answer--inline) .cursor-agent-feed-viewport {
+  mask-image: none;
+  -webkit-mask-image: none;
+}
+
 .msg-streaming {
   margin: 0;
   padding: 0;
@@ -7560,6 +7775,20 @@ button.primary.small {
   color: var(--muted);
   font-size: 14px;
   text-align: center;
+}
+
+.git-panel-fetch-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.git-fetch-error-detail {
+  margin: 0;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.45);
+  word-break: break-word;
 }
 
 .editor-empty {
@@ -8327,7 +8556,14 @@ button.compact {
 }
 
 .cursor-agent-wrap.collapsed {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   margin-bottom: 0;
+}
+
+.cursor-agent-wrap.collapsed .cursor-activity-toggle {
+  align-self: flex-start;
 }
 
 .cursor-agent-wrap.running {

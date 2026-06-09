@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCursorAgentFeed,
+  buildCursorAgentTimeline,
   computeExplorationStats,
   computeLineDelta,
   formatCursorActionLabel,
@@ -63,6 +64,30 @@ describe("agentCursorFeed", () => {
     const feed = buildCursorAgentFeed({ groups, isRunning: false });
     expect(feed[0].kind).toBe("thought");
     expect(feed[1].kind).toBe("action");
+  });
+
+  it("appends answer to process timeline without mixing into scroll blocks", () => {
+    const actions: CursorFeedItem[] = [{
+      kind: "action",
+      key: "a-1",
+      step: {
+        id: "a-1",
+        turn: 1,
+        name: "read_file",
+        icon: "📄",
+        title: "读取",
+        detail: "a.ts",
+        label: "读取",
+        summary: "ok",
+        ok: true,
+        args: { path: "a.ts" },
+      },
+    }];
+
+    const timeline = buildCursorAgentTimeline(actions, "最终回答正文", { streaming: false });
+    expect(timeline.processBlocks).toHaveLength(1);
+    expect(timeline.processBlocks[0]?.kind).toBe("actions");
+    expect(timeline.answer).toEqual({ text: "最终回答正文", streaming: false });
   });
 
   it("collapses long action batches but keeps recent steps visible", () => {
