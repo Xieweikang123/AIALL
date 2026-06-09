@@ -7,6 +7,7 @@ import {
   formatCursorActionLabel,
   formatExplorationSummary,
   cursorPlanningLabel,
+  shouldSuppressFeedPlanningStatus,
   layoutCursorFeedBlocks,
   getRecentFeedActions,
   shouldUseCompactAgentFeed,
@@ -36,6 +37,7 @@ describe("agentCursorFeed", () => {
   });
 
   it("localizes planning labels for connect phases", () => {
+    expect(cursorPlanningLabel(undefined)).toBeNull();
     expect(cursorPlanningLabel("connecting_local")).toBe("连接本地服务…");
     expect(cursorPlanningLabel("connected", "读取项目上下文")).toContain("启动 Agent");
     expect(cursorPlanningLabel("building_context")).toBe("准备上下文…");
@@ -64,6 +66,48 @@ describe("agentCursorFeed", () => {
     const feed = buildCursorAgentFeed({ groups, isRunning: false });
     expect(feed[0].kind).toBe("thought");
     expect(feed[1].kind).toBe("action");
+  });
+
+  it("suppresses thinking status while answer preview is streaming", () => {
+    const feed = buildCursorAgentFeed({
+      groups: [],
+      isRunning: true,
+      agentPhase: "streaming_model",
+      answerPreview: "正在输出的正文",
+      streaming: true,
+    });
+    expect(feed.some((item) => item.kind === "status")).toBe(false);
+  });
+
+  it("keeps waiting status before answer preview arrives", () => {
+    const feed = buildCursorAgentFeed({
+      groups: [],
+      isRunning: true,
+      agentPhase: "waiting_model",
+      answerPreview: "",
+      streaming: false,
+    });
+    expect(feed.find((item) => item.kind === "status")?.kind).toBe("status");
+    if (feed[0]?.kind === "status") {
+      expect(feed[0].text).toContain("整合信息中");
+    }
+  });
+
+  it("shouldSuppressFeedPlanningStatus covers streaming and preview cases", () => {
+    expect(
+      shouldSuppressFeedPlanningStatus({
+        agentPhase: "streaming_model",
+        answerPreview: "已有正文",
+        streaming: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldSuppressFeedPlanningStatus({
+        agentPhase: "waiting_model",
+        answerPreview: "上一轮遗留",
+        streaming: false,
+      }),
+    ).toBe(false);
   });
 
   it("appends answer to process timeline without mixing into scroll blocks", () => {

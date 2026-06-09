@@ -188,11 +188,11 @@ export function useGitPanel(
     try {
       const result = await fetchGitStatus(pathAtStart);
       if (token !== gitStatusRefreshToken || projectPath() !== pathAtStart) return;
+      gitStatusKnown.value = true;
       if (!result.ok) {
         gitError.value = result.error || "获取 Git 状态失败";
         return;
       }
-      gitStatusKnown.value = true;
       gitIsRepo.value = result.isRepo;
       gitBranch.value = result.branch;
       gitStatus.value = result.files;
@@ -200,10 +200,11 @@ export function useGitPanel(
       clearGitDiffCache();
 
       if (result.isRepo) {
-        refreshGitRemotes();
-        refreshGitStashes();
+        void refreshGitRemotes();
+        void refreshGitStashes();
         if (gitLogOpen.value) {
           const logResult = await fetchGitLog(pathAtStart, 20);
+          if (token !== gitStatusRefreshToken || projectPath() !== pathAtStart) return;
           if (logResult.ok) {
             gitLogEntries.value = logResult.entries;
           }
@@ -211,9 +212,12 @@ export function useGitPanel(
       }
     } catch (e) {
       if (token !== gitStatusRefreshToken || projectPath() !== pathAtStart) return;
+      gitStatusKnown.value = true;
       gitError.value = e instanceof Error ? e.message : "获取 Git 状态失败";
     } finally {
-      if (token === gitStatusRefreshToken && showLoading) gitLoading.value = false;
+      if (token === gitStatusRefreshToken && projectPath() === pathAtStart) {
+        gitLoading.value = false;
+      }
     }
   }
 

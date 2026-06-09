@@ -17,8 +17,10 @@ export type CursorFeedBlock =
   | { kind: "status"; key: string; text: string; active: boolean }
   | { kind: "answer"; key: string; text: string; streaming: boolean };
 
+export type CursorFeedProcessBlock = Exclude<CursorFeedBlock, { kind: "answer" }>;
+
 export type CursorAgentTimeline = {
-  processBlocks: Exclude<CursorFeedBlock, { kind: "answer" }>[];
+  processBlocks: CursorFeedProcessBlock[];
   answer: { text: string; streaming: boolean } | null;
 };
 
@@ -114,11 +116,11 @@ export function getRecentFeedActions(
 export function layoutCursorFeedBlocks(
   items: CursorFeedItem[],
   options?: { keepVisible?: number; collapseAfter?: number; compactWhileRunning?: boolean },
-): CursorFeedBlock[] {
+): CursorFeedProcessBlock[] {
   const compactWhileRunning = options?.compactWhileRunning ?? false;
   const keepVisible = compactWhileRunning ? 1 : (options?.keepVisible ?? DEFAULT_KEEP_VISIBLE);
   const collapseAfter = compactWhileRunning ? 2 : (options?.collapseAfter ?? DEFAULT_COLLAPSE_AFTER);
-  const blocks: CursorFeedBlock[] = [];
+  const blocks: CursorFeedProcessBlock[] = [];
   let actionBatch: Extract<CursorFeedItem, { kind: "action" }>[] = [];
   let batchIndex = 0;
 
@@ -237,7 +239,7 @@ export function formatCursorActionLabel(step: AgentRoundTool): string {
 }
 
 export function cursorPlanningLabel(phase?: string, detail?: string): string | null {
-  if (!phase) return "Planning next moves";
+  if (!phase) return null;
 
   if (phase === "waiting_model" || phase === "sending_request" || phase === "retrying_model") {
     if (detail?.trim()) return `整合信息中 · ${detail.trim()}`;
@@ -260,11 +262,24 @@ export function cursorPlanningLabel(phase?: string, detail?: string): string | n
   return null;
 }
 
+/** Hide idle planning rows while the timeline answer is already streaming. */
+export function shouldSuppressFeedPlanningStatus(input: {
+  agentPhase?: string;
+  answerPreview?: string;
+  streaming?: boolean;
+}): boolean {
+  if (input.streaming) return true;
+  if (input.agentPhase !== "streaming_model" && input.agentPhase !== "planning_tools") return false;
+  return Boolean(input.answerPreview?.trim());
+}
+
 export function buildCursorAgentFeed(input: {
   groups: AgentRoundGroupView[];
   isRunning: boolean;
   agentPhase?: string;
   agentDetail?: string;
+  answerPreview?: string;
+  streaming?: boolean;
 }): CursorFeedItem[] {
   const items: CursorFeedItem[] = [];
 
@@ -288,7 +303,13 @@ export function buildCursorAgentFeed(input: {
 
   if (input.isRunning) {
     const hasRunningTool = input.groups.some((group) => group.tools.some((tool) => tool.running));
-    const planning = hasRunningTool ? null : cursorPlanningLabel(input.agentPhase, input.agentDetail);
+    const suppressPlanning = shouldSuppressFeedPlanningStatus({
+      agentPhase: input.agentPhase,
+      answerPreview: input.answerPreview,
+      streaming: input.streaming,
+    });
+    const planning =
+      hasRunningTool || suppressPlanning ? null : cursorPlanningLabel(input.agentPhase, input.agentDetail);
     if (planning) {
       items.push({ kind: "status", key: "planning-current", text: planning, active: true });
     }

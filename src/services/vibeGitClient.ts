@@ -104,13 +104,33 @@ export interface GitRemoteActionResult {
   error?: string;
 }
 
+function gitStatusFetchSignal(timeoutMs: number): AbortSignal {
+  if (typeof AbortSignal !== "undefined" && "timeout" in AbortSignal) {
+    return AbortSignal.timeout(timeoutMs);
+  }
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), timeoutMs);
+  return controller.signal;
+}
+
 export async function fetchGitStatus(projectPath: string): Promise<GitStatusResult> {
   try {
     const url = backendUrl(`/backend/vibe/git/status?path=${encodeURIComponent(projectPath)}`);
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: gitStatusFetchSignal(30_000) });
     const data = (await response.json()) as GitStatusResult;
     return data;
   } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      return {
+        ok: false,
+        branch: "",
+        files: [],
+        stagedCount: 0,
+        unstagedCount: 0,
+        isRepo: false,
+        error: "获取 Git 状态超时，请点刷新重试",
+      };
+    }
     return { ok: false, branch: "", files: [], stagedCount: 0, unstagedCount: 0, isRepo: false, error: error instanceof Error ? error.message : "网络错误" };
   }
 }

@@ -1420,7 +1420,7 @@ import {
   buildCursorAgentTimeline,
   shouldUseCompactAgentFeed as shouldUseCompactAgentFeedByCount,
   type CursorAgentTimeline,
-  type CursorFeedBlock,
+  type CursorFeedProcessBlock,
 } from "../services/agentCursorFeed";
 
 function getToolIcon(name: string): string {
@@ -1930,6 +1930,15 @@ function onDocumentDropCapture(e: DragEvent) {
 const fileWatcherActive = ref(false);
 const fileWatcherConnected = ref(false);
 const fileWatcherCleanup = ref<(() => void) | null>(null);
+let gitRefreshDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleGitStatusRefreshFromWatcher() {
+  if (gitRefreshDebounceTimer) clearTimeout(gitRefreshDebounceTimer);
+  gitRefreshDebounceTimer = setTimeout(() => {
+    gitRefreshDebounceTimer = null;
+    refreshGitStatus({ showLoading: false });
+  }, 300);
+}
 
 async function startFileWatcherForProject(projectPath: string) {
   try {
@@ -1953,7 +1962,7 @@ async function startFileWatcherForProject(projectPath: string) {
               !change.path.includes(".aiall/vibe-chat-sessions")
           );
           if (relevantChanges.length > 0) {
-            refreshGitStatus({ showLoading: false });
+            scheduleGitStatusRefreshFromWatcher();
           }
         },
         (error) => {
@@ -2873,19 +2882,21 @@ function cursorAgentFeed(msg: ChatMessage) {
       (msg.agentPhase === "connecting_local" ? "连接本地服务" : "启动 Agent");
     agentDetail = `${base} · ${elapsed}s`;
   }
+  const bubble = messageDisplayContent(msg);
   const items = buildCursorAgentFeed({
     groups: agentRoundGroupViews(msg),
     isRunning: isAgentRunning(msg),
     agentPhase: msg.agentPhase,
     agentDetail,
+    answerPreview: bubble,
+    streaming: Boolean(msg.streaming && isAgentRunning(msg)),
   });
-  const bubble = messageDisplayContent(msg);
   return filterDuplicateFeedThoughts(items, bubble, {
     suppressAllWhenBubble: isAgentRunning(msg),
   });
 }
 
-function cursorAgentFeedBlocks(msg: ChatMessage): CursorFeedBlock[] {
+function cursorAgentFeedBlocks(msg: ChatMessage): CursorFeedProcessBlock[] {
   return cursorAgentTimeline(msg).processBlocks;
 }
 
@@ -2907,7 +2918,9 @@ function timelineAnswerContent(msg: ChatMessage): string {
 function hasAgentProcessSteps(msg: ChatMessage): boolean {
   return Boolean(
     msg.tools?.length ||
-      msg.roundGroups?.some((group) => group.turn > 0 && (group.tools.length || group.modelSteps.length)),
+      msg.roundGroups?.some(
+        (group) => group.turn > 0 && ((group.toolIds?.length ?? 0) > 0 || group.modelSteps.length > 0),
+      ),
   );
 }
 
@@ -2970,6 +2983,9 @@ function cursorCompactLiveStatus(msg: ChatMessage): string | null {
   void agentUiTick.value;
   if (!isAgentRunning(msg)) return null;
   if (cursorCompactRunningAction(msg)) return null;
+  if (timelineAnswerContent(msg) && (msg.streaming || msg.agentPhase === "streaming_model" || msg.agentPhase === "planning_tools")) {
+    return null;
+  }
 
   if (msg.agentPhase === "streaming_model" || msg.agentPhase === "planning_tools") {
     return msg.streamChars && msg.streamChars > 0
@@ -4620,10 +4636,15 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
       assistantMsg.content = mergeAssistantTurnText(assistantMsg.content || "", turnText);
     }
     assistantMsg.streaming = false;
+    if (event.data.isFinal) {
+      assistantMsg.agentPhase = undefined;
+      assistantMsg.status = "";
+    }
     patchAssistantMsg(msgId, {
       ...syncRoundGroupsPatch(assistantMsg),
       content: assistantMsg.content,
       streaming: assistantMsg.streaming,
+      ...(event.data.isFinal ? { agentPhase: undefined, status: "" } : {}),
     });
     if (isAgentRunning(assistantMsg)) scrollStatusLogToBottom(msgId);
     return;
@@ -5807,6 +5828,7 @@ onBeforeUnmount(() => {
   if (streamScrollTimer) clearTimeout(streamScrollTimer);
   if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
   if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
+  if (gitRefreshDebounceTimer) clearTimeout(gitRefreshDebounceTimer);
   cancelAutoResume();
   persistChatNow();
   stopFileWatcherForProject();
