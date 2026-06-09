@@ -655,6 +655,11 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       } catch {
         // ignore
       }
+      try {
+        sendSseEvent(res, "done", { writtenFiles: [], pendingFiles: [], turns: 0 });
+      } catch {
+        // ignore
+      }
     } finally {
       stopKeepalive();
     }

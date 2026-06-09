@@ -67,6 +67,7 @@ export function useGitPanel(
   const gitRemoteLoading = ref(false);
   const gitRemoteAction = ref("");
   const gitStashes = ref<Array<{ index: string; message: string }>>([]);
+  const gitStashOpen = ref(true);
   const gitStashAction = ref("");
   const gitStashMessage = ref("");
   const gitAiPushStep = ref("");
@@ -605,6 +606,7 @@ export function useGitPanel(
     gitRemoteLoading,
     gitRemoteAction,
     gitStashes,
+    gitStashOpen,
     gitStashAction,
     gitStashMessage,
     gitAiPushStep,

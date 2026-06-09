@@ -842,7 +842,6 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         : undefined),
   );
   const isExecutePlan = !isAsk && runProfile.kind === "execute_plan";
-  const readOnlyBuildRun = !isAsk && !isExecutePlan && isConsultativeUserPrompt(prompt);
   const {
     projectRoot,
     prompt,
@@ -853,6 +852,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     onEvent,
     signal,
   } = params;
+  const readOnlyBuildRun = !isAsk && !isExecutePlan && isConsultativeUserPrompt(prompt);
   const imageDataUrls = sanitizeImageDataUrls(params.imageDataUrls);
 
   const segmentBudget = resolveAgentMaxTurns(mode, runProfile);

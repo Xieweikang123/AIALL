@@ -234,28 +234,36 @@
                 </div>
               </div>
               <div v-if="gitStashes.length" class="git-stash-list">
-                <div v-for="stash in gitStashes" :key="stash.index" class="git-stash-item">
-                  <span class="git-stash-label">{{ 'stash@{' + stash.index + '}' }}</span>
-                  <span class="git-stash-msg">{{ stash.message }}</span>
-                  <div class="git-stash-actions">
-                    <button
-                      type="button"
-                      class="ghost tiny"
-                      :disabled="!!gitStashAction"
-                      @click="doStashApply(stash.index)"
-                      title="应用贮藏（保留贮藏）"
-                    >
-                      {{ gitStashAction === 'apply-' + stash.index ? '…' : 'Apply' }}
-                    </button>
-                    <button
-                      type="button"
-                      class="ghost tiny danger"
-                      :disabled="!!gitStashAction"
-                      @click="doStashDrop(stash.index)"
-                      title="移除此贮藏（不应用）"
-                    >
-                      {{ gitStashAction === 'drop-' + stash.index ? '…' : 'Drop' }}
-                    </button>
+                <div class="git-stash-list-header">
+                  <button type="button" class="git-section-toggle" @click="gitStashOpen = !gitStashOpen">
+                    <span class="git-section-chevron">{{ gitStashOpen ? "▾" : "▸" }}</span>
+                    <span class="git-stash-list-title">贮藏列表</span>
+                  </button>
+                </div>
+                <div v-if="gitStashOpen" class="git-stash-list-content">
+                  <div v-for="stash in gitStashes" :key="stash.index" class="git-stash-item">
+                    <span class="git-stash-label">{{ 'stash@{' + stash.index + '}' }}</span>
+                    <span class="git-stash-msg">{{ stash.message }}</span>
+                    <div class="git-stash-actions">
+                      <button
+                        type="button"
+                        class="ghost tiny"
+                        :disabled="!!gitStashAction"
+                        @click="doStashApply(stash.index)"
+                        title="应用贮藏（保留贮藏）"
+                      >
+                        {{ gitStashAction === 'apply-' + stash.index ? '…' : 'Apply' }}
+                      </button>
+                      <button
+                        type="button"
+                        class="ghost tiny danger"
+                        :disabled="!!gitStashAction"
+                        @click="doStashDrop(stash.index)"
+                        title="移除此贮藏（不应用）"
+                      >
+                        {{ gitStashAction === 'drop-' + stash.index ? '…' : 'Drop' }}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -845,45 +853,49 @@
                           </summary>
                           <div class="cursor-actions-fold-body">
                             <template v-for="item in block.collapsed" :key="item.key">
-                              <details
-                                v-if="shouldShowToolExpand(item.step)"
-                                class="cursor-action-details"
-                              >
-                                <summary class="cursor-action" :class="cursorActionClass(item.step)">
-                                  {{ formatCursorActionLabel(item.step) }}
-                                </summary>
-                                <div class="cursor-action-expand">
-                                  <pre v-if="shouldShowToolResult(item.step)" class="trace-pre compact">{{ item.step.fullResult }}</pre>
-                                  <pre
-                                    v-if="formatToolArgsPreview(item.step.name, item.step.args || {})"
-                                    class="trace-pre compact"
-                                  >{{ formatToolArgsPreview(item.step.name, item.step.args || {}) }}</pre>
-                                </div>
-                              </details>
-                              <div v-else class="cursor-action" :class="cursorActionClass(item.step)">
-                                {{ formatCursorActionLabel(item.step) }}
+                              <div class="cursor-action-compact" :class="cursorActionClass(item.step)">
+                                <span class="cursor-action-icon" :class="getToolIconClass(item.step.name)">{{ getToolIcon(item.step.name) }}</span>
+                                <span class="cursor-action-label">{{ getToolLabel(item.step.name) }}</span>
+                                <span class="cursor-action-path">{{ getToolPath(item.step) }}</span>
+                                <span class="cursor-action-meta">{{ getToolMeta(item.step) }}</span>
+                                <span class="cursor-action-status" :class="cursorActionClass(item.step)"></span>
+                                <details
+                                  v-if="shouldShowToolExpand(item.step)"
+                                  class="cursor-action-details-compact"
+                                >
+                                  <summary class="cursor-action-expand-toggle"></summary>
+                                  <div class="cursor-action-expand-compact">
+                                    <pre v-if="shouldShowToolResult(item.step)" class="trace-pre compact">{{ item.step.fullResult }}</pre>
+                                    <pre
+                                      v-if="formatToolArgsPreview(item.step.name, item.step.args || {})"
+                                      class="trace-pre compact"
+                                    >{{ formatToolArgsPreview(item.step.name, item.step.args || {}) }}</pre>
+                                  </div>
+                                </details>
                               </div>
                             </template>
                           </div>
                         </details>
                         <template v-for="item in block.visible" :key="item.key">
-                          <details
-                            v-if="shouldShowToolExpand(item.step)"
-                            class="cursor-action-details"
-                          >
-                            <summary class="cursor-action" :class="cursorActionClass(item.step)">
-                              {{ formatCursorActionLabel(item.step) }}
-                            </summary>
-                            <div class="cursor-action-expand">
-                              <pre v-if="shouldShowToolResult(item.step)" class="trace-pre compact">{{ item.step.fullResult }}</pre>
-                              <pre
-                                v-if="formatToolArgsPreview(item.step.name, item.step.args || {})"
-                                class="trace-pre compact"
-                              >{{ formatToolArgsPreview(item.step.name, item.step.args || {}) }}</pre>
-                            </div>
-                          </details>
-                          <div v-else class="cursor-action" :class="cursorActionClass(item.step)">
-                            {{ formatCursorActionLabel(item.step) }}
+                          <div class="cursor-action-compact" :class="cursorActionClass(item.step)">
+                            <span class="cursor-action-icon" :class="getToolIconClass(item.step.name)">{{ getToolIcon(item.step.name) }}</span>
+                            <span class="cursor-action-label">{{ getToolLabel(item.step.name) }}</span>
+                            <span class="cursor-action-path">{{ getToolPath(item.step) }}</span>
+                            <span class="cursor-action-meta">{{ getToolMeta(item.step) }}</span>
+                            <span class="cursor-action-status" :class="cursorActionClass(item.step)"></span>
+                            <details
+                              v-if="shouldShowToolExpand(item.step)"
+                              class="cursor-action-details-compact"
+                            >
+                              <summary class="cursor-action-expand-toggle"></summary>
+                              <div class="cursor-action-expand-compact">
+                                <pre v-if="shouldShowToolResult(item.step)" class="trace-pre compact">{{ item.step.fullResult }}</pre>
+                                <pre
+                                  v-if="formatToolArgsPreview(item.step.name, item.step.args || {})"
+                                  class="trace-pre compact"
+                                >{{ formatToolArgsPreview(item.step.name, item.step.args || {}) }}</pre>
+                              </div>
+                            </details>
                           </div>
                         </template>
                       </div>
@@ -1149,7 +1161,7 @@
                 <span class="mention-item-path">{{ item.relative }}</span>
               </button>
             </div>
-            <div class="chat-input-box" :class="{ focused: chatInputFocused }">
+            <div class="chat-input-box" :class="{ focused: chatInputFocused }" @mousedown="onChatInputBoxMouseDown">
               <ChatComposerEditor
                 ref="composerRef"
                 class="chat-composer-editor"
@@ -1356,6 +1368,48 @@ import {
   shouldUseCompactAgentFeed as shouldUseCompactAgentFeedByCount,
   type CursorFeedBlock,
 } from "../services/agentCursorFeed";
+
+function getToolIcon(name: string): string {
+  if (name === 'read_file') return '📄';
+  if (name === 'write_file' || name === 'patch_file') return '🔧';
+  if (name === 'grep') return '🔍';
+  if (name === 'search_files') return '🔎';
+  if (name === 'list_dir') return '📁';
+  if (name === 'delete_file') return '🗑️';
+  return '⚡';
+}
+
+function getToolIconClass(name: string): string {
+  if (name === 'read_file') return 'read';
+  if (name === 'write_file' || name === 'patch_file') return 'write';
+  if (name === 'grep' || name === 'search_files') return 'search';
+  return 'default';
+}
+
+function getToolLabel(name: string): string {
+  if (name === 'read_file') return '读取';
+  if (name === 'write_file') return '写入';
+  if (name === 'patch_file') return '修改';
+  if (name === 'grep') return '搜索';
+  if (name === 'search_files') return '搜索文件';
+  if (name === 'list_dir') return '列出';
+  if (name === 'delete_file') return '删除';
+  return name;
+}
+
+function getToolPath(step: { args?: Record<string, unknown>; detail?: string }): string {
+  const path = String(step.args?.path ?? step.args?.pattern ?? step.args?.query ?? step.detail?.split(' · ')[0] ?? '').trim();
+  return path || '...';
+}
+
+function getToolMeta(step: { summary?: string; ok?: boolean; running?: boolean }): string {
+  if (step.running) return '进行中';
+  if (step.summary) {
+    const match = step.summary.match(/(\d+)/);
+    if (match) return match[1] + (step.summary.includes('行') ? ' 行' : step.summary.includes('个') ? ' 个' : '');
+  }
+  return step.ok === false ? '失败' : '';
+}
 import {
   filterDuplicateFeedThoughts,
   finalizeAssistantBubbleContent,
@@ -1664,6 +1718,9 @@ const composerRef = ref<InstanceType<typeof ChatComposerEditor> | null>(null);
 const composerEmpty = ref(true);
 const chatDropZoneRef = ref<HTMLElement | null>(null);
 const chatInputFocused = ref(false);
+function onChatInputBoxMouseDown() {
+  composerRef.value?.focus();
+}
 const mentionOpen = ref(false);
 const mentionQuery = ref("");
 const mentionActiveIndex = ref(0);
@@ -1679,7 +1736,7 @@ const {
   gitCommitMessage, gitCommitting, gitGenStep, gitLogEntries, gitLogOpen,
   gitStagedOpen, gitUnstagedOpen, expandedGitLogEntries, selectedGitFile,
   gitDiffLoadingKey, gitDiffContentCache, gitRemotes, gitTrackingBranch,
-  gitAhead, gitBehind, gitRemoteLoading, gitRemoteAction, gitStashes,
+  gitAhead, gitBehind, gitRemoteLoading, gitRemoteAction, gitStashes, gitStashOpen,
   gitStashAction, gitStashMessage, gitAiPushStep,
   gitStagedFiles, gitUnstagedFiles, gitChangeCount, canGitCommit,
   clearGitDiffCache, gitStatusIcon, gitStatusColor,
@@ -6011,54 +6068,56 @@ onBeforeUnmount(() => {
 .git-stash-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  padding: 10px 14px;
+  padding: 8px 14px;
   font-size: 14px;
 }
 
 .git-stash-title-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
+  flex-shrink: 0;
 }
 
 .git-stash-icon {
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1;
 }
 
 .git-stash-title {
   color: var(--text);
   font-weight: 600;
-  font-size: 13px;
+  font-size: 12px;
   letter-spacing: 0.3px;
 }
 
 .git-stash-count {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--text-dim);
   background: rgba(255, 255, 255, 0.06);
-  padding: 1px 6px;
+  padding: 1px 5px;
   border-radius: 8px;
   line-height: 1.4;
 }
 
 .git-stash-save-row {
   display: flex;
-  gap: 6px;
+  gap: 5px;
   align-items: center;
+  flex: 1;
+  min-width: 0;
 }
 
 .git-stash-msg-input {
   flex: 1;
   min-width: 0;
-  padding: 4px 8px;
-  font-size: 12px;
+  padding: 3px 7px;
+  font-size: 11px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 4px;
   color: var(--text);
   outline: none;
   transition: border-color 180ms ease;
@@ -6073,8 +6132,8 @@ onBeforeUnmount(() => {
 }
 
 .stash-save-btn {
-  font-size: 11px !important;
-  padding: 4px 10px !important;
+  font-size: 10px !important;
+  padding: 3px 8px !important;
   flex-shrink: 0;
 }
 
@@ -6083,12 +6142,30 @@ onBeforeUnmount(() => {
   flex-direction: column;
 }
 
+.git-stash-list-header {
+  display: flex;
+  align-items: center;
+  padding: 4px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.git-stash-list-title {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
+.git-stash-list-content {
+  display: flex;
+  flex-direction: column;
+}
+
 .git-stash-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 14px;
-  font-size: 13px;
+  padding: 5px 14px;
+  font-size: 12px;
   border-top: 1px solid var(--border);
   transition: background 0.15s ease;
 }
@@ -6100,19 +6177,19 @@ onBeforeUnmount(() => {
 .git-stash-label {
   color: #bb9af7;
   font-family: monospace;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 500;
   flex-shrink: 0;
-  padding: 2px 6px;
+  padding: 1px 5px;
   background: rgba(187, 154, 247, 0.08);
   border: 1px solid rgba(187, 154, 247, 0.12);
-  border-radius: 4px;
+  border-radius: 3px;
   line-height: 1.4;
 }
 
 .git-stash-msg {
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -6133,8 +6210,8 @@ onBeforeUnmount(() => {
 }
 
 .git-stash-empty {
-  padding: 6px 14px 10px;
-  font-size: 12px;
+  padding: 5px 14px 8px;
+  font-size: 11px;
   color: var(--text-dim);
   opacity: 0.35;
   font-style: italic;
@@ -8079,10 +8156,12 @@ button.compact {
   min-height: 48px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
-  padding: 9px 11px;
+  padding: 0;
   background: rgba(255, 255, 255, 0.055);
   transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
   cursor: text;
+  display: flex;
+  flex-direction: column;
 }
 
 .chat-input-box.focused {
@@ -8093,6 +8172,7 @@ button.compact {
 
 .chat-composer-editor {
   width: 100%;
+  flex: 1;
 }
 
 .chat-bottom {
@@ -8426,6 +8506,162 @@ button.compact {
   margin: 4px 0 2px 8px;
   padding-left: 8px;
   border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* 紧凑型工具调用样式 */
+.cursor-action-compact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  border-radius: 4px;
+  transition: background 0.15s;
+  min-width: 0;
+}
+
+.cursor-action-compact:hover {
+  background: rgba(88, 166, 255, 0.08);
+}
+
+.cursor-action-compact.running {
+  background: rgba(88, 166, 255, 0.05);
+  border: 1px solid rgba(88, 166, 255, 0.2);
+}
+
+.cursor-action-compact.done {
+  border: 1px solid transparent;
+}
+
+.cursor-action-compact.fail {
+  border: 1px solid rgba(248, 81, 73, 0.2);
+}
+
+.cursor-action-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.cursor-action-icon.read {
+  background: rgba(63, 185, 80, 0.15);
+}
+
+.cursor-action-icon.write {
+  background: rgba(137, 87, 229, 0.15);
+}
+
+.cursor-action-icon.search {
+  background: rgba(210, 153, 34, 0.15);
+}
+
+.cursor-action-icon.default {
+  background: rgba(139, 148, 158, 0.15);
+}
+
+.cursor-action-icon.running {
+  animation: tool-pulse 1s infinite;
+}
+
+.cursor-action-label {
+  color: rgba(139, 148, 158, 0.88);
+  flex-shrink: 0;
+}
+
+.cursor-action-path {
+  color: #58a6ff;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.cursor-action-meta {
+  color: rgba(72, 79, 88, 0.8);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.cursor-action-status {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.cursor-action-status.pending {
+  background: rgba(72, 79, 88, 0.6);
+}
+
+.cursor-action-status.running {
+  background: #58a6ff;
+  animation: tool-pulse 1s infinite;
+}
+
+.cursor-action-status.done {
+  background: #3fb950;
+}
+
+.cursor-action-status.fail {
+  background: #f85149;
+}
+
+.cursor-action-details-compact {
+  margin: 0;
+  position: relative;
+}
+
+.cursor-action-expand-toggle {
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  color: rgba(139, 148, 158, 0.6);
+  font-size: 10px;
+}
+
+.cursor-action-expand-toggle:hover {
+  background: rgba(139, 148, 158, 0.1);
+}
+
+.cursor-action-expand-toggle::before {
+  content: "▸";
+}
+
+.cursor-action-details-compact[open] > .cursor-action-expand-toggle::before {
+  content: "▾";
+}
+
+.cursor-action-expand-compact {
+  margin: 4px 0 0 26px;
+  padding: 6px 8px;
+  background: rgba(1, 4, 9, 0.5);
+  border-radius: 4px;
+  font-size: 11px;
+  max-height: 120px;
+  overflow: auto;
+}
+
+.cursor-action-expand-compact pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: rgba(139, 148, 158, 0.88);
+}
+
+@keyframes tool-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 
 .cursor-activity-toggle,

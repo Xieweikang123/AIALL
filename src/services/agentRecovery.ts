@@ -282,10 +282,10 @@ export function resolveAgentFailureBubbleContent(
 
 export function resolveAgentCompletedTurns(msg: AgentProgressSource): number {
   if (msg.totalTurns && msg.totalTurns > 0) return msg.totalTurns;
-  const fromTraces = msg.turnTraces?.length ?? 0;
-  if (fromTraces > 0) return fromTraces;
   const fromGroups = msg.roundGroups?.filter((g) => g.turn > 0).length ?? 0;
   if (fromGroups > 0) return fromGroups;
+  const fromTraces = msg.turnTraces?.length ?? 0;
+  if (fromTraces > 0) return fromTraces;
   if (msg.agentTurn && msg.agentTurn > 1) return msg.agentTurn - 1;
   if ((msg.tools?.length ?? 0) > 0) return 1;
   return 0;
