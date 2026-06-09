@@ -800,243 +800,17 @@
                   恢复运行
                 </button>
               </div>
-              <div
+              <AgentMessage
                 v-if="m.role === 'assistant' && hasAgentActivity(m)"
-                class="cursor-agent-wrap"
-                :class="{ running: isAgentRunning(m), collapsed: !isAgentRunning(m) && !isActivityExpanded(m) }"
-              >
-                <ChatMarkdown
-                  v-if="!isAgentRunning(m) && !isActivityExpanded(m) && timelineAnswerContent(m)"
-                  class="cursor-timeline-answer msg-answer msg-answer--final"
-                  :content="timelineAnswerContent(m)"
-                />
-                <button
-                  v-if="!isAgentRunning(m) && !isActivityExpanded(m) && hasAgentProcessSteps(m)"
-                  type="button"
-                  class="cursor-activity-toggle"
-                  @click="toggleActivityExpanded(m)"
-                >
-                  {{ cursorActivitySummary(m) }}
-                </button>
-                <div
-                  v-show="isAgentRunning(m) || isActivityExpanded(m)"
-                  class="cursor-agent-feed-wrap"
-                >
-                  <div
-                    v-if="shouldUseCompactAgentFeed(m)"
-                    class="cursor-agent-compact"
-                    aria-live="polite"
-                  >
-                    <p class="cursor-compact-summary">{{ cursorCompactExplorationSummary(m) }}</p>
-                    <AgentActivityLogStream
-                      :items="compactLogItems(m)"
-                      :live-status="cursorCompactLiveStatus(m)"
-                      :hidden-count="cursorCompactHiddenCount(m)"
-                    />
-                    <button
-                      type="button"
-                      class="cursor-activity-toggle cursor-compact-expand"
-                      @click="toggleActivityDetailed(m)"
-                    >
-                      查看全部步骤（{{ m.tools?.length ?? 0 }}）
-                    </button>
-                    <ChatMarkdown
-                      v-if="cursorAgentFeedAnswer(m)"
-                      class="cursor-timeline-answer msg-answer"
-                      :class="{
-                        'msg-answer--streaming': cursorAgentFeedAnswer(m)!.streaming,
-                        'msg-answer--final': !cursorAgentFeedAnswer(m)!.streaming,
-                      }"
-                      :content="cursorAgentFeedAnswer(m)!.text"
-                      :streaming="cursorAgentFeedAnswer(m)!.streaming"
-                    />
-                  </div>
-                  <div v-else class="cursor-agent-feed-shell" :class="{ collapsed: shouldCollapseFeed(m) }" aria-live="polite">
-                    <div class="cursor-agent-feed-head">
-                      <span class="cursor-agent-feed-title">链路</span>
-                      <span v-if="m.tools?.length" class="cursor-agent-feed-meta">{{ m.tools.length }} 步</span>
-                    </div>
-                    <div class="cursor-agent-feed-viewport-wrap">
-                      <div
-                        :ref="(el) => bindStatusLogScroll(el as HTMLElement | null, m.id)"
-                        class="cursor-agent-feed-viewport"
-                        @scroll="onChainViewportScroll(m.id)"
-                      >
-                        <div class="cursor-agent-feed">
-                    <button
-                      v-if="isAgentRunning(m) && isActivityDetailed(m) && (m.tools?.length ?? 0) > 0"
-                      type="button"
-                      class="cursor-activity-collapse cursor-activity-collapse--inline"
-                      @click="collapseActivityDetailed(m)"
-                    >
-                      收起步骤
-                    </button>
-                    <template v-for="block in cursorAgentFeedBlocks(m)" :key="block.key">
-                      <div v-if="block.kind === 'thought'" class="cursor-thought">
-                        <ChatMarkdown
-                          :content="block.text"
-                          :streaming="isAgentRunning(m)"
-                        />
-                      </div>
-                      <div v-else-if="block.kind === 'actions'" class="cursor-actions-block">
-                        <details v-if="block.collapsed.length" class="cursor-actions-fold" open>
-                          <summary class="cursor-actions-fold-summary">
-                            {{ formatCollapsedStepsSummary(block.collapsed.map((item) => item.step)) }}
-                          </summary>
-                          <div class="cursor-actions-fold-body">
-                            <template v-for="item in block.collapsed" :key="item.key">
-                              <div class="cursor-action-compact" :class="cursorActionClass(item.step)">
-                                <span class="cursor-action-icon" :class="getToolIconClass(item.step.name)">{{ getToolIcon(item.step.name) }}</span>
-                                <span class="cursor-action-label">{{ getToolLabel(item.step.name) }}</span>
-                                <span class="cursor-action-path">{{ getToolPath(item.step) }}</span>
-                                <span class="cursor-action-meta">{{ getToolMeta(item.step) }}</span>
-                                <span class="cursor-action-status" :class="cursorActionClass(item.step)"></span>
-                                <details
-                                  v-if="shouldShowToolExpand(item.step)"
-                                  class="cursor-action-details-compact"
-                                >
-                                  <summary class="cursor-action-expand-toggle"></summary>
-                                  <div class="cursor-action-expand-compact">
-                                    <pre v-if="shouldShowToolResult(item.step)" class="trace-pre compact">{{ item.step.fullResult }}</pre>
-                                    <pre
-                                      v-if="formatToolArgsPreview(item.step.name, item.step.args || {})"
-                                      class="trace-pre compact"
-                                    >{{ formatToolArgsPreview(item.step.name, item.step.args || {}) }}</pre>
-                                  </div>
-                                </details>
-                              </div>
-                            </template>
-                          </div>
-                        </details>
-                        <template v-for="item in block.visible" :key="item.key">
-                          <div class="cursor-action-compact" :class="cursorActionClass(item.step)">
-                            <span class="cursor-action-icon" :class="getToolIconClass(item.step.name)">{{ getToolIcon(item.step.name) }}</span>
-                            <span class="cursor-action-label">{{ getToolLabel(item.step.name) }}</span>
-                            <span class="cursor-action-path">{{ getToolPath(item.step) }}</span>
-                            <span class="cursor-action-meta">{{ getToolMeta(item.step) }}</span>
-                            <span class="cursor-action-status" :class="cursorActionClass(item.step)"></span>
-                            <details
-                              v-if="shouldShowToolExpand(item.step)"
-                              class="cursor-action-details-compact"
-                            >
-                              <summary class="cursor-action-expand-toggle"></summary>
-                              <div class="cursor-action-expand-compact">
-                                <pre v-if="shouldShowToolResult(item.step)" class="trace-pre compact">{{ item.step.fullResult }}</pre>
-                                <pre
-                                  v-if="formatToolArgsPreview(item.step.name, item.step.args || {})"
-                                  class="trace-pre compact"
-                                >{{ formatToolArgsPreview(item.step.name, item.step.args || {}) }}</pre>
-                              </div>
-                            </details>
-                          </div>
-                        </template>
-                      </div>
-                      <p v-else-if="block.kind === 'status'" class="cursor-action planning">{{ block.text }}</p>
-                    </template>
-                      </div>
-                    </div>
-                      <button
-                        v-if="chainJumpVisible[m.id]"
-                        type="button"
-                        class="cursor-chain-jump"
-                        title="回到最新"
-                        aria-label="回到最新"
-                        @click="jumpChainToLatest(m.id)"
-                      >
-                        ↓
-                      </button>
-                    </div>
-                    <ChatMarkdown
-                      v-if="cursorAgentFeedAnswer(m)"
-                      class="cursor-timeline-answer msg-answer cursor-timeline-answer--inline"
-                      :class="{
-                        'msg-answer--streaming': cursorAgentFeedAnswer(m)!.streaming,
-                        'msg-answer--final': !cursorAgentFeedAnswer(m)!.streaming,
-                      }"
-                      :content="cursorAgentFeedAnswer(m)!.text"
-                      :streaming="cursorAgentFeedAnswer(m)!.streaming"
-                    />
-                  </div>
-                  <details
-                    v-if="hasAgentDebugDetails(m) && !shouldUseCompactAgentFeed(m)"
-                    class="cursor-debug-panel"
-                  >
-                    <summary>调试详情</summary>
-                    <div class="cursor-debug-body">
-                      <section
-                        v-for="group in agentRoundGroupViews(m).filter((g) => g.turn > 0)"
-                        :key="`debug-${group.turn}`"
-                        class="cursor-debug-round"
-                      >
-                        <div class="cursor-debug-round-title">第 {{ group.turn }} 轮</div>
-                        <details v-if="group.modelSteps.length" class="cursor-debug-nested">
-                          <summary>模型链路 · {{ group.modelSteps.length }} 步</summary>
-                          <ul class="agent-round-model-steps">
-                            <li
-                              v-for="step in group.modelSteps"
-                              :key="step.id"
-                              class="agent-round-model-step status-log-entry"
-                            >
-                              <span class="status-log-text">{{ cleanStatusLogText(step.text) }}</span>
-                            </li>
-                          </ul>
-                        </details>
-                        <details v-if="group.request" class="cursor-debug-nested">
-                          <summary>
-                            请求详情 · {{ group.request.contextMessages }} 条 · {{ formatContextChars(group.request.contextChars) }}
-                          </summary>
-                          <div class="agent-round-message-list">
-                            <div
-                              v-for="(message, mi) in group.request.messages"
-                              :key="`${group.turn}-req-${mi}`"
-                              class="agent-round-message"
-                            >
-                              <details
-                                v-if="shouldCollapseRequestMessage(message.role, message.content || '')"
-                                class="agent-round-message-collapsible"
-                              >
-                                <summary class="agent-round-message-summary">
-                                  <span class="agent-round-message-role">{{ turnMessageRoleLabel(message.role) }}</span>
-                                  <span class="agent-round-message-meta">{{ messagePreviewLength(message.content || "") }}</span>
-                                </summary>
-                                <pre v-if="message.content" class="trace-pre compact">{{ message.content }}</pre>
-                                <pre v-if="message.toolCalls" class="trace-pre compact tool-call-preview">{{ message.toolCalls }}</pre>
-                              </details>
-                              <template v-else>
-                                <div class="agent-round-message-head">
-                                  <span class="agent-round-message-role">{{ turnMessageRoleLabel(message.role) }}</span>
-                                </div>
-                                <pre v-if="message.content" class="trace-pre compact">{{ message.content }}</pre>
-                              </template>
-                            </div>
-                          </div>
-                        </details>
-                        <details v-if="group.response" class="cursor-debug-nested">
-                          <summary>回复详情</summary>
-                          <pre v-if="group.response.assistantText" class="trace-pre compact">{{ group.response.assistantText }}</pre>
-                          <pre
-                            v-for="call in group.response.toolCalls"
-                            :key="call.id"
-                            class="trace-pre compact tool-call-preview"
-                          >{{ call.name }}({{ call.arguments }})</pre>
-                        </details>
-                      </section>
-                      <details v-if="m.agentContext" class="cursor-debug-nested">
-                        <summary>初始上下文</summary>
-                        <pre class="trace-pre compact">{{ m.agentContext.systemPrompt }}</pre>
-                      </details>
-                    </div>
-                  </details>
-                  <button
-                    v-if="!isAgentRunning(m)"
-                    type="button"
-                    class="cursor-activity-collapse"
-                    @click="collapseAgentActivity(m)"
-                  >
-                    收起过程
-                  </button>
-                </div>
-              </div>
+                :msg="m"
+                :is-agent-running="isAgentRunning"
+                :agent-ui-tick="agentUiTick"
+                :patch-assistant-msg="patchAssistantMsg"
+                :schedule-persist-chat="schedulePersistChat"
+                :message-display-content="messageDisplayContent"
+                :show-jump="chainJumpVisible[m.id]"
+                @jump-latest="jumpChainToLatest(m.id)"
+              />
               <div
                 v-if="m.role === 'user' && userMessageImages(m).length"
                 class="msg-user-images"
@@ -1308,6 +1082,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import AgentActivityLogStream, {
   type AgentLogLineItem,
 } from "../components/AgentActivityLogStream.vue";
+import AgentMessage from "../components/AgentMessage.vue";
 import ChatComposerEditor from "../components/ChatComposerEditor.vue";
 import ChatMarkdown from "../components/ChatMarkdown.vue";
 import CodeMonacoDiffEditor from "../components/CodeMonacoDiffEditor.vue";
@@ -1601,15 +1376,24 @@ type AgentStatusData = Extract<VibeAgentSseEvent, { type: "status" }>["data"] & 
   retryError?: string;
 };
 
+function hasAgentProcessSteps(msg: ChatMessage): boolean {
+  return Boolean(
+    msg.tools?.length ||
+      msg.roundGroups?.some(
+        (group) => group.turn > 0 && ((group.toolIds?.length ?? 0) > 0 || group.modelSteps.length > 0),
+      ),
+  );
+}
+
 function normalizeChatMessages(messages: PersistedChatMessage[]): ChatMessage[] {
   return messages.map((m) => {
     const normalized: ChatMessage = {
       ...m,
       activityExpanded:
         m.activityExpanded ??
-        false,
+        (m.role === "assistant" && hasAgentProcessSteps(m)),
       activityDetailed:
-        m.activityDetailed ?? false,
+        m.activityDetailed ?? (m.role === "assistant" && hasAgentProcessSteps(m)),
       tools: m.tools?.map((t) => ({
         id: t.id,
         name: t.name || "",
@@ -2913,15 +2697,6 @@ function cursorAgentTimeline(msg: ChatMessage): CursorAgentTimeline {
 function timelineAnswerContent(msg: ChatMessage): string {
   if (msg.role !== "assistant" || !hasAgentActivity(msg)) return "";
   return messageDisplayContent(msg);
-}
-
-function hasAgentProcessSteps(msg: ChatMessage): boolean {
-  return Boolean(
-    msg.tools?.length ||
-      msg.roundGroups?.some(
-        (group) => group.turn > 0 && ((group.toolIds?.length ?? 0) > 0 || group.modelSteps.length > 0),
-      ),
-  );
 }
 
 function cursorAgentFeedAnswer(msg: ChatMessage) {
@@ -5627,10 +5402,12 @@ async function sendChat() {
   const imageDataUrls = payload.imageDataUrls.filter(Boolean);
   let fullPrompt = userText || (imageDataUrls.length ? "请结合附带的图片回答。" : "请结合引用的文件回答。");
 
+  let bubbleText = userText;
   if (quotedMessage.value) {
     const prefix = quotedMessage.value.role === "assistant" ? "Agent" : "你";
     const quotedContent = `> ${prefix}: ${quotedMessage.value.content.replace(/\n/g, "\n> ")}`;
     fullPrompt = `${quotedContent}\n\n${fullPrompt}`;
+    bubbleText = `${quotedContent}\n\n${userText}`;
     quotedMessage.value = null;
   }
 
@@ -5662,7 +5439,7 @@ async function sendChat() {
     chatMessages.value.push({
       id: genId(),
       role: "user",
-      content: userText || (imageDataUrls.length ? "（附图）" : ""),
+      content: bubbleText || (imageDataUrls.length ? "（附图）" : ""),
       imageDataUrls: imageDataUrls.length ? [...imageDataUrls] : undefined,
     });
     pendingPromptQueue.value.push(fullPrompt);
@@ -5675,7 +5452,7 @@ async function sendChat() {
   await runAgentTurn(fullPrompt, {
     referencedFiles: payload.refs.map((r) => r.relative || r.path).filter(Boolean),
     imageDataUrls: imageDataUrls,
-    userBubbleContent: userText,
+    userBubbleContent: bubbleText,
   });
 }
 
@@ -7375,9 +7152,9 @@ button.ghost.danger:hover:not(:disabled) {
 .cursor-timeline-answer--inline.msg-answer--streaming {
   margin-top: 0;
   border: none;
-  border-top: 1px solid rgba(48, 54, 61, 0.55);
   border-radius: 0;
-  background: rgba(255, 255, 255, 0.02);
+  background: transparent;
+  padding: 0;
 }
 
 .cursor-agent-feed-shell:has(.cursor-timeline-answer--inline) .cursor-agent-feed-viewport {
@@ -8575,13 +8352,102 @@ button.compact {
 
 .cursor-agent-wrap {
   margin: 0 0 4px;
+  padding: 2px 0;
+}
+
+.cursor-agent-folded {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: rgba(139, 148, 158, 0.85);
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.cursor-agent-folded:hover {
+  color: rgba(230, 237, 243, 0.92);
+  background: rgba(88, 166, 255, 0.08);
+  border-color: rgba(88, 166, 255, 0.2);
+}
+
+.cursor-agent-folded-icon {
+  font-size: 8px;
+  flex-shrink: 0;
+  color: rgba(88, 166, 255, 0.6);
+  transition: transform 0.2s ease;
+}
+
+.cursor-agent-folded:hover .cursor-agent-folded-icon {
+  color: rgba(88, 166, 255, 0.9);
+  transform: scale(1.15);
+}
+
+.cursor-agent-folded-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+
+.cursor-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0;
+}
+
+.cursor-timeline-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cursor-timeline-controls {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 2px;
+  padding: 0 0 4px;
+}
+
+.cursor-timeline-controls button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.02);
+  color: rgba(139, 148, 158, 0.75);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cursor-timeline-controls button:hover {
+  color: rgba(230, 237, 243, 0.9);
+  background: rgba(88, 166, 255, 0.08);
+  border-color: rgba(88, 166, 255, 0.2);
+}
+
+.cursor-timeline-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .cursor-agent-wrap.collapsed {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   margin-bottom: 0;
+  padding: 0;
 }
 
 .cursor-agent-wrap.collapsed .cursor-activity-toggle {
@@ -8659,7 +8525,7 @@ button.compact {
   gap: 8px;
   flex-shrink: 0;
   padding: 6px 10px 4px;
-  border-bottom: 1px solid rgba(48, 54, 61, 0.55);
+  border-bottom: none;
   background: rgba(1, 4, 9, 0.88);
 }
 
@@ -8751,13 +8617,16 @@ button.compact {
 .cursor-activity-collapse--inline {
   align-self: flex-start;
   margin-bottom: 2px;
+  font-size: 10.5px;
+  padding: 1px 6px;
 }
 
 .cursor-thought {
-  margin: 0 0 2px;
-  font-size: 13px;
-  line-height: 1.55;
-  color: rgba(230, 237, 243, 0.88);
+  margin: 0;
+  padding: 2px 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: rgba(230, 237, 243, 0.82);
   word-break: break-word;
 }
 
@@ -8768,7 +8637,7 @@ button.compact {
 }
 
 .cursor-thought :deep(.msg-markdown p) {
-  margin: 0 0 0.5em;
+  margin: 0 0 0.4em;
 }
 
 .cursor-thought :deep(.msg-markdown p:last-child) {
@@ -8779,38 +8648,62 @@ button.compact {
 .cursor-thought :deep(.msg-markdown h2),
 .cursor-thought :deep(.msg-markdown h3),
 .cursor-thought :deep(.msg-markdown h4) {
-  margin: 0.6em 0 0.35em;
+  margin: 0.5em 0 0.3em;
   font-size: inherit;
   font-weight: 600;
+  color: rgba(230, 237, 243, 0.92);
 }
 
 .cursor-thought :deep(.msg-markdown h3) {
   font-size: 1.02em;
 }
 
+.cursor-thought :deep(.msg-markdown code) {
+  font-size: 0.92em;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(139, 148, 158, 0.1);
+  color: rgba(230, 237, 243, 0.88);
+}
+
+.cursor-thought :deep(.msg-markdown pre) {
+  margin: 0.4em 0;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: rgba(1, 4, 9, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  overflow-x: auto;
+}
+
 .cursor-actions-block {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding-left: 10px;
-  border-left: 2px solid rgba(88, 166, 255, 0.14);
+  gap: 1px;
+  padding-left: 12px;
+  border-left: 2px solid rgba(88, 166, 255, 0.12);
   min-width: 0;
+  margin: 2px 0;
 }
 
 .cursor-actions-fold {
-  margin: 0 0 2px;
+  margin: 0 0 1px;
 }
 
 .cursor-actions-fold-summary {
   list-style: none;
-  font-size: 11px;
+  font-size: 10.5px;
   line-height: 1.4;
-  color: rgba(139, 148, 158, 0.9);
+  color: rgba(139, 148, 158, 0.75);
   cursor: pointer;
   user-select: none;
   min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
+  transition: color 0.15s ease;
+}
+
+.cursor-actions-fold-summary:hover {
+  color: rgba(139, 148, 158, 0.95);
 }
 
 .cursor-actions-fold-summary::-webkit-details-marker {
@@ -8819,8 +8712,8 @@ button.compact {
 
 .cursor-actions-fold-summary::before {
   content: "▸ ";
-  font-size: 10px;
-  color: rgba(139, 148, 158, 0.7);
+  font-size: 9px;
+  color: rgba(139, 148, 158, 0.5);
 }
 
 .cursor-actions-fold[open] > .cursor-actions-fold-summary::before {
@@ -8830,10 +8723,10 @@ button.compact {
 .cursor-actions-fold-body {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin-top: 4px;
+  gap: 1px;
+  margin-top: 3px;
   padding-left: 4px;
-  max-height: 140px;
+  max-height: 120px;
   overflow: auto;
 }
 
@@ -8868,19 +8761,20 @@ button.compact {
   color: rgba(88, 166, 255, 0.85);
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  background: rgba(88, 166, 255, 0.06);
+  gap: 6px;
+  padding: 4px 8px;
+  background: rgba(88, 166, 255, 0.04);
   border-radius: 4px;
-  margin: 4px 0;
+  margin: 2px 0;
+  font-size: 11.5px;
 }
 
 .cursor-action.planning::before {
   content: "";
-  width: 12px;
-  height: 12px;
-  border: 2px solid rgba(88, 166, 255, 0.3);
-  border-top-color: #58a6ff;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid rgba(88, 166, 255, 0.25);
+  border-top-color: rgba(88, 166, 255, 0.8);
   border-radius: 50%;
   animation: planning-spin 0.8s linear infinite;
   flex-shrink: 0;
@@ -8913,105 +8807,115 @@ button.compact {
 .cursor-action-compact {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 8px;
+  gap: 6px;
+  padding: 3px 6px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: 11.5px;
   border-radius: 4px;
-  transition: background 0.15s;
+  transition: all 0.15s ease;
   min-width: 0;
-}
-
-.cursor-action-compact:hover {
-  background: rgba(88, 166, 255, 0.08);
-}
-
-.cursor-action-compact.running {
-  background: rgba(88, 166, 255, 0.05);
-  border: 1px solid rgba(88, 166, 255, 0.2);
-}
-
-.cursor-action-compact.done {
   border: 1px solid transparent;
 }
 
+.cursor-action-compact:hover {
+  background: rgba(88, 166, 255, 0.06);
+  border-color: rgba(88, 166, 255, 0.1);
+}
+
+.cursor-action-compact.running {
+  background: rgba(88, 166, 255, 0.04);
+  border-color: rgba(88, 166, 255, 0.15);
+}
+
+.cursor-action-compact.done {
+  border-color: transparent;
+}
+
 .cursor-action-compact.fail {
-  border: 1px solid rgba(248, 81, 73, 0.2);
+  border-color: rgba(248, 81, 73, 0.15);
+  background: rgba(248, 81, 73, 0.04);
 }
 
 .cursor-action-icon {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: 3px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: 9px;
   flex-shrink: 0;
+  line-height: 1;
 }
 
 .cursor-action-icon.read {
-  background: rgba(63, 185, 80, 0.15);
+  background: rgba(63, 185, 80, 0.12);
 }
 
 .cursor-action-icon.write {
-  background: rgba(137, 87, 229, 0.15);
+  background: rgba(137, 87, 229, 0.12);
 }
 
 .cursor-action-icon.search {
-  background: rgba(210, 153, 34, 0.15);
+  background: rgba(210, 153, 34, 0.12);
 }
 
 .cursor-action-icon.default {
-  background: rgba(139, 148, 158, 0.15);
+  background: rgba(139, 148, 158, 0.1);
 }
 
 .cursor-action-icon.running {
-  animation: tool-pulse 1s infinite;
+  animation: tool-pulse 1.2s ease-in-out infinite;
 }
 
 .cursor-action-label {
-  color: rgba(139, 148, 158, 0.88);
+  color: rgba(139, 148, 158, 0.82);
   flex-shrink: 0;
+  font-size: 11px;
 }
 
 .cursor-action-path {
-  color: #58a6ff;
+  color: rgba(88, 166, 255, 0.85);
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  font-size: 11px;
 }
 
 .cursor-action-meta {
-  color: rgba(72, 79, 88, 0.8);
+  color: rgba(139, 148, 158, 0.55);
   margin-left: auto;
   flex-shrink: 0;
+  font-size: 10px;
 }
 
 .cursor-action-status {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   flex-shrink: 0;
 }
 
 .cursor-action-status.pending {
-  background: rgba(72, 79, 88, 0.6);
+  background: rgba(72, 79, 88, 0.5);
 }
 
 .cursor-action-status.running {
   background: #58a6ff;
-  animation: tool-pulse 1s infinite;
+  animation: tool-pulse 1.2s ease-in-out infinite;
+  box-shadow: 0 0 4px rgba(88, 166, 255, 0.4);
 }
 
 .cursor-action-status.done {
   background: #3fb950;
+  box-shadow: 0 0 3px rgba(63, 185, 80, 0.3);
 }
 
 .cursor-action-status.fail {
   background: #f85149;
+  box-shadow: 0 0 3px rgba(248, 81, 73, 0.3);
 }
 
 .cursor-action-details-compact {
@@ -9021,18 +8925,20 @@ button.compact {
 
 .cursor-action-expand-toggle {
   cursor: pointer;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 3px;
-  color: rgba(139, 148, 158, 0.6);
-  font-size: 10px;
+  color: rgba(139, 148, 158, 0.5);
+  font-size: 9px;
+  transition: all 0.15s ease;
 }
 
 .cursor-action-expand-toggle:hover {
   background: rgba(139, 148, 158, 0.1);
+  color: rgba(139, 148, 158, 0.8);
 }
 
 .cursor-action-expand-toggle::before {
@@ -9044,12 +8950,13 @@ button.compact {
 }
 
 .cursor-action-expand-compact {
-  margin: 4px 0 0 26px;
-  padding: 6px 8px;
-  background: rgba(1, 4, 9, 0.5);
+  margin: 2px 0 0 22px;
+  padding: 4px 6px;
+  background: rgba(1, 4, 9, 0.4);
   border-radius: 4px;
-  font-size: 11px;
-  max-height: 120px;
+  border-left: 2px solid rgba(88, 166, 255, 0.1);
+  font-size: 10.5px;
+  max-height: 100px;
   overflow: auto;
 }
 
@@ -9057,7 +8964,8 @@ button.compact {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-all;
-  color: rgba(139, 148, 158, 0.88);
+  color: rgba(139, 148, 158, 0.82);
+  line-height: 1.45;
 }
 
 @keyframes tool-pulse {
@@ -9089,15 +8997,21 @@ button.compact {
 }
 
 .cursor-debug-panel {
-  margin-top: 4px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  margin-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
   padding-top: 6px;
 }
 
 .cursor-debug-panel > summary {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.38);
+  color: rgba(139, 148, 158, 0.6);
   cursor: pointer;
+  user-select: none;
+  transition: color 0.15s ease;
+}
+
+.cursor-debug-panel > summary:hover {
+  color: rgba(139, 148, 158, 0.85);
 }
 
 .cursor-debug-body {
@@ -9105,14 +9019,18 @@ button.compact {
   flex-direction: column;
   gap: 8px;
   margin-top: 8px;
+  padding: 6px 8px;
+  background: rgba(1, 4, 9, 0.3);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
 }
 
 .cursor-debug-round-title {
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.35);
+  color: rgba(88, 166, 255, 0.55);
   margin-bottom: 4px;
 }
 
@@ -9122,9 +9040,14 @@ button.compact {
 
 .cursor-debug-nested > summary {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.48);
+  color: rgba(139, 148, 158, 0.7);
   cursor: pointer;
   margin-bottom: 4px;
+  transition: color 0.15s ease;
+}
+
+.cursor-debug-nested > summary:hover {
+  color: rgba(230, 237, 243, 0.85);
 }
 
 .agent-activity.collapsed {

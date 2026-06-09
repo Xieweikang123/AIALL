@@ -94,6 +94,9 @@ export type PersistedChatMessage = {
   reverted?: boolean;
   activityExpanded?: boolean;
   activityDetailed?: boolean;
+  /** Quote metadata for user messages that were sent with a quoted reply. */
+  quotedRole?: "user" | "assistant";
+  quotedText?: string;
 };
 
 export type VibeChatSessionMeta = {
