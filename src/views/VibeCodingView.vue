@@ -1748,7 +1748,7 @@ const {
   gitAhead, gitBehind, gitRemoteLoading, gitRemoteAction, gitStashes, gitStashOpen,
   gitStashAction, gitStashMessage, gitAiPushStep,
   gitStagedFiles, gitUnstagedFiles, gitChangeCount, canGitCommit,
-  clearGitDiffCache, gitStatusIcon, gitStatusColor,
+  clearGitDiffCache, evictOldestCacheEntry, gitStagingInProgress, gitLastStagingAt, gitStatusIcon, gitStatusColor,
   isGitLogEntryOpen, toggleGitLogEntry, gitHistoryDiffKey, gitWorkingTreeDiffKey,
   refreshGitStatus, commitGit, stageFile, unstageFile,
   stageAll, unstageAll, discardFile, discardAll,
@@ -1845,8 +1845,19 @@ async function startFileWatcherForProject(projectPath: string) {
       fileWatcherActive.value = true;
       fileWatcherCleanup.value = connectFileWatcherStream(
         (changes) => {
+          const guard1 = gitStagingInProgress.value;
+          const guard2 = Date.now() - gitLastStagingAt.value < 500;
+          if (guard1 || guard2) {
+            return;
+          }
           const relevantChanges = changes.filter(
-            (change) => !change.path.includes(".git") && !change.path.includes("node_modules")
+            (change) =>
+              !change.path.includes(".git") &&
+              !change.path.includes("node_modules") &&
+              !change.path.includes(".aiall\\logs") &&
+              !change.path.includes(".aiall/logs") &&
+              !change.path.includes(".aiall\\vibe-chat-sessions") &&
+              !change.path.includes(".aiall/vibe-chat-sessions")
           );
           if (relevantChanges.length > 0) {
             refreshGitStatus({ showLoading: false });
@@ -3495,6 +3506,7 @@ async function openGitLogFile(entry: GitLogEntry, file: GitLogFile) {
       }
       diff = { before: result.before, after: result.after, deleted: file.status === "D" };
       gitDiffContentCache.value = { ...gitDiffContentCache.value, [cacheKey]: diff };
+      evictOldestCacheEntry();
     }
 
     const displayPath = file.oldPath ? `${file.oldPath} → ${file.path}` : file.path;
@@ -3510,8 +3522,11 @@ async function openGitLogFile(entry: GitLogEntry, file: GitLogFile) {
   }
 }
 
+let diffAbortController: AbortController | null = null;
+
 async function showGitFileDiff(filePath: string, staged = false) {
   if (!projectOpened.value) return;
+  if (diffAbortController) diffAbortController.abort();
   const cacheKey = gitWorkingTreeDiffKey(filePath, staged);
   selectedGitFile.value = cacheKey;
   gitError.value = "";
@@ -3521,18 +3536,25 @@ async function showGitFileDiff(filePath: string, staged = false) {
     let diff = cached;
     if (!diff) {
       gitDiffLoadingKey.value = cacheKey;
-      const result = await fetchGitDiffContent(projectPath.value.trim(), filePath, staged);
+      const controller = new AbortController();
+      diffAbortController = controller;
+      const result = await fetchGitDiffContent(projectPath.value.trim(), filePath, staged, controller.signal);
+      if (controller.signal.aborted) return;
       if (!result.ok) {
-        gitError.value = result.error || "获取 diff 失败";
+        if (result.error !== "已取消") gitError.value = result.error || "获取 diff 失败";
         return;
       }
       diff = { before: result.before, after: result.after };
       gitDiffContentCache.value = { ...gitDiffContentCache.value, [cacheKey]: diff };
+      evictOldestCacheEntry();
     }
     await openDiffPreview(previewPath, diff, { readOnly: staged });
   } catch (e) {
-    gitError.value = e instanceof Error ? e.message : "获取 diff 失败";
+    if (!(e instanceof DOMException && e.name === "AbortError")) {
+      gitError.value = e instanceof Error ? e.message : "获取 diff 失败";
+    }
   } finally {
+    diffAbortController = null;
     if (gitDiffLoadingKey.value === cacheKey) gitDiffLoadingKey.value = "";
   }
 }

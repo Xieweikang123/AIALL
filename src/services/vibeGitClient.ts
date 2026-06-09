@@ -128,14 +128,22 @@ export async function fetchGitDiff(projectPath: string, filePath?: string, stage
   }
 }
 
-export async function fetchGitDiffContent(projectPath: string, filePath: string, staged = false): Promise<GitDiffContentResult> {
+export async function fetchGitDiffContent(
+  projectPath: string,
+  filePath: string,
+  staged = false,
+  signal?: AbortSignal,
+): Promise<GitDiffContentResult> {
   try {
     const stagedParam = staged ? "&staged=1" : "";
     const url = backendUrl(`/backend/vibe/git/diff-content?path=${encodeURIComponent(projectPath)}&file=${encodeURIComponent(filePath)}${stagedParam}`);
-    const response = await fetch(url);
+    const response = await fetch(url, { signal });
     const data = (await response.json()) as GitDiffContentResult;
     return data;
   } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return { ok: false, before: "", after: "", error: "已取消" };
+    }
     return { ok: false, before: "", after: "", error: error instanceof Error ? error.message : "网络错误" };
   }
 }

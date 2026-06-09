@@ -247,30 +247,71 @@ export interface GitDiffContentResult {
 
 export async function gitDiffContent(projectRoot: string, filePath: string, staged = false): Promise<GitDiffContentResult> {
   try {
-    let before = (await readGitObjectForPreview(projectRoot, staged ? `HEAD:${filePath}` : `:${filePath}`, filePath)) ?? "";
-    if (!before && !staged) {
-      before = (await readGitObjectForPreview(projectRoot, `HEAD:${filePath}`, filePath)) ?? "";
+    const diffArgs = staged
+      ? ["diff", "--cached", "--no-color", "-U100000", "--", filePath]
+      : ["diff", "HEAD", "--no-color", "-U100000", "--", filePath];
+
+    let before = "";
+    let after = "";
+
+    try {
+      const { stdout: diffOutput } = await gitExec(projectRoot, diffArgs);
+      const parsed = parseUnifiedDiff(diffOutput);
+      before = parsed.before;
+      after = parsed.after;
+    } catch {
+      const beforePromise = readGitObjectForPreview(projectRoot, staged ? `HEAD:${filePath}` : `:${filePath}`, filePath)
+        .then((v) => v ?? (staged ? null : readGitObjectForPreview(projectRoot, `HEAD:${filePath}`, filePath)));
+
+      let afterPromise: Promise<string>;
+      if (staged) {
+        afterPromise = readGitObjectForPreview(projectRoot, `:${filePath}`, filePath).then((v) => v ?? "");
+      } else {
+        afterPromise = readWorktreeFile(projectRoot, filePath);
+      }
+
+      const [b, a] = await Promise.all([beforePromise, afterPromise]);
+      before = b ?? "";
+      after = a ?? "";
     }
 
-    let after = "";
-    if (staged) {
-      after = (await readGitObjectForPreview(projectRoot, `:${filePath}`, filePath)) ?? "";
-    } else {
-      const fs = await import("node:fs");
-      const fullPath = await import("node:path").then((p) => p.resolve(projectRoot, filePath));
-      if (fs.existsSync(fullPath)) {
-        const stat = fs.statSync(fullPath);
-        if (stat.size > MAX_DIFF_PREVIEW_CHARS) throw new Error(`${filePath} 过大，无法预览`);
-        const buffer = fs.readFileSync(fullPath);
-        if (buffer.includes(0)) throw new Error(`${filePath} 是二进制文件，无法预览`);
-        after = buffer.toString("utf-8");
-      }
-    }
+    if (before.length > MAX_DIFF_PREVIEW_CHARS) throw new Error(`${filePath} 旧版本过大，无法预览`);
+    if (after.length > MAX_DIFF_PREVIEW_CHARS) throw new Error(`${filePath} 新版本过大，无法预览`);
 
     return { ok: true, before, after };
   } catch (error) {
     return { ok: false, before: "", after: "", error: error instanceof Error ? error.message : "获取文件内容失败" };
   }
+}
+
+function parseUnifiedDiff(diffOutput: string): { before: string; after: string } {
+  const lines = diffOutput.split("\n");
+  const beforeLines: string[] = [];
+  const afterLines: string[] = [];
+  for (const line of lines) {
+    if (line.startsWith("diff --git") || line.startsWith("index ") || line.startsWith("--- ") || line.startsWith("+++") || line.startsWith("@@ ")) continue;
+    if (line.startsWith("-") && !line.startsWith("---")) {
+      beforeLines.push(line.slice(1));
+    } else if (line.startsWith("+") && !line.startsWith("+++")) {
+      afterLines.push(line.slice(1));
+    } else if (line.startsWith(" ")) {
+      const content = line.slice(1);
+      beforeLines.push(content);
+      afterLines.push(content);
+    }
+  }
+  return { before: beforeLines.join("\n"), after: afterLines.join("\n") };
+}
+
+async function readWorktreeFile(projectRoot: string, filePath: string): Promise<string> {
+  const fs = await import("node:fs");
+  const fullPath = await import("node:path").then((p) => p.resolve(projectRoot, filePath));
+  if (!fs.existsSync(fullPath)) return "";
+  const stat = fs.statSync(fullPath);
+  if (stat.size > MAX_DIFF_PREVIEW_CHARS) throw new Error(`${filePath} 过大，无法预览`);
+  const buffer = fs.readFileSync(fullPath);
+  if (buffer.includes(0)) throw new Error(`${filePath} 是二进制文件，无法预览`);
+  return buffer.toString("utf-8");
 }
 
 export async function gitCommitFileDiff(

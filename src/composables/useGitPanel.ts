@@ -60,6 +60,18 @@ export function useGitPanel(
   const selectedGitFile = ref("");
   const gitDiffLoadingKey = ref("");
   const gitDiffContentCache = ref<Record<string, GitFileDiff>>({});
+  const gitStagingInProgress = ref(false);
+  const gitLastStagingAt = ref(0);
+  const GIT_DIFF_CACHE_MAX = 30;
+
+  function evictOldestCacheEntry() {
+    const keys = Object.keys(gitDiffContentCache.value);
+    if (keys.length <= GIT_DIFF_CACHE_MAX) return;
+    const toRemove = keys.slice(0, keys.length - GIT_DIFF_CACHE_MAX);
+    const next = { ...gitDiffContentCache.value };
+    for (const k of toRemove) delete next[k];
+    gitDiffContentCache.value = next;
+  }
   const gitRemotes = ref<GitRemoteInfo[]>([]);
   const gitTrackingBranch = ref("");
   const gitAhead = ref(0);
@@ -221,15 +233,19 @@ export function useGitPanel(
     gitError.value = "";
     clearGitDiffCache();
     gitStatus.value = gitStatus.value.map((f) => (f.path === filePath ? { ...f, staged: true } : f));
+    gitStagingInProgress.value = true;
+    gitLastStagingAt.value = Date.now();
     try {
       const result = await stageGitFiles(projectPath(), [filePath]);
       if (!result.ok) {
         gitError.value = result.error || "暂存失败";
-        await refreshGitStatus();
+        await refreshGitStatus({ showLoading: false });
       }
     } catch (e) {
       gitError.value = e instanceof Error ? e.message : "暂存失败";
-      await refreshGitStatus();
+      await refreshGitStatus({ showLoading: false });
+    } finally {
+      gitStagingInProgress.value = false;
     }
   }
 
@@ -238,15 +254,19 @@ export function useGitPanel(
     gitError.value = "";
     clearGitDiffCache();
     gitStatus.value = gitStatus.value.map((f) => (f.path === filePath ? { ...f, staged: false } : f));
+    gitStagingInProgress.value = true;
+    gitLastStagingAt.value = Date.now();
     try {
       const result = await unstageGitFiles(projectPath(), [filePath]);
       if (!result.ok) {
         gitError.value = result.error || "取消暂存失败";
-        await refreshGitStatus();
+        await refreshGitStatus({ showLoading: false });
       }
     } catch (e) {
       gitError.value = e instanceof Error ? e.message : "取消暂存失败";
-      await refreshGitStatus();
+      await refreshGitStatus({ showLoading: false });
+    } finally {
+      gitStagingInProgress.value = false;
     }
   }
 
@@ -257,15 +277,19 @@ export function useGitPanel(
     const filesToStage = gitUnstagedFiles.value.map((f) => f.path);
     if (!filesToStage.length) return;
     gitStatus.value = gitStatus.value.map((f) => ({ ...f, staged: true }));
+    gitStagingInProgress.value = true;
+    gitLastStagingAt.value = Date.now();
     try {
       const result = await stageGitFiles(projectPath(), filesToStage);
       if (!result.ok) {
         gitError.value = result.error || "暂存失败";
-        await refreshGitStatus();
+        await refreshGitStatus({ showLoading: false });
       }
     } catch (e) {
       gitError.value = e instanceof Error ? e.message : "暂存失败";
-      await refreshGitStatus();
+      await refreshGitStatus({ showLoading: false });
+    } finally {
+      gitStagingInProgress.value = false;
     }
   }
 
@@ -275,15 +299,19 @@ export function useGitPanel(
     clearGitDiffCache();
     if (!gitStagedFiles.value.length) return;
     gitStatus.value = gitStatus.value.map((f) => ({ ...f, staged: false }));
+    gitStagingInProgress.value = true;
+    gitLastStagingAt.value = Date.now();
     try {
       const result = await unstageGitFiles(projectPath(), []);
       if (!result.ok) {
         gitError.value = result.error || "取消暂存失败";
-        await refreshGitStatus();
+        await refreshGitStatus({ showLoading: false });
       }
     } catch (e) {
       gitError.value = e instanceof Error ? e.message : "取消暂存失败";
-      await refreshGitStatus();
+      await refreshGitStatus({ showLoading: false });
+    } finally {
+      gitStagingInProgress.value = false;
     }
   }
 
@@ -293,17 +321,21 @@ export function useGitPanel(
     gitError.value = "";
     clearGitDiffCache();
     gitStatus.value = gitStatus.value.filter((f) => f.path !== filePath);
+    gitStagingInProgress.value = true;
+    gitLastStagingAt.value = Date.now();
     try {
       const result = await discardGitFiles(projectPath(), [filePath]);
       if (!result.ok) {
         gitError.value = result.error || "丢弃更改失败";
-        await refreshGitStatus();
+        await refreshGitStatus({ showLoading: false });
       }
       onRefreshTree?.();
     } catch (e) {
       gitError.value = e instanceof Error ? e.message : "丢弃更改失败";
-      await refreshGitStatus();
+      await refreshGitStatus({ showLoading: false });
       onRefreshTree?.();
+    } finally {
+      gitStagingInProgress.value = false;
     }
   }
 
@@ -315,17 +347,21 @@ export function useGitPanel(
     const unstagedPaths = gitUnstagedFiles.value.map((f) => f.path);
     if (!unstagedPaths.length) return;
     gitStatus.value = gitStagedFiles.value;
+    gitStagingInProgress.value = true;
+    gitLastStagingAt.value = Date.now();
     try {
       const result = await discardGitFiles(projectPath(), unstagedPaths);
       if (!result.ok) {
         gitError.value = result.error || "丢弃更改失败";
-        await refreshGitStatus();
+        await refreshGitStatus({ showLoading: false });
       }
       onRefreshTree?.();
     } catch (e) {
       gitError.value = e instanceof Error ? e.message : "丢弃更改失败";
-      await refreshGitStatus();
+      await refreshGitStatus({ showLoading: false });
       onRefreshTree?.();
+    } finally {
+      gitStagingInProgress.value = false;
     }
   }
 
@@ -617,6 +653,9 @@ export function useGitPanel(
     canGitCommit,
 
     clearGitDiffCache,
+    evictOldestCacheEntry,
+    gitStagingInProgress,
+    gitLastStagingAt,
     gitStatusIcon,
     gitStatusColor,
     isGitLogEntryOpen,
