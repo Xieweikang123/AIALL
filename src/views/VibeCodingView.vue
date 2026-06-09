@@ -1390,6 +1390,7 @@ function getToolIcon(name: string): string {
   if (name === 'search_files') return '🔎';
   if (name === 'list_dir') return '📁';
   if (name === 'delete_file') return '🗑️';
+  if (name === 'run_command') return '▶️';
   return '⚡';
 }
 
@@ -1408,6 +1409,7 @@ function getToolLabel(name: string): string {
   if (name === 'search_files') return '搜索文件';
   if (name === 'list_dir') return '列出';
   if (name === 'delete_file') return '删除';
+  if (name === 'run_command') return '执行';
   return name;
 }
 

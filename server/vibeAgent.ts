@@ -1,5 +1,7 @@
+import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { promisify } from "node:util";
 import {
   AGENT_AI_MAX_RETRIES,
   chatCompletionWithTools,
@@ -443,6 +445,21 @@ const VIBE_AGENT_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "run_command",
+      description: "在项目目录中执行 shell 命令（如 npm run dev、python main.py、go test）。返回 stdout 和 stderr。",
+      parameters: {
+        type: "object",
+        properties: {
+          command: { type: "string", description: "要执行的 shell 命令" },
+          timeout_ms: { type: "number", description: "超时时间（毫秒），默认 30000，最大 120000" },
+        },
+        required: ["command"],
+      },
+    },
+  },
 ];
 
 const READ_ONLY_AGENT_TOOLS = VIBE_AGENT_TOOLS.filter((t) =>
@@ -490,6 +507,7 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "删除文件时：使用 delete_file 工具，不要用 write_file 清空内容来替代删除。",
     "重要：必须通过 API 工具接口调用 list_dir、read_file 等，禁止在正文里输出 <function>、<parameter> 等标记。",
     "工具 path 参数使用相对项目根的路径（如 package.json、src/main.ts），不要用绝对路径。",
+    "run_command 可在项目目录执行 shell 命令（如 npm run dev、python main.py、go test），超时默认 30 秒，长时间命令请设置 timeout_ms；不要执行危险命令。",
     `项目根目录：${projectRoot}`,
   ];
   if (model?.trim()) {
@@ -611,6 +629,13 @@ function toolSummary(name: string, result: string): string {
     const m = result.match(/已删除\s+(.+)$/);
     if (m) return `已删除 ${m[1]}`;
     return result;
+  }
+
+  if (name === "run_command") {
+    if (result.startsWith("错误：") || result.startsWith("命令执行失败")) return `执行失败`;
+    const outMatch = result.match(/^stdout:\n(.+)/m);
+    const oneLine = (outMatch?.[1] || result).replace(/\s+/g, " ").trim();
+    return oneLine.length > 60 ? `${oneLine.slice(0, 60)}…` : oneLine || "执行完成";
   }
 
   const oneLine = result.replace(/\s+/g, " ").trim();
@@ -827,6 +852,43 @@ export async function executeTool(
     trackWrittenFile(stage, resolved.relative);
     invalidateProjectContextCache(root);
     return `已删除 ${resolved.relative}`;
+  }
+
+  if (name === "run_command") {
+    if (mode === "ask") return "Ask 模式下不支持执行命令。";
+    const command = String(args.command || "").trim();
+    if (!command) return "错误：缺少 command";
+    const dangerous = /rm\s+-rf\s+[\/~]|format\s+[a-z]:|del\s+\/[sfq]/i;
+    if (dangerous.test(command)) return "错误：禁止执行危险命令";
+
+    const timeoutMs = Math.min(120000, Math.max(5000, Number(args.timeout_ms) || 30000));
+    const execFileAsync = promisify(execFile);
+    const shell = process.platform === "win32" ? "powershell.exe" : "/bin/sh";
+    const shellFlag = process.platform === "win32" ? "-Command" : "-c";
+    try {
+      const { stdout, stderr } = await execFileAsync(shell, [shellFlag, command], {
+        cwd: root,
+        timeout: timeoutMs,
+        maxBuffer: 2 * 1024 * 1024,
+        windowsHide: true,
+      });
+      const out = String(stdout || "").trim();
+      const err = String(stderr || "").trim();
+      if (!out && !err) return "（命令执行完成，无输出）";
+      const parts: string[] = [];
+      if (out) parts.push(`stdout:\n${out}`);
+      if (err) parts.push(`stderr:\n${err}`);
+      return parts.join("\n\n");
+    } catch (error: any) {
+      if (error.killed) return `错误：命令超时（${timeoutMs}ms）`;
+      const out = String(error.stdout || "").trim();
+      const err = String(error.stderr || "").trim();
+      const parts: string[] = [];
+      if (out) parts.push(`stdout:\n${out}`);
+      if (err) parts.push(`stderr:\n${err}`);
+      if (error.status !== undefined) parts.push(`exit code: ${error.status}`);
+      return parts.length ? `命令执行失败：\n${parts.join("\n\n")}` : `错误：${error.message}`;
+    }
   }
 
   return `错误：未知工具 ${name}`;
