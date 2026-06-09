@@ -465,6 +465,30 @@ void nextTick(() => syncEmpty());
   word-break: break-word;
   white-space: pre-wrap;
   padding: 8px 12px;
+
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.composer-editor::-webkit-scrollbar {
+  width: 6px;
+}
+
+.composer-editor::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.composer-editor::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+
+.composer-editor::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.composer-editor.empty {
+  overflow-y: hidden;
 }
 
 .composer-editor.empty::before {

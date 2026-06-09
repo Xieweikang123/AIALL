@@ -6773,7 +6773,7 @@ button.ghost.danger:hover:not(:disabled) {
 
 .chat-panel {
   position: relative;
-  background: rgba(11, 18, 32, 0.3);
+
   border-left: 1px solid var(--border);
 }
 
@@ -8067,7 +8067,7 @@ button.compact {
   border-top: 1px solid var(--border);
   padding: 10px 12px 12px;
   overflow: hidden;
-  background: linear-gradient(180deg, rgba(11, 18, 32, 0.2), rgba(11, 18, 32, 0.78));
+
   backdrop-filter: blur(8px);
   transition: background 200ms ease, border-color 200ms ease;
 }
@@ -8132,6 +8132,7 @@ button.compact {
 .chat-input-field {
   position: relative;
   min-width: 0;
+
 }
 
 .mention-dropdown {
@@ -8216,7 +8217,7 @@ button.compact {
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
   padding: 0;
-  background: rgba(255, 255, 255, 0.055);
+
   transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
   cursor: text;
   display: flex;
@@ -8235,6 +8236,7 @@ button.compact {
   max-width: 100%;
   flex: 1;
   min-width: 0;
+  box-sizing: border-box;
 }
 
 .chat-bottom {
@@ -8316,10 +8318,13 @@ button.compact {
   gap: 0;
   min-height: 0;
   border-radius: 8px;
-  background: rgba(1, 4, 9, 0.72);
+  background: rgba(1, 4, 9, 0.92);
   border: 1px solid rgba(48, 54, 61, 0.78);
   overflow: hidden;
   transition: max-height 0.3s ease, opacity 0.3s ease;
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 
 .cursor-agent-feed-shell.collapsed {
