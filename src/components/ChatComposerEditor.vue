@@ -453,9 +453,10 @@ void nextTick(() => syncEmpty());
 .composer-editor {
   position: relative;
   flex: 1 1 120px;
-  min-width: 120px;
+  min-width: 0;
   min-height: 40px;
   max-height: 160px;
+  overflow-x: hidden;
   overflow-y: auto;
   outline: none;
   font-size: 13px;

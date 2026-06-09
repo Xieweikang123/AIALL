@@ -60,26 +60,23 @@ export async function stopFileWatcher(): Promise<FileWatcherStopResult> {
 
 export type FileWatcherChangeCallback = (changes: FileChangeEvent[]) => void;
 export type FileWatcherErrorCallback = (error: string) => void;
+export type FileWatcherStatusCallback = (connected: boolean) => void;
 
 let eventSource: EventSource | null = null;
 let changeCallback: FileWatcherChangeCallback | null = null;
 let errorCallback: FileWatcherErrorCallback | null = null;
+let statusCallback: FileWatcherStatusCallback | null = null;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let disposed = false;
 
-export function connectFileWatcherStream(
-  onChanges: FileWatcherChangeCallback,
-  onError?: FileWatcherErrorCallback
-): () => void {
-  // Disconnect existing connection
-  disconnectFileWatcherStream();
+const RECONNECT_DELAY = 3000;
 
-  changeCallback = onChanges;
-  errorCallback = onError || null;
-
-  const url = backendUrl("/backend/vibe/file-watcher/stream");
-  eventSource = new EventSource(url);
+function bindStreamListeners() {
+  if (!eventSource) return;
 
   eventSource.addEventListener("status", (event) => {
     const data = JSON.parse(event.data);
+    statusCallback?.(!!data.connected);
     if (!data.connected) {
       errorCallback?.("文件监听连接失败");
     }
@@ -98,20 +95,55 @@ export function connectFileWatcherStream(
       errorCallback?.(data.message || "文件监听错误");
     } else {
       errorCallback?.("文件监听连接断开");
+      reconnect();
     }
   });
 
   eventSource.onerror = () => {
-    errorCallback?.("文件监听连接错误");
+    statusCallback?.(false);
+    eventSource?.close();
+    eventSource = null;
+    reconnect();
   };
+}
 
-  // Return cleanup function
+function reconnect() {
+  if (disposed) return;
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    if (disposed || !changeCallback) return;
+    eventSource = new EventSource(backendUrl("/backend/vibe/file-watcher/stream"));
+    bindStreamListeners();
+  }, RECONNECT_DELAY);
+}
+
+export function connectFileWatcherStream(
+  onChanges: FileWatcherChangeCallback,
+  onError?: FileWatcherErrorCallback,
+  onStatus?: FileWatcherStatusCallback,
+): () => void {
+  disconnectFileWatcherStream();
+  disposed = false;
+
+  changeCallback = onChanges;
+  errorCallback = onError || null;
+  statusCallback = onStatus || null;
+
+  eventSource = new EventSource(backendUrl("/backend/vibe/file-watcher/stream"));
+  bindStreamListeners();
+
   return () => {
     disconnectFileWatcherStream();
   };
 }
 
 export function disconnectFileWatcherStream(): void {
+  disposed = true;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
   if (eventSource) {
     eventSource.close();
     eventSource = null;

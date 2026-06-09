@@ -181,6 +181,12 @@
                   </span>
                 </div>
                 <button type="button" class="ghost tiny" :disabled="gitLoading" @click="() => refreshGitStatus()">刷新</button>
+                <span
+                  v-if="fileWatcherActive"
+                  class="file-watcher-dot"
+                  :class="{ connected: fileWatcherConnected }"
+                  :title="fileWatcherConnected ? '文件监控已连接' : '文件监控重连中…'"
+                />
               </div>
               <!-- 第二行：同步操作 -->
               <div v-if="gitRemotes.length" class="git-header-row git-sync-row">
@@ -1829,6 +1835,7 @@ function onDocumentDropCapture(e: DragEvent) {
 
 // File watcher state
 const fileWatcherActive = ref(false);
+const fileWatcherConnected = ref(false);
 const fileWatcherCleanup = ref<(() => void) | null>(null);
 
 async function startFileWatcherForProject(projectPath: string) {
@@ -1847,7 +1854,10 @@ async function startFileWatcherForProject(projectPath: string) {
         },
         (error) => {
           console.error("File watcher stream error:", error);
-        }
+        },
+        (connected) => {
+          fileWatcherConnected.value = connected;
+        },
       );
     }
   } catch (e) {
@@ -5251,8 +5261,8 @@ async function runAgentTurn(
 ) {
   const rawPrompt = userText.trim();
   const project = projectPath.value.trim();
-  const imageSources = options?.imageDataUrls?.length
-    ? options.imageDataUrls
+  const imageSources = options && 'imageDataUrls' in options
+    ? (options.imageDataUrls ?? [])
     : await resolveImagesForAgentTurn(project, chatMessages.value);
   const compressedImages = imageSources.length
     ? await compressImageDataUrlsForAgent(imageSources)
@@ -5436,7 +5446,7 @@ async function sendChat() {
 
   await runAgentTurn(fullPrompt, {
     referencedFiles: payload.refs.map((r) => r.relative || r.path).filter(Boolean),
-    imageDataUrls: imageDataUrls.length ? imageDataUrls : undefined,
+    imageDataUrls: imageDataUrls,
     userBubbleContent: userText,
   });
 }
@@ -5985,6 +5995,19 @@ onBeforeUnmount(() => {
 /* ---- 分支行 ---- */
 .git-branch-row {
   gap: 8px;
+}
+
+.file-watcher-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f7768e;
+  flex-shrink: 0;
+  transition: background 0.3s;
+}
+
+.file-watcher-dot.connected {
+  background: #9ece6a;
 }
 
 .git-branch-info {
@@ -8040,8 +8063,10 @@ button.compact {
 .chat-composer {
   position: relative;
   flex-shrink: 0;
+  min-width: 0;
   border-top: 1px solid var(--border);
   padding: 10px 12px 12px;
+  overflow: hidden;
   background: linear-gradient(180deg, rgba(11, 18, 32, 0.2), rgba(11, 18, 32, 0.78));
   backdrop-filter: blur(8px);
   transition: background 200ms ease, border-color 200ms ease;
@@ -8106,6 +8131,7 @@ button.compact {
 
 .chat-input-field {
   position: relative;
+  min-width: 0;
 }
 
 .mention-dropdown {
@@ -8195,6 +8221,7 @@ button.compact {
   cursor: text;
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
 }
 
 .chat-input-box.focused {
@@ -8205,7 +8232,9 @@ button.compact {
 
 .chat-composer-editor {
   width: 100%;
+  max-width: 100%;
   flex: 1;
+  min-width: 0;
 }
 
 .chat-bottom {
