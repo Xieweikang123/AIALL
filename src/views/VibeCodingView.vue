@@ -4522,7 +4522,17 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
     if (phase === "aborted") {
       clearStreamDeltaBuffer();
       assistantMsg.agentAborted = true;
-      patchAssistantMsg(msgId, { agentAborted: true });
+      const abortTurn = assistantMsg.agentTurn ?? 1;
+      assistantMsg.roundGroups = recordAgentRoundResponse(
+        assistantMsg.roundGroups,
+        abortTurn,
+        { assistantText: "", toolCalls: [], hasToolCalls: false, isFinal: false },
+        assistantMsg.agentMaxTurns,
+      );
+      patchAssistantMsg(msgId, {
+        agentAborted: true,
+        ...syncRoundGroupsPatch(assistantMsg),
+      });
       stopAgentUiTick();
       chatSending.value = false;
       persistChatNow();

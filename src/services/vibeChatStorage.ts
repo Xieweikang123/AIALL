@@ -141,7 +141,7 @@ const CHAT_STORAGE_KEY = "vibe-coding-chat";
 export const STORE_VERSION = 3 as const;
 const MAX_MESSAGES_PER_SESSION = 120;
 const MAX_SESSIONS_PER_PROJECT = 40;
-const MAX_STATUS_LOG_LINES = 48;
+const MAX_STATUS_LOG_LINES = 32;
 const MAX_TURN_TRACES = 24;
 const MAX_NARRATIVE_CHARS = 800;
 const MAX_MODEL_STEP_CHARS = 500;
@@ -272,42 +272,49 @@ function compactRoundGroupsForStorage(
   groups: PersistedAgentRoundGroup[] | undefined,
 ): PersistedAgentRoundGroup[] | undefined {
   if (!groups?.length) return undefined;
-  return groups.map((group) => ({
-    turn: group.turn,
-    maxTurns: group.maxTurns,
-    narrative: group.narrative
-      ? truncateText(stripToolSummaryFromAssistantContent(group.narrative), MAX_NARRATIVE_CHARS)
-      : undefined,
-    modelSteps: group.modelSteps.map((step) => ({
-      id: step.id,
-      phase: step.phase,
-      text: truncateText(step.text, MAX_MODEL_STEP_CHARS),
-    })),
-    toolIds: [...group.toolIds],
-    request: group.request
-      ? {
-          model: group.request.model,
-          contextMessages: group.request.contextMessages,
-          contextChars: group.request.contextChars,
-          messages: [],
-        }
-      : undefined,
-    response: group.response
-      ? {
-          assistantText: truncateText(
-            stripToolSummaryFromAssistantContent(group.response.assistantText),
-            MAX_NARRATIVE_CHARS,
-          ),
-          hasToolCalls: group.response.hasToolCalls,
-          isFinal: group.response.isFinal,
-          toolCalls: group.response.toolCalls.map((call) => ({
-            id: call.id,
-            name: call.name,
-            arguments: truncateText(call.arguments, MAX_TOOL_CALL_ARGS_CHARS),
-          })),
-        }
-      : undefined,
-  }));
+  return groups.map((group) => {
+    const isFinalWithText = group.response?.isFinal && group.response?.assistantText?.trim();
+    return {
+      turn: group.turn,
+      maxTurns: group.maxTurns,
+      narrative: isFinalWithText
+        ? undefined
+        : group.narrative
+          ? truncateText(stripToolSummaryFromAssistantContent(group.narrative), MAX_NARRATIVE_CHARS)
+          : undefined,
+      modelSteps: group.modelSteps.map((step) => ({
+        id: step.id,
+        phase: step.phase,
+        text: truncateText(step.text, MAX_MODEL_STEP_CHARS),
+      })),
+      toolIds: [...group.toolIds],
+      request: group.request
+        ? {
+            model: group.request.model,
+            contextMessages: group.request.contextMessages,
+            contextChars: group.request.contextChars,
+            messages: group.request.messages.length
+              ? [{ role: "system", content: `${group.request.messages.length} 条消息，${group.request.contextChars} 字符` }]
+              : [],
+          }
+        : undefined,
+      response: group.response
+        ? {
+            assistantText: truncateText(
+              stripToolSummaryFromAssistantContent(group.response.assistantText),
+              MAX_NARRATIVE_CHARS,
+            ),
+            hasToolCalls: group.response.hasToolCalls,
+            isFinal: group.response.isFinal,
+            toolCalls: group.response.toolCalls.map((call) => ({
+              id: call.id,
+              name: call.name,
+              arguments: truncateText(call.arguments, MAX_TOOL_CALL_ARGS_CHARS),
+            })),
+          }
+        : undefined,
+    };
+  });
 }
 
 const MAX_PERSISTED_IMAGES = 4;
