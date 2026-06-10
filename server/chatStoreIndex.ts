@@ -8,6 +8,7 @@ export type ChatStoreIndexSession = {
   updatedAt: string;
   messageCount: number;
   file: string;
+  status?: string;
 };
 
 export type ChatStoreIndexFile = {
@@ -24,6 +25,7 @@ type SessionPayloadLike = {
   createdAt?: string;
   updatedAt?: string;
   messages?: unknown[];
+  status?: string;
 };
 
 export function safeChatStoreFilePart(value: string): string {
@@ -43,6 +45,7 @@ export function buildSessionIndexEntry(session: SessionPayloadLike, sessionId: s
     updatedAt: session.updatedAt || new Date().toISOString(),
     messageCount: messages.length,
     file: sessionIndexFileName(sessionId),
+    status: session.status || "active",
   };
 }
 

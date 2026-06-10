@@ -105,6 +105,7 @@ export type VibeChatSessionMeta = {
   createdAt: string;
   updatedAt: string;
   messageCount: number;
+  status?: "active" | "completed" | "failed" | "interrupted";
 };
 
 export type VibeChatProjectSnapshot = {
@@ -120,6 +121,7 @@ type VibeChatSession = {
   createdAt: string;
   updatedAt: string;
   messages: PersistedChatMessage[];
+  status?: "active" | "completed" | "failed" | "interrupted";
 };
 
 type ProjectChatRecord = {
@@ -464,6 +466,7 @@ function createSession(messages: PersistedChatMessage[] = []): VibeChatSession {
     createdAt: now,
     updatedAt: now,
     messages: sanitized,
+    status: "active",
   };
 }
 
@@ -608,6 +611,14 @@ function touchSession(session: VibeChatSession, messages: PersistedChatMessage[]
   session.title = sessionTitleFromMessages(session.messages);
 }
 
+function updateSessionStatus(
+  session: VibeChatSession,
+  status: "active" | "completed" | "failed" | "interrupted",
+) {
+  session.status = status;
+  session.updatedAt = new Date().toISOString();
+}
+
 export function getVibeChatProjectSnapshot(projectPath: string): VibeChatProjectSnapshot {
   const key = normalizeProjectKey(projectPath);
   const record = key ? getProjectRecord(key) : undefined;
@@ -623,6 +634,7 @@ export function getVibeChatProjectSnapshot(projectPath: string): VibeChatProject
         updatedAt: s.updatedAt,
         messageCount: s.messages.length,
         messages: sanitizeMessages(s.messages, { forDisk: true }),
+        status: s.status,
       })) || [],
   };
 }
@@ -661,6 +673,7 @@ export function listVibeChatSessions(projectPath: string): VibeChatSessionMeta[]
         createdAt: s.createdAt,
         updatedAt: s.updatedAt,
         messageCount: s.messages.length || indexed?.messageCount || 0,
+        status: s.status,
       };
     });
 }
@@ -733,6 +746,7 @@ export function restoreChatStoreFromSnapshot(snapshot: VibeChatProjectSnapshot):
     createdAt: s.createdAt || new Date().toISOString(),
     updatedAt: s.updatedAt || new Date().toISOString(),
     messages: sanitizeMessages(s.messages, { forDisk: true }),
+    status: s.status || "active",
   }));
   const record: ProjectChatRecord = {
     activeSessionId:
@@ -829,6 +843,22 @@ export function deleteVibeChatSession(projectPath: string, sessionId: string): P
   }
   persistRecord(key, record);
   return sanitizeMessages(getActiveSession(record).messages);
+}
+
+export function updateVibeChatSessionStatus(
+  projectPath: string,
+  sessionId: string,
+  status: "active" | "completed" | "failed" | "interrupted",
+): boolean {
+  const key = normalizeProjectKey(projectPath);
+  if (!key) return false;
+  const record = getProjectRecord(key);
+  if (!record?.sessions?.length) return false;
+  const session = record.sessions.find((s) => s.id === sessionId);
+  if (!session) return false;
+  updateSessionStatus(session, status);
+  persistRecord(key, record);
+  return true;
 }
 
 export function clearVibeChatHistory(projectPath: string) {

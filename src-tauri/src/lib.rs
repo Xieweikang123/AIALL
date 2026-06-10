@@ -13,7 +13,16 @@ fn get_backend_url() -> String {
 
 fn resolve_project_root(app: &tauri::App) -> Result<std::path::PathBuf, String> {
   if cfg!(debug_assertions) {
-    std::env::current_dir().map_err(|e| e.to_string())
+    // tauri dev 的 cargo 进程工作目录是 src-tauri/，
+    // 需要向上查找 package.json 来定位真正的项目根目录
+    let mut dir = std::env::current_dir().map_err(|e| e.to_string())?;
+    while !dir.join("package.json").exists() {
+      match dir.parent() {
+        Some(parent) => dir = parent.to_path_buf(),
+        None => break,
+      }
+    }
+    Ok(dir)
   } else if let Ok(resource_dir) = app.path().resource_dir() {
     Ok(resource_dir)
   } else {

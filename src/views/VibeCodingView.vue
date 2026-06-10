@@ -963,6 +963,7 @@ import {
   stripToolSummaryFromAssistantContent,
   switchVibeChatSession,
   getActiveVibeChatSessionId,
+  updateVibeChatSessionStatus,
   type PersistedChatMessage,
   type VibeChatSessionMeta,
 } from "../services/vibeChatStorage";
@@ -1976,6 +1977,10 @@ function abortAgentConnectStall(msg: ChatMessage) {
     agentPhase: undefined,
     status: reason,
   });
+  // Update session status to failed
+  if (activeSessionId.value && projectPath.value.trim()) {
+    updateVibeChatSessionStatus(projectPath.value.trim(), activeSessionId.value, "failed");
+  }
   persistChatNow();
 }
 
@@ -4210,6 +4215,10 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
       });
       stopAgentUiTick();
       chatSending.value = false;
+      // Update session status to interrupted
+      if (activeSessionId.value && projectPath.value.trim()) {
+        updateVibeChatSessionStatus(projectPath.value.trim(), activeSessionId.value, "interrupted");
+      }
       persistChatNow();
       if (pendingPromptQueue.value.length) {
         const next = pendingPromptQueue.value.shift()!;
@@ -4373,6 +4382,11 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
 
     const completedTurns = resolveCompletedTurns(event.data.turns, assistantMsg);
     const wasAborted = !!assistantMsg.agentAborted;
+    
+    // Update session status to completed if agent completed successfully
+    if (!wasAborted && !assistantMsg.agentFailed && activeSessionId.value && projectPath.value.trim()) {
+      updateVibeChatSessionStatus(projectPath.value.trim(), activeSessionId.value, "completed");
+    }
     const hasRunningTools = assistantMsg.tools?.some((t) => t.running);
     const hadProgress = hasRecoverableAgentProgress(assistantMsg);
     const incompleteRun =
@@ -5332,6 +5346,17 @@ onBeforeUnmount(() => {
   cancelAutoResume();
   persistChatNow();
   stopFileWatcherForProject();
+  
+  // Best-effort: give pending disk syncs a brief window to complete.
+  // This won't block unmount (onBeforeUnmount must be sync), but ensures
+  // the async sync chain is at least kicked off and may complete in time.
+  void (async () => {
+    const startTime = Date.now();
+    const maxWaitMs = 500;
+    while (syncingChatStore.value && Date.now() - startTime < maxWaitMs) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+  })();
 });
 </script>
 

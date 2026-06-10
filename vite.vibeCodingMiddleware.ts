@@ -20,8 +20,20 @@ import { gitStatus, gitDiff, gitDiffFile, gitDiffContent, gitCommitFileDiff, git
 import { upsertChatStoreIndexEntry } from "./server/chatStoreIndex";
 import { mergeSessionPayloadForDisk } from "./server/chatStoreMerge";
 import { externalizeSessionPayload, readImageRefAsBuffer, readImageRefAsDataUrl } from "./server/vibeChatImages";
+import { withFileLock } from "./server/fileLock";
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Atomic file write: write to a temp file first, then rename.
+ * Prevents JSON corruption if the process crashes mid-write.
+ */
+async function atomicWriteFile(filePath: string, content: string): Promise<void> {
+  const dir = path.dirname(filePath);
+  const tmpFile = path.join(dir, `.tmp-${path.basename(filePath)}.${Date.now()}`);
+  await fs.promises.writeFile(tmpFile, content, "utf-8");
+  await fs.promises.rename(tmpFile, filePath);
+}
 
 const DEBUG_LOG = path.join(os.tmpdir(), "aiall-debug.log");
 function debugLog(msg: string) {
@@ -259,6 +271,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
           updatedAt?: string;
           messageCount?: number;
           file?: string;
+          status?: string;
         }>;
       };
       const metas = Array.isArray(index.sessions) ? index.sessions : [];
@@ -269,6 +282,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         updatedAt: string;
         messageCount: number;
         messages: unknown[];
+        status?: string;
       }> = [];
 
       for (const meta of metas) {
@@ -286,6 +300,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
           updatedAt: meta.updatedAt || "",
           messageCount: Array.isArray(sessionData.messages) ? sessionData.messages.length : 0,
           messages: Array.isArray(sessionData.messages) ? sessionData.messages : [],
+          status: meta.status || "active",
         });
       }
 
@@ -297,7 +312,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       sendJson(res, 200, {
         ok: true,
         data: {
-          version: index.version || 2,
+          version: index.version || 3,
           projectPath,
           activeSessionId: index.activeSessionId || sessions[0].id,
           sessions,
@@ -397,6 +412,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
             updatedAt?: string;
             messageCount?: number;
             messages?: unknown;
+            status?: string;
           }>;
         };
       };
@@ -413,14 +429,30 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       const storeFile = path.join(chatDir, "chat-store.json");
       const sessions = Array.isArray(body.data?.sessions) ? body.data.sessions : [];
       debugLog(`chat-store-sync writing ${sessions.length} sessions to ${chatDir}`);
-      const indexSessions: Array<{
+
+      // Read existing index to preserve sessions not being synced
+      let existingIndex: { sessions?: Array<{ id: string; title: string; createdAt: string; updatedAt: string; messageCount: number; file: string }> } | null = null;
+      try {
+        const raw = await fs.promises.readFile(storeFile, "utf-8");
+        existingIndex = JSON.parse(raw);
+      } catch {
+        existingIndex = null;
+      }
+      const existingSessions = existingIndex?.sessions || [];
+
+      // Start with existing sessions, then overwrite with incoming ones
+      const indexSessionsMap = new Map<string, {
         id: string;
         title: string;
         createdAt: string;
         updatedAt: string;
         messageCount: number;
         file: string;
-      }> = [];
+        status?: string;
+      }>();
+      for (const s of existingSessions) {
+        indexSessionsMap.set(s.id, s);
+      }
 
       for (const session of sessions) {
         const id = (session.id || "").trim();
@@ -441,38 +473,40 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
           createdAt: session.createdAt || "",
           updatedAt: session.updatedAt || "",
           messages: Array.isArray(session.messages) ? session.messages : [],
+          status: session.status || "active",
         };
         const mergedPayload = mergeSessionPayloadForDisk(incomingPayload, existingPayload);
         const sessionPayload = await externalizeSessionPayload(chatDir, id, mergedPayload);
-        await fs.promises.writeFile(sessionFile, JSON.stringify(sessionPayload, null, 2), "utf-8");
+        await withFileLock(sessionFile, async () => {
+          await atomicWriteFile(sessionFile, JSON.stringify(sessionPayload, null, 2));
+        });
         // After merge+write, re-read the file to get the true message count
         // (handles cases where incoming was empty but disk had messages)
         let messageCount = Array.isArray(sessionPayload.messages) ? sessionPayload.messages.length : 0;
         if (messageCount === 0 && existingPayload && Array.isArray(existingPayload.messages) && existingPayload.messages.length > 0) {
           messageCount = existingPayload.messages.length;
         }
-        indexSessions.push({
+        indexSessionsMap.set(id, {
           id,
           title: sessionPayload.title || "新会话",
           createdAt: sessionPayload.createdAt || "",
           updatedAt: sessionPayload.updatedAt || "",
           messageCount,
           file: `chat-${safeFilePart(id)}.json`,
+          status: sessionPayload.status || "active",
         });
       }
 
       const index = {
         syncedAt: new Date().toISOString(),
-        version: body.data?.version || 2,
+        version: body.data?.version || 3,
         projectPath,
         activeSessionId: body.data?.activeSessionId || "",
-        sessions: indexSessions,
+        sessions: Array.from(indexSessionsMap.values()),
       };
-      await fs.promises.writeFile(
-        storeFile,
-        JSON.stringify(index, null, 2),
-        "utf-8",
-      );
+      await withFileLock(storeFile, async () => {
+        await atomicWriteFile(storeFile, JSON.stringify(index, null, 2));
+      });
       debugLog(`chat-store-sync done, path=${chatDir}`);
       sendJson(res, 200, { ok: true, path: chatDir, sessionCount: sessions.length });
     } catch (error) {
@@ -529,10 +563,18 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       const payload = mergedData
         ? await externalizeSessionPayload(chatDir, sessionId, mergedData as { messages?: unknown[] })
         : mergedData;
-      await fs.promises.writeFile(sessionFile, JSON.stringify(payload, null, 2), "utf-8");
+      
+      // Use file lock to prevent concurrent writes to the same session file and index
+      const storeFile = path.join(chatDir, "chat-store.json");
+      await withFileLock(sessionFile, async () => {
+        await atomicWriteFile(sessionFile, JSON.stringify(payload, null, 2));
+      });
+      
       if (payload && typeof payload === "object") {
-        await upsertChatStoreIndexEntry(chatDir, resolved, payload as Record<string, unknown>, sessionId, {
-          activeSessionId,
+        await withFileLock(storeFile, async () => {
+          await upsertChatStoreIndexEntry(chatDir, resolved, payload as Record<string, unknown>, sessionId, {
+            activeSessionId,
+          });
         });
       }
       sendJson(res, 200, { ok: true });
