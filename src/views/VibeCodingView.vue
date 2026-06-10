@@ -6054,10 +6054,10 @@ onBeforeUnmount(() => {
 .git-commit-box {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 14px 10px;
+  gap: 8px;
+  padding: 12px 14px;
   border-top: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.015);
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .git-commit-input {
@@ -6100,12 +6100,46 @@ onBeforeUnmount(() => {
 
 .git-ai-push {
   width: 100%;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  border-radius: 6px;
+  transition: all 200ms ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.git-ai-push:not(:disabled)::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+  transition: left 500ms ease;
+}
+
+.git-ai-push:not(:disabled):hover::before {
+  left: 100%;
+}
+
+.git-ai-push:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(31, 111, 235, 0.3);
+}
+
+.git-ai-push:not(:disabled):active {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(31, 111, 235, 0.2);
 }
 
 .git-ai-push-sep {
   height: 1px;
   background: var(--border);
-  margin: 2px 0;
+  margin: 8px 0;
+  opacity: 0.6;
 }
 
 .git-commit-ai:not(:disabled) {
@@ -6310,25 +6344,26 @@ button.ghost.danger:hover:not(:disabled) {
 
 .git-log-section {
   border-top: 1px solid var(--border);
-  margin-top: 4px;
-  background: rgba(255, 255, 255, 0.015);
+  margin-top: 8px;
+  padding-top: 4px;
 }
 
 .git-log-toggle {
   width: 100%;
   justify-content: flex-start;
   text-align: left;
-  border-radius: 0;
+  border-radius: 4px;
   border: none !important;
-  padding: 9px 14px !important;
+  padding: 8px 10px !important;
   font-size: 12px !important;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: 0.02em;
   color: var(--text-dim) !important;
+  transition: all 150ms ease;
 }
 
 .git-log-toggle:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.04) !important;
+  background: rgba(255, 255, 255, 0.06) !important;
   color: var(--text) !important;
 }
 
@@ -7293,10 +7328,23 @@ button.primary.small {
 .panel-empty,
 .editor-empty,
 .chat-empty {
-  padding: 24px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px 14px;
   color: var(--muted);
-  font-size: 14px;
+  font-size: 13px;
   text-align: center;
+  opacity: 0.8;
+}
+
+.git-scroll-area .panel-empty::before {
+  content: "✓";
+  font-size: 28px;
+  color: rgba(100, 200, 150, 0.6);
+  margin-bottom: 4px;
 }
 
 .git-panel-fetch-error {
