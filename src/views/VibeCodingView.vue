@@ -1,170 +1,41 @@
 <template>
   <div class="vibe-page">
-    <header class="app-toolbar">
-      <div class="toolbar-brand">
-        <span class="brand-icon" aria-hidden="true">⚡</span>
-        <h1 class="title">Vibe Coding✨</h1>
-      </div>
-      <div class="toolbar-project">
-        <input
-          v-model="projectPath"
-          class="path-input"
-          type="text"
-          placeholder="输入项目路径，或点击「打开项目」"
-          @keydown.enter="openProjectByInput"
-        />
-        <button type="button" class="primary compact" :disabled="pickingFolder || loadingTree" @click="handleOpenProject">
-          {{ pickingFolder ? "选择…" : loadingTree ? "加载中" : "打开项目" }}
-        </button>
-        <button type="button" class="secondary compact" :disabled="!projectPath.trim()" @click="refreshTree" title="刷新文件树">↻</button>
-      </div>
-      <div class="toolbar-actions">
-        <div ref="projectHistoryRef" class="project-history-wrap">
-          <button
-            type="button"
-            class="ghost small"
-            :disabled="loadingTree || pickingFolder"
-            @click="toggleProjectHistory"
-          >
-            最近
-          </button>
-          <div v-if="projectHistoryOpen" class="project-history-dropdown">
-            <div class="project-history-head">
-              <div>
-                <h3 class="project-history-title">最近打开的项目</h3>
-                <p class="project-history-desc">点击可快速重新打开</p>
-              </div>
-              <button
-                v-if="projectHistoryList.length"
-                type="button"
-                class="ghost small"
-                @click="clearRecentProjects"
-              >
-                清空
-              </button>
-            </div>
-            <div v-if="!projectHistoryList.length" class="project-history-empty">还没有打开过项目</div>
-            <ul v-else class="project-history-list">
-              <li
-                v-for="item in projectHistoryList"
-                :key="item.path"
-                class="project-history-item"
-                :class="{ active: isCurrentProject(item.path) }"
-              >
-                <button
-                  type="button"
-                  class="project-history-item-main"
-                  :disabled="loadingTree || pickingFolder"
-                  @click="openRecentProject(item.path)"
-                >
-                  <span class="project-history-item-title">{{ item.displayName }}</span>
-                  <span class="project-history-item-path" :title="item.path">{{ item.path }}</span>
-                  <span class="project-history-item-meta">{{ formatSessionTime(item.lastOpenedAt) }}</span>
-                </button>
-                <button
-                  type="button"
-                  class="ghost small project-history-delete"
-                  title="从历史中移除"
-                  @click="removeRecentProject(item.path, $event)"
-                >
-                  移除
-                </button>
-              </li>
-            </ul>
-          </div>
-        </div>
-        <div v-if="treeError || retryCountdown > 0" class="toolbar-error" role="alert">
-          <span v-if="retryCountdown > 0" class="toolbar-error-countdown">⟳</span>
-          <span class="toolbar-error-text">{{ retryCountdown > 0 ? (treeError ? treeError.replace(/。?$/, ' ') : '无法连接后端服务，') + `正在重试… ${retryCountdown}s` : treeError }}</span>
-          <button type="button" class="toolbar-error-dismiss" aria-label="关闭提示" @click="clearRetryTimer(); treeError = ''">
-            ×
-          </button>
-        </div>
-        <router-link class="ghost small link-btn" to="/chat">AI 对话</router-link>
-        <router-link class="ghost small link-btn" to="/ai-config">配置</router-link>
-      </div>
-    </header>
+    <AppToolbar
+      :project-path="projectPath"
+      :loading-tree="loadingTree"
+      :picking-folder="pickingFolder"
+      :tree-error="treeError"
+      :retry-countdown="retryCountdown"
+      :project-opened="projectOpened"
+      @update:project-path="projectPath = $event"
+      @open-project-by-input="openProjectByInput"
+      @handle-open-project="handleOpenProject"
+      @refresh-tree="refreshTree"
+      @clear-retry="clearRetryTimer"
+      @update:tree-error="treeError = $event"
+      @open-recent-project="openProjectByPath"
+    />
 
     <main ref="workspaceRef" class="workspace" :class="{ 'no-project': !projectOpened, 'editor-collapsed': editorCollapsed }">
-      <aside class="file-panel" :style="{ width: filePanelWidth + 'px' }">
-        <div class="file-panel-head">
-          <div class="file-panel-row file-panel-top-row">
-            <div class="file-panel-tabs" role="group">
-              <button
-                type="button"
-                class="file-panel-tab"
-                :class="{ active: gitPanelMode === 'files' }"
-                @click="gitPanelMode = 'files'"
-              >
-                文件
-              </button>
-              <button
-                type="button"
-                class="file-panel-tab"
-                :class="{ active: gitPanelMode === 'git' }"
-                :disabled="!projectOpened"
-                @click="gitPanelMode = 'git'; refreshGitStatus(gitIsRepo ? { showLoading: false } : undefined)"
-              >
-                Git
-                <span
-                  v-if="gitChangeCount"
-                  class="git-badge"
-                  :class="{ 'git-badge-staged': !gitUnstagedFiles.length }"
-                  :title="gitUnstagedFiles.length && gitStagedFiles.length
-                    ? `${gitStagedFiles.length} 已暂存 · ${gitUnstagedFiles.length} 未暂存`
-                    : gitStagedFiles.length
-                      ? `${gitStagedFiles.length} 已暂存`
-                      : `${gitUnstagedFiles.length} 未暂存`"
-                >{{ gitChangeCount }}</span>
-              </button>
-            </div>
-            <div v-if="projectOpened && gitPanelMode === 'files'" class="file-toolbar">
-              <button type="button" class="icon-btn" title="新建文件" @click="createNewFile">+</button>
-              <button type="button" class="icon-btn" title="新建文件夹" @click="createNewFolder">📁</button>
-              <span v-if="editorCollapsed" class="toolbar-sep" />
-              <button
-                v-if="editorCollapsed"
-                type="button"
-                class="icon-btn"
-                title="展开编辑器"
-                @click="expandEditor"
-              >
-                ◧
-              </button>
-            </div>
-          </div>
-          <div v-if="gitPanelMode === 'files'" class="file-panel-row file-panel-search-row">
-            <div class="search-mode-switch" role="group" aria-label="搜索模式">
-              <button
-                type="button"
-                class="search-mode-btn"
-                :class="{ active: searchMode === 'file' }"
-                :disabled="!projectOpened"
-                @click="searchMode = 'file'"
-              >
-                文件
-              </button>
-              <button
-                type="button"
-                class="search-mode-btn"
-                :class="{ active: searchMode === 'content' }"
-                :disabled="!projectOpened"
-                @click="searchMode = 'content'"
-              >
-                内容
-              </button>
-            </div>
-            <input
-              ref="searchInputRef"
-              v-model="searchQuery"
-              class="search-input"
-              type="text"
-              :placeholder="searchMode === 'file' ? '搜索文件名…' : '搜索代码内容…'"
-              :disabled="!projectOpened"
-              @keydown.enter="handleSearch"
-            />
-          </div>
-        </div>
+      <FilePanel
+        :file-panel-width="filePanelWidth"
+        :git-panel-mode="gitPanelMode"
+        :project-opened="projectOpened"
+        :search-mode="searchMode"
+        :search-query="searchQuery"
+        :editor-collapsed="editorCollapsed"
+        :git-change-count="gitChangeCount"
+        :git-unstaged-files="gitUnstagedFiles"
+        :git-staged-files="gitStagedFiles"
+        @update:git-panel-mode="gitPanelMode = $event"
+        @update:search-query="searchQuery = $event"
+        @update:search-mode="searchMode = $event"
+        @handle-search="handleSearch"
+        @create-new-file="createNewFile"
+        @create-new-folder="createNewFolder"
+        @expand-editor="expandEditor"
+        @refresh-git-status="refreshGitStatus(gitIsRepo ? { showLoading: false } : undefined)"
+      >
 
         <div v-if="gitPanelMode === 'git'" class="git-panel">
           <div v-if="!projectOpened" class="panel-empty">请先打开项目文件夹</div>
@@ -416,12 +287,12 @@
               </div>
             </div>
           </div>
-          <div v-else-if="gitStatusKnown" class="panel-empty">当前目录不是 Git 仓库</div>
           <div v-else-if="gitError" class="panel-empty git-panel-fetch-error">
             <p>获取 Git 状态失败</p>
             <p class="git-fetch-error-detail">{{ gitError }}</p>
             <button type="button" class="secondary small" @click="() => refreshGitStatus()">重试</button>
           </div>
+          <div v-else-if="gitStatusKnown" class="panel-empty">当前目录不是 Git 仓库</div>
           <div v-else class="panel-empty">加载中…</div>
         </div>
 
@@ -482,95 +353,32 @@
             @file-drag-end="onFileDragEnd"
           />
         </div>
-      </aside>
+      </FilePanel>
 
       <div class="resize-handle" @mousedown="startResize('file', $event)"></div>
 
-      <section v-show="!editorCollapsed" class="editor-panel">
-        <div class="editor-header">
-          <div v-if="openTabs.length" class="editor-tabs">
-            <button
-              v-for="tab in openTabs"
-              :key="tab.path"
-              type="button"
-              class="editor-tab"
-              :class="{ active: tab.path === activeFilePath, dirty: tab.dirty }"
-              :title="tab.path"
-              @click="switchTab(tab.path)"
-            >
-              <span class="editor-tab-name">{{ fileName(tab.path) }}</span>
-              <span v-if="tab.dirty" class="editor-tab-dot" aria-hidden="true">•</span>
-              <span
-                class="editor-tab-close"
-                role="button"
-                tabindex="0"
-                title="关闭"
-                @click.stop="closeTab(tab.path)"
-                @keydown.enter.stop.prevent="closeTab(tab.path)"
-              >
-                ×
-              </span>
-            </button>
-          </div>
-          <div v-else class="editor-header-title">未打开文件</div>
-          <div class="editor-header-actions">
-            <button
-              v-if="activeFileDiff"
-              type="button"
-              class="ghost tiny"
-              :disabled="activeFileReadOnly"
-              @click="toggleDiffMode"
-            >
-              {{ showDiffMode ? "编辑" : "对比" }}
-            </button>
-            <span v-if="fileDirty && !showDiffMode" class="dirty-badge">未保存</span>
-            <button
-              type="button"
-              class="ghost tiny"
-              :disabled="!activeFilePath || !fileDirty || showDiffMode || activeFileReadOnly"
-              @click="saveFile"
-            >
-              保存
-            </button>
-            <button type="button" class="ghost tiny" :disabled="!activeFilePath || showDiffMode || activeFileReadOnly" @click="reloadFile">
-              重载
-            </button>
-            <button type="button" class="ghost tiny" title="收起编辑器" @click="collapseEditor">收起</button>
-          </div>
-        </div>
-
-        <div v-if="!activeFilePath" class="editor-empty">
-          <div class="editor-empty-icon" aria-hidden="true">📂</div>
-          <p class="editor-empty-title">从左侧选择文件开始编辑</p>
-          <p class="editor-empty-hint">支持多标签、Diff 对比、Ctrl+S 保存</p>
-          <button type="button" class="secondary compact" @click="collapseEditor">收起编辑器</button>
-        </div>
-
-        <div v-else-if="fileLoadError" class="editor-empty error">{{ fileLoadError }}</div>
-
-        <CodeMonacoDiffEditor
-          v-else-if="showDiffMode && activeFileDiff"
-          class="code-editor"
-          :original="activeFileDiff.before"
-          :modified="activeFileDiff.after"
-          :file-path="activeFilePath"
-        />
-
-        <CodeMonacoEditor
-          ref="editorRef"
-          v-else
-          v-model="fileContent"
-          class="code-editor"
-          :file-path="activeFilePath"
-          :read-only="activeFileReadOnly"
-          @change="onEditorChange"
-          @save="saveFile"
-          @select="onEditorSelect"
-        />
-        <div v-if="selectedCode" class="ask-ai-floating" @click="askAiWithCode">
-          💬 问 AI
-        </div>
-      </section>
+      <EditorPanel
+        :active-file-path="activeFilePath"
+        :file-content="fileContent"
+        :file-dirty="fileDirty"
+        :file-load-error="fileLoadError"
+        :active-file-diff="activeFileDiff"
+        :active-file-read-only="activeFileReadOnly"
+        :show-diff-mode="showDiffMode"
+        :open-tabs="openTabs"
+        :parent-editor-collapsed="editorCollapsed"
+        :selected-code="selectedCode"
+        @update:file-content="fileContent = $event"
+        @switch-tab="switchTab"
+        @close-tab="closeTab"
+        @toggle-diff-mode="toggleDiffMode"
+        @save-file="saveFile"
+        @reload-file="reloadFile"
+        @collapse-editor="collapseEditor"
+        @editor-change="onEditorChange"
+        @editor-select="onEditorSelect"
+        @ask-ai-with-code="askAiWithCode"
+      />
 
       <div
         v-show="!editorCollapsed"
@@ -1090,6 +898,11 @@ import CodeMonacoEditor from "../components/CodeMonacoEditor.vue";
 import ConfirmPopup from "../components/ConfirmPopup.vue";
 import InputPrompt from "../components/InputPrompt.vue";
 import FileTreeNode, { type TreeNode } from "../components/FileTreeNode.vue";
+import AppToolbar from "../components/vibe/AppToolbar.vue";
+import FilePanel from "../components/vibe/FilePanel.vue";
+import GitPanel from "../components/vibe/GitPanel.vue";
+import EditorPanel from "../components/vibe/EditorPanel.vue";
+import ChatPanel from "../components/vibe/ChatPanel.vue";
 import { useConfirm } from "../composables/useConfirm";
 import { useFileDrag } from "../composables/useFileDrag";
 import { useGitPanel, type GitFileDiff } from "../composables/useGitPanel";
@@ -1197,50 +1010,8 @@ import {
   type CursorAgentTimeline,
   type CursorFeedProcessBlock,
 } from "../services/agentCursorFeed";
+import { type AgentToolStep as AgentToolStepFromToolHelpers } from "../utils/toolHelpers";
 
-function getToolIcon(name: string): string {
-  if (name === 'read_file') return '📄';
-  if (name === 'write_file' || name === 'patch_file') return '🔧';
-  if (name === 'grep') return '🔍';
-  if (name === 'search_files') return '🔎';
-  if (name === 'list_dir') return '📁';
-  if (name === 'delete_file') return '🗑️';
-  if (name === 'run_command') return '▶️';
-  return '⚡';
-}
-
-function getToolIconClass(name: string): string {
-  if (name === 'read_file') return 'read';
-  if (name === 'write_file' || name === 'patch_file') return 'write';
-  if (name === 'grep' || name === 'search_files') return 'search';
-  return 'default';
-}
-
-function getToolLabel(name: string): string {
-  if (name === 'read_file') return '读取';
-  if (name === 'write_file') return '写入';
-  if (name === 'patch_file') return '修改';
-  if (name === 'grep') return '搜索';
-  if (name === 'search_files') return '搜索文件';
-  if (name === 'list_dir') return '列出';
-  if (name === 'delete_file') return '删除';
-  if (name === 'run_command') return '执行';
-  return name;
-}
-
-function getToolPath(step: { args?: Record<string, unknown>; detail?: string }): string {
-  const path = String(step.args?.path ?? step.args?.pattern ?? step.args?.query ?? step.detail?.split(' · ')[0] ?? '').trim();
-  return path || '...';
-}
-
-function getToolMeta(step: { summary?: string; ok?: boolean; running?: boolean }): string {
-  if (step.running) return '进行中';
-  if (step.summary) {
-    const match = step.summary.match(/(\d+)/);
-    if (match) return match[1] + (step.summary.includes('行') ? ' 行' : step.summary.includes('个') ? ' 个' : '');
-  }
-  return step.ok === false ? '失败' : '';
-}
 import {
   filterDuplicateFeedThoughts,
   finalizeAssistantBubbleContent,
@@ -1324,23 +1095,8 @@ const CHAT_MAX_WIDTH = 1200;
 const EDITOR_MIN_WIDTH = 280;
 const RESIZE_HANDLES_WIDTH = 8;
 type ChatRole = "user" | "assistant";
-type AgentToolStep = {
-  id: string;
-  name: string;
-  icon: string;
-  title: string;
-  detail: string;
-  label: string;
-  summary: string;
-  ok: boolean;
-  running?: boolean;
-  turn?: number;
-  lineDelta?: number;
-  fullResult?: string;
-  args?: Record<string, unknown>;
-};
 type ChatMessage = Omit<PersistedChatMessage, "tools" | "roundGroups"> & {
-  tools?: AgentToolStep[];
+  tools?: AgentToolStepFromToolHelpers[];
   roundGroups?: AgentRoundGroup[];
   status?: string;
   agentPhase?: string;
@@ -2564,39 +2320,6 @@ function scrollStatusLogToBottom(msgId: string) {
     }
     onChainViewportScroll(msgId);
   });
-}
-
-function formatToolArgsPreview(name: string, args: Record<string, unknown>): string {
-  if (name === "write_file") {
-    const path = String(args.path ?? "").trim();
-    const content = typeof args.content === "string" ? args.content : "";
-    const preview = content.length > 600 ? `${content.slice(0, 600)}\n…（共 ${content.length} 字符）` : content;
-    return path ? `路径：${path}\n\n${preview}` : preview;
-  }
-  if (name === "delete_file") {
-    const path = String(args.path ?? "").trim();
-    return path ? `将删除：${path}` : "";
-  }
-  return "";
-}
-
-const TRIVIAL_TOOL_RESULTS = new Set(["（无匹配文件）", "（无匹配）", "（空目录）"]);
-
-function isTrivialToolResult(result?: string): boolean {
-  const text = result?.trim() || "";
-  if (!text) return true;
-  return TRIVIAL_TOOL_RESULTS.has(text);
-}
-
-function shouldShowToolResult(step: AgentToolStep): boolean {
-  if (step.running || !step.fullResult?.trim()) return false;
-  return !isTrivialToolResult(step.fullResult);
-}
-
-function shouldShowToolExpand(step: AgentToolStep): boolean {
-  if (step.running) return false;
-  if (step.fullResult?.trim()) return true;
-  return Boolean(formatToolArgsPreview(step.name, step.args || {}));
 }
 
 function escapeHtml(s: string): string {
