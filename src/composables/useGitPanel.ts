@@ -86,7 +86,17 @@ export function useGitPanel(
   const gitStashMessage = ref("");
   const gitAiPushStep = ref("");
 
-  const gitStagedFiles = computed(() => gitStatus.value.filter((f) => f.staged));
+  const gitStagedFiles = computed(() => {
+    const seen = new Set<string>();
+    const result: GitStatusFile[] = [];
+    for (const f of gitStatus.value) {
+      if (f.staged && !seen.has(f.path)) {
+        seen.add(f.path);
+        result.push(f);
+      }
+    }
+    return result;
+  });
   const gitUnstagedFiles = computed(() => gitStatus.value.filter((f) => !f.staged));
   const gitChangeCount = computed(() => gitStatus.value.length);
   const canGitCommit = computed(

@@ -54,8 +54,10 @@ function bindModels() {
 
   diffEditor.setModel({ original: originalModel, modified: modifiedModel });
 
+  // 模型绑定后延迟触发 layout + 滚动到第一处差异
   setTimeout(() => {
     if (!diffEditor) return;
+    diffEditor.layout();
     diffEditor.revealFirstDiff();
   }, 200);
 }
@@ -66,7 +68,7 @@ function createDiffEditor() {
 
   diffEditor = monaco.editor.createDiffEditor(container, {
     theme: "vs-dark",
-    automaticLayout: false,
+    automaticLayout: true,
     fontSize: 14,
     fontFamily: "Cascadia Code, Consolas, 'Courier New', monospace",
     readOnly: true,
@@ -74,6 +76,7 @@ function createDiffEditor() {
     scrollBeyondLastLine: false,
     minimap: { enabled: false },
     renderOverviewRuler: true,
+    ignoreTrimWhitespace: false,
   });
 
   bindModels();
@@ -89,8 +92,11 @@ async function initMonaco() {
   await import("monaco-editor/min/vs/editor/editor.main.css");
   monaco = await import("monaco-editor");
   loading.value = false;
-  await Promise.resolve();
+  // 双重 rAF 确保 Vue 完成 DOM 更新、容器已获得正确尺寸
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
   createDiffEditor();
+  // 兜底：再延迟一次 layout
+  setTimeout(() => diffEditor?.layout(), 150);
 }
 
 watch(
