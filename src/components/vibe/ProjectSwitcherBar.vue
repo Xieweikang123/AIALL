@@ -38,6 +38,7 @@
 </template>
 
 <script setup lang="ts">
+import { watch } from "vue";
 import type { ProjectHistoryEntry } from "../../services/vibeProjectHistory";
 
 interface Props {
@@ -48,6 +49,12 @@ interface Props {
 }
 
 const props = defineProps<Props>();
+
+// #region agent log
+watch(() => props.projectList, (list) => {
+  console.log('[DBG][TAB][ProjectSwitcherBar] props.projectList changed', { count: list.length, items: list.map(p => p.displayName) });
+}, { immediate: true });
+// #endregion
 
 defineEmits<{
   (e: "switch-project", path: string): void;

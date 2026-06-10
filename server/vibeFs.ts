@@ -39,7 +39,9 @@ export function resolveProjectPath(
 }
 
 export async function listDirectory(dirPath: string) {
+  const _t0 = Date.now();
   const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+  const _t1 = Date.now();
   const items: Array<{
     name: string;
     path: string;
@@ -50,13 +52,18 @@ export async function listDirectory(dirPath: string) {
     size?: number;
   }> = [];
 
-  for (const entry of entries) {
-    if (entry.name.startsWith(".")) continue;
-    if (IGNORE_DIRS.has(entry.name)) continue;
+  // 并行 stat 所有条目，而非串行
+  const filtered = entries.filter((e) => !e.name.startsWith(".") && !IGNORE_DIRS.has(e.name));
+  const statResults = await Promise.all(
+    filtered.map(async (entry) => {
+      const fullPath = path.join(dirPath, entry.name);
+      const stat = await fs.promises.stat(fullPath).catch(() => null);
+      return { entry, fullPath, stat };
+    }),
+  );
+  const _t2 = Date.now();
 
-    const fullPath = path.join(dirPath, entry.name);
-    const stat = await fs.promises.stat(fullPath).catch(() => null);
-
+  for (const { entry, fullPath, stat } of statResults) {
     items.push({
       name: entry.name,
       path: fullPath,
@@ -72,6 +79,14 @@ export async function listDirectory(dirPath: string) {
     if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
     return a.name.localeCompare(b.name);
   });
+
+  const _t3 = Date.now();
+  // #region agent log
+  try {
+    const logEntry = { sessionId: "b0d733", id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, timestamp: Date.now(), location: "vibeFs.ts:listDirectory", message: "listDirectory timing", data: { dirPath, totalEntries: entries.length, filteredCount: filtered.length, readdirMs: _t1 - _t0, statMs: _t2 - _t1, sortMs: _t3 - _t2, totalMs: _t3 - _t0 }, hypothesisId: "H1", runId: "run1" };
+    fs.appendFile(path.join(process.cwd(), "debug-b0d733.log"), JSON.stringify(logEntry) + "\n", () => {});
+  } catch {}
+  // #endregion
 
   return items;
 }

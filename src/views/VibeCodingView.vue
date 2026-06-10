@@ -16,6 +16,16 @@
       @open-recent-project="openProjectByPath"
     />
 
+    <ProjectSwitcherBar
+      :project-list="projectHistoryList"
+      :current-path="projectPath"
+      :loading-tree="loadingTree"
+      :picking-folder="pickingFolder"
+      @switch-project="openProjectByPath"
+      @remove-project="removeRecentProject"
+      @open-new-project="handleOpenProject"
+    />
+
     <main ref="workspaceRef" class="workspace" :class="{ 'no-project': !projectOpened, 'editor-collapsed': editorCollapsed }">
       <FilePanel
         :file-panel-width="filePanelWidth"
@@ -887,6 +897,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import "../styles/vibe-coding.scss";
 import AgentActivityLogStream, {
   type AgentLogLineItem,
 } from "../components/AgentActivityLogStream.vue";
@@ -899,6 +910,7 @@ import ConfirmPopup from "../components/ConfirmPopup.vue";
 import InputPrompt from "../components/InputPrompt.vue";
 import FileTreeNode, { type TreeNode } from "../components/FileTreeNode.vue";
 import AppToolbar from "../components/vibe/AppToolbar.vue";
+import ProjectSwitcherBar from "../components/vibe/ProjectSwitcherBar.vue";
 import FilePanel from "../components/vibe/FilePanel.vue";
 import GitPanel from "../components/vibe/GitPanel.vue";
 import EditorPanel from "../components/vibe/EditorPanel.vue";
@@ -3054,14 +3066,34 @@ async function openProjectByPath(dirPath: string) {
   resetGitPanelState();
 
   try {
-    const items = await autoRetryWithCountdown(
-      () => loadDirChildren(normalized),
-      {
-        onRetry: (remaining, attempt, max) => {
-          treeError.value = `打开项目失败，正在重试… ${remaining}s (${attempt}/${max})`;
+    // 并行加载目录和聊天记录
+    const [items, chatLoaded] = await Promise.all([
+      autoRetryWithCountdown(
+        () => loadDirChildren(normalized),
+        {
+          onRetry: (remaining, attempt, max) => {
+            treeError.value = `打开项目失败，正在重试… ${remaining}s (${attempt}/${max})`;
+          },
         },
-      },
-    );
+      ),
+      (async () => {
+        if (!hasVibeChatHistory(normalized)) {
+          const diskStore = await fetchChatStoreFromDisk(normalized);
+          if (diskStore.ok && diskStore.data.sessions.length) {
+            restoreChatStoreFromSnapshot(diskStore.data);
+          }
+        } else {
+          await ensureProjectChatLoadedFromDisk(normalized);
+        }
+        let loaded = loadVibeChatHistory(normalized);
+        if (!loaded.length) {
+          await ensureProjectChatLoadedFromDisk(normalized);
+          loaded = loadVibeChatHistory(normalized);
+        }
+        return loaded;
+      })(),
+    ]);
+
     treeError.value = "";
     fileTree.value = items;
     expandedDirs.value = new Set([normalized]);
@@ -3071,26 +3103,18 @@ async function openProjectByPath(dirPath: string) {
     localStorage.setItem(STORAGE_KEY, normalized);
     addProjectToHistory(normalized);
     refreshProjectHistoryList();
-    if (!hasVibeChatHistory(normalized)) {
-      const diskStore = await fetchChatStoreFromDisk(normalized);
-      if (diskStore.ok && diskStore.data.sessions.length) {
-        restoreChatStoreFromSnapshot(diskStore.data);
-      }
-    } else {
-      await ensureProjectChatLoadedFromDisk(normalized);
-    }
-    let loaded = loadVibeChatHistory(normalized);
-    if (!loaded.length) {
-      await ensureProjectChatLoadedFromDisk(normalized);
-      loaded = loadVibeChatHistory(normalized);
-    }
-    chatMessages.value = normalizeChatMessages(loaded);
+
+    chatMessages.value = normalizeChatMessages(chatLoaded);
     activeSessionId.value = getActiveVibeChatSessionId(normalized);
     refreshSessionList(normalized);
-    scheduleSyncChatStore(normalized);
-    refreshGitStatus();
-    // Start file watcher for automatic Git status updates
-    startFileWatcherForProject(normalized);
+
+    // 并行执行非关键操作
+    Promise.all([
+      scheduleSyncChatStore(normalized),
+      refreshGitStatus(),
+      startFileWatcherForProject(normalized),
+    ]).catch(() => {});
+
     syncEditorPanelForOpenFiles();
     maybeAutoResumeLastRecoverableAssistant();
     await scrollChatToBottom(true);
@@ -5290,6 +5314,21 @@ watch(gitPanelMode, (mode) => {
 onMounted(() => {
   reloadAiConfig();
   refreshProjectHistoryList();
+  // #region agent log
+  console.log('[DBG][TAB][onMounted] projectHistoryList', { count: projectHistoryList.value.length, items: projectHistoryList.value.map(p => p.displayName) });
+  nextTick(() => {
+    const barEl = document.querySelector('.project-switcher-bar');
+    const vibePage = document.querySelector('.vibe-page');
+    console.log('[DBG][TAB][onMounted] DOM check', {
+      hasBar: !!barEl,
+      barDisplay: barEl ? window.getComputedStyle(barEl).display : null,
+      barVisibility: barEl ? window.getComputedStyle(barEl).visibility : null,
+      barHeight: barEl ? barEl.getBoundingClientRect().height : null,
+      vibePageChildren: vibePage ? vibePage.children.length : null,
+      childTags: vibePage ? Array.from(vibePage.children).map(c => c.tagName + '.' + c.className.split(' ')[0]) : null,
+    });
+  });
+  // #endregion
   pendingPromptQueue.value = loadPendingQueue();
   loadSavedProject();
   chatPanelWidth.value = Math.min(chatPanelWidth.value, getChatPanelMaxWidth());

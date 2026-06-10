@@ -94,12 +94,13 @@ export interface GitCommitFileDiffResult {
   error?: string;
 }
 
-async function gitExec(projectRoot: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+async function gitExec(projectRoot: string, args: string[], timeoutMs = 10_000): Promise<{ stdout: string; stderr: string }> {
   try {
     return await execFileAsync("git", args, {
       cwd: projectRoot,
       maxBuffer: 4 * 1024 * 1024,
       windowsHide: true,
+      timeout: timeoutMs,
     });
   } catch (error) {
     const err = error as NodeJS.ErrnoException & { stderr?: Buffer | string; stdout?: Buffer | string };
