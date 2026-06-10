@@ -149,6 +149,7 @@ const MAX_TURN_TRACES = 24;
 const MAX_NARRATIVE_CHARS = 800;
 const MAX_MODEL_STEP_CHARS = 500;
 const MAX_TOOL_CALL_ARGS_CHARS = 240;
+const MAX_TOOL_ARGS_DISK_CHARS = 400;
 
 /** Full session payloads live in memory (and on disk); not in localStorage. */
 const memoryByProject = new Map<string, ProjectChatRecord>();
@@ -350,6 +351,19 @@ export function sanitizePersistedChatMessages(
   return sanitizeMessages(messages, options);
 }
 
+/** Truncate string values inside a tool args object to prevent file bloat. */
+function truncateToolArgs(
+  args: Record<string, unknown> | undefined,
+  maxChars: number,
+): Record<string, unknown> | undefined {
+  if (!args || typeof args !== "object") return args;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(args)) {
+    out[k] = typeof v === "string" && v.length > maxChars ? `${v.slice(0, maxChars)}…` : v;
+  }
+  return out;
+}
+
 function sanitizeMessages(
   messages: PersistedChatMessage[],
   options?: { forDisk?: boolean },
@@ -391,7 +405,7 @@ function sanitizeMessages(
           summary: t.summary,
           ok: t.ok,
           turn: t.turn,
-          args: t.args,
+          args: options?.forDisk ? truncateToolArgs(t.args, MAX_TOOL_ARGS_DISK_CHARS) : t.args,
         })),
         statusLog: m.statusLog?.length ? m.statusLog.slice(-MAX_STATUS_LOG_LINES) : undefined,
         turnTraces: m.turnTraces?.length
@@ -689,8 +703,13 @@ export function projectChatNeedsDiskRestore(projectPath: string, sessionId?: str
 
   for (const meta of metas) {
     const expected = meta.messageCount ?? 0;
-    if (expected <= 0) continue;
     const session = record?.sessions.find((s) => s.id === meta.id);
+    // If index says 0 messages but in-memory session is empty, still check disk
+    // (handles old sessions that were synced without messages)
+    if (expected <= 0) {
+      if (!session || session.messages.length === 0) return true;
+      continue;
+    }
     if (!session || session.messages.length === 0) return true;
     if (session.messages.length < expected) return true;
     const missingImages = session.messages.some(

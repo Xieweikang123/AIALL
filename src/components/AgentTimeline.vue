@@ -1,7 +1,7 @@
 <template>
   <div class="cursor-timeline-body">
-    <!-- 控制按钮 -->
-    <div class="cursor-timeline-controls">
+    <!-- 控制按钮（仅在有步骤时显示） -->
+    <div v-if="blocks.length" class="cursor-timeline-controls">
       <button
         v-if="isRunning && showCompact"
         type="button"

@@ -445,7 +445,12 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         const mergedPayload = mergeSessionPayloadForDisk(incomingPayload, existingPayload);
         const sessionPayload = await externalizeSessionPayload(chatDir, id, mergedPayload);
         await fs.promises.writeFile(sessionFile, JSON.stringify(sessionPayload, null, 2), "utf-8");
-        const messageCount = Array.isArray(sessionPayload.messages) ? sessionPayload.messages.length : 0;
+        // After merge+write, re-read the file to get the true message count
+        // (handles cases where incoming was empty but disk had messages)
+        let messageCount = Array.isArray(sessionPayload.messages) ? sessionPayload.messages.length : 0;
+        if (messageCount === 0 && existingPayload && Array.isArray(existingPayload.messages) && existingPayload.messages.length > 0) {
+          messageCount = existingPayload.messages.length;
+        }
         indexSessions.push({
           id,
           title: sessionPayload.title || "新会话",
