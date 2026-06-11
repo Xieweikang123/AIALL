@@ -260,6 +260,13 @@ export async function gitDiffContent(projectRoot: string, filePath: string, stag
       const parsed = parseUnifiedDiff(diffOutput);
       before = parsed.before;
       after = parsed.after;
+
+      if (!diffOutput.trim() && !staged) {
+        const worktreeContent = await readWorktreeFile(projectRoot, filePath);
+        if (worktreeContent) {
+          after = worktreeContent;
+        }
+      }
     } catch {
       const beforePromise = readGitObjectForPreview(projectRoot, staged ? `HEAD:${filePath}` : `:${filePath}`, filePath)
         .then((v) => v ?? (staged ? null : readGitObjectForPreview(projectRoot, `HEAD:${filePath}`, filePath)));

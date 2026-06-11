@@ -619,7 +619,7 @@ export async function runWebSearch(
   const searchUrl = buildSearchUrl(query, safeEngine, limit);
 
   try {
-    const outcome = await runWebExtract({ url: searchUrl, mode: "html" }, () => {});
+    const outcome = await runWebExtract({ url: searchUrl, mode: "auto" }, () => {});
     if (!outcome.payload.ok) {
       return { ok: false, error: String(outcome.payload.error || "搜索失败") };
     }
