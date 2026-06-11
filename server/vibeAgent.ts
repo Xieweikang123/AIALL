@@ -50,7 +50,9 @@ import {
   searchFiles,
   sliceFileLines,
   writeFileContent,
+  type RunExtractOutcome,
 } from "./vibeFs";
+import { runWebExtract, runWebSearch } from "./webExtract";
 import {
   buildModelIdentityHint,
   buildVisionConsultativeContinueHint,
@@ -308,6 +310,8 @@ function toolDisplayName(name: string): string {
     write_file: "写入文件",
     patch_file: "局部修改",
     delete_file: "删除文件",
+    web_search: "联网搜索",
+    web_extract: "抓取网页",
   };
   return map[name] || name;
 }
@@ -460,13 +464,44 @@ const VIBE_AGENT_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "web_search",
+      description: "联网搜索，获取最新信息。返回搜索结果列表（标题、链接、摘要）。",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "搜索关键词" },
+          engine: { type: "string", enum: ["google", "bing", "baidu"], description: "搜索引擎，默认 google" },
+          max_results: { type: "number", description: "最大结果数，默认 5，最大 10" },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "web_extract",
+      description: "抓取指定 URL 的网页内容，返回标题和正文。",
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string", description: "要抓取的网页 URL（http/https）" },
+          mode: { type: "string", enum: ["auto", "html", "browser"], description: "抓取模式，默认 auto" },
+        },
+        required: ["url"],
+      },
+    },
+  },
 ];
 
 const READ_ONLY_AGENT_TOOLS = VIBE_AGENT_TOOLS.filter((t) =>
-  ["list_dir", "read_file", "grep", "search_files"].includes(t.function.name),
+  ["list_dir", "read_file", "grep", "search_files", "web_search", "web_extract"].includes(t.function.name),
 );
 
-const READ_ONLY_AGENT_TOOL_NAMES = new Set(["list_dir", "read_file", "grep", "search_files"]);
+const READ_ONLY_AGENT_TOOL_NAMES = new Set(["list_dir", "read_file", "grep", "search_files", "web_search", "web_extract"]);
 const WRITE_AGENT_TOOL_NAMES = new Set(["write_file", "patch_file", "delete_file"]);
 
 const LARGE_FILE_LINE_THRESHOLD = 500;
@@ -508,6 +543,7 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "重要：必须通过 API 工具接口调用 list_dir、read_file 等，禁止在正文里输出 <function>、<parameter> 等标记。",
     "工具 path 参数使用相对项目根的路径（如 package.json、src/main.ts），不要用绝对路径。",
     "run_command 可在项目目录执行 shell 命令（如 npm run dev、python main.py、go test），超时默认 30 秒，长时间命令请设置 timeout_ms；不要执行危险命令。",
+    "联网搜索：当需要最新信息、外部文档、API 用法时，使用 web_search 搜索；使用 web_extract 抓取指定链接内容。搜索结果可能较多，优先关注前 3 条结果，避免大量内容占用上下文。",
     "如果系统提示你上一次回复被截断，请从截断处继续输出，不要重复已输出的内容。",
     `项目根目录：${projectRoot}`,
   ];
@@ -541,6 +577,7 @@ function buildAskSystemPrompt(
     "用户附截图询问界面/功能时：先描述截图所见，再判断是否属于本项目（优先查 src/views、src/components），勿默认是外部应用。",
     "用户针对截图局部提问（配色、按钮、某块区域）时：讨论阶段只谈其所指可见范围，勿擅自扩大到整页/全项目样式盘点；若用户明确要求修改，可在该范围内定位源码并说明改法；用户明确说「整个/整页/全面板」时可按扩大后的范围回答。",
     "你可以使用 list_dir、read_file、grep、search_files 工具来探索项目、读取文件，但不能修改任何文件。",
+    "你可以使用 web_search 搜索外部信息，使用 web_extract 抓取指定链接内容。",
     "若信息不足，请主动使用工具查找相关内容，而不是要求用户打开文件。",
     "读取文件时：优先 grep / search_files 定位，再用 read_file 的 offset/limit 分段读取（单次约 200 行）；避免连续大块读取同一文件。",
     "收集到足够信息后立即用自然语言回答，不要无意义地继续读文件。",
@@ -637,6 +674,16 @@ function toolSummary(name: string, result: string): string {
     const outMatch = result.match(/^stdout:\n(.+)/m);
     const oneLine = (outMatch?.[1] || result).replace(/\s+/g, " ").trim();
     return oneLine.length > 60 ? `${oneLine.slice(0, 60)}…` : oneLine || "执行完成";
+  }
+
+  if (name === "web_search") {
+    const n = result.split("\n").filter((l) => l.match(/^\d+\./)).length;
+    return n > 0 ? `找到 ${n} 条结果` : "搜索完成";
+  }
+
+  if (name === "web_extract") {
+    const m = result.match(/标题：(.+)/);
+    return m ? `抓取「${m[1].slice(0, 30)}」` : "抓取网页";
   }
 
   const oneLine = result.replace(/\s+/g, " ").trim();
@@ -890,6 +937,31 @@ export async function executeTool(
       if (error.status !== undefined) parts.push(`exit code: ${error.status}`);
       return parts.length ? `命令执行失败：\n${parts.join("\n\n")}` : `错误：${error.message}`;
     }
+  }
+
+  if (name === "web_search") {
+    const query = String(args.query || "").trim();
+    if (!query) return "错误：缺少 query";
+    const engine = String(args.engine || "google").trim();
+    const maxResults = Math.min(10, Math.max(1, Number(args.max_results) || 5));
+    const result = await runWebSearch(query, engine, maxResults);
+    if (!result.ok) return `错误：${result.error}`;
+    return result.text || "（无结果）";
+  }
+
+  if (name === "web_extract") {
+    const url = String(args.url || "").trim();
+    if (!url) return "错误：缺少 url";
+    if (!/^https?:\/\//.test(url)) return "错误：url 必须以 http:// 或 https:// 开头";
+    const mode = String(args.mode || "auto").trim();
+    const outcome = await runWebExtract({ url, mode }, () => {});
+    const payload = outcome.payload as Record<string, unknown>;
+    if (!payload.ok) {
+      return `错误：${payload.error || "抓取失败"}`;
+    }
+    const title = String(payload.title || "无标题");
+    const text = String(payload.text || "").slice(0, 120000);
+    return `网页抓取成功\n标题：${title}\n正文：\n${text}`;
   }
 
   return `错误：未知工具 ${name}`;

@@ -13,12 +13,14 @@
       <p v-else-if="block.kind === 'status'" class="cursor-action planning">{{ block.text }}</p>
     </template>
 
-    <!-- 最终回答 -->
+    <!-- 当前状态（运行中显示） -->
+    <p v-if="isRunning && currentStatus" class="cursor-action planning">{{ currentStatus }}</p>
+
+    <!-- 最终回答（仅完成后显示） -->
     <ChatMarkdown
-      v-if="finalAnswer && finalAnswer.trim()"
+      v-if="!isRunning && finalAnswer && finalAnswer.trim()"
       class="cursor-merged-answer"
       :content="finalAnswer"
-      :streaming="isRunning && !finalAnswerComplete"
     />
   </div>
 </template>
@@ -39,7 +41,7 @@ const props = defineProps<{
   roundGroups: AgentRoundGroupView[];
   finalAnswer: string;
   isRunning: boolean;
-  finalAnswerComplete: boolean;
+  currentStatus?: string;
 }>();
 
 const mergedBlocks = computed<CursorFeedProcessBlock[]>(() => {
@@ -68,8 +70,8 @@ const mergedBlocks = computed<CursorFeedProcessBlock[]>(() => {
   }
 
   return layoutCursorFeedBlocks(items, {
-    keepVisible: 8,
-    collapseAfter: 6,
+    keepVisible: 3,
+    collapseAfter: 3,
   });
 });
 </script>
@@ -80,6 +82,35 @@ const mergedBlocks = computed<CursorFeedProcessBlock[]>(() => {
   flex-direction: column;
   gap: 6px;
   padding: 8px 0;
+}
+
+.cursor-action.planning {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-style: normal;
+  color: rgba(139, 148, 158, 0.85);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(139, 148, 158, 0.06);
+  border-radius: 6px;
+  margin: 2px 0;
+  font-size: 12px;
+}
+
+.cursor-action.planning::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid rgba(139, 148, 158, 0.3);
+  border-top-color: rgba(139, 148, 158, 0.8);
+  border-radius: 50%;
+  animation: planning-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes planning-spin {
+  to { transform: rotate(360deg); }
 }
 
 .cursor-merged-answer {

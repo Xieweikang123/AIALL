@@ -1,8 +1,8 @@
 <template>
   <div class="cursor-actions-block">
-    <details v-if="block.collapsed.length" class="cursor-actions-fold" open>
+    <details v-if="block.collapsed.length" class="cursor-actions-fold" @toggle="isExpanded = $event.target.open">
       <summary class="cursor-actions-fold-summary">
-        {{ formatCollapsedStepsSummary(block.collapsed.map((item: any) => item.step)) }}
+        {{ collapsedStepsSummary }}
       </summary>
       <div class="cursor-actions-fold-body">
         <template v-for="item in block.collapsed" :key="item.key">
@@ -55,6 +55,7 @@
 </template>
 
 <script setup lang="ts">
+import { ref, computed } from "vue";
 import type { CursorFeedProcessBlock } from "../services/agentCursorFeed";
 import {
   getToolIcon,
@@ -74,7 +75,23 @@ import {
 type ActionItem = { key: string; step: AgentToolStep };
 type ActionsBlock = { kind: "actions"; key: string; collapsed: ActionItem[]; visible: ActionItem[] };
 
-defineProps<{ block: ActionsBlock }>();
+const props = defineProps<{ block: ActionsBlock }>();
+
+const isExpanded = ref(false);
+
+const collapsedStepsSummary = computed(() => {
+  const steps = props.block.collapsed.map((item) => item.step);
+  const count = steps.length;
+  const summary = formatCollapsedStepsSummary(steps);
+  if (isExpanded.value) {
+    return summary.replace("已折叠", "已展开");
+  }
+  return summary;
+});
+
+function toggleExpanded() {
+  isExpanded.value = !isExpanded.value;
+}
 </script>
 
 <style scoped>
@@ -129,8 +146,6 @@ defineProps<{ block: ActionsBlock }>();
   gap: 1px;
   margin-top: 3px;
   padding-left: 4px;
-  max-height: 120px;
-  overflow: auto;
 }
 
 .cursor-action-compact {

@@ -14,7 +14,7 @@
         :round-groups="agentRoundGroupViews(msg)"
         :final-answer="timelineAnswerContent(msg)"
         :is-running="isAgentRunning(msg)"
-        :final-answer-complete="!isAgentRunning(msg)"
+        :current-status="currentAgentStatus(msg)"
       />
 
       <!-- 调试面板 -->
@@ -70,6 +70,7 @@ const {
   collapseActivityDetailed,
   cursorActivitySummary,
   timelineAnswerContent,
+  currentAgentStatus,
 } = useAgentMessage(
   computed(() => props.msg),
   {

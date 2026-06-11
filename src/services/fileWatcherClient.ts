@@ -24,6 +24,7 @@ export async function startFileWatcher(
   watchPaths?: string[]
 ): Promise<FileWatcherStartResult> {
   try {
+    watchedProjectPath = projectPath;
     const url = backendUrl("/backend/vibe/file-watcher/start");
     const response = await fetch(url, {
       method: "POST",
@@ -68,6 +69,7 @@ let errorCallback: FileWatcherErrorCallback | null = null;
 let statusCallback: FileWatcherStatusCallback | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let disposed = false;
+let watchedProjectPath: string | null = null;
 
 const RECONNECT_DELAY = 3000;
 
@@ -107,12 +109,20 @@ function bindStreamListeners() {
   };
 }
 
-function reconnect() {
+async function reconnect() {
   if (disposed) return;
   if (reconnectTimer) clearTimeout(reconnectTimer);
-  reconnectTimer = setTimeout(() => {
+  reconnectTimer = setTimeout(async () => {
     reconnectTimer = null;
     if (disposed || !changeCallback) return;
+    // 重新启动服务器端 watcher（如果之前有项目路径）
+    if (watchedProjectPath) {
+      try {
+        await startFileWatcher(watchedProjectPath);
+      } catch {
+        // 忽略启动错误，继续重连 SSE
+      }
+    }
     eventSource = new EventSource(backendUrl("/backend/vibe/file-watcher/stream"));
     bindStreamListeners();
   }, RECONNECT_DELAY);
@@ -150,4 +160,5 @@ export function disconnectFileWatcherStream(): void {
   }
   changeCallback = null;
   errorCallback = null;
+  watchedProjectPath = null;
 }

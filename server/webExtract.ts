@@ -278,7 +278,7 @@ interface RunExtractOutcome {
   payload: WebExtractRunPayload;
 }
 
-async function runWebExtract(body: WebExtractRequestBody, emit: (message: string) => void): Promise<RunExtractOutcome> {
+export async function runWebExtract(body: WebExtractRequestBody, emit: (message: string) => void): Promise<RunExtractOutcome> {
   const safeEmit = (message: string) => {
     try {
       emit(message);
@@ -518,6 +518,132 @@ async function runWebExtract(body: WebExtractRequestBody, emit: (message: string
         error: causeMessage ? `${baseMessage}\n原因：${causeMessage}` : baseMessage,
       },
     };
+  }
+}
+
+export type { WebExtractRequestBody, RunExtractOutcome };
+
+function buildSearchUrl(query: string, engine: string, limit: number): string {
+  const encodedQuery = encodeURIComponent(query);
+  switch (engine) {
+    case "bing":
+      return `https://www.bing.com/search?q=${encodedQuery}&count=${limit}`;
+    case "baidu":
+      return `https://www.baidu.com/s?wd=${encodedQuery}&rn=${limit}`;
+    case "google":
+    default:
+      return `https://www.google.com/search?q=${encodedQuery}&num=${limit}`;
+  }
+}
+
+interface SearchResult {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+function parseGoogleResults(html: string): SearchResult[] {
+  const results: SearchResult[] = [];
+  const divPattern = /<div class="[^"]*"[^>]*>[\s\S]*?<a href="\/url\?q=([^&"]+)[^"]*"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<span[^>]*>([\s\S]*?)<\/span>/gi;
+  let match;
+  while ((match = divPattern.exec(html)) !== null && results.length < 10) {
+    const url = decodeURIComponent(match[1]);
+    const title = match[2].replace(/<[^>]+>/g, "").trim();
+    const snippet = match[3].replace(/<[^>]+>/g, "").trim();
+    if (url && title && !url.includes("google.com")) {
+      results.push({ title, url, snippet });
+    }
+  }
+  return results;
+}
+
+function parseBingResults(html: string): SearchResult[] {
+  const results: SearchResult[] = [];
+  const liPattern = /<li class="b_algo"[\s\S]*?<a href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/gi;
+  let match;
+  while ((match = liPattern.exec(html)) !== null && results.length < 10) {
+    const url = match[1];
+    const title = match[2].replace(/<[^>]+>/g, "").trim();
+    const snippet = match[3].replace(/<[^>]+>/g, "").trim();
+    if (url && title) {
+      results.push({ title, url, snippet });
+    }
+  }
+  return results;
+}
+
+function parseBaiduResults(html: string): SearchResult[] {
+  const results: SearchResult[] = [];
+  const divPattern = /<div class="result[^"]*"[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<span class="content-right_[^"]*">([\s\S]*?)<\/span>/gi;
+  let match;
+  while ((match = divPattern.exec(html)) !== null && results.length < 10) {
+    const url = match[1];
+    const title = match[2].replace(/<[^>]+>/g, "").trim();
+    const snippet = match[3].replace(/<[^>]+>/g, "").trim();
+    if (url && title) {
+      results.push({ title, url, snippet });
+    }
+  }
+  if (results.length === 0) {
+    const simplePattern = /<h3[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+    while ((match = simplePattern.exec(html)) !== null && results.length < 10) {
+      const url = match[1];
+      const title = match[2].replace(/<[^>]+>/g, "").trim();
+      if (url && title && !url.includes("baidu.com")) {
+        results.push({ title, url, snippet: "" });
+      }
+    }
+  }
+  return results;
+}
+
+function parseSearchResults(html: string, engine: string): SearchResult[] {
+  switch (engine) {
+    case "bing":
+      return parseBingResults(html);
+    case "baidu":
+      return parseBaiduResults(html);
+    case "google":
+    default:
+      return parseGoogleResults(html);
+  }
+}
+
+export async function runWebSearch(
+  query: string,
+  engine: string = "google",
+  maxResults: number = 5,
+): Promise<{ ok: boolean; text?: string; error?: string }> {
+  const safeEngine = ["google", "bing", "baidu"].includes(engine) ? engine : "google";
+  const limit = Math.min(10, Math.max(1, maxResults));
+  const searchUrl = buildSearchUrl(query, safeEngine, limit);
+
+  try {
+    const outcome = await runWebExtract({ url: searchUrl, mode: "html" }, () => {});
+    if (!outcome.payload.ok) {
+      return { ok: false, error: String(outcome.payload.error || "搜索失败") };
+    }
+    const html = String(outcome.payload.text || "");
+    const results = parseSearchResults(html, safeEngine);
+
+    if (results.length === 0) {
+      return { ok: false, error: "未找到搜索结果，可能被搜索引擎拦截，请稍后重试" };
+    }
+
+    const lines = [`搜索结果：关键词 "${query}"`, ""];
+    results.slice(0, limit).forEach((r, i) => {
+      lines.push(`${i + 1}. ${r.title}`);
+      lines.push(`   链接：${r.url}`);
+      if (r.snippet) {
+        lines.push(`   摘要：${r.snippet}`);
+      }
+      lines.push("");
+    });
+
+    return { ok: true, text: lines.join("\n") };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    return { ok: false, error: `搜索异常：${msg}` };
   }
 }
 

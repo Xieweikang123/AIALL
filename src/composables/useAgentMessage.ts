@@ -122,6 +122,18 @@ export function useAgentMessage(
     return messageDisplayContent(m);
   }
 
+  function currentAgentStatus(m: AgentMessage): string {
+    if (!isAgentRunning(m)) return "";
+    let detail = m.agentDetail || m.status;
+    if (
+      m.agentPhase &&
+      ["connecting_local", "stream_connected", "connected", "reconnecting", "preparing", "starting", "building_context"].includes(m.agentPhase)
+    ) {
+      detail = m.agentDetail || (m.agentPhase === "connecting_local" ? "连接本地服务" : "启动 Agent");
+    }
+    return detail || "";
+  }
+
   function cursorActivitySummary(m: AgentMessage): string {
     const actions = m.tools?.length ?? 0;
     const last = m.tools?.[m.tools.length - 1];
@@ -180,6 +192,7 @@ export function useAgentMessage(
     cursorAgentFeedBlocks,
     cursorAgentFeedAnswer,
     timelineAnswerContent,
+    currentAgentStatus,
     cursorActivitySummary,
     agentRoundGroupViews,
     toggleActivityExpanded,
