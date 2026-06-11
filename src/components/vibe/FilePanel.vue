@@ -240,9 +240,10 @@ defineExpose({ searchInputRef });
 }
 
 .search-mode-btn {
-  flex: 1;
-  padding: 4px 8px;
+  flex: 0 0 auto;
+  padding: 4px 10px;
   font-size: 11px;
+  white-space: nowrap;
   border: 1px solid var(--border-color, #333);
   background: var(--bg-secondary, #252525);
   color: var(--text-secondary, #999);

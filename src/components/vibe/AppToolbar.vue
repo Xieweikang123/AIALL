@@ -180,11 +180,11 @@ function formatSessionTime(iso: string): string {
 .app-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 2px 16px;
+  gap: 12px;
+  padding: 6px 20px;
   background: var(--bg-primary);
   border-bottom: 1px solid var(--border-color);
-  height: 32px;
+  height: 44px;
   flex-shrink: 0;
 }
 
@@ -197,6 +197,7 @@ function formatSessionTime(iso: string): string {
 
 .brand-icon {
   font-size: 18px;
+  flex-shrink: 0;
 }
 
 .title {
@@ -204,22 +205,24 @@ function formatSessionTime(iso: string): string {
   font-weight: 600;
   margin: 0;
   white-space: nowrap;
+  overflow: visible;
 }
 
 .toolbar-project {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex: 1;
-  max-width: 500px;
+  min-width: 0;
 }
 
 .path-input {
   flex: 1;
-  padding: 4px 8px;
+  min-width: 0;
+  padding: 5px 10px;
   font-size: 12px;
   border: 1px solid var(--border-color);
-  border-radius: 4px;
+  border-radius: 6px;
   background: var(--bg-secondary);
   color: var(--text-primary);
 }
@@ -234,6 +237,7 @@ function formatSessionTime(iso: string): string {
   align-items: center;
   gap: 8px;
   margin-left: auto;
+  flex-shrink: 0;
 }
 
 .project-history-wrap {
@@ -402,10 +406,11 @@ function formatSessionTime(iso: string): string {
   background: var(--accent-color);
   color: white;
   border: none;
-  padding: 6px 12px;
-  border-radius: 4px;
+  padding: 5px 12px;
+  border-radius: 6px;
   font-size: 12px;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .primary:hover {
@@ -418,15 +423,15 @@ function formatSessionTime(iso: string): string {
 }
 
 .primary.compact {
-  padding: 4px 8px;
+  padding: 5px 12px;
 }
 
 .secondary {
   background: var(--bg-tertiary);
   color: var(--text-primary);
   border: 1px solid var(--border-color);
-  padding: 6px 12px;
-  border-radius: 4px;
+  padding: 5px 12px;
+  border-radius: 6px;
   font-size: 12px;
   cursor: pointer;
 }
@@ -441,6 +446,6 @@ function formatSessionTime(iso: string): string {
 }
 
 .secondary.compact {
-  padding: 4px 8px;
+  padding: 5px 12px;
 }
 </style>

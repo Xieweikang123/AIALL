@@ -5502,14 +5502,13 @@ onBeforeUnmount(() => {
 .app-toolbar {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 2px 16px;
+  gap: 12px;
+  padding: 6px 20px;
   border-bottom: none;
   background: rgba(11, 18, 32, 0.92);
   backdrop-filter: blur(12px);
   flex-shrink: 0;
-  min-height: 32px;
+  height: 44px;
 }
 
 .toolbar-brand {
@@ -5517,11 +5516,15 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+  padding-right: 12px;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  margin-right: 4px;
 }
 
 .brand-icon {
   font-size: 16px;
   line-height: 1;
+  flex-shrink: 0;
 }
 
 .title {
@@ -5530,12 +5533,13 @@ onBeforeUnmount(() => {
   font-weight: 700;
   letter-spacing: -0.2px;
   white-space: nowrap;
+  overflow: visible;
 }
 
 .toolbar-project {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex: 1;
   flex-basis: 420px;
   min-width: 0;
@@ -5553,10 +5557,10 @@ onBeforeUnmount(() => {
 .path-input {
   flex: 1;
   min-width: 120px;
-  border: 1px solid var(--border);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 7px;
-  padding: 6px 12px;
-  background: rgba(255, 255, 255, 0.04);
+  padding: 5px 12px;
+  background: rgba(255, 255, 255, 0.03);
   color: var(--text);
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -5565,9 +5569,9 @@ onBeforeUnmount(() => {
 }
 
 .path-input:focus {
-  border-color: rgba(31, 111, 235, 0.5);
+  border-color: rgba(31, 111, 235, 0.4);
   background: rgba(255, 255, 255, 0.06);
-  box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.08);
+  box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.06);
 }
 
 .path-input::placeholder {
