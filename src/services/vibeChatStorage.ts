@@ -112,7 +112,7 @@ export type VibeChatProjectSnapshot = {
   version: typeof STORE_VERSION;
   projectPath: string;
   activeSessionId: string;
-  sessions: Array<VibeChatSessionMeta & { messages: PersistedChatMessage[] }>;
+  sessions: Array<VibeChatSessionMeta & { messages?: PersistedChatMessage[] }>;
 };
 
 type VibeChatSession = {
@@ -745,7 +745,7 @@ export function restoreChatStoreFromSnapshot(snapshot: VibeChatProjectSnapshot):
     title: s.title || "新会话",
     createdAt: s.createdAt || new Date().toISOString(),
     updatedAt: s.updatedAt || new Date().toISOString(),
-    messages: sanitizeMessages(s.messages, { forDisk: true }),
+    messages: sanitizeMessages(s.messages || [], { forDisk: true }),
     status: s.status || "active",
   }));
   const record: ProjectChatRecord = {

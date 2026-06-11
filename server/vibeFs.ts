@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -52,18 +53,22 @@ export async function listDirectory(dirPath: string) {
     size?: number;
   }> = [];
 
-  // 并行 stat 所有条目，而非串行
+  // 用 readdir 的 withFileTypes 判断类型，只对文件取 size（减少 stat 调用）
   const filtered = entries.filter((e) => !e.name.startsWith(".") && !IGNORE_DIRS.has(e.name));
   const statResults = await Promise.all(
     filtered.map(async (entry) => {
       const fullPath = path.join(dirPath, entry.name);
-      const stat = await fs.promises.stat(fullPath).catch(() => null);
-      return { entry, fullPath, stat };
+      let size: number | undefined;
+      if (entry.isFile()) {
+        const stat = await fs.promises.stat(fullPath).catch(() => null);
+        size = stat?.size;
+      }
+      return { entry, fullPath, size };
     }),
   );
   const _t2 = Date.now();
 
-  for (const { entry, fullPath, stat } of statResults) {
+  for (const { entry, fullPath, size } of statResults) {
     items.push({
       name: entry.name,
       path: fullPath,
@@ -71,7 +76,7 @@ export async function listDirectory(dirPath: string) {
       isDirectory: entry.isDirectory(),
       isFile: entry.isFile(),
       extension: entry.isFile() ? path.extname(entry.name).toLowerCase() : "",
-      size: stat?.size,
+      size,
     });
   }
 
@@ -81,12 +86,9 @@ export async function listDirectory(dirPath: string) {
   });
 
   const _t3 = Date.now();
-  // #region agent log
-  try {
-    const logEntry = { sessionId: "b0d733", id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, timestamp: Date.now(), location: "vibeFs.ts:listDirectory", message: "listDirectory timing", data: { dirPath, totalEntries: entries.length, filteredCount: filtered.length, readdirMs: _t1 - _t0, statMs: _t2 - _t1, sortMs: _t3 - _t2, totalMs: _t3 - _t0 }, hypothesisId: "H1", runId: "run1" };
-    fs.appendFile(path.join(process.cwd(), "debug-b0d733.log"), JSON.stringify(logEntry) + "\n", () => {});
-  } catch {}
-  // #endregion
+  // 记录耗时到 debug log
+  const timings = { readdir: _t1 - _t0, stat: _t2 - _t1, sort: _t3 - _t2, total: _t3 - _t0, entries: entries.length, filtered: filtered.length, items: items.length };
+  try { fs.appendFileSync(path.join(os.tmpdir(), "aiall-list-perf.log"), `${new Date().toISOString()} ${dirPath} ${JSON.stringify(timings)}\n`); } catch {}
 
   return items;
 }

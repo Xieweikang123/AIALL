@@ -202,21 +202,64 @@ export type ChatStoreLoadResult =
   | { ok: true; data: import("./vibeChatStorage").VibeChatProjectSnapshot }
   | { ok: false; error: string };
 
-export async function fetchChatStoreFromDisk(projectPath: string): Promise<ChatStoreLoadResult> {
+export type SessionMessagesResult =
+  | { ok: true; data: { sessionId: string; messages: unknown[] } }
+  | { ok: false; error: string };
+
+let fetchChatStoreAbort: AbortController | null = null;
+
+/** 加载会话存储，默认不含 messages；传入 loadMessages=true 可同时加载消息内容 */
+export async function fetchChatStoreFromDisk(projectPath: string, options?: { loadMessages?: boolean }): Promise<ChatStoreLoadResult> {
+  // 取消之前的请求，避免连接池阻塞
+  if (fetchChatStoreAbort) {
+    fetchChatStoreAbort.abort();
+    fetchChatStoreAbort = null;
+  }
+  const controller = new AbortController();
+  fetchChatStoreAbort = controller;
+
+  const t0 = performance.now();
   try {
-    const response = await fetch(
-      backendUrl(`/backend/vibe/chat-store-load?projectPath=${encodeURIComponent(projectPath)}`),
-    );
+    const loadMsg = options?.loadMessages ? "&loadMessages=1" : "";
+    const url = backendUrl(`/backend/vibe/chat-store-load?projectPath=${encodeURIComponent(projectPath)}&_t=${Date.now()}${loadMsg}`);
+    
+    const response = await fetch(url, { signal: controller.signal });
+    console.log(`[FETCH] ${Math.round(performance.now() - t0)}ms ${projectPath.split("\\").pop()}`);
+    
     if (response.status === 404) {
       return { ok: false, error: "磁盘上没有会话备份" };
     }
     if (!response.ok) {
       return { ok: false, error: `读取会话备份失败：HTTP ${response.status}` };
     }
-    const result = await readJsonResponse<ChatStoreLoadResult>(response);
+    
+    const result = await response.json() as ChatStoreLoadResult;
     return result;
   } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      return { ok: false, error: "请求已取消" };
+    }
     return { ok: false, error: formatFetchError(error, "读取会话备份失败") };
+  } finally {
+    if (fetchChatStoreAbort === controller) {
+      fetchChatStoreAbort = null;
+    }
+  }
+}
+
+/** 按需加载单个会话的 messages */
+export async function fetchSessionMessages(projectPath: string, sessionId: string): Promise<SessionMessagesResult> {
+  try {
+    const response = await fetch(
+      backendUrl(`/backend/vibe/chat-session-messages?projectPath=${encodeURIComponent(projectPath)}&sessionId=${encodeURIComponent(sessionId)}`),
+    );
+    if (!response.ok) {
+      return { ok: false, error: `读取会话消息失败：HTTP ${response.status}` };
+    }
+    const result = await readJsonResponse<SessionMessagesResult>(response);
+    return result;
+  } catch (error) {
+    return { ok: false, error: formatFetchError(error, "读取会话消息失败") };
   }
 }
 

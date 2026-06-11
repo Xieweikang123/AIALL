@@ -36,10 +36,49 @@ async function atomicWriteFile(filePath: string, content: string): Promise<void>
 }
 
 const DEBUG_LOG = path.join(os.tmpdir(), "aiall-debug.log");
+const TAB_PERF_LOG = path.join(os.tmpdir(), "aiall-tab-perf.log");
 function debugLog(msg: string) {
   fs.appendFileSync(DEBUG_LOG, `[${new Date().toISOString()}] ${msg}\n`);
 }
+function tabPerfLog(line: string) {
+  fs.appendFileSync(TAB_PERF_LOG, line + "\n");
+}
 debugLog("=== middleware loaded v2 ===");
+
+// 内存缓存 chat-store.json 避免反复读盘触发 Defender
+const chatStoreCache = new Map<string, { raw: string; ts: number }>();
+const CHAT_STORE_CACHE_TTL_MS = 60_000;
+
+// 内存缓存目录列表
+const dirListCache = new Map<string, { items: unknown[]; ts: number }>();
+const DIR_LIST_CACHE_TTL_MS = 30_000;
+
+function getCachedChatStore(projectPath: string): string | null {
+  const entry = chatStoreCache.get(projectPath);
+  if (entry && Date.now() - entry.ts < CHAT_STORE_CACHE_TTL_MS) {
+    return entry.raw;
+  }
+  chatStoreCache.delete(projectPath);
+  return null;
+}
+function setCachedChatStore(projectPath: string, raw: string) {
+  chatStoreCache.set(projectPath, { raw, ts: Date.now() });
+}
+function invalidateChatStoreCache(projectPath: string) {
+  chatStoreCache.delete(projectPath);
+}
+
+function getCachedDirList(dirPath: string): unknown[] | null {
+  const entry = dirListCache.get(dirPath);
+  if (entry && Date.now() - entry.ts < DIR_LIST_CACHE_TTL_MS) {
+    return entry.items;
+  }
+  dirListCache.delete(dirPath);
+  return null;
+}
+function setCachedDirList(dirPath: string, items: unknown[]) {
+  dirListCache.set(dirPath, { items, ts: Date.now() });
+}
 
 /** SSE comment interval while agent run is open (prevents idle connection drops). */
 const AGENT_SSE_KEEPALIVE_MS = 15_000;
@@ -236,6 +275,21 @@ function resolvePathInsideOptionalRoot(inputPath: string, projectRoot?: string):
 }
 
 export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
+  // POST /backend/vibe/log — 简单日志端点
+  middlewares.use("/backend/vibe/log", async (req, res) => {
+    if (req.method !== "POST") { sendJson(res, 405, { ok: false }); return; }
+    try {
+      const body = await readJsonBody(req) as { path?: string; line?: string };
+      if (body.path === "tab-perf.log" && body.line) {
+        tabPerfLog(body.line);
+      } else if (body.path === "fetch-perf.log" && body.line) {
+        const fetchLogPath = path.join(os.tmpdir(), "aiall-fetch-perf.log");
+        fs.appendFileSync(fetchLogPath, body.line);
+      }
+      sendJson(res, 200, { ok: true });
+    } catch { sendJson(res, 500, { ok: false }); }
+  });
+
   // POST /backend/vibe/debug-log — 临时调试日志端点，写入 NDJSON 到 debug-b0d733.log
   middlewares.use("/backend/vibe/debug-log", async (req, res) => {
     if (req.method !== "POST") { sendJson(res, 405, { ok: false }); return; }
@@ -251,6 +305,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
 
   // GET /backend/vibe/chat-store-load
   middlewares.use("/backend/vibe/chat-store-load", async (req, res) => {
+    const _reqTime = Date.now();
     if (req.method !== "GET") {
       sendJson(res, 405, { ok: false, error: "仅支持 GET 请求" });
       return;
@@ -259,15 +314,23 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
     try {
       const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
       const projectPath = (url.searchParams.get("projectPath") || "").trim();
+      const loadMessages = url.searchParams.get("loadMessages") === "1";
       if (!projectPath) {
         sendJson(res, 400, { ok: false, error: "缺少 projectPath" });
         return;
       }
+      debugLog(`chat-store-load: request-arrived projectPath="${projectPath}" delayFromEntry=${Date.now() - _reqTime}ms`);
 
       const resolved = path.resolve(projectPath);
       const chatDir = path.join(resolved, ".aiall", "vibe-chat-sessions");
       const storeFile = path.join(chatDir, "chat-store.json");
-      const raw = await fs.promises.readFile(storeFile, "utf-8").catch(() => null);
+      let raw = getCachedChatStore(resolved);
+      if (raw) {
+        debugLog(`chat-store-load: cache-hit projectPath="${projectPath}" age=${Date.now() - chatStoreCache.get(resolved)?.ts}ms`);
+      } else {
+        raw = await fs.promises.readFile(storeFile, "utf-8").catch(() => null);
+        if (raw) setCachedChatStore(resolved, raw);
+      }
       if (!raw) {
         sendJson(res, 404, { ok: false, error: "未找到 chat-store.json" });
         return;
@@ -294,40 +357,60 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         createdAt: string;
         updatedAt: string;
         messageCount: number;
-        messages: unknown[];
+        messages?: unknown[];
         status?: string;
       }> = [];
 
       const _chatT0 = Date.now();
-      // 并行读取所有 session 文件
-      const sessionResults = await Promise.all(
-        metas.map(async (meta) => {
+      debugLog(`chat-store-load start: projectPath="${projectPath}", loadMessages=${loadMessages}, sessions=${metas.length}`);
+
+      if (loadMessages) {
+        // 原逻辑：并行读取所有 session 文件（含 messages）
+        const sessionResults = await Promise.all(
+          metas.map(async (meta) => {
+            const id = (meta.id || "").trim();
+            const fileName = (meta.file || (id ? `chat-${safeFilePart(id)}.json` : "")).trim();
+            if (!fileName) return null;
+            const sessionFile = path.join(chatDir, fileName);
+            const sessionRaw = await fs.promises.readFile(sessionFile, "utf-8").catch(() => null);
+            if (!sessionRaw) return null;
+            const sessionData = JSON.parse(sessionRaw) as { messages?: unknown[] };
+            return {
+              id,
+              title: meta.title || "新会话",
+              createdAt: meta.createdAt || "",
+              updatedAt: meta.updatedAt || "",
+              messageCount: Array.isArray(sessionData.messages) ? sessionData.messages.length : 0,
+              messages: Array.isArray(sessionData.messages) ? sessionData.messages : [],
+              status: meta.status || "active",
+            };
+          }),
+        );
+        for (const s of sessionResults) {
+          if (s) sessions.push(s);
+        }
+      } else {
+        // 快速模式：只返回元数据，不读取 session 文件
+        for (const meta of metas) {
           const id = (meta.id || "").trim();
-          const fileName = (meta.file || (id ? `chat-${safeFilePart(id)}.json` : "")).trim();
-          if (!fileName) return null;
-          const sessionFile = path.join(chatDir, fileName);
-          const sessionRaw = await fs.promises.readFile(sessionFile, "utf-8").catch(() => null);
-          if (!sessionRaw) return null;
-          const sessionData = JSON.parse(sessionRaw) as { messages?: unknown[] };
-          return {
+          if (!id) continue;
+          sessions.push({
             id,
             title: meta.title || "新会话",
             createdAt: meta.createdAt || "",
             updatedAt: meta.updatedAt || "",
-            messageCount: Array.isArray(sessionData.messages) ? sessionData.messages.length : 0,
-            messages: Array.isArray(sessionData.messages) ? sessionData.messages : [],
+            messageCount: meta.messageCount || 0,
             status: meta.status || "active",
-          };
-        }),
-      );
-      for (const s of sessionResults) {
-        if (s) sessions.push(s);
+          });
+        }
       }
+
       const _chatT1 = Date.now();
+      debugLog(`chat-store-load done: loadMessages=${loadMessages}, sessions=${sessions.length}, loadMs=${_chatT1 - _chatT0}, totalFromEntry=${_chatT1 - _reqTime}ms`);
 
       // #region agent log
       try {
-        const logEntry = { sessionId: "b0d733", id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, timestamp: Date.now(), location: "vibeCodingMiddleware:chat-store-load", message: "chat-store-load timing", data: { projectPath, sessionCount: sessions.length, totalEntries: metas.length, loadMs: _chatT1 - _chatT0 }, hypothesisId: "H3", runId: "run1" };
+        const logEntry = { sessionId: "b0d733", id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, timestamp: Date.now(), location: "vibeCodingMiddleware:chat-store-load", message: "chat-store-load timing", data: { projectPath, sessionCount: sessions.length, totalEntries: metas.length, loadMs: _chatT1 - _chatT0, loadMessages }, hypothesisId: "H3", runId: "run1" };
         fs.appendFile(path.join(process.cwd(), "debug-b0d733.log"), JSON.stringify(logEntry) + "\n", () => {});
       } catch {}
       // #endregion
@@ -350,6 +433,47 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       sendJson(res, 500, {
         ok: false,
         error: error instanceof Error ? error.message : "读取会话库失败",
+      });
+    }
+  });
+
+  // GET /backend/vibe/chat-session-messages — 按需加载单个会话的 messages
+  middlewares.use("/backend/vibe/chat-session-messages", async (req, res) => {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { ok: false, error: "仅支持 GET 请求" });
+      return;
+    }
+
+    try {
+      const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+      const projectPath = (url.searchParams.get("projectPath") || "").trim();
+      const sessionId = (url.searchParams.get("sessionId") || "").trim();
+      if (!projectPath || !sessionId) {
+        sendJson(res, 400, { ok: false, error: "缺少 projectPath 或 sessionId" });
+        return;
+      }
+
+      const resolved = path.resolve(projectPath);
+      const chatDir = path.join(resolved, ".aiall", "vibe-chat-sessions");
+      const sessionFile = path.join(chatDir, `chat-${safeFilePart(sessionId)}.json`);
+      const raw = await fs.promises.readFile(sessionFile, "utf-8").catch(() => null);
+      if (!raw) {
+        sendJson(res, 404, { ok: false, error: "会话文件不存在" });
+        return;
+      }
+
+      const sessionData = JSON.parse(raw) as { messages?: unknown[] };
+      sendJson(res, 200, {
+        ok: true,
+        data: {
+          sessionId,
+          messages: Array.isArray(sessionData.messages) ? sessionData.messages : [],
+        },
+      });
+    } catch (error) {
+      sendJson(res, 500, {
+        ok: false,
+        error: error instanceof Error ? error.message : "读取会话失败",
       });
     }
   });
@@ -451,14 +575,20 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         return;
       }
 
+      // 先响应前端，再异步写入磁盘
+      sendJson(res, 200, { ok: true, path: path.join(path.resolve(projectPath), ".aiall", "vibe-chat-sessions"), sessionCount: (body.data?.sessions || []).length });
+
+      // 异步写入（不阻塞响应）
+      const sessions = Array.isArray(body.data?.sessions) ? body.data.sessions : [];
+      if (!sessions.length) return;
+
       const resolved = path.resolve(projectPath);
       const chatDir = path.join(resolved, ".aiall", "vibe-chat-sessions");
-      await fs.promises.mkdir(chatDir, { recursive: true });
+      await fs.promises.mkdir(chatDir, { recursive: true }).catch(() => {});
       const storeFile = path.join(chatDir, "chat-store.json");
-      const sessions = Array.isArray(body.data?.sessions) ? body.data.sessions : [];
-      debugLog(`chat-store-sync writing ${sessions.length} sessions to ${chatDir}`);
+      debugLog(`chat-store-sync async writing ${sessions.length} sessions`);
 
-      // Read existing index to preserve sessions not being synced
+      // 只写有变更的 session（通过比较 messageCount）
       let existingIndex: { sessions?: Array<{ id: string; title: string; createdAt: string; updatedAt: string; messageCount: number; file: string }> } | null = null;
       try {
         const raw = await fs.promises.readFile(storeFile, "utf-8");
@@ -467,8 +597,8 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         existingIndex = null;
       }
       const existingSessions = existingIndex?.sessions || [];
+      const existingMap = new Map(existingSessions.map(s => [s.id, s]));
 
-      // Start with existing sessions, then overwrite with incoming ones
       const indexSessionsMap = new Map<string, {
         id: string;
         title: string;
@@ -482,18 +612,22 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         indexSessionsMap.set(s.id, s);
       }
 
-      for (const session of sessions) {
+      // 并行写入所有 session 文件
+      await Promise.all(sessions.map(async (session) => {
         const id = (session.id || "").trim();
-        if (!id) continue;
+        if (!id) return;
+
+        // 跳过未变更的 session
+        const existing = existingMap.get(id);
+        if (existing && existing.messageCount === (session.messageCount || 0) && existing.title === session.title) {
+          return;
+        }
+
         const sessionFile = path.join(chatDir, `chat-${safeFilePart(id)}.json`);
         const existingRaw = await fs.promises.readFile(sessionFile, "utf-8").catch(() => null);
         let existingPayload: { messages?: unknown[] } | null = null;
         if (existingRaw) {
-          try {
-            existingPayload = JSON.parse(existingRaw) as { messages?: unknown[] };
-          } catch {
-            existingPayload = null;
-          }
+          try { existingPayload = JSON.parse(existingRaw); } catch { existingPayload = null; }
         }
         const incomingPayload = {
           id,
@@ -505,11 +639,8 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         };
         const mergedPayload = mergeSessionPayloadForDisk(incomingPayload, existingPayload);
         const sessionPayload = await externalizeSessionPayload(chatDir, id, mergedPayload);
-        await withFileLock(sessionFile, async () => {
-          await atomicWriteFile(sessionFile, JSON.stringify(sessionPayload, null, 2));
-        });
-        // After merge+write, re-read the file to get the true message count
-        // (handles cases where incoming was empty but disk had messages)
+        await atomicWriteFile(sessionFile, JSON.stringify(sessionPayload, null, 2));
+
         let messageCount = Array.isArray(sessionPayload.messages) ? sessionPayload.messages.length : 0;
         if (messageCount === 0 && existingPayload && Array.isArray(existingPayload.messages) && existingPayload.messages.length > 0) {
           messageCount = existingPayload.messages.length;
@@ -523,8 +654,9 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
           file: `chat-${safeFilePart(id)}.json`,
           status: sessionPayload.status || "active",
         });
-      }
+      }));
 
+      // 写入 index
       const index = {
         syncedAt: new Date().toISOString(),
         version: body.data?.version || 3,
@@ -532,14 +664,11 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         activeSessionId: body.data?.activeSessionId || "",
         sessions: Array.from(indexSessionsMap.values()),
       };
-      await withFileLock(storeFile, async () => {
-        await atomicWriteFile(storeFile, JSON.stringify(index, null, 2));
-      });
-      debugLog(`chat-store-sync done, path=${chatDir}`);
-      sendJson(res, 200, { ok: true, path: chatDir, sessionCount: sessions.length });
+      await atomicWriteFile(storeFile, JSON.stringify(index, null, 2));
+      invalidateChatStoreCache(resolved);
+      debugLog(`chat-store-sync async done, cache invalidated for "${resolved}"`);
     } catch (error) {
       debugLog(`chat-store-sync error: ${error instanceof Error ? error.message : String(error)}`);
-      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "写入会话库失败" });
     }
   });
 
@@ -850,8 +979,18 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         sendJson(res, 400, { error: "缺少 path 参数" });
         return;
       }
+      debugLog(`list: request-arrived dirPath="${dirPath}" delayFromEntry=${Date.now() - _listReqTime}ms`);
 
       const resolved = path.resolve(dirPath);
+
+      // 走缓存，避免反复 stat/readdir 触发 Defender
+      const cached = getCachedDirList(resolved);
+      if (cached) {
+        debugLog(`list: cache-hit dirPath="${dirPath}" age=${Date.now() - dirListCache.get(resolved)?.ts}ms`);
+        sendJson(res, 200, { ok: true, path: resolved, items: cached });
+        return;
+      }
+
       const stat = await fs.promises.stat(resolved).catch(() => null);
       if (!stat || !stat.isDirectory()) {
         sendJson(res, 400, { error: "路径不存在或不是目录" });
@@ -859,12 +998,14 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       }
 
       const items = await listDirectory(resolved);
+      setCachedDirList(resolved, items);
       // #region agent log
       try {
         const logEntry = { sessionId: "b0d733", id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, timestamp: Date.now(), location: "vibeCodingMiddleware:list-endpoint", message: "list endpoint total", data: { dirPath: resolved, itemCount: items.length, totalMs: Date.now() - _listReqTime }, hypothesisId: "H6", runId: "run1" };
         fs.appendFile(path.join(process.cwd(), "debug-b0d733.log"), JSON.stringify(logEntry) + "\n", () => {});
       } catch {}
       // #endregion
+      debugLog(`list: done dirPath="${dirPath}" items=${items.length} totalFromEntry=${Date.now() - _listReqTime}ms`);
       sendJson(res, 200, { ok: true, path: resolved, items });
     } catch (error) {
       sendJson(res, 500, { error: error instanceof Error ? error.message : "读取目录失败" });

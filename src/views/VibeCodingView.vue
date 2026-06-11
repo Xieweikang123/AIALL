@@ -1100,7 +1100,7 @@ const EDITOR_COLLAPSED_KEY = "vibe-coding-editor-collapsed";
 const CHAT_MODE_KEY = "vibe-coding-chat-mode";
 const PENDING_QUEUE_KEY = "vibe-coding-pending-queue";
 const GIT_PANEL_MODE_KEY = "vibe-coding-git-panel-mode";
-const SYNC_STORE_DEBOUNCE_MS = 2000;
+const SYNC_STORE_DEBOUNCE_MS = 5000;
 const FILE_MIN_WIDTH = 180;
 const FILE_MAX_WIDTH = 500;
 const CHAT_MIN_WIDTH = 260;
@@ -2652,7 +2652,7 @@ function userMessageImages(msg: ChatMessage): string[] {
 
 async function ensureProjectChatLoadedFromDisk(project: string, sessionId?: string): Promise<void> {
   if (!project.trim() || !projectChatNeedsDiskRestore(project, sessionId)) return;
-  const diskStore = await fetchChatStoreFromDisk(project);
+  const diskStore = await fetchChatStoreFromDisk(project, { loadMessages: true });
   if (!diskStore.ok || !diskStore.data.sessions.length) return;
   restoreChatStoreFromSnapshot(diskStore.data);
 }
@@ -2948,6 +2948,14 @@ function scheduleSyncChatStore(path: string) {
   }, SYNC_STORE_DEBOUNCE_MS);
 }
 
+function cancelPendingSync() {
+  // 取消延迟的 sync
+  if (syncStoreTimer) {
+    clearTimeout(syncStoreTimer);
+    syncStoreTimer = null;
+  }
+}
+
 function persistChatNow(path = projectPath.value.trim(), options?: { flushStore?: boolean }) {
   if (!path) return;
   const isEmptyDraft = !activeSessionId.value && !chatMessages.value.length;
@@ -2955,28 +2963,31 @@ function persistChatNow(path = projectPath.value.trim(), options?: { flushStore?
   if (result.sessionId) activeSessionId.value = result.sessionId;
   refreshSessionList(path);
   const sessionId = result.sessionId;
-  void (async () => {
-    if (sessionId) {
-      const snapshot = getActiveSessionSnapshot(path, sessionId);
-      if (snapshot) {
-        await syncChatSession(path, sessionId, snapshot, { activeSessionId: activeSessionId.value || sessionId });
-        if (activeSessionId.value === sessionId && projectPath.value.trim() === path) {
-          chatMessages.value = normalizeChatMessages(
-            stampImageRefsAfterSync(sessionId, chatMessages.value),
-          );
+  // 延迟执行，不阻塞后续操作
+  setTimeout(() => {
+    (async () => {
+      if (sessionId) {
+        const snapshot = getActiveSessionSnapshot(path, sessionId);
+        if (snapshot) {
+          await syncChatSession(path, sessionId, snapshot, { activeSessionId: activeSessionId.value || sessionId });
+          if (activeSessionId.value === sessionId && projectPath.value.trim() === path) {
+            chatMessages.value = normalizeChatMessages(
+              stampImageRefsAfterSync(sessionId, chatMessages.value),
+            );
+          }
         }
       }
-    }
-    if (options?.flushStore) {
-      if (syncStoreTimer) {
-        clearTimeout(syncStoreTimer);
-        syncStoreTimer = null;
+      if (options?.flushStore) {
+        if (syncStoreTimer) {
+          clearTimeout(syncStoreTimer);
+          syncStoreTimer = null;
+        }
+        await flushChatStoreToDisk(path, { quiet: true });
+      } else {
+        scheduleSyncChatStore(path);
       }
-      await flushChatStoreToDisk(path, { quiet: true });
-    } else {
-      scheduleSyncChatStore(path);
-    }
-  })();
+    })();
+  }, 100);
   if (isEmptyDraft) activeSessionId.value = "";
 }
 
@@ -3045,12 +3056,38 @@ async function openProjectByPath(dirPath: string) {
     return;
   }
 
+  const t0 = performance.now();
+  const timings: string[] = [];
+  const log = (label: string) => {
+    const ms = Math.round(performance.now() - t0);
+    timings.push(`${label}: ${ms}ms`);
+  };
+
+  const flushLog = (result: string) => {
+    const line = `[${new Date().toISOString()}] ${normalized} | ${result}`;
+    console.log(`[TAB-PERF] ${line}`);
+    // 写磁盘
+    try {
+      const blob = new Blob([line + "\n"], { type: "text/plain" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      // 不用下载，用 fetch 写到后端
+    } catch {}
+    fetch("/backend/vibe/log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: "tab-perf.log", line }),
+    }).catch(() => {});
+  };
+
   const previousPath = projectPath.value.trim();
   if (projectOpened.value && previousPath && previousPath !== normalized) {
-    persistChatNow(previousPath);
     pendingPromptQueue.value = [];
     persistPendingQueue();
+    // 取消之前的 sync，避免磁盘 I/O 争用
+    cancelPendingSync();
   }
+  log("persist-prev");
 
   loadingTree.value = true;
   treeError.value = "";
@@ -3064,35 +3101,40 @@ async function openProjectByPath(dirPath: string) {
   fileLoadError.value = "";
   showDiffMode.value = false;
   resetGitPanelState();
+  log("reset-state");
 
   try {
-    // 并行加载目录和聊天记录
-    const [items, chatLoaded] = await Promise.all([
-      autoRetryWithCountdown(
-        () => loadDirChildren(normalized),
-        {
-          onRetry: (remaining, attempt, max) => {
-            treeError.value = `打开项目失败，正在重试… ${remaining}s (${attempt}/${max})`;
-          },
+    // 串行执行，避免浏览器连接池阻塞
+    const tDir0 = performance.now();
+    log("dir-start");
+    const items = await autoRetryWithCountdown(
+      () => loadDirChildren(normalized),
+      {
+        onRetry: (remaining, attempt, max) => {
+          treeError.value = `打开项目失败，正在重试… ${remaining}s (${attempt}/${max})`;
         },
-      ),
-      (async () => {
-        if (!hasVibeChatHistory(normalized)) {
-          const diskStore = await fetchChatStoreFromDisk(normalized);
-          if (diskStore.ok && diskStore.data.sessions.length) {
-            restoreChatStoreFromSnapshot(diskStore.data);
-          }
-        } else {
-          await ensureProjectChatLoadedFromDisk(normalized);
-        }
-        let loaded = loadVibeChatHistory(normalized);
-        if (!loaded.length) {
-          await ensureProjectChatLoadedFromDisk(normalized);
-          loaded = loadVibeChatHistory(normalized);
-        }
-        return loaded;
-      })(),
-    ]);
+      },
+    );
+    log(`dir-done(${items.length}items, ${Math.round(performance.now() - tDir0)}ms)`);
+    const dirs = items.filter(i => i.isDirectory).length;
+    const files = items.filter(i => !i.isDirectory).length;
+    log(`dir-stats(${dirs}dirs, ${files}files)`);
+
+    const tChat0 = performance.now();
+    log(`chat-check`);
+    let loaded = loadVibeChatHistory(normalized);
+    log(`chat-load-local(${loaded.length}sessions)`);
+    if (!loaded.length) {
+      const diskStore = await fetchChatStoreFromDisk(normalized, { loadMessages: true });
+      log(`chat-fetch-disk(${diskStore.ok ? "ok" : "fail"}, ${diskStore.data?.sessions?.length || 0}sessions)`);
+      if (diskStore.ok && diskStore.data.sessions.length) {
+        restoreChatStoreFromSnapshot(diskStore.data);
+        loaded = loadVibeChatHistory(normalized);
+        log(`chat-after-restore(${loaded.length}sessions)`);
+      }
+    }
+    log(`chat-done(${Math.round(performance.now() - tChat0)}ms)`);
+
 
     treeError.value = "";
     fileTree.value = items;
@@ -3103,14 +3145,14 @@ async function openProjectByPath(dirPath: string) {
     localStorage.setItem(STORAGE_KEY, normalized);
     addProjectToHistory(normalized);
     refreshProjectHistoryList();
+    log("set-state");
 
-    chatMessages.value = normalizeChatMessages(chatLoaded);
+    chatMessages.value = normalizeChatMessages(loaded);
     activeSessionId.value = getActiveVibeChatSessionId(normalized);
     refreshSessionList(normalized);
+    log("set-chat");
 
-    // 并行执行非关键操作
     Promise.all([
-      scheduleSyncChatStore(normalized),
       refreshGitStatus(),
       startFileWatcherForProject(normalized),
     ]).catch(() => {});
@@ -3118,10 +3160,14 @@ async function openProjectByPath(dirPath: string) {
     syncEditorPanelForOpenFiles();
     maybeAutoResumeLastRecoverableAssistant();
     await scrollChatToBottom(true);
+    log("final");
+
+    flushLog(`total=${Math.round(performance.now() - t0)}ms | ${timings.join(" → ")}`);
   } catch (e) {
     projectOpened.value = false;
     fileTree.value = [];
     treeError.value = formatFetchError(e, "打开项目失败（已重试）");
+    flushLog(`FAILED total=${Math.round(performance.now() - t0)}ms | ${timings.join(" → ")}`);
   } finally {
     loadingTree.value = false;
   }
