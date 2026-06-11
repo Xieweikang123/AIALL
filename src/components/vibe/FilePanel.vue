@@ -145,20 +145,21 @@ defineExpose({ searchInputRef });
 
 .file-panel-tabs {
   display: flex;
-  gap: 2px;
+  gap: 8px;
 }
 
 .file-panel-tab {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 8px;
-  font-size: 12px;
+  padding: 5px 12px;
+  font-size: 13px;
   border: none;
   background: none;
   color: var(--text-secondary, #999);
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 6px;
+  transition: background 0.15s, color 0.15s;
 }
 
 .file-panel-tab:hover {

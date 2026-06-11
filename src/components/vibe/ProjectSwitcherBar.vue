@@ -77,11 +77,11 @@ function isActive(path: string): boolean {
 .project-switcher-bar {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 16px;
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-color);
-  min-height: 32px;
+  gap: 6px;
+  padding: 6px 16px;
+  background: rgba(11, 18, 32, 0.6);
+  border-bottom: 1px solid var(--border);
+  min-height: 36px;
   flex-shrink: 0;
   overflow: hidden;
 }
@@ -89,7 +89,7 @@ function isActive(path: string): boolean {
 .project-tabs {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 6px;
   overflow-x: auto;
   flex: 1;
   scrollbar-width: none;
@@ -103,30 +103,31 @@ function isActive(path: string): boolean {
 .project-tab {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 10px;
+  gap: 5px;
+  padding: 5px 12px;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: 6px;
   background: none;
-  color: var(--text-secondary);
-  font-size: 11px;
+  color: var(--muted);
+  font-size: 12px;
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
-  max-width: 180px;
+  max-width: 200px;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
 .project-tab:hover {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
 }
 
 .project-tab.active {
-  background: var(--bg-primary);
-  border-color: var(--accent-color);
-  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--primary);
+  color: var(--text);
   font-weight: 500;
+  box-shadow: 0 0 0 1px var(--primary), 0 1px 4px rgba(31, 111, 235, 0.25);
 }
 
 .project-tab.loading {
@@ -164,7 +165,7 @@ function isActive(path: string): boolean {
   border: none;
   border-radius: 2px;
   background: transparent;
-  color: var(--text-tertiary);
+  color: rgba(255, 255, 255, 0.4);
   font-size: 12px;
   line-height: 1;
   cursor: pointer;
@@ -178,21 +179,21 @@ function isActive(path: string): boolean {
 }
 
 .project-tab-close:hover {
-  background: var(--error-bg, #fee2e2);
-  color: var(--error-text, #dc2626);
+  background: rgba(255, 77, 94, 0.15);
+  color: var(--danger);
 }
 
 .project-tab-add {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   padding: 0;
-  border: 1px dashed var(--border-color);
-  border-radius: 4px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--muted);
   font-size: 14px;
   cursor: pointer;
   flex-shrink: 0;
@@ -200,9 +201,9 @@ function isActive(path: string): boolean {
 }
 
 .project-tab-add:hover {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  border-color: var(--accent-color);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  border-color: var(--primary);
 }
 
 .project-tab-add:disabled {

@@ -4540,17 +4540,17 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
 
     assistantMsg.status = "";
     assistantMsg.agentPhase = undefined;
-    assistantMsg.activityExpanded = false;
     assistantMsg.content = finalizeAssistantBubbleContent({
       ...assistantMsg,
       wasAborted,
       writtenFiles: fileAction.writtenFiles,
     });
+    assistantMsg.activityExpanded = Boolean(assistantMsg.content?.trim());
     patchAssistantMsg(msgId, {
       status: "",
       agentPhase: undefined,
       streaming: false,
-      activityExpanded: false,
+      activityExpanded: assistantMsg.activityExpanded,
       content: assistantMsg.content,
       totalTurns: assistantMsg.totalTurns,
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
@@ -5787,12 +5787,12 @@ onBeforeUnmount(() => {
 
 .file-panel-tabs {
   display: flex;
-  gap: 2px;
+  gap: 8px;
   margin-right: 8px;
 }
 
 .file-panel-tab {
-  padding: 6px 14px;
+  padding: 5px 14px;
   font-size: 13px;
   background: transparent;
   color: var(--text-dim);
@@ -5813,6 +5813,7 @@ onBeforeUnmount(() => {
   color: var(--text);
   background: rgba(31, 111, 235, 0.22);
   font-weight: 600;
+  box-shadow: 0 0 0 1px rgba(31, 111, 235, 0.4);
 }
 
 .git-badge {
