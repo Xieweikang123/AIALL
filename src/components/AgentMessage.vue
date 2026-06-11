@@ -9,27 +9,12 @@
 
     <!-- 展开时间线 -->
     <div v-else class="cursor-timeline">
-      <AgentTimeline
-        :blocks="blocks"
+      <!-- 合并内容：文字 + 工具调用穿插显示 -->
+      <AgentMergedContent
+        :round-groups="agentRoundGroupViews(msg)"
+        :final-answer="timelineAnswerContent(msg)"
         :is-running="isAgentRunning(msg)"
-        :is-detailed="isActivityDetailed(msg)"
-        :show-compact="showCompact"
-        :show-jump="showJump ?? false"
-        @toggle-detailed="toggleActivityDetailed(msg)"
-        @collapse-detailed="collapseActivityDetailed(msg)"
-        @jump-latest="jumpToLatest"
-      />
-
-      <!-- 回答内容（如果 Agent 已完成且有回答） -->
-      <ChatMarkdown
-        v-if="answer && answer.text && !isAgentRunning(msg)"
-        class="cursor-timeline-answer msg-answer cursor-timeline-answer--inline"
-        :class="{
-          'msg-answer--streaming': answer.streaming,
-          'msg-answer--final': !answer.streaming,
-        }"
-        :content="answer.text"
-        :streaming="answer.streaming"
+        :final-answer-complete="!isAgentRunning(msg)"
       />
 
       <!-- 调试面板 -->
@@ -54,9 +39,8 @@
 
 <script setup lang="ts">
 import { computed, type Ref } from "vue";
-import ChatMarkdown from "./ChatMarkdown.vue";
 import AgentFoldedView from "./AgentFoldedView.vue";
-import AgentTimeline from "./AgentTimeline.vue";
+import AgentMergedContent from "./AgentMergedContent.vue";
 import AgentDebugPanel from "./AgentDebugPanel.vue";
 import { useAgentMessage, type AgentMessage } from "../composables/useAgentMessage";
 
@@ -76,11 +60,7 @@ const emit = defineEmits<{
 
 const {
   isFolded,
-  blocks,
-  answer,
   showDebug,
-  showCompact,
-  hasProcessSteps,
   isActivityExpanded,
   isActivityDetailed,
   agentRoundGroupViews,
@@ -127,21 +107,6 @@ function jumpToLatest() {
   flex-direction: column;
   gap: 6px;
   padding: 8px 0;
-}
-
-.cursor-timeline-answer {
-  margin: 0;
-  max-width: 100%;
-  min-width: 0;
-}
-
-.cursor-timeline-answer--inline.msg-answer--final,
-.cursor-timeline-answer--inline.msg-answer--streaming {
-  margin-top: 0;
-  border: none;
-  border-radius: 0;
-  background: transparent;
-  padding: 0;
 }
 
 .cursor-activity-collapse {

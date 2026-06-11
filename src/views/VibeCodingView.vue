@@ -5503,13 +5503,13 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 12px;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--border);
+  gap: 8px;
+  padding: 2px 16px;
+  border-bottom: none;
   background: rgba(11, 18, 32, 0.92);
   backdrop-filter: blur(12px);
   flex-shrink: 0;
-  min-height: 44px;
+  min-height: 32px;
 }
 
 .toolbar-brand {

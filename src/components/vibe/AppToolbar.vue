@@ -180,11 +180,11 @@ function formatSessionTime(iso: string): string {
 .app-toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 16px;
+  gap: 8px;
+  padding: 2px 16px;
   background: var(--bg-primary);
   border-bottom: 1px solid var(--border-color);
-  height: 48px;
+  height: 32px;
   flex-shrink: 0;
 }
 

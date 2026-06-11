@@ -78,10 +78,10 @@ function isActive(path: string): boolean {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 16px;
-  background: rgba(11, 18, 32, 0.6);
+  padding: 2px 16px;
+  background: rgba(11, 18, 32, 0.92);
   border-bottom: 1px solid var(--border);
-  min-height: 36px;
+  min-height: 24px;
   flex-shrink: 0;
   overflow: hidden;
 }
@@ -103,10 +103,10 @@ function isActive(path: string): boolean {
 .project-tab {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 12px;
+  gap: 4px;
+  padding: 2px 10px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 4px;
   background: none;
   color: var(--muted);
   font-size: 12px;
@@ -127,7 +127,7 @@ function isActive(path: string): boolean {
   border-color: var(--primary);
   color: var(--text);
   font-weight: 500;
-  box-shadow: 0 0 0 1px var(--primary), 0 1px 4px rgba(31, 111, 235, 0.25);
+  box-shadow: 0 0 0 1px rgba(31, 111, 235, 0.5);
 }
 
 .project-tab.loading {
@@ -187,11 +187,11 @@ function isActive(path: string): boolean {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   border: 1px dashed var(--border);
-  border-radius: 6px;
+  border-radius: 4px;
   background: transparent;
   color: var(--muted);
   font-size: 14px;
