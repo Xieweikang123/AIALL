@@ -201,6 +201,7 @@ const expanded = computed(() => props.expandedDirs.has(props.node.path));
   align-items: center;
   gap: 6px;
   width: 100%;
+  box-sizing: border-box;
   border: none;
   background: transparent;
   color: rgba(255, 255, 255, 0.92);

@@ -388,6 +388,7 @@ function gitStatusColor(status: string): string {
 <style scoped>
 .git-panel {
   flex: 1;
+  overflow-x: hidden;
   overflow-y: auto;
   padding: 8px;
 }
@@ -544,6 +545,7 @@ function gitStatusColor(status: string): string {
 
 .git-stash-msg-input {
   flex: 1;
+  box-sizing: border-box;
   padding: 4px 6px;
   font-size: 11px;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -654,6 +656,7 @@ function gitStatusColor(status: string): string {
 
 .git-commit-input {
   width: 100%;
+  box-sizing: border-box;
   padding: 6px 8px;
   font-size: 12px;
   border: 1px solid rgba(255, 255, 255, 0.12);

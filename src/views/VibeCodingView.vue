@@ -47,275 +47,67 @@
         @refresh-git-status="refreshGitStatus(gitIsRepo ? { showLoading: false } : undefined)"
       >
 
-        <div v-if="gitPanelMode === 'git'" class="git-panel">
-          <div v-if="!projectOpened" class="panel-empty">请先打开项目文件夹</div>
-          <div v-else-if="gitLoading" class="panel-empty">加载中…</div>
-          <div v-else-if="gitIsRepo" class="git-panel-content">
-            <div class="git-header">
-              <!-- 第一行：分支名 + 操作按钮 -->
-              <div class="git-header-row git-branch-row">
-                <div class="git-branch-info">
-                  <span class="git-branch-icon" aria-hidden="true">⎇</span>
-                  <span class="git-branch-name" :title="gitBranch">{{ gitBranch }}</span>
-                  <span v-if="gitTrackingBranch" class="git-tracking-badge" :title="'跟踪: ' + gitTrackingBranch">
-                    ⟶ {{ gitTrackingBranch.replace(/^[^/]+\//, '') }}
-                  </span>
-                </div>
-                <button type="button" class="ghost tiny" :disabled="gitLoading" @click="() => refreshGitStatus()">刷新</button>
-                <span
-                  v-if="fileWatcherActive"
-                  class="file-watcher-dot"
-                  :class="{ connected: fileWatcherConnected }"
-                  :title="fileWatcherConnected ? '文件监控已连接' : '文件监控重连中…'"
-                />
-              </div>
-              <!-- 第二行：同步操作 -->
-              <div v-if="gitRemotes.length" class="git-header-row git-sync-row">
-                <div class="git-sync-info">
-                  <span class="git-sync-stat" :class="{ ahead: gitAhead > 0, behind: gitBehind > 0 }">
-                    <span class="git-sync-arrow">↑</span>{{ gitAhead }}
-                  </span>
-                  <span class="git-sync-stat" :class="{ ahead: gitAhead > 0, behind: gitBehind > 0 }">
-                    <span class="git-sync-arrow">↓</span>{{ gitBehind }}
-                  </span>
-                </div>
-                <div class="git-remote-actions">
-                  <button type="button" class="ghost tiny" :disabled="!!gitRemoteAction" @click="doFetch">
-                    {{ gitRemoteAction === 'fetch' ? '…' : 'Fetch' }}
-                  </button>
-                  <button type="button" class="ghost tiny" :disabled="!!gitRemoteAction" @click="doPull">
-                    {{ gitRemoteAction === 'pull' ? '…' : 'Pull' }}
-                  </button>
-                  <button type="button" class="ghost tiny" :disabled="!!gitRemoteAction" @click="doPush">
-                    {{ gitRemoteAction === 'push' ? '…' : 'Push' }}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <!-- Stash 区域 -->
-            <div class="git-stash-section">
-              <div class="git-stash-header">
-                <div class="git-stash-title-row">
-                  <span class="git-stash-icon">📦</span>
-                  <span class="git-stash-title">贮藏</span>
-                  <span v-if="gitStashes.length" class="git-stash-count">{{ gitStashes.length }}</span>
-                </div>
-                <div class="git-stash-save-row">
-                  <input
-                    v-model="gitStashMessage"
-                    class="git-stash-msg-input"
-                    type="text"
-                    placeholder="贮藏信息（可选）"
-                    :disabled="!!gitStashAction"
-                    @keydown.enter="doStashSave"
-                  />
-                  <button
-                    type="button"
-                    class="ghost tiny stash-save-btn"
-                    :disabled="!!gitStashAction"
-                    @click="doStashSave"
-                  >
-                    {{ gitStashAction === 'save' ? '…' : '贮藏' }}
-                  </button>
-                </div>
-              </div>
-              <div v-if="gitStashes.length" class="git-stash-list">
-                <div class="git-stash-list-header">
-                  <button type="button" class="git-section-toggle" @click="gitStashOpen = !gitStashOpen">
-                    <span class="git-section-chevron">{{ gitStashOpen ? "▾" : "▸" }}</span>
-                    <span class="git-stash-list-title">贮藏列表</span>
-                  </button>
-                </div>
-                <div v-if="gitStashOpen" class="git-stash-list-content">
-                  <div v-for="stash in gitStashes" :key="stash.index" class="git-stash-item">
-                    <span class="git-stash-label">{{ 'stash@{' + stash.index + '}' }}</span>
-                    <span class="git-stash-msg">{{ stash.message }}</span>
-                    <div class="git-stash-actions">
-                      <button
-                        type="button"
-                        class="ghost tiny"
-                        :disabled="!!gitStashAction"
-                        @click="doStashApply(stash.index)"
-                        title="应用贮藏（保留贮藏）"
-                      >
-                        {{ gitStashAction === 'apply-' + stash.index ? '…' : 'Apply' }}
-                      </button>
-                      <button
-                        type="button"
-                        class="ghost tiny danger"
-                        :disabled="!!gitStashAction"
-                        @click="doStashDrop(stash.index)"
-                        title="移除此贮藏（不应用）"
-                      >
-                        {{ gitStashAction === 'drop-' + stash.index ? '…' : 'Drop' }}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div v-else-if="gitStashAction === 'list'" class="git-stash-empty">加载中…</div>
-              <div v-else class="git-stash-empty">暂无贮藏</div>
-            </div>
-
-            <div v-if="gitError" class="git-error">{{ gitError }}</div>
-            <div class="git-commit-box">
-              <textarea
-                v-model="gitCommitMessage"
-                class="git-commit-input"
-                rows="2"
-                placeholder="提交信息…"
-                :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep"
-                @keydown.ctrl.enter="() => { if (!gitAiPushStep) commitGit() }"
-                @keydown.meta.enter="() => { if (!gitAiPushStep) commitGit() }"
-              />
-              <div class="git-commit-actions">
-                <button
-                  type="button"
-                  class="secondary small git-commit-ai"
-                  :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep || !gitStagedFiles.length || !configReady"
-                  @click="generateCommitMessage"
-                >
-                  {{ gitGenStep || "✦ AI 生成" }}
-                </button>
-                <button
-                  type="button"
-                  class="small"
-                  :class="canGitCommit ? 'primary' : 'secondary'"
-                  :disabled="!canGitCommit || !!gitAiPushStep"
-                  @click="commitGit"
-                >
-                  {{ gitCommitting ? "提交中…" : `提交 (${gitStagedFiles.length})` }}
-                </button>
-              </div>
-              <div class="git-ai-push-sep"></div>
-              <button
-                type="button"
-                class="primary small git-ai-push"
-                :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep || !gitStagedFiles.length || !configReady"
-                @click="aiCommitAndPush"
-              >
-                {{ gitAiPushStep || "✦ AI 一键推送" }}
-              </button>
-            </div>
-            <div class="git-scroll-area">
-              <div v-if="!gitStatus.length" class="panel-empty">无本地改动</div>
-              <template v-else>
-                <div v-if="gitStagedFiles.length" class="git-section">
-                  <div class="git-section-head">
-                    <button type="button" class="git-section-toggle" @click="gitStagedOpen = !gitStagedOpen">
-                      <span class="git-section-chevron">{{ gitStagedOpen ? "▾" : "▸" }}</span>
-                      <span class="git-section-title">已暂存 ({{ gitStagedFiles.length }})</span>
-                    </button>
-                    <div class="git-section-actions">
-                      <button v-if="selectedGitFiles.length" type="button" class="ghost tiny" @click="unstageSelectedFiles">
-                        取消暂存选中 ({{ selectedGitFiles.length }})
-                      </button>
-                      <button type="button" class="ghost tiny" @click="unstageAll">取消全部</button>
-                    </div>
-                  </div>
-                  <div v-if="gitStagedOpen" class="git-file-list">
-                      <div
-                        v-for="file in gitStagedFiles"
-                        :key="file.path"
-                        class="git-file-item"
-                        :class="{ active: selectedGitFiles.includes(file.path), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
-                        @pointerdown="onGitFilePointerDown($event, file.path, file.staged)"
-                      >
-                      <span class="git-file-check" @pointerdown.stop @click.stop="unstageFile(file.path)">✓</span>
-                      <span
-                        class="git-file-status"
-                        :style="{ color: gitStatusColor(file.status) }"
-                      >
-                        {{ gitStatusIcon(file.status) }}
-                      </span>
-                      <span class="git-file-path" :title="file.path">{{ file.path }}</span>
-                    </div>
-                  </div>
-                </div>
-                <div v-if="gitUnstagedFiles.length" class="git-section">
-                  <div class="git-section-head">
-                    <button type="button" class="git-section-toggle" @click="gitUnstagedOpen = !gitUnstagedOpen">
-                      <span class="git-section-chevron">{{ gitUnstagedOpen ? "▾" : "▸" }}</span>
-                      <span class="git-section-title">未暂存 ({{ gitUnstagedFiles.length }})</span>
-                    </button>
-                    <div class="git-section-actions">
-                      <button v-if="selectedGitFiles.length" type="button" class="ghost tiny" @click="stageSelectedFiles">
-                        暂存选中 ({{ selectedGitFiles.length }})
-                      </button>
-                      <button v-if="selectedGitFiles.length" type="button" class="ghost tiny danger" @click="discardSelectedFiles($event)">
-                        丢弃选中 ({{ selectedGitFiles.length }})
-                      </button>
-                      <button type="button" class="ghost tiny" @click="stageAll">全部暂存</button>
-                      <button type="button" class="ghost tiny danger" @click="discardAll($event)">丢弃全部</button>
-                    </div>
-                  </div>
-                   <div v-if="gitUnstagedOpen" class="git-file-list">
-                      <div
-                        v-for="file in gitUnstagedFiles"
-                        :key="file.path"
-                        class="git-file-item"
-                        :class="{ active: selectedGitFiles.includes(file.path), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
-                        @pointerdown="onGitFilePointerDown($event, file.path, file.staged)"
-                      >
-                      <span class="git-file-check" @pointerdown.stop @click.stop="stageFile(file.path)">+</span>
-                      <span
-                        class="git-file-status"
-                        :style="{ color: gitStatusColor(file.status) }"
-                      >
-                        {{ gitStatusIcon(file.status) }}
-                      </span>
-                      <span class="git-file-path" :title="file.path">{{ file.path }}</span>
-                      <button type="button" class="ghost tiny danger git-file-btn" title="丢弃更改" @pointerdown.stop @click.stop="discardFile(file.path, $event)">✕</button>
-                    </div>
-                  </div>
-                </div>
-              </template>
-              <div class="git-log-section">
-                <button type="button" class="ghost tiny git-log-toggle" @click="gitLogOpen = !gitLogOpen">
-                  {{ gitLogOpen ? "▾" : "▸" }} 提交历史
-                </button>
-                <div v-if="gitLogOpen" class="git-log-list">
-                  <div v-if="!gitLogEntries.length" class="panel-empty">无历史</div>
-                  <div v-for="entry in gitLogEntries" :key="entry.hash" class="git-log-item">
-                    <button type="button" class="git-log-entry-head" @click="toggleGitLogEntry(entry.hash)">
-                      <span class="git-log-chevron">{{ isGitLogEntryOpen(entry.hash) ? "▾" : "▸" }}</span>
-                      <span class="git-log-hash">{{ entry.shortHash }}</span>
-                      <span class="git-log-msg" :title="entry.message">{{ entry.message }}</span>
-                      <span class="git-log-count">{{ entry.files.length }}</span>
-                    </button>
-                    <div v-if="isGitLogEntryOpen(entry.hash)" class="git-log-detail">
-                      <div v-if="entry.message.includes('\n')" class="git-log-full-msg">{{ entry.message }}</div>
-                      <div class="git-log-files">
-                      <button
-                        v-for="file in entry.files"
-                        :key="`${entry.hash}:${file.oldPath || ''}:${file.path}`"
-                        type="button"
-                        class="git-log-file"
-                        :class="{ loading: gitDiffLoadingKey === gitHistoryDiffKey(entry.hash, file.path, file.oldPath) }"
-                        :title="file.oldPath ? `${file.oldPath} → ${file.path}` : file.path"
-                        @click="openGitLogFile(entry, file)"
-                      >
-                        <span class="git-file-status" :style="{ color: gitStatusColor(file.status) }">
-                          {{ gitStatusIcon(file.status) }}
-                        </span>
-                        <span class="git-file-path">{{ file.oldPath ? `${file.oldPath} → ${file.path}` : file.path }}</span>
-                      </button>
-                    </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div v-else-if="gitError" class="panel-empty git-panel-fetch-error">
-            <p>获取 Git 状态失败</p>
-            <p class="git-fetch-error-detail">{{ gitError }}</p>
-            <button type="button" class="secondary small" @click="() => refreshGitStatus()">重试</button>
-          </div>
-          <div v-else-if="gitStatusKnown" class="panel-empty">当前目录不是 Git 仓库</div>
-          <div v-else class="panel-empty">加载中…</div>
-        </div>
+        <GitPanel
+          v-if="gitPanelMode === 'git'"
+          :project-opened="projectOpened"
+          :git-loading="gitLoading"
+          :git-is-repo="gitIsRepo"
+          :git-status-known="gitStatusKnown"
+          :git-error="gitError"
+          :git-branch="gitBranch"
+          :git-tracking-branch="gitTrackingBranch"
+          :git-remotes="gitRemotes"
+          :git-ahead="gitAhead"
+          :git-behind="gitBehind"
+          :git-stashes="gitStashes"
+          :git-status="gitStatus"
+          :git-staged-files="gitStagedFiles"
+          :git-unstaged-files="gitUnstagedFiles"
+          :can-git-commit="canGitCommit"
+          :git-commit-message="gitCommitMessage"
+          :git-committing="gitCommitting"
+          :git-gen-step="gitGenStep"
+          :git-ai-push-step="gitAiPushStep"
+          :git-stash-action="gitStashAction"
+          :git-stash-message="gitStashMessage"
+          :git-stash-open="gitStashOpen"
+          :git-staged-open="gitStagedOpen"
+          :git-unstaged-open="gitUnstagedOpen"
+          :git-log-open="gitLogOpen"
+          :git-log-entries="gitLogEntries"
+          :selected-git-files="selectedGitFiles"
+          :git-diff-loading-key="gitDiffLoadingKey"
+          :git-remote-action="gitRemoteAction"
+          :config-ready="configReady"
+          :file-watcher-active="fileWatcherActive"
+          :file-watcher-connected="fileWatcherConnected"
+          :expanded-git-log-entries="expandedGitLogEntries"
+          @refresh="refreshGitStatus()"
+          @do-fetch="doFetch"
+          @do-pull="doPull"
+          @do-push="doPush"
+          @commit-git="commitGit"
+          @generate-commit-message="generateCommitMessage"
+          @ai-commit-and-push="aiCommitAndPush"
+          @stage-file="stageFile"
+          @unstage-file="unstageFile"
+          @stage-all="stageAll"
+          @unstage-all="unstageAll"
+          @discard-file="discardFile"
+          @discard-all="discardAll"
+          @do-stash-save="doStashSave"
+          @do-stash-apply="doStashApply"
+          @do-stash-drop="doStashDrop"
+          @update:git-stash-open="gitStashOpen = $event"
+          @update:git-staged-open="gitStagedOpen = $event"
+          @update:git-unstaged-open="gitUnstagedOpen = $event"
+          @update:git-log-open="gitLogOpen = $event"
+          @update:git-commit-message="gitCommitMessage = $event"
+          @update:git-stash-message="gitStashMessage = $event"
+          @toggle-git-log-entry="toggleGitLogEntry"
+          @open-git-log-file="openGitLogFile"
+          @on-git-file-pointer-down="onGitFilePointerDown"
+        />
 
         <div v-if="gitPanelMode === 'files' && !projectOpened" class="panel-empty">请先打开项目文件夹</div>
 
@@ -814,6 +606,33 @@
               <span v-else-if="chatError" class="chat-error">{{ chatError }}</span>
               <span v-else-if="chatSending" class="chat-running">{{ chatRunningText }}</span>
               <span v-else class="chat-hint">{{ chatHintText }}</span>
+              <span v-if="totalTokenUsage" class="token-usage" @click="showTokenDetail = !showTokenDetail">
+                {{ totalTokenUsage }}
+              </span>
+            </div>
+            <div v-if="showTokenDetail && tokenDetailData" class="token-detail-popup">
+              <div class="token-detail-header">
+                <span>Token 用量详情</span>
+                <button type="button" class="ghost tiny" @click="showTokenDetail = false">×</button>
+              </div>
+              <div class="token-detail-body">
+                <div class="token-detail-row">
+                  <span class="token-detail-label">AI 回复次数</span>
+                  <span class="token-detail-value">{{ tokenDetailData.assistantCount }}</span>
+                </div>
+                <div class="token-detail-row">
+                  <span class="token-detail-label">总输出字符</span>
+                  <span class="token-detail-value">{{ formatCharCount(tokenDetailData.totalStreamChars) }}</span>
+                </div>
+                <div class="token-detail-row">
+                  <span class="token-detail-label">最大上下文</span>
+                  <span class="token-detail-value">{{ formatCharCount(tokenDetailData.maxContextChars) }}</span>
+                </div>
+                <div class="token-detail-row">
+                  <span class="token-detail-label">总消息数</span>
+                  <span class="token-detail-value">{{ tokenDetailData.totalMessages }}</span>
+                </div>
+              </div>
             </div>
             <div class="chat-action-row">
               <div class="chat-mode-switch" role="group" aria-label="对话模式">
@@ -909,13 +728,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import "../styles/vibe-coding.scss";
-import AgentActivityLogStream, {
-  type AgentLogLineItem,
-} from "../components/AgentActivityLogStream.vue";
+import type { AgentLogLineItem } from "../components/AgentActivityLogStream.vue";
 import AgentMessage from "../components/AgentMessage.vue";
 import ChatComposerEditor from "../components/ChatComposerEditor.vue";
 import ChatMarkdown from "../components/ChatMarkdown.vue";
-import CodeMonacoDiffEditor from "../components/CodeMonacoDiffEditor.vue";
 import CodeMonacoEditor from "../components/CodeMonacoEditor.vue";
 import ConfirmPopup from "../components/ConfirmPopup.vue";
 import InputPrompt from "../components/InputPrompt.vue";
@@ -925,11 +741,11 @@ import ProjectSwitcherBar from "../components/vibe/ProjectSwitcherBar.vue";
 import FilePanel from "../components/vibe/FilePanel.vue";
 import GitPanel from "../components/vibe/GitPanel.vue";
 import EditorPanel from "../components/vibe/EditorPanel.vue";
-import ChatPanel from "../components/vibe/ChatPanel.vue";
 import { useConfirm } from "../composables/useConfirm";
 import { useFileDrag } from "../composables/useFileDrag";
 import { useGitPanel, type GitFileDiff } from "../composables/useGitPanel";
 import { useInputPrompt } from "../composables/useInputPrompt";
+import { useEditorPanel } from "../composables/useEditorPanel";
 import { useSessionManager } from "../composables/useSessionManager";
 import {
   buildAgentPromptForProfile,
@@ -1286,28 +1102,9 @@ async function autoRetryWithCountdown<T>(
   }
   throw lastErr;
 }
-const fileTree = ref<TreeNode[]>([]);
-const expandedDirs = ref<Set<string>>(new Set());
-
-type OpenTab = {
-  path: string;
-  content: string;
-  dirty: boolean;
-};
-
 type SearchMode = "file" | "content";
 
-const openTabs = ref<OpenTab[]>([]);
-const activeFilePath = ref("");
-const selectedTreePath = ref("");
-const fileContent = ref("");
-const fileDirty = ref(false);
-const fileLoadError = ref("");
-const fileDiffs = ref<Record<string, FileDiff>>({});
-const readOnlyFileKeys = ref<Set<string>>(new Set());
-const showDiffMode = ref(false);
 const editorRef = ref<InstanceType<typeof CodeMonacoEditor> | null>(null);
-const selectedCode = ref("");
 
 interface QuotedMessage {
   messageId: string;
@@ -1562,8 +1359,6 @@ const contextMenuTargetIsFile = computed(() => {
   const node = findNode(fileTree.value, contextMenu.value.path);
   return Boolean(node && !node.isDirectory);
 });
-const renamingPath = ref("");
-
 const aiConfig = ref({ endpoint: "", apiKey: "", model: "", providerName: "" });
 
 const configReady = computed(() => Boolean(aiConfig.value.endpoint.trim()) && Boolean(aiConfig.value.model.trim()));
@@ -1600,6 +1395,65 @@ const chatRunningText = computed(() =>
     : "Agent 运行中… · 发送新消息将打断",
 );
 
+const totalTokenUsage = computed(() => {
+  let totalStreamChars = 0;
+  let totalContextChars = 0;
+  let hasTokenData = false;
+  
+  for (const msg of chatMessages.value) {
+    if (msg.role === "assistant") {
+      if (msg.streamChars && msg.streamChars > 0) {
+        totalStreamChars += msg.streamChars;
+        hasTokenData = true;
+      }
+      if (msg.contextChars && msg.contextChars > 0) {
+        totalContextChars = Math.max(totalContextChars, msg.contextChars);
+        hasTokenData = true;
+      }
+    }
+  }
+  
+  if (!hasTokenData) return "";
+  
+  const parts: string[] = [];
+  if (totalStreamChars > 0) {
+    parts.push(`${formatCharCount(totalStreamChars)} 输出`);
+  }
+  if (totalContextChars > 0) {
+    parts.push(`${formatCharCount(totalContextChars)} 上下文`);
+  }
+  return parts.join(" · ");
+});
+
+const showTokenDetail = ref(false);
+
+const tokenDetailData = computed(() => {
+  let totalStreamChars = 0;
+  let maxContextChars = 0;
+  let assistantCount = 0;
+  
+  for (const msg of chatMessages.value) {
+    if (msg.role === "assistant") {
+      assistantCount++;
+      if (msg.streamChars && msg.streamChars > 0) {
+        totalStreamChars += msg.streamChars;
+      }
+      if (msg.contextChars && msg.contextChars > 0) {
+        maxContextChars = Math.max(maxContextChars, msg.contextChars);
+      }
+    }
+  }
+  
+  if (assistantCount === 0) return null;
+  
+  return {
+    assistantCount,
+    totalStreamChars,
+    maxContextChars,
+    totalMessages: chatMessages.value.length,
+  };
+});
+
 const recoverableAssistantMsg = computed(() => {
   if (chatSending.value) return null;
   for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
@@ -1621,9 +1475,6 @@ const stalledAssistantMsg = computed(() => {
 function isAssistantStalled(msg: ChatMessage): boolean {
   return Boolean(stalledAssistantMsg.value && stalledAssistantMsg.value.id === msg.id);
 }
-
-const activeFileDiff = computed(() => getFileDiff(activeFilePath.value));
-const activeFileReadOnly = computed(() => readOnlyFileKeys.value.has(normalizePathKey(activeFilePath.value)));
 
 const activeAssistantMsgId = computed(() => {
   for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
@@ -1808,11 +1659,38 @@ function expandEditor() {
   saveEditorCollapsed();
 }
 
-function syncEditorPanelForOpenFiles() {
-  if (!activeFilePath.value && projectOpened.value) {
-    collapseEditor();
-  }
-}
+const {
+  fileTree, expandedDirs, openTabs, activeFilePath, selectedTreePath,
+  fileContent, fileDirty, fileLoadError, fileDiffs, readOnlyFileKeys,
+  showDiffMode, selectedCode, renamingPath, activeFileDiff, activeFileReadOnly,
+  refreshTree, openFile, saveFile, reloadFile, closeTab, switchTab,
+  switchReadOnlyTab, createNewFile, createNewFolder, commitRename, cancelRename,
+  deleteSelectedItem, showGitFileDiff, openGitLogFile, openDiffPreview,
+  toggleDiffMode, toggleDir, findNode, findNodeByKey, normalizePathKey,
+  joinProjectPath, resolveFullPathFromRel, storeFileDiff, getFileDiff, setFileDiff,
+  findOpenTab, syncActiveTabToCache, ensureCanLeaveCurrentTab,
+  syncEditorPanelForOpenFiles, parentDirForCreate, selectTreeItem,
+  onEditorChange, onEditorSelect,   askAiWithCode, activeFileRelativePath,
+  syncEditorAfterAgentFileChange,
+} = useEditorPanel({
+  projectPath,
+  projectOpened,
+  aiConfig,
+  configReady,
+  confirm,
+  inputPrompt,
+  composerRef,
+  gitError,
+  gitDiffContentCache,
+  gitDiffLoadingKey,
+  evictOldestCacheEntry,
+  gitHistoryDiffKey,
+  gitWorkingTreeDiffKey,
+  treeError,
+  collapseEditor,
+  expandEditor,
+  autoRetryWithCountdown,
+});
 
 function phaseBadgeLabel(phase?: string): string {
   switch (phase) {
@@ -2590,6 +2468,7 @@ function agentRunningHint(msg: ChatMessage): string {
 
 function agentStatusDisplay(msg: ChatMessage): string {
   void agentUiTick.value;
+  let statusText = "";
   if (msg.status) {
     if (
       msg.agentWaitStartedAt &&
@@ -2599,11 +2478,37 @@ function agentStatusDisplay(msg: ChatMessage): string {
       !msg.agentDetail
     ) {
       const elapsed = Math.max(0, Math.floor((Date.now() - msg.agentWaitStartedAt) / 1000));
-      return `${msg.status} · 已等待 ${elapsed}s`;
+      statusText = `${msg.status} · 已等待 ${elapsed}s`;
+    } else {
+      statusText = msg.status;
     }
-    return msg.status;
+  } else {
+    statusText = msg.agentPhase ? formatAgentStatus({ phase: msg.agentPhase, detail: msg.agentDetail }, true) : "正在运行…";
   }
-  return msg.agentPhase ? formatAgentStatus({ phase: msg.agentPhase, detail: msg.agentDetail }, true) : "正在运行…";
+  
+  // Append token usage info
+  const tokenInfo: string[] = [];
+  if (msg.streamChars && msg.streamChars > 0) {
+    tokenInfo.push(`${msg.streamChars} 字输出`);
+  }
+  if (msg.contextChars && msg.contextChars > 0) {
+    tokenInfo.push(`${formatCharCount(msg.contextChars)} 上下文`);
+  }
+  if (tokenInfo.length > 0) {
+    statusText += ` · ${tokenInfo.join(" · ")}`;
+  }
+  
+  return statusText;
+}
+
+function formatCharCount(chars: number): string {
+  if (chars >= 1000000) {
+    return `${(chars / 1000000).toFixed(1)}M`;
+  }
+  if (chars >= 1000) {
+    return `${(chars / 1000).toFixed(1)}K`;
+  }
+  return `${chars}`;
 }
 
 function agentActiveModel(msg: ChatMessage): string {
@@ -3206,469 +3111,10 @@ function openProjectByInput() {
   void openProjectByPath(projectPath.value);
 }
 
-async function refreshTree() {
-  if (!projectOpened.value) return;
-  const normalized = projectPath.value.trim();
-  if (!normalized) return;
-  try {
-    fileTree.value = await autoRetryWithCountdown(
-      () => loadDirChildren(normalized),
-      {
-        onRetry: (remaining, attempt, max) => {
-          treeError.value = `刷新目录失败，正在重试… ${remaining}s (${attempt}/${max})`;
-        },
-      },
-    );
-    treeError.value = "";
-  } catch (e) {
-    treeError.value = formatFetchError(e, "刷新目录失败");
-  }
-}
-
-async function openGitLogFile(entry: GitLogEntry, file: GitLogFile) {
-  if (!projectOpened.value) return;
-  gitError.value = "";
-  const cacheKey = gitHistoryDiffKey(entry.hash, file.path, file.oldPath);
-  const cached = gitDiffContentCache.value[cacheKey];
-  try {
-    let diff = cached;
-    if (!diff) {
-      gitDiffLoadingKey.value = cacheKey;
-      const result = await fetchGitCommitFileDiff(projectPath.value.trim(), entry.hash, file.path, file.oldPath);
-      if (!result.ok) {
-        gitError.value = result.error || "获取提交文件 diff 失败";
-        return;
-      }
-      diff = { before: result.before, after: result.after, deleted: file.status === "D" };
-      gitDiffContentCache.value = { ...gitDiffContentCache.value, [cacheKey]: diff };
-      evictOldestCacheEntry();
-    }
-
-    const displayPath = file.oldPath ? `${file.oldPath} → ${file.path}` : file.path;
-    const previewPath = `git-history://${entry.shortHash}/${displayPath}`;
-    const nextReadOnly = new Set(readOnlyFileKeys.value);
-    nextReadOnly.add(normalizePathKey(previewPath));
-    readOnlyFileKeys.value = nextReadOnly;
-    await openDiffPreview(previewPath, diff, { readOnly: true });
-  } catch (e) {
-    gitError.value = e instanceof Error ? e.message : "获取提交文件 diff 失败";
-  } finally {
-    if (gitDiffLoadingKey.value === cacheKey) gitDiffLoadingKey.value = "";
-  }
-}
-
-let diffAbortController: AbortController | null = null;
-
-async function showGitFileDiff(filePath: string, staged = false) {
-  if (!projectOpened.value) return;
-  if (diffAbortController) diffAbortController.abort();
-  const cacheKey = gitWorkingTreeDiffKey(filePath, staged);
-  gitError.value = "";
-  const previewPath = gitWorkingTreePreviewPath(filePath, staged);
-  const cached = gitDiffContentCache.value[cacheKey];
-  try {
-    let diff = cached;
-    if (!diff) {
-      gitDiffLoadingKey.value = cacheKey;
-      const controller = new AbortController();
-      diffAbortController = controller;
-      const result = await fetchGitDiffContent(projectPath.value.trim(), filePath, staged, controller.signal);
-      if (controller.signal.aborted) return;
-      if (!result.ok) {
-        if (result.error !== "已取消") gitError.value = result.error || "获取 diff 失败";
-        return;
-      }
-      diff = { before: result.before, after: result.after };
-      gitDiffContentCache.value = { ...gitDiffContentCache.value, [cacheKey]: diff };
-      evictOldestCacheEntry();
-    }
-    await openDiffPreview(previewPath, diff, { readOnly: staged });
-  } catch (e) {
-    if (!(e instanceof DOMException && e.name === "AbortError")) {
-      gitError.value = e instanceof Error ? e.message : "获取 diff 失败";
-    }
-  } finally {
-    diffAbortController = null;
-    if (gitDiffLoadingKey.value === cacheKey) gitDiffLoadingKey.value = "";
-  }
-}
-
-function gitWorkingTreePreviewPath(filePath: string, staged = false): string {
-  if (!staged) return resolveFullPathFromRel(filePath);
-  return `git-index://${filePath}`;
-}
-
-function isVirtualSchemePath(path: string): boolean {
-  return path.startsWith("git-index://") || path.startsWith("git-history://");
-}
-
-function displayFilePath(path: string): string {
-  if (!path) return "";
-  if (path.startsWith("git-index://")) return path.slice("git-index://".length);
-  if (path.startsWith("git-history://")) {
-    const rest = path.slice("git-history://".length);
-    const slash = rest.indexOf("/");
-    return slash >= 0 ? rest.slice(slash + 1) : rest;
-  }
-  return path;
-}
-
-async function openDiffPreview(path: string, diff: FileDiff, options?: { readOnly?: boolean }) {
-  if (!await ensureCanLeaveCurrentTab()) return;
-  syncActiveTabToCache();
-  if (options?.readOnly) {
-    const nextReadOnly = new Set(readOnlyFileKeys.value);
-    nextReadOnly.add(normalizePathKey(path));
-    readOnlyFileKeys.value = nextReadOnly;
-  }
-  expandEditor();
-  setFileDiff(path, diff);
-  selectedTreePath.value = options?.readOnly ? "" : path;
-  activeFilePath.value = path;
-  fileContent.value = diff.after;
-  fileDirty.value = false;
-  fileLoadError.value = "";
-  showDiffMode.value = true;
-
-  const cached = findOpenTab(path);
-  if (cached) {
-    cached.content = diff.after;
-    cached.dirty = false;
-  } else {
-    openTabs.value.push({ path, content: diff.after, dirty: false });
-  }
-}
-
-async function toggleDir(dirPath: string) {
-  const expanded = expandedDirs.value;
-  if (expanded.has(dirPath)) {
-    expanded.delete(dirPath);
-    expandedDirs.value = new Set(expanded);
-    return;
-  }
-
-  expanded.add(dirPath);
-  expandedDirs.value = new Set(expanded);
-
-  const node = findNode(fileTree.value, dirPath);
-  if (node && node.isDirectory && !node.loaded) {
-    try {
-      node.children = await loadDirChildren(dirPath);
-      node.loaded = true;
-    } catch {
-      node.children = [];
-    }
-  }
-}
-
-function findNode(nodes: TreeNode[], targetPath: string): TreeNode | null {
-  for (const node of nodes) {
-    if (node.path === targetPath) return node;
-    if (node.children?.length) {
-      const found = findNode(node.children, targetPath);
-      if (found) return found;
-    }
-  }
-  return null;
-}
-
-function normalizePathKey(p: string): string {
-  return p.replace(/\\/g, "/").toLowerCase();
-}
-
-function joinProjectPath(base: string, relative: string): string {
-  const rel = relative.trim().replace(/\\/g, "/").replace(/^\/+/, "");
-  if (!rel) return base;
-  if (/^[a-zA-Z]:/.test(rel)) return rel;
-  const baseNorm = base.replace(/\\/g, "/").replace(/\/$/, "");
-  return `${baseNorm}/${rel}`;
-}
-
-function resolveFullPathFromRel(rel: string): string {
-  const joined = joinProjectPath(projectPath.value, rel);
-  const key = normalizePathKey(joined);
-  const node = findNodeByKey(fileTree.value, key);
-  return node?.path || joined;
-}
-
-function findNodeByKey(nodes: TreeNode[], key: string): TreeNode | null {
-  for (const node of nodes) {
-    if (normalizePathKey(node.path) === key) return node;
-    if (node.children?.length) {
-      const found = findNodeByKey(node.children, key);
-      if (found) return found;
-    }
-  }
-  return null;
-}
-
-function setFileDiff(path: string, diff: FileDiff) {
-  fileDiffs.value = { ...fileDiffs.value, [normalizePathKey(path)]: diff };
-}
-
-function getFileDiff(path: string): FileDiff | null {
-  if (!path) return null;
-  return fileDiffs.value[normalizePathKey(path)] || null;
-}
-
-function parentDirForCreate(): string {
-  const sel = selectedTreePath.value || activeFilePath.value || projectPath.value;
-  const node = findNode(fileTree.value, sel);
-  if (node?.isDirectory) return sel;
-  const norm = sel.replace(/\\/g, "/");
-  const idx = norm.lastIndexOf("/");
-  return idx > 0 ? norm.slice(0, idx) : projectPath.value;
-}
-
-function selectTreeItem(path: string) {
-  selectedTreePath.value = path;
-}
-
-function toggleDiffMode() {
-  if (!activeFileDiff.value) return;
-  showDiffMode.value = !showDiffMode.value;
-}
-
-function storeFileDiff(relPath: string, before: string, after: string, deleted?: boolean) {
-  const full = resolveFullPathFromRel(relPath);
-  setFileDiff(full, { before, after, deleted });
-}
-
-async function syncEditorAfterAgentFileChange(relPath: string, diff: FileDiff) {
-  await refreshTree();
-  const fullPath = resolveFullPathFromRel(relPath);
-  if (diff.deleted) {
-    removeOpenTabForPath(fullPath);
-    return;
-  }
-  const tab = findOpenTab(fullPath);
-  if (tab) {
-    tab.content = diff.after;
-    tab.dirty = false;
-  }
-  if (normalizePathKey(activeFilePath.value) === normalizePathKey(fullPath)) {
-    fileContent.value = diff.after;
-    fileDirty.value = false;
-  }
-}
-
-function findOpenTab(path: string): OpenTab | undefined {
-  return openTabs.value.find((tab) => tab.path === path);
-}
-
-function syncActiveTabToCache() {
-  if (!activeFilePath.value) return;
-  const tab = findOpenTab(activeFilePath.value);
-  if (!tab) return;
-  tab.content = fileContent.value;
-  tab.dirty = fileDirty.value;
-}
-
-async function ensureCanLeaveCurrentTab(): Promise<boolean> {
-  if (!fileDirty.value || !activeFilePath.value) return true;
-  const name = fileName(activeFilePath.value);
-  const choice = await confirm(`「${name}」未保存。确定保存？\n\n确定 = 保存后切换\n取消 = 留在当前文件`);
-  if (choice) {
-    await saveFile();
-    return !fileDirty.value;
-  }
-  return false;
-}
-
-function switchTab(path: string) {
-  if (path === activeFilePath.value) return;
-  if (readOnlyFileKeys.value.has(normalizePathKey(path))) {
-    void switchReadOnlyTab(path);
-    return;
-  }
-  void openFile(path);
-}
-
-async function switchReadOnlyTab(path: string) {
-  const canLeave = await ensureCanLeaveCurrentTab();
-  if (!canLeave) return;
-  syncActiveTabToCache();
-  const tab = findOpenTab(path);
-  if (!tab) return;
-  activeFilePath.value = path;
-  fileContent.value = tab.content;
-  fileDirty.value = false;
-  fileLoadError.value = "";
-  selectedTreePath.value = "";
-  showDiffMode.value = Boolean(getFileDiff(path));
-}
-
-async function closeTab(path: string) {
-  const tab = findOpenTab(path);
-  if (!tab) return;
-
-  if (tab.dirty) {
-    const name = fileName(path);
-    const save = await confirm(`「${name}」未保存。确定保存？\n\n确定 = 保存后关闭\n取消 = 留在当前文件`);
-    if (save) {
-      if (activeFilePath.value !== path) {
-        syncActiveTabToCache();
-        activeFilePath.value = path;
-        fileContent.value = tab.content;
-        fileDirty.value = tab.dirty;
-      }
-      await saveFile();
-      if (fileDirty.value) return;
-    } else {
-      return;
-    }
-  }
-
-  const idx = openTabs.value.findIndex((item) => item.path === path);
-  if (idx < 0) return;
-  openTabs.value.splice(idx, 1);
-  if (readOnlyFileKeys.value.has(normalizePathKey(path))) {
-    const nextReadOnly = new Set(readOnlyFileKeys.value);
-    nextReadOnly.delete(normalizePathKey(path));
-    readOnlyFileKeys.value = nextReadOnly;
-    const nextDiffs = { ...fileDiffs.value };
-    delete nextDiffs[normalizePathKey(path)];
-    fileDiffs.value = nextDiffs;
-  }
-
-  if (activeFilePath.value !== path) return;
-
-  const nextTab = openTabs.value[idx] || openTabs.value[idx - 1];
-  if (nextTab) {
-    activeFilePath.value = nextTab.path;
-    fileContent.value = nextTab.content;
-    fileDirty.value = nextTab.dirty;
-    fileLoadError.value = "";
-    showDiffMode.value = readOnlyFileKeys.value.has(normalizePathKey(nextTab.path)) && Boolean(getFileDiff(nextTab.path));
-    selectedTreePath.value = showDiffMode.value ? "" : nextTab.path;
-    return;
-  }
-
-  activeFilePath.value = "";
-  fileContent.value = "";
-  fileDirty.value = false;
-  fileLoadError.value = "";
-  showDiffMode.value = false;
-  syncEditorPanelForOpenFiles();
-}
-
-function updateOpenTabPath(from: string, to: string) {
-  const tab = findOpenTab(from);
-  if (tab) tab.path = to;
-}
-
-async function createNewFile() {
-  if (!projectOpened.value) return;
-  const name = await inputPrompt.prompt("新建文件（可含子目录，如 src/utils/helper.ts）", {
-    defaultValue: "new-file.ts",
-  });
-  if (!name) return;
-  const target = joinProjectPath(parentDirForCreate(), name.trim());
-  const result = await createItem(target, false, "");
-  if (!result.ok) {
-    treeError.value = result.error || "创建失败";
-    return;
-  }
-  treeError.value = "";
-  await refreshTree();
-  selectedTreePath.value = target;
-  await openFile(target);
-}
-
-async function createNewFolder() {
-  if (!projectOpened.value) return;
-  const name = await inputPrompt.prompt("新建文件夹（可含子目录）", {
-    defaultValue: "new-folder",
-  });
-  if (!name) return;
-  const target = joinProjectPath(parentDirForCreate(), name.trim());
-  const result = await createItem(target, true);
-  if (!result.ok) {
-    treeError.value = result.error || "创建失败";
-    return;
-  }
-  treeError.value = "";
-  selectedTreePath.value = target;
-  await refreshTree();
-  await toggleDir(target);
-}
-
 async function renameSelectedItem() {
   const from = selectedTreePath.value;
   if (!from) return;
   renamingPath.value = from;
-}
-
-async function commitRename(path: string, newName: string) {
-  renamingPath.value = "";
-  const from = path;
-  const parent = from.replace(/\\/g, "/").replace(/\/[^/]+$/, "");
-  const to = joinProjectPath(parent, newName);
-  const result = await renameItem(from, to);
-  if (!result.ok) {
-    treeError.value = result.error || "重命名失败";
-    return;
-  }
-  treeError.value = "";
-  if (activeFilePath.value === from) {
-    activeFilePath.value = to;
-    const fromDiff = getFileDiff(from);
-    if (fromDiff) {
-      setFileDiff(to, fromDiff);
-      const next = { ...fileDiffs.value };
-      delete next[normalizePathKey(from)];
-      fileDiffs.value = next;
-    }
-  }
-  updateOpenTabPath(from, to);
-  selectedTreePath.value = to;
-  await refreshTree();
-}
-
-function cancelRename() {
-  renamingPath.value = "";
-}
-
-async function deleteSelectedItem() {
-  const target = selectedTreePath.value;
-  if (!target) return;
-  const root = projectPath.value.replace(/\\/g, "/").replace(/\/$/, "");
-  const normalized = target.replace(/\\/g, "/");
-  if (normalized === root) {
-    treeError.value = "不能删除项目根目录";
-    return;
-  }
-  if (!await confirm(`确定删除「${fileName(target)}」？`)) return;
-
-  const result = await deleteItem(target);
-  if (!result.ok) {
-    treeError.value = result.error || "删除失败";
-    return;
-  }
-  treeError.value = "";
-  const tabIdx = openTabs.value.findIndex((tab) => tab.path === target);
-  if (tabIdx >= 0) openTabs.value.splice(tabIdx, 1);
-  if (activeFilePath.value === target) {
-    const nextTab = openTabs.value[tabIdx] || openTabs.value[tabIdx - 1];
-    if (nextTab) {
-      activeFilePath.value = nextTab.path;
-      fileContent.value = nextTab.content;
-      fileDirty.value = nextTab.dirty;
-    } else {
-      activeFilePath.value = "";
-      fileContent.value = "";
-      fileDirty.value = false;
-      syncEditorPanelForOpenFiles();
-    }
-    showDiffMode.value = false;
-  }
-  if (getFileDiff(target)) {
-    const next = { ...fileDiffs.value };
-    delete next[normalizePathKey(target)];
-    fileDiffs.value = next;
-  }
-  selectedTreePath.value = projectPath.value;
-  await refreshTree();
 }
 
 function showContextMenu(path: string, x: number, y: number) {
@@ -3722,80 +3168,6 @@ function contextMenuDelete() {
   void deleteSelectedItem();
 }
 
-async function openFile(filePath: string, options?: { force?: boolean; skipUnsavedCheck?: boolean }) {
-  if (!options?.skipUnsavedCheck && activeFilePath.value && activeFilePath.value !== filePath) {
-    const canLeave = await ensureCanLeaveCurrentTab();
-    if (!canLeave) return;
-    syncActiveTabToCache();
-  } else {
-    syncActiveTabToCache();
-  }
-
-  expandEditor();
-  showDiffMode.value = false;
-  fileLoadError.value = "";
-  selectedTreePath.value = filePath;
-
-  const cached = findOpenTab(filePath);
-  if (cached && !options?.force) {
-    activeFilePath.value = filePath;
-    fileContent.value = cached.content;
-    fileDirty.value = cached.dirty;
-    return;
-  }
-
-  activeFilePath.value = filePath;
-  fileDirty.value = false;
-
-  if (isVirtualSchemePath(filePath)) {
-    fileContent.value = cached?.content || "";
-    fileLoadError.value = cached ? "" : "预览文件不可直接读取";
-    return;
-  }
-
-  const result = await readFile(filePath);
-  if (!result.ok) {
-    fileContent.value = "";
-    fileLoadError.value = result.error || "读取失败";
-    if (cached) {
-      cached.content = "";
-      cached.dirty = false;
-    }
-    return;
-  }
-
-  fileContent.value = result.content;
-  if (cached) {
-    cached.content = result.content;
-    cached.dirty = false;
-  } else {
-    openTabs.value.push({ path: filePath, content: result.content, dirty: false });
-  }
-}
-
-async function reloadFile() {
-  if (!activeFilePath.value) return;
-  if (activeFileReadOnly.value) return;
-  await openFile(activeFilePath.value, { force: true, skipUnsavedCheck: true });
-}
-
-async function saveFile() {
-  if (!activeFilePath.value) return;
-  if (activeFileReadOnly.value) return;
-  const result = await writeFile(activeFilePath.value, fileContent.value);
-  if (!result.ok) {
-    fileLoadError.value = result.error || "保存失败";
-    return;
-  }
-  fileDirty.value = false;
-  fileLoadError.value = "";
-  const tab = findOpenTab(activeFilePath.value);
-  if (tab) {
-    tab.content = fileContent.value;
-    tab.dirty = false;
-  }
-}
-
 async function handleSearch() {
   const q = searchQuery.value.trim();
   if (!q || !projectPath.value.trim()) {
@@ -3834,27 +3206,6 @@ watch(searchQuery, (val) => {
 watch(searchMode, () => {
   if (searchQuery.value.trim()) void handleSearch();
 });
-
-function onEditorChange() {
-  if (activeFileReadOnly.value) return;
-  fileDirty.value = true;
-  const tab = findOpenTab(activeFilePath.value);
-  if (tab) tab.dirty = true;
-}
-
-function onEditorSelect(text: string) {
-  selectedCode.value = text.trim();
-}
-
-function askAiWithCode() {
-  if (!selectedCode.value) return;
-  const raw = activeFilePath.value || "";
-  const filePath = displayFilePath(raw) || "未知文件";
-  composerRef.value?.setPlainText(
-    `请帮我分析以下代码（${filePath}）：\n\n\`\`\`\n${selectedCode.value}\n\`\`\``,
-  );
-  selectedCode.value = "";
-}
 
 function onMessageSelect(event: MouseEvent, message: ChatMessage) {
   const selection = window.getSelection();
@@ -4128,14 +3479,6 @@ function formatToolMeta(
   }
 
   return { name, icon: "⚙️", title: name, detail: "", label: name };
-}
-
-function activeFileRelativePath(): string {
-  if (!activeFilePath.value || !projectPath.value) return "";
-  const root = projectPath.value.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
-  const full = activeFilePath.value.replace(/\\/g, "/").toLowerCase();
-  if (!full.startsWith(root)) return "";
-  return full.slice(root.length).replace(/^\//, "");
 }
 
 async function handleAgentWrittenFiles(files: string[]) {
@@ -5469,37 +4812,6 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-:global(body) {
-  margin: 0;
-  background: radial-gradient(900px 520px at 18% 8%, rgba(31, 111, 235, 0.16), transparent 62%),
-    radial-gradient(900px 560px at 92% 0%, rgba(130, 80, 223, 0.18), transparent 60%),
-    #0b1220;
-  color: rgba(255, 255, 255, 0.92);
-}
-
-:global(::-webkit-scrollbar) {
-  width: 6px;
-  height: 6px;
-}
-
-:global(::-webkit-scrollbar-track) {
-  background: transparent;
-}
-
-:global(::-webkit-scrollbar-thumb) {
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 3px;
-  transition: background 200ms ease;
-}
-
-:global(::-webkit-scrollbar-thumb:hover) {
-  background: rgba(255, 255, 255, 0.28);
-}
-
-:global(::-webkit-scrollbar-corner) {
-  background: transparent;
-}
-
 .vibe-page {
   --bg: #0b1220;
   --panel: rgba(17, 24, 39, 0.72);
@@ -5805,13 +5117,6 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
-.git-panel {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
 .file-panel-tabs {
   display: flex;
   gap: 8px;
@@ -5843,814 +5148,6 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 0 1px rgba(31, 111, 235, 0.4);
 }
 
-.git-badge {
-  margin-left: 4px;
-  padding: 0 6px;
-  font-size: 12px;
-  font-weight: 600;
-  background: rgba(31, 111, 235, 0.45);
-  color: #fff;
-  border-radius: 8px;
-  line-height: 18px;
-}
-
-.git-badge-staged {
-  background: rgba(115, 218, 202, 0.45);
-}
-
-.git-panel-content {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.git-scroll-area {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding-bottom: 8px;
-}
-
-.git-header {
-  border-bottom: 1px solid var(--border);
-}
-
-.git-header-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 14px;
-  font-size: 14px;
-}
-
-.git-header-row + .git-header-row {
-  padding-top: 0;
-  padding-bottom: 10px;
-}
-
-/* ---- 分支行 ---- */
-.git-branch-row {
-  gap: 8px;
-}
-
-.file-watcher-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #f7768e;
-  flex-shrink: 0;
-  transition: background 0.3s;
-}
-
-.file-watcher-dot.connected {
-  background: #9ece6a;
-}
-
-.git-branch-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex: 1;
-}
-
-.git-branch-icon {
-  color: var(--text-dim);
-  flex-shrink: 0;
-  font-size: 15px;
-}
-
-.git-branch-name {
-  color: #7aa2f7;
-  font-family: monospace;
-  font-weight: 600;
-  font-size: 13px;
-  padding: 3px 8px;
-  background: rgba(122, 162, 247, 0.1);
-  border: 1px solid rgba(122, 162, 247, 0.15);
-  border-radius: 6px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  transition: background 0.2s ease;
-}
-
-.git-branch-name:hover {
-  background: rgba(122, 162, 247, 0.18);
-}
-
-.git-tracking-badge {
-  font-family: monospace;
-  font-size: 11px;
-  color: var(--text-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  opacity: 0.7;
-  transition: opacity 0.15s;
-  cursor: default;
-}
-
-.git-tracking-badge:hover {
-  opacity: 1;
-}
-
-/* ---- 同步行 ---- */
-.git-sync-row {
-  gap: 12px;
-}
-
-.git-sync-info {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.git-sync-stat {
-  font-family: monospace;
-  font-size: 12px;
-  color: var(--text-dim);
-  flex-shrink: 0;
-  padding: 3px 7px;
-  border-radius: 5px;
-  background: rgba(255, 255, 255, 0.04);
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  transition: all 0.2s ease;
-}
-
-.git-sync-arrow {
-  font-size: 11px;
-  opacity: 0.6;
-}
-
-.git-sync-stat.active,
-.git-sync-stat.ahead {
-  color: #7aa2f7;
-  font-weight: 600;
-  background: rgba(122, 162, 247, 0.12);
-}
-
-.git-sync-stat.ahead .git-sync-arrow,
-.git-sync-stat.active .git-sync-arrow {
-  opacity: 1;
-}
-
-.git-sync-stat.behind {
-  color: #e0af68;
-  font-weight: 600;
-  background: rgba(224, 175, 104, 0.12);
-}
-
-.git-sync-stat.behind .git-sync-arrow {
-  opacity: 1;
-}
-
-.git-remote-actions {
-  display: flex;
-  gap: 6px;
-}
-
-/* ---- Stash 区域 ---- */
-.git-stash-section {
-  border-top: 1px solid var(--border);
-}
-
-.git-stash-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  font-size: 14px;
-}
-
-.git-stash-title-row {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex-shrink: 0;
-}
-
-.git-stash-icon {
-  font-size: 13px;
-  line-height: 1;
-}
-
-.git-stash-title {
-  color: var(--text);
-  font-weight: 600;
-  font-size: 12px;
-  letter-spacing: 0.3px;
-}
-
-.git-stash-count {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--text-dim);
-  background: rgba(255, 255, 255, 0.06);
-  padding: 1px 5px;
-  border-radius: 8px;
-  line-height: 1.4;
-}
-
-.git-stash-save-row {
-  display: flex;
-  gap: 5px;
-  align-items: center;
-  flex: 1;
-  min-width: 0;
-}
-
-.git-stash-msg-input {
-  flex: 1;
-  min-width: 0;
-  padding: 3px 7px;
-  font-size: 11px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text);
-  outline: none;
-  transition: border-color 180ms ease;
-}
-
-.git-stash-msg-input:focus {
-  border-color: rgba(31, 111, 235, 0.5);
-}
-
-.git-stash-msg-input::placeholder {
-  color: var(--text-dim);
-}
-
-.stash-save-btn {
-  font-size: 10px !important;
-  padding: 3px 8px !important;
-  flex-shrink: 0;
-}
-
-.git-stash-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.git-stash-list-header {
-  display: flex;
-  align-items: center;
-  padding: 4px 14px;
-  border-top: 1px solid var(--border);
-}
-
-.git-stash-list-title {
-  font-size: 11px;
-  color: var(--text-dim);
-  font-weight: 500;
-}
-
-.git-stash-list-content {
-  display: flex;
-  flex-direction: column;
-}
-
-.git-stash-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 14px;
-  font-size: 12px;
-  border-top: 1px solid var(--border);
-  transition: background 0.15s ease;
-}
-
-.git-stash-item:hover {
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.git-stash-label {
-  color: #bb9af7;
-  font-family: monospace;
-  font-size: 10px;
-  font-weight: 500;
-  flex-shrink: 0;
-  padding: 1px 5px;
-  background: rgba(187, 154, 247, 0.08);
-  border: 1px solid rgba(187, 154, 247, 0.12);
-  border-radius: 3px;
-  line-height: 1.4;
-}
-
-.git-stash-msg {
-  color: var(--text-dim);
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-  flex: 1;
-}
-
-.git-stash-actions {
-  display: flex;
-  gap: 3px;
-  flex-shrink: 0;
-  opacity: 0.4;
-  transition: opacity 0.2s ease;
-}
-
-.git-stash-item:hover .git-stash-actions {
-  opacity: 1;
-}
-
-.git-stash-empty {
-  padding: 5px 14px 8px;
-  font-size: 11px;
-  color: var(--text-dim);
-  opacity: 0.35;
-  font-style: italic;
-  letter-spacing: 0.2px;
-}
-
-.git-error {
-  padding: 6px 14px;
-  font-size: 12px;
-  color: #f7768e;
-  background: rgba(247, 118, 142, 0.08);
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.git-error::before {
-  content: '⚠';
-  font-size: 12px;
-  flex-shrink: 0;
-}
-
-.git-commit-box {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px 14px;
-  border-top: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.02);
-}
-
-.git-commit-input {
-  width: 100%;
-  padding: 8px 10px;
-  font-size: 13px;
-  line-height: 1.45;
-  font-family: inherit;
-  resize: vertical;
-  min-height: 48px;
-  max-height: 120px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  outline: none;
-  transition: border-color 180ms ease, box-shadow 180ms ease;
-  box-sizing: border-box;
-}
-
-.git-commit-input:focus {
-  border-color: rgba(31, 111, 235, 0.5);
-  box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.1);
-}
-
-.git-commit-input::placeholder {
-  color: var(--text-dim);
-}
-
-.git-commit-actions {
-  display: flex;
-  gap: 6px;
-}
-
-.git-commit-actions button {
-  flex: 1;
-  min-width: 0;
-  font-weight: 500;
-}
-
-.git-ai-push {
-  width: 100%;
-  padding: 10px 16px;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  border-radius: 6px;
-  transition: all 200ms ease;
-  position: relative;
-  overflow: hidden;
-}
-
-.git-ai-push:not(:disabled)::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
-  transition: left 500ms ease;
-}
-
-.git-ai-push:not(:disabled):hover::before {
-  left: 100%;
-}
-
-.git-ai-push:not(:disabled):hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(31, 111, 235, 0.3);
-}
-
-.git-ai-push:not(:disabled):active {
-  transform: translateY(0);
-  box-shadow: 0 2px 6px rgba(31, 111, 235, 0.2);
-}
-
-.git-ai-push-sep {
-  height: 1px;
-  background: var(--border);
-  margin: 8px 0;
-  opacity: 0.6;
-}
-
-.git-commit-ai:not(:disabled) {
-  color: #9eceff;
-  border-color: rgba(31, 111, 235, 0.35);
-  background: rgba(31, 111, 235, 0.1);
-}
-
-.git-commit-ai:not(:disabled):hover {
-  background: rgba(31, 111, 235, 0.18);
-  color: #c0d9ff;
-}
-
-.git-file-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 2px 0;
-  user-select: none;
-}
-
-.git-file-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 14px;
-  cursor: pointer;
-  transition: background 120ms ease;
-  min-width: 0;
-}
-
-.git-file-item:hover {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.git-file-status {
-  font-family: monospace;
-  font-size: 12px;
-  font-weight: 700;
-  width: 14px;
-  text-align: center;
-  flex-shrink: 0;
-}
-
-.git-file-path {
-  flex: 1;
-  min-width: 0;
-  font-size: 13px;
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  direction: rtl;
-  text-align: left;
-  unicode-bidi: plaintext;
-}
-
-.git-file-item.active {
-  background: rgba(31, 111, 235, 0.15);
-}
-
-.git-file-item.loading,
-.git-log-file.loading {
-  cursor: wait;
-  opacity: 0.72;
-}
-
-.git-file-item.loading .git-file-path::after,
-.git-log-file.loading .git-file-path::after {
-  content: "加载中";
-  margin-left: 8px;
-  color: var(--text-dim);
-  font-size: 12px;
-}
-
-.git-file-check {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  font-size: 13px;
-  font-weight: 600;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text-dim);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: all 120ms ease;
-  line-height: 1;
-}
-
-.git-file-check:hover {
-  background: rgba(31, 111, 235, 0.2);
-  border-color: rgba(31, 111, 235, 0.4);
-  color: #7aa2f7;
-}
-
-.git-file-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0 !important;
-  font-size: 14px !important;
-  border-radius: 5px !important;
-  border: 1px solid transparent !important;
-  background: transparent !important;
-  color: var(--muted) !important;
-  opacity: 0.6;
-  transition: all 120ms ease;
-  flex-shrink: 0;
-}
-
-.git-file-item:hover .git-file-btn {
-  opacity: 1;
-}
-
-.git-file-btn:hover:not(:disabled) {
-  background: rgba(31, 111, 235, 0.18) !important;
-  color: #7aa2f7 !important;
-  border-color: rgba(31, 111, 235, 0.3) !important;
-}
-
-.git-file-btn.danger {
-  color: var(--muted) !important;
-  border-color: transparent !important;
-}
-
-.git-file-btn.danger:hover:not(:disabled) {
-  background: rgba(255, 77, 94, 0.15) !important;
-  color: #ff6b7a !important;
-  border-color: rgba(255, 77, 94, 0.3) !important;
-}
-
-.git-section {
-  border-bottom: 1px solid var(--border);
-}
-
-.git-section-head {
-  display: flex;
-  align-items: center;
-  flex-wrap: nowrap;
-  gap: 8px;
-  padding: 6px 14px;
-  background: rgba(255, 255, 255, 0.025);
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  backdrop-filter: blur(8px);
-  border-bottom: 1px solid var(--border);
-}
-
-.git-section-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  padding: 0;
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-}
-
-.git-section-toggle:hover .git-section-title {
-  color: var(--text);
-}
-
-.git-section-chevron {
-  flex-shrink: 0;
-  width: 12px;
-  font-size: 11px;
-  color: var(--text-dim);
-  line-height: 1;
-}
-
-.git-section-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-dim);
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  flex-shrink: 0;
-}
-
-.git-section-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  justify-content: flex-end;
-  margin-left: auto;
-}
-
-.git-section-actions button.ghost.tiny {
-  padding: 4px 10px;
-  font-size: 12px;
-  border-radius: 5px;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-button.ghost.danger {
-  color: #f7768e;
-}
-
-button.ghost.danger:hover:not(:disabled) {
-  background: rgba(247, 118, 142, 0.12);
-  color: #ff9a9a;
-}
-
-.git-log-section {
-  border-top: 1px solid var(--border);
-  margin-top: 8px;
-  padding-top: 4px;
-}
-
-.git-log-toggle {
-  width: 100%;
-  justify-content: flex-start;
-  text-align: left;
-  border-radius: 4px;
-  border: none !important;
-  padding: 8px 10px !important;
-  font-size: 12px !important;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  color: var(--text-dim) !important;
-  transition: all 150ms ease;
-}
-
-.git-log-toggle:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06) !important;
-  color: var(--text) !important;
-}
-
-.git-log-item {
-  display: flex;
-  flex-direction: column;
-  font-size: 12px;
-}
-
-.git-log-item:hover {
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.git-log-entry-head {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  width: 100%;
-  padding: 7px 14px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-}
-
-.git-log-entry-head:hover {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.git-log-chevron {
-  width: 10px;
-  color: var(--text-dim);
-  flex-shrink: 0;
-}
-
-.git-log-hash {
-  font-family: monospace;
-  color: #7aa2f7;
-  flex-shrink: 0;
-}
-
-.git-log-msg {
-  flex: 1;
-  min-width: 0;
-  color: var(--text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.git-log-count {
-  flex-shrink: 0;
-  min-width: 18px;
-  padding: 1px 5px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text-dim);
-  font-size: 11px;
-  text-align: center;
-}
-
-.git-log-detail {
-  padding: 0 0 5px 27px;
-}
-
-.git-log-full-msg {
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: var(--text);
-  font-size: 12px;
-  line-height: 1.5;
-  padding: 8px 12px;
-  margin-bottom: 4px;
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 6px;
-}
-
-.git-log-files {
-  padding: 0 0 5px 27px;
-}
-
-.git-log-file {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  width: 100%;
-  padding: 5px 12px 5px 8px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  text-align: left;
-}
-
-.git-log-file:hover {
-  background: rgba(31, 111, 235, 0.12);
-}
-
-.git-diff-panel {
-  border-top: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  max-height: 40%;
-  overflow: hidden;
-}
-
-.git-diff-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.git-diff-title {
-  font-size: 11px;
-  color: var(--text-dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.git-diff-content {
-  flex: 1;
-  overflow: auto;
-  margin: 0;
-  padding: 8px 12px;
-  font-family: monospace;
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--text);
-  white-space: pre;
-  tab-size: 4;
-}
 
 .editor-panel {
   display: flex;
@@ -7489,28 +5986,6 @@ button.primary.small {
   text-align: center;
   opacity: 0.8;
 }
-
-.git-scroll-area .panel-empty::before {
-  content: "✓";
-  font-size: 28px;
-  color: rgba(100, 200, 150, 0.6);
-  margin-bottom: 4px;
-}
-
-.git-panel-fetch-error {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-}
-
-.git-fetch-error-detail {
-  margin: 0;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.45);
-  word-break: break-word;
-}
-
 .editor-empty {
   display: flex;
   flex-direction: column;
@@ -7584,7 +6059,8 @@ button.primary.small {
 .file-list,
 .file-tree {
   flex: 1;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 4px 0;
 }
 
@@ -8240,6 +6716,7 @@ button.compact {
   flex-direction: column;
   gap: 6px;
   margin-top: 8px;
+  position: relative;
 }
 
 .chat-status-row {
@@ -8247,6 +6724,65 @@ button.compact {
   align-items: center;
   min-height: 16px;
   font-size: 11px;
+}
+
+.token-usage {
+  margin-left: auto;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 10px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: background 0.15s ease;
+}
+
+.token-usage:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.token-detail-popup {
+  position: absolute;
+  bottom: 60px;
+  right: 16px;
+  background: rgba(17, 24, 39, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 12px;
+  min-width: 200px;
+  z-index: 100;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.token-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.token-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.token-detail-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+}
+
+.token-detail-label {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.token-detail-value {
+  color: rgba(255, 255, 255, 0.9);
+  font-family: ui-monospace, monospace;
 }
 
 .chat-action-row {

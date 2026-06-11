@@ -269,6 +269,7 @@ defineExpose({ searchInputRef });
 
 .search-input {
   width: 100%;
+  box-sizing: border-box;
   padding: 6px 8px;
   font-size: 12px;
   border: 1px solid var(--border-color, #333);

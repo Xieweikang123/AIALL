@@ -97,6 +97,9 @@ export type PersistedChatMessage = {
   /** Quote metadata for user messages that were sent with a quoted reply. */
   quotedRole?: "user" | "assistant";
   quotedText?: string;
+  /** Token usage tracking */
+  streamChars?: number;
+  contextChars?: number;
 };
 
 export type VibeChatSessionMeta = {
@@ -434,6 +437,8 @@ function sanitizeMessages(
         reverted: m.reverted || undefined,
         activityExpanded: m.activityExpanded || undefined,
         activityDetailed: m.activityDetailed || undefined,
+        streamChars: m.streamChars || undefined,
+        contextChars: m.contextChars || undefined,
         ...(options?.forDisk
           ? {
               ...(m.imageRefs?.length ? { imageRefs: m.imageRefs.map((r) => ({ path: r.path })) } : {}),
