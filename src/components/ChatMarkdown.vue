@@ -86,6 +86,32 @@ function wrapToolSummaryBlocks(el: HTMLElement) {
     content.appendChild(h3); // put h3 inside content (hidden)
     toMove.forEach((el) => content.appendChild(el));
 
+    // Color-code list items by action type
+    const colorMap: Record<string, string> = {
+      "读取文件": "#58a6ff",
+      "搜索代码": "#d2a8ff",
+      "局部修改": "#3fb950",
+      "读取目录": "#79c0ff",
+      "执行命令": "#f0883e",
+    };
+    content.querySelectorAll("li").forEach((li) => {
+      const text = li.textContent || "";
+      let matchedColor = "";
+      for (const [key, color] of Object.entries(colorMap)) {
+        if (text.includes(key)) { matchedColor = color; break; }
+      }
+      if (matchedColor) {
+        li.style.borderLeftColor = matchedColor;
+      }
+      // Bold the action type prefix before ":"
+      const colonIdx = text.indexOf(":");
+      if (colonIdx > 0 && colonIdx < 20) {
+        const prefix = text.slice(0, colonIdx);
+        const rest = text.slice(colonIdx);
+        li.innerHTML = `<strong style="color: ${matchedColor || 'rgba(255,255,255,0.7)'}; font-weight: 600; font-size: 11px;">${prefix}</strong><span style="color: rgba(255,255,255,0.45); font-size: 12px;">${rest}</span>`;
+      }
+    });
+
     // Toggle click
     header.addEventListener("click", () => {
       const collapsed = wrapper.getAttribute("data-collapsed") === "true";
@@ -244,23 +270,24 @@ onUpdated(() => postProcess());
 
 /* ===== Tool Summary Block ===== */
 .msg-markdown :deep(.tool-summary-block) {
-  margin: 8px 0;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  margin: 10px 0;
+  border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.025);
   overflow: hidden;
-  transition: border-color 0.2s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .msg-markdown :deep(.tool-summary-block:hover) {
-  border-color: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
 .msg-markdown :deep(.tool-summary-header) {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 12px;
+  padding: 6px 12px;
   cursor: pointer;
   user-select: none;
   transition: background 0.15s ease;
@@ -271,21 +298,21 @@ onUpdated(() => postProcess());
 }
 
 .msg-markdown :deep(.tool-summary-icon) {
-  font-size: 13px;
-  opacity: 0.7;
+  font-size: 12px;
+  opacity: 0.6;
 }
 
 .msg-markdown :deep(.tool-summary-title) {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.55);
+  color: rgba(255, 255, 255, 0.45);
   letter-spacing: 0.3px;
   flex: 1;
 }
 
 .msg-markdown :deep(.tool-summary-toggle) {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.35);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.3);
   transition: transform 0.25s ease;
 }
 
@@ -320,24 +347,38 @@ onUpdated(() => postProcess());
 /* Style list items inside tool summary */
 .msg-markdown :deep(.tool-summary-content > ul) {
   margin: 0;
-  padding-left: 1.2em;
+  padding: 2px 8px;
   list-style: none;
 }
 
 .msg-markdown :deep(.tool-summary-content > ul > li) {
-  margin: 3px 0;
+  margin: 1px 0;
   font-size: 12px;
   color: rgba(255, 255, 255, 0.55);
-  line-height: 1.5;
-  position: relative;
-  padding-left: 0;
+  line-height: 1.45;
+  padding: 3px 8px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.12s;
+}
+
+.msg-markdown :deep(.tool-summary-content > ul > li:hover) {
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .msg-markdown :deep(.tool-summary-content > ul > li::before) {
-  content: "·";
-  position: absolute;
-  left: -12px;
-  color: rgba(255, 255, 255, 0.25);
+  display: none;
+}
+
+/* Color-coded action prefix badges */
+.msg-markdown :deep(.tool-summary-content > ul > li) {
+  border-left: 2px solid rgba(255, 255, 255, 0.08);
+}
+
+.msg-markdown :deep(.tool-summary-content > ul > li:has(strong)) {
+  border-left-color: rgba(255, 255, 255, 0.12);
 }
 
 /* ─── 语法高亮 ─────────────────────────────────────── */
