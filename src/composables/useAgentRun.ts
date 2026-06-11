@@ -115,7 +115,7 @@ export interface AgentStatusData {
   retryError?: string;
 }
 
-const STREAM_DELTA_FLUSH_MS = 80;
+const STREAM_DELTA_FLUSH_MS = 16;
 const STREAM_SCROLL_THROTTLE_MS = 120;
 
 export function useAgentRun(options: {

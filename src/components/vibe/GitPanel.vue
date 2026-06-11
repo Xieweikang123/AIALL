@@ -165,7 +165,7 @@
                 v-for="file in gitStagedFiles"
                 :key="file.path"
                 class="git-file-item"
-                :class="{ active: selectedGitFile === gitWorkingTreeDiffKey(file.path, file.staged), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
+                :class="{ active: selectedGitFiles.includes(file.path), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
                 @pointerdown="$emit('on-git-file-pointer-down', $event, file.path, file.staged)"
               >
                 <span class="git-file-check" @pointerdown.stop @click.stop="$emit('unstage-file', file.path)">✓</span>
@@ -195,7 +195,7 @@
                 v-for="file in gitUnstagedFiles"
                 :key="file.path"
                 class="git-file-item"
-                :class="{ active: selectedGitFile === gitWorkingTreeDiffKey(file.path, file.staged), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
+                :class="{ active: selectedGitFiles.includes(file.path), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
                 @pointerdown="$emit('on-git-file-pointer-down', $event, file.path, file.staged)"
               >
                 <span class="git-file-check" @pointerdown.stop @click.stop="$emit('stage-file', file.path)">+</span>
@@ -310,7 +310,7 @@ interface Props {
   gitUnstagedOpen: boolean;
   gitLogOpen: boolean;
   gitLogEntries: GitLogEntry[];
-  selectedGitFile: string;
+  selectedGitFiles: string[];
   gitDiffLoadingKey: string;
   gitRemoteAction: string;
   configReady: boolean;
@@ -699,13 +699,25 @@ function gitStatusColor(status: string): string {
 
 .git-section-head {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  flex-wrap: nowrap;
+  gap: 8px;
 }
 
 .git-section-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+.git-section-actions button.ghost.tiny {
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .git-file-list {

@@ -207,14 +207,19 @@
                       <span class="git-section-chevron">{{ gitStagedOpen ? "▾" : "▸" }}</span>
                       <span class="git-section-title">已暂存 ({{ gitStagedFiles.length }})</span>
                     </button>
-                    <button type="button" class="ghost tiny" @click="unstageAll">取消全部</button>
+                    <div class="git-section-actions">
+                      <button v-if="selectedGitFiles.length" type="button" class="ghost tiny" @click="unstageSelectedFiles">
+                        取消暂存选中 ({{ selectedGitFiles.length }})
+                      </button>
+                      <button type="button" class="ghost tiny" @click="unstageAll">取消全部</button>
+                    </div>
                   </div>
                   <div v-if="gitStagedOpen" class="git-file-list">
                       <div
                         v-for="file in gitStagedFiles"
                         :key="file.path"
                         class="git-file-item"
-                        :class="{ active: selectedGitFile === gitWorkingTreeDiffKey(file.path, file.staged), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
+                        :class="{ active: selectedGitFiles.includes(file.path), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
                         @pointerdown="onGitFilePointerDown($event, file.path, file.staged)"
                       >
                       <span class="git-file-check" @pointerdown.stop @click.stop="unstageFile(file.path)">✓</span>
@@ -235,16 +240,22 @@
                       <span class="git-section-title">未暂存 ({{ gitUnstagedFiles.length }})</span>
                     </button>
                     <div class="git-section-actions">
+                      <button v-if="selectedGitFiles.length" type="button" class="ghost tiny" @click="stageSelectedFiles">
+                        暂存选中 ({{ selectedGitFiles.length }})
+                      </button>
+                      <button v-if="selectedGitFiles.length" type="button" class="ghost tiny danger" @click="discardSelectedFiles($event)">
+                        丢弃选中 ({{ selectedGitFiles.length }})
+                      </button>
                       <button type="button" class="ghost tiny" @click="stageAll">全部暂存</button>
                       <button type="button" class="ghost tiny danger" @click="discardAll($event)">丢弃全部</button>
                     </div>
                   </div>
-                  <div v-if="gitUnstagedOpen" class="git-file-list">
+                   <div v-if="gitUnstagedOpen" class="git-file-list">
                       <div
                         v-for="file in gitUnstagedFiles"
                         :key="file.path"
                         class="git-file-item"
-                        :class="{ active: selectedGitFile === gitWorkingTreeDiffKey(file.path, file.staged), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
+                        :class="{ active: selectedGitFiles.includes(file.path), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
                         @pointerdown="onGitFilePointerDown($event, file.path, file.staged)"
                       >
                       <span class="git-file-check" @pointerdown.stop @click.stop="stageFile(file.path)">+</span>
@@ -1389,7 +1400,7 @@ const projectHistoryRef = ref<HTMLElement | null>(null);
 const {
   gitPanelMode, gitStatus, gitBranch, gitIsRepo, gitStatusKnown, gitLoading, gitError,
   gitCommitMessage, gitCommitting, gitGenStep, gitLogEntries, gitLogOpen,
-  gitStagedOpen, gitUnstagedOpen, expandedGitLogEntries, selectedGitFile,
+  gitStagedOpen, gitUnstagedOpen, expandedGitLogEntries, selectedGitFiles,
   gitDiffLoadingKey, gitDiffContentCache, gitRemotes, gitTrackingBranch,
   gitAhead, gitBehind, gitRemoteLoading, gitRemoteAction, gitStashes, gitStashOpen,
   gitStashAction, gitStashMessage, gitAiPushStep,
@@ -1398,6 +1409,7 @@ const {
   isGitLogEntryOpen, toggleGitLogEntry, gitHistoryDiffKey, gitWorkingTreeDiffKey,
   resetGitPanelState, refreshGitStatus, commitGit, stageFile, unstageFile,
   stageAll, unstageAll, discardFile, discardAll,
+  stageSelectedFiles, unstageSelectedFiles, discardSelectedFiles, toggleGitFileSelection, clearGitSelection,
   generateCommitMessage, aiCommitAndPush, refreshGitRemotes,
   doFetch, doPull, doPush,
   refreshGitStashes, doStashSave, doStashApply, doStashDrop,
@@ -3251,7 +3263,6 @@ async function showGitFileDiff(filePath: string, staged = false) {
   if (!projectOpened.value) return;
   if (diffAbortController) diffAbortController.abort();
   const cacheKey = gitWorkingTreeDiffKey(filePath, staged);
-  selectedGitFile.value = cacheKey;
   gitError.value = "";
   const previewPath = gitWorkingTreePreviewPath(filePath, staged);
   const cached = gitDiffContentCache.value[cacheKey];
@@ -4037,10 +4048,22 @@ function onSearchResultPointerDown(
 }
 
 function onGitFilePointerDown(e: PointerEvent, relativePath: string, staged = false) {
-  const fullPath = resolveFullPathFromRel(relativePath);
-  startPathDrag(fullPath, fileName(relativePath), e, () => {
-    void showGitFileDiff(relativePath, staged);
-  }, chatDropZoneRef.value);
+  const shiftKey = e.shiftKey;
+  const ctrlKey = e.ctrlKey || e.metaKey;
+  
+  if (shiftKey || ctrlKey) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  
+  toggleGitFileSelection(relativePath, shiftKey, ctrlKey);
+  
+  if (!shiftKey && !ctrlKey) {
+    const fullPath = resolveFullPathFromRel(relativePath);
+    startPathDrag(fullPath, fileName(relativePath), e, () => {
+      void showGitFileDiff(relativePath, staged);
+    }, chatDropZoneRef.value);
+  }
 }
 
 function selectMention(item: ProjectFileItem) {
@@ -6272,6 +6295,7 @@ onBeforeUnmount(() => {
   flex: 1;
   overflow-y: auto;
   padding: 2px 0;
+  user-select: none;
 }
 
 .git-file-item {
@@ -6397,7 +6421,7 @@ onBeforeUnmount(() => {
 .git-section-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  flex-wrap: nowrap;
   gap: 8px;
   padding: 6px 14px;
   background: rgba(255, 255, 255, 0.025);
@@ -6445,7 +6469,18 @@ onBeforeUnmount(() => {
 
 .git-section-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+.git-section-actions button.ghost.tiny {
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 button.ghost.danger {

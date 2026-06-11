@@ -42,7 +42,9 @@ function sanitizeMarkdownHtml(html: string): string {
 export function renderMarkdown(text: string): string {
   const source = String(text || "").trim();
   if (!source) return "";
-  const raw = marked.parse(source, { async: false }) as string;
+  // Unescape escaped markdown syntax that some models produce
+  const unescaped = source.replace(/\\\*/g, "*").replace(/\\_/g, "_").replace(/\\\[/g, "[");
+  const raw = marked.parse(unescaped, { async: false }) as string;
   return sanitizeMarkdownHtml(raw);
 }
 

@@ -268,6 +268,14 @@ onUpdated(() => postProcess());
   background: rgba(255, 255, 255, 0.06);
 }
 
+.msg-markdown :deep(strong) {
+  font-weight: 600;
+}
+
+.msg-markdown :deep(em) {
+  font-style: italic;
+}
+
 /* ===== Tool Summary Block ===== */
 .msg-markdown :deep(.tool-summary-block) {
   margin: 10px 0;

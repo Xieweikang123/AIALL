@@ -1,9 +1,11 @@
 import type { ChatToolCall } from "./aiForward";
 
-const TOOL_MARKUP_START = /<function[=>]/i;
+const TOOL_MARKUP_START = /<function[=>]|\[Tool call:/i;
 
 const TOOL_BLOCK_RE = /<function[=>](\w+)>?\s*([\s\S]*?)(?=<function[=>]|$)/gi;
 const PARAM_RE = /<parameter[=>](\w+)>([^<]*)/gi;
+
+const JSON_TOOL_CALL_RE = /\[Tool call:\s*(\w+)\(([\s\S]*?)\)\]/gi;
 
 const TOOL_NAME_ALIASES: Record<string, string> = {
   list_directory: "list_dir",
@@ -49,11 +51,15 @@ export function normalizeTextToolArgs(args: Record<string, unknown>): Record<str
   return out;
 }
 
-/** Remove XML-style pseudo tool calls from assistant text shown to the user. */
+/** Remove XML-style and JSON-style pseudo tool calls from assistant text shown to the user. */
 export function stripTextToolCallMarkup(text: string): string {
-  const start = text.search(TOOL_MARKUP_START);
-  if (start < 0) return text;
-  return text.slice(0, start).trimEnd();
+  let result = text;
+
+  result = result.replace(/\[Tool call:\s*\w+\([\s\S]*?\)\]/gi, "").trim();
+
+  const start = result.search(/<function[=>]/i);
+  if (start < 0) return result;
+  return result.slice(0, start).trimEnd();
 }
 
 export function hasTextToolCallMarkup(text: string): boolean {
@@ -89,6 +95,29 @@ export function parseTextToolCallsFromContent(content: string): ParsedTextToolCa
     }
   }
 
+  JSON_TOOL_CALL_RE.lastIndex = 0;
+  let jsonMatch: RegExpExecArray | null;
+  while ((jsonMatch = JSON_TOOL_CALL_RE.exec(content)) !== null) {
+    const rawName = jsonMatch[1];
+    const argsStr = jsonMatch[2] || "{}";
+    let args: Record<string, unknown> = {};
+    try {
+      args = JSON.parse(argsStr) as Record<string, unknown>;
+    } catch {
+      const keyValRe = /(\w+)\s*:\s*"([^"]*)"/g;
+      let kv: RegExpExecArray | null;
+      while ((kv = keyValRe.exec(argsStr)) !== null) {
+        args[kv[1]] = kv[2];
+      }
+    }
+
+    const name = normalizeTextToolName(rawName);
+    const normalizedArgs = normalizeTextToolArgs(args);
+    if (name) {
+      results.push({ name, args: normalizedArgs });
+    }
+  }
+
   return results;
 }
 
@@ -115,7 +144,7 @@ export class TextToolCallStreamFilter {
     if (!delta || this.markupStarted) return "";
 
     this.raw += delta;
-    const markupAt = this.raw.search(TOOL_MARKUP_START);
+    const markupAt = this.raw.search(/<function[=>]|\[Tool call:/i);
     if (markupAt < 0) {
       const userDelta = this.raw.slice(this.visibleLen);
       this.visibleLen = this.raw.length;
