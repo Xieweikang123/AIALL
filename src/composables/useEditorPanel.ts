@@ -370,13 +370,13 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     await openFile(activeFilePath.value, { force: true, skipUnsavedCheck: true });
   }
 
-  async function saveFile() {
-    if (!activeFilePath.value) return;
-    if (activeFileReadOnly.value) return;
+  async function saveFile(): Promise<boolean> {
+    if (!activeFilePath.value) return false;
+    if (activeFileReadOnly.value) return false;
     const result = await writeFile(activeFilePath.value, fileContent.value);
     if (!result.ok) {
       fileLoadError.value = result.error || "保存失败";
-      return;
+      return false;
     }
     fileDirty.value = false;
     fileLoadError.value = "";
@@ -385,6 +385,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
       tab.content = fileContent.value;
       tab.dirty = false;
     }
+    return true;
   }
 
   function switchTab(path: string) {
@@ -612,8 +613,9 @@ export function useEditorPanel(params: UseEditorPanelParams) {
       try {
         node.children = await loadDirChildren(dirPath);
         node.loaded = true;
-      } catch {
+      } catch (e) {
         node.children = [];
+        treeError.value = e instanceof Error ? e.message : "加载目录失败";
       }
     }
   }

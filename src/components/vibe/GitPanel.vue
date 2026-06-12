@@ -321,7 +321,7 @@ interface Props {
   expandedGitLogEntries: Set<string>;
 }
 
-defineProps<Props>();
+const { expandedGitLogEntries } = defineProps<Props>();
 
 const emit = defineEmits<{
   (e: "refresh"): void;
@@ -353,8 +353,7 @@ const emit = defineEmits<{
 }>();
 
 function isGitLogEntryOpen(hash: string): boolean {
-  const props = defineProps<Props>();
-  return props.expandedGitLogEntries.has(hash);
+  return expandedGitLogEntries.has(hash);
 }
 
 function gitWorkingTreeDiffKey(path: string, staged: boolean): string {
@@ -565,7 +564,7 @@ function gitStatusColor(status: string): string {
 }
 
 .git-stash-msg-input:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
 }
 
 .stash-save-btn {
@@ -679,7 +678,7 @@ function gitStatusColor(status: string): string {
 }
 
 .git-commit-input:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
 }
 
 .git-commit-actions {

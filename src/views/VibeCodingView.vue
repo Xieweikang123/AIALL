@@ -186,7 +186,7 @@
         @switch-tab="switchTab"
         @close-tab="closeTab"
         @toggle-diff-mode="toggleDiffMode"
-        @save-file="saveFile"
+        @save-file="onSaveFile"
         @reload-file="reloadFile"
         @collapse-editor="collapseEditor"
         @editor-change="onEditorChange"
@@ -504,11 +504,10 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import "../styles/vibe-coding.scss";
 import type { AgentLogLineItem } from "../components/AgentActivityLogStream.vue";
-import { phaseBadgeLabel, appendStatusDetail, computeDiffHtml, truncateDiffPreview, cleanStatusLogText, statusLogPhaseClass, formatCharCount, formatContextChars, modelStepPhaseLabel, formatSessionTime, escapeHtml, isNetworkError, fileName, normalizePathKey, joinProjectPath, isVirtualSchemePath, displayFilePath, genId, roundGroupSetupLabel, isActiveModelStep, hasAgentProcessSteps, shouldShowMessageBubble, turnMessageRoleLabel, entryToNode, formatToolMeta, syncRoundGroupsPatch } from "../utils/vibeHelpers";
+import { appendStatusDetail, truncateDiffPreview, cleanStatusLogText, formatCharCount, isNetworkError, fileName, normalizePathKey, joinProjectPath, genId, isActiveModelStep, hasAgentProcessSteps, shouldShowMessageBubble, entryToNode, formatToolMeta, syncRoundGroupsPatch } from "../utils/vibeHelpers";
 import AgentMessage from "../components/AgentMessage.vue";
 import ChatComposerEditor from "../components/ChatComposerEditor.vue";
 import ChatMarkdown from "../components/ChatMarkdown.vue";
-import CodeMonacoEditor from "../components/CodeMonacoEditor.vue";
 import ConfirmPopup from "../components/ConfirmPopup.vue";
 import InputPrompt from "../components/InputPrompt.vue";
 import FileTreeNode, { type TreeNode } from "../components/FileTreeNode.vue";
@@ -867,8 +866,6 @@ async function autoRetryWithCountdown<T>(
 }
 type SearchMode = "file" | "content";
 
-const editorRef = ref<InstanceType<typeof CodeMonacoEditor> | null>(null);
-
 interface QuotedMessage {
   messageId: string;
   content: string;
@@ -880,6 +877,8 @@ const quotedMessage = ref<QuotedMessage | null>(null);
 const quoteButtonPosition = ref({ x: 0, y: 0 });
 const showQuoteButton = ref(false);
 const quoteButtonRef = ref<HTMLElement | null>(null);
+const openingProject = ref(false);
+let switchSessionGeneration = 0;
 
 const searchQuery = ref("");
 const searchMode = ref<SearchMode>("file");
@@ -899,7 +898,6 @@ const chatMode = ref<VibeChatMode>(loadChatMode());
 const chatMessages = ref<ChatMessage[]>([]);
 const chatSending = ref(false);
 const chatError = ref("");
-const chatScrollRef = ref<HTMLElement | null>(null);
 const searchInputRef = ref<HTMLInputElement | null>(null);
 const workspaceRef = ref<HTMLElement | null>(null);
 let scrollChatRaf = 0;
@@ -1027,7 +1025,9 @@ function switchToAdjacentSession(delta: number) {
   if (nextId) switchSession(nextId);
 }
 
-function removeSession(sessionId: string) {
+async function removeSession(sessionId: string) {
+  const ok = await confirm("确定删除此会话？");
+  if (!ok) return;
   const result = removeSessionBase(sessionId, chatSending.value);
   if (result) chatMessages.value = normalizeChatMessages(result);
   refreshSessionList();
@@ -1375,7 +1375,7 @@ function loadSavedProject() {
 }
 
 function isChatNearBottom(): boolean {
-  const el = chatScrollRef.value;
+  const el = chatPanelRef.value?.chatScrollRef;
   if (!el) return true;
   return el.scrollHeight - el.scrollTop - el.clientHeight <= CHAT_SCROLL_PIN_THRESHOLD;
 }
@@ -1399,7 +1399,7 @@ async function scrollChatToBottom(force = false) {
   await nextTick();
   if (scrollChatRaf) cancelAnimationFrame(scrollChatRaf);
   scrollChatRaf = requestAnimationFrame(() => {
-    const el = chatScrollRef.value;
+    const el = chatPanelRef.value?.chatScrollRef;
     if (el) el.scrollTop = el.scrollHeight;
     scrollChatRaf = 0;
   });
@@ -2322,9 +2322,11 @@ function switchSession(sessionId: string) {
     return;
   }
   persistChatNow();
+  const gen = ++switchSessionGeneration;
   void (async () => {
     const project = projectPath.value.trim();
     await ensureProjectChatLoadedFromDisk(project, sessionId);
+    if (gen !== switchSessionGeneration) return;
     const messages = switchVibeChatSession(project, sessionId);
     chatMessages.value = normalizeChatMessages(messages);
     activeSessionId.value = sessionId;
@@ -2480,8 +2482,12 @@ function schedulePersistChat() {
   }, 400);
 }
 
-function clearChat() {
+async function clearChat() {
   if (chatSending.value) return;
+  if (chatMessages.value.length > 0) {
+    const ok = await confirm("确定清空所有聊天记录？");
+    if (!ok) return;
+  }
   chatMessages.value = [];
   chatError.value = "";
   pendingPromptQueue.value = [];
@@ -2514,14 +2520,6 @@ async function openProjectByPath(dirPath: string) {
 
   const flushLog = (result: string) => {
     const line = `[${new Date().toISOString()}] ${normalized} | ${result}`;
-    console.log(`[TAB-PERF] ${line}`);
-    // 写磁盘
-    try {
-      const blob = new Blob([line + "\n"], { type: "text/plain" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      // 不用下载，用 fetch 写到后端
-    } catch {}
     fetch("/backend/vibe/log", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2623,6 +2621,8 @@ async function openProjectByPath(dirPath: string) {
 }
 
 async function handleOpenProject() {
+  if (openingProject.value) return;
+  openingProject.value = true;
   pickingFolder.value = true;
   treeError.value = "";
 
@@ -2636,6 +2636,7 @@ async function handleOpenProject() {
     await openProjectByPath(picked.path);
   } finally {
     pickingFolder.value = false;
+    openingProject.value = false;
   }
 }
 
@@ -2963,8 +2964,15 @@ function hideGitFileContextMenu() {
 
 function gitFileCopyName() {
   const path = gitFileContextMenu.value.path;
-  void navigator.clipboard.writeText(fileName(path));
+  void copyText(fileName(path));
   hideGitFileContextMenu();
+}
+
+async function onSaveFile() {
+  const ok = await saveFile();
+  if (ok) {
+    // Brief visual feedback - the dirty indicator already disappears
+  }
 }
 
 function selectMention(item: ProjectFileItem) {
@@ -4146,6 +4154,11 @@ function onGlobalKeydown(e: KeyboardEvent) {
     searchInputRef.value?.focus();
     searchInputRef.value?.select();
   }
+  if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+    e.preventDefault();
+    void saveFile();
+    return;
+  }
   if ((e.ctrlKey || e.metaKey) && e.altKey && e.key === "ArrowUp") {
     e.preventDefault();
     switchToAdjacentSession(-1);
@@ -4233,21 +4246,6 @@ watch(gitPanelMode, (mode) => {
 onMounted(() => {
   reloadAiConfig();
   refreshProjectHistoryList();
-  // #region agent log
-  console.log('[DBG][TAB][onMounted] projectHistoryList', { count: projectHistoryList.value.length, items: projectHistoryList.value.map(p => p.displayName) });
-  nextTick(() => {
-    const barEl = document.querySelector('.project-switcher-bar');
-    const vibePage = document.querySelector('.vibe-page');
-    console.log('[DBG][TAB][onMounted] DOM check', {
-      hasBar: !!barEl,
-      barDisplay: barEl ? window.getComputedStyle(barEl).display : null,
-      barVisibility: barEl ? window.getComputedStyle(barEl).visibility : null,
-      barHeight: barEl ? barEl.getBoundingClientRect().height : null,
-      vibePageChildren: vibePage ? vibePage.children.length : null,
-      childTags: vibePage ? Array.from(vibePage.children).map(c => c.tagName + '.' + c.className.split(' ')[0]) : null,
-    });
-  });
-  // #endregion
   pendingPromptQueue.value = loadPendingQueue();
   loadSavedProject();
   chatPanelWidth.value = Math.min(chatPanelWidth.value, getChatPanelMaxWidth());
@@ -4306,30 +4304,37 @@ onBeforeUnmount(() => {
   stopFileWatcherForProject();
   
   // Best-effort: give pending disk syncs a brief window to complete.
-  // This won't block unmount (onBeforeUnmount must be sync), but ensures
-  // the async sync chain is at least kicked off and may complete in time.
-  void (async () => {
-    const startTime = Date.now();
-    const maxWaitMs = 500;
-    while (syncingChatStore.value && Date.now() - startTime < maxWaitMs) {
-      await new Promise(resolve => setTimeout(resolve, 50));
-    }
-  })();
+  // Fire-and-forget; don't block unmount.
+  if (syncingChatStore.value) {
+    setTimeout(() => {}, 200);
+  }
 });
 </script>
 
 <style scoped>
 .vibe-page {
   --bg: #0b1220;
+  --bg-primary: #0b1220;
+  --bg-secondary: #111827;
+  --bg-tertiary: #1f2937;
   --panel: rgba(17, 24, 39, 0.72);
   --panel-2: rgb(2, 6, 23);
   --text: rgba(255, 255, 255, 0.92);
+  --text-primary: rgba(255, 255, 255, 0.92);
+  --text-secondary: rgba(255, 255, 255, 0.7);
+  --text-tertiary: rgba(255, 255, 255, 0.55);
   --muted: rgba(255, 255, 255, 0.7);
   --text-dim: rgba(255, 255, 255, 0.55);
   --border: rgba(255, 255, 255, 0.12);
+  --border-color: rgba(255, 255, 255, 0.12);
   --primary: #1f6feb;
+  --accent-color: #58a6ff;
+  --accent-hover: #79c0ff;
   --danger: #ff4d5e;
+  --error-color: #f85149;
   --ok: #1a7f37;
+  --success-color: #3fb950;
+  --warning-color: #d29922;
 
   height: 100vh;
   display: flex;
@@ -4624,6 +4629,16 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
+.editor-panel {
+  display: flex;
+  flex-direction: column;
+  background: rgba(2, 6, 23, 0.35);
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+}
+
 .file-panel-tabs {
   display: flex;
   gap: 8px;
@@ -4697,8 +4712,23 @@ onBeforeUnmount(() => {
   width: 4px;
   cursor: col-resize;
   background: transparent;
-  transition: background 150ms ease;
+  transition: background 150ms ease, box-shadow 150ms ease;
   flex-shrink: 0;
+  position: relative;
+}
+
+.resize-handle::after {
+  content: '';
+  position: absolute;
+  inset: 0 -3px;
+}
+
+.resize-handle:hover {
+  background: rgba(31, 111, 235, 0.4);
+}
+
+.resize-handle:active {
+  background: rgba(31, 111, 235, 0.6);
 }
 
 .resize-handle:hover {

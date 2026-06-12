@@ -67,16 +67,25 @@
             内容
           </button>
         </div>
-        <input
-          ref="searchInputRef"
-          :value="searchQuery"
-          class="search-input"
-          type="text"
-          :placeholder="searchMode === 'file' ? '搜索文件名…' : '搜索代码内容…'"
-          :disabled="!projectOpened"
-          @input="$emit('update:searchQuery', ($event.target as HTMLInputElement).value)"
-          @keydown.enter="$emit('handle-search')"
-        />
+        <div class="search-input-wrap">
+          <input
+            ref="searchInputRef"
+            :value="searchQuery"
+            class="search-input"
+            type="text"
+            :placeholder="searchMode === 'file' ? '搜索文件名…' : '搜索代码内容…'"
+            :disabled="!projectOpened"
+            @input="$emit('update:searchQuery', ($event.target as HTMLInputElement).value)"
+            @keydown.enter="$emit('handle-search')"
+          />
+          <button
+            v-if="searchQuery"
+            type="button"
+            class="search-clear-btn"
+            title="清除搜索"
+            @click="$emit('update:searchQuery', '')"
+          >×</button>
+        </div>
       </div>
     </div>
 
@@ -174,7 +183,7 @@ defineExpose({ searchInputRef });
 }
 
 .file-panel-tab:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
@@ -263,14 +272,20 @@ defineExpose({ searchInputRef });
 }
 
 .search-mode-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
+}
+
+.search-input-wrap {
+  position: relative;
+  width: 100%;
 }
 
 .search-input {
   width: 100%;
   box-sizing: border-box;
   padding: 6px 8px;
+  padding-right: 24px;
   font-size: 12px;
   border: 1px solid var(--border-color, #333);
   border-radius: 4px;
@@ -284,7 +299,30 @@ defineExpose({ searchInputRef });
 }
 
 .search-input:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
+}
+
+.search-clear-btn {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  color: var(--text-secondary, #999);
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.search-clear-btn:hover {
+  background: var(--bg-tertiary, #333);
+  color: var(--text-primary, #fff);
 }
 </style>

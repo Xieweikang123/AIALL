@@ -389,7 +389,7 @@ const chatPanelStyle = computed(() => {
   return { width: "360px", flexShrink: "0" };
 });
 
-defineExpose({ sessionPickerRef });
+defineExpose({ sessionPickerRef, chatScrollRef });
 
 function formatSessionTime(timestamp: number | string): string {
   const ts = typeof timestamp === 'string' ? parseInt(timestamp, 10) : timestamp;
@@ -425,6 +425,8 @@ function formatSessionTime(timestamp: number | string): string {
   padding: 8px 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(22, 27, 34, 0.8);
+  backdrop-filter: blur(8px);
+  flex-shrink: 0;
 }
 
 .panel-head-left {
@@ -536,12 +538,13 @@ function formatSessionTime(timestamp: number | string): string {
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
-  background: #161b22;
+  background: rgba(22, 27, 34, 0.95);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   z-index: 1000;
   margin-top: 4px;
+  backdrop-filter: blur(12px);
 }
 
 .session-picker-dropdown::-webkit-scrollbar {
@@ -762,7 +765,7 @@ function formatSessionTime(timestamp: number | string): string {
 }
 
 .chip:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
@@ -1018,7 +1021,7 @@ function formatSessionTime(timestamp: number | string): string {
 }
 
 .mode-btn:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
@@ -1039,6 +1042,16 @@ function formatSessionTime(timestamp: number | string): string {
 
 .send-btn {
   min-width: 80px;
+  transition: all 200ms ease;
+}
+
+.send-btn:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(31, 111, 235, 0.3);
+}
+
+.send-btn:not(:disabled):active {
+  transform: translateY(0);
 }
 
 .ghost {
@@ -1046,7 +1059,7 @@ function formatSessionTime(timestamp: number | string): string {
   border: none;
   color: rgba(139, 148, 158, 0.8);
   cursor: pointer;
-  padding: 4px 8px;
+  padding: 5px 10px;
   border-radius: 4px;
   font-size: 12px;
   transition: all 0.15s ease;
@@ -1070,6 +1083,11 @@ function formatSessionTime(timestamp: number | string): string {
 .primary {
   background: rgba(31, 111, 235, 0.8);
   color: white;
+  transition: all 200ms ease;
+}
+
+.primary:hover:not(:disabled) {
+  background: rgba(31, 111, 235, 1);
 }
 
 .primary:hover:not(:disabled) {

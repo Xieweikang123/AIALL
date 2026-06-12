@@ -50,12 +50,6 @@ interface Props {
 
 const props = defineProps<Props>();
 
-// #region agent log
-watch(() => props.projectList, (list) => {
-  console.log('[DBG][TAB][ProjectSwitcherBar] props.projectList changed', { count: list.length, items: list.map(p => p.displayName) });
-}, { immediate: true });
-// #endregion
-
 defineEmits<{
   (e: "switch-project", path: string): void;
   (e: "remove-project", path: string): void;
