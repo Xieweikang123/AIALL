@@ -167,6 +167,7 @@
                 class="git-file-item"
                 :class="{ active: selectedGitFiles.includes(file.path), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
                 @pointerdown="$emit('on-git-file-pointer-down', $event, file.path, file.staged)"
+                @contextmenu.prevent="$emit('on-git-file-contextmenu', $event, file.path)"
               >
                 <span class="git-file-check" @pointerdown.stop @click.stop="$emit('unstage-file', file.path)">✓</span>
                 <span
@@ -197,6 +198,7 @@
                 class="git-file-item"
                 :class="{ active: selectedGitFiles.includes(file.path), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
                 @pointerdown="$emit('on-git-file-pointer-down', $event, file.path, file.staged)"
+                @contextmenu.prevent="$emit('on-git-file-contextmenu', $event, file.path)"
               >
                 <span class="git-file-check" @pointerdown.stop @click.stop="$emit('stage-file', file.path)">+</span>
                 <span
@@ -347,6 +349,7 @@ const emit = defineEmits<{
   (e: "toggle-git-log-entry", hash: string): void;
   (e: "open-git-log-file", entry: GitLogEntry, file: GitLogFile): void;
   (e: "on-git-file-pointer-down", event: PointerEvent, path: string, staged: boolean): void;
+  (e: "on-git-file-contextmenu", event: MouseEvent, path: string): void;
 }>();
 
 function isGitLogEntryOpen(hash: string): boolean {
@@ -388,9 +391,10 @@ function gitStatusColor(status: string): string {
 <style scoped>
 .git-panel {
   flex: 1;
-  overflow-x: hidden;
-  overflow-y: auto;
-  padding: 8px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
 }
 
 .panel-empty {
@@ -407,20 +411,21 @@ function gitStatusColor(status: string): string {
 .git-panel-content {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
+  min-height: 0;
 }
 
 .git-header {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 
 .git-header-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
 }
 
 .git-branch-row {
@@ -430,17 +435,17 @@ function gitStatusColor(status: string): string {
 .git-branch-info {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 
 .git-branch-icon {
-  font-size: 12px;
+  font-size: 13px;
   color: rgba(139, 148, 158, 0.6);
 }
 
 .git-branch-name {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   color: rgba(255, 255, 255, 0.9);
   overflow: hidden;
@@ -449,9 +454,9 @@ function gitStatusColor(status: string): string {
 }
 
 .git-tracking-badge {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(139, 148, 158, 0.6);
-  padding: 1px 4px;
+  padding: 2px 6px;
   background: rgba(255, 255, 255, 0.06);
   border-radius: 3px;
 }
@@ -475,14 +480,14 @@ function gitStatusColor(status: string): string {
 .git-sync-info {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .git-sync-stat {
   display: flex;
   align-items: center;
-  gap: 2px;
-  font-size: 11px;
+  gap: 3px;
+  font-size: 12px;
   color: rgba(139, 148, 158, 0.6);
 }
 
@@ -495,61 +500,61 @@ function gitStatusColor(status: string): string {
 }
 
 .git-sync-arrow {
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .git-remote-actions {
   display: flex;
-  gap: 4px;
+  gap: 6px;
 }
 
 .git-stash-section {
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  padding-bottom: 8px;
+  padding-bottom: 12px;
 }
 
 .git-stash-header {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .git-stash-title-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .git-stash-icon {
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .git-stash-title {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
   color: rgba(255, 255, 255, 0.8);
 }
 
 .git-stash-count {
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(139, 148, 158, 0.6);
-  padding: 1px 4px;
+  padding: 2px 6px;
   background: rgba(255, 255, 255, 0.06);
   border-radius: 3px;
 }
 
 .git-stash-save-row {
   display: flex;
-  gap: 4px;
+  gap: 6px;
 }
 
 .git-stash-msg-input {
   flex: 1;
   box-sizing: border-box;
-  padding: 4px 6px;
-  font-size: 11px;
+  padding: 5px 8px;
+  font-size: 12px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 3px;
+  border-radius: 4px;
   background: rgba(0, 0, 0, 0.2);
   color: rgba(255, 255, 255, 0.9);
 }
@@ -568,7 +573,7 @@ function gitStatusColor(status: string): string {
 }
 
 .git-stash-list {
-  margin-top: 6px;
+  margin-top: 8px;
 }
 
 .git-stash-list-header {
@@ -580,13 +585,13 @@ function gitStatusColor(status: string): string {
 .git-section-toggle {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   background: none;
   border: none;
   color: rgba(139, 148, 158, 0.8);
   cursor: pointer;
-  padding: 2px 0;
-  font-size: 11px;
+  padding: 3px 0;
+  font-size: 12px;
 }
 
 .git-section-toggle:hover {
@@ -610,9 +615,9 @@ function gitStatusColor(status: string): string {
 .git-stash-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 0;
-  font-size: 11px;
+  gap: 10px;
+  padding: 5px 0;
+  font-size: 12px;
 }
 
 .git-stash-label {
@@ -630,41 +635,41 @@ function gitStatusColor(status: string): string {
 
 .git-stash-actions {
   display: flex;
-  gap: 4px;
+  gap: 6px;
 }
 
 .git-stash-empty {
   color: rgba(139, 148, 158, 0.5);
-  font-size: 11px;
-  padding: 4px 0;
+  font-size: 12px;
+  padding: 5px 0;
 }
 
 .git-error {
-  padding: 6px 8px;
+  padding: 8px 10px;
   background: rgba(248, 81, 73, 0.1);
   border: 1px solid rgba(248, 81, 73, 0.3);
   border-radius: 4px;
   color: #ff9a9a;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .git-commit-box {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .git-commit-input {
   width: 100%;
   box-sizing: border-box;
-  padding: 6px 8px;
-  font-size: 12px;
+  padding: 8px 10px;
+  font-size: 13px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.2);
   color: rgba(255, 255, 255, 0.9);
   resize: vertical;
-  min-height: 40px;
+  min-height: 44px;
   font-family: inherit;
 }
 
@@ -679,44 +684,47 @@ function gitStatusColor(status: string): string {
 
 .git-commit-actions {
   display: flex;
-  gap: 6px;
+  gap: 8px;
 }
 
 .git-ai-push-sep {
   height: 1px;
   background: rgba(255, 255, 255, 0.08);
-  margin: 4px 0;
+  margin: 6px 0;
 }
 
 .git-scroll-area {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .git-section {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .git-section-head {
   display: flex;
   align-items: center;
   flex-wrap: nowrap;
-  gap: 8px;
+  gap: 10px;
 }
 
 .git-section-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px;
   justify-content: flex-end;
   margin-left: auto;
 }
 
 .git-section-actions button.ghost.tiny {
-  padding: 4px 10px;
+  padding: 5px 12px;
   font-size: 12px;
   border-radius: 5px;
   white-space: nowrap;
@@ -726,16 +734,16 @@ function gitStatusColor(status: string): string {
 .git-file-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 
 .git-file-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 6px;
-  font-size: 11px;
-  border-radius: 3px;
+  gap: 8px;
+  padding: 5px 8px;
+  font-size: 12px;
+  border-radius: 4px;
   cursor: pointer;
 }
 
@@ -752,12 +760,12 @@ function gitStatusColor(status: string): string {
 }
 
 .git-file-check {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: 11px;
   color: rgba(139, 148, 158, 0.6);
   cursor: pointer;
 }
@@ -767,9 +775,9 @@ function gitStatusColor(status: string): string {
 }
 
 .git-file-status {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: bold;
-  width: 14px;
+  width: 16px;
   text-align: center;
 }
 
@@ -791,35 +799,35 @@ function gitStatusColor(status: string): string {
 }
 
 .git-log-section {
-  margin-top: 8px;
+  margin-top: 10px;
 }
 
 .git-log-toggle {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
 .git-log-list {
-  margin-top: 6px;
+  margin-top: 8px;
 }
 
 .git-log-item {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .git-log-entry-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 0;
+  gap: 8px;
+  padding: 5px 0;
   background: none;
   border: none;
   color: rgba(255, 255, 255, 0.8);
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
   text-align: left;
   width: 100%;
 }
@@ -880,7 +888,7 @@ function gitStatusColor(status: string): string {
   border: none;
   color: rgba(255, 255, 255, 0.7);
   cursor: pointer;
-  font-size: 11px;
+  font-size: 12px;
   text-align: left;
 }
 
@@ -897,7 +905,7 @@ function gitStatusColor(status: string): string {
 }
 
 .git-fetch-error-detail {
-  font-size: 11px;
+  font-size: 12px;
   color: rgba(139, 148, 158, 0.6);
   word-break: break-all;
 }
@@ -907,9 +915,9 @@ function gitStatusColor(status: string): string {
   border: none;
   color: rgba(139, 148, 158, 0.8);
   cursor: pointer;
-  padding: 4px 8px;
+  padding: 5px 10px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 13px;
   transition: all 0.15s ease;
 }
 
@@ -924,8 +932,8 @@ function gitStatusColor(status: string): string {
 }
 
 .ghost.tiny {
-  padding: 2px 6px;
-  font-size: 11px;
+  padding: 3px 8px;
+  font-size: 12px;
 }
 
 .ghost.danger:hover:not(:disabled) {
@@ -953,7 +961,7 @@ function gitStatusColor(status: string): string {
 }
 
 .small {
-  padding: 4px 10px;
-  font-size: 11px;
+  padding: 5px 12px;
+  font-size: 12px;
 }
 </style>

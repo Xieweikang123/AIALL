@@ -107,6 +107,7 @@
           @toggle-git-log-entry="toggleGitLogEntry"
           @open-git-log-file="openGitLogFile"
           @on-git-file-pointer-down="onGitFilePointerDown"
+          @on-git-file-contextmenu="onGitFileContextMenu"
         />
 
         <div v-if="gitPanelMode === 'files' && !projectOpened" class="panel-empty">请先打开项目文件夹</div>
@@ -719,6 +720,11 @@
           <div class="ctx-sep" />
           <button type="button" class="ctx-item" @click="contextMenuRename">重命名</button>
           <button type="button" class="ctx-item danger" @click="contextMenuDelete">删除</button>
+        </div>
+      </div>
+      <div v-if="gitFileContextMenu.show" class="ctx-overlay" @click="hideGitFileContextMenu" @contextmenu.prevent="hideGitFileContextMenu">
+        <div class="ctx-menu" :style="{ left: gitFileContextMenu.x + 'px', top: gitFileContextMenu.y + 'px' }" @click.stop>
+          <button type="button" class="ctx-item" @click="gitFileCopyName">复制文件名</button>
         </div>
       </div>
     </Teleport>
@@ -1354,6 +1360,7 @@ async function stopFileWatcherForProject() {
 }
 
 const contextMenu = ref({ show: false, x: 0, y: 0, path: "" });
+const gitFileContextMenu = ref({ show: false, x: 0, y: 0, path: "" });
 
 const contextMenuTargetIsFile = computed(() => {
   const node = findNode(fileTree.value, contextMenu.value.path);
@@ -3415,6 +3422,24 @@ function onGitFilePointerDown(e: PointerEvent, relativePath: string, staged = fa
       void showGitFileDiff(relativePath, staged);
     }, chatDropZoneRef.value);
   }
+}
+
+function onGitFileContextMenu(e: MouseEvent, path: string) {
+  const menuW = 160;
+  const menuH = 40;
+  const clampedX = Math.min(e.clientX, window.innerWidth - menuW);
+  const clampedY = Math.min(e.clientY, window.innerHeight - menuH);
+  gitFileContextMenu.value = { show: true, x: Math.max(0, clampedX), y: Math.max(0, clampedY), path };
+}
+
+function hideGitFileContextMenu() {
+  gitFileContextMenu.value.show = false;
+}
+
+function gitFileCopyName() {
+  const path = gitFileContextMenu.value.path;
+  void navigator.clipboard.writeText(fileName(path));
+  hideGitFileContextMenu();
 }
 
 function selectMention(item: ProjectFileItem) {
@@ -6059,6 +6084,7 @@ button.primary.small {
 .file-list,
 .file-tree {
   flex: 1;
+  min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
   padding: 4px 0;
