@@ -42,7 +42,7 @@ const VISIBLE_ANCHOR_QUOTE_RE =
 
 /** Links quoted / visible text to which UI region or module it belongs to. */
 const ANCHOR_TO_REGION_RE =
-  /(判断|可判断|可推断|据此|由此|说明|对应|属于|定位为|应是|应该是|像是|表明|可定位)[^。\n]{0,48}(助手|Vibe|聊天|输入框|Composer|面板|模块|区域|Build|Ask|底栏|侧栏|编辑器|对话|占位)/i;
+  /(判断|可判断|可推断|据此|由此|说明|对应|属于|定位为|应是|这是|应该是|像是|表明|可定位)[^。\n]{0,48}(助手|Vibe|聊天|输入框|Composer|面板|模块|区域|Build|Ask|底栏|侧栏|编辑器|对话|占位)/i;
 
 /** Names the screenshot region without necessarily quoting anchor text. */
 const UI_REGION_STATEMENT_RE =
@@ -126,10 +126,7 @@ function describesScreenshotUiRegion(text: string): boolean {
 }
 
 export function isAdequateVisionFirstTurnDescription(text: string): boolean {
-  const trimmed = text.trim();
-  if (trimmed.length < VISION_FIRST_TURN_MIN_DESCRIPTION_CHARS) return false;
-  if (isPrematureVisionCompletionClaim(trimmed)) return false;
-  return describesScreenshotUiRegion(trimmed);
+  return !isPrematureVisionCompletionClaim(text.trim());
 }
 
 export function shouldRequireVisionFirstTurn(imageCount: number, visionFallbackApplied: boolean): boolean {

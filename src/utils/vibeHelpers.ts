@@ -162,8 +162,9 @@ export function hasAgentProcessSteps(msg: { tools?: unknown[]; roundGroups?: { t
   );
 }
 
-export function shouldShowMessageBubble(msg: { role: string; content?: string; images?: unknown[] }): boolean {
+export function shouldShowMessageBubble(msg: { role: string; content?: string; images?: unknown[] }, hasAgentActivity?: boolean): boolean {
   if (msg.role === "user") return Boolean(msg.content?.trim() || (msg.images?.length ?? 0) > 0);
+  if (hasAgentActivity) return false;
   return Boolean(msg.content?.trim());
 }
 

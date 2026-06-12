@@ -181,10 +181,10 @@ function formatSessionTime(iso: string): string {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 6px 20px;
+  padding: 8px 16px;
   background: var(--bg-primary);
   border-bottom: 1px solid var(--border-color);
-  height: 44px;
+  height: 52px;
   flex-shrink: 0;
 }
 
@@ -196,16 +196,17 @@ function formatSessionTime(iso: string): string {
 }
 
 .brand-icon {
-  font-size: 18px;
+  font-size: 16px;
   flex-shrink: 0;
 }
 
 .title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   margin: 0;
   white-space: nowrap;
   overflow: visible;
+  letter-spacing: -0.3px;
 }
 
 .toolbar-project {
@@ -219,25 +220,41 @@ function formatSessionTime(iso: string): string {
 .path-input {
   flex: 1;
   min-width: 0;
-  padding: 5px 10px;
+  padding: 6px 12px;
   font-size: 12px;
   border: 1px solid var(--border-color);
   border-radius: 6px;
   background: var(--bg-secondary);
   color: var(--text-primary);
+  transition: all 0.15s ease;
 }
 
 .path-input:focus {
   outline: none;
   border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px rgba(var(--accent-color-rgb, 99, 102, 241), 0.15);
+}
+
+.path-input::placeholder {
+  color: var(--text-tertiary);
 }
 
 .toolbar-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   margin-left: auto;
   flex-shrink: 0;
+}
+
+.toolbar-actions > *:not(:first-child)::before {
+  content: "";
+  display: block;
+  width: 1px;
+  height: 16px;
+  background: var(--border-color);
+  margin: 0 4px;
+  opacity: 0.6;
 }
 
 .project-history-wrap {
@@ -375,6 +392,11 @@ function formatSessionTime(iso: string): string {
 
 .link-btn {
   text-decoration: none;
+  font-weight: 500;
+}
+
+.link-btn:hover {
+  text-decoration: none;
 }
 
 .ghost {
@@ -382,9 +404,11 @@ function formatSessionTime(iso: string): string {
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 4px;
+  padding: 6px 10px;
+  border-radius: 6px;
   font-size: 12px;
+  font-weight: 500;
+  transition: all 0.15s ease;
 }
 
 .ghost:hover {
@@ -392,48 +416,66 @@ function formatSessionTime(iso: string): string {
   color: var(--text-primary);
 }
 
+.ghost:active {
+  transform: scale(0.97);
+}
+
 .ghost:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  transform: none;
 }
 
 .ghost.small {
-  padding: 2px 6px;
-  font-size: 11px;
+  padding: 5px 10px;
+  font-size: 11.5px;
+  letter-spacing: 0.2px;
 }
 
 .primary {
   background: var(--accent-color);
   color: white;
   border: none;
-  padding: 5px 12px;
+  padding: 6px 14px;
   border-radius: 6px;
   font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
 }
 
 .primary:hover {
   background: var(--accent-hover);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+.primary:active {
+  transform: scale(0.97);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 .primary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
 
 .primary.compact {
-  padding: 5px 12px;
+  padding: 6px 14px;
 }
 
 .secondary {
-  background: var(--bg-tertiary);
+  background: var(--bg-secondary);
   color: var(--text-primary);
   border: 1px solid var(--border-color);
-  padding: 5px 12px;
+  padding: 5px 10px;
   border-radius: 6px;
   font-size: 12px;
   cursor: pointer;
+  transition: all 0.15s ease;
 }
 
 .secondary:hover {
@@ -446,6 +488,8 @@ function formatSessionTime(iso: string): string {
 }
 
 .secondary.compact {
-  padding: 5px 12px;
+  padding: 5px 10px;
+  font-size: 13px;
+  line-height: 1;
 }
 </style>

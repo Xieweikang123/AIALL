@@ -389,6 +389,8 @@ const chatPanelStyle = computed(() => {
   return { width: "360px", flexShrink: "0" };
 });
 
+defineExpose({ sessionPickerRef });
+
 function formatSessionTime(timestamp: number | string): string {
   const ts = typeof timestamp === 'string' ? parseInt(timestamp, 10) : timestamp;
   const date = new Date(ts);
@@ -532,12 +534,27 @@ function formatSessionTime(timestamp: number | string): string {
   width: 320px;
   max-height: 400px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
   background: #161b22;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   z-index: 1000;
   margin-top: 4px;
+}
+
+.session-picker-dropdown::-webkit-scrollbar {
+  width: 5px;
+}
+
+.session-picker-dropdown::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.session-picker-dropdown::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .session-picker-head {
@@ -572,6 +589,22 @@ function formatSessionTime(timestamp: number | string): string {
   list-style: none;
   margin: 0;
   padding: 4px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.history-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.history-list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.history-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .history-item {
@@ -651,6 +684,21 @@ function formatSessionTime(timestamp: number | string): string {
   flex: 1;
   overflow-y: auto;
   padding: 16px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.chat-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+
+.chat-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.chat-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .chat-empty {

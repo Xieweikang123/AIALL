@@ -15,19 +15,11 @@
 
     <!-- 当前状态（运行中显示） -->
     <p v-if="isRunning && currentStatus" class="cursor-action planning">{{ currentStatus }}</p>
-
-    <!-- 最终回答（仅完成后显示） -->
-    <ChatMarkdown
-      v-if="!isRunning && finalAnswer && finalAnswer.trim()"
-      class="cursor-merged-answer"
-      :content="finalAnswer"
-    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from "vue";
-import ChatMarkdown from "./ChatMarkdown.vue";
 import AgentThoughtBlock from "./AgentThoughtBlock.vue";
 import AgentActionBlock from "./AgentActionBlock.vue";
 import {

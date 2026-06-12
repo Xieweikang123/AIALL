@@ -201,6 +201,7 @@
       ></div>
 
       <ChatPanel
+        ref="chatPanelRef"
         :project-opened="projectOpened"
         :chat-sending="chatSending"
         :chat-messages="chatMessages"
@@ -361,7 +362,7 @@
                 />
               </div>
               <ChatMarkdown
-                v-if="shouldShowMessageBubble(m)"
+                v-if="shouldShowMessageBubble(m, hasAgentActivity(m))"
                 class="msg-answer"
                 :class="{
                   'msg-answer--streaming': m.role === 'assistant' && isAgentRunning(m),
@@ -905,6 +906,7 @@ let scrollChatRaf = 0;
 const CHAT_SCROLL_PIN_THRESHOLD = 80;
 let chatPinnedToBottom = true;
 const sessionPickerRef = ref<HTMLElement | null>(null);
+const chatPanelRef = ref<InstanceType<typeof ChatPanel> | null>(null);
 const syncingChatStore = ref(false);
 const chatStoreSyncMessage = ref("");
 const pendingPromptQueue = ref<string[]>([]);
@@ -2282,7 +2284,7 @@ function onDocumentClick(event: MouseEvent) {
     if (el && !el.contains(target)) closeProjectHistory();
   }
   if (sessionPickerOpen.value) {
-    const el = sessionPickerRef.value;
+    const el = chatPanelRef.value?.sessionPickerRef ?? sessionPickerRef.value;
     if (el && !el.contains(target)) closeSessionPicker();
   }
   if (showQuoteButton.value) {

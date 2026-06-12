@@ -120,6 +120,7 @@ export function useAgentMessage(
   function timelineAnswerContent(m: AgentMessage): string {
     if (m.role !== "assistant" || !hasAgentActivity(m)) return "";
     if (isAgentRunning(m)) return "";
+    if (m.tools?.some((t) => t.running)) return "";
     return messageDisplayContent(m);
   }
 
