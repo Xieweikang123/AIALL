@@ -392,8 +392,8 @@ const chatPanelStyle = computed(() => {
 defineExpose({ sessionPickerRef, chatScrollRef });
 
 function formatSessionTime(timestamp: number | string): string {
-  const ts = typeof timestamp === 'string' ? parseInt(timestamp, 10) : timestamp;
-  const date = new Date(ts);
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return String(timestamp);
   const now = new Date();
   const diff = now.getTime() - date.getTime();
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));

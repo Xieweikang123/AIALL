@@ -12,7 +12,7 @@ export default defineConfig({
     strictPort: true,
     host: host || false,
     watch: {
-      ignored: ["**/.aiall/**", "**/node_modules/**", "**/.git/**"],
+      ignored: ["**/node_modules/**", "**/.git/**"],
     },
     proxy: {
       "/backend": {

@@ -24,6 +24,12 @@ import { withFileLock } from "./server/fileLock";
 
 const execFileAsync = promisify(execFile);
 
+const AIALL_DATA_DIR = path.join(
+  process.env.APPDATA || path.join(os.homedir(), ".config"),
+  "aiall",
+  "vibe-chat-sessions",
+);
+
 /**
  * Atomic file write: write to a temp file first, then rename.
  * Prevents JSON corruption if the process crashes mid-write.
@@ -322,7 +328,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       debugLog(`chat-store-load: request-arrived projectPath="${projectPath}" delayFromEntry=${Date.now() - _reqTime}ms`);
 
       const resolved = path.resolve(projectPath);
-      const chatDir = path.join(resolved, ".aiall", "vibe-chat-sessions");
+      const chatDir = AIALL_DATA_DIR;
       const storeFile = path.join(chatDir, "chat-store.json");
       let raw = getCachedChatStore(resolved);
       if (raw) {
@@ -454,7 +460,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       }
 
       const resolved = path.resolve(projectPath);
-      const chatDir = path.join(resolved, ".aiall", "vibe-chat-sessions");
+      const chatDir = AIALL_DATA_DIR;
       const sessionFile = path.join(chatDir, `chat-${safeFilePart(sessionId)}.json`);
       const raw = await fs.promises.readFile(sessionFile, "utf-8").catch(() => null);
       if (!raw) {
@@ -494,7 +500,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         return;
       }
 
-      const chatDir = path.join(path.resolve(projectPath), ".aiall", "vibe-chat-sessions");
+      const chatDir = AIALL_DATA_DIR;
       const dataUrl = await readImageRefAsDataUrl(chatDir, relPath);
       if (!dataUrl) {
         sendJson(res, 404, { ok: false, error: "图片不存在" });
@@ -525,7 +531,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         return;
       }
 
-      const chatDir = path.join(path.resolve(projectPath), ".aiall", "vibe-chat-sessions");
+      const chatDir = AIALL_DATA_DIR;
       const loaded = await readImageRefAsBuffer(chatDir, relPath);
       if (!loaded) {
         sendJson(res, 404, { ok: false, error: "图片不存在" });
@@ -576,14 +582,14 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       }
 
       // 先响应前端，再异步写入磁盘
-      sendJson(res, 200, { ok: true, path: path.join(path.resolve(projectPath), ".aiall", "vibe-chat-sessions"), sessionCount: (body.data?.sessions || []).length });
+      sendJson(res, 200, { ok: true, path: AIALL_DATA_DIR, sessionCount: (body.data?.sessions || []).length });
 
       // 异步写入（不阻塞响应）
       const sessions = Array.isArray(body.data?.sessions) ? body.data.sessions : [];
       if (!sessions.length) return;
 
       const resolved = path.resolve(projectPath);
-      const chatDir = path.join(resolved, ".aiall", "vibe-chat-sessions");
+      const chatDir = AIALL_DATA_DIR;
       await fs.promises.mkdir(chatDir, { recursive: true }).catch(() => {});
       const storeFile = path.join(chatDir, "chat-store.json");
       debugLog(`chat-store-sync async writing ${sessions.length} sessions`);
@@ -695,7 +701,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       }
 
       const resolved = path.resolve(projectPath);
-      const chatDir = path.join(resolved, ".aiall", "vibe-chat-sessions");
+      const chatDir = AIALL_DATA_DIR;
       await fs.promises.mkdir(chatDir, { recursive: true });
       const safeId = safeFilePart(sessionId);
       const sessionFile = path.join(chatDir, `chat-${safeId}.json`);

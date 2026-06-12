@@ -33,6 +33,17 @@
       >
         收起过程
       </button>
+
+      <!-- 跳转到底部 -->
+      <button
+        v-if="showJump"
+        type="button"
+        class="cursor-chain-jump"
+        title="跳转到底部"
+        @click="jumpToLatest"
+      >
+        ↓
+      </button>
     </div>
   </div>
 </template>
@@ -130,5 +141,34 @@ function jumpToLatest() {
   color: rgba(230, 237, 243, 0.85);
   background: rgba(88, 166, 255, 0.06);
   border-color: rgba(88, 166, 255, 0.15);
+}
+
+.cursor-chain-jump {
+  position: sticky;
+  bottom: 10px;
+  left: 50%;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(88, 166, 255, 0.42);
+  background: rgba(1, 8, 18, 0.92);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  color: rgba(126, 182, 255, 0.96);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transform: translateX(-50%);
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.cursor-chain-jump:hover {
+  background: rgba(14, 28, 48, 0.96);
+  border-color: rgba(126, 182, 255, 0.65);
+  transform: translateX(-50%) translateY(-1px);
 }
 </style>

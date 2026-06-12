@@ -276,6 +276,9 @@
               <div class="msg-head">
                 <div class="msg-role">{{ m.role === "user" ? "你" : "Agent" }}</div>
                 <div v-if="!chatSending" class="msg-toolbar">
+                  <button type="button" class="ghost small" title="复制此消息" @click="copyText(m.content)">
+                    复制
+                  </button>
                   <button v-if="m.role === 'user'" type="button" class="ghost small" title="编辑此消息" @click="editUserMessage(m.id)">
                     编辑
                   </button>
@@ -1081,11 +1084,7 @@ async function startFileWatcherForProject(projectPath: string) {
           const relevantChanges = changes.filter(
             (change) =>
               !change.path.includes(".git") &&
-              !change.path.includes("node_modules") &&
-              !change.path.includes(".aiall\\logs") &&
-              !change.path.includes(".aiall/logs") &&
-              !change.path.includes(".aiall\\vibe-chat-sessions") &&
-              !change.path.includes(".aiall/vibe-chat-sessions")
+              !change.path.includes("node_modules")
           );
           if (relevantChanges.length > 0) {
             scheduleGitStatusRefreshFromWatcher();
@@ -2389,7 +2388,7 @@ async function syncChatStoreToDisk() {
       chatStoreSyncMessage.value = result.error || "同步会话到本地失败";
       return;
     }
-    chatStoreSyncMessage.value = `已同步 ${result.sessionCount ?? sessionList.value.length} 条会话到 ${result.path || ".aiall/vibe-chat-sessions"}`;
+      chatStoreSyncMessage.value = `已同步 ${result.sessionCount ?? sessionList.value.length} 条会话到 ${result.path || "本地目录"}`;
   } finally {
     syncingChatStore.value = false;
   }
@@ -2460,7 +2459,7 @@ async function flushChatStoreToDisk(path: string, options?: { quiet?: boolean })
       return;
     }
     if (!options?.quiet) {
-      chatStoreSyncMessage.value = `已同步 ${result.sessionCount ?? sessionList.value.length} 条会话到 ${result.path || ".aiall/vibe-chat-sessions"}`;
+    chatStoreSyncMessage.value = `已同步 ${result.sessionCount ?? sessionList.value.length} 条会话到 ${result.path || "本地目录"}`;
     }
   } finally {
     syncingChatStore.value = false;
@@ -3328,6 +3327,11 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
       });
       persistChatNow();
       void scrollChatToBottom();
+      if (pendingPromptQueue.value.length) {
+        const next = pendingPromptQueue.value.shift()!;
+        persistPendingQueue();
+        void runAgentTurn(next, { skipUserBubble: true });
+      }
       return;
     }
 
@@ -3374,6 +3378,11 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
       });
       persistChatNow();
       void scrollChatToBottom();
+      if (pendingPromptQueue.value.length) {
+        const next = pendingPromptQueue.value.shift()!;
+        persistPendingQueue();
+        void runAgentTurn(next, { skipUserBubble: true });
+      }
       return;
     }
 
@@ -3391,6 +3400,11 @@ function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, r
       patchAssistantMsg(msgId, { totalTurns: completedTurns, ...syncRoundGroupsPatch(assistantMsg) });
       persistChatNow();
       void scrollChatToBottom();
+      if (pendingPromptQueue.value.length) {
+        const next = pendingPromptQueue.value.shift()!;
+        persistPendingQueue();
+        void runAgentTurn(next, { skipUserBubble: true });
+      }
       return;
     }
 
@@ -4300,14 +4314,8 @@ onBeforeUnmount(() => {
   if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
   if (gitRefreshDebounceTimer) clearTimeout(gitRefreshDebounceTimer);
   cancelAutoResume();
-  persistChatNow();
+  persistChatNow(undefined, { flushStore: true });
   stopFileWatcherForProject();
-  
-  // Best-effort: give pending disk syncs a brief window to complete.
-  // Fire-and-forget; don't block unmount.
-  if (syncingChatStore.value) {
-    setTimeout(() => {}, 200);
-  }
 });
 </script>
 

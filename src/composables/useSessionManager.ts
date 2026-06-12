@@ -78,8 +78,8 @@ export function useSessionManager(projectPath: () => string) {
     return `chat-${safe}.json`;
   }
 
-  function formatSessionInfoForCopy(session: VibeChatSessionMeta, project: string): string {
-    const chatDir = ".aiall/vibe-chat-sessions";
+  function formatSessionInfoForCopy(session: VibeChatSessionMeta, _project: string): string {
+    const chatDir = "aiall/vibe-chat-sessions";
     const relFile = `${chatDir}/${sessionLocalFileName(session.id)}`;
     const storeFile = `${chatDir}/chat-store.json`;
     const lines = [

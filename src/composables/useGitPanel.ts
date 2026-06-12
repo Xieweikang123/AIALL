@@ -335,7 +335,7 @@ export function useGitPanel(
     gitStagingInProgress.value = true;
     gitLastStagingAt.value = Date.now();
     try {
-      const result = await unstageGitFiles(projectPath(), []);
+      const result = await unstageGitFiles(projectPath(), gitStagedFiles.value.map((f) => f.path));
       if (!result.ok) {
         gitError.value = result.error || "取消暂存失败";
         await refreshGitStatus({ showLoading: false });
