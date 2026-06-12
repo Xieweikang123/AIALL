@@ -200,161 +200,75 @@
         @mousedown="startResize('chat', $event)"
       ></div>
 
-      <aside
-        ref="chatDropZoneRef"
-        class="chat-panel"
-        :class="{ 'chat-expanded': editorCollapsed, 'drag-over': isDragging }"
-        @dragenter="onChatDragEnter"
-        @dragover="onChatDragOver"
-        @dragleave="onChatDragLeave"
-        @drop="onChatDrop"
-        :style="chatPanelStyle"
+      <ChatPanel
+        :project-opened="projectOpened"
+        :chat-sending="chatSending"
+        :chat-messages="chatMessages"
+        :chat-mode="chatMode"
+        :chat-error="chatError"
+        :config-ready="configReady"
+        :api-key-ready="apiKeyReady"
+        :ai-config-status-text="aiConfigStatusText"
+        :can-send-chat="canSendChat"
+        :chat-placeholder="chatPlaceholder"
+        :chat-hint-text="chatHintText"
+        :chat-running-text="chatRunningText"
+        :recoverable-assistant-msg="recoverableAssistantMsg"
+        :stalled-assistant-msg="stalledAssistantMsg"
+        :auto-resume-seconds-left="autoResumeSecondsLeft"
+        :pending-prompt-queue="pendingPromptQueue"
+        :session-list="sessionList"
+        :active-session-id="activeSessionId"
+        :active-session-title="activeSessionTitle"
+        :session-picker-open="sessionPickerOpen"
+        :session-picker-title="sessionPickerTitle"
+        :syncing-chat-store="syncingChatStore"
+        :chat-store-sync-message="chatStoreSyncMessage"
+        :is-dragging="isDragging"
+        :editor-collapsed="editorCollapsed"
+        :show-quote-button="showQuoteButton"
+        :quote-button-position="quoteButtonPosition"
+        :quoted-message="quotedMessage"
+        :mention-open="mentionOpen"
+        :mention-results="mentionResults"
+        :mention-active-index="mentionActiveIndex"
+        :chat-input-focused="chatInputFocused"
+        :can-switch-to-newer-session="canSwitchToNewerSession"
+        :can-switch-to-older-session="canSwitchToOlderSession"
+        :chat-panel-style="chatPanelStyle"
+        :show-token-detail="showTokenDetail"
+        :token-detail-data="tokenDetailData"
+        :total-token-usage="totalTokenUsage"
+        @on-chat-drag-enter="onChatDragEnter"
+        @on-chat-drag-over="onChatDragOver"
+        @on-chat-drag-leave="onChatDragLeave"
+        @on-chat-drop="onChatDrop"
+        @switch-to-adjacent-session="switchToAdjacentSession"
+        @toggle-session-picker="toggleSessionPicker"
+        @start-new-session="startNewSession"
+        @switch-session="switchSession"
+        @copy-session-info="copySessionInfo"
+        @remove-session="removeSession"
+        @sync-chat-store-to-disk="syncChatStoreToDisk"
+        @clear-chat="clearChat"
+        @apply-example="applyExample"
+        @on-chat-scroll="onChatScroll"
+        @quote-selected-text="quoteSelectedText"
+        @hide-quote-button="hideQuoteButton"
+        @clear-pending-queue="clearPendingPromptQueue"
+        @update:quoted-message="quotedMessage = $event"
+        @on-composer-field-keydown="onComposerFieldKeydown"
+        @select-mention="selectMention"
+        @on-chat-input-box-mousedown="onChatInputBoxMouseDown"
+        @update:chat-mode="chatMode = $event"
+        @cancel-auto-resume="cancelAutoResume"
+        @force-recover-stalled-run="forceRecoverStalledRun"
+        @resume-agent-run="resumeAgentRun"
+        @stop-agent="stopAgent"
+        @send-chat="sendChat"
+        @update:show-token-detail="showTokenDetail = $event"
       >
-        <div class="panel-head">
-          <div class="panel-head-left">
-            <span class="panel-label">AI 助手</span>
-            <div ref="sessionPickerRef" class="session-picker-wrap">
-              <div class="session-picker-row">
-                <button
-                  v-if="sessionList.length > 1"
-                  type="button"
-                  class="session-nav-btn"
-                  :disabled="!projectOpened || chatSending || !canSwitchToNewerSession"
-                  title="较新的会话 (Ctrl+Alt+↑)"
-                  @click="switchToAdjacentSession(-1)"
-                >
-                  ‹
-                </button>
-                <button
-                  type="button"
-                  class="session-picker-trigger"
-                  :class="{ open: sessionPickerOpen }"
-                  :disabled="!projectOpened || chatSending"
-                  :title="sessionPickerTitle"
-                  @click="toggleSessionPicker"
-                >
-                  <span class="session-picker-title">{{ activeSessionTitle || "新会话" }}</span>
-                  <span class="session-picker-chevron" aria-hidden="true">▾</span>
-                </button>
-                <button
-                  v-if="sessionList.length > 1"
-                  type="button"
-                  class="session-nav-btn"
-                  :disabled="!projectOpened || chatSending || !canSwitchToOlderSession"
-                  title="较旧的会话 (Ctrl+Alt+↓)"
-                  @click="switchToAdjacentSession(1)"
-                >
-                  ›
-                </button>
-              </div>
-              <div v-if="sessionPickerOpen" class="session-picker-dropdown">
-                <div class="session-picker-head">
-                  <span class="session-picker-head-title">会话记录</span>
-                  <button
-                    type="button"
-                    class="ghost small session-picker-new"
-                    :disabled="chatSending"
-                    @click="startNewSession"
-                  >
-                    + 新会话
-                  </button>
-                </div>
-                <div v-if="chatStoreSyncMessage" class="history-sync-message">{{ chatStoreSyncMessage }}</div>
-                <div v-if="!sessionList.length" class="history-empty">当前项目还没有会话记录</div>
-                <ul v-else class="history-list session-picker-list">
-                  <li
-                    v-for="s in sessionList"
-                    :key="s.id"
-                    class="history-item"
-                    :class="{ active: s.id === activeSessionId }"
-                  >
-                    <button type="button" class="history-item-main" @click="switchSession(s.id)">
-                      <span class="history-item-title">{{ s.title }}</span>
-                      <span class="history-item-meta">
-                        {{ formatSessionTime(s.updatedAt) }} · {{ s.messageCount }} 条
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      class="ghost small history-copy"
-                      :disabled="chatSending"
-                      title="复制会话信息（便于粘贴给 AI 排查）"
-                      @click.stop="copySessionInfo(s)"
-                    >
-                      复制
-                    </button>
-                    <button
-                      type="button"
-                      class="ghost small history-delete"
-                      :disabled="chatSending"
-                      title="删除此会话"
-                      @click.stop="removeSession(s.id)"
-                    >
-                      删除
-                    </button>
-                  </li>
-                </ul>
-                <div class="session-picker-foot">
-                  <button
-                    type="button"
-                    class="ghost small session-picker-sync"
-                    :disabled="chatSending || syncingChatStore || !projectOpened"
-                    @click="syncChatStoreToDisk"
-                  >
-                    {{ syncingChatStore ? "同步中…" : "同步到本地" }}
-                  </button>
-                  <span class="session-picker-hint">Ctrl+Alt+↑↓ 切换</span>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="panel-head-right">
-            <button
-              type="button"
-              class="ghost small"
-              :disabled="!projectOpened || chatSending"
-              @click="startNewSession"
-              title="新会话 (Ctrl+Shift+N)"
-            >
-              新会话
-            </button>
-            <button
-              v-if="chatMessages.length"
-              type="button"
-              class="ghost small"
-              :disabled="chatSending"
-              @click="clearChat"
-            >
-              清空
-            </button>
-            <span class="panel-meta" :class="{ warn: !configReady || !apiKeyReady }">
-              {{ aiConfigStatusText }}
-            </span>
-          </div>
-        </div>
-
-        <div ref="chatScrollRef" class="chat-scroll" @scroll="onChatScroll">
-          <div v-if="!chatMessages.length" class="chat-empty">
-            <div class="chat-empty-icon" aria-hidden="true">🤖</div>
-            <p class="chat-empty-title">AI 编程助手</p>
-            <p class="chat-empty-desc">Agent 会探索项目；Build 模式下每次文件修改会立即写入磁盘。输入 <code>@</code> 可引用文件。</p>
-            <div class="chips">
-              <button type="button" class="chip" :disabled="chatSending" @click="applyExample('解释这个项目是做什么的')">
-                解释项目
-              </button>
-              <button type="button" class="chip" :disabled="chatSending" @click="applyExample('解释这段代码在做什么')">
-                解释代码
-              </button>
-              <button type="button" class="chip" :disabled="chatSending" @click="applyExample('帮我优化这段代码，并给出修改后的完整代码')">
-                优化代码
-              </button>
-              <button type="button" class="chip" :disabled="chatSending" @click="applyExample('找出潜在 bug 并修复')">
-                修复 bug
-              </button>
-            </div>
-          </div>
-
-          <div v-else class="msg-list">
+        <template #messages>
             <div v-for="m in chatMessages" :key="m.id" class="msg" :class="m.role" @mouseup="onMessageSelect($event, m)">
               <div class="msg-avatar" aria-hidden="true">{{ m.role === "user" ? "你" : "AI" }}</div>
               <div class="msg-body">
@@ -529,169 +443,23 @@
                 <span v-else-if="m.reverted" class="reverted-badge">已回滚</span>
                 <span v-else-if="m.rejected" class="rejected-badge">已拒绝</span>
               </div>
-              </div>
             </div>
-          </div>
-        </div>
-
-        <div
-          v-if="showQuoteButton"
-          ref="quoteButtonRef"
-          class="quote-floating"
-          :style="{ left: quoteButtonPosition.x + 'px', top: quoteButtonPosition.y + 'px' }"
-          @mousedown.prevent="quoteSelectedText"
-          @mouseleave="hideQuoteButton"
-        >
-          <span class="quote-icon">❝</span> 引用
-        </div>
-
-        <footer class="chat-composer">
-          <div v-if="pendingPromptQueue.length" class="pending-queue">
-            <div class="pending-queue-head">
-              <span>排队中 {{ pendingPromptQueue.length }} 条消息</span>
-              <button type="button" class="ghost small" @click="clearPendingPromptQueue">清空队列</button>
             </div>
-            <ol class="pending-queue-list">
-              <li v-for="(q, qi) in pendingPromptQueue" :key="qi">{{ q }}</li>
-            </ol>
-          </div>
-          <div v-if="quotedMessage" class="quoted-preview">
-            <div class="quoted-preview-header">
-              <span class="quoted-preview-label">
-                <span class="quoted-preview-icon">❝</span>
-                引用 {{ quotedMessage.role === "assistant" ? "Agent" : "你" }}
-              </span>
-              <button type="button" class="quoted-preview-close" @click="quotedMessage = null">×</button>
-            </div>
-            <div class="quoted-preview-body">{{ quotedMessage.content }}</div>
-          </div>
-          <div class="chat-input-field" @keydown.capture="onComposerFieldKeydown">
-            <div v-if="mentionOpen && mentionResults.length" class="mention-dropdown">
-              <button
-                v-for="(item, idx) in mentionResults"
-                :key="item.path"
-                type="button"
-                class="mention-item"
-                :class="{ active: idx === mentionActiveIndex }"
-                @mousedown.prevent="selectMention(item)"
-              >
-                <span class="mention-item-name">{{ item.name }}</span>
-                <span class="mention-item-path">{{ item.relative }}</span>
-              </button>
-            </div>
-            <div class="chat-input-box" :class="{ focused: chatInputFocused }" @mousedown="onChatInputBoxMouseDown">
-              <ChatComposerEditor
-                ref="composerRef"
-                class="chat-composer-editor"
-                :placeholder="chatSending ? '输入新指令将打断当前任务…' : chatPlaceholder"
-                :disabled="!configReady || !projectOpened"
-                @mention-change="onComposerMentionChange"
-                @enter-send="sendChat"
-                @update:empty="composerEmpty = $event"
-                @focus="chatInputFocused = true"
-                @blur="chatInputFocused = false"
-              />
-            </div>
-          </div>
-          <div class="chat-bottom">
-            <div class="chat-status-row">
-              <span v-if="autoResumeSecondsLeft > 0" class="chat-recovery-hint chat-auto-resume-hint">
-                {{ autoResumeSecondsLeft }}s 后自动恢复（可取消）
-              </span>
-              <span v-else-if="stalledAssistantMsg" class="chat-recovery-hint chat-stall-hint">
-                运行似乎已卡住
-              </span>
-              <span v-else-if="recoverableAssistantMsg && !chatSending" class="chat-recovery-hint">
-                Agent 已中断，可恢复
-              </span>
-              <span v-else-if="chatError" class="chat-error">{{ chatError }}</span>
-              <span v-else-if="chatSending" class="chat-running">{{ chatRunningText }}</span>
-              <span v-else class="chat-hint">{{ chatHintText }}</span>
-              <span v-if="totalTokenUsage" class="token-usage" @click="showTokenDetail = !showTokenDetail">
-                {{ totalTokenUsage }}
-              </span>
-            </div>
-            <div v-if="showTokenDetail && tokenDetailData" class="token-detail-popup">
-              <div class="token-detail-header">
-                <span>Token 用量详情</span>
-                <button type="button" class="ghost tiny" @click="showTokenDetail = false">×</button>
-              </div>
-              <div class="token-detail-body">
-                <div class="token-detail-row">
-                  <span class="token-detail-label">AI 回复次数</span>
-                  <span class="token-detail-value">{{ tokenDetailData.assistantCount }}</span>
-                </div>
-                <div class="token-detail-row">
-                  <span class="token-detail-label">总输出字符</span>
-                  <span class="token-detail-value">{{ formatCharCount(tokenDetailData.totalStreamChars) }}</span>
-                </div>
-                <div class="token-detail-row">
-                  <span class="token-detail-label">最大上下文</span>
-                  <span class="token-detail-value">{{ formatCharCount(tokenDetailData.maxContextChars) }}</span>
-                </div>
-                <div class="token-detail-row">
-                  <span class="token-detail-label">总消息数</span>
-                  <span class="token-detail-value">{{ tokenDetailData.totalMessages }}</span>
-                </div>
-              </div>
-            </div>
-            <div class="chat-action-row">
-              <div class="chat-mode-switch" role="group" aria-label="对话模式">
-                <button
-                  type="button"
-                  class="mode-btn"
-                  :class="{ active: chatMode === 'ask' }"
-                  :disabled="chatSending"
-                  @click="chatMode = 'ask'"
-                >
-                  Ask
-                </button>
-                <button
-                  type="button"
-                  class="mode-btn"
-                  :class="{ active: chatMode === 'build' }"
-                  :disabled="chatSending"
-                  @click="chatMode = 'build'"
-                >
-                  Build
-                </button>
-              </div>
-              <div class="chat-actions">
-                <button
-                  v-if="autoResumeSecondsLeft > 0"
-                  type="button"
-                  class="secondary"
-                  @click="cancelAutoResume"
-                >
-                  取消恢复
-                </button>
-                <button
-                  v-if="stalledAssistantMsg"
-                  type="button"
-                  class="secondary resume-bottom-btn"
-                  :disabled="!configReady || !projectOpened"
-                  @click="forceRecoverStalledRun(stalledAssistantMsg.id)"
-                >
-                  恢复运行
-                </button>
-                <button
-                  v-else-if="recoverableAssistantMsg && !chatSending"
-                  type="button"
-                  class="secondary resume-bottom-btn"
-                  :disabled="!configReady || !projectOpened"
-                  @click="resumeAgentRun(recoverableAssistantMsg.id)"
-                >
-                  {{ autoResumeSecondsLeft > 0 ? "立即恢复" : "恢复运行" }}
-                </button>
-                <button v-if="chatSending" type="button" class="secondary" @click="stopAgent">停止</button>
-                <button type="button" class="primary send-btn" :disabled="!canSendChat" @click="sendChat">
-                  {{ chatSending ? "打断并发送" : "发送" }}
-                </button>
-              </div>
-            </div>
-          </div>
-        </footer>
-      </aside>
+  </template>
+        <template #composer>
+          <ChatComposerEditor
+            ref="composerRef"
+            class="chat-composer-editor"
+            :placeholder="chatSending ? '输入新指令将打断当前任务…' : chatPlaceholder"
+            :disabled="!configReady || !projectOpened"
+            @mention-change="onComposerMentionChange"
+            @enter-send="sendChat"
+            @update:empty="composerEmpty = $event"
+            @focus="chatInputFocused = true"
+            @blur="chatInputFocused = false"
+          />
+        </template>
+      </ChatPanel>
     </main>
 
     <Teleport to="body">
@@ -735,6 +503,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import "../styles/vibe-coding.scss";
 import type { AgentLogLineItem } from "../components/AgentActivityLogStream.vue";
+import { phaseBadgeLabel, appendStatusDetail, computeDiffHtml, truncateDiffPreview, cleanStatusLogText, statusLogPhaseClass, formatCharCount, formatContextChars, modelStepPhaseLabel, formatSessionTime, escapeHtml, isNetworkError, fileName, normalizePathKey, joinProjectPath, isVirtualSchemePath, displayFilePath, genId, roundGroupSetupLabel, isActiveModelStep, hasAgentProcessSteps, shouldShowMessageBubble, turnMessageRoleLabel, entryToNode, formatToolMeta, syncRoundGroupsPatch } from "../utils/vibeHelpers";
 import AgentMessage from "../components/AgentMessage.vue";
 import ChatComposerEditor from "../components/ChatComposerEditor.vue";
 import ChatMarkdown from "../components/ChatMarkdown.vue";
@@ -747,6 +516,7 @@ import ProjectSwitcherBar from "../components/vibe/ProjectSwitcherBar.vue";
 import FilePanel from "../components/vibe/FilePanel.vue";
 import GitPanel from "../components/vibe/GitPanel.vue";
 import EditorPanel from "../components/vibe/EditorPanel.vue";
+import ChatPanel from "../components/vibe/ChatPanel.vue";
 import { useConfirm } from "../composables/useConfirm";
 import { useFileDrag } from "../composables/useFileDrag";
 import { useGitPanel, type GitFileDiff } from "../composables/useGitPanel";
@@ -978,15 +748,6 @@ type AgentStatusData = Extract<VibeAgentSseEvent, { type: "status" }>["data"] & 
   retryError?: string;
 };
 
-function hasAgentProcessSteps(msg: ChatMessage): boolean {
-  return Boolean(
-    msg.tools?.length ||
-      msg.roundGroups?.some(
-        (group) => group.turn > 0 && ((group.toolIds?.length ?? 0) > 0 || group.modelSteps.length > 0),
-      ),
-  );
-}
-
 function normalizeChatMessages(messages: PersistedChatMessage[]): ChatMessage[] {
   return messages.map((m) => {
     const normalized: ChatMessage = {
@@ -1063,11 +824,6 @@ const treeError = ref("");
 const retryCountdown = ref(0);
 let retryTimer: ReturnType<typeof setInterval> | null = null;
 let retryAbort: AbortController | null = null;
-
-function isNetworkError(e: unknown): boolean {
-  const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
-  return /failed to fetch|networkerror|network error|fetcherror|load failed/.test(msg);
-}
 
 function clearRetryTimer() {
   if (retryTimer) { clearInterval(retryTimer); retryTimer = null; }
@@ -1616,15 +1372,6 @@ function loadSavedProject() {
   }
 }
 
-function genId() {
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function fileName(p: string) {
-  const parts = p.replace(/\\/g, "/").split("/");
-  return parts[parts.length - 1] || p;
-}
-
 function isChatNearBottom(): boolean {
   const el = chatScrollRef.value;
   if (!el) return true;
@@ -1698,53 +1445,6 @@ const {
   expandEditor,
   autoRetryWithCountdown,
 });
-
-function phaseBadgeLabel(phase?: string): string {
-  switch (phase) {
-    case "connecting_local":
-    case "stream_connected":
-    case "connected":
-      return "连接";
-    case "reconnecting":
-      return "重连";
-    case "preparing":
-    case "starting":
-    case "building_context":
-      return "准备";
-    case "compacting_context":
-      return "上下文";
-    case "vision_first_turn":
-      return "读图";
-    case "vision_first_turn_done":
-    case "vision_first_turn_skipped":
-      return "读图";
-    case "waiting_model":
-    case "thinking":
-    case "retrying_model":
-    case "sending_request":
-      return "模型";
-    case "streaming_model":
-      return "输出";
-    case "planning_tools":
-      return "规划";
-    case "executing_tool":
-    case "executing_tools":
-      return "工具";
-    case "summarizing_tools":
-      return "整理";
-    case "continuing":
-      return "续跑";
-    case "aborted":
-      return "停止";
-    default:
-      return "";
-  }
-}
-
-function appendStatusDetail(base: string, detail?: string): string {
-  const extra = detail?.trim();
-  return extra ? `${base} · ${extra}` : base;
-}
 
 function formatAgentStatus(data: AgentStatusData, compact = false): string {
   const { phase, turn, maxTurns, openFile, model, toolTitle, toolDetail, detail } = data;
@@ -2236,48 +1936,6 @@ function scrollStatusLogToBottom(msgId: string) {
   });
 }
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-function computeDiffHtml(before: string, after: string, maxLines = 80): { htmlBefore: string; htmlAfter: string } {
-  const aLines = before.split("\n");
-  const bLines = after.split("\n");
-  const maxLen = Math.max(aLines.length, bLines.length);
-  const aResult: string[] = [];
-  const bResult: string[] = [];
-  for (let i = 0; i < maxLen && (aResult.length < maxLines || bResult.length < maxLines); i++) {
-    const aLine = i < aLines.length ? aLines[i] : undefined;
-    const bLine = i < bLines.length ? bLines[i] : undefined;
-    if (aLine === undefined) {
-      aResult.push(`<span class="diff-line diff-add">${escapeHtml(bLine!)}</span>`);
-      bResult.push(`<span class="diff-line diff-add">${escapeHtml(bLine!)}</span>`);
-    } else if (bLine === undefined) {
-      aResult.push(`<span class="diff-line diff-del">${escapeHtml(aLine)}</span>`);
-      bResult.push(`<span class="diff-line diff-del">${escapeHtml(aLine)}</span>`);
-    } else if (aLine === bLine) {
-      aResult.push(`<span class="diff-line">${escapeHtml(aLine)}</span>`);
-      bResult.push(`<span class="diff-line">${escapeHtml(bLine)}</span>`);
-    } else {
-      aResult.push(`<span class="diff-line diff-del">${escapeHtml(aLine)}</span>`);
-      bResult.push(`<span class="diff-line diff-add">${escapeHtml(bLine)}</span>`);
-    }
-  }
-  const tail = maxLen > maxLines ? `\n<span class="diff-overflow">… 共 ${aLines.length} / ${bLines.length} 行</span>` : "";
-  return {
-    htmlBefore: aResult.join("\n") + tail,
-    htmlAfter: bResult.join("\n") + tail,
-  };
-}
-
-function truncateDiffPreview(text: string, max = 1200): string {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max)}\n…（共 ${text.length} 字符）`;
-}
-
 function isActivityExpanded(msg: ChatMessage): boolean {
   if (isAgentRunning(msg)) return true;
   return msg.activityExpanded === true;
@@ -2508,38 +2166,8 @@ function agentStatusDisplay(msg: ChatMessage): string {
   return statusText;
 }
 
-function formatCharCount(chars: number): string {
-  if (chars >= 1000000) {
-    return `${(chars / 1000000).toFixed(1)}M`;
-  }
-  if (chars >= 1000) {
-    return `${(chars / 1000).toFixed(1)}K`;
-  }
-  return `${chars}`;
-}
-
 function agentActiveModel(msg: ChatMessage): string {
   return msg.agentModel || msg.agentContext?.model || "";
-}
-
-function statusLogPhaseClass(text: string): string {
-  if (text.includes("连接") || text.includes("已连接")) return "phase-connecting";
-  if (text.includes("扫描") || text.includes("项目上下文") || text.includes("准备问答") || text.includes("组装")) return "phase-context";
-  if (text.includes("压缩") || text.includes("准备模型上下文")) return "phase-compacting";
-  if (text.includes("发送模型请求") || text.includes("等待模型") || text.includes("重试")) return "phase-model";
-  if (text.includes("模型输出") || text.includes("规划工具")) return "phase-streaming";
-  if (text.includes("执行") && text.includes("工具")) return "phase-tool";
-  if (text.includes("整理")) return "phase-summarize";
-  if (text.includes("停止")) return "phase-aborted";
-  return "phase-default";
-}
-
-function cleanStatusLogText(text: string): string {
-  return text
-    .replace(/^正在/, "")
-    .replace(/…$/, "")
-    .replace(/\.\.\.\s*$/, "")
-    .trim();
 }
 
 function agentRoundGroupViews(msg: ChatMessage): AgentRoundGroupView[] {
@@ -2552,18 +2180,6 @@ function agentRoundGroupViews(msg: ChatMessage): AgentRoundGroupView[] {
     activeTurn: isAgentRunning(msg) ? msg.agentTurn : undefined,
     activePhase: isAgentRunning(msg) ? msg.agentPhase : undefined,
   });
-}
-
-function roundGroupSetupLabel(group: AgentRoundGroupView): string {
-  return group.turn === 0 ? "准备阶段" : `第 ${group.turn} 轮`;
-}
-
-function shouldShowMessageBubble(msg: ChatMessage): boolean {
-  if (msg.role === "user") {
-    return Boolean(msg.content?.trim() || userMessageImages(msg).length);
-  }
-  if (hasAgentActivity(msg)) return false;
-  return Boolean(messageDisplayContent(msg));
 }
 
 function userMessageImages(msg: ChatMessage): string[] {
@@ -2602,39 +2218,6 @@ function messageDisplayContent(msg: ChatMessage): string {
   return finalizeAssistantBubbleContent(msg);
 }
 
-function isActiveModelStep(msg: ChatMessage, group: AgentRoundGroupView, step: { phase: string }): boolean {
-  return isAgentRunning(msg) && !!group.active && msg.agentPhase === step.phase;
-}
-
-function modelStepPhaseLabel(phase: string): string {
-  switch (phase) {
-    case "compacting_context":
-      return "上下文";
-    case "sending_request":
-      return "请求";
-    case "waiting_model":
-    case "retrying_model":
-      return "等待";
-    case "streaming_model":
-      return "输出";
-    case "planning_tools":
-      return "规划";
-    case "summarizing_tools":
-      return "整理";
-    case "connecting_local":
-    case "stream_connected":
-    case "connected":
-    case "reconnecting":
-      return "连接";
-    case "preparing":
-    case "starting":
-    case "building_context":
-      return "准备";
-    default:
-      return "步骤";
-  }
-}
-
 function isRoundGroupComplete(msg: ChatMessage, group: AgentRoundGroupView): boolean {
   if (isAgentRunning(msg) && group.active) return false;
   if (group.tools.some((tool) => tool.running)) return false;
@@ -2654,43 +2237,6 @@ function liveModelStepText(msg: ChatMessage, group: AgentRoundGroupView, step: {
     return `${base} · 已等待 ${elapsed}s`;
   }
   return base;
-}
-
-function syncRoundGroupsPatch(msg: ChatMessage): Pick<ChatMessage, "roundGroups"> {
-  return {
-    roundGroups: msg.roundGroups?.map((group) => ({
-      ...group,
-      modelSteps: group.modelSteps.map((step) => ({ ...step })),
-      toolIds: [...group.toolIds],
-      request: group.request
-        ? { ...group.request, messages: group.request.messages.map((message) => ({ ...message })) }
-        : undefined,
-      response: group.response
-        ? { ...group.response, toolCalls: group.response.toolCalls.map((call) => ({ ...call })) }
-        : undefined,
-    })),
-  };
-}
-
-function formatContextChars(chars: number): string {
-  if (chars >= 10_000) return `${(chars / 10_000).toFixed(1)} 万字符`;
-  if (chars >= 1000) return `${(chars / 1000).toFixed(1)}k 字符`;
-  return `${chars} 字符`;
-}
-
-function turnMessageRoleLabel(role: string): string {
-  switch (role) {
-    case "system":
-      return "系统";
-    case "user":
-      return "用户";
-    case "assistant":
-      return "助手";
-    case "tool":
-      return "工具结果";
-    default:
-      return role;
-  }
 }
 
 function refreshProjectHistoryList() {
@@ -2752,25 +2298,6 @@ function onDocumentClick(event: MouseEvent) {
 function hideQuoteButtonNow() {
   showQuoteButton.value = false;
   pendingQuote.value = null;
-}
-
-function formatSessionTime(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const now = new Date();
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
-  if (sameDay) {
-    return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-  }
-  return d.toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 function startNewSession() {
@@ -2961,10 +2488,6 @@ function clearChat() {
     clearVibeChatHistory(projectPath.value.trim());
     refreshSessionList();
   }
-}
-
-function entryToNode(entry: FileEntry): TreeNode {
-  return { ...entry, children: entry.isDirectory ? [] : undefined, loaded: !entry.isDirectory };
 }
 
 async function loadDirChildren(dirPath: string): Promise<TreeNode[]> {
@@ -3461,49 +2984,6 @@ function onFileDragMove(x: number, y: number) {
 }
 function onFileDragEnd(node: TreeNode, x: number, y: number) {
   fileDrag.onFileDragEnd(node, x, y, chatDropZoneRef.value);
-}
-
-function formatToolMeta(
-  name: string,
-  args: Record<string, unknown>,
-): { name: string; icon: string; title: string; detail: string; label: string } {
-  const path = String(args.path ?? "").trim();
-  const pattern = String(args.pattern ?? "").trim();
-  const query = String(args.query ?? "").trim();
-
-  if (name === "read_file") {
-    const offset = Number(args.offset) || 1;
-    const limit = Math.min(800, Math.max(1, Number(args.limit) || 500));
-    const detail = path ? `${path} · 行 ${offset}–${offset + limit - 1}` : "";
-    return { name, icon: "📄", title: "读取文件", detail, label: detail ? `读取文件 ${detail}` : "读取文件" };
-  }
-  if (name === "write_file") {
-    const content = typeof args.content === "string" ? args.content : "";
-    const detail = path ? `${path}${content ? ` · ${content.length} 字符` : ""}` : "";
-    return { name, icon: "✏️", title: "写入文件", detail, label: detail ? `写入文件 ${detail}` : "写入文件" };
-  }
-  if (name === "patch_file") {
-    const detail = path || "";
-    return { name, icon: "🔧", title: "局部修改", detail, label: detail ? `局部修改 ${detail}` : "局部修改" };
-  }
-  if (name === "delete_file") {
-    const detail = path || "";
-    return { name, icon: "🗑️", title: "删除文件", detail, label: detail ? `删除文件 ${detail}` : "删除文件" };
-  }
-  if (name === "list_dir") {
-    const detail = path || "项目根目录";
-    return { name, icon: "📁", title: "浏览目录", detail, label: `浏览目录 ${detail}` };
-  }
-  if (name === "grep") {
-    const detail = pattern ? `「${pattern}」` : "";
-    return { name, icon: "🔍", title: "搜索代码", detail, label: detail ? `搜索代码 ${detail}` : "搜索代码" };
-  }
-  if (name === "search_files") {
-    const detail = query ? `「${query}」` : "";
-    return { name, icon: "🔎", title: "搜索文件", detail, label: detail ? `搜索文件 ${detail}` : "搜索文件" };
-  }
-
-  return { name, icon: "⚙️", title: name, detail: "", label: name };
 }
 
 async function handleAgentWrittenFiles(files: string[]) {
@@ -5205,39 +4685,6 @@ onBeforeUnmount(() => {
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
 }
 
-.quote-floating {
-  position: fixed;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 12px;
-  background: rgba(2, 6, 23, 0.92);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font-size: 11px;
-  color: var(--text);
-  cursor: pointer;
-  z-index: 1000;
-  transform: translate(-50%, -100%);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-  transition: all 180ms ease;
-  white-space: nowrap;
-  backdrop-filter: blur(10px);
-}
-
-.quote-floating:hover {
-  background: rgba(31, 111, 235, 0.2);
-  border-color: rgba(31, 111, 235, 0.5);
-  color: rgba(255, 255, 255, 0.95);
-  transform: translate(-50%, -100%) translateY(-2px);
-  box-shadow: 0 6px 20px rgba(31, 111, 235, 0.3);
-}
-
-.quote-icon {
-  font-size: 13px;
-  line-height: 1;
-}
-
 .chat-panel {
   position: relative;
 
@@ -5335,19 +4782,6 @@ onBeforeUnmount(() => {
     height: 300px;
     border-left: none;
     border-top: 1px solid var(--border);
-  }
-
-  .panel-head {
-    align-items: flex-start;
-  }
-
-  .panel-head-right,
-  .chat-actions {
-    justify-content: flex-start;
-  }
-
-  .chat-action-row {
-    flex-wrap: wrap;
   }
 
   .editor-header {
@@ -5626,117 +5060,6 @@ button.ghost.danger:hover:not(:disabled) {
   }
 }
 
-.panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-  background: rgba(17, 24, 39, 0.4);
-  min-width: 0;
-  overflow-x: clip;
-}
-
-.panel-head-right {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-  min-width: 0;
-}
-
-.history-sync-message {
-  margin: -2px 0 10px;
-  padding: 8px 10px;
-  border: 1px solid rgba(31, 111, 235, 0.22);
-  border-radius: 8px;
-  background: rgba(31, 111, 235, 0.08);
-  color: rgba(255, 255, 255, 0.78);
-  font-size: 11px;
-  line-height: 1.5;
-  word-break: break-all;
-}
-
-.history-empty {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  color: var(--muted);
-  text-align: center;
-  padding: 24px 12px;
-}
-
-.history-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  display: grid;
-  gap: 6px;
-}
-
-.history-item {
-  display: flex;
-  align-items: stretch;
-  gap: 6px;
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.02);
-}
-
-.history-item.active {
-  border-color: rgba(31, 111, 235, 0.45);
-  background: rgba(31, 111, 235, 0.1);
-}
-
-.history-item-main {
-  flex: 1;
-  min-width: 0;
-  text-align: left;
-  background: transparent;
-  border: none;
-  color: inherit;
-  padding: 10px 12px;
-  cursor: pointer;
-}
-
-.history-item-title {
-  display: block;
-  font-size: 13px;
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.history-item-meta {
-  display: block;
-  margin-top: 4px;
-  font-size: 11px;
-  color: var(--muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.history-copy,
-.history-delete {
-  align-self: center;
-  flex-shrink: 0;
-}
-
-.history-delete {
-  margin-right: 6px;
-}
-
 button.ghost.small,
 button.secondary.small,
 button.primary.small {
@@ -5744,193 +5067,6 @@ button.primary.small {
   font-size: 13px;
   flex-shrink: 0;
   border-radius: 6px;
-}
-
-.panel-head-left {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  flex: 1;
-}
-
-.panel-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.session-picker-wrap {
-  position: relative;
-  min-width: 0;
-  max-width: 100%;
-}
-
-.session-picker-row {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  min-width: 0;
-}
-
-.session-nav-btn {
-  flex-shrink: 0;
-  width: 22px;
-  height: 24px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.45);
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
-}
-
-.session-nav-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.88);
-  border-color: rgba(255, 255, 255, 0.08);
-}
-
-.session-nav-btn:disabled {
-  opacity: 0.28;
-  cursor: default;
-}
-
-.session-picker-trigger {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  max-width: 100%;
-  padding: 3px 8px 3px 6px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.92);
-  font-size: 13px;
-  font-weight: 600;
-  text-align: left;
-  cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease;
-}
-
-.session-picker-trigger:hover:not(:disabled),
-.session-picker-trigger.open {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.08);
-}
-
-.session-picker-trigger:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.session-picker-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.session-picker-chevron {
-  flex-shrink: 0;
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.45);
-  transition: transform 150ms ease;
-}
-
-.session-picker-trigger.open .session-picker-chevron {
-  transform: rotate(180deg);
-}
-
-.session-picker-dropdown {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 30;
-  width: min(340px, calc(100vw - 48px));
-  max-height: min(420px, calc(100vh - 180px));
-  display: flex;
-  flex-direction: column;
-  background: #111827;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 10px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
-  overflow: hidden;
-  backdrop-filter: blur(16px);
-}
-
-.session-picker-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.session-picker-head-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--muted);
-}
-
-.session-picker-new {
-  flex-shrink: 0;
-}
-
-.session-picker-list {
-  flex: 1;
-  min-height: 0;
-  max-height: 300px;
-}
-
-.session-picker-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  min-width: 0;
-}
-
-.session-picker-sync {
-  font-size: 11px;
-  padding: 4px 8px;
-}
-
-.session-picker-hint {
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.35);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.panel-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.panel-meta {
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.panel-meta.warn {
-  color: var(--danger);
 }
 
 .panel-actions {
@@ -5997,20 +5133,6 @@ button.primary.small {
   color: rgba(255, 255, 255, 0.4);
 }
 
-.panel-empty,
-.editor-empty,
-.chat-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 32px 14px;
-  color: var(--muted);
-  font-size: 13px;
-  text-align: center;
-  opacity: 0.8;
-}
 .editor-empty {
   display: flex;
   flex-direction: column;
@@ -6037,44 +5159,6 @@ button.primary.small {
   margin: 0 0 8px;
   font-size: 12px;
   color: var(--text-dim);
-}
-
-.chat-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 200px;
-  padding: 32px 20px;
-}
-
-.chat-empty-icon {
-  font-size: 32px;
-  margin-bottom: 8px;
-  opacity: 0.7;
-}
-
-.chat-empty-title {
-  margin: 0 0 6px;
-  font-size: 15px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.85);
-}
-
-.chat-empty-desc {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--muted);
-  max-width: 320px;
-}
-
-.chat-empty-desc code {
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: rgba(31, 111, 235, 0.15);
-  color: #91beff;
-  font-size: 11px;
 }
 
 .editor-empty.error {
@@ -6272,21 +5356,6 @@ button.primary.small {
   tab-size: 2;
 }
 
-.chat-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: none;
-  padding: 12px 14px;
-}
-
-.msg-list {
-  display: grid;
-  gap: 10px;
-  min-width: 0;
-}
-
 .msg {
   display: flex;
   gap: 8px;
@@ -6421,10 +5490,6 @@ button.primary.small {
   color: #ffc47a;
 }
 
-.chat-stall-hint {
-  color: #ffc47a;
-}
-
 .msg-actions {
   display: flex;
   flex-wrap: wrap;
@@ -6497,67 +5562,6 @@ button.compact {
   border-radius: 7px;
 }
 
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 12px;
-}
-
-.chip {
-  background: rgba(31, 111, 235, 0.12);
-  color: #91beff;
-  border: 1px solid rgba(31, 111, 235, 0.25);
-  padding: 6px 14px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 500;
-  transition: all 180ms ease;
-}
-
-.chip:hover:not(:disabled) {
-  background: rgba(31, 111, 235, 0.22);
-  border-color: rgba(31, 111, 235, 0.4);
-}
-
-.chat-mode-switch {
-  display: inline-flex;
-  gap: 2px;
-  padding: 2px;
-  border-radius: 8px;
-  background: rgba(0, 0, 0, 0.18);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  flex-shrink: 0;
-}
-
-.mode-btn {
-  border: none;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.55);
-  border-radius: 6px;
-  padding: 3px 10px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 180ms ease;
-}
-
-.mode-btn:hover:not(:disabled):not(.active) {
-  color: rgba(255, 255, 255, 0.85);
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.mode-btn.active {
-  background: rgba(31, 111, 235, 0.25);
-  color: #aad0ff;
-  box-shadow: inset 0 0 0 1px rgba(31, 111, 235, 0.35);
-}
-
-.mode-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
 .chat-composer {
   position: relative;
   flex-shrink: 0;
@@ -6568,120 +5572,6 @@ button.compact {
 
   backdrop-filter: blur(8px);
   transition: background 200ms ease, border-color 200ms ease;
-}
-
-.quoted-preview {
-  margin-bottom: 10px;
-  border: 1px solid rgba(179, 146, 240, 0.3);
-  border-radius: 8px;
-  background: rgba(179, 146, 240, 0.06);
-  overflow: hidden;
-}
-
-.quoted-preview-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 10px;
-  background: rgba(179, 146, 240, 0.1);
-  border-bottom: 1px solid rgba(179, 146, 240, 0.2);
-}
-
-.quoted-preview-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  font-weight: 600;
-  color: rgba(179, 146, 240, 0.9);
-}
-
-.quoted-preview-icon {
-  font-size: 13px;
-  line-height: 1;
-}
-
-.quoted-preview-close {
-  background: none;
-  border: none;
-  color: rgba(255, 255, 255, 0.5);
-  cursor: pointer;
-  padding: 0 4px;
-  font-size: 16px;
-  line-height: 1;
-  transition: color 150ms ease;
-}
-
-.quoted-preview-close:hover {
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.quoted-preview-body {
-  padding: 8px 10px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: rgba(255, 255, 255, 0.7);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 80px;
-  overflow: auto;
-}
-
-.chat-input-field {
-  position: relative;
-  min-width: 0;
-
-}
-
-.mention-dropdown {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: calc(100% + 6px);
-  z-index: 12;
-  max-height: 220px;
-  overflow: auto;
-  display: grid;
-  gap: 2px;
-  padding: 6px;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(12px);
-}
-
-.mention-item {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  width: 100%;
-  text-align: left;
-  background: transparent;
-  color: inherit;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  padding: 8px 10px;
-  cursor: pointer;
-  transition: all 150ms ease;
-}
-
-.mention-item:hover,
-.mention-item.active {
-  background: rgba(31, 111, 235, 0.16);
-  border-color: rgba(31, 111, 235, 0.28);
-}
-
-.mention-item-name {
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.mention-item-path {
-  font-size: 11px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  color: rgba(145, 190, 255, 0.82);
 }
 
 .file-drag-ghost {
@@ -6697,132 +5587,6 @@ button.compact {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   white-space: nowrap;
-}
-
-.chat-panel.drag-over {
-  outline: 2px solid rgba(31, 111, 235, 0.55);
-  outline-offset: -2px;
-}
-
-.chat-panel.drag-over .chat-composer {
-  background: rgba(31, 111, 235, 0.15);
-  border-top-color: rgba(31, 111, 235, 0.6);
-}
-
-.chat-input-box {
-  width: 100%;
-  min-height: 56px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
-  padding: 0;
-
-  transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
-  cursor: text;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-}
-
-.chat-input-box.focused {
-  border-color: rgba(145, 190, 255, 0.58);
-  background: rgba(255, 255, 255, 0.075);
-  box-shadow: 0 0 0 1px rgba(145, 190, 255, 0.12), 0 12px 28px rgba(0, 0, 0, 0.18);
-}
-
-.chat-composer-editor {
-  width: 100%;
-  max-width: 100%;
-  flex: 1;
-  min-width: 0;
-  box-sizing: border-box;
-}
-
-.chat-bottom {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
-  position: relative;
-}
-
-.chat-status-row {
-  display: flex;
-  align-items: center;
-  min-height: 16px;
-  font-size: 11px;
-}
-
-.token-usage {
-  margin-left: auto;
-  color: rgba(255, 255, 255, 0.45);
-  font-size: 10px;
-  cursor: pointer;
-  padding: 2px 6px;
-  border-radius: 4px;
-  transition: background 0.15s ease;
-}
-
-.token-usage:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.7);
-}
-
-.token-detail-popup {
-  position: absolute;
-  bottom: 60px;
-  right: 16px;
-  background: rgba(17, 24, 39, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  padding: 12px;
-  min-width: 200px;
-  z-index: 100;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-}
-
-.token-detail-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 10px;
-  font-size: 12px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.token-detail-body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.token-detail-row {
-  display: flex;
-  justify-content: space-between;
-  font-size: 11px;
-}
-
-.token-detail-label {
-  color: rgba(255, 255, 255, 0.6);
-}
-
-.token-detail-value {
-  color: rgba(255, 255, 255, 0.9);
-  font-family: ui-monospace, monospace;
-}
-
-.chat-action-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.chat-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
 }
 
 .agent-activity {
@@ -8590,66 +7354,6 @@ button.compact {
   font-weight: 700;
   color: rgba(255, 255, 255, 0.55);
   margin-bottom: 4px;
-}
-
-.pending-queue {
-  margin-bottom: 10px;
-  border: 1px solid rgba(240, 198, 116, 0.35);
-  border-radius: 10px;
-  background: rgba(240, 198, 116, 0.08);
-  overflow: hidden;
-}
-
-.pending-queue-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 10px;
-  font-size: 11px;
-  font-weight: 600;
-  color: #f0c674;
-  border-bottom: 1px solid rgba(240, 198, 116, 0.2);
-}
-
-.pending-queue-list {
-  margin: 0;
-  padding: 8px 10px 8px 24px;
-  font-size: 11px;
-  line-height: 1.5;
-  color: rgba(255, 255, 255, 0.75);
-  max-height: 100px;
-  overflow: auto;
-}
-
-.chat-hint,
-.chat-running {
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.chat-running {
-  color: #91beff;
-}
-
-.chat-error {
-  font-size: 11px;
-  color: var(--danger);
-}
-
-.chat-recovery-hint {
-  font-size: 11px;
-  color: rgba(121, 192, 255, 0.88);
-}
-
-.chat-actions .resume-bottom-btn {
-  border: 1px solid rgba(88, 166, 255, 0.45);
-  background: rgba(88, 166, 255, 0.12);
-  color: rgba(180, 215, 255, 0.95);
-}
-
-.chat-actions .resume-bottom-btn:hover:not(:disabled) {
-  background: rgba(88, 166, 255, 0.2);
 }
 
 button {

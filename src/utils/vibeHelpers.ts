@@ -219,3 +219,70 @@ export function roundGroupSetupLabel(group: { turn: number }): string {
 export function isActiveModelStep(group: { active?: boolean }, _step: { phase: string }): boolean {
   return !!group.active;
 }
+
+export function formatToolMeta(
+  name: string,
+  args: Record<string, unknown>,
+): { name: string; icon: string; title: string; detail: string; label: string } {
+  const path = String(args.path ?? "").trim();
+  const pattern = String(args.pattern ?? "").trim();
+  const query = String(args.query ?? "").trim();
+
+  if (name === "read_file") {
+    const offset = Number(args.offset) || 1;
+    const limit = Math.min(800, Math.max(1, Number(args.limit) || 500));
+    const detail = path ? `${path} · 行 ${offset}–${offset + limit - 1}` : "";
+    return { name, icon: "📄", title: "读取文件", detail, label: detail ? `读取文件 ${detail}` : "读取文件" };
+  }
+  if (name === "write_file") {
+    const content = typeof args.content === "string" ? args.content : "";
+    const detail = path ? `${path}${content ? ` · ${content.length} 字符` : ""}` : "";
+    return { name, icon: "✏️", title: "写入文件", detail, label: detail ? `写入文件 ${detail}` : "写入文件" };
+  }
+  if (name === "patch_file") {
+    const detail = path || "";
+    return { name, icon: "🔧", title: "局部修改", detail, label: detail ? `局部修改 ${detail}` : "局部修改" };
+  }
+  if (name === "delete_file") {
+    const detail = path || "";
+    return { name, icon: "🗑️", title: "删除文件", detail, label: detail ? `删除文件 ${detail}` : "删除文件" };
+  }
+  if (name === "list_dir") {
+    const detail = path || "项目根目录";
+    return { name, icon: "📁", title: "浏览目录", detail, label: `浏览目录 ${detail}` };
+  }
+  if (name === "grep") {
+    const detail = pattern ? `「${pattern}」` : "";
+    return { name, icon: "🔍", title: "搜索代码", detail, label: detail ? `搜索代码 ${detail}` : "搜索代码" };
+  }
+  if (name === "search_files") {
+    const detail = query ? `「${query}」` : "";
+    return { name, icon: "🔎", title: "搜索文件", detail, label: detail ? `搜索文件 ${detail}` : "搜索文件" };
+  }
+
+  return { name, icon: "⚙️", title: name, detail: "", label: name };
+}
+
+interface RoundGroup {
+  turn: number;
+  modelSteps: unknown[];
+  toolIds: unknown[];
+  request?: { messages: unknown[] };
+  response?: { toolCalls: unknown[] };
+}
+
+export function syncRoundGroupsPatch(msg: { roundGroups?: RoundGroup[] }): { roundGroups?: RoundGroup[] } {
+  return {
+    roundGroups: msg.roundGroups?.map((group) => ({
+      ...group,
+      modelSteps: group.modelSteps.map((step) => ({ ...step })),
+      toolIds: [...group.toolIds],
+      request: group.request
+        ? { ...group.request, messages: group.request.messages.map((message) => ({ ...message })) }
+        : undefined,
+      response: group.response
+        ? { ...group.response, toolCalls: group.response.toolCalls.map((call) => ({ ...call })) }
+        : undefined,
+    })),
+  };
+}

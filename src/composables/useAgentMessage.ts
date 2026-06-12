@@ -119,6 +119,7 @@ export function useAgentMessage(
 
   function timelineAnswerContent(m: AgentMessage): string {
     if (m.role !== "assistant" || !hasAgentActivity(m)) return "";
+    if (isAgentRunning(m)) return "";
     return messageDisplayContent(m);
   }
 

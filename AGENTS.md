@@ -7,12 +7,31 @@
 | AI 助手 | `src/views/VibeCodingView.vue` 及相关 vibe coding 模块 |
 | vibe coding | `src/views/VibeCodingView.vue` 页面 |
 | 聊天页面 | `src/views/ChatView.vue` |
+| Git 面板 | `src/components/vibe/GitPanel.vue` |
+| 文件面板 | `src/components/vibe/FilePanel.vue` |
+| 编辑器 | `src/components/vibe/EditorPanel.vue` |
+| 聊天面板 | `src/components/vibe/ChatPanel.vue` |
+| 文件树 | `src/components/FileTreeNode.vue` |
+| 工具栏 | `src/components/vibe/AppToolbar.vue` |
+| 项目切换栏 | `src/components/vibe/ProjectSwitcherBar.vue` |
 
 ## 项目结构
 
 - `src/views/VibeCodingView.vue` — AI 助手主页面（vibe coding）
+- `src/views/ChatView.vue` — 聊天页面
+- `src/components/vibe/GitPanel.vue` — Git 面板
+- `src/components/vibe/FilePanel.vue` — 文件面板
+- `src/components/vibe/EditorPanel.vue` — 编辑器
+- `src/components/vibe/ChatPanel.vue` — 聊天面板
+- `src/components/vibe/AppToolbar.vue` — 工具栏
+- `src/components/vibe/ProjectSwitcherBar.vue` — 项目切换栏
+- `src/components/FileTreeNode.vue` — 文件树节点
+- `src/composables/useGitPanel.ts` — Git 状态管理
+- `src/composables/useEditorPanel.ts` — 编辑器状态
 - `src/services/vibeCodingClient.ts` — vibe coding 客户端服务
 - `src/services/vibeAgentClient.ts` — AI agent 客户端
+- `src/services/vibeChatStorage.ts` — 聊天持久化
+- `src/utils/renderMarkdown.ts` — Markdown 渲染
 - `server/vibeAgent.ts` — AI agent 后端服务
 
 ## Agent 编排与提示词（通用性）
