@@ -16,6 +16,7 @@ export {
   ASK_MAX_TURNS,
   EXECUTE_PLAN_MAX_TURNS,
   INTERACTIVE_BUILD_MAX_TURNS,
+  PLAN_MAX_TURNS,
   resolveAgentMaxTurns,
   resolveResumeMaxTurns,
 } from "../../server/agentTurnBudget";
@@ -142,7 +143,7 @@ function extractTargetFilesFromTools(tools: AgentProgressTool[]): string[] {
 export function resolveAgentResumeRunProfile(
   msg: AgentProgressSource,
   originalPrompt: string,
-  mode: "ask" | "build",
+  mode: "ask" | "build" | "plan",
   lastAssistantContent?: string,
 ): AgentRunProfile {
   const base = resolveAgentRunProfile({

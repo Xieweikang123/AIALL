@@ -6,6 +6,8 @@ export const EXECUTE_PLAN_MAX_TURNS = 20;
 /** Open-ended build tasks (explore + modify). */
 export const INTERACTIVE_BUILD_MAX_TURNS = 24;
 export const ASK_MAX_TURNS = 12;
+/** Plan mode — thorough exploration, output structured plan, no writes. */
+export const PLAN_MAX_TURNS = 16;
 
 /** Resume runs get extra headroom so multi-segment tasks can finish without repeated clicks. */
 export const RESUME_MAX_TURNS_CAP = 48;

@@ -387,7 +387,7 @@
               >
                 <span v-if="isAgentRunning(m)" class="status-pulse" aria-hidden="true" />
                 <span class="msg-status-text">
-                  {{ agentStatusDisplay(m) || (m.chatMode === 'ask' ? '思考中…' : 'Agent 运行中…') }}
+                  {{ agentStatusDisplay(m) || (m.chatMode === 'ask' ? '思考中…' : m.chatMode === 'plan' ? '规划中…' : 'Agent 运行中…') }}
                 </span>
               </div>
               <div
@@ -886,7 +886,8 @@ const contentSearchResults = ref<GrepMatch[]>([]);
 function loadChatMode(): VibeChatMode {
   try {
     const saved = localStorage.getItem(CHAT_MODE_KEY);
-    return saved === "ask" ? "ask" : "build";
+    if (saved === "ask" || saved === "plan") return saved;
+    return "build";
   } catch {
     return "build";
   }
@@ -1139,12 +1140,16 @@ const canSendChat = computed(
 const chatPlaceholder = computed(() =>
   chatMode.value === "ask"
     ? "提问、解释代码"
+    : chatMode.value === "plan"
+    ? "描述需求，AI 输出修改方案（不写文件）"
     : "描述要改什么（Enter 发送，Shift+Enter 换行）",
 );
 
 const chatRunningText = computed(() =>
   chatMode.value === "ask"
     ? "思考中… · 发送新消息将打断"
+    : chatMode.value === "plan"
+    ? "规划中… · 发送新消息将打断"
     : "Agent 运行中… · 发送新消息将打断",
 );
 
@@ -1369,6 +1374,11 @@ function formatAgentStatus(data: AgentStatusData, compact = false): string {
       return openFile
         ? appendStatusDetail(`正在准备问答上下文（当前文件：${openFile}）…`, detail)
         : appendStatusDetail("正在准备问答上下文…", detail);
+    }
+    if (chatMode.value === "plan") {
+      return openFile
+        ? appendStatusDetail(`正在准备规划上下文（当前文件：${openFile}）…`, detail)
+        : appendStatusDetail("正在准备规划上下文…", detail);
     }
     return openFile
       ? appendStatusDetail(`正在组装 Agent 上下文与工具定义（当前文件：${openFile}）…`, detail)

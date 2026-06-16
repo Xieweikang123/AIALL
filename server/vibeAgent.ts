@@ -27,6 +27,7 @@ import {
   buildExploreBudgetNudge,
   EXECUTE_PLAN_EXPLORE_TURN_BUDGET,
   INTERACTIVE_EXPLORE_TURN_BUDGET,
+  PLAN_EXPLORE_TURN_BUDGET,
 } from "./agentExplorationBudget";
 import { buildConsultativeBuildHint, isConsultativeUserPrompt } from "./agentUserIntent";
 import {
@@ -169,6 +170,7 @@ const MAX_TOOL_RESULT_SSE_CHARS = 16_000;
 const MAX_TOOL_RESULT_MODEL_CHARS = 10_000;
 const MAX_AGENT_CONTEXT_CHARS = 200_000;
 export const EXECUTE_PLAN_MAX_CONTEXT_CHARS = 100_000;
+const PLAN_MAX_CONTEXT_CHARS = 150_000;
 const PROTECTED_RECENT_TOOL_RESULTS = 2;
 
 function truncateText(text: string, max: number, suffix: string): string {
@@ -597,6 +599,44 @@ function buildAskSystemPrompt(
   return lines.join("\n");
 }
 
+function buildPlanSystemPrompt(
+  projectRoot: string,
+  openFilePath?: string,
+  openFileSnippet?: string,
+  model?: string,
+): string {
+  const lines = [
+    "你是一个编程架构师（Plan 模式），负责分析项目并输出结构化的修改方案。",
+    "回答请使用中文。",
+    "用户可能在消息中附带截图或图片；若已附带，请结合图片内容理解需求并回答，不要声称无法查看图片。",
+    "用户附截图询问界面/功能时：先描述截图所见，再判断是否属于本项目（优先查 src/views、src/components），勿默认是外部应用。",
+    "你可以使用 list_dir、read_file、grep、search_files 工具来探索项目、读取文件，但不能修改任何文件。",
+    "你可以使用 web_search 搜索外部信息，使用 web_extract 抓取指定链接内容。",
+    "工作流程：先全面探索相关代码，理解现有架构，然后输出结构化的修改方案。",
+    "输出格式要求：",
+    "1. 先概述需求和当前状态；",
+    "2. 列出涉及的文件清单（相对路径）；",
+    "3. 对每个文件给出具体改动说明和代码块（标明修改前/修改后或新增内容）；",
+    "4. 说明改动顺序和依赖关系。",
+    "探索时：read_file 用 offset/limit 分段读取（单次约 200 行）；不要重复读取已读过的文件；用中文简短说明后立即调用工具。",
+    "收集到足够信息后立即输出方案，不要无意义地继续读文件。",
+    "重要：必须通过 API 工具接口调用 list_dir、read_file 等，禁止在正文里输出 <function>、<parameter> 等标记。",
+    "工具 path 参数使用相对项目根的路径（如 package.json、src/main.ts），不要用绝对路径。",
+    `项目根目录：${projectRoot}`,
+  ];
+  if (model?.trim()) {
+    lines.push("", buildModelIdentityHint(model));
+  }
+  const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
+  if (openFile) {
+    lines.push(`用户当前打开的文件：${openFile.relative}`);
+    if (openFileSnippet?.trim()) {
+      lines.push("", "当前打开文件内容（节选）：", "```", openFileSnippet.trim(), "```");
+    }
+  }
+  return lines.join("\n");
+}
+
 function buildDoneData(stage: WriteStage | null, turns: number) {
   if (!stage) {
     return { writtenFiles: [] as string[], pendingFiles: [] as string[], turns };
@@ -732,6 +772,9 @@ export async function executeTool(
   if (mode === "ask" && WRITE_AGENT_TOOL_NAMES.has(name)) {
     return "Ask 模式下不支持文件修改，请仅使用只读工具查询项目。";
   }
+  if (mode === "plan" && WRITE_AGENT_TOOL_NAMES.has(name)) {
+    return "Plan 模式下不支持文件修改，请仅输出修改方案。";
+  }
   if (!stage && WRITE_AGENT_TOOL_NAMES.has(name)) {
     return "错误：当前模式不支持写文件";
   }
@@ -764,8 +807,8 @@ export async function executeTool(
     }
     if (content === null) return `错误：${resolved.relative} 不存在或无法读取`;
     const offset = Number(args.offset) || 1;
-    const defaultLimit = mode === "ask" ? 200 : 200;
-    const maxLimit = mode === "ask" ? 400 : 350;
+    const defaultLimit = mode === "ask" ? 200 : mode === "plan" ? 300 : 200;
+    const maxLimit = mode === "ask" ? 400 : mode === "plan" ? 500 : 350;
     const limit = Math.min(maxLimit, Math.max(1, Number(args.limit) || defaultLimit));
     const sliceKey = `${resolved.relative}:${offset}:${limit}`;
     const cachedSlice = readSliceCache?.get(sliceKey);
@@ -905,6 +948,7 @@ export async function executeTool(
 
   if (name === "run_command") {
     if (mode === "ask") return "Ask 模式下不支持执行命令。";
+    if (mode === "plan") return "Plan 模式下不支持执行命令。";
     const command = String(args.command || "").trim();
     if (!command) return "错误：缺少 command";
     const dangerous = /rm\s+-rf\s+[\/~]|format\s+[a-z]:|del\s+\/[sfq]/i;
@@ -971,13 +1015,14 @@ export async function executeTool(
 export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   const mode = params.mode ?? "build";
   const isAsk = mode === "ask";
+  const isPlan = mode === "plan";
   const runProfile = normalizeRunProfile(
     params.runProfile ||
       (params.executionMode
         ? { kind: "execute_plan", targetFiles: params.runProfile?.targetFiles }
         : undefined),
   );
-  const isExecutePlan = !isAsk && runProfile.kind === "execute_plan";
+  const isExecutePlan = !isAsk && !isPlan && runProfile.kind === "execute_plan";
   const {
     projectRoot,
     prompt,
@@ -988,14 +1033,14 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     onEvent,
     signal,
   } = params;
-  const readOnlyBuildRun = !isAsk && !isExecutePlan && isConsultativeUserPrompt(prompt);
+  const readOnlyBuildRun = !isAsk && !isPlan && !isExecutePlan && isConsultativeUserPrompt(prompt);
   const imageDataUrls = sanitizeImageDataUrls(params.imageDataUrls);
 
   const segmentBudget = resolveAgentMaxTurns(mode, runProfile);
   let segmentMaxTurns = params.maxTurns ?? segmentBudget;
   let segmentIndex = 1;
-  const exploreTurnBudget = isExecutePlan ? EXECUTE_PLAN_EXPLORE_TURN_BUDGET : INTERACTIVE_EXPLORE_TURN_BUDGET;
-  const maxContextChars = isExecutePlan ? EXECUTE_PLAN_MAX_CONTEXT_CHARS : MAX_AGENT_CONTEXT_CHARS;
+  const exploreTurnBudget = isExecutePlan ? EXECUTE_PLAN_EXPLORE_TURN_BUDGET : isPlan ? PLAN_EXPLORE_TURN_BUDGET : INTERACTIVE_EXPLORE_TURN_BUDGET;
+  const maxContextChars = isExecutePlan ? EXECUTE_PLAN_MAX_CONTEXT_CHARS : isPlan ? PLAN_MAX_CONTEXT_CHARS : MAX_AGENT_CONTEXT_CHARS;
 
   const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
   const openFileRel = openFile?.relative;
@@ -1055,16 +1100,18 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   const systemPrompt =
     (isAsk
       ? buildAskSystemPrompt(projectRoot, openFilePath, openFileSnippet, model)
+      : isPlan
+      ? buildPlanSystemPrompt(projectRoot, openFilePath, openFileSnippet, model)
       : buildSystemPrompt(projectRoot, openFilePath, model) +
         (readOnlyBuildRun ? buildConsultativeBuildHint() : "")) + projectContextBlock;
 
-  const writeStage = isAsk || readOnlyBuildRun ? null : createWriteStage();
+  const writeStage = isAsk || isPlan || readOnlyBuildRun ? null : createWriteStage();
   const readCache = new Map<string, string>();
   const readSliceCache = new Map<string, string>();
   const grepCache = new Map<string, string>();
   let consecutiveExploreTurns = 0;
   let turnsLowNudgeSent = false;
-  const activeTools = isAsk || readOnlyBuildRun ? READ_ONLY_AGENT_TOOLS : VIBE_AGENT_TOOLS;
+  const activeTools = isAsk || isPlan || readOnlyBuildRun ? READ_ONLY_AGENT_TOOLS : VIBE_AGENT_TOOLS;
   const userContent = buildVisionUserContent(prompt, imageDataUrls);
   const messages: ChatCompletionMessage[] = [
     { role: "system", content: systemPrompt },

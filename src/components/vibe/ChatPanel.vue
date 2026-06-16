@@ -236,6 +236,15 @@
             <button
               type="button"
               class="mode-btn"
+              :class="{ active: chatMode === 'plan' }"
+              :disabled="chatSending"
+              @click="$emit('update:chatMode', 'plan')"
+            >
+              Plan
+            </button>
+            <button
+              type="button"
+              class="mode-btn"
               :class="{ active: chatMode === 'build' }"
               :disabled="chatSending"
               @click="$emit('update:chatMode', 'build')"

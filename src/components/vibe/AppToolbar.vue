@@ -90,7 +90,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, onMounted, onBeforeUnmount } from "vue";
 import {
   listProjectHistory,
   removeProjectFromHistory,
@@ -138,6 +138,23 @@ function toggleProjectHistory() {
 function closeProjectHistory() {
   projectHistoryOpen.value = false;
 }
+
+/** 点击下拉面板外部时自动关闭 */
+function handleOutsideClick(e: MouseEvent) {
+  if (!projectHistoryOpen.value) return;
+  const wrap = projectHistoryRef.value;
+  if (wrap && !wrap.contains(e.target as Node)) {
+    closeProjectHistory();
+  }
+}
+
+onMounted(() => {
+  document.addEventListener("mousedown", handleOutsideClick, true);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("mousedown", handleOutsideClick, true);
+});
 
 function openRecentProject(path: string) {
   closeProjectHistory();
@@ -298,6 +315,26 @@ function formatSessionTime(iso: string): string {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   z-index: 1000;
   margin-top: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(128, 128, 128, 0.3) transparent;
+}
+
+.project-history-dropdown::-webkit-scrollbar {
+  width: 6px;
+}
+
+.project-history-dropdown::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.project-history-dropdown::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.3);
+  border-radius: 3px;
+  transition: background 0.2s ease;
+}
+
+.project-history-dropdown::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 128, 128, 0.5);
 }
 
 .project-history-head {
