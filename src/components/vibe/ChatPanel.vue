@@ -164,7 +164,6 @@
       class="quote-floating"
       :style="{ left: quoteButtonPosition.x + 'px', top: quoteButtonPosition.y + 'px' }"
       @mousedown.prevent="$emit('quote-selected-text')"
-      @mouseleave="$emit('hide-quote-button')"
     >
       <span class="quote-icon">❝</span> 引用
     </div>
@@ -803,24 +802,29 @@ function formatSessionTime(timestamp: number | string): string {
 .quote-floating {
   position: fixed;
   z-index: 1000;
-  padding: 6px 12px;
-  background: #1f6feb;
-  color: white;
-  border-radius: 6px;
+  padding: 5px 10px;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
   font-size: 12px;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   display: flex;
   align-items: center;
   gap: 4px;
+  transition: all 0.15s ease;
+  backdrop-filter: blur(8px);
 }
 
 .quote-floating:hover {
-  background: #388bfd;
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: white;
 }
 
 .quote-icon {
-  font-size: 14px;
+  font-size: 13px;
+  opacity: 0.8;
 }
 
 .chat-composer {

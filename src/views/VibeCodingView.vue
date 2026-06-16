@@ -2186,16 +2186,15 @@ function onDocumentClick(event: MouseEvent) {
   if (showQuoteButton.value) {
     const btn = quoteButtonRef.value;
     if (btn && btn.contains(target)) return;
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed || !sel.toString().trim()) {
-      hideQuoteButtonNow();
-    }
+    hideQuoteButtonNow();
   }
 }
 
+let quoteHiddenAt = 0;
 function hideQuoteButtonNow() {
   showQuoteButton.value = false;
   pendingQuote.value = null;
+  quoteHiddenAt = Date.now();
 }
 
 function startNewSession() {
@@ -2666,15 +2665,14 @@ watch(searchMode, () => {
 });
 
 function onMessageSelect(event: MouseEvent, message: ChatMessage) {
+  if (event.detail <= 1 && Date.now() - quoteHiddenAt < 150) return;
   const selection = window.getSelection();
   if (!selection || selection.isCollapsed || !selection.toString().trim()) {
-    showQuoteButton.value = false;
     return;
   }
 
   const selectedText = selection.toString().trim();
   if (!selectedText) {
-    showQuoteButton.value = false;
     return;
   }
 
@@ -2687,10 +2685,16 @@ function onMessageSelect(event: MouseEvent, message: ChatMessage) {
     role: message.role,
   };
   
-  quoteButtonPosition.value = {
-    x: rect.left + rect.width / 2,
-    y: rect.top - 10,
-  };
+  const btnWidth = 70;
+  const btnHeight = 28;
+  const margin = 8;
+  let x = rect.left + rect.width / 2 - btnWidth / 2;
+  let y = rect.top - btnHeight - margin;
+  if (y < margin) y = rect.bottom + margin;
+  if (x < margin) x = margin;
+  if (x + btnWidth > window.innerWidth - margin) x = window.innerWidth - btnWidth - margin;
+  
+  quoteButtonPosition.value = { x, y };
   
   showQuoteButton.value = true;
 }
@@ -2724,7 +2728,6 @@ function onSelectionChange() {
   if (selectionChangeTimer) clearTimeout(selectionChangeTimer);
   selectionChangeTimer = setTimeout(() => {
     selectionChangeTimer = null;
-    if (!showQuoteButton.value) return;
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed || !sel.toString().trim()) {
       hideQuoteButtonNow();

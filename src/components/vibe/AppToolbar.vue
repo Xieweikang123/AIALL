@@ -83,8 +83,8 @@
         </div>
       </div>
       <div class="toolbar-sep" />
-      <a class="ghost small link-btn" href="javascript:void(0)" @click.prevent="router.push('/chat')">AI 对话</a>
-      <a class="ghost small link-btn" href="javascript:void(0)" @click.prevent="router.push('/ai-config')">配置</a>
+      <button type="button" class="ghost small link-btn" @click="router.push('/chat')">AI 对话</button>
+      <button type="button" class="ghost small link-btn" @click="router.push('/ai-config')">配置</button>
     </div>
   </header>
 </template>

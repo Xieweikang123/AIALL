@@ -49,7 +49,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, type Ref } from "vue";
+import { computed, toRef, type Ref } from "vue";
 import AgentFoldedView from "./AgentFoldedView.vue";
 import AgentMergedContent from "./AgentMergedContent.vue";
 import AgentDebugPanel from "./AgentDebugPanel.vue";
@@ -58,7 +58,7 @@ import { useAgentMessage, type AgentMessage } from "../composables/useAgentMessa
 const props = defineProps<{
   msg: AgentMessage;
   isAgentRunning: (msg: any) => boolean;
-  agentUiTick: Ref<number>;
+  agentUiTick: number;
   patchAssistantMsg: (id: string, patch: Record<string, unknown>) => void;
   schedulePersistChat: () => void;
   messageDisplayContent: (msg: any) => string;
@@ -86,7 +86,7 @@ const {
   computed(() => props.msg),
   {
     isAgentRunning: props.isAgentRunning,
-    agentUiTick: props.agentUiTick,
+    agentUiTick: toRef(props, 'agentUiTick'),
     patchAssistantMsg: props.patchAssistantMsg,
     schedulePersistChat: props.schedulePersistChat,
     messageDisplayContent: props.messageDisplayContent,
