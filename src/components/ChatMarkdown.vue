@@ -1,15 +1,23 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onUpdated, ref, watch } from "vue";
 import { renderMarkdown } from "../utils/renderMarkdown";
+import { parseAiOptions, type AiOption } from "../utils/parseAiOptions";
+import AiOptionButtons from "./AiOptionButtons.vue";
 
 const props = withDefaults(
   defineProps<{
     content: string;
     /** Throttle markdown re-parsing while content is still growing. */
     streaming?: boolean;
+    /** Enable interactive option detection for assistant messages. */
+    interactive?: boolean;
   }>(),
-  { streaming: false },
+  { streaming: false, interactive: false },
 );
+
+const emit = defineEmits<{
+  selectOption: [option: AiOption];
+}>();
 
 const markdownRef = ref<HTMLElement | null>(null);
 const renderSource = ref(props.content);
@@ -93,6 +101,8 @@ function wrapToolSummaryBlocks(el: HTMLElement) {
       "局部修改": "#3fb950",
       "读取目录": "#79c0ff",
       "执行命令": "#f0883e",
+      "写入文件": "#f778ba",
+      "删除文件": "#f85149",
     };
     content.querySelectorAll("li").forEach((li) => {
       const text = li.textContent || "";
@@ -102,13 +112,14 @@ function wrapToolSummaryBlocks(el: HTMLElement) {
       }
       if (matchedColor) {
         li.style.borderLeftColor = matchedColor;
+        li.style.background = `${matchedColor}08`;
       }
       // Bold the action type prefix before ":"
       const colonIdx = text.indexOf(":");
       if (colonIdx > 0 && colonIdx < 20) {
         const prefix = text.slice(0, colonIdx);
         const rest = text.slice(colonIdx);
-        li.innerHTML = `<strong style="color: ${matchedColor || 'rgba(255,255,255,0.7)'}; font-weight: 600; font-size: 11px;">${prefix}</strong><span style="color: rgba(255,255,255,0.45); font-size: 12px;">${rest}</span>`;
+        li.innerHTML = `<strong style="color: ${matchedColor || 'rgba(255,255,255,0.7)'}; font-weight: 700; font-size: 11px; letter-spacing: 0.3px;">${prefix}</strong><span style="color: rgba(255,255,255,0.5); font-size: 12px;">${rest}</span>`;
       }
     });
 
@@ -120,7 +131,23 @@ function wrapToolSummaryBlocks(el: HTMLElement) {
   });
 }
 
-const html = computed(() => renderMarkdown(renderSource.value));
+// Parse options from content (only when interactive and not streaming)
+const parsedOptions = computed(() => {
+  if (!props.interactive || props.streaming) return null;
+  return parseAiOptions(renderSource.value);
+});
+
+const markdownContent = computed(() => {
+  const parsed = parsedOptions.value;
+  if (!parsed) return renderSource.value;
+  return parsed.before;
+});
+
+const html = computed(() => renderMarkdown(markdownContent.value));
+
+function handleOptionSelect(option: AiOption) {
+  emit("selectOption", option);
+}
 
 // After render, wrap tool summary blocks
 function postProcess() {
@@ -137,7 +164,14 @@ onUpdated(() => postProcess());
 </script>
 
 <template>
-  <div v-if="html" ref="markdownRef" class="msg-markdown" v-html="html" />
+  <div v-if="html || parsedOptions?.options.length" ref="markdownRef" class="msg-markdown">
+    <div v-if="html" v-html="html" />
+    <AiOptionButtons
+      v-if="parsedOptions?.options.length"
+      :options="parsedOptions.options"
+      @select="handleOptionSelect"
+    />
+  </div>
   <div v-else-if="streaming && content" class="msg-markdown msg-plain-stream">{{ content }}</div>
 </template>
 
@@ -278,50 +312,55 @@ onUpdated(() => postProcess());
 
 /* ===== Tool Summary Block ===== */
 .msg-markdown :deep(.tool-summary-block) {
-  margin: 10px 0;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.025);
+  margin: 12px 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
   overflow: hidden;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: all 0.25s ease;
+  backdrop-filter: blur(8px);
 }
 
 .msg-markdown :deep(.tool-summary-block:hover) {
-  border-color: rgba(255, 255, 255, 0.12);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  border-color: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  transform: translateY(-1px);
 }
 
 .msg-markdown :deep(.tool-summary-header) {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
+  gap: 8px;
+  padding: 10px 14px;
   cursor: pointer;
   user-select: none;
-  transition: background 0.15s ease;
+  transition: all 0.2s ease;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .msg-markdown :deep(.tool-summary-header:hover) {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .msg-markdown :deep(.tool-summary-icon) {
-  font-size: 12px;
-  opacity: 0.6;
+  font-size: 14px;
+  opacity: 0.7;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
 }
 
 .msg-markdown :deep(.tool-summary-title) {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.45);
-  letter-spacing: 0.3px;
+  color: rgba(255, 255, 255, 0.5);
+  letter-spacing: 0.5px;
   flex: 1;
+  text-transform: uppercase;
 }
 
 .msg-markdown :deep(.tool-summary-toggle) {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.3);
-  transition: transform 0.25s ease;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.35);
+  transition: transform 0.3s ease;
 }
 
 .msg-markdown :deep(.tool-summary-block[data-collapsed="false"] .tool-summary-toggle) {
@@ -334,17 +373,30 @@ onUpdated(() => postProcess());
 
 /* Collapsible content */
 .msg-markdown :deep(.tool-summary-content) {
-  max-height: 300px;
-  overflow: hidden;
-  transition: max-height 0.3s ease, opacity 0.25s ease, padding 0.25s ease;
+  max-height: 400px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
   opacity: 1;
-  padding: 0 12px 6px;
+  padding: 0 14px 10px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.msg-markdown :deep(.tool-summary-content::-webkit-scrollbar) {
+  width: 4px;
+}
+
+.msg-markdown :deep(.tool-summary-content::-webkit-scrollbar-thumb) {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
 }
 
 .msg-markdown :deep(.tool-summary-block[data-collapsed="true"] .tool-summary-content) {
   max-height: 0;
   opacity: 0;
-  padding: 0 12px;
+  padding: 0 14px;
+  overflow: hidden;
 }
 
 /* Hide the h3 inside the summary (replaced by header) */
@@ -355,25 +407,27 @@ onUpdated(() => postProcess());
 /* Style list items inside tool summary */
 .msg-markdown :deep(.tool-summary-content > ul) {
   margin: 0;
-  padding: 2px 8px;
+  padding: 8px 12px;
   list-style: none;
 }
 
 .msg-markdown :deep(.tool-summary-content > ul > li) {
-  margin: 1px 0;
+  margin: 4px 0;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.55);
-  line-height: 1.45;
-  padding: 3px 8px;
-  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.6);
+  line-height: 1.5;
+  padding: 6px 10px;
+  border-radius: 6px;
   display: flex;
   align-items: center;
-  gap: 6px;
-  transition: background 0.12s;
+  gap: 8px;
+  transition: all 0.15s ease;
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .msg-markdown :deep(.tool-summary-content > ul > li:hover) {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.06);
+  transform: translateX(2px);
 }
 
 .msg-markdown :deep(.tool-summary-content > ul > li::before) {
@@ -382,11 +436,13 @@ onUpdated(() => postProcess());
 
 /* Color-coded action prefix badges */
 .msg-markdown :deep(.tool-summary-content > ul > li) {
-  border-left: 2px solid rgba(255, 255, 255, 0.08);
+  border-left: 3px solid rgba(255, 255, 255, 0.1);
+  position: relative;
 }
 
 .msg-markdown :deep(.tool-summary-content > ul > li:has(strong)) {
-  border-left-color: rgba(255, 255, 255, 0.12);
+  border-left-width: 4px;
+  border-left-style: solid;
 }
 
 /* ─── 语法高亮 ─────────────────────────────────────── */

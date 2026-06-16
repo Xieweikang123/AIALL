@@ -46,6 +46,7 @@ import {
   filterDuplicateFeedThoughts,
 } from "../services/agentMessageDisplay";
 import { isScrollNearBottom, scrollElementToBottom } from "../utils/scrollViewport";
+import { escapeHtml, computeDiffHtml, truncateDiffPreview } from "../utils/vibeHelpers";
 
 export interface ChatMessage {
   id: string;
@@ -734,48 +735,6 @@ export function useAgentRun(options: {
     return Boolean(messageDisplayContent(msg));
   }
 
-  function truncateDiffPreview(text: string, max = 1200): string {
-    if (text.length <= max) return text;
-    return `${text.slice(0, max)}\n…（共 ${text.length} 字符）`;
-  }
-
-  function escapeHtml(s: string): string {
-    return s
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
-  }
-
-  function computeDiffHtml(before: string, after: string, maxLines = 80): { htmlBefore: string; htmlAfter: string } {
-    const aLines = before.split("\n");
-    const bLines = after.split("\n");
-    const maxLen = Math.max(aLines.length, bLines.length);
-    const aResult: string[] = [];
-    const bResult: string[] = [];
-    for (let i = 0; i < maxLen && (aResult.length < maxLines || bResult.length < maxLines); i++) {
-      const aLine = i < aLines.length ? aLines[i] : undefined;
-      const bLine = i < bLines.length ? bLines[i] : undefined;
-      if (aLine === undefined) {
-        aResult.push(`<span class="diff-line diff-add">${escapeHtml(bLine!)}</span>`);
-        bResult.push(`<span class="diff-line diff-add">${escapeHtml(bLine!)}</span>`);
-      } else if (bLine === undefined) {
-        aResult.push(`<span class="diff-line diff-del">${escapeHtml(aLine)}</span>`);
-        bResult.push(`<span class="diff-line diff-del">${escapeHtml(aLine)}</span>`);
-      } else if (aLine === bLine) {
-        aResult.push(`<span class="diff-line">${escapeHtml(aLine)}</span>`);
-        bResult.push(`<span class="diff-line">${escapeHtml(bLine)}</span>`);
-      } else {
-        aResult.push(`<span class="diff-line diff-del">${escapeHtml(aLine)}</span>`);
-        bResult.push(`<span class="diff-line diff-add">${escapeHtml(bLine)}</span>`);
-      }
-    }
-    const tail = maxLen > maxLines ? `\n<span class="diff-overflow">… 共 ${aLines.length} / ${bLines.length} 行</span>` : "";
-    return {
-      htmlBefore: aResult.join("\n") + tail,
-      htmlAfter: bResult.join("\n") + tail,
-    };
-  }
-
   return {
     autoResumeSecondsLeft,
     autoResumeTargetId,
@@ -825,8 +784,5 @@ export function useAgentRun(options: {
     scheduleAutoResume,
     prepareAssistantForSilentContinue,
     shouldShowMessageBubble,
-    truncateDiffPreview,
-    escapeHtml,
-    computeDiffHtml,
   };
 }

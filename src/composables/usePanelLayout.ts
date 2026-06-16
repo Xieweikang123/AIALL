@@ -134,6 +134,7 @@ export function usePanelLayout(workspaceRef: Ref<HTMLElement | null>) {
     startResize,
     collapseEditor,
     expandEditor,
+    getChatPanelMaxWidth,
     CHAT_MIN_WIDTH,
     CHAT_MAX_WIDTH,
     FILE_MIN_WIDTH,
