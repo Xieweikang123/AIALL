@@ -454,7 +454,8 @@ void nextTick(() => syncEmpty());
   position: relative;
   flex: 1 1 120px;
   min-width: 0;
-  min-height: 40px;
+  width: 100%;
+  min-height: 100%;
   max-height: 160px;
   overflow-x: hidden;
   overflow-y: auto;
@@ -465,6 +466,7 @@ void nextTick(() => syncEmpty());
   word-break: break-word;
   white-space: pre-wrap;
   padding: 8px 12px;
+  box-sizing: border-box;
 
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
@@ -503,8 +505,7 @@ void nextTick(() => syncEmpty());
 }
 
 .composer-editor.focused {
-  outline: 1.5px solid rgba(99, 147, 255, 0.65);
-  outline-offset: -1px;
+  /* 聚焦指示由外层 .chat-input-box.focused border-color 统一展示，此处不再重复 */
 }
 
 .composer-editor.disabled {

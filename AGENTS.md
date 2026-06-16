@@ -44,6 +44,16 @@
 
 完整约定见 Cursor 规则：`.cursor/rules/agent-orchestration.mdc`（`alwaysApply: true`）。
 
+## 会话文件存储
+
+AIALL 的 Vibe 会话文件**不在项目目录内**，存储在 AppData Roaming 下：
+
+- 会话消息：`%APPDATA%\aiall\vibe-chat-sessions\chat-<id>.json`
+- 会话索引：`%APPDATA%\aiall\vibe-chat-sessions\chat-store.json`
+
+对于当前用户 `[REDACTED]`，完整路径为：
+`C:\Users\<username>\AppData\Roaming\aiall\vibe-chat-sessions\`
+
 ## 开发约定
 
 - **禁止** 在代码中添加 `console.log` 用于调试
