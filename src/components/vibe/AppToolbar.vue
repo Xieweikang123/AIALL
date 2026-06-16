@@ -83,14 +83,15 @@
         </div>
       </div>
       <div class="toolbar-sep" />
-      <router-link class="ghost small link-btn" to="/chat">AI 对话</router-link>
-      <router-link class="ghost small link-btn" to="/ai-config">配置</router-link>
+      <a class="ghost small link-btn" href="javascript:void(0)" @click.prevent="router.push('/chat')">AI 对话</a>
+      <a class="ghost small link-btn" href="javascript:void(0)" @click.prevent="router.push('/ai-config')">配置</a>
     </div>
   </header>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from "vue";
+import { useRouter } from "vue-router";
 import {
   listProjectHistory,
   removeProjectFromHistory,
@@ -119,6 +120,7 @@ const emit = defineEmits<{
   (e: "open-recent-project", path: string): void;
 }>();
 
+const router = useRouter();
 const projectHistoryOpen = ref(false);
 const projectHistoryList = ref<ProjectHistoryEntry[]>([]);
 const projectHistoryRef = ref<HTMLElement | null>(null);
@@ -454,6 +456,9 @@ function formatSessionTime(iso: string): string {
 .link-btn {
   text-decoration: none;
   font-weight: 500;
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
 }
 
 .link-btn:hover {

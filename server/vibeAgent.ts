@@ -25,8 +25,10 @@ import {
 } from "./agentTurnBudget";
 import {
   buildExploreBudgetNudge,
+  buildForceOutputNudge,
   EXECUTE_PLAN_EXPLORE_TURN_BUDGET,
   INTERACTIVE_EXPLORE_TURN_BUDGET,
+  MAX_TOTAL_EXPLORE_TURNS,
   PLAN_EXPLORE_TURN_BUDGET,
 } from "./agentExplorationBudget";
 import { buildConsultativeBuildHint, isConsultativeUserPrompt } from "./agentUserIntent";
@@ -1110,6 +1112,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   const readSliceCache = new Map<string, string>();
   const grepCache = new Map<string, string>();
   let consecutiveExploreTurns = 0;
+  let totalExploreTurns = 0;
   let turnsLowNudgeSent = false;
   const activeTools = isAsk || isPlan || readOnlyBuildRun ? READ_ONLY_AGENT_TOOLS : VIBE_AGENT_TOOLS;
   const userContent = buildVisionUserContent(prompt, imageDataUrls);
@@ -1175,8 +1178,14 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       !turnsLowNudgeSent &&
       turn >= segmentMaxTurns - 3
     ) {
-      messages.push({ role: "system", content: buildAgentTurnsLowNudge(turn, segmentMaxTurns) });
+      messages.push({ role: "system", content: buildAgentTurnsLowNudge(turn, segmentMaxTurns, mode) });
       turnsLowNudgeSent = true;
+    }
+
+    // Hard cap: force text output when total exploration exceeds limit
+    const forceTextOutput = !isAsk && !readOnlyBuildRun && totalExploreTurns >= MAX_TOTAL_EXPLORE_TURNS;
+    if (forceTextOutput) {
+      messages.push({ role: "system", content: buildForceOutputNudge(totalExploreTurns, mode) });
     }
 
     onEvent({
@@ -1192,7 +1201,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       },
     });
 
-    const toolsForTurn = visionFirstTurnPending ? [] : activeTools;
+    const toolsForTurn = (visionFirstTurnPending || forceTextOutput) ? [] : activeTools;
 
     let streamedChars = 0;
     const streamFilter = new TextToolCallStreamFilter();
@@ -1657,9 +1666,10 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       consecutiveExploreTurns = 0;
     } else if (turnExploreOnly) {
       consecutiveExploreTurns += 1;
+      totalExploreTurns += 1;
     }
     if (!isAsk && !readOnlyBuildRun && consecutiveExploreTurns >= exploreTurnBudget) {
-      messages.push({ role: "system", content: buildExploreBudgetNudge(consecutiveExploreTurns) });
+      messages.push({ role: "system", content: buildExploreBudgetNudge(consecutiveExploreTurns, mode) });
       consecutiveExploreTurns = 0;
     }
 
@@ -1683,7 +1693,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       segmentMaxTurns = extendSegmentMaxTurns(turn, segmentBudget);
       turnsLowNudgeSent = false;
       if (!readOnlyBuildRun) {
-        messages.push({ role: "system", content: buildSegmentContinueNudge(turn, segmentIndex) });
+        messages.push({ role: "system", content: buildSegmentContinueNudge(turn, segmentIndex, mode) });
       }
       onEvent({
         type: "status",

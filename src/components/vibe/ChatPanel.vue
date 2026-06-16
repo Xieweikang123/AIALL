@@ -291,7 +291,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import type { VibeChatMode } from "../../services/vibeAgentClient";
 import type { VibeChatSessionMeta } from "../../services/vibeChatStorage";
 
@@ -399,6 +399,22 @@ const chatPanelStyle = computed(() => {
 });
 
 defineExpose({ sessionPickerRef, chatScrollRef });
+
+function handleSessionPickerOutsideClick(e: MouseEvent) {
+  if (!props.sessionPickerOpen) return;
+  const wrap = sessionPickerRef.value;
+  if (wrap && !wrap.contains(e.target as Node)) {
+    emit("toggle-session-picker");
+  }
+}
+
+onMounted(() => {
+  document.addEventListener("mousedown", handleSessionPickerOutsideClick, true);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("mousedown", handleSessionPickerOutsideClick, true);
+});
 
 function formatSessionTime(timestamp: number | string): string {
   const date = new Date(timestamp);

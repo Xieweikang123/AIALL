@@ -4211,7 +4211,7 @@ onMounted(() => {
   chatPanelWidth.value = Math.min(chatPanelWidth.value, getChatPanelMaxWidth());
   window.addEventListener("focus", onWindowFocus);
   window.addEventListener("dragend", onWindowDragEnd);
-  document.addEventListener("click", onDocumentClick);
+  document.addEventListener("mousedown", onDocumentClick, true);
   document.addEventListener("keydown", onGlobalKeydown);
   document.addEventListener("selectionchange", onSelectionChange);
   document.addEventListener("dragover", onDocumentDragOverCapture, true);
@@ -4243,7 +4243,7 @@ onBeforeUnmount(() => {
   fileDragGhost.value = null;
   window.removeEventListener("focus", onWindowFocus);
   window.removeEventListener("dragend", onWindowDragEnd);
-  document.removeEventListener("click", onDocumentClick);
+  document.removeEventListener("mousedown", onDocumentClick, true);
   document.removeEventListener("keydown", onGlobalKeydown);
   document.removeEventListener("selectionchange", onSelectionChange);
   if (selectionChangeTimer) clearTimeout(selectionChangeTimer);
@@ -7393,6 +7393,9 @@ button:disabled {
   align-items: center;
   text-decoration: none;
   white-space: nowrap;
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
 }
 
 .link-btn.ghost {

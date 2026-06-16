@@ -34,19 +34,25 @@ export function resolveResumeMaxTurns(
   return Math.min(AGENT_SAFETY_MAX_TURNS, RESUME_MAX_TURNS_CAP, base + bonus);
 }
 
-export function buildAgentTurnsLowNudge(turn: number, maxTurns: number): string {
+export function buildAgentTurnsLowNudge(turn: number, maxTurns: number, mode?: string): string {
   const remaining = Math.max(0, maxTurns - turn + 1);
+  const actionHint = mode === "plan"
+    ? "请立即输出结构化修改方案，然后给出简要总结；避免再开新的广泛探索。"
+    : "请优先完成必要的 patch_file / write_file，然后给出简要总结；避免再开新的广泛探索。";
   return [
     `【系统提示】剩余约 ${remaining} 轮（当前第 ${turn}/${maxTurns} 轮）。`,
-    "请优先完成必要的 patch_file / write_file，然后给出简要总结；避免再开新的广泛探索。",
+    actionHint,
   ].join("");
 }
 
 /** Injected when a segment budget is exhausted but the safety ceiling allows another segment. */
-export function buildSegmentContinueNudge(completedTurn: number, segmentIndex: number): string {
+export function buildSegmentContinueNudge(completedTurn: number, segmentIndex: number, mode?: string): string {
+  const actionHint = mode === "plan"
+    ? "请立即输出结构化修改方案，不要再继续读文件。"
+    : "不要重复已完成的 read/grep；直接 patch_file / write_file 完成剩余修改，然后给出最终总结。";
   return [
     `【系统自动续跑·第 ${segmentIndex} 段】仍在同一次任务中（累计 ${completedTurn} 轮）。`,
-    "不要重复已完成的 read/grep；直接 patch_file / write_file 完成剩余修改，然后给出最终总结。",
+    actionHint,
   ].join("");
 }
 
