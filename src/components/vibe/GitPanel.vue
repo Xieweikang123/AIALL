@@ -510,6 +510,10 @@ function gitStatusColor(status: string): string {
 .git-stash-section {
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   padding-bottom: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 6px;
+  margin: 4px 0;
+  padding: 8px 12px;
 }
 
 .git-stash-header {
@@ -615,13 +619,24 @@ function gitStatusColor(status: string): string {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 5px 0;
+  padding: 6px 8px;
   font-size: 12px;
+  border-radius: 4px;
+  transition: background 120ms ease;
+}
+
+.git-stash-item:hover {
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .git-stash-label {
-  color: rgba(139, 148, 158, 0.6);
+  color: #bb9af7;
   font-family: monospace;
+  font-size: 11px;
+  background: rgba(187, 154, 247, 0.08);
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
 }
 
 .git-stash-msg {
@@ -670,6 +685,20 @@ function gitStatusColor(status: string): string {
   resize: vertical;
   min-height: 44px;
   font-family: inherit;
+
+  /* 滚动条优化 —— 与全局一致的半透明滑块 + 圆角 */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+.git-commit-input::-webkit-scrollbar {
+  width: 5px;
+}
+.git-commit-input::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 999px;
+}
+.git-commit-input::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .git-commit-input:focus {
@@ -699,6 +728,21 @@ function gitStatusColor(status: string): string {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.git-scroll-area::-webkit-scrollbar {
+  width: 5px;
+}
+
+.git-scroll-area::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.git-scroll-area::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .git-section {

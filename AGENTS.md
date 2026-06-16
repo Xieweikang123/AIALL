@@ -43,3 +43,8 @@
 - **测试**用通用 fixture（`foo.ts`、占位变量），不要用真实需求文案绑定分类器
 
 完整约定见 Cursor 规则：`.cursor/rules/agent-orchestration.mdc`（`alwaysApply: true`）。
+
+## 开发约定
+
+- **禁止** 在代码中添加 `console.log` 用于调试
+- **应使用** 写入临时文件的日志：追加到 `.debug.log`（项目根目录），调试完成后删除该文件

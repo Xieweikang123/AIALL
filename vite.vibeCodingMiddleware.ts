@@ -291,6 +291,9 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       } else if (body.path === "fetch-perf.log" && body.line) {
         const fetchLogPath = path.join(os.tmpdir(), "aiall-fetch-perf.log");
         fs.appendFileSync(fetchLogPath, body.line);
+      } else if (body.path === ".debug.log" && body.line) {
+        const debugLogPath = path.join(process.cwd(), ".debug.log");
+        fs.appendFileSync(debugLogPath, body.line + "\n");
       }
       sendJson(res, 200, { ok: true });
     } catch { sendJson(res, 500, { ok: false }); }

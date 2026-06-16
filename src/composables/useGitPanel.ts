@@ -1,4 +1,5 @@
 import { computed, onUnmounted, reactive, ref, watch } from "vue";
+import { debugLog } from "../utils/debugLog";
 import {
   fetchGitStatus,
   fetchGitDiff,
@@ -81,7 +82,7 @@ export function useGitPanel(
   const gitRemoteLoading = ref(false);
   const gitRemoteAction = ref("");
   const gitStashes = ref<Array<{ index: string; message: string }>>([]);
-  const gitStashOpen = ref(true);
+  const gitStashOpen = ref(false);
   const gitStashAction = ref("");
   const gitStashMessage = ref("");
   const gitAiPushStep = ref("");
@@ -265,11 +266,14 @@ export function useGitPanel(
     if (!projectOpened()) return;
     gitError.value = "";
     clearGitDiffCache();
+    const t = Date.now();
     gitStatus.value = gitStatus.value.map((f) => (f.path === filePath ? { ...f, staged: true } : f));
     gitStagingInProgress.value = true;
-    gitLastStagingAt.value = Date.now();
+    gitLastStagingAt.value = t;
+    debugLog("stageFile start", filePath, "ts", t);
     try {
       const result = await stageGitFiles(projectPath(), [filePath]);
+      debugLog("stageFile API done", "ok:", result.ok, "elapsed:", Date.now() - t);
       if (!result.ok) {
         gitError.value = result.error || "暂存失败";
         await refreshGitStatus({ showLoading: false });

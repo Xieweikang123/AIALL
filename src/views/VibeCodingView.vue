@@ -2337,25 +2337,39 @@ function switchSession(sessionId: string) {
   })();
 }
 
-async function copyText(text: string) {
+function debugLog(msg: string) {
+  const line = `[${new Date().toISOString()}] ${msg}`;
+  fetch("/backend/vibe/log", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: "debug-copy.log", line }),
+  }).catch(() => {});
+}
+
+async function copyText(text: string): Promise<boolean> {
   const value = String(text ?? "");
-  if (!value) return;
+  if (!value) { debugLog("copyText: empty value"); return false; }
   try {
     await navigator.clipboard.writeText(value);
-  } catch {
+    debugLog("copyText: clipboard.writeText OK");
+    return true;
+  } catch (e) {
+    debugLog(`copyText: clipboard.writeText failed: ${e}`);
+  }
+  // Fallback: textarea + execCommand
+  try {
     const textarea = document.createElement("textarea");
     textarea.value = value;
-    textarea.style.position = "fixed";
-    textarea.style.left = "-9999px";
-    textarea.style.top = "-9999px";
+    textarea.style.cssText = "position:fixed;left:-9999px;top:-9999px;opacity:0";
     document.body.appendChild(textarea);
-    textarea.focus();
     textarea.select();
-    try {
-      document.execCommand("copy");
-    } finally {
-      document.body.removeChild(textarea);
-    }
+    const ok = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    debugLog(`copyText: execCommand result=${ok}`);
+    return ok;
+  } catch (e) {
+    debugLog(`copyText: execCommand failed: ${e}`);
+    return false;
   }
 }
 
@@ -2363,16 +2377,31 @@ let sessionCopyHintTimer: ReturnType<typeof setTimeout> | null = null;
 
 async function copySessionInfo(session: VibeChatSessionMeta) {
   const project = projectPath.value.trim();
-  if (!project) return;
-  await copyText(formatSessionInfoForCopy(session, project));
+  debugLog(`copySessionInfo: project="${project}", sessionId="${session.id}"`);
+  if (!project) {
+    chatStoreSyncMessage.value = "请先打开项目";
+    setTimeout(() => { chatStoreSyncMessage.value = ""; }, 2000);
+    return;
+  }
+  const text = formatSessionInfoForCopy(session, project);
+  debugLog(`copySessionInfo: text length=${text.length}`);
+  if (!text) {
+    chatStoreSyncMessage.value = "生成复制内容失败";
+    setTimeout(() => { chatStoreSyncMessage.value = ""; }, 2000);
+    return;
+  }
+  const ok = await copyText(text);
+  debugLog(`copySessionInfo: copyText result=${ok}`);
   if (sessionCopyHintTimer) clearTimeout(sessionCopyHintTimer);
-  chatStoreSyncMessage.value = `已复制「${session.title}」的会话信息`;
+  chatStoreSyncMessage.value = ok
+    ? `已复制「${session.title}」的会话信息`
+    : "复制失败，请手动选择复制";
   sessionCopyHintTimer = setTimeout(() => {
     sessionCopyHintTimer = null;
-    if (chatStoreSyncMessage.value.startsWith("已复制「")) {
+    if (chatStoreSyncMessage.value.startsWith("已复制") || chatStoreSyncMessage.value === "复制失败，请手动选择复制") {
       chatStoreSyncMessage.value = "";
     }
-  }, 2500);
+  }, 3000);
 }
 
 async function syncChatStoreToDisk() {
