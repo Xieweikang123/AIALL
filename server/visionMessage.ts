@@ -68,6 +68,7 @@ export function buildVisionFirstTurnRule(): string {
     "本轮禁止调用任何工具；仅输出读图描述，下一轮可用 grep 图中摘录的文案定位源码。",
     "读图首轮禁止写「已修改/已修复/已添加/已做」等完成时态，禁止描述尚未执行的 patch。",
     "布局问题后续修改时优先检查 flex-shrink、min-width、overflow、gap、margin；点击/聚焦问题另查 DOM 层级与 focus 转发，勿默认只加 padding。",
+    "当你真正理解了截图内容后，在描述末尾加上暗号 [图已理解]。只有加上此暗号，才表示你已完成读图。",
   ].join("\n");
 }
 
@@ -77,6 +78,8 @@ export function buildVisionFirstTurnContinueHint(): string {
     "下一轮请结合上述描述与用户需求调用工具；",
     "若读图时摘录了占位符/按钮/标签等可见文案，优先 grep 该字符串定位组件，再 read_file 核对；",
     "回答用户时先一句点明「截图对应哪块界面」，再讲操作或改代码。",
+    "注意：首轮截图描述已生效，后续轮次禁止重复输出同一张截图的描述；若仅需配合用户追问补充少量布局细节，也不要完整重写。",
+    "若本轮可产出最终回复（如用户仅提问/讨论，无需改代码），应直接回答并结束，不要无工具调用地空转多轮。",
   ].join("");
 }
 
@@ -95,6 +98,7 @@ export function buildVisionFirstTurnRetryHint(): string {
     "【附图首轮】读图描述不合格：过短，或只描述了外观却没有说明截图对应哪块界面。",
     "请重新查看附图：引用占位符/标签原文，并写明据此判断属于哪个模块或区域（如 Vibe 助手底栏输入框）；",
     "若画面只裁到局部，也要根据可见文案推断，不要只复述颜色与边框。本轮仍不要调用工具。",
+    "真正理解截图后，在末尾加上暗号 [图已理解]。",
   ].join("");
 }
 
@@ -102,6 +106,7 @@ export function buildVisionFirstTurnPrematureCompletionRetryHint(): string {
   return [
     "【附图首轮·禁止抢答】你在尚未调用工具前写了「已修改/已修复/已添加/已做」等完成表述。",
     "读图首轮只能描述截图所见与控件类型，不得声称已改代码。请重写读图描述，本轮仍不要调用工具。",
+    "真正理解截图后，在末尾加上暗号 [图已理解]。",
   ].join("");
 }
 
@@ -126,7 +131,8 @@ function describesScreenshotUiRegion(text: string): boolean {
 }
 
 export function isAdequateVisionFirstTurnDescription(text: string): boolean {
-  return !isPrematureVisionCompletionClaim(text.trim());
+  if (isPrematureVisionCompletionClaim(text)) return false;
+  return /\[图已理解\]/.test(text);
 }
 
 export function shouldRequireVisionFirstTurn(imageCount: number, visionFallbackApplied: boolean): boolean {

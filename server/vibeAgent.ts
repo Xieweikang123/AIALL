@@ -545,6 +545,7 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "run_command 可在项目目录执行 shell 命令（如 npm run dev、python main.py、go test），超时默认 30 秒，长时间命令请设置 timeout_ms；不要执行危险命令。",
     "联网搜索：当需要最新信息、外部文档、API 用法时，使用 web_search 搜索；使用 web_extract 抓取指定链接内容。搜索结果可能较多，优先关注前 3 条结果，避免大量内容占用上下文。",
     "如果系统提示你上一次回复被截断，请从截断处继续输出，不要重复已输出的内容。",
+    "附截图时：首轮输出截图描述后，后续轮次禁止再次描述同一张截图。若需追问用户意见，应在代码探索后给出具体方案对比，而非仅提问。",
     `项目根目录：${projectRoot}`,
   ];
   if (model?.trim()) {

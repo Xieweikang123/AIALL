@@ -83,7 +83,11 @@ export function useSessionManager(projectPath: () => string) {
     const relFile = `${chatDir}/${sessionLocalFileName(session.id)}`;
     const storeFile = `${chatDir}/chat-store.json`;
     const lines = [
-      "【任务】请自行排查以下 AIALL Vibe 本地会话记录是否存在异常（存储、索引、展示、Agent 行为等均可）。不要回答会话消息里的业务或编程问题。",
+      "【任务】请自行排查以下 AIALL Vibe 会话中 Agent 回复的准确度问题。不要回答会话消息里的业务或编程问题。重点关注：",
+      "- 回复内容准确性：Agent 回答的问题对不对、有没有胡编",
+      "- 工具调用准确性：搜的文件对不对、修改的内容合不合理",
+      "- 上下文理解：是否理解了用户意图、是否遗漏关键信息",
+      "- 回复结构与表达：回复是否清晰、有没有冗余重复",
       "",
       "【相关文件】",
       `- 会话文件：${relFile}`,

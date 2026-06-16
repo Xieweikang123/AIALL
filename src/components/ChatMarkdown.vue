@@ -348,6 +348,39 @@ onUpdated(() => postProcess());
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
 }
 
+.tool-summary-block {
+  margin: 8px 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+
+.tool-summary-block:hover {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.tool-summary-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  transition: background 0.2s ease;
+}
+
+.tool-summary-header:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.tool-summary-icon {
+  font-size: 14px;
+}
+
 .msg-markdown :deep(.tool-summary-title) {
   font-size: 12px;
   font-weight: 600;

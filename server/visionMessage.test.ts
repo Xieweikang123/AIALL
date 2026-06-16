@@ -52,19 +52,26 @@ describe("visionMessage", () => {
     expect(shouldRequireVisionFirstTurn(0, false)).toBe(false);
   });
 
-  it("isAdequateVisionFirstTurnDescription enforces length and region identification", () => {
+  it("isAdequateVisionFirstTurnDescription requires [图已理解] code phrase", () => {
     expect(
-      isAdequateVisionFirstTurnDescription("图中 Git 同步行的 main 分支标签与 Fetch 按钮边框重叠"),
+      isAdequateVisionFirstTurnDescription(
+        "截图展示的是 Git 面板右侧部分，包含「AI 一键推送」按钮… [图已理解]",
+      ),
     ).toBe(true);
     expect(
       isAdequateVisionFirstTurnDescription(
-        "占位符「描述要改什么」表明这是 Vibe 助手 Build 模式底栏的对话输入框（ChatComposer）。",
+        "占位符「描述要改什么」表明这是 Vibe 助手输入框。[图已理解]",
       ),
     ).toBe(true);
     expect(isAdequateVisionFirstTurnDescription("看到了")).toBe(false);
     expect(
       isAdequateVisionFirstTurnDescription(
-        "截图显示深色圆角输入框，占位符为「描述要改什么 (拖动文件到右侧)」，浅灰色文字占满区域。",
+        "截图显示深色圆角输入框，占位符为「描述要改什么」",
+      ),
+    ).toBe(false);
+    expect(
+      isAdequateVisionFirstTurnDescription(
+        "已修复 padding。[图已理解]",
       ),
     ).toBe(false);
   });
