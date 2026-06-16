@@ -1,4 +1,4 @@
-export type VibeChatMode = "ask" | "build";
+export type VibeChatMode = "ask" | "build" | "plan";
 
 export type AgentDoneFileAction = {
   autoApply: boolean;

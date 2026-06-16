@@ -212,7 +212,7 @@
         :ai-config-status-text="aiConfigStatusText"
         :can-send-chat="canSendChat"
         :chat-placeholder="chatPlaceholder"
-        :chat-hint-text="chatHintText"
+
         :chat-running-text="chatRunningText"
         :recoverable-assistant-msg="recoverableAssistantMsg"
         :stalled-assistant-msg="stalledAssistantMsg"
@@ -1138,14 +1138,8 @@ const canSendChat = computed(
 
 const chatPlaceholder = computed(() =>
   chatMode.value === "ask"
-    ? "提问、解释代码（拖动文件到右侧或 @ 引用，Enter 发送）"
-    : "描述要改什么（拖动文件到右侧或 @ 引用，Enter 发送，Shift+Enter 换行）",
-);
-
-const chatHintText = computed(() =>
-  chatMode.value === "ask"
-    ? "Ask 模式 · 按住文件拖到 AI 面板 · 或输入 @ 引用"
-    : "Build 模式 · 按住文件拖到 AI 面板 · 或输入 @ 引用",
+    ? "提问、解释代码"
+    : "描述要改什么（Enter 发送，Shift+Enter 换行）",
 );
 
 const chatRunningText = computed(() =>
@@ -4300,10 +4294,9 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 6px 20px;
-  border-bottom: none;
-  background: rgba(11, 18, 32, 0.92);
-  backdrop-filter: blur(12px);
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-primary);
   flex-shrink: 0;
   height: 44px;
 }
@@ -4311,24 +4304,22 @@ onBeforeUnmount(() => {
 .toolbar-brand {
   display: flex;
   align-items: center;
-  gap: 8px;
   flex-shrink: 0;
-  padding-right: 12px;
-  border-right: 1px solid rgba(255, 255, 255, 0.1);
-  margin-right: 4px;
 }
 
-.brand-icon {
-  font-size: 16px;
-  line-height: 1;
+.toolbar-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
   flex-shrink: 0;
+  opacity: 0.5;
 }
 
 .title {
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
-  letter-spacing: -0.2px;
+  letter-spacing: -0.3px;
   white-space: nowrap;
   overflow: visible;
 }
@@ -4336,7 +4327,7 @@ onBeforeUnmount(() => {
 .toolbar-project {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex: 1;
   flex-basis: 420px;
   min-width: 0;
@@ -4347,16 +4338,17 @@ onBeforeUnmount(() => {
   align-items: center;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 2px;
   flex-shrink: 0;
 }
 
 .path-input {
   flex: 1;
+  max-width: 420px;
   min-width: 120px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 7px;
-  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 10px;
   background: rgba(255, 255, 255, 0.03);
   color: var(--text);
   font-size: 12px;
@@ -4372,7 +4364,7 @@ onBeforeUnmount(() => {
 }
 
 .path-input::placeholder {
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(255, 255, 255, 0.35);
 }
 
 .toolbar-error {
@@ -4591,17 +4583,17 @@ onBeforeUnmount(() => {
 
 .file-panel-tabs {
   display: flex;
-  gap: 8px;
+  gap: 2px;
   margin-right: 8px;
 }
 
 .file-panel-tab {
-  padding: 5px 14px;
-  font-size: 13px;
+  padding: 4px 12px;
+  font-size: 12px;
   background: transparent;
   color: var(--text-dim);
   border: none;
-  border-radius: 6px;
+  border-radius: 5px;
   cursor: pointer;
   transition: all 150ms ease;
   position: relative;
@@ -4615,9 +4607,8 @@ onBeforeUnmount(() => {
 
 .file-panel-tab.active {
   color: var(--text);
-  background: rgba(31, 111, 235, 0.22);
+  background: rgba(31, 111, 235, 0.15);
   font-weight: 600;
-  box-shadow: 0 0 0 1px rgba(31, 111, 235, 0.4);
 }
 
 
@@ -4781,8 +4772,8 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 6px;
-  padding: 8px 10px;
+  gap: 4px;
+  padding: 6px 10px;
   border-bottom: 1px solid var(--border);
   background: rgba(17, 24, 39, 0.4);
   flex-shrink: 0;
@@ -4851,10 +4842,10 @@ onBeforeUnmount(() => {
 
 .toolbar-sep {
   width: 1px;
-  height: 14px;
+  height: 18px;
   background: var(--border);
-  margin: 0 2px;
   flex-shrink: 0;
+  opacity: 0.5;
 }
 
 button.ghost.tiny {

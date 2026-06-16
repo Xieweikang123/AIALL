@@ -661,7 +661,7 @@ button:disabled {
   border-radius: 8px;
   background: rgba(22, 27, 34, 0.8);
   transition: border-color 0.15s, background 0.15s;
-  min-height: 48px;
+  min-height: 56px;
 }
 
 .chat-input-box.focused {
@@ -677,8 +677,8 @@ button:disabled {
 .chat-bottom {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 8px;
+  gap: 4px;
+  margin-top: 4px;
 }
 
 .chat-status-row {

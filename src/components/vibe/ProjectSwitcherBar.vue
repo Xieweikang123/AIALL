@@ -11,7 +11,7 @@
         :title="item.path"
         @click="$emit('switch-project', item.path)"
       >
-        <span class="project-tab-icon" aria-hidden="true">{{ isActive(item.path) ? '⚡' : '📁' }}</span>
+        <span v-if="isActive(item.path)" class="project-tab-dot" aria-hidden="true" />
         <span class="project-tab-name">{{ item.displayName }}</span>
         <span
           v-if="isActive(item.path) && loadingTree"
@@ -72,10 +72,10 @@ function isActive(path: string): boolean {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 16px;
-  background: rgba(11, 18, 32, 0.92);
-  border-bottom: 1px solid var(--border);
-  min-height: 24px;
+  padding: 0 16px;
+  background: var(--bg-primary, #0b1220);
+  border-bottom: 1px solid var(--border, rgba(255,255,255,0.08));
+  height: 32px;
   flex-shrink: 0;
   overflow: hidden;
 }
@@ -83,7 +83,7 @@ function isActive(path: string): boolean {
 .project-tabs {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
   overflow-x: auto;
   flex: 1;
   scrollbar-width: none;
@@ -97,31 +97,29 @@ function isActive(path: string): boolean {
 .project-tab {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 10px;
-  border: 1px solid transparent;
+  gap: 6px;
+  padding: 3px 10px;
+  border: none;
   border-radius: 4px;
   background: none;
-  color: var(--muted);
+  color: var(--muted, rgba(255,255,255,0.55));
   font-size: 12px;
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
   max-width: 200px;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition: background 0.15s, color 0.15s;
 }
 
 .project-tab:hover {
   background: rgba(255, 255, 255, 0.06);
-  color: var(--text);
+  color: var(--text, rgba(255,255,255,0.92));
 }
 
 .project-tab.active {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: var(--primary);
-  color: var(--text);
+  background: rgba(31, 111, 235, 0.12);
+  color: var(--text, rgba(255,255,255,0.92));
   font-weight: 500;
-  box-shadow: 0 0 0 1px rgba(31, 111, 235, 0.5);
 }
 
 .project-tab.loading {
@@ -133,8 +131,11 @@ function isActive(path: string): boolean {
   cursor: not-allowed;
 }
 
-.project-tab-icon {
-  font-size: 10px;
+.project-tab-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary, #1f6feb);
   flex-shrink: 0;
 }
 
@@ -159,12 +160,12 @@ function isActive(path: string): boolean {
   border: none;
   border-radius: 2px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(255, 255, 255, 0.3);
   font-size: 12px;
   line-height: 1;
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.15s, background 0.15s;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
   flex-shrink: 0;
 }
 
@@ -174,7 +175,7 @@ function isActive(path: string): boolean {
 
 .project-tab-close:hover {
   background: rgba(255, 77, 94, 0.15);
-  color: var(--danger);
+  color: var(--danger, #ff4d5e);
 }
 
 .project-tab-add {
@@ -184,10 +185,10 @@ function isActive(path: string): boolean {
   width: 22px;
   height: 22px;
   padding: 0;
-  border: 1px dashed var(--border);
+  border: 1px dashed var(--border, rgba(255,255,255,0.12));
   border-radius: 4px;
   background: transparent;
-  color: var(--muted);
+  color: var(--muted, rgba(255,255,255,0.55));
   font-size: 14px;
   cursor: pointer;
   flex-shrink: 0;
@@ -196,8 +197,8 @@ function isActive(path: string): boolean {
 
 .project-tab-add:hover {
   background: rgba(255, 255, 255, 0.06);
-  color: var(--text);
-  border-color: var(--primary);
+  color: var(--text, rgba(255,255,255,0.92));
+  border-color: var(--primary, #1f6feb);
 }
 
 .project-tab-add:disabled {

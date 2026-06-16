@@ -28,7 +28,7 @@ export interface AgentRunProfile {
 
 export interface ResolveAgentRunProfileInput {
   prompt: string;
-  mode: "ask" | "build";
+  mode: "ask" | "build" | "plan";
   lastAssistantContent?: string;
   referencedFiles?: string[];
 }

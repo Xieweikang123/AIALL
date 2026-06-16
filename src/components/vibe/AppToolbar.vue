@@ -1,24 +1,33 @@
 <template>
   <header class="app-toolbar">
     <div class="toolbar-brand">
-      <span class="brand-icon" aria-hidden="true">⚡</span>
-      <h1 class="title">Vibe Coding✨</h1>
+      <h1 class="title">Vibe Coding</h1>
     </div>
+    <div class="toolbar-sep" />
     <div class="toolbar-project">
       <input
         :value="projectPath"
         class="path-input"
         type="text"
-        placeholder="输入项目路径，或点击「打开项目」"
+        placeholder="项目路径"
         @input="$emit('update:projectPath', ($event.target as HTMLInputElement).value)"
         @keydown.enter="$emit('open-project-by-input')"
       />
       <button type="button" class="primary compact" :disabled="pickingFolder || loadingTree" @click="$emit('handle-open-project')">
         {{ pickingFolder ? "选择…" : loadingTree ? "加载中" : "打开项目" }}
       </button>
-      <button type="button" class="secondary compact" :disabled="!projectPath.trim()" @click="$emit('refresh-tree')" title="刷新文件树">↻</button>
+      <button type="button" class="icon-btn" :disabled="!projectPath.trim()" @click="$emit('refresh-tree')" title="刷新文件树">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M13.65 2.35A7.96 7.96 0 0 0 8 0a8 8 0 1 0 8 8h-2A6 6 0 1 1 8 2c1.66 0 3.14.69 4.22 1.78L9 7h7V0l-2.35 2.35Z" fill="currentColor"/></svg>
+      </button>
     </div>
     <div class="toolbar-actions">
+      <div v-if="treeError || retryCountdown > 0" class="toolbar-error" role="alert">
+        <span v-if="retryCountdown > 0" class="toolbar-error-countdown">⟳</span>
+        <span class="toolbar-error-text">{{ retryCountdown > 0 ? (treeError ? treeError.replace(/。?$/, ' ') : '无法连接后端服务，') + `正在重试… ${retryCountdown}s` : treeError }}</span>
+        <button type="button" class="toolbar-error-dismiss" aria-label="关闭提示" @click="$emit('clear-retry'); $emit('update:treeError', '')">
+          ×
+        </button>
+      </div>
       <div ref="projectHistoryRef" class="project-history-wrap">
         <button
           type="button"
@@ -26,7 +35,7 @@
           :disabled="loadingTree || pickingFolder"
           @click="toggleProjectHistory"
         >
-          最近
+          最近项目
         </button>
         <div v-if="projectHistoryOpen" class="project-history-dropdown">
           <div class="project-history-head">
@@ -73,13 +82,7 @@
           </ul>
         </div>
       </div>
-      <div v-if="treeError || retryCountdown > 0" class="toolbar-error" role="alert">
-        <span v-if="retryCountdown > 0" class="toolbar-error-countdown">⟳</span>
-        <span class="toolbar-error-text">{{ retryCountdown > 0 ? (treeError ? treeError.replace(/。?$/, ' ') : '无法连接后端服务，') + `正在重试… ${retryCountdown}s` : treeError }}</span>
-        <button type="button" class="toolbar-error-dismiss" aria-label="关闭提示" @click="$emit('clear-retry'); $emit('update:treeError', '')">
-          ×
-        </button>
-      </div>
+      <div class="toolbar-sep" />
       <router-link class="ghost small link-btn" to="/chat">AI 对话</router-link>
       <router-link class="ghost small link-btn" to="/ai-config">配置</router-link>
     </div>
@@ -181,52 +184,56 @@ function formatSessionTime(iso: string): string {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 16px;
+  padding: 0 16px;
   background: var(--bg-primary);
   border-bottom: 1px solid var(--border-color);
-  height: 52px;
+  height: 44px;
   flex-shrink: 0;
 }
 
 .toolbar-brand {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.brand-icon {
-  font-size: 16px;
   flex-shrink: 0;
 }
 
 .title {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
   margin: 0;
   white-space: nowrap;
   overflow: visible;
   letter-spacing: -0.3px;
+  color: var(--text-primary);
+}
+
+.toolbar-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border-color);
+  flex-shrink: 0;
+  opacity: 0.5;
 }
 
 .toolbar-project {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex: 1;
   min-width: 0;
 }
 
 .path-input {
   flex: 1;
+  max-width: 420px;
   min-width: 0;
-  padding: 6px 12px;
+  padding: 5px 10px;
   font-size: 12px;
   border: 1px solid var(--border-color);
   border-radius: 6px;
   background: var(--bg-secondary);
   color: var(--text-primary);
-  transition: all 0.15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .path-input:focus {
@@ -239,22 +246,39 @@ function formatSessionTime(iso: string): string {
   color: var(--text-tertiary);
 }
 
-.toolbar-actions {
-  display: flex;
+.icon-btn {
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
-  margin-left: auto;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
   flex-shrink: 0;
 }
 
-.toolbar-actions > *:not(:first-child)::before {
-  content: "";
-  display: block;
-  width: 1px;
-  height: 16px;
-  background: var(--border-color);
-  margin: 0 4px;
-  opacity: 0.6;
+.icon-btn:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--accent-color);
+}
+
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 .project-history-wrap {

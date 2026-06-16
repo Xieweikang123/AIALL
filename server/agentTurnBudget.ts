@@ -11,17 +11,18 @@ export const ASK_MAX_TURNS = 12;
 export const RESUME_MAX_TURNS_CAP = 48;
 
 export function resolveAgentMaxTurns(
-  mode: "ask" | "build",
+  mode: "ask" | "build" | "plan",
   profile?: { kind?: "interactive" | "execute_plan" } | null,
 ): number {
   if (mode === "ask") return ASK_MAX_TURNS;
+  if (mode === "plan") return PLAN_MAX_TURNS;
   if (profile?.kind === "execute_plan") return EXECUTE_PLAN_MAX_TURNS;
   return INTERACTIVE_BUILD_MAX_TURNS;
 }
 
 /** Extra turns when resuming after interruption or turn-cap exhaustion. */
 export function resolveResumeMaxTurns(
-  mode: "ask" | "build",
+  mode: "ask" | "build" | "plan",
   profile?: { kind?: "interactive" | "execute_plan" } | null,
   completedTurns = 0,
 ): number {

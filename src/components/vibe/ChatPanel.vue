@@ -220,7 +220,7 @@
           </span>
           <span v-else-if="chatError" class="chat-error">{{ chatError }}</span>
           <span v-else-if="chatSending" class="chat-running">{{ chatRunningText }}</span>
-          <span v-else class="chat-hint">{{ chatHintText }}</span>
+
         </div>
         <div class="chat-action-row">
           <div class="chat-mode-switch" role="group" aria-label="对话模式">
@@ -319,7 +319,7 @@ interface Props {
   aiConfigStatusText: string;
   canSendChat: boolean;
   chatPlaceholder: string;
-  chatHintText: string;
+
   chatRunningText: string;
   recoverableAssistantMsg: ChatMessage | null;
   stalledAssistantMsg: ChatMessage | null;
@@ -944,7 +944,7 @@ function formatSessionTime(timestamp: number | string): string {
   border-radius: 8px;
   background: rgba(22, 27, 34, 0.8);
   transition: border-color 0.15s, background 0.15s;
-  min-height: 48px;
+  min-height: 56px;
 }
 
 .chat-input-box.focused {
@@ -955,8 +955,8 @@ function formatSessionTime(timestamp: number | string): string {
 .chat-bottom {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 8px;
+  gap: 4px;
+  margin-top: 4px;
 }
 
 .chat-status-row {

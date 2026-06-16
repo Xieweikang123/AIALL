@@ -136,7 +136,7 @@ export type VibeAgentEvent =
   | { type: "error"; data: { message: string } }
   | { type: "done"; data: { writtenFiles: string[]; pendingFiles: string[]; turns: number } };
 
-export type VibeChatMode = "ask" | "build";
+export type VibeChatMode = "ask" | "build" | "plan";
 
 export type VibeChatHistoryMessage = {
   role: "user" | "assistant";
