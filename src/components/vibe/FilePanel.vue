@@ -72,20 +72,23 @@
             ref="searchInputRef"
             :value="searchQuery"
             class="search-input"
+            :class="{ searching: searchLoading }"
             type="text"
             :placeholder="searchMode === 'file' ? '搜索文件名…' : '搜索代码内容…'"
-            :disabled="!projectOpened"
+            :disabled="!projectOpened || searchLoading"
             @input="$emit('update:searchQuery', ($event.target as HTMLInputElement).value)"
             @keydown.enter="$emit('handle-search')"
           />
+          <span v-if="searchLoading" class="search-spinner" aria-hidden="true" />
           <button
-            v-if="searchQuery"
+            v-else-if="searchQuery"
             type="button"
             class="search-clear-btn"
             title="清除搜索"
             @click="$emit('update:searchQuery', '')"
           >×</button>
         </div>
+        <p v-if="searchError" class="search-error" role="alert">{{ searchError }}</p>
       </div>
     </div>
 
@@ -110,6 +113,8 @@ interface Props {
   loadingTree?: boolean;
   searchMode: "file" | "content";
   searchQuery: string;
+  searchLoading?: boolean;
+  searchError?: string;
   editorCollapsed: boolean;
   gitChangeCount: number;
   gitUnstagedFiles: GitStatusFile[];
@@ -118,6 +123,8 @@ interface Props {
 
 withDefaults(defineProps<Props>(), {
   loadingTree: false,
+  searchLoading: false,
+  searchError: "",
 });
 
 const emit = defineEmits<{
@@ -258,35 +265,40 @@ defineExpose({ searchInputRef });
 .file-panel-search-row {
   padding: 6px 8px;
   border-top: 1px solid var(--border-color, #333);
+  flex-direction: column;
+  align-items: stretch;
 }
 
 .search-mode-switch {
   display: flex;
   gap: 2px;
   margin-bottom: 6px;
+  padding: 2px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .search-mode-btn {
   flex: 0 0 auto;
-  padding: 4px 10px;
+  padding: 4px 12px;
   font-size: 11px;
+  font-weight: 500;
   white-space: nowrap;
-  border: 1px solid var(--border-color, #333);
-  background: var(--bg-secondary, #252525);
-  color: var(--text-secondary, #999);
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.5);
   cursor: pointer;
   border-radius: 4px;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
-.search-mode-btn:hover {
-  background: var(--bg-tertiary, #333);
-  color: var(--text-primary, #fff);
+.search-mode-btn:hover:not(:disabled) {
+  color: rgba(255, 255, 255, 0.85);
 }
 
 .search-mode-btn.active {
-  background: var(--accent-color, #58a6ff);
-  color: white;
-  border-color: var(--accent-color, #58a6ff);
+  background: rgba(88, 166, 255, 0.2);
+  color: #58a6ff;
 }
 
 .search-mode-btn:disabled {
@@ -302,18 +314,20 @@ defineExpose({ searchInputRef });
 .search-input {
   width: 100%;
   box-sizing: border-box;
-  padding: 6px 8px;
-  padding-right: 24px;
+  padding: 7px 10px;
+  padding-right: 28px;
   font-size: 12px;
-  border: 1px solid var(--border-color, #333);
-  border-radius: 4px;
-  background: var(--bg-secondary, #252525);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.2);
   color: var(--text-primary, #fff);
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 .search-input:focus {
   outline: none;
-  border-color: var(--accent-color, #58a6ff);
+  border-color: rgba(88, 166, 255, 0.45);
+  background: rgba(0, 0, 0, 0.28);
 }
 
 .search-input:disabled {
@@ -342,5 +356,30 @@ defineExpose({ searchInputRef });
 .search-clear-btn:hover {
   background: var(--bg-tertiary, #333);
   color: var(--text-primary, #fff);
+}
+
+.search-spinner {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  border-top-color: var(--accent-color, #58a6ff);
+  border-radius: 50%;
+  animation: file-search-spin 0.7s linear infinite;
+}
+
+@keyframes file-search-spin {
+  to { transform: translateY(-50%) rotate(360deg); }
+}
+
+.search-error {
+  margin: 4px 0 0;
+  padding: 0 2px;
+  font-size: 11px;
+  color: #f85149;
+  line-height: 1.4;
 }
 </style>

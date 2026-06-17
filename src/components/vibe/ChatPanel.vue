@@ -334,6 +334,56 @@
         </div>
       </div>
     </footer>
+
+    <div
+      v-if="projectMemoryOpen"
+      class="project-memory-overlay"
+      @mousedown.self="$emit('close-project-memory')"
+    >
+      <div class="project-memory-dialog" role="dialog" aria-labelledby="project-memory-title">
+        <div class="project-memory-head">
+          <div>
+            <h3 id="project-memory-title" class="project-memory-title">项目记忆</h3>
+            <p class="project-memory-desc">
+              记录编码偏好、常用命令与踩坑。保存后，Ask / Plan / Build 模式均会自动注入 Agent。
+            </p>
+          </div>
+          <button
+            type="button"
+            class="ghost small project-memory-close"
+            @click="$emit('close-project-memory')"
+          >
+            ×
+          </button>
+        </div>
+        <div v-if="projectMemoryLoading" class="project-memory-status">加载中…</div>
+        <textarea
+          v-else
+          class="project-memory-editor"
+          :value="projectMemoryDraft"
+          :maxlength="projectMemoryMaxChars"
+          placeholder="# 项目记忆&#10;&#10;例如：改 UI 优先看 src/components/vibe/；测试用 npm test。"
+          @input="$emit('update:projectMemoryDraft', ($event.target as HTMLTextAreaElement).value)"
+        />
+        <div class="project-memory-foot">
+          <span class="project-memory-counter">
+            {{ projectMemoryDraft.length }} / {{ projectMemoryMaxChars }}
+          </span>
+          <span v-if="projectMemoryMessage" class="project-memory-message">{{ projectMemoryMessage }}</span>
+          <div class="project-memory-actions">
+            <button type="button" class="ghost small" @click="$emit('close-project-memory')">取消</button>
+            <button
+              type="button"
+              class="primary small"
+              :disabled="projectMemorySaving || projectMemoryLoading"
+              @click="$emit('save-project-memory')"
+            >
+              {{ projectMemorySaving ? "保存中…" : "保存" }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </aside>
 </template>
 

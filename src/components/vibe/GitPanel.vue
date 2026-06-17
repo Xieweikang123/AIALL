@@ -1,7 +1,14 @@
 <template>
   <div class="git-panel">
-    <div v-if="!projectOpened" class="panel-empty">请先打开项目文件夹</div>
-    <div v-else-if="gitLoading" class="panel-empty">加载中…</div>
+    <div v-if="!projectOpened" class="panel-empty">
+      <span class="panel-empty-icon" aria-hidden="true">⎇</span>
+      <p class="panel-empty-title">尚未打开项目</p>
+      <p class="panel-empty-hint">打开项目后可查看 Git 状态与变更</p>
+    </div>
+    <div v-else-if="gitLoading" class="panel-empty">
+      <span class="panel-loading-spinner panel-empty-spinner" aria-hidden="true" />
+      <p class="panel-empty-title">正在加载 Git 状态…</p>
+    </div>
     <div v-else-if="gitIsRepo" class="git-panel-content">
       <div class="git-header">
         <div class="git-header-row git-branch-row">
