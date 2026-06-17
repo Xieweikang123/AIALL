@@ -237,10 +237,7 @@
           <span v-else-if="stalledAssistantMsg" class="chat-recovery-hint chat-stall-hint">
             运行似乎已卡住
           </span>
-          <span v-else-if="chatSending && agentRunningStatus" class="chat-running-hint">
-            <span class="status-pulse" aria-hidden="true" />
-            {{ agentRunningStatus }}
-          </span>
+          <!-- 重复状态已由消息列表内的 footer 展示，此处隐藏避免冗余 -->
           <span v-else-if="recoverableAssistantMsg && !chatSending" class="chat-recovery-hint">
             Agent 已中断，可恢复
           </span>
@@ -1136,9 +1133,9 @@ function formatSessionTime(timestamp: number | string): string {
 .chat-bottom {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
   margin-top: 4px;
-  padding-bottom: 8px;
+  padding-bottom: 4px;
 }
 
 .chat-status-row {
@@ -1148,8 +1145,7 @@ function formatSessionTime(timestamp: number | string): string {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: 20px;
-  flex: 1;
+  min-height: 0;
   min-width: 0;
 }
 
@@ -1180,7 +1176,7 @@ function formatSessionTime(timestamp: number | string): string {
 }
 
 .mode-btn {
-  padding: 6px 12px;
+  padding: 4px 10px;
   font-size: 12px;
   border: none;
   background: none;
