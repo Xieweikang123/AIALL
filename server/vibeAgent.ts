@@ -39,6 +39,9 @@ import {
   buildExploreSoftCapNudge,
   buildFileBreadthNudge,
   buildForceOutputNudge,
+  buildPatchAnchorForcePatchNudge,
+  buildPatchRequiredRetryNudge,
+  buildUiDefectForcePatchNudge,
   EXECUTE_PLAN_EXPLORE_TURN_BUDGET,
   EXPLORE_INTERIM_DIAGNOSIS_TURN,
   INTERACTIVE_EXPLORE_TURN_BUDGET,
@@ -50,7 +53,22 @@ import {
   PLAN_MAX_TOTAL_EXPLORE_HARD,
   PLAN_MAX_TOTAL_EXPLORE_SOFT,
 } from "./agentExplorationBudget";
-import { buildConsultativeBuildHint, isConsultativeUserPrompt } from "./agentUserIntent";
+import { buildConsultativeBuildHint, buildUiDefectBuildHint, isConsultativeUserPrompt, isUiDefectReportPrompt } from "./agentUserIntent";
+import {
+  buildBlockedGrepMessage,
+  buildEnglishPlanningNudge,
+  buildPatchAnchorLocatedNudge,
+  checkOverlappingRead,
+  isAnalysisOnlyReplyUnderForcePatch,
+  isBlockedGrepAfterVisionMisread,
+  readLineRangeFromArgs,
+  recordReadRange,
+  sanitizeAgentUserVisibleText,
+  shouldForcePatchAfterAnchorLocated,
+  shouldNudgeEnglishPlanning,
+  textIndicatesPatchAnchor,
+  type ToolGuardContext,
+} from "./agentExploreGuard";
 import {
   buildExecutePlanSystemHint,
   buildTargetFileManifest,
@@ -90,6 +108,7 @@ import {
   isVisionUnsupportedError,
   sanitizeImageDataUrls,
   shouldRequireVisionFirstTurn,
+  suggestsEmbeddedLayoutMisread,
 } from "./visionMessage";
 
 export type VibeAgentEvent =
@@ -551,6 +570,17 @@ function isSubstantiveChineseToolPreamble(text: string): boolean {
   return (trimmed.match(/[\u4e00-\u9fff]/g) || []).length >= 8;
 }
 
+function emitUserVisibleAssistantMessage(
+  onEvent: RunVibeAgentParams["onEvent"],
+  text: string,
+  streamedChars: number,
+): void {
+  const visible = sanitizeAgentUserVisibleText(text);
+  if (visible && !streamedChars) {
+    onEvent({ type: "message", data: { text: visible } });
+  }
+}
+
 function canParallelizeToolBatch(calls: ChatToolCall[]): boolean {
   if (calls.length <= 1) return false;
   const names = calls.map((call) => call.function.name);
@@ -803,6 +833,7 @@ export async function executeTool(
   readSliceCache?: Map<string, string>,
   grepCache?: Map<string, string>,
   readSliceRepeatCounts?: Map<string, number>,
+  toolGuard?: ToolGuardContext,
 ): Promise<string> {
   if (mode === "ask" && WRITE_AGENT_TOOL_NAMES.has(name)) {
     return "Ask 模式下不支持文件修改，请仅使用只读工具查询项目。";
@@ -846,6 +877,11 @@ export async function executeTool(
     const maxLimit = mode === "ask" ? 400 : mode === "plan" ? 500 : 350;
     const limit = Math.min(maxLimit, Math.max(1, Number(args.limit) || defaultLimit));
     const sliceKey = `${resolved.relative}:${offset}:${limit}`;
+    const lineRange = readLineRangeFromArgs(offset, limit);
+    if (toolGuard) {
+      const overlapErr = checkOverlappingRead(resolved.relative, lineRange, toolGuard.readFileRanges);
+      if (overlapErr) return overlapErr;
+    }
     const cachedSlice = readSliceCache?.get(sliceKey);
     if (cachedSlice) {
       const repeats = (readSliceRepeatCounts?.get(sliceKey) ?? 0) + 1;
@@ -857,6 +893,9 @@ export async function executeTool(
     }
     const sliced = sliceFileLines(content, offset, limit);
     readSliceCache?.set(sliceKey, sliced);
+    if (toolGuard) {
+      recordReadRange(resolved.relative, lineRange, toolGuard.readFileRanges);
+    }
     stage?.readPaths.add(resolved.relative);
     return sliced;
   }
@@ -864,6 +903,9 @@ export async function executeTool(
   if (name === "grep") {
     const pattern = String(args.pattern || "").trim();
     if (!pattern) return "错误：缺少 pattern";
+    if (toolGuard?.visionMisreadActive && isBlockedGrepAfterVisionMisread(pattern, true)) {
+      return buildBlockedGrepMessage(pattern);
+    }
     const maxMatches = Math.min(80, Math.max(1, Number(args.max_matches) || 40));
     const grepKey = `${pattern}:${maxMatches}`;
     const cached = grepCache?.get(grepKey);
@@ -1077,6 +1119,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   } = params;
   const readOnlyBuildRun = !isAsk && !isPlanExplore && !isExecutePlan && isConsultativeUserPrompt(prompt);
   const imageDataUrls = sanitizeImageDataUrls(params.imageDataUrls);
+  const uiDefectBuildRun =
+    !isAsk && !isPlanExplore && !readOnlyBuildRun && imageDataUrls.length > 0 && isUiDefectReportPrompt(prompt);
 
   const segmentBudget = resolveAgentMaxTurns(mode, runProfile);
   let segmentMaxTurns = params.maxTurns ?? segmentBudget;
@@ -1153,7 +1197,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       : isPlanExplore
       ? buildPlanSystemPrompt(projectRoot, openFilePath, openFileSnippet, model)
       : buildSystemPrompt(projectRoot, openFilePath, model) +
-        (readOnlyBuildRun ? buildConsultativeBuildHint() : "")) +
+        (readOnlyBuildRun ? buildConsultativeBuildHint() : "") +
+        (uiDefectBuildRun ? buildUiDefectBuildHint() : "")) +
     projectContextBlock +
     projectMemoryBlock;
 
@@ -1162,10 +1207,20 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   const readSliceCache = new Map<string, string>();
   const readSliceRepeatCounts = new Map<string, number>();
   const grepCache = new Map<string, string>();
+  const toolGuard: ToolGuardContext = {
+    readFileRanges: new Map(),
+    visionMisreadActive: false,
+  };
   let consecutiveExploreTurns = 0;
   let totalExploreTurns = 0;
   let turnsLowNudgeSent = false;
   let interimDiagnosisNudgeSent = false;
+  let patchAnchorLocated = false;
+  let patchAnchorNudgeSent = false;
+  let patchAnchorForcePending = false;
+  let englishPlanningNudgeSent = false;
+  let uiDefectForcePatchNudgeSent = false;
+  let patchAnchorForcePatchNudgeSent = false;
   /** Track unique files read in explore-only turns to detect breadth sprawl. */
   const exploreFilesRead = new Set<string>();
   let fileBreadthNudgeSent = false;
@@ -1243,19 +1298,42 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     // Progressive exploration restriction:
     //   Soft cap: strip grep/search_files — model can still read_file
     //   Hard cap: strip ALL tools — model must output text only
+    //   UI defect + located anchor: hard cap keeps write tools (avoid analysis-only stall)
+    const buildExploreHardCapReached =
+      !isAsk && !isPlanExplore && !readOnlyBuildRun && totalExploreTurns >= MAX_TOTAL_EXPLORE_TURNS;
+    const forcePatchOutput =
+      !isAsk &&
+      !isPlanExplore &&
+      !readOnlyBuildRun &&
+      writeStage !== null &&
+      shouldForcePatchAfterAnchorLocated(patchAnchorLocated, patchAnchorForcePending, buildExploreHardCapReached);
     const forceTextOutput =
-      (isAsk && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_HARD) ||
-      (isPlanExplore && totalExploreTurns >= PLAN_MAX_TOTAL_EXPLORE_HARD) ||
-      (readOnlyBuildRun && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_HARD) ||
-      (!isAsk && !isPlanExplore && !readOnlyBuildRun && totalExploreTurns >= MAX_TOTAL_EXPLORE_TURNS);
+      !forcePatchOutput &&
+      ((isAsk && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_HARD) ||
+        (isPlanExplore && totalExploreTurns >= PLAN_MAX_TOTAL_EXPLORE_HARD) ||
+        (readOnlyBuildRun && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_HARD) ||
+        buildExploreHardCapReached);
     const stripWideSearch =
       !forceTextOutput &&
+      !forcePatchOutput &&
       ((isAsk && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_SOFT) ||
         (isPlanExplore && totalExploreTurns >= PLAN_MAX_TOTAL_EXPLORE_SOFT) ||
         (readOnlyBuildRun && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_SOFT) ||
         (!isAsk && !isPlanExplore && !readOnlyBuildRun && totalExploreTurns >= MAX_TOTAL_EXPLORE_TURNS_SOFT));
 
-    if (forceTextOutput) {
+    if (forcePatchOutput && !uiDefectForcePatchNudgeSent && buildExploreHardCapReached && uiDefectBuildRun) {
+      messages.push({
+        role: "system",
+        content: buildUiDefectForcePatchNudge(totalExploreTurns),
+      });
+      uiDefectForcePatchNudgeSent = true;
+    } else if (forcePatchOutput && patchAnchorForcePending && !patchAnchorForcePatchNudgeSent) {
+      messages.push({
+        role: "system",
+        content: buildPatchAnchorForcePatchNudge(),
+      });
+      patchAnchorForcePatchNudgeSent = true;
+    } else if (forceTextOutput) {
       messages.push({
         role: "system",
         content:
@@ -1282,8 +1360,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     if (
       !interimDiagnosisNudgeSent &&
       !isAsk &&
-      totalExploreTurns >= EXPLORE_INTERIM_DIAGNOSIS_TURN &&
-      (writeStage || readOnlyBuildRun)
+      !isPlanExplore &&
+      writeStage !== null &&
+      totalExploreTurns >= EXPLORE_INTERIM_DIAGNOSIS_TURN
     ) {
       messages.push({ role: "system", content: buildExploreInterimDiagnosisNudge(totalExploreTurns) });
       interimDiagnosisNudgeSent = true;
@@ -1304,6 +1383,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
     const toolsForTurn = (() => {
       if (visionFirstTurnPending || forceTextOutput) return [];
+      if (forcePatchOutput) {
+        return activeTools.filter((t) => WRITE_AGENT_TOOL_NAMES.has(t.function.name));
+      }
       if (stripWideSearch) {
         // Keep only read_file (and list_dir); remove grep / search_files / run_command / web_*
         return activeTools.filter(
@@ -1508,7 +1590,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         },
       });
       if (text && !streamedChars) {
-        onEvent({ type: "message", data: { text } });
+        emitUserVisibleAssistantMessage(onEvent, text, streamedChars);
       }
       messages.push({ role: "assistant", content: text });
     };
@@ -1567,13 +1649,14 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
           },
         });
         if (text && !streamedChars) {
-          onEvent({ type: "message", data: { text } });
+          emitUserVisibleAssistantMessage(onEvent, text, streamedChars);
         }
         continue;
       }
 
       visionFirstTurnPending = false;
       completeVisionFirstTurn(text, false);
+      toolGuard.visionMisreadActive = suggestsEmbeddedLayoutMisread(text);
       if (consultativeVisionRun) {
         messages.push({ role: "system", content: buildVisionConsultativeContinueHint() });
         if (segmentMaxTurns !== undefined) {
@@ -1596,21 +1679,58 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     }
 
     if (!toolCalls.length) {
-      const text = visibleContent.trim();
+      const rawText = visibleContent.trim();
+      const userText = sanitizeAgentUserVisibleText(rawText);
+      const mustPatchBeforeFinish =
+        writeStage !== null &&
+        !isAsk &&
+        !isPlanExplore &&
+        !readOnlyBuildRun &&
+        patchAnchorLocated &&
+        (patchAnchorForcePending || uiDefectBuildRun) &&
+        writeStage.writtenList.length === 0;
+
+      if (mustPatchBeforeFinish && isAnalysisOnlyReplyUnderForcePatch(rawText)) {
+        messages.push({ role: "assistant", content: rawText });
+        messages.push({ role: "system", content: buildPatchRequiredRetryNudge() });
+        onEvent({
+          type: "turn_response",
+          data: {
+            turn,
+            ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+            assistantText: userText,
+            toolCalls: [],
+            hasToolCalls: false,
+            isFinal: false,
+          },
+        });
+        patchAnchorForcePending = true;
+        patchAnchorForcePatchNudgeSent = false;
+        onEvent({
+          type: "status",
+          data: {
+            phase: "patch_required_retry",
+            turn,
+            ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+            model,
+            detail: "须先提交代码修改，已要求重试",
+          },
+        });
+        continue;
+      }
+
       onEvent({
         type: "turn_response",
         data: {
           turn,
           ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
-          assistantText: text,
+          assistantText: userText,
           toolCalls: [],
           hasToolCalls: false,
           isFinal: true,
         },
       });
-      if (text && !streamedChars) {
-        onEvent({ type: "message", data: { text } });
-      }
+      emitUserVisibleAssistantMessage(onEvent, rawText, streamedChars);
       onEvent({
         type: "status",
         data: {
@@ -1625,9 +1745,13 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
     if (visibleContent.trim()) {
       const preamble = visibleContent.trim();
+      if (shouldNudgeEnglishPlanning(preamble) && !englishPlanningNudgeSent) {
+        messages.push({ role: "system", content: buildEnglishPlanningNudge() });
+        englishPlanningNudgeSent = true;
+      }
       if (isSubstantiveChineseToolPreamble(preamble) && !streamedChars) {
-        onEvent({ type: "message", data: { text: preamble } });
-        streamedChars = preamble.length;
+        emitUserVisibleAssistantMessage(onEvent, preamble, streamedChars);
+        streamedChars = sanitizeAgentUserVisibleText(preamble).length;
       }
       onEvent({
         type: "turn_trace",
@@ -1714,7 +1838,18 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
       let result = "";
       try {
-        result = await executeTool(projectRoot, toolName, toolArgs, writeStage, toolMode, readCache, readSliceCache, grepCache, readSliceRepeatCounts);
+        result = await executeTool(
+          projectRoot,
+          toolName,
+          toolArgs,
+          writeStage,
+          toolMode,
+          readCache,
+          readSliceCache,
+          grepCache,
+          readSliceRepeatCounts,
+          toolGuard,
+        );
       } catch (error) {
         result = `错误：${error instanceof Error ? error.message : String(error)}`;
       }
@@ -1742,6 +1877,12 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         tool_call_id: outcome.call.id,
         content: truncateToolResultForModel(outcome.result),
       });
+      if (!outcome.result.startsWith("错误：") && textIndicatesPatchAnchor(outcome.result)) {
+        patchAnchorLocated = true;
+        if (uiDefectBuildRun && writeStage !== null) {
+          patchAnchorForcePending = true;
+        }
+      }
     };
 
     for (let index = 0; index < toolCalls.length; ) {
@@ -1777,9 +1918,22 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     const turnHadWrite = toolCalls.some((call) => WRITE_AGENT_TOOL_NAMES.has(call.function.name));
     const turnExploreOnly =
       toolCalls.length > 0 && toolCalls.every((call) => READ_ONLY_AGENT_TOOL_NAMES.has(call.function.name));
+    if (
+      patchAnchorLocated &&
+      writeStage !== null &&
+      !isAsk &&
+      !isPlanExplore &&
+      !readOnlyBuildRun &&
+      !patchAnchorNudgeSent &&
+      turnExploreOnly
+    ) {
+      messages.push({ role: "system", content: buildPatchAnchorLocatedNudge() });
+      patchAnchorNudgeSent = true;
+    }
     if (turnHadWrite) {
       consecutiveExploreTurns = 0;
       interimDiagnosisNudgeSent = false;
+      patchAnchorForcePending = false;
       // Reset file-breadth tracking when the model finally writes (it found the target).
       exploreFilesRead.clear();
       fileBreadthNudgeSent = false;

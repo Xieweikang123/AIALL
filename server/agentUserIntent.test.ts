@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildConsultativeBuildHint, isConsultativeUserPrompt } from "./agentUserIntent";
+import { buildConsultativeBuildHint, buildUiDefectBuildHint, isConsultativeUserPrompt } from "./agentUserIntent";
 
 describe("isConsultativeUserPrompt", () => {
   it("detects question-only prompts", () => {
@@ -33,5 +33,13 @@ describe("buildConsultativeBuildHint", () => {
   it("mentions read-only tools", () => {
     expect(buildConsultativeBuildHint()).toContain("禁止 patch_file");
     expect(buildConsultativeBuildHint()).toContain("grep");
+  });
+});
+
+describe("buildUiDefectBuildHint", () => {
+  it("requires patch and mentions overlay positioning", () => {
+    expect(buildUiDefectBuildHint()).toContain("patch_file");
+    expect(buildUiDefectBuildHint()).toContain("Teleport");
+    expect(buildUiDefectBuildHint()).toContain("getSelection");
   });
 });

@@ -45,3 +45,13 @@ export function buildConsultativeBuildHint(): string {
     "用自然语言直接回答；若用户之后要明确修改，请其切换到 Build 并说明改什么，或改用 Ask 继续讨论。",
   ].join("\n");
 }
+
+export function buildUiDefectBuildHint(): string {
+  return [
+    "",
+    "【UI 缺陷·须修复】用户用截图反馈控件/布局异常。",
+    "须定位后 patch_file/write_file；禁止只分析并反问「要不要修」。",
+    "控件与选区/焦点在空间上分离时优先查 Teleport/fixed 浮层（grep *-floating、show*At），勿查底栏 flex。",
+    "排查 mouseup 与 getSelection 时序：选区在 mouseup 时可能尚未就绪，关注 getSelection* / queueMicrotask 链路。",
+  ].join("\n");
+}

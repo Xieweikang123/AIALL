@@ -201,6 +201,12 @@ describe("visionMessage", () => {
     expect(suggestsEmbeddedLayoutMisread(vision)).toBe(true);
   });
 
+  it("suggestsEmbeddedLayoutMisread when flex blame lacks overlay mechanism", () => {
+    const vision =
+      "底部状态栏左侧出现「引用」按钮，chat-action-row 添加 position: relative，flex 布局导致错位 [图已理解]";
+    expect(suggestsEmbeddedLayoutMisread(vision)).toBe(true);
+  });
+
   it("buildVisionBuildContinueHint injects grep correction after misread", () => {
     const vision =
       "选区在上方… 底部状态栏「引用」按钮… chat-bottom flex 布局 [图已理解]";

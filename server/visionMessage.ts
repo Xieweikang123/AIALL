@@ -81,12 +81,20 @@ export function isUiPositioningBugPrompt(text: string): boolean {
 export function suggestsEmbeddedLayoutMisread(visionDescription: string): boolean {
   const text = visionDescription.trim();
   if (!text) return false;
+  const blamesInFlowLayout =
+    /flex|布局问题|父容器|chat-status|chat-bottom|chat-action|position:\s*relative/i.test(text);
   const hasSeparatedRegions =
     /选区|选中|蓝色|高亮/.test(text) &&
-    /底(?:部|栏)|状态栏|角落|同一行/.test(text);
-  const blamesFlex =
-    /flex|布局问题|父容器|chat-status|chat-bottom|chat-action/i.test(text);
-  return hasSeparatedRegions && blamesFlex;
+    /底(?:部|栏)|状态栏|角落|同一行|左下|右下/.test(text);
+  if (hasSeparatedRegions && blamesInFlowLayout) return true;
+
+  const controlAtEdge =
+    /底(?:部|栏)|状态栏|角落|左下|右下/.test(text) &&
+    /按钮|控件|悬浮|浮在|停留|弹出/.test(text);
+  const omitsOverlayMechanism = !/Teleport|fixed|absolute|浮层错位/i.test(text);
+  if (controlAtEdge && blamesInFlowLayout && omitsOverlayMechanism) return true;
+
+  return false;
 }
 
 export function buildVisionGrepAnchorHint(visionDescription: string): string {

@@ -108,6 +108,32 @@ export function buildForceOutputNudge(totalExploreTurns: number, mode?: string):
   ].join("");
 }
 
+/** UI defect + located anchor: hard cap keeps write tools instead of text-only stall. */
+export function buildUiDefectForcePatchNudge(totalExploreTurns: number): string {
+  return [
+    `【系统强制】UI 缺陷任务已累计 ${totalExploreTurns} 轮探索且已定位相关代码。`,
+    "下一轮只能调用 patch_file / write_file / delete_file；禁止 grep / read_file / search。",
+    "必须直接修复并简要说明改动；禁止只输出分析或反问「要不要修」。",
+  ].join("");
+}
+
+/** Located patch anchor — next turn must write (independent of explore-budget counter resets). */
+export function buildPatchAnchorForcePatchNudge(): string {
+  return [
+    "【系统强制·已定位】浮层/选区定位函数已在工具结果中出现。",
+    "下一轮只能调用 patch_file / write_file / delete_file，禁止任何 read/grep/search。",
+    "禁止重复输出截图分析；须直接提交代码修改。",
+  ].join("");
+}
+
+/** Model returned analysis text while force-patch was active — retry without ending the run. */
+export function buildPatchRequiredRetryNudge(): string {
+  return [
+    "【系统强制】上一轮在必须改代码时你只输出了分析/读图复述，任务未完成。",
+    "请立即调用 patch_file 或 write_file 修复；回复中说明改动要点，勿再复述截图或根因猜测。",
+  ].join("");
+}
+
 /** Injected mid-exploration — requires a user-visible Chinese progress summary. */
 export function buildExploreInterimDiagnosisNudge(totalExploreTurns: number): string {
   return [

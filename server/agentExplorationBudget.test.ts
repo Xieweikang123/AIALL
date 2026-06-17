@@ -5,6 +5,8 @@ import {
   buildAskForceAnswerNudge,
   buildExploreBudgetNudge,
   buildExploreInterimDiagnosisNudge,
+  buildPatchAnchorForcePatchNudge,
+  buildUiDefectForcePatchNudge,
   EXECUTE_PLAN_EXPLORE_TURN_BUDGET,
   EXPLORE_INTERIM_DIAGNOSIS_TURN,
   INTERACTIVE_EXPLORE_TURN_BUDGET,
@@ -34,5 +36,17 @@ describe("agentExplorationBudget", () => {
     const nudge = buildExploreInterimDiagnosisNudge(4);
     expect(nudge).toContain("进度摘要");
     expect(nudge).toContain("patch_file");
+  });
+
+  it("builds UI defect force-patch nudge at hard cap", () => {
+    const nudge = buildUiDefectForcePatchNudge(10);
+    expect(nudge).toContain("patch_file");
+    expect(nudge).toContain("禁止只输出分析");
+  });
+
+  it("builds patch-anchor force-patch nudge", () => {
+    const nudge = buildPatchAnchorForcePatchNudge();
+    expect(nudge).toContain("只能调用 patch_file");
+    expect(nudge).toContain("禁止重复输出截图分析");
   });
 });
