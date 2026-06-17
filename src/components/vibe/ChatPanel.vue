@@ -182,16 +182,6 @@
       </div>
     </div>
 
-    <div
-      v-if="showQuoteButton"
-      ref="quoteButtonRef"
-      class="quote-floating"
-      :style="{ left: quoteButtonPosition.x + 'px', top: quoteButtonPosition.y + 'px' }"
-      @mousedown.prevent="$emit('quote-selected-text')"
-    >
-      <span class="quote-icon">❝</span> 引用
-    </div>
-
     <footer class="chat-composer">
       <div v-if="pendingPromptQueue.length" class="pending-queue">
         <div class="pending-queue-head">
@@ -202,16 +192,25 @@
           <li v-for="(q, qi) in pendingPromptQueue" :key="qi">{{ q }}</li>
         </ol>
       </div>
-      <div v-if="quotedMessage" class="quoted-preview">
+    <div
+      v-if="quotedMessages.length"
+      class="quoted-preview-stack"
+    >
+      <div
+        v-for="(q, quoteIndex) in quotedMessages"
+        :key="`${q.messageId}-${quoteIndex}`"
+        class="quoted-preview"
+      >
         <div class="quoted-preview-header">
           <span class="quoted-preview-label">
             <span class="quoted-preview-icon">❝</span>
-            引用 {{ quotedMessage.role === "assistant" ? "Agent" : "你" }}
+            引用 {{ q.role === "assistant" ? "Agent" : "你" }}
           </span>
-          <button type="button" class="quoted-preview-close" @click="$emit('update:quotedMessage', null)">×</button>
+          <button type="button" class="quoted-preview-close" @click="removeQuotedMessage(quoteIndex)">×</button>
         </div>
-        <div class="quoted-preview-body">{{ quotedMessage.content }}</div>
+        <div class="quoted-preview-body">{{ q.content }}</div>
       </div>
+    </div>
       <div class="chat-input-field" @keydown.capture="$emit('on-composer-field-keydown', $event)">
         <div v-if="mentionOpen && mentionResults.length" class="mention-dropdown">
           <button
@@ -455,9 +454,7 @@ interface Props {
   chatStoreSyncMessage: string;
   isDragging: boolean;
   editorCollapsed: boolean;
-  showQuoteButton: boolean;
-  quoteButtonPosition: { x: number; y: number };
-  quotedMessage: QuotedMessage | null;
+  quotedMessages: QuotedMessage[];
   mentionOpen: boolean;
   mentionResults: MentionItem[];
   mentionActiveIndex: number;
@@ -489,6 +486,7 @@ const props = withDefaults(defineProps<Props>(), {
   projectMemoryMessage: "",
   projectMemoryMaxChars: 3500,
   projectMemoryHasContent: false,
+  quotedMessages: () => [],
 });
 
 const panelStyle = computed(() => {
@@ -517,8 +515,6 @@ const emit = defineEmits<{
   (e: "apply-example", text: string): void;
   (e: "copy-session-info", session: VibeChatSessionMeta): void;
   (e: "clear-chat"): void;
-  (e: "quote-selected-text"): void;
-  (e: "hide-quote-button"): void;
   (e: "on-composer-field-keydown", event: KeyboardEvent): void;
   (e: "on-chat-input-box-mousedown"): void;
   (e: "select-mention", item: MentionItem): void;
@@ -528,7 +524,7 @@ const emit = defineEmits<{
   (e: "on-chat-drag-leave", event: DragEvent): void;
   (e: "on-chat-drop", event: DragEvent): void;
   (e: "update:chatMode", mode: VibeChatMode): void;
-  (e: "update:quotedMessage", value: QuotedMessage | null): void;
+  (e: "update:quotedMessages", value: QuotedMessage[]): void;
   (e: "update:showTokenDetail", value: boolean): void;
   (e: "update:projectMemoryDraft", value: string): void;
   (e: "open-project-memory"): void;
@@ -538,10 +534,14 @@ const emit = defineEmits<{
 
 const chatScrollRef = ref<HTMLElement | null>(null);
 const sessionPickerRef = ref<HTMLElement | null>(null);
-const quoteButtonRef = ref<HTMLElement | null>(null);
 const chatDropZoneRef = ref<HTMLElement | null>(null);
 
 defineExpose({ sessionPickerRef, chatScrollRef });
+
+function removeQuotedMessage(index: number) {
+  const next = props.quotedMessages.filter((_, i) => i !== index);
+  emit("update:quotedMessages", next);
+}
 
 function handleSessionPickerOutsideClick(e: MouseEvent) {
   if (!props.sessionPickerOpen) return;
@@ -959,39 +959,6 @@ function formatSessionTime(timestamp: number | string): string {
   cursor: not-allowed;
 }
 
-.quote-floating {
-  position: fixed;
-  z-index: 1000;
-  padding: 5px 10px;
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 4px;
-  font-size: 12px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  transition: all 0.15s ease;
-  backdrop-filter: blur(8px);
-}
-
-.quote-floating:hover {
-  background: rgba(255, 255, 255, 0.15);
-  border-color: rgba(255, 255, 255, 0.25);
-  color: white;
-}
-
-.quote-icon {
-  font-size: 13px;
-  opacity: 0.8;
-}
-
-.chat-composer {
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  padding: 12px;
-}
-
 .pending-queue {
   margin-bottom: 10px;
   border: 1px solid rgba(210, 153, 34, 0.35);
@@ -1020,8 +987,14 @@ function formatSessionTime(timestamp: number | string): string {
   overflow: auto;
 }
 
-.quoted-preview {
+.quoted-preview-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   margin-bottom: 10px;
+}
+
+.quoted-preview {
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);

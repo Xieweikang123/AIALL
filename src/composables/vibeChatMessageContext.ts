@@ -28,6 +28,7 @@ export interface VibeChatMessageContext {
   chainJumpVisible: Reactive<Record<string, boolean>>;
   expandedDiffs: Reactive<Record<string, Record<string, boolean>>>;
   onMessageSelect: (event: MouseEvent, msg: VibeChatMessageItem) => void;
+  onMessageDoubleClick: (event: MouseEvent, msg: VibeChatMessageItem) => void;
   copyText: (text: string) => void | Promise<boolean>;
   editUserMessage: (messageId: string) => void;
   undoExchange: (messageId: string, event?: MouseEvent) => void;

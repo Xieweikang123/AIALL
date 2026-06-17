@@ -241,9 +241,7 @@
         :chat-store-sync-message="chatStoreSyncMessage"
         :is-dragging="isDragging"
         :editor-collapsed="editorCollapsed"
-        :show-quote-button="showQuoteButton"
-        :quote-button-position="quoteButtonPosition"
-        :quoted-message="quotedMessage"
+        :quoted-messages="quotedMessages"
         :mention-open="mentionOpen"
         :mention-results="mentionResults"
         :mention-active-index="mentionActiveIndex"
@@ -277,10 +275,8 @@
         @clear-chat="clearChat"
         @apply-example="applyExample"
         @on-chat-scroll="onChatScroll"
-        @quote-selected-text="quoteSelectedText"
-        @hide-quote-button="hideQuoteButton"
         @clear-pending-queue="clearPendingPromptQueue"
-        @update:quoted-message="quotedMessage = $event"
+        @update:quoted-messages="quotedMessages = $event"
         @on-composer-field-keydown="onComposerFieldKeydown"
         @select-mention="selectMention"
         @on-chat-input-box-mousedown="onChatInputBoxMouseDown"
@@ -348,6 +344,16 @@
           <button type="button" class="ctx-item" @click="gitFileCopyName">复制文件名</button>
         </div>
       </div>
+      <button
+        v-if="showQuoteButton"
+        ref="quoteButtonRef"
+        type="button"
+        class="quote-floating"
+        :style="{ left: quoteButtonPosition.x + 'px', top: quoteButtonPosition.y + 'px' }"
+        @mousedown.stop.prevent="quoteSelectedText"
+      >
+        <span class="quote-icon">❝</span> 引用
+      </button>
     </Teleport>
   </div>
 </template>
@@ -698,9 +704,10 @@ interface QuotedMessage {
 }
 
 const pendingQuote = ref<QuotedMessage | null>(null);
-const quotedMessage = ref<QuotedMessage | null>(null);
+const quotedMessages = ref<QuotedMessage[]>([]);
 const quoteButtonPosition = ref({ x: 0, y: 0 });
 const showQuoteButton = ref(false);
+const quoteButtonRef = ref<HTMLElement | null>(null);
 const openingProject = ref(false);
 let switchSessionGeneration = 0;
 
@@ -1235,9 +1242,97 @@ function onDocumentClick(event: MouseEvent) {
     if (el && !el.contains(target)) closeSessionPicker();
   }
   if (showQuoteButton.value) {
-    if (target.closest('.quote-floating')) return;
+    if (eventComposedPathIncludes(event, ".quote-floating")) return;
     hideQuoteButtonNow();
   }
+}
+
+function eventComposedPathIncludes(event: MouseEvent, selector: string): boolean {
+  return event.composedPath().some(
+    (node) => node instanceof Element && Boolean(node.closest(selector)),
+  );
+}
+
+function clampQuoteButtonPosition(x: number, y: number, btnWidth: number, btnHeight: number) {
+  const margin = 8;
+  return {
+    x: Math.max(margin, Math.min(x, window.innerWidth - btnWidth - margin)),
+    y: Math.max(margin, Math.min(y, window.innerHeight - btnHeight - margin)),
+  };
+}
+
+/** 选区包围盒在多行时会横跨整行宽度；优先用最后一行的 client rect 锚定按钮。 */
+function selectionRectUsable(rect: DOMRect): boolean {
+  return rect.width > 0 || rect.height > 0;
+}
+
+function getSelectionFocusRect(selection: Selection): DOMRect | null {
+  const { focusNode, focusOffset } = selection;
+  if (!focusNode) return null;
+
+  const focusRange = document.createRange();
+  try {
+    focusRange.setStart(focusNode, focusOffset);
+    focusRange.collapse(true);
+  } catch {
+    return null;
+  }
+
+  const focusRects = focusRange.getClientRects();
+  for (let i = focusRects.length - 1; i >= 0; i--) {
+    const rect = focusRects[i];
+    if (rect.width > 0 || rect.height > 0) return rect;
+  }
+
+  const collapsed = focusRange.getBoundingClientRect();
+  if (collapsed.width > 0 || collapsed.height > 0) return collapsed;
+
+  const endRange = selection.getRangeAt(0).cloneRange();
+  endRange.collapse(false);
+  const endRects = endRange.getClientRects();
+  if (endRects.length > 0) return endRects[endRects.length - 1];
+  return endRange.getBoundingClientRect();
+}
+
+function getSelectionAnchorRect(selection: Selection): DOMRect | null {
+  const range = selection.getRangeAt(0);
+  const lineRects = Array.from(range.getClientRects()).filter(selectionRectUsable);
+  if (lineRects.length > 0) {
+    return lineRects[lineRects.length - 1]!;
+  }
+
+  const focusRect = getSelectionFocusRect(selection);
+  if (focusRect && selectionRectUsable(focusRect)) return focusRect;
+
+  const bounds = range.getBoundingClientRect();
+  if (selectionRectUsable(bounds)) return bounds;
+  return null;
+}
+
+async function showQuoteButtonAt(anchor: DOMRect) {
+  const margin = 8;
+  const estimatedWidth = 72;
+  const estimatedHeight = 32;
+  let x = anchor.left;
+  let y = anchor.top - estimatedHeight - margin;
+  if (y < margin) y = anchor.bottom + margin;
+  ({ x, y } = clampQuoteButtonPosition(x, y, estimatedWidth, estimatedHeight));
+  quoteButtonPosition.value = { x, y };
+  showQuoteButton.value = true;
+  await nextTick();
+  const btn = quoteButtonRef.value;
+  if (!btn) return;
+  const btnWidth = btn.offsetWidth;
+  const btnHeight = btn.offsetHeight;
+  x = anchor.left;
+  y = anchor.top - btnHeight - margin;
+  if (y < margin) y = anchor.bottom + margin;
+  ({ x, y } = clampQuoteButtonPosition(x, y, btnWidth, btnHeight));
+  quoteButtonPosition.value = { x, y };
+}
+
+function quoteMessageKey(message: QuotedMessage): string {
+  return `${message.messageId}:${message.content}`;
 }
 
 let quoteHiddenAt = 0;
@@ -1272,9 +1367,9 @@ registerEscapeDismiss(
 registerEscapeDismiss(projectHistoryOpen, closeProjectHistory, ESCAPE_DISMISS_PRIORITY.PROJECT_HISTORY);
 registerEscapeDismiss(showQuoteButton, hideQuoteButtonNow, ESCAPE_DISMISS_PRIORITY.QUOTE_BUTTON);
 registerEscapeDismiss(
-  () => Boolean(quotedMessage.value),
+  () => quotedMessages.value.length > 0,
   () => {
-    quotedMessage.value = null;
+    quotedMessages.value = [];
   },
   ESCAPE_DISMISS_PRIORITY.QUOTED_PREVIEW,
 );
@@ -1948,62 +2043,68 @@ watch(searchMode, () => {
   if (searchQuery.value.trim()) void handleSearch();
 });
 
-function onMessageSelect(event: MouseEvent, message: ChatMessage) {
-  if (event.detail <= 1 && Date.now() - quoteHiddenAt < 150) return;
+function shouldIgnoreQuoteSelectEvent(event: MouseEvent): boolean {
+  if (event.detail <= 1 && Date.now() - quoteHiddenAt < 150) return true;
+  const target = event.target;
+  return target instanceof Element
+    && Boolean(target.closest(".msg-toolbar, .agent-recovery-actions, .inline-diff-head, .msg-actions"));
+}
+
+function tryShowQuoteButtonFromSelection(message: ChatMessage): void {
   const selection = window.getSelection();
   if (!selection || selection.isCollapsed || !selection.toString().trim()) {
     return;
   }
 
   const selectedText = selection.toString().trim();
-  if (!selectedText) {
-    return;
-  }
+  if (!selectedText) return;
 
-  const range = selection.getRangeAt(0);
-  const rect = range.getBoundingClientRect();
-  
+  const anchor = getSelectionAnchorRect(selection);
+  if (!anchor || !selectionRectUsable(anchor)) return;
+
   pendingQuote.value = {
     messageId: message.id,
     content: selectedText,
     role: message.role,
   };
-  
-  const btnWidth = 70;
-  const btnHeight = 28;
-  const margin = 8;
-  let x = rect.left + rect.width / 2 - btnWidth / 2;
-  let y = rect.top - btnHeight - margin;
-  if (y < margin) y = rect.bottom + margin;
-  if (x < margin) x = margin;
-  if (x + btnWidth > window.innerWidth - margin) x = window.innerWidth - btnWidth - margin;
-  
-  quoteButtonPosition.value = { x, y };
-  
-  showQuoteButton.value = true;
+
+  void showQuoteButtonAt(anchor);
+}
+
+function onMessageSelect(event: MouseEvent, message: ChatMessage) {
+  if (shouldIgnoreQuoteSelectEvent(event)) return;
+  // 双击/三击时选区在 mouseup 时尚未就绪，推迟到 microtask（dblclick 也会再触发一次）
+  if (event.detail >= 2) {
+    queueMicrotask(() => tryShowQuoteButtonFromSelection(message));
+    return;
+  }
+  tryShowQuoteButtonFromSelection(message);
+}
+
+function onMessageDoubleClick(event: MouseEvent, message: ChatMessage) {
+  if (shouldIgnoreQuoteSelectEvent(event)) return;
+  tryShowQuoteButtonFromSelection(message);
 }
 
 function quoteSelectedText() {
   if (!pendingQuote.value) return;
-  
-  quotedMessage.value = pendingQuote.value;
+
+  const next = pendingQuote.value;
+  const key = quoteMessageKey(next);
+  if (!quotedMessages.value.some((item) => quoteMessageKey(item) === key)) {
+    quotedMessages.value = [...quotedMessages.value, next];
+  }
   pendingQuote.value = null;
   showQuoteButton.value = false;
-  
+
   const selection = window.getSelection();
   if (selection) {
     selection.removeAllRanges();
   }
-  
+
   nextTick(() => {
     composerRef.value?.focus();
   });
-}
-
-function hideQuoteButton() {
-  setTimeout(() => {
-    showQuoteButton.value = false;
-  }, 200);
 }
 
 let selectionChangeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -2535,12 +2636,16 @@ async function sendChat() {
   let fullPrompt = userText || (imageDataUrls.length ? "请结合附带的图片回答。" : "请结合引用的文件回答。");
 
   let bubbleText = userText;
-  if (quotedMessage.value) {
-    const prefix = quotedMessage.value.role === "assistant" ? "Agent" : "你";
-    const quotedContent = `> ${prefix}: ${quotedMessage.value.content.replace(/\n/g, "\n> ")}`;
+  if (quotedMessages.value.length) {
+    const quotedContent = quotedMessages.value
+      .map((q) => {
+        const prefix = q.role === "assistant" ? "Agent" : "你";
+        return `> ${prefix}: ${q.content.replace(/\n/g, "\n> ")}`;
+      })
+      .join("\n\n");
     fullPrompt = `${quotedContent}\n\n${fullPrompt}`;
-    bubbleText = `${quotedContent}\n\n${userText}`;
-    quotedMessage.value = null;
+    bubbleText = userText ? `${quotedContent}\n\n${userText}` : quotedContent;
+    quotedMessages.value = [];
   }
 
   const refSection =
@@ -2680,6 +2785,7 @@ provide(vibeChatMessageContextKey, {
   chainJumpVisible,
   expandedDiffs,
   onMessageSelect,
+  onMessageDoubleClick,
   copyText,
   editUserMessage,
   undoExchange,

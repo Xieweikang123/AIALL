@@ -769,28 +769,39 @@ button:disabled {
   background: rgba(255, 154, 154, 0.1);
 }
 
-// 引用按钮
+// 引用按钮 - 毛玻璃效果
 .quote-floating {
   position: fixed;
-  z-index: 1000;
+  z-index: 10000;
   padding: 6px 12px;
-  background: var(--primary);
-  color: white;
+  background: rgba(17, 24, 39, 0.72);
+  color: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 6px;
   font-size: 12px;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: 
+    0 2px 10px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
   display: flex;
   align-items: center;
   gap: 4px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: all 0.15s ease;
 }
 
 .quote-floating:hover {
-  background: #388bfd;
+  background: rgba(31, 111, 235, 0.65);
+  border-color: rgba(88, 166, 255, 0.4);
+  box-shadow: 
+    0 4px 16px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .quote-icon {
   font-size: 14px;
+  opacity: 0.8;
 }
 
 // Pending queue
@@ -825,6 +836,13 @@ button:disabled {
 }
 
 // Quoted message preview
+.quoted-preview-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
 .quoted-preview {
   margin-bottom: 10px;
   border: 1px solid rgba(255, 255, 255, 0.12);

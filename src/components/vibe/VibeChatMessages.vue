@@ -6,6 +6,7 @@
     class="msg"
     :class="m.role"
     @mouseup="ctx.onMessageSelect($event, m)"
+    @dblclick="ctx.onMessageDoubleClick($event, m)"
   >
     <div class="msg-avatar" aria-hidden="true">{{ m.role === "user" ? "你" : "AI" }}</div>
     <div class="msg-body">
@@ -18,7 +19,7 @@
           <button v-if="m.role === 'user'" type="button" class="ghost small" title="编辑此消息" @click="ctx.editUserMessage(m.id)">
             编辑
           </button>
-          <button type="button" class="ghost small" title="删除本条问答" @click="ctx.undoExchange(m.id, $event)">
+          <button v-if="m.role === 'user'" type="button" class="ghost small" title="删除本条问答" @click="ctx.undoExchange(m.id, $event)">
             撤销
           </button>
           <button

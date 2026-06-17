@@ -1,5 +1,33 @@
+import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { adaptPatchLineEndings, applyUniquePatch, detectFileEOL } from "./vibeFs";
+import { adaptPatchLineEndings, applyUniquePatch, detectFileEOL, resolveProjectPath } from "./vibeFs";
+
+describe("resolveProjectPath", () => {
+  it("joins relative paths under project root", () => {
+    const root = path.resolve("D:/project/mall");
+    const result = resolveProjectPath(root, ".aiall/project-memory.md");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.path).toBe(path.resolve(root, ".aiall/project-memory.md"));
+      expect(result.relative).toBe(".aiall/project-memory.md");
+    }
+  });
+
+  it("rejects paths outside project root", () => {
+    const root = path.resolve("D:/project/mall");
+    const result = resolveProjectPath(root, "../AIALL/package.json");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("路径超出项目根目录");
+  });
+
+  it("accepts absolute paths inside project root", () => {
+    const root = path.resolve("D:/project/mall");
+    const abs = path.resolve(root, "src/main.ts");
+    const result = resolveProjectPath(root, abs);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.relative).toBe("src/main.ts");
+  });
+});
 
 describe("patch line endings", () => {
   it("detectFileEOL prefers CRLF when present", () => {
