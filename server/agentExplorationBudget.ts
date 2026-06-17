@@ -96,15 +96,24 @@ export function buildExploreSoftCapNudge(totalExploreTurns: number, mode?: strin
   ].join("");
 }
 
-/** Injected when total exploration turns exceed the hard cap — forces text-only output. */
+/** Injected when Plan mode exploration exceeds the hard cap — forces text-only plan output. */
 export function buildForceOutputNudge(totalExploreTurns: number, mode?: string): string {
   const actionHint = mode === "plan"
     ? "请基于已有信息，立即输出结构化修改方案（文件清单 + 代码块 + 改动说明）。不要再调用任何工具。"
-    : "请基于已有信息，立即用中文输出：① 问题根因（或最可能假设）；② 建议修改的文件与函数；③ 具体 patch 思路。不要再调用任何工具。";
+    : "请基于已有信息，立即用中文输出完整结论。不要再调用任何工具。";
   return [
     `【系统强制】已累计 ${totalExploreTurns} 轮仅探索（超过上限 ${MAX_TOTAL_EXPLORE_TURNS}）。`,
     "下一轮已移除所有工具，你只能输出文字。",
     actionHint,
+  ].join("");
+}
+
+/** Build mode hard cap — keep write tools; agent must patch, not output a plan and ask. */
+export function buildBuildExploreForcePatchNudge(totalExploreTurns: number): string {
+  return [
+    `【系统强制·Build】已累计 ${totalExploreTurns} 轮探索且尚未改代码（超过上限 ${MAX_TOTAL_EXPLORE_TURNS}）。`,
+    "你已判断需要修改时，下一轮只能调用 patch_file / write_file / delete_file；禁止 grep / read_file / search。",
+    "必须直接提交代码修改并简要说明；禁止只输出 patch 思路或反问「需要我执行吗」。",
   ].join("");
 }
 

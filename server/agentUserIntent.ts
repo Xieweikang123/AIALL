@@ -105,8 +105,7 @@ export function buildConsultativeBuildHint(): string {
     "【咨询任务·只读】用户本条仅为提问/解释，未要求改代码。",
     "只允许 list_dir / read_file / grep / search_files；禁止 patch_file / write_file / delete_file。",
     "优先 1 次 grep 定位，必要时 read_file 1 个相关文件后即回答；勿连环读取多个无关文件。",
-    "回答须覆盖：定位机制、常见不准场景、mouseup/选区时序（若相关）；勿只罗列函数名。",
-    "用自然语言直接回答；若用户之后要明确修改，请其切换到 Build 并说明改什么，或改用 Ask 继续讨论。",
+    "用自然语言直接回答；若调查后发现代码须改才能符合描述，说明结论并提示用户描述期望行为，勿擅自 patch。",
   ].join("\n");
 }
 

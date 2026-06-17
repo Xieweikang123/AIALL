@@ -177,6 +177,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   const autoResumeSecondsLeft = ref(0);
   const autoResumeTargetId = ref("");
+  const runningAssistantMsgId = ref("");
   const agentUiTick = ref(0);
   const stalledAssistantMsg = ref<ChatMessage | null>(null);
   const planExecutionActive = ref(false);

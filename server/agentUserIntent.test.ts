@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAgentStepClarificationHint,
+  buildAgentStepClarifyContinueHint,
   buildConsultativeBuildHint,
   buildImplementFollowUpHint,
   buildUiDefectBuildHint,
+  historySuggestsQuotePositionFix,
   isAgentStepClarificationPrompt,
   isConsultativeUserPrompt,
   isImplementFollowUpRun,
   isScreenshotVisibilityPrompt,
+  isShortImplementPrompt,
   isUiDefectReportPrompt,
 } from "./agentUserIntent";
 
@@ -103,5 +106,48 @@ describe("buildImplementFollowUpHint", () => {
   it("forbids paste-only instructions", () => {
     expect(buildImplementFollowUpHint()).toContain("禁止");
     expect(buildImplementFollowUpHint()).toContain("patch_file");
+  });
+});
+
+describe("isShortImplementPrompt", () => {
+  it("detects bare short implement prompts", () => {
+    expect(isShortImplementPrompt("修复吧")).toBe(true);
+    expect(isShortImplementPrompt("改一下")).toBe(true);
+    expect(isShortImplementPrompt("动手")).toBe(true);
+    expect(isShortImplementPrompt("执行")).toBe(true);
+  });
+
+  it("rejects non-implementation prompts", () => {
+    expect(isShortImplementPrompt("这是什么")).toBe(false);
+    expect(isShortImplementPrompt("帮我把按钮改成红色")).toBe(false);
+  });
+});
+
+describe("historySuggestsQuotePositionFix", () => {
+  it("returns true when recent history mentions quote positioning", () => {
+    const history = [
+      { role: "assistant", content: "getSelectionAnchorRect 获取选区锚点位置" },
+      { role: "user", content: "修复吧" },
+    ];
+    expect(historySuggestsQuotePositionFix(history)).toBe(true);
+  });
+
+  it("returns false for empty or unrelated history", () => {
+    expect(historySuggestsQuotePositionFix([])).toBe(false);
+    expect(historySuggestsQuotePositionFix(undefined)).toBe(false);
+    expect(historySuggestsQuotePositionFix([{ role: "user", content: "今天天气不错" }])).toBe(false);
+  });
+
+  it("detects quote-floating and showQuoteButtonAt keywords", () => {
+    expect(historySuggestsQuotePositionFix([{ role: "assistant", content: "quote-floating 定位有误" }])).toBe(true);
+    expect(historySuggestsQuotePositionFix([{ role: "assistant", content: "showQuoteButtonAt 需要修改" }])).toBe(true);
+  });
+});
+
+describe("buildAgentStepClarifyContinueHint", () => {
+  it("contains tool prohibition and key positioning terms", () => {
+    const hint = buildAgentStepClarifyContinueHint();
+    expect(hint).toContain("禁止");
+    expect(hint).toContain("show*At");
   });
 });

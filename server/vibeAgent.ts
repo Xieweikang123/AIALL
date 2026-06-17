@@ -38,6 +38,7 @@ import {
   buildExploreInterimDiagnosisNudge,
   buildExploreSoftCapNudge,
   buildFileBreadthNudge,
+  buildBuildExploreForcePatchNudge,
   buildForceOutputNudge,
   buildPatchAnchorForcePatchNudge,
   buildPatchRequiredRetryNudge,
@@ -602,10 +603,11 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "用户可能在消息中附带截图或图片；若已附带，请结合图片内容理解需求并回答，不要声称无法查看图片。",
     "用户附截图询问界面/功能时：先描述截图所见，再判断是否属于本项目（优先查 src/views、src/components），勿默认是 GitHub Desktop、VS Code 等外部应用。",
     "用户针对截图局部提问（配色、按钮、某块区域）时：讨论阶段只谈其所指可见范围，勿擅自扩大到整页/全项目样式盘点；若用户明确要求修改，可在该范围内 grep/read 对应组件后 patch_file；用户明确说「整个/整页/全面板」时可按扩大后的范围实施。",
-    "若用户仅为提问/解释（如「是什么」「为什么」「点哪里」「怎么工作」）且未明确要求改代码：只读探索后用自然语言回答，禁止 patch_file / write_file / delete_file；需要改代码时请用户明确说明改什么。",
+    "若系统标注【咨询任务·只读】：用户本条仅为提问/解释，只读探索后自然语言回答，禁止 patch_file / write_file / delete_file。",
+    "其余 Build 任务：一旦你判断须改代码才能满足用户（含 bug、实测与描述不符、功能/体验需求），探索完成后同一轮立即 patch_file / write_file，禁止只输出方案并问「需要我执行吗」。",
     "用户要求「点击输入框任意位置可输入/聚焦」时：先 read_file 核对父容器（如 chat-input-box）与 contenteditable 子元素的 DOM 层级与命中区域；常见修复为外层 mousedown 转发 focus 或子元素 min-height:100% 填满，勿默认只加 padding。",
     "工作流程：先 grep / search_files 快速定位（通常 1 轮），read_file 读关键片段，然后 patch_file / write_file 修改。",
-    "Bug 修复：当用户报告问题（如「点击没反应」「不工作」「没效果」「报错了」等）时，默认理解为「帮我修复」，分析后直接 patch_file / write_file 执行修改，不要停下来问「需要我实施吗？」。",
+    "Bug / 实测不符：用户报告行为不对、没效果、试了不行等，默认理解为须修复；定位后直接 patch，勿停下来征求确认。",
     "区分问题类型：「按钮跑别处/位置不对」若控件与选区在空间上分离，优先查 position:fixed/absolute 或 Teleport 浮层定位，勿默认只改 flex；「点击没反应」「不工作」查事件处理/JS 逻辑。同一组件在连续消息中被提及时，每条消息是独立问题，不要因为上一条修了布局就假设这一条也是布局问题。",
     "短追问（如「需要吗」「要不要」「对吗」且未指明新对象）必须承接上一条助手回复的话题作答，勿因会话更早主题偏离；若意图仍不清晰，用一句话澄清，禁止回顾已完成工作清单或擅自改代码。",
     "效率：探索不超过 2 轮；在已确认要改代码的任务中，信息足够后必须写入，不要连续多轮只读；同一轮可并行多个 read_file / grep。",
@@ -1246,6 +1248,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   let englishPlanningNudgeSent = false;
   let uiDefectForcePatchNudgeSent = false;
   let patchAnchorForcePatchNudgeSent = false;
+  let buildExploreForcePatchNudgeSent = false;
   let agentStepClarifyPending = agentStepClarifyRun;
   /** Track unique files read in explore-only turns to detect breadth sprawl. */
   const exploreFilesRead = new Set<string>();
@@ -1335,18 +1338,18 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       !isPlanExplore &&
       !readOnlyBuildRun &&
       writeStage !== null &&
-      shouldForcePatchAfterAnchorLocated(
-        patchAnchorLocated,
-        patchAnchorForcePending,
-        buildExploreHardCapReached,
-        implementFollowUpRun,
-      );
+      (buildExploreHardCapReached ||
+        shouldForcePatchAfterAnchorLocated(
+          patchAnchorLocated,
+          patchAnchorForcePending,
+          buildExploreHardCapReached,
+          implementFollowUpRun,
+        ));
     const forceTextOutput =
       !forcePatchOutput &&
       ((isAsk && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_HARD) ||
         (isPlanExplore && totalExploreTurns >= PLAN_MAX_TOTAL_EXPLORE_HARD) ||
-        (readOnlyBuildRun && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_HARD) ||
-        buildExploreHardCapReached);
+        (readOnlyBuildRun && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_HARD));
     const stripWideSearch =
       !forceTextOutput &&
       !forcePatchOutput &&
@@ -1361,6 +1364,18 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         content: buildUiDefectForcePatchNudge(totalExploreTurns),
       });
       uiDefectForcePatchNudgeSent = true;
+    } else if (
+      forcePatchOutput &&
+      buildExploreHardCapReached &&
+      !buildExploreForcePatchNudgeSent &&
+      !uiDefectBuildRun &&
+      !patchAnchorForcePending
+    ) {
+      messages.push({
+        role: "system",
+        content: buildBuildExploreForcePatchNudge(totalExploreTurns),
+      });
+      buildExploreForcePatchNudgeSent = true;
     } else if (forcePatchOutput && patchAnchorForcePending && !patchAnchorForcePatchNudgeSent) {
       messages.push({
         role: "system",

@@ -74,9 +74,14 @@ export function resolveAgentRunProfile(input: ResolveAgentRunProfileInput): Agen
   if (mode === "build") {
     const scopedFiles = resolveScopedTargetFiles(input);
     if (hasDirectImplementationIntent(body || trimmed)) {
+      const fromProposal = lastAssistantContent ? extractPlanFilePaths(lastAssistantContent) : [];
+      const targetFiles = mergeTargetFiles(
+        scopedFiles.length ? scopedFiles : undefined,
+        fromProposal.length ? fromProposal : undefined,
+      );
       return {
         kind: "execute_plan",
-        targetFiles: scopedFiles.length ? scopedFiles : undefined,
+        targetFiles,
         userIntent: summarizeIntent(body || trimmed),
       };
     }

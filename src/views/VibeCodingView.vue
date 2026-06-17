@@ -1112,6 +1112,8 @@ function isChatNearBottom(): boolean {
 
 function onChatScroll() {
   chatPinnedToBottom = isChatNearBottom();
+  // 滚动时隐藏引用按钮，避免 fixed 定位与选区脱节
+  if (showQuoteButton.value) hideQuoteButtonNow();
 }
 
 function resetChatScrollPin() {
@@ -1405,6 +1407,17 @@ registerEscapeDismiss(
 );
 registerEscapeDismiss(projectHistoryOpen, closeProjectHistory, ESCAPE_DISMISS_PRIORITY.PROJECT_HISTORY);
 registerEscapeDismiss(showQuoteButton, hideQuoteButtonNow, ESCAPE_DISMISS_PRIORITY.QUOTE_BUTTON);
+// 滚动时隐藏引用按钮，避免 fixed 定位与选区脱节
+onMounted(() => {
+  nextTick(() => {
+    const scrollHost = chatPanelRef.value?.chatScrollRef;
+    if (scrollHost) {
+      scrollHost.addEventListener('scroll', () => {
+        if (showQuoteButton.value) hideQuoteButtonNow();
+      }, { passive: true });
+    }
+  });
+});
 registerEscapeDismiss(
   () => quotedMessages.value.length > 0,
   () => {

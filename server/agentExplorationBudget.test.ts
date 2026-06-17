@@ -3,6 +3,7 @@ import {
   ASK_EXPLORE_TURN_BUDGET,
   buildAskExploreBudgetNudge,
   buildAskForceAnswerNudge,
+  buildBuildExploreForcePatchNudge,
   buildExploreBudgetNudge,
   buildExploreInterimDiagnosisNudge,
   buildPatchAnchorForcePatchNudge,
@@ -48,5 +49,11 @@ describe("agentExplorationBudget", () => {
     const nudge = buildPatchAnchorForcePatchNudge();
     expect(nudge).toContain("只能调用 patch_file");
     expect(nudge).toContain("禁止重复输出截图分析");
+  });
+
+  it("builds generic build hard-cap force-patch nudge", () => {
+    const nudge = buildBuildExploreForcePatchNudge(10);
+    expect(nudge).toContain("patch_file");
+    expect(nudge).toContain("禁止只输出 patch 思路");
   });
 });
