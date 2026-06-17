@@ -53,10 +53,10 @@ function wrapToolSummaryBlocks(el: HTMLElement) {
     wrapper.className = "tool-summary-block";
     wrapper.setAttribute("data-collapsed", "false");
 
-    // Header (clickable)
+    // Header (clickable) — count items first
     const header = document.createElement("div");
     header.className = "tool-summary-header";
-    header.innerHTML = `<span class="tool-summary-icon">⚙️</span><span class="tool-summary-title">工具摘要</span><span class="tool-summary-toggle">▾</span>`;
+    header.innerHTML = `<span class="tool-summary-icon">⚙️</span><span class="tool-summary-count"></span><span class="tool-summary-toggle">▾</span>`;
 
     // Content (collapsible)
     const content = document.createElement("div");
@@ -95,8 +95,8 @@ function wrapToolSummaryBlocks(el: HTMLElement) {
         if (text.includes(key)) { matchedColor = color; break; }
       }
       if (matchedColor) {
-        li.style.borderLeftColor = matchedColor;
-        li.style.background = `${matchedColor}08`;
+        li.style.setProperty("--dot-color", matchedColor);
+        li.style.background = `${matchedColor}06`;
       }
       // Bold the action type prefix before ":"
       const colonIdx = text.indexOf(":");
@@ -106,6 +106,13 @@ function wrapToolSummaryBlocks(el: HTMLElement) {
         li.innerHTML = `<strong style="color: ${matchedColor || 'rgba(255,255,255,0.7)'}; font-weight: 700; font-size: 11px; letter-spacing: 0.3px;">${prefix}</strong><span style="color: rgba(255,255,255,0.5); font-size: 12px;">${rest}</span>`;
       }
     });
+
+    // Set tool call count badge
+    const countEl = header.querySelector(".tool-summary-count") as HTMLSpanElement;
+    if (countEl) {
+      const actionCount = content.querySelectorAll("li").length;
+      countEl.textContent = String(actionCount);
+    }
 
     // Toggle click
     header.addEventListener("click", () => {
@@ -301,90 +308,84 @@ onUpdated(() => postProcess());
   font-style: italic;
 }
 
-/* ===== Tool Summary Block ===== */
+/* ===== Tool Summary Block (compact) ===== */
 .msg-markdown :deep(.tool-summary-block) {
-  margin: 12px 0;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
+  margin: 4px 0;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
   overflow: hidden;
-  transition: all 0.25s ease;
-  backdrop-filter: blur(8px);
 }
 
-.msg-markdown :deep(.tool-summary-block:hover) {
-  border-color: rgba(255, 255, 255, 0.15);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-  transform: translateY(-1px);
+.tool-summary-block {
+  margin: 4px 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  overflow: hidden;
 }
 
 .msg-markdown :deep(.tool-summary-header) {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
+  gap: 5px;
+  padding: 3px 10px;
   cursor: pointer;
   user-select: none;
-  transition: all 0.2s ease;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .msg-markdown :deep(.tool-summary-header:hover) {
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.msg-markdown :deep(.tool-summary-icon) {
-  font-size: 14px;
-  opacity: 0.7;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
-}
-
-.tool-summary-block {
-  margin: 8px 0;
-  border-radius: 8px;
   background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  overflow: hidden;
-  transition: all 0.2s ease;
-}
-
-.tool-summary-block:hover {
-  border-color: rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
 }
 
 .tool-summary-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
+  gap: 5px;
+  padding: 3px 10px;
   cursor: pointer;
   user-select: none;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  transition: background 0.2s ease;
 }
 
 .tool-summary-header:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
 }
 
-.tool-summary-icon {
-  font-size: 14px;
+.tool-summary-icon,
+.msg-markdown :deep(.tool-summary-icon) {
+  font-size: 11px;
+  opacity: 0.5;
+}
+
+.tool-summary-count,
+.msg-markdown :deep(.tool-summary-count) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
 }
 
 .msg-markdown :deep(.tool-summary-title) {
-  font-size: 12px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.5);
-  letter-spacing: 0.5px;
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.4);
   flex: 1;
   text-transform: uppercase;
 }
 
 .msg-markdown :deep(.tool-summary-toggle) {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.35);
-  transition: transform 0.3s ease;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.25);
+  margin-left: auto;
+  transition: transform 0.2s ease;
 }
 
 .msg-markdown :deep(.tool-summary-block[data-collapsed="false"] .tool-summary-toggle) {
@@ -397,29 +398,29 @@ onUpdated(() => postProcess());
 
 /* Collapsible content */
 .msg-markdown :deep(.tool-summary-content) {
-  max-height: 400px;
+  max-height: 300px;
   overflow-y: auto;
   overflow-x: hidden;
-  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: max-height 0.25s ease, opacity 0.2s ease;
   opacity: 1;
-  padding: 0 14px 10px;
+  padding: 0 8px 4px;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
 }
 
 .msg-markdown :deep(.tool-summary-content::-webkit-scrollbar) {
-  width: 4px;
+  width: 3px;
 }
 
 .msg-markdown :deep(.tool-summary-content::-webkit-scrollbar-thumb) {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.15);
   border-radius: 999px;
 }
 
 .msg-markdown :deep(.tool-summary-block[data-collapsed="true"] .tool-summary-content) {
   max-height: 0;
   opacity: 0;
-  padding: 0 14px;
+  padding: 0 8px;
   overflow: hidden;
 }
 
@@ -431,42 +432,43 @@ onUpdated(() => postProcess());
 /* Style list items inside tool summary */
 .msg-markdown :deep(.tool-summary-content > ul) {
   margin: 0;
-  padding: 8px 12px;
+  padding: 2px 4px;
   list-style: none;
 }
 
 .msg-markdown :deep(.tool-summary-content > ul > li) {
-  margin: 4px 0;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
-  line-height: 1.5;
-  padding: 6px 10px;
-  border-radius: 6px;
+  margin: 1px 0;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  line-height: 1.4;
+  padding: 2px 6px;
+  border-radius: 4px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  transition: all 0.15s ease;
-  background: rgba(255, 255, 255, 0.02);
+  gap: 6px;
+  background: transparent;
+  position: relative;
 }
 
 .msg-markdown :deep(.tool-summary-content > ul > li:hover) {
-  background: rgba(255, 255, 255, 0.06);
-  transform: translateX(2px);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .msg-markdown :deep(.tool-summary-content > ul > li::before) {
   display: none;
 }
 
-/* Color-coded action prefix badges */
-.msg-markdown :deep(.tool-summary-content > ul > li) {
-  border-left: 3px solid rgba(255, 255, 255, 0.1);
-  position: relative;
-}
-
-.msg-markdown :deep(.tool-summary-content > ul > li:has(strong)) {
-  border-left-width: 4px;
-  border-left-style: solid;
+/* Color-coded dot before each list item */
+.msg-markdown :deep(.tool-summary-content > ul > li:has(strong))::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--dot-color, rgba(255, 255, 255, 0.15));
+  flex-shrink: 0;
+  margin-right: 2px;
+  box-shadow: 0 0 3px var(--dot-color, transparent);
 }
 
 /* ─── 语法高亮 ─────────────────────────────────────── */

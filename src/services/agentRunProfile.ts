@@ -1,3 +1,4 @@
+import { buildImmediateTopicFollowUpHint } from "../../server/agentTopicFollowUp";
 import { buildUiScopeFollowUpHint } from "../../server/visionMessage";
 import {
   compressHistoryForExecution,
@@ -87,7 +88,12 @@ export function enrichAgentUserPrompt(
   prompt: string,
   options?: { lastAssistantContent?: string; hasImages?: boolean },
 ): string {
-  return buildUiScopeFollowUpHint(prompt, options?.lastAssistantContent);
+  const withUiScope = buildUiScopeFollowUpHint(prompt, options?.lastAssistantContent);
+  return buildImmediateTopicFollowUpHint(
+    withUiScope,
+    options?.lastAssistantContent,
+    prompt,
+  );
 }
 
 export function buildAgentPromptForProfile(prompt: string, profile: AgentRunProfile): string {

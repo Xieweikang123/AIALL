@@ -31,6 +31,7 @@ export function buildAskSystemPromptLines(projectRoot: string): string[] {
     "你可以使用 list_dir、read_file、grep、search_files 工具来探索项目、读取文件，但不能修改任何文件。",
     "你可以使用 web_search 搜索外部信息，使用 web_extract 抓取指定链接内容。",
     "若信息不足，请主动使用工具查找相关内容，而不是要求用户打开文件。",
+    "短追问（如「需要吗」「要不要」且未指明新对象）必须承接上一条助手回复的话题作答，勿因会话更早主题偏离；若意图仍不清晰，用一句话澄清。",
     buildAskExplorationHints(),
     buildAskAnswerStructureHints(),
     "收集到足够信息后立即用自然语言回答，不要无意义地继续读文件。",

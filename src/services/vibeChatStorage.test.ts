@@ -119,6 +119,24 @@ describe("buildAgentHistoryFromMessages", () => {
     expect(cleaned[0].content).toBe("正文");
   });
 
+  it("strips leaked tool action bullet lines without [工具摘要] header", () => {
+    const leaked = [
+      "- 读取文件：读取 62 行内容",
+      "- 读取文件：读取 51 行内容",
+      "- 局部修改：已修改 src/components/ChatMarkdown.vue",
+    ].join("\n");
+    expect(stripToolSummaryFromAssistantContent(leaked)).toBe("");
+  });
+
+  it("keeps prose while stripping trailing tool action lines", () => {
+    const mixed = [
+      "已修复 Markdown 渲染问题。",
+      "- 读取文件：读取 20 行内容",
+      "- 局部修改：已修改 src/foo.ts",
+    ].join("\n");
+    expect(stripToolSummaryFromAssistantContent(mixed)).toBe("已修复 Markdown 渲染问题。");
+  });
+
   it("shapes history for execute_plan profile", () => {
     const plan = "## 修改方案\n改 `src/foo.ts`：\n```ts\nconst x = 1;\n```";
     const base = buildAgentHistoryFromMessages([

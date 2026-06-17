@@ -102,6 +102,17 @@ describe("resolveAgentRunProfile", () => {
     expect(hint).not.toBe("我要的效果是，点击输入框任何位置，都能输入");
   });
 
+  it("enrichAgentUserPrompt anchors short follow-up to prior explanation", () => {
+    const prior = [
+      "这个错误出现在 `patch_file` 工具调用时：",
+      "**原因**：须逐字符完全一致。",
+      "**解决方式**：重新 read_file 后再 patch。",
+    ].join("\n");
+    const hint = enrichAgentUserPrompt("需要优化吗", { lastAssistantContent: prior });
+    expect(hint).toContain("【延续上一轮话题】");
+    expect(hint).toContain("需要优化吗");
+  });
+
   it("uses execute_plan for 继续 after partial progress on resume", () => {
     const profile = resolveAgentResumeRunProfile(
       {

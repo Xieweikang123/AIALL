@@ -217,10 +217,31 @@ export type AgentHistorySourceMessage = {
 
 const TOOL_SUMMARY_BLOCK_RE = /\n*(?:\[工具摘要\]\n(?:- .*(?:\n|$))+)+\n*/g;
 
-/** Strip [工具摘要] blocks echoed by the model or leaked into stored assistant content. */
+/** Lines echoing tool step labels + summaries (model leak, with or without [工具摘要] header). */
+const TOOL_ACTION_LINE_RE =
+  /^[-*•>\s]*(?:读取文件|列出目录|浏览目录|搜索代码|搜索内容|搜索文件|写入文件|局部修改|删除文件|执行命令|联网搜索|抓取网页)[：:]\s*.+$/u;
+
+const TOOL_SUMMARY_HEADING_RE = /^#{1,3}\s*工具摘要\s*$/;
+
+/** Strip [工具摘要] blocks and leaked tool-action bullet lines from assistant text shown to the user. */
 export function stripToolSummaryFromAssistantContent(text: string): string {
-  if (!text || !text.includes("[工具摘要]")) return text;
-  return text.replace(TOOL_SUMMARY_BLOCK_RE, "\n").trim();
+  if (!text?.trim()) return text;
+
+  let result = text.replace(TOOL_SUMMARY_BLOCK_RE, "\n");
+  const kept: string[] = [];
+
+  for (const line of result.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      kept.push("");
+      continue;
+    }
+    if (TOOL_SUMMARY_HEADING_RE.test(trimmed)) continue;
+    if (TOOL_ACTION_LINE_RE.test(trimmed)) continue;
+    kept.push(line);
+  }
+
+  return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function summarizeToolsForHistory(

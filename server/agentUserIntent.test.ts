@@ -17,6 +17,11 @@ describe("isConsultativeUserPrompt", () => {
   it("rejects automation/resume prompts", () => {
     expect(isConsultativeUserPrompt("【方案执行阶段】请直接动手")).toBe(false);
   });
+
+  it("treats short evaluative follow-ups as consultative despite 优化", () => {
+    expect(isConsultativeUserPrompt("需要优化吗")).toBe(true);
+    expect(isConsultativeUserPrompt("要不要调整呢")).toBe(true);
+  });
 });
 
 describe("buildConsultativeBuildHint", () => {
