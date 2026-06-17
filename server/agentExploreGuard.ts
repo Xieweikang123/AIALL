@@ -68,9 +68,33 @@ export function buildPatchAnchorLocatedNudge(): string {
 export const VISION_MISREAD_BLOCKED_GREP_RE =
   /chat-action-row|chat-status-row|chat-bottom|transform\s*\|\s*will-change/i;
 
+/** After anchor located or Teleport→body confirmed — low-signal detours. */
+export const POST_LOCATE_BLOCKED_GREP_RE =
+  /(?:^|\|)transform(?:\s*\||$)|will-change|chat-action-row|chat-status-row|chat-bottom/i;
+
+export function textConfirmsTeleportToBody(text: string): boolean {
+  return /Teleport[\s\S]{0,80}to\s*=\s*["']body["']/i.test(text) || /<Teleport[^>]*\s+to=["']body["']/i.test(text);
+}
+
 export function isBlockedGrepAfterVisionMisread(pattern: string, visionMisreadActive: boolean): boolean {
   if (!visionMisreadActive) return false;
   return VISION_MISREAD_BLOCKED_GREP_RE.test(pattern.trim());
+}
+
+export function isBlockedGrepAfterLocate(
+  pattern: string,
+  patchAnchorLocated: boolean,
+  teleportBodyConfirmed: boolean,
+): boolean {
+  if (!patchAnchorLocated && !teleportBodyConfirmed) return false;
+  const p = pattern.trim();
+  if (POST_LOCATE_BLOCKED_GREP_RE.test(p)) return true;
+  if (teleportBodyConfirmed && /\btransform\b/i.test(p)) return true;
+  return false;
+}
+
+export function buildBlockedGrepAfterLocateMessage(pattern: string): string {
+  return `错误：已确认 Teleport/fixed 浮层或已定位 show*At/getSelection*，不应 grep「${pattern}」。请 patch 坐标计算逻辑，勿查 transform 或底栏 flex。`;
 }
 
 export function buildBlockedGrepMessage(pattern: string): string {
@@ -93,21 +117,34 @@ export function shouldNudgeEnglishPlanning(text: string): boolean {
 export type ToolGuardContext = {
   readFileRanges: Map<string, ReadLineRange[]>;
   visionMisreadActive: boolean;
+  patchAnchorLocated: boolean;
+  teleportBodyConfirmed: boolean;
 };
 
 const VISION_MARKER_RE = /\s*\[图已理解\]\s*/g;
 
 /** Remove internal vision-first-turn marker from user-visible assistant text. */
 export function sanitizeAgentUserVisibleText(text: string): string {
-  return text.replace(VISION_MARKER_RE, "").trim();
+  return dedupeRepeatedClauses(text.replace(VISION_MARKER_RE, "")).trim();
 }
 
-const WRITE_DONE_RE = /已(?:经)?(?:修复|修改|写入|调整|完成)|改动(?:如下|点)|```[\s\S]*```/i;
+function dedupeRepeatedClauses(text: string): string {
+  return text.replace(/(.{4,48}?)[。．.]{2,}\s*\1[。．.]?/g, "$1。");
+}
+
+const WRITE_DONE_RE = /已(?:经)?(?:修复|修改|写入|调整|完成)|改动(?:如下|点)|file_diff|已写入/i;
+
+const MANUAL_PASTE_INSTRUCTION_RE =
+  /请将.{0,24}(?:应用|粘贴|手动)|请自行.{0,12}(?:应用|修改|粘贴)|手动.{0,8}(?:应用|修改|粘贴)/i;
 
 /** True when the model re-output screenshot analysis instead of patching under force-patch. */
 export function isAnalysisOnlyReplyUnderForcePatch(text: string): boolean {
   const body = sanitizeAgentUserVisibleText(text);
   if (!body) return true;
+  if (MANUAL_PASTE_INSTRUCTION_RE.test(body)) return true;
+  if (/修复方案|以下是具体修改|###\s*修改/i.test(body) && /```[\s\S]+```/.test(body) && !WRITE_DONE_RE.test(body)) {
+    return true;
+  }
   if (WRITE_DONE_RE.test(body)) return false;
   return (
     /截图|读图|图已理解|核心问题|根因|getSelection|getClientRects|position:\s*fixed/i.test(body) &&
@@ -119,7 +156,19 @@ export function shouldForcePatchAfterAnchorLocated(
   patchAnchorLocated: boolean,
   patchAnchorForcePending: boolean,
   buildExploreHardCapReached: boolean,
+  implementFollowUpRun = false,
 ): boolean {
+  if (implementFollowUpRun && writePendingForImplement(patchAnchorLocated, patchAnchorForcePending, buildExploreHardCapReached)) {
+    return true;
+  }
   if (!patchAnchorLocated) return false;
   return patchAnchorForcePending || buildExploreHardCapReached;
+}
+
+function writePendingForImplement(
+  patchAnchorLocated: boolean,
+  patchAnchorForcePending: boolean,
+  buildExploreHardCapReached: boolean,
+): boolean {
+  return patchAnchorForcePending || patchAnchorLocated || buildExploreHardCapReached;
 }

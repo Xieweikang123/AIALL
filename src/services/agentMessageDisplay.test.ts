@@ -252,6 +252,7 @@ describe("finalizeAssistantBubbleContent", () => {
 
   it("builds aborted partial-write summary", () => {
     expect(buildWrittenFilesSummary(["a.ts"], true)).toContain("运行中断");
+    expect(buildWrittenFilesSummary(["a.ts"], true)).toContain("点击下方");
   });
 
   it("detects truncated final answers ending with a colon", () => {

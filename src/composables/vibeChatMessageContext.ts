@@ -33,11 +33,15 @@ export interface VibeChatMessageContext {
   undoExchange: (messageId: string, event?: MouseEvent) => void;
   resendFromMessage: (messageId: string) => void;
   canResumeAgentRun: (msg: VibeChatMessageItem) => boolean;
+  isPartialWrittenRunInterrupt: (msg: VibeChatMessageItem) => boolean;
   resumeAgentRun: (messageId: string) => void;
+  resolveAgentResumeButtonLabel: (msg: VibeChatMessageItem) => string;
   isAssistantStalled: (msg: VibeChatMessageItem) => boolean;
   stopAgent: () => void;
   forceRecoverStalledRun: (messageId: string) => void;
   recoverableAgentErrorHint: (msg: VibeChatMessageItem, reason: string) => string;
+  agentStatusDisplay: (msg: VibeChatMessageItem) => string;
+  buildAgentRunningStatusText: (msg: VibeChatMessageItem) => string;
   hasAgentActivity: (msg: VibeChatMessageItem) => boolean;
   isAgentRunning: (msg: VibeChatMessageItem) => boolean;
   patchAssistantMsg: (id: string, patch: Record<string, unknown>) => void;

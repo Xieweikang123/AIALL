@@ -1,4 +1,8 @@
-import { resolveAssistantBubbleContent } from "./agentMessageDisplay";
+import {
+  hasSubstantiveAgentSummary,
+  PARTIAL_WRITE_ABORT_HEADING,
+  resolveAssistantBubbleContent,
+} from "./agentMessageDisplay";
 import type { AgentRoundGroup } from "./agentRoundGroups";
 
 export type AgentProgressTool = {
@@ -211,7 +215,7 @@ export function inferAgentRecoveryFlags(msg: AgentProgressSource & {
   statusLog?: string[];
 }): AgentRecoveryFlags | null {
   if (msg.role && msg.role !== "assistant") return null;
-  if (msg.agentAborted || msg.streaming) return null;
+  if (msg.streaming) return null;
 
   const completedTurns = resolveAgentCompletedTurns(msg);
   const maxTurns = resolveAgentMaxTurnsFromProgress(msg);
@@ -222,6 +226,16 @@ export function inferAgentRecoveryFlags(msg: AgentProgressSource & {
       agentFailureReason: buildAgentMaxTurnsExhaustedMessage(maxTurns),
     };
   }
+
+  if (isPartialWrittenRunInterrupt(msg) && hasRecoverableAgentProgress(msg)) {
+    return {
+      agentFailed: true,
+      agentRecoverable: true,
+      agentFailureReason: PARTIAL_RUN_RESUME_REASON,
+    };
+  }
+
+  if (msg.agentAborted) return null;
 
   if (msg.agentRecoveryDismissed) return null;
 
@@ -340,6 +354,44 @@ export function summarizeAgentProgress(msg: AgentProgressSource): string {
   return lines.join("\n");
 }
 
+export const PARTIAL_RUN_RESUME_REASON = "连接在总结前结束（部分修改已落盘）";
+
+/** True when the bubble shows partial writes after an aborted run. */
+export function isPartialWrittenRunInterrupt(
+  msg: AgentProgressSource & { content?: string },
+): boolean {
+  if (!(msg.writtenFiles?.length ?? 0)) return false;
+  return Boolean(msg.content?.includes(PARTIAL_WRITE_ABORT_HEADING));
+}
+
+/** Offer manual resume when a stopped run wrote files but skipped the final summary. */
+export function shouldOfferPartialRunResume(params: {
+  wasAborted: boolean;
+  writtenFiles?: string[];
+  msg: AgentProgressSource;
+}): boolean {
+  if (!params.wasAborted) return false;
+  if ((params.writtenFiles?.length ?? 0) === 0) return false;
+  if (!hasRecoverableAgentProgress(params.msg)) return false;
+  return !hasSubstantiveAgentSummary(params.msg);
+}
+
+export function resolveAgentResumeButtonLabel(
+  msg: AgentProgressSource & { content?: string },
+): string {
+  return isPartialWrittenRunInterrupt(msg) ? "继续" : "恢复运行";
+}
+
+export function buildAgentRunningStatusText(
+  msg: AgentProgressSource & { writtenFiles?: string[] },
+  statusText: string,
+): string {
+  const parts = [statusText.trim() || "Agent 运行中…"];
+  const writtenCount = msg.writtenFiles?.length ?? 0;
+  if (writtenCount > 0) parts.push(`已落盘 ${writtenCount} 个文件`);
+  return parts.join(" · ");
+}
+
 export function buildAgentResumePrompt(
   msg: AgentProgressSource,
   originalUserPrompt: string,
@@ -366,11 +418,17 @@ export function canResumeAgentRun(msg: AgentProgressSource & {
   agentRecoveryDismissed?: boolean;
   streaming?: boolean;
 }): boolean {
-  if (msg.agentAborted || msg.streaming || msg.agentRecoveryDismissed) return false;
-  return Boolean(msg.agentFailed && msg.agentRecoverable);
+  if (msg.streaming || msg.agentRecoveryDismissed) return false;
+  if (!msg.agentFailed || !msg.agentRecoverable) return false;
+  if (msg.agentAborted && !isPartialWrittenRunInterrupt(msg)) return false;
+  return true;
 }
 
 export function recoverableAgentErrorHint(msg: AgentProgressSource, errorMessage: string): string {
+  if (isPartialWrittenRunInterrupt(msg)) {
+    const count = msg.writtenFiles?.length ?? 0;
+    return `运行已中断，${count} 个文件已落盘但未生成总结。可点击「继续」完成剩余任务。`;
+  }
   const turns = resolveAgentCompletedTurns(msg);
   const toolCount = msg.tools?.filter((t) => !t.running).length ?? 0;
   const progress =

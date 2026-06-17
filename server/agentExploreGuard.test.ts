@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   checkOverlappingRead,
   isAnalysisOnlyReplyUnderForcePatch,
+  isBlockedGrepAfterLocate,
   isBlockedGrepAfterVisionMisread,
   readLineRangeFromArgs,
   readRangesOverlap,
@@ -9,6 +10,7 @@ import {
   sanitizeAgentUserVisibleText,
   shouldForcePatchAfterAnchorLocated,
   shouldNudgeEnglishPlanning,
+  textConfirmsTeleportToBody,
   textIndicatesPatchAnchor,
 } from "./agentExploreGuard";
 
@@ -46,11 +48,27 @@ describe("agentExploreGuard", () => {
     expect(sanitizeAgentUserVisibleText("分析完毕 [图已理解]")).toBe("分析完毕");
   });
 
+  it("dedupes repeated planning clauses", () => {
+    expect(sanitizeAgentUserVisibleText("让我看看定位逻辑。。让我看看定位逻辑。")).toBe("让我看看定位逻辑。");
+  });
+
+  it("confirms Teleport to body from file content", () => {
+    expect(textConfirmsTeleportToBody('<Teleport to="body">')).toBe(true);
+    expect(textConfirmsTeleportToBody("<div>no teleport</div>")).toBe(false);
+  });
+
+  it("blocks transform grep after anchor or Teleport confirmed", () => {
+    expect(isBlockedGrepAfterLocate("transform", false, true)).toBe(true);
+    expect(isBlockedGrepAfterLocate("chat-action-row", true, false)).toBe(true);
+    expect(isBlockedGrepAfterLocate("quote-floating", true, false)).toBe(false);
+  });
+
   it("detects analysis-only reply under force-patch", () => {
     const analysis =
       "核心问题：getSelectionAnchorRect 坐标异常，getClientRects 可能不对 [图已理解]";
     expect(isAnalysisOnlyReplyUnderForcePatch(analysis)).toBe(true);
     expect(isAnalysisOnlyReplyUnderForcePatch("已修复 getSelectionAnchorRect，改动如下：…")).toBe(false);
+    expect(isAnalysisOnlyReplyUnderForcePatch("请将这两处修改应用到 src/views/VibeCodingView.vue")).toBe(true);
   });
 
   it("force-patch when anchor located and pending", () => {
@@ -58,5 +76,9 @@ describe("agentExploreGuard", () => {
     expect(shouldForcePatchAfterAnchorLocated(true, false, true)).toBe(true);
     expect(shouldForcePatchAfterAnchorLocated(true, false, false)).toBe(false);
     expect(shouldForcePatchAfterAnchorLocated(false, true, true)).toBe(false);
+  });
+
+  it("force-patch on implement follow-up even before tool anchor in this run", () => {
+    expect(shouldForcePatchAfterAnchorLocated(false, true, false, true)).toBe(true);
   });
 });

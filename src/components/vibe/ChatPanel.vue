@@ -237,6 +237,10 @@
           <span v-else-if="stalledAssistantMsg" class="chat-recovery-hint chat-stall-hint">
             运行似乎已卡住
           </span>
+          <span v-else-if="chatSending && agentRunningStatus" class="chat-running-hint">
+            <span class="status-pulse" aria-hidden="true" />
+            {{ agentRunningStatus }}
+          </span>
           <span v-else-if="recoverableAssistantMsg && !chatSending" class="chat-recovery-hint">
             Agent 已中断，可恢复
           </span>
@@ -329,7 +333,7 @@
               :disabled="!configReady || !projectOpened"
               @click="$emit('resume-agent-run', recoverableAssistantMsg.id)"
             >
-              {{ autoResumeSecondsLeft > 0 ? "立即恢复" : "恢复运行" }}
+              {{ autoResumeSecondsLeft > 0 ? "立即继续" : recoverableResumeLabel }}
             </button>
             <button v-if="chatSending" type="button" class="secondary" @click="$emit('stop-agent')">停止</button>
             <button type="button" class="primary send-btn" :disabled="!canSendChat" @click="$emit('send-chat')">
@@ -397,6 +401,7 @@ import { ref, computed, onMounted, onBeforeUnmount, withDefaults, type CSSProper
 import type { VibeChatMode } from "../../services/vibeAgentClient";
 import type { VibeChatSessionMeta } from "../../services/vibeChatStorage";
 import { formatCharCount } from "../../utils/vibeHelpers";
+import { resolveAgentResumeButtonLabel } from "../../services/agentRecovery";
 
 interface ChatMessage {
   id: string;
@@ -442,6 +447,7 @@ interface Props {
   canSendChat: boolean;
   chatPlaceholder: string;
   recoverableAssistantMsg: ChatMessage | null;
+  agentRunningStatus?: string;
   stalledAssistantMsg: ChatMessage | null;
   autoResumeSecondsLeft: number;
   pendingPromptQueue: string[];
@@ -487,6 +493,7 @@ const props = withDefaults(defineProps<Props>(), {
   projectMemoryMaxChars: 3500,
   projectMemoryHasContent: false,
   quotedMessages: () => [],
+  agentRunningStatus: "",
 });
 
 const panelStyle = computed(() => {
@@ -497,6 +504,12 @@ const panelStyle = computed(() => {
     return { flex: "1", minWidth: "260px", width: "auto" };
   }
   return { width: "360px", flexShrink: "0" };
+});
+
+const recoverableResumeLabel = computed(() => {
+  const msg = props.recoverableAssistantMsg;
+  if (!msg) return "恢复运行";
+  return resolveAgentResumeButtonLabel(msg);
 });
 
 const emit = defineEmits<{

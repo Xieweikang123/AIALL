@@ -41,6 +41,7 @@ import {
   buildForceOutputNudge,
   buildPatchAnchorForcePatchNudge,
   buildPatchRequiredRetryNudge,
+  buildImplementPasteBlockedNudge,
   buildUiDefectForcePatchNudge,
   EXECUTE_PLAN_EXPLORE_TURN_BUDGET,
   EXPLORE_INTERIM_DIAGNOSIS_TURN,
@@ -53,19 +54,22 @@ import {
   PLAN_MAX_TOTAL_EXPLORE_HARD,
   PLAN_MAX_TOTAL_EXPLORE_SOFT,
 } from "./agentExplorationBudget";
-import { buildConsultativeBuildHint, buildUiDefectBuildHint, isConsultativeUserPrompt, isUiDefectReportPrompt } from "./agentUserIntent";
+import { buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildImplementFollowUpHint, buildUiDefectBuildHint, isAgentStepClarificationPrompt, isConsultativeUserPrompt, isImplementFollowUpRun, isUiDefectReportPrompt } from "./agentUserIntent";
 import {
+  buildBlockedGrepAfterLocateMessage,
   buildBlockedGrepMessage,
   buildEnglishPlanningNudge,
   buildPatchAnchorLocatedNudge,
   checkOverlappingRead,
   isAnalysisOnlyReplyUnderForcePatch,
+  isBlockedGrepAfterLocate,
   isBlockedGrepAfterVisionMisread,
   readLineRangeFromArgs,
   recordReadRange,
   sanitizeAgentUserVisibleText,
   shouldForcePatchAfterAnchorLocated,
   shouldNudgeEnglishPlanning,
+  textConfirmsTeleportToBody,
   textIndicatesPatchAnchor,
   type ToolGuardContext,
 } from "./agentExploreGuard";
@@ -906,6 +910,12 @@ export async function executeTool(
     if (toolGuard?.visionMisreadActive && isBlockedGrepAfterVisionMisread(pattern, true)) {
       return buildBlockedGrepMessage(pattern);
     }
+    if (
+      toolGuard &&
+      isBlockedGrepAfterLocate(pattern, toolGuard.patchAnchorLocated, toolGuard.teleportBodyConfirmed)
+    ) {
+      return buildBlockedGrepAfterLocateMessage(pattern);
+    }
     const maxMatches = Math.min(80, Math.max(1, Number(args.max_matches) || 40));
     const grepKey = `${pattern}:${maxMatches}`;
     const cached = grepCache?.get(grepKey);
@@ -1120,7 +1130,17 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   const readOnlyBuildRun = !isAsk && !isPlanExplore && !isExecutePlan && isConsultativeUserPrompt(prompt);
   const imageDataUrls = sanitizeImageDataUrls(params.imageDataUrls);
   const uiDefectBuildRun =
-    !isAsk && !isPlanExplore && !readOnlyBuildRun && imageDataUrls.length > 0 && isUiDefectReportPrompt(prompt);
+    !isAsk &&
+    !isPlanExplore &&
+    !readOnlyBuildRun &&
+    imageDataUrls.length > 0 &&
+    isUiDefectReportPrompt(prompt, imageDataUrls.length > 0);
+  const agentStepClarifyRun = !isAsk && !isPlanExplore && isAgentStepClarificationPrompt(prompt);
+  const implementFollowUpRun =
+    !isAsk &&
+    !isPlanExplore &&
+    !isExecutePlan &&
+    isImplementFollowUpRun(prompt, params.history, { isAsk, readOnlyBuild: readOnlyBuildRun });
 
   const segmentBudget = resolveAgentMaxTurns(mode, runProfile);
   let segmentMaxTurns = params.maxTurns ?? segmentBudget;
@@ -1198,7 +1218,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       ? buildPlanSystemPrompt(projectRoot, openFilePath, openFileSnippet, model)
       : buildSystemPrompt(projectRoot, openFilePath, model) +
         (readOnlyBuildRun ? buildConsultativeBuildHint() : "") +
-        (uiDefectBuildRun ? buildUiDefectBuildHint() : "")) +
+        (uiDefectBuildRun ? buildUiDefectBuildHint() : "") +
+        (implementFollowUpRun ? buildImplementFollowUpHint() : "") +
+        (agentStepClarifyRun ? buildAgentStepClarificationHint() : "")) +
     projectContextBlock +
     projectMemoryBlock;
 
@@ -1210,17 +1232,21 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   const toolGuard: ToolGuardContext = {
     readFileRanges: new Map(),
     visionMisreadActive: false,
+    patchAnchorLocated: implementFollowUpRun,
+    teleportBodyConfirmed: implementFollowUpRun,
   };
   let consecutiveExploreTurns = 0;
   let totalExploreTurns = 0;
   let turnsLowNudgeSent = false;
   let interimDiagnosisNudgeSent = false;
-  let patchAnchorLocated = false;
+  let patchAnchorLocated = implementFollowUpRun;
+  let teleportBodyConfirmed = implementFollowUpRun;
   let patchAnchorNudgeSent = false;
-  let patchAnchorForcePending = false;
+  let patchAnchorForcePending = implementFollowUpRun;
   let englishPlanningNudgeSent = false;
   let uiDefectForcePatchNudgeSent = false;
   let patchAnchorForcePatchNudgeSent = false;
+  let agentStepClarifyPending = agentStepClarifyRun;
   /** Track unique files read in explore-only turns to detect breadth sprawl. */
   const exploreFilesRead = new Set<string>();
   let fileBreadthNudgeSent = false;
@@ -1295,6 +1321,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       turnsLowNudgeSent = true;
     }
 
+    toolGuard.patchAnchorLocated = patchAnchorLocated;
+    toolGuard.teleportBodyConfirmed = teleportBodyConfirmed;
+
     // Progressive exploration restriction:
     //   Soft cap: strip grep/search_files — model can still read_file
     //   Hard cap: strip ALL tools — model must output text only
@@ -1306,7 +1335,12 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       !isPlanExplore &&
       !readOnlyBuildRun &&
       writeStage !== null &&
-      shouldForcePatchAfterAnchorLocated(patchAnchorLocated, patchAnchorForcePending, buildExploreHardCapReached);
+      shouldForcePatchAfterAnchorLocated(
+        patchAnchorLocated,
+        patchAnchorForcePending,
+        buildExploreHardCapReached,
+        implementFollowUpRun,
+      );
     const forceTextOutput =
       !forcePatchOutput &&
       ((isAsk && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_HARD) ||
@@ -1383,6 +1417,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
     const toolsForTurn = (() => {
       if (visionFirstTurnPending || forceTextOutput) return [];
+      if (agentStepClarifyPending) return [];
       if (forcePatchOutput) {
         return activeTools.filter((t) => WRITE_AGENT_TOOL_NAMES.has(t.function.name));
       }
@@ -1686,13 +1721,46 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         !isAsk &&
         !isPlanExplore &&
         !readOnlyBuildRun &&
-        patchAnchorLocated &&
-        (patchAnchorForcePending || uiDefectBuildRun) &&
-        writeStage.writtenList.length === 0;
+        writeStage.writtenList.length === 0 &&
+        (implementFollowUpRun || (patchAnchorLocated && patchAnchorForcePending));
+
+      if (agentStepClarifyPending) {
+        agentStepClarifyPending = false;
+        messages.push({ role: "assistant", content: rawText });
+        onEvent({
+          type: "turn_response",
+          data: {
+            turn,
+            ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+            assistantText: userText,
+            toolCalls: [],
+            hasToolCalls: false,
+            isFinal: false,
+          },
+        });
+        emitUserVisibleAssistantMessage(onEvent, rawText, streamedChars);
+        if (uiDefectBuildRun || patchAnchorLocated || patchAnchorForcePending) {
+          messages.push({ role: "system", content: buildAgentStepClarifyContinueHint() });
+          onEvent({
+            type: "status",
+            data: {
+              phase: "clarify_continue",
+              turn,
+              ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+              model,
+              detail: "已向用户解释，继续修复",
+            },
+          });
+          continue;
+        }
+      }
 
       if (mustPatchBeforeFinish && isAnalysisOnlyReplyUnderForcePatch(rawText)) {
         messages.push({ role: "assistant", content: rawText });
-        messages.push({ role: "system", content: buildPatchRequiredRetryNudge() });
+        messages.push({
+          role: "system",
+          content: implementFollowUpRun ? buildImplementPasteBlockedNudge() : buildPatchRequiredRetryNudge(),
+        });
         onEvent({
           type: "turn_response",
           data: {
@@ -1749,7 +1817,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         messages.push({ role: "system", content: buildEnglishPlanningNudge() });
         englishPlanningNudgeSent = true;
       }
-      if (isSubstantiveChineseToolPreamble(preamble) && !streamedChars) {
+      if (isSubstantiveChineseToolPreamble(preamble) && !streamedChars && (isAsk || readOnlyBuildRun)) {
         emitUserVisibleAssistantMessage(onEvent, preamble, streamedChars);
         streamedChars = sanitizeAgentUserVisibleText(preamble).length;
       }
@@ -1879,9 +1947,12 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       });
       if (!outcome.result.startsWith("错误：") && textIndicatesPatchAnchor(outcome.result)) {
         patchAnchorLocated = true;
-        if (uiDefectBuildRun && writeStage !== null) {
+        if (writeStage !== null && !isAsk && !isPlanExplore && !readOnlyBuildRun) {
           patchAnchorForcePending = true;
         }
+      }
+      if (!outcome.result.startsWith("错误：") && textConfirmsTeleportToBody(outcome.result)) {
+        teleportBodyConfirmed = true;
       }
     };
 
@@ -1940,6 +2011,10 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     } else if (turnExploreOnly) {
       consecutiveExploreTurns += 1;
       totalExploreTurns += 1;
+      if (implementFollowUpRun && totalExploreTurns >= 1 && writeStage && writeStage.writtenList.length === 0) {
+        patchAnchorForcePending = true;
+        patchAnchorLocated = true;
+      }
       // Track which files were read this turn for breadth monitoring.
       for (const call of toolCalls) {
         if (call.function.name === "read_file") {

@@ -227,6 +227,7 @@
         :can-send-chat="canSendChat"
         :chat-placeholder="chatPlaceholder"
         :recoverable-assistant-msg="recoverableAssistantMsg"
+        :agent-running-status="agentRunningStatusText"
         :stalled-assistant-msg="stalledAssistantMsg"
         :auto-resume-seconds-left="autoResumeSecondsLeft"
         :pending-prompt-queue="pendingPromptQueue"
@@ -405,6 +406,7 @@ import {
   canResumeAgentRun,
   hasRecoverableAgentProgress,
   inferAgentRecoveryFlags,
+  isPartialWrittenRunInterrupt,
   isAgentMaxTurnsExhausted,
   isAgentConnectPhase,
   isAgentConnectStalled,
@@ -413,6 +415,7 @@ import {
   recoverableAgentErrorHint,
   resolveAgentCompletedTurns,
   resolveAgentFailureBubbleContent,
+  resolveAgentResumeButtonLabel,
   shouldSilentAutoContinue,
   resolveAutoResumeSeconds,
 } from "../services/agentRecovery";
@@ -1287,6 +1290,11 @@ function selectionRectUsable(rect: DOMRect): boolean {
   return rect.width > 0 || rect.height > 0;
 }
 
+/** 判断 rect 是否包含指定点（视口坐标） */
+function rectContainsPoint(rect: DOMRect, px: number, py: number): boolean {
+  return px >= rect.left && px <= rect.right && py >= rect.top && py <= rect.bottom;
+}
+
 function getSelectionFocusRect(selection: Selection): DOMRect | null {
   const { focusNode, focusOffset } = selection;
   if (!focusNode) return null;
@@ -1319,7 +1327,9 @@ function getSelectionAnchorRect(selection: Selection): DOMRect | null {
   const range = selection.getRangeAt(0);
   const lineRects = Array.from(range.getClientRects()).filter(selectionRectUsable);
   if (lineRects.length > 0) {
-    return lineRects[lineRects.length - 1]!;
+    // 优先取第一行 rect，使引用按钮始终在选区顶部附近，
+    // 避免多行选区时按钮出现在最后一行导致与选区视觉分离
+    return lineRects[0]!;
   }
 
   const focusRect = getSelectionFocusRect(selection);
@@ -1332,11 +1342,17 @@ function getSelectionAnchorRect(selection: Selection): DOMRect | null {
 
 async function showQuoteButtonAt(anchor: DOMRect) {
   const margin = 8;
+  const bottomSafe = 80; // 底部输入面板安全距离
   const estimatedWidth = 72;
   const estimatedHeight = 32;
-  let x = anchor.left;
+  const maxBottom = window.innerHeight - bottomSafe;
+
+  let x = anchor.left + (anchor.width - estimatedWidth) / 2;
   let y = anchor.top - estimatedHeight - margin;
+  // 上方空间不足时回退到下方，但不能超出底部安全区
   if (y < margin) y = anchor.bottom + margin;
+  if (y + estimatedHeight > maxBottom) y = maxBottom - estimatedHeight;
+  if (y < margin) y = margin;
   ({ x, y } = clampQuoteButtonPosition(x, y, estimatedWidth, estimatedHeight));
   quoteButtonPosition.value = { x, y };
   showQuoteButton.value = true;
@@ -1345,9 +1361,11 @@ async function showQuoteButtonAt(anchor: DOMRect) {
   if (!btn) return;
   const btnWidth = btn.offsetWidth;
   const btnHeight = btn.offsetHeight;
-  x = anchor.left;
+  x = anchor.left + (anchor.width - btnWidth) / 2;
   y = anchor.top - btnHeight - margin;
   if (y < margin) y = anchor.bottom + margin;
+  if (y + btnHeight > maxBottom) y = maxBottom - btnHeight;
+  if (y < margin) y = margin;
   ({ x, y } = clampQuoteButtonPosition(x, y, btnWidth, btnHeight));
   quoteButtonPosition.value = { x, y };
 }
@@ -1743,6 +1761,7 @@ const {
   hasAgentActivity,
   messageDisplayContent,
   agentStatusDisplay,
+  buildAgentRunningStatusTextForMsg,
   jumpChainToLatest,
   forceRecoverStalledRun,
   shouldShowMessageBubble,
@@ -1756,6 +1775,15 @@ const {
   maybeAutoResumeLastRecoverableAssistant,
   stopAgentUiTick,
 } = agent;
+
+const agentRunningStatusText = computed(() => {
+  if (!chatSending.value) return "";
+  for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
+    const m = chatMessages.value[i];
+    if (m?.role === "assistant") return buildAgentRunningStatusTextForMsg(m);
+  }
+  return "Agent 运行中…";
+});
 
 const expandedDiffs = reactive<Record<string, Record<string, boolean>>>({});
 
@@ -2074,7 +2102,7 @@ function shouldIgnoreQuoteSelectEvent(event: MouseEvent): boolean {
   if (event.detail <= 1 && Date.now() - quoteHiddenAt < 150) return true;
   const target = event.target;
   return target instanceof Element
-    && Boolean(target.closest(".msg-toolbar, .agent-recovery-actions, .inline-diff-head, .msg-actions"));
+    && Boolean(target.closest(".msg-toolbar, .agent-recovery-actions, .agent-recovery-footer, .inline-diff-head, .msg-actions"));
 }
 
 function tryShowQuoteButtonFromSelection(message: ChatMessage): void {
@@ -2818,11 +2846,15 @@ provide(vibeChatMessageContextKey, {
   undoExchange,
   resendFromMessage,
   canResumeAgentRun,
+  isPartialWrittenRunInterrupt,
   resumeAgentRun,
+  resolveAgentResumeButtonLabel,
   isAssistantStalled,
   stopAgent,
   forceRecoverStalledRun,
   recoverableAgentErrorHint,
+  agentStatusDisplay,
+  buildAgentRunningStatusText: buildAgentRunningStatusTextForMsg,
   hasAgentActivity,
   isAgentRunning,
   patchAssistantMsg,
@@ -2832,7 +2864,6 @@ provide(vibeChatMessageContextKey, {
   userMessageImages,
   shouldShowMessageBubble,
   handleAiOptionSelect,
-  agentStatusDisplay,
   previewAgentFile,
   truncateDiffPreview,
   toggleExpandedDiff,

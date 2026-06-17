@@ -42,14 +42,14 @@
             重发
           </button>
           <button
-            v-if="ctx.canResumeAgentRun(m)"
+            v-if="ctx.canResumeAgentRun(m) && !ctx.isPartialWrittenRunInterrupt(m)"
             type="button"
             class="ghost small resume-btn"
             title="从断点继续运行，保留已完成步骤"
             :disabled="!ctx.configReady.value || !ctx.projectOpened.value || ctx.chatSending.value"
             @click="ctx.resumeAgentRun(m.id)"
           >
-            恢复运行
+            {{ ctx.resolveAgentResumeButtonLabel(m) }}
           </button>
         </div>
       </div>
@@ -71,7 +71,7 @@
         </div>
       </div>
       <div
-        v-else-if="m.role === 'assistant' && ctx.canResumeAgentRun(m)"
+        v-else-if="m.role === 'assistant' && ctx.canResumeAgentRun(m) && !ctx.isPartialWrittenRunInterrupt(m)"
         class="agent-recovery-banner"
       >
         <span class="agent-recovery-text">
@@ -83,7 +83,7 @@
           :disabled="!ctx.configReady.value || !ctx.projectOpened.value || ctx.chatSending.value"
           @click="ctx.resumeAgentRun(m.id)"
         >
-          恢复运行
+          {{ ctx.resolveAgentResumeButtonLabel(m) }}
         </button>
       </div>
       <AgentMessage
@@ -133,6 +133,19 @@
           @select-option="ctx.handleAiOptionSelect"
         />
       </PlanDocumentBlock>
+      <div
+        v-if="m.role === 'assistant' && ctx.canResumeAgentRun(m) && ctx.isPartialWrittenRunInterrupt(m)"
+        class="agent-recovery-footer"
+      >
+        <button
+          type="button"
+          class="secondary compact"
+          :disabled="!ctx.configReady.value || !ctx.projectOpened.value || ctx.chatSending.value"
+          @click="ctx.resumeAgentRun(m.id)"
+        >
+          继续
+        </button>
+      </div>
       <div
         v-if="
           m.role === 'assistant' &&
@@ -198,8 +211,16 @@
         </div>
       </div>
       <div
+        v-if="m.role === 'assistant' && ctx.isAgentRunning(m)"
+        class="agent-running-footer"
+      >
+        <span class="status-pulse" aria-hidden="true" />
+        <span class="agent-running-text">{{ ctx.buildAgentRunningStatusText(m) }}</span>
+      </div>
+      <div
         v-if="
           m.role === 'assistant' &&
+          !ctx.isAgentRunning(m) &&
           !m.streaming &&
           (m.writtenFiles?.length)
         "

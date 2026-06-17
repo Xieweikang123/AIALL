@@ -134,6 +134,14 @@ export function buildPatchRequiredRetryNudge(): string {
   ].join("");
 }
 
+/** User said 「修复吧」 after prior analysis — forbid ending with paste-instructions. */
+export function buildImplementPasteBlockedNudge(): string {
+  return [
+    "【系统强制】用户已确认修复，禁止「请将修改应用到文件」或只贴代码块。",
+    "下一轮必须调用 patch_file/write_file 提交 diff；简要说明改了什么即可。",
+  ].join("");
+}
+
 /** Injected mid-exploration — requires a user-visible Chinese progress summary. */
 export function buildExploreInterimDiagnosisNudge(totalExploreTurns: number): string {
   return [

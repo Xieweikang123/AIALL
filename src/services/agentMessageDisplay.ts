@@ -20,6 +20,8 @@ export type FinalizeAssistantBubbleSource = AssistantBubbleSource & {
   agentFailed?: boolean;
 };
 
+export const PARTIAL_WRITE_ABORT_HEADING = "运行中断（部分修改已落盘）";
+
 const SUBSTANTIVE_MIN_CHARS = 48;
 const THIN_EPILOGUE_MAX_CHARS = 96;
 
@@ -262,11 +264,12 @@ export function hasSubstantiveAgentSummary(msg: AssistantBubbleSource): boolean 
 export function buildWrittenFilesSummary(writtenFiles: string[], wasAborted = false): string {
   if (!writtenFiles.length) return "";
   const list = writtenFiles.map((file) => `- \`${file}\``).join("\n");
-  const heading = wasAborted ? "## 运行中断（部分修改已落盘）" : "## 修改完成";
+  const heading = wasAborted ? `## ${PARTIAL_WRITE_ABORT_HEADING}` : "## 修改完成";
   const lead = wasAborted
     ? `连接在总结前结束，但以下 ${writtenFiles.length} 个文件已写入：`
     : `已写入 ${writtenFiles.length} 个文件：`;
-  return `${heading}\n\n${lead}\n\n${list}`;
+  const footer = wasAborted ? "\n\n可点击下方按钮继续完成剩余任务。" : "";
+  return `${heading}\n\n${lead}\n\n${list}${footer}`;
 }
 
 /** Append file-write summary when the run ended without a model completion message. */

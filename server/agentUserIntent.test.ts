@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { buildConsultativeBuildHint, buildUiDefectBuildHint, isConsultativeUserPrompt } from "./agentUserIntent";
+import {
+  buildAgentStepClarificationHint,
+  buildConsultativeBuildHint,
+  buildImplementFollowUpHint,
+  buildUiDefectBuildHint,
+  isAgentStepClarificationPrompt,
+  isConsultativeUserPrompt,
+  isImplementFollowUpRun,
+  isScreenshotVisibilityPrompt,
+  isUiDefectReportPrompt,
+} from "./agentUserIntent";
 
 describe("isConsultativeUserPrompt", () => {
   it("detects question-only prompts", () => {
@@ -27,6 +37,17 @@ describe("isConsultativeUserPrompt", () => {
     expect(isConsultativeUserPrompt("看到没，引用按钮跑别的地方了？")).toBe(false);
     expect(isConsultativeUserPrompt("你看，这个按钮错位了？")).toBe(false);
   });
+
+  it("does not treat agent-step clarification as consultative read-only", () => {
+    const prompt = "我直接去读取 Teleport 的 opening tag 确认 target 啥意思？";
+    expect(isAgentStepClarificationPrompt(prompt)).toBe(true);
+    expect(isConsultativeUserPrompt(prompt)).toBe(false);
+  });
+
+  it("treats accuracy questions as consultative", () => {
+    expect(isConsultativeUserPrompt("AI 助手，引用按钮出现位置是否总是准确？")).toBe(true);
+    expect(isConsultativeUserPrompt("这个位置一直准确吗？")).toBe(true);
+  });
 });
 
 describe("buildConsultativeBuildHint", () => {
@@ -41,5 +62,46 @@ describe("buildUiDefectBuildHint", () => {
     expect(buildUiDefectBuildHint()).toContain("patch_file");
     expect(buildUiDefectBuildHint()).toContain("Teleport");
     expect(buildUiDefectBuildHint()).toContain("getSelection");
+  });
+});
+
+describe("buildAgentStepClarificationHint", () => {
+  it("requires explain-first without tools", () => {
+    const hint = buildAgentStepClarificationHint();
+    expect(hint).toContain("禁止调用工具");
+    expect(hint).toContain("Teleport");
+    expect(hint).toContain("show*At");
+  });
+});
+
+describe("isUiDefectReportPrompt", () => {
+  it("treats screenshot visibility question with image as UI defect", () => {
+    expect(isScreenshotVisibilityPrompt("能看到我截图的问题吗")).toBe(true);
+    expect(isUiDefectReportPrompt("能看到我截图的问题吗", true)).toBe(true);
+    expect(isUiDefectReportPrompt("能看到我截图的问题吗", false)).toBe(false);
+  });
+});
+
+describe("isImplementFollowUpRun", () => {
+  const history = [
+    {
+      role: "assistant",
+      content: "引用按钮 getSelectionAnchorRect 可能有问题，建议修复 showQuoteButtonAt。",
+    },
+  ];
+
+  it("detects 修复吧 after prior quote-button analysis", () => {
+    expect(isImplementFollowUpRun("修复吧", history)).toBe(true);
+  });
+
+  it("rejects 修复吧 without relevant history", () => {
+    expect(isImplementFollowUpRun("修复吧", [])).toBe(false);
+  });
+});
+
+describe("buildImplementFollowUpHint", () => {
+  it("forbids paste-only instructions", () => {
+    expect(buildImplementFollowUpHint()).toContain("禁止");
+    expect(buildImplementFollowUpHint()).toContain("patch_file");
   });
 });

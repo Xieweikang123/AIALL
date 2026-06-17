@@ -608,6 +608,37 @@ button:disabled {
   flex-shrink: 0;
 }
 
+.agent-recovery-footer {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 10px;
+}
+
+.agent-running-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(145, 190, 255, 0.25);
+  background: rgba(31, 111, 235, 0.06);
+}
+
+.agent-running-text {
+  font-size: 12px;
+  color: #91beff;
+  line-height: 1.45;
+}
+
+.chat-running-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #79c0ff;
+}
+
 .msg-actions {
   display: flex;
   flex-wrap: wrap;

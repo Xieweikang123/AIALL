@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { PARTIAL_WRITE_ABORT_HEADING } from "./agentMessageDisplay";
 import {
   agentConnectStallMessage,
   agentStallRecoveryReason,
@@ -13,6 +14,10 @@ import {
   isAgentConnectStalled,
   isAgentRunStalled,
   isRecoverableAgentError,
+  isPartialWrittenRunInterrupt,
+  PARTIAL_RUN_RESUME_REASON,
+  resolveAgentResumeButtonLabel,
+  shouldOfferPartialRunResume,
   shouldAutoResumeAgentError,
   shouldSilentAutoContinue,
   AGENT_AUTO_RESUME_SECONDS,
@@ -22,6 +27,7 @@ import {
   recoverableAgentErrorHint,
   resolveAgentCompletedTurns,
   resolveAgentFailureBubbleContent,
+  buildAgentRunningStatusText,
   summarizeAgentProgress,
 } from "./agentRecovery";
 
@@ -179,12 +185,76 @@ describe("canResumeAgentRun", () => {
     );
   });
 
+  it("allows resume after user stop when partial files were written", () => {
+    expect(
+      canResumeAgentRun({
+        agentFailed: true,
+        agentRecoverable: true,
+        agentAborted: true,
+        writtenFiles: ["src/foo.ts"],
+        content: `## ${PARTIAL_WRITE_ABORT_HEADING}\n\n- \`src/foo.ts\``,
+      }),
+    ).toBe(true);
+  });
+
   it("does not infer recoverable state at runtime from legacy content", () => {
     expect(
       canResumeAgentRun({
         role: "assistant",
         content: "Failed to fetch",
         tools: [{ running: false, label: "搜索文件", summary: "3 个匹配", ok: true, turn: 1 }],
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("buildAgentRunningStatusText", () => {
+  it("combines phase status with partial write count", () => {
+    expect(
+      buildAgentRunningStatusText(
+        { writtenFiles: ["src/foo.ts"], tools: [{ running: false, summary: "ok" }] },
+        "第 3 轮 · 执行工具",
+      ),
+    ).toBe("第 3 轮 · 执行工具 · 已落盘 1 个文件");
+  });
+
+  it("falls back to default label", () => {
+    expect(buildAgentRunningStatusText({}, "")).toBe("Agent 运行中…");
+  });
+});
+
+describe("shouldOfferPartialRunResume", () => {
+  it("offers resume when stopped run wrote files without a final summary", () => {
+    expect(
+      shouldOfferPartialRunResume({
+        wasAborted: true,
+        writtenFiles: ["src/foo.ts"],
+        msg: { tools: [{ running: false, summary: "ok", turn: 1 }] },
+      }),
+    ).toBe(true);
+  });
+
+  it("skips when the run completed with a substantive summary", () => {
+    expect(
+      shouldOfferPartialRunResume({
+        wasAborted: true,
+        writtenFiles: ["src/foo.ts"],
+        msg: {
+          tools: [{ running: false, summary: "ok", turn: 1 }],
+          roundGroups: [
+            {
+              turn: 1,
+              modelSteps: [],
+              toolIds: [],
+              response: {
+                assistantText: "## 修改完成\n已将 Pop 改为 Apply，并更新了后端路由与前端客户端。",
+                toolCalls: [],
+                hasToolCalls: false,
+                isFinal: true,
+              },
+            },
+          ],
+        },
       }),
     ).toBe(false);
   });
@@ -223,6 +293,19 @@ describe("inferAgentRecoveryFlags", () => {
     expect(flags?.agentRecoverable).toBe(true);
     expect(flags?.agentFailureReason).toContain("已达最大轮次（12）");
   });
+
+  it("re-infers partial-write interruption even when recovery was dismissed", () => {
+    const flags = inferAgentRecoveryFlags({
+      role: "assistant",
+      agentRecoveryDismissed: true,
+      agentAborted: true,
+      writtenFiles: ["src/foo.ts"],
+      content: `## ${PARTIAL_WRITE_ABORT_HEADING}\n\n- \`src/foo.ts\``,
+      tools: [{ running: false, summary: "ok", turn: 1 }],
+    });
+    expect(flags?.agentRecoverable).toBe(true);
+    expect(flags?.agentFailureReason).toBe(PARTIAL_RUN_RESUME_REASON);
+  });
 });
 
 describe("resolveAgentFailureBubbleContent", () => {
@@ -237,7 +320,31 @@ describe("resolveAgentFailureBubbleContent", () => {
   });
 });
 
+describe("resolveAgentResumeButtonLabel", () => {
+  it("uses 继续 for partial-write interruption", () => {
+    expect(
+      resolveAgentResumeButtonLabel({
+        writtenFiles: ["src/foo.ts"],
+        content: `## ${PARTIAL_WRITE_ABORT_HEADING}`,
+      }),
+    ).toBe("继续");
+    expect(resolveAgentResumeButtonLabel({ content: "Failed to fetch" })).toBe("恢复运行");
+  });
+});
+
 describe("recoverableAgentErrorHint", () => {
+  it("mentions 继续 for partial-write interruption", () => {
+    const hint = recoverableAgentErrorHint(
+      {
+        writtenFiles: ["src/foo.ts"],
+        content: `## ${PARTIAL_WRITE_ABORT_HEADING}`,
+      },
+      PARTIAL_RUN_RESUME_REASON,
+    );
+    expect(hint).toContain("继续");
+    expect(hint).toContain("1 个文件");
+  });
+
   it("mentions turns and manual retry after silent continue gives up", () => {
     const hint = recoverableAgentErrorHint(
       { turnTraces: [{ turn: 1 }, { turn: 2 }], tools: [{ running: false, summary: "ok" }] },

@@ -15,6 +15,7 @@ import {
   agentStallRecoveryReason,
   agentConnectStallMessage,
   buildAgentMaxTurnsExhaustedMessage,
+  buildAgentRunningStatusText,
   buildAgentResumePrompt,
   buildSilentContinueStatusLog,
   canResumeAgentRun,
@@ -25,9 +26,11 @@ import {
   isAgentConnectStalled,
   isAgentRunStalled,
   isRecoverableAgentError,
+  PARTIAL_RUN_RESUME_REASON,
   recoverableAgentErrorHint,
   resolveAgentCompletedTurns,
   resolveAgentFailureBubbleContent,
+  shouldOfferPartialRunResume,
   shouldSilentAutoContinue,
   resolveAutoResumeSeconds,
 } from "../services/agentRecovery";
@@ -612,6 +615,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     }
 
     return statusText;
+  }
+
+  function buildAgentRunningStatusTextForMsg(msg: ChatMessage): string {
+    return buildAgentRunningStatusText(msg, agentStatusDisplay(msg));
   }
 
   function agentRunningHint(msg: ChatMessage): string {
@@ -1396,19 +1403,35 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
       assistantMsg.pendingApproval = fileAction.pendingApproval;
       assistantMsg.writtenFiles = fileAction.writtenFiles;
-      assistantMsg.agentFailed = false;
-      assistantMsg.agentRecoverable = false;
-      assistantMsg.agentFailureReason = undefined;
-      assistantMsg.agentRecoveryDismissed = true;
-      assistantMsg.agentContinueCount = undefined;
 
-      assistantMsg.status = "";
-      assistantMsg.agentPhase = undefined;
       assistantMsg.content = finalizeAssistantBubbleContent({
         ...assistantMsg,
         wasAborted,
         writtenFiles: fileAction.writtenFiles,
+        agentFailed: false,
       });
+
+      const offerPartialResume = shouldOfferPartialRunResume({
+        wasAborted,
+        writtenFiles: fileAction.writtenFiles,
+        msg: assistantMsg,
+      });
+
+      if (offerPartialResume) {
+        assistantMsg.agentFailed = true;
+        assistantMsg.agentRecoverable = true;
+        assistantMsg.agentFailureReason = PARTIAL_RUN_RESUME_REASON;
+        assistantMsg.agentRecoveryDismissed = false;
+      } else {
+        assistantMsg.agentFailed = false;
+        assistantMsg.agentRecoverable = false;
+        assistantMsg.agentFailureReason = undefined;
+        assistantMsg.agentRecoveryDismissed = true;
+        assistantMsg.agentContinueCount = undefined;
+      }
+
+      assistantMsg.status = "";
+      assistantMsg.agentPhase = undefined;
       assistantMsg.activityExpanded = Boolean(assistantMsg.content?.trim());
       patchAssistantMsg(msgId, {
         status: "",
@@ -1422,11 +1445,11 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         writtenFiles: assistantMsg.writtenFiles,
         pendingApproval: assistantMsg.pendingApproval,
         agentAborted: assistantMsg.agentAborted || undefined,
-        agentFailed: undefined,
-        agentRecoverable: undefined,
-        agentFailureReason: undefined,
-        agentRecoveryDismissed: true,
-        agentContinueCount: undefined,
+        agentFailed: offerPartialResume ? true : undefined,
+        agentRecoverable: offerPartialResume ? true : undefined,
+        agentFailureReason: offerPartialResume ? PARTIAL_RUN_RESUME_REASON : undefined,
+        agentRecoveryDismissed: offerPartialResume ? false : true,
+        agentContinueCount: offerPartialResume ? assistantMsg.agentContinueCount : undefined,
       });
       persistChatNow(undefined, { flushStore: true });
 
@@ -1763,6 +1786,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     cursorCompactHiddenCount,
     cursorCompactLiveStatus,
     agentStatusDisplay,
+    buildAgentRunningStatusTextForMsg,
     agentRunningHint,
     activitySummary,
     cursorActivitySummary,
