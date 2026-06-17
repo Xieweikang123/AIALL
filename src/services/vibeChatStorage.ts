@@ -198,6 +198,8 @@ export function stripReferenceAttachments(content: string): string {
 export type AgentHistorySourceMessage = {
   role: string;
   content: string;
+  imageRefs?: PersistedImageRef[];
+  imageCount?: number;
   tools?: Array<{
     name?: string;
     title?: string;

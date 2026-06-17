@@ -95,7 +95,7 @@
 
 <script setup lang="ts">
 import { ref } from "vue";
-import type { GitFileDiff } from "../../composables/useGitPanel";
+import type { GitStatusFile } from "../../services/vibeGitClient";
 
 interface Props {
   filePanelWidth: number;
@@ -105,8 +105,8 @@ interface Props {
   searchQuery: string;
   editorCollapsed: boolean;
   gitChangeCount: number;
-  gitUnstagedFiles: GitFileDiff[];
-  gitStagedFiles: GitFileDiff[];
+  gitUnstagedFiles: GitStatusFile[];
+  gitStagedFiles: GitStatusFile[];
 }
 
 defineProps<Props>();

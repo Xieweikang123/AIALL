@@ -261,8 +261,10 @@
 </template>
 
 <script setup lang="ts">
+import type { GitRemoteInfo } from "../../services/vibeGitClient";
+
 interface GitStash {
-  index: number;
+  index: number | string;
   message: string;
 }
 
@@ -293,7 +295,7 @@ interface Props {
   gitError: string;
   gitBranch: string;
   gitTrackingBranch: string;
-  gitRemotes: string[];
+  gitRemotes: GitRemoteInfo[];
   gitAhead: number;
   gitBehind: number;
   gitStashes: GitStash[];

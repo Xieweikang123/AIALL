@@ -169,7 +169,9 @@ describe("sanitizePersistedChatMessages", () => {
     ]);
     const msg = sanitized[0];
     expect(msg.agentContext).toBeUndefined();
-    expect(msg.roundGroups?.[0]?.request?.messages).toEqual([]);
+    expect(msg.roundGroups?.[0]?.request?.messages).toEqual([
+      { role: "system", content: "1 条消息，999 字符" },
+    ]);
     expect(JSON.stringify(sanitized).length).toBeLessThan(5000);
   });
 

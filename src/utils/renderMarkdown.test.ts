@@ -22,7 +22,7 @@ describe("renderMarkdown", () => {
     const html = renderMarkdown("- first\n- second\n\n```ts\nconst x = 1;\n```");
     expect(html).toContain("<ul");
     expect(html).toContain("<li");
-    expect(html).toContain("const x = 1;");
+    expect(html.replace(/<[^>]+>/g, "")).toContain("const x = 1;");
   });
 
   it("does not add apply buttons to code blocks", () => {

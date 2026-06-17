@@ -509,7 +509,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import "../styles/vibe-coding.scss";
 import type { AgentLogLineItem } from "../components/AgentActivityLogStream.vue";
-import { appendStatusDetail, truncateDiffPreview, cleanStatusLogText, formatCharCount, isNetworkError, fileName, normalizePathKey, joinProjectPath, genId, isActiveModelStep, hasAgentProcessSteps, shouldShowMessageBubble, entryToNode, formatToolMeta, syncRoundGroupsPatch } from "../utils/vibeHelpers";
+import { appendStatusDetail, truncateDiffPreview, cleanStatusLogText, formatCharCount, isNetworkError, fileName, genId, isActiveModelStep, hasAgentProcessSteps, shouldShowMessageBubble, entryToNode, formatToolMeta, syncRoundGroupsPatch } from "../utils/vibeHelpers";
 import AgentMessage from "../components/AgentMessage.vue";
 import ChatComposerEditor from "../components/ChatComposerEditor.vue";
 import ChatMarkdown from "../components/ChatMarkdown.vue";
@@ -729,6 +729,7 @@ type ChatMessage = Omit<PersistedChatMessage, "tools" | "roundGroups"> & {
   agentRecoverable?: boolean;
   agentFailureReason?: string;
   agentRecoveryDismissed?: boolean;
+  _expandedDiffs?: Record<string, boolean>;
 };
 
 type FileDiff = {
@@ -2125,7 +2126,7 @@ function isRoundGroupComplete(msg: ChatMessage, group: AgentRoundGroupView): boo
 function liveModelStepText(msg: ChatMessage, group: AgentRoundGroupView, step: { text: string; phase: string }): string {
   void agentUiTick.value;
   const base = cleanStatusLogText(step.text);
-  if (!isActiveModelStep(msg, group, step)) return base;
+  if (!isActiveModelStep(group, step)) return base;
   if (msg.agentDetail?.trim()) return `${base} · ${msg.agentDetail.trim()}`;
   if (
     (step.phase === "waiting_model" || step.phase === "sending_request" || step.phase === "retrying_model") &&
@@ -2496,7 +2497,7 @@ async function openProjectByPath(dirPath: string) {
     log(`chat-load-local(${loaded.length}sessions)`);
     if (!loaded.length) {
       const diskStore = await fetchChatStoreFromDisk(normalized, { loadMessages: true });
-      log(`chat-fetch-disk(${diskStore.ok ? "ok" : "fail"}, ${diskStore.data?.sessions?.length || 0}sessions)`);
+      log(`chat-fetch-disk(${diskStore.ok ? "ok" : "fail"}, ${diskStore.ok ? diskStore.data.sessions.length : 0}sessions)`);
       if (diskStore.ok && diskStore.data.sessions.length) {
         restoreChatStoreFromSnapshot(diskStore.data);
         loaded = loadVibeChatHistory(normalized);

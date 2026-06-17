@@ -5,6 +5,7 @@ export type AgentProgressTool = {
   running?: boolean;
   label?: string;
   title?: string;
+  detail?: string;
   name?: string;
   summary?: string;
   ok?: boolean;
@@ -268,6 +269,9 @@ export function resolveAgentFailureBubbleContent(
   const fromProgress = resolveAssistantBubbleContent({
     ...msg,
     content: direct && isRecoverableAgentError(direct) ? "" : direct,
+    turnTraces: msg.turnTraces
+      ?.filter((t): t is { assistantText: string } => Boolean(t.assistantText?.trim()))
+      .map((t) => ({ assistantText: t.assistantText! })),
   });
   if (fromProgress) return fromProgress;
 

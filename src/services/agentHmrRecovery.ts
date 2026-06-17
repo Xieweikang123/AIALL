@@ -11,8 +11,8 @@ export type PendingAgentRun = {
   request: Record<string, unknown>;
   /** 项目路径 */
   projectPath: string;
-  /** 持久化时间戳 */
-  savedAt: number;
+  /** 持久化时间戳（写入时自动填充） */
+  savedAt?: number;
   /** 会话 ID */
   sessionId?: string;
 };

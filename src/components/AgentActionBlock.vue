@@ -1,6 +1,6 @@
 <template>
   <div class="cursor-actions-block">
-    <details v-if="block.collapsed.length" class="cursor-actions-fold" @toggle="isExpanded = $event.target.open">
+    <details v-if="block.collapsed.length" class="cursor-actions-fold" @toggle="onFoldToggle">
       <summary class="cursor-actions-fold-summary">
         {{ collapsedStepsSummary }}
       </summary>
@@ -91,6 +91,11 @@ const collapsedStepsSummary = computed(() => {
 
 function toggleExpanded() {
   isExpanded.value = !isExpanded.value;
+}
+
+function onFoldToggle(event: Event) {
+  const el = event.target as HTMLDetailsElement | null;
+  if (el) isExpanded.value = el.open;
 }
 </script>
 

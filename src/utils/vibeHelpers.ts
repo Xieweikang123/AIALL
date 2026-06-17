@@ -1,3 +1,5 @@
+import type { AgentRoundGroup } from "../services/agentRoundGroups";
+
 export function phaseBadgeLabel(phase?: string): string {
   switch (phase) {
     case "connecting_local":
@@ -264,15 +266,7 @@ export function formatToolMeta(
   return { name, icon: "⚙️", title: name, detail: "", label: name };
 }
 
-interface RoundGroup {
-  turn: number;
-  modelSteps: unknown[];
-  toolIds: unknown[];
-  request?: { messages: unknown[] };
-  response?: { toolCalls: unknown[] };
-}
-
-export function syncRoundGroupsPatch(msg: { roundGroups?: RoundGroup[] }): { roundGroups?: RoundGroup[] } {
+export function syncRoundGroupsPatch(msg: { roundGroups?: AgentRoundGroup[] }): { roundGroups?: AgentRoundGroup[] } {
   return {
     roundGroups: msg.roundGroups?.map((group) => ({
       ...group,
