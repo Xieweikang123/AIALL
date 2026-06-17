@@ -81,6 +81,8 @@ import {
   filterDuplicateFeedThoughts,
   mergeAssistantTurnText,
   resolveAssistantBubbleContent,
+  resolveAgentTimelineAnswer,
+  isAgentTimelineAnswerStreaming,
 } from "../services/agentMessageDisplay";
 import { isScrollNearBottom, scrollElementToBottom } from "../utils/scrollViewport";
 import {
@@ -126,7 +128,6 @@ export type UseAgentRunDeps = {
   findLastUserMessage: () => { content: string } | null;
 };
 
-const STREAM_DELTA_FLUSH_MS = 80;
 const STREAM_SCROLL_THROTTLE_MS = 120;
 
 export function useAgentRun(deps: UseAgentRunDeps) {
@@ -176,7 +177,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   const agentUiTick = ref(0);
   const stalledAssistantMsg = ref<ChatMessage | null>(null);
 
-  let streamDeltaFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  let streamDeltaRaf: number | null = null;
   let streamScrollTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingStreamDelta: { msgId: string; assistantMsg: ChatMessage; pending: string } | null = null;
 
@@ -450,6 +451,16 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     return finalizeAssistantBubbleContent(msg);
   }
 
+  function agentAnswerPreview(msg: ChatMessage): string {
+    const hasRunningTool = Boolean(msg.tools?.some((t: { running?: boolean }) => t.running));
+    return resolveAgentTimelineAnswer(
+      { content: msg.content, roundGroups: msg.roundGroups, turnTraces: msg.turnTraces, agentTurn: msg.agentTurn },
+      messageDisplayContent(msg),
+      isAgentRunning(msg),
+      hasRunningTool,
+    );
+  }
+
   function cursorAgentFeed(msg: ChatMessage) {
     void agentUiTick.value;
     let agentDetail = msg.agentDetail || msg.status;
@@ -464,27 +475,37 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         (msg.agentPhase === "connecting_local" ? "连接本地服务" : "启动 Agent");
       agentDetail = `${base} · ${elapsed}s`;
     }
-    const bubble = messageDisplayContent(msg);
+    const bubble = agentAnswerPreview(msg);
+    const hasRunningTool = Boolean(msg.tools?.some((t: { running?: boolean }) => t.running));
     const items = buildCursorAgentFeed({
       groups: agentRoundGroupViews(msg),
       isRunning: isAgentRunning(msg),
       agentPhase: msg.agentPhase,
       agentDetail,
       answerPreview: bubble,
-      streaming: Boolean(msg.streaming && isAgentRunning(msg)),
+      streaming: isAgentTimelineAnswerStreaming(
+        { roundGroups: msg.roundGroups, agentTurn: msg.agentTurn },
+        isAgentRunning(msg),
+        hasRunningTool,
+      ),
     });
     return filterDuplicateFeedThoughts(items, bubble, {
-      suppressAllWhenBubble: isAgentRunning(msg),
+      suppressAllWhenBubble: isAgentRunning(msg) && Boolean(bubble.trim()),
     });
   }
 
   function cursorAgentTimeline(msg: ChatMessage): CursorAgentTimeline {
     const detailed = isActivityDetailed(msg);
-    return buildCursorAgentTimeline(cursorAgentFeed(msg), messageDisplayContent(msg), {
+    const hasRunningTool = Boolean(msg.tools?.some((t: { running?: boolean }) => t.running));
+    return buildCursorAgentTimeline(cursorAgentFeed(msg), agentAnswerPreview(msg), {
       keepVisible: detailed ? 8 : 6,
       collapseAfter: detailed ? 10 : 5,
       compactWhileRunning: isAgentRunning(msg) && detailed,
-      streaming: isAgentRunning(msg),
+      streaming: isAgentTimelineAnswerStreaming(
+        { roundGroups: msg.roundGroups, agentTurn: msg.agentTurn },
+        isAgentRunning(msg),
+        hasRunningTool,
+      ),
     });
   }
 
@@ -747,9 +768,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   }
 
   function flushPendingStreamDelta() {
-    if (streamDeltaFlushTimer) {
-      clearTimeout(streamDeltaFlushTimer);
-      streamDeltaFlushTimer = null;
+    if (streamDeltaRaf !== null) {
+      cancelAnimationFrame(streamDeltaRaf);
+      streamDeltaRaf = null;
     }
     if (!pendingStreamDelta?.pending) return;
 
@@ -781,11 +802,11 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       pendingStreamDelta = { msgId, assistantMsg, pending: "" };
     }
     pendingStreamDelta.pending += delta;
-    if (streamDeltaFlushTimer) return;
-    streamDeltaFlushTimer = setTimeout(() => {
-      streamDeltaFlushTimer = null;
+    if (streamDeltaRaf !== null) return;
+    streamDeltaRaf = requestAnimationFrame(() => {
+      streamDeltaRaf = null;
       flushPendingStreamDelta();
-    }, STREAM_DELTA_FLUSH_MS);
+    });
   }
 
   function clearStreamDeltaBuffer() {

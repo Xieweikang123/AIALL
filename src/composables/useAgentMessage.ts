@@ -5,7 +5,7 @@ import {
   shouldUseCompactAgentFeed as shouldUseCompactAgentFeedByCount,
   type CursorFeedProcessBlock,
 } from "../services/agentCursorFeed";
-import { filterDuplicateFeedThoughts } from "../services/agentMessageDisplay";
+import { filterDuplicateFeedThoughts, resolveAgentTimelineAnswer, isAgentTimelineAnswerStreaming } from "../services/agentMessageDisplay";
 import { buildAgentRoundGroupViews } from "../services/agentRoundGroups";
 import type { AgentMessage, UseAgentMessageOptions } from "./useAgentMessageTypes";
 
@@ -74,6 +74,16 @@ export function useAgentMessage(
     return shouldUseCompactAgentFeedByCount(stepCount, isAgentRunning(m), isActivityDetailed(m));
   }
 
+  function agentAnswerPreview(m: AgentMessage): string {
+    const hasRunningTool = Boolean(m.tools?.some((t: { running?: boolean }) => t.running));
+    return resolveAgentTimelineAnswer(
+      { content: m.content, roundGroups: m.roundGroups, turnTraces: m.turnTraces, agentTurn: m.agentTurn },
+      messageDisplayContent(m),
+      isAgentRunning(m),
+      hasRunningTool,
+    );
+  }
+
   function cursorAgentFeed(m: AgentMessage) {
     void agentUiTick.value;
     let agentDetail = m.agentDetail || m.status;
@@ -84,27 +94,36 @@ export function useAgentMessage(
     ) {
       agentDetail = `${m.agentDetail || (m.agentPhase === "connecting_local" ? "连接本地服务" : "启动 Agent")}`;
     }
-    const bubble = messageDisplayContent(m);
+    const bubble = agentAnswerPreview(m);
     const items = buildCursorAgentFeed({
       groups: agentRoundGroupViews(m),
       isRunning: isAgentRunning(m),
       agentPhase: m.agentPhase,
       agentDetail,
       answerPreview: bubble,
-      streaming: Boolean(m.streaming && isAgentRunning(m)),
+      streaming: isAgentTimelineAnswerStreaming(
+        { roundGroups: m.roundGroups, agentTurn: m.agentTurn },
+        isAgentRunning(m),
+        Boolean(m.tools?.some((t: { running?: boolean }) => t.running)),
+      ),
     });
     return filterDuplicateFeedThoughts(items, bubble, {
-      suppressAllWhenBubble: isAgentRunning(m),
+      suppressAllWhenBubble: isAgentRunning(m) && Boolean(bubble.trim()),
     });
   }
 
   function cursorAgentTimeline(m: AgentMessage) {
     const detailed = isActivityDetailed(m);
-    return buildCursorAgentTimeline(cursorAgentFeed(m), messageDisplayContent(m), {
+    const hasRunningTool = Boolean(m.tools?.some((t: { running?: boolean }) => t.running));
+    return buildCursorAgentTimeline(cursorAgentFeed(m), agentAnswerPreview(m), {
       keepVisible: detailed ? 8 : 6,
       collapseAfter: detailed ? 10 : 5,
       compactWhileRunning: isAgentRunning(m) && detailed,
-      streaming: isAgentRunning(m),
+      streaming: isAgentTimelineAnswerStreaming(
+        { roundGroups: m.roundGroups, agentTurn: m.agentTurn },
+        isAgentRunning(m),
+        hasRunningTool,
+      ),
     });
   }
 
@@ -119,13 +138,20 @@ export function useAgentMessage(
 
   function timelineAnswerContent(m: AgentMessage): string {
     if (m.role !== "assistant" || !hasAgentActivity(m)) return "";
-    if (isAgentRunning(m)) return "";
-    if (m.tools?.some((t: { running?: boolean }) => t.running)) return "";
-    return messageDisplayContent(m);
+    return agentAnswerPreview(m);
+  }
+
+  function timelineAnswerStreaming(m: AgentMessage): boolean {
+    return isAgentTimelineAnswerStreaming(
+      { roundGroups: m.roundGroups, agentTurn: m.agentTurn },
+      isAgentRunning(m),
+      Boolean(m.tools?.some((t: { running?: boolean }) => t.running)),
+    );
   }
 
   function currentAgentStatus(m: AgentMessage): string {
     if (!isAgentRunning(m)) return "";
+    if (timelineAnswerStreaming(m)) return "";
     let detail = m.agentDetail || m.status;
     if (
       m.agentPhase &&
@@ -194,6 +220,7 @@ export function useAgentMessage(
     cursorAgentFeedBlocks,
     cursorAgentFeedAnswer,
     timelineAnswerContent,
+    timelineAnswerStreaming,
     currentAgentStatus,
     cursorActivitySummary,
     agentRoundGroupViews,

@@ -13,6 +13,7 @@
       <AgentMergedContent
         :round-groups="agentRoundGroupViews(msg)"
         :final-answer="timelineAnswerContent(msg)"
+        :answer-streaming="timelineAnswerStreaming(msg)"
         :is-running="isAgentRunning(msg)"
         :current-status="currentAgentStatus(msg)"
         :activity-detailed="isActivityDetailed(msg)"
@@ -82,6 +83,7 @@ const {
   collapseActivityDetailed,
   cursorActivitySummary,
   timelineAnswerContent,
+  timelineAnswerStreaming,
   currentAgentStatus,
 } = useAgentMessage(
   computed(() => props.msg),

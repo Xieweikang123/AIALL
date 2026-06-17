@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onUpdated, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onUpdated, ref, toRef, watch } from "vue";
 import { renderMarkdown } from "../utils/renderMarkdown";
 import { parseAiOptions, type AiOption } from "../utils/parseAiOptions";
 import AiOptionButtons from "./AiOptionButtons.vue";
+import { useTypewriterStream } from "../composables/useTypewriterStream";
 
 const props = withDefaults(
   defineProps<{
@@ -21,21 +22,17 @@ const emit = defineEmits<{
 
 const markdownRef = ref<HTMLElement | null>(null);
 const renderSource = ref(props.content);
-let streamDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-const STREAM_RENDER_MS = 320;
+const { visibleText: streamVisibleText } = useTypewriterStream({
+  source: toRef(props, "content"),
+  enabled: toRef(props, "streaming"),
+  intervalMs: 22,
+});
 
 watch(
   () => props.content,
   (value) => {
-    if (!props.streaming) {
-      renderSource.value = value;
-      return;
-    }
-    if (streamDebounceTimer) clearTimeout(streamDebounceTimer);
-    streamDebounceTimer = setTimeout(() => {
-      renderSource.value = value;
-      streamDebounceTimer = null;
-    }, STREAM_RENDER_MS);
+    if (props.streaming) return;
+    renderSource.value = value;
   },
   { immediate: true },
 );
@@ -44,18 +41,10 @@ watch(
   () => props.streaming,
   (streaming) => {
     if (!streaming) {
-      if (streamDebounceTimer) {
-        clearTimeout(streamDebounceTimer);
-        streamDebounceTimer = null;
-      }
       renderSource.value = props.content;
     }
   },
 );
-
-onBeforeUnmount(() => {
-  if (streamDebounceTimer) clearTimeout(streamDebounceTimer);
-});
 
 /** Wrap tool summary blocks (h3[工具摘要] + following ul) into collapsible cards. */
 function wrapToolSummaryBlocks(el: HTMLElement) {
@@ -164,7 +153,8 @@ onUpdated(() => postProcess());
 </script>
 
 <template>
-  <div v-if="html || parsedOptions?.options.length" ref="markdownRef" class="msg-markdown">
+  <div v-if="streaming && content" class="msg-markdown msg-plain-stream">{{ streamVisibleText }}</div>
+  <div v-else-if="html || parsedOptions?.options.length" ref="markdownRef" class="msg-markdown">
     <div v-if="html" v-html="html" />
     <AiOptionButtons
       v-if="parsedOptions?.options.length"
@@ -172,7 +162,6 @@ onUpdated(() => postProcess());
       @select="handleOptionSelect"
     />
   </div>
-  <div v-else-if="streaming && content" class="msg-markdown msg-plain-stream">{{ content }}</div>
 </template>
 
 <style scoped>

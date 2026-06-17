@@ -4,7 +4,7 @@
       <AgentThoughtBlock
         v-if="block.kind === 'thought'"
         :block="block"
-        :streaming="isRunning"
+        :streaming="false"
       />
       <AgentActionBlock
         v-else-if="block.kind === 'actions'"
@@ -13,15 +13,17 @@
       <p v-else-if="block.kind === 'status'" class="cursor-action planning">{{ block.text }}</p>
     </template>
 
-    <!-- 当前状态（运行中显示） -->
+    <!-- 当前状态（运行中、且尚无流式回答时显示） -->
     <p v-if="isRunning && currentStatus" class="cursor-action planning">{{ currentStatus }}</p>
 
-    <!-- 最终回答：有 Agent 过程时外层气泡被隐藏，须在此展示 -->
+    <!-- 最终回答：运行中流式输出，完成后展示完整 Markdown -->
     <ChatMarkdown
-      v-if="!isRunning && finalAnswer.trim()"
+      v-if="finalAnswer.trim()"
       class="cursor-merged-answer"
+      :class="{ 'cursor-merged-answer--streaming': answerStreaming }"
       :content="finalAnswer"
-      interactive
+      :streaming="answerStreaming"
+      :interactive="!isRunning"
     />
   </div>
 </template>
@@ -31,6 +33,7 @@ import { computed } from "vue";
 import ChatMarkdown from "./ChatMarkdown.vue";
 import AgentThoughtBlock from "./AgentThoughtBlock.vue";
 import AgentActionBlock from "./AgentActionBlock.vue";
+import { filterDuplicateFeedThoughts } from "../services/agentMessageDisplay";
 import {
   layoutCursorFeedBlocks,
   type CursorFeedItem,
@@ -41,6 +44,7 @@ import type { AgentRoundGroupView } from "../services/agentRoundGroups";
 const props = defineProps<{
   roundGroups: AgentRoundGroupView[];
   finalAnswer: string;
+  answerStreaming?: boolean;
   isRunning: boolean;
   currentStatus?: string;
   activityDetailed?: boolean;
@@ -48,11 +52,11 @@ const props = defineProps<{
 
 const mergedBlocks = computed<CursorFeedProcessBlock[]>(() => {
   const items: CursorFeedItem[] = [];
+  const answer = props.finalAnswer.trim();
 
   for (const group of props.roundGroups) {
     if (group.turn <= 0 && !group.narrative) continue;
 
-    // 添加思考/推理文本
     if (group.narrative?.trim()) {
       items.push({
         kind: "thought",
@@ -61,7 +65,6 @@ const mergedBlocks = computed<CursorFeedProcessBlock[]>(() => {
       });
     }
 
-    // 添加工具调用
     for (const tool of group.tools) {
       items.push({
         kind: "action",
@@ -71,8 +74,12 @@ const mergedBlocks = computed<CursorFeedProcessBlock[]>(() => {
     }
   }
 
+  const filtered = filterDuplicateFeedThoughts(items, answer, {
+    suppressAllWhenBubble: props.isRunning && Boolean(answer),
+  });
+
   const detailed = props.activityDetailed === true;
-  return layoutCursorFeedBlocks(items, {
+  return layoutCursorFeedBlocks(filtered, {
     keepVisible: detailed ? 8 : 6,
     collapseAfter: detailed ? 10 : 5,
   });
@@ -122,5 +129,10 @@ const mergedBlocks = computed<CursorFeedProcessBlock[]>(() => {
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.cursor-merged-answer--streaming {
+  border-color: rgba(88, 166, 255, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(88, 166, 255, 0.06);
 }
 </style>

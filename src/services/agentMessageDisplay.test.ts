@@ -5,12 +5,15 @@ import {
   finalizeAssistantBubbleContent,
   hasSubstantiveAgentSummary,
   isEnglishToolNarration,
+  isAgentTimelineAnswerStreaming,
   isStorageCompactedAssistantText,
   isTruncatedAssistantAnswer,
   mergeAssistantTurnText,
   preferFullContentOverCompactedRoundGroup,
+  resolveAgentTimelineAnswer,
   resolveAssistantBubbleContent,
   resolveCompletedAgentBubbleContent,
+  resolveLiveAgentAnswerPreview,
   thoughtDuplicatesBubble,
 } from "./agentMessageDisplay";
 import type { CursorFeedItem } from "./agentCursorFeed";
@@ -284,6 +287,109 @@ describe("finalizeAssistantBubbleContent", () => {
     const result = finalizeAssistantBubbleContent(msg);
     expect(result).toContain("## 修改完成");
     expect(result).toContain("ChatComposerEditor.vue");
+  });
+});
+
+describe("resolveLiveAgentAnswerPreview", () => {
+  it("reads narrative from the active agent turn", () => {
+    expect(
+      resolveLiveAgentAnswerPreview({
+        agentTurn: 2,
+        roundGroups: [
+          { turn: 1, narrative: "旧轮次", modelSteps: [], toolIds: [] },
+          { turn: 2, narrative: "正在流式输出最终回答", modelSteps: [], toolIds: [] },
+        ],
+      }),
+    ).toBe("正在流式输出最终回答");
+  });
+
+  it("falls back to the last round when agentTurn is missing", () => {
+    expect(
+      resolveLiveAgentAnswerPreview({
+        roundGroups: [
+          { turn: 1, narrative: "探索阶段", modelSteps: [], toolIds: [] },
+          { turn: 2, narrative: "最新 narrative", modelSteps: [], toolIds: [] },
+        ],
+      }),
+    ).toBe("最新 narrative");
+  });
+
+  it("ignores english tool narration", () => {
+    expect(
+      resolveLiveAgentAnswerPreview({
+        agentTurn: 1,
+        roundGroups: [
+          { turn: 1, narrative: "Now let me search for the controller", modelSteps: [], toolIds: [] },
+        ],
+      }),
+    ).toBe("");
+  });
+});
+
+describe("resolveAgentTimelineAnswer", () => {
+  it("streams live preview while running without active tools", () => {
+    expect(
+      resolveAgentTimelineAnswer(
+        {
+          agentTurn: 1,
+          roundGroups: [{ turn: 1, narrative: "流式片段", modelSteps: [], toolIds: [] }],
+        },
+        "",
+        true,
+        false,
+      ),
+    ).toBe("流式片段");
+  });
+
+  it("hides live preview while a tool is running", () => {
+    expect(
+      resolveAgentTimelineAnswer(
+        {
+          agentTurn: 1,
+          roundGroups: [{ turn: 1, narrative: "流式片段", modelSteps: [], toolIds: [] }],
+        },
+        "",
+        true,
+        true,
+      ),
+    ).toBe("");
+  });
+
+  it("uses completed content after the run finishes", () => {
+    expect(
+      resolveAgentTimelineAnswer(
+        {
+          agentTurn: 1,
+          roundGroups: [{ turn: 1, narrative: "流式片段", modelSteps: [], toolIds: [] }],
+        },
+        "## 完整回答",
+        false,
+        false,
+      ),
+    ).toBe("## 完整回答");
+  });
+
+  it("marks streaming only when live preview is visible", () => {
+    expect(
+      isAgentTimelineAnswerStreaming(
+        {
+          agentTurn: 1,
+          roundGroups: [{ turn: 1, narrative: "流式片段", modelSteps: [], toolIds: [] }],
+        },
+        true,
+        false,
+      ),
+    ).toBe(true);
+    expect(
+      isAgentTimelineAnswerStreaming(
+        {
+          agentTurn: 1,
+          roundGroups: [{ turn: 1, narrative: "流式片段", modelSteps: [], toolIds: [] }],
+        },
+        true,
+        true,
+      ),
+    ).toBe(false);
   });
 });
 

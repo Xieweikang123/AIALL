@@ -9,6 +9,10 @@ export type AssistantBubbleSource = {
   turnTraces?: Array<{ assistantText: string }>;
 };
 
+export type LiveAgentAnswerSource = AssistantBubbleSource & {
+  agentTurn?: number;
+};
+
 export type FinalizeAssistantBubbleSource = AssistantBubbleSource & {
   writtenFiles?: string[];
   wasAborted?: boolean;
@@ -99,6 +103,38 @@ function pickBestAssistantBubbleText(candidates: string[], direct: string): stri
     return mergeAssistantTurnText(longest, direct);
   }
   return direct;
+}
+
+/** Live answer text from the active round narrative while the agent is streaming. */
+export function resolveLiveAgentAnswerPreview(msg: LiveAgentAnswerSource): string {
+  const groups = msg.roundGroups ?? [];
+  const activeTurn = msg.agentTurn;
+  const group =
+    (activeTurn && activeTurn > 0 ? groups.find((item) => item.turn === activeTurn) : undefined) ??
+    groups.filter((item) => item.turn > 0).at(-1);
+  const text = normalizeBubbleText(group?.narrative || "");
+  if (!text || isEnglishToolNarration(text)) return "";
+  return text;
+}
+
+/** Prefer live stream preview while running; otherwise use the completed bubble text. */
+export function resolveAgentTimelineAnswer(
+  msg: LiveAgentAnswerSource,
+  completedContent: string,
+  isRunning: boolean,
+  hasRunningTool = false,
+): string {
+  if (!isRunning) return completedContent;
+  if (hasRunningTool) return "";
+  return resolveLiveAgentAnswerPreview(msg) || "";
+}
+
+export function isAgentTimelineAnswerStreaming(
+  msg: LiveAgentAnswerSource,
+  isRunning: boolean,
+  hasRunningTool = false,
+): boolean {
+  return isRunning && !hasRunningTool && Boolean(resolveLiveAgentAnswerPreview(msg).trim());
 }
 
 /** Resolve the text shown in the assistant chat bubble (with fallbacks for agent runs). */
