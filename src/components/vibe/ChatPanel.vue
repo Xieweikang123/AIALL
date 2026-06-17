@@ -466,9 +466,12 @@ function formatSessionTime(timestamp: number | string): string {
 }
 
 .panel-label {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.8);
+  color: rgba(255, 255, 255, 0.85);
+  letter-spacing: 0.3px;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
 }
 
 .panel-meta {

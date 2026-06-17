@@ -25,10 +25,14 @@ import {
 } from "./agentTurnBudget";
 import {
   buildExploreBudgetNudge,
+  buildExploreSoftCapNudge,
+  buildFileBreadthNudge,
   buildForceOutputNudge,
   EXECUTE_PLAN_EXPLORE_TURN_BUDGET,
   INTERACTIVE_EXPLORE_TURN_BUDGET,
   MAX_TOTAL_EXPLORE_TURNS,
+  MAX_TOTAL_EXPLORE_TURNS_SOFT,
+  MAX_UNIQUE_READ_FILES_BEFORE_NUDGE,
   PLAN_EXPLORE_TURN_BUDGET,
 } from "./agentExplorationBudget";
 import { buildConsultativeBuildHint, isConsultativeUserPrompt } from "./agentUserIntent";
@@ -535,7 +539,9 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "用户针对截图局部提问（配色、按钮、某块区域）时：讨论阶段只谈其所指可见范围，勿擅自扩大到整页/全项目样式盘点；若用户明确要求修改，可在该范围内 grep/read 对应组件后 patch_file；用户明确说「整个/整页/全面板」时可按扩大后的范围实施。",
     "若用户仅为提问/解释（如「是什么」「为什么」「点哪里」「怎么工作」）且未明确要求改代码：只读探索后用自然语言回答，禁止 patch_file / write_file / delete_file；需要改代码时请用户明确说明改什么。",
     "用户要求「点击输入框任意位置可输入/聚焦」时：先 read_file 核对父容器（如 chat-input-box）与 contenteditable 子元素的 DOM 层级与命中区域；常见修复为外层 mousedown 转发 focus 或子元素 min-height:100% 填满，勿默认只加 padding。",
-    "工作流程（用户已要求实施改动时）：先 grep / search_files 快速定位（通常 1 轮），read_file 读关键片段，然后 patch_file / write_file 修改。",
+    "工作流程：先 grep / search_files 快速定位（通常 1 轮），read_file 读关键片段，然后 patch_file / write_file 修改。",
+    "Bug 修复：当用户报告问题（如「点击没反应」「不工作」「没效果」「报错了」等）时，默认理解为「帮我修复」，分析后直接 patch_file / write_file 执行修改，不要停下来问「需要我实施吗？」。",
+    "区分问题类型：「按钮跑好远」「位置不对」是布局问题（检查 CSS 定位/flex）；「点击没反应」「不工作」是功能问题（检查事件处理/JS 逻辑）。同一组件在连续消息中被提及时，每条消息是独立问题，不要因为上一条修了布局就假设这一条也是布局问题。",
     "效率：探索不超过 2 轮；在已确认要改代码的任务中，信息足够后必须写入，不要连续多轮只读；同一轮可并行多个 read_file / grep。",
     "用户选择执行：当你提供了多个方案/选项让用户选择时，用户选定后必须立即执行该方案（如 patch_file / write_file 落盘），不得自行改变方向或跳过执行去做其他调查。执行完毕并报告结果后，若需进一步排查再提出下一步建议。",
     "探索时：read_file 用 offset/limit 分段读取（单次约 200 行）；不要重复读取已读过的文件；用中文简短说明后立即调用工具。",
@@ -1115,6 +1121,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   let consecutiveExploreTurns = 0;
   let totalExploreTurns = 0;
   let turnsLowNudgeSent = false;
+  /** Track unique files read in explore-only turns to detect breadth sprawl. */
+  const exploreFilesRead = new Set<string>();
+  let fileBreadthNudgeSent = false;
   const activeTools = isAsk || isPlan || readOnlyBuildRun ? READ_ONLY_AGENT_TOOLS : VIBE_AGENT_TOOLS;
   const userContent = buildVisionUserContent(prompt, imageDataUrls);
   const messages: ChatCompletionMessage[] = [
@@ -1183,10 +1192,22 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       turnsLowNudgeSent = true;
     }
 
-    // Hard cap: force text output when total exploration exceeds limit
+    // Progressive exploration restriction:
+    //   Soft cap (6): strip grep/search_files — model can still read_file
+    //   Hard cap (10): strip ALL tools — model must output text only
     const forceTextOutput = !isAsk && !readOnlyBuildRun && totalExploreTurns >= MAX_TOTAL_EXPLORE_TURNS;
+    const stripWideSearch = !forceTextOutput && !isAsk && !readOnlyBuildRun && totalExploreTurns >= MAX_TOTAL_EXPLORE_TURNS_SOFT;
+
     if (forceTextOutput) {
       messages.push({ role: "system", content: buildForceOutputNudge(totalExploreTurns, mode) });
+    } else if (stripWideSearch) {
+      messages.push({ role: "system", content: buildExploreSoftCapNudge(totalExploreTurns, mode) });
+    }
+
+    if (!fileBreadthNudgeSent && exploreFilesRead.size >= MAX_UNIQUE_READ_FILES_BEFORE_NUDGE) {
+      const files = Array.from(exploreFilesRead);
+      messages.push({ role: "system", content: buildFileBreadthNudge(files, mode) });
+      fileBreadthNudgeSent = true;
     }
 
     onEvent({
@@ -1202,7 +1223,16 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       },
     });
 
-    const toolsForTurn = (visionFirstTurnPending || forceTextOutput) ? [] : activeTools;
+    const toolsForTurn = (() => {
+      if (visionFirstTurnPending || forceTextOutput) return [];
+      if (stripWideSearch) {
+        // Keep only read_file (and list_dir); remove grep / search_files / run_command / web_*
+        return activeTools.filter(
+          (t) => !["grep", "search_files", "run_command", "web_search", "web_extract"].includes(t.function.name),
+        );
+      }
+      return activeTools;
+    })();
 
     let streamedChars = 0;
     const streamFilter = new TextToolCallStreamFilter();
@@ -1665,9 +1695,21 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       toolCalls.length > 0 && toolCalls.every((call) => READ_ONLY_AGENT_TOOL_NAMES.has(call.function.name));
     if (turnHadWrite) {
       consecutiveExploreTurns = 0;
+      // Reset file-breadth tracking when the model finally writes (it found the target).
+      exploreFilesRead.clear();
+      fileBreadthNudgeSent = false;
     } else if (turnExploreOnly) {
       consecutiveExploreTurns += 1;
       totalExploreTurns += 1;
+      // Track which files were read this turn for breadth monitoring.
+      for (const call of toolCalls) {
+        if (call.function.name === "read_file") {
+          try {
+            const args = JSON.parse(call.function.arguments || "{}");
+            if (args.path) exploreFilesRead.add(String(args.path));
+          } catch { /* ignore parse errors */ }
+        }
+      }
     }
     if (!isAsk && !readOnlyBuildRun && consecutiveExploreTurns >= exploreTurnBudget) {
       messages.push({ role: "system", content: buildExploreBudgetNudge(consecutiveExploreTurns, mode) });

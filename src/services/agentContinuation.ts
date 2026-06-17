@@ -20,6 +20,10 @@ const INTERACTION_REQUIREMENT_RE =
 
 const ASK_ONLY_RE = /^(什么是|是什么|怎么|如何|为什么|有没有|是否|能不能|可以吗)[\s\S]{0,120}$/i;
 
+/** User reports a bug or broken behavior — treat as "please fix this". */
+const BUG_FEEDBACK_RE =
+  /(?:没反应|不工作|失效|没效果|没用|不好使|点击.{0,6}(?:没|不|无)|点了.{0,6}(?:没|不|无)|依然.{0,6}没|还是.{0,6}没|不能.{0,6}(?:点击|输入|使用)|打不开|无法.{0,6}(?:使用|点击|打开)|bug|报错|报了|报错信息|出错|有问题)/;
+
 const HISTORY_PLAN_KEEP_CHARS = 2_400;
 const PLAN_CODE_BLOCK_MAX_CHARS = 6_000;
 const PLAN_CODE_BLOCKS_MAX_TOTAL = 18_000;
@@ -60,19 +64,25 @@ export function hasDirectImplementationIntent(text: string): boolean {
   if (body.length <= 200 && IMPLEMENTATION_INTENT_RE.test(body)) return true;
   if (body.length <= 400 && SCOPED_EDIT_INTENT_RE.test(body)) return true;
   if (body.length <= 400 && INTERACTION_REQUIREMENT_RE.test(body)) return true;
+  if (body.length <= 200 && BUG_FEEDBACK_RE.test(body)) return true;
   return false;
 }
 
 export function looksLikeModificationPlan(content: string): boolean {
   const text = content.trim();
   if (!text) return false;
-  if (/是否需要我|需要我帮你|你想让我|是否要|是否开始/.test(text) && !text.includes("```")) {
-    return false;
-  }
 
   const paths = extractPlanFilePaths(text);
   const hasCodeBlock = text.includes("```");
   const hasPlanStructure = PLAN_SIGNAL_RE.test(text);
+
+  const hasSubstantiveContent = hasCodeBlock || paths.length > 0;
+  const hasConfirmationPhrase = /是否需要我|需要我帮你|你想让我|是否要|是否开始/.test(text);
+
+  if (hasConfirmationPhrase && !hasSubstantiveContent) return false;
+  if (hasConfirmationPhrase && hasSubstantiveContent) {
+    return true;
+  }
 
   if (hasCodeBlock && paths.length >= 1) return true;
   if (hasPlanStructure && paths.length >= 1 && hasCodeBlock) return true;

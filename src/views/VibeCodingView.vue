@@ -874,7 +874,6 @@ const pendingQuote = ref<QuotedMessage | null>(null);
 const quotedMessage = ref<QuotedMessage | null>(null);
 const quoteButtonPosition = ref({ x: 0, y: 0 });
 const showQuoteButton = ref(false);
-const quoteButtonRef = ref<HTMLElement | null>(null);
 const openingProject = ref(false);
 let switchSessionGeneration = 0;
 
@@ -2175,7 +2174,7 @@ function clearRecentProjects() {
 }
 
 function onDocumentClick(event: MouseEvent) {
-  const target = event.target as Node;
+  const target = event.target as Element;
   if (projectHistoryOpen.value) {
     const el = projectHistoryRef.value;
     if (el && !el.contains(target)) closeProjectHistory();
@@ -2185,8 +2184,7 @@ function onDocumentClick(event: MouseEvent) {
     if (el && !el.contains(target)) closeSessionPicker();
   }
   if (showQuoteButton.value) {
-    const btn = quoteButtonRef.value;
-    if (btn && btn.contains(target)) return;
+    if (target.closest('.quote-floating')) return;
     hideQuoteButtonNow();
   }
 }
