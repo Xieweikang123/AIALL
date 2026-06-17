@@ -47,7 +47,18 @@ export function useSessionManager(projectPath: () => string) {
       return;
     }
     sessionList.value = listVibeChatSessions(p);
-    activeSessionId.value = getActiveVibeChatSessionId(p);
+    const storedActiveId = getActiveVibeChatSessionId(p);
+    if (storedActiveId) {
+      activeSessionId.value = storedActiveId;
+    } else if (!sessionList.value.some((s) => s.id === activeSessionId.value)) {
+      activeSessionId.value = "";
+    }
+  }
+
+  function resetSessionUi() {
+    closeSessionPicker();
+    sessionList.value = [];
+    activeSessionId.value = "";
   }
 
   function toggleSessionPicker(chatSending: boolean) {
@@ -119,6 +130,7 @@ export function useSessionManager(projectPath: () => string) {
     canSwitchToOlderSession,
     sessionPickerTitle,
     refreshSessionList,
+    resetSessionUi,
     toggleSessionPicker,
     closeSessionPicker,
     switchToAdjacentSession,

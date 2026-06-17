@@ -4,8 +4,10 @@ import {
   buildAgentHistoryFromMessages,
   formatSessionTitle,
   getActiveSessionSnapshot,
+  createVibeChatSession,
   getVibeChatProjectSnapshot,
   loadVibeChatHistory,
+  projectChatNeedsDiskRestore,
   restoreChatStoreFromSnapshot,
   sanitizePersistedChatMessages,
   saveVibeChatHistory,
@@ -307,12 +309,43 @@ describe("v3 chat storage (index + memory)", () => {
           messages: [{ id: "u1", role: "user", content: "从磁盘恢复" }],
         },
       ],
-    });
+    }, projectPath);
 
     expect(loadVibeChatHistory(projectPath)).toEqual([
       { id: "u1", role: "user", content: "从磁盘恢复" },
     ]);
     const snapshot = getVibeChatProjectSnapshot(projectPath);
     expect(snapshot.sessions[0]?.messages[0]?.content).toBe("从磁盘恢复");
+  });
+
+  it("rejects disk snapshot when project path mismatches", () => {
+    const projectPath = "D:/projects/target";
+    const ok = restoreChatStoreFromSnapshot(
+      {
+        version: STORE_VERSION,
+        projectPath: "D:/projects/other",
+        activeSessionId: "disk-s1",
+        sessions: [
+          {
+            id: "disk-s1",
+            title: "其他项目会话",
+            createdAt: "2026-03-01T00:00:00.000Z",
+            updatedAt: "2026-03-02T00:00:00.000Z",
+            messageCount: 1,
+            messages: [{ id: "u1", role: "user", content: "不应写入" }],
+          },
+        ],
+      },
+      projectPath,
+    );
+
+    expect(ok).toBe(false);
+    expect(loadVibeChatHistory(projectPath)).toEqual([]);
+  });
+
+  it("does not treat empty indexed sessions as disk restore candidates", () => {
+    const projectPath = "D:/projects/empty-session-index";
+    createVibeChatSession(projectPath);
+    expect(projectChatNeedsDiskRestore(projectPath)).toBe(false);
   });
 });

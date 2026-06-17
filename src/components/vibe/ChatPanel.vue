@@ -144,7 +144,11 @@
     </div>
 
     <div ref="chatScrollRef" class="chat-scroll" @scroll="$emit('on-chat-scroll')">
-      <div v-if="switchingSession" class="chat-switching">
+      <div v-if="switchingProject" class="chat-switching">
+        <span class="chat-switching-spinner" aria-hidden="true">⟳</span>
+        <span>正在加载项目…</span>
+      </div>
+      <div v-else-if="switchingSession" class="chat-switching">
         <span class="chat-switching-spinner" aria-hidden="true">⟳</span>
         <span>正在加载会话…</span>
       </div>
@@ -427,6 +431,7 @@ interface Props {
   projectOpened: boolean;
   chatSending: boolean;
   switchingSession?: boolean;
+  switchingProject?: boolean;
   chatMessages: ChatMessage[];
   chatMode: VibeChatMode;
   chatError: string;
@@ -473,6 +478,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   switchingSession: false,
+  switchingProject: false,
   totalTokenUsage: "",
   showTokenDetail: false,
   tokenDetailData: null,

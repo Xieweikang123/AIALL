@@ -60,6 +60,10 @@ const CHAT_STORE_CACHE_TTL_MS = 60_000;
 const dirListCache = new Map<string, { items: unknown[]; ts: number }>();
 const DIR_LIST_CACHE_TTL_MS = 30_000;
 
+function normalizeProjectPathKey(path: string): string {
+  return path.trim().replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
+}
+
 function getCachedChatStore(projectPath: string): string | null {
   const entry = chatStoreCache.get(projectPath);
   if (entry && Date.now() - entry.ts < CHAT_STORE_CACHE_TTL_MS) {
@@ -360,6 +364,15 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
           status?: string;
         }>;
       };
+      const storedProjectPath = (index.projectPath || "").trim();
+      if (
+        storedProjectPath
+        && normalizeProjectPathKey(storedProjectPath) !== normalizeProjectPathKey(projectPath)
+      ) {
+        sendJson(res, 404, { ok: false, error: "磁盘会话库属于其他项目" });
+        return;
+      }
+
       const metas = Array.isArray(index.sessions) ? index.sessions : [];
       const sessions: Array<{
         id: string;
@@ -434,7 +447,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         ok: true,
         data: {
           version: index.version || 3,
-          projectPath,
+          projectPath: storedProjectPath || projectPath,
           activeSessionId: index.activeSessionId || sessions[0].id,
           sessions,
         },

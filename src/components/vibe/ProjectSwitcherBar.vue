@@ -1,15 +1,19 @@
 <template>
   <div v-if="projectList.length > 0" class="project-switcher-bar">
-    <div class="project-tabs">
-      <button
+    <div class="project-tabs" role="tablist">
+      <div
         v-for="item in projectList"
         :key="item.path"
-        type="button"
+        role="tab"
+        tabindex="0"
         class="project-tab"
         :class="{ active: isActive(item.path), loading: loadingTree && isActive(item.path) }"
-        :disabled="loadingTree && !isActive(item.path) || (chatSending && !isActive(item.path))"
+        :aria-selected="isActive(item.path)"
+        :aria-disabled="isTabDisabled(item.path) || undefined"
         :title="item.path"
-        @click="$emit('switch-project', item.path)"
+        @click="onTabClick(item.path)"
+        @keydown.enter.prevent="onTabClick(item.path)"
+        @keydown.space.prevent="onTabClick(item.path)"
       >
         <span v-if="isActive(item.path)" class="project-tab-dot" aria-hidden="true" />
         <span class="project-tab-name">{{ item.displayName }}</span>
@@ -23,7 +27,7 @@
           title="从列表移除"
           @click.stop="$emit('remove-project', item.path)"
         >×</button>
-      </button>
+      </div>
     </div>
     <button
       type="button"
@@ -38,7 +42,7 @@
 </template>
 
 <script setup lang="ts">
-import { watch, withDefaults } from "vue";
+import { withDefaults } from "vue";
 import type { ProjectHistoryEntry } from "../../services/vibeProjectHistory";
 
 interface Props {
@@ -53,7 +57,7 @@ const props = withDefaults(defineProps<Props>(), {
   chatSending: false,
 });
 
-defineEmits<{
+const emit = defineEmits<{
   (e: "switch-project", path: string): void;
   (e: "remove-project", path: string): void;
   (e: "open-new-project"): void;
@@ -67,6 +71,15 @@ function isActive(path: string): boolean {
   const current = props.currentPath.trim();
   if (!current || !path.trim()) return false;
   return normalize(current) === normalize(path);
+}
+
+function isTabDisabled(path: string): boolean {
+  return (props.loadingTree && !isActive(path)) || (props.chatSending && !isActive(path));
+}
+
+function onTabClick(path: string) {
+  if (isTabDisabled(path)) return;
+  emit("switch-project", path);
 }
 </script>
 
@@ -113,9 +126,10 @@ function isActive(path: string): boolean {
   flex-shrink: 0;
   max-width: 200px;
   transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  outline: none;
 }
 
-.project-tab:hover:not(:disabled) {
+.project-tab:hover:not([aria-disabled="true"]) {
   background: rgba(255, 255, 255, 0.06);
   color: rgba(255, 255, 255, 0.88);
 }
@@ -131,7 +145,7 @@ function isActive(path: string): boolean {
   opacity: 0.7;
 }
 
-.project-tab:disabled {
+.project-tab[aria-disabled="true"] {
   opacity: 0.5;
   cursor: not-allowed;
 }

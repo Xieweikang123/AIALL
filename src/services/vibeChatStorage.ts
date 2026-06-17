@@ -178,6 +178,12 @@ function normalizeProjectKey(path: string): string {
   return path.trim().replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
 }
 
+export function vibeProjectPathsMatch(a: string, b: string): boolean {
+  const left = normalizeProjectKey(a);
+  const right = normalizeProjectKey(b);
+  return Boolean(left && right && left === right);
+}
+
 function genSessionId(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
@@ -724,12 +730,7 @@ export function projectChatNeedsDiskRestore(projectPath: string, sessionId?: str
   for (const meta of metas) {
     const expected = meta.messageCount ?? 0;
     const session = record?.sessions.find((s) => s.id === meta.id);
-    // If index says 0 messages but in-memory session is empty, still check disk
-    // (handles old sessions that were synced without messages)
-    if (expected <= 0) {
-      if (!session || session.messages.length === 0) return true;
-      continue;
-    }
+    if (expected <= 0) continue;
     if (!session || session.messages.length === 0) return true;
     if (session.messages.length < expected) return true;
     const missingImages = session.messages.some(
@@ -744,9 +745,13 @@ export function projectChatNeedsDiskRestore(projectPath: string, sessionId?: str
   return false;
 }
 
-export function restoreChatStoreFromSnapshot(snapshot: VibeChatProjectSnapshot): boolean {
+export function restoreChatStoreFromSnapshot(
+  snapshot: VibeChatProjectSnapshot,
+  expectedProjectPath?: string,
+): boolean {
   const key = normalizeProjectKey(snapshot.projectPath);
   if (!key || !snapshot.sessions?.length) return false;
+  if (expectedProjectPath && normalizeProjectKey(expectedProjectPath) !== key) return false;
   const sessions: VibeChatSession[] = snapshot.sessions.map((s) => ({
     id: s.id,
     title: s.title || "新会话",

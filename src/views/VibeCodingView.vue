@@ -251,6 +251,7 @@
         :can-switch-to-newer-session="canSwitchToNewerSession"
         :can-switch-to-older-session="canSwitchToOlderSession"
         :switching-session="switchingSession"
+        :switching-project="switchingProject"
         :chat-panel-style="chatPanelStyle"
         :show-token-detail="showTokenDetail"
         :token-detail-data="tokenDetailData"
@@ -435,6 +436,7 @@ import {
   stripToolSummaryFromAssistantContent,
   switchVibeChatSession,
   getActiveVibeChatSessionId,
+  vibeProjectPathsMatch,
   updateVibeChatSessionStatus,
   type PersistedChatMessage,
   type VibeChatSessionMeta,
@@ -514,6 +516,7 @@ import {
   renameItem,
   searchFiles,
   fetchChatStoreFromDisk,
+  fetchSessionMessages,
   formatFetchError,
   syncChatSession,
   syncChatStore,
@@ -722,6 +725,7 @@ const chatMode = ref<VibeChatMode>(loadChatMode());
 const chatMessages = ref<ChatMessage[]>([]);
 const chatSending = ref(false);
 const switchingSession = ref(false);
+const switchingProject = ref(false);
 const chatError = ref("");
 const searchInputRef = ref<HTMLInputElement | null>(null);
 const workspaceRef = ref<HTMLElement | null>(null);
@@ -1155,9 +1159,24 @@ const {
 
 async function ensureProjectChatLoadedFromDisk(project: string, sessionId?: string): Promise<void> {
   if (!project.trim() || !projectChatNeedsDiskRestore(project, sessionId)) return;
+
+  const targetId = sessionId || getActiveVibeChatSessionId(project);
+  if (targetId) {
+    const result = await fetchSessionMessages(project, targetId);
+    if (result.ok && Array.isArray(result.data.messages) && result.data.messages.length) {
+      saveVibeChatHistory(project, result.data.messages as PersistedChatMessage[], targetId);
+      if (!projectChatNeedsDiskRestore(project, sessionId)) return;
+    }
+  }
+
   const diskStore = await fetchChatStoreFromDisk(project, { loadMessages: true });
-  if (!diskStore.ok || !diskStore.data.sessions.length) return;
-  restoreChatStoreFromSnapshot(diskStore.data);
+  if (
+    diskStore.ok
+    && diskStore.data.sessions.length
+    && vibeProjectPathsMatch(project, diskStore.data.projectPath)
+  ) {
+    restoreChatStoreFromSnapshot(diskStore.data, project);
+  }
 }
 
 async function applyChatMessageImageHydration(messages: PersistedChatMessage[]): Promise<ChatMessage[]> {
@@ -1714,6 +1733,10 @@ async function openProjectByPath(dirPath: string) {
   fileLoadError.value = "";
   showDiffMode.value = false;
   resetGitPanelState();
+  chatMessages.value = [];
+  activeSessionId.value = "";
+  sessionList.value = [];
+  closeSessionPicker();
   log("reset-state");
 
   try {
@@ -1736,18 +1759,7 @@ async function openProjectByPath(dirPath: string) {
     const tChat0 = performance.now();
     log(`chat-check`);
     let loaded = loadVibeChatHistory(normalized);
-    log(`chat-load-local(${loaded.length}sessions)`);
-    if (!loaded.length) {
-      const diskStore = await fetchChatStoreFromDisk(normalized, { loadMessages: true });
-      log(`chat-fetch-disk(${diskStore.ok ? "ok" : "fail"}, ${diskStore.ok ? diskStore.data.sessions.length : 0}sessions)`);
-      if (diskStore.ok && diskStore.data.sessions.length) {
-        restoreChatStoreFromSnapshot(diskStore.data);
-        loaded = loadVibeChatHistory(normalized);
-        log(`chat-after-restore(${loaded.length}sessions)`);
-      }
-    }
-    log(`chat-done(${Math.round(performance.now() - tChat0)}ms)`);
-
+    log(`chat-load-local(${loaded.length}msgs)`);
 
     treeError.value = "";
     fileTree.value = items;
@@ -1764,6 +1776,23 @@ async function openProjectByPath(dirPath: string) {
     activeSessionId.value = getActiveVibeChatSessionId(normalized);
     refreshSessionList(normalized);
     log("set-chat");
+
+    loadingTree.value = false;
+
+    if (!loaded.length && projectChatNeedsDiskRestore(normalized)) {
+      switchingProject.value = true;
+      try {
+        await ensureProjectChatLoadedFromDisk(normalized);
+        loaded = loadVibeChatHistory(normalized);
+        chatMessages.value = normalizeChatMessages(loaded);
+        activeSessionId.value = getActiveVibeChatSessionId(normalized);
+        refreshSessionList(normalized);
+        log(`chat-hydrate-disk(${loaded.length}msgs)`);
+      } finally {
+        switchingProject.value = false;
+      }
+    }
+    log(`chat-done(${Math.round(performance.now() - tChat0)}ms)`);
 
     Promise.all([
       refreshGitStatus(),
@@ -1783,6 +1812,7 @@ async function openProjectByPath(dirPath: string) {
     flushLog(`FAILED total=${Math.round(performance.now() - t0)}ms | ${timings.join(" → ")}`);
   } finally {
     loadingTree.value = false;
+    switchingProject.value = false;
   }
 }
 
