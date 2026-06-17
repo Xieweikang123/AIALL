@@ -33,6 +33,11 @@ describe("resolveAgentMaxTurns", () => {
     expect(resolveAgentMaxTurns("ask", undefined)).toBe(ASK_MAX_TURNS);
     expect(ASK_MAX_TURNS).toBe(12);
   });
+
+  it("limits plan explore vs plan execution", () => {
+    expect(resolveAgentMaxTurns("plan", { kind: "interactive" })).toBe(16);
+    expect(resolveAgentMaxTurns("plan", { kind: "execute_plan" })).toBe(EXECUTE_PLAN_MAX_TURNS);
+  });
 });
 
 describe("resolveResumeMaxTurns", () => {

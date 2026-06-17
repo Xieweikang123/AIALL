@@ -44,6 +44,7 @@ import {
   updateVibeChatSessionStatus,
 } from "../services/vibeChatStorage";
 import { resolveImagesForAgentTurn } from "../services/vibeChatImageStore";
+import { looksLikeModificationPlan } from "../services/agentContinuation";
 import { isDeleteNotFoundError, resolveAgentDoneFileAction } from "../services/vibeAgentTurnApply";
 import {
   runVibeAgentSse,
@@ -176,6 +177,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   const autoResumeTargetId = ref("");
   const agentUiTick = ref(0);
   const stalledAssistantMsg = ref<ChatMessage | null>(null);
+  const planExecutionActive = ref(false);
 
   let streamDeltaRaf: number | null = null;
   let streamScrollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1258,6 +1260,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       stopAgentUiTick();
       agentLastProgressAt = 0;
       chatSending.value = false;
+      planExecutionActive.value = false;
       if (trySilentContinue(assistantMsg, event.data.message)) {
         persistChatNow();
         void scrollChatToBottom();
@@ -1279,6 +1282,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       stopAgentUiTick();
       agentLastProgressAt = 0;
       chatSending.value = false;
+      planExecutionActive.value = false;
       agentAbortHandle = null;
       assistantMsg.streaming = false;
       clearPendingAgentRun();
@@ -1593,6 +1597,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       referencedFiles?: string[];
       imageDataUrls?: string[];
       userBubbleContent?: string;
+      /** When executing a specific plan message, use its content as the prior assistant plan. */
+      planAssistantContent?: string;
     },
   ) {
     const rawPrompt = userText.trim();
@@ -1608,7 +1614,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
     agentConnectHasImages = hasImages;
 
-    const lastAssistant = findLastAssistantContent();
+    const lastAssistant = options?.planAssistantContent ?? findLastAssistantContent();
     const mode = chatMode.value;
     const runProfile = resolveAgentRunProfile({
       prompt: rawPrompt,
@@ -1616,6 +1622,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       lastAssistantContent: lastAssistant,
       referencedFiles: options?.referencedFiles,
     });
+    planExecutionActive.value = mode === "plan" && runProfile.kind === "execute_plan";
     const prompt = buildAgentPromptForProfile(
       enrichAgentUserPrompt(rawPrompt, {
         lastAssistantContent: lastAssistant,
@@ -1707,6 +1714,33 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     return Boolean(messageDisplayContent(msg));
   }
 
+  function findLastAssistantMessage(): ChatMessage | undefined {
+    for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
+      const m = chatMessages.value[i];
+      if (m.role === "assistant") return m;
+    }
+    return undefined;
+  }
+
+  function canExecutePlanMessage(msg: ChatMessage): boolean {
+    if (msg.role !== "assistant") return false;
+    if (chatMode.value !== "plan") return false;
+    if (chatSending.value || msg.streaming || isAgentRunning(msg)) return false;
+    if (msg.writtenFiles?.length) return false;
+    const last = findLastAssistantMessage();
+    if (!last || last.id !== msg.id) return false;
+    return looksLikeModificationPlan(messageDisplayContent(msg));
+  }
+
+  async function executePlanFromMessage(messageId: string) {
+    const msg = chatMessages.value.find((m) => m.id === messageId);
+    if (!msg || !canExecutePlanMessage(msg)) return;
+    await runAgentTurn("改吧", {
+      userBubbleContent: "执行方案",
+      planAssistantContent: messageDisplayContent(msg),
+    });
+  }
+
   return {
     autoResumeSecondsLeft,
     autoResumeTargetId,
@@ -1769,6 +1803,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     interruptAgentRun,
     tryResumeHmrInterruptedRun,
     shouldShowMessageBubble,
+    canExecutePlanMessage,
+    executePlanFromMessage,
+    planExecutionActive,
     scheduleStreamScroll,
     getAgentAbortHandle: () => agentAbortHandle,
   };

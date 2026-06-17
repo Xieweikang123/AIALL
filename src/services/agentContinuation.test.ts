@@ -22,6 +22,7 @@ describe("isExecutionContinuation", () => {
     expect(isExecutionContinuation("改吧")).toBe(true);
     expect(isExecutionContinuation("好的")).toBe(true);
     expect(isExecutionContinuation("执行吧")).toBe(true);
+    expect(isExecutionContinuation("执行方案")).toBe(true);
   });
 
   it("rejects long exploratory prompts", () => {

@@ -1,6 +1,6 @@
 /** Short user confirmations after the agent already proposed a change plan. */
 const EXECUTION_CONTINUATION_RE =
-  /^(改吧|好的?|行|可以|继续|接着(做|改|来)?|执行(吧|一下)?|开始(改|做)?|动手(吧)?|按方案(改|执行)?|go|do it|yes|ok|okay|sure)\.?$/i;
+  /^(改吧|执行方案|好的?|行|可以|继续|接着(做|改|来)?|执行(吧|一下)?|开始(改|做)?|动手(吧)?|按方案(改|执行)?|go|do it|yes|ok|okay|sure)\.?$/i;
 
 /** Explicit “go implement” phrasing (may appear after a quoted reply block). */
 const IMPLEMENTATION_INTENT_RE =

@@ -26,6 +26,16 @@ describe("resolveAgentRunProfile", () => {
     expect(profile.targetFiles).toContain("src/components/ChatComposerEditor.vue");
   });
 
+  it("uses execute_plan for plan-mode confirmations after a plan", () => {
+    const profile = resolveAgentRunProfile({
+      prompt: "执行方案",
+      mode: "plan",
+      lastAssistantContent: SAMPLE_PLAN,
+    });
+    expect(profile.kind).toBe("execute_plan");
+    expect(profile.targetFiles).toContain("src/components/ChatComposerEditor.vue");
+  });
+
   it("uses execute_plan when user asks to implement after quoting the plan", () => {
     const profile = resolveAgentRunProfile({
       prompt: "> Agent: …\n\n实现 vibe coding 页的发图功能",
@@ -131,5 +141,7 @@ describe("buildAgentPromptForProfile", () => {
 describe("resolveAgentMaxTurns export", () => {
   it("re-exports turn budget helper from server module", () => {
     expect(resolveAgentMaxTurns("build", { kind: "execute_plan" })).toBe(20);
+    expect(resolveAgentMaxTurns("plan", { kind: "execute_plan" })).toBe(20);
+    expect(resolveAgentMaxTurns("plan", { kind: "interactive" })).toBe(16);
   });
 });

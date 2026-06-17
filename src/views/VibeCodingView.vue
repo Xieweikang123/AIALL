@@ -978,7 +978,7 @@ const chatPlaceholder = computed(() =>
   chatMode.value === "ask"
     ? "提问、解释代码"
     : chatMode.value === "plan"
-    ? "描述需求，AI 输出修改方案（不写文件）"
+    ? "描述需求 → AI 输出方案 → 确认后执行（可点「执行方案」或回复「执行方案」）"
     : "描述要改什么（Enter 发送，Shift+Enter 换行）",
 );
 
@@ -986,7 +986,9 @@ const chatRunningText = computed(() =>
   chatMode.value === "ask"
     ? "思考中… · 发送新消息将打断"
     : chatMode.value === "plan"
-    ? "规划中… · 发送新消息将打断"
+    ? planExecutionActive.value
+      ? "执行方案中… · 发送新消息将打断"
+      : "规划中… · 发送新消息将打断"
     : "Agent 运行中… · 发送新消息将打断",
 );
 
@@ -1721,6 +1723,9 @@ const {
   jumpChainToLatest,
   forceRecoverStalledRun,
   shouldShowMessageBubble,
+  canExecutePlanMessage,
+  executePlanFromMessage,
+  planExecutionActive,
   scheduleStreamScroll,
   clearStreamDeltaBuffer,
   tryResumeHmrInterruptedRun,
@@ -2810,6 +2815,8 @@ provide(vibeChatMessageContextKey, {
   truncateDiffPreview,
   toggleExpandedDiff,
   isDiffExpanded,
+  canExecutePlanMessage,
+  executePlanFromMessage,
 } as VibeChatMessageContext);
 
 onMounted(() => {

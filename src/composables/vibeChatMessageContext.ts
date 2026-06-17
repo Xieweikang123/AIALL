@@ -53,6 +53,8 @@ export interface VibeChatMessageContext {
   truncateDiffPreview: (text: string) => string;
   toggleExpandedDiff: (messageId: string, relPath: string) => void;
   isDiffExpanded: (messageId: string, relPath: string) => boolean;
+  canExecutePlanMessage: (msg: VibeChatMessageItem) => boolean;
+  executePlanFromMessage: (messageId: string) => void | Promise<void>;
 }
 
 export const vibeChatMessageContextKey: InjectionKey<VibeChatMessageContext> = Symbol("vibeChatMessageContext");

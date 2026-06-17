@@ -13,6 +13,15 @@
       <div class="msg-head">
         <div class="msg-role">{{ m.role === "user" ? "你" : "Agent" }}</div>
         <div v-if="!ctx.chatSending.value" class="msg-toolbar">
+          <button
+            v-if="ctx.canExecutePlanMessage(m)"
+            type="button"
+            class="ghost small plan-exec-btn"
+            title="按上一条方案开始改代码"
+            @click="ctx.executePlanFromMessage(m.id)"
+          >
+            执行方案
+          </button>
           <button type="button" class="ghost small" title="复制此消息" @click="ctx.copyText(m.content)">
             复制
           </button>
@@ -177,7 +186,7 @@
         class="msg-actions"
       >
         <span
-          v-if="m.writtenFiles?.length && !m.reverted && !m.rejected && m.chatMode === 'build'"
+          v-if="m.writtenFiles?.length && !m.reverted && !m.rejected && (m.chatMode === 'build' || m.chatMode === 'plan')"
           class="applied-badge"
         >
           已写入 {{ m.writtenFiles.length }} 个文件

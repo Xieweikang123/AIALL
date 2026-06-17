@@ -160,7 +160,7 @@
           </svg>
         </div>
         <p class="chat-empty-title">AI 编程助手</p>
-        <p class="chat-empty-desc">Agent 会探索项目；Build 模式下文件修改会立即写入磁盘。输入 <code>@</code> 引用文件。</p>
+        <p class="chat-empty-desc">Ask 只读问答；Plan 先出方案再确认执行；Build 直接探索并改代码。输入 <code>@</code> 引用文件。</p>
         <div class="chips">
           <button type="button" class="chip" :disabled="chatSending" @click="$emit('apply-example', '解释这个项目是做什么的')">
             解释项目
@@ -288,6 +288,7 @@
               class="mode-btn"
               :class="{ active: chatMode === 'plan' }"
               :disabled="chatSending"
+              title="先输出修改方案，确认后再执行"
               @click="$emit('update:chatMode', 'plan')"
             >
               Plan
@@ -297,6 +298,7 @@
               class="mode-btn"
               :class="{ active: chatMode === 'build' }"
               :disabled="chatSending"
+              title="直接探索并修改文件"
               @click="$emit('update:chatMode', 'build')"
             >
               Build

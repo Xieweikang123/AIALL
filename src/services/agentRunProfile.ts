@@ -55,7 +55,7 @@ export function resolveAgentRunProfile(input: ResolveAgentRunProfileInput): Agen
   const body = stripQuotedReplyPrefix(trimmed);
 
   if (
-    mode === "build" &&
+    (mode === "build" || mode === "plan") &&
     isExecutionContinuation(trimmed) &&
     lastAssistantContent &&
     looksLikeModificationPlan(lastAssistantContent)
@@ -151,7 +151,7 @@ export function resolveAgentResumeRunProfile(
     mode,
     lastAssistantContent,
   });
-  if (mode !== "build") return base;
+  if (mode !== "build" && mode !== "plan") return base;
 
   const turns = resolveAgentCompletedTurns(msg);
   const completedTools = msg.tools?.filter((t) => !t.running) ?? [];
