@@ -148,25 +148,26 @@
 
       <form class="config-form" @submit.prevent="handleTest">
         <label class="field">
-          <span>模型名称</span>
-          <div class="model-row">
-            <input v-model.trim="form.model" type="text" placeholder="mimo-v2.5-pro" />
-            <button type="button" class="secondary" :disabled="modelsLoading || !endpointReady" @click="handleFetchModels">
-              {{ modelsLoading ? "加载中..." : "获取可用模型" }}
-            </button>
-            <button type="button" class="secondary" :disabled="modelsLoading || !endpointReady" @click="handleRefreshModels">
-              刷新
-            </button>
+          <div class="field-row">
+            <span>模型名称</span>
+            <div class="field-tools">
+              <button type="button" class="link" :disabled="modelsLoading || !endpointReady" @click="handleFetchModels">
+                {{ modelsLoading ? "加载中..." : "获取模型" }}
+              </button>
+              <button type="button" class="link" :disabled="modelsLoading || !endpointReady" @click="handleRefreshModels">
+                刷新
+              </button>
+              <small class="tips">{{ modelsStatusText }}</small>
+            </div>
           </div>
-          <select v-if="availableModels.length" v-model="form.model">
-            <option v-for="modelName in availableModels" :key="modelName" :value="modelName">
-              {{ modelName }}
-            </option>
-          </select>
-          <small class="tips">
-            {{ modelsStatusText }}
-          </small>
-          <pre v-if="availableModels.length" class="models-pre">{{ availableModels.join("\n") }}</pre>
+          <div class="model-row">
+            <select v-if="availableModels.length" v-model="form.model" class="model-select">
+              <option v-for="modelName in availableModels" :key="modelName" :value="modelName">
+                {{ modelName }}
+              </option>
+            </select>
+            <input v-model.trim="form.model" type="text" placeholder="mimo-v2.5-pro" />
+          </div>
         </label>
 
         <label class="field">
@@ -1546,9 +1547,19 @@ button.primary {
 }
 
 .model-row {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
+  display: flex;
   gap: 8px;
+  align-items: center;
+}
+
+.model-row select {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.model-row input {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .checkbox {
@@ -1736,9 +1747,10 @@ pre {
   background: rgba(17, 24, 39, 0.05);
 }
 
-.models-pre {
-  max-height: 220px;
-  overflow: auto;
+
+
+.model-select {
+  min-width: 0;
 }
 
 @media (max-width: 640px) {

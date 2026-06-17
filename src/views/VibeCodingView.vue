@@ -1248,6 +1248,7 @@ const {
   editorCollapsed,
   chatPanelStyle,
   startResize,
+  stopResize,
   collapseEditor,
   expandEditor,
   getChatPanelMaxWidth,
