@@ -115,6 +115,7 @@
       <PlanDocumentBlock
         v-if="ctx.shouldShowMessageBubble(m, ctx.hasAgentActivity(m))"
         :content="ctx.messageDisplayContent(m)"
+        :streaming="m.role === 'assistant' && (ctx.isAgentRunning(m) || !!m.streaming)"
         :can-execute="ctx.canExecutePlanMessage(m)"
         :enhance-layout="m.role === 'assistant' && !ctx.isAgentRunning(m)"
         @execute="ctx.executePlanFromMessage(m.id)"
@@ -231,6 +232,8 @@ if (!ctx) {
 }
 
 function planMarkdownContent(msg: VibeChatMessageItem): string {
-  return enrichPlanMarkdownForDisplay(ctx.messageDisplayContent(msg));
+  const raw = ctx.messageDisplayContent(msg);
+  const whileStreaming = msg.role === "assistant" && (ctx.isAgentRunning(msg) || !!msg.streaming);
+  return enrichPlanMarkdownForDisplay(raw, { whileStreaming });
 }
 </script>

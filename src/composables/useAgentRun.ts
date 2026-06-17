@@ -45,6 +45,7 @@ import {
 } from "../services/vibeChatStorage";
 import { resolveImagesForAgentTurn } from "../services/vibeChatImageStore";
 import { looksLikeModificationPlan, findLastAssistantContentInMessages } from "../services/agentContinuation";
+import { stripTextToolCallMarkup } from "../services/textToolCallMarkup";
 import { isDeleteNotFoundError, resolveAgentDoneFileAction } from "../services/vibeAgentTurnApply";
 import {
   runVibeAgentSse,
@@ -1058,7 +1059,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         },
         event.data.maxTurns,
       );
-      const turnText = stripToolSummaryFromAssistantContent(event.data.assistantText || "");
+      const turnText = stripTextToolCallMarkup(
+        stripToolSummaryFromAssistantContent(event.data.assistantText || ""),
+      );
       if (turnText) {
         assistantMsg.content = mergeAssistantTurnText(assistantMsg.content || "", turnText);
       }
@@ -1241,7 +1244,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
     if (event.type === "message") {
       clearStreamDeltaBuffer();
-      const cleanText = stripToolSummaryFromAssistantContent(event.data.text);
+      const cleanText = stripTextToolCallMarkup(stripToolSummaryFromAssistantContent(event.data.text));
       assistantMsg.content = mergeAssistantTurnText(assistantMsg.content || "", cleanText);
       assistantMsg.streaming = false;
       assistantMsg.status = "";

@@ -46,7 +46,11 @@ export function injectPlanFileAnchors(content: string, files: readonly string[])
   return result;
 }
 
-export function enrichPlanMarkdownForDisplay(content: string): string {
+export function enrichPlanMarkdownForDisplay(
+  content: string,
+  options?: { whileStreaming?: boolean },
+): string {
+  if (options?.whileStreaming) return content;
   const { isPlan, files } = parsePlanDocumentDisplay(content);
   if (!isPlan) return content;
   return injectPlanFileAnchors(content, files);

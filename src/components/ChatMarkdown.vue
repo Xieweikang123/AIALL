@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onUpdated, ref, toRef, watch } from "vue";
+import { computed, nextTick, onUpdated, ref, watch } from "vue";
 import { renderMarkdown } from "../utils/renderMarkdown";
 import { parseAiOptions, type AiOption } from "../utils/parseAiOptions";
 import AiOptionButtons from "./AiOptionButtons.vue";
-import { useTypewriterStream } from "../composables/useTypewriterStream";
+import { stripTextToolCallMarkup } from "../services/textToolCallMarkup";
 
 const props = withDefaults(
   defineProps<{
@@ -22,11 +22,6 @@ const emit = defineEmits<{
 
 const markdownRef = ref<HTMLElement | null>(null);
 const renderSource = ref(props.content);
-const { visibleText: streamVisibleText } = useTypewriterStream({
-  source: toRef(props, "content"),
-  enabled: toRef(props, "streaming"),
-  intervalMs: 22,
-});
 
 watch(
   () => props.content,
@@ -132,7 +127,9 @@ const markdownContent = computed(() => {
   return parsed.before;
 });
 
-const html = computed(() => renderMarkdown(markdownContent.value));
+const html = computed(() => renderMarkdown(stripTextToolCallMarkup(markdownContent.value)));
+
+const streamingHtml = computed(() => renderMarkdown(stripTextToolCallMarkup(props.content)));
 
 function handleOptionSelect(option: AiOption) {
   emit("selectOption", option);
@@ -148,12 +145,17 @@ function postProcess() {
 }
 
 // Trigger on html change
-watch(html, () => postProcess(), { immediate: true });
+watch([html, streamingHtml, () => props.streaming], () => postProcess(), { immediate: true });
 onUpdated(() => postProcess());
 </script>
 
 <template>
-  <div v-if="streaming && content" class="msg-markdown msg-plain-stream">{{ streamVisibleText }}</div>
+  <div
+    v-if="streaming && content"
+    ref="markdownRef"
+    class="msg-markdown msg-markdown--streaming"
+    v-html="streamingHtml"
+  />
   <div v-else-if="html || parsedOptions?.options.length" ref="markdownRef" class="msg-markdown">
     <div v-if="html" v-html="html" />
     <AiOptionButtons
@@ -175,8 +177,8 @@ onUpdated(() => postProcess());
   color: rgba(255, 255, 255, 0.92);
 }
 
-.msg-plain-stream {
-  white-space: pre-wrap;
+.msg-markdown--streaming {
+  opacity: 0.98;
 }
 
 .msg-markdown :deep(p) {

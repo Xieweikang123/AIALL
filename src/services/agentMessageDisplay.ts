@@ -2,6 +2,7 @@ import type { AgentRoundGroup } from "./agentRoundGroups";
 import type { CursorFeedItem } from "./agentCursorFeed";
 import { isPrematureVisionCompletionClaim } from "../../server/visionMessage";
 import { stripToolSummaryFromAssistantContent } from "./vibeChatStorage";
+import { stripTextToolCallMarkup } from "./textToolCallMarkup";
 
 export type AssistantBubbleSource = {
   content?: string;
@@ -25,7 +26,7 @@ const THIN_EPILOGUE_MAX_CHARS = 96;
 const ENGLISH_TOOL_NARRATION_RE = /^(?:Now let me|Let me|I'll|I need to|First,?\s+I)\b/i;
 
 function normalizeBubbleText(text: string): string {
-  return stripToolSummaryFromAssistantContent(text).trim();
+  return stripTextToolCallMarkup(stripToolSummaryFromAssistantContent(text)).trim();
 }
 
 /** Short English planning lines emitted before tool calls — not user-facing answers. */

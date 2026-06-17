@@ -46,4 +46,8 @@ describe("enrichPlanMarkdownForDisplay", () => {
     const enriched = enrichPlanMarkdownForDisplay(SAMPLE_PLAN);
     expect(enriched).toContain("plan-file-0");
   });
+
+  it("skips enrichment while streaming", () => {
+    expect(enrichPlanMarkdownForDisplay(SAMPLE_PLAN, { whileStreaming: true })).toBe(SAMPLE_PLAN);
+  });
 });

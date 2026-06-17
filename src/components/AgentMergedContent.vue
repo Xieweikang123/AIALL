@@ -19,6 +19,7 @@
     <!-- 最终回答：运行中流式输出，完成后展示完整 Markdown -->
     <PlanDocumentBlock
       :content="finalAnswer"
+      :streaming="answerStreaming || isRunning"
       :can-execute="canExecutePlan && !isRunning && !answerStreaming"
       :enhance-layout="!isRunning && !answerStreaming"
       @execute="emit('execute-plan')"
@@ -64,7 +65,11 @@ const emit = defineEmits<{
   "execute-plan": [];
 }>();
 
-const markdownContent = computed(() => enrichPlanMarkdownForDisplay(props.finalAnswer));
+const markdownContent = computed(() =>
+  enrichPlanMarkdownForDisplay(props.finalAnswer, {
+    whileStreaming: Boolean(props.answerStreaming || props.isRunning),
+  }),
+);
 
 const mergedBlocks = computed<CursorFeedProcessBlock[]>(() => {
   const items: CursorFeedItem[] = [];

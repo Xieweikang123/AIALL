@@ -1,5 +1,5 @@
 <template>
-  <div v-if="display.isPlan" class="plan-document">
+  <div v-if="showPlanChrome" class="plan-document">
     <div class="plan-document-head">
       <div class="plan-document-title">
         <span class="plan-document-badge">修改方案</span>
@@ -46,10 +46,12 @@ const props = withDefaults(
   defineProps<{
     content: string;
     canExecute?: boolean;
+    /** When true, show raw markdown only (no plan chrome / anchors). */
+    streaming?: boolean;
     /** When false, skip code-block folding (e.g. while streaming). */
     enhanceLayout?: boolean;
   }>(),
-  { canExecute: false, enhanceLayout: true },
+  { canExecute: false, streaming: false, enhanceLayout: true },
 );
 
 const emit = defineEmits<{
@@ -58,6 +60,7 @@ const emit = defineEmits<{
 
 const bodyRef = ref<HTMLElement | null>(null);
 const display = computed(() => parsePlanDocumentDisplay(props.content));
+const showPlanChrome = computed(() => !props.streaming && display.value.isPlan);
 const filesExpanded = computed(() => display.value.files.length <= 6);
 
 function scrollToFile(index: number) {
@@ -98,14 +101,14 @@ function wrapPlanCodeBlocks(root: HTMLElement) {
 }
 
 function enhancePlanBody() {
-  if (!props.enhanceLayout) return;
+  if (!props.enhanceLayout || props.streaming) return;
   const root = bodyRef.value;
   if (!root || !display.value.isPlan) return;
   wrapPlanCodeBlocks(root);
 }
 
 watch(
-  () => [props.content, props.enhanceLayout] as const,
+  () => [props.content, props.enhanceLayout, props.streaming] as const,
   () => {
     nextTick(enhancePlanBody);
   },

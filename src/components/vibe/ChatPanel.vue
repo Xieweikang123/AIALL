@@ -1187,8 +1187,9 @@ function formatSessionTime(timestamp: number | string): string {
 }
 
 .mode-btn.active {
-  background: rgba(88, 166, 255, 0.2);
-  color: #58a6ff;
+  background: linear-gradient(135deg, rgba(255, 213, 79, 0.25), rgba(255, 213, 79, 0.15));
+  color: #ffd54f;
+  box-shadow: 0 1px 3px rgba(255, 213, 79, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .mode-btn:disabled {
