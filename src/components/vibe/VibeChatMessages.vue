@@ -17,7 +17,7 @@
             v-if="ctx.canExecutePlanMessage(m)"
             type="button"
             class="ghost small plan-exec-btn"
-            title="按上一条方案开始改代码"
+            title="按此方案开始改代码"
             @click="ctx.executePlanFromMessage(m.id)"
           >
             执行方案
@@ -95,6 +95,8 @@
         :schedule-persist-chat="ctx.schedulePersistChat"
         :message-display-content="ctx.messageDisplayContent"
         :show-jump="ctx.chainJumpVisible[m.id]"
+        :can-execute-plan="ctx.canExecutePlanMessage(m)"
+        @execute-plan="ctx.executePlanFromMessage(m.id)"
         @jump-latest="ctx.jumpChainToLatest(m.id)"
       />
       <div
@@ -110,18 +112,25 @@
           loading="lazy"
         />
       </div>
-      <ChatMarkdown
+      <PlanDocumentBlock
         v-if="ctx.shouldShowMessageBubble(m, ctx.hasAgentActivity(m))"
-        class="msg-answer"
-        :class="{
-          'msg-answer--streaming': m.role === 'assistant' && ctx.isAgentRunning(m),
-          'msg-answer--final': m.role === 'assistant' && !ctx.isAgentRunning(m),
-        }"
         :content="ctx.messageDisplayContent(m)"
-        :streaming="m.role === 'assistant' && !!m.streaming && ctx.isAgentRunning(m)"
-        :interactive="m.role === 'assistant' && !ctx.isAgentRunning(m)"
-        @select-option="ctx.handleAiOptionSelect"
-      />
+        :can-execute="ctx.canExecutePlanMessage(m)"
+        :enhance-layout="m.role === 'assistant' && !ctx.isAgentRunning(m)"
+        @execute="ctx.executePlanFromMessage(m.id)"
+      >
+        <ChatMarkdown
+          class="msg-answer"
+          :class="{
+            'msg-answer--streaming': m.role === 'assistant' && ctx.isAgentRunning(m),
+            'msg-answer--final': m.role === 'assistant' && !ctx.isAgentRunning(m),
+          }"
+          :content="planMarkdownContent(m)"
+          :streaming="m.role === 'assistant' && !!m.streaming && ctx.isAgentRunning(m)"
+          :interactive="m.role === 'assistant' && !ctx.isAgentRunning(m)"
+          @select-option="ctx.handleAiOptionSelect"
+        />
+      </PlanDocumentBlock>
       <div
         v-if="
           m.role === 'assistant' &&
@@ -133,7 +142,16 @@
       >
         <span v-if="ctx.isAgentRunning(m)" class="status-pulse" aria-hidden="true" />
         <span class="msg-status-text">
-          {{ ctx.agentStatusDisplay(m) || (m.chatMode === 'ask' ? '思考中…' : m.chatMode === 'plan' ? '规划中…' : 'Agent 运行中…') }}
+          {{
+            ctx.agentStatusDisplay(m) ||
+            (m.chatMode === 'ask'
+              ? '思考中…'
+              : m.chatMode === 'plan' && ctx.isAgentRunning(m) && ctx.planExecutionActive.value
+                ? '执行方案中…'
+                : m.chatMode === 'plan'
+                  ? '规划中…'
+                  : 'Agent 运行中…')
+          }}
         </span>
       </div>
       <div
@@ -203,10 +221,16 @@
 import { inject } from "vue";
 import AgentMessage from "../AgentMessage.vue";
 import ChatMarkdown from "../ChatMarkdown.vue";
-import { vibeChatMessageContextKey } from "../../composables/vibeChatMessageContext";
+import PlanDocumentBlock from "../PlanDocumentBlock.vue";
+import { enrichPlanMarkdownForDisplay } from "../../services/planDocumentDisplay";
+import { vibeChatMessageContextKey, type VibeChatMessageItem } from "../../composables/vibeChatMessageContext";
 
 const ctx = inject(vibeChatMessageContextKey);
 if (!ctx) {
   throw new Error("VibeChatMessages requires vibeChatMessageContext");
+}
+
+function planMarkdownContent(msg: VibeChatMessageItem): string {
+  return enrichPlanMarkdownForDisplay(ctx.messageDisplayContent(msg));
 }
 </script>

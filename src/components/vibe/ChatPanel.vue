@@ -279,6 +279,7 @@
               class="mode-btn"
               :class="{ active: chatMode === 'ask' }"
               :disabled="chatSending"
+              title="只读探索，自然语言答疑"
               @click="$emit('update:chatMode', 'ask')"
             >
               Ask
@@ -288,7 +289,7 @@
               class="mode-btn"
               :class="{ active: chatMode === 'plan' }"
               :disabled="chatSending"
-              title="先输出修改方案，确认后再执行"
+              title="先输出结构化修改方案，确认后再执行"
               @click="$emit('update:chatMode', 'plan')"
             >
               Plan
@@ -298,7 +299,7 @@
               class="mode-btn"
               :class="{ active: chatMode === 'build' }"
               :disabled="chatSending"
-              title="直接探索并修改文件"
+              title="直接探索并修改文件，无需先出方案"
               @click="$emit('update:chatMode', 'build')"
             >
               Build

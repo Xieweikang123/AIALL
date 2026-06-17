@@ -1,5 +1,4 @@
 import type { InjectionKey, Reactive, Ref } from "vue";
-import type { AgentMessage } from "./useAgentMessage";
 
 export interface VibeChatMessageItem {
   id: string;
@@ -55,8 +54,7 @@ export interface VibeChatMessageContext {
   isDiffExpanded: (messageId: string, relPath: string) => boolean;
   canExecutePlanMessage: (msg: VibeChatMessageItem) => boolean;
   executePlanFromMessage: (messageId: string) => void | Promise<void>;
+  planExecutionActive: Ref<boolean>;
 }
 
 export const vibeChatMessageContextKey: InjectionKey<VibeChatMessageContext> = Symbol("vibeChatMessageContext");
-
-export type { AgentMessage };

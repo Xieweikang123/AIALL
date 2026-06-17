@@ -44,6 +44,8 @@ import {
   MAX_TOTAL_EXPLORE_TURNS_SOFT,
   MAX_UNIQUE_READ_FILES_BEFORE_NUDGE,
   PLAN_EXPLORE_TURN_BUDGET,
+  PLAN_MAX_TOTAL_EXPLORE_HARD,
+  PLAN_MAX_TOTAL_EXPLORE_SOFT,
 } from "./agentExplorationBudget";
 import { buildConsultativeBuildHint, isConsultativeUserPrompt } from "./agentUserIntent";
 import {
@@ -623,6 +625,7 @@ function buildPlanSystemPrompt(
     "工作流程：先探索相关代码 → 输出结构化修改方案（规划文档）→ 等待用户确认 → 用户确认后系统进入执行阶段并写入代码。",
     "当前处于【规划阶段】：只读探索，禁止 patch_file / write_file / delete_file / run_command。",
     "输出格式要求（作为可执行的方案文档）：",
+    "0. 方案开头第一行必须是 `[PLAN]` 或 `## 修改方案`（二选一，便于系统识别）；",
     "1. 标题使用「## 修改方案」；先概述需求和当前状态；",
     "2. 列出涉及的文件清单（相对路径）；",
     "3. 对每个文件给出具体改动说明和代码块（标明修改前/修改后或新增内容）；",
@@ -1209,15 +1212,17 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     }
 
     // Progressive exploration restriction:
-    //   Soft cap (6): strip grep/search_files — model can still read_file
-    //   Hard cap (10): strip ALL tools — model must output text only
+    //   Soft cap: strip grep/search_files — model can still read_file
+    //   Hard cap: strip ALL tools — model must output text only
     const forceTextOutput =
       (isAsk && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_HARD) ||
-      (!isAsk && !readOnlyBuildRun && totalExploreTurns >= MAX_TOTAL_EXPLORE_TURNS);
+      (isPlanExplore && totalExploreTurns >= PLAN_MAX_TOTAL_EXPLORE_HARD) ||
+      (!isAsk && !isPlanExplore && !readOnlyBuildRun && totalExploreTurns >= MAX_TOTAL_EXPLORE_TURNS);
     const stripWideSearch =
       !forceTextOutput &&
       ((isAsk && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_SOFT) ||
-        (!isAsk && !readOnlyBuildRun && totalExploreTurns >= MAX_TOTAL_EXPLORE_TURNS_SOFT));
+        (isPlanExplore && totalExploreTurns >= PLAN_MAX_TOTAL_EXPLORE_SOFT) ||
+        (!isAsk && !isPlanExplore && !readOnlyBuildRun && totalExploreTurns >= MAX_TOTAL_EXPLORE_TURNS_SOFT));
 
     if (forceTextOutput) {
       messages.push({
@@ -1605,7 +1610,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
     messages.push({
       role: "assistant",
-      content: visibleContent || null,
+      content: visibleContent || "",
       tool_calls: toolCalls,
     });
 

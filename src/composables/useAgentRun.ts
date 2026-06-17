@@ -44,7 +44,7 @@ import {
   updateVibeChatSessionStatus,
 } from "../services/vibeChatStorage";
 import { resolveImagesForAgentTurn } from "../services/vibeChatImageStore";
-import { looksLikeModificationPlan } from "../services/agentContinuation";
+import { looksLikeModificationPlan, findLastAssistantContentInMessages } from "../services/agentContinuation";
 import { isDeleteNotFoundError, resolveAgentDoneFileAction } from "../services/vibeAgentTurnApply";
 import {
   runVibeAgentSse,
@@ -122,7 +122,6 @@ export type UseAgentRunDeps = {
   storeFileDiff: (relPath: string, before: string, after: string, deleted?: boolean, created?: boolean) => void;
   syncEditorAfterAgentFileChange: (relPath: string, diff: TurnFileDiff) => void;
   resolveUserMessageImages: (msg: ChatMessage) => string[];
-  findLastAssistantContent: () => string | undefined;
   buildAgentHistory: (prompt: string, profile: AgentRunProfile) => VibeChatHistoryMessage[];
   buildAgentHistoryForResume: (assistantMsgId: string) => VibeChatHistoryMessage[];
   resolveOriginalUserPrompt: (assistantMsgId: string) => string;
@@ -158,7 +157,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     storeFileDiff,
     syncEditorAfterAgentFileChange,
     resolveUserMessageImages,
-    findLastAssistantContent,
     buildAgentHistory,
     buildAgentHistoryForResume,
     resolveOriginalUserPrompt,
@@ -453,6 +451,12 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     return finalizeAssistantBubbleContent(msg);
   }
 
+  function findLastAssistantContent(): string | undefined {
+    return findLastAssistantContentInMessages(chatMessages.value, (msg) =>
+      messageDisplayContent(msg as ChatMessage),
+    );
+  }
+
   function agentAnswerPreview(msg: ChatMessage): string {
     const hasRunningTool = Boolean(msg.tools?.some((t: { running?: boolean }) => t.running));
     return resolveAgentTimelineAnswer(
@@ -491,9 +495,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         hasRunningTool,
       ),
     });
-    return filterDuplicateFeedThoughts(items, bubble, {
-      suppressAllWhenBubble: isAgentRunning(msg) && Boolean(bubble.trim()),
-    });
+    return filterDuplicateFeedThoughts(items, bubble);
   }
 
   function cursorAgentTimeline(msg: ChatMessage): CursorAgentTimeline {
@@ -1714,21 +1716,11 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     return Boolean(messageDisplayContent(msg));
   }
 
-  function findLastAssistantMessage(): ChatMessage | undefined {
-    for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
-      const m = chatMessages.value[i];
-      if (m.role === "assistant") return m;
-    }
-    return undefined;
-  }
-
   function canExecutePlanMessage(msg: ChatMessage): boolean {
     if (msg.role !== "assistant") return false;
     if (chatMode.value !== "plan") return false;
     if (chatSending.value || msg.streaming || isAgentRunning(msg)) return false;
     if (msg.writtenFiles?.length) return false;
-    const last = findLastAssistantMessage();
-    if (!last || last.id !== msg.id) return false;
     return looksLikeModificationPlan(messageDisplayContent(msg));
   }
 

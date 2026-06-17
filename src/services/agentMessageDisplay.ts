@@ -122,10 +122,9 @@ export function resolveAgentTimelineAnswer(
   msg: LiveAgentAnswerSource,
   completedContent: string,
   isRunning: boolean,
-  hasRunningTool = false,
+  _hasRunningTool = false,
 ): string {
   if (!isRunning) return completedContent;
-  if (hasRunningTool) return "";
   return resolveLiveAgentAnswerPreview(msg) || "";
 }
 

@@ -499,6 +499,7 @@ import {
   mergeAssistantTurnText,
   resolveAssistantBubbleContent,
 } from "../services/agentMessageDisplay";
+import { findLastAssistantContentInMessages } from "../services/agentContinuation";
 import { isScrollNearBottom, scrollElementToBottom } from "../utils/scrollViewport";
 import { truncatePromptAttachment } from "../utils/truncatePromptAttachment";
 import {
@@ -1635,8 +1636,12 @@ function userMessageImages(msg: ChatMessage): string[] {
   );
 }
 
+function resolveAssistantOrchestrationContent(msg: ChatMessage): string {
+  return finalizeAssistantBubbleContent(msg);
+}
+
 function findLastAssistantContent(): string | undefined {
-  return [...chatMessages.value].reverse().find((m) => m.role === "assistant" && m.content.trim())?.content;
+  return findLastAssistantContentInMessages(chatMessages.value, resolveAssistantOrchestrationContent);
 }
 
 function buildAgentHistory(
@@ -1697,7 +1702,6 @@ const agent = useAgentRun({
   storeFileDiff,
   syncEditorAfterAgentFileChange,
   resolveUserMessageImages: userMessageImages,
-  findLastAssistantContent,
   buildAgentHistory,
   buildAgentHistoryForResume,
   resolveOriginalUserPrompt,
@@ -2817,6 +2821,7 @@ provide(vibeChatMessageContextKey, {
   isDiffExpanded,
   canExecutePlanMessage,
   executePlanFromMessage,
+  planExecutionActive,
 } as VibeChatMessageContext);
 
 onMounted(() => {

@@ -99,7 +99,34 @@ export function formatAiHttpError(status: number, rawText: string): string {
   if (status === 403) {
     return `${base}\n访问被拒绝：请检查 API Key 权限或模型是否可用。`;
   }
+  if (status === 400) {
+    const providerNote = /provider\s*\(/i.test(detail)
+      ? "上游模型网关认为本次请求参数不合法。"
+      : "请求参数可能不被当前模型或网关接受。";
+    return `${base}\n${providerNote}常见原因：endpoint / 模型名配置错误、会话上下文过长、附带图片但模型不支持多模态、或 Agent 工具调用格式不兼容。请到「AI 配置」核对 API Key 与模型（如 mimo-v2.5-pro），或新建会话后重试。`;
+  }
   return base;
+}
+
+/** Normalize message shapes for picky OpenAI-compatible gateways (e.g. Xiaomi). */
+export function normalizeMessagesForChatApi(messages: ChatCompletionMessage[]): ChatCompletionMessage[] {
+  return messages.map((message) => {
+    if (message.role === "assistant" && message.tool_calls?.length) {
+      const toolCalls = message.tool_calls.filter((call) => call.id && call.function?.name);
+      return {
+        ...message,
+        content: message.content == null ? "" : message.content,
+        tool_calls: toolCalls,
+      };
+    }
+    if (message.role === "tool") {
+      return {
+        ...message,
+        content: message.content == null ? "" : String(message.content),
+      };
+    }
+    return message;
+  });
 }
 
 export interface ChatToolCall {
@@ -171,7 +198,7 @@ function buildMessageFromStream(
 
   return {
     role: "assistant",
-    content: content || null,
+    content: toolCalls.length ? content || "" : content || null,
     ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
   };
 }
@@ -211,9 +238,10 @@ async function chatCompletionWithToolsOnce(params: {
     params.onStreamProgress(progress);
   };
 
+  const normalizedMessages = normalizeMessagesForChatApi(params.messages);
   const requestBody: Record<string, unknown> = {
     model: params.model,
-    messages: params.messages,
+    messages: normalizedMessages,
     stream: useStream,
   };
   if (params.tools.length > 0) {

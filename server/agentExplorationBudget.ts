@@ -7,6 +7,10 @@ export const EXECUTE_PLAN_EXPLORE_TURN_BUDGET = 1;
 /** Consecutive read-only turns in plan mode before nudging the model to wrap up. */
 export const PLAN_EXPLORE_TURN_BUDGET = 3;
 
+/** Plan explore soft/hard caps — allow more reads than build before forcing text output. */
+export const PLAN_MAX_TOTAL_EXPLORE_SOFT = 8;
+export const PLAN_MAX_TOTAL_EXPLORE_HARD = 12;
+
 /** Consecutive read-only turns in ask mode before nudging the model to answer. */
 export const ASK_EXPLORE_TURN_BUDGET = 5;
 

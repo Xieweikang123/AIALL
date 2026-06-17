@@ -17,23 +17,32 @@
     <p v-if="isRunning && currentStatus" class="cursor-action planning">{{ currentStatus }}</p>
 
     <!-- 最终回答：运行中流式输出，完成后展示完整 Markdown -->
-    <ChatMarkdown
-      v-if="finalAnswer.trim()"
-      class="cursor-merged-answer"
-      :class="{ 'cursor-merged-answer--streaming': answerStreaming }"
+    <PlanDocumentBlock
       :content="finalAnswer"
-      :streaming="answerStreaming"
-      :interactive="!isRunning"
-    />
+      :can-execute="canExecutePlan && !isRunning && !answerStreaming"
+      :enhance-layout="!isRunning && !answerStreaming"
+      @execute="emit('execute-plan')"
+    >
+      <ChatMarkdown
+        v-if="finalAnswer.trim()"
+        class="cursor-merged-answer"
+        :class="{ 'cursor-merged-answer--streaming': answerStreaming }"
+        :content="markdownContent"
+        :streaming="answerStreaming"
+        :interactive="!isRunning"
+      />
+    </PlanDocumentBlock>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from "vue";
 import ChatMarkdown from "./ChatMarkdown.vue";
+import PlanDocumentBlock from "./PlanDocumentBlock.vue";
 import AgentThoughtBlock from "./AgentThoughtBlock.vue";
 import AgentActionBlock from "./AgentActionBlock.vue";
 import { filterDuplicateFeedThoughts } from "../services/agentMessageDisplay";
+import { enrichPlanMarkdownForDisplay } from "../services/planDocumentDisplay";
 import {
   layoutCursorFeedBlocks,
   type CursorFeedItem,
@@ -48,7 +57,14 @@ const props = defineProps<{
   isRunning: boolean;
   currentStatus?: string;
   activityDetailed?: boolean;
+  canExecutePlan?: boolean;
 }>();
+
+const emit = defineEmits<{
+  "execute-plan": [];
+}>();
+
+const markdownContent = computed(() => enrichPlanMarkdownForDisplay(props.finalAnswer));
 
 const mergedBlocks = computed<CursorFeedProcessBlock[]>(() => {
   const items: CursorFeedItem[] = [];
@@ -74,14 +90,13 @@ const mergedBlocks = computed<CursorFeedProcessBlock[]>(() => {
     }
   }
 
-  const filtered = filterDuplicateFeedThoughts(items, answer, {
-    suppressAllWhenBubble: props.isRunning && Boolean(answer),
-  });
+  const filtered = filterDuplicateFeedThoughts(items, answer);
 
   const detailed = props.activityDetailed === true;
+  const collapseAfter = props.isRunning ? 999 : detailed ? 10 : 5;
   return layoutCursorFeedBlocks(filtered, {
     keepVisible: detailed ? 8 : 6,
-    collapseAfter: detailed ? 10 : 5,
+    collapseAfter,
   });
 });
 </script>

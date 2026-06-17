@@ -17,6 +17,8 @@
         :is-running="isAgentRunning(msg)"
         :current-status="currentAgentStatus(msg)"
         :activity-detailed="isActivityDetailed(msg)"
+        :can-execute-plan="canExecutePlan"
+        @execute-plan="emit('execute-plan')"
       />
 
       <!-- 调试面板 -->
@@ -65,10 +67,12 @@ const props = defineProps<{
   schedulePersistChat: () => void;
   messageDisplayContent: (msg: any) => string;
   showJump?: boolean;
+  canExecutePlan?: boolean;
 }>();
 
 const emit = defineEmits<{
   "jump-latest": [];
+  "execute-plan": [];
 }>();
 
 const {

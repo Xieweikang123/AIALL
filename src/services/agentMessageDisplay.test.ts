@@ -341,7 +341,7 @@ describe("resolveAgentTimelineAnswer", () => {
     ).toBe("流式片段");
   });
 
-  it("hides live preview while a tool is running", () => {
+  it("keeps live preview while a tool is running to avoid UI flicker", () => {
     expect(
       resolveAgentTimelineAnswer(
         {
@@ -352,7 +352,7 @@ describe("resolveAgentTimelineAnswer", () => {
         true,
         true,
       ),
-    ).toBe("");
+    ).toBe("流式片段");
   });
 
   it("uses completed content after the run finishes", () => {
@@ -411,7 +411,7 @@ describe("filterDuplicateFeedThoughts", () => {
     },
   };
 
-  it("suppresses all thoughts during live preview when bubble has content", () => {
+  it("can suppress all thoughts during live preview when explicitly requested", () => {
     const items = filterDuplicateFeedThoughts([thought, action], "streaming answer", {
       suppressAllWhenBubble: true,
     });

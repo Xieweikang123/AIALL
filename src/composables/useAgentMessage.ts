@@ -107,9 +107,7 @@ export function useAgentMessage(
         Boolean(m.tools?.some((t: { running?: boolean }) => t.running)),
       ),
     });
-    return filterDuplicateFeedThoughts(items, bubble, {
-      suppressAllWhenBubble: isAgentRunning(m) && Boolean(bubble.trim()),
-    });
+    return filterDuplicateFeedThoughts(items, bubble);
   }
 
   function cursorAgentTimeline(m: AgentMessage) {

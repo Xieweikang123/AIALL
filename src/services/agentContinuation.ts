@@ -1,6 +1,14 @@
 /** Short user confirmations after the agent already proposed a change plan. */
 const EXECUTION_CONTINUATION_RE =
-  /^(改吧|执行方案|好的?|行|可以|继续|接着(做|改|来)?|执行(吧|一下)?|开始(改|做)?|动手(吧)?|按方案(改|执行)?|go|do it|yes|ok|okay|sure)\.?$/i;
+  /^(改吧|执行方案|好的?|行|可以|接着(做|改|来)?|执行(吧|一下)?|开始(改|做)?|动手(吧)?|按方案(改|执行)?|go|do it|yes|ok|okay|sure)\.?$/i;
+
+/** 「继续」 alone is ambiguous; require execution-oriented phrasing. */
+const EXECUTION_CONTINUE_RE =
+  /^继续(?:执行|改|做|写|来|完成)(?:吧|一下)?\.?$/i;
+
+/** Explicit plan document markers emitted in Plan mode. */
+const PLAN_EXPLICIT_MARKER_RE =
+  /(?:^|\n)\s*(?:##\s*修改方案|\[PLAN\]|<!--\s*agent-plan\s*-->)/i;
 
 /** Explicit “go implement” phrasing (may appear after a quoted reply block). */
 const IMPLEMENTATION_INTENT_RE =
@@ -40,16 +48,22 @@ export function stripQuotedReplyPrefix(text: string): string {
   return body || text.trim();
 }
 
+function matchesExecutionContinuationPhrase(text: string): boolean {
+  if (EXECUTION_CONTINUATION_RE.test(text)) return true;
+  if (EXECUTION_CONTINUE_RE.test(text)) return true;
+  return false;
+}
+
 export function isExecutionContinuation(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return false;
 
-  if (trimmed.length <= 24 && EXECUTION_CONTINUATION_RE.test(trimmed)) return true;
+  if (trimmed.length <= 24 && matchesExecutionContinuationPhrase(trimmed)) return true;
 
   const body = stripQuotedReplyPrefix(trimmed);
   if (!body) return false;
 
-  if (body.length <= 32 && EXECUTION_CONTINUATION_RE.test(body)) return true;
+  if (body.length <= 32 && matchesExecutionContinuationPhrase(body)) return true;
   if (body.length <= 200 && IMPLEMENTATION_INTENT_RE.test(body)) return true;
 
   return false;
@@ -75,20 +89,43 @@ export function looksLikeModificationPlan(content: string): boolean {
   const paths = extractPlanFilePaths(text);
   const hasCodeBlock = text.includes("```");
   const hasPlanStructure = PLAN_SIGNAL_RE.test(text);
+  const hasExplicitMarker = PLAN_EXPLICIT_MARKER_RE.test(text);
 
   const hasSubstantiveContent = hasCodeBlock || paths.length > 0;
   const hasConfirmationPhrase = /是否需要我|需要我帮你|你想让我|是否要|是否开始/.test(text);
 
   if (hasConfirmationPhrase && !hasSubstantiveContent) return false;
-  if (hasConfirmationPhrase && hasSubstantiveContent) {
-    return true;
+  if (hasConfirmationPhrase && hasSubstantiveContent && !hasExplicitMarker && !hasPlanStructure) {
+    return false;
   }
 
-  if (hasCodeBlock && paths.length >= 1) return true;
+  if (hasExplicitMarker && paths.length >= 1) return true;
+  if (hasExplicitMarker && hasCodeBlock) return true;
+  if (hasCodeBlock && paths.length >= 1 && (hasPlanStructure || hasExplicitMarker)) return true;
   if (hasPlanStructure && paths.length >= 1 && hasCodeBlock) return true;
   if (hasPlanStructure && paths.length >= 2) return true;
 
   return false;
+}
+
+/** Prefer the latest plan-like assistant message; fall back to the latest assistant text. */
+export function findLastAssistantContentInMessages(
+  messages: ReadonlyArray<{ role: string; content: string }>,
+  resolveContent: (msg: { role: string; content: string }) => string = (msg) => msg.content,
+): string | undefined {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (msg.role !== "assistant") continue;
+    const text = resolveContent(msg).trim();
+    if (text && looksLikeModificationPlan(text)) return text;
+  }
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (msg.role !== "assistant") continue;
+    const text = resolveContent(msg).trim();
+    if (text) return text;
+  }
+  return undefined;
 }
 
 export function extractPlanFilePaths(content: string): string[] {
@@ -171,15 +208,25 @@ export function compressHistoryForExecution(
 ): AgentHistoryEntry[] {
   if (!isExecutionContinuation(currentPrompt)) return history;
 
-  const lastAssistantIdx = history.map((m, i) => (m.role === "assistant" ? i : -1)).filter((i) => i >= 0).pop();
-  if (lastAssistantIdx === undefined) return history;
+  let planAssistantIdx = -1;
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    if (history[i].role === "assistant" && looksLikeModificationPlan(history[i].content)) {
+      planAssistantIdx = i;
+      break;
+    }
+  }
+  if (planAssistantIdx < 0) {
+    planAssistantIdx =
+      history.map((m, i) => (m.role === "assistant" ? i : -1)).filter((i) => i >= 0).pop() ?? -1;
+  }
+  if (planAssistantIdx < 0) return history;
 
-  const assistant = history[lastAssistantIdx];
+  const assistant = history[planAssistantIdx];
   if (!looksLikeModificationPlan(assistant.content)) return history;
 
   const precedingUser =
-    lastAssistantIdx > 0 && history[lastAssistantIdx - 1]?.role === "user"
-      ? history[lastAssistantIdx - 1]
+    planAssistantIdx > 0 && history[planAssistantIdx - 1]?.role === "user"
+      ? history[planAssistantIdx - 1]
       : null;
 
   const userContent = precedingUser
