@@ -35,10 +35,12 @@ export function parseAiOptions(text: string): AiOptionsParseResult | null {
 
   const lines = text.split("\n");
 
-  // Find the last question/prompt line to anchor the option block
+  // Find the last question/prompt line to anchor the option block (not numbered option lines).
   let questionLineIdx = -1;
   for (let i = lines.length - 1; i >= 0; i--) {
-    if (TRAILING_QUESTION_RE.test(lines[i])) {
+    const trimmed = lines[i].trim();
+    if (/^\d+[.)]\s/.test(trimmed)) continue;
+    if (TRAILING_QUESTION_RE.test(trimmed)) {
       questionLineIdx = i;
       break;
     }
@@ -60,7 +62,15 @@ export function parseAiOptions(text: string): AiOptionsParseResult | null {
     if (numMatch) {
       const num = parseInt(numMatch[1], 10);
       const content = numMatch[2].trim();
-      if (content.length > 0 && content.length < 80 && num === optionLines.length + 1) {
+      // Interactive options are short prompts ending in ? / ？ — not doc numbered lists.
+      if (
+        content.length > 0 &&
+        content.length < 80 &&
+        num === optionLines.length + 1 &&
+        /[?？]$/.test(content) &&
+        !/^#{1,6}\s/.test(content) &&
+        !content.startsWith("**")
+      ) {
         optionLines.push({ line: lines[i], index: i });
         continue;
       }
@@ -86,6 +96,9 @@ export function parseAiOptions(text: string): AiOptionsParseResult | null {
 
   const before = lines.slice(0, firstIdx).join("\n").trimEnd();
   const after = lines.slice(lastIdx + 1).join("\n").trimStart();
+
+  // Residual prose after options means this was a normal list, not a choice block.
+  if (after.length > 20) return null;
 
   return { before, options, after };
 }

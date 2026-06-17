@@ -317,10 +317,12 @@ function compactRoundGroupsForStorage(
         : undefined,
       response: group.response
         ? {
-            assistantText: truncateText(
-              stripToolSummaryFromAssistantContent(group.response.assistantText),
-              MAX_NARRATIVE_CHARS,
-            ),
+            assistantText: group.response.isFinal
+              ? stripToolSummaryFromAssistantContent(group.response.assistantText)
+              : truncateText(
+                  stripToolSummaryFromAssistantContent(group.response.assistantText),
+                  MAX_NARRATIVE_CHARS,
+                ),
             hasToolCalls: group.response.hasToolCalls,
             isFinal: group.response.isFinal,
             toolCalls: group.response.toolCalls.map((call) => ({

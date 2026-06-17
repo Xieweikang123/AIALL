@@ -132,9 +132,33 @@ function regionAnchorPresentInText(anchor: string, text: string): boolean {
   return /截图|图中|占位符|助手|Vibe|输入框|Composer/i.test(text);
 }
 
+/** Persisted roundGroups cap assistantText; msg.content keeps the full answer. */
+export function isStorageCompactedAssistantText(text: string): boolean {
+  return text.trimEnd().endsWith("…");
+}
+
+/** Prefer msg.content when round-group final text was compacted for storage. */
+export function preferFullContentOverCompactedRoundGroup(compacted: string, full: string): string {
+  const left = compacted.trim();
+  const right = full.trim();
+  if (!left || !right) return left || right;
+  if (right.length <= left.length) return left;
+  if (isStorageCompactedAssistantText(left)) {
+    const prefix = left.slice(0, -1);
+    if (right.startsWith(prefix)) return right;
+  }
+  const probe = left.replace(/…$/, "").slice(0, 240);
+  if (probe.length >= 120 && right.startsWith(probe)) return right;
+  return left;
+}
+
 /** Prefer the final agent turn; prepend vision region when the final answer omits it. */
 export function resolveCompletedAgentBubbleContent(msg: AssistantBubbleSource): string {
-  const finalText = normalizeBubbleText(resolveFinalAssistantText(msg));
+  const finalFromRound = normalizeBubbleText(resolveFinalAssistantText(msg));
+  const direct = normalizeBubbleText(msg.content || "");
+  const finalText = finalFromRound
+    ? preferFullContentOverCompactedRoundGroup(finalFromRound, direct)
+    : "";
   const visionPreamble = resolveVisionRegionPreamble(msg);
 
   if (finalText) {
@@ -149,7 +173,6 @@ export function resolveCompletedAgentBubbleContent(msg: AssistantBubbleSource): 
   }
 
   const candidates = collectAssistantTextCandidates(msg);
-  const direct = normalizeBubbleText(msg.content || "");
   const filteredDirect = isEnglishToolNarration(direct)
     ? candidates.sort((a, b) => b.length - a.length)[0] || ""
     : direct;
@@ -174,6 +197,10 @@ export function isTruncatedAssistantAnswer(text: string): boolean {
 }
 
 function pickFallbackWhenFinalTruncated(msg: AssistantBubbleSource, finalText: string): string {
+  const direct = normalizeBubbleText(msg.content || "");
+  if (direct.length > finalText.length && !isTruncatedAssistantAnswer(direct)) {
+    return direct;
+  }
   const candidates = collectAssistantTextCandidates(msg).filter(
     (text) => text !== finalText && !isPrematureVisionCompletionClaim(text) && !isTruncatedAssistantAnswer(text),
   );
@@ -182,7 +209,11 @@ function pickFallbackWhenFinalTruncated(msg: AssistantBubbleSource, finalText: s
 
 /** Whether the model already gave a substantive completion summary. */
 export function hasSubstantiveAgentSummary(msg: AssistantBubbleSource): boolean {
-  const finalText = resolveFinalAssistantText(msg);
+  const finalFromRound = resolveFinalAssistantText(msg);
+  const direct = normalizeBubbleText(msg.content || "");
+  const finalText = finalFromRound
+    ? preferFullContentOverCompactedRoundGroup(normalizeBubbleText(finalFromRound), direct)
+    : direct;
   if (finalText && isTruncatedAssistantAnswer(finalText)) return false;
   if (finalText.length >= SUBSTANTIVE_MIN_CHARS) return true;
   if (COMPLETION_SUMMARY_RE.test(finalText)) return true;

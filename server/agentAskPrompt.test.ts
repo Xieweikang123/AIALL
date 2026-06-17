@@ -1,0 +1,35 @@
+import { describe, expect, it } from "vitest";
+import {
+  buildAskAnswerStructureHints,
+  buildAskExplorationHints,
+  buildAskSystemPromptLines,
+  buildSearchFilesEmptyHint,
+} from "./agentAskPrompt";
+
+describe("agentAskPrompt", () => {
+  it("prioritizes grep over search_files in exploration hints", () => {
+    const hints = buildAskExplorationHints();
+    expect(hints.indexOf("grep")).toBeLessThan(hints.indexOf("search_files"));
+    expect(hints).toContain("重叠");
+  });
+
+  it("requires entry write/revert/none classification in answer hints", () => {
+    const hints = buildAskAnswerStructureHints();
+    expect(hints).toMatch(/正向写入|回滚|不涉及/);
+    expect(hints).toContain("AND");
+  });
+
+  it("includes ask exploration and answer hints in system prompt lines", () => {
+    const lines = buildAskSystemPromptLines("/tmp/project");
+    const joined = lines.join("\n");
+    expect(joined).toContain("Ask 模式");
+    expect(joined).toContain("探索策略");
+    expect(joined).toContain("回答结构");
+    expect(joined).toContain("/tmp/project");
+  });
+
+  it("suggests grep fallback when search_files misses on CJK query", () => {
+    expect(buildSearchFilesEmptyHint("工单")).toContain("grep");
+    expect(buildSearchFilesEmptyHint("WorkOrder")).toBe("（无匹配文件）");
+  });
+});

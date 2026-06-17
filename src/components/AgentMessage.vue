@@ -15,6 +15,7 @@
         :final-answer="timelineAnswerContent(msg)"
         :is-running="isAgentRunning(msg)"
         :current-status="currentAgentStatus(msg)"
+        :activity-detailed="isActivityDetailed(msg)"
       />
 
       <!-- 调试面板 -->

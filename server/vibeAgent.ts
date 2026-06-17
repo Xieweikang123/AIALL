@@ -24,6 +24,16 @@ import {
   resolveAgentMaxTurns,
 } from "./agentTurnBudget";
 import {
+  buildAskSystemPromptLines,
+  buildSearchFilesEmptyHint,
+} from "./agentAskPrompt";
+import {
+  ASK_EXPLORE_TURN_BUDGET,
+  ASK_MAX_TOTAL_EXPLORE_HARD,
+  ASK_MAX_TOTAL_EXPLORE_SOFT,
+  buildAskExploreBudgetNudge,
+  buildAskExploreSoftCapNudge,
+  buildAskForceAnswerNudge,
   buildExploreBudgetNudge,
   buildExploreSoftCapNudge,
   buildFileBreadthNudge,
@@ -583,19 +593,7 @@ function buildAskSystemPrompt(
   openFileSnippet?: string,
   model?: string,
 ): string {
-  const lines = [
-    "你是一个编程问答助手（Ask 模式）。",
-    "回答请使用中文。",
-    "用户可能在消息中附带截图或图片；若已附带，请结合图片内容理解需求并回答，不要声称无法查看图片。",
-    "用户附截图询问界面/功能时：先描述截图所见，再判断是否属于本项目（优先查 src/views、src/components），勿默认是外部应用。",
-    "用户针对截图局部提问（配色、按钮、某块区域）时：讨论阶段只谈其所指可见范围，勿擅自扩大到整页/全项目样式盘点；若用户明确要求修改，可在该范围内定位源码并说明改法；用户明确说「整个/整页/全面板」时可按扩大后的范围回答。",
-    "你可以使用 list_dir、read_file、grep、search_files 工具来探索项目、读取文件，但不能修改任何文件。",
-    "你可以使用 web_search 搜索外部信息，使用 web_extract 抓取指定链接内容。",
-    "若信息不足，请主动使用工具查找相关内容，而不是要求用户打开文件。",
-    "读取文件时：优先 grep / search_files 定位，再用 read_file 的 offset/limit 分段读取（单次约 200 行）；避免连续大块读取同一文件。",
-    "收集到足够信息后立即用自然语言回答，不要无意义地继续读文件。",
-    `项目根目录：${projectRoot}`,
-  ];
+  const lines = [...buildAskSystemPromptLines(projectRoot)];
   if (model?.trim()) {
     lines.push("", buildModelIdentityHint(model));
   }
@@ -859,7 +857,7 @@ export async function executeTool(
     if (!query) return "错误：缺少 query";
     const maxResults = Math.min(50, Math.max(1, Number(args.max_results) || 30));
     const results = await searchFiles(root, query, maxResults);
-    if (!results.length) return "（无匹配文件）";
+    if (!results.length) return buildSearchFilesEmptyHint(query);
     return results.map((r) => `${r.isDirectory ? "[dir]" : "[file]"} ${r.relative}`).join("\n");
   }
 
@@ -1204,13 +1202,28 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     // Progressive exploration restriction:
     //   Soft cap (6): strip grep/search_files — model can still read_file
     //   Hard cap (10): strip ALL tools — model must output text only
-    const forceTextOutput = !isAsk && !readOnlyBuildRun && totalExploreTurns >= MAX_TOTAL_EXPLORE_TURNS;
-    const stripWideSearch = !forceTextOutput && !isAsk && !readOnlyBuildRun && totalExploreTurns >= MAX_TOTAL_EXPLORE_TURNS_SOFT;
+    const forceTextOutput =
+      (isAsk && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_HARD) ||
+      (!isAsk && !readOnlyBuildRun && totalExploreTurns >= MAX_TOTAL_EXPLORE_TURNS);
+    const stripWideSearch =
+      !forceTextOutput &&
+      ((isAsk && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_SOFT) ||
+        (!isAsk && !readOnlyBuildRun && totalExploreTurns >= MAX_TOTAL_EXPLORE_TURNS_SOFT));
 
     if (forceTextOutput) {
-      messages.push({ role: "system", content: buildForceOutputNudge(totalExploreTurns, mode) });
+      messages.push({
+        role: "system",
+        content: isAsk
+          ? buildAskForceAnswerNudge(totalExploreTurns)
+          : buildForceOutputNudge(totalExploreTurns, mode),
+      });
     } else if (stripWideSearch) {
-      messages.push({ role: "system", content: buildExploreSoftCapNudge(totalExploreTurns, mode) });
+      messages.push({
+        role: "system",
+        content: isAsk
+          ? buildAskExploreSoftCapNudge(totalExploreTurns)
+          : buildExploreSoftCapNudge(totalExploreTurns, mode),
+      });
     }
 
     if (!fileBreadthNudgeSent && exploreFilesRead.size >= MAX_UNIQUE_READ_FILES_BEFORE_NUDGE) {
@@ -1720,7 +1733,10 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         }
       }
     }
-    if (!isAsk && !readOnlyBuildRun && consecutiveExploreTurns >= exploreTurnBudget) {
+    if (isAsk && consecutiveExploreTurns >= ASK_EXPLORE_TURN_BUDGET) {
+      messages.push({ role: "system", content: buildAskExploreBudgetNudge(consecutiveExploreTurns) });
+      consecutiveExploreTurns = 0;
+    } else if (!isAsk && !readOnlyBuildRun && consecutiveExploreTurns >= exploreTurnBudget) {
       messages.push({ role: "system", content: buildExploreBudgetNudge(consecutiveExploreTurns, mode) });
       consecutiveExploreTurns = 0;
     }

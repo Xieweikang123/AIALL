@@ -7,6 +7,15 @@ export const EXECUTE_PLAN_EXPLORE_TURN_BUDGET = 1;
 /** Consecutive read-only turns in plan mode before nudging the model to wrap up. */
 export const PLAN_EXPLORE_TURN_BUDGET = 3;
 
+/** Consecutive read-only turns in ask mode before nudging the model to answer. */
+export const ASK_EXPLORE_TURN_BUDGET = 5;
+
+/** Ask mode soft cap — strip wide-search tools, still allow read_file. */
+export const ASK_MAX_TOTAL_EXPLORE_SOFT = 8;
+
+/** Ask mode hard cap — force text-only answer. */
+export const ASK_MAX_TOTAL_EXPLORE_HARD = 12;
+
 /**
  * Hard cap on total exploration-only turns (read-only turns, not reset by nudges).
  * When exceeded, tools are stripped from the next request, forcing text output.
@@ -37,6 +46,31 @@ export function buildExploreBudgetNudge(consecutiveExploreTurns: number, mode?: 
   return [
     `【系统提示】已连续 ${consecutiveExploreTurns} 轮仅探索、尚未修改。`,
     actionHint,
+  ].join("");
+}
+
+export function buildAskExploreBudgetNudge(consecutiveExploreTurns: number): string {
+  return [
+    `【系统提示】Ask 模式已连续 ${consecutiveExploreTurns} 轮仅探索、尚未给出回答。`,
+    "请基于已读内容立即输出完整自然语言答案。",
+    "若仍缺关键片段：最多再 read 一次目标文件的连续逻辑块（勿重叠小 window 反复 read）。",
+    "禁止无意义续搜；回答时区分各 API 入口的写/回滚/不写行为，条件用 AND 列全。",
+  ].join("");
+}
+
+export function buildAskExploreSoftCapNudge(totalExploreTurns: number): string {
+  return [
+    `【系统提示】Ask 模式已累计 ${totalExploreTurns} 轮探索（超过 ${ASK_MAX_TOTAL_EXPLORE_SOFT}）。`,
+    "已移除 grep / search_files，只能 read_file 做最后确认。",
+    "下一轮必须输出完整文字回答，不要再调用工具。",
+  ].join("");
+}
+
+export function buildAskForceAnswerNudge(totalExploreTurns: number): string {
+  return [
+    `【系统强制】Ask 模式已累计 ${totalExploreTurns} 轮探索（超过 ${ASK_MAX_TOTAL_EXPLORE_HARD}）。`,
+    "下一轮已移除所有工具，你只能输出文字。",
+    "请基于已有信息给出完整结论；若信息不足，说明已确认部分与仍不确定部分。",
   ].join("");
 }
 

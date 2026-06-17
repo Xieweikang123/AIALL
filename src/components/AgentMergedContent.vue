@@ -15,11 +15,20 @@
 
     <!-- 当前状态（运行中显示） -->
     <p v-if="isRunning && currentStatus" class="cursor-action planning">{{ currentStatus }}</p>
+
+    <!-- 最终回答：有 Agent 过程时外层气泡被隐藏，须在此展示 -->
+    <ChatMarkdown
+      v-if="!isRunning && finalAnswer.trim()"
+      class="cursor-merged-answer"
+      :content="finalAnswer"
+      interactive
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from "vue";
+import ChatMarkdown from "./ChatMarkdown.vue";
 import AgentThoughtBlock from "./AgentThoughtBlock.vue";
 import AgentActionBlock from "./AgentActionBlock.vue";
 import {
@@ -34,6 +43,7 @@ const props = defineProps<{
   finalAnswer: string;
   isRunning: boolean;
   currentStatus?: string;
+  activityDetailed?: boolean;
 }>();
 
 const mergedBlocks = computed<CursorFeedProcessBlock[]>(() => {
@@ -61,9 +71,10 @@ const mergedBlocks = computed<CursorFeedProcessBlock[]>(() => {
     }
   }
 
+  const detailed = props.activityDetailed === true;
   return layoutCursorFeedBlocks(items, {
-    keepVisible: 3,
-    collapseAfter: 3,
+    keepVisible: detailed ? 8 : 6,
+    collapseAfter: detailed ? 10 : 5,
   });
 });
 </script>

@@ -5,8 +5,10 @@ import {
   finalizeAssistantBubbleContent,
   hasSubstantiveAgentSummary,
   isEnglishToolNarration,
+  isStorageCompactedAssistantText,
   isTruncatedAssistantAnswer,
   mergeAssistantTurnText,
+  preferFullContentOverCompactedRoundGroup,
   resolveAssistantBubbleContent,
   resolveCompletedAgentBubbleContent,
   thoughtDuplicatesBubble,
@@ -166,6 +168,36 @@ describe("resolveCompletedAgentBubbleContent", () => {
     expect(result).toContain("Vibe 助手");
     expect(result).toContain("## 回答");
     expect(result).not.toContain("Now let me");
+  });
+
+  it("prefers full msg.content when persisted round-group final text was compacted", () => {
+    const fullAnswer =
+      `${"根据项目代码分析，工单处理修改订单汇总表的时机主要有以下几个：\n\n".repeat(30)}` +
+      "## 五、特殊注意事项\n\n**总结**：工单处理修改订单汇总表主要发生在工单状态变为已处理时。";
+    expect(fullAnswer.length).toBeGreaterThan(800);
+    const compacted = `${fullAnswer.slice(0, 800)}…`;
+    expect(isStorageCompactedAssistantText(compacted)).toBe(true);
+    expect(preferFullContentOverCompactedRoundGroup(compacted, fullAnswer)).toBe(fullAnswer);
+
+    const result = resolveCompletedAgentBubbleContent({
+      content: fullAnswer,
+      roundGroups: [
+        {
+          turn: 16,
+          modelSteps: [],
+          toolIds: [],
+          response: {
+            assistantText: compacted,
+            toolCalls: [],
+            hasToolCalls: false,
+            isFinal: true,
+          },
+        },
+      ],
+    });
+    expect(result).toContain("## 五、特殊注意事项");
+    expect(result).toContain("**总结**");
+    expect(result).not.toMatch(/包含…$/);
   });
 });
 
