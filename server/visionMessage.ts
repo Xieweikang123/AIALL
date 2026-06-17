@@ -31,6 +31,10 @@ export const UI_REQUIREMENT_SPEC_RE =
 const UI_LAYOUT_FEEDBACK_RE =
   /挤|贴|挨|重叠|太紧|间距|spacing|overlap|cramped|你看|看一下|一块|不好看|丑/i;
 
+/** Control rendered at wrong screen coordinates (often fixed/Teleport overlay, not flex). */
+export const UI_POSITIONING_BUG_RE =
+  /跑(?:到|去|别的)|错位|位置不对|飘到|歪了|不在.{0,8}旁边|离.{0,8}远|跑到.{0,12}(底|顶|角)/i;
+
 /** Color/button topics that should stay within the visible region the user points at. */
 const NARROW_UI_TOPIC_RE = /配色|颜色|按钮|badge|几种|太多|有点多|杂乱|花哨/i;
 
@@ -59,6 +63,54 @@ export function buildClickFocusInteractionHint(): string {
   ].join("");
 }
 
+export function buildFloatingControlPositioningHint(): string {
+  return [
+    "【浮动/绝对定位控件】若图中某按钮/标签与上方选区、焦点区域在空间上分离（如选区在消息区、按钮却出现在底栏/角落），",
+    "该控件多半是 position:fixed/absolute 或 Teleport 到 body 的浮层，而非父容器 flex 内嵌元素。",
+    "读图时须区分「浮层错位」与「底栏 flex 拥挤」；后续 grep 优先搜 kebab-case class（如 *-floating、*-popup）及 Teleport，勿仅凭可见中文文案锁定错误组件。",
+  ].join("");
+}
+
+export function isUiPositioningBugPrompt(text: string): boolean {
+  const body = text.trim();
+  if (!body) return false;
+  return UI_POSITIONING_BUG_RE.test(body) && NARROW_UI_TOPIC_RE.test(body);
+}
+
+/** Vision description treats a spatially separated control as embedded layout. */
+export function suggestsEmbeddedLayoutMisread(visionDescription: string): boolean {
+  const text = visionDescription.trim();
+  if (!text) return false;
+  const hasSeparatedRegions =
+    /选区|选中|蓝色|高亮/.test(text) &&
+    /底(?:部|栏)|状态栏|角落|同一行/.test(text);
+  const blamesFlex =
+    /flex|布局问题|父容器|chat-status|chat-bottom|chat-action/i.test(text);
+  return hasSeparatedRegions && blamesFlex;
+}
+
+export function buildVisionGrepAnchorHint(visionDescription: string): string {
+  if (!suggestsEmbeddedLayoutMisread(visionDescription)) return "";
+  return [
+    "【读图校正·定位方式】读图把浮层按钮误判为底栏 flex 内嵌控件。",
+    "下一轮勿再 grep 纯中文可见文案；改 grep kebab-case class（如 quote-floating、floating、Teleport）或 position:fixed 相关标识。",
+    "浮层逻辑常在 src/views 而非子组件 chat-bottom；read_file 定位到 show*At / getSelection* / clamp* 函数后即应 patch 或输出诊断，勿反复读 ChatPanel 底栏 template。",
+  ].join("");
+}
+
+export function buildVisionBuildContinueHint(visionDescription: string, userPrompt: string): string {
+  const parts = [buildVisionFirstTurnContinueHint()];
+  if (isUiPositioningBugPrompt(userPrompt) || UI_POSITIONING_BUG_RE.test(visionDescription)) {
+    parts.push(buildFloatingControlPositioningHint());
+  }
+  const grepHint = buildVisionGrepAnchorHint(visionDescription);
+  if (grepHint) parts.push(grepHint);
+  parts.push(
+    "探索过程中每 3 轮须用中文写一段可见进度（根因假设 + 下一步），勿仅用英文 planning 句；找到定位函数后 Build 模式必须 patch_file/write_file。",
+  );
+  return parts.join("\n");
+}
+
 export function buildVisionFirstTurnRule(): string {
   return [
     "【附图·首轮必读图】你必须先仔细查看附带图片，用中文描述所见：",
@@ -67,7 +119,8 @@ export function buildVisionFirstTurnRule(): string {
     "- 再补充控件类型、布局关系；若用户反馈拥挤/重叠/不好看，须点名哪两个（或哪组）元素及其关系。",
     "本轮禁止调用任何工具；仅输出读图描述，下一轮可用 grep 图中摘录的文案定位源码。",
     "读图首轮禁止写「已修改/已修复/已添加/已做」等完成时态，禁止描述尚未执行的 patch。",
-    "布局问题后续修改时优先检查 flex-shrink、min-width、overflow、gap、margin；点击/聚焦问题另查 DOM 层级与 focus 转发，勿默认只加 padding。",
+    "布局问题后续修改时：底栏内元素拥挤查 flex-shrink、min-width、overflow、gap、margin；若控件与选区/焦点在空间上分离，优先怀疑 position:fixed/absolute 或 Teleport 浮层错位，勿误判为 flex。",
+    "点击/聚焦问题另查 DOM 层级与 focus 转发，勿默认只加 padding。",
     "当你真正理解了截图内容后，在描述末尾加上暗号 [图已理解]。只有加上此暗号，才表示你已完成读图。",
   ].join("\n");
 }
@@ -192,14 +245,18 @@ export function buildVisionTaskText(text: string, imageCount: number): string {
   const clickFocusHint = UI_CLICK_FOCUS_INTERACTION_RE.test(body)
     ? `\n\n${buildClickFocusInteractionHint()}`
     : "";
+  const positioningHint = isUiPositioningBugPrompt(body)
+    ? `\n\n${buildFloatingControlPositioningHint()}`
+    : "";
   const isUiQuestion =
     UI_IMAGE_QUESTION_RE.test(body) ||
     NARROW_UI_TOPIC_RE.test(body) ||
     UI_LAYOUT_FEEDBACK_RE.test(body) ||
     UI_CLICK_FOCUS_INTERACTION_RE.test(body) ||
-    UI_REQUIREMENT_SPEC_RE.test(body);
+    UI_REQUIREMENT_SPEC_RE.test(body) ||
+    isUiPositioningBugPrompt(body);
   if (!isUiQuestion) {
-    return `${firstTurnRule}${clickFocusHint}\n\n${body}`;
+    return `${firstTurnRule}${clickFocusHint}${positioningHint}\n\n${body}`;
   }
 
   const implementing = hasUiImplementationIntent(body);
@@ -213,7 +270,7 @@ export function buildVisionTaskText(text: string, imageCount: number): string {
     ? "读图描述须先根据占位符/标签说明截图是哪块界面，下一轮再 grep 该文案并在对应源码内修改；修改前先 read_file 父/子 DOM 层级，勿在未读代码前声称已改完。"
     : "读图须说明截图对应哪块界面（可据占位符/标签推断），并覆盖用户所指可见范围；不要跳过读图先去全盘 grep/search。";
   const prefix = `【附图为本消息重点】${scopeRule} ${toolHint} 若界面像 Git/设置/聊天等，优先在 src/views 中查找，勿默认是外部应用。`;
-  return `${firstTurnRule}${clickFocusHint}\n\n${prefix}\n\n${body}`;
+  return `${firstTurnRule}${clickFocusHint}${positioningHint}\n\n${prefix}\n\n${body}`;
 }
 
 /**

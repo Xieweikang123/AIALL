@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildModelIdentityHint,
   buildUiScopeFollowUpHint,
+  buildVisionBuildContinueHint,
   buildVisionConsultativeContinueHint,
   buildVisionTaskText,
   buildVisionUserContent,
@@ -9,9 +10,11 @@ import {
   contentDisplayText,
   isAdequateVisionFirstTurnDescription,
   isPrematureVisionCompletionClaim,
+  isUiPositioningBugPrompt,
   isVisionUnsupportedError,
   sanitizeImageDataUrls,
   shouldRequireVisionFirstTurn,
+  suggestsEmbeddedLayoutMisread,
 } from "./visionMessage";
 
 const PNG_DATA_URL = "data:image/png;base64,iVBORw0KGgo=";
@@ -179,5 +182,30 @@ describe("visionMessage", () => {
   it("isVisionUnsupportedError detects common API errors", () => {
     expect(isVisionUnsupportedError("Model does not support image input")).toBe(true);
     expect(isVisionUnsupportedError("HTTP 500 internal error")).toBe(false);
+  });
+
+  it("detects UI positioning bug prompts", () => {
+    expect(isUiPositioningBugPrompt("看到没，引用按钮跑别的地方了？")).toBe(true);
+    expect(isUiPositioningBugPrompt("这个函数是干什么的？")).toBe(false);
+  });
+
+  it("buildVisionTaskText adds floating control hint for positioning bugs", () => {
+    const text = buildVisionTaskText("看到没，引用按钮跑别的地方了？", 1);
+    expect(text).toContain("浮动/绝对定位控件");
+    expect(text).toContain("position:fixed");
+  });
+
+  it("suggestsEmbeddedLayoutMisread when selection and button are spatially separated", () => {
+    const vision =
+      "顶部蓝色选区… 最底部状态栏有「引用」按钮与 token 挤在同一行，属于 flex 布局问题，组件 ChatPanel.vue [图已理解]";
+    expect(suggestsEmbeddedLayoutMisread(vision)).toBe(true);
+  });
+
+  it("buildVisionBuildContinueHint injects grep correction after misread", () => {
+    const vision =
+      "选区在上方… 底部状态栏「引用」按钮… chat-bottom flex 布局 [图已理解]";
+    const hint = buildVisionBuildContinueHint(vision, "引用按钮跑别的地方了");
+    expect(hint).toContain("quote-floating");
+    expect(hint).toContain("进度");
   });
 });

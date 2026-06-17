@@ -4,7 +4,9 @@ import {
   buildAskExploreBudgetNudge,
   buildAskForceAnswerNudge,
   buildExploreBudgetNudge,
+  buildExploreInterimDiagnosisNudge,
   EXECUTE_PLAN_EXPLORE_TURN_BUDGET,
+  EXPLORE_INTERIM_DIAGNOSIS_TURN,
   INTERACTIVE_EXPLORE_TURN_BUDGET,
 } from "./agentExplorationBudget";
 
@@ -25,5 +27,12 @@ describe("agentExplorationBudget", () => {
     expect(buildAskExploreBudgetNudge(5)).toContain("Ask 模式");
     expect(buildAskExploreBudgetNudge(5)).toContain("完整自然语言答案");
     expect(buildAskForceAnswerNudge(12)).toContain("移除所有工具");
+  });
+
+  it("builds interim diagnosis nudge requiring Chinese progress", () => {
+    expect(EXPLORE_INTERIM_DIAGNOSIS_TURN).toBe(4);
+    const nudge = buildExploreInterimDiagnosisNudge(4);
+    expect(nudge).toContain("进度摘要");
+    expect(nudge).toContain("patch_file");
   });
 });

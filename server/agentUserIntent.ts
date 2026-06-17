@@ -13,10 +13,24 @@ const AUTOMATION_PROMPT_RE = /^\s*(?:【|\[)(?:方案执行|精准修改|效率|
 const SHORT_EVALUATIVE_FOLLOW_UP_RE =
   /^(?:需要|要不要|是否|还得|还要|值得|可以|那)?[^。！!]{0,24}(?:吗|呢)[？?]?\s*$/;
 
+/** Screenshot-backed UI defect — user shows broken layout/position; Build should fix, not read-only Q&A. */
+const UI_DEFECT_REPORT_RE =
+  /看到没|你看|你瞧|分明|明显|错位|跑(?:到|去|别的)|飘|歪|不对|坏了|出问题了|有问题|挤一块|重叠|太紧/i;
+
+const UI_DEFECT_SUBJECT_RE =
+  /按钮|控件|布局|位置|样式|界面|面板|输入框|弹窗|浮动|引用|图标/i;
+
+export function isUiDefectReportPrompt(prompt: string): boolean {
+  const text = prompt.trim();
+  if (!text) return false;
+  return UI_DEFECT_REPORT_RE.test(text) && UI_DEFECT_SUBJECT_RE.test(text);
+}
+
 export function isConsultativeUserPrompt(prompt: string): boolean {
   const text = prompt.trim();
   if (!text) return false;
   if (AUTOMATION_PROMPT_RE.test(text)) return false;
+  if (isUiDefectReportPrompt(text)) return false;
   if (SHORT_EVALUATIVE_FOLLOW_UP_RE.test(text)) return true;
   if (IMPLEMENT_INTENT_RE.test(text)) return false;
   return CONSULTATIVE_MARKERS_RE.test(text);

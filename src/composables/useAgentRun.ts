@@ -1250,7 +1250,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       assistantMsg.status = "";
       assistantMsg.agentPhase = undefined;
       patchAssistantMsg(msgId, {
-        content: cleanText,
+        content: assistantMsg.content,
         streaming: false,
         status: "",
         agentPhase: undefined,

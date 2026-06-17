@@ -89,6 +89,24 @@ export async function readImageRefAsBuffer(
   return { buffer: buf, mime: mimeFromExt(ext) };
 }
 
+async function imageRefFileExists(chatDir: string, refPath: string): Promise<boolean> {
+  const loaded = await readImageRefAsBuffer(chatDir, refPath);
+  return Boolean(loaded);
+}
+
+async function filterExistingImageRefs(
+  chatDir: string,
+  refs: PersistedImageRef[],
+): Promise<PersistedImageRef[]> {
+  const out: PersistedImageRef[] = [];
+  for (const ref of refs) {
+    if (ref.path && (await imageRefFileExists(chatDir, ref.path))) {
+      out.push(ref);
+    }
+  }
+  return out;
+}
+
 /** Persist user-message images to disk; strip base64 from serialized payload. */
 export async function externalizeMessageImages(
   chatDir: string,
@@ -118,12 +136,12 @@ export async function externalizeMessageImages(
       }
     }
 
-    const imageCount = refs.length || message.imageCount || urls.length || undefined;
+    const verifiedRefs = await filterExistingImageRefs(chatDir, refs);
     out.push({
       ...message,
       imageDataUrls: undefined,
-      imageRefs: refs.length ? refs : undefined,
-      imageCount: imageCount && imageCount > 0 ? imageCount : undefined,
+      imageRefs: verifiedRefs.length ? verifiedRefs : undefined,
+      imageCount: verifiedRefs.length > 0 ? verifiedRefs.length : undefined,
     });
   }
   return out;

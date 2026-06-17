@@ -1540,14 +1540,15 @@ function persistChatNow(path = projectPath.value.trim(), options?: { flushStore?
   setTimeout(() => {
     (async () => {
       if (sessionId) {
+        if (activeSessionId.value === sessionId && projectPath.value.trim() === path) {
+          chatMessages.value = normalizeChatMessages(
+            stampImageRefsAfterSync(sessionId, chatMessages.value),
+          );
+          saveVibeChatHistory(path, chatMessages.value, sessionId);
+        }
         const snapshot = getActiveSessionSnapshot(path, sessionId);
         if (snapshot) {
           await syncChatSession(path, sessionId, snapshot, { activeSessionId: activeSessionId.value || sessionId });
-          if (activeSessionId.value === sessionId && projectPath.value.trim() === path) {
-            chatMessages.value = normalizeChatMessages(
-              stampImageRefsAfterSync(sessionId, chatMessages.value),
-            );
-          }
         }
       }
       if (options?.flushStore) {

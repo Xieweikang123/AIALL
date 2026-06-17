@@ -43,4 +43,19 @@ describe("vibeChatImages", () => {
     const abs = path.join(tmpDir, messages[0].imageRefs![0].path.split("/").join(path.sep));
     expect(await fs.promises.stat(abs)).toBeTruthy();
   });
+
+  it("drops orphan imageRefs when file missing and no base64 to write", async () => {
+    tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "vibe-chat-img-"));
+    const messages = await externalizeMessageImages(tmpDir, "s1", [
+      {
+        id: "u1",
+        role: "user",
+        content: "看",
+        imageRefs: [{ path: "images/s1/missing-0.png" }],
+        imageCount: 1,
+      },
+    ]);
+    expect(messages[0].imageRefs).toBeUndefined();
+    expect(messages[0].imageCount).toBeUndefined();
+  });
 });

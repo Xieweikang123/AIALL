@@ -43,10 +43,16 @@ export const MAX_TOTAL_EXPLORE_TURNS_SOFT = 6;
  */
 export const MAX_UNIQUE_READ_FILES_BEFORE_NUDGE = 4;
 
+/** Total explore-only turns before requiring a user-visible Chinese interim diagnosis. */
+export const EXPLORE_INTERIM_DIAGNOSIS_TURN = 4;
+
+/** Identical read_file slice requests allowed after the first read before hard-blocking. */
+export const MAX_READ_SLICE_REPEATS = 2;
+
 export function buildExploreBudgetNudge(consecutiveExploreTurns: number, mode?: string): string {
   const actionHint = mode === "plan"
     ? "请立即输出结构化修改方案（文件清单 + 代码块 + 改动说明），不要再继续读文件。"
-    : "下一轮必须调用 patch_file 或 write_file；若目标文件已 read 过，直接改，不要再 grep/read。\n若仍缺路径：最多 1 次 grep/search，然后立即修改。\n禁止重复 read 同一文件相同片段；禁止用英文写长分析。\n\n💡 提示：如果问题表现为「点击没反应」「按钮不工作」等前端交互异常，优先请用户打开浏览器 DevTools Console 查看报错信息——这比读代码更快定位根因。";
+    : "下一轮必须调用 patch_file 或 write_file；若目标文件已 read 过，直接改，不要再 grep/read。\n若仍缺路径：最多 1 次 grep/search，然后立即修改。\n禁止重复 read 同一文件相同片段；禁止用英文写长分析。\n先用 2–4 句中文写可见进度（根因假设 + 下一步），再调用工具。\n\n💡 提示：如果问题表现为「点击没反应」「按钮不工作」等前端交互异常，优先请用户打开浏览器 DevTools Console 查看报错信息——这比读代码更快定位根因。";
   return [
     `【系统提示】已连续 ${consecutiveExploreTurns} 轮仅探索、尚未修改。`,
     actionHint,
@@ -94,11 +100,22 @@ export function buildExploreSoftCapNudge(totalExploreTurns: number, mode?: strin
 export function buildForceOutputNudge(totalExploreTurns: number, mode?: string): string {
   const actionHint = mode === "plan"
     ? "请基于已有信息，立即输出结构化修改方案（文件清单 + 代码块 + 改动说明）。不要再调用任何工具。"
-    : "请基于已有信息，立即输出当前发现的结论、问题根因、以及建议的修复方案。不要再调用任何工具。";
+    : "请基于已有信息，立即用中文输出：① 问题根因（或最可能假设）；② 建议修改的文件与函数；③ 具体 patch 思路。不要再调用任何工具。";
   return [
     `【系统强制】已累计 ${totalExploreTurns} 轮仅探索（超过上限 ${MAX_TOTAL_EXPLORE_TURNS}）。`,
     "下一轮已移除所有工具，你只能输出文字。",
     actionHint,
+  ].join("");
+}
+
+/** Injected mid-exploration — requires a user-visible Chinese progress summary. */
+export function buildExploreInterimDiagnosisNudge(totalExploreTurns: number): string {
+  return [
+    `【系统提示】已累计 ${totalExploreTurns} 轮探索且尚未修改或给出结论。`,
+    "下一轮开始必须用中文输出一段用户可见的进度摘要（2–4 句）：",
+    "① 当前根因假设；② 已读过哪些关键文件/符号；③ 下一步是 patch 还是仍需一次 read。",
+    "摘要写完后才能继续调用工具；禁止仅用英文 \"Now let me...\" 句式。",
+    "若已足够定位问题，本轮必须 patch_file / write_file。",
   ].join("");
 }
 

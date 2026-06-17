@@ -110,6 +110,7 @@
           alt="发送的图片"
           class="msg-user-image"
           loading="lazy"
+          @error="hideBrokenUserImage"
         />
       </div>
       <PlanDocumentBlock
@@ -229,6 +230,13 @@ import { vibeChatMessageContextKey, type VibeChatMessageItem } from "../../compo
 const ctx = inject(vibeChatMessageContextKey);
 if (!ctx) {
   throw new Error("VibeChatMessages requires vibeChatMessageContext");
+}
+
+function hideBrokenUserImage(event: Event) {
+  const img = event.target;
+  if (img instanceof HTMLImageElement) {
+    img.style.display = "none";
+  }
 }
 
 function planMarkdownContent(msg: VibeChatMessageItem): string {

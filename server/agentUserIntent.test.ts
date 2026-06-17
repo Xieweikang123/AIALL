@@ -22,6 +22,11 @@ describe("isConsultativeUserPrompt", () => {
     expect(isConsultativeUserPrompt("需要优化吗")).toBe(true);
     expect(isConsultativeUserPrompt("要不要调整呢")).toBe(true);
   });
+
+  it("treats screenshot UI defect reports as implement intent even with ？", () => {
+    expect(isConsultativeUserPrompt("看到没，引用按钮跑别的地方了？")).toBe(false);
+    expect(isConsultativeUserPrompt("你看，这个按钮错位了？")).toBe(false);
+  });
 });
 
 describe("buildConsultativeBuildHint", () => {

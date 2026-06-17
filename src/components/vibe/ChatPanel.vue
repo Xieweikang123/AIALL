@@ -231,6 +231,19 @@
       </div>
       <div class="chat-bottom">
         <div class="chat-status-row">
+          <span v-if="autoResumeSecondsLeft > 0" class="chat-recovery-hint chat-auto-resume-hint">
+            {{ autoResumeSecondsLeft }}s 后自动恢复（可取消）
+          </span>
+          <span v-else-if="stalledAssistantMsg" class="chat-recovery-hint chat-stall-hint">
+            运行似乎已卡住
+          </span>
+          <span v-else-if="recoverableAssistantMsg && !chatSending" class="chat-recovery-hint">
+            Agent 已中断，可恢复
+          </span>
+          <span v-else-if="chatError" class="chat-error">{{ chatError }}</span>
+
+        </div>
+        <div class="chat-action-row">
           <button
             v-if="totalTokenUsage"
             type="button"
@@ -259,19 +272,6 @@
               <span>{{ tokenDetailData.totalMessages }}</span>
             </div>
           </div>
-          <span v-if="autoResumeSecondsLeft > 0" class="chat-recovery-hint chat-auto-resume-hint">
-            {{ autoResumeSecondsLeft }}s 后自动恢复（可取消）
-          </span>
-          <span v-else-if="stalledAssistantMsg" class="chat-recovery-hint chat-stall-hint">
-            运行似乎已卡住
-          </span>
-          <span v-else-if="recoverableAssistantMsg && !chatSending" class="chat-recovery-hint">
-            Agent 已中断，可恢复
-          </span>
-          <span v-else-if="chatError" class="chat-error">{{ chatError }}</span>
-
-        </div>
-        <div class="chat-action-row">
           <div class="chat-mode-switch" role="group" aria-label="对话模式">
             <button
               type="button"
@@ -1151,6 +1151,7 @@ function formatSessionTime(timestamp: number | string): string {
 }
 
 .chat-action-row {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;

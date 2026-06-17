@@ -96,12 +96,58 @@ describe("executeTool immediate persistence", () => {
     const stage = createWriteStage();
     const readCache = new Map<string, string>();
     const readSliceCache = new Map<string, string>();
+    const readSliceRepeatCounts = new Map<string, number>();
 
-    const first = await executeTool(root, "read_file", { path: "a.ts" }, stage, "build", readCache, readSliceCache);
-    const second = await executeTool(root, "read_file", { path: "a.ts" }, stage, "build", readCache, readSliceCache);
+    const first = await executeTool(
+      root,
+      "read_file",
+      { path: "a.ts" },
+      stage,
+      "build",
+      readCache,
+      readSliceCache,
+      undefined,
+      readSliceRepeatCounts,
+    );
+    const second = await executeTool(
+      root,
+      "read_file",
+      { path: "a.ts" },
+      stage,
+      "build",
+      readCache,
+      readSliceCache,
+      undefined,
+      readSliceRepeatCounts,
+    );
+    const third = await executeTool(
+      root,
+      "read_file",
+      { path: "a.ts" },
+      stage,
+      "build",
+      readCache,
+      readSliceCache,
+      undefined,
+      readSliceRepeatCounts,
+    );
+    const fourth = await executeTool(
+      root,
+      "read_file",
+      { path: "a.ts" },
+      stage,
+      "build",
+      readCache,
+      readSliceCache,
+      undefined,
+      readSliceRepeatCounts,
+    );
 
     expect(first).toContain("line1");
     expect(second).toContain("省略重复读取");
+    expect(third).toContain("省略重复读取");
+    expect(fourth).toContain("错误");
+    expect(fourth).toContain("勿重复 read_file");
   });
 
   it("delete_file removes from disk immediately", async () => {
