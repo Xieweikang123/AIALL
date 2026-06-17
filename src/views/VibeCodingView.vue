@@ -226,8 +226,6 @@
         :ai-config-status-text="aiConfigStatusText"
         :can-send-chat="canSendChat"
         :chat-placeholder="chatPlaceholder"
-
-        :chat-running-text="chatRunningText"
         :recoverable-assistant-msg="recoverableAssistantMsg"
         :stalled-assistant-msg="stalledAssistantMsg"
         :auto-resume-seconds-left="autoResumeSecondsLeft"
@@ -430,6 +428,7 @@ import { loadAiChatBaseFromStorage } from "../services/aiLocalConfig";
 import {
   buildAgentHistoryFromMessages,
   clearVibeChatHistory,
+  diskChatStoreAheadOfLocalIndex,
   getActiveSessionSnapshot,
   getVibeChatProjectSnapshot,
   hasVibeChatHistory,
@@ -850,7 +849,16 @@ function refreshSessionList(path?: string) {
 }
 
 function toggleSessionPicker() {
+  const wasOpen = sessionPickerOpen.value;
   session.toggleSessionPicker(chatSending.value);
+  if (!wasOpen && sessionPickerOpen.value && projectPath.value.trim()) {
+    void (async () => {
+      const project = projectPath.value.trim();
+      if (await hydrateProjectChatFromDisk(project)) {
+        refreshSessionList(project);
+      }
+    })();
+  }
 }
 
 function closeSessionPicker() {
@@ -981,16 +989,6 @@ const chatPlaceholder = computed(() =>
     : chatMode.value === "plan"
     ? "描述需求 → AI 输出方案 → 确认后执行（可点「执行方案」或回复「执行方案」）"
     : "描述要改什么（Enter 发送，Shift+Enter 换行）",
-);
-
-const chatRunningText = computed(() =>
-  chatMode.value === "ask"
-    ? "思考中… · 发送新消息将打断"
-    : chatMode.value === "plan"
-    ? planExecutionActive.value
-      ? "执行方案中… · 发送新消息将打断"
-      : "规划中… · 发送新消息将打断"
-    : "Agent 运行中… · 发送新消息将打断",
 );
 
 const totalTokenUsage = computed(() => {
@@ -1167,8 +1165,20 @@ const {
   autoRetryWithCountdown,
 });
 
+async function loadFullChatStoreFromDisk(project: string): Promise<void> {
+  const diskStore = await fetchChatStoreFromDisk(project, { loadMessages: true });
+  if (
+    diskStore.ok
+    && diskStore.data.sessions.length
+    && vibeProjectPathsMatch(project, diskStore.data.projectPath)
+  ) {
+    restoreChatStoreFromSnapshot(diskStore.data, project);
+  }
+}
+
 async function ensureProjectChatLoadedFromDisk(project: string, sessionId?: string): Promise<void> {
-  if (!project.trim() || !projectChatNeedsDiskRestore(project, sessionId)) return;
+  if (!project.trim()) return;
+  if (!projectChatNeedsDiskRestore(project, sessionId)) return;
 
   const targetId = sessionId || getActiveVibeChatSessionId(project);
   if (targetId) {
@@ -1179,14 +1189,22 @@ async function ensureProjectChatLoadedFromDisk(project: string, sessionId?: stri
     }
   }
 
-  const diskStore = await fetchChatStoreFromDisk(project, { loadMessages: true });
-  if (
-    diskStore.ok
-    && diskStore.data.sessions.length
-    && vibeProjectPathsMatch(project, diskStore.data.projectPath)
-  ) {
-    restoreChatStoreFromSnapshot(diskStore.data, project);
-  }
+  await loadFullChatStoreFromDisk(project);
+}
+
+async function hydrateProjectChatFromDisk(project: string): Promise<boolean> {
+  if (!project.trim()) return false;
+  const diskIndex = await fetchChatStoreFromDisk(project, { loadMessages: false });
+  const diskOk =
+    diskIndex.ok
+    && diskIndex.data.sessions.length > 0
+    && vibeProjectPathsMatch(project, diskIndex.data.projectPath);
+  const needsDisk =
+    projectChatNeedsDiskRestore(project)
+    || (diskOk && diskChatStoreAheadOfLocalIndex(project, diskIndex.data.sessions));
+  if (!needsDisk) return false;
+  await loadFullChatStoreFromDisk(project);
+  return true;
 }
 
 async function applyChatMessageImageHydration(messages: PersistedChatMessage[]): Promise<ChatMessage[]> {
@@ -1883,10 +1901,9 @@ async function openProjectByPath(dirPath: string) {
 
     loadingTree.value = false;
 
-    if (!loaded.length && projectChatNeedsDiskRestore(normalized)) {
+    if (await hydrateProjectChatFromDisk(normalized)) {
       switchingProject.value = true;
       try {
-        await ensureProjectChatLoadedFromDisk(normalized);
         loaded = loadVibeChatHistory(normalized);
         chatMessages.value = normalizeChatMessages(loaded);
         activeSessionId.value = getActiveVibeChatSessionId(normalized);

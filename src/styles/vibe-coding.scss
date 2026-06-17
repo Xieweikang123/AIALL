@@ -196,6 +196,8 @@
 .panel-meta {
   font-size: 11px;
   color: var(--muted);
+  opacity: 0.6;
+  letter-spacing: 0.02em;
 }
 
 .panel-meta.warn {
@@ -976,6 +978,7 @@ button:disabled {
   flex-direction: column;
   gap: 4px;
   margin-top: 4px;
+  padding-bottom: 8px;
 }
 
 .chat-status-row {
@@ -983,16 +986,6 @@ button:disabled {
   align-items: center;
   justify-content: center;
   min-height: 20px;
-}
-
-.chat-hint,
-.chat-running {
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.chat-running {
-  color: #58a6ff;
 }
 
 .chat-error {

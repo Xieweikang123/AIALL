@@ -5,6 +5,7 @@ import {
   extractPlanFilePaths,
   extractReferencedFilePaths,
   hasDirectImplementationIntent,
+  isAssistantExecutionBrief,
   isExecutionContinuation,
   looksLikeModificationPlan,
   stripQuotedReplyPrefix,
@@ -59,7 +60,7 @@ export function resolveAgentRunProfile(input: ResolveAgentRunProfileInput): Agen
     (mode === "build" || mode === "plan") &&
     isExecutionContinuation(trimmed) &&
     lastAssistantContent &&
-    looksLikeModificationPlan(lastAssistantContent)
+    isAssistantExecutionBrief(lastAssistantContent)
   ) {
     const targetFiles = extractPlanFilePaths(lastAssistantContent);
     const lastUserIntent = summarizeIntent(body || trimmed);
@@ -104,7 +105,7 @@ export function buildAgentPromptForProfile(prompt: string, profile: AgentRunProf
   return [
     stripQuotedReplyPrefix(prompt.trim()) || prompt.trim(),
     "",
-    "[精准修改] 用户要求实施功能，请直接动手，不要再次询问是否开始。",
+    "[精准修改] 用户已明确要求实施（如执行/继续/改吧/优化等）。禁止再问「需要我执行吗」「请确认后」；直接 patch_file / write_file。",
     "流程：grep 定位（如需）→ read_file 核对片段 → patch_file / write_file；大文件禁止整文件 write_file。",
     "探索最多 1–2 轮，然后必须写入代码；同一轮可并行多个 read_file。",
     `目标文件（待服务端校验）：${files}`,

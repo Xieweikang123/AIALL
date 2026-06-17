@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   compressHistoryForExecution,
   compressPlanForHistory,
+  compressProposalForHistory,
   extractPlanCodeBlocks,
   extractPlanFilePaths,
   findLastAssistantContentInMessages,
   isExecutionContinuation,
+  looksLikeActionableProposal,
   looksLikeModificationPlan,
 } from "./agentContinuation";
 
@@ -23,16 +25,10 @@ describe("isExecutionContinuation", () => {
     expect(isExecutionContinuation("改吧")).toBe(true);
     expect(isExecutionContinuation("好的")).toBe(true);
     expect(isExecutionContinuation("执行吧")).toBe(true);
+    expect(isExecutionContinuation("执行")).toBe(true);
     expect(isExecutionContinuation("执行方案")).toBe(true);
-  });
-
-  it("rejects ambiguous bare 继续", () => {
-    expect(isExecutionContinuation("继续")).toBe(false);
-  });
-
-  it("matches execution-oriented 继续 phrasing", () => {
-    expect(isExecutionContinuation("继续执行")).toBe(true);
-    expect(isExecutionContinuation("继续改")).toBe(true);
+    expect(isExecutionContinuation("继续")).toBe(true);
+    expect(isExecutionContinuation("优化")).toBe(true);
   });
 
   it("rejects long exploratory prompts", () => {
@@ -45,6 +41,27 @@ describe("isExecutionContinuation", () => {
     ).toBe(true);
     expect(isExecutionContinuation("帮我实现一下")).toBe(true);
     expect(isExecutionContinuation("那就做吧")).toBe(true);
+  });
+});
+
+const ACTIONABLE_PROPOSAL = [
+  "具体改动：",
+  "1. 移除 `src/foo.ts` 中的 `deadProp` 绑定",
+  "2. 删除 `src/bar.scss` 内无用样式",
+  "",
+  "需要我执行这个修改吗？",
+].join("\n");
+
+describe("looksLikeActionableProposal", () => {
+  it("detects numbered edits with file refs even when asking for confirmation", () => {
+    expect(looksLikeActionableProposal(ACTIONABLE_PROPOSAL)).toBe(true);
+    expect(looksLikeModificationPlan(ACTIONABLE_PROPOSAL)).toBe(false);
+  });
+
+  it("rejects analysis that only asks whether to implement", () => {
+    expect(
+      looksLikeActionableProposal("当前不支持某功能。是否需要我帮你实现？"),
+    ).toBe(false);
   });
 });
 
@@ -128,7 +145,25 @@ describe("compressPlanForHistory", () => {
   });
 });
 
+describe("compressProposalForHistory", () => {
+  it("compresses actionable proposals for execution", () => {
+    const compressed = compressProposalForHistory(ACTIONABLE_PROPOSAL);
+    expect(compressed).toContain("[已确认改动]");
+    expect(compressed).toContain("src/foo.ts");
+  });
+});
+
 describe("compressHistoryForExecution", () => {
+  it("compresses history after actionable proposal confirmation", () => {
+    const history = [
+      { role: "user" as const, content: "状态行重复了" },
+      { role: "assistant" as const, content: ACTIONABLE_PROPOSAL },
+    ];
+    const compressed = compressHistoryForExecution(history, "执行");
+    expect(compressed).toHaveLength(2);
+    expect(compressed[1].content).toContain("[已确认改动]");
+  });
+
   it("drops earlier chitchat and keeps only the plan exchange", () => {
     const longIntro = "a".repeat(5000);
     const history = [

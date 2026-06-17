@@ -1,10 +1,18 @@
-/** Short user confirmations after the agent already proposed a change plan. */
+/** Short user confirmations after the agent already proposed changes. */
 const EXECUTION_CONTINUATION_RE =
-  /^(改吧|执行方案|好的?|行|可以|接着(做|改|来)?|执行(吧|一下)?|开始(改|做)?|动手(吧)?|按方案(改|执行)?|go|do it|yes|ok|okay|sure)\.?$/i;
+  /^(改吧|执行方案|好的?|行|可以|接着(做|改|来)?|执行(吧|一下)?|开始(改|做)?|动手(吧)?|按方案(改|执行)?|继续|优化|go|do it|yes|ok|okay|sure)\.?$/i;
 
-/** 「继续」 alone is ambiguous; require execution-oriented phrasing. */
+/** Longer 「继续…」 phrasing with explicit edit intent. */
 const EXECUTION_CONTINUE_RE =
   /^继续(?:执行|改|做|写|来|完成)(?:吧|一下)?\.?$/i;
+
+const NUMBERED_STEP_RE = /(?:^|\n)\s*\d+[\.\)、]\s+\S/g;
+
+const BACKTICK_FILE_REF_RE =
+  /`(?:[\w@.-]+\/)*[\w.-]+\.(?:vue|ts|tsx|js|jsx|scss|css|json|md|html|py|rs|go|toml)`/;
+
+const CONCRETE_EDIT_VERB_RE =
+  /(?:移除|删除|去掉|新增|添加|改为|改成|替换|精简|清理|patch_file|write_file)/;
 
 /** Explicit plan document markers emitted in Plan mode. */
 const PLAN_EXPLICIT_MARKER_RE =
@@ -82,6 +90,31 @@ export function hasDirectImplementationIntent(text: string): boolean {
   return false;
 }
 
+/** Assistant laid out concrete edits (steps / snippet) awaiting user go-ahead. */
+export function looksLikeActionableProposal(content: string): boolean {
+  const text = content.trim();
+  if (!text) return false;
+
+  const paths = extractPlanFilePaths(text);
+  const stepCount = (text.match(NUMBERED_STEP_RE) ?? []).length;
+  const hasCodeBlock = text.includes("```");
+  const hasFileRef = paths.length >= 1 || BACKTICK_FILE_REF_RE.test(text);
+  const hasEditVerbs = CONCRETE_EDIT_VERB_RE.test(text);
+  const hasProposalTable = /\|[^|\n]*`[^`]+\.(?:vue|ts|tsx|scss|css|json)`/i.test(text);
+
+  if (!hasEditVerbs && !hasCodeBlock) return false;
+  if (stepCount >= 2 && (hasFileRef || hasCodeBlock)) return true;
+  if (stepCount >= 1 && hasCodeBlock) return true;
+  if (hasCodeBlock && hasFileRef && hasEditVerbs) return true;
+  if (hasProposalTable && (stepCount >= 1 || hasEditVerbs)) return true;
+
+  return false;
+}
+
+export function isAssistantExecutionBrief(content: string): boolean {
+  return looksLikeModificationPlan(content) || looksLikeActionableProposal(content);
+}
+
 export function looksLikeModificationPlan(content: string): boolean {
   const text = content.trim();
   if (!text) return false;
@@ -117,7 +150,7 @@ export function findLastAssistantContentInMessages(
     const msg = messages[i];
     if (msg.role !== "assistant") continue;
     const text = resolveContent(msg).trim();
-    if (text && looksLikeModificationPlan(text)) return text;
+    if (text && isAssistantExecutionBrief(text)) return text;
   }
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const msg = messages[i];
@@ -183,6 +216,23 @@ function formatPlanCodeBlocks(content: string): string {
   return lines.join("\n");
 }
 
+export function compressProposalForHistory(content: string): string {
+  if (looksLikeModificationPlan(content)) return compressPlanForHistory(content);
+
+  const files = extractPlanFilePaths(content);
+  const base =
+    content.length > HISTORY_PLAN_KEEP_CHARS
+      ? `${content.slice(0, HISTORY_PLAN_KEEP_CHARS)}\n\n…（改动说明已截断，按上文步骤执行）`
+      : content;
+  return [
+    "[已确认改动] 用户已同意执行。先 read_file 核对真实内容，再 patch_file / write_file。",
+    files.length ? `涉及文件：${files.join("、")}` : "",
+    base,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 export function compressPlanForHistory(content: string): string {
   const files = extractPlanFilePaths(content);
   const codeBlocks = formatPlanCodeBlocks(content);
@@ -210,7 +260,7 @@ export function compressHistoryForExecution(
 
   let planAssistantIdx = -1;
   for (let i = history.length - 1; i >= 0; i -= 1) {
-    if (history[i].role === "assistant" && looksLikeModificationPlan(history[i].content)) {
+    if (history[i].role === "assistant" && isAssistantExecutionBrief(history[i].content)) {
       planAssistantIdx = i;
       break;
     }
@@ -222,7 +272,7 @@ export function compressHistoryForExecution(
   if (planAssistantIdx < 0) return history;
 
   const assistant = history[planAssistantIdx];
-  if (!looksLikeModificationPlan(assistant.content)) return history;
+  if (!isAssistantExecutionBrief(assistant.content)) return history;
 
   const precedingUser =
     planAssistantIdx > 0 && history[planAssistantIdx - 1]?.role === "user"
@@ -235,7 +285,7 @@ export function compressHistoryForExecution(
 
   return [
     { role: "user", content: userContent },
-    { role: "assistant", content: compressPlanForHistory(assistant.content) },
+    { role: "assistant", content: compressProposalForHistory(assistant.content) },
   ];
 }
 

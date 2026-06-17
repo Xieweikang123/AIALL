@@ -5,6 +5,7 @@ import {
   formatSessionTitle,
   getActiveSessionSnapshot,
   createVibeChatSession,
+  diskChatStoreAheadOfLocalIndex,
   getVibeChatProjectSnapshot,
   loadVibeChatHistory,
   projectChatNeedsDiskRestore,
@@ -365,5 +366,54 @@ describe("v3 chat storage (index + memory)", () => {
     const projectPath = "D:/projects/empty-session-index";
     createVibeChatSession(projectPath);
     expect(projectChatNeedsDiskRestore(projectPath)).toBe(false);
+  });
+
+  it("detects when disk index has more sessions than localStorage", () => {
+    const projectPath = "D:/projects/disk-ahead";
+    saveVibeChatHistory(projectPath, [
+      { id: "u1", role: "user", content: "local only" },
+      { id: "a1", role: "assistant", content: "ok" },
+    ]);
+
+    expect(
+      diskChatStoreAheadOfLocalIndex(projectPath, [
+        {
+          id: "disk-only",
+          title: "磁盘会话",
+          createdAt: "2026-03-01T00:00:00.000Z",
+          updatedAt: "2026-03-02T00:00:00.000Z",
+          messageCount: 4,
+        },
+      ]),
+    ).toBe(true);
+  });
+
+  it("merges disk sessions without dropping unsynced local-only sessions", () => {
+    const projectPath = "D:/projects/merge-local-disk";
+    const { sessionId: localOnlyId } = saveVibeChatHistory(projectPath, [
+      { id: "u1", role: "user", content: "仅本地" },
+      { id: "a1", role: "assistant", content: "本地回复" },
+    ]);
+
+    restoreChatStoreFromSnapshot({
+      version: STORE_VERSION,
+      projectPath,
+      activeSessionId: "disk-s1",
+      sessions: [
+        {
+          id: "disk-s1",
+          title: "磁盘会话",
+          createdAt: "2026-03-01T00:00:00.000Z",
+          updatedAt: "2026-03-02T00:00:00.000Z",
+          messageCount: 1,
+          messages: [{ id: "u2", role: "user", content: "磁盘消息" }],
+        },
+      ],
+    }, projectPath);
+
+    const snapshot = getVibeChatProjectSnapshot(projectPath);
+    expect(snapshot.sessions).toHaveLength(2);
+    expect(snapshot.sessions.some((s) => s.id === localOnlyId)).toBe(true);
+    expect(snapshot.sessions.some((s) => s.id === "disk-s1")).toBe(true);
   });
 });

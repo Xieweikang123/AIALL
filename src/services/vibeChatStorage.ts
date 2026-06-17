@@ -738,6 +738,28 @@ export function hasVibeChatHistory(projectPath: string): boolean {
   return Boolean(indexed?.sessions.some((s) => s.messageCount > 0));
 }
 
+/** True when disk index has sessions or message counts not reflected in localStorage. */
+export function diskChatStoreAheadOfLocalIndex(
+  projectPath: string,
+  diskSessions: Array<Pick<VibeChatSessionMeta, "id" | "messageCount" | "updatedAt">>,
+): boolean {
+  const key = normalizeProjectKey(projectPath);
+  if (!key || !diskSessions.length) return false;
+  const indexed = readIndex().byProject[key];
+  const localSessions = indexed?.sessions || [];
+  if (diskSessions.length > localSessions.length) return true;
+
+  const localMap = new Map(localSessions.map((s) => [s.id, s]));
+  for (const disk of diskSessions) {
+    const local = localMap.get(disk.id);
+    if (!local) return true;
+    const diskCount = disk.messageCount ?? 0;
+    const localCount = local.messageCount ?? 0;
+    if (diskCount > localCount) return true;
+  }
+  return false;
+}
+
 /** True when localStorage index says a session has messages but memory is empty or missing image refs. */
 export function projectChatNeedsDiskRestore(projectPath: string, sessionId?: string): boolean {
   const key = normalizeProjectKey(projectPath);
@@ -768,14 +790,8 @@ export function projectChatNeedsDiskRestore(projectPath: string, sessionId?: str
   return false;
 }
 
-export function restoreChatStoreFromSnapshot(
-  snapshot: VibeChatProjectSnapshot,
-  expectedProjectPath?: string,
-): boolean {
-  const key = normalizeProjectKey(snapshot.projectPath);
-  if (!key || !snapshot.sessions?.length) return false;
-  if (expectedProjectPath && normalizeProjectKey(expectedProjectPath) !== key) return false;
-  const sessions: VibeChatSession[] = snapshot.sessions.map((s) => ({
+function snapshotSessionsToRecord(snapshot: VibeChatProjectSnapshot): VibeChatSession[] {
+  return snapshot.sessions.map((s) => ({
     id: s.id,
     title: s.title || "新会话",
     createdAt: s.createdAt || new Date().toISOString(),
@@ -783,15 +799,72 @@ export function restoreChatStoreFromSnapshot(
     messages: sanitizeMessages(s.messages || [], { forDisk: true }),
     status: s.status || "active",
   }));
-  const record: ProjectChatRecord = {
-    activeSessionId:
-      snapshot.activeSessionId && sessions.some((s) => s.id === snapshot.activeSessionId)
+}
+
+function pickMergedSession(local: VibeChatSession, disk: VibeChatSession): VibeChatSession {
+  const localCount = local.messages.length;
+  const diskCount = disk.messages.length;
+  if (localCount === 0 && diskCount > 0) {
+    return { ...local, ...disk, messages: disk.messages };
+  }
+  if (diskCount > localCount) {
+    return { ...local, ...disk, messages: disk.messages };
+  }
+  if (diskCount > 0 && disk.updatedAt.localeCompare(local.updatedAt) > 0) {
+    return { ...local, ...disk, messages: disk.messages };
+  }
+  return local;
+}
+
+/** Merge disk snapshot into local store without dropping unsynced local-only sessions. */
+export function mergeChatStoreFromDiskSnapshot(
+  snapshot: VibeChatProjectSnapshot,
+  expectedProjectPath?: string,
+): boolean {
+  const key = normalizeProjectKey(snapshot.projectPath);
+  if (!key || !snapshot.sessions?.length) return false;
+  if (expectedProjectPath && normalizeProjectKey(expectedProjectPath) !== key) return false;
+
+  const diskSessions = snapshotSessionsToRecord(snapshot);
+  const existing = getProjectRecord(key);
+  if (!existing?.sessions?.length) {
+    const record: ProjectChatRecord = {
+      activeSessionId:
+        snapshot.activeSessionId && diskSessions.some((s) => s.id === snapshot.activeSessionId)
+          ? snapshot.activeSessionId
+          : diskSessions[0].id,
+      sessions: diskSessions,
+    };
+    persistRecord(key, record);
+    return true;
+  }
+
+  const mergedMap = new Map<string, VibeChatSession>();
+  for (const local of existing.sessions) {
+    mergedMap.set(local.id, local);
+  }
+  for (const disk of diskSessions) {
+    const local = mergedMap.get(disk.id);
+    mergedMap.set(disk.id, local ? pickMergedSession(local, disk) : disk);
+  }
+
+  const sessions = [...mergedMap.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const activeSessionId =
+    existing.activeSessionId && mergedMap.has(existing.activeSessionId)
+      ? existing.activeSessionId
+      : snapshot.activeSessionId && mergedMap.has(snapshot.activeSessionId)
         ? snapshot.activeSessionId
-        : sessions[0].id,
-    sessions,
-  };
-  persistRecord(key, record);
+        : sessions[0]?.id || "";
+
+  persistRecord(key, { activeSessionId, sessions });
   return true;
+}
+
+export function restoreChatStoreFromSnapshot(
+  snapshot: VibeChatProjectSnapshot,
+  expectedProjectPath?: string,
+): boolean {
+  return mergeChatStoreFromDiskSnapshot(snapshot, expectedProjectPath);
 }
 
 export function saveVibeChatHistory(

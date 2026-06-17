@@ -113,6 +113,46 @@ describe("resolveAgentRunProfile", () => {
     expect(hint).toContain("需要优化吗");
   });
 
+  it("uses execute_plan for 继续 after actionable proposal", () => {
+    const proposal = [
+      "具体改动：",
+      "1. 移除 `src/foo.ts` 中的 `featureFlag`",
+      "2. 精简 `src/bar.ts` 计算属性",
+      "需要我执行吗？",
+    ].join("\n");
+    const profile = resolveAgentRunProfile({
+      prompt: "继续",
+      mode: "build",
+      lastAssistantContent: proposal,
+    });
+    expect(profile.kind).toBe("execute_plan");
+    expect(profile.targetFiles).toContain("src/foo.ts");
+  });
+
+  it("uses execute_plan for 执行 after actionable proposal without formal plan marker", () => {
+    const proposal = [
+      "建议在 `src/foo.ts` 添加底部留白：",
+      "```css",
+      ".panel { padding-bottom: 8px; }",
+      "```",
+      "请确认后我将执行 patch_file。",
+    ].join("\n");
+    const profile = resolveAgentRunProfile({
+      prompt: "执行",
+      mode: "build",
+      lastAssistantContent: proposal,
+    });
+    expect(profile.kind).toBe("execute_plan");
+  });
+
+  it("uses execute_plan for standalone 优化 in build mode", () => {
+    const profile = resolveAgentRunProfile({
+      prompt: "优化",
+      mode: "build",
+    });
+    expect(profile.kind).toBe("execute_plan");
+  });
+
   it("uses execute_plan for 继续 after partial progress on resume", () => {
     const profile = resolveAgentResumeRunProfile(
       {
@@ -144,7 +184,7 @@ describe("buildAgentPromptForProfile", () => {
       targetFiles: ["src/foo.ts"],
     });
     expect(prompt).toContain("read_file");
-    expect(prompt).toContain("不要再次询问是否开始");
+    expect(prompt).toContain("禁止再问");
     expect(prompt).not.toContain("禁止 read_file");
   });
 });

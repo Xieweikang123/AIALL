@@ -269,7 +269,6 @@
             Agent 已中断，可恢复
           </span>
           <span v-else-if="chatError" class="chat-error">{{ chatError }}</span>
-          <span v-else-if="chatSending" class="chat-running">{{ chatRunningText }}</span>
 
         </div>
         <div class="chat-action-row">
@@ -442,8 +441,6 @@ interface Props {
   aiConfigStatusText: string;
   canSendChat: boolean;
   chatPlaceholder: string;
-
-  chatRunningText: string;
   recoverableAssistantMsg: ChatMessage | null;
   stalledAssistantMsg: ChatMessage | null;
   autoResumeSecondsLeft: number;
@@ -627,8 +624,9 @@ function formatSessionTime(timestamp: number | string): string {
 }
 
 .panel-meta {
-  font-size: 10px;
-  color: rgba(139, 148, 158, 0.6);
+  font-size: 11px;
+  color: rgba(139, 148, 158, 0.5);
+  letter-spacing: 0.02em;
 }
 
 .panel-meta.warn {
@@ -962,6 +960,11 @@ function formatSessionTime(timestamp: number | string): string {
   cursor: not-allowed;
 }
 
+.chat-composer {
+  flex-shrink: 0;
+  padding: 0 12px 12px;
+}
+
 .pending-queue {
   margin-bottom: 10px;
   border: 1px solid rgba(210, 153, 34, 0.35);
@@ -1122,6 +1125,7 @@ function formatSessionTime(timestamp: number | string): string {
   flex-direction: column;
   gap: 4px;
   margin-top: 4px;
+  padding-bottom: 8px;
 }
 
 .chat-status-row {
@@ -1134,16 +1138,6 @@ function formatSessionTime(timestamp: number | string): string {
   min-height: 20px;
   flex: 1;
   min-width: 0;
-}
-
-.chat-hint,
-.chat-running {
-  font-size: 11px;
-  color: rgba(139, 148, 158, 0.6);
-}
-
-.chat-running {
-  color: #58a6ff;
 }
 
 .chat-error {
