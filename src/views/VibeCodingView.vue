@@ -377,6 +377,7 @@ import { useInputPrompt } from "../composables/useInputPrompt";
 import { useEditorPanel } from "../composables/useEditorPanel";
 import { useSessionManager } from "../composables/useSessionManager";
 import { useProjectMemory } from "../composables/useProjectMemory";
+import { ESCAPE_DISMISS_PRIORITY, registerEscapeDismiss } from "../composables/useEscapeDismiss";
 import {
   buildAgentPromptForProfile,
   enrichAgentUserPrompt,
@@ -2082,6 +2083,38 @@ function hideQuoteButtonNow() {
   pendingQuote.value = null;
   quoteHiddenAt = Date.now();
 }
+
+registerEscapeDismiss(() => contextMenu.value.show, hideContextMenu, ESCAPE_DISMISS_PRIORITY.CONTEXT_MENU);
+registerEscapeDismiss(
+  () => gitFileContextMenu.value.show,
+  hideGitFileContextMenu,
+  ESCAPE_DISMISS_PRIORITY.CONTEXT_MENU,
+);
+registerEscapeDismiss(projectMemoryOpen, closeProjectMemoryEditor, ESCAPE_DISMISS_PRIORITY.PROJECT_MEMORY);
+registerEscapeDismiss(sessionPickerOpen, closeSessionPicker, ESCAPE_DISMISS_PRIORITY.SESSION_PICKER);
+registerEscapeDismiss(
+  mentionOpen,
+  () => {
+    mentionOpen.value = false;
+  },
+  ESCAPE_DISMISS_PRIORITY.MENTION,
+);
+registerEscapeDismiss(
+  showTokenDetail,
+  () => {
+    showTokenDetail.value = false;
+  },
+  ESCAPE_DISMISS_PRIORITY.TOKEN_DETAIL,
+);
+registerEscapeDismiss(projectHistoryOpen, closeProjectHistory, ESCAPE_DISMISS_PRIORITY.PROJECT_HISTORY);
+registerEscapeDismiss(showQuoteButton, hideQuoteButtonNow, ESCAPE_DISMISS_PRIORITY.QUOTE_BUTTON);
+registerEscapeDismiss(
+  () => Boolean(quotedMessage.value),
+  () => {
+    quotedMessage.value = null;
+  },
+  ESCAPE_DISMISS_PRIORITY.QUOTED_PREVIEW,
+);
 
 function startNewSession() {
   if (chatSending.value || !projectPath.value.trim()) return;
@@ -4061,22 +4094,6 @@ function onGlobalKeydown(e: KeyboardEvent) {
     e.preventDefault();
     startNewSession();
     return;
-  }
-  if (e.key === "Escape") {
-    // 优先关闭最顶层弹窗（按z-index层级从高到低）
-    if (contextMenu.value.show) {
-      e.preventDefault();
-      hideContextMenu();
-    } else if (sessionPickerOpen.value) {
-      e.preventDefault();
-      closeSessionPicker();
-    } else if (mentionOpen.value) {
-      e.preventDefault();
-      mentionOpen.value = false;
-    } else if (projectHistoryOpen.value) {
-      e.preventDefault();
-      projectHistoryOpen.value = false;
-    }
   }
 }
 

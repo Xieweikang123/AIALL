@@ -6,19 +6,26 @@ export function formatFetchError(error: unknown, fallback: string): string {
   if (/unexpected end of json input/i.test(msg) || /failed to execute 'json'/i.test(msg)) {
     return "后端无有效响应，请确认开发服务已启动";
   }
+  if (/unexpected token '<'/i.test(msg) || /not valid json/i.test(msg)) {
+    return "后端返回 HTML 而非 JSON，请重启本地服务（npm run dev 或 npm run sidecar）";
+  }
   if (/failed to fetch|networkerror|network error/i.test(msg)) {
     return "无法连接后端服务，请检查网络或开发服务是否已启动";
   }
   return msg.trim() || fallback;
 }
 
-async function readJsonResponse<T>(response: Response): Promise<T> {
+export async function readJsonResponse<T>(response: Response): Promise<T> {
   const text = await response.text();
   if (!text.trim()) {
     if (response.status >= 500) {
       throw new Error(`后端服务未启动或已崩溃（HTTP ${response.status}），请运行 npm run dev 重启`);
     }
     throw new Error(`后端返回空响应（HTTP ${response.status}）`);
+  }
+  const trimmed = text.trimStart();
+  if (trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html") || trimmed.startsWith("<")) {
+    throw new Error("后端返回 HTML 而非 JSON，请重启本地服务（npm run dev 或 npm run sidecar）");
   }
   try {
     return JSON.parse(text) as T;

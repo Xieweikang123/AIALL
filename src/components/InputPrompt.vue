@@ -27,9 +27,11 @@
 
 <script setup lang="ts">
 import { nextTick, ref, watch } from "vue";
+import { ESCAPE_DISMISS_PRIORITY, registerEscapeDismiss } from "../composables/useEscapeDismiss";
 import { useInputPrompt } from "../composables/useInputPrompt";
 
 const inputState = useInputPrompt();
+registerEscapeDismiss(inputState.show, () => inputState.onCancel(), ESCAPE_DISMISS_PRIORITY.MODAL);
 const inputRef = ref<HTMLInputElement | null>(null);
 const inputValue = ref("");
 

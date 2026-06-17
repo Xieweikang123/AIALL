@@ -24,8 +24,10 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from "vue";
 import { useConfirm } from "../composables/useConfirm";
+import { ESCAPE_DISMISS_PRIORITY, registerEscapeDismiss } from "../composables/useEscapeDismiss";
 
 const confirmState = useConfirm();
+registerEscapeDismiss(confirmState.show, () => confirmState.onCancel(), ESCAPE_DISMISS_PRIORITY.MODAL);
 const popupRef = ref<HTMLElement | null>(null);
 const popupPosition = ref({ x: 0, y: 0 });
 
