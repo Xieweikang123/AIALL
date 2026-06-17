@@ -2,7 +2,6 @@ import { createRouter, createWebHashHistory, RouteRecordRaw } from "vue-router";
 import AiConfigView from "../views/AiConfigView.vue";
 import ChatView from "../views/ChatView.vue";
 import IconTemplatesView from "../views/IconTemplatesView.vue";
-import VibeCodingView from "../views/VibeCodingView.vue";
 
 const routes: RouteRecordRaw[] = [
   {
@@ -27,7 +26,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: "/vibe-coding",
     name: "VibeCoding",
-    component: VibeCodingView,
+    component: () => import("../views/VibeCodingView.vue"),
   },
 ];
 

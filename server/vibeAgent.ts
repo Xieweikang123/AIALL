@@ -48,6 +48,7 @@ import {
   formatProjectContextForPrompt,
   invalidateProjectContextCache,
 } from "./vibeProjectContext";
+import { formatProjectMemoryForPrompt, readProjectMemory } from "./vibeProjectMemory";
 import {
   applyUniquePatch,
   grepInProject,
@@ -1106,13 +1107,21 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     }
   }
 
+  const projectMemoryResult = await readProjectMemory(projectRoot);
+  const projectMemoryBlock =
+    projectMemoryResult.ok && projectMemoryResult.content.trim()
+      ? formatProjectMemoryForPrompt(projectMemoryResult.content, projectMemoryResult.truncated)
+      : "";
+
   const systemPrompt =
     (isAsk
       ? buildAskSystemPrompt(projectRoot, openFilePath, openFileSnippet, model)
       : isPlan
       ? buildPlanSystemPrompt(projectRoot, openFilePath, openFileSnippet, model)
       : buildSystemPrompt(projectRoot, openFilePath, model) +
-        (readOnlyBuildRun ? buildConsultativeBuildHint() : "")) + projectContextBlock;
+        (readOnlyBuildRun ? buildConsultativeBuildHint() : "")) +
+    projectContextBlock +
+    projectMemoryBlock;
 
   const writeStage = isAsk || isPlan || readOnlyBuildRun ? null : createWriteStage();
   const readCache = new Map<string, string>();
@@ -1142,7 +1151,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     mode,
     systemPrompt,
     history: historyForDisplay(params.history),
-    projectContext: projectContextBlock || undefined,
+    projectContext: [projectContextBlock, projectMemoryBlock].filter(Boolean).join("") || undefined,
     ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
     model,
     ...(openFileRel ? { openFile: openFileRel } : {}),

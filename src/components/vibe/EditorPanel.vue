@@ -68,9 +68,14 @@
     </div>
 
     <div v-if="!activeFilePath" class="editor-empty">
-      <div class="editor-empty-icon" aria-hidden="true">📂</div>
+      <div class="editor-empty-visual" aria-hidden="true">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Z" stroke="currentColor" stroke-width="1.2" />
+          <path d="M14 2v6h6M10 13h4M10 17h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
+        </svg>
+      </div>
       <p class="editor-empty-title">从左侧选择文件开始编辑</p>
-      <p class="editor-empty-hint">支持多标签、Diff 对比、Ctrl+S 保存</p>
+      <p class="editor-empty-hint">支持多标签 · Diff 对比 · Ctrl+S 保存</p>
       <button type="button" class="editor-action-btn collapse-btn" @click="$emit('collapse-editor')">收起编辑器</button>
     </div>
 
@@ -167,7 +172,7 @@ defineExpose({ editorRef });
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: var(--bg-primary, #1e1e1e);
+  background: rgba(2, 6, 23, 0.55);
   overflow: hidden;
 }
 
@@ -176,8 +181,10 @@ defineExpose({ editorRef });
   align-items: center;
   justify-content: space-between;
   padding: 0 8px;
-  height: 36px;
-  border-bottom: 1px solid var(--border-color, #333);
+  height: 38px;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  background: rgba(11, 18, 32, 0.5);
+  backdrop-filter: blur(8px);
   flex-shrink: 0;
 }
 
@@ -194,29 +201,38 @@ defineExpose({ editorRef });
   display: none;
 }
 
+.editor-empty.error {
+  color: #f85149;
+  font-size: 13px;
+  padding: 16px;
+  text-align: center;
+}
+
 .editor-tab {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 8px;
+  padding: 5px 10px;
   font-size: 12px;
   border: none;
   background: none;
-  color: var(--text-secondary, #999);
+  color: rgba(255, 255, 255, 0.45);
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: 6px 6px 0 0;
   white-space: nowrap;
-  max-width: 160px;
+  max-width: 180px;
+  transition: color 0.15s ease, background 0.15s ease;
 }
 
 .editor-tab:hover {
-  background: var(--bg-tertiary, #333);
-  color: var(--text-primary, #fff);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.85);
 }
 
 .editor-tab.active {
-  background: var(--bg-tertiary, #333);
-  color: var(--text-primary, #fff);
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.95);
+  box-shadow: inset 0 -2px 0 #58a6ff;
 }
 
 .editor-tab.dirty .editor-tab-name {
@@ -329,26 +345,35 @@ defineExpose({ editorRef });
   align-items: center;
   justify-content: center;
   flex: 1;
-  gap: 8px;
-  color: var(--text-secondary, #999);
+  gap: 10px;
+  padding: 24px;
+  color: rgba(255, 255, 255, 0.45);
 }
 
-.editor-empty.error {
-  color: var(--error-color, #f85149);
-}
-
-.editor-empty-icon {
-  font-size: 32px;
+.editor-empty-visual {
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.35);
+  margin-bottom: 4px;
 }
 
 .editor-empty-title {
-  font-size: 13px;
-  font-weight: 500;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.72);
 }
 
 .editor-empty-hint {
-  font-size: 11px;
-  color: var(--text-tertiary, #666);
+  margin: 0;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.38);
 }
 
 .code-editor {

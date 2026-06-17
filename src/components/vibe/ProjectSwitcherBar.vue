@@ -7,7 +7,7 @@
         type="button"
         class="project-tab"
         :class="{ active: isActive(item.path), loading: loadingTree && isActive(item.path) }"
-        :disabled="loadingTree && !isActive(item.path)"
+        :disabled="loadingTree && !isActive(item.path) || (chatSending && !isActive(item.path))"
         :title="item.path"
         @click="$emit('switch-project', item.path)"
       >
@@ -28,7 +28,7 @@
     <button
       type="button"
       class="project-tab-add"
-      :disabled="pickingFolder || loadingTree"
+      :disabled="pickingFolder || loadingTree || chatSending"
       title="打开新项目"
       @click="$emit('open-new-project')"
     >
@@ -38,7 +38,7 @@
 </template>
 
 <script setup lang="ts">
-import { watch } from "vue";
+import { watch, withDefaults } from "vue";
 import type { ProjectHistoryEntry } from "../../services/vibeProjectHistory";
 
 interface Props {
@@ -46,9 +46,12 @@ interface Props {
   currentPath: string;
   loadingTree: boolean;
   pickingFolder: boolean;
+  chatSending?: boolean;
 }
 
-const props = defineProps<Props>();
+const props = withDefaults(defineProps<Props>(), {
+  chatSending: false,
+});
 
 defineEmits<{
   (e: "switch-project", path: string): void;
@@ -72,10 +75,11 @@ function isActive(path: string): boolean {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 16px;
-  background: var(--bg-primary, #0b1220);
-  border-bottom: 1px solid var(--border, rgba(255,255,255,0.08));
-  height: 32px;
+  padding: 0 12px;
+  background: rgba(11, 18, 32, 0.6);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  height: 34px;
   flex-shrink: 0;
   overflow: hidden;
 }
@@ -98,28 +102,29 @@ function isActive(path: string): boolean {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 10px;
-  border: none;
-  border-radius: 4px;
+  padding: 4px 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
   background: none;
-  color: var(--muted, rgba(255,255,255,0.55));
+  color: rgba(255, 255, 255, 0.5);
   font-size: 12px;
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
   max-width: 200px;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
-.project-tab:hover {
+.project-tab:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.06);
-  color: var(--text, rgba(255,255,255,0.92));
+  color: rgba(255, 255, 255, 0.88);
 }
 
 .project-tab.active {
-  background: rgba(31, 111, 235, 0.12);
-  color: var(--text, rgba(255,255,255,0.92));
-  font-weight: 500;
+  background: rgba(31, 111, 235, 0.14);
+  border-color: rgba(31, 111, 235, 0.28);
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 600;
 }
 
 .project-tab.loading {

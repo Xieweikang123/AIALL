@@ -21,14 +21,22 @@
       :current-path="projectPath"
       :loading-tree="loadingTree"
       :picking-folder="pickingFolder"
+      :chat-sending="chatSending"
       @switch-project="openProjectByPath"
       @remove-project="removeRecentProject"
       @open-new-project="handleOpenProject"
     />
 
     <main ref="workspaceRef" class="workspace" :class="{ 'no-project': !projectOpened, 'editor-collapsed': editorCollapsed }">
+      <VibeWorkspaceWelcome
+        :show="!projectOpened && !loadingTree"
+        :loading-tree="loadingTree"
+        :picking-folder="pickingFolder"
+        @open-project="handleOpenProject"
+      />
       <FilePanel
         :file-panel-width="filePanelWidth"
+        :loading-tree="loadingTree"
         :git-panel-mode="gitPanelMode"
         :project-opened="projectOpened"
         :search-mode="searchMode"
@@ -110,7 +118,11 @@
           @on-git-file-contextmenu="onGitFileContextMenu"
         />
 
-        <div v-if="gitPanelMode === 'files' && !projectOpened" class="panel-empty">请先打开项目文件夹</div>
+        <div v-if="gitPanelMode === 'files' && !projectOpened" class="panel-empty">
+          <span class="panel-empty-icon" aria-hidden="true">📁</span>
+          <p class="panel-empty-title">尚未打开项目</p>
+          <p class="panel-empty-hint">点击欢迎页或顶部「打开项目」选择文件夹</p>
+        </div>
 
         <div v-else-if="gitPanelMode === 'files' && searchMode === 'content' && contentSearchResults.length" class="file-list">
           <button
@@ -236,10 +248,18 @@
         :chat-input-focused="chatInputFocused"
         :can-switch-to-newer-session="canSwitchToNewerSession"
         :can-switch-to-older-session="canSwitchToOlderSession"
+        :switching-session="switchingSession"
         :chat-panel-style="chatPanelStyle"
         :show-token-detail="showTokenDetail"
         :token-detail-data="tokenDetailData"
         :total-token-usage="totalTokenUsage"
+        :project-memory-open="projectMemoryOpen"
+        :project-memory-draft="projectMemoryDraft"
+        :project-memory-loading="projectMemoryLoading"
+        :project-memory-saving="projectMemorySaving"
+        :project-memory-message="projectMemoryMessage"
+        :project-memory-max-chars="projectMemoryMaxChars"
+        :project-memory-has-content="projectMemoryHasContent"
         @on-chat-drag-enter="onChatDragEnter"
         @on-chat-drag-over="onChatDragOver"
         @on-chat-drag-leave="onChatDragLeave"
@@ -268,190 +288,14 @@
         @stop-agent="stopAgent"
         @send-chat="sendChat"
         @update:show-token-detail="showTokenDetail = $event"
+        @open-project-memory="openProjectMemoryEditor"
+        @close-project-memory="closeProjectMemoryEditor"
+        @save-project-memory="saveProjectMemoryDraft"
+        @update:project-memory-draft="projectMemoryDraft = $event"
       >
         <template #messages>
-            <div v-for="m in chatMessages" :key="m.id" class="msg" :class="m.role" @mouseup="onMessageSelect($event, m)">
-              <div class="msg-avatar" aria-hidden="true">{{ m.role === "user" ? "你" : "AI" }}</div>
-              <div class="msg-body">
-              <div class="msg-head">
-                <div class="msg-role">{{ m.role === "user" ? "你" : "Agent" }}</div>
-                <div v-if="!chatSending" class="msg-toolbar">
-                  <button type="button" class="ghost small" title="复制此消息" @click="copyText(m.content)">
-                    复制
-                  </button>
-                  <button v-if="m.role === 'user'" type="button" class="ghost small" title="编辑此消息" @click="editUserMessage(m.id)">
-                    编辑
-                  </button>
-                  <button type="button" class="ghost small" title="删除本条问答" @click="undoExchange(m.id, $event)">
-                    撤销
-                  </button>
-                  <button
-                    v-if="m.role === 'user'"
-                    type="button"
-                    class="ghost small"
-                    title="从此问题重新生成"
-                    :disabled="!configReady || !projectOpened"
-                    @click="resendFromMessage(m.id)"
-                  >
-                    重发
-                  </button>
-                  <button
-                    v-if="canResumeAgentRun(m)"
-                    type="button"
-                    class="ghost small resume-btn"
-                    title="从断点继续运行，保留已完成步骤"
-                    :disabled="!configReady || !projectOpened || chatSending"
-                    @click="resumeAgentRun(m.id)"
-                  >
-                    恢复运行
-                  </button>
-                </div>
-              </div>
-              <div
-                v-if="m.role === 'assistant' && isAssistantStalled(m)"
-                class="agent-recovery-banner agent-stall-banner"
-              >
-                <span class="agent-recovery-text">运行似乎已卡住（长时间无进展），可停止或恢复运行。</span>
-                <div class="agent-recovery-actions">
-                  <button type="button" class="secondary compact" @click="stopAgent">停止</button>
-                  <button
-                    type="button"
-                    class="secondary compact"
-                    :disabled="!configReady || !projectOpened"
-                    @click="forceRecoverStalledRun(m.id)"
-                  >
-                    恢复运行
-                  </button>
-                </div>
-              </div>
-              <div
-                v-else-if="m.role === 'assistant' && canResumeAgentRun(m)"
-                class="agent-recovery-banner"
-              >
-                <span class="agent-recovery-text">
-                  {{ recoverableAgentErrorHint(m, m.agentFailureReason || m.content || '连接中断') }}
-                </span>
-                <button
-                  type="button"
-                  class="secondary compact"
-                  :disabled="!configReady || !projectOpened || chatSending"
-                  @click="resumeAgentRun(m.id)"
-                >
-                  恢复运行
-                </button>
-              </div>
-              <AgentMessage
-                v-if="m.role === 'assistant' && hasAgentActivity(m)"
-                :msg="m"
-                :is-agent-running="isAgentRunning"
-                :agent-ui-tick="agentUiTick"
-                :patch-assistant-msg="patchAssistantMsg"
-                :schedule-persist-chat="schedulePersistChat"
-                :message-display-content="messageDisplayContent"
-                :show-jump="chainJumpVisible[m.id]"
-                @jump-latest="jumpChainToLatest(m.id)"
-              />
-              <div
-                v-if="m.role === 'user' && userMessageImages(m).length"
-                class="msg-user-images"
-              >
-                <img
-                  v-for="(url, imageIdx) in userMessageImages(m)"
-                  :key="`${m.id}-img-${imageIdx}`"
-                  :src="url"
-                  alt="发送的图片"
-                  class="msg-user-image"
-                  loading="lazy"
-                />
-              </div>
-              <ChatMarkdown
-                v-if="shouldShowMessageBubble(m, hasAgentActivity(m))"
-                class="msg-answer"
-                :class="{
-                  'msg-answer--streaming': m.role === 'assistant' && isAgentRunning(m),
-                  'msg-answer--final': m.role === 'assistant' && !isAgentRunning(m),
-                }"
-                :content="messageDisplayContent(m)"
-                :streaming="m.role === 'assistant' && !!m.streaming && isAgentRunning(m)"
-                :interactive="m.role === 'assistant' && !isAgentRunning(m)"
-                @select-option="handleAiOptionSelect"
-              />
-              <div
-                v-if="
-                  m.role === 'assistant' &&
-                  !messageDisplayContent(m) &&
-                  (m.status || isAgentRunning(m)) &&
-                  !(isAgentRunning(m) && hasAgentActivity(m))
-                "
-                class="msg-status"
-              >
-                <span v-if="isAgentRunning(m)" class="status-pulse" aria-hidden="true" />
-                <span class="msg-status-text">
-                  {{ agentStatusDisplay(m) || (m.chatMode === 'ask' ? '思考中…' : m.chatMode === 'plan' ? '规划中…' : 'Agent 运行中…') }}
-                </span>
-              </div>
-              <div
-                v-if="m.role === 'assistant' && m.turnFileDiffs && Object.keys(m.turnFileDiffs).length"
-                class="inline-diff-list"
-              >
-                <div
-                  v-for="relPath in Object.keys(m.turnFileDiffs)"
-                  :key="relPath"
-                  class="inline-diff-card"
-                >
-                  <div class="inline-diff-head">
-                    <span class="inline-diff-path">{{ relPath }}</span>
-                    <span v-if="m.turnFileDiffs[relPath].deleted" class="inline-diff-tag delete">删除</span>
-                    <span v-else class="inline-diff-tag modify">修改</span>
-                    <button
-                      type="button"
-                      class="ghost small"
-                      :disabled="!projectOpened"
-                      @click="previewAgentFile(m.id, relPath)"
-                    >
-                      编辑器预览
-                    </button>
-                    <button
-                      type="button"
-                      class="ghost small diff-toggle-btn"
-                      @click="m._expandedDiffs = m._expandedDiffs || {}; m._expandedDiffs[relPath] = !m._expandedDiffs[relPath]"
-                    >
-                      {{ m._expandedDiffs?.[relPath] ? '收起' : '展开' }}
-                    </button>
-                  </div>
-                  <div class="inline-diff-wrap" :class="{ open: m._expandedDiffs?.[relPath] }">
-                    <div class="inline-diff-col">
-                      <div class="inline-diff-label">修改前</div>
-                      <pre class="trace-pre compact">{{ truncateDiffPreview(m.turnFileDiffs[relPath].before || "（空 / 新文件）") }}</pre>
-                    </div>
-                    <div class="inline-diff-col">
-                      <div class="inline-diff-label">{{ m.turnFileDiffs[relPath].deleted ? "删除后" : "修改后" }}</div>
-                      <pre class="trace-pre compact">{{ truncateDiffPreview(m.turnFileDiffs[relPath].deleted ? "（文件已删除）" : m.turnFileDiffs[relPath].after) }}</pre>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div
-                v-if="
-                  m.role === 'assistant' &&
-                  !m.streaming &&
-                  (m.writtenFiles?.length)
-                "
-                class="msg-actions"
-              >
-                <span
-                  v-if="m.writtenFiles?.length && !m.reverted && !m.rejected && m.chatMode === 'build'"
-                  class="applied-badge"
-                >
-                  已写入 {{ m.writtenFiles.length }} 个文件
-                </span>
-
-                <span v-else-if="m.reverted" class="reverted-badge">已回滚</span>
-                <span v-else-if="m.rejected" class="rejected-badge">已拒绝</span>
-              </div>
-            </div>
-            </div>
-  </template>
+          <VibeChatMessages />
+        </template>
         <template #composer>
           <ChatComposerEditor
             ref="composerRef"
@@ -506,13 +350,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from "vue";
 import "../styles/vibe-coding.scss";
 import type { AgentLogLineItem } from "../components/AgentActivityLogStream.vue";
 import { appendStatusDetail, truncateDiffPreview, cleanStatusLogText, formatCharCount, isNetworkError, fileName, genId, isActiveModelStep, hasAgentProcessSteps, shouldShowMessageBubble, entryToNode, formatToolMeta, syncRoundGroupsPatch } from "../utils/vibeHelpers";
-import AgentMessage from "../components/AgentMessage.vue";
 import ChatComposerEditor from "../components/ChatComposerEditor.vue";
-import ChatMarkdown from "../components/ChatMarkdown.vue";
 import ConfirmPopup from "../components/ConfirmPopup.vue";
 import InputPrompt from "../components/InputPrompt.vue";
 import FileTreeNode, { type TreeNode } from "../components/FileTreeNode.vue";
@@ -522,6 +364,9 @@ import FilePanel from "../components/vibe/FilePanel.vue";
 import GitPanel from "../components/vibe/GitPanel.vue";
 import EditorPanel from "../components/vibe/EditorPanel.vue";
 import ChatPanel from "../components/vibe/ChatPanel.vue";
+import VibeChatMessages from "../components/vibe/VibeChatMessages.vue";
+import VibeWorkspaceWelcome from "../components/vibe/VibeWorkspaceWelcome.vue";
+import { vibeChatMessageContextKey, type VibeChatMessageContext } from "../composables/vibeChatMessageContext";
 import { useConfirm } from "../composables/useConfirm";
 import { useFileDrag } from "../composables/useFileDrag";
 import { usePanelLayout } from "../composables/usePanelLayout";
@@ -529,6 +374,7 @@ import { useGitPanel, type GitFileDiff } from "../composables/useGitPanel";
 import { useInputPrompt } from "../composables/useInputPrompt";
 import { useEditorPanel } from "../composables/useEditorPanel";
 import { useSessionManager } from "../composables/useSessionManager";
+import { useProjectMemory } from "../composables/useProjectMemory";
 import {
   buildAgentPromptForProfile,
   enrichAgentUserPrompt,
@@ -817,6 +663,19 @@ let agentConnectHasImages = false;
 
 const projectPath = ref("");
 const projectOpened = ref(false);
+
+const {
+  projectMemoryOpen,
+  projectMemoryDraft,
+  projectMemoryLoading,
+  projectMemorySaving,
+  projectMemoryMessage,
+  projectMemoryMaxChars,
+  projectMemoryHasContent,
+  openProjectMemoryEditor,
+  closeProjectMemoryEditor,
+  saveProjectMemoryDraft,
+} = useProjectMemory(projectPath, projectOpened);
 const loadingTree = ref(false);
 const pickingFolder = ref(false);
 const treeError = ref("");
@@ -896,6 +755,7 @@ function loadChatMode(): VibeChatMode {
 const chatMode = ref<VibeChatMode>(loadChatMode());
 const chatMessages = ref<ChatMessage[]>([]);
 const chatSending = ref(false);
+const switchingSession = ref(false);
 const chatError = ref("");
 const searchInputRef = ref<HTMLInputElement | null>(null);
 const workspaceRef = ref<HTMLElement | null>(null);
@@ -1221,14 +1081,24 @@ const recoverableAssistantMsg = computed(() => {
   return null;
 });
 
-const stalledAssistantMsg = computed(() => {
-  if (!chatSending.value || agentLastProgressAt <= 0) return null;
-  void agentUiTick.value;
-  if (!isAgentRunStalled(agentLastProgressAt, chatSending.value)) return null;
+const stalledAssistantMsg = ref<ChatMessage | null>(null);
+
+function refreshStalledAssistantMsg() {
+  if (!chatSending.value || agentLastProgressAt <= 0) {
+    stalledAssistantMsg.value = null;
+    return;
+  }
+  if (!isAgentRunStalled(agentLastProgressAt, chatSending.value)) {
+    stalledAssistantMsg.value = null;
+    return;
+  }
   const msg = findRunningAssistantMsg();
-  if (!msg || !hasRecoverableAgentProgress(msg)) return null;
-  return msg;
-});
+  if (!msg || !hasRecoverableAgentProgress(msg)) {
+    stalledAssistantMsg.value = null;
+    return;
+  }
+  stalledAssistantMsg.value = msg;
+}
 
 function isAssistantStalled(msg: ChatMessage): boolean {
   return Boolean(stalledAssistantMsg.value && stalledAssistantMsg.value.id === msg.id);
@@ -1316,7 +1186,7 @@ const {
   deleteSelectedItem, showGitFileDiff, openGitLogFile, openDiffPreview,
   toggleDiffMode, toggleDir, findNode, findNodeByKey, normalizePathKey,
   joinProjectPath, resolveFullPathFromRel, storeFileDiff, getFileDiff, setFileDiff,
-  findOpenTab, syncActiveTabToCache, ensureCanLeaveCurrentTab,
+  findOpenTab, syncActiveTabToCache, ensureCanLeaveCurrentTab, ensureCanLeaveAllOpenTabs,
   syncEditorPanelForOpenFiles, parentDirForCreate, selectTreeItem,
   onEditorChange, onEditorSelect,   askAiWithCode, activeFileRelativePath,
   syncEditorAfterAgentFileChange,
@@ -1442,6 +1312,7 @@ function startAgentUiTick() {
   agentConnectStartedAt = Date.now();
   agentUiTickTimer = setInterval(() => {
     agentUiTick.value += 1;
+    refreshStalledAssistantMsg();
     checkAgentStall();
   }, 1000);
 }
@@ -1673,6 +1544,7 @@ function stopAgentUiTick() {
     clearInterval(agentUiTickTimer);
     agentUiTickTimer = null;
   }
+  stalledAssistantMsg.value = null;
 }
 
 const STREAM_DELTA_FLUSH_MS = 80;
@@ -1791,6 +1663,16 @@ function appendStatusLog(msg: ChatMessage, line: string) {
 const statusLogScrollRefs = new Map<string, HTMLElement>();
 const chainScrollPinned = new Map<string, boolean>();
 const chainJumpVisible = reactive<Record<string, boolean>>({});
+const expandedDiffs = reactive<Record<string, Record<string, boolean>>>({});
+
+function toggleExpandedDiff(messageId: string, relPath: string) {
+  if (!expandedDiffs[messageId]) expandedDiffs[messageId] = {};
+  expandedDiffs[messageId][relPath] = !expandedDiffs[messageId][relPath];
+}
+
+function isDiffExpanded(messageId: string, relPath: string): boolean {
+  return Boolean(expandedDiffs[messageId]?.[relPath]);
+}
 
 function bindStatusLogScroll(el: HTMLElement | null, msgId: string) {
   if (el) {
@@ -2218,18 +2100,23 @@ function switchSession(sessionId: string) {
   }
   persistChatNow();
   const gen = ++switchSessionGeneration;
+  switchingSession.value = true;
   void (async () => {
-    const project = projectPath.value.trim();
-    await ensureProjectChatLoadedFromDisk(project, sessionId);
-    if (gen !== switchSessionGeneration) return;
-    const messages = switchVibeChatSession(project, sessionId);
-    chatMessages.value = normalizeChatMessages(messages);
-    activeSessionId.value = sessionId;
-    chatError.value = "";
-    refreshSessionList();
-    closeSessionPicker();
-    maybeAutoResumeLastRecoverableAssistant();
-    await scrollChatToBottom(true);
+    try {
+      const project = projectPath.value.trim();
+      await ensureProjectChatLoadedFromDisk(project, sessionId);
+      if (gen !== switchSessionGeneration) return;
+      const messages = switchVibeChatSession(project, sessionId);
+      chatMessages.value = normalizeChatMessages(messages);
+      activeSessionId.value = sessionId;
+      chatError.value = "";
+      refreshSessionList();
+      closeSessionPicker();
+      maybeAutoResumeLastRecoverableAssistant();
+      await scrollChatToBottom(true);
+    } finally {
+      if (gen === switchSessionGeneration) switchingSession.value = false;
+    }
   })();
 }
 
@@ -2435,6 +2322,24 @@ async function openProjectByPath(dirPath: string) {
     return;
   }
 
+  const normalizeProjectPath = (p: string) =>
+    p.trim().replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
+
+  const previousPath = projectPath.value.trim();
+  if (
+    projectOpened.value &&
+    previousPath &&
+    normalizeProjectPath(previousPath) === normalizeProjectPath(normalized)
+  ) {
+    return;
+  }
+
+  if (chatSending.value) {
+    interruptAgentRun();
+  }
+
+  if (!(await ensureCanLeaveAllOpenTabs())) return;
+
   const t0 = performance.now();
   const timings: string[] = [];
   const log = (label: string) => {
@@ -2451,12 +2356,16 @@ async function openProjectByPath(dirPath: string) {
     }).catch(() => {});
   };
 
-  const previousPath = projectPath.value.trim();
-  if (projectOpened.value && previousPath && previousPath !== normalized) {
+  const previousPathForPersist = projectPath.value.trim();
+  if (projectOpened.value && previousPathForPersist) {
     pendingPromptQueue.value = [];
     persistPendingQueue();
-    // 取消之前的 sync，避免磁盘 I/O 争用
     cancelPendingSync();
+    if (saveChatTimer) {
+      clearTimeout(saveChatTimer);
+      saveChatTimer = null;
+    }
+    persistChatNow(previousPathForPersist, { flushStore: true });
   }
   log("persist-prev");
 
@@ -4206,6 +4115,41 @@ watch(gitPanelMode, (mode) => {
   localStorage.setItem(GIT_PANEL_MODE_KEY, mode);
 });
 
+provide(vibeChatMessageContextKey, {
+  chatMessages,
+  chatSending,
+  agentUiTick,
+  configReady,
+  projectOpened,
+  chainJumpVisible,
+  expandedDiffs,
+  onMessageSelect,
+  copyText,
+  editUserMessage,
+  undoExchange,
+  resendFromMessage,
+  canResumeAgentRun,
+  resumeAgentRun,
+  isAssistantStalled,
+  stopAgent,
+  forceRecoverStalledRun,
+  recoverableAgentErrorHint,
+  hasAgentActivity,
+  isAgentRunning,
+  patchAssistantMsg,
+  schedulePersistChat,
+  messageDisplayContent,
+  jumpChainToLatest,
+  userMessageImages,
+  shouldShowMessageBubble,
+  handleAiOptionSelect,
+  agentStatusDisplay,
+  previewAgentFile,
+  truncateDiffPreview,
+  toggleExpandedDiff,
+  isDiffExpanded,
+} as VibeChatMessageContext);
+
 onMounted(() => {
   reloadAiConfig();
   refreshProjectHistoryList();
@@ -4262,6 +4206,16 @@ onBeforeUnmount(() => {
   if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
   if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
   if (gitRefreshDebounceTimer) clearTimeout(gitRefreshDebounceTimer);
+  stopAgentUiTick();
+  clearRetryTimer();
+  if (syncStoreTimer) {
+    clearTimeout(syncStoreTimer);
+    syncStoreTimer = null;
+  }
+  if (sessionCopyHintTimer) {
+    clearTimeout(sessionCopyHintTimer);
+    sessionCopyHintTimer = null;
+  }
   cancelAutoResume();
   persistChatNow(undefined, { flushStore: true });
   stopFileWatcherForProject();
@@ -4555,10 +4509,11 @@ onBeforeUnmount(() => {
   display: flex;
   min-height: 0;
   overflow: hidden;
+  position: relative;
 }
 
 .workspace.no-project {
-  opacity: 0.85;
+  opacity: 1;
 }
 
 .workspace.editor-collapsed .chat-panel.chat-expanded {

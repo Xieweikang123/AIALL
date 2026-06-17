@@ -1,6 +1,12 @@
 <template>
   <header class="app-toolbar">
     <div class="toolbar-brand">
+      <div class="toolbar-logo" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+          <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+          <path d="M12 12 3 7m9-5 9 5M12 12v10" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
+        </svg>
+      </div>
       <h1 class="title">Vibe Coding</h1>
     </div>
     <div class="toolbar-sep" />
@@ -204,8 +210,9 @@ function formatSessionTime(iso: string): string {
   align-items: center;
   gap: 12px;
   padding: 0 16px;
-  background: var(--bg-primary);
-  border-bottom: 1px solid var(--border-color);
+  background: rgba(11, 18, 32, 0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
   height: 44px;
   flex-shrink: 0;
 }
@@ -213,7 +220,20 @@ function formatSessionTime(iso: string): string {
 .toolbar-brand {
   display: flex;
   align-items: center;
+  gap: 8px;
   flex-shrink: 0;
+}
+
+.toolbar-logo {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(31, 111, 235, 0.3), rgba(130, 80, 223, 0.25));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #91beff;
 }
 
 .title {

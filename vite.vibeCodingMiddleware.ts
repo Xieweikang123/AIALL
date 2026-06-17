@@ -9,6 +9,7 @@ import { readJsonBody, sendJson, sendSseEvent, sendSseComment, sendSseHeaders } 
 import { chatCompletionWithTools, resolveChatEndpoint } from "./server/aiForward";
 import { runVibeAgent } from "./server/vibeAgent";
 import { buildProjectContext } from "./server/vibeProjectContext";
+import { readProjectMemory, writeProjectMemory } from "./server/vibeProjectMemory";
 import {
   grepInProject,
   listDirectory,
@@ -898,6 +899,50 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       res.end();
     } catch {
       // ignore
+    }
+  });
+
+  // GET/POST /backend/vibe/project-memory
+  middlewares.use("/backend/vibe/project-memory", async (req, res) => {
+    try {
+      if (req.method === "GET") {
+        const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+        const projectPath = (url.searchParams.get("projectPath") || "").trim();
+        if (!projectPath) {
+          sendJson(res, 400, { ok: false, error: "缺少 projectPath" });
+          return;
+        }
+        const result = await readProjectMemory(projectPath);
+        if (!result.ok) {
+          sendJson(res, 400, result);
+          return;
+        }
+        sendJson(res, 200, result);
+        return;
+      }
+
+      if (req.method === "POST") {
+        const body = (await readJsonBody(req)) as { projectPath?: string; content?: string };
+        const projectPath = body.projectPath?.trim() || "";
+        if (!projectPath) {
+          sendJson(res, 400, { ok: false, error: "缺少 projectPath" });
+          return;
+        }
+        const result = await writeProjectMemory(projectPath, body.content ?? "");
+        if (!result.ok) {
+          sendJson(res, 400, result);
+          return;
+        }
+        sendJson(res, 200, result);
+        return;
+      }
+
+      sendJson(res, 405, { ok: false, error: "仅支持 GET / POST" });
+    } catch (error) {
+      sendJson(res, 500, {
+        ok: false,
+        error: error instanceof Error ? error.message : "项目记忆操作失败",
+      });
     }
   });
 

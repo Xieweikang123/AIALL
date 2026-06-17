@@ -167,6 +167,24 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     return false;
   }
 
+  async function ensureCanLeaveAllOpenTabs(): Promise<boolean> {
+    for (const tab of [...openTabs.value]) {
+      if (!tab.dirty) continue;
+      const name = fileName(tab.path);
+      const save = await confirm(`「${name}」未保存。确定保存？\n\n确定 = 保存后切换\n取消 = 留在当前项目`);
+      if (!save) return false;
+      if (activeFilePath.value !== tab.path) {
+        syncActiveTabToCache();
+        activeFilePath.value = tab.path;
+        fileContent.value = tab.content;
+        fileDirty.value = tab.dirty;
+      }
+      await saveFile();
+      if (fileDirty.value) return false;
+    }
+    return true;
+  }
+
   function findOpenTab(path: string): OpenTab | undefined {
     return openTabs.value.find((tab) => tab.path === path);
   }
@@ -736,6 +754,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     findOpenTab,
     syncActiveTabToCache,
     ensureCanLeaveCurrentTab,
+    ensureCanLeaveAllOpenTabs,
     syncEditorPanelForOpenFiles,
     parentDirForCreate,
     selectTreeItem,

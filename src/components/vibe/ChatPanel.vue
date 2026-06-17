@@ -3,11 +3,12 @@
     ref="chatDropZoneRef"
     class="chat-panel"
     :class="{ 'chat-expanded': editorCollapsed, 'drag-over': isDragging }"
+    aria-label="AI 助手"
     @dragenter="$emit('on-chat-drag-enter', $event)"
     @dragover="$emit('on-chat-drag-over', $event)"
     @dragleave="$emit('on-chat-drag-leave', $event)"
     @drop="$emit('on-chat-drop', $event)"
-    :style="chatPanelStyle"
+    :style="panelStyle"
   >
     <div class="panel-head">
       <div class="panel-head-left">
@@ -110,6 +111,16 @@
       <div class="panel-head-right">
         <button
           type="button"
+          class="ghost small project-memory-btn"
+          :class="{ active: projectMemoryHasContent }"
+          :disabled="!projectOpened || chatSending"
+          title="编辑项目记忆（AI 每次对话自动读取）"
+          @click="$emit('open-project-memory')"
+        >
+          记忆
+        </button>
+        <button
+          type="button"
           class="ghost small"
           :disabled="!projectOpened || chatSending"
           @click="$emit('start-new-session')"
@@ -133,10 +144,19 @@
     </div>
 
     <div ref="chatScrollRef" class="chat-scroll" @scroll="$emit('on-chat-scroll')">
-      <div v-if="!chatMessages.length" class="chat-empty">
-        <div class="chat-empty-icon" aria-hidden="true">🤖</div>
+      <div v-if="switchingSession" class="chat-switching">
+        <span class="chat-switching-spinner" aria-hidden="true">⟳</span>
+        <span>正在加载会话…</span>
+      </div>
+      <div v-else-if="!chatMessages.length" class="chat-empty">
+        <div class="chat-empty-visual" aria-hidden="true">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.2" opacity="0.35" />
+            <path d="M8 10h8M8 14h5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.5" />
+          </svg>
+        </div>
         <p class="chat-empty-title">AI 编程助手</p>
-        <p class="chat-empty-desc">Agent 会探索项目；Build 模式下每次文件修改会立即写入磁盘。输入 <code>@</code> 可引用文件。</p>
+        <p class="chat-empty-desc">Agent 会探索项目；Build 模式下文件修改会立即写入磁盘。输入 <code>@</code> 引用文件。</p>
         <div class="chips">
           <button type="button" class="chip" :disabled="chatSending" @click="$emit('apply-example', '解释这个项目是做什么的')">
             解释项目
@@ -208,6 +228,34 @@
       </div>
       <div class="chat-bottom">
         <div class="chat-status-row">
+          <button
+            v-if="totalTokenUsage"
+            type="button"
+            class="token-usage-btn"
+            :class="{ open: showTokenDetail }"
+            :title="showTokenDetail ? '收起用量详情' : '查看用量详情'"
+            @click="$emit('update:showTokenDetail', !showTokenDetail)"
+          >
+            {{ totalTokenUsage }}
+          </button>
+          <div v-if="showTokenDetail && tokenDetailData" class="token-detail-popover">
+            <div class="token-detail-row">
+              <span>助手回复</span>
+              <span>{{ tokenDetailData.assistantCount }} 条</span>
+            </div>
+            <div v-if="tokenDetailData.totalStreamChars > 0" class="token-detail-row">
+              <span>累计输出</span>
+              <span>{{ formatCharCount(tokenDetailData.totalStreamChars) }}</span>
+            </div>
+            <div v-if="tokenDetailData.maxContextChars > 0" class="token-detail-row">
+              <span>最大上下文</span>
+              <span>{{ formatCharCount(tokenDetailData.maxContextChars) }}</span>
+            </div>
+            <div class="token-detail-row">
+              <span>消息总数</span>
+              <span>{{ tokenDetailData.totalMessages }}</span>
+            </div>
+          </div>
           <span v-if="autoResumeSecondsLeft > 0" class="chat-recovery-hint chat-auto-resume-hint">
             {{ autoResumeSecondsLeft }}s 后自动恢复（可取消）
           </span>
@@ -290,9 +338,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount, withDefaults, type CSSProperties } from "vue";
 import type { VibeChatMode } from "../../services/vibeAgentClient";
 import type { VibeChatSessionMeta } from "../../services/vibeChatStorage";
+import { formatCharCount } from "../../utils/vibeHelpers";
 
 interface ChatMessage {
   id: string;
@@ -316,9 +365,18 @@ interface MentionItem {
   relative: string;
 }
 
+interface TokenDetailData {
+  assistantCount: number;
+  totalStreamChars: number;
+  maxContextChars: number;
+  totalMessages: number;
+}
+
 interface Props {
+  chatPanelStyle?: CSSProperties;
   projectOpened: boolean;
   chatSending: boolean;
+  switchingSession?: boolean;
   chatMessages: ChatMessage[];
   chatMode: VibeChatMode;
   chatError: string;
@@ -351,9 +409,41 @@ interface Props {
   chatInputFocused: boolean;
   canSwitchToNewerSession: boolean;
   canSwitchToOlderSession: boolean;
+  totalTokenUsage?: string;
+  showTokenDetail?: boolean;
+  tokenDetailData?: TokenDetailData | null;
+  projectMemoryOpen?: boolean;
+  projectMemoryDraft?: string;
+  projectMemoryLoading?: boolean;
+  projectMemorySaving?: boolean;
+  projectMemoryMessage?: string;
+  projectMemoryMaxChars?: number;
+  projectMemoryHasContent?: boolean;
 }
 
-const props = defineProps<Props>();
+const props = withDefaults(defineProps<Props>(), {
+  switchingSession: false,
+  totalTokenUsage: "",
+  showTokenDetail: false,
+  tokenDetailData: null,
+  projectMemoryOpen: false,
+  projectMemoryDraft: "",
+  projectMemoryLoading: false,
+  projectMemorySaving: false,
+  projectMemoryMessage: "",
+  projectMemoryMaxChars: 3500,
+  projectMemoryHasContent: false,
+});
+
+const panelStyle = computed(() => {
+  if (props.chatPanelStyle && Object.keys(props.chatPanelStyle).length > 0) {
+    return props.chatPanelStyle;
+  }
+  if (props.editorCollapsed) {
+    return { flex: "1", minWidth: "260px", width: "auto" };
+  }
+  return { width: "360px", flexShrink: "0" };
+});
 
 const emit = defineEmits<{
   (e: "send-chat"): void;
@@ -383,19 +473,17 @@ const emit = defineEmits<{
   (e: "on-chat-drop", event: DragEvent): void;
   (e: "update:chatMode", mode: VibeChatMode): void;
   (e: "update:quotedMessage", value: QuotedMessage | null): void;
+  (e: "update:showTokenDetail", value: boolean): void;
+  (e: "update:projectMemoryDraft", value: string): void;
+  (e: "open-project-memory"): void;
+  (e: "close-project-memory"): void;
+  (e: "save-project-memory"): void;
 }>();
 
 const chatScrollRef = ref<HTMLElement | null>(null);
 const sessionPickerRef = ref<HTMLElement | null>(null);
 const quoteButtonRef = ref<HTMLElement | null>(null);
 const chatDropZoneRef = ref<HTMLElement | null>(null);
-
-const chatPanelStyle = computed(() => {
-  if (props.editorCollapsed) {
-    return { flex: "1", minWidth: "260px", width: "auto" };
-  }
-  return { width: "360px", flexShrink: "0" };
-});
 
 defineExpose({ sessionPickerRef, chatScrollRef });
 
@@ -430,11 +518,16 @@ function formatSessionTime(timestamp: number | string): string {
 
 <style scoped>
 .chat-panel {
+  position: relative;
   display: flex;
   flex-direction: column;
-  background: #0d1117;
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  background: transparent;
   overflow: hidden;
+}
+
+.chat-panel.drag-over {
+  box-shadow: inset 0 0 0 2px rgba(88, 166, 255, 0.45);
+  background: rgba(31, 111, 235, 0.06);
 }
 
 .chat-panel.chat-expanded {
@@ -737,34 +830,47 @@ function formatSessionTime(timestamp: number | string): string {
   align-items: center;
   justify-content: center;
   height: 100%;
-  gap: 12px;
+  gap: 10px;
   text-align: center;
+  padding: 24px 20px;
 }
 
-.chat-empty-icon {
-  font-size: 48px;
+.chat-empty-visual {
+  width: 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(31, 111, 235, 0.15), rgba(130, 80, 223, 0.12));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #91beff;
+  margin-bottom: 4px;
 }
 
 .chat-empty-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  color: rgba(255, 255, 255, 0.92);
   margin: 0;
 }
 
 .chat-empty-desc {
-  font-size: 13px;
-  color: rgba(139, 148, 158, 0.8);
-  max-width: 320px;
-  line-height: 1.5;
+  font-size: 12px;
+  color: rgba(139, 148, 158, 0.85);
+  max-width: 280px;
+  line-height: 1.55;
   margin: 0;
 }
 
 .chat-empty-desc code {
-  background: rgba(255, 255, 255, 0.1);
-  padding: 1px 4px;
-  border-radius: 3px;
-  font-family: monospace;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: #91beff;
 }
 
 .chips {
@@ -772,34 +878,29 @@ function formatSessionTime(timestamp: number | string): string {
   flex-wrap: wrap;
   gap: 8px;
   justify-content: center;
-  margin-top: 8px;
+  margin-top: 12px;
 }
 
 .chip {
-  padding: 6px 12px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 6px 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 999px;
-  color: rgba(255, 255, 255, 0.8);
+  color: rgba(255, 255, 255, 0.78);
   font-size: 12px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .chip:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(88, 166, 255, 0.1);
+  border-color: rgba(88, 166, 255, 0.28);
+  color: #c9e4ff;
 }
 
 .chip:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-}
-
-.msg-list {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
 }
 
 .quote-floating {
@@ -992,10 +1093,15 @@ function formatSessionTime(timestamp: number | string): string {
 }
 
 .chat-status-row {
+  position: relative;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   min-height: 20px;
+  flex: 1;
+  min-width: 0;
 }
 
 .chat-hint,
@@ -1140,5 +1246,172 @@ function formatSessionTime(timestamp: number | string): string {
 .compact {
   padding: 4px 10px;
   font-size: 11px;
+}
+
+.chat-switching {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 48px 16px;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 13px;
+}
+
+.chat-switching-spinner {
+  display: inline-block;
+  animation: chat-switch-spin 0.9s linear infinite;
+}
+
+@keyframes chat-switch-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.token-usage-btn {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.55);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.token-usage-btn:hover,
+.token-usage-btn.open {
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.token-detail-popover {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 20;
+  min-width: 180px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(15, 22, 35, 0.98);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.token-detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.72);
+  padding: 3px 0;
+}
+
+.project-memory-btn.active {
+  color: rgba(120, 190, 255, 0.95);
+  border-color: rgba(120, 190, 255, 0.35);
+}
+
+.project-memory-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(6, 10, 18, 0.72);
+  backdrop-filter: blur(2px);
+}
+
+.project-memory-dialog {
+  width: min(100%, 420px);
+  max-height: calc(100% - 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(15, 22, 35, 0.98);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+.project-memory-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.project-memory-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.project-memory-desc {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.project-memory-close {
+  flex-shrink: 0;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 8px;
+}
+
+.project-memory-editor {
+  flex: 1;
+  min-height: 220px;
+  resize: vertical;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.25);
+  color: rgba(255, 255, 255, 0.88);
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.project-memory-editor:focus {
+  outline: none;
+  border-color: rgba(120, 190, 255, 0.45);
+}
+
+.project-memory-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-memory-counter {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.project-memory-message {
+  flex: 1;
+  font-size: 11px;
+  color: rgba(120, 220, 160, 0.9);
+}
+
+.project-memory-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.project-memory-status {
+  padding: 24px 0;
+  text-align: center;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
 }
 </style>

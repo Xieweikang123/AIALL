@@ -89,18 +89,25 @@
       </div>
     </div>
 
-    <slot></slot>
+    <div class="panel-body">
+      <div v-if="loadingTree" class="panel-loading-overlay" aria-live="polite">
+        <span class="panel-loading-spinner" aria-hidden="true" />
+        <span>正在加载项目…</span>
+      </div>
+      <slot></slot>
+    </div>
   </aside>
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, withDefaults } from "vue";
 import type { GitStatusFile } from "../../services/vibeGitClient";
 
 interface Props {
   filePanelWidth: number;
   gitPanelMode: "files" | "git";
   projectOpened: boolean;
+  loadingTree?: boolean;
   searchMode: "file" | "content";
   searchQuery: string;
   editorCollapsed: boolean;
@@ -109,7 +116,9 @@ interface Props {
   gitStagedFiles: GitStatusFile[];
 }
 
-defineProps<Props>();
+withDefaults(defineProps<Props>(), {
+  loadingTree: false,
+});
 
 const emit = defineEmits<{
   (e: "update:gitPanelMode", mode: "files" | "git"): void;
@@ -131,9 +140,18 @@ defineExpose({ searchInputRef });
 .file-panel {
   display: flex;
   flex-direction: column;
-  background: var(--bg-primary, #1e1e1e);
-  border-right: 1px solid var(--border-color, #333);
+  min-height: 0;
+  background: transparent;
   overflow: hidden;
+}
+
+.panel-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .file-panel-head {

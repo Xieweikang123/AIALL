@@ -1,0 +1,202 @@
+<template>
+  <div class="msg-list">
+    <div
+      v-for="m in ctx.chatMessages.value"
+    :key="m.id"
+    class="msg"
+    :class="m.role"
+    @mouseup="ctx.onMessageSelect($event, m)"
+  >
+    <div class="msg-avatar" aria-hidden="true">{{ m.role === "user" ? "你" : "AI" }}</div>
+    <div class="msg-body">
+      <div class="msg-head">
+        <div class="msg-role">{{ m.role === "user" ? "你" : "Agent" }}</div>
+        <div v-if="!ctx.chatSending.value" class="msg-toolbar">
+          <button type="button" class="ghost small" title="复制此消息" @click="ctx.copyText(m.content)">
+            复制
+          </button>
+          <button v-if="m.role === 'user'" type="button" class="ghost small" title="编辑此消息" @click="ctx.editUserMessage(m.id)">
+            编辑
+          </button>
+          <button type="button" class="ghost small" title="删除本条问答" @click="ctx.undoExchange(m.id, $event)">
+            撤销
+          </button>
+          <button
+            v-if="m.role === 'user'"
+            type="button"
+            class="ghost small"
+            title="从此问题重新生成"
+            :disabled="!ctx.configReady.value || !ctx.projectOpened.value"
+            @click="ctx.resendFromMessage(m.id)"
+          >
+            重发
+          </button>
+          <button
+            v-if="ctx.canResumeAgentRun(m)"
+            type="button"
+            class="ghost small resume-btn"
+            title="从断点继续运行，保留已完成步骤"
+            :disabled="!ctx.configReady.value || !ctx.projectOpened.value || ctx.chatSending.value"
+            @click="ctx.resumeAgentRun(m.id)"
+          >
+            恢复运行
+          </button>
+        </div>
+      </div>
+      <div
+        v-if="m.role === 'assistant' && ctx.isAssistantStalled(m)"
+        class="agent-recovery-banner agent-stall-banner"
+      >
+        <span class="agent-recovery-text">运行似乎已卡住（长时间无进展），可停止或恢复运行。</span>
+        <div class="agent-recovery-actions">
+          <button type="button" class="secondary compact" @click="ctx.stopAgent()">停止</button>
+          <button
+            type="button"
+            class="secondary compact"
+            :disabled="!ctx.configReady.value || !ctx.projectOpened.value"
+            @click="ctx.forceRecoverStalledRun(m.id)"
+          >
+            恢复运行
+          </button>
+        </div>
+      </div>
+      <div
+        v-else-if="m.role === 'assistant' && ctx.canResumeAgentRun(m)"
+        class="agent-recovery-banner"
+      >
+        <span class="agent-recovery-text">
+          {{ ctx.recoverableAgentErrorHint(m, m.agentFailureReason || m.content || '连接中断') }}
+        </span>
+        <button
+          type="button"
+          class="secondary compact"
+          :disabled="!ctx.configReady.value || !ctx.projectOpened.value || ctx.chatSending.value"
+          @click="ctx.resumeAgentRun(m.id)"
+        >
+          恢复运行
+        </button>
+      </div>
+      <AgentMessage
+        v-if="m.role === 'assistant' && ctx.hasAgentActivity(m)"
+        :msg="m"
+        :is-agent-running="ctx.isAgentRunning"
+        :agent-ui-tick="ctx.isAgentRunning(m) ? ctx.agentUiTick.value : 0"
+        :patch-assistant-msg="ctx.patchAssistantMsg"
+        :schedule-persist-chat="ctx.schedulePersistChat"
+        :message-display-content="ctx.messageDisplayContent"
+        :show-jump="ctx.chainJumpVisible[m.id]"
+        @jump-latest="ctx.jumpChainToLatest(m.id)"
+      />
+      <div
+        v-if="m.role === 'user' && ctx.userMessageImages(m).length"
+        class="msg-user-images"
+      >
+        <img
+          v-for="(url, imageIdx) in ctx.userMessageImages(m)"
+          :key="`${m.id}-img-${imageIdx}`"
+          :src="url"
+          alt="发送的图片"
+          class="msg-user-image"
+          loading="lazy"
+        />
+      </div>
+      <ChatMarkdown
+        v-if="ctx.shouldShowMessageBubble(m, ctx.hasAgentActivity(m))"
+        class="msg-answer"
+        :class="{
+          'msg-answer--streaming': m.role === 'assistant' && ctx.isAgentRunning(m),
+          'msg-answer--final': m.role === 'assistant' && !ctx.isAgentRunning(m),
+        }"
+        :content="ctx.messageDisplayContent(m)"
+        :streaming="m.role === 'assistant' && !!m.streaming && ctx.isAgentRunning(m)"
+        :interactive="m.role === 'assistant' && !ctx.isAgentRunning(m)"
+        @select-option="ctx.handleAiOptionSelect"
+      />
+      <div
+        v-if="
+          m.role === 'assistant' &&
+          !ctx.messageDisplayContent(m) &&
+          (m.status || ctx.isAgentRunning(m)) &&
+          !(ctx.isAgentRunning(m) && ctx.hasAgentActivity(m))
+        "
+        class="msg-status"
+      >
+        <span v-if="ctx.isAgentRunning(m)" class="status-pulse" aria-hidden="true" />
+        <span class="msg-status-text">
+          {{ ctx.agentStatusDisplay(m) || (m.chatMode === 'ask' ? '思考中…' : m.chatMode === 'plan' ? '规划中…' : 'Agent 运行中…') }}
+        </span>
+      </div>
+      <div
+        v-if="m.role === 'assistant' && m.turnFileDiffs && Object.keys(m.turnFileDiffs).length"
+        class="inline-diff-list"
+      >
+        <div
+          v-for="relPath in Object.keys(m.turnFileDiffs)"
+          :key="relPath"
+          class="inline-diff-card"
+        >
+          <div class="inline-diff-head">
+            <span class="inline-diff-path">{{ relPath }}</span>
+            <span v-if="m.turnFileDiffs[relPath].deleted" class="inline-diff-tag delete">删除</span>
+            <span v-else class="inline-diff-tag modify">修改</span>
+            <button
+              type="button"
+              class="ghost small"
+              :disabled="!ctx.projectOpened.value"
+              @click="ctx.previewAgentFile(m.id, relPath)"
+            >
+              编辑器预览
+            </button>
+            <button
+              type="button"
+              class="ghost small diff-toggle-btn"
+              @click="ctx.toggleExpandedDiff(m.id, relPath)"
+            >
+              {{ ctx.isDiffExpanded(m.id, relPath) ? '收起' : '展开' }}
+            </button>
+          </div>
+          <div class="inline-diff-wrap" :class="{ open: ctx.isDiffExpanded(m.id, relPath) }">
+            <div class="inline-diff-col">
+              <div class="inline-diff-label">修改前</div>
+              <pre class="trace-pre compact">{{ ctx.truncateDiffPreview(m.turnFileDiffs[relPath].before || "（空 / 新文件）") }}</pre>
+            </div>
+            <div class="inline-diff-col">
+              <div class="inline-diff-label">{{ m.turnFileDiffs[relPath].deleted ? "删除后" : "修改后" }}</div>
+              <pre class="trace-pre compact">{{ ctx.truncateDiffPreview(m.turnFileDiffs[relPath].deleted ? "（文件已删除）" : (m.turnFileDiffs[relPath].after || "")) }}</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div
+        v-if="
+          m.role === 'assistant' &&
+          !m.streaming &&
+          (m.writtenFiles?.length)
+        "
+        class="msg-actions"
+      >
+        <span
+          v-if="m.writtenFiles?.length && !m.reverted && !m.rejected && m.chatMode === 'build'"
+          class="applied-badge"
+        >
+          已写入 {{ m.writtenFiles.length }} 个文件
+        </span>
+        <span v-else-if="m.reverted" class="reverted-badge">已回滚</span>
+        <span v-else-if="m.rejected" class="rejected-badge">已拒绝</span>
+      </div>
+    </div>
+  </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { inject } from "vue";
+import AgentMessage from "../AgentMessage.vue";
+import ChatMarkdown from "../ChatMarkdown.vue";
+import { vibeChatMessageContextKey } from "../../composables/vibeChatMessageContext";
+
+const ctx = inject(vibeChatMessageContextKey);
+if (!ctx) {
+  throw new Error("VibeChatMessages requires vibeChatMessageContext");
+}
+</script>
