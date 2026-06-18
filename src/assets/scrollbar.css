@@ -1,0 +1,45 @@
+/* ============================================
+   全局滚动条样式 - 极简深色主题
+   ============================================ */
+
+/* WebKit 浏览器 (Chrome, Edge, Safari) */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* 隐藏两端的滚动按钮 */
+::-webkit-scrollbar-button {
+  display: none;
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+
+/* 高对比度模式下确保可见 */
+@media (forced-colors: active) {
+  ::-webkit-scrollbar-thumb {
+    forced-color-adjust: none;
+    background: Highlight;
+  }
+}

@@ -281,6 +281,7 @@ defineExpose({ searchInputRef });
   gap: 4px;
   padding: 5px 12px;
   font-size: 13px;
+  white-space: nowrap;
   border: none;
   background: none;
   color: var(--text-secondary, #999);
@@ -313,14 +314,18 @@ defineExpose({ searchInputRef });
   height: 16px;
   padding: 0 4px;
   font-size: 10px;
-  font-weight: 500;
-  background: var(--accent-color, #58a6ff);
-  color: white;
-  border-radius: 8px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-tertiary, #666);
+  border: none;
+  border-radius: 4px;
+  line-height: 1;
+  letter-spacing: 0.2px;
 }
 
 .git-badge-staged {
-  background: var(--success-color, #3fb950);
+  background: rgba(63, 185, 80, 0.1);
+  color: var(--success-color, #3fb950);
 }
 
 .file-toolbar {
