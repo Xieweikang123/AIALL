@@ -220,6 +220,7 @@ export function inferAgentRecoveryFlags(msg: AgentProgressSource & {
   agentRecoverable?: boolean;
   agentFailureReason?: string;
   agentAborted?: boolean;
+  agentAbortReason?: string;
   agentRecoveryDismissed?: boolean;
   streaming?: boolean;
   statusLog?: string[];

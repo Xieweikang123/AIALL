@@ -900,10 +900,13 @@ function formatSessionTime(timestamp: number | string): string {
 .history-list {
   list-style: none;
   margin: 0;
-  padding: 4px 2px;
+  padding: 6px 6px;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(139, 148, 158, 0.2) transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .history-list::-webkit-scrollbar {
@@ -922,9 +925,9 @@ function formatSessionTime(timestamp: number | string): string {
 .history-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border-radius: 8px;
+  gap: 8px;
+  padding: 10px 10px;
+  border-radius: 10px;
   transition: background 0.15s;
 }
 
@@ -941,8 +944,8 @@ function formatSessionTime(timestamp: number | string): string {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
-  padding: 6px 8px;
+  gap: 4px;
+  padding: 8px 10px;
   background: none;
   border: none;
   color: rgba(255, 255, 255, 0.8);

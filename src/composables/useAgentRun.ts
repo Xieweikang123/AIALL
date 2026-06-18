@@ -536,12 +536,13 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   function cursorAgentFeed(msg: ChatMessage) {
     void agentUiTick.value;
     let agentDetail = msg.agentDetail || msg.status;
+    const connectStartedAt = getActiveRun()?.connectStartedAt ?? 0;
     if (
       isAgentRunning(msg) &&
       isAgentConnectPhase(msg.agentPhase) &&
-      agentConnectStartedAt > 0
+      connectStartedAt > 0
     ) {
-      const elapsed = Math.max(0, Math.floor((Date.now() - agentConnectStartedAt) / 1000));
+      const elapsed = Math.max(0, Math.floor((Date.now() - connectStartedAt) / 1000));
       const base =
         msg.agentDetail ||
         (msg.agentPhase === "connecting_local" ? "连接本地服务" : "启动 Agent");
@@ -1178,9 +1179,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
     if (event.type === "status") {
       const { phase } = event.data;
-      if (phase && !isAgentConnectPhase(phase)) {
-        agentConnectStartedAt = 0;
-      }
       const prevPhase = assistantMsg.agentPhase;
       setAgentStatus(assistantMsg, phase, event.data, { log: phase !== prevPhase });
       assistantMsg.roundGroups = recordAgentRoundStatus(
@@ -1780,8 +1778,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       : undefined;
     const hasImages = Boolean(compressedImages?.length);
     if ((!rawPrompt && !hasImages) || !configReady.value || !projectOpened.value) return;
-
-    agentConnectHasImages = hasImages;
 
     const lastAssistant = options?.planAssistantContent ?? findLastAssistantContent();
     const mode = chatMode.value;

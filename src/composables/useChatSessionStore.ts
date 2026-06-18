@@ -380,7 +380,7 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     const project = projectPath().trim();
     cancelPendingChatPersistence();
     markSessionDeleted(sessionId);
-    const result = removeSessionLocal(sessionId, chatSending());
+    const result = removeSessionLocal(sessionId);
     if (result) chatMessages.value = normalizeMessages(result);
     refreshList();
     const nextActiveId = getActiveVibeChatSessionId(project);
