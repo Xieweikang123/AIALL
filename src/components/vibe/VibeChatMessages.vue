@@ -86,17 +86,6 @@
           {{ ctx.resolveAgentResumeButtonLabel(m) }}
         </button>
       </div>
-      <div
-        v-else-if="
-          m.role === 'assistant' &&
-          m.agentAborted &&
-          !ctx.isAgentRunning(m) &&
-          !ctx.canResumeAgentRun(m)
-        "
-        class="agent-recovery-banner agent-abort-banner"
-      >
-        <span class="agent-recovery-text">运行已中断：{{ ctx.agentAbortDisplayReason(m) }}</span>
-      </div>
       <AgentMessage
         v-if="m.role === 'assistant' && ctx.hasAgentActivity(m)"
         :msg="m"
@@ -247,6 +236,17 @@
         </span>
         <span v-else-if="m.reverted" class="reverted-badge">已回滚</span>
         <span v-else-if="m.rejected" class="rejected-badge">已拒绝</span>
+      </div>
+      <div
+        v-if="
+          m.role === 'assistant' &&
+          m.agentAborted &&
+          !ctx.isAgentRunning(m) &&
+          !ctx.canResumeAgentRun(m)
+        "
+        class="agent-recovery-banner agent-abort-banner"
+      >
+        <span class="agent-recovery-text">运行已中断：{{ ctx.agentAbortDisplayReason(m) }}</span>
       </div>
     </div>
   </div>

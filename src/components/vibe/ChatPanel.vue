@@ -25,17 +25,7 @@
             >
               ‹
             </button>
-            <button
-              type="button"
-              class="session-picker-trigger"
-              :class="{ open: sessionPickerOpen }"
-              :disabled="!projectOpened || chatSending"
-              :title="sessionPickerTitle"
-              @click="$emit('toggle-session-picker')"
-            >
-              <span class="session-picker-title">{{ activeSessionTitle || "新会话" }}</span>
-              <span class="session-picker-chevron" aria-hidden="true">▾</span>
-            </button>
+            <span class="session-picker-title">{{ activeSessionTitle || "新会话" }}</span>
             <button
               v-if="sessionList.length > 1"
               type="button"
@@ -46,65 +36,6 @@
             >
               ›
             </button>
-          </div>
-          <div v-if="sessionPickerOpen" class="session-picker-dropdown">
-            <div class="session-picker-head">
-              <span class="session-picker-head-title">会话记录</span>
-              <button
-                type="button"
-                class="ghost small session-picker-new"
-                :disabled="chatSending"
-                @click="$emit('start-new-session')"
-              >
-                + 新会话
-              </button>
-            </div>
-            <div v-if="chatStoreSyncMessage" class="history-sync-message">{{ chatStoreSyncMessage }}</div>
-            <div v-if="!sessionList.length" class="history-empty">当前项目还没有会话记录</div>
-            <ul v-else class="history-list session-picker-list">
-              <li
-                v-for="s in sessionList"
-                :key="s.id"
-                class="history-item"
-                :class="{ active: s.id === activeSessionId }"
-              >
-                <button type="button" class="history-item-main" @click="$emit('switch-session', s.id)">
-                  <span class="history-item-title">{{ s.title }}</span>
-                  <span class="history-item-meta">
-                    {{ formatSessionTime(s.updatedAt) }} · {{ s.messageCount }} 条
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  class="ghost small history-copy"
-                  :disabled="chatSending"
-                  title="复制会话信息（便于粘贴给 AI 排查）"
-                  @click.stop="$emit('copy-session-info', s)"
-                >
-                  复制
-                </button>
-                <button
-                  type="button"
-                  class="ghost small history-delete"
-                  :disabled="chatSending"
-                  title="删除此会话"
-                  @click.stop="$emit('remove-session', s.id)"
-                >
-                  删除
-                </button>
-              </li>
-            </ul>
-            <div class="session-picker-foot">
-              <button
-                type="button"
-                class="ghost small session-picker-sync"
-                :disabled="chatSending || syncingChatStore || !projectOpened"
-                @click="$emit('sync-chat-store-to-disk')"
-              >
-                {{ syncingChatStore ? "同步中…" : "同步到本地" }}
-              </button>
-              <span class="session-picker-hint">Ctrl+Alt+↑↓ 切换</span>
-            </div>
           </div>
         </div>
       </div>

@@ -30,6 +30,15 @@
                   : `${gitUnstagedFiles.length} 未暂存`"
             >{{ gitChangeCount }}</span>
           </button>
+          <button
+            type="button"
+            class="file-panel-tab"
+            :class="{ active: gitPanelMode === 'sessions' }"
+            @click="$emit('update:gitPanelMode', 'sessions')"
+          >
+            会话
+            <span v-if="sessionCount" class="git-badge">{{ sessionCount }}</span>
+          </button>
         </div>
         <div v-if="projectOpened && gitPanelMode === 'files'" class="file-toolbar">
           <button type="button" class="icon-btn" title="新建文件" @click="$emit('create-new-file')">+</button>
@@ -98,17 +107,87 @@
         <span>正在加载项目…</span>
       </div>
       <slot></slot>
+
+      <!-- 会话管理面板 -->
+      <div v-if="gitPanelMode === 'sessions'" class="sessions-panel">
+        <div class="sessions-toolbar">
+          <button
+            type="button"
+            class="icon-btn"
+            title="新会话"
+            :disabled="chatSending"
+            @click="$emit('start-new-session')"
+          >+</button>
+          <button
+            type="button"
+            class="icon-btn"
+            title="同步到本地"
+            :disabled="chatSending || syncingChatStore"
+            @click="$emit('sync-chat-store-to-disk')"
+          >{{ syncingChatStore ? "…" : "💾" }}</button>
+          <span v-if="chatStoreSyncMessage" class="sessions-sync-msg">{{ chatStoreSyncMessage }}</span>
+        </div>
+        <div v-if="!sessionList.length" class="panel-empty" style="padding: 24px 12px;">
+          <span class="panel-empty-icon" aria-hidden="true">💬</span>
+          <p class="panel-empty-title">当前项目还没有会话记录</p>
+          <p class="panel-empty-hint">开始对话后，会话会显示在这里</p>
+        </div>
+        <ul v-else class="sessions-list">
+          <li
+            v-for="s in sessionList"
+            :key="s.id"
+            class="session-item"
+            :class="{ active: s.id === activeSessionId }"
+          >
+            <button type="button" class="session-item-main" @click="$emit('switch-session', s.id)">
+              <span class="session-item-title">{{ s.title }}</span>
+              <span class="session-item-meta">
+                {{ formatSessionTime(s.updatedAt) }} · {{ s.messageCount }} 条
+              </span>
+            </button>
+            <div class="session-item-actions">
+              <button
+                type="button"
+                class="icon-btn small"
+                title="复制会话信息"
+                :disabled="chatSending"
+                @click.stop="$emit('copy-session-info', s)"
+              >📋</button>
+              <button
+                type="button"
+                class="icon-btn small"
+                title="删除此会话"
+                :disabled="chatSending"
+                @click.stop="$emit('remove-session', s.id)"
+              >🗑</button>
+            </div>
+          </li>
+        </ul>
+      </div>
     </div>
   </aside>
 </template>
 
 <script setup lang="ts">
-import { ref, withDefaults } from "vue";
+import { ref, computed, withDefaults } from "vue";
 import type { GitStatusFile } from "../../services/vibeGitClient";
+import type { VibeChatSessionMeta } from "../../services/vibeChatStorage";
+
+function formatSessionTime(timestamp: number | string): string {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return String(timestamp);
+  const now = new Date();
+  const diff = now.getTime() - date.getTime();
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  if (days === 0) return "今天";
+  if (days === 1) return "昨天";
+  if (days < 7) return `${days} 天前`;
+  return date.toLocaleDateString();
+}
 
 interface Props {
   filePanelWidth: number;
-  gitPanelMode: "files" | "git";
+  gitPanelMode: "files" | "git" | "sessions";
   projectOpened: boolean;
   loadingTree?: boolean;
   searchMode: "file" | "content";
@@ -119,16 +198,24 @@ interface Props {
   gitChangeCount: number;
   gitUnstagedFiles: GitStatusFile[];
   gitStagedFiles: GitStatusFile[];
+  sessionList: VibeChatSessionMeta[];
+  activeSessionId: string;
+  activeSessionTitle: string;
+  sessionPickerOpen: boolean;
+  sessionPickerTitle: string;
+  syncingChatStore: boolean;
+  chatStoreSyncMessage: string;
+  chatSending: boolean;
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   loadingTree: false,
   searchLoading: false,
   searchError: "",
 });
 
 const emit = defineEmits<{
-  (e: "update:gitPanelMode", mode: "files" | "git"): void;
+  (e: "update:gitPanelMode", mode: "files" | "git" | "sessions"): void;
   (e: "update:searchQuery", value: string): void;
   (e: "update:searchMode", mode: "file" | "content"): void;
   (e: "handle-search"): void;
@@ -136,8 +223,14 @@ const emit = defineEmits<{
   (e: "create-new-folder"): void;
   (e: "expand-editor"): void;
   (e: "refresh-git-status"): void;
+  (e: "switch-session", sessionId: string): void;
+  (e: "remove-session", sessionId: string): void;
+  (e: "start-new-session"): void;
+  (e: "copy-session-info", session: VibeChatSessionMeta): void;
+  (e: "sync-chat-store-to-disk"): void;
 }>();
 
+const sessionCount = computed(() => props.sessionList.length);
 const searchInputRef = ref<HTMLInputElement | null>(null);
 
 defineExpose({ searchInputRef });
@@ -381,5 +474,104 @@ defineExpose({ searchInputRef });
   font-size: 11px;
   color: #f85149;
   line-height: 1.4;
+}
+
+/* --- Sessions Panel --- */
+.sessions-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.sessions-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-color, #333);
+  flex-shrink: 0;
+}
+
+.sessions-sync-msg {
+  font-size: 11px;
+  color: var(--text-secondary, #999);
+  margin-left: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sessions-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.06));
+}
+
+.session-item.active {
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.06));
+}
+
+.session-item-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 10px;
+  border: none;
+  background: none;
+  color: var(--text-primary, #e6edf3);
+  cursor: pointer;
+  text-align: left;
+  min-width: 0;
+  transition: background 0.12s;
+}
+
+.session-item-main:hover {
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.04));
+}
+
+.session-item-title {
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.session-item-meta {
+  font-size: 11px;
+  color: var(--text-secondary, #8b949e);
+}
+
+.session-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding-right: 6px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.session-item:hover .session-item-actions {
+  opacity: 1;
+}
+
+.icon-btn.small {
+  width: 20px;
+  height: 20px;
+  font-size: 11px;
 }
 </style>

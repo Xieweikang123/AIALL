@@ -47,6 +47,14 @@
         :git-change-count="gitChangeCount"
         :git-unstaged-files="gitUnstagedFiles"
         :git-staged-files="gitStagedFiles"
+        :session-list="sessionList"
+        :active-session-id="activeSessionId"
+        :active-session-title="activeSessionTitle"
+        :session-picker-open="sessionPickerOpen"
+        :session-picker-title="sessionPickerTitle"
+        :syncing-chat-store="syncingChatStore"
+        :chat-store-sync-message="chatStoreSyncMessage"
+        :chat-sending="chatSending"
         @update:git-panel-mode="gitPanelMode = $event"
         @update:search-query="searchQuery = $event"
         @update:search-mode="searchMode = $event"
@@ -55,6 +63,11 @@
         @create-new-folder="createNewFolder"
         @expand-editor="expandEditor"
         @refresh-git-status="refreshGitStatus(gitIsRepo ? { showLoading: false } : undefined)"
+        @switch-session="switchSession"
+        @remove-session="removeSession"
+        @start-new-session="startNewSession"
+        @copy-session-info="copySessionInfo"
+        @sync-chat-store-to-disk="syncChatStoreToDisk"
       >
 
         <GitPanel
