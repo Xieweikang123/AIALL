@@ -13,10 +13,59 @@
     @blur="onBlur"
     @mousedown="onMouseDown"
   />
+  
+  <!-- 图片查看器模态框 -->
+  <Teleport to="body">
+    <Transition name="image-viewer-fade">
+      <div
+        v-if="imageViewerVisible"
+        class="image-viewer-overlay"
+        tabindex="-1"
+        ref="imageViewerOverlay"
+        @click="closeImageViewer"
+        @keydown.escape="closeImageViewer"
+      >
+        <div class="image-viewer-container" @click.stop>
+          <button class="image-viewer-close" @click="closeImageViewer">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+          <img
+            :src="imageViewerSrc"
+            class="image-viewer-image"
+            alt="查看图片"
+            @click.stop
+          />
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
 import { nextTick, ref, watch } from "vue";
+
+// 图片查看器状态
+const imageViewerVisible = ref(false);
+const imageViewerSrc = ref("");
+const imageViewerOverlay = ref<HTMLDivElement>();
+
+function openImageViewer(src: string) {
+  imageViewerSrc.value = src;
+  imageViewerVisible.value = true;
+  // 阻止背景滚动
+  document.body.style.overflow = "hidden";
+  // 自动聚焦，使 ESC 按键可被捕获
+  nextTick(() => imageViewerOverlay.value?.focus());
+}
+
+function closeImageViewer() {
+  imageViewerVisible.value = false;
+  imageViewerSrc.value = "";
+  // 恢复背景滚动
+  document.body.style.overflow = "";
+}
 
 export interface ComposerReferencedFile {
   name: string;
@@ -160,6 +209,11 @@ function createImageChip(dataUrl: string): HTMLSpanElement {
   img.src = dataUrl;
   img.className = "composer-image-preview";
   img.draggable = false;
+  // 添加点击事件，打开图片查看器
+  img.addEventListener("click", (e) => {
+    e.stopPropagation(); // 阻止事件冒泡到编辑器
+    openImageViewer(dataUrl);
+  });
   chip.appendChild(img);
   return chip;
 }
@@ -555,6 +609,93 @@ void nextTick(() => syncEmpty());
   max-height: 80px;
   border-radius: 4px;
   object-fit: contain;
-  pointer-events: none;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.composer-editor :deep(.composer-image-preview:hover) {
+  transform: scale(1.05);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* 图片查看器样式 - 全局样式 */
+.image-viewer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(8px);
+}
+
+.image-viewer-container {
+  position: relative;
+  max-width: 90vw;
+  max-height: 90vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.image-viewer-image {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.image-viewer-close {
+  position: absolute;
+  top: -40px;
+  right: 0;
+  background: rgba(255, 255, 255, 0.15);
+  border: none;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: white;
+  padding: 0;
+}
+
+.image-viewer-close:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: scale(1.1);
+}
+
+.image-viewer-close svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* 动画过渡 */
+.image-viewer-fade-enter-active,
+.image-viewer-fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.image-viewer-fade-enter-from,
+.image-viewer-fade-leave-to {
+  opacity: 0;
+}
+
+.image-viewer-fade-enter-active .image-viewer-image,
+.image-viewer-fade-leave-active .image-viewer-image {
+  transition: transform 0.3s ease;
+}
+
+.image-viewer-fade-enter-from .image-viewer-image {
+  transform: scale(0.8);
+}
+
+.image-viewer-fade-leave-to .image-viewer-image {
+  transform: scale(0.8);
 }
 </style>
