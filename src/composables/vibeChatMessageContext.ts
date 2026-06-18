@@ -52,8 +52,10 @@ export interface VibeChatMessageContext {
   jumpChainToLatest: (messageId: string) => void;
   userMessageImages: (msg: VibeChatMessageItem) => string[];
   shouldShowMessageBubble: (msg: VibeChatMessageItem, hasActivity: boolean) => boolean;
-  handleAiOptionSelect: (option: { index: number; label: string; fullText: string }) => void;
-  agentStatusDisplay: (msg: VibeChatMessageItem) => string;
+  handleAiOptionSelect: (
+    option: { index: number; label: string; fullText: string; action?: "implement" },
+    msg?: VibeChatMessageItem,
+  ) => void;
   previewAgentFile: (messageId: string, relPath: string) => void;
   truncateDiffPreview: (text: string) => string;
   toggleExpandedDiff: (messageId: string, relPath: string) => void;

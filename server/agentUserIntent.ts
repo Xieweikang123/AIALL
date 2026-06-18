@@ -4,7 +4,7 @@ export const IMPLEMENT_INTENT_RE =
 
 /** Short confirm-to-implement after prior analysis (e.g. 「修复吧」). */
 const SHORT_IMPLEMENT_PROMPT_RE =
-  /^(?:请?)?(?:修复|改|修|实现|动手|执行|应用|写入|落地|按(?:此|上面)?(?:方案|分析)?)(?:吧|了|下)?[。！!]?$/i;
+  /^(?:请?)?(?:修复|改一下|改(?:吧|了|下)?|修|实现|动手|执行|应用|写入|落地|按(?:此|上面)?(?:方案|分析)?)(?:吧|了|下)?[。！!]?$/i;
 
 /** Accuracy / behavior Q&A without asking to change code yet. */
 const ACCURACY_CONSULTATIVE_RE =

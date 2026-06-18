@@ -25,4 +25,23 @@ describe("parseAiOptions", () => {
     ].join("\n");
     expect(parseAiOptions(text)).toBeNull();
   });
+
+  it("turns implementation confirmations into a single action button", () => {
+    const text = "当前还没有点击放大逻辑。需要我实现吗？";
+    const parsed = parseAiOptions(text);
+    expect(parsed?.before).toBe(text);
+    expect(parsed?.options).toEqual([
+      {
+        index: 0,
+        label: "实现",
+        fullText: "请实现上面提到的功能/修改",
+        showIndex: false,
+        action: "implement",
+      },
+    ]);
+  });
+
+  it("does not create implementation action for ordinary explanations", () => {
+    expect(parseAiOptions("当前还没有点击放大逻辑。")).toBeNull();
+  });
 });

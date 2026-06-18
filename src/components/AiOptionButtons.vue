@@ -5,9 +5,11 @@
       :key="opt.index"
       type="button"
       class="ai-option-btn"
-      @click="$emit('select', opt)"
+      @click.stop="$emit('select', opt)"
+      @mouseup.stop
+      @dblclick.stop
     >
-      <span class="ai-option-index">{{ opt.index + 1 }}</span>
+      <span v-if="opt.showIndex !== false" class="ai-option-index">{{ opt.index + 1 }}</span>
       <span class="ai-option-label">{{ opt.label }}</span>
     </button>
   </div>

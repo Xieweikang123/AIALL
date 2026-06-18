@@ -130,7 +130,7 @@
           :content="planMarkdownContent(m)"
           :streaming="m.role === 'assistant' && !!m.streaming && ctx.isAgentRunning(m)"
           :interactive="m.role === 'assistant' && !ctx.isAgentRunning(m)"
-          @select-option="ctx.handleAiOptionSelect"
+          @select-option="(option) => ctx.handleAiOptionSelect(option, m)"
         />
       </PlanDocumentBlock>
       <div
@@ -248,10 +248,11 @@ import PlanDocumentBlock from "../PlanDocumentBlock.vue";
 import { enrichPlanMarkdownForDisplay } from "../../services/planDocumentDisplay";
 import { vibeChatMessageContextKey, type VibeChatMessageItem } from "../../composables/vibeChatMessageContext";
 
-const ctx = inject(vibeChatMessageContextKey);
-if (!ctx) {
+const injectedCtx = inject(vibeChatMessageContextKey);
+if (!injectedCtx) {
   throw new Error("VibeChatMessages requires vibeChatMessageContext");
 }
+const ctx = injectedCtx;
 
 function hideBrokenUserImage(event: Event) {
   const img = event.target;

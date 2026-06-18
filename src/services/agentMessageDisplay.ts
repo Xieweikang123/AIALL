@@ -7,7 +7,7 @@ import { stripTextToolCallMarkup } from "./textToolCallMarkup";
 export type AssistantBubbleSource = {
   content?: string;
   roundGroups?: AgentRoundGroup[];
-  turnTraces?: Array<{ assistantText: string }>;
+  turnTraces?: Array<{ turn?: number; assistantText?: string }>;
 };
 
 export type LiveAgentAnswerSource = AssistantBubbleSource & {

@@ -2659,24 +2659,34 @@ async function buildReferencedFileSection(refs: ReferencedFile[]): Promise<strin
   return chunks.join("\n\n");
 }
 
-function handleAiOptionSelect(option: { index: number; label: string; fullText: string }) {
+function handleAiOptionSelect(
+  option: { index: number; label: string; fullText: string; action?: "implement" },
+  msg?: ChatMessage,
+) {
   const userText = option.fullText;
   if (!userText) return;
+  const runOptions =
+    option.action === "implement" && msg?.role === "assistant"
+      ? {
+          userBubbleContent: option.label,
+          planAssistantContent: messageDisplayContent(msg),
+        }
+      : { userBubbleContent: userText };
 
   if (chatSending.value) {
     chatMessages.value.push({
       id: genId(),
       role: "user",
-      content: userText,
+      content: runOptions.userBubbleContent,
     });
     interruptAgentRun();
     persistChatNow();
     void scrollChatToBottom(true);
-    void runAgentTurn(userText, { skipUserBubble: true, userBubbleContent: userText });
+    void runAgentTurn(userText, { ...runOptions, skipUserBubble: true });
     return;
   }
 
-  void runAgentTurn(userText, { userBubbleContent: userText });
+  void runAgentTurn(userText, runOptions);
 }
 
 async function sendChat() {

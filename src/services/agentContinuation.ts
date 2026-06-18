@@ -169,9 +169,9 @@ export function looksLikeModificationPlan(content: string): boolean {
 }
 
 /** Prefer the latest plan-like assistant message; fall back to the latest assistant text. */
-export function findLastAssistantContentInMessages(
-  messages: ReadonlyArray<{ role: string; content: string }>,
-  resolveContent: (msg: { role: string; content: string }) => string = (msg) => msg.content,
+export function findLastAssistantContentInMessages<T extends { role: string; content: string }>(
+  messages: ReadonlyArray<T>,
+  resolveContent: (msg: T) => string = (msg) => msg.content,
 ): string | undefined {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const msg = messages[i];

@@ -2,6 +2,8 @@ export type AiOption = {
   index: number;
   label: string;
   fullText: string;
+  showIndex?: boolean;
+  action?: "implement";
 };
 
 export type AiOptionsParseResult = {
@@ -29,9 +31,13 @@ export type AiOptionsParseResult = {
  */
 const NUMBERED_ITEM_RE = /^(?:\d+[.)]\s*.+|[（(]\d+[)）]\s*.+)$/m;
 const TRAILING_QUESTION_RE = /\?|？|请选择|告诉我|告诉我是|你(?:是指|想要|希望)/;
+const IMPLEMENT_CONFIRM_RE =
+  /(?:如果你?需要(?:添加|实现|改)?(?:这个|该)?功能，?我可以帮你实现|需要我(?:帮你)?实现(?:吗|这个功能吗|一下吗)?|你想让我实现吗)[？?]?\s*$/;
 
 export function parseAiOptions(text: string): AiOptionsParseResult | null {
   if (!text) return { before: text, options: [], after: "" };
+  const implementConfirm = parseImplementationConfirmOption(text);
+  if (implementConfirm) return implementConfirm;
 
   const lines = text.split("\n");
 
@@ -101,4 +107,23 @@ export function parseAiOptions(text: string): AiOptionsParseResult | null {
   if (after.length > 20) return null;
 
   return { before, options, after };
+}
+
+function parseImplementationConfirmOption(text: string): AiOptionsParseResult | null {
+  const trimmed = text.trimEnd();
+  if (!IMPLEMENT_CONFIRM_RE.test(trimmed)) return null;
+
+  return {
+    before: trimmed,
+    options: [
+      {
+        index: 0,
+        label: "实现",
+        fullText: "请实现上面提到的功能/修改",
+        showIndex: false,
+        action: "implement",
+      },
+    ],
+    after: "",
+  };
 }

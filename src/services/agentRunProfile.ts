@@ -81,7 +81,10 @@ export function resolveAgentRunProfile(input: ResolveAgentRunProfileInput): Agen
       if (followsReviewReport && isShortFollowUp) {
         return { kind: "interactive" };
       }
-      const fromProposal = lastAssistantKind === "actionable_plan" ? extractPlanFilePaths(lastAssistantContent) : [];
+      let fromProposal: string[] = [];
+      if (lastAssistantKind === "actionable_plan" && lastAssistantContent) {
+        fromProposal = extractPlanFilePaths(lastAssistantContent);
+      }
       const targetFiles = mergeTargetFiles(
         scopedFiles.length ? scopedFiles : undefined,
         fromProposal.length ? fromProposal : undefined,
