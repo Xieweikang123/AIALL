@@ -33,24 +33,27 @@ import {
   fetchSessionMessages,
   syncChatSession,
   syncChatStore,
+  type ChatStoreSyncResult,
 } from "../services/vibeCodingClient";
 import { stampImageRefsAfterSync } from "../services/vibeChatImageStore";
 import { markSessionDeleted, sessionDiag } from "../utils/sessionDiagLog";
 import type { useSessionManager } from "./useSessionManager";
 
-export type ChatSessionStoreDeps = {
+export type ChatSessionStoreDeps<T extends PersistedChatMessage = PersistedChatMessage> = {
   projectPath: () => string;
-  chatMessages: Ref<PersistedChatMessage[]>;
+  chatMessages: Ref<T[]>;
   chatError: Ref<string>;
   chatSending: () => boolean;
   session: ReturnType<typeof useSessionManager>;
-  normalizeMessages: <T extends PersistedChatMessage>(msgs: PersistedChatMessage[]) => T[];
+  normalizeMessages: (msgs: PersistedChatMessage[]) => T[];
   confirm: (message: string) => Promise<boolean>;
   onAfterSwitch?: () => void;
   scrollToBottom?: (force?: boolean) => void | Promise<void>;
 };
 
-export function useChatSessionStore(deps: ChatSessionStoreDeps) {
+export function useChatSessionStore<T extends PersistedChatMessage = PersistedChatMessage>(
+  deps: ChatSessionStoreDeps<T>,
+) {
   const switchingSession = ref(false);
   const syncingChatStore = ref(false);
   const chatStoreSyncMessage = ref("");
@@ -110,7 +113,7 @@ export function useChatSessionStore(deps: ChatSessionStoreDeps) {
       if (!projectChatNeedsDiskRestore(project, id)) continue;
       const result = await fetchSessionMessages(project, id);
       if (result.ok && Array.isArray(result.data.messages) && result.data.messages.length) {
-        saveVibeChatHistory(project, result.data.messages as PersistedChatMessage[], id);
+        saveVibeChatHistory(project, result.data.messages as PersistedChatMessage[], id, { touchTimestamp: false });
       }
     }
   }
@@ -243,7 +246,11 @@ export function useChatSessionStore(deps: ChatSessionStoreDeps) {
     sessionId: string,
     messagesForDiskSync: PersistedChatMessage[],
     options?: { flushStore?: boolean },
+    persistGen?: number,
   ) {
+    if (persistGen !== undefined && persistGen !== persistChatGeneration) return;
+    if (isSessionRecentlyDeletedLocally(path, sessionId)) return;
+
     const sameActiveSession =
       activeSessionId.value === sessionId && projectPath().trim() === path;
     const snapshot =
@@ -260,15 +267,20 @@ export function useChatSessionStore(deps: ChatSessionStoreDeps) {
         && chatMessagesHavePendingImageBase64(messagesForDiskSync)
         && sameActiveSession
       ) {
-        chatError.value = syncResult.error || "附图未能写入本地，刷新后可能丢失";
+        chatError.value = ("error" in syncResult && syncResult.error)
+          ? syncResult.error
+          : "附图未能写入本地，刷新后可能丢失";
       }
     }
     if (syncOk) {
+      if (persistGen !== undefined && persistGen !== persistChatGeneration) return;
+      if (isSessionRecentlyDeletedLocally(path, sessionId)) return;
+
       const stamped = stampImageRefsAfterSync(sessionId, messagesForDiskSync);
       if (sameActiveSession) {
         chatMessages.value = normalizeMessages(stamped);
       }
-      saveVibeChatHistory(path, stamped, sessionId, { setActive: sameActiveSession });
+      saveVibeChatHistory(path, stamped, sessionId, { setActive: sameActiveSession, touchTimestamp: false });
       refreshList(path);
     }
     if (options?.flushStore) {
@@ -290,14 +302,14 @@ export function useChatSessionStore(deps: ChatSessionStoreDeps) {
 
     const messagesForDiskSync = cloneChatMessagesForDiskSync(chatMessages.value);
     const gen = ++persistChatGeneration;
-    saveVibeChatHistory(path, chatMessages.value, sessionId);
+    saveVibeChatHistory(path, chatMessages.value, sessionId, { touchTimestamp: false });
     refreshList(path);
 
     if (persistDelayTimer) clearTimeout(persistDelayTimer);
     persistDelayTimer = setTimeout(() => {
       persistDelayTimer = null;
       if (gen !== persistChatGeneration) return;
-      void runDelayedChatDiskSync(path, sessionId, messagesForDiskSync, options);
+      void runDelayedChatDiskSync(path, sessionId, messagesForDiskSync, options, gen);
     }, 100);
   }
 
@@ -307,7 +319,7 @@ export function useChatSessionStore(deps: ChatSessionStoreDeps) {
     const project = projectPath().trim();
     const fromSessionId = activeSessionId.value;
     if (fromSessionId && chatMessages.value.length) {
-      saveVibeChatHistory(project, chatMessages.value, fromSessionId);
+      saveVibeChatHistory(project, chatMessages.value, fromSessionId, { touchTimestamp: false });
     } else if (fromSessionId) {
       abandonVibeChatDraftIfEmpty(project, fromSessionId);
     }
@@ -330,7 +342,7 @@ export function useChatSessionStore(deps: ChatSessionStoreDeps) {
     const fromSessionId = activeSessionId.value;
     const project = projectPath().trim();
     if (fromSessionId && chatMessages.value.length) {
-      saveVibeChatHistory(project, chatMessages.value, fromSessionId);
+      saveVibeChatHistory(project, chatMessages.value, fromSessionId, { touchTimestamp: false });
     } else if (fromSessionId) {
       abandonVibeChatDraftIfEmpty(project, fromSessionId);
     }

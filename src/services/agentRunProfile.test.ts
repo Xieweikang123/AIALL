@@ -5,6 +5,7 @@ import {
   resolveAgentMaxTurns,
   resolveAgentResumeRunProfile,
   resolveAgentRunProfile,
+  resolveAskExecutionEscalation,
 } from "./agentRunProfile";
 
 const SAMPLE_PLAN = [
@@ -53,6 +54,32 @@ describe("resolveAgentRunProfile", () => {
       lastAssistantContent: SAMPLE_PLAN,
     });
     expect(profile.kind).toBe("interactive");
+  });
+
+  it("escalates ask-mode 改吧 after actionable plan to build execute_plan", () => {
+    const escalation = resolveAskExecutionEscalation({
+      prompt: "改吧",
+      mode: "ask",
+      lastAssistantContent: SAMPLE_PLAN,
+    });
+    expect(escalation).toEqual({
+      mode: "build",
+      runProfile: {
+        kind: "execute_plan",
+        targetFiles: ["src/components/ChatComposerEditor.vue"],
+        userIntent: "改吧",
+      },
+    });
+  });
+
+  it("does not escalate ask-mode 改吧 without actionable plan", () => {
+    expect(
+      resolveAskExecutionEscalation({
+        prompt: "改吧",
+        mode: "ask",
+        lastAssistantContent: "这是补充说明，不涉及改代码。",
+      }),
+    ).toBeNull();
   });
 
   it("uses execute_plan when user @ references files with edit intent", () => {
@@ -235,5 +262,16 @@ describe("resolveAgentMaxTurns export", () => {
     expect(resolveAgentMaxTurns("build", { kind: "execute_plan" })).toBe(20);
     expect(resolveAgentMaxTurns("plan", { kind: "execute_plan" })).toBe(20);
     expect(resolveAgentMaxTurns("plan", { kind: "interactive" })).toBe(16);
+  });
+});
+
+describe("enrichAgentUserPrompt execution continuation", () => {
+  it("adds no-screenshot hint when confirming without images", () => {
+    const hint = enrichAgentUserPrompt("改吧", {
+      lastAssistantContent: SAMPLE_PLAN,
+      hasImages: false,
+    });
+    expect(hint).toContain("【续跑确认】");
+    expect(hint).toContain("禁止写「看到截图");
   });
 });

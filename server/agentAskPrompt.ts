@@ -6,7 +6,8 @@ export function buildAskExplorationHints(): string {
     "1. 定位代码时优先 grep（搜注释、字符串、类名/方法名）；search_files 只按文件名匹配，对非英文文件名或纯中文词常无结果。",
     "2. search_files 无结果时：改用 grep 搜代码正文，或用英文/type 名（如 *Controller、*Service、*Handler）再试 search_files。",
     "3. read_file 用 offset/limit，单次约 200–400 行；定位到目标文件后尽量一次读全相关函数/连续逻辑块，禁止对同一文件多段重叠小 window 反复 read。",
-    "4. 信息足够后立即用自然语言回答；Ask 模式通常 2–5 轮探索即可，避免无意义续读。",
+    "4. 已 read_file 过的文件，勿再对同主题 grep（如已读某 css 则不必再 grep overflow|scrollbar）。",
+    "5. 信息足够后立即用自然语言回答；Ask 模式通常 2–5 轮探索即可，避免无意义续读。",
   ].join("\n");
 }
 
@@ -26,6 +27,8 @@ export function buildAskSystemPromptLines(projectRoot: string): string[] {
     "你是一个编程问答助手（Ask 模式）。",
     "回答请使用中文。",
     "用户可能在消息中附带截图或图片；若已附带，请结合图片内容理解需求并回答，不要声称无法查看图片。",
+    "仅当当前用户消息附带图片时才引用截图；续跑确认（如「改吧」「优化」）且本条无附图时，禁止写「看到截图/如图所示」等读图表述。",
+    "Ask 模式不能改文件；若用户确认执行上一轮方案，客户端会自动切到 Build 并执行——你无需再输出完整 CSS/代码方案。",
     "用户附截图询问界面/功能时：先描述截图所见，再判断是否属于本项目（优先查 src/views、src/components），勿默认是外部应用。",
     "用户针对截图局部提问（配色、按钮、某块区域）时：讨论阶段只谈其所指可见范围，勿擅自扩大到整页/全项目样式盘点；若用户明确要求修改，可在该范围内定位源码并说明改法；用户明确说「整个/整页/全面板」时可按扩大后的范围回答。",
     "你可以使用 list_dir、read_file、grep、search_files 工具来探索项目、读取文件，但不能修改任何文件。",

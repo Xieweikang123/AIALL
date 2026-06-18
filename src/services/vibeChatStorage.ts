@@ -816,9 +816,11 @@ function getActiveSession(record: ProjectChatRecord): VibeChatSession {
   return session || record.sessions[0];
 }
 
-function touchSession(session: VibeChatSession, messages: PersistedChatMessage[]) {
+function touchSession(session: VibeChatSession, messages: PersistedChatMessage[], options?: { touchTimestamp?: boolean }) {
   session.messages = sanitizeMessages(messages);
-  session.updatedAt = new Date().toISOString();
+  if (options?.touchTimestamp !== false) {
+    session.updatedAt = new Date().toISOString();
+  }
   session.title = sessionTitleFromMessages(session.messages);
   if (session.status === "draft" && session.messages.length) {
     session.status = "active";
@@ -1316,7 +1318,7 @@ export function saveVibeChatHistory(
   projectPath: string,
   messages: PersistedChatMessage[],
   sessionId?: string,
-  options?: { setActive?: boolean },
+  options?: { setActive?: boolean; touchTimestamp?: boolean },
 ): { ok: boolean; sessionId: string } {
   const key = normalizeProjectKey(projectPath);
   if (!key) return { ok: false, sessionId: "" };
@@ -1326,6 +1328,9 @@ export function saveVibeChatHistory(
 
   let record = getProjectRecord(key);
   if (!record) {
+    if (sessionId && isRecentlyDeletedSession(projectPath, sessionId)) {
+      return { ok: true, sessionId };
+    }
     const session = sessionId ? adoptSessionWithId(sessionId, sanitized, projectPath) : createSession(sanitized);
     record = { activeSessionId: session.id, sessions: [session] };
     return { ok: persistRecord(key, record), sessionId: session.id };
@@ -1334,6 +1339,9 @@ export function saveVibeChatHistory(
   let session = sessionId ? record.sessions.find((s) => s.id === sessionId) : undefined;
   if (!session) {
     if (sessionId) {
+      if (isRecentlyDeletedSession(projectPath, sessionId)) {
+        return { ok: true, sessionId };
+      }
       session = adoptSessionWithId(sessionId, sanitized, projectPath);
       record.sessions.unshift(session);
       // #region session-diag
@@ -1358,7 +1366,7 @@ export function saveVibeChatHistory(
       // #endregion
     }
   } else {
-    touchSession(session, sanitized);
+    touchSession(session, sanitized, { touchTimestamp: options?.touchTimestamp });
   }
 
   if (record.sessions.length > MAX_SESSIONS_PER_PROJECT) {

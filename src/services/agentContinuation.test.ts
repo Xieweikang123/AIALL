@@ -160,6 +160,14 @@ describe("extractPlanFilePaths", () => {
       "src/views/VibeCodingView.vue",
     ]);
   });
+
+  it("drops import-relative paths starting with ./", () => {
+    expect(
+      extractPlanFilePaths(
+        "改 `src/main.ts` 中的 `import './assets/scrollbar.css'` 以及 `src/assets/scrollbar.css`",
+      ),
+    ).toEqual(["src/main.ts", "src/assets/scrollbar.css"]);
+  });
 });
 
 describe("extractPlanCodeBlocks", () => {

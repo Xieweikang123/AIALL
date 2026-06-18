@@ -19,6 +19,7 @@ import {
   createVibeChatSession,
   deleteVibeChatSession,
   diskChatStoreAheadOfLocalIndex,
+  markSessionLocallyDeleted,
   sessionIdsWithDiskAheadMessageCounts,
   getActiveVibeChatSessionId,
   getVibeChatProjectSnapshot,
@@ -491,6 +492,32 @@ describe("v3 chat storage (index + memory)", () => {
     );
     expect(sessionId).toBe(explicitId);
     expect(listVibeChatSessions(projectPath).map((s) => s.id)).toEqual([explicitId]);
+  });
+
+  it("does not adopt a recently deleted session id when saving", () => {
+    const projectPath = "D:/projects/adopt-deleted";
+    const explicitId = "1781749904219-deleted-session";
+    saveVibeChatHistory(
+      projectPath,
+      [
+        { id: "u1", role: "user", content: "同一个问题" },
+        { id: "a1", role: "assistant", content: "同一个回答" },
+      ],
+      explicitId,
+    );
+    deleteVibeChatSession(projectPath, explicitId);
+    markSessionLocallyDeleted(projectPath, explicitId);
+
+    saveVibeChatHistory(
+      projectPath,
+      [
+        { id: "u1", role: "user", content: "同一个问题" },
+        { id: "a1", role: "assistant", content: "同一个回答" },
+      ],
+      explicitId,
+    );
+
+    expect(listVibeChatSessions(projectPath).map((s) => s.id)).not.toContain(explicitId);
   });
 
   it("merges disk duplicate signatures into one session during merge", () => {

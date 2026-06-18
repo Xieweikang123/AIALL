@@ -100,16 +100,47 @@ export function resolveAgentRunProfile(input: ResolveAgentRunProfileInput): Agen
   return { kind: "interactive" };
 }
 
+/** Ask 模式下用户确认执行上一轮可执行方案时，自动升级到 Build + execute_plan。 */
+export function resolveAskExecutionEscalation(
+  input: ResolveAgentRunProfileInput,
+): { mode: "build"; runProfile: AgentRunProfile } | null {
+  if (input.mode !== "ask") return null;
+  const trimmed = input.prompt.trim();
+  if (!isExecutionContinuation(trimmed)) return null;
+  const lastAssistant = input.lastAssistantContent?.trim();
+  if (!lastAssistant) return null;
+  if (classifyAssistantReply(lastAssistant) !== "actionable_plan") return null;
+
+  const body = stripQuotedReplyPrefix(trimmed);
+  const targetFiles = extractPlanFilePaths(lastAssistant);
+  return {
+    mode: "build",
+    runProfile: {
+      kind: "execute_plan",
+      targetFiles: targetFiles.length ? targetFiles : undefined,
+      userIntent: summarizeIntent(body || trimmed),
+    },
+  };
+}
+
 export function enrichAgentUserPrompt(
   prompt: string,
   options?: { lastAssistantContent?: string; hasImages?: boolean },
 ): string {
-  const withUiScope = buildUiScopeFollowUpHint(prompt, options?.lastAssistantContent);
-  return buildImmediateTopicFollowUpHint(
-    withUiScope,
+  let enriched = buildUiScopeFollowUpHint(prompt, options?.lastAssistantContent);
+  enriched = buildImmediateTopicFollowUpHint(
+    enriched,
     options?.lastAssistantContent,
     prompt,
   );
+  if (!options?.hasImages && isExecutionContinuation(prompt.trim())) {
+    enriched = [
+      enriched,
+      "",
+      "【续跑确认】本条消息无附图；禁止写「看到截图/如图所示」等读图开场，直接基于上一轮方案执行。",
+    ].join("\n");
+  }
+  return enriched;
 }
 
 export function buildAgentPromptForProfile(prompt: string, profile: AgentRunProfile): string {

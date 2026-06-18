@@ -219,6 +219,7 @@ export function extractReferencedFilePaths(prompt: string): string[] {
 function normalizePlanPaths(paths: string[]): string[] {
   const unique = [...new Set(paths)];
   return unique.filter((path) => {
+    if (path.startsWith("./")) return false;
     if (path.includes("/")) return true;
     return !unique.some((other) => other !== path && other.endsWith(`/${path}`));
   });

@@ -1515,7 +1515,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         patch.content = running.content;
         patch.activityExpanded = true;
         patch.statusLog = running.statusLog ? [...running.statusLog] : undefined;
-        patch...syncRoundGroupsPatch(running);
+        Object.assign(patch, syncRoundGroupsPatch(running));
       }
 
       patchAssistantMsg(running.id, patch);
