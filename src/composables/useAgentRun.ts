@@ -26,6 +26,7 @@ import {
   isAgentConnectStalled,
   isAgentRunStalled,
   isRecoverableAgentError,
+  isHmrInterruptReason,
   PARTIAL_RUN_RESUME_REASON,
   recoverableAgentErrorHint,
   resolveAgentCompletedTurns,
@@ -1489,13 +1490,35 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         appendStatusLog(running, reason);
         setAgentStatus(running, "aborted", undefined, { log: false });
       }
-      patchAssistantMsg(running.id, {
+
+      const patch: Parameters<typeof patchAssistantMsg>[1] = {
         agentAborted: true,
         agentAbortReason: reason,
         streaming: false,
         status: running.status,
         statusLog: running.statusLog ? [...running.statusLog] : undefined,
-      });
+      };
+
+      if (isHmrInterruptReason(reason) && hasRecoverableAgentProgress(running)) {
+        running.agentFailed = true;
+        running.agentRecoverable = true;
+        running.agentFailureReason = reason;
+        running.agentRecoveryDismissed = false;
+        running.totalTurns = resolveAgentCompletedTurns(running);
+        running.content = resolveAgentFailureBubbleContent(running);
+        running.activityExpanded = true;
+        patch.agentFailed = true;
+        patch.agentRecoverable = true;
+        patch.agentFailureReason = reason;
+        patch.agentRecoveryDismissed = false;
+        patch.totalTurns = running.totalTurns;
+        patch.content = running.content;
+        patch.activityExpanded = true;
+        patch.statusLog = running.statusLog ? [...running.statusLog] : undefined;
+        patch...syncRoundGroupsPatch(running);
+      }
+
+      patchAssistantMsg(running.id, patch);
     }
     clearStreamDeltaBuffer();
     stopAgentUiTick();

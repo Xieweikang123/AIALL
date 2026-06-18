@@ -420,6 +420,7 @@ import {
   buildSilentContinueStatusLog,
   canResumeAgentRun,
   hasRecoverableAgentProgress,
+  HMR_INTERRUPT_REASON,
   inferAgentRecoveryFlags,
   isPartialWrittenRunInterrupt,
   isAgentMaxTurnsExhausted,
@@ -2764,7 +2765,7 @@ onBeforeUnmount(() => {
   document.removeEventListener("dragover", onDocumentDragOverCapture, true);
   document.removeEventListener("drop", onDocumentDropCapture, true);
   if (chatSending.value && getAgentAbortHandle()) {
-    interruptAgentRun({ reason: "页面刷新或热更新导致运行中断" });
+    interruptAgentRun({ reason: HMR_INTERRUPT_REASON });
   } else {
     getAgentAbortHandle()?.abort();
   }

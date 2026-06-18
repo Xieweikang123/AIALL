@@ -27,6 +27,15 @@ export type AgentProgressSource = {
   writtenFiles?: string[];
 };
 
+/** Reason persisted when Vite HMR or page unload interrupts an in-flight agent run. */
+export const HMR_INTERRUPT_REASON = "页面刷新或热更新导致运行中断";
+
+export function isHmrInterruptReason(reason: string): boolean {
+  const text = reason.trim();
+  if (!text) return false;
+  return text === HMR_INTERRUPT_REASON || text.includes("热更新") || text.includes("页面刷新");
+}
+
 /** No meaningful agent progress for this long → treat run as stalled (server heartbeats don't count). */
 export const AGENT_STALL_PROGRESS_MS = 120_000;
 
@@ -235,6 +244,18 @@ export function inferAgentRecoveryFlags(msg: AgentProgressSource & {
     };
   }
 
+  if (
+    msg.agentAborted &&
+    isHmrInterruptReason(msg.agentAbortReason || "") &&
+    hasRecoverableAgentProgress(msg)
+  ) {
+    return {
+      agentFailed: true,
+      agentRecoverable: true,
+      agentFailureReason: msg.agentAbortReason?.trim() || HMR_INTERRUPT_REASON,
+    };
+  }
+
   if (msg.agentAborted) return null;
 
   if (msg.agentRecoveryDismissed) return null;
@@ -415,19 +436,37 @@ export function canResumeAgentRun(msg: AgentProgressSource & {
   agentFailed?: boolean;
   agentRecoverable?: boolean;
   agentAborted?: boolean;
+  agentAbortReason?: string;
+  agentFailureReason?: string;
   agentRecoveryDismissed?: boolean;
   streaming?: boolean;
 }): boolean {
   if (msg.streaming || msg.agentRecoveryDismissed) return false;
   if (!msg.agentFailed || !msg.agentRecoverable) return false;
-  if (msg.agentAborted && !isPartialWrittenRunInterrupt(msg)) return false;
+  if (msg.agentAborted && !isPartialWrittenRunInterrupt(msg)) {
+    const hmrReason = msg.agentAbortReason || msg.agentFailureReason || "";
+    if (!(isHmrInterruptReason(hmrReason) && hasRecoverableAgentProgress(msg))) return false;
+  }
   return true;
 }
 
-export function recoverableAgentErrorHint(msg: AgentProgressSource, errorMessage: string): string {
+export function recoverableAgentErrorHint(
+  msg: AgentProgressSource & { agentAbortReason?: string },
+  errorMessage: string,
+): string {
   if (isPartialWrittenRunInterrupt(msg)) {
     const count = msg.writtenFiles?.length ?? 0;
     return `运行已中断，${count} 个文件已落盘但未生成总结。可点击「继续」完成剩余任务。`;
+  }
+  const reason = errorMessage.trim() || msg.agentAbortReason?.trim() || "";
+  if (isHmrInterruptReason(reason)) {
+    const turns = resolveAgentCompletedTurns(msg);
+    const toolCount = msg.tools?.filter((t) => !t.running).length ?? 0;
+    const progress =
+      turns > 0 || toolCount > 0
+        ? `（已完成 ${turns} 轮${toolCount > 0 ? `，${toolCount} 个工具步骤` : ""}）`
+        : "";
+    return `运行已中断：${reason}${progress}。可点击「恢复运行」从断点继续。`;
   }
   const turns = resolveAgentCompletedTurns(msg);
   const toolCount = msg.tools?.filter((t) => !t.running).length ?? 0;

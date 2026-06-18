@@ -8,6 +8,7 @@ import {
   buildSilentContinueStatusLog,
   canResumeAgentRun,
   hasRecoverableAgentProgress,
+  HMR_INTERRUPT_REASON,
   inferAgentRecoveryFlags,
   isAgentMaxTurnsExhausted,
   isAgentConnectPhase,
@@ -197,6 +198,30 @@ describe("canResumeAgentRun", () => {
     ).toBe(true);
   });
 
+  it("allows resume after HMR interrupt when progress exists", () => {
+    expect(
+      canResumeAgentRun({
+        agentFailed: true,
+        agentRecoverable: true,
+        agentAborted: true,
+        agentAbortReason: HMR_INTERRUPT_REASON,
+        tools: [{ running: false, label: "读取文件", summary: "ok", turn: 1 }],
+      }),
+    ).toBe(true);
+  });
+
+  it("blocks resume after manual stop even with progress", () => {
+    expect(
+      canResumeAgentRun({
+        agentFailed: true,
+        agentRecoverable: true,
+        agentAborted: true,
+        agentAbortReason: "已手动停止",
+        tools: [{ running: false, label: "读取文件", summary: "ok", turn: 1 }],
+      }),
+    ).toBe(false);
+  });
+
   it("does not infer recoverable state at runtime from legacy content", () => {
     expect(
       canResumeAgentRun({
@@ -306,6 +331,17 @@ describe("inferAgentRecoveryFlags", () => {
     expect(flags?.agentRecoverable).toBe(true);
     expect(flags?.agentFailureReason).toBe(PARTIAL_RUN_RESUME_REASON);
   });
+
+  it("infers recoverable flags for HMR-aborted runs with progress", () => {
+    const flags = inferAgentRecoveryFlags({
+      role: "assistant",
+      agentAborted: true,
+      agentAbortReason: HMR_INTERRUPT_REASON,
+      tools: [{ running: false, label: "读取文件", summary: "ok", turn: 1 }],
+    });
+    expect(flags?.agentRecoverable).toBe(true);
+    expect(flags?.agentFailureReason).toBe(HMR_INTERRUPT_REASON);
+  });
 });
 
 describe("resolveAgentFailureBubbleContent", () => {
@@ -343,6 +379,18 @@ describe("recoverableAgentErrorHint", () => {
     );
     expect(hint).toContain("继续");
     expect(hint).toContain("1 个文件");
+  });
+
+  it("mentions resume for HMR interruption with progress", () => {
+    const hint = recoverableAgentErrorHint(
+      {
+        agentAbortReason: HMR_INTERRUPT_REASON,
+        tools: [{ running: false, label: "读取文件", summary: "ok", turn: 1 }],
+      },
+      HMR_INTERRUPT_REASON,
+    );
+    expect(hint).toContain("恢复运行");
+    expect(hint).toContain(HMR_INTERRUPT_REASON);
   });
 
   it("mentions turns and manual retry after silent continue gives up", () => {
