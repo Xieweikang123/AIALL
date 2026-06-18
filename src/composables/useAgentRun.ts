@@ -622,6 +622,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     return buildAgentRunningStatusText(msg, agentStatusDisplay(msg));
   }
 
+  function agentAbortDisplayReason(msg: ChatMessage): string {
+    return msg.agentAbortReason?.trim() || msg.agentFailureReason?.trim() || "运行已中断";
+  }
+
   function agentRunningHint(msg: ChatMessage): string {
     if (msg.streamChars && msg.streamChars > 0) return `${msg.streamChars} 字`;
     if (msg.agentDetail) return msg.agentDetail;
@@ -1829,6 +1833,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     stopAgent,
     interruptAgentRun,
     tryResumeHmrInterruptedRun,
+    agentAbortDisplayReason,
     shouldShowMessageBubble,
     canExecutePlanMessage,
     executePlanFromMessage,

@@ -152,14 +152,16 @@ export async function fetchProjectContext(projectPath: string): Promise<ProjectC
   }
 }
 
+export type ChatSessionSyncResult = { ok: true } | { ok: false; error?: string };
+
 export async function syncChatSession(
   projectPath: string,
   sessionId: string,
   data: unknown,
   options?: { activeSessionId?: string },
-): Promise<void> {
+): Promise<ChatSessionSyncResult> {
   try {
-    await fetch(backendUrl("/backend/vibe/chat-session-sync"), {
+    const response = await fetch(backendUrl("/backend/vibe/chat-session-sync"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -169,8 +171,16 @@ export async function syncChatSession(
         activeSessionId: options?.activeSessionId || sessionId,
       }),
     });
-  } catch {
-    // best-effort, ignore errors
+    if (!response.ok) {
+      return { ok: false, error: `HTTP ${response.status}` };
+    }
+    const body = await readJsonResponse<{ ok?: boolean; error?: string }>(response);
+    if (body.ok === false) {
+      return { ok: false, error: body.error || "写入会话文件失败" };
+    }
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: formatFetchError(error, "网络错误") };
   }
 }
 

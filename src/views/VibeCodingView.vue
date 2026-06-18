@@ -433,6 +433,8 @@ import {
   clearVibeChatHistory,
   diskChatStoreAheadOfLocalIndex,
   buildActiveSessionDiskSyncPayload,
+  chatMessagesHavePendingImageBase64,
+  cloneChatMessagesForDiskSync,
   getActiveSessionSnapshot,
   getVibeChatProjectSnapshot,
   hasVibeChatHistory,
@@ -1553,6 +1555,7 @@ function cancelPendingSync() {
 function persistChatNow(path = projectPath.value.trim(), options?: { flushStore?: boolean }) {
   if (!path) return;
   const isEmptyDraft = !activeSessionId.value && !chatMessages.value.length;
+  const messagesForDiskSync = cloneChatMessagesForDiskSync(chatMessages.value);
   const result = saveVibeChatHistory(path, chatMessages.value, activeSessionId.value);
   if (result.sessionId) activeSessionId.value = result.sessionId;
   refreshSessionList(path);
@@ -1563,20 +1566,44 @@ function persistChatNow(path = projectPath.value.trim(), options?: { flushStore?
       if (sessionId) {
         const sameActiveSession =
           activeSessionId.value === sessionId && projectPath.value.trim() === path;
-        const snapshot = sameActiveSession
-          ? buildActiveSessionDiskSyncPayload(path, sessionId, chatMessages.value)
-          : getActiveSessionSnapshot(path, sessionId);
+        const snapshot =
+          buildActiveSessionDiskSyncPayload(path, sessionId, messagesForDiskSync) ??
+          getActiveSessionSnapshot(path, sessionId);
+        let syncOk = false;
         if (snapshot) {
-          await syncChatSession(path, sessionId, snapshot, {
+          const syncResult = await syncChatSession(path, sessionId, snapshot, {
             activeSessionId: activeSessionId.value || sessionId,
           });
+          syncOk = syncResult.ok;
+          if (
+            !syncOk &&
+            chatMessagesHavePendingImageBase64(messagesForDiskSync) &&
+            sameActiveSession
+          ) {
+            chatError.value = syncResult.error || "附图未能写入本地，刷新后可能丢失";
+          }
         }
-        if (sameActiveSession) {
-          chatMessages.value = normalizeChatMessages(
-            stampImageRefsAfterSync(sessionId, chatMessages.value),
-          );
-          saveVibeChatHistory(path, chatMessages.value, sessionId);
+        if (syncOk) {
+          const stamped = stampImageRefsAfterSync(sessionId, messagesForDiskSync);
+          if (sameActiveSession) {
+            chatMessages.value = normalizeChatMessages(stamped);
+          }
+          saveVibeChatHistory(path, stamped, sessionId);
         }
+        const pendingImages = chatMessagesHavePendingImageBase64(messagesForDiskSync);
+        const shouldFlushStore = !pendingImages || syncOk;
+        if (options?.flushStore) {
+          if (syncStoreTimer) {
+            clearTimeout(syncStoreTimer);
+            syncStoreTimer = null;
+          }
+          if (shouldFlushStore) {
+            await flushChatStoreToDisk(path, { quiet: true });
+          }
+        } else if (shouldFlushStore) {
+          scheduleSyncChatStore(path);
+        }
+        return;
       }
       if (options?.flushStore) {
         if (syncStoreTimer) {
@@ -1769,6 +1796,7 @@ const {
   isAssistantStalled,
   hasAgentActivity,
   messageDisplayContent,
+  agentAbortDisplayReason,
   agentStatusDisplay,
   buildAgentRunningStatusTextForMsg,
   jumpChainToLatest,
@@ -2575,27 +2603,31 @@ function undoExchange(messageId: string, event?: MouseEvent) {
   });
 }
 
-function editUserMessage(messageId: string) {
+async function editUserMessage(messageId: string) {
   if (chatSending.value) return;
   const userIdx = resolveUserMessageIndex(messageId);
   if (userIdx < 0) return;
 
   const userMsg = chatMessages.value[userIdx];
   const userText = stripReferenceAttachments(userMsg.content).trim();
-  const images = userMsg.imageDataUrls?.filter(Boolean) ?? [];
-  
+  const project = projectPath.value.trim();
+  const hydratedUrls = project ? await hydrateChatMessageImages(project, userMsg) : [];
+  const images = userMsg.imageDataUrls?.filter(Boolean)?.length
+    ? userMsg.imageDataUrls.filter(Boolean)
+    : hydratedUrls;
+
   const { start, end } = findExchangeBounds(userIdx);
   chatMessages.value.splice(start, end - start + 1);
-  
+
   composerRef.value?.setPlainText(userText);
   for (const url of images) {
     composerRef.value?.insertImage(url);
   }
-  
+
   chatError.value = "";
   persistChatNow();
   void scrollChatToBottom();
-  
+
   nextTick(() => composerRef.value?.focus());
 }
 
@@ -2877,6 +2909,7 @@ provide(vibeChatMessageContextKey, {
   stopAgent,
   forceRecoverStalledRun,
   recoverableAgentErrorHint,
+  agentAbortDisplayReason,
   agentStatusDisplay,
   buildAgentRunningStatusText: buildAgentRunningStatusTextForMsg,
   hasAgentActivity,

@@ -358,11 +358,13 @@ function compactRoundGroupsForStorage(
   });
 }
 
+import { MAX_AGENT_IMAGE_BYTES } from "./imageCompress";
+
 const MAX_PERSISTED_IMAGES = 4;
-/** Match disk cap so in-memory previews survive until session-sync externalizes. */
-const MAX_PERSISTED_IMAGE_CHARS = 600_000;
+/** Align with agent compress cap so memory previews match what session-sync can externalize. */
+const MAX_PERSISTED_IMAGE_CHARS = MAX_AGENT_IMAGE_BYTES;
 const MAX_DISK_IMAGES = 8;
-const MAX_DISK_IMAGE_CHARS = 600_000;
+const MAX_DISK_IMAGE_CHARS = MAX_AGENT_IMAGE_BYTES;
 
 function compactImageDataUrls(
   urls: string[] | undefined,
@@ -694,6 +696,23 @@ export function getActiveSessionSnapshot(
     updatedAt: session.updatedAt,
     messages: sanitizeMessages(session.messages, { forDisk: true }),
   };
+}
+
+/** Shallow-clone messages at persist time so delayed disk sync keeps attached base64. */
+export function cloneChatMessagesForDiskSync(messages: PersistedChatMessage[]): PersistedChatMessage[] {
+  return messages.map((m) => ({
+    ...m,
+    ...(m.imageDataUrls?.length ? { imageDataUrls: [...m.imageDataUrls] } : {}),
+    ...(m.imageRefs?.length ? { imageRefs: m.imageRefs.map((r) => ({ path: r.path })) } : {}),
+  }));
+}
+
+export function chatMessagesHavePendingImageBase64(messages: PersistedChatMessage[]): boolean {
+  return messages.some(
+    (m) =>
+      m.role === "user" &&
+      Boolean(m.imageDataUrls?.some((url) => typeof url === "string" && url.startsWith("data:image/"))),
+  );
 }
 
 /** Disk sync payload: session metadata from store + live Vue messages (keeps image base64 for externalize). */

@@ -5,6 +5,7 @@ import {
   listDirectory,
   readFile,
   searchFiles,
+  syncChatSession,
   writeFile,
 } from "./vibeCodingClient";
 
@@ -112,5 +113,34 @@ describe("vibeCodingClient", () => {
     expect(formatFetchError(new Error("Failed to execute 'json' on 'Response': Unexpected end of JSON input"), "x")).toBe(
       "后端无有效响应，请确认开发服务已启动",
     );
+  });
+
+  it("syncChatSession returns ok when backend accepts session payload", async () => {
+    const fetchMock = mockFetchJson({ ok: true });
+    const result = await syncChatSession("D:/demo", "sess-1", { messages: [] });
+    expect(result).toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledWith("/backend/vibe/chat-session-sync", expect.objectContaining({
+      method: "POST",
+    }));
+  });
+
+  it("syncChatSession surfaces HTTP and backend errors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: false, error: "写入会话文件失败" }), { status: 500 })),
+    );
+    await expect(syncChatSession("D:/demo", "sess-1", { messages: [] })).resolves.toEqual({
+      ok: false,
+      error: "HTTP 500",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: false, error: "磁盘满" }), { status: 200 })),
+    );
+    await expect(syncChatSession("D:/demo", "sess-1", { messages: [] })).resolves.toEqual({
+      ok: false,
+      error: "磁盘满",
+    });
   });
 });

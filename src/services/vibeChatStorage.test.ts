@@ -9,6 +9,8 @@ import {
   buildAgentHistoryFromMessages,
   formatSessionTitle,
   buildActiveSessionDiskSyncPayload,
+  chatMessagesHavePendingImageBase64,
+  cloneChatMessagesForDiskSync,
   getActiveSessionSnapshot,
   createVibeChatSession,
   diskChatStoreAheadOfLocalIndex,
@@ -18,6 +20,7 @@ import {
   restoreChatStoreFromSnapshot,
   sanitizePersistedChatMessages,
   saveVibeChatHistory,
+  type PersistedChatMessage,
   STORE_VERSION,
   stripReferenceAttachments,
   stripToolSummaryFromAssistantContent,
@@ -295,14 +298,29 @@ describe("sanitizePersistedChatMessages", () => {
         { id: messageId, role: "user" as const, content: "红色线框 是啥？", imageDataUrls: [largeDataUrl] },
       ];
 
-      const diskPayload = sanitizePersistedChatMessages(vueMessages, { forDisk: true });
+      const captured = cloneChatMessagesForDiskSync(vueMessages);
+      expect(chatMessagesHavePendingImageBase64(captured)).toBe(true);
+      expect(captured[0].imageDataUrls?.[0]).toBe(largeDataUrl);
+
+      const diskPayload = sanitizePersistedChatMessages(captured, { forDisk: true });
       const externalized = await externalizeMessageImages(tmpDir, sessionId, diskPayload);
       expect(externalized[0].imageRefs).toHaveLength(1);
       expect(externalized[0].imageCount).toBe(1);
       expect(externalized[0].imageDataUrls).toBeUndefined();
 
-      const stamped = stampImageRefsAfterSync(sessionId, vueMessages);
+      const stamped = stampImageRefsAfterSync(sessionId, captured);
       expect(stamped[0].imageRefs?.[0].path).toBe(externalized[0].imageRefs![0].path);
+    });
+
+    it("captured disk sync keeps base64 after simulated session switch clears Vue", () => {
+      const largeDataUrl = `data:image/jpeg;base64,${"D".repeat(150_000)}`;
+      const captured = cloneChatMessagesForDiskSync([
+        { id: "u1", role: "user", content: "附图", imageDataUrls: [largeDataUrl] },
+      ]);
+      const emptyVue: PersistedChatMessage[] = [];
+      expect(sanitizePersistedChatMessages(emptyVue, { forDisk: true })).toEqual([]);
+      const diskPayload = sanitizePersistedChatMessages(captured, { forDisk: true });
+      expect(diskPayload[0].imageDataUrls?.[0]).toBe(largeDataUrl);
     });
   });
 

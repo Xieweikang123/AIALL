@@ -5,8 +5,9 @@
       :key="opt.index"
       type="button"
       class="ai-option-btn"
-      @click.stop="$emit('select', opt)"
+      @mousedown.stop
       @mouseup.stop
+      @click.stop.prevent="selectOption(opt)"
       @dblclick.stop
     >
       <span v-if="opt.showIndex !== false" class="ai-option-index">{{ opt.index + 1 }}</span>
@@ -22,9 +23,13 @@ defineProps<{
   options: AiOption[];
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   select: [option: AiOption];
 }>();
+
+function selectOption(option: AiOption) {
+  emit("select", option);
+}
 </script>
 
 <style scoped>

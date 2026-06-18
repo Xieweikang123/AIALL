@@ -42,6 +42,7 @@ export interface VibeChatMessageContext {
   stopAgent: () => void;
   forceRecoverStalledRun: (messageId: string) => void;
   recoverableAgentErrorHint: (msg: VibeChatMessageItem, reason: string) => string;
+  agentAbortDisplayReason: (msg: VibeChatMessageItem) => string;
   agentStatusDisplay: (msg: VibeChatMessageItem) => string;
   buildAgentRunningStatusText: (msg: VibeChatMessageItem) => string;
   hasAgentActivity: (msg: VibeChatMessageItem) => boolean;

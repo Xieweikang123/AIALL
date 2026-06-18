@@ -1,5 +1,6 @@
 const MAX_AGENT_IMAGE_DIMENSION = 1600;
-const MAX_AGENT_IMAGE_BYTES = 900_000;
+/** Max base64 length for agent upload and chat image persist caps. */
+export const MAX_AGENT_IMAGE_BYTES = 900_000;
 const JPEG_QUALITY = 0.82;
 
 function estimateDataUrlBytes(dataUrl: string): number {
