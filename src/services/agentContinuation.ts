@@ -1,6 +1,6 @@
 /** Short user confirmations after the agent already proposed changes. */
 const EXECUTION_CONTINUATION_RE =
-  /^(改吧|执行方案|好的?|行|可以|接着(做|改|来)?|执行(吧|一下)?|开始(改|做)?|动手(吧)?|按方案(改|执行)?|继续|优化|go|do it|yes|ok|okay|sure)\.?$/i;
+  /^(改吧|执行方案|好的?|行|可以|接着(做|改|来)?|执行(吧|一下)?|开始(改|做)?|动手(吧)?|按方案(改|执行)?|继续|(?:优化|改进|调整)(?:吧|一下|下)?|go|do it|yes|ok|okay|sure)\.?$/i;
 
 /** Longer 「继续…」 phrasing with explicit edit intent. */
 const EXECUTION_CONTINUE_RE =
@@ -27,6 +27,20 @@ const PLAN_FILE_PATH_RE =
 
 const PLAN_SIGNAL_RE =
   /修改方案|改动方案|涉及文件|制定计划|详细改动|确认后.*实施|第一步|第二步|按方案|完整文件/i;
+
+const AUDIT_OR_REVIEW_REPORT_RE =
+  /(?:审计报告|评估报告|排查报告|准确性评估|工具调用准确性|上下文理解|回复结构|综合评分|改进建议)/i;
+
+export function isAuditOrReviewReport(content: string): boolean {
+  return AUDIT_OR_REVIEW_REPORT_RE.test(content.trim());
+}
+
+export type AssistantReplyKind =
+  | "actionable_plan"
+  | "audit_report"
+  | "explanation"
+  | "completion_summary"
+  | "other";
 
 const SCOPED_EDIT_INTENT_RE =
   /(?:改|修|加|支持|接入|添加|实现|做|优化|调整|更新|完善|支持一下)/;
@@ -89,6 +103,7 @@ export function hasDirectImplementationIntent(text: string): boolean {
 export function looksLikeActionableProposal(content: string): boolean {
   const text = content.trim();
   if (!text) return false;
+  if (AUDIT_OR_REVIEW_REPORT_RE.test(text)) return false;
 
   const paths = extractPlanFilePaths(text);
   const stepCount = (text.match(NUMBERED_STEP_RE) ?? []).length;
@@ -110,9 +125,26 @@ export function isAssistantExecutionBrief(content: string): boolean {
   return looksLikeModificationPlan(content) || looksLikeActionableProposal(content);
 }
 
+export function classifyAssistantReply(content: string): AssistantReplyKind {
+  const text = content.trim();
+  if (!text) return "other";
+  if (isAuditOrReviewReport(text)) return "audit_report";
+  if (looksLikeModificationPlan(text) || looksLikeActionableProposal(text)) {
+    return "actionable_plan";
+  }
+  if (/(?:原因|方式|机制|流程|步骤|因为|由于|如何|为什么)/.test(text)) {
+    return "explanation";
+  }
+  if (/(?:已完成|已修复|已更新|已添加|已删除|主要改动|验证)/.test(text)) {
+    return "completion_summary";
+  }
+  return "other";
+}
+
 export function looksLikeModificationPlan(content: string): boolean {
   const text = content.trim();
   if (!text) return false;
+  if (AUDIT_OR_REVIEW_REPORT_RE.test(text)) return false;
 
   const paths = extractPlanFilePaths(text);
   const hasCodeBlock = text.includes("```");

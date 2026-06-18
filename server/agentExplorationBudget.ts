@@ -1,6 +1,12 @@
 /** Consecutive read-only tool turns in interactive build mode before nudging the model to edit. */
 export const INTERACTIVE_EXPLORE_TURN_BUDGET = 2;
 
+/**
+ * Build 模式下的读文件重叠检测阈值：同一文件重叠 read 超过此次数后硬阻断。
+ * 原值 2 仍保留给 readSliceRepeatCounts，此处用于全局 read_file 同文件计数。
+ */
+export const BUILD_MAX_READ_FILE_REPEATS = 3;
+
 /** Consecutive read-only tool turns in execute_plan mode before nudging the model to edit. */
 export const EXECUTE_PLAN_EXPLORE_TURN_BUDGET = 1;
 
@@ -52,6 +58,8 @@ export const MAX_READ_SLICE_REPEATS = 2;
 export function buildExploreBudgetNudge(consecutiveExploreTurns: number, mode?: string): string {
   const actionHint = mode === "plan"
     ? "请立即输出结构化修改方案（文件清单 + 代码块 + 改动说明），不要再继续读文件。"
+    : mode === "build"
+    ? "下一轮必须调用 patch_file 或 write_file；若目标文件已 read 过，直接改，不要再 grep/read。\n若仍缺路径：最多 1 次 grep/search，然后立即修改。\n禁止重复 read 同一文件相同片段；禁止用英文写长分析。\n先用 1–2 句中文写根因假设，然后直接改代码。\n\n⚠️ Build 模式下分析不是产出，patch 才是产出。"
     : "下一轮必须调用 patch_file 或 write_file；若目标文件已 read 过，直接改，不要再 grep/read。\n若仍缺路径：最多 1 次 grep/search，然后立即修改。\n禁止重复 read 同一文件相同片段；禁止用英文写长分析。\n先用 2–4 句中文写可见进度（根因假设 + 下一步），再调用工具。\n\n💡 提示：如果问题表现为「点击没反应」「按钮不工作」等前端交互异常，优先请用户打开浏览器 DevTools Console 查看报错信息——这比读代码更快定位根因。";
   return [
     `【系统提示】已连续 ${consecutiveExploreTurns} 轮仅探索、尚未修改。`,
@@ -114,6 +122,7 @@ export function buildBuildExploreForcePatchNudge(totalExploreTurns: number): str
     `【系统强制·Build】已累计 ${totalExploreTurns} 轮探索且尚未改代码（超过上限 ${MAX_TOTAL_EXPLORE_TURNS}）。`,
     "你已判断需要修改时，下一轮只能调用 patch_file / write_file / delete_file；禁止 grep / read_file / search。",
     "必须直接提交代码修改并简要说明；禁止只输出 patch 思路或反问「需要我执行吗」。",
+    "禁止再读文件——你已有足够信息，立即改。",
   ].join("");
 }
 

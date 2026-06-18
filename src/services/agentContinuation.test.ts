@@ -3,6 +3,7 @@ import {
   compressHistoryForExecution,
   compressPlanForHistory,
   compressProposalForHistory,
+  classifyAssistantReply,
   extractPlanCodeBlocks,
   extractPlanFilePaths,
   findLastAssistantContentInMessages,
@@ -29,6 +30,8 @@ describe("isExecutionContinuation", () => {
     expect(isExecutionContinuation("执行方案")).toBe(true);
     expect(isExecutionContinuation("继续")).toBe(true);
     expect(isExecutionContinuation("优化")).toBe(true);
+    expect(isExecutionContinuation("优化吧")).toBe(true);
+    expect(isExecutionContinuation("改进一下")).toBe(true);
   });
 
   it("rejects long exploratory prompts", () => {
@@ -62,6 +65,19 @@ describe("looksLikeActionableProposal", () => {
     expect(
       looksLikeActionableProposal("当前不支持某功能。是否需要我帮你实现？"),
     ).toBe(false);
+  });
+
+  it("rejects audit reports with improvement advice as executable proposals", () => {
+    const report = [
+      "## 审计报告",
+      "### 改进建议",
+      "1. Build 模式下默认直接执行。",
+      "2. 读取当前状态，避免误判。",
+      "3. 一次读取覆盖所需范围，避免碎片化读取。",
+      "示例：`src/styles/foo.scss` 里曾出现 gap 过大。",
+    ].join("\n");
+    expect(looksLikeActionableProposal(report)).toBe(false);
+    expect(looksLikeModificationPlan(report)).toBe(false);
   });
 });
 
@@ -105,6 +121,22 @@ describe("looksLikeModificationPlan", () => {
         ["## 修改方案", "涉及文件：`src/a.ts`、`src/b.ts`", "第一步改 a，第二步改 b。"].join("\n"),
       ),
     ).toBe(true);
+  });
+});
+
+describe("classifyAssistantReply", () => {
+  it("classifies audit reports before action hints inside the report", () => {
+    const report = [
+      "## 审计报告",
+      "### 改进建议",
+      "1. Build 模式下默认直接执行。",
+      "2. 读取当前状态，避免误判。",
+    ].join("\n");
+    expect(classifyAssistantReply(report)).toBe("audit_report");
+  });
+
+  it("classifies concrete plans as actionable", () => {
+    expect(classifyAssistantReply(ACTIONABLE_PROPOSAL)).toBe("actionable_plan");
   });
 });
 

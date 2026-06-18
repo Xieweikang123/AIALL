@@ -1,11 +1,11 @@
 import { buildImmediateTopicFollowUpHint } from "../../server/agentTopicFollowUp";
 import { buildUiScopeFollowUpHint } from "../../server/visionMessage";
 import {
+  classifyAssistantReply,
   compressHistoryForExecution,
   extractPlanFilePaths,
   extractReferencedFilePaths,
   hasDirectImplementationIntent,
-  isAssistantExecutionBrief,
   isExecutionContinuation,
   looksLikeModificationPlan,
   stripQuotedReplyPrefix,
@@ -55,12 +55,14 @@ export function resolveAgentRunProfile(input: ResolveAgentRunProfileInput): Agen
   const { prompt, mode, lastAssistantContent } = input;
   const trimmed = prompt.trim();
   const body = stripQuotedReplyPrefix(trimmed);
+  const lastAssistantKind = lastAssistantContent ? classifyAssistantReply(lastAssistantContent) : "other";
+  const followsReviewReport = lastAssistantKind === "audit_report";
 
   if (
     (mode === "build" || mode === "plan") &&
     isExecutionContinuation(trimmed) &&
     lastAssistantContent &&
-    isAssistantExecutionBrief(lastAssistantContent)
+    lastAssistantKind === "actionable_plan"
   ) {
     const targetFiles = extractPlanFilePaths(lastAssistantContent);
     const lastUserIntent = summarizeIntent(body || trimmed);
@@ -73,8 +75,13 @@ export function resolveAgentRunProfile(input: ResolveAgentRunProfileInput): Agen
 
   if (mode === "build") {
     const scopedFiles = resolveScopedTargetFiles(input);
-    if (hasDirectImplementationIntent(body || trimmed)) {
-      const fromProposal = lastAssistantContent ? extractPlanFilePaths(lastAssistantContent) : [];
+    const directIntent = hasDirectImplementationIntent(body || trimmed);
+    const isShortFollowUp = isExecutionContinuation(trimmed);
+    if (directIntent) {
+      if (followsReviewReport && isShortFollowUp) {
+        return { kind: "interactive" };
+      }
+      const fromProposal = lastAssistantKind === "actionable_plan" ? extractPlanFilePaths(lastAssistantContent) : [];
       const targetFiles = mergeTargetFiles(
         scopedFiles.length ? scopedFiles : undefined,
         fromProposal.length ? fromProposal : undefined,

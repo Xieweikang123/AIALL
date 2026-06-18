@@ -153,6 +153,47 @@ describe("resolveAgentRunProfile", () => {
     expect(profile.kind).toBe("execute_plan");
   });
 
+  it("stays interactive for audit-report follow-up optimization", () => {
+    const profile = resolveAgentRunProfile({
+      prompt: "优化吧",
+      mode: "build",
+      lastAssistantContent: [
+        "## 审计报告",
+        "### 改进建议",
+        "1. Build 模式下默认直接执行。",
+        "2. 读取当前状态，避免误判。",
+        "3. 一次读取覆盖所需范围，避免碎片化读取。",
+      ].join("\n"),
+    });
+    expect(profile.kind).toBe("interactive");
+  });
+
+  it("does not extract target files from audit report examples", () => {
+    const profile = resolveAgentRunProfile({
+      prompt: "优化吧",
+      mode: "build",
+      lastAssistantContent: [
+        "## 审计报告",
+        "### 改进建议",
+        "1. Build 模式下默认直接执行。",
+        "示例：`src/styles/foo.scss` 里曾出现 gap 过大。",
+      ].join("\n"),
+    });
+    expect(profile).toEqual({ kind: "interactive" });
+  });
+
+  it("enrichAgentUserPrompt anchors audit-report optimization to system behavior", () => {
+    const prior = [
+      "## 审计报告",
+      "### 改进建议",
+      "1. Build 模式下默认直接执行。",
+      "示例：`src/styles/foo.scss` 里曾出现 gap 过大。",
+    ].join("\n");
+    const hint = enrichAgentUserPrompt("优化吧", { lastAssistantContent: prior });
+    expect(hint).toContain("【延续上一轮话题】");
+    expect(hint).toContain("系统行为、流程和规则");
+  });
+
   it("uses execute_plan for 继续 after partial progress on resume", () => {
     const profile = resolveAgentResumeRunProfile(
       {
