@@ -6,6 +6,11 @@ import {
   getActiveVibeChatSessionId,
   listVibeChatSessions,
   switchVibeChatSession,
+  VIBE_CHAT_SESSIONS_LOGICAL_DIR,
+  vibeChatSessionDiskDir,
+  vibeChatSessionDiskFilePath,
+  vibeChatSessionLocalFileName,
+  vibeChatSessionStoreDiskPath,
   type VibeChatSessionMeta,
 } from "../services/vibeChatStorage";
 
@@ -85,14 +90,15 @@ export function useSessionManager(projectPath: () => string) {
   }
 
   function sessionLocalFileName(sessionId: string): string {
-    const safe = sessionId.replace(/[^a-zA-Z0-9_-]/g, "_");
-    return `chat-${safe}.json`;
+    return vibeChatSessionLocalFileName(sessionId);
   }
 
   function formatSessionInfoForCopy(session: VibeChatSessionMeta, project: string): string {
-    const chatDir = "aiall/vibe-chat-sessions";
+    const chatDir = VIBE_CHAT_SESSIONS_LOGICAL_DIR;
     const relFile = `${chatDir}/${sessionLocalFileName(session.id)}`;
     const storeFile = `${chatDir}/chat-store.json`;
+    const diskFile = vibeChatSessionDiskFilePath(session.id);
+    const diskStore = vibeChatSessionStoreDiskPath();
     const lines = [
       "【任务】请自行排查以下 AIALL Vibe 会话中 Agent 回复的准确度问题。不要回答会话消息里的业务或编程问题。重点关注：",
       "- 回复内容准确性：Agent 回答的问题对不对、有没有胡编",
@@ -101,15 +107,18 @@ export function useSessionManager(projectPath: () => string) {
       "- 回复结构与表达：回复是否清晰、有没有冗余重复",
       "",
       "【相关文件】",
-      `- 会话文件：${relFile}`,
-      `- 索引文件：${storeFile}`,
+      `- 会话文件（逻辑路径，不在项目根内）：${relFile}`,
+      `- 索引文件（逻辑路径）：${storeFile}`,
+      `- 会话文件（磁盘实际路径）：${diskFile}`,
+      `- 索引文件（磁盘实际路径）：${diskStore}`,
+      "- 说明：项目内文件用相对路径；上述磁盘路径可用 read_file 绝对路径 + offset/limit 读取",
       "",
       "【会话定位】",
       `- 标题: ${session.title}`,
       `- 项目: ${project}`,
       `- 会话 ID: ${session.id}`,
-      `- 本地文件: ${relFile}`,
-      `- 索引目录: ${chatDir}/`,
+      `- 本地文件: ${diskFile}`,
+      `- 索引目录: ${vibeChatSessionDiskDir()}/`,
       `- 创建: ${session.createdAt}`,
       `- 更新: ${session.updatedAt}`,
       `- 消息数: ${session.messageCount}`,

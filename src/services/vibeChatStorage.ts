@@ -978,10 +978,31 @@ export function clearVibeChatHistory(projectPath: string) {
   if (!record.sessions.length) {
     memoryByProject.delete(key);
     const index = readIndex();
-    delete index.byProject[key];
+      delete index.byProject[key];
     writeIndex(index);
   } else {
     record.activeSessionId = record.sessions[0].id;
     persistRecord(key, record);
   }
+}
+
+/** Logical prefix in copy templates — not a path under the project root. */
+export const VIBE_CHAT_SESSIONS_LOGICAL_DIR = "aiall/vibe-chat-sessions";
+
+/** On-disk session directory (%APPDATA% on Windows). See AGENTS.md. */
+export function vibeChatSessionDiskDir(): string {
+  return "%APPDATA%\\aiall\\vibe-chat-sessions";
+}
+
+export function vibeChatSessionLocalFileName(sessionId: string): string {
+  const safe = sessionId.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return `chat-${safe}.json`;
+}
+
+export function vibeChatSessionDiskFilePath(sessionId: string): string {
+  return `${vibeChatSessionDiskDir()}\\${vibeChatSessionLocalFileName(sessionId)}`;
+}
+
+export function vibeChatSessionStoreDiskPath(): string {
+  return `${vibeChatSessionDiskDir()}\\chat-store.json`;
 }

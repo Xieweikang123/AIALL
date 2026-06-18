@@ -55,7 +55,7 @@ import {
   PLAN_MAX_TOTAL_EXPLORE_HARD,
   PLAN_MAX_TOTAL_EXPLORE_SOFT,
 } from "./agentExplorationBudget";
-import { buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildImplementFollowUpHint, buildUiDefectBuildHint, isAgentStepClarificationPrompt, isConsultativeUserPrompt, isImplementFollowUpRun, isUiDefectReportPrompt } from "./agentUserIntent";
+import { buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildImplementFollowUpHint, buildSessionAuditHint, buildUiDefectBuildHint, isAgentStepClarificationPrompt, isConsultativeUserPrompt, isImplementFollowUpRun, isSessionAuditPrompt, isUiDefectReportPrompt } from "./agentUserIntent";
 import {
   buildBlockedGrepAfterLocateMessage,
   buildBlockedGrepMessage,
@@ -93,6 +93,7 @@ import {
   listDirectory,
   readFileContent,
   resolveProjectPath,
+  resolveReadablePath,
   searchFiles,
   sliceFileLines,
   writeFileContent,
@@ -396,11 +397,11 @@ const VIBE_AGENT_TOOLS = [
     type: "function",
     function: {
       name: "list_dir",
-      description: "列出目录下的文件和子目录。path 为相对项目根的路径，空字符串表示根目录。",
+      description: "列出目录下的文件和子目录。空 path 表示项目根；相对路径限于项目内；绝对路径可读本机任意目录。",
       parameters: {
         type: "object",
         properties: {
-          path: { type: "string", description: "相对项目根的路径，默认 ''" },
+          path: { type: "string", description: "目录路径：''=项目根，相对=项目内，绝对=本机任意目录" },
         },
       },
     },
@@ -409,11 +410,11 @@ const VIBE_AGENT_TOOLS = [
     type: "function",
     function: {
       name: "read_file",
-      description: "读取文本文件。支持 offset/limit 按行读取大文件。",
+      description: "读取文本文件。支持 offset/limit 按行读取大文件。相对路径限于项目内；绝对路径可读本机任意文件（如 AppData 下的配置/会话 JSON）。",
       parameters: {
         type: "object",
         properties: {
-          path: { type: "string", description: "相对项目根的文件路径" },
+          path: { type: "string", description: "文件路径：相对项目根，或本机绝对路径" },
           offset: { type: "number", description: "起始行号，从 1 开始，默认 1" },
           limit: { type: "number", description: "读取行数，默认 500，最大 800" },
         },
@@ -613,6 +614,7 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "效率：探索不超过 2 轮；在已确认要改代码的任务中，信息足够后必须写入，不要连续多轮只读；同一轮可并行多个 read_file / grep。",
     "用户选择执行：当你提供了多个方案/选项让用户选择时，用户选定后必须立即执行该方案（如 patch_file / write_file 落盘），不得自行改变方向或跳过执行去做其他调查。执行完毕并报告结果后，若需进一步排查再提出下一步建议。",
     "Build 模式简短实施指令（如「执行」「继续」「改吧」「优化」）或用户明确提出要改时：若上一条助手回复已列出具体改动步骤、代码片段或目标文件，必须立即 patch_file / write_file，禁止再次征求确认；除非改动涉及大范围重构或明显高风险操作。",
+    "当前已在 Build 模式时，禁止再问用户是否切换到 Build；若上一条已列出多项改动，patch 须逐项落实，不得在回复中声称已完成尚未 patch 的项。",
     "探索时：read_file 用 offset/limit 分段读取（单次约 200 行）；不要重复读取已读过的文件；用中文简短说明后立即调用工具。",
     "修改前必须先 read_file 核对目标文件；patch_file 前 old_string 须与磁盘内容完全一致。",
     "解释项目时：从 package.json、README、入口文件等关键文件入手，不要臆测。",
@@ -621,7 +623,8 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "write_file / patch_file / delete_file 会立即写入磁盘，无需用户确认。",
     "删除文件时：使用 delete_file 工具，不要用 write_file 清空内容来替代删除。",
     "重要：必须通过 API 工具接口调用 list_dir、read_file 等，禁止在正文里输出 <function>、<parameter> 等标记。",
-    "工具 path 参数使用相对项目根的路径（如 package.json、src/main.ts），不要用绝对路径。",
+    "read_file / list_dir：项目内用相对路径（如 src/main.ts）；读 AppData 会话可用绝对路径，或逻辑路径 aiall/vibe-chat-sessions/chat-<id>.json（自动映射到 AppData）；大文件用 offset/limit，勿用 run_command 读文件。",
+    "write_file / patch_file / delete_file 的 path 必须相对项目根，禁止绝对路径。",
     "run_command 可在项目目录执行 shell 命令（如 npm run dev、python main.py、go test），超时默认 30 秒，长时间命令请设置 timeout_ms；不要执行危险命令。",
     "联网搜索：当需要最新信息、外部文档、API 用法时，使用 web_search 搜索；使用 web_extract 抓取指定链接内容。搜索结果可能较多，优先关注前 3 条结果，避免大量内容占用上下文。",
     "如果系统提示你上一次回复被截断，请从截断处继续输出，不要重复已输出的内容。",
@@ -691,7 +694,8 @@ function buildPlanSystemPrompt(
     "探索时：read_file 用 offset/limit 分段读取（单次约 200 行）；不要重复读取已读过的文件；用中文简短说明后立即调用工具。",
     "收集到足够信息后立即输出方案，不要无意义地继续读文件。",
     "重要：必须通过 API 工具接口调用 list_dir、read_file 等，禁止在正文里输出 <function>、<parameter> 等标记。",
-    "工具 path 参数使用相对项目根的路径（如 package.json、src/main.ts），不要用绝对路径。",
+    "read_file / list_dir：项目内用相对路径；读 AppData 会话可用绝对路径或 aiall/vibe-chat-sessions/ 逻辑前缀；大文件用 offset/limit，勿用 run_command 读文件。",
+    "write_file / patch_file / delete_file 的 path 必须相对项目根，禁止绝对路径。",
     `项目根目录：${projectRoot}`,
   ];
   if (model?.trim()) {
@@ -819,13 +823,13 @@ function trackWrittenFile(stage: WriteStage, relative: string) {
 }
 
 async function readStagedFileContent(
-  root: string,
-  relative: string,
-  absPath: string,
+  readable: { path: string; key: string; outsideProject: boolean },
   stage: WriteStage | null,
 ): Promise<string | null> {
-  if (stage?.files.has(relative)) return stage.files.get(relative)!;
-  const result = await readFileContent(absPath).catch(() => null);
+  if (!readable.outsideProject && stage?.files.has(readable.key)) {
+    return stage.files.get(readable.key)!;
+  }
+  const result = await readFileContent(readable.path).catch(() => null);
   return result?.ok ? result.content : null;
 }
 
@@ -854,15 +858,25 @@ export async function executeTool(
 
   if (name === "list_dir") {
     const rel = String(args.path ?? "").trim();
-    const resolved = rel ? resolveProjectPath(root, rel) : { ok: true as const, path: root, relative: "" };
+    if (!rel) {
+      const stat = await fs.promises.stat(root).catch(() => null);
+      if (!stat?.isDirectory()) return "错误：不是目录 .";
+      const items = await listDirectory(root);
+      const lines = items.map((item) => `${item.isDirectory ? "[dir]" : "[file]"} ${item.name}`);
+      return lines.length ? lines.join("\n") : "（空目录）";
+    }
+    const resolved = resolveReadablePath(root, rel);
     if (!resolved.ok) return `错误：${resolved.error}`;
     const stat = await fs.promises.stat(resolved.path).catch(() => null);
-    if (!stat?.isDirectory()) return `错误：不是目录 ${resolved.relative || "."}`;
+    if (!stat?.isDirectory()) return `错误：不是目录 ${resolved.displayPath}`;
     const items = await listDirectory(resolved.path);
-    const baseRel = resolved.relative;
     const lines = items.map((item) => {
-      const rel = baseRel ? `${baseRel}/${item.name}` : item.name;
-      return `${item.isDirectory ? "[dir]" : "[file]"} ${rel}`;
+      if (resolved.outsideProject) {
+        const full = path.join(resolved.path, item.name).replace(/\\/g, "/");
+        return `${item.isDirectory ? "[dir]" : "[file]"} ${full}`;
+      }
+      const itemRel = resolved.key ? `${resolved.key}/${item.name}` : item.name;
+      return `${item.isDirectory ? "[dir]" : "[file]"} ${itemRel}`;
     });
     return lines.length ? lines.join("\n") : "（空目录）";
   }
@@ -870,22 +884,24 @@ export async function executeTool(
   if (name === "read_file") {
     const filePath = String(args.path || "").trim();
     if (!filePath) return "错误：缺少 path";
-    const resolved = resolveProjectPath(root, filePath);
+    const resolved = resolveReadablePath(root, filePath);
     if (!resolved.ok) return `错误：${resolved.error}`;
-    let content = readCache?.get(resolved.relative) ?? null;
+    const fileStat = await fs.promises.stat(resolved.path).catch(() => null);
+    if (!fileStat?.isFile()) return `错误：${resolved.displayPath} 不存在或无法读取`;
+    let content = readCache?.get(resolved.key) ?? null;
     if (content === null) {
-      content = await readStagedFileContent(root, resolved.relative, resolved.path, stage);
-      if (content !== null) readCache?.set(resolved.relative, content);
+      content = await readStagedFileContent(resolved, stage);
+      if (content !== null) readCache?.set(resolved.key, content);
     }
-    if (content === null) return `错误：${resolved.relative} 不存在或无法读取`;
+    if (content === null) return `错误：${resolved.displayPath} 不存在或无法读取`;
     const offset = Number(args.offset) || 1;
     const defaultLimit = mode === "ask" ? 200 : mode === "plan" ? 300 : 200;
     const maxLimit = mode === "ask" ? 400 : mode === "plan" ? 500 : 350;
     const limit = Math.min(maxLimit, Math.max(1, Number(args.limit) || defaultLimit));
-    const sliceKey = `${resolved.relative}:${offset}:${limit}`;
+    const sliceKey = `${resolved.key}:${offset}:${limit}`;
     const lineRange = readLineRangeFromArgs(offset, limit);
     if (toolGuard) {
-      const overlapErr = checkOverlappingRead(resolved.relative, lineRange, toolGuard.readFileRanges);
+      const overlapErr = checkOverlappingRead(resolved.key, lineRange, toolGuard.readFileRanges);
       if (overlapErr) return overlapErr;
     }
     const cachedSlice = readSliceCache?.get(sliceKey);
@@ -893,16 +909,18 @@ export async function executeTool(
       const repeats = (readSliceRepeatCounts?.get(sliceKey) ?? 0) + 1;
       readSliceRepeatCounts?.set(sliceKey, repeats);
       if (repeats > MAX_READ_SLICE_REPEATS) {
-        return `错误：已连续 ${repeats} 次读取相同片段 ${resolved.relative}（offset ${offset} limit ${limit}），请基于已有内容继续分析或 patch_file，勿重复 read_file。`;
+        return `错误：已连续 ${repeats} 次读取相同片段 ${resolved.displayPath}（offset ${offset} limit ${limit}），请基于已有内容继续分析或 patch_file，勿重复 read_file。`;
       }
       return `${cachedSlice}\n（与上次 read_file 相同，已省略重复读取）`;
     }
     const sliced = sliceFileLines(content, offset, limit);
     readSliceCache?.set(sliceKey, sliced);
     if (toolGuard) {
-      recordReadRange(resolved.relative, lineRange, toolGuard.readFileRanges);
+      recordReadRange(resolved.key, lineRange, toolGuard.readFileRanges);
     }
-    stage?.readPaths.add(resolved.relative);
+    if (!resolved.outsideProject) {
+      stage?.readPaths.add(resolved.key);
+    }
     return sliced;
   }
 
@@ -1143,6 +1161,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     !isPlanExplore &&
     !isExecutePlan &&
     isImplementFollowUpRun(prompt, params.history, { isAsk, readOnlyBuild: readOnlyBuildRun });
+  const sessionAuditRun =
+    !isAsk && !isPlanExplore && !isExecutePlan && isSessionAuditPrompt(prompt);
 
   const segmentBudget = resolveAgentMaxTurns(mode, runProfile);
   let segmentMaxTurns = params.maxTurns ?? segmentBudget;
@@ -1222,6 +1242,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         (readOnlyBuildRun ? buildConsultativeBuildHint() : "") +
         (uiDefectBuildRun ? buildUiDefectBuildHint() : "") +
         (implementFollowUpRun ? buildImplementFollowUpHint() : "") +
+        (sessionAuditRun ? buildSessionAuditHint() : "") +
         (agentStepClarifyRun ? buildAgentStepClarificationHint() : "")) +
     projectContextBlock +
     projectMemoryBlock;
@@ -1234,15 +1255,15 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   const toolGuard: ToolGuardContext = {
     readFileRanges: new Map(),
     visionMisreadActive: false,
-    patchAnchorLocated: implementFollowUpRun,
-    teleportBodyConfirmed: implementFollowUpRun,
+    patchAnchorLocated: false,
+    teleportBodyConfirmed: false,
   };
   let consecutiveExploreTurns = 0;
   let totalExploreTurns = 0;
   let turnsLowNudgeSent = false;
   let interimDiagnosisNudgeSent = false;
-  let patchAnchorLocated = implementFollowUpRun;
-  let teleportBodyConfirmed = implementFollowUpRun;
+  let patchAnchorLocated = false;
+  let teleportBodyConfirmed = false;
   let patchAnchorNudgeSent = false;
   let patchAnchorForcePending = implementFollowUpRun;
   let englishPlanningNudgeSent = false;

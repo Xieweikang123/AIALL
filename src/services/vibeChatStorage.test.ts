@@ -15,6 +15,10 @@ import {
   STORE_VERSION,
   stripReferenceAttachments,
   stripToolSummaryFromAssistantContent,
+  vibeChatSessionDiskFilePath,
+  vibeChatSessionLocalFileName,
+  vibeChatSessionStoreDiskPath,
+  VIBE_CHAT_SESSIONS_LOGICAL_DIR,
 } from "./vibeChatStorage";
 
 const CHAT_STORAGE_KEY = "vibe-coding-chat";
@@ -415,5 +419,18 @@ describe("v3 chat storage (index + memory)", () => {
     expect(snapshot.sessions).toHaveLength(2);
     expect(snapshot.sessions.some((s) => s.id === localOnlyId)).toBe(true);
     expect(snapshot.sessions.some((s) => s.id === "disk-s1")).toBe(true);
+  });
+});
+
+describe("vibe chat session disk paths", () => {
+  it("maps session id to AppData file path", () => {
+    expect(VIBE_CHAT_SESSIONS_LOGICAL_DIR).toBe("aiall/vibe-chat-sessions");
+    expect(vibeChatSessionLocalFileName("1781689365698-5b7c3cda4e73e")).toBe(
+      "chat-1781689365698-5b7c3cda4e73e.json",
+    );
+    expect(vibeChatSessionDiskFilePath("1781689365698-5b7c3cda4e73e")).toBe(
+      "%APPDATA%\\aiall\\vibe-chat-sessions\\chat-1781689365698-5b7c3cda4e73e.json",
+    );
+    expect(vibeChatSessionStoreDiskPath()).toBe("%APPDATA%\\aiall\\vibe-chat-sessions\\chat-store.json");
   });
 });

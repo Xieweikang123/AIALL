@@ -160,4 +160,16 @@ describe("executeTool immediate persistence", () => {
     expect(stage.writtenList).toEqual(["remove-me.txt"]);
     await expect(fs.promises.stat(filePath)).rejects.toThrow();
   });
+
+  it("read_file allows absolute paths outside project root", async () => {
+    const root = await makeProject();
+    const externalFile = path.join(os.tmpdir(), `vibe-agent-ext-${Date.now()}.txt`);
+    await fs.promises.writeFile(externalFile, "external line\n", "utf-8");
+    try {
+      const result = await executeTool(root, "read_file", { path: externalFile }, null, "build");
+      expect(result).toContain("external line");
+    } finally {
+      await fs.promises.unlink(externalFile).catch(() => {});
+    }
+  });
 });

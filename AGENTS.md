@@ -54,6 +54,8 @@ AIALL 的 Vibe 会话文件**不在项目目录内**，存储在 AppData Roaming
 对于当前用户 `[REDACTED]`，完整路径为：
 `C:\Users\<username>\AppData\Roaming\aiall\vibe-chat-sessions\`
 
+**Agent 读取会话文件**：`read_file` / `list_dir` 支持读本机任意路径（绝对路径），也识别逻辑前缀 `aiall/vibe-chat-sessions/`（自动映射到上述 AppData 目录）。大 JSON 请用 `offset` / `limit` 分段读。`write_file` / `patch_file` / `delete_file` 仍仅限项目内相对路径。
+
 ## 开发约定
 
 - **禁止** 在代码中添加 `console.log` 用于调试

@@ -1,6 +1,12 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { adaptPatchLineEndings, applyUniquePatch, detectFileEOL, resolveProjectPath } from "./vibeFs";
+import {
+  adaptPatchLineEndings,
+  applyUniquePatch,
+  detectFileEOL,
+  resolveProjectPath,
+  resolveReadablePath,
+} from "./vibeFs";
 
 describe("resolveProjectPath", () => {
   it("joins relative paths under project root", () => {
@@ -26,6 +32,45 @@ describe("resolveProjectPath", () => {
     const result = resolveProjectPath(root, abs);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.relative).toBe("src/main.ts");
+  });
+});
+
+describe("resolveReadablePath", () => {
+  it("allows absolute paths outside project root for read-only access", () => {
+    const root = path.resolve("D:/project/mall");
+    const external = path.resolve("C:/Users/me/AppData/Roaming/aiall/chat-store.json");
+    const result = resolveReadablePath(root, external);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.outsideProject).toBe(true);
+      expect(result.path).toBe(external);
+    }
+  });
+
+  it("keeps relative paths under project root", () => {
+    const root = path.resolve("D:/project/mall");
+    const result = resolveReadablePath(root, "src/main.ts");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.outsideProject).toBe(false);
+      expect(result.key).toBe("src/main.ts");
+    }
+  });
+
+  it("rejects relative paths that escape project root", () => {
+    const root = path.resolve("D:/project/mall");
+    const result = resolveReadablePath(root, "../other/package.json");
+    expect(result.ok).toBe(false);
+  });
+
+  it("maps logical aiall/vibe-chat-sessions/ paths to AppData", () => {
+    const root = path.resolve("D:/project/mall");
+    const result = resolveReadablePath(root, "aiall/vibe-chat-sessions/chat-abc.json");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.outsideProject).toBe(true);
+      expect(result.path).toContain(`${path.sep}vibe-chat-sessions${path.sep}chat-abc.json`);
+    }
   });
 });
 

@@ -39,6 +39,56 @@ export function resolveProjectPath(
   return { ok: true, path: resolved, relative: relative.replace(/\\/g, "/") };
 }
 
+export type ResolvedReadablePath =
+  | { ok: true; path: string; key: string; outsideProject: boolean; displayPath: string }
+  | { ok: false; error: string };
+
+/** Copy-template logical prefix; on disk under AppData, not under project root. */
+export const AIALL_SESSION_LOGICAL_PREFIX = "aiall/vibe-chat-sessions/";
+
+export function resolveAiallSessionDataDir(): string {
+  return path.join(
+    process.env.APPDATA || path.join(os.homedir(), ".config"),
+    "aiall",
+    "vibe-chat-sessions",
+  );
+}
+
+function tryResolveLogicalSessionPath(trimmed: string): ResolvedReadablePath | null {
+  const normalized = trimmed.replace(/\\/g, "/");
+  if (!normalized.startsWith(AIALL_SESSION_LOGICAL_PREFIX)) return null;
+  const tail = normalized.slice(AIALL_SESSION_LOGICAL_PREFIX.length);
+  if (!tail || tail.includes("..")) return null;
+  const resolved = path.resolve(resolveAiallSessionDataDir(), ...tail.split("/"));
+  const displayPath = resolved.replace(/\\/g, "/");
+  return { ok: true, path: resolved, key: displayPath, outsideProject: true, displayPath };
+}
+
+/** Read-only path resolution: relative paths stay under project root; absolute paths allowed anywhere. */
+export function resolveReadablePath(projectRoot: string, inputPath: string): ResolvedReadablePath {
+  const trimmed = String(inputPath || "").trim();
+  if (!trimmed) return { ok: false, error: "路径不能为空" };
+
+  if (path.isAbsolute(trimmed)) {
+    const resolved = path.resolve(trimmed);
+    const displayPath = resolved.replace(/\\/g, "/");
+    return { ok: true, path: resolved, key: displayPath, outsideProject: true, displayPath };
+  }
+
+  const logical = tryResolveLogicalSessionPath(trimmed);
+  if (logical) return logical;
+
+  const inProject = resolveProjectPath(projectRoot, trimmed);
+  if (!inProject.ok) return inProject;
+  return {
+    ok: true,
+    path: inProject.path,
+    key: inProject.relative,
+    outsideProject: false,
+    displayPath: inProject.relative,
+  };
+}
+
 export async function listDirectory(dirPath: string) {
   const _t0 = Date.now();
   const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });

@@ -50,7 +50,7 @@ export function recordReadRange(
 
 /** Overlay positioning handlers / fixed layers — structural, not topic-specific. */
 export const PATCH_ANCHOR_SYMBOL_RE =
-  /\b(?:function|async function|const)\s+(show[A-Z]\w*At|tryShow[A-Z]\w*|getSelection[A-Z]\w*|clamp[A-Z]\w*)\b|\b(?:Teleport|position:\s*fixed|-(?:floating|popup|overlay|popover))\b/i;
+  /\b(?:function|async function|const)\s+(show[A-Z]\w*At|tryShow[A-Z]\w*|getSelection[A-Z]\w*|clamp[A-Z]\w*)\b|<Teleport\b|\bposition:\s*fixed\b|\b[\w-]*-floating\b/i;
 
 export function textIndicatesPatchAnchor(text: string): boolean {
   return PATCH_ANCHOR_SYMBOL_RE.test(text);

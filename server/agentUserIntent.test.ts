@@ -4,12 +4,14 @@ import {
   buildAgentStepClarifyContinueHint,
   buildConsultativeBuildHint,
   buildImplementFollowUpHint,
+  buildSessionAuditHint,
   buildUiDefectBuildHint,
   historySuggestsQuotePositionFix,
   isAgentStepClarificationPrompt,
   isConsultativeUserPrompt,
   isImplementFollowUpRun,
   isScreenshotVisibilityPrompt,
+  isSessionAuditPrompt,
   isShortImplementPrompt,
   isUiDefectReportPrompt,
 } from "./agentUserIntent";
@@ -149,5 +151,26 @@ describe("buildAgentStepClarifyContinueHint", () => {
     const hint = buildAgentStepClarifyContinueHint();
     expect(hint).toContain("禁止");
     expect(hint).toContain("show*At");
+  });
+});
+
+describe("isSessionAuditPrompt", () => {
+  it("detects session audit copy template", () => {
+    const prompt =
+      "【任务】请自行排查以下 AIALL Vibe 会话中 Agent 回复的准确度问题。\n【相关文件】\n- 会话文件：aiall/vibe-chat-sessions/chat-1781689365698.json";
+    expect(isSessionAuditPrompt(prompt)).toBe(true);
+  });
+
+  it("rejects ordinary implement prompts", () => {
+    expect(isSessionAuditPrompt("帮我把按钮改紧凑一点")).toBe(false);
+  });
+});
+
+describe("buildSessionAuditHint", () => {
+  it("mentions read_file absolute path and forbids run_command paging", () => {
+    const hint = buildSessionAuditHint();
+    expect(hint).toContain("read_file");
+    expect(hint).toContain("%APPDATA%");
+    expect(hint).toContain("禁止 run_command");
   });
 });

@@ -145,3 +145,22 @@ export function buildAgentStepClarifyContinueHint(): string {
     "下一轮禁止重复解释或再读 Teleport；直接 patch show*At / getSelection* 相关逻辑，或 1 次 read 后立即 patch。",
   ].join("");
 }
+
+/** User pasted session-audit task (evaluate another Vibe chat's agent quality). */
+const SESSION_AUDIT_TASK_RE =
+  /【任务】请自行排查以下\s*AIALL\s*Vibe\s*会话|Agent\s*回复的准确度|会话文件.*chat-\d{10,}/i;
+
+export function isSessionAuditPrompt(prompt: string): boolean {
+  const text = prompt.trim();
+  if (!text) return false;
+  return SESSION_AUDIT_TASK_RE.test(text);
+}
+
+export function buildSessionAuditHint(): string {
+  return [
+    "",
+    "【会话审计·只读】用户要求评估另一 Vibe 会话中 Agent 的回复质量；勿回答被审计会话内的业务/编程问题。",
+    "会话 JSON 在 %APPDATA%\\aiall\\vibe-chat-sessions\\chat-<id>.json（详见 AGENTS.md）；用 read_file 绝对路径 + offset/limit 分段读取，禁止 run_command 分页读文件。",
+    "禁止 write_file 将审计报告写入仓库；结论直接写入聊天回复。",
+  ].join("\n");
+}

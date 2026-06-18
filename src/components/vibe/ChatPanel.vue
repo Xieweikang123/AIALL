@@ -1310,7 +1310,7 @@ function formatSessionTime(timestamp: number | string): string {
   background: rgba(255, 255, 255, 0.04);
   color: rgba(255, 255, 255, 0.55);
   border-radius: 6px;
-  padding: 2px 8px;
+  padding: 1px 6px;
   font-size: 11px;
   cursor: pointer;
   white-space: nowrap;

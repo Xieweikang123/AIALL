@@ -31,6 +31,8 @@ describe("agentExploreGuard", () => {
     expect(textIndicatesPatchAnchor("async function showQuoteButtonAt(anchor: DOMRect)")).toBe(true);
     expect(textIndicatesPatchAnchor(".quote-floating { position: fixed; }")).toBe(true);
     expect(textIndicatesPatchAnchor("export function unrelated()")).toBe(false);
+    expect(textIndicatesPatchAnchor(".token-detail-popover { position: absolute; }")).toBe(false);
+    expect(textIndicatesPatchAnchor(".project-memory-overlay { }")).toBe(false);
   });
 
   it("blocks misleading grep after vision misread", () => {
