@@ -60,8 +60,8 @@ export function useSessionManager(projectPath: () => string) {
     activeSessionId.value = "";
   }
 
-  function toggleSessionPicker(chatSending: boolean) {
-    if (!projectPath() || chatSending) return;
+  function toggleSessionPicker(_chatSending?: boolean) {
+    if (!projectPath()) return;
     sessionPickerOpen.value = !sessionPickerOpen.value;
     if (sessionPickerOpen.value) refreshSessionList();
   }
@@ -70,16 +70,16 @@ export function useSessionManager(projectPath: () => string) {
     sessionPickerOpen.value = false;
   }
 
-  function switchToAdjacentSession(delta: number, chatSending: boolean) {
-    if (chatSending || !projectPath() || !sessionList.value.length) return;
+  function switchToAdjacentSession(delta: number) {
+    if (!projectPath() || !sessionList.value.length) return;
     let nextIdx = activeSessionIndex.value + delta;
     if (activeSessionIndex.value < 0 && delta > 0) nextIdx = 0;
     if (nextIdx < 0 || nextIdx >= sessionList.value.length) return;
     return sessionList.value[nextIdx]?.id;
   }
 
-  function removeSession(sessionId: string, chatSending: boolean) {
-    if (chatSending || !projectPath()) return;
+  function removeSession(sessionId: string) {
+    if (!projectPath()) return;
     return deleteVibeChatSession(projectPath(), sessionId);
   }
 

@@ -19,7 +19,7 @@
               v-if="sessionList.length > 1"
               type="button"
               class="session-nav-btn"
-              :disabled="!projectOpened || chatSending || !canSwitchToNewerSession"
+              :disabled="!projectOpened || !canSwitchToNewerSession"
               title="较新的会话 (Ctrl+Alt+↑)"
               @click="$emit('switch-to-adjacent-session', -1)"
             >
@@ -30,7 +30,7 @@
               v-if="sessionList.length > 1"
               type="button"
               class="session-nav-btn"
-              :disabled="!projectOpened || chatSending || !canSwitchToOlderSession"
+              :disabled="!projectOpened || !canSwitchToOlderSession"
               title="较旧的会话 (Ctrl+Alt+↓)"
               @click="$emit('switch-to-adjacent-session', 1)"
             >
@@ -44,7 +44,7 @@
           type="button"
           class="ghost small project-memory-btn"
           :class="{ active: projectMemoryHasContent }"
-          :disabled="!projectOpened || chatSending"
+          :disabled="!projectOpened"
           title="编辑项目记忆（AI 每次对话自动读取）"
           @click="$emit('open-project-memory')"
         >
@@ -53,7 +53,7 @@
         <button
           type="button"
           class="ghost small"
-          :disabled="!projectOpened || chatSending"
+          :disabled="!projectOpened"
           @click="$emit('start-new-session')"
           title="新会话 (Ctrl+Shift+N)"
         >

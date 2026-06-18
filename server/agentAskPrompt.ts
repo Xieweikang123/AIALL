@@ -1,4 +1,4 @@
-/** Ask-mode exploration and answer-structure hints (generic; no domain-specific terms). */
+import { buildAgentSuggestionsPromptHint } from "../src/services/agentSuggestions";
 
 export function buildAskExplorationHints(): string {
   return [
@@ -39,6 +39,7 @@ export function buildAskSystemPromptLines(projectRoot: string): string[] {
     buildAskExplorationHints(),
     buildAskAnswerStructureHints(),
     "收集到足够信息后立即用自然语言回答，不要无意义地继续读文件。",
+    buildAgentSuggestionsPromptHint(),
     `项目根目录：${projectRoot}`,
   ];
 }

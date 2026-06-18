@@ -49,6 +49,7 @@ import {
 } from "../services/vibeChatStorage";
 import { resolveImagesForAgentTurn } from "../services/vibeChatImageStore";
 import { looksLikeModificationPlan, findLastAssistantContentInMessages } from "../services/agentContinuation";
+import { parseAgentSuggestions, type AgentSuggestion } from "../services/agentSuggestions";
 import { stripTextToolCallMarkup } from "../services/textToolCallMarkup";
 import { isDeleteNotFoundError, resolveAgentDoneFileAction } from "../services/vibeAgentTurnApply";
 import {
@@ -100,6 +101,12 @@ import {
 } from "../utils/vibeHelpers";
 
 export type ChatMessage = VibeChatMessage;
+
+function applySuggestionsToAssistantContent(assistantMsg: ChatMessage, rawContent: string): string {
+  const { content, suggestions } = parseAgentSuggestions(rawContent);
+  assistantMsg.agentSuggestions = suggestions.length ? suggestions : undefined;
+  return content;
+}
 
 export type UseAgentRunDeps = {
   chatMessages: Ref<ChatMessage[]>;
@@ -1412,12 +1419,15 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       assistantMsg.pendingApproval = fileAction.pendingApproval;
       assistantMsg.writtenFiles = fileAction.writtenFiles;
 
-      assistantMsg.content = finalizeAssistantBubbleContent({
-        ...assistantMsg,
-        wasAborted,
-        writtenFiles: fileAction.writtenFiles,
-        agentFailed: false,
-      });
+      assistantMsg.content = applySuggestionsToAssistantContent(
+        assistantMsg,
+        finalizeAssistantBubbleContent({
+          ...assistantMsg,
+          wasAborted,
+          writtenFiles: fileAction.writtenFiles,
+          agentFailed: false,
+        }),
+      );
 
       const offerPartialResume = shouldOfferPartialRunResume({
         wasAborted,
@@ -1447,6 +1457,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         streaming: false,
         activityExpanded: assistantMsg.activityExpanded,
         content: assistantMsg.content,
+        agentSuggestions: assistantMsg.agentSuggestions,
         totalTurns: assistantMsg.totalTurns,
         statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
         ...syncRoundGroupsPatch(assistantMsg),

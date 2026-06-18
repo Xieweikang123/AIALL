@@ -880,7 +880,7 @@ function refreshSessionList(path?: string) {
 }
 
 function toggleSessionPicker() {
-  session.toggleSessionPicker(chatSending.value);
+  session.toggleSessionPicker();
 }
 
 function closeSessionPicker() {
@@ -888,7 +888,7 @@ function closeSessionPicker() {
 }
 
 function switchToAdjacentSession(delta: number) {
-  const nextId = session.switchToAdjacentSession(delta, chatSending.value);
+  const nextId = session.switchToAdjacentSession(delta);
   if (nextId) switchSession(nextId);
 }
 

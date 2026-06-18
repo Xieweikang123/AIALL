@@ -95,6 +95,11 @@ export type PersistedChatMessage = {
   reverted?: boolean;
   activityExpanded?: boolean;
   activityDetailed?: boolean;
+  agentSuggestions?: Array<{
+    label: string;
+    action?: "send" | "implement" | "execute_plan";
+    text?: string;
+  }>;
   /** Quote metadata for user messages that were sent with a quoted reply. */
   quotedRole?: "user" | "assistant";
   quotedText?: string;

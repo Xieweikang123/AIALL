@@ -58,6 +58,7 @@ import {
 } from "./agentExplorationBudget";
 import { buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildImplementFollowUpHint, buildSessionAuditHint, buildUiDefectBuildHint, isAgentStepClarificationPrompt, isConsultativeUserPrompt, isImplementFollowUpRun, isSessionAuditPrompt, isUiDefectReportPrompt } from "./agentUserIntent";
 import { detectUserNegation } from "../src/services/agentContinuation";
+import { buildAgentSuggestionsPromptHint } from "../src/services/agentSuggestions";
 import {
   buildBlockedGrepAfterLocateMessage,
   buildBlockedGrepMessage,
@@ -633,6 +634,7 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "联网搜索：当需要最新信息、外部文档、API 用法时，使用 web_search 搜索；使用 web_extract 抓取指定链接内容。搜索结果可能较多，优先关注前 3 条结果，避免大量内容占用上下文。",
     "如果系统提示你上一次回复被截断，请从截断处继续输出，不要重复已输出的内容。",
     "附截图时：首轮输出截图描述后，后续轮次禁止再次描述同一张截图。若需追问用户意见，应在代码探索后给出具体方案对比，而非仅提问。",
+    buildAgentSuggestionsPromptHint(),
     `项目根目录：${projectRoot}`,
   ];
   if (model?.trim()) {
@@ -695,6 +697,7 @@ function buildPlanSystemPrompt(
     "3. 对每个文件给出具体改动说明和代码块（标明修改前/修改后或新增内容）；",
     "4. 说明改动顺序和依赖关系；",
     "5. 文末固定提示：「确认无误后回复「执行方案」或点击消息上的「执行方案」按钮，我将按方案改代码。」",
+    buildAgentSuggestionsPromptHint(),
     "探索时：read_file 用 offset/limit 分段读取（单次约 200 行）；不要重复读取已读过的文件；用中文简短说明后立即调用工具。",
     "收集到足够信息后立即输出方案，不要无意义地继续读文件。",
     "重要：必须通过 API 工具接口调用 list_dir、read_file 等，禁止在正文里输出 <function>、<parameter> 等标记。",
