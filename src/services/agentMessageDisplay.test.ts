@@ -3,6 +3,8 @@ import {
   buildWrittenFilesSummary,
   filterDuplicateFeedThoughts,
   finalizeAssistantBubbleContent,
+  hasAgentFinalAnswer,
+  hasAgentRunStructure,
   hasSubstantiveAgentSummary,
   isEnglishToolNarration,
   isAgentTimelineAnswerStreaming,
@@ -38,6 +40,29 @@ describe("resolveAssistantBubbleContent", () => {
     ).toBe("## 最终答案");
   });
 
+  it("does not treat tool-turn narrative as a completed answer", () => {
+    expect(
+      resolveAssistantBubbleContent({
+        content: "让我看看 `useProjectMemory.ts` 中的归档保存流程。",
+        roundGroups: [
+          {
+            turn: 3,
+            narrative: "让我看看 `useProjectMemory.ts` 中的归档保存流程。",
+            modelSteps: [],
+            toolIds: ["t1"],
+            response: {
+              assistantText: "让我看看 `useProjectMemory.ts` 中的归档保存流程。",
+              toolCalls: [{ id: "t1", name: "read_file", arguments: "{}" }],
+              hasToolCalls: true,
+              isFinal: false,
+            },
+          },
+        ],
+        tools: [{ running: false, turn: 3 }],
+      }),
+    ).toBe("");
+  });
+
   it("falls back to last narrative when content and final response are empty", () => {
     expect(
       resolveAssistantBubbleContent({
@@ -46,7 +71,7 @@ describe("resolveAssistantBubbleContent", () => {
           { turn: 2, narrative: "## 总结\n表格", modelSteps: [], toolIds: [] },
         ],
       }),
-    ).toBe("## 总结\n表格");
+    ).toBe("");
   });
 
   it("strips leaked tool summaries from bubble content", () => {
@@ -57,22 +82,19 @@ describe("resolveAssistantBubbleContent", () => {
     ).toBe("已完成修改。");
   });
 
-  it("prefers long narrative over thin final content after tool turns", () => {
-    const longAnswer =
-      "从截图看，这是一个输入框。聚焦方式：点击输入框内部任何区域都会聚焦。如果点击没有反应，可能是因为 disabled。";
+  it("uses only the final turn answer after tool exploration", () => {
     const shortFinal = "修改后，即使输入框被禁用，点击时也会允许聚焦，方便查看内容。";
     expect(
       resolveAssistantBubbleContent({
         content: shortFinal,
-        turnTraces: [{ assistantText: longAnswer }],
         roundGroups: [
           {
             turn: 12,
-            narrative: longAnswer,
+            narrative: "从截图看，这是一个输入框。聚焦方式：点击输入框内部任何区域都会聚焦。",
             modelSteps: [],
             toolIds: [],
             response: {
-              assistantText: longAnswer,
+              assistantText: "从截图看，这是一个输入框。聚焦方式：点击输入框内部任何区域都会聚焦。",
               toolCalls: [{ id: "1", name: "patch_file", arguments: "{}" }],
               hasToolCalls: true,
               isFinal: false,
@@ -92,39 +114,7 @@ describe("resolveAssistantBubbleContent", () => {
           },
         ],
       }),
-    ).toContain("聚焦方式");
-    expect(
-      resolveAssistantBubbleContent({
-        content: shortFinal,
-        turnTraces: [{ assistantText: longAnswer }],
-        roundGroups: [
-          {
-            turn: 12,
-            narrative: longAnswer,
-            modelSteps: [],
-            toolIds: [],
-            response: {
-              assistantText: longAnswer,
-              toolCalls: [{ id: "1", name: "patch_file", arguments: "{}" }],
-              hasToolCalls: true,
-              isFinal: false,
-            },
-          },
-          {
-            turn: 13,
-            narrative: shortFinal,
-            modelSteps: [],
-            toolIds: [],
-            response: {
-              assistantText: shortFinal,
-              toolCalls: [],
-              hasToolCalls: false,
-              isFinal: true,
-            },
-          },
-        ],
-      }),
-    ).toContain(shortFinal);
+    ).toBe(shortFinal);
   });
 
   it("ignores english tool narration when merging turns", () => {
@@ -205,7 +195,7 @@ describe("resolveCompletedAgentBubbleContent", () => {
 });
 
 describe("finalizeAssistantBubbleContent", () => {
-  it("appends written-files summary after planning-only text", () => {
+  it("shows written-files summary when run ends without a final answer", () => {
     const result = finalizeAssistantBubbleContent({
       content: "现在开始批量修改：",
       writtenFiles: ["src/views/VibeCodingView.vue"],
@@ -223,7 +213,7 @@ describe("finalizeAssistantBubbleContent", () => {
         },
       ],
     });
-    expect(result).toContain("现在开始批量修改：");
+    expect(result).not.toContain("现在开始批量修改：");
     expect(result).toContain("## 修改完成");
     expect(result).toContain("`src/views/VibeCodingView.vue`");
   });

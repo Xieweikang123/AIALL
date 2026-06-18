@@ -13,6 +13,7 @@ import {
   AGENT_SILENT_CONTINUE_DELAY_MS,
   AGENT_SILENT_CONTINUE_MAX,
   AGENT_MODEL_WAIT_STALL_MS,
+  AGENT_CONTINUE_MODEL_WAIT_STALL_MS,
   agentStallRecoveryReason,
   agentConnectStallMessage,
   buildAgentMaxTurnsExhaustedMessage,
@@ -27,6 +28,8 @@ import {
   isAgentConnectStalled,
   isAgentRunStalled,
   isRecoverableAgentError,
+  isIncompleteAgentRunWithoutFinalAnswer,
+  applyInferredAgentRecovery,
   isHmrInterruptReason,
   PARTIAL_RUN_RESUME_REASON,
   recoverableAgentErrorHint,
@@ -87,8 +90,10 @@ import type { AgentStatusData, TurnFileDiff, VibeChatMessage } from "../types/vi
 import {
   finalizeAssistantBubbleContent,
   filterDuplicateFeedThoughts,
+  hasAgentFinalAnswer,
+  hasAgentRunStructure,
   mergeAssistantTurnText,
-  resolveAssistantBubbleContent,
+  resolveLiveAgentAnswerPreview,
   resolveAgentTimelineAnswer,
   isAgentTimelineAnswerStreaming,
 } from "../services/agentMessageDisplay";
@@ -145,6 +150,7 @@ export type UseAgentRunDeps = {
   beginAgentRunSession: (sessionId: string) => void;
   endAgentRunSession: (sessionId?: string) => void;
   persistAgentRunSession: (sessionId: string) => void;
+  snapshotAgentRunSession?: (sessionId: string) => void;
   onAgentRunSettled?: (msg: ChatMessage) => void;
   onMemoryProposal?: (msgId: string, proposal: import("../services/projectMemoryProposal").MemoryProposalPayload) => void;
   onSkillProposal?: (msgId: string, proposal: import("../services/projectSkillProposal").SkillProposalPayload) => void;
@@ -186,6 +192,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     beginAgentRunSession,
     endAgentRunSession,
     persistAgentRunSession,
+    snapshotAgentRunSession,
     onAgentRunSettled,
     onMemoryProposal,
     onSkillProposal,
@@ -207,6 +214,23 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   }
 
   function finishRunSession(sessionId: string) {
+    const run = runManager.get(sessionId);
+    if (run?.assistantMsg.role === "assistant") {
+      applyInferredAgentRecovery(run.assistantMsg);
+      patchAssistantMsg(
+        run.assistantMsg.id,
+        {
+          agentFailed: run.assistantMsg.agentFailed,
+          agentRecoverable: run.assistantMsg.agentRecoverable,
+          agentFailureReason: run.assistantMsg.agentFailureReason,
+          agentRecoveryDismissed: run.assistantMsg.agentRecoveryDismissed,
+          content: run.assistantMsg.content,
+          activityExpanded: run.assistantMsg.activityExpanded,
+          ...syncRoundGroupsPatch(run.assistantMsg),
+        },
+        sessionId,
+      );
+    }
     persistAgentRunSession(sessionId);
     endAgentRunSession(sessionId);
     runManager.remove(sessionId);
@@ -366,10 +390,59 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     return Boolean(stalledAssistantMsg.value && stalledAssistantMsg.value.id === msg.id);
   }
 
+  function findRunningAssistantMsgForSession(sessionId: string): ChatMessage | null {
+    const run = runManager.get(sessionId);
+    if (!run) return null;
+    if (isRunVisible(sessionId)) {
+      return chatMessages.value.find((m) => m.id === run.assistantMsgId) ?? run.assistantMsg;
+    }
+    return run.assistantMsg;
+  }
+
   function findRunningAssistantMsg(): ChatMessage | null {
-    const run = getActiveRun();
-    if (!run || !chatSending.value) return null;
-    return chatMessages.value.find((m) => m.id === run.assistantMsgId) ?? run.assistantMsg;
+    if (!chatSending.value) return null;
+    return findRunningAssistantMsgForSession(activeSessionId.value);
+  }
+
+  function checkAgentStallForSession(sessionId: string) {
+    const run = runManager.get(sessionId);
+    if (!run) return;
+    const msg = findRunningAssistantMsgForSession(sessionId);
+    if (!msg) return;
+
+    if (
+      isAgentConnectStalled(run.connectStartedAt, msg.agentPhase, true) &&
+      isAgentConnectPhase(msg.agentPhase)
+    ) {
+      abortAgentConnectStall(sessionId, msg);
+      return;
+    }
+
+    const MODEL_WAIT_PHASES = ["sending_request", "waiting_model", "retrying_model"];
+    const waitThreshold =
+      (msg.agentContinueCount ?? 0) > 0
+        ? AGENT_CONTINUE_MODEL_WAIT_STALL_MS
+        : AGENT_MODEL_WAIT_STALL_MS;
+    if (
+      MODEL_WAIT_PHASES.includes(msg.agentPhase || "") &&
+      msg.agentWaitStartedAt &&
+      Date.now() - msg.agentWaitStartedAt >= waitThreshold
+    ) {
+      recoverAgentRunFromStall(sessionId, msg, "模型请求长时间无响应（可能已卡住）");
+      return;
+    }
+
+    if (run.lastProgressAt <= 0) return;
+    if (!isAgentRunStalled(run.lastProgressAt, true)) return;
+    if (!hasRecoverableAgentProgress(msg)) return;
+    recoverAgentRunFromStall(sessionId, msg, agentStallRecoveryReason());
+  }
+
+  function checkAgentStall() {
+    if (runManager.size() === 0) return;
+    for (const run of runManager.listRuns()) {
+      checkAgentStallForSession(run.sessionId);
+    }
   }
 
   function touchAgentProgress(sessionId: string) {
@@ -399,39 +472,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   function getActiveRun() {
     return runManager.get(activeSessionId.value);
-  }
-
-  function checkAgentStall() {
-    if (!chatSending.value) return;
-    const sessionId = activeSessionId.value;
-    const run = runManager.get(sessionId);
-    const msg = findRunningAssistantMsg();
-    if (!run || !msg) return;
-
-    if (
-      isAgentConnectStalled(run.connectStartedAt, msg.agentPhase, true) &&
-      isAgentConnectPhase(msg.agentPhase)
-    ) {
-      abortAgentConnectStall(sessionId, msg);
-      return;
-    }
-
-    // Model-wait stall: agentWaitStartedAt is set once on entering waiting phase
-    // and is NOT refreshed by heartbeats, so it reliably detects prolonged waits.
-    const MODEL_WAIT_PHASES = ["sending_request", "waiting_model", "retrying_model"];
-    if (
-      MODEL_WAIT_PHASES.includes(msg.agentPhase || "") &&
-      msg.agentWaitStartedAt &&
-      Date.now() - msg.agentWaitStartedAt >= AGENT_MODEL_WAIT_STALL_MS
-    ) {
-      recoverAgentRunFromStall(sessionId, msg, "模型请求长时间无响应（可能已卡住）");
-      return;
-    }
-
-    if (run.lastProgressAt <= 0) return;
-    if (!isAgentRunStalled(run.lastProgressAt, true)) return;
-    if (!hasRecoverableAgentProgress(msg)) return;
-    recoverAgentRunFromStall(sessionId, msg, agentStallRecoveryReason());
   }
 
   function abortAgentConnectStall(sessionId: string, msg: ChatMessage) {
@@ -491,6 +531,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         msg.statusLog?.length ||
         msg.turnTraces?.length ||
         msg.status ||
+        msg.agentPhase ||
+        msg.streaming ||
+        msg.agentFailed ||
+        msg.agentRecoverable ||
         msg.tools?.length ||
         msg.agentTurn ||
         msg.totalTurns,
@@ -526,7 +570,12 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       if (msg.imageCount && msg.imageCount > 0) return `（已发送 ${msg.imageCount} 张图片）`;
       return msg.content?.trim() || "";
     }
-    if (canResumeAgentRun(msg)) return resolveAgentFailureBubbleContent(msg);
+    if (canResumeAgentRun(msg) || inferAgentRecoveryFlags(msg)?.agentRecoverable) {
+      return resolveAgentFailureBubbleContent(msg);
+    }
+    if (isAgentRunning(msg)) {
+      return resolveLiveAgentAnswerPreview(msg);
+    }
     return finalizeAssistantBubbleContent(msg);
   }
 
@@ -999,8 +1048,12 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       ...syncRoundGroupsPatch(assistantMsg),
     }, sessionId);
 
+    runManager.abort(sessionId);
+    runManager.setAbortHandle(sessionId, null);
+    finishRunSession(sessionId);
+
     window.setTimeout(() => {
-      if (!runManager.has(sessionId)) void resumeAgentRun(assistantMsg.id, { silent: true });
+      void resumeAgentRun(assistantMsg.id, { silent: true });
     }, AGENT_SILENT_CONTINUE_DELAY_MS);
     return true;
   }
@@ -1051,6 +1104,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       agentRecoveryDismissed: false,
       content: assistantMsg.content,
       streaming: false,
+      agentPhase: undefined,
       activityExpanded: recoverable ? true : assistantMsg.activityExpanded,
       totalTurns: assistantMsg.totalTurns,
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
@@ -1161,7 +1215,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       const turnText = stripTextToolCallMarkup(
         stripToolSummaryFromAssistantContent(event.data.assistantText || ""),
       );
-      if (turnText) {
+      if (turnText && event.data.isFinal) {
         assistantMsg.content = mergeAssistantTurnText(assistantMsg.content || "", turnText);
       }
       assistantMsg.streaming = false;
@@ -1393,6 +1447,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         if (!assistantMsg.totalTurns) assistantMsg.totalTurns = completedTurns;
         patchAssistantMsg(msgId, {
           streaming: false,
+          agentPhase: undefined,
           totalTurns: assistantMsg.totalTurns,
           ...syncRoundGroupsPatch(assistantMsg),
         });
@@ -1501,11 +1556,77 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         return;
       }
 
+      const spuriousDoneAfterInterrupt =
+        !wasAborted &&
+        event.data.turns === 0 &&
+        hadProgress &&
+        !hasRunningTools &&
+        !hasAgentFinalAnswer(assistantMsg);
+
+      if (spuriousDoneAfterInterrupt) {
+        if (trySilentContinue(sessionId, assistantMsg, "连接中断（运行未完成）")) {
+          if (!assistantMsg.totalTurns) {
+            assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
+          }
+          patchAssistantMsg(msgId, {
+            streaming: false,
+            totalTurns: assistantMsg.totalTurns,
+            ...syncRoundGroupsPatch(assistantMsg),
+          });
+          persistChatNow();
+          persistAgentRunSession(sessionId);
+          void scrollChatToBottom();
+          return;
+        }
+        handleRecoverableInterruption(sessionId, assistantMsg, "连接中断（运行未完成）", { logStatus: true });
+        finishRunSession(sessionId);
+        if (!assistantMsg.totalTurns) {
+          assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
+        }
+        patchAssistantMsg(msgId, {
+          streaming: false,
+          totalTurns: assistantMsg.totalTurns,
+          agentFailed: assistantMsg.agentFailed,
+          agentRecoverable: assistantMsg.agentRecoverable,
+          agentFailureReason: assistantMsg.agentFailureReason,
+          agentRecoveryDismissed: assistantMsg.agentRecoveryDismissed,
+          content: assistantMsg.content,
+          statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
+          ...syncRoundGroupsPatch(assistantMsg),
+        });
+        persistChatNow();
+        void scrollChatToBottom();
+        return;
+      }
+
       assistantMsg.totalTurns = completedTurns;
       appendStatusLog(
         assistantMsg,
         wasAborted ? `已停止（共 ${completedTurns} 轮）` : `完成（共 ${completedTurns} 轮）`,
       );
+
+      if (!wasAborted && hadProgress && !hasAgentFinalAnswer(assistantMsg)) {
+        handleRecoverableInterruption(sessionId, assistantMsg, "运行中断（未生成最终回复）", {
+          logStatus: true,
+        });
+        assistantMsg.content = resolveAgentFailureBubbleContent(assistantMsg);
+        finishRunSession(sessionId);
+        patchAssistantMsg(msgId, {
+          streaming: false,
+          content: assistantMsg.content,
+          agentFailed: assistantMsg.agentFailed,
+          agentRecoverable: assistantMsg.agentRecoverable,
+          agentFailureReason: assistantMsg.agentFailureReason,
+          agentRecoveryDismissed: assistantMsg.agentRecoveryDismissed,
+          totalTurns: assistantMsg.totalTurns,
+          statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
+          activityExpanded: true,
+          ...syncRoundGroupsPatch(assistantMsg),
+        });
+        persistChatNow(undefined, { flushStore: true });
+        void scrollChatToBottom();
+        return;
+      }
 
       const turnFileDiffPaths = assistantMsg.turnFileDiffs
         ? Object.keys(assistantMsg.turnFileDiffs)
@@ -1711,12 +1832,12 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     assistantMsg.agentFailed = false;
     assistantMsg.agentRecoverable = false;
     assistantMsg.agentFailureReason = undefined;
-    assistantMsg.agentRecoveryDismissed = true;
     assistantMsg.agentAborted = false;
     assistantMsg.agentAbortReason = undefined;
     assistantMsg.streaming = false;
-    const resumedContent = resolveAssistantBubbleContent({ ...assistantMsg, content: "" });
-    if (resumedContent) assistantMsg.content = resumedContent;
+    if (hasAgentRunStructure(assistantMsg) && !hasAgentFinalAnswer(assistantMsg)) {
+      assistantMsg.content = "";
+    }
     assistantMsg.activityExpanded = true;
     assistantMsg.activityDetailed = true;
     assistantMsg.agentPhase = "connecting_local";
@@ -1736,7 +1857,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       agentFailed: false,
       agentRecoverable: false,
       agentFailureReason: undefined,
-      agentRecoveryDismissed: true,
       content: assistantMsg.content,
       agentAborted: false,
       agentAbortReason: undefined,
@@ -1749,6 +1869,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       ...syncRoundGroupsPatch(assistantMsg),
     }, sessionId);
     persistChatNow();
+    snapshotAgentRunSession?.(sessionId);
     await scrollChatToBottom(true);
 
     const history = shapeAgentHistoryForProfile(
@@ -1789,17 +1910,157 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   ) {
     const rawPrompt = userText.trim();
     const project = projectPath.value.trim();
-    const imageSources = options && 'imageDataUrls' in options
-      ? (options.imageDataUrls ?? [])
-      : await resolveImagesForAgentTurn(project, chatMessages.value);
-    const compressedImages = imageSources.length
-      ? await compressImageDataUrlsForAgent(imageSources)
-      : undefined;
-    const hasImages = Boolean(compressedImages?.length);
-    if ((!rawPrompt && !hasImages) || !configReady.value || !projectOpened.value) return;
+    if (!configReady.value || !projectOpened.value) return;
+
+    reloadAiConfig();
+    clearStreamDeltaBuffer();
+    const sessionId = activeSessionId.value;
+    const mode = chatMode.value;
+
+    function rollbackTurnPlaceholders(skipUserBubble?: boolean) {
+      const msgs = chatMessages.value;
+      if (msgs.length > 0 && msgs[msgs.length - 1]?.role === "assistant") msgs.pop();
+      if (!skipUserBubble && msgs.length > 0 && msgs[msgs.length - 1]?.role === "user") msgs.pop();
+    }
+
+    function attachUserImages(imageDataUrls?: string[]) {
+      if (!imageDataUrls?.length || options?.skipUserBubble) return;
+      for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
+        const msg = chatMessages.value[i];
+        if (msg?.role === "user") {
+          msg.imageDataUrls = [...imageDataUrls];
+          break;
+        }
+      }
+    }
+
+    let assistantMsg: ChatMessage;
+    let compressedImagesForRequest: string[] | undefined;
+    let hasImagesForRequest = false;
+
+    if (options?.resumeAssistantMsg) {
+      assistantMsg = options.resumeAssistantMsg;
+      const imageSources =
+        options && "imageDataUrls" in options
+          ? (options.imageDataUrls ?? [])
+          : await resolveImagesForAgentTurn(project, chatMessages.value);
+      compressedImagesForRequest = imageSources.length
+        ? await compressImageDataUrlsForAgent(imageSources)
+        : undefined;
+      hasImagesForRequest = Boolean(compressedImagesForRequest?.length);
+    } else {
+      const canBootstrapEarly = Boolean(
+        rawPrompt || options?.skipUserBubble || (options?.imageDataUrls?.length ?? 0) > 0,
+      );
+
+      if (canBootstrapEarly) {
+        if (runManager.has(sessionId)) {
+          interruptSessionRun(sessionId, { logStatus: true, reason: "已被新指令打断" });
+        }
+        beginAgentRunSession(sessionId);
+        chatError.value = "";
+        resetChatScrollPin();
+
+        if (!options?.skipUserBubble) {
+          chatMessages.value.push({
+            id: genId(),
+            role: "user",
+            content: options?.userBubbleContent ?? stripReferenceAttachments(rawPrompt),
+            imageDataUrls: options?.imageDataUrls?.length ? [...options.imageDataUrls] : undefined,
+          });
+        }
+
+        const preparingStatus = formatAgentStatus({ phase: "preparing" });
+        assistantMsg = {
+          id: genId(),
+          role: "assistant",
+          content: "",
+          chatMode: mode,
+          tools: [],
+          roundGroups: [],
+          activityExpanded: true,
+          activityDetailed: true,
+          streaming: true,
+          agentPhase: "preparing",
+          status: preparingStatus,
+        };
+        chatMessages.value.push(assistantMsg);
+        persistChatNow();
+        snapshotAgentRunSession?.(sessionId);
+        await scrollChatToBottom(true);
+      }
+
+      const imageSources =
+        options && "imageDataUrls" in options
+          ? (options.imageDataUrls ?? [])
+          : await resolveImagesForAgentTurn(project, chatMessages.value);
+      compressedImagesForRequest = imageSources.length
+        ? await compressImageDataUrlsForAgent(imageSources)
+        : undefined;
+      hasImagesForRequest = Boolean(compressedImagesForRequest?.length);
+
+      if (!rawPrompt && !hasImagesForRequest) {
+        if (canBootstrapEarly) {
+          endAgentRunSession(sessionId);
+          rollbackTurnPlaceholders(options?.skipUserBubble);
+          persistChatNow();
+        }
+        return;
+      }
+
+      if (canBootstrapEarly) {
+        attachUserImages(compressedImagesForRequest);
+        const connectStatus = formatAgentStatus({
+          phase: "connecting_local",
+          detail: hasImagesForRequest ? "上传图片中…" : undefined,
+        });
+        assistantMsg!.agentPhase = "connecting_local";
+        assistantMsg!.agentDetail = hasImagesForRequest ? "上传图片中…" : undefined;
+        assistantMsg!.status = connectStatus;
+        assistantMsg!.streaming = true;
+        persistChatNow();
+        snapshotAgentRunSession?.(sessionId);
+      } else {
+        if (runManager.has(sessionId)) {
+          interruptSessionRun(sessionId, { logStatus: true, reason: "已被新指令打断" });
+        }
+        beginAgentRunSession(sessionId);
+        chatError.value = "";
+        resetChatScrollPin();
+
+        if (!options?.skipUserBubble) {
+          chatMessages.value.push({
+            id: genId(),
+            role: "user",
+            content: options?.userBubbleContent ?? stripReferenceAttachments(rawPrompt),
+            imageDataUrls: compressedImagesForRequest?.length ? [...compressedImagesForRequest] : undefined,
+          });
+        }
+        assistantMsg = {
+          id: genId(),
+          role: "assistant",
+          content: "",
+          chatMode: mode,
+          tools: [],
+          roundGroups: [],
+          activityExpanded: true,
+          activityDetailed: true,
+          streaming: true,
+          agentPhase: "connecting_local",
+          agentDetail: hasImagesForRequest ? "上传图片中…" : undefined,
+          status: formatAgentStatus({
+            phase: "connecting_local",
+            detail: hasImagesForRequest ? "上传图片中…" : undefined,
+          }),
+        };
+        chatMessages.value.push(assistantMsg);
+        persistChatNow();
+        snapshotAgentRunSession?.(sessionId);
+        await scrollChatToBottom(true);
+      }
+    }
 
     const lastAssistant = options?.planAssistantContent ?? findLastAssistantContent();
-    const mode = chatMode.value;
     const runProfile = resolveAgentRunProfile({
       prompt: rawPrompt,
       mode,
@@ -1810,62 +2071,14 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     const prompt = buildAgentPromptForProfile(
       enrichAgentUserPrompt(rawPrompt, {
         lastAssistantContent: lastAssistant,
-        hasImages,
+        hasImages: hasImagesForRequest,
       }),
       runProfile,
     );
 
-    reloadAiConfig();
-    clearStreamDeltaBuffer();
-    const sessionId = activeSessionId.value;
-    if (runManager.has(sessionId)) {
-      interruptSessionRun(sessionId, { logStatus: true, reason: "已被新指令打断" });
-    }
-    beginAgentRunSession(sessionId);
-    chatError.value = "";
-    resetChatScrollPin();
-
     const history = buildAgentHistory(rawPrompt, runProfile);
 
-    let assistantMsg: ChatMessage;
-    if (options?.resumeAssistantMsg) {
-      assistantMsg = options.resumeAssistantMsg;
-    } else {
-      if (!options?.skipUserBubble) {
-        chatMessages.value.push({
-          id: genId(),
-          role: "user",
-          content: options?.userBubbleContent ?? stripReferenceAttachments(rawPrompt),
-          imageDataUrls: compressedImages?.length ? [...compressedImages] : undefined,
-        });
-      }
-      assistantMsg = {
-        id: genId(),
-        role: "assistant",
-        content: "",
-        chatMode: mode,
-        tools: [],
-        roundGroups: [],
-        activityExpanded: true,
-        activityDetailed: true,
-        agentPhase: "connecting_local",
-        agentDetail: hasImages ? "上传图片中…" : undefined,
-        status: formatAgentStatus({
-          phase: "connecting_local",
-          detail: hasImages ? "上传图片中…" : undefined,
-        }),
-      };
-      chatMessages.value.push(assistantMsg);
-      assistantMsg.roundGroups = recordAgentRoundStatus(
-        assistantMsg.roundGroups,
-        "connecting_local",
-        assistantMsg.status || "",
-      );
-      persistChatNow();
-      await scrollChatToBottom(true);
-    }
-
-    const runGen = runManager.start(sessionId, assistantMsg.id, assistantMsg, hasImages);
+    const runGen = runManager.start(sessionId, assistantMsg.id, assistantMsg, hasImagesForRequest);
     startAgentUiTick();
     const agentRequest = {
       prompt,
@@ -1878,7 +2091,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       maxTurns: resolveAgentMaxTurns(mode, runProfile),
       openFilePath: activeFilePath.value || undefined,
       runProfile: runProfile.kind === "execute_plan" ? runProfile : undefined,
-      imageDataUrls: compressedImages?.length ? compressedImages : undefined,
+      imageDataUrls: compressedImagesForRequest?.length ? compressedImagesForRequest : undefined,
     };
     // 持久化请求状态，以便 HMR 重载后恢复
     persistAgentRunForHmr({

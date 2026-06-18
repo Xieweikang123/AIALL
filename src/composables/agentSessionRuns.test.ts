@@ -30,4 +30,13 @@ describe("createAgentSessionRunManager", () => {
     expect(mgr.has("session-b")).toBe(true);
     expect(mgr.size()).toBe(1);
   });
+
+  it("listRuns returns all active runs", () => {
+    const mgr = createAgentSessionRunManager();
+    mgr.start("session-a", "msg-a", { id: "msg-a" }, false);
+    mgr.start("session-b", "msg-b", { id: "msg-b" }, true);
+    const runs = mgr.listRuns();
+    expect(runs).toHaveLength(2);
+    expect(runs.map((r) => r.sessionId).sort()).toEqual(["session-a", "session-b"]);
+  });
 });

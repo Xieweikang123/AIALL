@@ -9,10 +9,12 @@ export type AssistantBubbleSource = {
   content?: string;
   roundGroups?: AgentRoundGroup[];
   turnTraces?: Array<{ turn?: number; assistantText?: string }>;
+  tools?: Array<{ running?: boolean; turn?: number }>;
 };
 
 export type LiveAgentAnswerSource = AssistantBubbleSource & {
   agentTurn?: number;
+  agentPhase?: string;
 };
 
 export type FinalizeAssistantBubbleSource = AssistantBubbleSource & {
@@ -29,10 +31,21 @@ const THIN_EPILOGUE_MAX_CHARS = 96;
 
 const ENGLISH_TOOL_NARRATION_RE = /^(?:Now let me|Let me|I'll|I need to|First,?\s+I)\b/i;
 
+const CHINESE_TOOL_NARRATION_RE =
+  /^(?:现在|接下来|让我|我来|我们|下面|先|然后|再|我需要|我要)\s*(?:看看|查看|读取|搜索|检查|分析|确认|定位|找到|打开|找|查|读|写|看|试|仔细)/;
+
 function normalizeBubbleText(text: string): string {
   return stripAgentSuggestions(
     stripTextToolCallMarkup(stripToolSummaryFromAssistantContent(text)),
   ).trim();
+}
+
+/** Short planning lines emitted before tool calls — not user-facing answers. */
+export function isAgentToolTurnNarration(text: string): boolean {
+  const trimmed = normalizeBubbleText(text);
+  if (!trimmed) return false;
+  if (isEnglishToolNarration(trimmed)) return true;
+  return CHINESE_TOOL_NARRATION_RE.test(trimmed);
 }
 
 /** Short English planning lines emitted before tool calls — not user-facing answers. */
@@ -50,6 +63,7 @@ export function mergeAssistantTurnText(existing: string, incoming: string): stri
   const prev = normalizeBubbleText(existing);
   const next = normalizeBubbleText(incoming);
   if (isEnglishToolNarration(next)) return prev;
+  if (isAgentToolTurnNarration(next)) return prev;
   if (!prev) return next;
   if (!next) return prev;
   if (prev === next) return prev;
@@ -63,23 +77,57 @@ export function mergeAssistantTurnText(existing: string, incoming: string): stri
   return `${prev}\n\n${next}`;
 }
 
+/** Agent run with tool/turn metadata (distinct from plain assistant chat). */
+export function hasAgentRunStructure(msg: AssistantBubbleSource): boolean {
+  return Boolean(
+    msg.roundGroups?.some((group) => group.turn > 0) ||
+      msg.tools?.length ||
+      msg.turnTraces?.length,
+  );
+}
+
+function resolveFinalAssistantText(msg: AssistantBubbleSource): string {
+  return (
+    msg.roundGroups
+      ?.filter((group) => group.response?.isFinal && group.response.assistantText.trim())
+      .at(-1)?.response?.assistantText.trim() || ""
+  );
+}
+
+/**
+ * User-visible answer exists only after the server marks a turn `isFinal`,
+ * or for non-agent assistant messages that only use `content`.
+ */
+export function hasAgentFinalAnswer(msg: AssistantBubbleSource): boolean {
+  if (resolveFinalAssistantText(msg)) return true;
+  if (!hasAgentRunStructure(msg)) {
+    return Boolean(normalizeBubbleText(msg.content || ""));
+  }
+  return false;
+}
+
 function collectAssistantTextCandidates(msg: AssistantBubbleSource): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   const push = (raw?: string) => {
     const text = normalizeBubbleText(raw || "");
-    if (!text || seen.has(text) || isEnglishToolNarration(text)) return;
+    if (!text || seen.has(text) || isAgentToolTurnNarration(text)) return;
     seen.add(text);
     out.push(text);
   };
 
-  push(msg.content);
-  for (const group of msg.roundGroups ?? []) {
-    push(group.narrative);
-    push(group.response?.assistantText);
+  if (!hasAgentRunStructure(msg)) {
+    push(msg.content);
+    return out;
   }
-  for (const trace of msg.turnTraces ?? []) {
-    push(trace.assistantText);
+
+  for (const group of msg.roundGroups ?? []) {
+    if (group.response?.isFinal) {
+      push(group.response.assistantText);
+    }
+  }
+  if (hasAgentFinalAnswer(msg)) {
+    push(msg.content);
   }
   return out;
 }
@@ -112,15 +160,21 @@ function pickBestAssistantBubbleText(candidates: string[], direct: string): stri
   return direct;
 }
 
-/** Live answer text from the active round narrative while the agent is streaming. */
+/** Live final-answer stream while the model is still generating (not tool-turn preamble). */
 export function resolveLiveAgentAnswerPreview(msg: LiveAgentAnswerSource): string {
+  if (msg.tools?.some((tool) => tool.running)) return "";
+  if (msg.agentPhase && msg.agentPhase !== "streaming_model") return "";
+
   const groups = msg.roundGroups ?? [];
   const activeTurn = msg.agentTurn;
   const group =
     (activeTurn && activeTurn > 0 ? groups.find((item) => item.turn === activeTurn) : undefined) ??
     groups.filter((item) => item.turn > 0).at(-1);
-  const text = normalizeBubbleText(group?.narrative || "");
-  if (!text || isEnglishToolNarration(text)) return "";
+  if (!group) return "";
+  if (group.response?.hasToolCalls) return "";
+
+  const text = normalizeBubbleText(group.narrative || group.response?.assistantText || "");
+  if (!text || isAgentToolTurnNarration(text)) return "";
   return text;
 }
 
@@ -145,18 +199,11 @@ export function isAgentTimelineAnswerStreaming(
 
 /** Resolve the text shown in the assistant chat bubble (with fallbacks for agent runs). */
 export function resolveAssistantBubbleContent(msg: AssistantBubbleSource): string {
+  if (hasAgentRunStructure(msg) && !hasAgentFinalAnswer(msg)) return "";
   const direct = normalizeBubbleText(msg.content || "");
   const candidates = collectAssistantTextCandidates(msg);
   if (!direct && !candidates.length) return "";
   return pickBestAssistantBubbleText(candidates, direct);
-}
-
-function resolveFinalAssistantText(msg: AssistantBubbleSource): string {
-  return (
-    msg.roundGroups
-      ?.filter((group) => group.response?.isFinal && group.response.assistantText.trim())
-      .at(-1)?.response?.assistantText.trim() || ""
-  );
 }
 
 function resolveVisionRegionPreamble(msg: AssistantBubbleSource): string {
@@ -251,6 +298,7 @@ function pickFallbackWhenFinalTruncated(msg: AssistantBubbleSource, finalText: s
 
 /** Whether the model already gave a substantive completion summary. */
 export function hasSubstantiveAgentSummary(msg: AssistantBubbleSource): boolean {
+  if (hasAgentRunStructure(msg) && !hasAgentFinalAnswer(msg)) return false;
   const finalFromRound = resolveFinalAssistantText(msg);
   const direct = normalizeBubbleText(msg.content || "");
   const finalText = finalFromRound
@@ -278,14 +326,22 @@ export function buildWrittenFilesSummary(writtenFiles: string[], wasAborted = fa
 
 /** Append file-write summary when the run ended without a model completion message. */
 export function finalizeAssistantBubbleContent(msg: FinalizeAssistantBubbleSource): string {
+  const writtenFiles = msg.writtenFiles?.filter(Boolean) ?? [];
+
+  if (hasAgentRunStructure(msg) && !hasAgentFinalAnswer(msg)) {
+    if (writtenFiles.length) {
+      return buildWrittenFilesSummary(writtenFiles, Boolean(msg.wasAborted));
+    }
+    return "";
+  }
+
   const base = msg.roundGroups?.some((g) => g.response?.isFinal)
     ? resolveCompletedAgentBubbleContent(msg)
     : resolveAssistantBubbleContent(msg);
-  if (msg.wasAborted && !base.trim() && !msg.writtenFiles?.length) {
+  if (msg.wasAborted && !base.trim() && !writtenFiles.length) {
     const reason = msg.agentAbortReason?.trim() || "运行已中断";
     return `运行已中断：${reason}`;
   }
-  const writtenFiles = msg.writtenFiles?.filter(Boolean) ?? [];
   if (!writtenFiles.length) return base;
   if (msg.agentFailed) return base;
   if (!msg.wasAborted && hasSubstantiveAgentSummary(msg)) return base;

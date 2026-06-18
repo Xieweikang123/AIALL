@@ -77,6 +77,10 @@ export function createAgentSessionRunManager<TMsg = unknown>() {
     return runs.get(activeSessionId)?.abortHandle ?? null;
   }
 
+  function listRuns(): SessionAgentRun<TMsg>[] {
+    return [...runs.values()];
+  }
+
   return {
     start,
     get,
@@ -89,5 +93,6 @@ export function createAgentSessionRunManager<TMsg = unknown>() {
     abort,
     touchProgress,
     getActiveAbortHandle,
+    listRuns,
   };
 }

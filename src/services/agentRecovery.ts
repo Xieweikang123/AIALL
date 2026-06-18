@@ -1,4 +1,6 @@
 import {
+  hasAgentFinalAnswer,
+  hasAgentRunStructure,
   hasSubstantiveAgentSummary,
   PARTIAL_WRITE_ABORT_HEADING,
   resolveAssistantBubbleContent,
@@ -107,7 +109,10 @@ export const AGENT_AUTO_RESUME_SECONDS = 3;
 export const AGENT_AUTO_RESUME_IMMEDIATE_SECONDS = 2;
 
 /** Max silent client-side continuations after transport interruption (per assistant message). */
-export const AGENT_SILENT_CONTINUE_MAX = 8;
+export const AGENT_SILENT_CONTINUE_MAX = 3;
+
+/** Shorter model-wait stall threshold after silent continue — fail fast instead of showing half-replies. */
+export const AGENT_CONTINUE_MODEL_WAIT_STALL_MS = 60_000;
 
 /** Brief backoff before chaining the next SSE segment on the client. */
 export const AGENT_SILENT_CONTINUE_DELAY_MS = 400;
@@ -145,7 +150,8 @@ export function isRecoverableAgentError(message: string): boolean {
     msg.includes("timeout") ||
     msg.includes("timed out") ||
     msg.includes("超时") ||
-    msg.includes("首包") ||
+    msg.includes("首包超时") ||
+    msg.includes("等待首包超时") ||
     msg.includes("连接中断") ||
     msg.includes("连接失败") ||
     msg.includes("未收到完成信号") ||
@@ -202,6 +208,9 @@ export type AgentRecoveryFlags = {
   agentFailureReason: string;
 };
 
+const AGENT_STATUS_PROGRESS_RE =
+  /^(?:正在|模型(?:输出|规划|请求)|继续执行（自动续跑|自动续跑（第 \d+ 次）|任务较长)/;
+
 function extractFailureReasonFromStatusLog(statusLog?: string[]): string | null {
   if (!statusLog?.length) return null;
   for (let i = statusLog.length - 1; i >= 0; i -= 1) {
@@ -210,9 +219,27 @@ function extractFailureReasonFromStatusLog(statusLog?: string[]): string | null 
     const match = line.match(/^连接中断：(.+?)（可恢复运行）$/);
     if (match?.[1]) return match[1].trim();
     if (line.startsWith("错误：")) return line.slice(3).trim();
+    if (line.startsWith("自动续跑（第 ") && line.includes("）：")) {
+      const reason = line.replace(/^自动续跑（第 \d+ 次）：/, "").trim();
+      if (reason && isRecoverableAgentError(reason)) return reason;
+      continue;
+    }
+    if (AGENT_STATUS_PROGRESS_RE.test(line)) continue;
     if (isRecoverableAgentError(line)) return line.replace(/^连接中断：/, "").trim();
   }
   return null;
+}
+
+/** Run ended with tool progress but no final (`isFinal`) user-visible answer. */
+export function isIncompleteAgentRunWithoutFinalAnswer(
+  msg: AgentProgressSource & {
+    agentAborted?: boolean;
+  },
+): boolean {
+  if (msg.agentAborted) return false;
+  if (!hasRecoverableAgentProgress(msg)) return false;
+  if (!msg.roundGroups?.some((group) => group.turn > 0)) return false;
+  return !hasAgentFinalAnswer(msg);
 }
 
 /** Infer recovery flags for legacy sessions or incomplete error handling. */
@@ -225,6 +252,7 @@ export function inferAgentRecoveryFlags(msg: AgentProgressSource & {
   agentAborted?: boolean;
   agentAbortReason?: string;
   agentRecoveryDismissed?: boolean;
+  agentContinueCount?: number;
   streaming?: boolean;
   statusLog?: string[];
 }): AgentRecoveryFlags | null {
@@ -263,6 +291,14 @@ export function inferAgentRecoveryFlags(msg: AgentProgressSource & {
 
   if (msg.agentAborted) return null;
 
+  if (isIncompleteAgentRunWithoutFinalAnswer(msg)) {
+    return {
+      agentFailed: true,
+      agentRecoverable: true,
+      agentFailureReason: "运行中断（未生成最终回复）",
+    };
+  }
+
   if (msg.agentRecoveryDismissed) return null;
 
   if (msg.agentFailed && msg.agentRecoverable) {
@@ -283,7 +319,7 @@ export function inferAgentRecoveryFlags(msg: AgentProgressSource & {
   const candidates = [
     msg.agentFailureReason?.trim(),
     extractFailureReasonFromStatusLog(msg.statusLog),
-    msg.content?.trim(),
+    ...(msg.roundGroups?.some((group) => group.turn > 0) ? [msg.content?.trim()] : []),
   ].filter(Boolean) as string[];
 
   for (const candidate of candidates) {
@@ -304,14 +340,13 @@ export function resolveAgentFailureBubbleContent(
   msg: AgentProgressSource & { content?: string },
 ): string {
   const direct = stripToolSummaryFromAssistantContent(msg.content?.trim() || "");
-  if (direct && !isRecoverableAgentError(direct)) return direct;
+  const staleIncompleteAnswer =
+    hasAgentRunStructure(msg) && !hasAgentFinalAnswer(msg) && Boolean(direct);
+  if (direct && !staleIncompleteAnswer && !isRecoverableAgentError(direct)) return direct;
 
   const fromProgress = resolveAssistantBubbleContent({
     ...msg,
-    content: direct && isRecoverableAgentError(direct) ? "" : direct,
-    turnTraces: msg.turnTraces
-      ?.filter((t): t is { assistantText: string } => Boolean(t.assistantText?.trim()))
-      .map((t) => ({ assistantText: t.assistantText! })),
+    content: staleIncompleteAnswer || (direct && isRecoverableAgentError(direct)) ? "" : direct,
   });
   if (fromProgress) return fromProgress;
 
@@ -436,6 +471,46 @@ export function buildAgentResumePrompt(
   ].join("\n");
 }
 
+function passesAgentAbortResumeGate(
+  msg: AgentProgressSource & {
+    agentAborted?: boolean;
+    agentAbortReason?: string;
+    agentFailureReason?: string;
+    writtenFiles?: string[];
+    content?: string;
+  },
+): boolean {
+  if (msg.agentAborted && !isPartialWrittenRunInterrupt(msg)) {
+    const hmrReason = msg.agentAbortReason || msg.agentFailureReason || "";
+    if (!(isHmrInterruptReason(hmrReason) && hasRecoverableAgentProgress(msg))) return false;
+  }
+  return true;
+}
+
+/** Apply inferred recovery flags onto a persisted assistant message. */
+export function applyInferredAgentRecovery(
+  msg: AgentProgressSource & {
+    role?: string;
+    content?: string;
+    agentFailed?: boolean;
+    agentRecoverable?: boolean;
+    agentFailureReason?: string;
+    agentRecoveryDismissed?: boolean;
+    activityExpanded?: boolean;
+  },
+): boolean {
+  if (msg.role && msg.role !== "assistant") return false;
+  const inferred = inferAgentRecoveryFlags(msg);
+  if (!inferred?.agentRecoverable) return false;
+  msg.agentFailed = inferred.agentFailed;
+  msg.agentRecoverable = inferred.agentRecoverable;
+  msg.agentFailureReason = inferred.agentFailureReason;
+  msg.agentRecoveryDismissed = false;
+  msg.content = resolveAgentFailureBubbleContent(msg);
+  msg.activityExpanded = msg.activityExpanded ?? true;
+  return true;
+}
+
 export function canResumeAgentRun(msg: AgentProgressSource & {
   role?: string;
   agentFailed?: boolean;
@@ -446,13 +521,14 @@ export function canResumeAgentRun(msg: AgentProgressSource & {
   agentRecoveryDismissed?: boolean;
   streaming?: boolean;
 }): boolean {
-  if (msg.streaming || msg.agentRecoveryDismissed) return false;
+  if (msg.streaming) return false;
+
+  const inferred = inferAgentRecoveryFlags(msg);
+  if (inferred?.agentRecoverable && passesAgentAbortResumeGate(msg)) return true;
+
+  if (msg.agentRecoveryDismissed) return false;
   if (!msg.agentFailed || !msg.agentRecoverable) return false;
-  if (msg.agentAborted && !isPartialWrittenRunInterrupt(msg)) {
-    const hmrReason = msg.agentAbortReason || msg.agentFailureReason || "";
-    if (!(isHmrInterruptReason(hmrReason) && hasRecoverableAgentProgress(msg))) return false;
-  }
-  return true;
+  return passesAgentAbortResumeGate(msg);
 }
 
 export function recoverableAgentErrorHint(

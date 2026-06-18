@@ -15,6 +15,7 @@ import {
   isAgentConnectStalled,
   isAgentRunStalled,
   isRecoverableAgentError,
+  isIncompleteAgentRunWithoutFinalAnswer,
   isPartialWrittenRunInterrupt,
   PARTIAL_RUN_RESUME_REASON,
   resolveAgentResumeButtonLabel,
@@ -68,7 +69,7 @@ describe("shouldAutoResumeAgentError", () => {
   it("uses a 2–10 second countdown window", () => {
     expect(AGENT_AUTO_RESUME_IMMEDIATE_SECONDS).toBeGreaterThanOrEqual(1);
     expect(AGENT_AUTO_RESUME_IMMEDIATE_SECONDS).toBeLessThan(AGENT_AUTO_RESUME_SECONDS);
-    expect(AGENT_AUTO_RESUME_SECONDS).toBeGreaterThanOrEqual(5);
+    expect(AGENT_AUTO_RESUME_SECONDS).toBeGreaterThanOrEqual(2);
     expect(AGENT_AUTO_RESUME_SECONDS).toBeLessThanOrEqual(10);
   });
 
@@ -332,6 +333,63 @@ describe("inferAgentRecoveryFlags", () => {
     expect(flags?.agentFailureReason).toBe(PARTIAL_RUN_RESUME_REASON);
   });
 
+  it("re-infers incomplete silent-continue run even when recovery was dismissed", () => {
+    const flags = inferAgentRecoveryFlags({
+      role: "assistant",
+      agentRecoveryDismissed: true,
+      agentContinueCount: 3,
+      content: "让我看看 `useProjectMemory.ts` 中归档保存的完整流程，以及归档文件如何被后续注入。",
+      tools: [{ running: false, summary: "读取 149 行内容", turn: 1 }],
+      statusLog: [
+        "继续执行（自动续跑 3/8）…",
+        "正在发送模型请求… · 正在发送请求…",
+      ],
+      roundGroups: [
+        { turn: 1, maxTurns: 40, modelSteps: [], toolIds: ["t1"] },
+      ],
+    });
+    expect(flags?.agentRecoverable).toBe(true);
+    expect(flags?.agentFailureReason).toBe("运行中断（未生成最终回复）");
+  });
+
+  it("does not treat normal model-wait status lines as recoverable errors", () => {
+    expect(
+      isRecoverableAgentError("正在等待模型响应（第 7/24 轮 · mimo-v2.5）… · 等待模型首包 · 3s"),
+    ).toBe(false);
+  });
+});
+
+describe("isIncompleteAgentRunWithoutFinalAnswer", () => {
+  it("detects incomplete agent run without final answer", () => {
+    expect(
+      isIncompleteAgentRunWithoutFinalAnswer({
+        tools: [{ running: false, summary: "ok", turn: 1 }],
+        roundGroups: [{ turn: 1, maxTurns: 24, modelSteps: [], toolIds: ["t1"] }],
+        content: "让我看看相关逻辑。",
+      }),
+    ).toBe(true);
+  });
+
+  it("returns false when a substantive final answer exists", () => {
+    expect(
+      isIncompleteAgentRunWithoutFinalAnswer({
+        tools: [{ running: false, summary: "ok", turn: 1 }],
+        content: "A".repeat(80),
+        roundGroups: [
+          {
+            turn: 2,
+            maxTurns: 24,
+            modelSteps: [],
+            toolIds: [],
+            response: { assistantText: "A".repeat(80), hasToolCalls: false, isFinal: true, toolCalls: [] },
+          },
+        ],
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("inferAgentRecoveryFlags (continued)", () => {
   it("infers recoverable flags for HMR-aborted runs with progress", () => {
     const flags = inferAgentRecoveryFlags({
       role: "assistant",
@@ -352,7 +410,7 @@ describe("resolveAgentFailureBubbleContent", () => {
       turnTraces: [{ turn: 1, assistantText: "分析输入框结构" }],
     });
     expect(text).not.toBe("Failed to fetch");
-    expect(text).toContain("分析输入框结构");
+    expect(text).toContain("恢复运行");
   });
 });
 
