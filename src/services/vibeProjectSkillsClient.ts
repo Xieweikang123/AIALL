@@ -1,10 +1,11 @@
 import { backendUrl } from "./backendBase";
 import { formatFetchError, readJsonResponse } from "./vibeCodingClient";
-import type { SkillIndexEntry } from "./projectSkills";
+import type { ExplorationIndexEntry, SkillIndexEntry } from "./projectSkills";
 
 export type ProjectSkillsListPayload = {
   ok: boolean;
   skills?: SkillIndexEntry[];
+  exploration?: ExplorationIndexEntry[];
   error?: string;
 };
 
@@ -38,7 +39,15 @@ export async function fetchProjectSkills(projectPath: string): Promise<ProjectSk
     const response = await fetch(
       backendUrl(`/backend/vibe/project-skills?projectPath=${encodeURIComponent(trimmed)}`),
     );
-    return await readJsonResponse<ProjectSkillsListPayload>(response);
+    const data = await readJsonResponse<
+      ProjectSkillsListPayload & { index?: { skills?: SkillIndexEntry[]; exploration?: ExplorationIndexEntry[] } }
+    >(response);
+    if (!data.ok) return data;
+    return {
+      ok: true,
+      skills: data.skills ?? data.index?.skills ?? [],
+      exploration: data.exploration ?? data.index?.exploration ?? [],
+    };
   } catch (error) {
     return { ok: false, error: formatFetchError(error, "读取 skills 失败") };
   }

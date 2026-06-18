@@ -267,18 +267,26 @@
         :token-detail-data="tokenDetailData"
         :total-token-usage="totalTokenUsage"
         :project-memory-open="projectMemoryOpen"
+        :project-memory-tab="projectMemoryTab"
         :project-memory-draft="projectMemoryDraft"
         :project-memory-loading="projectMemoryLoading"
         :project-memory-saving="projectMemorySaving"
         :project-memory-message="projectMemoryMessage"
         :project-memory-max-chars="projectMemoryMaxChars"
         :project-memory-has-content="projectMemoryHasContent"
-        :memory-suggest-open="memorySuggestOpen"
+        :project-skills-list="projectSkillsList"
+        :project-exploration-list="projectExplorationList"
+        :project-skills-loading="projectSkillsLoading"
+        :selected-skill-slug="selectedSkillSlug"
+        :skill-draft-title="skillDraftTitle"
+        :skill-draft-kind="skillDraftKind"
+        :skill-draft-body="skillDraftBody"
+        :skill-detail-loading="skillDetailLoading"
+        :skill-saving="skillSaving"
+        :selected-exploration-id="selectedExplorationId"
+        :exploration-content="explorationContent"
+        :exploration-detail-loading="explorationDetailLoading"
         :memory-suggest-saving="memorySuggestSaving"
-        :memory-suggest-message="memorySuggestMessage"
-        :memory-suggest-candidates="memorySuggestCandidates"
-        :memory-suggest-archive="memorySuggestArchive"
-        :memory-suggest-skill-proposals="memorySuggestSkillProposals"
         :pending-memory-proposals="pendingMemoryProposals"
         :pending-skill-proposals="pendingSkillProposals"
         :agent-suggestions="activeAgentSuggestions"
@@ -311,13 +319,13 @@
         @update:show-token-detail="showTokenDetail = $event"
         @open-project-memory="openProjectMemoryEditor"
         @close-project-memory="closeProjectMemoryEditor"
+        @update:project-memory-tab="setProjectMemoryTab"
+        @select-project-skill="selectProjectSkill"
+        @select-project-exploration="selectProjectExploration"
         @save-project-memory="saveProjectMemoryDraft"
+        @save-project-skill="saveProjectSkillDraft"
         @update:project-memory-draft="projectMemoryDraft = $event"
-        @close-memory-suggest="closeMemorySuggest"
-        @apply-memory-suggest="applyMemorySuggest"
-        @toggle-memory-suggest-candidate="(id, checked) => toggleMemorySuggestCandidate(id, checked)"
-        @toggle-memory-suggest-archive="toggleMemorySuggestArchive"
-        @toggle-memory-suggest-skill="(id, checked) => toggleMemorySuggestSkill(id, checked)"
+        @update:skill-draft-body="skillDraftBody = $event"
         @confirm-memory-proposal="confirmPendingMemoryProposal"
         @dismiss-memory-proposal="dismissPendingMemoryProposal"
         @confirm-skill-proposal="confirmPendingSkillProposal"
@@ -662,29 +670,36 @@ const projectOpened = ref(false);
 
 const {
   projectMemoryOpen,
+  projectMemoryTab,
   projectMemoryDraft,
   projectMemoryLoading,
   projectMemorySaving,
   projectMemoryMessage,
   projectMemoryMaxChars,
   projectMemoryHasContent,
-  memorySuggestOpen,
+  projectSkillsList,
+  projectExplorationList,
+  projectSkillsLoading,
+  selectedSkillSlug,
+  skillDraftTitle,
+  skillDraftKind,
+  skillDraftBody,
+  skillDetailLoading,
+  skillSaving,
+  selectedExplorationId,
+  explorationContent,
+  explorationDetailLoading,
   memorySuggestSaving,
-  memorySuggestMessage,
-  memorySuggestCandidates,
-  memorySuggestArchive,
-  memorySuggestSkillProposals,
   pendingMemoryProposals,
   pendingSkillProposals,
   openProjectMemoryEditor,
   closeProjectMemoryEditor,
+  setProjectMemoryTab,
+  selectProjectSkill,
+  selectProjectExploration,
   saveProjectMemoryDraft,
-  openExplorationDistillSuggest,
-  closeMemorySuggest,
-  toggleMemorySuggestCandidate,
-  toggleMemorySuggestArchive,
-  toggleMemorySuggestSkill,
-  applyMemorySuggest,
+  saveProjectSkillDraft,
+  applyExplorationDistillSilently,
   addPendingMemoryProposal,
   addPendingSkillProposal,
   confirmPendingMemoryProposal,
@@ -1710,7 +1725,7 @@ const agent = useAgentRun({
       totalTurns: msg.agentTurn,
       hadAttachedImage,
     });
-    if (distill.offer) openExplorationDistillSuggest(distill);
+    if (distill.offer) void applyExplorationDistillSilently(distill);
   },
   onMemoryProposal: (_msgId, proposal) => {
     addPendingMemoryProposal(proposal);

@@ -177,9 +177,15 @@ function formatSessionTime(timestamp: number | string): string {
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return String(timestamp);
   const now = new Date();
-  const diff = now.getTime() - date.getTime();
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-  if (days === 0) return "今天";
+  const diffMs = now.getTime() - date.getTime();
+  if (diffMs < 0) return "刚刚";
+  const sec = Math.floor(diffMs / 1000);
+  if (sec < 60) return "刚刚";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m 前`;
+  const hour = Math.floor(min / 60);
+  if (hour < 24) return `${hour}h 前`;
+  const days = Math.floor(hour / 24);
   if (days === 1) return "昨天";
   if (days < 7) return `${days} 天前`;
   return date.toLocaleDateString();

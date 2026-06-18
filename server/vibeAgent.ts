@@ -1458,6 +1458,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   let patchAnchorForcePatchNudgeSent = false;
   let buildExploreForcePatchNudgeSent = false;
   let agentStepClarifyPending = agentStepClarifyRun;
+  /** Track patch_file failures per turn for corrective nudges and final summary audit. */
+  const patchFailureLog: Array<{ turn: number; path: string; reason: string }> = [];
   /** Track unique files read in explore-only turns to detect breadth sprawl. */
   const exploreFilesRead = new Set<string>();
   let fileBreadthNudgeSent = false;
@@ -2039,6 +2041,20 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         continue;
       }
 
+      // Inject modification audit before final reply to prevent false claims of success.
+      if (!isAsk && writeStage && patchFailureLog.length > 0) {
+        const successCount = writeStage.writtenList.length;
+        const failCount = patchFailureLog.length;
+        const failFiles = [...new Set(patchFailureLog.map((f) => f.path))].join("、");
+        messages.push({
+          role: "system",
+          content:
+            `【修改审计】本轮会话中：${successCount} 个文件修改成功（${writeStage.writtenList.map((w) => w.key).join("、") || "无"}），` +
+            `${failCount} 个 patch_file 调用失败（${failFiles}）。` +
+            "在最终回复的总结中，只可声称上述成功修改的文件已完成；失败的修改必须如实标注'未生效'或'失败'，禁止虚假声称已完成。",
+        });
+      }
+
       // Ghost reply detection: model claims to have made changes but called no tools.
       const claimsModification =
         /(?:已完成修改|已更新|已修复|已添加|已删除|已改为|已改成|改动如下|优化完成|修改如下|刷新查看)/i.test(rawText) &&
@@ -2246,6 +2262,17 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       if (!outcome.result.startsWith("错误：") && textConfirmsTeleportToBody(outcome.result)) {
         teleportBodyConfirmed = true;
       }
+      // Track patch_file failures for corrective nudges.
+      if (toolName === "patch_file" && outcome.result.startsWith("错误：")) {
+        try {
+          const args = JSON.parse(outcome.call.function.arguments || "{}");
+          patchFailureLog.push({
+            turn,
+            path: String(args.path || ""),
+            reason: outcome.result.slice(0, 200),
+          });
+        } catch { /* ignore */ }
+      }
     };
 
     for (let index = 0; index < toolCalls.length; ) {
@@ -2276,6 +2303,19 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       }
 
       index = end;
+    }
+
+    // Inject corrective prompt if patch_file calls failed this turn.
+    const thisTurnPatchFailures = patchFailureLog.filter((f) => f.turn === turn);
+    if (thisTurnPatchFailures.length > 0 && turn > 1) {
+      const failedFiles = [...new Set(thisTurnPatchFailures.map((f) => f.path))].join("、");
+      messages.push({
+        role: "system",
+        content:
+          `【系统纠正】本轮 ${thisTurnPatchFailures.length} 个 patch_file 调用失败（文件：${failedFiles}），` +
+          "old_string 未在目标文件中匹配到。请立即用 read_file 重新读取目标文件的相关片段，" +
+          "确认当前磁盘内容后再用精确的 old_string 重试 patch_file。禁止凭记忆或之前读取的内容构造 old_string。",
+      });
     }
 
     const turnHadWrite = toolCalls.some((call) => WRITE_AGENT_TOOL_NAMES.has(call.function.name));

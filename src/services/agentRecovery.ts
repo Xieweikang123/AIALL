@@ -98,7 +98,7 @@ export function isAgentMaxTurnsExhausted(
 }
 
 /** Delay before auto-resuming after transient disconnect (seconds). */
-export const AGENT_AUTO_RESUME_SECONDS = 5;
+export const AGENT_AUTO_RESUME_SECONDS = 3;
 
 /** Shorter delay for obvious transport blips (Failed to fetch / network error). */
 export const AGENT_AUTO_RESUME_IMMEDIATE_SECONDS = 2;

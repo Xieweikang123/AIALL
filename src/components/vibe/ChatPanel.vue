@@ -45,7 +45,7 @@
           class="ghost small project-memory-btn"
           :class="{ active: projectMemoryHasContent }"
           :disabled="!projectOpened"
-          title="编辑项目记忆（AI 每次对话自动读取）"
+          title="项目记忆、Skills 与探索归档"
           @click="$emit('open-project-memory')"
         >
           记忆
@@ -344,12 +344,17 @@
       class="project-memory-overlay"
       @mousedown.self="$emit('close-project-memory')"
     >
-      <div class="project-memory-dialog" role="dialog" aria-labelledby="project-memory-title">
+      <div
+        class="project-memory-dialog"
+        :class="{ wide: projectMemoryTab !== 'memory' }"
+        role="dialog"
+        aria-labelledby="project-memory-title"
+      >
         <div class="project-memory-head">
           <div>
-            <h3 id="project-memory-title" class="project-memory-title">项目记忆</h3>
+            <h3 id="project-memory-title" class="project-memory-title">项目 AI 数据</h3>
             <p class="project-memory-desc">
-              分区记录术语、导航与偏好；与 AGENTS.md 互补。保存后 Ask / Plan / Build 均会自动注入 Agent。
+              记忆、Skills 与探索归档均存于 .aiall/；保存后 Ask / Plan / Build 会自动注入 Agent。
             </p>
           </div>
           <button
@@ -360,23 +365,139 @@
             ×
           </button>
         </div>
-        <div v-if="projectMemoryLoading" class="project-memory-status">加载中…</div>
-        <textarea
-          v-else
-          class="project-memory-editor"
-          :value="projectMemoryDraft"
-          :maxlength="projectMemoryMaxChars"
-              placeholder="# 项目记忆&#10;&#10;## 术语 / ## 导航 / ## 偏好"
-          @input="$emit('update:projectMemoryDraft', ($event.target as HTMLTextAreaElement).value)"
-        />
+
+        <div class="project-memory-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            class="project-memory-tab"
+            :class="{ active: projectMemoryTab === 'memory' }"
+            :aria-selected="projectMemoryTab === 'memory'"
+            @click="$emit('update:projectMemoryTab', 'memory')"
+          >
+            记忆
+          </button>
+          <button
+            type="button"
+            role="tab"
+            class="project-memory-tab"
+            :class="{ active: projectMemoryTab === 'skills' }"
+            :aria-selected="projectMemoryTab === 'skills'"
+            @click="$emit('update:projectMemoryTab', 'skills')"
+          >
+            Skills
+            <span v-if="projectSkillsList.length" class="project-memory-tab-count">{{
+              projectSkillsList.length
+            }}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            class="project-memory-tab"
+            :class="{ active: projectMemoryTab === 'exploration' }"
+            :aria-selected="projectMemoryTab === 'exploration'"
+            @click="$emit('update:projectMemoryTab', 'exploration')"
+          >
+            探索归档
+            <span v-if="projectExplorationList.length" class="project-memory-tab-count">{{
+              projectExplorationList.length
+            }}</span>
+          </button>
+        </div>
+
+        <div v-if="projectMemoryTab === 'memory'" class="project-memory-pane">
+          <div v-if="projectMemoryLoading" class="project-memory-status">加载中…</div>
+          <textarea
+            v-else
+            class="project-memory-editor"
+            :value="projectMemoryDraft"
+            :maxlength="projectMemoryMaxChars"
+            placeholder="# 项目记忆&#10;&#10;## 术语 / ## 导航 / ## 偏好"
+            @input="$emit('update:projectMemoryDraft', ($event.target as HTMLTextAreaElement).value)"
+          />
+        </div>
+
+        <div v-else-if="projectMemoryTab === 'skills'" class="project-memory-split-pane">
+          <div v-if="projectSkillsLoading" class="project-memory-status">加载中…</div>
+          <template v-else>
+            <ul v-if="projectSkillsList.length" class="project-memory-list">
+              <li
+                v-for="item in projectSkillsList"
+                :key="item.slug"
+                class="project-memory-list-item"
+                :class="{ active: item.slug === selectedSkillSlug }"
+              >
+                <button type="button" class="project-memory-list-btn" @click="$emit('select-project-skill', item.slug)">
+                  <span class="project-memory-list-title">{{ item.title }}</span>
+                  <span class="project-memory-list-meta">{{ item.kind }} · {{ item.slug }}</span>
+                </button>
+              </li>
+            </ul>
+            <div v-else class="project-memory-status">暂无 Skill</div>
+            <div class="project-memory-detail">
+              <div v-if="skillDetailLoading" class="project-memory-status">加载中…</div>
+              <template v-else-if="selectedSkillSlug">
+                <div class="project-memory-detail-head">
+                  <strong>{{ skillDraftTitle }}</strong>
+                  <span class="project-memory-list-meta">{{ skillDraftKind }} · {{ selectedSkillSlug }}</span>
+                </div>
+                <textarea
+                  class="project-memory-editor project-memory-editor-detail"
+                  :value="skillDraftBody"
+                  @input="$emit('update:skillDraftBody', ($event.target as HTMLTextAreaElement).value)"
+                />
+              </template>
+              <div v-else class="project-memory-status">选择左侧 Skill 查看内容</div>
+            </div>
+          </template>
+        </div>
+
+        <div v-else class="project-memory-split-pane">
+          <div v-if="projectSkillsLoading" class="project-memory-status">加载中…</div>
+          <template v-else>
+            <ul v-if="projectExplorationList.length" class="project-memory-list">
+              <li
+                v-for="item in projectExplorationList"
+                :key="item.id"
+                class="project-memory-list-item"
+                :class="{ active: item.id === selectedExplorationId }"
+              >
+                <button
+                  type="button"
+                  class="project-memory-list-btn"
+                  @click="$emit('select-project-exploration', item.id)"
+                >
+                  <span class="project-memory-list-title">{{ formatExplorationLabel(item) }}</span>
+                  <span class="project-memory-list-meta">
+                    读 {{ item.readCount }} · 写 {{ item.writtenCount }}
+                  </span>
+                </button>
+              </li>
+            </ul>
+            <div v-else class="project-memory-status">暂无探索归档</div>
+            <div class="project-memory-detail">
+              <div v-if="explorationDetailLoading" class="project-memory-status">加载中…</div>
+              <pre v-else-if="selectedExplorationId" class="project-memory-readonly">{{
+                explorationContent
+              }}</pre>
+              <div v-else class="project-memory-status">选择左侧快照查看内容</div>
+            </div>
+          </template>
+        </div>
+
         <div class="project-memory-foot">
-          <span class="project-memory-counter">
+          <span v-if="projectMemoryTab === 'memory'" class="project-memory-counter">
             {{ projectMemoryDraft.length }} / {{ projectMemoryMaxChars }}
           </span>
+          <span v-else-if="projectMemoryTab === 'skills' && selectedSkillSlug" class="project-memory-counter">
+            {{ skillDraftBody.length }} 字
+          </span>
+          <span v-else class="project-memory-counter">&nbsp;</span>
           <span v-if="projectMemoryMessage" class="project-memory-message">{{ projectMemoryMessage }}</span>
           <div class="project-memory-actions">
-            <button type="button" class="ghost small" @click="$emit('close-project-memory')">取消</button>
+            <button type="button" class="ghost small" @click="$emit('close-project-memory')">关闭</button>
             <button
+              v-if="projectMemoryTab === 'memory'"
               type="button"
               class="primary small"
               :disabled="projectMemorySaving || projectMemoryLoading"
@@ -384,96 +505,14 @@
             >
               {{ projectMemorySaving ? "保存中…" : "保存" }}
             </button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div
-      v-if="memorySuggestOpen"
-      class="project-memory-overlay"
-      @mousedown.self="$emit('close-memory-suggest')"
-    >
-      <div class="project-memory-dialog" role="dialog" aria-labelledby="memory-suggest-title">
-        <div class="project-memory-head">
-          <div>
-            <h3 id="memory-suggest-title" class="project-memory-title">保存探索成果？</h3>
-            <p class="project-memory-desc">
-              根据本次探索生成的候选：记忆条目、探索快照归档、skill 更新。勾选后才会写入 .aiall/。
-            </p>
-          </div>
-          <button type="button" class="ghost small project-memory-close" @click="$emit('close-memory-suggest')">
-            ×
-          </button>
-        </div>
-        <ul v-if="memorySuggestCandidates.length" class="memory-suggest-list">
-          <li v-for="item in memorySuggestCandidates" :key="item.id" class="memory-suggest-item">
-            <label>
-              <input
-                type="checkbox"
-                :checked="item.checked"
-                @change="
-                  $emit(
-                    'toggle-memory-suggest-candidate',
-                    item.id,
-                    ($event.target as HTMLInputElement).checked,
-                  )
-                "
-              />
-              <span class="memory-suggest-section">## {{ item.section }}</span>
-              <span class="memory-suggest-line">{{ item.line }}</span>
-            </label>
-          </li>
-        </ul>
-        <div v-if="memorySuggestArchive" class="memory-suggest-item memory-suggest-archive">
-          <label>
-            <input
-              type="checkbox"
-              :checked="memorySuggestArchive.checked"
-              @change="
-                $emit(
-                  'toggle-memory-suggest-archive',
-                  ($event.target as HTMLInputElement).checked,
-                )
-              "
-            />
-            <span class="memory-suggest-section">探索快照</span>
-            <span class="memory-suggest-line">
-              归档到 .aiall/exploration/{{ memorySuggestArchive.filename }}（读取
-              {{ memorySuggestArchive.readPaths.length }} 个文件）
-            </span>
-          </label>
-        </div>
-        <ul v-if="memorySuggestSkillProposals.length" class="memory-suggest-list">
-          <li v-for="item in memorySuggestSkillProposals" :key="item.id" class="memory-suggest-item">
-            <label>
-              <input
-                type="checkbox"
-                :checked="item.checked"
-                @change="
-                  $emit(
-                    'toggle-memory-suggest-skill',
-                    item.id,
-                    ($event.target as HTMLInputElement).checked,
-                  )
-                "
-              />
-              <span class="memory-suggest-section">skill: {{ item.slug }}</span>
-              <span class="memory-suggest-line">{{ item.title }} — {{ item.content }}</span>
-            </label>
-          </li>
-        </ul>
-        <div class="project-memory-foot">
-          <span v-if="memorySuggestMessage" class="project-memory-message">{{ memorySuggestMessage }}</span>
-          <div class="project-memory-actions">
-            <button type="button" class="ghost small" @click="$emit('close-memory-suggest')">暂不</button>
             <button
+              v-else-if="projectMemoryTab === 'skills' && selectedSkillSlug"
               type="button"
               class="primary small"
-              :disabled="memorySuggestSaving"
-              @click="$emit('apply-memory-suggest')"
+              :disabled="skillSaving || skillDetailLoading"
+              @click="$emit('save-project-skill')"
             >
-              {{ memorySuggestSaving ? "写入中…" : "确认写入" }}
+              {{ skillSaving ? "保存中…" : "保存 Skill" }}
             </button>
           </div>
         </div>
@@ -486,10 +525,10 @@
 import { ref, computed, onMounted, onBeforeUnmount, withDefaults, type CSSProperties } from "vue";
 import type { VibeChatMode } from "../../services/vibeAgentClient";
 import type { AgentSuggestion } from "../../services/agentSuggestions";
-import type { ExplorationMemoryCandidate } from "../../services/explorationMemorySuggest";
-import type { ExplorationArchiveDraft, SkillDistillProposal } from "../../services/explorationDistill";
 import type { PendingMemoryProposal } from "../../services/projectMemoryProposal";
 import type { PendingSkillProposal } from "../../services/projectSkillProposal";
+import type { ExplorationIndexEntry, SkillIndexEntry, SkillKind } from "../../services/projectSkills";
+import type { ProjectMemoryTab } from "../../composables/useProjectMemory";
 import type { VibeChatSessionMeta } from "../../services/vibeChatStorage";
 import { formatCharCount } from "../../utils/vibeHelpers";
 import { resolveAgentResumeButtonLabel } from "../../services/agentRecovery";
@@ -562,18 +601,26 @@ interface Props {
   showTokenDetail?: boolean;
   tokenDetailData?: TokenDetailData | null;
   projectMemoryOpen?: boolean;
+  projectMemoryTab?: ProjectMemoryTab;
   projectMemoryDraft?: string;
   projectMemoryLoading?: boolean;
   projectMemorySaving?: boolean;
   projectMemoryMessage?: string;
   projectMemoryMaxChars?: number;
   projectMemoryHasContent?: boolean;
-  memorySuggestOpen?: boolean;
+  projectSkillsList?: SkillIndexEntry[];
+  projectExplorationList?: ExplorationIndexEntry[];
+  projectSkillsLoading?: boolean;
+  selectedSkillSlug?: string;
+  skillDraftTitle?: string;
+  skillDraftKind?: SkillKind;
+  skillDraftBody?: string;
+  skillDetailLoading?: boolean;
+  skillSaving?: boolean;
+  selectedExplorationId?: string;
+  explorationContent?: string;
+  explorationDetailLoading?: boolean;
   memorySuggestSaving?: boolean;
-  memorySuggestMessage?: string;
-  memorySuggestCandidates?: ExplorationMemoryCandidate[];
-  memorySuggestArchive?: (ExplorationArchiveDraft & { checked: boolean }) | null;
-  memorySuggestSkillProposals?: SkillDistillProposal[];
   pendingMemoryProposals?: PendingMemoryProposal[];
   pendingSkillProposals?: PendingSkillProposal[];
   agentSuggestions?: AgentSuggestion[];
@@ -586,18 +633,26 @@ const props = withDefaults(defineProps<Props>(), {
   showTokenDetail: false,
   tokenDetailData: null,
   projectMemoryOpen: false,
+  projectMemoryTab: "memory",
   projectMemoryDraft: "",
   projectMemoryLoading: false,
   projectMemorySaving: false,
   projectMemoryMessage: "",
   projectMemoryMaxChars: 3500,
   projectMemoryHasContent: false,
-  memorySuggestOpen: false,
+  projectSkillsList: () => [],
+  projectExplorationList: () => [],
+  projectSkillsLoading: false,
+  selectedSkillSlug: "",
+  skillDraftTitle: "",
+  skillDraftKind: "heuristic",
+  skillDraftBody: "",
+  skillDetailLoading: false,
+  skillSaving: false,
+  selectedExplorationId: "",
+  explorationContent: "",
+  explorationDetailLoading: false,
   memorySuggestSaving: false,
-  memorySuggestMessage: "",
-  memorySuggestCandidates: () => [],
-  memorySuggestArchive: null,
-  memorySuggestSkillProposals: () => [],
   pendingMemoryProposals: () => [],
   pendingSkillProposals: () => [],
   quotedMessages: () => [],
@@ -620,6 +675,19 @@ const recoverableResumeLabel = computed(() => {
   if (!msg) return "恢复运行";
   return resolveAgentResumeButtonLabel(msg);
 });
+
+function formatExplorationLabel(item: ExplorationIndexEntry): string {
+  const stamp = item.createdAt?.trim();
+  if (!stamp) return item.id;
+  const date = new Date(stamp);
+  if (Number.isNaN(date.getTime())) return item.id;
+  return date.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 const emit = defineEmits<{
   (e: "send-chat"): void;
@@ -652,12 +720,13 @@ const emit = defineEmits<{
   (e: "update:projectMemoryDraft", value: string): void;
   (e: "open-project-memory"): void;
   (e: "close-project-memory"): void;
+  (e: "update:projectMemoryTab", value: ProjectMemoryTab): void;
+  (e: "update:projectMemoryDraft", value: string): void;
+  (e: "update:skillDraftBody", value: string): void;
+  (e: "select-project-skill", slug: string): void;
+  (e: "select-project-exploration", id: string): void;
   (e: "save-project-memory"): void;
-  (e: "close-memory-suggest"): void;
-  (e: "apply-memory-suggest"): void;
-  (e: "toggle-memory-suggest-candidate", id: string, checked: boolean): void;
-  (e: "toggle-memory-suggest-archive", checked: boolean): void;
-  (e: "toggle-memory-suggest-skill", id: string, checked: boolean): void;
+  (e: "save-project-skill"): void;
   (e: "confirm-memory-proposal", id: string): void;
   (e: "dismiss-memory-proposal", id: string): void;
   (e: "confirm-skill-proposal", id: string): void;
@@ -695,9 +764,15 @@ function formatSessionTime(timestamp: number | string): string {
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return String(timestamp);
   const now = new Date();
-  const diff = now.getTime() - date.getTime();
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-  if (days === 0) return "今天";
+  const diffMs = now.getTime() - date.getTime();
+  if (diffMs < 0) return "刚刚";
+  const sec = Math.floor(diffMs / 1000);
+  if (sec < 60) return "刚刚";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m 前`;
+  const hour = Math.floor(min / 60);
+  if (hour < 24) return `${hour}h 前`;
+  const days = Math.floor(hour / 24);
   if (days === 1) return "昨天";
   if (days < 7) return `${days} 天前`;
   return date.toLocaleDateString();
@@ -1521,36 +1596,168 @@ function formatSessionTime(timestamp: number | string): string {
 }
 
 .project-memory-dialog {
-  width: min(100%, 420px);
+  width: min(100%, 440px);
   max-height: calc(100% - 32px);
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px;
-  border-radius: 12px;
+  gap: 14px;
+  padding: 18px 20px;
+  border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(15, 22, 35, 0.98);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+.project-memory-dialog.wide {
+  width: min(100%, 640px);
+}
+
+.project-memory-tabs {
+  display: flex;
+  gap: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.project-memory-tab {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 13px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.project-memory-tab.active {
+  color: rgba(140, 190, 255, 0.98);
+  background: rgba(88, 166, 255, 0.12);
+}
+
+.project-memory-tab-count {
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.project-memory-pane,
+.project-memory-split-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 240px;
+  max-height: min(52vh, 420px);
+}
+
+.project-memory-split-pane {
+  display: grid;
+  grid-template-columns: minmax(140px, 38%) 1fr;
+  gap: 10px;
+  min-height: 280px;
+}
+
+.project-memory-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.project-memory-list-item + .project-memory-list-item {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.project-memory-list-item.active .project-memory-list-btn {
+  background: rgba(88, 166, 255, 0.14);
+}
+
+.project-memory-list-btn {
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 8px 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.project-memory-list-title {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.9);
+  line-height: 1.35;
+}
+
+.project-memory-list-meta {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.project-memory-detail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.project-memory-detail-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.project-memory-editor-detail {
+  flex: 1;
+  min-height: 220px;
+}
+
+.project-memory-readonly {
+  flex: 1;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.22);
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .project-memory-head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
 }
 
 .project-memory-title {
   margin: 0;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.92);
 }
 
 .project-memory-desc {
   margin: 4px 0 0;
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: 12px;
+  line-height: 1.5;
   color: rgba(255, 255, 255, 0.55);
 }
 
@@ -1558,20 +1765,30 @@ function formatSessionTime(timestamp: number | string): string {
   flex-shrink: 0;
   font-size: 16px;
   line-height: 1;
-  padding: 2px 8px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.6);
+  transition: color 0.15s, background 0.15s;
+}
+
+.project-memory-close:hover {
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .project-memory-editor {
   flex: 1;
+  width: 100%;
   min-height: 220px;
+  box-sizing: border-box;
   resize: vertical;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.25);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.2);
   color: rgba(255, 255, 255, 0.88);
-  padding: 10px 12px;
+  padding: 12px 14px;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.6;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
@@ -1584,24 +1801,29 @@ function formatSessionTime(timestamp: number | string): string {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  padding-top: 4px;
 }
 
 .project-memory-counter {
-  font-size: 11px;
+  font-size: 12px;
   color: rgba(255, 255, 255, 0.45);
+  white-space: nowrap;
 }
 
 .project-memory-message {
   flex: 1;
+  min-width: 0;
   font-size: 11px;
+  line-height: 1.4;
   color: rgba(120, 220, 160, 0.9);
 }
 
 .project-memory-actions {
   margin-left: auto;
   display: flex;
-  gap: 8px;
+  gap: 10px;
+  flex-shrink: 0;
 }
 
 .project-memory-status {
@@ -1609,39 +1831,6 @@ function formatSessionTime(timestamp: number | string): string {
   text-align: center;
   font-size: 12px;
   color: rgba(255, 255, 255, 0.55);
-}
-
-.memory-suggest-list {
-  list-style: none;
-  margin: 0;
-  padding: 0 0 8px;
-  max-height: 280px;
-  overflow-y: auto;
-}
-
-.memory-suggest-item {
-  padding: 8px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.memory-suggest-item label {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  cursor: pointer;
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.memory-suggest-section {
-  flex-shrink: 0;
-  color: rgba(140, 180, 255, 0.95);
-  font-size: 11px;
-}
-
-.memory-suggest-line {
-  color: rgba(255, 255, 255, 0.88);
-  word-break: break-word;
 }
 
 .memory-proposal-banner {

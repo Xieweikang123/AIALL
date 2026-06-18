@@ -945,6 +945,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         const reason = m.agentFailureReason || "";
         if (reason && shouldSilentAutoContinue(reason)) {
           trySilentContinue(activeSessionId.value, m, reason);
+        } else {
+          // Fallback: auto-resume countdown for non-silent recoverable failures
+          scheduleAutoResume(m.id, reason);
         }
         return;
       }
@@ -1042,6 +1045,11 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     });
 
     cancelAutoResume();
+
+    // Auto-resume countdown for recoverable errors
+    if (recoverable) {
+      scheduleAutoResume(assistantMsg.id, message);
+    }
   }
 
   function recoverAgentRunFromStall(sessionId: string, assistantMsg: ChatMessage, reason: string) {
