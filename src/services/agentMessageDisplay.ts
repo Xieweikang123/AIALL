@@ -17,6 +17,7 @@ export type LiveAgentAnswerSource = AssistantBubbleSource & {
 export type FinalizeAssistantBubbleSource = AssistantBubbleSource & {
   writtenFiles?: string[];
   wasAborted?: boolean;
+  agentAbortReason?: string;
   agentFailed?: boolean;
 };
 
@@ -277,6 +278,10 @@ export function finalizeAssistantBubbleContent(msg: FinalizeAssistantBubbleSourc
   const base = msg.roundGroups?.some((g) => g.response?.isFinal)
     ? resolveCompletedAgentBubbleContent(msg)
     : resolveAssistantBubbleContent(msg);
+  if (msg.wasAborted && !base.trim() && !msg.writtenFiles?.length) {
+    const reason = msg.agentAbortReason?.trim() || "运行已中断";
+    return `运行已中断：${reason}`;
+  }
   const writtenFiles = msg.writtenFiles?.filter(Boolean) ?? [];
   if (!writtenFiles.length) return base;
   if (msg.agentFailed) return base;

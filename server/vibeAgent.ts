@@ -826,7 +826,7 @@ async function readStagedFileContent(
   readable: { path: string; key: string; outsideProject: boolean },
   stage: WriteStage | null,
 ): Promise<string | null> {
-  if (!readable.outsideProject && stage?.files.has(readable.key)) {
+  if (!readable.outsideProject && stage?.files?.has(readable.key)) {
     return stage.files.get(readable.key)!;
   }
   const result = await readFileContent(readable.path).catch(() => null);
@@ -919,7 +919,7 @@ export async function executeTool(
       recordReadRange(resolved.key, lineRange, toolGuard.readFileRanges);
     }
     if (!resolved.outsideProject) {
-      stage?.readPaths.add(resolved.key);
+      stage?.readPaths?.add(resolved.key);
     }
     return sliced;
   }
@@ -1017,7 +1017,10 @@ export async function executeTool(
     if (readErr) return readErr;
     let content = stage.files.get(resolved.relative) ?? readCache?.get(resolved.relative) ?? null;
     if (content === null) {
-      content = await readStagedFileContent(root, resolved.relative, resolved.path, stage);
+      content = await readStagedFileContent(
+        { path: resolved.path, key: resolved.relative, outsideProject: false },
+        stage,
+      );
       if (content !== null) readCache?.set(resolved.relative, content);
     }
     if (content === null) return `错误：${resolved.relative} 不存在或无法读取`;
@@ -1907,9 +1910,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
           const resolved = resolveProjectPath(projectRoot, filePath);
           if (resolved.ok) {
             const staged = await readStagedFileContent(
-              projectRoot,
-              resolved.relative,
-              resolved.path,
+              { path: resolved.path, key: resolved.relative, outsideProject: false },
               writeStage,
             );
             const before = staged ?? "";

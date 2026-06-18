@@ -759,17 +759,6 @@ function persistPendingQueue() {
   }
 }
 
-function loadPendingQueue(): string[] {
-  try {
-    const raw = localStorage.getItem(PENDING_QUEUE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((x: unknown) => typeof x === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
 import { type ReferencedFile } from "../composables/useFileDrag";
 
 interface ProjectFileItem {
@@ -2680,10 +2669,10 @@ function handleAiOptionSelect(option: { index: number; label: string; fullText: 
       role: "user",
       content: userText,
     });
-    pendingPromptQueue.value.push(userText);
-    persistPendingQueue();
+    interruptAgentRun();
     persistChatNow();
     void scrollChatToBottom(true);
+    void runAgentTurn(userText, { skipUserBubble: true, userBubbleContent: userText });
     return;
   }
 
@@ -2747,10 +2736,15 @@ async function sendChat() {
       content: bubbleText || (imageDataUrls.length ? "（附图）" : ""),
       imageDataUrls: imageDataUrls.length ? [...imageDataUrls] : undefined,
     });
-    pendingPromptQueue.value.push(fullPrompt);
-    persistPendingQueue();
+    interruptAgentRun();
     persistChatNow();
     void scrollChatToBottom(true);
+    await runAgentTurn(fullPrompt, {
+      referencedFiles: payload.refs.map((r) => r.relative || r.path).filter(Boolean),
+      imageDataUrls,
+      skipUserBubble: true,
+      userBubbleContent: bubbleText,
+    });
     return;
   }
 
@@ -2889,7 +2883,8 @@ provide(vibeChatMessageContextKey, {
 onMounted(() => {
   reloadAiConfig();
   refreshProjectHistoryList();
-  pendingPromptQueue.value = loadPendingQueue();
+  pendingPromptQueue.value = [];
+  persistPendingQueue();
   loadSavedProject();
   chatPanelWidth.value = Math.min(chatPanelWidth.value, getChatPanelMaxWidth());
   window.addEventListener("focus", onWindowFocus);
@@ -2932,7 +2927,11 @@ onBeforeUnmount(() => {
   if (selectionChangeTimer) clearTimeout(selectionChangeTimer);
   document.removeEventListener("dragover", onDocumentDragOverCapture, true);
   document.removeEventListener("drop", onDocumentDropCapture, true);
-  getAgentAbortHandle()?.abort();
+  if (chatSending.value && getAgentAbortHandle()) {
+    interruptAgentRun({ reason: "页面刷新或热更新导致运行中断" });
+  } else {
+    getAgentAbortHandle()?.abort();
+  }
   clearStreamDeltaBuffer();
   stopResize();
   if (scrollChatRaf) cancelAnimationFrame(scrollChatRaf);

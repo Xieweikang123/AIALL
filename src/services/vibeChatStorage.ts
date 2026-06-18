@@ -85,6 +85,7 @@ export type PersistedChatMessage = {
   turnFileDiffs?: Record<string, PersistedFileDiff>;
   pendingApproval?: boolean;
   agentAborted?: boolean;
+  agentAbortReason?: string;
   agentFailed?: boolean;
   agentRecoverable?: boolean;
   agentFailureReason?: string;
@@ -459,6 +460,7 @@ function sanitizeMessages(
           m.pendingApproval && m.turnFileDiffs ? { ...m.turnFileDiffs } : undefined,
         pendingApproval: m.pendingApproval || undefined,
         agentAborted: m.agentAborted || undefined,
+        agentAbortReason: m.agentAbortReason || undefined,
         agentFailed: m.agentFailed || undefined,
         agentRecoverable: m.agentRecoverable || undefined,
         agentFailureReason: m.agentFailureReason || undefined,

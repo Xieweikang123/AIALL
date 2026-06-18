@@ -15,6 +15,8 @@ export interface VibeChatMessageItem {
   rejected?: boolean;
   turnFileDiffs?: Record<string, { before?: string; after?: string; deleted?: boolean }>;
   imageCount?: number;
+  agentAborted?: boolean;
+  agentAbortReason?: string;
   agentFailureReason?: string;
 }
 

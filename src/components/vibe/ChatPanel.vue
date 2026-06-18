@@ -185,8 +185,8 @@
     <footer class="chat-composer">
       <div v-if="pendingPromptQueue.length" class="pending-queue">
         <div class="pending-queue-head">
-          <span>排队中 {{ pendingPromptQueue.length }} 条消息</span>
-          <button type="button" class="ghost small" @click="$emit('clear-pending-queue')">清空队列</button>
+          <span>待发送 {{ pendingPromptQueue.length }} 条消息</span>
+          <button type="button" class="ghost small" @click="$emit('clear-pending-queue')">取消</button>
         </div>
         <ol class="pending-queue-list">
           <li v-for="(q, qi) in pendingPromptQueue" :key="qi">{{ q }}</li>

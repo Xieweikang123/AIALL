@@ -173,4 +173,13 @@ describe("buildSessionAuditHint", () => {
     expect(hint).toContain("%APPDATA%");
     expect(hint).toContain("禁止 run_command");
   });
+
+  it("prioritizes logical session paths and evidence-qualified conclusions", () => {
+    const hint = buildSessionAuditHint();
+    expect(hint).toContain("aiall/vibe-chat-sessions/");
+    expect(hint).toContain("不要先在项目根目录搜索 aiall");
+    expect(hint).toContain("证据强度");
+    expect(hint).toContain("摘要不足，无法确认");
+    expect(hint).toContain("禁止断言");
+  });
 });

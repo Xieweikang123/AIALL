@@ -172,4 +172,12 @@ describe("executeTool immediate persistence", () => {
       await fs.promises.unlink(externalFile).catch(() => {});
     }
   });
+
+  it("read_file works without write stage for in-project paths", async () => {
+    const root = await makeProject();
+    await fs.promises.writeFile(path.join(root, "a.ts"), "inside project\n", "utf-8");
+    const result = await executeTool(root, "read_file", { path: "a.ts" }, null, "ask");
+    expect(result).toContain("inside project");
+    expect(result).not.toMatch(/错误：.*has/);
+  });
 });

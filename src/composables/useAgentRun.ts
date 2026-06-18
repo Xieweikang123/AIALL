@@ -1137,6 +1137,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       if (phase === "aborted") {
         clearStreamDeltaBuffer();
         assistantMsg.agentAborted = true;
+        assistantMsg.agentAbortReason ||= "运行连接已中断";
         const abortTurn = assistantMsg.agentTurn ?? 1;
         assistantMsg.roundGroups = recordAgentRoundResponse(
           assistantMsg.roundGroups,
@@ -1146,6 +1147,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         );
         patchAssistantMsg(msgId, {
           agentAborted: true,
+          agentAbortReason: assistantMsg.agentAbortReason,
           ...syncRoundGroupsPatch(assistantMsg),
         });
         stopAgentUiTick();
@@ -1468,21 +1470,24 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     }
   }
 
-  function interruptAgentRun(options?: { logStatus?: boolean }) {
+  function interruptAgentRun(options?: { logStatus?: boolean; reason?: string }) {
     cancelAutoResume();
     clearPendingAgentRun();
     agentRunGeneration += 1;
     agentLastProgressAt = 0;
     const running = findRunningAssistantMsg();
     if (running) {
+      const reason = options?.reason?.trim() || "已被新指令打断";
       running.agentAborted = true;
+      running.agentAbortReason = reason;
       running.streaming = false;
       if (options?.logStatus !== false) {
-        appendStatusLog(running, "已被新指令打断");
+        appendStatusLog(running, reason);
         setAgentStatus(running, "aborted", undefined, { log: false });
       }
       patchAssistantMsg(running.id, {
         agentAborted: true,
+        agentAbortReason: reason,
         streaming: false,
         status: running.status,
         statusLog: running.statusLog ? [...running.statusLog] : undefined,
@@ -1496,7 +1501,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   }
 
   function stopAgent() {
-    interruptAgentRun();
+    interruptAgentRun({ reason: "已手动停止" });
   }
 
   function tryResumeHmrInterruptedRun(): void {
@@ -1556,6 +1561,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     assistantMsg.agentFailureReason = undefined;
     assistantMsg.agentRecoveryDismissed = true;
     assistantMsg.agentAborted = false;
+    assistantMsg.agentAbortReason = undefined;
     assistantMsg.streaming = false;
     const resumedContent = resolveAssistantBubbleContent({ ...assistantMsg, content: "" });
     if (resumedContent) assistantMsg.content = resumedContent;
@@ -1581,6 +1587,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       agentRecoveryDismissed: true,
       content: assistantMsg.content,
       agentAborted: false,
+      agentAbortReason: undefined,
       streaming: false,
       activityExpanded: true,
       activityDetailed: true,

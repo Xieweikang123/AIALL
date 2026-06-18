@@ -160,7 +160,10 @@ export function buildSessionAuditHint(): string {
   return [
     "",
     "【会话审计·只读】用户要求评估另一 Vibe 会话中 Agent 的回复质量；勿回答被审计会话内的业务/编程问题。",
-    "会话 JSON 在 %APPDATA%\\aiall\\vibe-chat-sessions\\chat-<id>.json（详见 AGENTS.md）；用 read_file 绝对路径 + offset/limit 分段读取，禁止 run_command 分页读文件。",
+    "优先读取用户给出的会话 JSON：若路径以 aiall/vibe-chat-sessions/ 开头，这是逻辑路径，会自动映射到 %APPDATA%\\aiall\\vibe-chat-sessions\\；不要先在项目根目录搜索 aiall。",
+    "若用户同时给出磁盘实际路径，用 read_file 直接读该绝对路径；大 JSON 用 offset/limit 分段读取，禁止 run_command 分页读文件。",
+    "审计工具记录时必须区分证据强度：只根据 tools/roundGroups/statusLog 中明确出现的内容下结论；若工具摘要缺少具体输出，只能写“摘要不足，无法确认”，禁止断言 Agent 未验证或编造。",
+    "输出应聚焦准确性、工具调用、上下文理解、表达结构；把确定问题、推测风险、无法判断项分开写，避免把被审计会话中的业务问题展开解答。",
     "禁止 write_file 将审计报告写入仓库；结论直接写入聊天回复。",
   ].join("\n");
 }
