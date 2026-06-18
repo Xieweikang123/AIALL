@@ -113,6 +113,61 @@
       </div>
     </div>
 
+    <div v-if="pendingMemoryProposals.length || pendingSkillProposals.length" class="memory-proposal-banner">
+      <div
+        v-for="proposal in pendingMemoryProposals"
+        :key="proposal.id"
+        class="memory-proposal-item"
+      >
+        <span class="memory-proposal-text">
+          Agent 提议写入 <strong>## {{ proposal.section }}</strong>：{{ proposal.content }}
+        </span>
+        <div class="memory-proposal-actions">
+          <button
+            type="button"
+            class="ghost small"
+            @click="$emit('dismiss-memory-proposal', proposal.id)"
+          >
+            忽略
+          </button>
+          <button
+            type="button"
+            class="primary small"
+            :disabled="memorySuggestSaving"
+            @click="$emit('confirm-memory-proposal', proposal.id)"
+          >
+            写入
+          </button>
+        </div>
+      </div>
+      <div
+        v-for="proposal in pendingSkillProposals"
+        :key="proposal.id"
+        class="memory-proposal-item"
+      >
+        <span class="memory-proposal-text">
+          Agent 提议 skill <strong>{{ proposal.slug }}</strong>（{{ proposal.kind }}）：{{ proposal.title }}
+        </span>
+        <div class="memory-proposal-actions">
+          <button
+            type="button"
+            class="ghost small"
+            @click="$emit('dismiss-skill-proposal', proposal.id)"
+          >
+            忽略
+          </button>
+          <button
+            type="button"
+            class="primary small"
+            :disabled="memorySuggestSaving"
+            @click="$emit('confirm-skill-proposal', proposal.id)"
+          >
+            写入
+          </button>
+        </div>
+      </div>
+    </div>
+
     <footer class="chat-composer">
       <div v-if="pendingPromptQueue.length" class="pending-queue">
         <div class="pending-queue-head">
@@ -294,7 +349,7 @@
           <div>
             <h3 id="project-memory-title" class="project-memory-title">项目记忆</h3>
             <p class="project-memory-desc">
-              记录编码偏好、常用命令与踩坑。保存后，Ask / Plan / Build 模式均会自动注入 Agent。
+              分区记录术语、导航与偏好；与 AGENTS.md 互补。保存后 Ask / Plan / Build 均会自动注入 Agent。
             </p>
           </div>
           <button
@@ -311,7 +366,7 @@
           class="project-memory-editor"
           :value="projectMemoryDraft"
           :maxlength="projectMemoryMaxChars"
-          placeholder="# 项目记忆&#10;&#10;例如：改 UI 优先看 src/components/vibe/；测试用 npm test。"
+              placeholder="# 项目记忆&#10;&#10;## 术语 / ## 导航 / ## 偏好"
           @input="$emit('update:projectMemoryDraft', ($event.target as HTMLTextAreaElement).value)"
         />
         <div class="project-memory-foot">
@@ -333,6 +388,97 @@
         </div>
       </div>
     </div>
+
+    <div
+      v-if="memorySuggestOpen"
+      class="project-memory-overlay"
+      @mousedown.self="$emit('close-memory-suggest')"
+    >
+      <div class="project-memory-dialog" role="dialog" aria-labelledby="memory-suggest-title">
+        <div class="project-memory-head">
+          <div>
+            <h3 id="memory-suggest-title" class="project-memory-title">保存探索成果？</h3>
+            <p class="project-memory-desc">
+              根据本次探索生成的候选：记忆条目、探索快照归档、skill 更新。勾选后才会写入 .aiall/。
+            </p>
+          </div>
+          <button type="button" class="ghost small project-memory-close" @click="$emit('close-memory-suggest')">
+            ×
+          </button>
+        </div>
+        <ul v-if="memorySuggestCandidates.length" class="memory-suggest-list">
+          <li v-for="item in memorySuggestCandidates" :key="item.id" class="memory-suggest-item">
+            <label>
+              <input
+                type="checkbox"
+                :checked="item.checked"
+                @change="
+                  $emit(
+                    'toggle-memory-suggest-candidate',
+                    item.id,
+                    ($event.target as HTMLInputElement).checked,
+                  )
+                "
+              />
+              <span class="memory-suggest-section">## {{ item.section }}</span>
+              <span class="memory-suggest-line">{{ item.line }}</span>
+            </label>
+          </li>
+        </ul>
+        <div v-if="memorySuggestArchive" class="memory-suggest-item memory-suggest-archive">
+          <label>
+            <input
+              type="checkbox"
+              :checked="memorySuggestArchive.checked"
+              @change="
+                $emit(
+                  'toggle-memory-suggest-archive',
+                  ($event.target as HTMLInputElement).checked,
+                )
+              "
+            />
+            <span class="memory-suggest-section">探索快照</span>
+            <span class="memory-suggest-line">
+              归档到 .aiall/exploration/{{ memorySuggestArchive.filename }}（读取
+              {{ memorySuggestArchive.readPaths.length }} 个文件）
+            </span>
+          </label>
+        </div>
+        <ul v-if="memorySuggestSkillProposals.length" class="memory-suggest-list">
+          <li v-for="item in memorySuggestSkillProposals" :key="item.id" class="memory-suggest-item">
+            <label>
+              <input
+                type="checkbox"
+                :checked="item.checked"
+                @change="
+                  $emit(
+                    'toggle-memory-suggest-skill',
+                    item.id,
+                    ($event.target as HTMLInputElement).checked,
+                  )
+                "
+              />
+              <span class="memory-suggest-section">skill: {{ item.slug }}</span>
+              <span class="memory-suggest-line">{{ item.title }} — {{ item.content }}</span>
+            </label>
+          </li>
+        </ul>
+        <div class="project-memory-foot">
+          <span v-if="memorySuggestMessage" class="project-memory-message">{{ memorySuggestMessage }}</span>
+          <div class="project-memory-actions">
+            <button type="button" class="ghost small" @click="$emit('close-memory-suggest')">暂不</button>
+            <button
+              type="button"
+              class="primary small"
+              :disabled="memorySuggestSaving"
+              @click="$emit('apply-memory-suggest')"
+            >
+              {{ memorySuggestSaving ? "写入中…" : "确认写入" }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </aside>
 </template>
 
@@ -340,6 +486,10 @@
 import { ref, computed, onMounted, onBeforeUnmount, withDefaults, type CSSProperties } from "vue";
 import type { VibeChatMode } from "../../services/vibeAgentClient";
 import type { AgentSuggestion } from "../../services/agentSuggestions";
+import type { ExplorationMemoryCandidate } from "../../services/explorationMemorySuggest";
+import type { ExplorationArchiveDraft, SkillDistillProposal } from "../../services/explorationDistill";
+import type { PendingMemoryProposal } from "../../services/projectMemoryProposal";
+import type { PendingSkillProposal } from "../../services/projectSkillProposal";
 import type { VibeChatSessionMeta } from "../../services/vibeChatStorage";
 import { formatCharCount } from "../../utils/vibeHelpers";
 import { resolveAgentResumeButtonLabel } from "../../services/agentRecovery";
@@ -418,6 +568,14 @@ interface Props {
   projectMemoryMessage?: string;
   projectMemoryMaxChars?: number;
   projectMemoryHasContent?: boolean;
+  memorySuggestOpen?: boolean;
+  memorySuggestSaving?: boolean;
+  memorySuggestMessage?: string;
+  memorySuggestCandidates?: ExplorationMemoryCandidate[];
+  memorySuggestArchive?: (ExplorationArchiveDraft & { checked: boolean }) | null;
+  memorySuggestSkillProposals?: SkillDistillProposal[];
+  pendingMemoryProposals?: PendingMemoryProposal[];
+  pendingSkillProposals?: PendingSkillProposal[];
   agentSuggestions?: AgentSuggestion[];
 }
 
@@ -434,6 +592,14 @@ const props = withDefaults(defineProps<Props>(), {
   projectMemoryMessage: "",
   projectMemoryMaxChars: 3500,
   projectMemoryHasContent: false,
+  memorySuggestOpen: false,
+  memorySuggestSaving: false,
+  memorySuggestMessage: "",
+  memorySuggestCandidates: () => [],
+  memorySuggestArchive: null,
+  memorySuggestSkillProposals: () => [],
+  pendingMemoryProposals: () => [],
+  pendingSkillProposals: () => [],
   quotedMessages: () => [],
   agentRunningStatus: "",
   agentSuggestions: () => [],
@@ -487,6 +653,15 @@ const emit = defineEmits<{
   (e: "open-project-memory"): void;
   (e: "close-project-memory"): void;
   (e: "save-project-memory"): void;
+  (e: "close-memory-suggest"): void;
+  (e: "apply-memory-suggest"): void;
+  (e: "toggle-memory-suggest-candidate", id: string, checked: boolean): void;
+  (e: "toggle-memory-suggest-archive", checked: boolean): void;
+  (e: "toggle-memory-suggest-skill", id: string, checked: boolean): void;
+  (e: "confirm-memory-proposal", id: string): void;
+  (e: "dismiss-memory-proposal", id: string): void;
+  (e: "confirm-skill-proposal", id: string): void;
+  (e: "dismiss-skill-proposal", id: string): void;
 }>();
 
 const chatScrollRef = ref<HTMLElement | null>(null);
@@ -725,31 +900,32 @@ function formatSessionTime(timestamp: number | string): string {
 .history-list {
   list-style: none;
   margin: 0;
-  padding: 4px;
+  padding: 4px 2px;
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  scrollbar-color: rgba(139, 148, 158, 0.2) transparent;
 }
 
 .history-list::-webkit-scrollbar {
-  width: 5px;
+  width: 4px;
 }
 
 .history-list::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(139, 148, 158, 0.25);
 }
 
 .history-list::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: rgba(139, 148, 158, 0.4);
 }
 
 .history-item {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px;
-  border-radius: 6px;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  transition: background 0.15s;
 }
 
 .history-item:hover {
@@ -780,8 +956,10 @@ function formatSessionTime(timestamp: number | string): string {
 }
 
 .history-item-title {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.9);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -789,19 +967,28 @@ function formatSessionTime(timestamp: number | string): string {
 }
 
 .history-item-meta {
-  font-size: 10px;
-  color: rgba(139, 148, 158, 0.6);
+  font-size: 11px;
+  color: rgba(139, 148, 158, 0.7);
+  line-height: 1.3;
 }
 
 .history-copy,
 .history-delete {
-  opacity: 0;
-  transition: opacity 0.15s;
+  opacity: 0.4;
+  transition: all 0.15s ease;
+  border-radius: 6px;
+  padding: 3px;
 }
 
 .history-item:hover .history-copy,
 .history-item:hover .history-delete {
+  opacity: 0.8;
+}
+
+.history-item:hover .history-copy:hover,
+.history-item:hover .history-delete:hover {
   opacity: 1;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .session-picker-foot {
@@ -1419,5 +1606,71 @@ function formatSessionTime(timestamp: number | string): string {
   text-align: center;
   font-size: 12px;
   color: rgba(255, 255, 255, 0.55);
+}
+
+.memory-suggest-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.memory-suggest-item {
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.memory-suggest-item label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.memory-suggest-section {
+  flex-shrink: 0;
+  color: rgba(140, 180, 255, 0.95);
+  font-size: 11px;
+}
+
+.memory-suggest-line {
+  color: rgba(255, 255, 255, 0.88);
+  word-break: break-word;
+}
+
+.memory-proposal-banner {
+  margin: 0 10px 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(88, 166, 255, 0.1);
+  border: 1px solid rgba(88, 166, 255, 0.22);
+}
+
+.memory-proposal-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.memory-proposal-item + .memory-proposal-item {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.memory-proposal-text {
+  color: rgba(255, 255, 255, 0.85);
+  line-height: 1.45;
+}
+
+.memory-proposal-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
 }
 </style>

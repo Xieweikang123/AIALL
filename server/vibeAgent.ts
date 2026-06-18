@@ -63,11 +63,16 @@ import {
   buildBlockedGrepAfterLocateMessage,
   buildBlockedGrepMessage,
   buildEnglishPlanningNudge,
+  buildOverlyBroadVisionGrepMessage,
   buildPatchAnchorLocatedNudge,
+  buildSearchFilesContentQueryMessage,
   checkOverlappingRead,
+  checkPatchOldStringFromReads,
   isAnalysisOnlyReplyUnderForcePatch,
   isBlockedGrepAfterLocate,
   isBlockedGrepAfterVisionMisread,
+  isOverlyBroadVisionGrep,
+  isSearchFilesContentQuery,
   readLineRangeFromArgs,
   recordReadRange,
   sanitizeAgentUserVisibleText,
@@ -89,7 +94,19 @@ import {
   formatProjectContextForPrompt,
   invalidateProjectContextCache,
 } from "./vibeProjectContext";
-import { formatProjectMemoryForPrompt, readProjectMemory } from "./vibeProjectMemory";
+import {
+  formatProjectMemoryForPrompt,
+  isProjectMemorySection,
+  readProjectMemory,
+} from "./vibeProjectMemory";
+import { formatAgentsGuideForPrompt, readProjectAgentsGuide } from "./vibeProjectAgentsGuide";
+import { buildMemoryProposalToolResult } from "./projectMemoryProposal";
+import { buildSkillProposalToolResult } from "./projectSkillProposal";
+import {
+  buildProjectSkillsPromptBlock,
+  listProjectSkills,
+  readProjectSkill,
+} from "./vibeProjectSkills";
 import {
   applyUniquePatch,
   grepInProject,
@@ -112,6 +129,7 @@ import {
   buildVisionUserContent,
   contentCharSize,
   contentDisplayText,
+  extractVisibleAnchorQuotes,
   isAdequateVisionFirstTurnDescription,
   isPrematureVisionCompletionClaim,
   isVisionUnsupportedError,
@@ -504,6 +522,66 @@ const VIBE_AGENT_TOOLS = [
   {
     type: "function",
     function: {
+      name: "append_memory",
+      description:
+        "向项目记忆（.aiall/project-memory.md）提议追加一条记录；须经用户确认后才会写入。section 为 术语|导航|偏好。",
+      parameters: {
+        type: "object",
+        properties: {
+          section: {
+            type: "string",
+            enum: ["术语", "导航", "偏好"],
+            description: "写入分区：术语 / 导航 / 偏好",
+          },
+          content: { type: "string", description: "单条要点（勿带 leading -），1–200 字" },
+        },
+        required: ["section", "content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_skills",
+      description: "列出 .aiall/skills/ 下的 skill（slug、kind、title）。",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_skill",
+      description: "读取指定 slug 的 skill 完整 Markdown 内容。",
+      parameters: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "skill 文件名（不含 .md），如 ui-screenshot-locate" },
+        },
+        required: ["slug"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "propose_skill",
+      description:
+        "提议写入/更新 .aiall/skills/ 下的 skill 文件；须经用户确认。kind 为 fact|heuristic|preference。",
+      parameters: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "skill 标识（kebab-case）" },
+          kind: { type: "string", enum: ["fact", "heuristic", "preference"] },
+          title: { type: "string", description: "短标题" },
+          content: { type: "string", description: "Markdown 正文（不含 frontmatter）" },
+        },
+        required: ["slug", "kind", "title", "content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "run_command",
       description: "在项目目录中执行 shell 命令（如 npm run dev、python main.py、go test）。返回 stdout 和 stderr。",
       parameters: {
@@ -550,10 +628,21 @@ const VIBE_AGENT_TOOLS = [
 ];
 
 const READ_ONLY_AGENT_TOOLS = VIBE_AGENT_TOOLS.filter((t) =>
-  ["list_dir", "read_file", "grep", "search_files", "web_search", "web_extract"].includes(t.function.name),
+  ["list_dir", "read_file", "grep", "search_files", "web_search", "web_extract", "list_skills", "read_skill"].includes(
+    t.function.name,
+  ),
 );
 
-const READ_ONLY_AGENT_TOOL_NAMES = new Set(["list_dir", "read_file", "grep", "search_files", "web_search", "web_extract"]);
+const READ_ONLY_AGENT_TOOL_NAMES = new Set([
+  "list_dir",
+  "read_file",
+  "grep",
+  "search_files",
+  "web_search",
+  "web_extract",
+  "list_skills",
+  "read_skill",
+]);
 const WRITE_AGENT_TOOL_NAMES = new Set(["write_file", "patch_file", "delete_file"]);
 
 const LARGE_FILE_LINE_THRESHOLD = 500;
@@ -627,6 +716,8 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "修改代码时：小范围改动优先 patch_file（old_string 须唯一匹配）；全文件重写或新文件才用 write_file；大文件禁止 write_file 整文件覆盖。",
     "需要确认现状时 read_file 用 offset/limit 读相关片段即可，不要读整个大文件。",
     "write_file / patch_file / delete_file 会立即写入磁盘，无需用户确认。",
+    "探索结论或踩坑可调用 append_memory 提议写入项目记忆（## 术语|导航|偏好）；可调用 propose_skill 提议写入 .aiall/skills/；均须用户确认后才会落盘。",
+    "可 list_skills / read_skill 按需读取项目 skill；冷启动时已注入 fact/heuristic 类 skill 摘要。",
     "删除文件时：使用 delete_file 工具，不要用 write_file 清空内容来替代删除。",
     "重要：必须通过 API 工具接口调用 list_dir、read_file 等，禁止在正文里输出 <function>、<parameter> 等标记。",
     "read_file / list_dir：项目内用相对路径（如 src/main.ts）；读 AppData 会话可用绝对路径，或逻辑路径 aiall/vibe-chat-sessions/chat-<id>.json（自动映射到 AppData）；大文件用 offset/limit，勿用 run_command 读文件。",
@@ -939,6 +1030,13 @@ export async function executeTool(
       return buildBlockedGrepMessage(pattern);
     }
     if (
+      toolGuard?.visionLocateActive &&
+      toolGuard.visionAnchorQuotes?.length &&
+      isOverlyBroadVisionGrep(pattern, toolGuard.visionAnchorQuotes)
+    ) {
+      return buildOverlyBroadVisionGrepMessage(pattern, toolGuard.visionAnchorQuotes);
+    }
+    if (
       toolGuard &&
       isBlockedGrepAfterLocate(pattern, toolGuard.patchAnchorLocated, toolGuard.teleportBodyConfirmed)
     ) {
@@ -967,6 +1065,9 @@ export async function executeTool(
   if (name === "search_files") {
     const query = String(args.query || "").trim();
     if (!query) return "错误：缺少 query";
+    if (toolGuard?.visionLocateActive && isSearchFilesContentQuery(query)) {
+      return buildSearchFilesContentQueryMessage(query);
+    }
     const maxResults = Math.min(50, Math.max(1, Number(args.max_results) || 30));
     const results = await searchFiles(root, query, maxResults);
     if (!results.length) return buildSearchFilesEmptyHint(query);
@@ -1032,6 +1133,13 @@ export async function executeTool(
       if (content !== null) readCache?.set(resolved.relative, content);
     }
     if (content === null) return `错误：${resolved.relative} 不存在或无法读取`;
+    const readCheck = checkPatchOldStringFromReads(
+      resolved.relative,
+      oldString,
+      readSliceCache ?? new Map(),
+      readCache,
+    );
+    if (readCheck) return readCheck;
     const patchResult = applyUniquePatch(content, oldString, newString);
     if (!patchResult.ok) return patchResult.error;
     const patched = patchResult.patched;
@@ -1045,6 +1153,7 @@ export async function executeTool(
     }
     trackWrittenFile(stage, resolved.relative);
     invalidateProjectContextCache(root);
+    if (toolGuard) toolGuard.visionLocateActive = false;
     return `已修改 ${resolved.relative}（${oldString.length} → ${newString.length} 字符）`;
   }
 
@@ -1069,6 +1178,49 @@ export async function executeTool(
     trackWrittenFile(stage, resolved.relative);
     invalidateProjectContextCache(root);
     return `已删除 ${resolved.relative}`;
+  }
+
+  if (name === "append_memory") {
+    if (mode === "ask") return "Ask 模式下不支持写入项目记忆。";
+    if (mode === "plan" && !stage) return buildWriteToolBlockedMessage("plan");
+    const section = String(args.section ?? "").trim();
+    const content = String(args.content ?? "").trim().replace(/\s+/g, " ");
+    if (!isProjectMemorySection(section)) {
+      return "错误：section 须为 术语、导航 或 偏好";
+    }
+    if (!content) return "错误：缺少 content";
+    if (content.length > 200) return "错误：content 过长（最多 200 字）";
+    return buildMemoryProposalToolResult({ section, content });
+  }
+
+  if (name === "list_skills") {
+    const result = await listProjectSkills(root);
+    if (!result.ok) return `错误：${result.error}`;
+    if (!result.skills.length) return "（无 skill 文件）";
+    return result.skills.map((s) => `- ${s.slug} [${s.kind}] ${s.title}`).join("\n");
+  }
+
+  if (name === "read_skill") {
+    const slug = String(args.slug ?? "").trim();
+    if (!slug) return "错误：缺少 slug";
+    const result = await readProjectSkill(root, slug);
+    if (!result.ok) return `错误：${result.error}`;
+    return `# ${result.frontmatter.title} (${result.slug})\nkind: ${result.frontmatter.kind}\n\n${result.body}`;
+  }
+
+  if (name === "propose_skill") {
+    if (mode === "ask") return "Ask 模式下不支持写入 skill。";
+    if (mode === "plan" && !stage) return buildWriteToolBlockedMessage("plan");
+    const slug = String(args.slug ?? "").trim();
+    const kind = String(args.kind ?? "").trim();
+    const title = String(args.title ?? "").trim();
+    const content = String(args.content ?? "").trim();
+    if (!slug || !title || !content) return "错误：缺少 slug / title / content";
+    if (kind !== "fact" && kind !== "heuristic" && kind !== "preference") {
+      return "错误：kind 须为 fact、heuristic 或 preference";
+    }
+    if (content.length > 2000) return "错误：content 过长（最多 2000 字）";
+    return buildSkillProposalToolResult({ slug, kind, title, content });
   }
 
   if (name === "run_command") {
@@ -1253,6 +1405,14 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       ? formatProjectMemoryForPrompt(projectMemoryResult.content, projectMemoryResult.truncated)
       : "";
 
+  const agentsGuideResult = await readProjectAgentsGuide(projectRoot);
+  const agentsGuideBlock =
+    agentsGuideResult.ok && agentsGuideResult.content.trim()
+      ? formatAgentsGuideForPrompt(agentsGuideResult.content, agentsGuideResult.truncated)
+      : "";
+
+  const projectSkillsBlock = await buildProjectSkillsPromptBlock(projectRoot);
+
   const systemPrompt =
     (isAsk
       ? buildAskSystemPrompt(projectRoot, openFilePath, openFileSnippet, model)
@@ -1268,6 +1428,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         (sessionAuditRun ? buildSessionAuditHint() : "") +
         (agentStepClarifyRun ? buildAgentStepClarificationHint() : "")) +
     projectContextBlock +
+    agentsGuideBlock +
+    projectSkillsBlock +
     projectMemoryBlock;
 
   const writeStage = isAsk || isPlanExplore || readOnlyBuildRun ? null : createWriteStage();
@@ -1280,6 +1442,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     visionMisreadActive: false,
     patchAnchorLocated: false,
     teleportBodyConfirmed: false,
+    visionAnchorQuotes: [],
+    visionLocateActive: false,
   };
   let consecutiveExploreTurns = 0;
   let totalExploreTurns = 0;
@@ -1318,7 +1482,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     mode,
     systemPrompt,
     history: historyForDisplay(params.history),
-    projectContext: [projectContextBlock, projectMemoryBlock].filter(Boolean).join("") || undefined,
+    projectContext: [projectContextBlock, agentsGuideBlock, projectSkillsBlock, projectMemoryBlock]
+      .filter(Boolean)
+      .join("") || undefined,
     ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
     model,
     ...(openFileRel ? { openFile: openFileRel } : {}),
@@ -1776,6 +1942,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       visionFirstTurnPending = false;
       completeVisionFirstTurn(text, false);
       toolGuard.visionMisreadActive = suggestsEmbeddedLayoutMisread(text);
+      toolGuard.visionAnchorQuotes = extractVisibleAnchorQuotes(text);
+      toolGuard.visionLocateActive = toolGuard.visionAnchorQuotes.length > 0 || imageDataUrls.length > 0;
       if (consultativeVisionRun) {
         messages.push({ role: "system", content: buildVisionConsultativeContinueHint() });
         if (segmentMaxTurns !== undefined) {

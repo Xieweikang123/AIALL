@@ -103,6 +103,52 @@ export async function fetchProjectMemory(projectPath: string): Promise<ProjectMe
   }
 }
 
+export async function appendProjectMemoryEntries(
+  projectPath: string,
+  section: "术语" | "导航" | "偏好",
+  lines: string[],
+): Promise<ProjectMemoryPayload> {
+  const trimmed = projectPath.trim();
+  if (!trimmed) return { ok: false, error: "缺少 projectPath" };
+  if (!lines.length) return { ok: false, error: "缺少 appendLines" };
+  try {
+    const response = await fetch(backendUrl("/backend/vibe/project-memory"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectPath: trimmed,
+        appendSection: section,
+        appendLines: lines,
+      }),
+    });
+    if (response.ok) {
+      return await readJsonResponse<ProjectMemoryPayload>(response);
+    }
+    if (response.status === 404 || response.status === 405) {
+      return appendProjectMemoryViaFileApi(trimmed, section, lines);
+    }
+    return await readJsonResponse<ProjectMemoryPayload>(response);
+  } catch (error) {
+    const message = formatFetchError(error, "追加项目记忆失败");
+    if (/HTML|无效 JSON|空响应/i.test(message)) {
+      return appendProjectMemoryViaFileApi(trimmed, section, lines);
+    }
+    return { ok: false, error: message };
+  }
+}
+
+async function appendProjectMemoryViaFileApi(
+  projectPath: string,
+  section: "术语" | "导航" | "偏好",
+  lines: string[],
+): Promise<ProjectMemoryPayload> {
+  const read = await fetchProjectMemoryViaFileApi(projectPath);
+  if (!read.ok) return read;
+  const { appendProjectMemorySection } = await import("./projectMemorySections");
+  const merged = appendProjectMemorySection(read.content ?? "", section, lines);
+  return saveProjectMemoryViaFileApi(projectPath, merged);
+}
+
 export async function saveProjectMemory(
   projectPath: string,
   content: string,

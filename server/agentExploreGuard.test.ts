@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   checkOverlappingRead,
+  checkPatchOldStringFromReads,
   isAnalysisOnlyReplyUnderForcePatch,
   isBlockedGrepAfterLocate,
   isBlockedGrepAfterVisionMisread,
+  isOverlyBroadVisionGrep,
+  isSearchFilesContentQuery,
   readLineRangeFromArgs,
   readRangesOverlap,
   recordReadRange,
@@ -82,5 +85,28 @@ describe("agentExploreGuard", () => {
 
   it("force-patch on implement follow-up even before tool anchor in this run", () => {
     expect(shouldForcePatchAfterAnchorLocated(false, true, false, true)).toBe(true);
+  });
+
+  it("blocks overly broad vision grep when anchors exist", () => {
+    const anchors = ["多会话同时进行，好实现吗？", "今天·14条"];
+    expect(isOverlyBroadVisionGrep("会话", anchors)).toBe(true);
+    expect(isOverlyBroadVisionGrep("多会话同时进行", anchors)).toBe(false);
+    expect(isOverlyBroadVisionGrep("session-item", anchors)).toBe(false);
+  });
+
+  it("detects search_files queries that look like UI copy not filenames", () => {
+    expect(isSearchFilesContentQuery("会话列表")).toBe(true);
+    expect(isSearchFilesContentQuery("SessionList.vue")).toBe(false);
+    expect(isSearchFilesContentQuery("file-panel")).toBe(false);
+  });
+
+  it("requires patch old_string to appear in prior read slices", () => {
+    const slices = new Map<string, string>([
+      ["src/foo.ts:1:200", ".real { color: red; }\n"],
+    ]);
+    expect(checkPatchOldStringFromReads("src/foo.ts", ".real { color: red; }", slices)).toBeNull();
+    expect(checkPatchOldStringFromReads("src/foo.ts", ".fake { gap: 1px; }", slices)).toMatch(
+      /未出现在你对 src\/foo.ts 的已读片段中/,
+    );
   });
 });

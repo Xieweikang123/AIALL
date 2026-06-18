@@ -119,7 +119,79 @@ export type ToolGuardContext = {
   visionMisreadActive: boolean;
   patchAnchorLocated: boolean;
   teleportBodyConfirmed: boolean;
+  /** Quoted visible strings from vision-first-turn description. */
+  visionAnchorQuotes?: string[];
+  /** Post-vision UI locate phase — enforce anchor-first grep and read-validated patch. */
+  visionLocateActive?: boolean;
 };
+
+/** Grep patterns that carry structural/code signals (class names, attributes, symbols). */
+const STRUCTURAL_GREP_RE =
+  /[a-z0-9]-[a-z0-9]|title\s*=|class\s*=|`\s*[\w.-]+\s*`|\.[\w-]+\s*\{|@click|<Teleport|\bposition:\s*(?:fixed|absolute)/i;
+
+/** search_files matches filenames only — CJK-heavy queries usually mean content search. */
+export function isSearchFilesContentQuery(query: string): boolean {
+  const q = query.trim();
+  if (!q) return false;
+  const hasCjk = /[\u4e00-\u9fff]/.test(q);
+  const hasLatinToken = /[a-zA-Z][\w.-]{1,}/.test(q);
+  return hasCjk && !hasLatinToken;
+}
+
+export function buildSearchFilesContentQueryMessage(query: string): string {
+  return [
+    `错误：search_files 按文件名匹配，「${query}」更像界面可见文案而非文件名。`,
+    "请改用 grep 搜索该文案或 kebab-case class（如 item-meta、panel-list），命中后再 read_file 核对。",
+  ].join("");
+}
+
+/** Block overly short / generic grep after vision when anchor quotes are available. */
+export function isOverlyBroadVisionGrep(pattern: string, anchorQuotes: string[]): boolean {
+  if (!anchorQuotes.length) return false;
+  const p = pattern.trim();
+  if (!p) return false;
+  if (STRUCTURAL_GREP_RE.test(p)) return false;
+  const compact = p.replace(/\s+/g, "");
+  if (compact.length >= 4) {
+    for (const quote of anchorQuotes) {
+      if (quote.includes(p) || p.includes(quote)) return false;
+      if (compact.length >= 4 && quote.includes(compact.slice(0, Math.min(compact.length, 8)))) return false;
+    }
+  }
+  if (compact.length < 4) return true;
+  if (/^[\u4e00-\u9fff|｜\s]+$/.test(p) && p.length <= 8) return true;
+  return false;
+}
+
+export function buildOverlyBroadVisionGrepMessage(pattern: string, anchorQuotes: string[]): string {
+  const samples = anchorQuotes.slice(0, 3).map((q) => `「${q}」`).join("、");
+  return [
+    `错误：grep「${pattern}」过宽，易扫出大量无关命中。`,
+    `读图已摘录可见原文 ${samples}。请 grep 其中 ≥4 字的片段，或 grep kebab-case class / title= 等结构标识，再 read_file 核对。`,
+  ].join("");
+}
+
+/** patch old_string must appear in content the agent already read for that file. */
+export function checkPatchOldStringFromReads(
+  fileKey: string,
+  oldString: string,
+  readSliceCache: Map<string, string>,
+  readCache?: Map<string, string>,
+): string | null {
+  const chunks: string[] = [];
+  for (const [key, slice] of readSliceCache) {
+    if (key.startsWith(`${fileKey}:`)) chunks.push(slice);
+  }
+  const full = readCache?.get(fileKey);
+  if (full) chunks.push(full);
+  if (!chunks.length) return null;
+  const combined = chunks.join("\n");
+  if (combined.includes(oldString)) return null;
+  return [
+    `错误：old_string 未出现在你对 ${fileKey} 的已读片段中，禁止凭记忆构造。`,
+    "请 read_file 包含该段落的窗口，从返回原文复制 old_string 后再 patch_file；若 read 后 DOM 与截图不符，换 grep 下一个命中。",
+  ].join("");
+}
 
 const VISION_MARKER_RE = /\s*\[图已理解\]\s*/g;
 

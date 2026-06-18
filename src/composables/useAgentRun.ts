@@ -91,6 +91,9 @@ import {
   resolveAgentTimelineAnswer,
   isAgentTimelineAnswerStreaming,
 } from "../services/agentMessageDisplay";
+import { parseMemoryProposalToolResult } from "../services/projectMemoryProposal";
+import { parseSkillProposalToolResult } from "../services/projectSkillProposal";
+import { createAgentSessionRunManager } from "./agentSessionRuns";
 import { isScrollNearBottom, scrollElementToBottom } from "../utils/scrollViewport";
 import {
   appendStatusDetail,
@@ -121,7 +124,7 @@ export type UseAgentRunDeps = {
   activeSessionId: Ref<string>;
   activeFilePath: Ref<string>;
   pendingPromptQueue: Ref<string[]>;
-  patchAssistantMsg: (id: string, patch: Partial<ChatMessage>) => void;
+  patchAssistantMsg: (id: string, patch: Partial<ChatMessage>, sessionId?: string) => void;
   schedulePersistChat: () => void;
   persistChatNow: (path?: string, options?: { flushStore?: boolean }) => void;
   persistPendingQueue: () => void;
@@ -140,8 +143,10 @@ export type UseAgentRunDeps = {
   findLastUserMessage: () => { content: string } | null;
   beginAgentRunSession: (sessionId: string) => void;
   endAgentRunSession: (sessionId?: string) => void;
-  getAgentRunSessionId: () => string;
-  persistAgentRunSession: () => void;
+  persistAgentRunSession: (sessionId: string) => void;
+  onAgentRunSettled?: (msg: ChatMessage) => void;
+  onMemoryProposal?: (msgId: string, proposal: import("../services/projectMemoryProposal").MemoryProposalPayload) => void;
+  onSkillProposal?: (msgId: string, proposal: import("../services/projectSkillProposal").SkillProposalPayload) => void;
 };
 
 const STREAM_SCROLL_THROTTLE_MS = 120;
@@ -179,33 +184,49 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     findLastUserMessage,
     beginAgentRunSession,
     endAgentRunSession,
-    getAgentRunSessionId,
     persistAgentRunSession,
+    onAgentRunSettled,
+    onMemoryProposal,
+    onSkillProposal,
   } = deps;
 
-  function agentRunSessionId(): string {
-    return getAgentRunSessionId();
+  const runManager = createAgentSessionRunManager<ChatMessage>();
+
+  function isRunVisible(sessionId: string): boolean {
+    return sessionId === activeSessionId.value;
   }
 
-  function finishAgentRunSession() {
-    const sid = agentRunSessionId();
-    persistAgentRunSession();
-    endAgentRunSession(sid);
+  function maybeScrollChat(sessionId: string, force = false) {
+    if (isRunVisible(sessionId)) void scrollChatToBottom(force);
   }
 
-  function updateAgentRunSessionStatus(status: "completed" | "failed" | "interrupted") {
+  function maybePersistChat(sessionId: string, options?: { flushStore?: boolean }) {
+    if (isRunVisible(sessionId)) persistChatNow(undefined, options);
+    else persistAgentRunSession(sessionId);
+  }
+
+  function finishRunSession(sessionId: string) {
+    persistAgentRunSession(sessionId);
+    endAgentRunSession(sessionId);
+    runManager.remove(sessionId);
+    if (runManager.size() === 0) {
+      agentLastProgressAt = 0;
+      stalledAssistantMsg.value = null;
+      stopAgentUiTick();
+    }
+  }
+
+  function updateAgentRunSessionStatus(
+    sessionId: string,
+    status: "completed" | "failed" | "interrupted",
+  ) {
     const project = projectPath.value.trim();
-    const sid = agentRunSessionId() || activeSessionId.value;
-    if (project && sid) updateVibeChatSessionStatus(project, sid, status);
+    if (project && sessionId) updateVibeChatSessionStatus(project, sessionId, status);
   }
 
-  let agentAbortHandle: { abort: () => void } | null = null;
-  let agentRunGeneration = 0;
   let agentUiTickTimer: ReturnType<typeof setInterval> | null = null;
   let autoResumeTimer: ReturnType<typeof setInterval> | null = null;
   let agentLastProgressAt = 0;
-  let agentConnectStartedAt = 0;
-  let agentConnectHasImages = false;
 
   const autoResumeSecondsLeft = ref(0);
   const autoResumeTargetId = ref("");
@@ -323,11 +344,12 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   }
 
   function refreshStalledAssistantMsg() {
-    if (!chatSending.value || agentLastProgressAt <= 0) {
+    const run = getActiveRun();
+    if (!chatSending.value || !run || run.lastProgressAt <= 0) {
       stalledAssistantMsg.value = null;
       return;
     }
-    if (!isAgentRunStalled(agentLastProgressAt, chatSending.value)) {
+    if (!isAgentRunStalled(run.lastProgressAt, chatSending.value)) {
       stalledAssistantMsg.value = null;
       return;
     }
@@ -344,20 +366,20 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   }
 
   function findRunningAssistantMsg(): ChatMessage | null {
-    if (!chatSending.value) return null;
-    const id = activeAssistantMsgId.value;
-    if (!id) return null;
-    return chatMessages.value.find((m) => m.id === id) ?? null;
+    const run = getActiveRun();
+    if (!run || !chatSending.value) return null;
+    return chatMessages.value.find((m) => m.id === run.assistantMsgId) ?? run.assistantMsg;
   }
 
-  function touchAgentProgress() {
-    agentLastProgressAt = Date.now();
+  function touchAgentProgress(sessionId: string) {
+    runManager.touchProgress(sessionId);
+    if (sessionId === activeSessionId.value) {
+      agentLastProgressAt = runManager.get(sessionId)?.lastProgressAt ?? Date.now();
+    }
   }
 
   function startAgentUiTick() {
-    stopAgentUiTick();
-    touchAgentProgress();
-    agentConnectStartedAt = Date.now();
+    if (agentUiTickTimer) return;
     agentUiTickTimer = setInterval(() => {
       agentUiTick.value += 1;
       refreshStalledAssistantMsg();
@@ -366,6 +388,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   }
 
   function stopAgentUiTick() {
+    if (runManager.size() > 0) return;
     if (agentUiTickTimer) {
       clearInterval(agentUiTickTimer);
       agentUiTickTimer = null;
@@ -373,35 +396,39 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     stalledAssistantMsg.value = null;
   }
 
+  function getActiveRun() {
+    return runManager.get(activeSessionId.value);
+  }
+
   function checkAgentStall() {
     if (!chatSending.value) return;
+    const sessionId = activeSessionId.value;
+    const run = runManager.get(sessionId);
     const msg = findRunningAssistantMsg();
-    if (!msg) return;
+    if (!run || !msg) return;
 
     if (
-      isAgentConnectStalled(agentConnectStartedAt, msg.agentPhase, true) &&
+      isAgentConnectStalled(run.connectStartedAt, msg.agentPhase, true) &&
       isAgentConnectPhase(msg.agentPhase)
     ) {
-      abortAgentConnectStall(msg);
+      abortAgentConnectStall(sessionId, msg);
       return;
     }
 
-    if (agentLastProgressAt <= 0) return;
-    if (!isAgentRunStalled(agentLastProgressAt, true)) return;
+    if (run.lastProgressAt <= 0) return;
+    if (!isAgentRunStalled(run.lastProgressAt, true)) return;
     if (!hasRecoverableAgentProgress(msg)) return;
-    recoverAgentRunFromStall(msg, agentStallRecoveryReason());
+    recoverAgentRunFromStall(sessionId, msg, agentStallRecoveryReason());
   }
 
-  function abortAgentConnectStall(msg: ChatMessage) {
-    agentAbortHandle?.abort();
-    agentAbortHandle = null;
-    finishAgentRunSession();
-    agentConnectStartedAt = 0;
-    agentLastProgressAt = 0;
+  function abortAgentConnectStall(sessionId: string, msg: ChatMessage) {
+    const connectHasImages = runManager.get(sessionId)?.connectHasImages ?? false;
+    runManager.abort(sessionId);
+    runManager.setAbortHandle(sessionId, null);
+    runManager.invalidate(sessionId);
+    finishRunSession(sessionId);
     clearPendingAgentRun();
-    stopAgentUiTick();
-    const reason = agentConnectStallMessage(agentConnectHasImages);
-    chatError.value = reason;
+    const reason = agentConnectStallMessage(connectHasImages);
     msg.agentFailed = true;
     msg.agentRecoverable = true;
     msg.agentFailureReason = reason;
@@ -411,11 +438,12 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       agentFailureReason: reason,
       agentPhase: undefined,
       status: reason,
-    });
+    }, sessionId);
     if (projectPath.value.trim()) {
-      updateAgentRunSessionStatus("failed");
+      updateAgentRunSessionStatus(sessionId, "failed");
     }
-    persistChatNow();
+    maybePersistChat(sessionId);
+    if (isRunVisible(sessionId)) chatError.value = reason;
   }
 
   function setAgentStatus(msg: ChatMessage, phase: string, extra?: Partial<AgentStatusData>, options?: { log?: boolean }) {
@@ -439,7 +467,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   }
 
   function isAgentRunning(msg: ChatMessage): boolean {
-    return Boolean(chatSending.value && msg.id === activeAssistantMsgId.value);
+    const run = getActiveRun();
+    return Boolean(run && run.assistantMsgId === msg.id && chatSending.value);
   }
 
   function hasAgentActivity(msg: ChatMessage): boolean {
@@ -914,7 +943,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       if (m.role === "assistant" && canResumeAgentRun(m)) {
         const reason = m.agentFailureReason || "";
         if (reason && shouldSilentAutoContinue(reason)) {
-          trySilentContinue(m, reason);
+          trySilentContinue(activeSessionId.value, m, reason);
         }
         return;
       }
@@ -930,7 +959,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     assistantMsg.status = "";
   }
 
-  function trySilentContinue(assistantMsg: ChatMessage, reason: string): boolean {
+  function trySilentContinue(sessionId: string, assistantMsg: ChatMessage, reason: string): boolean {
     if (!shouldSilentAutoContinue(reason)) return false;
     const count = assistantMsg.agentContinueCount ?? 0;
     if (count >= AGENT_SILENT_CONTINUE_MAX) return false;
@@ -939,7 +968,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
     prepareAssistantForSilentContinue(assistantMsg);
     assistantMsg.agentContinueCount = count + 1;
-    chatError.value = "";
+    if (isRunVisible(sessionId)) chatError.value = "";
     appendStatusLog(assistantMsg, buildSilentContinueStatusLog(reason, assistantMsg.agentContinueCount));
     patchAssistantMsg(assistantMsg.id, {
       agentContinueCount: assistantMsg.agentContinueCount,
@@ -951,20 +980,21 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       activityDetailed: true,
       tools: assistantMsg.tools ? [...assistantMsg.tools] : undefined,
       ...syncRoundGroupsPatch(assistantMsg),
-    });
+    }, sessionId);
 
     window.setTimeout(() => {
-      if (!chatSending.value) void resumeAgentRun(assistantMsg.id, { silent: true });
+      if (!runManager.has(sessionId)) void resumeAgentRun(assistantMsg.id, { silent: true });
     }, AGENT_SILENT_CONTINUE_DELAY_MS);
     return true;
   }
 
   function handleRecoverableInterruption(
+    sessionId: string,
     assistantMsg: ChatMessage,
     reason: string,
     options?: { logStatus?: boolean },
   ) {
-    if (trySilentContinue(assistantMsg, reason)) return;
+    if (trySilentContinue(sessionId, assistantMsg, reason)) return;
     applyRecoverableAgentFailure(assistantMsg, reason, options);
   }
 
@@ -1013,24 +1043,23 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     cancelAutoResume();
   }
 
-  function recoverAgentRunFromStall(assistantMsg: ChatMessage, reason: string) {
-    agentRunGeneration += 1;
+  function recoverAgentRunFromStall(sessionId: string, assistantMsg: ChatMessage, reason: string) {
+    runManager.invalidate(sessionId);
     clearStreamDeltaBuffer();
-    stopAgentUiTick();
-    agentAbortHandle?.abort();
-    agentAbortHandle = null;
-    agentLastProgressAt = 0;
-    finishAgentRunSession();
-    handleRecoverableInterruption(assistantMsg, reason);
-    persistChatNow();
-    void scrollChatToBottom();
+    runManager.abort(sessionId);
+    runManager.setAbortHandle(sessionId, null);
+    finishRunSession(sessionId);
+    handleRecoverableInterruption(sessionId, assistantMsg, reason);
+    maybePersistChat(sessionId);
+    maybeScrollChat(sessionId);
   }
 
   function forceRecoverStalledRun(assistantMsgId: string) {
     const msg = chatMessages.value.find((m) => m.id === assistantMsgId);
     if (!msg || msg.role !== "assistant") return;
-    if (chatSending.value && msg.id === activeAssistantMsgId.value) {
-      recoverAgentRunFromStall(msg, agentStallRecoveryReason());
+    const run = getActiveRun();
+    if (chatSending.value && run?.assistantMsgId === msg.id) {
+      recoverAgentRunFromStall(activeSessionId.value, msg, agentStallRecoveryReason());
       return;
     }
     if (canResumeAgentRun(msg)) {
@@ -1050,9 +1079,15 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     void runAgentTurn(next, { skipUserBubble: true });
   }
 
-  function handleAgentEvent(event: VibeAgentSseEvent, assistantMsg: ChatMessage, runGen: number) {
-    if (runGen !== agentRunGeneration) return;
+  function handleAgentEvent(
+    event: VibeAgentSseEvent,
+    assistantMsg: ChatMessage,
+    runGen: number,
+    sessionId: string,
+  ) {
+    if (!runManager.isValid(sessionId, runGen)) return;
     const msgId = assistantMsg.id;
+    const patchMsg = (patch: Partial<ChatMessage>) => patchAssistantMsg(msgId, patch, sessionId);
 
     const isProgressEvent =
       event.type === "status" ||
@@ -1066,7 +1101,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       event.type === "message" ||
       event.type === "agent_context" ||
       event.type === "error";
-    if (isProgressEvent) touchAgentProgress();
+    if (isProgressEvent) touchAgentProgress(sessionId);
 
     if (event.type === "agent_context") {
       assistantMsg.agentContext = event.data;
@@ -1187,8 +1222,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           ...syncRoundGroupsPatch(assistantMsg),
         });
         stopAgentUiTick();
-        finishAgentRunSession();
-        updateAgentRunSessionStatus("interrupted");
+        finishRunSession(sessionId);
+        updateAgentRunSessionStatus(sessionId, "interrupted");
         persistChatNow();
         if (pendingPromptQueue.value.length) {
         dequeuePendingPromptAndRun();
@@ -1262,6 +1297,12 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         step.summary = event.data.summary;
         if (event.data.result) step.fullResult = event.data.result;
       }
+      if (event.data.result) {
+        const proposal = parseMemoryProposalToolResult(event.data.result);
+        if (proposal) onMemoryProposal?.(msgId, proposal);
+        const skillProposal = parseSkillProposalToolResult(event.data.result);
+        if (skillProposal) onSkillProposal?.(msgId, skillProposal);
+      }
       const pending = assistantMsg.tools?.some((t) => t.running);
       setAgentStatus(assistantMsg, pending ? "executing_tools" : "summarizing_tools", {
         turn: assistantMsg.agentTurn,
@@ -1304,37 +1345,33 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     }
 
     if (event.type === "error") {
-      clearStreamDeltaBuffer();
-      stopAgentUiTick();
-      agentLastProgressAt = 0;
+      if (isRunVisible(sessionId)) clearStreamDeltaBuffer();
       planExecutionActive.value = false;
-      if (trySilentContinue(assistantMsg, event.data.message)) {
-        agentAbortHandle = null;
+      if (trySilentContinue(sessionId, assistantMsg, event.data.message)) {
+        runManager.setAbortHandle(sessionId, null);
         return;
       }
       applyRecoverableAgentFailure(assistantMsg, event.data.message);
-      finishAgentRunSession();
-      persistChatNow();
-      void scrollChatToBottom();
+      finishRunSession(sessionId);
+      maybePersistChat(sessionId);
+      maybeScrollChat(sessionId);
 
       const recoverable = isRecoverableAgentError(event.data.message);
-      if (!recoverable && pendingPromptQueue.value.length) {
+      if (!recoverable && pendingPromptQueue.value.length && isRunVisible(sessionId)) {
         dequeuePendingPromptAndRun();
       }
       return;
     }
 
     if (event.type === "done") {
-      clearStreamDeltaBuffer();
-      stopAgentUiTick();
-      agentLastProgressAt = 0;
+      if (isRunVisible(sessionId)) clearStreamDeltaBuffer();
       planExecutionActive.value = false;
-      agentAbortHandle = null;
+      runManager.setAbortHandle(sessionId, null);
       assistantMsg.streaming = false;
       clearPendingAgentRun();
 
       if (assistantMsg.agentFailed) {
-        finishAgentRunSession();
+        finishRunSession(sessionId);
         const completedTurns = resolveCompletedTurns(event.data.turns, assistantMsg);
         if (!assistantMsg.totalTurns) assistantMsg.totalTurns = completedTurns;
         patchAssistantMsg(msgId, {
@@ -1355,7 +1392,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       
       // Update session status to completed if agent completed successfully
       if (!wasAborted && !assistantMsg.agentFailed && projectPath.value.trim()) {
-        updateAgentRunSessionStatus("completed");
+        updateAgentRunSessionStatus(sessionId, "completed");
       }
       const hasRunningTools = assistantMsg.tools?.some((t) => t.running);
       const hadProgress = hasRecoverableAgentProgress(assistantMsg);
@@ -1369,7 +1406,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         isAgentMaxTurnsExhausted(assistantMsg, completedTurns);
 
       if (incompleteRun) {
-        if (trySilentContinue(assistantMsg, "连接中断（运行未完成）")) {
+        if (trySilentContinue(sessionId, assistantMsg, "连接中断（运行未完成）")) {
           if (!assistantMsg.totalTurns) {
             assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
           }
@@ -1379,12 +1416,12 @@ export function useAgentRun(deps: UseAgentRunDeps) {
             ...syncRoundGroupsPatch(assistantMsg),
           });
           persistChatNow();
-          persistAgentRunSession();
+          persistAgentRunSession(sessionId);
           void scrollChatToBottom();
           return;
         }
         const continueBefore = assistantMsg.agentContinueCount ?? 0;
-        handleRecoverableInterruption(assistantMsg, "连接中断（运行未完成）", { logStatus: true });
+        handleRecoverableInterruption(sessionId, assistantMsg, "连接中断（运行未完成）", { logStatus: true });
         if ((assistantMsg.agentContinueCount ?? 0) > continueBefore) {
           if (!assistantMsg.totalTurns) {
             assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
@@ -1395,11 +1432,11 @@ export function useAgentRun(deps: UseAgentRunDeps) {
             ...syncRoundGroupsPatch(assistantMsg),
           });
           persistChatNow();
-          persistAgentRunSession();
+          persistAgentRunSession(sessionId);
           void scrollChatToBottom();
           return;
         }
-        finishAgentRunSession();
+        finishRunSession(sessionId);
         if (!assistantMsg.totalTurns) {
           assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
         }
@@ -1418,25 +1455,25 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
       if (maxTurnsExhausted) {
         const reason = buildAgentMaxTurnsExhaustedMessage(assistantMsg.agentMaxTurns ?? completedTurns);
-        if (trySilentContinue(assistantMsg, reason)) {
+        if (trySilentContinue(sessionId, assistantMsg, reason)) {
           assistantMsg.totalTurns = completedTurns;
           patchAssistantMsg(msgId, { totalTurns: completedTurns, ...syncRoundGroupsPatch(assistantMsg) });
           persistChatNow();
-          persistAgentRunSession();
+          persistAgentRunSession(sessionId);
           void scrollChatToBottom();
           return;
         }
         const continueBefore = assistantMsg.agentContinueCount ?? 0;
-        handleRecoverableInterruption(assistantMsg, reason, { logStatus: true });
+        handleRecoverableInterruption(sessionId, assistantMsg, reason, { logStatus: true });
         if ((assistantMsg.agentContinueCount ?? 0) > continueBefore) {
           assistantMsg.totalTurns = completedTurns;
           patchAssistantMsg(msgId, { totalTurns: completedTurns, ...syncRoundGroupsPatch(assistantMsg) });
           persistChatNow();
-          persistAgentRunSession();
+          persistAgentRunSession(sessionId);
           void scrollChatToBottom();
           return;
         }
-        finishAgentRunSession();
+        finishRunSession(sessionId);
         assistantMsg.totalTurns = completedTurns;
         patchAssistantMsg(msgId, { totalTurns: completedTurns, ...syncRoundGroupsPatch(assistantMsg) });
         persistChatNow();
@@ -1528,7 +1565,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       }
       void scrollChatToBottom();
 
-      finishAgentRunSession();
+      finishRunSession(sessionId);
+
+      onAgentRunSettled?.(assistantMsg);
 
       if (pendingPromptQueue.value.length) {
         dequeuePendingPromptAndRun();
@@ -1536,56 +1575,59 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     }
   }
 
-  function interruptAgentRun(options?: { logStatus?: boolean; reason?: string }) {
+  function interruptSessionRun(sessionId: string, options?: { logStatus?: boolean; reason?: string }) {
+    const run = runManager.get(sessionId);
+    if (!run) return;
     cancelAutoResume();
     clearPendingAgentRun();
-    agentRunGeneration += 1;
-    agentLastProgressAt = 0;
-    const running = findRunningAssistantMsg();
-    if (running) {
-      const reason = options?.reason?.trim() || "已被新指令打断";
-      running.agentAborted = true;
-      running.agentAbortReason = reason;
-      running.streaming = false;
-      if (options?.logStatus !== false) {
-        appendStatusLog(running, reason);
-        setAgentStatus(running, "aborted", undefined, { log: false });
-      }
+    runManager.invalidate(sessionId);
 
-      const patch: Parameters<typeof patchAssistantMsg>[1] = {
-        agentAborted: true,
-        agentAbortReason: reason,
-        streaming: false,
-        status: running.status,
-        statusLog: running.statusLog ? [...running.statusLog] : undefined,
-      };
-
-      if (isHmrInterruptReason(reason) && hasRecoverableAgentProgress(running)) {
-        running.agentFailed = true;
-        running.agentRecoverable = true;
-        running.agentFailureReason = reason;
-        running.agentRecoveryDismissed = false;
-        running.totalTurns = resolveAgentCompletedTurns(running);
-        running.content = resolveAgentFailureBubbleContent(running);
-        running.activityExpanded = true;
-        patch.agentFailed = true;
-        patch.agentRecoverable = true;
-        patch.agentFailureReason = reason;
-        patch.agentRecoveryDismissed = false;
-        patch.totalTurns = running.totalTurns;
-        patch.content = running.content;
-        patch.activityExpanded = true;
-        patch.statusLog = running.statusLog ? [...running.statusLog] : undefined;
-        Object.assign(patch, syncRoundGroupsPatch(running));
-      }
-
-      patchAssistantMsg(running.id, patch);
+    const running = run.assistantMsg;
+    const reason = options?.reason?.trim() || "已被新指令打断";
+    running.agentAborted = true;
+    running.agentAbortReason = reason;
+    running.streaming = false;
+    if (options?.logStatus !== false) {
+      appendStatusLog(running, reason);
+      setAgentStatus(running, "aborted", undefined, { log: false });
     }
-    clearStreamDeltaBuffer();
-    stopAgentUiTick();
-    agentAbortHandle?.abort();
-    agentAbortHandle = null;
-    finishAgentRunSession();
+
+    const patch: Partial<ChatMessage> = {
+      agentAborted: true,
+      agentAbortReason: reason,
+      streaming: false,
+      status: running.status,
+      statusLog: running.statusLog ? [...running.statusLog] : undefined,
+    };
+
+    if (isHmrInterruptReason(reason) && hasRecoverableAgentProgress(running)) {
+      running.agentFailed = true;
+      running.agentRecoverable = true;
+      running.agentFailureReason = reason;
+      running.agentRecoveryDismissed = false;
+      running.totalTurns = resolveAgentCompletedTurns(running);
+      running.content = resolveAgentFailureBubbleContent(running);
+      running.activityExpanded = true;
+      patch.agentFailed = true;
+      patch.agentRecoverable = true;
+      patch.agentFailureReason = reason;
+      patch.agentRecoveryDismissed = false;
+      patch.totalTurns = running.totalTurns;
+      patch.content = running.content;
+      patch.activityExpanded = true;
+      patch.statusLog = running.statusLog ? [...running.statusLog] : undefined;
+      Object.assign(patch, syncRoundGroupsPatch(running));
+    }
+
+    patchAssistantMsg(running.id, patch, sessionId);
+    if (isRunVisible(sessionId)) clearStreamDeltaBuffer();
+    runManager.abort(sessionId);
+    runManager.setAbortHandle(sessionId, null);
+    finishRunSession(sessionId);
+  }
+
+  function interruptAgentRun(options?: { logStatus?: boolean; reason?: string }) {
+    interruptSessionRun(activeSessionId.value, options);
   }
 
   function stopAgent() {
@@ -1595,8 +1637,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   function tryResumeHmrInterruptedRun(): void {
     const pending = popPendingAgentRun();
     if (!pending) return;
-    // 如果已经有活跃的 Agent 运行，不恢复
-    if (chatSending.value || agentAbortHandle) return;
+    if (runManager.size() > 0) return;
     // 如果项目路径不匹配，不恢复
     const currentProject = projectPath.value.trim();
     if (pending.projectPath && pending.projectPath !== currentProject) return;
@@ -1612,6 +1653,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   async function resumeAgentRun(assistantMsgId: string, options?: { silent?: boolean }) {
     cancelAutoResume();
+    const sessionId = activeSessionId.value;
     if (chatSending.value || !configReady.value || !projectOpened.value) return;
 
     const assistantIdx = chatMessages.value.findIndex((m) => m.id === assistantMsgId);
@@ -1623,6 +1665,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
     const originalPrompt = resolveOriginalUserPrompt(assistantMsgId);
     if (!originalPrompt) return;
+
+    if (runManager.has(sessionId)) {
+      interruptSessionRun(sessionId, { logStatus: true, reason: "已被新指令打断" });
+    }
 
     const failureReason =
       assistantMsg.agentFailureReason ||
@@ -1639,9 +1685,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
     reloadAiConfig();
     clearStreamDeltaBuffer();
-    beginAgentRunSession(getAgentRunSessionId() || activeSessionId.value);
+    beginAgentRunSession(sessionId);
     chatError.value = "";
     resetChatScrollPin();
+    const runGen = runManager.start(sessionId, assistantMsg.id, assistantMsg, false);
     startAgentUiTick();
 
     assistantMsg.agentFailed = false;
@@ -1683,7 +1730,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       status: assistantMsg.status,
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
       ...syncRoundGroupsPatch(assistantMsg),
-    });
+    }, sessionId);
     persistChatNow();
     await scrollChatToBottom(true);
 
@@ -1693,10 +1740,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       resumePrompt,
     );
 
-    agentAbortHandle?.abort();
-    agentAbortHandle = null;
-    const runGen = ++agentRunGeneration;
-    agentAbortHandle = runVibeAgentSse(
+    const handle = runVibeAgentSse(
       {
         prompt: resumePrompt,
         history,
@@ -1709,8 +1753,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         openFilePath: activeFilePath.value || undefined,
         runProfile: runProfile.kind === "execute_plan" ? runProfile : undefined,
       },
-      (event) => handleAgentEvent(event, assistantMsg, runGen),
+      (event) => handleAgentEvent(event, assistantMsg, runGen, sessionId),
     );
+    runManager.setAbortHandle(sessionId, handle);
   }
 
   async function runAgentTurn(
@@ -1757,10 +1802,13 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
     reloadAiConfig();
     clearStreamDeltaBuffer();
-    beginAgentRunSession(activeSessionId.value);
+    const sessionId = activeSessionId.value;
+    if (runManager.has(sessionId)) {
+      interruptSessionRun(sessionId, { logStatus: true, reason: "已被新指令打断" });
+    }
+    beginAgentRunSession(sessionId);
     chatError.value = "";
     resetChatScrollPin();
-    startAgentUiTick();
 
     const history = buildAgentHistory(rawPrompt, runProfile);
 
@@ -1802,9 +1850,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       await scrollChatToBottom(true);
     }
 
-    agentAbortHandle?.abort();
-    agentAbortHandle = null;
-    const runGen = ++agentRunGeneration;
+    const runGen = runManager.start(sessionId, assistantMsg.id, assistantMsg, hasImages);
+    startAgentUiTick();
     const agentRequest = {
       prompt,
       history,
@@ -1822,12 +1869,13 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     persistAgentRunForHmr({
       request: agentRequest as unknown as Record<string, unknown>,
       projectPath: agentRequest.projectPath,
-      sessionId: activeSessionId.value || undefined,
+      sessionId: sessionId || undefined,
     });
-    agentAbortHandle = runVibeAgentSse(
+    const handle = runVibeAgentSse(
       agentRequest,
-      (event) => handleAgentEvent(event, assistantMsg, runGen),
+      (event) => handleAgentEvent(event, assistantMsg, runGen, sessionId),
     );
+    runManager.setAbortHandle(sessionId, handle);
   }
 
   function shouldShowMessageBubble(msg: ChatMessage): boolean {
@@ -1923,6 +1971,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     executePlanFromMessage,
     planExecutionActive,
     scheduleStreamScroll,
-    getAgentAbortHandle: () => agentAbortHandle,
+    getAgentAbortHandle: () => runManager.getActiveAbortHandle(activeSessionId.value),
   };
 }

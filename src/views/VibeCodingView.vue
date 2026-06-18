@@ -273,6 +273,14 @@
         :project-memory-message="projectMemoryMessage"
         :project-memory-max-chars="projectMemoryMaxChars"
         :project-memory-has-content="projectMemoryHasContent"
+        :memory-suggest-open="memorySuggestOpen"
+        :memory-suggest-saving="memorySuggestSaving"
+        :memory-suggest-message="memorySuggestMessage"
+        :memory-suggest-candidates="memorySuggestCandidates"
+        :memory-suggest-archive="memorySuggestArchive"
+        :memory-suggest-skill-proposals="memorySuggestSkillProposals"
+        :pending-memory-proposals="pendingMemoryProposals"
+        :pending-skill-proposals="pendingSkillProposals"
         :agent-suggestions="activeAgentSuggestions"
         @on-chat-drag-enter="onChatDragEnter"
         @on-chat-drag-over="onChatDragOver"
@@ -305,6 +313,15 @@
         @close-project-memory="closeProjectMemoryEditor"
         @save-project-memory="saveProjectMemoryDraft"
         @update:project-memory-draft="projectMemoryDraft = $event"
+        @close-memory-suggest="closeMemorySuggest"
+        @apply-memory-suggest="applyMemorySuggest"
+        @toggle-memory-suggest-candidate="(id, checked) => toggleMemorySuggestCandidate(id, checked)"
+        @toggle-memory-suggest-archive="toggleMemorySuggestArchive"
+        @toggle-memory-suggest-skill="(id, checked) => toggleMemorySuggestSkill(id, checked)"
+        @confirm-memory-proposal="confirmPendingMemoryProposal"
+        @dismiss-memory-proposal="dismissPendingMemoryProposal"
+        @confirm-skill-proposal="confirmPendingSkillProposal"
+        @dismiss-skill-proposal="dismissPendingSkillProposal"
       >
         <template #messages>
           <VibeChatMessages />
@@ -401,6 +418,7 @@ import { useSessionManager } from "../composables/useSessionManager";
 import { useChatSessionStore } from "../composables/useChatSessionStore";
 import { useSessionMessageCache } from "../composables/useSessionMessageCache";
 import { useProjectMemory } from "../composables/useProjectMemory";
+import { distillExplorationRun } from "../services/explorationDistill";
 import { useAgentRun, type ChatMessage } from "../composables/useAgentRun";
 import { parseAgentSuggestions, type AgentSuggestion } from "../services/agentSuggestions";
 import type { TurnFileDiff } from "../types/vibeChat";
@@ -650,9 +668,29 @@ const {
   projectMemoryMessage,
   projectMemoryMaxChars,
   projectMemoryHasContent,
+  memorySuggestOpen,
+  memorySuggestSaving,
+  memorySuggestMessage,
+  memorySuggestCandidates,
+  memorySuggestArchive,
+  memorySuggestSkillProposals,
+  pendingMemoryProposals,
+  pendingSkillProposals,
   openProjectMemoryEditor,
   closeProjectMemoryEditor,
   saveProjectMemoryDraft,
+  openExplorationDistillSuggest,
+  closeMemorySuggest,
+  toggleMemorySuggestCandidate,
+  toggleMemorySuggestArchive,
+  toggleMemorySuggestSkill,
+  applyMemorySuggest,
+  addPendingMemoryProposal,
+  addPendingSkillProposal,
+  confirmPendingMemoryProposal,
+  confirmPendingSkillProposal,
+  dismissPendingMemoryProposal,
+  dismissPendingSkillProposal,
 } = useProjectMemory(projectPath, projectOpened);
 const loadingTree = ref(false);
 const pickingFolder = ref(false);
@@ -737,7 +775,6 @@ const chatSending = ref(false);
 // ── 按会话独立的发送状态 ──
 const sendingSessionIds = reactive(new Set<string>());
 const sessionMessageCache = useSessionMessageCache<ChatMessage>();
-let agentRunSessionId = "";
 
 const sendingSessionIdList = computed(() => [...sendingSessionIds]);
 
@@ -751,25 +788,22 @@ function syncActiveChatSending() {
 
 function beginAgentRunSession(sessionId: string) {
   if (!sessionId) return;
-  agentRunSessionId = sessionId;
   sendingSessionIds.add(sessionId);
-  sessionMessageCache.snapshot(sessionId, chatMessages.value);
+  if (sessionId === activeSessionId.value) {
+    sessionMessageCache.snapshot(sessionId, chatMessages.value);
+  }
   syncActiveChatSending();
 }
 
 function endAgentRunSession(sessionId?: string) {
-  const sid = (sessionId || agentRunSessionId).trim();
-  if (sid) sendingSessionIds.delete(sid);
-  if (!sessionId || sid === agentRunSessionId) agentRunSessionId = "";
+  const sid = (sessionId || "").trim();
+  if (!sid) return;
+  sendingSessionIds.delete(sid);
   syncActiveChatSending();
 }
 
-function getAgentRunSessionId(): string {
-  return agentRunSessionId;
-}
-
-function persistAgentRunSession() {
-  const sid = agentRunSessionId;
+function persistAgentRunSession(sessionId: string) {
+  const sid = sessionId.trim();
   const project = projectPath.value.trim();
   if (!sid || !project || sid === activeSessionId.value) return;
   const cached = sessionMessageCache.get(sid);
@@ -1519,18 +1553,19 @@ async function copySessionInfo(session: VibeChatSessionMeta) {
   }, 3000);
 }
 
-function patchAssistantMsg(msgId: string, patch: Partial<ChatMessage>) {
+function patchAssistantMsg(msgId: string, patch: Partial<ChatMessage>, sessionId?: string) {
+  const sid = (sessionId || activeSessionId.value).trim();
+  const isActive = sid === activeSessionId.value;
   const apply = (list: ChatMessage[]) => {
     const idx = list.findIndex((m) => m.id === msgId);
     if (idx < 0) return false;
     list[idx] = { ...list[idx], ...patch };
     return true;
   };
-  const patched = apply(chatMessages.value);
-  const runSid = agentRunSessionId;
-  if (runSid) {
-    if (patched) sessionMessageCache.snapshot(runSid, chatMessages.value);
-    else sessionMessageCache.patchMessage(runSid, msgId, patch);
+  const patched = isActive ? apply(chatMessages.value) : false;
+  if (sid && sendingSessionIds.has(sid)) {
+    if (isActive && patched) sessionMessageCache.snapshot(sid, chatMessages.value);
+    else sessionMessageCache.patchMessage(sid, msgId, patch);
   }
 }
 
@@ -1653,8 +1688,36 @@ const agent = useAgentRun({
   findLastUserMessage,
   beginAgentRunSession,
   endAgentRunSession,
-  getAgentRunSessionId,
   persistAgentRunSession,
+  onAgentRunSettled: (msg) => {
+    const msgIndex = chatMessages.value.findIndex((m) => m.id === msg.id);
+    let hadAttachedImage = false;
+    for (let i = msgIndex - 1; i >= 0; i -= 1) {
+      const prior = chatMessages.value[i];
+      if (prior?.role === "user") {
+        hadAttachedImage = Boolean(
+          prior.imageDataUrls?.length || prior.imageRefs?.length || prior.imageCount,
+        );
+        break;
+      }
+    }
+    const distill = distillExplorationRun({
+      tools: msg.tools,
+      writtenFiles: msg.writtenFiles,
+      agentAborted: msg.agentAborted,
+      agentFailed: msg.agentFailed,
+      chatMode: msg.chatMode,
+      totalTurns: msg.agentTurn,
+      hadAttachedImage,
+    });
+    if (distill.offer) openExplorationDistillSuggest(distill);
+  },
+  onMemoryProposal: (_msgId, proposal) => {
+    addPendingMemoryProposal(proposal);
+  },
+  onSkillProposal: (_msgId, proposal) => {
+    addPendingSkillProposal(proposal);
+  },
 });
 
 const {
@@ -1816,7 +1879,6 @@ async function openProjectByPath(dirPath: string) {
   if (sendingSessionIds.size) interruptAgentRun();
   sessionMessageCache.clearAll();
   sendingSessionIds.clear();
-  agentRunSessionId = "";
   chatSending.value = false;
   log("persist-prev");
 

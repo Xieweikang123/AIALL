@@ -5,9 +5,11 @@ import {
   buildVisionBuildContinueHint,
   buildVisionConsultativeContinueHint,
   buildVisionTaskText,
+  buildVisionUiLocateHint,
   buildVisionUserContent,
   contentCharSize,
   contentDisplayText,
+  extractVisibleAnchorQuotes,
   isAdequateVisionFirstTurnDescription,
   isPrematureVisionCompletionClaim,
   isUiPositioningBugPrompt,
@@ -211,7 +213,33 @@ describe("visionMessage", () => {
     const vision =
       "选区在上方… 底部状态栏「引用」按钮… chat-bottom flex 布局 [图已理解]";
     const hint = buildVisionBuildContinueHint(vision, "引用按钮跑别的地方了");
-    expect(hint).toContain("quote-floating");
+    expect(hint).toContain("*-floating");
     expect(hint).toContain("进度");
+    expect(hint).toContain("截图 UI 定位·通用");
+  });
+
+  it("extractVisibleAnchorQuotes pulls quoted strings from vision text", () => {
+    const vision =
+      "列表含「多会话同时进行，好实现吗？」与「今天·14条」元信息 [图已理解]";
+    expect(extractVisibleAnchorQuotes(vision)).toEqual([
+      "多会话同时进行，好实现吗？",
+      "今天·14条",
+    ]);
+  });
+
+  it("buildVisionUiLocateHint stays generic without project paths", () => {
+    const hint = buildVisionUiLocateHint(["示例标题", "今天·3条"]);
+    expect(hint).toContain("截图 UI 定位·通用");
+    expect(hint).toContain("grep");
+    expect(hint).toContain("item-meta");
+    expect(hint).not.toMatch(/VibeCodingView|FilePanel|src\/views/);
+  });
+
+  it("buildVisionTaskText treats short 优化UI with image as scoped implement", () => {
+    const text = buildVisionTaskText("优化UI", 1);
+    expect(text).toContain("附图为本消息重点");
+    expect(text).toContain("实施时");
+    expect(text).toContain("grep");
+    expect(text).not.toMatch(/src\/views|VibeCoding/);
   });
 });

@@ -1,5 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
+import {
+  appendProjectMemorySection,
+  isProjectMemorySection,
+  PROJECT_MEMORY_SECTION_TEMPLATE,
+  type ProjectMemorySection,
+} from "../src/services/projectMemorySections";
 import { resolveProjectPath } from "./vibeFs";
 
 /** Relative to project root; listed in .gitignore by default. */
@@ -8,10 +14,10 @@ export const PROJECT_MEMORY_REL_PATH = ".aiall/project-memory.md";
 /** Keep injected context small — force curation of high-signal notes. */
 export const PROJECT_MEMORY_MAX_CHARS = 3_500;
 
-export const PROJECT_MEMORY_DEFAULT_TEMPLATE = `# 项目记忆
+export const PROJECT_MEMORY_DEFAULT_TEMPLATE = PROJECT_MEMORY_SECTION_TEMPLATE;
 
-可记录：编码风格偏好、常用命令、目录约定、已知踩坑。AI 助手每次对话会自动读取此文件。
-`;
+export { isProjectMemorySection, appendProjectMemorySection, PROJECT_MEMORY_SECTIONS };
+export type { ProjectMemorySection };
 
 export type ProjectMemoryReadResult =
   | { ok: true; content: string; truncated: boolean; path: string; maxChars: number }
@@ -132,4 +138,15 @@ export async function writeProjectMemory(
     size: Buffer.byteLength(normalized.content, "utf-8"),
     truncated: normalized.truncated,
   };
+}
+
+export async function appendProjectMemory(
+  projectRoot: string,
+  section: ProjectMemorySection,
+  lines: string[],
+): Promise<ProjectMemoryWriteResult> {
+  const current = await readProjectMemory(projectRoot);
+  const base = current.ok ? current.content : "";
+  const merged = appendProjectMemorySection(base, section, lines);
+  return writeProjectMemory(projectRoot, merged);
 }

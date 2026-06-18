@@ -10,6 +10,7 @@ import {
   PROJECT_MEMORY_REL_PATH,
   readProjectMemory,
   writeProjectMemory,
+  appendProjectMemory,
 } from "./vibeProjectMemory";
 
 describe("vibeProjectMemory", () => {
@@ -69,5 +70,17 @@ describe("vibeProjectMemory", () => {
     const { content, truncated } = normalizeProjectMemoryContent("  hello  ");
     expect(content).toBe("hello");
     expect(truncated).toBe(false);
+  });
+
+  it("appendProjectMemorySection merges bullets", async () => {
+    const root = await makeProject();
+    await writeProjectMemory(root, "## 导航\n\n- old");
+    const result = await appendProjectMemory(root, "导航", ["new item"]);
+    expect(result.ok).toBe(true);
+    const read = await readProjectMemory(root);
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect(read.content).toContain("- old");
+    expect(read.content).toContain("- new item");
   });
 });

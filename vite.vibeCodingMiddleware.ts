@@ -9,7 +9,18 @@ import { readJsonBody, sendJson, sendSseEvent, sendSseComment, sendSseHeaders } 
 import { chatCompletionWithTools, resolveChatEndpoint } from "./server/aiForward";
 import { runVibeAgent } from "./server/vibeAgent";
 import { buildProjectContext } from "./server/vibeProjectContext";
-import { readProjectMemory, writeProjectMemory } from "./server/vibeProjectMemory";
+import {
+  appendProjectMemory,
+  isProjectMemorySection,
+  readProjectMemory,
+  writeProjectMemory,
+} from "./server/vibeProjectMemory";
+import {
+  archiveExplorationNote,
+  listProjectSkills,
+  readProjectSkill,
+  upsertProjectSkill,
+} from "./server/vibeProjectSkills";
 import {
   grepInProject,
   listDirectory,
@@ -1088,12 +1099,45 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       }
 
       if (req.method === "POST") {
-        const body = (await readJsonBody(req)) as { projectPath?: string; content?: string };
+        const body = (await readJsonBody(req)) as {
+          projectPath?: string;
+          content?: string;
+          appendSection?: string;
+          appendLines?: string[];
+        };
         const projectPath = body.projectPath?.trim() || "";
         if (!projectPath) {
           sendJson(res, 400, { ok: false, error: "缺少 projectPath" });
           return;
         }
+
+        const appendSection = String(body.appendSection ?? "").trim();
+        const appendLines = Array.isArray(body.appendLines)
+          ? body.appendLines.map((line) => String(line ?? "").trim()).filter(Boolean)
+          : [];
+
+        if (appendSection && appendLines.length) {
+          if (!isProjectMemorySection(appendSection)) {
+            sendJson(res, 400, { ok: false, error: "appendSection 须为 术语、导航 或 偏好" });
+            return;
+          }
+          const result = await appendProjectMemory(projectPath, appendSection, appendLines);
+          if (!result.ok) {
+            sendJson(res, 400, result);
+            return;
+          }
+          const readBack = await readProjectMemory(projectPath);
+          sendJson(res, 200, {
+            ok: true,
+            path: result.path,
+            size: result.size,
+            truncated: result.truncated,
+            content: readBack.ok ? readBack.content : "",
+            maxChars: readBack.ok ? readBack.maxChars : undefined,
+          });
+          return;
+        }
+
         const result = await writeProjectMemory(projectPath, body.content ?? "");
         if (!result.ok) {
           sendJson(res, 400, result);
@@ -1108,6 +1152,89 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       sendJson(res, 500, {
         ok: false,
         error: error instanceof Error ? error.message : "项目记忆操作失败",
+      });
+    }
+  });
+
+  // GET/POST /backend/vibe/project-skills
+  middlewares.use("/backend/vibe/project-skills", async (req, res) => {
+    try {
+      if (req.method === "GET") {
+        const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+        const projectPath = (url.searchParams.get("projectPath") || "").trim();
+        const slug = (url.searchParams.get("slug") || "").trim();
+        if (!projectPath) {
+          sendJson(res, 400, { ok: false, error: "缺少 projectPath" });
+          return;
+        }
+        if (slug) {
+          const result = await readProjectSkill(projectPath, slug);
+          sendJson(res, result.ok ? 200 : 400, result);
+          return;
+        }
+        const result = await listProjectSkills(projectPath);
+        sendJson(res, result.ok ? 200 : 400, result);
+        return;
+      }
+
+      if (req.method === "POST") {
+        const body = (await readJsonBody(req)) as {
+          projectPath?: string;
+          action?: string;
+          slug?: string;
+          kind?: string;
+          title?: string;
+          content?: string;
+          filename?: string;
+          archiveContent?: string;
+          readCount?: number;
+          writtenCount?: number;
+        };
+        const projectPath = body.projectPath?.trim() || "";
+        if (!projectPath) {
+          sendJson(res, 400, { ok: false, error: "缺少 projectPath" });
+          return;
+        }
+
+        const action = String(body.action ?? "upsert").trim();
+
+        if (action === "archive") {
+          const filename = String(body.filename ?? "").trim();
+          const archiveContent = String(body.archiveContent ?? "");
+          if (!filename || !archiveContent.trim()) {
+            sendJson(res, 400, { ok: false, error: "缺少 filename 或 archiveContent" });
+            return;
+          }
+          const result = await archiveExplorationNote(projectPath, filename, archiveContent, {
+            readCount: Math.max(0, Number(body.readCount) || 0),
+            writtenCount: Math.max(0, Number(body.writtenCount) || 0),
+          });
+          sendJson(res, result.ok ? 200 : 400, result);
+          return;
+        }
+
+        const slug = String(body.slug ?? "").trim();
+        const kind = String(body.kind ?? "").trim();
+        const title = String(body.title ?? "").trim();
+        const content = String(body.content ?? "").trim();
+        if (!slug || !title || !content) {
+          sendJson(res, 400, { ok: false, error: "缺少 slug / title / content" });
+          return;
+        }
+        if (kind !== "fact" && kind !== "heuristic" && kind !== "preference") {
+          sendJson(res, 400, { ok: false, error: "kind 须为 fact、heuristic 或 preference" });
+          return;
+        }
+        const result = await upsertProjectSkill(projectPath, slug, { kind, title }, content);
+        sendJson(res, result.ok ? 200 : 400, result);
+        return;
+      }
+
+      sendJson(res, 405, { ok: false, error: "仅支持 GET / POST" });
+    } catch (error) {
+      sendJson(res, 500, {
+        ok: false,
+        error: error instanceof Error ? error.message : "项目 skills 操作失败",
       });
     }
   });
