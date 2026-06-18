@@ -43,26 +43,26 @@ const cardClass = computed(() => {
 
 <style scoped>
 .aggregate-card {
-  border: 1px solid rgba(88, 166, 255, 0.14);
-  border-radius: 8px;
-  background: rgba(88, 166, 255, 0.04);
-  overflow: hidden;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.02);
+  transition: background 0.15s ease;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.aggregate-card:last-child {
+  border-bottom: none;
 }
 
 .aggregate-card:hover {
-  border-color: rgba(88, 166, 255, 0.28);
-  background: rgba(88, 166, 255, 0.07);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .aggregate-card.running {
-  border-color: rgba(88, 166, 255, 0.35);
   animation: card-pulse 1.4s ease-in-out infinite;
 }
 
 .aggregate-card.fail {
-  border-color: rgba(248, 81, 73, 0.35);
-  background: rgba(248, 81, 73, 0.05);
+  background: rgba(248, 81, 73, 0.03);
 }
 
 .aggregate-card-details {
@@ -71,12 +71,13 @@ const cardClass = computed(() => {
 
 .aggregate-card-head {
   display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 6px 8px;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 4px;
   list-style: none;
   cursor: pointer;
   user-select: none;
+  font-size: 11px;
 }
 
 .aggregate-card-head.static {
@@ -88,10 +89,10 @@ const cardClass = computed(() => {
 }
 
 .aggregate-card-icon {
-  font-size: 14px;
-  line-height: 1.2;
+  font-size: 12px;
+  line-height: 1;
   flex-shrink: 0;
-  margin-top: 1px;
+  opacity: 0.7;
 }
 
 .aggregate-card-text {
@@ -99,64 +100,63 @@ const cardClass = computed(() => {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
 }
 
 .aggregate-card-title {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  font-weight: 600;
-  color: rgba(126, 182, 255, 0.95);
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.88);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .aggregate-card-subtitle {
-  font-size: 11px;
-  line-height: 1.45;
-  color: rgba(139, 148, 158, 0.82);
+  font-size: 10px;
+  line-height: 1.3;
+  color: rgba(255, 255, 255, 0.45);
   overflow-wrap: anywhere;
 }
 
 .aggregate-card-hint {
   flex-shrink: 0;
-  font-size: 10px;
-  color: rgba(139, 148, 158, 0.65);
-  padding: 2px 6px;
-  border-radius: 4px;
-  border: 1px solid rgba(139, 148, 158, 0.2);
-  margin-top: 1px;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.35);
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .aggregate-card-details[open] .aggregate-card-hint {
-  color: rgba(126, 182, 255, 0.85);
-  border-color: rgba(88, 166, 255, 0.35);
+  color: rgba(88, 166, 255, 0.8);
+  background: rgba(88, 166, 255, 0.1);
 }
 
 .aggregate-card-preview {
   margin: 0;
-  padding: 4px 8px 6px 28px;
+  padding: 2px 4px 2px 24px;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  border-top: 1px solid rgba(88, 166, 255, 0.08);
-  max-height: 120px;
+  gap: 1px;
+  border-top: 1px solid rgba(255, 255, 255, 0.03);
+  max-height: 100px;
   overflow: auto;
 }
 
 .aggregate-preview-line {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 10.5px;
-  line-height: 1.45;
-  color: rgba(139, 148, 158, 0.88);
+  font-size: 10px;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.55);
   overflow-wrap: anywhere;
   word-break: break-word;
 }
 
 @keyframes card-pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.72; }
+  50% { opacity: 0.8; }
 }
 </style>

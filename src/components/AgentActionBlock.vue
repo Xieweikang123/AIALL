@@ -55,11 +55,10 @@ const collapsedSummary = computed(() => {
 .cursor-actions-block {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding-left: 8px;
-  border-left: 2px solid rgba(88, 166, 255, 0.12);
+  gap: 2px;
   min-width: 0;
-  margin: 1px 0;
+  margin: 2px 0;
+  padding: 2px 0;
 }
 
 .cursor-actions-fold {
@@ -68,12 +67,13 @@ const collapsedSummary = computed(() => {
 
 .cursor-actions-fold-summary {
   list-style: none;
-  font-size: 11px;
-  line-height: 1.4;
-  color: rgba(139, 148, 158, 0.8);
+  font-size: 10px;
+  line-height: 1.3;
+  color: rgba(255, 255, 255, 0.4);
   cursor: pointer;
   user-select: none;
-  padding: 4px 0;
+  padding: 2px 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .cursor-actions-fold-summary::-webkit-details-marker {
@@ -82,8 +82,8 @@ const collapsedSummary = computed(() => {
 
 .cursor-actions-fold-summary::before {
   content: "▸ ";
-  font-size: 9px;
-  color: rgba(139, 148, 158, 0.55);
+  font-size: 8px;
+  color: rgba(255, 255, 255, 0.3);
 }
 
 .cursor-actions-fold[open] > .cursor-actions-fold-summary::before {
@@ -93,8 +93,8 @@ const collapsedSummary = computed(() => {
 .cursor-actions-fold-body {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-top: 2px;
-  padding-left: 2px;
+  gap: 1px;
+  margin-top: 1px;
+  padding-left: 8px;
 }
 </style>

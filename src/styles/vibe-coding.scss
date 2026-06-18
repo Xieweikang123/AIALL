@@ -683,48 +683,59 @@ button:disabled {
 
 // 内联 diff
 .inline-diff-list {
-  display: grid;
-  gap: 8px;
-  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
 }
 
 .inline-diff-card {
-  border: 1px solid rgba(31, 111, 235, 0.28);
-  border-radius: 10px;
-  background: rgba(31, 111, 235, 0.06);
+  border: none;
+  border-radius: 4px;
+  background: transparent;
   overflow: hidden;
+
+  & + .inline-diff-card {
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+  }
 }
 
 .inline-diff-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
-  padding: 8px 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 4px 6px;
+  border-bottom: none;
+  border-radius: 4px;
+  transition: background 0.12s ease;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.03);
+  }
 }
 
 .inline-diff-path {
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 11px;
+  font-weight: 500;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  color: #91beff;
+  color: rgba(200, 220, 255, 0.8);
 }
 
 .inline-diff-tag {
-  font-size: 10px;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
 }
 
 .inline-diff-tag.delete {
-  background: rgba(248, 81, 73, 0.15);
+  background: rgba(248, 81, 73, 0.12);
   color: #ff9a9a;
 }
 
 .inline-diff-tag.modify {
-  background: rgba(240, 198, 116, 0.15);
+  background: rgba(240, 198, 116, 0.12);
   color: #f0c674;
 }
 
@@ -738,11 +749,11 @@ button:disabled {
 .inline-diff-wrap.open {
   max-height: 3000px;
   opacity: 1;
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
 .inline-diff-col {
-  padding: 8px 10px;
+  padding: 4px 6px;
 }
 
 .inline-diff-label {
