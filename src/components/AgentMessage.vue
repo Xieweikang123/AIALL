@@ -19,6 +19,7 @@
         :activity-detailed="isActivityDetailed(msg)"
         :can-execute-plan="canExecutePlan"
         @execute-plan="emit('execute-plan')"
+        @select-option="(option) => emit('select-option', option)"
       />
 
       <!-- 调试面板 -->
@@ -58,6 +59,7 @@ import AgentFoldedView from "./AgentFoldedView.vue";
 import AgentMergedContent from "./AgentMergedContent.vue";
 import AgentDebugPanel from "./AgentDebugPanel.vue";
 import { useAgentMessage, type AgentMessage } from "../composables/useAgentMessage";
+import type { AiOption } from "../utils/parseAiOptions";
 
 const props = defineProps<{
   msg: AgentMessage;
@@ -73,6 +75,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   "jump-latest": [];
   "execute-plan": [];
+  "select-option": [option: AiOption];
 }>();
 
 const {

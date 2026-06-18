@@ -97,6 +97,7 @@
         :show-jump="ctx.chainJumpVisible[m.id]"
         :can-execute-plan="ctx.canExecutePlanMessage(m)"
         @execute-plan="ctx.executePlanFromMessage(m.id)"
+        @select-option="(option) => ctx.handleAiOptionSelect(option, m)"
         @jump-latest="ctx.jumpChainToLatest(m.id)"
       />
       <div
@@ -111,6 +112,7 @@
           class="msg-user-image"
           loading="lazy"
           @error="hideBrokenUserImage"
+          @click="openImageViewer(url, '发送的图片')"
         />
       </div>
       <PlanDocumentBlock
@@ -238,10 +240,37 @@
     </div>
   </div>
   </div>
+
+  <!-- 图片查看器模态框 -->
+  <Teleport to="body">
+    <Transition name="image-viewer-fade">
+      <div
+        v-if="viewerOpen"
+        class="image-viewer-overlay"
+        tabindex="-1"
+        @click="handleBackdropClick"
+        @keydown="handleImageKeydown"
+      >
+        <div class="image-viewer-container" @click.stop>
+          <button class="image-viewer-close" @click="closeImageViewer">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+          <img
+            :src="viewerUrl"
+            class="image-viewer-image"
+            :alt="viewerAlt"
+            @click.stop
+          />
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
-import { inject } from "vue";
+import { inject, ref } from "vue";
 import AgentMessage from "../AgentMessage.vue";
 import ChatMarkdown from "../ChatMarkdown.vue";
 import PlanDocumentBlock from "../PlanDocumentBlock.vue";
@@ -253,6 +282,35 @@ if (!injectedCtx) {
   throw new Error("VibeChatMessages requires vibeChatMessageContext");
 }
 const ctx = injectedCtx;
+
+// 图片查看器状态
+const viewerOpen = ref(false);
+const viewerUrl = ref("");
+const viewerAlt = ref("");
+
+function openImageViewer(url: string, alt: string = "发送的图片") {
+  viewerUrl.value = url;
+  viewerAlt.value = alt;
+  viewerOpen.value = true;
+}
+
+function closeImageViewer() {
+  viewerOpen.value = false;
+  viewerUrl.value = "";
+  viewerAlt.value = "";
+}
+
+function handleImageKeydown(e: KeyboardEvent) {
+  if (e.key === "Escape") {
+    closeImageViewer();
+  }
+}
+
+function handleBackdropClick(e: MouseEvent) {
+  if ((e.target as HTMLElement).classList.contains("image-viewer-overlay")) {
+    closeImageViewer();
+  }
+}
 
 function hideBrokenUserImage(event: Event) {
   const img = event.target;

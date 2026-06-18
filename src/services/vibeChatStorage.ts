@@ -359,7 +359,8 @@ function compactRoundGroupsForStorage(
 }
 
 const MAX_PERSISTED_IMAGES = 4;
-const MAX_PERSISTED_IMAGE_CHARS = 120_000;
+/** Match disk cap so in-memory previews survive until session-sync externalizes. */
+const MAX_PERSISTED_IMAGE_CHARS = 600_000;
 const MAX_DISK_IMAGES = 8;
 const MAX_DISK_IMAGE_CHARS = 600_000;
 
@@ -692,6 +693,26 @@ export function getActiveSessionSnapshot(
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     messages: sanitizeMessages(session.messages, { forDisk: true }),
+  };
+}
+
+/** Disk sync payload: session metadata from store + live Vue messages (keeps image base64 for externalize). */
+export function buildActiveSessionDiskSyncPayload(
+  projectPath: string,
+  sessionId: string,
+  liveMessages: PersistedChatMessage[],
+): { id: string; title: string; createdAt: string; updatedAt: string; messages: PersistedChatMessage[] } | null {
+  const key = normalizeProjectKey(projectPath);
+  if (!key) return null;
+  const record = getProjectRecord(key);
+  const session = record?.sessions.find((s) => s.id === sessionId);
+  if (!session) return null;
+  return {
+    id: session.id,
+    title: session.title,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    messages: sanitizeMessages(liveMessages, { forDisk: true }),
   };
 }
 

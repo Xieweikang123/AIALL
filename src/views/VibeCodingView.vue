@@ -432,6 +432,7 @@ import {
   buildAgentHistoryFromMessages,
   clearVibeChatHistory,
   diskChatStoreAheadOfLocalIndex,
+  buildActiveSessionDiskSyncPayload,
   getActiveSessionSnapshot,
   getVibeChatProjectSnapshot,
   hasVibeChatHistory,
@@ -1560,15 +1561,21 @@ function persistChatNow(path = projectPath.value.trim(), options?: { flushStore?
   setTimeout(() => {
     (async () => {
       if (sessionId) {
-        if (activeSessionId.value === sessionId && projectPath.value.trim() === path) {
+        const sameActiveSession =
+          activeSessionId.value === sessionId && projectPath.value.trim() === path;
+        const snapshot = sameActiveSession
+          ? buildActiveSessionDiskSyncPayload(path, sessionId, chatMessages.value)
+          : getActiveSessionSnapshot(path, sessionId);
+        if (snapshot) {
+          await syncChatSession(path, sessionId, snapshot, {
+            activeSessionId: activeSessionId.value || sessionId,
+          });
+        }
+        if (sameActiveSession) {
           chatMessages.value = normalizeChatMessages(
             stampImageRefsAfterSync(sessionId, chatMessages.value),
           );
           saveVibeChatHistory(path, chatMessages.value, sessionId);
-        }
-        const snapshot = getActiveSessionSnapshot(path, sessionId);
-        if (snapshot) {
-          await syncChatSession(path, sessionId, snapshot, { activeSessionId: activeSessionId.value || sessionId });
         }
       }
       if (options?.flushStore) {
@@ -2104,7 +2111,7 @@ function shouldIgnoreQuoteSelectEvent(event: MouseEvent): boolean {
   if (event.detail <= 1 && Date.now() - quoteHiddenAt < 150) return true;
   const target = event.target;
   return target instanceof Element
-    && Boolean(target.closest(".msg-toolbar, .agent-recovery-actions, .agent-recovery-footer, .inline-diff-head, .msg-actions"));
+    && Boolean(target.closest(".msg-toolbar, .agent-recovery-actions, .agent-recovery-footer, .inline-diff-head, .msg-actions, .ai-option-buttons"));
 }
 
 function tryShowQuoteButtonFromSelection(message: ChatMessage): void {

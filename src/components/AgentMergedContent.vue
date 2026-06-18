@@ -31,6 +31,7 @@
         :content="markdownContent"
         :streaming="answerStreaming"
         :interactive="!isRunning"
+        @select-option="(option) => emit('select-option', option)"
       />
     </PlanDocumentBlock>
   </div>
@@ -50,6 +51,7 @@ import {
   type CursorFeedProcessBlock,
 } from "../services/agentCursorFeed";
 import type { AgentRoundGroupView } from "../services/agentRoundGroups";
+import type { AiOption } from "../utils/parseAiOptions";
 
 const props = defineProps<{
   roundGroups: AgentRoundGroupView[];
@@ -63,6 +65,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   "execute-plan": [];
+  "select-option": [option: AiOption];
 }>();
 
 const markdownContent = computed(() =>

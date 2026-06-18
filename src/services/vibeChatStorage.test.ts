@@ -1,8 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { externalizeMessageImages } from "../../server/vibeChatImages";
+import { stampImageRefsAfterSync } from "./vibeChatImageStore";
 import { shapeAgentHistoryForProfile } from "./agentRunProfile";
 import {
   buildAgentHistoryFromMessages,
   formatSessionTitle,
+  buildActiveSessionDiskSyncPayload,
   getActiveSessionSnapshot,
   createVibeChatSession,
   diskChatStoreAheadOfLocalIndex,
@@ -232,6 +238,72 @@ describe("sanitizePersistedChatMessages", () => {
     );
     expect(sanitized[0].imageDataUrls?.[0]).toBe(dataUrl);
     expect(sanitized[0].imageCount).toBe(1);
+  });
+
+  it("large agent-compressed screenshots keep imageDataUrls up to disk cap", () => {
+    const largeDataUrl = `data:image/jpeg;base64,${"A".repeat(150_000)}`;
+    const sanitized = sanitizePersistedChatMessages([
+      { id: "u1", role: "user", content: "红色线框 是啥？", imageDataUrls: [largeDataUrl] },
+    ]);
+    expect(sanitized[0].imageDataUrls?.[0]).toBe(largeDataUrl);
+    expect(sanitized[0].imageCount).toBe(1);
+  });
+
+  describe("image sync pipeline (persistChatNow → sync)", () => {
+    let tmpDir = "";
+
+    afterEach(async () => {
+      if (tmpDir) {
+        await fs.promises.rm(tmpDir, { recursive: true, force: true });
+        tmpDir = "";
+      }
+    });
+
+    it("forDisk from live Vue messages retains base64 for externalize", () => {
+      const largeDataUrl = `data:image/jpeg;base64,${"B".repeat(150_000)}`;
+      const vueMessages = [
+        { id: "u1", role: "user" as const, content: "附图", imageDataUrls: [largeDataUrl] },
+      ];
+      const diskPayload = sanitizePersistedChatMessages(vueMessages, { forDisk: true });
+      expect(diskPayload[0].imageDataUrls?.[0]).toBe(largeDataUrl);
+    });
+
+    it("getActiveSessionSnapshot alone still lacks base64 when memory record has orphan refs", () => {
+      installLocalStorageMock();
+      const projectPath = "D:/projects/image-sync-gap";
+      const largeDataUrl = `data:image/jpeg;base64,${"C".repeat(150_000)}`;
+      const { sessionId } = saveVibeChatHistory(projectPath, [
+        {
+          id: "u1",
+          role: "user",
+          content: "附图",
+          imageRefs: [{ path: "images/s/u1-0.jpg" }],
+          imageCount: 1,
+        },
+      ]);
+      const snapshot = getActiveSessionSnapshot(projectPath, sessionId);
+      expect(snapshot?.messages[0].imageDataUrls).toBeUndefined();
+      expect(snapshot?.messages[0].imageRefs).toHaveLength(1);
+    });
+
+    it("live forDisk payload externalizes images before stamp writes orphan refs", async () => {
+      tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "vibe-chat-loss-"));
+      const sessionId = "1781746585762-afb69c5f9de258";
+      const messageId = "1781746585759-cd6d837676bb18";
+      const largeDataUrl = `data:image/jpeg;base64,${"B".repeat(150_000)}`;
+      const vueMessages = [
+        { id: messageId, role: "user" as const, content: "红色线框 是啥？", imageDataUrls: [largeDataUrl] },
+      ];
+
+      const diskPayload = sanitizePersistedChatMessages(vueMessages, { forDisk: true });
+      const externalized = await externalizeMessageImages(tmpDir, sessionId, diskPayload);
+      expect(externalized[0].imageRefs).toHaveLength(1);
+      expect(externalized[0].imageCount).toBe(1);
+      expect(externalized[0].imageDataUrls).toBeUndefined();
+
+      const stamped = stampImageRefsAfterSync(sessionId, vueMessages);
+      expect(stamped[0].imageRefs?.[0].path).toBe(externalized[0].imageRefs![0].path);
+    });
   });
 
   it("drops turnFileDiffs after approval completes", () => {
