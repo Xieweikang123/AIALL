@@ -43,6 +43,9 @@ export const AGENT_STALL_PROGRESS_MS = 120_000;
 /** Stuck on local connect / upload with no SSE status for this long. */
 export const AGENT_CONNECT_STALL_MS = 45_000;
 
+/** Stuck in model-wait phase (sending_request / waiting_model / retrying_model) without response. */
+export const AGENT_MODEL_WAIT_STALL_MS = 180_000;
+
 const CONNECT_PHASES = new Set(["connecting_local", "stream_connected", "connected", "reconnecting"]);
 
 export function isAgentConnectPhase(phase?: string): boolean {

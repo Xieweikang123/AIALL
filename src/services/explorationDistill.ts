@@ -13,6 +13,10 @@ export type ExplorationArchiveDraft = {
   readPaths: string[];
   writtenPaths: string[];
   turnCount: number;
+  /** Agent progress text extracted from assistant messages during exploration. */
+  assistantText?: string;
+  /** Concise summary of key findings extracted from assistantText. */
+  summary?: string;
 };
 
 export type SkillDistillProposal = {
@@ -45,6 +49,8 @@ type DistillInput = {
   chatMode?: string;
   totalTurns?: number;
   hadAttachedImage?: boolean;
+  /** Agent progress/finding text from assistant messages during exploration. */
+  assistantText?: string;
 };
 
 function explorationArchiveId(): string {
@@ -52,11 +58,53 @@ function explorationArchiveId(): string {
   return stamp.slice(0, 19);
 }
 
+/** Max characters for the summary section in archive markdown. */
+const SUMMARY_MAX_CHARS = 600;
+
+/**
+ * Extract a concise summary from agent assistantText.
+ * Heuristics:
+ * 1. Prefer lines containing Chinese conclusions / key findings markers.
+ * 2. Strip tool-call artifacts (grep/read/patch logs).
+ * 3. Truncate to SUMMARY_MAX_CHARS.
+ */
+export function extractExplorationSummary(assistantText: string | undefined): string {
+  if (!assistantText?.trim()) return "";
+  const text = assistantText.trim();
+
+  // Split into lines, filter out tool-call noise and empty lines
+  const lines = text.split("\n").filter((line) => {
+    const t = line.trim();
+    if (!t) return false;
+    // Skip tool call artifacts
+    if (/^<function_|^<tool_|^<\/function|^<\/tool/i.test(t)) return false;
+    // Skip lines that are purely file paths or tool parameter XML
+    if (/^<[a-z]+>$/i.test(t) && !/[\u4e00-\u9fff]/.test(t)) return false;
+    return true;
+  });
+
+  if (!lines.length) return "";
+
+  // Take lines that contain CJK text (likely the agent's natural language findings)
+  const meaningfulLines = lines.filter((l) => /[\u4e00-\u9fff]/.test(l));
+  const source = meaningfulLines.length >= 2 ? meaningfulLines : lines;
+
+  // Join and truncate
+  const joined = source
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  if (joined.length <= SUMMARY_MAX_CHARS) return joined;
+  return joined.slice(0, SUMMARY_MAX_CHARS) + "…";
+}
+
 export function buildExplorationArchiveMarkdown(params: {
   readPaths: string[];
   writtenPaths: string[];
   turnCount: number;
   createdAt?: string;
+  summary?: string;
 }): string {
   const createdAt = params.createdAt ?? new Date().toISOString();
   const lines = [
@@ -73,6 +121,9 @@ export function buildExplorationArchiveMarkdown(params: {
     `- 读取 ${params.readPaths.length} 个文件，写入 ${params.writtenPaths.length} 个文件`,
     "",
   ];
+  if (params.summary) {
+    lines.push("## 发现摘要", "", params.summary, "");
+  }
   if (params.writtenPaths.length) {
     lines.push("## 写入路径", "", ...params.writtenPaths.map((p) => `- \`${p}\``), "");
   }
@@ -136,13 +187,15 @@ export function distillExplorationRun(input: DistillInput): ExplorationDistillRe
   }
 
   const id = explorationArchiveId();
+  const summary = extractExplorationSummary(input.assistantText);
   const archive: ExplorationArchiveDraft = {
     id,
     filename: `${id}.md`,
-    content: buildExplorationArchiveMarkdown({ readPaths, writtenPaths, turnCount }),
+    content: buildExplorationArchiveMarkdown({ readPaths, writtenPaths, turnCount, summary }),
     readPaths,
     writtenPaths,
     turnCount,
+    summary,
   };
 
   const skillProposals = buildSkillProposals({

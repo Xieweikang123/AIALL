@@ -1724,6 +1724,7 @@ const agent = useAgentRun({
       chatMode: msg.chatMode,
       totalTurns: msg.agentTurn,
       hadAttachedImage,
+      assistantText: msg.content,
     });
     if (distill.offer) void applyExplorationDistillSilently(distill);
   },

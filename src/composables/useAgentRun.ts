@@ -12,6 +12,7 @@ import {
 import {
   AGENT_SILENT_CONTINUE_DELAY_MS,
   AGENT_SILENT_CONTINUE_MAX,
+  AGENT_MODEL_WAIT_STALL_MS,
   agentStallRecoveryReason,
   agentConnectStallMessage,
   buildAgentMaxTurnsExhaustedMessage,
@@ -412,6 +413,18 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       isAgentConnectPhase(msg.agentPhase)
     ) {
       abortAgentConnectStall(sessionId, msg);
+      return;
+    }
+
+    // Model-wait stall: agentWaitStartedAt is set once on entering waiting phase
+    // and is NOT refreshed by heartbeats, so it reliably detects prolonged waits.
+    const MODEL_WAIT_PHASES = ["sending_request", "waiting_model", "retrying_model"];
+    if (
+      MODEL_WAIT_PHASES.includes(msg.agentPhase || "") &&
+      msg.agentWaitStartedAt &&
+      Date.now() - msg.agentWaitStartedAt >= AGENT_MODEL_WAIT_STALL_MS
+    ) {
+      recoverAgentRunFromStall(sessionId, msg, "模型请求长时间无响应（可能已卡住）");
       return;
     }
 
@@ -1043,8 +1056,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
       ...syncRoundGroupsPatch(assistantMsg),
     });
-
-    cancelAutoResume();
 
     // Auto-resume countdown for recoverable errors
     if (recoverable) {
