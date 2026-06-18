@@ -42,9 +42,13 @@ export function useGitPanel(
 ) {
   const GIT_PANEL_MODE_KEY = "vibe-coding-git-panel-mode";
 
+  const _storedPanelMode = localStorage.getItem(GIT_PANEL_MODE_KEY);
   const gitPanelMode = ref<"files" | "git" | "sessions">(
-    localStorage.getItem(GIT_PANEL_MODE_KEY) === "git" ? "git" : "files",
+    _storedPanelMode === "git" || _storedPanelMode === "sessions" ? _storedPanelMode : "files",
   );
+  watch(gitPanelMode, (mode) => {
+    localStorage.setItem(GIT_PANEL_MODE_KEY, mode);
+  });
   const gitStatus = ref<GitStatusFile[]>([]);
   const gitBranch = ref("");
   const gitIsRepo = ref(false);

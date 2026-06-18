@@ -49,6 +49,10 @@ export type ChatSessionStoreDeps<T extends PersistedChatMessage = PersistedChatM
   confirm: (message: string) => Promise<boolean>;
   onAfterSwitch?: () => void;
   scrollToBottom?: (force?: boolean) => void | Promise<void>;
+  /** Cache live messages before leaving a session (e.g. background agent run). */
+  onBeforeSessionSwitch?: (fromSessionId: string, messages: T[]) => void;
+  /** Prefer in-memory cache over disk when switching back. */
+  resolveSessionMessages?: (sessionId: string, diskMessages: PersistedChatMessage[]) => T[];
 };
 
 export function useChatSessionStore<T extends PersistedChatMessage = PersistedChatMessage>(
@@ -73,6 +77,8 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     confirm,
     onAfterSwitch,
     scrollToBottom,
+    onBeforeSessionSwitch,
+    resolveSessionMessages,
   } = deps;
 
   const {
@@ -342,6 +348,7 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     const fromSessionId = activeSessionId.value;
     const project = projectPath().trim();
     if (fromSessionId && chatMessages.value.length) {
+      onBeforeSessionSwitch?.(fromSessionId, chatMessages.value);
       saveVibeChatHistory(project, chatMessages.value, fromSessionId, { touchTimestamp: false });
     } else if (fromSessionId) {
       abandonVibeChatDraftIfEmpty(project, fromSessionId);
@@ -352,8 +359,9 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
       try {
         await ensureProjectChatLoadedFromDisk(project, sessionId);
         if (gen !== switchSessionGeneration) return;
-        const messages = switchVibeChatSession(project, sessionId);
-        chatMessages.value = normalizeMessages(messages);
+        const diskMessages = switchVibeChatSession(project, sessionId);
+        const resolved = resolveSessionMessages?.(sessionId, diskMessages) ?? diskMessages;
+        chatMessages.value = normalizeMessages(resolved);
         setActiveSession(sessionId);
         chatError.value = "";
         refreshList(project);

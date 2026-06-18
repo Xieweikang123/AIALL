@@ -54,6 +54,7 @@
         :syncing-chat-store="syncingChatStore"
         :chat-store-sync-message="chatStoreSyncMessage"
         :chat-sending="chatSending"
+        :session-sending-ids="sendingSessionIdList"
         @update:git-panel-mode="gitPanelMode = $event"
         @update:search-query="searchQuery = $event"
         @update:search-mode="searchMode = $event"
@@ -398,6 +399,7 @@ import { useInputPrompt } from "../composables/useInputPrompt";
 import { useEditorPanel } from "../composables/useEditorPanel";
 import { useSessionManager } from "../composables/useSessionManager";
 import { useChatSessionStore } from "../composables/useChatSessionStore";
+import { useSessionMessageCache } from "../composables/useSessionMessageCache";
 import { useProjectMemory } from "../composables/useProjectMemory";
 import { useAgentRun, type ChatMessage } from "../composables/useAgentRun";
 import { parseAgentSuggestions, type AgentSuggestion } from "../services/agentSuggestions";
@@ -450,6 +452,7 @@ import {
   buildAgentHistoryFromMessages,
   getSessionDiagSnapshot,
   onStorageError,
+  saveVibeChatHistory,
   stripReferenceAttachments,
   stripToolSummaryFromAssistantContent,
   updateVibeChatSessionStatus,
@@ -733,8 +736,46 @@ const chatMessages = ref<ChatMessage[]>([]);
 const chatSending = ref(false);
 // ── 按会话独立的发送状态 ──
 const sendingSessionIds = reactive(new Set<string>());
+const sessionMessageCache = useSessionMessageCache<ChatMessage>();
+let agentRunSessionId = "";
+
+const sendingSessionIdList = computed(() => [...sendingSessionIds]);
+
 function isSessionSending(sessionId: string): boolean {
   return sendingSessionIds.has(sessionId);
+}
+
+function syncActiveChatSending() {
+  chatSending.value = sendingSessionIds.has(activeSessionId.value);
+}
+
+function beginAgentRunSession(sessionId: string) {
+  if (!sessionId) return;
+  agentRunSessionId = sessionId;
+  sendingSessionIds.add(sessionId);
+  sessionMessageCache.snapshot(sessionId, chatMessages.value);
+  syncActiveChatSending();
+}
+
+function endAgentRunSession(sessionId?: string) {
+  const sid = (sessionId || agentRunSessionId).trim();
+  if (sid) sendingSessionIds.delete(sid);
+  if (!sessionId || sid === agentRunSessionId) agentRunSessionId = "";
+  syncActiveChatSending();
+}
+
+function getAgentRunSessionId(): string {
+  return agentRunSessionId;
+}
+
+function persistAgentRunSession() {
+  const sid = agentRunSessionId;
+  const project = projectPath.value.trim();
+  if (!sid || !project || sid === activeSessionId.value) return;
+  const cached = sessionMessageCache.get(sid);
+  if (cached?.length) {
+    saveVibeChatHistory(project, cached, sid, { touchTimestamp: false });
+  }
 }
 const switchingProject = ref(false);
 const chatError = ref("");
@@ -817,20 +858,9 @@ const {
   setActiveSession,
 } = session;
 
-// 监听 chatSending 变化，同步到 sendingSessionIds
-watch(chatSending, (sending) => {
-  if (sending) {
-    sendingSessionIds.add(activeSessionId.value);
-  } else {
-    sendingSessionIds.delete(activeSessionId.value);
-  }
-});
 // 切换会话时，恢复目标会话的发送状态到 chatSending
-watch(activeSessionId, (_newId, _oldId) => {
-  const wasSending = sendingSessionIds.has(_newId);
-  if (wasSending !== chatSending.value) {
-    chatSending.value = wasSending;
-  }
+watch(activeSessionId, () => {
+  syncActiveChatSending();
 });
 
 const chatSessionHooks: {
@@ -846,6 +876,13 @@ const chatSession = useChatSessionStore({
   session,
   normalizeMessages: normalizeChatMessages,
   confirm,
+  onBeforeSessionSwitch: (fromSessionId, messages) => {
+    sessionMessageCache.snapshot(fromSessionId, messages);
+  },
+  resolveSessionMessages: (sessionId, diskMessages) => {
+    const cached = sessionMessageCache.get(sessionId);
+    return cached?.length ? cached : normalizeChatMessages(diskMessages);
+  },
   onAfterSwitch: () => chatSessionHooks.onAfterSwitch?.(),
   scrollToBottom: (force) => chatSessionHooks.scrollToBottom?.(force),
 });
@@ -1483,9 +1520,18 @@ async function copySessionInfo(session: VibeChatSessionMeta) {
 }
 
 function patchAssistantMsg(msgId: string, patch: Partial<ChatMessage>) {
-  const idx = chatMessages.value.findIndex((m) => m.id === msgId);
-  if (idx < 0) return;
-  chatMessages.value[idx] = { ...chatMessages.value[idx], ...patch };
+  const apply = (list: ChatMessage[]) => {
+    const idx = list.findIndex((m) => m.id === msgId);
+    if (idx < 0) return false;
+    list[idx] = { ...list[idx], ...patch };
+    return true;
+  };
+  const patched = apply(chatMessages.value);
+  const runSid = agentRunSessionId;
+  if (runSid) {
+    if (patched) sessionMessageCache.snapshot(runSid, chatMessages.value);
+    else sessionMessageCache.patchMessage(runSid, msgId, patch);
+  }
 }
 
 async function handleAgentWrittenFiles(files: string[]) {
@@ -1605,6 +1651,10 @@ const agent = useAgentRun({
   buildAgentHistoryForResume,
   resolveOriginalUserPrompt,
   findLastUserMessage,
+  beginAgentRunSession,
+  endAgentRunSession,
+  getAgentRunSessionId,
+  persistAgentRunSession,
 });
 
 const {
@@ -1732,10 +1782,6 @@ async function openProjectByPath(dirPath: string) {
     return;
   }
 
-  if (chatSending.value) {
-    interruptAgentRun();
-  }
-
   if (!(await ensureCanLeaveAllOpenTabs())) return;
 
   const t0 = performance.now();
@@ -1759,8 +1805,19 @@ async function openProjectByPath(dirPath: string) {
     pendingPromptQueue.value = [];
     persistPendingQueue();
     cancelPendingChatPersistence();
+    for (const sid of [...sendingSessionIds]) {
+      const cached = sessionMessageCache.get(sid);
+      if (cached?.length) {
+        saveVibeChatHistory(previousPathForPersist, cached, sid, { touchTimestamp: false });
+      }
+    }
     persistChatNow(previousPathForPersist, { flushStore: true });
   }
+  if (sendingSessionIds.size) interruptAgentRun();
+  sessionMessageCache.clearAll();
+  sendingSessionIds.clear();
+  agentRunSessionId = "";
+  chatSending.value = false;
   log("persist-prev");
 
   loadingTree.value = true;

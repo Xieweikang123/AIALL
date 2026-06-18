@@ -139,7 +139,10 @@
             :class="{ active: s.id === activeSessionId }"
           >
             <button type="button" class="session-item-main" @click="$emit('switch-session', s.id)">
-              <span class="session-item-title">{{ s.title }}</span>
+              <span class="session-item-title">
+                <span v-if="sessionSendingIds.includes(s.id)" class="session-item-sending" title="Agent 运行中">●</span>
+                {{ s.title }}
+              </span>
               <span class="session-item-meta">
                 {{ formatSessionTime(s.updatedAt) }} · {{ s.messageCount }} 条
               </span>
@@ -203,12 +206,14 @@ interface Props {
   syncingChatStore: boolean;
   chatStoreSyncMessage: string;
   chatSending: boolean;
+  sessionSendingIds?: string[];
 }
 
 const props = withDefaults(defineProps<Props>(), {
   loadingTree: false,
   searchLoading: false,
   searchError: "",
+  sessionSendingIds: () => [],
 });
 
 const emit = defineEmits<{
@@ -501,8 +506,8 @@ defineExpose({ searchInputRef });
 .sessions-toolbar {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px 8px;
+  gap: 6px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--border-color, #333);
   flex-shrink: 0;
 }
@@ -519,7 +524,7 @@ defineExpose({ searchInputRef });
 .sessions-list {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 4px 0;
   overflow-y: auto;
   flex: 1;
 }
@@ -528,12 +533,32 @@ defineExpose({ searchInputRef });
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 0;
-  border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.06));
+  padding: 0 4px;
+  margin: 2px 0;
+  border-radius: 8px;
+  position: relative;
+  border-bottom: none;
+}
+
+.session-item:hover {
+  background: var(--bg-tertiary, rgba(255, 255, 255, 0.04));
 }
 
 .session-item.active {
-  background: var(--bg-tertiary, rgba(255, 255, 255, 0.06));
+  background: rgba(88, 166, 255, 0.08);
+}
+
+.session-item.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 60%;
+  min-height: 18px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent-color, #58a6ff);
 }
 
 .session-item-main {
@@ -541,42 +566,56 @@ defineExpose({ searchInputRef });
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
-  padding: 8px 10px;
+  gap: 3px;
+  padding: 10px 10px 10px 12px;
   border: none;
   background: none;
   color: var(--text-primary, #e6edf3);
   cursor: pointer;
   text-align: left;
   min-width: 0;
-  transition: background 0.12s;
+  transition: background 0.15s;
+  border-radius: 6px;
 }
 
 .session-item-main:hover {
-  background: var(--bg-tertiary, rgba(255, 255, 255, 0.04));
+  background: transparent;
 }
 
 .session-item-title {
   font-size: 13px;
   font-weight: 500;
-  white-space: nowrap;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
+  word-break: break-word;
+}
+
+.session-item-sending {
+  color: var(--accent, #3b82f6);
+  margin-right: 4px;
+  font-size: 10px;
+  vertical-align: middle;
 }
 
 .session-item-meta {
   font-size: 11px;
-  color: var(--text-secondary, #8b949e);
+  color: var(--text-secondary, #6e7681);
+  line-height: 1.3;
 }
 
 .session-item-actions {
   display: flex;
   align-items: center;
-  gap: 1px;
+  gap: 2px;
   padding-right: 6px;
-  opacity: 0;
-  transition: opacity 0.12s;
+  opacity: 0.35;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
 }
 
 .session-item:hover .session-item-actions {
@@ -584,8 +623,14 @@ defineExpose({ searchInputRef });
 }
 
 .icon-btn.small {
-  width: 20px;
-  height: 20px;
-  font-size: 11px;
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+  border-radius: 4px;
+  transition: background 0.12s, opacity 0.12s;
+}
+
+.icon-btn.small:hover {
+  background: rgba(255, 255, 255, 0.08);
 }
 </style>
