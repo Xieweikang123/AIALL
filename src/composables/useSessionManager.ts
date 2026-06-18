@@ -1,11 +1,7 @@
 import { computed, ref } from "vue";
 import {
-  formatSessionTitle,
-  clearVibeChatHistory,
   deleteVibeChatSession,
-  getActiveVibeChatSessionId,
   listVibeChatSessions,
-  switchVibeChatSession,
   VIBE_CHAT_SESSIONS_LOGICAL_DIR,
   vibeChatSessionDiskDir,
   vibeChatSessionDiskFilePath,
@@ -44,26 +40,18 @@ export function useSessionManager(projectPath: () => string) {
     return "点击新建或查看会话";
   });
 
+  /** Read-only projection of persisted sessions. Does not mutate activeSessionId. */
   function refreshSessionList(path?: string) {
     const p = path ?? projectPath();
     if (!p) {
       sessionList.value = [];
-      activeSessionId.value = "";
       return;
     }
-    const previousActiveId = activeSessionId.value;
     sessionList.value = listVibeChatSessions(p);
-    const storedActiveId = getActiveVibeChatSessionId(p);
-    const listIds = new Set(sessionList.value.map((s) => s.id));
-    if (previousActiveId && listIds.has(previousActiveId)) {
-      activeSessionId.value = previousActiveId;
-    } else if (storedActiveId && listIds.has(storedActiveId)) {
-      activeSessionId.value = storedActiveId;
-    } else if (previousActiveId || storedActiveId) {
-      activeSessionId.value = sessionList.value[0]?.id || "";
-    } else {
-      activeSessionId.value = "";
-    }
+  }
+
+  function setActiveSession(sessionId: string) {
+    activeSessionId.value = sessionId;
   }
 
   function resetSessionUi() {
@@ -145,6 +133,7 @@ export function useSessionManager(projectPath: () => string) {
     canSwitchToOlderSession,
     sessionPickerTitle,
     refreshSessionList,
+    setActiveSession,
     resetSessionUi,
     toggleSessionPicker,
     closeSessionPicker,

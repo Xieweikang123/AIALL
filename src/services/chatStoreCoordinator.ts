@@ -1,6 +1,6 @@
 import type { ChatSessionDeleteResult, ChatStoreSyncResult } from "./vibeCodingClient";
 import { deleteChatSessionFromDisk } from "./vibeCodingClient";
-import { mirrorLocalIndexFromDiskMeta } from "./vibeChatStorage";
+import { syncLocalIndexFromRecord } from "./vibeChatStorage";
 
 const queues = new Map<string, Promise<unknown>>();
 const queueDepth = new Map<string, number>();
@@ -32,27 +32,6 @@ export function enqueueChatStoreOp<T>(projectPath: string, op: () => Promise<T>)
   return run;
 }
 
-export function mirrorDiskIndexAfterSync(
-  projectPath: string,
-  result: {
-    activeSessionId?: string;
-    sessions?: Array<{
-      id: string;
-      title: string;
-      createdAt: string;
-      updatedAt: string;
-      messageCount: number;
-      status?: string;
-    }>;
-  },
-): void {
-  if (!result.sessions && result.activeSessionId === undefined) return;
-  mirrorLocalIndexFromDiskMeta(projectPath, {
-    activeSessionId: result.activeSessionId || "",
-    sessions: result.sessions ?? [],
-  });
-}
-
 export async function deleteChatSessionOnDisk(
   projectPath: string,
   sessionId: string,
@@ -63,7 +42,7 @@ export async function deleteChatSessionOnDisk(
       activeSessionId: nextActiveSessionId || "",
     });
     if (result.ok) {
-      mirrorDiskIndexAfterSync(projectPath, result);
+      syncLocalIndexFromRecord(projectPath);
     }
     return result;
   });
@@ -76,7 +55,7 @@ export async function flushChatStoreOnDisk<T extends ChatStoreSyncResult>(
   return enqueueChatStoreOp(projectPath, async () => {
     const result = await flush();
     if (result.ok) {
-      mirrorDiskIndexAfterSync(projectPath, result);
+      syncLocalIndexFromRecord(projectPath);
     }
     return result;
   });

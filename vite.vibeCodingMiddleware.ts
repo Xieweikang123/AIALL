@@ -663,19 +663,8 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       }>();
       const incomingIds = new Set(incomingIdList);
 
-      const removedFromDisk: string[] = [];
-      await Promise.all(existingSessions.map(async (session) => {
-        if (!session.id || incomingIds.has(session.id)) return;
-        removedFromDisk.push(session.id);
-        const file = session.file || `chat-${safeFilePart(session.id)}.json`;
-        await fs.promises.unlink(path.join(chatDir, file)).catch(() => {});
-      }));
-      if (removedFromDisk.length) {
-        sessionDiagServer("backend:chat-store-sync:removed-files", {
-          projectPath,
-          removedSessionIds: removedFromDisk,
-        });
-      }
+      // 勿因过期快照裁掉未出现在 payload 中的会话；显式删除走 chat-session-delete。
+      const preservedFromDisk: string[] = [];
 
       // 并行写入所有 session 文件
       await Promise.all(sessions.map(async (session) => {
@@ -728,6 +717,18 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         });
       }));
 
+      for (const existing of existingSessions) {
+        if (!existing.id || incomingIds.has(existing.id) || indexSessionsMap.has(existing.id)) continue;
+        indexSessionsMap.set(existing.id, existing);
+        preservedFromDisk.push(existing.id);
+      }
+      if (preservedFromDisk.length) {
+        sessionDiagServer("backend:chat-store-sync:preserved-existing", {
+          projectPath,
+          preservedSessionIds: preservedFromDisk,
+        });
+      }
+
       // 写入 index
       const index = {
         syncedAt: new Date().toISOString(),
@@ -742,7 +743,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         projectPath,
         writtenSessionIds: index.sessions.map((s) => s.id),
         activeSessionId: index.activeSessionId,
-        removedFromDisk,
+        preservedFromDisk,
       });
       debugLog(`chat-store-sync async done, cache invalidated for "${resolved}"`);
       sendJson(res, 200, {

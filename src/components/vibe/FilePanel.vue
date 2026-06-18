@@ -307,25 +307,23 @@ defineExpose({ searchInputRef });
 }
 
 .git-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
+  display: inline;
   font-size: 10px;
-  font-weight: 600;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text-tertiary, #666);
+  font-weight: 400;
+  color: var(--text-tertiary, #555);
+  background: none;
   border: none;
-  border-radius: 4px;
+  padding: 0;
+  margin-left: 2px;
+  vertical-align: baseline;
   line-height: 1;
-  letter-spacing: 0.2px;
+  letter-spacing: 0;
+  opacity: 0.7;
 }
 
 .git-badge-staged {
-  background: rgba(63, 185, 80, 0.1);
   color: var(--success-color, #3fb950);
+  opacity: 1;
 }
 
 .file-toolbar {
@@ -338,19 +336,33 @@ defineExpose({ searchInputRef });
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: none;
-  background: none;
+  width: 26px;
+  height: 26px;
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
+  background: rgba(99, 102, 241, 0.15);
   color: var(--text-secondary, #999);
   cursor: pointer;
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.1s;
 }
 
 .icon-btn:hover {
-  background: var(--bg-tertiary, #333);
-  color: var(--text-primary, #fff);
+  background: rgba(99, 102, 241, 0.35);
+  color: #fff;
+  border-color: rgba(99, 102, 241, 0.6);
+  transform: scale(1.08);
+}
+
+.icon-btn:active {
+  transform: scale(0.95);
+}
+
+.icon-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .toolbar-sep {

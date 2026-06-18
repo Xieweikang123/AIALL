@@ -65,7 +65,7 @@
         @refresh-git-status="refreshGitStatus(gitIsRepo ? { showLoading: false } : undefined)"
         @switch-session="switchSession"
         @remove-session="removeSession"
-        @start-new-session="startNewSession"
+        @start-new-session="handleStartNewSession"
         @copy-session-info="copySessionInfo"
         @sync-chat-store-to-disk="syncChatStoreToDisk"
       >
@@ -279,7 +279,7 @@
         @on-chat-drop="onChatDrop"
         @switch-to-adjacent-session="switchToAdjacentSession"
         @toggle-session-picker="toggleSessionPicker"
-        @start-new-session="startNewSession"
+        @start-new-session="handleStartNewSession"
         @switch-session="switchSession"
         @copy-session-info="copySessionInfo"
         @remove-session="removeSession"
@@ -375,7 +375,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref,
 import "../styles/vibe-coding.scss";
 import { appendStatusDetail, truncateDiffPreview, cleanStatusLogText, formatCharCount, isNetworkError, fileName, genId, hasAgentProcessSteps, entryToNode, formatToolMeta, syncRoundGroupsPatch } from "../utils/vibeHelpers";
 import { debugLog } from "../utils/debugLog";
-import { markSessionDeleted, sessionDiag } from "../utils/sessionDiagLog";
+import { sessionDiag } from "../utils/sessionDiagLog";
 import ChatComposerEditor from "../components/ChatComposerEditor.vue";
 import ConfirmPopup from "../components/ConfirmPopup.vue";
 import InputPrompt from "../components/InputPrompt.vue";
@@ -396,6 +396,7 @@ import { useGitPanel, type GitFileDiff } from "../composables/useGitPanel";
 import { useInputPrompt } from "../composables/useInputPrompt";
 import { useEditorPanel } from "../composables/useEditorPanel";
 import { useSessionManager } from "../composables/useSessionManager";
+import { useChatSessionStore } from "../composables/useChatSessionStore";
 import { useProjectMemory } from "../composables/useProjectMemory";
 import { useAgentRun, type ChatMessage } from "../composables/useAgentRun";
 import type { TurnFileDiff } from "../types/vibeChat";
@@ -444,29 +445,10 @@ import { compressImageDataUrlsForAgent } from "../services/imageCompress";
 import { loadAiChatBaseFromStorage } from "../services/aiLocalConfig";
 import {
   buildAgentHistoryFromMessages,
-  clearVibeChatHistory,
-  diskChatStoreAheadOfLocalIndex,
-  sessionIdsWithDiskAheadMessageCounts,
-  buildActiveSessionDiskSyncPayload,
-  chatMessagesHavePendingImageBase64,
-  cloneChatMessagesForDiskSync,
-  getActiveSessionSnapshot,
-  getVibeChatProjectSnapshot,
-  hasVibeChatHistory,
-  loadVibeChatHistory,
+  getSessionDiagSnapshot,
   onStorageError,
-  projectChatNeedsDiskRestore,
-  compactProjectSessionRecord,
-  createVibeChatSession,
-  isSessionRecentlyDeletedLocally,
-  replaceChatStoreFromDiskSnapshot,
-  saveVibeChatHistory,
   stripReferenceAttachments,
   stripToolSummaryFromAssistantContent,
-  switchVibeChatSession,
-  getActiveVibeChatSessionId,
-  getSessionDiagSnapshot,
-  vibeProjectPathsMatch,
   updateVibeChatSessionStatus,
   type PersistedChatMessage,
   type VibeChatSessionMeta,
@@ -477,7 +459,6 @@ import {
   chatMessagesNeedImageHydration,
   resolveChatMessageImageUrls,
   resolveImagesForAgentTurn,
-  stampImageRefsAfterSync,
 } from "../services/vibeChatImageStore";
 import {
   isDeleteNotFoundError,
@@ -546,20 +527,11 @@ import {
   readFile,
   renameItem,
   searchFiles,
-  fetchChatStoreFromDisk,
-  fetchSessionMessages,
   formatFetchError,
-  syncChatSession,
-  syncChatStore,
   writeFile,
   type FileEntry,
   type GrepMatch,
 } from "../services/vibeCodingClient";
-import {
-  deleteChatSessionOnDisk,
-  enqueueChatStoreOp,
-  flushChatStoreOnDisk,
-} from "../services/chatStoreCoordinator";
 import {
   fetchGitDiffContent,
   fetchGitCommitFileDiff,
@@ -597,7 +569,6 @@ const STORAGE_KEY = "vibe-coding-project";
 const CHAT_MODE_KEY = "vibe-coding-chat-mode";
 const PENDING_QUEUE_KEY = "vibe-coding-pending-queue";
 const GIT_PANEL_MODE_KEY = "vibe-coding-git-panel-mode";
-const SYNC_STORE_DEBOUNCE_MS = 5000;
 type ChatRole = "user" | "assistant";
 type FileDiff = TurnFileDiff;
 
@@ -683,10 +654,6 @@ const treeError = ref("");
 const retryCountdown = ref(0);
 let retryTimer: ReturnType<typeof setInterval> | null = null;
 let retryAbort: AbortController | null = null;
-let saveChatTimer: ReturnType<typeof setTimeout> | null = null;
-let persistDelayTimer: ReturnType<typeof setTimeout> | null = null;
-let persistChatGeneration = 0;
-let syncStoreTimer: ReturnType<typeof setTimeout> | null = null;
 
 function clearRetryTimer() {
   if (retryTimer) { clearInterval(retryTimer); retryTimer = null; }
@@ -741,8 +708,6 @@ const quoteButtonPosition = ref({ x: 0, y: 0 });
 const showQuoteButton = ref(false);
 const quoteButtonRef = ref<HTMLElement | null>(null);
 const openingProject = ref(false);
-let switchSessionGeneration = 0;
-
 const searchQuery = ref("");
 const searchLoading = ref(false);
 const searchError = ref("");
@@ -763,7 +728,6 @@ function loadChatMode(): VibeChatMode {
 const chatMode = ref<VibeChatMode>(loadChatMode());
 const chatMessages = ref<ChatMessage[]>([]);
 const chatSending = ref(false);
-const switchingSession = ref(false);
 const switchingProject = ref(false);
 const chatError = ref("");
 const searchInputRef = ref<HTMLInputElement | null>(null);
@@ -773,8 +737,6 @@ const CHAT_SCROLL_PIN_THRESHOLD = 80;
 let chatPinnedToBottom = true;
 const sessionPickerRef = ref<HTMLElement | null>(null);
 const chatPanelRef = ref<InstanceType<typeof ChatPanel> | null>(null);
-const syncingChatStore = ref(false);
-const chatStoreSyncMessage = ref("");
 const pendingPromptQueue = ref<string[]>([]);
 function persistPendingQueue() {
   try {
@@ -841,10 +803,44 @@ const {
   canSwitchToNewerSession,
   canSwitchToOlderSession,
   sessionPickerTitle,
-  removeSession: removeSessionBase,
   sessionLocalFileName,
   formatSessionInfoForCopy,
+  setActiveSession,
 } = session;
+
+const chatSessionHooks: {
+  onAfterSwitch?: () => void;
+  scrollToBottom?: (force?: boolean) => void | Promise<void>;
+} = {};
+
+const chatSession = useChatSessionStore({
+  projectPath: () => projectPath.value.trim(),
+  chatMessages,
+  chatError,
+  chatSending: () => chatSending.value,
+  session,
+  normalizeMessages: normalizeChatMessages,
+  confirm,
+  onAfterSwitch: () => chatSessionHooks.onAfterSwitch?.(),
+  scrollToBottom: (force) => chatSessionHooks.scrollToBottom?.(force),
+});
+
+const {
+  switchingSession,
+  syncingChatStore,
+  chatStoreSyncMessage,
+  persistChatNow,
+  schedulePersistChat,
+  cancelPendingChatPersistence,
+  flushChatStoreToDisk,
+  startNewSession,
+  switchSession,
+  removeSession,
+  syncChatStoreToDisk,
+  loadProjectChatState,
+  resetUiForProjectSwitch,
+  clearProjectChat,
+} = chatSession;
 
 // File drag composable
 const {
@@ -895,67 +891,6 @@ function switchToAdjacentSession(delta: number) {
   if (nextId) switchSession(nextId);
 }
 
-async function removeSession(sessionId: string) {
-  const ok = await confirm("确定删除此会话？");
-  if (!ok) return;
-  const project = projectPath.value.trim();
-  sessionDiag("ui:delete:start", {
-    projectPath: project,
-    sessionId,
-    activeSessionId: activeSessionId.value,
-    listSessionIds: sessionList.value.map((s) => s.id),
-    local: getSessionDiagSnapshot(project),
-    pendingSaveTimer: Boolean(saveChatTimer),
-    pendingSyncTimer: Boolean(syncStoreTimer),
-  });
-  cancelPendingChatPersistence();
-  markSessionDeleted(sessionId);
-  const result = removeSessionBase(sessionId, chatSending.value);
-  if (result) chatMessages.value = normalizeChatMessages(result);
-  refreshSessionList();
-  const nextActiveId = getActiveVibeChatSessionId(project);
-  const diskResult = await deleteChatSessionOnDisk(project, sessionId, nextActiveId);
-  let syncOk = diskResult.ok;
-  let syncError = diskResult.ok ? undefined : diskResult.error;
-  let syncSessionCount = diskResult.ok ? diskResult.sessionCount : undefined;
-  if (!diskResult.ok) {
-    const syncResult = await flushChatStoreToDisk(project, { quiet: true, force: true });
-    syncOk = syncResult?.ok ?? false;
-    syncError = syncResult && !syncResult.ok ? syncResult.error : undefined;
-    syncSessionCount = syncResult?.sessionCount;
-  }
-  activeSessionId.value = getActiveVibeChatSessionId(project);
-  sessionDiag("ui:delete:after-sync", {
-    projectPath: project,
-    deletedSessionId: sessionId,
-    diskDeleteOk: diskResult.ok,
-    syncOk,
-    syncError,
-    syncSessionCount,
-    listSessionIds: sessionList.value.map((s) => s.id),
-    local: getSessionDiagSnapshot(project),
-  });
-  refreshSessionList();
-  setTimeout(() => {
-    sessionDiag("ui:delete:watch-3s", {
-      projectPath: project,
-      deletedSessionId: sessionId,
-      listSessionIds: sessionList.value.map((s) => s.id),
-      stillInList: sessionList.value.some((s) => s.id === sessionId),
-      local: getSessionDiagSnapshot(project),
-    });
-  }, 3000);
-  setTimeout(() => {
-    sessionDiag("ui:delete:watch-8s", {
-      projectPath: project,
-      deletedSessionId: sessionId,
-      listSessionIds: sessionList.value.map((s) => s.id),
-      stillInList: sessionList.value.some((s) => s.id === sessionId),
-      local: getSessionDiagSnapshot(project),
-    });
-  }, 8000);
-  void scrollChatToBottom(true);
-}
 function onChatDragEnter(e: DragEvent) {
   onChatDragEnterBase(e);
 }
@@ -1245,120 +1180,6 @@ const {
   autoRetryWithCountdown,
 });
 
-async function loadFullChatStoreFromDisk(project: string): Promise<void> {
-  sessionDiag("ui:load-full-chat-store:start", { projectPath: project, local: getSessionDiagSnapshot(project) });
-  const diskStore = await fetchChatStoreFromDisk(project, { loadMessages: true });
-  if (
-    diskStore.ok
-    && diskStore.data.sessions.length
-    && vibeProjectPathsMatch(project, diskStore.data.projectPath)
-  ) {
-    sessionDiag("ui:load-full-chat-store:restore", {
-      projectPath: project,
-      diskSessionIds: diskStore.data.sessions.map((s) => s.id),
-      diskActiveSessionId: diskStore.data.activeSessionId,
-    });
-    replaceChatStoreFromDiskSnapshot(diskStore.data, project);
-    sessionDiag("ui:load-full-chat-store:after", {
-      projectPath: project,
-      local: getSessionDiagSnapshot(project),
-    });
-  }
-}
-
-async function restoreIndexedSessionsFromDisk(project: string, sessionIds: string[]): Promise<void> {
-  if (!sessionIds.length) return;
-  const indexedIds = getSessionDiagSnapshot(project).indexSessionIds;
-  for (const id of sessionIds.filter((sid) => indexedIds.includes(sid))) {
-    if (isSessionRecentlyDeletedLocally(project, id)) continue;
-    if (!projectChatNeedsDiskRestore(project, id)) continue;
-    const result = await fetchSessionMessages(project, id);
-    if (result.ok && Array.isArray(result.data.messages) && result.data.messages.length) {
-      sessionDiag("ui:ensure-chat-from-disk:session-messages", {
-        projectPath: project,
-        sessionId: id,
-        messageCount: result.data.messages.length,
-      });
-      saveVibeChatHistory(project, result.data.messages as PersistedChatMessage[], id);
-    }
-  }
-}
-
-async function restoreDiskAheadSessionsFromDisk(project: string): Promise<void> {
-  const diskIndex = await fetchChatStoreFromDisk(project, { loadMessages: false });
-  if (
-    !diskIndex.ok
-    || !diskIndex.data.sessions.length
-    || !vibeProjectPathsMatch(project, diskIndex.data.projectPath)
-  ) {
-    return;
-  }
-  const aheadIds = sessionIdsWithDiskAheadMessageCounts(project, diskIndex.data.sessions).filter(
-    (id) => !isSessionRecentlyDeletedLocally(project, id),
-  );
-  if (!aheadIds.length) return;
-  await restoreIndexedSessionsFromDisk(project, aheadIds);
-}
-
-async function ensureProjectChatLoadedFromDiskInternal(project: string, sessionId?: string): Promise<void> {
-  sessionDiag("ui:ensure-chat-from-disk:start", {
-    projectPath: project,
-    targetSessionId: sessionId || getActiveVibeChatSessionId(project),
-    local: getSessionDiagSnapshot(project),
-  });
-
-  if (sessionId) {
-    if (!projectChatNeedsDiskRestore(project, sessionId)) return;
-    await restoreIndexedSessionsFromDisk(project, [sessionId]);
-    return;
-  }
-
-  const activeId = getActiveVibeChatSessionId(project);
-  const idsToRestore: string[] = [];
-  if (activeId && projectChatNeedsDiskRestore(project, activeId)) {
-    idsToRestore.push(activeId);
-  }
-  await restoreIndexedSessionsFromDisk(project, idsToRestore);
-  await restoreDiskAheadSessionsFromDisk(project);
-}
-
-async function ensureProjectChatLoadedFromDisk(project: string, sessionId?: string): Promise<void> {
-  if (!project.trim()) return;
-  await enqueueChatStoreOp(project, () => ensureProjectChatLoadedFromDiskInternal(project, sessionId));
-}
-
-async function hydrateProjectChatFromDisk(project: string): Promise<boolean> {
-  if (!project.trim()) return false;
-  return enqueueChatStoreOp(project, async () => {
-    const diskIndex = await fetchChatStoreFromDisk(project, { loadMessages: false });
-    const diskOk =
-      diskIndex.ok
-      && diskIndex.data.sessions.length > 0
-      && vibeProjectPathsMatch(project, diskIndex.data.projectPath);
-    const indexEmpty = !getSessionDiagSnapshot(project).indexSessionIds.length;
-    const activeId = getActiveVibeChatSessionId(project);
-    const needsDisk =
-      (indexEmpty && diskOk)
-      || (activeId ? projectChatNeedsDiskRestore(project, activeId) : false)
-      || (diskOk && diskChatStoreAheadOfLocalIndex(project, diskIndex.data.sessions));
-    sessionDiag("ui:hydrate-from-disk:check", {
-      projectPath: project,
-      diskOk,
-      needsDisk,
-      activeId,
-      diskSessionIds: diskOk ? diskIndex.data.sessions.map((s) => s.id) : [],
-      local: getSessionDiagSnapshot(project),
-    });
-    if (!needsDisk) return false;
-    if (indexEmpty) {
-      await loadFullChatStoreFromDisk(project);
-    } else {
-      await ensureProjectChatLoadedFromDiskInternal(project);
-    }
-    return true;
-  });
-}
-
 async function applyChatMessageImageHydration(messages: PersistedChatMessage[]): Promise<ChatMessage[]> {
   const project = projectPath.value.trim();
   if (!project || !chatMessagesNeedImageHydration(messages)) {
@@ -1573,61 +1394,9 @@ registerEscapeDismiss(
   ESCAPE_DISMISS_PRIORITY.QUOTED_PREVIEW,
 );
 
-function startNewSession() {
-  if (chatSending.value || !projectPath.value.trim()) return;
-  persistChatNow();
-  activeSessionId.value = "";
-  chatMessages.value = [];
-  chatError.value = "";
-  refreshSessionList();
-  activeSessionId.value = "";
-  closeSessionPicker();
-  void scrollChatToBottom(true);
+function handleStartNewSession() {
+  startNewSession();
   void nextTick(() => composerRef.value?.focus());
-}
-
-function switchSession(sessionId: string) {
-  if (chatSending.value || !projectPath.value.trim()) return;
-  if (sessionId === activeSessionId.value) {
-    closeSessionPicker();
-    return;
-  }
-  cancelPendingChatPersistence();
-  const fromSessionId = activeSessionId.value;
-  const project = projectPath.value.trim();
-  sessionDiag("ui:switch-session:start", {
-    projectPath: project,
-    fromSessionId,
-    toSessionId: sessionId,
-    local: getSessionDiagSnapshot(project),
-  });
-  if (fromSessionId && chatMessages.value.length) {
-    saveVibeChatHistory(project, chatMessages.value, fromSessionId);
-  }
-  const gen = ++switchSessionGeneration;
-  switchingSession.value = true;
-  void (async () => {
-    try {
-      await ensureProjectChatLoadedFromDisk(project, sessionId);
-      if (gen !== switchSessionGeneration) return;
-      const messages = switchVibeChatSession(project, sessionId);
-      chatMessages.value = normalizeChatMessages(messages);
-      activeSessionId.value = sessionId;
-      chatError.value = "";
-      refreshSessionList(project);
-      closeSessionPicker();
-      maybeAutoResumeLastRecoverableAssistant();
-      await scrollChatToBottom(true);
-      sessionDiag("ui:switch-session:done", {
-        projectPath: project,
-        fromSessionId,
-        toSessionId: sessionId,
-        local: getSessionDiagSnapshot(project),
-      });
-    } finally {
-      if (gen === switchSessionGeneration) switchingSession.value = false;
-    }
-  })();
 }
 
 async function copyText(text: string): Promise<boolean> {
@@ -1687,206 +1456,6 @@ async function copySessionInfo(session: VibeChatSessionMeta) {
     }
   }, 3000);
 }
-
-async function syncChatStoreToDisk() {
-  const path = projectPath.value.trim();
-  if (!path || syncingChatStore.value) return;
-  persistChatNow(path);
-  syncingChatStore.value = true;
-  chatError.value = "";
-  chatStoreSyncMessage.value = "正在同步会话到本地...";
-  try {
-    const result = await syncChatStore(path, getVibeChatProjectSnapshot(path));
-    if (!result.ok) {
-      chatStoreSyncMessage.value = result.error || "同步会话到本地失败";
-      return;
-    }
-      chatStoreSyncMessage.value = `已同步 ${result.sessionCount ?? sessionList.value.length} 条会话到 ${result.path || "本地目录"}`;
-  } finally {
-    syncingChatStore.value = false;
-  }
-}
-
-function scheduleSyncChatStore(path: string) {
-  if (syncStoreTimer) clearTimeout(syncStoreTimer);
-  syncStoreTimer = setTimeout(() => {
-    syncStoreTimer = null;
-    void flushChatStoreToDisk(path, { quiet: true });
-  }, SYNC_STORE_DEBOUNCE_MS);
-}
-
-function cancelPendingSync() {
-  // 取消延迟的 sync
-  if (syncStoreTimer) {
-    clearTimeout(syncStoreTimer);
-    syncStoreTimer = null;
-  }
-}
-
-function cancelPendingChatPersistence() {
-  persistChatGeneration++;
-  if (saveChatTimer) {
-    clearTimeout(saveChatTimer);
-    saveChatTimer = null;
-  }
-  if (persistDelayTimer) {
-    clearTimeout(persistDelayTimer);
-    persistDelayTimer = null;
-  }
-  cancelPendingSync();
-}
-
-function persistChatNow(path = projectPath.value.trim(), options?: { flushStore?: boolean }) {
-  if (!path) return;
-  const isEmptyDraft = !activeSessionId.value && !chatMessages.value.length;
-  const messagesForDiskSync = cloneChatMessagesForDiskSync(chatMessages.value);
-  const persistTargetSessionId = activeSessionId.value;
-  const gen = ++persistChatGeneration;
-  let sessionIdForSave = activeSessionId.value;
-  if (chatMessages.value.length && !sessionIdForSave) {
-    sessionIdForSave = createVibeChatSession(path).id;
-    activeSessionId.value = sessionIdForSave;
-  }
-  sessionDiag("ui:persist-chat-now:start", {
-    projectPath: path,
-    sessionId: sessionIdForSave,
-    messageCount: chatMessages.value.length,
-    flushStore: options?.flushStore ?? false,
-    local: getSessionDiagSnapshot(path),
-  });
-  const result = saveVibeChatHistory(path, chatMessages.value, sessionIdForSave || undefined);
-  if (result.sessionId) activeSessionId.value = result.sessionId;
-  refreshSessionList(path);
-  const sessionId = result.sessionId;
-  if (persistDelayTimer) clearTimeout(persistDelayTimer);
-  // 延迟执行，不阻塞后续操作
-  persistDelayTimer = setTimeout(() => {
-    persistDelayTimer = null;
-    if (gen !== persistChatGeneration) return;
-    (async () => {
-      sessionDiag("ui:persist-chat-now:delayed-run", {
-        projectPath: path,
-        sessionId,
-        persistTargetSessionId,
-        activeSessionId: activeSessionId.value,
-        local: getSessionDiagSnapshot(path),
-      });
-      if (sessionId) {
-        const sameActiveSession =
-          activeSessionId.value === sessionId && projectPath.value.trim() === path;
-        const snapshot =
-          buildActiveSessionDiskSyncPayload(path, sessionId, messagesForDiskSync) ??
-          getActiveSessionSnapshot(path, sessionId);
-        let syncOk = false;
-        if (snapshot) {
-          sessionDiag("ui:sync-chat-session", {
-            projectPath: path,
-            sessionId,
-            messageCount: snapshot.messages?.length ?? 0,
-            activeSessionId: activeSessionId.value || sessionId,
-          });
-          const syncResult = await syncChatSession(path, sessionId, snapshot, {
-            activeSessionId: activeSessionId.value || sessionId,
-          });
-          syncOk = syncResult.ok;
-          if (
-            !syncOk &&
-            chatMessagesHavePendingImageBase64(messagesForDiskSync) &&
-            sameActiveSession
-          ) {
-            chatError.value = syncResult.error || "附图未能写入本地，刷新后可能丢失";
-          }
-        }
-        if (syncOk) {
-          const stamped = stampImageRefsAfterSync(sessionId, messagesForDiskSync);
-          if (sameActiveSession) {
-            chatMessages.value = normalizeChatMessages(stamped);
-          }
-          saveVibeChatHistory(path, stamped, sessionId, { setActive: sameActiveSession });
-        }
-        const pendingImages = chatMessagesHavePendingImageBase64(messagesForDiskSync);
-        const shouldFlushStore = !pendingImages || syncOk;
-        if (options?.flushStore) {
-          if (syncStoreTimer) {
-            clearTimeout(syncStoreTimer);
-            syncStoreTimer = null;
-          }
-          if (shouldFlushStore) {
-            await flushChatStoreToDisk(path, { quiet: true });
-          }
-        } else if (shouldFlushStore) {
-          scheduleSyncChatStore(path);
-        }
-        return;
-      }
-      if (options?.flushStore) {
-        if (syncStoreTimer) {
-          clearTimeout(syncStoreTimer);
-          syncStoreTimer = null;
-        }
-        await flushChatStoreToDisk(path, { quiet: true });
-      } else {
-        scheduleSyncChatStore(path);
-      }
-    })();
-  }, 100);
-  if (isEmptyDraft) activeSessionId.value = "";
-}
-
-async function flushChatStoreToDisk(
-  path: string,
-  options?: { quiet?: boolean; force?: boolean },
-): Promise<import("../services/vibeCodingClient").ChatStoreSyncResult | undefined> {
-  if (!path || (syncingChatStore.value && !options?.force)) return undefined;
-  syncingChatStore.value = true;
-  try {
-    const snapshot = getVibeChatProjectSnapshot(path);
-    sessionDiag("ui:flush-chat-store:start", {
-      projectPath: path,
-      sessionIds: snapshot.sessions.map((s) => s.id),
-      activeSessionId: snapshot.activeSessionId,
-      local: getSessionDiagSnapshot(path),
-    });
-    const result = await flushChatStoreOnDisk(path, () => syncChatStore(path, snapshot));
-    sessionDiag("ui:flush-chat-store:done", {
-      projectPath: path,
-      ok: result.ok,
-      sessionCount: result.sessionCount,
-      error: result.error,
-      payloadSessionIds: snapshot.sessions.map((s) => s.id),
-    });
-    if (!result.ok) {
-      if (!options?.quiet) {
-        chatStoreSyncMessage.value = result.error || "同步会话到本地失败";
-      } else {
-        chatError.value = result.error || "会话未能写入项目目录，请检查后端服务是否运行";
-      }
-      return result;
-    }
-    if (!options?.quiet) {
-    chatStoreSyncMessage.value = `已同步 ${result.sessionCount ?? sessionList.value.length} 条会话到 ${result.path || "本地目录"}`;
-    }
-    return result;
-  } finally {
-    syncingChatStore.value = false;
-  }
-}
-
-function clearPendingPromptQueue() {
-  pendingPromptQueue.value = [];
-  persistPendingQueue();
-}
-
-function schedulePersistChat() {
-  if (!projectPath.value.trim()) return;
-  if (chatSending.value) return;
-  if (saveChatTimer) clearTimeout(saveChatTimer);
-  saveChatTimer = setTimeout(() => {
-    saveChatTimer = null;
-    persistChatNow();
-  }, 400);
-}
-
 
 function patchAssistantMsg(msgId: string, patch: Partial<ChatMessage>) {
   const idx = chatMessages.value.findIndex((m) => m.id === msgId);
@@ -2045,6 +1614,9 @@ const {
   stopAgentUiTick,
 } = agent;
 
+chatSessionHooks.scrollToBottom = scrollChatToBottom;
+chatSessionHooks.onAfterSwitch = maybeAutoResumeLastRecoverableAssistant;
+
 const agentRunningStatusText = computed(() => {
   if (!chatSending.value) return "";
   for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
@@ -2065,20 +1637,20 @@ function isDiffExpanded(messageId: string, relPath: string): boolean {
   return Boolean(expandedDiffs[messageId]?.[relPath]);
 }
 
+function clearPendingPromptQueue() {
+  pendingPromptQueue.value = [];
+  persistPendingQueue();
+}
+
 async function clearChat() {
   if (chatSending.value) return;
   if (chatMessages.value.length > 0) {
     const ok = await confirm("确定清空所有聊天记录？");
     if (!ok) return;
   }
-  chatMessages.value = [];
-  chatError.value = "";
   pendingPromptQueue.value = [];
   persistPendingQueue();
-  if (projectPath.value.trim()) {
-    clearVibeChatHistory(projectPath.value.trim());
-    refreshSessionList();
-  }
+  clearProjectChat();
 }
 
 async function loadDirChildren(dirPath: string): Promise<TreeNode[]> {
@@ -2132,11 +1704,7 @@ async function openProjectByPath(dirPath: string) {
   if (projectOpened.value && previousPathForPersist) {
     pendingPromptQueue.value = [];
     persistPendingQueue();
-    cancelPendingSync();
-    if (saveChatTimer) {
-      clearTimeout(saveChatTimer);
-      saveChatTimer = null;
-    }
+    cancelPendingChatPersistence();
     persistChatNow(previousPathForPersist, { flushStore: true });
   }
   log("persist-prev");
@@ -2153,10 +1721,7 @@ async function openProjectByPath(dirPath: string) {
   fileLoadError.value = "";
   showDiffMode.value = false;
   resetGitPanelState();
-  chatMessages.value = [];
-  activeSessionId.value = "";
-  sessionList.value = [];
-  closeSessionPicker();
+  resetUiForProjectSwitch();
   log("reset-state");
 
   try {
@@ -2178,8 +1743,6 @@ async function openProjectByPath(dirPath: string) {
 
     const tChat0 = performance.now();
     log(`chat-check`);
-    let loaded = loadVibeChatHistory(normalized);
-    log(`chat-load-local(${loaded.length}msgs)`);
 
     treeError.value = "";
     fileTree.value = items;
@@ -2192,26 +1755,19 @@ async function openProjectByPath(dirPath: string) {
     refreshProjectHistoryList();
     log("set-state");
 
-    chatMessages.value = normalizeChatMessages(loaded);
-    activeSessionId.value = getActiveVibeChatSessionId(normalized);
-    refreshSessionList(normalized);
-    log("set-chat");
+    switchingProject.value = true;
+    try {
+      const chatState = await loadProjectChatState(normalized);
+      setActiveSession(chatState.activeSessionId);
+      chatMessages.value = normalizeChatMessages(chatState.messages);
+      refreshSessionList(normalized);
+      log(`chat-active(${chatState.activeSessionId}, ${chatState.messages.length}msgs)`);
+    } finally {
+      switchingProject.value = false;
+    }
 
     loadingTree.value = false;
     void refreshGitStatus();
-
-    if (await hydrateProjectChatFromDisk(normalized)) {
-      switchingProject.value = true;
-      try {
-        loaded = loadVibeChatHistory(normalized);
-        chatMessages.value = normalizeChatMessages(loaded);
-        activeSessionId.value = getActiveVibeChatSessionId(normalized);
-        refreshSessionList(normalized);
-        log(`chat-hydrate-disk(${loaded.length}msgs)`);
-      } finally {
-        switchingProject.value = false;
-      }
-    }
     log(`chat-done(${Math.round(performance.now() - tChat0)}ms)`);
 
     void startFileWatcherForProject(normalized).catch(() => {});
@@ -3215,17 +2771,12 @@ onBeforeUnmount(() => {
   clearStreamDeltaBuffer();
   stopResize();
   if (scrollChatRaf) cancelAnimationFrame(scrollChatRaf);
-  if (saveChatTimer) clearTimeout(saveChatTimer);
-  if (syncStoreTimer) clearTimeout(syncStoreTimer);
+  cancelPendingChatPersistence();
   if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
   if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
   if (gitRefreshDebounceTimer) clearTimeout(gitRefreshDebounceTimer);
   stopAgentUiTick();
   clearRetryTimer();
-  if (syncStoreTimer) {
-    clearTimeout(syncStoreTimer);
-    syncStoreTimer = null;
-  }
   if (sessionCopyHintTimer) {
     clearTimeout(sessionCopyHintTimer);
     sessionCopyHintTimer = null;

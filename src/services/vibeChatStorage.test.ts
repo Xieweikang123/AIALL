@@ -13,10 +13,14 @@ import {
   cloneChatMessagesForDiskSync,
   getActiveSessionSnapshot,
   compactProjectSessionRecord,
+  beginVibeChatDraftSession,
+  abandonVibeChatDraftIfEmpty,
+  resolveActiveVibeChatSessionId,
   createVibeChatSession,
   deleteVibeChatSession,
   diskChatStoreAheadOfLocalIndex,
   sessionIdsWithDiskAheadMessageCounts,
+  getActiveVibeChatSessionId,
   getVibeChatProjectSnapshot,
   getSessionDiagSnapshot,
   listVibeChatSessions,
@@ -25,6 +29,7 @@ import {
   projectChatNeedsDiskRestore,
   replaceChatStoreFromDiskSnapshot,
   restoreChatStoreFromSnapshot,
+  syncLocalIndexFromRecord,
   sanitizePersistedChatMessages,
   saveVibeChatHistory,
   type PersistedChatMessage,
@@ -670,6 +675,51 @@ describe("v3 chat storage (index + memory)", () => {
     expect(projectChatNeedsDiskRestore(projectPath)).toBe(false);
   });
 
+  it("beginVibeChatDraftSession creates a draft not shown in list until messages exist", () => {
+    const projectPath = "D:/projects/draft-flow";
+    const { sessionId: existingId } = saveVibeChatHistory(projectPath, [
+      { id: "u1", role: "user", content: "existing" },
+      { id: "a1", role: "assistant", content: "ok" },
+    ]);
+    expect(listVibeChatSessions(projectPath).map((s) => s.id)).toEqual([existingId]);
+
+    const { id: draftId } = beginVibeChatDraftSession(projectPath);
+    expect(draftId).not.toBe(existingId);
+    expect(listVibeChatSessions(projectPath).map((s) => s.id)).toEqual([existingId]);
+    expect(getActiveVibeChatSessionId(projectPath)).toBe(draftId);
+
+    saveVibeChatHistory(
+      projectPath,
+      [{ id: "u2", role: "user", content: "new thread" }],
+      draftId,
+    );
+    const ids = listVibeChatSessions(projectPath).map((s) => s.id);
+    expect(ids).toHaveLength(2);
+    expect(ids).toContain(draftId);
+  });
+
+  it("abandonVibeChatDraftIfEmpty removes empty draft without touching active sessions", () => {
+    const projectPath = "D:/projects/abandon-draft";
+    const { id: draftId } = beginVibeChatDraftSession(projectPath);
+    abandonVibeChatDraftIfEmpty(projectPath, draftId);
+    expect(getActiveVibeChatSessionId(projectPath)).toBe("");
+    expect(listVibeChatSessions(projectPath)).toHaveLength(0);
+
+    const { sessionId } = saveVibeChatHistory(projectPath, [
+      { id: "u1", role: "user", content: "keep" },
+      { id: "a1", role: "assistant", content: "ok" },
+    ]);
+    abandonVibeChatDraftIfEmpty(projectPath, sessionId);
+    expect(listVibeChatSessions(projectPath).map((s) => s.id)).toEqual([sessionId]);
+  });
+
+  it("resolveActiveVibeChatSessionId creates draft for empty project", () => {
+    const projectPath = "D:/projects/resolve-empty";
+    const id = resolveActiveVibeChatSessionId(projectPath);
+    expect(id).toBeTruthy();
+    expect(getActiveVibeChatSessionId(projectPath)).toBe(id);
+  });
+
   it("does not treat disk-only orphan sessions as ahead of local index", () => {
     const projectPath = "D:/projects/disk-ahead";
     saveVibeChatHistory(projectPath, [
@@ -771,6 +821,16 @@ describe("v3 chat storage (index + memory)", () => {
     expect(loadVibeChatHistory(projectPath)[0]?.content).toBe("磁盘消息");
   });
 
+  it("syncLocalIndexFromRecord writes index from memory record", () => {
+    const projectPath = "D:/projects/sync-local-index";
+    const { sessionId } = saveVibeChatHistory(projectPath, [
+      { id: "u1", role: "user", content: "hello" },
+      { id: "a1", role: "assistant", content: "hi" },
+    ]);
+    syncLocalIndexFromRecord(projectPath);
+    expect(getSessionDiagSnapshot(projectPath).indexSessionIds).toContain(sessionId);
+  });
+
   it("mirrors disk index metadata into localStorage", () => {
     const projectPath = "D:/projects/mirror-index";
     mirrorLocalIndexFromDiskMeta(projectPath, {
@@ -787,6 +847,32 @@ describe("v3 chat storage (index + memory)", () => {
     });
     expect(getSessionDiagSnapshot(projectPath).indexSessionIds).toEqual(["s1"]);
     expect(getSessionDiagSnapshot(projectPath).activeSessionId).toBe("s1");
+  });
+
+  it("mirrorLocalIndexFromDiskMeta keeps local-only sessions not yet in disk payload", () => {
+    const projectPath = "D:/projects/mirror-keep-local";
+    const { sessionId: localOnlyId } = saveVibeChatHistory(projectPath, [
+      { id: "u1", role: "user", content: "仅本地" },
+      { id: "a1", role: "assistant", content: "ok" },
+    ]);
+
+    mirrorLocalIndexFromDiskMeta(projectPath, {
+      activeSessionId: "disk-s1",
+      sessions: [
+        {
+          id: "disk-s1",
+          title: "磁盘",
+          createdAt: "2026-03-01T00:00:00.000Z",
+          updatedAt: "2026-03-02T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+    });
+
+    const ids = getSessionDiagSnapshot(projectPath).indexSessionIds;
+    expect(ids).toContain("disk-s1");
+    expect(ids).toContain(localOnlyId);
+    expect(getSessionDiagSnapshot(projectPath).activeSessionId).toBe(localOnlyId);
   });
 
   it("does not resurrect locally deleted sessions when merging disk snapshot", () => {

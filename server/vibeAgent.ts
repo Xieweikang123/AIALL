@@ -44,6 +44,7 @@ import {
   buildPatchRequiredRetryNudge,
   buildImplementPasteBlockedNudge,
   buildUiDefectForcePatchNudge,
+  buildUserNegationNudge,
   EXECUTE_PLAN_EXPLORE_TURN_BUDGET,
   EXPLORE_INTERIM_DIAGNOSIS_TURN,
   INTERACTIVE_EXPLORE_TURN_BUDGET,
@@ -56,6 +57,7 @@ import {
   PLAN_MAX_TOTAL_EXPLORE_SOFT,
 } from "./agentExplorationBudget";
 import { buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildImplementFollowUpHint, buildSessionAuditHint, buildUiDefectBuildHint, isAgentStepClarificationPrompt, isConsultativeUserPrompt, isImplementFollowUpRun, isSessionAuditPrompt, isUiDefectReportPrompt } from "./agentUserIntent";
+import { detectUserNegation } from "../src/services/agentContinuation";
 import {
   buildBlockedGrepAfterLocateMessage,
   buildBlockedGrepMessage,
@@ -1279,6 +1281,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   /** Track unique files read in explore-only turns to detect breadth sprawl. */
   const exploreFilesRead = new Set<string>();
   let fileBreadthNudgeSent = false;
+  /** Track consecutive user negations to detect dissatisfaction patterns. */
+  let consecutiveUserNegations = 0;
+  let negationNudgeSent = false;
   const activeTools = isAsk || isPlanExplore || readOnlyBuildRun ? READ_ONLY_AGENT_TOOLS : VIBE_AGENT_TOOLS;
   const userContent = buildVisionUserContent(prompt, imageDataUrls);
   const messages: ChatCompletionMessage[] = [
@@ -1348,6 +1353,28 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         content: buildAgentTurnsLowNudge(turn, segmentMaxTurns, nudgeMode, isExecutePlan && mode === "plan"),
       });
       turnsLowNudgeSent = true;
+    }
+
+    // User negation detection: track consecutive dissatisfaction and inject direction-switch nudge.
+    if (!isAsk && !isPlanExplore && prompt && detectUserNegation(prompt)) {
+      consecutiveUserNegations += 1;
+    } else if (prompt) {
+      // Reset negation count when user sends a non-negation message (e.g., confirming a direction).
+      consecutiveUserNegations = 0;
+      negationNudgeSent = false;
+    }
+    if (
+      !negationNudgeSent &&
+      consecutiveUserNegations >= 2 &&
+      !isAsk &&
+      !isPlanExplore &&
+      !readOnlyBuildRun
+    ) {
+      messages.push({
+        role: "system",
+        content: buildUserNegationNudge(consecutiveUserNegations),
+      });
+      negationNudgeSent = true;
     }
 
     toolGuard.patchAnchorLocated = patchAnchorLocated;
@@ -1823,6 +1850,48 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
             ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
             model,
             detail: "须先提交代码修改，已要求重试",
+          },
+        });
+        continue;
+      }
+
+      // Ghost reply detection: model claims to have made changes but called no tools.
+      const claimsModification =
+        /(?:已完成修改|已更新|已修复|已添加|已删除|已改为|已改成|改动如下|优化完成|修改如下|刷新查看)/i.test(rawText) &&
+        !/以上是|仅供参考|建议|方案|思路/.test(rawText);
+      const noWriteToolsThisTurn =
+        writeStage !== null &&
+        !isAsk &&
+        !isPlanExplore &&
+        !readOnlyBuildRun &&
+        writeStage.writtenList.length === 0;
+      if (claimsModification && noWriteToolsThisTurn && turn > 1) {
+        messages.push({ role: "assistant", content: rawText });
+        messages.push({
+          role: "system",
+          content:
+            "【系统强制】你声称已完成修改，但本轮未调用任何 patch_file / write_file 工具，代码实际未被修改。" +
+            "请立即调用 patch_file 或 write_file 提交真实的代码修改；禁止只输出文字描述。",
+        });
+        onEvent({
+          type: "turn_response",
+          data: {
+            turn,
+            ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+            assistantText: userText,
+            toolCalls: [],
+            hasToolCalls: false,
+            isFinal: false,
+          },
+        });
+        onEvent({
+          type: "status",
+          data: {
+            phase: "ghost_reply_retry",
+            turn,
+            ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+            model,
+            detail: "检测到幻觉回复（声称修改但未执行工具），已要求重试",
           },
         });
         continue;

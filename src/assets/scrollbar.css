@@ -1,11 +1,11 @@
 /* ============================================
-   全局滚动条样式 - 极简深色主题
+   全局滚动条样式 - 主题色悬浮胶囊风格
    ============================================ */
 
 /* WebKit 浏览器 (Chrome, Edge, Safari) */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
@@ -13,16 +13,42 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 3px;
+  background: linear-gradient(
+    180deg,
+    rgba(99, 102, 241, 0.6) 0%,
+    rgba(139, 92, 246, 0.6) 50%,
+    rgba(168, 85, 247, 0.6) 100%
+  );
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 10px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: linear-gradient(
+    180deg,
+    rgba(99, 102, 241, 0.85) 0%,
+    rgba(139, 92, 246, 0.85) 50%,
+    rgba(168, 85, 247, 0.85) 100%
+  );
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 10px;
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.4);
 }
 
 ::-webkit-scrollbar-thumb:active {
-  background: rgba(255, 255, 255, 0.3);
+  background: linear-gradient(
+    180deg,
+    rgba(99, 102, 241, 1) 0%,
+    rgba(139, 92, 246, 1) 50%,
+    rgba(168, 85, 247, 1) 100%
+  );
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 10px;
+  box-shadow: 0 0 16px rgba(99, 102, 241, 0.6);
 }
 
 /* 隐藏两端的滚动按钮 */
@@ -30,10 +56,15 @@
   display: none;
 }
 
+/* 隐藏滚动条角落（交叉区域） */
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* Firefox */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+  scrollbar-color: rgba(99, 102, 241, 0.5) transparent;
 }
 
 /* 高对比度模式下确保可见 */

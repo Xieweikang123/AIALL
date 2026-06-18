@@ -50,6 +50,15 @@ const INTERACTION_REQUIREMENT_RE =
 
 const ASK_ONLY_RE = /^(什么是|是什么|怎么|如何|为什么|有没有|是否|能不能|可以吗)[\s\S]{0,120}$/i;
 
+/** Detect user dissatisfaction / negation after prior modifications. */
+const USER_NEGATION_RE =
+  /不好看|不满意|不对|不是这样|不是这个|重来|重新(改|做|来|设计|调整)|换一种|换(个|一个)(风格|方向|方式)|还是(不|没)|继续(优化|改|调整)|再来(一次|个)|不行|不喜欢|太(丑|丑了|难看)|效果不(好|行|对)|不是我想要|跟之前(一样|差不多)|没变化|没区别|不喜欢/i;
+
+/** Detect repeated negation — user said negation ≥2 times in recent turns. */
+export function detectUserNegation(text: string): boolean {
+  return USER_NEGATION_RE.test(text.trim());
+}
+
 const HISTORY_PLAN_KEEP_CHARS = 2_400;
 const PLAN_CODE_BLOCK_MAX_CHARS = 6_000;
 const PLAN_CODE_BLOCKS_MAX_TOTAL = 18_000;

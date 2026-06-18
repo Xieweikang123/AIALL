@@ -172,6 +172,22 @@ export function buildExploreInterimDiagnosisNudge(totalExploreTurns: number): st
 }
 
 /**
+ * Injected when user has expressed dissatisfaction ≥2 times consecutively.
+ * Forces the model to abandon current approach and propose a completely different direction.
+ */
+export function buildUserNegationNudge(negationCount: number): string {
+  return [
+    `【系统提示】用户已连续 ${negationCount} 次表达不满（"不好看"/"换一种"等）。`,
+    "当前设计方向不被认可，请立即停止在当前方向上微调。",
+    "下一轮必须：",
+    "1. 提出 2-3 个完全不同设计风格的方案（如：从圆形→胶囊形、从实心→线框、从纯色→渐变等形态级变化）",
+    "2. 用简短文字描述每个方案的视觉特点，让用户选择",
+    "3. 不要直接执行修改，先让用户确认方向",
+    "禁止继续调整当前方案的参数（颜色/大小/圆角等），必须切换设计方向。",
+  ].join("");
+}
+
+/**
  * Injected when the model reads too many different files in explore-only mode.
  * Guides it to narrow focus rather than spreading across unrelated areas.
  */

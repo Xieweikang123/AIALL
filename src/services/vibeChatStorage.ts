@@ -109,7 +109,7 @@ export type VibeChatSessionMeta = {
   createdAt: string;
   updatedAt: string;
   messageCount: number;
-  status?: "active" | "completed" | "failed" | "interrupted";
+  status?: "draft" | "active" | "completed" | "failed" | "interrupted";
 };
 
 export type VibeChatProjectSnapshot = {
@@ -125,7 +125,7 @@ type VibeChatSession = {
   createdAt: string;
   updatedAt: string;
   messages: PersistedChatMessage[];
-  status?: "active" | "completed" | "failed" | "interrupted";
+  status?: "draft" | "active" | "completed" | "failed" | "interrupted";
 };
 
 type ProjectChatRecord = {
@@ -618,7 +618,10 @@ function sanitizeMessages(
     });
 }
 
-function createSession(messages: PersistedChatMessage[] = []): VibeChatSession {
+function createSession(
+  messages: PersistedChatMessage[] = [],
+  options?: { draft?: boolean },
+): VibeChatSession {
   const now = new Date().toISOString();
   const sanitized = sanitizeMessages(messages);
   return {
@@ -627,8 +630,22 @@ function createSession(messages: PersistedChatMessage[] = []): VibeChatSession {
     createdAt: now,
     updatedAt: now,
     messages: sanitized,
-    status: "active",
+    status: options?.draft ? "draft" : "active",
   };
+}
+
+function isEmptyDraftSession(session: VibeChatSession): boolean {
+  return session.status === "draft" && !session.messages.length;
+}
+
+function pruneEmptyDraftSessions(record: ProjectChatRecord): void {
+  record.sessions = record.sessions.filter((s) => !isEmptyDraftSession(s));
+  if (
+    record.activeSessionId
+    && !record.sessions.some((s) => s.id === record.activeSessionId)
+  ) {
+    record.activeSessionId = record.sessions[0]?.id || "";
+  }
 }
 
 /** Restore a session using an explicit id (e.g. from disk/index) instead of generating a new one. */
@@ -803,6 +820,9 @@ function touchSession(session: VibeChatSession, messages: PersistedChatMessage[]
   session.messages = sanitizeMessages(messages);
   session.updatedAt = new Date().toISOString();
   session.title = sessionTitleFromMessages(session.messages);
+  if (session.status === "draft" && session.messages.length) {
+    session.status = "active";
+  }
 }
 
 function updateSessionStatus(
@@ -817,12 +837,17 @@ export function getVibeChatProjectSnapshot(projectPath: string): VibeChatProject
   const key = normalizeProjectKey(projectPath);
   const record = key ? getProjectRecord(key) : undefined;
   const indexed = key ? readIndex().byProject[key]?.sessions : undefined;
+  const listableSessions = record?.sessions.filter((s) => !isEmptyDraftSession(s)) || [];
+  const activeSessionId =
+    record?.activeSessionId && listableSessions.some((s) => s.id === record.activeSessionId)
+      ? record.activeSessionId
+      : listableSessions[0]?.id || record?.activeSessionId || "";
   return {
     version: STORE_VERSION,
     projectPath,
-    activeSessionId: record?.activeSessionId || "",
+    activeSessionId,
     sessions:
-      record?.sessions.map((s) => {
+      listableSessions.map((s) => {
         const indexMeta = indexed?.find((m) => m.id === s.id);
         const messageCount = s.messages.length || indexMeta?.messageCount || 0;
         return {
@@ -915,6 +940,7 @@ export function getSessionDiagSnapshot(projectPath: string): {
 }
 
 function sessionHasListableContent(key: string, session: VibeChatSession): boolean {
+  if (isEmptyDraftSession(session)) return false;
   if (session.messages.length > 0) return true;
   return Boolean(
     readIndex().byProject[key]?.sessions.some((m) => m.id === session.id && m.messageCount > 0),
@@ -1159,20 +1185,70 @@ type DiskIndexMirrorInput = {
   }>;
 };
 
-/** Align localStorage index with disk chat-store.json metadata (messages stay in memory). */
+/** Project index in localStorage is authoritative on write; disk is read-only on hydrate. */
+export function syncLocalIndexFromRecord(projectPath: string): void {
+  const key = normalizeProjectKey(projectPath);
+  if (!key) return;
+  const record = getProjectRecord(key);
+  if (!record) return;
+  const index = readIndex();
+  index.byProject[key] = projectIndexFromRecord(record, index.byProject[key]);
+  writeIndex(index);
+}
+
+/** Align localStorage index with disk chat-store.json metadata (hydrate read path only). */
 export function mirrorLocalIndexFromDiskMeta(projectPath: string, disk: DiskIndexMirrorInput): void {
   const key = normalizeProjectKey(projectPath);
   if (!key) return;
   const index = readIndex();
+  const localMeta = index.byProject[key];
+  const localRecord = getProjectRecord(key);
+  const diskIds = new Set(disk.sessions.map((s) => s.id));
+  const merged = disk.sessions.map((s) => ({
+    id: s.id,
+    title: s.title || "新会话",
+    createdAt: s.createdAt || "",
+    updatedAt: s.updatedAt || "",
+    messageCount: s.messageCount ?? 0,
+  }));
+
+  for (const local of localMeta?.sessions || []) {
+    if (diskIds.has(local.id)) continue;
+    const mem = localRecord?.sessions.find((s) => s.id === local.id);
+    const hasContent = (mem?.messages.length ?? 0) > 0 || (local.messageCount ?? 0) > 0;
+    if (!hasContent) continue;
+    merged.push({
+      id: local.id,
+      title: local.title || mem?.title || "新会话",
+      createdAt: local.createdAt || mem?.createdAt || "",
+      updatedAt: local.updatedAt || mem?.updatedAt || "",
+      messageCount: mem?.messages.length || local.messageCount || 0,
+    });
+    diskIds.add(local.id);
+  }
+
+  for (const mem of localRecord?.sessions || []) {
+    if (diskIds.has(mem.id)) continue;
+    if (!mem.messages.length) continue;
+    merged.push({
+      id: mem.id,
+      title: mem.title || "新会话",
+      createdAt: mem.createdAt || "",
+      updatedAt: mem.updatedAt || "",
+      messageCount: mem.messages.length,
+    });
+  }
+
+  const localActive = localMeta?.activeSessionId || localRecord?.activeSessionId || "";
+  const diskActive = disk.activeSessionId || "";
+  const activeSessionId =
+    localActive && !disk.sessions.some((s) => s.id === localActive) && merged.some((s) => s.id === localActive)
+      ? localActive
+      : diskActive || localActive;
+
   index.byProject[key] = {
-    activeSessionId: disk.activeSessionId || "",
-    sessions: disk.sessions.map((s) => ({
-      id: s.id,
-      title: s.title || "新会话",
-      createdAt: s.createdAt || "",
-      updatedAt: s.updatedAt || "",
-      messageCount: s.messageCount ?? 0,
-    })),
+    activeSessionId,
+    sessions: merged,
   };
   writeIndex(index);
 }
@@ -1306,6 +1382,81 @@ export function switchVibeChatSession(projectPath: string, sessionId: string): P
   return sanitizeMessages(target.messages);
 }
 
+/** Drop an empty draft session (e.g. when switching away or starting a new draft). */
+export function abandonVibeChatDraftIfEmpty(projectPath: string, sessionId: string): void {
+  const key = normalizeProjectKey(projectPath);
+  if (!key || !sessionId) return;
+  const record = getProjectRecord(key);
+  if (!record) return;
+  const session = record.sessions.find((s) => s.id === sessionId);
+  if (!session || !isEmptyDraftSession(session)) return;
+
+  record.sessions = record.sessions.filter((s) => s.id !== sessionId);
+  if (record.activeSessionId === sessionId) {
+    record.activeSessionId = record.sessions[0]?.id || "";
+  }
+  if (!record.sessions.length) {
+    memoryByProject.delete(key);
+    const index = readIndex();
+    delete index.byProject[key];
+    writeIndex(index);
+    return;
+  }
+  persistRecord(key, record);
+}
+
+/** Create a draft session and make it active. Empty drafts are not listed until first message. */
+export function beginVibeChatDraftSession(projectPath: string): { id: string; messages: PersistedChatMessage[] } {
+  const key = normalizeProjectKey(projectPath);
+  if (!key) return { id: "", messages: [] };
+  let record = getProjectRecord(key);
+  if (!record) {
+    record = { activeSessionId: "", sessions: [] };
+  }
+  pruneEmptyDraftSessions(record);
+  const session = createSession([], { draft: true });
+  record.sessions.unshift(session);
+  if (record.sessions.length > MAX_SESSIONS_PER_PROJECT) {
+    const removed = record.sessions.pop();
+    if (removed?.id === record.activeSessionId && record.sessions.length) {
+      record.activeSessionId = record.sessions[0].id;
+    }
+  }
+  record.activeSessionId = session.id;
+  persistRecord(key, record);
+  sessionDiag("storage:begin-draft", {
+    projectPath,
+    sessionId: session.id,
+    local: getSessionDiagSnapshot(projectPath),
+  });
+  return { id: session.id, messages: [] };
+}
+
+/**
+ * Resolve the active session id for UI binding.
+ * Creates a draft when the project has no sessions or no valid active pointer.
+ */
+export function resolveActiveVibeChatSessionId(projectPath: string): string {
+  const key = normalizeProjectKey(projectPath);
+  if (!key) return "";
+  const record = getProjectRecord(key);
+  if (!record?.sessions.length) {
+    return beginVibeChatDraftSession(projectPath).id;
+  }
+  if (record.activeSessionId) {
+    const active = record.sessions.find((s) => s.id === record.activeSessionId);
+    if (active) return record.activeSessionId;
+  }
+  const firstListable = record.sessions.find((s) => sessionHasListableContent(key, s));
+  if (firstListable) {
+    record.activeSessionId = firstListable.id;
+    persistRecord(key, record);
+    return firstListable.id;
+  }
+  return beginVibeChatDraftSession(projectPath).id;
+}
+
+/** @deprecated Prefer beginVibeChatDraftSession for new-session UI; kept for tests. */
 export function createVibeChatSession(projectPath: string): { id: string; messages: PersistedChatMessage[] } {
   const key = normalizeProjectKey(projectPath);
   if (!key) return { id: "", messages: [] };
@@ -1313,6 +1464,7 @@ export function createVibeChatSession(projectPath: string): { id: string; messag
   if (!record) {
     record = { activeSessionId: "", sessions: [] };
   }
+  pruneEmptyDraftSessions(record);
   const session = createSession();
   record.sessions.unshift(session);
   if (record.sessions.length > MAX_SESSIONS_PER_PROJECT) {

@@ -36,7 +36,8 @@
       title="打开新项目"
       @click="$emit('open-new-project')"
     >
-      +
+      <span class="project-tab-add-icon">+</span>
+      <span class="project-tab-add-label">新建</span>
     </button>
   </div>
 </template>
@@ -204,25 +205,27 @@ function onTabClick(path: string) {
   width: 22px;
   height: 22px;
   padding: 0;
-  border: 1px dashed var(--border, rgba(255,255,255,0.12));
+  border: 1px dashed rgba(255, 255, 255, 0.25);
   border-radius: 4px;
-  background: transparent;
-  color: var(--muted, rgba(255,255,255,0.55));
+  background: none;
+  color: rgba(255, 255, 255, 0.55);
   font-size: 14px;
+  line-height: 1;
   cursor: pointer;
   flex-shrink: 0;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
-.project-tab-add:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--text, rgba(255,255,255,0.92));
-  border-color: var(--primary, #1f6feb);
+.project-tab-add:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.8);
+  border-color: rgba(255, 255, 255, 0.4);
 }
 
 .project-tab-add:disabled {
-  opacity: 0.5;
+  opacity: 0.3;
   cursor: not-allowed;
+  transform: none;
 }
 
 @keyframes spin {
