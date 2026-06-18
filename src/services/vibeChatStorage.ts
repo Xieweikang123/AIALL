@@ -150,6 +150,7 @@ const CHAT_STORAGE_KEY = "vibe-coding-chat";
 export const STORE_VERSION = 3 as const;
 const MAX_MESSAGES_PER_SESSION = 120;
 const MAX_SESSIONS_PER_PROJECT = 40;
+const SESSION_DEDUP_TIME_WINDOW_MS = 60_000;
 const MAX_STATUS_LOG_LINES = 32;
 const MAX_TURN_TRACES = 24;
 const MAX_NARRATIVE_CHARS = 800;
@@ -159,6 +160,49 @@ const MAX_TOOL_ARGS_DISK_CHARS = 400;
 
 /** Full session payloads live in memory (and on disk); not in localStorage. */
 const memoryByProject = new Map<string, ProjectChatRecord>();
+
+/** Sessions deleted locally; block disk merge from resurrecting them until TTL expires. */
+const recentlyDeletedByProject = new Map<string, Map<string, number>>();
+const DELETED_SESSION_TTL_MS = 120_000;
+
+function pruneRecentlyDeletedSessions(projectKey: string) {
+  const map = recentlyDeletedByProject.get(projectKey);
+  if (!map) return;
+  const now = Date.now();
+  for (const [id, ts] of map) {
+    if (now - ts > DELETED_SESSION_TTL_MS) map.delete(id);
+  }
+  if (map.size === 0) recentlyDeletedByProject.delete(projectKey);
+}
+
+export function markSessionLocallyDeleted(projectPath: string, sessionId: string) {
+  const key = normalizeProjectKey(projectPath);
+  if (!key || !sessionId) return;
+  let map = recentlyDeletedByProject.get(key);
+  if (!map) {
+    map = new Map();
+    recentlyDeletedByProject.set(key, map);
+  }
+  map.set(sessionId, Date.now());
+}
+
+export function isSessionRecentlyDeletedLocally(projectPath: string, sessionId: string): boolean {
+  return isRecentlyDeletedSession(projectPath, sessionId);
+}
+
+function isRecentlyDeletedSession(projectPath: string, sessionId: string): boolean {
+  const key = normalizeProjectKey(projectPath);
+  if (!key || !sessionId) return false;
+  pruneRecentlyDeletedSessions(key);
+  return recentlyDeletedByProject.get(key)?.has(sessionId) ?? false;
+}
+
+function filterOutRecentlyDeletedDiskSessions(
+  projectPath: string,
+  sessions: VibeChatSession[],
+): VibeChatSession[] {
+  return sessions.filter((s) => !isRecentlyDeletedSession(projectPath, s.id));
+}
 
 type ChatStoreV1 = {
   version: 1;
@@ -302,6 +346,81 @@ function sessionTitleFromMessages(messages: PersistedChatMessage[]): string {
   return "新会话";
 }
 
+function normalizeSessionTitle(title: string): string {
+  return title.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function sessionHasLoadedMessages(session: Pick<VibeChatSession, "messages">): boolean {
+  return session.messages.some(
+    (m) =>
+      (m.role === "user" && m.content.trim()) ||
+      (m.role === "assistant" && m.content.trim()) ||
+      (m.tools?.length ?? 0) > 0,
+  );
+}
+
+function sessionSignature(
+  session: Pick<VibeChatSession, "id" | "title" | "createdAt" | "messages">,
+  indexedMessageCount?: number,
+): string {
+  // Index-only sessions (messages not loaded into memory) must not dedupe by metadata alone.
+  if (!sessionHasLoadedMessages(session)) {
+    return `id|${session.id}`;
+  }
+  const firstUser = session.messages.find((m) => m.role === "user")?.content?.trim() || "";
+  const firstAssistant = session.messages.find((m) => m.role === "assistant")?.content?.trim() || "";
+  const createdMs = new Date(session.createdAt).getTime();
+  const createdBucket = Number.isFinite(createdMs)
+    ? Math.floor(createdMs / SESSION_DEDUP_TIME_WINDOW_MS)
+    : session.createdAt;
+  const messageCount = Math.max(session.messages.length, indexedMessageCount ?? 0);
+  return [
+    normalizeSessionTitle(session.title),
+    messageCount,
+    createdBucket,
+    firstUser.slice(0, 120),
+    firstAssistant.slice(0, 120),
+  ].join("|");
+}
+
+function dedupeSessionsBySignature(
+  sessions: VibeChatSession[],
+  indexMessageCountById?: Map<string, number>,
+): VibeChatSession[] {
+  const seen = new Map<string, VibeChatSession>();
+  for (const session of sessions) {
+    const signature = sessionSignature(session, indexMessageCountById?.get(session.id));
+    const existing = seen.get(signature);
+    if (!existing || session.updatedAt.localeCompare(existing.updatedAt) > 0) {
+      seen.set(signature, session);
+    }
+  }
+  return [...seen.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+function normalizeProjectRecordSessions(record: ProjectChatRecord): ProjectChatRecord {
+  const sessions = dedupeSessionsBySignature(record.sessions);
+  const activeSessionId = sessions.some((s) => s.id === record.activeSessionId)
+    ? record.activeSessionId
+    : sessions[0]?.id || "";
+  return { activeSessionId, sessions };
+}
+
+/** Dedupe in-memory/index sessions after load; returns true when record changed. */
+export function compactProjectSessionRecord(projectPath: string): boolean {
+  const key = normalizeProjectKey(projectPath);
+  if (!key) return false;
+  const record = getProjectRecord(key);
+  if (!record?.sessions?.length) return false;
+  const normalized = normalizeProjectRecordSessions(record);
+  const sameOrder =
+    normalized.sessions.length === record.sessions.length
+    && normalized.sessions.every((s, i) => s.id === record.sessions[i]?.id);
+  if (sameOrder && normalized.activeSessionId === record.activeSessionId) return false;
+  persistRecord(key, normalized);
+  return true;
+}
+
 function truncateText(text: string, max: number): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max)}…`;
@@ -359,6 +478,7 @@ function compactRoundGroupsForStorage(
 }
 
 import { MAX_AGENT_IMAGE_BYTES } from "./imageCompress";
+import { sessionDiag } from "../utils/sessionDiagLog";
 
 const MAX_PERSISTED_IMAGES = 4;
 /** Align with agent compress cap so memory previews match what session-sync can externalize. */
@@ -511,6 +631,26 @@ function createSession(messages: PersistedChatMessage[] = []): VibeChatSession {
   };
 }
 
+/** Restore a session using an explicit id (e.g. from disk/index) instead of generating a new one. */
+function adoptSessionWithId(
+  sessionId: string,
+  messages: PersistedChatMessage[],
+  projectPath: string,
+): VibeChatSession {
+  const sanitized = sanitizeMessages(messages);
+  const key = normalizeProjectKey(projectPath);
+  const indexed = key ? readIndex().byProject[key]?.sessions.find((s) => s.id === sessionId) : undefined;
+  const now = new Date().toISOString();
+  return {
+    id: sessionId,
+    title: sessionTitleFromMessages(sanitized),
+    createdAt: indexed?.createdAt || now,
+    updatedAt: now,
+    messages: sanitized,
+    status: "active",
+  };
+}
+
 function cloneRecord(record: ProjectChatRecord): ProjectChatRecord {
   return {
     activeSessionId: record.activeSessionId,
@@ -521,16 +661,27 @@ function cloneRecord(record: ProjectChatRecord): ProjectChatRecord {
   };
 }
 
-function projectIndexFromRecord(record: ProjectChatRecord): ProjectIndexRecord {
+function projectIndexFromRecord(
+  record: ProjectChatRecord,
+  previousIndex?: ProjectIndexRecord,
+): ProjectIndexRecord {
+  const previousById = previousIndex
+    ? new Map(previousIndex.sessions.map((s) => [s.id, s]))
+    : undefined;
   return {
     activeSessionId: record.activeSessionId,
-    sessions: record.sessions.map((session) => ({
-      id: session.id,
-      title: session.title,
-      createdAt: session.createdAt,
-      updatedAt: session.updatedAt,
-      messageCount: session.messages.length,
-    })),
+    sessions: record.sessions.map((session) => {
+      const previous = previousById?.get(session.id);
+      const memoryCount = session.messages.length;
+      const messageCount = memoryCount > 0 ? memoryCount : (previous?.messageCount ?? 0);
+      return {
+        id: session.id,
+        title: session.title,
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt,
+        messageCount,
+      };
+    }),
   };
 }
 
@@ -597,9 +748,11 @@ function writeIndex(index: ChatStoreIndex): boolean {
 }
 
 function persistRecord(key: string, record: ProjectChatRecord): boolean {
-  memoryByProject.set(key, cloneRecord(record));
+  const normalized = normalizeProjectRecordSessions(record);
+  memoryByProject.set(key, cloneRecord(normalized));
   const index = readIndex();
-  index.byProject[key] = projectIndexFromRecord(record);
+  const previous = index.byProject[key];
+  index.byProject[key] = projectIndexFromRecord(normalized, previous);
   return writeIndex(index);
 }
 
@@ -663,20 +816,25 @@ function updateSessionStatus(
 export function getVibeChatProjectSnapshot(projectPath: string): VibeChatProjectSnapshot {
   const key = normalizeProjectKey(projectPath);
   const record = key ? getProjectRecord(key) : undefined;
+  const indexed = key ? readIndex().byProject[key]?.sessions : undefined;
   return {
     version: STORE_VERSION,
     projectPath,
     activeSessionId: record?.activeSessionId || "",
     sessions:
-      record?.sessions.map((s) => ({
-        id: s.id,
-        title: s.title,
-        createdAt: s.createdAt,
-        updatedAt: s.updatedAt,
-        messageCount: s.messages.length,
-        messages: sanitizeMessages(s.messages, { forDisk: true }),
-        status: s.status,
-      })) || [],
+      record?.sessions.map((s) => {
+        const indexMeta = indexed?.find((m) => m.id === s.id);
+        const messageCount = s.messages.length || indexMeta?.messageCount || 0;
+        return {
+          id: s.id,
+          title: s.title,
+          createdAt: s.createdAt,
+          updatedAt: s.updatedAt,
+          messageCount,
+          messages: sanitizeMessages(s.messages, { forDisk: true }),
+          status: s.status,
+        };
+      }) || [],
   };
 }
 
@@ -735,13 +893,42 @@ export function buildActiveSessionDiskSyncPayload(
   };
 }
 
+/** 诊断用：memory / localStorage 索引 / 列表视图 的 sessionId 快照。 */
+export function getSessionDiagSnapshot(projectPath: string): {
+  activeSessionId: string;
+  memorySessionIds: string[];
+  indexSessionIds: string[];
+  listSessionIds: string[];
+} {
+  const key = normalizeProjectKey(projectPath);
+  if (!key) {
+    return { activeSessionId: "", memorySessionIds: [], indexSessionIds: [], listSessionIds: [] };
+  }
+  const cached = memoryByProject.get(key);
+  const index = readIndex().byProject[key];
+  return {
+    activeSessionId: cached?.activeSessionId || index?.activeSessionId || "",
+    memorySessionIds: cached?.sessions.map((s) => s.id) || [],
+    indexSessionIds: index?.sessions.map((s) => s.id) || [],
+    listSessionIds: listVibeChatSessions(projectPath).map((s) => s.id),
+  };
+}
+
+function sessionHasListableContent(key: string, session: VibeChatSession): boolean {
+  if (session.messages.length > 0) return true;
+  return Boolean(
+    readIndex().byProject[key]?.sessions.some((m) => m.id === session.id && m.messageCount > 0),
+  );
+}
+
+/** Session list is a direct projection of persisted record; dedupe runs only on write (persistRecord). */
 export function listVibeChatSessions(projectPath: string): VibeChatSessionMeta[] {
   const key = normalizeProjectKey(projectPath);
   if (!key) return [];
   const record = getProjectRecord(key);
   if (!record?.sessions?.length) return [];
-  return [...record.sessions]
-    .filter((s) => s.messages.length > 0 || readIndex().byProject[key]?.sessions.some((m) => m.id === s.id && m.messageCount > 0))
+  return record.sessions
+    .filter((s) => sessionHasListableContent(key, s))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .map((s) => {
       const indexed = readIndex().byProject[key]?.sessions.find((m) => m.id === s.id);
@@ -787,19 +974,40 @@ export function diskChatStoreAheadOfLocalIndex(
 ): boolean {
   const key = normalizeProjectKey(projectPath);
   if (!key || !diskSessions.length) return false;
+  const diskFiltered = diskSessions.filter((d) => !isRecentlyDeletedSession(projectPath, d.id));
   const indexed = readIndex().byProject[key];
   const localSessions = indexed?.sessions || [];
-  if (diskSessions.length > localSessions.length) return true;
+  if (!localSessions.length) return diskFiltered.length > 0;
 
   const localMap = new Map(localSessions.map((s) => [s.id, s]));
-  for (const disk of diskSessions) {
+  for (const disk of diskFiltered) {
     const local = localMap.get(disk.id);
-    if (!local) return true;
+    if (!local) continue;
     const diskCount = disk.messageCount ?? 0;
     const localCount = local.messageCount ?? 0;
     if (diskCount > localCount) return true;
   }
   return false;
+}
+
+/** Session ids present in local index whose disk copy has more messages than the index records. */
+export function sessionIdsWithDiskAheadMessageCounts(
+  projectPath: string,
+  diskSessions: Array<Pick<VibeChatSessionMeta, "id" | "messageCount">>,
+): string[] {
+  const key = normalizeProjectKey(projectPath);
+  if (!key) return [];
+  const indexed = readIndex().byProject[key]?.sessions || [];
+  if (!indexed.length) return [];
+  const localMap = new Map(indexed.map((s) => [s.id, s]));
+  const ids: string[] = [];
+  for (const disk of diskSessions) {
+    if (isRecentlyDeletedSession(projectPath, disk.id)) continue;
+    const local = localMap.get(disk.id);
+    if (!local) continue;
+    if ((disk.messageCount ?? 0) > (local.messageCount ?? 0)) ids.push(disk.id);
+  }
+  return ids;
 }
 
 /** True when localStorage index says a session has messages but memory is empty or missing image refs. */
@@ -867,7 +1075,20 @@ export function mergeChatStoreFromDiskSnapshot(
   if (!key || !snapshot.sessions?.length) return false;
   if (expectedProjectPath && normalizeProjectKey(expectedProjectPath) !== key) return false;
 
-  const diskSessions = snapshotSessionsToRecord(snapshot);
+  // #region session-diag
+  sessionDiag("storage:merge-from-disk:before", {
+    projectPath: snapshot.projectPath,
+    diskSessionIds: snapshot.sessions.map((s) => s.id),
+    diskActiveSessionId: snapshot.activeSessionId,
+    localBefore: getSessionDiagSnapshot(expectedProjectPath || snapshot.projectPath),
+  });
+  // #endregion
+
+  const diskSessions = filterOutRecentlyDeletedDiskSessions(
+    snapshot.projectPath,
+    snapshotSessionsToRecord(snapshot),
+  );
+  if (!diskSessions.length) return false;
   const existing = getProjectRecord(key);
   if (!existing?.sessions?.length) {
     const record: ProjectChatRecord = {
@@ -887,18 +1108,124 @@ export function mergeChatStoreFromDiskSnapshot(
   }
   for (const disk of diskSessions) {
     const local = mergedMap.get(disk.id);
-    mergedMap.set(disk.id, local ? pickMergedSession(local, disk) : disk);
+    if (local) {
+      mergedMap.set(disk.id, pickMergedSession(local, disk));
+      continue;
+    }
+    const diskSig = sessionSignature(disk);
+    let mergedIntoExisting = false;
+    for (const [existingId, existingSession] of mergedMap) {
+      if (sessionSignature(existingSession) === diskSig) {
+        mergedMap.set(existingId, pickMergedSession(existingSession, disk));
+        mergedIntoExisting = true;
+        break;
+      }
+    }
+    if (!mergedIntoExisting) {
+      mergedMap.set(disk.id, disk);
+    }
   }
 
-  const sessions = [...mergedMap.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const sessions = dedupeSessionsBySignature([...mergedMap.values()]);
+  const sessionIdSet = new Set(sessions.map((s) => s.id));
   const activeSessionId =
-    existing.activeSessionId && mergedMap.has(existing.activeSessionId)
+    existing.activeSessionId && sessionIdSet.has(existing.activeSessionId)
       ? existing.activeSessionId
-      : snapshot.activeSessionId && mergedMap.has(snapshot.activeSessionId)
+      : snapshot.activeSessionId && sessionIdSet.has(snapshot.activeSessionId)
         ? snapshot.activeSessionId
         : sessions[0]?.id || "";
 
   persistRecord(key, { activeSessionId, sessions });
+  // #region session-diag
+  sessionDiag("storage:merge-from-disk:after", {
+    projectPath: snapshot.projectPath,
+    mergedSessionIds: sessions.map((s) => s.id),
+    activeSessionId,
+    localAfter: getSessionDiagSnapshot(expectedProjectPath || snapshot.projectPath),
+  });
+  // #endregion
+  return true;
+}
+
+type DiskIndexMirrorInput = {
+  activeSessionId: string;
+  sessions: Array<{
+    id: string;
+    title: string;
+    createdAt: string;
+    updatedAt: string;
+    messageCount: number;
+    status?: string;
+  }>;
+};
+
+/** Align localStorage index with disk chat-store.json metadata (messages stay in memory). */
+export function mirrorLocalIndexFromDiskMeta(projectPath: string, disk: DiskIndexMirrorInput): void {
+  const key = normalizeProjectKey(projectPath);
+  if (!key) return;
+  const index = readIndex();
+  index.byProject[key] = {
+    activeSessionId: disk.activeSessionId || "",
+    sessions: disk.sessions.map((s) => ({
+      id: s.id,
+      title: s.title || "新会话",
+      createdAt: s.createdAt || "",
+      updatedAt: s.updatedAt || "",
+      messageCount: s.messageCount ?? 0,
+    })),
+  };
+  writeIndex(index);
+}
+
+export function mirrorLocalIndexFromDiskSnapshot(projectPath: string, snapshot: VibeChatProjectSnapshot): void {
+  mirrorLocalIndexFromDiskMeta(projectPath, {
+    activeSessionId: snapshot.activeSessionId || "",
+    sessions: snapshot.sessions.map((s) => ({
+      id: s.id,
+      title: s.title,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+      messageCount: s.messageCount ?? s.messages?.length ?? 0,
+      status: s.status,
+    })),
+  });
+}
+
+/** Cold start: replace local record from disk instead of merging with stale local state. */
+export function replaceChatStoreFromDiskSnapshot(
+  snapshot: VibeChatProjectSnapshot,
+  expectedProjectPath?: string,
+): boolean {
+  const key = normalizeProjectKey(snapshot.projectPath);
+  if (!key || !snapshot.sessions?.length) return false;
+  if (expectedProjectPath && normalizeProjectKey(expectedProjectPath) !== key) return false;
+
+  sessionDiag("storage:replace-from-disk:before", {
+    projectPath: snapshot.projectPath,
+    diskSessionIds: snapshot.sessions.map((s) => s.id),
+    localBefore: getSessionDiagSnapshot(expectedProjectPath || snapshot.projectPath),
+  });
+
+  const diskSessions = filterOutRecentlyDeletedDiskSessions(
+    snapshot.projectPath,
+    snapshotSessionsToRecord(snapshot),
+  );
+  if (!diskSessions.length) return false;
+
+  const activeSessionId =
+    snapshot.activeSessionId && diskSessions.some((s) => s.id === snapshot.activeSessionId)
+      ? snapshot.activeSessionId
+      : diskSessions[0].id;
+
+  persistRecord(key, { activeSessionId, sessions: diskSessions });
+  mirrorLocalIndexFromDiskSnapshot(expectedProjectPath || snapshot.projectPath, snapshot);
+
+  sessionDiag("storage:replace-from-disk:after", {
+    projectPath: snapshot.projectPath,
+    sessionIds: diskSessions.map((s) => s.id),
+    activeSessionId,
+    localAfter: getSessionDiagSnapshot(expectedProjectPath || snapshot.projectPath),
+  });
   return true;
 }
 
@@ -913,23 +1240,47 @@ export function saveVibeChatHistory(
   projectPath: string,
   messages: PersistedChatMessage[],
   sessionId?: string,
+  options?: { setActive?: boolean },
 ): { ok: boolean; sessionId: string } {
   const key = normalizeProjectKey(projectPath);
   if (!key) return { ok: false, sessionId: "" };
   const sanitized = sanitizeMessages(messages);
   if (!sanitized.length) return { ok: true, sessionId: sessionId || "" };
+  const setActive = options?.setActive !== false;
 
   let record = getProjectRecord(key);
   if (!record) {
-    const session = createSession(sanitized);
+    const session = sessionId ? adoptSessionWithId(sessionId, sanitized, projectPath) : createSession(sanitized);
     record = { activeSessionId: session.id, sessions: [session] };
     return { ok: persistRecord(key, record), sessionId: session.id };
   }
 
   let session = sessionId ? record.sessions.find((s) => s.id === sessionId) : undefined;
   if (!session) {
-    session = createSession(sanitized);
-    record.sessions.unshift(session);
+    if (sessionId) {
+      session = adoptSessionWithId(sessionId, sanitized, projectPath);
+      record.sessions.unshift(session);
+      // #region session-diag
+      sessionDiag("storage:adopt-session-id", {
+        projectPath,
+        sessionId,
+        messageCount: sanitized.length,
+        localBefore: getSessionDiagSnapshot(projectPath),
+      });
+      // #endregion
+    } else {
+      session = createSession(sanitized);
+      record.sessions.unshift(session);
+      // #region session-diag
+      sessionDiag("storage:save-new-session", {
+        projectPath,
+        requestedSessionId: "",
+        createdSessionId: session.id,
+        messageCount: sanitized.length,
+        localBefore: getSessionDiagSnapshot(projectPath),
+      });
+      // #endregion
+    }
   } else {
     touchSession(session, sanitized);
   }
@@ -937,7 +1288,9 @@ export function saveVibeChatHistory(
   if (record.sessions.length > MAX_SESSIONS_PER_PROJECT) {
     record.sessions = record.sessions.slice(0, MAX_SESSIONS_PER_PROJECT);
   }
-  record.activeSessionId = session.id;
+  if (setActive) {
+    record.activeSessionId = session.id;
+  }
   return { ok: persistRecord(key, record), sessionId: session.id };
 }
 
@@ -979,11 +1332,28 @@ export function deleteVibeChatSession(projectPath: string, sessionId: string): P
   const record = getProjectRecord(key);
   if (!record?.sessions?.length) return [];
 
+  // #region session-diag
+  sessionDiag("storage:delete:before", {
+    projectPath,
+    sessionId,
+    local: getSessionDiagSnapshot(projectPath),
+  });
+  // #endregion
+
+  markSessionLocallyDeleted(projectPath, sessionId);
+
   if (record.sessions.length === 1) {
     memoryByProject.delete(key);
     const index = readIndex();
     delete index.byProject[key];
     writeIndex(index);
+    // #region session-diag
+    sessionDiag("storage:delete:after-last", {
+      projectPath,
+      sessionId,
+      local: getSessionDiagSnapshot(projectPath),
+    });
+    // #endregion
     return [];
   }
 
@@ -992,7 +1362,15 @@ export function deleteVibeChatSession(projectPath: string, sessionId: string): P
     record.activeSessionId = record.sessions[0].id;
   }
   persistRecord(key, record);
-  return sanitizeMessages(getActiveSession(record).messages);
+  const result = sanitizeMessages(getActiveSession(record).messages);
+  // #region session-diag
+  sessionDiag("storage:delete:after", {
+    projectPath,
+    sessionId,
+    local: getSessionDiagSnapshot(projectPath),
+  });
+  // #endregion
+  return result;
 }
 
 export function updateVibeChatSessionStatus(

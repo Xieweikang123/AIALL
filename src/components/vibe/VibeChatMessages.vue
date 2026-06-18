@@ -257,6 +257,7 @@
     <Transition name="image-viewer-fade">
       <div
         v-if="viewerOpen"
+        ref="viewerOverlay"
         class="image-viewer-overlay"
         tabindex="-1"
         @click="handleBackdropClick"
@@ -281,7 +282,7 @@
 </template>
 
 <script setup lang="ts">
-import { inject, ref } from "vue";
+import { inject, nextTick, ref } from "vue";
 import AgentMessage from "../AgentMessage.vue";
 import ChatMarkdown from "../ChatMarkdown.vue";
 import PlanDocumentBlock from "../PlanDocumentBlock.vue";
@@ -299,10 +300,15 @@ const viewerOpen = ref(false);
 const viewerUrl = ref("");
 const viewerAlt = ref("");
 
+const viewerOverlay = ref<HTMLElement>();
+
 function openImageViewer(url: string, alt: string = "发送的图片") {
   viewerUrl.value = url;
   viewerAlt.value = alt;
   viewerOpen.value = true;
+  nextTick(() => {
+    viewerOverlay.value?.focus();
+  });
 }
 
 function closeImageViewer() {

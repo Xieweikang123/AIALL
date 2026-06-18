@@ -18,10 +18,11 @@ import {
   writeFileContent,
 } from "./server/vibeFs";
 import { gitStatus, gitDiff, gitDiffFile, gitDiffContent, gitCommitFileDiff, gitCommit, gitLog, gitIsRepo, gitAdd, gitReset, gitDiscard, gitDiscardAll, gitRemotes, gitFetch, gitPull, gitPush, gitStashList, gitStashSave, gitStashPop, gitStashApply, gitStashDrop } from "./server/vibeGit";
-import { upsertChatStoreIndexEntry } from "./server/chatStoreIndex";
+import { deleteChatStoreSession, upsertChatStoreIndexEntry } from "./server/chatStoreIndex";
 import { mergeSessionPayloadForDisk } from "./server/chatStoreMerge";
 import { externalizeSessionPayload, readImageRefAsBuffer, readImageRefAsDataUrl } from "./server/vibeChatImages";
 import { withFileLock } from "./server/fileLock";
+import { sessionDiagServer } from "./server/sessionDiagLog";
 
 const execFileAsync = promisify(execFile);
 
@@ -329,6 +330,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
       const projectPath = (url.searchParams.get("projectPath") || "").trim();
       const loadMessages = url.searchParams.get("loadMessages") === "1";
+      const bustCache = url.searchParams.has("_t");
       if (!projectPath) {
         sendJson(res, 400, { ok: false, error: "缺少 projectPath" });
         return;
@@ -338,8 +340,10 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       const resolved = path.resolve(projectPath);
       const chatDir = AIALL_DATA_DIR;
       const storeFile = path.join(chatDir, "chat-store.json");
-      let raw = getCachedChatStore(resolved);
+      let cacheHit = false;
+      let raw = bustCache ? null : getCachedChatStore(resolved);
       if (raw) {
+        cacheHit = true;
         debugLog(`chat-store-load: cache-hit projectPath="${projectPath}" age=${Date.now() - chatStoreCache.get(resolved)?.ts}ms`);
       } else {
         raw = await fs.promises.readFile(storeFile, "utf-8").catch(() => null);
@@ -374,6 +378,13 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       }
 
       const metas = Array.isArray(index.sessions) ? index.sessions : [];
+      sessionDiagServer("backend:chat-store-load", {
+        projectPath,
+        loadMessages,
+        cacheHit,
+        indexSessionIds: metas.map((m) => m.id).filter(Boolean),
+        activeSessionId: index.activeSessionId || "",
+      });
       const sessions: Array<{
         id: string;
         title: string;
@@ -598,18 +609,37 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         return;
       }
 
-      // 先响应前端，再异步写入磁盘
-      sendJson(res, 200, { ok: true, path: AIALL_DATA_DIR, sessionCount: (body.data?.sessions || []).length });
-
-      // 异步写入（不阻塞响应）
       const sessions = Array.isArray(body.data?.sessions) ? body.data.sessions : [];
-      if (!sessions.length) return;
+      const incomingIdList = sessions
+        .map((session) => (session.id || "").trim())
+        .filter(Boolean);
+
+      sessionDiagServer("backend:chat-store-sync:start", {
+        projectPath,
+        incomingSessionIds: incomingIdList,
+        activeSessionId: body.data?.activeSessionId || "",
+      });
 
       const resolved = path.resolve(projectPath);
       const chatDir = AIALL_DATA_DIR;
       await fs.promises.mkdir(chatDir, { recursive: true }).catch(() => {});
       const storeFile = path.join(chatDir, "chat-store.json");
       debugLog(`chat-store-sync async writing ${sessions.length} sessions`);
+
+      if (!sessions.length) {
+        const index = {
+          syncedAt: new Date().toISOString(),
+          version: body.data?.version || 3,
+          projectPath,
+          activeSessionId: "",
+          sessions: [],
+        };
+        await atomicWriteFile(storeFile, JSON.stringify(index, null, 2));
+        invalidateChatStoreCache(resolved);
+        sessionDiagServer("backend:chat-store-sync:done-empty", { projectPath });
+        sendJson(res, 200, { ok: true, path: AIALL_DATA_DIR, sessionCount: 0 });
+        return;
+      }
 
       // 只写有变更的 session（通过比较 messageCount）
       let existingIndex: { sessions?: Array<{ id: string; title: string; createdAt: string; updatedAt: string; messageCount: number; file: string }> } | null = null;
@@ -631,8 +661,20 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         file: string;
         status?: string;
       }>();
-      for (const s of existingSessions) {
-        indexSessionsMap.set(s.id, s);
+      const incomingIds = new Set(incomingIdList);
+
+      const removedFromDisk: string[] = [];
+      await Promise.all(existingSessions.map(async (session) => {
+        if (!session.id || incomingIds.has(session.id)) return;
+        removedFromDisk.push(session.id);
+        const file = session.file || `chat-${safeFilePart(session.id)}.json`;
+        await fs.promises.unlink(path.join(chatDir, file)).catch(() => {});
+      }));
+      if (removedFromDisk.length) {
+        sessionDiagServer("backend:chat-store-sync:removed-files", {
+          projectPath,
+          removedSessionIds: removedFromDisk,
+        });
       }
 
       // 并行写入所有 session 文件
@@ -640,13 +682,20 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         const id = (session.id || "").trim();
         if (!id) return;
 
-        // 跳过未变更的 session
         const existing = existingMap.get(id);
-        if (existing && existing.messageCount === (session.messageCount || 0) && existing.title === session.title) {
+        const sessionFile = path.join(chatDir, `chat-${safeFilePart(id)}.json`);
+        const sessionFileExists = await fs.promises.access(sessionFile).then(() => true).catch(() => false);
+
+        // 跳过未变更的 session
+        if (existing && sessionFileExists && existing.messageCount === (session.messageCount || 0) && existing.title === session.title) {
+          indexSessionsMap.set(id, {
+            ...existing,
+            updatedAt: session.updatedAt || existing.updatedAt,
+            status: session.status || existing.status,
+          });
           return;
         }
 
-        const sessionFile = path.join(chatDir, `chat-${safeFilePart(id)}.json`);
         const existingRaw = await fs.promises.readFile(sessionFile, "utf-8").catch(() => null);
         let existingPayload: { messages?: unknown[] } | null = null;
         if (existingRaw) {
@@ -689,9 +738,31 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       };
       await atomicWriteFile(storeFile, JSON.stringify(index, null, 2));
       invalidateChatStoreCache(resolved);
+      sessionDiagServer("backend:chat-store-sync:done", {
+        projectPath,
+        writtenSessionIds: index.sessions.map((s) => s.id),
+        activeSessionId: index.activeSessionId,
+        removedFromDisk,
+      });
       debugLog(`chat-store-sync async done, cache invalidated for "${resolved}"`);
+      sendJson(res, 200, {
+        ok: true,
+        path: AIALL_DATA_DIR,
+        sessionCount: index.sessions.length,
+        activeSessionId: index.activeSessionId,
+        syncedAt: index.syncedAt,
+        sessions: index.sessions.map((s) => ({
+          id: s.id,
+          title: s.title,
+          createdAt: s.createdAt,
+          updatedAt: s.updatedAt,
+          messageCount: s.messageCount,
+          status: s.status,
+        })),
+      });
     } catch (error) {
       debugLog(`chat-store-sync error: ${error instanceof Error ? error.message : String(error)}`);
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "同步会话到本地失败" });
     }
   });
 
@@ -756,10 +827,91 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
             activeSessionId,
           });
         });
+        const indexAfter = await fs.promises.readFile(storeFile, "utf-8").catch(() => null);
+        let indexSessionIds: string[] = [];
+        if (indexAfter) {
+          try {
+            const parsed = JSON.parse(indexAfter) as { sessions?: Array<{ id?: string }> };
+            indexSessionIds = (parsed.sessions || []).map((s) => s.id || "").filter(Boolean);
+          } catch { /* ignore */ }
+        }
+        sessionDiagServer("backend:chat-session-sync:done", {
+          projectPath,
+          sessionId,
+          activeSessionId,
+          indexSessionIds,
+        });
       }
       sendJson(res, 200, { ok: true });
     } catch (error) {
       sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "写入会话文件失败" });
+    }
+  });
+
+  // POST /backend/vibe/chat-session-delete — 立即删除磁盘 session 文件并 patch index
+  middlewares.use("/backend/vibe/chat-session-delete", async (req, res) => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "仅支持 POST 请求" });
+      return;
+    }
+
+    try {
+      const body = (await readJsonBody(req)) as {
+        projectPath?: string;
+        sessionId?: string;
+        activeSessionId?: string;
+      };
+      const projectPath = (body.projectPath || "").trim();
+      const sessionId = (body.sessionId || "").trim();
+      const activeSessionId = (body.activeSessionId || "").trim();
+      if (!projectPath || !sessionId) {
+        sendJson(res, 400, { ok: false, error: "缺少 projectPath 或 sessionId" });
+        return;
+      }
+
+      const resolved = path.resolve(projectPath);
+      const chatDir = AIALL_DATA_DIR;
+      const storeFile = path.join(chatDir, "chat-store.json");
+
+      sessionDiagServer("backend:chat-session-delete:start", {
+        projectPath,
+        sessionId,
+        activeSessionId,
+      });
+
+      const index = await withFileLock(storeFile, async () =>
+        deleteChatStoreSession(chatDir, projectPath, sessionId, {
+          activeSessionId: activeSessionId || undefined,
+        }),
+      );
+      invalidateChatStoreCache(resolved);
+
+      sessionDiagServer("backend:chat-session-delete:done", {
+        projectPath,
+        sessionId,
+        activeSessionId: index.activeSessionId,
+        indexSessionIds: index.sessions.map((s) => s.id),
+      });
+
+      sendJson(res, 200, {
+        ok: true,
+        activeSessionId: index.activeSessionId,
+        sessionCount: index.sessions.length,
+        syncedAt: index.syncedAt,
+        sessions: index.sessions.map((s) => ({
+          id: s.id,
+          title: s.title,
+          createdAt: s.createdAt,
+          updatedAt: s.updatedAt,
+          messageCount: s.messageCount,
+          status: s.status,
+        })),
+      });
+    } catch (error) {
+      sendJson(res, 500, {
+        ok: false,
+        error: error instanceof Error ? error.message : "删除会话文件失败",
+      });
     }
   });
 

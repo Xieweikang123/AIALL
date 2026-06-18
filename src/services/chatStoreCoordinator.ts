@@ -1,0 +1,83 @@
+import type { ChatSessionDeleteResult, ChatStoreSyncResult } from "./vibeCodingClient";
+import { deleteChatSessionFromDisk } from "./vibeCodingClient";
+import { mirrorLocalIndexFromDiskMeta } from "./vibeChatStorage";
+
+const queues = new Map<string, Promise<unknown>>();
+const queueDepth = new Map<string, number>();
+
+function queueKey(projectPath: string): string {
+  return projectPath.trim().replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
+}
+
+/** Serialize disk hydrate / flush / delete for one project to prevent merge races. Reentrant-safe. */
+export function enqueueChatStoreOp<T>(projectPath: string, op: () => Promise<T>): Promise<T> {
+  const key = queueKey(projectPath);
+  const depth = queueDepth.get(key) ?? 0;
+  if (depth > 0) {
+    return op();
+  }
+
+  const tail = queues.get(key) ?? Promise.resolve();
+  const run = tail.catch(() => {}).then(async () => {
+    queueDepth.set(key, (queueDepth.get(key) ?? 0) + 1);
+    try {
+      return await op();
+    } finally {
+      const next = (queueDepth.get(key) ?? 1) - 1;
+      if (next <= 0) queueDepth.delete(key);
+      else queueDepth.set(key, next);
+    }
+  });
+  queues.set(key, run);
+  return run;
+}
+
+export function mirrorDiskIndexAfterSync(
+  projectPath: string,
+  result: {
+    activeSessionId?: string;
+    sessions?: Array<{
+      id: string;
+      title: string;
+      createdAt: string;
+      updatedAt: string;
+      messageCount: number;
+      status?: string;
+    }>;
+  },
+): void {
+  if (!result.sessions && result.activeSessionId === undefined) return;
+  mirrorLocalIndexFromDiskMeta(projectPath, {
+    activeSessionId: result.activeSessionId || "",
+    sessions: result.sessions ?? [],
+  });
+}
+
+export async function deleteChatSessionOnDisk(
+  projectPath: string,
+  sessionId: string,
+  nextActiveSessionId?: string,
+): Promise<ChatSessionDeleteResult> {
+  return enqueueChatStoreOp(projectPath, async () => {
+    const result = await deleteChatSessionFromDisk(projectPath, sessionId, {
+      activeSessionId: nextActiveSessionId || "",
+    });
+    if (result.ok) {
+      mirrorDiskIndexAfterSync(projectPath, result);
+    }
+    return result;
+  });
+}
+
+export async function flushChatStoreOnDisk<T extends ChatStoreSyncResult>(
+  projectPath: string,
+  flush: () => Promise<T>,
+): Promise<T> {
+  return enqueueChatStoreOp(projectPath, async () => {
+    const result = await flush();
+    if (result.ok) {
+      mirrorDiskIndexAfterSync(projectPath, result);
+    }
+    return result;
+  });
+}

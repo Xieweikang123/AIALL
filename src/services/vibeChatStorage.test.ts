@@ -12,11 +12,18 @@ import {
   chatMessagesHavePendingImageBase64,
   cloneChatMessagesForDiskSync,
   getActiveSessionSnapshot,
+  compactProjectSessionRecord,
   createVibeChatSession,
+  deleteVibeChatSession,
   diskChatStoreAheadOfLocalIndex,
+  sessionIdsWithDiskAheadMessageCounts,
   getVibeChatProjectSnapshot,
+  getSessionDiagSnapshot,
+  listVibeChatSessions,
   loadVibeChatHistory,
+  mirrorLocalIndexFromDiskMeta,
   projectChatNeedsDiskRestore,
+  replaceChatStoreFromDiskSnapshot,
   restoreChatStoreFromSnapshot,
   sanitizePersistedChatMessages,
   saveVibeChatHistory,
@@ -431,6 +438,125 @@ describe("v3 chat storage (index + memory)", () => {
     expect(snapshot.sessions[0]?.messages[0]?.content).toBe("从磁盘恢复");
   });
 
+  it("deduplicates visually identical sessions in the session list", () => {
+    const projectPath = "D:/projects/session-dedupe";
+    restoreChatStoreFromSnapshot({
+      version: STORE_VERSION,
+      projectPath,
+      activeSessionId: "newer",
+      sessions: [
+        {
+          id: "older",
+          title: "重复会话",
+          createdAt: "2026-03-01T00:00:05.000Z",
+          updatedAt: "2026-03-01T00:01:00.000Z",
+          messageCount: 2,
+          messages: [
+            { id: "u1", role: "user", content: "同一个问题" },
+            { id: "a1", role: "assistant", content: "同一个回答" },
+          ],
+        },
+        {
+          id: "newer",
+          title: "重复会话",
+          createdAt: "2026-03-01T00:00:40.000Z",
+          updatedAt: "2026-03-01T00:02:00.000Z",
+          messageCount: 2,
+          messages: [
+            { id: "u1", role: "user", content: "同一个问题" },
+            { id: "a1", role: "assistant", content: "同一个回答" },
+          ],
+        },
+      ],
+    }, projectPath);
+
+    expect(listVibeChatSessions(projectPath).map((s) => s.id)).toEqual(["newer"]);
+  });
+
+  it("uses explicit sessionId when saving instead of generating a duplicate id", () => {
+    const projectPath = "D:/projects/adopt-session-id";
+    const explicitId = "1781749904219-d0d46d6524c";
+    const { sessionId } = saveVibeChatHistory(
+      projectPath,
+      [
+        { id: "u1", role: "user", content: "同一个问题" },
+        { id: "a1", role: "assistant", content: "同一个回答" },
+      ],
+      explicitId,
+    );
+    expect(sessionId).toBe(explicitId);
+    expect(listVibeChatSessions(projectPath).map((s) => s.id)).toEqual([explicitId]);
+  });
+
+  it("merges disk duplicate signatures into one session during merge", () => {
+    const projectPath = "D:/projects/merge-dedupe-disk";
+    restoreChatStoreFromSnapshot(
+      {
+        version: STORE_VERSION,
+        projectPath,
+        activeSessionId: "disk-newer",
+        sessions: [
+          {
+            id: "disk-older",
+            title: "重复会话",
+            createdAt: "2026-03-01T00:00:05.000Z",
+            updatedAt: "2026-03-01T00:01:00.000Z",
+            messageCount: 2,
+            messages: [
+              { id: "u1", role: "user", content: "同一个问题" },
+              { id: "a1", role: "assistant", content: "同一个回答" },
+            ],
+          },
+          {
+            id: "disk-newer",
+            title: "重复会话",
+            createdAt: "2026-03-01T00:00:40.000Z",
+            updatedAt: "2026-03-02T00:00:00.000Z",
+            messageCount: 2,
+            messages: [
+              { id: "u1", role: "user", content: "同一个问题" },
+              { id: "a1", role: "assistant", content: "同一个回答" },
+            ],
+          },
+        ],
+      },
+      projectPath,
+    );
+
+    const ids = listVibeChatSessions(projectPath).map((s) => s.id);
+    expect(ids).toHaveLength(1);
+    expect(ids[0]).toBe("disk-newer");
+  });
+
+  it("keeps same-title sessions when their content differs", () => {
+    const projectPath = "D:/projects/session-dedupe-distinct";
+    restoreChatStoreFromSnapshot({
+      version: STORE_VERSION,
+      projectPath,
+      activeSessionId: "s2",
+      sessions: [
+        {
+          id: "s1",
+          title: "同名会话",
+          createdAt: "2026-03-01T00:00:05.000Z",
+          updatedAt: "2026-03-01T00:01:00.000Z",
+          messageCount: 1,
+          messages: [{ id: "u1", role: "user", content: "第一个问题" }],
+        },
+        {
+          id: "s2",
+          title: "同名会话",
+          createdAt: "2026-03-01T00:00:40.000Z",
+          updatedAt: "2026-03-01T00:02:00.000Z",
+          messageCount: 1,
+          messages: [{ id: "u2", role: "user", content: "第二个问题" }],
+        },
+      ],
+    }, projectPath);
+
+    expect(listVibeChatSessions(projectPath).map((s) => s.id)).toEqual(["s2", "s1"]);
+  });
+
   it("rejects disk snapshot when project path mismatches", () => {
     const projectPath = "D:/projects/target";
     const ok = restoreChatStoreFromSnapshot(
@@ -456,13 +582,95 @@ describe("v3 chat storage (index + memory)", () => {
     expect(loadVibeChatHistory(projectPath)).toEqual([]);
   });
 
+  it("compacts duplicate sessions in memory on demand", () => {
+    const projectPath = "D:/projects/compact-on-load";
+    restoreChatStoreFromSnapshot(
+      {
+        version: STORE_VERSION,
+        projectPath,
+        activeSessionId: "newer",
+        sessions: [
+          {
+            id: "older",
+            title: "重复会话",
+            createdAt: "2026-03-01T00:00:05.000Z",
+            updatedAt: "2026-03-01T00:01:00.000Z",
+            messageCount: 2,
+            messages: [
+              { id: "u1", role: "user", content: "同一个问题" },
+              { id: "a1", role: "assistant", content: "同一个回答" },
+            ],
+          },
+          {
+            id: "newer",
+            title: "重复会话",
+            createdAt: "2026-03-01T00:00:40.000Z",
+            updatedAt: "2026-03-02T00:00:00.000Z",
+            messageCount: 2,
+            messages: [
+              { id: "u1", role: "user", content: "同一个问题" },
+              { id: "a1", role: "assistant", content: "同一个回答" },
+            ],
+          },
+        ],
+      },
+      projectPath,
+    );
+    expect(listVibeChatSessions(projectPath).map((s) => s.id)).toEqual(["newer"]);
+    expect(compactProjectSessionRecord(projectPath)).toBe(false);
+  });
+
+  it("does not drop other sessions when saving one with index-only peers", () => {
+    const projectPath = "D:/projects/no-false-dedupe-on-save";
+    replaceChatStoreFromDiskSnapshot(
+      {
+        version: STORE_VERSION,
+        projectPath,
+        activeSessionId: "session-a",
+        sessions: [
+          {
+            id: "session-a",
+            title: "同标题",
+            createdAt: "2026-03-01T00:00:05.000Z",
+            updatedAt: "2026-03-01T00:01:00.000Z",
+            messageCount: 2,
+            messages: [],
+          },
+          {
+            id: "session-b",
+            title: "同标题",
+            createdAt: "2026-03-01T00:00:40.000Z",
+            updatedAt: "2026-03-01T00:02:00.000Z",
+            messageCount: 2,
+            messages: [],
+          },
+        ],
+      },
+      projectPath,
+    );
+
+    saveVibeChatHistory(
+      projectPath,
+      [
+        { id: "u1", role: "user", content: "第一个问题" },
+        { id: "a1", role: "assistant", content: "第一个回答" },
+      ],
+      "session-a",
+    );
+
+    const ids = listVibeChatSessions(projectPath).map((s) => s.id);
+    expect(ids).toHaveLength(2);
+    expect(ids).toContain("session-a");
+    expect(ids).toContain("session-b");
+  });
+
   it("does not treat empty indexed sessions as disk restore candidates", () => {
     const projectPath = "D:/projects/empty-session-index";
     createVibeChatSession(projectPath);
     expect(projectChatNeedsDiskRestore(projectPath)).toBe(false);
   });
 
-  it("detects when disk index has more sessions than localStorage", () => {
+  it("does not treat disk-only orphan sessions as ahead of local index", () => {
     const projectPath = "D:/projects/disk-ahead";
     saveVibeChatHistory(projectPath, [
       { id: "u1", role: "user", content: "local only" },
@@ -473,13 +681,35 @@ describe("v3 chat storage (index + memory)", () => {
       diskChatStoreAheadOfLocalIndex(projectPath, [
         {
           id: "disk-only",
-          title: "磁盘会话",
-          createdAt: "2026-03-01T00:00:00.000Z",
-          updatedAt: "2026-03-02T00:00:00.000Z",
           messageCount: 4,
+          updatedAt: "2026-03-02T00:00:00.000Z",
+        },
+      ]),
+    ).toBe(false);
+  });
+
+  it("detects when an indexed session has more messages on disk", () => {
+    const projectPath = "D:/projects/disk-ahead-count";
+    const { sessionId } = saveVibeChatHistory(projectPath, [
+      { id: "u1", role: "user", content: "local only" },
+      { id: "a1", role: "assistant", content: "ok" },
+    ]);
+
+    expect(
+      diskChatStoreAheadOfLocalIndex(projectPath, [
+        {
+          id: sessionId,
+          messageCount: 4,
+          updatedAt: "2026-03-02T00:00:00.000Z",
         },
       ]),
     ).toBe(true);
+    expect(
+      sessionIdsWithDiskAheadMessageCounts(projectPath, [
+        { id: sessionId, messageCount: 4 },
+        { id: "disk-only", messageCount: 4 },
+      ]),
+    ).toEqual([sessionId]);
   });
 
   it("merges disk sessions without dropping unsynced local-only sessions", () => {
@@ -509,6 +739,112 @@ describe("v3 chat storage (index + memory)", () => {
     expect(snapshot.sessions).toHaveLength(2);
     expect(snapshot.sessions.some((s) => s.id === localOnlyId)).toBe(true);
     expect(snapshot.sessions.some((s) => s.id === "disk-s1")).toBe(true);
+  });
+
+  it("replaces local store from disk on cold start instead of merging", () => {
+    const projectPath = "D:/projects/replace-from-disk";
+    saveVibeChatHistory(projectPath, [
+      { id: "u-local", role: "user", content: "仅本地" },
+      { id: "a-local", role: "assistant", content: "本地" },
+    ]);
+
+    const ok = replaceChatStoreFromDiskSnapshot(
+      {
+        version: STORE_VERSION,
+        projectPath,
+        activeSessionId: "disk-s1",
+        sessions: [
+          {
+            id: "disk-s1",
+            title: "磁盘",
+            createdAt: "2026-03-01T00:00:00.000Z",
+            updatedAt: "2026-03-02T00:00:00.000Z",
+            messageCount: 1,
+            messages: [{ id: "u1", role: "user", content: "磁盘消息" }],
+          },
+        ],
+      },
+      projectPath,
+    );
+    expect(ok).toBe(true);
+    expect(listVibeChatSessions(projectPath).map((s) => s.id)).toEqual(["disk-s1"]);
+    expect(loadVibeChatHistory(projectPath)[0]?.content).toBe("磁盘消息");
+  });
+
+  it("mirrors disk index metadata into localStorage", () => {
+    const projectPath = "D:/projects/mirror-index";
+    mirrorLocalIndexFromDiskMeta(projectPath, {
+      activeSessionId: "s1",
+      sessions: [
+        {
+          id: "s1",
+          title: "镜像",
+          createdAt: "2026-03-01T00:00:00.000Z",
+          updatedAt: "2026-03-02T00:00:00.000Z",
+          messageCount: 3,
+        },
+      ],
+    });
+    expect(getSessionDiagSnapshot(projectPath).indexSessionIds).toEqual(["s1"]);
+    expect(getSessionDiagSnapshot(projectPath).activeSessionId).toBe("s1");
+  });
+
+  it("does not resurrect locally deleted sessions when merging disk snapshot", () => {
+    const projectPath = "D:/projects/deleted-no-resurrect";
+    const keepId = saveVibeChatHistory(projectPath, [
+      { id: "u1", role: "user", content: "keep me" },
+      { id: "a1", role: "assistant", content: "ok" },
+    ]).sessionId;
+    const deleteId = saveVibeChatHistory(projectPath, [
+      { id: "u2", role: "user", content: "delete me" },
+      { id: "a2", role: "assistant", content: "bye" },
+    ]).sessionId;
+
+    deleteVibeChatSession(projectPath, deleteId);
+    expect(listVibeChatSessions(projectPath).map((s) => s.id)).toContain(keepId);
+    expect(listVibeChatSessions(projectPath).map((s) => s.id)).not.toContain(deleteId);
+
+    restoreChatStoreFromSnapshot({
+      version: STORE_VERSION,
+      projectPath,
+      activeSessionId: keepId,
+      sessions: [
+        {
+          id: keepId,
+          title: "keep",
+          createdAt: "2026-03-01T00:00:00.000Z",
+          updatedAt: "2026-03-01T00:01:00.000Z",
+          messageCount: 2,
+          messages: [
+            { id: "u1", role: "user", content: "keep me" },
+            { id: "a1", role: "assistant", content: "ok" },
+          ],
+        },
+        {
+          id: deleteId,
+          title: "delete",
+          createdAt: "2026-03-01T00:00:10.000Z",
+          updatedAt: "2026-03-01T00:02:00.000Z",
+          messageCount: 2,
+          messages: [
+            { id: "u2", role: "user", content: "delete me" },
+            { id: "a2", role: "assistant", content: "bye" },
+          ],
+        },
+      ],
+    }, projectPath);
+
+    expect(listVibeChatSessions(projectPath).map((s) => s.id)).not.toContain(deleteId);
+    expect(listVibeChatSessions(projectPath).map((s) => s.id)).toContain(keepId);
+    expect(
+      diskChatStoreAheadOfLocalIndex(projectPath, [
+        {
+          id: deleteId,
+          messageCount: 2,
+          updatedAt: "2026-03-01T00:02:00.000Z",
+        },
+      ]),
+    ).toBe(false);
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSessionIndexEntry, patchChatStoreIndex } from "./chatStoreIndex";
+import { buildSessionIndexEntry, patchChatStoreIndex, removeChatStoreIndexSession } from "./chatStoreIndex";
 
 describe("chatStoreIndex", () => {
   it("builds index entry from session payload", () => {
@@ -48,5 +48,37 @@ describe("chatStoreIndex", () => {
     expect(next.sessions).toHaveLength(2);
     expect(next.sessions.find((s) => s.id === "s1")?.messageCount).toBe(2);
     expect(next.syncedAt).not.toBe("old");
+  });
+
+  it("removes session from index and reassigns activeSessionId", () => {
+    const next = removeChatStoreIndexSession(
+      {
+        syncedAt: "old",
+        version: 3,
+        projectPath: "D:/proj",
+        activeSessionId: "s1",
+        sessions: [
+          {
+            id: "s1",
+            title: "gone",
+            createdAt: "a",
+            updatedAt: "a",
+            messageCount: 1,
+            file: "chat-s1.json",
+          },
+          {
+            id: "s2",
+            title: "keep",
+            createdAt: "b",
+            updatedAt: "b",
+            messageCount: 2,
+            file: "chat-s2.json",
+          },
+        ],
+      },
+      "s1",
+    );
+    expect(next.sessions.map((s) => s.id)).toEqual(["s2"]);
+    expect(next.activeSessionId).toBe("s2");
   });
 });

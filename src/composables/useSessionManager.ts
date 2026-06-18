@@ -51,11 +51,17 @@ export function useSessionManager(projectPath: () => string) {
       activeSessionId.value = "";
       return;
     }
+    const previousActiveId = activeSessionId.value;
     sessionList.value = listVibeChatSessions(p);
     const storedActiveId = getActiveVibeChatSessionId(p);
-    if (storedActiveId) {
+    const listIds = new Set(sessionList.value.map((s) => s.id));
+    if (previousActiveId && listIds.has(previousActiveId)) {
+      activeSessionId.value = previousActiveId;
+    } else if (storedActiveId && listIds.has(storedActiveId)) {
       activeSessionId.value = storedActiveId;
-    } else if (!sessionList.value.some((s) => s.id === activeSessionId.value)) {
+    } else if (previousActiveId || storedActiveId) {
+      activeSessionId.value = sessionList.value[0]?.id || "";
+    } else {
       activeSessionId.value = "";
     }
   }

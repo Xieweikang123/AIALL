@@ -135,8 +135,35 @@ export interface ChatStoreSyncResult {
   ok: boolean;
   path?: string;
   sessionCount?: number;
+  activeSessionId?: string;
+  syncedAt?: string;
+  sessions?: Array<{
+    id: string;
+    title: string;
+    createdAt: string;
+    updatedAt: string;
+    messageCount: number;
+    status?: string;
+  }>;
   error?: string;
 }
+
+export type ChatSessionDeleteResult =
+  | {
+      ok: true;
+      activeSessionId: string;
+      sessionCount: number;
+      syncedAt: string;
+      sessions: Array<{
+        id: string;
+        title: string;
+        createdAt: string;
+        updatedAt: string;
+        messageCount: number;
+        status?: string;
+      }>;
+    }
+  | { ok: false; error?: string };
 
 export async function fetchProjectContext(projectPath: string): Promise<ProjectContextResult> {
   try {
@@ -181,6 +208,34 @@ export async function syncChatSession(
     return { ok: true };
   } catch (error) {
     return { ok: false, error: formatFetchError(error, "网络错误") };
+  }
+}
+
+export async function deleteChatSessionFromDisk(
+  projectPath: string,
+  sessionId: string,
+  options?: { activeSessionId?: string },
+): Promise<ChatSessionDeleteResult> {
+  try {
+    const response = await fetch(backendUrl("/backend/vibe/chat-session-delete"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectPath,
+        sessionId,
+        activeSessionId: options?.activeSessionId || "",
+      }),
+    });
+    if (!response.ok) {
+      return { ok: false, error: `HTTP ${response.status}` };
+    }
+    const body = await readJsonResponse<ChatSessionDeleteResult>(response);
+    if (!body.ok) {
+      return { ok: false, error: body.error || "删除会话文件失败" };
+    }
+    return body;
+  } catch (error) {
+    return { ok: false, error: formatFetchError(error, "删除会话文件失败") };
   }
 }
 

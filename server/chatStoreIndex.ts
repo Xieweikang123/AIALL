@@ -106,3 +106,45 @@ export async function upsertChatStoreIndexEntry(
   });
   await fs.promises.writeFile(storeFile, JSON.stringify(next, null, 2), "utf-8");
 }
+
+export function removeChatStoreIndexSession(
+  index: ChatStoreIndexFile,
+  sessionId: string,
+  options?: { activeSessionId?: string },
+): ChatStoreIndexFile {
+  const sessions = (index.sessions || []).filter((s) => s.id !== sessionId);
+  let activeSessionId = options?.activeSessionId ?? index.activeSessionId;
+  if (activeSessionId === sessionId) {
+    activeSessionId = sessions[0]?.id || "";
+  }
+  return {
+    ...index,
+    activeSessionId,
+    syncedAt: new Date().toISOString(),
+    sessions,
+  };
+}
+
+export async function deleteChatStoreSession(
+  chatDir: string,
+  projectPath: string,
+  sessionId: string,
+  options?: { activeSessionId?: string },
+): Promise<ChatStoreIndexFile> {
+  const storeFile = path.join(chatDir, "chat-store.json");
+  const sessionFile = path.join(chatDir, sessionIndexFileName(sessionId));
+  await fs.promises.unlink(sessionFile).catch(() => {});
+  const existing = await readChatStoreIndex(storeFile);
+  if (!existing) {
+    return {
+      syncedAt: new Date().toISOString(),
+      version: 3,
+      projectPath,
+      activeSessionId: options?.activeSessionId || "",
+      sessions: [],
+    };
+  }
+  const next = removeChatStoreIndexSession(existing, sessionId, options);
+  await fs.promises.writeFile(storeFile, JSON.stringify(next, null, 2), "utf-8");
+  return next;
+}

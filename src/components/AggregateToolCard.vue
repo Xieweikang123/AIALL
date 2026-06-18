@@ -72,8 +72,8 @@ const cardClass = computed(() => {
 .aggregate-card-head {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: 6px;
+  padding: 6px 8px;
   list-style: none;
   cursor: pointer;
   user-select: none;
@@ -136,13 +136,13 @@ const cardClass = computed(() => {
 
 .aggregate-card-preview {
   margin: 0;
-  padding: 6px 10px 8px 32px;
+  padding: 4px 8px 6px 28px;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   border-top: 1px solid rgba(88, 166, 255, 0.08);
-  max-height: 140px;
+  max-height: 120px;
   overflow: auto;
 }
 
