@@ -2,13 +2,18 @@ import { describe, expect, it } from "vitest";
 import {
   buildAgentStepClarificationHint,
   buildAgentStepClarifyContinueHint,
+  buildBuildWriteBlockedHint,
   buildConsultativeBuildHint,
   buildImplementFollowUpHint,
+  buildImplementationStatusHint,
   buildSessionAuditHint,
   buildUiDefectBuildHint,
+  buildWriteToolBlockedMessage,
+  historySuggestsActiveImplementation,
   historySuggestsQuotePositionFix,
   isAgentStepClarificationPrompt,
   isConsultativeUserPrompt,
+  isImplementationStatusPrompt,
   isImplementFollowUpRun,
   isScreenshotVisibilityPrompt,
   isSessionAuditPrompt,
@@ -53,12 +58,44 @@ describe("isConsultativeUserPrompt", () => {
     expect(isConsultativeUserPrompt("AI 助手，引用按钮出现位置是否总是准确？")).toBe(true);
     expect(isConsultativeUserPrompt("这个位置一直准确吗？")).toBe(true);
   });
+
+  it("treats implementation status prompts as consultative", () => {
+    expect(isImplementationStatusPrompt("多会话同时进行  改好了吗？")).toBe(true);
+    expect(isImplementationStatusPrompt("改好了吗")).toBe(true);
+    expect(isConsultativeUserPrompt("多会话同时进行  改好了吗？")).toBe(true);
+  });
 });
 
 describe("buildConsultativeBuildHint", () => {
-  it("mentions read-only tools", () => {
+  it("mentions read-only tools and forbids mislabeling Ask mode", () => {
     expect(buildConsultativeBuildHint()).toContain("禁止 patch_file");
     expect(buildConsultativeBuildHint()).toContain("grep");
+    expect(buildConsultativeBuildHint()).toContain("Ask 模式");
+  });
+});
+
+describe("buildImplementationStatusHint", () => {
+  it("requires read-only progress answer", () => {
+    const hint = buildImplementationStatusHint();
+    expect(hint).toContain("实施进度");
+    expect(hint).toContain("禁止 patch_file");
+    expect(hint).toContain("Ask 模式");
+  });
+});
+
+describe("buildWriteToolBlockedMessage", () => {
+  it("disambiguates Build consultative from Ask mode", () => {
+    expect(buildWriteToolBlockedMessage("consultative_build")).toContain("Build 只读轮");
+    expect(buildWriteToolBlockedMessage("consultative_build")).toContain("禁止");
+    expect(buildWriteToolBlockedMessage("ask")).toContain("Ask 模式");
+  });
+});
+
+describe("buildBuildWriteBlockedHint", () => {
+  it("mentions both error shapes", () => {
+    const hint = buildBuildWriteBlockedHint();
+    expect(hint).toContain("Build 只读轮");
+    expect(hint).toContain("Ask 模式");
   });
 });
 
@@ -94,13 +131,36 @@ describe("isImplementFollowUpRun", () => {
       content: "引用按钮 getSelectionAnchorRect 可能有问题，建议修复 showQuoteButtonAt。",
     },
   ];
+  const implHistory = [
+    { role: "user", content: "实现吧" },
+    { role: "assistant", content: "部分改好了，下一步需要把 chatSending 改为 per-session。" },
+  ];
 
   it("detects 修复吧 after prior quote-button analysis", () => {
     expect(isImplementFollowUpRun("修复吧", history)).toBe(true);
   });
 
+  it("detects 继续改 after partial implementation", () => {
+    expect(isImplementFollowUpRun("继续改", implHistory)).toBe(true);
+    expect(isConsultativeUserPrompt("继续改")).toBe(false);
+  });
+
+  it("does not treat implementation status as implement follow-up", () => {
+    expect(isImplementFollowUpRun("多会话同时进行  改好了吗？", implHistory)).toBe(false);
+  });
+
   it("rejects 修复吧 without relevant history", () => {
     expect(isImplementFollowUpRun("修复吧", [])).toBe(false);
+  });
+});
+
+describe("historySuggestsActiveImplementation", () => {
+  it("detects partial implementation in recent history", () => {
+    const history = [
+      { role: "user", content: "实现吧" },
+      { role: "assistant", content: "部分改好了，未完成 sendingSessionIds 接入。" },
+    ];
+    expect(historySuggestsActiveImplementation(history)).toBe(true);
   });
 });
 

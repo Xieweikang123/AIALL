@@ -180,4 +180,32 @@ describe("executeTool immediate persistence", () => {
     expect(result).toContain("inside project");
     expect(result).not.toMatch(/错误：.*has/);
   });
+
+  it("patch_file in Build consultative run returns disambiguated error", async () => {
+    const root = await makeProject();
+    await fs.promises.writeFile(path.join(root, "a.ts"), "x\n", "utf-8");
+    const result = await executeTool(
+      root,
+      "patch_file",
+      { path: "a.ts", old_string: "x", new_string: "y" },
+      null,
+      "build",
+    );
+    expect(result).toContain("Build 只读轮");
+    expect(result).not.toContain("当前模式不支持写文件");
+    expect(result).toContain("Ask 模式");
+  });
+
+  it("patch_file in Ask mode returns Ask-specific error", async () => {
+    const root = await makeProject();
+    const result = await executeTool(
+      root,
+      "patch_file",
+      { path: "a.ts", old_string: "x", new_string: "y" },
+      null,
+      "ask",
+    );
+    expect(result).toContain("Ask 模式下不支持");
+    expect(result).not.toContain("Build 只读轮");
+  });
 });

@@ -4,6 +4,7 @@ import {
   resolveAssistantBubbleContent,
 } from "./agentMessageDisplay";
 import type { AgentRoundGroup } from "./agentRoundGroups";
+import { stripToolSummaryFromAssistantContent } from "./vibeChatStorage";
 
 export type AgentProgressTool = {
   running?: boolean;
@@ -298,7 +299,7 @@ export function inferAgentRecoveryFlags(msg: AgentProgressSource & {
 export function resolveAgentFailureBubbleContent(
   msg: AgentProgressSource & { content?: string },
 ): string {
-  const direct = msg.content?.trim() || "";
+  const direct = stripToolSummaryFromAssistantContent(msg.content?.trim() || "");
   if (direct && !isRecoverableAgentError(direct)) return direct;
 
   const fromProgress = resolveAssistantBubbleContent({

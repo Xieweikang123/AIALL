@@ -32,7 +32,7 @@
     <button
       type="button"
       class="project-tab-add"
-      :disabled="pickingFolder || loadingTree || chatSending"
+      :disabled="pickingFolder || loadingTree"
       title="打开新项目"
       @click="$emit('open-new-project')"
     >
@@ -51,12 +51,9 @@ interface Props {
   currentPath: string;
   loadingTree: boolean;
   pickingFolder: boolean;
-  chatSending?: boolean;
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  chatSending: false,
-});
+const props = withDefaults(defineProps<Props>(), {});
 
 const emit = defineEmits<{
   (e: "switch-project", path: string): void;
@@ -75,7 +72,7 @@ function isActive(path: string): boolean {
 }
 
 function isTabDisabled(path: string): boolean {
-  return (props.loadingTree && !isActive(path)) || (props.chatSending && !isActive(path));
+  return props.loadingTree && !isActive(path);
 }
 
 function onTabClick(path: string) {

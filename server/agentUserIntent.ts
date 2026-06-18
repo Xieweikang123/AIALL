@@ -21,6 +21,14 @@ const AUTOMATION_PROMPT_RE = /^\s*(?:【|\[)(?:方案执行|精准修改|效率|
 const SHORT_EVALUATIVE_FOLLOW_UP_RE =
   /^(?:需要|要不要|是否|还得|还要|值得|可以|那)?[^。！!]{0,24}(?:吗|呢)[？?]?\s*$/;
 
+/** User asks whether a prior implementation task is done (progress check, not a new implement request). */
+const IMPLEMENTATION_STATUS_PROMPT_RE =
+  /(?:改好|做完|写好|弄好|搞定|完成|实现好|落地)[了吗呢]?[？?]?\s*$|(?:好了吗|完成了吗|做完了吗|改完了吗)[？?]?\s*$/i;
+
+/** User wants to resume patching after prior analysis or partial implementation. */
+const CONTINUE_IMPLEMENT_PROMPT_RE =
+  /^(?:请?)?(?:继续|接着)(?:改|做|实现|修|完善|完成)/i;
+
 /** Screenshot-backed UI defect — user shows broken layout/position; Build should fix, not read-only Q&A. */
 const UI_DEFECT_REPORT_RE =
   /看到没|你看|你瞧|分明|明显|错位|跑(?:到|去|别的)|飘|歪|不对|坏了|出问题了|有问题|挤一块|重叠|太紧/i;
@@ -60,6 +68,12 @@ export function isShortImplementPrompt(prompt: string): boolean {
 
 export type UserIntentHistoryMessage = { role: string; content: string };
 
+export function isImplementationStatusPrompt(prompt: string): boolean {
+  const text = prompt.trim();
+  if (!text) return false;
+  return IMPLEMENTATION_STATUS_PROMPT_RE.test(text);
+}
+
 /** Prior turns already analyzed quote-button positioning — user now wants code applied. */
 export function historySuggestsQuotePositionFix(history?: UserIntentHistoryMessage[]): boolean {
   const text = (history ?? [])
@@ -73,17 +87,32 @@ export function historySuggestsQuotePositionFix(history?: UserIntentHistoryMessa
   );
 }
 
+/** Recent turns mention an in-flight or partial code change task. */
+export function historySuggestsActiveImplementation(history?: UserIntentHistoryMessage[]): boolean {
+  const text = (history ?? [])
+    .slice(-8)
+    .filter((m) => m.role === "assistant" || m.role === "user")
+    .map((m) => m.content)
+    .join("\n");
+  if (!text.trim()) return false;
+  if (historySuggestsQuotePositionFix(history)) return true;
+  return /(?:改吧|实现吧|执行吧|继续改|动手吧|patch_file|write_file|已修改|修改方案|实施计划|下一步需要|部分改好|未完成|须改代码|让我完成|剩余(?:的)?实现)/i.test(
+    text,
+  );
+}
+
 export function isImplementFollowUpRun(
   prompt: string,
   history?: UserIntentHistoryMessage[],
-  opts?: { isAsk?: boolean; readOnlyBuild?: boolean },
+  opts?: { isAsk?: boolean },
 ): boolean {
-  if (opts?.isAsk || opts?.readOnlyBuild) return false;
+  if (opts?.isAsk) return false;
   const text = prompt.trim();
   if (!text) return false;
-  if (isConsultativeUserPrompt(text)) return false;
-  if (isShortImplementPrompt(text) && historySuggestsQuotePositionFix(history)) return true;
-  if (IMPLEMENT_INTENT_RE.test(text) && historySuggestsQuotePositionFix(history)) return true;
+  if (!historySuggestsActiveImplementation(history)) return false;
+  if (isShortImplementPrompt(text)) return true;
+  if (CONTINUE_IMPLEMENT_PROMPT_RE.test(text)) return true;
+  if (IMPLEMENT_INTENT_RE.test(text) && !isImplementationStatusPrompt(text)) return true;
   return false;
 }
 
@@ -106,17 +135,57 @@ export function buildConsultativeBuildHint(): string {
     "只允许 list_dir / read_file / grep / search_files；禁止 patch_file / write_file / delete_file。",
     "优先 1 次 grep 定位，必要时 read_file 1 个相关文件后即回答；勿连环读取多个无关文件。",
     "用自然语言直接回答；若调查后发现代码须改才能符合描述，说明结论并提示用户描述期望行为，勿擅自 patch。",
+    "若写工具返回「Build 只读轮」相关错误：当前仍是 Build 模式，只是本条被标为咨询只读；禁止向用户称 Ask 模式或让用户切换 Build。",
   ].join("\n");
 }
 
-export function buildImplementFollowUpHint(): string {
+export function buildImplementationStatusHint(): string {
   return [
     "",
-    "【确认执行·须改代码】用户在上文分析后要求修复/改吧，不是再要一篇分析。",
-    "最多 1 次 read_file 核对目标函数后即 patch_file/write_file；禁止 grep transform/Teleport（上文已讨论过）。",
-    "禁止输出「请将以下修改应用到…」或只贴代码块让用户手动改；你必须亲自提交 patch。",
-    "优先改 src/views/VibeCodingView.vue 中 getSelectionAnchorRect / showQuoteButtonAt / onMessageSelect 相关逻辑。",
+    "【实施进度追问】用户在问前述改动是否已完成。",
+    "只读 grep/read 核对仓库现状后直接回答进度；禁止 patch_file / write_file。",
+    "禁止称 Ask 模式或让用户切换 Build（当前为 Build 模式的咨询只读轮）。",
   ].join("\n");
+}
+
+export function buildImplementFollowUpHint(quotePositionFix = false): string {
+  const lines = [
+    "",
+    "【确认执行·须改代码】用户在上文分析或部分实施后要求继续修复/改吧，不是再要一篇分析。",
+    "最多 1–2 次 read_file 核对目标后即 patch_file/write_file；禁止只分析并反问「要不要修」。",
+    "禁止输出「请将以下修改应用到…」或只贴代码块让用户手动改；你必须亲自提交 patch。",
+  ];
+  if (quotePositionFix) {
+    lines.push(
+      "最多 1 次 read_file 核对目标函数；禁止 grep transform/Teleport（上文已讨论过）。",
+      "优先改 src/views/VibeCodingView.vue 中 getSelectionAnchorRect / showQuoteButtonAt / onMessageSelect 相关逻辑。",
+    );
+  }
+  return lines.join("\n");
+}
+
+/** Shown in Build system prompt — disambiguate write-tool errors from UI Ask mode. */
+export function buildBuildWriteBlockedHint(): string {
+  return [
+    "写工具若返回「Build 只读轮」：说明本条被标为【咨询任务·只读】，不是 UI 的 Ask 模式；禁止让用户切换 Build 或称 Ask 模式。",
+    "写工具若返回「Ask 模式下不支持」：才表示用户确实在 Ask 模式。",
+  ].join("\n");
+}
+
+export type WriteToolBlockReason = "ask" | "plan" | "consultative_build";
+
+export function buildWriteToolBlockedMessage(reason: WriteToolBlockReason): string {
+  if (reason === "ask") {
+    return "Ask 模式下不支持文件修改，请仅使用只读工具查询项目。";
+  }
+  if (reason === "plan") {
+    return "Plan 规划阶段不支持文件修改，请先输出方案；用户确认后再执行。";
+  }
+  return (
+    "错误：本条为咨询任务（Build 只读轮），不支持写文件。" +
+    "请用自然语言回答；若须继续改代码，请用户发送明确实施指令（如「继续改」）。" +
+    "禁止向用户称「Ask 模式」或让用户切换 Build。"
+  );
 }
 
 export function buildUiDefectBuildHint(): string {

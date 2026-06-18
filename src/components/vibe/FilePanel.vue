@@ -115,7 +115,6 @@
             type="button"
             class="icon-btn"
             title="新会话"
-            :disabled="chatSending"
             @click="$emit('start-new-session')"
           >+</button>
           <button
@@ -150,14 +149,12 @@
                 type="button"
                 class="icon-btn small"
                 title="复制会话信息"
-                :disabled="chatSending"
                 @click.stop="$emit('copy-session-info', s)"
               >📋</button>
               <button
                 type="button"
                 class="icon-btn small"
                 title="删除此会话"
-                :disabled="chatSending"
                 @click.stop="$emit('remove-session', s.id)"
               >🗑</button>
             </div>

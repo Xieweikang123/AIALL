@@ -314,7 +314,7 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
   }
 
   function startNewSession() {
-    if (chatSending() || !projectPath().trim()) return;
+    if (!projectPath().trim()) return;
     cancelPendingChatPersistence();
     const project = projectPath().trim();
     const fromSessionId = activeSessionId.value;
@@ -333,7 +333,7 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
   }
 
   function switchSession(sessionId: string) {
-    if (chatSending() || !projectPath().trim()) return;
+    if (!projectPath().trim()) return;
     if (sessionId === activeSessionId.value) {
       closeSessionPicker();
       return;

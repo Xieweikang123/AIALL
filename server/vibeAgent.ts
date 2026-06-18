@@ -56,7 +56,7 @@ import {
   PLAN_MAX_TOTAL_EXPLORE_HARD,
   PLAN_MAX_TOTAL_EXPLORE_SOFT,
 } from "./agentExplorationBudget";
-import { buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildImplementFollowUpHint, buildSessionAuditHint, buildUiDefectBuildHint, isAgentStepClarificationPrompt, isConsultativeUserPrompt, isImplementFollowUpRun, isSessionAuditPrompt, isUiDefectReportPrompt } from "./agentUserIntent";
+import { buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildBuildWriteBlockedHint, buildImplementFollowUpHint, buildImplementationStatusHint, buildSessionAuditHint, buildUiDefectBuildHint, buildWriteToolBlockedMessage, isAgentStepClarificationPrompt, isConsultativeUserPrompt, isImplementationStatusPrompt, isImplementFollowUpRun, isSessionAuditPrompt, isUiDefectReportPrompt, historySuggestsActiveImplementation, historySuggestsQuotePositionFix } from "./agentUserIntent";
 import { detectUserNegation } from "../src/services/agentContinuation";
 import { buildAgentSuggestionsPromptHint } from "../src/services/agentSuggestions";
 import {
@@ -619,6 +619,7 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "用户选择执行：当你提供了多个方案/选项让用户选择时，用户选定后必须立即执行该方案（如 patch_file / write_file 落盘），不得自行改变方向或跳过执行去做其他调查。执行完毕并报告结果后，若需进一步排查再提出下一步建议。",
     "Build 模式简短实施指令（如「执行」「继续」「改吧」「优化」）或用户明确提出要改时：若上一条助手回复已列出具体改动步骤、代码片段或目标文件，必须立即 patch_file / write_file，禁止再次征求确认；除非改动涉及大范围重构或明显高风险操作。",
     "当前已在 Build 模式时，禁止再问用户是否切换到 Build；若上一条已列出多项改动，patch 须逐项落实，不得在回复中声称已完成尚未 patch 的项。",
+    buildBuildWriteBlockedHint(),
     "Build 模式下用户追问「还能优化吗」「还能继续吗」「继续吧」「接着改」等，均视为执行指令，必须立即 patch_file / write_file，禁止再分析或询问。",
     "探索时：read_file 用 offset/limit 分段读取（单次约 200 行）；不要重复读取已读过的文件；用中文简短说明后立即调用工具。",
     "修改前必须先 read_file 核对目标文件；patch_file 前 old_string 须与磁盘内容完全一致。",
@@ -853,13 +854,13 @@ export async function executeTool(
   toolGuard?: ToolGuardContext,
 ): Promise<string> {
   if (mode === "ask" && WRITE_AGENT_TOOL_NAMES.has(name)) {
-    return "Ask 模式下不支持文件修改，请仅使用只读工具查询项目。";
+    return buildWriteToolBlockedMessage("ask");
   }
   if (mode === "plan" && !stage && WRITE_AGENT_TOOL_NAMES.has(name)) {
-    return "Plan 规划阶段不支持文件修改，请先输出方案；用户确认后再执行。";
+    return buildWriteToolBlockedMessage("plan");
   }
   if (!stage && WRITE_AGENT_TOOL_NAMES.has(name)) {
-    return "错误：当前模式不支持写文件";
+    return buildWriteToolBlockedMessage("consultative_build");
   }
   const root = path.resolve(projectRoot);
 
@@ -973,7 +974,7 @@ export async function executeTool(
   }
 
   if (name === "write_file") {
-    if (!stage) return "错误：当前模式不支持写文件";
+    if (!stage) return buildWriteToolBlockedMessage("consultative_build");
     const filePath = String(args.path || "").trim();
     const content = args.content;
     if (!filePath) return "错误：缺少 path";
@@ -1010,7 +1011,7 @@ export async function executeTool(
   }
 
   if (name === "patch_file") {
-    if (!stage) return "错误：当前模式不支持写文件";
+    if (!stage) return buildWriteToolBlockedMessage("consultative_build");
     const filePath = String(args.path || "").trim();
     const oldString = args.old_string;
     const newString = args.new_string;
@@ -1048,7 +1049,9 @@ export async function executeTool(
   }
 
   if (name === "delete_file") {
-    if (!stage) return "错误：当前模式不支持删除文件";
+    if (!stage) {
+      return buildWriteToolBlockedMessage("consultative_build").replace("写文件", "删除文件");
+    }
     const filePath = String(args.path || "").trim();
     if (!filePath) return "错误：缺少 path";
     const resolved = resolveProjectPath(root, filePath);
@@ -1157,7 +1160,21 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     onEvent,
     signal,
   } = params;
-  const readOnlyBuildRun = !isAsk && !isPlanExplore && !isExecutePlan && isConsultativeUserPrompt(prompt);
+  const implementFollowUpRun =
+    !isAsk &&
+    !isPlanExplore &&
+    !isExecutePlan &&
+    isImplementFollowUpRun(prompt, params.history, { isAsk });
+  const readOnlyBuildRun =
+    !isAsk &&
+    !isPlanExplore &&
+    !isExecutePlan &&
+    isConsultativeUserPrompt(prompt) &&
+    !implementFollowUpRun;
+  const implementationStatusRun =
+    readOnlyBuildRun &&
+    isImplementationStatusPrompt(prompt) &&
+    historySuggestsActiveImplementation(params.history);
   const imageDataUrls = sanitizeImageDataUrls(params.imageDataUrls);
   const uiDefectBuildRun =
     !isAsk &&
@@ -1166,11 +1183,6 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     imageDataUrls.length > 0 &&
     isUiDefectReportPrompt(prompt, imageDataUrls.length > 0);
   const agentStepClarifyRun = !isAsk && !isPlanExplore && isAgentStepClarificationPrompt(prompt);
-  const implementFollowUpRun =
-    !isAsk &&
-    !isPlanExplore &&
-    !isExecutePlan &&
-    isImplementFollowUpRun(prompt, params.history, { isAsk, readOnlyBuild: readOnlyBuildRun });
   const sessionAuditRun =
     !isAsk && !isPlanExplore && !isExecutePlan && isSessionAuditPrompt(prompt);
 
@@ -1250,8 +1262,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       ? buildPlanSystemPrompt(projectRoot, openFilePath, openFileSnippet, model)
       : buildSystemPrompt(projectRoot, openFilePath, model) +
         (readOnlyBuildRun ? buildConsultativeBuildHint() : "") +
+        (implementationStatusRun ? buildImplementationStatusHint() : "") +
         (uiDefectBuildRun ? buildUiDefectBuildHint() : "") +
-        (implementFollowUpRun ? buildImplementFollowUpHint() : "") +
+        (implementFollowUpRun ? buildImplementFollowUpHint(historySuggestsQuotePositionFix(params.history)) : "") +
         (sessionAuditRun ? buildSessionAuditHint() : "") +
         (agentStepClarifyRun ? buildAgentStepClarificationHint() : "")) +
     projectContextBlock +

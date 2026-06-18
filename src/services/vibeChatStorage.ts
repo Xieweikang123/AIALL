@@ -265,19 +265,35 @@ export type AgentHistorySourceMessage = {
   }>;
 };
 
-const TOOL_SUMMARY_BLOCK_RE = /\n*(?:\[工具摘要\]\n(?:- .*(?:\n|$))+)+\n*/g;
+const TOOL_SUMMARY_MARKER = /(?:\[工具摘要\]|<!--\s*agent-tool-log\s*-->)/u;
 
-/** Lines echoing tool step labels + summaries (model leak, with or without [工具摘要] header). */
+const TOOL_SUMMARY_BLOCK_RE =
+  /\n*(?:(?:\[工具摘要\]|<!--\s*agent-tool-log\s*-->)\n(?:- .*(?:\n|$))+)+\n*/gu;
+
+/** Incomplete tail while streaming (header / marker with partial bullet list). */
+const TOOL_SUMMARY_TAIL_RE =
+  /\n*(?:\[工具摘要\]|<!--\s*agent-tool-log\s*-->)\s*[\s\S]*$/u;
+
+const TOOL_SUMMARY_MARKDOWN_TAIL_RE = /\n*#{1,3}\s*工具摘要\s*[\s\S]*$/u;
+
+/** Lines echoing tool step labels + summaries (model leak, with or without marker header). */
 const TOOL_ACTION_LINE_RE =
   /^[-*•>\s]*(?:读取文件|列出目录|浏览目录|搜索代码|搜索内容|搜索文件|写入文件|局部修改|删除文件|执行命令|联网搜索|抓取网页)[：:]\s*.+$/u;
 
 const TOOL_SUMMARY_HEADING_RE = /^#{1,3}\s*工具摘要\s*$/;
 
-/** Strip [工具摘要] blocks and leaked tool-action bullet lines from assistant text shown to the user. */
+/** Strip tool-log blocks and leaked tool-action bullet lines from assistant text shown to the user. */
 export function stripToolSummaryFromAssistantContent(text: string): string {
   if (!text?.trim()) return text;
 
-  let result = text.replace(TOOL_SUMMARY_BLOCK_RE, "\n");
+  const markerIdx = text.search(/<!--\s*agent-tool-log\b/i);
+  let result = markerIdx >= 0 ? text.slice(0, markerIdx) : text;
+
+  result = result
+    .replace(TOOL_SUMMARY_BLOCK_RE, "\n")
+    .replace(TOOL_SUMMARY_TAIL_RE, "")
+    .replace(TOOL_SUMMARY_MARKDOWN_TAIL_RE, "");
+
   const kept: string[] = [];
 
   for (const line of result.split("\n")) {
@@ -287,6 +303,7 @@ export function stripToolSummaryFromAssistantContent(text: string): string {
       continue;
     }
     if (TOOL_SUMMARY_HEADING_RE.test(trimmed)) continue;
+    if (TOOL_SUMMARY_MARKER.test(trimmed)) continue;
     if (TOOL_ACTION_LINE_RE.test(trimmed)) continue;
     kept.push(line);
   }
@@ -305,7 +322,7 @@ function summarizeToolsForHistory(
       const status = t.ok === false ? "（失败）" : "";
       return `- ${label}: ${t.summary}${status}`;
     });
-  return lines.length ? `\n\n[工具摘要]\n${lines.join("\n")}` : "";
+  return lines.length ? `\n\n<!-- agent-tool-log -->\n${lines.join("\n")}` : "";
 }
 
 /** Most recent user message that has stored image refs (for follow-up runs without a new attachment). */
@@ -598,6 +615,7 @@ function sanitizeMessages(
         reverted: m.reverted || undefined,
         activityExpanded: m.activityExpanded || undefined,
         activityDetailed: m.activityDetailed || undefined,
+        agentSuggestions: m.agentSuggestions?.length ? [...m.agentSuggestions] : undefined,
         streamChars: m.streamChars || undefined,
         contextChars: m.contextChars || undefined,
         ...(options?.forDisk

@@ -116,7 +116,7 @@ describe("buildAgentHistoryFromMessages", () => {
       },
     ]);
     expect(history[0].content).toContain("找到了文件。");
-    expect(history[0].content).toContain("[工具摘要]");
+    expect(history[0].content).toContain("<!-- agent-tool-log -->");
     expect(history[0].content).toContain("搜索文件: 找到 1 个文件");
   });
 
@@ -131,7 +131,7 @@ describe("buildAgentHistoryFromMessages", () => {
       },
     ]);
     expect(history[0].content).toBe(
-      "完成了。\n\n[工具摘要]\n- 局部修改: 已修改 a.ts",
+      "完成了。\n\n<!-- agent-tool-log -->\n- 局部修改: 已修改 a.ts",
     );
   });
 
@@ -162,6 +162,28 @@ describe("buildAgentHistoryFromMessages", () => {
       "- 局部修改：已修改 src/foo.ts",
     ].join("\n");
     expect(stripToolSummaryFromAssistantContent(mixed)).toBe("已修复 Markdown 渲染问题。");
+  });
+
+  it("strips partial streaming tool summary tail", () => {
+    const streaming = [
+      "你只需要等它跑完即可。",
+      "",
+      "[工具摘要]",
+      "- 读取文件: 读取 73 行内容",
+      "- 读取文件: 读取 59 行内容",
+      "- 搜索代码: 找到 5 处",
+    ].join("\n");
+    expect(stripToolSummaryFromAssistantContent(streaming)).toBe("你只需要等它跑完即可。");
+  });
+
+  it("strips agent-tool-log marker blocks for model history leaks", () => {
+    const leaked = [
+      "正文。",
+      "",
+      "<!-- agent-tool-log -->",
+      "- 读取文件: 读取 20 行内容",
+    ].join("\n");
+    expect(stripToolSummaryFromAssistantContent(leaked)).toBe("正文。");
   });
 
   it("shapes history for execute_plan profile", () => {

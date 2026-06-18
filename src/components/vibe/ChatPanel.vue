@@ -123,6 +123,18 @@
           <li v-for="(q, qi) in pendingPromptQueue" :key="qi">{{ q }}</li>
         </ol>
       </div>
+      <div v-if="agentSuggestions.length && !chatSending" class="agent-suggestion-chips">
+        <span class="agent-suggestion-label">建议操作</span>
+        <button
+          v-for="(suggestion, index) in agentSuggestions"
+          :key="`${suggestion.label}-${index}`"
+          type="button"
+          class="chip agent-suggestion-chip"
+          @click="$emit('apply-suggestion', suggestion)"
+        >
+          {{ suggestion.label }}
+        </button>
+      </div>
     <div
       v-if="quotedMessages.length"
       class="quoted-preview-stack"
@@ -327,6 +339,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, withDefaults, type CSSProperties } from "vue";
 import type { VibeChatMode } from "../../services/vibeAgentClient";
+import type { AgentSuggestion } from "../../services/agentSuggestions";
 import type { VibeChatSessionMeta } from "../../services/vibeChatStorage";
 import { formatCharCount } from "../../utils/vibeHelpers";
 import { resolveAgentResumeButtonLabel } from "../../services/agentRecovery";
@@ -405,6 +418,7 @@ interface Props {
   projectMemoryMessage?: string;
   projectMemoryMaxChars?: number;
   projectMemoryHasContent?: boolean;
+  agentSuggestions?: AgentSuggestion[];
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -422,6 +436,7 @@ const props = withDefaults(defineProps<Props>(), {
   projectMemoryHasContent: false,
   quotedMessages: () => [],
   agentRunningStatus: "",
+  agentSuggestions: () => [],
 });
 
 const panelStyle = computed(() => {
@@ -454,6 +469,7 @@ const emit = defineEmits<{
   (e: "sync-chat-store-to-disk"): void;
   (e: "clear-pending-queue"): void;
   (e: "apply-example", text: string): void;
+  (e: "apply-suggestion", suggestion: AgentSuggestion): void;
   (e: "copy-session-info", session: VibeChatSessionMeta): void;
   (e: "clear-chat"): void;
   (e: "on-composer-field-keydown", event: KeyboardEvent): void;
@@ -899,6 +915,28 @@ function formatSessionTime(timestamp: number | string): string {
 .chip:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.agent-suggestion-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(31, 111, 235, 0.22);
+  background: rgba(31, 111, 235, 0.06);
+}
+
+.agent-suggestion-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  flex-shrink: 0;
+}
+
+.agent-suggestion-chip {
+  margin: 0;
 }
 
 .chat-composer {

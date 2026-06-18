@@ -21,7 +21,6 @@
       :current-path="projectPath"
       :loading-tree="loadingTree"
       :picking-folder="pickingFolder"
-      :chat-sending="chatSending"
       @switch-project="openProjectByPath"
       @remove-project="removeRecentProject"
       @open-new-project="handleOpenProject"
@@ -273,6 +272,7 @@
         :project-memory-message="projectMemoryMessage"
         :project-memory-max-chars="projectMemoryMaxChars"
         :project-memory-has-content="projectMemoryHasContent"
+        :agent-suggestions="activeAgentSuggestions"
         @on-chat-drag-enter="onChatDragEnter"
         @on-chat-drag-over="onChatDragOver"
         @on-chat-drag-leave="onChatDragLeave"
@@ -286,6 +286,7 @@
         @sync-chat-store-to-disk="syncChatStoreToDisk"
         @clear-chat="clearChat"
         @apply-example="applyExample"
+        @apply-suggestion="handleAgentSuggestion"
         @on-chat-scroll="onChatScroll"
         @clear-pending-queue="clearPendingPromptQueue"
         @update:quoted-messages="quotedMessages = $event"
@@ -399,6 +400,7 @@ import { useSessionManager } from "../composables/useSessionManager";
 import { useChatSessionStore } from "../composables/useChatSessionStore";
 import { useProjectMemory } from "../composables/useProjectMemory";
 import { useAgentRun, type ChatMessage } from "../composables/useAgentRun";
+import { parseAgentSuggestions, type AgentSuggestion } from "../services/agentSuggestions";
 import type { TurnFileDiff } from "../types/vibeChat";
 import { ESCAPE_DISMISS_PRIORITY, registerEscapeDismiss } from "../composables/useEscapeDismiss";
 import {
@@ -729,6 +731,11 @@ function loadChatMode(): VibeChatMode {
 const chatMode = ref<VibeChatMode>(loadChatMode());
 const chatMessages = ref<ChatMessage[]>([]);
 const chatSending = ref(false);
+// ── 按会话独立的发送状态 ──
+const sendingSessionIds = reactive(new Set<string>());
+function isSessionSending(sessionId: string): boolean {
+  return sendingSessionIds.has(sessionId);
+}
 const switchingProject = ref(false);
 const chatError = ref("");
 const searchInputRef = ref<HTMLInputElement | null>(null);
@@ -761,6 +768,7 @@ interface ProjectFileItem {
 
 const composerRef = ref<InstanceType<typeof ChatComposerEditor> | null>(null);
 const composerEmpty = ref(true);
+const dismissedSuggestionMsgId = ref<string | null>(null);
 const chatDropZoneRef = ref<HTMLElement | null>(null);
 const chatInputFocused = ref(false);
 function onChatInputBoxMouseDown() {
@@ -808,6 +816,22 @@ const {
   formatSessionInfoForCopy,
   setActiveSession,
 } = session;
+
+// 监听 chatSending 变化，同步到 sendingSessionIds
+watch(chatSending, (sending) => {
+  if (sending) {
+    sendingSessionIds.add(activeSessionId.value);
+  } else {
+    sendingSessionIds.delete(activeSessionId.value);
+  }
+});
+// 切换会话时，恢复目标会话的发送状态到 chatSending
+watch(activeSessionId, (_newId, _oldId) => {
+  const wasSending = sendingSessionIds.has(_newId);
+  if (wasSending !== chatSending.value) {
+    chatSending.value = wasSending;
+  }
+});
 
 const chatSessionHooks: {
   onAfterSwitch?: () => void;
@@ -1625,6 +1649,35 @@ const agentRunningStatusText = computed(() => {
     if (m?.role === "assistant") return buildAgentRunningStatusTextForMsg(m);
   }
   return "Agent 运行中…";
+});
+
+function findLastCompletedAssistantMessage(): ChatMessage | undefined {
+  for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
+    const msg = chatMessages.value[i];
+    if (msg?.role === "assistant" && !isAgentRunning(msg)) return msg;
+  }
+  return undefined;
+}
+
+const activeAgentSuggestions = computed<AgentSuggestion[]>(() => {
+  if (chatSending.value || !composerEmpty.value) return [];
+  const msg = findLastCompletedAssistantMessage();
+  if (!msg || dismissedSuggestionMsgId.value === msg.id) return [];
+  if (msg.agentSuggestions?.length) return msg.agentSuggestions;
+  return parseAgentSuggestions(msg.content || "").suggestions;
+});
+
+function dismissAgentSuggestions() {
+  const msg = findLastCompletedAssistantMessage();
+  if (msg) dismissedSuggestionMsgId.value = msg.id;
+}
+
+watch(activeSessionId, () => {
+  dismissedSuggestionMsgId.value = null;
+});
+
+watch(composerEmpty, (empty) => {
+  if (!empty) dismissAgentSuggestions();
 });
 
 const expandedDiffs = reactive<Record<string, Record<string, boolean>>>({});
@@ -2485,6 +2538,40 @@ async function buildReferencedFileSection(refs: ReferencedFile[]): Promise<strin
   return chunks.join("\n\n");
 }
 
+function handleAgentSuggestion(suggestion: AgentSuggestion) {
+  dismissAgentSuggestions();
+  const sourceMsg = findLastCompletedAssistantMessage();
+
+  if (suggestion.action === "execute_plan" && sourceMsg && canExecutePlanMessage(sourceMsg)) {
+    void executePlanFromMessage(sourceMsg.id);
+    return;
+  }
+
+  const userText = suggestion.text?.trim() || suggestion.label;
+  const runOptions =
+    suggestion.action === "implement" && sourceMsg
+      ? {
+          userBubbleContent: suggestion.label,
+          planAssistantContent: messageDisplayContent(sourceMsg),
+        }
+      : { userBubbleContent: suggestion.label || userText };
+
+  if (chatSending.value) {
+    chatMessages.value.push({
+      id: genId(),
+      role: "user",
+      content: runOptions.userBubbleContent,
+    });
+    interruptAgentRun();
+    persistChatNow();
+    void scrollChatToBottom(true);
+    void runAgentTurn(userText, { ...runOptions, skipUserBubble: true });
+    return;
+  }
+
+  void runAgentTurn(userText, runOptions);
+}
+
 function handleAiOptionSelect(
   option: { index: number; label: string; fullText: string; action?: "implement" },
   msg?: ChatMessage,
@@ -2517,6 +2604,7 @@ function handleAiOptionSelect(
 
 async function sendChat() {
   if (!canSendChat.value) return;
+  dismissAgentSuggestions();
   const composer = composerRef.value;
   if (!composer) return;
 
