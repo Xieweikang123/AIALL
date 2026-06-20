@@ -61,6 +61,11 @@ AIALL 的 Vibe 会话文件**不在项目目录内**，存储在 AppData Roaming
 - **禁止** 在代码中添加 `console.log` 用于调试
 - **应使用** 写入临时文件的日志：追加到 `.debug.log`（项目根目录），调试完成后删除该文件
 
+## 事实核查
+
+- 涉及代码实现的断言，必须先 read/grep 验证，禁止凭印象作答
+- 不确定时明确说"不确定"，不要用肯定语气包装猜测
+
 ## 事件竞态调试准则
 
 处理 DOM 事件竞态（mousedown/mouseup/selectionchange 等）时：

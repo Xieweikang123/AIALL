@@ -331,6 +331,25 @@ export function useProjectMemory(projectPath: Ref<string>, projectOpened: Ref<bo
     pendingSkillProposals.value = pendingSkillProposals.value.filter((p) => p.id !== id);
   }
 
+  async function trackMemoryUsageAfterRun(assistantResponse: string) {
+    const path = projectPath.value.trim();
+    if (!path || !projectMemoryContent.value.trim()) return;
+    try {
+      const { backendUrl } = await import("../services/backendBase");
+      await fetch(backendUrl("/backend/vibe/memory-usage"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectPath: path,
+          memoryContent: projectMemoryContent.value,
+          assistantResponse,
+        }),
+      });
+    } catch {
+      // silent
+    }
+  }
+
   watch(
     () => [projectPath.value, projectOpened.value] as const,
     ([path, opened]) => {
@@ -393,5 +412,6 @@ export function useProjectMemory(projectPath: Ref<string>, projectOpened: Ref<bo
     confirmPendingSkillProposal,
     dismissPendingMemoryProposal,
     dismissPendingSkillProposal,
+    trackMemoryUsageAfterRun,
   };
 }

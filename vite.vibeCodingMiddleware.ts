@@ -1239,6 +1239,34 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
     }
   });
 
+  // POST /backend/vibe/memory-usage
+  middlewares.use("/backend/vibe/memory-usage", async (req, res) => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { ok: false, error: "仅支持 POST 请求" });
+      return;
+    }
+    try {
+      const { trackMemoryUsage, getMemoryUsageStore } = await import("./server/memoryUsageTracker.js");
+      const body = (await readJsonBody(req)) as {
+        projectPath?: string;
+        memoryContent?: string;
+        assistantResponse?: string;
+      };
+      const projectPath = body.projectPath?.trim() || "";
+      if (!projectPath) {
+        sendJson(res, 400, { ok: false, error: "缺少 projectPath" });
+        return;
+      }
+      if (body.memoryContent && body.assistantResponse) {
+        await trackMemoryUsage(projectPath, body.memoryContent, body.assistantResponse);
+      }
+      const store = await getMemoryUsageStore(projectPath);
+      sendJson(res, 200, { ok: true, entries: store.entries });
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "记忆使用追踪失败" });
+    }
+  });
+
   // POST /backend/vibe/project-context
   middlewares.use("/backend/vibe/project-context", async (req, res) => {
     if (req.method !== "POST") {

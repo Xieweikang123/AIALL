@@ -2,10 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   appendProjectMemorySection,
+  extractTaskKeywords,
   isProjectMemorySection,
   PROJECT_MEMORY_SECTION_TEMPLATE,
+  rankMemoryEntries,
   type ProjectMemorySection,
 } from "../src/services/projectMemorySections";
+import { getMemoryUsageStore } from "./memoryUsageTracker";
 import { resolveProjectPath } from "./vibeFs";
 
 /** Relative to project root; listed in .gitignore by default. */
@@ -47,15 +50,33 @@ export function normalizeProjectMemoryContent(raw: string): { content: string; t
   };
 }
 
-export function formatProjectMemoryForPrompt(content: string, truncated = false): string {
+export async function formatProjectMemoryForPrompt(
+  content: string,
+  truncated = false,
+  taskContext?: string,
+  projectRoot?: string,
+): Promise<string> {
   const body = content.trim();
   if (!body) return "";
+
+  let filtered = body;
+  if (taskContext) {
+    const keywords = extractTaskKeywords(taskContext);
+    let usageCounts: Map<string, number> | undefined;
+    if (projectRoot) {
+      const store = await getMemoryUsageStore(projectRoot);
+      if (store.entries.length) {
+        usageCounts = new Map(store.entries.map((e) => [e.key, e.count]));
+      }
+    }
+    filtered = rankMemoryEntries(body, keywords, PROJECT_MEMORY_MAX_CHARS, usageCounts);
+  }
 
   const lines = [
     "",
     "项目记忆（用户确认的偏好、常用命令与踩坑，请优先遵守；与当前任务冲突时以用户最新消息为准）：",
     "```markdown",
-    body,
+    filtered,
     "```",
   ];
   if (truncated) {

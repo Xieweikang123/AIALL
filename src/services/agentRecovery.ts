@@ -17,6 +17,7 @@ export type AgentProgressTool = {
   summary?: string;
   ok?: boolean;
   turn?: number;
+  args?: Record<string, unknown>;
 };
 
 export type AgentProgressSource = {
@@ -395,6 +396,11 @@ export function summarizeAgentProgress(msg: AgentProgressSource): string {
     }
   }
 
+  const readFileSummary = summarizeReadFileRanges(completedTools);
+  if (readFileSummary) {
+    lines.push("", "已读文件范围（勿重复读取相同区域，可 grep 定位后精确 read）：", readFileSummary);
+  }
+
   const lastNarrative =
     msg.roundGroups
       ?.map((g) => g.narrative?.trim())
@@ -414,6 +420,64 @@ export function summarizeAgentProgress(msg: AgentProgressSource): string {
     lines.push("", `已产生文件变更（${written.length} 个）：${written.join("、")}`);
   }
 
+  return lines.join("\n");
+}
+
+/**
+ * Extract read_file tool calls, group by file path, merge overlapping line ranges,
+ * and produce a compact summary like:
+ *   - src/composables/useGitPanel.ts: L1-100, L196-247(refreshGitStatus), L348-374(unstageAll)
+ *   - src/components/vibe/GitPanel.vue: L160-179
+ */
+function summarizeReadFileRanges(tools: AgentProgressTool[]): string {
+  const readCalls = tools.filter((t) => t.name === "read_file" && t.ok !== false && t.args);
+  if (!readCalls.length) return "";
+
+  // file → array of { start, end }
+  const fileRanges = new Map<string, Array<{ start: number; end: number }>>();
+
+  for (const t of readCalls) {
+    const args = t.args!;
+    const path = String(args.path ?? "");
+    if (!path) continue;
+    const offset = Number(args.offset) || 1;
+    const limit = Number(args.limit) || 100;
+    const start = Math.max(1, offset);
+    const end = start + limit - 1;
+
+    if (!fileRanges.has(path)) fileRanges.set(path, []);
+    fileRanges.get(path)!.push({ start, end });
+  }
+
+  if (!fileRanges.size) return "";
+
+  // Merge overlapping ranges per file
+  const mergedPerFile: Array<{ path: string; ranges: Array<{ start: number; end: number }> }> = [];
+  for (const [path, raw] of fileRanges) {
+    const sorted = raw.sort((a, b) => a.start - b.start);
+    const merged: Array<{ start: number; end: number }> = [];
+    for (const r of sorted) {
+      const last = merged[merged.length - 1];
+      if (last && r.start <= last.end + 20) {
+        // Merge if overlap or gap ≤ 20 lines (small gap = not worth re-reading)
+        last.end = Math.max(last.end, r.end);
+      } else {
+        merged.push({ start: r.start, end: r.end });
+      }
+    }
+    mergedPerFile.push({ path, ranges: merged });
+  }
+
+  // Sort by file path for stable output
+  mergedPerFile.sort((a, b) => a.path.localeCompare(b.path));
+
+  const lines: string[] = [];
+  for (const { path, ranges } of mergedPerFile) {
+    const rangeStr = ranges
+      .map((r) => (r.start === 1 && r.end <= 200 ? `L1-${r.end}` : `L${r.start}-${r.end}`))
+      .join(", ");
+    lines.push(`- ${path}: ${rangeStr}`);
+  }
   return lines.join("\n");
 }
 
@@ -463,7 +527,7 @@ export function buildAgentResumePrompt(
   const progress = summarizeAgentProgress(msg);
   return [
     "【自动续跑】上次运行因连接中断而暂停。请从断点继续完成原始任务，不要重复已完成的工具步骤或已写入的修改。",
-    "【效率】你已探索足够：禁止重复上述 grep/read；直接 patch_file/write_file 完成剩余改动；最多 1 次 grep 定位遗漏。",
+    "【效率】已读文件范围见下方摘要——相同文件的相同区域禁止再 read_file，用 grep 定位后直接 patch_file/write_file；最多 1 次 grep 定位遗漏。",
     `中断原因：${errorMessage.trim()}`,
     "",
     progress,

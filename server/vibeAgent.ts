@@ -111,6 +111,7 @@ import { formatAgentsGuideForPrompt, readProjectAgentsGuide } from "./vibeProjec
 import { buildMemoryProposalToolResult } from "./projectMemoryProposal";
 import { buildSkillProposalToolResult } from "./projectSkillProposal";
 import {
+  buildExplorationArchivePromptBlock,
   buildProjectSkillsPromptBlock,
   listProjectSkills,
   readProjectSkill,
@@ -1426,9 +1427,15 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   }
 
   const projectMemoryResult = await readProjectMemory(projectRoot);
+  const memoryTaskContext = [prompt, openFileRel].filter(Boolean).join(" ");
   const projectMemoryBlock =
     projectMemoryResult.ok && projectMemoryResult.content.trim()
-      ? formatProjectMemoryForPrompt(projectMemoryResult.content, projectMemoryResult.truncated)
+      ? await formatProjectMemoryForPrompt(
+          projectMemoryResult.content,
+          projectMemoryResult.truncated,
+          memoryTaskContext,
+          projectRoot,
+        )
       : "";
 
   const agentsGuideResult = await readProjectAgentsGuide(projectRoot);
@@ -1437,7 +1444,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       ? formatAgentsGuideForPrompt(agentsGuideResult.content, agentsGuideResult.truncated)
       : "";
 
-  const projectSkillsBlock = await buildProjectSkillsPromptBlock(projectRoot);
+  const projectSkillsBlock = await buildProjectSkillsPromptBlock(projectRoot, prompt);
+
+  const explorationArchiveBlock = await buildExplorationArchivePromptBlock(projectRoot, prompt);
 
   const runtimeProfile = detectProjectRuntimeProfile(projectRoot);
   const runtimeAwarenessBlock = buildRuntimeAwarenessHint(runtimeProfile);
@@ -1463,6 +1472,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     agentsGuideBlock +
     projectSkillsBlock +
     projectMemoryBlock +
+    explorationArchiveBlock +
     runtimeAwarenessBlock;
 
   const writeStage = isAsk || isPlanExplore || readOnlyBuildRun ? null : createWriteStage();

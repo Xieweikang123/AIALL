@@ -1021,6 +1021,13 @@ export function listVibeChatSessions(projectPath: string): VibeChatSessionMeta[]
     });
 }
 
+export function getSessionTitle(projectPath: string, sessionId: string): string | undefined {
+  const key = normalizeProjectKey(projectPath);
+  if (!key) return undefined;
+  const record = getProjectRecord(key);
+  return record?.sessions.find((s) => s.id === sessionId)?.title;
+}
+
 export function getActiveVibeChatSessionId(projectPath: string): string {
   const key = normalizeProjectKey(projectPath);
   if (!key) return "";

@@ -158,6 +158,33 @@ describe("summarizeAgentProgress", () => {
     expect(summary).toContain("再写入");
     expect(summary).toContain("src/b.ts");
   });
+
+  it("includes read_file ranges summary with merged overlapping ranges", () => {
+    const summary = summarizeAgentProgress({
+      tools: [
+        { name: "read_file", ok: true, turn: 1, args: { path: "src/a.ts", offset: 1, limit: 100 } },
+        { name: "read_file", ok: true, turn: 2, args: { path: "src/a.ts", offset: 90, limit: 50 } },
+        { name: "read_file", ok: true, turn: 3, args: { path: "src/b.ts", offset: 200, limit: 50 } },
+        { name: "grep", ok: true, turn: 1, args: { pattern: "foo" } },
+      ],
+    });
+    expect(summary).toContain("已读文件范围");
+    expect(summary).toContain("src/a.ts");
+    expect(summary).toContain("src/b.ts");
+    // L1-100 and L90-139 should merge to L1-139
+    expect(summary).toContain("L1-139");
+    expect(summary).toContain("L200-249");
+  });
+
+  it("skips read_file summary when no read_file tools", () => {
+    const summary = summarizeAgentProgress({
+      tools: [
+        { name: "grep", ok: true, turn: 1, args: { pattern: "foo" } },
+        { name: "patch_file", ok: true, turn: 2, args: { path: "src/a.ts" } },
+      ],
+    });
+    expect(summary).not.toContain("已读文件范围");
+  });
 });
 
 describe("buildAgentResumePrompt", () => {

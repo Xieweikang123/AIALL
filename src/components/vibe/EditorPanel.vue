@@ -221,6 +221,8 @@ defineExpose({ editorRef });
   border-radius: 6px 6px 0 0;
   white-space: nowrap;
   max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   transition: color 0.15s ease, background 0.15s ease;
 }
 
@@ -249,8 +251,8 @@ defineExpose({ editorRef });
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   font-size: 12px;
   color: var(--text-secondary, #999);
   border-radius: 3px;
@@ -347,7 +349,7 @@ defineExpose({ editorRef });
   flex: 1;
   gap: 10px;
   padding: 24px;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgba(255, 255, 255, 0.55);
 }
 
 .editor-empty-visual {
@@ -357,23 +359,23 @@ defineExpose({ editorRef });
   align-items: center;
   justify-content: center;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.35);
+  background: linear-gradient(135deg, rgba(31, 111, 235, 0.15), rgba(130, 80, 223, 0.12));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(145, 190, 255, 0.8);
   margin-bottom: 4px;
 }
 
 .editor-empty-title {
   margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.72);
+  font-size: 15px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.92);
 }
 
 .editor-empty-hint {
   margin: 0;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.38);
+  color: rgba(255, 255, 255, 0.55);
 }
 
 .code-editor {

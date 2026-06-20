@@ -1,3 +1,5 @@
+import { extractTaskKeywords } from "./projectMemorySections";
+
 export const SKILL_KINDS = ["fact", "heuristic", "preference"] as const;
 export type SkillKind = (typeof SKILL_KINDS)[number];
 
@@ -109,4 +111,86 @@ export function emptySkillsIndex(): ProjectSkillsIndex {
 export function summarizeSkillForPrompt(title: string, kind: SkillKind, body: string, maxBody = 280): string {
   const snippet = body.replace(/\s+/g, " ").trim().slice(0, maxBody);
   return `- [${kind}] ${title}：${snippet}${body.length > maxBody ? "…" : ""}`;
+}
+
+/** Score a skill against task keywords by matching title + body. */
+function skillRelevanceScore(
+  entry: SkillIndexEntry,
+  body: string,
+  keywords: Set<string>,
+): number {
+  if (keywords.size === 0) return 0;
+  const text = `${entry.title} ${body}`.toLowerCase();
+  let hits = 0;
+  for (const kw of keywords) {
+    if (text.includes(kw)) hits++;
+  }
+  return hits;
+}
+
+/**
+ * Format skills for prompt injection.
+ * If taskContext is provided, the most relevant skill gets full body injection.
+ */
+export function formatSkillsForPrompt(
+  skills: SkillIndexEntry[],
+  bodies: Map<string, string>,
+  injectKinds: SkillKind[] = ["fact", "heuristic"],
+  taskContext?: string,
+): { content: string; truncated: boolean } {
+  const keywords = taskContext ? extractTaskKeywords(taskContext) : new Set<string>();
+  const lines: string[] = [];
+  let used = 0;
+  let truncated = false;
+
+  let bestRelevantSlug = "";
+  let bestScore = 0;
+  if (keywords.size > 0) {
+    for (const entry of skills) {
+      if (!injectKinds.includes(entry.kind)) continue;
+      const body = bodies.get(entry.slug) ?? "";
+      const score = skillRelevanceScore(entry, body, keywords);
+      if (score > bestScore) {
+        bestScore = score;
+        bestRelevantSlug = entry.slug;
+      }
+    }
+  }
+
+  for (const entry of skills) {
+    if (!injectKinds.includes(entry.kind)) continue;
+    const body = bodies.get(entry.slug) ?? "";
+
+    if (entry.slug === bestRelevantSlug && bestScore > 0) {
+      const fullBlock = `### ${entry.title} [${entry.kind}]（完整）\n${body}`;
+      if (used + fullBlock.length + 1 > SKILLS_PROMPT_MAX_CHARS) {
+        truncated = true;
+        break;
+      }
+      used += fullBlock.length + 1;
+      lines.push(fullBlock);
+    } else {
+      const line = summarizeSkillForPrompt(entry.title, entry.kind, body);
+      if (used + line.length > SKILLS_PROMPT_MAX_CHARS) {
+        truncated = true;
+        break;
+      }
+      lines.push(line);
+      used += line.length + 1;
+    }
+  }
+
+  if (!lines.length) return { content: "", truncated: false };
+
+  return {
+    content: [
+      "",
+      "项目 Skills（.aiall/skills/ 中的可复用约定；冲突时以用户最新消息为准）：",
+      "```markdown",
+      lines.join("\n"),
+      "```",
+      "按需 read_skill(slug) 读取完整内容；list_skills 列出全部。",
+    ].join("\n"),
+    truncated,
+  };
 }

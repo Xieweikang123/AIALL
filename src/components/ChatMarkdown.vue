@@ -310,18 +310,18 @@ onUpdated(() => postProcess());
 
 /* ===== Tool Summary Block (compact) ===== */
 .msg-markdown :deep(.tool-summary-block) {
-  margin: 4px 0;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  margin: 6px 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(139, 148, 158, 0.06);
   overflow: hidden;
 }
 
 .tool-summary-block {
-  margin: 4px 0;
+  margin: 6px 0;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(139, 148, 158, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   overflow: hidden;
 }
 
@@ -329,26 +329,26 @@ onUpdated(() => postProcess());
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 10px;
+  padding: 5px 10px;
   cursor: pointer;
   user-select: none;
 }
 
 .msg-markdown :deep(.tool-summary-header:hover) {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .tool-summary-header {
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 3px 10px;
+  padding: 5px 10px;
   cursor: pointer;
   user-select: none;
 }
 
 .tool-summary-header:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .tool-summary-icon,
@@ -362,12 +362,12 @@ onUpdated(() => postProcess());
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 14px;
-  height: 13px;
-  padding: 0 3px;
+  min-width: 16px;
+  height: 14px;
+  padding: 0 4px;
   border-radius: 7px;
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.4);
+  background: rgba(88, 166, 255, 0.12);
+  color: rgba(145, 190, 255, 0.9);
   font-size: 9px;
   font-weight: 600;
   line-height: 1;
@@ -376,7 +376,7 @@ onUpdated(() => postProcess());
 .msg-markdown :deep(.tool-summary-title) {
   font-size: 10px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(139, 148, 158, 0.8);
   flex: 1;
   text-transform: uppercase;
 }
@@ -439,14 +439,14 @@ onUpdated(() => postProcess());
 .msg-markdown :deep(.tool-summary-content > ul > li) {
   margin: 1px 0;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(139, 148, 158, 0.85);
   line-height: 1.4;
-  padding: 2px 6px;
+  padding: 3px 8px;
   border-radius: 4px;
   display: flex;
   align-items: center;
   gap: 6px;
-  background: transparent;
+  background: rgba(0, 0, 0, 0.12);
   position: relative;
 }
 

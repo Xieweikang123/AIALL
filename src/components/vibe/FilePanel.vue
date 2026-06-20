@@ -132,39 +132,48 @@
           <p class="panel-empty-hint">开始对话后，会话会显示在这里</p>
         </div>
         <ul v-else class="sessions-list">
-          <li
-            v-for="s in sessionList"
-            :key="s.id"
-            class="session-item"
-            :class="{ active: s.id === activeSessionId }"
-          >
-            <button type="button" class="session-item-main" @click="$emit('switch-session', s.id)">
-              <span class="session-item-title">
-                <span v-if="sessionSendingIds.includes(s.id)" class="session-item-sending" title="Agent 运行中">●</span>
-                <span v-else-if="s.status === 'completed'" class="session-item-completed" title="已完成">✓</span>
-                <span v-else-if="s.status === 'failed'" class="session-item-failed" title="失败">✗</span>
-                <span v-else-if="s.status === 'interrupted'" class="session-item-interrupted" title="已中断">⚠</span>
-                {{ s.title }}
-              </span>
-              <span class="session-item-meta">
-                {{ formatSessionTime(s.updatedAt) }} · {{ s.messageCount }} 条
-              </span>
-            </button>
-            <div class="session-item-actions">
-              <button
-                type="button"
-                class="icon-btn small"
-                title="复制会话信息"
-                @click.stop="$emit('copy-session-info', s)"
-              >📋</button>
-              <button
-                type="button"
-                class="icon-btn small"
-                title="删除此会话"
-                @click.stop="$emit('remove-session', s.id)"
-              >🗑</button>
-            </div>
-          </li>
+          <template v-for="group in groupedSessions" :key="group.label">
+            <li class="session-group-header">
+              <span class="session-group-label">{{ group.label }}</span>
+              <span class="session-group-count">{{ group.items.length }}</span>
+            </li>
+            <li
+              v-for="s in group.items"
+              :key="s.id"
+              class="session-item"
+              :class="{ active: s.id === activeSessionId }"
+            >
+              <button type="button" class="session-item-main" :title="s.title" @click="$emit('switch-session', s.id)">
+                <span class="session-item-title">
+                  <span v-if="sessionSendingIds.includes(s.id)" class="session-item-sending" title="Agent 运行中">
+                    <span class="session-spinner" />
+                  </span>
+                  <span v-else-if="s.status === 'completed'" class="session-item-completed" title="已完成">✓</span>
+                  <span v-else-if="s.status === 'failed'" class="session-item-failed" title="失败">✗</span>
+                  <span v-else-if="s.status === 'interrupted'" class="session-item-interrupted" title="已中断">⚠</span>
+                  {{ s.title }}
+                </span>
+                <span class="session-item-meta">
+                  <span class="session-item-time">{{ formatSessionTime(s.updatedAt) }}</span>
+                  <span class="session-item-count" v-if="s.messageCount">{{ formatCount(s.messageCount) }}</span>
+                </span>
+              </button>
+              <div class="session-item-actions">
+                <button
+                  type="button"
+                  class="icon-btn small"
+                  title="复制会话信息"
+                  @click.stop="$emit('copy-session-info', s)"
+                >📋</button>
+                <button
+                  type="button"
+                  class="icon-btn small"
+                  title="删除此会话"
+                  @click.stop="$emit('remove-session', s.id)"
+                >🗑</button>
+              </div>
+            </li>
+          </template>
         </ul>
       </div>
     </div>
@@ -188,10 +197,31 @@ function formatSessionTime(timestamp: number | string): string {
   if (min < 60) return `${min}m 前`;
   const hour = Math.floor(min / 60);
   if (hour < 24) return `${hour}h 前`;
-  const days = Math.floor(hour / 24);
-  if (days === 1) return "昨天";
-  if (days < 7) return `${days} 天前`;
-  return date.toLocaleDateString();
+  return "";
+}
+
+function formatCount(n: number): string {
+  if (n > 99) return "99+";
+  return String(n);
+}
+
+function getDateGroup(timestamp: number | string): string {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "更早";
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfYesterday = new Date(startOfToday.getTime() - 86400000);
+  if (date >= startOfToday) return "今天";
+  if (date >= startOfYesterday) return "昨天";
+  const daysAgo = Math.floor((startOfToday.getTime() - date.getTime()) / 86400000);
+  if (daysAgo < 7) return "本周";
+  if (daysAgo < 30) return "本月";
+  return "更早";
+}
+
+interface SessionGroup {
+  label: string;
+  items: typeof props.sessionList;
 }
 
 interface Props {
@@ -242,6 +272,20 @@ const emit = defineEmits<{
 }>();
 
 const sessionCount = computed(() => props.sessionList.length);
+
+const groupedSessions = computed<SessionGroup[]>(() => {
+  const order = ["今天", "昨天", "本周", "本月", "更早"];
+  const map = new Map<string, typeof props.sessionList>();
+  for (const label of order) map.set(label, []);
+  for (const s of props.sessionList) {
+    const group = getDateGroup(s.updatedAt);
+    map.get(group)?.push(s);
+  }
+  return order
+    .filter((label) => map.get(label)!.length > 0)
+    .map((label) => ({ label, items: map.get(label)! }));
+});
+
 const searchInputRef = ref<HTMLInputElement | null>(null);
 
 defineExpose({ searchInputRef });
@@ -533,28 +577,61 @@ defineExpose({ searchInputRef });
 .sessions-list {
   list-style: none;
   margin: 0;
-  padding: 4px 0;
+  padding: 4px 4px;
   overflow-y: auto;
   flex: 1;
+}
+
+.session-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 8px 4px;
+  list-style: none;
+}
+
+.session-group-header:first-child {
+  padding-top: 4px;
+}
+
+.session-group-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(139, 148, 158, 0.6);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.session-group-count {
+  font-size: 10px;
+  color: rgba(139, 148, 158, 0.4);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0 5px;
+  border-radius: 8px;
+  line-height: 16px;
 }
 
 .session-item {
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 0 4px;
-  margin: 2px 0;
   border-radius: 8px;
   position: relative;
-  border-bottom: none;
+  transition: background 0.15s ease;
+}
+
+.session-item + .session-item {
+  margin-top: 1px;
 }
 
 .session-item:hover {
-  background: var(--bg-tertiary, rgba(255, 255, 255, 0.04));
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .session-item.active {
-  background: rgba(88, 166, 255, 0.08);
+  background: rgba(88, 166, 255, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(88, 166, 255, 0.12);
 }
 
 .session-item.active::before {
@@ -564,10 +641,11 @@ defineExpose({ searchInputRef });
   top: 50%;
   transform: translateY(-50%);
   width: 3px;
-  height: 60%;
-  min-height: 18px;
+  height: 55%;
+  min-height: 20px;
   border-radius: 0 3px 3px 0;
   background: var(--accent-color, #58a6ff);
+  box-shadow: 0 0 6px rgba(88, 166, 255, 0.4);
 }
 
 .session-item-main {
@@ -575,8 +653,8 @@ defineExpose({ searchInputRef });
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 3px;
-  padding: 10px 10px 10px 12px;
+  gap: 5px;
+  padding: 10px 12px;
   border: none;
   background: none;
   color: var(--text-primary, #e6edf3);
@@ -594,51 +672,106 @@ defineExpose({ searchInputRef });
 .session-item-title {
   font-size: 13px;
   font-weight: 500;
-  line-height: 1.4;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  line-height: 1.45;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
-  word-break: break-word;
+  color: rgba(255, 255, 255, 0.92);
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .session-item-sending {
-  color: var(--accent, #3b82f6);
-  margin-right: 4px;
-  font-size: 10px;
-  vertical-align: middle;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.session-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(88, 166, 255, 0.2);
+  border-top-color: #58a6ff;
+  border-radius: 50%;
+  animation: session-spin 0.75s linear infinite;
+}
+
+@keyframes session-spin {
+  to { transform: rotate(360deg); }
 }
 
 .session-item-completed {
-  color: var(--success-color, #3fb950);
-  margin-right: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  vertical-align: middle;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(63, 185, 80, 0.15);
+  color: #3fb950;
+  font-size: 9px;
+  font-weight: 700;
+  flex-shrink: 0;
 }
 
 .session-item-failed {
-  color: var(--danger-color, #f85149);
-  margin-right: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  vertical-align: middle;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(248, 81, 73, 0.15);
+  color: #f85149;
+  font-size: 9px;
+  font-weight: 700;
+  flex-shrink: 0;
 }
 
 .session-item-interrupted {
-  color: var(--warning-color, #d29922);
-  margin-right: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  vertical-align: middle;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(210, 153, 34, 0.15);
+  color: #d29922;
+  font-size: 9px;
+  font-weight: 700;
+  flex-shrink: 0;
 }
 
 .session-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
-  color: var(--text-secondary, #6e7681);
   line-height: 1.3;
+}
+
+.session-item-time {
+  color: rgba(139, 148, 158, 0.6);
+}
+
+.session-item-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(139, 148, 158, 0.7);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
 }
 
 .session-item-actions {
@@ -646,7 +779,7 @@ defineExpose({ searchInputRef });
   align-items: center;
   gap: 2px;
   padding-right: 6px;
-  opacity: 0.35;
+  opacity: 0;
   transition: opacity 0.15s;
   flex-shrink: 0;
 }
@@ -656,14 +789,19 @@ defineExpose({ searchInputRef });
 }
 
 .icon-btn.small {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   font-size: 12px;
-  border-radius: 4px;
-  transition: background 0.12s, opacity 0.12s;
+  border-radius: 5px;
+  transition: background 0.12s, color 0.12s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(139, 148, 158, 0.6);
 }
 
 .icon-btn.small:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
 }
 </style>

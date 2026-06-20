@@ -807,46 +807,12 @@ function formatSessionTime(timestamp: number | string): string {
   min-width: 260px;
 }
 
-.panel-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(22, 27, 34, 0.8);
-  backdrop-filter: blur(8px);
-  flex-shrink: 0;
-}
-
-.panel-head-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .panel-head-right {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.panel-label {
-  font-size: 13px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.85);
-  letter-spacing: 0.3px;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-}
-
-.panel-meta {
-  font-size: 11px;
-  color: rgba(139, 148, 158, 0.5);
-  letter-spacing: 0.02em;
-}
-
-.panel-meta.warn {
-  color: #d29922;
+  flex-shrink: 0;
+  overflow: hidden;
 }
 
 .session-picker-wrap {
@@ -871,6 +837,7 @@ function formatSessionTime(timestamp: number | string): string {
   cursor: pointer;
   border-radius: 4px;
   font-size: 12px;
+  transition: background 0.15s, color 0.15s;
 }
 
 .session-nav-btn:hover:not(:disabled) {
@@ -911,12 +878,6 @@ function formatSessionTime(timestamp: number | string): string {
   border-color: rgba(88, 166, 255, 0.5);
 }
 
-.session-picker-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .session-picker-chevron {
   font-size: 10px;
   color: rgba(139, 148, 158, 0.6);
@@ -929,8 +890,6 @@ function formatSessionTime(timestamp: number | string): string {
   width: 320px;
   max-height: 400px;
   overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
   background: rgba(22, 27, 34, 0.95);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
@@ -938,19 +897,6 @@ function formatSessionTime(timestamp: number | string): string {
   z-index: 1000;
   margin-top: 4px;
   backdrop-filter: blur(12px);
-}
-
-.session-picker-dropdown::-webkit-scrollbar {
-  width: 5px;
-}
-
-.session-picker-dropdown::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.18);
-}
-
-.session-picker-dropdown::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
 }
 
 .session-picker-head {
@@ -986,24 +932,9 @@ function formatSessionTime(timestamp: number | string): string {
   margin: 0;
   padding: 6px 6px;
   overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(139, 148, 158, 0.2) transparent;
   display: flex;
   flex-direction: column;
   gap: 2px;
-}
-
-.history-list::-webkit-scrollbar {
-  width: 4px;
-}
-
-.history-list::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: rgba(139, 148, 158, 0.25);
-}
-
-.history-list::-webkit-scrollbar-thumb:hover {
-  background: rgba(139, 148, 158, 0.4);
 }
 
 .history-item {
@@ -1094,22 +1025,8 @@ function formatSessionTime(timestamp: number | string): string {
 .chat-scroll {
   flex: 1;
   overflow-y: auto;
+  overflow-x: clip;
   padding: 16px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
-}
-
-.chat-scroll::-webkit-scrollbar {
-  width: 5px;
-}
-
-.chat-scroll::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.18);
-}
-
-.chat-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
 }
 
 .chat-empty {
@@ -1246,67 +1163,6 @@ function formatSessionTime(timestamp: number | string): string {
   overflow: auto;
 }
 
-.quoted-preview-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.quoted-preview {
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.quoted-preview-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.quoted-preview-label {
-  font-size: 11px;
-  color: rgba(139, 148, 158, 0.8);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.quoted-preview-icon {
-  font-size: 12px;
-}
-
-.quoted-preview-close {
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: none;
-  border: none;
-  color: rgba(139, 148, 158, 0.6);
-  cursor: pointer;
-  border-radius: 4px;
-  font-size: 14px;
-}
-
-.quoted-preview-close:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.quoted-preview-body {
-  padding: 8px 10px;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.7);
-  max-height: 80px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .chat-input-field {
   position: relative;
 }
@@ -1318,7 +1174,8 @@ function formatSessionTime(timestamp: number | string): string {
   right: 0;
   max-height: 200px;
   overflow-y: auto;
-  background: #161b22;
+  background: rgba(22, 27, 34, 0.95);
+  backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.3);
@@ -1364,6 +1221,7 @@ function formatSessionTime(timestamp: number | string): string {
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   background: rgba(22, 27, 34, 0.8);
+  backdrop-filter: blur(8px);
   transition: border-color 0.15s, background 0.15s;
   min-height: 56px;
 }
@@ -1473,61 +1331,6 @@ function formatSessionTime(timestamp: number | string): string {
   transform: translateY(0);
 }
 
-.ghost {
-  background: none;
-  border: none;
-  color: rgba(139, 148, 158, 0.8);
-  cursor: pointer;
-  padding: 5px 10px;
-  border-radius: 4px;
-  font-size: 12px;
-  transition: all 0.15s ease;
-}
-
-.ghost:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.ghost:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.ghost.small {
-  padding: 2px 6px;
-  font-size: 11px;
-}
-
-.primary {
-  background: rgba(31, 111, 235, 0.8);
-  color: white;
-  transition: all 200ms ease;
-}
-
-.primary:hover:not(:disabled) {
-  background: rgba(31, 111, 235, 1);
-}
-
-.primary:hover:not(:disabled) {
-  background: rgba(31, 111, 235, 1);
-}
-
-.secondary {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-}
-
-.secondary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.compact {
-  padding: 4px 10px;
-  font-size: 11px;
-}
-
 .chat-switching {
   display: flex;
   align-items: center;
@@ -1557,6 +1360,7 @@ function formatSessionTime(timestamp: number | string): string {
   font-size: 11px;
   cursor: pointer;
   white-space: nowrap;
+  transition: color 0.15s, background 0.15s;
 }
 
 .token-usage-btn:hover,
@@ -1640,6 +1444,7 @@ function formatSessionTime(timestamp: number | string): string {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  transition: color 0.15s, background 0.15s;
 }
 
 .project-memory-tab.active {

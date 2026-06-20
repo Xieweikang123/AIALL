@@ -55,10 +55,10 @@ const collapsedSummary = computed(() => {
 .cursor-actions-block {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
-  margin: 2px 0;
-  padding: 2px 0;
+  margin: 6px 0;
+  padding: 4px 0;
 }
 
 .cursor-actions-fold {

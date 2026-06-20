@@ -43,18 +43,22 @@ const cardClass = computed(() => {
 
 <style scoped>
 .aggregate-card {
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.02);
+  border-radius: 6px;
+  background: rgba(139, 148, 158, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   transition: background 0.15s ease;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.aggregate-card + .aggregate-card {
+  margin-top: 2px;
 }
 
 .aggregate-card:last-child {
-  border-bottom: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .aggregate-card:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(139, 148, 158, 0.1);
 }
 
 .aggregate-card.running {
@@ -72,8 +76,8 @@ const cardClass = computed(() => {
 .aggregate-card-head {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 3px 4px;
+  gap: 6px;
+  padding: 5px 8px;
   list-style: none;
   cursor: pointer;
   user-select: none;
@@ -89,10 +93,10 @@ const cardClass = computed(() => {
 }
 
 .aggregate-card-icon {
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1;
   flex-shrink: 0;
-  opacity: 0.7;
+  opacity: 0.8;
 }
 
 .aggregate-card-text {
@@ -106,8 +110,8 @@ const cardClass = computed(() => {
 .aggregate-card-title {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.88);
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -116,8 +120,12 @@ const cardClass = computed(() => {
 .aggregate-card-subtitle {
   font-size: 10px;
   line-height: 1.3;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgba(139, 148, 158, 0.8);
   overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .aggregate-card-hint {

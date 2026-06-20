@@ -480,6 +480,7 @@ import { loadAiChatBaseFromStorage } from "../services/aiLocalConfig";
 import {
   buildAgentHistoryFromMessages,
   getSessionDiagSnapshot,
+  getSessionTitle,
   onStorageError,
   saveVibeChatHistory,
   stripReferenceAttachments,
@@ -711,6 +712,7 @@ const {
   confirmPendingSkillProposal,
   dismissPendingMemoryProposal,
   dismissPendingSkillProposal,
+  trackMemoryUsageAfterRun,
 } = useProjectMemory(projectPath, projectOpened);
 const loadingTree = ref(false);
 const pickingFolder = ref(false);
@@ -856,8 +858,8 @@ function sendAgentCompleteNotification(sessionName: string) {
 
 // 始终弹通知（无论页面是否可见）
 function notifyAgentDoneIfNeeded(sessionId: string) {
-  const session = sessionList.value.find(s => s.id === sessionId);
-  const name = session?.name || sessionId;
+  const project = projectPath.value.trim();
+  const name = (project ? getSessionTitle(project, sessionId) : undefined) || sessionId;
   sendAgentCompleteNotification(name);
   console.log('[AIALL] Agent 完成:', name);
 }
@@ -1095,6 +1097,9 @@ function scheduleGitStatusRefreshFromWatcher() {
   if (gitRefreshDebounceTimer) clearTimeout(gitRefreshDebounceTimer);
   gitRefreshDebounceTimer = setTimeout(() => {
     gitRefreshDebounceTimer = null;
+    // 二次 guard：debounce fire 时距上次暂存操作不足 1.5s 则跳过，防止竞态覆盖乐观更新导致闪烁
+    if (gitStagingInProgress.value) return;
+    if (gitLastStagingAt.value && Date.now() - gitLastStagingAt.value < 1500) return;
     refreshGitStatus({ showLoading: false });
   }, 300);
 }
@@ -1793,6 +1798,7 @@ const agent = useAgentRun({
       assistantText: msg.content,
     });
     if (distill.offer) void applyExplorationDistillSilently(distill);
+    if (msg.content) void trackMemoryUsageAfterRun(msg.content);
   },
   onMemoryProposal: (_msgId, proposal) => {
     addPendingMemoryProposal(proposal);
