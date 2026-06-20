@@ -1,6 +1,7 @@
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use tauri::{Manager, RunEvent};
+use tauri_plugin_notification::NotificationExt;
 
 const BACKEND_PORT: u16 = 37891;
 
@@ -9,6 +10,17 @@ struct BackendProcess(Mutex<Option<Child>>);
 #[tauri::command]
 fn get_backend_url() -> String {
   format!("http://127.0.0.1:{BACKEND_PORT}")
+}
+
+#[tauri::command]
+fn send_notification(app: tauri::AppHandle, title: String, body: String) -> Result<(), String> {
+  use tauri_plugin_notification::NotificationExt;
+  app.notification()
+    .builder()
+    .title(&title)
+    .body(&body)
+    .show()
+    .map_err(|e| format!("发送通知失败: {e}"))
 }
 
 fn resolve_project_root(app: &tauri::App) -> Result<std::path::PathBuf, String> {
@@ -109,9 +121,10 @@ pub fn run() {
       }
       start_backend_process(app)?;
       app.handle().plugin(tauri_plugin_dialog::init())?;
+      app.handle().plugin(tauri_plugin_notification::init())?;
       Ok(())
     })
-    .invoke_handler(tauri::generate_handler![get_backend_url])
+    .invoke_handler(tauri::generate_handler![get_backend_url, send_notification])
     .build(tauri::generate_context!())
     .expect("error while running tauri application")
     .run(|app, event| {

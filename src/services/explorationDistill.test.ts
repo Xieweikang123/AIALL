@@ -29,7 +29,7 @@ describe("explorationDistill", () => {
     expect(result.skillProposals.some((s) => s.slug === "ui-screenshot-locate")).toBe(true);
   });
 
-  it("archive includes key findings from assistant text", () => {
+  it("archive content summary replaces file path list", () => {
     const content = buildExplorationArchiveMarkdown({
       readPaths: ["src/App.vue", "src/router/index.ts", "src/views/Home.vue"],
       writtenPaths: ["src/App.vue"],
@@ -37,21 +37,24 @@ describe("explorationDistill", () => {
       assistantText:
         "根因假设：App.vue 的路由配置缺少 fallback\n已读取关键文件，确认 router 使用 hash history\n下一步需要修改 App.vue 添加默认路由",
     });
-    expect(content).toContain("## 关键发现");
+    expect(content).toContain("# 探索快照");
     expect(content).toContain("根因假设");
-    expect(content).toContain("## 涉及模块");
-    expect(content).toContain("src（2 个文件）");
-    expect(content).toContain("## 写入文件");
-    expect(content).toContain("`src/App.vue`");
+    expect(content).toContain("router");
+    // Old format: should NOT contain file path list section
+    expect(content).not.toContain("## 涉及文件");
+    expect(content).not.toContain("`src/App.vue`");
+    expect(content).not.toContain("读取 3 个文件");
   });
 
-  it("archive skips findings when no assistant text", () => {
+  it("archive falls back to stats when no assistant text", () => {
     const content = buildExplorationArchiveMarkdown({
       readPaths: ["src/App.vue"],
       writtenPaths: [],
       turnCount: 3,
     });
-    expect(content).not.toContain("## 关键发现");
-    expect(content).toContain("## 涉及模块");
+    expect(content).toContain("# 探索快照");
+    expect(content).toContain("读取 1 个文件");
+    // No file path list in fallback either
+    expect(content).not.toContain("## 涉及文件");
   });
 });

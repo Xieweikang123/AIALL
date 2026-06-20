@@ -191,6 +191,62 @@ export function buildUserNegationNudge(negationCount: number): string {
  * Injected when the model reads too many different files in explore-only mode.
  * Guides it to narrow focus rather than spreading across unrelated areas.
  */
+/** Model ended a turn with empty or near-empty user-visible text. */
+export function buildEmptyReplyRetryNudge(): string {
+  return [
+    "【系统强制】上一轮未输出任何面向用户的有效正文（空回复或仅空白）。",
+    "请用中文写出完整结论：做了什么、验证了什么、用户下一步如何测试；若任务未完成，说明阻塞点与所需信息。",
+    "禁止无正文结束；若仍需工具，先写 1–2 句进度摘要再调用。",
+  ].join("");
+}
+
+/** Model declared success / all-correct without tool evidence or despite user failure reports. */
+export function buildPrematureCompletionRetryNudge(userReportedFailure: boolean): string {
+  const lines = [
+    "【系统强制】上一轮回复过早宣称「全部正确/无需再改/检查完成✅」，但缺乏工具证据或用户实测仍失败。",
+    "禁止 rubber-stamp 式自检；须基于 read/grep 结果与用户反馈逐项核对。",
+    "未验证项写「无法确认」；失败项如实标注；区分主路径效果与降级/兜底 UI。",
+  ];
+  if (userReportedFailure) {
+    lines.push("用户已报告「试了不行/没有效果」——禁止重复宣称成功，须换排查方向或给出可执行验证步骤。");
+  }
+  return lines.join("");
+}
+
+/** Short 「检查/核对/复查」 prompts — evidence-based review, not affirmation. */
+export function buildCodeReviewHonestyNudge(userReportedFailure: boolean): string {
+  const lines = [
+    "",
+    "【代码核对·只读】用户要求检查/核对实现，不是索要肯定答复。",
+    "须 read/grep 对照仓库现状；结论分「已确认」「未验证」「与用户反馈矛盾」三类。",
+    "禁止在未对照工具结果前写「全部正确✅/无逻辑漏洞/可以测试了」。",
+  ];
+  if (userReportedFailure) {
+    lines.push("用户近期报告实测失败：优先排查为何无效，勿重复「链路完整」类总结。");
+  }
+  return lines.join("\n");
+}
+
+/** User likely pasted an error/banner string they saw — clarify intent before implementing. */
+export function buildUserErrorQuoteHint(): string {
+  return [
+    "",
+    "【用户可能在复述报错/横幅】本条短消息可能是用户粘贴他们看到的提示文案，而非要求原样实现该文案。",
+    "先判断：是在报告问题、询问含义，还是要求新增该提示？",
+    "若是报告问题：定位根因并修复底层能力；若是询问：解释含义；勿把报错文本当作产品需求直接复刻。",
+  ].join("\n");
+}
+
+/** User reported the feature still does not work — pivot from repeat patches to diagnosis. */
+export function buildUserFailureReportNudge(): string {
+  return [
+    "",
+    "【实测失败反馈】用户报告先前改动未达预期（试了不行/没有效果等）。",
+    "禁止再次输出「已完成/无需再改」式总结；须：①承认未验证或仍失败；②列出与预期不符的具体点；③给出下一步排查或不同方案。",
+    "若涉及原生/系统能力，先确认运行环境（Web dev vs 桌面壳）是否匹配测试方式。",
+  ].join("\n");
+}
+
 export function buildFileBreadthNudge(uniqueReadFiles: string[], mode?: string): string {
   const fileList = uniqueReadFiles.slice(-4).join("、");
   const actionHint = mode === "plan"

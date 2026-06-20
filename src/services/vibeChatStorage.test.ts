@@ -33,6 +33,7 @@ import {
   syncLocalIndexFromRecord,
   sanitizePersistedChatMessages,
   saveVibeChatHistory,
+  shouldPersistAssistantMessage,
   type PersistedChatMessage,
   STORE_VERSION,
   stripReferenceAttachments,
@@ -204,6 +205,33 @@ describe("buildAgentHistoryFromMessages", () => {
 });
 
 describe("sanitizePersistedChatMessages", () => {
+  it("keeps in-flight assistant placeholders with roundGroups or agentPhase", () => {
+    const connecting: PersistedChatMessage = {
+      id: "a1",
+      role: "assistant",
+      content: "",
+      chatMode: "build",
+      agentPhase: "connecting_local",
+      status: "正在连接本地服务（127.0.0.1:37891）…",
+      roundGroups: [
+        {
+          turn: 0,
+          modelSteps: [{ id: "s0", phase: "connecting_local", text: "正在连接本地服务（127.0.0.1:37891）…" }],
+          toolIds: [],
+        },
+      ],
+    };
+    expect(shouldPersistAssistantMessage(connecting)).toBe(true);
+    const sanitized = sanitizePersistedChatMessages([
+      { id: "u1", role: "user", content: "hello" },
+      connecting,
+    ]);
+    expect(sanitized).toHaveLength(2);
+    expect(sanitized[1].agentPhase).toBe("connecting_local");
+    expect(sanitized[1].status).toContain("正在连接本地服务");
+    expect(sanitized[1].roundGroups?.length).toBe(1);
+  });
+
   it("strips heavy agent debug payloads before persistence", () => {
     const huge = "x".repeat(20_000);
     const sanitized = sanitizePersistedChatMessages([

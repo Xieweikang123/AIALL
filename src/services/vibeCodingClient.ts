@@ -305,7 +305,7 @@ export async function fetchChatStoreFromDisk(projectPath: string, options?: { lo
       return { ok: false, error: `读取会话备份失败：HTTP ${response.status}` };
     }
     
-    const result = await response.json() as ChatStoreLoadResult;
+    const result = await readJsonResponse<ChatStoreLoadResult>(response);
     return result;
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {

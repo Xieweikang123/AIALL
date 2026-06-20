@@ -14,6 +14,7 @@
       @clear-retry="clearRetryTimer"
       @update:tree-error="treeError = $event"
       @open-recent-project="openProjectByPath"
+      @test-notification="testNotification"
     />
 
     <ProjectSwitcherBar
@@ -394,6 +395,8 @@
         <span class="quote-icon">❝</span> 引用
       </button>
     </Teleport>
+
+    <!-- 站内通知横幅已移除：仅使用 Tauri 原生通知（invoke('send_notification')） -->
   </div>
 </template>
 
@@ -599,6 +602,8 @@ const fileDrag = useFileDrag(
 
 const STORAGE_KEY = "vibe-coding-project";
 const CHAT_MODE_KEY = "vibe-coding-chat-mode";
+
+// 站内通知横幅已移除：仅使用 Tauri 原生通知（invoke('send_notification')）
 const PENDING_QUEUE_KEY = "vibe-coding-pending-queue";
 const GIT_PANEL_MODE_KEY = "vibe-coding-git-panel-mode";
 type ChatRole = "user" | "assistant";
@@ -804,10 +809,68 @@ function syncActiveChatSending() {
 function beginAgentRunSession(sessionId: string) {
   if (!sessionId) return;
   sendingSessionIds.add(sessionId);
-  if (sessionId === activeSessionId.value) {
-    sessionMessageCache.snapshot(sessionId, chatMessages.value);
-  }
   syncActiveChatSending();
+}
+
+function snapshotAgentRunSession(sessionId: string) {
+  if (!sessionId || !sendingSessionIds.has(sessionId)) return;
+  if (sessionId !== activeSessionId.value) return;
+  sessionMessageCache.snapshot(sessionId, chatMessages.value);
+}
+
+// ── 系统通知（Agent 完成时） ──
+// 同步检测 Tauri 运行时，避免异步竞态导致降级误判
+const isTauriEnv = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
+
+// ensureNotificationPermission 已移除：仅使用 Tauri 原生通知（invoke('send_notification')）
+
+/**
+ * 尝试 Tauri 原生通知
+ * 桌面端（Windows/macOS/Linux）无需权限检查，直接发送即可。
+ * 权限检查仅在移动端有意义。
+ */
+async function tryTauriNotification(title: string, body: string): Promise<boolean> {
+  if (!isTauriEnv) {
+    console.log('[AIALL] 非 Tauri 环境，跳过原生通知');
+    return false;
+  }
+  try {
+    // 调用 Rust 端自定义命令 send_notification（已注册在 lib.rs invoke_handler 中）
+    const { invoke } = await import('@tauri-apps/api/core');
+    console.log('[AIALL] 调用 Rust send_notification:', { title, body });
+    await invoke('send_notification', { title, body });
+    console.log('[AIALL] Rust 通知命令调用成功');
+    return true;
+  } catch (e) {
+    console.error('[AIALL] Rust 通知发送失败:', e);
+    return false;
+  }
+}
+
+function sendAgentCompleteNotification(sessionName: string) {
+  const title = 'AIALL · Agent 回复完毕';
+  const body = sessionName ? `「${sessionName}」已完成，点击查看` : 'Agent 已完成，可以查看结果';
+  // 只使用 Tauri 原生通知，不降级到 JS 插件或站内横幅
+  tryTauriNotification(title, body);
+}
+
+// 始终弹通知（无论页面是否可见）
+function notifyAgentDoneIfNeeded(sessionId: string) {
+  const session = sessionList.value.find(s => s.id === sessionId);
+  const name = session?.name || sessionId;
+  sendAgentCompleteNotification(name);
+  console.log('[AIALL] Agent 完成:', name);
+}
+
+/** 测试系统通知 */
+async function testNotification() {
+  // 只使用 Tauri 原生通知，不降级到 JS 插件或站内横幅
+  const ok = await tryTauriNotification('AIALL · 通知测试', '系统通知正常工作 ✅');
+  if (ok) {
+    console.log('[AIALL] 通知测试成功');
+  } else {
+    console.error('[AIALL] 通知测试失败');
+  }
 }
 
 function endAgentRunSession(sessionId?: string) {
@@ -815,6 +878,7 @@ function endAgentRunSession(sessionId?: string) {
   if (!sid) return;
   sendingSessionIds.delete(sid);
   syncActiveChatSending();
+  notifyAgentDoneIfNeeded(sid);
 }
 
 function persistAgentRunSession(sessionId: string) {
@@ -1704,7 +1768,9 @@ const agent = useAgentRun({
   beginAgentRunSession,
   endAgentRunSession,
   persistAgentRunSession,
+  snapshotAgentRunSession,
   onAgentRunSettled: (msg) => {
+    refreshSessionList();
     const msgIndex = chatMessages.value.findIndex((m) => m.id === msg.id);
     let hadAttachedImage = false;
     for (let i = msgIndex - 1; i >= 0; i -= 1) {

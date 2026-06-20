@@ -79,6 +79,8 @@ const mergedBlocks = computed<CursorFeedProcessBlock[]>(() => {
   const answer = props.finalAnswer.trim();
 
   for (const group of props.roundGroups) {
+    // Turn 0 holds transient setup phases (connect / prepare). Show live status via
+    // `currentStatus` below — do not render every recorded step as permanent history.
     if (group.turn <= 0 && !group.narrative) continue;
 
     if (group.narrative?.trim()) {

@@ -103,10 +103,10 @@ export function isAgentMaxTurnsExhausted(
 }
 
 /** Delay before auto-resuming after transient disconnect (seconds). */
-export const AGENT_AUTO_RESUME_SECONDS = 3;
+export const AGENT_AUTO_RESUME_SECONDS = 1;
 
 /** Shorter delay for obvious transport blips (Failed to fetch / network error). */
-export const AGENT_AUTO_RESUME_IMMEDIATE_SECONDS = 2;
+export const AGENT_AUTO_RESUME_IMMEDIATE_SECONDS = 1;
 
 /** Max silent client-side continuations after transport interruption (per assistant message). */
 export const AGENT_SILENT_CONTINUE_MAX = 3;
@@ -172,7 +172,9 @@ export function shouldAutoResumeAgentError(message: string): boolean {
 
 /** Whether the client should chain another SSE segment without asking the user. */
 export function shouldSilentAutoContinue(message: string): boolean {
-  return isRecoverableAgentError(message);
+  if (!isRecoverableAgentError(message)) return false;
+  if (isMaxTurnsExhaustedReason(message)) return false;
+  return true;
 }
 
 export function buildSilentContinueStatusLog(reason: string, attempt: number): string {
@@ -531,6 +533,20 @@ export function canResumeAgentRun(msg: AgentProgressSource & {
   return passesAgentAbortResumeGate(msg);
 }
 
+function isMaxTurnsExhaustedReason(errorMessage: string): boolean {
+  const msg = errorMessage.trim();
+  return msg.includes("已达最大轮次") || msg.includes("任务可能未完成");
+}
+
+function isStallReason(errorMessage: string): boolean {
+  const msg = errorMessage.trim();
+  return msg.includes("长时间无进展") || msg.includes("可能已卡住");
+}
+
+function isNoFinalAnswerReason(errorMessage: string): boolean {
+  return errorMessage.trim() === "运行中断（未生成最终回复）";
+}
+
 export function recoverableAgentErrorHint(
   msg: AgentProgressSource & { agentAbortReason?: string },
   errorMessage: string,
@@ -555,5 +571,14 @@ export function recoverableAgentErrorHint(
     turns > 0 || toolCount > 0
       ? `（已完成 ${turns} 轮${toolCount > 0 ? `，${toolCount} 个工具步骤` : ""}）`
       : "";
+  if (isMaxTurnsExhaustedReason(reason)) {
+    return `Agent 已达到轮次上限${progress}，任务可能未完成。可点击「恢复运行」继续。`;
+  }
+  if (isStallReason(reason)) {
+    return `Agent 运行似乎已卡住${progress}。可点击「恢复运行」从断点继续。`;
+  }
+  if (isNoFinalAnswerReason(reason)) {
+    return `Agent 已完成运行但未生成最终回复${progress}。可点击「恢复运行」重新生成。`;
+  }
   return `Agent 自动续跑后仍未能完成${progress}：${errorMessage.trim()}。可点击「恢复运行」重试。`;
 }

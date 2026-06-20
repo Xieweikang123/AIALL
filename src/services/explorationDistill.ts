@@ -72,24 +72,30 @@ export function extractExplorationSummary(assistantText: string | undefined): st
   if (!assistantText?.trim()) return "";
   const text = assistantText.trim();
 
-  // Split into lines, filter out tool-call noise and empty lines
+  // Lines that signal mere progress — not findings
+  const PROGRESS_RE =
+    /^(?:现在|接下来|让我|我来|我们|下面|先|然后|再)\s*(?:看看|查看|读取|搜索|检查|分析|确认|定位|找到|打开|找|查|读|写|看|试)/;
+
   const lines = text.split("\n").filter((line) => {
     const t = line.trim();
     if (!t) return false;
     // Skip tool call artifacts
     if (/^<function_|^<tool_|^<\/function|^<\/tool/i.test(t)) return false;
-    // Skip lines that are purely file paths or tool parameter XML
+    // Skip bare XML / HTML tags without CJK
     if (/^<[a-z]+>$/i.test(t) && !/[\u4e00-\u9fff]/.test(t)) return false;
+    // Skip tool parameter lines
+    if (/^(?:path|pattern|command|query|content|old_string|new_string)\s*=/i.test(t)) return false;
+    // Skip pure progress lines
+    if (PROGRESS_RE.test(t)) return false;
     return true;
   });
 
   if (!lines.length) return "";
 
-  // Take lines that contain CJK text (likely the agent's natural language findings)
+  // Prefer lines with CJK (actual Chinese findings)
   const meaningfulLines = lines.filter((l) => /[\u4e00-\u9fff]/.test(l));
   const source = meaningfulLines.length >= 2 ? meaningfulLines : lines;
 
-  // Join and truncate
   const joined = source
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
@@ -105,8 +111,11 @@ export function buildExplorationArchiveMarkdown(params: {
   turnCount: number;
   createdAt?: string;
   summary?: string;
+  /** When provided, summary is auto-extracted if not given. */
+  assistantText?: string;
 }): string {
   const createdAt = params.createdAt ?? new Date().toISOString();
+  const summary = params.summary ?? extractExplorationSummary(params.assistantText);
   const lines = [
     "---",
     `createdAt: ${createdAt}`,
@@ -115,20 +124,20 @@ export function buildExplorationArchiveMarkdown(params: {
     `writtenCount: ${params.writtenPaths.length}`,
     "---",
     "",
-    "# 探索快照",
-    "",
-    `- 轮次：${params.turnCount}`,
-    `- 读取 ${params.readPaths.length} 个文件，写入 ${params.writtenPaths.length} 个文件`,
-    "",
   ];
-  if (params.summary) {
-    lines.push("## 发现摘要", "", params.summary, "");
-  }
-  if (params.writtenPaths.length) {
-    lines.push("## 写入路径", "", ...params.writtenPaths.map((p) => `- \`${p}\``), "");
-  }
-  if (params.readPaths.length) {
-    lines.push("## 读取路径", "", ...params.readPaths.map((p) => `- \`${p}\``), "");
+  if (summary) {
+    lines.push("# 探索快照", "", summary, "");
+  } else {
+    // Fallback: brief description when no summary extracted
+    const allPaths = [...new Set([...params.readPaths, ...params.writtenPaths])];
+    const fileCount = allPaths.length;
+    lines.push(
+      "# 探索快照",
+      "",
+      `本轮探索读取 ${params.readPaths.length} 个文件、写入 ${params.writtenPaths.length} 个文件` +
+        (fileCount > 0 ? `，涉及 ${fileCount} 个不同路径。` : "。"),
+      "",
+    );
   }
   return lines.join("\n").trim() + "\n";
 }

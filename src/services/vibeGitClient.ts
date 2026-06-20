@@ -1,4 +1,5 @@
 import { backendUrl } from "./backendBase";
+import { readJsonResponse } from "./vibeCodingClient";
 
 export interface GitStatusFile {
   path: string;
@@ -117,8 +118,7 @@ export async function fetchGitStatus(projectPath: string): Promise<GitStatusResu
   try {
     const url = backendUrl(`/backend/vibe/git/status?path=${encodeURIComponent(projectPath)}`);
     const response = await fetch(url, { signal: gitStatusFetchSignal(30_000) });
-    const data = (await response.json()) as GitStatusResult;
-    return data;
+    return await readJsonResponse<GitStatusResult>(response);
   } catch (error) {
     if (error instanceof DOMException && error.name === "TimeoutError") {
       return {
@@ -141,8 +141,7 @@ export async function fetchGitDiff(projectPath: string, filePath?: string, stage
     if (filePath) url += `&file=${encodeURIComponent(filePath)}`;
     if (staged) url += "&staged=1";
     const response = await fetch(url);
-    const data = (await response.json()) as GitDiffResult;
-    return data;
+    return await readJsonResponse<GitDiffResult>(response);
   } catch (error) {
     return { ok: false, files: [], patch: "", error: error instanceof Error ? error.message : "网络错误" };
   }
@@ -158,8 +157,7 @@ export async function fetchGitDiffContent(
     const stagedParam = staged ? "&staged=1" : "";
     const url = backendUrl(`/backend/vibe/git/diff-content?path=${encodeURIComponent(projectPath)}&file=${encodeURIComponent(filePath)}${stagedParam}`);
     const response = await fetch(url, { signal });
-    const data = (await response.json()) as GitDiffContentResult;
-    return data;
+    return await readJsonResponse<GitDiffContentResult>(response);
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
       return { ok: false, before: "", after: "", error: "已取消" };
@@ -175,8 +173,7 @@ export async function commitGitChanges(projectPath: string, message: string): Pr
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: projectPath, message }),
     });
-    const data = (await response.json()) as GitCommitResult;
-    return data;
+    return await readJsonResponse<GitCommitResult>(response);
   } catch (error) {
     return { ok: false, hash: "", error: error instanceof Error ? error.message : "网络错误" };
   }
@@ -186,7 +183,7 @@ export async function fetchGitLog(projectPath: string, count = 20): Promise<GitL
   try {
     const url = backendUrl(`/backend/vibe/git/log?path=${encodeURIComponent(projectPath)}&count=${count}`);
     const response = await fetch(url);
-    const data = (await response.json()) as GitLogResult;
+    const data = await readJsonResponse<GitLogResult>(response);
     return { ...data, entries: data.entries?.map((entry) => ({ ...entry, files: entry.files || [] })) || [] };
   } catch (error) {
     return { ok: false, entries: [], error: error instanceof Error ? error.message : "网络错误" };
@@ -203,8 +200,7 @@ export async function fetchGitCommitFileDiff(
     let url = backendUrl(`/backend/vibe/git/commit-file-diff?path=${encodeURIComponent(projectPath)}&hash=${encodeURIComponent(hash)}&file=${encodeURIComponent(filePath)}`);
     if (oldPath) url += `&oldFile=${encodeURIComponent(oldPath)}`;
     const response = await fetch(url);
-    const data = (await response.json()) as GitCommitFileDiffResult;
-    return data;
+    return await readJsonResponse<GitCommitFileDiffResult>(response);
   } catch (error) {
     return { ok: false, before: "", after: "", error: error instanceof Error ? error.message : "网络错误" };
   }
@@ -217,8 +213,7 @@ export async function stageGitFiles(projectPath: string, files: string[]): Promi
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: projectPath, files }),
     });
-    const data = (await response.json()) as GitActionResult;
-    return data;
+    return await readJsonResponse<GitActionResult>(response);
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "网络错误" };
   }
@@ -231,8 +226,7 @@ export async function unstageGitFiles(projectPath: string, files: string[]): Pro
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: projectPath, files }),
     });
-    const data = (await response.json()) as GitActionResult;
-    return data;
+    return await readJsonResponse<GitActionResult>(response);
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "网络错误" };
   }
@@ -245,8 +239,7 @@ export async function discardGitFiles(projectPath: string, files: string[]): Pro
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: projectPath, files }),
     });
-    const data = (await response.json()) as GitActionResult;
-    return data;
+    return await readJsonResponse<GitActionResult>(response);
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "网络错误" };
   }
@@ -278,7 +271,7 @@ export async function generateCommitMessage(
 
     const contentType = response.headers.get("content-type") || "";
     if (!contentType.includes("text/event-stream") || !response.body) {
-      const data = (await response.json()) as GitGenerateMessageResult;
+      const data = await readJsonResponse<GitGenerateMessageResult>(response);
       return data;
     }
 
@@ -333,8 +326,7 @@ export async function fetchGitRemotes(projectPath: string): Promise<GitRemotesRe
   try {
     const url = backendUrl(`/backend/vibe/git/remotes?path=${encodeURIComponent(projectPath)}`);
     const response = await fetch(url);
-    const data = (await response.json()) as GitRemotesResult;
-    return data;
+    return await readJsonResponse<GitRemotesResult>(response);
   } catch (error) {
     return { ok: false, remotes: [], trackingBranch: "", ahead: 0, behind: 0, error: error instanceof Error ? error.message : "网络错误" };
   }
@@ -347,8 +339,7 @@ export async function gitFetchRemote(projectPath: string, remote?: string): Prom
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: projectPath, remote }),
     });
-    const data = (await response.json()) as GitRemoteActionResult;
-    return data;
+    return await readJsonResponse<GitRemoteActionResult>(response);
   } catch (error) {
     return { ok: false, output: "", error: error instanceof Error ? error.message : "网络错误" };
   }
@@ -361,8 +352,7 @@ export async function gitPullRemote(projectPath: string, remote?: string, branch
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: projectPath, remote, branch }),
     });
-    const data = (await response.json()) as GitRemoteActionResult;
-    return data;
+    return await readJsonResponse<GitRemoteActionResult>(response);
   } catch (error) {
     return { ok: false, output: "", error: error instanceof Error ? error.message : "网络错误" };
   }
@@ -375,8 +365,7 @@ export async function gitPushRemote(projectPath: string, remote?: string, branch
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: projectPath, remote, branch, setUpstream }),
     });
-    const data = (await response.json()) as GitRemoteActionResult;
-    return data;
+    return await readJsonResponse<GitRemoteActionResult>(response);
   } catch (error) {
     return { ok: false, output: "", error: error instanceof Error ? error.message : "网络错误" };
   }
@@ -405,8 +394,7 @@ export async function gitStashListRemote(projectPath: string): Promise<GitStashL
   try {
     const url = backendUrl(`/backend/vibe/git/stash-list?path=${encodeURIComponent(projectPath)}`);
     const response = await fetch(url);
-    const data = (await response.json()) as GitStashListResult;
-    return data;
+    return await readJsonResponse<GitStashListResult>(response);
   } catch (error) {
     return { ok: false, stashes: [], error: error instanceof Error ? error.message : "网络错误" };
   }
@@ -419,8 +407,7 @@ export async function gitStashSaveRemote(projectPath: string, message?: string):
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: projectPath, message }),
     });
-    const data = (await response.json()) as GitStashResult;
-    return data;
+    return await readJsonResponse<GitStashResult>(response);
   } catch (error) {
     return { ok: false, output: "", error: error instanceof Error ? error.message : "网络错误" };
   }
@@ -433,8 +420,7 @@ export async function gitStashPopRemote(projectPath: string, stashIndex?: number
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: projectPath, stashIndex }),
     });
-    const data = (await response.json()) as GitStashResult;
-    return data;
+    return await readJsonResponse<GitStashResult>(response);
   } catch (error) {
     return { ok: false, output: "", error: error instanceof Error ? error.message : "网络错误" };
   }
@@ -447,8 +433,7 @@ export async function gitStashApplyRemote(projectPath: string, stashIndex: numbe
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: projectPath, stashIndex }),
     });
-    const data = (await response.json()) as GitStashResult;
-    return data;
+    return await readJsonResponse<GitStashResult>(response);
   } catch (error) {
     return { ok: false, output: "", error: error instanceof Error ? error.message : "网络错误" };
   }
@@ -461,8 +446,7 @@ export async function gitStashDropRemote(projectPath: string, stashIndex: number
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: projectPath, stashIndex }),
     });
-    const data = (await response.json()) as GitStashResult;
-    return data;
+    return await readJsonResponse<GitStashResult>(response);
   } catch (error) {
     return { ok: false, output: "", error: error instanceof Error ? error.message : "网络错误" };
   }

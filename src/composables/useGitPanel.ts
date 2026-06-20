@@ -193,8 +193,10 @@ export function useGitPanel(
     clearGitDiffCache();
   }
 
-  async function refreshGitStatus(options?: { showLoading?: boolean }) {
+  async function refreshGitStatus(options?: { showLoading?: boolean; force?: boolean }) {
     if (!projectOpened()) return;
+    // 正在执行暂存/取消暂存操作时，跳过外部触发的刷新，防止覆盖乐观更新导致闪烁
+    if (!options?.force && gitStagingInProgress.value) return;
     const showLoading = options?.showLoading !== false;
     const pathAtStart = projectPath();
     const token = ++gitStatusRefreshToken;
@@ -339,18 +341,20 @@ export function useGitPanel(
     gitError.value = "";
     clearGitDiffCache();
     if (!gitStagedFiles.value.length) return;
+    // 先保存待取消暂存的文件路径，再做乐观更新（否则 gitStagedFiles computed 会立即变空）
+    const pathsToUnstage = gitStagedFiles.value.map((f) => f.path);
     gitStatus.value = gitStatus.value.map((f) => ({ ...f, staged: false }));
     gitStagingInProgress.value = true;
     gitLastStagingAt.value = Date.now();
     try {
-      const result = await unstageGitFiles(projectPath(), gitStagedFiles.value.map((f) => f.path));
+      const result = await unstageGitFiles(projectPath(), pathsToUnstage);
       if (!result.ok) {
         gitError.value = result.error || "取消暂存失败";
-        await refreshGitStatus({ showLoading: false });
+        await refreshGitStatus({ showLoading: false, force: true });
       }
     } catch (e) {
       gitError.value = e instanceof Error ? e.message : "取消暂存失败";
-      await refreshGitStatus({ showLoading: false });
+      await refreshGitStatus({ showLoading: false, force: true });
     } finally {
       gitStagingInProgress.value = false;
     }

@@ -54,9 +54,28 @@ const ASK_ONLY_RE = /^(什么是|是什么|怎么|如何|为什么|有没有|是
 const USER_NEGATION_RE =
   /不好看|不满意|不对|不是这样|不是这个|重来|重新(改|做|来|设计|调整)|换一种|换(个|一个)(风格|方向|方式)|还是(不|没)|继续(优化|改|调整)|再来(一次|个)|不行|不喜欢|太(丑|丑了|难看)|效果不(好|行|对)|不是我想要|跟之前(一样|差不多)|没变化|没区别|不喜欢/i;
 
+/** User reports implementation did not work in practice — structural, not topic-specific. */
+const USER_FAILURE_REPORT_RE =
+  /试了.{0,20}(?:没有|没|不|无效)|并没有|没效果|没有效果|不起作用|仍然(?:没有|没|不)|还是(?:没有|没|不)|看不到|电脑没|系统没|实际没|并未/i;
+
 /** Detect repeated negation — user said negation ≥2 times in recent turns. */
 export function detectUserNegation(text: string): boolean {
   return USER_NEGATION_RE.test(text.trim());
+}
+
+export function detectUserFailureReport(text: string): boolean {
+  return USER_FAILURE_REPORT_RE.test(text.trim());
+}
+
+export type FailureReportHistoryMessage = { role: string; content: string };
+
+/** True when recent user turns report the prior fix did not work. */
+export function historyRecentUserFailureReport(
+  history?: FailureReportHistoryMessage[],
+  maxUserTurns = 4,
+): boolean {
+  const users = (history ?? []).filter((m) => m.role === "user").slice(-maxUserTurns);
+  return users.some((m) => detectUserFailureReport(m.content));
 }
 
 const HISTORY_PLAN_KEEP_CHARS = 2_400;

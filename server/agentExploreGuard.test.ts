@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   checkOverlappingRead,
   checkPatchOldStringFromReads,
+  claimsPrematureCompletion,
   isAnalysisOnlyReplyUnderForcePatch,
   isBlockedGrepAfterLocate,
   isBlockedGrepAfterVisionMisread,
+  isEmptyOrInsufficientFinalReply,
   isOverlyBroadVisionGrep,
   isSearchFilesContentQuery,
   readLineRangeFromArgs,
@@ -108,5 +110,17 @@ describe("agentExploreGuard", () => {
     expect(checkPatchOldStringFromReads("src/foo.ts", ".fake { gap: 1px; }", slices)).toMatch(
       /未出现在你对 src\/foo.ts 的已读片段中/,
     );
+  });
+
+  it("detects premature completion claims", () => {
+    expect(claimsPrematureCompletion("检查完成，所有修改都正确无误 ✅")).toBe(true);
+    expect(claimsPrematureCompletion("无需再改，链路完整")).toBe(true);
+    expect(claimsPrematureCompletion("已修复 foo.ts，改动如下")).toBe(false);
+  });
+
+  it("detects empty or insufficient final replies", () => {
+    expect(isEmptyOrInsufficientFinalReply("")).toBe(true);
+    expect(isEmptyOrInsufficientFinalReply("  ")).toBe(true);
+    expect(isEmptyOrInsufficientFinalReply("好的，已完成修改并说明测试步骤。")).toBe(false);
   });
 });

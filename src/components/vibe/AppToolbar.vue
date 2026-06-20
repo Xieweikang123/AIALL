@@ -91,6 +91,7 @@
       <div class="toolbar-sep" />
       <button type="button" class="ghost small link-btn" @click="router.push('/chat')">AI 对话</button>
       <button type="button" class="ghost small link-btn" @click="router.push('/ai-config')">配置</button>
+      <button type="button" class="ghost small link-btn" @click="$emit('test-notification')" title="测试系统通知">🔔 通知测试</button>
     </div>
   </header>
 </template>

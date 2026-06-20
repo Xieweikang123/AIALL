@@ -170,6 +170,23 @@ export function shouldShowMessageBubble(msg: { role: string; content?: string; i
   return Boolean(msg.content?.trim());
 }
 
+/** Last message is user with no following assistant (e.g. lost on session switch). */
+export function isOrphanedUserReply(
+  messages: Array<{ role: string }>,
+  chatSending: boolean,
+): boolean {
+  if (chatSending || messages.length === 0) return false;
+  return messages[messages.length - 1]?.role === "user";
+}
+
+/** Agent run started but assistant placeholder not yet in the list. */
+export function isAwaitingAssistantPlaceholder(
+  messages: Array<{ role: string }>,
+  chatSending: boolean,
+): boolean {
+  return chatSending && messages[messages.length - 1]?.role === "user";
+}
+
 export function isNetworkError(e: unknown): boolean {
   const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
   return /failed to fetch|networkerror|network error|fetcherror|load failed/.test(msg);

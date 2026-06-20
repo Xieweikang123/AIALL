@@ -141,6 +141,9 @@
             <button type="button" class="session-item-main" @click="$emit('switch-session', s.id)">
               <span class="session-item-title">
                 <span v-if="sessionSendingIds.includes(s.id)" class="session-item-sending" title="Agent 运行中">●</span>
+                <span v-else-if="s.status === 'completed'" class="session-item-completed" title="已完成">✓</span>
+                <span v-else-if="s.status === 'failed'" class="session-item-failed" title="失败">✗</span>
+                <span v-else-if="s.status === 'interrupted'" class="session-item-interrupted" title="已中断">⚠</span>
                 {{ s.title }}
               </span>
               <span class="session-item-meta">
@@ -605,6 +608,30 @@ defineExpose({ searchInputRef });
   color: var(--accent, #3b82f6);
   margin-right: 4px;
   font-size: 10px;
+  vertical-align: middle;
+}
+
+.session-item-completed {
+  color: var(--success-color, #3fb950);
+  margin-right: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.session-item-failed {
+  color: var(--danger-color, #f85149);
+  margin-right: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.session-item-interrupted {
+  color: var(--warning-color, #d29922);
+  margin-right: 4px;
+  font-size: 11px;
+  font-weight: 600;
   vertical-align: middle;
 }
 

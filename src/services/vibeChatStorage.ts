@@ -106,7 +106,33 @@ export type PersistedChatMessage = {
   /** Token usage tracking */
   streamChars?: number;
   contextChars?: number;
+  /** In-flight agent UI (persisted so background runs survive session switch). */
+  agentPhase?: string;
+  status?: string;
+  streaming?: boolean;
 };
+
+/** Whether an assistant row should be kept despite empty final content. */
+export function shouldPersistAssistantMessage(m: PersistedChatMessage): boolean {
+  if (m.role !== "assistant") return false;
+  return Boolean(
+    m.content.trim() ||
+      (m.tools?.length ?? 0) > 0 ||
+      (m.roundGroups?.length ?? 0) > 0 ||
+      (m.statusLog?.length ?? 0) > 0 ||
+      m.agentRecoverable ||
+      m.agentFailed ||
+      m.agentAborted ||
+      m.agentContext ||
+      (m.totalTurns ?? 0) > 0 ||
+      (m.streamChars ?? 0) > 0 ||
+      (m.writtenFiles?.length ?? 0) > 0 ||
+      m.pendingApproval ||
+      m.agentPhase ||
+      m.status?.trim() ||
+      m.streaming,
+  );
+}
 
 export type VibeChatSessionMeta = {
   id: string;
@@ -554,12 +580,10 @@ function sanitizeMessages(
     .filter(
       (m) =>
         m.role === "user" ||
-        m.content.trim() ||
+        shouldPersistAssistantMessage(m) ||
         (m.imageDataUrls?.length ?? 0) > 0 ||
         (m.imageRefs?.length ?? 0) > 0 ||
-        (m.imageCount ?? 0) > 0 ||
-        (m.tools?.length ?? 0) > 0 ||
-        m.agentRecoverable,
+        (m.imageCount ?? 0) > 0,
     )
     .slice(-MAX_MESSAGES_PER_SESSION)
     .map((m) => {
@@ -618,6 +642,9 @@ function sanitizeMessages(
         agentSuggestions: m.agentSuggestions?.length ? [...m.agentSuggestions] : undefined,
         streamChars: m.streamChars || undefined,
         contextChars: m.contextChars || undefined,
+        agentPhase: m.agentPhase || undefined,
+        status: m.status?.trim() ? m.status : undefined,
+        streaming: m.streaming || undefined,
         ...(options?.forDisk
           ? {
               ...(m.imageRefs?.length ? { imageRefs: m.imageRefs.map((r) => ({ path: r.path })) } : {}),

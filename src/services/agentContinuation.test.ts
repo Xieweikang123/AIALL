@@ -4,9 +4,11 @@ import {
   compressPlanForHistory,
   compressProposalForHistory,
   classifyAssistantReply,
+  detectUserFailureReport,
   extractPlanCodeBlocks,
   extractPlanFilePaths,
   findLastAssistantContentInMessages,
+  historyRecentUserFailureReport,
   isExecutionContinuation,
   looksLikeActionableProposal,
   looksLikeModificationPlan,
@@ -229,5 +231,27 @@ describe("compressHistoryForExecution", () => {
     const compressed = compressHistoryForExecution(history, "改吧");
     expect(compressed).toHaveLength(2);
     expect(compressed[1].content).toContain("[已确认方案]");
+  });
+});
+
+describe("detectUserFailureReport", () => {
+  it("detects practical failure reports", () => {
+    expect(detectUserFailureReport("试了，并没有通知")).toBe(true);
+    expect(detectUserFailureReport("电脑没弹出提示")).toBe(true);
+    expect(detectUserFailureReport("帮我加个按钮")).toBe(false);
+  });
+});
+
+describe("historyRecentUserFailureReport", () => {
+  it("returns true when recent user messages report failure", () => {
+    const history = [
+      { role: "assistant", content: "已完成修改" },
+      { role: "user", content: "试了，并没有效果" },
+    ];
+    expect(historyRecentUserFailureReport(history)).toBe(true);
+  });
+
+  it("returns false for unrelated history", () => {
+    expect(historyRecentUserFailureReport([{ role: "user", content: "检查下" }])).toBe(false);
   });
 });

@@ -1,4 +1,5 @@
 import { backendUrl } from "./backendBase";
+import { readJsonResponse } from "./vibeCodingClient";
 
 export interface FileChangeEvent {
   type: "add" | "change" | "unlink" | "addDir" | "unlinkDir";
@@ -31,7 +32,7 @@ export async function startFileWatcher(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: projectPath, watchPaths }),
     });
-    return await response.json();
+    return await readJsonResponse<FileWatcherStartResult>(response);
   } catch (error) {
     return {
       ok: false,
@@ -49,7 +50,7 @@ export async function stopFileWatcher(): Promise<FileWatcherStopResult> {
       method: "POST",
       headers: { "Content-Type": "application/json" },
     });
-    return await response.json();
+    return await readJsonResponse<FileWatcherStopResult>(response);
   } catch (error) {
     return {
       ok: false,

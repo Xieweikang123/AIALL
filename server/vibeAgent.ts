@@ -45,6 +45,11 @@ import {
   buildImplementPasteBlockedNudge,
   buildUiDefectForcePatchNudge,
   buildUserNegationNudge,
+  buildEmptyReplyRetryNudge,
+  buildPrematureCompletionRetryNudge,
+  buildCodeReviewHonestyNudge,
+  buildUserErrorQuoteHint,
+  buildUserFailureReportNudge,
   EXECUTE_PLAN_EXPLORE_TURN_BUDGET,
   EXPLORE_INTERIM_DIAGNOSIS_TURN,
   INTERACTIVE_EXPLORE_TURN_BUDGET,
@@ -56,8 +61,9 @@ import {
   PLAN_MAX_TOTAL_EXPLORE_HARD,
   PLAN_MAX_TOTAL_EXPLORE_SOFT,
 } from "./agentExplorationBudget";
-import { buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildBuildWriteBlockedHint, buildImplementFollowUpHint, buildImplementationStatusHint, buildSessionAuditHint, buildUiDefectBuildHint, buildWriteToolBlockedMessage, isAgentStepClarificationPrompt, isConsultativeUserPrompt, isImplementationStatusPrompt, isImplementFollowUpRun, isSessionAuditPrompt, isUiDefectReportPrompt, historySuggestsActiveImplementation, historySuggestsQuotePositionFix } from "./agentUserIntent";
-import { detectUserNegation } from "../src/services/agentContinuation";
+import { buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildBuildWriteBlockedHint, buildImplementFollowUpHint, buildImplementationStatusHint, buildSessionAuditHint, buildUiDefectBuildHint, buildWriteToolBlockedMessage, isAgentStepClarificationPrompt, isCodeReviewPrompt, isConsultativeUserPrompt, isImplementationStatusPrompt, isImplementFollowUpRun, isSessionAuditPrompt, isUiDefectReportPrompt, isUserErrorQuotePrompt, historySuggestsActiveImplementation, historySuggestsQuotePositionFix } from "./agentUserIntent";
+import { detectProjectRuntimeProfile, buildRuntimeAwarenessHint } from "./agentRuntimeHint";
+import { detectUserNegation, detectUserFailureReport, historyRecentUserFailureReport } from "../src/services/agentContinuation";
 import { buildAgentSuggestionsPromptHint } from "../src/services/agentSuggestions";
 import {
   buildBlockedGrepAfterLocateMessage,
@@ -68,6 +74,8 @@ import {
   buildSearchFilesContentQueryMessage,
   checkOverlappingRead,
   checkPatchOldStringFromReads,
+  claimsPrematureCompletion,
+  isEmptyOrInsufficientFinalReply,
   isAnalysisOnlyReplyUnderForcePatch,
   isBlockedGrepAfterLocate,
   isBlockedGrepAfterVisionMisread,
@@ -712,6 +720,9 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "Build 模式下用户追问「还能优化吗」「还能继续吗」「继续吧」「接着改」等，均视为执行指令，必须立即 patch_file / write_file，禁止再分析或询问。",
     "探索时：read_file 用 offset/limit 分段读取（单次约 200 行）；不要重复读取已读过的文件；用中文简短说明后立即调用工具。",
     "修改前必须先 read_file 核对目标文件；patch_file 前 old_string 须与磁盘内容完全一致。",
+    "自检/验证：禁止在未对照工具结果与用户实测反馈前宣称「全部正确/无需再改/链路完整」；须区分主路径效果与降级/兜底 UI。",
+    "用户报告「试了不行/没有效果」后，禁止再用同样方案做未经证实的「检查完成✅」；须承认未验证项并给出可执行排查步骤。",
+    "给用户的测试步骤须与项目实际运行环境一致（从 package.json scripts 判断 Web dev vs 桌面壳）；禁止混用。",
     "解释项目时：从 package.json、README、入口文件等关键文件入手，不要臆测。",
     "修改代码时：小范围改动优先 patch_file（old_string 须唯一匹配）；全文件重写或新文件才用 write_file；大文件禁止 write_file 整文件覆盖。",
     "需要确认现状时 read_file 用 offset/limit 读相关片段即可，不要读整个大文件。",
@@ -1317,11 +1328,26 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     !isPlanExplore &&
     !isExecutePlan &&
     isImplementFollowUpRun(prompt, params.history, { isAsk });
+  const codeReviewRun =
+    !isAsk &&
+    !isPlanExplore &&
+    !isExecutePlan &&
+    isCodeReviewPrompt(prompt) &&
+    !implementFollowUpRun;
+  const userErrorQuoteRun =
+    !isAsk &&
+    !isPlanExplore &&
+    !isExecutePlan &&
+    isUserErrorQuotePrompt(prompt, params.history) &&
+    !implementFollowUpRun;
+  const userFailureReportRun =
+    !isAsk && !isPlanExplore && !isExecutePlan && detectUserFailureReport(prompt);
+  const userRecentlyReportedFailure = historyRecentUserFailureReport(params.history);
   const readOnlyBuildRun =
     !isAsk &&
     !isPlanExplore &&
     !isExecutePlan &&
-    isConsultativeUserPrompt(prompt) &&
+    (isConsultativeUserPrompt(prompt) || codeReviewRun) &&
     !implementFollowUpRun;
   const implementationStatusRun =
     readOnlyBuildRun &&
@@ -1413,6 +1439,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
   const projectSkillsBlock = await buildProjectSkillsPromptBlock(projectRoot);
 
+  const runtimeProfile = detectProjectRuntimeProfile(projectRoot);
+  const runtimeAwarenessBlock = buildRuntimeAwarenessHint(runtimeProfile);
+
   const systemPrompt =
     (isAsk
       ? buildAskSystemPrompt(projectRoot, openFilePath, openFileSnippet, model)
@@ -1422,6 +1451,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       ? buildPlanSystemPrompt(projectRoot, openFilePath, openFileSnippet, model)
       : buildSystemPrompt(projectRoot, openFilePath, model) +
         (readOnlyBuildRun ? buildConsultativeBuildHint() : "") +
+        (codeReviewRun ? buildCodeReviewHonestyNudge(userRecentlyReportedFailure) : "") +
+        (userErrorQuoteRun ? buildUserErrorQuoteHint() : "") +
+        (userFailureReportRun ? buildUserFailureReportNudge() : "") +
         (implementationStatusRun ? buildImplementationStatusHint() : "") +
         (uiDefectBuildRun ? buildUiDefectBuildHint() : "") +
         (implementFollowUpRun ? buildImplementFollowUpHint(historySuggestsQuotePositionFix(params.history)) : "") +
@@ -1430,7 +1462,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     projectContextBlock +
     agentsGuideBlock +
     projectSkillsBlock +
-    projectMemoryBlock;
+    projectMemoryBlock +
+    runtimeAwarenessBlock;
 
   const writeStage = isAsk || isPlanExplore || readOnlyBuildRun ? null : createWriteStage();
   const readCache = new Map<string, string>();
@@ -1465,6 +1498,10 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   let fileBreadthNudgeSent = false;
   /** Track consecutive user negations to detect dissatisfaction patterns. */
   let consecutiveUserNegations = 0;
+  let emptyReplyRetries = 0;
+  let prematureCompletionRetries = 0;
+  const MAX_EMPTY_REPLY_RETRIES = 2;
+  const MAX_PREMATURE_COMPLETION_RETRIES = 1;
   let negationNudgeSent = false;
   const activeTools = isAsk || isPlanExplore || readOnlyBuildRun ? READ_ONLY_AGENT_TOOLS : VIBE_AGENT_TOOLS;
   const userContent = buildVisionUserContent(prompt, imageDataUrls);
@@ -2041,6 +2078,72 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         continue;
       }
 
+      if (
+        isEmptyOrInsufficientFinalReply(rawText) &&
+        emptyReplyRetries < MAX_EMPTY_REPLY_RETRIES
+      ) {
+        emptyReplyRetries += 1;
+        messages.push({ role: "assistant", content: rawText || "(empty)" });
+        messages.push({ role: "system", content: buildEmptyReplyRetryNudge() });
+        onEvent({
+          type: "turn_response",
+          data: {
+            turn,
+            ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+            assistantText: userText,
+            toolCalls: [],
+            hasToolCalls: false,
+            isFinal: false,
+          },
+        });
+        onEvent({
+          type: "status",
+          data: {
+            phase: "empty_reply_retry",
+            turn,
+            ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+            model,
+            detail: "空回复，已要求输出有效正文",
+          },
+        });
+        continue;
+      }
+
+      if (
+        claimsPrematureCompletion(rawText) &&
+        prematureCompletionRetries < MAX_PREMATURE_COMPLETION_RETRIES &&
+        (userRecentlyReportedFailure || codeReviewRun || userFailureReportRun)
+      ) {
+        prematureCompletionRetries += 1;
+        messages.push({ role: "assistant", content: rawText });
+        messages.push({
+          role: "system",
+          content: buildPrematureCompletionRetryNudge(userRecentlyReportedFailure || userFailureReportRun),
+        });
+        onEvent({
+          type: "turn_response",
+          data: {
+            turn,
+            ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+            assistantText: userText,
+            toolCalls: [],
+            hasToolCalls: false,
+            isFinal: false,
+          },
+        });
+        onEvent({
+          type: "status",
+          data: {
+            phase: "premature_completion_retry",
+            turn,
+            ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+            model,
+            detail: "过早宣称完成，已要求证据式核对",
+          },
+        });
+        continue;
+      }
+
       // Inject modification audit before final reply to prevent false claims of success.
       if (!isAsk && writeStage && patchFailureLog.length > 0) {
         const successCount = writeStage.writtenList.length;
@@ -2275,34 +2378,52 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       }
     };
 
-    for (let index = 0; index < toolCalls.length; ) {
-      if (signal?.aborted) break;
+    const toolExecutionHeartbeat = setInterval(() => {
+      if (signal?.aborted) return;
+      onEvent({
+        type: "status",
+        data: {
+          phase: "executing_tool",
+          turn,
+          ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+          model,
+          detail: "正在执行工具...",
+        },
+      });
+    }, 5000);
 
-      let end = index + 1;
-      while (end < toolCalls.length && canParallelizeToolBatch(toolCalls.slice(index, end + 1))) {
-        end += 1;
-      }
+    try {
+      for (let index = 0; index < toolCalls.length; ) {
+        if (signal?.aborted) break;
 
-      const batch = toolCalls.slice(index, end);
-      const canParallel = canParallelizeToolBatch(batch);
-      for (const call of batch) {
-        onEvent({
-          type: "tool_start",
-          data: { id: call.id, name: call.function.name, args: parseToolArgs(call.function.arguments || "{}") },
-        });
-      }
-
-      if (canParallel && batch.length > 1) {
-        const outcomes = await Promise.all(batch.map((call) => runToolCall(call)));
-        for (const outcome of outcomes) emitToolOutcome(outcome);
-      } else {
-        for (const call of batch) {
-          const outcome = await runToolCall(call);
-          emitToolOutcome(outcome);
+        let end = index + 1;
+        while (end < toolCalls.length && canParallelizeToolBatch(toolCalls.slice(index, end + 1))) {
+          end += 1;
         }
-      }
 
-      index = end;
+        const batch = toolCalls.slice(index, end);
+        const canParallel = canParallelizeToolBatch(batch);
+        for (const call of batch) {
+          onEvent({
+            type: "tool_start",
+            data: { id: call.id, name: call.function.name, args: parseToolArgs(call.function.arguments || "{}") },
+          });
+        }
+
+        if (canParallel && batch.length > 1) {
+          const outcomes = await Promise.all(batch.map((call) => runToolCall(call)));
+          for (const outcome of outcomes) emitToolOutcome(outcome);
+        } else {
+          for (const call of batch) {
+            const outcome = await runToolCall(call);
+            emitToolOutcome(outcome);
+          }
+        }
+
+        index = end;
+      }
+    } finally {
+      clearInterval(toolExecutionHeartbeat);
     }
 
     // Inject corrective prompt if patch_file calls failed this turn.

@@ -71,6 +71,14 @@
         <span class="panel-meta" :class="{ warn: !configReady || !apiKeyReady }">
           {{ aiConfigStatusText }}
         </span>
+        <button
+          type="button"
+          class="ghost small test-notify-btn"
+          title="测试系统通知"
+          @click="$emit('test-notification')"
+        >
+          🔔
+        </button>
       </div>
     </div>
 
@@ -731,6 +739,7 @@ const emit = defineEmits<{
   (e: "dismiss-memory-proposal", id: string): void;
   (e: "confirm-skill-proposal", id: string): void;
   (e: "dismiss-skill-proposal", id: string): void;
+  (e: "test-notification"): void;
 }>();
 
 const chatScrollRef = ref<HTMLElement | null>(null);
@@ -1864,5 +1873,16 @@ function formatSessionTime(timestamp: number | string): string {
   display: flex;
   gap: 6px;
   flex-shrink: 0;
+}
+
+.test-notify-btn {
+  font-size: 13px;
+  padding: 2px 6px;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+.test-notify-btn:hover {
+  opacity: 1;
 }
 </style>

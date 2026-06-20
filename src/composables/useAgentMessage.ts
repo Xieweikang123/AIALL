@@ -2,6 +2,7 @@ import { computed, type Ref } from "vue";
 import {
   buildCursorAgentFeed,
   buildCursorAgentTimeline,
+  cursorPlanningLabel,
   shouldUseCompactAgentFeed as shouldUseCompactAgentFeedByCount,
   type CursorFeedProcessBlock,
 } from "../services/agentCursorFeed";
@@ -36,6 +37,10 @@ export function useAgentMessage(
         m.statusLog?.length ||
         m.turnTraces?.length ||
         m.status ||
+        m.agentPhase ||
+        m.streaming ||
+        m.agentFailed ||
+        m.agentRecoverable ||
         m.tools?.length ||
         m.agentTurn ||
         m.totalTurns,
@@ -150,14 +155,10 @@ export function useAgentMessage(
   function currentAgentStatus(m: AgentMessage): string {
     if (!isAgentRunning(m)) return "";
     if (timelineAnswerStreaming(m)) return "";
-    let detail = m.agentDetail || m.status;
-    if (
-      m.agentPhase &&
-      ["connecting_local", "stream_connected", "connected", "reconnecting", "preparing", "starting", "building_context"].includes(m.agentPhase)
-    ) {
-      detail = m.agentDetail || (m.agentPhase === "connecting_local" ? "连接本地服务" : "启动 Agent");
-    }
-    return detail || "";
+    if (m.status?.trim()) return m.status.trim();
+    const planning = cursorPlanningLabel(m.agentPhase, m.agentDetail);
+    if (planning) return planning;
+    return m.agentDetail?.trim() || "";
   }
 
   function cursorActivitySummary(m: AgentMessage): string {

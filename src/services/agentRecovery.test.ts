@@ -59,10 +59,10 @@ describe("isRecoverableAgentError", () => {
 });
 
 describe("shouldAutoResumeAgentError", () => {
-  it("auto-continues transient disconnects and turn-cap exhaustion", () => {
+  it("auto-continues transient disconnects but not turn-cap exhaustion", () => {
     expect(shouldAutoResumeAgentError("Failed to fetch")).toBe(true);
     expect(shouldAutoResumeAgentError("连接中断（运行未完成）")).toBe(true);
-    expect(shouldAutoResumeAgentError(buildAgentMaxTurnsExhaustedMessage(12))).toBe(true);
+    expect(shouldAutoResumeAgentError(buildAgentMaxTurnsExhaustedMessage(12))).toBe(false);
     expect(shouldAutoResumeAgentError("模型返回格式错误")).toBe(false);
   });
 
@@ -460,6 +460,34 @@ describe("recoverableAgentErrorHint", () => {
     expect(hint).toContain("恢复运行");
     expect(hint).toContain("Failed to fetch");
   });
+
+  it("mentions turn cap for max-turns exhaustion without implying auto-retry", () => {
+    const hint = recoverableAgentErrorHint(
+      { turnTraces: [{ turn: 1 }, { turn: 2 }, { turn: 3 }], tools: [{ running: false, summary: "ok" }] },
+      buildAgentMaxTurnsExhaustedMessage(3),
+    );
+    expect(hint).toContain("轮次上限");
+    expect(hint).toContain("恢复运行");
+    expect(hint).not.toContain("自动续跑");
+  });
+
+  it("mentions stall for long-no-progress recovery", () => {
+    const hint = recoverableAgentErrorHint(
+      { turnTraces: [{ turn: 1 }], tools: [{ running: false, summary: "ok" }] },
+      agentStallRecoveryReason(),
+    );
+    expect(hint).toContain("卡住");
+    expect(hint).toContain("恢复运行");
+  });
+
+  it("mentions missing final answer when run completed without summary", () => {
+    const hint = recoverableAgentErrorHint(
+      { turnTraces: [{ turn: 1 }], tools: [{ running: false, summary: "ok" }] },
+      "运行中断（未生成最终回复）",
+    );
+    expect(hint).toContain("未生成最终回复");
+    expect(hint).toContain("恢复运行");
+  });
 });
 
 describe("silent continue helpers", () => {
@@ -469,7 +497,8 @@ describe("silent continue helpers", () => {
 
   it("caps silent attempts", () => {
     expect(AGENT_SILENT_CONTINUE_MAX).toBeGreaterThanOrEqual(3);
-    expect(shouldSilentAutoContinue(buildAgentMaxTurnsExhaustedMessage(20))).toBe(true);
+    expect(shouldSilentAutoContinue(buildAgentMaxTurnsExhaustedMessage(20))).toBe(false);
+    expect(shouldSilentAutoContinue("Failed to fetch")).toBe(true);
   });
 });
 

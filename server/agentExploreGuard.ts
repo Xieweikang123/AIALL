@@ -206,6 +206,37 @@ function dedupeRepeatedClauses(text: string): string {
 
 const WRITE_DONE_RE = /已(?:经)?(?:修复|修改|写入|调整|完成)|改动(?:如下|点)|file_diff|已写入/i;
 
+/** Rubber-stamp self-check without evidence — structural patterns, not feature-specific. */
+const PREMATURE_COMPLETION_RE =
+  /(?:全部|所有).{0,10}(?:正确|无误|完成|落盘)|无需再改|链路完整|无逻辑漏洞|可以启动测试|代码质量检查|均(?:已)?(?:正确|完成)|都(?:已)?(?:正确|完成)/i;
+
+const FALSE_VERIFICATION_PASS_RE =
+  /检查完成|核对完成|验证通过|自检.{0,6}(?:通过|完成)|.{0,6}✅.{0,6}正确/i;
+
+export function claimsPrematureCompletion(text: string): boolean {
+  const body = sanitizeAgentUserVisibleText(text);
+  if (!body) return false;
+  return PREMATURE_COMPLETION_RE.test(body) || (FALSE_VERIFICATION_PASS_RE.test(body) && /✅|无误|正确/.test(body));
+}
+
+export function isEmptyOrInsufficientFinalReply(text: string): boolean {
+  const body = sanitizeAgentUserVisibleText(text);
+  if (!body) return true;
+  if (body.length <= 6 && !/[\u4e00-\u9fff]{2}/.test(body)) return true;
+  return false;
+}
+
+/** True when reply treats a fallback/degraded UI path as primary success. */
+export function claimsFallbackAsPrimarySuccess(text: string): boolean {
+  const body = sanitizeAgentUserVisibleText(text);
+  if (!body) return false;
+  return (
+    /(?:已发送|通知已|成功).{0,12}(?:✅|成功)/i.test(body) &&
+    /(?:横幅|站内|降级|代替|fallback|alert)/i.test(body) === false &&
+    /(?:系统|原生|操作系统|桌面|OS)/i.test(body)
+  );
+}
+
 const MANUAL_PASTE_INSTRUCTION_RE =
   /请将.{0,24}(?:应用|粘贴|手动)|请自行.{0,12}(?:应用|修改|粘贴)|手动.{0,8}(?:应用|修改|粘贴)/i;
 

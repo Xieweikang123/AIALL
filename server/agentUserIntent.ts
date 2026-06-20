@@ -39,6 +39,14 @@ const UI_DEFECT_SUBJECT_RE =
 /** User asks what an agent investigation step or API attribute means — explain first, not read-only Build. */
 const STEP_CLARIFICATION_RE = /啥意思|什么意思|啥是|是什么|干吗|干嘛|怎么理解|confirm\s*啥|确认.*(?:啥|什么)/i;
 
+/** Short code review / verification request — read-only, evidence-based. */
+const CODE_REVIEW_PROMPT_RE =
+  /^(?:请?)?(?:检查|核对|复查|自检|验证|确认)(?:一下|下)?(?:代码|改动|修改|实现|吧|了)?[。！!]?$/i;
+
+/** Message shape: user pasted system/error copy (often no question mark, short). */
+const ERROR_QUOTE_SHAPE_RE =
+  /^(?:错误|警告|提示|通知|失败|已被拒绝|不可用|权限|拒绝|未授权)/;
+
 const STEP_OR_API_REFERENCE_RE =
   /(?:读取|read|grep|opening|Teleport|target|anchor|定位|浮层|fixed|patch|工具|这一步|这步|opening tag)/i;
 
@@ -46,6 +54,30 @@ export function isAgentStepClarificationPrompt(prompt: string): boolean {
   const text = prompt.trim();
   if (!text) return false;
   return STEP_CLARIFICATION_RE.test(text) && STEP_OR_API_REFERENCE_RE.test(text);
+}
+
+export function isCodeReviewPrompt(prompt: string): boolean {
+  return CODE_REVIEW_PROMPT_RE.test(prompt.trim());
+}
+
+/** User likely pasted an error/banner they saw — not necessarily a new feature request. */
+export function isUserErrorQuotePrompt(
+  prompt: string,
+  history?: UserIntentHistoryMessage[],
+): boolean {
+  const text = prompt.trim();
+  if (!text || text.length > 160) return false;
+  if (/[？?]$/.test(text)) return false;
+  if (IMPLEMENT_INTENT_RE.test(text)) return false;
+  if (ERROR_QUOTE_SHAPE_RE.test(text)) return true;
+  const snippet = text.slice(0, Math.min(48, text.length));
+  if (snippet.length < 8) return false;
+  const recentAssistant = (history ?? [])
+    .filter((m) => m.role === "assistant")
+    .slice(-3)
+    .map((m) => m.content)
+    .join("\n");
+  return recentAssistant.includes(snippet);
 }
 
 /** User asks whether agent can see attached screenshot issue — treat as UI defect when image present. */

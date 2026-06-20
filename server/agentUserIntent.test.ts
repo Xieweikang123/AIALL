@@ -12,6 +12,7 @@ import {
   historySuggestsActiveImplementation,
   historySuggestsQuotePositionFix,
   isAgentStepClarificationPrompt,
+  isCodeReviewPrompt,
   isConsultativeUserPrompt,
   isImplementationStatusPrompt,
   isImplementFollowUpRun,
@@ -19,6 +20,7 @@ import {
   isSessionAuditPrompt,
   isShortImplementPrompt,
   isUiDefectReportPrompt,
+  isUserErrorQuotePrompt,
 } from "./agentUserIntent";
 
 describe("isConsultativeUserPrompt", () => {
@@ -241,5 +243,39 @@ describe("buildSessionAuditHint", () => {
     expect(hint).toContain("证据强度");
     expect(hint).toContain("摘要不足，无法确认");
     expect(hint).toContain("禁止断言");
+  });
+});
+
+describe("isCodeReviewPrompt", () => {
+  it("detects short review requests", () => {
+    expect(isCodeReviewPrompt("检查下")).toBe(true);
+    expect(isCodeReviewPrompt("核对一下")).toBe(true);
+    expect(isCodeReviewPrompt("复查代码")).toBe(true);
+  });
+
+  it("rejects implement requests", () => {
+    expect(isCodeReviewPrompt("帮我修复按钮")).toBe(false);
+  });
+});
+
+describe("isUserErrorQuotePrompt", () => {
+  it("detects error-shaped paste without question mark", () => {
+    expect(isUserErrorQuotePrompt("通知权限已被拒绝，请在浏览器设置中手动开启通知权限")).toBe(true);
+  });
+
+  it("detects repeat of recent assistant banner text", () => {
+    const history = [
+      {
+        role: "assistant",
+        content: "通知权限已被拒绝，请在浏览器设置中手动开启通知权限。",
+      },
+    ];
+    expect(isUserErrorQuotePrompt("通知权限已被拒绝，请在浏览器设置中手动开启通知权限", history)).toBe(
+      true,
+    );
+  });
+
+  it("rejects questions", () => {
+    expect(isUserErrorQuotePrompt("为什么通知权限被拒绝？")).toBe(false);
   });
 });

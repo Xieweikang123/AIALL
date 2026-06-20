@@ -250,6 +250,39 @@
       </div>
     </div>
   </div>
+
+    <div
+      v-if="awaitingAssistantPlaceholder"
+      class="msg assistant pending-assistant-hint"
+    >
+      <div class="msg-avatar" aria-hidden="true">AI</div>
+      <div class="msg-body">
+        <div class="msg-head">
+          <div class="msg-role">Agent</div>
+        </div>
+        <div class="msg-status">
+          <span class="status-pulse" aria-hidden="true" />
+          <span class="msg-status-text">正在启动 Agent…</span>
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-else-if="orphanedUserReply"
+      class="msg assistant orphaned-reply-hint"
+    >
+      <div class="msg-avatar" aria-hidden="true">AI</div>
+      <div class="msg-body">
+        <div class="msg-head">
+          <div class="msg-role">Agent</div>
+        </div>
+        <div class="agent-recovery-banner">
+          <span class="agent-recovery-text">
+            Agent 未回复（可能因连接中断或切换会话导致）。请点击上方用户消息的「重发」重新提问。
+          </span>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- 图片查看器模态框 -->
@@ -282,18 +315,27 @@
 </template>
 
 <script setup lang="ts">
-import { inject, nextTick, ref } from "vue";
+import { computed, inject, nextTick, ref } from "vue";
 import AgentMessage from "../AgentMessage.vue";
 import ChatMarkdown from "../ChatMarkdown.vue";
 import PlanDocumentBlock from "../PlanDocumentBlock.vue";
 import { enrichPlanMarkdownForDisplay } from "../../services/planDocumentDisplay";
 import { vibeChatMessageContextKey, type VibeChatMessageItem } from "../../composables/vibeChatMessageContext";
+import { isAwaitingAssistantPlaceholder, isOrphanedUserReply } from "../../utils/vibeHelpers";
 
 const injectedCtx = inject(vibeChatMessageContextKey);
 if (!injectedCtx) {
   throw new Error("VibeChatMessages requires vibeChatMessageContext");
 }
 const ctx = injectedCtx;
+
+const orphanedUserReply = computed(() =>
+  isOrphanedUserReply(ctx.chatMessages.value, ctx.chatSending.value),
+);
+
+const awaitingAssistantPlaceholder = computed(() =>
+  isAwaitingAssistantPlaceholder(ctx.chatMessages.value, ctx.chatSending.value),
+);
 
 // 图片查看器状态
 const viewerOpen = ref(false);
