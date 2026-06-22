@@ -353,8 +353,15 @@ function setPlainText(text: string) {
 }
 
 function hasContent(): boolean {
-  const { text, refs, drops, imageDataUrls } = extractPayload();
-  return Boolean(text.trim() || refs.length || drops.length || imageDataUrls.length);
+  const root = editorRef.value;
+  if (!root) return false;
+  // 快速检查：如果有任何子元素（chip、图片等），或 textContent 非空，则有内容
+  if (root.childElementCount > 0) return true;
+  const text = root.textContent ?? "";
+  if (text.trim()) return true;
+  // 回退到完整的 payload 提取
+  const { refs, drops, imageDataUrls } = extractPayload();
+  return Boolean(refs.length || drops.length || imageDataUrls.length);
 }
 
 function syncEmpty() {

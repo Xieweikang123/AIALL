@@ -1,15 +1,17 @@
-<template>
+﻿<template>
   <section v-show="!parentEditorCollapsed" class="editor-panel">
     <div class="editor-header">
-      <div v-if="openTabs.length" class="editor-tabs">
+      <div v-if="openTabs.length" ref="tabsContainerRef" class="editor-tabs" @wheel.prevent="onTabsWheel">
         <button
           v-for="tab in openTabs"
           :key="tab.path"
+          :ref="(el) => setTabRef(tab.path, el as HTMLElement | null)"
           type="button"
           class="editor-tab"
           :class="{ active: tab.path === activeFilePath, dirty: tab.dirty }"
           :title="tab.path"
           @click="$emit('switch-tab', tab.path)"
+          @contextmenu.prevent="onTabContextMenu($event, tab.path)"
         >
           <span class="editor-tab-name">{{ getFileName(tab.path) }}</span>
           <span v-if="tab.dirty" class="editor-tab-dot" aria-hidden="true">•</span>
@@ -26,34 +28,23 @@
         </button>
       </div>
       <div v-else class="editor-header-title">未打开文件</div>
+
+      <!-- 右键菜单 -->
+      <Teleport to="body">
+        <div
+          v-if="contextMenu.visible"
+          class="editor-tab-context-menu"
+          :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+          @click.stop
+        >
+          <button type="button" @click="ctxClose">关闭</button>
+          <button type="button" :disabled="openTabs.length <= 1" @click="ctxCloseOthers">关闭其它</button>
+          <button type="button" :disabled="!hasTabsToRight" @click="ctxCloseRight">关闭右侧</button>
+          <div class="ctx-sep" />
+          <button type="button" :disabled="openTabs.length === 0" @click="ctxCloseAll">关闭全部</button>
+        </div>
+      </Teleport>
       <div class="editor-header-actions">
-        <button
-          v-if="activeFileDiff"
-          type="button"
-          class="editor-action-btn"
-          :disabled="activeFileReadOnly"
-          @click="$emit('toggle-diff-mode')"
-        >
-          {{ showDiffMode ? "编辑" : "对比" }}
-        </button>
-        <button
-          type="button"
-          class="editor-action-btn save-btn"
-          :disabled="!activeFilePath || !fileDirty || showDiffMode || activeFileReadOnly"
-          title="保存 (Ctrl+S)"
-          @click="$emit('save-file')"
-        >
-          保存
-        </button>
-        <button
-          type="button"
-          class="editor-action-btn"
-          :disabled="!activeFilePath || showDiffMode || activeFileReadOnly"
-          title="重新加载文件"
-          @click="$emit('reload-file')"
-        >
-          重载
-        </button>
         <span v-if="fileDirty && !showDiffMode" class="dirty-badge" title="文件已修改">● 未保存</span>
         <span class="editor-action-divider" />
         <button
@@ -107,7 +98,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from "vue";
+import { ref, computed, watch, nextTick } from "vue";
 import CodeMonacoEditor from "../CodeMonacoEditor.vue";
 import CodeMonacoDiffEditor from "../CodeMonacoDiffEditor.vue";
 
@@ -142,6 +133,9 @@ const props = defineProps<Props>();
 const emit = defineEmits<{
   (e: "switch-tab", path: string): void;
   (e: "close-tab", path: string): void;
+  (e: "close-other-tabs", path: string): void;
+  (e: "close-right-tabs", path: string): void;
+  (e: "close-all-tabs"): void;
   (e: "toggle-diff-mode"): void;
   (e: "save-file"): void;
   (e: "reload-file"): void;
@@ -151,6 +145,93 @@ const emit = defineEmits<{
   (e: "ask-ai-with-code"): void;
   (e: "update:fileContent", value: string): void;
 }>();
+
+/* ---- 标签滚轮横向滚动 ---- */
+function onTabsWheel(e: WheelEvent) {
+  const el = (e.currentTarget as HTMLElement);
+  if (e.deltaY !== 0) {
+    el.scrollLeft += e.deltaY;
+  }
+}
+
+/* ---- 标签 ref 管理 & 自动滚动 ---- */
+const tabsContainerRef = ref<HTMLDivElement | null>(null);
+const tabElMap = new Map<string, HTMLElement>();
+
+function setTabRef(path: string, el: HTMLElement | null) {
+  if (el) tabElMap.set(path, el);
+  else tabElMap.delete(path);
+}
+
+function scrollTabIntoView(path: string) {
+  const container = tabsContainerRef.value;
+  const tabEl = tabElMap.get(path);
+  if (!container || !tabEl) return;
+
+  const tabLeft = tabEl.offsetLeft;
+  const tabRight = tabLeft + tabEl.offsetWidth;
+  const scrollLeft = container.scrollLeft;
+  const viewWidth = container.clientWidth;
+
+  if (tabRight > scrollLeft + viewWidth) {
+    container.scrollLeft = tabRight - viewWidth + 8;
+  } else if (tabLeft < scrollLeft) {
+    container.scrollLeft = tabLeft - 8;
+  }
+}
+
+watch(() => props.activeFilePath, async (newPath) => {
+  if (!newPath) return;
+  await nextTick();
+  scrollTabIntoView(newPath);
+});
+
+/* ---- 右键菜单 ---- */
+const contextMenu = ref({ visible: false, x: 0, y: 0, path: "" });
+
+function onTabContextMenu(e: MouseEvent, path: string) {
+  contextMenu.value = { visible: true, x: e.clientX, y: e.clientY, path };
+}
+
+const hasTabsToRight = computed(() => {
+  const idx = props.openTabs.findIndex((t) => t.path === contextMenu.value.path);
+  return idx >= 0 && idx < props.openTabs.length - 1;
+});
+
+function hideCtx() { contextMenu.value.visible = false; }
+
+function ctxClose() {
+  const p = contextMenu.value.path;
+  hideCtx();
+  emit("close-tab", p);
+}
+function ctxCloseOthers() {
+  const p = contextMenu.value.path;
+  hideCtx();
+  emit("close-other-tabs", p);
+}
+function ctxCloseRight() {
+  const p = contextMenu.value.path;
+  hideCtx();
+  emit("close-right-tabs", p);
+}
+function ctxCloseAll() {
+  hideCtx();
+  emit("close-all-tabs");
+}
+
+/* 点击页面任意位置或按 Escape 关闭菜单 */
+import { onMounted, onBeforeUnmount } from "vue";
+function onGlobalClick() { hideCtx(); }
+function onGlobalKeydown(e: KeyboardEvent) { if (e.key === "Escape") hideCtx(); }
+onMounted(() => {
+  document.addEventListener("click", onGlobalClick, true);
+  document.addEventListener("keydown", onGlobalKeydown, true);
+});
+onBeforeUnmount(() => {
+  document.removeEventListener("click", onGlobalClick, true);
+  document.removeEventListener("keydown", onGlobalKeydown, true);
+});
 
 const editorRef = ref<InstanceType<typeof CodeMonacoEditor> | null>(null);
 
@@ -190,11 +271,12 @@ defineExpose({ editorRef });
 
 .editor-tabs {
   display: flex;
-  gap: 2px;
+  gap: 4px;
   overflow-x: auto;
-  flex: 1;
+  flex: 1 1 0%;
   scrollbar-width: none;
   -ms-overflow-style: none;
+  min-width: 0;
 }
 
 .editor-tabs::-webkit-scrollbar {
@@ -220,7 +302,9 @@ defineExpose({ editorRef });
   cursor: pointer;
   border-radius: 6px 6px 0 0;
   white-space: nowrap;
+  min-width: 0;
   max-width: 180px;
+  flex: 0 0 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   transition: color 0.15s ease, background 0.15s ease;
@@ -399,5 +483,47 @@ defineExpose({ editorRef });
 
 .ask-ai-floating:hover {
   background: var(--accent-hover, #79c0ff);
+}
+
+/* 右键菜单 */
+.editor-tab-context-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 140px;
+  background: rgba(22, 27, 38, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 4px 0;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(12px);
+}
+
+.editor-tab-context-menu button {
+  display: block;
+  width: 100%;
+  padding: 5px 14px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.82);
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.editor-tab-context-menu button:hover:not(:disabled) {
+  background: rgba(88, 166, 255, 0.18);
+  color: #fff;
+}
+
+.editor-tab-context-menu button:disabled {
+  color: rgba(255, 255, 255, 0.25);
+  cursor: default;
+}
+
+.ctx-sep {
+  height: 1px;
+  margin: 3px 8px;
+  background: rgba(255, 255, 255, 0.08);
 }
 </style>

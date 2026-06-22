@@ -483,6 +483,45 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     syncEditorPanelForOpenFiles();
   }
 
+  async function closeOtherTabs(keepPath: string) {
+    const keepTab = findOpenTab(keepPath);
+    if (!keepTab) return;
+    syncActiveTabToCache();
+    const others = openTabs.value.filter((t) => t.path !== keepPath);
+    for (const t of others) {
+      await closeTab(t.path);
+    }
+    if (activeFilePath.value !== keepPath) {
+      const kt = findOpenTab(keepPath);
+      if (kt) {
+        syncActiveTabToCache();
+        activeFilePath.value = kt.path;
+        fileContent.value = kt.content;
+        fileDirty.value = kt.dirty;
+        fileLoadError.value = "";
+        showDiffMode.value = readOnlyFileKeys.value.has(normalizePathKey(kt.path)) && Boolean(getFileDiff(kt.path));
+      }
+    }
+  }
+
+  async function closeRightTabs(keepPath: string) {
+    syncActiveTabToCache();
+    const keepIdx = openTabs.value.findIndex((t) => t.path === keepPath);
+    if (keepIdx < 0) return;
+    const rightTabs = openTabs.value.slice(keepIdx + 1);
+    for (const t of rightTabs) {
+      await closeTab(t.path);
+    }
+  }
+
+  async function closeAllTabs() {
+    syncActiveTabToCache();
+    const all = [...openTabs.value];
+    for (const t of all) {
+      await closeTab(t.path);
+    }
+  }
+
   function updateOpenTabPath(from: string, to: string) {
     const tab = findOpenTab(from);
     if (tab) tab.path = to;
@@ -763,5 +802,8 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     askAiWithCode,
     activeFileRelativePath,
     syncEditorAfterAgentFileChange,
+    closeOtherTabs,
+    closeRightTabs,
+    closeAllTabs,
   };
 }

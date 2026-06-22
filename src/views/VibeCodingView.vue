@@ -220,6 +220,9 @@
         @editor-change="onEditorChange"
         @editor-select="onEditorSelect"
         @ask-ai-with-code="askAiWithCode"
+        @close-other-tabs="closeOtherTabs"
+        @close-right-tabs="closeRightTabs"
+        @close-all-tabs="closeAllTabs"
       />
 
       <div
@@ -1340,6 +1343,7 @@ const {
   syncEditorPanelForOpenFiles, parentDirForCreate, selectTreeItem,
   onEditorChange, onEditorSelect,   askAiWithCode, activeFileRelativePath,
   syncEditorAfterAgentFileChange,
+  closeOtherTabs, closeRightTabs, closeAllTabs,
 } = useEditorPanel({
   projectPath,
   projectOpened,

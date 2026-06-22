@@ -136,7 +136,7 @@
         />
       </PlanDocumentBlock>
       <div
-        v-if="m.role === 'assistant' && ctx.canResumeAgentRun(m) && ctx.isPartialWrittenRunInterrupt(m)"
+        v-if="m.role === 'assistant' && ctx.canResumeAgentRun(m) && ctx.isPartialWrittenRunInterrupt(m) && !ctx.isAgentRunning(m)"
         class="agent-recovery-footer"
       >
         <button
