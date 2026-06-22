@@ -151,7 +151,8 @@
       <div
         v-if="
           m.role === 'assistant' &&
-          (m.status || ctx.isAgentRunning(m))
+          (m.status || ctx.isAgentRunning(m)) &&
+          !(m.streaming && (m.content || '').trim().length > 50)
         "
         class="msg-status"
       >

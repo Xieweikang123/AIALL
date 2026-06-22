@@ -202,6 +202,53 @@ describe("buildAgentHistoryFromMessages", () => {
     expect(history[1].content).toContain("[已确认方案]");
     expect(history[1].content).toContain("const x = 1");
   });
+
+  it("includes round group analysis when assistant has no final answer", () => {
+    const history = buildAgentHistoryFromMessages([
+      { role: "user", content: "咋显示成这了" },
+      {
+        role: "assistant",
+        content: "运行中断（已完成 12 轮）",
+        roundGroups: [
+          { turn: 0, narrative: "", response: undefined },
+          {
+            turn: 1,
+            narrative: "这是聊天面板的消息渲染问题——工具调用的原始文本被当作普通内容直接显示了。",
+            response: { assistantText: "", isFinal: false },
+          },
+          {
+            turn: 2,
+            narrative: "根因假设：正则未匹配到 [tool call] 格式。",
+            response: { assistantText: "", isFinal: false },
+          },
+        ],
+      },
+    ]);
+    expect(history).toHaveLength(2);
+    expect(history[1].content).toContain("运行中断");
+    expect(history[1].content).toContain("[前轮 Agent 分析]");
+    expect(history[1].content).toContain("工具调用的原始文本被当作普通内容直接显示");
+    expect(history[1].content).toContain("根因假设");
+  });
+
+  it("does not add round group analysis when final answer exists", () => {
+    const history = buildAgentHistoryFromMessages([
+      { role: "user", content: "问题" },
+      {
+        role: "assistant",
+        content: "这是最终回答。",
+        roundGroups: [
+          {
+            turn: 1,
+            narrative: "分析中...",
+            response: { assistantText: "这是最终回答。", isFinal: true },
+          },
+        ],
+      },
+    ]);
+    expect(history[1].content).toBe("这是最终回答。");
+    expect(history[1].content).not.toContain("[前轮 Agent 分析]");
+  });
 });
 
 describe("sanitizePersistedChatMessages", () => {

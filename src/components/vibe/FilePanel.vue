@@ -141,12 +141,13 @@
             >
               <button type="button" class="session-item-main" :title="s.title" @click="$emit('switch-session', s.id)">
                 <span class="session-item-title">
-                  <span v-if="s.status === 'completed'" class="session-item-completed" title="已完成">✓</span>
-                  <span v-else-if="s.status === 'failed'" class="session-item-failed" title="失败">✗</span>
-                  <span v-else-if="s.status === 'interrupted'" class="session-item-interrupted" title="已中断">⚠</span>
-                  <span :class="{ 'shimmer-text--fast': sessionSendingIds.includes(s.id) }">{{ s.title }}</span>
+                  <span v-if="s.status === 'completed' && !sessionSendingIds.includes(s.id)" class="session-item-completed" title="已完成">✓</span>
+                  <span v-else-if="s.status === 'failed' && !sessionSendingIds.includes(s.id)" class="session-item-failed" title="失败">✗</span>
+                  <span v-else-if="s.status === 'interrupted' && !sessionSendingIds.includes(s.id)" class="session-item-interrupted" title="已中断">⚠</span>
+                  <span v-else-if="sessionSendingIds.includes(s.id)" class="session-item-completed" title="运行中">🔄</span>
+                  <span :class="{ 'shimmer-text--fast': sessionSendingIds.includes(s.id) || s.status === 'active' }">{{ s.title }}</span>
                 </span>
-                <span class="session-item-meta" :class="{ 'shimmer-text--fast': sessionSendingIds.includes(s.id) }">
+                <span class="session-item-meta" :class="{ 'shimmer-text--fast': sessionSendingIds.includes(s.id) || s.status === 'active' }">
                   {{ formatSessionTime(s.updatedAt) }}
                   <span class="session-item-count" v-if="s.messageCount">{{ formatCount(s.messageCount) }} 条</span>
                 </span>

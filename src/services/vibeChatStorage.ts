@@ -289,6 +289,12 @@ export type AgentHistorySourceMessage = {
     ok?: boolean;
     running?: boolean;
   }>;
+  roundGroups?: Array<{
+    turn: number;
+    narrative?: string;
+    response?: { assistantText: string; isFinal: boolean };
+  }>;
+  turnTraces?: PersistedTurnTrace[];
 };
 
 const TOOL_SUMMARY_MARKER = /(?:\[工具摘要\]|<!--\s*agent-tool-log\s*-->)/u;
@@ -351,6 +357,34 @@ function summarizeToolsForHistory(
   return lines.length ? `\n\n<!-- agent-tool-log -->\n${lines.join("\n")}` : "";
 }
 
+/**
+ * Extract agent analysis from roundGroups for history context.
+ * When a run is interrupted, msg.content only has the failure banner,
+ * but the actual analysis lives in roundGroups[].narrative.
+ */
+function extractRoundGroupAnalysisForHistory(
+  msg: Pick<AgentHistorySourceMessage, "roundGroups" | "turnTraces" | "content">,
+): string {
+  const direct = stripToolSummaryFromAssistantContent(msg.content?.trim() || "");
+  const hasRunStructure = Boolean(
+    msg.roundGroups?.some((g) => g.turn > 0) || msg.turnTraces?.length,
+  );
+  const hasFinalAnswer = Boolean(
+    msg.roundGroups?.filter((g) => g.response?.isFinal && g.response.assistantText.trim()).length,
+  );
+  if (!hasRunStructure || hasFinalAnswer || !direct) return "";
+
+  const narratives: string[] = [];
+  for (const g of msg.roundGroups ?? []) {
+    if (g.turn <= 0) continue;
+    const text = g.narrative?.trim() || g.response?.assistantText?.trim() || "";
+    if (text && !narratives.includes(text)) narratives.push(text);
+  }
+  if (!narratives.length) return "";
+  const joined = narratives.join("\n");
+  return joined.length > 1200 ? `${joined.slice(0, 1200)}…` : joined;
+}
+
 /** Most recent user message that has stored image refs (for follow-up runs without a new attachment). */
 export function findRecentUserImageRefs(
   messages: Array<Pick<PersistedChatMessage, "role" | "imageRefs" | "imageDataUrls">>,
@@ -380,6 +414,10 @@ export function buildAgentHistoryFromMessages(
       }
       if (m.role === "assistant") {
         content = stripToolSummaryFromAssistantContent(content);
+        const analysis = extractRoundGroupAnalysisForHistory(m);
+        if (analysis) {
+          content = `${content}\n\n[前轮 Agent 分析]\n${analysis}`.trim();
+        }
         content = `${content}${summarizeToolsForHistory(m.tools)}`.trim();
       }
       if (!content) return null;

@@ -704,6 +704,7 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "回答请使用中文。",
     "用户可能在消息中附带截图或图片；若已附带，请结合图片内容理解需求并回答，不要声称无法查看图片。",
     "用户附截图询问界面/功能时：先描述截图所见，再判断是否属于本项目（优先查 src/views、src/components），勿默认是 GitHub Desktop、VS Code 等外部应用。",
+    "截图中有可见文字/图标按钮时：先 grep 该文字的精确原文（如「打开项目」、「+」、「💾」），而非猜 CSS class 名或 SVG 路径；从 grep 命中可直接定位到目标文件和行号。",
     "用户针对截图局部提问（配色、按钮、某块区域）时：讨论阶段只谈其所指可见范围，勿擅自扩大到整页/全项目样式盘点；若用户明确要求修改，可在该范围内 grep/read 对应组件后 patch_file；用户明确说「整个/整页/全面板」时可按扩大后的范围实施。",
     "若系统标注【咨询任务·只读】：用户本条仅为提问/解释，只读探索后自然语言回答，禁止 patch_file / write_file / delete_file。",
     "其余 Build 任务：一旦你判断须改代码才能满足用户（含 bug、实测与描述不符、功能/体验需求），探索完成后同一轮立即 patch_file / write_file，禁止只输出方案并问「需要我执行吗」。",
@@ -714,6 +715,7 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "短追问（如「需要吗」「要不要」「对吗」且未指明新对象）必须承接上一条助手回复的话题作答，勿因会话更早主题偏离；若意图仍不清晰，用一句话澄清，禁止回顾已完成工作清单或擅自改代码。",
     "效率：探索不超过 2 轮；在已确认要改代码的任务中，信息足够后必须写入，不要连续多轮只读；同一轮可并行多个 read_file / grep。",
     "CSS/SCSS 样式定位：禁止 grep CSS 选择器（如 `.chat-bottom`、`.mode-btn`），应直接 read_file 对应 Vue 文件的 `<style>` 段；同一文件已读过的行区间禁止重叠 read。",
+    "CSS class 重命名时：修改前先 grep 旧 class 名在该文件中的所有出现次数，然后一次性补全所有匹配（如同时改 `.old-class`、`.old-class:hover`、`.old-class:active`、`.old-class-icon` 等）。改完后 grep 验证零残留，确认全部替换完毕再宣布完成。",
     "用户选择执行：当你提供了多个方案/选项让用户选择时，用户选定后必须立即执行该方案（如 patch_file / write_file 落盘），不得自行改变方向或跳过执行去做其他调查。执行完毕并报告结果后，若需进一步排查再提出下一步建议。",
     "Build 模式简短实施指令（如「执行」「继续」「改吧」「优化」）或用户明确提出要改时：若上一条助手回复已列出具体改动步骤、代码片段或目标文件，必须立即 patch_file / write_file，禁止再次征求确认；除非改动涉及大范围重构或明显高风险操作。",
     "当前已在 Build 模式时，禁止再问用户是否切换到 Build；若上一条已列出多项改动，patch 须逐项落实，不得在回复中声称已完成尚未 patch 的项。",
@@ -722,6 +724,7 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "探索时：read_file 用 offset/limit 分段读取（单次约 200 行）；不要重复读取已读过的文件；用中文简短说明后立即调用工具。",
     "修改前必须先 read_file 核对目标文件；patch_file 前 old_string 须与磁盘内容完全一致。",
     "自检/验证：禁止在未对照工具结果与用户实测反馈前宣称「全部正确/无需再改/链路完整」；须区分主路径效果与降级/兜底 UI。",
+    "用户问「看出啥问题没」「检查一下」「这样对吗」等评价性问题时：必须先 read_file 读取你上次修改的文件，确认代码实际状态后再回答。禁止仅凭截图视觉判断或记忆作答。",
     "用户报告「试了不行/没有效果」后，禁止再用同样方案做未经证实的「检查完成✅」；须承认未验证项并给出可执行排查步骤。",
     "给用户的测试步骤须与项目实际运行环境一致（从 package.json scripts 判断 Web dev vs 桌面壳）；禁止混用。",
     "解释项目时：从 package.json、README、入口文件等关键文件入手，不要臆测。",
@@ -1120,6 +1123,7 @@ export async function executeTool(
     }
     trackWrittenFile(stage, resolved.relative);
     invalidateProjectContextCache(root);
+    readSliceCache?.forEach((_, key) => { if (key.startsWith(`${resolved.relative}:`)) readSliceCache!.delete(key); });
     return `已写入 ${resolved.relative}（${content.length} 字符）`;
   }
 
@@ -1165,6 +1169,7 @@ export async function executeTool(
     }
     trackWrittenFile(stage, resolved.relative);
     invalidateProjectContextCache(root);
+    readSliceCache?.forEach((_, key) => { if (key.startsWith(`${resolved.relative}:`)) readSliceCache!.delete(key); });
     if (toolGuard) toolGuard.visionLocateActive = false;
     return `已修改 ${resolved.relative}（${oldString.length} → ${newString.length} 字符）`;
   }

@@ -347,6 +347,7 @@
             @mention-change="onComposerMentionChange"
             @enter-send="sendChat"
             @update:empty="composerEmpty = $event"
+            @image-error="onComposerImageError"
             @focus="chatInputFocused = true"
             @blur="chatInputFocused = false"
           />
@@ -2351,6 +2352,10 @@ function onComposerMentionChange(payload: { open: boolean; query: string }) {
     return;
   }
   mentionRemoteResults.value = [];
+}
+
+function onComposerImageError(message: string) {
+  chatError.value = message;
 }
 
 function onComposerFieldKeydown(e: KeyboardEvent) {

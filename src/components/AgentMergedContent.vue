@@ -15,8 +15,8 @@
       <p v-else-if="block.kind === 'status'" class="cursor-action planning" :style="{ '--block-index': blockIndex }"><span class="shimmer-text">{{ block.text }}</span></p>
     </template>
 
-    <!-- 当前状态 + 调试面板（合并为可点击的一行） -->
-    <template v-if="isRunning && currentStatus">
+    <!-- 当前状态 + 调试面板（合并为可点击的一行）：流式回答已有实质内容后隐藏，避免冗余 -->
+    <template v-if="isRunning && currentStatus && !(answerStreaming && finalAnswer.trim().length > 50)">
       <button
         type="button"
         class="cursor-action planning planning-clickable"

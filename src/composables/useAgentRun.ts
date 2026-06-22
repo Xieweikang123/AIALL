@@ -295,6 +295,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (phase === "vision_first_turn_skipped") {
       return appendStatusDetail("读图描述不足，继续执行任务…", detail);
     }
+    if (phase === "vision_fallback") {
+      return detail?.trim() ? detail.trim() : "当前模型不支持图片输入，已降级为纯文本请求";
+    }
     if (phase === "sending_request") {
       return appendStatusDetail("正在发送模型请求…", detail);
     }
@@ -1395,6 +1398,20 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (event.type === "message_delta") {
       const delta = event.data.delta || "";
       if (!delta) return;
+      // 首个 delta 到达时，说明模型已开始输出，切换到 streaming_model 阶段
+      if (assistantMsg.agentPhase === "waiting_model" || assistantMsg.agentPhase === "sending_request" || assistantMsg.agentPhase === "retrying_model") {
+        setAgentStatus(assistantMsg, "streaming_model", {
+          turn: assistantMsg.agentTurn,
+          maxTurns: assistantMsg.agentMaxTurns,
+          model: assistantMsg.agentModel,
+          streamChars: (assistantMsg.streamChars || 0) + delta.length,
+        });
+        patchAssistantMsg(msgId, {
+          agentPhase: assistantMsg.agentPhase,
+          status: assistantMsg.status,
+          agentWaitStartedAt: assistantMsg.agentWaitStartedAt,
+        });
+      }
       enqueueStreamDelta(msgId, assistantMsg, delta);
       return;
     }
@@ -1763,7 +1780,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (isRunVisible(sessionId)) clearStreamDeltaBuffer();
     runManager.abort(sessionId);
     runManager.setAbortHandle(sessionId, null);
-    finishRunSession(sessionId);
+    finishRunSession(sessionId, reason === "已被新指令打断");
   }
 
   function interruptAgentRun(options?: { logStatus?: boolean; reason?: string }) {

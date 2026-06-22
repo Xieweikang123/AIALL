@@ -100,6 +100,7 @@ const emit = defineEmits<{
   "mention-change": [payload: { open: boolean; query: string }];
   "enter-send": [];
   "update:empty": [empty: boolean];
+  "image-error": [message: string];
   focus: [];
   blur: [];
 }>();
@@ -398,36 +399,44 @@ function onMouseDown(e: MouseEvent) {
 /** Read an image file into a data URL. */
 function readImageAsDataUrl(file: File): Promise<string | null> {
   if (!file.type.startsWith("image/")) return Promise.resolve(null);
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
-    reader.onerror = () => resolve(null);
+    reader.onerror = () => reject(new Error(`Cannot read "${file.name}"`));
     reader.readAsDataURL(file);
   });
 }
 
 /** Extract image data URLs from ClipboardEvent (paste). */
-async function extractImagesFromClipboard(e: ClipboardEvent): Promise<string[]> {
+async function extractImagesFromClipboard(e: ClipboardEvent): Promise<{ urls: string[]; errors: string[] }> {
   const items = e.clipboardData?.items;
-  if (!items) return [];
+  if (!items) return { urls: [], errors: [] };
   const urls: string[] = [];
+  const errors: string[] = [];
   for (const item of Array.from(items)) {
     if (item.kind === "file" && item.type.startsWith("image/")) {
       const file = item.getAsFile();
       if (file) {
-        const url = await readImageAsDataUrl(file);
-        if (url) urls.push(url);
+        try {
+          const url = await readImageAsDataUrl(file);
+          if (url) urls.push(url);
+        } catch (err) {
+          errors.push(err instanceof Error ? err.message : `Cannot read "${file.name}"`);
+        }
       }
     }
   }
-  return urls;
+  return { urls, errors };
 }
 
 async function onPaste(e: ClipboardEvent) {
   e.preventDefault();
 
   // Try images first
-  const imageUrls = await extractImagesFromClipboard(e);
+  const { urls: imageUrls, errors: imageErrors } = await extractImagesFromClipboard(e);
+  if (imageErrors.length) {
+    emit("image-error", imageErrors.join("\n"));
+  }
   if (imageUrls.length) {
     for (const url of imageUrls) {
       insertImage(url);

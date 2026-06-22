@@ -1,7 +1,7 @@
 /** Detect and strip pseudo tool-call markup leaked into assistant text. */
 
 export const TOOL_MARKUP_START_RE =
-  /<function_calls\b|<function[=>]|<invoke\b|<tool_call\b|\[Tool call:/i;
+  /<function_calls\b|<function[=>]|<invoke\b|<tool_call\b|\[Tool call[:\]]/i;
 
 const LEGACY_TOOL_BLOCK_RE = /<function[=>](\w+)>?\s*([\s\S]*?)(?=<function[=>]|<function_calls\b|<invoke\b|<tool_call\b|$)/gi;
 const LEGACY_PARAM_RE = /<parameter[=>](\w+)>([^<]*)/gi;
