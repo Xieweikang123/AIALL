@@ -37,7 +37,7 @@
             @click="$emit('update:gitPanelMode', 'sessions')"
           >
             会话
-            <span v-if="sessionCount" class="git-badge">{{ sessionCount }}</span>
+            <span v-if="sessionCount" class="git-badge shimmer-text--fast">{{ sessionCount }}</span>
           </button>
         </div>
         <div v-if="projectOpened && gitPanelMode === 'files'" class="file-toolbar">
@@ -113,18 +113,14 @@
         <div class="sessions-toolbar">
           <button
             type="button"
-            class="icon-btn"
+            class="session-action-btn"
             title="新会话"
             @click="$emit('start-new-session')"
-          >+</button>
-          <button
-            type="button"
-            class="icon-btn"
-            title="同步到本地"
-            :disabled="chatSending || syncingChatStore"
-            @click="$emit('sync-chat-store-to-disk')"
-          >{{ syncingChatStore ? "…" : "💾" }}</button>
-          <span v-if="chatStoreSyncMessage" class="sessions-sync-msg">{{ chatStoreSyncMessage }}</span>
+          >
+            <span class="session-action-icon">+</span>
+            <span class="session-action-label">新建</span>
+          </button>
+
         </div>
         <div v-if="!sessionList.length" class="panel-empty" style="padding: 24px 12px;">
           <span class="panel-empty-icon" aria-hidden="true">💬</span>
@@ -134,7 +130,7 @@
         <ul v-else class="sessions-list">
           <template v-for="group in groupedSessions" :key="group.label">
             <li class="session-group-header">
-              <span class="session-group-label">{{ group.label }}</span>
+              <span class="session-group-label shimmer-text--fast">{{ group.label }}</span>
               <span class="session-group-count">{{ group.items.length }}</span>
             </li>
             <li
@@ -145,15 +141,12 @@
             >
               <button type="button" class="session-item-main" :title="s.title" @click="$emit('switch-session', s.id)">
                 <span class="session-item-title">
-                  <span v-if="sessionSendingIds.includes(s.id)" class="session-item-sending" title="Agent 运行中">
-                    <span class="session-spinner" />
-                  </span>
-                  <span v-else-if="s.status === 'completed'" class="session-item-completed" title="已完成">✓</span>
+                  <span v-if="s.status === 'completed'" class="session-item-completed" title="已完成">✓</span>
                   <span v-else-if="s.status === 'failed'" class="session-item-failed" title="失败">✗</span>
                   <span v-else-if="s.status === 'interrupted'" class="session-item-interrupted" title="已中断">⚠</span>
-                  {{ s.title }}
+                  <span :class="{ 'shimmer-text--fast': sessionSendingIds.includes(s.id) }">{{ s.title }}</span>
                 </span>
-                <span class="session-item-meta">
+                <span class="session-item-meta" :class="{ 'shimmer-text--fast': sessionSendingIds.includes(s.id) }">
                   {{ formatSessionTime(s.updatedAt) }}
                   <span class="session-item-count" v-if="s.messageCount">{{ formatCount(s.messageCount) }} 条</span>
                 </span>
@@ -246,8 +239,6 @@ interface Props {
   activeSessionTitle: string;
   sessionPickerOpen: boolean;
   sessionPickerTitle: string;
-  syncingChatStore: boolean;
-  chatStoreSyncMessage: string;
   chatSending: boolean;
   sessionSendingIds?: string[];
 }
@@ -272,7 +263,6 @@ const emit = defineEmits<{
   (e: "remove-session", sessionId: string): void;
   (e: "start-new-session"): void;
   (e: "copy-session-info", session: VibeChatSessionMeta): void;
-  (e: "sync-chat-store-to-disk"): void;
 }>();
 
 const sessionCount = computed(() => props.sessionList.length);
@@ -569,13 +559,41 @@ defineExpose({ searchInputRef });
   flex-shrink: 0;
 }
 
-.sessions-sync-msg {
-  font-size: 11px;
-  color: var(--text-secondary, #999);
-  margin-left: 4px;
+.session-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+.session-action-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.session-action-btn:active {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+
+
+.session-action-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.session-action-label {
+  line-height: 1;
 }
 
 .sessions-list {

@@ -1,6 +1,6 @@
 <template>
   <div class="monaco-wrap">
-    <div v-if="loading" class="monaco-loading">加载编辑器…</div>
+    <div v-if="loading" class="monaco-loading"><span class="shimmer-text">加载编辑器…</span></div>
     <div ref="containerRef" class="monaco-editor-host" :class="{ hidden: loading }" />
   </div>
 </template>

@@ -5,7 +5,7 @@
         <span class="aggregate-card-icon">{{ card.icon }}</span>
         <div class="aggregate-card-text">
           <span class="aggregate-card-title">{{ card.title }}</span>
-          <span class="aggregate-card-subtitle">{{ card.subtitle }}</span>
+          <span class="aggregate-card-subtitle" :class="{ 'shimmer-text--fast': card.running }">{{ card.subtitle }}</span>
         </div>
         <span class="aggregate-card-hint">{{ card.kind === 'search' ? '查看匹配' : '展开详情' }}</span>
       </summary>

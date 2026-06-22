@@ -12,7 +12,7 @@
         :block="block"
         :style="{ '--block-index': blockIndex }"
       />
-      <p v-else-if="block.kind === 'status'" class="cursor-action planning" :style="{ '--block-index': blockIndex }">{{ block.text }}</p>
+      <p v-else-if="block.kind === 'status'" class="cursor-action planning" :style="{ '--block-index': blockIndex }"><span class="shimmer-text">{{ block.text }}</span></p>
     </template>
 
     <!-- 当前状态 + 调试面板（合并为可点击的一行） -->
@@ -23,7 +23,7 @@
         :class="{ 'planning-expanded': debugExpanded }"
         @click="emit('toggle-debug')"
       >
-        <span class="planning-text">{{ currentStatus }}</span>
+        <span class="planning-text shimmer-text--fast">{{ currentStatus }}</span>
         <span v-if="showDebug" class="planning-chevron">{{ debugExpanded ? '▾' : '▸' }}</span>
       </button>
       <slot v-if="debugExpanded" name="debug" />

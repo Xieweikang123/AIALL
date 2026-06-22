@@ -19,7 +19,7 @@
         :activity-detailed="isActivityDetailed(msg)"
         :can-execute-plan="canExecutePlan"
         :show-debug="showDebug"
-        :debug-expanded="showDebug && isActivityDetailed(msg)"
+        :debug-expanded="false"
         @execute-plan="emit('execute-plan')"
         @select-option="(option) => emit('select-option', option)"
         @toggle-debug="toggleActivityDetailed(msg)"

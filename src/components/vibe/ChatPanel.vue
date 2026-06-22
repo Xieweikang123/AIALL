@@ -77,11 +77,11 @@
     <div ref="chatScrollRef" class="chat-scroll" @scroll="$emit('on-chat-scroll')">
       <div v-if="switchingProject" class="chat-switching">
         <span class="chat-switching-spinner" aria-hidden="true">⟳</span>
-        <span>正在加载项目…</span>
+        <span class="shimmer-text--fast">正在加载项目…</span>
       </div>
       <div v-else-if="switchingSession" class="chat-switching">
         <span class="chat-switching-spinner" aria-hidden="true">⟳</span>
-        <span>正在加载会话…</span>
+        <span class="shimmer-text--fast">正在加载会话…</span>
       </div>
       <div v-else-if="!chatMessages.length" class="chat-empty">
         <div class="chat-empty-visual" aria-hidden="true">
@@ -477,9 +477,7 @@
             <div v-else class="project-memory-status">暂无探索归档</div>
             <div class="project-memory-detail">
               <div v-if="explorationDetailLoading" class="project-memory-status shimmer-text--fast">加载中…</div>
-              <pre v-else-if="selectedExplorationId" class="project-memory-readonly">{{
-                explorationContent
-              }}</pre>
+              <div v-else-if="selectedExplorationId" class="project-memory-readonly exploration-markdown" v-html="explorationContentHtml"></div>
               <div v-else class="project-memory-status">选择左侧快照查看内容</div>
             </div>
           </template>
@@ -532,6 +530,7 @@ import type { ProjectMemoryTab } from "../../composables/useProjectMemory";
 import type { VibeChatSessionMeta } from "../../services/vibeChatStorage";
 import { formatCharCount } from "../../utils/vibeHelpers";
 import { resolveAgentResumeButtonLabel } from "../../services/agentRecovery";
+import { renderMarkdown } from "../../utils/renderMarkdown";
 
 interface ChatMessage {
   id: string;
@@ -688,6 +687,11 @@ function formatExplorationLabel(item: ExplorationIndexEntry): string {
     minute: "2-digit",
   });
 }
+
+const explorationContentHtml = computed(() => {
+  if (!props.explorationContent) return "";
+  return renderMarkdown(props.explorationContent);
+});
 
 const emit = defineEmits<{
   (e: "send-chat"): void;
@@ -1404,10 +1408,6 @@ function formatSessionTime(timestamp: number | string): string {
 
 .project-memory-dialog {
   width: min(100%, 440px);
-  max-height: 100%;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
   max-height: calc(100% - 32px);
   display: flex;
   flex-direction: column;
@@ -1417,6 +1417,7 @@ function formatSessionTime(timestamp: number | string): string {
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(15, 22, 35, 0.98);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
 }
 
 .project-memory-dialog.wide {
@@ -1469,9 +1470,11 @@ function formatSessionTime(timestamp: number | string): string {
 
 .project-memory-split-pane {
   display: grid;
+  grid-template-rows: 1fr;
   grid-template-columns: minmax(140px, 38%) 1fr;
   gap: 10px;
   min-height: 280px;
+  max-height: min(52vh, 420px);
 }
 
 .project-memory-list {
@@ -1479,6 +1482,7 @@ function formatSessionTime(timestamp: number | string): string {
   margin: 0;
   padding: 0;
   overflow-y: auto;
+  min-height: 0;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.15);
@@ -1550,6 +1554,79 @@ function formatSessionTime(timestamp: number | string): string {
   white-space: pre-wrap;
   word-break: break-word;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.exploration-markdown {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  white-space: normal;
+}
+
+.exploration-markdown h1,
+.exploration-markdown h2,
+.exploration-markdown h3 {
+  margin: 12px 0 8px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.exploration-markdown h1 {
+  font-size: 16px;
+}
+
+.exploration-markdown h2 {
+  font-size: 14px;
+}
+
+.exploration-markdown h3 {
+  font-size: 13px;
+}
+
+.exploration-markdown p {
+  margin: 6px 0;
+}
+
+.exploration-markdown ul,
+.exploration-markdown ol {
+  margin: 6px 0;
+  padding-left: 20px;
+}
+
+.exploration-markdown li {
+  margin: 3px 0;
+}
+
+.exploration-markdown code {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+}
+
+.exploration-markdown pre {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 8px 10px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.exploration-markdown pre code {
+  background: none;
+  padding: 0;
+  font-size: 11px;
+}
+
+.exploration-markdown strong {
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 600;
+}
+
+.exploration-markdown blockquote {
+  border-left: 3px solid rgba(88, 166, 255, 0.5);
+  margin: 8px 0;
+  padding: 4px 12px;
+  color: rgba(255, 255, 255, 0.7);
 }
 
 .project-memory-head {

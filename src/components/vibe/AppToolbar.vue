@@ -29,7 +29,8 @@
     <div class="toolbar-actions">
       <div v-if="treeError || retryCountdown > 0" class="toolbar-error" role="alert">
         <span v-if="retryCountdown > 0" class="toolbar-error-countdown">⟳</span>
-        <span class="toolbar-error-text">{{ retryCountdown > 0 ? (treeError ? treeError.replace(/。?$/, ' ') : '无法连接后端服务，') + `正在重试… ${retryCountdown}s` : treeError }}</span>
+        <span class="toolbar-error-text" v-if="retryCountdown > 0">{{ treeError ? treeError.replace(/。?$/, ' ') : '无法连接后端服务，' }}<span class="shimmer-text--fast">正在重试… {{ retryCountdown }}s</span></span>
+        <span class="toolbar-error-text" v-else>{{ treeError }}</span>
         <button type="button" class="toolbar-error-dismiss" aria-label="关闭提示" @click="$emit('clear-retry'); $emit('update:treeError', '')">
           ×
         </button>
@@ -290,26 +291,33 @@ function formatSessionTime(iso: string): string {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   padding: 0;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  background: var(--bg-secondary);
-  color: var(--text-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.5);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   flex-shrink: 0;
 }
 
 .icon-btn:hover:not(:disabled) {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-  border-color: var(--accent-color);
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.icon-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: none;
 }
 
 .icon-btn:disabled {
-  opacity: 0.4;
+  opacity: 0.3;
   cursor: not-allowed;
 }
 
@@ -520,31 +528,34 @@ function formatSessionTime(iso: string): string {
 }
 
 .primary {
-  background: var(--accent-color);
-  color: white;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent-color) 70%, #000) 0%, color-mix(in srgb, #5b9cf6 60%, #000) 100%);
+  color: rgba(255, 255, 255, 0.92);
   border: none;
-  padding: 6px 14px;
-  border-radius: 6px;
-  font-size: 12px;
+  padding: 7px 16px;
+  border-radius: 8px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.15s ease;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(31, 111, 235, 0.2);
+  letter-spacing: 0.3px;
 }
 
 .primary:hover {
-  background: var(--accent-hover);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+  background: linear-gradient(135deg, var(--accent-color) 0%, #5b9cf6 100%);
+  color: white;
+  box-shadow: 0 3px 10px rgba(31, 111, 235, 0.35);
+  transform: translateY(-1px);
 }
 
 .primary:active {
-  transform: scale(0.97);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  transform: translateY(0) scale(0.98);
+  box-shadow: 0 1px 4px rgba(31, 111, 235, 0.3);
 }
 
 .primary:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
   transform: none;
   box-shadow: none;
