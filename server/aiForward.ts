@@ -1,3 +1,5 @@
+import fs from "node:fs";
+
 export function resolveChatEndpoint(endpoint: string): string {
   const input = endpoint.trim();
   if (!input) return input;
@@ -271,6 +273,7 @@ async function chatCompletionWithToolsOnce(params: {
   const unlinkParent = linkAbortSignal(params.signal, timeoutController);
 
   let response: Response;
+  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [ai] fetch start: endpoint=${chatEndpoint} model=${params.model} timeout=${firstByteTimeoutMs}ms\n`); } catch {}
   try {
     response = await fetch(chatEndpoint, {
       method: "POST",
@@ -279,6 +282,7 @@ async function chatCompletionWithToolsOnce(params: {
       body: JSON.stringify(requestBody),
     });
   } catch (fetchError) {
+    try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [ai] fetch ERROR: ${fetchError instanceof Error ? fetchError.message : String(fetchError)} timedOut=${timedOut}\n`); } catch {}
     clearTimeout(timeoutId);
     unlinkParent();
     if (params.signal?.aborted) {
@@ -297,6 +301,8 @@ async function chatCompletionWithToolsOnce(params: {
     clearTimeout(timeoutId);
     unlinkParent();
   }
+
+  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [ai] fetch done: status=${response.status}\n`); } catch {}
 
   emitProgress(
     {

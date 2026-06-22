@@ -1,8 +1,15 @@
 /** Line range tracked per file to detect overlapping read_file windows. */
 export type ReadLineRange = { start: number; end: number };
 
-/** Block when a new read overlaps any prior range on the same file (2nd overlapping window). */
-export const MAX_OVERLAPPING_READ_ATTEMPTS = 1;
+/**
+ * Block when a new read overlaps any prior range on the same file.
+ * Value 2 means: 1st overlap is silently allowed, 2nd is allowed, 3rd is blocked.
+ * Raised from 1 → 2 because:
+ * - Agent often needs to read adjacent windows (e.g. L1-100 then L50-150)
+ * - After resume the guard starts fresh, so no risk of runaway accumulation
+ * - Tighter blocking caused the agent to waste turns on run_command workarounds
+ */
+export const MAX_OVERLAPPING_READ_ATTEMPTS = 2;
 export const OVERLAP_READ_MIN_SHARE = 0.5;
 
 export function readLineRangeFromArgs(offset: number, limit: number): ReadLineRange {
@@ -33,7 +40,7 @@ export function checkOverlappingRead(
     if (readRangesOverlap(range, prior)) overlapHits += 1;
   }
   if (overlapHits >= MAX_OVERLAPPING_READ_ATTEMPTS) {
-    return `错误：${filePath} 行 ${range.start}–${range.end} 与已读片段高度重叠（第 ${overlapHits + 1} 次），请基于已有内容 patch_file，勿再用重叠窗口 read_file。`;
+    return `错误：${filePath} 行 ${range.start}–${range.end} 与已读片段高度重叠（第 ${overlapHits + 1} 次），请基于已有内容 patch_file，或一次读取更大范围（300-500 行）再查找，勿用小窗口反复 read_file。`;
   }
   return null;
 }

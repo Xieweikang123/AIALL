@@ -19,11 +19,28 @@ defineProps<{
 <style scoped>
 .cursor-thought {
   margin: 0;
-  padding: 2px 0;
+  padding: 6px 10px;
   font-size: 12.5px;
   line-height: 1.5;
   color: rgba(230, 237, 243, 0.82);
   word-break: break-word;
+  animation: thought-reveal 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+  background: rgba(88, 166, 255, 0.04);
+  border-left: 2px solid rgba(88, 166, 255, 0.3);
+  border-radius: 0 4px 4px 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+@keyframes thought-reveal {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .cursor-thought :deep(.msg-markdown) {

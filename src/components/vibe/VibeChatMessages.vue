@@ -151,9 +151,7 @@
       <div
         v-if="
           m.role === 'assistant' &&
-          !ctx.messageDisplayContent(m) &&
-          (m.status || ctx.isAgentRunning(m)) &&
-          !(ctx.isAgentRunning(m) && ctx.hasAgentActivity(m))
+          (m.status || ctx.isAgentRunning(m))
         "
         class="msg-status"
       >

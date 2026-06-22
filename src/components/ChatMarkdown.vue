@@ -186,6 +186,18 @@ onUpdated(() => postProcess());
 
 .msg-markdown--streaming {
   opacity: 0.98;
+  animation: typing-fade-in 0.3s ease-out;
+}
+
+@keyframes typing-fade-in {
+  from {
+    opacity: 0.7;
+    filter: blur(0.3px);
+  }
+  to {
+    opacity: 0.98;
+    filter: blur(0);
+  }
 }
 
 .msg-markdown :deep(p) {

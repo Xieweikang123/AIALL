@@ -440,7 +440,7 @@ const VIBE_AGENT_TOOLS = [
     type: "function",
     function: {
       name: "read_file",
-      description: "读取文本文件。支持 offset/limit 按行读取大文件。相对路径限于项目内；绝对路径可读本机任意文件（如 AppData 下的配置/会话 JSON）。",
+      description: "读取文本文件。支持 offset/limit 按行读取大文件。相对路径限于项目内；绝对路径可读本机任意文件（如 AppData 下的配置/会话 JSON）。建议一次读取 200-500 行连续代码，避免小窗口（<80 行）反复读取同一文件。",
       parameters: {
         type: "object",
         properties: {
@@ -1006,8 +1006,8 @@ export async function executeTool(
     }
     if (content === null) return `错误：${resolved.displayPath} 不存在或无法读取`;
     const offset = Number(args.offset) || 1;
-    const defaultLimit = mode === "ask" ? 200 : mode === "plan" ? 300 : 200;
-    const maxLimit = mode === "ask" ? 400 : mode === "plan" ? 500 : 350;
+    const defaultLimit = mode === "ask" ? 300 : mode === "plan" ? 400 : 350;
+    const maxLimit = mode === "ask" ? 500 : mode === "plan" ? 600 : 500;
     const limit = Math.min(maxLimit, Math.max(1, Number(args.limit) || defaultLimit));
     const sliceKey = `${resolved.key}:${offset}:${limit}`;
     const lineRange = readLineRangeFromArgs(offset, limit);
@@ -1020,7 +1020,7 @@ export async function executeTool(
       const repeats = (readSliceRepeatCounts?.get(sliceKey) ?? 0) + 1;
       readSliceRepeatCounts?.set(sliceKey, repeats);
       if (repeats > MAX_READ_SLICE_REPEATS) {
-        return `错误：已连续 ${repeats} 次读取相同片段 ${resolved.displayPath}（offset ${offset} limit ${limit}），请基于已有内容继续分析或 patch_file，勿重复 read_file。`;
+        return `错误：已连续 ${repeats} 次读取相同片段 ${resolved.displayPath}（offset ${offset} limit ${limit}），请基于已有内容继续分析或 patch_file，若需更多行请一次读更大范围（300-500 行），勿重复读相同片段。`;
       }
       return `${cachedSlice}\n（与上次 read_file 相同，已省略重复读取）`;
     }
@@ -1374,19 +1374,25 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
   const openFileRel = openFile?.relative;
 
+  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] runVibeAgent start: mode=${mode} model=${model} prompt="${prompt.slice(0, 60)}" isExecutePlan=${isExecutePlan}\n`); } catch {}
+
   onEvent({
     type: "status",
     data: {
       phase: "preparing",
       ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
       model,
+      detail: "[DBG-1] entering runVibeAgent",
       ...(openFileRel ? { openFile: openFileRel } : {}),
     },
   });
 
+  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] preparing sent, targetManifest...\n`); } catch {}
+
   const targetManifest = isExecutePlan
     ? await buildTargetFileManifest(projectRoot, runProfile.targetFiles || [])
     : [];
+  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] targetManifest done (${targetManifest.length} entries), openFile=${openFileRel ?? "none"}\n`); } catch {}
   let openFileSnippet = "";
   if (!isExecutePlan && openFile) {
     onEvent({
@@ -1394,11 +1400,13 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       data: {
         phase: "building_context",
         model,
-        detail: openFileRel ? `读取当前文件 ${openFileRel}…` : "扫描项目结构与关键文件…",
+        detail: `[DBG-2] reading openFile ${openFileRel}`,
         ...(openFileRel ? { openFile: openFileRel } : {}),
       },
     });
+    try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] building_context sent, reading openFile ${openFileRel}...\n`); } catch {}
     const result = await readFileContent(openFile.path).catch(() => null);
+    try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] readFileContent done: ok=${result?.ok}\n`); } catch {}
     if (result?.ok) {
       openFileSnippet = sliceFileLines(result.content, 1, 400);
     }
@@ -1408,17 +1416,21 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       data: {
         phase: "building_context",
         model,
-        detail: "扫描项目结构与关键文件…",
+        detail: "[DBG-2] scanning project",
       },
     });
+    try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] building_context sent (no openFile)\n`); } catch {}
   }
 
   let projectContextBlock = "";
   if (isExecutePlan) {
     projectContextBlock = `\n\n项目根：${projectRoot}（方案执行阶段，已跳过全项目扫描）`;
     projectContextBlock += buildExecutePlanSystemHint(targetManifest, runProfile.userIntent);
+    try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] execute_plan context built\n`); } catch {}
   } else {
-    const projectContext = await buildProjectContext(projectRoot);
+  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] buildProjectContext start...\n`); } catch {}
+  const projectContext = await buildProjectContext(projectRoot);
+  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] buildProjectContext done: ok=${projectContext.ok}\n`); } catch {}
     if (projectContext.ok) {
       projectContextBlock = isAsk
         ? formatProjectContextForPrompt(projectContext)
@@ -1426,7 +1438,10 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     }
   }
 
+  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] readProjectMemory start...\n`); } catch {}
+  onEvent({ type: "status", data: { phase: "building_context", model, detail: "[DBG-3] readProjectMemory" } });
   const projectMemoryResult = await readProjectMemory(projectRoot);
+  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] readProjectMemory done: ok=${projectMemoryResult.ok}\n`); } catch {}
   const memoryTaskContext = [prompt, openFileRel].filter(Boolean).join(" ");
   const projectMemoryBlock =
     projectMemoryResult.ok && projectMemoryResult.content.trim()
@@ -1438,15 +1453,24 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         )
       : "";
 
+  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] readProjectAgentsGuide start...\n`); } catch {}
+  onEvent({ type: "status", data: { phase: "building_context", model, detail: "[DBG-4] readProjectAgentsGuide" } });
   const agentsGuideResult = await readProjectAgentsGuide(projectRoot);
+  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] readProjectAgentsGuide done: ok=${agentsGuideResult.ok}\n`); } catch {}
   const agentsGuideBlock =
     agentsGuideResult.ok && agentsGuideResult.content.trim()
       ? formatAgentsGuideForPrompt(agentsGuideResult.content, agentsGuideResult.truncated)
       : "";
 
+  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] buildProjectSkillsPromptBlock start...\n`); } catch {}
+  onEvent({ type: "status", data: { phase: "building_context", model, detail: "[DBG-5] buildProjectSkills" } });
   const projectSkillsBlock = await buildProjectSkillsPromptBlock(projectRoot, prompt);
+  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] buildProjectSkillsPromptBlock done: len=${projectSkillsBlock.length}\n`); } catch {}
 
+  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] buildExplorationArchivePromptBlock start...\n`); } catch {}
+  onEvent({ type: "status", data: { phase: "building_context", model, detail: "[DBG-6] buildExplorationArchive" } });
   const explorationArchiveBlock = await buildExplorationArchivePromptBlock(projectRoot, prompt);
+  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] buildExplorationArchivePromptBlock done: len=${explorationArchiveBlock.length}\n`); } catch {}
 
   const runtimeProfile = detectProjectRuntimeProfile(projectRoot);
   const runtimeAwarenessBlock = buildRuntimeAwarenessHint(runtimeProfile);
@@ -1544,6 +1568,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     onEvent({ type: "done", data: buildDoneData(writeStage, 0) });
     return;
   }
+
+  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] context assembly done, entering turn loop...\n`); } catch {}
+  onEvent({ type: "status", data: { phase: "building_context", model, detail: "[DBG-7] context assembly done, entering turn loop" } });
 
   for (let turn = 1; ; turn += 1) {
     if (turn > AGENT_SAFETY_MAX_TURNS) {
@@ -1775,6 +1802,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       },
     });
     let completion: Awaited<ReturnType<typeof chatCompletionWithTools>>;
+    try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] turn ${turn}: calling chatCompletionWithTools, tools=${toolsForTurn.length} contextChars=${contextChars}\n`); } catch {}
+    onEvent({ type: "status", data: { phase: "waiting_model", turn, model, detail: `[DBG-8] turn ${turn}: calling model` } });
     try {
       completion = await chatCompletionWithTools({
         endpoint,
@@ -2494,6 +2523,15 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     } else if (!isAsk && !readOnlyBuildRun && consecutiveExploreTurns >= exploreTurnBudget) {
       messages.push({ role: "system", content: buildExploreBudgetNudge(consecutiveExploreTurns, mode) });
       consecutiveExploreTurns = 0;
+    }
+
+    // 轮次接近上限时，注入强制完成提示，避免 Agent 继续重试失败操作
+    if (!readOnlyBuildRun && segmentMaxTurns !== undefined && turn >= segmentMaxTurns - 3 && turn < segmentMaxTurns) {
+      const remaining = segmentMaxTurns - turn;
+      messages.push({
+        role: "system",
+        content: `【紧急提示】剩余 ${remaining} 轮。请立即用 write_file 重写需要修改的文件完成任务，禁止再用 patch_file。如果任务已完成，请直接输出总结。`
+      });
     }
 
     if (segmentMaxTurns !== undefined && turn >= segmentMaxTurns) {

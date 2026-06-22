@@ -312,24 +312,29 @@ export function compressHistoryForExecution(
   history: AgentHistoryEntry[],
   currentPrompt: string,
 ): AgentHistoryEntry[] {
-  if (!isExecutionContinuation(currentPrompt)) return history;
+  const isResume = /^【自动续跑】/.test(currentPrompt.trim());
+  if (!isExecutionContinuation(currentPrompt) && !isResume) return history;
 
   let planAssistantIdx = -1;
   for (let i = history.length - 1; i >= 0; i -= 1) {
-    if (history[i].role === "assistant" && isAssistantExecutionBrief(history[i].content)) {
-      planAssistantIdx = i;
-      break;
+    if (history[i].role === "assistant" && history[i].content.trim()) {
+      if (isAssistantExecutionBrief(history[i].content) || isResume) {
+        planAssistantIdx = i;
+        break;
+      }
     }
   }
   if (planAssistantIdx < 0) {
-    planAssistantIdx =
-      history.map((m, i) => (m.role === "assistant" ? i : -1)).filter((i) => i >= 0).pop() ?? -1;
+    for (let i = history.length - 1; i >= 0; i -= 1) {
+      if (history[i].role === "assistant" && history[i].content.trim()) {
+        planAssistantIdx = i;
+        break;
+      }
+    }
   }
   if (planAssistantIdx < 0) return history;
 
   const assistant = history[planAssistantIdx];
-  if (!isAssistantExecutionBrief(assistant.content)) return history;
-
   const precedingUser =
     planAssistantIdx > 0 && history[planAssistantIdx - 1]?.role === "user"
       ? history[planAssistantIdx - 1]
@@ -340,7 +345,7 @@ export function compressHistoryForExecution(
     : "用户请求按已确认的方案修改代码。";
 
   return [
-    { role: "user", content: userContent },
+    { role: "user", content: userContent + (isResume ? "\n（自动续跑：从断点继续完成原始任务）" : "") },
     { role: "assistant", content: compressProposalForHistory(assistant.content) },
   ];
 }

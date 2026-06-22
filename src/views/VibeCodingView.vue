@@ -878,12 +878,12 @@ async function testNotification() {
   }
 }
 
-function endAgentRunSession(sessionId?: string) {
+function endAgentRunSession(sessionId?: string, silent = false) {
   const sid = (sessionId || "").trim();
   if (!sid) return;
   sendingSessionIds.delete(sid);
   syncActiveChatSending();
-  notifyAgentDoneIfNeeded(sid);
+  if (!silent) notifyAgentDoneIfNeeded(sid);
 }
 
 function persistAgentRunSession(sessionId: string) {

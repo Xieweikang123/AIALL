@@ -159,7 +159,7 @@ watch(
   () => [props.filePath, props.language] as const,
   () => {
     if (!editor) return;
-    bindModel(editor.getValue());
+    bindModel(props.modelValue ?? '');
   },
 );
 

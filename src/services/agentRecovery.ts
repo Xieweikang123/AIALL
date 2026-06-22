@@ -159,6 +159,7 @@ export function isRecoverableAgentError(message: string): boolean {
     msg.includes("运行未完成") ||
     msg.includes("长时间无进展") ||
     msg.includes("可能已卡住") ||
+    msg.includes("未生成最终回复") ||
     msg.includes("网络") ||
     /\bhttp\s*(502|503|504|408)\b/.test(msg) ||
     msg.includes("bad gateway") ||
@@ -175,6 +176,7 @@ export function shouldAutoResumeAgentError(message: string): boolean {
 export function shouldSilentAutoContinue(message: string): boolean {
   if (!isRecoverableAgentError(message)) return false;
   if (isMaxTurnsExhaustedReason(message)) return false;
+  if (isNoFinalAnswerReason(message)) return false;
   return true;
 }
 
@@ -292,6 +294,19 @@ export function inferAgentRecoveryFlags(msg: AgentProgressSource & {
     };
   }
 
+  // 手动停止且有进展 → 允许恢复
+  if (
+    msg.agentAborted &&
+    msg.agentAbortReason === "已手动停止" &&
+    hasRecoverableAgentProgress(msg)
+  ) {
+    return {
+      agentFailed: true,
+      agentRecoverable: true,
+      agentFailureReason: msg.agentAbortReason,
+    };
+  }
+
   if (msg.agentAborted) return null;
 
   if (isIncompleteAgentRunWithoutFinalAnswer(msg)) {
@@ -356,7 +371,9 @@ export function resolveAgentFailureBubbleContent(
   const turns = resolveAgentCompletedTurns(msg);
   const toolCount = msg.tools?.filter((t) => !t.running).length ?? 0;
   if (turns > 0 || toolCount > 0) {
-    return `运行中断（已完成 ${turns} 轮${toolCount > 0 ? `，${toolCount} 个工具步骤` : ""}），可点击「恢复运行」继续。`;
+    const reason = (msg as { agentFailureReason?: string }).agentFailureReason?.trim();
+    const hint = reason ? `（原因：${reason}）` : "";
+    return `运行中断（已完成 ${turns} 轮${toolCount > 0 ? `，${toolCount} 个工具步骤` : ""}）${hint}，可点击「恢复运行」继续。`;
   }
 
   return direct;
@@ -383,7 +400,7 @@ export function summarizeAgentProgress(msg: AgentProgressSource): string {
 
   if (completedTools.length) {
     lines.push("", "已执行工具（勿重复）：");
-    const maxTools = 40;
+    const maxTools = 20;
     for (let i = 0; i < Math.min(completedTools.length, maxTools); i += 1) {
       const t = completedTools[i]!;
       const label = t.label || t.title || t.name || "工具";
@@ -410,7 +427,7 @@ export function summarizeAgentProgress(msg: AgentProgressSource): string {
     "";
   if (lastNarrative) {
     const snippet =
-      lastNarrative.length > 800 ? `${lastNarrative.slice(0, 800)}\n…（已截断）` : lastNarrative;
+      lastNarrative.length > 400 ? `${lastNarrative.slice(0, 400)}\n…（已截断）` : lastNarrative;
     lines.push("", "中断前最后一轮思路：", snippet);
   }
 
@@ -525,6 +542,9 @@ export function buildAgentResumePrompt(
   errorMessage: string,
 ): string {
   const progress = summarizeAgentProgress(msg);
+  const truncatedPrompt = originalUserPrompt.trim().length > 600
+    ? `${originalUserPrompt.trim().slice(0, 600)}\n…（原始任务已截断，请按摘要继续完成）`
+    : originalUserPrompt.trim();
   return [
     "【自动续跑】上次运行因连接中断而暂停。请从断点继续完成原始任务，不要重复已完成的工具步骤或已写入的修改。",
     "【效率】已读文件范围见下方摘要——相同文件的相同区域禁止再 read_file，用 grep 定位后直接 patch_file/write_file；最多 1 次 grep 定位遗漏。",
@@ -532,8 +552,8 @@ export function buildAgentResumePrompt(
     "",
     progress,
     "",
-    "原始任务：",
-    originalUserPrompt.trim(),
+    "原始任务（摘要）：",
+    truncatedPrompt,
   ].join("\n");
 }
 
@@ -548,7 +568,11 @@ function passesAgentAbortResumeGate(
 ): boolean {
   if (msg.agentAborted && !isPartialWrittenRunInterrupt(msg)) {
     const hmrReason = msg.agentAbortReason || msg.agentFailureReason || "";
-    if (!(isHmrInterruptReason(hmrReason) && hasRecoverableAgentProgress(msg))) return false;
+    // HMR 中断且有进展 → 允许恢复
+    if (isHmrInterruptReason(hmrReason) && hasRecoverableAgentProgress(msg)) return true;
+    // 手动停止且有进展 → 允许恢复
+    if (msg.agentAbortReason === "已手动停止" && hasRecoverableAgentProgress(msg)) return true;
+    return false;
   }
   return true;
 }

@@ -148,7 +148,7 @@ export type UseAgentRunDeps = {
   resolveOriginalUserPrompt: (assistantMsgId: string) => string;
   findLastUserMessage: () => { content: string } | null;
   beginAgentRunSession: (sessionId: string) => void;
-  endAgentRunSession: (sessionId?: string) => void;
+  endAgentRunSession: (sessionId?: string, silent?: boolean) => void;
   persistAgentRunSession: (sessionId: string) => void;
   snapshotAgentRunSession?: (sessionId: string) => void;
   onAgentRunSettled?: (msg: ChatMessage) => void;
@@ -213,7 +213,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     else persistAgentRunSession(sessionId);
   }
 
-  function finishRunSession(sessionId: string) {
+  function finishRunSession(sessionId: string, silent = false) {
     const run = runManager.get(sessionId);
     if (run?.assistantMsg.role === "assistant") {
       applyInferredAgentRecovery(run.assistantMsg);
@@ -232,7 +232,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       );
     }
     persistAgentRunSession(sessionId);
-    endAgentRunSession(sessionId);
+    endAgentRunSession(sessionId, silent);
     runManager.remove(sessionId);
     if (runManager.size() === 0) {
       agentLastProgressAt = 0;
@@ -1050,7 +1050,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
     runManager.abort(sessionId);
     runManager.setAbortHandle(sessionId, null);
-    finishRunSession(sessionId);
+    finishRunSession(sessionId, true);
 
     window.setTimeout(() => {
       void resumeAgentRun(assistantMsg.id, { silent: true });
@@ -1062,16 +1062,16 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     sessionId: string,
     assistantMsg: ChatMessage,
     reason: string,
-    options?: { logStatus?: boolean },
+    options?: { logStatus?: boolean; noAutoResume?: boolean },
   ) {
     if (trySilentContinue(sessionId, assistantMsg, reason)) return;
-    applyRecoverableAgentFailure(assistantMsg, reason, options);
+    applyRecoverableAgentFailure(assistantMsg, reason, { ...options, noAutoResume: true });
   }
 
   function applyRecoverableAgentFailure(
     assistantMsg: ChatMessage,
     message: string,
-    options?: { logStatus?: boolean },
+    options?: { logStatus?: boolean; noAutoResume?: boolean },
   ) {
     const recoverable = isRecoverableAgentError(message);
     assistantMsg.agentFailed = true;
@@ -1111,8 +1111,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       ...syncRoundGroupsPatch(assistantMsg),
     });
 
-    // Auto-resume countdown for recoverable errors
-    if (recoverable) {
+    // Auto-resume countdown for recoverable errors (skip if noAutoResume is set)
+    if (recoverable && !options?.noAutoResume) {
       scheduleAutoResume(assistantMsg.id, message);
     }
   }
@@ -1142,7 +1142,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   }
 
   function resolveCompletedTurns(reported: number, msg: ChatMessage): number {
-    if (reported > 0) return reported;
+    if (reported > 0) {
+      return (msg.totalTurns ?? 0) + reported;
+    }
     return resolveAgentCompletedTurns(msg);
   }
 
@@ -1821,7 +1823,13 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       findLastAssistantContent(),
     );
 
+    const savedEndpoint = aiConfig.value.endpoint;
+    const savedApiKey = aiConfig.value.apiKey;
+    const savedModel = aiConfig.value.model;
     reloadAiConfig();
+    if (!aiConfig.value.endpoint) aiConfig.value.endpoint = savedEndpoint;
+    if (!aiConfig.value.apiKey) aiConfig.value.apiKey = savedApiKey;
+    if (!aiConfig.value.model) aiConfig.value.model = savedModel;
     clearStreamDeltaBuffer();
     beginAgentRunSession(sessionId);
     chatError.value = "";
@@ -1912,6 +1920,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     const project = projectPath.value.trim();
     if (!configReady.value || !projectOpened.value) return;
 
+    try { console.log(`[AGENT-DEBUG] [ui] runAgentTurn start: prompt="${rawPrompt.slice(0, 60)}" project=${project}`); } catch {}
     reloadAiConfig();
     clearStreamDeltaBuffer();
     const sessionId = activeSessionId.value;
@@ -1990,14 +1999,17 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         await scrollChatToBottom(true);
       }
 
+      try { console.log(`[AGENT-DEBUG] [ui] resolveImagesForAgentTurn start...`); } catch {}
       const imageSources =
         options && "imageDataUrls" in options
           ? (options.imageDataUrls ?? [])
           : await resolveImagesForAgentTurn(project, chatMessages.value);
+      try { console.log(`[AGENT-DEBUG] [ui] resolveImagesForAgentTurn done: ${imageSources.length} images`); } catch {}
       compressedImagesForRequest = imageSources.length
         ? await compressImageDataUrlsForAgent(imageSources)
         : undefined;
       hasImagesForRequest = Boolean(compressedImagesForRequest?.length);
+      try { console.log(`[AGENT-DEBUG] [ui] images compressed, hasImages=${hasImagesForRequest}`); } catch {}
 
       if (!rawPrompt && !hasImagesForRequest) {
         if (canBootstrapEarly) {
@@ -2099,6 +2111,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       projectPath: agentRequest.projectPath,
       sessionId: sessionId || undefined,
     });
+    try { console.log(`[AGENT-DEBUG] [ui] calling runVibeAgentSse...`); } catch {}
     const handle = runVibeAgentSse(
       agentRequest,
       (event) => handleAgentEvent(event, assistantMsg, runGen, sessionId),

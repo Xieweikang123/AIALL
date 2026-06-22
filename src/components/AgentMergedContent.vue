@@ -1,16 +1,18 @@
 <template>
   <div class="cursor-merged-content">
-    <template v-for="block in mergedBlocks" :key="block.key">
+    <template v-for="(block, blockIndex) in mergedBlocks" :key="block.key">
       <AgentThoughtBlock
         v-if="block.kind === 'thought'"
         :block="block"
         :streaming="false"
+        :style="{ '--block-index': blockIndex }"
       />
       <AgentActionBlock
         v-else-if="block.kind === 'actions'"
         :block="block"
+        :style="{ '--block-index': blockIndex }"
       />
-      <p v-else-if="block.kind === 'status'" class="cursor-action planning">{{ block.text }}</p>
+      <p v-else-if="block.kind === 'status'" class="cursor-action planning" :style="{ '--block-index': blockIndex }">{{ block.text }}</p>
     </template>
 
     <!-- 当前状态（运行中、且尚无流式回答时显示） -->
@@ -117,6 +119,43 @@ const mergedBlocks = computed<CursorFeedProcessBlock[]>(() => {
   flex-direction: column;
   gap: 6px;
   padding: 8px 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Agent 活动块入场动画 */
+.cursor-thought,
+.cursor-actions-block,
+.cursor-action.planning {
+  animation: agent-block-fade-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--block-index, 0) * 60ms);
+}
+
+@keyframes agent-block-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 最终回答淡入 */
+.cursor-merged-answer {
+  animation: answer-fade-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both;
+}
+
+@keyframes answer-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .cursor-action.planning {

@@ -534,6 +534,16 @@ button:active:not(:disabled) {
 .msg-answer--streaming {
   border-left: 2px solid var(--primary);
   padding-left: 12px;
+  animation: streaming-border-glow 2s ease-in-out infinite;
+}
+
+@keyframes streaming-border-glow {
+  0%, 100% {
+    border-left-color: var(--primary);
+  }
+  50% {
+    border-left-color: rgba(88, 166, 255, 0.8);
+  }
 }
 
 .msg-status {

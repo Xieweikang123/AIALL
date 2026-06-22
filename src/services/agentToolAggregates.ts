@@ -13,6 +13,7 @@ export type ToolAggregateCard = {
   failed: boolean;
   previewLines: string[];
   stepCount: number;
+  path?: string;
 };
 
 const WRITE_TOOLS = new Set(["write_file", "patch_file", "delete_file"]);
@@ -97,6 +98,7 @@ function buildFileCard(path: string, steps: AgentRoundTool[]): ToolAggregateCard
     failed: steps.some((s) => !s.ok && !s.running),
     previewLines: readPreviewLines(steps),
     stepCount: steps.length,
+    path,
   };
 }
 

@@ -1,5 +1,5 @@
 <template>
-  <div class="aggregate-card" :class="cardClass">
+  <div class="aggregate-card" :class="cardClass" :title="card.path || ''">
     <details v-if="card.previewLines.length" class="aggregate-card-details">
       <summary class="aggregate-card-head">
         <span class="aggregate-card-icon">{{ card.icon }}</span>
@@ -7,11 +7,12 @@
           <span class="aggregate-card-title">{{ card.title }}</span>
           <span class="aggregate-card-subtitle">{{ card.subtitle }}</span>
         </div>
-        <span class="aggregate-card-hint">命中摘要</span>
+        <span class="aggregate-card-hint">{{ card.kind === 'search' ? '查看匹配' : '展开详情' }}</span>
       </summary>
       <ul class="aggregate-card-preview">
         <li v-for="(line, index) in card.previewLines" :key="index" class="aggregate-preview-line">
-          {{ line }}
+          <span v-if="highlightKeyword" v-html="highlightLine(line, highlightKeyword)"></span>
+          <span v-else>{{ line }}</span>
         </li>
       </ul>
     </details>
@@ -32,6 +33,7 @@ import type { ToolAggregateCard } from "../services/agentToolAggregates";
 
 const props = defineProps<{
   card: ToolAggregateCard;
+  highlightKeyword?: string;
 }>();
 
 const cardClass = computed(() => {
@@ -39,6 +41,22 @@ const cardClass = computed(() => {
   if (props.card.failed) return "fail";
   return "ok";
 });
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function highlightLine(line: string, keyword: string): string {
+  if (!keyword) return escapeHtml(line);
+  const escaped = escapeHtml(line);
+  const kw = escapeHtml(keyword);
+  const regex = new RegExp(`(${kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi");
+  return escaped.replace(regex, '<mark class="search-hit">$1</mark>');
+}
 </script>
 
 <style scoped>
@@ -47,6 +65,20 @@ const cardClass = computed(() => {
   background: rgba(139, 148, 158, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.06);
   transition: background 0.15s ease;
+  animation: tool-card-appear 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+  min-width: 0;
+  overflow: hidden;
+}
+
+@keyframes tool-card-appear {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .aggregate-card + .aggregate-card {
@@ -159,8 +191,17 @@ const cardClass = computed(() => {
   font-size: 10px;
   line-height: 1.35;
   color: rgba(255, 255, 255, 0.55);
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.aggregate-preview-line :deep(.search-hit) {
+  background: rgba(210, 153, 34, 0.3);
+  color: rgba(255, 255, 255, 0.92);
+  border-radius: 2px;
+  padding: 0 2px;
 }
 
 @keyframes card-pulse {

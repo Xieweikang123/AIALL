@@ -976,15 +976,18 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
     // Open SSE immediately so the client leaves "connecting_local" before slow validation/agent work.
     sendSseHeaders(res);
     sendSseEvent(res, "status", { phase: "connected" });
+    try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent-route] SSE opened, projectPath=${projectPath} model=${model}\n`); } catch {}
 
     const resolvedRoot = path.resolve(projectPath);
     const rootStat = await fs.promises.stat(resolvedRoot).catch(() => null);
     if (!rootStat?.isDirectory()) {
+      try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent-route] projectPath invalid: ${resolvedRoot}\n`); } catch {}
       sendSseEvent(res, "error", { message: "projectPath 不是有效目录" });
       sendSseEvent(res, "done", { writtenFiles: [], turns: 0 });
       res.end();
       return;
     }
+    try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent-route] projectPath OK, calling runVibeAgent...\n`); } catch {}
 
     const controller = new AbortController();
     let keepaliveTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
@@ -1012,6 +1015,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
 
     try {
       const mode = body.mode === "ask" ? "ask" : "build";
+      try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent-route] mode=${mode} prompt="${prompt.slice(0, 80)}"\n`); } catch {}
 
       const history = Array.isArray(body.history)
         ? body.history
@@ -1022,6 +1026,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
             .map((m) => ({ role: m.role, content: String(m.content).trim() }))
         : undefined;
 
+      try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent-route] calling runVibeAgent...\n`); } catch {}
       await runVibeAgent({
         projectRoot: resolvedRoot,
         prompt,
@@ -1056,6 +1061,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         },
       });
     } catch (error) {
+      try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent-route] runVibeAgent ERROR: ${error instanceof Error ? error.message : String(error)}\n`); } catch {}
       try {
         sendSseEvent(res, "error", {
           message: error instanceof Error ? error.message : "Agent 运行失败",

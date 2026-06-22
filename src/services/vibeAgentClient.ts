@@ -169,9 +169,10 @@ export function runVibeAgentSse(request: VibeAgentRunRequest, onEvent: (event: V
       controller.abort();
     }, connectTimeoutMs);
 
+    const url = agentRunUrl();
     let response: Response;
     try {
-      response = await fetch(agentRunUrl(), {
+      response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(request),

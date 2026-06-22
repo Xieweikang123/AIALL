@@ -162,7 +162,20 @@ function pickBestAssistantBubbleText(candidates: string[], direct: string): stri
 
 /** Live final-answer stream while the model is still generating (not tool-turn preamble). */
 export function resolveLiveAgentAnswerPreview(msg: LiveAgentAnswerSource): string {
-  if (msg.tools?.some((tool) => tool.running)) return "";
+  // 工具运行阶段：显示 narrative（Agent 的思考过程）
+  if (msg.tools?.some((tool) => tool.running)) {
+    const groups = msg.roundGroups ?? [];
+    const activeTurn = msg.agentTurn;
+    const group =
+      (activeTurn && activeTurn > 0 ? groups.find((item) => item.turn === activeTurn) : undefined) ??
+      groups.filter((item) => item.turn > 0).at(-1);
+    if (group?.narrative) {
+      const text = normalizeBubbleText(group.narrative);
+      if (text && !isAgentToolTurnNarration(text)) return text;
+    }
+    return "";
+  }
+
   if (msg.agentPhase && msg.agentPhase !== "streaming_model") return "";
 
   const groups = msg.roundGroups ?? [];
