@@ -61,9 +61,9 @@ describe("vibeProjectMemory", () => {
     expect(onDisk).toContain("项目记忆");
   });
 
-  it("formatProjectMemoryForPrompt skips empty content", () => {
-    expect(formatProjectMemoryForPrompt("")).toBe("");
-    expect(formatProjectMemoryForPrompt("  ")).toBe("");
+  it("formatProjectMemoryForPrompt skips empty content", async () => {
+    expect(await formatProjectMemoryForPrompt("")).toBe("");
+    expect(await formatProjectMemoryForPrompt("  ")).toBe("");
   });
 
   it("normalizeProjectMemoryContent preserves short content", () => {

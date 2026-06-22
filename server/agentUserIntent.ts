@@ -106,7 +106,7 @@ export function isImplementationStatusPrompt(prompt: string): boolean {
   return IMPLEMENTATION_STATUS_PROMPT_RE.test(text);
 }
 
-/** Prior turns already analyzed quote-button positioning — user now wants code applied. */
+/** Prior turns already analyzed positioning/coordinates — user now wants code applied. */
 export function historySuggestsQuotePositionFix(history?: UserIntentHistoryMessage[]): boolean {
   const text = (history ?? [])
     .slice(-6)
@@ -114,9 +114,11 @@ export function historySuggestsQuotePositionFix(history?: UserIntentHistoryMessa
     .map((m) => m.content)
     .join("\n");
   if (!text.trim()) return false;
-  return /引用按钮|quote-floating|showQuoteButtonAt|getSelectionAnchorRect|clampQuoteButton|修复方案|修改方案|根因|patch/i.test(
-    text,
-  );
+  // 检测消息结构：已有定位/坐标分析 + 修复方案结论
+  const hasPositionAnalysis = /定位|坐标|位置|浮层|fixed|absolute|Teleport|锚点|偏移/i.test(text);
+  const hasAnalysisConclusion = /根因|原因|问题在于|分析|诊断|排查/i.test(text);
+  const hasFixProposal = /修复方案|修改方案|建议|patch|改法/i.test(text);
+  return hasPositionAnalysis && (hasAnalysisConclusion || hasFixProposal);
 }
 
 /** Recent turns mention an in-flight or partial code change task. */
@@ -189,8 +191,8 @@ export function buildImplementFollowUpHint(quotePositionFix = false): string {
   ];
   if (quotePositionFix) {
     lines.push(
-      "最多 1 次 read_file 核对目标函数；禁止 grep transform/Teleport（上文已讨论过）。",
-      "优先改 src/views/VibeCodingView.vue 中 getSelectionAnchorRect / showQuoteButtonAt / onMessageSelect 相关逻辑。",
+      "最多 1 次 read_file 核对上文已定位的目标函数；禁止重复 grep 已讨论过的定位问题。",
+      "优先改上文已识别的目标文件和函数。",
     );
   }
   return lines.join("\n");
@@ -225,8 +227,8 @@ export function buildUiDefectBuildHint(): string {
     "",
     "【UI 缺陷·须修复】用户用截图反馈控件/布局异常。",
     "须定位后 patch_file/write_file；禁止只分析并反问「要不要修」。",
-    "控件与选区/焦点在空间上分离时优先查 Teleport/fixed 浮层（grep *-floating、show*At），勿查底栏 flex。",
-    "排查 mouseup 与 getSelection 时序：选区在 mouseup 时可能尚未就绪，关注 getSelection* / queueMicrotask 链路。",
+    "控件与选区/焦点在空间上分离时优先查浮层定位（fixed/absolute/Teleport），勿查底栏 flex。",
+    "排查 mouseup 与 getSelection 时序：选区在 mouseup 时可能尚未就绪，关注异步回调链路。",
   ].join("\n");
 }
 
@@ -235,8 +237,7 @@ export function buildAgentStepClarificationHint(): string {
     "",
     "【用户追问排查步骤】用户在问「你这步是在确认什么」或某属性/API 含义。",
     "本轮禁止调用工具；先用 2–4 句中文面向用户解释（勿写 planning 句如「让我读取…」）。",
-    "Teleport 的 to：传送目标容器；to=\"body\" 表示节点挂到 document.body，position:fixed 相对视口，非底栏 flex 内嵌。",
-    "解释后若任务仍是修 UI 缺陷：下一轮转向 show*At / getSelection* 坐标计算并 patch，勿再 grep transform 或 chat-bottom layout。",
+    "解释后若任务仍是修 UI 缺陷：下一轮直接定位并 patch，勿再重复解释。",
   ].join("\n");
 }
 

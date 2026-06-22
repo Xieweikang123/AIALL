@@ -113,8 +113,7 @@ describe("buildAgentStepClarificationHint", () => {
   it("requires explain-first without tools", () => {
     const hint = buildAgentStepClarificationHint();
     expect(hint).toContain("禁止调用工具");
-    expect(hint).toContain("Teleport");
-    expect(hint).toContain("show*At");
+    expect(hint).toContain("解释");
   });
 });
 
@@ -130,7 +129,7 @@ describe("isImplementFollowUpRun", () => {
   const history = [
     {
       role: "assistant",
-      content: "引用按钮 getSelectionAnchorRect 可能有问题，建议修复 showQuoteButtonAt。",
+      content: "定位分析显示坐标计算有问题，建议修复定位逻辑。",
     },
   ];
   const implHistory = [
@@ -138,7 +137,7 @@ describe("isImplementFollowUpRun", () => {
     { role: "assistant", content: "部分改好了，下一步需要把 chatSending 改为 per-session。" },
   ];
 
-  it("detects 修复吧 after prior quote-button analysis", () => {
+  it("detects 修复吧 after prior positioning analysis", () => {
     expect(isImplementFollowUpRun("修复吧", history)).toBe(true);
   });
 
@@ -188,9 +187,9 @@ describe("isShortImplementPrompt", () => {
 });
 
 describe("historySuggestsQuotePositionFix", () => {
-  it("returns true when recent history mentions quote positioning", () => {
+  it("returns true when recent history mentions positioning analysis", () => {
     const history = [
-      { role: "assistant", content: "getSelectionAnchorRect 获取选区锚点位置" },
+      { role: "assistant", content: "定位分析显示坐标计算有问题，建议修复" },
       { role: "user", content: "修复吧" },
     ];
     expect(historySuggestsQuotePositionFix(history)).toBe(true);
@@ -202,9 +201,9 @@ describe("historySuggestsQuotePositionFix", () => {
     expect(historySuggestsQuotePositionFix([{ role: "user", content: "今天天气不错" }])).toBe(false);
   });
 
-  it("detects quote-floating and showQuoteButtonAt keywords", () => {
-    expect(historySuggestsQuotePositionFix([{ role: "assistant", content: "quote-floating 定位有误" }])).toBe(true);
-    expect(historySuggestsQuotePositionFix([{ role: "assistant", content: "showQuoteButtonAt 需要修改" }])).toBe(true);
+  it("detects positioning and fix proposal keywords", () => {
+    expect(historySuggestsQuotePositionFix([{ role: "assistant", content: "浮层定位有误，需要分析坐标" }])).toBe(true);
+    expect(historySuggestsQuotePositionFix([{ role: "assistant", content: "根因是定位偏移，建议修改" }])).toBe(true);
   });
 });
 

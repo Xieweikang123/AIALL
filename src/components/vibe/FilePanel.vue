@@ -154,8 +154,8 @@
                   {{ s.title }}
                 </span>
                 <span class="session-item-meta">
-                  <span class="session-item-time">{{ formatSessionTime(s.updatedAt) }}</span>
-                  <span class="session-item-count" v-if="s.messageCount">{{ formatCount(s.messageCount) }}</span>
+                  {{ formatSessionTime(s.updatedAt) }}
+                  <span class="session-item-count" v-if="s.messageCount">{{ formatCount(s.messageCount) }} 条</span>
                 </span>
               </button>
               <div class="session-item-actions">
@@ -194,10 +194,14 @@ function formatSessionTime(timestamp: number | string): string {
   const sec = Math.floor(diffMs / 1000);
   if (sec < 60) return "刚刚";
   const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m 前`;
+  if (min < 60) return `${min}分钟前`;
   const hour = Math.floor(min / 60);
-  if (hour < 24) return `${hour}h 前`;
-  return "";
+  if (hour < 24) return `${hour}小时前`;
+  const days = Math.floor(hour / 24);
+  if (days === 1) return "昨天";
+  if (days < 7) return `${days}天前`;
+  if (days < 30) return `${Math.floor(days / 7)}周前`;
+  return `${Math.floor(days / 30)}月前`;
 }
 
 function formatCount(n: number): string {
@@ -585,8 +589,8 @@ defineExpose({ searchInputRef });
 .session-group-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 8px 4px;
+  gap: 6px;
+  padding: 14px 8px 6px;
   list-style: none;
 }
 
@@ -597,19 +601,18 @@ defineExpose({ searchInputRef });
 .session-group-label {
   font-size: 11px;
   font-weight: 600;
-  color: rgba(139, 148, 158, 0.6);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  color: rgba(139, 148, 158, 0.5);
+  letter-spacing: 0.03em;
   white-space: nowrap;
 }
 
 .session-group-count {
   font-size: 10px;
-  color: rgba(139, 148, 158, 0.4);
-  background: rgba(255, 255, 255, 0.06);
-  padding: 0 5px;
-  border-radius: 8px;
-  line-height: 16px;
+  color: rgba(139, 148, 158, 0.35);
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  line-height: 1;
 }
 
 .session-item {
@@ -748,30 +751,23 @@ defineExpose({ searchInputRef });
 }
 
 .session-item-meta {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
   font-size: 11px;
   line-height: 1.3;
-}
-
-.session-item-time {
-  color: rgba(139, 148, 158, 0.6);
+  color: rgba(139, 148, 158, 0.55);
 }
 
 .session-item-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 20px;
-  height: 16px;
-  padding: 0 5px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(139, 148, 158, 0.7);
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1;
+  display: inline;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: rgba(139, 148, 158, 0.45);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: inherit;
 }
 
 .session-item-actions {
