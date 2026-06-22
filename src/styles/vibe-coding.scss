@@ -568,25 +568,28 @@ button:active:not(:disabled) {
 
 .shimmer-text {
   background: linear-gradient(
-    90deg,
-    rgba(255, 255, 255, 0.5) 0%,
-    rgba(255, 255, 255, 0.9) 50%,
-    rgba(255, 255, 255, 0.5) 100%
+    100deg,
+    rgba(140, 175, 225, 0.70) 0%,
+    rgba(180, 210, 255, 0.90) 25%,
+    rgba(255, 255, 255, 1.00) 50%,
+    rgba(180, 210, 255, 0.90) 75%,
+    rgba(140, 175, 225, 0.70) 100%
   );
-  background-size: 200% 100%;
+  background-size: 250% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: shimmer 2.5s ease-in-out infinite;
+  animation: shimmer 6s ease-in-out infinite;
 }
 
 .shimmer-text--fast {
-  animation-duration: 1.5s;
+  @extend .shimmer-text;
+  animation-duration: 5.6s;
 }
 
 @keyframes shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+  0% { background-position: 250% 0; }
+  100% { background-position: -250% 0; }
 }
 
 .msg-status-text {

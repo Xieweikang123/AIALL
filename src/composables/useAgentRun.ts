@@ -1108,6 +1108,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       content: assistantMsg.content,
       streaming: false,
       agentPhase: undefined,
+      status: "",
       activityExpanded: recoverable ? true : assistantMsg.activityExpanded,
       totalTurns: assistantMsg.totalTurns,
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
@@ -1127,6 +1128,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     runManager.setAbortHandle(sessionId, null);
     finishRunSession(sessionId);
     handleRecoverableInterruption(sessionId, assistantMsg, reason);
+    if (projectPath.value.trim()) updateAgentRunSessionStatus(sessionId, "failed");
     maybePersistChat(sessionId);
     maybeScrollChat(sessionId);
   }
@@ -1496,6 +1498,23 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         !assistantMsg.agentFailed &&
         isAgentMaxTurnsExhausted(assistantMsg, completedTurns);
 
+      // 自动续跑：模型输出被截断时静默继续
+      if (event.data.truncated && !wasAborted && !assistantMsg.agentFailed) {
+        if (trySilentContinue(sessionId, assistantMsg, "模型输出被截断，正在自动续跑")) {
+          if (!assistantMsg.totalTurns) {
+            assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
+          }
+          patchAssistantMsg(msgId, {
+            streaming: false,
+            totalTurns: assistantMsg.totalTurns,
+            ...syncRoundGroupsPatch(assistantMsg),
+          });
+          persistChatNow();
+          void scrollChatToBottom();
+          return;
+        }
+      }
+
       if (incompleteRun) {
         if (trySilentContinue(sessionId, assistantMsg, "连接中断（运行未完成）")) {
           if (!assistantMsg.totalTurns) {
@@ -1753,7 +1772,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       agentAborted: true,
       agentAbortReason: reason,
       streaming: false,
-      status: running.status,
+      status: "",
       statusLog: running.statusLog ? [...running.statusLog] : undefined,
     };
 
@@ -1781,6 +1800,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     runManager.abort(sessionId);
     runManager.setAbortHandle(sessionId, null);
     finishRunSession(sessionId, reason === "已被新指令打断");
+    if (projectPath.value.trim()) updateAgentRunSessionStatus(sessionId, "interrupted");
   }
 
   function interruptAgentRun(options?: { logStatus?: boolean; reason?: string }) {
@@ -1860,6 +1880,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     assistantMsg.agentAborted = false;
     assistantMsg.agentAbortReason = undefined;
     assistantMsg.streaming = false;
+    assistantMsg.agentWaitStartedAt = undefined;
+    assistantMsg.agentContinueCount = undefined;
     if (hasAgentRunStructure(assistantMsg) && !hasAgentFinalAnswer(assistantMsg)) {
       assistantMsg.content = "";
     }
@@ -1886,6 +1908,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       agentAborted: false,
       agentAbortReason: undefined,
       streaming: false,
+      agentWaitStartedAt: undefined,
+      agentContinueCount: undefined,
       activityExpanded: true,
       activityDetailed: true,
       agentPhase: assistantMsg.agentPhase,
@@ -2107,7 +2131,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
     const history = buildAgentHistory(rawPrompt, runProfile);
 
-    const runGen = runManager.start(sessionId, assistantMsg.id, assistantMsg, hasImagesForRequest);
+    const runGen = runManager.start(sessionId, assistantMsg!.id, assistantMsg!, hasImagesForRequest);
     startAgentUiTick();
     const agentRequest = {
       prompt,

@@ -2,6 +2,7 @@ import {
   hasAgentFinalAnswer,
   hasAgentRunStructure,
   hasSubstantiveAgentSummary,
+  isTruncatedAssistantAnswer,
   PARTIAL_WRITE_ABORT_HEADING,
   resolveAssistantBubbleContent,
 } from "./agentMessageDisplay";
@@ -247,6 +248,21 @@ export function isIncompleteAgentRunWithoutFinalAnswer(
   return !hasAgentFinalAnswer(msg);
 }
 
+/** Detect truncated final answer: streaming stopped but answer was cut off mid-sentence. */
+export function isTruncatedFinalAnswer(msg: AgentProgressSource & {
+  streaming?: boolean;
+}): boolean {
+  if (!msg.streaming) return false;
+  if (!hasAgentFinalAnswer(msg)) return false;
+  // 获取最终回复文本
+  const finalText = msg.roundGroups
+    ?.filter((g) => g.response?.isFinal)
+    .at(-1)?.response?.assistantText?.trim() || "";
+  if (!finalText) return false;
+  // 检测是否被截断
+  return isTruncatedAssistantAnswer(finalText);
+}
+
 /** Infer recovery flags for legacy sessions or incomplete error handling. */
 export function inferAgentRecoveryFlags(msg: AgentProgressSource & {
   role?: string;
@@ -262,7 +278,17 @@ export function inferAgentRecoveryFlags(msg: AgentProgressSource & {
   statusLog?: string[];
 }): AgentRecoveryFlags | null {
   if (msg.role && msg.role !== "assistant") return null;
-  if (msg.streaming) return null;
+  // 如果正在流式输出，只检测截断的最终回复
+  if (msg.streaming) {
+    if (isTruncatedFinalAnswer(msg)) {
+      return {
+        agentFailed: true,
+        agentRecoverable: true,
+        agentFailureReason: "回复被截断（模型输出不完整）",
+      };
+    }
+    return null;
+  }
 
   const completedTurns = resolveAgentCompletedTurns(msg);
   const maxTurns = resolveAgentMaxTurnsFromProgress(msg);
@@ -410,6 +436,17 @@ export function summarizeAgentProgress(msg: AgentProgressSource): string {
     }
     if (completedTools.length > maxTools) {
       lines.push(`…（另有 ${completedTools.length - maxTools} 个工具步骤）`);
+    }
+  }
+
+  // 提取 patch_file/write_file 操作，注入操作记忆
+  const writeTools = completedTools.filter((t) => t.name === "patch_file" || t.name === "write_file");
+  if (writeTools.length) {
+    lines.push("", "已执行写入操作（勿重复）：");
+    for (const t of writeTools) {
+      const path = String(t.args?.path ?? "未知文件");
+      const status = t.ok === false ? "（失败）" : "（成功）";
+      lines.push(`- ${t.name} ${path}${status}`);
     }
   }
 

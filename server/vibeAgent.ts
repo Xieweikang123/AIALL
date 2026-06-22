@@ -212,7 +212,7 @@ export type VibeAgentEvent =
       };
     }
   | { type: "error"; data: { message: string } }
-  | { type: "done"; data: { writtenFiles: string[]; pendingFiles: string[]; turns: number } };
+  | { type: "done"; data: { writtenFiles: string[]; pendingFiles: string[]; turns: number; truncated?: boolean } };
 
 export type VibeChatMode = "ask" | "build" | "plan";
 
@@ -533,7 +533,7 @@ const VIBE_AGENT_TOOLS = [
     function: {
       name: "append_memory",
       description:
-        "向项目记忆（.aiall/project-memory.md）提议追加一条记录；须经用户确认后才会写入。section 为 术语|导航|偏好。",
+        "向项目记忆（.aiall/project-memory.md）追加一条记录（自动写入，无需确认）。section 为 术语|导航|偏好。仅在遇到重要的项目约定、术语、导航信息时调用，不要滥用。",
       parameters: {
         type: "object",
         properties: {
@@ -825,14 +825,15 @@ function buildPlanSystemPrompt(
   return lines.join("\n");
 }
 
-function buildDoneData(stage: WriteStage | null, turns: number) {
+function buildDoneData(stage: WriteStage | null, turns: number, truncated = false) {
   if (!stage) {
-    return { writtenFiles: [] as string[], pendingFiles: [] as string[], turns };
+    return { writtenFiles: [] as string[], pendingFiles: [] as string[], turns, ...(truncated ? { truncated: true } : {}) };
   }
   return {
     writtenFiles: [...stage.writtenList],
     pendingFiles: [] as string[],
     turns,
+    ...(truncated ? { truncated: true } : {}),
   };
 }
 
@@ -1207,7 +1208,10 @@ export async function executeTool(
     }
     if (!content) return "错误：缺少 content";
     if (content.length > 200) return "错误：content 过长（最多 200 字）";
-    return buildMemoryProposalToolResult({ section, content });
+    const result = await appendProjectMemory(root, section, [content]);
+    if (!result.ok) return `写入失败：${result.error}`;
+    invalidateProjectContextCache(root);
+    return `已写入项目记忆（## ${section}）：${content}`;
   }
 
   if (name === "list_skills") {
@@ -1553,7 +1557,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   let visionFirstTurnPending = shouldRequireVisionFirstTurn(imageDataUrls.length, false);
   let visionFirstTurnRetries = 0;
   const MAX_VISION_FIRST_TURN_RETRIES = 2;
-  let truncationRetried = false;
+  const MAX_TRUNCATION_RETRIES = 3;
+  let truncationRetryCount = 0;
+  let outputTruncated = false;
   const consultativeVisionRun = imageDataUrls.length > 0 && (isAsk || readOnlyBuildRun);
 
   emitAgentContext(onEvent, {
@@ -1913,31 +1919,34 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     // --- 检测模型输出被截断（finish_reason === "length"）---
     if (
       completion.finish_reason === "length" &&
-      !completion.message.tool_calls?.length &&
-      !truncationRetried
+      !completion.message.tool_calls?.length
     ) {
-      truncationRetried = true;
-      onEvent({
-        type: "status",
-        data: {
-          phase: "streaming_model",
-          turn,
-          ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
-          model,
-          detail: "模型输出被截断（达到 token 上限），正在重试…",
-        },
-      });
-      // 将已截断的内容作为 assistant 消息推入上下文，让模型继续
-      const truncatedText = String(completion.message.content || "");
-      if (truncatedText.trim()) {
-        messages.push({ role: "assistant", content: truncatedText });
-        messages.push({
-          role: "user",
-          content:
-            "你的上一次回复被截断了（达到输出 token 上限）。请从被截断的地方继续，不要重复已输出的内容。",
+      if (truncationRetryCount < MAX_TRUNCATION_RETRIES) {
+        truncationRetryCount += 1;
+        onEvent({
+          type: "status",
+          data: {
+            phase: "streaming_model",
+            turn,
+            ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+            model,
+            detail: `模型输出被截断，正在续跑（${truncationRetryCount}/${MAX_TRUNCATION_RETRIES}）…`,
+          },
         });
+        // 将已截断的内容作为 assistant 消息推入上下文，让模型继续
+        const truncatedText = String(completion.message.content || "");
+        if (truncatedText.trim()) {
+          messages.push({ role: "assistant", content: truncatedText });
+          messages.push({
+            role: "user",
+            content:
+              "你的上一次回复被截断了（达到输出 token 上限）。请从被截断的地方继续，不要重复已输出的内容。",
+          });
+        }
+        continue;
       }
-      continue;
+      // 达到最大重试次数 → 标记输出截断，交由客户端续跑
+      outputTruncated = true;
     }
 
     const assistant = completion.message;
@@ -2264,7 +2273,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
           ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
         },
       });
-      onEvent({ type: "done", data: buildDoneData(writeStage, turn) });
+      onEvent({ type: "done", data: buildDoneData(writeStage, turn, outputTruncated) });
       return;
     }
 
@@ -2551,7 +2560,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
             data: { message: `已达安全上限（${AGENT_SAFETY_MAX_TURNS} 轮），任务可能未完成。` },
           });
         }
-        onEvent({ type: "done", data: buildDoneData(writeStage, turn) });
+        onEvent({ type: "done", data: buildDoneData(writeStage, turn, outputTruncated) });
         return;
       }
 

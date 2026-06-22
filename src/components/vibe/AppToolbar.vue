@@ -126,6 +126,7 @@ const emit = defineEmits<{
   (e: "clear-retry"): void;
   (e: "update:treeError", value: string): void;
   (e: "open-recent-project", path: string): void;
+  (e: "test-notification"): void;
 }>();
 
 const router = useRouter();

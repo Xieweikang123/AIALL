@@ -130,21 +130,21 @@
         <ul v-else class="sessions-list">
           <template v-for="group in groupedSessions" :key="group.label">
             <li class="session-group-header">
-              <span class="session-group-label shimmer-text--fast">{{ group.label }}</span>
+              <span class="session-group-label">{{ group.label }}</span>
               <span class="session-group-count">{{ group.items.length }}</span>
             </li>
             <li
               v-for="s in group.items"
               :key="s.id"
               class="session-item"
-              :class="{ active: s.id === activeSessionId }"
+              :class="{ active: s.id === activeSessionId, 'session-item--syncing': sessionSendingIds.includes(s.id) || s.status === 'active' }"
             >
               <button type="button" class="session-item-main" :title="s.title" @click="$emit('switch-session', s.id)">
                 <span class="session-item-title">
                   <span v-if="s.status === 'completed' && !sessionSendingIds.includes(s.id)" class="session-item-completed" title="已完成">✓</span>
                   <span v-else-if="s.status === 'failed' && !sessionSendingIds.includes(s.id)" class="session-item-failed" title="失败">✗</span>
                   <span v-else-if="s.status === 'interrupted' && !sessionSendingIds.includes(s.id)" class="session-item-interrupted" title="已中断">⚠</span>
-                  <span v-else-if="sessionSendingIds.includes(s.id)" class="session-item-completed" title="运行中">🔄</span>
+                  <span v-else-if="sessionSendingIds.includes(s.id)" class="session-item-sending" title="运行中"><span class="session-spinner" /></span>
                   <span :class="{ 'shimmer-text--fast': sessionSendingIds.includes(s.id) || s.status === 'active' }">{{ s.title }}</span>
                 </span>
                 <span class="session-item-meta" :class="{ 'shimmer-text--fast': sessionSendingIds.includes(s.id) || s.status === 'active' }">
@@ -670,6 +670,8 @@ defineExpose({ searchInputRef });
   box-shadow: 0 0 6px rgba(88, 166, 255, 0.4);
 }
 
+
+
 .session-item-main {
   flex: 1;
   display: flex;
@@ -685,6 +687,8 @@ defineExpose({ searchInputRef });
   min-width: 0;
   transition: background 0.15s;
   border-radius: 6px;
+  position: relative;
+  z-index: 1;
 }
 
 .session-item-main:hover {

@@ -287,14 +287,24 @@ const COMPLETION_SUMMARY_RE = /(?:修改完成|已完成|已写入|总结|变更
 export function isTruncatedAssistantAnswer(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return false;
+  // 以冒号结尾
   if (/[：:]\s*$/.test(trimmed)) return true;
+  // 短文本包含"已修复"等但没有句号
   if (
     trimmed.length < SUBSTANTIVE_MIN_CHARS &&
-    /已添加|已修复|已修改/.test(trimmed) &&
+    /已添加|已修复|已修改|已写入|已完成/.test(trimmed) &&
     !/[。.!！?？]$/.test(trimmed)
   ) {
     return true;
   }
+  // 以未闭合的 markdown 标记结尾
+  if (/[*_`~]\s*$/.test(trimmed)) return true;
+  // 以左括号/左引号结尾
+  if (/[（(「『"'"'\[{]\s*$/.test(trimmed)) return true;
+  // 以省略号结尾
+  if (/…\s*$/.test(trimmed)) return true;
+  // 以未闭合的代码块标记结尾
+  if (/```\w*\s*$/.test(trimmed)) return true;
   return false;
 }
 

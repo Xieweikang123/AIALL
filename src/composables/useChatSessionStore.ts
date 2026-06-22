@@ -283,9 +283,13 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
       if (isSessionRecentlyDeletedLocally(path, sessionId)) return;
 
       const stamped = stampImageRefsAfterSync(sessionId, messagesForDiskSync);
-      if (sameActiveSession) {
-        chatMessages.value = normalizeMessages(stamped);
-      }
+      // Intentionally do NOT write back to chatMessages here.
+      // normalizeMessages() always creates new object references, which triggers the
+      // deep watcher -> schedulePersistChat -> persistChatNow -> runDelayedChatDiskSync
+      // ping-pong loop.  Additionally, the stale snapshot can overwrite live agent-run
+      // state (e.g. agentPhase transitions from SSE events).  The in-memory store is
+      // already updated by saveVibeChatHistory below; the sidebar list is refreshed
+      // by refreshList.
       saveVibeChatHistory(path, stamped, sessionId, { setActive: sameActiveSession, touchTimestamp: false });
       refreshList(path);
     }

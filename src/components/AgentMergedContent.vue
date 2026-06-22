@@ -58,6 +58,7 @@ import AgentThoughtBlock from "./AgentThoughtBlock.vue";
 import AgentActionBlock from "./AgentActionBlock.vue";
 import { filterDuplicateFeedThoughts } from "../services/agentMessageDisplay";
 import { enrichPlanMarkdownForDisplay } from "../services/planDocumentDisplay";
+import { stripTextToolCallMarkup } from "../services/textToolCallMarkup";
 import {
   layoutCursorFeedBlocks,
   type CursorFeedItem,
@@ -99,11 +100,12 @@ const mergedBlocks = computed<CursorFeedProcessBlock[]>(() => {
     // `currentStatus` below — do not render every recorded step as permanent history.
     if (group.turn <= 0 && !group.narrative) continue;
 
-    if (group.narrative?.trim()) {
+    const narrativeText = stripTextToolCallMarkup(group.narrative || "").trim();
+    if (narrativeText) {
       items.push({
         kind: "thought",
         key: `thought-${group.turn}`,
-        text: group.narrative.trim(),
+        text: narrativeText,
       });
     }
 
