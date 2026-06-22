@@ -90,10 +90,43 @@ export function extractTaskKeywords(text: string): Set<string> {
   return words;
 }
 
+/**
+ * Assess content quality of a memory line (0-1).
+ * Higher score means more descriptive and useful content.
+ */
+function assessContentQuality(line: string): number {
+  const text = line.replace(/^- /, "").replace(/^\[[\d-]+\]\s*/, "");
+  if (!text) return 0;
+
+  let score = 0;
+
+  // Pure path or file reference without description → low quality
+  const purePathPattern = /^`?[a-z/._-]+\.[a-z]+`?$/i;
+  if (purePathPattern.test(text)) return 0.1;
+
+  // Path with description → medium quality
+  const pathWithDescPattern = /^`?[a-z/._-]+\.[a-z]+`?\s*[:：]/i;
+  if (pathWithDescPattern.test(text)) score += 0.3;
+
+  // Contains Chinese description → higher quality
+  if (/[\u4e00-\u9fff]/.test(text)) score += 0.25;
+
+  // Contains actionable keywords (should/must/prohibit/priority/commonly)
+  if (/(?:应|需|禁止|优先|常用|约定|必须|建议|不要|避免)/.test(text)) score += 0.25;
+
+  // Contains specific paths or code references
+  if (/(?:`[^`]+`|src\/|server\/|components\/)/.test(text)) score += 0.1;
+
+  // Contains dates (temporal relevance)
+  if (/\d{4}-\d{2}-\d{2}/.test(text)) score += 0.1;
+
+  return Math.min(score, 1);
+}
+
 export type RankedMemoryLine = { line: string; score: number };
 
 /**
- * Rank memory lines by combined relevance + time decay + usage frequency.
+ * Rank memory lines by combined relevance + time decay + usage frequency + content quality.
  * Returns lines sorted descending by score, capped to maxChars.
  */
 export function rankMemoryEntries(
@@ -113,9 +146,18 @@ export function rankMemoryEntries(
     }
     const decay = timeDecayScore(line, now);
     const rel = relevanceScore(line, taskKeywords);
+    const quality = assessContentQuality(line);
     const key = memoryLineKey(line);
     const usageBoost = usageCounts?.get(key) ?? 0;
-    ranked.push({ line, score: decay * 0.4 + rel * 0.4 + Math.min(usageBoost, 10) * 0.02 });
+
+    // Dynamic weight: quality matters more for low-usage items
+    const usageWeight = Math.min(usageBoost, 10) * 0.025;
+    const qualityWeight = usageBoost > 0 ? 0.15 : 0.25;
+
+    ranked.push({
+      line,
+      score: decay * 0.3 + rel * 0.3 + quality * qualityWeight + usageWeight,
+    });
   }
 
   ranked.sort((a, b) => b.score - a.score);

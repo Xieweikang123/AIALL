@@ -62,11 +62,70 @@ function explorationArchiveId(): string {
 const SUMMARY_MAX_CHARS = 600;
 
 /**
+ * Extract navigation hints from assistant text.
+ * Identifies file paths and their purposes mentioned in the exploration.
+ */
+function extractNavigationHints(assistantText: string): string {
+  const hints: string[] = [];
+  const lines = assistantText.split("\n");
+
+  for (const line of lines) {
+    const t = line.trim();
+    // Look for patterns like: "这是 X 文件" or "X 文件是..."
+    const fileHintMatch = t.match(/(?:这是|这是|该|这个|那个|文件)\s*`?([a-z/._-]+\.[a-z]+)`?\s*(?:是|用于|负责|包含|处理)/i);
+    if (fileHintMatch) {
+      hints.push(fileHintMatch[1]);
+    }
+
+    // Look for directory structure descriptions
+    const dirMatch = t.match(/(?:目录|文件夹|路径)\s*`?([a-z/._-]+)`?\s*(?:下|中|包含|存放)/i);
+    if (dirMatch) {
+      hints.push(`${dirMatch[1]}/`);
+    }
+  }
+
+  // Deduplicate and limit
+  const unique = [...new Set(hints)].slice(0, 5);
+  return unique.length > 0 ? `关键路径：${unique.join("、")}` : "";
+}
+
+/**
+ * Extract key conclusions from assistant text.
+ * Looks for conclusion markers in Chinese.
+ */
+function extractConclusions(assistantText: string): string {
+  const lines = assistantText.split("\n");
+  const conclusions: string[] = [];
+
+  // Conclusion markers
+  const CONCLUSION_MARKERS = [
+    /(?:结论|总结|发现|问题|原因|修复|解决|方案|建议|应|需要|必须|禁止)/,
+    /(?:所以|因此|由此可见|综上)/,
+    /(?:问题在于|问题原因|根本原因)/,
+  ];
+
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t || !/[\u4e00-\u9fff]/.test(t)) continue;
+
+    // Check if line contains conclusion markers
+    const isConclusion = CONCLUSION_MARKERS.some(marker => marker.test(t));
+    if (isConclusion && t.length >= 10 && t.length <= 100) {
+      conclusions.push(t);
+    }
+  }
+
+  // Return top 3 conclusions
+  return conclusions.slice(0, 3).join("；");
+}
+
+/**
  * Extract a concise summary from agent assistantText.
  * Heuristics:
  * 1. Prefer lines containing Chinese conclusions / key findings markers.
  * 2. Strip tool-call artifacts (grep/read/patch logs).
- * 3. Truncate to SUMMARY_MAX_CHARS.
+ * 3. Add navigation hints and conclusions.
+ * 4. Truncate to SUMMARY_MAX_CHARS.
  */
 export function extractExplorationSummary(assistantText: string | undefined): string {
   if (!assistantText?.trim()) return "";
@@ -96,13 +155,25 @@ export function extractExplorationSummary(assistantText: string | undefined): st
   const meaningfulLines = lines.filter((l) => /[\u4e00-\u9fff]/.test(l));
   const source = meaningfulLines.length >= 2 ? meaningfulLines : lines;
 
-  const joined = source
+  let summary = source
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-  if (joined.length <= SUMMARY_MAX_CHARS) return joined;
-  return joined.slice(0, SUMMARY_MAX_CHARS) + "…";
+  // Add navigation hints if available
+  const navHints = extractNavigationHints(text);
+  if (navHints) {
+    summary = `${summary}\n\n${navHints}`;
+  }
+
+  // Add conclusions if available
+  const conclusions = extractConclusions(text);
+  if (conclusions) {
+    summary = `${summary}\n\n结论：${conclusions}`;
+  }
+
+  if (summary.length <= SUMMARY_MAX_CHARS) return summary;
+  return summary.slice(0, SUMMARY_MAX_CHARS) + "…";
 }
 
 export function buildExplorationArchiveMarkdown(params: {

@@ -1398,10 +1398,16 @@ function formatSessionTime(timestamp: number | string): string {
   padding: 16px;
   background: rgba(6, 10, 18, 0.72);
   backdrop-filter: blur(2px);
+  max-height: 100%;
+  overflow: hidden;
 }
 
 .project-memory-dialog {
   width: min(100%, 440px);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   max-height: calc(100% - 32px);
   display: flex;
   flex-direction: column;

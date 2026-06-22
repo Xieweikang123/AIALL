@@ -60,6 +60,8 @@ export async function formatProjectMemoryForPrompt(
   if (!body) return "";
 
   let filtered = body;
+  let adjustedMaxChars = PROJECT_MEMORY_MAX_CHARS;
+
   if (taskContext) {
     const keywords = extractTaskKeywords(taskContext);
     let usageCounts: Map<string, number> | undefined;
@@ -69,7 +71,18 @@ export async function formatProjectMemoryForPrompt(
         usageCounts = new Map(store.entries.map((e) => [e.key, e.count]));
       }
     }
-    filtered = rankMemoryEntries(body, keywords, PROJECT_MEMORY_MAX_CHARS, usageCounts);
+
+    // Dynamic max chars based on task relevance
+    const keywordCount = keywords.size;
+    if (keywordCount >= 5) {
+      // High relevance: inject more memory
+      adjustedMaxChars = Math.round(PROJECT_MEMORY_MAX_CHARS * 1.2);
+    } else if (keywordCount <= 1) {
+      // Low relevance: inject less memory
+      adjustedMaxChars = Math.round(PROJECT_MEMORY_MAX_CHARS * 0.8);
+    }
+
+    filtered = rankMemoryEntries(body, keywords, adjustedMaxChars, usageCounts);
   }
 
   const lines = [
