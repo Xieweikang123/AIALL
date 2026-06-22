@@ -199,9 +199,9 @@ function onTabClick(path: string) {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
+  min-width: 22px;
   height: 22px;
-  padding: 0;
+  padding: 0 8px;
   border: 1px dashed rgba(255, 255, 255, 0.25);
   border-radius: 4px;
   background: none;

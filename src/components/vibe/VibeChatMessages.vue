@@ -71,7 +71,7 @@
         </div>
       </div>
       <div
-        v-else-if="m.role === 'assistant' && ctx.canResumeAgentRun(m) && !ctx.isPartialWrittenRunInterrupt(m)"
+        v-else-if="m.role === 'assistant' && ctx.canResumeAgentRun(m) && !ctx.isPartialWrittenRunInterrupt(m) && !ctx.isAgentRunning(m)"
         class="agent-recovery-banner"
       >
         <span class="agent-recovery-text">
@@ -211,13 +211,6 @@
             </div>
           </div>
         </div>
-      </div>
-      <div
-        v-if="m.role === 'assistant' && ctx.isAgentRunning(m)"
-        class="agent-running-footer"
-      >
-        <span class="status-pulse" aria-hidden="true" />
-        <span class="agent-running-text">{{ ctx.buildAgentRunningStatusText(m) }}</span>
       </div>
       <div
         v-if="

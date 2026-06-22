@@ -71,14 +71,6 @@
         <span class="panel-meta" :class="{ warn: !configReady || !apiKeyReady }">
           {{ aiConfigStatusText }}
         </span>
-        <button
-          type="button"
-          class="ghost small test-notify-btn"
-          title="测试系统通知"
-          @click="$emit('test-notification')"
-        >
-          🔔
-        </button>
       </div>
     </div>
 
