@@ -49,12 +49,6 @@
         :git-staged-files="gitStagedFiles"
         :session-list="sessionList"
         :active-session-id="activeSessionId"
-        :active-session-title="activeSessionTitle"
-        :session-picker-open="sessionPickerOpen"
-        :session-picker-title="sessionPickerTitle"
-        :syncing-chat-store="syncingChatStore"
-        :chat-store-sync-message="chatStoreSyncMessage"
-        :chat-sending="chatSending"
         :session-sending-ids="sendingSessionIdList"
         @update:git-panel-mode="gitPanelMode = $event"
         @update:search-query="searchQuery = $event"
@@ -68,7 +62,6 @@
         @remove-session="removeSession"
         @start-new-session="handleStartNewSession"
         @copy-session-info="copySessionInfo"
-        @sync-chat-store-to-disk="syncChatStoreToDisk"
       >
 
         <GitPanel
@@ -200,6 +193,7 @@
       <div class="resize-handle" @mousedown="startResize('file', $event)"></div>
 
       <EditorPanel
+        ref="editorPanelRef"
         :active-file-path="activeFilePath"
         :file-content="fileContent"
         :file-dirty="fileDirty"
@@ -251,9 +245,6 @@
         :session-list="sessionList"
         :active-session-id="activeSessionId"
         :active-session-title="activeSessionTitle"
-        :session-picker-open="sessionPickerOpen"
-        :session-picker-title="sessionPickerTitle"
-        :syncing-chat-store="syncingChatStore"
         :chat-store-sync-message="chatStoreSyncMessage"
         :is-dragging="isDragging"
         :editor-collapsed="editorCollapsed"
@@ -299,12 +290,10 @@
         @on-chat-drag-leave="onChatDragLeave"
         @on-chat-drop="onChatDrop"
         @switch-to-adjacent-session="switchToAdjacentSession"
-        @toggle-session-picker="toggleSessionPicker"
         @start-new-session="handleStartNewSession"
         @switch-session="switchSession"
         @copy-session-info="copySessionInfo"
         @remove-session="removeSession"
-        @sync-chat-store-to-disk="syncChatStoreToDisk"
         @clear-chat="clearChat"
         @apply-example="applyExample"
         @apply-suggestion="handleAgentSuggestion"
@@ -401,6 +390,18 @@
     </Teleport>
 
     <!-- 站内通知横幅已移除：仅使用 Tauri 原生通知（invoke('send_notification')） -->
+
+    <QuickSearchModal
+      :open="quickSearchOpen"
+      :project-opened="projectOpened"
+      :project-path="projectPath"
+      :session-list="sessionList"
+      :active-session-id="activeSessionId"
+      :get-live-session-messages="getLiveSessionMessagesForSearch"
+      @close="quickSearchOpen = false"
+      @open-file="onQuickSearchOpenFile"
+      @open-session="onQuickSearchOpenSession"
+    />
   </div>
 </template>
 
@@ -422,6 +423,7 @@ import EditorPanel from "../components/vibe/EditorPanel.vue";
 import ChatPanel from "../components/vibe/ChatPanel.vue";
 import VibeChatMessages from "../components/vibe/VibeChatMessages.vue";
 import VibeWorkspaceWelcome from "../components/vibe/VibeWorkspaceWelcome.vue";
+import QuickSearchModal from "../components/vibe/QuickSearchModal.vue";
 import { vibeChatMessageContextKey, type VibeChatMessageContext } from "../composables/vibeChatMessageContext";
 import { useConfirm } from "../composables/useConfirm";
 import { useFileDrag } from "../composables/useFileDrag";
@@ -502,58 +504,20 @@ import {
 } from "../services/vibeChatImageStore";
 import {
   isDeleteNotFoundError,
-  resolveAgentDoneFileAction,
 } from "../services/vibeAgentTurnApply";
 import {
-  runVibeAgentSse,
-  type VibeAgentSseEvent,
   type VibeChatHistoryMessage,
   type VibeChatMode,
 } from "../services/vibeAgentClient";
-import {
-  buildAgentRoundGroupViews,
-  recordAgentRoundNarrative,
-  recordAgentRoundRequest,
-  recordAgentRoundResponse,
-  recordAgentRoundStatus,
-  recordAgentRoundStreamDelta,
-  recordAgentRoundToolStart,
-  type AgentRoundGroup,
-  type AgentRoundGroupView,
-} from "../services/agentRoundGroups";
-import {
-  buildCursorAgentFeed,
-  computeExplorationStats,
-  computeLineDelta,
-  cursorActionClass,
-  formatCollapsedStepsSummary,
-  formatCursorActionLabel,
-  formatExplorationSummary,
-  getRecentFeedActions,
-  getRunningFeedAction,
-  buildCursorAgentTimeline,
-  shouldUseCompactAgentFeed as shouldUseCompactAgentFeedByCount,
-  type CursorAgentTimeline,
-  type CursorFeedProcessBlock,
-} from "../services/agentCursorFeed";
-import { type AgentToolStep as AgentToolStepFromToolHelpers } from "../utils/toolHelpers";
 
 import {
-  filterDuplicateFeedThoughts,
   finalizeAssistantBubbleContent,
-  mergeAssistantTurnText,
-  resolveAssistantBubbleContent,
 } from "../services/agentMessageDisplay";
 import { findLastAssistantContentInMessages } from "../services/agentContinuation";
 import { isScrollNearBottom, scrollElementToBottom } from "../utils/scrollViewport";
 import { truncatePromptAttachment } from "../utils/truncatePromptAttachment";
 import {
-  messagePreviewLength,
-  shouldCollapseRequestMessage,
-} from "../services/agentNarrativeSegments";
-import {
   addProjectToHistory,
-  clearProjectHistory,
   listProjectHistory,
   removeProjectFromHistory,
   type ProjectHistoryEntry,
@@ -613,14 +577,6 @@ const PENDING_QUEUE_KEY = "vibe-coding-pending-queue";
 const GIT_PANEL_MODE_KEY = "vibe-coding-git-panel-mode";
 type ChatRole = "user" | "assistant";
 type FileDiff = TurnFileDiff;
-
-type AgentStatusData = Extract<VibeAgentSseEvent, { type: "status" }>["data"] & {
-  toolTitle?: string;
-  toolDetail?: string;
-  retryAttempt?: number;
-  retryMaxAttempts?: number;
-  retryError?: string;
-};
 
 function normalizeChatMessages(messages: PersistedChatMessage[]): ChatMessage[] {
   return messages.map((m) => {
@@ -837,18 +793,14 @@ const isTauriEnv = typeof window !== 'undefined' && !!(window as any).__TAURI_IN
  */
 async function tryTauriNotification(title: string, body: string): Promise<boolean> {
   if (!isTauriEnv) {
-    console.log('[AIALL] 非 Tauri 环境，跳过原生通知');
     return false;
   }
   try {
-    // 调用 Rust 端自定义命令 send_notification（已注册在 lib.rs invoke_handler 中）
     const { invoke } = await import('@tauri-apps/api/core');
-    console.log('[AIALL] 调用 Rust send_notification:', { title, body });
     await invoke('send_notification', { title, body });
-    console.log('[AIALL] Rust 通知命令调用成功');
     return true;
   } catch (e) {
-    console.error('[AIALL] Rust 通知发送失败:', e);
+    debugLog(`tryTauriNotification failed: ${e}`);
     return false;
   }
 }
@@ -865,18 +817,11 @@ function notifyAgentDoneIfNeeded(sessionId: string) {
   const project = projectPath.value.trim();
   const name = (project ? getSessionTitle(project, sessionId) : undefined) || sessionId;
   sendAgentCompleteNotification(name);
-  console.log('[AIALL] Agent 完成:', name);
 }
 
 /** 测试系统通知 */
 async function testNotification() {
-  // 只使用 Tauri 原生通知，不降级到 JS 插件或站内横幅
-  const ok = await tryTauriNotification('AIALL · 通知测试', '系统通知正常工作 ✅');
-  if (ok) {
-    console.log('[AIALL] 通知测试成功');
-  } else {
-    console.error('[AIALL] 通知测试失败');
-  }
+  await tryTauriNotification('AIALL · 通知测试', '系统通知正常工作 ✅');
 }
 
 function endAgentRunSession(sessionId?: string, silent = false) {
@@ -898,12 +843,12 @@ function persistAgentRunSession(sessionId: string) {
 }
 const switchingProject = ref(false);
 const chatError = ref("");
-const searchInputRef = ref<HTMLInputElement | null>(null);
+const quickSearchOpen = ref(false);
+const editorPanelRef = ref<InstanceType<typeof EditorPanel> | null>(null);
 const workspaceRef = ref<HTMLElement | null>(null);
 let scrollChatRaf = 0;
 const CHAT_SCROLL_PIN_THRESHOLD = 80;
 let chatPinnedToBottom = true;
-const sessionPickerRef = ref<HTMLElement | null>(null);
 const chatPanelRef = ref<InstanceType<typeof ChatPanel> | null>(null);
 const pendingPromptQueue = ref<string[]>([]);
 function persistPendingQueue() {
@@ -939,9 +884,7 @@ const mentionQuery = ref("");
 const mentionActiveIndex = ref(0);
 const mentionRemoteResults = ref<ProjectFileItem[]>([]);
 let mentionSearchTimer: ReturnType<typeof setTimeout> | null = null;
-const projectHistoryOpen = ref(false);
 const projectHistoryList = ref<ProjectHistoryEntry[]>([]);
-const projectHistoryRef = ref<HTMLElement | null>(null);
 
 // Git panel composable
 const {
@@ -964,14 +907,12 @@ const {
 
 // Session manager composable
 const {
-  sessionPickerOpen,
   activeSessionId,
   sessionList,
   activeSessionTitle,
   activeSessionIndex,
   canSwitchToNewerSession,
   canSwitchToOlderSession,
-  sessionPickerTitle,
   sessionLocalFileName,
   formatSessionInfoForCopy,
   setActiveSession,
@@ -1008,16 +949,13 @@ const chatSession = useChatSessionStore({
 
 const {
   switchingSession,
-  syncingChatStore,
   chatStoreSyncMessage,
   persistChatNow,
   schedulePersistChat,
   cancelPendingChatPersistence,
-  flushChatStoreToDisk,
   startNewSession,
   switchSession,
   removeSession,
-  syncChatStoreToDisk,
   loadProjectChatState,
   resetUiForProjectSwitch,
   clearProjectChat,
@@ -1057,14 +995,6 @@ function refreshSessionList(path?: string) {
       local: getSessionDiagSnapshot(p),
     });
   }
-}
-
-function toggleSessionPicker() {
-  session.toggleSessionPicker();
-}
-
-function closeSessionPicker() {
-  session.closeSessionPicker();
 }
 
 function switchToAdjacentSession(delta: number) {
@@ -1387,41 +1317,14 @@ function isCurrentProject(path: string): boolean {
   return norm(current) === norm(path);
 }
 
-function toggleProjectHistory() {
-  projectHistoryOpen.value = !projectHistoryOpen.value;
-  if (projectHistoryOpen.value) refreshProjectHistoryList();
-}
-
-function closeProjectHistory() {
-  projectHistoryOpen.value = false;
-}
-
-function openRecentProject(path: string) {
-  closeProjectHistory();
-  void openProjectByPath(path);
-}
-
 function removeRecentProject(path: string, event?: MouseEvent) {
   event?.stopPropagation();
   removeProjectFromHistory(path);
   refreshProjectHistoryList();
 }
 
-function clearRecentProjects() {
-  clearProjectHistory();
-  refreshProjectHistoryList();
-}
-
 function onDocumentClick(event: MouseEvent) {
   const target = event.target as Element;
-  if (projectHistoryOpen.value) {
-    const el = projectHistoryRef.value;
-    if (el && !el.contains(target)) closeProjectHistory();
-  }
-  if (sessionPickerOpen.value) {
-    const el = chatPanelRef.value?.sessionPickerRef ?? sessionPickerRef.value;
-    if (el && !el.contains(target)) closeSessionPicker();
-  }
   if (showQuoteButton.value) {
     if (eventComposedPathIncludes(event, ".quote-floating")) return;
     hideQuoteButtonNow();
@@ -1545,7 +1448,6 @@ registerEscapeDismiss(
   ESCAPE_DISMISS_PRIORITY.CONTEXT_MENU,
 );
 registerEscapeDismiss(projectMemoryOpen, closeProjectMemoryEditor, ESCAPE_DISMISS_PRIORITY.PROJECT_MEMORY);
-registerEscapeDismiss(sessionPickerOpen, closeSessionPicker, ESCAPE_DISMISS_PRIORITY.SESSION_PICKER);
 registerEscapeDismiss(
   mentionOpen,
   () => {
@@ -1560,7 +1462,6 @@ registerEscapeDismiss(
   },
   ESCAPE_DISMISS_PRIORITY.TOKEN_DETAIL,
 );
-registerEscapeDismiss(projectHistoryOpen, closeProjectHistory, ESCAPE_DISMISS_PRIORITY.PROJECT_HISTORY);
 registerEscapeDismiss(showQuoteButton, hideQuoteButtonNow, ESCAPE_DISMISS_PRIORITY.QUOTE_BUTTON);
 // 滚动时隐藏引用按钮，避免 fixed 定位与选区脱节
 onMounted(() => {
@@ -2901,11 +2802,69 @@ function onWindowFocus() {
   reloadAiConfig();
 }
 
+function getLiveSessionMessagesForSearch(sessionId: string): PersistedChatMessage[] | undefined {
+  if (sessionId === activeSessionId.value && chatMessages.value.length) {
+    return chatMessages.value;
+  }
+  const cached = sessionMessageCache.get(sessionId);
+  return cached?.length ? cached : undefined;
+}
+
+async function scrollChatToMessage(messageId: string) {
+  if (!messageId.trim()) return;
+  await nextTick();
+  await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+  const host = chatPanelRef.value?.chatScrollRef;
+  if (!host) return;
+  const escaped = typeof CSS !== "undefined" && "escape" in CSS ? CSS.escape(messageId) : messageId.replace(/"/g, '\\"');
+  const el = host.querySelector(`[data-message-id="${escaped}"]`);
+  if (!(el instanceof HTMLElement)) return;
+  el.scrollIntoView({ block: "center", behavior: "smooth" });
+  el.classList.add("msg--search-highlight");
+  window.setTimeout(() => {
+    el.classList.remove("msg--search-highlight");
+  }, 2200);
+}
+
+function waitUntilSwitchingSessionDone(): Promise<void> {
+  if (!switchingSession.value) return Promise.resolve();
+  return new Promise((resolve) => {
+    const stop = watch(switchingSession, (busy) => {
+      if (!busy) {
+        stop();
+        resolve();
+      }
+    });
+  });
+}
+
+async function onQuickSearchOpenFile(payload: { path: string; line?: number }) {
+  await openFile(payload.path);
+  if (payload.line && payload.line > 0) {
+    await nextTick();
+    await editorPanelRef.value?.revealLineInEditor(payload.line);
+  }
+}
+
+async function onQuickSearchOpenSession(payload: { sessionId: string; messageId?: string }) {
+  if (payload.sessionId && payload.sessionId !== activeSessionId.value) {
+    switchSession(payload.sessionId);
+    await waitUntilSwitchingSessionDone();
+  }
+  if (payload.messageId) {
+    await scrollChatToMessage(payload.messageId);
+  }
+}
+
+function openQuickSearch() {
+  quickSearchOpen.value = true;
+}
+
 function onGlobalKeydown(e: KeyboardEvent) {
   if ((e.ctrlKey || e.metaKey) && e.key === "p") {
     e.preventDefault();
-    searchInputRef.value?.focus();
-    searchInputRef.value?.select();
+    openQuickSearch();
+    return;
   }
   if ((e.ctrlKey || e.metaKey) && e.key === "s") {
     e.preventDefault();
@@ -2947,12 +2906,25 @@ watch(gitLogOpen, async (open) => {
 });
 
 watch(
-  chatMessages,
+  () => {
+    if (chatSending.value) return "";
+    return chatMessages.value.map((m) => `${m.id}:${m.content?.length ?? 0}`).join("|");
+  },
   () => {
     schedulePersistChat();
+  },
+);
+
+watch(
+  () => {
+    if (!chatSending.value) return 0;
+    const last = chatMessages.value[chatMessages.value.length - 1];
+    if (!last) return 0;
+    return (last.content?.length ?? 0) + (last.tools?.length ?? 0) * 1000;
+  },
+  () => {
     if (chatSending.value) scheduleStreamScroll();
   },
-  { deep: true },
 );
 
 let chatImageHydrateToken = 0;

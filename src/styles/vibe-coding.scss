@@ -434,6 +434,13 @@ button:active:not(:disabled) {
   align-items: flex-start;
   min-width: 0;
   padding: 2px 12px;
+  border-radius: 12px;
+  transition: box-shadow 0.25s ease, background 0.25s ease;
+}
+
+.msg--search-highlight {
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.55);
+  background: rgba(88, 166, 255, 0.08);
 }
 
 .msg.user {

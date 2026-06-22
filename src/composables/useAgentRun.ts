@@ -1038,7 +1038,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     prepareAssistantForSilentContinue(assistantMsg);
     assistantMsg.agentContinueCount = count + 1;
     if (isRunVisible(sessionId)) chatError.value = "";
-    appendStatusLog(assistantMsg, buildSilentContinueStatusLog(reason, assistantMsg.agentContinueCount));
+    const statusLogReason = reason.includes("自动续跑") ? reason : `连接中断（自动续跑 ${count + 1}/${AGENT_SILENT_CONTINUE_MAX}）`;
+    appendStatusLog(assistantMsg, buildSilentContinueStatusLog(statusLogReason, assistantMsg.agentContinueCount));
     patchAssistantMsg(assistantMsg.id, {
       agentContinueCount: assistantMsg.agentContinueCount,
       streaming: false,
@@ -1500,7 +1501,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
       // 自动续跑：模型输出被截断时静默继续
       if (event.data.truncated && !wasAborted && !assistantMsg.agentFailed) {
-        if (trySilentContinue(sessionId, assistantMsg, "模型输出被截断，正在自动续跑")) {
+        const continueCount = assistantMsg.agentContinueCount ?? 0;
+        const maxContinues = AGENT_SILENT_CONTINUE_MAX;
+        const truncatedNotice = `模型输出较长，正在自动续跑以补全内容（第 ${continueCount + 1}/${maxContinues} 次）…`;
+        if (trySilentContinue(sessionId, assistantMsg, truncatedNotice)) {
           if (!assistantMsg.totalTurns) {
             assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
           }
@@ -1961,7 +1965,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     const project = projectPath.value.trim();
     if (!configReady.value || !projectOpened.value) return;
 
-    try { console.log(`[AGENT-DEBUG] [ui] runAgentTurn start: prompt="${rawPrompt.slice(0, 60)}" project=${project}`); } catch {}
     reloadAiConfig();
     clearStreamDeltaBuffer();
     const sessionId = activeSessionId.value;
@@ -2040,17 +2043,14 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         await scrollChatToBottom(true);
       }
 
-      try { console.log(`[AGENT-DEBUG] [ui] resolveImagesForAgentTurn start...`); } catch {}
       const imageSources =
         options && "imageDataUrls" in options
           ? (options.imageDataUrls ?? [])
           : await resolveImagesForAgentTurn(project, chatMessages.value);
-      try { console.log(`[AGENT-DEBUG] [ui] resolveImagesForAgentTurn done: ${imageSources.length} images`); } catch {}
       compressedImagesForRequest = imageSources.length
         ? await compressImageDataUrlsForAgent(imageSources)
         : undefined;
       hasImagesForRequest = Boolean(compressedImagesForRequest?.length);
-      try { console.log(`[AGENT-DEBUG] [ui] images compressed, hasImages=${hasImagesForRequest}`); } catch {}
 
       if (!rawPrompt && !hasImagesForRequest) {
         if (canBootstrapEarly) {
@@ -2152,7 +2152,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       projectPath: agentRequest.projectPath,
       sessionId: sessionId || undefined,
     });
-    try { console.log(`[AGENT-DEBUG] [ui] calling runVibeAgentSse...`); } catch {}
     const handle = runVibeAgentSse(
       agentRequest,
       (event) => handleAgentEvent(event, assistantMsg, runGen, sessionId),

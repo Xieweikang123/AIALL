@@ -2,19 +2,23 @@
   <aside class="file-panel" :style="{ width: filePanelWidth + 'px' }">
     <div class="file-panel-head">
       <div class="file-panel-row file-panel-top-row">
-        <div class="file-panel-tabs" role="group">
+        <div class="file-panel-tabs" role="tablist" aria-label="左侧面板">
           <button
             type="button"
+            role="tab"
             class="file-panel-tab"
             :class="{ active: gitPanelMode === 'files' }"
+            :aria-selected="gitPanelMode === 'files'"
             @click="$emit('update:gitPanelMode', 'files')"
           >
             文件
           </button>
           <button
             type="button"
+            role="tab"
             class="file-panel-tab"
             :class="{ active: gitPanelMode === 'git' }"
+            :aria-selected="gitPanelMode === 'git'"
             :disabled="!projectOpened"
             @click="$emit('update:gitPanelMode', 'git'); $emit('refresh-git-status')"
           >
@@ -32,8 +36,10 @@
           </button>
           <button
             type="button"
+            role="tab"
             class="file-panel-tab"
             :class="{ active: gitPanelMode === 'sessions' }"
+            :aria-selected="gitPanelMode === 'sessions'"
             @click="$emit('update:gitPanelMode', 'sessions')"
           >
             会话
@@ -56,48 +62,16 @@
         </div>
       </div>
       <div v-if="gitPanelMode === 'files'" class="file-panel-row file-panel-search-row">
-        <div class="search-mode-switch" role="group" aria-label="搜索模式">
-          <button
-            type="button"
-            class="search-mode-btn"
-            :class="{ active: searchMode === 'file' }"
-            :disabled="!projectOpened"
-            @click="$emit('update:searchMode', 'file')"
-          >
-            文件
-          </button>
-          <button
-            type="button"
-            class="search-mode-btn"
-            :class="{ active: searchMode === 'content' }"
-            :disabled="!projectOpened"
-            @click="$emit('update:searchMode', 'content')"
-          >
-            内容
-          </button>
-        </div>
-        <div class="search-input-wrap">
-          <input
-            ref="searchInputRef"
-            :value="searchQuery"
-            class="search-input"
-            :class="{ searching: searchLoading }"
-            type="text"
-            :placeholder="searchMode === 'file' ? '搜索文件名…' : '搜索代码内容…'"
-            :disabled="!projectOpened || searchLoading"
-            @input="$emit('update:searchQuery', ($event.target as HTMLInputElement).value)"
-            @keydown.enter="$emit('handle-search')"
-          />
-          <span v-if="searchLoading" class="search-spinner" aria-hidden="true" />
-          <button
-            v-else-if="searchQuery"
-            type="button"
-            class="search-clear-btn"
-            title="清除搜索"
-            @click="$emit('update:searchQuery', '')"
-          >×</button>
-        </div>
-        <p v-if="searchError" class="search-error" role="alert">{{ searchError }}</p>
+        <button
+          type="button"
+          class="quick-search-trigger"
+          :disabled="!projectOpened"
+          title="搜索文件、代码与会话 (Ctrl+P)"
+          @click="$emit('open-quick-search')"
+        >
+          <span class="quick-search-trigger-label">⌕ 快速搜索</span>
+          <kbd class="quick-search-kbd">Ctrl+P</kbd>
+        </button>
       </div>
     </div>
 
@@ -120,8 +94,20 @@
             <span class="session-action-icon">+</span>
             <span class="session-action-label">新建</span>
           </button>
-
+          <button
+            type="button"
+            class="session-action-btn"
+            title="将会话同步到本地磁盘"
+            :disabled="!projectOpened || syncingChatStore"
+            @click="$emit('sync-chat-store-to-disk')"
+          >
+            <span class="session-action-icon">↧</span>
+            <span class="session-action-label">{{ syncingChatStore ? "同步中" : "同步" }}</span>
+          </button>
         </div>
+        <p v-if="chatStoreSyncMessage" class="sessions-sync-hint" role="status" aria-live="polite">
+          {{ chatStoreSyncMessage }}
+        </p>
         <div v-if="!sessionList.length" class="panel-empty" style="padding: 24px 12px;">
           <span class="panel-empty-icon" aria-hidden="true">💬</span>
           <p class="panel-empty-title">当前项目还没有会话记录</p>
@@ -227,35 +213,27 @@ interface Props {
   gitPanelMode: "files" | "git" | "sessions";
   projectOpened: boolean;
   loadingTree?: boolean;
-  searchMode: "file" | "content";
-  searchQuery: string;
-  searchLoading?: boolean;
-  searchError?: string;
   editorCollapsed: boolean;
   gitChangeCount: number;
   gitUnstagedFiles: GitStatusFile[];
   gitStagedFiles: GitStatusFile[];
   sessionList: VibeChatSessionMeta[];
   activeSessionId: string;
-  activeSessionTitle: string;
-  sessionPickerOpen: boolean;
-  sessionPickerTitle: string;
-  chatSending: boolean;
   sessionSendingIds?: string[];
+  syncingChatStore?: boolean;
+  chatStoreSyncMessage?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   loadingTree: false,
-  searchLoading: false,
-  searchError: "",
   sessionSendingIds: () => [],
+  syncingChatStore: false,
+  chatStoreSyncMessage: "",
 });
 
 const emit = defineEmits<{
   (e: "update:gitPanelMode", mode: "files" | "git" | "sessions"): void;
-  (e: "update:searchQuery", value: string): void;
-  (e: "update:searchMode", mode: "file" | "content"): void;
-  (e: "handle-search"): void;
+  (e: "open-quick-search"): void;
   (e: "create-new-file"): void;
   (e: "create-new-folder"): void;
   (e: "expand-editor"): void;
@@ -716,6 +694,14 @@ defineExpose({ searchInputRef });
   width: 16px;
   height: 16px;
   flex-shrink: 0;
+}
+
+.session-item--syncing .session-item-title {
+  color: rgba(201, 224, 255, 0.95);
+}
+
+.session-item--syncing:not(.active) {
+  background: rgba(88, 166, 255, 0.06);
 }
 
 .session-spinner {

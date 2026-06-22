@@ -1473,6 +1473,15 @@ export function saveVibeChatHistory(
   return { ok: persistRecord(key, record), sessionId: session.id };
 }
 
+/** Read session messages without switching active session (for search / preview). */
+export function peekVibeChatSessionMessages(projectPath: string, sessionId: string): PersistedChatMessage[] {
+  const key = normalizeProjectKey(projectPath);
+  if (!key || !sessionId) return [];
+  const record = getProjectRecord(key);
+  const session = record?.sessions.find((s) => s.id === sessionId);
+  return session ? sanitizeMessages(session.messages) : [];
+}
+
 export function switchVibeChatSession(projectPath: string, sessionId: string): PersistedChatMessage[] {
   const key = normalizeProjectKey(projectPath);
   if (!key) return [];

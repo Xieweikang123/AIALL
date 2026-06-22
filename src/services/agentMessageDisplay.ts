@@ -305,6 +305,8 @@ export function isTruncatedAssistantAnswer(text: string): boolean {
   if (/…\s*$/.test(trimmed)) return true;
   // 以未闭合的代码块标记结尾
   if (/```\w*\s*$/.test(trimmed)) return true;
+  // 服务端截断标记（…已截断…字符…）
+  if (/…（已截断[）]/.test(trimmed)) return true;
   return false;
 }
 

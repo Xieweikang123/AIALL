@@ -11,7 +11,6 @@ import {
 } from "../services/vibeChatStorage";
 
 export function useSessionManager(projectPath: () => string) {
-  const sessionPickerOpen = ref(false);
   const activeSessionId = ref("");
   const sessionList = ref<VibeChatSessionMeta[]>([]);
 
@@ -34,12 +33,6 @@ export function useSessionManager(projectPath: () => string) {
     return idx < sessionList.value.length - 1;
   });
 
-  const sessionPickerTitle = computed(() => {
-    if (!projectPath()) return "请先打开项目";
-    if (sessionList.value.length) return "点击切换会话";
-    return "点击新建或查看会话";
-  });
-
   /** Read-only projection of persisted sessions. Does not mutate activeSessionId. */
   function refreshSessionList(path?: string) {
     const p = path ?? projectPath();
@@ -55,19 +48,8 @@ export function useSessionManager(projectPath: () => string) {
   }
 
   function resetSessionUi() {
-    closeSessionPicker();
     sessionList.value = [];
     activeSessionId.value = "";
-  }
-
-  function toggleSessionPicker(_chatSending?: boolean) {
-    if (!projectPath()) return;
-    sessionPickerOpen.value = !sessionPickerOpen.value;
-    if (sessionPickerOpen.value) refreshSessionList();
-  }
-
-  function closeSessionPicker() {
-    sessionPickerOpen.value = false;
   }
 
   function switchToAdjacentSession(delta: number) {
@@ -124,19 +106,15 @@ export function useSessionManager(projectPath: () => string) {
   }
 
   return {
-    sessionPickerOpen,
     activeSessionId,
     sessionList,
     activeSessionTitle,
     activeSessionIndex,
     canSwitchToNewerSession,
     canSwitchToOlderSession,
-    sessionPickerTitle,
     refreshSessionList,
     setActiveSession,
     resetSessionUi,
-    toggleSessionPicker,
-    closeSessionPicker,
     switchToAdjacentSession,
     removeSession,
     sessionLocalFileName,

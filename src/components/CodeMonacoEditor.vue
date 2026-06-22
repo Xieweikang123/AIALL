@@ -190,7 +190,27 @@ function getSelectedText(): string {
   return editor.getModel()?.getValueInRange(selection) || "";
 }
 
-defineExpose({ getSelectedText });
+function revealLine(line: number, column = 1): boolean {
+  if (!editor || line < 1) return false;
+  const model = editor.getModel();
+  if (!model) return false;
+  const safeLine = Math.min(Math.max(1, Math.floor(line)), model.getLineCount());
+  const safeColumn = Math.max(1, column);
+  editor.setPosition({ lineNumber: safeLine, column: safeColumn });
+  editor.revealLineInCenter(safeLine);
+  editor.focus();
+  return true;
+}
+
+async function revealLineWhenReady(line: number, column = 1, maxAttempts = 24): Promise<boolean> {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (revealLine(line, column)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return false;
+}
+
+defineExpose({ getSelectedText, revealLine, revealLineWhenReady });
 </script>
 
 <style scoped>

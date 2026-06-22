@@ -110,6 +110,32 @@ export function usePanelLayout(workspaceRef: Ref<HTMLElement | null>) {
     document.body.style.userSelect = "";
   }
 
+  function nudgePanelWidth(type: "file" | "chat", delta: number) {
+    if (type === "file") {
+      filePanelWidth.value = Math.min(
+        Math.max(FILE_MIN_WIDTH, filePanelWidth.value + delta),
+        FILE_MAX_WIDTH,
+      );
+    } else {
+      chatPanelWidth.value = Math.min(
+        Math.max(CHAT_MIN_WIDTH, chatPanelWidth.value + delta),
+        getChatPanelMaxWidth(),
+      );
+    }
+    savePanelWidths();
+  }
+
+  function onResizeKeydown(type: "file" | "chat", e: KeyboardEvent) {
+    const step = e.shiftKey ? 40 : 12;
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      nudgePanelWidth(type, type === "file" ? -step : step);
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      nudgePanelWidth(type, type === "file" ? step : -step);
+    }
+  }
+
   function collapseEditor() {
     editorCollapsed.value = true;
     saveEditorCollapsed();
@@ -133,6 +159,8 @@ export function usePanelLayout(workspaceRef: Ref<HTMLElement | null>) {
     chatPanelStyle,
     startResize,
     stopResize,
+    nudgePanelWidth,
+    onResizeKeydown,
     collapseEditor,
     expandEditor,
     getChatPanelMaxWidth,

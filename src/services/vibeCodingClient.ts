@@ -290,13 +290,11 @@ export async function fetchChatStoreFromDisk(projectPath: string, options?: { lo
   const controller = new AbortController();
   fetchChatStoreAbort = controller;
 
-  const t0 = performance.now();
   try {
     const loadMsg = options?.loadMessages ? "&loadMessages=1" : "";
     const url = backendUrl(`/backend/vibe/chat-store-load?projectPath=${encodeURIComponent(projectPath)}&_t=${Date.now()}${loadMsg}`);
     
     const response = await fetch(url, { signal: controller.signal });
-    console.log(`[FETCH] ${Math.round(performance.now() - t0)}ms ${projectPath.split("\\").pop()}`);
     
     if (response.status === 404) {
       return { ok: false, error: "磁盘上没有会话备份" };

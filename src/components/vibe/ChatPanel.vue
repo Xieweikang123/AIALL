@@ -13,8 +13,7 @@
     <div class="panel-head">
       <div class="panel-head-left">
         <span class="panel-label">AI 助手</span>
-        <div ref="sessionPickerRef" class="session-picker-wrap">
-          <div class="session-picker-row">
+        <div class="session-picker-row">
             <button
               v-if="sessionList.length > 1"
               type="button"
@@ -37,9 +36,14 @@
               ›
             </button>
           </div>
-        </div>
       </div>
       <div class="panel-head-right">
+        <span
+          v-if="chatStoreSyncMessage"
+          class="session-copy-hint"
+          role="status"
+          aria-live="polite"
+        >{{ chatStoreSyncMessage }}</span>
         <button
           type="button"
           class="ghost small project-memory-btn"
@@ -520,7 +524,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, withDefaults, type CSSProperties } from "vue";
+import { ref, computed, withDefaults, type CSSProperties } from "vue";
 import type { VibeChatMode } from "../../services/vibeAgentClient";
 import type { AgentSuggestion } from "../../services/agentSuggestions";
 import type { PendingMemoryProposal } from "../../services/projectMemoryProposal";
@@ -583,9 +587,6 @@ interface Props {
   sessionList: VibeChatSessionMeta[];
   activeSessionId: string;
   activeSessionTitle: string;
-  sessionPickerOpen: boolean;
-  sessionPickerTitle: string;
-  syncingChatStore: boolean;
   chatStoreSyncMessage: string;
   isDragging: boolean;
   editorCollapsed: boolean;
@@ -702,9 +703,7 @@ const emit = defineEmits<{
   (e: "start-new-session"): void;
   (e: "switch-session", sessionId: string): void;
   (e: "remove-session", sessionId: string): void;
-  (e: "toggle-session-picker"): void;
   (e: "switch-to-adjacent-session", delta: number): void;
-  (e: "sync-chat-store-to-disk"): void;
   (e: "clear-pending-queue"): void;
   (e: "apply-example", text: string): void;
   (e: "apply-suggestion", suggestion: AgentSuggestion): void;
@@ -739,48 +738,13 @@ const emit = defineEmits<{
 }>();
 
 const chatScrollRef = ref<HTMLElement | null>(null);
-const sessionPickerRef = ref<HTMLElement | null>(null);
 const chatDropZoneRef = ref<HTMLElement | null>(null);
 
-defineExpose({ sessionPickerRef, chatScrollRef });
+defineExpose({ chatScrollRef });
 
 function removeQuotedMessage(index: number) {
   const next = props.quotedMessages.filter((_, i) => i !== index);
   emit("update:quotedMessages", next);
-}
-
-function handleSessionPickerOutsideClick(e: MouseEvent) {
-  if (!props.sessionPickerOpen) return;
-  const wrap = sessionPickerRef.value;
-  if (wrap && !wrap.contains(e.target as Node)) {
-    emit("toggle-session-picker");
-  }
-}
-
-onMounted(() => {
-  document.addEventListener("mousedown", handleSessionPickerOutsideClick, true);
-});
-
-onBeforeUnmount(() => {
-  document.removeEventListener("mousedown", handleSessionPickerOutsideClick, true);
-});
-
-function formatSessionTime(timestamp: number | string): string {
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return String(timestamp);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  if (diffMs < 0) return "刚刚";
-  const sec = Math.floor(diffMs / 1000);
-  if (sec < 60) return "刚刚";
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m 前`;
-  const hour = Math.floor(min / 60);
-  if (hour < 24) return `${hour}h 前`;
-  const days = Math.floor(hour / 24);
-  if (days === 1) return "昨天";
-  if (days < 7) return `${days} 天前`;
-  return date.toLocaleDateString();
 }
 </script>
 
@@ -809,6 +773,18 @@ function formatSessionTime(timestamp: number | string): string {
   gap: 8px;
   flex-shrink: 0;
   overflow: hidden;
+}
+
+.session-copy-hint {
+  max-width: 180px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: #d29922;
+  background: rgba(210, 153, 34, 0.12);
+  border-radius: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .session-picker-wrap {
@@ -844,178 +820,6 @@ function formatSessionTime(timestamp: number | string): string {
 .session-nav-btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
-}
-
-.session-picker-trigger {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  background: none;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 6px;
-  color: rgba(255, 255, 255, 0.8);
-  cursor: pointer;
-  font-size: 12px;
-  max-width: 180px;
-}
-
-.session-picker-trigger:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.18);
-}
-
-.session-picker-trigger:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.session-picker-trigger.open {
-  border-color: rgba(88, 166, 255, 0.5);
-}
-
-.session-picker-chevron {
-  font-size: 10px;
-  color: rgba(139, 148, 158, 0.6);
-}
-
-.session-picker-dropdown {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  width: 320px;
-  max-height: 400px;
-  overflow-y: auto;
-  background: rgba(22, 27, 34, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  z-index: 1000;
-  margin-top: 4px;
-  backdrop-filter: blur(12px);
-}
-
-.session-picker-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.session-picker-head-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.8);
-}
-
-.history-sync-message {
-  padding: 6px 12px;
-  font-size: 11px;
-  color: #d29922;
-  background: rgba(210, 153, 34, 0.1);
-}
-
-.history-empty {
-  padding: 16px 12px;
-  text-align: center;
-  font-size: 12px;
-  color: rgba(139, 148, 158, 0.6);
-}
-
-.history-list {
-  list-style: none;
-  margin: 0;
-  padding: 6px 6px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.history-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 10px;
-  border-radius: 10px;
-  transition: background 0.15s;
-}
-
-.history-item:hover {
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.history-item.active {
-  background: rgba(88, 166, 255, 0.15);
-}
-
-.history-item-main {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  padding: 8px 10px;
-  background: none;
-  border: none;
-  color: rgba(255, 255, 255, 0.8);
-  cursor: pointer;
-  text-align: left;
-  min-width: 0;
-}
-
-.history-item-main:hover {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.history-item-title {
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.4;
-  color: rgba(255, 255, 255, 0.9);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  width: 100%;
-}
-
-.history-item-meta {
-  font-size: 11px;
-  color: rgba(139, 148, 158, 0.7);
-  line-height: 1.3;
-}
-
-.history-copy,
-.history-delete {
-  opacity: 0.4;
-  transition: all 0.15s ease;
-  border-radius: 6px;
-  padding: 3px;
-}
-
-.history-item:hover .history-copy,
-.history-item:hover .history-delete {
-  opacity: 0.8;
-}
-
-.history-item:hover .history-copy:hover,
-.history-item:hover .history-delete:hover {
-  opacity: 1;
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.session-picker-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.session-picker-hint {
-  font-size: 10px;
-  color: rgba(139, 148, 158, 0.5);
 }
 
 .chat-scroll {

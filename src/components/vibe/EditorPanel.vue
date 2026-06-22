@@ -245,7 +245,11 @@ function getFileName(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
-defineExpose({ editorRef });
+async function revealLineInEditor(line: number, column = 1): Promise<boolean> {
+  return editorRef.value?.revealLineWhenReady(line, column) ?? false;
+}
+
+defineExpose({ editorRef, revealLineInEditor });
 </script>
 
 <style scoped>

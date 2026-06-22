@@ -5,6 +5,7 @@
     :key="m.id"
     class="msg"
     :class="m.role"
+    :data-message-id="m.id"
     @mouseup="ctx.onMessageSelect($event, m)"
     @dblclick="ctx.onMessageDoubleClick($event, m)"
   >

@@ -88,7 +88,6 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     setActiveSession,
     removeSession: removeSessionLocal,
     resetSessionUi,
-    closeSessionPicker,
   } = session;
 
   function refreshList(path?: string) {
@@ -338,14 +337,12 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     chatMessages.value = [];
     chatError.value = "";
     refreshList(project);
-    closeSessionPicker();
     void scrollToBottom?.(true);
   }
 
   function switchSession(sessionId: string) {
     if (!projectPath().trim()) return;
     if (sessionId === activeSessionId.value) {
-      closeSessionPicker();
       return;
     }
     cancelPendingChatPersistence();
@@ -369,7 +366,6 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
         setActiveSession(sessionId);
         chatError.value = "";
         refreshList(project);
-        closeSessionPicker();
         onAfterSwitch?.();
         await scrollToBottom?.(true);
       } finally {

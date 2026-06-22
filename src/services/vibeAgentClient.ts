@@ -112,7 +112,7 @@ export type VibeAgentSseEvent =
       };
     }
   | { type: "error"; data: { message: string } }
-  | { type: "done"; data: { writtenFiles: string[]; pendingFiles: string[]; turns: number } }
+  | { type: "done"; data: { writtenFiles: string[]; pendingFiles: string[]; turns: number; truncated?: boolean } }
   | { type: "unknown"; data: unknown };
 
 function safeJsonParse(input: string): unknown | undefined {

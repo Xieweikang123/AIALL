@@ -256,7 +256,7 @@ function truncateText(text: string, max: number, suffix: string): string {
 }
 
 function truncateForSse(text: string, max = MAX_SSE_TEXT_CHARS): string {
-  return truncateText(text, max, "…（已截断，共 {n} 字符）");
+  return truncateText(text, max, "…（已截断，共 {n} 字符。自动续跑中…）");
 }
 
 function truncateToolResultForModel(text: string): string {
@@ -1557,7 +1557,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   let visionFirstTurnPending = shouldRequireVisionFirstTurn(imageDataUrls.length, false);
   let visionFirstTurnRetries = 0;
   const MAX_VISION_FIRST_TURN_RETRIES = 2;
-  const MAX_TRUNCATION_RETRIES = 3;
+  const MAX_TRUNCATION_RETRIES = 5;
   let truncationRetryCount = 0;
   let outputTruncated = false;
   const consultativeVisionRun = imageDataUrls.length > 0 && (isAsk || readOnlyBuildRun);
@@ -1930,23 +1930,46 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
             turn,
             ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
             model,
-            detail: `模型输出被截断，正在续跑（${truncationRetryCount}/${MAX_TRUNCATION_RETRIES}）…`,
+            detail: `正在继续完成任务（${truncationRetryCount}/${MAX_TRUNCATION_RETRIES}）…`,
           },
         });
         // 将已截断的内容作为 assistant 消息推入上下文，让模型继续
         const truncatedText = String(completion.message.content || "");
         if (truncatedText.trim()) {
           messages.push({ role: "assistant", content: truncatedText });
+          // 根据截断内容的上下文给出更精准的续跑提示
+          const hasToolCalls = truncatedText.includes("patch_file") || truncatedText.includes("write_file") || truncatedText.includes("read_file") || truncatedText.includes("grep") || truncatedText.includes("search_files");
+          const hasPartialCode = truncatedText.includes("```") && !truncatedText.match(/```\s*$/m);
+          let continueHint: string;
+          if (hasToolCalls && !hasPartialCode) {
+            // 工具调用已完成，但文本总结被截断 → 提示总结剩余部分
+            continueHint =
+              "你的上一次回复被截断了（达到输出 token 上限）。" +
+              "你之前的工具调用已成功执行，无需重复。请继续完成剩余的分析和总结；" +
+              "如果任务已完成，直接输出简短结论即可。";
+          } else if (hasPartialCode) {
+            // 代码块写到一半被截断 → 提示补完代码块
+            continueHint =
+              "你的上一次回复被截断了（达到输出 token 上限）。" +
+              "你正在写入代码/内容，请从截断处继续完成当前代码块，不要重新开始。";
+          } else {
+            // 纯文本回复被截断
+            continueHint =
+              "你的上一次回复被截断了（达到输出 token 上限）。" +
+              "请从被截断的地方继续，不要重复已输出的内容。" +
+              "如果任务已完成，直接输出简短结论即可。";
+          }
           messages.push({
             role: "user",
-            content:
-              "你的上一次回复被截断了（达到输出 token 上限）。请从被截断的地方继续，不要重复已输出的内容。",
+            content: continueHint,
           });
         }
         continue;
       }
       // 达到最大重试次数 → 标记输出截断，交由客户端续跑
       outputTruncated = true;
+      // 不再将截断提示追加到消息上下文（避免浪费 token / 混淆模型）；
+      // 客户端会通过 done 事件的 truncated 标志自行处理续跑和 UI 展示
     }
 
     const assistant = completion.message;

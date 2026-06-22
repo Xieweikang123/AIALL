@@ -144,7 +144,6 @@ const mergedBlocks = computed<CursorFeedProcessBlock[]>(() => {
 .cursor-actions-block,
 .cursor-action.planning {
   animation: agent-block-fade-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
-  animation-delay: calc(var(--block-index, 0) * 60ms);
 }
 
 @keyframes agent-block-fade-in {
