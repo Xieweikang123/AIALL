@@ -15,8 +15,19 @@
       <p v-else-if="block.kind === 'status'" class="cursor-action planning" :style="{ '--block-index': blockIndex }">{{ block.text }}</p>
     </template>
 
-    <!-- 当前状态（运行中、且尚无流式回答时显示） -->
-    <p v-if="isRunning && currentStatus" class="cursor-action planning">{{ currentStatus }}</p>
+    <!-- 当前状态 + 调试面板（合并为可点击的一行） -->
+    <template v-if="isRunning && currentStatus">
+      <button
+        type="button"
+        class="cursor-action planning planning-clickable"
+        :class="{ 'planning-expanded': debugExpanded }"
+        @click="emit('toggle-debug')"
+      >
+        <span class="planning-text">{{ currentStatus }}</span>
+        <span v-if="showDebug" class="planning-chevron">{{ debugExpanded ? '▾' : '▸' }}</span>
+      </button>
+      <slot v-if="debugExpanded" name="debug" />
+    </template>
 
     <!-- 最终回答：运行中流式输出，完成后展示完整 Markdown -->
     <PlanDocumentBlock
@@ -63,11 +74,14 @@ const props = defineProps<{
   currentStatus?: string;
   activityDetailed?: boolean;
   canExecutePlan?: boolean;
+  showDebug?: boolean;
+  debugExpanded?: boolean;
 }>();
 
 const emit = defineEmits<{
   "execute-plan": [];
   "select-option": [option: AiOption];
+  "toggle-debug": [];
 }>();
 
 const markdownContent = computed(() =>
@@ -185,6 +199,45 @@ const mergedBlocks = computed<CursorFeedProcessBlock[]>(() => {
 
 @keyframes planning-spin {
   to { transform: rotate(360deg); }
+}
+
+/* 可点击状态行：状态指示器 + 调试面板合并 */
+.planning-clickable {
+  width: 100%;
+  border: none;
+  outline: none;
+  font: inherit;
+  color: inherit;
+  background: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  text-align: left;
+  padding: 4px 10px;
+}
+
+.planning-clickable:hover {
+  background: rgba(139, 148, 158, 0.1);
+}
+
+.planning-clickable.planning-expanded {
+  border-radius: 6px 6px 0 0;
+}
+
+.planning-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.planning-chevron {
+  flex-shrink: 0;
+  font-size: 10px;
+  opacity: 0.45;
+  transition: opacity 0.15s ease;
+  margin-left: 4px;
+}
+
+.planning-clickable:hover .planning-chevron {
+  opacity: 0.7;
 }
 
 .cursor-merged-answer {

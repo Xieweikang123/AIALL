@@ -1250,7 +1250,9 @@ const recoverableAssistantMsg = computed(() => {
   if (chatSending.value) return null;
   for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
     const m = chatMessages.value[i]!;
-    if (m.role === "assistant" && canResumeAgentRun(m)) return m;
+    if (m.role !== "assistant") continue;
+    if (canResumeAgentRun(m)) return m;
+    break;
   }
   return null;
 });

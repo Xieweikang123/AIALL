@@ -406,7 +406,7 @@
         </div>
 
         <div v-if="projectMemoryTab === 'memory'" class="project-memory-pane">
-          <div v-if="projectMemoryLoading" class="project-memory-status">加载中…</div>
+          <div v-if="projectMemoryLoading" class="project-memory-status shimmer-text--fast">加载中…</div>
           <textarea
             v-else
             class="project-memory-editor"
@@ -418,7 +418,7 @@
         </div>
 
         <div v-else-if="projectMemoryTab === 'skills'" class="project-memory-split-pane">
-          <div v-if="projectSkillsLoading" class="project-memory-status">加载中…</div>
+          <div v-if="projectSkillsLoading" class="project-memory-status shimmer-text--fast">加载中…</div>
           <template v-else>
             <ul v-if="projectSkillsList.length" class="project-memory-list">
               <li
@@ -435,7 +435,7 @@
             </ul>
             <div v-else class="project-memory-status">暂无 Skill</div>
             <div class="project-memory-detail">
-              <div v-if="skillDetailLoading" class="project-memory-status">加载中…</div>
+              <div v-if="skillDetailLoading" class="project-memory-status shimmer-text--fast">加载中…</div>
               <template v-else-if="selectedSkillSlug">
                 <div class="project-memory-detail-head">
                   <strong>{{ skillDraftTitle }}</strong>
@@ -453,7 +453,7 @@
         </div>
 
         <div v-else class="project-memory-split-pane">
-          <div v-if="projectSkillsLoading" class="project-memory-status">加载中…</div>
+          <div v-if="projectSkillsLoading" class="project-memory-status shimmer-text--fast">加载中…</div>
           <template v-else>
             <ul v-if="projectExplorationList.length" class="project-memory-list">
               <li
@@ -476,7 +476,7 @@
             </ul>
             <div v-else class="project-memory-status">暂无探索归档</div>
             <div class="project-memory-detail">
-              <div v-if="explorationDetailLoading" class="project-memory-status">加载中…</div>
+              <div v-if="explorationDetailLoading" class="project-memory-status shimmer-text--fast">加载中…</div>
               <pre v-else-if="selectedExplorationId" class="project-memory-readonly">{{
                 explorationContent
               }}</pre>

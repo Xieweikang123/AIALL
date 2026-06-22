@@ -566,6 +566,33 @@ button:active:not(:disabled) {
   animation: pulse 1.4s ease-out infinite;
 }
 
+.shimmer-text {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.5) 0%,
+    rgba(255, 255, 255, 0.9) 50%,
+    rgba(255, 255, 255, 0.5) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 2.5s ease-in-out infinite;
+}
+
+.shimmer-text--fast {
+  animation-duration: 1.5s;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.msg-status-text {
+  @extend .shimmer-text;
+}
+
 @keyframes pulse {
   0% { box-shadow: 0 0 0 0 rgba(31, 111, 235, 0.55); }
   70% { box-shadow: 0 0 0 8px rgba(31, 111, 235, 0); }

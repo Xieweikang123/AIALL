@@ -20,7 +20,7 @@
         @keydown.enter="$emit('open-project-by-input')"
       />
       <button type="button" class="primary compact" :disabled="pickingFolder || loadingTree" @click="$emit('handle-open-project')">
-        {{ pickingFolder ? "选择…" : loadingTree ? "加载中" : "打开项目" }}
+        {{ pickingFolder ? "选择…" : loadingTree ? "" : "打开项目" }}<span v-if="loadingTree" class="shimmer-text--fast">加载中</span>
       </button>
       <button type="button" class="icon-btn" :disabled="!projectPath.trim()" @click="$emit('refresh-tree')" title="刷新文件树">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M13.65 2.35A7.96 7.96 0 0 0 8 0a8 8 0 1 0 8 8h-2A6 6 0 1 1 8 2c1.66 0 3.14.69 4.22 1.78L9 7h7V0l-2.35 2.35Z" fill="currentColor"/></svg>

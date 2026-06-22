@@ -73,7 +73,7 @@
         <div class="composer-bottom">
           <div class="hint">
             <span v-if="state.phase === 'fail'" class="hint-error">失败：{{ state.message }}</span>
-            <span v-else-if="state.phase === 'running'" class="hint-running">处理中：{{ state.message }}</span>
+            <span v-else-if="state.phase === 'running'" class="hint-running"><span class="shimmer-text--fast">处理中</span>：{{ state.message }}</span>
             <span v-else class="hint-muted">快捷键：Ctrl/⌘ + Enter 发送，Shift + Enter 换行</span>
           </div>
           <div class="actions">
@@ -81,7 +81,7 @@
               复制最后回复
             </button>
             <button type="button" class="primary" :disabled="sending || !canSend" @click="handleSend">
-              {{ sending ? "处理中..." : "发送" }}
+              {{ sending ? "" : "发送" }}<span v-if="sending" class="shimmer-text--fast">处理中...</span>
             </button>
           </div>
         </div>

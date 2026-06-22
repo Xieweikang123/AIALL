@@ -1,9 +1,8 @@
 <template>
-  <details
+  <div
     v-if="showDebug"
     class="cursor-debug-panel"
   >
-    <summary>调试详情</summary>
     <div class="cursor-debug-body">
       <section
         v-for="group in groups"
@@ -68,7 +67,7 @@
         <pre class="trace-pre compact">{{ agentContext.systemPrompt }}</pre>
       </details>
     </div>
-  </details>
+  </div>
 </template>
 
 <script setup lang="ts">

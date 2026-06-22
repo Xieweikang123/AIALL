@@ -185,8 +185,9 @@ export function useAgentMessage(
   }
 
   function toggleActivityDetailed(m: AgentMessage) {
-    m.activityDetailed = true;
-    patchAssistantMsg(m.id, { activityDetailed: true });
+    const next = !isActivityDetailed(m);
+    m.activityDetailed = next;
+    patchAssistantMsg(m.id, { activityDetailed: next });
     schedulePersistChat();
   }
 

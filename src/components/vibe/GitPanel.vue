@@ -111,7 +111,7 @@
             </div>
           </div>
         </div>
-        <div v-else-if="gitStashAction === 'list'" class="git-stash-empty">加载中…</div>
+        <div v-else-if="gitStashAction === 'list'" class="git-stash-empty shimmer-text--fast">加载中…</div>
         <div v-else class="git-stash-empty">暂无贮藏</div>
       </div>
 
@@ -263,7 +263,7 @@
       <button type="button" class="secondary small" @click="$emit('refresh')">重试</button>
     </div>
     <div v-else-if="gitStatusKnown" class="panel-empty">当前目录不是 Git 仓库</div>
-    <div v-else class="panel-empty">加载中…</div>
+    <div v-else class="panel-empty shimmer-text--fast">加载中…</div>
   </div>
 </template>
 

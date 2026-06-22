@@ -18,16 +18,20 @@
         :current-status="currentAgentStatus(msg)"
         :activity-detailed="isActivityDetailed(msg)"
         :can-execute-plan="canExecutePlan"
+        :show-debug="showDebug"
+        :debug-expanded="showDebug && isActivityDetailed(msg)"
         @execute-plan="emit('execute-plan')"
         @select-option="(option) => emit('select-option', option)"
-      />
-
-      <!-- 调试面板 -->
-      <AgentDebugPanel
-        :groups="agentRoundGroupViews(msg)"
-        :agent-context="msg.agentContext"
-        :show-debug="showDebug"
-      />
+        @toggle-debug="toggleActivityDetailed(msg)"
+      >
+        <template #debug>
+          <AgentDebugPanel
+            :groups="agentRoundGroupViews(msg)"
+            :agent-context="msg.agentContext"
+            :show-debug="showDebug"
+          />
+        </template>
+      </AgentMergedContent>
 
       <!-- 收起按钮 -->
       <button
