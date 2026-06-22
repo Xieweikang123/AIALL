@@ -242,6 +242,7 @@ const emit = defineEmits<{
   (e: "remove-session", sessionId: string): void;
   (e: "start-new-session"): void;
   (e: "copy-session-info", session: VibeChatSessionMeta): void;
+  (e: "sync-chat-store-to-disk"): void;
 }>();
 
 const sessionCount = computed(() => props.sessionList.length);
@@ -258,10 +259,6 @@ const groupedSessions = computed<SessionGroup[]>(() => {
     .filter((label) => map.get(label)!.length > 0)
     .map((label) => ({ label, items: map.get(label)! }));
 });
-
-const searchInputRef = ref<HTMLInputElement | null>(null);
-
-defineExpose({ searchInputRef });
 </script>
 
 <style scoped>
@@ -403,122 +400,52 @@ defineExpose({ searchInputRef });
 .file-panel-search-row {
   padding: 6px 8px;
   border-top: 1px solid var(--border-color, #333);
-  flex-direction: column;
-  align-items: stretch;
 }
 
-.search-mode-switch {
-  display: flex;
-  gap: 2px;
-  margin-bottom: 6px;
-  padding: 2px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.search-mode-btn {
-  flex: 0 0 auto;
-  padding: 4px 12px;
-  font-size: 11px;
-  font-weight: 500;
-  white-space: nowrap;
-  border: none;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.5);
-  cursor: pointer;
-  border-radius: 4px;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-
-.search-mode-btn:hover:not(:disabled) {
-  color: rgba(255, 255, 255, 0.85);
-}
-
-.search-mode-btn.active {
-  background: rgba(88, 166, 255, 0.2);
-  color: #58a6ff;
-}
-
-.search-mode-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.search-input-wrap {
-  position: relative;
+.quick-search-trigger {
   width: 100%;
-}
-
-.search-input {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 7px 10px;
-  padding-right: 28px;
-  font-size: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.2);
-  color: var(--text-primary, #fff);
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-.search-input:focus {
-  outline: none;
-  border-color: rgba(88, 166, 255, 0.45);
-  background: rgba(0, 0, 0, 0.28);
-}
-
-.search-input:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.search-clear-btn {
-  position: absolute;
-  right: 4px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 18px;
-  height: 18px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  border: none;
-  background: none;
-  color: var(--text-secondary, #999);
-  font-size: 14px;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 12px;
   cursor: pointer;
-  border-radius: 3px;
+  transition: background 0.15s, border-color 0.15s;
 }
 
-.search-clear-btn:hover {
-  background: var(--bg-tertiary, #333);
-  color: var(--text-primary, #fff);
+.quick-search-trigger:hover:not(:disabled) {
+  background: rgba(88, 166, 255, 0.1);
+  border-color: rgba(88, 166, 255, 0.35);
 }
 
-.search-spinner {
-  position: absolute;
-  right: 6px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 14px;
-  height: 14px;
-  border: 2px solid rgba(255, 255, 255, 0.12);
-  border-top-color: var(--accent-color, #58a6ff);
-  border-radius: 50%;
-  animation: file-search-spin 0.7s linear infinite;
+.quick-search-trigger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
-@keyframes file-search-spin {
-  to { transform: translateY(-50%) rotate(360deg); }
+.quick-search-trigger-label {
+  font-weight: 500;
 }
 
-.search-error {
-  margin: 4px 0 0;
-  padding: 0 2px;
+.quick-search-kbd {
+  font-size: 10px;
+  font-family: ui-monospace, monospace;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(139, 148, 158, 0.9);
+}
+
+.sessions-sync-hint {
+  margin: 0;
+  padding: 6px 12px 0;
   font-size: 11px;
-  color: #f85149;
-  line-height: 1.4;
+  color: #d29922;
 }
 
 /* --- Sessions Panel --- */
@@ -564,7 +491,10 @@ defineExpose({ searchInputRef });
   background: rgba(255, 255, 255, 0.18);
 }
 
-
+.session-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 
 .session-action-icon {
   font-size: 13px;

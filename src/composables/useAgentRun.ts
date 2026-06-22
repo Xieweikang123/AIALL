@@ -213,6 +213,14 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     else persistAgentRunSession(sessionId);
   }
 
+  /** 续跑、排队或倒计时恢复期间不弹「已完成」通知，仅在真正收尾时通知。 */
+  function shouldSuppressAgentCompleteNotification(silent: boolean): boolean {
+    if (silent) return true;
+    if (pendingPromptQueue.value.length > 0) return true;
+    if (autoResumeSchedulePending || autoResumeTargetId.value) return true;
+    return false;
+  }
+
   function finishRunSession(sessionId: string, silent = false) {
     const run = runManager.get(sessionId);
     if (run?.assistantMsg.role === "assistant") {
@@ -232,7 +240,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       );
     }
     persistAgentRunSession(sessionId);
-    endAgentRunSession(sessionId, silent);
+    endAgentRunSession(sessionId, shouldSuppressAgentCompleteNotification(silent));
     runManager.remove(sessionId);
     if (runManager.size() === 0) {
       agentLastProgressAt = 0;
@@ -252,6 +260,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   let agentUiTickTimer: ReturnType<typeof setInterval> | null = null;
   let autoResumeTimer: ReturnType<typeof setInterval> | null = null;
   let agentLastProgressAt = 0;
+  let autoResumeSchedulePending = false;
 
   const autoResumeSecondsLeft = ref(0);
   const autoResumeTargetId = ref("");
@@ -959,6 +968,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   }
 
   function cancelAutoResume() {
+    autoResumeSchedulePending = false;
     if (autoResumeTimer) {
       clearInterval(autoResumeTimer);
       autoResumeTimer = null;
@@ -990,7 +1000,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     cancelAutoResume();
     if (!assistantMsgId || !configReady.value || !projectOpened.value) return;
 
+    autoResumeSchedulePending = true;
+
     const run = () => {
+      autoResumeSchedulePending = false;
       if (!assistantMsgId || chatSending.value || !configReady.value || !projectOpened.value) return;
       startAutoResumeCountdown(assistantMsgId, errorMessage);
     };
@@ -1127,6 +1140,13 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     clearStreamDeltaBuffer();
     runManager.abort(sessionId);
     runManager.setAbortHandle(sessionId, null);
+
+    if (trySilentContinue(sessionId, assistantMsg, reason)) {
+      maybePersistChat(sessionId);
+      maybeScrollChat(sessionId);
+      return;
+    }
+
     finishRunSession(sessionId);
     handleRecoverableInterruption(sessionId, assistantMsg, reason);
     if (projectPath.value.trim()) updateAgentRunSessionStatus(sessionId, "failed");
@@ -1503,7 +1523,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       if (event.data.truncated && !wasAborted && !assistantMsg.agentFailed) {
         const continueCount = assistantMsg.agentContinueCount ?? 0;
         const maxContinues = AGENT_SILENT_CONTINUE_MAX;
-        const truncatedNotice = `模型输出较长，正在自动续跑以补全内容（第 ${continueCount + 1}/${maxContinues} 次）…`;
+        const truncatedNotice = `回复内容较长，正在自动补充完成（第 ${continueCount + 1}/${maxContinues} 次）…`;
         if (trySilentContinue(sessionId, assistantMsg, truncatedNotice)) {
           if (!assistantMsg.totalTurns) {
             assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
@@ -1642,9 +1662,14 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       }
 
       assistantMsg.totalTurns = completedTurns;
+      const continueCount = assistantMsg.agentContinueCount ?? 0;
       appendStatusLog(
         assistantMsg,
-        wasAborted ? `已停止（共 ${completedTurns} 轮）` : `完成（共 ${completedTurns} 轮）`,
+        wasAborted
+          ? `已停止（共 ${completedTurns} 轮）`
+          : continueCount > 0
+            ? `✅ 完成（共 ${completedTurns} 轮，含 ${continueCount} 次自动续跑）`
+            : `完成（共 ${completedTurns} 轮）`,
       );
 
       if (!wasAborted && hadProgress && !hasAgentFinalAnswer(assistantMsg)) {
@@ -2054,7 +2079,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
       if (!rawPrompt && !hasImagesForRequest) {
         if (canBootstrapEarly) {
-          endAgentRunSession(sessionId);
+          endAgentRunSession(sessionId, true);
           rollbackTurnPlaceholders(options?.skipUserBubble);
           persistChatNow();
         }

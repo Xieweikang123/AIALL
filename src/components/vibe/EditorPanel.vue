@@ -91,9 +91,15 @@
       @save="$emit('save-file')"
       @select="$emit('editor-select', $event)"
     />
-    <div v-if="selectedCode" class="ask-ai-floating" @click="$emit('ask-ai-with-code')">
+    <button
+      v-if="selectedCode"
+      type="button"
+      class="ask-ai-floating"
+      title="将选中代码发送给 AI"
+      @click="$emit('ask-ai-with-code')"
+    >
       💬 问 AI
-    </div>
+    </button>
   </section>
 </template>
 
@@ -478,6 +484,7 @@ defineExpose({ editorRef, revealLineInEditor });
   padding: 8px 16px;
   background: var(--accent-color, #58a6ff);
   color: white;
+  border: none;
   border-radius: 8px;
   cursor: pointer;
   font-size: 13px;

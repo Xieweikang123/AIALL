@@ -37,7 +37,7 @@ const MAX_FILES = 8;
 const MAX_CONTENT = 8;
 const MAX_SESSION_TITLES = 6;
 const MAX_SESSION_MESSAGES = 10;
-const MAX_DISK_SESSION_FETCH = 6;
+const MAX_DISK_SESSION_FETCH = 12;
 
 const TOOL_LOG_TAIL_RE = /\n*(?:\[工具摘要\]|<!--\s*agent-tool-log\s*-->)\s*[\s\S]*$/u;
 

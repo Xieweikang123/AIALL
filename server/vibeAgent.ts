@@ -256,7 +256,7 @@ function truncateText(text: string, max: number, suffix: string): string {
 }
 
 function truncateForSse(text: string, max = MAX_SSE_TEXT_CHARS): string {
-  return truncateText(text, max, "…（已截断，共 {n} 字符。自动续跑中…）");
+  return truncateText(text, max, "…（内容较长，已自动续跑中…）");
 }
 
 function truncateToolResultForModel(text: string): string {
@@ -1930,7 +1930,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
             turn,
             ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
             model,
-            detail: `正在继续完成任务（${truncationRetryCount}/${MAX_TRUNCATION_RETRIES}）…`,
+            detail: `内容较长，正在自动补充完成（第 ${truncationRetryCount}/${MAX_TRUNCATION_RETRIES} 次）…`,
           },
         });
         // 将已截断的内容作为 assistant 消息推入上下文，让模型继续
@@ -1944,18 +1944,17 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
           if (hasToolCalls && !hasPartialCode) {
             // 工具调用已完成，但文本总结被截断 → 提示总结剩余部分
             continueHint =
-              "你的上一次回复被截断了（达到输出 token 上限）。" +
-              "你之前的工具调用已成功执行，无需重复。请继续完成剩余的分析和总结；" +
-              "如果任务已完成，直接输出简短结论即可。";
+              "你的上一次回复因内容较多被截断，之前的工具调用已成功执行，无需重复。" +
+              "请继续完成剩余的分析和总结；如果任务已完成，直接输出简短结论即可。";
           } else if (hasPartialCode) {
             // 代码块写到一半被截断 → 提示补完代码块
             continueHint =
-              "你的上一次回复被截断了（达到输出 token 上限）。" +
-              "你正在写入代码/内容，请从截断处继续完成当前代码块，不要重新开始。";
+              "你的上一次回复因内容较多被截断，你正在写入代码/内容。" +
+              "请从截断处继续完成当前代码块，不要重新开始。";
           } else {
             // 纯文本回复被截断
             continueHint =
-              "你的上一次回复被截断了（达到输出 token 上限）。" +
+              "你的上一次回复因内容较多被截断。" +
               "请从被截断的地方继续，不要重复已输出的内容。" +
               "如果任务已完成，直接输出简短结论即可。";
           }

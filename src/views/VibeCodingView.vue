@@ -39,10 +39,6 @@
         :loading-tree="loadingTree"
         :git-panel-mode="gitPanelMode"
         :project-opened="projectOpened"
-        :search-mode="searchMode"
-        :search-query="searchQuery"
-        :search-loading="searchLoading"
-        :search-error="searchError"
         :editor-collapsed="editorCollapsed"
         :git-change-count="gitChangeCount"
         :git-unstaged-files="gitUnstagedFiles"
@@ -50,10 +46,10 @@
         :session-list="sessionList"
         :active-session-id="activeSessionId"
         :session-sending-ids="sendingSessionIdList"
+        :syncing-chat-store="syncingChatStore"
+        :chat-store-sync-message="chatStoreSyncMessage"
         @update:git-panel-mode="gitPanelMode = $event"
-        @update:search-query="searchQuery = $event"
-        @update:search-mode="searchMode = $event"
-        @handle-search="handleSearch"
+        @open-quick-search="openQuickSearch"
         @create-new-file="createNewFile"
         @create-new-folder="createNewFolder"
         @expand-editor="expandEditor"
@@ -62,6 +58,7 @@
         @remove-session="removeSession"
         @start-new-session="handleStartNewSession"
         @copy-session-info="copySessionInfo"
+        @sync-chat-store-to-disk="syncChatStoreToDisk"
       >
 
         <GitPanel
@@ -133,40 +130,6 @@
           <p class="panel-empty-hint">点击欢迎页或顶部「打开项目」选择文件夹</p>
         </div>
 
-        <div v-else-if="gitPanelMode === 'files' && searchMode === 'content' && contentSearchResults.length" class="file-list">
-          <button
-            v-for="item in contentSearchResults"
-            :key="`${item.path}:${item.line}`"
-            type="button"
-            class="file-item content-result"
-            :class="{ active: item.path === activeFilePath }"
-            @click="openFile(item.path)"
-          >
-            <span class="file-icon">📄</span>
-            <span class="file-result-body">
-              <span class="file-name">{{ item.relative }}:{{ item.line }}</span>
-              <span class="file-result-text">{{ item.text }}</span>
-            </span>
-          </button>
-        </div>
-
-        <div v-else-if="gitPanelMode === 'files' && searchMode === 'file' && searchResults.length" class="file-list">
-          <div
-            v-for="item in searchResults"
-            :key="item.path"
-            role="button"
-            tabindex="0"
-            class="file-item"
-            :class="{ active: item.path === activeFilePath, 'file-item-draggable': !item.isDirectory }"
-            @keydown.enter="openFile(item.path)"
-            @keydown.space.prevent="openFile(item.path)"
-            @pointerdown="onSearchResultPointerDown($event, item)"
-          >
-            <span class="file-icon">{{ item.isDirectory ? "📁" : "📄" }}</span>
-            <span class="file-name">{{ item.name }}</span>
-          </div>
-        </div>
-
         <div v-else-if="gitPanelMode === 'files'" class="file-tree">
           <FileTreeNode
             v-for="node in fileTree"
@@ -190,7 +153,15 @@
         </div>
       </FilePanel>
 
-      <div class="resize-handle" @mousedown="startResize('file', $event)"></div>
+      <div
+        class="resize-handle"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整文件面板宽度"
+        tabindex="0"
+        @mousedown="startResize('file', $event)"
+        @keydown="onResizeKeydown('file', $event)"
+      ></div>
 
       <EditorPanel
         ref="editorPanelRef"
@@ -222,7 +193,12 @@
       <div
         v-show="!editorCollapsed"
         class="resize-handle"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整聊天面板宽度"
+        tabindex="0"
         @mousedown="startResize('chat', $event)"
+        @keydown="onResizeKeydown('chat', $event)"
       ></div>
 
       <ChatPanel
@@ -434,6 +410,8 @@ import { useEditorPanel } from "../composables/useEditorPanel";
 import { useSessionManager } from "../composables/useSessionManager";
 import { useChatSessionStore } from "../composables/useChatSessionStore";
 import { useSessionMessageCache } from "../composables/useSessionMessageCache";
+import { useVibeQuickSearch } from "../composables/useVibeQuickSearch";
+import { useVibeGlobalShortcuts } from "../composables/useVibeGlobalShortcuts";
 import { useProjectMemory } from "../composables/useProjectMemory";
 import { distillExplorationRun } from "../services/explorationDistill";
 import { useAgentRun, type ChatMessage } from "../composables/useAgentRun";
@@ -525,7 +503,6 @@ import {
 import {
   createItem,
   deleteItem,
-  grepContent,
   listDirectory,
   pickProjectFolder,
   readFile,
@@ -534,7 +511,6 @@ import {
   formatFetchError,
   writeFile,
   type FileEntry,
-  type GrepMatch,
 } from "../services/vibeCodingClient";
 import {
   fetchGitDiffContent,
@@ -574,7 +550,6 @@ const CHAT_MODE_KEY = "vibe-coding-chat-mode";
 
 // 站内通知横幅已移除：仅使用 Tauri 原生通知（invoke('send_notification')）
 const PENDING_QUEUE_KEY = "vibe-coding-pending-queue";
-const GIT_PANEL_MODE_KEY = "vibe-coding-git-panel-mode";
 type ChatRole = "user" | "assistant";
 type FileDiff = TurnFileDiff;
 
@@ -720,7 +695,6 @@ async function autoRetryWithCountdown<T>(
   }
   throw lastErr;
 }
-type SearchMode = "file" | "content";
 
 interface QuotedMessage {
   messageId: string;
@@ -734,12 +708,8 @@ const quoteButtonPosition = ref({ x: 0, y: 0 });
 const showQuoteButton = ref(false);
 const quoteButtonRef = ref<HTMLElement | null>(null);
 const openingProject = ref(false);
-const searchQuery = ref("");
-const searchLoading = ref(false);
-const searchError = ref("");
-const searchMode = ref<SearchMode>("file");
-const searchResults = ref<Array<{ name: string; path: string; isDirectory: boolean }>>([]);
-const contentSearchResults = ref<GrepMatch[]>([]);
+const composerRef = ref<InstanceType<typeof ChatComposerEditor> | null>(null);
+const composerEmpty = ref(true);
 
 function loadChatMode(): VibeChatMode {
   try {
@@ -812,7 +782,7 @@ function sendAgentCompleteNotification(sessionName: string) {
   tryTauriNotification(title, body);
 }
 
-// 始终弹通知（无论页面是否可见）
+// Agent 真正收尾时弹通知（续跑/排队期间由 finishRunSession 抑制）
 function notifyAgentDoneIfNeeded(sessionId: string) {
   const project = projectPath.value.trim();
   const name = (project ? getSessionTitle(project, sessionId) : undefined) || sessionId;
@@ -843,7 +813,6 @@ function persistAgentRunSession(sessionId: string) {
 }
 const switchingProject = ref(false);
 const chatError = ref("");
-const quickSearchOpen = ref(false);
 const editorPanelRef = ref<InstanceType<typeof EditorPanel> | null>(null);
 const workspaceRef = ref<HTMLElement | null>(null);
 let scrollChatRaf = 0;
@@ -871,8 +840,6 @@ interface ProjectFileItem {
   relative: string;
 }
 
-const composerRef = ref<InstanceType<typeof ChatComposerEditor> | null>(null);
-const composerEmpty = ref(true);
 const dismissedSuggestionMsgId = ref<string | null>(null);
 const chatDropZoneRef = ref<HTMLElement | null>(null);
 const chatInputFocused = ref(false);
@@ -949,6 +916,7 @@ const chatSession = useChatSessionStore({
 
 const {
   switchingSession,
+  syncingChatStore,
   chatStoreSyncMessage,
   persistChatNow,
   schedulePersistChat,
@@ -956,6 +924,7 @@ const {
   startNewSession,
   switchSession,
   removeSession,
+  syncChatStoreToDisk,
   loadProjectChatState,
   resetUiForProjectSwitch,
   clearProjectChat,
@@ -1203,6 +1172,7 @@ const {
   chatPanelStyle,
   startResize,
   stopResize,
+  onResizeKeydown,
   collapseEditor,
   expandEditor,
   getChatPanelMaxWidth,
@@ -1295,6 +1265,30 @@ const {
   collapseEditor,
   expandEditor,
   autoRetryWithCountdown,
+});
+
+const {
+  quickSearchOpen,
+  openQuickSearch,
+  getLiveSessionMessagesForSearch,
+  onQuickSearchOpenFile,
+  onQuickSearchOpenSession,
+} = useVibeQuickSearch({
+  activeSessionId,
+  chatMessages,
+  switchingSession,
+  sessionMessageCache,
+  switchSession,
+  openFile,
+  chatPanelRef,
+  editorPanelRef,
+});
+
+useVibeGlobalShortcuts({
+  openQuickSearch,
+  saveFile: () => { void saveFile(); },
+  switchToAdjacentSession,
+  startNewSession,
 });
 
 async function applyChatMessageImageHydration(messages: PersistedChatMessage[]): Promise<ChatMessage[]> {
@@ -1880,9 +1874,6 @@ async function openProjectByPath(dirPath: string) {
 
   loadingTree.value = true;
   treeError.value = "";
-  searchQuery.value = "";
-  searchResults.value = [];
-  contentSearchResults.value = [];
   openTabs.value = [];
   activeFilePath.value = "";
   fileContent.value = "";
@@ -2038,57 +2029,6 @@ function contextMenuDelete() {
   hideContextMenu();
   void deleteSelectedItem();
 }
-
-async function handleSearch() {
-  const q = searchQuery.value.trim();
-  if (!q || !projectPath.value.trim()) {
-    searchResults.value = [];
-    contentSearchResults.value = [];
-    searchError.value = "";
-    searchLoading.value = false;
-    return;
-  }
-
-  searchLoading.value = true;
-  searchError.value = "";
-
-  try {
-    if (searchMode.value === "content") {
-      const result = await grepContent(projectPath.value.trim(), q);
-      contentSearchResults.value = result.ok ? result.results : [];
-      searchResults.value = [];
-      if (!result.ok && result.error) searchError.value = result.error;
-      return;
-    }
-
-    const result = await searchFiles(projectPath.value.trim(), q);
-    searchResults.value = result.ok ? result.results : [];
-    contentSearchResults.value = [];
-    if (!result.ok && result.error) searchError.value = result.error;
-  } finally {
-    searchLoading.value = false;
-  }
-}
-
-let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-watch(searchQuery, (val) => {
-  if (!val.trim()) {
-    searchResults.value = [];
-    contentSearchResults.value = [];
-    searchError.value = "";
-    searchLoading.value = false;
-    return;
-  }
-  if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-  searchDebounceTimer = setTimeout(() => {
-    void handleSearch();
-  }, 300);
-});
-
-watch(searchMode, () => {
-  if (searchQuery.value.trim()) void handleSearch();
-});
 
 function shouldIgnoreQuoteSelectEvent(event: MouseEvent): boolean {
   if (event.detail <= 1 && Date.now() - quoteHiddenAt < 150) return true;
@@ -2283,16 +2223,6 @@ function onComposerFieldKeydown(e: KeyboardEvent) {
     e.preventDefault();
     mentionOpen.value = false;
   }
-}
-
-function onSearchResultPointerDown(
-  e: PointerEvent,
-  item: { path: string; name: string; isDirectory: boolean },
-) {
-  if (item.isDirectory) return;
-  startPathDrag(item.path, item.name, e, () => {
-    void openFile(item.path);
-  }, chatDropZoneRef.value);
 }
 
 function onGitFilePointerDown(e: PointerEvent, relativePath: string, staged = false) {
@@ -2802,92 +2732,6 @@ function onWindowFocus() {
   reloadAiConfig();
 }
 
-function getLiveSessionMessagesForSearch(sessionId: string): PersistedChatMessage[] | undefined {
-  if (sessionId === activeSessionId.value && chatMessages.value.length) {
-    return chatMessages.value;
-  }
-  const cached = sessionMessageCache.get(sessionId);
-  return cached?.length ? cached : undefined;
-}
-
-async function scrollChatToMessage(messageId: string) {
-  if (!messageId.trim()) return;
-  await nextTick();
-  await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-  const host = chatPanelRef.value?.chatScrollRef;
-  if (!host) return;
-  const escaped = typeof CSS !== "undefined" && "escape" in CSS ? CSS.escape(messageId) : messageId.replace(/"/g, '\\"');
-  const el = host.querySelector(`[data-message-id="${escaped}"]`);
-  if (!(el instanceof HTMLElement)) return;
-  el.scrollIntoView({ block: "center", behavior: "smooth" });
-  el.classList.add("msg--search-highlight");
-  window.setTimeout(() => {
-    el.classList.remove("msg--search-highlight");
-  }, 2200);
-}
-
-function waitUntilSwitchingSessionDone(): Promise<void> {
-  if (!switchingSession.value) return Promise.resolve();
-  return new Promise((resolve) => {
-    const stop = watch(switchingSession, (busy) => {
-      if (!busy) {
-        stop();
-        resolve();
-      }
-    });
-  });
-}
-
-async function onQuickSearchOpenFile(payload: { path: string; line?: number }) {
-  await openFile(payload.path);
-  if (payload.line && payload.line > 0) {
-    await nextTick();
-    await editorPanelRef.value?.revealLineInEditor(payload.line);
-  }
-}
-
-async function onQuickSearchOpenSession(payload: { sessionId: string; messageId?: string }) {
-  if (payload.sessionId && payload.sessionId !== activeSessionId.value) {
-    switchSession(payload.sessionId);
-    await waitUntilSwitchingSessionDone();
-  }
-  if (payload.messageId) {
-    await scrollChatToMessage(payload.messageId);
-  }
-}
-
-function openQuickSearch() {
-  quickSearchOpen.value = true;
-}
-
-function onGlobalKeydown(e: KeyboardEvent) {
-  if ((e.ctrlKey || e.metaKey) && e.key === "p") {
-    e.preventDefault();
-    openQuickSearch();
-    return;
-  }
-  if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-    e.preventDefault();
-    void saveFile();
-    return;
-  }
-  if ((e.ctrlKey || e.metaKey) && e.altKey && e.key === "ArrowUp") {
-    e.preventDefault();
-    switchToAdjacentSession(-1);
-    return;
-  }
-  if ((e.ctrlKey || e.metaKey) && e.altKey && e.key === "ArrowDown") {
-    e.preventDefault();
-    switchToAdjacentSession(1);
-    return;
-  }
-  if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "n" || e.key === "N")) {
-    e.preventDefault();
-    startNewSession();
-    return;
-  }
-}
-
 watch(chatMode, (mode) => {
   try {
     localStorage.setItem(CHAT_MODE_KEY, mode);
@@ -2948,10 +2792,6 @@ watch(
   },
 );
 
-watch(gitPanelMode, (mode) => {
-  localStorage.setItem(GIT_PANEL_MODE_KEY, mode);
-});
-
 provide(vibeChatMessageContextKey, {
   chatMessages,
   chatSending,
@@ -3005,7 +2845,6 @@ onMounted(() => {
   window.addEventListener("focus", onWindowFocus);
   window.addEventListener("dragend", onWindowDragEnd);
   document.addEventListener("mousedown", onDocumentClick, true);
-  document.addEventListener("keydown", onGlobalKeydown);
   document.addEventListener("selectionchange", onSelectionChange);
   document.addEventListener("dragover", onDocumentDragOverCapture, true);
   document.addEventListener("drop", onDocumentDropCapture, true);
@@ -3037,7 +2876,6 @@ onBeforeUnmount(() => {
   window.removeEventListener("focus", onWindowFocus);
   window.removeEventListener("dragend", onWindowDragEnd);
   document.removeEventListener("mousedown", onDocumentClick, true);
-  document.removeEventListener("keydown", onGlobalKeydown);
   document.removeEventListener("selectionchange", onSelectionChange);
   if (selectionChangeTimer) clearTimeout(selectionChangeTimer);
   document.removeEventListener("dragover", onDocumentDragOverCapture, true);
@@ -3051,7 +2889,6 @@ onBeforeUnmount(() => {
   stopResize();
   if (scrollChatRaf) cancelAnimationFrame(scrollChatRaf);
   cancelPendingChatPersistence();
-  if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
   if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
   if (gitRefreshDebounceTimer) clearTimeout(gitRefreshDebounceTimer);
   stopAgentUiTick();

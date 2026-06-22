@@ -159,6 +159,11 @@
   background: rgba(88, 166, 255, 0.65);
 }
 
+.resize-handle:focus-visible {
+  outline: 2px solid rgba(88, 166, 255, 0.65);
+  outline-offset: 1px;
+}
+
 .panel-head {
   display: flex;
   align-items: center;
