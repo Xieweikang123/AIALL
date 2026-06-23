@@ -1,8 +1,16 @@
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 
+/** Mermaid source lives in <code> textContent so both render paths survive DOMPurify. */
+function renderMermaidPlaceholder(code: string): string {
+  return `<div class="mermaid-render"><code class="language-mermaid">${escapeHtml(code)}</code></div>`;
+}
+
 const renderer = new marked.Renderer();
 renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
+  if (lang === "mermaid") {
+    return renderMermaidPlaceholder(text);
+  }
   const langAttr = lang ? ` class="language-${lang}"` : "";
   const { html } = highlightCode(text, lang || "");
   return `<pre${langAttr}><code${langAttr}>${html}</code></pre>`;
@@ -35,6 +43,7 @@ function sanitizeMarkdownHtml(html: string): string {
   }
   return DOMPurify.sanitize(html, {
     USE_PROFILES: { html: true },
+    ADD_ATTR: ["data-mermaid-rendered", "data-collapsed"],
     FORBID_TAGS: ["input", "form", "select", "textarea", "iframe", "script", "style", "object", "embed"],
   });
 }
@@ -55,6 +64,9 @@ export function renderMarkdownLite(text: string): string {
   const unescaped = source.replace(/\\\*/g, "*").replace(/\\_/g, "_").replace(/\\\[/g, "[");
   const liteRenderer = new marked.Renderer();
   liteRenderer.code = function ({ text: code, lang }: { text: string; lang?: string }) {
+    if (lang === "mermaid") {
+      return renderMermaidPlaceholder(code);
+    }
     const langAttr = lang ? ` class="language-${lang}"` : "";
     return `<pre${langAttr}><code${langAttr}>${escapeHtml(code)}</code></pre>`;
   };

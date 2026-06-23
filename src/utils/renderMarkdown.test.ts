@@ -7,7 +7,17 @@ vi.mock("dompurify", () => ({
   },
 }));
 
-import { renderMarkdown } from "./renderMarkdown";
+import { renderMarkdown, renderMarkdownLite } from "./renderMarkdown";
+
+const MERMAID_SAMPLE = "```mermaid\ngraph TD\n    A[开始] --> B[结束]\n```";
+
+function expectMermaidPlaceholder(html: string) {
+  expect(html).toContain('class="mermaid-render"');
+  expect(html).toContain('class="language-mermaid"');
+  expect(html).not.toContain("data-mermaid-code");
+  expect(html.replace(/<[^>]+>/g, "")).toContain("graph TD");
+  expect(html.replace(/<[^>]+>/g, "")).toContain("A[开始]");
+}
 
 describe("renderMarkdown", () => {
   it("renders headings and inline code", () => {
@@ -37,5 +47,19 @@ describe("renderMarkdown", () => {
     expect(html).toContain("<strong");
     expect(html).toContain("<table");
     expect(html).toContain("<td");
+  });
+
+  it("renders mermaid blocks as sanitized code placeholders", () => {
+    expectMermaidPlaceholder(renderMarkdown(MERMAID_SAMPLE));
+  });
+
+  it("renders mermaid placeholders identically in lite mode", () => {
+    expectMermaidPlaceholder(renderMarkdownLite(MERMAID_SAMPLE));
+  });
+
+  it("escapes angle brackets inside mermaid source", () => {
+    const html = renderMarkdown("```mermaid\nflowchart LR\n    A[\"<test>\"] --> B\n```");
+    expect(html).toContain("&lt;test&gt;");
+    expect(html).not.toContain('["<test>"]');
   });
 });

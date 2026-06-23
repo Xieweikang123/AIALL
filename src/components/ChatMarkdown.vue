@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onUpdated, ref, watch } from "vue";
 import { renderMarkdown, renderMarkdownLite } from "../utils/renderMarkdown";
+import { renderMermaidInContainer } from "../utils/mermaidRenderer";
 import { parseAiOptions, type AiOption } from "../utils/parseAiOptions";
 import AiOptionButtons from "./AiOptionButtons.vue";
 import { stripTextToolCallMarkup } from "../services/textToolCallMarkup";
@@ -24,9 +25,22 @@ const emit = defineEmits<{
 const markdownRef = ref<HTMLElement | null>(null);
 const renderSource = ref(props.content);
 const streamingRenderText = ref("");
+const streamingMinHeight = ref(0);
 const streamingThrottle = createStreamingMarkdownThrottle(undefined, (text) => {
   streamingRenderText.value = text;
 });
+
+function syncStreamingMinHeight() {
+  if (!props.streaming || !markdownRef.value) return;
+  const height = markdownRef.value.offsetHeight;
+  if (height > streamingMinHeight.value) {
+    streamingMinHeight.value = height;
+    return;
+  }
+  if (height > 0 && height < streamingMinHeight.value * 0.9) {
+    streamingMinHeight.value = height;
+  }
+}
 
 watch(
   () => [props.content, props.streaming] as const,
@@ -35,6 +49,7 @@ watch(
       streamingThrottle.pushSource(value, true);
       return;
     }
+    streamingMinHeight.value = 0;
     streamingThrottle.pushSource(value, false);
     renderSource.value = value;
   },
@@ -163,22 +178,40 @@ function handleOptionSelect(option: AiOption) {
 // After render, wrap tool summary blocks (skip while streaming for perf)
 function postProcess() {
   if (props.streaming) return;
-  nextTick(() => {
-    if (markdownRef.value) {
+  requestAnimationFrame(() => {
+    nextTick(() => {
+      if (props.streaming || !markdownRef.value) return;
       wrapToolSummaryBlocks(markdownRef.value);
-    }
+      renderMermaidInContainer(markdownRef.value);
+    });
   });
 }
 
 // Trigger on html change
-watch([displayHtml, () => props.streaming], () => postProcess(), { immediate: true });
+watch([displayHtml, () => props.streaming], () => {
+  if (props.streaming) {
+    void nextTick(syncStreamingMinHeight);
+    return;
+  }
+  postProcess();
+}, { immediate: true });
 onUpdated(() => {
-  if (!props.streaming) postProcess();
+  if (props.streaming) {
+    syncStreamingMinHeight();
+    return;
+  }
+  postProcess();
 });
 </script>
 
 <template>
-  <div v-if="showMarkdown" ref="markdownRef" class="msg-markdown" :class="{ 'msg-markdown--streaming': streaming }">
+  <div
+    v-if="showMarkdown"
+    ref="markdownRef"
+    class="msg-markdown"
+    :class="{ 'msg-markdown--streaming': streaming }"
+    :style="streaming && streamingMinHeight ? { minHeight: `${streamingMinHeight}px` } : undefined"
+  >
     <div v-if="displayHtml" v-html="displayHtml" />
     <AiOptionButtons
       v-if="parsedOptions?.options.length"
@@ -514,5 +547,187 @@ onUpdated(() => {
 }
 .msg-markdown :deep(.tok-variable) {
   color: #56b6c2; /* 青色 - 变量引用 $var */
+}
+
+/* ─── Mermaid 图表 ────────────────────────────────── */
+.msg-markdown :deep(.mermaid-render:not([data-mermaid-rendered]) code.language-mermaid) {
+  display: none;
+}
+
+.msg-markdown :deep(.mermaid-render) {
+  position: relative;
+  margin: 0.75em 0;
+  padding: 12px 16px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  overflow-x: auto;
+  overscroll-behavior: contain;
+  text-align: center;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+  /* 防止触控板捏合触发整页缩放，仅作用于图表自身缩放 */
+  touch-action: none;
+}
+
+.msg-markdown :deep(.mermaid-render::-webkit-scrollbar) {
+  height: 3px;
+}
+
+.msg-markdown :deep(.mermaid-render::-webkit-scrollbar-thumb) {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 999px;
+}
+
+.msg-markdown :deep(.mermaid-render .mermaid-chart-wrapper) {
+  display: inline-block;
+  text-align: center;
+}
+
+.msg-markdown :deep(.mermaid-render svg) {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Mermaid 渲染失败提示 */
+.msg-markdown :deep(.mermaid-render pre) {
+  margin: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  font-size: 12px;
+}
+
+/* ─── Mermaid 工具栏 ──────────────────────────────── */
+.msg-markdown :deep(.mermaid-toolbar) {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.msg-markdown :deep(.mermaid-render:hover .mermaid-toolbar) {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.msg-markdown :deep(.mermaid-toolbar button) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(205, 214, 244, 0.8);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  line-height: 1;
+}
+
+.msg-markdown :deep(.mermaid-toolbar button:hover) {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.msg-markdown :deep(.mermaid-toolbar .mermaid-zoom-label) {
+  font-size: 10px;
+  color: rgba(205, 214, 244, 0.6);
+  min-width: 32px;
+  text-align: center;
+  user-select: none;
+}
+
+/* ─── Mermaid 全屏遮罩（scoped 内不生效，因为 overlay 挂在 body） ── */
+</style>
+
+<!-- non-scoped: overlay 由 JS 追加到 document.body，scoped 属性选择器无法命中 -->
+<style>
+.mermaid-fullscreen-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(8px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  cursor: zoom-out;
+  /* 防止触控板捏合被浏览器拦截为整页缩放，仅作用于图表自身缩放 */
+  touch-action: none;
+}
+.mermaid-fullscreen-overlay .mermaid-fs-toolbar {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  z-index: 10000;
+}
+.mermaid-fullscreen-overlay .mermaid-fs-toolbar button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(205, 214, 244, 0.85);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.mermaid-fullscreen-overlay .mermaid-fs-toolbar button:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+.mermaid-fullscreen-overlay .mermaid-fs-toolbar .mermaid-zoom-label {
+  font-size: 11px;
+  color: rgba(205, 214, 244, 0.6);
+  min-width: 36px;
+  text-align: center;
+  user-select: none;
+}
+.mermaid-fullscreen-overlay .mermaid-fs-close {
+  font-size: 16px !important;
+  margin-left: 4px;
+}
+.mermaid-fullscreen-overlay .mermaid-fs-chart-wrapper {
+  cursor: grab;
+  flex: 0 1 auto;
+  max-width: 92vw;
+  max-height: 88vh;
+  overflow: auto;
+  overscroll-behavior: contain;
+  touch-action: none;
+}
+.mermaid-fullscreen-overlay .mermaid-fs-chart-wrapper svg {
+  display: block;
+  max-width: 90vw;
+  max-height: 85vh;
+  width: auto;
+  height: auto;
 }
 </style>
