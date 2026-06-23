@@ -108,10 +108,23 @@ const toolsSummary = computed(() =>
 );
 
 const foldedCards = computed(() => {
+  // Collect keys already shown in the main aggregatedCards row to avoid
+  // a tool (e.g. search) appearing in both the visible chips and the
+  // folded "earlier steps" section.
+  const visibleKeys = new Set(aggregatedCards.value.map((c) => c.key));
+  // Also track keys added within the fold loop — multiple ActionsBlocks
+  // can each produce a search card with the same key ("search:batch")
+  // when all search steps land in collapsed portions.
+  const addedKeys = new Set<string>();
   const cards: ToolAggregateCard[] = [];
   for (const block of props.turn.actions) {
     if (block.collapsed.length) {
-      cards.push(...aggregateToolSteps(block.collapsed.map((i) => i.step)));
+      for (const card of aggregateToolSteps(block.collapsed.map((i) => i.step))) {
+        if (!visibleKeys.has(card.key) && !addedKeys.has(card.key)) {
+          addedKeys.add(card.key);
+          cards.push(card);
+        }
+      }
     }
   }
   return cards;

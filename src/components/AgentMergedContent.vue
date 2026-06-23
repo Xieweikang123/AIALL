@@ -17,11 +17,11 @@
     </details>
 
     <AgentTurnCard
-      v-for="turn in visibleTurns"
-      :key="turn.key"
-      :turn="turn"
-      :running="turn.isLatest && isRunning"
-      :show-tools="shouldShowTurnTools(turn)"
+      v-for="view in visibleTurnViews"
+      :key="view.key"
+      :turn="view.turn"
+      :running="view.running"
+      :show-tools="view.showTools"
     />
 
     <template v-if="isRunning && currentStatus">
@@ -63,14 +63,12 @@ import { computed } from "vue";
 import ChatMarkdown from "./ChatMarkdown.vue";
 import PlanDocumentBlock from "./PlanDocumentBlock.vue";
 import AgentTurnCard from "./AgentTurnCard.vue";
-import { filterDuplicateFeedThoughts, isAgentToolTurnNarration } from "../services/agentMessageDisplay";
 import { enrichPlanMarkdownForDisplay } from "../services/planDocumentDisplay";
-import { stripTextToolCallMarkup } from "../services/textToolCallMarkup";
 import {
-  layoutCursorFeedBlocks,
-  type CursorFeedItem,
-  type CursorFeedProcessBlock,
-} from "../services/agentCursorFeed";
+  buildTurnCardsFromRoundGroups,
+  buildVisibleTurnViews,
+  type AgentTurnCardModel,
+} from "../services/agentTurnCards";
 import type { AgentRoundGroupView } from "../services/agentRoundGroups";
 import type { AiOption } from "../utils/parseAiOptions";
 
@@ -98,63 +96,16 @@ const markdownContent = computed(() =>
   }),
 );
 
-type TurnCard = {
-  key: string;
-  text: string;
-  actions: Extract<CursorFeedProcessBlock, { kind: "actions" }>[];
-  isLatest: boolean;
-};
-
 const VISIBLE_TURN_LIMIT = 2;
 const VISIBLE_TURN_LIMIT_RUNNING = 3;
 
-const turnCards = computed<TurnCard[]>(() => {
-  const items: CursorFeedItem[] = [];
-  const answer = props.finalAnswer.trim();
-
-  for (const group of props.roundGroups) {
-    if (group.turn <= 0 && !group.narrative) continue;
-    const narrativeText = stripTextToolCallMarkup(group.narrative || "").trim();
-    if (narrativeText) {
-      items.push({ kind: "thought", key: `thought-${group.turn}`, text: narrativeText });
-    }
-    for (const tool of group.tools) {
-      items.push({ kind: "action", key: tool.id, step: tool });
-    }
-  }
-
-  const filtered = filterDuplicateFeedThoughts(items, answer);
-  const detailed = props.activityDetailed === true;
-  const collapseAfter = props.isRunning ? 999 : detailed ? 10 : 5;
-  const blocks = layoutCursorFeedBlocks(filtered, {
-    keepVisible: detailed ? 8 : 6,
-    collapseAfter,
-  });
-
-  const turns: TurnCard[] = [];
-  let current: TurnCard | null = null;
-
-  for (const block of blocks) {
-    if (block.kind === "thought") {
-      if (isAgentToolTurnNarration(block.text)) continue;
-      if (current) turns.push(current);
-      current = { key: block.key, text: block.text, actions: [], isLatest: false };
-    } else if (block.kind === "actions") {
-      if (current) {
-        current.actions.push(block);
-      } else if (turns.length) {
-        turns[turns.length - 1].actions.push(block);
-      } else {
-        turns.push({ key: block.key, text: "", actions: [block], isLatest: false });
-        current = turns[turns.length - 1];
-      }
-    }
-  }
-  if (current) turns.push(current);
-
-  if (turns.length) turns[turns.length - 1].isLatest = true;
-  return turns;
-});
+const turnCards = computed<AgentTurnCardModel[]>(() =>
+  buildTurnCardsFromRoundGroups(props.roundGroups, {
+    finalAnswer: props.finalAnswer,
+    activityDetailed: props.activityDetailed,
+    isRunning: props.isRunning,
+  }),
+);
 
 const visibleTurnLimit = computed(() =>
   props.isRunning ? VISIBLE_TURN_LIMIT_RUNNING : VISIBLE_TURN_LIMIT,
@@ -174,10 +125,13 @@ const visibleTurns = computed(() => {
   return cards.slice(-limit);
 });
 
-function shouldShowTurnTools(turn: TurnCard): boolean {
-  if (props.activityDetailed) return true;
-  return turn.isLatest;
-}
+const visibleTurnViews = computed(() =>
+  buildVisibleTurnViews({
+    turns: turnCards.value,
+    visibleTurns: visibleTurns.value,
+    isRunning: props.isRunning,
+  }),
+);
 </script>
 
 <style scoped>
