@@ -21,10 +21,12 @@ import {
   isImplementFollowUpRun,
   isImplementationFailureReportPrompt,
   isScreenshotVisibilityPrompt,
+  isSameIssueFollowUpRun,
   isSessionAuditPrompt,
   isShortImplementPrompt,
   isUiDefectReportPrompt,
   isUserErrorQuotePrompt,
+  historyPriorAssistantClaimedFix,
 } from "./agentUserIntent";
 
 describe("isConsultativeUserPrompt", () => {
@@ -308,20 +310,19 @@ describe("isSessionAuditPrompt", () => {
 });
 
 describe("buildSessionAuditHint", () => {
-  it("mentions read_file absolute path and forbids run_command paging", () => {
+  it("mentions path resolution and forbids run_command paging", () => {
     const hint = buildSessionAuditHint();
-    expect(hint).toContain("read_file");
-    expect(hint).toContain("%APPDATA%");
+    expect(hint).toContain("offset/limit");
     expect(hint).toContain("禁止 run_command");
+    expect(hint).toContain("AGENTS.md");
   });
 
-  it("prioritizes logical session paths and evidence-qualified conclusions", () => {
+  it("requires evidence-qualified conclusions and forbids repo audit writes", () => {
     const hint = buildSessionAuditHint();
-    expect(hint).toContain("aiall/vibe-chat-sessions/");
-    expect(hint).toContain("不要先在项目根目录搜索 aiall");
     expect(hint).toContain("证据强度");
     expect(hint).toContain("摘要不足，无法确认");
     expect(hint).toContain("禁止断言");
+    expect(hint).toContain("禁止 write_file");
   });
 });
 
@@ -356,5 +357,32 @@ describe("isUserErrorQuotePrompt", () => {
 
   it("rejects questions", () => {
     expect(isUserErrorQuotePrompt("为什么通知权限被拒绝？")).toBe(false);
+  });
+});
+
+describe("isSameIssueFollowUpRun", () => {
+  const priorFixHistory = [
+    { role: "user", content: "某功能有问题，排查下" },
+    { role: "assistant", content: "## ✅ 修复完成\n\n已修改 src/foo.ts。" },
+  ];
+
+  it("detects follow-up after prior fix claim", () => {
+    expect(historyPriorAssistantClaimedFix(priorFixHistory)).toBe(true);
+    expect(isSameIssueFollowUpRun("草稿显示有问题，明明没发送", priorFixHistory)).toBe(true);
+    expect(isSameIssueFollowUpRun("给你发消息，会创建一个新会话，发现这个问题没？", priorFixHistory)).toBe(
+      true,
+    );
+  });
+
+  it("rejects when prior assistant did not claim fix", () => {
+    const history = [
+      { role: "user", content: "问题 A" },
+      { role: "assistant", content: "我先分析一下…" },
+    ];
+    expect(isSameIssueFollowUpRun("还有问题", history)).toBe(false);
+  });
+
+  it("rejects unrelated new task", () => {
+    expect(isSameIssueFollowUpRun("帮我把路由改成 lazy load", priorFixHistory)).toBe(false);
   });
 });

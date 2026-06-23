@@ -56,7 +56,7 @@ const USER_NEGATION_RE =
 
 /** User reports implementation did not work in practice — structural, not topic-specific. */
 const USER_FAILURE_REPORT_RE =
-  /试了.{0,20}(?:没有|没|不|无效)|并没有|没效果|没有效果|没生效|不生效|未生效|没变化|不起作用|仍然(?:没有|没|不)|还是(?:没有|没|不)|看不到|电脑没|系统没|实际没|并未/i;
+  /试了.{0,20}(?:没有|没|不|无效)|并没有|没效果|没有效果|没生效|不生效|未生效|没变化|不起作用|仍然(?:没有|没|不)|还是(?:没有|没|不)|明明(?:没有|没|不)|看不到|电脑没|系统没|实际没|并未/i;
 
 /** Detect repeated negation — user said negation ≥2 times in recent turns. */
 export function detectUserNegation(text: string): boolean {

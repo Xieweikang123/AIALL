@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isRetryableAiError, MODEL_FIRST_BYTE_TIMEOUT_MS } from "../../server/aiForward";
-import { compactMessagesForModel, EXECUTE_PLAN_MAX_CONTEXT_CHARS } from "../../server/vibeAgent";
+import { compactMessagesForModel, EXECUTE_PLAN_MAX_CONTEXT_CHARS, SOFT_COMPACT_CONTEXT_CHARS } from "../../server/vibeAgent";
 import type { ChatCompletionMessage } from "../../server/aiForward";
 
 describe("isRetryableAiError", () => {
@@ -54,7 +54,23 @@ describe("compactMessagesForModel", () => {
       { role: "tool", tool_call_id: "3", content: `lines 201-300\n${"c".repeat(30_000)}` },
     ];
     expect(EXECUTE_PLAN_MAX_CONTEXT_CHARS).toBe(100_000);
-    expect(compactMessagesForModel(messages)[2].content).not.toContain("已压缩");
+    expect(compactMessagesForModel(messages)[2].content).toContain("已压缩");
     expect(compactMessagesForModel(messages, EXECUTE_PLAN_MAX_CONTEXT_CHARS)[2].content).toContain("已压缩");
+  });
+
+  it("soft-compacts older tool outputs before hitting hard context ceiling", () => {
+    const messages: ChatCompletionMessage[] = [
+      { role: "system", content: "s".repeat(8_000) },
+      { role: "user", content: "u".repeat(8_000) },
+      { role: "tool", tool_call_id: "1", content: `lines 1-100\n${"a".repeat(12_000)}` },
+      { role: "tool", tool_call_id: "2", content: `lines 101-200\n${"b".repeat(12_000)}` },
+      { role: "tool", tool_call_id: "3", content: `lines 201-300\n${"c".repeat(12_000)}` },
+    ];
+    expect(SOFT_COMPACT_CONTEXT_CHARS).toBe(36_000);
+    const totalBefore = messages.reduce((sum, m) => sum + String(m.content || "").length, 0);
+    expect(totalBefore).toBeGreaterThan(SOFT_COMPACT_CONTEXT_CHARS);
+    const compacted = compactMessagesForModel(messages);
+    expect(compacted[2].content).toContain("已压缩");
+    expect(compacted[4].content).toContain("lines 201-300");
   });
 });

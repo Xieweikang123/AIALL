@@ -45,6 +45,20 @@
         </div>
       </Teleport>
       <div class="editor-header-actions">
+        <button
+          type="button"
+          class="editor-action-btn nav-btn"
+          :disabled="!canGoBack"
+          title="后退 (导航历史)"
+          @click="$emit('navigate-back')"
+        >←</button>
+        <button
+          type="button"
+          class="editor-action-btn nav-btn"
+          :disabled="!canGoForward"
+          title="前进 (导航历史)"
+          @click="$emit('navigate-forward')"
+        >→</button>
         <span v-if="fileDirty && !showDiffMode" class="dirty-badge" title="文件已修改">● 未保存</span>
         <span class="editor-action-divider" />
         <button
@@ -132,6 +146,8 @@ interface Props {
   openTabs: OpenTab[];
   parentEditorCollapsed: boolean;
   selectedCode?: string;
+  canGoBack?: boolean;
+  canGoForward?: boolean;
 }
 
 const props = defineProps<Props>();
@@ -150,6 +166,8 @@ const emit = defineEmits<{
   (e: "editor-select", text: string): void;
   (e: "ask-ai-with-code"): void;
   (e: "update:fileContent", value: string): void;
+  (e: "navigate-back"): void;
+  (e: "navigate-forward"): void;
 }>();
 
 /* ---- 标签滚轮横向滚动 ---- */
@@ -407,6 +425,22 @@ defineExpose({ editorRef, revealLineInEditor });
 .editor-action-btn.save-btn:hover:not(:disabled) {
   background: rgba(88, 166, 255, 0.1);
   border-color: var(--accent-color, #58a6ff);
+}
+
+.editor-action-btn.nav-btn {
+  font-size: 14px;
+  font-weight: 700;
+  padding: 2px 6px;
+  color: var(--text-secondary, #999);
+  border-color: transparent;
+  background: transparent;
+  min-width: 22px;
+  text-align: center;
+}
+
+.editor-action-btn.nav-btn:hover:not(:disabled) {
+  color: var(--text-primary, #e0e0e0);
+  background: var(--bg-tertiary, #2a2a2a);
 }
 
 .editor-action-btn.collapse-btn {

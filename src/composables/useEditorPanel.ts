@@ -41,6 +41,7 @@ export interface UseEditorPanelParams {
   confirm: (msg: string, event?: MouseEvent) => Promise<boolean>;
   inputPrompt: { prompt: (msg: string, options?: { defaultValue?: string }) => Promise<string | null> };
   composerRef: Ref<{ setPlainText: (text: string) => void; focus: () => void } | null>;
+  editorPanelRef?: Ref<{ editorRef: { value: { getScrollTop?: () => number; setScrollTop?: (v: number) => void; getPosition?: () => { lineNumber: number; column: number } | null; setPosition?: (v: { lineNumber: number; column: number }) => void } | null } } | null>;
   gitError: Ref<string>;
   gitDiffContentCache: Ref<Record<string, FileDiff>>;
   gitDiffLoadingKey: Ref<string>;
@@ -60,6 +61,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     confirm,
     inputPrompt,
     composerRef,
+    editorPanelRef,
     gitError,
     gitDiffContentCache,
     gitDiffLoadingKey,
@@ -85,6 +87,81 @@ export function useEditorPanel(params: UseEditorPanelParams) {
   const showDiffMode = ref(false);
   const selectedCode = ref("");
   const renamingPath = ref("");
+
+  /* ---- 导航历史（浏览器式后退/前进） ---- */
+  interface NavEntry {
+    path: string;
+    scrollTop?: number;
+    cursorLine?: number;
+    cursorColumn?: number;
+  }
+  const navBackStack = ref<NavEntry[]>([]);
+  const navForwardStack = ref<NavEntry[]>([]);
+  const canGoBack = computed(() => navBackStack.value.length > 0);
+  const canGoForward = computed(() => navForwardStack.value.length > 0);
+  let navSuppressNext = false; // 内部导航跳转时抑制记录
+
+  function snapshotCurrentNavEntry(): NavEntry | null {
+    if (!activeFilePath.value) return null;
+    const entry: NavEntry = { path: activeFilePath.value };
+    // 尝试获取编辑器滚动位置和光标
+    try {
+      const monacoEditor = editorPanelRef?.value?.editorRef?.value;
+      if (monacoEditor?.getScrollTop) entry.scrollTop = monacoEditor.getScrollTop();
+      if (monacoEditor?.getPosition) {
+        const pos = monacoEditor.getPosition();
+        if (pos) {
+          entry.cursorLine = pos.lineNumber;
+          entry.cursorColumn = pos.column;
+        }
+      }
+    } catch { /* ignore */ }
+    return entry;
+  }
+
+  function recordNavEntry() {
+    if (navSuppressNext) { navSuppressNext = false; return; }
+    const entry = snapshotCurrentNavEntry();
+    if (entry) {
+      navBackStack.value = [...navBackStack.value, entry];
+      navForwardStack.value = []; // 新导航清空前进栈
+    }
+  }
+
+  async function navigateBack() {
+    if (!canGoBack.value) return;
+    const current = snapshotCurrentNavEntry();
+    const prev = navBackStack.value[navBackStack.value.length - 1];
+    navBackStack.value = navBackStack.value.slice(0, -1);
+    if (current) navForwardStack.value = [...navForwardStack.value, current];
+    navSuppressNext = true;
+    await openFile(prev.path, { skipUnsavedCheck: true });
+    // 恢复滚动和光标
+    try {
+      const monacoEditor = editorPanelRef?.value?.editorRef?.value;
+      if (monacoEditor) {
+        if (prev.scrollTop != null && monacoEditor.setScrollTop) monacoEditor.setScrollTop(prev.scrollTop);
+        if (prev.cursorLine != null && monacoEditor.setPosition) monacoEditor.setPosition({ lineNumber: prev.cursorLine, column: prev.cursorColumn || 1 });
+      }
+    } catch { /* ignore */ }
+  }
+
+  async function navigateForward() {
+    if (!canGoForward.value) return;
+    const current = snapshotCurrentNavEntry();
+    const next = navForwardStack.value[navForwardStack.value.length - 1];
+    navForwardStack.value = navForwardStack.value.slice(0, -1);
+    if (current) navBackStack.value = [...navBackStack.value, current];
+    navSuppressNext = true;
+    await openFile(next.path, { skipUnsavedCheck: true });
+    try {
+      const monacoEditor = editorPanelRef?.value?.editorRef?.value;
+      if (monacoEditor) {
+        if (next.scrollTop != null && monacoEditor.setScrollTop) monacoEditor.setScrollTop(next.scrollTop);
+        if (next.cursorLine != null && monacoEditor.setPosition) monacoEditor.setPosition({ lineNumber: next.cursorLine, column: next.cursorColumn || 1 });
+      }
+    } catch { /* ignore */ }
+  }
 
   let diffAbortController: AbortController | null = null;
 
@@ -338,6 +415,11 @@ export function useEditorPanel(params: UseEditorPanelParams) {
       syncActiveTabToCache();
     } else {
       syncActiveTabToCache();
+    }
+
+    // 记录导航历史（非历史跳转时）
+    if (activeFilePath.value && activeFilePath.value !== filePath) {
+      recordNavEntry();
     }
 
     expandEditor();
@@ -805,5 +887,9 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     closeOtherTabs,
     closeRightTabs,
     closeAllTabs,
+    navigateBack,
+    navigateForward,
+    canGoBack,
+    canGoForward,
   };
 }

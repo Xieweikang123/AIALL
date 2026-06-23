@@ -5,6 +5,8 @@ export interface VibeGlobalShortcutHandlers {
   saveFile: () => void | Promise<void>;
   switchToAdjacentSession: (delta: number) => void;
   startNewSession: () => void;
+  navigateBack?: () => void;
+  navigateForward?: () => void;
 }
 
 export function useVibeGlobalShortcuts(handlers: VibeGlobalShortcutHandlers) {
@@ -32,6 +34,16 @@ export function useVibeGlobalShortcuts(handlers: VibeGlobalShortcutHandlers) {
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "n" || e.key === "N")) {
       e.preventDefault();
       handlers.startNewSession();
+    }
+    if (e.altKey && e.key === "ArrowLeft") {
+      e.preventDefault();
+      handlers.navigateBack?.();
+      return;
+    }
+    if (e.altKey && e.key === "ArrowRight") {
+      e.preventDefault();
+      handlers.navigateForward?.();
+      return;
     }
   }
 

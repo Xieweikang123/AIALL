@@ -55,6 +55,20 @@ export const MAX_UNIQUE_READ_FILES_BEFORE_NUDGE = 4;
 /** Total explore-only turns before requiring a user-visible Chinese interim diagnosis. */
 export const EXPLORE_INTERIM_DIAGNOSIS_TURN = 4;
 
+/** Tighter caps when user continues reporting issues after a prior「修复完成」claim in the same thread. */
+export const SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE_SOFT = 5;
+export const SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE = 8;
+
+/** Paths written during exploration note-taking — do not reset explore-budget counters. */
+export function isExplorationArchivePath(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, "/").trim();
+  return /^\.aiall\/exploration\//i.test(normalized);
+}
+
+export function isProductiveWritePath(filePath: string): boolean {
+  return Boolean(filePath.trim()) && !isExplorationArchivePath(filePath);
+}
+
 /** Identical read_file slice requests allowed after the first read before hard-blocking. */
 export const MAX_READ_SLICE_REPEATS = 2;
 
@@ -269,6 +283,30 @@ export function buildUserFailureReportNudge(): string {
     "禁止再次输出「已完成/无需再改」式总结；须：①承认未验证或仍失败；②列出与预期不符的具体点；③给出下一步排查或不同方案。",
     "若涉及原生/系统能力，先确认运行环境（Web dev vs 桌面壳）是否匹配测试方式。",
   ].join("\n");
+}
+
+/** Same-thread follow-up after assistant claimed a fix — must connect prior scope before re-exploring. */
+export function buildSameIssueFollowUpHint(): string {
+  return [
+    "",
+    "【同问题追问·前轮已宣称修复】用户在同一会话继续报告异常或质疑修复是否完整。",
+    "① 先回顾前轮改了什么、针对哪个可见症状；列出仍存疑的现象，勿假设已解决。",
+    "② 从用户操作入口 trace 完整链路（入口→编排→副作用/持久化→UI 展示）；禁止只修展示/format 单分支而忽略状态默认值、列表投影、切换/路由等关联路径。",
+    "③ patch 前 grep import 确认运行时入口；未引用的同名/近似路径文件勿改。",
+    "④ 若前轮修复不完整须显式承认并扩大范围；禁止再次无验证「修复完成」。",
+    "⑤ 探索预算收紧：基于会话已有上下文优先 patch 或分症状结论，禁止从零广搜全链路。",
+    "禁止 write_file 写探索笔记或归档 markdown；结论直接用于 patch 或用户可见回复。",
+  ].join("\n");
+}
+
+/** Hard cap for same-issue follow-up without productive patch — force structured status, not endless read. */
+export function buildSameIssueFollowUpForceSummaryNudge(totalExploreTurns: number): string {
+  return [
+    `【系统强制·同问题追问】已累计 ${totalExploreTurns} 轮探索且尚未提交有效代码修改。`,
+    "下一轮已移除 read/grep/search；你必须用中文输出结构化结论：",
+    "① 前轮修复覆盖了什么、遗漏了什么；② 各可见症状在调用链上的状态（已确认/未验证/仍异常）；③ 若需继续改代码，列出目标文件与改动要点（下轮再 patch）。",
+    "禁止继续探索或写探索笔记；禁止再次无依据宣称「修复完成」。",
+  ].join("");
 }
 
 export function buildFileBreadthNudge(uniqueReadFiles: string[], mode?: string): string {

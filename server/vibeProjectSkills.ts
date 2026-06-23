@@ -221,7 +221,7 @@ export function formatSkillsForPrompt(
   return {
     content: [
       "",
-      "项目 Skills（.aiall/skills/ 中的可复用约定；冲突时以用户最新消息为准）：",
+      "项目 Skills（skill 目录中的可复用约定；冲突时以用户最新消息为准）：",
       "```markdown",
       lines.join("\n"),
       "```",

@@ -100,7 +100,7 @@ export function validateMemoryProposal(payload: MemoryProposalPayload): {
 
   // Check for actionable keywords
   if (!/(?:应|需|禁止|优先|常用|约定|必须|建议|不要|避免)/.test(content)) {
-    suggestions.push("建议添加行动指导（如"应"、"禁止"、"优先"等）");
+    suggestions.push('建议添加行动指导（如"应"、"禁止"、"优先"等）');
   }
 
   return {

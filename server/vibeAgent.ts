@@ -25,6 +25,7 @@ import {
 } from "./agentTurnBudget";
 import {
   buildAskSystemPromptLines,
+  buildFileAccessPathHint,
   buildSearchFilesEmptyHint,
 } from "./agentAskPrompt";
 import {
@@ -52,10 +53,13 @@ import {
   buildCodeReviewHonestyNudge,
   buildUserErrorQuoteHint,
   buildUserFailureReportNudge,
+  buildSameIssueFollowUpHint,
+  buildSameIssueFollowUpForceSummaryNudge,
   EXECUTE_PLAN_EXPLORE_TURN_BUDGET,
   EXPLORE_INTERIM_DIAGNOSIS_TURN,
   INTERACTIVE_EXPLORE_TURN_BUDGET,
   CONSULTATIVE_BUILD_EXPLORE_TURN_BUDGET,
+  isProductiveWritePath,
   MAX_READ_SLICE_REPEATS,
   MAX_TOTAL_EXPLORE_TURNS,
   MAX_TOTAL_EXPLORE_TURNS_SOFT,
@@ -63,9 +67,11 @@ import {
   PLAN_EXPLORE_TURN_BUDGET,
   PLAN_MAX_TOTAL_EXPLORE_HARD,
   PLAN_MAX_TOTAL_EXPLORE_SOFT,
+  SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE,
+  SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE_SOFT,
 } from "./agentExplorationBudget";
 import { buildReplyAccuracyHint } from "../src/services/agentReplyAccuracy";
-import { buildBehaviorContradictionHint, buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildBuildWriteBlockedHint, buildImplementFollowUpHint, buildImplementationStatusHint, buildSessionAuditHint, buildUiDefectBuildHint, buildWriteToolBlockedMessage, isAgentStepClarificationPrompt, isBehaviorContradictionPrompt, isCodeReviewPrompt, isConsultativeUserPrompt, isImplementationStatusPrompt, isImplementFollowUpRun, isSessionAuditPrompt, isUiDefectReportPrompt, isUserErrorQuotePrompt, historySuggestsActiveImplementation, historySuggestsQuotePositionFix } from "../src/services/agentUserIntent";
+import { buildBehaviorContradictionHint, buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildBuildWriteBlockedHint, buildImplementFollowUpHint, buildImplementationStatusHint, buildSessionAuditHint, buildUiDefectBuildHint, buildWriteToolBlockedMessage, isAgentStepClarificationPrompt, isBehaviorContradictionPrompt, isCodeReviewPrompt, isConsultativeUserPrompt, isImplementationStatusPrompt, isImplementFollowUpRun, isSameIssueFollowUpRun, isSessionAuditPrompt, isUiDefectReportPrompt, isUserErrorQuotePrompt, historySuggestsActiveImplementation, historySuggestsQuotePositionFix } from "../src/services/agentUserIntent";
 import { detectProjectRuntimeProfile, buildRuntimeAwarenessHint } from "./agentRuntimeHint";
 import { detectUserNegation, detectUserFailureReport, historyRecentUserFailureReport } from "../src/services/agentContinuation";
 import { resolveOriginalTaskFromResumePrompt } from "../src/services/agentRecovery";
@@ -710,24 +716,30 @@ function canParallelizeToolBatch(calls: ChatToolCall[]): boolean {
   return new Set(paths).size === paths.length;
 }
 
+function callIsProductiveWrite(call: ChatToolCall): boolean {
+  if (!WRITE_AGENT_TOOL_NAMES.has(call.function.name)) return false;
+  const filePath = String(parseToolArgs(call.function.arguments || "{}").path || "").trim();
+  return isProductiveWritePath(filePath);
+}
+
 function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: string): string {
   const lines = [
     "你是一个专业的编程 Agent（Build 模式），可以调用工具探索并修改本地项目。",
     "回答请使用中文。",
     "用户可能在消息中附带截图或图片；若已附带，请结合图片内容理解需求并回答，不要声称无法查看图片。",
-    "用户附截图询问界面/功能时：先描述截图所见，再判断是否属于本项目（优先查 src/views、src/components），勿默认是 GitHub Desktop、VS Code 等外部应用。",
-    "截图中有可见文字/图标按钮时：先 grep 该文字的精确原文（如「打开项目」、「+」、「💾」），而非猜 CSS class 名或 SVG 路径；从 grep 命中可直接定位到目标文件和行号。",
+    "用户附截图询问界面/功能时：先描述截图所见，再判断是否属于本项目（优先查 views/components 或项目惯用 UI 目录），勿默认是外部 IDE/桌面应用。",
+    "截图中有可见文字/图标/按钮时：先 grep 图中可见原文的最短可识别片段（通常 ≥3 字），而非猜 CSS class 名或 SVG 路径；从 grep 命中定位 template/组件。",
     "用户针对截图局部提问（配色、按钮、某块区域）时：讨论阶段只谈其所指可见范围，勿擅自扩大到整页/全项目样式盘点；若用户明确要求修改，可在该范围内 grep/read 对应组件后 patch_file；用户明确说「整个/整页/全面板」时可按扩大后的范围实施。",
-    "截图中 Agent 回复体内的文件 chip / 工具步标签（文件名旁可能有 ×N 聚合）：优先 grep `tool-chip` 或 read 含该 class 的 Vue 组件样式段，勿用全局 theme 变量（如 --primary）臆断具体 chip 配色。",
+    "截图中内联 chip/标签/元信息样式（含聚合 badge）：grep 该 chip 的 class 名或 read 承载它的组件 `<style>` 段，勿用全局 theme 变量臆断局部配色。",
     "若系统标注【咨询任务·只读】：用户本条仅为提问/解释，只读探索后自然语言回答，禁止 patch_file / write_file / delete_file。",
     "其余 Build 任务：一旦你判断须改代码才能满足用户（含 bug、实测与描述不符、功能/体验需求），探索完成后同一轮立即 patch_file / write_file，禁止只输出方案并问「需要我执行吗」。",
-    "用户要求「点击输入框任意位置可输入/聚焦」时：先 read_file 核对父容器（如 chat-input-box）与 contenteditable 子元素的 DOM 层级与命中区域；常见修复为外层 mousedown 转发 focus 或子元素 min-height:100% 填满，勿默认只加 padding。",
+    "用户要求「点击输入区域任意位置可聚焦/输入」时：read_file 核对父容器与内层 contenteditable/textarea 的 DOM 层级与命中区域；常见修复为外层 mousedown 转发 focus 或子元素 min-height:100% 填满，勿默认只加 padding。",
     "工作流程：先 grep / search_files 快速定位（通常 1 轮），read_file 读关键片段，然后 patch_file / write_file 修改。",
     "Bug / 实测不符：用户报告行为不对、没效果、试了不行等，默认理解为须修复；定位后直接 patch，勿停下来征求确认。",
     "区分问题类型：「按钮跑别处/位置不对」若控件与选区在空间上分离，优先查 position:fixed/absolute 或 Teleport 浮层定位，勿默认只改 flex；「点击没反应」「不工作」查事件处理/JS 逻辑。同一组件在连续消息中被提及时，每条消息是独立问题，不要因为上一条修了布局就假设这一条也是布局问题。",
     "短追问（如「需要吗」「要不要」「对吗」且未指明新对象）必须承接上一条助手回复的话题作答，勿因会话更早主题偏离；若意图仍不清晰，用一句话澄清，禁止回顾已完成工作清单或擅自改代码。",
     "在已确认须改代码后，探索够了同一轮即 patch/write，勿连续多轮只 read；同一轮可并行 grep/read。",
-    "CSS/SCSS 样式定位：禁止 grep CSS 选择器（如 `.chat-bottom`、`.mode-btn`），应直接 read_file 对应 Vue 文件的 `<style>` 段。",
+    "CSS/SCSS 样式定位：禁止 grep 推测出的全局 layout 选择器；应 read_file 已定位组件文件的 `<style>` 或 scoped 样式段。",
     "CSS class 重命名时：修改前先 grep 旧 class 名在该文件中的所有出现次数，然后一次性补全所有匹配（如同时改 `.old-class`、`.old-class:hover`、`.old-class:active`、`.old-class-icon` 等）。改完后 grep 验证零残留，确认全部替换完毕再宣布完成。",
     "用户选择执行：当你提供了多个方案/选项让用户选择时，用户选定后必须立即执行该方案（如 patch_file / write_file 落盘），不得自行改变方向或跳过执行去做其他调查。执行完毕并报告结果后，若需进一步排查再提出下一步建议。",
     "Build 模式简短实施指令（如「执行」「继续」「改吧」「优化」）或用户明确提出要改时：若上一条助手回复已列出具体改动步骤、代码片段或目标文件，必须立即 patch_file / write_file，禁止再次征求确认；除非改动涉及大范围重构或明显高风险操作。",
@@ -743,11 +755,11 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "修改代码时：小范围改动优先 patch_file（old_string 须唯一匹配）；全文件重写或新文件才用 write_file；大文件禁止 write_file 整文件覆盖。",
     "需要确认现状时 read_file 用 offset/limit 读相关片段即可，不要读整个大文件。",
     "write_file / patch_file / delete_file 会立即写入磁盘，无需用户确认。",
-    "探索结论或踩坑可调用 append_memory 提议写入项目记忆（## 术语|导航|偏好）；可调用 propose_skill 提议写入 .aiall/skills/；均须用户确认后才会落盘。",
+    "探索结论或踩坑可调用 append_memory 提议写入项目记忆（## 术语|导航|偏好）；可调用 propose_skill 提议写入项目 skill 目录；均须用户确认后才会落盘。",
     "可 list_skills / read_skill 按需读取项目 skill；冷启动时已注入 fact/heuristic 类 skill 摘要。",
     "删除文件时：使用 delete_file 工具，不要用 write_file 清空内容来替代删除。",
     "重要：必须通过 API 工具接口调用 list_dir、read_file 等，禁止在正文里输出 <function>、<parameter> 等标记。",
-    "read_file / list_dir：项目内用相对路径（如 src/main.ts）；读 AppData 会话可用绝对路径，或逻辑路径 aiall/vibe-chat-sessions/chat-<id>.json（自动映射到 AppData）；大文件用 offset/limit，勿用 run_command 读文件。",
+    buildFileAccessPathHint(),
     "write_file / patch_file / delete_file 的 path 必须相对项目根，禁止绝对路径。",
     "run_command 可在项目目录执行 shell 命令（如 npm run dev、python main.py、go test），超时默认 30 秒，长时间命令请设置 timeout_ms；不要执行危险命令。",
     "联网搜索：当需要最新信息、外部文档、API 用法时，使用 web_search 搜索；使用 web_extract 抓取指定链接内容。搜索结果可能较多，优先关注前 3 条结果，避免大量内容占用上下文。",
@@ -820,7 +832,7 @@ function buildPlanSystemPrompt(
     buildReplyAccuracyHint(),
     "收集到足够信息后立即输出方案，不要无意义地继续读文件。",
     "重要：必须通过 API 工具接口调用 list_dir、read_file 等，禁止在正文里输出 <function>、<parameter> 等标记。",
-    "read_file / list_dir：项目内用相对路径；读 AppData 会话可用绝对路径或 aiall/vibe-chat-sessions/ 逻辑前缀；大文件用 offset/limit，勿用 run_command 读文件。",
+    "read_file / list_dir：项目内用相对路径；读项目外数据按 AGENTS.md 或用户给出的路径说明；大文件用 offset/limit，勿用 run_command 读文件。",
     "write_file / patch_file / delete_file 的 path 必须相对项目根，禁止绝对路径。",
     `项目根目录：${projectRoot}`,
   ];
@@ -1350,6 +1362,18 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     !isPlanExplore &&
     !isExecutePlan &&
     isImplementFollowUpRun(prompt, params.history, { isAsk });
+  const sameIssueFollowUpRun =
+    !isAsk &&
+    !isPlanExplore &&
+    !isExecutePlan &&
+    !implementFollowUpRun &&
+    isSameIssueFollowUpRun(prompt, params.history);
+  const exploreHardCap = sameIssueFollowUpRun
+    ? SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE
+    : MAX_TOTAL_EXPLORE_TURNS;
+  const exploreSoftCap = sameIssueFollowUpRun
+    ? SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE_SOFT
+    : MAX_TOTAL_EXPLORE_TURNS_SOFT;
   const codeReviewRun =
     !isAsk &&
     !isPlanExplore &&
@@ -1520,6 +1544,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         (implementationStatusRun ? buildImplementationStatusHint() : "") +
         (uiDefectBuildRun ? buildUiDefectBuildHint() : "") +
         (implementFollowUpRun ? buildImplementFollowUpHint(historySuggestsQuotePositionFix(params.history)) : "") +
+        (sameIssueFollowUpRun ? buildSameIssueFollowUpHint() : "") +
         (sessionAuditRun ? buildSessionAuditHint() : "") +
         (agentStepClarifyRun ? buildAgentStepClarificationHint() : "")) +
     projectContextBlock +
@@ -1674,8 +1699,14 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     //   Hard cap: strip ALL tools — model must output text only
     //   UI defect + located anchor: hard cap keeps write tools (avoid analysis-only stall)
     const buildExploreHardCapReached =
-      !isAsk && !isPlanExplore && !readOnlyBuildRun && totalExploreTurns >= MAX_TOTAL_EXPLORE_TURNS;
+      !isAsk && !isPlanExplore && !readOnlyBuildRun && totalExploreTurns >= exploreHardCap;
+    const sameIssueFollowUpNeedsSummary =
+      sameIssueFollowUpRun &&
+      buildExploreHardCapReached &&
+      writeStage !== null &&
+      !writeStage.writtenList.some((p) => isProductiveWritePath(p));
     const forcePatchOutput =
+      !sameIssueFollowUpNeedsSummary &&
       !isAsk &&
       !isPlanExplore &&
       !readOnlyBuildRun &&
@@ -1689,7 +1720,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         ));
     const forceTextOutput =
       !forcePatchOutput &&
-      ((isAsk && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_HARD) ||
+      (sameIssueFollowUpNeedsSummary ||
+        (isAsk && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_HARD) ||
         (isPlanExplore && totalExploreTurns >= PLAN_MAX_TOTAL_EXPLORE_HARD) ||
         (readOnlyBuildRun && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_HARD));
     const stripWideSearch =
@@ -1698,7 +1730,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       ((isAsk && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_SOFT) ||
         (isPlanExplore && totalExploreTurns >= PLAN_MAX_TOTAL_EXPLORE_SOFT) ||
         (readOnlyBuildRun && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_SOFT) ||
-        (!isAsk && !isPlanExplore && !readOnlyBuildRun && totalExploreTurns >= MAX_TOTAL_EXPLORE_TURNS_SOFT));
+        (!isAsk && !isPlanExplore && !readOnlyBuildRun && totalExploreTurns >= exploreSoftCap));
 
     if (forcePatchOutput && !uiDefectForcePatchNudgeSent && buildExploreHardCapReached && uiDefectBuildRun) {
       messages.push({
@@ -1727,8 +1759,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     } else if (forceTextOutput) {
       messages.push({
         role: "system",
-        content:
-          isAsk || readOnlyBuildRun
+        content: sameIssueFollowUpNeedsSummary
+          ? buildSameIssueFollowUpForceSummaryNudge(totalExploreTurns)
+          : isAsk || readOnlyBuildRun
             ? buildAskForceAnswerNudge(totalExploreTurns)
             : buildForceOutputNudge(totalExploreTurns, mode),
       });
@@ -2557,7 +2590,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       });
     }
 
-    const turnHadWrite = toolCalls.some((call) => WRITE_AGENT_TOOL_NAMES.has(call.function.name));
+    const turnHadProductiveWrite = toolCalls.some((call) => callIsProductiveWrite(call));
     const turnExploreOnly =
       toolCalls.length > 0 && toolCalls.every((call) => READ_ONLY_AGENT_TOOL_NAMES.has(call.function.name));
     if (
@@ -2572,7 +2605,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       messages.push({ role: "system", content: buildPatchAnchorLocatedNudge() });
       patchAnchorNudgeSent = true;
     }
-    if (turnHadWrite) {
+    if (turnHadProductiveWrite) {
       consecutiveExploreTurns = 0;
       interimDiagnosisNudgeSent = false;
       patchAnchorForcePending = false;
@@ -2582,7 +2615,12 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     } else if (turnExploreOnly) {
       consecutiveExploreTurns += 1;
       totalExploreTurns += 1;
-      if (implementFollowUpRun && totalExploreTurns >= 1 && writeStage && writeStage.writtenList.length === 0) {
+      if (
+        (implementFollowUpRun || sameIssueFollowUpRun) &&
+        totalExploreTurns >= 1 &&
+        writeStage &&
+        !writeStage.writtenList.some((p) => isProductiveWritePath(p))
+      ) {
         patchAnchorForcePending = true;
         patchAnchorLocated = true;
       }

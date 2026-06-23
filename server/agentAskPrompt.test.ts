@@ -3,6 +3,7 @@ import {
   buildAskAnswerStructureHints,
   buildAskExplorationHints,
   buildAskSystemPromptLines,
+  buildFileAccessPathHint,
   buildSearchFilesEmptyHint,
 } from "./agentAskPrompt";
 
@@ -33,5 +34,11 @@ describe("agentAskPrompt", () => {
   it("suggests grep fallback when search_files misses on CJK query", () => {
     expect(buildSearchFilesEmptyHint("工单")).toContain("grep");
     expect(buildSearchFilesEmptyHint("WorkOrder")).toBe("（无匹配文件）");
+  });
+
+  it("buildFileAccessPathHint defers external paths to AGENTS.md", () => {
+    const hint = buildFileAccessPathHint();
+    expect(hint).toContain("AGENTS.md");
+    expect(hint).not.toMatch(/aiall|vibe-chat|AppData/i);
   });
 });

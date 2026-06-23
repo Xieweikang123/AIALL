@@ -73,11 +73,11 @@ export function buildPatchAnchorLocatedNudge(): string {
 
 /** Grep patterns that mislead after vision treats a fixed overlay as in-flow layout. */
 export const VISION_MISREAD_BLOCKED_GREP_RE =
-  /chat-action-row|chat-status-row|chat-bottom|transform\s*\|\s*will-change/i;
+  /(?:[\w-]+-)?(?:bottom|footer|toolbar|status|action)(?:-(?:row|bar|area))?|(?:layout|container)-(?:bottom|footer)|transform\s*\|\s*will-change/i;
 
 /** After anchor located or Teleport→body confirmed — low-signal detours. */
 export const POST_LOCATE_BLOCKED_GREP_RE =
-  /(?:^|\|)transform(?:\s*\||$)|will-change|chat-action-row|chat-status-row|chat-bottom/i;
+  /(?:^|\|)transform(?:\s*\||$)|will-change|(?:[\w-]+-)?(?:bottom|footer|toolbar|status|action)(?:-(?:row|bar|area))?/i;
 
 export function textConfirmsTeleportToBody(text: string): boolean {
   return /Teleport[\s\S]{0,80}to\s*=\s*["']body["']/i.test(text) || /<Teleport[^>]*\s+to=["']body["']/i.test(text);

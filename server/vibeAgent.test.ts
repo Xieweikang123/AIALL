@@ -147,7 +147,7 @@ describe("executeTool immediate persistence", () => {
     expect(second).toContain("省略重复读取");
     expect(third).toContain("省略重复读取");
     expect(fourth).toContain("错误");
-    expect(fourth).toContain("勿重复 read_file");
+    expect(fourth).toContain("勿重复读相同片段");
   });
 
   it("delete_file removes from disk immediately", async () => {

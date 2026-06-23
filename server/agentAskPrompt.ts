@@ -1,6 +1,14 @@
 import { buildReplyAccuracyHint } from "../src/services/agentReplyAccuracy";
 import { buildAgentSuggestionsPromptHint } from "../src/services/agentSuggestions";
 
+export function buildFileAccessPathHint(): string {
+  return [
+    "read_file / list_dir：项目内用相对路径（如 src/main.ts）；",
+    "读项目外或用户数据目录时，按 AGENTS.md、工具说明或用户消息中的逻辑路径前缀/绝对路径；",
+    "大文件用 offset/limit，勿用 run_command 读文件。",
+  ].join("");
+}
+
 export function buildAskExplorationHints(): string {
   return [
     "探索策略：",
@@ -30,7 +38,7 @@ export function buildAskSystemPromptLines(projectRoot: string): string[] {
     "用户可能在消息中附带截图或图片；若已附带，请结合图片内容理解需求并回答，不要声称无法查看图片。",
     "仅当当前用户消息附带图片时才引用截图；续跑确认（如「改吧」「优化」）且本条无附图时，禁止写「看到截图/如图所示」等读图表述。",
     "Ask 模式不能改文件；若用户确认执行上一轮方案，客户端会自动切到 Build 并执行——你无需再输出完整 CSS/代码方案。",
-    "用户附截图询问界面/功能时：先描述截图所见，再判断是否属于本项目（优先查 src/views、src/components），勿默认是外部应用。",
+    "用户附截图询问界面/功能时：先描述截图所见，再判断是否属于本项目（优先查 views/components 或项目惯用 UI 目录），勿默认是外部应用。",
     "用户针对截图局部提问（配色、按钮、某块区域）时：讨论阶段只谈其所指可见范围，勿擅自扩大到整页/全项目样式盘点；若用户明确要求修改，可在该范围内定位源码并说明改法；用户明确说「整个/整页/全面板」时可按扩大后的范围回答。",
     "你可以使用 list_dir、read_file、grep、search_files 工具来探索项目、读取文件，但不能修改任何文件。",
     "read_file / list_dir 支持绝对路径读取项目外文件；write 类工具不存在于 Ask 模式。",

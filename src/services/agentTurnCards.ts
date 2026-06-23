@@ -123,7 +123,9 @@ export function buildVisibleTurnViews(input: {
   return input.visibleTurns.map((turn) => ({
     key: turn.key,
     running: turn.isLatest && input.isRunning,
-    turn: turn.isLatest ? { ...turn, actions: mergedActions } : turn,
+    turn: turn.isLatest
+      ? { ...turn, actions: mergedActions }
+      : { ...turn, actions: [] }, // 清空非最新 turn 的 actions，避免工具步骤重复显示
     showTools: turn.isLatest && showMergedTools,
   }));
 }

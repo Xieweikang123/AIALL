@@ -9,11 +9,16 @@ import {
   buildExploreInterimDiagnosisNudge,
   buildGrepEmptyRecoveryNudge,
   buildPatchAnchorForcePatchNudge,
+  buildSameIssueFollowUpForceSummaryNudge,
+  buildSameIssueFollowUpHint,
   buildUiDefectForcePatchNudge,
   CONSULTATIVE_BUILD_EXPLORE_TURN_BUDGET,
   EXECUTE_PLAN_EXPLORE_TURN_BUDGET,
   EXPLORE_INTERIM_DIAGNOSIS_TURN,
   INTERACTIVE_EXPLORE_TURN_BUDGET,
+  isExplorationArchivePath,
+  isProductiveWritePath,
+  SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE,
 } from "./agentExplorationBudget";
 
 describe("agentExplorationBudget", () => {
@@ -73,5 +78,19 @@ describe("agentExplorationBudget", () => {
     expect(nudge).toContain("switchVibeSession");
     expect(nudge).toContain("禁止重复相同 pattern");
     expect(nudge).toContain("handler/composable");
+  });
+
+  it("treats exploration archive paths as non-productive writes", () => {
+    expect(isExplorationArchivePath(".aiall/exploration/2026-test.md")).toBe(true);
+    expect(isProductiveWritePath(".aiall/exploration/2026-test.md")).toBe(false);
+    expect(isProductiveWritePath("src/foo.ts")).toBe(true);
+  });
+
+  it("builds same-issue follow-up hints", () => {
+    expect(SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE).toBeLessThan(10);
+    expect(buildSameIssueFollowUpHint()).toContain("同问题追问");
+    expect(buildSameIssueFollowUpHint()).toContain("运行时入口");
+    expect(buildSameIssueFollowUpHint()).not.toContain(".aiall/exploration");
+    expect(buildSameIssueFollowUpForceSummaryNudge(8)).toContain("结构化结论");
   });
 });

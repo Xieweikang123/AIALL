@@ -61,19 +61,19 @@ export function extractVisibleAnchorQuotes(text: string): string[] {
 
 /** Links quoted / visible text to which UI region or module it belongs to. */
 const ANCHOR_TO_REGION_RE =
-  /(判断|可判断|可推断|据此|由此|说明|对应|属于|定位为|应是|这是|应该是|像是|表明|可定位)[^。\n]{0,48}(助手|Vibe|聊天|输入框|Composer|面板|模块|区域|Build|Ask|底栏|侧栏|编辑器|对话|占位)/i;
+  /(判断|可判断|可推断|据此|由此|说明|对应|属于|定位为|应是|这是|应该是|像是|表明|可定位)[^。\n]{0,48}(助手|聊天|输入框|面板|模块|区域|底栏|侧栏|编辑器|对话|占位|工具栏|列表)/i;
 
 /** Names the screenshot region without necessarily quoting anchor text. */
 const UI_REGION_STATEMENT_RE =
-  /(截图|图中|图里|从图|可见|画面)[^。\n]{0,72}(区域|模块|面板|输入|按钮|编辑器|侧栏|底|顶|助手|聊天|Composer)/i;
+  /(截图|图中|图里|从图|可见|画面)[^。\n]{0,72}(区域|模块|面板|输入|按钮|编辑器|侧栏|底|顶|助手|聊天|工具栏|列表)/i;
 
 const UI_MODULE_STATEMENT_RE =
-  /这是[^。\n]{0,48}(助手|Vibe|聊天|输入|面板|模块|区域|Composer|编辑器|底栏|侧栏)/i;
+  /这是[^。\n]{0,48}(助手|聊天|输入|面板|模块|区域|编辑器|底栏|侧栏|工具栏)/i;
 
 export function buildClickFocusInteractionHint(): string {
   return [
     "【点击/聚焦交互】用户要求点击输入区域任意位置即可输入或聚焦。",
-    "这通常不是单纯加大 padding：须核对父容器（如 chat-input-box）与内层 contenteditable 的命中区域是否一致；",
+    "这通常不是单纯加大 padding：须核对父容器与内层 contenteditable/textarea 的命中区域是否一致；",
     "常见修复：外层 mousedown 转发 focus、或让 editable 用 min-height:100% 填满父容器；改 padding 前先 read_file 看清 DOM 层级。",
   ].join("");
 }
@@ -97,7 +97,7 @@ export function suggestsEmbeddedLayoutMisread(visionDescription: string): boolea
   const text = visionDescription.trim();
   if (!text) return false;
   const blamesInFlowLayout =
-    /flex|布局问题|父容器|chat-status|chat-bottom|chat-action|position:\s*relative/i.test(text);
+    /flex|布局问题|父容器|(?:[\w-]+-)?(?:bottom|footer|toolbar|status|action)(?:-(?:row|bar|area))?|position:\s*relative/i.test(text);
   const hasSeparatedRegions =
     /选区|选中|蓝色|高亮/.test(text) &&
     /底(?:部|栏)|状态栏|角落|同一行|左下|右下/.test(text);
@@ -255,7 +255,7 @@ const UI_SCOPE_IMPLEMENT_EXPANDED =
   "实施时：用户已明确要求扩大改动范围，按其所述区域实施，勿超出其描述。";
 
 function isUiInputInteractionThread(content: string): boolean {
-  return /输入框|Composer|composer-editor|chat-input|聚焦|focus|contenteditable|点击.{0,6}输入|padding|占位/.test(
+  return /输入框|可编辑|contenteditable|textarea|聚焦|focus|点击.{0,6}输入|padding|占位/.test(
     content,
   );
 }

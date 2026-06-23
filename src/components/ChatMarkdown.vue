@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onUpdated, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onUpdated, ref, watch } from "vue";
 import { renderMarkdown } from "../utils/renderMarkdown";
 import { parseAiOptions, type AiOption } from "../utils/parseAiOptions";
 import AiOptionButtons from "./AiOptionButtons.vue";
 import { stripTextToolCallMarkup } from "../services/textToolCallMarkup";
+import { createStreamingMarkdownThrottle } from "../utils/streamingMarkdownThrottle";
 
 const props = withDefaults(
   defineProps<{
@@ -22,24 +23,27 @@ const emit = defineEmits<{
 
 const markdownRef = ref<HTMLElement | null>(null);
 const renderSource = ref(props.content);
+const streamingRenderText = ref("");
+const streamingThrottle = createStreamingMarkdownThrottle(undefined, (text) => {
+  streamingRenderText.value = text;
+});
 
 watch(
-  () => props.content,
-  (value) => {
-    if (props.streaming) return;
+  () => [props.content, props.streaming] as const,
+  ([value, streaming]) => {
+    if (streaming) {
+      streamingThrottle.pushSource(value, true);
+      return;
+    }
     renderSource.value = value;
+    streamingThrottle.pushSource(value, false);
   },
   { immediate: true },
 );
 
-watch(
-  () => props.streaming,
-  (streaming) => {
-    if (!streaming) {
-      renderSource.value = props.content;
-    }
-  },
-);
+onBeforeUnmount(() => {
+  streamingThrottle.dispose();
+});
 
 /** Wrap tool summary blocks (h3[工具摘要] + following ul) into collapsible cards. */
 function wrapToolSummaryBlocks(el: HTMLElement) {
@@ -136,7 +140,9 @@ const markdownContent = computed(() => {
 
 const html = computed(() => renderMarkdown(stripTextToolCallMarkup(markdownContent.value)));
 
-const streamingHtml = computed(() => renderMarkdown(stripTextToolCallMarkup(props.content)));
+const streamingHtml = computed(() =>
+  renderMarkdown(stripTextToolCallMarkup(streamingRenderText.value)),
+);
 
 function handleOptionSelect(option: AiOption) {
   emit("selectOption", option);

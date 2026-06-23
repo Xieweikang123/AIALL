@@ -156,7 +156,7 @@ describe("visionMessage", () => {
   it("buildVisionTaskText adds click-focus hint for hit-target requirements", () => {
     const text = buildVisionTaskText("我要的效果是，点击输入框任何位置，都能输入", 1);
     expect(text).toContain("点击/聚焦交互");
-    expect(text).toContain("chat-input-box");
+    expect(text).toContain("contenteditable");
     expect(text).not.toMatch(/勿默认只加 padding.*勿默认只加 padding/);
   });
 

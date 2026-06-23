@@ -1,12 +1,19 @@
 <template>
-  <div class="aggregate-card" :class="cardClass" :title="card.path || ''">
+  <div class="aggregate-card" :class="[cardClass, { 'aggregate-card--compact': compact }]" :title="card.path || ''">
     <details v-if="card.previewLines.length" class="aggregate-card-details">
       <summary class="aggregate-card-head">
         <span class="aggregate-card-icon">{{ card.icon }}</span>
-        <div class="aggregate-card-text">
+        <template v-if="compact">
           <span class="aggregate-card-title">{{ card.title }}</span>
+          <span class="aggregate-card-sep">·</span>
           <span class="aggregate-card-subtitle" :class="{ 'shimmer-text--fast': card.running }">{{ card.subtitle }}</span>
-        </div>
+        </template>
+        <template v-else>
+          <div class="aggregate-card-text">
+            <span class="aggregate-card-title">{{ card.title }}</span>
+            <span class="aggregate-card-subtitle" :class="{ 'shimmer-text--fast': card.running }">{{ card.subtitle }}</span>
+          </div>
+        </template>
         <span class="aggregate-card-hint">{{ card.kind === 'search' ? '查看匹配' : '展开详情' }}</span>
       </summary>
       <ul class="aggregate-card-preview">
@@ -19,10 +26,17 @@
 
     <div v-else class="aggregate-card-head static">
       <span class="aggregate-card-icon">{{ card.icon }}</span>
-      <div class="aggregate-card-text">
+      <template v-if="compact">
         <span class="aggregate-card-title">{{ card.title }}</span>
+        <span class="aggregate-card-sep">·</span>
         <span class="aggregate-card-subtitle">{{ card.subtitle }}</span>
-      </div>
+      </template>
+      <template v-else>
+        <div class="aggregate-card-text">
+          <span class="aggregate-card-title">{{ card.title }}</span>
+          <span class="aggregate-card-subtitle">{{ card.subtitle }}</span>
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -34,6 +48,7 @@ import type { ToolAggregateCard } from "../services/agentToolAggregates";
 const props = defineProps<{
   card: ToolAggregateCard;
   highlightKeyword?: string;
+  compact?: boolean;
 }>();
 
 const cardClass = computed(() => {
@@ -62,8 +77,8 @@ function highlightLine(line: string, keyword: string): string {
 <style scoped>
 .aggregate-card {
   border-radius: 6px;
-  background: rgba(139, 148, 158, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(148, 163, 184, 0.04);
+  border: 1px solid rgba(148, 163, 184, 0.08);
   transition: background 0.15s ease;
   animation: tool-card-appear 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
   min-width: 0;
@@ -85,12 +100,58 @@ function highlightLine(line: string, keyword: string): string {
   margin-top: 2px;
 }
 
+.aggregate-card--compact {
+  border-radius: 4px;
+  background: transparent;
+  border: none;
+}
+
+.aggregate-card--compact + .aggregate-card--compact {
+  margin-top: 0;
+}
+
+.aggregate-card--compact:hover {
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.aggregate-card--compact .aggregate-card-head {
+  padding: 2px 6px;
+  gap: 4px;
+}
+
+.aggregate-card--compact .aggregate-card-icon {
+  font-size: 11px;
+}
+
+.aggregate-card--compact .aggregate-card-title {
+  font-size: 10px;
+  font-weight: 500;
+  flex-shrink: 0;
+  max-width: 40%;
+}
+
+.aggregate-card--compact .aggregate-card-sep {
+  color: rgba(139, 148, 158, 0.3);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.aggregate-card--compact .aggregate-card-subtitle {
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+  -webkit-line-clamp: unset;
+  -webkit-box-orient: unset;
+}
+
 .aggregate-card:last-child {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.08);
 }
 
 .aggregate-card:hover {
-  background: rgba(139, 148, 158, 0.1);
+  background: rgba(148, 163, 184, 0.08);
 }
 
 .aggregate-card.running {
@@ -98,7 +159,8 @@ function highlightLine(line: string, keyword: string): string {
 }
 
 .aggregate-card.fail {
-  background: rgba(248, 81, 73, 0.03);
+  background: rgba(248, 81, 73, 0.05);
+  border-color: rgba(248, 81, 73, 0.1);
 }
 
 .aggregate-card-details {
@@ -152,7 +214,7 @@ function highlightLine(line: string, keyword: string): string {
 .aggregate-card-subtitle {
   font-size: 10px;
   line-height: 1.3;
-  color: rgba(139, 148, 158, 0.8);
+  color: rgba(148, 163, 184, 0.65);
   overflow-wrap: anywhere;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -163,10 +225,10 @@ function highlightLine(line: string, keyword: string): string {
 .aggregate-card-hint {
   flex-shrink: 0;
   font-size: 9px;
-  color: rgba(255, 255, 255, 0.35);
+  color: rgba(148, 163, 184, 0.4);
   padding: 1px 4px;
   border-radius: 3px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(148, 163, 184, 0.06);
 }
 
 .aggregate-card-details[open] .aggregate-card-hint {
@@ -181,7 +243,7 @@ function highlightLine(line: string, keyword: string): string {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  border-top: 1px solid rgba(255, 255, 255, 0.03);
+  border-top: 1px solid rgba(148, 163, 184, 0.06);
   max-height: 100px;
   overflow: auto;
 }
@@ -190,7 +252,7 @@ function highlightLine(line: string, keyword: string): string {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 10px;
   line-height: 1.35;
-  color: rgba(255, 255, 255, 0.55);
+  color: rgba(148, 163, 184, 0.55);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -206,6 +268,6 @@ function highlightLine(line: string, keyword: string): string {
 
 @keyframes card-pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.8; }
+  50% { opacity: 0.6; }
 }
 </style>

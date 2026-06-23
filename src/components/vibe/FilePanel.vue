@@ -94,16 +94,7 @@
             <span class="session-action-icon">+</span>
             <span class="session-action-label">新建</span>
           </button>
-          <button
-            type="button"
-            class="session-action-btn"
-            title="将会话同步到本地磁盘"
-            :disabled="!projectOpened || syncingChatStore"
-            @click="$emit('sync-chat-store-to-disk')"
-          >
-            <span class="session-action-icon">↧</span>
-            <span class="session-action-label">{{ syncingChatStore ? "同步中" : "同步" }}</span>
-          </button>
+
         </div>
         <p v-if="chatStoreSyncMessage" class="sessions-sync-hint" role="status" aria-live="polite">
           {{ chatStoreSyncMessage }}

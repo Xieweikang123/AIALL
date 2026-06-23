@@ -11,6 +11,8 @@ describe("buildReplyAccuracyHint", () => {
     expect(hint).toContain("显式更正");
     expect(hint).toContain("read 验证");
     expect(hint).toContain("你之前");
+    expect(hint).toContain("运行时入口");
+    expect(hint).toContain("多可见症状");
   });
 
   it("avoids business-specific terms", () => {

@@ -27,7 +27,7 @@ const SHORT_EVALUATIVE_FOLLOW_UP_RE =
 
 /** User reports prior change did not take effect — not a read-only evaluative question. */
 const IMPLEMENTATION_FAILURE_REPORT_RE =
-  /没生效|不生效|未生效|没效果|没有效果|没变化|不起作用|试了.{0,16}(?:没有|没|不|无效)|仍然(?:没有|没|不)|还是(?:没有|没|不)/i;
+  /没生效|不生效|未生效|没效果|没有效果|没变化|不起作用|试了.{0,16}(?:没有|没|不|无效)|仍然(?:没有|没|不)|还是(?:没有|没|不)|明明(?:没有|没|不)/i;
 
 /** User says observed behavior contradicts a prior assistant claim (not merely「试了不行」). */
 const BEHAVIOR_CONTRADICTION_MARKER_RE =
@@ -169,6 +169,31 @@ export function isImplementFollowUpRun(
 
 export function isImplementationFailureReportPrompt(prompt: string): boolean {
   return IMPLEMENTATION_FAILURE_REPORT_RE.test(prompt.trim());
+}
+
+/** Prior assistant claimed the issue was fixed (structural markers, not topic-specific). */
+const PRIOR_FIX_CLAIM_RE =
+  /(?:✅|修复完成|修改已完成|已完成修复|问题已修复|应该(?:可以|没问题)了|刷新(?:应用|页面)?后)/i;
+
+/** User continues reporting the same problem domain after a prior fix claim. */
+const SAME_ISSUE_FOLLOW_UP_RE =
+  /(?:还有|仍(?:然)?有|依然).{0,8}问题|发现.{0,12}问题|问题.{0,8}(?:没|吗)[？?]?|还是有问题|没(?:解决|修好)|(?:排查|检查).{0,8}(?:下|一下)/i;
+
+export function historyPriorAssistantClaimedFix(history?: UserIntentHistoryMessage[]): boolean {
+  const assistants = (history ?? []).filter((m) => m.role === "assistant").slice(-2);
+  return assistants.some((m) => PRIOR_FIX_CLAIM_RE.test(m.content));
+}
+
+export function isSameIssueFollowUpRun(
+  prompt: string,
+  history?: UserIntentHistoryMessage[],
+): boolean {
+  const text = prompt.trim();
+  if (!text || !historyPriorAssistantClaimedFix(history)) return false;
+  if (SAME_ISSUE_FOLLOW_UP_RE.test(text)) return true;
+  if (isImplementationFailureReportPrompt(text)) return true;
+  if (isBehaviorContradictionPrompt(text, history)) return true;
+  return false;
 }
 
 /** User reports phenomenon that conflicts with the assistant's prior「不会/不更新」类结论. */
@@ -333,9 +358,9 @@ export function isSessionAuditPrompt(prompt: string): boolean {
 export function buildSessionAuditHint(): string {
   return [
     "",
-    "【会话审计·只读】用户要求评估另一 Vibe 会话中 Agent 的回复质量；勿回答被审计会话内的业务/编程问题。",
-    "优先读取用户给出的会话 JSON：若路径以 aiall/vibe-chat-sessions/ 开头，这是逻辑路径，会自动映射到 %APPDATA%\\aiall\\vibe-chat-sessions\\；不要先在项目根目录搜索 aiall。",
-    "若用户同时给出磁盘实际路径，用 read_file 直接读该绝对路径；大 JSON 用 offset/limit 分段读取，禁止 run_command 分页读文件。",
+    "【会话审计·只读】用户要求评估另一聊天会话中 Agent 的回复质量；勿回答被审计会话内的业务/编程问题。",
+    "优先读取用户消息中给出的会话 JSON（逻辑路径或绝对路径，按 AGENTS.md / 用户说明解析）；勿在项目根臆搜数据目录。",
+    "大 JSON 用 offset/limit 分段读取，禁止 run_command 分页读文件。",
     "审计工具记录时必须区分证据强度：只根据 tools/roundGroups/statusLog 中明确出现的内容下结论；若工具摘要缺少具体输出，只能写“摘要不足，无法确认”，禁止断言 Agent 未验证或编造。",
     "输出应聚焦准确性、工具调用、上下文理解、表达结构；把确定问题、推测风险、无法判断项分开写，避免把被审计会话中的业务问题展开解答。",
     "禁止 write_file 将审计报告写入仓库；结论直接写入聊天回复。",
