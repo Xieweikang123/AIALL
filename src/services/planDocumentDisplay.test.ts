@@ -23,10 +23,19 @@ describe("parsePlanDocumentDisplay", () => {
   });
 
   it("detects partial plan while streaming", () => {
-    const display = parsePlanDocumentDisplay("将分析并修改 `src/foo.ts` 与 `src/bar.ts`");
+    const display = parsePlanDocumentDisplay("## 修改方案\n正在分析相关代码…");
     expect(display.isPlan).toBe(true);
     expect(display.isPartialPlan).toBe(true);
-    expect(display.files).toEqual(["src/foo.ts", "src/bar.ts"]);
+    expect(display.files).toEqual([]);
+  });
+
+  it("does not treat multi-file explanation as plan", () => {
+    const display = parsePlanDocumentDisplay(
+      "`FilePanel.vue` 负责文件树，`ProjectSwitcherBar.vue` 负责项目切换。",
+    );
+    expect(display.isPlan).toBe(false);
+    expect(display.isPartialPlan).toBe(false);
+    expect(display.files).toEqual(["FilePanel.vue", "ProjectSwitcherBar.vue"]);
   });
 
   it("treats multi-file outline as complete plan shell", () => {

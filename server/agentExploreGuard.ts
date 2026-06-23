@@ -132,7 +132,41 @@ export type ToolGuardContext = {
   visionLocateActive?: boolean;
   /** Block exploration archive writes during same-issue failure follow-up. */
   blockExplorationArchiveWrite?: boolean;
+  /** Files that failed patch_file — next read_file bypasses overlap/slice cache. */
+  patchRecoveryFiles?: Set<string>;
 };
+
+/** Clear cached read windows so patch failure can re-read fresh content from disk. */
+export function invalidateFileReadState(
+  fileKey: string,
+  readSliceCache?: Map<string, string>,
+  readSliceRepeatCounts?: Map<string, number>,
+  readFileRanges?: Map<string, ReadLineRange[]>,
+): void {
+  if (readSliceCache) {
+    for (const key of [...readSliceCache.keys()]) {
+      if (key.startsWith(`${fileKey}:`)) readSliceCache.delete(key);
+    }
+  }
+  if (readSliceRepeatCounts) {
+    for (const key of [...readSliceRepeatCounts.keys()]) {
+      if (key.startsWith(`${fileKey}:`)) readSliceRepeatCounts.delete(key);
+    }
+  }
+  readFileRanges?.delete(fileKey);
+}
+
+export function markPatchRecoveryFile(toolGuard: ToolGuardContext | undefined, fileKey: string): void {
+  if (!toolGuard) return;
+  if (!toolGuard.patchRecoveryFiles) toolGuard.patchRecoveryFiles = new Set();
+  toolGuard.patchRecoveryFiles.add(fileKey);
+}
+
+export function consumePatchRecoveryRead(toolGuard: ToolGuardContext | undefined, fileKey: string): boolean {
+  if (!toolGuard?.patchRecoveryFiles?.has(fileKey)) return false;
+  toolGuard.patchRecoveryFiles.delete(fileKey);
+  return true;
+}
 
 /** Grep patterns that carry structural/code signals (class names, attributes, symbols). */
 const STRUCTURAL_GREP_RE =
@@ -198,7 +232,7 @@ export function checkPatchOldStringFromReads(
   if (combined.includes(oldString)) return null;
   return [
     `错误：old_string 未出现在你对 ${fileKey} 的已读片段中，禁止凭记忆构造。`,
-    "请 read_file 包含该段落的窗口，从返回原文复制 old_string 后再 patch_file；若 read 后 DOM 与截图不符，换 grep 下一个命中。",
+    "请从已读输出中复制更短且唯一的片段作为 old_string；若仍缺上下文，read_file 更大范围（300–500 行）后从返回原文复制再 patch。",
   ].join("");
 }
 

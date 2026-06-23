@@ -92,6 +92,9 @@ import {
   claimsPrematureCompletion,
   claimsSuccessDespitePatchFailures,
   shouldNudgeAlternateUiPatchStrategy,
+  invalidateFileReadState,
+  markPatchRecoveryFile,
+  consumePatchRecoveryRead,
   isEmptyOrInsufficientFinalReply,
   isAnalysisOnlyReplyUnderForcePatch,
   isBlockedGrepAfterLocate,
@@ -752,7 +755,7 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "当前已在 Build 模式时，禁止再问用户是否切换到 Build；若上一条已列出多项改动，patch 须逐项落实，不得在回复中声称已完成尚未 patch 的项。",
     buildBuildWriteBlockedHint(),
     "Build 模式下用户追问「还能优化吗」「还能继续吗」「继续吧」「接着改」等，均视为执行指令，必须立即 patch_file / write_file，禁止再分析或询问。",
-    "修改前必须先 read_file 核对目标文件；patch_file 前 old_string 须与磁盘内容完全一致。",
+    "修改前必须先 read_file 核对目标文件；patch_file 的 old_string 须从 read 返回原文复制（含缩进），可换更短且唯一的片段。",
     "用户问「看出啥问题没」「检查一下」「这样对吗」等评价性问题时：必须先 read_file 读取你上次修改的文件，确认代码实际状态后再回答。禁止仅凭截图视觉判断或记忆作答。",
     "用户报告「试了不行/没有效果」后，禁止再用同样方案做未经证实的「检查完成✅」；须承认未验证项并给出可执行排查步骤。",
     "给用户的测试步骤须与项目实际运行环境一致（从 package.json scripts 判断 Web dev vs 桌面壳）；禁止混用。",
@@ -1045,11 +1048,24 @@ export async function executeTool(
     const limit = Math.min(maxLimit, Math.max(1, Number(args.limit) || defaultLimit));
     const sliceKey = `${resolved.key}:${offset}:${limit}`;
     const lineRange = readLineRangeFromArgs(offset, limit);
-    if (toolGuard) {
+    const patchRecoveryRead = consumePatchRecoveryRead(toolGuard, resolved.key);
+    if (patchRecoveryRead) {
+      invalidateFileReadState(
+        resolved.key,
+        readSliceCache,
+        readSliceRepeatCounts,
+        toolGuard?.readFileRanges,
+      );
+      readCache?.delete(resolved.key);
+      content = await readStagedFileContent(resolved, stage);
+      if (content !== null) readCache?.set(resolved.key, content);
+      if (content === null) return `错误：${resolved.displayPath} 不存在或无法读取`;
+    }
+    if (toolGuard && !patchRecoveryRead) {
       const overlapErr = checkOverlappingRead(resolved.key, lineRange, toolGuard.readFileRanges);
       if (overlapErr) return overlapErr;
     }
-    const cachedSlice = readSliceCache?.get(sliceKey);
+    const cachedSlice = !patchRecoveryRead ? readSliceCache?.get(sliceKey) : undefined;
     if (cachedSlice) {
       const repeats = (readSliceRepeatCounts?.get(sliceKey) ?? 0) + 1;
       readSliceRepeatCounts?.set(sliceKey, repeats);
@@ -1189,9 +1205,27 @@ export async function executeTool(
       readSliceCache ?? new Map(),
       readCache,
     );
-    if (readCheck) return readCheck;
+    if (readCheck) {
+      markPatchRecoveryFile(toolGuard, resolved.relative);
+      invalidateFileReadState(
+        resolved.relative,
+        readSliceCache,
+        readSliceRepeatCounts,
+        toolGuard?.readFileRanges,
+      );
+      return readCheck;
+    }
     const patchResult = applyUniquePatch(content, oldString, newString);
-    if (!patchResult.ok) return patchResult.error;
+    if (!patchResult.ok) {
+      markPatchRecoveryFile(toolGuard, resolved.relative);
+      invalidateFileReadState(
+        resolved.relative,
+        readSliceCache,
+        readSliceRepeatCounts,
+        toolGuard?.readFileRanges,
+      );
+      return patchResult.error;
+    }
     const patched = patchResult.patched;
     stage.deletions.delete(resolved.relative);
     stage.files.set(resolved.relative, patched);
@@ -1570,6 +1604,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   const grepCache = new Map<string, string>();
   const toolGuard: ToolGuardContext = {
     readFileRanges: new Map(),
+    patchRecoveryFiles: new Set(),
     visionMisreadActive: false,
     patchAnchorLocated: false,
     teleportBodyConfirmed: false,
@@ -2639,9 +2674,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       messages.push({
         role: "system",
         content:
-          `【系统纠正】本轮 ${thisTurnPatchFailures.length} 个 patch_file 调用失败（文件：${failedFiles}），` +
-          "old_string 未在目标文件中匹配到。请立即用 read_file 重新读取目标文件的相关片段，" +
-          "确认当前磁盘内容后再用精确的 old_string 重试 patch_file。禁止凭记忆或之前读取的内容构造 old_string。",
+          `【系统纠正】本轮 ${thisTurnPatchFailures.length} 个 patch_file 调用失败（文件：${failedFiles}）。` +
+          "请 read_file 重新读取（patch 失败后已解除重叠/缓存限制）；从返回原文复制更短且唯一的 old_string 再 patch。" +
+          "禁止凭记忆构造 old_string。",
       });
       for (const path of new Set(thisTurnPatchFailures.map((f) => f.path).filter(Boolean))) {
         if (shouldNudgeAlternateUiPatchStrategy(patchFailureLog, path)) {

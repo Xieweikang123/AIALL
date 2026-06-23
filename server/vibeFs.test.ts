@@ -107,4 +107,16 @@ describe("patch line endings", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.occurrences).toBe(2);
   });
+
+  it("applyUniquePatch tolerates leading-indent mismatch when block is unique", () => {
+    const content = ["<template>", "  <div class=\"panel\">", "    hello", "  </div>", "</template>"].join("\n");
+    const oldString = ["    <div class=\"panel\">", "      hello", "    </div>"].join("\n");
+    const newString = ["    <div class=\"panel\">", "      world", "    </div>"].join("\n");
+    const result = applyUniquePatch(content, oldString, newString);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.patched).toContain("world");
+      expect(result.patched).not.toContain("hello");
+    }
+  });
 });

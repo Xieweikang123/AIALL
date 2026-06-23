@@ -12,8 +12,7 @@ export function looksLikeStreamingPlanContent(content: string): boolean {
   const text = content.trim();
   if (!text) return false;
   if (/(?:^|\n)\s*(?:##\s*修改方案|\[PLAN\]|<!--\s*agent-plan\s*-->)/i.test(text)) return true;
-  if (/修改方案|涉及文件|详细改动/i.test(text) && extractPlanFilePaths(text).length > 0) return true;
-  return extractPlanFilePaths(text).length >= 2;
+  return /修改方案|涉及文件|详细改动/i.test(text) && extractPlanFilePaths(text).length > 0;
 }
 
 export function parsePlanDocumentDisplay(content: string): PlanDocumentDisplay {

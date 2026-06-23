@@ -133,6 +133,7 @@
       <PlanDocumentBlock
         v-if="ctx.shouldShowMessageBubble(m, ctx.hasAgentActivity(m))"
         :content="ctx.messageDisplayContent(m)"
+        :chat-mode="m.chatMode"
         :streaming="m.role === 'assistant' && ctx.isAgentRunning(m)"
         :can-execute="ctx.canExecutePlanMessage(m)"
         :enhance-layout="m.role === 'assistant' && !ctx.isAgentRunning(m)"

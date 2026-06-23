@@ -16,6 +16,7 @@
         :current-status="displayAgentStatus(msg)"
         :activity-detailed="isActivityDetailed(msg)"
         :can-execute-plan="canExecutePlan"
+        :chat-mode="msg.chatMode"
         :show-debug="showDebug"
         :debug-expanded="false"
         :tools="msg.tools"

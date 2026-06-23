@@ -5,6 +5,8 @@ import {
   claimsPrematureCompletion,
   claimsSuccessDespitePatchFailures,
   shouldNudgeAlternateUiPatchStrategy,
+  consumePatchRecoveryRead,
+  invalidateFileReadState,
   isAnalysisOnlyReplyUnderForcePatch,
   isBlockedGrepAfterLocate,
   isBlockedGrepAfterVisionMisread,
@@ -19,6 +21,7 @@ import {
   shouldNudgeEnglishPlanning,
   textConfirmsTeleportToBody,
   textIndicatesPatchAnchor,
+  type ToolGuardContext,
 } from "./agentExploreGuard";
 
 describe("agentExploreGuard", () => {
@@ -136,6 +139,26 @@ describe("agentExploreGuard", () => {
     ];
     expect(shouldNudgeAlternateUiPatchStrategy(log, "src/foo.vue")).toBe(true);
     expect(shouldNudgeAlternateUiPatchStrategy(log.slice(0, 1), "src/foo.vue")).toBe(false);
+  });
+
+  it("invalidates read caches and allows patch recovery re-read", () => {
+    const readSliceCache = new Map<string, string>([["src/foo.ts:1:50", "cached"]]);
+    const readSliceRepeatCounts = new Map<string, number>([["src/foo.ts:1:50", 2]]);
+    const readFileRanges = new Map<string, ReturnType<typeof readLineRangeFromArgs>[]>([
+      ["src/foo.ts", [readLineRangeFromArgs(1, 50)]],
+    ]);
+    const toolGuard: ToolGuardContext = {
+      readFileRanges,
+      patchRecoveryFiles: new Set(["src/foo.ts"]),
+    } as ToolGuardContext;
+
+    invalidateFileReadState("src/foo.ts", readSliceCache, readSliceRepeatCounts, readFileRanges);
+    expect(readSliceCache.size).toBe(0);
+    expect(readSliceRepeatCounts.size).toBe(0);
+    expect(readFileRanges.has("src/foo.ts")).toBe(false);
+
+    expect(consumePatchRecoveryRead(toolGuard, "src/foo.ts")).toBe(true);
+    expect(toolGuard.patchRecoveryFiles?.has("src/foo.ts")).toBe(false);
   });
 
   it("detects empty or insufficient final replies", () => {

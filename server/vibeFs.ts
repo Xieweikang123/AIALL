@@ -207,9 +207,73 @@ export type UniquePatchResult =
   | { ok: true; patched: string }
   | { ok: false; error: string; occurrences: number };
 
+function splitPatchLines(text: string): string[] {
+  return text.split(/\r?\n/);
+}
+
+function lineBody(line: string): string {
+  return line.trimStart();
+}
+
+/** Match block when only leading indent differs between read output and disk. */
+function findUniqueFlexibleIndentBlock(
+  content: string,
+  oldString: string,
+): { matched: string; start: number; end: number; matchedLines: string[]; oldLines: string[] } | null {
+  const eol = detectFileEOL(content);
+  const oldLines = splitPatchLines(oldString);
+  if (!oldLines.length || oldLines.every((line) => line.length === 0)) return null;
+
+  const contentLines = splitPatchLines(content);
+  const startLines: number[] = [];
+  for (let i = 0; i <= contentLines.length - oldLines.length; i += 1) {
+    let ok = true;
+    for (let j = 0; j < oldLines.length; j += 1) {
+      if (lineBody(contentLines[i + j] ?? "") !== lineBody(oldLines[j] ?? "")) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) startLines.push(i);
+  }
+  if (startLines.length !== 1) return null;
+
+  const startLine = startLines[0]!;
+  const matchedLines = contentLines.slice(startLine, startLine + oldLines.length);
+  const matched = matchedLines.join(eol);
+  let start = 0;
+  for (let i = 0; i < startLine; i += 1) {
+    start += (contentLines[i]?.length ?? 0) + eol.length;
+  }
+  return { matched, start, end: start + matched.length, matchedLines, oldLines };
+}
+
+function buildIndentAdaptedNewBlock(
+  matchedLines: string[],
+  oldLines: string[],
+  newString: string,
+  eol: FileEOL,
+): string {
+  const newLines = splitPatchLines(newString);
+  return newLines
+    .map((newLine, index) => {
+      const anchorLine = matchedLines[Math.min(index, matchedLines.length - 1)] ?? "";
+      const oldLine = oldLines[Math.min(index, oldLines.length - 1)] ?? "";
+      const anchorIndent = anchorLine.match(/^[\t ]*/)?.[0] ?? "";
+      const oldIndent = oldLine.match(/^[\t ]*/)?.[0] ?? "";
+      const newIndent = newLine.match(/^[\t ]*/)?.[0] ?? "";
+      const content = newLine.trimStart();
+      const relativeIndent =
+        newIndent.length >= oldIndent.length ? newIndent.slice(oldIndent.length) : "";
+      return `${anchorIndent}${relativeIndent}${content}`;
+    })
+    .join(eol);
+}
+
 /**
  * Apply a unique old_string → new_string replacement.
  * Falls back to EOL-normalized matching when read_file (LF) differs from disk (CRLF).
+ * Falls back to indent-flexible line matching when only leading whitespace differs.
  */
 export function applyUniquePatch(content: string, oldString: string, newString: string): UniquePatchResult {
   let oldToMatch = oldString;
@@ -224,16 +288,26 @@ export function applyUniquePatch(content: string, oldString: string, newString: 
   }
 
   if (occurrences === 0) {
+    const flex = findUniqueFlexibleIndentBlock(content, oldString);
+    if (flex) {
+      const eol = detectFileEOL(content);
+      const adaptedNew = buildIndentAdaptedNewBlock(flex.matchedLines, flex.oldLines, newString, eol);
+      return {
+        ok: true,
+        patched: content.slice(0, flex.start) + adaptedNew + content.slice(flex.end),
+      };
+    }
     return {
       ok: false,
-      error: "错误：old_string 在文件中未找到，请检查空格与缩进是否完全一致",
+      error:
+        "错误：old_string 在文件中未找到。请从 read_file 返回原文复制（含缩进）；可换更短且唯一的片段，或 read 更大范围后重试",
       occurrences: 0,
     };
   }
   if (occurrences > 1) {
     return {
       ok: false,
-      error: `错误：old_string 在文件中出现 ${occurrences} 次，请扩大 old_string 使匹配唯一`,
+      error: `错误：old_string 在文件中出现 ${occurrences} 次，请缩小为更短且唯一的片段`,
       occurrences,
     };
   }

@@ -2,7 +2,7 @@
   <div v-if="showPlanChrome" class="plan-document">
     <div class="plan-document-head">
       <div class="plan-document-title">
-        <span class="plan-document-badge">修改方案</span>
+        <span class="plan-document-badge">方案</span>
         <span v-if="streaming && display.isPartialPlan" class="plan-document-badge plan-document-badge--draft">
           生成中
         </span>
@@ -49,6 +49,8 @@ const props = withDefaults(
   defineProps<{
     content: string;
     canExecute?: boolean;
+    /** Only Plan mode messages use plan document chrome. */
+    chatMode?: "ask" | "build" | "plan";
     /** When true, show raw markdown only (no plan chrome / anchors). */
     streaming?: boolean;
     /** When false, skip code-block folding (e.g. while streaming). */
@@ -63,7 +65,7 @@ const emit = defineEmits<{
 
 const bodyRef = ref<HTMLElement | null>(null);
 const display = computed(() => parsePlanDocumentDisplay(props.content));
-const showPlanChrome = computed(() => display.value.isPlan);
+const showPlanChrome = computed(() => props.chatMode === "plan" && display.value.isPlan);
 const filesExpanded = computed(() => display.value.files.length <= (props.streaming ? 8 : 6));
 
 function scrollToFile(index: number) {

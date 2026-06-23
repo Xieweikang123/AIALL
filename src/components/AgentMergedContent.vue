@@ -106,6 +106,7 @@
       <PlanDocumentBlock
         v-if="displayFinalAnswer.trim()"
         :content="displayFinalAnswer"
+        :chat-mode="chatMode"
         :streaming="answerStreaming || isRunning"
         :can-execute="canExecutePlan && !isRunning && !answerStreaming"
         :enhance-layout="!isRunning && !answerStreaming"
@@ -153,6 +154,7 @@ const props = withDefaults(
     currentStatus?: string;
     activityDetailed?: boolean;
     canExecutePlan?: boolean;
+    chatMode?: "ask" | "build" | "plan";
     showDebug?: boolean;
     debugExpanded?: boolean;
     showProcess?: boolean;
