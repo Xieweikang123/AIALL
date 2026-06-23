@@ -1,35 +1,43 @@
 <template>
-  <div class="cursor-merged-content">
-    <template v-for="(block, blockIndex) in mergedBlocks" :key="block.key">
-      <AgentThoughtBlock
-        v-if="block.kind === 'thought'"
-        :block="block"
-        :streaming="false"
-        :style="{ '--block-index': blockIndex }"
-      />
-      <AgentActionBlock
-        v-else-if="block.kind === 'actions'"
-        :block="block"
-        :style="{ '--block-index': blockIndex }"
-      />
-      <p v-else-if="block.kind === 'status'" class="cursor-action planning" :style="{ '--block-index': blockIndex }"><span class="shimmer-text">{{ block.text }}</span></p>
-    </template>
+  <div class="agent-feed">
+    <details v-if="earlierTurns.length" class="agent-feed__earlier">
+      <summary class="agent-feed__earlier-label">
+        <span class="agent-feed__earlier-count">{{ earlierTurns.length }}</span>
+        <span>条更早推理</span>
+      </summary>
+      <div class="agent-feed__earlier-body">
+        <AgentTurnCard
+          v-for="turn in earlierTurns"
+          :key="turn.key"
+          :turn="turn"
+          :show-tools="false"
+          compact
+        />
+      </div>
+    </details>
 
-    <!-- 当前状态 + 调试面板（合并为可点击的一行）：流式回答已有实质内容后隐藏，避免冗余 -->
+    <AgentTurnCard
+      v-for="turn in visibleTurns"
+      :key="turn.key"
+      :turn="turn"
+      :running="turn.isLatest && isRunning"
+      :show-tools="shouldShowTurnTools(turn)"
+    />
+
     <template v-if="isRunning && currentStatus && !(answerStreaming && finalAnswer.trim().length > 50)">
       <button
         type="button"
-        class="cursor-action planning planning-clickable"
-        :class="{ 'planning-expanded': debugExpanded }"
+        class="agent-status"
+        :class="{ 'agent-status--expanded': debugExpanded }"
         @click="emit('toggle-debug')"
       >
-        <span class="planning-text shimmer-text--fast">{{ currentStatus }}</span>
-        <span v-if="showDebug" class="planning-chevron">{{ debugExpanded ? '▾' : '▸' }}</span>
+        <span class="agent-status-dot" />
+        <span class="agent-status-text shimmer-text--fast">{{ currentStatus }}</span>
+        <span v-if="showDebug" class="agent-status-chevron">{{ debugExpanded ? '▾' : '▸' }}</span>
       </button>
       <slot v-if="debugExpanded" name="debug" />
     </template>
 
-    <!-- 最终回答：运行中流式输出，完成后展示完整 Markdown -->
     <PlanDocumentBlock
       :content="finalAnswer"
       :streaming="answerStreaming || isRunning"
@@ -39,8 +47,8 @@
     >
       <ChatMarkdown
         v-if="finalAnswer.trim()"
-        class="cursor-merged-answer"
-        :class="{ 'cursor-merged-answer--streaming': answerStreaming }"
+        class="agent-answer"
+        :class="{ 'agent-answer--streaming': answerStreaming }"
         :content="markdownContent"
         :streaming="answerStreaming"
         :interactive="!isRunning"
@@ -54,9 +62,8 @@
 import { computed } from "vue";
 import ChatMarkdown from "./ChatMarkdown.vue";
 import PlanDocumentBlock from "./PlanDocumentBlock.vue";
-import AgentThoughtBlock from "./AgentThoughtBlock.vue";
-import AgentActionBlock from "./AgentActionBlock.vue";
-import { filterDuplicateFeedThoughts } from "../services/agentMessageDisplay";
+import AgentTurnCard from "./AgentTurnCard.vue";
+import { filterDuplicateFeedThoughts, isAgentToolTurnNarration } from "../services/agentMessageDisplay";
 import { enrichPlanMarkdownForDisplay } from "../services/planDocumentDisplay";
 import { stripTextToolCallMarkup } from "../services/textToolCallMarkup";
 import {
@@ -91,165 +98,224 @@ const markdownContent = computed(() =>
   }),
 );
 
-const mergedBlocks = computed<CursorFeedProcessBlock[]>(() => {
+type TurnCard = {
+  key: string;
+  text: string;
+  actions: Extract<CursorFeedProcessBlock, { kind: "actions" }>[];
+  isLatest: boolean;
+};
+
+const VISIBLE_TURN_LIMIT = 2;
+const VISIBLE_TURN_LIMIT_RUNNING = 3;
+
+const turnCards = computed<TurnCard[]>(() => {
   const items: CursorFeedItem[] = [];
   const answer = props.finalAnswer.trim();
 
   for (const group of props.roundGroups) {
-    // Turn 0 holds transient setup phases (connect / prepare). Show live status via
-    // `currentStatus` below — do not render every recorded step as permanent history.
     if (group.turn <= 0 && !group.narrative) continue;
-
     const narrativeText = stripTextToolCallMarkup(group.narrative || "").trim();
     if (narrativeText) {
-      items.push({
-        kind: "thought",
-        key: `thought-${group.turn}`,
-        text: narrativeText,
-      });
+      items.push({ kind: "thought", key: `thought-${group.turn}`, text: narrativeText });
     }
-
     for (const tool of group.tools) {
-      items.push({
-        kind: "action",
-        key: tool.id,
-        step: tool,
-      });
+      items.push({ kind: "action", key: tool.id, step: tool });
     }
   }
 
   const filtered = filterDuplicateFeedThoughts(items, answer);
-
   const detailed = props.activityDetailed === true;
   const collapseAfter = props.isRunning ? 999 : detailed ? 10 : 5;
-  return layoutCursorFeedBlocks(filtered, {
+  const blocks = layoutCursorFeedBlocks(filtered, {
     keepVisible: detailed ? 8 : 6,
     collapseAfter,
   });
+
+  const turns: TurnCard[] = [];
+  let current: TurnCard | null = null;
+
+  for (const block of blocks) {
+    if (block.kind === "thought") {
+      if (isAgentToolTurnNarration(block.text)) continue;
+      if (current) turns.push(current);
+      current = { key: block.key, text: block.text, actions: [], isLatest: false };
+    } else if (block.kind === "actions") {
+      if (current) {
+        current.actions.push(block);
+      } else if (turns.length) {
+        turns[turns.length - 1].actions.push(block);
+      } else {
+        turns.push({ key: block.key, text: "", actions: [block], isLatest: false });
+        current = turns[turns.length - 1];
+      }
+    }
+  }
+  if (current) turns.push(current);
+
+  if (turns.length) turns[turns.length - 1].isLatest = true;
+  return turns;
 });
+
+const visibleTurnLimit = computed(() =>
+  props.isRunning ? VISIBLE_TURN_LIMIT_RUNNING : VISIBLE_TURN_LIMIT,
+);
+
+const earlierTurns = computed(() => {
+  const cards = turnCards.value;
+  const limit = visibleTurnLimit.value;
+  if (props.activityDetailed || cards.length <= limit + 1) return [];
+  return cards.slice(0, cards.length - limit);
+});
+
+const visibleTurns = computed(() => {
+  const cards = turnCards.value;
+  const limit = visibleTurnLimit.value;
+  if (props.activityDetailed || cards.length <= limit + 1) return cards;
+  return cards.slice(-limit);
+});
+
+function shouldShowTurnTools(turn: TurnCard): boolean {
+  if (props.activityDetailed) return true;
+  return turn.isLatest;
+}
 </script>
 
 <style scoped>
-.cursor-merged-content {
+.agent-feed {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 0;
+  gap: 3px;
+  padding: 6px 0;
   min-width: 0;
   overflow: hidden;
 }
 
-/* Agent 活动块入场动画 */
-.cursor-thought,
-.cursor-actions-block,
-.cursor-action.planning {
-  animation: agent-block-fade-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+.agent-feed__earlier {
+  margin: 0;
 }
 
-@keyframes agent-block-fade-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* 最终回答淡入 */
-.cursor-merged-answer {
-  animation: answer-fade-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.1s both;
-}
-
-@keyframes answer-fade-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.cursor-action.planning {
+.agent-feed__earlier-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  list-style: none;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-style: normal;
-  color: rgba(139, 148, 158, 0.85);
+  font-size: 10px;
+  color: rgba(148, 163, 184, 0.45);
+  cursor: pointer;
+  user-select: none;
+  padding: 2px 8px;
+  border-radius: 4px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.agent-feed__earlier-label:hover {
+  color: rgba(148, 163, 184, 0.65);
+  background: rgba(148, 163, 184, 0.05);
+}
+
+.agent-feed__earlier-label::-webkit-details-marker {
+  display: none;
+}
+
+.agent-feed__earlier-label::before {
+  content: "▸ ";
+  font-size: 8px;
+  color: rgba(148, 163, 184, 0.25);
+}
+
+.agent-feed__earlier[open] > .agent-feed__earlier-label::before {
+  content: "▾ ";
+}
+
+.agent-feed__earlier-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  height: 12px;
+  padding: 0 3px;
+  font-size: 8px;
+  font-weight: 600;
+  color: rgba(148, 163, 184, 0.55);
+  background: rgba(148, 163, 184, 0.08);
+  border-radius: 6px;
+}
+
+.agent-feed__earlier-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+  padding-left: 4px;
+}
+
+.agent-status {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
-  background: rgba(139, 148, 158, 0.06);
-  border-radius: 6px;
-  margin: 2px 0;
-  font-size: 12px;
-}
-
-.cursor-action.planning::before {
-  content: "";
-  width: 8px;
-  height: 8px;
-  border: 1.5px solid rgba(139, 148, 158, 0.3);
-  border-top-color: rgba(139, 148, 158, 0.8);
-  border-radius: 50%;
-  animation: planning-spin 0.8s linear infinite;
-  flex-shrink: 0;
-}
-
-@keyframes planning-spin {
-  to { transform: rotate(360deg); }
-}
-
-/* 可点击状态行：状态指示器 + 调试面板合并 */
-.planning-clickable {
   width: 100%;
   border: none;
   outline: none;
   font: inherit;
-  color: inherit;
-  background: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: rgba(148, 163, 184, 0.7);
+  background: transparent;
   cursor: pointer;
-  transition: background 0.15s ease;
+  padding: 3px 8px;
+  border-radius: 4px;
   text-align: left;
-  padding: 4px 10px;
+  transition: background 0.15s ease;
 }
 
-.planning-clickable:hover {
-  background: rgba(139, 148, 158, 0.1);
+.agent-status:hover {
+  background: rgba(148, 163, 184, 0.06);
 }
 
-.planning-clickable.planning-expanded {
-  border-radius: 6px 6px 0 0;
+.agent-status--expanded {
+  border-radius: 4px 4px 0 0;
 }
 
-.planning-text {
+.agent-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(148, 163, 184, 0.4);
+  animation: status-pulse 1.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.agent-status-text {
   flex: 1;
   min-width: 0;
 }
 
-.planning-chevron {
+.agent-status-chevron {
   flex-shrink: 0;
-  font-size: 10px;
-  opacity: 0.45;
+  font-size: 9px;
+  opacity: 0.4;
   transition: opacity 0.15s ease;
-  margin-left: 4px;
 }
 
-.planning-clickable:hover .planning-chevron {
+.agent-status:hover .agent-status-chevron {
   opacity: 0.7;
 }
 
-.cursor-merged-answer {
+.agent-answer {
   margin: 4px 0 0;
   padding: 8px 12px;
-  border-radius: 8px;
+  border-radius: 6px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.cursor-merged-answer--streaming {
+.agent-answer--streaming {
   border-color: rgba(88, 166, 255, 0.22);
   box-shadow: inset 0 0 0 1px rgba(88, 166, 255, 0.06);
 }

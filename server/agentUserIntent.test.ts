@@ -16,6 +16,7 @@ import {
   isConsultativeUserPrompt,
   isImplementationStatusPrompt,
   isImplementFollowUpRun,
+  isImplementationFailureReportPrompt,
   isScreenshotVisibilityPrompt,
   isSessionAuditPrompt,
   isShortImplementPrompt,
@@ -43,6 +44,11 @@ describe("isConsultativeUserPrompt", () => {
   it("treats short evaluative follow-ups as consultative despite 优化", () => {
     expect(isConsultativeUserPrompt("需要优化吗")).toBe(true);
     expect(isConsultativeUserPrompt("要不要调整呢")).toBe(true);
+  });
+
+  it("does not treat implementation failure reports as consultative", () => {
+    expect(isImplementationFailureReportPrompt("看起来，没生效呢")).toBe(true);
+    expect(isConsultativeUserPrompt("看起来，没生效呢")).toBe(false);
   });
 
   it("treats screenshot UI defect reports as implement intent even with ？", () => {
@@ -139,6 +145,14 @@ describe("isImplementFollowUpRun", () => {
 
   it("detects 修复吧 after prior positioning analysis", () => {
     expect(isImplementFollowUpRun("修复吧", history)).toBe(true);
+  });
+
+  it("detects failure report after prior patch as implement follow-up", () => {
+    const patchHistory = [
+      { role: "user", content: "改成一个淡一点的颜色，不要突出它" },
+      { role: "assistant", content: "已修改完成。将输入框中文件引用标签的配色改为…" },
+    ];
+    expect(isImplementFollowUpRun("看起来，没生效呢", patchHistory)).toBe(true);
   });
 
   it("detects 继续改 after partial implementation", () => {

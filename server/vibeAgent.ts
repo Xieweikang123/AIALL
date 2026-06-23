@@ -706,6 +706,7 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "用户附截图询问界面/功能时：先描述截图所见，再判断是否属于本项目（优先查 src/views、src/components），勿默认是 GitHub Desktop、VS Code 等外部应用。",
     "截图中有可见文字/图标按钮时：先 grep 该文字的精确原文（如「打开项目」、「+」、「💾」），而非猜 CSS class 名或 SVG 路径；从 grep 命中可直接定位到目标文件和行号。",
     "用户针对截图局部提问（配色、按钮、某块区域）时：讨论阶段只谈其所指可见范围，勿擅自扩大到整页/全项目样式盘点；若用户明确要求修改，可在该范围内 grep/read 对应组件后 patch_file；用户明确说「整个/整页/全面板」时可按扩大后的范围实施。",
+    "截图中 Agent 回复体内的文件 chip / 工具步标签（文件名旁可能有 ×N 聚合）：优先 grep `tool-chip` 或 read 含该 class 的 Vue 组件样式段，勿用全局 theme 变量（如 --primary）臆断具体 chip 配色。",
     "若系统标注【咨询任务·只读】：用户本条仅为提问/解释，只读探索后自然语言回答，禁止 patch_file / write_file / delete_file。",
     "其余 Build 任务：一旦你判断须改代码才能满足用户（含 bug、实测与描述不符、功能/体验需求），探索完成后同一轮立即 patch_file / write_file，禁止只输出方案并问「需要我执行吗」。",
     "用户要求「点击输入框任意位置可输入/聚焦」时：先 read_file 核对父容器（如 chat-input-box）与 contenteditable 子元素的 DOM 层级与命中区域；常见修复为外层 mousedown 转发 focus 或子元素 min-height:100% 填满，勿默认只加 padding。",

@@ -21,6 +21,10 @@ const AUTOMATION_PROMPT_RE = /^\s*(?:【|\[)(?:方案执行|精准修改|效率|
 const SHORT_EVALUATIVE_FOLLOW_UP_RE =
   /^(?:需要|要不要|是否|还得|还要|值得|可以|那)?[^。！!]{0,24}(?:吗|呢)[？?]?\s*$/;
 
+/** User reports prior change did not take effect — not a read-only evaluative question. */
+const IMPLEMENTATION_FAILURE_REPORT_RE =
+  /没生效|不生效|未生效|没效果|没有效果|没变化|不起作用|试了.{0,16}(?:没有|没|不|无效)|仍然(?:没有|没|不)|还是(?:没有|没|不)/i;
+
 /** User asks whether a prior implementation task is done (progress check, not a new implement request). */
 const IMPLEMENTATION_STATUS_PROMPT_RE =
   /(?:改好|做完|写好|弄好|搞定|完成|实现好|落地)[了吗呢]?[？?]?\s*$|(?:好了吗|完成了吗|做完了吗|改完了吗)[？?]?\s*$/i;
@@ -146,8 +150,13 @@ export function isImplementFollowUpRun(
   if (!historySuggestsActiveImplementation(history)) return false;
   if (isShortImplementPrompt(text)) return true;
   if (CONTINUE_IMPLEMENT_PROMPT_RE.test(text)) return true;
+  if (isImplementationFailureReportPrompt(text)) return true;
   if (IMPLEMENT_INTENT_RE.test(text) && !isImplementationStatusPrompt(text)) return true;
   return false;
+}
+
+export function isImplementationFailureReportPrompt(prompt: string): boolean {
+  return IMPLEMENTATION_FAILURE_REPORT_RE.test(prompt.trim());
 }
 
 export function isConsultativeUserPrompt(prompt: string): boolean {
@@ -156,6 +165,7 @@ export function isConsultativeUserPrompt(prompt: string): boolean {
   if (AUTOMATION_PROMPT_RE.test(text)) return false;
   if (isUiDefectReportPrompt(text)) return false;
   if (isAgentStepClarificationPrompt(text)) return false;
+  if (isImplementationFailureReportPrompt(text)) return false;
   if (SHORT_EVALUATIVE_FOLLOW_UP_RE.test(text)) return true;
   if (IMPLEMENT_INTENT_RE.test(text)) return false;
   if (ACCURACY_CONSULTATIVE_RE.test(text)) return true;
