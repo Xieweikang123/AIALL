@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildControlInnerProportionHint,
   buildModelIdentityHint,
   buildUiScopeFollowUpHint,
   buildVisionBuildContinueHint,
@@ -14,6 +15,9 @@ import {
   isPrematureVisionCompletionClaim,
   isUiPositioningBugPrompt,
   isVisionUnsupportedError,
+  mentionsControlProportionImbalance,
+  suggestsVisibleShellEmptyInner,
+  buildVisibleShellEmptyInnerHint,
   sanitizeImageDataUrls,
   shouldRequireVisionFirstTurn,
   suggestsEmbeddedLayoutMisread,
@@ -241,5 +245,47 @@ describe("visionMessage", () => {
     expect(text).toContain("实施时");
     expect(text).toContain("grep");
     expect(text).not.toMatch(/src\/views|VibeCoding/);
+  });
+
+  it("buildVisionTaskText adds control inner proportion hint for UI feedback with images", () => {
+    const text = buildVisionTaskText("你看效果", 1);
+    expect(text).toContain("控件内外比例");
+    expect(text).toContain("内外比例失衡");
+    expect(text).toContain("svg width/height");
+  });
+
+  it("buildVisionFirstTurnRule requires inner/outer proportion for composite controls", () => {
+    const text = buildVisionTaskText("这段报错什么意思", 1);
+    expect(text).toContain("内外比例失衡");
+  });
+
+  it("mentionsControlProportionImbalance detects proportion language in vision text", () => {
+    expect(
+      mentionsControlProportionImbalance(
+        "外框偏大而内层图标明显偏小，内外比例失衡 [图已理解]",
+      ),
+    ).toBe(true);
+    expect(mentionsControlProportionImbalance("截图中有蓝色圆形按钮 [图已理解]")).toBe(false);
+  });
+
+  it("buildVisionBuildContinueHint nudges dual-layer patch when proportion imbalance noted", () => {
+    const vision =
+      "圆形按钮外框占满画面，内层箭头图标相对外框偏小，内外比例失衡 [图已理解]";
+    const hint = buildVisionBuildContinueHint(vision, "你看效果");
+    expect(hint).toContain("内外比例问题");
+    expect(hint).toContain("SVG");
+  });
+
+  it("buildControlInnerProportionHint stays generic without feature names", () => {
+    const hint = buildControlInnerProportionHint();
+    expect(hint).toContain("stroke-width");
+    expect(hint).not.toMatch(/ChatPanel|scroll-to-bottom|回到最新/);
+  });
+
+  it("detects visible shell with empty inner content from vision text", () => {
+    const vision = "深色圆底按钮容器可见，但箭头图标不可见 [图已理解]";
+    expect(suggestsVisibleShellEmptyInner(vision)).toBe(true);
+    expect(buildVisionBuildContinueHint(vision, "优化按钮")).toContain("内层渲染");
+    expect(buildVisibleShellEmptyInnerHint()).not.toMatch(/scroll-to-bottom|回到最新/);
   });
 });

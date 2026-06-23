@@ -9,9 +9,12 @@ import {
   buildExploreInterimDiagnosisNudge,
   buildGrepEmptyRecoveryNudge,
   buildPatchAnchorForcePatchNudge,
+  buildPatchFailureCompletionRetryNudge,
+  buildExplorationArchiveWriteBlockedMessage,
   buildSameIssueFollowUpForceSummaryNudge,
   buildSameIssueFollowUpHint,
   buildUiDefectForcePatchNudge,
+  buildUiSymptomDiagnosisHint,
   CONSULTATIVE_BUILD_EXPLORE_TURN_BUDGET,
   EXECUTE_PLAN_EXPLORE_TURN_BUDGET,
   EXPLORE_INTERIM_DIAGNOSIS_TURN,
@@ -90,7 +93,14 @@ describe("agentExplorationBudget", () => {
     expect(SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE).toBeLessThan(10);
     expect(buildSameIssueFollowUpHint()).toContain("同问题追问");
     expect(buildSameIssueFollowUpHint()).toContain("运行时入口");
-    expect(buildSameIssueFollowUpHint()).not.toContain(".aiall/exploration");
+    expect(buildSameIssueFollowUpHint()).toContain("分症状排查");
     expect(buildSameIssueFollowUpForceSummaryNudge(8)).toContain("结构化结论");
+  });
+
+  it("builds patch failure completion and exploration write block messages", () => {
+    expect(buildPatchFailureCompletionRetryNudge(["src/foo.ts"], ["src/bar.ts"])).toContain("patch_file 失败");
+    expect(buildPatchFailureCompletionRetryNudge(["src/foo.ts"], [])).toContain("src/foo.ts");
+    expect(buildExplorationArchiveWriteBlockedMessage()).toContain("探索笔记");
+    expect(buildUiSymptomDiagnosisHint()).toContain("overflow-y:auto");
   });
 });

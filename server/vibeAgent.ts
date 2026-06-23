@@ -55,6 +55,10 @@ import {
   buildUserFailureReportNudge,
   buildSameIssueFollowUpHint,
   buildSameIssueFollowUpForceSummaryNudge,
+  buildPatchFailureCompletionRetryNudge,
+  buildExplorationArchiveWriteBlockedMessage,
+  buildAlternateUiPatchStrategyNudge,
+  isExplorationArchivePath,
   EXECUTE_PLAN_EXPLORE_TURN_BUDGET,
   EXPLORE_INTERIM_DIAGNOSIS_TURN,
   INTERACTIVE_EXPLORE_TURN_BUDGET,
@@ -86,6 +90,8 @@ import {
   checkOverlappingRead,
   checkPatchOldStringFromReads,
   claimsPrematureCompletion,
+  claimsSuccessDespitePatchFailures,
+  shouldNudgeAlternateUiPatchStrategy,
   isEmptyOrInsufficientFinalReply,
   isAnalysisOnlyReplyUnderForcePatch,
   isBlockedGrepAfterLocate,
@@ -1122,6 +1128,9 @@ export async function executeTool(
     if (typeof content !== "string") return "错误：缺少 content";
     const resolved = resolveProjectPath(root, filePath);
     if (!resolved.ok) return `错误：${resolved.error}`;
+    if (toolGuard?.blockExplorationArchiveWrite && isExplorationArchivePath(resolved.relative)) {
+      return buildExplorationArchiveWriteBlockedMessage();
+    }
     const stat = await fs.promises.stat(resolved.path).catch(() => null);
     const existsOnDisk = !!stat?.isFile();
     const readErr = requirePriorRead(stage, resolved.relative, existsOnDisk);
@@ -1566,6 +1575,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     teleportBodyConfirmed: false,
     visionAnchorQuotes: [],
     visionLocateActive: false,
+    blockExplorationArchiveWrite:
+      sameIssueFollowUpRun && (userFailureReportRun || userRecentlyReportedFailure),
   };
   let consecutiveExploreTurns = 0;
   let totalExploreTurns = 0;
@@ -1589,8 +1600,10 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   let consecutiveUserNegations = 0;
   let emptyReplyRetries = 0;
   let prematureCompletionRetries = 0;
+  let patchFailureCompletionRetries = 0;
   const MAX_EMPTY_REPLY_RETRIES = 2;
   const MAX_PREMATURE_COMPLETION_RETRIES = 1;
+  const MAX_PATCH_FAILURE_COMPLETION_RETRIES = 1;
   let negationNudgeSent = false;
   const activeTools = isAsk || isPlanExplore || readOnlyBuildRun ? READ_ONLY_AGENT_TOOLS : VIBE_AGENT_TOOLS;
   const userContent = buildVisionUserContent(prompt, imageDataUrls);
@@ -2240,7 +2253,10 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       if (
         claimsPrematureCompletion(rawText) &&
         prematureCompletionRetries < MAX_PREMATURE_COMPLETION_RETRIES &&
-        (userRecentlyReportedFailure || codeReviewRun || userFailureReportRun)
+        (userRecentlyReportedFailure ||
+          codeReviewRun ||
+          userFailureReportRun ||
+          sameIssueFollowUpRun)
       ) {
         prematureCompletionRetries += 1;
         messages.push({ role: "assistant", content: rawText });
@@ -2267,6 +2283,45 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
             ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
             model,
             detail: "过早宣称完成，已要求证据式核对",
+          },
+        });
+        continue;
+      }
+
+      const failedPatchPaths = [...new Set(patchFailureLog.map((entry) => entry.path).filter(Boolean))];
+      const successPatchPaths = writeStage?.writtenList.map((entry) => entry.key).filter(Boolean) ?? [];
+      if (
+        !isAsk &&
+        writeStage &&
+        patchFailureLog.length > 0 &&
+        claimsSuccessDespitePatchFailures(rawText, patchFailureLog.length) &&
+        patchFailureCompletionRetries < MAX_PATCH_FAILURE_COMPLETION_RETRIES
+      ) {
+        patchFailureCompletionRetries += 1;
+        messages.push({ role: "assistant", content: rawText });
+        messages.push({
+          role: "system",
+          content: buildPatchFailureCompletionRetryNudge(failedPatchPaths, successPatchPaths),
+        });
+        onEvent({
+          type: "turn_response",
+          data: {
+            turn,
+            ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+            assistantText: userText,
+            toolCalls: [],
+            hasToolCalls: false,
+            isFinal: false,
+          },
+        });
+        onEvent({
+          type: "status",
+          data: {
+            phase: "patch_failure_completion_retry",
+            turn,
+            ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+            model,
+            detail: "存在 patch 失败却宣称完成，已要求如实审计",
           },
         });
         continue;
@@ -2588,6 +2643,11 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
           "old_string 未在目标文件中匹配到。请立即用 read_file 重新读取目标文件的相关片段，" +
           "确认当前磁盘内容后再用精确的 old_string 重试 patch_file。禁止凭记忆或之前读取的内容构造 old_string。",
       });
+      for (const path of new Set(thisTurnPatchFailures.map((f) => f.path).filter(Boolean))) {
+        if (shouldNudgeAlternateUiPatchStrategy(patchFailureLog, path)) {
+          messages.push({ role: "system", content: buildAlternateUiPatchStrategyNudge(path) });
+        }
+      }
     }
 
     const turnHadProductiveWrite = toolCalls.some((call) => callIsProductiveWrite(call));

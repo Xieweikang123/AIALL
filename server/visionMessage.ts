@@ -29,7 +29,7 @@ export const UI_REQUIREMENT_SPEC_RE =
 
 /** Layout/spacing feedback often paired with screenshots ("你看挤一块了"). */
 const UI_LAYOUT_FEEDBACK_RE =
-  /挤|贴|挨|重叠|太紧|间距|spacing|overlap|cramped|你看|看一下|一块|不好看|丑/i;
+  /挤|贴|挨|重叠|太紧|间距|spacing|overlap|cramped|你看|看一下|一块|不好看|丑|效果|太小|太大|偏小|偏大|比例|不协调/i;
 
 /** Control rendered at wrong screen coordinates (often fixed/Teleport overlay, not flex). */
 export const UI_POSITIONING_BUG_RE =
@@ -86,6 +86,17 @@ export function buildFloatingControlPositioningHint(): string {
   ].join("");
 }
 
+/** Icon/label vs outer control shell — common in screenshot UI feedback. */
+export function buildControlInnerProportionHint(): string {
+  return [
+    "【控件内外比例】读图时若见按钮、徽章、chip、带图标的圆形/方形控件等复合元素：",
+    "须分别描述外框（容器）与内层（图标、箭头、文字、徽标）的相对大小与视觉权重；",
+    "若外框明显偏大/占满画面而内层图标或文字显得过小、过细、留白过多，须明确写出「内外比例失衡」及哪一层偏大/偏小，",
+    "勿只并列「有大容器和小图标」却不作比例判断；若外框正常仅内层偏小/偏细，也要单独点出。",
+    "后续改代码时须同时核对容器尺寸（width/height/padding）与内层尺寸（svg width/height、font-size、stroke-width），勿只改其中一层。",
+  ].join("");
+}
+
 export function isUiPositioningBugPrompt(text: string): boolean {
   const body = text.trim();
   if (!body) return false;
@@ -138,6 +149,14 @@ export function buildVisionUiLocateHint(anchorQuotes: string[]): string {
 export function buildVisionBuildContinueHint(visionDescription: string, userPrompt: string): string {
   const parts = [buildVisionFirstTurnContinueHint()];
   parts.push(buildVisionUiLocateHint(extractVisibleAnchorQuotes(visionDescription)));
+  if (mentionsControlProportionImbalance(visionDescription)) {
+    parts.push(
+      "【读图已指出内外比例问题】下一轮 read_file 须同时覆盖容器样式与内层 SVG/字体尺寸，patch 时两层一起调整，勿只改 width/height 或只改图标其一。",
+    );
+  }
+  if (suggestsVisibleShellEmptyInner(visionDescription)) {
+    parts.push(buildVisibleShellEmptyInnerHint());
+  }
   if (isUiPositioningBugPrompt(userPrompt) || UI_POSITIONING_BUG_RE.test(visionDescription)) {
     parts.push(buildFloatingControlPositioningHint());
   }
@@ -154,13 +173,39 @@ export function buildVisionFirstTurnRule(): string {
     "【附图·首轮必读图】你必须先仔细查看附带图片，用中文描述所见：",
     "- 先说明截图对应应用中的哪一块（模块/面板/区域）；画面若只裁到局部，也要根据占位符、按钮、标签等可见文案推断归属；",
     "- 须引用图中可辨识的占位符或标签原文（用「」括起），并写明「据此可判断这是 …」；",
-    "- 再补充控件类型、布局关系；若用户反馈拥挤/重叠/不好看，须点名哪两个（或哪组）元素及其关系。",
+    "- 再补充控件类型、布局关系；若用户反馈拥挤/重叠/不好看，须点名哪两个（或哪组）元素及其关系；",
+    "- 若控件含图标、文字或徽章等内嵌内容，须描述外框与内层的相对大小；内外明显不匹配时须点明「内外比例失衡」及哪一层偏大/偏小，勿只罗列元素类型而不作比例判断。",
     "本轮禁止调用任何工具；仅输出读图描述，下一轮可用 grep 图中摘录的文案定位源码。",
     "读图首轮禁止写「已修改/已修复/已添加/已做」等完成时态，禁止描述尚未执行的 patch。",
     "布局问题后续修改时：底栏内元素拥挤查 flex-shrink、min-width、overflow、gap、margin；若控件与选区/焦点在空间上分离，优先怀疑 position:fixed/absolute 或 Teleport 浮层错位，勿误判为 flex。",
     "点击/聚焦问题另查 DOM 层级与 focus 转发，勿默认只加 padding。",
     "当你真正理解了截图内容后，在描述末尾加上暗号 [图已理解]。只有加上此暗号，才表示你已完成读图。",
   ].join("\n");
+}
+
+/** Vision text flagged inner/outer scale mismatch for follow-up locate hints. */
+export function mentionsControlProportionImbalance(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  return /内外比例|比例失衡|内层.{0,12}(偏小|偏细|过小)|外框.{0,12}(偏大|过大)|图标.{0,12}(偏小|过小|偏细)|文字.{0,12}(偏小|过小)|相对.{0,8}(偏小|过大|失衡)/i.test(
+    trimmed,
+  );
+}
+
+/** Container visible in screenshot but inner symbol/text appears missing or clipped. */
+export function suggestsVisibleShellEmptyInner(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  return /(?:外框|圆|容器|按钮).{0,24}(?:可见|在渲染|出现).{0,24}(?:箭头|图标|文字|符号|内容).{0,16}(?:不可见|看不到|空白|被裁|没有)|(?:箭头|图标|文字|符号).{0,16}(?:不可见|看不到|空白|没有).{0,24}(?:外框|圆|容器|按钮)/i.test(
+    trimmed,
+  );
+}
+
+export function buildVisibleShellEmptyInnerHint(): string {
+  return [
+    "【读图·内外层】外框可见但内层符号/文字不可见：优先改内层渲染（text 字符、SVG 尺寸/stroke、font-size/line-height），",
+    "勿再改外层 position/bottom；除非 read 证明控件不在 viewport 或被 overflow 裁切。",
+  ].join("");
 }
 
 export function buildVisionFirstTurnContinueHint(): string {
@@ -188,7 +233,8 @@ export function buildVisionFirstTurnRetryHint(): string {
   return [
     "【附图首轮】读图描述不合格：过短，或只描述了外观却没有说明截图对应哪块界面。",
     "请重新查看附图：引用占位符/标签原文，并写明据此判断属于哪个模块或区域；",
-    "若画面只裁到局部，也要根据可见文案推断，不要只复述颜色与边框。本轮仍不要调用工具。",
+    "若画面只裁到局部，也要根据可见文案推断，不要只复述颜色与边框；",
+    "复合控件（按钮/徽章等）还须说明外框与内层图标/文字的比例是否失衡。本轮仍不要调用工具。",
     "真正理解截图后，在末尾加上暗号 [图已理解]。",
   ].join("");
 }
@@ -299,6 +345,7 @@ export function buildVisionTaskText(text: string, imageCount: number): string {
     UI_CLICK_FOCUS_INTERACTION_RE.test(body) ||
     UI_REQUIREMENT_SPEC_RE.test(body) ||
     isUiPositioningBugPrompt(body);
+  const proportionHint = isUiQuestion ? `\n\n${buildControlInnerProportionHint()}` : "";
   if (!isUiQuestion) {
     return `${firstTurnRule}${clickFocusHint}${positioningHint}\n\n${body}`;
   }
@@ -314,7 +361,7 @@ export function buildVisionTaskText(text: string, imageCount: number): string {
     ? "读图描述须先根据占位符/标签说明截图是哪块界面，下一轮再 grep 该文案并在对应源码内修改；修改前先 read_file 父/子 DOM 层级，勿在未读代码前声称已改完。"
     : "读图须说明截图对应哪块界面（可据占位符/标签推断），并覆盖用户所指可见范围；不要跳过读图先去全盘 grep/search。";
   const prefix = `【附图为本消息重点】${scopeRule} ${toolHint} 定位须从截图可见原文或 grep 命中出发，勿猜组件文件名或固定目录。`;
-  return `${firstTurnRule}${clickFocusHint}${positioningHint}\n\n${prefix}\n\n${body}`;
+  return `${firstTurnRule}${clickFocusHint}${positioningHint}${proportionHint}\n\n${prefix}\n\n${body}`;
 }
 
 /**

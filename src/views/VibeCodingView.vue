@@ -278,6 +278,7 @@
         @apply-example="applyExample"
         @apply-suggestion="handleAgentSuggestion"
         @on-chat-scroll="onChatScroll"
+        @scroll-to-bottom="scrollChatToBottom(true)"
         @clear-pending-queue="clearPendingPromptQueue"
         @update:quoted-messages="quotedMessages = $event"
         @on-composer-field-keydown="onComposerFieldKeydown"
@@ -390,7 +391,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from "vue";
 import "../styles/vibe-coding.scss";
-import { appendStatusDetail, assistantTransientUiClearPatch, truncateDiffPreview, cleanStatusLogText, formatCharCount, isNetworkError, fileName, genId, hasAgentProcessSteps, entryToNode, formatToolMeta, syncRoundGroupsPatch } from "../utils/vibeHelpers";
+import { appendStatusDetail, assistantTransientUiClearPatch, truncateDiffPreview, cleanStatusLogText, CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount, isNetworkError, fileName, genId, hasAgentProcessSteps, entryToNode, formatToolMeta, syncRoundGroupsPatch } from "../utils/vibeHelpers";
 import { debugLog } from "../utils/debugLog";
 import { sessionDiag } from "../utils/sessionDiagLog";
 import ChatComposerEditor, { COMPOSER_PENDING_DRAFT_KEY } from "../components/ChatComposerEditor.vue";
@@ -827,7 +828,6 @@ const chatError = ref("");
 const editorPanelRef = ref<InstanceType<typeof EditorPanel> | null>(null);
 const workspaceRef = ref<HTMLElement | null>(null);
 let scrollChatRaf = 0;
-const CHAT_SCROLL_PIN_THRESHOLD = 80;
 let chatPinnedToBottom = true;
 const chatPanelRef = ref<InstanceType<typeof ChatPanel> | null>(null);
 const pendingPromptQueue = ref<string[]>([]);
@@ -1202,7 +1202,7 @@ function loadSavedProject() {
 function isChatNearBottom(): boolean {
   const el = chatPanelRef.value?.chatScrollRef;
   if (!el) return true;
-  return el.scrollHeight - el.scrollTop - el.clientHeight <= CHAT_SCROLL_PIN_THRESHOLD;
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= CHAT_SCROLL_BOTTOM_THRESHOLD;
 }
 
 function onChatScroll() {

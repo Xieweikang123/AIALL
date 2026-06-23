@@ -130,6 +130,8 @@ export type ToolGuardContext = {
   visionAnchorQuotes?: string[];
   /** Post-vision UI locate phase — enforce anchor-first grep and read-validated patch. */
   visionLocateActive?: boolean;
+  /** Block exploration archive writes during same-issue failure follow-up. */
+  blockExplorationArchiveWrite?: boolean;
 };
 
 /** Grep patterns that carry structural/code signals (class names, attributes, symbols). */
@@ -215,15 +217,45 @@ const WRITE_DONE_RE = /已(?:经)?(?:修复|修改|写入|调整|完成)|改动(
 
 /** Rubber-stamp self-check without evidence — structural patterns, not feature-specific. */
 const PREMATURE_COMPLETION_RE =
-  /(?:全部|所有).{0,10}(?:正确|无误|完成|落盘)|无需再改|链路完整|无逻辑漏洞|可以启动测试|代码质量检查|均(?:已)?(?:正确|完成)|都(?:已)?(?:正确|完成)/i;
+  /(?:全部|所有).{0,10}(?:正确|无误|完成|落盘)|无需再改|无需修改|链路完整|无逻辑漏洞|可以启动测试|代码质量检查|均(?:已)?(?:正确|完成)|都(?:已)?(?:正确|完成)/i;
 
 const FALSE_VERIFICATION_PASS_RE =
   /检查完成|核对完成|验证通过|自检.{0,6}(?:通过|完成)|.{0,6}✅.{0,6}正确/i;
 
+/** Static review declares no change needed or no defect — without runtime verification. */
+const UNVERIFIED_ALL_CLEAR_RE =
+  /(?:没有|无)\s*bug|应(?:该)?(?:能)?正常(?:工作)?|代码(?:逻辑|结构).{0,20}(?:正确|没问题)|结论：.{0,24}(?:没有|无)\s*bug|审查结果.{0,16}无需修改/i;
+
+/** Reply claims write/patch success — used with patch failure audit. */
+const WRITE_SUCCESS_CLAIM_RE =
+  /(?:✅|修复完成|修改已完成|已完成|改动已全部|全部到位|两处修改|三处修改|均已?成功|patch\s*均成功)/i;
+
 export function claimsPrematureCompletion(text: string): boolean {
   const body = sanitizeAgentUserVisibleText(text);
   if (!body) return false;
-  return PREMATURE_COMPLETION_RE.test(body) || (FALSE_VERIFICATION_PASS_RE.test(body) && /✅|无误|正确/.test(body));
+  return (
+    PREMATURE_COMPLETION_RE.test(body) ||
+    UNVERIFIED_ALL_CLEAR_RE.test(body) ||
+    (FALSE_VERIFICATION_PASS_RE.test(body) && /✅|无误|正确/.test(body))
+  );
+}
+
+/** True when assistant claims overall success while patch_file failures exist in the run. */
+export function claimsSuccessDespitePatchFailures(text: string, patchFailureCount: number): boolean {
+  if (patchFailureCount <= 0) return false;
+  const body = sanitizeAgentUserVisibleText(text);
+  if (!body) return false;
+  return WRITE_SUCCESS_CLAIM_RE.test(body) || claimsPrematureCompletion(body);
+}
+
+/** Same file failed patch twice or more — likely repeating the same wrong strategy. */
+export function shouldNudgeAlternateUiPatchStrategy(
+  patchFailureLog: Array<{ path: string; reason: string }>,
+  filePath: string,
+): boolean {
+  const failures = patchFailureLog.filter((entry) => entry.path === filePath);
+  if (failures.length < 2) return false;
+  return failures.every((entry) => /old_string|未出现|未匹配|禁止凭记忆/.test(entry.reason));
 }
 
 export function isEmptyOrInsufficientFinalReply(text: string): boolean {

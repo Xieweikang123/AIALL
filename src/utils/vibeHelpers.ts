@@ -328,3 +328,6 @@ export function syncRoundGroupsPatch(msg: { roundGroups?: AgentRoundGroup[] }): 
     })),
   };
 }
+
+/** 聊天消息区「视为在底部」的 scroll 余量（px），ChatPanel 与 VibeCodingView 共用 */
+export const CHAT_SCROLL_BOTTOM_THRESHOLD = 80;

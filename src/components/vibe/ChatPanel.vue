@@ -78,7 +78,8 @@
       </div>
     </div>
 
-    <div ref="chatScrollRef" class="chat-scroll" @scroll="$emit('on-chat-scroll')">
+    <div class="chat-scroll-wrap">
+      <div ref="chatScrollRef" class="chat-scroll" @scroll="onScroll">
       <div v-if="switchingProject" class="chat-switching">
         <span class="chat-switching-spinner" aria-hidden="true">⟳</span>
         <span class="shimmer-text--fast">正在加载项目…</span>
@@ -114,6 +115,23 @@
 
       <div v-else class="msg-list">
         <slot name="messages"></slot>
+      </div>
+      </div>
+
+      <div class="chat-scroll-overlay" aria-hidden="true">
+        <transition name="stb-fade">
+          <button
+            v-if="showScrollToBottom"
+            type="button"
+            class="scroll-to-bottom-btn"
+            @click="scrollToBottom"
+            title="回到最新消息"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+        </transition>
       </div>
     </div>
 
@@ -527,7 +545,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, withDefaults, type CSSProperties } from "vue";
+import { ref, computed, watch, nextTick, onMounted, onUnmounted, withDefaults, type CSSProperties } from "vue";
 import type { VibeChatMode } from "../../services/vibeAgentClient";
 import type { AgentSuggestion } from "../../services/agentSuggestions";
 import type { PendingMemoryProposal } from "../../services/projectMemoryProposal";
@@ -535,7 +553,7 @@ import type { PendingSkillProposal } from "../../services/projectSkillProposal";
 import type { ExplorationIndexEntry, SkillIndexEntry, SkillKind } from "../../services/projectSkills";
 import type { ProjectMemoryTab } from "../../composables/useProjectMemory";
 import type { VibeChatSessionMeta } from "../../services/vibeChatStorage";
-import { formatCharCount } from "../../utils/vibeHelpers";
+import { CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount } from "../../utils/vibeHelpers";
 import { resolveAgentResumeButtonLabel } from "../../services/agentRecovery";
 import { renderMarkdown } from "../../utils/renderMarkdown";
 
@@ -716,6 +734,7 @@ const emit = defineEmits<{
   (e: "on-chat-input-box-mousedown"): void;
   (e: "select-mention", item: MentionItem): void;
   (e: "on-chat-scroll"): void;
+  (e: "scroll-to-bottom"): void;
   (e: "on-chat-drag-enter", event: DragEvent): void;
   (e: "on-chat-drag-over", event: DragEvent): void;
   (e: "on-chat-drag-leave", event: DragEvent): void;
@@ -742,6 +761,54 @@ const emit = defineEmits<{
 
 const chatScrollRef = ref<HTMLElement | null>(null);
 const chatDropZoneRef = ref<HTMLElement | null>(null);
+
+const isAtBottom = ref(true);
+const showScrollToBottom = computed(() => !isAtBottom.value && props.chatMessages.length > 0);
+
+function checkScrollPosition() {
+  const el = chatScrollRef.value;
+  if (!el) { isAtBottom.value = true; return; }
+  isAtBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight <= CHAT_SCROLL_BOTTOM_THRESHOLD;
+}
+
+function onScroll() {
+  checkScrollPosition();
+  emit("on-chat-scroll");
+}
+
+function scrollToBottom() {
+  const el = chatScrollRef.value;
+  if (!el) return;
+  el.scrollTop = el.scrollHeight;
+  isAtBottom.value = true;
+  emit("on-chat-scroll");
+  emit("scroll-to-bottom");
+}
+
+watch(
+  () => [props.chatMessages.length, props.switchingSession, props.chatSending] as const,
+  () => {
+    if (props.switchingSession) return;
+    void nextTick(() => checkScrollPosition());
+  },
+);
+
+let scrollResizeObserver: ResizeObserver | null = null;
+
+onMounted(() => {
+  void nextTick(() => {
+    checkScrollPosition();
+    const el = chatScrollRef.value;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    scrollResizeObserver = new ResizeObserver(() => checkScrollPosition());
+    scrollResizeObserver.observe(el);
+  });
+});
+
+onUnmounted(() => {
+  scrollResizeObserver?.disconnect();
+  scrollResizeObserver = null;
+});
 
 defineExpose({ chatScrollRef });
 
@@ -825,11 +892,28 @@ function removeQuotedMessage(index: number) {
   cursor: not-allowed;
 }
 
+.chat-scroll-wrap {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-scroll-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
 .chat-scroll {
   flex: 1;
   overflow-y: auto;
   overflow-x: clip;
   padding: 16px;
+  position: relative;
 }
 
 .chat-empty {
@@ -1571,5 +1655,58 @@ function removeQuotedMessage(index: number) {
 }
 .test-notify-btn:hover {
   opacity: 1;
+}
+
+.scroll-to-bottom-btn {
+  pointer-events: auto;
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1.5px solid rgba(88, 166, 255, 0.3);
+  border-radius: 50%;
+  background: rgba(8, 18, 36, 0.82);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: rgba(126, 182, 255, 0.96);
+  font-size: 0;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.3),
+    0 0 12px rgba(56, 136, 255, 0.15);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.scroll-to-bottom-btn:hover {
+  background: rgba(14, 28, 48, 0.92);
+  border-color: rgba(100, 176, 255, 0.55);
+  color: rgba(150, 200, 255, 1);
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.35),
+    0 0 18px rgba(56, 136, 255, 0.25);
+  transform: translateX(-50%) translateY(-1px);
+}
+
+.scroll-to-bottom-btn:active {
+  transform: translateX(-50%) translateY(0);
+  transition-duration: 0.08s;
+}
+
+.stb-fade-enter-active,
+.stb-fade-leave-active {
+  transition: opacity 0.25s ease, transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.stb-fade-enter-from,
+.stb-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
 }
 </style>

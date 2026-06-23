@@ -282,7 +282,44 @@ export function buildUserFailureReportNudge(): string {
     "【实测失败反馈】用户报告先前改动未达预期（试了不行/没有效果等）。",
     "禁止再次输出「已完成/无需再改」式总结；须：①承认未验证或仍失败；②列出与预期不符的具体点；③给出下一步排查或不同方案。",
     "若涉及原生/系统能力，先确认运行环境（Web dev vs 桌面壳）是否匹配测试方式。",
+    buildUiSymptomDiagnosisHint(),
   ].join("\n");
+}
+
+/** Structural UI symptom checklist — not bound to any specific feature. */
+export function buildUiSymptomDiagnosisHint(): string {
+  return [
+    "【UI 分症状排查】禁止在同一文件反复微调 position/bottom/sticky 组合；按序核对：",
+    "① v-if/显示条件与 scroll/resize 事件是否更新；② 控件是否在 overflow-y:auto 子树内（改 overlay sibling）；",
+    "③ 外框可见但符号/文字空白则改内层渲染（text/SVG 尺寸），勿只改定位；④ 给出用户可复现验证步骤。",
+  ].join("");
+}
+
+/** patch_file failed but assistant claimed overall success — force honest audit. */
+export function buildPatchFailureCompletionRetryNudge(
+  failedPaths: string[],
+  successPaths: string[],
+): string {
+  const failed = failedPaths.filter(Boolean).join("、") || "未知";
+  const success = successPaths.filter(Boolean).join("、") || "无";
+  return [
+    "【系统强制·修改审计】你宣称已完成，但本轮会话存在 patch_file 失败，禁止把部分成功说成「全部完成」。",
+    `失败文件：${failed}；已成功：${success}。`,
+    "须列出失败项与原因（old_string 不匹配等），read 后重试 patch 或换方案；若用户仍报告无效，用分症状排查，禁止「无需修改/没有 bug」。",
+  ].join("");
+}
+
+export function buildExplorationArchiveWriteBlockedMessage(): string {
+  return "错误：同问题追问且用户报告仍失败时，禁止 write_file 探索笔记；请直接 patch 源码或输出分症状结论。";
+}
+
+/** Repeated patch failures on one file — switch strategy instead of tweaking CSS. */
+export function buildAlternateUiPatchStrategyNudge(filePath: string): string {
+  return [
+    `【系统提示】${filePath} 已连续多次 patch_file 失败（old_string 不匹配）。`,
+    "禁止凭记忆再构造 old_string；须 read_file 含目标段落后重试。",
+    "若属 UI 浮层/滚动区问题，考虑换 overlay sibling 方案，勿再微调同一组 position/bottom。",
+  ].join("");
 }
 
 /** Same-thread follow-up after assistant claimed a fix — must connect prior scope before re-exploring. */
@@ -296,6 +333,7 @@ export function buildSameIssueFollowUpHint(): string {
     "④ 若前轮修复不完整须显式承认并扩大范围；禁止再次无验证「修复完成」。",
     "⑤ 探索预算收紧：基于会话已有上下文优先 patch 或分症状结论，禁止从零广搜全链路。",
     "禁止 write_file 写探索笔记或归档 markdown；结论直接用于 patch 或用户可见回复。",
+    buildUiSymptomDiagnosisHint(),
   ].join("\n");
 }
 

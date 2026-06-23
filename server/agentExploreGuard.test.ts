@@ -3,6 +3,8 @@ import {
   checkOverlappingRead,
   checkPatchOldStringFromReads,
   claimsPrematureCompletion,
+  claimsSuccessDespitePatchFailures,
+  shouldNudgeAlternateUiPatchStrategy,
   isAnalysisOnlyReplyUnderForcePatch,
   isBlockedGrepAfterLocate,
   isBlockedGrepAfterVisionMisread,
@@ -115,7 +117,25 @@ describe("agentExploreGuard", () => {
   it("detects premature completion claims", () => {
     expect(claimsPrematureCompletion("检查完成，所有修改都正确无误 ✅")).toBe(true);
     expect(claimsPrematureCompletion("无需再改，链路完整")).toBe(true);
+    expect(claimsPrematureCompletion("结论：当前代码没有 bug，无需修改")).toBe(true);
+    expect(claimsPrematureCompletion("代码逻辑和 DOM 结构审查结果如下，应正常工作")).toBe(true);
     expect(claimsPrematureCompletion("已修复 foo.ts，改动如下")).toBe(false);
+  });
+
+  it("detects success claims despite patch failures", () => {
+    expect(claimsSuccessDespitePatchFailures("✅ 两处修改已完成", 1)).toBe(true);
+    expect(claimsSuccessDespitePatchFailures("结论：当前代码没有 bug", 2)).toBe(true);
+    expect(claimsSuccessDespitePatchFailures("仍需 read 后再 patch", 1)).toBe(false);
+    expect(claimsSuccessDespitePatchFailures("✅ 修复完成", 0)).toBe(false);
+  });
+
+  it("nudges alternate UI patch strategy after repeated failures on same file", () => {
+    const log = [
+      { path: "src/foo.vue", reason: "old_string 未出现在已读片段中" },
+      { path: "src/foo.vue", reason: "old_string 未匹配" },
+    ];
+    expect(shouldNudgeAlternateUiPatchStrategy(log, "src/foo.vue")).toBe(true);
+    expect(shouldNudgeAlternateUiPatchStrategy(log.slice(0, 1), "src/foo.vue")).toBe(false);
   });
 
   it("detects empty or insufficient final replies", () => {
