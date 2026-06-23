@@ -680,9 +680,13 @@ function sanitizeMessages(
         agentSuggestions: m.agentSuggestions?.length ? [...m.agentSuggestions] : undefined,
         streamChars: m.streamChars || undefined,
         contextChars: m.contextChars || undefined,
-        agentPhase: m.agentPhase || undefined,
-        status: m.status?.trim() ? m.status : undefined,
-        streaming: m.streaming || undefined,
+        ...(options?.forDisk && m.role === "assistant"
+          ? {}
+          : {
+              agentPhase: m.agentPhase || undefined,
+              status: m.status?.trim() ? m.status : undefined,
+              streaming: m.streaming || undefined,
+            }),
         ...(options?.forDisk
           ? {
               ...(m.imageRefs?.length ? { imageRefs: m.imageRefs.map((r) => ({ path: r.path })) } : {}),

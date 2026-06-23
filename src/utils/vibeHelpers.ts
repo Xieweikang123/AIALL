@@ -44,7 +44,37 @@ export function phaseBadgeLabel(phase?: string): string {
 
 export function appendStatusDetail(base: string, detail?: string): string {
   const extra = detail?.trim();
-  return extra ? `${base} · ${extra}` : base;
+  if (!extra || isRedundantAgentStatusDetail(base, extra)) return base;
+  if (base.endsWith("…") && extra.endsWith("…") && base.slice(0, -1) === extra.slice(0, -1)) {
+    return base;
+  }
+  return `${base} · ${extra}`;
+}
+
+/** Clears live Agent status UI; history stays in statusLog / roundGroups. */
+export function assistantTransientUiClearPatch(): {
+  status: "";
+  agentPhase: undefined;
+  agentDetail: undefined;
+  streaming: false;
+  agentWaitStartedAt: undefined;
+} {
+  return {
+    status: "",
+    agentPhase: undefined,
+    agentDetail: undefined,
+    streaming: false,
+    agentWaitStartedAt: undefined,
+  };
+}
+
+/** Server turn preamble duplicated in compact waiting_model status lines. */
+export function isRedundantAgentStatusDetail(base: string, detail?: string): boolean {
+  const extra = detail?.trim();
+  if (!extra) return false;
+  if (/^第 \d+ 轮：等待模型响应$/.test(extra)) return true;
+  if (base === "正在发送模型请求…" && extra === "正在发送请求…") return true;
+  return false;
 }
 
 export function escapeHtml(s: string): string {

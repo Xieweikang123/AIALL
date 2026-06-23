@@ -279,6 +279,25 @@ describe("sanitizePersistedChatMessages", () => {
     expect(sanitized[1].roundGroups?.length).toBe(1);
   });
 
+  it("strips transient agent UI fields before disk persistence", () => {
+    const sanitized = sanitizePersistedChatMessages(
+      [
+        {
+          id: "a1",
+          role: "assistant",
+          content: "done",
+          status: "正在发送模型请求… · 正在发送请求…",
+          agentPhase: "sending_request",
+          streaming: true,
+        },
+      ],
+      { forDisk: true },
+    );
+    expect(sanitized[0].status).toBeUndefined();
+    expect(sanitized[0].agentPhase).toBeUndefined();
+    expect(sanitized[0].streaming).toBeUndefined();
+  });
+
   it("strips heavy agent debug payloads before persistence", () => {
     const huge = "x".repeat(20_000);
     const sanitized = sanitizePersistedChatMessages([

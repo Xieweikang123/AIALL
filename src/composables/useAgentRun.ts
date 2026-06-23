@@ -99,15 +99,15 @@ import {
 } from "../services/agentMessageDisplay";
 import { parseMemoryProposalToolResult } from "../services/projectMemoryProposal";
 import { parseSkillProposalToolResult } from "../services/projectSkillProposal";
-import { createAgentSessionRunManager } from "./agentSessionRuns";
+import { isAgentSseProgressEvent } from "../services/agentSseEventHandlers";
 import { isScrollNearBottom, scrollElementToBottom } from "../utils/scrollViewport";
 import {
-  appendStatusDetail,
-  formatCharCount,
-  formatToolMeta,
-  genId,
-  syncRoundGroupsPatch,
-} from "../utils/vibeHelpers";
+  createInitialLiveState,
+  formatAgentLiveStatus,
+  patchLiveFromStatusEvent,
+  type AgentRunLiveState,
+} from "../services/agentRunLiveState";
+import { createAgentSessionRunManager } from "./agentSessionRuns";
 
 export type ChatMessage = VibeChatMessage;
 
@@ -200,6 +200,27 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   const runManager = createAgentSessionRunManager<ChatMessage>();
 
+  function findRunForMsg(msgOrId: ChatMessage | string) {
+    const msgId = typeof msgOrId === "string" ? msgOrId : msgOrId.id;
+    return runManager.findByAssistantMsgId(msgId);
+  }
+
+  function getLiveForMsg(msg: ChatMessage): AgentRunLiveState | undefined {
+    return findRunForMsg(msg)?.live;
+  }
+
+  function formatLiveStatus(live: AgentRunLiveState, compact = false): string {
+    return formatAgentLiveStatus(live, { chatMode: chatMode.value, compact });
+  }
+
+  /** @deprecated Prefer formatLiveStatus(run.live) — kept for legacy call sites. */
+  function formatAgentStatus(data: AgentStatusData, compact = false): string {
+    return formatAgentLiveStatus(
+      patchLiveFromStatusEvent(createInitialLiveState(), data.phase, data),
+      { chatMode: chatMode.value, compact },
+    );
+  }
+
   function isRunVisible(sessionId: string): boolean {
     return sessionId === activeSessionId.value;
   }
@@ -210,6 +231,12 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   function maybePersistChat(sessionId: string, options?: { flushStore?: boolean }) {
     if (isRunVisible(sessionId)) persistChatNow(undefined, options);
+    else persistAgentRunSession(sessionId);
+  }
+
+  /** Agent 运行中：debounce 磁盘写入，后台 session 仍走 snapshot。 */
+  function schedulePersistDuringRun(sessionId: string) {
+    if (isRunVisible(sessionId)) schedulePersistChat();
     else persistAgentRunSession(sessionId);
   }
 
@@ -225,6 +252,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     const run = runManager.get(sessionId);
     if (run?.assistantMsg.role === "assistant") {
       applyInferredAgentRecovery(run.assistantMsg);
+      Object.assign(run.assistantMsg, assistantTransientUiClearPatch());
       patchAssistantMsg(
         run.assistantMsg.id,
         {
@@ -234,6 +262,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           agentRecoveryDismissed: run.assistantMsg.agentRecoveryDismissed,
           content: run.assistantMsg.content,
           activityExpanded: run.assistantMsg.activityExpanded,
+          ...assistantTransientUiClearPatch(),
           ...syncRoundGroupsPatch(run.assistantMsg),
         },
         sessionId,
@@ -277,101 +306,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   const chainScrollPinned = new Map<string, boolean>();
   const chainJumpVisible = reactive<Record<string, boolean>>({});
 
-  function formatAgentStatus(data: AgentStatusData, compact = false): string {
-    const { phase, turn, maxTurns, openFile, model, toolTitle, toolDetail, detail } = data;
-
-    if (phase === "connecting_local") return "正在连接本地服务（127.0.0.1:37891）…";
-    if (phase === "stream_connected") return "本地服务已连接，等待 Agent 启动…";
-    if (phase === "connected") return "本地 Agent 服务已就绪，正在启动任务…";
-    if (phase === "reconnecting") {
-      const retryHint = data.retryAttempt && data.retryMaxAttempts
-        ? `（第 ${data.retryAttempt}/${data.retryMaxAttempts - 1} 次）`
-        : "";
-      return `正在重连${retryHint}…`;
-    }
-    if (phase === "building_context") {
-      return appendStatusDetail("正在扫描项目上下文…", detail);
-    }
-    if (phase === "compacting_context") {
-      return appendStatusDetail("正在压缩并准备模型上下文…", detail);
-    }
-    if (phase === "vision_first_turn") {
-      return appendStatusDetail("正在查看附图并描述所见…", detail);
-    }
-    if (phase === "vision_first_turn_done") {
-      return appendStatusDetail("读图完成，开始定位与修改…", detail);
-    }
-    if (phase === "vision_first_turn_skipped") {
-      return appendStatusDetail("读图描述不足，继续执行任务…", detail);
-    }
-    if (phase === "vision_fallback") {
-      return detail?.trim() ? detail.trim() : "当前模型不支持图片输入，已降级为纯文本请求";
-    }
-    if (phase === "sending_request") {
-      return appendStatusDetail("正在发送模型请求…", detail);
-    }
-    if (phase === "preparing" || phase === "starting") {
-      if (chatMode.value === "ask") {
-        return openFile
-          ? appendStatusDetail(`正在准备问答上下文（当前文件：${openFile}）…`, detail)
-          : appendStatusDetail("正在准备问答上下文…", detail);
-      }
-      if (chatMode.value === "plan") {
-        return openFile
-          ? appendStatusDetail(`正在准备规划上下文（当前文件：${openFile}）…`, detail)
-          : appendStatusDetail("正在准备规划上下文…", detail);
-      }
-      return openFile
-        ? appendStatusDetail(`正在组装 Agent 上下文与工具定义（当前文件：${openFile}）…`, detail)
-        : appendStatusDetail("正在组装 Agent 上下文与工具定义…", detail);
-    }
-    if (phase === "streaming_model") {
-      if (compact) return appendStatusDetail("模型输出中…", detail);
-      const modelHint = model ? ` · ${model}` : "";
-      const turnHint = turn ? `（第 ${turn} 轮${modelHint}）` : modelHint;
-      return appendStatusDetail(`模型输出中${turnHint}`, detail);
-    }
-    if (phase === "planning_tools") {
-      if (compact) return appendStatusDetail("模型规划工具…", detail);
-      const modelHint = model ? ` · ${model}` : "";
-      const turnHint = turn ? `（第 ${turn} 轮${modelHint}）` : modelHint;
-      return appendStatusDetail(`模型规划工具${turnHint}`, detail);
-    }
-    if (phase === "waiting_model" || phase === "thinking") {
-      if (compact) return appendStatusDetail("正在等待模型响应…", detail);
-      const modelHint = model ? ` · ${model}` : "";
-      const turnHint = turn
-        ? maxTurns
-          ? `（第 ${turn}/${maxTurns} 轮${modelHint}）`
-          : `（第 ${turn} 轮${modelHint}）`
-        : modelHint;
-      return appendStatusDetail(`正在等待模型响应${turnHint}…`, detail);
-    }
-    if (phase === "retrying_model") {
-      const modelHint = model ? ` · ${model}` : "";
-      const turnHint = turn
-        ? maxTurns
-          ? `（第 ${turn}/${maxTurns} 轮${modelHint}）`
-          : `（第 ${turn} 轮${modelHint}）`
-        : modelHint;
-      const retryHint =
-        data.retryAttempt && data.retryMaxAttempts
-          ? `，第 ${data.retryAttempt}/${data.retryMaxAttempts - 1} 次重试`
-          : "";
-      const reason = data.retryError ? `：${data.retryError}` : "";
-      return appendStatusDetail(`模型请求失败${reason}，正在重试${turnHint}${retryHint}…`, detail);
-    }
-    if (phase === "executing_tool") {
-      return toolDetail ? `正在执行：${toolTitle}（${toolDetail}）` : `正在执行：${toolTitle}…`;
-    }
-    if (phase === "executing_tools") return "正在执行工具调用…";
-    if (phase === "summarizing_tools") return "正在整理工具结果，准备下一轮推理…";
-    if (phase === "continuing") return appendStatusDetail("任务较长，自动续跑下一段…", detail);
-    if (phase === "finished") return "";
-    if (phase === "aborted") return "已停止运行";
-    return "";
-  }
-
   function appendStatusLog(msg: ChatMessage, line: string) {
     const text = line.trim();
     if (!text) return;
@@ -382,11 +316,11 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   function refreshStalledAssistantMsg() {
     const run = getActiveRun();
-    if (!chatSending.value || !run || run.lastProgressAt <= 0) {
+    if (!run || run.lastProgressAt <= 0) {
       stalledAssistantMsg.value = null;
       return;
     }
-    if (!isAgentRunStalled(run.lastProgressAt, chatSending.value)) {
+    if (!isAgentRunStalled(run.lastProgressAt, true)) {
       stalledAssistantMsg.value = null;
       return;
     }
@@ -412,7 +346,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   }
 
   function findRunningAssistantMsg(): ChatMessage | null {
-    if (!chatSending.value) return null;
+    const run = getActiveRun();
+    if (!run) return null;
     return findRunningAssistantMsgForSession(activeSessionId.value);
   }
 
@@ -421,10 +356,11 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (!run) return;
     const msg = findRunningAssistantMsgForSession(sessionId);
     if (!msg) return;
+    const { live } = run;
 
     if (
-      isAgentConnectStalled(run.connectStartedAt, msg.agentPhase, true) &&
-      isAgentConnectPhase(msg.agentPhase)
+      isAgentConnectStalled(run.connectStartedAt, live.phase, true) &&
+      isAgentConnectPhase(live.phase)
     ) {
       abortAgentConnectStall(sessionId, msg);
       return;
@@ -436,9 +372,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         ? AGENT_CONTINUE_MODEL_WAIT_STALL_MS
         : AGENT_MODEL_WAIT_STALL_MS;
     if (
-      MODEL_WAIT_PHASES.includes(msg.agentPhase || "") &&
-      msg.agentWaitStartedAt &&
-      Date.now() - msg.agentWaitStartedAt >= waitThreshold
+      MODEL_WAIT_PHASES.includes(live.phase) &&
+      live.waitStartedAt &&
+      Date.now() - live.waitStartedAt >= waitThreshold
     ) {
       recoverAgentRunFromStall(sessionId, msg, "模型请求长时间无响应（可能已卡住）");
       return;
@@ -501,8 +437,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       agentFailed: true,
       agentRecoverable: true,
       agentFailureReason: reason,
-      agentPhase: undefined,
-      status: reason,
     }, sessionId);
     if (projectPath.value.trim()) {
       updateAgentRunSessionStatus(sessionId, "failed");
@@ -511,29 +445,29 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (isRunVisible(sessionId)) chatError.value = reason;
   }
 
-  function setAgentStatus(msg: ChatMessage, phase: string, extra?: Partial<AgentStatusData>, options?: { log?: boolean }) {
-    const prevPhase = msg.agentPhase;
-    msg.agentPhase = phase;
-    if (extra?.detail !== undefined) msg.agentDetail = extra.detail;
+  function setAgentStatus(
+    sessionId: string,
+    msg: ChatMessage,
+    phase: string,
+    extra?: Partial<AgentStatusData> & { toolTitle?: string; toolDetail?: string },
+    options?: { log?: boolean },
+  ) {
+    const run = runManager.get(sessionId);
+    if (!run) return;
+    const prevPhase = run.live.phase;
+    run.live = patchLiveFromStatusEvent(run.live, phase, extra);
     if (extra?.streamChars !== undefined) msg.streamChars = extra.streamChars;
     if (extra?.contextChars !== undefined) msg.contextChars = extra.contextChars;
     if (extra?.turn) msg.agentTurn = extra.turn;
     if (extra?.maxTurns) msg.agentMaxTurns = extra.maxTurns;
     if (extra?.model) msg.agentModel = extra.model;
-    if (phase === "waiting_model" || phase === "sending_request" || phase === "retrying_model") {
-      if (!msg.agentWaitStartedAt) msg.agentWaitStartedAt = Date.now();
-    } else if (phase === "streaming_model" || phase === "planning_tools" || phase === "executing_tool") {
-      msg.agentWaitStartedAt = undefined;
-    }
-    const statusText = formatAgentStatus({ phase, ...extra, turn: msg.agentTurn, maxTurns: msg.agentMaxTurns, model: msg.agentModel || extra?.model });
-    msg.status = statusText;
+    const statusText = formatLiveStatus(run.live);
     const shouldLog = options?.log ?? phase !== prevPhase;
     if (shouldLog) appendStatusLog(msg, statusText);
   }
 
   function isAgentRunning(msg: ChatMessage): boolean {
-    const run = getActiveRun();
-    return Boolean(run && run.assistantMsgId === msg.id && chatSending.value);
+    return Boolean(findRunForMsg(msg));
   }
 
   function hasAgentActivity(msg: ChatMessage): boolean {
@@ -542,9 +476,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         msg.roundGroups?.length ||
         msg.statusLog?.length ||
         msg.turnTraces?.length ||
-        msg.status ||
-        msg.agentPhase ||
-        msg.streaming ||
         msg.agentFailed ||
         msg.agentRecoverable ||
         msg.tools?.length ||
@@ -564,13 +495,14 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   function agentRoundGroupViews(msg: ChatMessage): AgentRoundGroupView[] {
     void agentUiTick.value;
+    const live = getLiveForMsg(msg);
     return buildAgentRoundGroupViews({
       roundGroups: msg.roundGroups as any,
       turnTraces: msg.turnTraces as any,
       statusLog: msg.statusLog,
       tools: msg.tools as any,
-      activeTurn: isAgentRunning(msg) ? msg.agentTurn : undefined,
-      activePhase: isAgentRunning(msg) ? msg.agentPhase : undefined,
+      activeTurn: isAgentRunning(msg) ? (live?.turn ?? msg.agentTurn) : undefined,
+      activePhase: isAgentRunning(msg) ? live?.phase : undefined,
     });
   }
 
@@ -586,7 +518,12 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       return resolveAgentFailureBubbleContent(msg);
     }
     if (isAgentRunning(msg)) {
-      return resolveLiveAgentAnswerPreview(msg);
+      const live = getLiveForMsg(msg);
+      return resolveLiveAgentAnswerPreview({
+        ...msg,
+        agentTurn: live?.turn ?? msg.agentTurn,
+        agentPhase: live?.phase,
+      });
     }
     return finalizeAssistantBubbleContent(msg);
   }
@@ -599,8 +536,14 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   function agentAnswerPreview(msg: ChatMessage): string {
     const hasRunningTool = Boolean(msg.tools?.some((t: { running?: boolean }) => t.running));
+    const live = getLiveForMsg(msg);
     return resolveAgentTimelineAnswer(
-      { content: msg.content, roundGroups: msg.roundGroups, turnTraces: msg.turnTraces, agentTurn: msg.agentTurn },
+      {
+        content: msg.content,
+        roundGroups: msg.roundGroups,
+        turnTraces: msg.turnTraces,
+        agentTurn: live?.turn ?? msg.agentTurn,
+      },
       messageDisplayContent(msg),
       isAgentRunning(msg),
       hasRunningTool,
@@ -609,17 +552,20 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   function cursorAgentFeed(msg: ChatMessage) {
     void agentUiTick.value;
-    let agentDetail = msg.agentDetail || msg.status;
-    const connectStartedAt = getActiveRun()?.connectStartedAt ?? 0;
+    const run = findRunForMsg(msg);
+    const live = run?.live;
+    let agentDetail = live?.detail?.trim() || "";
+    const connectStartedAt = run?.connectStartedAt ?? 0;
     if (
       isAgentRunning(msg) &&
-      isAgentConnectPhase(msg.agentPhase) &&
+      live &&
+      isAgentConnectPhase(live.phase) &&
       connectStartedAt > 0
     ) {
       const elapsed = Math.max(0, Math.floor((Date.now() - connectStartedAt) / 1000));
       const base =
-        msg.agentDetail ||
-        (msg.agentPhase === "connecting_local" ? "连接本地服务" : "启动 Agent");
+        live.detail?.trim() ||
+        (live.phase === "connecting_local" ? "连接本地服务" : "启动 Agent");
       agentDetail = `${base} · ${elapsed}s`;
     }
     const bubble = agentAnswerPreview(msg);
@@ -627,11 +573,11 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     const items = buildCursorAgentFeed({
       groups: agentRoundGroupViews(msg),
       isRunning: isAgentRunning(msg),
-      agentPhase: msg.agentPhase,
+      agentPhase: live?.phase,
       agentDetail,
       answerPreview: bubble,
       streaming: isAgentTimelineAnswerStreaming(
-        { roundGroups: msg.roundGroups, agentTurn: msg.agentTurn },
+        { roundGroups: msg.roundGroups, agentTurn: live?.turn ?? msg.agentTurn },
         isAgentRunning(msg),
         hasRunningTool,
       ),
@@ -685,67 +631,71 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   function cursorCompactLiveStatus(msg: ChatMessage): string | null {
     void agentUiTick.value;
-    if (!isAgentRunning(msg)) return null;
+    const run = findRunForMsg(msg);
+    const live = run?.live;
+    if (!run || !live) return null;
     if (cursorCompactRunningAction(msg)) return null;
     const timelineAnswer = cursorAgentTimeline(msg).answer;
-    if (timelineAnswer && (msg.streaming || msg.agentPhase === "streaming_model" || msg.agentPhase === "planning_tools")) {
+    if (timelineAnswer && (live.phase === "streaming_model" || live.phase === "planning_tools")) {
       return null;
     }
 
-    if (msg.agentPhase === "streaming_model" || msg.agentPhase === "planning_tools") {
-      return msg.streamChars && msg.streamChars > 0
-        ? `思考中 · 已生成 ${msg.streamChars} 字`
-        : "思考中…";
+    if (live.phase === "streaming_model" || live.phase === "planning_tools") {
+      const chars = live.streamChars ?? msg.streamChars ?? 0;
+      return chars > 0 ? `思考中 · 已生成 ${chars} 字` : "思考中…";
     }
 
     const parts: string[] = [];
     const waitingModel =
-      msg.agentPhase === "waiting_model" ||
-      msg.agentPhase === "sending_request" ||
-      msg.agentPhase === "retrying_model";
-    if (msg.agentPhase === "compacting_context") parts.push("压缩上下文…");
-    else if (msg.agentPhase === "summarizing_tools") parts.push("整理工具结果…");
-    else if (msg.agentPhase === "executing_tool" || msg.agentPhase === "executing_tools") return null;
+      live.phase === "waiting_model" ||
+      live.phase === "sending_request" ||
+      live.phase === "retrying_model";
+    if (live.phase === "compacting_context") parts.push("压缩上下文…");
+    else if (live.phase === "summarizing_tools") parts.push("整理工具结果…");
+    else if (live.phase === "executing_tool" || live.phase === "executing_tools") return null;
     else if (waitingModel) parts.push("等待模型响应…");
     else parts.push("整合信息中…");
 
-    if (msg.agentTurn) parts.push(`第 ${msg.agentTurn} 轮`);
-    if (msg.agentWaitStartedAt && waitingModel) {
-      const elapsed = Math.max(0, Math.floor((Date.now() - msg.agentWaitStartedAt) / 1000));
+    const turn = live.turn ?? msg.agentTurn;
+    if (turn) parts.push(`第 ${turn} 轮`);
+    if (live.waitStartedAt && waitingModel) {
+      const elapsed = Math.max(0, Math.floor((Date.now() - live.waitStartedAt) / 1000));
       parts.push(`已等待 ${elapsed}s`);
       if (elapsed > 45) parts.push("模型较慢，可取消后 @ 具体文件重试");
-    } else if (msg.agentDetail?.trim()) {
-      parts.push(msg.agentDetail.trim());
+    } else if (live.detail?.trim()) {
+      parts.push(live.detail.trim());
     }
     return parts.join(" · ");
   }
 
   function agentStatusDisplay(msg: ChatMessage): string {
     void agentUiTick.value;
-    let statusText = "";
-    if (msg.status) {
-      if (
-        msg.agentWaitStartedAt &&
-        (msg.agentPhase === "waiting_model" ||
-          msg.agentPhase === "sending_request" ||
-          msg.agentPhase === "retrying_model") &&
-        !msg.agentDetail
-      ) {
-        const elapsed = Math.max(0, Math.floor((Date.now() - msg.agentWaitStartedAt) / 1000));
-        statusText = `${msg.status} · 已等待 ${elapsed}s`;
-      } else {
-        statusText = msg.status;
-      }
-    } else {
-      statusText = msg.agentPhase ? formatAgentStatus({ phase: msg.agentPhase, detail: msg.agentDetail }, true) : "正在运行…";
+    const run = findRunForMsg(msg);
+    const live = run?.live;
+    if (!live) return "";
+
+    let statusText = formatLiveStatus(live);
+    const waitingModel =
+      live.phase === "waiting_model" ||
+      live.phase === "sending_request" ||
+      live.phase === "retrying_model";
+    if (
+      live.waitStartedAt &&
+      waitingModel &&
+      !live.detail?.trim()
+    ) {
+      const elapsed = Math.max(0, Math.floor((Date.now() - live.waitStartedAt) / 1000));
+      statusText = `${statusText} · 已等待 ${elapsed}s`;
     }
 
     const tokenInfo: string[] = [];
-    if (msg.streamChars && msg.streamChars > 0) {
-      tokenInfo.push(`${msg.streamChars} 字输出`);
+    const streamChars = live.streamChars ?? msg.streamChars ?? 0;
+    const contextChars = live.contextChars ?? msg.contextChars ?? 0;
+    if (streamChars > 0) {
+      tokenInfo.push(`${streamChars} 字输出`);
     }
-    if (msg.contextChars && msg.contextChars > 0) {
-      tokenInfo.push(`${formatCharCount(msg.contextChars)} 上下文`);
+    if (contextChars > 0) {
+      tokenInfo.push(`${formatCharCount(contextChars)} 上下文`);
     }
     if (tokenInfo.length > 0) {
       statusText += ` · ${tokenInfo.join(" · ")}`;
@@ -763,10 +713,14 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   }
 
   function agentRunningHint(msg: ChatMessage): string {
-    if (msg.streamChars && msg.streamChars > 0) return `${msg.streamChars} 字`;
-    if (msg.agentDetail) return msg.agentDetail;
-    if (msg.agentTurn && msg.agentMaxTurns) return `${msg.agentTurn}/${msg.agentMaxTurns}`;
-    if (msg.agentTurn) return `第 ${msg.agentTurn} 轮`;
+    const live = getLiveForMsg(msg);
+    const streamChars = live?.streamChars ?? msg.streamChars ?? 0;
+    if (streamChars > 0) return `${streamChars} 字`;
+    if (live?.detail?.trim()) return live.detail.trim();
+    const turn = live?.turn ?? msg.agentTurn;
+    const maxTurns = live?.maxTurns ?? msg.agentMaxTurns;
+    if (turn && maxTurns) return `${turn}/${maxTurns}`;
+    if (turn) return `第 ${turn} 轮`;
     return "运行中…";
   }
 
@@ -939,9 +893,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       assistantMsg.agentMaxTurns,
     );
     assistantMsg.streamChars = (assistantMsg.streamChars || 0) + delta.length;
-    assistantMsg.streaming = true;
+    const run = findRunForMsg(assistantMsg);
+    if (run) run.live.streamChars = assistantMsg.streamChars;
     patchAssistantMsg(msgId, {
-      streaming: true,
       streamChars: assistantMsg.streamChars,
       ...syncRoundGroupsPatch(assistantMsg),
     });
@@ -1036,9 +990,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     for (const tool of assistantMsg.tools || []) {
       if (tool.running) tool.running = false;
     }
-    assistantMsg.streaming = false;
-    assistantMsg.agentPhase = undefined;
-    assistantMsg.status = "";
   }
 
   function trySilentContinue(sessionId: string, assistantMsg: ChatMessage, reason: string): boolean {
@@ -1055,9 +1006,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     appendStatusLog(assistantMsg, buildSilentContinueStatusLog(statusLogReason, assistantMsg.agentContinueCount));
     patchAssistantMsg(assistantMsg.id, {
       agentContinueCount: assistantMsg.agentContinueCount,
-      streaming: false,
-      agentPhase: undefined,
-      status: "",
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
       activityExpanded: true,
       activityDetailed: true,
@@ -1095,7 +1043,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     assistantMsg.agentRecoverable = recoverable;
     assistantMsg.agentFailureReason = message;
     assistantMsg.agentRecoveryDismissed = false;
-    assistantMsg.streaming = false;
 
     const progressContent = resolveAgentFailureBubbleContent(assistantMsg);
     assistantMsg.content = progressContent;
@@ -1120,9 +1067,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       agentFailureReason: message,
       agentRecoveryDismissed: false,
       content: assistantMsg.content,
-      streaming: false,
-      agentPhase: undefined,
-      status: "",
       activityExpanded: recoverable ? true : assistantMsg.activityExpanded,
       totalTurns: assistantMsg.totalTurns,
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
@@ -1191,18 +1135,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     const msgId = assistantMsg.id;
     const patchMsg = (patch: Partial<ChatMessage>) => patchAssistantMsg(msgId, patch, sessionId);
 
-    const isProgressEvent =
-      event.type === "status" ||
-      event.type === "turn_request" ||
-      event.type === "turn_response" ||
-      event.type === "turn_trace" ||
-      event.type === "tool_start" ||
-      event.type === "tool_end" ||
-      event.type === "file_diff" ||
-      event.type === "message_delta" ||
-      event.type === "message" ||
-      event.type === "agent_context" ||
-      event.type === "error";
+    const isProgressEvent = isAgentSseProgressEvent(event.type);
     if (isProgressEvent) touchAgentProgress(sessionId);
 
     if (event.type === "agent_context") {
@@ -1246,16 +1179,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       if (turnText && event.data.isFinal) {
         assistantMsg.content = mergeAssistantTurnText(assistantMsg.content || "", turnText);
       }
-      assistantMsg.streaming = false;
-      if (event.data.isFinal) {
-        assistantMsg.agentPhase = undefined;
-        assistantMsg.status = "";
-      }
       patchAssistantMsg(msgId, {
         ...syncRoundGroupsPatch(assistantMsg),
         content: assistantMsg.content,
-        streaming: assistantMsg.streaming,
-        ...(event.data.isFinal ? { agentPhase: undefined, status: "" } : {}),
       });
       if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
       return;
@@ -1280,28 +1206,26 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
     if (event.type === "status") {
       const { phase } = event.data;
-      const prevPhase = assistantMsg.agentPhase;
-      setAgentStatus(assistantMsg, phase, event.data, { log: phase !== prevPhase });
+      const run = runManager.get(sessionId);
+      if (!run) return;
+      const prevPhase = run.live.phase;
+      setAgentStatus(sessionId, assistantMsg, phase, event.data, { log: phase !== prevPhase });
+      const statusText = formatLiveStatus(run.live);
       assistantMsg.roundGroups = recordAgentRoundStatus(
         assistantMsg.roundGroups,
         phase,
-        assistantMsg.status || "",
+        statusText,
         assistantMsg.agentTurn ?? event.data.turn,
         assistantMsg.agentMaxTurns ?? event.data.maxTurns,
       );
       patchAssistantMsg(msgId, {
-        agentPhase: assistantMsg.agentPhase,
-        status: assistantMsg.status,
-        agentDetail: assistantMsg.agentDetail,
         streamChars: assistantMsg.streamChars,
         contextChars: assistantMsg.contextChars,
-        agentWaitStartedAt: assistantMsg.agentWaitStartedAt,
         statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
         agentTurn: assistantMsg.agentTurn,
         agentMaxTurns: assistantMsg.agentMaxTurns,
         agentModel: assistantMsg.agentModel,
         ...syncRoundGroupsPatch(assistantMsg),
-        ...(phase === "finished" ? { agentPhase: undefined, streaming: false, agentWaitStartedAt: undefined } : {}),
       });
       if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
       if (phase === "aborted") {
@@ -1346,7 +1270,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         turn: toolTurn,
       });
       assistantMsg.roundGroups = recordAgentRoundToolStart(assistantMsg.roundGroups, event.data.id, toolTurn);
-      setAgentStatus(assistantMsg, "executing_tool", {
+      setAgentStatus(sessionId, assistantMsg, "executing_tool", {
         toolTitle: meta.title,
         toolDetail: meta.detail,
         turn: assistantMsg.agentTurn,
@@ -1354,9 +1278,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       });
       patchAssistantMsg(msgId, {
         tools: [...assistantMsg.tools],
-        status: assistantMsg.status,
         statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
-        agentPhase: assistantMsg.agentPhase,
         ...syncRoundGroupsPatch(assistantMsg),
       });
       if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
@@ -1403,15 +1325,13 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         if (skillProposal) onSkillProposal?.(msgId, skillProposal);
       }
       const pending = assistantMsg.tools?.some((t) => t.running);
-      setAgentStatus(assistantMsg, pending ? "executing_tools" : "summarizing_tools", {
+      setAgentStatus(sessionId, assistantMsg, pending ? "executing_tools" : "summarizing_tools", {
         turn: assistantMsg.agentTurn,
         maxTurns: assistantMsg.agentMaxTurns,
       });
       patchAssistantMsg(msgId, {
         tools: assistantMsg.tools ? [...assistantMsg.tools] : undefined,
-        status: assistantMsg.status,
         statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
-        agentPhase: assistantMsg.agentPhase,
       });
       if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
       void scrollChatToBottom();
@@ -1421,18 +1341,17 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (event.type === "message_delta") {
       const delta = event.data.delta || "";
       if (!delta) return;
-      // 首个 delta 到达时，说明模型已开始输出，切换到 streaming_model 阶段
-      if (assistantMsg.agentPhase === "waiting_model" || assistantMsg.agentPhase === "sending_request" || assistantMsg.agentPhase === "retrying_model") {
-        setAgentStatus(assistantMsg, "streaming_model", {
+      const run = runManager.get(sessionId);
+      const waitPhases = new Set(["waiting_model", "sending_request", "retrying_model"]);
+      if (run && waitPhases.has(run.live.phase)) {
+        setAgentStatus(sessionId, assistantMsg, "streaming_model", {
           turn: assistantMsg.agentTurn,
           maxTurns: assistantMsg.agentMaxTurns,
           model: assistantMsg.agentModel,
           streamChars: (assistantMsg.streamChars || 0) + delta.length,
         });
         patchAssistantMsg(msgId, {
-          agentPhase: assistantMsg.agentPhase,
-          status: assistantMsg.status,
-          agentWaitStartedAt: assistantMsg.agentWaitStartedAt,
+          streamChars: assistantMsg.streamChars,
         });
       }
       enqueueStreamDelta(msgId, assistantMsg, delta);
@@ -1443,16 +1362,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       clearStreamDeltaBuffer();
       const cleanText = stripTextToolCallMarkup(stripToolSummaryFromAssistantContent(event.data.text));
       assistantMsg.content = mergeAssistantTurnText(assistantMsg.content || "", cleanText);
-      assistantMsg.streaming = false;
-      assistantMsg.status = "";
-      assistantMsg.agentPhase = undefined;
       patchAssistantMsg(msgId, {
         content: assistantMsg.content,
-        streaming: false,
-        status: "",
-        agentPhase: undefined,
       });
-      persistChatNow();
+      schedulePersistDuringRun(sessionId);
       void scrollChatToBottom();
       return;
     }
@@ -1480,7 +1393,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       if (isRunVisible(sessionId)) clearStreamDeltaBuffer();
       planExecutionActive.value = false;
       runManager.setAbortHandle(sessionId, null);
-      assistantMsg.streaming = false;
       clearPendingAgentRun();
 
       if (assistantMsg.agentFailed) {
@@ -1488,9 +1400,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         const completedTurns = resolveCompletedTurns(event.data.turns, assistantMsg);
         if (!assistantMsg.totalTurns) assistantMsg.totalTurns = completedTurns;
         patchAssistantMsg(msgId, {
-          streaming: false,
-          agentPhase: undefined,
           totalTurns: assistantMsg.totalTurns,
+          ...assistantTransientUiClearPatch(),
           ...syncRoundGroupsPatch(assistantMsg),
         });
         persistChatNow();
@@ -1529,11 +1440,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
             assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
           }
           patchAssistantMsg(msgId, {
-            streaming: false,
             totalTurns: assistantMsg.totalTurns,
             ...syncRoundGroupsPatch(assistantMsg),
           });
-          persistChatNow();
+          schedulePersistDuringRun(sessionId);
           void scrollChatToBottom();
           return;
         }
@@ -1545,11 +1455,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
             assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
           }
           patchAssistantMsg(msgId, {
-            streaming: false,
             totalTurns: assistantMsg.totalTurns,
             ...syncRoundGroupsPatch(assistantMsg),
           });
-          persistChatNow();
+          schedulePersistDuringRun(sessionId);
           persistAgentRunSession(sessionId);
           void scrollChatToBottom();
           return;
@@ -1561,11 +1470,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
             assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
           }
           patchAssistantMsg(msgId, {
-            streaming: false,
             totalTurns: assistantMsg.totalTurns,
             ...syncRoundGroupsPatch(assistantMsg),
           });
-          persistChatNow();
+          schedulePersistDuringRun(sessionId);
           persistAgentRunSession(sessionId);
           void scrollChatToBottom();
           return;
@@ -1575,8 +1483,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
         }
         patchAssistantMsg(msgId, {
-          streaming: false,
           totalTurns: assistantMsg.totalTurns,
+          ...assistantTransientUiClearPatch(),
           ...syncRoundGroupsPatch(assistantMsg),
         });
         persistChatNow();
@@ -1592,7 +1500,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         if (trySilentContinue(sessionId, assistantMsg, reason)) {
           assistantMsg.totalTurns = completedTurns;
           patchAssistantMsg(msgId, { totalTurns: completedTurns, ...syncRoundGroupsPatch(assistantMsg) });
-          persistChatNow();
+          schedulePersistDuringRun(sessionId);
           persistAgentRunSession(sessionId);
           void scrollChatToBottom();
           return;
@@ -1602,7 +1510,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         if ((assistantMsg.agentContinueCount ?? 0) > continueBefore) {
           assistantMsg.totalTurns = completedTurns;
           patchAssistantMsg(msgId, { totalTurns: completedTurns, ...syncRoundGroupsPatch(assistantMsg) });
-          persistChatNow();
+          schedulePersistDuringRun(sessionId);
           persistAgentRunSession(sessionId);
           void scrollChatToBottom();
           return;
@@ -1631,11 +1539,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
             assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
           }
           patchAssistantMsg(msgId, {
-            streaming: false,
             totalTurns: assistantMsg.totalTurns,
             ...syncRoundGroupsPatch(assistantMsg),
           });
-          persistChatNow();
+          schedulePersistDuringRun(sessionId);
           persistAgentRunSession(sessionId);
           void scrollChatToBottom();
           return;
@@ -1646,7 +1553,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
         }
         patchAssistantMsg(msgId, {
-          streaming: false,
           totalTurns: assistantMsg.totalTurns,
           agentFailed: assistantMsg.agentFailed,
           agentRecoverable: assistantMsg.agentRecoverable,
@@ -1679,7 +1585,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         assistantMsg.content = resolveAgentFailureBubbleContent(assistantMsg);
         finishRunSession(sessionId);
         patchAssistantMsg(msgId, {
-          streaming: false,
           content: assistantMsg.content,
           agentFailed: assistantMsg.agentFailed,
           agentRecoverable: assistantMsg.agentRecoverable,
@@ -1738,13 +1643,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         assistantMsg.agentContinueCount = undefined;
       }
 
-      assistantMsg.status = "";
-      assistantMsg.agentPhase = undefined;
       assistantMsg.activityExpanded = Boolean(assistantMsg.content?.trim());
       patchAssistantMsg(msgId, {
-        status: "",
-        agentPhase: undefined,
-        streaming: false,
+        ...assistantTransientUiClearPatch(),
         activityExpanded: assistantMsg.activityExpanded,
         content: assistantMsg.content,
         agentSuggestions: assistantMsg.agentSuggestions,
@@ -1791,17 +1692,14 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     const reason = options?.reason?.trim() || "已被新指令打断";
     running.agentAborted = true;
     running.agentAbortReason = reason;
-    running.streaming = false;
     if (options?.logStatus !== false) {
       appendStatusLog(running, reason);
-      setAgentStatus(running, "aborted", undefined, { log: false });
+      setAgentStatus(sessionId, running, "aborted", undefined, { log: false });
     }
 
     const patch: Partial<ChatMessage> = {
       agentAborted: true,
       agentAbortReason: reason,
-      streaming: false,
-      status: "",
       statusLog: running.statusLog ? [...running.statusLog] : undefined,
     };
 
@@ -1860,7 +1758,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   async function resumeAgentRun(assistantMsgId: string, options?: { silent?: boolean }) {
     cancelAutoResume();
     const sessionId = activeSessionId.value;
-    if (chatSending.value || !configReady.value || !projectOpened.value) return;
+    if (!configReady.value || !projectOpened.value) return;
 
     const assistantIdx = chatMessages.value.findIndex((m) => m.id === assistantMsgId);
     if (assistantIdx < 0) return;
@@ -1900,24 +1798,21 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     beginAgentRunSession(sessionId);
     chatError.value = "";
     resetChatScrollPin();
-    const runGen = runManager.start(sessionId, assistantMsg.id, assistantMsg, false);
+    const runGen = runManager.start(sessionId, assistantMsg.id, assistantMsg, false, "connecting_local");
     startAgentUiTick();
+    const connectStatus = formatLiveStatus(runManager.get(sessionId)!.live);
 
     assistantMsg.agentFailed = false;
     assistantMsg.agentRecoverable = false;
     assistantMsg.agentFailureReason = undefined;
     assistantMsg.agentAborted = false;
     assistantMsg.agentAbortReason = undefined;
-    assistantMsg.streaming = false;
-    assistantMsg.agentWaitStartedAt = undefined;
     assistantMsg.agentContinueCount = undefined;
     if (hasAgentRunStructure(assistantMsg) && !hasAgentFinalAnswer(assistantMsg)) {
       assistantMsg.content = "";
     }
     assistantMsg.activityExpanded = true;
     assistantMsg.activityDetailed = true;
-    assistantMsg.agentPhase = "connecting_local";
-    assistantMsg.status = formatAgentStatus({ phase: "connecting_local" });
     appendStatusLog(
       assistantMsg,
       options?.silent
@@ -1927,7 +1822,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     assistantMsg.roundGroups = recordAgentRoundStatus(
       assistantMsg.roundGroups,
       "connecting_local",
-      assistantMsg.status || "",
+      connectStatus,
     );
     patchAssistantMsg(assistantMsgId, {
       agentFailed: false,
@@ -1936,14 +1831,11 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       content: assistantMsg.content,
       agentAborted: false,
       agentAbortReason: undefined,
-      streaming: false,
-      agentWaitStartedAt: undefined,
       agentContinueCount: undefined,
       activityExpanded: true,
       activityDetailed: true,
-      agentPhase: assistantMsg.agentPhase,
-      status: assistantMsg.status,
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
+      ...assistantTransientUiClearPatch(),
       ...syncRoundGroupsPatch(assistantMsg),
     }, sessionId);
     persistChatNow();
@@ -1972,6 +1864,25 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       (event) => handleAgentEvent(event, assistantMsg, runGen, sessionId),
     );
     runManager.setAbortHandle(sessionId, handle);
+  }
+
+  function beginAssistantRunSlot(
+    sessionId: string,
+    assistantMsg: ChatMessage,
+    phase: string,
+    connectHasImages: boolean,
+    detail?: string,
+  ): number {
+    const existing = runManager.get(sessionId);
+    if (existing && existing.assistantMsgId === assistantMsg.id) {
+      runManager.applyStatus(sessionId, phase, { detail });
+      runManager.setConnectHasImages(sessionId, connectHasImages);
+      return runManager.getGeneration(sessionId);
+    }
+    const gen = runManager.start(sessionId, assistantMsg.id, assistantMsg, connectHasImages, phase);
+    if (detail) runManager.setLive(sessionId, { detail });
+    startAgentUiTick();
+    return gen;
   }
 
   async function runAgentTurn(
@@ -2048,7 +1959,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           });
         }
 
-        const preparingStatus = formatAgentStatus({ phase: "preparing" });
         assistantMsg = {
           id: genId(),
           role: "assistant",
@@ -2058,12 +1968,11 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           roundGroups: [],
           activityExpanded: true,
           activityDetailed: true,
-          streaming: true,
-          agentPhase: "preparing",
-          status: preparingStatus,
         };
         chatMessages.value.push(assistantMsg);
-        persistChatNow();
+        beginAssistantRunSlot(sessionId, assistantMsg, "preparing", false);
+        appendStatusLog(assistantMsg, formatLiveStatus(runManager.get(sessionId)!.live));
+        schedulePersistChat();
         snapshotAgentRunSession?.(sessionId);
         await scrollChatToBottom(true);
       }
@@ -2079,6 +1988,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
       if (!rawPrompt && !hasImagesForRequest) {
         if (canBootstrapEarly) {
+          runManager.remove(sessionId);
           endAgentRunSession(sessionId, true);
           rollbackTurnPlaceholders(options?.skipUserBubble);
           persistChatNow();
@@ -2088,15 +1998,14 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
       if (canBootstrapEarly) {
         attachUserImages(compressedImagesForRequest);
-        const connectStatus = formatAgentStatus({
-          phase: "connecting_local",
-          detail: hasImagesForRequest ? "上传图片中…" : undefined,
-        });
-        assistantMsg!.agentPhase = "connecting_local";
-        assistantMsg!.agentDetail = hasImagesForRequest ? "上传图片中…" : undefined;
-        assistantMsg!.status = connectStatus;
-        assistantMsg!.streaming = true;
-        persistChatNow();
+        beginAssistantRunSlot(
+          sessionId,
+          assistantMsg!,
+          "connecting_local",
+          hasImagesForRequest,
+          hasImagesForRequest ? "上传图片中…" : undefined,
+        );
+        schedulePersistChat();
         snapshotAgentRunSession?.(sessionId);
       } else {
         if (runManager.has(sessionId)) {
@@ -2123,16 +2032,16 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           roundGroups: [],
           activityExpanded: true,
           activityDetailed: true,
-          streaming: true,
-          agentPhase: "connecting_local",
-          agentDetail: hasImagesForRequest ? "上传图片中…" : undefined,
-          status: formatAgentStatus({
-            phase: "connecting_local",
-            detail: hasImagesForRequest ? "上传图片中…" : undefined,
-          }),
         };
         chatMessages.value.push(assistantMsg);
-        persistChatNow();
+        beginAssistantRunSlot(
+          sessionId,
+          assistantMsg,
+          "connecting_local",
+          hasImagesForRequest,
+          hasImagesForRequest ? "上传图片中…" : undefined,
+        );
+        schedulePersistChat();
         snapshotAgentRunSession?.(sessionId);
         await scrollChatToBottom(true);
       }
@@ -2156,8 +2065,15 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
     const history = buildAgentHistory(rawPrompt, runProfile);
 
-    const runGen = runManager.start(sessionId, assistantMsg!.id, assistantMsg!, hasImagesForRequest);
-    startAgentUiTick();
+    const runGen = runManager.has(sessionId)
+      ? runManager.getGeneration(sessionId)
+      : beginAssistantRunSlot(
+          sessionId,
+          assistantMsg!,
+          "connecting_local",
+          hasImagesForRequest,
+          hasImagesForRequest ? "上传图片中…" : undefined,
+        );
     const agentRequest = {
       prompt,
       history,
@@ -2195,7 +2111,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   function canExecutePlanMessage(msg: ChatMessage): boolean {
     if (msg.role !== "assistant") return false;
     if (chatMode.value !== "plan") return false;
-    if (chatSending.value || msg.streaming || isAgentRunning(msg)) return false;
+    if (chatSending.value || isAgentRunning(msg)) return false;
     if (msg.writtenFiles?.length) return false;
     return looksLikeModificationPlan(messageDisplayContent(msg));
   }
@@ -2207,6 +2123,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       userBubbleContent: "执行方案",
       planAssistantContent: messageDisplayContent(msg),
     });
+  }
+
+  function getActiveLiveContextChars(): number {
+    return getActiveRun()?.live.contextChars ?? 0;
   }
 
   return {
@@ -2278,5 +2198,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     planExecutionActive,
     scheduleStreamScroll,
     getAgentAbortHandle: () => runManager.getActiveAbortHandle(activeSessionId.value),
+    getActiveLiveContextChars,
   };
 }

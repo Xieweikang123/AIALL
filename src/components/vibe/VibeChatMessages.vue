@@ -1,9 +1,18 @@
 <template>
   <div class="msg-list">
+    <button
+      v-if="hiddenMessageCount > 0"
+      type="button"
+      class="ghost small load-earlier-btn"
+      @click="showAllMessages = true"
+    >
+      显示较早的 {{ hiddenMessageCount }} 条消息
+    </button>
     <div
-      v-for="m in ctx.chatMessages.value"
-    :key="m.id"
-    class="msg"
+      v-for="m in visibleMessages"
+      :key="m.id"
+      v-memo="[messageMemoKey(m)]"
+      class="msg"
     :class="m.role"
     :data-message-id="m.id"
     @mouseup="ctx.onMessageSelect($event, m)"
@@ -119,7 +128,7 @@
       <PlanDocumentBlock
         v-if="ctx.shouldShowMessageBubble(m, ctx.hasAgentActivity(m))"
         :content="ctx.messageDisplayContent(m)"
-        :streaming="m.role === 'assistant' && (ctx.isAgentRunning(m) || !!m.streaming)"
+        :streaming="m.role === 'assistant' && ctx.isAgentRunning(m)"
         :can-execute="ctx.canExecutePlanMessage(m)"
         :enhance-layout="m.role === 'assistant' && !ctx.isAgentRunning(m)"
         @execute="ctx.executePlanFromMessage(m.id)"
@@ -131,7 +140,7 @@
             'msg-answer--final': m.role === 'assistant' && !ctx.isAgentRunning(m),
           }"
           :content="planMarkdownContent(m)"
-          :streaming="m.role === 'assistant' && !!m.streaming && ctx.isAgentRunning(m)"
+          :streaming="m.role === 'assistant' && ctx.isAgentRunning(m)"
           :interactive="m.role === 'assistant' && !ctx.isAgentRunning(m)"
           @select-option="(option) => ctx.handleAiOptionSelect(option, m)"
         />
@@ -152,8 +161,8 @@
       <div
         v-if="
           m.role === 'assistant' &&
-          (m.status || ctx.isAgentRunning(m)) &&
-          !(m.streaming && (m.content || '').trim().length > 50)
+          ctx.isAgentRunning(m) &&
+          !(ctx.isAgentRunning(m) && (m.content || '').trim().length > 50)
         "
         class="msg-status"
       >
@@ -308,7 +317,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, nextTick, ref } from "vue";
+import { computed, inject, nextTick, ref, watch } from "vue";
 import AgentMessage from "../AgentMessage.vue";
 import ChatMarkdown from "../ChatMarkdown.vue";
 import PlanDocumentBlock from "../PlanDocumentBlock.vue";
@@ -321,6 +330,54 @@ if (!injectedCtx) {
   throw new Error("VibeChatMessages requires vibeChatMessageContext");
 }
 const ctx = injectedCtx;
+
+const MESSAGE_WINDOW = 80;
+const showAllMessages = ref(true);
+
+watch(
+  () => ctx.chatMessages.value.length,
+  (count, prev) => {
+    if (count > MESSAGE_WINDOW && prev <= MESSAGE_WINDOW) {
+      showAllMessages.value = false;
+    }
+  },
+);
+
+const hiddenMessageCount = computed(() => {
+  if (showAllMessages.value) return 0;
+  return Math.max(0, ctx.chatMessages.value.length - MESSAGE_WINDOW);
+});
+
+const visibleMessages = computed(() => {
+  const messages = ctx.chatMessages.value;
+  if (showAllMessages.value || messages.length <= MESSAGE_WINDOW) return messages;
+  return messages.slice(messages.length - MESSAGE_WINDOW);
+});
+
+function messageMemoKey(m: VibeChatMessageItem): unknown[] {
+  if (ctx.isAgentRunning(m)) {
+    return [
+      m.id,
+      "running",
+      ctx.agentUiTick.value,
+      m.content?.length ?? 0,
+      m.streaming,
+      m.status,
+      m.agentPhase,
+      m.tools?.length ?? 0,
+    ];
+  }
+  return [
+    m.id,
+    m.content,
+    m.reverted,
+    m.rejected,
+    m.writtenFiles?.length ?? 0,
+    m.agentFailed,
+    m.agentRecoverable,
+    Object.keys(m.turnFileDiffs ?? {}).length,
+  ];
+}
 
 const orphanedUserReply = computed(() =>
   isOrphanedUserReply(ctx.chatMessages.value, ctx.chatSending.value),
@@ -373,7 +430,7 @@ function hideBrokenUserImage(event: Event) {
 
 function planMarkdownContent(msg: VibeChatMessageItem): string {
   const raw = ctx.messageDisplayContent(msg);
-  const whileStreaming = msg.role === "assistant" && (ctx.isAgentRunning(msg) || !!msg.streaming);
+  const whileStreaming = msg.role === "assistant" && ctx.isAgentRunning(msg);
   return enrichPlanMarkdownForDisplay(raw, { whileStreaming });
 }
 </script>

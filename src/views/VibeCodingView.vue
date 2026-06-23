@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="vibe-page">
     <AppToolbar
       :project-path="projectPath"
@@ -309,6 +309,7 @@
             class="chat-composer-editor"
             :placeholder="chatSending ? '输入新指令将打断当前任务…' : chatPlaceholder"
             :disabled="!configReady || !projectOpened"
+            :draft-key="activeSessionId || undefined"
             @mention-change="onComposerMentionChange"
             @enter-send="sendChat"
             @update:empty="composerEmpty = $event"
@@ -384,7 +385,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from "vue";
 import "../styles/vibe-coding.scss";
-import { appendStatusDetail, truncateDiffPreview, cleanStatusLogText, formatCharCount, isNetworkError, fileName, genId, hasAgentProcessSteps, entryToNode, formatToolMeta, syncRoundGroupsPatch } from "../utils/vibeHelpers";
+import { appendStatusDetail, assistantTransientUiClearPatch, truncateDiffPreview, cleanStatusLogText, formatCharCount, isNetworkError, fileName, genId, hasAgentProcessSteps, entryToNode, formatToolMeta, syncRoundGroupsPatch } from "../utils/vibeHelpers";
 import { debugLog } from "../utils/debugLog";
 import { sessionDiag } from "../utils/sessionDiagLog";
 import ChatComposerEditor from "../components/ChatComposerEditor.vue";
@@ -553,7 +554,10 @@ const PENDING_QUEUE_KEY = "vibe-coding-pending-queue";
 type ChatRole = "user" | "assistant";
 type FileDiff = TurnFileDiff;
 
-function normalizeChatMessages(messages: PersistedChatMessage[]): ChatMessage[] {
+function normalizeChatMessages(
+  messages: PersistedChatMessage[],
+  options?: { stripTransientUi?: boolean },
+): ChatMessage[] {
   return messages.map((m) => {
     const normalized: ChatMessage = {
       ...m,
@@ -590,7 +594,8 @@ function normalizeChatMessages(messages: PersistedChatMessage[]): ChatMessage[] 
       })),
     };
 
-    if (m.role === "assistant") {
+    if (m.role === "assistant" && options?.stripTransientUi) {
+      Object.assign(normalized, assistantTransientUiClearPatch());
       const inferred = inferAgentRecoveryFlags(normalized);
       if (inferred) {
         normalized.agentFailed = inferred.agentFailed;
@@ -901,14 +906,14 @@ const chatSession = useChatSessionStore({
   chatError,
   chatSending: () => chatSending.value,
   session,
-  normalizeMessages: normalizeChatMessages,
+  normalizeMessages: (msgs) => normalizeChatMessages(msgs, { stripTransientUi: true }),
   confirm,
   onBeforeSessionSwitch: (fromSessionId, messages) => {
     sessionMessageCache.snapshot(fromSessionId, messages);
   },
   resolveSessionMessages: (sessionId, diskMessages) => {
     const cached = sessionMessageCache.get(sessionId);
-    return cached?.length ? cached : normalizeChatMessages(diskMessages);
+    return cached?.length ? cached : normalizeChatMessages(diskMessages, { stripTransientUi: true });
   },
   onAfterSwitch: () => chatSessionHooks.onAfterSwitch?.(),
   scrollToBottom: (force) => chatSessionHooks.scrollToBottom?.(force),
@@ -1086,36 +1091,6 @@ const chatPlaceholder = computed(() =>
     ? "描述需求 → AI 输出方案 → 确认后执行（可点「执行方案」或回复「执行方案」）"
     : "描述要改什么（Enter 发送，Shift+Enter 换行）",
 );
-
-const totalTokenUsage = computed(() => {
-  let totalStreamChars = 0;
-  let totalContextChars = 0;
-  let hasTokenData = false;
-  
-  for (const msg of chatMessages.value) {
-    if (msg.role === "assistant") {
-      if (msg.streamChars && msg.streamChars > 0) {
-        totalStreamChars += msg.streamChars;
-        hasTokenData = true;
-      }
-      if (msg.contextChars && msg.contextChars > 0) {
-        totalContextChars = Math.max(totalContextChars, msg.contextChars);
-        hasTokenData = true;
-      }
-    }
-  }
-  
-  if (!hasTokenData) return "";
-  
-  const parts: string[] = [];
-  if (totalStreamChars > 0) {
-    parts.push(`${formatCharCount(totalStreamChars)} 输出`);
-  }
-  if (totalContextChars > 0) {
-    parts.push(`${formatCharCount(totalContextChars)} 上下文`);
-  }
-  return parts.join(" · ");
-});
 
 const showTokenDetail = ref(false);
 
@@ -1738,9 +1713,46 @@ const {
   clearStreamDeltaBuffer,
   tryResumeHmrInterruptedRun,
   getAgentAbortHandle,
+  getActiveLiveContextChars,
   maybeAutoResumeLastRecoverableAssistant,
   stopAgentUiTick,
 } = agent;
+
+const totalTokenUsage = computed(() => {
+  let totalStreamChars = 0;
+  let maxContextChars = 0;
+  let hasTokenData = false;
+
+  for (const msg of chatMessages.value) {
+    if (msg.role === "assistant") {
+      if (msg.streamChars && msg.streamChars > 0) {
+        totalStreamChars += msg.streamChars;
+        hasTokenData = true;
+      }
+      if (msg.contextChars && msg.contextChars > 0) {
+        maxContextChars = Math.max(maxContextChars, msg.contextChars);
+        hasTokenData = true;
+      }
+    }
+  }
+
+  void agentUiTick.value;
+  const currentRunContextChars = chatSending.value ? getActiveLiveContextChars() : 0;
+
+  if (!hasTokenData && !currentRunContextChars) return "";
+
+  const parts: string[] = [];
+  if (totalStreamChars > 0) {
+    parts.push(`${formatCharCount(totalStreamChars)} 输出`);
+  }
+  const contextChars = chatSending.value && currentRunContextChars > 0
+    ? currentRunContextChars
+    : maxContextChars;
+  if (contextChars > 0) {
+    parts.push(`${formatCharCount(contextChars)} ${chatSending.value ? "本轮上下文" : "峰值上下文"}`);
+  }
+  return parts.join(" · ");
+});
 
 chatSessionHooks.scrollToBottom = scrollChatToBottom;
 chatSessionHooks.onAfterSwitch = maybeAutoResumeLastRecoverableAssistant;
@@ -1919,7 +1931,7 @@ async function openProjectByPath(dirPath: string) {
     try {
       const chatState = await loadProjectChatState(normalized);
       setActiveSession(chatState.activeSessionId);
-      chatMessages.value = normalizeChatMessages(chatState.messages);
+      chatMessages.value = normalizeChatMessages(chatState.messages, { stripTransientUi: true });
       refreshSessionList(normalized);
       log(`chat-active(${chatState.activeSessionId}, ${chatState.messages.length}msgs)`);
     } finally {
@@ -2659,6 +2671,7 @@ async function sendChat() {
 
   const payload = composer.extractPayload();
   composer.clear();
+  composer.clearDraftStorage();
   mentionOpen.value = false;
 
   const userText = payload.text.trim();
@@ -2902,4 +2915,5 @@ onBeforeUnmount(() => {
   stopFileWatcherForProject();
 });
 </script>
+
 
