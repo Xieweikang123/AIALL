@@ -89,8 +89,8 @@ function readLegacyDraftText(projectPath: string, draftKey: string): string | nu
   return last?.role === "user" && last.content.trim() ? last.content : null;
 }
 
-/** 生成按会话隔离的草稿 key（保留向后兼容） */
-function draftStorageKeyFor(draftKey?: string): string {
+/** 无活跃会话时输入框草稿的 localStorage key 后缀 */
+export const COMPOSER_PENDING_DRAFT_KEY = "__composer-pending__";
   const suffix = draftKey || "__global";
   return `vibe-coding-input-draft-${suffix}`;
 }

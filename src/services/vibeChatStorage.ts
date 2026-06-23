@@ -1043,7 +1043,8 @@ export function getSessionDiagSnapshot(projectPath: string): {
 }
 
 function sessionHasListableContent(key: string, session: VibeChatSession): boolean {
-  if (isEmptyDraftSession(session)) return false;
+  // Draft sessions (even with content) should not appear in the session list
+  if (session.status === "draft") return false;
   if (session.messages.length > 0) return true;
   return Boolean(
     readIndex().byProject[key]?.sessions.some((m) => m.id === session.id && m.messageCount > 0),
@@ -1090,8 +1091,10 @@ export function loadVibeChatHistory(projectPath: string): PersistedChatMessage[]
   const key = normalizeProjectKey(projectPath);
   if (!key) return [];
   const record = getProjectRecord(key);
-  if (!record?.sessions?.length) return [];
-  return sanitizeMessages(getActiveSession(record).messages);
+  if (!record?.sessions?.length || !record.activeSessionId) return [];
+  const session = record.sessions.find((s) => s.id === record.activeSessionId);
+  if (!session || isEmptyDraftSession(session)) return [];
+  return sanitizeMessages(session.messages);
 }
 
 export function hasVibeChatHistory(projectPath: string): boolean {
@@ -1530,8 +1533,11 @@ export function abandonVibeChatDraftIfEmpty(projectPath: string, sessionId: stri
   persistRecord(key, record);
 }
 
-/** Create a draft session and make it active. Empty drafts are not listed until first message. */
-export function beginVibeChatDraftSession(projectPath: string): { id: string; messages: PersistedChatMessage[] } {
+/** Create a draft session and optionally make it active. Empty drafts are not listed until first message. */
+export function beginVibeChatDraftSession(
+  projectPath: string,
+  options?: { setActive?: boolean },
+): { id: string; messages: PersistedChatMessage[] } {
   const key = normalizeProjectKey(projectPath);
   if (!key) return { id: "", messages: [] };
   let record = getProjectRecord(key);
@@ -1547,7 +1553,7 @@ export function beginVibeChatDraftSession(projectPath: string): { id: string; me
       record.activeSessionId = record.sessions[0].id;
     }
   }
-  record.activeSessionId = session.id;
+  if (options?.setActive !== false) record.activeSessionId = session.id;
   persistRecord(key, record);
   sessionDiag("storage:begin-draft", {
     projectPath,
@@ -1559,26 +1565,38 @@ export function beginVibeChatDraftSession(projectPath: string): { id: string; me
 
 /**
  * Resolve the active session id for UI binding.
- * Creates a draft when the project has no sessions or no valid active pointer.
+ * Does not create sessions — composer drafts live in localStorage until first send.
  */
 export function resolveActiveVibeChatSessionId(projectPath: string): string {
   const key = normalizeProjectKey(projectPath);
   if (!key) return "";
   const record = getProjectRecord(key);
-  if (!record?.sessions.length) {
-    return beginVibeChatDraftSession(projectPath).id;
+  if (!record?.sessions.length) return "";
+
+  pruneEmptyDraftSessions(record);
+  if (!record.sessions.length) {
+    record.activeSessionId = "";
+    persistRecord(key, record);
+    return "";
   }
+
   if (record.activeSessionId) {
     const active = record.sessions.find((s) => s.id === record.activeSessionId);
-    if (active) return record.activeSessionId;
+    if (active && !isEmptyDraftSession(active)) {
+      return record.activeSessionId;
+    }
   }
+
   const firstListable = record.sessions.find((s) => sessionHasListableContent(key, s));
   if (firstListable) {
     record.activeSessionId = firstListable.id;
     persistRecord(key, record);
     return firstListable.id;
   }
-  return beginVibeChatDraftSession(projectPath).id;
+
+  record.activeSessionId = "";
+  persistRecord(key, record);
+  return "";
 }
 
 /** @deprecated Prefer beginVibeChatDraftSession for new-session UI; kept for tests. */

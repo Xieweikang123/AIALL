@@ -175,6 +175,8 @@
         :open-tabs="openTabs"
         :parent-editor-collapsed="editorCollapsed"
         :selected-code="selectedCode"
+        :can-go-back="canGoBack"
+        :can-go-forward="canGoForward"
         @update:file-content="fileContent = $event"
         @switch-tab="switchTab"
         @close-tab="closeTab"
@@ -188,6 +190,8 @@
         @close-other-tabs="closeOtherTabs"
         @close-right-tabs="closeRightTabs"
         @close-all-tabs="closeAllTabs"
+        @navigate-back="navigateBack"
+        @navigate-forward="navigateForward"
       />
 
       <div
@@ -308,8 +312,9 @@
             ref="composerRef"
             class="chat-composer-editor"
             :placeholder="chatSending ? '输入新指令将打断当前任务…' : chatPlaceholder"
-            :disabled="!configReady || !projectOpened || !activeSessionId"
-            :draft-key="activeSessionId || undefined"
+            :disabled="!configReady || !projectOpened"
+            :draft-key="composerDraftKey"
+            :project-path="projectPath"
             @mention-change="onComposerMentionChange"
             @enter-send="sendChat"
             @update:empty="composerEmpty = $event"
@@ -388,7 +393,7 @@ import "../styles/vibe-coding.scss";
 import { appendStatusDetail, assistantTransientUiClearPatch, truncateDiffPreview, cleanStatusLogText, formatCharCount, isNetworkError, fileName, genId, hasAgentProcessSteps, entryToNode, formatToolMeta, syncRoundGroupsPatch } from "../utils/vibeHelpers";
 import { debugLog } from "../utils/debugLog";
 import { sessionDiag } from "../utils/sessionDiagLog";
-import ChatComposerEditor from "../components/ChatComposerEditor.vue";
+import ChatComposerEditor, { COMPOSER_PENDING_DRAFT_KEY } from "../components/ChatComposerEditor.vue";
 import ConfirmPopup from "../components/ConfirmPopup.vue";
 import InputPrompt from "../components/InputPrompt.vue";
 import FileTreeNode, { type TreeNode } from "../components/FileTreeNode.vue";
@@ -814,6 +819,7 @@ function persistAgentRunSession(sessionId: string) {
   const cached = sessionMessageCache.get(sid);
   if (cached?.length) {
     saveVibeChatHistory(project, cached, sid, { touchTimestamp: false });
+    refreshSessionList();
   }
 }
 const switchingProject = ref(false);
@@ -935,6 +941,7 @@ const {
   schedulePersistChat,
   schedulePersistDuringAgentRun,
   cancelPendingChatPersistence,
+  ensureSessionForSend,
   startNewSession,
   switchSession,
   removeSession,
@@ -1093,8 +1100,12 @@ const canSendChat = computed(
   () =>
     !composerEmpty.value
     && configReady.value
-    && projectOpened.value
-    && Boolean(activeSessionId.value),
+    && projectOpened.value,
+);
+
+/** 无活跃会话时输入框草稿用固定 key，仅存 localStorage */
+const composerDraftKey = computed(
+  () => activeSessionId.value || COMPOSER_PENDING_DRAFT_KEY,
 );
 
 const chatPlaceholder = computed(() =>
@@ -1235,6 +1246,7 @@ const {
   onEditorChange, onEditorSelect,   askAiWithCode, activeFileRelativePath,
   syncEditorAfterAgentFileChange,
   closeOtherTabs, closeRightTabs, closeAllTabs,
+  navigateBack, navigateForward, canGoBack, canGoForward,
 } = useEditorPanel({
   projectPath,
   projectOpened,
@@ -1243,6 +1255,7 @@ const {
   confirm,
   inputPrompt,
   composerRef,
+  editorPanelRef,
   gitError,
   gitDiffContentCache,
   gitDiffLoadingKey,
@@ -1277,6 +1290,8 @@ useVibeGlobalShortcuts({
   saveFile: () => { void saveFile(); },
   switchToAdjacentSession,
   startNewSession,
+  navigateBack,
+  navigateForward,
 });
 
 async function applyChatMessageImageHydration(messages: PersistedChatMessage[]): Promise<ChatMessage[]> {
@@ -2632,6 +2647,7 @@ function handleAgentSuggestion(suggestion: AgentSuggestion) {
       : { userBubbleContent: suggestion.label || userText };
 
   if (chatSending.value) {
+    ensureSessionForSend();
     chatMessages.value.push({
       id: genId(),
       role: "user",
@@ -2644,6 +2660,7 @@ function handleAgentSuggestion(suggestion: AgentSuggestion) {
     return;
   }
 
+  ensureSessionForSend();
   void runAgentTurn(userText, runOptions);
 }
 
@@ -2662,6 +2679,7 @@ function handleAiOptionSelect(
       : { userBubbleContent: userText };
 
   if (chatSending.value) {
+    ensureSessionForSend();
     chatMessages.value.push({
       id: genId(),
       role: "user",
@@ -2674,6 +2692,7 @@ function handleAiOptionSelect(
     return;
   }
 
+  ensureSessionForSend();
   void runAgentTurn(userText, runOptions);
 }
 
@@ -2683,8 +2702,12 @@ async function sendChat() {
   const composer = composerRef.value;
   if (!composer) return;
 
-  const sendSessionId = activeSessionId.value;
-  if (!sendSessionId) return;
+  // 无活跃会话时仅在发送瞬间创建 chat-store 会话，不打字建会话
+  let sendSessionId = activeSessionId.value.trim();
+  if (!sendSessionId) {
+    sendSessionId = ensureSessionForSend();
+    if (!sendSessionId) return;
+  }
 
   const payload = composer.extractPayload();
   mentionOpen.value = false;

@@ -79,6 +79,63 @@ describe("formatSessionTitle", () => {
   });
 });
 
+describe("saveVibeChatHistory touchTimestamp", () => {
+  beforeEach(() => {
+    installLocalStorageMock();
+  });
+
+  it("preserves updatedAt when touchTimestamp is false", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2020-01-15T08:00:00.000Z"));
+    const projectPath = "D:/projects/touch-false";
+    const { sessionId } = saveVibeChatHistory(projectPath, [
+      { id: "u1", role: "user", content: "hello" },
+    ]);
+    const original = listVibeChatSessions(projectPath).find((s) => s.id === sessionId)!;
+
+    vi.setSystemTime(new Date("2026-06-23T10:00:00.000Z"));
+    saveVibeChatHistory(
+      projectPath,
+      [
+        { id: "u1", role: "user", content: "hello" },
+        { id: "u2", role: "user", content: "follow up" },
+      ],
+      sessionId,
+      { touchTimestamp: false },
+    );
+
+    const after = listVibeChatSessions(projectPath).find((s) => s.id === sessionId)!;
+    expect(after.updatedAt).toBe(original.updatedAt);
+    vi.useRealTimers();
+  });
+
+  it("refreshes updatedAt when touchTimestamp is true", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2020-01-15T08:00:00.000Z"));
+    const projectPath = "D:/projects/touch-true";
+    const { sessionId } = saveVibeChatHistory(projectPath, [
+      { id: "u1", role: "user", content: "hello" },
+    ]);
+    const original = listVibeChatSessions(projectPath).find((s) => s.id === sessionId)!;
+
+    vi.setSystemTime(new Date("2026-06-23T10:00:00.000Z"));
+    saveVibeChatHistory(
+      projectPath,
+      [
+        { id: "u1", role: "user", content: "hello" },
+        { id: "u2", role: "user", content: "follow up" },
+      ],
+      sessionId,
+      { touchTimestamp: true },
+    );
+
+    const after = listVibeChatSessions(projectPath).find((s) => s.id === sessionId)!;
+    expect(after.updatedAt).toBe("2026-06-23T10:00:00.000Z");
+    expect(after.updatedAt).not.toBe(original.updatedAt);
+    vi.useRealTimers();
+  });
+});
+
 describe("buildAgentHistoryFromMessages", () => {
   it("includes the first completed exchange when starting turn two", () => {
     const history = buildAgentHistoryFromMessages([
@@ -856,11 +913,19 @@ describe("v3 chat storage (index + memory)", () => {
     expect(listVibeChatSessions(projectPath).map((s) => s.id)).toEqual([sessionId]);
   });
 
-  it("resolveActiveVibeChatSessionId creates draft for empty project", () => {
+  it("resolveActiveVibeChatSessionId returns empty for project with no sessions", () => {
     const projectPath = "D:/projects/resolve-empty";
-    const id = resolveActiveVibeChatSessionId(projectPath);
-    expect(id).toBeTruthy();
-    expect(getActiveVibeChatSessionId(projectPath)).toBe(id);
+    expect(resolveActiveVibeChatSessionId(projectPath)).toBe("");
+    expect(getActiveVibeChatSessionId(projectPath)).toBe("");
+    expect(listVibeChatSessions(projectPath)).toHaveLength(0);
+  });
+
+  it("loadVibeChatHistory returns empty when active is unset or empty draft", () => {
+    const projectPath = "D:/projects/load-empty-active";
+    const { id: draftId } = beginVibeChatDraftSession(projectPath);
+    expect(loadVibeChatHistory(projectPath)).toEqual([]);
+    abandonVibeChatDraftIfEmpty(projectPath, draftId);
+    expect(loadVibeChatHistory(projectPath)).toEqual([]);
   });
 
   it("does not treat disk-only orphan sessions as ahead of local index", () => {
