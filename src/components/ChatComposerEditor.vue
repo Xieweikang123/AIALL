@@ -46,13 +46,53 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
-/** 草稿自动保存：将输入框纯文本保存到 localStorage，刷新后恢复 */
-const DRAFT_STORAGE_KEY_PREFIX = "vibe-coding-input-draft";
+import {
+  deleteVibeChatSession,
+  peekVibeChatSessionMessages,
+} from "../services/vibeChatStorage";
 
-/** 生成按会话隔离的草稿 key */
+/** 旧版草稿会话映射（draftKey → draftSessionId），仅用于迁移清理 */
+const LEGACY_DRAFT_MAP_KEY = "vibe-coding-draft-session-map";
+
+function getLegacyDraftSessionMap(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(LEGACY_DRAFT_MAP_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function getLegacyDraftSessionId(draftKey?: string): string | null {
+  if (!draftKey) return null;
+  return getLegacyDraftSessionMap()[draftKey] || null;
+}
+
+function removeLegacyDraftSessionId(draftKey?: string): void {
+  if (!draftKey) return;
+  const map = getLegacyDraftSessionMap();
+  delete map[draftKey];
+  localStorage.setItem(LEGACY_DRAFT_MAP_KEY, JSON.stringify(map));
+}
+
+function purgeLegacyDraftSession(draftKey: string, projectPath: string): void {
+  const draftId = getLegacyDraftSessionId(draftKey);
+  if (!draftId) return;
+  deleteVibeChatSession(projectPath, draftId);
+  removeLegacyDraftSessionId(draftKey);
+}
+
+function readLegacyDraftText(projectPath: string, draftKey: string): string | null {
+  const draftId = getLegacyDraftSessionId(draftKey);
+  if (!draftId) return null;
+  const messages = peekVibeChatSessionMessages(projectPath, draftId);
+  const last = messages[messages.length - 1];
+  return last?.role === "user" && last.content.trim() ? last.content : null;
+}
+
+/** 生成按会话隔离的草稿 key（保留向后兼容） */
 function draftStorageKeyFor(draftKey?: string): string {
   const suffix = draftKey || "__global";
-  return `${DRAFT_STORAGE_KEY_PREFIX}-${suffix}`;
+  return `vibe-coding-input-draft-${suffix}`;
 }
 
 function getDraftStorageKey(): string {
@@ -108,6 +148,7 @@ const props = defineProps<{
   placeholder?: string;
   disabled?: boolean;
   draftKey?: string;
+  projectPath?: string;
 }>();
 
 const emit = defineEmits<{
@@ -422,15 +463,42 @@ function moveCaretToEnd(root: HTMLElement) {
   sel?.addRange(range);
 }
 
-/** 将当前输入框完整 HTML（含图片 chip）保存到指定 localStorage key */
+function isPlaceholderEditorHtml(html: string): boolean {
+  const trimmed = html.trim();
+  return !trimmed || trimmed === "<br>" || trimmed === "<br/>" || trimmed === "<br />";
+}
+
+function applySavedDraft(root: HTMLElement, saved: string) {
+  const looksLikeHtml = /<[a-z][\s\S]*>/i.test(saved);
+  if (looksLikeHtml) {
+    root.innerHTML = saved;
+    bindImageChipClickHandlers(root);
+  } else {
+    root.innerHTML = "";
+    if (saved.trim()) {
+      root.appendChild(document.createTextNode(saved));
+    }
+  }
+  moveCaretToEnd(root);
+}
+
+/** 将当前输入框完整 HTML（含图片 chip）保存到 localStorage，不写 chat-store */
 function saveDraftToKey(storageKey: string) {
   try {
     const root = editorRef.value;
-    if (root && root.innerHTML.trim()) {
-      localStorage.setItem(storageKey, root.innerHTML);
-    } else {
+    if (!root || !props.draftKey) return;
+
+    if (!hasContent()) {
       localStorage.removeItem(storageKey);
+      return;
     }
+
+    const html = root.innerHTML;
+    if (isPlaceholderEditorHtml(html)) {
+      localStorage.removeItem(storageKey);
+      return;
+    }
+    localStorage.setItem(storageKey, html);
   } catch {
     // ignore storage errors
   }
@@ -441,16 +509,23 @@ function saveDraftToStorage() {
   saveDraftToKey(getDraftStorageKey());
 }
 
-/** 从 localStorage 恢复草稿（含图片 chip）；无草稿时清空输入框 */
+/** 从 localStorage 恢复输入框内容（含图片 chip）；无草稿时清空输入框 */
 function restoreDraftFromStorage() {
   try {
-    const saved = localStorage.getItem(getDraftStorageKey());
     const root = editorRef.value;
     if (!root) return;
+
+    let saved = localStorage.getItem(getDraftStorageKey());
+
+    if (!saved && props.draftKey && props.projectPath) {
+      saved = readLegacyDraftText(props.projectPath, props.draftKey);
+    }
+    if (props.draftKey && props.projectPath) {
+      purgeLegacyDraftSession(props.draftKey, props.projectPath);
+    }
+
     if (saved) {
-      root.innerHTML = saved;
-      bindImageChipClickHandlers(root);
-      moveCaretToEnd(root);
+      applySavedDraft(root, saved);
     } else {
       root.innerHTML = "";
     }
@@ -465,6 +540,9 @@ function restoreDraftFromStorage() {
 function clearDraftStorage() {
   try {
     localStorage.removeItem(getDraftStorageKey());
+    if (props.draftKey && props.projectPath) {
+      purgeLegacyDraftSession(props.draftKey, props.projectPath);
+    }
   } catch {
     // ignore
   }
