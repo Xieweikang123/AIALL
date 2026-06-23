@@ -1,5 +1,6 @@
 import { ref, type Ref } from "vue";
 import {
+  abandonVibeChatDraftIfEmpty,
   beginVibeChatDraftSession,
   buildActiveSessionDiskSyncPayload,
   chatMessagesHavePendingImageBase64,
@@ -12,6 +13,7 @@ import {
   getVibeChatProjectSnapshot,
   isSessionRecentlyDeletedLocally,
   loadVibeChatHistory,
+  peekVibeChatSessionMessages,
   projectChatNeedsDiskRestore,
   replaceChatStoreFromDiskSnapshot,
   resolveActiveVibeChatSessionId,
@@ -320,15 +322,14 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
   ) {
     if (!path || !chatMessages.value.length) return;
 
-    let sessionId = (options?.sessionId || activeSessionId.value).trim();
-    if (!sessionId) {
-      sessionId = beginVibeChatDraftSession(path).id;
-      setActiveSession(sessionId);
-    }
+    const sessionId = (options?.sessionId || activeSessionId.value).trim();
+    if (!sessionId) return;
 
     const messagesForDiskSync = cloneChatMessagesForDiskSync(chatMessages.value);
     const gen = ++persistChatGeneration;
-    saveVibeChatHistory(path, chatMessages.value, sessionId, { touchTimestamp: false });
+    // Refresh updatedAt so sidebar date grouping / sort order reflect latest activity.
+    // Session switch and disk-sync replay keep touchTimestamp: false to avoid spurious reorder.
+    saveVibeChatHistory(path, chatMessages.value, sessionId);
     refreshList(path);
 
     if (persistDelayTimer) clearTimeout(persistDelayTimer);
@@ -339,6 +340,18 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     }, 100);
   }
 
+  /** Create a chat-store session only when sending the first message (no active session). */
+  function ensureSessionForSend(): string {
+    const project = projectPath().trim();
+    if (!project) return "";
+    const existing = activeSessionId.value.trim();
+    if (existing) return existing;
+    const { id } = beginVibeChatDraftSession(project);
+    setActiveSession(id);
+    refreshList(project);
+    return id;
+  }
+
   function startNewSession() {
     if (!projectPath().trim()) return;
     const project = projectPath().trim();
@@ -347,13 +360,26 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
       onBeforeSessionSwitch?.(fromSessionId, chatMessages.value);
       saveVibeChatHistory(project, chatMessages.value, fromSessionId, { touchTimestamp: false });
     }
+    if (fromSessionId) {
+      abandonVibeChatDraftIfEmpty(project, fromSessionId);
+    }
     cancelPendingChatPersistence();
-    // 空草稿不再丢弃，保留以便刷新后恢复
     const { id } = beginVibeChatDraftSession(project);
     setActiveSession(id);
     chatMessages.value = [];
     chatError.value = "";
     refreshList(project);
+    void scrollToBottom?.(true);
+  }
+
+  function applySessionSwitch(project: string, sessionId: string) {
+    const diskMessages = switchVibeChatSession(project, sessionId);
+    const resolved = resolveSessionMessages?.(sessionId, diskMessages) ?? diskMessages;
+    chatMessages.value = normalizeMessages(resolved);
+    setActiveSession(sessionId);
+    chatError.value = "";
+    refreshList(project);
+    onAfterSwitch?.();
     void scrollToBottom?.(true);
   }
 
@@ -368,22 +394,24 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
       onBeforeSessionSwitch?.(fromSessionId, chatMessages.value);
       saveVibeChatHistory(project, chatMessages.value, fromSessionId, { touchTimestamp: false });
     }
+    if (fromSessionId && fromSessionId !== sessionId) {
+      abandonVibeChatDraftIfEmpty(project, fromSessionId);
+    }
     cancelPendingChatPersistence();
-    // 空草稿不再丢弃，保留以便刷新后恢复
     const gen = ++switchSessionGeneration;
+    // 先用内存数据即时切换，避免 Agent 运行期间的磁盘队列阻塞 UI
+    applySessionSwitch(project, sessionId);
+
+    if (!projectChatNeedsDiskRestore(project, sessionId)) return;
+
     switchingSession.value = true;
     void (async () => {
       try {
         await ensureProjectChatLoadedFromDisk(project, sessionId);
         if (gen !== switchSessionGeneration) return;
-        const diskMessages = switchVibeChatSession(project, sessionId);
+        const diskMessages = peekVibeChatSessionMessages(project, sessionId);
         const resolved = resolveSessionMessages?.(sessionId, diskMessages) ?? diskMessages;
         chatMessages.value = normalizeMessages(resolved);
-        setActiveSession(sessionId);
-        chatError.value = "";
-        refreshList(project);
-        onAfterSwitch?.();
-        await scrollToBottom?.(true);
       } finally {
         if (gen === switchSessionGeneration) switchingSession.value = false;
       }
@@ -452,6 +480,7 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     schedulePersistDuringAgentRun,
     cancelPendingChatPersistence,
     flushChatStoreToDisk,
+    ensureSessionForSend,
     startNewSession,
     switchSession,
     removeSession,

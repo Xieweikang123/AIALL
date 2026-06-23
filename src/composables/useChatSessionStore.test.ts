@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ref } from "vue";
 import { useSessionManager } from "./useSessionManager";
 import { useChatSessionStore } from "./useChatSessionStore";
@@ -44,6 +44,10 @@ describe("useChatSessionStore", () => {
     vi.restoreAllMocks();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("startNewSession creates draft and keeps refreshSessionList from changing active", () => {
     const projectPath = "D:/projects/chat-store";
     const { sessionId: existingId } = saveVibeChatHistory(projectPath, [
@@ -75,6 +79,30 @@ describe("useChatSessionStore", () => {
     expect(listVibeChatSessions(projectPath).map((s) => s.id)).toEqual([existingId]);
   });
 
+  it("ensureSessionForSend creates session without clearing chat messages", () => {
+    const projectPath = "D:/projects/ensure-send";
+    const session = useSessionManager(() => projectPath);
+    const chatMessages = ref([{ id: "u1", role: "user" as const, content: "draft text" }]);
+    const chatError = ref("");
+
+    const store = useChatSessionStore({
+      projectPath: () => projectPath,
+      chatMessages,
+      chatError,
+      chatSending: () => false,
+      session,
+      normalizeMessages: (msgs) => msgs,
+      confirm: async () => true,
+    });
+
+    expect(session.activeSessionId.value).toBe("");
+    const id = store.ensureSessionForSend();
+    expect(id).toBeTruthy();
+    expect(session.activeSessionId.value).toBe(id);
+    expect(chatMessages.value).toEqual([{ id: "u1", role: "user", content: "draft text" }]);
+    expect(listVibeChatSessions(projectPath)).toHaveLength(0);
+  });
+
   it("persistChatNow promotes draft to listable session", () => {
     const projectPath = "D:/projects/persist";
     const session = useSessionManager(() => projectPath);
@@ -97,6 +125,36 @@ describe("useChatSessionStore", () => {
     store.persistChatNow();
 
     expect(listVibeChatSessions(projectPath).map((s) => s.id)).toContain(draftId);
+  });
+
+  it("persistChatNow refreshes updatedAt for sidebar date grouping", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2020-01-15T08:00:00.000Z"));
+    const projectPath = "D:/projects/persist-updated-at";
+    const session = useSessionManager(() => projectPath);
+    const chatMessages = ref<Array<{ id: string; role: "user"; content: string }>>([]);
+    const chatError = ref("");
+
+    const store = useChatSessionStore({
+      projectPath: () => projectPath,
+      chatMessages,
+      chatError,
+      chatSending: () => false,
+      session,
+      normalizeMessages: (msgs) => msgs,
+      confirm: async () => true,
+    });
+
+    store.startNewSession();
+    const sessionId = session.activeSessionId.value;
+    chatMessages.value = [{ id: "u-new", role: "user", content: "today's message" }];
+
+    vi.setSystemTime(new Date("2026-06-23T10:00:00.000Z"));
+    store.persistChatNow();
+
+    const meta = listVibeChatSessions(projectPath).find((s) => s.id === sessionId)!;
+    expect(meta.updatedAt).toBe("2026-06-23T10:00:00.000Z");
+    vi.useRealTimers();
   });
 
   it("schedulePersistDuringAgentRun persists while chatSending blocks schedulePersistChat", async () => {
@@ -132,6 +190,55 @@ describe("useChatSessionStore", () => {
       ]),
     );
     expect(listVibeChatSessions(projectPath).map((s) => s.id)).toContain(draftId);
+  });
+
+  it("switchSession applies local state immediately without waiting on disk hydrate", async () => {
+    const projectPath = "D:/projects/switch-immediate";
+    const { sessionId: sessionA } = saveVibeChatHistory(projectPath, [
+      { id: "u1", role: "user", content: "session A" },
+    ]);
+    const { sessionId: sessionB } = saveVibeChatHistory(projectPath, [
+      { id: "u2", role: "user", content: "session B" },
+    ]);
+
+    const session = useSessionManager(() => projectPath);
+    session.setActiveSession(sessionA);
+    session.refreshSessionList();
+
+    const chatMessages = ref([{ id: "u1", role: "user" as const, content: "session A" }]);
+    const chatError = ref("");
+    let diskHydrateStarted = false;
+    let releaseDiskHydrate: (() => void) | undefined;
+
+    const { fetchSessionMessages } = await import("../services/vibeCodingClient");
+    vi.mocked(fetchSessionMessages).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          diskHydrateStarted = true;
+          releaseDiskHydrate = () => resolve({ ok: true, data: { messages: [] } });
+        }),
+    );
+
+    const store = useChatSessionStore({
+      projectPath: () => projectPath,
+      chatMessages,
+      chatError,
+      chatSending: () => true,
+      session,
+      normalizeMessages: (msgs) => msgs,
+      confirm: async () => true,
+    });
+
+    store.switchSession(sessionB);
+
+    expect(session.activeSessionId.value).toBe(sessionB);
+    expect(chatMessages.value).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "u2", content: "session B" })]),
+    );
+    expect(diskHydrateStarted).toBe(false);
+
+    releaseDiskHydrate?.();
+    await new Promise((r) => setTimeout(r, 0));
   });
 
   it("startNewSession saves in-flight messages before canceling pending persistence", async () => {
