@@ -1,4 +1,5 @@
 import { ref, nextTick, reactive, type ComputedRef, type Ref } from "vue";
+import { debugLog } from "../utils/debugLog";
 import {
   buildAgentPromptForProfile,
   enrichAgentUserPrompt,
@@ -102,6 +103,13 @@ import { parseSkillProposalToolResult } from "../services/projectSkillProposal";
 import { isAgentSseProgressEvent } from "../services/agentSseEventHandlers";
 import { isScrollNearBottom, scrollElementToBottom } from "../utils/scrollViewport";
 import {
+  assistantTransientUiClearPatch,
+  formatCharCount,
+  formatToolMeta,
+  genId,
+  syncRoundGroupsPatch,
+} from "../utils/vibeHelpers";
+import {
   createInitialLiveState,
   formatAgentLiveStatus,
   patchLiveFromStatusEvent,
@@ -132,7 +140,8 @@ export type UseAgentRunDeps = {
   pendingPromptQueue: Ref<string[]>;
   patchAssistantMsg: (id: string, patch: Partial<ChatMessage>, sessionId?: string) => void;
   schedulePersistChat: () => void;
-  persistChatNow: (path?: string, options?: { flushStore?: boolean }) => void;
+  schedulePersistDuringAgentRun: (options?: { sessionId?: string; flushStore?: boolean }) => void;
+  persistChatNow: (path?: string, options?: { flushStore?: boolean; sessionId?: string }) => void;
   persistPendingQueue: () => void;
   scrollChatToBottom: (force?: boolean) => Promise<void>;
   resetChatScrollPin: () => void;
@@ -174,6 +183,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     pendingPromptQueue,
     patchAssistantMsg,
     schedulePersistChat,
+    schedulePersistDuringAgentRun,
     persistChatNow,
     persistPendingQueue,
     scrollChatToBottom,
@@ -236,7 +246,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   /** Agent 运行中：debounce 磁盘写入，后台 session 仍走 snapshot。 */
   function schedulePersistDuringRun(sessionId: string) {
-    if (isRunVisible(sessionId)) schedulePersistChat();
+    if (isRunVisible(sessionId)) schedulePersistDuringAgentRun({ sessionId });
     else persistAgentRunSession(sessionId);
   }
 
@@ -993,11 +1003,11 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   }
 
   function trySilentContinue(sessionId: string, assistantMsg: ChatMessage, reason: string): boolean {
-    if (!shouldSilentAutoContinue(reason)) return false;
+    if (!shouldSilentAutoContinue(reason)) { debugLog(`[stall-recover] trySilent: shouldSilentAutoContinue=false`); return false; }
     const count = assistantMsg.agentContinueCount ?? 0;
-    if (count >= AGENT_SILENT_CONTINUE_MAX) return false;
-    if (!configReady.value || !projectOpened.value) return false;
-    if (!resolveOriginalUserPrompt(assistantMsg.id)) return false;
+    if (count >= AGENT_SILENT_CONTINUE_MAX) { debugLog(`[stall-recover] trySilent: count=${count}>=max`); return false; }
+    if (!configReady.value || !projectOpened.value) { debugLog(`[stall-recover] trySilent: configReady=${configReady.value}, projectOpened=${projectOpened.value}`); return false; }
+    if (!resolveOriginalUserPrompt(assistantMsg.id)) { debugLog(`[stall-recover] trySilent: originalPrompt empty`); return false; }
 
     prepareAssistantForSilentContinue(assistantMsg);
     assistantMsg.agentContinueCount = count + 1;
@@ -1080,17 +1090,21 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   }
 
   function recoverAgentRunFromStall(sessionId: string, assistantMsg: ChatMessage, reason: string) {
+    debugLog(`[stall-recover] recoverAgentRunFromStall sessionId=${sessionId}, reason=${reason}`);
     runManager.invalidate(sessionId);
     clearStreamDeltaBuffer();
     runManager.abort(sessionId);
     runManager.setAbortHandle(sessionId, null);
 
-    if (trySilentContinue(sessionId, assistantMsg, reason)) {
+    const silentResult = trySilentContinue(sessionId, assistantMsg, reason);
+    debugLog(`[stall-recover] trySilentContinue result=${silentResult}`);
+    if (silentResult) {
       maybePersistChat(sessionId);
       maybeScrollChat(sessionId);
       return;
     }
 
+    debugLog(`[stall-recover] trySilentContinue failed, calling finishRunSession + handleRecoverableInterruption`);
     finishRunSession(sessionId);
     handleRecoverableInterruption(sessionId, assistantMsg, reason);
     if (projectPath.value.trim()) updateAgentRunSessionStatus(sessionId, "failed");
@@ -1100,14 +1114,19 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   function forceRecoverStalledRun(assistantMsgId: string) {
     const msg = chatMessages.value.find((m) => m.id === assistantMsgId);
-    if (!msg || msg.role !== "assistant") return;
+    if (!msg || msg.role !== "assistant") { debugLog(`[stall-recover] msg not found or not assistant: id=${assistantMsgId}`); return; }
     const run = getActiveRun();
+    debugLog(`[stall-recover] msg found, chatSending=${chatSending.value}, run=${!!run}, runMsgId=${run?.assistantMsgId}, msgId=${msg.id}, configReady=${configReady.value}, projectOpened=${projectOpened.value}`);
     if (chatSending.value && run?.assistantMsgId === msg.id) {
+      debugLog(`[stall-recover] -> recoverAgentRunFromStall`);
       recoverAgentRunFromStall(activeSessionId.value, msg, agentStallRecoveryReason());
       return;
     }
     if (canResumeAgentRun(msg)) {
+      debugLog(`[stall-recover] -> resumeAgentRun (no active run)`);
       void resumeAgentRun(assistantMsgId);
+    } else {
+      debugLog(`[stall-recover] canResume=false, no action`);
     }
   }
 
@@ -1682,8 +1701,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   }
 
   function interruptSessionRun(sessionId: string, options?: { logStatus?: boolean; reason?: string }) {
+    debugLog(`[interrupt] interruptSessionRun sessionId=${sessionId}, reason=${options?.reason}`);
     const run = runManager.get(sessionId);
-    if (!run) return;
+    if (!run) { debugLog(`[interrupt] no run found for session ${sessionId}`); return; }
     cancelAutoResume();
     clearPendingAgentRun();
     runManager.invalidate(sessionId);
@@ -1735,6 +1755,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   }
 
   function stopAgent() {
+    debugLog(`[stop-agent] called`);
     interruptAgentRun({ reason: "已手动停止" });
   }
 
@@ -1758,17 +1779,19 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   async function resumeAgentRun(assistantMsgId: string, options?: { silent?: boolean }) {
     cancelAutoResume();
     const sessionId = activeSessionId.value;
-    if (!configReady.value || !projectOpened.value) return;
+    if (!configReady.value || !projectOpened.value) { debugLog(`[resume] early return: configReady=${configReady.value}, projectOpened=${projectOpened.value}`); return; }
 
     const assistantIdx = chatMessages.value.findIndex((m) => m.id === assistantMsgId);
-    if (assistantIdx < 0) return;
+    if (assistantIdx < 0) { debugLog(`[resume] early return: assistant not found id=${assistantMsgId}`); return; }
 
     const assistantMsg = chatMessages.value[assistantIdx];
-    if (!options?.silent && !canResumeAgentRun(assistantMsg)) return;
-    if (options?.silent && !hasRecoverableAgentProgress(assistantMsg)) return;
+    if (!options?.silent && !canResumeAgentRun(assistantMsg)) { debugLog(`[resume] early return: canResumeAgentRun=false`); return; }
+    if (options?.silent && !hasRecoverableAgentProgress(assistantMsg)) { debugLog(`[resume] early return: silent but no recoverable progress`); return; }
 
     const originalPrompt = resolveOriginalUserPrompt(assistantMsgId);
-    if (!originalPrompt) return;
+    if (!originalPrompt) { debugLog(`[resume] early return: originalPrompt empty`); return; }
+
+    debugLog(`[resume] proceeding: sessionId=${sessionId}, silent=${!!options?.silent}`);
 
     if (runManager.has(sessionId)) {
       interruptSessionRun(sessionId, { logStatus: true, reason: "已被新指令打断" });
@@ -1893,17 +1916,32 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       referencedFiles?: string[];
       imageDataUrls?: string[];
       userBubbleContent?: string;
+      /** Pin the target session (avoids races if activeSessionId changes during async prep). */
+      sessionId?: string;
       /** When executing a specific plan message, use its content as the prior assistant plan. */
       planAssistantContent?: string;
     },
-  ) {
+  ): Promise<boolean> {
     const rawPrompt = userText.trim();
     const project = projectPath.value.trim();
-    if (!configReady.value || !projectOpened.value) return;
+    if (!configReady.value || !projectOpened.value) {
+      chatError.value = !configReady.value
+        ? "请先配置 AI 模型后再发送"
+        : "请先打开项目后再发送";
+      return false;
+    }
 
     reloadAiConfig();
     clearStreamDeltaBuffer();
-    const sessionId = activeSessionId.value;
+    const sessionId = (options?.sessionId ?? activeSessionId.value).trim();
+    if (!sessionId) {
+      chatError.value = "会话尚未就绪，请重新选择或新建会话";
+      return false;
+    }
+    if (activeSessionId.value !== sessionId) {
+      chatError.value = "会话已切换，发送已取消";
+      return false;
+    }
     const mode = chatMode.value;
 
     function rollbackTurnPlaceholders(skipUserBubble?: boolean) {
@@ -1971,8 +2009,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         };
         chatMessages.value.push(assistantMsg);
         beginAssistantRunSlot(sessionId, assistantMsg, "preparing", false);
-        appendStatusLog(assistantMsg, formatLiveStatus(runManager.get(sessionId)!.live));
-        schedulePersistChat();
+        const bootRun = runManager.get(sessionId);
+        if (bootRun) {
+          appendStatusLog(assistantMsg, formatLiveStatus(bootRun.live));
+        }
         snapshotAgentRunSession?.(sessionId);
         await scrollChatToBottom(true);
       }
@@ -1991,9 +2031,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           runManager.remove(sessionId);
           endAgentRunSession(sessionId, true);
           rollbackTurnPlaceholders(options?.skipUserBubble);
-          persistChatNow();
         }
-        return;
+        chatError.value = "消息无效，无法发送";
+        return false;
       }
 
       if (canBootstrapEarly) {
@@ -2005,7 +2045,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           hasImagesForRequest,
           hasImagesForRequest ? "上传图片中…" : undefined,
         );
-        schedulePersistChat();
+        persistChatNow(undefined, { sessionId });
         snapshotAgentRunSession?.(sessionId);
       } else {
         if (runManager.has(sessionId)) {
@@ -2041,7 +2081,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           hasImagesForRequest,
           hasImagesForRequest ? "上传图片中…" : undefined,
         );
-        schedulePersistChat();
+        persistChatNow(undefined, { sessionId });
         snapshotAgentRunSession?.(sessionId);
         await scrollChatToBottom(true);
       }
@@ -2098,11 +2138,17 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       (event) => handleAgentEvent(event, assistantMsg, runGen, sessionId),
     );
     runManager.setAbortHandle(sessionId, handle);
+    return true;
   }
 
   function shouldShowMessageBubble(msg: ChatMessage): boolean {
     if (msg.role === "user") {
-      return Boolean(msg.content?.trim());
+      return Boolean(
+        msg.content?.trim()
+          || msg.imageDataUrls?.length
+          || msg.imageRefs?.length
+          || msg.imageCount,
+      );
     }
     if (hasAgentActivity(msg)) return false;
     return Boolean(messageDisplayContent(msg));

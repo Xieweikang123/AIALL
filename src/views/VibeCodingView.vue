@@ -308,7 +308,7 @@
             ref="composerRef"
             class="chat-composer-editor"
             :placeholder="chatSending ? '输入新指令将打断当前任务…' : chatPlaceholder"
-            :disabled="!configReady || !projectOpened"
+            :disabled="!configReady || !projectOpened || !activeSessionId"
             :draft-key="activeSessionId || undefined"
             @mention-change="onComposerMentionChange"
             @enter-send="sendChat"
@@ -913,7 +913,15 @@ const chatSession = useChatSessionStore({
   },
   resolveSessionMessages: (sessionId, diskMessages) => {
     const cached = sessionMessageCache.get(sessionId);
-    return cached?.length ? cached : normalizeChatMessages(diskMessages, { stripTransientUi: true });
+    if (cached?.length) return cached;
+    if (
+      sendingSessionIds.has(sessionId)
+      && sessionId === activeSessionId.value
+      && chatMessages.value.length
+    ) {
+      return normalizeChatMessages(chatMessages.value, { stripTransientUi: true });
+    }
+    return normalizeChatMessages(diskMessages, { stripTransientUi: true });
   },
   onAfterSwitch: () => chatSessionHooks.onAfterSwitch?.(),
   scrollToBottom: (force) => chatSessionHooks.scrollToBottom?.(force),
@@ -925,6 +933,7 @@ const {
   chatStoreSyncMessage,
   persistChatNow,
   schedulePersistChat,
+  schedulePersistDuringAgentRun,
   cancelPendingChatPersistence,
   startNewSession,
   switchSession,
@@ -1081,7 +1090,11 @@ const aiConfigStatusText = computed(() => {
   return modelNameForDisplay.value;
 });
 const canSendChat = computed(
-  () => !composerEmpty.value && configReady.value && projectOpened.value,
+  () =>
+    !composerEmpty.value
+    && configReady.value
+    && projectOpened.value
+    && Boolean(activeSessionId.value),
 );
 
 const chatPlaceholder = computed(() =>
@@ -1632,6 +1645,7 @@ const agent = useAgentRun({
   pendingPromptQueue,
   patchAssistantMsg,
   schedulePersistChat,
+  schedulePersistDuringAgentRun,
   persistChatNow,
   persistPendingQueue,
   scrollChatToBottom,
@@ -2669,9 +2683,10 @@ async function sendChat() {
   const composer = composerRef.value;
   if (!composer) return;
 
+  const sendSessionId = activeSessionId.value;
+  if (!sendSessionId) return;
+
   const payload = composer.extractPayload();
-  composer.clear();
-  composer.clearDraftStorage();
   mentionOpen.value = false;
 
   const userText = payload.text.trim();
@@ -2691,54 +2706,65 @@ async function sendChat() {
     quotedMessages.value = [];
   }
 
-  const refSection =
-    chatMode.value === "build" &&
-    resolveAgentRunProfile({
-      prompt: fullPrompt,
-      mode: chatMode.value,
-      lastAssistantContent: findLastAssistantContent(),
-      referencedFiles: payload.refs.map((r) => r.relative || r.path).filter(Boolean),
-    }).kind === "execute_plan"
-      ? buildReferencedFilePathsSection(payload.refs)
-      : await buildReferencedFileSection(payload.refs);
-  const dropSection = payload.drops.length
-    ? payload.drops
-        .map((f) => {
-          const content = truncatePromptAttachment(f.content);
-          return `### 📄 ${f.name}\n\`\`\`\n${content}\n\`\`\``;
-        })
-        .join("\n\n")
-    : "";
+  try {
+    const refSection =
+      chatMode.value === "build" &&
+      resolveAgentRunProfile({
+        prompt: fullPrompt,
+        mode: chatMode.value,
+        lastAssistantContent: findLastAssistantContent(),
+        referencedFiles: payload.refs.map((r) => r.relative || r.path).filter(Boolean),
+      }).kind === "execute_plan"
+        ? buildReferencedFilePathsSection(payload.refs)
+        : await buildReferencedFileSection(payload.refs);
+    const dropSection = payload.drops.length
+      ? payload.drops
+          .map((f) => {
+            const content = truncatePromptAttachment(f.content);
+            return `### 📄 ${f.name}\n\`\`\`\n${content}\n\`\`\``;
+          })
+          .join("\n\n")
+      : "";
 
-  const sections = [refSection, dropSection].filter(Boolean);
-  if (sections.length) {
-    fullPrompt = `${fullPrompt}\n\n## 📎 参考文件\n\n${sections.join("\n\n")}`;
-  }
+    const sections = [refSection, dropSection].filter(Boolean);
+    if (sections.length) {
+      fullPrompt = `${fullPrompt}\n\n## 📎 参考文件\n\n${sections.join("\n\n")}`;
+    }
 
-  if (chatSending.value) {
-    chatMessages.value.push({
-      id: genId(),
-      role: "user",
-      content: bubbleText || (imageDataUrls.length ? "（附图）" : ""),
-      imageDataUrls: imageDataUrls.length ? [...imageDataUrls] : undefined,
-    });
-    interruptAgentRun();
-    persistChatNow();
-    void scrollChatToBottom(true);
-    await runAgentTurn(fullPrompt, {
+    if (activeSessionId.value !== sendSessionId) {
+      chatError.value = "会话已切换，发送已取消";
+      return;
+    }
+
+    const runOptions = {
       referencedFiles: payload.refs.map((r) => r.relative || r.path).filter(Boolean),
       imageDataUrls,
-      skipUserBubble: true,
       userBubbleContent: bubbleText,
-    });
-    return;
-  }
+      sessionId: sendSessionId,
+    };
 
-  await runAgentTurn(fullPrompt, {
-    referencedFiles: payload.refs.map((r) => r.relative || r.path).filter(Boolean),
-    imageDataUrls: imageDataUrls,
-    userBubbleContent: bubbleText,
-  });
+    let started = false;
+    if (chatSending.value) {
+      chatMessages.value.push({
+        id: genId(),
+        role: "user",
+        content: bubbleText || (imageDataUrls.length ? "（附图）" : ""),
+        imageDataUrls: imageDataUrls.length ? [...imageDataUrls] : undefined,
+      });
+      interruptAgentRun();
+      persistChatNow(undefined, { sessionId: sendSessionId });
+      void scrollChatToBottom(true);
+      started = await runAgentTurn(fullPrompt, { ...runOptions, skipUserBubble: true });
+    } else {
+      started = await runAgentTurn(fullPrompt, runOptions);
+    }
+
+    if (started) {
+      composer.clear();
+    }
+  } catch (error) {
+    chatError.value = error instanceof Error ? error.message : "发送失败";
+  }
 }
 
 function onWindowFocus() {

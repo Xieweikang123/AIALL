@@ -1,6 +1,5 @@
 import { ref, type Ref } from "vue";
 import {
-  abandonVibeChatDraftIfEmpty,
   beginVibeChatDraftSession,
   buildActiveSessionDiskSyncPayload,
   chatMessagesHavePendingImageBase64,
@@ -64,6 +63,7 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
 
   let switchSessionGeneration = 0;
   let saveChatTimer: ReturnType<typeof setTimeout> | null = null;
+  let persistDuringRunTimer: ReturnType<typeof setTimeout> | null = null;
   let persistDelayTimer: ReturnType<typeof setTimeout> | null = null;
   let persistChatGeneration = 0;
 
@@ -204,6 +204,10 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
       clearTimeout(saveChatTimer);
       saveChatTimer = null;
     }
+    if (persistDuringRunTimer) {
+      clearTimeout(persistDuringRunTimer);
+      persistDuringRunTimer = null;
+    }
     if (persistDelayTimer) {
       clearTimeout(persistDelayTimer);
       persistDelayTimer = null;
@@ -217,6 +221,16 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     saveChatTimer = setTimeout(() => {
       saveChatTimer = null;
       persistChatNow();
+    }, 400);
+  }
+
+  /** Debounced persist while Agent is running (schedulePersistChat is suppressed during chatSending). */
+  function schedulePersistDuringAgentRun(options?: { sessionId?: string; flushStore?: boolean }) {
+    if (!projectPath().trim()) return;
+    if (persistDuringRunTimer) clearTimeout(persistDuringRunTimer);
+    persistDuringRunTimer = setTimeout(() => {
+      persistDuringRunTimer = null;
+      persistChatNow(undefined, options);
     }, 400);
   }
 
@@ -300,10 +314,13 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     }
   }
 
-  function persistChatNow(path = projectPath().trim(), options?: { flushStore?: boolean }) {
+  function persistChatNow(
+    path = projectPath().trim(),
+    options?: { flushStore?: boolean; sessionId?: string },
+  ) {
     if (!path || !chatMessages.value.length) return;
 
-    let sessionId = activeSessionId.value;
+    let sessionId = (options?.sessionId || activeSessionId.value).trim();
     if (!sessionId) {
       sessionId = beginVibeChatDraftSession(path).id;
       setActiveSession(sessionId);
@@ -324,14 +341,14 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
 
   function startNewSession() {
     if (!projectPath().trim()) return;
-    cancelPendingChatPersistence();
     const project = projectPath().trim();
     const fromSessionId = activeSessionId.value;
     if (fromSessionId && chatMessages.value.length) {
+      onBeforeSessionSwitch?.(fromSessionId, chatMessages.value);
       saveVibeChatHistory(project, chatMessages.value, fromSessionId, { touchTimestamp: false });
-    } else if (fromSessionId) {
-      abandonVibeChatDraftIfEmpty(project, fromSessionId);
     }
+    cancelPendingChatPersistence();
+    // 空草稿不再丢弃，保留以便刷新后恢复
     const { id } = beginVibeChatDraftSession(project);
     setActiveSession(id);
     chatMessages.value = [];
@@ -345,15 +362,14 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     if (sessionId === activeSessionId.value) {
       return;
     }
-    cancelPendingChatPersistence();
     const fromSessionId = activeSessionId.value;
     const project = projectPath().trim();
     if (fromSessionId && chatMessages.value.length) {
       onBeforeSessionSwitch?.(fromSessionId, chatMessages.value);
       saveVibeChatHistory(project, chatMessages.value, fromSessionId, { touchTimestamp: false });
-    } else if (fromSessionId) {
-      abandonVibeChatDraftIfEmpty(project, fromSessionId);
     }
+    cancelPendingChatPersistence();
+    // 空草稿不再丢弃，保留以便刷新后恢复
     const gen = ++switchSessionGeneration;
     switchingSession.value = true;
     void (async () => {
@@ -433,6 +449,7 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     chatStoreSyncMessage,
     persistChatNow,
     schedulePersistChat,
+    schedulePersistDuringAgentRun,
     cancelPendingChatPersistence,
     flushChatStoreToDisk,
     startNewSession,

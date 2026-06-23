@@ -932,16 +932,25 @@ export function getVibeChatProjectSnapshot(projectPath: string): VibeChatProject
   const record = key ? getProjectRecord(key) : undefined;
   const indexed = key ? readIndex().byProject[key]?.sessions : undefined;
   const listableSessions = record?.sessions.filter((s) => !isEmptyDraftSession(s)) || [];
+  const activeRecordId = record?.activeSessionId || "";
+  const sessionsForSnapshot = [...listableSessions];
+  if (
+    activeRecordId
+    && !sessionsForSnapshot.some((s) => s.id === activeRecordId)
+  ) {
+    const activeDraft = record?.sessions.find((s) => s.id === activeRecordId);
+    if (activeDraft) sessionsForSnapshot.unshift(activeDraft);
+  }
   const activeSessionId =
-    record?.activeSessionId && listableSessions.some((s) => s.id === record.activeSessionId)
-      ? record.activeSessionId
-      : listableSessions[0]?.id || record?.activeSessionId || "";
+    activeRecordId && sessionsForSnapshot.some((s) => s.id === activeRecordId)
+      ? activeRecordId
+      : sessionsForSnapshot[0]?.id || activeRecordId || "";
   return {
     version: STORE_VERSION,
     projectPath,
     activeSessionId,
     sessions:
-      listableSessions.map((s) => {
+      sessionsForSnapshot.map((s) => {
         const indexMeta = indexed?.find((m) => m.id === s.id);
         const messageCount = s.messages.length || indexMeta?.messageCount || 0;
         return {

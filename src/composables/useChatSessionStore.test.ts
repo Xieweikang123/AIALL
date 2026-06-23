@@ -5,6 +5,7 @@ import { useChatSessionStore } from "./useChatSessionStore";
 import {
   deleteVibeChatSession,
   listVibeChatSessions,
+  loadVibeChatHistory,
   markSessionLocallyDeleted,
   saveVibeChatHistory,
 } from "../services/vibeChatStorage";
@@ -96,6 +97,75 @@ describe("useChatSessionStore", () => {
     store.persistChatNow();
 
     expect(listVibeChatSessions(projectPath).map((s) => s.id)).toContain(draftId);
+  });
+
+  it("schedulePersistDuringAgentRun persists while chatSending blocks schedulePersistChat", async () => {
+    const projectPath = "D:/projects/persist-during-run";
+    const session = useSessionManager(() => projectPath);
+    const chatMessages = ref<Array<{ id: string; role: "user" | "assistant"; content: string; statusLog?: string[] }>>([]);
+    const chatError = ref("");
+
+    const store = useChatSessionStore({
+      projectPath: () => projectPath,
+      chatMessages,
+      chatError,
+      chatSending: () => true,
+      session,
+      normalizeMessages: (msgs) => msgs,
+      confirm: async () => true,
+    });
+
+    store.startNewSession();
+    const draftId = session.activeSessionId.value;
+    chatMessages.value = [
+      { id: "u1", role: "user", content: "hello from new session" },
+      { id: "a1", role: "assistant", content: "", statusLog: ["连接中…"] },
+    ];
+    store.schedulePersistDuringAgentRun({ sessionId: draftId });
+    store.schedulePersistChat();
+    await new Promise((r) => setTimeout(r, 450));
+
+    expect(session.activeSessionId.value).toBe(draftId);
+    expect(loadVibeChatHistory(projectPath)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "u1", role: "user", content: "hello from new session" }),
+      ]),
+    );
+    expect(listVibeChatSessions(projectPath).map((s) => s.id)).toContain(draftId);
+  });
+
+  it("startNewSession saves in-flight messages before canceling pending persistence", async () => {
+    const projectPath = "D:/projects/new-session-save-order";
+    const session = useSessionManager(() => projectPath);
+    session.setActiveSession(
+      saveVibeChatHistory(projectPath, [{ id: "u0", role: "user", content: "old" }]).sessionId,
+    );
+    session.refreshSessionList();
+
+    const chatMessages = ref([
+      { id: "u-run", role: "user" as const, content: "in flight" },
+      { id: "a-run", role: "assistant" as const, content: "", statusLog: ["运行中…"] },
+    ]);
+    const fromSessionId = session.activeSessionId.value;
+    const chatError = ref("");
+
+    const store = useChatSessionStore({
+      projectPath: () => projectPath,
+      chatMessages,
+      chatError,
+      chatSending: () => true,
+      session,
+      normalizeMessages: (msgs) => msgs,
+      confirm: async () => true,
+    });
+
+    store.persistChatNow();
+    store.startNewSession();
+
+    expect(loadVibeChatHistory(projectPath)).toEqual([]);
+    expect(listVibeChatSessions(projectPath).some((s) => s.id === fromSessionId)).toBe(true);
+    const saved = listVibeChatSessions(projectPath).find((s) => s.id === fromSessionId);
+    expect(saved?.messageCount).toBeGreaterThan(0);
   });
 
   it("delayed disk sync does not resurrect a recently deleted session", async () => {

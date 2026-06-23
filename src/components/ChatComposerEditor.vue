@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div
     ref="editorRef"
     class="composer-editor"
@@ -44,7 +44,20 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref, watch } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+
+/** 草稿自动保存：将输入框纯文本保存到 localStorage，刷新后恢复 */
+const DRAFT_STORAGE_KEY_PREFIX = "vibe-coding-input-draft";
+
+/** 生成按会话隔离的草稿 key */
+function draftStorageKeyFor(draftKey?: string): string {
+  const suffix = draftKey || "__global";
+  return `${DRAFT_STORAGE_KEY_PREFIX}-${suffix}`;
+}
+
+function getDraftStorageKey(): string {
+  return draftStorageKeyFor(props.draftKey);
+}
 
 // 图片查看器状态
 const imageViewerVisible = ref(false);
@@ -94,6 +107,7 @@ const CHIP_IMAGE = "composer-chip-image";
 const props = defineProps<{
   placeholder?: string;
   disabled?: boolean;
+  draftKey?: string;
 }>();
 
 const emit = defineEmits<{
@@ -340,6 +354,7 @@ function clear() {
   root.innerHTML = "";
   syncEmpty();
   emitMentionChange();
+  clearDraftStorage();
 }
 
 function setPlainText(text: string) {
@@ -386,6 +401,73 @@ function emitMentionChange() {
 function onInput() {
   syncEmpty();
   emitMentionChange();
+  saveDraftToStorage();
+}
+
+function bindImageChipClickHandlers(root: HTMLElement) {
+  root.querySelectorAll(`.${CHIP_IMAGE} img`).forEach((img) => {
+    img.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openImageViewer((img as HTMLImageElement).src);
+    });
+  });
+}
+
+function moveCaretToEnd(root: HTMLElement) {
+  const range = document.createRange();
+  range.selectNodeContents(root);
+  range.collapse(false);
+  const sel = window.getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(range);
+}
+
+/** 将当前输入框完整 HTML（含图片 chip）保存到指定 localStorage key */
+function saveDraftToKey(storageKey: string) {
+  try {
+    const root = editorRef.value;
+    if (root && root.innerHTML.trim()) {
+      localStorage.setItem(storageKey, root.innerHTML);
+    } else {
+      localStorage.removeItem(storageKey);
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
+/** 将当前输入框完整 HTML（含图片 chip）保存到 localStorage */
+function saveDraftToStorage() {
+  saveDraftToKey(getDraftStorageKey());
+}
+
+/** 从 localStorage 恢复草稿（含图片 chip）；无草稿时清空输入框 */
+function restoreDraftFromStorage() {
+  try {
+    const saved = localStorage.getItem(getDraftStorageKey());
+    const root = editorRef.value;
+    if (!root) return;
+    if (saved) {
+      root.innerHTML = saved;
+      bindImageChipClickHandlers(root);
+      moveCaretToEnd(root);
+    } else {
+      root.innerHTML = "";
+    }
+    syncEmpty();
+    emitMentionChange();
+  } catch {
+    // ignore storage errors
+  }
+}
+
+/** 清除已保存的草稿（发送消息后调用） */
+function clearDraftStorage() {
+  try {
+    localStorage.removeItem(getDraftStorageKey());
+  } catch {
+    // ignore
+  }
 }
 
 function onMouseDown(e: MouseEvent) {
@@ -514,9 +596,23 @@ defineExpose({
   setPlainText,
   hasContent,
   removeMentionQueryBeforeCursor,
+  clearDraftStorage,
 });
 
 void nextTick(() => syncEmpty());
+
+// draftKey 变化时：先保存旧会话草稿，再恢复（或清空）新会话输入框
+watch(() => props.draftKey, (newKey, oldKey) => {
+  if (oldKey !== undefined) {
+    saveDraftToKey(draftStorageKeyFor(oldKey));
+  }
+  restoreDraftFromStorage();
+});
+
+// 组件挂载时恢复草稿
+onMounted(() => {
+  restoreDraftFromStorage();
+});
 </script>
 
 <style scoped>
@@ -597,9 +693,9 @@ void nextTick(() => syncEmpty());
 }
 
 .composer-editor :deep(.composer-chip-ref) {
-  background: rgba(179, 146, 240, 0.22);
-  border: 1px solid rgba(179, 146, 240, 0.38);
-  color: #e8d9ff;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.55);
 }
 
 .composer-editor :deep(.composer-chip-drop) {
@@ -715,3 +811,4 @@ void nextTick(() => syncEmpty());
   transform: scale(0.8);
 }
 </style>
+
