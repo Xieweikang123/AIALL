@@ -24,7 +24,7 @@
       :show-tools="shouldShowTurnTools(turn)"
     />
 
-    <template v-if="isRunning && currentStatus && !(answerStreaming && finalAnswer.trim().length > 50)">
+    <template v-if="isRunning && currentStatus">
       <button
         type="button"
         class="agent-status"

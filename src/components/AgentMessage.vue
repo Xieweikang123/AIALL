@@ -15,7 +15,7 @@
         :final-answer="timelineAnswerContent(msg)"
         :answer-streaming="timelineAnswerStreaming(msg)"
         :is-running="isAgentRunning(msg)"
-        :current-status="currentAgentStatus(msg)"
+        :current-status="displayAgentStatus(msg)"
         :activity-detailed="isActivityDetailed(msg)"
         :can-execute-plan="canExecutePlan"
         :show-debug="showDebug"
@@ -68,6 +68,7 @@ import type { AiOption } from "../utils/parseAiOptions";
 const props = defineProps<{
   msg: AgentMessage;
   isAgentRunning: (msg: any) => boolean;
+  agentStatusDisplay?: (msg: AgentMessage) => string;
   agentUiTick: number;
   patchAssistantMsg: (id: string, patch: Record<string, unknown>) => void;
   schedulePersistChat: () => void;
@@ -108,6 +109,14 @@ const {
 );
 
 const summary = computed(() => cursorActivitySummary(props.msg));
+
+/** Prefer ephemeral run.live text (planning_tools / waiting_model); fall back to persisted msg fields. */
+function displayAgentStatus(m: AgentMessage): string {
+  if (!props.isAgentRunning(m)) return "";
+  const live = props.agentStatusDisplay?.(m)?.trim();
+  if (live) return live;
+  return currentAgentStatus(m);
+}
 
 function jumpToLatest() {
   emit("jump-latest");

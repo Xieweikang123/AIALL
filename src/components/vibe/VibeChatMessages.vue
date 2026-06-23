@@ -100,6 +100,7 @@
         v-if="m.role === 'assistant' && ctx.hasAgentActivity(m)"
         :msg="m"
         :is-agent-running="ctx.isAgentRunning"
+        :agent-status-display="ctx.agentStatusDisplay"
         :agent-ui-tick="ctx.isAgentRunning(m) ? ctx.agentUiTick.value : 0"
         :patch-assistant-msg="ctx.patchAssistantMsg"
         :schedule-persist-chat="ctx.schedulePersistChat"
@@ -162,7 +163,7 @@
         v-if="
           m.role === 'assistant' &&
           ctx.isAgentRunning(m) &&
-          !(ctx.isAgentRunning(m) && (m.content || '').trim().length > 50)
+          !ctx.hasAgentActivity(m)
         "
         class="msg-status"
       >
