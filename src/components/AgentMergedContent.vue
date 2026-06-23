@@ -40,6 +40,7 @@
       </details>
 
       <AgentTurnCard
+        v-if="!compactFeed"
         v-for="view in visibleTurnViews"
         :key="view.key"
         :turn="view.turn"
@@ -48,7 +49,7 @@
         @open-file="(path) => emit('openFile', path)"
       />
 
-      <template v-if="isRunning && currentStatus">
+      <template v-if="isRunning && currentStatus && !showExplorationProgress">
         <button
           type="button"
           class="agent-status"
@@ -76,7 +77,12 @@
       </div>
 
       <div v-if="showExplorationProgress" class="agent-exploration-progress">
-        <p v-if="progressNarrative" class="agent-exploration-progress__narrative">{{ progressNarrative }}</p>
+        <ChatMarkdown
+          v-if="progressNarrative"
+          class="agent-exploration-progress__narrative"
+          :content="progressNarrative"
+          :streaming="isRunning"
+        />
         <template v-if="explorationProgress">
           <p class="agent-exploration-progress__summary">{{ explorationProgress.summary }}</p>
           <p v-if="explorationProgress.activeTool" class="agent-exploration-progress__active">
@@ -86,6 +92,9 @@
             {{ explorationProgress.detail }}
           </p>
         </template>
+        <p v-if="currentStatus" class="agent-exploration-progress__status shimmer-text--fast">
+          {{ currentStatus }}
+        </p>
       </div>
 
       <div
@@ -109,14 +118,14 @@
         :chat-mode="chatMode"
         :streaming="answerStreaming || isRunning"
         :can-execute="canExecutePlan && !isRunning && !answerStreaming"
-        :enhance-layout="!isRunning && !answerStreaming"
+        :enhance-layout="layoutEnhanceReady && !isRunning && !answerStreaming"
         @execute="emit('execute-plan')"
       >
         <ChatMarkdown
           class="agent-answer"
-          :class="{ 'agent-answer--streaming': answerStreaming }"
+          :class="{ 'agent-answer--streaming': answerStreaming || isRunning }"
           :content="markdownContent"
-          :streaming="answerStreaming"
+          :streaming="answerStreaming || isRunning"
           :interactive="true"
           @select-option="(option) => emit('select-option', option)"
         />
@@ -126,7 +135,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import ChatMarkdown from "./ChatMarkdown.vue";
 import PlanDocumentBlock from "./PlanDocumentBlock.vue";
 import AgentTurnCard from "./AgentTurnCard.vue";
@@ -158,6 +167,7 @@ const props = withDefaults(
     showDebug?: boolean;
     debugExpanded?: boolean;
     showProcess?: boolean;
+    compactFeed?: boolean;
     tools?: AgentRoundTool[];
     agentTurn?: number;
     agentMaxTurns?: number;
@@ -168,6 +178,7 @@ const props = withDefaults(
   }>(),
   {
     showProcess: true,
+    compactFeed: false,
   },
 );
 
@@ -178,6 +189,22 @@ const emit = defineEmits<{
   openFile: [path: string];
   resume: [];
 }>();
+
+/** Defer plan chrome / code folding until after streaming UI settles. */
+const layoutEnhanceReady = ref(false);
+watch(
+  () => props.isRunning || props.answerStreaming,
+  (active) => {
+    if (active) {
+      layoutEnhanceReady.value = false;
+      return;
+    }
+    void nextTick(() => {
+      layoutEnhanceReady.value = true;
+    });
+  },
+  { immediate: true },
+);
 
 const markdownContent = computed(() =>
   enrichPlanMarkdownForDisplay(displayFinalAnswer.value, {
@@ -207,7 +234,6 @@ const displayFinalAnswer = computed(() => {
 
 const VISIBLE_TURN_LIMIT = 2;
 const VISIBLE_TURN_LIMIT_RUNNING = 3;
-const VISIBLE_TURN_LIMIT_STREAMING = 1;
 
 const explorationProgress = computed(() =>
   buildAgentExplorationProgress({
@@ -251,13 +277,13 @@ const turnCards = computed<AgentTurnCardModel[]>(() =>
     finalAnswer: props.finalAnswer,
     activityDetailed: props.activityDetailed,
     isRunning: props.isRunning,
+    answerStreaming: props.answerStreaming,
   }),
 );
 
-const visibleTurnLimit = computed(() => {
-  if (props.answerStreaming) return VISIBLE_TURN_LIMIT_STREAMING;
-  return props.isRunning ? VISIBLE_TURN_LIMIT_RUNNING : VISIBLE_TURN_LIMIT;
-});
+const visibleTurnLimit = computed(() =>
+  props.isRunning ? VISIBLE_TURN_LIMIT_RUNNING : VISIBLE_TURN_LIMIT,
+);
 
 const earlierTurns = computed(() => {
   const cards = turnCards.value;
@@ -525,10 +551,12 @@ const visibleTurnViews = computed(() =>
 
 .agent-exploration-progress__narrative {
   margin: 0;
+}
+
+.agent-exploration-progress__narrative :deep(.msg-markdown) {
   font-size: 12px;
   line-height: 1.55;
   color: rgba(226, 232, 240, 0.9);
-  white-space: pre-wrap;
 }
 
 .agent-exploration-progress__summary {
@@ -549,6 +577,14 @@ const visibleTurnViews = computed(() =>
 
 .agent-exploration-progress__active {
   color: rgba(126, 182, 255, 0.82);
+}
+
+.agent-exploration-progress__status {
+  margin: 2px 0 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(148, 163, 184, 0.78);
 }
 
 .agent-answer {

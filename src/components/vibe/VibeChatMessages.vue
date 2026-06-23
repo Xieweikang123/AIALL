@@ -1,5 +1,5 @@
 <template>
-  <div class="msg-list">
+  <div class="msg-list" :class="{ 'msg-list--live-run': ctx.chatSending.value }">
     <button
       v-if="hiddenMessageCount > 0"
       type="button"
@@ -105,6 +105,7 @@
         :patch-assistant-msg="ctx.patchAssistantMsg"
         :schedule-persist-chat="ctx.schedulePersistChat"
         :message-display-content="ctx.messageDisplayContent"
+        :resolve-live-agent-source="ctx.resolveLiveAgentSource"
         :show-jump="ctx.chainJumpVisible[m.id]"
         :can-execute-plan="ctx.canExecutePlanMessage(m)"
         :can-resume="ctx.canResumeAgentRun(m) && !ctx.isAgentRunning(m)"
@@ -341,6 +342,13 @@ const MESSAGE_WINDOW = 80;
 const showAllMessages = ref(true);
 
 watch(
+  () => ctx.chatMessages.value[0]?.id ?? "",
+  () => {
+    showAllMessages.value = true;
+  },
+);
+
+watch(
   () => ctx.chatMessages.value.length,
   (count, prev) => {
     if (count > MESSAGE_WINDOW && prev <= MESSAGE_WINDOW) {
@@ -362,11 +370,17 @@ const visibleMessages = computed(() => {
 
 function messageMemoKey(m: VibeChatMessageItem): unknown[] {
   if (ctx.isAgentRunning(m)) {
+    const activeNarrative =
+      m.roundGroups?.find((g) => g.turn === m.agentTurn)?.narrative ??
+      m.roundGroups?.filter((g) => g.turn > 0).at(-1)?.narrative ??
+      "";
     return [
       m.id,
       "running",
-      ctx.agentUiTick.value,
+      m.agentTurn ?? 0,
       m.content?.length ?? 0,
+      m.streamChars ?? 0,
+      activeNarrative.length,
       m.streaming,
       m.status,
       m.agentPhase,

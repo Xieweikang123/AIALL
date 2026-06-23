@@ -13,6 +13,16 @@ export type VisionAnchorPrefgrepResult = {
 };
 
 /** Pick grep patterns from vision anchor quotes; filter overly broad queries. */
+/** Runtime UI copy (label + dynamic count) — not present as literal in source. */
+export function isRuntimeVisibleTextGrepPattern(pattern: string): boolean {
+  const p = pattern.trim();
+  if (!p) return false;
+  if (/^\d+$/.test(p)) return true;
+  if (/^[A-Za-z][\w.-]*\s+\d+$/.test(p)) return true;
+  if (/^[\u4e00-\u9fff]+\s+\d+$/.test(p)) return true;
+  return false;
+}
+
 export function selectVisionAnchorGrepPatterns(anchorQuotes: string[]): string[] {
   const seen = new Set<string>();
   const patterns: string[] = [];
@@ -20,6 +30,7 @@ export function selectVisionAnchorGrepPatterns(anchorQuotes: string[]): string[]
   const add = (raw: string) => {
     const t = raw.trim();
     if (t.length < 2 || seen.has(t)) return;
+    if (isRuntimeVisibleTextGrepPattern(t)) return;
     const isAnchorDerived = anchorQuotes.some((quote) => {
       const q = quote.trim();
       return q.includes(t) || t.includes(q);
@@ -65,7 +76,8 @@ export function formatVisionAnchorPrefgrepBlock(patterns: string[], matches: Gre
     header,
     lines.join("\n"),
     `共 ${matches.length} 处命中，涉及 ${uniqueFiles.length} 个文件：${uniqueFiles.slice(0, 8).join("、")}${uniqueFiles.length > 8 ? "…" : ""}。`,
-    "请 read_file 1 个最相关文件核对 template/DOM 是否与截图一致，然后给出最终答案；勿重复首轮外观描述。",
+      "请 read_file 1 个最相关文件核对 template/DOM 是否与截图一致，然后给出最终答案；勿重复首轮外观描述。",
+      "只答用户所指的控件/区域；行号须来自 read_file 返回。",
   ].join("\n");
 }
 
@@ -74,12 +86,14 @@ export function buildVisionConsultativeAutoGrepContinueHint(hadMatches: boolean)
     return [
       "【读图完成·咨询·已预 grep】服务端已按读图锚点搜索并附上命中列表。",
       "请 read_file 1 个最相关文件核对 DOM 是否与截图一致，然后给出最终中文回答：先一句点明截图对应哪块界面，再答用户问题。",
+      "只答用户所指的控件/区域；行号须来自 read_file 返回。",
       "禁止在未 read 的情况下猜测路径；禁止写「下一轮再确认」；禁止重复首轮完整外观描述。",
     ].join("");
   }
   return [
     "【读图完成·咨询·预 grep 无命中】服务端已尝试按读图锚点搜索但未命中。",
     "请改用 grep kebab-case class、title= 或更短可见片段（1 次），必要时 read_file 1 个文件，然后给出最终答案。",
+    "只答用户所指的控件；勿 grep 标签+计数的运行时文案。",
     "禁止猜测组件路径或写「下一轮再确认」；禁止重复首轮完整外观描述。",
   ].join("");
 }
@@ -93,6 +107,7 @@ export function buildVisionConsultativeReadAfterPrefgrepHint(uniqueFiles: string
     "【定位未完成·须 read 核对】服务端 grep 已有命中，但你尚未 read_file 核对源码。",
     files,
     "请 read_file 1 个最相关文件，对照截图确认 DOM/文案后给出最终答案；勿重复外观描述或写「下一轮再确认」。",
+    "只答用户所指的控件；行号须来自 read_file 返回。",
   ].join("");
 }
 

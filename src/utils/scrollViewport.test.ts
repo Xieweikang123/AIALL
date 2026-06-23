@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { isScrollNearBottom, scrollElementToBottom } from "./scrollViewport";
+import { isScrollNearBottom, scrollContainerToBottom, scrollElementToBottom } from "./scrollViewport";
 
 function mockScrollElement(input: {
   scrollHeight: number;
@@ -41,5 +41,13 @@ describe("scrollElementToBottom", () => {
     scrollElementToBottom(el, "smooth");
     expect(el.scrollTo).toHaveBeenCalledWith({ top: 880, behavior: "smooth" });
     expect(el.scrollTop).toBe(880);
+  });
+});
+
+describe("scrollContainerToBottom", () => {
+  it("sets scrollTop to scrollHeight", () => {
+    const el = mockScrollElement({ scrollHeight: 1200, clientHeight: 400, scrollTop: 0 });
+    scrollContainerToBottom(el);
+    expect(el.scrollTop).toBe(1200);
   });
 });

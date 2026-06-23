@@ -16,17 +16,37 @@ export function useAgentMessage(
   msg: Ref<AgentMessage>,
   options: UseAgentMessageOptions,
 ) {
-  const { isAgentRunning, agentUiTick, patchAssistantMsg, schedulePersistChat, messageDisplayContent } = options;
+  const {
+    isAgentRunning,
+    agentUiTick,
+    patchAssistantMsg,
+    schedulePersistChat,
+    messageDisplayContent,
+    resolveLiveAgentSource,
+  } = options;
+
+  function liveAgentSource(m: AgentMessage) {
+    return (
+      resolveLiveAgentSource?.(m) ?? {
+        content: m.content,
+        roundGroups: m.roundGroups,
+        turnTraces: m.turnTraces,
+        agentTurn: m.agentTurn,
+        agentPhase: m.agentPhase,
+      }
+    );
+  }
 
   function agentRoundGroupViews(m: AgentMessage) {
     void agentUiTick.value;
+    const live = liveAgentSource(m);
     return buildAgentRoundGroupViews({
       roundGroups: m.roundGroups,
       turnTraces: m.turnTraces,
       statusLog: m.statusLog,
       tools: m.tools,
-      activeTurn: isAgentRunning(m) ? m.agentTurn : undefined,
-      activePhase: isAgentRunning(m) ? m.agentPhase : undefined,
+      activeTurn: isAgentRunning(m) ? live.agentTurn : undefined,
+      activePhase: isAgentRunning(m) ? live.agentPhase : undefined,
     });
   }
 
@@ -82,7 +102,7 @@ export function useAgentMessage(
   function agentAnswerPreview(m: AgentMessage): string {
     const hasRunningTool = Boolean(m.tools?.some((t: { running?: boolean }) => t.running));
     return resolveAgentTimelineAnswer(
-      { content: m.content, roundGroups: m.roundGroups, turnTraces: m.turnTraces, agentTurn: m.agentTurn },
+      liveAgentSource(m),
       messageDisplayContent(m),
       isAgentRunning(m),
       hasRunningTool,
@@ -100,33 +120,35 @@ export function useAgentMessage(
       agentDetail = `${m.agentDetail || (m.agentPhase === "connecting_local" ? "连接本地服务" : "启动 Agent")}`;
     }
     const bubble = agentAnswerPreview(m);
+    const hasRunningTool = Boolean(m.tools?.some((t: { running?: boolean }) => t.running));
+    const live = liveAgentSource(m);
+    const answerStreaming = isAgentTimelineAnswerStreaming(
+      live,
+      isAgentRunning(m),
+      hasRunningTool,
+    );
     const items = buildCursorAgentFeed({
       groups: agentRoundGroupViews(m),
       isRunning: isAgentRunning(m),
-      agentPhase: m.agentPhase,
+      agentPhase: live.agentPhase,
       agentDetail,
       answerPreview: bubble,
-      streaming: isAgentTimelineAnswerStreaming(
-        { roundGroups: m.roundGroups, agentTurn: m.agentTurn },
-        isAgentRunning(m),
-        Boolean(m.tools?.some((t: { running?: boolean }) => t.running)),
-      ),
+      streaming: answerStreaming,
     });
-    return filterDuplicateFeedThoughts(items, bubble);
+    return filterDuplicateFeedThoughts(items, bubble, {
+      suppressAllWhenBubble: isAgentRunning(m) && Boolean(bubble.trim()),
+    });
   }
 
   function cursorAgentTimeline(m: AgentMessage) {
     const detailed = isActivityDetailed(m);
     const hasRunningTool = Boolean(m.tools?.some((t: { running?: boolean }) => t.running));
+    const live = liveAgentSource(m);
     return buildCursorAgentTimeline(cursorAgentFeed(m), agentAnswerPreview(m), {
       keepVisible: detailed ? 8 : 6,
       collapseAfter: detailed ? 10 : 5,
       compactWhileRunning: isAgentRunning(m) && detailed,
-      streaming: isAgentTimelineAnswerStreaming(
-        { roundGroups: m.roundGroups, agentTurn: m.agentTurn },
-        isAgentRunning(m),
-        hasRunningTool,
-      ),
+      streaming: isAgentTimelineAnswerStreaming(live, isAgentRunning(m), hasRunningTool),
     });
   }
 
@@ -146,7 +168,7 @@ export function useAgentMessage(
 
   function timelineAnswerStreaming(m: AgentMessage): boolean {
     return isAgentTimelineAnswerStreaming(
-      { roundGroups: m.roundGroups, agentTurn: m.agentTurn },
+      liveAgentSource(m),
       isAgentRunning(m),
       Boolean(m.tools?.some((t: { running?: boolean }) => t.running)),
     );

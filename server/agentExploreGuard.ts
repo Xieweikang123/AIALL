@@ -216,6 +216,21 @@ export function buildOverlyBroadVisionGrepMessage(pattern: string, anchorQuotes:
   ].join("");
 }
 
+/** Generic UI state symbols — low signal for locating a specific visible control. */
+export function isLowSignalVisionLocateGrep(pattern: string): boolean {
+  const p = pattern.trim();
+  if (!p || STRUCTURAL_GREP_RE.test(p)) return false;
+  return /^(?:active|selected|current|default)(?:Tab|Index|Mode|View|Panel|Item|Id)$/i.test(p);
+}
+
+export function buildLowSignalVisionLocateGrepMessage(pattern: string): string {
+  return [
+    `错误：grep「${pattern}」是泛化状态符号，与读图区域定位无关。`,
+    "请 grep kebab-case class（如 *-badge、*-tab）或 template 中与可见标签相邻的片段，命中后 read_file 核对。",
+    "勿 grep 界面运行时拼接的数字（标签+计数在源码中不存在）。",
+  ].join("");
+}
+
 /** patch old_string must appear in content the agent already read for that file. */
 export function checkPatchOldStringFromReads(
   fileKey: string,

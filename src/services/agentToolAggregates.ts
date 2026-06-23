@@ -18,6 +18,7 @@ export type ToolAggregateCard = {
 
 const WRITE_TOOLS = new Set(["write_file", "patch_file", "delete_file"]);
 const SEARCH_TOOLS = new Set(["grep", "search_files"]);
+const COMMAND_TOOLS = new Set(["run_command"]);
 
 function fileNameFromPath(filePath: string): string {
   const parts = filePath.replace(/\\/g, "/").split("/");
@@ -152,8 +153,40 @@ function buildEditCard(path: string, steps: AgentRoundTool[]): ToolAggregateCard
   };
 }
 
+function commandPreviewFromStep(step: AgentRoundTool): string {
+  const cmd = String(step.args?.command ?? "").trim();
+  if (cmd) {
+    const oneLine = cmd.replace(/\s+/g, " ");
+    return oneLine.length > 96 ? `${oneLine.slice(0, 96)}…` : oneLine;
+  }
+  const summary = step.summary?.trim();
+  if (summary) return summary;
+  if (!step.ok && !step.running) return "执行失败";
+  return step.label || step.name;
+}
+
+function buildCommandCard(steps: AgentRoundTool[]): ToolAggregateCard {
+  const failed = steps.some((s) => !s.ok && !s.running);
+  const previewLines = steps
+    .map(commandPreviewFromStep)
+    .filter(Boolean)
+    .slice(-4);
+  return {
+    key: "command:batch",
+    kind: "misc",
+    icon: "▶️",
+    title: "执行命令",
+    subtitle: failed ? `${steps.length} 次 · 有失败` : `${steps.length} 次`,
+    running: steps.some((s) => s.running),
+    failed,
+    previewLines,
+    stepCount: steps.length,
+  };
+}
+
 function buildMiscCard(step: AgentRoundTool): ToolAggregateCard {
   const path = getToolPath(step);
+  const useResultPreview = step.name !== "run_command" && step.fullResult?.trim();
   return {
     key: `misc:${step.id}`,
     kind: "misc",
@@ -162,8 +195,8 @@ function buildMiscCard(step: AgentRoundTool): ToolAggregateCard {
     subtitle: path !== "..." ? path : step.summary || step.label,
     running: Boolean(step.running),
     failed: !step.ok && !step.running,
-    previewLines: step.fullResult?.trim()
-      ? step.fullResult.split("\n").filter(Boolean).slice(0, 5)
+    previewLines: useResultPreview
+      ? step.fullResult!.split("\n").filter(Boolean).slice(0, 3)
       : [],
     stepCount: 1,
   };
@@ -172,6 +205,7 @@ function buildMiscCard(step: AgentRoundTool): ToolAggregateCard {
 type GroupRef =
   | { kind: "file"; key: string; firstIndex: number }
   | { kind: "search"; key: "search"; firstIndex: number }
+  | { kind: "command"; key: "command"; firstIndex: number }
   | { kind: "edit"; key: string; firstIndex: number }
   | { kind: "misc"; key: string; firstIndex: number; stepId: string };
 
@@ -181,6 +215,7 @@ export function aggregateToolSteps(steps: AgentRoundTool[]): ToolAggregateCard[]
 
   const fileGroups = new Map<string, AgentRoundTool[]>();
   const searchSteps: AgentRoundTool[] = [];
+  const commandSteps: AgentRoundTool[] = [];
   const editGroups = new Map<string, AgentRoundTool[]>();
   const miscSteps: AgentRoundTool[] = [];
   const order: GroupRef[] = [];
@@ -200,6 +235,13 @@ export function aggregateToolSteps(steps: AgentRoundTool[]): ToolAggregateCard[]
         order.push({ kind: "search", key: "search", firstIndex: index });
       }
       searchSteps.push(step);
+      return;
+    }
+    if (COMMAND_TOOLS.has(step.name)) {
+      if (!commandSteps.length) {
+        order.push({ kind: "command", key: "command", firstIndex: index });
+      }
+      commandSteps.push(step);
       return;
     }
     if (WRITE_TOOLS.has(step.name)) {
@@ -232,6 +274,10 @@ export function aggregateToolSteps(steps: AgentRoundTool[]): ToolAggregateCard[]
       if (seen.has("search")) continue;
       seen.add("search");
       if (searchSteps.length) cards.push(buildSearchCard(searchSteps));
+    } else if (ref.kind === "command") {
+      if (seen.has("command")) continue;
+      seen.add("command");
+      if (commandSteps.length) cards.push(buildCommandCard(commandSteps));
     } else if (ref.kind === "edit") {
       const groupKey = `edit:${ref.key}`;
       if (seen.has(groupKey)) continue;

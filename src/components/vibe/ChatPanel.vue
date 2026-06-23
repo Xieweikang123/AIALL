@@ -88,11 +88,6 @@
       </div>
     </div>
 
-    <div v-if="editorCollapsed && projectOpened" class="editor-collapsed-hint">
-      <span class="editor-collapsed-hint-text">编辑器已收起，当前为全宽对话模式</span>
-      <button type="button" class="editor-collapsed-hint-btn" @click="$emit('expand-editor')">展开编辑器</button>
-    </div>
-
     <div class="chat-scroll-wrap">
       <div ref="chatScrollRef" class="chat-scroll" @scroll="onScroll">
       <div v-if="switchingProject" class="chat-switching">
@@ -357,6 +352,7 @@
               type="button"
               class="secondary resume-bottom-btn"
               :disabled="!configReady || !projectOpened"
+              :title="resumeBottomBtnTitle"
               @click="$emit('force-recover-stalled-run', stalledAssistantMsg.id)"
             >
               恢复运行
@@ -366,6 +362,7 @@
               type="button"
               class="secondary resume-bottom-btn"
               :disabled="!configReady || !projectOpened"
+              :title="resumeBottomBtnTitle"
               @click="$emit('resume-agent-run', recoverableAssistantMsg.id)"
             >
               {{ autoResumeSecondsLeft > 0 ? "立即继续" : recoverableResumeLabel }}
@@ -569,6 +566,7 @@ import type { ExplorationIndexEntry, SkillIndexEntry, SkillKind } from "../../se
 import type { ProjectMemoryTab } from "../../composables/useProjectMemory";
 import type { VibeChatSessionMeta } from "../../services/vibeChatStorage";
 import { CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount } from "../../utils/vibeHelpers";
+import { scheduleScrollContainerToBottom, scrollContainerToBottom } from "../../utils/scrollViewport";
 import { resolveAgentResumeButtonLabel } from "../../services/agentRecovery";
 import { renderMarkdown } from "../../utils/renderMarkdown";
 
@@ -712,6 +710,12 @@ const recoverableResumeLabel = computed(() => {
   return resolveAgentResumeButtonLabel(msg);
 });
 
+const resumeBottomBtnTitle = computed(() => {
+  if (props.configReady && props.projectOpened) return undefined;
+  if (!props.configReady) return "请先配置 AI 模型";
+  return "请先打开项目";
+});
+
 function formatExplorationLabel(item: ExplorationIndexEntry): string {
   const stamp = item.createdAt?.trim();
   if (!stamp) return item.id;
@@ -795,14 +799,44 @@ function onScroll() {
 function scrollToBottom() {
   const el = chatScrollRef.value;
   if (!el) return;
-  el.scrollTop = el.scrollHeight;
+  scrollContainerToBottom(el);
   isAtBottom.value = true;
   emit("on-chat-scroll");
   emit("scroll-to-bottom");
 }
 
+function scheduleSessionScrollToBottom() {
+  if (props.switchingSession || !props.chatMessages.length) return;
+  sessionScrollPending = true;
+  if (sessionScrollClearTimer) window.clearTimeout(sessionScrollClearTimer);
+  sessionScrollClearTimer = window.setTimeout(() => {
+    sessionScrollPending = false;
+    sessionScrollClearTimer = 0;
+  }, 900);
+  scheduleScrollContainerToBottom(() => chatScrollRef.value, { behavior: "auto" });
+  void nextTick(() => {
+    scrollToBottom();
+  });
+}
+
 watch(
-  () => [props.chatMessages.length, props.switchingSession, props.chatSending] as const,
+  () => props.activeSessionId,
+  () => {
+    scheduleSessionScrollToBottom();
+  },
+);
+
+watch(
+  () => props.switchingSession,
+  (busy, wasBusy) => {
+    if (wasBusy && !busy) {
+      scheduleSessionScrollToBottom();
+    }
+  },
+);
+
+watch(
+  () => [props.chatMessages.length, props.chatSending] as const,
   () => {
     if (props.switchingSession) return;
     void nextTick(() => checkScrollPosition());
@@ -810,13 +844,21 @@ watch(
 );
 
 let scrollResizeObserver: ResizeObserver | null = null;
+let sessionScrollPending = false;
+let sessionScrollClearTimer = 0;
 
 onMounted(() => {
   void nextTick(() => {
     checkScrollPosition();
     const el = chatScrollRef.value;
     if (!el || typeof ResizeObserver === "undefined") return;
-    scrollResizeObserver = new ResizeObserver(() => checkScrollPosition());
+    scrollResizeObserver = new ResizeObserver(() => {
+      if (sessionScrollPending) {
+        scrollToBottom();
+      } else {
+        checkScrollPosition();
+      }
+    });
     scrollResizeObserver.observe(el);
   });
 });
@@ -824,6 +866,7 @@ onMounted(() => {
 onUnmounted(() => {
   scrollResizeObserver?.disconnect();
   scrollResizeObserver = null;
+  if (sessionScrollClearTimer) window.clearTimeout(sessionScrollClearTimer);
 });
 
 defineExpose({ chatScrollRef });
@@ -916,43 +959,6 @@ function removeQuotedMessage(index: number) {
   line-height: 1.3;
 }
 
-.editor-collapsed-hint {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 6px 14px;
-  flex-shrink: 0;
-  border-bottom: 1px solid rgba(88, 166, 255, 0.15);
-  background: linear-gradient(90deg, rgba(31, 111, 235, 0.1), rgba(130, 80, 223, 0.06));
-}
-
-.editor-collapsed-hint-text {
-  font-size: 11px;
-  color: rgba(145, 190, 255, 0.88);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.editor-collapsed-hint-btn {
-  flex-shrink: 0;
-  padding: 3px 10px;
-  font-size: 11px;
-  font-weight: 600;
-  border: 1px solid rgba(88, 166, 255, 0.35);
-  border-radius: 6px;
-  background: rgba(88, 166, 255, 0.12);
-  color: #c9e4ff;
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
-}
-
-.editor-collapsed-hint-btn:hover {
-  background: rgba(88, 166, 255, 0.22);
-  border-color: rgba(88, 166, 255, 0.5);
-}
-
 .session-picker-wrap {
   position: relative;
 }
@@ -1009,6 +1015,8 @@ function removeQuotedMessage(index: number) {
   flex: 1;
   overflow-y: auto;
   overflow-x: clip;
+  overflow-anchor: none;
+  scroll-padding-bottom: 12px;
   padding: 20px 18px;
   position: relative;
 }
@@ -1303,6 +1311,11 @@ function removeQuotedMessage(index: number) {
 
 .resume-bottom-btn:hover:not(:disabled) {
   background: rgba(88, 166, 255, 0.2);
+}
+
+.resume-bottom-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .send-btn {

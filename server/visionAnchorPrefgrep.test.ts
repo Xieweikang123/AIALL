@@ -3,6 +3,7 @@ import {
   buildVisionConsultativeAutoGrepContinueHint,
   buildVisionConsultativeReadAfterPrefgrepHint,
   formatVisionAnchorPrefgrepBlock,
+  isRuntimeVisibleTextGrepPattern,
   selectVisionAnchorGrepPatterns,
 } from "./visionAnchorPrefgrep";
 import {
@@ -21,6 +22,13 @@ describe("visionAnchorPrefgrep", () => {
     const anchors = ["多会话同时进行，好实现吗？", "今天·14条"];
     expect(selectVisionAnchorGrepPatterns(anchors)).not.toContain("会话");
     expect(selectVisionAnchorGrepPatterns(anchors)).toContain("多会话同时进行，好实现吗？");
+  });
+
+  it("selectVisionAnchorGrepPatterns skips runtime label+count patterns", () => {
+    expect(selectVisionAnchorGrepPatterns(["Git 30", "新建"])).not.toContain("Git 30");
+    expect(selectVisionAnchorGrepPatterns(["Git 30", "新建"])).toContain("新建");
+    expect(isRuntimeVisibleTextGrepPattern("Git 30")).toBe(true);
+    expect(isRuntimeVisibleTextGrepPattern("30")).toBe(true);
   });
 
   it("formatVisionAnchorPrefgrepBlock summarizes matches", () => {

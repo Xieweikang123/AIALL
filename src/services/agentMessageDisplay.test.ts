@@ -449,6 +449,88 @@ describe("resolveAgentTimelineAnswer", () => {
       ),
     ).toBe(true);
   });
+
+  it("does not show progress fallback in timeline answer slot while running", () => {
+    const progress = `${AGENT_PROGRESS_MARKER}\n第一句假设。第二句已读文件。第三句下一步。`;
+    expect(
+      resolveAgentTimelineAnswer(
+        {
+          agentTurn: 2,
+          roundGroups: [
+            {
+              turn: 1,
+              narrative: progress,
+              modelSteps: [],
+              toolIds: [],
+            },
+            {
+              turn: 2,
+              narrative: "Now let me read the handler",
+              modelSteps: [],
+              toolIds: [],
+              response: { assistantText: "", hasToolCalls: true, isFinal: false, toolCalls: [] },
+            },
+          ],
+        },
+        "",
+        true,
+        false,
+      ),
+    ).toBe("");
+  });
+
+  it("uses finalized bubble text after isFinal even while run is still open", () => {
+    const finalAnswer = "## 完整回答\n\n正文内容。";
+    expect(
+      resolveAgentTimelineAnswer(
+        {
+          content: finalAnswer,
+          agentTurn: 1,
+          roundGroups: [
+            {
+              turn: 1,
+              narrative: "流式片段",
+              modelSteps: [],
+              toolIds: [],
+              response: { assistantText: finalAnswer, hasToolCalls: false, isFinal: true, toolCalls: [] },
+            },
+          ],
+        },
+        finalAnswer,
+        true,
+        false,
+      ),
+    ).toBe(finalAnswer);
+  });
+
+  it("does not mark streaming when preview is only progress fallback", () => {
+    const progress = `${AGENT_PROGRESS_MARKER}\n当前假设是路由层未转发 focus。已读 src/foo.ts 与 handler。下一步 patch。`;
+    expect(
+      isAgentTimelineAnswerStreaming(
+        {
+          agentTurn: 2,
+          roundGroups: [
+            {
+              turn: 1,
+              narrative: progress,
+              modelSteps: [],
+              toolIds: [],
+              response: { assistantText: "", hasToolCalls: true, isFinal: false, toolCalls: [] },
+            },
+            {
+              turn: 2,
+              narrative: "Now let me read the handler",
+              modelSteps: [],
+              toolIds: [],
+              response: { assistantText: "", hasToolCalls: true, isFinal: false, toolCalls: [] },
+            },
+          ],
+        },
+        true,
+        false,
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("filterDuplicateFeedThoughts", () => {

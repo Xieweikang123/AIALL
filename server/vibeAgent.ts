@@ -84,6 +84,7 @@ import {
   buildBlockedGrepAfterLocateMessage,
   buildBlockedGrepMessage,
   buildEnglishPlanningNudge,
+  buildLowSignalVisionLocateGrepMessage,
   buildOverlyBroadVisionGrepMessage,
   buildPatchAnchorLocatedNudge,
   buildSearchFilesContentQueryMessage,
@@ -99,6 +100,7 @@ import {
   isAnalysisOnlyReplyUnderForcePatch,
   isBlockedGrepAfterLocate,
   isBlockedGrepAfterVisionMisread,
+  isLowSignalVisionLocateGrep,
   isOverlyBroadVisionGrep,
   isSearchFilesContentQuery,
   readLineRangeFromArgs,
@@ -151,6 +153,8 @@ import {
 import { runWebExtract, runWebSearch } from "./webExtract";
 import {
   buildModelIdentityHint,
+  buildConsultativeVisibleShellEmptyInnerHint,
+  buildUnreconciledEmptyShellRetryHint,
   buildVisionConsultativeContinueHint,
   buildVisionConsultativeLocateRetryHint,
   buildVisionBuildContinueHint,
@@ -168,11 +172,14 @@ import {
   shouldBypassVisionFirstTurn,
   shouldRequireVisionFirstTurn,
   shouldRunVisionAnchorPrefgrep,
+  isUnreconciledEmptyShellAnswer,
   suggestsEmbeddedLayoutMisread,
+  suggestsVisibleShellEmptyInner,
 } from "./visionMessage";
 import {
   appendVisionAnchorPrefgrepMessages,
   buildVisionConsultativeReadAfterPrefgrepHint,
+  isRuntimeVisibleTextGrepPattern,
 } from "./visionAnchorPrefgrep";
 import {
   buildConsultativeAccuracyTraceHint,
@@ -1110,6 +1117,12 @@ export async function executeTool(
       isOverlyBroadVisionGrep(pattern, toolGuard.visionAnchorQuotes)
     ) {
       return buildOverlyBroadVisionGrepMessage(pattern, toolGuard.visionAnchorQuotes);
+    }
+    if (toolGuard?.visionLocateActive && isLowSignalVisionLocateGrep(pattern)) {
+      return buildLowSignalVisionLocateGrepMessage(pattern);
+    }
+    if (toolGuard?.visionLocateActive && isRuntimeVisibleTextGrepPattern(pattern)) {
+      return buildLowSignalVisionLocateGrepMessage(pattern);
     }
     if (
       toolGuard &&
@@ -2231,6 +2244,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         } else {
           messages.push({ role: "system", content: buildVisionConsultativeContinueHint() });
         }
+        if (suggestsVisibleShellEmptyInner(text)) {
+          messages.push({ role: "system", content: buildConsultativeVisibleShellEmptyInnerHint() });
+        }
         if (accuracyConsultativeRun) {
           messages.push({ role: "system", content: buildConsultativeAccuracyTraceHint() });
         }
@@ -2557,10 +2573,14 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       ) {
         visionConsultativeLocateRetries += 1;
         messages.push({ role: "assistant", content: rawText });
+        const unreconciledEmptyShell =
+          visionFirstTurnDescriptionText &&
+          isUnreconciledEmptyShellAnswer(visionFirstTurnDescriptionText, rawText);
         messages.push({
           role: "system",
-          content:
-            visionAutoGrepHadMatches && !visionLocateReadUsed
+          content: unreconciledEmptyShell
+            ? buildUnreconciledEmptyShellRetryHint()
+            : visionAutoGrepHadMatches && !visionLocateReadUsed
               ? buildVisionConsultativeReadAfterPrefgrepHint(pregrepUniqueFiles)
               : buildVisionConsultativeLocateRetryHint(toolGuard.visionAnchorQuotes ?? []),
         });

@@ -27,7 +27,7 @@ export type CursorAgentTimeline = {
 
 const DEFAULT_KEEP_VISIBLE = 4;
 const DEFAULT_COLLAPSE_AFTER = 5;
-const COMPACT_FEED_MIN_STEPS = 6;
+const COMPACT_FEED_MIN_STEPS = 4;
 const COMPACT_RECENT_VISIBLE = 6;
 
 export type AgentExplorationStats = {

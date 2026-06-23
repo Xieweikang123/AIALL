@@ -431,6 +431,11 @@ button:active:not(:disabled) {
   flex-direction: column;
   gap: 20px;
   padding: 8px 0 16px;
+  overflow-anchor: none;
+}
+
+.msg-list--live-run {
+  padding-bottom: 24px;
 }
 
 .load-earlier-btn {
@@ -451,6 +456,7 @@ button:active:not(:disabled) {
   padding: 2px 12px;
   border-radius: 12px;
   transition: box-shadow 0.25s ease, background 0.25s ease;
+  overflow-anchor: none;
 }
 
 .msg--search-highlight {

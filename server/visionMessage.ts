@@ -144,6 +144,7 @@ export function buildVisionUiLocateHint(anchorQuotes: string[]): string {
     "【截图 UI 定位·通用】",
     anchorHint,
     "定位顺序：① grep 上述原文中最短可唯一识别的片段（≥4 字）或 grep kebab-case class（如 item-meta、panel-list）；② read_file 核对 template/DOM 是否与截图一致；③ 不一致则换下一个 grep 命中，勿猜组件文件名。",
+    "勿 grep 界面运行时拼接的数字（标签+计数在源码中不存在）；勿 grep 泛化状态符号（如 activeTab、selectedIndex）。",
     "search_files 仅按文件名匹配，中文 UI 文案须用 grep 搜内容；patch 的 old_string 必须来自 read_file 返回原文，禁止凭记忆构造 CSS/DOM。",
   ].join("");
 }
@@ -193,7 +194,8 @@ export function buildVisionLocateSingleTurnRule(): string {
     "① 查看附图，用一句点明截图对应哪块界面，并引用可见原文（用「」括起）；",
     "② 立即 grep 该文案（≥2 字片段）或 kebab-case class；",
     "③ 必要时 read_file 1 个相关文件核对 template/DOM 是否与截图一致；",
-    "④ 给出最终中文答案。",
+    "④ 给出最终中文答案：只答用户所指的控件/区域，勿展开未问及的整块面板；引用行号须来自 read_file 返回。",
+    "若外框可见但内层像空白，须查 v-if/shimmer/透明文字后再作答，勿只断言显示某数字。",
     "禁止写「下一轮再确认」；禁止在未 grep/read 的情况下猜测组件路径；禁止输出 [图已理解] 暗号（定位题无需读图独占轮）。",
   ].join("\n");
 }
@@ -237,7 +239,14 @@ export function mentionsControlProportionImbalance(text: string): boolean {
 export function suggestsVisibleShellEmptyInner(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return false;
-  return /(?:外框|圆|容器|按钮).{0,24}(?:可见|在渲染|出现).{0,24}(?:箭头|图标|文字|符号|内容).{0,16}(?:不可见|看不到|空白|被裁|没有)|(?:箭头|图标|文字|符号).{0,16}(?:不可见|看不到|空白|没有).{0,24}(?:外框|圆|容器|按钮)/i.test(
+  if (
+    /(?:外框|圆|容器|按钮|徽标|徽章|圆角).{0,24}(?:可见|在渲染|出现).{0,24}(?:箭头|图标|文字|符号|内容|数字).{0,16}(?:不可见|看不到|空白|被裁|没有|无明显)|(?:箭头|图标|文字|符号|数字|内容).{0,16}(?:不可见|看不到|空白|没有|无明显).{0,24}(?:外框|圆|容器|按钮|徽标|徽章|圆角)/i.test(
+      trimmed,
+    )
+  ) {
+    return true;
+  }
+  return /无明显(?:内容|文字)|无文字|像.{0,16}(?:空|占位|toggle|开关)|(?:空洞|空白).{0,12}(?:控件|圆角|矩形)/i.test(
     trimmed,
   );
 }
@@ -247,6 +256,27 @@ export function buildVisibleShellEmptyInnerHint(): string {
     "【读图·内外层】外框可见但内层符号/文字不可见：优先改内层渲染（text 字符、SVG 尺寸/stroke、font-size/line-height），",
     "勿再改外层 position/bottom；除非 read 证明控件不在 viewport 或被 overflow 裁切。",
   ].join("");
+}
+
+/** Consultative: vision noted empty-looking shell — reconcile before answering, do not patch. */
+export function buildConsultativeVisibleShellEmptyInnerHint(): string {
+  return [
+    "【读图·外框有内层无·咨询】读图记录外框可见但内层文字/数字看不清或像空白。",
+    "最终回答须解释观感与源码是否一致：read template 查 v-if/v-show、内层绑定字段，以及 shimmer/透明文字/background-clip 等样式；",
+    "若截图观感与数据绑定矛盾，须在答案中说明原因（条件未满足则不渲染、动画类使文字透明等），勿只断言「显示某数字」。",
+    "只答用户所指的单个控件，勿展开整块面板结构。",
+  ].join("");
+}
+
+/** Final answer claims display without reconciling vision-noted empty shell. */
+export function isUnreconciledEmptyShellAnswer(visionText: string, replyText: string): boolean {
+  if (!suggestsVisibleShellEmptyInner(visionText)) return false;
+  const reply = replyText.replace(/\s*\[图已理解\]\s*/g, "").trim();
+  if (!reply) return false;
+  if (/v-if|v-show|shimmer|透明|渐变|background-clip|text-fill|条件.{0,8}(?:不|未)|为\s*0|不渲染|看不见|观感/i.test(reply)) {
+    return false;
+  }
+  return /显示.{0,12}(?:数字|数量|条数|N|\d)|徽标|badge|用于显示/i.test(reply);
 }
 
 export function buildVisionFirstTurnContinueHint(): string {
@@ -269,12 +299,13 @@ export function buildVisionConsultativeContinueHint(): string {
     "禁止在未 grep/read 的情况下猜测源码路径或组件文件名；禁止写「下一轮再确认/需要再搜索」。",
     "禁止重复首轮完整外观描述；读图记录已生效，本轮只输出定位结论与答案。",
     "禁止连环 read_file/grep 多个无关文件；核对后立即输出最终答案。",
+    "只答用户所指的单个控件/区域，勿展开整块面板；行号须来自 read_file 返回，禁止凭记忆写行号。",
   ].join("");
 }
 
 /** User asks which UI region / component a screenshot shows (locate-only, not implement). */
 const UI_LOCATE_QUESTION_RE =
-  /(?:哪(?:儿|里|块|个)|什么|啥)(?:的)?(?:按钮|控件|面板|区域|组件|元素|部分|内容)|(?:知道|看得出|认得|识别).{0,12}(?:哪儿|哪里|哪块|哪个)/;
+  /(?:哪(?:儿|里|块|个)|什么|啥)(?:的)?(?:按钮|控件|面板|区域|组件|元素|部分|内容)|(?:知道|看得出|认得|识别).{0,12}(?:哪儿|哪里|哪块|哪个)|显示的(?:什么|啥)|(?:这里|这边|旁边|此处).{0,12}(?:啥|什么)|(?:这是|那是)(?:什么|啥)/;
 
 export function isUiLocateQuestionPrompt(prompt: string): boolean {
   const text = prompt.trim();
@@ -366,11 +397,25 @@ export function shouldBlockConsultativeVisionLocateFinalize(params: {
   if (isSpeculativeLocateReply(params.replyText)) return true;
   if (
     params.visionFirstTurnText &&
+    isUnreconciledEmptyShellAnswer(params.visionFirstTurnText, params.replyText)
+  ) {
+    return true;
+  }
+  if (
+    params.visionFirstTurnText &&
     isRepeatingVisionFirstTurnDescription(params.replyText, params.visionFirstTurnText)
   ) {
     return true;
   }
   return false;
+}
+
+export function buildUnreconciledEmptyShellRetryHint(): string {
+  return [
+    "【观感未闭环】读图记录控件外框可见但内层像空白，而你的回答只断言显示数字/徽标，未解释观感差异。",
+    "请 read template 查 v-if/v-show、绑定字段及 shimmer/透明文字类样式，在最终答案中说明：源码意图显示什么、为何截图里看不清。",
+    "只答用户所指的控件，勿展开整块面板；行号须来自 read_file 返回。",
+  ].join("");
 }
 
 export function buildVisionFirstTurnRetryHint(): string {

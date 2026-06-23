@@ -9,6 +9,7 @@
     <div class="cursor-timeline">
       <AgentMergedContent
         :show-process="!isFolded"
+        :compact-feed="showCompact"
         :round-groups="agentRoundGroupViews(msg)"
         :final-answer="timelineAnswerContent(msg)"
         :answer-streaming="timelineAnswerStreaming(msg)"
@@ -20,7 +21,7 @@
         :show-debug="showDebug"
         :debug-expanded="false"
         :tools="msg.tools"
-        :agent-turn="msg.agentTurn"
+        :agent-turn="activeAgentTurn(msg)"
         :agent-max-turns="msg.agentMaxTurns"
         :can-resume="canResume"
         :resume-label="resumeLabel"
@@ -79,6 +80,7 @@ const props = defineProps<{
   patchAssistantMsg: (id: string, patch: Record<string, unknown>) => void;
   schedulePersistChat: () => void;
   messageDisplayContent: (msg: any) => string;
+  resolveLiveAgentSource?: (msg: any) => import("../services/agentMessageDisplay").LiveAgentAnswerSource;
   showJump?: boolean;
   canExecutePlan?: boolean;
   canResume?: boolean;
@@ -107,6 +109,7 @@ const {
   timelineAnswerContent,
   timelineAnswerStreaming,
   currentAgentStatus,
+  showCompact,
 } = useAgentMessage(
   computed(() => props.msg),
   {
@@ -115,6 +118,7 @@ const {
     patchAssistantMsg: props.patchAssistantMsg,
     schedulePersistChat: props.schedulePersistChat,
     messageDisplayContent: props.messageDisplayContent,
+    resolveLiveAgentSource: props.resolveLiveAgentSource,
   },
 );
 
@@ -126,6 +130,10 @@ function displayAgentStatus(m: AgentMessage): string {
   const live = props.agentStatusDisplay?.(m)?.trim();
   if (live) return live;
   return currentAgentStatus(m);
+}
+
+function activeAgentTurn(m: AgentMessage): number | undefined {
+  return props.resolveLiveAgentSource?.(m)?.agentTurn ?? m.agentTurn;
 }
 
 function jumpToLatest() {

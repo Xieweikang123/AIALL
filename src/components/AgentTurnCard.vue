@@ -15,13 +15,29 @@
     <template v-if="showToolRow">
       <div class="turn-card__tools">
         <AggregateToolCard
-          v-for="card in aggregatedCards"
+          v-for="card in displayedCards"
           :key="card.key"
           :card="card"
           :compact="useCompactSummary"
           @open-file="(path) => emit('openFile', path)"
         />
       </div>
+
+      <details v-if="overflowToolCards.length" class="turn-card__fold">
+        <summary class="turn-card__fold-label">
+          <span class="turn-card__fold-count">{{ overflowToolCards.length }}</span>
+          <span class="turn-card__fold-text">更早工具步骤</span>
+        </summary>
+        <div class="turn-card__fold-body">
+          <AggregateToolCard
+            v-for="card in overflowToolCards"
+            :key="card.key"
+            :card="card"
+            compact
+            @open-file="(path) => emit('openFile', path)"
+          />
+        </div>
+      </details>
 
       <details v-if="hasFoldedActions" class="turn-card__fold">
         <summary class="turn-card__fold-label">
@@ -51,9 +67,6 @@ import {
   type ToolAggregateCard,
 } from "../services/agentToolAggregates";
 import type { AgentToolStep } from "../utils/toolHelpers";
-
-const COMPACT_CHIP_THRESHOLD = 4;
-const COMPACT_STEP_THRESHOLD = 6;
 
 type ActionItem = { key: string; step: AgentToolStep };
 type ActionsBlock = { kind: "actions"; key: string; visible: ActionItem[]; collapsed: ActionItem[] };
@@ -86,18 +99,32 @@ const allSteps = computed(() =>
 
 const aggregatedCards = computed(() => aggregateToolSteps(allSteps.value));
 
+const MAX_VISIBLE_TOOL_CARDS = 5;
+
+const displayedCards = computed(() => {
+  const cards = aggregatedCards.value;
+  if (cards.length <= MAX_VISIBLE_TOOL_CARDS) return cards;
+  return cards.slice(-MAX_VISIBLE_TOOL_CARDS);
+});
+
+const overflowToolCards = computed(() => {
+  const cards = aggregatedCards.value;
+  if (cards.length <= MAX_VISIBLE_TOOL_CARDS) return [];
+  return cards.slice(0, cards.length - MAX_VISIBLE_TOOL_CARDS);
+});
+
 const showToolRow = computed(
-  () => props.showTools !== false && aggregatedCards.value.length > 0,
+  () => props.showTools !== false && displayedCards.value.length > 0,
 );
 
-const useCompactSummary = computed(
-  () =>
-    aggregatedCards.value.length > COMPACT_CHIP_THRESHOLD ||
-    allSteps.value.length > COMPACT_STEP_THRESHOLD,
-);
+/** Compact chip layout only for explicitly folded rows (earlier turns / earlier steps). */
+const useCompactSummary = computed(() => Boolean(props.compact));
 
 const foldedCards = computed(() => {
-  const visibleKeys = new Set(aggregatedCards.value.map((c) => c.key));
+  const visibleKeys = new Set([
+    ...displayedCards.value.map((c) => c.key),
+    ...overflowToolCards.value.map((c) => c.key),
+  ]);
   const addedKeys = new Set<string>();
   const cards: ToolAggregateCard[] = [];
   for (const block of props.turn.actions) {

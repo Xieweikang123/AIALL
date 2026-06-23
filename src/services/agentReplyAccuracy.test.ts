@@ -13,6 +13,9 @@ describe("buildReplyAccuracyHint", () => {
     expect(hint).toContain("你之前");
     expect(hint).toContain("运行时入口");
     expect(hint).toContain("多可见症状");
+    expect(hint).toContain("单点提问");
+    expect(hint).toContain("观感闭环");
+    expect(hint).toContain("行号");
   });
 
   it("avoids business-specific terms", () => {

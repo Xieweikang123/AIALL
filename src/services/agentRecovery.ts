@@ -8,7 +8,7 @@ import {
 } from "./agentMessageDisplay";
 import { buildConsultativeResumeHint, isConsultativeUserPrompt } from "./agentUserIntent";
 import type { AgentRoundGroup } from "./agentRoundGroups";
-import { stripToolSummaryFromAssistantContent } from "./vibeChatStorage";
+import { stripReferenceAttachments, stripToolSummaryFromAssistantContent } from "./vibeChatStorage";
 
 export type AgentProgressTool = {
   running?: boolean;
@@ -567,6 +567,51 @@ export function buildAgentRunningStatusText(
   const writtenCount = msg.writtenFiles?.length ?? 0;
   if (writtenCount > 0) parts.push(`已落盘 ${writtenCount} 个文件`);
   return parts.join(" · ");
+}
+
+export type ResumePromptMessage = {
+  id?: string;
+  role: string;
+  content?: string;
+  imageDataUrls?: string[];
+  imageCount?: number;
+};
+
+function extractResumeUserPromptText(msg: ResumePromptMessage): string {
+  const text = stripReferenceAttachments(msg.content || "").trim();
+  if (text) return text;
+  if (msg.imageDataUrls?.some(Boolean) || (msg.imageCount && msg.imageCount > 0)) {
+    return "请结合附带的图片回答。";
+  }
+  return msg.content?.trim() || "";
+}
+
+/** Resolve the user task that started (or triggered) an assistant run, for resume/续跑. */
+export function resolveResumeOriginalUserPrompt(
+  messages: ResumePromptMessage[],
+  assistantMsgId: string,
+): string {
+  const assistantIdx = assistantMsgId
+    ? messages.findIndex((m) => m.id === assistantMsgId)
+    : -1;
+  const searchFrom = assistantIdx >= 0 ? assistantIdx : messages.length;
+
+  for (let i = searchFrom - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (msg?.role !== "user") continue;
+    const text = extractResumeUserPromptText(msg);
+    if (text) return text;
+  }
+
+  // skipUserBubble / queued runs may leave assistant without a preceding user bubble
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (msg?.role !== "user") continue;
+    const text = extractResumeUserPromptText(msg);
+    if (text) return text;
+  }
+
+  return "";
 }
 
 /** Extract embedded user task from auto-resume prompt (for intent re-classification on server). */

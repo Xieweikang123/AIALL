@@ -11,6 +11,7 @@ import {
   isBlockedGrepAfterLocate,
   isBlockedGrepAfterVisionMisread,
   isEmptyOrInsufficientFinalReply,
+  isLowSignalVisionLocateGrep,
   isOverlyBroadVisionGrep,
   isSearchFilesContentQuery,
   readLineRangeFromArgs,
@@ -99,6 +100,13 @@ describe("agentExploreGuard", () => {
     expect(isOverlyBroadVisionGrep("会话", anchors)).toBe(true);
     expect(isOverlyBroadVisionGrep("多会话同时进行", anchors)).toBe(false);
     expect(isOverlyBroadVisionGrep("session-item", anchors)).toBe(false);
+  });
+
+  it("blocks low-signal vision locate grep patterns", () => {
+    expect(isLowSignalVisionLocateGrep("activeTab")).toBe(true);
+    expect(isLowSignalVisionLocateGrep("selectedIndex")).toBe(true);
+    expect(isLowSignalVisionLocateGrep("file-panel-tab")).toBe(false);
+    expect(isLowSignalVisionLocateGrep("git-badge")).toBe(false);
   });
 
   it("detects search_files queries that look like UI copy not filenames", () => {

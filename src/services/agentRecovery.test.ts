@@ -31,6 +31,7 @@ import {
   resolveAgentFailureBubbleContent,
   buildAgentRunningStatusText,
   resolveOriginalTaskFromResumePrompt,
+  resolveResumeOriginalUserPrompt,
   summarizeAgentProgress,
 } from "./agentRecovery";
 
@@ -218,6 +219,37 @@ describe("buildAgentResumePrompt", () => {
     expect(prompt).not.toContain("后直接 patch_file/write_file");
     expect(prompt).toContain("手动终止会话，也会通知？");
     expect(resolveOriginalTaskFromResumePrompt(prompt)).toBe("手动终止会话，也会通知？");
+  });
+});
+
+describe("resolveResumeOriginalUserPrompt", () => {
+  it("finds the nearest preceding user message", () => {
+    const messages = [
+      { id: "u1", role: "user", content: "实现功能 A" },
+      { id: "a1", role: "assistant", content: "进行中" },
+    ];
+    expect(resolveResumeOriginalUserPrompt(messages, "a1")).toBe("实现功能 A");
+  });
+
+  it("falls back to last user message when assistant has no preceding user bubble", () => {
+    const messages = [
+      { id: "u1", role: "user", content: "原始任务" },
+      { id: "a1", role: "assistant", content: "第一次" },
+      { id: "a2", role: "assistant", content: "续跑占位" },
+    ];
+    expect(resolveResumeOriginalUserPrompt(messages, "a2")).toBe("原始任务");
+  });
+
+  it("uses image-only fallback text", () => {
+    const messages = [
+      { id: "u1", role: "user", content: "", imageDataUrls: ["data:image/png;base64,abc"] },
+      { id: "a1", role: "assistant", content: "Failed to fetch" },
+    ];
+    expect(resolveResumeOriginalUserPrompt(messages, "a1")).toBe("请结合附带的图片回答。");
+  });
+
+  it("returns empty when no user task exists", () => {
+    expect(resolveResumeOriginalUserPrompt([{ id: "a1", role: "assistant", content: "x" }], "a1")).toBe("");
   });
 });
 

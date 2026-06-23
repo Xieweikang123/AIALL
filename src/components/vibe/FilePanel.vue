@@ -43,7 +43,6 @@
             @click="$emit('update:gitPanelMode', 'sessions')"
           >
             会话
-            <span v-if="sessionCount" class="git-badge shimmer-text--fast">{{ sessionCount }}</span>
           </button>
         </div>
         <div v-if="projectOpened && gitPanelMode === 'files'" class="file-toolbar">

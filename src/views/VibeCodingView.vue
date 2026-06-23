@@ -456,6 +456,7 @@ import {
   resolveAgentCompletedTurns,
   resolveAgentFailureBubbleContent,
   resolveAgentResumeButtonLabel,
+  resolveResumeOriginalUserPrompt,
   shouldSilentAutoContinue,
   resolveAutoResumeSeconds,
 } from "../services/agentRecovery";
@@ -498,7 +499,7 @@ import {
   finalizeAssistantBubbleContent,
 } from "../services/agentMessageDisplay";
 import { findLastAssistantContentInMessages } from "../services/agentContinuation";
-import { isScrollNearBottom, scrollElementToBottom } from "../utils/scrollViewport";
+import { isScrollNearBottom, scheduleScrollContainerToBottom, scrollContainerToBottom, scrollElementToBottom } from "../utils/scrollViewport";
 import { truncatePromptAttachment } from "../utils/truncatePromptAttachment";
 import {
   addProjectToHistory,
@@ -1134,7 +1135,7 @@ const recoverableAssistantMsg = computed(() => {
   for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
     const m = chatMessages.value[i]!;
     if (m.role !== "assistant") continue;
-    if (canResumeAgentRun(m)) return m;
+    if (canResumeAgentRun(m) && resolveResumeOriginalUserPrompt(chatMessages.value, m.id)) return m;
     break;
   }
   return null;
@@ -1211,7 +1212,16 @@ async function scrollChatToBottom(force = false) {
   if (scrollChatRaf) cancelAnimationFrame(scrollChatRaf);
   scrollChatRaf = requestAnimationFrame(() => {
     const el = chatPanelRef.value?.chatScrollRef;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) {
+      scrollChatRaf = 0;
+      return;
+    }
+
+    if (force) {
+      scheduleScrollContainerToBottom(() => chatPanelRef.value?.chatScrollRef ?? null, { behavior: "auto" });
+    } else {
+      scrollContainerToBottom(el, "auto");
+    }
     scrollChatRaf = 0;
   });
 }
@@ -1612,13 +1622,7 @@ function buildAgentHistoryForResume(assistantMsgId: string): VibeChatHistoryMess
 }
 
 function resolveOriginalUserPrompt(assistantMsgId: string): string {
-  const assistantIdx = chatMessages.value.findIndex((m) => m.id === assistantMsgId);
-  if (assistantIdx <= 0) return "";
-  for (let i = assistantIdx - 1; i >= 0; i -= 1) {
-    const msg = chatMessages.value[i];
-    if (msg.role === "user") return stripReferenceAttachments(msg.content);
-  }
-  return "";
+  return resolveResumeOriginalUserPrompt(chatMessages.value, assistantMsgId);
 }
 
 function findLastUserMessage(): { content: string } | null {
@@ -1713,6 +1717,7 @@ const {
   isAssistantStalled,
   hasAgentActivity,
   messageDisplayContent,
+  resolveLiveAgentSource,
   agentAbortDisplayReason,
   agentStatusDisplay,
   buildAgentRunningStatusTextForMsg,
@@ -2809,7 +2814,16 @@ watch(
     if (!chatSending.value) return 0;
     const last = chatMessages.value[chatMessages.value.length - 1];
     if (!last) return 0;
-    return (last.content?.length ?? 0) + (last.tools?.length ?? 0) * 1000;
+    const activeNarrative =
+      last.roundGroups?.find((g) => g.turn === last.agentTurn)?.narrative ??
+      last.roundGroups?.filter((g) => g.turn > 0).at(-1)?.narrative ??
+      "";
+    return (
+      (last.content?.length ?? 0)
+      + (last.streamChars ?? 0)
+      + activeNarrative.length
+      + (last.tools?.length ?? 0) * 1000
+    );
   },
   () => {
     if (chatSending.value) scheduleStreamScroll();
@@ -2867,6 +2881,7 @@ provide(vibeChatMessageContextKey, {
   patchAssistantMsg,
   schedulePersistChat,
   messageDisplayContent,
+  resolveLiveAgentSource,
   jumpChainToLatest,
   userMessageImages,
   shouldShowMessageBubble,

@@ -17,6 +17,7 @@ import {
   isPrematureVisionCompletionClaim,
   isRepeatingVisionFirstTurnDescription,
   isSpeculativeLocateReply,
+  isUnreconciledEmptyShellAnswer,
   isUiLocateQuestionPrompt,
   isUiPositioningBugPrompt,
   isVisionUnsupportedError,
@@ -138,6 +139,7 @@ describe("visionMessage", () => {
   it("isUiLocateQuestionPrompt detects where-is-this UI questions", () => {
     expect(isUiLocateQuestionPrompt("知道是哪儿的按钮吗？")).toBe(true);
     expect(isUiLocateQuestionPrompt("这是哪个面板的内容？")).toBe(true);
+    expect(isUiLocateQuestionPrompt("会话这里，显示的啥")).toBe(true);
     expect(isUiLocateQuestionPrompt("帮我把这个按钮改小一点")).toBe(false);
   });
 
@@ -390,7 +392,28 @@ describe("visionMessage", () => {
   it("detects visible shell with empty inner content from vision text", () => {
     const vision = "深色圆底按钮容器可见，但箭头图标不可见 [图已理解]";
     expect(suggestsVisibleShellEmptyInner(vision)).toBe(true);
+    expect(suggestsVisibleShellEmptyInner("深灰色圆角矩形无明显内容，像空的 toggle")).toBe(true);
     expect(buildVisionBuildContinueHint(vision, "优化按钮")).toContain("内层渲染");
     expect(buildVisibleShellEmptyInnerHint()).not.toMatch(/scroll-to-bottom|回到最新/);
+  });
+
+  it("isUnreconciledEmptyShellAnswer blocks numeric claims without reconcile", () => {
+    const vision = "会话右侧深灰圆角矩形，无明显文字，像空 toggle";
+    const bad =
+      "根据代码，灰色块是 git-badge，用于显示会话数量 sessionCount。";
+    const good =
+      "灰色块是 git-badge；数字由 sessionCount 绑定，但 shimmer 透明文字在截图里可能看不清，且 v-if 为 0 时不渲染。";
+    expect(isUnreconciledEmptyShellAnswer(vision, bad)).toBe(true);
+    expect(isUnreconciledEmptyShellAnswer(vision, good)).toBe(false);
+  });
+
+  it("shouldBypassVisionFirstTurn for displayed-what prompts", () => {
+    expect(
+      shouldBypassVisionFirstTurn({
+        imageCount: 1,
+        consultativeVisionRun: true,
+        prompt: "会话这里，显示的啥",
+      }),
+    ).toBe(true);
   });
 });

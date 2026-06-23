@@ -439,7 +439,6 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     chatError.value = "";
     refreshList(project);
     onAfterSwitch?.();
-    void scrollToBottom?.(true);
   }
 
   function switchSession(sessionId: string) {
@@ -461,7 +460,10 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     const gen = ++switchSessionGeneration;
     applySessionSwitch(project, sessionId);
 
-    if (!projectChatNeedsDiskRestore(project, sessionId)) return;
+    if (!projectChatNeedsDiskRestore(project, sessionId)) {
+      void scrollToBottom?.(true);
+      return;
+    }
 
     switchingSession.value = true;
     void (async () => {
@@ -472,7 +474,10 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
         const resolved = resolveMessagesForSession(sessionId, diskMessages);
         bindSessionMessages(sessionId, normalizeMessages(resolved));
       } finally {
-        if (gen === switchSessionGeneration) switchingSession.value = false;
+        if (gen === switchSessionGeneration) {
+          switchingSession.value = false;
+          void scrollToBottom?.(true);
+        }
       }
     })();
   }

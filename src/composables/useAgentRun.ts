@@ -93,9 +93,9 @@ import {
   hasAgentFinalAnswer,
   hasAgentRunStructure,
   mergeAssistantTurnText,
-  resolveLiveAgentAnswerPreview,
   resolveAgentTimelineAnswer,
   isAgentTimelineAnswerStreaming,
+  type LiveAgentAnswerSource,
 } from "../services/agentMessageDisplay";
 import { parseMemoryProposalToolResult } from "../services/projectMemoryProposal";
 import { parseSkillProposalToolResult } from "../services/projectSkillProposal";
@@ -216,6 +216,17 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   function getLiveForMsg(msg: ChatMessage): AgentRunLiveState | undefined {
     return findRunForMsg(msg)?.live;
+  }
+
+  function resolveLiveAgentSource(msg: ChatMessage): LiveAgentAnswerSource {
+    const live = getLiveForMsg(msg);
+    return {
+      content: msg.content,
+      roundGroups: msg.roundGroups,
+      turnTraces: msg.turnTraces,
+      agentTurn: live?.turn ?? msg.agentTurn,
+      agentPhase: live?.phase ?? msg.agentPhase,
+    };
   }
 
   function formatLiveStatus(live: AgentRunLiveState, compact = false): string {
@@ -527,12 +538,13 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       return resolveAgentFailureBubbleContent(msg);
     }
     if (isAgentRunning(msg)) {
-      const live = getLiveForMsg(msg);
-      return resolveLiveAgentAnswerPreview({
-        ...msg,
-        agentTurn: live?.turn ?? msg.agentTurn,
-        agentPhase: live?.phase,
-      });
+      const hasRunningTool = Boolean(msg.tools?.some((t) => t.running));
+      return resolveAgentTimelineAnswer(
+        resolveLiveAgentSource(msg),
+        "",
+        true,
+        hasRunningTool,
+      );
     }
     return finalizeAssistantBubbleContent(msg);
   }
@@ -545,14 +557,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   function agentAnswerPreview(msg: ChatMessage): string {
     const hasRunningTool = Boolean(msg.tools?.some((t: { running?: boolean }) => t.running));
-    const live = getLiveForMsg(msg);
     return resolveAgentTimelineAnswer(
-      {
-        content: msg.content,
-        roundGroups: msg.roundGroups,
-        turnTraces: msg.turnTraces,
-        agentTurn: live?.turn ?? msg.agentTurn,
-      },
+      resolveLiveAgentSource(msg),
       messageDisplayContent(msg),
       isAgentRunning(msg),
       hasRunningTool,
@@ -579,19 +585,23 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     }
     const bubble = agentAnswerPreview(msg);
     const hasRunningTool = Boolean(msg.tools?.some((t: { running?: boolean }) => t.running));
+    const liveSource = resolveLiveAgentSource(msg);
+    const answerStreaming = isAgentTimelineAnswerStreaming(
+      liveSource,
+      isAgentRunning(msg),
+      hasRunningTool,
+    );
     const items = buildCursorAgentFeed({
       groups: agentRoundGroupViews(msg),
       isRunning: isAgentRunning(msg),
       agentPhase: live?.phase,
       agentDetail,
       answerPreview: bubble,
-      streaming: isAgentTimelineAnswerStreaming(
-        { roundGroups: msg.roundGroups, agentTurn: live?.turn ?? msg.agentTurn },
-        isAgentRunning(msg),
-        hasRunningTool,
-      ),
+      streaming: answerStreaming,
     });
-    return filterDuplicateFeedThoughts(items, bubble);
+    return filterDuplicateFeedThoughts(items, bubble, {
+      suppressAllWhenBubble: isAgentRunning(msg) && Boolean(bubble.trim()),
+    });
   }
 
   function cursorAgentTimeline(msg: ChatMessage): CursorAgentTimeline {
@@ -602,7 +612,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       collapseAfter: detailed ? 10 : 5,
       compactWhileRunning: isAgentRunning(msg) && detailed,
       streaming: isAgentTimelineAnswerStreaming(
-        { roundGroups: msg.roundGroups, agentTurn: msg.agentTurn },
+        resolveLiveAgentSource(msg),
         isAgentRunning(msg),
         hasRunningTool,
       ),
@@ -1669,6 +1679,11 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       }
 
       assistantMsg.activityExpanded = Boolean(assistantMsg.content?.trim());
+
+      // End the run before patching final content so the UI does not render
+      // live-preview text while msg.content already holds the finalized answer.
+      finishRunSession(sessionId);
+
       patchAssistantMsg(msgId, {
         ...assistantTransientUiClearPatch(),
         activityExpanded: assistantMsg.activityExpanded,
@@ -1695,8 +1710,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         void handleAgentWrittenFiles(fileAction.writtenFiles);
       }
       void scrollChatToBottom();
-
-      finishRunSession(sessionId);
 
       onAgentRunSettled?.(assistantMsg);
 
@@ -1792,17 +1805,38 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   async function resumeAgentRun(assistantMsgId: string, options?: { silent?: boolean }) {
     cancelAutoResume();
     const sessionId = activeSessionId.value;
-    if (!configReady.value || !projectOpened.value) { debugLog(`[resume] early return: configReady=${configReady.value}, projectOpened=${projectOpened.value}`); return; }
+    if (!configReady.value || !projectOpened.value) {
+      debugLog(`[resume] early return: configReady=${configReady.value}, projectOpened=${projectOpened.value}`);
+      chatError.value = !configReady.value
+        ? "请先配置 AI 模型后再恢复"
+        : "请先打开项目后再恢复";
+      return;
+    }
 
     const assistantIdx = chatMessages.value.findIndex((m) => m.id === assistantMsgId);
-    if (assistantIdx < 0) { debugLog(`[resume] early return: assistant not found id=${assistantMsgId}`); return; }
+    if (assistantIdx < 0) {
+      debugLog(`[resume] early return: assistant not found id=${assistantMsgId}`);
+      chatError.value = "找不到可恢复的 Agent 回复，请重新发送指令";
+      return;
+    }
 
     const assistantMsg = chatMessages.value[assistantIdx];
-    if (!options?.silent && !canResumeAgentRun(assistantMsg)) { debugLog(`[resume] early return: canResumeAgentRun=false`); return; }
-    if (options?.silent && !hasRecoverableAgentProgress(assistantMsg)) { debugLog(`[resume] early return: silent but no recoverable progress`); return; }
+    if (!options?.silent && !canResumeAgentRun(assistantMsg)) {
+      debugLog(`[resume] early return: canResumeAgentRun=false`);
+      chatError.value = "当前运行无法恢复，请重新发送指令";
+      return;
+    }
+    if (options?.silent && !hasRecoverableAgentProgress(assistantMsg)) {
+      debugLog(`[resume] early return: silent but no recoverable progress`);
+      return;
+    }
 
     const originalPrompt = resolveOriginalUserPrompt(assistantMsgId);
-    if (!originalPrompt) { debugLog(`[resume] early return: originalPrompt empty`); return; }
+    if (!originalPrompt) {
+      debugLog(`[resume] early return: originalPrompt empty`);
+      chatError.value = "找不到原始任务内容，无法恢复运行";
+      return;
+    }
 
     debugLog(`[resume] proceeding: sessionId=${sessionId}, silent=${!!options?.silent}`);
 
@@ -2210,6 +2244,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     isActivityDetailed,
     agentRoundGroupViews,
     messageDisplayContent,
+    resolveLiveAgentSource,
     cursorAgentFeed,
     cursorAgentTimeline,
     cursorCompactExplorationSummary,

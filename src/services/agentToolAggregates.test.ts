@@ -57,6 +57,28 @@ describe("aggregateToolSteps", () => {
     expect(cards[0]?.previewLines[0]).toContain("Alpha →");
   });
 
+  it("merges multiple run_command steps into one card", () => {
+    const cards = aggregateToolSteps([
+      step({
+        id: "c1",
+        name: "run_command",
+        args: { command: "npm test" },
+        ok: true,
+      }),
+      step({
+        id: "c2",
+        name: "run_command",
+        args: { command: "npm run build" },
+        ok: false,
+      }),
+    ]);
+    expect(cards).toHaveLength(1);
+    expect(cards[0]?.title).toBe("执行命令");
+    expect(cards[0]?.subtitle).toContain("2 次");
+    expect(cards[0]?.subtitle).toContain("有失败");
+    expect(cards[0]?.previewLines[0]).toContain("npm test");
+  });
+
   it("summarizes collapsed steps for fold header", () => {
     const summary = summarizeAggregateSteps([
       step({ id: "1", name: "read_file", args: { path: "src/a.ts" } }),

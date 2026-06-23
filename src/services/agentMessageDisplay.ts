@@ -234,25 +234,24 @@ export function resolveLatestAgentProgressNarrative(
   return "";
 }
 
-/** Live final-answer stream while the model is still generating (not tool-turn preamble). */
-export function resolveLiveAgentAnswerPreview(msg: LiveAgentAnswerSource): string {
+/** Direct model answer on the active turn — excludes progress-narrative fallback. */
+export function resolveLiveAgentAnswerText(msg: LiveAgentAnswerSource): string {
   if (msg.agentPhase && AGENT_LIVE_PREVIEW_PREP_PHASES.has(msg.agentPhase)) return "";
 
   const group = resolveActiveRoundGroup(msg);
   if (!group) return "";
 
   const text = normalizeBubbleText(group.narrative || group.response?.assistantText || "");
-  if (!text || isAgentToolTurnNarration(text)) {
-    const progress = resolveLatestAgentProgressNarrative(msg);
-    if (progress) return progress;
-    return "";
-  }
-  if (shouldHideToolTurnPreview(text, group)) {
-    const progress = resolveLatestAgentProgressNarrative(msg);
-    if (progress) return progress;
-    return "";
-  }
+  if (!text || isAgentToolTurnNarration(text)) return "";
+  if (shouldHideToolTurnPreview(text, group)) return "";
   return text;
+}
+
+/** Live final-answer stream while the model is still generating (not tool-turn preamble). */
+export function resolveLiveAgentAnswerPreview(msg: LiveAgentAnswerSource): string {
+  const answer = resolveLiveAgentAnswerText(msg);
+  if (answer) return answer;
+  return resolveLatestAgentProgressNarrative(msg);
 }
 
 /** Prefer live stream preview while running; otherwise use the completed bubble text. */
@@ -263,7 +262,11 @@ export function resolveAgentTimelineAnswer(
   _hasRunningTool = false,
 ): string {
   if (!isRunning) return completedContent;
-  return resolveLiveAgentAnswerPreview(msg) || "";
+  if (hasAgentFinalAnswer(msg)) {
+    const finalized = resolveCompletedAgentBubbleContent(msg);
+    if (finalized.trim()) return finalized;
+  }
+  return resolveLiveAgentAnswerText(msg) || "";
 }
 
 export function isAgentTimelineAnswerStreaming(
@@ -271,7 +274,7 @@ export function isAgentTimelineAnswerStreaming(
   isRunning: boolean,
   _hasRunningTool = false,
 ): boolean {
-  return isRunning && Boolean(resolveLiveAgentAnswerPreview(msg).trim());
+  return isRunning && Boolean(resolveLiveAgentAnswerText(msg).trim());
 }
 
 /** Resolve the text shown in the assistant chat bubble (with fallbacks for agent runs). */

@@ -17,6 +17,7 @@ export type BuildTurnCardsOptions = {
   finalAnswer?: string;
   activityDetailed?: boolean;
   isRunning?: boolean;
+  answerStreaming?: boolean;
 };
 
 export function buildTurnCardsFromRoundGroups(
@@ -37,7 +38,9 @@ export function buildTurnCardsFromRoundGroups(
     }
   }
 
-  const filtered = filterDuplicateFeedThoughts(items, answer);
+  const filtered = filterDuplicateFeedThoughts(items, answer, {
+    suppressAllWhenBubble: Boolean(options.isRunning && answer),
+  });
   const detailed = options.activityDetailed === true;
   const collapseAfter = options.isRunning ? 999 : detailed ? 10 : 5;
   const blocks = layoutCursorFeedBlocks(filtered, {
