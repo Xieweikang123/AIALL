@@ -90,9 +90,27 @@
         </div>
       </div>
       <div class="toolbar-sep" />
-      <button type="button" class="ghost small link-btn" @click="router.push('/chat')">AI 对话</button>
-      <button type="button" class="ghost small link-btn" @click="router.push('/ai-config')">配置</button>
-      <button type="button" class="ghost small link-btn" @click="$emit('test-notification')" title="测试系统通知">🔔 通知测试</button>
+      <nav class="toolbar-nav" aria-label="快捷导航">
+        <button type="button" class="toolbar-nav-btn" title="AI 对话" @click="router.push('/chat')">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v5A1.5 1.5 0 0 1 12.5 10H8l-3 2.5V10H3.5A1.5 1.5 0 0 1 2 8.5v-5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+          </svg>
+          <span class="toolbar-nav-label">对话</span>
+        </button>
+        <button type="button" class="toolbar-nav-btn" title="AI 配置" @click="router.push('/ai-config')">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.2"/>
+            <path d="M8 1.5v1.2M8 13.3v1.2M1.5 8h1.2M13.3 8h1.2M3.4 3.4l.85.85M11.75 11.75l.85.85M3.4 12.6l.85-.85M11.75 4.25l.85-.85" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+          </svg>
+          <span class="toolbar-nav-label">配置</span>
+        </button>
+        <button type="button" class="toolbar-nav-btn" title="通知测试" @click="$emit('test-notification')">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M8 1.8c-2.2 0-3.5 1.8-3.5 4v2.2L3.2 10.5h9.6L11.5 8V5.8c0-2.2-1.3-4-3.5-4Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+            <path d="M6.5 12.5a1.5 1.5 0 0 0 3 0" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </nav>
     </div>
   </header>
 </template>
@@ -483,16 +501,44 @@ function formatSessionTime(iso: string): string {
   line-height: 1;
 }
 
-.link-btn {
-  text-decoration: none;
-  font-weight: 500;
-  position: relative;
-  z-index: 1;
-  pointer-events: auto;
+.toolbar-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
-.link-btn:hover {
-  text-decoration: none;
+.toolbar-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.toolbar-nav-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.toolbar-nav-label {
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+@media (max-width: 960px) {
+  .toolbar-nav-label {
+    display: none;
+  }
+
+  .toolbar-nav-btn {
+    padding: 5px 7px;
+  }
 }
 
 .ghost {

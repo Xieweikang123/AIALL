@@ -12,30 +12,40 @@
   >
     <div class="panel-head">
       <div class="panel-head-left">
-        <span class="panel-label">AI 助手</span>
-        <div class="session-picker-row">
-            <button
-              v-if="sessionList.length > 1"
-              type="button"
-              class="session-nav-btn"
-              :disabled="!projectOpened || !canSwitchToNewerSession"
-              title="较新的会话 (Ctrl+Alt+↑)"
-              @click="$emit('switch-to-adjacent-session', -1)"
-            >
-              ‹
-            </button>
-            <span class="session-picker-title">{{ activeSessionTitle || "新会话" }}</span>
-            <button
-              v-if="sessionList.length > 1"
-              type="button"
-              class="session-nav-btn"
-              :disabled="!projectOpened || !canSwitchToOlderSession"
-              title="较旧的会话 (Ctrl+Alt+↓)"
-              @click="$emit('switch-to-adjacent-session', 1)"
-            >
-              ›
-            </button>
+        <div class="chat-head-brand">
+          <span class="chat-head-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+              <path d="M12 12 4 7.5m8 4.5 8-4.5M12 12v9" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+            </svg>
+          </span>
+          <div class="chat-head-text">
+            <span class="panel-label">AI 助手</span>
+            <div class="session-picker-row">
+              <button
+                v-if="sessionList.length > 1"
+                type="button"
+                class="session-nav-btn"
+                :disabled="!projectOpened || !canSwitchToNewerSession"
+                title="较新的会话 (Ctrl+Alt+↑)"
+                @click="$emit('switch-to-adjacent-session', -1)"
+              >
+                ‹
+              </button>
+              <span class="session-picker-title" :title="activeSessionTitle || '新会话'">{{ activeSessionTitle || "新会话" }}</span>
+              <button
+                v-if="sessionList.length > 1"
+                type="button"
+                class="session-nav-btn"
+                :disabled="!projectOpened || !canSwitchToOlderSession"
+                title="较旧的会话 (Ctrl+Alt+↓)"
+                @click="$emit('switch-to-adjacent-session', 1)"
+              >
+                ›
+              </button>
+            </div>
           </div>
+        </div>
       </div>
       <div class="panel-head-right">
         <span
@@ -76,6 +86,11 @@
           {{ aiConfigStatusText }}
         </span>
       </div>
+    </div>
+
+    <div v-if="editorCollapsed && projectOpened" class="editor-collapsed-hint">
+      <span class="editor-collapsed-hint-text">编辑器已收起，当前为全宽对话模式</span>
+      <button type="button" class="editor-collapsed-hint-btn" @click="$emit('expand-editor')">展开编辑器</button>
     </div>
 
     <div class="chat-scroll-wrap">
@@ -722,6 +737,7 @@ const emit = defineEmits<{
   (e: "force-recover-stalled-run", messageId: string): void;
   (e: "cancel-auto-resume"): void;
   (e: "start-new-session"): void;
+  (e: "expand-editor"): void;
   (e: "switch-session", sessionId: string): void;
   (e: "remove-session", sessionId: string): void;
   (e: "switch-to-adjacent-session", delta: number): void;
@@ -857,6 +873,86 @@ function removeQuotedMessage(index: number) {
   text-overflow: ellipsis;
 }
 
+.chat-head-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.chat-head-icon {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(31, 111, 235, 0.22), rgba(130, 80, 223, 0.18));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #91beff;
+}
+
+.chat-head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.chat-head-text .panel-label {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.session-picker-title {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(139, 148, 158, 0.85);
+  max-width: min(280px, 36vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+
+.editor-collapsed-hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 14px;
+  flex-shrink: 0;
+  border-bottom: 1px solid rgba(88, 166, 255, 0.15);
+  background: linear-gradient(90deg, rgba(31, 111, 235, 0.1), rgba(130, 80, 223, 0.06));
+}
+
+.editor-collapsed-hint-text {
+  font-size: 11px;
+  color: rgba(145, 190, 255, 0.88);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.editor-collapsed-hint-btn {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid rgba(88, 166, 255, 0.35);
+  border-radius: 6px;
+  background: rgba(88, 166, 255, 0.12);
+  color: #c9e4ff;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.editor-collapsed-hint-btn:hover {
+  background: rgba(88, 166, 255, 0.22);
+  border-color: rgba(88, 166, 255, 0.5);
+}
+
 .session-picker-wrap {
   position: relative;
 }
@@ -865,6 +961,7 @@ function removeQuotedMessage(index: number) {
   display: flex;
   align-items: center;
   gap: 2px;
+  min-width: 0;
 }
 
 .session-nav-btn {
@@ -912,7 +1009,7 @@ function removeQuotedMessage(index: number) {
   flex: 1;
   overflow-y: auto;
   overflow-x: clip;
-  padding: 16px;
+  padding: 20px 18px;
   position: relative;
 }
 
@@ -1158,24 +1255,28 @@ function removeQuotedMessage(index: number) {
 .chat-mode-switch {
   display: flex;
   gap: 2px;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 6px;
-  padding: 2px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 3px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 .mode-btn {
-  padding: 4px 10px;
+  padding: 5px 12px;
   font-size: 12px;
+  font-weight: 500;
   border: none;
-  background: none;
-  color: rgba(139, 148, 158, 0.8);
+  background: transparent;
+  color: rgba(139, 148, 158, 0.7);
   cursor: pointer;
-  border-radius: 4px;
-  transition: all 0.15s ease;
+  border-radius: 6px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .mode-btn:hover:not(:disabled) {
   color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .mode-btn.active {

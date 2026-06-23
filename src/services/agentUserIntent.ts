@@ -7,8 +7,12 @@ const SHORT_IMPLEMENT_PROMPT_RE =
   /^(?:请?)?(?:修复|改一下|改(?:吧|了|下)?|修|实现|动手|执行|应用|写入|落地|按(?:此|上面)?(?:方案|分析)?)(?:吧|了|下)?[。！!]?$/i;
 
 /** Accuracy / behavior Q&A without asking to change code yet. */
-const ACCURACY_CONSULTATIVE_RE =
+export const ACCURACY_CONSULTATIVE_RE =
   /是否.{0,20}(?:准确|正确|总是|一直|可靠)|(?:准确|正确|可靠).{0,12}(?:吗|么)[？?]?$/i;
+
+export function isAccuracyConsultativePrompt(prompt: string): boolean {
+  return ACCURACY_CONSULTATIVE_RE.test(prompt.trim());
+}
 
 /** Observed-behavior question (e.g. 「也会通知？」) — consultative, not implement. */
 const OBSERVED_BEHAVIOR_QUESTION_RE =
@@ -254,7 +258,8 @@ export function buildConsultativeBuildHint(): string {
     "",
     "【咨询任务·只读】用户本条仅为提问/解释，未要求改代码。",
     "只允许 list_dir / read_file / grep / search_files；禁止 patch_file / write_file / delete_file。",
-    "优先 grep 精确符号；「会不会/是否/做 X 时会不会 Y」须 trace 入口→编排层→副作用，read 目标函数及至少一层直接调用方后再答；禁止只读最底层 export。",
+    "优先 grep 精确符号；「会不会/是否/做 X 时会不会 Y/准确吗」须 trace 入口→编排层→副作用或 prompt 构造处，read 目标函数及至少一层直接调用方后再答；禁止只读 composable 即下结论。",
+    "准确度/输出质量类：须 read 到 backend 路由或 middleware 中实际 prompt/数据拼装处，说明代码里注入了哪些上下文；禁止用「如果 prompt 包含…」猜测。",
     "勿广搜或同一文件多段重叠 read；信息足够后立即用自然语言回答「当前代码下会怎样」，勿连环读取无关文件。",
     "禁止在未对照工具结果前宣称「逻辑已正确/无需再改/链路完整」；需要改代码时说明结论并请用户发送明确实施指令。",
     "若写工具返回「Build 只读轮」相关错误：当前仍是 Build 模式，只是本条被标为咨询只读；禁止向用户称 Ask 模式或让用户切换 Build。",
@@ -266,6 +271,7 @@ export function buildConsultativeResumeHint(): string {
     "【咨询续跑·只读】原始消息仅为提问/解释，未要求改代码。",
     "请根据下方已完成的 grep/read 证据直接回答原始问题；禁止 patch_file / write_file / delete_file。",
     "禁止宣称「上一轮的 patch 已生效/无需再改/逻辑已正确」——须基于当前磁盘代码说明结论；若曾误执行写操作，说明现状即可，勿重复 patch。",
+    "若原始问题为准确度/是否类且尚未 read backend/middleware 的 prompt 构造：须补齐该层 read 后再答；禁止「基于已有信息直接回答」或反问用户要不要继续查。",
     "相同文件区域禁止再 read_file；最多 1 次 grep 补齐遗漏。",
   ].join("\n");
 }

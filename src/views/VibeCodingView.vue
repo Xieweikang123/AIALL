@@ -271,6 +271,7 @@
         @on-chat-drop="onChatDrop"
         @switch-to-adjacent-session="switchToAdjacentSession"
         @start-new-session="handleStartNewSession"
+        @expand-editor="expandEditor"
         @switch-session="switchSession"
         @copy-session-info="copySessionInfo"
         @remove-session="removeSession"

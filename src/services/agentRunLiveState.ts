@@ -92,6 +92,9 @@ export function formatAgentLiveStatus(
   if (phase === "vision_first_turn_done") {
     return appendStatusDetail("读图完成，开始定位与修改…", detail);
   }
+  if (phase === "vision_anchor_prefgrep") {
+    return appendStatusDetail("读图完成，正在按锚点搜索源码…", detail);
+  }
   if (phase === "vision_first_turn_skipped") {
     return appendStatusDetail("读图描述不足，继续执行任务…", detail);
   }

@@ -16,6 +16,7 @@ import {
   isAgentStepClarificationPrompt,
   isBehaviorContradictionPrompt,
   isCodeReviewPrompt,
+  isAccuracyConsultativePrompt,
   isConsultativeUserPrompt,
   isImplementationStatusPrompt,
   isImplementFollowUpRun,
@@ -75,6 +76,7 @@ describe("isConsultativeUserPrompt", () => {
   it("treats accuracy questions as consultative", () => {
     expect(isConsultativeUserPrompt("AI 助手，引用按钮出现位置是否总是准确？")).toBe(true);
     expect(isConsultativeUserPrompt("这个位置一直准确吗？")).toBe(true);
+    expect(isAccuracyConsultativePrompt("ai生成注释准确吗？")).toBe(true);
   });
 
   it("treats implementation status prompts as consultative", () => {
@@ -100,7 +102,7 @@ describe("buildConsultativeBuildHint", () => {
     expect(buildConsultativeBuildHint()).toContain("无需再改");
     expect(buildConsultativeBuildHint()).toContain("当前代码下");
     expect(buildConsultativeBuildHint()).toContain("直接调用方");
-    expect(buildConsultativeBuildHint()).toContain("最底层 export");
+    expect(buildConsultativeBuildHint()).toContain("middleware");
   });
 });
 
@@ -147,6 +149,7 @@ describe("buildConsultativeResumeHint", () => {
     const hint = buildConsultativeResumeHint();
     expect(hint).toContain("禁止 patch_file");
     expect(hint).toContain("上一轮的 patch");
+    expect(hint).toContain("middleware");
   });
 });
 

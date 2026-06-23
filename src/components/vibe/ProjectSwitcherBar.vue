@@ -87,10 +87,10 @@ function onTabClick(path: string) {
   align-items: center;
   gap: 6px;
   padding: 0 12px;
-  background: rgba(11, 18, 32, 0.6);
+  background: rgba(11, 18, 32, 0.72);
   backdrop-filter: blur(8px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  height: 34px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  height: 36px;
   flex-shrink: 0;
   overflow: hidden;
 }
@@ -98,11 +98,12 @@ function onTabClick(path: string) {
 .project-tabs {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   overflow-x: auto;
   flex: 1;
   scrollbar-width: none;
   -ms-overflow-style: none;
+  mask-image: linear-gradient(to right, transparent 0, #000 8px, #000 calc(100% - 16px), transparent 100%);
 }
 
 .project-tabs::-webkit-scrollbar {
@@ -115,9 +116,9 @@ function onTabClick(path: string) {
   gap: 6px;
   padding: 4px 12px;
   border: 1px solid transparent;
-  border-radius: 999px;
-  background: none;
-  color: rgba(255, 255, 255, 0.5);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(255, 255, 255, 0.55);
   font-size: 12px;
   cursor: pointer;
   white-space: nowrap;
@@ -128,15 +129,16 @@ function onTabClick(path: string) {
 }
 
 .project-tab:hover:not([aria-disabled="true"]) {
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .project-tab.active {
-  background: rgba(31, 111, 235, 0.14);
-  border-color: rgba(31, 111, 235, 0.28);
-  color: rgba(255, 255, 255, 0.95);
+  background: rgba(31, 111, 235, 0.16);
+  border-color: rgba(31, 111, 235, 0.32);
+  color: rgba(255, 255, 255, 0.96);
   font-weight: 600;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .project-tab.loading {

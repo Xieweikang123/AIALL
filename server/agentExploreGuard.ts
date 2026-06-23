@@ -134,6 +134,8 @@ export type ToolGuardContext = {
   blockExplorationArchiveWrite?: boolean;
   /** Files that failed patch_file — next read_file bypasses overlap/slice cache. */
   patchRecoveryFiles?: Set<string>;
+  /** Paths read during consultative read-only runs — for accuracy trace depth checks. */
+  consultativeReadPaths?: string[];
 };
 
 /** Clear cached read windows so patch failure can re-read fresh content from disk. */

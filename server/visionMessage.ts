@@ -1,3 +1,5 @@
+import { isAccuracyConsultativePrompt } from "../src/services/agentUserIntent";
+
 export type ChatContentPart =
   | { type: "text"; text: string }
   | { type: "image_url"; image_url: { url: string } };
@@ -183,6 +185,45 @@ export function buildVisionFirstTurnRule(): string {
   ].join("\n");
 }
 
+/** Locate-only consultative prompt with screenshot — read image and grep in the same turn. */
+export function buildVisionLocateSingleTurnRule(): string {
+  return [
+    "【附图·定位题·同轮读图定位】用户问截图中的控件/区域在代码哪里，未要求改代码。",
+    "本轮允许 list_dir / read_file / grep / search_files。同轮须完成：",
+    "① 查看附图，用一句点明截图对应哪块界面，并引用可见原文（用「」括起）；",
+    "② 立即 grep 该文案（≥2 字片段）或 kebab-case class；",
+    "③ 必要时 read_file 1 个相关文件核对 template/DOM 是否与截图一致；",
+    "④ 给出最终中文答案。",
+    "禁止写「下一轮再确认」；禁止在未 grep/read 的情况下猜测组件路径；禁止输出 [图已理解] 暗号（定位题无需读图独占轮）。",
+  ].join("\n");
+}
+
+/** Accuracy / output-quality consultative prompt with screenshot — trace in same turn. */
+export function buildVisionAccuracySingleTurnRule(): string {
+  return [
+    "【附图·准确度题·同轮读图追溯】用户问某功能/输出是否准确，未要求改代码。",
+    "本轮允许 list_dir / read_file / grep / search_files。同轮须完成：",
+    "① 查看附图，用一句点明截图对应哪块界面，并引用可见原文（用「」括起）；",
+    "② grep 可见文案或相关符号定位用户操作入口；",
+    "③ 沿调用链向下 trace：read 入口处理函数 → read API 客户端（若有）→ grep/read backend 路由或 middleware 中 prompt 构造处；",
+    "④ 基于已读代码给出最终中文答案，说明实际注入的上下文；禁止用「如果 prompt 包含…」猜测。",
+    "禁止写「下一轮再确认」或「想让我深入看一下」；禁止输出 [图已理解] 暗号。",
+  ].join("\n");
+}
+
+/** Screenshot locate or accuracy question — skip vision-first no-tools turn; use same-turn grep/trace instead. */
+export function shouldBypassVisionFirstTurn(params: {
+  imageCount: number;
+  consultativeVisionRun: boolean;
+  prompt: string;
+}): boolean {
+  if (params.imageCount <= 0) return false;
+  if (!params.consultativeVisionRun) return false;
+  return (
+    isUiLocateQuestionPrompt(params.prompt) || isAccuracyConsultativePrompt(params.prompt)
+  );
+}
+
 /** Vision text flagged inner/outer scale mismatch for follow-up locate hints. */
 export function mentionsControlProportionImbalance(text: string): boolean {
   const trimmed = text.trim();
@@ -225,8 +266,111 @@ export function buildVisionConsultativeContinueHint(): string {
     "【读图完成·咨询】用户仅为提问/说明，未要求改代码。",
     "优先 grep 读图时摘录的占位符或标签（1 次）定位组件，必要时 read_file 1 个相关文件核对；",
     "然后给出最终中文回答：先一句点明截图对应哪块界面，再答用户问题。",
+    "禁止在未 grep/read 的情况下猜测源码路径或组件文件名；禁止写「下一轮再确认/需要再搜索」。",
+    "禁止重复首轮完整外观描述；读图记录已生效，本轮只输出定位结论与答案。",
     "禁止连环 read_file/grep 多个无关文件；核对后立即输出最终答案。",
   ].join("");
+}
+
+/** User asks which UI region / component a screenshot shows (locate-only, not implement). */
+const UI_LOCATE_QUESTION_RE =
+  /(?:哪(?:儿|里|块|个)|什么|啥)(?:的)?(?:按钮|控件|面板|区域|组件|元素|部分|内容)|(?:知道|看得出|认得|识别).{0,12}(?:哪儿|哪里|哪块|哪个)/;
+
+export function isUiLocateQuestionPrompt(prompt: string): boolean {
+  const text = prompt.trim();
+  if (!text) return false;
+  return UI_LOCATE_QUESTION_RE.test(text);
+}
+
+const DEFERRED_LOCATE_REPLY_RE =
+  /(?:下一(?:轮|步)|再.{0,8}(?:搜索|确认|核对|定位|查))|(?:需要|须|应).{0,16}(?:搜索|确认|核对|定位)|通过搜索.{0,16}确认|精确确认/i;
+
+export function isDeferredLocateReply(text: string): boolean {
+  const body = text.replace(/\s*\[图已理解\]\s*/g, "").trim();
+  if (!body) return false;
+  return DEFERRED_LOCATE_REPLY_RE.test(body);
+}
+
+const SPECULATIVE_LOCATE_REPLY_RE =
+  /(?:极有可能|很可能|可能属于|或许在|猜测|推断.{0,24}(?:属于|位于)).{0,48}(?:或|\/)/i;
+
+const SPECULATIVE_PATH_GUESS_RE =
+  /(?:极有可能|很可能|可能属于|或许|猜测).{0,48}[`'"][\w./-]+\.(?:vue|tsx?|jsx?)['"`]/i;
+
+export function isSpeculativeLocateReply(text: string): boolean {
+  const body = text.replace(/\s*\[图已理解\]\s*/g, "").trim();
+  if (!body) return false;
+  return SPECULATIVE_LOCATE_REPLY_RE.test(body) || SPECULATIVE_PATH_GUESS_RE.test(body);
+}
+
+export function isRepeatingVisionFirstTurnDescription(replyText: string, visionText: string): boolean {
+  const a = replyText.replace(/\s*\[图已理解\]\s*/g, "").trim();
+  const b = visionText.replace(/\s*\[图已理解\]\s*/g, "").trim();
+  if (!a || !b || a.length < 48 || b.length < 48) return false;
+  const headA = a.slice(0, 72);
+  const headB = b.slice(0, 72);
+  if (headA === headB) return true;
+  const snippet = headB.slice(0, 44);
+  return snippet.length >= 24 && a.includes(snippet);
+}
+
+export function buildVisionConsultativeLocateRetryHint(anchorQuotes: string[]): string {
+  const anchorHint =
+    anchorQuotes.length > 0
+      ? `读图已摘录：${anchorQuotes.slice(0, 3).map((q) => `「${q}」`).join("、")}。请 grep 其中 ≥4 字片段。`
+      : "请 grep 读图描述中的可见文案（≥4 字）或 kebab-case class。";
+  return [
+    "【定位未完成】读图已完成，但尚未 grep/read 核对源码。",
+    anchorHint,
+    "禁止猜测组件路径或写「下一轮再确认」。",
+    "请立即调用 grep（必要时 read_file 1 个文件），然后给出最终答案：先一句点明截图对应哪块界面，再答用户问题。",
+    "勿重复首轮完整外观描述。",
+  ].join("");
+}
+
+export function shouldRunVisionAnchorPrefgrep(params: {
+  consultativeVisionRun: boolean;
+  prompt: string;
+  anchorQuotes: string[];
+}): boolean {
+  if (!params.consultativeVisionRun || params.anchorQuotes.length === 0) return false;
+  return (
+    isUiLocateQuestionPrompt(params.prompt) || isAccuracyConsultativePrompt(params.prompt)
+  );
+}
+
+export function shouldBlockConsultativeVisionLocateFinalize(params: {
+  consultativeVisionRun: boolean;
+  visionLocateActive: boolean;
+  visionLocateToolsUsed: boolean;
+  visionAutoGrepHadMatches?: boolean;
+  visionLocateReadUsed?: boolean;
+  prompt: string;
+  replyText: string;
+  visionFirstTurnText?: string;
+}): boolean {
+  if (!params.consultativeVisionRun || !params.visionLocateActive) return false;
+
+  if (
+    params.visionAutoGrepHadMatches &&
+    !params.visionLocateReadUsed &&
+    isUiLocateQuestionPrompt(params.prompt)
+  ) {
+    return true;
+  }
+
+  if (params.visionLocateToolsUsed) return false;
+
+  if (isUiLocateQuestionPrompt(params.prompt)) return true;
+  if (isDeferredLocateReply(params.replyText)) return true;
+  if (isSpeculativeLocateReply(params.replyText)) return true;
+  if (
+    params.visionFirstTurnText &&
+    isRepeatingVisionFirstTurnDescription(params.replyText, params.visionFirstTurnText)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 export function buildVisionFirstTurnRetryHint(): string {
@@ -261,18 +405,27 @@ function hasVisibleAnchorQuote(text: string): boolean {
 function describesScreenshotUiRegion(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return false;
+  if (UI_REGION_STATEMENT_RE.test(trimmed) || UI_MODULE_STATEMENT_RE.test(trimmed)) return true;
   if (hasVisibleAnchorQuote(trimmed)) {
     return ANCHOR_TO_REGION_RE.test(trimmed);
   }
-  return UI_REGION_STATEMENT_RE.test(trimmed) || UI_MODULE_STATEMENT_RE.test(trimmed);
+  return false;
 }
 
 export function isAdequateVisionFirstTurnDescription(text: string): boolean {
   if (isPrematureVisionCompletionClaim(text)) return false;
-  return /\[图已理解\]/.test(text);
+  const trimmed = text.trim();
+  if (!/\[图已理解\]/.test(trimmed)) return false;
+  if (trimmed.replace(/\s*\[图已理解\]\s*/g, "").trim().length < VISION_FIRST_TURN_MIN_DESCRIPTION_CHARS) return false;
+  return describesScreenshotUiRegion(trimmed);
 }
 
-export function shouldRequireVisionFirstTurn(imageCount: number, visionFallbackApplied: boolean): boolean {
+export function shouldRequireVisionFirstTurn(
+  imageCount: number,
+  visionFallbackApplied: boolean,
+  bypassVisionFirstTurn = false,
+): boolean {
+  if (bypassVisionFirstTurn) return false;
   return imageCount > 0 && !visionFallbackApplied;
 }
 
@@ -329,6 +482,12 @@ function hasUiImplementationIntent(body: string): boolean {
 export function buildVisionTaskText(text: string, imageCount: number): string {
   if (imageCount <= 0) return text;
   const body = text.trim() || "请描述并分析附带的图片。";
+  if (isUiLocateQuestionPrompt(body) && !hasUiImplementationIntent(body)) {
+    return `${buildVisionLocateSingleTurnRule()}\n\n${body}`;
+  }
+  if (isAccuracyConsultativePrompt(body)) {
+    return `${buildVisionAccuracySingleTurnRule()}\n\n${body}`;
+  }
   const firstTurnRule = buildVisionFirstTurnRule();
   const clickFocusHint = UI_CLICK_FOCUS_INTERACTION_RE.test(body)
     ? `\n\n${buildClickFocusInteractionHint()}`

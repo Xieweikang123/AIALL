@@ -5,6 +5,7 @@ import {
   buildUiScopeFollowUpHint,
   buildVisionBuildContinueHint,
   buildVisionConsultativeContinueHint,
+  buildVisionLocateSingleTurnRule,
   buildVisionTaskText,
   buildVisionUiLocateHint,
   buildVisionUserContent,
@@ -12,10 +13,16 @@ import {
   contentDisplayText,
   extractVisibleAnchorQuotes,
   isAdequateVisionFirstTurnDescription,
+  isDeferredLocateReply,
   isPrematureVisionCompletionClaim,
+  isRepeatingVisionFirstTurnDescription,
+  isSpeculativeLocateReply,
+  isUiLocateQuestionPrompt,
   isUiPositioningBugPrompt,
   isVisionUnsupportedError,
   mentionsControlProportionImbalance,
+  shouldBlockConsultativeVisionLocateFinalize,
+  shouldBypassVisionFirstTurn,
   suggestsVisibleShellEmptyInner,
   buildVisibleShellEmptyInnerHint,
   sanitizeImageDataUrls,
@@ -55,13 +62,51 @@ describe("visionMessage", () => {
     expect(text).toContain("禁止调用任何工具");
   });
 
-  it("shouldRequireVisionFirstTurn respects vision fallback", () => {
+  it("shouldRequireVisionFirstTurn respects vision fallback and locate bypass", () => {
     expect(shouldRequireVisionFirstTurn(1, false)).toBe(true);
     expect(shouldRequireVisionFirstTurn(1, true)).toBe(false);
     expect(shouldRequireVisionFirstTurn(0, false)).toBe(false);
+    expect(shouldRequireVisionFirstTurn(1, false, true)).toBe(false);
   });
 
-  it("isAdequateVisionFirstTurnDescription requires [图已理解] code phrase", () => {
+  it("shouldBypassVisionFirstTurn applies to consultative screenshot locate questions", () => {
+    expect(
+      shouldBypassVisionFirstTurn({
+        imageCount: 1,
+        consultativeVisionRun: true,
+        prompt: "知道是哪儿的按钮吗？",
+      }),
+    ).toBe(true);
+    expect(
+      shouldBypassVisionFirstTurn({
+        imageCount: 1,
+        consultativeVisionRun: true,
+        prompt: "ai生成注释准确吗？",
+      }),
+    ).toBe(true);
+    expect(
+      shouldBypassVisionFirstTurn({
+        imageCount: 1,
+        consultativeVisionRun: true,
+        prompt: "你看挤一块了",
+      }),
+    ).toBe(false);
+  });
+
+  it("buildVisionTaskText uses same-turn accuracy trace for accuracy questions", () => {
+    const text = buildVisionTaskText("ai生成注释准确吗？", 1);
+    expect(text).toContain("准确度题·同轮读图追溯");
+    expect(text).not.toContain("本轮禁止调用任何工具");
+  });
+
+  it("buildVisionTaskText uses same-turn locate rule for locate questions", () => {
+    const text = buildVisionTaskText("知道是哪儿的按钮吗？", 1);
+    expect(text).toContain("同轮读图定位");
+    expect(text).toContain("允许 list_dir / read_file / grep");
+    expect(text).not.toContain("本轮禁止调用任何工具");
+  });
+
+  it("isAdequateVisionFirstTurnDescription requires [图已理解] and UI region", () => {
     expect(
       isAdequateVisionFirstTurnDescription(
         "截图展示的是 Git 面板右侧部分，包含「AI 一键推送」按钮… [图已理解]",
@@ -83,6 +128,73 @@ describe("visionMessage", () => {
         "已修复 padding。[图已理解]",
       ),
     ).toBe(false);
+    expect(
+      isAdequateVisionFirstTurnDescription(
+        "深色圆角按钮，边框灰色。[图已理解]",
+      ),
+    ).toBe(false);
+  });
+
+  it("isUiLocateQuestionPrompt detects where-is-this UI questions", () => {
+    expect(isUiLocateQuestionPrompt("知道是哪儿的按钮吗？")).toBe(true);
+    expect(isUiLocateQuestionPrompt("这是哪个面板的内容？")).toBe(true);
+    expect(isUiLocateQuestionPrompt("帮我把这个按钮改小一点")).toBe(false);
+  });
+
+  it("isDeferredLocateReply detects postponed locate answers", () => {
+    expect(isDeferredLocateReply("需要在下一轮通过搜索按钮文案来精确确认。")).toBe(true);
+    expect(isDeferredLocateReply("位于 FilePanel.vue 的 session-action-btn。")).toBe(false);
+  });
+
+  it("isSpeculativeLocateReply detects component guessing without evidence", () => {
+    const guess =
+      "它极有可能属于文件面板（`src/components/vibe/FilePanel.vue`）或工具栏（`src/components/vibe/AppToolbar.vue`）。";
+    expect(isSpeculativeLocateReply(guess)).toBe(true);
+    expect(isSpeculativeLocateReply("grep 命中 FilePanel.vue，按钮 class 为 session-action-btn。")).toBe(false);
+  });
+
+  it("isRepeatingVisionFirstTurnDescription detects duplicated vision narrative", () => {
+    const vision =
+      "这是一个深色背景上的按钮，按钮文字为「+ 新建」。按钮呈圆角矩形，边框为灰色，整体是一个标准的操作按钮样式。[图已理解]";
+    const repeat =
+      "这是一个深色背景上的按钮，按钮文字为「+ 新建」。按钮呈圆角矩形，边框为灰色，整体是一个标准的操作按钮样式。";
+    expect(isRepeatingVisionFirstTurnDescription(repeat, vision)).toBe(true);
+  });
+
+  it("shouldBlockConsultativeVisionLocateFinalize blocks guess-only consultative vision replies", () => {
+    const vision =
+      "这是一个深色背景上的按钮，按钮文字为「+ 新建」。据此可判断这是侧栏会话区域。[图已理解]";
+    const reply =
+      "这是一个深色背景上的按钮，按钮文字为「+ 新建」。极有可能属于 FilePanel 或 AppToolbar，需要在下一轮搜索确认。";
+    expect(
+      shouldBlockConsultativeVisionLocateFinalize({
+        consultativeVisionRun: true,
+        visionLocateActive: true,
+        visionLocateToolsUsed: false,
+        prompt: "知道是哪儿的按钮吗？",
+        replyText: reply,
+        visionFirstTurnText: vision,
+      }),
+    ).toBe(true);
+    expect(
+      shouldBlockConsultativeVisionLocateFinalize({
+        consultativeVisionRun: true,
+        visionLocateActive: true,
+        visionLocateToolsUsed: true,
+        prompt: "知道是哪儿的按钮吗？",
+        replyText: reply,
+        visionFirstTurnText: vision,
+      }),
+    ).toBe(false);
+  });
+
+  it("buildVisionConsultativeContinueHint limits tool exploration", () => {
+    const hint = buildVisionConsultativeContinueHint();
+    expect(hint).toContain("咨询");
+    expect(hint).toContain("grep");
+    expect(hint).toContain("禁止连环");
+    expect(hint).toContain("禁止在未 grep/read");
+    expect(hint).toContain("禁止重复首轮");
   });
 
   it("buildVisionFirstTurnRule requires anchor-based region identification", () => {
@@ -92,17 +204,10 @@ describe("visionMessage", () => {
     expect(text).toContain("grep");
   });
 
-  it("buildVisionConsultativeContinueHint limits tool exploration", () => {
-    const hint = buildVisionConsultativeContinueHint();
-    expect(hint).toContain("咨询");
-    expect(hint).toContain("grep");
-    expect(hint).toContain("禁止连环");
-  });
-
-  it("buildVisionTaskText prioritizes screenshot description for UI questions", () => {
+  it("buildVisionTaskText uses same-turn locate for which-region UI questions", () => {
     const text = buildVisionTaskText("你知道截图的是哪块内容吗？", 1);
-    expect(text).toContain("附图为本消息重点");
-    expect(text).toContain("不要跳过读图");
+    expect(text).toContain("同轮读图定位");
+    expect(text).not.toContain("本轮禁止调用任何工具");
   });
 
   it("buildVisionTaskText scopes narrow UI color questions to visible region", () => {

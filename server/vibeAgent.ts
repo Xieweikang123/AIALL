@@ -75,7 +75,7 @@ import {
   SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE_SOFT,
 } from "./agentExplorationBudget";
 import { buildReplyAccuracyHint } from "../src/services/agentReplyAccuracy";
-import { buildBehaviorContradictionHint, buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildBuildWriteBlockedHint, buildImplementFollowUpHint, buildImplementationStatusHint, buildSessionAuditHint, buildUiDefectBuildHint, buildWriteToolBlockedMessage, isAgentStepClarificationPrompt, isBehaviorContradictionPrompt, isCodeReviewPrompt, isConsultativeUserPrompt, isImplementationStatusPrompt, isImplementFollowUpRun, isSameIssueFollowUpRun, isSessionAuditPrompt, isUiDefectReportPrompt, isUserErrorQuotePrompt, historySuggestsActiveImplementation, historySuggestsQuotePositionFix } from "../src/services/agentUserIntent";
+import { buildBehaviorContradictionHint, buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildBuildWriteBlockedHint, buildImplementFollowUpHint, buildImplementationStatusHint, buildSessionAuditHint, buildUiDefectBuildHint, buildWriteToolBlockedMessage, isAccuracyConsultativePrompt, isAgentStepClarificationPrompt, isBehaviorContradictionPrompt, isCodeReviewPrompt, isConsultativeUserPrompt, isImplementationStatusPrompt, isImplementFollowUpRun, isSameIssueFollowUpRun, isSessionAuditPrompt, isUiDefectReportPrompt, isUserErrorQuotePrompt, historySuggestsActiveImplementation, historySuggestsQuotePositionFix } from "../src/services/agentUserIntent";
 import { detectProjectRuntimeProfile, buildRuntimeAwarenessHint } from "./agentRuntimeHint";
 import { detectUserNegation, detectUserFailureReport, historyRecentUserFailureReport } from "../src/services/agentContinuation";
 import { resolveOriginalTaskFromResumePrompt } from "../src/services/agentRecovery";
@@ -152,6 +152,7 @@ import { runWebExtract, runWebSearch } from "./webExtract";
 import {
   buildModelIdentityHint,
   buildVisionConsultativeContinueHint,
+  buildVisionConsultativeLocateRetryHint,
   buildVisionBuildContinueHint,
   buildVisionFirstTurnPrematureCompletionRetryHint,
   buildVisionFirstTurnRetryHint,
@@ -163,9 +164,21 @@ import {
   isPrematureVisionCompletionClaim,
   isVisionUnsupportedError,
   sanitizeImageDataUrls,
+  shouldBlockConsultativeVisionLocateFinalize,
+  shouldBypassVisionFirstTurn,
   shouldRequireVisionFirstTurn,
+  shouldRunVisionAnchorPrefgrep,
   suggestsEmbeddedLayoutMisread,
 } from "./visionMessage";
+import {
+  appendVisionAnchorPrefgrepMessages,
+  buildVisionConsultativeReadAfterPrefgrepHint,
+} from "./visionAnchorPrefgrep";
+import {
+  buildConsultativeAccuracyTraceHint,
+  buildConsultativeAccuracyTraceRetryHint,
+  shouldBlockConsultativeAccuracyFinalize,
+} from "./consultativeAccuracyTrace";
 
 export type VibeAgentEvent =
   | {
@@ -1454,6 +1467,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       codeReviewRun ||
       sessionAuditRun) &&
     !implementFollowUpRun;
+  const accuracyConsultativeRun =
+    readOnlyBuildRun && isAccuracyConsultativePrompt(resumeOriginalTask ?? prompt);
   const implementationStatusRun =
     readOnlyBuildRun &&
     isImplementationStatusPrompt(resumeOriginalTask ?? prompt) &&
@@ -1610,6 +1625,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     teleportBodyConfirmed: false,
     visionAnchorQuotes: [],
     visionLocateActive: false,
+    consultativeReadPaths: [],
     blockExplorationArchiveWrite:
       sameIssueFollowUpRun && (userFailureReportRun || userRecentlyReportedFailure),
   };
@@ -1648,13 +1664,37 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     { role: "user", content: userContent },
   ];
   let visionFallbackApplied = false;
-  let visionFirstTurnPending = shouldRequireVisionFirstTurn(imageDataUrls.length, false);
+  const consultativeVisionRun = imageDataUrls.length > 0 && (isAsk || readOnlyBuildRun);
+  const visionLocateSingleTurnRun = shouldBypassVisionFirstTurn({
+    imageCount: imageDataUrls.length,
+    consultativeVisionRun,
+    prompt,
+  });
+  if (visionLocateSingleTurnRun) {
+    toolGuard.visionLocateActive = true;
+  }
+  if (visionLocateSingleTurnRun && accuracyConsultativeRun) {
+    messages.push({ role: "system", content: buildConsultativeAccuracyTraceHint() });
+  }
+  let visionFirstTurnPending = shouldRequireVisionFirstTurn(
+    imageDataUrls.length,
+    false,
+    visionLocateSingleTurnRun,
+  );
   let visionFirstTurnRetries = 0;
+  let visionFirstTurnDescriptionText = "";
+  let visionLocateToolsUsed = false;
+  let visionLocateReadUsed = false;
+  let visionAutoGrepHadMatches = false;
+  let pregrepUniqueFiles: string[] = [];
+  let visionConsultativeLocateRetries = 0;
+  let visionConsultativeAccuracyRetries = 0;
   const MAX_VISION_FIRST_TURN_RETRIES = 2;
+  const MAX_VISION_CONSULTATIVE_LOCATE_RETRIES = 2;
+  const MAX_VISION_CONSULTATIVE_ACCURACY_RETRIES = 2;
   const MAX_TRUNCATION_RETRIES = 5;
   let truncationRetryCount = 0;
   let outputTruncated = false;
-  const consultativeVisionRun = imageDataUrls.length > 0 && (isAsk || readOnlyBuildRun);
 
   emitAgentContext(onEvent, {
     mode,
@@ -2155,13 +2195,46 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       }
 
       visionFirstTurnPending = false;
+      visionFirstTurnDescriptionText = text;
       completeVisionFirstTurn(text, false);
       toolGuard.visionMisreadActive = suggestsEmbeddedLayoutMisread(text);
       toolGuard.visionAnchorQuotes = extractVisibleAnchorQuotes(text);
       toolGuard.visionLocateActive = toolGuard.visionAnchorQuotes.length > 0 || imageDataUrls.length > 0;
       if (consultativeVisionRun) {
-        messages.push({ role: "system", content: buildVisionConsultativeContinueHint() });
-        if (segmentMaxTurns !== undefined) {
+        if (
+          shouldRunVisionAnchorPrefgrep({
+            consultativeVisionRun,
+            prompt,
+            anchorQuotes: toolGuard.visionAnchorQuotes,
+          })
+        ) {
+          onEvent({
+            type: "status",
+            data: {
+              phase: "vision_anchor_prefgrep",
+              turn,
+              ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+              model,
+              detail: "读图完成，正在按锚点搜索源码…",
+            },
+          });
+          const pregrep = await appendVisionAnchorPrefgrepMessages(
+            projectRoot,
+            toolGuard.visionAnchorQuotes,
+            messages,
+          );
+          pregrepUniqueFiles = pregrep.uniqueFiles;
+          if (pregrep.hadMatches) {
+            visionAutoGrepHadMatches = true;
+            visionLocateToolsUsed = true;
+          }
+        } else {
+          messages.push({ role: "system", content: buildVisionConsultativeContinueHint() });
+        }
+        if (accuracyConsultativeRun) {
+          messages.push({ role: "system", content: buildConsultativeAccuracyTraceHint() });
+        }
+        if (segmentMaxTurns !== undefined && !accuracyConsultativeRun) {
           segmentMaxTurns = Math.min(segmentMaxTurns, turn + 4);
         }
       } else {
@@ -2418,6 +2491,142 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         continue;
       }
 
+      if (
+        visionLocateSingleTurnRun &&
+        !visionLocateToolsUsed &&
+        consultativeVisionRun
+      ) {
+        const anchorQuotes = extractVisibleAnchorQuotes(rawText);
+        if (
+          anchorQuotes.length > 0 &&
+          shouldRunVisionAnchorPrefgrep({
+            consultativeVisionRun,
+            prompt,
+            anchorQuotes,
+          })
+        ) {
+          messages.push({ role: "assistant", content: rawText });
+          toolGuard.visionAnchorQuotes = anchorQuotes;
+          visionFirstTurnDescriptionText = rawText;
+          onEvent({
+            type: "status",
+            data: {
+              phase: "vision_anchor_prefgrep",
+              turn,
+              ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+              model,
+              detail: "已摘录可见文案，正在按锚点搜索源码…",
+            },
+          });
+          const pregrep = await appendVisionAnchorPrefgrepMessages(projectRoot, anchorQuotes, messages);
+          pregrepUniqueFiles = pregrep.uniqueFiles;
+          if (pregrep.hadMatches) {
+            visionAutoGrepHadMatches = true;
+            visionLocateToolsUsed = true;
+          }
+          onEvent({
+            type: "turn_response",
+            data: {
+              turn,
+              ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+              assistantText: userText,
+              toolCalls: [],
+              hasToolCalls: false,
+              isFinal: false,
+            },
+          });
+          if (rawText && !streamedChars) {
+            emitUserVisibleAssistantMessage(onEvent, rawText, streamedChars);
+          }
+          continue;
+        }
+      }
+
+      if (
+        shouldBlockConsultativeVisionLocateFinalize({
+          consultativeVisionRun,
+          visionLocateActive: toolGuard.visionLocateActive,
+          visionLocateToolsUsed,
+          visionAutoGrepHadMatches: visionAutoGrepHadMatches,
+          visionLocateReadUsed,
+          prompt,
+          replyText: rawText,
+          visionFirstTurnText: visionFirstTurnDescriptionText,
+        }) &&
+        visionConsultativeLocateRetries < MAX_VISION_CONSULTATIVE_LOCATE_RETRIES
+      ) {
+        visionConsultativeLocateRetries += 1;
+        messages.push({ role: "assistant", content: rawText });
+        messages.push({
+          role: "system",
+          content:
+            visionAutoGrepHadMatches && !visionLocateReadUsed
+              ? buildVisionConsultativeReadAfterPrefgrepHint(pregrepUniqueFiles)
+              : buildVisionConsultativeLocateRetryHint(toolGuard.visionAnchorQuotes ?? []),
+        });
+        onEvent({
+          type: "turn_response",
+          data: {
+            turn,
+            ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+            assistantText: userText,
+            toolCalls: [],
+            hasToolCalls: false,
+            isFinal: false,
+          },
+        });
+        onEvent({
+          type: "status",
+          data: {
+            phase: "vision_consultative_locate_retry",
+            turn,
+            ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+            model,
+            detail: "读图后须 grep/read 定位，已要求重试",
+          },
+        });
+        continue;
+      }
+
+      if (
+        shouldBlockConsultativeAccuracyFinalize({
+          accuracyConsultative: accuracyConsultativeRun,
+          visionLocateToolsUsed,
+          consultativeReadPaths: toolGuard.consultativeReadPaths ?? [],
+          replyText: rawText,
+        }) &&
+        visionConsultativeAccuracyRetries < MAX_VISION_CONSULTATIVE_ACCURACY_RETRIES
+      ) {
+        visionConsultativeAccuracyRetries += 1;
+        messages.push({ role: "assistant", content: rawText });
+        messages.push({
+          role: "system",
+          content: buildConsultativeAccuracyTraceRetryHint(toolGuard.consultativeReadPaths ?? []),
+        });
+        onEvent({
+          type: "turn_response",
+          data: {
+            turn,
+            ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+            assistantText: userText,
+            toolCalls: [],
+            hasToolCalls: false,
+            isFinal: false,
+          },
+        });
+        onEvent({
+          type: "status",
+          data: {
+            phase: "vision_consultative_accuracy_retry",
+            turn,
+            ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+            model,
+            detail: "准确度题须 trace 到 backend prompt 构造，已要求重试",
+          },
+        });
+        continue;
+      }
+
       onEvent({
         type: "turn_response",
         data: {
@@ -2667,6 +2876,18 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       });
     }
 
+    if (consultativeVisionRun && toolGuard.visionLocateActive) {
+      for (const call of toolCalls) {
+        if (call.function.name === "grep") {
+          visionLocateToolsUsed = true;
+        }
+        if (call.function.name === "read_file") {
+          visionLocateToolsUsed = true;
+          visionLocateReadUsed = true;
+        }
+      }
+    }
+
     // Inject corrective prompt if patch_file calls failed this turn.
     const thisTurnPatchFailures = patchFailureLog.filter((f) => f.turn === turn);
     if (thisTurnPatchFailures.length > 0 && turn > 1) {
@@ -2724,7 +2945,16 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         if (call.function.name === "read_file") {
           try {
             const args = JSON.parse(call.function.arguments || "{}");
-            if (args.path) exploreFilesRead.add(String(args.path));
+            if (args.path) {
+              const readPath = String(args.path);
+              exploreFilesRead.add(readPath);
+              if (readOnlyBuildRun) {
+                if (!toolGuard.consultativeReadPaths) toolGuard.consultativeReadPaths = [];
+                if (!toolGuard.consultativeReadPaths.includes(readPath)) {
+                  toolGuard.consultativeReadPaths.push(readPath);
+                }
+              }
+            }
           } catch { /* ignore parse errors */ }
         }
       }

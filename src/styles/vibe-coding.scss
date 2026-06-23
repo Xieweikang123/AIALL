@@ -104,19 +104,19 @@
 }
 
 .file-panel {
-  background: var(--surface);
+  background: rgba(11, 18, 32, 0.55);
   border-right: 1px solid var(--border);
   overflow: hidden;
 }
 
 .editor-panel {
-  background: rgba(2, 6, 23, 0.45);
+  background: rgba(2, 6, 23, 0.55);
   flex: 1;
   min-width: 0;
 }
 
 .chat-panel {
-  background: var(--surface);
+  background: rgba(11, 18, 32, 0.48);
   border-left: 1px solid var(--border);
 }
 
@@ -169,12 +169,12 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 10px 14px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--border);
-  background: var(--glass);
+  background: rgba(11, 18, 32, 0.82);
   backdrop-filter: blur(12px);
   flex-shrink: 0;
-  min-height: 44px;
+  min-height: 48px;
 }
 
 .panel-head-left {

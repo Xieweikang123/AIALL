@@ -18,6 +18,7 @@ export function phaseBadgeLabel(phase?: string): string {
       return "读图";
     case "vision_first_turn_done":
     case "vision_first_turn_skipped":
+    case "vision_anchor_prefgrep":
       return "读图";
     case "waiting_model":
     case "thinking":

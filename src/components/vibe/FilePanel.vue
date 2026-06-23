@@ -87,7 +87,7 @@
         <div class="sessions-toolbar">
           <button
             type="button"
-            class="session-action-btn"
+            class="session-action-btn-glass"
             title="新会话"
             @click="$emit('start-new-session')"
           >
@@ -122,7 +122,10 @@
                   <span v-else-if="s.status === 'failed' && !sessionSendingIds.includes(s.id)" class="session-item-failed" title="失败">✗</span>
                   <span v-else-if="s.status === 'interrupted' && !sessionSendingIds.includes(s.id)" class="session-item-interrupted" title="已中断">⚠</span>
                   <span v-else-if="sessionSendingIds.includes(s.id)" class="session-item-sending" title="运行中"><span class="session-spinner" /></span>
-                  <span :class="{ 'shimmer-text--fast': sessionSendingIds.includes(s.id) || s.status === 'active' }">{{ s.title }}</span>
+                  <span
+                    class="session-item-text"
+                    :class="{ 'shimmer-text--fast': sessionSendingIds.includes(s.id) || s.status === 'active' }"
+                  >{{ s.title }}</span>
                 </span>
                 <span class="session-item-meta" :class="{ 'shimmer-text--fast': sessionSendingIds.includes(s.id) || s.status === 'active' }">
                   {{ formatSessionTime(s.updatedAt) }}
@@ -132,16 +135,25 @@
               <div class="session-item-actions">
                 <button
                   type="button"
-                  class="icon-btn small"
+                  class="session-icon-btn"
                   title="复制会话信息"
                   @click.stop="$emit('copy-session-info', s)"
-                >📋</button>
+                >
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <rect x="5" y="5" width="8" height="9" rx="1.2" stroke="currentColor" stroke-width="1.2"/>
+                    <path d="M4 11V3.8A1.8 1.8 0 0 1 5.8 2H11" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                  </svg>
+                </button>
                 <button
                   type="button"
-                  class="icon-btn small"
+                  class="session-icon-btn session-icon-btn--danger"
                   title="删除此会话"
                   @click.stop="$emit('remove-session', s.id)"
-                >🗑</button>
+                >
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M3.5 4.5h9M6 4.5V3.2a.8.8 0 0 1 .8-.8h2.4a.8.8 0 0 1 .8.8V4.5M6.2 7v4.2M9.8 7v4.2M5 4.5l.4 8.2a.8.8 0 0 0 .8.8h3.6a.8.8 0 0 0 .8-.8l.4-8.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </button>
               </div>
             </li>
           </template>
@@ -288,33 +300,38 @@ const groupedSessions = computed<SessionGroup[]>(() => {
 
 .file-panel-tabs {
   display: flex;
-  gap: 8px;
+  gap: 2px;
+  padding: 3px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 9px;
 }
 
 .file-panel-tab {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 5px 12px;
-  font-size: 13px;
+  padding: 5px 11px;
+  font-size: 12px;
   white-space: nowrap;
   border: none;
   background: none;
-  color: var(--text-secondary, #999);
+  color: rgba(255, 255, 255, 0.52);
   cursor: pointer;
   border-radius: 6px;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
 }
 
-.file-panel-tab:hover {
-  background: var(--bg-tertiary, #333);
-  color: var(--text-primary, #fff);
+.file-panel-tab:hover:not(:disabled) {
+  color: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .file-panel-tab.active {
-  background: var(--bg-tertiary, #333);
-  color: var(--text-primary, #fff);
-  font-weight: 500;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .file-panel-tab:disabled {
@@ -323,23 +340,25 @@ const groupedSessions = computed<SessionGroup[]>(() => {
 }
 
 .git-badge {
-  display: inline;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
   font-size: 10px;
-  font-weight: 400;
-  color: var(--text-tertiary, #555);
-  background: none;
-  border: none;
-  padding: 0;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
   margin-left: 2px;
-  vertical-align: baseline;
+  vertical-align: middle;
   line-height: 1;
-  letter-spacing: 0;
-  opacity: 0.7;
 }
 
 .git-badge-staged {
-  color: var(--success-color, #3fb950);
-  opacity: 1;
+  color: #7ee787;
+  background: rgba(63, 185, 80, 0.18);
 }
 
 .file-toolbar {
@@ -457,43 +476,142 @@ const groupedSessions = computed<SessionGroup[]>(() => {
 }
 
 .session-action-btn {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  font-size: 12px;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 13px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.7);
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
+  color: #6c8cff;
+  background: linear-gradient(135deg, rgba(108, 140, 255, 0.06) 0%, rgba(108, 140, 255, 0.02) 100%);
+  border: 1.5px dashed rgba(108, 140, 255, 0.35);
+  border-radius: 8px;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   white-space: nowrap;
+  flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.session-action-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(108, 140, 255, 0.12) 0%, rgba(108, 140, 255, 0.04) 100%);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  border-radius: 7px;
 }
 
 .session-action-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.2);
+  color: #8ba8ff;
+  border-color: rgba(108, 140, 255, 0.55);
+  background: linear-gradient(135deg, rgba(108, 140, 255, 0.12) 0%, rgba(108, 140, 255, 0.04) 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 12px rgba(108, 140, 255, 0.15);
+}
+
+.session-action-btn:hover::before {
+  opacity: 1;
 }
 
 .session-action-btn:active {
-  background: rgba(255, 255, 255, 0.18);
+  transform: translateY(0);
+  box-shadow: 0 1px 4px rgba(108, 140, 255, 0.1);
 }
 
 .session-action-btn:disabled {
-  opacity: 0.45;
+  opacity: 0.35;
   cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.session-action-btn-glass {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 100%;
+  padding: 6px 12px;
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid transparent;
+  border-top-color: rgba(255, 255, 255, 0.08);
+  border-bottom-color: rgba(0, 0, 0, 0.15);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+  flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.session-action-btn-glass::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, transparent 60%);
+  opacity: 1;
+  border-radius: 5px;
+  pointer-events: none;
+}
+
+.session-action-btn-glass:hover {
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.08);
+  border-top-color: rgba(255, 255, 255, 0.12);
+  border-bottom-color: rgba(0, 0, 0, 0.2);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.session-action-btn-glass:active {
+  background: rgba(255, 255, 255, 0.1);
+  border-top-color: rgba(0, 0, 0, 0.1);
+  border-bottom-color: rgba(255, 255, 255, 0.06);
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.15),
+    0 0 2px rgba(0, 0, 0, 0.1);
+}
+
+.session-action-btn-glass:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 .session-action-icon {
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1;
+  font-weight: 600;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(108, 140, 255, 0.15);
+  border-radius: 50%;
+  color: #6c8cff;
+  transition: background 0.2s ease;
+}
+
+.session-action-btn-glass:hover .session-action-icon {
+  color: #6c8cff;
+  background: rgba(108, 140, 255, 0.15);
 }
 
 .session-action-label {
   line-height: 1;
+  letter-spacing: 0.3px;
 }
 
 .sessions-list {
@@ -598,14 +716,22 @@ const groupedSessions = computed<SessionGroup[]>(() => {
   font-size: 13px;
   font-weight: 500;
   line-height: 1.45;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   max-width: 100%;
   color: rgba(255, 255, 255, 0.92);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
+  width: 100%;
+}
+
+.session-item-text {
+  flex: 1;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
 }
 
 .session-item-sending {
@@ -714,20 +840,28 @@ const groupedSessions = computed<SessionGroup[]>(() => {
   opacity: 1;
 }
 
-.icon-btn.small {
-  width: 24px;
-  height: 24px;
-  font-size: 12px;
-  border-radius: 5px;
-  transition: background 0.12s, color 0.12s;
+.session-icon-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(139, 148, 158, 0.6);
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: rgba(139, 148, 158, 0.65);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
 }
 
-.icon-btn.small:hover {
+.session-icon-btn:hover {
   background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.9);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.session-icon-btn--danger:hover {
+  background: rgba(248, 81, 73, 0.15);
+  color: #ff9a9a;
 }
 </style>
