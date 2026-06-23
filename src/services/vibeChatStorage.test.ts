@@ -4,9 +4,11 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { externalizeMessageImages } from "../../server/vibeChatImages";
 import { stampImageRefsAfterSync } from "./vibeChatImageStore";
+import { composerDraftStorageKey } from "../utils/composerDraftStorage";
 import { shapeAgentHistoryForProfile } from "./agentRunProfile";
 import {
   buildAgentHistoryFromMessages,
+  chatMessagesMatchSessionAnchor,
   formatSessionTitle,
   buildActiveSessionDiskSyncPayload,
   chatMessagesHavePendingImageBase64,
@@ -15,6 +17,7 @@ import {
   compactProjectSessionRecord,
   beginVibeChatDraftSession,
   abandonVibeChatDraftIfEmpty,
+  finalizeDraftSessionOnLeave,
   resolveActiveVibeChatSessionId,
   createVibeChatSession,
   deleteVibeChatSession,
@@ -77,6 +80,49 @@ describe("formatSessionTitle", () => {
   it("truncates long titles", () => {
     const raw = "a".repeat(40);
     expect(formatSessionTitle(raw)).toBe(`${"a".repeat(36)}…`);
+  });
+});
+
+describe("chatMessagesMatchSessionAnchor", () => {
+  beforeEach(() => {
+    installLocalStorageMock();
+  });
+
+  it("allows first persist for empty stored session", () => {
+    const projectPath = "D:/projects/anchor-empty";
+    const { id } = beginVibeChatDraftSession(projectPath);
+    expect(
+      chatMessagesMatchSessionAnchor(projectPath, id, [
+        { id: "u1", role: "user", content: "hello" },
+      ]),
+    ).toBe(true);
+  });
+
+  it("rejects when first message id differs from stored anchor", () => {
+    const projectPath = "D:/projects/anchor-mismatch";
+    const { sessionId } = saveVibeChatHistory(projectPath, [
+      { id: "u-a", role: "user", content: "session A" },
+    ]);
+    expect(
+      chatMessagesMatchSessionAnchor(projectPath, sessionId, [
+        { id: "u-b", role: "user", content: "session B" },
+      ]),
+    ).toBe(false);
+  });
+
+  it("accepts when first message id matches stored anchor", () => {
+    const projectPath = "D:/projects/anchor-match";
+    const { sessionId } = saveVibeChatHistory(projectPath, [
+      { id: "u-a", role: "user", content: "session A" },
+      { id: "a-a", role: "assistant", content: "reply" },
+    ]);
+    expect(
+      chatMessagesMatchSessionAnchor(projectPath, sessionId, [
+        { id: "u-a", role: "user", content: "session A edited" },
+        { id: "a-a", role: "assistant", content: "reply" },
+        { id: "u-a2", role: "user", content: "follow up" },
+      ]),
+    ).toBe(true);
   });
 });
 
@@ -971,6 +1017,35 @@ describe("v3 chat storage (index + memory)", () => {
     ]);
     abandonVibeChatDraftIfEmpty(projectPath, sessionId);
     expect(listVibeChatSessions(projectPath).map((s) => s.id)).toEqual([sessionId]);
+  });
+
+  it("finalizeDraftSessionOnLeave keeps composer-only draft listable with preview title", () => {
+    const projectPath = "D:/projects/composer-draft-leave";
+    const { sessionId: existingId } = saveVibeChatHistory(projectPath, [
+      { id: "u1", role: "user", content: "existing" },
+      { id: "a1", role: "assistant", content: "ok" },
+    ]);
+    const { id: draftId } = beginVibeChatDraftSession(projectPath);
+    localStorage.setItem(composerDraftStorageKey(draftId), "未发送的输入内容");
+
+    finalizeDraftSessionOnLeave(projectPath, draftId);
+
+    const ids = listVibeChatSessions(projectPath).map((s) => s.id);
+    expect(ids).toContain(existingId);
+    expect(ids).toContain(draftId);
+    const draftMeta = listVibeChatSessions(projectPath).find((s) => s.id === draftId);
+    expect(draftMeta?.title).toContain("未发送的输入内容");
+    expect(draftMeta?.messageCount).toBe(0);
+    expect(resolveActiveVibeChatSessionId(projectPath)).toBe(draftId);
+  });
+
+  it("abandonVibeChatDraftIfEmpty skips draft with composer content", () => {
+    const projectPath = "D:/projects/abandon-composer-storage";
+    const { id: draftId } = beginVibeChatDraftSession(projectPath);
+    localStorage.setItem(composerDraftStorageKey(draftId), "orphan");
+    abandonVibeChatDraftIfEmpty(projectPath, draftId);
+    expect(listVibeChatSessions(projectPath).map((s) => s.id)).toContain(draftId);
+    expect(localStorage.getItem(composerDraftStorageKey(draftId))).toBe("orphan");
   });
 
   it("resolveActiveVibeChatSessionId returns empty for project with no sessions", () => {

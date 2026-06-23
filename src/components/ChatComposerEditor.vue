@@ -43,9 +43,17 @@
   </Teleport>
 </template>
 
+<script lang="ts">
+export { COMPOSER_PENDING_DRAFT_KEY } from "../utils/composerDraftStorage";
+</script>
+
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
+import {
+  composerDraftStorageKey,
+  isPlaceholderComposerHtml,
+} from "../utils/composerDraftStorage";
 import {
   deleteVibeChatSession,
   peekVibeChatSessionMessages,
@@ -89,10 +97,8 @@ function readLegacyDraftText(projectPath: string, draftKey: string): string | nu
   return last?.role === "user" && last.content.trim() ? last.content : null;
 }
 
-/** 无活跃会话时输入框草稿的 localStorage key 后缀 */
-export const COMPOSER_PENDING_DRAFT_KEY = "__composer-pending__";
-  const suffix = draftKey || "__global";
-  return `vibe-coding-input-draft-${suffix}`;
+function draftStorageKeyFor(draftKey?: string): string {
+  return composerDraftStorageKey(draftKey || "__global");
 }
 
 function getDraftStorageKey(): string {
@@ -464,8 +470,7 @@ function moveCaretToEnd(root: HTMLElement) {
 }
 
 function isPlaceholderEditorHtml(html: string): boolean {
-  const trimmed = html.trim();
-  return !trimmed || trimmed === "<br>" || trimmed === "<br/>" || trimmed === "<br />";
+  return isPlaceholderComposerHtml(html);
 }
 
 function applySavedDraft(root: HTMLElement, saved: string) {
@@ -675,6 +680,7 @@ defineExpose({
   hasContent,
   removeMentionQueryBeforeCursor,
   clearDraftStorage,
+  saveDraftNow: saveDraftToStorage,
 });
 
 void nextTick(() => syncEmpty());

@@ -1,7 +1,7 @@
 import { ref, type Ref } from "vue";
 import {
-  abandonVibeChatDraftIfEmpty,
   beginVibeChatDraftSession,
+  finalizeDraftSessionOnLeave,
   buildActiveSessionDiskSyncPayload,
   chatMessagesHavePendingImageBase64,
   clearVibeChatHistory,
@@ -13,7 +13,6 @@ import {
   getVibeChatProjectSnapshot,
   isSessionRecentlyDeletedLocally,
   loadVibeChatHistory,
-  peekVibeChatSessionMessages,
   projectChatNeedsDiskRestore,
   replaceChatStoreFromDiskSnapshot,
   resolveActiveVibeChatSessionId,
@@ -22,6 +21,7 @@ import {
   switchVibeChatSession,
   syncLocalIndexFromRecord,
   vibeProjectPathsMatch,
+  peekVibeChatSessionMessages,
   type PersistedChatMessage,
 } from "../services/vibeChatStorage";
 import {
@@ -39,10 +39,10 @@ import {
 import { stampImageRefsAfterSync } from "../services/vibeChatImageStore";
 import { markSessionDeleted, sessionDiag } from "../utils/sessionDiagLog";
 import type { useSessionManager } from "./useSessionManager";
+import { useSessionMessageRegistry } from "./useSessionMessageRegistry";
 
 export type ChatSessionStoreDeps<T extends PersistedChatMessage = PersistedChatMessage> = {
   projectPath: () => string;
-  chatMessages: Ref<T[]>;
   chatError: Ref<string>;
   chatSending: () => boolean;
   session: ReturnType<typeof useSessionManager>;
@@ -50,10 +50,10 @@ export type ChatSessionStoreDeps<T extends PersistedChatMessage = PersistedChatM
   confirm: (message: string) => Promise<boolean>;
   onAfterSwitch?: () => void;
   scrollToBottom?: (force?: boolean) => void | Promise<void>;
-  /** Cache live messages before leaving a session (e.g. background agent run). */
-  onBeforeSessionSwitch?: (fromSessionId: string, messages: T[]) => void;
-  /** Prefer in-memory cache over disk when switching back. */
+  /** Prefer in-memory registry over disk when switching back. */
   resolveSessionMessages?: (sessionId: string, diskMessages: PersistedChatMessage[]) => T[];
+  /** Save composer input before leaving a session (must run before draft cleanup). */
+  persistComposerDraft?: () => void;
 };
 
 export function useChatSessionStore<T extends PersistedChatMessage = PersistedChatMessage>(
@@ -62,16 +62,21 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
   const switchingSession = ref(false);
   const syncingChatStore = ref(false);
   const chatStoreSyncMessage = ref("");
+  /** UI binds here; always the same array reference as registry.get(activeSessionId). */
+  const activeMessages = ref<T[]>([]) as Ref<T[]>;
+
+  const sessionMessages = useSessionMessageRegistry<T>();
 
   let switchSessionGeneration = 0;
   let saveChatTimer: ReturnType<typeof setTimeout> | null = null;
   let persistDuringRunTimer: ReturnType<typeof setTimeout> | null = null;
   let persistDelayTimer: ReturnType<typeof setTimeout> | null = null;
   let persistChatGeneration = 0;
+  /** Messages typed before first session id exists (ensureSessionForSend). */
+  let orphanMessages: T[] | null = null;
 
   const {
     projectPath,
-    chatMessages,
     chatError,
     chatSending,
     session,
@@ -79,8 +84,8 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     confirm,
     onAfterSwitch,
     scrollToBottom,
-    onBeforeSessionSwitch,
     resolveSessionMessages,
+    persistComposerDraft,
   } = deps;
 
   const {
@@ -94,6 +99,33 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
 
   function refreshList(path?: string) {
     refreshSessionList(path);
+  }
+
+  /** Bind session id + messages atomically; activeMessages points into the registry. */
+  function activateSession(sessionId: string, messages?: T[]) {
+    const id = sessionId.trim();
+    if (!id) return;
+    const bound = messages ?? sessionMessages.getSessionMessages(id) ?? [];
+    sessionMessages.setSessionMessages(id, bound);
+    setActiveSession(id);
+    activeMessages.value = sessionMessages.getSessionMessages(id)!;
+    orphanMessages = null;
+  }
+
+  function bindSessionMessages(sessionId: string, messages: T[]) {
+    const id = sessionId.trim();
+    if (!id) return;
+    sessionMessages.setSessionMessages(id, messages);
+    if (activeSessionId.value.trim() === id) {
+      activeMessages.value = messages;
+    }
+  }
+
+  function resolveMessagesForSession(sessionId: string, diskMessages: PersistedChatMessage[]): T[] {
+    const cached = sessionMessages.getSessionMessages(sessionId);
+    if (cached?.length) return cached;
+    if (resolveSessionMessages) return resolveSessionMessages(sessionId, diskMessages);
+    return normalizeMessages(diskMessages);
   }
 
   async function loadFullChatStoreFromDisk(project: string): Promise<void> {
@@ -185,7 +217,6 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     });
   }
 
-  /** Open project / hydrate: returns resolved active id + messages. */
   async function loadProjectChatState(project: string): Promise<{
     activeSessionId: string;
     messages: PersistedChatMessage[];
@@ -197,7 +228,9 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
 
   function resetUiForProjectSwitch() {
     resetSessionUi();
-    chatMessages.value = [];
+    sessionMessages.clearAll();
+    orphanMessages = null;
+    activeMessages.value = [];
   }
 
   function cancelPendingChatPersistence() {
@@ -219,20 +252,26 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
   function schedulePersistChat() {
     if (!projectPath().trim()) return;
     if (chatSending()) return;
+    if (switchingSession.value) return;
+    const scheduledSessionId = activeSessionId.value.trim();
+    if (!scheduledSessionId) return;
     if (saveChatTimer) clearTimeout(saveChatTimer);
     saveChatTimer = setTimeout(() => {
       saveChatTimer = null;
-      persistChatNow();
+      if (switchingSession.value) return;
+      if (activeSessionId.value.trim() !== scheduledSessionId) return;
+      persistSessionNow(scheduledSessionId);
     }, 400);
   }
 
-  /** Debounced persist while Agent is running (schedulePersistChat is suppressed during chatSending). */
   function schedulePersistDuringAgentRun(options?: { sessionId?: string; flushStore?: boolean }) {
     if (!projectPath().trim()) return;
+    const sessionId = (options?.sessionId || activeSessionId.value).trim();
+    if (!sessionId) return;
     if (persistDuringRunTimer) clearTimeout(persistDuringRunTimer);
     persistDuringRunTimer = setTimeout(() => {
       persistDuringRunTimer = null;
-      persistChatNow(undefined, options);
+      persistSessionNow(sessionId, undefined, options);
     }, 400);
   }
 
@@ -298,14 +337,8 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
       if (isSessionRecentlyDeletedLocally(path, sessionId)) return;
 
       const stamped = stampImageRefsAfterSync(sessionId, messagesForDiskSync);
-      // Intentionally do NOT write back to chatMessages here.
-      // normalizeMessages() always creates new object references, which triggers the
-      // deep watcher -> schedulePersistChat -> persistChatNow -> runDelayedChatDiskSync
-      // ping-pong loop.  Additionally, the stale snapshot can overwrite live agent-run
-      // state (e.g. agentPhase transitions from SSE events).  The in-memory store is
-      // already updated by saveVibeChatHistory below; the sidebar list is refreshed
-      // by refreshList.
       saveVibeChatHistory(path, stamped, sessionId, { setActive: sameActiveSession, touchTimestamp: false });
+      bindSessionMessages(sessionId, normalizeMessages(stamped) as T[]);
       refreshList(path);
     }
     if (options?.flushStore) {
@@ -316,38 +349,64 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     }
   }
 
-  function persistChatNow(
+  /** Persist using registry pairing — never reads a mismatched UI ref. */
+  function persistSessionNow(
+    sessionId: string,
     path = projectPath().trim(),
-    options?: { flushStore?: boolean; sessionId?: string },
+    options?: { flushStore?: boolean; touchTimestamp?: boolean },
   ) {
-    if (!path || !chatMessages.value.length) return;
+    const id = sessionId.trim();
+    if (!path || !id) return;
+    const messages = sessionMessages.getSessionMessages(id);
+    if (!messages?.length) return;
 
-    const sessionId = (options?.sessionId || activeSessionId.value).trim();
-    if (!sessionId) return;
-
-    const messagesForDiskSync = cloneChatMessagesForDiskSync(chatMessages.value);
+    const messagesForDiskSync = cloneChatMessagesForDiskSync(messages);
     const gen = ++persistChatGeneration;
-    // Refresh updatedAt so sidebar date grouping / sort order reflect latest activity.
-    // Session switch and disk-sync replay keep touchTimestamp: false to avoid spurious reorder.
-    saveVibeChatHistory(path, chatMessages.value, sessionId);
+    let touchTimestamp =
+      options?.touchTimestamp
+      ?? (id === activeSessionId.value.trim() && !switchingSession.value);
+    if (options?.touchTimestamp === undefined && touchTimestamp) {
+      const disk = peekVibeChatSessionMessages(path, id);
+      if (
+        disk.length === messages.length
+        && disk.every(
+          (d, i) =>
+            d.id === messages[i]?.id
+            && d.role === messages[i]?.role
+            && (d.content ?? "") === (messages[i]?.content ?? ""),
+        )
+      ) {
+        touchTimestamp = false;
+      }
+    }
+    saveVibeChatHistory(path, messages, id, { touchTimestamp });
     refreshList(path);
 
     if (persistDelayTimer) clearTimeout(persistDelayTimer);
     persistDelayTimer = setTimeout(() => {
       persistDelayTimer = null;
       if (gen !== persistChatGeneration) return;
-      void runDelayedChatDiskSync(path, sessionId, messagesForDiskSync, options, gen);
+      void runDelayedChatDiskSync(path, id, messagesForDiskSync, options, gen);
     }, 100);
   }
 
-  /** Create a chat-store session only when sending the first message (no active session). */
+  function persistChatNow(
+    path = projectPath().trim(),
+    options?: { flushStore?: boolean; sessionId?: string },
+  ) {
+    const sessionId = (options?.sessionId || activeSessionId.value).trim();
+    if (!sessionId || switchingSession.value) return;
+    persistSessionNow(sessionId, path, options);
+  }
+
   function ensureSessionForSend(): string {
     const project = projectPath().trim();
     if (!project) return "";
     const existing = activeSessionId.value.trim();
     if (existing) return existing;
     const { id } = beginVibeChatDraftSession(project);
-    setActiveSession(id);
+    const seed = orphanMessages ?? (activeMessages.value.length ? [...activeMessages.value] : []);
+    activateSession(id, seed);
     refreshList(project);
     return id;
   }
@@ -355,28 +414,28 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
   function startNewSession() {
     if (!projectPath().trim()) return;
     const project = projectPath().trim();
-    const fromSessionId = activeSessionId.value;
-    if (fromSessionId && chatMessages.value.length) {
-      onBeforeSessionSwitch?.(fromSessionId, chatMessages.value);
-      saveVibeChatHistory(project, chatMessages.value, fromSessionId, { touchTimestamp: false });
+    const fromSessionId = activeSessionId.value.trim();
+    const fromMessages = fromSessionId ? sessionMessages.getSessionMessages(fromSessionId) : undefined;
+    if (fromSessionId && fromMessages?.length) {
+      saveVibeChatHistory(project, fromMessages, fromSessionId, { touchTimestamp: false });
     }
+    persistComposerDraft?.();
     if (fromSessionId) {
-      abandonVibeChatDraftIfEmpty(project, fromSessionId);
+      finalizeDraftSessionOnLeave(project, fromSessionId);
     }
     cancelPendingChatPersistence();
     const { id } = beginVibeChatDraftSession(project);
-    setActiveSession(id);
-    chatMessages.value = [];
+    activateSession(id, []);
     chatError.value = "";
     refreshList(project);
     void scrollToBottom?.(true);
   }
 
   function applySessionSwitch(project: string, sessionId: string) {
-    const diskMessages = switchVibeChatSession(project, sessionId);
-    const resolved = resolveSessionMessages?.(sessionId, diskMessages) ?? diskMessages;
-    chatMessages.value = normalizeMessages(resolved);
-    setActiveSession(sessionId);
+    switchVibeChatSession(project, sessionId);
+    const diskMessages = peekVibeChatSessionMessages(project, sessionId);
+    const resolved = resolveMessagesForSession(sessionId, diskMessages);
+    activateSession(sessionId, normalizeMessages(resolved));
     chatError.value = "";
     refreshList(project);
     onAfterSwitch?.();
@@ -388,18 +447,18 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     if (sessionId === activeSessionId.value) {
       return;
     }
-    const fromSessionId = activeSessionId.value;
+    const fromSessionId = activeSessionId.value.trim();
     const project = projectPath().trim();
-    if (fromSessionId && chatMessages.value.length) {
-      onBeforeSessionSwitch?.(fromSessionId, chatMessages.value);
-      saveVibeChatHistory(project, chatMessages.value, fromSessionId, { touchTimestamp: false });
+    const fromMessages = fromSessionId ? sessionMessages.getSessionMessages(fromSessionId) : undefined;
+    if (fromSessionId && fromMessages?.length) {
+      saveVibeChatHistory(project, fromMessages, fromSessionId, { touchTimestamp: false });
     }
+    persistComposerDraft?.();
     if (fromSessionId && fromSessionId !== sessionId) {
-      abandonVibeChatDraftIfEmpty(project, fromSessionId);
+      finalizeDraftSessionOnLeave(project, fromSessionId);
     }
     cancelPendingChatPersistence();
     const gen = ++switchSessionGeneration;
-    // 先用内存数据即时切换，避免 Agent 运行期间的磁盘队列阻塞 UI
     applySessionSwitch(project, sessionId);
 
     if (!projectChatNeedsDiskRestore(project, sessionId)) return;
@@ -410,8 +469,8 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
         await ensureProjectChatLoadedFromDisk(project, sessionId);
         if (gen !== switchSessionGeneration) return;
         const diskMessages = peekVibeChatSessionMessages(project, sessionId);
-        const resolved = resolveSessionMessages?.(sessionId, diskMessages) ?? diskMessages;
-        chatMessages.value = normalizeMessages(resolved);
+        const resolved = resolveMessagesForSession(sessionId, diskMessages);
+        bindSessionMessages(sessionId, normalizeMessages(resolved));
       } finally {
         if (gen === switchSessionGeneration) switchingSession.value = false;
       }
@@ -424,8 +483,8 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     const project = projectPath().trim();
     cancelPendingChatPersistence();
     markSessionDeleted(sessionId);
-    const result = removeSessionLocal(sessionId);
-    if (result) chatMessages.value = normalizeMessages(result);
+    sessionMessages.deleteSessionMessages(sessionId);
+    removeSessionLocal(sessionId);
     refreshList();
     const nextActiveId = getActiveVibeChatSessionId(project);
     const diskResult = await deleteChatSessionOnDisk(project, sessionId, nextActiveId);
@@ -433,8 +492,7 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
       await flushChatStoreToDisk(project, { quiet: true, force: true });
     }
     const activeId = resolveActiveVibeChatSessionId(project);
-    setActiveSession(activeId);
-    chatMessages.value = normalizeMessages(loadVibeChatHistory(project));
+    activateSession(activeId, normalizeMessages(loadVibeChatHistory(project)));
     refreshList();
     void scrollToBottom?.(true);
   }
@@ -464,17 +522,23 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     if (chatSending()) return;
     const project = projectPath().trim();
     if (!project) return;
-    chatMessages.value = [];
+    const activeId = resolveActiveVibeChatSessionId(project);
+    activateSession(activeId, []);
     chatError.value = "";
     clearVibeChatHistory(project);
-    setActiveSession(resolveActiveVibeChatSessionId(project));
     refreshList(project);
   }
 
   return {
+    activeMessages,
     switchingSession,
     syncingChatStore,
     chatStoreSyncMessage,
+    activateSession,
+    bindSessionMessages,
+    getSessionMessages: sessionMessages.getSessionMessages,
+    patchSessionMessage: sessionMessages.patchSessionMessage,
+    persistSessionNow,
     persistChatNow,
     schedulePersistChat,
     schedulePersistDuringAgentRun,

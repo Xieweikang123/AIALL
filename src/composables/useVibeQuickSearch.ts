@@ -2,14 +2,13 @@ import { nextTick, ref, watch, type Ref } from "vue";
 import type EditorPanel from "../components/vibe/EditorPanel.vue";
 import type ChatPanel from "../components/vibe/ChatPanel.vue";
 import type { ChatMessage } from "./useAgentRun";
-import type { useSessionMessageCache } from "./useSessionMessageCache";
 import type { PersistedChatMessage } from "../services/vibeChatStorage";
 
 export interface UseVibeQuickSearchOptions {
   activeSessionId: Ref<string>;
   chatMessages: Ref<ChatMessage[]>;
   switchingSession: Ref<boolean>;
-  sessionMessageCache: ReturnType<typeof useSessionMessageCache<ChatMessage>>;
+  getSessionMessages: (sessionId: string) => ChatMessage[] | undefined;
   switchSession: (sessionId: string) => void;
   openFile: (filePath: string) => Promise<void>;
   chatPanelRef: Ref<InstanceType<typeof ChatPanel> | null>;
@@ -23,7 +22,7 @@ export function useVibeQuickSearch(options: UseVibeQuickSearchOptions) {
     if (sessionId === options.activeSessionId.value && options.chatMessages.value.length) {
       return options.chatMessages.value;
     }
-    const cached = options.sessionMessageCache.get(sessionId);
+    const cached = options.getSessionMessages(sessionId);
     return cached?.length ? cached : undefined;
   }
 

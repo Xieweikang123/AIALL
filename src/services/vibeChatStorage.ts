@@ -570,6 +570,11 @@ function compactRoundGroupsForStorage(
 import { MAX_AGENT_IMAGE_BYTES } from "./imageCompress";
 import { hasAgentProgressMarker } from "./agentProgressMarker";
 import { sessionDiag } from "../utils/sessionDiagLog";
+import {
+  composerDraftPreviewText,
+  hasComposerDraft,
+  removeComposerDraft,
+} from "../utils/composerDraftStorage";
 
 const MAX_PERSISTED_IMAGES = 4;
 /** Align with agent compress cap so memory previews match what session-sync can externalize. */
@@ -735,8 +740,18 @@ function isEmptyDraftSession(session: VibeChatSession): boolean {
   return session.status === "draft" && !session.messages.length;
 }
 
+function isDisposableEmptyDraftSession(session: VibeChatSession): boolean {
+  return isEmptyDraftSession(session) && !hasComposerDraft(session.id);
+}
+
+function resolveSessionListTitle(session: VibeChatSession): string {
+  if (session.messages.length) return session.title;
+  const preview = composerDraftPreviewText(session.id);
+  return preview ? formatSessionTitle(preview) : session.title;
+}
+
 function pruneEmptyDraftSessions(record: ProjectChatRecord): void {
-  record.sessions = record.sessions.filter((s) => !isEmptyDraftSession(s));
+  record.sessions = record.sessions.filter((s) => !isDisposableEmptyDraftSession(s));
   if (
     record.activeSessionId
     && !record.sessions.some((s) => s.id === record.activeSessionId)
@@ -936,7 +951,9 @@ export function getVibeChatProjectSnapshot(projectPath: string): VibeChatProject
   const key = normalizeProjectKey(projectPath);
   const record = key ? getProjectRecord(key) : undefined;
   const indexed = key ? readIndex().byProject[key]?.sessions : undefined;
-  const listableSessions = record?.sessions.filter((s) => !isEmptyDraftSession(s)) || [];
+  const listableSessions = key
+    ? record?.sessions.filter((s) => sessionHasListableContent(key, s)) || []
+    : [];
   const activeRecordId = record?.activeSessionId || "";
   const sessionsForSnapshot = [...listableSessions];
   if (
@@ -1048,8 +1065,9 @@ export function getSessionDiagSnapshot(projectPath: string): {
 }
 
 function sessionHasListableContent(key: string, session: VibeChatSession): boolean {
-  // Draft sessions (even with content) should not appear in the session list
-  if (session.status === "draft") return false;
+  if (session.status === "draft") {
+    return session.messages.length > 0 || hasComposerDraft(session.id);
+  }
   if (session.messages.length > 0) return true;
   return Boolean(
     readIndex().byProject[key]?.sessions.some((m) => m.id === session.id && m.messageCount > 0),
@@ -1069,7 +1087,7 @@ export function listVibeChatSessions(projectPath: string): VibeChatSessionMeta[]
       const indexed = readIndex().byProject[key]?.sessions.find((m) => m.id === s.id);
       return {
         id: s.id,
-        title: s.title,
+        title: resolveSessionListTitle(s),
         createdAt: s.createdAt,
         updatedAt: s.updatedAt,
         messageCount: s.messages.length || indexed?.messageCount || 0,
@@ -1503,6 +1521,21 @@ export function peekVibeChatSessionMessages(projectPath: string, sessionId: stri
   return session ? sanitizeMessages(session.messages) : [];
 }
 
+/** Reject persist when in-memory messages clearly belong to another session (anchor id mismatch). */
+export function chatMessagesMatchSessionAnchor(
+  projectPath: string,
+  sessionId: string,
+  messages: PersistedChatMessage[],
+): boolean {
+  const sid = sessionId.trim();
+  if (!sid || !messages.length) return false;
+  const stored = peekVibeChatSessionMessages(projectPath, sid);
+  if (!stored.length) return true;
+  const anchorId = stored[0]?.id?.trim();
+  if (!anchorId) return true;
+  return messages[0]?.id?.trim() === anchorId;
+}
+
 export function switchVibeChatSession(projectPath: string, sessionId: string): PersistedChatMessage[] {
   const key = normalizeProjectKey(projectPath);
   if (!key) return [];
@@ -1515,6 +1548,20 @@ export function switchVibeChatSession(projectPath: string, sessionId: string): P
   return sanitizeMessages(target.messages);
 }
 
+/** Update draft session metadata when leaving with unsent composer content. */
+export function touchComposerOnlyDraftSession(projectPath: string, sessionId: string): void {
+  const key = normalizeProjectKey(projectPath);
+  if (!key || !sessionId) return;
+  const record = getProjectRecord(key);
+  if (!record) return;
+  const session = record.sessions.find((s) => s.id === sessionId);
+  if (!session || session.status !== "draft" || session.messages.length) return;
+  const preview = composerDraftPreviewText(sessionId);
+  if (preview) session.title = formatSessionTitle(preview);
+  session.updatedAt = new Date().toISOString();
+  persistRecord(key, record);
+}
+
 /** Drop an empty draft session (e.g. when switching away or starting a new draft). */
 export function abandonVibeChatDraftIfEmpty(projectPath: string, sessionId: string): void {
   const key = normalizeProjectKey(projectPath);
@@ -1522,9 +1569,10 @@ export function abandonVibeChatDraftIfEmpty(projectPath: string, sessionId: stri
   const record = getProjectRecord(key);
   if (!record) return;
   const session = record.sessions.find((s) => s.id === sessionId);
-  if (!session || !isEmptyDraftSession(session)) return;
+  if (!session || !isDisposableEmptyDraftSession(session)) return;
 
   record.sessions = record.sessions.filter((s) => s.id !== sessionId);
+  removeComposerDraft(sessionId);
   if (record.activeSessionId === sessionId) {
     record.activeSessionId = record.sessions[0]?.id || "";
   }
@@ -1536,6 +1584,16 @@ export function abandonVibeChatDraftIfEmpty(projectPath: string, sessionId: stri
     return;
   }
   persistRecord(key, record);
+}
+
+/** Persist or drop a draft when leaving it (composer-only drafts stay listable). */
+export function finalizeDraftSessionOnLeave(projectPath: string, sessionId: string): void {
+  if (!sessionId) return;
+  if (hasComposerDraft(sessionId)) {
+    touchComposerOnlyDraftSession(projectPath, sessionId);
+    return;
+  }
+  abandonVibeChatDraftIfEmpty(projectPath, sessionId);
 }
 
 /** Create a draft session and optionally make it active. Empty drafts are not listed until first message. */
@@ -1587,7 +1645,10 @@ export function resolveActiveVibeChatSessionId(projectPath: string): string {
 
   if (record.activeSessionId) {
     const active = record.sessions.find((s) => s.id === record.activeSessionId);
-    if (active && !isEmptyDraftSession(active)) {
+    if (
+      active
+      && (!isEmptyDraftSession(active) || hasComposerDraft(active.id))
+    ) {
       return record.activeSessionId;
     }
   }
@@ -1641,6 +1702,7 @@ export function deleteVibeChatSession(projectPath: string, sessionId: string): P
   // #endregion
 
   markSessionLocallyDeleted(projectPath, sessionId);
+  removeComposerDraft(sessionId);
 
   if (record.sessions.length === 1) {
     memoryByProject.delete(key);

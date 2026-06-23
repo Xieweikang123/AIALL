@@ -416,7 +416,6 @@ import { useInputPrompt } from "../composables/useInputPrompt";
 import { useEditorPanel } from "../composables/useEditorPanel";
 import { useSessionManager } from "../composables/useSessionManager";
 import { useChatSessionStore } from "../composables/useChatSessionStore";
-import { useSessionMessageCache } from "../composables/useSessionMessageCache";
 import { useVibeQuickSearch } from "../composables/useVibeQuickSearch";
 import { useVibeGlobalShortcuts } from "../composables/useVibeGlobalShortcuts";
 import { useProjectMemory } from "../composables/useProjectMemory";
@@ -733,11 +732,9 @@ function loadChatMode(): VibeChatMode {
 }
 
 const chatMode = ref<VibeChatMode>(loadChatMode());
-const chatMessages = ref<ChatMessage[]>([]);
 const chatSending = ref(false);
 // ── 按会话独立的发送状态 ──
 const sendingSessionIds = reactive(new Set<string>());
-const sessionMessageCache = useSessionMessageCache<ChatMessage>();
 
 const sendingSessionIdList = computed(() => [...sendingSessionIds]);
 
@@ -755,10 +752,8 @@ function beginAgentRunSession(sessionId: string) {
   syncActiveChatSending();
 }
 
-function snapshotAgentRunSession(sessionId: string) {
-  if (!sessionId || !sendingSessionIds.has(sessionId)) return;
-  if (sessionId !== activeSessionId.value) return;
-  sessionMessageCache.snapshot(sessionId, chatMessages.value);
+function snapshotAgentRunSession(_sessionId: string) {
+  // Registry holds live messages; no separate snapshot needed.
 }
 
 // ── 系统通知（Agent 完成时） ──
@@ -813,16 +808,6 @@ function endAgentRunSession(sessionId?: string, silent = false) {
   if (!silent) notifyAgentDoneIfNeeded(sid);
 }
 
-function persistAgentRunSession(sessionId: string) {
-  const sid = sessionId.trim();
-  const project = projectPath.value.trim();
-  if (!sid || !project || sid === activeSessionId.value) return;
-  const cached = sessionMessageCache.get(sid);
-  if (cached?.length) {
-    saveVibeChatHistory(project, cached, sid, { touchTimestamp: false });
-    refreshSessionList();
-  }
-}
 const switchingProject = ref(false);
 const chatError = ref("");
 const editorPanelRef = ref<InstanceType<typeof EditorPanel> | null>(null);
@@ -893,7 +878,6 @@ const {
   canSwitchToOlderSession,
   sessionLocalFileName,
   formatSessionInfoForCopy,
-  setActiveSession,
 } = session;
 
 // 切换会话时，恢复目标会话的发送状态到 chatSending
@@ -908,35 +892,28 @@ const chatSessionHooks: {
 
 const chatSession = useChatSessionStore({
   projectPath: () => projectPath.value.trim(),
-  chatMessages,
   chatError,
   chatSending: () => chatSending.value,
   session,
   normalizeMessages: (msgs) => normalizeChatMessages(msgs, { stripTransientUi: true }),
   confirm,
-  onBeforeSessionSwitch: (fromSessionId, messages) => {
-    sessionMessageCache.snapshot(fromSessionId, messages);
-  },
-  resolveSessionMessages: (sessionId, diskMessages) => {
-    const cached = sessionMessageCache.get(sessionId);
-    if (cached?.length) return cached;
-    if (
-      sendingSessionIds.has(sessionId)
-      && sessionId === activeSessionId.value
-      && chatMessages.value.length
-    ) {
-      return normalizeChatMessages(chatMessages.value, { stripTransientUi: true });
-    }
-    return normalizeChatMessages(diskMessages, { stripTransientUi: true });
-  },
+  resolveSessionMessages: (sessionId, diskMessages) =>
+    normalizeChatMessages(diskMessages, { stripTransientUi: true }),
+  persistComposerDraft: () => composerRef.value?.saveDraftNow?.(),
   onAfterSwitch: () => chatSessionHooks.onAfterSwitch?.(),
   scrollToBottom: (force) => chatSessionHooks.scrollToBottom?.(force),
 });
 
 const {
+  activeMessages: chatMessages,
   switchingSession,
   syncingChatStore,
   chatStoreSyncMessage,
+  activateSession,
+  bindSessionMessages,
+  getSessionMessages,
+  patchSessionMessage,
+  persistSessionNow,
   persistChatNow,
   schedulePersistChat,
   schedulePersistDuringAgentRun,
@@ -950,6 +927,13 @@ const {
   resetUiForProjectSwitch,
   clearProjectChat,
 } = chatSession;
+
+function persistAgentRunSession(sessionId: string) {
+  const sid = sessionId.trim();
+  const project = projectPath.value.trim();
+  if (!sid || !project || sid === activeSessionId.value) return;
+  persistSessionNow(sid, project, { touchTimestamp: false });
+}
 
 // File drag composable
 const {
@@ -1278,7 +1262,7 @@ const {
   activeSessionId,
   chatMessages,
   switchingSession,
-  sessionMessageCache,
+  getSessionMessages,
   switchSession,
   openFile,
   chatPanelRef,
@@ -1551,10 +1535,10 @@ function patchAssistantMsg(msgId: string, patch: Partial<ChatMessage>, sessionId
     list[idx] = { ...list[idx], ...patch };
     return true;
   };
-  const patched = isActive ? apply(chatMessages.value) : false;
-  if (sid && sendingSessionIds.has(sid)) {
-    if (isActive && patched) sessionMessageCache.snapshot(sid, chatMessages.value);
-    else sessionMessageCache.patchMessage(sid, msgId, patch);
+  if (isActive) {
+    apply(chatMessages.value);
+  } else if (sid && sendingSessionIds.has(sid)) {
+    patchSessionMessage(sid, msgId, patch);
   }
 }
 
@@ -1900,15 +1884,11 @@ async function openProjectByPath(dirPath: string) {
     persistPendingQueue();
     cancelPendingChatPersistence();
     for (const sid of [...sendingSessionIds]) {
-      const cached = sessionMessageCache.get(sid);
-      if (cached?.length) {
-        saveVibeChatHistory(previousPathForPersist, cached, sid, { touchTimestamp: false });
-      }
+      persistSessionNow(sid, previousPathForPersist, { touchTimestamp: false });
     }
     persistChatNow(previousPathForPersist, { flushStore: true });
   }
   if (sendingSessionIds.size) interruptAgentRun();
-  sessionMessageCache.clearAll();
   sendingSessionIds.clear();
   chatSending.value = false;
   log("persist-prev");
@@ -1959,8 +1939,10 @@ async function openProjectByPath(dirPath: string) {
     switchingProject.value = true;
     try {
       const chatState = await loadProjectChatState(normalized);
-      setActiveSession(chatState.activeSessionId);
-      chatMessages.value = normalizeChatMessages(chatState.messages, { stripTransientUi: true });
+      activateSession(
+        chatState.activeSessionId,
+        normalizeChatMessages(chatState.messages, { stripTransientUi: true }),
+      );
       refreshSessionList(normalized);
       log(`chat-active(${chatState.activeSessionId}, ${chatState.messages.length}msgs)`);
     } finally {
@@ -2589,7 +2571,7 @@ async function resendFromMessage(messageId: string) {
     : hydratedUrls;
   if (!userText && !imageDataUrls.length) return;
 
-  chatMessages.value = chatMessages.value.slice(0, userIdx);
+  chatMessages.value.splice(userIdx);
   chatError.value = "";
   persistChatNow();
   await runAgentTurn(userText || "请结合附带的图片回答。", {
@@ -2817,6 +2799,7 @@ watch(
     return chatMessages.value.map((m) => `${m.id}:${m.content?.length ?? 0}`).join("|");
   },
   () => {
+    if (switchingProject.value || switchingSession.value) return;
     schedulePersistChat();
   },
 );
@@ -2849,7 +2832,7 @@ watch(
     void (async () => {
       const next = await applyChatMessageImageHydration(chatMessages.value);
       if (token !== chatImageHydrateToken) return;
-      chatMessages.value = next;
+      bindSessionMessages(activeSessionId.value, next);
     })();
   },
 );
