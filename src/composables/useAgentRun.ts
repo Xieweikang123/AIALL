@@ -52,7 +52,6 @@ import {
   stripToolSummaryFromAssistantContent,
   updateVibeChatSessionStatus,
 } from "../services/vibeChatStorage";
-import { resolveImagesForAgentTurn } from "../services/vibeChatImageStore";
 import { looksLikeModificationPlan, findLastAssistantContentInMessages } from "../services/agentContinuation";
 import { parseAgentSuggestions, type AgentSuggestion } from "../services/agentSuggestions";
 import { stripTextToolCallMarkup } from "../services/textToolCallMarkup";
@@ -1779,9 +1778,15 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     // 如果配置尚未就绪，不恢复
     if (!configReady.value || !projectOpened.value) return;
 
-    // 恢复运行：显示提示并自动重发
+    // 恢复运行：显示提示并自动重发（用户气泡已在会话中，仅重发请求）
     chatError.value = "检测到之前因页面刷新中断的 Agent 运行，正在恢复…";
-    void runAgentTurn(prompt);
+    const storedImages = Array.isArray(pending.request?.imageDataUrls)
+      ? (pending.request.imageDataUrls as string[]).filter(Boolean)
+      : [];
+    void runAgentTurn(prompt, {
+      skipUserBubble: true,
+      imageDataUrls: storedImages,
+    });
   }
 
   async function resumeAgentRun(assistantMsgId: string, options?: { silent?: boolean }) {
@@ -1916,6 +1921,16 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     return gen;
   }
 
+  /** Only attach images explicitly passed for this turn — never inherit from earlier user messages. */
+  function resolveTurnImageSources(
+    options?: { imageDataUrls?: string[] },
+  ): string[] {
+    if (options && "imageDataUrls" in options) {
+      return options.imageDataUrls ?? [];
+    }
+    return [];
+  }
+
   async function runAgentTurn(
     userText: string,
     options?: {
@@ -1975,10 +1990,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
     if (options?.resumeAssistantMsg) {
       assistantMsg = options.resumeAssistantMsg;
-      const imageSources =
-        options && "imageDataUrls" in options
-          ? (options.imageDataUrls ?? [])
-          : await resolveImagesForAgentTurn(project, chatMessages.value);
+      const imageSources = resolveTurnImageSources(options);
       compressedImagesForRequest = imageSources.length
         ? await compressImageDataUrlsForAgent(imageSources)
         : undefined;
@@ -2025,10 +2037,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         await scrollChatToBottom(true);
       }
 
-      const imageSources =
-        options && "imageDataUrls" in options
-          ? (options.imageDataUrls ?? [])
-          : await resolveImagesForAgentTurn(project, chatMessages.value);
+      const imageSources = resolveTurnImageSources(options);
       compressedImagesForRequest = imageSources.length
         ? await compressImageDataUrlsForAgent(imageSources)
         : undefined;

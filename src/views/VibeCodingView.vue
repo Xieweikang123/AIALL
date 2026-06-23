@@ -485,7 +485,6 @@ import {
   hydrateChatMessageImages,
   chatMessagesNeedImageHydration,
   resolveChatMessageImageUrls,
-  resolveImagesForAgentTurn,
 } from "../services/vibeChatImageStore";
 import {
   isDeleteNotFoundError,
