@@ -1,0 +1,65 @@
+---
+description: Agent 答疑/探索/修改时的通用准确度与工具策略（与具体业务解耦）
+alwaysApply: true
+---
+
+# Agent 回复准确度（通用）
+
+修改 **Agent system prompt、探索策略、答疑/Build 行为提示** 时，须保持与具体功能、字段名、当前需求解耦。
+
+## 适用范围
+
+- `src/services/agentReplyAccuracy.ts`、`src/services/agentUserIntent.ts`（含 `isBehaviorContradictionPrompt`）
+- `server/vibeAgent.ts`、`server/agentAskPrompt.ts` 中的 system prompt 片段
+- 以及任何 `*ReplyAccuracy*`、`*ExplorationHint*`、`*AnswerStructure*` 类逻辑
+
+## 行为类问题
+
+用户问「做 X 时会不会发生 Y」：
+
+1. 找**用户操作入口**（事件处理、对外 API、路由 handler）
+2. 向下 trace **至少两层**：入口 → 编排/中间层 → 副作用或持久化
+3. 禁止只打开最底层、名字相近的函数就下结论
+
+## 二元结论
+
+「会/不会」「是/不是」类问题：
+
+- grep 命中后必须 read **完整函数体**及**直接调用方**
+- 有完整执行路径证据再作答；禁止凭记忆或单层符号断言
+
+## 工具策略
+
+- 先 grep **精确符号**，再 read 定义与调用方
+- 避免：宽泛关键词广搜 + 同一文件多段重叠 read
+- 简单「规则在哪」：1–2 次定点 read 优先；广搜仅在前一步无结果时使用
+
+## 多轮自洽
+
+- 新结论与先前回复矛盾时：**显式更正** + 引用新证据
+- 用户现象与浅层结论不符时：注入 `buildBehaviorContradictionHint`（`isBehaviorContradictionPrompt`），Ask/Build 均适用；自动加深一层调用链
+- 咨询只读连续探索：`CONSULTATIVE_BUILD_EXPLORE_TURN_BUDGET`（默认 4 轮）后注入 `buildConsultativeExploreBudgetNudge`
+- grep 零命中：当轮注入 `buildGrepEmptyRecoveryNudge`，提示换符号/搜调用方
+
+## 修改收尾
+
+- patch/write 后 **read 验证**变更区域，再宣告完成
+- 运行中断恢复后：**re-read 确认**，不可假设上一轮已成功
+- 项目有相关测试：跑测或说明应跑项
+
+## 表达约束
+
+- 无用户证据时不写「你之前…」「所以你看到…」
+- 结论附带**适用前提**（代码中的 if/guard）
+- 不确定时说「不确定」，不用肯定语气包装猜测
+
+## 禁止
+
+- 在规则/提示词里写具体功能名、API 字段、页面名、用户原话专有名词
+- 把某次 bug 的个案边界写进全局规则
+
+## Code Review 三问
+
+1. 这条提示里有没有具体功能名或本次需求的词？
+2. 换成 unrelated 需求（如改路由、加重试），规则仍成立吗？
+3. 分析回复里**提到**某标识符，会不会误导为唯一路径？

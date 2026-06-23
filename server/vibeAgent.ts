@@ -34,12 +34,14 @@ import {
   buildAskExploreBudgetNudge,
   buildAskExploreSoftCapNudge,
   buildAskForceAnswerNudge,
+  buildConsultativeExploreBudgetNudge,
   buildExploreBudgetNudge,
   buildExploreInterimDiagnosisNudge,
   buildExploreSoftCapNudge,
   buildFileBreadthNudge,
   buildBuildExploreForcePatchNudge,
   buildForceOutputNudge,
+  buildGrepEmptyRecoveryNudge,
   buildPatchAnchorForcePatchNudge,
   buildPatchRequiredRetryNudge,
   buildImplementPasteBlockedNudge,
@@ -53,6 +55,7 @@ import {
   EXECUTE_PLAN_EXPLORE_TURN_BUDGET,
   EXPLORE_INTERIM_DIAGNOSIS_TURN,
   INTERACTIVE_EXPLORE_TURN_BUDGET,
+  CONSULTATIVE_BUILD_EXPLORE_TURN_BUDGET,
   MAX_READ_SLICE_REPEATS,
   MAX_TOTAL_EXPLORE_TURNS,
   MAX_TOTAL_EXPLORE_TURNS_SOFT,
@@ -61,7 +64,8 @@ import {
   PLAN_MAX_TOTAL_EXPLORE_HARD,
   PLAN_MAX_TOTAL_EXPLORE_SOFT,
 } from "./agentExplorationBudget";
-import { buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildBuildWriteBlockedHint, buildImplementFollowUpHint, buildImplementationStatusHint, buildSessionAuditHint, buildUiDefectBuildHint, buildWriteToolBlockedMessage, isAgentStepClarificationPrompt, isCodeReviewPrompt, isConsultativeUserPrompt, isImplementationStatusPrompt, isImplementFollowUpRun, isSessionAuditPrompt, isUiDefectReportPrompt, isUserErrorQuotePrompt, historySuggestsActiveImplementation, historySuggestsQuotePositionFix } from "../src/services/agentUserIntent";
+import { buildReplyAccuracyHint } from "../src/services/agentReplyAccuracy";
+import { buildBehaviorContradictionHint, buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildBuildWriteBlockedHint, buildImplementFollowUpHint, buildImplementationStatusHint, buildSessionAuditHint, buildUiDefectBuildHint, buildWriteToolBlockedMessage, isAgentStepClarificationPrompt, isBehaviorContradictionPrompt, isCodeReviewPrompt, isConsultativeUserPrompt, isImplementationStatusPrompt, isImplementFollowUpRun, isSessionAuditPrompt, isUiDefectReportPrompt, isUserErrorQuotePrompt, historySuggestsActiveImplementation, historySuggestsQuotePositionFix } from "../src/services/agentUserIntent";
 import { detectProjectRuntimeProfile, buildRuntimeAwarenessHint } from "./agentRuntimeHint";
 import { detectUserNegation, detectUserFailureReport, historyRecentUserFailureReport } from "../src/services/agentContinuation";
 import { resolveOriginalTaskFromResumePrompt } from "../src/services/agentRecovery";
@@ -722,21 +726,20 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "Bug / 实测不符：用户报告行为不对、没效果、试了不行等，默认理解为须修复；定位后直接 patch，勿停下来征求确认。",
     "区分问题类型：「按钮跑别处/位置不对」若控件与选区在空间上分离，优先查 position:fixed/absolute 或 Teleport 浮层定位，勿默认只改 flex；「点击没反应」「不工作」查事件处理/JS 逻辑。同一组件在连续消息中被提及时，每条消息是独立问题，不要因为上一条修了布局就假设这一条也是布局问题。",
     "短追问（如「需要吗」「要不要」「对吗」且未指明新对象）必须承接上一条助手回复的话题作答，勿因会话更早主题偏离；若意图仍不清晰，用一句话澄清，禁止回顾已完成工作清单或擅自改代码。",
-    "效率：探索不超过 2 轮；在已确认要改代码的任务中，信息足够后必须写入，不要连续多轮只读；同一轮可并行多个 read_file / grep。",
-    "CSS/SCSS 样式定位：禁止 grep CSS 选择器（如 `.chat-bottom`、`.mode-btn`），应直接 read_file 对应 Vue 文件的 `<style>` 段；同一文件已读过的行区间禁止重叠 read。",
+    "在已确认须改代码后，探索够了同一轮即 patch/write，勿连续多轮只 read；同一轮可并行 grep/read。",
+    "CSS/SCSS 样式定位：禁止 grep CSS 选择器（如 `.chat-bottom`、`.mode-btn`），应直接 read_file 对应 Vue 文件的 `<style>` 段。",
     "CSS class 重命名时：修改前先 grep 旧 class 名在该文件中的所有出现次数，然后一次性补全所有匹配（如同时改 `.old-class`、`.old-class:hover`、`.old-class:active`、`.old-class-icon` 等）。改完后 grep 验证零残留，确认全部替换完毕再宣布完成。",
     "用户选择执行：当你提供了多个方案/选项让用户选择时，用户选定后必须立即执行该方案（如 patch_file / write_file 落盘），不得自行改变方向或跳过执行去做其他调查。执行完毕并报告结果后，若需进一步排查再提出下一步建议。",
     "Build 模式简短实施指令（如「执行」「继续」「改吧」「优化」）或用户明确提出要改时：若上一条助手回复已列出具体改动步骤、代码片段或目标文件，必须立即 patch_file / write_file，禁止再次征求确认；除非改动涉及大范围重构或明显高风险操作。",
     "当前已在 Build 模式时，禁止再问用户是否切换到 Build；若上一条已列出多项改动，patch 须逐项落实，不得在回复中声称已完成尚未 patch 的项。",
     buildBuildWriteBlockedHint(),
     "Build 模式下用户追问「还能优化吗」「还能继续吗」「继续吧」「接着改」等，均视为执行指令，必须立即 patch_file / write_file，禁止再分析或询问。",
-    "探索时：read_file 用 offset/limit 分段读取（单次约 200 行）；不要重复读取已读过的文件；用中文简短说明后立即调用工具。",
     "修改前必须先 read_file 核对目标文件；patch_file 前 old_string 须与磁盘内容完全一致。",
-    "自检/验证：禁止在未对照工具结果与用户实测反馈前宣称「全部正确/无需再改/链路完整」；须区分主路径效果与降级/兜底 UI。",
     "用户问「看出啥问题没」「检查一下」「这样对吗」等评价性问题时：必须先 read_file 读取你上次修改的文件，确认代码实际状态后再回答。禁止仅凭截图视觉判断或记忆作答。",
     "用户报告「试了不行/没有效果」后，禁止再用同样方案做未经证实的「检查完成✅」；须承认未验证项并给出可执行排查步骤。",
     "给用户的测试步骤须与项目实际运行环境一致（从 package.json scripts 判断 Web dev vs 桌面壳）；禁止混用。",
     "解释项目时：从 package.json、README、入口文件等关键文件入手，不要臆测。",
+    buildReplyAccuracyHint(),
     "修改代码时：小范围改动优先 patch_file（old_string 须唯一匹配）；全文件重写或新文件才用 write_file；大文件禁止 write_file 整文件覆盖。",
     "需要确认现状时 read_file 用 offset/limit 读相关片段即可，不要读整个大文件。",
     "write_file / patch_file / delete_file 会立即写入磁盘，无需用户确认。",
@@ -814,7 +817,7 @@ function buildPlanSystemPrompt(
     "4. 说明改动顺序和依赖关系；",
     "5. 文末固定提示：「确认无误后回复「执行方案」或点击消息上的「执行方案」按钮，我将按方案改代码。」",
     buildAgentSuggestionsPromptHint(),
-    "探索时：read_file 用 offset/limit 分段读取（单次约 200 行）；不要重复读取已读过的文件；用中文简短说明后立即调用工具。",
+    buildReplyAccuracyHint(),
     "收集到足够信息后立即输出方案，不要无意义地继续读文件。",
     "重要：必须通过 API 工具接口调用 list_dir、read_file 等，禁止在正文里输出 <function>、<parameter> 等标记。",
     "read_file / list_dir：项目内用相对路径；读 AppData 会话可用绝对路径或 aiall/vibe-chat-sessions/ 逻辑前缀；大文件用 offset/limit，勿用 run_command 读文件。",
@@ -1364,6 +1367,11 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   const userRecentlyReportedFailure = historyRecentUserFailureReport(params.history);
   const sessionAuditRun =
     !isAsk && !isPlanExplore && !isExecutePlan && isSessionAuditPrompt(prompt);
+  const behaviorContradictionRun =
+    !isPlanExplore &&
+    !isExecutePlan &&
+    !implementFollowUpRun &&
+    isBehaviorContradictionPrompt(prompt, params.history);
   const resumeOriginalTask = resolveOriginalTaskFromResumePrompt(prompt);
   const consultativeResumeRun =
     !isAsk &&
@@ -1497,13 +1505,15 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
   const systemPrompt =
     (isAsk
-      ? buildAskSystemPrompt(projectRoot, openFilePath, openFileSnippet, model)
+      ? buildAskSystemPrompt(projectRoot, openFilePath, openFileSnippet, model) +
+        (behaviorContradictionRun ? buildBehaviorContradictionHint() : "")
       : isExecutePlan
       ? buildSystemPrompt(projectRoot, openFilePath, model)
       : isPlanExplore
       ? buildPlanSystemPrompt(projectRoot, openFilePath, openFileSnippet, model)
       : buildSystemPrompt(projectRoot, openFilePath, model) +
         (readOnlyBuildRun ? buildConsultativeBuildHint() : "") +
+        (behaviorContradictionRun ? buildBehaviorContradictionHint() : "") +
         (codeReviewRun ? buildCodeReviewHonestyNudge(userRecentlyReportedFailure) : "") +
         (userErrorQuoteRun ? buildUserErrorQuoteHint() : "") +
         (userFailureReportRun ? buildUserFailureReportNudge() : "") +
@@ -2477,6 +2487,18 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       });
     }, 5000);
 
+    const turnGrepEmptyPatterns: string[] = [];
+    const recordGrepEmpty = (call: ChatToolCall, result: string) => {
+      if (call.function.name !== "grep" || result !== "（无匹配）") return;
+      try {
+        const args = JSON.parse(call.function.arguments || "{}");
+        const pattern = String(args.pattern ?? "").trim();
+        if (pattern) turnGrepEmptyPatterns.push(pattern);
+      } catch {
+        /* ignore parse errors */
+      }
+    };
+
     try {
       for (let index = 0; index < toolCalls.length; ) {
         if (signal?.aborted) break;
@@ -2497,10 +2519,14 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
         if (canParallel && batch.length > 1) {
           const outcomes = await Promise.all(batch.map((call) => runToolCall(call)));
-          for (const outcome of outcomes) emitToolOutcome(outcome);
+          for (const outcome of outcomes) {
+            recordGrepEmpty(outcome.call, outcome.result);
+            emitToolOutcome(outcome);
+          }
         } else {
           for (const call of batch) {
             const outcome = await runToolCall(call);
+            recordGrepEmpty(outcome.call, outcome.result);
             emitToolOutcome(outcome);
           }
         }
@@ -2509,6 +2535,13 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       }
     } finally {
       clearInterval(toolExecutionHeartbeat);
+    }
+
+    if (turnGrepEmptyPatterns.length > 0) {
+      messages.push({
+        role: "system",
+        content: buildGrepEmptyRecoveryNudge(turnGrepEmptyPatterns),
+      });
     }
 
     // Inject corrective prompt if patch_file calls failed this turn.
@@ -2565,6 +2598,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     }
     if (isAsk && consecutiveExploreTurns >= ASK_EXPLORE_TURN_BUDGET) {
       messages.push({ role: "system", content: buildAskExploreBudgetNudge(consecutiveExploreTurns) });
+      consecutiveExploreTurns = 0;
+    } else if (readOnlyBuildRun && consecutiveExploreTurns >= CONSULTATIVE_BUILD_EXPLORE_TURN_BUDGET) {
+      messages.push({ role: "system", content: buildConsultativeExploreBudgetNudge(consecutiveExploreTurns) });
       consecutiveExploreTurns = 0;
     } else if (!isAsk && !readOnlyBuildRun && consecutiveExploreTurns >= exploreTurnBudget) {
       messages.push({ role: "system", content: buildExploreBudgetNudge(consecutiveExploreTurns, mode) });

@@ -29,6 +29,14 @@ const SHORT_EVALUATIVE_FOLLOW_UP_RE =
 const IMPLEMENTATION_FAILURE_REPORT_RE =
   /没生效|不生效|未生效|没效果|没有效果|没变化|不起作用|试了.{0,16}(?:没有|没|不|无效)|仍然(?:没有|没|不)|还是(?:没有|没|不)/i;
 
+/** User says observed behavior contradicts a prior assistant claim (not merely「试了不行」). */
+const BEHAVIOR_CONTRADICTION_MARKER_RE =
+  /但是|可是|然而|不对|不知道为啥|奇怪|咋会|怎么会|实际上|明明/i;
+
+/** Prior assistant made a negative / binary behavioral claim. */
+const PRIOR_NEGATIVE_BEHAVIOR_CLAIM_RE =
+  /(?:^|\n)\s*(?:\*\*)?(?:不会|不(?:会|能)?更新|没有.{0,12}更新|不改变|不涉及|只是.{0,16}(?:改|设置|指向))(?:\*\*)?/im;
+
 /** User asks whether a prior implementation task is done (progress check, not a new implement request). */
 const IMPLEMENTATION_STATUS_PROMPT_RE =
   /(?:改好|做完|写好|弄好|搞定|完成|实现好|落地)[了吗呢]?[？?]?\s*$|(?:好了吗|完成了吗|做完了吗|改完了吗)[？?]?\s*$/i;
@@ -163,6 +171,36 @@ export function isImplementationFailureReportPrompt(prompt: string): boolean {
   return IMPLEMENTATION_FAILURE_REPORT_RE.test(prompt.trim());
 }
 
+/** User reports phenomenon that conflicts with the assistant's prior「不会/不更新」类结论. */
+export function isBehaviorContradictionPrompt(
+  prompt: string,
+  history?: UserIntentHistoryMessage[],
+): boolean {
+  const text = prompt.trim();
+  if (!text) return false;
+  if (isImplementationFailureReportPrompt(text)) return false;
+  if (isShortImplementPrompt(text)) return false;
+  if (IMPLEMENT_INTENT_RE.test(text) && !BEHAVIOR_CONTRADICTION_MARKER_RE.test(text)) return false;
+  if (!BEHAVIOR_CONTRADICTION_MARKER_RE.test(text)) return false;
+  if (!/(?:会|有|跳|跑|变|出现|显示|排序|更新|通知|消失|移到|跑到|往上|往下)/i.test(text)) return false;
+
+  const lastAssistant = (history ?? [])
+    .filter((m) => m.role === "assistant")
+    .slice(-1)[0]?.content;
+  if (!lastAssistant?.trim()) return false;
+  return PRIOR_NEGATIVE_BEHAVIOR_CLAIM_RE.test(lastAssistant);
+}
+
+export function buildBehaviorContradictionHint(): string {
+  return [
+    "",
+    "【现象与上轮矛盾】用户反馈的实际现象与上一条助手结论不符。",
+    "禁止维持上轮「不会/不更新/仅…」等结论；须显式承认先前结论不完整或有误。",
+    "从用户操作入口重新 trace 调用链（入口 → 编排层 → 副作用/持久化），grep 命中底层符号后必须 read 其直接调用方及完整函数体。",
+    "结论须附带代码中的 if/guard 前提；咨询只读时先给出更正后的根因，用户明确实施指令后再 patch。",
+  ].join("\n");
+}
+
 /** Question-shaped message describing observed behavior — not an implement command. */
 function isQuestionShapedConsultative(text: string): boolean {
   if (!/[？?]\s*$/.test(text)) return false;
@@ -191,8 +229,8 @@ export function buildConsultativeBuildHint(): string {
     "",
     "【咨询任务·只读】用户本条仅为提问/解释，未要求改代码。",
     "只允许 list_dir / read_file / grep / search_files；禁止 patch_file / write_file / delete_file。",
-    "优先 1 次 grep 定位，必要时 read_file 1 个相关文件后即回答；勿连环读取多个无关文件。",
-    "行为/是否类问题：grep/read 核对后用自然语言直接回答「当前代码下会怎样」；若用户描述的现象与代码逻辑不符，可说明差异（如修复前后），勿擅自 patch。",
+    "优先 grep 精确符号；「会不会/是否/做 X 时会不会 Y」须 trace 入口→编排层→副作用，read 目标函数及至少一层直接调用方后再答；禁止只读最底层 export。",
+    "勿广搜或同一文件多段重叠 read；信息足够后立即用自然语言回答「当前代码下会怎样」，勿连环读取无关文件。",
     "禁止在未对照工具结果前宣称「逻辑已正确/无需再改/链路完整」；需要改代码时说明结论并请用户发送明确实施指令。",
     "若写工具返回「Build 只读轮」相关错误：当前仍是 Build 模式，只是本条被标为咨询只读；禁止向用户称 Ask 模式或让用户切换 Build。",
   ].join("\n");

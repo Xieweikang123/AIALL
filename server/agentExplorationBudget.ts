@@ -20,6 +20,9 @@ export const PLAN_MAX_TOTAL_EXPLORE_HARD = 12;
 /** Consecutive read-only turns in ask mode before nudging the model to answer. */
 export const ASK_EXPLORE_TURN_BUDGET = 5;
 
+/** Consecutive read-only turns in consultative build (read-only) before nudging to answer. */
+export const CONSULTATIVE_BUILD_EXPLORE_TURN_BUDGET = 4;
+
 /** Ask mode soft cap — strip wide-search tools, still allow read_file. */
 export const ASK_MAX_TOTAL_EXPLORE_SOFT = 8;
 
@@ -73,6 +76,27 @@ export function buildAskExploreBudgetNudge(consecutiveExploreTurns: number): str
     "请基于已读内容立即输出完整自然语言答案。",
     "若仍缺关键片段：最多再 read 一次目标文件的连续逻辑块（勿重叠小 window 反复 read）。",
     "禁止无意义续搜；回答时区分各 API 入口的写/回滚/不写行为，条件用 AND 列全。",
+  ].join("");
+}
+
+export function buildConsultativeExploreBudgetNudge(consecutiveExploreTurns: number): string {
+  return [
+    `【系统提示】咨询只读已连续 ${consecutiveExploreTurns} 轮探索、尚未给出回答。`,
+    "请基于已有 grep/read 证据立即输出自然语言结论；禁止继续广搜或同一文件重叠 read。",
+    "行为/是否类：若已 grep 到底层符号，须 read 其直接调用方后再答；仍不足则说明「无法确认」。",
+  ].join("");
+}
+
+/** Injected when grep returns no matches for a pattern in the current turn. */
+export function buildGrepEmptyRecoveryNudge(patterns: string[]): string {
+  const listed = patterns
+    .slice(0, 3)
+    .map((pattern) => `\`${pattern}\``)
+    .join("、");
+  return [
+    `【系统提示】本轮 grep 未找到匹配：${listed}。`,
+    "禁止重复相同 pattern；请改用精确函数/导出名、调用方符号，或更短的英文标识符。",
+    "行为类问题：底层未命中时应 grep 上层 handler/composable 再 read，禁止广搜凑轮次。",
   ].join("");
 }
 

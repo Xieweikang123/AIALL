@@ -25,6 +25,7 @@ describe("agentAskPrompt", () => {
     expect(joined).toContain("Ask 模式");
     expect(joined).toContain("探索策略");
     expect(joined).toContain("回答结构");
+    expect(joined).toContain("事实与准确度");
     expect(joined).toContain("无附图");
     expect(joined).toContain("/tmp/project");
   });

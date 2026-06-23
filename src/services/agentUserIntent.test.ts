@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAgentStepClarificationHint,
   buildAgentStepClarifyContinueHint,
+  buildBehaviorContradictionHint,
   buildBuildWriteBlockedHint,
   buildConsultativeBuildHint,
   buildConsultativeResumeHint,
@@ -13,6 +14,7 @@ import {
   historySuggestsActiveImplementation,
   historySuggestsQuotePositionFix,
   isAgentStepClarificationPrompt,
+  isBehaviorContradictionPrompt,
   isCodeReviewPrompt,
   isConsultativeUserPrompt,
   isImplementationStatusPrompt,
@@ -95,6 +97,46 @@ describe("buildConsultativeBuildHint", () => {
   it("forbids premature completion claims on behavior questions", () => {
     expect(buildConsultativeBuildHint()).toContain("无需再改");
     expect(buildConsultativeBuildHint()).toContain("当前代码下");
+    expect(buildConsultativeBuildHint()).toContain("直接调用方");
+    expect(buildConsultativeBuildHint()).toContain("最底层 export");
+  });
+});
+
+describe("isBehaviorContradictionPrompt", () => {
+  const priorDenial = [
+    {
+      role: "assistant",
+      content: "**不会。** 切换会话不更新 `updatedAt`。",
+    },
+  ];
+
+  it("detects observed behavior contradicting prior negative claim", () => {
+    expect(
+      isBehaviorContradictionPrompt("但是不知道为啥，切换会话，选中的会话自动跑上面了", priorDenial),
+    ).toBe(true);
+  });
+
+  it("rejects implement follow-ups", () => {
+    expect(isBehaviorContradictionPrompt("改吧", priorDenial)).toBe(false);
+  });
+
+  it("rejects when no prior negative assistant claim", () => {
+    expect(
+      isBehaviorContradictionPrompt("但是还是会跑到上面", [{ role: "assistant", content: "排序按时间字段。" }]),
+    ).toBe(false);
+  });
+
+  it("rejects implementation failure reports handled elsewhere", () => {
+    expect(isBehaviorContradictionPrompt("试了不行，还是没效果", priorDenial)).toBe(false);
+  });
+});
+
+describe("buildBehaviorContradictionHint", () => {
+  it("requires deepening trace and explicit correction", () => {
+    const hint = buildBehaviorContradictionHint();
+    expect(hint).toContain("现象与上轮矛盾");
+    expect(hint).toContain("调用方");
+    expect(hint).toContain("显式承认");
   });
 });
 

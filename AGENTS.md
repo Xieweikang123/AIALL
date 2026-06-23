@@ -44,6 +44,15 @@
 
 完整约定见 Cursor 规则：`.cursor/rules/agent-orchestration.mdc`（`alwaysApply: true`）。
 
+## Agent 回复准确度（通用）
+
+修改 Agent **答疑/探索/修改** 相关 system prompt（如 `agentReplyAccuracy.ts`、`vibeAgent.ts`、`agentAskPrompt.ts`）时：
+
+- **应使用**结构契约：行为问题 trace 调用链、二元结论需完整证据、patch 后验证、多轮自洽更正
+- **禁止**把具体功能名、字段名、个案 bug 边界写进全局提示
+
+完整约定见 Cursor 规则：`.cursor/rules/agent-reply-accuracy.mdc`（`alwaysApply: true`）。
+
 ## 会话文件存储
 
 AIALL 的 Vibe 会话文件**不在项目目录内**，存储在 AppData Roaming 下：

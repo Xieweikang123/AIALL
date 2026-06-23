@@ -4,10 +4,13 @@ import {
   buildAskExploreBudgetNudge,
   buildAskForceAnswerNudge,
   buildBuildExploreForcePatchNudge,
+  buildConsultativeExploreBudgetNudge,
   buildExploreBudgetNudge,
   buildExploreInterimDiagnosisNudge,
+  buildGrepEmptyRecoveryNudge,
   buildPatchAnchorForcePatchNudge,
   buildUiDefectForcePatchNudge,
+  CONSULTATIVE_BUILD_EXPLORE_TURN_BUDGET,
   EXECUTE_PLAN_EXPLORE_TURN_BUDGET,
   EXPLORE_INTERIM_DIAGNOSIS_TURN,
   INTERACTIVE_EXPLORE_TURN_BUDGET,
@@ -55,5 +58,20 @@ describe("agentExplorationBudget", () => {
     const nudge = buildBuildExploreForcePatchNudge(10);
     expect(nudge).toContain("patch_file");
     expect(nudge).toContain("禁止只输出 patch 思路");
+  });
+
+  it("builds consultative read-only explore budget nudge", () => {
+    expect(CONSULTATIVE_BUILD_EXPLORE_TURN_BUDGET).toBe(4);
+    expect(CONSULTATIVE_BUILD_EXPLORE_TURN_BUDGET).toBeLessThan(ASK_EXPLORE_TURN_BUDGET);
+    const nudge = buildConsultativeExploreBudgetNudge(4);
+    expect(nudge).toContain("咨询只读");
+    expect(nudge).toContain("直接调用方");
+  });
+
+  it("builds grep empty recovery nudge with patterns", () => {
+    const nudge = buildGrepEmptyRecoveryNudge(["switchVibeSession", "fooBar"]);
+    expect(nudge).toContain("switchVibeSession");
+    expect(nudge).toContain("禁止重复相同 pattern");
+    expect(nudge).toContain("handler/composable");
   });
 });

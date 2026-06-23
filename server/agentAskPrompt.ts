@@ -1,3 +1,4 @@
+import { buildReplyAccuracyHint } from "../src/services/agentReplyAccuracy";
 import { buildAgentSuggestionsPromptHint } from "../src/services/agentSuggestions";
 
 export function buildAskExplorationHints(): string {
@@ -38,6 +39,7 @@ export function buildAskSystemPromptLines(projectRoot: string): string[] {
     "短追问（如「需要吗」「要不要」且未指明新对象）必须承接上一条助手回复的话题作答，勿因会话更早主题偏离；若意图仍不清晰，用一句话澄清。",
     buildAskExplorationHints(),
     buildAskAnswerStructureHints(),
+    buildReplyAccuracyHint(),
     "收集到足够信息后立即用自然语言回答，不要无意义地继续读文件。",
     buildAgentSuggestionsPromptHint(),
     `项目根目录：${projectRoot}`,
