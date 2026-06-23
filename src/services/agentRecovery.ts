@@ -6,6 +6,7 @@ import {
   PARTIAL_WRITE_ABORT_HEADING,
   resolveAssistantBubbleContent,
 } from "./agentMessageDisplay";
+import { buildConsultativeResumeHint, isConsultativeUserPrompt } from "./agentUserIntent";
 import type { AgentRoundGroup } from "./agentRoundGroups";
 import { stripToolSummaryFromAssistantContent } from "./vibeChatStorage";
 
@@ -105,7 +106,7 @@ export function isAgentMaxTurnsExhausted(
 }
 
 /** Delay before auto-resuming after transient disconnect (seconds). */
-export const AGENT_AUTO_RESUME_SECONDS = 1;
+export const AGENT_AUTO_RESUME_SECONDS = 3;
 
 /** Shorter delay for obvious transport blips (Failed to fetch / network error). */
 export const AGENT_AUTO_RESUME_IMMEDIATE_SECONDS = 1;
@@ -320,16 +321,11 @@ export function inferAgentRecoveryFlags(msg: AgentProgressSource & {
     };
   }
 
-  // 手动停止且有进展 → 允许恢复
-  if (
-    msg.agentAborted &&
-    msg.agentAbortReason === "已手动停止" &&
-    hasRecoverableAgentProgress(msg)
-  ) {
+  if (msg.agentAborted && !isHmrInterruptReason(msg.agentAbortReason || "")) {
     return {
       agentFailed: true,
       agentRecoverable: true,
-      agentFailureReason: msg.agentAbortReason,
+      agentFailureReason: msg.agentAbortReason?.trim() || "已手动停止",
     };
   }
 
@@ -573,6 +569,15 @@ export function buildAgentRunningStatusText(
   return parts.join(" · ");
 }
 
+/** Extract embedded user task from auto-resume prompt (for intent re-classification on server). */
+export function resolveOriginalTaskFromResumePrompt(prompt: string): string | null {
+  const marker = "原始任务（摘要）：";
+  const idx = prompt.indexOf(marker);
+  if (idx < 0) return null;
+  const rest = prompt.slice(idx + marker.length).trim();
+  return rest || null;
+}
+
 export function buildAgentResumePrompt(
   msg: AgentProgressSource,
   originalUserPrompt: string,
@@ -582,9 +587,18 @@ export function buildAgentResumePrompt(
   const truncatedPrompt = originalUserPrompt.trim().length > 600
     ? `${originalUserPrompt.trim().slice(0, 600)}\n…（原始任务已截断，请按摘要继续完成）`
     : originalUserPrompt.trim();
+  const consultative = isConsultativeUserPrompt(originalUserPrompt);
+  const header = consultative
+    ? [
+        buildConsultativeResumeHint(),
+        "上次运行因连接中断而暂停。请从断点继续完成原始提问的回答，不要重复已完成的只读工具步骤。",
+      ]
+    : [
+        "【自动续跑】上次运行因连接中断而暂停。请从断点继续完成原始任务，不要重复已完成的工具步骤或已写入的修改。",
+        "【效率】已读文件范围见下方摘要——相同文件的相同区域禁止再 read_file，用 grep 定位后直接 patch_file/write_file；最多 1 次 grep 定位遗漏。",
+      ];
   return [
-    "【自动续跑】上次运行因连接中断而暂停。请从断点继续完成原始任务，不要重复已完成的工具步骤或已写入的修改。",
-    "【效率】已读文件范围见下方摘要——相同文件的相同区域禁止再 read_file，用 grep 定位后直接 patch_file/write_file；最多 1 次 grep 定位遗漏。",
+    ...header,
     `中断原因：${errorMessage.trim()}`,
     "",
     progress,
@@ -607,8 +621,8 @@ function passesAgentAbortResumeGate(
     const hmrReason = msg.agentAbortReason || msg.agentFailureReason || "";
     // HMR 中断且有进展 → 允许恢复
     if (isHmrInterruptReason(hmrReason) && hasRecoverableAgentProgress(msg)) return true;
-    // 手动停止且有进展 → 允许恢复
-    if (msg.agentAbortReason === "已手动停止" && hasRecoverableAgentProgress(msg)) return true;
+    // 非 HMR 中断（如手动停止）→ 始终允许恢复
+    if (!isHmrInterruptReason(hmrReason)) return true;
     return false;
   }
   return true;

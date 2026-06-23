@@ -30,6 +30,7 @@ import {
   resolveAgentCompletedTurns,
   resolveAgentFailureBubbleContent,
   buildAgentRunningStatusText,
+  resolveOriginalTaskFromResumePrompt,
   summarizeAgentProgress,
 } from "./agentRecovery";
 
@@ -201,6 +202,22 @@ describe("buildAgentResumePrompt", () => {
     expect(prompt).toContain("Failed to fetch");
     expect(prompt).toContain("搜索文件");
     expect(prompt).toContain("实现粘贴图片功能");
+    expect(prompt).toContain("patch_file");
+  });
+
+  it("uses read-only resume for consultative questions", () => {
+    const prompt = buildAgentResumePrompt(
+      {
+        tools: [{ running: false, name: "grep", summary: "11 处匹配", ok: true, turn: 1 }],
+      },
+      "手动终止会话，也会通知？",
+      "已手动停止",
+    );
+    expect(prompt).toContain("【咨询续跑·只读】");
+    expect(prompt).toContain("禁止 patch_file");
+    expect(prompt).not.toContain("后直接 patch_file/write_file");
+    expect(prompt).toContain("手动终止会话，也会通知？");
+    expect(resolveOriginalTaskFromResumePrompt(prompt)).toBe("手动终止会话，也会通知？");
   });
 });
 
@@ -208,7 +225,7 @@ describe("canResumeAgentRun", () => {
   it("allows resume only for recoverable failures", () => {
     expect(canResumeAgentRun({ agentFailed: true, agentRecoverable: true })).toBe(true);
     expect(canResumeAgentRun({ agentFailed: true, agentRecoverable: false })).toBe(false);
-    expect(canResumeAgentRun({ agentFailed: true, agentRecoverable: true, agentAborted: true })).toBe(false);
+    expect(canResumeAgentRun({ agentFailed: true, agentRecoverable: true, agentAborted: true })).toBe(true);
     expect(canResumeAgentRun({ agentFailed: true, agentRecoverable: true, agentRecoveryDismissed: true })).toBe(
       false,
     );
@@ -238,7 +255,7 @@ describe("canResumeAgentRun", () => {
     ).toBe(true);
   });
 
-  it("blocks resume after manual stop even with progress", () => {
+  it("allows resume after manual stop", () => {
     expect(
       canResumeAgentRun({
         agentFailed: true,
@@ -247,7 +264,7 @@ describe("canResumeAgentRun", () => {
         agentAbortReason: "已手动停止",
         tools: [{ running: false, label: "读取文件", summary: "ok", turn: 1 }],
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("does not infer recoverable state at runtime from legacy content", () => {

@@ -10,6 +10,10 @@ const SHORT_IMPLEMENT_PROMPT_RE =
 const ACCURACY_CONSULTATIVE_RE =
   /是否.{0,20}(?:准确|正确|总是|一直|可靠)|(?:准确|正确|可靠).{0,12}(?:吗|么)[？?]?$/i;
 
+/** Observed-behavior question (e.g. 「也会通知？」) — consultative, not implement. */
+const OBSERVED_BEHAVIOR_QUESTION_RE =
+  /(?:也会|还会|是不是会|会不会|有没有).{0,20}(?:通知|弹窗|提示|提醒)|(?:通知|弹窗|提示).{0,12}(?:吗|么|吧)[？?]?$/i;
+
 /** Question / explanation intent without asking to change code. */
 const CONSULTATIVE_MARKERS_RE =
   /(?:什么|为什么|为啥|如何|怎么|怎样|哪里|哪儿|是否|是不是|能不能|可不可以|能否|干嘛|干啥|啥是|是什么|有没有|对不对|什么意思|啥意思|吗[？?]?$|[？?]$)/;
@@ -159,6 +163,14 @@ export function isImplementationFailureReportPrompt(prompt: string): boolean {
   return IMPLEMENTATION_FAILURE_REPORT_RE.test(prompt.trim());
 }
 
+/** Question-shaped message describing observed behavior — not an implement command. */
+function isQuestionShapedConsultative(text: string): boolean {
+  if (!/[？?]\s*$/.test(text)) return false;
+  if (!CONSULTATIVE_MARKERS_RE.test(text)) return false;
+  if (/^(?:请|帮我|帮忙|麻烦)/.test(text) && IMPLEMENT_INTENT_RE.test(text)) return false;
+  return true;
+}
+
 export function isConsultativeUserPrompt(prompt: string): boolean {
   const text = prompt.trim();
   if (!text) return false;
@@ -167,8 +179,10 @@ export function isConsultativeUserPrompt(prompt: string): boolean {
   if (isAgentStepClarificationPrompt(text)) return false;
   if (isImplementationFailureReportPrompt(text)) return false;
   if (SHORT_EVALUATIVE_FOLLOW_UP_RE.test(text)) return true;
-  if (IMPLEMENT_INTENT_RE.test(text)) return false;
   if (ACCURACY_CONSULTATIVE_RE.test(text)) return true;
+  if (OBSERVED_BEHAVIOR_QUESTION_RE.test(text)) return true;
+  if (isQuestionShapedConsultative(text)) return true;
+  if (IMPLEMENT_INTENT_RE.test(text)) return false;
   return CONSULTATIVE_MARKERS_RE.test(text);
 }
 
@@ -178,8 +192,18 @@ export function buildConsultativeBuildHint(): string {
     "【咨询任务·只读】用户本条仅为提问/解释，未要求改代码。",
     "只允许 list_dir / read_file / grep / search_files；禁止 patch_file / write_file / delete_file。",
     "优先 1 次 grep 定位，必要时 read_file 1 个相关文件后即回答；勿连环读取多个无关文件。",
-    "用自然语言直接回答；若调查后发现代码须改才能符合描述，说明结论并提示用户描述期望行为，勿擅自 patch。",
+    "行为/是否类问题：grep/read 核对后用自然语言直接回答「当前代码下会怎样」；若用户描述的现象与代码逻辑不符，可说明差异（如修复前后），勿擅自 patch。",
+    "禁止在未对照工具结果前宣称「逻辑已正确/无需再改/链路完整」；需要改代码时说明结论并请用户发送明确实施指令。",
     "若写工具返回「Build 只读轮」相关错误：当前仍是 Build 模式，只是本条被标为咨询只读；禁止向用户称 Ask 模式或让用户切换 Build。",
+  ].join("\n");
+}
+
+export function buildConsultativeResumeHint(): string {
+  return [
+    "【咨询续跑·只读】原始消息仅为提问/解释，未要求改代码。",
+    "请根据下方已完成的 grep/read 证据直接回答原始问题；禁止 patch_file / write_file / delete_file。",
+    "禁止宣称「上一轮的 patch 已生效/无需再改/逻辑已正确」——须基于当前磁盘代码说明结论；若曾误执行写操作，说明现状即可，勿重复 patch。",
+    "相同文件区域禁止再 read_file；最多 1 次 grep 补齐遗漏。",
   ].join("\n");
 }
 

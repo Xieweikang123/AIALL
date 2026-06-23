@@ -61,9 +61,10 @@ import {
   PLAN_MAX_TOTAL_EXPLORE_HARD,
   PLAN_MAX_TOTAL_EXPLORE_SOFT,
 } from "./agentExplorationBudget";
-import { buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildBuildWriteBlockedHint, buildImplementFollowUpHint, buildImplementationStatusHint, buildSessionAuditHint, buildUiDefectBuildHint, buildWriteToolBlockedMessage, isAgentStepClarificationPrompt, isCodeReviewPrompt, isConsultativeUserPrompt, isImplementationStatusPrompt, isImplementFollowUpRun, isSessionAuditPrompt, isUiDefectReportPrompt, isUserErrorQuotePrompt, historySuggestsActiveImplementation, historySuggestsQuotePositionFix } from "./agentUserIntent";
+import { buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildBuildWriteBlockedHint, buildImplementFollowUpHint, buildImplementationStatusHint, buildSessionAuditHint, buildUiDefectBuildHint, buildWriteToolBlockedMessage, isAgentStepClarificationPrompt, isCodeReviewPrompt, isConsultativeUserPrompt, isImplementationStatusPrompt, isImplementFollowUpRun, isSessionAuditPrompt, isUiDefectReportPrompt, isUserErrorQuotePrompt, historySuggestsActiveImplementation, historySuggestsQuotePositionFix } from "../src/services/agentUserIntent";
 import { detectProjectRuntimeProfile, buildRuntimeAwarenessHint } from "./agentRuntimeHint";
 import { detectUserNegation, detectUserFailureReport, historyRecentUserFailureReport } from "../src/services/agentContinuation";
+import { resolveOriginalTaskFromResumePrompt } from "../src/services/agentRecovery";
 import { buildAgentSuggestionsPromptHint } from "../src/services/agentSuggestions";
 import {
   buildBlockedGrepAfterLocateMessage,
@@ -247,6 +248,9 @@ const MAX_TOOL_RESULT_SSE_CHARS = 16_000;
 const MAX_TOOL_RESULT_MODEL_CHARS = 10_000;
 const MAX_AGENT_CONTEXT_CHARS = 200_000;
 export const EXECUTE_PLAN_MAX_CONTEXT_CHARS = 100_000;
+export const ASK_MAX_CONTEXT_CHARS = 80_000;
+/** Proactively compress older tool outputs above this size to reduce model latency. */
+export const SOFT_COMPACT_CONTEXT_CHARS = 36_000;
 const PLAN_MAX_CONTEXT_CHARS = 150_000;
 const PROTECTED_RECENT_TOOL_RESULTS = 2;
 
@@ -285,7 +289,11 @@ export function compactMessagesForModel(
   });
 
   let total = result.reduce((sum, message) => sum + messageCharSize(message), 0);
-  if (total <= maxContextChars) return result;
+  const needsHardCompact = total > maxContextChars;
+  const needsSoftCompact = total > SOFT_COMPACT_CONTEXT_CHARS;
+  if (!needsHardCompact && !needsSoftCompact) return result;
+
+  const compressTarget = needsHardCompact ? maxContextChars : SOFT_COMPACT_CONTEXT_CHARS;
 
   const toolIndexes = result
     .map((message, index) => (message.role === "tool" ? index : -1))
@@ -301,7 +309,7 @@ export function compactMessagesForModel(
       content: `（较早的工具输出已压缩${lineHint ? `，${lineHint}` : ""}，约 ${raw.length} 字符）`,
     };
     total = result.reduce((sum, message) => sum + messageCharSize(message), 0);
-    if (total <= maxContextChars) break;
+    if (total <= compressTarget) break;
   }
 
   return result;
@@ -1354,15 +1362,26 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   const userFailureReportRun =
     !isAsk && !isPlanExplore && !isExecutePlan && detectUserFailureReport(prompt);
   const userRecentlyReportedFailure = historyRecentUserFailureReport(params.history);
+  const sessionAuditRun =
+    !isAsk && !isPlanExplore && !isExecutePlan && isSessionAuditPrompt(prompt);
+  const resumeOriginalTask = resolveOriginalTaskFromResumePrompt(prompt);
+  const consultativeResumeRun =
+    !isAsk &&
+    !isPlanExplore &&
+    !isExecutePlan &&
+    Boolean(resumeOriginalTask && isConsultativeUserPrompt(resumeOriginalTask));
   const readOnlyBuildRun =
     !isAsk &&
     !isPlanExplore &&
     !isExecutePlan &&
-    (isConsultativeUserPrompt(prompt) || codeReviewRun) &&
+    (isConsultativeUserPrompt(prompt) ||
+      consultativeResumeRun ||
+      codeReviewRun ||
+      sessionAuditRun) &&
     !implementFollowUpRun;
   const implementationStatusRun =
     readOnlyBuildRun &&
-    isImplementationStatusPrompt(prompt) &&
+    isImplementationStatusPrompt(resumeOriginalTask ?? prompt) &&
     historySuggestsActiveImplementation(params.history);
   const imageDataUrls = sanitizeImageDataUrls(params.imageDataUrls);
   const uiDefectBuildRun =
@@ -1372,19 +1391,21 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     imageDataUrls.length > 0 &&
     isUiDefectReportPrompt(prompt, imageDataUrls.length > 0);
   const agentStepClarifyRun = !isAsk && !isPlanExplore && isAgentStepClarificationPrompt(prompt);
-  const sessionAuditRun =
-    !isAsk && !isPlanExplore && !isExecutePlan && isSessionAuditPrompt(prompt);
 
   const segmentBudget = resolveAgentMaxTurns(mode, runProfile);
   let segmentMaxTurns = params.maxTurns ?? segmentBudget;
   let segmentIndex = 1;
   const exploreTurnBudget = isExecutePlan ? EXECUTE_PLAN_EXPLORE_TURN_BUDGET : isPlanExplore ? PLAN_EXPLORE_TURN_BUDGET : INTERACTIVE_EXPLORE_TURN_BUDGET;
-  const maxContextChars = isExecutePlan ? EXECUTE_PLAN_MAX_CONTEXT_CHARS : isPlanExplore ? PLAN_MAX_CONTEXT_CHARS : MAX_AGENT_CONTEXT_CHARS;
+  const maxContextChars = isExecutePlan
+    ? EXECUTE_PLAN_MAX_CONTEXT_CHARS
+    : isPlanExplore
+      ? PLAN_MAX_CONTEXT_CHARS
+      : isAsk
+        ? ASK_MAX_CONTEXT_CHARS
+        : MAX_AGENT_CONTEXT_CHARS;
 
   const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
   const openFileRel = openFile?.relative;
-
-  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] runVibeAgent start: mode=${mode} model=${model} prompt="${prompt.slice(0, 60)}" isExecutePlan=${isExecutePlan}\n`); } catch {}
 
   onEvent({
     type: "status",
@@ -1392,17 +1413,13 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       phase: "preparing",
       ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
       model,
-      detail: "[DBG-1] entering runVibeAgent",
       ...(openFileRel ? { openFile: openFileRel } : {}),
     },
   });
 
-  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] preparing sent, targetManifest...\n`); } catch {}
-
   const targetManifest = isExecutePlan
     ? await buildTargetFileManifest(projectRoot, runProfile.targetFiles || [])
     : [];
-  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] targetManifest done (${targetManifest.length} entries), openFile=${openFileRel ?? "none"}\n`); } catch {}
   let openFileSnippet = "";
   if (!isExecutePlan && openFile) {
     onEvent({
@@ -1410,13 +1427,11 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       data: {
         phase: "building_context",
         model,
-        detail: `[DBG-2] reading openFile ${openFileRel}`,
+        detail: openFileRel ? `读取当前文件 ${openFileRel}` : undefined,
         ...(openFileRel ? { openFile: openFileRel } : {}),
       },
     });
-    try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] building_context sent, reading openFile ${openFileRel}...\n`); } catch {}
     const result = await readFileContent(openFile.path).catch(() => null);
-    try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] readFileContent done: ok=${result?.ok}\n`); } catch {}
     if (result?.ok) {
       openFileSnippet = sliceFileLines(result.content, 1, 400);
     }
@@ -1426,33 +1441,42 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       data: {
         phase: "building_context",
         model,
-        detail: "[DBG-2] scanning project",
+        detail: "扫描项目结构",
       },
     });
-    try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] building_context sent (no openFile)\n`); } catch {}
   }
+
+  const memoryTaskContext = [prompt, openFileRel].filter(Boolean).join(" ");
+
+  onEvent({
+    type: "status",
+    data: { phase: "building_context", model, detail: "加载项目上下文…" },
+  });
+
+  const [
+    projectContextOrNull,
+    projectMemoryResult,
+    agentsGuideResult,
+    projectSkillsBlock,
+    explorationArchiveBlock,
+  ] = await Promise.all([
+    isExecutePlan ? Promise.resolve(null) : buildProjectContext(projectRoot),
+    readProjectMemory(projectRoot),
+    readProjectAgentsGuide(projectRoot),
+    buildProjectSkillsPromptBlock(projectRoot, prompt),
+    buildExplorationArchivePromptBlock(projectRoot, prompt),
+  ]);
 
   let projectContextBlock = "";
   if (isExecutePlan) {
     projectContextBlock = `\n\n项目根：${projectRoot}（方案执行阶段，已跳过全项目扫描）`;
     projectContextBlock += buildExecutePlanSystemHint(targetManifest, runProfile.userIntent);
-    try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] execute_plan context built\n`); } catch {}
-  } else {
-  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] buildProjectContext start...\n`); } catch {}
-  const projectContext = await buildProjectContext(projectRoot);
-  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] buildProjectContext done: ok=${projectContext.ok}\n`); } catch {}
-    if (projectContext.ok) {
-      projectContextBlock = isAsk
-        ? formatProjectContextForPrompt(projectContext)
-        : formatProjectContextForBuild(projectContext);
-    }
+  } else if (projectContextOrNull?.ok) {
+    projectContextBlock = isAsk
+      ? formatProjectContextForPrompt(projectContextOrNull)
+      : formatProjectContextForBuild(projectContextOrNull);
   }
 
-  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] readProjectMemory start...\n`); } catch {}
-  onEvent({ type: "status", data: { phase: "building_context", model, detail: "[DBG-3] readProjectMemory" } });
-  const projectMemoryResult = await readProjectMemory(projectRoot);
-  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] readProjectMemory done: ok=${projectMemoryResult.ok}\n`); } catch {}
-  const memoryTaskContext = [prompt, openFileRel].filter(Boolean).join(" ");
   const projectMemoryBlock =
     projectMemoryResult.ok && projectMemoryResult.content.trim()
       ? await formatProjectMemoryForPrompt(
@@ -1463,24 +1487,10 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         )
       : "";
 
-  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] readProjectAgentsGuide start...\n`); } catch {}
-  onEvent({ type: "status", data: { phase: "building_context", model, detail: "[DBG-4] readProjectAgentsGuide" } });
-  const agentsGuideResult = await readProjectAgentsGuide(projectRoot);
-  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] readProjectAgentsGuide done: ok=${agentsGuideResult.ok}\n`); } catch {}
   const agentsGuideBlock =
     agentsGuideResult.ok && agentsGuideResult.content.trim()
       ? formatAgentsGuideForPrompt(agentsGuideResult.content, agentsGuideResult.truncated)
       : "";
-
-  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] buildProjectSkillsPromptBlock start...\n`); } catch {}
-  onEvent({ type: "status", data: { phase: "building_context", model, detail: "[DBG-5] buildProjectSkills" } });
-  const projectSkillsBlock = await buildProjectSkillsPromptBlock(projectRoot, prompt);
-  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] buildProjectSkillsPromptBlock done: len=${projectSkillsBlock.length}\n`); } catch {}
-
-  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] buildExplorationArchivePromptBlock start...\n`); } catch {}
-  onEvent({ type: "status", data: { phase: "building_context", model, detail: "[DBG-6] buildExplorationArchive" } });
-  const explorationArchiveBlock = await buildExplorationArchivePromptBlock(projectRoot, prompt);
-  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] buildExplorationArchivePromptBlock done: len=${explorationArchiveBlock.length}\n`); } catch {}
 
   const runtimeProfile = detectProjectRuntimeProfile(projectRoot);
   const runtimeAwarenessBlock = buildRuntimeAwarenessHint(runtimeProfile);
@@ -1581,8 +1591,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     return;
   }
 
-  try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] context assembly done, entering turn loop...\n`); } catch {}
-  onEvent({ type: "status", data: { phase: "building_context", model, detail: "[DBG-7] context assembly done, entering turn loop" } });
+  onEvent({ type: "status", data: { phase: "building_context", model, detail: "上下文就绪，开始运行" } });
 
   for (let turn = 1; ; turn += 1) {
     if (turn > AGENT_SAFETY_MAX_TURNS) {
@@ -1814,8 +1823,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       },
     });
     let completion: Awaited<ReturnType<typeof chatCompletionWithTools>>;
-    try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent] turn ${turn}: calling chatCompletionWithTools, tools=${toolsForTurn.length} contextChars=${contextChars}\n`); } catch {}
-    onEvent({ type: "status", data: { phase: "waiting_model", turn, model, detail: `[DBG-8] turn ${turn}: calling model` } });
+    onEvent({ type: "status", data: { phase: "waiting_model", turn, model, detail: `第 ${turn} 轮：等待模型响应` } });
     try {
       completion = await chatCompletionWithTools({
         endpoint,
@@ -1944,9 +1952,10 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
           let continueHint: string;
           if (hasToolCalls && !hasPartialCode) {
             // 工具调用已完成，但文本总结被截断 → 提示总结剩余部分
-            continueHint =
-              "你的上一次回复因内容较多被截断，之前的工具调用已成功执行，无需重复。" +
-              "请继续完成剩余的分析和总结；如果任务已完成，直接输出简短结论即可。";
+            continueHint = readOnlyBuildRun
+              ? "你的上一次回复因内容较多被截断。只读工具结果已有，请勿重复 grep/read 或调用写工具；直接完成剩余分析与结论。"
+              : "你的上一次回复因内容较多被截断，之前的工具调用已成功执行，无需重复。" +
+                "请继续完成剩余的分析和总结；如果任务已完成，直接输出简短结论即可。";
           } else if (hasPartialCode) {
             // 代码块写到一半被截断 → 提示补完代码块
             continueHint =

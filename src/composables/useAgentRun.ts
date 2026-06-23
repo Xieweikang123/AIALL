@@ -706,6 +706,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     }
     if (contextChars > 0) {
       tokenInfo.push(`${formatCharCount(contextChars)} 上下文`);
+      if (waitingModel && contextChars > 36_000) {
+        tokenInfo.push("上下文较大，响应可能较慢");
+      }
     }
     if (tokenInfo.length > 0) {
       statusText += ` · ${tokenInfo.join(" · ")}`;
@@ -1746,7 +1749,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (isRunVisible(sessionId)) clearStreamDeltaBuffer();
     runManager.abort(sessionId);
     runManager.setAbortHandle(sessionId, null);
-    finishRunSession(sessionId, reason === "已被新指令打断");
+    // 手动停止 / 被新指令打断 → 都不应弹「已完成」通知
+    finishRunSession(sessionId, true);
     if (projectPath.value.trim()) updateAgentRunSessionStatus(sessionId, "interrupted");
   }
 

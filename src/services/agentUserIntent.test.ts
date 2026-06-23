@@ -4,6 +4,7 @@ import {
   buildAgentStepClarifyContinueHint,
   buildBuildWriteBlockedHint,
   buildConsultativeBuildHint,
+  buildConsultativeResumeHint,
   buildImplementFollowUpHint,
   buildImplementationStatusHint,
   buildSessionAuditHint,
@@ -29,6 +30,11 @@ describe("isConsultativeUserPrompt", () => {
     expect(isConsultativeUserPrompt("这个输入框，点哪里能聚焦？")).toBe(true);
     expect(isConsultativeUserPrompt("这是什么组件")).toBe(true);
     expect(isConsultativeUserPrompt("为什么点击没反应")).toBe(true);
+  });
+
+  it("treats manual-stop notification questions as consultative", () => {
+    expect(isConsultativeUserPrompt("手动终止会话，也会通知？")).toBe(true);
+    expect(isConsultativeUserPrompt("停止 Agent 后还会弹通知吗？")).toBe(true);
   });
 
   it("rejects explicit implement requests", () => {
@@ -72,6 +78,11 @@ describe("isConsultativeUserPrompt", () => {
     expect(isImplementationStatusPrompt("改好了吗")).toBe(true);
     expect(isConsultativeUserPrompt("多会话同时进行  改好了吗？")).toBe(true);
   });
+
+  it("treats descriptive 更新 in question-shaped prompts as consultative", () => {
+    expect(isConsultativeUserPrompt("昨天的会话，今天更新了，为啥还处在昨天？")).toBe(true);
+    expect(isConsultativeUserPrompt("请更新一下这个功能？")).toBe(false);
+  });
 });
 
 describe("buildConsultativeBuildHint", () => {
@@ -79,6 +90,19 @@ describe("buildConsultativeBuildHint", () => {
     expect(buildConsultativeBuildHint()).toContain("禁止 patch_file");
     expect(buildConsultativeBuildHint()).toContain("grep");
     expect(buildConsultativeBuildHint()).toContain("Ask 模式");
+  });
+
+  it("forbids premature completion claims on behavior questions", () => {
+    expect(buildConsultativeBuildHint()).toContain("无需再改");
+    expect(buildConsultativeBuildHint()).toContain("当前代码下");
+  });
+});
+
+describe("buildConsultativeResumeHint", () => {
+  it("forbids patch on resume and misleading prior-patch claims", () => {
+    const hint = buildConsultativeResumeHint();
+    expect(hint).toContain("禁止 patch_file");
+    expect(hint).toContain("上一轮的 patch");
   });
 });
 
