@@ -211,6 +211,19 @@ function cloneRoundGroups(groups: AgentRoundGroup[] | undefined): AgentRoundGrou
     : [];
 }
 
+/** Keep streamed narrative when turn_response arrives with a shorter server snapshot. */
+function mergeRoundNarrative(existing: string, incoming: string): string {
+  const prev = existing.trim();
+  const next = incoming.trim();
+  if (!prev) return next;
+  if (!next) return prev;
+  if (prev === next) return prev;
+  if (prev.includes(next)) return prev;
+  if (next.includes(prev)) return next;
+  if (next.length >= prev.length * 0.85) return next;
+  return prev;
+}
+
 export function recordAgentRoundRequest(
   groups: AgentRoundGroup[] | undefined,
   turn: number,
@@ -241,7 +254,9 @@ export function recordAgentRoundResponse(
     ...detail,
     toolCalls: detail.toolCalls.map((call) => ({ ...call })),
   };
-  if (detail.assistantText.trim()) group.narrative = detail.assistantText.trim();
+  if (detail.assistantText.trim()) {
+    group.narrative = mergeRoundNarrative(group.narrative || "", detail.assistantText.trim());
+  }
   if (maxTurns) group.maxTurns = maxTurns;
   return next;
 }

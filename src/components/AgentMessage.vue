@@ -1,16 +1,14 @@
 <template>
   <div class="cursor-agent-wrap" :class="{ collapsed: isFolded }">
-    <!-- 折叠视图 -->
     <AgentFoldedView
       v-if="isFolded"
       :summary="summary"
       @expand="toggleActivityExpanded(msg)"
     />
 
-    <!-- 展开时间线 -->
-    <div v-else class="cursor-timeline">
-      <!-- 合并内容：文字 + 工具调用穿插显示 -->
+    <div class="cursor-timeline">
       <AgentMergedContent
+        :show-process="!isFolded"
         :round-groups="agentRoundGroupViews(msg)"
         :final-answer="timelineAnswerContent(msg)"
         :answer-streaming="timelineAnswerStreaming(msg)"
@@ -20,9 +18,18 @@
         :can-execute-plan="canExecutePlan"
         :show-debug="showDebug"
         :debug-expanded="false"
+        :tools="msg.tools"
+        :agent-turn="msg.agentTurn"
+        :agent-max-turns="msg.agentMaxTurns"
+        :can-resume="canResume"
+        :resume-label="resumeLabel"
+        :written-files="msg.writtenFiles"
+        :was-aborted="msg.agentAborted"
         @execute-plan="emit('execute-plan')"
         @select-option="(option) => emit('select-option', option)"
         @toggle-debug="toggleActivityDetailed(msg)"
+        @open-file="(path) => emit('open-file', path)"
+        @resume="emit('resume')"
       >
         <template #debug>
           <AgentDebugPanel
@@ -33,9 +40,8 @@
         </template>
       </AgentMergedContent>
 
-      <!-- 收起按钮 -->
       <button
-        v-if="!isAgentRunning(msg)"
+        v-if="!isFolded && !isAgentRunning(msg)"
         type="button"
         class="cursor-activity-collapse"
         @click="collapseAgentActivity(msg)"
@@ -43,7 +49,6 @@
         收起过程
       </button>
 
-      <!-- 跳转到底部 -->
       <button
         v-if="showJump"
         type="button"
@@ -75,12 +80,16 @@ const props = defineProps<{
   messageDisplayContent: (msg: any) => string;
   showJump?: boolean;
   canExecutePlan?: boolean;
+  canResume?: boolean;
+  resumeLabel?: string;
 }>();
 
 const emit = defineEmits<{
   "jump-latest": [];
   "execute-plan": [];
   "select-option": [option: AiOption];
+  "open-file": [path: string];
+  resume: [];
 }>();
 
 const {
@@ -132,7 +141,7 @@ function jumpToLatest() {
 .cursor-agent-wrap.collapsed {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   margin-bottom: 0;
   padding: 0;
 }
@@ -142,6 +151,10 @@ function jumpToLatest() {
   flex-direction: column;
   gap: 6px;
   padding: 8px 0;
+}
+
+.cursor-agent-wrap.collapsed .cursor-timeline {
+  padding-top: 0;
 }
 
 .cursor-activity-collapse {

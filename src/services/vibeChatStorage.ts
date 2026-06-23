@@ -185,6 +185,7 @@ const SESSION_DEDUP_TIME_WINDOW_MS = 60_000;
 const MAX_STATUS_LOG_LINES = 32;
 const MAX_TURN_TRACES = 24;
 const MAX_NARRATIVE_CHARS = 800;
+const MAX_PROGRESS_NARRATIVE_CHARS = 2400;
 const MAX_MODEL_STEP_CHARS = 500;
 const MAX_TOOL_CALL_ARGS_CHARS = 240;
 const MAX_TOOL_ARGS_DISK_CHARS = 400;
@@ -512,6 +513,12 @@ function truncateText(text: string, max: number): string {
   return `${text.slice(0, max)}…`;
 }
 
+function truncateNarrativeForStorage(text: string): string {
+  const cleaned = stripToolSummaryFromAssistantContent(text);
+  const max = hasAgentProgressMarker(text) ? MAX_PROGRESS_NARRATIVE_CHARS : MAX_NARRATIVE_CHARS;
+  return truncateText(cleaned, max);
+}
+
 function compactRoundGroupsForStorage(
   groups: PersistedAgentRoundGroup[] | undefined,
 ): PersistedAgentRoundGroup[] | undefined {
@@ -524,7 +531,7 @@ function compactRoundGroupsForStorage(
       narrative: isFinalWithText
         ? undefined
         : group.narrative
-          ? truncateText(stripToolSummaryFromAssistantContent(group.narrative), MAX_NARRATIVE_CHARS)
+          ? truncateNarrativeForStorage(group.narrative)
           : undefined,
       modelSteps: group.modelSteps.map((step) => ({
         id: step.id,
@@ -546,10 +553,7 @@ function compactRoundGroupsForStorage(
         ? {
             assistantText: group.response.isFinal
               ? stripToolSummaryFromAssistantContent(group.response.assistantText)
-              : truncateText(
-                  stripToolSummaryFromAssistantContent(group.response.assistantText),
-                  MAX_NARRATIVE_CHARS,
-                ),
+              : truncateNarrativeForStorage(group.response.assistantText),
             hasToolCalls: group.response.hasToolCalls,
             isFinal: group.response.isFinal,
             toolCalls: group.response.toolCalls.map((call) => ({
@@ -564,6 +568,7 @@ function compactRoundGroupsForStorage(
 }
 
 import { MAX_AGENT_IMAGE_BYTES } from "./imageCompress";
+import { hasAgentProgressMarker } from "./agentProgressMarker";
 import { sessionDiag } from "../utils/sessionDiagLog";
 
 const MAX_PERSISTED_IMAGES = 4;

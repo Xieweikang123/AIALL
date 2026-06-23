@@ -2,16 +2,29 @@ import { extractPlanFilePaths, looksLikeModificationPlan } from "./agentContinua
 
 export type PlanDocumentDisplay = {
   isPlan: boolean;
+  isPartialPlan: boolean;
   files: string[];
   codeBlockCount: number;
 };
+
+/** Detect in-progress plan output before the full plan structure is complete. */
+export function looksLikeStreamingPlanContent(content: string): boolean {
+  const text = content.trim();
+  if (!text) return false;
+  if (/(?:^|\n)\s*(?:##\s*修改方案|\[PLAN\]|<!--\s*agent-plan\s*-->)/i.test(text)) return true;
+  if (/修改方案|涉及文件|详细改动/i.test(text) && extractPlanFilePaths(text).length > 0) return true;
+  return extractPlanFilePaths(text).length >= 2;
+}
 
 export function parsePlanDocumentDisplay(content: string): PlanDocumentDisplay {
   const text = content.trim();
   const files = extractPlanFilePaths(text);
   const codeBlocks = text.match(/```[\w-]*\n[\s\S]*?```/g) ?? [];
+  const isCompletePlan = looksLikeModificationPlan(text);
+  const isPartialPlan = !isCompletePlan && looksLikeStreamingPlanContent(text);
   return {
-    isPlan: looksLikeModificationPlan(text),
+    isPlan: isCompletePlan || isPartialPlan,
+    isPartialPlan,
     files,
     codeBlockCount: codeBlocks.length,
   };
@@ -50,8 +63,8 @@ export function enrichPlanMarkdownForDisplay(
   content: string,
   options?: { whileStreaming?: boolean },
 ): string {
-  if (options?.whileStreaming) return content;
   const { isPlan, files } = parsePlanDocumentDisplay(content);
-  if (!isPlan) return content;
+  if (!isPlan || !files.length) return content;
+  if (options?.whileStreaming) return content;
   return injectPlanFileAnchors(content, files);
 }

@@ -4,6 +4,7 @@ import {
   recordAgentRoundNarrative,
   recordAgentRoundRequest,
   recordAgentRoundResponse,
+  recordAgentRoundStreamDelta,
   recordAgentRoundStatus,
   recordAgentRoundToolStart,
   resetAgentRoundGroupIds,
@@ -76,5 +77,18 @@ describe("agentRoundGroups", () => {
     expect(groups[0].request?.contextMessages).toBe(48);
     expect(groups[0].response?.toolCalls).toHaveLength(1);
     expect(groups[0].narrative).toContain("VibeCodingView");
+  });
+
+  it("keeps longer streamed narrative when turn_response is shorter", () => {
+    resetAgentRoundGroupIds();
+    let groups = recordAgentRoundStreamDelta(undefined, 2, "这是一段较长的流式输出内容，用于验证不会被更短的响应覆盖。", 20);
+    groups = recordAgentRoundResponse(groups, 2, {
+      assistantText: "这是一段较长的流式",
+      toolCalls: [],
+      hasToolCalls: false,
+      isFinal: false,
+    }, 20);
+
+    expect(groups[0].narrative).toContain("用于验证不会被更短的响应覆盖");
   });
 });

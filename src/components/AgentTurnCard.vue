@@ -13,20 +13,14 @@
     </div>
 
     <template v-if="showToolRow">
-      <div v-if="useCompactSummary" class="turn-card__tools-summary">
-        {{ toolsSummary }}
-      </div>
-      <div v-else class="turn-card__tools">
-        <div
+      <div class="turn-card__tools">
+        <AggregateToolCard
           v-for="card in aggregatedCards"
           :key="card.key"
-          class="tool-chip"
-          :class="chipClass(card)"
-        >
-          <span class="tool-chip__icon">{{ card.icon }}</span>
-          <span class="tool-chip__name">{{ card.title }}</span>
-          <span v-if="chipMeta(card)" class="tool-chip__meta">{{ chipMeta(card) }}</span>
-        </div>
+          :card="card"
+          :compact="useCompactSummary"
+          @open-file="(path) => emit('openFile', path)"
+        />
       </div>
 
       <details v-if="hasFoldedActions" class="turn-card__fold">
@@ -35,15 +29,13 @@
           <span class="turn-card__fold-text">更早步骤</span>
         </summary>
         <div class="turn-card__fold-body">
-          <div
+          <AggregateToolCard
             v-for="card in foldedCards"
             :key="card.key"
-            class="tool-chip tool-chip--dim"
-          >
-            <span class="tool-chip__icon">{{ card.icon }}</span>
-            <span class="tool-chip__name">{{ card.title }}</span>
-            <span v-if="chipMeta(card)" class="tool-chip__meta">{{ chipMeta(card) }}</span>
-          </div>
+            :card="card"
+            compact
+            @open-file="(path) => emit('openFile', path)"
+          />
         </div>
       </details>
     </template>
@@ -53,10 +45,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import ChatMarkdown from "./ChatMarkdown.vue";
-import {
-  computeExplorationStats,
-  formatExplorationSummary,
-} from "../services/agentCursorFeed";
+import AggregateToolCard from "./AggregateToolCard.vue";
 import {
   aggregateToolSteps,
   type ToolAggregateCard,
@@ -82,6 +71,10 @@ const props = defineProps<{
   compact?: boolean;
 }>();
 
+const emit = defineEmits<{
+  openFile: [path: string];
+}>();
+
 const turnIndex = computed(() => {
   const match = props.turn.key.match(/(\d+)$/);
   return match ? Number(match[1]) : 0;
@@ -103,18 +96,8 @@ const useCompactSummary = computed(
     allSteps.value.length > COMPACT_STEP_THRESHOLD,
 );
 
-const toolsSummary = computed(() =>
-  formatExplorationSummary(computeExplorationStats(allSteps.value), Boolean(props.running)),
-);
-
 const foldedCards = computed(() => {
-  // Collect keys already shown in the main aggregatedCards row to avoid
-  // a tool (e.g. search) appearing in both the visible chips and the
-  // folded "earlier steps" section.
   const visibleKeys = new Set(aggregatedCards.value.map((c) => c.key));
-  // Also track keys added within the fold loop — multiple ActionsBlocks
-  // can each produce a search card with the same key ("search:batch")
-  // when all search steps land in collapsed portions.
   const addedKeys = new Set<string>();
   const cards: ToolAggregateCard[] = [];
   for (const block of props.turn.actions) {
@@ -135,21 +118,6 @@ const hasFoldedActions = computed(() => foldedCards.value.length > 0);
 const foldedCount = computed(() =>
   props.turn.actions.reduce((sum, b) => sum + b.collapsed.length, 0),
 );
-
-function chipClass(card: ToolAggregateCard): string {
-  const parts: string[] = [];
-  if (card.running) parts.push("tool-chip--running");
-  else if (card.failed) parts.push("tool-chip--fail");
-  else parts.push(`tool-chip--${card.kind}`);
-  return parts.join(" ");
-}
-
-function chipMeta(card: ToolAggregateCard): string {
-  if (card.kind === "file" && card.stepCount > 1) return `×${card.stepCount}`;
-  if (card.kind === "search") return `${card.stepCount}次`;
-  if (card.kind === "edit") return card.subtitle;
-  return "";
-}
 </script>
 
 <style scoped>
@@ -223,115 +191,8 @@ function chipMeta(card: ToolAggregateCard): string {
 
 .turn-card__tools {
   display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-}
-
-.turn-card__tools-summary {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 10px;
-  line-height: 1.4;
-  color: rgba(148, 163, 184, 0.55);
-  padding: 1px 0;
-}
-
-.tool-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: rgba(148, 163, 184, 0.06);
-  border: 1px solid rgba(148, 163, 184, 0.08);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 10px;
-  line-height: 1.4;
-  color: rgba(148, 163, 184, 0.7);
-  transition: background 0.15s ease;
-  min-width: 0;
-}
-
-.tool-chip:hover {
-  background: rgba(148, 163, 184, 0.1);
-}
-
-.tool-chip--file {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.1);
-}
-
-.tool-chip--file .tool-chip__name {
-  color: rgba(255, 255, 255, 0.55);
-}
-
-.tool-chip--search {
-  background: rgba(34, 197, 94, 0.06);
-  border-color: rgba(34, 197, 94, 0.1);
-}
-
-.tool-chip--search .tool-chip__name {
-  color: rgba(134, 239, 172, 0.85);
-}
-
-.tool-chip--edit {
-  background: rgba(251, 146, 60, 0.06);
-  border-color: rgba(251, 146, 60, 0.1);
-}
-
-.tool-chip--edit .tool-chip__name {
-  color: rgba(253, 186, 116, 0.85);
-}
-
-.tool-chip--running {
-  background: rgba(88, 166, 255, 0.08);
-  border-color: rgba(88, 166, 255, 0.2);
-  animation: chip-pulse 1.4s ease-in-out infinite;
-}
-
-.tool-chip--fail {
-  background: rgba(248, 81, 73, 0.06);
-  border-color: rgba(248, 81, 73, 0.12);
-}
-
-.tool-chip.tool-chip--dim,
-.tool-chip.tool-chip--dim.tool-chip--file,
-.tool-chip.tool-chip--dim.tool-chip--search,
-.tool-chip.tool-chip--dim.tool-chip--edit,
-.tool-chip.tool-chip--dim.tool-chip--misc {
-  background: rgba(148, 163, 184, 0.04);
-  border-color: rgba(148, 163, 184, 0.06);
-  color: rgba(148, 163, 184, 0.6);
-}
-
-.tool-chip.tool-chip--dim .tool-chip__name,
-.tool-chip.tool-chip--dim .tool-chip__meta,
-.tool-chip.tool-chip--dim .tool-chip__icon {
-  color: rgba(148, 163, 184, 0.5);
-}
-
-.tool-chip__icon {
-  font-size: 10px;
-  flex-shrink: 0;
-}
-
-.tool-chip__name {
-  font-weight: 500;
-  color: rgba(226, 232, 240, 0.75);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 160px;
-}
-
-.tool-chip__meta {
-  color: rgba(148, 163, 184, 0.5);
-  font-size: 9px;
-  flex-shrink: 0;
-}
-
-@keyframes chip-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+  flex-direction: column;
+  gap: 2px;
 }
 
 .turn-card__fold {
@@ -390,9 +251,9 @@ function chipMeta(card: ToolAggregateCard): string {
 
 .turn-card__fold-body {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  flex-direction: column;
+  gap: 2px;
   margin-top: 4px;
-  padding-left: 8px;
+  padding-left: 4px;
 }
 </style>

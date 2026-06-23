@@ -48,6 +48,20 @@ export function renderMarkdown(text: string): string {
   return sanitizeMarkdownHtml(raw);
 }
 
+/** Faster markdown for streaming: skips syntax highlighting in fenced code blocks. */
+export function renderMarkdownLite(text: string): string {
+  const source = String(text || "").trim();
+  if (!source) return "";
+  const unescaped = source.replace(/\\\*/g, "*").replace(/\\_/g, "_").replace(/\\\[/g, "[");
+  const liteRenderer = new marked.Renderer();
+  liteRenderer.code = function ({ text: code, lang }: { text: string; lang?: string }) {
+    const langAttr = lang ? ` class="language-${lang}"` : "";
+    return `<pre${langAttr}><code${langAttr}>${escapeHtml(code)}</code></pre>`;
+  };
+  const raw = marked.parse(unescaped, { async: false, renderer: liteRenderer }) as string;
+  return sanitizeMarkdownHtml(raw);
+}
+
 // ─── 轻量语法高亮（零依赖） ───────────────────────────
 
 interface Token {

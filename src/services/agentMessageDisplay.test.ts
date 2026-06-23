@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AGENT_PROGRESS_MARKER,
   buildWrittenFilesSummary,
   filterDuplicateFeedThoughts,
   finalizeAssistantBubbleContent,
@@ -9,12 +10,14 @@ import {
   isEnglishToolNarration,
   isAgentTimelineAnswerStreaming,
   isStorageCompactedAssistantText,
+  isSubstantiveProgressSummary,
   isTruncatedAssistantAnswer,
   mergeAssistantTurnText,
   preferFullContentOverCompactedRoundGroup,
   resolveAgentTimelineAnswer,
   resolveAssistantBubbleContent,
   resolveCompletedAgentBubbleContent,
+  resolveLatestAgentProgressNarrative,
   resolveLiveAgentAnswerPreview,
   thoughtDuplicatesBubble,
 } from "./agentMessageDisplay";
@@ -315,6 +318,70 @@ describe("resolveLiveAgentAnswerPreview", () => {
       }),
     ).toBe("");
   });
+
+  it("keeps preview during waiting_model to avoid flicker", () => {
+    expect(
+      resolveLiveAgentAnswerPreview({
+        agentTurn: 2,
+        agentPhase: "waiting_model",
+        roundGroups: [
+          { turn: 2, narrative: "## 分析结论\n正文足够长以便在阶段切换时保持可见", modelSteps: [], toolIds: [] },
+        ],
+      }),
+    ).toBe("## 分析结论\n正文足够长以便在阶段切换时保持可见");
+  });
+
+  it("falls back to marked progress narrative when active turn is tool preamble", () => {
+    const progress = `${AGENT_PROGRESS_MARKER}\n当前假设是路由层未转发 focus。已读 src/foo.ts 与 handler。下一步 patch。`;
+    expect(
+      resolveLiveAgentAnswerPreview({
+        agentTurn: 2,
+        roundGroups: [
+          {
+            turn: 1,
+            narrative: progress,
+            modelSteps: [],
+            toolIds: [],
+            response: { assistantText: "", hasToolCalls: true, isFinal: false, toolCalls: [] },
+          },
+          {
+            turn: 2,
+            narrative: "Now let me read the handler",
+            modelSteps: [],
+            toolIds: [],
+            response: { assistantText: "", hasToolCalls: true, isFinal: false, toolCalls: [] },
+          },
+        ],
+      }),
+    ).toBe("当前假设是路由层未转发 focus。已读 src/foo.ts 与 handler。下一步 patch。");
+  });
+});
+
+describe("resolveLatestAgentProgressNarrative", () => {
+  it("prefers marked multi-sentence progress on the active turn", () => {
+    const progress = `${AGENT_PROGRESS_MARKER}\n第一句假设。第二句已读文件。第三句下一步。`;
+    expect(
+      resolveLatestAgentProgressNarrative({
+        agentTurn: 2,
+        roundGroups: [
+          { turn: 1, narrative: "旧摘要", modelSteps: [], toolIds: [] },
+          { turn: 2, narrative: progress, modelSteps: [], toolIds: [] },
+        ],
+      }),
+    ).toBe("第一句假设。第二句已读文件。第三句下一步。");
+  });
+
+  it("accepts unmarked substantive progress with multiple sentences", () => {
+    const progress =
+      "第一句假设足够长以便通过长度门槛并描述当前排查方向。第二句说明已读 src/foo.ts 与 handler 符号。";
+    expect(isSubstantiveProgressSummary(progress)).toBe(true);
+    expect(
+      resolveLatestAgentProgressNarrative({
+        agentTurn: 1,
+        roundGroups: [{ turn: 1, narrative: progress, modelSteps: [], toolIds: [] }],
+      }),
+    ).toBe(progress);
+  });
 });
 
 describe("resolveAgentTimelineAnswer", () => {
@@ -360,7 +427,7 @@ describe("resolveAgentTimelineAnswer", () => {
     ).toBe("## 完整回答");
   });
 
-  it("marks streaming only when live preview is visible", () => {
+  it("marks streaming while live preview is visible", () => {
     expect(
       isAgentTimelineAnswerStreaming(
         {
@@ -380,7 +447,7 @@ describe("resolveAgentTimelineAnswer", () => {
         true,
         true,
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 });
 

@@ -202,7 +202,7 @@ export function buildImplementPasteBlockedNudge(): string {
 export function buildExploreInterimDiagnosisNudge(totalExploreTurns: number): string {
   return [
     `【系统提示】已累计 ${totalExploreTurns} 轮探索且尚未修改或给出结论。`,
-    "下一轮开始必须用中文输出一段用户可见的进度摘要（2–4 句）：",
+    "下一轮开始须以 `<!-- agent-progress -->` 开头，随后用中文输出一段用户可见的进度摘要（2–4 句）：",
     "① 当前根因假设；② 已读过哪些关键文件/符号；③ 下一步是 patch 还是仍需一次 read。",
     "摘要写完后才能继续调用工具；禁止仅用英文 \"Now let me...\" 句式。",
     "若已足够定位问题，本轮必须 patch_file / write_file。",

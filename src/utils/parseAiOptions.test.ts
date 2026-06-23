@@ -44,4 +44,15 @@ describe("parseAiOptions", () => {
   it("does not create implementation action for ordinary explanations", () => {
     expect(parseAiOptions("当前还没有点击放大逻辑。")).toBeNull();
   });
+
+  it("parses complete option blocks from partial streaming text", () => {
+    const text = [
+      "需要调整工具摘要展示吗？",
+      "1. 隐藏/折叠工具摘要（不显示给用户）？",
+      "2. 美化样式（如加边框、背景色区分）？",
+    ].join("\n");
+    const parsed = parseAiOptions(text);
+    expect(parsed?.options).toHaveLength(2);
+    expect(parsed?.before).toContain("需要调整");
+  });
 });

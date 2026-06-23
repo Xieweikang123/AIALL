@@ -4,6 +4,14 @@ import { isPrematureVisionCompletionClaim } from "../../server/visionMessage";
 import { stripToolSummaryFromAssistantContent } from "./vibeChatStorage";
 import { stripAgentSuggestions } from "./agentSuggestions";
 import { stripTextToolCallMarkup } from "./textToolCallMarkup";
+import {
+  AGENT_PROGRESS_MARKER,
+  AGENT_PROGRESS_MARKER_RE,
+  hasAgentProgressMarker,
+  stripAgentProgressMarker,
+} from "./agentProgressMarker";
+
+export { AGENT_PROGRESS_MARKER, AGENT_PROGRESS_MARKER_RE, hasAgentProgressMarker, stripAgentProgressMarker };
 
 export type AssistantBubbleSource = {
   content?: string;
@@ -34,6 +42,21 @@ const ENGLISH_TOOL_NARRATION_RE = /^(?:Now let me|Let me|I'll|I need to|First,?\
 const CHINESE_TOOL_NARRATION_RE =
   /^(?:现在|接下来|让我|我来|我们|下面|先|然后|再|我需要|我要)\s*(?:看看|查看|读取|搜索|检查|分析|确认|定位|找到|打开|找|查|读|写|看|试|仔细)/;
 
+function countSentenceUnits(text: string): number {
+  return text
+    .split(/[。！？；\n]/)
+    .map((part) => part.trim())
+    .filter(Boolean).length;
+}
+
+/** Multi-sentence substantive text during exploration — not a one-line tool preamble. */
+export function isSubstantiveProgressSummary(text: string): boolean {
+  const trimmed = stripAgentProgressMarker(normalizeBubbleText(text));
+  if (!trimmed) return false;
+  if (hasAgentProgressMarker(text)) return trimmed.length >= 24;
+  return trimmed.length >= SUBSTANTIVE_MIN_CHARS && countSentenceUnits(trimmed) >= 2;
+}
+
 function normalizeBubbleText(text: string): string {
   return stripAgentSuggestions(
     stripTextToolCallMarkup(stripToolSummaryFromAssistantContent(text)),
@@ -42,6 +65,7 @@ function normalizeBubbleText(text: string): string {
 
 /** Short planning lines emitted before tool calls — not user-facing answers. */
 export function isAgentToolTurnNarration(text: string): boolean {
+  if (hasAgentProgressMarker(text) || isSubstantiveProgressSummary(text)) return false;
   const trimmed = normalizeBubbleText(text);
   if (!trimmed) return false;
   if (isEnglishToolNarration(trimmed)) return true;
@@ -160,34 +184,74 @@ function pickBestAssistantBubbleText(candidates: string[], direct: string): stri
   return direct;
 }
 
-/** Live final-answer stream while the model is still generating (not tool-turn preamble). */
-export function resolveLiveAgentAnswerPreview(msg: LiveAgentAnswerSource): string {
-  // 工具运行阶段：显示 narrative（Agent 的思考过程）
-  if (msg.tools?.some((tool) => tool.running)) {
-    const groups = msg.roundGroups ?? [];
-    const activeTurn = msg.agentTurn;
-    const group =
-      (activeTurn && activeTurn > 0 ? groups.find((item) => item.turn === activeTurn) : undefined) ??
-      groups.filter((item) => item.turn > 0).at(-1);
-    if (group?.narrative) {
-      const text = normalizeBubbleText(group.narrative);
-      if (text && !isAgentToolTurnNarration(text)) return text;
-    }
-    return "";
-  }
+const AGENT_LIVE_PREVIEW_PREP_PHASES = new Set([
+  "preparing",
+  "starting",
+  "building_context",
+  "connecting_local",
+  "stream_connected",
+  "connected",
+  "reconnecting",
+]);
 
-  if (msg.agentPhase && msg.agentPhase !== "streaming_model") return "";
-
+function resolveActiveRoundGroup(msg: LiveAgentAnswerSource): AgentRoundGroup | undefined {
   const groups = msg.roundGroups ?? [];
   const activeTurn = msg.agentTurn;
-  const group =
+  return (
     (activeTurn && activeTurn > 0 ? groups.find((item) => item.turn === activeTurn) : undefined) ??
-    groups.filter((item) => item.turn > 0).at(-1);
+    groups.filter((item) => item.turn > 0).at(-1)
+  );
+}
+
+function shouldHideToolTurnPreview(text: string, group: AgentRoundGroup): boolean {
+  if (!group.response?.hasToolCalls || group.response?.isFinal) return false;
+  if (hasAgentProgressMarker(text) || isSubstantiveProgressSummary(text)) return false;
+  if (isAgentToolTurnNarration(text)) return true;
+  return text.length < SUBSTANTIVE_MIN_CHARS;
+}
+
+/** Latest marked or multi-sentence progress summary from round narratives. */
+export function resolveLatestAgentProgressNarrative(
+  msg: Pick<LiveAgentAnswerSource, "roundGroups" | "agentTurn">,
+): string {
+  const groups = msg.roundGroups ?? [];
+  const activeTurn = msg.agentTurn;
+  const ordered =
+    activeTurn && activeTurn > 0
+      ? [
+          ...groups.filter((item) => item.turn === activeTurn),
+          ...groups.filter((item) => item.turn > 0 && item.turn !== activeTurn),
+        ]
+      : [...groups].filter((item) => item.turn > 0).reverse();
+
+  for (const group of ordered) {
+    const raw = group.narrative || group.response?.assistantText || "";
+    if (!raw) continue;
+    if (!hasAgentProgressMarker(raw) && !isSubstantiveProgressSummary(raw)) continue;
+    const text = normalizeBubbleText(stripAgentProgressMarker(raw));
+    if (text && !isAgentToolTurnNarration(raw)) return text;
+  }
+  return "";
+}
+
+/** Live final-answer stream while the model is still generating (not tool-turn preamble). */
+export function resolveLiveAgentAnswerPreview(msg: LiveAgentAnswerSource): string {
+  if (msg.agentPhase && AGENT_LIVE_PREVIEW_PREP_PHASES.has(msg.agentPhase)) return "";
+
+  const group = resolveActiveRoundGroup(msg);
   if (!group) return "";
-  if (group.response?.hasToolCalls) return "";
 
   const text = normalizeBubbleText(group.narrative || group.response?.assistantText || "");
-  if (!text || isAgentToolTurnNarration(text)) return "";
+  if (!text || isAgentToolTurnNarration(text)) {
+    const progress = resolveLatestAgentProgressNarrative(msg);
+    if (progress) return progress;
+    return "";
+  }
+  if (shouldHideToolTurnPreview(text, group)) {
+    const progress = resolveLatestAgentProgressNarrative(msg);
+    if (progress) return progress;
+    return "";
+  }
   return text;
 }
 
@@ -205,9 +269,9 @@ export function resolveAgentTimelineAnswer(
 export function isAgentTimelineAnswerStreaming(
   msg: LiveAgentAnswerSource,
   isRunning: boolean,
-  hasRunningTool = false,
+  _hasRunningTool = false,
 ): boolean {
-  return isRunning && !hasRunningTool && Boolean(resolveLiveAgentAnswerPreview(msg).trim());
+  return isRunning && Boolean(resolveLiveAgentAnswerPreview(msg).trim());
 }
 
 /** Resolve the text shown in the assistant chat bubble (with fallbacks for agent runs). */

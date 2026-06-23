@@ -200,7 +200,7 @@ export function useAgentMessage(
   const isFolded = computed(() => !isAgentRunning(msg.value) && !isActivityExpanded(msg.value));
   const blocks = computed(() => cursorAgentFeedBlocks(msg.value));
   const answer = computed(() => cursorAgentFeedAnswer(msg.value));
-  const showDebug = computed(() => hasAgentDebugDetails(msg.value) && !shouldUseCompactAgentFeed(msg.value));
+  const showDebug = computed(() => hasAgentDebugDetails(msg.value));
   const showCompact = computed(() => shouldUseCompactAgentFeed(msg.value));
   const hasProcessSteps = computed(() => hasAgentProcessSteps(msg.value));
 

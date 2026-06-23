@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildAgentExplorationProgress,
+  buildAgentExplorationTimeline,
   buildCursorAgentFeed,
   buildCursorAgentTimeline,
   computeExplorationStats,
@@ -212,5 +214,72 @@ describe("agentCursorFeed", () => {
     expect(recent).toHaveLength(6);
     expect(hiddenCount).toBe(4);
     expect(recent[5]?.key).toBe("a-9");
+  });
+
+  it("builds exploration progress for running agent without final answer", () => {
+    expect(
+      buildAgentExplorationProgress({
+        isRunning: true,
+        agentTurn: 6,
+        agentMaxTurns: 20,
+        tools: [
+          {
+            id: "1",
+            name: "read_file",
+            icon: "📄",
+            title: "读取",
+            detail: "ChatPanel.vue",
+            label: "读取",
+            summary: "ok",
+            ok: true,
+          },
+          {
+            id: "2",
+            name: "read_file",
+            icon: "📄",
+            title: "读取",
+            detail: "ChatPanel.vue",
+            label: "读取",
+            summary: "",
+            ok: true,
+            running: true,
+          },
+        ],
+      }),
+    ).toEqual({
+      summary: "探索代码库 · 读 2 个文件",
+      detail: "第 6/20 轮",
+      activeTool: "读取 · ChatPanel.vue",
+    });
+  });
+
+  it("builds horizontal exploration timeline chips", () => {
+    expect(
+      buildAgentExplorationTimeline([
+        {
+          id: "1",
+          name: "read_file",
+          icon: "📄",
+          title: "读取",
+          detail: "src/a.ts",
+          label: "读取",
+          summary: "ok",
+          ok: true,
+        },
+        {
+          id: "2",
+          name: "grep",
+          icon: "🔍",
+          title: "搜索",
+          detail: "pattern",
+          label: "搜索",
+          summary: "ok",
+          ok: true,
+        },
+      ]),
+    ).toEqual([
+      { key: "file:src/a.ts", kind: "file", path: "src/a.ts", label: "a.ts" },
+      { key: "search:batch", kind: "search", path: undefined, label: "搜索 ×1" },
+    ]);
   });
 });

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onUpdated, ref, watch } from "vue";
-import { renderMarkdown } from "../utils/renderMarkdown";
+import { renderMarkdown, renderMarkdownLite } from "../utils/renderMarkdown";
 import { parseAiOptions, type AiOption } from "../utils/parseAiOptions";
 import AiOptionButtons from "./AiOptionButtons.vue";
 import { stripTextToolCallMarkup } from "../services/textToolCallMarkup";
@@ -35,8 +35,8 @@ watch(
       streamingThrottle.pushSource(value, true);
       return;
     }
-    renderSource.value = value;
     streamingThrottle.pushSource(value, false);
+    renderSource.value = value;
   },
   { immediate: true },
 );
@@ -126,30 +126,43 @@ function wrapToolSummaryBlocks(el: HTMLElement) {
   });
 }
 
-// Parse options from content (only when interactive and not streaming)
+// Parse options from content (including during streaming once the block is complete)
+const activeSource = computed(() =>
+  props.streaming ? streamingRenderText.value : renderSource.value,
+);
+
 const parsedOptions = computed(() => {
-  if (!props.interactive || props.streaming) return null;
-  return parseAiOptions(renderSource.value);
+  if (!props.interactive) return null;
+  const parsed = parseAiOptions(activeSource.value);
+  if (!parsed?.options.length) return null;
+  return parsed;
 });
 
 const markdownContent = computed(() => {
   const parsed = parsedOptions.value;
-  if (!parsed) return renderSource.value;
+  if (!parsed) return activeSource.value;
   return parsed.before;
 });
 
 const html = computed(() => renderMarkdown(stripTextToolCallMarkup(markdownContent.value)));
 
 const streamingHtml = computed(() =>
-  renderMarkdown(stripTextToolCallMarkup(streamingRenderText.value)),
+  renderMarkdownLite(stripTextToolCallMarkup(markdownContent.value)),
+);
+
+const displayHtml = computed(() => (props.streaming ? streamingHtml.value : html.value));
+
+const showMarkdown = computed(
+  () => Boolean(displayHtml.value) || Boolean(parsedOptions.value?.options.length),
 );
 
 function handleOptionSelect(option: AiOption) {
   emit("selectOption", option);
 }
 
-// After render, wrap tool summary blocks
+// After render, wrap tool summary blocks (skip while streaming for perf)
 function postProcess() {
+  if (props.streaming) return;
   nextTick(() => {
     if (markdownRef.value) {
       wrapToolSummaryBlocks(markdownRef.value);
@@ -158,19 +171,15 @@ function postProcess() {
 }
 
 // Trigger on html change
-watch([html, streamingHtml, () => props.streaming], () => postProcess(), { immediate: true });
-onUpdated(() => postProcess());
+watch([displayHtml, () => props.streaming], () => postProcess(), { immediate: true });
+onUpdated(() => {
+  if (!props.streaming) postProcess();
+});
 </script>
 
 <template>
-  <div
-    v-if="streaming && content"
-    ref="markdownRef"
-    class="msg-markdown msg-markdown--streaming"
-    v-html="streamingHtml"
-  />
-  <div v-else-if="html || parsedOptions?.options.length" ref="markdownRef" class="msg-markdown">
-    <div v-if="html" v-html="html" />
+  <div v-if="showMarkdown" ref="markdownRef" class="msg-markdown" :class="{ 'msg-markdown--streaming': streaming }">
+    <div v-if="displayHtml" v-html="displayHtml" />
     <AiOptionButtons
       v-if="parsedOptions?.options.length"
       :options="parsedOptions.options"
@@ -192,18 +201,6 @@ onUpdated(() => postProcess());
 
 .msg-markdown--streaming {
   opacity: 0.98;
-  animation: typing-fade-in 0.3s ease-out;
-}
-
-@keyframes typing-fade-in {
-  from {
-    opacity: 0.7;
-    filter: blur(0.3px);
-  }
-  to {
-    opacity: 0.98;
-    filter: blur(0);
-  }
 }
 
 .msg-markdown :deep(p) {

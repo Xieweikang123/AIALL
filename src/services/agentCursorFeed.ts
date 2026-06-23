@@ -1,5 +1,6 @@
 import type { AgentRoundGroupView, AgentRoundTool } from "./agentRoundGroups";
 import { buildNarrativeSegments } from "./agentNarrativeSegments";
+import { aggregateToolSteps } from "./agentToolAggregates";
 
 export type CursorFeedItem =
   | { kind: "thought"; key: string; text: string }
@@ -65,6 +66,82 @@ export function formatExplorationSummary(stats: AgentExplorationStats, running =
   if (!parts.length) return running ? "准备中…" : "无工具步骤";
   const body = parts.join(" · ");
   return running ? `探索代码库 · ${body}` : `已完成 · ${body}`;
+}
+
+export type AgentExplorationProgressView = {
+  summary: string;
+  detail?: string;
+  activeTool?: string;
+};
+
+function formatActiveToolLabel(step: AgentRoundTool): string {
+  const detail = step.detail?.trim();
+  if (detail) return `${step.title} · ${detail}`;
+  return step.title || step.label || step.name;
+}
+
+/** User-facing progress while Agent explores without a final answer yet. */
+export function buildAgentExplorationProgress(input: {
+  tools?: AgentRoundTool[];
+  agentTurn?: number;
+  agentMaxTurns?: number;
+  isRunning: boolean;
+}): AgentExplorationProgressView | null {
+  if (!input.isRunning) return null;
+
+  const tools = input.tools ?? [];
+  const runningTool = tools.find((step) => step.running);
+  const completedTools = tools.filter((step) => !step.running);
+  if (!runningTool && completedTools.length === 0) return null;
+
+  const stats = computeExplorationStats(tools);
+  const summary = formatExplorationSummary(stats, true);
+  const detail =
+    input.agentTurn && input.agentMaxTurns
+      ? `第 ${input.agentTurn}/${input.agentMaxTurns} 轮`
+      : input.agentTurn
+        ? `第 ${input.agentTurn} 轮`
+        : undefined;
+  const activeTool = runningTool
+    ? formatActiveToolLabel(runningTool)
+    : completedTools.length
+      ? formatActiveToolLabel(completedTools[completedTools.length - 1]!)
+      : undefined;
+
+  return { summary, detail, activeTool };
+}
+
+export type AgentExplorationTimelineChip = {
+  key: string;
+  label: string;
+  kind: "file" | "search" | "edit" | "misc";
+  path?: string;
+};
+
+/** Compact horizontal chips summarizing exploration steps for the process header. */
+export function buildAgentExplorationTimeline(
+  tools: AgentRoundTool[] | undefined,
+  maxChips = 8,
+): AgentExplorationTimelineChip[] {
+  const steps = tools ?? [];
+  if (steps.length < 2) return [];
+
+  const cards = aggregateToolSteps(steps);
+  return cards.slice(-maxChips).map((card) => ({
+    key: card.key,
+    kind: card.kind,
+    path: card.path,
+    label:
+      card.kind === "file"
+        ? card.stepCount > 1
+          ? `${card.title} ×${card.stepCount}`
+          : card.title
+        : card.kind === "search"
+          ? `搜索 ×${card.stepCount}`
+          : card.kind === "edit"
+            ? `改 ${card.title}`
+            : card.title,
+  }));
 }
 
 export function formatCollapsedStepsSummary(steps: AgentRoundTool[]): string {

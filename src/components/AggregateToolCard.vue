@@ -4,13 +4,31 @@
       <summary class="aggregate-card-head">
         <span class="aggregate-card-icon">{{ card.icon }}</span>
         <template v-if="compact">
-          <span class="aggregate-card-title">{{ card.title }}</span>
+          <button
+            v-if="card.path"
+            type="button"
+            class="aggregate-card-title aggregate-card-title--link"
+            :title="card.path"
+            @click.stop="emit('openFile', card.path!)"
+          >
+            {{ card.title }}
+          </button>
+          <span v-else class="aggregate-card-title">{{ card.title }}</span>
           <span class="aggregate-card-sep">·</span>
           <span class="aggregate-card-subtitle" :class="{ 'shimmer-text--fast': card.running }">{{ card.subtitle }}</span>
         </template>
         <template v-else>
           <div class="aggregate-card-text">
-            <span class="aggregate-card-title">{{ card.title }}</span>
+            <button
+              v-if="card.path"
+              type="button"
+              class="aggregate-card-title aggregate-card-title--link"
+              :title="card.path"
+              @click.stop="emit('openFile', card.path!)"
+            >
+              {{ card.title }}
+            </button>
+            <span v-else class="aggregate-card-title">{{ card.title }}</span>
             <span class="aggregate-card-subtitle" :class="{ 'shimmer-text--fast': card.running }">{{ card.subtitle }}</span>
           </div>
         </template>
@@ -27,13 +45,31 @@
     <div v-else class="aggregate-card-head static">
       <span class="aggregate-card-icon">{{ card.icon }}</span>
       <template v-if="compact">
-        <span class="aggregate-card-title">{{ card.title }}</span>
+        <button
+          v-if="card.path"
+          type="button"
+          class="aggregate-card-title aggregate-card-title--link"
+          :title="card.path"
+          @click="emit('openFile', card.path!)"
+        >
+          {{ card.title }}
+        </button>
+        <span v-else class="aggregate-card-title">{{ card.title }}</span>
         <span class="aggregate-card-sep">·</span>
         <span class="aggregate-card-subtitle">{{ card.subtitle }}</span>
       </template>
       <template v-else>
         <div class="aggregate-card-text">
-          <span class="aggregate-card-title">{{ card.title }}</span>
+          <button
+            v-if="card.path"
+            type="button"
+            class="aggregate-card-title aggregate-card-title--link"
+            :title="card.path"
+            @click="emit('openFile', card.path!)"
+          >
+            {{ card.title }}
+          </button>
+          <span v-else class="aggregate-card-title">{{ card.title }}</span>
           <span class="aggregate-card-subtitle">{{ card.subtitle }}</span>
         </div>
       </template>
@@ -49,6 +85,10 @@ const props = defineProps<{
   card: ToolAggregateCard;
   highlightKeyword?: string;
   compact?: boolean;
+}>();
+
+const emit = defineEmits<{
+  openFile: [path: string];
 }>();
 
 const cardClass = computed(() => {
@@ -209,6 +249,19 @@ function highlightLine(line: string, keyword: string): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.aggregate-card-title--link {
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.aggregate-card-title--link:hover {
+  color: rgba(126, 182, 255, 0.98);
+  text-decoration: underline;
 }
 
 .aggregate-card-subtitle {

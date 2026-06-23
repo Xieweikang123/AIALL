@@ -43,6 +43,7 @@ import {
   vibeChatSessionStoreDiskPath,
   VIBE_CHAT_SESSIONS_LOGICAL_DIR,
 } from "./vibeChatStorage";
+import { AGENT_PROGRESS_MARKER } from "./agentProgressMarker";
 
 const CHAT_STORAGE_KEY = "vibe-coding-chat";
 
@@ -353,6 +354,65 @@ describe("sanitizePersistedChatMessages", () => {
     expect(sanitized[0].status).toBeUndefined();
     expect(sanitized[0].agentPhase).toBeUndefined();
     expect(sanitized[0].streaming).toBeUndefined();
+  });
+
+  it("keeps longer progress-marked round narratives when compacting for storage", () => {
+    const longProgress =
+      `${AGENT_PROGRESS_MARKER}\n` + "进度摘要句子内容。".repeat(120);
+    expect(longProgress.length).toBeGreaterThan(800);
+    const sanitized = sanitizePersistedChatMessages([
+      {
+        id: "a1",
+        role: "assistant",
+        content: "final answer kept in msg.content",
+        roundGroups: [
+          {
+            turn: 1,
+            modelSteps: [],
+            toolIds: [],
+            narrative: longProgress,
+            response: {
+              assistantText: "",
+              hasToolCalls: true,
+              isFinal: false,
+              toolCalls: [],
+            },
+          },
+        ],
+      },
+    ]);
+    const stored = sanitized[0].roundGroups?.[0]?.narrative ?? "";
+    expect(stored.endsWith("…")).toBe(false);
+    expect(stored.length).toBeGreaterThan(800);
+  });
+
+  it("truncates ordinary round narratives at the default cap", () => {
+    const longNarrative = "普通探索说明。".repeat(200);
+    expect(longNarrative.length).toBeGreaterThan(800);
+    const sanitized = sanitizePersistedChatMessages([
+      {
+        id: "a1",
+        role: "assistant",
+        content: "done",
+        roundGroups: [
+          {
+            turn: 1,
+            modelSteps: [],
+            toolIds: [],
+            narrative: longNarrative,
+            response: {
+              assistantText: "",
+              hasToolCalls: true,
+              isFinal: false,
+              toolCalls: [],
+            },
+          },
+        ],
+      },
+    ]);
+    const stored = sanitized[0].roundGroups?.[0]?.narrative ?? "";
+    expect(stored.endsWith("…")).toBe(true);
+    expect(stored.length).toBeLessThanOrEqual(801);
   });
 
   it("strips heavy agent debug payloads before persistence", () => {

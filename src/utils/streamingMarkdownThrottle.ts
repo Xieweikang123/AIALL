@@ -1,5 +1,5 @@
 /** Throttle interval for re-parsing markdown while content is still streaming. */
-export const STREAM_MARKDOWN_THROTTLE_MS = 150;
+export const STREAM_MARKDOWN_THROTTLE_MS = 80;
 
 export type StreamingMarkdownThrottle = {
   /** Latest throttled text safe to pass into renderMarkdown. */

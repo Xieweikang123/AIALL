@@ -17,8 +17,23 @@ describe("parsePlanDocumentDisplay", () => {
   it("detects plan metadata", () => {
     const display = parsePlanDocumentDisplay(SAMPLE_PLAN);
     expect(display.isPlan).toBe(true);
+    expect(display.isPartialPlan).toBe(false);
     expect(display.files).toEqual(["src/foo.ts", "src/bar.ts"]);
     expect(display.codeBlockCount).toBe(1);
+  });
+
+  it("detects partial plan while streaming", () => {
+    const display = parsePlanDocumentDisplay("将分析并修改 `src/foo.ts` 与 `src/bar.ts`");
+    expect(display.isPlan).toBe(true);
+    expect(display.isPartialPlan).toBe(true);
+    expect(display.files).toEqual(["src/foo.ts", "src/bar.ts"]);
+  });
+
+  it("treats multi-file outline as complete plan shell", () => {
+    const display = parsePlanDocumentDisplay("## 修改方案\n将改 `src/foo.ts` 和 `src/bar.ts`");
+    expect(display.isPlan).toBe(true);
+    expect(display.isPartialPlan).toBe(false);
+    expect(display.files).toEqual(["src/foo.ts", "src/bar.ts"]);
   });
 
   it("returns non-plan for ordinary answers", () => {

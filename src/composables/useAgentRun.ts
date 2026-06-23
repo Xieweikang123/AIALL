@@ -680,38 +680,42 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   function agentStatusDisplay(msg: ChatMessage): string {
     void agentUiTick.value;
+    const compactStatus = cursorCompactLiveStatus(msg);
+    if (compactStatus) return compactStatus;
+
     const run = findRunForMsg(msg);
     const live = run?.live;
     if (!live) return "";
 
-    let statusText = formatLiveStatus(live);
+    if (live.phase === "executing_tool" || live.phase === "executing_tools") {
+      const running = msg.tools?.find((tool) => tool.running);
+      if (running?.title) {
+        return running.detail ? `${running.title} · ${running.detail}` : `${running.title}…`;
+      }
+      if (live.toolTitle) {
+        return live.toolDetail ? `${live.toolTitle} · ${live.toolDetail}` : `${live.toolTitle}…`;
+      }
+      return "执行工具…";
+    }
+
+    let statusText = formatLiveStatus(live, true);
     const waitingModel =
       live.phase === "waiting_model" ||
       live.phase === "sending_request" ||
       live.phase === "retrying_model";
-    if (
-      live.waitStartedAt &&
-      waitingModel &&
-      !live.detail?.trim()
-    ) {
+    if (live.waitStartedAt && waitingModel) {
       const elapsed = Math.max(0, Math.floor((Date.now() - live.waitStartedAt) / 1000));
-      statusText = `${statusText} · 已等待 ${elapsed}s`;
-    }
-
-    const tokenInfo: string[] = [];
-    const streamChars = live.streamChars ?? msg.streamChars ?? 0;
-    const contextChars = live.contextChars ?? msg.contextChars ?? 0;
-    if (streamChars > 0) {
-      tokenInfo.push(`${streamChars} 字输出`);
-    }
-    if (contextChars > 0) {
-      tokenInfo.push(`${formatCharCount(contextChars)} 上下文`);
-      if (waitingModel && contextChars > 36_000) {
-        tokenInfo.push("上下文较大，响应可能较慢");
+      if (elapsed >= 15) {
+        statusText = `${statusText} · ${elapsed}s`;
+      }
+      if (elapsed > 45) {
+        statusText += " · 可 @ 文件缩小范围";
       }
     }
-    if (tokenInfo.length > 0) {
-      statusText += ` · ${tokenInfo.join(" · ")}`;
+
+    const contextChars = live.contextChars ?? msg.contextChars ?? 0;
+    if (waitingModel && contextChars > 36_000) {
+      statusText += " · 上下文较大";
     }
 
     return statusText;

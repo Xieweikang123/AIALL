@@ -3,6 +3,9 @@
     <div class="plan-document-head">
       <div class="plan-document-title">
         <span class="plan-document-badge">修改方案</span>
+        <span v-if="streaming && display.isPartialPlan" class="plan-document-badge plan-document-badge--draft">
+          生成中
+        </span>
         <span v-if="display.files.length || display.codeBlockCount" class="plan-document-meta">
           <template v-if="display.files.length">{{ display.files.length }} 个文件</template>
           <template v-if="display.files.length && display.codeBlockCount"> · </template>
@@ -60,8 +63,8 @@ const emit = defineEmits<{
 
 const bodyRef = ref<HTMLElement | null>(null);
 const display = computed(() => parsePlanDocumentDisplay(props.content));
-const showPlanChrome = computed(() => !props.streaming && display.value.isPlan);
-const filesExpanded = computed(() => display.value.files.length <= 6);
+const showPlanChrome = computed(() => display.value.isPlan);
+const filesExpanded = computed(() => display.value.files.length <= (props.streaming ? 8 : 6));
 
 function scrollToFile(index: number) {
   const root = bodyRef.value;
@@ -157,6 +160,11 @@ onUpdated(() => {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
+}
+
+.plan-document-badge--draft {
+  background: rgba(210, 153, 34, 0.14);
+  color: rgba(255, 214, 130, 0.96);
 }
 
 .plan-document-meta {

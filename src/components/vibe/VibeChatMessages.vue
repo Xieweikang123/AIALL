@@ -32,7 +32,7 @@
           >
             执行方案
           </button>
-          <button type="button" class="ghost small" title="复制此消息" @click="ctx.copyText(m.content)">
+          <button type="button" class="ghost small" title="复制此消息" @click="ctx.copyText(ctx.messageDisplayContent(m))">
             复制
           </button>
           <button v-if="m.role === 'user'" type="button" class="ghost small" title="编辑此消息" @click="ctx.editUserMessage(m.id)">
@@ -107,9 +107,13 @@
         :message-display-content="ctx.messageDisplayContent"
         :show-jump="ctx.chainJumpVisible[m.id]"
         :can-execute-plan="ctx.canExecutePlanMessage(m)"
+        :can-resume="ctx.canResumeAgentRun(m) && !ctx.isAgentRunning(m)"
+        :resume-label="ctx.resolveAgentResumeButtonLabel(m)"
         @execute-plan="ctx.executePlanFromMessage(m.id)"
         @select-option="(option) => ctx.handleAiOptionSelect(option, m)"
         @jump-latest="ctx.jumpChainToLatest(m.id)"
+        @open-file="(path) => ctx.previewAgentFile(m.id, path)"
+        @resume="ctx.resumeAgentRun(m.id)"
       />
       <div
         v-if="m.role === 'user' && ctx.userMessageImages(m).length"
