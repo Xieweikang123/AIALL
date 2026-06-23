@@ -10,7 +10,7 @@
       <p class="panel-empty-title">正在加载 Git 状态…</p>
     </div>
     <div v-else-if="gitIsRepo" class="git-panel-content">
-      <div class="git-header">
+      <div class="git-header git-section-card">
         <div class="git-header-row git-branch-row">
           <div class="git-branch-info">
             <span class="git-branch-icon" aria-hidden="true">⎇</span>
@@ -19,44 +19,47 @@
               ⟶ {{ gitTrackingBranch.replace(/^[^/]+\//, '') }}
             </span>
           </div>
-          <button type="button" class="ghost tiny" :disabled="gitLoading" @click="$emit('refresh')">刷新</button>
-          <span
-            v-if="fileWatcherActive"
-            class="file-watcher-dot"
-            :class="{ connected: fileWatcherConnected }"
-            :title="fileWatcherConnected ? '文件监控已连接' : '文件监控重连中…'"
-          />
+          <div class="git-header-actions">
+            <button type="button" class="ghost tiny" :disabled="gitLoading" @click="$emit('refresh')">刷新</button>
+            <span
+              v-if="fileWatcherActive"
+              class="file-watcher-dot"
+              :class="{ connected: fileWatcherConnected }"
+              :title="fileWatcherConnected ? '文件监控已连接' : '文件监控重连中…'"
+            />
+          </div>
         </div>
         <div v-if="gitRemotes.length" class="git-header-row git-sync-row">
           <div class="git-sync-info">
-            <span class="git-sync-stat" :class="{ ahead: gitAhead > 0, behind: gitBehind > 0 }">
+            <span class="git-sync-stat" :class="{ ahead: gitAhead > 0 }">
               <span class="git-sync-arrow">↑</span>{{ gitAhead }}
             </span>
-            <span class="git-sync-stat" :class="{ ahead: gitAhead > 0, behind: gitBehind > 0 }">
+            <span class="git-sync-stat" :class="{ behind: gitBehind > 0 }">
               <span class="git-sync-arrow">↓</span>{{ gitBehind }}
             </span>
           </div>
           <div class="git-remote-actions">
-            <button type="button" class="ghost tiny" :disabled="!!gitRemoteAction" @click="$emit('do-fetch')">
+            <button type="button" class="git-remote-btn" :disabled="!!gitRemoteAction" @click="$emit('do-fetch')">
               {{ gitRemoteAction === 'fetch' ? '…' : 'Fetch' }}
             </button>
-            <button type="button" class="ghost tiny" :disabled="!!gitRemoteAction" @click="$emit('do-pull')">
+            <button type="button" class="git-remote-btn" :disabled="!!gitRemoteAction" @click="$emit('do-pull')">
               {{ gitRemoteAction === 'pull' ? '…' : 'Pull' }}
             </button>
-            <button type="button" class="ghost tiny" :disabled="!!gitRemoteAction" @click="$emit('do-push')">
+            <button type="button" class="git-remote-btn" :disabled="!!gitRemoteAction" @click="$emit('do-push')">
               {{ gitRemoteAction === 'push' ? '…' : 'Push' }}
             </button>
           </div>
         </div>
       </div>
 
-      <div class="git-stash-section">
-        <div class="git-stash-header">
-          <div class="git-stash-title-row">
-            <span class="git-stash-icon">📦</span>
-            <span class="git-stash-title">贮藏</span>
-            <span v-if="gitStashes.length" class="git-stash-count">{{ gitStashes.length }}</span>
-          </div>
+      <div class="git-stash-section git-section-card">
+        <button type="button" class="git-stash-collapse-toggle" @click="stashSectionOpen = !stashSectionOpen">
+          <span class="git-section-chevron">{{ stashSectionOpen ? "▾" : "▸" }}</span>
+          <span class="git-stash-icon">📦</span>
+          <span class="git-stash-title">贮藏</span>
+          <span v-if="gitStashes.length" class="git-stash-count">{{ gitStashes.length }}</span>
+        </button>
+        <div v-if="stashSectionOpen" class="git-stash-header">
           <div class="git-stash-save-row">
             <input
               :value="gitStashMessage"
@@ -77,7 +80,7 @@
             </button>
           </div>
         </div>
-        <div v-if="gitStashes.length" class="git-stash-list">
+        <div v-if="stashSectionOpen && gitStashes.length" class="git-stash-list">
           <div class="git-stash-list-header">
             <button type="button" class="git-section-toggle" @click="$emit('update:gitStashOpen', !gitStashOpen)">
               <span class="git-section-chevron">{{ gitStashOpen ? "▾" : "▸" }}</span>
@@ -111,53 +114,16 @@
             </div>
           </div>
         </div>
-        <div v-else-if="gitStashAction === 'list'" class="git-stash-empty shimmer-text--fast">加载中…</div>
-        <div v-else class="git-stash-empty">暂无贮藏</div>
+        <div v-else-if="stashSectionOpen && gitStashAction === 'list'" class="git-stash-empty shimmer-text--fast">加载中…</div>
+        <div v-else-if="stashSectionOpen" class="git-stash-empty">暂无贮藏</div>
       </div>
 
       <div v-if="gitError" class="git-error">{{ gitError }}</div>
-      <div class="git-commit-box">
-        <textarea
-          :value="gitCommitMessage"
-          class="git-commit-input"
-          rows="2"
-          placeholder="提交信息…"
-          :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep"
-          @input="$emit('update:gitCommitMessage', ($event.target as HTMLTextAreaElement).value)"
-          @keydown.ctrl.enter="$emit('commit-git')"
-          @keydown.meta.enter="$emit('commit-git')"
-        />
-        <div class="git-commit-actions">
-          <button
-            type="button"
-            class="secondary small git-commit-ai"
-            :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep || !gitStagedFiles.length || !configReady"
-            @click="$emit('generate-commit-message')"
-          >
-            {{ gitGenStep || "✦ AI 生成" }}
-          </button>
-          <button
-            type="button"
-            class="small"
-            :class="canGitCommit ? 'primary' : 'secondary'"
-            :disabled="!canGitCommit || !!gitAiPushStep"
-            @click="$emit('commit-git')"
-          >
-            {{ gitCommitting ? "提交中…" : `提交 (${gitStagedFiles.length})` }}
-          </button>
-        </div>
-        <div class="git-ai-push-sep"></div>
-        <button
-          type="button"
-          class="primary small git-ai-push"
-          :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep || !gitStagedFiles.length || !configReady"
-          @click="$emit('ai-commit-and-push')"
-        >
-          {{ gitAiPushStep || "✦ AI 一键推送" }}
-        </button>
-      </div>
       <div class="git-scroll-area">
-        <div v-if="!gitStatus.length" class="panel-empty">无本地改动</div>
+        <div v-if="!gitStatus.length" class="git-changes-empty">
+          <span class="git-changes-empty-icon" aria-hidden="true">✓</span>
+          <span>工作区干净，无本地改动</span>
+        </div>
         <template v-else>
           <div v-if="gitStagedFiles.length" class="git-section">
             <div class="git-section-head">
@@ -256,6 +222,49 @@
           </div>
         </div>
       </div>
+      <div class="git-commit-box git-section-card">
+        <div class="git-commit-title-row">
+          <span class="git-commit-title">提交</span>
+          <span v-if="gitStagedFiles.length" class="git-commit-staged-badge">{{ gitStagedFiles.length }} 已暂存</span>
+        </div>
+        <textarea
+          :value="gitCommitMessage"
+          class="git-commit-input"
+          rows="2"
+          placeholder="提交信息…"
+          :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep"
+          @input="$emit('update:gitCommitMessage', ($event.target as HTMLTextAreaElement).value)"
+          @keydown.ctrl.enter="$emit('commit-git')"
+          @keydown.meta.enter="$emit('commit-git')"
+        />
+        <div class="git-commit-actions">
+          <button
+            type="button"
+            class="secondary small git-commit-ai"
+            :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep || !gitStagedFiles.length || !configReady"
+            @click="$emit('generate-commit-message')"
+          >
+            {{ gitGenStep || "✦ AI 生成" }}
+          </button>
+          <button
+            type="button"
+            class="small"
+            :class="canGitCommit ? 'primary' : 'secondary'"
+            :disabled="!canGitCommit || !!gitAiPushStep"
+            @click="$emit('commit-git')"
+          >
+            {{ gitCommitting ? "提交中…" : `提交 (${gitStagedFiles.length})` }}
+          </button>
+          <button
+            type="button"
+            class="small git-ai-push"
+            :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep || !gitStagedFiles.length || !configReady"
+            @click="$emit('ai-commit-and-push')"
+          >
+            {{ gitAiPushStep || "✦ 一键推送" }}
+          </button>
+        </div>
+      </div>
     </div>
     <div v-else-if="gitError" class="panel-empty git-panel-fetch-error">
       <p>获取 Git 状态失败</p>
@@ -268,6 +277,7 @@
 </template>
 
 <script setup lang="ts">
+import { ref, watch } from "vue";
 import type { GitRemoteInfo } from "../../services/vibeGitClient";
 
 interface GitStash {
@@ -330,7 +340,16 @@ interface Props {
   expandedGitLogEntries: Set<string>;
 }
 
-const { expandedGitLogEntries } = defineProps<Props>();
+const props = defineProps<Props>();
+
+const stashSectionOpen = ref(false);
+
+watch(
+  () => props.gitStashes.length,
+  (count, prev) => {
+    if (count > 0 && (prev ?? 0) === 0) stashSectionOpen.value = true;
+  },
+);
 
 const emit = defineEmits<{
   (e: "refresh"): void;
@@ -362,7 +381,7 @@ const emit = defineEmits<{
 }>();
 
 function isGitLogEntryOpen(hash: string): boolean {
-  return expandedGitLogEntries.has(hash);
+  return props.expandedGitLogEntries.has(hash);
 }
 
 function gitWorkingTreeDiffKey(path: string, staged: boolean): string {
@@ -419,25 +438,41 @@ function gitStatusColor(status: string): string {
 .git-panel-content {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
+  flex: 1;
   min-height: 0;
+}
+
+.git-section-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  padding: 10px 12px;
 }
 
 .git-header {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .git-header-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
+}
+
+.git-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .git-branch-row {
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .git-branch-info {
@@ -482,21 +517,25 @@ function gitStatusColor(status: string): string {
 }
 
 .git-sync-row {
-  justify-content: flex-end;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .git-sync-info {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .git-sync-stat {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   font-size: 12px;
-  color: rgba(139, 148, 158, 0.6);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: rgba(139, 148, 158, 0.75);
+  min-width: 28px;
 }
 
 .git-sync-stat.ahead {
@@ -509,20 +548,60 @@ function gitStatusColor(status: string): string {
 
 .git-sync-arrow {
   font-size: 11px;
+  opacity: 0.85;
 }
 
 .git-remote-actions {
   display: flex;
-  gap: 6px;
+  gap: 4px;
+}
+
+.git-remote-btn {
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.78);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.git-remote-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.git-remote-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .git-stash-section {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  padding-bottom: 12px;
-  background: rgba(255, 255, 255, 0.02);
-  border-radius: 6px;
-  margin: 4px 0;
-  padding: 8px 12px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.git-stash-collapse-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.82);
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+}
+
+.git-stash-collapse-toggle:hover {
+  color: rgba(255, 255, 255, 0.95);
 }
 
 .git-stash-header {
@@ -538,13 +617,14 @@ function gitStatusColor(status: string): string {
 }
 
 .git-stash-icon {
-  font-size: 13px;
+  font-size: 12px;
+  line-height: 1;
 }
 
 .git-stash-title {
   font-size: 13px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.8);
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
 }
 
 .git-stash-count {
@@ -662,9 +742,9 @@ function gitStatusColor(status: string): string {
 }
 
 .git-stash-empty {
-  color: rgba(139, 148, 158, 0.5);
-  font-size: 12px;
-  padding: 5px 0;
+  color: rgba(139, 148, 158, 0.55);
+  font-size: 11px;
+  padding: 0 0 2px 16px;
 }
 
 .git-error {
@@ -680,6 +760,29 @@ function gitStatusColor(status: string): string {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex-shrink: 0;
+}
+
+.git-commit-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.git-commit-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.git-commit-staged-badge {
+  font-size: 11px;
+  color: #7ee787;
+  background: rgba(63, 185, 80, 0.12);
+  border: 1px solid rgba(63, 185, 80, 0.22);
+  border-radius: 999px;
+  padding: 1px 8px;
 }
 
 .git-commit-input {
@@ -721,13 +824,54 @@ function gitStatusColor(status: string): string {
 
 .git-commit-actions {
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
-.git-ai-push-sep {
-  height: 1px;
-  background: rgba(255, 255, 255, 0.08);
-  margin: 6px 0;
+.git-commit-actions .git-commit-ai {
+  flex: 1 1 auto;
+}
+
+.git-commit-actions .primary,
+.git-commit-actions .secondary:not(.git-commit-ai) {
+  flex: 1 1 auto;
+}
+
+.git-ai-push {
+  flex: 1 1 100%;
+  border: 1px solid rgba(88, 166, 255, 0.28);
+  background: rgba(88, 166, 255, 0.08);
+  color: rgba(147, 197, 253, 0.95);
+}
+
+.git-ai-push:hover:not(:disabled) {
+  background: rgba(88, 166, 255, 0.14);
+  border-color: rgba(88, 166, 255, 0.42);
+}
+
+.git-changes-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: rgba(139, 148, 158, 0.65);
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+}
+
+.git-changes-empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 10px;
+  color: #3fb950;
+  background: rgba(63, 185, 80, 0.12);
+  flex-shrink: 0;
 }
 
 .git-scroll-area {
@@ -851,7 +995,9 @@ function gitStatusColor(status: string): string {
 }
 
 .git-log-section {
-  margin-top: 10px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .git-log-toggle {
@@ -1015,5 +1161,14 @@ function gitStatusColor(status: string): string {
 .small {
   padding: 5px 12px;
   font-size: 12px;
+  border-radius: 5px;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.small:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 </style>
