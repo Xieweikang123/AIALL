@@ -489,12 +489,28 @@ export function resolveCompletedAgentBubbleContent(msg: AssistantBubbleSource): 
 
 const COMPLETION_SUMMARY_RE = /(?:修改完成|已完成|已写入|总结|变更如下|完成了)/;
 
+const WRITTEN_FILES_LIST_HEADER_RE = /已写入\s+\d+\s*个文件[：:]\s*$/;
+const MARKDOWN_HEADING_COLON_RE = /^#{1,6}\s+\S.+[：:]\s*$/;
+
+function endsWithCompleteMarkdownTail(text: string): boolean {
+  return /`[^`\n]+`\s*$/.test(text);
+}
+
+function endsWithSuspiciousColon(text: string): boolean {
+  if (!/[：:]\s*$/.test(text)) return false;
+  const lastLine = text.split(/\n/).pop()?.trim() ?? text;
+  if (!/[：:]\s*$/.test(lastLine)) return false;
+  if (WRITTEN_FILES_LIST_HEADER_RE.test(lastLine)) return false;
+  if (MARKDOWN_HEADING_COLON_RE.test(lastLine)) return false;
+  return true;
+}
+
 /** Final model answer cut off mid-sentence (e.g. ends with a colon). */
 export function isTruncatedAssistantAnswer(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return false;
-  // 以冒号结尾
-  if (/[：:]\s*$/.test(trimmed)) return true;
+  // 以冒号结尾（排除「已写入 N 个文件：」等列表标题行）
+  if (endsWithSuspiciousColon(trimmed)) return true;
   // 短文本包含"已修复"等但没有句号
   if (
     trimmed.length < SUBSTANTIVE_MIN_CHARS &&
@@ -503,8 +519,8 @@ export function isTruncatedAssistantAnswer(text: string): boolean {
   ) {
     return true;
   }
-  // 以未闭合的 markdown 标记结尾
-  if (/[*_`~]\s*$/.test(trimmed)) return true;
+  // 以未闭合的 markdown 标记结尾（排除 `- \`path\`` 等已闭合的行内代码）
+  if (!endsWithCompleteMarkdownTail(trimmed) && /[*_`~]\s*$/.test(trimmed)) return true;
   // 以左括号/左引号结尾
   if (/[（(「『"'"'\[{]\s*$/.test(trimmed)) return true;
   // 以省略号结尾

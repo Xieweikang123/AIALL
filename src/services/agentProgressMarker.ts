@@ -8,3 +8,11 @@ export function stripAgentProgressMarker(text: string): string {
 export function hasAgentProgressMarker(text: string): boolean {
   return AGENT_PROGRESS_MARKER_RE.test(text);
 }
+
+/** Strip progress markers and leading HTML comments (including incomplete stream fragments). */
+export function sanitizeFeedThoughtText(text: string): string {
+  let result = stripAgentProgressMarker(text);
+  result = result.replace(/^<!--[\s\S]*?(?:-->|$)\s*/, "");
+  result = result.replace(/^<!+\s*/, "");
+  return result.trim();
+}

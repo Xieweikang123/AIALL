@@ -23,6 +23,8 @@
         :tools="msg.tools"
         :agent-turn="activeAgentTurn(msg)"
         :agent-max-turns="msg.agentMaxTurns"
+        :agent-phase="activeAgentPhase(msg)"
+        :agent-detail="activeAgentDetail(msg)"
         :can-resume="canResume"
         :resume-label="resumeLabel"
         :written-files="msg.writtenFiles"
@@ -133,6 +135,14 @@ function displayAgentStatus(m: AgentMessage): string {
 
 function activeAgentTurn(m: AgentMessage): number | undefined {
   return props.resolveLiveAgentSource?.(m)?.agentTurn ?? m.agentTurn;
+}
+
+function activeAgentPhase(m: AgentMessage): string | undefined {
+  return props.resolveLiveAgentSource?.(m)?.agentPhase ?? m.agentPhase;
+}
+
+function activeAgentDetail(m: AgentMessage): string | undefined {
+  return m.agentDetail;
 }
 
 function jumpToLatest() {

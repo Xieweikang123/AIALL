@@ -8,6 +8,7 @@ import {
   getRecentFeedActions,
   getRunningFeedAction,
   type CursorAgentTimeline,
+  type CursorFeedBlock,
 } from "./agentCursorFeed";
 import {
   filterDuplicateFeedThoughts,
@@ -75,20 +76,100 @@ export function buildCursorAgentTimelineForMessage(
   input: AgentCompactStatusInput,
 ): CursorAgentTimeline {
   const detailed = input.isActivityDetailed;
-  return buildCursorAgentTimeline(
-    buildCursorAgentFeedForMessage(input),
+  const stepCount = input.msg.tools?.length ?? 0;
+  const compactFeed =
+    input.isRunning && stepCount >= 4 && !detailed;
+  return buildUnifiedAgentTimeline({
+    roundGroups: input.roundGroupViews,
+    answerPreview: input.answerPreview,
+    answerStreaming: isAgentTimelineAnswerStreaming(
+      input.liveAgentSource,
+      input.isRunning,
+      input.hasRunningTool,
+    ),
+    isRunning: input.isRunning,
+    activityDetailed: detailed,
+    compactFeed,
+    agentPhase: input.live?.phase,
+    agentDetail: resolveConnectAgentDetail(input),
+  });
+}
+
+export type UnifiedAgentTimelineInput = {
+  roundGroups: AgentRoundGroupView[];
+  answerPreview: string;
+  answerStreaming: boolean;
+  isRunning: boolean;
+  activityDetailed: boolean;
+  compactFeed: boolean;
+  agentPhase?: string;
+  agentDetail?: string;
+};
+
+/** Single chronological feed for AgentMergedContent (thought → tool → answer). */
+export function buildUnifiedAgentTimeline(
+  input: UnifiedAgentTimelineInput,
+): CursorAgentTimeline {
+  const trimmedAnswer = input.answerPreview.trim();
+  const items = filterDuplicateFeedThoughts(
+    buildCursorAgentFeed({
+      groups: input.roundGroups,
+      isRunning: input.isRunning,
+      agentPhase: input.agentPhase,
+      agentDetail: input.agentDetail,
+      answerPreview: input.answerPreview,
+      streaming: input.answerStreaming,
+    }),
     input.answerPreview,
     {
-      keepVisible: detailed ? 8 : 6,
-      collapseAfter: detailed ? 10 : 5,
-      compactWhileRunning: input.isRunning && detailed,
-      streaming: isAgentTimelineAnswerStreaming(
-        input.liveAgentSource,
-        input.isRunning,
-        input.hasRunningTool,
-      ),
+      suppressAllWhenBubble:
+        input.isRunning && input.answerStreaming && Boolean(trimmedAnswer),
     },
   );
+
+  const detailed = input.activityDetailed;
+  const compact = input.compactFeed;
+  const timeline = buildCursorAgentTimeline(items, input.answerPreview, {
+    keepVisible: compact ? 3 : detailed ? 8 : 4,
+    collapseAfter: compact ? 4 : detailed ? 10 : 5,
+    compactWhileRunning: compact,
+    streaming: input.answerStreaming,
+  });
+
+  if (!compact || !input.isRunning) {
+    return timeline;
+  }
+
+  const blocks = timeline.blocks.filter((block) => block.kind !== "thought");
+  return { ...timeline, blocks };
+}
+
+export function buildUnifiedAgentTimelineBlocks(
+  input: UnifiedAgentTimelineInput,
+): CursorFeedBlock[] {
+  return buildUnifiedAgentTimeline(input).blocks;
+}
+
+/** One footer line while running — avoids repeating tool-card details. */
+export function buildAgentLiveFooterStatus(input: {
+  currentStatus?: string;
+  isRunning: boolean;
+  hasAnswer: boolean;
+  hasRunningTool?: boolean;
+  hasActionBlocks?: boolean;
+}): string | null {
+  if (!input.isRunning || input.hasAnswer) return null;
+
+  const status = input.currentStatus?.trim();
+  if (!status) return null;
+  if (/^探索代码库 ·/.test(status)) return null;
+
+  if (input.hasRunningTool) {
+    const turnOnly = status.match(/第 \d+(?:\/\d+)? 轮(?:\s*·\s*已等待 \d+s)?/);
+    return turnOnly?.[0] ?? null;
+  }
+
+  return status;
 }
 
 export function buildCursorCompactExplorationSummary(input: AgentCompactStatusInput): string {

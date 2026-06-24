@@ -21,6 +21,8 @@ export type CursorFeedBlock =
 export type CursorFeedProcessBlock = Exclude<CursorFeedBlock, { kind: "answer" }>;
 
 export type CursorAgentTimeline = {
+  /** Chronological feed: thoughts, tools, status, then answer. */
+  blocks: CursorFeedBlock[];
   processBlocks: CursorFeedProcessBlock[];
   answer: { text: string; streaming: boolean } | null;
 };
@@ -242,11 +244,18 @@ export function buildCursorAgentTimeline(
     streaming?: boolean;
   },
 ): CursorAgentTimeline {
-  const blocks = layoutCursorFeedBlocks(items, options);
+  const processBlocks = layoutCursorFeedBlocks(items, options);
   const trimmed = answerText.trim();
+  const answer = trimmed
+    ? { text: trimmed, streaming: options?.streaming ?? false }
+    : null;
+  const answerBlock: CursorFeedBlock[] = answer
+    ? [{ kind: "answer", key: "timeline-answer", text: answer.text, streaming: answer.streaming }]
+    : [];
   return {
-    processBlocks: blocks,
-    answer: trimmed ? { text: trimmed, streaming: options?.streaming ?? false } : null,
+    blocks: [...processBlocks, ...answerBlock],
+    processBlocks,
+    answer,
   };
 }
 

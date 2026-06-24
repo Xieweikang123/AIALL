@@ -14,6 +14,7 @@ import {
   getRecentFeedActions,
   shouldUseCompactAgentFeed,
 } from "./agentCursorFeed";
+import { buildUnifiedAgentTimeline, buildAgentLiveFooterStatus } from "./agentCompactStatus";
 import type { CursorFeedItem } from "./agentCursorFeed";
 import type { AgentRoundGroupView } from "./agentRoundGroups";
 
@@ -134,6 +135,13 @@ describe("agentCursorFeed", () => {
     expect(timeline.processBlocks).toHaveLength(1);
     expect(timeline.processBlocks[0]?.kind).toBe("actions");
     expect(timeline.answer).toEqual({ text: "最终回答正文", streaming: false });
+    expect(timeline.blocks).toHaveLength(2);
+    expect(timeline.blocks.at(-1)).toEqual({
+      kind: "answer",
+      key: "timeline-answer",
+      text: "最终回答正文",
+      streaming: false,
+    });
   });
 
   it("collapses long action batches but keeps recent steps visible", () => {
@@ -281,5 +289,80 @@ describe("agentCursorFeed", () => {
       { key: "file:src/a.ts", kind: "file", path: "src/a.ts", label: "a.ts" },
       { key: "search:batch", kind: "search", path: undefined, label: "搜索 ×1" },
     ]);
+  });
+
+  it("builds unified timeline with answer as last block", () => {
+    const groups: AgentRoundGroupView[] = [{
+      turn: 1,
+      modelSteps: [],
+      toolIds: ["t1"],
+      narrative: "我先读文件。",
+      tools: [{
+        id: "t1",
+        turn: 1,
+        name: "read_file",
+        icon: "📄",
+        title: "读取",
+        detail: "a.ts",
+        label: "读取",
+        summary: "ok",
+        ok: true,
+        args: { path: "a.ts" },
+      }],
+    }];
+
+    const timeline = buildUnifiedAgentTimeline({
+      roundGroups: groups,
+      answerPreview: "这是最终回答",
+      answerStreaming: false,
+      isRunning: false,
+      activityDetailed: false,
+      compactFeed: false,
+    });
+
+    expect(timeline.blocks.at(-1)?.kind).toBe("answer");
+    expect(timeline.blocks.some((block) => block.kind === "thought")).toBe(true);
+    expect(timeline.blocks.some((block) => block.kind === "actions")).toBe(true);
+  });
+
+  it("hides thought blocks in compact running feed", () => {
+    const groups: AgentRoundGroupView[] = [{
+      turn: 1,
+      modelSteps: [],
+      toolIds: [],
+      narrative: "中间推理不应显示",
+      tools: [],
+    }];
+
+    const timeline = buildUnifiedAgentTimeline({
+      roundGroups: groups,
+      answerPreview: "",
+      answerStreaming: false,
+      isRunning: true,
+      activityDetailed: false,
+      compactFeed: true,
+    });
+
+    expect(timeline.blocks.some((block) => block.kind === "thought")).toBe(false);
+  });
+
+  it("buildAgentLiveFooterStatus suppresses exploration summary when tools are visible", () => {
+    expect(
+      buildAgentLiveFooterStatus({
+        currentStatus: "探索代码库 · 搜索 1 次",
+        isRunning: true,
+        hasAnswer: false,
+        hasActionBlocks: true,
+      }),
+    ).toBeNull();
+
+    expect(
+      buildAgentLiveFooterStatus({
+        currentStatus: "等待模型响应… · 第 2/24 轮 · 已等待 0s",
+        isRunning: true,
+        hasAnswer: false,
+        hasActionBlocks: true,
+      }),
+    ).toBe("等待模型响应… · 第 2/24 轮 · 已等待 0s");
   });
 });

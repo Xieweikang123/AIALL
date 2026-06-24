@@ -327,6 +327,42 @@ describe("finalizeAssistantBubbleContent", () => {
     ).toBe(true);
   });
 
+  it("does not flag written-files summary ending with closed inline code", () => {
+    const summary = buildWrittenFilesSummary(["src/components/vibe/AppToolbar.vue"], false);
+    expect(isTruncatedAssistantAnswer(summary)).toBe(false);
+  });
+
+  it("does not flag short model answer plus appended written-files summary", () => {
+    const modelAnswer = "已改回纯色 #0b1220 (深蓝黑色)，和应用主背景一致。";
+    const result = finalizeAssistantBubbleContent({
+      content: modelAnswer,
+      writtenFiles: ["src/components/vibe/AppToolbar.vue"],
+      roundGroups: [
+        {
+          turn: 1,
+          modelSteps: [],
+          toolIds: ["t1"],
+          response: {
+            assistantText: modelAnswer,
+            toolCalls: [],
+            hasToolCalls: false,
+            isFinal: true,
+          },
+        },
+      ],
+    });
+    expect(result).toContain("AppToolbar.vue");
+    expect(isTruncatedAssistantAnswer(result)).toBe(false);
+  });
+
+  it("does not flag written-files list header ending with a colon", () => {
+    expect(
+      isTruncatedAssistantAnswer(
+        "已改回纯色 #0b1220 (深蓝黑色)，和应用主背景一致。\n\n## 修改完成\n\n已写入 1 个文件：",
+      ),
+    ).toBe(false);
+  });
+
   it("appends written-files summary when final answer is truncated", () => {
     const msg = {
       content:
