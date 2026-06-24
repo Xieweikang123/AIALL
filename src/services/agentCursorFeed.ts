@@ -271,6 +271,13 @@ export function computeLineDelta(before: string, after: string, created?: boolea
   return Math.max(Math.abs(afterLines - beforeLines), 1);
 }
 
+/** read_file blocked by overlap / duplicate-slice policy — not a disk or IO failure. */
+export function isReadFilePolicyBlock(summary: string | undefined): boolean {
+  const text = summary?.trim() ?? "";
+  if (!text) return false;
+  return /高度重叠|相同片段|勿重复读|重复读相同|省略重复读取|已连续\s*\d+\s*次读取相同片段/.test(text);
+}
+
 export function formatCursorActionLabel(step: AgentRoundTool): string {
   const path = String(step.args?.path ?? step.detail.split(" · ")[0] ?? "").trim();
   const pattern = String(step.args?.pattern ?? "").trim();
@@ -282,7 +289,11 @@ export function formatCursorActionLabel(step: AgentRoundTool): string {
   if (step.name === "read_file") {
     const target = path || step.detail || "file";
     if (running) return `Reading ${target}`;
-    if (failed) return `Read failed ${target}`;
+    if (failed) {
+      return isReadFilePolicyBlock(step.summary)
+        ? `Skipped duplicate read ${target}`
+        : `Read failed ${target}`;
+    }
     const lines = step.summary?.match(/(\d+)/)?.[1];
     return lines ? `Read ${target} · ${lines} lines` : `Read ${target}`;
   }
@@ -431,6 +442,8 @@ export function buildCursorAgentFeed(input: {
 
 export function cursorActionClass(step: AgentRoundTool): string {
   if (step.running) return "running";
-  if (!step.ok) return "fail";
+  if (!step.ok) {
+    return step.name === "read_file" && isReadFilePolicyBlock(step.summary) ? "skipped" : "fail";
+  }
   return "done";
 }

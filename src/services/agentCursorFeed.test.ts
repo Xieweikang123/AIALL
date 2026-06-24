@@ -8,6 +8,7 @@ import {
   computeLineDelta,
   formatCursorActionLabel,
   formatExplorationSummary,
+  cursorActionClass,
   cursorPlanningLabel,
   shouldSuppressFeedPlanningStatus,
   layoutCursorFeedBlocks,
@@ -39,6 +40,45 @@ describe("agentCursorFeed", () => {
       ok: false,
       args: { query: "Monaco Editor minimap settings" },
     })).toContain("Monaco Editor minimap settings");
+  });
+
+  it("formats policy-blocked read_file as skipped duplicate", () => {
+    expect(formatCursorActionLabel({
+      id: "1",
+      name: "read_file",
+      icon: "📄",
+      title: "读取",
+      detail: "src/a.ts",
+      label: "读取",
+      summary: "src/a.ts 行 1–134 与已读片段高度重叠（第 4 次），请基于已有内容 patch_file",
+      ok: false,
+      args: { path: "src/a.ts" },
+    })).toBe("Skipped duplicate read src/a.ts");
+    expect(cursorActionClass({
+      id: "1",
+      name: "read_file",
+      icon: "📄",
+      title: "读取",
+      detail: "src/a.ts",
+      label: "读取",
+      summary: "src/a.ts 行 1–134 与已读片段高度重叠（第 4 次）",
+      ok: false,
+      args: { path: "src/a.ts" },
+    })).toBe("skipped");
+  });
+
+  it("formats missing-file read_file as failed", () => {
+    expect(formatCursorActionLabel({
+      id: "1",
+      name: "read_file",
+      icon: "📄",
+      title: "读取",
+      detail: "src/missing.ts",
+      label: "读取",
+      summary: "错误：src/missing.ts 不存在或无法读取",
+      ok: false,
+      args: { path: "src/missing.ts" },
+    })).toBe("Read failed src/missing.ts");
   });
 
   it("formats tool actions like Cursor", () => {

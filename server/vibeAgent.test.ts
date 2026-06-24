@@ -90,6 +90,100 @@ describe("executeTool immediate persistence", () => {
     expect(onDisk).toBe("before\r\n  push();\r\n  stash();\r\nafter\r\n");
   });
 
+  it("allows overlapping read after successful patch_file", async () => {
+    const root = await makeProject();
+    await fs.promises.mkdir(path.join(root, "src"), { recursive: true });
+    await fs.promises.writeFile(path.join(root, "src/a.ts"), "line1\nline2\nline3\n", "utf-8");
+    const stage = createWriteStage();
+    const readCache = new Map<string, string>();
+    const readSliceCache = new Map<string, string>();
+    const readSliceRepeatCounts = new Map<string, number>();
+    const toolGuard = {
+      readFileRanges: new Map<string, { start: number; end: number }[]>(),
+      patchRecoveryFiles: new Set<string>(),
+    };
+
+    await executeTool(
+      root,
+      "read_file",
+      { path: "src/a.ts", offset: 1, limit: 3 },
+      stage,
+      "build",
+      readCache,
+      readSliceCache,
+      undefined,
+      readSliceRepeatCounts,
+      toolGuard,
+    );
+    await executeTool(
+      root,
+      "read_file",
+      { path: "src/a.ts", offset: 1, limit: 2 },
+      stage,
+      "build",
+      readCache,
+      readSliceCache,
+      undefined,
+      readSliceRepeatCounts,
+      toolGuard,
+    );
+    await executeTool(
+      root,
+      "read_file",
+      { path: "src/a.ts", offset: 2, limit: 2 },
+      stage,
+      "build",
+      readCache,
+      readSliceCache,
+      undefined,
+      readSliceRepeatCounts,
+      toolGuard,
+    );
+
+    const blocked = await executeTool(
+      root,
+      "read_file",
+      { path: "src/a.ts", offset: 1, limit: 3 },
+      stage,
+      "build",
+      readCache,
+      readSliceCache,
+      undefined,
+      readSliceRepeatCounts,
+      toolGuard,
+    );
+    expect(blocked).toMatch(/高度重叠/);
+
+    const patchResult = await executeTool(
+      root,
+      "patch_file",
+      { path: "src/a.ts", old_string: "line2", new_string: "line2patched" },
+      stage,
+      "build",
+      readCache,
+      readSliceCache,
+      undefined,
+      readSliceRepeatCounts,
+      toolGuard,
+    );
+    expect(patchResult).toContain("已修改");
+
+    const afterPatch = await executeTool(
+      root,
+      "read_file",
+      { path: "src/a.ts", offset: 1, limit: 3 },
+      stage,
+      "build",
+      readCache,
+      readSliceCache,
+      undefined,
+      readSliceRepeatCounts,
+      toolGuard,
+    );
+    expect(afterPatch).not.toMatch(/^错误：/);
+    expect(afterPatch).toContain("line2patched");
+  });
+
   it("deduplicates identical read_file slice requests", async () => {
     const root = await makeProject();
     await fs.promises.writeFile(path.join(root, "a.ts"), "line1\nline2\n", "utf-8");
