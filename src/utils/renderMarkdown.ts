@@ -1,5 +1,10 @@
 import DOMPurify from "dompurify";
 import { marked } from "marked";
+import {
+  getCachedMarkdownHtml,
+  markdownLiteRenderCache,
+  markdownRenderCache,
+} from "./markdownRenderCache";
 
 /** Mermaid source lives in <code> textContent so both render paths survive DOMPurify. */
 function renderMermaidPlaceholder(code: string): string {
@@ -22,11 +27,70 @@ marked.setOptions({
   renderer,
 });
 
+const liteRenderer = new marked.Renderer();
+liteRenderer.code = function ({ text, lang }: { text: string; lang?: string }) {
+  if (lang === "mermaid") {
+    return renderMermaidPlaceholder(text);
+  }
+  const langAttr = lang ? ` class="language-${lang}"` : "";
+  return `<pre${langAttr}><code${langAttr}>${escapeHtml(text)}</code></pre>`;
+};
+
+/** Skip regex tokenization on very large blocks — full render still escapes HTML. */
+const HIGHLIGHT_MAX_CHARS = 8_192;
+
 export function resetCodeBlockIndex() {
   // 已不再为代码块生成按钮,保留为空函数以保持兼容。
 }
 
 let purifyHookInstalled = false;
+
+/**
+ * LLM output often uses fullwidth asterisks or inserts spaces before closing `**`,
+ * which breaks GFM bold (e.g. `**text **` stays literal).
+ */
+export function normalizeLooseMarkdownEmphasis(source: string): string {
+  let result = source.replace(/\uFF0A/g, "*");
+  // Only trim horizontal whitespace — \s would swallow newlines after closing ** and break block structure.
+  result = result.replace(/([^\s*])[ \t]+\*\*(?!\*)/g, "$1**");
+  result = result.replace(/(?<!\*)\*\*(?!\*)[ \t]+/g, "**");
+  return result;
+}
+
+const CORNER_OPEN = "\uE000";
+const CORNER_CLOSE = "\uE001";
+
+/** marked fails inline **bold** when the span contains CJK corner quotes 「」. */
+function protectCornerBracketsForMarkdown(source: string): string {
+  return source.replace(/「/g, CORNER_OPEN).replace(/」/g, CORNER_CLOSE);
+}
+
+/**
+ * marked leaves literal ** when bold wraps inline code: **`table`说明**
+ * → **<code>table</code>说明**
+ */
+function expandBoldWithInlineCode(source: string): string {
+  return source.replace(
+    /\*\*`([^`\n]+)`([^*\n]*?)\*\*/g,
+    "<strong><code>$1</code>$2</strong>",
+  );
+}
+
+function restoreCornerBrackets(html: string): string {
+  return html.replaceAll(CORNER_OPEN, "「").replaceAll(CORNER_CLOSE, "」");
+}
+
+const NEEDS_PREPARE_RE = /[\\*_\[`「」\uFF0A]/;
+
+function prepareMarkdownSource(text: string): string {
+  const source = String(text || "").trim();
+  if (!source) return "";
+  if (!NEEDS_PREPARE_RE.test(source)) return source;
+  const unescaped = source.replace(/\\\*/g, "*").replace(/\\_/g, "_").replace(/\\\[/g, "[");
+  return protectCornerBracketsForMarkdown(
+    expandBoldWithInlineCode(normalizeLooseMarkdownEmphasis(unescaped)),
+  );
+}
 
 function sanitizeMarkdownHtml(html: string): string {
   if (!purifyHookInstalled && typeof DOMPurify.addHook === "function") {
@@ -49,29 +113,22 @@ function sanitizeMarkdownHtml(html: string): string {
 }
 
 export function renderMarkdown(text: string): string {
-  const source = String(text || "").trim();
-  if (!source) return "";
-  // Unescape escaped markdown syntax that some models produce
-  const unescaped = source.replace(/\\\*/g, "*").replace(/\\_/g, "_").replace(/\\\[/g, "[");
-  const raw = marked.parse(unescaped, { async: false }) as string;
-  return sanitizeMarkdownHtml(raw);
+  return getCachedMarkdownHtml(text, markdownRenderCache, () => {
+    const prepared = prepareMarkdownSource(text);
+    if (!prepared) return "";
+    const raw = marked.parse(prepared, { async: false }) as string;
+    return restoreCornerBrackets(sanitizeMarkdownHtml(raw));
+  });
 }
 
 /** Faster markdown for streaming: skips syntax highlighting in fenced code blocks. */
 export function renderMarkdownLite(text: string): string {
-  const source = String(text || "").trim();
-  if (!source) return "";
-  const unescaped = source.replace(/\\\*/g, "*").replace(/\\_/g, "_").replace(/\\\[/g, "[");
-  const liteRenderer = new marked.Renderer();
-  liteRenderer.code = function ({ text: code, lang }: { text: string; lang?: string }) {
-    if (lang === "mermaid") {
-      return renderMermaidPlaceholder(code);
-    }
-    const langAttr = lang ? ` class="language-${lang}"` : "";
-    return `<pre${langAttr}><code${langAttr}>${escapeHtml(code)}</code></pre>`;
-  };
-  const raw = marked.parse(unescaped, { async: false, renderer: liteRenderer }) as string;
-  return sanitizeMarkdownHtml(raw);
+  return getCachedMarkdownHtml(text, markdownLiteRenderCache, () => {
+    const prepared = prepareMarkdownSource(text);
+    if (!prepared) return "";
+    const raw = marked.parse(prepared, { async: false, renderer: liteRenderer }) as string;
+    return restoreCornerBrackets(sanitizeMarkdownHtml(raw));
+  });
 }
 
 // ─── 轻量语法高亮（零依赖） ───────────────────────────
@@ -158,17 +215,17 @@ function tokenize(code: string, lang: string): Token[] {
   const key = lang.toLowerCase();
   const rules = [...commonRules, ...(langRules[key] || [])];
   const tokens: Token[] = [];
-  const occupied = new Set<number>(); // 已被占据的字符位置
+  const occupied: Array<[number, number]> = [];
 
-  function isOccupied(start: number, end: number): boolean {
-    for (let i = start; i < end; i++) {
-      if (occupied.has(i)) return true;
+  function overlaps(start: number, end: number): boolean {
+    for (const [occupiedStart, occupiedEnd] of occupied) {
+      if (start < occupiedEnd && end > occupiedStart) return true;
     }
     return false;
   }
 
   function occupy(start: number, end: number) {
-    for (let i = start; i < end; i++) occupied.add(i);
+    occupied.push([start, end]);
   }
 
   for (const rule of rules) {
@@ -178,7 +235,7 @@ function tokenize(code: string, lang: string): Token[] {
     while ((match = rule.pattern.exec(code)) !== null) {
       const start = match.index;
       const end = start + match[0].length;
-      if (!isOccupied(start, end)) {
+      if (!overlaps(start, end)) {
         tokens.push({ start, end, token: rule.token });
         occupy(start, end);
       }
@@ -194,6 +251,9 @@ function tokenize(code: string, lang: string): Token[] {
  * 内部完成 HTML 转义 + span 包裹。
  */
 function highlightCode(code: string, lang: string): { html: string } {
+  if (code.length > HIGHLIGHT_MAX_CHARS) {
+    return { html: escapeHtml(code) };
+  }
   const tokens = tokenize(code, lang);
   if (!tokens.length) {
     return { html: escapeHtml(code) };

@@ -40,6 +40,8 @@ export interface VibeAgentRunRequest {
   maxTurns?: number;
   openFilePath?: string;
   imageDataUrls?: string[];
+  /** 与 AI 配置「网页抓取代理」一致，供 web_search / web_extract 使用 */
+  webProxyUrl?: string;
   runProfile?: {
     kind: "interactive" | "execute_plan";
     targetFiles?: string[];

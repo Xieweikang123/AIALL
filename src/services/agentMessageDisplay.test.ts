@@ -813,6 +813,18 @@ describe("filterDuplicateFeedThoughts", () => {
     expect(items).toEqual([action]);
   });
 
+  it("removes short thought fragments contained in the answer bubble", () => {
+    const fragment: CursorFeedItem = {
+      kind: "thought",
+      key: "t-frag",
+      text: "这是一个很有意思的功能构想。",
+    };
+    const bubble =
+      "这是一个很有意思的功能构想。让我先理清当前的 Git 集成现状，再分析可行性。\n\n## 当前现状";
+    const items = filterDuplicateFeedThoughts([fragment, action], bubble);
+    expect(items).toEqual([action]);
+  });
+
   it("keeps non-duplicate intermediate thoughts", () => {
     const intermediate: CursorFeedItem = {
       kind: "thought",

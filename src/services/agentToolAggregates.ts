@@ -187,12 +187,15 @@ function buildCommandCard(steps: AgentRoundTool[]): ToolAggregateCard {
 function buildMiscCard(step: AgentRoundTool): ToolAggregateCard {
   const path = getToolPath(step);
   const useResultPreview = step.name !== "run_command" && step.fullResult?.trim();
+  const subtitle =
+    step.detail?.trim() ||
+    (path !== "..." ? path : step.summary || step.label);
   return {
     key: `misc:${step.id}`,
     kind: "misc",
     icon: step.icon || "⚡",
     title: step.title || step.name,
-    subtitle: path !== "..." ? path : step.summary || step.label,
+    subtitle,
     running: Boolean(step.running),
     failed: !step.ok && !step.running,
     previewLines: useResultPreview

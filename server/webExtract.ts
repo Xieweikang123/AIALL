@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import dns from "node:dns";
 import { ProxyAgent } from "undici";
-import { chromium } from "playwright";
+import { chromium, type Browser, type BrowserContext } from "playwright";
 import { readJsonBody, sendJson, sendSseEvent, sendSseHeaders } from "./httpUtils";
 
 try {
@@ -76,6 +76,69 @@ function safeProxyUrl(input: string | undefined): string {
 
 const proxyAgentCache = new Map<string, ProxyAgent>();
 
+const SHARED_HEADLESS_IDLE_MS = 5 * 60_000;
+let sharedHeadlessBrowser: Browser | null = null;
+let sharedHeadlessLaunch: Promise<Browser> | null = null;
+let sharedHeadlessIdleTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleSharedHeadlessIdleClose() {
+  if (sharedHeadlessIdleTimer) clearTimeout(sharedHeadlessIdleTimer);
+  sharedHeadlessIdleTimer = setTimeout(() => {
+    sharedHeadlessIdleTimer = null;
+    void closeSharedHeadlessBrowser();
+  }, SHARED_HEADLESS_IDLE_MS);
+}
+
+async function closeSharedHeadlessBrowser() {
+  const browser = sharedHeadlessBrowser;
+  sharedHeadlessBrowser = null;
+  sharedHeadlessLaunch = null;
+  if (!browser) return;
+  try {
+    await browser.close();
+  } catch {
+    // ignore
+  }
+}
+
+async function acquireSharedHeadlessBrowser(): Promise<Browser> {
+  if (sharedHeadlessIdleTimer) {
+    clearTimeout(sharedHeadlessIdleTimer);
+    sharedHeadlessIdleTimer = null;
+  }
+  if (sharedHeadlessBrowser?.isConnected()) return sharedHeadlessBrowser;
+
+  sharedHeadlessBrowser = null;
+  if (!sharedHeadlessLaunch) {
+    sharedHeadlessLaunch = chromium.launch({ headless: true });
+  }
+  const browser = await sharedHeadlessLaunch;
+  sharedHeadlessLaunch = null;
+  if (!browser.isConnected()) {
+    return acquireSharedHeadlessBrowser();
+  }
+  sharedHeadlessBrowser = browser;
+  browser.on("disconnected", () => {
+    if (sharedHeadlessBrowser === browser) sharedHeadlessBrowser = null;
+  });
+  return browser;
+}
+
+function releaseSharedHeadlessBrowser() {
+  if (sharedHeadlessBrowser?.isConnected()) {
+    scheduleSharedHeadlessIdleClose();
+  }
+}
+
+async function closePlaywrightContext(context: BrowserContext | undefined) {
+  if (!context) return;
+  try {
+    await context.close();
+  } catch {
+    // ignore
+  }
+}
+
 function looksLikeCloudflareChallenge(html: string): boolean {
   const sample = html.slice(0, 120_000).toLowerCase();
   if (sample.includes("just a moment")) return true;
@@ -122,13 +185,13 @@ async function extractWithPlaywright(
     }
   };
 
-  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+  let context: BrowserContext | undefined;
   try {
-    p("Playwright：正在启动 Chromium…");
-    browser = await chromium.launch({ headless: true });
+    p("Playwright：正在连接 Chromium…");
+    const browser = await acquireSharedHeadlessBrowser();
     const proxy = buildPlaywrightProxy(proxyUrl);
     p(proxy ? "Playwright：已启用代理，正在创建浏览器上下文…" : "Playwright：正在创建浏览器上下文…");
-    const context = await browser.newContext({
+    context = await browser.newContext({
       userAgent:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
       locale: "zh-CN",
@@ -188,11 +251,8 @@ async function extractWithPlaywright(
     }
     return { ok: false, status: 500, error: `Playwright 异常：${msg}` };
   } finally {
-    try {
-      await browser?.close();
-    } catch {
-      // ignore
-    }
+    await closePlaywrightContext(context);
+    releaseSharedHeadlessBrowser();
   }
 }
 
@@ -208,14 +268,21 @@ async function screenshotPageWithPlaywright(
   | { ok: true; mime: string; base64: string; byteLength: number }
   | { ok: false; error: string }
 > {
-  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+  let browser: Browser | undefined;
+  let context: BrowserContext | undefined;
+  let ownsBrowser = false;
   try {
-    browser = await chromium.launch({
-      headless: !options.headed,
-      slowMo: options.headed ? 40 : 0,
-    });
+    if (options.headed) {
+      browser = await chromium.launch({
+        headless: false,
+        slowMo: 40,
+      });
+      ownsBrowser = true;
+    } else {
+      browser = await acquireSharedHeadlessBrowser();
+    }
     const proxy = buildPlaywrightProxy(proxyUrl);
-    const context = await browser.newContext({
+    context = await browser.newContext({
       userAgent:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
       locale: "zh-CN",
@@ -255,10 +322,15 @@ async function screenshotPageWithPlaywright(
     }
     return { ok: false, error: `截图异常：${msg}` };
   } finally {
-    try {
-      await browser?.close();
-    } catch {
-      // ignore
+    await closePlaywrightContext(context);
+    if (ownsBrowser) {
+      try {
+        await browser?.close();
+      } catch {
+        // ignore
+      }
+    } else {
+      releaseSharedHeadlessBrowser();
     }
   }
 }
@@ -503,6 +575,7 @@ export async function runWebExtract(body: WebExtractRequestBody, emit: (message:
         kind: "html",
         title: "",
         text: text.slice(0, 120_000),
+        rawHtml: rawText.slice(0, 500_000),
       },
     };
   } catch (error) {
@@ -527,13 +600,46 @@ function buildSearchUrl(query: string, engine: string, limit: number): string {
   const encodedQuery = encodeURIComponent(query);
   switch (engine) {
     case "bing":
-      return `https://www.bing.com/search?q=${encodedQuery}&count=${limit}`;
+      return `https://cn.bing.com/search?q=${encodedQuery}&count=${limit}`;
     case "baidu":
       return `https://www.baidu.com/s?wd=${encodedQuery}&rn=${limit}`;
+    case "duckduckgo":
+      return `https://html.duckduckgo.com/html/?q=${encodedQuery}`;
     case "google":
     default:
       return `https://www.google.com/search?q=${encodedQuery}&num=${limit}`;
   }
+}
+
+const SEARCH_ENGINE_IDS = ["google", "bing", "baidu", "duckduckgo"] as const;
+type SearchEngineId = (typeof SEARCH_ENGINE_IDS)[number];
+
+function normalizeSearchEngine(engine: string): SearchEngineId {
+  return SEARCH_ENGINE_IDS.includes(engine as SearchEngineId) ? (engine as SearchEngineId) : "baidu";
+}
+
+function searchEngineFallbacks(primary: SearchEngineId): SearchEngineId[] {
+  const chain: SearchEngineId[] = ["duckduckgo", "bing", "baidu", "google"];
+  return chain.filter((e) => e !== primary);
+}
+
+function resolveRedirectSearchUrl(rawUrl: string): string {
+  let url = rawUrl.replace(/&amp;/g, "&").trim();
+  if (url.startsWith("//")) url = `https:${url}`;
+  try {
+    const parsed = new URL(url);
+    const uddg = parsed.searchParams.get("uddg");
+    if (uddg) return decodeURIComponent(uddg);
+    const googleQ = parsed.searchParams.get("q");
+    if (parsed.pathname === "/url" && googleQ) return decodeURIComponent(googleQ);
+  } catch {
+    // keep original url
+  }
+  return url;
+}
+
+function stripInlineHtml(text: string): string {
+  return text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }
 
 interface SearchResult {
@@ -559,41 +665,124 @@ function parseGoogleResults(html: string): SearchResult[] {
 
 function parseBingResults(html: string): SearchResult[] {
   const results: SearchResult[] = [];
-  const liPattern = /<li class="b_algo"[\s\S]*?<a href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/gi;
-  let match;
-  while ((match = liPattern.exec(html)) !== null && results.length < 10) {
-    const url = match[1];
-    const title = match[2].replace(/<[^>]+>/g, "").trim();
-    const snippet = match[3].replace(/<[^>]+>/g, "").trim();
-    if (url && title) {
-      results.push({ title, url, snippet });
+  const seen = new Set<string>();
+
+  const addResult = (rawUrl: string, rawTitle: string, rawSnippet = "") => {
+    const url = resolveRedirectSearchUrl(rawUrl);
+    const title = stripInlineHtml(rawTitle);
+    const snippet = stripInlineHtml(rawSnippet);
+    if (!url || !title || seen.has(url)) return;
+    if (/^(javascript:|#|mailto:)/i.test(url)) return;
+    seen.add(url);
+    results.push({ title, url, snippet });
+  };
+
+  let match: RegExpExecArray | null;
+
+  const modernPattern =
+    /<li class="b_algo"[\s\S]*?<h2[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?(?:<div class="b_caption"[^>]*>\s*<p[^>]*>([\s\S]*?)<\/p>)?/gi;
+  while ((match = modernPattern.exec(html)) !== null && results.length < 10) {
+    addResult(match[1], match[2], match[3] || "");
+  }
+
+  if (results.length === 0) {
+    const legacyPattern =
+      /<li class="b_algo"[\s\S]*?<a href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/gi;
+    while ((match = legacyPattern.exec(html)) !== null && results.length < 10) {
+      addResult(match[1], match[2], match[3]);
     }
+  }
+
+  return results;
+}
+
+function parseDuckDuckGoResults(html: string): SearchResult[] {
+  const results: SearchResult[] = [];
+  const seen = new Set<string>();
+  const blockPattern =
+    /class="result[^"]*"[\s\S]*?<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?(?:<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>)?/gi;
+  let match: RegExpExecArray | null;
+  while ((match = blockPattern.exec(html)) !== null && results.length < 10) {
+    const url = resolveRedirectSearchUrl(match[1]);
+    const title = stripInlineHtml(match[2]);
+    const snippet = stripInlineHtml(match[3] || "");
+    if (!url || !title || seen.has(url)) continue;
+    seen.add(url);
+    results.push({ title, url, snippet });
   }
   return results;
 }
 
+function looksLikeBaiduCsrShell(html: string): boolean {
+  if (!html || html.length < 50_000) return false;
+  const hasContentLeft = /<div[^>]+id="content_left"/i.test(html);
+  const hasResultLinks = /\/link\?url=|data-landurl=|"mu"\s*:/i.test(html);
+  return !hasContentLeft && !hasResultLinks;
+}
+
 function parseBaiduResults(html: string): SearchResult[] {
   const results: SearchResult[] = [];
-  const divPattern = /<div class="result[^"]*"[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<span class="content-right_[^"]*">([\s\S]*?)<\/span>/gi;
-  let match;
-  while ((match = divPattern.exec(html)) !== null && results.length < 10) {
-    const url = match[1];
-    const title = match[2].replace(/<[^>]+>/g, "").trim();
-    const snippet = match[3].replace(/<[^>]+>/g, "").trim();
-    if (url && title) {
-      results.push({ title, url, snippet });
+  const seen = new Set<string>();
+
+  const addResult = (rawUrl: string, rawTitle: string, snippet = "") => {
+    let url = resolveRedirectSearchUrl(rawUrl);
+    const title = stripInlineHtml(rawTitle);
+    if (!url || !title || title.length < 2) return;
+    if (seen.has(url)) return;
+    if (/^(javascript:|#|mailto:)/i.test(url)) return;
+    if (/baidu\.com/i.test(url) && !url.includes("/link?") && !url.includes("baike.baidu.com")) return;
+    seen.add(url);
+    results.push({
+      url,
+      title,
+      snippet: stripInlineHtml(snippet),
+    });
+  };
+
+  let match: RegExpExecArray | null;
+
+  const linkPattern =
+    /<a[^>]+href="(https?:\/\/(?:www\.)?baidu\.com\/link\?url=[^"]+)"[^>]*(?:title="([^"]*)")?[^>]*>([\s\S]*?)<\/a>/gi;
+  while ((match = linkPattern.exec(html)) !== null && results.length < 10) {
+    addResult(match[1], match[2] || match[3]);
+  }
+
+  const moleculePattern =
+    /class="[^"]*result-molecule[^"]*"[\s\S]{0,4000}?<a[^>]+href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  while ((match = moleculePattern.exec(html)) !== null && results.length < 10) {
+    addResult(match[1], match[2]);
+  }
+
+  const landUrlPattern = /data-landurl="(https?:\/\/[^"]+)"/gi;
+  while ((match = landUrlPattern.exec(html)) !== null && results.length < 10) {
+    addResult(match[1], "链接");
+  }
+
+  const muPattern = /"mu"\s*:\s*"(https?:\\\/\\\/[^"]+)"/gi;
+  while ((match = muPattern.exec(html)) !== null && results.length < 10) {
+    try {
+      const decoded = JSON.parse(`"${match[1]}"`) as string;
+      addResult(decoded, "搜索结果");
+    } catch {
+      addResult(match[1].replace(/\\\//g, "/"), "搜索结果");
     }
   }
+
   if (results.length === 0) {
-    const simplePattern = /<h3[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-    while ((match = simplePattern.exec(html)) !== null && results.length < 10) {
-      const url = match[1];
-      const title = match[2].replace(/<[^>]+>/g, "").trim();
-      if (url && title && !url.includes("baidu.com")) {
-        results.push({ title, url, snippet: "" });
-      }
+    const divPattern =
+      /<div class="result[^"]*"[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<span class="content-right_[^"]*">([\s\S]*?)<\/span>/gi;
+    while ((match = divPattern.exec(html)) !== null && results.length < 10) {
+      addResult(match[1], match[2], match[3]);
     }
   }
+
+  if (results.length === 0) {
+    const simplePattern = /<a[^>]+href="(https?:\/\/[^"]+)"[^>]*>[\s\S]*?<h3[^>]*>([\s\S]*?)<\/h3>/gi;
+    while ((match = simplePattern.exec(html)) !== null && results.length < 10) {
+      addResult(match[1], match[2]);
+    }
+  }
+
   return results;
 }
 
@@ -603,48 +792,89 @@ function parseSearchResults(html: string, engine: string): SearchResult[] {
       return parseBingResults(html);
     case "baidu":
       return parseBaiduResults(html);
+    case "duckduckgo":
+      return parseDuckDuckGoResults(html);
     case "google":
     default:
       return parseGoogleResults(html);
   }
 }
 
+function searchParseFailureMessage(engine: string, rawLen: number, strippedLen: number): string {
+  if (rawLen === 0) return "搜索页面为空，请检查网络或代理配置";
+  if (strippedLen > 0 && rawLen > strippedLen * 2) {
+    return `未能从 ${engine} 搜索结果页解析出条目（页面约 ${rawLen} 字符，可能页面结构已变更）`;
+  }
+  return `未能从 ${engine} 搜索结果页解析出条目，请稍后重试或换用 web_extract 指定 URL`;
+}
+
 export async function runWebSearch(
   query: string,
-  engine: string = "google",
+  engine: string = "baidu",
   maxResults: number = 5,
+  proxyUrl?: string,
 ): Promise<{ ok: boolean; text?: string; error?: string }> {
-  const safeEngine = ["google", "bing", "baidu"].includes(engine) ? engine : "google";
+  const primaryEngine = normalizeSearchEngine(engine);
   const limit = Math.min(10, Math.max(1, maxResults));
-  const searchUrl = buildSearchUrl(query, safeEngine, limit);
+  const safeProxy = safeProxyUrl(proxyUrl);
+  const enginesToTry = [primaryEngine, ...searchEngineFallbacks(primaryEngine)];
 
-  try {
-    const outcome = await runWebExtract({ url: searchUrl, mode: "auto" }, () => {});
-    if (!outcome.payload.ok) {
-      return { ok: false, error: String(outcome.payload.error || "搜索失败") };
-    }
-    const html = String(outcome.payload.text || "");
-    const results = parseSearchResults(html, safeEngine);
+  let lastError = "";
 
-    if (results.length === 0) {
-      return { ok: false, error: "未找到搜索结果，可能被搜索引擎拦截，请稍后重试" };
-    }
+  for (const currentEngine of enginesToTry) {
+    const searchUrl = buildSearchUrl(query, currentEngine, limit);
 
-    const lines = [`搜索结果：关键词 "${query}"`, ""];
-    results.slice(0, limit).forEach((r, i) => {
-      lines.push(`${i + 1}. ${r.title}`);
-      lines.push(`   链接：${r.url}`);
-      if (r.snippet) {
-        lines.push(`   摘要：${r.snippet}`);
+    try {
+      const outcome = await runWebExtract(
+        { url: searchUrl, mode: "auto", proxyUrl: safeProxy || undefined },
+        () => {},
+      );
+      if (!outcome.payload.ok) {
+        lastError = String(outcome.payload.error || "搜索失败");
+        continue;
       }
-      lines.push("");
-    });
 
-    return { ok: true, text: lines.join("\n") };
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    return { ok: false, error: `搜索异常：${msg}` };
+      const rawHtml = String((outcome.payload as { rawHtml?: string }).rawHtml ?? "");
+      const stripped = String(outcome.payload.text || "");
+      const parseSource = rawHtml || stripped;
+      const resultsFromRaw = rawHtml ? parseSearchResults(rawHtml, currentEngine) : [];
+      const resultsFromStripped = stripped ? parseSearchResults(stripped, currentEngine) : [];
+      const results =
+        resultsFromRaw.length > 0 ? resultsFromRaw : parseSearchResults(parseSource, currentEngine);
+      const baiduCsrShell = currentEngine === "baidu" && looksLikeBaiduCsrShell(rawHtml);
+
+      if (results.length === 0) {
+        lastError = searchParseFailureMessage(
+          currentEngine,
+          rawHtml.length || stripped.length,
+          stripped.length,
+        );
+        if (baiduCsrShell) {
+          lastError = "百度搜索结果页为前端渲染，静态抓取无条目，正在尝试其它搜索引擎…";
+        }
+        continue;
+      }
+
+      const engineNote =
+        currentEngine !== primaryEngine ? `（${primaryEngine} 无结果，已通过 ${currentEngine} 获取）` : "";
+      const lines = [`搜索结果：关键词 "${query}"${engineNote}`, ""];
+      results.slice(0, limit).forEach((r, i) => {
+        lines.push(`${i + 1}. ${r.title}`);
+        lines.push(`   链接：${r.url}`);
+        if (r.snippet) {
+          lines.push(`   摘要：${r.snippet}`);
+        }
+        lines.push("");
+      });
+
+      return { ok: true, text: lines.join("\n") };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      lastError = `搜索异常：${msg}`;
+    }
   }
+
+  return { ok: false, error: lastError || "所有搜索引擎均未返回可用结果" };
 }
 
 type ConnectApp = {

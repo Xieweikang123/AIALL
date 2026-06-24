@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   buildTimelineEntriesFromBlocks,
   buildTimelineNodesFromSteps,
+  buildTimelineProcessSummary,
   formatPathSegment,
+  selectVisibleTimelineThoughts,
+  shouldCollapseTimelineProcess,
 } from "./agentTimelineNodes";
 import type { AgentRoundTool } from "./agentRoundGroups";
 import type { CursorFeedBlock } from "./agentCursorFeed";
@@ -82,8 +85,98 @@ describe("buildTimelineEntriesFromBlocks", () => {
   });
 });
 
+describe("selectVisibleTimelineThoughts", () => {
+  const thoughts = [
+    { kind: "thought" as const, key: "t1", text: "好的，我先读取配置文件，确认项目结构后再修改组件。" },
+    { kind: "thought" as const, key: "t2", text: "Let me check the full template for any button." },
+    { kind: "thought" as const, key: "t3", text: "进度摘要：已定位 minimap 设置入口，接下来修改 EditorPanel。" },
+  ];
+
+  it("returns empty when an answer block is present", () => {
+    expect(
+      selectVisibleTimelineThoughts(thoughts, {
+        showThoughts: true,
+        isRunning: false,
+        hasAnswer: true,
+        answerText: "进度摘要：已定位 minimap 设置入口，接下来修改 EditorPanel。",
+      }),
+    ).toEqual([]);
+  });
+
+  it("filters tool-turn narration and keeps substantive thoughts", () => {
+    const visible = selectVisibleTimelineThoughts(thoughts, {
+      showThoughts: true,
+      isRunning: false,
+      hasAnswer: false,
+    });
+    expect(visible.map((entry) => entry.key)).toEqual(["t1", "t3"]);
+  });
+
+  it("keeps only the latest thought while running without an answer", () => {
+    const visible = selectVisibleTimelineThoughts(thoughts, {
+      showThoughts: true,
+      isRunning: true,
+      hasAnswer: false,
+    });
+    expect(visible).toHaveLength(1);
+    expect(visible[0]?.key).toBe("t3");
+  });
+
+  it("returns empty when thoughts are hidden", () => {
+    expect(
+      selectVisibleTimelineThoughts(thoughts, {
+        showThoughts: false,
+        isRunning: true,
+        hasAnswer: false,
+      }),
+    ).toEqual([]);
+  });
+});
+
 describe("formatPathSegment", () => {
   it("shortens deep paths for breadcrumb chips", () => {
     expect(formatPathSegment("src/acme/module/feature/Tasks")).toBe("…/acme/module/feature/Tasks");
+  });
+});
+
+describe("timeline process auto-collapse", () => {
+  it("collapses tool steps once an answer block is present", () => {
+    expect(
+      shouldCollapseTimelineProcess({
+        hasAnswer: true,
+        toolCount: 3,
+        activityDetailed: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps tools visible while exploring or in detailed mode", () => {
+    expect(
+      shouldCollapseTimelineProcess({
+        hasAnswer: false,
+        toolCount: 3,
+        activityDetailed: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldCollapseTimelineProcess({
+        hasAnswer: true,
+        toolCount: 3,
+        activityDetailed: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("builds a compact summary for the folded process header", () => {
+    const blocks: CursorFeedBlock[] = [{
+      kind: "actions",
+      key: "actions-0",
+      collapsed: [],
+      visible: [{
+        key: "t1",
+        step: step({ id: "t1", name: "grep", title: "代码搜索", detail: "minimap" }),
+      }],
+    }];
+    expect(buildTimelineProcessSummary(blocks)).toBe("探索过程 · 搜索 1 次");
   });
 });

@@ -1,3 +1,5 @@
+import { sanitizeMarkdownForDisplay } from "./markdownDisplaySanitize";
+
 export const AGENT_PROGRESS_MARKER = "<!-- agent-progress -->";
 export const AGENT_PROGRESS_MARKER_RE = /<!--\s*agent-progress\s*-->/i;
 
@@ -11,8 +13,8 @@ export function hasAgentProgressMarker(text: string): boolean {
 
 /** Strip progress markers and leading HTML comments (including incomplete stream fragments). */
 export function sanitizeFeedThoughtText(text: string): string {
-  let result = stripAgentProgressMarker(text);
+  let result = text;
   result = result.replace(/^<!--[\s\S]*?(?:-->|$)\s*/, "");
   result = result.replace(/^<!+\s*/, "");
-  return result.trim();
+  return sanitizeMarkdownForDisplay(result);
 }

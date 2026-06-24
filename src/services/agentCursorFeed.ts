@@ -1,5 +1,7 @@
 import type { AgentRoundGroupView, AgentRoundTool } from "./agentRoundGroups";
 import { buildNarrativeSegments } from "./agentNarrativeSegments";
+import { isAgentToolTurnNarration, isAnswerLikeTimelineNarrative } from "./agentMessageDisplay";
+import { stripToolSummaryFromAssistantContent } from "./vibeChatStorage";
 import { aggregateToolSteps } from "./agentToolAggregates";
 
 export type CursorFeedItem =
@@ -246,9 +248,12 @@ export function buildCursorAgentTimeline(
 ): CursorAgentTimeline {
   const processBlocks = layoutCursorFeedBlocks(items, options);
   const trimmed = answerText.trim();
+  const streaming = options?.streaming ?? false;
   const answer = trimmed
-    ? { text: trimmed, streaming: options?.streaming ?? false }
-    : null;
+    ? { text: trimmed, streaming }
+    : streaming
+      ? { text: "", streaming: true }
+      : null;
   const answerBlock: CursorFeedBlock[] = answer
     ? [{ kind: "answer", key: "timeline-answer", text: answer.text, streaming: answer.streaming }]
     : [];
@@ -318,6 +323,21 @@ export function formatCursorActionLabel(step: AgentRoundTool): string {
     return `Explored ${target}`;
   }
 
+  if (step.name === "web_search") {
+    const target = query || step.detail || "query";
+    if (running) return `Searching web ${target}`;
+    if (failed) return `Web search failed ${target}`;
+    return `Searched web ${target}`;
+  }
+
+  if (step.name === "web_extract") {
+    const url = String(step.args?.url ?? step.detail ?? "").trim();
+    const target = url.length > 48 ? `${url.slice(0, 48)}…` : url || "url";
+    if (running) return `Fetching ${target}`;
+    if (failed) return `Fetch failed ${target}`;
+    return `Fetched ${target}`;
+  }
+
   const fallback = step.title || step.label || step.name;
   if (running) return fallback;
   if (failed) return `${fallback} failed`;
@@ -374,11 +394,16 @@ export function buildCursorAgentFeed(input: {
 
     const segments = buildNarrativeSegments(group.narrative, group.tools);
     for (const [index, segment] of segments.entries()) {
-      if (segment.text.trim()) {
+      const thoughtText = stripToolSummaryFromAssistantContent(segment.text.trim());
+      if (
+        thoughtText &&
+        !isAgentToolTurnNarration(thoughtText) &&
+        !isAnswerLikeTimelineNarrative(thoughtText)
+      ) {
         items.push({
           kind: "thought",
           key: `thought-${group.turn}-${index}`,
-          text: segment.text.trim(),
+          text: thoughtText,
         });
       }
       for (const step of segment.tools) {

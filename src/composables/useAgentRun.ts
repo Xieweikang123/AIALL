@@ -94,6 +94,7 @@ import {
 } from "../services/agentCompactStatus";
 import { parseMemoryProposalToolResult } from "../services/projectMemoryProposal";
 import { parseSkillProposalToolResult } from "../services/projectSkillProposal";
+import { loadWebProxyUrlFromStorage } from "../services/aiLocalConfig";
 import { isAgentSseProgressEvent } from "../services/agentSseEventHandlers";
 import { isScrollNearBottom, scrollElementToBottom } from "../utils/scrollViewport";
 import {
@@ -2120,6 +2121,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         maxTurns: resolveResumeMaxTurns(mode, runProfile, resolveAgentCompletedTurns(assistantMsg)),
         openFilePath: activeFilePath.value || undefined,
         runProfile: runProfile.kind === "execute_plan" ? runProfile : undefined,
+        webProxyUrl: loadWebProxyUrlFromStorage() || undefined,
       },
       (event) => enqueueAgentEvent(event, assistantMsg, runGen, sessionId),
     );
@@ -2367,6 +2369,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       openFilePath: activeFilePath.value || undefined,
       runProfile: runProfile.kind === "execute_plan" ? runProfile : undefined,
       imageDataUrls: compressedImagesForRequest?.length ? compressedImagesForRequest : undefined,
+      webProxyUrl: loadWebProxyUrlFromStorage() || undefined,
     };
     // 持久化请求状态，以便 HMR 重载后恢复
     persistAgentRunForHmr({

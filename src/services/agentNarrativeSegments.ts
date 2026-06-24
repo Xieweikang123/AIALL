@@ -5,13 +5,31 @@ export type NarrativeSegment = {
   tools: AgentRoundTool[];
 };
 
-const SPLIT_PATTERNS = [
-  /\n(?=#{1,3}\s+)/,
-  /(?<=[。！？!?])(?=\S)/,
-  /(?<=[.!?])\s+(?=I |Let me |Now let me |I'll |First,|Next,|Also )/i,
-  /(?<=[：:])\s*(?=现在|让我|Let me|Now let me|I noticed|I need)/i,
-  /\s+(?=现在让我|接下来|然后|另外|此外|Now let me|Let me check|Let me look|Let me find|Let me read|Let me fix|I noticed|I need to)/i,
-];
+/** Major boundaries only — paragraph breaks and markdown headers. */
+const SPLIT_PATTERNS = [/\n\n+/, /\n(?=#{1,3}\s+)/];
+
+const MERGE_SHORT_SEGMENT_MAX_CHARS = 80;
+
+function mergeShortNarrativeSegments(segments: string[]): string[] {
+  if (segments.length <= 1) return segments;
+
+  const merged: string[] = [segments[0]!];
+  for (let index = 1; index < segments.length; index += 1) {
+    const segment = segments[index]!;
+    const last = merged[merged.length - 1]!;
+    const segmentIsHeader = /^#{1,3}\s/.test(segment);
+    const canMerge =
+      !segmentIsHeader &&
+      segment.length < MERGE_SHORT_SEGMENT_MAX_CHARS &&
+      last.length < MERGE_SHORT_SEGMENT_MAX_CHARS;
+    if (canMerge) {
+      merged[merged.length - 1] = `${last} ${segment}`.trim();
+    } else {
+      merged.push(segment);
+    }
+  }
+  return merged;
+}
 
 export function splitAssistantNarrative(text: string): string[] {
   const trimmed = text.trim();
@@ -24,7 +42,8 @@ export function splitAssistantNarrative(text: string): string[] {
     );
   }
 
-  return parts.length ? parts : [trimmed];
+  const merged = mergeShortNarrativeSegments(parts);
+  return merged.length ? merged : [trimmed];
 }
 
 export function assignToolsToNarrativeSegments(

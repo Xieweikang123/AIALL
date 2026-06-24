@@ -136,6 +136,12 @@ export function buildUnifiedAgentTimeline(
     streaming: input.answerStreaming,
   });
 
+  if (timeline.answer) {
+    const blocks = timeline.blocks.filter((block) => block.kind !== "thought");
+    const processBlocks = timeline.processBlocks.filter((block) => block.kind !== "thought");
+    return { ...timeline, blocks, processBlocks };
+  }
+
   if (!compact || !input.isRunning) {
     return timeline;
   }

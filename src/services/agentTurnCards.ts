@@ -3,6 +3,7 @@ import type { CursorFeedItem, CursorFeedProcessBlock } from "./agentCursorFeed";
 import { layoutCursorFeedBlocks } from "./agentCursorFeed";
 import { filterDuplicateFeedThoughts, isAgentToolTurnNarration } from "./agentMessageDisplay";
 import { stripTextToolCallMarkup } from "./textToolCallMarkup";
+import { stripToolSummaryFromAssistantContent } from "./vibeChatStorage";
 
 export type TurnActionsBlock = Extract<CursorFeedProcessBlock, { kind: "actions" }>;
 
@@ -29,7 +30,9 @@ export function buildTurnCardsFromRoundGroups(
 
   for (const group of roundGroups) {
     if (group.turn <= 0 && !group.narrative) continue;
-    const narrativeText = stripTextToolCallMarkup(group.narrative || "").trim();
+    const narrativeText = stripToolSummaryFromAssistantContent(
+      stripTextToolCallMarkup(group.narrative || ""),
+    ).trim();
     if (narrativeText) {
       items.push({ kind: "thought", key: `thought-${group.turn}`, text: narrativeText });
     }

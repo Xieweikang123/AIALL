@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   buildBehaviorContradictionHint,
+  buildConfigBindingTopicHint,
   buildConsultativeBuildHint,
+  buildUserOptionMismatchHint,
   isBehaviorContradictionPrompt,
   isConsultativeUserPrompt,
+  isUserOptionMismatchPrompt,
 } from "./agentUserIntent";
 import { isScheduledTaskConsultativePrompt, shouldNudgeScheduledJobRegistration, buildConsultativeTopicHints } from "./agentConsultativeTopics";
 import {
@@ -47,6 +50,13 @@ describe("agent audit regression fixtures", () => {
     const nudge = buildGrepEmptyRecoveryNudge(["switchFooContext"]);
     expect(nudge).toContain("switchFooContext");
     expect(nudge).not.toMatch(/touchMark|BarPanel/i);
+  });
+
+  it("covers config binding hint without business terms", () => {
+    expect(isUserOptionMismatchPrompt("不是这几个选项")).toBe(true);
+    expect(buildUserOptionMismatchHint()).not.toMatch(/minimap|Monaco|Vertical size/i);
+    expect(buildConfigBindingTopicHint("doc_lookup")).toContain("web_extract");
+    expect(buildConfigBindingTopicHint("doc_lookup")).not.toMatch(/minimap|slider|scale/i);
   });
 
   it("scheduled-task: nudge when Job read without registration trace", () => {

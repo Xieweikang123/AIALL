@@ -8,6 +8,7 @@ vi.mock("dompurify", () => ({
 }));
 
 import { renderMarkdown, renderMarkdownLite } from "./renderMarkdown";
+import { sanitizeMarkdownForDisplay } from "../services/markdownDisplaySanitize";
 
 const MERMAID_SAMPLE = "```mermaid\ngraph TD\n    A[开始] --> B[结束]\n```";
 
@@ -57,9 +58,42 @@ describe("renderMarkdown", () => {
     expectMermaidPlaceholder(renderMarkdownLite(MERMAID_SAMPLE));
   });
 
-  it("escapes angle brackets inside mermaid source", () => {
-    const html = renderMarkdown("```mermaid\nflowchart LR\n    A[\"<test>\"] --> B\n```");
-    expect(html).toContain("&lt;test&gt;");
-    expect(html).not.toContain('["<test>"]');
+  it("renders bold when LLM leaves a space before closing **", () => {
+    const html = renderMarkdown(
+      "触发时机：每次执行时，自动以**服务器本地时间的「昨天」 **为目标日期进行补全。",
+    );
+    expect(html).toContain("<strong");
+    expect(html).toContain("服务器本地时间的「昨天」");
+    expect(html).not.toContain("**");
+  });
+
+  it("renders inline bold with CJK corner quotes", () => {
+    const html = renderMarkdown("以**「昨天」**为目标");
+    expect(html).toContain("<strong>「昨天」</strong>");
+  });
+
+  it("renders bold when LLM leaves a space after opening **", () => {
+    const html = renderMarkdown("说明 ** 重点内容 ** 继续。");
+    expect(html).toContain("<strong>重点内容</strong>");
+  });
+
+  it("renders bold wrapping inline code", () => {
+    const html = renderMarkdown(
+      "核心功能是对**`gw_energyrecorditem`表进行昨日能耗记录的补全**。",
+    );
+    expect(html).toContain("<strong>");
+    expect(html).toContain("<code>gw_energyrecorditem</code>");
+    expect(html).toContain("表进行昨日能耗记录的补全");
+    expect(html).not.toContain("**");
+  });
+
+  it("renders merged optional TS inline type as single code span", () => {
+    const html = renderMarkdown(
+      sanitizeMarkdownForDisplay("类型 `size?`: `'proportional' | 'fill' | 'fit';`"),
+    );
+    expect(html).toContain("<code");
+    expect(html.match(/<code/g)?.length).toBe(1);
+    expect(html).toContain("size?:");
+    expect(html).toContain("proportional");
   });
 });

@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onUpdated, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { renderMarkdown, renderMarkdownLite } from "../utils/renderMarkdown";
 import { renderMermaidInContainer } from "../utils/mermaidRenderer";
 import { parseAiOptions, type AiOption } from "../utils/parseAiOptions";
 import AiOptionButtons from "./AiOptionButtons.vue";
-import { stripTextToolCallMarkup } from "../services/textToolCallMarkup";
+import { sanitizeMarkdownForDisplay } from "../services/markdownDisplaySanitize";
 import { createStreamingMarkdownThrottle } from "../utils/streamingMarkdownThrottle";
+import { trimIncompleteStreamingMarkdown } from "../utils/streamingMarkdownTrim";
 
 const props = withDefaults(
   defineProps<{
@@ -30,9 +31,18 @@ const streamingMinHeight = ref(0);
 const cachedDisplayHtml = ref("");
 /** One paint cycle after streaming ends: still use lite path until full markdown is ready. */
 const streamingSettling = ref(false);
+const streamingHtmlCache = ref("");
 const streamingThrottle = createStreamingMarkdownThrottle(undefined, (text) => {
   streamingRenderText.value = text;
+  streamingHtmlCache.value = buildStreamingHtml(text);
 });
+
+function buildStreamingHtml(sourceText: string): string {
+  const parsed = props.interactive ? parseAiOptions(sourceText) : null;
+  const markdown = parsed?.options.length ? parsed.before : sourceText;
+  const sanitized = sanitizeMarkdownForDisplay(markdown);
+  return renderMarkdownLite(trimIncompleteStreamingMarkdown(sanitized));
+}
 
 const effectiveStreaming = computed(() => props.streaming || streamingSettling.value);
 
@@ -83,7 +93,10 @@ watch(
 watch(
   () => props.content,
   (value, prev) => {
-    if (!value.trim()) cachedDisplayHtml.value = "";
+    if (!value.trim()) {
+      cachedDisplayHtml.value = "";
+      streamingHtmlCache.value = "";
+    }
     if (
       props.streaming &&
       prev &&
@@ -107,12 +120,17 @@ onBeforeUnmount(() => {
     cancelAnimationFrame(streamingLayoutHoldRaf);
     streamingLayoutHoldRaf = 0;
   }
+  if (postProcessRaf) {
+    cancelAnimationFrame(postProcessRaf);
+    postProcessRaf = 0;
+  }
   streamingThrottle.dispose();
 });
 
 /** Wrap tool summary blocks (h3[工具摘要] + following ul) into collapsible cards. */
 function wrapToolSummaryBlocks(el: HTMLElement) {
-  const h3s = el.querySelectorAll("h3");
+  if (!el.textContent?.includes("工具摘要")) return;
+  const h3s = el.querySelectorAll("h3:not(.tool-summary-content h3)");
   h3s.forEach((h3) => {
     if (!h3.textContent?.includes("工具摘要")) return;
     if (h3.closest(".tool-summary-block")) return; // already wrapped
@@ -209,14 +227,12 @@ const markdownContent = computed(() => {
   return parsed.before;
 });
 
-const html = computed(() => renderMarkdown(stripTextToolCallMarkup(markdownContent.value)));
+const sanitizedMarkdown = computed(() => sanitizeMarkdownForDisplay(markdownContent.value));
 
-const streamingHtml = computed(() =>
-  renderMarkdownLite(stripTextToolCallMarkup(markdownContent.value)),
-);
+const html = computed(() => renderMarkdown(sanitizedMarkdown.value));
 
 const displayHtml = computed(() =>
-  effectiveStreaming.value ? streamingHtml.value : html.value,
+  effectiveStreaming.value ? streamingHtmlCache.value : html.value,
 );
 
 watch(
@@ -237,10 +253,13 @@ function handleOptionSelect(option: AiOption) {
   emit("selectOption", option);
 }
 
+let postProcessRaf = 0;
+
 // After render, wrap tool summary blocks (skip while streaming for perf)
-function postProcess() {
-  if (effectiveStreaming.value) return;
-  requestAnimationFrame(() => {
+function schedulePostProcess() {
+  if (effectiveStreaming.value || postProcessRaf) return;
+  postProcessRaf = requestAnimationFrame(() => {
+    postProcessRaf = 0;
     nextTick(() => {
       if (effectiveStreaming.value || !markdownRef.value) return;
       wrapToolSummaryBlocks(markdownRef.value);
@@ -249,18 +268,13 @@ function postProcess() {
   });
 }
 
-// Trigger on html change
 watch([displayHtml, effectiveStreaming], () => {
   if (effectiveStreaming.value) {
     syncStreamingMinHeight();
     return;
   }
-  postProcess();
+  schedulePostProcess();
 }, { immediate: true });
-onUpdated(() => {
-  if (effectiveStreaming.value) return;
-  postProcess();
-});
 </script>
 
 <template>
@@ -424,14 +438,6 @@ onUpdated(() => {
   overflow: hidden;
 }
 
-.tool-summary-block {
-  margin: 6px 0;
-  border-radius: 6px;
-  background: rgba(139, 148, 158, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  overflow: hidden;
-}
-
 .msg-markdown :deep(.tool-summary-header) {
   display: flex;
   align-items: center;
@@ -442,19 +448,6 @@ onUpdated(() => {
 }
 
 .msg-markdown :deep(.tool-summary-header:hover) {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.tool-summary-header {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 10px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.tool-summary-header:hover {
   background: rgba(255, 255, 255, 0.04);
 }
 

@@ -1,20 +1,61 @@
 <template>
   <div class="agent-timeline">
-    <div
-      ref="scrollContainerRef"
-      class="agent-timeline-scroll"
-      :class="{ 'agent-timeline-scroll--limited': shouldLimitScroll }"
+    <details
+      v-if="shouldWrapProcess"
+      class="timeline-process-fold"
+      :open="processExpanded"
+      @toggle="onProcessToggle"
     >
-      <AgentTimelineNode
-        v-for="(entry, index) in toolEntries"
-        :key="entryRenderKey(entry, index)"
-        :variant="entryVariant(entry)"
-        :node="entry.kind === 'node' ? entry.node : undefined"
-        :collapsed-summary="entry.kind === 'collapsed' ? entry.summary : undefined"
-        :collapsed-nodes="entry.kind === 'collapsed' ? entry.nodes : undefined"
-        :is-last="index === toolEntries.length - 1 && thoughtEntries.length === 0 && answerEntries.length === 0 && !liveFooterStatus"
-        @open-file="(path) => emit('openFile', path)"
-      />
+      <summary class="timeline-process-fold-summary">
+        <span class="timeline-process-fold-label">{{ processSummary }}</span>
+      </summary>
+      <div
+        class="agent-timeline-scroll-wrap"
+        :class="{ 'agent-timeline-scroll-wrap--fade-top': shouldLimitScroll && scrollFadeTop }"
+      >
+        <div
+          ref="scrollContainerRef"
+          class="agent-timeline-scroll"
+          :class="{ 'agent-timeline-scroll--limited': shouldLimitScroll }"
+          @scroll="onScrollContainer"
+        >
+          <AgentTimelineNode
+            v-for="(entry, index) in toolEntries"
+            :key="entryRenderKey(entry, index)"
+            :variant="entryVariant(entry)"
+            :node="entry.kind === 'node' ? entry.node : undefined"
+            :collapsed-summary="entry.kind === 'collapsed' ? entry.summary : undefined"
+            :collapsed-nodes="entry.kind === 'collapsed' ? entry.nodes : undefined"
+            :is-last="index === toolEntries.length - 1"
+            @open-file="(path) => emit('openFile', path)"
+          />
+        </div>
+      </div>
+    </details>
+
+    <div v-else-if="toolEntries.length" class="timeline-tools">
+      <div
+        class="agent-timeline-scroll-wrap"
+        :class="{ 'agent-timeline-scroll-wrap--fade-top': shouldLimitScroll && scrollFadeTop }"
+      >
+        <div
+          ref="scrollContainerRef"
+          class="agent-timeline-scroll"
+          :class="{ 'agent-timeline-scroll--limited': shouldLimitScroll }"
+          @scroll="onScrollContainer"
+        >
+          <AgentTimelineNode
+            v-for="(entry, index) in toolEntries"
+            :key="entryRenderKey(entry, index)"
+            :variant="entryVariant(entry)"
+            :node="entry.kind === 'node' ? entry.node : undefined"
+            :collapsed-summary="entry.kind === 'collapsed' ? entry.summary : undefined"
+            :collapsed-nodes="entry.kind === 'collapsed' ? entry.nodes : undefined"
+            :is-last="index === toolEntries.length - 1 && thoughtEntries.length === 0 && answerEntries.length === 0 && !liveFooterStatus"
+            @open-file="(path) => emit('openFile', path)"
+          />
+        </div>
+      </div>
     </div>
 
     <AgentTimelineNode
@@ -31,13 +72,18 @@
       v-for="(entry, index) in answerEntries"
       :key="entryRenderKey(entry, index)"
       variant="answer"
+      :answer-streaming="entry.streaming && isRunning"
       :is-last="index === answerEntries.length - 1 && !liveFooterStatus"
       @open-file="(path) => emit('openFile', path)"
     >
+      <div v-if="entry.streaming && isRunning && !entry.text.trim()" class="timeline-answer-placeholder">
+        <span class="shimmer-text--fast">正在生成回答…</span>
+      </div>
       <PlanDocumentBlock
+        v-else
         :content="entry.text"
         :chat-mode="chatMode"
-        :streaming="entry.streaming || isRunning"
+        :streaming="entry.streaming && isRunning"
         :can-execute="canExecutePlan && !isRunning && !entry.streaming"
         :enhance-layout="layoutEnhanceReady && !isRunning && !entry.streaming"
         @execute="emit('execute-plan')"
@@ -45,7 +91,7 @@
         <ChatMarkdown
           class="timeline-answer__markdown"
           :content="answerMarkdown(entry.text)"
-          :streaming="entry.streaming || isRunning"
+          :streaming="entry.streaming && isRunning"
           :interactive="true"
           @select-option="(option) => emit('select-option', option)"
         />
@@ -88,10 +134,15 @@ import ChatMarkdown from "./ChatMarkdown.vue";
 import PlanDocumentBlock from "./PlanDocumentBlock.vue";
 import AgentTimelineNode from "./AgentTimelineNode.vue";
 import { buildAgentLiveFooterStatus } from "../services/agentCompactStatus";
-import { buildTimelineEntriesFromBlocks, type TimelineRenderEntry } from "../services/agentTimelineNodes";
+import {
+  buildTimelineFeedFromBlocks,
+  buildTimelineProcessSummaryFromSteps,
+  selectVisibleTimelineThoughts,
+  shouldCollapseTimelineProcess,
+  type TimelineRenderEntry,
+} from "../services/agentTimelineNodes";
 import type { CursorFeedBlock } from "../services/agentCursorFeed";
 import { scrollElementToBottom, isScrollNearBottom } from "../utils/scrollViewport";
-import { sanitizeFeedThoughtText } from "../services/agentProgressMarker";
 import { enrichPlanMarkdownForDisplay } from "../services/planDocumentDisplay";
 import type { AiOption } from "../utils/parseAiOptions";
 
@@ -125,32 +176,75 @@ const displayBlocks = computed(() => props.blocks.filter((block) => block.kind !
 const TIMELINE_SCROLL_VISIBLE_COUNT = 3;
 
 const scrollContainerRef = ref<HTMLElement | null>(null);
+const processExpanded = ref(true);
+const userExpandedProcess = ref(false);
+const scrollFadeTop = ref(false);
 
-const renderEntries = computed(() => buildTimelineEntriesFromBlocks(displayBlocks.value));
+const timelineFeed = computed(() => buildTimelineFeedFromBlocks(displayBlocks.value));
 
-const toolEntries = computed(() =>
-  renderEntries.value.filter((entry) => entry.kind === "node" || entry.kind === "collapsed"),
+const toolEntries = computed(() => timelineFeed.value.toolEntries);
+
+const answerEntries = computed(() => timelineFeed.value.answerEntries);
+
+const showTimelineThoughts = computed(() => answerEntries.value.length === 0);
+
+const thoughtEntries = computed(() =>
+  selectVisibleTimelineThoughts(timelineFeed.value.thoughtEntries, {
+    showThoughts: showTimelineThoughts.value,
+    isRunning: props.isRunning,
+    hasAnswer: answerEntries.value.length > 0,
+    answerText: answerEntries.value.map((entry) => entry.text).join("\n\n"),
+  }),
 );
 
-const answerEntries = computed(() =>
-  renderEntries.value.filter((entry): entry is Extract<TimelineRenderEntry, { kind: "answer" }> => entry.kind === "answer"),
+const shouldWrapProcess = computed(() =>
+  shouldCollapseTimelineProcess({
+    activityDetailed: props.activityDetailed,
+    hasAnswer: answerEntries.value.length > 0,
+    toolCount: toolEntries.value.length,
+  }),
 );
-
-const showTimelineThoughts = computed(
-  () => props.activityDetailed || answerEntries.value.length === 0,
-);
-
-const thoughtEntries = computed(() => {
-  if (!showTimelineThoughts.value) return [];
-  return renderEntries.value.filter(
-    (entry): entry is Extract<TimelineRenderEntry, { kind: "thought" }> =>
-      entry.kind === "thought" && Boolean(sanitizeFeedThoughtText(entry.text)),
-  );
-});
 
 const shouldLimitScroll = computed(
   () => toolEntries.value.length > TIMELINE_SCROLL_VISIBLE_COUNT,
 );
+
+const processSummary = computed(() =>
+  buildTimelineProcessSummaryFromSteps(timelineFeed.value.actionSteps),
+);
+
+watch(
+  shouldWrapProcess,
+  (wrap) => {
+    if (wrap && !userExpandedProcess.value) {
+      processExpanded.value = false;
+    }
+    if (!wrap) {
+      processExpanded.value = true;
+      userExpandedProcess.value = false;
+    }
+  },
+  { immediate: true },
+);
+
+function onProcessToggle(event: Event) {
+  const target = event.target;
+  if (!(target instanceof HTMLDetailsElement)) return;
+  processExpanded.value = target.open;
+  if (target.open) userExpandedProcess.value = true;
+  syncScrollFadeTop();
+}
+
+function onScrollContainer(event: Event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  scrollFadeTop.value = target.scrollTop > 6;
+}
+
+function syncScrollFadeTop() {
+  const el = scrollContainerRef.value;
+  scrollFadeTop.value = Boolean(el && el.scrollTop > 6);
+}
 
 const hasAnswerBlock = computed(() => props.blocks.some((block) => block.kind === "answer"));
 
@@ -224,9 +318,15 @@ watch(
     if (!running || entryCount <= TIMELINE_SCROLL_VISIBLE_COUNT) return;
     await nextTick();
     scrollTimelineToBottom();
+    syncScrollFadeTop();
   },
   { flush: "post" },
 );
+
+watch(shouldLimitScroll, async () => {
+  await nextTick();
+  syncScrollFadeTop();
+});
 </script>
 
 <style scoped>
@@ -240,6 +340,71 @@ watch(
 
 .agent-timeline-scroll {
   min-width: 0;
+}
+
+.agent-timeline-scroll-wrap {
+  position: relative;
+  min-width: 0;
+}
+
+.agent-timeline-scroll-wrap--fade-top::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 28px;
+  z-index: 2;
+  pointer-events: none;
+  border-radius: 4px 4px 0 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(11, 18, 32, 0.98) 0%,
+    rgba(11, 18, 32, 0.72) 42%,
+    rgba(11, 18, 32, 0) 100%
+  );
+  box-shadow: inset 0 10px 12px -10px rgba(0, 0, 0, 0.42);
+}
+
+.timeline-process-fold {
+  margin: 0 0 4px;
+  min-width: 0;
+}
+
+.timeline-process-fold-summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  padding: 2px 0 6px 20px;
+}
+
+.timeline-process-fold-summary::-webkit-details-marker {
+  display: none;
+}
+
+.timeline-process-fold-summary::before {
+  content: "▸ ";
+  font-size: 8px;
+  color: rgba(148, 163, 184, 0.35);
+}
+
+.timeline-process-fold[open] > .timeline-process-fold-summary::before {
+  content: "▾ ";
+}
+
+.timeline-process-fold-label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.35;
+  color: rgba(148, 163, 184, 0.62);
+}
+
+.timeline-process-fold-summary:hover .timeline-process-fold-label {
+  color: rgba(165, 214, 255, 0.88);
+}
+
+.timeline-process-fold .agent-timeline-scroll-wrap {
+  padding-left: 2px;
 }
 
 .agent-timeline-scroll--limited {
@@ -319,6 +484,13 @@ watch(
   padding: 0;
   border: none;
   background: transparent;
+}
+
+.timeline-answer-placeholder {
+  padding: 2px 0 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(148, 163, 184, 0.78);
 }
 
 .timeline-truncated {

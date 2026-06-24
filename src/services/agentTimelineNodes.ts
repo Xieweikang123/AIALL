@@ -4,9 +4,13 @@ import {
   type ToolAggregateCard,
 } from "./agentToolAggregates";
 import {
+  computeExplorationStats,
   formatCollapsedStepsSummary,
+  formatExplorationSummary,
   type CursorFeedBlock,
 } from "./agentCursorFeed";
+import { isAgentToolTurnNarration, thoughtDuplicatesBubble } from "./agentMessageDisplay";
+import { sanitizeFeedThoughtText } from "./agentProgressMarker";
 import { getToolPath } from "../utils/toolHelpers";
 
 export type TimelineNodeStatus = "running" | "ok" | "fail";
@@ -61,6 +65,14 @@ export type TimelineRenderEntry =
   | TimelineCollapsedEntry
   | TimelineNodeEntry
   | TimelineAnswerEntry;
+
+export type TimelineFeedView = {
+  entries: TimelineRenderEntry[];
+  toolEntries: Array<TimelineNodeEntry | TimelineCollapsedEntry>;
+  thoughtEntries: TimelineThoughtEntry[];
+  answerEntries: TimelineAnswerEntry[];
+  actionSteps: AgentRoundTool[];
+};
 
 type StepCategory = "explore" | "read" | "search" | "edit" | "command" | "misc";
 
@@ -266,40 +278,116 @@ export function buildCollapsedTimelineEntry(
   };
 }
 
-export function buildTimelineEntriesFromBlocks(blocks: CursorFeedBlock[]): TimelineRenderEntry[] {
-  const entries: TimelineRenderEntry[] = [];
+export function collectTimelineStepsFromBlocks(blocks: CursorFeedBlock[]): AgentRoundTool[] {
+  const steps: AgentRoundTool[] = [];
+  for (const block of blocks) {
+    if (block.kind !== "actions") continue;
+    for (const item of block.collapsed) steps.push(item.step);
+    for (const item of block.visible) steps.push(item.step);
+  }
+  return steps;
+}
+
+export function shouldCollapseTimelineProcess(input: {
+  activityDetailed?: boolean;
+  hasAnswer: boolean;
+  toolCount: number;
+}): boolean {
+  return Boolean(input.hasAnswer && input.toolCount > 0 && !input.activityDetailed);
+}
+
+export function buildTimelineProcessSummaryFromSteps(steps: AgentRoundTool[]): string {
+  if (!steps.length) return "探索过程";
+  const stats = computeExplorationStats(steps);
+  const detail = formatExplorationSummary(stats, false).replace(/^已完成 · /, "");
+  return detail ? `探索过程 · ${detail}` : `探索过程 · ${stats.total} 步`;
+}
+
+export function buildTimelineProcessSummary(blocks: CursorFeedBlock[]): string {
+  return buildTimelineProcessSummaryFromSteps(collectTimelineStepsFromBlocks(blocks));
+}
+
+/** Visible thought rows for the timeline — filters narration and optionally keeps only the latest while running. */
+export function selectVisibleTimelineThoughts(
+  entries: TimelineThoughtEntry[],
+  options: {
+    showThoughts: boolean;
+    isRunning: boolean;
+    hasAnswer: boolean;
+    answerText?: string;
+  },
+): TimelineThoughtEntry[] {
+  if (!options.showThoughts || options.hasAnswer) return [];
+
+  const answerText = options.answerText?.trim() ?? "";
+  const visible = entries.filter((entry) => {
+    const sanitized = sanitizeFeedThoughtText(entry.text);
+    if (!sanitized || isAgentToolTurnNarration(entry.text)) return false;
+    if (answerText && thoughtDuplicatesBubble(entry.text, answerText)) return false;
+    return true;
+  });
+
+  if (options.isRunning && visible.length > 1) {
+    return [visible[visible.length - 1]!];
+  }
+  return visible;
+}
+
+export function buildTimelineFeedFromBlocks(blocks: CursorFeedBlock[]): TimelineFeedView {
+  const view: TimelineFeedView = {
+    entries: [],
+    toolEntries: [],
+    thoughtEntries: [],
+    answerEntries: [],
+    actionSteps: [],
+  };
 
   for (const block of blocks) {
     if (block.kind === "thought") {
-      entries.push({ kind: "thought", key: block.key, text: block.text });
+      const entry: TimelineThoughtEntry = { kind: "thought", key: block.key, text: block.text };
+      view.entries.push(entry);
+      view.thoughtEntries.push(entry);
       continue;
     }
 
     if (block.kind === "actions") {
+      for (const item of block.collapsed) view.actionSteps.push(item.step);
+      for (const item of block.visible) view.actionSteps.push(item.step);
       if (block.collapsed.length) {
         const collapsed = buildCollapsedTimelineEntry(
           `${block.key}-collapsed`,
           block.collapsed.map((item) => item.step),
         );
-        if (collapsed) entries.push(collapsed);
+        if (collapsed) {
+          view.entries.push(collapsed);
+          view.toolEntries.push(collapsed);
+        }
       }
       for (const node of buildTimelineNodesFromSteps(block.visible.map((item) => item.step))) {
-        entries.push({ kind: "node", key: node.key, node });
+        const entry: TimelineNodeEntry = { kind: "node", key: node.key, node };
+        view.entries.push(entry);
+        view.toolEntries.push(entry);
       }
       continue;
     }
 
     if (block.kind === "answer") {
-      entries.push({
+      const entry: TimelineAnswerEntry = {
         kind: "answer",
         key: block.key,
         text: block.text,
         streaming: block.streaming,
-      });
+      };
+      view.entries.push(entry);
+      view.answerEntries.push(entry);
     }
   }
 
-  return entries;
+  return view;
+}
+
+export function buildTimelineEntriesFromBlocks(blocks: CursorFeedBlock[]): TimelineRenderEntry[] {
+  return buildTimelineFeedFromBlocks(blocks).entries;
 }
 
 export { fileNameFromPath, formatPathSegment };

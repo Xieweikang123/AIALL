@@ -356,6 +356,18 @@ export function formatToolMeta(
     const detail = query ? `「${query}」` : "";
     return { name, icon: "🔎", title: "搜索文件", detail, label: detail ? `搜索文件 ${detail}` : "搜索文件" };
   }
+  if (name === "web_search") {
+    const searchQuery = query || String(args.q ?? "").trim();
+    const engine = String(args.engine ?? "").trim();
+    const engineNote = engine && engine !== "google" ? ` · ${engine}` : "";
+    const detail = searchQuery ? `「${searchQuery}」${engineNote}` : "";
+    return { name, icon: "🌐", title: "联网搜索", detail, label: detail ? `联网搜索 ${detail}` : "联网搜索" };
+  }
+  if (name === "web_extract") {
+    const url = String(args.url ?? "").trim();
+    const detail = url.length > 72 ? `${url.slice(0, 72)}…` : url;
+    return { name, icon: "🌐", title: "抓取网页", detail, label: detail ? `抓取网页 ${detail}` : "抓取网页" };
+  }
 
   return { name, icon: "⚙️", title: name, detail: "", label: name };
 }

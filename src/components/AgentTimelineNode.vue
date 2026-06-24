@@ -78,7 +78,10 @@
       </div>
 
       <div v-else-if="variant === 'answer'" class="timeline-answer-body">
-        <div class="timeline-answer-label">回答</div>
+        <div class="timeline-answer-label">
+          <span v-if="answerStreaming" class="timeline-answer-label--live shimmer-text--fast">回答中</span>
+          <span v-else>回答</span>
+        </div>
         <slot />
       </div>
     </div>
@@ -101,12 +104,14 @@ const props = withDefaults(
     thoughtStreaming?: boolean;
     collapsedSummary?: string;
     collapsedNodes?: TimelineNode[];
+    answerStreaming?: boolean;
     nested?: boolean;
     isLast?: boolean;
   }>(),
   {
     nested: false,
     isLast: false,
+    answerStreaming: false,
     collapsedNodes: () => [],
   },
 );
@@ -125,7 +130,9 @@ const hasChips = computed(() => Boolean(props.node?.chips.length));
 
 const dotClass = computed(() => {
   if (props.variant === "thought") return "timeline-node-dot--thought";
-  if (props.variant === "answer") return "timeline-node-dot--answer";
+  if (props.variant === "answer") {
+    return props.answerStreaming ? "timeline-node-dot--answer-streaming" : "timeline-node-dot--answer";
+  }
   if (props.variant === "collapsed") return "timeline-node-dot--collapsed";
   if (props.node?.status === "running") return "timeline-node-dot--running";
   if (props.node?.status === "fail") return "timeline-node-dot--fail";
@@ -215,6 +222,14 @@ function onCollapsedToggle(event: Event) {
   border-color: rgba(88, 166, 255, 0.75);
   background: rgba(88, 166, 255, 0.25);
   box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.08);
+}
+
+.timeline-node-dot--answer-streaming {
+  width: 10px;
+  height: 10px;
+  border-color: rgba(88, 166, 255, 0.9);
+  background: rgba(88, 166, 255, 0.55);
+  animation: timeline-dot-pulse 1.4s ease-in-out infinite;
 }
 
 .timeline-node-dot--running {

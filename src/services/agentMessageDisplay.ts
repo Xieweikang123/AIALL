@@ -2,9 +2,7 @@ import type { AgentRoundGroup } from "./agentRoundGroups";
 import { recordAgentRoundResponse } from "./agentRoundGroups";
 import type { CursorFeedItem } from "./agentCursorFeed";
 import { isPrematureVisionCompletionClaim } from "../../shared/visionCompletionClaim";
-import { stripToolSummaryFromAssistantContent } from "./vibeChatStorage";
-import { stripAgentSuggestions } from "./agentSuggestions";
-import { stripTextToolCallMarkup } from "./textToolCallMarkup";
+import { sanitizeMarkdownForDisplay } from "./markdownDisplaySanitize";
 import {
   AGENT_PROGRESS_MARKER,
   AGENT_PROGRESS_MARKER_RE,
@@ -59,9 +57,7 @@ export function isSubstantiveProgressSummary(text: string): boolean {
 }
 
 function normalizeBubbleText(text: string): string {
-  return stripAgentSuggestions(
-    stripTextToolCallMarkup(stripToolSummaryFromAssistantContent(text)),
-  ).trim();
+  return sanitizeMarkdownForDisplay(text);
 }
 
 /** Short planning lines emitted before tool calls — not user-facing answers. */
@@ -81,6 +77,16 @@ export function isEnglishToolNarration(text: string): boolean {
   const cjk = (trimmed.match(/[\u4e00-\u9fff]/g) || []).length;
   const latin = (trimmed.match(/[a-zA-Z]/g) || []).length;
   return latin >= 24 && cjk < 8 && trimmed.length <= 220;
+}
+
+/** Structured or long narrative that belongs in the answer block, not timeline thought rows. */
+export function isAnswerLikeTimelineNarrative(text: string): boolean {
+  const trimmed = normalizeBubbleText(text);
+  if (!trimmed) return false;
+  if (hasAgentProgressMarker(text)) return false;
+  if (/^#{1,3}\s/m.test(trimmed)) return true;
+  if (/^>\s/m.test(trimmed)) return true;
+  return trimmed.length >= 180;
 }
 
 /** Append incremental SSE delta — must not insert paragraph breaks between chunks. */
@@ -603,15 +609,22 @@ export function normalizeComparableText(text: string): string {
   return text.trim().replace(/\s+/g, " ");
 }
 
+const THOUGHT_DUPLICATE_MIN_FRAGMENT = 12;
+
 /** Whether a feed thought duplicates text already shown in the answer bubble. */
 export function thoughtDuplicatesBubble(thought: string, bubbleContent: string): boolean {
   const thoughtNorm = normalizeComparableText(thought);
   const bubbleNorm = normalizeComparableText(bubbleContent);
   if (!thoughtNorm || !bubbleNorm) return false;
   if (thoughtNorm === bubbleNorm) return true;
+  if (
+    thoughtNorm.length >= THOUGHT_DUPLICATE_MIN_FRAGMENT &&
+    (bubbleNorm.includes(thoughtNorm) || thoughtNorm.includes(bubbleNorm))
+  ) {
+    return true;
+  }
   const minLen = Math.min(thoughtNorm.length, bubbleNorm.length);
   if (minLen < SUBSTANTIVE_MIN_CHARS) return false;
-  if (bubbleNorm.includes(thoughtNorm) || thoughtNorm.includes(bubbleNorm)) return true;
   const prefixLen = Math.min(thoughtNorm.length, bubbleNorm.length, 160);
   return thoughtNorm.slice(0, prefixLen) === bubbleNorm.slice(0, prefixLen);
 }

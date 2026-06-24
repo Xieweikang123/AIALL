@@ -11,6 +11,7 @@ export function getToolIcon(name: string): string {
   if (name === 'list_dir') return '📁';
   if (name === 'delete_file') return '🗑️';
   if (name === 'run_command') return '▶️';
+  if (name === 'web_search' || name === 'web_extract') return '🌐';
   return '⚡';
 }
 
@@ -30,6 +31,8 @@ export function getToolLabel(name: string): string {
   if (name === 'list_dir') return '列出';
   if (name === 'delete_file') return '删除';
   if (name === 'run_command') return '执行';
+  if (name === 'web_search') return '联网搜索';
+  if (name === 'web_extract') return '抓取网页';
   return name;
 }
 

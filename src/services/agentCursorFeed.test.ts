@@ -15,10 +15,32 @@ import {
   shouldUseCompactAgentFeed,
 } from "./agentCursorFeed";
 import { buildUnifiedAgentTimeline, buildAgentLiveFooterStatus } from "./agentCompactStatus";
+import { formatToolMeta } from "../utils/vibeHelpers";
 import type { CursorFeedItem } from "./agentCursorFeed";
 import type { AgentRoundGroupView } from "./agentRoundGroups";
 
 describe("agentCursorFeed", () => {
+  it("formats web_search tool meta with query", () => {
+    const meta = formatToolMeta("web_search", {
+      query: "Monaco Editor minimap settings",
+      max_results: 3,
+    });
+    expect(meta.title).toBe("联网搜索");
+    expect(meta.detail).toBe("「Monaco Editor minimap settings」");
+    expect(meta.label).toContain("Monaco Editor minimap settings");
+    expect(formatCursorActionLabel({
+      id: "1",
+      name: "web_search",
+      icon: "🌐",
+      title: meta.title,
+      detail: meta.detail,
+      label: meta.label,
+      summary: "fetch failed",
+      ok: false,
+      args: { query: "Monaco Editor minimap settings" },
+    })).toContain("Monaco Editor minimap settings");
+  });
+
   it("formats tool actions like Cursor", () => {
     expect(formatCursorActionLabel({
       id: "1",
@@ -142,6 +164,20 @@ describe("agentCursorFeed", () => {
       text: "最终回答正文",
       streaming: false,
     });
+  });
+
+  it("adds placeholder answer block while streaming before text arrives", () => {
+    const timeline = buildCursorAgentTimeline([], "", { streaming: true });
+    expect(timeline.answer).toEqual({ text: "", streaming: true });
+    expect(timeline.blocks).toEqual([
+      { kind: "answer", key: "timeline-answer", text: "", streaming: true },
+    ]);
+  });
+
+  it("omits answer block when not streaming and no text", () => {
+    const timeline = buildCursorAgentTimeline([], "", { streaming: false });
+    expect(timeline.answer).toBeNull();
+    expect(timeline.blocks).toEqual([]);
   });
 
   it("collapses long action batches but keeps recent steps visible", () => {
@@ -321,7 +357,7 @@ describe("agentCursorFeed", () => {
     });
 
     expect(timeline.blocks.at(-1)?.kind).toBe("answer");
-    expect(timeline.blocks.some((block) => block.kind === "thought")).toBe(true);
+    expect(timeline.blocks.some((block) => block.kind === "thought")).toBe(false);
     expect(timeline.blocks.some((block) => block.kind === "actions")).toBe(true);
   });
 
@@ -344,6 +380,43 @@ describe("agentCursorFeed", () => {
     });
 
     expect(timeline.blocks.some((block) => block.kind === "thought")).toBe(false);
+  });
+
+  it("shows placeholder answer while streaming_model before preview text", () => {
+    const timeline = buildUnifiedAgentTimeline({
+      roundGroups: [{
+        turn: 1,
+        modelSteps: [],
+        toolIds: ["t1"],
+        narrative: "",
+        tools: [{
+          id: "t1",
+          turn: 1,
+          name: "grep",
+          icon: "🔍",
+          title: "代码搜索",
+          detail: "minimap",
+          label: "搜索",
+          summary: "ok",
+          ok: true,
+          args: { pattern: "minimap" },
+        }],
+      }],
+      answerPreview: "",
+      answerStreaming: true,
+      isRunning: true,
+      activityDetailed: false,
+      compactFeed: false,
+      agentPhase: "streaming_model",
+    });
+
+    const answerBlock = timeline.blocks.find((block) => block.kind === "answer");
+    expect(answerBlock).toEqual({
+      kind: "answer",
+      key: "timeline-answer",
+      text: "",
+      streaming: true,
+    });
   });
 
   it("buildAgentLiveFooterStatus suppresses exploration summary when tools are visible", () => {
