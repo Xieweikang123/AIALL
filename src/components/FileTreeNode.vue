@@ -193,7 +193,7 @@ function onFilePointerDown(e: PointerEvent) {
 }
 
 const depth = computed(() => props.depth ?? 0);
-const paddingLeft = computed(() => `${4 + depth.value * 12}px`);
+const paddingLeft = computed(() => `${6 + depth.value * 14}px`);
 const expanded = computed(() => props.expandedDirs.has(props.node.path));
 
 const FILE_KIND_BY_EXT: Record<string, string> = {
@@ -252,19 +252,19 @@ const fileTypeLabel = computed(() => {
 .file-item {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   width: 100%;
   box-sizing: border-box;
   border: none;
   background: transparent;
-  color: rgba(255, 255, 255, 0.88);
+  color: rgba(255, 255, 255, 0.86);
   text-align: left;
-  padding: 4px 8px 4px 4px;
+  padding: 5px 8px 5px 2px;
   cursor: pointer;
-  font-size: 12.5px;
-  line-height: 1.35;
+  font-size: 12px;
+  line-height: 1.4;
   touch-action: none;
-  border-radius: 6px;
+  border-radius: 5px;
   position: relative;
   transition: background 0.12s ease, color 0.12s ease;
 }
@@ -304,11 +304,11 @@ const fileTypeLabel = computed(() => {
 }
 
 .tree-chevron {
-  width: 14px;
+  width: 12px;
   flex-shrink: 0;
   text-align: center;
-  font-size: 9px;
-  color: rgba(139, 148, 158, 0.75);
+  font-size: 8px;
+  color: rgba(139, 148, 158, 0.65);
   transition: transform 0.12s ease, color 0.12s ease;
 }
 
@@ -324,13 +324,13 @@ const fileTypeLabel = computed(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
-  border-radius: 4px;
-  font-size: 8px;
+  border-radius: 3px;
+  font-size: 7px;
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
   line-height: 1;
   color: rgba(255, 255, 255, 0.85);
   background: rgba(139, 148, 158, 0.22);
@@ -343,11 +343,11 @@ const fileTypeLabel = computed(() => {
 
 .file-type-icon--dir::before {
   content: "";
-  width: 10px;
-  height: 8px;
+  width: 9px;
+  height: 7px;
   border-radius: 1px 1px 2px 2px;
   background: #d29922;
-  box-shadow: 0 -3px 0 -1px rgba(210, 153, 34, 0.55);
+  box-shadow: 0 -2px 0 -1px rgba(210, 153, 34, 0.55);
 }
 
 .file-type-icon--vue { background: rgba(65, 184, 131, 0.22); color: #7ee787; }
@@ -371,15 +371,19 @@ const fileTypeLabel = computed(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  color: rgba(255, 255, 255, 0.84);
 }
 
 .dir-name {
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.92);
+  color: rgba(255, 255, 255, 0.94);
 }
 
 .tree-children {
   position: relative;
+  margin-left: 10px;
+  padding-left: 6px;
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .rename-input {

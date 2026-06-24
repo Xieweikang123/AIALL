@@ -15,8 +15,12 @@
           <div class="git-branch-info">
             <span class="git-branch-icon" aria-hidden="true">⎇</span>
             <span class="git-branch-name" :title="gitBranch">{{ gitBranch }}</span>
-            <span v-if="gitTrackingBranch" class="git-tracking-badge" :title="'跟踪: ' + gitTrackingBranch">
-              ⟶ {{ gitTrackingBranch.replace(/^[^/]+\//, '') }}
+            <span
+              v-if="gitTrackingBranch && gitTrackingShortName() !== gitBranch"
+              class="git-tracking-badge"
+              :title="'跟踪: ' + gitTrackingBranch"
+            >
+              ⟶ {{ gitTrackingShortName() }}
             </span>
           </div>
           <div class="git-header-actions">
@@ -143,13 +147,13 @@
                 @contextmenu.prevent="$emit('on-git-file-contextmenu', $event, file.path)"
               >
                 <span class="git-file-check" @pointerdown.stop @click.stop="$emit('unstage-file', file.path)">✓</span>
-                <span
-                  class="git-file-status"
-                  :style="{ color: gitStatusColor(file.status) }"
-                >
+                <span class="git-file-status" :class="gitStatusClass(file.status)">
                   {{ gitStatusIcon(file.status) }}
                 </span>
-                <span class="git-file-path" :title="file.path">{{ file.path }}</span>
+                <span class="git-file-path" :title="file.path">
+                  <span v-if="filePathParts(file.path).dir" class="git-file-dir">{{ filePathParts(file.path).dir }}</span>
+                  <span class="git-file-name">{{ filePathParts(file.path).name }}</span>
+                </span>
               </div>
             </div>
           </div>
@@ -174,13 +178,13 @@
                 @contextmenu.prevent="$emit('on-git-file-contextmenu', $event, file.path)"
               >
                 <span class="git-file-check" @pointerdown.stop @click.stop="$emit('stage-file', file.path)">+</span>
-                <span
-                  class="git-file-status"
-                  :style="{ color: gitStatusColor(file.status) }"
-                >
+                <span class="git-file-status" :class="gitStatusClass(file.status)">
                   {{ gitStatusIcon(file.status) }}
                 </span>
-                <span class="git-file-path" :title="file.path">{{ file.path }}</span>
+                <span class="git-file-path" :title="file.path">
+                  <span v-if="filePathParts(file.path).dir" class="git-file-dir">{{ filePathParts(file.path).dir }}</span>
+                  <span class="git-file-name">{{ filePathParts(file.path).name }}</span>
+                </span>
                 <button type="button" class="ghost tiny danger git-file-btn" title="丢弃更改" @pointerdown.stop @click.stop="$emit('discard-file', file.path, $event)">✕</button>
               </div>
             </div>
@@ -211,7 +215,7 @@
                     :title="file.oldPath ? `${file.oldPath} → ${file.path}` : file.path"
                     @click="$emit('open-git-log-file', entry, file)"
                   >
-                    <span class="git-file-status" :style="{ color: gitStatusColor(file.status) }">
+                    <span class="git-file-status" :class="gitStatusClass(file.status)">
                       {{ gitStatusIcon(file.status) }}
                     </span>
                     <span class="git-file-path">{{ file.oldPath ? `${file.oldPath} → ${file.path}` : file.path }}</span>
@@ -238,23 +242,26 @@
           @keydown.meta.enter="$emit('commit-git')"
         />
         <div class="git-commit-actions">
-          <button
-            type="button"
-            class="secondary small git-commit-ai"
-            :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep || !gitStagedFiles.length || !configReady"
-            @click="$emit('generate-commit-message')"
-          >
-            {{ gitGenStep || "✦ AI 生成" }}
-          </button>
-          <button
-            type="button"
-            class="small"
-            :class="canGitCommit ? 'primary' : 'secondary'"
-            :disabled="!canGitCommit || !!gitAiPushStep"
-            @click="$emit('commit-git')"
-          >
-            {{ gitCommitting ? "提交中…" : `提交 (${gitStagedFiles.length})` }}
-          </button>
+          <div class="git-commit-primary-row">
+            <button
+              type="button"
+              class="secondary small git-commit-ai"
+              :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep || !gitStagedFiles.length || !configReady"
+              @click="$emit('generate-commit-message')"
+            >
+              {{ gitGenStep || "✦ AI 生成" }}
+            </button>
+            <button
+              type="button"
+              class="small git-commit-btn"
+              :class="canGitCommit ? 'primary' : 'secondary'"
+              :disabled="!canGitCommit || !!gitAiPushStep"
+              :title="canGitCommit ? 'Ctrl+Enter 提交' : '请先填写提交信息'"
+              @click="$emit('commit-git')"
+            >
+              {{ gitCommitting ? "提交中…" : `提交 (${gitStagedFiles.length})` }}
+            </button>
+          </div>
           <button
             type="button"
             class="small git-ai-push"
@@ -403,14 +410,24 @@ function gitStatusIcon(status: string): string {
   }
 }
 
-function gitStatusColor(status: string): string {
+function gitTrackingShortName(): string {
+  return props.gitTrackingBranch.replace(/^[^/]+\//, "");
+}
+
+function filePathParts(path: string): { dir: string; name: string } {
+  const slash = path.lastIndexOf("/");
+  if (slash === -1) return { dir: "", name: path };
+  return { dir: path.slice(0, slash + 1), name: path.slice(slash + 1) };
+}
+
+function gitStatusClass(status: string): string {
   switch (status) {
-    case "added": return "#3fb950";
-    case "modified": return "#d29922";
-    case "deleted": return "#f85149";
+    case "added": return "git-status-added";
+    case "modified": return "git-status-modified";
+    case "deleted": return "git-status-deleted";
     case "renamed":
-    case "copied": return "#58a6ff";
-    default: return "#8b949e";
+    case "copied": return "git-status-renamed";
+    default: return "git-status-unknown";
   }
 }
 </script>
@@ -824,29 +841,36 @@ function gitStatusColor(status: string): string {
 
 .git-commit-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 6px;
 }
 
-.git-commit-actions .git-commit-ai {
-  flex: 1 1 auto;
+.git-commit-primary-row {
+  display: flex;
+  gap: 6px;
 }
 
-.git-commit-actions .primary,
-.git-commit-actions .secondary:not(.git-commit-ai) {
-  flex: 1 1 auto;
+.git-commit-primary-row .git-commit-ai {
+  flex: 1;
+  min-width: 0;
+}
+
+.git-commit-primary-row .git-commit-btn {
+  flex: 1.2;
+  min-width: 0;
 }
 
 .git-ai-push {
-  flex: 1 1 100%;
-  border: 1px solid rgba(88, 166, 255, 0.28);
-  background: rgba(88, 166, 255, 0.08);
-  color: rgba(147, 197, 253, 0.95);
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.72);
 }
 
 .git-ai-push:hover:not(:disabled) {
-  background: rgba(88, 166, 255, 0.14);
-  border-color: rgba(88, 166, 255, 0.42);
+  background: rgba(88, 166, 255, 0.1);
+  border-color: rgba(88, 166, 255, 0.28);
+  color: rgba(147, 197, 253, 0.95);
 }
 
 .git-changes-empty {
@@ -908,39 +932,62 @@ function gitStatusColor(status: string): string {
   display: flex;
   align-items: center;
   flex-wrap: nowrap;
-  gap: 10px;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 0;
+}
+
+.git-section-toggle {
+  min-width: 0;
+  flex: 1;
+}
+
+.git-section-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .git-section-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-wrap: nowrap;
+  gap: 4px;
   justify-content: flex-end;
   margin-left: auto;
+  flex-shrink: 0;
 }
 
 .git-section-actions button.ghost.tiny {
-  padding: 5px 12px;
-  font-size: 12px;
-  border-radius: 5px;
+  padding: 4px 8px;
+  font-size: 11px;
+  border-radius: 4px;
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+.git-section-head > .ghost.tiny {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .git-file-list {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
+  padding: 2px 0;
 }
 
 .git-file-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 8px;
+  gap: 6px;
+  padding: 6px 8px;
   font-size: 12px;
-  border-radius: 4px;
+  border-radius: 5px;
   cursor: pointer;
+  transition: background 120ms ease;
 }
 
 .git-file-item:hover {
@@ -956,33 +1003,87 @@ function gitStatusColor(status: string): string {
 }
 
 .git-file-check {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  color: rgba(139, 148, 158, 0.6);
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(139, 148, 158, 0.7);
   cursor: pointer;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  flex-shrink: 0;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
 }
 
 .git-file-check:hover {
-  color: rgba(255, 255, 255, 0.9);
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
 }
 
 .git-file-status {
-  font-size: 11px;
-  font-weight: bold;
-  width: 16px;
-  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  min-width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.git-status-added {
+  color: #3fb950;
+  background: rgba(63, 185, 80, 0.14);
+}
+
+.git-status-modified {
+  color: #d29922;
+  background: rgba(210, 153, 34, 0.14);
+}
+
+.git-status-deleted {
+  color: #f85149;
+  background: rgba(248, 81, 73, 0.14);
+}
+
+.git-status-renamed {
+  color: #58a6ff;
+  background: rgba(88, 166, 255, 0.14);
+}
+
+.git-status-unknown {
+  color: #8b949e;
+  background: rgba(139, 148, 158, 0.12);
 }
 
 .git-file-path {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgba(255, 255, 255, 0.8);
+  display: flex;
+  align-items: baseline;
+}
+
+.git-file-dir {
+  color: rgba(139, 148, 158, 0.55);
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.git-file-name {
+  color: rgba(255, 255, 255, 0.88);
+  flex-shrink: 0;
+  font-weight: 500;
 }
 
 .git-file-btn {

@@ -53,7 +53,8 @@
           <span v-if="projectHistoryList.length > 1" class="project-history-badge">{{ projectHistoryList.length }}</span>
           <span class="project-history-chevron" aria-hidden="true">{{ projectHistoryOpen ? "▴" : "▾" }}</span>
         </button>
-        <div v-if="projectHistoryOpen" class="project-history-dropdown">
+        <Teleport to="body">
+        <div v-if="projectHistoryOpen" class="project-history-dropdown" :style="{ position: 'fixed', top: dropdownTop + 'px', right: dropdownRight + 'px' }">
           <div class="project-history-head">
             <div>
               <h3 class="project-history-title">{{ projectHistoryList.length > 1 ? "切换项目" : "最近打开的项目" }}</h3>
@@ -107,6 +108,7 @@
             </button>
           </div>
         </div>
+        </Teleport>
       </div>
       <div class="toolbar-sep" />
       <nav class="toolbar-nav" aria-label="快捷导航">
@@ -192,8 +194,22 @@ function isCurrentProject(path: string): boolean {
   return norm(current) === norm(path);
 }
 
+const dropdownTop = ref(0);
+const dropdownRight = ref(0);
+
+function updateDropdownPosition() {
+  if (projectHistoryRef.value) {
+    const rect = projectHistoryRef.value.getBoundingClientRect();
+    dropdownTop.value = rect.bottom + 4;
+    dropdownRight.value = window.innerWidth - rect.right;
+  }
+}
+
 function toggleProjectHistory() {
   projectHistoryOpen.value = !projectHistoryOpen.value;
+  if (projectHistoryOpen.value) {
+    nextTick(updateDropdownPosition);
+  }
   if (projectHistoryOpen.value) refreshProjectHistoryList();
 }
 
@@ -504,13 +520,10 @@ function formatSessionTime(iso: string): string {
 }
 
 .project-history-dropdown {
-  position: absolute;
-  top: 100%;
-  right: 0;
   width: 400px;
   max-height: 400px;
   overflow-y: auto;
-  background: var(--bg-primary);
+  background: #0b1220;
   border: 1px solid var(--border-color);
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);

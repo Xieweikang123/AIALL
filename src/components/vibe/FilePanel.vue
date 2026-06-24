@@ -59,7 +59,7 @@
               <circle cx="7" cy="7" r="4.2" stroke="currentColor" stroke-width="1.3"/>
               <path d="M10.2 10.2 13.5 13.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
             </svg>
-            快速搜索
+            <span class="quick-search-text">搜索文件…</span>
           </span>
           <kbd class="quick-search-kbd">Ctrl+P</kbd>
         </button>
@@ -313,6 +313,7 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
   min-height: 0;
   background: transparent;
   overflow: hidden;
+  container-type: inline-size;
 }
 
 .panel-body {
@@ -333,12 +334,12 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
 .file-panel-row {
   display: flex;
   align-items: center;
-  padding: 8px 10px;
+  padding: 7px 10px;
   gap: 8px;
 }
 
 .file-panel-top-row {
-  padding-bottom: 4px;
+  padding-bottom: 3px;
 }
 
 .file-panel-tabs {
@@ -358,8 +359,8 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
   justify-content: center;
   gap: 4px;
   flex: 1;
-  padding: 5px 8px;
-  font-size: 11.5px;
+  padding: 6px 8px;
+  font-size: 12px;
   white-space: nowrap;
   border: none;
   background: none;
@@ -411,12 +412,8 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
 .file-toolbar {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 2px;
   flex-shrink: 0;
-  padding: 2px;
-  background: rgba(0, 0, 0, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 7px;
 }
 
 .file-toolbar-btn {
@@ -424,12 +421,12 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   padding: 0;
   border: 1px solid transparent;
   background: transparent;
-  color: rgba(255, 255, 255, 0.72);
+  color: rgba(255, 255, 255, 0.62);
   cursor: pointer;
   border-radius: 5px;
   flex-shrink: 0;
@@ -470,8 +467,8 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
 .file-panel-search-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 10px 8px;
+  gap: 6px;
+  padding: 0 10px 7px;
 }
 
 .quick-search-trigger {
@@ -480,14 +477,14 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 6px 9px;
-  min-height: 30px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 7px;
-  background: rgba(0, 0, 0, 0.18);
-  color: rgba(255, 255, 255, 0.55);
-  font-size: 11.5px;
+  gap: 6px;
+  padding: 5px 8px;
+  min-height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.15);
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
@@ -507,22 +504,42 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   font-weight: 500;
 }
 
+.quick-search-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .quick-search-icon {
-  opacity: 0.7;
+  opacity: 0.65;
   flex-shrink: 0;
 }
 
 .quick-search-kbd {
   font-size: 10px;
   font-family: ui-monospace, monospace;
-  padding: 2px 5px;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.55);
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.45);
+  flex-shrink: 0;
+}
+
+@container (max-width: 210px) {
+  .quick-search-text,
+  .quick-search-kbd {
+    display: none;
+  }
+
+  .quick-search-trigger {
+    justify-content: center;
+    padding-inline: 6px;
+  }
 }
 
 .sessions-sync-hint {

@@ -108,6 +108,18 @@ export function turnHasToolSteps(turn: Pick<AgentTurnCardModel, "actions">): boo
   return turn.actions.some((block) => block.visible.length > 0 || block.collapsed.length > 0);
 }
 
+/** Single tool row model — merged across all turns, rendered once in the feed. */
+export function buildMergedToolTurn(turns: AgentTurnCardModel[]): AgentTurnCardModel | null {
+  const mergedActions = mergeTurnActionsForDisplay(turns);
+  if (!turnHasToolSteps({ actions: mergedActions })) return null;
+  return {
+    key: "merged-tools",
+    text: "",
+    actions: mergedActions,
+    isLatest: true,
+  };
+}
+
 export type AgentTurnCardView = {
   key: string;
   turn: AgentTurnCardModel;
@@ -120,21 +132,10 @@ export function buildVisibleTurnViews(input: {
   visibleTurns: AgentTurnCardModel[];
   isRunning: boolean;
 }): AgentTurnCardView[] {
-  const mergedActions = mergeTurnActionsForDisplay(input.turns);
-  const mergedTurn: AgentTurnCardModel = {
-    key: "merged-tools",
-    text: "",
-    actions: mergedActions,
-    isLatest: true,
-  };
-  const showMergedTools = turnHasToolSteps(mergedTurn);
-
   return input.visibleTurns.map((turn) => ({
     key: turn.key,
     running: turn.isLatest && input.isRunning,
-    turn: turn.isLatest
-      ? { ...turn, actions: mergedActions }
-      : { ...turn, actions: [] }, // 清空非最新 turn 的 actions，避免工具步骤重复显示
-    showTools: turn.isLatest && showMergedTools,
+    turn: { ...turn, actions: [] },
+    showTools: false,
   }));
 }

@@ -39,15 +39,24 @@
         </div>
       </details>
 
-      <AgentTurnCard
-        v-if="!compactFeed"
-        v-for="view in visibleTurnViews"
-        :key="view.key"
-        :turn="view.turn"
-        :running="view.running"
-        :show-tools="view.showTools"
-        @open-file="(path) => emit('openFile', path)"
-      />
+      <template v-if="!compactFeed">
+        <AgentTurnCard
+          v-for="view in visibleTurnViews"
+          :key="view.key"
+          :turn="view.turn"
+          :running="view.running"
+          :show-tools="false"
+          @open-file="(path) => emit('openFile', path)"
+        />
+        <AgentTurnCard
+          v-if="mergedToolTurn"
+          key="merged-tools"
+          :turn="mergedToolTurn"
+          :running="isRunning && Boolean(mergedToolTurn)"
+          show-tools
+          @open-file="(path) => emit('openFile', path)"
+        />
+      </template>
 
       <template v-if="isRunning && currentStatus && !showExplorationProgress">
         <button
@@ -142,6 +151,7 @@ import AgentTurnCard from "./AgentTurnCard.vue";
 import { useStableAgentAnswer } from "../composables/useStableAgentAnswer";
 import { enrichPlanMarkdownForDisplay } from "../services/planDocumentDisplay";
 import {
+  buildMergedToolTurn,
   buildTurnCardsFromRoundGroups,
   buildVisibleTurnViews,
   type AgentTurnCardModel,
@@ -321,6 +331,8 @@ const visibleTurnViews = computed(() =>
     isRunning: props.isRunning,
   }),
 );
+
+const mergedToolTurn = computed(() => buildMergedToolTurn(turnCards.value));
 </script>
 
 <style scoped>
