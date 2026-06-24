@@ -1,5 +1,4 @@
 import { backendUrl } from "./backendBase";
-import { debugSessionLog } from "../utils/debugSessionLog";
 
 const DEV_SIDECAR_ORIGIN = "http://127.0.0.1:37891";
 const AGENT_CONNECT_TIMEOUT_MS = 45_000;
@@ -209,17 +208,6 @@ export function runVibeAgentSse(request: VibeAgentRunRequest, onEvent: (event: V
       const dataStr = currentDataLines.join("\n");
       const parsed = safeJsonParse(dataStr);
       const type = currentEvent || "message";
-
-      if (type !== "message_delta") {
-        // #region agent log
-        debugSessionLog(
-          "vibeAgentClient:sse",
-          "received sse event",
-          { type, dataChars: dataStr.length },
-          "UI2",
-        );
-        // #endregion
-      }
 
       if (type === "status") onEvent({ type: "status", data: (parsed || {}) as VibeAgentSseEvent extends { type: "status"; data: infer D } ? D : never });
       else if (type === "tool_start") onEvent({ type: "tool_start", data: (parsed || {}) as any });

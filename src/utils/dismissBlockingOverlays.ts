@@ -1,4 +1,3 @@
-import { debugSessionLog } from "./debugSessionLog";
 import { dismissMermaidFullscreen } from "./mermaidRenderer";
 
 const DOM_OVERLAY_SELECTORS = [
@@ -31,8 +30,7 @@ export function scanDomBlockingOverlays(): string[] {
 }
 
 /** Clear module-level overlays + stray DOM nodes that block pointer events. */
-export function dismissBlockingOverlays(reason: string): string[] {
-  const before = scanDomBlockingOverlays();
+export function dismissBlockingOverlays(_reason: string): string[] {
   registeredDeps?.dismissConfirm();
   registeredDeps?.dismissInput();
   registeredDeps?.hideContextMenu();
@@ -40,14 +38,5 @@ export function dismissBlockingOverlays(reason: string): string[] {
   registeredDeps?.closeProjectMemory();
   registeredDeps?.closeQuickSearch();
   dismissMermaidFullscreen();
-  const after = scanDomBlockingOverlays();
-  // #region agent log
-  debugSessionLog(
-    "dismissBlockingOverlays",
-    reason,
-    { before, after, hadDeps: Boolean(registeredDeps) },
-    "UI1",
-  );
-  // #endregion
-  return after;
+  return scanDomBlockingOverlays();
 }

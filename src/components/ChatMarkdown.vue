@@ -36,25 +36,23 @@ const streamingThrottle = createStreamingMarkdownThrottle(undefined, (text) => {
 
 const effectiveStreaming = computed(() => props.streaming || streamingSettling.value);
 
+/** Coalesce layout-hold reads — avoid onUpdated ↔ minHeight reset loops while streaming. */
+let streamingLayoutHoldRaf = 0;
+
 function syncStreamingMinHeight() {
   if (!effectiveStreaming.value || !markdownRef.value) return;
-  const prevHold = streamingMinHeight.value;
-  streamingMinHeight.value = 0;
-
-  void nextTick(() => {
+  if (streamingLayoutHoldRaf) return;
+  streamingLayoutHoldRaf = requestAnimationFrame(() => {
+    streamingLayoutHoldRaf = 0;
     const node = markdownRef.value;
     if (!node || !effectiveStreaming.value) return;
+    const prevHold = streamingMinHeight.value;
     const naturalHeight = node.offsetHeight;
-    if (naturalHeight <= 0) {
-      streamingMinHeight.value = prevHold;
-      return;
-    }
+    if (naturalHeight <= 0) return;
     if (naturalHeight >= prevHold) {
-      streamingMinHeight.value = naturalHeight;
+      if (naturalHeight !== prevHold) streamingMinHeight.value = naturalHeight;
     } else if (naturalHeight < prevHold * 0.9) {
       streamingMinHeight.value = naturalHeight;
-    } else {
-      streamingMinHeight.value = prevHold;
     }
   });
 }
@@ -105,6 +103,10 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  if (streamingLayoutHoldRaf) {
+    cancelAnimationFrame(streamingLayoutHoldRaf);
+    streamingLayoutHoldRaf = 0;
+  }
   streamingThrottle.dispose();
 });
 
@@ -250,16 +252,13 @@ function postProcess() {
 // Trigger on html change
 watch([displayHtml, effectiveStreaming], () => {
   if (effectiveStreaming.value) {
-    void nextTick(syncStreamingMinHeight);
+    syncStreamingMinHeight();
     return;
   }
   postProcess();
 }, { immediate: true });
 onUpdated(() => {
-  if (effectiveStreaming.value) {
-    syncStreamingMinHeight();
-    return;
-  }
+  if (effectiveStreaming.value) return;
   postProcess();
 });
 </script>

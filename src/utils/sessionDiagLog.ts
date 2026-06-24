@@ -1,9 +1,6 @@
 import { debugLog } from "./debugLog";
 
 const TAG = "[session-diag]";
-const DEBUG_SESSION = "afe7ec";
-const DEBUG_INGEST =
-  "http://127.0.0.1:7681/ingest/c6f6b2fb-2f39-4dd4-897b-699ca68db244";
 const recentlyDeleted = new Map<string, number>();
 const DELETED_TTL_MS = 120_000;
 
@@ -48,43 +45,6 @@ function resurrectionHints(data: Record<string, unknown>): Record<string, unknow
   return hints;
 }
 
-function inferHypothesisId(event: string, data: Record<string, unknown>): string {
-  if (event.includes("persist-chat-now:delayed") || event.includes("sync-chat-session")) return "H1";
-  if (event.includes("flush-chat-store") || event.includes("chat-store-sync")) return "H2";
-  if (
-    event.includes("hydrate-from-disk")
-    || event.includes("load-full-chat-store")
-    || event.includes("merge-from-disk")
-    || event.includes("chat-store-load")
-    || event.includes("ensure-chat-from-disk")
-  ) return "H3";
-  if (event.includes("save-new-session")) return "H4";
-  if (event.includes("cacheHit") || (event.includes("chat-store-load") && data.cacheHit)) return "H5";
-  if (event.includes("refresh-session-list:added")) return "H0";
-  if (event.includes("delete")) return "H0";
-  return "H0";
-}
-
-function emitDebugNdjson(event: string, data: Record<string, unknown>) {
-  const payload = { ...data, ...resurrectionHints(data) };
-  const hypothesisId = inferHypothesisId(event, payload);
-  // #region agent log
-  fetch(DEBUG_INGEST, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": DEBUG_SESSION },
-    body: JSON.stringify({
-      sessionId: DEBUG_SESSION,
-      hypothesisId,
-      location: `sessionDiagLog:${event}`,
-      message: event,
-      data: payload,
-      timestamp: Date.now(),
-      runId: "pre-fix",
-    }),
-  }).catch(() => {});
-  // #endregion
-}
-
 /** 删除会话时登记，供后续日志检测「复活」。 */
 export function markSessionDeleted(sessionId: string) {
   if (!sessionId) return;
@@ -95,7 +55,6 @@ export function markSessionDeleted(sessionId: string) {
 export function sessionDiag(event: string, data: Record<string, unknown> = {}) {
   const payload = { ...data, ...resurrectionHints(data) };
   debugLog(TAG, event, payload);
-  emitDebugNdjson(event, data);
 }
 
 export type SessionDiagSnapshot = {

@@ -2,7 +2,6 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import { debugSessionLog } from "./debugSessionLog";
 import {
   AGENT_AI_MAX_RETRIES,
   chatCompletionWithTools,
@@ -2038,20 +2037,6 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     }, 2000);
     const compactedMessages = compactMessagesForModel(messages, maxContextChars);
     const contextChars = compactedMessages.reduce((sum, message) => sum + messageCharSize(message), 0);
-    // #region agent log
-    debugSessionLog(
-      "vibeAgent.ts:turnContext",
-      "compacted context for model turn",
-      {
-        turn,
-        contextChars,
-        messageCount: compactedMessages.length,
-        consultativeUiAppearanceRun,
-        toolsDisabled: toolsForTurn.length === 0,
-      },
-      "H6",
-    );
-    // #endregion
     onEvent({
       type: "status",
       data: {
@@ -2687,16 +2672,6 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
             : undefined,
           consultativeReadPaths: toolGuard.consultativeReadPaths,
         });
-      if (consultativeForceAnswerPending && rawText.trim()) {
-        // #region agent log
-        debugSessionLog(
-          "vibeAgent.ts:forceAnswerBypass",
-          "skipping consultative finalize block — force answer pending",
-          { replyLen: rawText.length, visionLocateReadUsed },
-          "H4",
-        );
-        // #endregion
-      }
       if (
         blockConsultativeFinalize &&
         visionConsultativeLocateRetries < MAX_VISION_CONSULTATIVE_LOCATE_RETRIES
@@ -2719,21 +2694,6 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
           isUiAppearanceQuestionPrompt(prompt) &&
           visionLocateReadUsed &&
           !appearanceRetry;
-        // #region agent log
-        debugSessionLog(
-          "vibeAgent.ts:consultativeBlock",
-          "blocked consultative finalize",
-          {
-            retry: visionConsultativeLocateRetries,
-            visionLocateReadUsed,
-            appearanceRetry,
-            appearanceAnswerAfterRead,
-            replyLen: rawText.length,
-            grepHits: grepHitVueList.length,
-          },
-          "H4",
-        );
-        // #endregion
         messages.push({
           role: "system",
           content: unreconciledEmptyShell
@@ -2830,14 +2790,6 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       });
       emitUserVisibleAssistantMessage(onEvent, rawText, streamedChars, { force: true });
       consultativeForceAnswerPending = false;
-      // #region agent log
-      debugSessionLog(
-        "vibeAgent.ts:emitDone",
-        "emitting final answer and done",
-        { turn, replyLen: rawText.length, streamedChars },
-        "H7",
-      );
-      // #endregion
       onEvent({
         type: "status",
         data: {
@@ -3137,14 +3089,6 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       if (exploreSig && exploreSig === lastConsultativeExploreSig) {
         consultativeDuplicateExploreHits += 1;
         if (consultativeDuplicateExploreHits >= 1) {
-          // #region agent log
-          debugSessionLog(
-            "vibeAgent.ts:duplicateExplore",
-            "duplicate explore sig — force answer",
-            { exploreSig: exploreSig.slice(0, 200), hits: consultativeDuplicateExploreHits },
-            "H4",
-          );
-          // #endregion
           messages.push({ role: "system", content: buildConsultativeDuplicateExploreNudge() });
           consultativeForceAnswerPending = true;
         }

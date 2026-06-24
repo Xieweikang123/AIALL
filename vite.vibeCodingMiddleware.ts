@@ -453,13 +453,6 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       const _chatT1 = Date.now();
       debugLog(`chat-store-load done: loadMessages=${loadMessages}, sessions=${sessions.length}, loadMs=${_chatT1 - _chatT0}, totalFromEntry=${_chatT1 - _reqTime}ms`);
 
-      // #region agent log
-      try {
-        const logEntry = { sessionId: "b0d733", id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, timestamp: Date.now(), location: "vibeCodingMiddleware:chat-store-load", message: "chat-store-load timing", data: { projectPath, sessionCount: sessions.length, totalEntries: metas.length, loadMs: _chatT1 - _chatT0, loadMessages }, hypothesisId: "H3", runId: "run1" };
-        fs.appendFile(path.join(process.cwd(), "debug-b0d733.log"), JSON.stringify(logEntry) + "\n", () => {});
-      } catch {}
-      // #endregion
-
       if (!sessions.length) {
         sendJson(res, 404, { ok: false, error: "会话目录为空" });
         return;
@@ -1380,12 +1373,6 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
 
       const items = await listDirectory(resolved);
       setCachedDirList(resolved, items);
-      // #region agent log
-      try {
-        const logEntry = { sessionId: "b0d733", id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, timestamp: Date.now(), location: "vibeCodingMiddleware:list-endpoint", message: "list endpoint total", data: { dirPath: resolved, itemCount: items.length, totalMs: Date.now() - _listReqTime }, hypothesisId: "H6", runId: "run1" };
-        fs.appendFile(path.join(process.cwd(), "debug-b0d733.log"), JSON.stringify(logEntry) + "\n", () => {});
-      } catch {}
-      // #endregion
       debugLog(`list: done dirPath="${dirPath}" items=${items.length} totalFromEntry=${Date.now() - _listReqTime}ms`);
       sendJson(res, 200, { ok: true, path: resolved, items });
     } catch (error) {
