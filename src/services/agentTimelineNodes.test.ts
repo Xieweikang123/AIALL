@@ -3,8 +3,10 @@ import {
   buildTimelineEntriesFromBlocks,
   buildTimelineNodesFromSteps,
   buildTimelineProcessSummary,
+  buildTimelineThoughtSummary,
   formatPathSegment,
   selectVisibleTimelineThoughts,
+  shouldAutoExpandTimelineThoughts,
   shouldCollapseTimelineProcess,
 } from "./agentTimelineNodes";
 import type { AgentRoundTool } from "./agentRoundGroups";
@@ -82,6 +84,56 @@ describe("buildTimelineEntriesFromBlocks", () => {
 
     const entries = buildTimelineEntriesFromBlocks(blocks);
     expect(entries.map((entry) => entry.kind)).toEqual(["thought", "collapsed", "node", "answer"]);
+  });
+});
+
+describe("buildTimelineThoughtSummary", () => {
+  it("uses a truncated preview for a single thought", () => {
+    const summary = buildTimelineThoughtSummary([
+      { kind: "thought", key: "t1", text: "好的，我先读取配置文件，确认项目结构后再修改组件。" },
+    ]);
+    expect(summary).toContain("配置文件");
+  });
+
+  it("labels multiple thoughts with count and latest preview", () => {
+    const summary = buildTimelineThoughtSummary([
+      { kind: "thought", key: "t1", text: "第一段进度摘要。" },
+      { kind: "thought", key: "t2", text: "第二段进度摘要，说明接下来要改 Git 面板。" },
+    ]);
+    expect(summary).toContain("思考过程 · 2 段");
+    expect(summary).toContain("Git");
+  });
+});
+
+describe("shouldAutoExpandTimelineThoughts", () => {
+  it("stays collapsed while running or when an answer exists", () => {
+    expect(
+      shouldAutoExpandTimelineThoughts({
+        isRunning: true,
+        hasAnswer: false,
+        thoughtCount: 3,
+        activityDetailed: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldAutoExpandTimelineThoughts({
+        isRunning: false,
+        hasAnswer: true,
+        thoughtCount: 3,
+        activityDetailed: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("expands only for completed detailed runs without an answer block", () => {
+    expect(
+      shouldAutoExpandTimelineThoughts({
+        isRunning: false,
+        hasAnswer: false,
+        thoughtCount: 2,
+        activityDetailed: true,
+      }),
+    ).toBe(true);
   });
 });
 

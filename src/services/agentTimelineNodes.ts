@@ -88,11 +88,6 @@ function stepCategory(name: string): StepCategory {
   return "misc";
 }
 
-function fileNameFromPath(filePath: string): string {
-  const parts = filePath.replace(/\\/g, "/").split("/");
-  return parts[parts.length - 1] || filePath;
-}
-
 const BREADCRUMB_TAIL_SEGMENTS = 4;
 
 function formatPathSegment(path: string): string {
@@ -278,14 +273,22 @@ export function buildCollapsedTimelineEntry(
   };
 }
 
+function appendActionStepsFromBlock(steps: AgentRoundTool[], block: Extract<CursorFeedBlock, { kind: "actions" }>): void {
+  for (const item of block.collapsed) steps.push(item.step);
+  for (const item of block.visible) steps.push(item.step);
+}
+
 export function collectTimelineStepsFromBlocks(blocks: CursorFeedBlock[]): AgentRoundTool[] {
   const steps: AgentRoundTool[] = [];
   for (const block of blocks) {
     if (block.kind !== "actions") continue;
-    for (const item of block.collapsed) steps.push(item.step);
-    for (const item of block.visible) steps.push(item.step);
+    appendActionStepsFromBlock(steps, block);
   }
   return steps;
+}
+
+function normalizeThoughtPreview(text: string): string {
+  return sanitizeFeedThoughtText(text).replace(/\s+/g, " ").trim();
 }
 
 export function shouldCollapseTimelineProcess(input: {
@@ -333,6 +336,43 @@ export function selectVisibleTimelineThoughts(
   return visible;
 }
 
+const THOUGHT_SUMMARY_PREVIEW_MAX = 72;
+
+/** One-line label for the folded thoughts header. */
+export function buildTimelineThoughtSummary(
+  entries: TimelineThoughtEntry[],
+  options?: { streaming?: boolean },
+): string {
+  if (!entries.length) return "";
+
+  if (entries.length === 1) {
+    const preview = normalizeThoughtPreview(entries[0]!.text);
+    if (!preview) return options?.streaming ? "思考中…" : "思考过程";
+    const short =
+      preview.length > THOUGHT_SUMMARY_PREVIEW_MAX
+        ? `${preview.slice(0, THOUGHT_SUMMARY_PREVIEW_MAX)}…`
+        : preview;
+    return options?.streaming ? `思考中 · ${short}` : short;
+  }
+
+  const latest = normalizeThoughtPreview(entries[entries.length - 1]!.text);
+  const suffix = latest.length > 48 ? `${latest.slice(0, 48)}…` : latest;
+  const countLabel = `思考过程 · ${entries.length} 段`;
+  if (!suffix) return options?.streaming ? `${countLabel} · 思考中…` : countLabel;
+  return `${countLabel} · ${suffix}`;
+}
+
+export function shouldAutoExpandTimelineThoughts(input: {
+  isRunning: boolean;
+  hasAnswer: boolean;
+  thoughtCount: number;
+  activityDetailed?: boolean;
+}): boolean {
+  if (input.hasAnswer || input.thoughtCount === 0) return false;
+  if (input.activityDetailed && !input.isRunning) return true;
+  return false;
+}
+
 export function buildTimelineFeedFromBlocks(blocks: CursorFeedBlock[]): TimelineFeedView {
   const view: TimelineFeedView = {
     entries: [],
@@ -351,8 +391,7 @@ export function buildTimelineFeedFromBlocks(blocks: CursorFeedBlock[]): Timeline
     }
 
     if (block.kind === "actions") {
-      for (const item of block.collapsed) view.actionSteps.push(item.step);
-      for (const item of block.visible) view.actionSteps.push(item.step);
+      appendActionStepsFromBlock(view.actionSteps, block);
       if (block.collapsed.length) {
         const collapsed = buildCollapsedTimelineEntry(
           `${block.key}-collapsed`,
@@ -390,4 +429,4 @@ export function buildTimelineEntriesFromBlocks(blocks: CursorFeedBlock[]): Timel
   return buildTimelineFeedFromBlocks(blocks).entries;
 }
 
-export { fileNameFromPath, formatPathSegment };
+export { formatPathSegment };
