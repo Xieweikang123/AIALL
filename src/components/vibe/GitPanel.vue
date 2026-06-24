@@ -123,79 +123,119 @@
       </div>
 
       <div v-if="gitError" class="git-error">{{ gitError }}</div>
-      <div class="git-scroll-area">
-        <div v-if="!gitStatus.length" class="git-changes-empty">
-          <span class="git-changes-empty-icon" aria-hidden="true">✓</span>
-          <span>工作区干净，无本地改动</span>
+      <div class="git-work-area" :class="{ 'git-work-area--log-open': gitLogOpen }">
+        <div class="git-changes-scroll">
+          <div v-if="!gitStatus.length" class="git-changes-empty">
+            <span class="git-changes-empty-icon" aria-hidden="true">✓</span>
+            <span>工作区干净，无本地改动</span>
+          </div>
+          <template v-else>
+            <div v-if="gitStagedFiles.length" class="git-section">
+              <div class="git-section-head">
+                <button type="button" class="git-section-toggle" @click="$emit('update:gitStagedOpen', !gitStagedOpen)">
+                  <span class="git-section-chevron">{{ gitStagedOpen ? "▾" : "▸" }}</span>
+                  <span class="git-section-title">已暂存 ({{ gitStagedFiles.length }})</span>
+                </button>
+                <button type="button" class="ghost tiny" @click="$emit('unstage-all')">取消全部</button>
+              </div>
+              <div v-if="gitStagedOpen" class="git-file-list">
+                <div
+                  v-for="file in gitStagedFiles"
+                  :key="file.path"
+                  class="git-file-item"
+                  :class="{ active: selectedGitFiles.includes(file.path), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
+                  @pointerdown="$emit('on-git-file-pointer-down', $event, file.path, file.staged)"
+                  @contextmenu.prevent="$emit('on-git-file-contextmenu', $event, file.path)"
+                >
+                  <span class="git-file-check" @pointerdown.stop @click.stop="$emit('unstage-file', file.path)">✓</span>
+                  <span class="git-file-status" :class="gitStatusClass(file.status)">
+                    {{ gitStatusIcon(file.status) }}
+                  </span>
+                  <span class="git-file-path" :title="file.path">{{ file.path }}</span>
+                </div>
+              </div>
+            </div>
+            <div v-if="gitUnstagedFiles.length" class="git-section">
+              <div class="git-section-head">
+                <button type="button" class="git-section-toggle" @click="$emit('update:gitUnstagedOpen', !gitUnstagedOpen)">
+                  <span class="git-section-chevron">{{ gitUnstagedOpen ? "▾" : "▸" }}</span>
+                  <span class="git-section-title">未暂存 ({{ gitUnstagedFiles.length }})</span>
+                </button>
+                <div class="git-section-actions">
+                  <button type="button" class="ghost tiny" @click="$emit('stage-all')">全部暂存</button>
+                  <button type="button" class="ghost tiny danger" @click="$emit('discard-all', $event)">丢弃全部</button>
+                </div>
+              </div>
+              <div v-if="gitUnstagedOpen" class="git-file-list">
+                <div
+                  v-for="file in gitUnstagedFiles"
+                  :key="file.path"
+                  class="git-file-item"
+                  :class="{ active: selectedGitFiles.includes(file.path), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
+                  @pointerdown="$emit('on-git-file-pointer-down', $event, file.path, file.staged)"
+                  @contextmenu.prevent="$emit('on-git-file-contextmenu', $event, file.path)"
+                >
+                  <span class="git-file-check" @pointerdown.stop @click.stop="$emit('stage-file', file.path)">+</span>
+                  <span class="git-file-status" :class="gitStatusClass(file.status)">
+                    {{ gitStatusIcon(file.status) }}
+                  </span>
+                  <span class="git-file-path" :title="file.path">{{ file.path }}</span>
+                  <button type="button" class="ghost tiny danger git-file-btn" title="丢弃更改" @pointerdown.stop @click.stop="$emit('discard-file', file.path, $event)">✕</button>
+                </div>
+              </div>
+            </div>
+          </template>
         </div>
-        <template v-else>
-          <div v-if="gitStagedFiles.length" class="git-section">
-            <div class="git-section-head">
-              <button type="button" class="git-section-toggle" @click="$emit('update:gitStagedOpen', !gitStagedOpen)">
-                <span class="git-section-chevron">{{ gitStagedOpen ? "▾" : "▸" }}</span>
-                <span class="git-section-title">已暂存 ({{ gitStagedFiles.length }})</span>
-              </button>
-              <button type="button" class="ghost tiny" @click="$emit('unstage-all')">取消全部</button>
-            </div>
-            <div v-if="gitStagedOpen" class="git-file-list">
-              <div
-                v-for="file in gitStagedFiles"
-                :key="file.path"
-                class="git-file-item"
-                :class="{ active: selectedGitFiles.includes(file.path), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
-                @pointerdown="$emit('on-git-file-pointer-down', $event, file.path, file.staged)"
-                @contextmenu.prevent="$emit('on-git-file-contextmenu', $event, file.path)"
-              >
-                <span class="git-file-check" @pointerdown.stop @click.stop="$emit('unstage-file', file.path)">✓</span>
-                <span class="git-file-status" :class="gitStatusClass(file.status)">
-                  {{ gitStatusIcon(file.status) }}
-                </span>
-                <span class="git-file-path" :title="file.path">
-                  <span v-if="filePathParts(file.path).dir" class="git-file-dir">{{ filePathParts(file.path).dir }}</span>
-                  <span class="git-file-name">{{ filePathParts(file.path).name }}</span>
-                </span>
-              </div>
-            </div>
+        <div class="git-commit-box git-section-card">
+          <textarea
+            :value="gitCommitMessage"
+            class="git-commit-input"
+            rows="2"
+            placeholder="提交信息…"
+            :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep"
+            @input="$emit('update:gitCommitMessage', ($event.target as HTMLTextAreaElement).value)"
+            @keydown.ctrl.enter="$emit('commit-git')"
+            @keydown.meta.enter="$emit('commit-git')"
+          />
+          <div class="git-commit-actions">
+            <button
+              type="button"
+              class="secondary small git-commit-ai"
+              :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep || !gitStagedFiles.length || !configReady"
+              :title="!configReady ? '请先配置 AI 模型' : 'AI 生成提交信息'"
+              @click="$emit('generate-commit-message')"
+            >
+              {{ gitGenStep || "✦ AI" }}
+            </button>
+            <button
+              type="button"
+              class="small git-commit-btn"
+              :class="canGitCommit ? 'primary' : 'secondary'"
+              :disabled="!canGitCommit || !!gitAiPushStep"
+              :title="canGitCommit ? 'Ctrl+Enter 提交' : '请先填写提交信息'"
+              @click="$emit('commit-git')"
+            >
+              {{ gitCommitting ? "提交中…" : `提交 (${gitStagedFiles.length})` }}
+            </button>
+            <button
+              type="button"
+              class="small git-ai-push"
+              :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep || !gitStagedFiles.length || !configReady"
+              :title="!configReady ? '请先配置 AI 模型' : 'AI 生成提交信息并推送'"
+              @click="$emit('ai-commit-and-push')"
+            >
+              {{ gitAiPushStep || "推送" }}
+            </button>
           </div>
-          <div v-if="gitUnstagedFiles.length" class="git-section">
-            <div class="git-section-head">
-              <button type="button" class="git-section-toggle" @click="$emit('update:gitUnstagedOpen', !gitUnstagedOpen)">
-                <span class="git-section-chevron">{{ gitUnstagedOpen ? "▾" : "▸" }}</span>
-                <span class="git-section-title">未暂存 ({{ gitUnstagedFiles.length }})</span>
-              </button>
-              <div class="git-section-actions">
-                <button type="button" class="ghost tiny" @click="$emit('stage-all')">全部暂存</button>
-                <button type="button" class="ghost tiny danger" @click="$emit('discard-all', $event)">丢弃全部</button>
-              </div>
-            </div>
-            <div v-if="gitUnstagedOpen" class="git-file-list">
-              <div
-                v-for="file in gitUnstagedFiles"
-                :key="file.path"
-                class="git-file-item"
-                :class="{ active: selectedGitFiles.includes(file.path), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
-                @pointerdown="$emit('on-git-file-pointer-down', $event, file.path, file.staged)"
-                @contextmenu.prevent="$emit('on-git-file-contextmenu', $event, file.path)"
-              >
-                <span class="git-file-check" @pointerdown.stop @click.stop="$emit('stage-file', file.path)">+</span>
-                <span class="git-file-status" :class="gitStatusClass(file.status)">
-                  {{ gitStatusIcon(file.status) }}
-                </span>
-                <span class="git-file-path" :title="file.path">
-                  <span v-if="filePathParts(file.path).dir" class="git-file-dir">{{ filePathParts(file.path).dir }}</span>
-                  <span class="git-file-name">{{ filePathParts(file.path).name }}</span>
-                </span>
-                <button type="button" class="ghost tiny danger git-file-btn" title="丢弃更改" @pointerdown.stop @click.stop="$emit('discard-file', file.path, $event)">✕</button>
-              </div>
-            </div>
-          </div>
-        </template>
-        <div class="git-log-section">
-          <button type="button" class="ghost tiny git-log-toggle" @click="$emit('update:gitLogOpen', !gitLogOpen)">
-            {{ gitLogOpen ? "▾" : "▸" }} 提交历史
+        </div>
+        <div class="git-log-section git-section-card" :class="{ 'git-log-section--open': gitLogOpen }">
+          <button type="button" class="git-log-toggle" @click="$emit('update:gitLogOpen', !gitLogOpen)">
+            <span class="git-section-chevron">{{ gitLogOpen ? "▾" : "▸" }}</span>
+            <span>提交历史</span>
+            <span v-if="gitLogEntries.length" class="git-log-section-count">{{ gitLogEntries.length }}</span>
           </button>
           <div v-if="gitLogOpen" class="git-log-list">
-            <div v-if="!gitLogEntries.length" class="panel-empty">无历史</div>
+            <div v-if="!gitLogEntries.length" class="git-log-empty">无历史</div>
             <div v-for="entry in gitLogEntries" :key="entry.hash" class="git-log-item">
               <button type="button" class="git-log-entry-head" @click="$emit('toggle-git-log-entry', entry.hash)">
                 <span class="git-log-chevron">{{ isGitLogEntryOpen(entry.hash) ? "▾" : "▸" }}</span>
@@ -224,52 +264,6 @@
               </div>
             </div>
           </div>
-        </div>
-      </div>
-      <div class="git-commit-box git-section-card">
-        <div class="git-commit-title-row">
-          <span class="git-commit-title">提交</span>
-          <span v-if="gitStagedFiles.length" class="git-commit-staged-badge">{{ gitStagedFiles.length }} 已暂存</span>
-        </div>
-        <textarea
-          :value="gitCommitMessage"
-          class="git-commit-input"
-          rows="2"
-          placeholder="提交信息…"
-          :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep"
-          @input="$emit('update:gitCommitMessage', ($event.target as HTMLTextAreaElement).value)"
-          @keydown.ctrl.enter="$emit('commit-git')"
-          @keydown.meta.enter="$emit('commit-git')"
-        />
-        <div class="git-commit-actions">
-          <div class="git-commit-primary-row">
-            <button
-              type="button"
-              class="secondary small git-commit-ai"
-              :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep || !gitStagedFiles.length || !configReady"
-              @click="$emit('generate-commit-message')"
-            >
-              {{ gitGenStep || "✦ AI 生成" }}
-            </button>
-            <button
-              type="button"
-              class="small git-commit-btn"
-              :class="canGitCommit ? 'primary' : 'secondary'"
-              :disabled="!canGitCommit || !!gitAiPushStep"
-              :title="canGitCommit ? 'Ctrl+Enter 提交' : '请先填写提交信息'"
-              @click="$emit('commit-git')"
-            >
-              {{ gitCommitting ? "提交中…" : `提交 (${gitStagedFiles.length})` }}
-            </button>
-          </div>
-          <button
-            type="button"
-            class="small git-ai-push"
-            :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep || !gitStagedFiles.length || !configReady"
-            @click="$emit('ai-commit-and-push')"
-          >
-            {{ gitAiPushStep || "✦ 一键推送" }}
-          </button>
         </div>
       </div>
     </div>
@@ -412,12 +406,6 @@ function gitStatusIcon(status: string): string {
 
 function gitTrackingShortName(): string {
   return props.gitTrackingBranch.replace(/^[^/]+\//, "");
-}
-
-function filePathParts(path: string): { dir: string; name: string } {
-  const slash = path.lastIndexOf("/");
-  if (slash === -1) return { dir: "", name: path };
-  return { dir: path.slice(0, slash + 1), name: path.slice(slash + 1) };
 }
 
 function gitStatusClass(status: string): string {
@@ -780,28 +768,6 @@ function gitStatusClass(status: string): string {
   flex-shrink: 0;
 }
 
-.git-commit-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.git-commit-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.85);
-}
-
-.git-commit-staged-badge {
-  font-size: 11px;
-  color: #7ee787;
-  background: rgba(63, 185, 80, 0.12);
-  border: 1px solid rgba(63, 185, 80, 0.22);
-  border-radius: 999px;
-  padding: 1px 8px;
-}
-
 .git-commit-input {
   width: 100%;
   box-sizing: border-box;
@@ -841,27 +807,18 @@ function gitStatusClass(status: string): string {
 
 .git-commit-actions {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
-.git-commit-primary-row {
-  display: flex;
-  gap: 6px;
-}
-
-.git-commit-primary-row .git-commit-ai {
-  flex: 1;
-  min-width: 0;
-}
-
-.git-commit-primary-row .git-commit-btn {
-  flex: 1.2;
-  min-width: 0;
+.git-commit-actions .git-commit-ai,
+.git-commit-actions .git-commit-btn,
+.git-commit-actions .git-ai-push {
+  flex: 1 1 0;
+  min-width: 72px;
 }
 
 .git-ai-push {
-  width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.04);
   color: rgba(255, 255, 255, 0.72);
@@ -898,28 +855,52 @@ function gitStatusClass(status: string): string {
   flex-shrink: 0;
 }
 
-.git-scroll-area {
+.git-work-area {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+  overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
 
-.git-scroll-area::-webkit-scrollbar {
+.git-work-area::-webkit-scrollbar {
   width: 5px;
 }
 
-.git-scroll-area::-webkit-scrollbar-thumb {
+.git-work-area::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.18);
 }
 
-.git-scroll-area::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
+.git-work-area--log-open {
+  overflow: hidden;
+}
+
+.git-changes-scroll {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.git-work-area--log-open .git-changes-scroll {
+  flex: 1 1 0;
+  min-height: 72px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.git-work-area--log-open .git-changes-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+
+.git-work-area--log-open .git-changes-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
 }
 
 .git-section {
@@ -1067,23 +1048,10 @@ function gitStatusClass(status: string): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  display: flex;
-  align-items: baseline;
-}
-
-.git-file-dir {
-  color: rgba(139, 148, 158, 0.55);
-  flex-shrink: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-
-.git-file-name {
+  direction: rtl;
+  text-align: left;
+  unicode-bidi: plaintext;
   color: rgba(255, 255, 255, 0.88);
-  flex-shrink: 0;
-  font-weight: 500;
 }
 
 .git-file-btn {
@@ -1096,15 +1064,68 @@ function gitStatusClass(status: string): string {
 }
 
 .git-log-section {
-  margin-top: 4px;
-  padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+}
+
+.git-log-section--open {
+  flex: 1 1 0;
+  min-height: 120px;
+  overflow: hidden;
+}
+
+.git-log-section .git-log-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.git-log-section .git-log-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.git-log-section .git-log-list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
 }
 
 .git-log-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.82);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.git-log-toggle:hover {
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.git-log-section-count {
+  font-size: 11px;
+  color: rgba(139, 148, 158, 0.6);
+  padding: 1px 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  margin-left: auto;
+}
+
+.git-log-empty {
+  font-size: 12px;
+  color: rgba(139, 148, 158, 0.55);
+  padding: 4px 0 2px 16px;
 }
 
 .git-log-list {

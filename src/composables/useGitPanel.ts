@@ -619,7 +619,7 @@ export function useGitPanel(
     }
     gitError.value = "";
     try {
-      gitAiPushStep.value = "AI 生成提交信息…";
+      gitAiPushStep.value = "生成中…";
       await new Promise((r) => setTimeout(r, 100));
 
       const cfg = aiConfig();
