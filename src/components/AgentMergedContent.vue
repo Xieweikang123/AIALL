@@ -66,13 +66,11 @@
 
     <section
       v-if="showAnswerSection"
-      ref="answerSectionRef"
       class="agent-answer-section"
       :class="{
         'agent-answer-section--streaming': answerStreaming,
         'agent-answer-section--exploring': showExplorationProgress,
       }"
-      :style="answerSectionMinHeight ? { minHeight: `${answerSectionMinHeight}px` } : undefined"
     >
       <div class="agent-answer-section__head">
         <span class="agent-answer-section__label">{{ sectionLabel }}</span>
@@ -115,7 +113,7 @@
       </div>
 
       <PlanDocumentBlock
-        v-show="Boolean(displayFinalAnswer.trim())"
+        v-if="displayFinalAnswer.trim()"
         :content="displayFinalAnswer"
         :chat-mode="chatMode"
         :streaming="answerStreaming || isRunning"
@@ -137,12 +135,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import ChatMarkdown from "./ChatMarkdown.vue";
 import PlanDocumentBlock from "./PlanDocumentBlock.vue";
 import AgentTurnCard from "./AgentTurnCard.vue";
 import { useStableAgentAnswer } from "../composables/useStableAgentAnswer";
-import { watchAgentAnswerJumps } from "../utils/agentJumpDebug";
 import { enrichPlanMarkdownForDisplay } from "../services/planDocumentDisplay";
 import {
   buildTurnCardsFromRoundGroups,
@@ -196,47 +193,11 @@ const emit = defineEmits<{
 
 /** Defer plan chrome / code folding until after streaming UI settles. */
 const layoutEnhanceReady = ref(false);
-const answerSectionRef = ref<HTMLElement | null>(null);
-const answerSectionMinHeight = ref(0);
 
 const { stableAnswer } = useStableAgentAnswer(
   () => props.finalAnswer,
   () => props.isRunning,
 );
-
-function syncAnswerSectionMinHeight() {
-  if (!props.isRunning && !props.answerStreaming) {
-    answerSectionMinHeight.value = 0;
-    return;
-  }
-  const el = answerSectionRef.value;
-  if (!el) return;
-
-  const prevHold = answerSectionMinHeight.value;
-  answerSectionMinHeight.value = 0;
-
-  void nextTick(() => {
-    const node = answerSectionRef.value;
-    if (!node || (!props.isRunning && !props.answerStreaming)) return;
-    const naturalHeight = node.offsetHeight;
-    if (naturalHeight <= 0) {
-      answerSectionMinHeight.value = prevHold;
-      return;
-    }
-    if (naturalHeight >= prevHold) {
-      answerSectionMinHeight.value = naturalHeight;
-    } else if (naturalHeight < prevHold * 0.9) {
-      answerSectionMinHeight.value = naturalHeight;
-    } else {
-      answerSectionMinHeight.value = prevHold;
-    }
-  });
-}
-
-function resetAnswerSectionMinHeight() {
-  answerSectionMinHeight.value = 0;
-  void nextTick(syncAnswerSectionMinHeight);
-}
 
 watch(
   () => props.isRunning || props.answerStreaming,
@@ -247,7 +208,6 @@ watch(
     }
     void nextTick(() => {
       layoutEnhanceReady.value = true;
-      answerSectionMinHeight.value = 0;
     });
   },
   { immediate: true },
@@ -274,9 +234,7 @@ const writtenFilesSummary = computed(() => {
 });
 
 const displayFinalAnswer = computed(() => {
-  const raw = props.isRunning && stableAnswer.value.trim()
-    ? stableAnswer.value
-    : props.finalAnswer;
+  const raw = props.isRunning && stableAnswer.value.trim() ? stableAnswer.value : props.finalAnswer;
   const base = raw.trim();
   if (base) return raw;
   return writtenFilesSummary.value;
@@ -306,55 +264,16 @@ const showExplorationProgress = computed(
     (Boolean(explorationProgress.value) || Boolean(progressNarrative.value)),
 );
 
+const showLiveActivityPanel = computed(
+  () => props.isRunning && Boolean(props.currentStatus?.trim()),
+);
+
 const showAnswerSection = computed(
-  () => Boolean(displayFinalAnswer.value.trim()) || showExplorationProgress.value,
-);
-
-watch(
-  () => props.isRunning,
-  (running) => {
-    if (!running) answerSectionMinHeight.value = 0;
-  },
-);
-
-watch(
   () =>
-    [
-      displayFinalAnswer.value,
-      progressNarrative.value,
-      showExplorationProgress.value,
-    ] as const,
-  ([answer, narrative, exploring], [prevAnswer, prevNarrative, prevExploring]) => {
-    if (!props.isRunning) return;
-    if (
-      exploring !== prevExploring ||
-      Boolean(answer.trim()) !== Boolean(prevAnswer?.trim())
-    ) {
-      resetAnswerSectionMinHeight();
-      return;
-    }
-    if (narrative !== prevNarrative || answer !== prevAnswer) {
-      void nextTick(syncAnswerSectionMinHeight);
-    }
-  },
+    Boolean(displayFinalAnswer.value.trim()) ||
+    showExplorationProgress.value ||
+    showLiveActivityPanel.value,
 );
-
-let stopJumpWatch: (() => void) | undefined;
-
-onMounted(() => {
-  stopJumpWatch = watchAgentAnswerJumps("AgentMergedContent", {
-    finalAnswer: () => props.finalAnswer,
-    stableAnswer: () => stableAnswer.value,
-    isRunning: () => props.isRunning,
-    answerStreaming: () => Boolean(props.answerStreaming),
-    showExploration: () => showExplorationProgress.value,
-    showAnswerBlock: () => Boolean(displayFinalAnswer.value.trim()),
-  });
-});
-
-onBeforeUnmount(() => {
-  stopJumpWatch?.();
-});
 
 const sectionLabel = computed(() => {
   if (props.finalAnswer.trim() || writtenFilesSummary.value) return "回答";
@@ -682,6 +601,10 @@ const visibleTurnViews = computed(() =>
   font-size: 11px;
   line-height: 1.45;
   color: rgba(148, 163, 184, 0.78);
+}
+
+.agent-answer-waiting {
+  padding: 4px 0 8px;
 }
 
 .agent-answer {

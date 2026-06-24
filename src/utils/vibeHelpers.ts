@@ -186,6 +186,52 @@ export function formatSessionTime(iso: string): string {
   return d.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
+export function hasRunningTool(msg: { tools?: Array<{ running?: boolean }> }): boolean {
+  return Boolean(msg.tools?.some((t) => t.running));
+}
+
+export function hasAgentActivity(msg: {
+  agentContext?: unknown;
+  roundGroups?: unknown[];
+  statusLog?: unknown[];
+  turnTraces?: unknown[];
+  status?: string;
+  agentPhase?: string;
+  streaming?: boolean;
+  agentFailed?: boolean;
+  agentRecoverable?: boolean;
+  tools?: unknown[];
+  agentTurn?: number;
+  totalTurns?: number;
+}): boolean {
+  return Boolean(
+    msg.agentContext ||
+      msg.roundGroups?.length ||
+      msg.statusLog?.length ||
+      msg.turnTraces?.length ||
+      msg.status ||
+      msg.agentPhase ||
+      msg.streaming ||
+      msg.agentFailed ||
+      msg.agentRecoverable ||
+      msg.tools?.length ||
+      msg.agentTurn ||
+      msg.totalTurns,
+  );
+}
+
+export function hasAgentDebugDetails(msg: {
+  agentContext?: unknown;
+  roundGroups?: Array<{ turn: number; request?: unknown; response?: unknown; modelSteps: unknown[] }>;
+}): boolean {
+  return Boolean(
+    msg.agentContext ||
+      msg.roundGroups?.some(
+        (group) => group.turn > 0 && (group.request || group.response || group.modelSteps.length),
+      ),
+  );
+}
+
 export function hasAgentProcessSteps(msg: { tools?: unknown[]; roundGroups?: { turn: number; toolIds?: unknown[]; modelSteps: unknown[] }[] }): boolean {
   return Boolean(
     msg.tools?.length ||

@@ -77,6 +77,7 @@ import {
   messagePreviewLength,
   shouldCollapseRequestMessage,
 } from "../services/agentNarrativeSegments";
+import { cleanStatusLogText, formatContextChars } from "../utils/vibeHelpers";
 
 const props = defineProps<{
   groups: AgentRoundGroupView[];
@@ -85,20 +86,6 @@ const props = defineProps<{
 }>();
 
 const filteredGroups = computed(() => props.groups.filter((g) => g.turn > 0));
-
-function cleanStatusLogText(text: string): string {
-  return text
-    .replace(/^正在/, "")
-    .replace(/…$/, "")
-    .replace(/\.\.\.\s*$/, "")
-    .trim();
-}
-
-function formatContextChars(chars: number): string {
-  if (chars >= 10_000) return `${(chars / 10_000).toFixed(1)} 万字符`;
-  if (chars >= 1000) return `${(chars / 1000).toFixed(1)}k 字符`;
-  return `${chars} 字符`;
-}
 
 function turnMessageRoleLabel(role: string): string {
   switch (role) {

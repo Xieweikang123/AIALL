@@ -487,10 +487,7 @@ import {
   type VibeChatMode,
 } from "../services/vibeAgentClient";
 
-import {
-  finalizeAssistantBubbleContent,
-} from "../services/agentMessageDisplay";
-import { findLastAssistantContentInMessages } from "../services/agentContinuation";
+
 import { isScrollNearBottom, scheduleScrollContainerToBottom, scrollContainerToBottom, scrollElementToBottom } from "../utils/scrollViewport";
 import { truncatePromptAttachment } from "../utils/truncatePromptAttachment";
 import {
@@ -1620,14 +1617,6 @@ function userMessageImages(msg: ChatMessage): string[] {
   );
 }
 
-function resolveAssistantOrchestrationContent(msg: ChatMessage): string {
-  return finalizeAssistantBubbleContent(msg);
-}
-
-function findLastAssistantContent(): string | undefined {
-  return findLastAssistantContentInMessages(chatMessages.value, resolveAssistantOrchestrationContent);
-}
-
 function buildAgentHistory(
   currentPrompt: string,
   profile: ReturnType<typeof resolveAgentRunProfile>,
@@ -1739,6 +1728,7 @@ const {
   hasAgentActivity,
   messageDisplayContent,
   resolveLiveAgentSource,
+  findLastAssistantContent,
   agentAbortDisplayReason,
   agentStatusDisplay,
   buildAgentRunningStatusTextForMsg,

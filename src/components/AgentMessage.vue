@@ -11,8 +11,8 @@
         v-if="!isFolded"
         :compact-feed="showCompact"
         :round-groups="agentRoundGroupViews(msg)"
-        :final-answer="timelineAnswerContent(msg)"
-        :answer-streaming="timelineAnswerStreaming(msg)"
+        :final-answer="timelineAnswerDisplay"
+        :answer-streaming="timelineAnswerStreamingDisplay"
         :is-running="isAgentRunning(msg)"
         :current-status="displayAgentStatus(msg)"
         :activity-detailed="isActivityDetailed(msg)"
@@ -104,10 +104,9 @@ const {
   toggleActivityExpanded,
   collapseAgentActivity,
   toggleActivityDetailed,
-  collapseActivityDetailed,
   cursorActivitySummary,
-  timelineAnswerContent,
-  timelineAnswerStreaming,
+  timelineAnswerDisplay,
+  timelineAnswerStreamingDisplay,
   currentAgentStatus,
   showCompact,
 } = useAgentMessage(

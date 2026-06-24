@@ -83,6 +83,15 @@ export function isEnglishToolNarration(text: string): boolean {
   return latin >= 24 && cjk < 8 && trimmed.length <= 220;
 }
 
+/** Append incremental SSE delta — must not insert paragraph breaks between chunks. */
+export function appendAssistantStreamDelta(existing: string, delta: string): string {
+  if (!delta) return existing || "";
+  const trimmedForCheck = delta.trim();
+  if (trimmedForCheck && isEnglishToolNarration(trimmedForCheck)) return existing || "";
+  if (trimmedForCheck && isAgentToolTurnNarration(trimmedForCheck)) return existing || "";
+  return `${existing || ""}${delta}`;
+}
+
 /** Merge streaming turn text without dropping a longer substantive answer. */
 export function mergeAssistantTurnText(existing: string, incoming: string): string {
   const prev = normalizeBubbleText(existing);
@@ -191,13 +200,18 @@ function isThinEpilogue(short: string, anchor: string): boolean {
   return short.length <= THIN_EPILOGUE_MAX_CHARS && anchor.length > short.length * 2;
 }
 
+function pickLongestText(candidates: string[]): string {
+  if (!candidates.length) return "";
+  return [...candidates].sort((a, b) => b.length - a.length)[0]!;
+}
+
 function pickBestAssistantBubbleText(candidates: string[], direct: string): string {
   if (!candidates.length) return "";
   if (!direct) {
-    return [...candidates].sort((a, b) => b.length - a.length)[0]!;
+    return pickLongestText(candidates);
   }
 
-  const longest = [...candidates].sort((a, b) => b.length - a.length)[0]!;
+  const longest = pickLongestText(candidates);
   if (isTruncatedAssistantAnswer(direct) && longest.length > direct.length) {
     return longest;
   }
@@ -213,6 +227,14 @@ function pickBestAssistantBubbleText(candidates: string[], direct: string): stri
   return direct;
 }
 
+function resolveAssistantBubbleFromCandidates(msg: AssistantBubbleSource): string {
+  const direct = normalizeBubbleText(msg.content || "");
+  const candidates = collectAssistantTextCandidates(msg);
+  if (!direct && !candidates.length) return "";
+  const filteredDirect = isEnglishToolNarration(direct) ? pickLongestText(candidates) : direct;
+  return pickBestAssistantBubbleText(candidates, filteredDirect);
+}
+
 const AGENT_LIVE_PREVIEW_PREP_PHASES = new Set([
   "preparing",
   "starting",
@@ -221,6 +243,18 @@ const AGENT_LIVE_PREVIEW_PREP_PHASES = new Set([
   "stream_connected",
   "connected",
   "reconnecting",
+]);
+
+/** Between tool/model turns — hide stale partial answer fragments until tokens stream again. */
+const AGENT_LIVE_PREVIEW_PRE_STREAM_PHASES = new Set([
+  "waiting_model",
+  "sending_request",
+  "retrying_model",
+  "executing_tool",
+  "summarizing_tools",
+  "planning_tools",
+  "compacting_context",
+  "consultative_segment_cap",
 ]);
 
 function resolveActiveRoundGroup(msg: LiveAgentAnswerSource): AgentRoundGroup | undefined {
@@ -263,17 +297,77 @@ export function resolveLatestAgentProgressNarrative(
   return "";
 }
 
+/** Mid-stream tail left over from a prior tool turn — not a user-facing answer. */
+function isStaleStreamTailFragment(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (trimmed.length >= SUBSTANTIVE_MIN_CHARS) return false;
+  if (isTruncatedAssistantAnswer(trimmed)) return true;
+  if (/^[`\-)\];:]/.test(trimmed)) return true;
+  if (/^的/.test(trimmed)) return true;
+  return false;
+}
+
+/** Short msg.content left from a prior turn while the active turn has not started streaming. */
+function isOrphanedPriorTurnPreview(
+  group: AgentRoundGroup | undefined,
+  picked: string,
+): boolean {
+  if (!picked || picked.length >= SUBSTANTIVE_MIN_CHARS) return false;
+  if (!group) return true;
+  const turnText = pickLongestSubstantiveAnswer(
+    normalizeBubbleText(group.narrative || ""),
+    normalizeBubbleText(group.response?.assistantText || ""),
+  );
+  if (!turnText) return true;
+  if (turnText === picked || turnText.includes(picked) || picked.includes(turnText)) return false;
+  return true;
+}
+
 /** Direct model answer on the active turn — excludes progress-narrative fallback. */
 export function resolveLiveAgentAnswerText(msg: LiveAgentAnswerSource): string {
   if (msg.agentPhase && AGENT_LIVE_PREVIEW_PREP_PHASES.has(msg.agentPhase)) return "";
 
-  const group = resolveActiveRoundGroup(msg);
-  if (!group) return "";
+  const contentFallback = normalizeBubbleText(msg.content || "");
+  const preStream = Boolean(
+    msg.agentPhase && AGENT_LIVE_PREVIEW_PRE_STREAM_PHASES.has(msg.agentPhase),
+  );
 
-  const text = normalizeBubbleText(group.narrative || group.response?.assistantText || "");
-  if (!text || isAgentToolTurnNarration(text)) return "";
-  if (shouldHideToolTurnPreview(text, group)) return "";
-  return text;
+  if (msg.agentPhase === "streaming_model") {
+    if (contentFallback) return contentFallback;
+  }
+
+  if (preStream && hasAgentFinalAnswer(msg)) {
+    const finalText = normalizeBubbleText(resolveFinalAssistantText(msg));
+    if (finalText && !isAgentToolTurnNarration(finalText)) return finalText;
+  }
+
+  const group = resolveActiveRoundGroup(msg);
+  let picked = "";
+
+  if (group) {
+    const candidates = [
+      normalizeBubbleText(group.narrative || ""),
+      normalizeBubbleText(group.response?.assistantText || ""),
+    ].filter(Boolean);
+
+    const groupAnswers: string[] = [];
+    for (const text of candidates) {
+      if (!text || isAgentToolTurnNarration(text)) continue;
+      if (shouldHideToolTurnPreview(text, group)) continue;
+      groupAnswers.push(text);
+    }
+    picked = pickLongestSubstantiveAnswer(...groupAnswers, contentFallback) || "";
+  } else {
+    picked = contentFallback;
+  }
+
+  if (preStream && picked) {
+    if (isStaleStreamTailFragment(picked)) return "";
+    if (!hasAgentFinalAnswer(msg) && isOrphanedPriorTurnPreview(group, picked)) return "";
+  }
+
+  return picked;
 }
 
 /** Live final-answer stream while the model is still generating (not tool-turn preamble). */
@@ -311,18 +405,18 @@ export function resolveAgentTimelineAnswer(
 export function isAgentTimelineAnswerStreaming(
   msg: LiveAgentAnswerSource,
   isRunning: boolean,
-  _hasRunningTool = false,
+  hasRunningTool = false,
 ): boolean {
-  return isRunning && Boolean(resolveLiveAgentAnswerText(msg).trim());
+  if (!isRunning) return false;
+  if (msg.agentPhase === "streaming_model") return true;
+  if (Boolean(resolveLiveAgentAnswerText(msg).trim())) return true;
+  return hasRunningTool && Boolean(normalizeBubbleText(msg.content || ""));
 }
 
 /** Resolve the text shown in the assistant chat bubble (with fallbacks for agent runs). */
 export function resolveAssistantBubbleContent(msg: AssistantBubbleSource): string {
   if (hasAgentRunStructure(msg) && !hasAgentFinalAnswer(msg)) return "";
-  const direct = normalizeBubbleText(msg.content || "");
-  const candidates = collectAssistantTextCandidates(msg);
-  if (!direct && !candidates.length) return "";
-  return pickBestAssistantBubbleText(candidates, direct);
+  return resolveAssistantBubbleFromCandidates(msg);
 }
 
 function resolveVisionRegionPreamble(msg: AssistantBubbleSource): string {
@@ -390,11 +484,7 @@ export function resolveCompletedAgentBubbleContent(msg: AssistantBubbleSource): 
     return finalText;
   }
 
-  const candidates = collectAssistantTextCandidates(msg);
-  const filteredDirect = isEnglishToolNarration(direct)
-    ? candidates.sort((a, b) => b.length - a.length)[0] || ""
-    : direct;
-  return pickBestAssistantBubbleText(candidates, filteredDirect);
+  return resolveAssistantBubbleFromCandidates(msg);
 }
 
 const COMPLETION_SUMMARY_RE = /(?:修改完成|已完成|已写入|总结|变更如下|完成了)/;
@@ -434,7 +524,7 @@ function pickFallbackWhenFinalTruncated(msg: AssistantBubbleSource, finalText: s
   const candidates = collectAssistantTextCandidates(msg).filter(
     (text) => text !== finalText && !isPrematureVisionCompletionClaim(text) && !isTruncatedAssistantAnswer(text),
   );
-  return candidates.sort((a, b) => b.length - a.length)[0] || "";
+  return pickLongestText(candidates);
 }
 
 /** Whether the model already gave a substantive completion summary. */

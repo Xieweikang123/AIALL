@@ -13,6 +13,7 @@ import {
   isStorageCompactedAssistantText,
   isSubstantiveProgressSummary,
   isTruncatedAssistantAnswer,
+  appendAssistantStreamDelta,
   mergeAssistantTurnText,
   preferFullContentOverCompactedRoundGroup,
   resolveAgentTimelineAnswer,
@@ -20,6 +21,7 @@ import {
   resolveCompletedAgentBubbleContent,
   resolveLatestAgentProgressNarrative,
   resolveLiveAgentAnswerPreview,
+  resolveLiveAgentAnswerText,
   thoughtDuplicatesBubble,
 } from "./agentMessageDisplay";
 import type { CursorFeedItem } from "./agentCursorFeed";
@@ -129,6 +131,26 @@ describe("resolveAssistantBubbleContent", () => {
   });
 });
 
+describe("appendAssistantStreamDelta", () => {
+  it("concatenates incremental chunks without inserting paragraph breaks", () => {
+    let content = "";
+    for (const chunk of ["从截图", "和代码", "两个维度", "来回答"]) {
+      content = appendAssistantStreamDelta(content, chunk);
+    }
+    expect(content).toBe("从截图和代码两个维度来回答");
+    expect(content.includes("\n\n")).toBe(false);
+  });
+
+  it("ignores english tool narration deltas", () => {
+    const prev = "已有中文正文。";
+    expect(appendAssistantStreamDelta(prev, "Now let me grep the styles:")).toBe(prev);
+  });
+
+  it("preserves leading spaces in incremental chunks", () => {
+    expect(appendAssistantStreamDelta("句号。", " 下一句")).toBe("句号。 下一句");
+  });
+});
+
 describe("resolveCompletedAgentBubbleContent", () => {
   it("uses final turn and prepends vision region when missing", () => {
     const vision =
@@ -219,6 +241,30 @@ describe("resolveCompletedAgentBubbleContent", () => {
         ],
       }),
     ).toBe(streamed);
+  });
+
+  it("prefers full msg.content over shorter final-group narrative fragment", () => {
+    const full =
+      "根据代码分析，项目选择弹窗的背景色由 CSS 变量控制，实际值为 transparent。";
+    expect(
+      resolveCompletedAgentBubbleContent({
+        content: full,
+        roundGroups: [
+          {
+            turn: 5,
+            narrative: "的实际值：",
+            modelSteps: [],
+            toolIds: [],
+            response: {
+              assistantText: full,
+              toolCalls: [],
+              hasToolCalls: false,
+              isFinal: true,
+            },
+          },
+        ],
+      }),
+    ).toBe(full);
   });
 });
 
@@ -320,6 +366,92 @@ describe("resolveLiveAgentAnswerPreview", () => {
         ],
       }),
     ).toBe("正在流式输出最终回答");
+  });
+
+  it("prefers longer msg.content over stale round narrative while streaming", () => {
+    const full = "根据代码分析，项目选择弹窗的背景色由 CSS 变量控制，实际值为 transparent。";
+    expect(
+      resolveLiveAgentAnswerPreview({
+        agentTurn: 5,
+        agentPhase: "streaming_model",
+        content: full,
+        roundGroups: [
+          {
+            turn: 5,
+            narrative: "的实际值：",
+            modelSteps: [],
+            toolIds: [],
+          },
+        ],
+      }),
+    ).toBe(full);
+  });
+
+  it("hides stale partial answer while waiting for the next model turn", () => {
+    expect(
+      resolveLiveAgentAnswerPreview({
+        agentTurn: 7,
+        agentPhase: "waiting_model",
+        content: "`-primary)` resolves to",
+        roundGroups: [
+          {
+            turn: 7,
+            narrative: "",
+            modelSteps: [],
+            toolIds: [],
+          },
+          {
+            turn: 6,
+            narrative: "`-primary)` resolves to",
+            modelSteps: [],
+            toolIds: [],
+            response: {
+              assistantText: "`-primary)` resolves to",
+              toolCalls: [{ id: "1", name: "grep", arguments: "{}" }],
+              hasToolCalls: true,
+              isFinal: false,
+            },
+          },
+        ],
+      }),
+    ).toBe("");
+  });
+
+  it("hides orphaned msg.content from a prior turn while waiting on a new turn", () => {
+    expect(
+      resolveLiveAgentAnswerText({
+        agentTurn: 6,
+        agentPhase: "waiting_model",
+        content: "上一轮残留的短片段文本",
+        roundGroups: [
+          {
+            turn: 6,
+            narrative: "",
+            modelSteps: [],
+            toolIds: [],
+          },
+        ],
+      }),
+    ).toBe("");
+  });
+
+  it("streams msg.content in real time during streaming_model", () => {
+    const partial = "根据代码确认，**弹窗背景不是透明的**";
+    expect(
+      resolveLiveAgentAnswerText({
+        agentTurn: 7,
+        agentPhase: "streaming_model",
+        content: partial,
+        roundGroups: [
+          {
+            turn: 7,
+            narrative: "`-primary)` resolves to",
+            modelSteps: [],
+            toolIds: [],
+          },
+        ],
+      }),
+    ).toBe(partial);
   });
 
   it("falls back to the last round when agentTurn is missing", () => {
@@ -556,6 +688,32 @@ describe("resolveAgentTimelineAnswer", () => {
         false,
       ),
     ).toBe(streamed);
+  });
+
+  it("marks streaming during streaming_model even before visible text arrives", () => {
+    expect(
+      isAgentTimelineAnswerStreaming(
+        { agentTurn: 3, agentPhase: "streaming_model", roundGroups: [{ turn: 3, modelSteps: [], toolIds: [] }] },
+        true,
+        false,
+      ),
+    ).toBe(true);
+  });
+
+  it("streams short deltas from msg.content during streaming_model", () => {
+    expect(
+      resolveAgentTimelineAnswer(
+        {
+          agentTurn: 3,
+          agentPhase: "streaming_model",
+          content: "你好",
+          roundGroups: [{ turn: 3, narrative: "你好", modelSteps: [], toolIds: [] }],
+        },
+        "",
+        true,
+        false,
+      ),
+    ).toBe("你好");
   });
 
   it("does not mark streaming when preview is only progress fallback", () => {
