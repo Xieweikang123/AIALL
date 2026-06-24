@@ -1,13 +1,14 @@
 import type { Ref } from "vue";
 import type { LiveAgentAnswerSource } from "../services/agentMessageDisplay";
 import type { AgentRoundGroup } from "../services/agentRoundGroups";
+import type { PersistedTurnTrace } from "../services/vibeChatStorage";
 import type { VibeChatMessageItem } from "./vibeChatMessageContext";
 import type { AgentToolStep } from "../utils/toolHelpers";
 
 /** Assistant message shape used by Agent UI — extends chat list item with agent fields. */
 export type AgentMessage = VibeChatMessageItem & {
   roundGroups?: AgentRoundGroup[];
-  turnTraces?: Array<{ turn?: number; assistantText?: string }>;
+  turnTraces?: PersistedTurnTrace[];
   tools?: AgentToolStep[];
   agentTurn?: number;
   agentPhase?: string;

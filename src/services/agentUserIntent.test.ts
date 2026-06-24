@@ -43,6 +43,7 @@ import {
   isUiDefectReportPrompt,
   isUserErrorQuotePrompt,
   isUserOptionMismatchPrompt,
+  isUltraShortOpenTaskPrompt,
   historyPriorAssistantClaimedFix,
 } from "./agentUserIntent";
 
@@ -498,5 +499,26 @@ describe("config binding topic", () => {
     expect(resolveConfigBindingTopic("有几个取值？")).toBe("enumeration");
     expect(resolveConfigBindingTopic("查官方文档里的 enum 定义")).toBe("doc_lookup");
     expect(resolveConfigBindingTopic("帮我改路由")).toBe(null);
+  });
+});
+
+describe("isUltraShortOpenTaskPrompt", () => {
+  it("detects ultra-short open-ended instructions by shape", () => {
+    expect(isUltraShortOpenTaskPrompt("找bug")).toBe(true);
+    expect(isUltraShortOpenTaskPrompt("查一下")).toBe(true);
+    expect(isUltraShortOpenTaskPrompt("排查")).toBe(true);
+    expect(isUltraShortOpenTaskPrompt("优化一下")).toBe(true);
+    expect(isUltraShortOpenTaskPrompt("帮忙看看")).toBe(true);
+    expect(isUltraShortOpenTaskPrompt("跑一下")).toBe(true);
+  });
+
+  it("rejects questions, scoped requests, and code review prompts", () => {
+    expect(isUltraShortOpenTaskPrompt("找bug？")).toBe(false);
+    expect(isUltraShortOpenTaskPrompt("为什么找bug")).toBe(false);
+    expect(isUltraShortOpenTaskPrompt("修复 src/foo.ts 的类型错误")).toBe(false);
+    expect(isUltraShortOpenTaskPrompt("检查一下")).toBe(false);
+    expect(isUltraShortOpenTaskPrompt("看看代码")).toBe(false);
+    expect(isUltraShortOpenTaskPrompt("优化UI")).toBe(false);
+    expect(isUltraShortOpenTaskPrompt("")).toBe(false);
   });
 });

@@ -332,6 +332,11 @@ export function shouldNudgeAlternateUiPatchStrategy(
   return failures.every((entry) => /old_string|未出现|未匹配|禁止凭记忆/.test(entry.reason));
 }
 
+/** Tool handlers prefix failures with these markers — keep in sync with executeTool / toolSummary. */
+export function isToolResultFailure(result: string): boolean {
+  return result.startsWith("错误：") || result.startsWith("命令执行失败");
+}
+
 export function isEmptyOrInsufficientFinalReply(text: string): boolean {
   const body = sanitizeAgentUserVisibleText(text);
   if (!body) return true;

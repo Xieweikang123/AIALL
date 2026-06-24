@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildRuntimeAwarenessHint, detectProjectRuntimeProfile } from "./agentRuntimeHint";
+import { buildRuntimeAwarenessHint, buildShellAwarenessHint, detectProjectRuntimeProfile } from "./agentRuntimeHint";
 
 describe("agentRuntimeHint", () => {
   const dirs: string[] = [];
@@ -48,5 +48,26 @@ describe("agentRuntimeHint", () => {
     expect(hint).toContain("npm run dev");
     expect(hint).toContain("npm run tauri:dev");
     expect(hint).toContain("降级");
+  });
+
+  it("detects verify script from package.json scripts", () => {
+    const withTypecheck = makeProject({ typecheck: "vue-tsc --noEmit", build: "vite build" }, false);
+    expect(detectProjectRuntimeProfile(withTypecheck).verifyScript).toBe("npm run typecheck");
+
+    const withLint = makeProject({ lint: "eslint .", build: "vite build" }, false);
+    expect(detectProjectRuntimeProfile(withLint).verifyScript).toBe("npm run lint");
+
+    const withVueTscBuild = makeProject({ build: "vue-tsc --noEmit && vite build" }, false);
+    expect(detectProjectRuntimeProfile(withVueTscBuild).verifyScript).toBe("npx vue-tsc --noEmit");
+
+    const withTestOnly = makeProject({ test: "vitest run" }, false);
+    expect(detectProjectRuntimeProfile(withTestOnly).verifyScript).toBe("npm run test");
+  });
+
+  it("builds PowerShell shell hint on Windows", () => {
+    const hint = buildShellAwarenessHint("win32");
+    expect(hint).toContain("PowerShell");
+    expect(hint).toContain("Select-Object");
+    expect(buildShellAwarenessHint("linux")).toBe("");
   });
 });

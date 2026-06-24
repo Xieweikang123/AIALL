@@ -128,6 +128,33 @@ export function isShortImplementPrompt(prompt: string): boolean {
   return SHORT_IMPLEMENT_PROMPT_RE.test(prompt.trim());
 }
 
+const ULTRA_SHORT_OPEN_TASK_MAX_LEN = 20;
+const ULTRA_SHORT_OPEN_TASK_BRIEF_LEN = 8;
+const FILE_PATH_IN_PROMPT_RE = /(?:@[\w./-]+|(?:[\w@.-]+\/)+[\w.-]+\.\w{2,4})/;
+const OPEN_ENDED_TAIL_RE =
+  /^(?:请?)?[\u4e00-\u9fa5a-zA-Z]{1,14}(?:一下|下|吧|了|看看)[。！!]?$/i;
+/** User already names a module/surface — not scopeless. */
+const ULTRA_SHORT_SCOPE_OBJECT_RE =
+  /(?:代码|组件|页面|模块|面板|按钮|路由|样式|编辑器|会话|功能|接口|字段|类型|文件|列表|滚动|输入|通知|API|UI)/i;
+
+/** Ultra-short open-ended task without scope (shape-based, not topic-specific). */
+export function isUltraShortOpenTaskPrompt(prompt: string): boolean {
+  const text = stripQuotedReplyPrefix(prompt.trim());
+  if (!text || text.length > ULTRA_SHORT_OPEN_TASK_MAX_LEN) return false;
+  if (/[？?]$/.test(text)) return false;
+  if (AUTOMATION_PROMPT_RE.test(text)) return false;
+  if (isCodeReviewPrompt(text)) return false;
+  if (isShortImplementPrompt(text)) return false;
+  if (FILE_PATH_IN_PROMPT_RE.test(text)) return false;
+  if (ULTRA_SHORT_SCOPE_OBJECT_RE.test(text)) return false;
+  if (IMPLEMENT_INTENT_RE.test(text) && text.length > ULTRA_SHORT_OPEN_TASK_BRIEF_LEN) return false;
+  if (CONSULTATIVE_MARKERS_RE.test(text) && /什么|为什么|如何|怎么|哪里|哪儿|是否|是不是/.test(text)) {
+    return false;
+  }
+  if (text.length <= ULTRA_SHORT_OPEN_TASK_BRIEF_LEN) return true;
+  return OPEN_ENDED_TAIL_RE.test(text);
+}
+
 export type UserIntentHistoryMessage = { role: string; content: string };
 
 export function isImplementationStatusPrompt(prompt: string): boolean {

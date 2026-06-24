@@ -11,6 +11,7 @@ import {
   isBlockedGrepAfterLocate,
   isBlockedGrepAfterVisionMisread,
   isEmptyOrInsufficientFinalReply,
+  isToolResultFailure,
   isLowSignalVisionLocateGrep,
   isOverlyBroadVisionGrep,
   isSearchFilesContentQuery,
@@ -197,5 +198,11 @@ describe("agentExploreGuard", () => {
     expect(isEmptyOrInsufficientFinalReply("")).toBe(true);
     expect(isEmptyOrInsufficientFinalReply("  ")).toBe(true);
     expect(isEmptyOrInsufficientFinalReply("好的，已完成修改并说明测试步骤。")).toBe(false);
+  });
+
+  it("detects tool result failure prefixes", () => {
+    expect(isToolResultFailure("错误：文件不存在")).toBe(true);
+    expect(isToolResultFailure("命令执行失败：\nstderr: foo")).toBe(true);
+    expect(isToolResultFailure("stdout:\nok")).toBe(false);
   });
 });

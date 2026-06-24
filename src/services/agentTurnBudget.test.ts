@@ -6,6 +6,8 @@ import {
   INTERACTIVE_BUILD_MAX_TURNS,
   RESUME_MAX_TURNS_CAP,
   extendSegmentMaxTurns,
+  buildTurnCapFinalSummaryNudge,
+  buildTurnCapExhaustedMessage,
   resolveAgentMaxTurns,
   resolveResumeMaxTurns,
 } from "../../server/agentTurnBudget";
@@ -60,5 +62,23 @@ describe("extendSegmentMaxTurns", () => {
   it("extends within the safety ceiling", () => {
     expect(extendSegmentMaxTurns(20, EXECUTE_PLAN_MAX_TURNS)).toBe(40);
     expect(extendSegmentMaxTurns(190, INTERACTIVE_BUILD_MAX_TURNS)).toBe(AGENT_SAFETY_MAX_TURNS);
+  });
+});
+
+describe("buildTurnCapFinalSummaryNudge", () => {
+  it("requires structured Chinese summary with written files", () => {
+    const nudge = buildTurnCapFinalSummaryNudge(24, ["src/foo.ts"]);
+    expect(nudge).toContain("禁止调用工具");
+    expect(nudge).toContain("src/foo.ts");
+    expect(nudge).toContain("禁止空回复");
+  });
+
+  it("escalates urgency on second attempt", () => {
+    const nudge = buildTurnCapFinalSummaryNudge(25, undefined, 2);
+    expect(nudge).toContain("最后机会");
+  });
+
+  it("builds exhausted message when forced summaries fail", () => {
+    expect(buildTurnCapExhaustedMessage(26)).toContain("未完成");
   });
 });

@@ -844,6 +844,7 @@ export function buildAgentResumePrompt(
     : [
         "【自动续跑】上次运行因连接中断而暂停。请从断点继续完成原始任务，不要重复已完成的工具步骤或已写入的修改。",
         "【效率】已读文件范围见下方摘要——相同文件的相同区域禁止再 read_file，用 grep 定位后直接 patch_file/write_file；最多 1 次 grep 定位遗漏。",
+        "【续跑验证】若下方摘要含已成功的 patch/write，先 read 变更区或 run 项目已有 verify script（test/lint/typecheck/check）验证，再续改；禁止重复已落盘 patch。",
       ];
   return [
     ...header,

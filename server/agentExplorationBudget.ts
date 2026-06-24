@@ -229,9 +229,38 @@ export function buildExploreInterimDiagnosisNudge(totalExploreTurns: number): st
   return [
     `【系统提示】已累计 ${totalExploreTurns} 轮探索且尚未修改或给出结论。`,
     "下一轮开始须以 `<!-- agent-progress -->` 开头，随后用中文输出一段用户可见的进度摘要（2–4 句）：",
-    "① 当前根因假设；② 已读过哪些关键文件/符号；③ 下一步是 patch 还是仍需一次 read。",
+    "① 当前根因假设（须基于已读/grep 证据，禁止臆测未出现的符号或错误）；② 已读过哪些关键文件/行号；③ 下一步是 patch 还是仍需一次 read。",
     "摘要写完后才能继续调用工具；禁止仅用英文 \"Now let me...\" 句式。",
+    "若 grep 零命中，或 read 片段与当前假设（错误类型/文件区域）不符，须在摘要中更正假设，勿重复已证伪方向。",
     "若已足够定位问题，本轮必须 patch_file / write_file。",
+  ].join("");
+}
+
+/** Build mode: user gave an ultra-short open-ended instruction without scope. */
+export function buildUltraShortOpenTaskHint(): string {
+  return [
+    "【超短任务·范围澄清】用户指令极短且未指明具体现象/文件/模块。",
+    "第一步：用 1 句中文说明你的假设（验证脚本 / 运行时 / 当前打开文件 / 用户描述的现象等），再选一条路径执行；",
+    "禁止无假设地广搜目录；优先读 package.json scripts，选用项目已有的 verify 命令（test/lint/typecheck/check），再 grep 精确符号。",
+    "每轮 progress 须区分「已证实」与「待验证」；命令失败时勿宣称已看到完整错误列表。",
+  ].join("");
+}
+
+/** After productive patch/write — remind to verify with project script or read-back. */
+export function buildPostPatchVerifyNudge(verifyScript: string): string {
+  return [
+    "【系统提示·修改后验证】本轮已写入项目文件。",
+    `下一轮须先验证再宣称修复完成：优先 run_command \`${verifyScript}\`，或 read_file 核对变更区。`,
+    "禁止在未验证前输出「已修复全部/检查完成」；验证仍失败时说明剩余项，项目内错误须继续修，外部依赖可注明跳过。",
+  ].join("");
+}
+
+/** When package.json has no detectable verify script — still require read-back. */
+export function buildPostPatchReadVerifyNudge(): string {
+  return [
+    "【系统提示·修改后验证】本轮已写入项目文件，但项目未检测到标准 verify script。",
+    "下一轮须 read_file 核对变更区，或 run_command 执行项目惯用的 test/lint/check 命令后再宣称修复完成。",
+    "禁止在未验证前输出「已修复全部/检查完成」。",
   ].join("");
 }
 

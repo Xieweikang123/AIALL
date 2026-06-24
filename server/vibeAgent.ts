@@ -1279,7 +1279,12 @@ export async function executeTool(
     }
     trackWrittenFile(stage, resolved.relative);
     invalidateProjectContextCache(root);
-    readSliceCache?.forEach((_, key) => { if (key.startsWith(`${resolved.relative}:`)) readSliceCache!.delete(key); });
+    invalidateFileReadState(
+      resolved.relative,
+      readSliceCache,
+      readSliceRepeatCounts,
+      toolGuard?.readFileRanges,
+    );
     return `已写入 ${resolved.relative}（${content.length} 字符）`;
   }
 
@@ -1343,7 +1348,12 @@ export async function executeTool(
     }
     trackWrittenFile(stage, resolved.relative);
     invalidateProjectContextCache(root);
-    readSliceCache?.forEach((_, key) => { if (key.startsWith(`${resolved.relative}:`)) readSliceCache!.delete(key); });
+    invalidateFileReadState(
+      resolved.relative,
+      readSliceCache,
+      readSliceRepeatCounts,
+      toolGuard?.readFileRanges,
+    );
     if (toolGuard) toolGuard.visionLocateActive = false;
     return `已修改 ${resolved.relative}（${oldString.length} → ${newString.length} 字符）`;
   }

@@ -18,6 +18,9 @@ import {
   buildSameIssueFollowUpHint,
   buildUiDefectForcePatchNudge,
   buildUiSymptomDiagnosisHint,
+  buildUltraShortOpenTaskHint,
+  buildPostPatchVerifyNudge,
+  buildPostPatchReadVerifyNudge,
   CONSULTATIVE_BUILD_EXPLORE_TURN_BUDGET,
   EXECUTE_PLAN_EXPLORE_TURN_BUDGET,
   EXPLORE_INTERIM_DIAGNOSIS_TURN,
@@ -115,5 +118,13 @@ describe("agentExplorationBudget", () => {
     expect(buildExplorationArchiveWriteBlockedMessage()).toContain("探索笔记");
     expect(buildUiSymptomDiagnosisHint()).toContain("overflow-y:auto");
     expect(buildUiSymptomDiagnosisHint()).toContain("padding:0");
+  });
+
+  it("builds ultra-short open task and post-patch verify nudges", () => {
+    expect(buildUltraShortOpenTaskHint()).toContain("超短任务");
+    expect(buildUltraShortOpenTaskHint()).toContain("verify");
+    expect(buildPostPatchVerifyNudge("npm run test")).toContain("npm run test");
+    expect(buildPostPatchVerifyNudge("npm run test")).toContain("禁止在未验证前");
+    expect(buildPostPatchReadVerifyNudge()).toContain("read_file");
   });
 });
