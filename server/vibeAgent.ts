@@ -20,6 +20,8 @@ import {
   AGENT_SAFETY_MAX_TURNS,
   buildAgentTurnsLowNudge,
   buildSegmentContinueNudge,
+  buildTurnCapFinalSummaryNudge,
+  buildTurnCapExhaustedMessage,
   extendSegmentMaxTurns,
   resolveAgentMaxTurns,
 } from "./agentTurnBudget";
@@ -29,12 +31,25 @@ import {
   buildSearchFilesEmptyHint,
 } from "./agentAskPrompt";
 import {
+  buildExploreAbortPartialReportNudge,
+  buildExploreContinueNudge,
+  buildExploreFollowUpHint,
+  buildExploreSystemPromptLines,
+} from "./agentExplorePrompt";
+import { isExploreContinuePrompt } from "../src/services/agentExplore";
+import {
   ASK_EXPLORE_TURN_BUDGET,
   ASK_MAX_TOTAL_EXPLORE_HARD,
   ASK_MAX_TOTAL_EXPLORE_SOFT,
   buildAskExploreBudgetNudge,
   buildAskExploreSoftCapNudge,
   buildAskForceAnswerNudge,
+  buildExploreExploreBudgetNudge,
+  buildExploreExploreSoftCapNudge,
+  buildExploreForceReportNudge,
+  EXPLORE_EXPLORE_TURN_BUDGET,
+  EXPLORE_MAX_TOTAL_EXPLORE_HARD,
+  EXPLORE_MAX_TOTAL_EXPLORE_SOFT,
   buildConsultativeExploreBudgetNudge,
   buildConsultativeDuplicateExploreNudge,
   buildConsultativeSegmentCapNudge,
@@ -61,6 +76,9 @@ import {
   buildPatchFailureCompletionRetryNudge,
   buildExplorationArchiveWriteBlockedMessage,
   buildAlternateUiPatchStrategyNudge,
+  buildUltraShortOpenTaskHint,
+  buildPostPatchVerifyNudge,
+  buildPostPatchReadVerifyNudge,
   isExplorationArchivePath,
   EXECUTE_PLAN_EXPLORE_TURN_BUDGET,
   EXPLORE_INTERIM_DIAGNOSIS_TURN,
@@ -84,9 +102,11 @@ import {
   isScheduledTaskConsultativePrompt,
   shouldNudgeScheduledJobRegistration,
 } from "../src/services/agentConsultativeTopics";
+import { resolveUserIntent, classifyUserIntentFromRules, shouldSkipAiIntentClassifier, formatIntentClassificationDetail } from "../src/services/agentIntentClassifier";
+import { classifyUserIntentWithAi } from "./agentIntentClassifier";
 import { extractJobClassNamesFromReadPaths } from "../src/services/agentStructuralPatterns";
-import { buildBehaviorContradictionHint, buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildBuildWriteBlockedHint, buildConfigBindingTopicHint, buildImplementFollowUpHint, buildImplementationStatusHint, buildLocateStatusFollowUpHint, buildSessionAuditHint, buildUiDefectBuildHint, buildWriteToolBlockedMessage, isAccuracyConsultativePrompt, isAgentStepClarificationPrompt, isBehaviorContradictionPrompt, isBehaviorPurposePrompt, isCodeReviewPrompt, isConsultativeUserPrompt, isImplementationStatusPrompt, isImplementFollowUpRun, isLocateStatusFollowUpPrompt, isSameIssueFollowUpRun, isSessionAuditPrompt, isUiAppearanceQuestionPrompt, isUiDefectReportPrompt, isUserErrorQuotePrompt, resolveConfigBindingTopic, historySuggestsActiveImplementation, historySuggestsQuotePositionFix } from "../src/services/agentUserIntent";
-import { detectProjectRuntimeProfile, buildRuntimeAwarenessHint } from "./agentRuntimeHint";
+import { buildConsultativeBuildHint, buildAgentStepClarifyContinueHint, buildBuildWriteBlockedHint, buildImplementFollowUpHint, buildLocateStatusFollowUpHint, buildUiDefectBuildHint, buildWriteToolBlockedMessage, isSameIssueFollowUpRun, isUiAppearanceQuestionPrompt, historySuggestsActiveImplementation, historySuggestsQuotePositionFix } from "../src/services/agentUserIntent";
+import { detectProjectRuntimeProfile, buildRuntimeAwarenessHint, buildShellAwarenessHint } from "./agentRuntimeHint";
 import { detectUserNegation, detectUserFailureReport, historyRecentUserFailureReport, stripQuotedReplyPrefix } from "../src/services/agentContinuation";
 import { resolveOriginalTaskFromResumePrompt } from "../src/services/agentRecovery";
 import { buildAgentSuggestionsPromptHint } from "../src/services/agentSuggestions";
@@ -107,6 +127,7 @@ import {
   markPatchRecoveryFile,
   consumePatchRecoveryRead,
   isEmptyOrInsufficientFinalReply,
+  isToolResultFailure,
   isAnalysisOnlyReplyUnderForcePatch,
   isBlockedGrepAfterLocate,
   isBlockedGrepAfterVisionMisread,
@@ -131,6 +152,8 @@ import {
 } from "./agentRunProfile";
 import {
   buildProjectContext,
+  buildInjectedKeyFilePathSet,
+  formatInjectedKeyFileReadNudge,
   formatProjectContextForBuild,
   formatProjectContextForPrompt,
   invalidateProjectContextCache,
@@ -203,7 +226,6 @@ import {
   shouldBlockConsultativeAccuracyFinalize,
 } from "./consultativeAccuracyTrace";
 import {
-  buildBehaviorPurposeTraceHint,
   buildBehaviorPurposeTraceRetryHint,
   shouldBlockBehaviorPurposeFinalize,
 } from "./consultativeBehaviorTrace";
@@ -275,7 +297,7 @@ export type VibeAgentEvent =
   | { type: "error"; data: { message: string } }
   | { type: "done"; data: { writtenFiles: string[]; pendingFiles: string[]; turns: number; truncated?: boolean } };
 
-export type VibeChatMode = "ask" | "build" | "plan";
+export type VibeChatMode = "ask" | "build" | "plan" | "explore";
 
 export type VibeChatHistoryMessage = {
   role: "user" | "assistant";
@@ -830,7 +852,7 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "重要：必须通过 API 工具接口调用 list_dir、read_file 等，禁止在正文里输出 <function>、<parameter> 等标记。",
     buildFileAccessPathHint(),
     "write_file / patch_file / delete_file 的 path 必须相对项目根，禁止绝对路径。",
-    "run_command 可在项目目录执行 shell 命令（如 npm run dev、python main.py、go test），超时默认 30 秒，长时间命令请设置 timeout_ms；不要执行危险命令。",
+    "run_command 可在项目目录执行 shell 命令（优先 package.json 中的 npm scripts；Windows 为 PowerShell，用 `;` 链式、勿用 head/&&），超时默认 30 秒，长时间命令请设置 timeout_ms；不要执行危险命令。",
     "联网搜索：当需要最新信息、外部文档、API 用法时，使用 web_search 搜索；使用 web_extract 抓取指定链接内容。搜索结果可能较多，优先关注前 3 条结果，避免大量内容占用上下文。",
     "如果系统提示你上一次回复被截断，请从截断处继续输出，不要重复已输出的内容。",
     "附截图时：首轮输出截图描述后，后续轮次禁止再次描述同一张截图。若需追问用户意见，应在代码探索后给出具体方案对比，而非仅提问。",
@@ -861,6 +883,26 @@ function buildAskSystemPrompt(
   model?: string,
 ): string {
   const lines = [...buildAskSystemPromptLines(projectRoot)];
+  if (model?.trim()) {
+    lines.push("", buildModelIdentityHint(model));
+  }
+  const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
+  if (openFile) {
+    lines.push(`用户当前打开的文件：${openFile.relative}`);
+    if (openFileSnippet?.trim()) {
+      lines.push("", "当前打开文件内容（节选）：", "```", openFileSnippet.trim(), "```");
+    }
+  }
+  return lines.join("\n");
+}
+
+function buildExploreSystemPrompt(
+  projectRoot: string,
+  openFilePath?: string,
+  openFileSnippet?: string,
+  model?: string,
+): string {
+  const lines = [...buildExploreSystemPromptLines(projectRoot)];
   if (model?.trim()) {
     lines.push("", buildModelIdentityHint(model));
   }
@@ -1074,9 +1116,13 @@ export async function executeTool(
   readSliceRepeatCounts?: Map<string, number>,
   toolGuard?: ToolGuardContext,
   webProxyUrl?: string,
+  injectedKeyFilePaths?: Set<string>,
 ): Promise<string> {
   if (mode === "ask" && WRITE_AGENT_TOOL_NAMES.has(name)) {
     return buildWriteToolBlockedMessage("ask");
+  }
+  if (mode === "explore" && (WRITE_AGENT_TOOL_NAMES.has(name) || name === "append_memory" || name === "write_skill")) {
+    return buildWriteToolBlockedMessage("ask").replace("Ask 模式", "Explore 模式");
   }
   if (mode === "plan" && !stage && WRITE_AGENT_TOOL_NAMES.has(name)) {
     return buildWriteToolBlockedMessage("plan");
@@ -1133,9 +1179,18 @@ export async function executeTool(
     }
     if (content === null) return `错误：${resolved.displayPath} 不存在或无法读取`;
     const offset = Number(args.offset) || 1;
-    const defaultLimit = mode === "ask" ? 300 : mode === "plan" ? 400 : 350;
-    const maxLimit = mode === "ask" ? 500 : mode === "plan" ? 600 : 500;
+    const defaultLimit = mode === "ask" || mode === "explore" ? 300 : mode === "plan" ? 400 : 350;
+    const maxLimit = mode === "ask" || mode === "explore" ? 500 : mode === "plan" ? 600 : 500;
     const limit = Math.min(maxLimit, Math.max(1, Number(args.limit) || defaultLimit));
+    const normalizedKey = resolved.key.replace(/\\/g, "/");
+    if (
+      injectedKeyFilePaths?.has(normalizedKey) &&
+      offset <= 1 &&
+      !args.offset &&
+      !args.limit
+    ) {
+      return formatInjectedKeyFileReadNudge(resolved.displayPath);
+    }
     const sliceKey = `${resolved.key}:${offset}:${limit}`;
     const lineRange = readLineRangeFromArgs(offset, limit);
     const patchRecoveryRead = consumePatchRecoveryRead(toolGuard, resolved.key);
@@ -1383,6 +1438,7 @@ export async function executeTool(
 
   if (name === "append_memory") {
     if (mode === "ask") return "Ask 模式下不支持写入项目记忆。";
+    if (mode === "explore") return "Explore 模式下不支持写入项目记忆。";
     if (mode === "plan" && !stage) return buildWriteToolBlockedMessage("plan");
     const section = String(args.section ?? "").trim();
     const content = String(args.content ?? "").trim().replace(/\s+/g, " ");
@@ -1414,6 +1470,7 @@ export async function executeTool(
 
   if (name === "propose_skill") {
     if (mode === "ask") return "Ask 模式下不支持写入 skill。";
+    if (mode === "explore") return "Explore 模式下不支持写入 skill。";
     if (mode === "plan" && !stage) return buildWriteToolBlockedMessage("plan");
     const slug = String(args.slug ?? "").trim();
     const kind = String(args.kind ?? "").trim();
@@ -1429,6 +1486,7 @@ export async function executeTool(
 
   if (name === "run_command") {
     if (mode === "ask") return "Ask 模式下不支持执行命令。";
+    if (mode === "explore") return "Explore 模式下不支持执行命令。";
     if (mode === "plan") return "Plan 模式下不支持执行命令。";
     const command = String(args.command || "").trim();
     if (!command) return "错误：缺少 command";
@@ -1496,6 +1554,8 @@ export async function executeTool(
 export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   const mode = params.mode ?? "build";
   const isAsk = mode === "ask";
+  const isExplore = mode === "explore";
+  const isReadOnlyAgent = isAsk || isExplore;
   const runProfile = normalizeRunProfile(
     params.runProfile ||
       (params.executionMode
@@ -1517,11 +1577,62 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     signal,
     webProxyUrl,
   } = params;
+  const imageDataUrls = sanitizeImageDataUrls(params.imageDataUrls);
+  const rulesIntent = classifyUserIntentFromRules({
+    prompt,
+    history: params.history,
+    mode,
+    hasImage: imageDataUrls.length > 0,
+    isAsk,
+  });
+  const skipAiClassifier = shouldSkipAiIntentClassifier(rulesIntent, prompt, { isAsk });
+
+  onEvent({
+    type: "status",
+    data: {
+      phase: "classifying_intent",
+      model,
+      detail: skipAiClassifier ? "规则高置信，跳过 AI 分类" : "正在识别用户意图…",
+    },
+  });
+  const aiIntentPayload = skipAiClassifier
+    ? null
+    : await classifyUserIntentWithAi({
+        prompt,
+        history: params.history,
+        mode,
+        hasImage: imageDataUrls.length > 0,
+        endpoint,
+        apiKey,
+        model,
+        projectRoot,
+        signal,
+      });
+  const userIntent = resolveUserIntent({
+    prompt,
+    history: params.history,
+    mode,
+    hasImage: imageDataUrls.length > 0,
+    isAsk,
+    ai: aiIntentPayload,
+  });
+  if (skipAiClassifier) {
+    userIntent.skippedAiClassifier = true;
+  }
+  onEvent({
+    type: "status",
+    data: {
+      phase: "intent_classified",
+      model,
+      detail: formatIntentClassificationDetail(userIntent),
+    },
+  });
+
   const implementFollowUpRun =
     !isAsk &&
     !isPlanExplore &&
     !isExecutePlan &&
-    isImplementFollowUpRun(prompt, params.history, { isAsk });
+    userIntent.implementFollowUp;
   const sameIssueFollowUpRun =
     !isAsk &&
     !isPlanExplore &&
@@ -1538,42 +1649,52 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     !isAsk &&
     !isPlanExplore &&
     !isExecutePlan &&
-    isCodeReviewPrompt(prompt) &&
+    userIntent.codeReview &&
     !implementFollowUpRun;
   const userErrorQuoteRun =
     !isAsk &&
     !isPlanExplore &&
     !isExecutePlan &&
-    isUserErrorQuotePrompt(prompt, params.history) &&
+    userIntent.userErrorQuote &&
     !implementFollowUpRun;
   const userFailureReportRun =
     !isAsk && !isPlanExplore && !isExecutePlan && detectUserFailureReport(prompt);
   const userRecentlyReportedFailure = historyRecentUserFailureReport(params.history);
   const sessionAuditRun =
-    !isAsk && !isPlanExplore && !isExecutePlan && isSessionAuditPrompt(prompt);
+    !isAsk && !isPlanExplore && !isExecutePlan && userIntent.consultativeTopic === "session_audit";
   const behaviorContradictionRun =
     !isPlanExplore &&
     !isExecutePlan &&
     !implementFollowUpRun &&
-    isBehaviorContradictionPrompt(prompt, params.history);
+    userIntent.behaviorContradiction;
   const resumeOriginalTask = resolveOriginalTaskFromResumePrompt(prompt);
   const effectiveTaskPrompt = resumeOriginalTask ?? prompt;
   const consultativeResumeRun =
     !isAsk &&
     !isPlanExplore &&
     !isExecutePlan &&
-    Boolean(resumeOriginalTask && isConsultativeUserPrompt(resumeOriginalTask));
+    Boolean(
+      resumeOriginalTask &&
+        classifyUserIntentFromRules({
+          prompt: resumeOriginalTask,
+          history: params.history,
+          mode,
+          hasImage: imageDataUrls.length > 0,
+          isAsk,
+        }).consultative,
+    );
   const locateStatusFollowUpRun =
     !isAsk &&
     !isPlanExplore &&
     !isExecutePlan &&
     !implementFollowUpRun &&
-    isLocateStatusFollowUpPrompt(prompt, params.history);
+    userIntent.locateStatusFollowUp;
   const readOnlyBuildRun =
     !isAsk &&
+    !isExplore &&
     !isPlanExplore &&
     !isExecutePlan &&
-    (isConsultativeUserPrompt(prompt) ||
+    (userIntent.consultative ||
       consultativeResumeRun ||
       codeReviewRun ||
       sessionAuditRun ||
@@ -1583,44 +1704,57 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     !isPlanExplore &&
     !isExecutePlan &&
     !implementFollowUpRun &&
-    isBehaviorPurposePrompt(stripQuotedReplyPrefix(effectiveTaskPrompt.trim()), params.history);
+    userIntent.behaviorPurpose;
   const scheduledTaskConsultativeRun =
     !isPlanExplore &&
     !isExecutePlan &&
     !implementFollowUpRun &&
-    isScheduledTaskConsultativePrompt(stripQuotedReplyPrefix(effectiveTaskPrompt.trim()), params.history);
+    isScheduledTaskConsultativePrompt(
+      stripQuotedReplyPrefix(effectiveTaskPrompt.trim()),
+      params.history,
+      userIntent.consultativeTopic,
+    );
   const accuracyConsultativeRun =
-    readOnlyBuildRun && isAccuracyConsultativePrompt(resumeOriginalTask ?? prompt);
-  const implementationStatusRun =
-    readOnlyBuildRun &&
-    isImplementationStatusPrompt(resumeOriginalTask ?? prompt) &&
-    historySuggestsActiveImplementation(params.history);
-  const imageDataUrls = sanitizeImageDataUrls(params.imageDataUrls);
+    readOnlyBuildRun && userIntent.accuracyQuestion;
   const consultativeVisionRun = imageDataUrls.length > 0 && (isAsk || readOnlyBuildRun);
   const consultativeUiAppearanceRun =
-    readOnlyBuildRun && consultativeVisionRun && isUiAppearanceQuestionPrompt(prompt);
+    readOnlyBuildRun && consultativeVisionRun && userIntent.uiAppearance;
   const uiDefectBuildRun =
     !isAsk &&
     !isPlanExplore &&
     !readOnlyBuildRun &&
     imageDataUrls.length > 0 &&
-    isUiDefectReportPrompt(prompt, imageDataUrls.length > 0);
-  const agentStepClarifyRun = !isAsk && !isPlanExplore && isAgentStepClarificationPrompt(prompt);
-  const configBindingTopic = !isAsk && !isPlanExplore && !isExecutePlan
-    ? resolveConfigBindingTopic(prompt)
-    : null;
+    userIntent.uiDefect;
+  const agentStepClarifyRun = !isAsk && !isPlanExplore && userIntent.agentStepClarification;
+  const ultraShortOpenTaskRun =
+    !isAsk &&
+    !isPlanExplore &&
+    !isExecutePlan &&
+    !readOnlyBuildRun &&
+    !resumeOriginalTask &&
+    userIntent.ultraShortOpenTask;
 
-  const segmentBudget = resolveAgentMaxTurns(mode, runProfile);
+  const segmentBudget = resolveAgentMaxTurns(
+    mode,
+    runProfile,
+    isExplore ? params.maxTurns : undefined,
+  );
   let segmentMaxTurns = params.maxTurns ?? segmentBudget;
   let segmentIndex = 1;
-  const exploreTurnBudget = isExecutePlan ? EXECUTE_PLAN_EXPLORE_TURN_BUDGET : isPlanExplore ? PLAN_EXPLORE_TURN_BUDGET : INTERACTIVE_EXPLORE_TURN_BUDGET;
+  const exploreTurnBudget = isExplore
+    ? EXPLORE_EXPLORE_TURN_BUDGET
+    : isExecutePlan
+      ? EXECUTE_PLAN_EXPLORE_TURN_BUDGET
+      : isPlanExplore
+        ? PLAN_EXPLORE_TURN_BUDGET
+        : INTERACTIVE_EXPLORE_TURN_BUDGET;
   const maxContextChars = isExecutePlan
     ? EXECUTE_PLAN_MAX_CONTEXT_CHARS
     : isPlanExplore
       ? PLAN_MAX_CONTEXT_CHARS
       : consultativeUiAppearanceRun
         ? CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS
-        : isAsk
+        : isReadOnlyAgent
           ? ASK_MAX_CONTEXT_CHARS
           : MAX_AGENT_CONTEXT_CHARS;
 
@@ -1698,7 +1832,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     projectContextBlock = `\n\n项目根：${projectRoot}（方案执行阶段，已跳过全项目扫描）`;
     projectContextBlock += buildExecutePlanSystemHint(targetManifest, runProfile.userIntent);
   } else if (projectContextOrNull?.ok) {
-    projectContextBlock = isAsk
+    projectContextBlock = isReadOnlyAgent
       ? formatProjectContextForPrompt(projectContextOrNull)
       : formatProjectContextForBuild(projectContextOrNull);
   } else if (consultativeUiAppearanceRun) {
@@ -1721,7 +1855,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       : "";
 
   const runtimeProfile = detectProjectRuntimeProfile(projectRoot);
-  const runtimeAwarenessBlock = buildRuntimeAwarenessHint(runtimeProfile);
+  const runtimeAwarenessBlock =
+    buildRuntimeAwarenessHint(runtimeProfile) + buildShellAwarenessHint(process.platform);
 
   const systemPromptCore = consultativeUiAppearanceRun
     ? [
@@ -1730,38 +1865,44 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         buildConsultativeBuildHint(),
         projectContextBlock,
       ].join("\n")
+    : isExplore
+      ? buildExploreSystemPrompt(projectRoot, openFilePath, openFileSnippet, model)
     : isAsk
       ? buildAskSystemPrompt(projectRoot, openFilePath, openFileSnippet, model) +
-        (behaviorContradictionRun ? buildBehaviorContradictionHint() : "") +
-        (behaviorPurposeRun ? `\n${buildBehaviorPurposeTraceHint()}` : "") +
-        buildConsultativeTopicHints(stripQuotedReplyPrefix(effectiveTaskPrompt.trim()), params.history)
+        buildConsultativeTopicHints(
+          stripQuotedReplyPrefix(effectiveTaskPrompt.trim()),
+          params.history,
+          userIntent.consultativeTopic,
+        )
       : isExecutePlan
         ? buildSystemPrompt(projectRoot, openFilePath, model)
         : isPlanExplore
           ? buildPlanSystemPrompt(projectRoot, openFilePath, openFileSnippet, model)
           : buildSystemPrompt(projectRoot, openFilePath, model) +
             (readOnlyBuildRun ? buildConsultativeBuildHint() : "") +
-            buildConsultativeTopicHints(stripQuotedReplyPrefix(effectiveTaskPrompt.trim()), params.history) +
-            (behaviorPurposeRun ? buildBehaviorPurposeTraceHint() : "") +
-            (behaviorContradictionRun ? buildBehaviorContradictionHint() : "") +
+            buildConsultativeTopicHints(
+              stripQuotedReplyPrefix(effectiveTaskPrompt.trim()),
+              params.history,
+              userIntent.consultativeTopic,
+            ) +
             (codeReviewRun ? buildCodeReviewHonestyNudge(userRecentlyReportedFailure) : "") +
             (userErrorQuoteRun ? buildUserErrorQuoteHint() : "") +
             (userFailureReportRun ? buildUserFailureReportNudge() : "") +
-            (implementationStatusRun ? buildImplementationStatusHint() : "") +
             (uiDefectBuildRun ? buildUiDefectBuildHint() : "") +
             (implementFollowUpRun ? buildImplementFollowUpHint(historySuggestsQuotePositionFix(params.history)) : "") +
             (sameIssueFollowUpRun ? buildSameIssueFollowUpHint() : "") +
-            (sessionAuditRun ? buildSessionAuditHint() : "") +
             (locateStatusFollowUpRun ? buildLocateStatusFollowUpHint() : "") +
-            (agentStepClarifyRun ? buildAgentStepClarificationHint() : "") +
-            (configBindingTopic ? buildConfigBindingTopicHint(configBindingTopic) : "");
+            (ultraShortOpenTaskRun ? `\n${buildUltraShortOpenTaskHint()}` : "");
 
   const systemPrompt = consultativeUiAppearanceRun
     ? `${systemPromptCore}\n${runtimeAwarenessBlock}`
     : `${systemPromptCore}${projectContextBlock}${agentsGuideBlock}${projectSkillsBlock}${projectMemoryBlock}${explorationArchiveBlock}${runtimeAwarenessBlock}`;
 
-  const writeStage = isAsk || isPlanExplore || readOnlyBuildRun ? null : createWriteStage();
+  const writeStage = isReadOnlyAgent || isPlanExplore || readOnlyBuildRun ? null : createWriteStage();
   const readCache = new Map<string, string>();
+  const injectedKeyFilePaths = projectContextOrNull?.ok
+    ? buildInjectedKeyFilePathSet(projectContextOrNull)
+    : undefined;
   const readSliceCache = new Map<string, string>();
   const readSliceRepeatCounts = new Map<string, number>();
   const grepCache = new Map<string, string>();
@@ -1805,13 +1946,22 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   const MAX_PREMATURE_COMPLETION_RETRIES = 1;
   const MAX_PATCH_FAILURE_COMPLETION_RETRIES = 1;
   let negationNudgeSent = false;
-  const activeTools = isAsk || isPlanExplore || readOnlyBuildRun ? READ_ONLY_AGENT_TOOLS : VIBE_AGENT_TOOLS;
+  let postPatchVerifyNudgeSent = false;
+  let turnCapFinalSummaryAttempts = 0;
+  const activeTools = isReadOnlyAgent || isPlanExplore || readOnlyBuildRun ? READ_ONLY_AGENT_TOOLS : VIBE_AGENT_TOOLS;
   const userContent = buildVisionUserContent(prompt, imageDataUrls);
   const messages: ChatCompletionMessage[] = [
     { role: "system", content: systemPrompt },
     ...buildHistoryMessages(params.history),
     { role: "user", content: userContent },
   ];
+  if (isExplore) {
+    if (isExploreContinuePrompt(prompt)) {
+      messages.push({ role: "system", content: buildExploreContinueNudge() });
+    } else if (params.history?.some((m) => m.role === "assistant")) {
+      messages.push({ role: "system", content: buildExploreFollowUpHint() });
+    }
+  }
   let visionFallbackApplied = false;
   let consultativeForceAnswerPending = locateStatusFollowUpRun;
   let lastConsultativeExploreSig = "";
@@ -1903,7 +2053,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     }
 
     if (
-      !isAsk &&
+      !isReadOnlyAgent &&
       !readOnlyBuildRun &&
       segmentMaxTurns !== undefined &&
       !turnsLowNudgeSent &&
@@ -1946,7 +2096,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     //   Hard cap: strip ALL tools — model must output text only
     //   UI defect + located anchor: hard cap keeps write tools (avoid analysis-only stall)
     const buildExploreHardCapReached =
-      !isAsk && !isPlanExplore && !readOnlyBuildRun && totalExploreTurns >= exploreHardCap;
+      !isReadOnlyAgent && !isPlanExplore && !readOnlyBuildRun && totalExploreTurns >= exploreHardCap;
     const sameIssueFollowUpNeedsSummary =
       sameIssueFollowUpRun &&
       buildExploreHardCapReached &&
@@ -1954,7 +2104,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       !writeStage.writtenList.some((p) => isProductiveWritePath(p));
     const forcePatchOutput =
       !sameIssueFollowUpNeedsSummary &&
-      !isAsk &&
+      !isReadOnlyAgent &&
       !isPlanExplore &&
       !readOnlyBuildRun &&
       writeStage !== null &&
@@ -1968,16 +2118,18 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     const forceTextOutput =
       !forcePatchOutput &&
       (sameIssueFollowUpNeedsSummary ||
+        (isExplore && totalExploreTurns >= EXPLORE_MAX_TOTAL_EXPLORE_HARD) ||
         (isAsk && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_HARD) ||
         (isPlanExplore && totalExploreTurns >= PLAN_MAX_TOTAL_EXPLORE_HARD) ||
         (readOnlyBuildRun && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_HARD));
     const stripWideSearch =
       !forceTextOutput &&
       !forcePatchOutput &&
-      ((isAsk && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_SOFT) ||
+      ((isExplore && totalExploreTurns >= EXPLORE_MAX_TOTAL_EXPLORE_SOFT) ||
+        (isAsk && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_SOFT) ||
         (isPlanExplore && totalExploreTurns >= PLAN_MAX_TOTAL_EXPLORE_SOFT) ||
         (readOnlyBuildRun && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_SOFT) ||
-        (!isAsk && !isPlanExplore && !readOnlyBuildRun && totalExploreTurns >= exploreSoftCap));
+        (!isReadOnlyAgent && !isPlanExplore && !readOnlyBuildRun && totalExploreTurns >= exploreSoftCap));
 
     if (forcePatchOutput && !uiDefectForcePatchNudgeSent && buildExploreHardCapReached && uiDefectBuildRun) {
       messages.push({
@@ -2008,17 +2160,21 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         role: "system",
         content: sameIssueFollowUpNeedsSummary
           ? buildSameIssueFollowUpForceSummaryNudge(totalExploreTurns)
-          : isAsk || readOnlyBuildRun
-            ? buildAskForceAnswerNudge(totalExploreTurns)
-            : buildForceOutputNudge(totalExploreTurns, mode),
+          : isExplore
+            ? buildExploreForceReportNudge(totalExploreTurns)
+            : isAsk || readOnlyBuildRun
+              ? buildAskForceAnswerNudge(totalExploreTurns)
+              : buildForceOutputNudge(totalExploreTurns, mode),
       });
     } else if (stripWideSearch) {
       messages.push({
         role: "system",
         content:
-          isAsk || readOnlyBuildRun
-            ? buildAskExploreSoftCapNudge(totalExploreTurns)
-            : buildExploreSoftCapNudge(totalExploreTurns, mode),
+          isExplore
+            ? buildExploreExploreSoftCapNudge(totalExploreTurns)
+            : isAsk || readOnlyBuildRun
+              ? buildAskExploreSoftCapNudge(totalExploreTurns)
+              : buildExploreSoftCapNudge(totalExploreTurns, mode),
       });
     }
 
@@ -2999,6 +3155,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
           readSliceRepeatCounts,
           toolGuard,
           webProxyUrl,
+          injectedKeyFilePaths,
         );
       } catch (error) {
         result = `错误：${error instanceof Error ? error.message : String(error)}`;
@@ -3009,7 +3166,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
     const emitToolOutcome = (outcome: ToolOutcome) => {
       const toolName = outcome.call.function.name;
-      if (outcome.pendingDiff && !outcome.result.startsWith("错误：")) {
+      if (outcome.pendingDiff && !isToolResultFailure(outcome.result)) {
         onEvent(outcome.pendingDiff);
       }
       onEvent({
@@ -3017,7 +3174,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         data: {
           id: outcome.call.id,
           name: toolName,
-          ok: !outcome.result.startsWith("错误："),
+          ok: !isToolResultFailure(outcome.result),
           summary: toolSummary(toolName, outcome.result),
           result: truncateForSse(outcome.result, MAX_TOOL_RESULT_SSE_CHARS),
         },
@@ -3027,17 +3184,17 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         tool_call_id: outcome.call.id,
         content: truncateToolResultForModel(outcome.result),
       });
-      if (!outcome.result.startsWith("错误：") && textIndicatesPatchAnchor(outcome.result)) {
+      if (!isToolResultFailure(outcome.result) && textIndicatesPatchAnchor(outcome.result)) {
         patchAnchorLocated = true;
         if (writeStage !== null && !isAsk && !isPlanExplore && !readOnlyBuildRun) {
           patchAnchorForcePending = true;
         }
       }
-      if (!outcome.result.startsWith("错误：") && textConfirmsTeleportToBody(outcome.result)) {
+      if (!isToolResultFailure(outcome.result) && textConfirmsTeleportToBody(outcome.result)) {
         teleportBodyConfirmed = true;
       }
       // Track patch_file failures for corrective nudges.
-      if (toolName === "patch_file" && outcome.result.startsWith("错误：")) {
+      if (toolName === "patch_file" && isToolResultFailure(outcome.result)) {
         try {
           const args = JSON.parse(outcome.call.function.arguments || "{}");
           patchFailureLog.push({
@@ -3229,6 +3386,19 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       // Reset file-breadth tracking when the model finally writes (it found the target).
       exploreFilesRead.clear();
       fileBreadthNudgeSent = false;
+      if (
+        !postPatchVerifyNudgeSent &&
+        runtimeProfile.verifyScript &&
+        !isAsk &&
+        !isPlanExplore &&
+        !readOnlyBuildRun
+      ) {
+        messages.push({
+          role: "system",
+          content: buildPostPatchVerifyNudge(runtimeProfile.verifyScript),
+        });
+        postPatchVerifyNudgeSent = true;
+      }
     } else if (turnExploreOnly) {
       consecutiveExploreTurns += 1;
       totalExploreTurns += 1;
@@ -3249,7 +3419,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
             if (args.path) {
               const readPath = String(args.path);
               exploreFilesRead.add(readPath);
-              if (readOnlyBuildRun || isAsk) {
+              if (readOnlyBuildRun || isReadOnlyAgent) {
                 if (!toolGuard.consultativeReadPaths) toolGuard.consultativeReadPaths = [];
                 if (!toolGuard.consultativeReadPaths.includes(readPath)) {
                   toolGuard.consultativeReadPaths.push(readPath);
@@ -3260,23 +3430,26 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         }
       }
     }
-    if (isAsk && consecutiveExploreTurns >= ASK_EXPLORE_TURN_BUDGET) {
+    if (isExplore && consecutiveExploreTurns >= EXPLORE_EXPLORE_TURN_BUDGET) {
+      messages.push({ role: "system", content: buildExploreExploreBudgetNudge(consecutiveExploreTurns) });
+      consecutiveExploreTurns = 0;
+    } else if (isAsk && consecutiveExploreTurns >= ASK_EXPLORE_TURN_BUDGET) {
       messages.push({ role: "system", content: buildAskExploreBudgetNudge(consecutiveExploreTurns) });
       consecutiveExploreTurns = 0;
     } else if (readOnlyBuildRun && consecutiveExploreTurns >= CONSULTATIVE_BUILD_EXPLORE_TURN_BUDGET) {
       messages.push({ role: "system", content: buildConsultativeExploreBudgetNudge(consecutiveExploreTurns) });
       consecutiveExploreTurns = 0;
-    } else if (!isAsk && !readOnlyBuildRun && consecutiveExploreTurns >= exploreTurnBudget) {
+    } else if (!isReadOnlyAgent && !readOnlyBuildRun && consecutiveExploreTurns >= exploreTurnBudget) {
       messages.push({ role: "system", content: buildExploreBudgetNudge(consecutiveExploreTurns, mode) });
       consecutiveExploreTurns = 0;
     }
 
     // 轮次接近上限时，注入强制完成提示，避免 Agent 继续重试失败操作
-    if (!readOnlyBuildRun && segmentMaxTurns !== undefined && turn >= segmentMaxTurns - 3 && turn < segmentMaxTurns) {
+    if (!readOnlyBuildRun && !isExplore && segmentMaxTurns !== undefined && turn >= segmentMaxTurns - 3 && turn < segmentMaxTurns) {
       const remaining = segmentMaxTurns - turn;
       messages.push({
         role: "system",
-        content: `【紧急提示】剩余 ${remaining} 轮。请立即用 write_file 重写需要修改的文件完成任务，禁止再用 patch_file。如果任务已完成，请直接输出总结。`
+        content: `【紧急提示】剩余 ${remaining} 轮。请优先 patch_file 完成必要修改，然后输出中文总结；若任务已完成，直接写总结（已改文件、验证方式、剩余问题）。`,
       });
     }
 
@@ -3286,7 +3459,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
           type: "status",
           data: { phase: "finished", turn, maxTurns: AGENT_SAFETY_MAX_TURNS },
         });
-        if (!isAsk) {
+        if (!isReadOnlyAgent) {
           onEvent({
             type: "error",
             data: { message: `已达安全上限（${AGENT_SAFETY_MAX_TURNS} 轮），任务可能未完成。` },
@@ -3296,34 +3469,79 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         return;
       }
 
-      if (readOnlyBuildRun) {
+      if (readOnlyBuildRun || isExplore) {
         messages.push({
           role: "system",
-          content: buildConsultativeSegmentCapNudge(turn, totalExploreTurns),
+          content: isExplore
+            ? buildExploreForceReportNudge(Math.max(totalExploreTurns, EXPLORE_MAX_TOTAL_EXPLORE_SOFT))
+            : buildConsultativeSegmentCapNudge(turn, totalExploreTurns),
         });
+        if (!isExplore) {
+          messages.push({
+            role: "system",
+            content: buildAskForceAnswerNudge(Math.max(totalExploreTurns, ASK_MAX_TOTAL_EXPLORE_SOFT)),
+          });
+        }
+        segmentMaxTurns = turn + 1;
+        consultativeForceAnswerPending = true;
+        onEvent({
+          type: "status",
+          data: {
+            phase: isExplore ? "explore_segment_cap" : "consultative_segment_cap",
+            turn,
+            maxTurns: segmentMaxTurns,
+            model,
+            detail: isExplore ? "探索已达段内轮次上限，须输出项目报告" : "咨询只读已达段内轮次上限，须输出结论",
+          },
+        });
+        continue;
+      }
+
+      if (!isReadOnlyAgent && turnCapFinalSummaryAttempts < 2) {
+        turnCapFinalSummaryAttempts += 1;
         messages.push({
           role: "system",
-          content: buildAskForceAnswerNudge(Math.max(totalExploreTurns, ASK_MAX_TOTAL_EXPLORE_SOFT)),
+          content: buildTurnCapFinalSummaryNudge(
+            turn,
+            writeStage?.writtenList.map((entry) => entry.key).filter(Boolean),
+            turnCapFinalSummaryAttempts,
+          ),
         });
         segmentMaxTurns = turn + 1;
         consultativeForceAnswerPending = true;
         onEvent({
           type: "status",
           data: {
-            phase: "consultative_segment_cap",
+            phase: "turn_cap_final_summary",
             turn,
             maxTurns: segmentMaxTurns,
             model,
-            detail: "咨询只读已达段内轮次上限，须输出结论",
+            detail:
+              turnCapFinalSummaryAttempts >= 2
+                ? "段内轮次将尽，最后机会须输出总结"
+                : "段内轮次将尽，须输出中文总结",
           },
         });
         continue;
       }
 
+      if (!isReadOnlyAgent && turnCapFinalSummaryAttempts >= 2) {
+        onEvent({
+          type: "status",
+          data: { phase: "finished", turn, maxTurns: segmentMaxTurns },
+        });
+        onEvent({
+          type: "error",
+          data: { message: buildTurnCapExhaustedMessage(turn) },
+        });
+        onEvent({ type: "done", data: buildDoneData(writeStage, turn, outputTruncated) });
+        return;
+      }
+
       segmentIndex += 1;
       segmentMaxTurns = extendSegmentMaxTurns(turn, segmentBudget);
       turnsLowNudgeSent = false;
-      if (!readOnlyBuildRun) {
+      if (!readOnlyBuildRun && !isExplore) {
         messages.push({
           role: "system",
           content: buildSegmentContinueNudge(turn, segmentIndex, nudgeMode, isExecutePlan && mode === "plan"),

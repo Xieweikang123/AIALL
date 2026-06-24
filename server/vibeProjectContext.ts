@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { buildRouteContextSummary } from "./projectRouteContext";
 import { listDirectory, readFileContent } from "./vibeFs";
 
 const KEY_PROJECT_FILES = [
@@ -54,6 +55,7 @@ export type ProjectContextResult =
       path: string;
       tree: string;
       keyFiles: Array<{ path: string; content: string }>;
+      routeSummary: string;
       truncated: boolean;
     }
   | { ok: false; error: string };
@@ -98,19 +100,44 @@ export async function buildProjectContext(projectPath: string): Promise<ProjectC
     usedChars += content.length + rel.length;
   }
 
+  const routeSummary = await buildRouteContextSummary(resolved).catch(() => "");
+  usedChars += routeSummary.length;
+
   const result: ProjectContextResult = {
     ok: true,
     path: resolved,
     tree,
     keyFiles,
+    routeSummary,
     truncated: usedChars >= PROJECT_CONTEXT_MAX_CHARS || treeLines.length >= PROJECT_CONTEXT_MAX_NODES,
   };
   contextCache.set(resolved, { builtAt: Date.now(), result });
   return result;
 }
 
+export function buildInjectedKeyFilePathSet(
+  context: Extract<ProjectContextResult, { ok: true }> | null | undefined,
+): Set<string> {
+  const paths = new Set<string>();
+  if (!context?.ok) return paths;
+  for (const file of context.keyFiles) {
+    paths.add(file.path.replace(/\\/g, "/"));
+  }
+  return paths;
+}
+
+export function formatInjectedKeyFileReadNudge(filePath: string): string {
+  return [
+    `（提示：\`${filePath}\` 已在上方「关键文件」项目上下文中注入。`,
+    "请直接引用该内容作答；若需未注入的行段，请指定 offset/limit，勿整文件重复 read。）",
+  ].join("");
+}
+
 export function formatProjectContextForPrompt(context: Extract<ProjectContextResult, { ok: true }>): string {
   const lines = ["", "项目目录结构：", "```", context.tree, "```"];
+  if (context.routeSummary.trim()) {
+    lines.push(context.routeSummary.trim());
+  }
   if (context.keyFiles.length) {
     lines.push("", "关键文件内容：");
     for (const file of context.keyFiles) {
@@ -133,6 +160,9 @@ export function formatProjectContextForBuild(context: Extract<ProjectContextResu
     tree = `${tree.slice(0, 12_000)}\n...（目录树已截断）`;
   }
   const lines = ["", "项目目录结构（节选）：", "```", tree, "```"];
+  if (context.routeSummary.trim()) {
+    lines.push(context.routeSummary.trim());
+  }
   let used = tree.length;
   const keyFiles: Array<{ path: string; content: string }> = [];
   for (const file of context.keyFiles) {

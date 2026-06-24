@@ -29,6 +29,13 @@ export const ASK_MAX_TOTAL_EXPLORE_SOFT = 8;
 /** Ask mode hard cap — force text-only answer. */
 export const ASK_MAX_TOTAL_EXPLORE_HARD = 12;
 
+/** Consecutive read-only turns in explore mode before nudging to output report. */
+export const EXPLORE_EXPLORE_TURN_BUDGET = 6;
+
+/** Explore mode soft/hard caps for total read-only turns. */
+export const EXPLORE_MAX_TOTAL_EXPLORE_SOFT = 10;
+export const EXPLORE_MAX_TOTAL_EXPLORE_HARD = 14;
+
 /**
  * Hard cap on total exploration-only turns (read-only turns, not reset by nudges).
  * When exceeded, tools are stripped from the next request, forcing text output.
@@ -153,6 +160,30 @@ export function buildAskForceAnswerNudge(totalExploreTurns: number): string {
     `【系统强制】Ask 模式已累计 ${totalExploreTurns} 轮探索（超过 ${ASK_MAX_TOTAL_EXPLORE_HARD}）。`,
     "下一轮已移除所有工具，你只能输出文字。",
     "请基于已有信息给出完整结论；若信息不足，说明已确认部分与仍不确定部分。",
+  ].join("");
+}
+
+export function buildExploreExploreBudgetNudge(consecutiveExploreTurns: number): string {
+  return [
+    `【系统提示】Explore 模式已连续 ${consecutiveExploreTurns} 轮仅探索、尚未输出报告。`,
+    "请基于已读内容立即输出或更新项目理解报告（含 <!-- project-report --> 标记）。",
+    "若仍缺关键片段：最多再 read 1–2 个代表文件，禁止重叠小 window 反复 read。",
+  ].join("");
+}
+
+export function buildExploreExploreSoftCapNudge(totalExploreTurns: number): string {
+  return [
+    `【系统提示】Explore 模式已累计 ${totalExploreTurns} 轮探索（超过 ${EXPLORE_MAX_TOTAL_EXPLORE_SOFT}）。`,
+    "已移除 grep / search_files，只能 read_file 做最后确认。",
+    "下一轮必须输出完整项目理解报告，不要再调用工具。",
+  ].join("");
+}
+
+export function buildExploreForceReportNudge(totalExploreTurns: number): string {
+  return [
+    `【系统强制】Explore 模式已累计 ${totalExploreTurns} 轮探索（超过 ${EXPLORE_MAX_TOTAL_EXPLORE_HARD}）。`,
+    "下一轮已移除所有工具，你只能输出文字。",
+    "请基于已有信息输出完整项目理解报告；未覆盖章节标注「未探索」。",
   ].join("");
 }
 

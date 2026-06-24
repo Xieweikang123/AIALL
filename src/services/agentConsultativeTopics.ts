@@ -3,16 +3,37 @@
  * New topics register here instead of hardcoding business symbols in classifiers.
  */
 
+import type { ConsultativeTopicId } from "./agentIntentClassifier";
 import {
+  PROJECT_OVERVIEW_TOPIC_RE,
   SCHEDULED_TASK_TOPIC_RE,
+  SESSION_AUDIT_TASK_RE,
   shouldNudgeScheduledJobRegistration,
 } from "./agentStructuralPatterns";
-import { isConsultativeUserPrompt, type UserIntentHistoryMessage } from "./agentUserIntent";
+import {
+  buildAgentStepClarificationHint,
+  buildBehaviorContradictionHint,
+  buildConfigBindingTopicHint,
+  buildImplementationStatusHint,
+  buildSessionAuditHint,
+  historySuggestsActiveImplementation,
+  isAccuracyConsultativePrompt,
+  isAgentStepClarificationPrompt,
+  isBehaviorContradictionPrompt,
+  isBehaviorPurposePrompt,
+  isCodeReviewPrompt,
+  isConsultativeUserPrompt,
+  isImplementationStatusPrompt,
+  resolveConfigBindingTopic,
+  type UserIntentHistoryMessage,
+} from "./agentUserIntent";
+import { buildConsultativeAccuracyTraceHint } from "../../server/consultativeAccuracyTrace";
+import { buildBehaviorPurposeTraceHint } from "../../server/consultativeBehaviorTrace";
 
 export interface ConsultativeTopicModule {
-  id: string;
+  id: ConsultativeTopicId;
   isActive(prompt: string, history?: UserIntentHistoryMessage[]): boolean;
-  buildSystemHint(): string;
+  buildSystemHint(prompt: string, history?: UserIntentHistoryMessage[]): string;
 }
 
 function scheduledTaskTopic(): ConsultativeTopicModule {
@@ -23,25 +44,142 @@ function scheduledTaskTopic(): ConsultativeTopicModule {
       if (!text || !SCHEDULED_TASK_TOPIC_RE.test(text)) return false;
       return isConsultativeUserPrompt(text, history);
     },
-    buildSystemHint: buildScheduledTaskConsultativeHint,
+    buildSystemHint: () => buildScheduledTaskConsultativeHint(),
   };
 }
 
-const CONSULTATIVE_TOPICS: ConsultativeTopicModule[] = [scheduledTaskTopic()];
+function projectOverviewTopic(): ConsultativeTopicModule {
+  return {
+    id: "project_overview",
+    isActive(prompt) {
+      const text = prompt.trim();
+      return Boolean(text && PROJECT_OVERVIEW_TOPIC_RE.test(text));
+    },
+    buildSystemHint: () => buildProjectOverviewConsultativeHint(),
+  };
+}
+
+function sessionAuditTopic(): ConsultativeTopicModule {
+  return {
+    id: "session_audit",
+    isActive(prompt) {
+      const text = prompt.trim();
+      return Boolean(text && SESSION_AUDIT_TASK_RE.test(text));
+    },
+    buildSystemHint: () => buildSessionAuditHint(),
+  };
+}
+
+function behaviorPurposeTopic(): ConsultativeTopicModule {
+  return {
+    id: "behavior_purpose",
+    isActive(prompt, history) {
+      return isBehaviorPurposePrompt(prompt.trim(), history);
+    },
+    buildSystemHint: () => buildBehaviorPurposeTraceHint(),
+  };
+}
+
+function behaviorContradictionTopic(): ConsultativeTopicModule {
+  return {
+    id: "behavior_contradiction",
+    isActive(prompt, history) {
+      return isBehaviorContradictionPrompt(prompt.trim(), history);
+    },
+    buildSystemHint: () => buildBehaviorContradictionHint(),
+  };
+}
+
+function accuracyTopic(): ConsultativeTopicModule {
+  return {
+    id: "accuracy",
+    isActive(prompt) {
+      return isAccuracyConsultativePrompt(prompt.trim());
+    },
+    buildSystemHint: () => buildConsultativeAccuracyTraceHint(),
+  };
+}
+
+function codeReviewTopic(): ConsultativeTopicModule {
+  return {
+    id: "code_review",
+    isActive(prompt) {
+      return isCodeReviewPrompt(prompt.trim());
+    },
+    buildSystemHint: () => buildCodeReviewConsultativeHint(),
+  };
+}
+
+function implementationStatusTopic(): ConsultativeTopicModule {
+  return {
+    id: "implementation_status",
+    isActive(prompt, history) {
+      return (
+        isImplementationStatusPrompt(prompt.trim()) &&
+        historySuggestsActiveImplementation(history)
+      );
+    },
+    buildSystemHint: () => buildImplementationStatusHint(),
+  };
+}
+
+function stepClarificationTopic(): ConsultativeTopicModule {
+  return {
+    id: "step_clarification",
+    isActive(prompt) {
+      return isAgentStepClarificationPrompt(prompt.trim());
+    },
+    buildSystemHint: () => buildAgentStepClarificationHint(),
+  };
+}
+
+function configBindingTopic(): ConsultativeTopicModule {
+  return {
+    id: "config_binding",
+    isActive(prompt) {
+      return Boolean(resolveConfigBindingTopic(prompt.trim()));
+    },
+    buildSystemHint(prompt) {
+      const topic = resolveConfigBindingTopic(prompt.trim());
+      return topic ? buildConfigBindingTopicHint(topic) : "";
+    },
+  };
+}
+
+const CONSULTATIVE_TOPICS: ConsultativeTopicModule[] = [
+  sessionAuditTopic(),
+  scheduledTaskTopic(),
+  projectOverviewTopic(),
+  behaviorPurposeTopic(),
+  behaviorContradictionTopic(),
+  accuracyTopic(),
+  codeReviewTopic(),
+  implementationStatusTopic(),
+  stepClarificationTopic(),
+  configBindingTopic(),
+];
+
+const TOPIC_ID_TO_MODULE = new Map(CONSULTATIVE_TOPICS.map((topic) => [topic.id, topic]));
 
 export function resolveActiveConsultativeTopics(
   prompt: string,
   history?: UserIntentHistoryMessage[],
+  aiTopic?: ConsultativeTopicId | null,
 ): ConsultativeTopicModule[] {
+  if (aiTopic && aiTopic !== "none" && aiTopic !== "general") {
+    const mapped = TOPIC_ID_TO_MODULE.get(aiTopic);
+    if (mapped) return [mapped];
+  }
   return CONSULTATIVE_TOPICS.filter((topic) => topic.isActive(prompt, history));
 }
 
 export function buildConsultativeTopicHints(
   prompt: string,
   history?: UserIntentHistoryMessage[],
+  aiTopic?: ConsultativeTopicId | null,
 ): string {
-  return resolveActiveConsultativeTopics(prompt, history)
-    .map((topic) => topic.buildSystemHint())
+  return resolveActiveConsultativeTopics(prompt, history, aiTopic)
+    .map((topic) => topic.buildSystemHint(prompt, history))
     .join("");
 }
 
@@ -52,8 +190,9 @@ export function isScheduledTaskTopicPrompt(prompt: string): boolean {
 export function isScheduledTaskConsultativePrompt(
   prompt: string,
   history?: UserIntentHistoryMessage[],
+  aiTopic?: ConsultativeTopicId | null,
 ): boolean {
-  return resolveActiveConsultativeTopics(prompt, history).some((t) => t.id === "scheduled_task");
+  return resolveActiveConsultativeTopics(prompt, history, aiTopic).some((t) => t.id === "scheduled_task");
 }
 
 export function buildScheduledTaskConsultativeHint(): string {
@@ -66,13 +205,33 @@ export function buildScheduledTaskConsultativeHint(): string {
   ].join("\n");
 }
 
+export function buildProjectOverviewConsultativeHint(): string {
+  return [
+    "",
+    "【项目概览】用户问的是整个应用/仓库做什么，不是某个函数行为。",
+    "1. 优先引用 system 已注入的「顶层路由与页面说明」与 AGENTS.md 产品入口；",
+    "2. 仅当摘要不足时再 read 路由入口或各 view 首屏 desc（offset/limit 约 1–80 行）；",
+    "3. 回答按「入口 → 用途」逐项说明全部顶层路由，勿只深挖单一子系统；",
+    "4. 已注入的关键文件（如 package.json）勿重复 read_file；",
+    "5. 禁止用单一产品类比替代多入口说明。",
+  ].join("\n");
+}
+
+export function buildCodeReviewConsultativeHint(): string {
+  return [
+    "",
+    "【代码核对·只读】用户要求检查/核对/验证代码或改动，不是新实施请求。",
+    "须 read_file 核对目标文件实际内容后作答；禁止仅凭记忆或截图断言「已正确」。",
+  ].join("\n");
+}
+
 export function buildScheduledJobRegistrationNudge(jobClassNames: string[]): string {
   const listed = jobClassNames.slice(0, 2).join("、");
   return [
     `【系统提示】你已 read Job 类（${listed}），但尚未 read/grep 调度注册处。`,
     `下一轮 grep \`${jobClassNames[0]}\` 或 CronSchedule/TriggerBuilder/ScheduleJob，read Startup 或调度配置文件。`,
     "作答须含触发时机/频率（如 cron、启动即跑）；禁止只写 Execute→Service 业务逻辑即结束。",
-  ].join("");
+  ].join("\n");
 }
 
 export { shouldNudgeScheduledJobRegistration };

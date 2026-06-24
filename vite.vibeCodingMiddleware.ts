@@ -7,7 +7,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { readJsonBody, sendJson, sendSseEvent, sendSseComment, sendSseHeaders } from "./server/httpUtils";
 import { chatCompletionWithTools, resolveChatEndpoint } from "./server/aiForward";
-import { runVibeAgent } from "./server/vibeAgent";
+import { runVibeAgent, type VibeChatMode } from "./server/vibeAgent";
 import { buildProjectContext } from "./server/vibeProjectContext";
 import {
   appendProjectMemory,
@@ -1027,7 +1027,8 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
     });
 
     try {
-      const mode = body.mode === "ask" ? "ask" : "build";
+      const mode: VibeChatMode =
+        body.mode === "ask" || body.mode === "plan" || body.mode === "explore" ? body.mode : "build";
       try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [agent-route] mode=${mode} prompt="${prompt.slice(0, 80)}"\n`); } catch {}
 
       const history = Array.isArray(body.history)

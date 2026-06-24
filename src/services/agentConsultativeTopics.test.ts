@@ -29,6 +29,24 @@ describe("agentConsultativeTopics", () => {
     expect(hints).not.toMatch(/EnergyRecord|gw_energy/i);
   });
 
+  it("uses AI topic when provided", () => {
+    const hints = buildConsultativeTopicHints("随便问问", undefined, "project_overview");
+    expect(hints).toContain("项目概览");
+    expect(hints).not.toContain("CronSchedule");
+  });
+
+  it("buildConsultativeTopicHints injects project overview hint", () => {
+    const hints = buildConsultativeTopicHints("解释这个项目是做什么的");
+    expect(hints).toContain("顶层路由与页面说明");
+  });
+
+  it("session audit topic injects audit hint", () => {
+    const hints = buildConsultativeTopicHints(
+      "【任务】请自行排查以下 AIALL Vibe 会话中 Agent 回复的准确度",
+    );
+    expect(hints).toContain("会话审计");
+  });
+
   it("nudges when Job read without registration trace", () => {
     const reads = [FIXTURE_FOO_BACKFILL_JOB];
     const greps = [FIXTURE_BACKFILL_SERVICE];

@@ -17,8 +17,10 @@
 
 ## 项目结构
 
-- `src/views/VibeCodingView.vue` — AI 助手主页面（vibe coding）
-- `src/views/ChatView.vue` — 聊天页面
+- `src/views/VibeCodingView.vue` — AI 助手主页面（vibe coding）：项目内 Agent、文件/Git/编辑器/聊天面板
+- `src/views/ChatView.vue` — 独立对话页：URL 抓取总结、图标模板驱动的桌面自动化（如「打开某应用」）
+- `src/views/IconTemplatesView.vue` — 图标模板库：屏幕截图模板，供 Chat 页在主显示器画面内匹配点击
+- `src/views/AiConfigView.vue` — AI 模型与 API 配置
 - `src/components/vibe/GitPanel.vue` — Git 面板
 - `src/components/vibe/FilePanel.vue` — 文件面板
 - `src/components/vibe/EditorPanel.vue` — 编辑器
@@ -33,6 +35,15 @@
 - `src/services/vibeChatStorage.ts` — 聊天持久化
 - `src/utils/renderMarkdown.ts` — Markdown 渲染
 - `server/vibeAgent.ts` — AI agent 后端服务
+
+## 产品入口（顶层路由）
+
+| 路由 | 用途 |
+|------|------|
+| `/vibe-coding` | 主 IDE：打开项目后的 Agent、文件树、Git、Monaco 编辑器、会话聊天 |
+| `/chat` | 通用对话：网页 URL 总结、结合图标模板的桌面 UI 自动化 |
+| `/icon-templates` | 录入任务栏/桌面截图模板，供 Chat 自动化匹配点击 |
+| `/ai-config` | 配置 API Key、模型、网页抓取代理等 |
 
 ## Agent 编排与提示词（通用性）
 

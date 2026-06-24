@@ -1,5 +1,5 @@
 import { stripQuotedReplyPrefix } from "./agentContinuation";
-import { assistantProvidedCodeLocationEvidence, PRIOR_DEFINITION_LISTING_RE } from "./agentStructuralPatterns";
+import { assistantProvidedCodeLocationEvidence, PRIOR_DEFINITION_LISTING_RE, SESSION_AUDIT_TASK_RE } from "./agentStructuralPatterns";
 
 /** Explicit change / implementation intent — Build may write. */
 export const IMPLEMENT_INTENT_RE =
@@ -480,9 +480,6 @@ export function buildAgentStepClarifyContinueHint(): string {
   ].join("");
 }
 
-/** User pasted session-audit task (evaluate another Vibe chat's agent quality). */
-const SESSION_AUDIT_TASK_RE =
-  /【任务】请自行排查以下\s*AIALL\s*Vibe\s*会话|Agent\s*回复的准确度|会话文件.*chat-\d{10,}/i;
 
 export function isSessionAuditPrompt(prompt: string): boolean {
   const text = prompt.trim();

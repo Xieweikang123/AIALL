@@ -15,6 +15,14 @@ export const DEFINITION_VALUE_TOKEN_RE =
 export const SCHEDULED_TASK_TOPIC_RE =
   /(?:有没有|是否有|有无).{0,32}(?:定时|调度|cron|Cron|周期)|(?:定时|调度).{0,24}(?:任务|job|Job|触发)|\bcron\b|CronSchedule|何时执行|什么时候跑|几点执行|执行频率|多久执行一次/i;
 
+/** Whole-repo / app purpose overview (not a single symbol). */
+export const PROJECT_OVERVIEW_TOPIC_RE =
+  /(?:项目|仓库|代码库|应用).{0,12}(?:做什么|是啥|是什么|介绍|概览|用途)|(?:解释|介绍|说明).{0,8}(?:项目|仓库|应用)/;
+
+/** User pasted session-quality audit task (marker shape, not a feature name). */
+export const SESSION_AUDIT_TASK_RE =
+  /【任务】请自行排查以下\s*.+\s*会话|Agent\s*回复的准确度|会话文件.*chat-\d{10,}/i;
+
 export const JOB_FILE_PATH_RE = /([^/\\]+Job)\.cs$/i;
 
 export const SCHEDULE_REGISTRATION_RE =
