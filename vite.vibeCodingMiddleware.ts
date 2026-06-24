@@ -29,7 +29,7 @@ import {
   writeFileContent,
 } from "./server/vibeFs";
 import { gitStatus, gitDiff, gitDiffFile, gitDiffContent, gitCommitFileDiff, gitCommit, gitLog, gitIsRepo, gitAdd, gitReset, gitDiscard, gitDiscardAll, gitRemotes, gitFetch, gitPull, gitPush, gitStashList, gitStashSave, gitStashPop, gitStashApply, gitStashDrop } from "./server/vibeGit";
-import { deleteChatStoreSession, upsertChatStoreIndexEntry } from "./server/chatStoreIndex";
+import { deleteChatStoreSession, mergeDeletedSessionIds, upsertChatStoreIndexEntry } from "./server/chatStoreIndex";
 import { mergeSessionPayloadForDisk } from "./server/chatStoreMerge";
 import { externalizeSessionPayload, readImageRefAsBuffer, readImageRefAsDataUrl } from "./server/vibeChatImages";
 import { withFileLock } from "./server/fileLock";
@@ -369,6 +369,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         version?: number;
         projectPath?: string;
         activeSessionId?: string;
+        deletedSessionIds?: string[];
         sessions?: Array<{
           id?: string;
           title?: string;
@@ -388,7 +389,13 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         return;
       }
 
-      const metas = Array.isArray(index.sessions) ? index.sessions : [];
+      const deletedSet = new Set((index.deletedSessionIds || []).map((id) => id.trim()).filter(Boolean));
+      const metas = (Array.isArray(index.sessions) ? index.sessions : []).filter(
+        (meta) => {
+          const id = (meta.id || "").trim();
+          return id && !deletedSet.has(id);
+        },
+      );
       sessionDiagServer("backend:chat-store-load", {
         projectPath,
         loadMessages,
@@ -464,6 +471,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
           version: index.version || 3,
           projectPath: storedProjectPath || projectPath,
           activeSessionId: index.activeSessionId || sessions[0].id,
+          deletedSessionIds: index.deletedSessionIds,
           sessions,
         },
       });
@@ -595,6 +603,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
           version?: number;
           projectPath?: string;
           activeSessionId?: string;
+          deletedSessionIds?: string[];
           sessions?: Array<{
             id?: string;
             title?: string;
@@ -646,14 +655,22 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       }
 
       // 只写有变更的 session（通过比较 messageCount）
-      let existingIndex: { sessions?: Array<{ id: string; title: string; createdAt: string; updatedAt: string; messageCount: number; file: string }> } | null = null;
+      let existingIndex: {
+        deletedSessionIds?: string[];
+        sessions?: Array<{ id: string; title: string; createdAt: string; updatedAt: string; messageCount: number; file: string }>;
+      } | null = null;
       try {
         const raw = await fs.promises.readFile(storeFile, "utf-8");
         existingIndex = JSON.parse(raw);
       } catch {
         existingIndex = null;
       }
-      const existingSessions = existingIndex?.sessions || [];
+      const mergedDeletedIds = mergeDeletedSessionIds(
+        existingIndex?.deletedSessionIds,
+        body.data?.deletedSessionIds,
+      );
+      const deletedSet = new Set(mergedDeletedIds || []);
+      const existingSessions = (existingIndex?.sessions || []).filter((s) => !deletedSet.has(s.id));
       const existingMap = new Map(existingSessions.map(s => [s.id, s]));
 
       const indexSessionsMap = new Map<string, {
@@ -673,7 +690,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       // 并行写入所有 session 文件
       await Promise.all(sessions.map(async (session) => {
         const id = (session.id || "").trim();
-        if (!id) return;
+        if (!id || deletedSet.has(id)) return;
 
         const existing = existingMap.get(id);
         const sessionFile = path.join(chatDir, `chat-${safeFilePart(id)}.json`);
@@ -723,6 +740,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
 
       for (const existing of existingSessions) {
         if (!existing.id || incomingIds.has(existing.id) || indexSessionsMap.has(existing.id)) continue;
+        if (deletedSet.has(existing.id)) continue;
         indexSessionsMap.set(existing.id, existing);
         preservedFromDisk.push(existing.id);
       }
@@ -739,7 +757,8 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         version: body.data?.version || 3,
         projectPath,
         activeSessionId: body.data?.activeSessionId || "",
-        sessions: Array.from(indexSessionsMap.values()),
+        deletedSessionIds: mergedDeletedIds,
+        sessions: Array.from(indexSessionsMap.values()).filter((s) => !deletedSet.has(s.id)),
       };
       await atomicWriteFile(storeFile, JSON.stringify(index, null, 2));
       invalidateChatStoreCache(resolved);

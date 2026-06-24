@@ -37,7 +37,7 @@ import {
   type ChatStoreSyncResult,
 } from "../services/vibeCodingClient";
 import { stampImageRefsAfterSync } from "../services/vibeChatImageStore";
-import { markSessionDeleted, sessionDiag } from "../utils/sessionDiagLog";
+import { sessionDiag } from "../utils/sessionDiagLog";
 import type { useSessionManager } from "./useSessionManager";
 import { useSessionMessageRegistry } from "./useSessionMessageRegistry";
 
@@ -476,7 +476,6 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     if (!ok) return;
     const project = projectPath().trim();
     cancelPendingChatPersistence();
-    markSessionDeleted(sessionId);
     sessionMessages.deleteSessionMessages(sessionId);
     removeSessionLocal(sessionId);
     refreshList();

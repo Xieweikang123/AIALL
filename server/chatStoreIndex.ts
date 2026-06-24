@@ -17,7 +17,36 @@ export type ChatStoreIndexFile = {
   projectPath: string;
   activeSessionId: string;
   sessions: ChatStoreIndexSession[];
+  /** Tombstone list — prevents delayed sync from resurrecting deleted sessions. */
+  deletedSessionIds?: string[];
 };
+
+const MAX_DELETED_SESSION_IDS = 200;
+
+export function mergeDeletedSessionIds(
+  existing: string[] | undefined,
+  incoming: string[] | undefined,
+): string[] | undefined {
+  const merged = [...new Set([...(existing || []), ...(incoming || [])])];
+  if (!merged.length) return undefined;
+  return merged.slice(-MAX_DELETED_SESSION_IDS);
+}
+
+export function appendDeletedSessionId(index: ChatStoreIndexFile, sessionId: string): ChatStoreIndexFile {
+  const id = sessionId.trim();
+  if (!id) return index;
+  const deletedSessionIds = mergeDeletedSessionIds(index.deletedSessionIds, [id]);
+  if (!deletedSessionIds?.length || deletedSessionIds.length === index.deletedSessionIds?.length) {
+    return index;
+  }
+  return { ...index, deletedSessionIds };
+}
+
+export function isSessionDeletedInIndex(index: ChatStoreIndexFile, sessionId: string): boolean {
+  const id = sessionId.trim();
+  if (!id) return false;
+  return (index.deletedSessionIds || []).includes(id);
+}
 
 type SessionPayloadLike = {
   id?: string;
@@ -117,12 +146,15 @@ export function removeChatStoreIndexSession(
   if (activeSessionId === sessionId) {
     activeSessionId = sessions[0]?.id || "";
   }
-  return {
-    ...index,
-    activeSessionId,
-    syncedAt: new Date().toISOString(),
-    sessions,
-  };
+  return appendDeletedSessionId(
+    {
+      ...index,
+      activeSessionId,
+      syncedAt: new Date().toISOString(),
+      sessions,
+    },
+    sessionId,
+  );
 }
 
 export async function deleteChatStoreSession(

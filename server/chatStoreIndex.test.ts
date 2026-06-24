@@ -50,7 +50,7 @@ describe("chatStoreIndex", () => {
     expect(next.syncedAt).not.toBe("old");
   });
 
-  it("removes session from index and reassigns activeSessionId", () => {
+  it("removes session from index, reassigns activeSessionId, and tombstones deleted id", () => {
     const next = removeChatStoreIndexSession(
       {
         syncedAt: "old",
@@ -80,5 +80,6 @@ describe("chatStoreIndex", () => {
     );
     expect(next.sessions.map((s) => s.id)).toEqual(["s2"]);
     expect(next.activeSessionId).toBe("s2");
+    expect(next.deletedSessionIds).toEqual(["s1"]);
   });
 });

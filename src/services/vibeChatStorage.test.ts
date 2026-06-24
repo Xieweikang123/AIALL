@@ -22,11 +22,11 @@ import {
   createVibeChatSession,
   deleteVibeChatSession,
   diskChatStoreAheadOfLocalIndex,
-  markSessionLocallyDeleted,
   sessionIdsWithDiskAheadMessageCounts,
   getActiveVibeChatSessionId,
   getVibeChatProjectSnapshot,
   getSessionDiagSnapshot,
+  isSessionRecentlyDeletedLocally,
   listVibeChatSessions,
   loadVibeChatHistory,
   mirrorLocalIndexFromDiskMeta,
@@ -571,10 +571,9 @@ describe("sanitizePersistedChatMessages", () => {
       expect(diskPayload[0].imageDataUrls?.[0]).toBe(largeDataUrl);
     });
 
-    it("getActiveSessionSnapshot alone still lacks base64 when memory record has orphan refs", () => {
+    it("getActiveSessionSnapshot attaches preview urls when memory record has image refs", () => {
       installLocalStorageMock();
       const projectPath = "D:/projects/image-sync-gap";
-      const largeDataUrl = `data:image/jpeg;base64,${"C".repeat(150_000)}`;
       const { sessionId } = saveVibeChatHistory(projectPath, [
         {
           id: "u1",
@@ -585,7 +584,7 @@ describe("sanitizePersistedChatMessages", () => {
         },
       ]);
       const snapshot = getActiveSessionSnapshot(projectPath, sessionId);
-      expect(snapshot?.messages[0].imageDataUrls).toBeUndefined();
+      expect(snapshot?.messages[0].imageDataUrls?.length).toBe(1);
       expect(snapshot?.messages[0].imageRefs).toHaveLength(1);
     });
 
@@ -793,7 +792,6 @@ describe("v3 chat storage (index + memory)", () => {
       explicitId,
     );
     deleteVibeChatSession(projectPath, explicitId);
-    markSessionLocallyDeleted(projectPath, explicitId);
 
     saveVibeChatHistory(
       projectPath,
@@ -805,6 +803,16 @@ describe("v3 chat storage (index + memory)", () => {
     );
 
     expect(listVibeChatSessions(projectPath).map((s) => s.id)).not.toContain(explicitId);
+  });
+
+  it("persists deleted session ids in localStorage index without TTL expiry", () => {
+    const projectPath = "D:/projects/persistent-delete";
+    const deleteId = saveVibeChatHistory(projectPath, [
+      { id: "u1", role: "user", content: "delete me" },
+    ]).sessionId;
+    deleteVibeChatSession(projectPath, deleteId);
+    expect(isSessionRecentlyDeletedLocally(projectPath, deleteId)).toBe(true);
+    expect(getVibeChatProjectSnapshot(projectPath).deletedSessionIds).toContain(deleteId);
   });
 
   it("merges disk duplicate signatures into one session during merge", () => {

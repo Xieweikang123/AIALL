@@ -1,15 +1,7 @@
 import { debugLog } from "./debugLog";
+import { isSessionRecentlyDeletedLocally } from "../services/vibeChatStorage";
 
 const TAG = "[session-diag]";
-const recentlyDeleted = new Map<string, number>();
-const DELETED_TTL_MS = 120_000;
-
-function pruneDeleted() {
-  const now = Date.now();
-  for (const [id, ts] of recentlyDeleted) {
-    if (now - ts > DELETED_TTL_MS) recentlyDeleted.delete(id);
-  }
-}
 
 function extractSessionIds(data: Record<string, unknown>): string[] {
   const ids: string[] = [];
@@ -31,25 +23,17 @@ function extractSessionIds(data: Record<string, unknown>): string[] {
 }
 
 function resurrectionHints(data: Record<string, unknown>): Record<string, unknown> {
-  pruneDeleted();
+  const projectPath = typeof data.projectPath === "string" ? data.projectPath.trim() : "";
+  if (!projectPath) return {};
   const hints: Record<string, unknown> = {};
   for (const id of extractSessionIds(data)) {
-    const deletedAt = recentlyDeleted.get(id);
-    if (deletedAt !== undefined) {
+    if (isSessionRecentlyDeletedLocally(projectPath, id)) {
       hints.resurrection = true;
       hints.resurrectedSessionId = id;
-      hints.deletedAgoMs = Date.now() - deletedAt;
       break;
     }
   }
   return hints;
-}
-
-/** 删除会话时登记，供后续日志检测「复活」。 */
-export function markSessionDeleted(sessionId: string) {
-  if (!sessionId) return;
-  recentlyDeleted.set(sessionId, Date.now());
-  sessionDiag("delete:marked", { sessionId });
 }
 
 export function sessionDiag(event: string, data: Record<string, unknown> = {}) {

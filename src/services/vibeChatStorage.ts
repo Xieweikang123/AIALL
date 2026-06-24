@@ -149,6 +149,7 @@ export type VibeChatProjectSnapshot = {
   projectPath: string;
   activeSessionId: string;
   sessions: Array<VibeChatSessionMeta & { messages?: PersistedChatMessage[] }>;
+  deletedSessionIds?: string[];
 };
 
 type VibeChatSession = {
@@ -176,6 +177,7 @@ type SessionIndexEntry = {
 type ProjectIndexRecord = {
   activeSessionId: string;
   sessions: SessionIndexEntry[];
+  deletedSessionIds?: string[];
 };
 
 const CHAT_STORAGE_KEY = "vibe-coding-chat";
@@ -194,29 +196,30 @@ const MAX_TOOL_ARGS_DISK_CHARS = 400;
 /** Full session payloads live in memory (and on disk); not in localStorage. */
 const memoryByProject = new Map<string, ProjectChatRecord>();
 
-/** Sessions deleted locally; block disk merge from resurrecting them until TTL expires. */
-const recentlyDeletedByProject = new Map<string, Map<string, number>>();
-const DELETED_SESSION_TTL_MS = 120_000;
+const MAX_DELETED_SESSION_IDS = 200;
 
-function pruneRecentlyDeletedSessions(projectKey: string) {
-  const map = recentlyDeletedByProject.get(projectKey);
-  if (!map) return;
-  const now = Date.now();
-  for (const [id, ts] of map) {
-    if (now - ts > DELETED_SESSION_TTL_MS) map.delete(id);
-  }
-  if (map.size === 0) recentlyDeletedByProject.delete(projectKey);
+function readDeletedSessionIds(projectKey: string): Set<string> {
+  const ids = readIndex().byProject[projectKey]?.deletedSessionIds;
+  return new Set(ids || []);
+}
+
+function persistDeletedSessionId(projectPath: string, sessionId: string): void {
+  const key = normalizeProjectKey(projectPath);
+  const id = sessionId.trim();
+  if (!key || !id) return;
+  const index = readIndex();
+  const previous = index.byProject[key]?.deletedSessionIds || [];
+  if (previous.includes(id)) return;
+  const deletedSessionIds = [...previous, id].slice(-MAX_DELETED_SESSION_IDS);
+  const existing = index.byProject[key];
+  index.byProject[key] = existing
+    ? { ...existing, deletedSessionIds }
+    : { activeSessionId: "", sessions: [], deletedSessionIds };
+  writeIndex(index);
 }
 
 export function markSessionLocallyDeleted(projectPath: string, sessionId: string) {
-  const key = normalizeProjectKey(projectPath);
-  if (!key || !sessionId) return;
-  let map = recentlyDeletedByProject.get(key);
-  if (!map) {
-    map = new Map();
-    recentlyDeletedByProject.set(key, map);
-  }
-  map.set(sessionId, Date.now());
+  persistDeletedSessionId(projectPath, sessionId);
 }
 
 export function isSessionRecentlyDeletedLocally(projectPath: string, sessionId: string): boolean {
@@ -225,9 +228,28 @@ export function isSessionRecentlyDeletedLocally(projectPath: string, sessionId: 
 
 function isRecentlyDeletedSession(projectPath: string, sessionId: string): boolean {
   const key = normalizeProjectKey(projectPath);
-  if (!key || !sessionId) return false;
-  pruneRecentlyDeletedSessions(key);
-  return recentlyDeletedByProject.get(key)?.has(sessionId) ?? false;
+  const id = sessionId.trim();
+  if (!key || !id) return false;
+  return readDeletedSessionIds(key).has(id);
+}
+
+function mergeDeletedSessionIds(existing?: string[], incoming?: string[]): string[] | undefined {
+  const merged = [...new Set([...(existing || []), ...(incoming || [])])];
+  if (!merged.length) return undefined;
+  return merged.slice(-MAX_DELETED_SESSION_IDS);
+}
+
+function syncDeletedSessionIdsFromSnapshot(projectPath: string, incoming?: string[]): void {
+  const key = normalizeProjectKey(projectPath);
+  if (!key || !incoming?.length) return;
+  const index = readIndex();
+  const existing = index.byProject[key];
+  const deletedSessionIds = mergeDeletedSessionIds(existing?.deletedSessionIds, incoming);
+  if (!deletedSessionIds) return;
+  index.byProject[key] = existing
+    ? { ...existing, deletedSessionIds }
+    : { activeSessionId: "", sessions: [], deletedSessionIds };
+  writeIndex(index);
 }
 
 function filterOutRecentlyDeletedDiskSessions(
@@ -317,6 +339,7 @@ const TOOL_ACTION_LINE_RE =
 const TOOL_SUMMARY_HEADING_RE = /^#{1,3}\s*工具摘要\s*$/;
 
 import { sanitizeUserVisibleAssistantText } from "./agentVisibleText";
+import { resolveChatMessageImageUrls } from "./vibeChatImageStore";
 
 /** Strip tool-log blocks and leaked tool-action bullet lines from assistant text shown to the user. */
 export function stripToolSummaryFromAssistantContent(text: string): string {
@@ -815,6 +838,9 @@ function projectIndexFromRecord(
         messageCount,
       };
     }),
+    ...(previousIndex?.deletedSessionIds?.length
+      ? { deletedSessionIds: previousIndex.deletedSessionIds }
+      : {}),
   };
 }
 
@@ -975,6 +1001,7 @@ export function getVibeChatProjectSnapshot(projectPath: string): VibeChatProject
     version: STORE_VERSION,
     projectPath,
     activeSessionId,
+    deletedSessionIds: key ? readIndex().byProject[key]?.deletedSessionIds : undefined,
     sessions:
       sessionsForSnapshot.map((s) => {
         const indexMeta = indexed?.find((m) => m.id === s.id);
@@ -1001,12 +1028,20 @@ export function getActiveSessionSnapshot(
   const record = getProjectRecord(key);
   const session = record?.sessions.find((s) => s.id === sessionId);
   if (!session) return null;
+  const messages = sanitizeMessages(session.messages, { forDisk: true }).map((message) => {
+    if (message.role !== "user" || message.imageDataUrls?.length || !message.imageRefs?.length) {
+      return message;
+    }
+    const previewUrls = resolveChatMessageImageUrls(projectPath, message, sessionId);
+    if (!previewUrls.length) return message;
+    return { ...message, imageDataUrls: previewUrls };
+  });
   return {
     id: session.id,
     title: session.title,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
-    messages: sanitizeMessages(session.messages, { forDisk: true }),
+    messages,
   };
 }
 
@@ -1241,6 +1276,8 @@ export function mergeChatStoreFromDiskSnapshot(
   if (!key || !snapshot.sessions?.length) return false;
   if (expectedProjectPath && normalizeProjectKey(expectedProjectPath) !== key) return false;
 
+  syncDeletedSessionIdsFromSnapshot(snapshot.projectPath, snapshot.deletedSessionIds);
+
   // #region session-diag
   sessionDiag("storage:merge-from-disk:before", {
     projectPath: snapshot.projectPath,
@@ -1315,6 +1352,7 @@ export function mergeChatStoreFromDiskSnapshot(
 
 type DiskIndexMirrorInput = {
   activeSessionId: string;
+  deletedSessionIds?: string[];
   sessions: Array<{
     id: string;
     title: string;
@@ -1386,9 +1424,11 @@ export function mirrorLocalIndexFromDiskMeta(projectPath: string, disk: DiskInde
       ? localActive
       : diskActive || localActive;
 
+  const deletedSessionIds = mergeDeletedSessionIds(localMeta?.deletedSessionIds, disk.deletedSessionIds);
   index.byProject[key] = {
     activeSessionId,
     sessions: merged,
+    ...(deletedSessionIds ? { deletedSessionIds } : {}),
   };
   writeIndex(index);
 }
@@ -1396,6 +1436,7 @@ export function mirrorLocalIndexFromDiskMeta(projectPath: string, disk: DiskInde
 export function mirrorLocalIndexFromDiskSnapshot(projectPath: string, snapshot: VibeChatProjectSnapshot): void {
   mirrorLocalIndexFromDiskMeta(projectPath, {
     activeSessionId: snapshot.activeSessionId || "",
+    deletedSessionIds: snapshot.deletedSessionIds,
     sessions: snapshot.sessions.map((s) => ({
       id: s.id,
       title: s.title,
@@ -1415,6 +1456,8 @@ export function replaceChatStoreFromDiskSnapshot(
   const key = normalizeProjectKey(snapshot.projectPath);
   if (!key || !snapshot.sessions?.length) return false;
   if (expectedProjectPath && normalizeProjectKey(expectedProjectPath) !== key) return false;
+
+  syncDeletedSessionIdsFromSnapshot(snapshot.projectPath, snapshot.deletedSessionIds);
 
   sessionDiag("storage:replace-from-disk:before", {
     projectPath: snapshot.projectPath,
@@ -1711,7 +1754,12 @@ export function deleteVibeChatSession(projectPath: string, sessionId: string): P
   if (record.sessions.length === 1) {
     memoryByProject.delete(key);
     const index = readIndex();
-    delete index.byProject[key];
+    const deletedSessionIds = index.byProject[key]?.deletedSessionIds;
+    if (deletedSessionIds?.length) {
+      index.byProject[key] = { activeSessionId: "", sessions: [], deletedSessionIds };
+    } else {
+      delete index.byProject[key];
+    }
     writeIndex(index);
     // #region session-diag
     sessionDiag("storage:delete:after-last", {
