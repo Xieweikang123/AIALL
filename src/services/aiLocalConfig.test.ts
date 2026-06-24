@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   getActiveProvider,
   migratePersistedAiConfig,
+  normalizeWebProxyUrl,
   parsePersistedAiConfig,
   providerToChatBase,
 } from "./aiLocalConfig";
@@ -102,5 +103,11 @@ describe("active provider resolution", () => {
     const config = parsePersistedAiConfig(raw);
     expect(config?.version).toBe(4);
     expect(config?.providers[0].endpoint).toBe("https://x/v1");
+  });
+
+  it("normalizes web proxy URL with optional scheme", () => {
+    expect(normalizeWebProxyUrl("http://127.0.0.1:7890")).toBe("http://127.0.0.1:7890/");
+    expect(normalizeWebProxyUrl("127.0.0.1:10809")).toBe("http://127.0.0.1:10809/");
+    expect(normalizeWebProxyUrl("  ")).toBe("");
   });
 });

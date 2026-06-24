@@ -463,6 +463,79 @@ export function isSessionAuditPrompt(prompt: string): boolean {
   return SESSION_AUDIT_TASK_RE.test(text);
 }
 
+/** User rejects assistant-offered config field / enum set — narrow scope. */
+const USER_OPTION_MISMATCH_RE =
+  /(?:不是|并非)(?:这几|这些)(?:个)?(?:选项|项|值|字段)?|(?:选项|配置项|字段|枚举|取值).{0,10}(?:不对|错了|不正确|不符|不匹配)|不对[，,]?是这几/i;
+
+/** User asks count or list of allowed enum/config values. */
+const ENUMERATION_COUNT_QUESTION_RE =
+  /(?:有|共|几个|多少).{0,20}(?:选项|取值|枚举|可选值|模式|值)|(?:选项|枚举|可选值|取值).{0,12}(?:有|共).{0,8}几个|\d+\s*个(?:选项|值)/i;
+
+/** Lookup intent must co-occur with config-binding context (avoid bare「联网搜搜」). */
+const DOC_LOOKUP_INTENT_RE =
+  /(?:联网|查.{0,10}(?:官方|文档)|官方文档|类型定义|typedoc|interface\s*定义)/i;
+const CONFIG_BINDING_CONTEXT_RE =
+  /配置|选项|option|enum|枚举|属性|字段|参数|映射|mapping|api/i;
+
+export type ConfigBindingTopic = "reject" | "enumeration" | "doc_lookup";
+
+export function isUserOptionMismatchPrompt(prompt: string): boolean {
+  return USER_OPTION_MISMATCH_RE.test(prompt.trim());
+}
+
+export function isEnumerationCountQuestionPrompt(prompt: string): boolean {
+  return ENUMERATION_COUNT_QUESTION_RE.test(prompt.trim());
+}
+
+export function isExternalApiLookupPrompt(prompt: string): boolean {
+  const text = prompt.trim();
+  if (!text) return false;
+  return DOC_LOOKUP_INTENT_RE.test(text) && CONFIG_BINDING_CONTEXT_RE.test(text);
+}
+
+/** At most one topic per message — reject > enumeration > doc_lookup. */
+export function resolveConfigBindingTopic(prompt: string): ConfigBindingTopic | null {
+  const text = prompt.trim();
+  if (!text) return null;
+  if (isUserOptionMismatchPrompt(text)) return "reject";
+  if (isEnumerationCountQuestionPrompt(text)) return "enumeration";
+  if (isExternalApiLookupPrompt(text)) return "doc_lookup";
+  return null;
+}
+
+const CONFIG_BINDING_TOPIC_LINES: Record<ConfigBindingTopic, string> = {
+  reject:
+    "用户否定当前字段/选项集合：禁止扩 scope；对照用户已展示项或类型定义收窄，显式更正前轮映射错误。",
+  enumeration:
+    "用户问可选值个数或列表：首句写「共 N 个：…」完整列表，再附代码；禁止以 patch 汇报开头漏答。",
+  doc_lookup:
+    "用户要求查官方定义：须 web_search + web_extract 后再改映射；回答含字段名与类型/枚举对照。",
+};
+
+/** Single injected hint — shared mapping guard + topic-specific tail. */
+export function buildConfigBindingTopicHint(topic: ConfigBindingTopic): string {
+  return [
+    "",
+    "【外部配置·准确度】绑定外部库或内置组件配置字段时，须 read 类型定义或 web_extract 官方文档；禁止凭字段名相似猜测。",
+    CONFIG_BINDING_TOPIC_LINES[topic],
+  ].join("\n");
+}
+
+/** @deprecated Use buildConfigBindingTopicHint(resolveConfigBindingTopic(...)). */
+export function buildUserOptionMismatchHint(): string {
+  return buildConfigBindingTopicHint("reject");
+}
+
+/** @deprecated Use buildConfigBindingTopicHint(resolveConfigBindingTopic(...)). */
+export function buildEnumerationAnswerFirstHint(): string {
+  return buildConfigBindingTopicHint("enumeration");
+}
+
+/** @deprecated Use buildConfigBindingTopicHint(resolveConfigBindingTopic(...)). */
+export function buildExternalApiLookupHint(): string {
+  return buildConfigBindingTopicHint("doc_lookup");
+}
+
 export function buildSessionAuditHint(): string {
   return [
     "",

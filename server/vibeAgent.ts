@@ -85,7 +85,7 @@ import {
   shouldNudgeScheduledJobRegistration,
 } from "../src/services/agentConsultativeTopics";
 import { extractJobClassNamesFromReadPaths } from "../src/services/agentStructuralPatterns";
-import { buildBehaviorContradictionHint, buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildBuildWriteBlockedHint, buildImplementFollowUpHint, buildImplementationStatusHint, buildLocateStatusFollowUpHint, buildSessionAuditHint, buildUiDefectBuildHint, buildWriteToolBlockedMessage, isAccuracyConsultativePrompt, isAgentStepClarificationPrompt, isBehaviorContradictionPrompt, isBehaviorPurposePrompt, isCodeReviewPrompt, isConsultativeUserPrompt, isImplementationStatusPrompt, isImplementFollowUpRun, isLocateStatusFollowUpPrompt, isSameIssueFollowUpRun, isSessionAuditPrompt, isUiAppearanceQuestionPrompt, isUiDefectReportPrompt, isUserErrorQuotePrompt, historySuggestsActiveImplementation, historySuggestsQuotePositionFix } from "../src/services/agentUserIntent";
+import { buildBehaviorContradictionHint, buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildBuildWriteBlockedHint, buildConfigBindingTopicHint, buildImplementFollowUpHint, buildImplementationStatusHint, buildLocateStatusFollowUpHint, buildSessionAuditHint, buildUiDefectBuildHint, buildWriteToolBlockedMessage, isAccuracyConsultativePrompt, isAgentStepClarificationPrompt, isBehaviorContradictionPrompt, isBehaviorPurposePrompt, isCodeReviewPrompt, isConsultativeUserPrompt, isImplementationStatusPrompt, isImplementFollowUpRun, isLocateStatusFollowUpPrompt, isSameIssueFollowUpRun, isSessionAuditPrompt, isUiAppearanceQuestionPrompt, isUiDefectReportPrompt, isUserErrorQuotePrompt, resolveConfigBindingTopic, historySuggestsActiveImplementation, historySuggestsQuotePositionFix } from "../src/services/agentUserIntent";
 import { detectProjectRuntimeProfile, buildRuntimeAwarenessHint } from "./agentRuntimeHint";
 import { detectUserNegation, detectUserFailureReport, historyRecentUserFailureReport, stripQuotedReplyPrefix } from "../src/services/agentContinuation";
 import { resolveOriginalTaskFromResumePrompt } from "../src/services/agentRecovery";
@@ -293,6 +293,8 @@ export interface RunVibeAgentParams {
   mode?: VibeChatMode;
   maxTurns?: number;
   imageDataUrls?: string[];
+  /** HTTP 代理，用于 Agent 联网搜索/抓取（与 AI 配置「网页抓取代理」一致） */
+  webProxyUrl?: string;
   /** Run orchestration profile (interactive vs plan execution). */
   runProfile?: AgentRunProfileInput;
   /** @deprecated Use runProfile.kind === "execute_plan" */
@@ -696,7 +698,7 @@ const VIBE_AGENT_TOOLS = [
         type: "object",
         properties: {
           query: { type: "string", description: "搜索关键词" },
-          engine: { type: "string", enum: ["google", "bing", "baidu"], description: "搜索引擎，默认 google" },
+          engine: { type: "string", enum: ["google", "bing", "baidu", "duckduckgo"], description: "搜索引擎，默认 baidu；百度无静态结果时会自动回退" },
           max_results: { type: "number", description: "最大结果数，默认 5，最大 10" },
         },
         required: ["query"],
@@ -1071,6 +1073,7 @@ export async function executeTool(
   grepCache?: Map<string, string>,
   readSliceRepeatCounts?: Map<string, number>,
   toolGuard?: ToolGuardContext,
+  webProxyUrl?: string,
 ): Promise<string> {
   if (mode === "ask" && WRITE_AGENT_TOOL_NAMES.has(name)) {
     return buildWriteToolBlockedMessage("ask");
@@ -1455,9 +1458,9 @@ export async function executeTool(
   if (name === "web_search") {
     const query = String(args.query || "").trim();
     if (!query) return "错误：缺少 query";
-    const engine = String(args.engine || "google").trim();
+    const engine = String(args.engine || "baidu").trim();
     const maxResults = Math.min(10, Math.max(1, Number(args.max_results) || 5));
-    const result = await runWebSearch(query, engine, maxResults);
+    const result = await runWebSearch(query, engine, maxResults, webProxyUrl);
     if (!result.ok) return `错误：${result.error}`;
     return result.text || "（无结果）";
   }
@@ -1467,7 +1470,7 @@ export async function executeTool(
     if (!url) return "错误：缺少 url";
     if (!/^https?:\/\//.test(url)) return "错误：url 必须以 http:// 或 https:// 开头";
     const mode = String(args.mode || "auto").trim();
-    const outcome = await runWebExtract({ url, mode }, () => {});
+    const outcome = await runWebExtract({ url, mode, proxyUrl: webProxyUrl }, () => {});
     const payload = outcome.payload as Record<string, unknown>;
     if (!payload.ok) {
       return `错误：${payload.error || "抓取失败"}`;
@@ -1502,6 +1505,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     model,
     onEvent,
     signal,
+    webProxyUrl,
   } = params;
   const implementFollowUpRun =
     !isAsk &&
@@ -1592,6 +1596,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     imageDataUrls.length > 0 &&
     isUiDefectReportPrompt(prompt, imageDataUrls.length > 0);
   const agentStepClarifyRun = !isAsk && !isPlanExplore && isAgentStepClarificationPrompt(prompt);
+  const configBindingTopic = !isAsk && !isPlanExplore && !isExecutePlan
+    ? resolveConfigBindingTopic(prompt)
+    : null;
 
   const segmentBudget = resolveAgentMaxTurns(mode, runProfile);
   let segmentMaxTurns = params.maxTurns ?? segmentBudget;
@@ -1736,7 +1743,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
             (sameIssueFollowUpRun ? buildSameIssueFollowUpHint() : "") +
             (sessionAuditRun ? buildSessionAuditHint() : "") +
             (locateStatusFollowUpRun ? buildLocateStatusFollowUpHint() : "") +
-            (agentStepClarifyRun ? buildAgentStepClarificationHint() : "");
+            (agentStepClarifyRun ? buildAgentStepClarificationHint() : "") +
+            (configBindingTopic ? buildConfigBindingTopicHint(configBindingTopic) : "");
 
   const systemPrompt = consultativeUiAppearanceRun
     ? `${systemPromptCore}\n${runtimeAwarenessBlock}`
@@ -2980,6 +2988,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
           grepCache,
           readSliceRepeatCounts,
           toolGuard,
+          webProxyUrl,
         );
       } catch (error) {
         result = `错误：${error instanceof Error ? error.message : String(error)}`;

@@ -21,6 +21,8 @@ describe("buildReplyAccuracyHint", () => {
     expect(hint).toContain("修复宣称");
     expect(hint).toContain("定时/调度类");
     expect(hint).toContain("list_dir");
+    expect(hint).toContain("外部配置映射");
+    expect(hint).toContain("枚举个数优先");
   });
 
   it("avoids business-specific terms", () => {

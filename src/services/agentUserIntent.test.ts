@@ -11,12 +11,16 @@ import {
   buildBehaviorContradictionHint,
   buildBuildWriteBlockedHint,
   buildConsultativeBuildHint,
+  buildConfigBindingTopicHint,
   buildConsultativeResumeHint,
+  buildExternalApiLookupHint,
   buildImplementFollowUpHint,
   buildImplementationStatusHint,
   buildSessionAuditHint,
   buildUiDefectBuildHint,
+  buildUserOptionMismatchHint,
   buildWriteToolBlockedMessage,
+  resolveConfigBindingTopic,
   historySuggestsActiveImplementation,
   historySuggestsQuotePositionFix,
   isAgentStepClarificationPrompt,
@@ -25,6 +29,8 @@ import {
   isCodeReviewPrompt,
   isAccuracyConsultativePrompt,
   isConsultativeUserPrompt,
+  isEnumerationCountQuestionPrompt,
+  isExternalApiLookupPrompt,
   isImplementationStatusPrompt,
   isImplementFollowUpRun,
   isImplementationFailureReportPrompt,
@@ -36,6 +42,7 @@ import {
   isUiAppearanceQuestionPrompt,
   isUiDefectReportPrompt,
   isUserErrorQuotePrompt,
+  isUserOptionMismatchPrompt,
   historyPriorAssistantClaimedFix,
 } from "./agentUserIntent";
 
@@ -463,5 +470,33 @@ describe("isSameIssueFollowUpRun", () => {
 
   it("rejects unrelated new task", () => {
     expect(isSameIssueFollowUpRun("帮我把路由改成 lazy load", priorFixHistory)).toBe(false);
+  });
+});
+
+describe("config binding topic", () => {
+  it("detects user rejecting offered fields", () => {
+    expect(isUserOptionMismatchPrompt("不是这几个选项")).toBe(true);
+    expect(isUserOptionMismatchPrompt("fooField — 不是这几个")).toBe(true);
+    expect(isUserOptionMismatchPrompt("这个不对")).toBe(false);
+    expect(buildConfigBindingTopicHint("reject")).toContain("禁止扩 scope");
+  });
+
+  it("detects enumeration count questions", () => {
+    expect(isEnumerationCountQuestionPrompt("fooField 有几个选项？")).toBe(true);
+    expect(isEnumerationCountQuestionPrompt("你联网搜搜，有几个选项")).toBe(true);
+    expect(buildConfigBindingTopicHint("enumeration")).toContain("首句");
+  });
+
+  it("requires doc lookup intent plus config context", () => {
+    expect(isExternalApiLookupPrompt("你联网搜搜")).toBe(false);
+    expect(isExternalApiLookupPrompt("查一下官方文档里的 option 定义")).toBe(true);
+    expect(buildConfigBindingTopicHint("doc_lookup")).toContain("web_extract");
+  });
+
+  it("resolves at most one topic with priority reject > enumeration > lookup", () => {
+    expect(resolveConfigBindingTopic("不是这几个选项")).toBe("reject");
+    expect(resolveConfigBindingTopic("有几个取值？")).toBe("enumeration");
+    expect(resolveConfigBindingTopic("查官方文档里的 enum 定义")).toBe("doc_lookup");
+    expect(resolveConfigBindingTopic("帮我改路由")).toBe(null);
   });
 });

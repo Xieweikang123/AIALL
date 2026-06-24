@@ -130,13 +130,22 @@
           <div class="field-row">
             <span>网页抓取代理（HTTP，可选）</span>
             <div class="field-tools">
+              <button
+                type="button"
+                class="link"
+                :disabled="!web.proxyUrl.trim() || proxyTestLoading"
+                @click="handleProxyTest"
+              >
+                {{ proxyTestLoading ? "测试中..." : "测试" }}
+              </button>
               <button type="button" class="link" :disabled="!web.proxyUrl" @click="copyText(web.proxyUrl)">复制</button>
             </div>
           </div>
           <input v-model.trim="web.proxyUrl" type="text" placeholder="例如：http://127.0.0.1:7890" />
           <small class="tips">
-            仅用于“总结 URL / 抓取网页”场景，解决 Node 无法直连网站的问题（浏览器能打开不代表 Node 能直连）。
+            用于 Node 侧联网（聊天页抓取 URL、Vibe Agent 的 web_search / web_extract）。浏览器能打开不代表 Node 能直连，可点「测试」验证。
           </small>
+          <p v-if="proxyTestHint" class="tips" :class="proxyTestOk ? 'ok' : 'error'">{{ proxyTestHint }}</p>
         </label>
       </div>
 
@@ -363,6 +372,7 @@ import { fetchAvailableModels, testAiModel, testTtsModel } from "../services/aiC
 import InputPrompt from "../components/InputPrompt.vue";
 import { useInputPrompt } from "../composables/useInputPrompt";
 import { requestPageScreenshot } from "../services/pageScreenshotClient";
+import { extractWebText } from "../services/webExtractClient";
 import {
   AI_CONFIG_VERSION,
   AI_LOCAL_CONFIG_KEY,
@@ -372,6 +382,7 @@ import {
   createDefaultProvider,
   loadPersistedAiConfigFromStorage,
   migratePersistedAiConfig,
+  normalizeWebProxyUrl,
   savePersistedAiConfigToStorage,
 } from "../services/aiLocalConfig";
 
@@ -486,6 +497,51 @@ function removeProvider(providerId: string) {
 const web = reactive({
   proxyUrl: "",
 });
+
+/** 经代理探测 Node 能否访问外网（国内通常需代理才能连通） */
+const PROXY_TEST_URL = "https://www.google.com/generate_204";
+
+const proxyTestLoading = ref(false);
+const proxyTestHint = ref("");
+const proxyTestOk = ref(false);
+
+async function handleProxyTest() {
+  const normalized = normalizeWebProxyUrl(web.proxyUrl);
+  if (!normalized) {
+    proxyTestOk.value = false;
+    proxyTestHint.value = "代理地址不合法，请填写如 http://127.0.0.1:7890";
+    return;
+  }
+  if (normalized !== web.proxyUrl.trim()) {
+    web.proxyUrl = normalized;
+  }
+
+  proxyTestLoading.value = true;
+  proxyTestOk.value = false;
+  proxyTestHint.value = "正在通过代理请求测试 URL…";
+  try {
+    const res = await extractWebText({
+      url: PROXY_TEST_URL,
+      mode: "html",
+      proxyUrl: normalized,
+      onProgress: (msg) => {
+        proxyTestHint.value = msg;
+      },
+    });
+    if (res.ok) {
+      proxyTestOk.value = true;
+      proxyTestHint.value = `代理可用（HTTP ${res.status}，Node 已通过 ${normalized} 连通外网）`;
+    } else {
+      proxyTestOk.value = false;
+      proxyTestHint.value = res.error || `测试失败（HTTP ${res.status}）`;
+    }
+  } catch (error) {
+    proxyTestOk.value = false;
+    proxyTestHint.value = error instanceof Error ? error.message : "测试异常";
+  } finally {
+    proxyTestLoading.value = false;
+  }
+}
 
 const loading = ref(false);
 const modelsLoading = ref(false);
@@ -867,13 +923,17 @@ function handleSaveShortcut(event: KeyboardEvent) {
 
 function saveConfig() {
   syncFormToProvider(editingProviderId.value);
+  const normalizedProxy = normalizeWebProxyUrl(web.proxyUrl);
+  if (normalizedProxy) {
+    web.proxyUrl = normalizedProxy;
+  }
   savePersistedAiConfigToStorage({
     version: AI_CONFIG_VERSION,
     activeProviderId: activeProviderId.value,
     providers: providers.value.map((provider) => ({ ...provider })),
     activeTab: activeTab.value,
     web: {
-      proxyUrl: web.proxyUrl,
+      proxyUrl: web.proxyUrl.trim(),
     },
     tts: {
       model: ttsForm.model,

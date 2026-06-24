@@ -232,3 +232,28 @@ export function loadAiChatBaseFromStorage(): AiChatBaseConfig | null {
   if (!base.endpoint && !base.model) return null;
   return base;
 }
+
+/** 规范化网页抓取代理地址（允许省略 http://） */
+export function normalizeWebProxyUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  try {
+    const url = new URL(trimmed);
+    if (/^https?:$/.test(url.protocol)) return url.toString();
+  } catch {
+    // 允许省略协议，如 127.0.0.1:7890
+  }
+  try {
+    const url = new URL(`http://${trimmed}`);
+    if (url.hostname) return url.toString();
+  } catch {
+    return "";
+  }
+  return "";
+}
+
+export function loadWebProxyUrlFromStorage(): string {
+  const config = loadPersistedAiConfigFromStorage();
+  if (!config?.web?.proxyUrl) return "";
+  return normalizeWebProxyUrl(config.web.proxyUrl);
+}

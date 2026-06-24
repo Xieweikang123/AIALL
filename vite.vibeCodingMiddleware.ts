@@ -957,6 +957,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       maxTurns?: number;
       openFilePath?: string;
       imageDataUrls?: string[];
+      webProxyUrl?: string;
       runProfile?: {
         kind?: "interactive" | "execute_plan";
         targetFiles?: string[];
@@ -1050,6 +1051,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         mode,
         maxTurns: body.maxTurns,
         imageDataUrls,
+        webProxyUrl: body.webProxyUrl?.trim() || undefined,
         runProfile:
           body.runProfile?.kind === "execute_plan"
             ? {

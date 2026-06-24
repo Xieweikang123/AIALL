@@ -63,13 +63,18 @@
             <button
               v-if="projectHistoryList.length"
               type="button"
-              class="ghost small"
+              class="ghost small project-history-clear"
               @click="clearRecentProjects"
             >
               清空
             </button>
           </div>
-          <div v-if="!projectHistoryList.length" class="project-history-empty">还没有打开过项目</div>
+          <div v-if="!projectHistoryList.length" class="project-history-empty">
+            <svg class="project-history-empty-icon" width="32" height="32" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M2.5 4.8A1.3 1.3 0 0 1 3.8 3.5h3.2l1.2 1.3h4.5A1.3 1.3 0 0 1 14 6.1v6.4a1.3 1.3 0 0 1-1.3 1.3H3.8A1.3 1.3 0 0 1 2.5 12.5V4.8Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+            </svg>
+            <p>还没有打开过项目</p>
+          </div>
           <ul v-else class="project-history-list">
             <li
               v-for="item in projectHistoryList"
@@ -83,17 +88,30 @@
                 :disabled="loadingTree || pickingFolder"
                 @click="openRecentProject(item.path)"
               >
-                <span class="project-history-item-title">{{ item.displayName }}</span>
-                <span class="project-history-item-path" :title="item.path">{{ item.path }}</span>
-                <span class="project-history-item-meta">{{ formatSessionTime(item.lastOpenedAt) }}</span>
+                <span class="project-history-item-icon" aria-hidden="true">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                    <path d="M2.5 4.8A1.3 1.3 0 0 1 3.8 3.5h3.2l1.2 1.3h4.5A1.3 1.3 0 0 1 14 6.1v6.4a1.3 1.3 0 0 1-1.3 1.3H3.8A1.3 1.3 0 0 1 2.5 12.5V4.8Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+                  </svg>
+                </span>
+                <span class="project-history-item-body">
+                  <span class="project-history-item-top">
+                    <span class="project-history-item-title">{{ item.displayName }}</span>
+                    <span v-if="isCurrentProject(item.path)" class="project-history-item-badge">当前</span>
+                    <span class="project-history-item-meta">{{ formatSessionTime(item.lastOpenedAt) }}</span>
+                  </span>
+                  <span class="project-history-item-path" :title="item.path">{{ item.path }}</span>
+                </span>
               </button>
               <button
                 type="button"
-                class="ghost small project-history-delete"
+                class="project-history-delete"
                 title="从历史中移除"
+                aria-label="从历史中移除"
                 @click="removeRecentProject(item.path, $event)"
               >
-                移除
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M4 4l8 8M12 4 4 12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                </svg>
               </button>
             </li>
           </ul>
@@ -104,6 +122,9 @@
               :disabled="loadingTree || pickingFolder"
               @click="openNewProject"
             >
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+              </svg>
               打开新项目
             </button>
           </div>
@@ -137,7 +158,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { useRouter } from "vue-router";
 import {
   listProjectHistory,
@@ -221,7 +242,12 @@ function closeProjectHistory() {
 function handleOutsideClick(e: MouseEvent) {
   if (!projectHistoryOpen.value) return;
   const wrap = projectHistoryRef.value;
-  if (wrap && !wrap.contains(e.target as Node)) {
+  // Teleport 后下拉菜单在 body 上，需同时检查 dropdown 自身
+  const dropdownEl = document.querySelector('.project-history-dropdown');
+  const target = e.target as Node;
+  const insideWrap = wrap && wrap.contains(target);
+  const insideDropdown = dropdownEl && dropdownEl.contains(target);
+  if (!insideWrap && !insideDropdown) {
     closeProjectHistory();
   }
 }
@@ -492,26 +518,31 @@ function formatSessionTime(iso: string): string {
 }
 
 .project-history-footer {
-  padding: 8px 12px 10px;
-  border-top: 1px solid var(--border-color);
+  padding: 8px 10px 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .project-history-open-new {
   width: 100%;
-  padding: 7px 10px;
-  border: 1px dashed rgba(255, 255, 255, 0.18);
-  border-radius: 6px;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.72);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.78);
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
 .project-history-open-new:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.28);
-  color: rgba(255, 255, 255, 0.92);
+  background: rgba(88, 166, 255, 0.1);
+  border-color: rgba(88, 166, 255, 0.28);
+  color: #c9e4ff;
 }
 
 .project-history-open-new:disabled {
@@ -520,13 +551,14 @@ function formatSessionTime(iso: string): string {
 }
 
 .project-history-dropdown {
-  width: 400px;
-  max-height: 400px;
+  width: min(420px, calc(100vw - 24px));
+  max-height: min(420px, calc(100vh - 80px));
   overflow-y: auto;
-  background: #0b1220;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  background: rgba(17, 24, 39, 0.96);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  box-shadow: var(--shadow-panel, 0 8px 32px rgba(0, 0, 0, 0.35));
   z-index: 1000;
   margin-top: 4px;
   scrollbar-width: thin;
@@ -554,84 +586,212 @@ function formatSessionTime(iso: string): string {
 .project-history-head {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  padding: 12px;
-  border-bottom: 1px solid var(--border-color);
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .project-history-title {
   font-size: 13px;
   font-weight: 600;
   margin: 0;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
 }
 
 .project-history-desc {
   font-size: 11px;
-  color: var(--text-secondary);
-  margin: 2px 0 0;
+  color: rgba(139, 148, 158, 0.85);
+  margin: 3px 0 0;
+  line-height: 1.4;
 }
 
 .project-history-empty {
-  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 28px 20px;
   text-align: center;
-  color: var(--text-secondary);
+  color: rgba(139, 148, 158, 0.8);
   font-size: 12px;
+}
+
+.project-history-empty p {
+  margin: 0;
+}
+
+.project-history-empty-icon {
+  color: rgba(139, 148, 158, 0.45);
 }
 
 .project-history-list {
   list-style: none;
-  padding: 0;
+  padding: 6px;
   margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .project-history-item {
   display: flex;
   align-items: center;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-color);
+  gap: 2px;
+  min-width: 0;
+  border-radius: 8px;
+  position: relative;
+  transition: background 0.12s ease;
 }
 
-.project-history-item:last-child {
-  border-bottom: none;
+.project-history-item:hover {
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .project-history-item.active {
-  background: var(--bg-tertiary);
+  background: rgba(88, 166, 255, 0.12);
+}
+
+.project-history-item.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2px;
+  height: 56%;
+  min-height: 18px;
+  border-radius: 0 2px 2px 0;
+  background: #58a6ff;
 }
 
 .project-history-item-main {
   flex: 1;
+  min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: flex-start;
+  gap: 10px;
   text-align: left;
   background: none;
   border: none;
-  padding: 0;
+  padding: 8px 6px 8px 10px;
   cursor: pointer;
+  color: inherit;
+}
+
+.project-history-item-main:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.project-history-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  background: rgba(210, 153, 34, 0.14);
+  color: #d29922;
+}
+
+.project-history-item.active .project-history-item-icon {
+  background: rgba(88, 166, 255, 0.18);
+  color: #79c0ff;
+}
+
+.project-history-item-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.project-history-item-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .project-history-item-title {
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 12.5px;
+  font-weight: 600;
   color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.project-history-item-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(88, 166, 255, 0.18);
+  color: #79c0ff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.5;
 }
 
 .project-history-item-path {
   font-size: 11px;
-  color: var(--text-secondary);
+  color: rgba(139, 148, 158, 0.85);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.35;
 }
 
 .project-history-item-meta {
+  flex-shrink: 0;
+  margin-left: auto;
   font-size: 10px;
-  color: var(--text-tertiary);
+  color: rgba(139, 148, 158, 0.65);
+  font-variant-numeric: tabular-nums;
 }
 
 .project-history-delete {
-  margin-left: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  margin-right: 4px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(139, 148, 158, 0.55);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+
+.project-history-item:hover .project-history-delete,
+.project-history-item.active .project-history-delete,
+.project-history-delete:focus-visible {
+  opacity: 1;
+}
+
+.project-history-delete:hover {
+  background: rgba(248, 81, 73, 0.14);
+  color: #ff9a9a;
+}
+
+.project-history-clear {
+  flex-shrink: 0;
+  color: rgba(139, 148, 158, 0.85);
+}
+
+.project-history-clear:hover {
+  background: rgba(248, 81, 73, 0.1);
+  color: #ff9a9a;
 }
 
 .toolbar-error {
