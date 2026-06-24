@@ -221,7 +221,7 @@ describe("resolveAgentRunProfile", () => {
     expect(hint).toContain("系统行为、流程和规则");
   });
 
-  it("uses execute_plan for 继续 after partial progress on resume", () => {
+  it("uses execute_plan for 继续 after partial progress on implement resume", () => {
     const profile = resolveAgentResumeRunProfile(
       {
         totalTurns: 12,
@@ -237,11 +237,40 @@ describe("resolveAgentRunProfile", () => {
           { running: false, name: "grep", turn: 2, ok: true },
         ],
       },
-      "输入框支持发送图片吗？",
+      "继续改",
       "build",
+      "部分改好了，下一步 patch src/foo.ts。",
     );
     expect(profile.kind).toBe("execute_plan");
     expect(profile.targetFiles).toContain("src/foo.ts");
+  });
+
+  it("stays interactive when resuming consultative Q&A after many read-only tools", () => {
+    const profile = resolveAgentResumeRunProfile(
+      {
+        totalTurns: 8,
+        tools: [
+          {
+            running: false,
+            name: "read_file",
+            turn: 7,
+            ok: true,
+            args: { path: "src/foo/WorkOrderController.cs" },
+          },
+          { running: false, name: "grep", turn: 1, ok: true },
+        ],
+      },
+      "> Agent: PartialRefund = 1\n\n啥作用",
+      "build",
+      undefined,
+      [
+        {
+          role: "assistant",
+          content: "共有三种：NoRefund=0、PartialRefund=1、FullRefund=2",
+        },
+      ],
+    );
+    expect(profile.kind).toBe("interactive");
   });
 });
 

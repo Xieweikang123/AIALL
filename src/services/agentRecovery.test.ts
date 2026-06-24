@@ -63,6 +63,15 @@ describe("isRecoverableAgentError", () => {
     const message = buildAgentMaxTurnsExhaustedMessage(12);
     expect(isRecoverableAgentError(message)).toBe(true);
   });
+
+  it("detects transient HTTP 400 provider errors as recoverable", () => {
+    expect(
+      isRecoverableAgentError(
+        "请求失败，HTTP 400：Error from provider (Xiaomi): unexpected end of data\n上游模型网关认为本次请求参数不合法。",
+      ),
+    ).toBe(true);
+    expect(isRecoverableAgentError("请求失败，HTTP 400：invalid model name")).toBe(false);
+  });
 });
 
 describe("shouldAutoResumeAgentError", () => {
@@ -224,6 +233,35 @@ describe("buildAgentResumePrompt", () => {
     expect(prompt).not.toContain("后直接 patch_file/write_file");
     expect(prompt).toContain("手动终止会话，也会通知？");
     expect(resolveOriginalTaskFromResumePrompt(prompt)).toBe("手动终止会话，也会通知？");
+  });
+
+  it("adds behavior-purpose resume guidance for enum follow-up questions", () => {
+    const prompt = buildAgentResumePrompt(
+      {
+        tools: [
+          {
+            running: false,
+            name: "read_file",
+            summary: "读取 90 行",
+            ok: true,
+            turn: 2,
+            args: { path: "src/foo/WorkOrderController.cs" },
+          },
+        ],
+      },
+      "> Agent: PartialRefund = 1\n\n啥作用",
+      "HTTP 400",
+      {
+        history: [
+          {
+            role: "assistant",
+            content: "NoRefund=0、PartialRefund=1、FullRefund=2",
+          },
+        ],
+      },
+    );
+    expect(prompt).toContain("用途/作用类");
+    expect(prompt).toContain("禁止重复枚举定义");
   });
 });
 

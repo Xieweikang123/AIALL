@@ -2029,13 +2029,20 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       assistantMsg.agentFailureReason ||
       inferAgentRecoveryFlags(assistantMsg)?.agentFailureReason ||
       "连接中断";
-    const resumePrompt = buildAgentResumePrompt(assistantMsg, originalPrompt, failureReason);
+    const resumeHistory = chatMessages.value
+      .slice(0, assistantIdx)
+      .filter((m) => m.role === "user" || m.role === "assistant")
+      .map((m) => ({ role: m.role, content: m.content || "" }));
+    const resumePrompt = buildAgentResumePrompt(assistantMsg, originalPrompt, failureReason, {
+      history: resumeHistory,
+    });
     const mode = assistantMsg.chatMode ?? chatMode.value;
     const runProfile = resolveAgentResumeRunProfile(
       assistantMsg,
       originalPrompt,
       mode,
       findLastAssistantContent(),
+      resumeHistory,
     );
 
     const savedEndpoint = aiConfig.value.endpoint;

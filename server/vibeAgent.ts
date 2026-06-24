@@ -78,9 +78,9 @@ import {
   SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE_SOFT,
 } from "./agentExplorationBudget";
 import { buildReplyAccuracyHint } from "../src/services/agentReplyAccuracy";
-import { buildBehaviorContradictionHint, buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildBuildWriteBlockedHint, buildImplementFollowUpHint, buildImplementationStatusHint, buildLocateStatusFollowUpHint, buildSessionAuditHint, buildUiDefectBuildHint, buildWriteToolBlockedMessage, isAccuracyConsultativePrompt, isAgentStepClarificationPrompt, isBehaviorContradictionPrompt, isCodeReviewPrompt, isConsultativeUserPrompt, isImplementationStatusPrompt, isImplementFollowUpRun, isLocateStatusFollowUpPrompt, isSameIssueFollowUpRun, isSessionAuditPrompt, isUiAppearanceQuestionPrompt, isUiDefectReportPrompt, isUserErrorQuotePrompt, historySuggestsActiveImplementation, historySuggestsQuotePositionFix } from "../src/services/agentUserIntent";
+import { buildBehaviorContradictionHint, buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildBuildWriteBlockedHint, buildImplementFollowUpHint, buildImplementationStatusHint, buildLocateStatusFollowUpHint, buildSessionAuditHint, buildUiDefectBuildHint, buildWriteToolBlockedMessage, isAccuracyConsultativePrompt, isAgentStepClarificationPrompt, isBehaviorContradictionPrompt, isBehaviorPurposePrompt, isCodeReviewPrompt, isConsultativeUserPrompt, isImplementationStatusPrompt, isImplementFollowUpRun, isLocateStatusFollowUpPrompt, isSameIssueFollowUpRun, isSessionAuditPrompt, isUiAppearanceQuestionPrompt, isUiDefectReportPrompt, isUserErrorQuotePrompt, historySuggestsActiveImplementation, historySuggestsQuotePositionFix } from "../src/services/agentUserIntent";
 import { detectProjectRuntimeProfile, buildRuntimeAwarenessHint } from "./agentRuntimeHint";
-import { detectUserNegation, detectUserFailureReport, historyRecentUserFailureReport } from "../src/services/agentContinuation";
+import { detectUserNegation, detectUserFailureReport, historyRecentUserFailureReport, stripQuotedReplyPrefix } from "../src/services/agentContinuation";
 import { resolveOriginalTaskFromResumePrompt } from "../src/services/agentRecovery";
 import { buildAgentSuggestionsPromptHint } from "../src/services/agentSuggestions";
 import {
@@ -195,6 +195,11 @@ import {
   buildConsultativeAccuracyTraceRetryHint,
   shouldBlockConsultativeAccuracyFinalize,
 } from "./consultativeAccuracyTrace";
+import {
+  buildBehaviorPurposeTraceHint,
+  buildBehaviorPurposeTraceRetryHint,
+  shouldBlockBehaviorPurposeFinalize,
+} from "./consultativeBehaviorTrace";
 
 export type VibeAgentEvent =
   | {
@@ -1527,6 +1532,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     !implementFollowUpRun &&
     isBehaviorContradictionPrompt(prompt, params.history);
   const resumeOriginalTask = resolveOriginalTaskFromResumePrompt(prompt);
+  const effectiveTaskPrompt = resumeOriginalTask ?? prompt;
   const consultativeResumeRun =
     !isAsk &&
     !isPlanExplore &&
@@ -1548,6 +1554,11 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       sessionAuditRun ||
       locateStatusFollowUpRun) &&
     !implementFollowUpRun;
+  const behaviorPurposeRun =
+    !isPlanExplore &&
+    !isExecutePlan &&
+    !implementFollowUpRun &&
+    isBehaviorPurposePrompt(stripQuotedReplyPrefix(effectiveTaskPrompt.trim()), params.history);
   const accuracyConsultativeRun =
     readOnlyBuildRun && isAccuracyConsultativePrompt(resumeOriginalTask ?? prompt);
   const implementationStatusRun =
@@ -1688,13 +1699,15 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       ].join("\n")
     : isAsk
       ? buildAskSystemPrompt(projectRoot, openFilePath, openFileSnippet, model) +
-        (behaviorContradictionRun ? buildBehaviorContradictionHint() : "")
+        (behaviorContradictionRun ? buildBehaviorContradictionHint() : "") +
+        (behaviorPurposeRun ? `\n${buildBehaviorPurposeTraceHint()}` : "")
       : isExecutePlan
         ? buildSystemPrompt(projectRoot, openFilePath, model)
         : isPlanExplore
           ? buildPlanSystemPrompt(projectRoot, openFilePath, openFileSnippet, model)
           : buildSystemPrompt(projectRoot, openFilePath, model) +
             (readOnlyBuildRun ? buildConsultativeBuildHint() : "") +
+            (behaviorPurposeRun ? buildBehaviorPurposeTraceHint() : "") +
             (behaviorContradictionRun ? buildBehaviorContradictionHint() : "") +
             (codeReviewRun ? buildCodeReviewHonestyNudge(userRecentlyReportedFailure) : "") +
             (userErrorQuoteRun ? buildUserErrorQuoteHint() : "") +
@@ -1796,6 +1809,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   let pregrepUniqueFiles: string[] = [];
   let visionConsultativeLocateRetries = 0;
   let visionConsultativeAccuracyRetries = 0;
+  let behaviorPurposeRetries = 0;
+  const MAX_BEHAVIOR_PURPOSE_RETRIES = 2;
   const MAX_VISION_FIRST_TURN_RETRIES = 2;
   const MAX_VISION_CONSULTATIVE_LOCATE_RETRIES = 2;
   const MAX_VISION_CONSULTATIVE_ACCURACY_RETRIES = 2;
@@ -2777,6 +2792,46 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         continue;
       }
 
+      if (
+        behaviorPurposeRun &&
+        shouldBlockBehaviorPurposeFinalize({
+          behaviorPurpose: true,
+          consultativeReadPaths: toolGuard.consultativeReadPaths ?? [],
+          replyText: rawText,
+        }) &&
+        behaviorPurposeRetries < MAX_BEHAVIOR_PURPOSE_RETRIES
+      ) {
+        behaviorPurposeRetries += 1;
+        consultativeForceAnswerPending = false;
+        messages.push({ role: "assistant", content: rawText });
+        messages.push({
+          role: "system",
+          content: buildBehaviorPurposeTraceRetryHint(toolGuard.consultativeReadPaths ?? []),
+        });
+        onEvent({
+          type: "turn_response",
+          data: {
+            turn,
+            ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+            assistantText: userText,
+            toolCalls: [],
+            hasToolCalls: false,
+            isFinal: false,
+          },
+        });
+        onEvent({
+          type: "status",
+          data: {
+            phase: "behavior_purpose_trace_retry",
+            turn,
+            ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+            model,
+            detail: "用途/作用题须 trace 分支逻辑，已要求重试",
+          },
+        });
+        continue;
+      }
+
       onEvent({
         type: "turn_response",
         data: {
@@ -3136,7 +3191,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
             if (args.path) {
               const readPath = String(args.path);
               exploreFilesRead.add(readPath);
-              if (readOnlyBuildRun) {
+              if (readOnlyBuildRun || isAsk) {
                 if (!toolGuard.consultativeReadPaths) toolGuard.consultativeReadPaths = [];
                 if (!toolGuard.consultativeReadPaths.includes(readPath)) {
                   toolGuard.consultativeReadPaths.push(readPath);

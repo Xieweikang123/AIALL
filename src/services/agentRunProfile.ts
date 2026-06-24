@@ -11,6 +11,7 @@ import {
   stripQuotedReplyPrefix,
 } from "./agentContinuation";
 import { resolveAgentCompletedTurns, type AgentProgressSource, type AgentProgressTool } from "./agentRecovery";
+import { isConsultativeUserPrompt, type UserIntentHistoryMessage } from "./agentUserIntent";
 
 export type AgentRunKind = "interactive" | "execute_plan";
 
@@ -198,13 +199,16 @@ export function resolveAgentResumeRunProfile(
   originalPrompt: string,
   mode: "ask" | "build" | "plan",
   lastAssistantContent?: string,
+  history?: UserIntentHistoryMessage[],
 ): AgentRunProfile {
+  const strippedPrompt = stripQuotedReplyPrefix(originalPrompt.trim());
   const base = resolveAgentRunProfile({
-    prompt: originalPrompt,
+    prompt: strippedPrompt,
     mode,
     lastAssistantContent,
   });
   if (mode !== "build" && mode !== "plan") return base;
+  if (isConsultativeUserPrompt(strippedPrompt, history)) return base;
 
   const turns = resolveAgentCompletedTurns(msg);
   const completedTools = msg.tools?.filter((t) => !t.running) ?? [];

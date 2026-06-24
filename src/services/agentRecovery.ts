@@ -6,7 +6,13 @@ import {
   PARTIAL_WRITE_ABORT_HEADING,
   resolveAssistantBubbleContent,
 } from "./agentMessageDisplay";
-import { buildConsultativeResumeHint, isConsultativeUserPrompt } from "./agentUserIntent";
+import {
+  buildConsultativeResumeHint,
+  isBehaviorPurposePrompt,
+  isConsultativeUserPrompt,
+  type UserIntentHistoryMessage,
+} from "./agentUserIntent";
+import { stripQuotedReplyPrefix } from "./agentContinuation";
 import type { AgentRoundGroup } from "./agentRoundGroups";
 import { stripReferenceAttachments, stripToolSummaryFromAssistantContent } from "./vibeChatStorage";
 
@@ -176,7 +182,9 @@ export function isRecoverableAgentError(message: string): boolean {
     msg.includes("网络") ||
     /\bhttp\s*(502|503|504|408)\b/.test(msg) ||
     msg.includes("bad gateway") ||
-    msg.includes("service unavailable")
+    msg.includes("service unavailable") ||
+    (/\bhttp\s*400\b/.test(msg) &&
+      /provider|网关|unexpected|工具调用|参数不合法|模型网关/i.test(msg))
   );
 }
 
@@ -819,15 +827,18 @@ export function buildAgentResumePrompt(
   msg: AgentProgressSource,
   originalUserPrompt: string,
   errorMessage: string,
+  options?: { history?: UserIntentHistoryMessage[] },
 ): string {
   const progress = summarizeAgentProgress(msg);
-  const truncatedPrompt = originalUserPrompt.trim().length > 600
-    ? `${originalUserPrompt.trim().slice(0, 600)}\n…（原始任务已截断，请按摘要继续完成）`
-    : originalUserPrompt.trim();
-  const consultative = isConsultativeUserPrompt(originalUserPrompt);
+  const strippedOriginal = stripQuotedReplyPrefix(originalUserPrompt.trim());
+  const truncatedPrompt = strippedOriginal.length > 600
+    ? `${strippedOriginal.slice(0, 600)}\n…（原始任务已截断，请按摘要继续完成）`
+    : strippedOriginal;
+  const consultative = isConsultativeUserPrompt(strippedOriginal, options?.history);
+  const behaviorPurpose = isBehaviorPurposePrompt(strippedOriginal, options?.history);
   const header = consultative
     ? [
-        buildConsultativeResumeHint(),
+        buildConsultativeResumeHint(behaviorPurpose),
         "上次运行因连接中断而暂停。请从断点继续完成原始提问的回答，不要重复已完成的只读工具步骤。",
       ]
     : [

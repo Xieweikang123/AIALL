@@ -15,6 +15,7 @@ import {
   historySuggestsQuotePositionFix,
   isAgentStepClarificationPrompt,
   isBehaviorContradictionPrompt,
+  isBehaviorPurposePrompt,
   isCodeReviewPrompt,
   isAccuracyConsultativePrompt,
   isConsultativeUserPrompt,
@@ -187,6 +188,33 @@ describe("buildConsultativeResumeHint", () => {
     expect(hint).toContain("禁止 patch_file");
     expect(hint).toContain("上一轮的 patch");
     expect(hint).toContain("middleware");
+  });
+
+  it("requires branch logic when resuming behavior-purpose follow-ups", () => {
+    const hint = buildConsultativeResumeHint(true);
+    expect(hint).toContain("用途/作用类");
+    expect(hint).toContain("禁止重复枚举定义");
+  });
+});
+
+describe("isBehaviorPurposePrompt", () => {
+  const enumListingHistory = [
+    {
+      role: "assistant" as const,
+      content:
+        "RefundType 枚举：NoRefund=0、PartialRefund=1、FullRefund=2，用于 WorkOrder.refundType 字段。",
+    },
+  ];
+
+  it("detects short purpose follow-up after enum listing", () => {
+    expect(isBehaviorPurposePrompt("啥作用", enumListingHistory)).toBe(true);
+    expect(
+      isBehaviorPurposePrompt("> Agent: PartialRefund = 1\n> FullRefund = 2\n\n啥作用", enumListingHistory),
+    ).toBe(true);
+  });
+
+  it("detects explicit purpose markers without prior enum listing", () => {
+    expect(isBehaviorPurposePrompt("这个字段有啥用？", [])).toBe(true);
   });
 });
 

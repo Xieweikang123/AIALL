@@ -1,3 +1,5 @@
+import { stripQuotedReplyPrefix } from "./agentContinuation";
+
 /** Explicit change / implementation intent — Build may write. */
 export const IMPLEMENT_INTENT_RE =
   /(?:帮我|请|麻烦)?(?:改|修|修复|实现|添加|新增|删除|创建|优化|调整|更新|写入|落地|开发|执行|替换|重构|改成|改为|改一下|改下|写一[个份]?|做一[个份]?|fix|implement|add\b|create\b|update\b|refactor\b)/i;
@@ -20,7 +22,15 @@ const OBSERVED_BEHAVIOR_QUESTION_RE =
 
 /** Question / explanation intent without asking to change code. */
 const CONSULTATIVE_MARKERS_RE =
-  /(?:什么|为什么|为啥|如何|怎么|怎样|哪里|哪儿|是否|是不是|能不能|可不可以|能否|干嘛|干啥|啥是|是什么|有没有|对不对|什么意思|啥意思|吗[？?]?$|[？?]$)/;
+  /(?:什么|为什么|为啥|如何|怎么|怎样|哪里|哪儿|是否|是不是|能不能|可不可以|能否|干嘛|干啥|啥是|是什么|有没有|对不对|什么意思|啥意思|啥作用|什么作用|有啥用|有什么用|干嘛用|吗[？?]?$|[？?]$)/;
+
+/** User asks what a field/enum/type does in runtime (not merely what values exist). */
+const BEHAVIOR_PURPOSE_PROMPT_RE =
+  /(?:啥作用|什么作用|有啥用|有什么用|干嘛用|做啥用|何时用|什么时候用|什么情况下|啥情况下|用来干|用来做什么|什么用途|有何作用)/;
+
+/** Prior assistant listed enum/field values — user now asks purpose of subset. */
+const PRIOR_ENUM_LISTING_RE =
+  /(?:=\s*\d+|NoRefund|PartialRefund|FullRefund|枚举|共有\s*(?:三|几|\d+)\s*(?:种|个))/i;
 
 /** Resume / plan execution prompts must keep write access. */
 const AUTOMATION_PROMPT_RE = /^\s*(?:【|\[)(?:方案执行|精准修改|效率|系统自动续跑|读图完成)/;
@@ -275,6 +285,34 @@ export function isBehaviorContradictionPrompt(
   return PRIOR_NEGATIVE_BEHAVIOR_CLAIM_RE.test(lastAssistant);
 }
 
+export function isBehaviorPurposePrompt(
+  prompt: string,
+  history?: UserIntentHistoryMessage[],
+): boolean {
+  const text = stripQuotedReplyPrefix(prompt.trim());
+  if (!text) return false;
+  if (AUTOMATION_PROMPT_RE.test(text)) return false;
+  if (IMPLEMENT_INTENT_RE.test(text) && !BEHAVIOR_PURPOSE_PROMPT_RE.test(text)) return false;
+  if (BEHAVIOR_PURPOSE_PROMPT_RE.test(text)) return true;
+
+  const lastAssistant = (history ?? [])
+    .filter((m) => m.role === "assistant")
+    .slice(-1)[0]?.content;
+  if (!lastAssistant?.trim()) return false;
+  if (!PRIOR_ENUM_LISTING_RE.test(lastAssistant)) return false;
+
+  return /(?:作用|用途|干嘛|干啥|干啥用|怎么用|何时|什么时候)/.test(text) && text.length <= 120;
+}
+
+export function buildBehaviorPurposeHint(): string {
+  return [
+    "",
+    "【行为·用途/作用】用户问的是运行时用途或分支差异，不是再要枚举/字段定义列表。",
+    "grep 符号后须 read 引用处（if/switch、handler、更新/校验逻辑），说明满足何条件 → 触发何副作用。",
+    "禁止只复述枚举值；禁止「可能…作为标识」「具体使用位置需要查看」推给用户查。",
+  ].join("\n");
+}
+
 export function buildBehaviorContradictionHint(): string {
   return [
     "",
@@ -293,13 +331,17 @@ function isQuestionShapedConsultative(text: string): boolean {
   return true;
 }
 
-export function isConsultativeUserPrompt(prompt: string): boolean {
+export function isConsultativeUserPrompt(
+  prompt: string,
+  history?: UserIntentHistoryMessage[],
+): boolean {
   const text = prompt.trim();
   if (!text) return false;
   if (AUTOMATION_PROMPT_RE.test(text)) return false;
   if (isUiDefectReportPrompt(text)) return false;
   if (isAgentStepClarificationPrompt(text)) return false;
   if (isImplementationFailureReportPrompt(text)) return false;
+  if (isBehaviorPurposePrompt(text, history)) return true;
   if (isUiLocateQuestionPrompt(text) && !IMPLEMENT_INTENT_RE.test(text)) return true;
   if (SHORT_EVALUATIVE_FOLLOW_UP_RE.test(text)) return true;
   if (ACCURACY_CONSULTATIVE_RE.test(text)) return true;
@@ -323,14 +365,20 @@ export function buildConsultativeBuildHint(): string {
   ].join("\n");
 }
 
-export function buildConsultativeResumeHint(): string {
-  return [
+export function buildConsultativeResumeHint(behaviorPurpose = false): string {
+  const lines = [
     "【咨询续跑·只读】原始消息仅为提问/解释，未要求改代码。",
     "请根据下方已完成的 grep/read 证据直接回答原始问题；禁止 patch_file / write_file / delete_file。",
     "禁止宣称「上一轮的 patch 已生效/无需再改/逻辑已正确」——须基于当前磁盘代码说明结论；若曾误执行写操作，说明现状即可，勿重复 patch。",
     "若原始问题为准确度/是否类且尚未 read backend/middleware 的 prompt 构造：须补齐该层 read 后再答；禁止「基于已有信息直接回答」或反问用户要不要继续查。",
-    "相同文件区域禁止再 read_file；最多 1 次 grep 补齐遗漏。",
-  ].join("\n");
+  ];
+  if (behaviorPurpose) {
+    lines.push(
+      "原始问题为用途/作用类：须基于下方已 read 的分支逻辑作答（条件→副作用），禁止重复枚举定义或写「可能需要查看引用」。",
+    );
+  }
+  lines.push("相同文件区域禁止再 read_file；最多 1 次 grep 补齐遗漏。");
+  return lines.join("\n");
 }
 
 export function buildImplementationStatusHint(): string {
