@@ -101,7 +101,7 @@
         :msg="m"
         :is-agent-running="ctx.isAgentRunning"
         :agent-status-display="ctx.agentStatusDisplay"
-        :agent-ui-tick="ctx.isAgentRunning(m) ? ctx.agentUiTick.value : 0"
+        :agent-live-revision="ctx.isAgentRunning(m) ? ctx.agentLiveRevision.value : 0"
         :patch-assistant-msg="ctx.patchAssistantMsg"
         :schedule-persist-chat="ctx.schedulePersistChat"
         :message-display-content="ctx.messageDisplayContent"
@@ -370,7 +370,7 @@ const visibleMessages = computed(() => {
 
 function messageMemoKey(m: VibeChatMessageItem): unknown[] {
   if (ctx.isAgentRunning(m)) {
-    return [m.id, "running-lite", ctx.agentUiTick.value];
+    return [m.id, "running-lite", ctx.agentLiveRevision.value];
   }
   return [
     m.id,

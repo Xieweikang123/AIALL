@@ -65,42 +65,33 @@ import {
   type VibeChatMode,
 } from "../services/vibeAgentClient";
 import {
-  buildAgentRoundGroupViews,
   recordAgentRoundNarrative,
   recordAgentRoundRequest,
   recordAgentRoundResponse,
   recordAgentRoundStatus,
   recordAgentRoundStreamDelta,
   recordAgentRoundToolStart,
-  type AgentRoundGroupView,
 } from "../services/agentRoundGroups";
-import {
-  buildCursorAgentFeed,
-  computeExplorationStats,
-  computeLineDelta,
-  cursorActionClass,
-  formatCursorActionLabel,
-  formatExplorationSummary,
-  getRecentFeedActions,
-  getRunningFeedAction,
-  buildCursorAgentTimeline,
-  shouldUseCompactAgentFeed as shouldUseCompactAgentFeedByCount,
-  type CursorAgentTimeline,
-} from "../services/agentCursorFeed";
-import type { AgentLogLineItem } from "../types/agentLog";
+import { computeLineDelta } from "../services/agentCursorFeed";
 import type { AgentStatusData, TurnFileDiff, VibeChatMessage } from "../types/vibeChat";
 import {
   finalizeAssistantBubbleContent,
-  filterDuplicateFeedThoughts,
   hasAgentFinalAnswer,
   commitAgentFinalAnswerIfMissing,
   hasAgentRunStructure,
   appendAssistantStreamDelta,
   mergeAssistantTurnText,
   resolveAgentTimelineAnswer,
-  isAgentTimelineAnswerStreaming,
   type LiveAgentAnswerSource,
 } from "../services/agentMessageDisplay";
+import {
+  buildAgentRoundGroupViewsForMessage,
+  resolveAgentAnswerPreview,
+} from "../services/agentMessageViewModel";
+import {
+  buildCompactStatusInput,
+  buildCursorCompactLiveStatus,
+} from "../services/agentCompactStatus";
 import { parseMemoryProposalToolResult } from "../services/projectMemoryProposal";
 import { parseSkillProposalToolResult } from "../services/projectSkillProposal";
 import { isAgentSseProgressEvent } from "../services/agentSseEventHandlers";
@@ -111,14 +102,12 @@ import {
   formatToolMeta,
   genId,
   hasAgentActivity,
-  hasAgentDebugDetails,
   hasRunningTool,
   modelStepPhaseLabel,
   roundGroupSetupLabel,
   statusLogPhaseClass,
   syncRoundGroupsPatch,
 } from "../utils/vibeHelpers";
-import { createAgentActivityActions } from "./agentActivityPatch";
 import {
   createInitialLiveState,
   formatAgentLiveStatus,
@@ -222,8 +211,11 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     onSkillProposal,
   } = deps;
 
-  const activity = createAgentActivityActions(patchAssistantMsg, schedulePersistChat);
   const runManager = createAgentSessionRunManager<ChatMessage>();
+
+  function bumpLiveRevision() {
+    agentLiveRevision.value += 1;
+  }
 
   function findRunForMsg(msgOrId: ChatMessage | string) {
     const msgId = typeof msgOrId === "string" ? msgOrId : msgOrId.id;
@@ -334,6 +326,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   const autoResumeTargetId = ref("");
   const runningAssistantMsgId = ref("");
   const agentUiTick = ref(0);
+  const agentLiveRevision = ref(0);
   const stalledAssistantMsg = ref<ChatMessage | null>(null);
   const planExecutionActive = ref(false);
 
@@ -453,6 +446,14 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (agentUiTickTimer) return;
     agentUiTickTimer = setInterval(() => {
       agentUiTick.value += 1;
+      let needsLiveRefresh = false;
+      for (const run of runManager.listRuns()) {
+        if (isAgentConnectPhase(run.live.phase)) {
+          needsLiveRefresh = true;
+          break;
+        }
+      }
+      if (needsLiveRefresh) bumpLiveRevision();
       syncRunningAssistantOnUiTick();
       refreshStalledAssistantMsg();
       checkAgentStall();
@@ -533,32 +534,15 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     msg.status = statusText;
     const shouldLog = !minimizing && (options?.log ?? phase !== prevPhase);
     if (shouldLog) appendStatusLog(msg, statusText);
+    bumpLiveRevision();
   }
 
   function isAgentRunning(msg: ChatMessage): boolean {
     return Boolean(findRunForMsg(msg));
   }
 
-  function isActivityExpanded(msg: ChatMessage): boolean {
-    if (isAgentRunning(msg)) return true;
-    return msg.activityExpanded === true;
-  }
-
   function isActivityDetailed(msg: ChatMessage): boolean {
     return msg.activityDetailed === true;
-  }
-
-  function agentRoundGroupViews(msg: ChatMessage): AgentRoundGroupView[] {
-    void agentUiTick.value;
-    const live = getLiveForMsg(msg);
-    return buildAgentRoundGroupViews({
-      roundGroups: msg.roundGroups as any,
-      turnTraces: msg.turnTraces as any,
-      statusLog: msg.statusLog,
-      tools: msg.tools as any,
-      activeTurn: isAgentRunning(msg) ? (live?.turn ?? msg.agentTurn) : undefined,
-      activePhase: isAgentRunning(msg) ? live?.phase : undefined,
-    });
   }
 
   function messageDisplayContent(msg: ChatMessage): string {
@@ -589,139 +573,39 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     );
   }
 
-  function agentAnswerPreview(msg: ChatMessage): string {
-    return resolveAgentTimelineAnswer(
-      resolveLiveAgentSource(msg),
-      messageDisplayContent(msg),
-      isAgentRunning(msg),
-      hasRunningTool(msg),
-    );
-  }
-
-  function cursorAgentFeed(msg: ChatMessage) {
-    void agentUiTick.value;
+  function buildCompactStatusForMessage(msg: ChatMessage) {
     const run = findRunForMsg(msg);
-    const live = run?.live;
-    let agentDetail = live?.detail?.trim() || "";
-    const connectStartedAt = run?.connectStartedAt ?? 0;
-    if (
-      isAgentRunning(msg) &&
-      live &&
-      isAgentConnectPhase(live.phase) &&
-      connectStartedAt > 0
-    ) {
-      const elapsed = Math.max(0, Math.floor((Date.now() - connectStartedAt) / 1000));
-      const base =
-        live.detail?.trim() ||
-        (live.phase === "connecting_local" ? "连接本地服务" : "启动 Agent");
-      agentDetail = `${base} · ${elapsed}s`;
-    }
-    const bubble = agentAnswerPreview(msg);
+    const running = isAgentRunning(msg);
     const liveSource = resolveLiveAgentSource(msg);
-    const answerStreaming = isAgentTimelineAnswerStreaming(
-      liveSource,
-      isAgentRunning(msg),
-      hasRunningTool(msg),
-    );
-    const items = buildCursorAgentFeed({
-      groups: agentRoundGroupViews(msg),
-      isRunning: isAgentRunning(msg),
-      agentPhase: live?.phase,
-      agentDetail,
-      answerPreview: bubble,
-      streaming: answerStreaming,
+    const roundGroupViews = buildAgentRoundGroupViewsForMessage(msg, {
+      isRunning: running,
+      live: run?.live,
     });
-    return filterDuplicateFeedThoughts(items, bubble, {
-      suppressAllWhenBubble: isAgentRunning(msg) && answerStreaming && Boolean(bubble.trim()),
+    const answerPreview = resolveAgentAnswerPreview(msg, {
+      isRunning: running,
+      live: run?.live,
+      liveAgentSource: liveSource,
+      messageDisplayContent,
     });
-  }
-
-  function cursorAgentTimeline(msg: ChatMessage): CursorAgentTimeline {
-    const detailed = isActivityDetailed(msg);
-    return buildCursorAgentTimeline(cursorAgentFeed(msg), agentAnswerPreview(msg), {
-      keepVisible: detailed ? 8 : 6,
-      collapseAfter: detailed ? 10 : 5,
-      compactWhileRunning: isAgentRunning(msg) && detailed,
-      streaming: isAgentTimelineAnswerStreaming(
-        resolveLiveAgentSource(msg),
-        isAgentRunning(msg),
-        hasRunningTool(msg),
-      ),
+    return buildCompactStatusInput(msg, {
+      isRunning: running,
+      live: run?.live,
+      connectStartedAt: run?.connectStartedAt,
+      isActivityDetailed: isActivityDetailed(msg),
+      roundGroupViews,
+      answerPreview,
+      liveAgentSource: liveSource,
+      hasRunningTool: hasRunningTool(msg),
     });
-  }
-
-  function cursorCompactExplorationSummary(msg: ChatMessage): string {
-    const stats = computeExplorationStats((msg.tools ?? []) as any);
-    return formatExplorationSummary(stats, isAgentRunning(msg));
-  }
-
-  function cursorCompactRunningAction(msg: ChatMessage) {
-    const action = getRunningFeedAction(cursorAgentFeed(msg));
-    return action?.step ?? null;
-  }
-
-  function cursorCompactRecentActions(msg: ChatMessage) {
-    void agentUiTick.value;
-    return getRecentFeedActions(cursorAgentFeed(msg)).recent;
-  }
-
-  function compactLogItems(msg: ChatMessage): AgentLogLineItem[] {
-    void agentUiTick.value;
-    return cursorCompactRecentActions(msg).map((item) => ({
-      key: item.key,
-      label: formatCursorActionLabel(item.step),
-      state: cursorActionClass(item.step) as AgentLogLineItem["state"],
-    }));
-  }
-
-  function cursorCompactHiddenCount(msg: ChatMessage): number {
-    void agentUiTick.value;
-    return getRecentFeedActions(cursorAgentFeed(msg)).hiddenCount;
   }
 
   function cursorCompactLiveStatus(msg: ChatMessage): string | null {
-    void agentUiTick.value;
-    const run = findRunForMsg(msg);
-    const live = run?.live;
-    if (!run || !live) return null;
-    if (cursorCompactRunningAction(msg)) return null;
-    const timelineAnswer = cursorAgentTimeline(msg).answer;
-    if (timelineAnswer && (live.phase === "streaming_model" || live.phase === "planning_tools")) {
-      return null;
-    }
-
-    if (live.phase === "streaming_model" || live.phase === "planning_tools") {
-      const chars = live.streamChars ?? msg.streamChars ?? 0;
-      return chars > 0 ? `思考中 · 已生成 ${chars} 字` : "思考中…";
-    }
-
-    const parts: string[] = [];
-    const waitingModel =
-      live.phase === "waiting_model" ||
-      live.phase === "sending_request" ||
-      live.phase === "retrying_model";
-    if (live.phase === "compacting_context") parts.push("压缩上下文…");
-    else if (live.phase === "summarizing_tools") parts.push("整理工具结果…");
-    else if (live.phase === "executing_tool" || live.phase === "executing_tools") return null;
-    else if (waitingModel) parts.push("等待模型响应…");
-    else parts.push("整合信息中…");
-
-    const turn = live.turn ?? msg.agentTurn;
-    if (turn) parts.push(`第 ${turn} 轮`);
-    if (live.waitStartedAt && waitingModel) {
-      // 优先用后端心跳推送的 elapsedMs（响应式更新），兜底用本地计算
-      const elapsedMs = live.elapsedMs ?? (Date.now() - live.waitStartedAt);
-      const elapsed = Math.max(0, Math.floor(elapsedMs / 1000));
-      parts.push(`已等待 ${elapsed}s`);
-      if (elapsed > 45) parts.push("模型较慢，可取消后 @ 具体文件重试");
-    } else if (live.detail?.trim()) {
-      parts.push(live.detail.trim());
-    }
-    return parts.join(" · ");
+    void agentLiveRevision.value;
+    return buildCursorCompactLiveStatus(buildCompactStatusForMessage(msg));
   }
 
   function agentStatusDisplay(msg: ChatMessage): string {
-    void agentUiTick.value;
+    void agentLiveRevision.value;
     const compactStatus = cursorCompactLiveStatus(msg);
     if (compactStatus) return compactStatus;
 
@@ -746,7 +630,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       live.phase === "sending_request" ||
       live.phase === "retrying_model";
     if (live.waitStartedAt && waitingModel) {
-      const elapsed = Math.max(0, Math.floor((Date.now() - live.waitStartedAt) / 1000));
+      const elapsedMs = live.elapsedMs ?? (Date.now() - live.waitStartedAt);
+      const elapsed = Math.max(0, Math.floor(elapsedMs / 1000));
       if (elapsed >= 15) {
         statusText = `${statusText} · ${elapsed}s`;
       }
@@ -781,52 +666,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (turn && maxTurns) return `${turn}/${maxTurns}`;
     if (turn) return `第 ${turn} 轮`;
     return "运行中…";
-  }
-
-  function activitySummary(msg: ChatMessage): string {
-    const toolCount = msg.tools?.length ?? 0;
-    const parts: string[] = [];
-    if (msg.totalTurns) parts.push(`${msg.totalTurns} 轮`);
-    if (toolCount > 0) {
-      const failed = msg.tools?.filter((t) => !t.ok).length ?? 0;
-      parts.push(failed > 0 ? `${toolCount} 个工具（${failed} 失败）` : `${toolCount} 个工具`);
-    }
-    if (msg.turnFileDiffs && Object.keys(msg.turnFileDiffs).length) {
-      parts.push(`${Object.keys(msg.turnFileDiffs).length} 个文件变更`);
-    }
-    return parts.length ? parts.join(" · ") : "查看执行过程";
-  }
-
-  function cursorActivitySummary(msg: ChatMessage): string {
-    const actions = msg.tools?.length ?? 0;
-    const last = msg.tools?.[msg.tools.length - 1];
-    if (last && !last.running) {
-      return `展开过程 · ${actions} 步 · ${formatCursorActionLabel(last as any)}`;
-    }
-    if (actions > 0) return `展开过程 · ${actions} 步`;
-    if (msg.totalTurns) return `展开过程 · ${msg.totalTurns} 轮`;
-    return "展开过程";
-  }
-
-  function toggleActivityExpanded(msg: ChatMessage) {
-    activity.toggleActivityExpanded(msg);
-  }
-
-  function collapseAgentActivity(msg: ChatMessage) {
-    activity.collapseAgentActivity(msg);
-  }
-
-  function toggleActivityDetailed(msg: ChatMessage) {
-    activity.toggleActivityDetailed(msg);
-  }
-
-  function collapseActivityDetailed(msg: ChatMessage) {
-    activity.collapseActivityDetailed(msg);
-  }
-
-  function shouldUseCompactAgentFeed(msg: ChatMessage): boolean {
-    const stepCount = msg.tools?.length ?? 0;
-    return shouldUseCompactAgentFeedByCount(stepCount, isAgentRunning(msg), isActivityDetailed(msg));
   }
 
   function bindStatusLogScroll(el: HTMLElement | null, msgId: string) {
@@ -896,28 +735,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     const run = findRunForMsg(assistantMsg);
     const minimizing = shouldMinimizeRunUiPatch(assistantMsg);
     if (cleanDelta) {
-      const prevContent = assistantMsg.content || "";
-      assistantMsg.content = appendAssistantStreamDelta(prevContent, cleanDelta);
-      // #region agent log
-      fetch("http://127.0.0.1:7681/ingest/c6f6b2fb-2f39-4dd4-897b-699ca68db244", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "456d31" },
-        body: JSON.stringify({
-          sessionId: "456d31",
-          location: "useAgentRun.ts:flushPendingStreamDelta",
-          message: "stream delta append",
-          data: {
-            deltaLen: cleanDelta.length,
-            prevLen: prevContent.length,
-            nextLen: assistantMsg.content.length,
-            newlineCount: (assistantMsg.content.match(/\n/g) || []).length,
-            deltaPreview: cleanDelta.slice(0, 24),
-          },
-          timestamp: Date.now(),
-          hypothesisId: "H1",
-        }),
-      }).catch(() => {});
-      // #endregion
+      assistantMsg.content = appendAssistantStreamDelta(assistantMsg.content || "", cleanDelta);
     }
     if (minimizing) {
       const nextStreamChars = (assistantMsg.streamChars || run?.live.streamChars || 0) + delta.length;
@@ -931,6 +749,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         assistantMsg.agentMaxTurns ?? run?.live.maxTurns,
       );
       if (run) scheduleMinimizedRunUiPatch(run.sessionId, msgId, "light");
+      bumpLiveRevision();
       return;
     }
 
@@ -951,6 +770,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     });
     if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
     scheduleStreamScroll();
+    bumpLiveRevision();
   }
 
   /** While agent is running (all modes): batch reactive chatMessages patches. */
@@ -1015,6 +835,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (isRunVisible(pending.sessionId)) {
       scheduleStreamScroll();
     }
+    bumpLiveRevision();
   }
 
   function scheduleMinimizedRunUiPatch(
@@ -2592,6 +2413,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     autoResumeSecondsLeft,
     autoResumeTargetId,
     agentUiTick,
+    agentLiveRevision,
     chainJumpVisible,
     stalledAssistantMsg,
     formatAgentStatus,
@@ -2602,37 +2424,15 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     isAgentRunning,
     isAssistantStalled,
     hasAgentActivity,
-    isActivityExpanded,
-    isActivityDetailed,
-    agentRoundGroupViews,
     messageDisplayContent,
     resolveLiveAgentSource,
-    cursorAgentFeed,
-    cursorAgentTimeline,
-    cursorCompactExplorationSummary,
-    cursorCompactRunningAction,
-    cursorCompactRecentActions,
-    compactLogItems,
-    cursorCompactHiddenCount,
-    cursorCompactLiveStatus,
     agentStatusDisplay,
     buildAgentRunningStatusTextForMsg,
     agentRunningHint,
-    activitySummary,
-    cursorActivitySummary,
-    toggleActivityExpanded,
-    collapseAgentActivity,
-    toggleActivityDetailed,
-    collapseActivityDetailed,
-    shouldUseCompactAgentFeed,
-    hasAgentDebugDetails,
     roundGroupSetupLabel,
     modelStepPhaseLabel,
     statusLogPhaseClass,
-    bindStatusLogScroll,
-    onChainViewportScroll,
     jumpChainToLatest,
-    scrollStatusLogToBottom: scrollStatusLogToBottomInternal,
     enqueueStreamDelta,
     clearStreamDeltaBuffer,
     cancelAutoResume,

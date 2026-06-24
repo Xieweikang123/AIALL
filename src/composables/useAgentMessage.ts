@@ -1,8 +1,14 @@
 import { computed, type Ref } from "vue";
-import { cursorPlanningLabel, shouldUseCompactAgentFeed as shouldUseCompactAgentFeedByCount } from "../services/agentCursorFeed";
-import { resolveAgentTimelineAnswer, isAgentTimelineAnswerStreaming } from "../services/agentMessageDisplay";
-import { buildAgentRoundGroupViews } from "../services/agentRoundGroups";
-import { hasAgentActivity, hasAgentDebugDetails, hasRunningTool } from "../utils/vibeHelpers";
+import { shouldUseCompactAgentFeed as shouldUseCompactAgentFeedByCount } from "../services/agentCursorFeed";
+import {
+  buildAgentRoundGroupViewsForMessage,
+  buildCursorActivitySummary,
+  isAgentActivityExpanded,
+  isAgentAnswerStreaming,
+  resolveAgentAnswerPreview,
+  resolveCurrentAgentStatus,
+} from "../services/agentMessageViewModel";
+import { hasAgentActivity, hasAgentDebugDetails } from "../utils/vibeHelpers";
 import { createAgentActivityActions } from "./agentActivityPatch";
 import type { AgentMessage, UseAgentMessageOptions } from "./useAgentMessageTypes";
 
@@ -14,7 +20,7 @@ export function useAgentMessage(
 ) {
   const {
     isAgentRunning,
-    agentUiTick,
+    agentLiveRevision,
     patchAssistantMsg,
     schedulePersistChat,
     messageDisplayContent,
@@ -35,22 +41,28 @@ export function useAgentMessage(
     );
   }
 
+  function messageViewContext(m: AgentMessage) {
+    return {
+      isRunning: isAgentRunning(m),
+      liveAgentSource: liveAgentSource(m),
+      messageDisplayContent,
+    };
+  }
+
   function agentRoundGroupViews(m: AgentMessage) {
-    void agentUiTick.value;
-    const live = liveAgentSource(m);
-    return buildAgentRoundGroupViews({
-      roundGroups: m.roundGroups,
-      turnTraces: m.turnTraces,
-      statusLog: m.statusLog,
-      tools: m.tools,
-      activeTurn: isAgentRunning(m) ? live.agentTurn : undefined,
-      activePhase: isAgentRunning(m) ? live.agentPhase : undefined,
+    void agentLiveRevision.value;
+    const liveSource = liveAgentSource(m);
+    const running = isAgentRunning(m);
+    return buildAgentRoundGroupViewsForMessage(m, {
+      isRunning: running,
+      live: running
+        ? { phase: liveSource.agentPhase ?? "", turn: liveSource.agentTurn }
+        : undefined,
     });
   }
 
   function isActivityExpanded(m: AgentMessage): boolean {
-    if (isAgentRunning(m)) return true;
-    return m.activityExpanded === true;
+    return isAgentActivityExpanded(m, isAgentRunning(m));
   }
 
   function isActivityDetailed(m: AgentMessage): boolean {
@@ -63,12 +75,8 @@ export function useAgentMessage(
   }
 
   function agentAnswerPreview(m: AgentMessage): string {
-    return resolveAgentTimelineAnswer(
-      liveAgentSource(m),
-      messageDisplayContent(m),
-      isAgentRunning(m),
-      hasRunningTool(m),
-    );
+    void agentLiveRevision.value;
+    return resolveAgentAnswerPreview(m, messageViewContext(m));
   }
 
   function timelineAnswerContent(m: AgentMessage): string {
@@ -77,42 +85,25 @@ export function useAgentMessage(
   }
 
   const timelineAnswerDisplay = computed(() => {
-    void agentUiTick.value;
+    void agentLiveRevision.value;
     return timelineAnswerContent(msg.value);
   });
 
   const timelineAnswerStreamingDisplay = computed(() => {
-    void agentUiTick.value;
+    void agentLiveRevision.value;
     return timelineAnswerStreaming(msg.value);
   });
 
   function timelineAnswerStreaming(m: AgentMessage): boolean {
-    return isAgentTimelineAnswerStreaming(
-      liveAgentSource(m),
-      isAgentRunning(m),
-      hasRunningTool(m),
-    );
+    return isAgentAnswerStreaming(m, messageViewContext(m));
   }
 
   function currentAgentStatus(m: AgentMessage): string {
-    if (!isAgentRunning(m)) return "";
-    if (timelineAnswerStreaming(m)) return "";
-    if (m.status?.trim()) return m.status.trim();
-    const planning = cursorPlanningLabel(m.agentPhase, m.agentDetail);
-    if (planning) return planning;
-    return m.agentDetail?.trim() || "";
+    void agentLiveRevision.value;
+    return resolveCurrentAgentStatus(m, messageViewContext(m));
   }
 
-  function cursorActivitySummary(m: AgentMessage): string {
-    const actions = m.tools?.length ?? 0;
-    const last = m.tools?.[m.tools.length - 1];
-    if (last && !last.running) {
-      return `展开过程 · ${actions} 步 · ${last.label || last.name}`;
-    }
-    if (actions > 0) return `展开过程 · ${actions} 步`;
-    if (m.totalTurns) return `展开过程 · ${m.totalTurns} 轮`;
-    return "展开过程";
-  }
+  const cursorActivitySummary = (m: AgentMessage) => buildCursorActivitySummary(m);
 
   return {
     isFolded: computed(() => !isAgentRunning(msg.value) && !isActivityExpanded(msg.value)),

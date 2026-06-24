@@ -24,7 +24,7 @@ export interface VibeChatMessageItem {
 export interface VibeChatMessageContext {
   chatMessages: Ref<VibeChatMessageItem[]>;
   chatSending: Ref<boolean>;
-  agentUiTick: Ref<number>;
+  agentLiveRevision: Ref<number>;
   configReady: Ref<boolean>;
   projectOpened: Ref<boolean>;
   chainJumpVisible: Reactive<Record<string, boolean>>;

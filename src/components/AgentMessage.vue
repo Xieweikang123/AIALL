@@ -74,13 +74,13 @@ import type { AiOption } from "../utils/parseAiOptions";
 
 const props = defineProps<{
   msg: AgentMessage;
-  isAgentRunning: (msg: any) => boolean;
+  isAgentRunning: (msg: AgentMessage) => boolean;
   agentStatusDisplay?: (msg: AgentMessage) => string;
-  agentUiTick: number;
+  agentLiveRevision: number;
   patchAssistantMsg: (id: string, patch: Record<string, unknown>) => void;
   schedulePersistChat: () => void;
-  messageDisplayContent: (msg: any) => string;
-  resolveLiveAgentSource?: (msg: any) => import("../services/agentMessageDisplay").LiveAgentAnswerSource;
+  messageDisplayContent: (msg: AgentMessage) => string;
+  resolveLiveAgentSource?: (msg: AgentMessage) => import("../services/agentMessageDisplay").LiveAgentAnswerSource;
   showJump?: boolean;
   canExecutePlan?: boolean;
   canResume?: boolean;
@@ -113,7 +113,7 @@ const {
   computed(() => props.msg),
   {
     isAgentRunning: props.isAgentRunning,
-    agentUiTick: toRef(props, 'agentUiTick'),
+    agentLiveRevision: toRef(props, 'agentLiveRevision'),
     patchAssistantMsg: props.patchAssistantMsg,
     schedulePersistChat: props.schedulePersistChat,
     messageDisplayContent: props.messageDisplayContent,

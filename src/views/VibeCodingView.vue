@@ -384,8 +384,6 @@ import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref,
 import "../styles/vibe-coding.scss";
 import { appendStatusDetail, assistantTransientUiClearPatch, truncateDiffPreview, cleanStatusLogText, CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount, isNetworkError, fileName, genId, hasAgentProcessSteps, entryToNode, formatToolMeta, syncRoundGroupsPatch } from "../utils/vibeHelpers";
 import { debugLog } from "../utils/debugLog";
-import { debugSessionLog } from "../utils/debugSessionLog";
-import { installUiFreezeProbe } from "../utils/debugUiFreezeProbe";
 import { dismissBlockingOverlays, registerOverlayDismissDeps, scanDomBlockingOverlays } from "../utils/dismissBlockingOverlays";
 import { sessionDiag } from "../utils/sessionDiagLog";
 import ChatComposerEditor, { COMPOSER_PENDING_DRAFT_KEY } from "../components/ChatComposerEditor.vue";
@@ -742,14 +740,6 @@ function beginAgentRunSession(sessionId: string) {
   dismissBlockingOverlays("agent-run-start");
   sendingSessionIds.add(sessionId);
   syncActiveChatSending();
-  // #region agent log
-  debugSessionLog(
-    "VibeCodingView:beginAgentRunSession",
-    "chatSending started",
-    { sessionId, sendingCount: sendingSessionIds.size },
-    "H2",
-  );
-  // #endregion
 }
 
 function snapshotAgentRunSession(_sessionId: string) {
@@ -1713,7 +1703,7 @@ const agent = useAgentRun({
 });
 
 const {
-  agentUiTick,
+  agentLiveRevision,
   chainJumpVisible,
   stalledAssistantMsg,
   autoResumeSecondsLeft,
@@ -1766,7 +1756,7 @@ const totalTokenUsage = computed(() => {
     }
   }
 
-  void agentUiTick.value;
+  void agentLiveRevision.value;
   const currentRunContextChars = chatSending.value ? getActiveLiveContextChars() : 0;
 
   if (!hasTokenData && !currentRunContextChars) return "";
@@ -2867,7 +2857,7 @@ watch(
 provide(vibeChatMessageContextKey, {
   chatMessages,
   chatSending,
-  agentUiTick,
+  agentLiveRevision,
   configReady,
   projectOpened,
   chainJumpVisible,
@@ -2909,26 +2899,10 @@ provide(vibeChatMessageContextKey, {
 } as VibeChatMessageContext);
 
 function reconcileOrphanedAgentSendingState() {
-  const confirmWasOpen = confirmShow.value;
   dismissBlockingOverlays("mount-reconcile");
   hideGitFileContextMenu();
 
   const orphaned = [...sendingSessionIds].filter((sid) => !hasActiveAgentRun(sid));
-  // #region agent log
-  debugSessionLog(
-    "VibeCodingView:reconcile",
-    "mount reconcile",
-    {
-      confirmWasOpen,
-      chatSending: chatSending.value,
-      sendingCount: sendingSessionIds.size,
-      orphanedSessions: orphaned,
-      projectMemoryOpen: projectMemoryOpen.value,
-      contextMenuOpen: contextMenu.value.show,
-    },
-    "H1",
-  );
-  // #endregion
 
   if (!sendingSessionIds.size) return;
   for (const sid of orphaned) {
@@ -2948,14 +2922,6 @@ onMounted(() => {
     },
   });
   reconcileOrphanedAgentSendingState();
-  installUiFreezeProbe(() => ({
-    confirmOpen: confirmShow.value,
-    inputOpen: inputPrompt.show.value,
-    chatSending: chatSending.value,
-    contextMenuOpen: contextMenu.value.show,
-    quickSearchOpen: quickSearchOpen.value,
-    projectMemoryOpen: projectMemoryOpen.value,
-  }));
   reloadAiConfig();
   refreshProjectHistoryList();
   pendingPromptQueue.value = [];

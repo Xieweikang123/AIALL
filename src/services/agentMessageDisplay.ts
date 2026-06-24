@@ -1,7 +1,7 @@
 import type { AgentRoundGroup } from "./agentRoundGroups";
 import { recordAgentRoundResponse } from "./agentRoundGroups";
 import type { CursorFeedItem } from "./agentCursorFeed";
-import { isPrematureVisionCompletionClaim } from "../../server/visionMessage";
+import { isPrematureVisionCompletionClaim } from "../../shared/visionCompletionClaim";
 import { stripToolSummaryFromAssistantContent } from "./vibeChatStorage";
 import { stripAgentSuggestions } from "./agentSuggestions";
 import { stripTextToolCallMarkup } from "./textToolCallMarkup";
