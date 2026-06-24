@@ -38,6 +38,13 @@ export function useInputPrompt() {
     resolve(null);
   }
 
+  /** HMR / 重载后关闭可能残留的遮罩，避免全屏拦截点击。 */
+  function dismissPendingOverlay() {
+    show.value = false;
+    resolvePromise?.(null);
+    resolvePromise = null;
+  }
+
   return {
     show,
     title,
@@ -48,5 +55,6 @@ export function useInputPrompt() {
     prompt,
     onConfirm,
     onCancel,
+    dismissPendingOverlay,
   };
 }

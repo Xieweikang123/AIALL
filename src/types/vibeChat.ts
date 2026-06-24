@@ -23,6 +23,7 @@ export type VibeChatMessage = Omit<PersistedChatMessage, "tools" | "roundGroups"
   agentFailed?: boolean;
   agentRecoverable?: boolean;
   agentFailureReason?: string;
+  agentFailureDetail?: string;
   agentRecoveryDismissed?: boolean;
   agentContinueCount?: number;
   _expandedDiffs?: Record<string, boolean>;

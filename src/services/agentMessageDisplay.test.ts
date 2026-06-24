@@ -5,6 +5,7 @@ import {
   filterDuplicateFeedThoughts,
   finalizeAssistantBubbleContent,
   hasAgentFinalAnswer,
+  commitAgentFinalAnswerIfMissing,
   hasAgentRunStructure,
   hasSubstantiveAgentSummary,
   isEnglishToolNarration,
@@ -194,6 +195,30 @@ describe("resolveCompletedAgentBubbleContent", () => {
     expect(result).toContain("## 五、特殊注意事项");
     expect(result).toContain("**总结**");
     expect(result).not.toMatch(/包含…$/);
+  });
+
+  it("prefers longer streamed narrative over shorter isFinal snapshot", () => {
+    const streamed = "这是一段较长的流式输出内容，用于验证不会被更短的响应覆盖。";
+    const shortFinal = "这是一段较长的流式";
+    expect(
+      resolveCompletedAgentBubbleContent({
+        content: streamed,
+        roundGroups: [
+          {
+            turn: 1,
+            narrative: streamed,
+            modelSteps: [],
+            toolIds: [],
+            response: {
+              assistantText: shortFinal,
+              toolCalls: [],
+              hasToolCalls: false,
+              isFinal: true,
+            },
+          },
+        ],
+      }),
+    ).toBe(streamed);
   });
 });
 
@@ -503,6 +528,36 @@ describe("resolveAgentTimelineAnswer", () => {
     ).toBe(finalAnswer);
   });
 
+  it("keeps longer streamed narrative when isFinal snapshot is shorter", () => {
+    const streamed = "这是一段较长的流式输出内容，用于验证不会被更短的响应覆盖。";
+    const shortFinal = "这是一段较长的流式";
+    expect(
+      resolveAgentTimelineAnswer(
+        {
+          content: streamed,
+          agentTurn: 1,
+          roundGroups: [
+            {
+              turn: 1,
+              narrative: streamed,
+              modelSteps: [],
+              toolIds: [],
+              response: {
+                assistantText: shortFinal,
+                hasToolCalls: false,
+                isFinal: true,
+                toolCalls: [],
+              },
+            },
+          ],
+        },
+        "",
+        true,
+        false,
+      ),
+    ).toBe(streamed);
+  });
+
   it("does not mark streaming when preview is only progress fallback", () => {
     const progress = `${AGENT_PROGRESS_MARKER}\n当前假设是路由层未转发 focus。已读 src/foo.ts 与 handler。下一步 patch。`;
     expect(
@@ -574,5 +629,34 @@ describe("filterDuplicateFeedThoughts", () => {
     const items = filterDuplicateFeedThoughts([intermediate, action], bubble);
     expect(items).toHaveLength(2);
     expect(thoughtDuplicatesBubble(intermediate.text, bubble)).toBe(false);
+  });
+});
+
+describe("commitAgentFinalAnswerIfMissing", () => {
+  it("writes isFinal from substantive content when roundGroups lack a final marker", () => {
+    const msg = {
+      content: "这是最终答复正文，说明项目历史下拉背景为不透明实色。".repeat(8),
+      tools: [{ running: false, turn: 13 }],
+      roundGroups: [{ turn: 13, maxTurns: 40, modelSteps: [], toolIds: ["t1"] }],
+    };
+    expect(hasAgentFinalAnswer(msg)).toBe(false);
+    expect(commitAgentFinalAnswerIfMissing(msg, 13, 40)).toBe(true);
+    expect(hasAgentFinalAnswer(msg)).toBe(true);
+    expect(msg.roundGroups?.at(-1)?.response?.isFinal).toBe(true);
+  });
+
+  it("returns false when isFinal already exists", () => {
+    const msg = {
+      content: "ignored",
+      roundGroups: [
+        {
+          turn: 2,
+          modelSteps: [],
+          toolIds: [],
+          response: { assistantText: "done", toolCalls: [], hasToolCalls: false, isFinal: true },
+        },
+      ],
+    };
+    expect(commitAgentFinalAnswerIfMissing(msg, 2)).toBe(false);
   });
 });

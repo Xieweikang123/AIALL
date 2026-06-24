@@ -5,9 +5,12 @@ import {
   buildAskForceAnswerNudge,
   buildBuildExploreForcePatchNudge,
   buildConsultativeExploreBudgetNudge,
+  buildConsultativeDuplicateExploreNudge,
+  buildConsultativeSegmentCapNudge,
   buildExploreBudgetNudge,
   buildExploreInterimDiagnosisNudge,
   buildGrepEmptyRecoveryNudge,
+  buildGrepHitVueReadNudge,
   buildPatchAnchorForcePatchNudge,
   buildPatchFailureCompletionRetryNudge,
   buildExplorationArchiveWriteBlockedMessage,
@@ -83,6 +86,15 @@ describe("agentExplorationBudget", () => {
     expect(nudge).toContain("handler/composable");
   });
 
+  it("builds grep hit vue read nudge and consultative segment cap", () => {
+    expect(buildGrepHitVueReadNudge(["src/Foo.vue"])).toContain("grep 已定位组件文件");
+    expect(buildGrepHitVueReadNudge(["src/Foo.vue"])).toContain("<style>");
+    expect(buildConsultativeSegmentCapNudge(5, 8)).toContain("咨询只读");
+    expect(buildConsultativeSegmentCapNudge(5, 8)).toContain("下一轮再确认");
+    expect(buildConsultativeDuplicateExploreNudge()).toContain("重复执行");
+    expect(buildConsultativeDuplicateExploreNudge()).toContain("禁止再调用工具");
+  });
+
   it("treats exploration archive paths as non-productive writes", () => {
     expect(isExplorationArchivePath(".aiall/exploration/2026-test.md")).toBe(true);
     expect(isProductiveWritePath(".aiall/exploration/2026-test.md")).toBe(false);
@@ -102,5 +114,6 @@ describe("agentExplorationBudget", () => {
     expect(buildPatchFailureCompletionRetryNudge(["src/foo.ts"], [])).toContain("src/foo.ts");
     expect(buildExplorationArchiveWriteBlockedMessage()).toContain("探索笔记");
     expect(buildUiSymptomDiagnosisHint()).toContain("overflow-y:auto");
+    expect(buildUiSymptomDiagnosisHint()).toContain("padding:0");
   });
 });

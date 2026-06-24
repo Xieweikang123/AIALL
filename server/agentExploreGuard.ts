@@ -1,3 +1,5 @@
+import { sanitizeUserVisibleAssistantText as sanitizeSharedUserVisibleText } from "../src/services/agentVisibleText";
+
 /** Line range tracked per file to detect overlapping read_file windows. */
 export type ReadLineRange = { start: number; end: number };
 
@@ -136,6 +138,10 @@ export type ToolGuardContext = {
   patchRecoveryFiles?: Set<string>;
   /** Paths read during consultative read-only runs — for accuracy trace depth checks. */
   consultativeReadPaths?: string[];
+  /** Full vision-first-turn narrative — extra anchor for grep guard. */
+  visionNarrativeText?: string;
+  /** .vue files hit by grep during vision locate phase. */
+  grepHitVueFiles?: Set<string>;
 };
 
 /** Clear cached read windows so patch failure can re-read fresh content from disk. */
@@ -191,20 +197,37 @@ export function buildSearchFilesContentQueryMessage(query: string): string {
 }
 
 /** Block overly short / generic grep after vision when anchor quotes are available. */
-export function isOverlyBroadVisionGrep(pattern: string, anchorQuotes: string[]): boolean {
-  if (!anchorQuotes.length) return false;
+export function isOverlyBroadVisionGrep(
+  pattern: string,
+  anchorQuotes: string[],
+  extraAnchorText: string[] = [],
+): boolean {
+  const allSources = [
+    ...anchorQuotes,
+    ...extraAnchorText.filter((t) => t.trim().length > 0),
+  ];
+  if (!allSources.length) return false;
   const p = pattern.trim();
   if (!p) return false;
   if (STRUCTURAL_GREP_RE.test(p)) return false;
   const compact = p.replace(/\s+/g, "");
   if (compact.length >= 4) {
-    for (const quote of anchorQuotes) {
+    for (const quote of allSources) {
       if (quote.includes(p) || p.includes(quote)) return false;
       if (compact.length >= 4 && quote.includes(compact.slice(0, Math.min(compact.length, 8)))) return false;
     }
   }
   if (compact.length < 4) return true;
   if (/^[\u4e00-\u9fff|｜\s]+$/.test(p) && p.length <= 8) return true;
+  return false;
+}
+
+/** Grep probe shows pattern is already selective enough to locate a component. */
+export function isVisionGrepLowSpread(matches: Array<{ relative: string }>): boolean {
+  if (!matches.length) return false;
+  const unique = new Set(matches.map((m) => m.relative));
+  if (matches.length <= 3 && unique.size <= 2) return true;
+  if (matches.length <= 5 && unique.size === 1) return true;
   return false;
 }
 
@@ -253,11 +276,9 @@ export function checkPatchOldStringFromReads(
   ].join("");
 }
 
-const VISION_MARKER_RE = /\s*\[图已理解\]\s*/g;
-
-/** Remove internal vision-first-turn marker from user-visible assistant text. */
+/** Remove internal markers and consultative-only tails from user-visible assistant text. */
 export function sanitizeAgentUserVisibleText(text: string): string {
-  return dedupeRepeatedClauses(text.replace(VISION_MARKER_RE, "")).trim();
+  return dedupeRepeatedClauses(sanitizeSharedUserVisibleText(text));
 }
 
 function dedupeRepeatedClauses(text: string): string {

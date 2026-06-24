@@ -49,7 +49,18 @@ export const AGENT_STALL_PROGRESS_MS = 120_000;
 export const AGENT_CONNECT_STALL_MS = 45_000;
 
 /** Stuck in model-wait phase (sending_request / waiting_model / retrying_model) without response. */
-export const AGENT_MODEL_WAIT_STALL_MS = 180_000;
+export const AGENT_MODEL_WAIT_STALL_MS = 120_000;
+
+/** Align client model-wait stall with server first-byte timeout (+15s buffer). */
+export function resolveModelWaitStallMs(
+  contextChars = 0,
+  continueCount = 0,
+): number {
+  if (continueCount > 0) return AGENT_CONTINUE_MODEL_WAIT_STALL_MS;
+  const extraSeconds = Math.min(120, Math.floor(Math.max(0, contextChars) / 1500));
+  const serverAlignedMs = 60_000 + extraSeconds * 1000 + 15_000;
+  return Math.min(AGENT_MODEL_WAIT_STALL_MS, serverAlignedMs);
+}
 
 const CONNECT_PHASES = new Set(["connecting_local", "stream_connected", "connected", "reconnecting"]);
 
@@ -213,7 +224,184 @@ export type AgentRecoveryFlags = {
   agentFailed: boolean;
   agentRecoverable: boolean;
   agentFailureReason: string;
+  agentFailureDetail?: string;
 };
+
+const READ_ONLY_AGENT_TOOLS = new Set([
+  "read_file",
+  "grep",
+  "search_files",
+  "list_dir",
+  "web_search",
+  "web_extract",
+]);
+
+const CLIENT_DRAFT_MIN_CHARS = 16;
+
+export type MissingFinalAnswerKind =
+  | "client_answer_not_committed"
+  | "server_explore_no_finalize"
+  | "server_segment_cap_no_answer"
+  | "server_blocked_or_empty";
+
+export type MissingFinalAnswerDiagnosis = {
+  kind: MissingFinalAnswerKind;
+  label: string;
+  detail: string;
+};
+
+const MISSING_FINAL_ANSWER_LABELS: Record<MissingFinalAnswerKind, string> = {
+  client_answer_not_committed: "客户端未结案",
+  server_explore_no_finalize: "服务端持续探索未结案",
+  server_segment_cap_no_answer: "段内轮次上限后未结案",
+  server_blocked_or_empty: "服务端未产出最终答复",
+};
+
+function resolveAgentToolName(tool: AgentProgressTool): string {
+  if (tool.name?.trim()) return tool.name.trim();
+  const hint = `${tool.label || ""} ${tool.title || ""}`.trim();
+  if (hint.includes("读取")) return "read_file";
+  if (hint.includes("grep") || hint.includes("搜索")) return "grep";
+  if (hint.includes("列出")) return "list_dir";
+  if (hint.includes("搜索文件")) return "search_files";
+  return tool.name?.trim() || "";
+}
+
+function extractMissingFinalAnswerStatusHint(statusLog?: string[]): string | null {
+  if (!statusLog?.length) return null;
+  for (let i = statusLog.length - 1; i >= 0; i -= 1) {
+    const line = statusLog[i]?.trim() || "";
+    if (!line) continue;
+    if (line.includes("咨询只读已达段内轮次上限")) {
+      return "已达到咨询只读段内轮次上限，系统已要求输出结论，但模型未发出带 isFinal 的最终答复";
+    }
+    if (line.includes("读图后须 grep") || line.includes("须 grep/read 定位")) {
+      return "终局校验要求继续 grep/read 定位样式，但未在截止前完成结案";
+    }
+    if (line.includes("样式未闭环")) {
+      return "样式校验未通过（未 read CSS 就断言视觉效果），重试后仍未产出合格结论";
+    }
+    if (line.includes("须输出结论")) {
+      return "系统已强制要求输出结论，但未收到 isFinal 最终答复";
+    }
+  }
+  return null;
+}
+
+function summarizeExploreTools(tools: AgentProgressTool[]): string {
+  const counts = new Map<string, number>();
+  for (const tool of tools) {
+    if (tool.running) continue;
+    const name = resolveAgentToolName(tool) || "tool";
+    counts.set(name, (counts.get(name) || 0) + 1);
+  }
+  const parts = [...counts.entries()]
+    .slice(0, 4)
+    .map(([name, count]) => (count > 1 ? `${name}×${count}` : name));
+  return parts.join("、") || "只读工具";
+}
+
+/** Only `roundGroups[].response.isFinal` counts — ignore plain `content` fallback. */
+function hasStrictAgentFinalMarker(msg: AgentProgressSource): boolean {
+  return Boolean(
+    msg.roundGroups
+      ?.filter((group) => group.response?.isFinal && group.response.assistantText?.trim())
+      .at(-1)?.response?.assistantText.trim(),
+  );
+}
+
+function isAgentFailureBubbleContent(text: string): boolean {
+  const trimmed = text.trim();
+  return (
+    trimmed.startsWith("运行中断（已完成") ||
+    (trimmed.includes("可点击「恢复运行」") && trimmed.includes("运行中断"))
+  );
+}
+
+function resolveUncommittedDraftText(msg: AgentProgressSource & { content?: string }): string {
+  const direct = stripToolSummaryFromAssistantContent(msg.content?.trim() || "");
+  if (!direct || isRecoverableAgentError(direct) || isAgentFailureBubbleContent(direct)) {
+    return "";
+  }
+  return direct;
+}
+
+function hasAgentRunProgressStructure(msg: AgentProgressSource): boolean {
+  return (
+    hasAgentRunStructure(msg) ||
+    resolveAgentCompletedTurns(msg) > 0 ||
+    Boolean(msg.tools?.some((tool) => !tool.running))
+  );
+}
+
+/** Classify why an agent run ended without an `isFinal` user-visible answer. */
+export function diagnoseMissingFinalAnswer(
+  msg: AgentProgressSource & { content?: string; statusLog?: string[] },
+  options?: { doneTurns?: number },
+): MissingFinalAnswerDiagnosis {
+  const draft = resolveUncommittedDraftText(msg);
+  const hasProgressStructure = hasAgentRunProgressStructure(msg);
+  const statusHint = extractMissingFinalAnswerStatusHint(msg.statusLog);
+  const turns = options?.doneTurns ?? resolveAgentCompletedTurns(msg);
+  const completedTools = msg.tools?.filter((tool) => !tool.running) ?? [];
+  const exploreOnly =
+    completedTools.length > 0 &&
+    completedTools.every((tool) => READ_ONLY_AGENT_TOOLS.has(resolveAgentToolName(tool)));
+
+  if (hasProgressStructure && !hasStrictAgentFinalMarker(msg) && draft.length >= CLIENT_DRAFT_MIN_CHARS) {
+    return {
+      kind: "client_answer_not_committed",
+      label: MISSING_FINAL_ANSWER_LABELS.client_answer_not_committed,
+      detail: `已有约 ${draft.length} 字回复正文，但未写入 isFinal 结案标记（常见于运行中 UI 最小化未同步 turn_response）。`,
+    };
+  }
+
+  if (statusHint?.includes("段内轮次上限")) {
+    return {
+      kind: "server_segment_cap_no_answer",
+      label: MISSING_FINAL_ANSWER_LABELS.server_segment_cap_no_answer,
+      detail: statusHint,
+    };
+  }
+
+  if (exploreOnly && draft.length < CLIENT_DRAFT_MIN_CHARS) {
+    const toolSummary = summarizeExploreTools(completedTools);
+    return {
+      kind: "server_explore_no_finalize",
+      label: MISSING_FINAL_ANSWER_LABELS.server_explore_no_finalize,
+      detail: statusHint
+        ? `${statusHint}（${toolSummary}）`
+        : `模型持续只读探索（${toolSummary}），未发出带 isFinal 的最终答复。`,
+    };
+  }
+
+  return {
+    kind: "server_blocked_or_empty",
+    label: MISSING_FINAL_ANSWER_LABELS.server_blocked_or_empty,
+    detail: statusHint
+      ? statusHint
+      : draft
+        ? `仅有 ${draft.length} 字残缺正文，未收到 isFinal 结案。`
+        : `未收到用户可见正文与 isFinal 结案。`,
+  };
+}
+
+export function formatMissingFinalAnswerDetail(diagnosis: MissingFinalAnswerDiagnosis): string {
+  return `${diagnosis.label}：${diagnosis.detail}`;
+}
+
+export function applyMissingFinalAnswerDiagnosis(
+  msg: AgentProgressSource & {
+    agentFailureDetail?: string;
+    content?: string;
+    statusLog?: string[];
+  },
+  options?: { doneTurns?: number },
+): MissingFinalAnswerDiagnosis {
+  const diagnosis = diagnoseMissingFinalAnswer(msg, options);
+  msg.agentFailureDetail = formatMissingFinalAnswerDetail(diagnosis);
+  return diagnosis;
+}
 
 const AGENT_STATUS_PROGRESS_RE =
   /^(?:正在|模型(?:输出|规划|请求)|继续执行（自动续跑|自动续跑（第 \d+ 次）|任务较长)/;
@@ -332,10 +520,13 @@ export function inferAgentRecoveryFlags(msg: AgentProgressSource & {
   if (msg.agentAborted) return null;
 
   if (isIncompleteAgentRunWithoutFinalAnswer(msg)) {
+    const preserved = (msg as { agentFailureDetail?: string }).agentFailureDetail?.trim();
+    const diagnosis = diagnoseMissingFinalAnswer(msg);
     return {
       agentFailed: true,
       agentRecoverable: true,
       agentFailureReason: "运行中断（未生成最终回复）",
+      agentFailureDetail: preserved || formatMissingFinalAnswerDetail(diagnosis),
     };
   }
 
@@ -394,7 +585,8 @@ export function resolveAgentFailureBubbleContent(
   const toolCount = msg.tools?.filter((t) => !t.running).length ?? 0;
   if (turns > 0 || toolCount > 0) {
     const reason = (msg as { agentFailureReason?: string }).agentFailureReason?.trim();
-    const hint = reason ? `（原因：${reason}）` : "";
+    const hint =
+      reason && !isNoFinalAnswerReason(reason) ? `（原因：${reason}）` : "";
     return `运行中断（已完成 ${turns} 轮${toolCount > 0 ? `，${toolCount} 个工具步骤` : ""}）${hint}，可点击「恢复运行」继续。`;
   }
 
@@ -691,6 +883,9 @@ export function applyInferredAgentRecovery(
   msg.agentFailed = inferred.agentFailed;
   msg.agentRecoverable = inferred.agentRecoverable;
   msg.agentFailureReason = inferred.agentFailureReason;
+  if (inferred.agentFailureDetail) {
+    (msg as { agentFailureDetail?: string }).agentFailureDetail = inferred.agentFailureDetail;
+  }
   msg.agentRecoveryDismissed = false;
   msg.content = resolveAgentFailureBubbleContent(msg);
   msg.activityExpanded = msg.activityExpanded ?? true;
@@ -762,7 +957,10 @@ export function recoverableAgentErrorHint(
     return `Agent 运行似乎已卡住${progress}。可点击「恢复运行」从断点继续。`;
   }
   if (isNoFinalAnswerReason(reason)) {
-    return `Agent 已完成运行但未生成最终回复${progress}。可点击「恢复运行」重新生成。`;
+    const failureDetail = formatMissingFinalAnswerDetail(
+      diagnoseMissingFinalAnswer(msg, { doneTurns: turns }),
+    );
+    return `Agent 未生成最终回复${progress}。${failureDetail} 可点击「恢复运行」重新生成。`;
   }
   return `Agent 自动续跑后仍未能完成${progress}：${errorMessage.trim()}。可点击「恢复运行」重试。`;
 }

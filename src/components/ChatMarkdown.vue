@@ -26,30 +26,78 @@ const markdownRef = ref<HTMLElement | null>(null);
 const renderSource = ref(props.content);
 const streamingRenderText = ref("");
 const streamingMinHeight = ref(0);
+/** Keep last painted HTML while switching streaming → final render to avoid blank flash. */
+const cachedDisplayHtml = ref("");
+/** One paint cycle after streaming ends: still use lite path until full markdown is ready. */
+const streamingSettling = ref(false);
 const streamingThrottle = createStreamingMarkdownThrottle(undefined, (text) => {
   streamingRenderText.value = text;
 });
 
+const effectiveStreaming = computed(() => props.streaming || streamingSettling.value);
+
 function syncStreamingMinHeight() {
-  if (!props.streaming || !markdownRef.value) return;
-  const height = markdownRef.value.offsetHeight;
-  if (height > streamingMinHeight.value) {
-    streamingMinHeight.value = height;
-    return;
-  }
-  if (height > 0 && height < streamingMinHeight.value * 0.9) {
-    streamingMinHeight.value = height;
-  }
+  if (!effectiveStreaming.value || !markdownRef.value) return;
+  const prevHold = streamingMinHeight.value;
+  streamingMinHeight.value = 0;
+
+  void nextTick(() => {
+    const node = markdownRef.value;
+    if (!node || !effectiveStreaming.value) return;
+    const naturalHeight = node.offsetHeight;
+    if (naturalHeight <= 0) {
+      streamingMinHeight.value = prevHold;
+      return;
+    }
+    if (naturalHeight >= prevHold) {
+      streamingMinHeight.value = naturalHeight;
+    } else if (naturalHeight < prevHold * 0.9) {
+      streamingMinHeight.value = naturalHeight;
+    } else {
+      streamingMinHeight.value = prevHold;
+    }
+  });
+}
+
+function releaseStreamingLayoutHold() {
+  void nextTick(() => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        streamingSettling.value = false;
+        streamingMinHeight.value = 0;
+      });
+    });
+  });
 }
 
 watch(
-  () => [props.content, props.streaming] as const,
-  ([value, streaming]) => {
-    if (streaming) {
+  () => props.streaming,
+  (streaming, wasStreaming) => {
+    if (wasStreaming && !streaming) {
+      streamingSettling.value = true;
+      streamingThrottle.pushSource(props.content, false);
+      renderSource.value = props.content;
+      releaseStreamingLayoutHold();
+    }
+  },
+);
+
+watch(
+  () => props.content,
+  (value, prev) => {
+    if (!value.trim()) cachedDisplayHtml.value = "";
+    if (
+      props.streaming &&
+      prev &&
+      value.trim().length > 0 &&
+      value.trim().length < prev.trim().length * 0.85
+    ) {
+      streamingMinHeight.value = 0;
+    }
+    if (props.streaming || streamingSettling.value) {
       streamingThrottle.pushSource(value, true);
       return;
     }
-    streamingMinHeight.value = 0;
     streamingThrottle.pushSource(value, false);
     renderSource.value = value;
   },
@@ -143,7 +191,7 @@ function wrapToolSummaryBlocks(el: HTMLElement) {
 
 // Parse options from content (including during streaming once the block is complete)
 const activeSource = computed(() =>
-  props.streaming ? streamingRenderText.value : renderSource.value,
+  effectiveStreaming.value ? streamingRenderText.value : renderSource.value,
 );
 
 const parsedOptions = computed(() => {
@@ -165,10 +213,22 @@ const streamingHtml = computed(() =>
   renderMarkdownLite(stripTextToolCallMarkup(markdownContent.value)),
 );
 
-const displayHtml = computed(() => (props.streaming ? streamingHtml.value : html.value));
+const displayHtml = computed(() =>
+  effectiveStreaming.value ? streamingHtml.value : html.value,
+);
+
+watch(
+  displayHtml,
+  (value) => {
+    if (value) cachedDisplayHtml.value = value;
+  },
+  { immediate: true },
+);
+
+const safeDisplayHtml = computed(() => displayHtml.value || cachedDisplayHtml.value);
 
 const showMarkdown = computed(
-  () => Boolean(displayHtml.value) || Boolean(parsedOptions.value?.options.length),
+  () => Boolean(safeDisplayHtml.value) || Boolean(parsedOptions.value?.options.length),
 );
 
 function handleOptionSelect(option: AiOption) {
@@ -177,10 +237,10 @@ function handleOptionSelect(option: AiOption) {
 
 // After render, wrap tool summary blocks (skip while streaming for perf)
 function postProcess() {
-  if (props.streaming) return;
+  if (effectiveStreaming.value) return;
   requestAnimationFrame(() => {
     nextTick(() => {
-      if (props.streaming || !markdownRef.value) return;
+      if (effectiveStreaming.value || !markdownRef.value) return;
       wrapToolSummaryBlocks(markdownRef.value);
       renderMermaidInContainer(markdownRef.value);
     });
@@ -188,15 +248,15 @@ function postProcess() {
 }
 
 // Trigger on html change
-watch([displayHtml, () => props.streaming], () => {
-  if (props.streaming) {
+watch([displayHtml, effectiveStreaming], () => {
+  if (effectiveStreaming.value) {
     void nextTick(syncStreamingMinHeight);
     return;
   }
   postProcess();
 }, { immediate: true });
 onUpdated(() => {
-  if (props.streaming) {
+  if (effectiveStreaming.value) {
     syncStreamingMinHeight();
     return;
   }
@@ -209,10 +269,10 @@ onUpdated(() => {
     v-if="showMarkdown"
     ref="markdownRef"
     class="msg-markdown"
-    :class="{ 'msg-markdown--streaming': streaming }"
-    :style="streaming && streamingMinHeight ? { minHeight: `${streamingMinHeight}px` } : undefined"
+    :class="{ 'msg-markdown--streaming': effectiveStreaming }"
+    :style="effectiveStreaming && streamingMinHeight ? { minHeight: `${streamingMinHeight}px` } : undefined"
   >
-    <div v-if="displayHtml" v-html="displayHtml" />
+    <div v-if="safeDisplayHtml" v-html="safeDisplayHtml" />
     <AiOptionButtons
       v-if="parsedOptions?.options.length"
       :options="parsedOptions.options"

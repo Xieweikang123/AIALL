@@ -1,5 +1,6 @@
 import { ref, nextTick, reactive, type ComputedRef, type Ref } from "vue";
 import { debugLog } from "../utils/debugLog";
+import { debugSessionLog } from "../utils/debugSessionLog";
 import {
   buildAgentPromptForProfile,
   enrichAgentUserPrompt,
@@ -15,6 +16,7 @@ import {
   AGENT_SILENT_CONTINUE_MAX,
   AGENT_MODEL_WAIT_STALL_MS,
   AGENT_CONTINUE_MODEL_WAIT_STALL_MS,
+  resolveModelWaitStallMs,
   agentStallRecoveryReason,
   agentConnectStallMessage,
   buildAgentMaxTurnsExhaustedMessage,
@@ -31,6 +33,7 @@ import {
   isRecoverableAgentError,
   isIncompleteAgentRunWithoutFinalAnswer,
   applyInferredAgentRecovery,
+  applyMissingFinalAnswerDiagnosis,
   isHmrInterruptReason,
   PARTIAL_RUN_RESUME_REASON,
   recoverableAgentErrorHint,
@@ -91,6 +94,7 @@ import {
   finalizeAssistantBubbleContent,
   filterDuplicateFeedThoughts,
   hasAgentFinalAnswer,
+  commitAgentFinalAnswerIfMissing,
   hasAgentRunStructure,
   mergeAssistantTurnText,
   resolveAgentTimelineAnswer,
@@ -165,6 +169,8 @@ export type UseAgentRunDeps = {
 };
 
 const STREAM_SCROLL_THROTTLE_MS = 120;
+const MAX_TOOL_FULL_RESULT_CHARS = 4_000;
+const AGENT_EVENT_FRAME_BUDGET_MS = 12;
 
 export function useAgentRun(deps: UseAgentRunDeps) {
   const {
@@ -321,6 +327,16 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   let streamDeltaRaf: number | null = null;
   let streamScrollTimer: ReturnType<typeof setTimeout> | null = null;
   let pendingStreamDelta: { msgId: string; assistantMsg: ChatMessage; pending: string } | null = null;
+  const pendingAgentEvents: VibeAgentSseEvent[] = [];
+  let agentEventFlushRaf = 0;
+
+  function clearPendingAgentEvents() {
+    pendingAgentEvents.length = 0;
+    if (agentEventFlushRaf) {
+      cancelAnimationFrame(agentEventFlushRaf);
+      agentEventFlushRaf = 0;
+    }
+  }
 
   const statusLogScrollRefs = new Map<string, HTMLElement>();
   const chainScrollPinned = new Map<string, boolean>();
@@ -387,15 +403,28 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     }
 
     const MODEL_WAIT_PHASES = ["sending_request", "waiting_model", "retrying_model"];
-    const waitThreshold =
-      (msg.agentContinueCount ?? 0) > 0
-        ? AGENT_CONTINUE_MODEL_WAIT_STALL_MS
-        : AGENT_MODEL_WAIT_STALL_MS;
+    const waitThreshold = resolveModelWaitStallMs(
+      live.contextChars ?? 0,
+      msg.agentContinueCount ?? 0,
+    );
     if (
       MODEL_WAIT_PHASES.includes(live.phase) &&
       live.waitStartedAt &&
       Date.now() - live.waitStartedAt >= waitThreshold
     ) {
+      // #region agent log
+      debugSessionLog(
+        "useAgentRun.ts:checkAgentStall",
+        "model-wait stall triggered",
+        {
+          phase: live.phase,
+          waitMs: Date.now() - live.waitStartedAt,
+          threshold: waitThreshold,
+          contextChars: live.contextChars ?? 0,
+        },
+        "H3",
+      );
+      // #endregion
       recoverAgentRunFromStall(sessionId, msg, "模型请求长时间无响应（可能已卡住）");
       return;
     }
@@ -426,7 +455,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       agentUiTick.value += 1;
       refreshStalledAssistantMsg();
       checkAgentStall();
-    }, 1000);
+    }, 2000);
   }
 
   function stopAgentUiTick() {
@@ -440,6 +469,11 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   function getActiveRun() {
     return runManager.get(activeSessionId.value);
+  }
+
+  function hasActiveAgentRun(sessionId?: string): boolean {
+    const sid = (sessionId ?? activeSessionId.value).trim();
+    return Boolean(sid && runManager.has(sid));
   }
 
   function abortAgentConnectStall(sessionId: string, msg: ChatMessage) {
@@ -476,13 +510,16 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (!run) return;
     const prevPhase = run.live.phase;
     run.live = patchLiveFromStatusEvent(run.live, phase, extra);
+    const minimizing = shouldMinimizeRunUiPatch(msg);
     if (extra?.streamChars !== undefined) msg.streamChars = extra.streamChars;
     if (extra?.contextChars !== undefined) msg.contextChars = extra.contextChars;
     if (extra?.turn) msg.agentTurn = extra.turn;
     if (extra?.maxTurns) msg.agentMaxTurns = extra.maxTurns;
     if (extra?.model) msg.agentModel = extra.model;
+    msg.agentPhase = phase;
     const statusText = formatLiveStatus(run.live);
-    const shouldLog = options?.log ?? phase !== prevPhase;
+    msg.status = statusText;
+    const shouldLog = !minimizing && (options?.log ?? phase !== prevPhase);
     if (shouldLog) appendStatusLog(msg, statusText);
   }
 
@@ -600,7 +637,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       streaming: answerStreaming,
     });
     return filterDuplicateFeedThoughts(items, bubble, {
-      suppressAllWhenBubble: isAgentRunning(msg) && Boolean(bubble.trim()),
+      suppressAllWhenBubble: isAgentRunning(msg) && answerStreaming && Boolean(bubble.trim()),
     });
   }
 
@@ -678,7 +715,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     const turn = live.turn ?? msg.agentTurn;
     if (turn) parts.push(`第 ${turn} 轮`);
     if (live.waitStartedAt && waitingModel) {
-      const elapsed = Math.max(0, Math.floor((Date.now() - live.waitStartedAt) / 1000));
+      // 优先用后端心跳推送的 elapsedMs（响应式更新），兜底用本地计算
+      const elapsedMs = live.elapsedMs ?? (Date.now() - live.waitStartedAt);
+      const elapsed = Math.max(0, Math.floor(elapsedMs / 1000));
       parts.push(`已等待 ${elapsed}s`);
       if (elapsed > 45) parts.push("模型较慢，可取消后 @ 具体文件重试");
     } else if (live.detail?.trim()) {
@@ -911,6 +950,26 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     const delta = pendingStreamDelta.pending;
     pendingStreamDelta.pending = "";
 
+    const run = findRunForMsg(assistantMsg);
+    const minimizing = shouldMinimizeRunUiPatch(assistantMsg);
+    if (minimizing) {
+      const nextStreamChars = (assistantMsg.streamChars || run?.live.streamChars || 0) + delta.length;
+      assistantMsg.streamChars = nextStreamChars;
+      if (run) run.live.streamChars = nextStreamChars;
+      const turn = assistantMsg.agentTurn ?? run?.live.turn ?? 1;
+      assistantMsg.roundGroups = recordAgentRoundStreamDelta(
+        assistantMsg.roundGroups,
+        turn,
+        delta,
+        assistantMsg.agentMaxTurns ?? run?.live.maxTurns,
+      );
+      if (run) scheduleMinimizedRunUiPatch(run.sessionId, msgId);
+      return;
+    }
+
+    assistantMsg.streamChars = (assistantMsg.streamChars || 0) + delta.length;
+    if (run) run.live.streamChars = assistantMsg.streamChars;
+
     const turn = assistantMsg.agentTurn ?? 1;
     assistantMsg.roundGroups = recordAgentRoundStreamDelta(
       assistantMsg.roundGroups,
@@ -918,15 +977,85 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       delta,
       assistantMsg.agentMaxTurns,
     );
-    assistantMsg.streamChars = (assistantMsg.streamChars || 0) + delta.length;
-    const run = findRunForMsg(assistantMsg);
-    if (run) run.live.streamChars = assistantMsg.streamChars;
     patchAssistantMsg(msgId, {
       streamChars: assistantMsg.streamChars,
       ...syncRoundGroupsPatch(assistantMsg),
     });
     if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
     scheduleStreamScroll();
+  }
+
+  /** While agent is running (all modes): batch reactive chatMessages patches. */
+  function shouldMinimizeRunUiPatch(msg: ChatMessage): boolean {
+    return isAgentRunning(msg);
+  }
+
+  type PendingRunUiPatch = { sessionId: string; msgId: string };
+  let pendingRunUiPatch: PendingRunUiPatch | null = null;
+  let runUiPatchRaf = 0;
+
+  function buildRunUiSyncPatch(assistantMsg: ChatMessage): Partial<ChatMessage> {
+    const run = findRunForMsg(assistantMsg);
+    const live = run?.live;
+    return {
+      content: assistantMsg.content,
+      tools: assistantMsg.tools?.length ? [...assistantMsg.tools] : undefined,
+      turnTraces: assistantMsg.turnTraces?.length ? [...assistantMsg.turnTraces] : undefined,
+      statusLog: assistantMsg.statusLog?.length ? [...assistantMsg.statusLog] : undefined,
+      streamChars: live?.streamChars ?? assistantMsg.streamChars,
+      contextChars: live?.contextChars ?? assistantMsg.contextChars,
+      agentTurn: live?.turn ?? assistantMsg.agentTurn,
+      agentMaxTurns: live?.maxTurns ?? assistantMsg.agentMaxTurns,
+      agentModel: live?.model ?? assistantMsg.agentModel,
+      agentPhase: live?.phase ?? assistantMsg.agentPhase,
+      status: live ? formatLiveStatus(live) : assistantMsg.status,
+      ...syncRoundGroupsPatch(assistantMsg),
+    };
+  }
+
+  function scheduleMinimizedRunUiPatch(sessionId: string, msgId: string) {
+    pendingRunUiPatch = { sessionId, msgId };
+    if (runUiPatchRaf) return;
+    runUiPatchRaf = requestAnimationFrame(() => {
+      runUiPatchRaf = 0;
+      const pending = pendingRunUiPatch;
+      pendingRunUiPatch = null;
+      if (!pending) return;
+      const run = runManager.get(pending.sessionId);
+      if (!run) return;
+      patchAssistantMsg(pending.msgId, buildRunUiSyncPatch(run.assistantMsg), pending.sessionId);
+      if (isRunVisible(pending.sessionId)) {
+        scheduleStreamScroll();
+      }
+    });
+  }
+
+  function flushMinimizedRunUiPatch(sessionId: string, msgId: string, assistantMsg: ChatMessage) {
+    if (runUiPatchRaf) {
+      cancelAnimationFrame(runUiPatchRaf);
+      runUiPatchRaf = 0;
+    }
+    pendingRunUiPatch = null;
+    patchAssistantMsg(msgId, buildRunUiSyncPatch(assistantMsg), sessionId);
+  }
+
+  function ensureDeferredCapture(sessionId: string) {
+    const run = runManager.get(sessionId);
+    if (!run) return undefined;
+    if (!run.deferredCapture) run.deferredCapture = { tools: [] };
+    return run.deferredCapture;
+  }
+
+  function mergeDeferredCaptureIntoMsg(sessionId: string, msg: ChatMessage) {
+    const run = runManager.get(sessionId);
+    const captured = run?.deferredCapture;
+    if (!captured?.tools.length) {
+      if (run) run.deferredCapture = undefined;
+      return;
+    }
+    if (!msg.tools) msg.tools = [];
+    msg.tools.push(...captured.tools);
+    run!.deferredCapture = undefined;
   }
 
   function enqueueStreamDelta(msgId: string, assistantMsg: ChatMessage, delta: string) {
@@ -1069,6 +1198,13 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     assistantMsg.agentRecoverable = recoverable;
     assistantMsg.agentFailureReason = message;
     assistantMsg.agentRecoveryDismissed = false;
+    if (message.trim() === "运行中断（未生成最终回复）") {
+      applyMissingFinalAnswerDiagnosis(assistantMsg, {
+        doneTurns: resolveAgentCompletedTurns(assistantMsg),
+      });
+    } else {
+      assistantMsg.agentFailureDetail = undefined;
+    }
 
     const progressContent = resolveAgentFailureBubbleContent(assistantMsg);
     assistantMsg.content = progressContent;
@@ -1091,6 +1227,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       agentFailed: true,
       agentRecoverable: recoverable,
       agentFailureReason: message,
+      agentFailureDetail: assistantMsg.agentFailureDetail,
       agentRecoveryDismissed: false,
       content: assistantMsg.content,
       activityExpanded: recoverable ? true : assistantMsg.activityExpanded,
@@ -1160,13 +1297,109 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     void runAgentTurn(next, { skipUserBubble: true });
   }
 
+  function dispatchAgentEvent(
+    event: VibeAgentSseEvent,
+    assistantMsg: ChatMessage,
+    runGen: number,
+    sessionId: string,
+  ) {
+    const t0 = performance.now();
+    handleAgentEvent(event, assistantMsg, runGen, sessionId);
+    const durationMs = Math.round(performance.now() - t0);
+    if (durationMs >= 16 || event.type === "done" || event.type === "error" || event.type === "tool_end" || event.type === "turn_request") {
+      // #region agent log
+      debugSessionLog(
+        "useAgentRun:dispatchEvent",
+        "agent sse event handled",
+        {
+          type: event.type,
+          durationMs,
+          queueDepth: pendingAgentEvents.length,
+          chatSending: chatSending.value,
+        },
+        "UI2",
+      );
+      // #endregion
+    }
+  }
+
+  function flushAgentEventQueue(
+    assistantMsg: ChatMessage,
+    runGen: number,
+    sessionId: string,
+    drainAll = false,
+  ) {
+    agentEventFlushRaf = 0;
+    const deadline = drainAll ? Number.POSITIVE_INFINITY : performance.now() + AGENT_EVENT_FRAME_BUDGET_MS;
+    while (pendingAgentEvents.length && performance.now() < deadline) {
+      const next = pendingAgentEvents.shift()!;
+      dispatchAgentEvent(next, assistantMsg, runGen, sessionId);
+    }
+    if (pendingAgentEvents.length) {
+      // #region agent log
+      if (pendingAgentEvents.length >= 20) {
+        debugSessionLog(
+          "useAgentRun:eventQueue",
+          "agent event queue backlog",
+          { depth: pendingAgentEvents.length, chatSending: chatSending.value },
+          "UI2",
+        );
+      }
+      // #endregion
+      scheduleAgentEventFlush(assistantMsg, runGen, sessionId);
+    }
+  }
+
+  function scheduleAgentEventFlush(
+    assistantMsg: ChatMessage,
+    runGen: number,
+    sessionId: string,
+  ) {
+    if (agentEventFlushRaf) return;
+    agentEventFlushRaf = requestAnimationFrame(() => {
+      flushAgentEventQueue(assistantMsg, runGen, sessionId);
+    });
+  }
+
+  function enqueueAgentEvent(
+    event: VibeAgentSseEvent,
+    assistantMsg: ChatMessage,
+    runGen: number,
+    sessionId: string,
+  ) {
+    pendingAgentEvents.push(event);
+    scheduleAgentEventFlush(assistantMsg, runGen, sessionId);
+  }
+
   function handleAgentEvent(
     event: VibeAgentSseEvent,
     assistantMsg: ChatMessage,
     runGen: number,
     sessionId: string,
   ) {
-    if (!runManager.isValid(sessionId, runGen)) return;
+    if (!runManager.isValid(sessionId, runGen)) {
+      if (event.type === "done" || event.type === "error") {
+        // #region agent log
+        debugSessionLog(
+          "useAgentRun:staleTerminalEvent",
+          "dropped terminal event for stale generation",
+          {
+            type: event.type,
+            runGen,
+            currentGen: runManager.getGeneration(sessionId),
+            chatSending: chatSending.value,
+          },
+          "H4",
+        );
+        // #endregion
+        if (runManager.get(sessionId)) {
+          finishRunSession(sessionId);
+        } else if (chatSending.value) {
+          finishRunSession(sessionId);
+        }
+      }
+      return;
+    }
     const msgId = assistantMsg.id;
     const patchMsg = (patch: Partial<ChatMessage>) => patchAssistantMsg(msgId, patch, sessionId);
 
@@ -1175,11 +1408,26 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
     if (event.type === "agent_context") {
       assistantMsg.agentContext = event.data;
-      patchAssistantMsg(msgId, { agentContext: event.data });
+      if (shouldMinimizeRunUiPatch(assistantMsg)) {
+        scheduleMinimizedRunUiPatch(sessionId, msgId);
+      } else {
+        patchAssistantMsg(msgId, { agentContext: event.data });
+      }
       return;
     }
 
     if (event.type === "turn_request") {
+      if (event.data.contextChars !== undefined) {
+        assistantMsg.contextChars = event.data.contextChars;
+      }
+      if (event.data.turn) assistantMsg.agentTurn = event.data.turn;
+      if (event.data.maxTurns) assistantMsg.agentMaxTurns = event.data.maxTurns;
+      const run = runManager.get(sessionId);
+      if (run?.live) {
+        if (event.data.turn) run.live.turn = event.data.turn;
+        if (event.data.maxTurns) run.live.maxTurns = event.data.maxTurns;
+        if (event.data.contextChars !== undefined) run.live.contextChars = event.data.contextChars;
+      }
       assistantMsg.roundGroups = recordAgentRoundRequest(
         assistantMsg.roundGroups,
         event.data.turn,
@@ -1191,12 +1439,17 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         },
         event.data.maxTurns,
       );
+      if (shouldMinimizeRunUiPatch(assistantMsg)) {
+        scheduleMinimizedRunUiPatch(sessionId, msgId);
+        return;
+      }
       patchAssistantMsg(msgId, syncRoundGroupsPatch(assistantMsg));
       if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
       return;
     }
 
     if (event.type === "turn_response") {
+      if (event.data.isFinal) clearStreamDeltaBuffer();
       assistantMsg.roundGroups = recordAgentRoundResponse(
         assistantMsg.roundGroups,
         event.data.turn,
@@ -1213,6 +1466,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       );
       if (turnText && event.data.isFinal) {
         assistantMsg.content = mergeAssistantTurnText(assistantMsg.content || "", turnText);
+      }
+      if (shouldMinimizeRunUiPatch(assistantMsg)) {
+        scheduleMinimizedRunUiPatch(sessionId, msgId);
+        return;
       }
       patchAssistantMsg(msgId, {
         ...syncRoundGroupsPatch(assistantMsg),
@@ -1231,6 +1488,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         event.data.assistantText,
         event.data.maxTurns,
       );
+      if (shouldMinimizeRunUiPatch(assistantMsg)) {
+        scheduleMinimizedRunUiPatch(sessionId, msgId);
+        return;
+      }
       patchAssistantMsg(msgId, {
         turnTraces: [...assistantMsg.turnTraces],
         ...syncRoundGroupsPatch(assistantMsg),
@@ -1244,7 +1505,72 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       const run = runManager.get(sessionId);
       if (!run) return;
       const prevPhase = run.live.phase;
+      if (
+        phase !== prevPhase &&
+        ["sending_request", "waiting_model", "streaming_model", "executing_tool", "finished", "aborted"].includes(phase)
+      ) {
+        // #region agent log
+        debugSessionLog(
+          "useAgentRun.ts:statusPhase",
+          "agent status phase",
+          {
+            phase,
+            prevPhase,
+            turn: event.data.turn,
+            contextChars: event.data.contextChars,
+            detail: event.data.detail?.slice(0, 80),
+          },
+          "H6",
+        );
+        // #endregion
+      }
       setAgentStatus(sessionId, assistantMsg, phase, event.data, { log: phase !== prevPhase });
+
+      const phaseChanged = phase !== prevPhase;
+      const contextChanged =
+        event.data.contextChars !== undefined &&
+        event.data.contextChars !== assistantMsg.contextChars;
+      const streamChanged =
+        event.data.streamChars !== undefined &&
+        event.data.streamChars !== assistantMsg.streamChars;
+      const isTerminal = phase === "aborted" || phase === "finished";
+      // Heartbeat-only status (same phase, e.g.「已等待 12s」) updates run.live only;
+      // skip patching chatMessages to avoid re-rendering the whole UI every 2s.
+      if (!phaseChanged && !contextChanged && !streamChanged && !isTerminal) {
+        return;
+      }
+
+      if (shouldMinimizeRunUiPatch(assistantMsg)) {
+        if (phase === "aborted") {
+          clearStreamDeltaBuffer();
+          assistantMsg.agentAborted = true;
+          assistantMsg.agentAbortReason ||= "运行连接已中断";
+          stopAgentUiTick();
+          finishRunSession(sessionId);
+          updateAgentRunSessionStatus(sessionId, "interrupted");
+          patchAssistantMsg(msgId, {
+            agentAborted: true,
+            agentAbortReason: assistantMsg.agentAbortReason,
+            content: assistantMsg.content,
+          });
+          persistChatNow();
+          if (pendingPromptQueue.value.length) {
+            dequeuePendingPromptAndRun();
+          }
+          return;
+        }
+        const statusText = formatLiveStatus(run.live);
+        assistantMsg.roundGroups = recordAgentRoundStatus(
+          assistantMsg.roundGroups,
+          phase,
+          statusText,
+          assistantMsg.agentTurn ?? event.data.turn,
+          assistantMsg.agentMaxTurns ?? event.data.maxTurns,
+        );
+        scheduleMinimizedRunUiPatch(sessionId, msgId);
+        return;
+      }
+
       const statusText = formatLiveStatus(run.live);
       assistantMsg.roundGroups = recordAgentRoundStatus(
         assistantMsg.roundGroups,
@@ -1292,10 +1618,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     }
 
     if (event.type === "tool_start") {
-      if (!assistantMsg.tools) assistantMsg.tools = [];
       const meta = formatToolMeta(event.data.name, event.data.args);
-      const toolTurn = assistantMsg.agentTurn ?? 1;
-      assistantMsg.tools.push({
+      const toolTurn = assistantMsg.agentTurn ?? runManager.get(sessionId)?.live.turn ?? 1;
+      const toolStep = {
         id: event.data.id,
         ...meta,
         args: { ...event.data.args },
@@ -1303,7 +1628,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         ok: true,
         running: true,
         turn: toolTurn,
-      });
+      };
+      if (!assistantMsg.tools) assistantMsg.tools = [];
+      assistantMsg.tools.push(toolStep);
       assistantMsg.roundGroups = recordAgentRoundToolStart(assistantMsg.roundGroups, event.data.id, toolTurn);
       setAgentStatus(sessionId, assistantMsg, "executing_tool", {
         toolTitle: meta.title,
@@ -1311,6 +1638,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         turn: assistantMsg.agentTurn,
         maxTurns: assistantMsg.agentMaxTurns,
       });
+      if (shouldMinimizeRunUiPatch(assistantMsg)) {
+        scheduleMinimizedRunUiPatch(sessionId, msgId);
+        return;
+      }
       patchAssistantMsg(msgId, {
         tools: [...assistantMsg.tools],
         statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
@@ -1351,7 +1682,13 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         step.running = false;
         step.ok = event.data.ok;
         step.summary = event.data.summary;
-        if (event.data.result) step.fullResult = event.data.result;
+        if (event.data.result) {
+          const raw = event.data.result;
+          step.fullResult =
+            raw.length > MAX_TOOL_FULL_RESULT_CHARS
+              ? `${raw.slice(0, MAX_TOOL_FULL_RESULT_CHARS)}…`
+              : raw;
+        }
       }
       if (event.data.result) {
         const proposal = parseMemoryProposalToolResult(event.data.result);
@@ -1364,6 +1701,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         turn: assistantMsg.agentTurn,
         maxTurns: assistantMsg.agentMaxTurns,
       });
+      if (shouldMinimizeRunUiPatch(assistantMsg)) {
+        scheduleMinimizedRunUiPatch(sessionId, msgId);
+        return;
+      }
       patchAssistantMsg(msgId, {
         tools: assistantMsg.tools ? [...assistantMsg.tools] : undefined,
         statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
@@ -1385,9 +1726,11 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           model: assistantMsg.agentModel,
           streamChars: (assistantMsg.streamChars || 0) + delta.length,
         });
-        patchAssistantMsg(msgId, {
-          streamChars: assistantMsg.streamChars,
-        });
+        if (!shouldMinimizeRunUiPatch(assistantMsg)) {
+          patchAssistantMsg(msgId, {
+            streamChars: assistantMsg.streamChars,
+          });
+        }
       }
       enqueueStreamDelta(msgId, assistantMsg, delta);
       return;
@@ -1397,6 +1740,11 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       clearStreamDeltaBuffer();
       const cleanText = stripTextToolCallMarkup(stripToolSummaryFromAssistantContent(event.data.text));
       assistantMsg.content = mergeAssistantTurnText(assistantMsg.content || "", cleanText);
+      if (shouldMinimizeRunUiPatch(assistantMsg)) {
+        schedulePersistDuringRun(sessionId);
+        scheduleMinimizedRunUiPatch(sessionId, msgId);
+        return;
+      }
       patchAssistantMsg(msgId, {
         content: assistantMsg.content,
       });
@@ -1406,6 +1754,14 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     }
 
     if (event.type === "error") {
+      // #region agent log
+      debugSessionLog(
+        "useAgentRun.ts:agentError",
+        "agent error event",
+        { message: (event.data.message || "").slice(0, 120) },
+        "H3",
+      );
+      // #endregion
       if (isRunVisible(sessionId)) clearStreamDeltaBuffer();
       planExecutionActive.value = false;
       if (trySilentContinue(sessionId, assistantMsg, event.data.message)) {
@@ -1425,10 +1781,19 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     }
 
     if (event.type === "done") {
+      // #region agent log
+      debugSessionLog(
+        "useAgentRun.ts:agentDone",
+        "agent done event",
+        { turns: event.data.turns, contentLen: assistantMsg.content?.length ?? 0 },
+        "H4",
+      );
+      // #endregion
       if (isRunVisible(sessionId)) clearStreamDeltaBuffer();
       planExecutionActive.value = false;
       runManager.setAbortHandle(sessionId, null);
       clearPendingAgentRun();
+      flushMinimizedRunUiPatch(sessionId, msgId, assistantMsg);
 
       if (assistantMsg.agentFailed) {
         finishRunSession(sessionId);
@@ -1449,6 +1814,45 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
       const completedTurns = resolveCompletedTurns(event.data.turns, assistantMsg);
       const wasAborted = !!assistantMsg.agentAborted;
+
+      mergeDeferredCaptureIntoMsg(sessionId, assistantMsg);
+
+      if (assistantMsg.chatMode === "ask" && !wasAborted) {
+        assistantMsg.totalTurns = completedTurns;
+        if (projectPath.value.trim()) {
+          updateAgentRunSessionStatus(sessionId, "completed");
+        }
+        assistantMsg.writtenFiles = event.data.writtenFiles?.length ? [...event.data.writtenFiles] : undefined;
+        assistantMsg.content = applySuggestionsToAssistantContent(
+          assistantMsg,
+          finalizeAssistantBubbleContent({
+            ...assistantMsg,
+            wasAborted: false,
+            writtenFiles: assistantMsg.writtenFiles,
+            agentFailed: false,
+          }),
+        );
+        assistantMsg.activityExpanded = Boolean(assistantMsg.content?.trim());
+        stopAgentUiTick();
+        clearPendingAgentEvents();
+        finishRunSession(sessionId);
+        patchAssistantMsg(msgId, {
+          ...assistantTransientUiClearPatch(),
+          activityExpanded: assistantMsg.activityExpanded,
+          content: assistantMsg.content,
+          totalTurns: assistantMsg.totalTurns,
+          writtenFiles: assistantMsg.writtenFiles,
+        });
+        window.setTimeout(() => {
+          persistChatNow(undefined, { flushStore: true, sessionId });
+          void scrollChatToBottom();
+          onAgentRunSettled?.(assistantMsg);
+        }, 0);
+        if (pendingPromptQueue.value.length) {
+          dequeuePendingPromptAndRun();
+        }
+        return;
+      }
       
       // Update session status to completed if agent completed successfully
       if (!wasAborted && !assistantMsg.agentFailed && projectPath.value.trim()) {
@@ -1613,6 +2017,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
             : `完成（共 ${completedTurns} 轮）`,
       );
 
+      commitAgentFinalAnswerIfMissing(assistantMsg, completedTurns, assistantMsg.agentMaxTurns);
+
       if (!wasAborted && hadProgress && !hasAgentFinalAnswer(assistantMsg)) {
         handleRecoverableInterruption(sessionId, assistantMsg, "运行中断（未生成最终回复）", {
           logStatus: true,
@@ -1624,6 +2030,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           agentFailed: assistantMsg.agentFailed,
           agentRecoverable: assistantMsg.agentRecoverable,
           agentFailureReason: assistantMsg.agentFailureReason,
+          agentFailureDetail: assistantMsg.agentFailureDetail,
           agentRecoveryDismissed: assistantMsg.agentRecoveryDismissed,
           totalTurns: assistantMsg.totalTurns,
           statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
@@ -1698,6 +2105,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         agentFailed: offerPartialResume ? true : undefined,
         agentRecoverable: offerPartialResume ? true : undefined,
         agentFailureReason: offerPartialResume ? PARTIAL_RUN_RESUME_REASON : undefined,
+        agentFailureDetail: undefined,
         agentRecoveryDismissed: offerPartialResume ? false : true,
         agentContinueCount: offerPartialResume ? assistantMsg.agentContinueCount : undefined,
       });
@@ -1721,10 +2129,25 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   function interruptSessionRun(sessionId: string, options?: { logStatus?: boolean; reason?: string }) {
     debugLog(`[interrupt] interruptSessionRun sessionId=${sessionId}, reason=${options?.reason}`);
-    const run = runManager.get(sessionId);
-    if (!run) { debugLog(`[interrupt] no run found for session ${sessionId}`); return; }
     cancelAutoResume();
     clearPendingAgentRun();
+    clearPendingAgentEvents();
+
+    const run = runManager.get(sessionId);
+    if (!run) {
+      debugLog(`[interrupt] no run found for session ${sessionId}, clearing orphaned sending state`);
+      // #region agent log
+      debugSessionLog(
+        "useAgentRun.ts:interrupt",
+        "orphaned interrupt — no runManager entry",
+        { sessionId, reason: options?.reason },
+        "H2",
+      );
+      // #endregion
+      runManager.abort(sessionId);
+      finishRunSession(sessionId, true);
+      return;
+    }
     runManager.invalidate(sessionId);
 
     const running = run.assistantMsg;
@@ -1790,6 +2213,19 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (!prompt) return;
     // 如果配置尚未就绪，不恢复
     if (!configReady.value || !projectOpened.value) return;
+
+    // #region agent log
+    debugSessionLog(
+      "useAgentRun.ts:hmrResume",
+      "HMR auto-resume starting",
+      {
+        promptLen: prompt.length,
+        hasImages: Boolean((pending.request?.imageDataUrls as string[] | undefined)?.length),
+        sessionId: pending.sessionId,
+      },
+      "H5",
+    );
+    // #endregion
 
     // 恢复运行：显示提示并自动重发（用户气泡已在会话中，仅重发请求）
     chatError.value = "检测到之前因页面刷新中断的 Agent 运行，正在恢复…";
@@ -1875,6 +2311,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     assistantMsg.agentFailed = false;
     assistantMsg.agentRecoverable = false;
     assistantMsg.agentFailureReason = undefined;
+    assistantMsg.agentFailureDetail = undefined;
     assistantMsg.agentAborted = false;
     assistantMsg.agentAbortReason = undefined;
     assistantMsg.agentContinueCount = undefined;
@@ -1898,6 +2335,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       agentFailed: false,
       agentRecoverable: false,
       agentFailureReason: undefined,
+      agentFailureDetail: undefined,
       content: assistantMsg.content,
       agentAborted: false,
       agentAbortReason: undefined,
@@ -1931,7 +2369,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         openFilePath: activeFilePath.value || undefined,
         runProfile: runProfile.kind === "execute_plan" ? runProfile : undefined,
       },
-      (event) => handleAgentEvent(event, assistantMsg, runGen, sessionId),
+      (event) => enqueueAgentEvent(event, assistantMsg, runGen, sessionId),
     );
     runManager.setAbortHandle(sessionId, handle);
   }
@@ -2059,7 +2497,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           tools: [],
           roundGroups: [],
           activityExpanded: true,
-          activityDetailed: true,
+          activityDetailed: mode !== "ask",
         };
         chatMessages.value.push(assistantMsg);
         beginAssistantRunSlot(sessionId, assistantMsg, "preparing", false);
@@ -2122,7 +2560,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           tools: [],
           roundGroups: [],
           activityExpanded: true,
-          activityDetailed: true,
+          activityDetailed: mode !== "ask",
         };
         chatMessages.value.push(assistantMsg);
         beginAssistantRunSlot(
@@ -2186,7 +2624,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     });
     const handle = runVibeAgentSse(
       agentRequest,
-      (event) => handleAgentEvent(event, assistantMsg, runGen, sessionId),
+      (event) => enqueueAgentEvent(event, assistantMsg, runGen, sessionId),
     );
     runManager.setAbortHandle(sessionId, handle);
     return true;
@@ -2297,5 +2735,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     scheduleStreamScroll,
     getAgentAbortHandle: () => runManager.getActiveAbortHandle(activeSessionId.value),
     getActiveLiveContextChars,
+    hasActiveAgentRun,
   };
 }

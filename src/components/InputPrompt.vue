@@ -26,12 +26,15 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref, watch } from "vue";
+import { nextTick, onMounted, ref, watch } from "vue";
 import { ESCAPE_DISMISS_PRIORITY, registerEscapeDismiss } from "../composables/useEscapeDismiss";
 import { useInputPrompt } from "../composables/useInputPrompt";
 
 const inputState = useInputPrompt();
 registerEscapeDismiss(inputState.show, () => inputState.onCancel(), ESCAPE_DISMISS_PRIORITY.MODAL);
+onMounted(() => {
+  inputState.dismissPendingOverlay();
+});
 const inputRef = ref<HTMLInputElement | null>(null);
 const inputValue = ref("");
 
@@ -57,7 +60,7 @@ watch(
   position: fixed;
   inset: 0;
   z-index: 9999;
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(0, 0, 0, 0.75);
   display: flex;
   align-items: center;
   justify-content: center;

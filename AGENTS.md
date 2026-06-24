@@ -13,7 +13,7 @@
 | 聊天面板 | `src/components/vibe/ChatPanel.vue` |
 | 文件树 | `src/components/FileTreeNode.vue` |
 | 工具栏 | `src/components/vibe/AppToolbar.vue` |
-| 项目切换栏 | `src/components/vibe/ProjectSwitcherBar.vue` |
+| 项目切换栏 | `src/components/vibe/AppToolbar.vue`（`project-history-*` 下拉） |
 
 ## 项目结构
 
@@ -24,7 +24,7 @@
 - `src/components/vibe/EditorPanel.vue` — 编辑器
 - `src/components/vibe/ChatPanel.vue` — 聊天面板
 - `src/components/vibe/AppToolbar.vue` — 工具栏
-- `src/components/vibe/ProjectSwitcherBar.vue` — 项目切换栏
+- `src/components/vibe/AppToolbar.vue` — 工具栏（含项目历史下拉 `project-history-*`）
 - `src/components/FileTreeNode.vue` — 文件树节点
 - `src/composables/useGitPanel.ts` — Git 状态管理
 - `src/composables/useEditorPanel.ts` — 编辑器状态

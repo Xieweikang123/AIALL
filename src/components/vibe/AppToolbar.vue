@@ -12,6 +12,7 @@
     <div class="toolbar-sep" />
     <div class="toolbar-project">
       <input
+        v-if="!projectOpened"
         :value="projectPath"
         class="path-input"
         type="text"
@@ -19,8 +20,9 @@
         @input="$emit('update:projectPath', ($event.target as HTMLInputElement).value)"
         @keydown.enter="$emit('open-project-by-input')"
       />
+      <span v-else class="path-current" :title="projectPath">{{ currentFolderName }}</span>
       <button type="button" class="primary compact" :disabled="pickingFolder || loadingTree" @click="$emit('handle-open-project')">
-        {{ pickingFolder ? "选择…" : loadingTree ? "" : "打开项目" }}<span v-if="loadingTree" class="shimmer-text--fast">加载中</span>
+        {{ pickingFolder ? "选择…" : loadingTree ? "" : projectOpened ? "切换" : "打开项目" }}<span v-if="loadingTree" class="shimmer-text--fast">加载中</span>
       </button>
       <button type="button" class="icon-btn" :disabled="!projectPath.trim()" @click="$emit('refresh-tree')" title="刷新文件树">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M13.65 2.35A7.96 7.96 0 0 0 8 0a8 8 0 1 0 8 8h-2A6 6 0 1 1 8 2c1.66 0 3.14.69 4.22 1.78L9 7h7V0l-2.35 2.35Z" fill="currentColor"/></svg>
@@ -38,17 +40,24 @@
       <div ref="projectHistoryRef" class="project-history-wrap">
         <button
           type="button"
-          class="ghost small"
+          class="project-history-trigger"
+          :class="{ open: projectHistoryOpen, active: projectOpened }"
           :disabled="loadingTree || pickingFolder"
+          :title="projectPath || '最近打开的项目'"
           @click="toggleProjectHistory"
         >
-          最近项目
+          <svg class="project-history-trigger-icon" width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M2.5 4.8A1.3 1.3 0 0 1 3.8 3.5h3.2l1.2 1.3h4.5A1.3 1.3 0 0 1 14 6.1v6.4a1.3 1.3 0 0 1-1.3 1.3H3.8A1.3 1.3 0 0 1 2.5 12.5V4.8Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+          </svg>
+          <span class="project-history-trigger-label">{{ projectTriggerLabel }}</span>
+          <span v-if="projectHistoryList.length > 1" class="project-history-badge">{{ projectHistoryList.length }}</span>
+          <span class="project-history-chevron" aria-hidden="true">{{ projectHistoryOpen ? "▴" : "▾" }}</span>
         </button>
         <div v-if="projectHistoryOpen" class="project-history-dropdown">
           <div class="project-history-head">
             <div>
-              <h3 class="project-history-title">最近打开的项目</h3>
-              <p class="project-history-desc">点击可快速重新打开</p>
+              <h3 class="project-history-title">{{ projectHistoryList.length > 1 ? "切换项目" : "最近打开的项目" }}</h3>
+              <p class="project-history-desc">点击切换，或从历史中移除</p>
             </div>
             <button
               v-if="projectHistoryList.length"
@@ -87,6 +96,16 @@
               </button>
             </li>
           </ul>
+          <div class="project-history-footer">
+            <button
+              type="button"
+              class="project-history-open-new"
+              :disabled="loadingTree || pickingFolder"
+              @click="openNewProject"
+            >
+              打开新项目
+            </button>
+          </div>
         </div>
       </div>
       <div class="toolbar-sep" />
@@ -116,7 +135,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from "vue";
+import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
 import { useRouter } from "vue-router";
 import {
   listProjectHistory,
@@ -152,6 +171,20 @@ const projectHistoryOpen = ref(false);
 const projectHistoryList = ref<ProjectHistoryEntry[]>([]);
 const projectHistoryRef = ref<HTMLElement | null>(null);
 
+const currentFolderName = computed(() => {
+  const current = projectHistoryList.value.find((item) => isCurrentProject(item.path));
+  if (current) return current.displayName;
+  const trimmed = props.projectPath.trim();
+  if (!trimmed) return "未选择项目";
+  const parts = trimmed.replace(/\\/g, "/").split("/");
+  return parts[parts.length - 1] || trimmed;
+});
+
+const projectTriggerLabel = computed(() => {
+  if (props.projectOpened && props.projectPath.trim()) return currentFolderName.value;
+  return "最近项目";
+});
+
 function isCurrentProject(path: string): boolean {
   const current = props.projectPath.trim();
   if (!current || !path.trim()) return false;
@@ -178,12 +211,25 @@ function handleOutsideClick(e: MouseEvent) {
 }
 
 onMounted(() => {
+  refreshProjectHistoryList();
   document.addEventListener("mousedown", handleOutsideClick, true);
 });
+
+watch(
+  () => props.projectPath,
+  () => {
+    refreshProjectHistoryList();
+  },
+);
 
 onBeforeUnmount(() => {
   document.removeEventListener("mousedown", handleOutsideClick, true);
 });
+
+function openNewProject() {
+  closeProjectHistory();
+  emit("handle-open-project");
+}
 
 function openRecentProject(path: string) {
   closeProjectHistory();
@@ -350,6 +396,111 @@ function formatSessionTime(iso: string): string {
 
 .project-history-wrap {
   position: relative;
+}
+
+.project-history-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 180px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.project-history-trigger:hover:not(:disabled),
+.project-history-trigger.open {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.project-history-trigger.active {
+  border-color: rgba(31, 111, 235, 0.28);
+  background: rgba(31, 111, 235, 0.1);
+}
+
+.project-history-trigger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.project-history-trigger-icon {
+  flex-shrink: 0;
+  opacity: 0.75;
+}
+
+.project-history-trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  font-weight: 500;
+}
+
+.project-history-badge {
+  flex-shrink: 0;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.project-history-chevron {
+  flex-shrink: 0;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.path-current {
+  flex: 1;
+  min-width: 0;
+  max-width: 220px;
+  padding: 0 10px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.72);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-history-footer {
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--border-color);
+}
+
+.project-history-open-new {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.project-history-open-new:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.28);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.project-history-open-new:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .project-history-dropdown {

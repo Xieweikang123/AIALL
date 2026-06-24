@@ -370,22 +370,7 @@ const visibleMessages = computed(() => {
 
 function messageMemoKey(m: VibeChatMessageItem): unknown[] {
   if (ctx.isAgentRunning(m)) {
-    const activeNarrative =
-      m.roundGroups?.find((g) => g.turn === m.agentTurn)?.narrative ??
-      m.roundGroups?.filter((g) => g.turn > 0).at(-1)?.narrative ??
-      "";
-    return [
-      m.id,
-      "running",
-      m.agentTurn ?? 0,
-      m.content?.length ?? 0,
-      m.streamChars ?? 0,
-      activeNarrative.length,
-      m.streaming,
-      m.status,
-      m.agentPhase,
-      m.tools?.length ?? 0,
-    ];
+    return [m.id, "running-lite", ctx.agentUiTick.value];
   }
   return [
     m.id,

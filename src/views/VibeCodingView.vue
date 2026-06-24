@@ -17,16 +17,6 @@
       @test-notification="testNotification"
     />
 
-    <ProjectSwitcherBar
-      :project-list="projectHistoryList"
-      :current-path="projectPath"
-      :loading-tree="loadingTree"
-      :picking-folder="pickingFolder"
-      @switch-project="openProjectByPath"
-      @remove-project="removeRecentProject"
-      @open-new-project="handleOpenProject"
-    />
-
     <main ref="workspaceRef" class="workspace" :class="{ 'no-project': !projectOpened, 'editor-collapsed': editorCollapsed }">
       <VibeWorkspaceWelcome
         :show="!projectOpened && !loadingTree"
@@ -394,13 +384,15 @@ import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref,
 import "../styles/vibe-coding.scss";
 import { appendStatusDetail, assistantTransientUiClearPatch, truncateDiffPreview, cleanStatusLogText, CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount, isNetworkError, fileName, genId, hasAgentProcessSteps, entryToNode, formatToolMeta, syncRoundGroupsPatch } from "../utils/vibeHelpers";
 import { debugLog } from "../utils/debugLog";
+import { debugSessionLog } from "../utils/debugSessionLog";
+import { installUiFreezeProbe } from "../utils/debugUiFreezeProbe";
+import { dismissBlockingOverlays, registerOverlayDismissDeps, scanDomBlockingOverlays } from "../utils/dismissBlockingOverlays";
 import { sessionDiag } from "../utils/sessionDiagLog";
 import ChatComposerEditor, { COMPOSER_PENDING_DRAFT_KEY } from "../components/ChatComposerEditor.vue";
 import ConfirmPopup from "../components/ConfirmPopup.vue";
 import InputPrompt from "../components/InputPrompt.vue";
 import FileTreeNode, { type TreeNode } from "../components/FileTreeNode.vue";
 import AppToolbar from "../components/vibe/AppToolbar.vue";
-import ProjectSwitcherBar from "../components/vibe/ProjectSwitcherBar.vue";
 import FilePanel from "../components/vibe/FilePanel.vue";
 import GitPanel from "../components/vibe/GitPanel.vue";
 import EditorPanel from "../components/vibe/EditorPanel.vue";
@@ -534,7 +526,7 @@ import {
   type FileChangeEvent,
 } from "../services/fileWatcherClient";
 
-const { confirm } = useConfirm();
+const { confirm, dismissPendingOverlay: dismissPendingConfirm, show: confirmShow } = useConfirm();
 const inputPrompt = useInputPrompt();
 
 const git = useGitPanel(
@@ -607,6 +599,7 @@ function normalizeChatMessages(
         normalized.agentFailed = inferred.agentFailed;
         normalized.agentRecoverable = inferred.agentRecoverable;
         normalized.agentFailureReason = inferred.agentFailureReason;
+        normalized.agentFailureDetail = inferred.agentFailureDetail;
         normalized.agentRecoveryDismissed = false;
         normalized.content = resolveAgentFailureBubbleContent(normalized);
         normalized.activityExpanded = normalized.activityExpanded || true;
@@ -749,8 +742,17 @@ function syncActiveChatSending() {
 
 function beginAgentRunSession(sessionId: string) {
   if (!sessionId) return;
+  dismissBlockingOverlays("agent-run-start");
   sendingSessionIds.add(sessionId);
   syncActiveChatSending();
+  // #region agent log
+  debugSessionLog(
+    "VibeCodingView:beginAgentRunSession",
+    "chatSending started",
+    { sessionId, sendingCount: sendingSessionIds.size },
+    "H2",
+  );
+  // #endregion
 }
 
 function snapshotAgentRunSession(_sessionId: string) {
@@ -806,6 +808,9 @@ function endAgentRunSession(sessionId?: string, silent = false) {
   if (!sid) return;
   sendingSessionIds.delete(sid);
   syncActiveChatSending();
+  if (!sendingSessionIds.size) {
+    dismissBlockingOverlays("agent-run-end");
+  }
   if (!silent) notifyAgentDoneIfNeeded(sid);
 }
 
@@ -1454,6 +1459,22 @@ registerEscapeDismiss(
   ESCAPE_DISMISS_PRIORITY.TOKEN_DETAIL,
 );
 registerEscapeDismiss(showQuoteButton, hideQuoteButtonNow, ESCAPE_DISMISS_PRIORITY.QUOTE_BUTTON);
+registerEscapeDismiss(
+  () => chatSending.value,
+  () => stopAgent(),
+  ESCAPE_DISMISS_PRIORITY.AGENT_RUN,
+);
+registerEscapeDismiss(
+  () =>
+    scanDomBlockingOverlays().length > 0 ||
+    confirmShow.value ||
+    inputPrompt.show.value ||
+    quickSearchOpen.value ||
+    contextMenu.value.show ||
+    projectMemoryOpen.value,
+  () => dismissBlockingOverlays("escape"),
+  ESCAPE_DISMISS_PRIORITY.MODAL + 5,
+);
 // 滚动时隐藏引用按钮，避免 fixed 定位与选区脱节
 onMounted(() => {
   nextTick(() => {
@@ -1734,6 +1755,7 @@ const {
   getActiveLiveContextChars,
   maybeAutoResumeLastRecoverableAssistant,
   stopAgentUiTick,
+  hasActiveAgentRun,
 } = agent;
 
 const totalTokenUsage = computed(() => {
@@ -2778,6 +2800,7 @@ async function sendChat() {
 }
 
 function onWindowFocus() {
+  dismissBlockingOverlays("window-focus");
   reloadAiConfig();
 }
 
@@ -2895,7 +2918,54 @@ provide(vibeChatMessageContextKey, {
   planExecutionActive,
 } as VibeChatMessageContext);
 
+function reconcileOrphanedAgentSendingState() {
+  const confirmWasOpen = confirmShow.value;
+  dismissBlockingOverlays("mount-reconcile");
+  hideGitFileContextMenu();
+
+  const orphaned = [...sendingSessionIds].filter((sid) => !hasActiveAgentRun(sid));
+  // #region agent log
+  debugSessionLog(
+    "VibeCodingView:reconcile",
+    "mount reconcile",
+    {
+      confirmWasOpen,
+      chatSending: chatSending.value,
+      sendingCount: sendingSessionIds.size,
+      orphanedSessions: orphaned,
+      projectMemoryOpen: projectMemoryOpen.value,
+      contextMenuOpen: contextMenu.value.show,
+    },
+    "H1",
+  );
+  // #endregion
+
+  if (!sendingSessionIds.size) return;
+  for (const sid of orphaned) {
+    endAgentRunSession(sid, true);
+  }
+}
+
 onMounted(() => {
+  registerOverlayDismissDeps({
+    dismissConfirm: dismissPendingConfirm,
+    dismissInput: () => inputPrompt.dismissPendingOverlay(),
+    hideContextMenu,
+    hideGitFileContextMenu,
+    closeProjectMemory: closeProjectMemoryEditor,
+    closeQuickSearch: () => {
+      quickSearchOpen.value = false;
+    },
+  });
+  reconcileOrphanedAgentSendingState();
+  installUiFreezeProbe(() => ({
+    confirmOpen: confirmShow.value,
+    inputOpen: inputPrompt.show.value,
+    chatSending: chatSending.value,
+    contextMenuOpen: contextMenu.value.show,
+    quickSearchOpen: quickSearchOpen.value,
+    projectMemoryOpen: projectMemoryOpen.value,
+  }));
   reloadAiConfig();
   refreshProjectHistoryList();
   pendingPromptQueue.value = [];

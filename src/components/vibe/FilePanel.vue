@@ -45,20 +45,6 @@
             会话
           </button>
         </div>
-        <div v-if="projectOpened && gitPanelMode === 'files'" class="file-toolbar">
-          <button type="button" class="icon-btn" title="新建文件" @click="$emit('create-new-file')">+</button>
-          <button type="button" class="icon-btn" title="新建文件夹" @click="$emit('create-new-folder')">📁</button>
-          <span v-if="editorCollapsed" class="toolbar-sep" />
-          <button
-            v-if="editorCollapsed"
-            type="button"
-            class="icon-btn"
-            title="展开编辑器"
-            @click="$emit('expand-editor')"
-          >
-            ◧
-          </button>
-        </div>
       </div>
       <div v-if="gitPanelMode === 'files'" class="file-panel-row file-panel-search-row">
         <button
@@ -68,9 +54,41 @@
           title="搜索文件、代码与会话 (Ctrl+P)"
           @click="$emit('open-quick-search')"
         >
-          <span class="quick-search-trigger-label">⌕ 快速搜索</span>
+          <span class="quick-search-trigger-label">
+            <svg class="quick-search-icon" width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle cx="7" cy="7" r="4.2" stroke="currentColor" stroke-width="1.3"/>
+              <path d="M10.2 10.2 13.5 13.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+            </svg>
+            快速搜索
+          </span>
           <kbd class="quick-search-kbd">Ctrl+P</kbd>
         </button>
+        <div v-if="projectOpened" class="file-toolbar">
+          <button type="button" class="file-toolbar-btn" title="新建文件" @click="$emit('create-new-file')">
+            <svg class="file-toolbar-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+            </svg>
+          </button>
+          <button type="button" class="file-toolbar-btn" title="新建文件夹" @click="$emit('create-new-folder')">
+            <svg class="file-toolbar-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M2.5 4.8A1.3 1.3 0 0 1 3.8 3.5h3.2l1.2 1.3h4.5A1.3 1.3 0 0 1 14 6.1v6.4a1.3 1.3 0 0 1-1.3 1.3H3.8A1.3 1.3 0 0 1 2.5 12.5V4.8Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
+            </svg>
+          </button>
+          <template v-if="editorCollapsed">
+            <span class="toolbar-sep" />
+            <button
+              type="button"
+              class="file-toolbar-btn"
+              title="展开编辑器"
+              @click="$emit('expand-editor')"
+            >
+              <svg class="file-toolbar-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <rect x="2.5" y="3.5" width="11" height="9" rx="1.2" stroke="currentColor" stroke-width="1.2" />
+                <path d="M6 3.5V12.5" stroke="currentColor" stroke-width="1.2" />
+              </svg>
+            </button>
+          </template>
+        </div>
       </div>
     </div>
 
@@ -83,17 +101,24 @@
 
       <!-- 会话管理面板 -->
       <div v-if="gitPanelMode === 'sessions'" class="sessions-panel">
-        <div class="sessions-toolbar">
+        <div class="sessions-header">
           <button
             type="button"
-            class="session-action-btn-glass"
+            class="sessions-new-btn"
             title="新会话"
             @click="$emit('start-new-session')"
           >
-            <span class="session-action-icon">+</span>
-            <span class="session-action-label">新建</span>
+            <span class="sessions-new-icon" aria-hidden="true">+</span>
+            新建会话
           </button>
-
+          <input
+            v-if="sessionList.length > 6"
+            v-model="sessionSearchQuery"
+            class="sessions-search"
+            type="search"
+            placeholder="搜索会话…"
+            aria-label="搜索会话"
+          />
         </div>
         <p v-if="chatStoreSyncMessage" class="sessions-sync-hint" role="status" aria-live="polite">
           {{ chatStoreSyncMessage }}
@@ -103,8 +128,11 @@
           <p class="panel-empty-title">当前项目还没有会话记录</p>
           <p class="panel-empty-hint">开始对话后，会话会显示在这里</p>
         </div>
+        <div v-else-if="!filteredGroupedSessions.length" class="sessions-search-empty">
+          没有匹配的会话
+        </div>
         <ul v-else class="sessions-list">
-          <template v-for="group in groupedSessions" :key="group.label">
+          <template v-for="group in filteredGroupedSessions" :key="group.label">
             <li class="session-group-header">
               <span class="session-group-label">{{ group.label }}</span>
               <span class="session-group-count">{{ group.items.length }}</span>
@@ -116,19 +144,20 @@
               :class="{ active: s.id === activeSessionId, 'session-item--syncing': sessionSendingIds.includes(s.id) || s.status === 'active' }"
             >
               <button type="button" class="session-item-main" :title="s.title" @click="$emit('switch-session', s.id)">
-                <span class="session-item-title">
-                  <span v-if="s.status === 'completed' && !sessionSendingIds.includes(s.id)" class="session-item-completed" title="已完成">✓</span>
-                  <span v-else-if="s.status === 'failed' && !sessionSendingIds.includes(s.id)" class="session-item-failed" title="失败">✗</span>
-                  <span v-else-if="s.status === 'interrupted' && !sessionSendingIds.includes(s.id)" class="session-item-interrupted" title="已中断">⚠</span>
-                  <span v-else-if="sessionSendingIds.includes(s.id)" class="session-item-sending" title="运行中"><span class="session-spinner" /></span>
+                <span class="session-item-title-row">
+                  <span class="session-item-status" aria-hidden="true">
+                    <span v-if="s.status === 'completed' && !sessionSendingIds.includes(s.id)" class="session-item-completed" title="已完成">✓</span>
+                    <span v-else-if="s.status === 'failed' && !sessionSendingIds.includes(s.id)" class="session-item-failed" title="失败">✗</span>
+                    <span v-else-if="s.status === 'interrupted' && !sessionSendingIds.includes(s.id)" class="session-item-interrupted" title="已中断">⚠</span>
+                    <span v-else-if="sessionSendingIds.includes(s.id)" class="session-item-sending" title="运行中"><span class="session-spinner" /></span>
+                  </span>
                   <span
                     class="session-item-text"
                     :class="{ 'shimmer-text--fast': sessionSendingIds.includes(s.id) || s.status === 'active' }"
                   >{{ s.title }}</span>
                 </span>
                 <span class="session-item-meta" :class="{ 'shimmer-text--fast': sessionSendingIds.includes(s.id) || s.status === 'active' }">
-                  {{ formatSessionTime(s.updatedAt) }}
-                  <span class="session-item-count" v-if="s.messageCount">{{ formatCount(s.messageCount) }} 条</span>
+                  {{ formatSessionTime(s.updatedAt) }}<template v-if="s.messageCount"> · {{ formatCount(s.messageCount) }} 条</template>
                 </span>
               </button>
               <div class="session-item-actions">
@@ -247,7 +276,7 @@ const emit = defineEmits<{
   (e: "sync-chat-store-to-disk"): void;
 }>();
 
-const sessionCount = computed(() => props.sessionList.length);
+const sessionSearchQuery = ref("");
 
 const groupedSessions = computed<SessionGroup[]>(() => {
   const order = ["今天", "昨天", "本周", "本月", "更早"];
@@ -259,7 +288,21 @@ const groupedSessions = computed<SessionGroup[]>(() => {
   }
   return order
     .filter((label) => map.get(label)!.length > 0)
-    .map((label) => ({ label, items: map.get(label)! }));
+    .map((label) => ({
+      label,
+      items: [...map.get(label)!].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    }));
+});
+
+const filteredGroupedSessions = computed<SessionGroup[]>(() => {
+  const query = sessionSearchQuery.value.trim().toLowerCase();
+  if (!query) return groupedSessions.value;
+  return groupedSessions.value
+    .map((group) => ({
+      label: group.label,
+      items: group.items.filter((s) => s.title.toLowerCase().includes(query)),
+    }))
+    .filter((group) => group.items.length > 0);
 });
 </script>
 
@@ -283,39 +326,44 @@ const groupedSessions = computed<SessionGroup[]>(() => {
 
 .file-panel-head {
   flex-shrink: 0;
-  border-bottom: 1px solid var(--border-color, #333);
+  background: rgba(0, 0, 0, 0.12);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .file-panel-row {
   display: flex;
   align-items: center;
-  padding: 6px 8px;
-  gap: 6px;
+  padding: 8px 10px;
+  gap: 8px;
 }
 
 .file-panel-top-row {
-  justify-content: space-between;
+  padding-bottom: 4px;
 }
 
 .file-panel-tabs {
   display: flex;
   gap: 2px;
-  padding: 3px;
-  background: rgba(0, 0, 0, 0.22);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 9px;
+  padding: 2px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  width: 100%;
+  min-width: 0;
 }
 
 .file-panel-tab {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
-  padding: 5px 11px;
-  font-size: 12px;
+  flex: 1;
+  padding: 5px 8px;
+  font-size: 11.5px;
   white-space: nowrap;
   border: none;
   background: none;
-  color: rgba(255, 255, 255, 0.52);
+  color: rgba(255, 255, 255, 0.5);
   cursor: pointer;
   border-radius: 6px;
   transition: background 0.15s, color 0.15s, box-shadow 0.15s;
@@ -363,73 +411,91 @@ const groupedSessions = computed<SessionGroup[]>(() => {
 .file-toolbar {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 2px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
 }
 
-.icon-btn {
+.file-toolbar-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  border: 1.5px solid rgba(255, 255, 255, 0.15);
-  background: rgba(99, 102, 241, 0.15);
-  color: var(--text-secondary, #999);
+  box-sizing: border-box;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.72);
   cursor: pointer;
-  border-radius: 6px;
-  font-size: 15px;
-  font-weight: 600;
-  transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.1s;
+  border-radius: 5px;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
-.icon-btn:hover {
-  background: rgba(99, 102, 241, 0.35);
-  color: #fff;
-  border-color: rgba(99, 102, 241, 0.6);
-  transform: scale(1.08);
+.file-toolbar-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.95);
 }
 
-.icon-btn:active {
-  transform: scale(0.95);
+.file-toolbar-btn:active {
+  background: rgba(255, 255, 255, 0.12);
 }
 
-.icon-btn:disabled {
-  opacity: 0.3;
+.file-toolbar-btn:disabled {
+  opacity: 0.35;
   cursor: not-allowed;
-  transform: none;
+}
+
+.file-toolbar-icon {
+  display: block;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  pointer-events: none;
 }
 
 .toolbar-sep {
   width: 1px;
   height: 16px;
-  background: var(--border-color, #333);
-  margin: 0 4px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 1px;
+  flex-shrink: 0;
 }
 
 .file-panel-search-row {
-  padding: 6px 8px;
-  border-top: 1px solid var(--border-color, #333);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 8px;
 }
 
 .quick-search-trigger {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.88);
-  font-size: 12px;
+  padding: 6px 9px;
+  min-height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.18);
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 11.5px;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
 .quick-search-trigger:hover:not(:disabled) {
-  background: rgba(88, 166, 255, 0.1);
-  border-color: rgba(88, 166, 255, 0.35);
+  background: rgba(88, 166, 255, 0.08);
+  border-color: rgba(88, 166, 255, 0.28);
+  color: rgba(255, 255, 255, 0.78);
 }
 
 .quick-search-trigger:disabled {
@@ -438,16 +504,25 @@ const groupedSessions = computed<SessionGroup[]>(() => {
 }
 
 .quick-search-trigger-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-weight: 500;
+}
+
+.quick-search-icon {
+  opacity: 0.7;
+  flex-shrink: 0;
 }
 
 .quick-search-kbd {
   font-size: 10px;
   font-family: ui-monospace, monospace;
-  padding: 2px 6px;
+  padding: 2px 5px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(139, 148, 158, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.55);
 }
 
 .sessions-sync-hint {
@@ -465,13 +540,78 @@ const groupedSessions = computed<SessionGroup[]>(() => {
   min-height: 0;
 }
 
-.sessions-toolbar {
+.sessions-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 10px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+
+.sessions-search {
+  width: 100%;
+  box-sizing: border-box;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.15);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 12px;
+  outline: none;
+}
+
+.sessions-search::placeholder {
+  color: rgba(139, 148, 158, 0.6);
+}
+
+.sessions-search:focus {
+  border-color: rgba(88, 166, 255, 0.3);
+}
+
+.sessions-new-btn {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border-color, #333);
-  flex-shrink: 0;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.sessions-new-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.96);
+}
+
+.sessions-new-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(88, 166, 255, 0.16);
+  color: #79c0ff;
+  font-size: 14px;
+  line-height: 1;
+  font-weight: 600;
+}
+
+.sessions-search-empty {
+  padding: 20px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: rgba(139, 148, 158, 0.65);
 }
 
 .session-action-btn {
@@ -616,43 +756,49 @@ const groupedSessions = computed<SessionGroup[]>(() => {
 .sessions-list {
   list-style: none;
   margin: 0;
-  padding: 4px 4px;
+  padding: 6px 8px 10px;
   overflow-y: auto;
   flex: 1;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+
+.sessions-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.sessions-list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .session-group-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 14px 8px 6px;
+  gap: 8px;
+  padding: 10px 6px 6px;
   list-style: none;
 }
 
 .session-group-header:first-child {
-  padding-top: 4px;
+  padding-top: 2px;
 }
 
 .session-group-label {
   font-size: 11px;
   font-weight: 600;
-  color: rgba(139, 148, 158, 0.5);
-  letter-spacing: 0.03em;
-  white-space: nowrap;
+  color: rgba(139, 148, 158, 0.55);
+  letter-spacing: 0.02em;
 }
 
 .session-group-count {
   font-size: 10px;
-  color: rgba(139, 148, 158, 0.35);
-  background: none;
-  padding: 0;
-  border-radius: 0;
-  line-height: 1;
+  color: rgba(139, 148, 158, 0.4);
 }
 
 .session-item {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 2px;
   border-radius: 8px;
   position: relative;
@@ -660,67 +806,61 @@ const groupedSessions = computed<SessionGroup[]>(() => {
 }
 
 .session-item + .session-item {
-  margin-top: 1px;
+  margin-top: 2px;
 }
 
 .session-item:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .session-item.active {
-  background: rgba(88, 166, 255, 0.12);
-  box-shadow: inset 0 0 0 1px rgba(88, 166, 255, 0.12);
+  background: rgba(88, 166, 255, 0.1);
 }
 
 .session-item.active::before {
   content: "";
   position: absolute;
   left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3px;
-  height: 55%;
-  min-height: 20px;
-  border-radius: 0 3px 3px 0;
-  background: var(--accent-color, #58a6ff);
-  box-shadow: 0 0 6px rgba(88, 166, 255, 0.4);
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: #58a6ff;
 }
-
-
 
 .session-item-main {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 5px;
-  padding: 10px 12px;
+  gap: 4px;
+  padding: 8px 10px 8px 12px;
   border: none;
   background: none;
   color: var(--text-primary, #e6edf3);
   cursor: pointer;
   text-align: left;
   min-width: 0;
-  transition: background 0.15s;
-  border-radius: 6px;
+  border-radius: 8px;
   position: relative;
   z-index: 1;
 }
 
-.session-item-main:hover {
-  background: transparent;
-}
-
-.session-item-title {
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.45;
-  max-width: 100%;
-  color: rgba(255, 255, 255, 0.92);
+.session-item-title-row {
   display: flex;
   align-items: flex-start;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
+  min-width: 0;
+}
+
+.session-item-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 18px;
+  flex-shrink: 0;
 }
 
 .session-item-text {
@@ -731,6 +871,27 @@ const groupedSessions = computed<SessionGroup[]>(() => {
   -webkit-box-orient: vertical;
   overflow: hidden;
   word-break: break-word;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.session-item-meta {
+  padding-left: 24px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: rgba(139, 148, 158, 0.55);
+}
+
+.session-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
 }
 
 .session-item-sending {
@@ -742,7 +903,7 @@ const groupedSessions = computed<SessionGroup[]>(() => {
   flex-shrink: 0;
 }
 
-.session-item--syncing .session-item-title {
+.session-item--syncing .session-item-text {
   color: rgba(201, 224, 255, 0.95);
 }
 
@@ -767,12 +928,12 @@ const groupedSessions = computed<SessionGroup[]>(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   background: rgba(63, 185, 80, 0.15);
   color: #3fb950;
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 700;
   flex-shrink: 0;
 }
@@ -781,12 +942,12 @@ const groupedSessions = computed<SessionGroup[]>(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   background: rgba(248, 81, 73, 0.15);
   color: #f85149;
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 700;
   flex-shrink: 0;
 }
@@ -795,43 +956,13 @@ const groupedSessions = computed<SessionGroup[]>(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   background: rgba(210, 153, 34, 0.15);
   color: #d29922;
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 700;
-  flex-shrink: 0;
-}
-
-.session-item-meta {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  line-height: 1.3;
-  color: rgba(139, 148, 158, 0.55);
-}
-
-.session-item-count {
-  display: inline;
-  padding: 0;
-  border-radius: 0;
-  background: none;
-  color: rgba(139, 148, 158, 0.45);
-  font-size: 11px;
-  font-weight: 400;
-  line-height: inherit;
-}
-
-.session-item-actions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding-right: 6px;
-  opacity: 0;
-  transition: opacity 0.15s;
   flex-shrink: 0;
 }
 
@@ -843,8 +974,8 @@ const groupedSessions = computed<SessionGroup[]>(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   border: none;
   border-radius: 5px;

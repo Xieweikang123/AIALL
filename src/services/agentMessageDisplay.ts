@@ -1,4 +1,5 @@
 import type { AgentRoundGroup } from "./agentRoundGroups";
+import { recordAgentRoundResponse } from "./agentRoundGroups";
 import type { CursorFeedItem } from "./agentCursorFeed";
 import { isPrematureVisionCompletionClaim } from "../../server/visionMessage";
 import { stripToolSummaryFromAssistantContent } from "./vibeChatStorage";
@@ -130,6 +131,34 @@ export function hasAgentFinalAnswer(msg: AssistantBubbleSource): boolean {
   return false;
 }
 
+/**
+ * When the server already streamed a substantive answer into `content` but `isFinal`
+ * never reached `roundGroups` (e.g. run UI minimization skipped turn_response), commit
+ * it locally so done handling treats the run as complete.
+ */
+export function commitAgentFinalAnswerIfMissing(
+  msg: AssistantBubbleSource & { content?: string; roundGroups?: AgentRoundGroup[] },
+  turn: number,
+  maxTurns?: number,
+): boolean {
+  if (hasAgentFinalAnswer(msg) || turn <= 0) return false;
+  const finalText = normalizeBubbleText(msg.content || "");
+  if (!finalText || finalText.length < 16 || isAgentToolTurnNarration(finalText)) return false;
+
+  msg.roundGroups = recordAgentRoundResponse(
+    msg.roundGroups,
+    turn,
+    {
+      assistantText: finalText,
+      toolCalls: [],
+      hasToolCalls: false,
+      isFinal: true,
+    },
+    maxTurns,
+  );
+  return true;
+}
+
 function collectAssistantTextCandidates(msg: AssistantBubbleSource): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
@@ -254,6 +283,14 @@ export function resolveLiveAgentAnswerPreview(msg: LiveAgentAnswerSource): strin
   return resolveLatestAgentProgressNarrative(msg);
 }
 
+function pickLongestSubstantiveAnswer(...candidates: string[]): string {
+  const normalized = candidates
+    .map(normalizeBubbleText)
+    .filter((text) => text && !isAgentToolTurnNarration(text));
+  if (!normalized.length) return "";
+  return normalized.sort((a, b) => b.length - a.length)[0]!;
+}
+
 /** Prefer live stream preview while running; otherwise use the completed bubble text. */
 export function resolveAgentTimelineAnswer(
   msg: LiveAgentAnswerSource,
@@ -262,11 +299,13 @@ export function resolveAgentTimelineAnswer(
   _hasRunningTool = false,
 ): string {
   if (!isRunning) return completedContent;
+  const live = resolveLiveAgentAnswerText(msg);
   if (hasAgentFinalAnswer(msg)) {
     const finalized = resolveCompletedAgentBubbleContent(msg);
-    if (finalized.trim()) return finalized;
+    const merged = pickLongestSubstantiveAnswer(finalized, live, msg.content || "");
+    if (merged) return merged;
   }
-  return resolveLiveAgentAnswerText(msg) || "";
+  return live || pickLongestSubstantiveAnswer(msg.content || "") || "";
 }
 
 export function isAgentTimelineAnswerStreaming(
@@ -318,16 +357,26 @@ export function preferFullContentOverCompactedRoundGroup(compacted: string, full
   }
   const probe = left.replace(/…$/, "").slice(0, 240);
   if (probe.length >= 120 && right.startsWith(probe)) return right;
+  const prefixLen = Math.min(left.length, 64);
+  if (prefixLen >= 24 && right.length > left.length && right.startsWith(left.slice(0, prefixLen))) {
+    return right;
+  }
   return left;
 }
 
 /** Prefer the final agent turn; prepend vision region when the final answer omits it. */
 export function resolveCompletedAgentBubbleContent(msg: AssistantBubbleSource): string {
+  const finalGroup = msg.roundGroups?.filter((group) => group.response?.isFinal).at(-1);
   const finalFromRound = normalizeBubbleText(resolveFinalAssistantText(msg));
+  const narrativeFromFinal = normalizeBubbleText(finalGroup?.narrative || "");
   const direct = normalizeBubbleText(msg.content || "");
-  const finalText = finalFromRound
+  const preferredFromRound = finalFromRound
     ? preferFullContentOverCompactedRoundGroup(finalFromRound, direct)
     : "";
+  const streamedOrSnapshot = pickLongestSubstantiveAnswer(preferredFromRound, narrativeFromFinal);
+  const finalText = streamedOrSnapshot
+    ? preferFullContentOverCompactedRoundGroup(streamedOrSnapshot, direct)
+    : pickLongestSubstantiveAnswer(direct);
   const visionPreamble = resolveVisionRegionPreamble(msg);
 
   if (finalText) {

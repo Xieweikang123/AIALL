@@ -136,7 +136,7 @@ export function useAgentMessage(
       streaming: answerStreaming,
     });
     return filterDuplicateFeedThoughts(items, bubble, {
-      suppressAllWhenBubble: isAgentRunning(m) && Boolean(bubble.trim()),
+      suppressAllWhenBubble: isAgentRunning(m) && answerStreaming && Boolean(bubble.trim()),
     });
   }
 

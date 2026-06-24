@@ -89,6 +89,7 @@ export type PersistedChatMessage = {
   agentFailed?: boolean;
   agentRecoverable?: boolean;
   agentFailureReason?: string;
+  agentFailureDetail?: string;
   agentRecoveryDismissed?: boolean;
   agentContinueCount?: number;
   rejected?: boolean;
@@ -315,6 +316,8 @@ const TOOL_ACTION_LINE_RE =
 
 const TOOL_SUMMARY_HEADING_RE = /^#{1,3}\s*工具摘要\s*$/;
 
+import { sanitizeUserVisibleAssistantText } from "./agentVisibleText";
+
 /** Strip tool-log blocks and leaked tool-action bullet lines from assistant text shown to the user. */
 export function stripToolSummaryFromAssistantContent(text: string): string {
   if (!text?.trim()) return text;
@@ -341,7 +344,7 @@ export function stripToolSummaryFromAssistantContent(text: string): string {
     kept.push(line);
   }
 
-  return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return sanitizeUserVisibleAssistantText(kept.join("\n").replace(/\n{3,}/g, "\n\n"));
 }
 
 function summarizeToolsForHistory(
@@ -681,6 +684,7 @@ function sanitizeMessages(
         agentFailed: m.agentFailed || undefined,
         agentRecoverable: m.agentRecoverable || undefined,
         agentFailureReason: m.agentFailureReason || undefined,
+        agentFailureDetail: m.agentFailureDetail || undefined,
         agentRecoveryDismissed: m.agentRecoveryDismissed || undefined,
         agentContinueCount: m.agentContinueCount || undefined,
         rejected: m.rejected || undefined,

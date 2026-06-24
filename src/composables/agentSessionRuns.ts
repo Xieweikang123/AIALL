@@ -3,7 +3,12 @@ import {
   patchLiveFromStatusEvent,
   type AgentRunLiveState,
 } from "../services/agentRunLiveState";
-import type { AgentStatusData } from "../types/vibeChat";
+import type { AgentStatusData, AgentToolStep } from "../types/vibeChat";
+
+/** Tool steps collected during minimized run UI — merged into msg on done. */
+export type AgentRunDeferredCapture = {
+  tools: AgentToolStep[];
+};
 
 /** Per-session Agent SSE run slots (supports concurrent runs across sessions). */
 export type SessionAgentRun<TMsg = unknown> = {
@@ -17,6 +22,8 @@ export type SessionAgentRun<TMsg = unknown> = {
   connectHasImages: boolean;
   /** Ephemeral UI / progress — cleared when run slot is removed. */
   live: AgentRunLiveState;
+  /** Non-reactive capture while run UI is minimized (avoids Vue re-render storms). */
+  deferredCapture?: AgentRunDeferredCapture;
 };
 
 export function createAgentSessionRunManager<TMsg = unknown>() {

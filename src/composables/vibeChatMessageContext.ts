@@ -18,6 +18,7 @@ export interface VibeChatMessageItem {
   agentAborted?: boolean;
   agentAbortReason?: string;
   agentFailureReason?: string;
+  agentFailureDetail?: string;
 }
 
 export interface VibeChatMessageContext {

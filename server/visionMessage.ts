@@ -1,4 +1,10 @@
-import { isAccuracyConsultativePrompt } from "../src/services/agentUserIntent";
+import {
+  isAccuracyConsultativePrompt,
+  isUiAppearanceQuestionPrompt,
+  isUiLocateQuestionPrompt,
+} from "../src/services/agentUserIntent";
+
+export { isUiAppearanceQuestionPrompt, isUiLocateQuestionPrompt } from "../src/services/agentUserIntent";
 
 export type ChatContentPart =
   | { type: "text"; text: string }
@@ -180,6 +186,7 @@ export function buildVisionFirstTurnRule(): string {
     "- 若控件含图标、文字或徽章等内嵌内容，须描述外框与内层的相对大小；内外明显不匹配时须点明「内外比例失衡」及哪一层偏大/偏小，勿只罗列元素类型而不作比例判断。",
     "本轮禁止调用任何工具；仅输出读图描述，下一轮可用 grep 图中摘录的文案定位源码。",
     "读图首轮禁止写「已修改/已修复/已添加/已做」等完成时态，禁止描述尚未执行的 patch。",
+    "禁止在未 read template 前断言控件语义（如状态圆点、计数含义、占位/未实现）；须 grep/read 后再解释元素作用。",
     "布局问题后续修改时：底栏内元素拥挤查 flex-shrink、min-width、overflow、gap、margin；若控件与选区/焦点在空间上分离，优先怀疑 position:fixed/absolute 或 Teleport 浮层错位，勿误判为 flex。",
     "点击/聚焦问题另查 DOM 层级与 focus 转发，勿默认只加 padding。",
     "当你真正理解了截图内容后，在描述末尾加上暗号 [图已理解]。只有加上此暗号，才表示你已完成读图。",
@@ -222,7 +229,9 @@ export function shouldBypassVisionFirstTurn(params: {
   if (params.imageCount <= 0) return false;
   if (!params.consultativeVisionRun) return false;
   return (
-    isUiLocateQuestionPrompt(params.prompt) || isAccuracyConsultativePrompt(params.prompt)
+    isUiLocateQuestionPrompt(params.prompt) ||
+    isAccuracyConsultativePrompt(params.prompt) ||
+    isUiAppearanceQuestionPrompt(params.prompt)
   );
 }
 
@@ -253,8 +262,8 @@ export function suggestsVisibleShellEmptyInner(text: string): boolean {
 
 export function buildVisibleShellEmptyInnerHint(): string {
   return [
-    "【读图·内外层】外框可见但内层符号/文字不可见：优先改内层渲染（text 字符、SVG 尺寸/stroke、font-size/line-height），",
-    "勿再改外层 position/bottom；除非 read 证明控件不在 viewport 或被 overflow 裁切。",
+    "【读图·内外层】外框可见但内层符号/文字不可见：grep/read 全局 element 选择器（如 button { padding }）是否与 compact 控件 width/height 冲突；",
+    "冲突时组件内须 padding:0 + box-sizing:border-box，再改内层 text/SVG 尺寸/stroke；勿只调 currentColor 或外层 position/bottom。",
   ].join("");
 }
 
@@ -303,16 +312,6 @@ export function buildVisionConsultativeContinueHint(): string {
   ].join("");
 }
 
-/** User asks which UI region / component a screenshot shows (locate-only, not implement). */
-const UI_LOCATE_QUESTION_RE =
-  /(?:哪(?:儿|里|块|个)|什么|啥)(?:的)?(?:按钮|控件|面板|区域|组件|元素|部分|内容)|(?:知道|看得出|认得|识别).{0,12}(?:哪儿|哪里|哪块|哪个)|显示的(?:什么|啥)|(?:这里|这边|旁边|此处).{0,12}(?:啥|什么)|(?:这是|那是)(?:什么|啥)/;
-
-export function isUiLocateQuestionPrompt(prompt: string): boolean {
-  const text = prompt.trim();
-  if (!text) return false;
-  return UI_LOCATE_QUESTION_RE.test(text);
-}
-
 const DEFERRED_LOCATE_REPLY_RE =
   /(?:下一(?:轮|步)|再.{0,8}(?:搜索|确认|核对|定位|查))|(?:需要|须|应).{0,16}(?:搜索|确认|核对|定位)|通过搜索.{0,16}确认|精确确认/i;
 
@@ -328,10 +327,18 @@ const SPECULATIVE_LOCATE_REPLY_RE =
 const SPECULATIVE_PATH_GUESS_RE =
   /(?:极有可能|很可能|可能属于|或许|猜测).{0,48}[`'"][\w./-]+\.(?:vue|tsx?|jsx?)['"`]/i;
 
+/** Claims placeholder/unimplemented before grep/read evidence. */
+const SPECULATIVE_PLACEHOLDER_CLAIM_RE =
+  /(?:占位|placeholder|尚未实现|无(?:内容|图标|点击)|待办功能|早期规划).{0,32}(?:占位|placeholder|未实现|无内容|无图标|无点击)/i;
+
 export function isSpeculativeLocateReply(text: string): boolean {
   const body = text.replace(/\s*\[图已理解\]\s*/g, "").trim();
   if (!body) return false;
-  return SPECULATIVE_LOCATE_REPLY_RE.test(body) || SPECULATIVE_PATH_GUESS_RE.test(body);
+  return (
+    SPECULATIVE_LOCATE_REPLY_RE.test(body) ||
+    SPECULATIVE_PATH_GUESS_RE.test(body) ||
+    SPECULATIVE_PLACEHOLDER_CLAIM_RE.test(body)
+  );
 }
 
 export function isRepeatingVisionFirstTurnDescription(replyText: string, visionText: string): boolean {
@@ -366,8 +373,95 @@ export function shouldRunVisionAnchorPrefgrep(params: {
 }): boolean {
   if (!params.consultativeVisionRun || params.anchorQuotes.length === 0) return false;
   return (
-    isUiLocateQuestionPrompt(params.prompt) || isAccuracyConsultativePrompt(params.prompt)
+    isUiLocateQuestionPrompt(params.prompt) ||
+    isAccuracyConsultativePrompt(params.prompt) ||
+    isUiAppearanceQuestionPrompt(params.prompt)
   );
+}
+
+export function buildConsultativeUiAppearanceHint(): string {
+  return [
+    "【读图·样式/观感咨询】用户问背景透明度、模糊、颜色等视觉效果。",
+    "须 grep 定位组件后 read_file 其 scoped 样式中的 background / backdrop-filter / opacity；",
+    "再答是否与截图一致；无 read 证据禁止「是的/不是」或断言 rgba/backdrop-filter。",
+    "若用户感觉「透」，须区分弹层容器与父级工具栏：父级可能有 rgba/backdrop-filter，弹层本身仍可能是实色 background。",
+    "只答用户所问的视觉属性，勿展开整块面板结构。",
+  ].join("");
+}
+
+const SPECULATIVE_STYLE_ANSWER_RE =
+  /(?:rgba\s*\(|backdrop-filter|毛玻璃|半透明|透明背景|blur\s*\()/i;
+
+const BINARY_STYLE_CONCLUSION_RE =
+  /(?:是的|不是|并非|确实|属于).{0,24}(?:透明|半透明|毛玻璃|实色|不透明)/;
+
+/** Style/binary visual claim without citing read CSS evidence. */
+export function isSpeculativeStyleAnswer(text: string): boolean {
+  const body = text.replace(/\s*\[图已理解\]\s*/g, "").trim();
+  if (!body) return false;
+  if (/var\s*\(--|background\s*:|\.[\w-]+\s*\{/.test(body)) return false;
+  return SPECULATIVE_STYLE_ANSWER_RE.test(body) || BINARY_STYLE_CONCLUSION_RE.test(body);
+}
+
+export function buildConsultativeUiAppearanceRetryHint(vueFiles: string[]): string {
+  const fileHint =
+    vueFiles.length > 0
+      ? `请 read_file：${vueFiles.slice(0, 2).join("、")}（含 \`<style>\` 段）。`
+      : "请 read_file 定位到的组件样式段。";
+  return [
+    "【样式未闭环】你在未 read CSS 的情况下断言了透明/模糊/rgba 等视觉效果。",
+    fileHint,
+    "从 read 返回引用 background 等属性后再给二元结论；不确定则明确说「无法确认」。",
+    "若本轮工具结果中已有该文件片段，禁止再 grep/read 同一文件，直接基于已有内容作答。",
+  ].join("");
+}
+
+export function buildConsultativeAppearanceAnswerAfterReadHint(): string {
+  return [
+    "【样式已读·须作答】你已 read 过相关组件/CSS，禁止再调用 grep/read 重复同一文件。",
+    "请基于已有 read 结果立即输出最终中文答案：引用 background / var(--*) 等属性，说明弹层是否透明；",
+    "勿重复读图首轮的外观描述；禁止写「下一轮再确认」。",
+  ].join("");
+}
+
+function normalizeConsultativeRelPath(p: string): string {
+  return p.replace(/\\/g, "/").replace(/^\.\//, "").trim().toLowerCase();
+}
+
+function consultativePathsMatch(read: string, vue: string): boolean {
+  const r = normalizeConsultativeRelPath(read);
+  const v = normalizeConsultativeRelPath(vue);
+  if (!r || !v) return false;
+  return r.endsWith(v) || v.endsWith(r) || r.includes(v);
+}
+
+/** Final answer cites CSS read from grep-hit component. */
+export function replyHasCssReadEvidence(text: string): boolean {
+  const body = text.replace(/\s*\[图已理解\]\s*/g, "").trim();
+  if (!body) return false;
+  return (
+    /var\s*\(--|background\s*:|backdrop-filter|opacity\s*:/i.test(body) ||
+    /\.[\w-]+\s*\{/.test(body)
+  );
+}
+
+function consultativeNeedsGrepHitVueRead(
+  grepHitVueFiles: string[] | undefined,
+  consultativeReadPaths: string[] | undefined,
+): boolean {
+  if (!grepHitVueFiles?.length) return false;
+  const reads = consultativeReadPaths ?? [];
+  if (!reads.length) return true;
+  return !grepHitVueFiles.some((vue) => reads.some((read) => consultativePathsMatch(read, vue)));
+}
+
+export function consultativeAppearanceNeedsVueRead(
+  grepHitVueFiles: string[] | undefined,
+  consultativeReadPaths: string[] | undefined,
+  visionLocateReadUsed?: boolean,
+): boolean {
+  if (visionLocateReadUsed) return false;
+  return consultativeNeedsGrepHitVueRead(grepHitVueFiles, consultativeReadPaths);
 }
 
 export function shouldBlockConsultativeVisionLocateFinalize(params: {
@@ -379,13 +473,52 @@ export function shouldBlockConsultativeVisionLocateFinalize(params: {
   prompt: string;
   replyText: string;
   visionFirstTurnText?: string;
+  grepHitVueFiles?: string[];
+  consultativeReadPaths?: string[];
 }): boolean {
   if (!params.consultativeVisionRun || !params.visionLocateActive) return false;
+
+  const appearancePrompt = isUiAppearanceQuestionPrompt(params.prompt);
+
+  if (
+    params.visionLocateReadUsed &&
+    appearancePrompt &&
+    replyHasCssReadEvidence(params.replyText) &&
+    !isSpeculativeStyleAnswer(params.replyText)
+  ) {
+    return false;
+  }
+
+  if (isDeferredLocateReply(params.replyText)) return true;
+
+  if (
+    params.visionFirstTurnText &&
+    isRepeatingVisionFirstTurnDescription(params.replyText, params.visionFirstTurnText) &&
+    !replyHasCssReadEvidence(params.replyText)
+  ) {
+    return true;
+  }
+
+  if (
+    appearancePrompt &&
+    isSpeculativeStyleAnswer(params.replyText) &&
+    consultativeNeedsGrepHitVueRead(params.grepHitVueFiles, params.consultativeReadPaths)
+  ) {
+    return true;
+  }
 
   if (
     params.visionAutoGrepHadMatches &&
     !params.visionLocateReadUsed &&
-    isUiLocateQuestionPrompt(params.prompt)
+    (isUiLocateQuestionPrompt(params.prompt) || appearancePrompt)
+  ) {
+    return true;
+  }
+
+  if (
+    appearancePrompt &&
+    !params.visionLocateReadUsed &&
+    consultativeNeedsGrepHitVueRead(params.grepHitVueFiles, params.consultativeReadPaths)
   ) {
     return true;
   }
@@ -393,17 +526,10 @@ export function shouldBlockConsultativeVisionLocateFinalize(params: {
   if (params.visionLocateToolsUsed) return false;
 
   if (isUiLocateQuestionPrompt(params.prompt)) return true;
-  if (isDeferredLocateReply(params.replyText)) return true;
   if (isSpeculativeLocateReply(params.replyText)) return true;
   if (
     params.visionFirstTurnText &&
     isUnreconciledEmptyShellAnswer(params.visionFirstTurnText, params.replyText)
-  ) {
-    return true;
-  }
-  if (
-    params.visionFirstTurnText &&
-    isRepeatingVisionFirstTurnDescription(params.replyText, params.visionFirstTurnText)
   ) {
     return true;
   }

@@ -1,4 +1,5 @@
 import { ref } from "vue";
+import { debugSessionLog } from "../utils/debugSessionLog";
 
 const show = ref(false);
 const message = ref("");
@@ -34,6 +35,9 @@ export function useConfirm() {
         };
       }
       show.value = true;
+      // #region agent log
+      debugSessionLog("useConfirm.ts:confirm", "confirm overlay opened", { msgLen: msg.length }, "H1");
+      // #endregion
     });
   }
 
@@ -51,6 +55,17 @@ export function useConfirm() {
     resolve(false);
   }
 
+  /** HMR / 重载后关闭可能残留的遮罩，避免全屏拦截点击。 */
+  function dismissPendingOverlay() {
+    const wasOpen = show.value;
+    show.value = false;
+    resolvePromise?.(false);
+    resolvePromise = null;
+    // #region agent log
+    if (wasOpen) debugSessionLog("useConfirm.ts:dismiss", "confirm overlay dismissed", {}, "H1");
+    // #endregion
+  }
+
   return {
     show,
     message,
@@ -60,5 +75,6 @@ export function useConfirm() {
     confirm,
     onConfirm,
     onCancel,
+    dismissPendingOverlay,
   };
 }

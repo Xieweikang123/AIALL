@@ -22,12 +22,15 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref, watch } from "vue";
+import { nextTick, onMounted, ref, watch } from "vue";
 import { useConfirm } from "../composables/useConfirm";
 import { ESCAPE_DISMISS_PRIORITY, registerEscapeDismiss } from "../composables/useEscapeDismiss";
 
 const confirmState = useConfirm();
 registerEscapeDismiss(confirmState.show, () => confirmState.onCancel(), ESCAPE_DISMISS_PRIORITY.MODAL);
+onMounted(() => {
+  confirmState.dismissPendingOverlay();
+});
 const popupRef = ref<HTMLElement | null>(null);
 const popupPosition = ref({ x: 0, y: 0 });
 
@@ -64,6 +67,7 @@ watch(
   position: fixed;
   inset: 0;
   z-index: 9999;
+  background: rgba(0, 0, 0, 0.7);
 }
 
 .confirm-popup {

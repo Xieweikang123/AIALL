@@ -1,4 +1,5 @@
 import { backendUrl } from "./backendBase";
+import { debugSessionLog } from "../utils/debugSessionLog";
 
 const DEV_SIDECAR_ORIGIN = "http://127.0.0.1:37891";
 const AGENT_CONNECT_TIMEOUT_MS = 45_000;
@@ -209,6 +210,17 @@ export function runVibeAgentSse(request: VibeAgentRunRequest, onEvent: (event: V
       const parsed = safeJsonParse(dataStr);
       const type = currentEvent || "message";
 
+      if (type !== "message_delta") {
+        // #region agent log
+        debugSessionLog(
+          "vibeAgentClient:sse",
+          "received sse event",
+          { type, dataChars: dataStr.length },
+          "UI2",
+        );
+        // #endregion
+      }
+
       if (type === "status") onEvent({ type: "status", data: (parsed || {}) as VibeAgentSseEvent extends { type: "status"; data: infer D } ? D : never });
       else if (type === "tool_start") onEvent({ type: "tool_start", data: (parsed || {}) as any });
       else if (type === "tool_end") onEvent({ type: "tool_end", data: (parsed || {}) as any });
@@ -251,6 +263,8 @@ export function runVibeAgentSse(request: VibeAgentRunRequest, onEvent: (event: V
           currentDataLines.push(line.slice(5).trimStart());
         }
       }
+      // Do not yield with setTimeout(0): when the main thread is busy, the read loop
+      // would stall and miss done/events. Event pacing is handled in useAgentRun (rAF queue).
     }
 
     pending += decoder.decode();

@@ -25,6 +25,8 @@ import {
   isSameIssueFollowUpRun,
   isSessionAuditPrompt,
   isShortImplementPrompt,
+  isLocateStatusFollowUpPrompt,
+  isUiAppearanceQuestionPrompt,
   isUiDefectReportPrompt,
   isUserErrorQuotePrompt,
   historyPriorAssistantClaimedFix,
@@ -55,6 +57,12 @@ describe("isConsultativeUserPrompt", () => {
   it("treats short evaluative follow-ups as consultative despite 优化", () => {
     expect(isConsultativeUserPrompt("需要优化吗")).toBe(true);
     expect(isConsultativeUserPrompt("要不要调整呢")).toBe(true);
+  });
+
+  it("treats UI locate questions as consultative when not asking to implement", () => {
+    expect(isConsultativeUserPrompt("会话这里，显示的啥")).toBe(true);
+    expect(isConsultativeUserPrompt("知道是哪儿的按钮吗？")).toBe(true);
+    expect(isConsultativeUserPrompt("帮我把这个按钮改小一点")).toBe(false);
   });
 
   it("does not treat implementation failure reports as consultative", () => {
@@ -88,6 +96,35 @@ describe("isConsultativeUserPrompt", () => {
   it("treats descriptive 更新 in question-shaped prompts as consultative", () => {
     expect(isConsultativeUserPrompt("昨天的会话，今天更新了，为啥还处在昨天？")).toBe(true);
     expect(isConsultativeUserPrompt("请更新一下这个功能？")).toBe(false);
+  });
+});
+
+describe("isUiAppearanceQuestionPrompt", () => {
+  it("detects transparency and blur style questions", () => {
+    expect(isUiAppearanceQuestionPrompt("弹窗背景透明的？")).toBe(true);
+    expect(isUiAppearanceQuestionPrompt("这个面板是半透明的吗")).toBe(true);
+    expect(isUiAppearanceQuestionPrompt("知道是哪儿的按钮吗？")).toBe(false);
+  });
+});
+
+describe("isLocateStatusFollowUpPrompt", () => {
+  const priorLocated = [
+    {
+      role: "assistant" as const,
+      content:
+        "弹窗在 `src/components/vibe/AppToolbar.vue`，`.project-history-dropdown { background: var(--bg-primary); }` 为实色。",
+    },
+  ];
+
+  it("detects locate progress follow-up with prior evidence", () => {
+    expect(isLocateStatusFollowUpPrompt("找到位置了吗？", priorLocated)).toBe(true);
+    expect(isLocateStatusFollowUpPrompt("定位到了吗", priorLocated)).toBe(true);
+  });
+
+  it("rejects when prior assistant had no locate evidence", () => {
+    expect(
+      isLocateStatusFollowUpPrompt("找到位置了吗？", [{ role: "assistant", content: "让我再看看。" }]),
+    ).toBe(false);
   });
 });
 
@@ -375,6 +412,15 @@ describe("isSameIssueFollowUpRun", () => {
     expect(isSameIssueFollowUpRun("给你发消息，会创建一个新会话，发现这个问题没？", priorFixHistory)).toBe(
       true,
     );
+  });
+
+  it("detects prior 已修复 / 已改完 claims", () => {
+    const history = [
+      { role: "user", content: "图标不显示" },
+      { role: "assistant", content: "已修复：图标颜色改为更亮。" },
+    ];
+    expect(historyPriorAssistantClaimedFix(history)).toBe(true);
+    expect(isSameIssueFollowUpRun("还是不显示", history)).toBe(true);
   });
 
   it("rejects when prior assistant did not claim fix", () => {

@@ -704,6 +704,12 @@ function closeFullscreen() {
   activeFullscreenOverlay = null;
 }
 
+/** Remove leaked mermaid fullscreen overlay (e.g. after HMR or aborted open). */
+export function dismissMermaidFullscreen(): void {
+  closeFullscreen();
+  document.querySelectorAll(".mermaid-fullscreen-overlay").forEach((el) => el.remove());
+}
+
 // 页面加载时设置一次事件委托
 setupDelegation();
 setupWheelDelegation();

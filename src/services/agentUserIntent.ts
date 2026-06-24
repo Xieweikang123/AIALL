@@ -177,7 +177,62 @@ export function isImplementationFailureReportPrompt(prompt: string): boolean {
 
 /** Prior assistant claimed the issue was fixed (structural markers, not topic-specific). */
 const PRIOR_FIX_CLAIM_RE =
-  /(?:✅|修复完成|修改已完成|已完成修复|问题已修复|应该(?:可以|没问题)了|刷新(?:应用|页面)?后)/i;
+  /(?:✅|修复完成|修改已完成|已完成修复|问题已修复|已修复|已改完|应该(?:可以|没问题|能看到)了|(?:现在|已).{0,8}(?:可见|清晰|能看))|刷新(?:应用|页面)?(?:后|看看)/i;
+
+/** User asks which UI region / element a screenshot shows (locate-only, not implement). */
+export const UI_LOCATE_QUESTION_RE =
+  /(?:哪(?:儿|里|块|个)|什么|啥)(?:的)?(?:按钮|控件|面板|区域|组件|元素|部分|内容)|(?:知道|看得出|认得|识别).{0,12}(?:哪儿|哪里|哪块|哪个)|显示的(?:什么|啥)|(?:这里|这边|旁边|此处).{0,12}(?:啥|什么)|(?:这是|那是)(?:什么|啥)/;
+
+export function isUiLocateQuestionPrompt(prompt: string): boolean {
+  const text = prompt.trim();
+  if (!text) return false;
+  return UI_LOCATE_QUESTION_RE.test(text);
+}
+
+/** User asks about visual style (transparency, blur, color) from a screenshot — consultative. */
+export const UI_APPEARANCE_QUESTION_RE =
+  /背景.{0,12}(?:透明|半透明|模糊|毛玻璃|虚化)|(?:透明|半透明|毛玻璃|blur|backdrop).{0,12}(?:吗|么|[？?]\s*$)|(?:opacity|rgba).{0,12}(?:吗|么|[？?]\s*$)/i;
+
+export function isUiAppearanceQuestionPrompt(prompt: string): boolean {
+  const text = prompt.trim();
+  if (!text) return false;
+  return UI_APPEARANCE_QUESTION_RE.test(text);
+}
+
+/** User asks whether prior turn already located the target in code — reuse evidence, no re-grep. */
+export const LOCATE_STATUS_FOLLOW_UP_RE =
+  /(?:找到|定位|搜到|查到).{0,12}(?:了吗|了么|没)|(?:已经)?(?:找到|定位).{0,6}[？?]\s*$|找.{0,4}(?:到了|着了)[？?]\s*$/;
+
+export function historyPriorAssistantLocatedUi(
+  history?: UserIntentHistoryMessage[],
+): boolean {
+  const last = (history ?? []).filter((m) => m.role === "assistant").slice(-1)[0];
+  if (!last?.content?.trim()) return false;
+  const text = last.content;
+  return (
+    /\.vue\b/i.test(text) ||
+    /project-history|background\s*:|var\(--/i.test(text) ||
+    /找到了|已定位|位于\s+`/.test(text)
+  );
+}
+
+export function isLocateStatusFollowUpPrompt(
+  prompt: string,
+  history?: UserIntentHistoryMessage[],
+): boolean {
+  const text = prompt.trim();
+  if (!text || !LOCATE_STATUS_FOLLOW_UP_RE.test(text)) return false;
+  if (IMPLEMENT_INTENT_RE.test(text)) return false;
+  return historyPriorAssistantLocatedUi(history);
+}
+
+export function buildLocateStatusFollowUpHint(): string {
+  return [
+    "【定位进度追问】用户仅问上一轮是否已在代码中定位到目标。",
+    "须直接引用上一条已给出的文件路径与样式/CSS 结论作答；禁止重复 grep/read 整文件。",
+    "若上一条已给出 `.vue` 与 background 证据，回答「是的，已在 … 中找到」并复述关键一行即可。",
+  ].join("\n");
+}
 
 /** User continues reporting the same problem domain after a prior fix claim. */
 const SAME_ISSUE_FOLLOW_UP_RE =
@@ -245,6 +300,7 @@ export function isConsultativeUserPrompt(prompt: string): boolean {
   if (isUiDefectReportPrompt(text)) return false;
   if (isAgentStepClarificationPrompt(text)) return false;
   if (isImplementationFailureReportPrompt(text)) return false;
+  if (isUiLocateQuestionPrompt(text) && !IMPLEMENT_INTENT_RE.test(text)) return true;
   if (SHORT_EVALUATIVE_FOLLOW_UP_RE.test(text)) return true;
   if (ACCURACY_CONSULTATIVE_RE.test(text)) return true;
   if (OBSERVED_BEHAVIOR_QUESTION_RE.test(text)) return true;
@@ -262,6 +318,7 @@ export function buildConsultativeBuildHint(): string {
     "准确度/输出质量类：须 read 到 backend 路由或 middleware 中实际 prompt/数据拼装处，说明代码里注入了哪些上下文；禁止用「如果 prompt 包含…」猜测。",
     "勿广搜或同一文件多段重叠 read；信息足够后立即用自然语言回答「当前代码下会怎样」，勿连环读取无关文件。",
     "禁止在未对照工具结果前宣称「逻辑已正确/无需再改/链路完整」；需要改代码时说明结论并请用户发送明确实施指令。",
+    "禁止在咨询结论末尾主动推销 patch（如「需要我调整…吗」）；用户未要求改代码时勿反问要不要改。",
     "若写工具返回「Build 只读轮」相关错误：当前仍是 Build 模式，只是本条被标为咨询只读；禁止向用户称 Ask 模式或让用户切换 Build。",
   ].join("\n");
 }
@@ -332,6 +389,8 @@ export function buildUiDefectBuildHint(): string {
     "须定位后 patch_file/write_file；禁止只分析并反问「要不要修」。",
     "控件与选区/焦点在空间上分离时优先查浮层定位（fixed/absolute/Teleport），勿查底栏 flex。",
     "排查 mouseup 与 getSelection 时序：选区在 mouseup 时可能尚未就绪，关注异步回调链路。",
+    "外框可见但图标/文字空白：read 全局样式表中同标签选择器（如 button { padding }）是否与 compact 控件 width/height 冲突；须在组件内显式 padding:0 + box-sizing:border-box，勿重复只调 stroke/currentColor。",
+    "说明控件含义或修复可见性时须附带 v-if/v-show 等显示前提；用户截图 tab/模式与当前讨论不一致时先核对条件。",
   ].join("\n");
 }
 

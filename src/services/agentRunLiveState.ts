@@ -12,6 +12,7 @@ export type AgentRunLiveState = {
   contextChars?: number;
   streamChars?: number;
   waitStartedAt?: number;
+  elapsedMs?: number;
   toolTitle?: string;
   toolDetail?: string;
   retryAttempt?: number;
@@ -40,6 +41,7 @@ export function patchLiveFromStatusEvent(
     model: extra?.model ?? prev.model,
     contextChars: extra?.contextChars ?? prev.contextChars,
     streamChars: extra?.streamChars ?? prev.streamChars,
+    elapsedMs: extra?.elapsedMs ?? prev.elapsedMs,
     toolTitle: extra?.toolTitle ?? prev.toolTitle,
     toolDetail: extra?.toolDetail ?? prev.toolDetail,
     retryAttempt: extra?.retryAttempt ?? prev.retryAttempt,
@@ -51,6 +53,7 @@ export function patchLiveFromStatusEvent(
     if (!next.waitStartedAt) next.waitStartedAt = Date.now();
   } else if (WAIT_CLEAR_PHASES.has(phase)) {
     next.waitStartedAt = undefined;
+    next.elapsedMs = undefined;
   }
 
   return next;

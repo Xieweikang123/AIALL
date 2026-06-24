@@ -17,7 +17,10 @@ import {
   isPrematureVisionCompletionClaim,
   isRepeatingVisionFirstTurnDescription,
   isSpeculativeLocateReply,
+  isSpeculativeStyleAnswer,
+  replyHasCssReadEvidence,
   isUnreconciledEmptyShellAnswer,
+  isUiAppearanceQuestionPrompt,
   isUiLocateQuestionPrompt,
   isUiPositioningBugPrompt,
   isVisionUnsupportedError,
@@ -155,6 +158,12 @@ describe("visionMessage", () => {
     expect(isSpeculativeLocateReply("grep 命中 FilePanel.vue，按钮 class 为 session-action-btn。")).toBe(false);
   });
 
+  it("isSpeculativeLocateReply detects placeholder claims before evidence", () => {
+    expect(
+      isSpeculativeLocateReply("右侧空方框是待办功能的占位按钮，目前无内容/图标，可能是早期规划尚未实现。"),
+    ).toBe(true);
+  });
+
   it("isRepeatingVisionFirstTurnDescription detects duplicated vision narrative", () => {
     const vision =
       "这是一个深色背景上的按钮，按钮文字为「+ 新建」。按钮呈圆角矩形，边框为灰色，整体是一个标准的操作按钮样式。[图已理解]";
@@ -187,7 +196,57 @@ describe("visionMessage", () => {
         replyText: reply,
         visionFirstTurnText: vision,
       }),
+    ).toBe(true);
+  });
+
+  it("shouldBlockConsultativeVisionLocateFinalize blocks speculative style without css read", () => {
+    expect(
+      shouldBlockConsultativeVisionLocateFinalize({
+        consultativeVisionRun: true,
+        visionLocateActive: true,
+        visionLocateToolsUsed: true,
+        visionLocateReadUsed: false,
+        prompt: "弹窗背景透明的？",
+        replyText: "是的，背景是半透明毛玻璃，用了 backdrop-filter。",
+        grepHitVueFiles: ["src/components/vibe/AppToolbar.vue"],
+        consultativeReadPaths: [],
+      }),
+    ).toBe(true);
+    expect(
+      shouldBlockConsultativeVisionLocateFinalize({
+        consultativeVisionRun: true,
+        visionLocateActive: true,
+        visionLocateToolsUsed: true,
+        visionLocateReadUsed: true,
+        prompt: "弹窗背景透明的？",
+        replyText:
+          "`.project-history-dropdown { background: var(--bg-primary); }` 为实色，不透明。",
+        grepHitVueFiles: ["src/components/vibe/AppToolbar.vue"],
+        consultativeReadPaths: ["src/components/vibe/AppToolbar.vue"],
+      }),
     ).toBe(false);
+    expect(isSpeculativeStyleAnswer("是的，背景是半透明毛玻璃，用了 backdrop-filter。")).toBe(true);
+    expect(
+      isSpeculativeStyleAnswer(
+        "`.project-history-dropdown { background: var(--bg-primary); }` 为实色，不透明。",
+      ),
+    ).toBe(false);
+    expect(
+      replyHasCssReadEvidence(
+        "`.project-history-dropdown { background: var(--bg-primary); }` 为实色，不透明。",
+      ),
+    ).toBe(true);
+  });
+
+  it("isUiAppearanceQuestionPrompt triggers bypass and pregrep eligibility", () => {
+    expect(isUiAppearanceQuestionPrompt("弹窗背景透明的？")).toBe(true);
+    expect(
+      shouldBypassVisionFirstTurn({
+        imageCount: 1,
+        consultativeVisionRun: true,
+        prompt: "弹窗背景透明的？",
+      }),
+    ).toBe(true);
   });
 
   it("buildVisionConsultativeContinueHint limits tool exploration", () => {
@@ -393,7 +452,7 @@ describe("visionMessage", () => {
     const vision = "深色圆底按钮容器可见，但箭头图标不可见 [图已理解]";
     expect(suggestsVisibleShellEmptyInner(vision)).toBe(true);
     expect(suggestsVisibleShellEmptyInner("深灰色圆角矩形无明显内容，像空的 toggle")).toBe(true);
-    expect(buildVisionBuildContinueHint(vision, "优化按钮")).toContain("内层渲染");
+    expect(buildVisionBuildContinueHint(vision, "优化按钮")).toContain("padding:0");
     expect(buildVisibleShellEmptyInnerHint()).not.toMatch(/scroll-to-bottom|回到最新/);
   });
 

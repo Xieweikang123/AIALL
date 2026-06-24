@@ -170,7 +170,7 @@ describe("useChatSessionStore", () => {
     vi.useRealTimers();
   });
 
-  it("schedulePersistDuringAgentRun persists while chatSending blocks schedulePersistChat", async () => {
+  it("schedulePersistDuringAgentRun skips mid-run persist (done handler persists)", async () => {
     const projectPath = "D:/projects/persist-during-run";
     const { store, session, chatMessages } = createStore(projectPath, { chatSending: () => true });
 
@@ -185,12 +185,7 @@ describe("useChatSessionStore", () => {
     await new Promise((r) => setTimeout(r, 450));
 
     expect(session.activeSessionId.value).toBe(draftId);
-    expect(loadVibeChatHistory(projectPath)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: "u1", role: "user", content: "hello from new session" }),
-      ]),
-    );
-    expect(listVibeChatSessions(projectPath).map((s) => s.id)).toContain(draftId);
+    expect(loadVibeChatHistory(projectPath)).toEqual([]);
   });
 
   it("switchSession does not bump target updatedAt when debounced persist fires", async () => {

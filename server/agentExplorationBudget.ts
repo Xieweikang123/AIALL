@@ -101,6 +101,32 @@ export function buildConsultativeExploreBudgetNudge(consecutiveExploreTurns: num
   ].join("");
 }
 
+/** After grep locates .vue component files — nudge read before answering style questions. */
+export function buildGrepHitVueReadNudge(vueFiles: string[]): string {
+  const primary = vueFiles.slice(0, 2).join("、");
+  return [
+    `【系统提示】grep 已定位组件文件：${primary}。`,
+    "下一轮须 read_file 该文件（含 template 与 `<style>` 段），再答样式/观感问题；禁止只 read 引用它的父视图。",
+  ].join("");
+}
+
+/** Consultative read-only hit segment turn cap — force answer instead of auto-continuing. */
+export function buildConsultativeSegmentCapNudge(turn: number, totalExploreTurns: number): string {
+  return [
+    `【系统提示】咨询只读已达第 ${turn} 轮段内上限（累计探索 ${totalExploreTurns} 轮）。`,
+    "下一轮必须输出最终中文结论；若 CSS/逻辑证据不足，说明已确认部分与仍不确定部分，禁止写「下一轮再确认」。",
+  ].join("");
+}
+
+/** Same grep/read batch repeated — stop exploring and answer from existing tool results. */
+export function buildConsultativeDuplicateExploreNudge(): string {
+  return [
+    "【系统提示】你已重复执行相同的 grep/read 组合，且工具结果未变。",
+    "禁止再调用工具；请基于已有 read/grep 输出立即给出最终中文答案。",
+    "若 CSS 已在工具结果中，直接引用 background / var(--*) 作答，勿重复读同一文件。",
+  ].join("");
+}
+
 /** Injected when grep returns no matches for a pattern in the current turn. */
 export function buildGrepEmptyRecoveryNudge(patterns: string[]): string {
   const listed = patterns
@@ -291,7 +317,8 @@ export function buildUiSymptomDiagnosisHint(): string {
   return [
     "【UI 分症状排查】禁止在同一文件反复微调 position/bottom/sticky 组合；按序核对：",
     "① v-if/显示条件与 scroll/resize 事件是否更新；② 控件是否在 overflow-y:auto 子树内（改 overlay sibling）；",
-    "③ 外框可见但符号/文字空白则改内层渲染（text/SVG 尺寸），勿只改定位；④ 给出用户可复现验证步骤。",
+    "③ 外框可见但符号/文字空白：grep/read 全局 element 选择器（如 button { padding }）是否与 compact 控件 width/height 冲突，组件内须 padding:0 + box-sizing:border-box，再查内层 text/SVG；勿只改 stroke/currentColor；",
+    "④ 给出用户可复现验证步骤（含当前 tab/模式前提）。",
   ].join("");
 }
 

@@ -26,9 +26,14 @@ import {
   AGENT_AUTO_RESUME_IMMEDIATE_SECONDS,
   AGENT_SILENT_CONTINUE_MAX,
   resolveAutoResumeSeconds,
+  resolveModelWaitStallMs,
+  AGENT_MODEL_WAIT_STALL_MS,
+  AGENT_CONTINUE_MODEL_WAIT_STALL_MS,
   recoverableAgentErrorHint,
   resolveAgentCompletedTurns,
   resolveAgentFailureBubbleContent,
+  diagnoseMissingFinalAnswer,
+  formatMissingFinalAnswerDetail,
   buildAgentRunningStatusText,
   resolveOriginalTaskFromResumePrompt,
   resolveResumeOriginalUserPrompt,
@@ -426,6 +431,7 @@ describe("inferAgentRecoveryFlags", () => {
     });
     expect(flags?.agentRecoverable).toBe(true);
     expect(flags?.agentFailureReason).toBe("运行中断（未生成最终回复）");
+    expect(flags?.agentFailureDetail).toContain("客户端未结案");
   });
 
   it("does not treat normal model-wait status lines as recoverable errors", () => {
@@ -558,11 +564,88 @@ describe("recoverableAgentErrorHint", () => {
 
   it("mentions missing final answer when run completed without summary", () => {
     const hint = recoverableAgentErrorHint(
-      { turnTraces: [{ turn: 1 }], tools: [{ running: false, summary: "ok" }] },
+      {
+        turnTraces: [{ turn: 1 }],
+        tools: [{ running: false, name: "grep", summary: "ok" }],
+      },
       "运行中断（未生成最终回复）",
     );
     expect(hint).toContain("未生成最终回复");
+    expect(hint).toContain("服务端持续探索未结案");
     expect(hint).toContain("恢复运行");
+  });
+});
+
+describe("diagnoseMissingFinalAnswer", () => {
+  it("detects client-side draft without isFinal", () => {
+    const diagnosis = diagnoseMissingFinalAnswer({
+      content: "A".repeat(80),
+      tools: [{ running: false, name: "read_file", summary: "ok", turn: 1 }],
+      roundGroups: [{ turn: 1, maxTurns: 24, modelSteps: [], toolIds: ["t1"] }],
+    });
+    expect(diagnosis.kind).toBe("client_answer_not_committed");
+    expect(formatMissingFinalAnswerDetail(diagnosis)).toContain("客户端未结案");
+  });
+
+  it("detects server explore-only runs without finalize", () => {
+    const diagnosis = diagnoseMissingFinalAnswer({
+      content: "让我看看相关样式。",
+      tools: [
+        { running: false, name: "grep", summary: "ok", turn: 1 },
+        { running: false, name: "read_file", summary: "ok", turn: 2 },
+      ],
+      roundGroups: [
+        { turn: 1, maxTurns: 24, modelSteps: [], toolIds: ["t1"] },
+        { turn: 2, maxTurns: 24, modelSteps: [], toolIds: ["t2"] },
+      ],
+      totalTurns: 5,
+    });
+    expect(diagnosis.kind).toBe("server_explore_no_finalize");
+    expect(diagnosis.detail).toContain("grep");
+  });
+
+  it("detects segment cap from status log", () => {
+    const diagnosis = diagnoseMissingFinalAnswer({
+      tools: [{ running: false, name: "grep", summary: "ok", turn: 6 }],
+      roundGroups: [{ turn: 6, maxTurns: 40, modelSteps: [], toolIds: ["t1"] }],
+      statusLog: ["咨询只读已达段内轮次上限，须输出结论"],
+    });
+    expect(diagnosis.kind).toBe("server_segment_cap_no_answer");
+    expect(diagnosis.detail).toContain("段内轮次上限");
+  });
+
+  it("classifies 10-turn run with 102-char draft as client uncommitted", () => {
+    const diagnosis = diagnoseMissingFinalAnswer(
+      {
+        content: "这是一段约一百字的回复草稿，说明下拉背景是不透明实色而非半透明毛玻璃效果，并引用了样式变量。".padEnd(102, "。"),
+        tools: Array.from({ length: 8 }, (_, index) => ({
+          running: false,
+          name: index % 2 === 0 ? "grep" : "read_file",
+          summary: "ok",
+          turn: index + 1,
+        })),
+        roundGroups: Array.from({ length: 10 }, (_, index) => ({
+          turn: index + 1,
+          maxTurns: 40,
+          modelSteps: [],
+          toolIds: [`t${index}`],
+        })),
+        totalTurns: 10,
+      },
+      { doneTurns: 10 },
+    );
+    expect(diagnosis.kind).toBe("client_answer_not_committed");
+    expect(diagnosis.detail).toContain("isFinal");
+  });
+
+  it("does not treat failure bubble text as a substantive draft", () => {
+    const diagnosis = diagnoseMissingFinalAnswer({
+      content: "运行中断（已完成 10 轮，8 个工具步骤），可点击「恢复运行」继续。",
+      tools: [{ running: false, name: "grep", summary: "ok", turn: 1 }],
+      roundGroups: [{ turn: 1, maxTurns: 40, modelSteps: [], toolIds: ["t1"] }],
+      totalTurns: 10,
+    });
+    expect(diagnosis.kind).not.toBe("client_answer_not_committed");
   });
 });
 
@@ -593,5 +676,17 @@ describe("agent connect stall", () => {
   it("builds helpful connect stall message", () => {
     expect(agentConnectStallMessage(true)).toContain("sidecar");
     expect(agentConnectStallMessage(false)).toContain("37891");
+  });
+});
+
+describe("resolveModelWaitStallMs", () => {
+  it("uses continue threshold after silent continue", () => {
+    expect(resolveModelWaitStallMs(92_000, 1)).toBe(AGENT_CONTINUE_MODEL_WAIT_STALL_MS);
+  });
+
+  it("aligns with large-context first-byte timeout plus buffer", () => {
+    expect(resolveModelWaitStallMs(92_000, 0)).toBe(AGENT_MODEL_WAIT_STALL_MS);
+    expect(resolveModelWaitStallMs(0, 0)).toBe(75_000);
+    expect(resolveModelWaitStallMs(500_000, 0)).toBe(AGENT_MODEL_WAIT_STALL_MS);
   });
 });

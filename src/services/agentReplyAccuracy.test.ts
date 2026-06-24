@@ -16,6 +16,9 @@ describe("buildReplyAccuracyHint", () => {
     expect(hint).toContain("单点提问");
     expect(hint).toContain("观感闭环");
     expect(hint).toContain("行号");
+    expect(hint).toContain("全局 element");
+    expect(hint).toContain("工具前禁猜");
+    expect(hint).toContain("修复宣称");
   });
 
   it("avoids business-specific terms", () => {

@@ -8,7 +8,7 @@
 
     <div class="cursor-timeline">
       <AgentMergedContent
-        :show-process="!isFolded"
+        v-if="!isFolded"
         :compact-feed="showCompact"
         :round-groups="agentRoundGroupViews(msg)"
         :final-answer="timelineAnswerContent(msg)"

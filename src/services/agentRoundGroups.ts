@@ -224,6 +224,19 @@ function mergeRoundNarrative(existing: string, incoming: string): string {
   return prev;
 }
 
+function compactTurnRequestForMemory(detail: AgentTurnRequestDetail): AgentTurnRequestDetail {
+  if (!detail.messages.length) return { ...detail, messages: [] };
+  return {
+    ...detail,
+    messages: [
+      {
+        role: "system",
+        content: `${detail.messages.length} 条消息，${detail.contextChars} 字符`,
+      },
+    ],
+  };
+}
+
 export function recordAgentRoundRequest(
   groups: AgentRoundGroup[] | undefined,
   turn: number,
@@ -233,10 +246,7 @@ export function recordAgentRoundRequest(
   if (turn <= 0) return groups ? cloneRoundGroups(groups) : [];
   const next = cloneRoundGroups(groups);
   const group = ensureGroup(next, turn);
-  group.request = {
-    ...detail,
-    messages: detail.messages.map((message) => ({ ...message })),
-  };
+  group.request = compactTurnRequestForMemory(detail);
   if (maxTurns) group.maxTurns = maxTurns;
   return next;
 }

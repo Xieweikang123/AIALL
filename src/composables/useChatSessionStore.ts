@@ -69,7 +69,6 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
 
   let switchSessionGeneration = 0;
   let saveChatTimer: ReturnType<typeof setTimeout> | null = null;
-  let persistDuringRunTimer: ReturnType<typeof setTimeout> | null = null;
   let persistDelayTimer: ReturnType<typeof setTimeout> | null = null;
   let persistChatGeneration = 0;
   /** Messages typed before first session id exists (ensureSessionForSend). */
@@ -239,10 +238,6 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
       clearTimeout(saveChatTimer);
       saveChatTimer = null;
     }
-    if (persistDuringRunTimer) {
-      clearTimeout(persistDuringRunTimer);
-      persistDuringRunTimer = null;
-    }
     if (persistDelayTimer) {
       clearTimeout(persistDelayTimer);
       persistDelayTimer = null;
@@ -264,15 +259,9 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     }, 400);
   }
 
-  function schedulePersistDuringAgentRun(options?: { sessionId?: string; flushStore?: boolean }) {
-    if (!projectPath().trim()) return;
-    const sessionId = (options?.sessionId || activeSessionId.value).trim();
-    if (!sessionId) return;
-    if (persistDuringRunTimer) clearTimeout(persistDuringRunTimer);
-    persistDuringRunTimer = setTimeout(() => {
-      persistDuringRunTimer = null;
-      persistSessionNow(sessionId, undefined, options);
-    }, 400);
+  /** Skip mid-run debounced writes — large sessions block the main thread; done handler persists. */
+  function schedulePersistDuringAgentRun(_options?: { sessionId?: string; flushStore?: boolean }) {
+    // no-op
   }
 
   async function flushChatStoreToDisk(

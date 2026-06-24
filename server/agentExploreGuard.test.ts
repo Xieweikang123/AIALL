@@ -14,6 +14,7 @@ import {
   isLowSignalVisionLocateGrep,
   isOverlyBroadVisionGrep,
   isSearchFilesContentQuery,
+  isVisionGrepLowSpread,
   readLineRangeFromArgs,
   readRangesOverlap,
   recordReadRange,
@@ -100,6 +101,29 @@ describe("agentExploreGuard", () => {
     expect(isOverlyBroadVisionGrep("会话", anchors)).toBe(true);
     expect(isOverlyBroadVisionGrep("多会话同时进行", anchors)).toBe(false);
     expect(isOverlyBroadVisionGrep("session-item", anchors)).toBe(false);
+  });
+
+  it("allows short UI copy when present in vision narrative", () => {
+    const anchors = ["项目切换栏"];
+    const narrative = ["底部有虚线边框的「打开新项目」按钮"];
+    expect(isOverlyBroadVisionGrep("打开新项目", anchors, narrative)).toBe(false);
+    expect(isOverlyBroadVisionGrep("打开新项目", anchors)).toBe(true);
+  });
+
+  it("isVisionGrepLowSpread accepts selective match sets", () => {
+    expect(isVisionGrepLowSpread([{ relative: "src/Foo.vue" }])).toBe(true);
+    expect(
+      isVisionGrepLowSpread([
+        { relative: "src/Foo.vue" },
+        { relative: "src/Foo.vue" },
+        { relative: "src/Bar.vue" },
+      ]),
+    ).toBe(true);
+    expect(
+      isVisionGrepLowSpread(
+        Array.from({ length: 10 }, (_, i) => ({ relative: `src/f${i}.ts` })),
+      ),
+    ).toBe(false);
   });
 
   it("blocks low-signal vision locate grep patterns", () => {

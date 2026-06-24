@@ -291,6 +291,14 @@ describe("buildAgentHistoryFromMessages", () => {
     expect(stripToolSummaryFromAssistantContent(leaked)).toBe("正文。");
   });
 
+  it("stripToolSummaryFromAssistantContent removes vision marker and implement offer tail", () => {
+    expect(
+      stripToolSummaryFromAssistantContent(
+        "不是透明。[图已理解]\n\n需要我调整背景吗？",
+      ),
+    ).toBe("不是透明。");
+  });
+
   it("shapes history for execute_plan profile", () => {
     const plan = "## 修改方案\n改 `src/foo.ts`：\n```ts\nconst x = 1;\n```";
     const base = buildAgentHistoryFromMessages([

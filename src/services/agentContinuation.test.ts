@@ -239,6 +239,7 @@ describe("detectUserFailureReport", () => {
     expect(detectUserFailureReport("试了，并没有通知")).toBe(true);
     expect(detectUserFailureReport("电脑没弹出提示")).toBe(true);
     expect(detectUserFailureReport("看起来，没生效呢")).toBe(true);
+    expect(detectUserFailureReport("还是不显示呢")).toBe(true);
     expect(detectUserFailureReport("帮我加个按钮")).toBe(false);
   });
 });

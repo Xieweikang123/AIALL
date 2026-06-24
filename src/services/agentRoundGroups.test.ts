@@ -75,6 +75,9 @@ describe("agentRoundGroups", () => {
     }, 20);
 
     expect(groups[0].request?.contextMessages).toBe(48);
+    expect(groups[0].request?.messages).toEqual([
+      { role: "system", content: "2 条消息，98000 字符" },
+    ]);
     expect(groups[0].response?.toolCalls).toHaveLength(1);
     expect(groups[0].narrative).toContain("VibeCodingView");
   });

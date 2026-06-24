@@ -11,6 +11,7 @@ export const ESCAPE_DISMISS_PRIORITY = {
   PROJECT_HISTORY: 40,
   QUOTE_BUTTON: 30,
   QUOTED_PREVIEW: 20,
+  AGENT_RUN: 15,
 } as const;
 
 type EscapeEntry = {

@@ -39,10 +39,16 @@ export function buildTurnCardsFromRoundGroups(
   }
 
   const filtered = filterDuplicateFeedThoughts(items, answer, {
-    suppressAllWhenBubble: Boolean(options.isRunning && answer),
+    suppressAllWhenBubble: Boolean(options.isRunning && options.answerStreaming && answer),
   });
   const detailed = options.activityDetailed === true;
-  const collapseAfter = options.isRunning ? 999 : detailed ? 10 : 5;
+  const collapseAfter = options.isRunning
+    ? detailed
+      ? 12
+      : 8
+    : detailed
+      ? 10
+      : 5;
   const blocks = layoutCursorFeedBlocks(filtered, {
     keepVisible: detailed ? 8 : 6,
     collapseAfter,

@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
+import { debugSessionLog } from "./debugSessionLog";
 import {
   AGENT_AI_MAX_RETRIES,
   chatCompletionWithTools,
@@ -36,6 +37,8 @@ import {
   buildAskExploreSoftCapNudge,
   buildAskForceAnswerNudge,
   buildConsultativeExploreBudgetNudge,
+  buildConsultativeDuplicateExploreNudge,
+  buildConsultativeSegmentCapNudge,
   buildExploreBudgetNudge,
   buildExploreInterimDiagnosisNudge,
   buildExploreSoftCapNudge,
@@ -43,6 +46,7 @@ import {
   buildBuildExploreForcePatchNudge,
   buildForceOutputNudge,
   buildGrepEmptyRecoveryNudge,
+  buildGrepHitVueReadNudge,
   buildPatchAnchorForcePatchNudge,
   buildPatchRequiredRetryNudge,
   buildImplementPasteBlockedNudge,
@@ -75,7 +79,7 @@ import {
   SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE_SOFT,
 } from "./agentExplorationBudget";
 import { buildReplyAccuracyHint } from "../src/services/agentReplyAccuracy";
-import { buildBehaviorContradictionHint, buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildBuildWriteBlockedHint, buildImplementFollowUpHint, buildImplementationStatusHint, buildSessionAuditHint, buildUiDefectBuildHint, buildWriteToolBlockedMessage, isAccuracyConsultativePrompt, isAgentStepClarificationPrompt, isBehaviorContradictionPrompt, isCodeReviewPrompt, isConsultativeUserPrompt, isImplementationStatusPrompt, isImplementFollowUpRun, isSameIssueFollowUpRun, isSessionAuditPrompt, isUiDefectReportPrompt, isUserErrorQuotePrompt, historySuggestsActiveImplementation, historySuggestsQuotePositionFix } from "../src/services/agentUserIntent";
+import { buildBehaviorContradictionHint, buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildBuildWriteBlockedHint, buildImplementFollowUpHint, buildImplementationStatusHint, buildLocateStatusFollowUpHint, buildSessionAuditHint, buildUiDefectBuildHint, buildWriteToolBlockedMessage, isAccuracyConsultativePrompt, isAgentStepClarificationPrompt, isBehaviorContradictionPrompt, isCodeReviewPrompt, isConsultativeUserPrompt, isImplementationStatusPrompt, isImplementFollowUpRun, isLocateStatusFollowUpPrompt, isSameIssueFollowUpRun, isSessionAuditPrompt, isUiAppearanceQuestionPrompt, isUiDefectReportPrompt, isUserErrorQuotePrompt, historySuggestsActiveImplementation, historySuggestsQuotePositionFix } from "../src/services/agentUserIntent";
 import { detectProjectRuntimeProfile, buildRuntimeAwarenessHint } from "./agentRuntimeHint";
 import { detectUserNegation, detectUserFailureReport, historyRecentUserFailureReport } from "../src/services/agentContinuation";
 import { resolveOriginalTaskFromResumePrompt } from "../src/services/agentRecovery";
@@ -103,6 +107,7 @@ import {
   isLowSignalVisionLocateGrep,
   isOverlyBroadVisionGrep,
   isSearchFilesContentQuery,
+  isVisionGrepLowSpread,
   readLineRangeFromArgs,
   recordReadRange,
   sanitizeAgentUserVisibleText,
@@ -152,6 +157,9 @@ import {
 } from "./vibeFs";
 import { runWebExtract, runWebSearch } from "./webExtract";
 import {
+  buildConsultativeUiAppearanceHint,
+  buildConsultativeAppearanceAnswerAfterReadHint,
+  buildConsultativeUiAppearanceRetryHint,
   buildModelIdentityHint,
   buildConsultativeVisibleShellEmptyInnerHint,
   buildUnreconciledEmptyShellRetryHint,
@@ -172,6 +180,8 @@ import {
   shouldBypassVisionFirstTurn,
   shouldRequireVisionFirstTurn,
   shouldRunVisionAnchorPrefgrep,
+  consultativeAppearanceNeedsVueRead,
+  isSpeculativeStyleAnswer,
   isUnreconciledEmptyShellAnswer,
   suggestsEmbeddedLayoutMisread,
   suggestsVisibleShellEmptyInner,
@@ -288,6 +298,8 @@ const MAX_TOOL_RESULT_MODEL_CHARS = 10_000;
 const MAX_AGENT_CONTEXT_CHARS = 200_000;
 export const EXECUTE_PLAN_MAX_CONTEXT_CHARS = 100_000;
 export const ASK_MAX_CONTEXT_CHARS = 80_000;
+/** Lighter cap for screenshot UI appearance consult — avoids 90k+ turn-1 model stalls. */
+export const CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS = 48_000;
 /** Proactively compress older tool outputs above this size to reduce model latency. */
 export const SOFT_COMPACT_CONTEXT_CHARS = 36_000;
 const PLAN_MAX_CONTEXT_CHARS = 150_000;
@@ -349,6 +361,20 @@ export function compactMessagesForModel(
     };
     total = result.reduce((sum, message) => sum + messageCharSize(message), 0);
     if (total <= compressTarget) break;
+  }
+
+  if (total > maxContextChars) {
+    const systemIdx = result.findIndex((message) => message.role === "system");
+    if (systemIdx >= 0) {
+      const sysContent = String(result[systemIdx]?.content || "");
+      const excess = total - maxContextChars;
+      if (sysContent.length > excess + 500) {
+        result[systemIdx] = {
+          ...result[systemIdx],
+          content: `${sysContent.slice(0, sysContent.length - excess - 80)}\n…（system 上下文已截断）`,
+        };
+      }
+    }
   }
 
   return result;
@@ -728,9 +754,10 @@ function emitUserVisibleAssistantMessage(
   onEvent: RunVibeAgentParams["onEvent"],
   text: string,
   streamedChars: number,
+  options?: { force?: boolean },
 ): void {
   const visible = sanitizeAgentUserVisibleText(text);
-  if (visible && !streamedChars) {
+  if (visible && (!streamedChars || options?.force)) {
     onEvent({ type: "message", data: { text: visible } });
   }
 }
@@ -1001,6 +1028,27 @@ async function readStagedFileContent(
   return result?.ok ? result.content : null;
 }
 
+async function isAgentsGuideOnlyPath(projectRoot: string, displayPath: string): Promise<boolean> {
+  const base = path.basename(displayPath).replace(/\.(vue|tsx?|jsx?)$/i, "");
+  if (!base || base.length < 3) return false;
+  const result = await grepInProject(projectRoot, base, 24);
+  if (!result.ok || !result.matches.length) return false;
+  return result.matches.every(
+    (m) => /AGENTS\.md$/i.test(m.relative) || /\.test\.(ts|tsx)$/i.test(m.relative),
+  );
+}
+
+function recordGrepHitVueFiles(
+  toolGuard: ToolGuardContext | undefined,
+  matches: Array<{ relative: string }>,
+): void {
+  if (!toolGuard?.visionLocateActive) return;
+  const vueFiles = matches.filter((m) => m.relative.endsWith(".vue")).map((m) => m.relative);
+  if (!vueFiles.length) return;
+  if (!toolGuard.grepHitVueFiles) toolGuard.grepHitVueFiles = new Set();
+  for (const file of vueFiles) toolGuard.grepHitVueFiles.add(file);
+}
+
 export async function executeTool(
   projectRoot: string,
   name: string,
@@ -1055,7 +1103,15 @@ export async function executeTool(
     const resolved = resolveReadablePath(root, filePath);
     if (!resolved.ok) return `错误：${resolved.error}`;
     const fileStat = await fs.promises.stat(resolved.path).catch(() => null);
-    if (!fileStat?.isFile()) return `错误：${resolved.displayPath} 不存在或无法读取`;
+    if (!fileStat?.isFile()) {
+      if (await isAgentsGuideOnlyPath(root, resolved.displayPath)) {
+        return (
+          `错误：${resolved.displayPath} 不存在或无法读取。` +
+          "该路径可能仅为 AGENTS.md 术语别名；请 grep 读图可见文案或 kebab-case class 定位真实组件，勿重复 read 此路径。"
+        );
+      }
+      return `错误：${resolved.displayPath} 不存在或无法读取`;
+    }
     let content = readCache?.get(resolved.key) ?? null;
     if (content === null) {
       content = await readStagedFileContent(resolved, stage);
@@ -1114,9 +1170,14 @@ export async function executeTool(
     if (
       toolGuard?.visionLocateActive &&
       toolGuard.visionAnchorQuotes?.length &&
-      isOverlyBroadVisionGrep(pattern, toolGuard.visionAnchorQuotes)
+      isOverlyBroadVisionGrep(pattern, toolGuard.visionAnchorQuotes, [
+        ...(toolGuard.visionNarrativeText ? [toolGuard.visionNarrativeText] : []),
+      ])
     ) {
-      return buildOverlyBroadVisionGrepMessage(pattern, toolGuard.visionAnchorQuotes);
+      const probe = await grepInProject(root, pattern, 10);
+      if (!(probe.ok && isVisionGrepLowSpread(probe.matches))) {
+        return buildOverlyBroadVisionGrepMessage(pattern, toolGuard.visionAnchorQuotes);
+      }
     }
     if (toolGuard?.visionLocateActive && isLowSignalVisionLocateGrep(pattern)) {
       return buildLowSignalVisionLocateGrepMessage(pattern);
@@ -1147,6 +1208,7 @@ export async function executeTool(
       .map((m) => `${m.relative}:${m.line}: ${m.text}`)
       .join("\n");
     grepCache?.set(grepKey, output);
+    recordGrepHitVueFiles(toolGuard, result.matches);
     return output;
   }
 
@@ -1471,6 +1533,12 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     !isPlanExplore &&
     !isExecutePlan &&
     Boolean(resumeOriginalTask && isConsultativeUserPrompt(resumeOriginalTask));
+  const locateStatusFollowUpRun =
+    !isAsk &&
+    !isPlanExplore &&
+    !isExecutePlan &&
+    !implementFollowUpRun &&
+    isLocateStatusFollowUpPrompt(prompt, params.history);
   const readOnlyBuildRun =
     !isAsk &&
     !isPlanExplore &&
@@ -1478,7 +1546,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     (isConsultativeUserPrompt(prompt) ||
       consultativeResumeRun ||
       codeReviewRun ||
-      sessionAuditRun) &&
+      sessionAuditRun ||
+      locateStatusFollowUpRun) &&
     !implementFollowUpRun;
   const accuracyConsultativeRun =
     readOnlyBuildRun && isAccuracyConsultativePrompt(resumeOriginalTask ?? prompt);
@@ -1487,6 +1556,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     isImplementationStatusPrompt(resumeOriginalTask ?? prompt) &&
     historySuggestsActiveImplementation(params.history);
   const imageDataUrls = sanitizeImageDataUrls(params.imageDataUrls);
+  const consultativeVisionRun = imageDataUrls.length > 0 && (isAsk || readOnlyBuildRun);
+  const consultativeUiAppearanceRun =
+    readOnlyBuildRun && consultativeVisionRun && isUiAppearanceQuestionPrompt(prompt);
   const uiDefectBuildRun =
     !isAsk &&
     !isPlanExplore &&
@@ -1503,9 +1575,11 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     ? EXECUTE_PLAN_MAX_CONTEXT_CHARS
     : isPlanExplore
       ? PLAN_MAX_CONTEXT_CHARS
-      : isAsk
-        ? ASK_MAX_CONTEXT_CHARS
-        : MAX_AGENT_CONTEXT_CHARS;
+      : consultativeUiAppearanceRun
+        ? CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS
+        : isAsk
+          ? ASK_MAX_CONTEXT_CHARS
+          : MAX_AGENT_CONTEXT_CHARS;
 
   const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
   const openFileRel = openFile?.relative;
@@ -1563,11 +1637,17 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     projectSkillsBlock,
     explorationArchiveBlock,
   ] = await Promise.all([
-    isExecutePlan ? Promise.resolve(null) : buildProjectContext(projectRoot),
-    readProjectMemory(projectRoot),
-    readProjectAgentsGuide(projectRoot),
-    buildProjectSkillsPromptBlock(projectRoot, prompt),
-    buildExplorationArchivePromptBlock(projectRoot, prompt),
+    isExecutePlan || consultativeUiAppearanceRun ? Promise.resolve(null) : buildProjectContext(projectRoot),
+    consultativeUiAppearanceRun
+      ? Promise.resolve({ ok: false as const, content: "", truncated: false })
+      : readProjectMemory(projectRoot),
+    consultativeUiAppearanceRun
+      ? Promise.resolve({ ok: false as const, content: "", truncated: false })
+      : readProjectAgentsGuide(projectRoot),
+    consultativeUiAppearanceRun ? Promise.resolve("") : buildProjectSkillsPromptBlock(projectRoot, prompt),
+    consultativeUiAppearanceRun
+      ? Promise.resolve("")
+      : buildExplorationArchivePromptBlock(projectRoot, prompt),
   ]);
 
   let projectContextBlock = "";
@@ -1578,6 +1658,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     projectContextBlock = isAsk
       ? formatProjectContextForPrompt(projectContextOrNull)
       : formatProjectContextForBuild(projectContextOrNull);
+  } else if (consultativeUiAppearanceRun) {
+    projectContextBlock = `\n\n项目根：${projectRoot}（咨询只读·UI 观感题，已省略全项目扫描以加快首包）`;
   }
 
   const projectMemoryBlock =
@@ -1598,32 +1680,37 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   const runtimeProfile = detectProjectRuntimeProfile(projectRoot);
   const runtimeAwarenessBlock = buildRuntimeAwarenessHint(runtimeProfile);
 
-  const systemPrompt =
-    (isAsk
+  const systemPromptCore = consultativeUiAppearanceRun
+    ? [
+        "你是编程助手（Build·咨询只读）。用户附截图询问 UI 观感/CSS；须 grep/read 定位组件 `<style>` 或 scss 规则后作答，禁止 patch_file / write_file。",
+        "回答用中文；须引用 read 到的 background / opacity / var(--*) 等，勿猜测。",
+        buildConsultativeBuildHint(),
+        projectContextBlock,
+      ].join("\n")
+    : isAsk
       ? buildAskSystemPrompt(projectRoot, openFilePath, openFileSnippet, model) +
         (behaviorContradictionRun ? buildBehaviorContradictionHint() : "")
       : isExecutePlan
-      ? buildSystemPrompt(projectRoot, openFilePath, model)
-      : isPlanExplore
-      ? buildPlanSystemPrompt(projectRoot, openFilePath, openFileSnippet, model)
-      : buildSystemPrompt(projectRoot, openFilePath, model) +
-        (readOnlyBuildRun ? buildConsultativeBuildHint() : "") +
-        (behaviorContradictionRun ? buildBehaviorContradictionHint() : "") +
-        (codeReviewRun ? buildCodeReviewHonestyNudge(userRecentlyReportedFailure) : "") +
-        (userErrorQuoteRun ? buildUserErrorQuoteHint() : "") +
-        (userFailureReportRun ? buildUserFailureReportNudge() : "") +
-        (implementationStatusRun ? buildImplementationStatusHint() : "") +
-        (uiDefectBuildRun ? buildUiDefectBuildHint() : "") +
-        (implementFollowUpRun ? buildImplementFollowUpHint(historySuggestsQuotePositionFix(params.history)) : "") +
-        (sameIssueFollowUpRun ? buildSameIssueFollowUpHint() : "") +
-        (sessionAuditRun ? buildSessionAuditHint() : "") +
-        (agentStepClarifyRun ? buildAgentStepClarificationHint() : "")) +
-    projectContextBlock +
-    agentsGuideBlock +
-    projectSkillsBlock +
-    projectMemoryBlock +
-    explorationArchiveBlock +
-    runtimeAwarenessBlock;
+        ? buildSystemPrompt(projectRoot, openFilePath, model)
+        : isPlanExplore
+          ? buildPlanSystemPrompt(projectRoot, openFilePath, openFileSnippet, model)
+          : buildSystemPrompt(projectRoot, openFilePath, model) +
+            (readOnlyBuildRun ? buildConsultativeBuildHint() : "") +
+            (behaviorContradictionRun ? buildBehaviorContradictionHint() : "") +
+            (codeReviewRun ? buildCodeReviewHonestyNudge(userRecentlyReportedFailure) : "") +
+            (userErrorQuoteRun ? buildUserErrorQuoteHint() : "") +
+            (userFailureReportRun ? buildUserFailureReportNudge() : "") +
+            (implementationStatusRun ? buildImplementationStatusHint() : "") +
+            (uiDefectBuildRun ? buildUiDefectBuildHint() : "") +
+            (implementFollowUpRun ? buildImplementFollowUpHint(historySuggestsQuotePositionFix(params.history)) : "") +
+            (sameIssueFollowUpRun ? buildSameIssueFollowUpHint() : "") +
+            (sessionAuditRun ? buildSessionAuditHint() : "") +
+            (locateStatusFollowUpRun ? buildLocateStatusFollowUpHint() : "") +
+            (agentStepClarifyRun ? buildAgentStepClarificationHint() : "");
+
+  const systemPrompt = consultativeUiAppearanceRun
+    ? `${systemPromptCore}\n${runtimeAwarenessBlock}`
+    : `${systemPromptCore}${projectContextBlock}${agentsGuideBlock}${projectSkillsBlock}${projectMemoryBlock}${explorationArchiveBlock}${runtimeAwarenessBlock}`;
 
   const writeStage = isAsk || isPlanExplore || readOnlyBuildRun ? null : createWriteStage();
   const readCache = new Map<string, string>();
@@ -1677,7 +1764,12 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     { role: "user", content: userContent },
   ];
   let visionFallbackApplied = false;
-  const consultativeVisionRun = imageDataUrls.length > 0 && (isAsk || readOnlyBuildRun);
+  let consultativeForceAnswerPending = locateStatusFollowUpRun;
+  let lastConsultativeExploreSig = "";
+  let consultativeDuplicateExploreHits = 0;
+  if (readOnlyBuildRun && consultativeVisionRun && segmentMaxTurns !== undefined) {
+    segmentMaxTurns = Math.min(segmentMaxTurns, 6);
+  }
   const visionLocateSingleTurnRun = shouldBypassVisionFirstTurn({
     imageCount: imageDataUrls.length,
     consultativeVisionRun,
@@ -1688,6 +1780,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   }
   if (visionLocateSingleTurnRun && accuracyConsultativeRun) {
     messages.push({ role: "system", content: buildConsultativeAccuracyTraceHint() });
+  }
+  if (visionLocateSingleTurnRun && isUiAppearanceQuestionPrompt(prompt)) {
+    messages.push({ role: "system", content: buildConsultativeUiAppearanceHint() });
   }
   let visionFirstTurnPending = shouldRequireVisionFirstTurn(
     imageDataUrls.length,
@@ -1907,7 +2002,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     });
 
     const toolsForTurn = (() => {
-      if (visionFirstTurnPending || forceTextOutput) return [];
+      if (visionFirstTurnPending || forceTextOutput || consultativeForceAnswerPending) return [];
       if (agentStepClarifyPending) return [];
       if (forcePatchOutput) {
         return activeTools.filter((t) => WRITE_AGENT_TOOL_NAMES.has(t.function.name));
@@ -1943,6 +2038,20 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     }, 2000);
     const compactedMessages = compactMessagesForModel(messages, maxContextChars);
     const contextChars = compactedMessages.reduce((sum, message) => sum + messageCharSize(message), 0);
+    // #region agent log
+    debugSessionLog(
+      "vibeAgent.ts:turnContext",
+      "compacted context for model turn",
+      {
+        turn,
+        contextChars,
+        messageCount: compactedMessages.length,
+        consultativeUiAppearanceRun,
+        toolsDisabled: toolsForTurn.length === 0,
+      },
+      "H6",
+    );
+    // #endregion
     onEvent({
       type: "status",
       data: {
@@ -2212,8 +2321,12 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       completeVisionFirstTurn(text, false);
       toolGuard.visionMisreadActive = suggestsEmbeddedLayoutMisread(text);
       toolGuard.visionAnchorQuotes = extractVisibleAnchorQuotes(text);
+      toolGuard.visionNarrativeText = text;
       toolGuard.visionLocateActive = toolGuard.visionAnchorQuotes.length > 0 || imageDataUrls.length > 0;
       if (consultativeVisionRun) {
+        if (isUiAppearanceQuestionPrompt(prompt)) {
+          messages.push({ role: "system", content: buildConsultativeUiAppearanceHint() });
+        }
         if (
           shouldRunVisionAnchorPrefgrep({
             consultativeVisionRun,
@@ -2558,7 +2671,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         }
       }
 
-      if (
+      const blockConsultativeFinalize =
+        !consultativeForceAnswerPending &&
         shouldBlockConsultativeVisionLocateFinalize({
           consultativeVisionRun,
           visionLocateActive: toolGuard.visionLocateActive,
@@ -2568,7 +2682,23 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
           prompt,
           replyText: rawText,
           visionFirstTurnText: visionFirstTurnDescriptionText,
-        }) &&
+          grepHitVueFiles: toolGuard.grepHitVueFiles
+            ? [...toolGuard.grepHitVueFiles]
+            : undefined,
+          consultativeReadPaths: toolGuard.consultativeReadPaths,
+        });
+      if (consultativeForceAnswerPending && rawText.trim()) {
+        // #region agent log
+        debugSessionLog(
+          "vibeAgent.ts:forceAnswerBypass",
+          "skipping consultative finalize block — force answer pending",
+          { replyLen: rawText.length, visionLocateReadUsed },
+          "H4",
+        );
+        // #endregion
+      }
+      if (
+        blockConsultativeFinalize &&
         visionConsultativeLocateRetries < MAX_VISION_CONSULTATIVE_LOCATE_RETRIES
       ) {
         visionConsultativeLocateRetries += 1;
@@ -2576,14 +2706,53 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         const unreconciledEmptyShell =
           visionFirstTurnDescriptionText &&
           isUnreconciledEmptyShellAnswer(visionFirstTurnDescriptionText, rawText);
+        const grepHitVueList = toolGuard.grepHitVueFiles ? [...toolGuard.grepHitVueFiles] : [];
+        const appearanceRetry =
+          isUiAppearanceQuestionPrompt(prompt) &&
+          consultativeAppearanceNeedsVueRead(
+            grepHitVueList,
+            toolGuard.consultativeReadPaths,
+            visionLocateReadUsed,
+          ) &&
+          (isSpeculativeStyleAnswer(rawText) || grepHitVueList.length > 0);
+        const appearanceAnswerAfterRead =
+          isUiAppearanceQuestionPrompt(prompt) &&
+          visionLocateReadUsed &&
+          !appearanceRetry;
+        // #region agent log
+        debugSessionLog(
+          "vibeAgent.ts:consultativeBlock",
+          "blocked consultative finalize",
+          {
+            retry: visionConsultativeLocateRetries,
+            visionLocateReadUsed,
+            appearanceRetry,
+            appearanceAnswerAfterRead,
+            replyLen: rawText.length,
+            grepHits: grepHitVueList.length,
+          },
+          "H4",
+        );
+        // #endregion
         messages.push({
           role: "system",
           content: unreconciledEmptyShell
             ? buildUnreconciledEmptyShellRetryHint()
-            : visionAutoGrepHadMatches && !visionLocateReadUsed
-              ? buildVisionConsultativeReadAfterPrefgrepHint(pregrepUniqueFiles)
-              : buildVisionConsultativeLocateRetryHint(toolGuard.visionAnchorQuotes ?? []),
+            : appearanceAnswerAfterRead
+              ? buildConsultativeAppearanceAnswerAfterReadHint()
+              : appearanceRetry
+                ? buildConsultativeUiAppearanceRetryHint(
+                    pregrepUniqueFiles.length ? pregrepUniqueFiles : grepHitVueList,
+                  )
+                : visionAutoGrepHadMatches && !visionLocateReadUsed
+                  ? buildVisionConsultativeReadAfterPrefgrepHint(
+                      pregrepUniqueFiles.length ? pregrepUniqueFiles : grepHitVueList,
+                    )
+                  : buildVisionConsultativeLocateRetryHint(toolGuard.visionAnchorQuotes ?? []),
         });
+        if (appearanceAnswerAfterRead || visionConsultativeLocateRetries >= MAX_VISION_CONSULTATIVE_LOCATE_RETRIES) {
+          consultativeForceAnswerPending = true;
+        }
         onEvent({
           type: "turn_response",
           data: {
@@ -2609,6 +2778,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       }
 
       if (
+        !consultativeForceAnswerPending &&
         shouldBlockConsultativeAccuracyFinalize({
           accuracyConsultative: accuracyConsultativeRun,
           visionLocateToolsUsed,
@@ -2658,7 +2828,16 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
           isFinal: true,
         },
       });
-      emitUserVisibleAssistantMessage(onEvent, rawText, streamedChars);
+      emitUserVisibleAssistantMessage(onEvent, rawText, streamedChars, { force: true });
+      consultativeForceAnswerPending = false;
+      // #region agent log
+      debugSessionLog(
+        "vibeAgent.ts:emitDone",
+        "emitting final answer and done",
+        { turn, replyLen: rawText.length, streamedChars },
+        "H7",
+      );
+      // #endregion
       onEvent({
         type: "status",
         data: {
@@ -2930,6 +3109,51 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     const turnExploreOnly =
       toolCalls.length > 0 && toolCalls.every((call) => READ_ONLY_AGENT_TOOL_NAMES.has(call.function.name));
     if (
+      readOnlyBuildRun &&
+      consultativeVisionRun &&
+      turnExploreOnly &&
+      toolGuard.grepHitVueFiles?.size &&
+      toolCalls.some((c) => c.function.name === "grep")
+    ) {
+      const grepVueList = [...toolGuard.grepHitVueFiles];
+      const reads = toolGuard.consultativeReadPaths ?? [];
+      const unreadVue = grepVueList.filter(
+        (vue) =>
+          !reads.some(
+            (read) =>
+              read.replace(/\\/g, "/").endsWith(vue.replace(/\\/g, "/")) ||
+              read.includes(vue.replace(/\\/g, "/")),
+          ),
+      );
+      if (unreadVue.length > 0) {
+        messages.push({ role: "system", content: buildGrepHitVueReadNudge(unreadVue) });
+      }
+    }
+    if (readOnlyBuildRun && turnExploreOnly && toolCalls.length > 0) {
+      const exploreSig = toolCalls
+        .map((call) => `${call.function.name}:${call.function.arguments || "{}"}`)
+        .sort()
+        .join("|");
+      if (exploreSig && exploreSig === lastConsultativeExploreSig) {
+        consultativeDuplicateExploreHits += 1;
+        if (consultativeDuplicateExploreHits >= 1) {
+          // #region agent log
+          debugSessionLog(
+            "vibeAgent.ts:duplicateExplore",
+            "duplicate explore sig — force answer",
+            { exploreSig: exploreSig.slice(0, 200), hits: consultativeDuplicateExploreHits },
+            "H4",
+          );
+          // #endregion
+          messages.push({ role: "system", content: buildConsultativeDuplicateExploreNudge() });
+          consultativeForceAnswerPending = true;
+        }
+      } else {
+        lastConsultativeExploreSig = exploreSig;
+        consultativeDuplicateExploreHits = 0;
+      }
+    }
+    if (
       patchAnchorLocated &&
       writeStage !== null &&
       !isAsk &&
@@ -3013,6 +3237,30 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         }
         onEvent({ type: "done", data: buildDoneData(writeStage, turn, outputTruncated) });
         return;
+      }
+
+      if (readOnlyBuildRun) {
+        messages.push({
+          role: "system",
+          content: buildConsultativeSegmentCapNudge(turn, totalExploreTurns),
+        });
+        messages.push({
+          role: "system",
+          content: buildAskForceAnswerNudge(Math.max(totalExploreTurns, ASK_MAX_TOTAL_EXPLORE_SOFT)),
+        });
+        segmentMaxTurns = turn + 1;
+        consultativeForceAnswerPending = true;
+        onEvent({
+          type: "status",
+          data: {
+            phase: "consultative_segment_cap",
+            turn,
+            maxTurns: segmentMaxTurns,
+            model,
+            detail: "咨询只读已达段内轮次上限，须输出结论",
+          },
+        });
+        continue;
       }
 
       segmentIndex += 1;
