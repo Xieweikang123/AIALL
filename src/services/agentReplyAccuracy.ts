@@ -18,5 +18,7 @@ export function buildReplyAccuracyHint(): string {
     "13. 外框有内层无：排查时须 grep/read 全局 element 选择器（如 button、input）与组件 scoped 样式是否 padding/box-sizing/color 冲突；compact 控件常见根因是继承全局 padding 裁切内容，勿只调 SVG stroke 或 color。",
     "14. 工具前禁猜：调用 grep/read 前禁止在正文写具体元素身份或「占位/未实现」结论；读图与 read 不一致须显式更正先前猜测。",
     "15. 修复宣称：patch 后须 read 验证再写「已修复」；用户反馈仍无效时须承认前轮未验证成功并换排查方向，禁止重复同一层改动。",
+    "16. 定时/调度类（有无定时任务、何时跑、cron）：read 到 IJob/Job 后须 grep 类名或 Schedule/Trigger/CronSchedule 找注册处并 read；禁止只 trace Execute→Service；答案须含触发时机/频率（代码有则写）。",
+    "17. 目录探索：禁止连续 list_dir 逐级下探超过 2 层；应用 grep/search_files 定位目标目录或符号。",
   ].join("\n");
 }

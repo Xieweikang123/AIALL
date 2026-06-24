@@ -19,6 +19,8 @@ describe("buildReplyAccuracyHint", () => {
     expect(hint).toContain("全局 element");
     expect(hint).toContain("工具前禁猜");
     expect(hint).toContain("修复宣称");
+    expect(hint).toContain("定时/调度类");
+    expect(hint).toContain("list_dir");
   });
 
   it("avoids business-specific terms", () => {

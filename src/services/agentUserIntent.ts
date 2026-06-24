@@ -1,4 +1,5 @@
 import { stripQuotedReplyPrefix } from "./agentContinuation";
+import { assistantProvidedCodeLocationEvidence, PRIOR_DEFINITION_LISTING_RE } from "./agentStructuralPatterns";
 
 /** Explicit change / implementation intent — Build may write. */
 export const IMPLEMENT_INTENT_RE =
@@ -29,8 +30,7 @@ const BEHAVIOR_PURPOSE_PROMPT_RE =
   /(?:啥作用|什么作用|有啥用|有什么用|干嘛用|做啥用|何时用|什么时候用|什么情况下|啥情况下|用来干|用来做什么|什么用途|有何作用)/;
 
 /** Prior assistant listed enum/field values — user now asks purpose of subset. */
-const PRIOR_ENUM_LISTING_RE =
-  /(?:=\s*\d+|NoRefund|PartialRefund|FullRefund|枚举|共有\s*(?:三|几|\d+)\s*(?:种|个))/i;
+const PRIOR_ENUM_LISTING_RE = PRIOR_DEFINITION_LISTING_RE;
 
 /** Resume / plan execution prompts must keep write access. */
 const AUTOMATION_PROMPT_RE = /^\s*(?:【|\[)(?:方案执行|精准修改|效率|系统自动续跑|读图完成)/;
@@ -64,7 +64,7 @@ const UI_DEFECT_REPORT_RE =
   /看到没|你看|你瞧|分明|明显|错位|跑(?:到|去|别的)|飘|歪|不对|坏了|出问题了|有问题|挤一块|重叠|太紧/i;
 
 const UI_DEFECT_SUBJECT_RE =
-  /按钮|控件|布局|位置|样式|界面|面板|输入框|弹窗|浮动|引用|图标/i;
+  /按钮|控件|布局|位置|样式|界面|面板|输入框|弹窗|浮动|图标/i;
 
 /** User asks what an agent investigation step or API attribute means — explain first, not read-only Build. */
 const STEP_CLARIFICATION_RE = /啥意思|什么意思|啥是|是什么|干吗|干嘛|怎么理解|confirm\s*啥|确认.*(?:啥|什么)/i;
@@ -218,12 +218,7 @@ export function historyPriorAssistantLocatedUi(
 ): boolean {
   const last = (history ?? []).filter((m) => m.role === "assistant").slice(-1)[0];
   if (!last?.content?.trim()) return false;
-  const text = last.content;
-  return (
-    /\.vue\b/i.test(text) ||
-    /project-history|background\s*:|var\(--/i.test(text) ||
-    /找到了|已定位|位于\s+`/.test(text)
-  );
+  return assistantProvidedCodeLocationEvidence(last.content);
 }
 
 export function isLocateStatusFollowUpPrompt(

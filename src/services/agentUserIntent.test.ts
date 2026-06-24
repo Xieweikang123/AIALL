@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  FIXTURE_CONTRADICTION_USER,
+  FIXTURE_ENUM_LISTING,
+  FIXTURE_LOCATE_EVIDENCE,
+  FIXTURE_PRIOR_DENIAL,
+} from "./agentTestFixtures";
+import {
   buildAgentStepClarificationHint,
   buildAgentStepClarifyContinueHint,
   buildBehaviorContradictionHint,
@@ -112,8 +118,7 @@ describe("isLocateStatusFollowUpPrompt", () => {
   const priorLocated = [
     {
       role: "assistant" as const,
-      content:
-        "弹窗在 `src/components/vibe/AppToolbar.vue`，`.project-history-dropdown { background: var(--bg-primary); }` 为实色。",
+      content: FIXTURE_LOCATE_EVIDENCE,
     },
   ];
 
@@ -148,14 +153,12 @@ describe("isBehaviorContradictionPrompt", () => {
   const priorDenial = [
     {
       role: "assistant",
-      content: "**不会。** 切换会话不更新 `updatedAt`。",
+      content: FIXTURE_PRIOR_DENIAL,
     },
   ];
 
   it("detects observed behavior contradicting prior negative claim", () => {
-    expect(
-      isBehaviorContradictionPrompt("但是不知道为啥，切换会话，选中的会话自动跑上面了", priorDenial),
-    ).toBe(true);
+    expect(isBehaviorContradictionPrompt(FIXTURE_CONTRADICTION_USER, priorDenial)).toBe(true);
   });
 
   it("rejects implement follow-ups", () => {
@@ -201,15 +204,14 @@ describe("isBehaviorPurposePrompt", () => {
   const enumListingHistory = [
     {
       role: "assistant" as const,
-      content:
-        "RefundType 枚举：NoRefund=0、PartialRefund=1、FullRefund=2，用于 WorkOrder.refundType 字段。",
+      content: FIXTURE_ENUM_LISTING,
     },
   ];
 
   it("detects short purpose follow-up after enum listing", () => {
     expect(isBehaviorPurposePrompt("啥作用", enumListingHistory)).toBe(true);
     expect(
-      isBehaviorPurposePrompt("> Agent: PartialRefund = 1\n> FullRefund = 2\n\n啥作用", enumListingHistory),
+      isBehaviorPurposePrompt("> Agent: FlagPartial = 1\n> FlagFull = 2\n\n啥作用", enumListingHistory),
     ).toBe(true);
   });
 

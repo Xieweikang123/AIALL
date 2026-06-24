@@ -249,13 +249,13 @@ describe("buildAgentResumePrompt", () => {
           },
         ],
       },
-      "> Agent: PartialRefund = 1\n\n啥作用",
+      "> Agent: FlagPartial = 1\n\n啥作用",
       "HTTP 400",
       {
         history: [
           {
             role: "assistant",
-            content: "NoRefund=0、PartialRefund=1、FullRefund=2",
+            content: "FlagNone=0、FlagPartial=1、FlagFull=2",
           },
         ],
       },

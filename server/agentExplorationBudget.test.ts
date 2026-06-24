@@ -80,8 +80,8 @@ describe("agentExplorationBudget", () => {
   });
 
   it("builds grep empty recovery nudge with patterns", () => {
-    const nudge = buildGrepEmptyRecoveryNudge(["switchVibeSession", "fooBar"]);
-    expect(nudge).toContain("switchVibeSession");
+    const nudge = buildGrepEmptyRecoveryNudge(["switchFooContext", "fooBar"]);
+    expect(nudge).toContain("switchFooContext");
     expect(nudge).toContain("禁止重复相同 pattern");
     expect(nudge).toContain("handler/composable");
   });

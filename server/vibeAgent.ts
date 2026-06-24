@@ -78,6 +78,13 @@ import {
   SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE_SOFT,
 } from "./agentExplorationBudget";
 import { buildReplyAccuracyHint } from "../src/services/agentReplyAccuracy";
+import {
+  buildScheduledJobRegistrationNudge,
+  buildConsultativeTopicHints,
+  isScheduledTaskConsultativePrompt,
+  shouldNudgeScheduledJobRegistration,
+} from "../src/services/agentConsultativeTopics";
+import { extractJobClassNamesFromReadPaths } from "../src/services/agentStructuralPatterns";
 import { buildBehaviorContradictionHint, buildConsultativeBuildHint, buildAgentStepClarificationHint, buildAgentStepClarifyContinueHint, buildBuildWriteBlockedHint, buildImplementFollowUpHint, buildImplementationStatusHint, buildLocateStatusFollowUpHint, buildSessionAuditHint, buildUiDefectBuildHint, buildWriteToolBlockedMessage, isAccuracyConsultativePrompt, isAgentStepClarificationPrompt, isBehaviorContradictionPrompt, isBehaviorPurposePrompt, isCodeReviewPrompt, isConsultativeUserPrompt, isImplementationStatusPrompt, isImplementFollowUpRun, isLocateStatusFollowUpPrompt, isSameIssueFollowUpRun, isSessionAuditPrompt, isUiAppearanceQuestionPrompt, isUiDefectReportPrompt, isUserErrorQuotePrompt, historySuggestsActiveImplementation, historySuggestsQuotePositionFix } from "../src/services/agentUserIntent";
 import { detectProjectRuntimeProfile, buildRuntimeAwarenessHint } from "./agentRuntimeHint";
 import { detectUserNegation, detectUserFailureReport, historyRecentUserFailureReport, stripQuotedReplyPrefix } from "../src/services/agentContinuation";
@@ -1203,6 +1210,10 @@ export async function executeTool(
     }
     const result = await grepInProject(root, pattern, maxMatches);
     if (!result.ok) return `错误：${result.error}`;
+    if (toolGuard) {
+      if (!toolGuard.grepPatterns) toolGuard.grepPatterns = [];
+      if (!toolGuard.grepPatterns.includes(pattern)) toolGuard.grepPatterns.push(pattern);
+    }
     if (!result.matches.length) {
       const empty = "（无匹配）";
       grepCache?.set(grepKey, empty);
@@ -1559,6 +1570,11 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     !isExecutePlan &&
     !implementFollowUpRun &&
     isBehaviorPurposePrompt(stripQuotedReplyPrefix(effectiveTaskPrompt.trim()), params.history);
+  const scheduledTaskConsultativeRun =
+    !isPlanExplore &&
+    !isExecutePlan &&
+    !implementFollowUpRun &&
+    isScheduledTaskConsultativePrompt(stripQuotedReplyPrefix(effectiveTaskPrompt.trim()), params.history);
   const accuracyConsultativeRun =
     readOnlyBuildRun && isAccuracyConsultativePrompt(resumeOriginalTask ?? prompt);
   const implementationStatusRun =
@@ -1700,13 +1716,15 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     : isAsk
       ? buildAskSystemPrompt(projectRoot, openFilePath, openFileSnippet, model) +
         (behaviorContradictionRun ? buildBehaviorContradictionHint() : "") +
-        (behaviorPurposeRun ? `\n${buildBehaviorPurposeTraceHint()}` : "")
+        (behaviorPurposeRun ? `\n${buildBehaviorPurposeTraceHint()}` : "") +
+        buildConsultativeTopicHints(stripQuotedReplyPrefix(effectiveTaskPrompt.trim()), params.history)
       : isExecutePlan
         ? buildSystemPrompt(projectRoot, openFilePath, model)
         : isPlanExplore
           ? buildPlanSystemPrompt(projectRoot, openFilePath, openFileSnippet, model)
           : buildSystemPrompt(projectRoot, openFilePath, model) +
             (readOnlyBuildRun ? buildConsultativeBuildHint() : "") +
+            buildConsultativeTopicHints(stripQuotedReplyPrefix(effectiveTaskPrompt.trim()), params.history) +
             (behaviorPurposeRun ? buildBehaviorPurposeTraceHint() : "") +
             (behaviorContradictionRun ? buildBehaviorContradictionHint() : "") +
             (codeReviewRun ? buildCodeReviewHonestyNudge(userRecentlyReportedFailure) : "") +
@@ -1753,6 +1771,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   let uiDefectForcePatchNudgeSent = false;
   let patchAnchorForcePatchNudgeSent = false;
   let buildExploreForcePatchNudgeSent = false;
+  let scheduledJobRegistrationNudgeSent = false;
   let agentStepClarifyPending = agentStepClarifyRun;
   /** Track patch_file failures per turn for corrective nudges and final summary audit. */
   const patchFailureLog: Array<{ turn: number; path: string; reason: string }> = [];
@@ -3134,6 +3153,26 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       );
       if (unreadVue.length > 0) {
         messages.push({ role: "system", content: buildGrepHitVueReadNudge(unreadVue) });
+      }
+    }
+    if (
+      (isAsk || readOnlyBuildRun) &&
+      scheduledTaskConsultativeRun &&
+      turnExploreOnly &&
+      !scheduledJobRegistrationNudgeSent &&
+      toolGuard.consultativeReadPaths?.length
+    ) {
+      const readPaths = toolGuard.consultativeReadPaths;
+      const grepPatterns = toolGuard.grepPatterns ?? [];
+      if (shouldNudgeScheduledJobRegistration(readPaths, grepPatterns)) {
+        const jobNames = extractJobClassNamesFromReadPaths(readPaths);
+        if (jobNames.length > 0) {
+          messages.push({
+            role: "system",
+            content: buildScheduledJobRegistrationNudge([...new Set(jobNames)]),
+          });
+          scheduledJobRegistrationNudgeSent = true;
+        }
       }
     }
     if (readOnlyBuildRun && turnExploreOnly && toolCalls.length > 0) {

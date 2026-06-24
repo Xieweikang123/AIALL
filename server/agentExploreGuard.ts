@@ -138,6 +138,8 @@ export type ToolGuardContext = {
   patchRecoveryFiles?: Set<string>;
   /** Paths read during consultative read-only runs — for accuracy trace depth checks. */
   consultativeReadPaths?: string[];
+  /** Grep patterns used this run — for scheduled-job registration trace checks. */
+  grepPatterns?: string[];
   /** Full vision-first-turn narrative — extra anchor for grep guard. */
   visionNarrativeText?: string;
   /** .vue files hit by grep during vision locate phase. */

@@ -1,6 +1,7 @@
 /** Consultative behavior-purpose Q&A — trace usage branches before finalize. */
 
 import { isDeferredBehaviorAnswerReply } from "./consultativeAccuracyTrace";
+import { DEFINITION_VALUE_TOKEN_RE } from "../src/services/agentStructuralPatterns";
 
 /** Reply hedges purpose without citing code branches or call sites. */
 export function isSpeculativeBehaviorPurposeReply(text: string): boolean {
@@ -18,8 +19,7 @@ export function isSpeculativeBehaviorPurposeReply(text: string): boolean {
   return false;
 }
 
-const ENUM_VALUE_LINE_RE =
-  /(?:=\s*\d+|NoRefund|PartialRefund|FullRefund|= 0|= 1|= 2)/gi;
+const ENUM_VALUE_LINE_RE = DEFINITION_VALUE_TOKEN_RE;
 
 /** Lists enum/field values again without explaining runtime branches. */
 export function isEnumListingWithoutUsageReply(text: string): boolean {

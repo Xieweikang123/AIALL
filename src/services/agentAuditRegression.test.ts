@@ -5,35 +5,36 @@ import {
   isBehaviorContradictionPrompt,
   isConsultativeUserPrompt,
 } from "./agentUserIntent";
+import { isScheduledTaskConsultativePrompt, shouldNudgeScheduledJobRegistration, buildConsultativeTopicHints } from "./agentConsultativeTopics";
 import {
   CONSULTATIVE_BUILD_EXPLORE_TURN_BUDGET,
   buildConsultativeExploreBudgetNudge,
   buildGrepEmptyRecoveryNudge,
 } from "../../server/agentExplorationBudget";
+import {
+  FIXTURE_CONTRADICTION_USER,
+  FIXTURE_FOO_BACKFILL_JOB,
+  FIXTURE_BACKFILL_SERVICE,
+  FIXTURE_PRIOR_DENIAL,
+  FIXTURE_SCHEDULED_TASK_QUESTION,
+} from "./agentTestFixtures";
 
-/** Regression fixtures from audited Vibe session (structure only, no business binding). */
+/** Structural regression — generic fixtures only, no audited session binding. */
 describe("agent audit regression fixtures", () => {
-  it("treats behavior sorting question as consultative read-only", () => {
-    expect(isConsultativeUserPrompt("会话列表按啥排序的？")).toBe(true);
+  it("treats list-sorting question as consultative read-only", () => {
+    expect(isConsultativeUserPrompt("列表按啥字段排序的？")).toBe(true);
     const hint = buildConsultativeBuildHint();
     expect(hint).toContain("直接调用方");
     expect(hint).toContain("禁止 patch_file");
   });
 
-  it("treats switch-updatedAt question as consultative", () => {
-    expect(isConsultativeUserPrompt("切换会话，会更新 updatedAt 吗？")).toBe(true);
+  it("treats context-touchMark question as consultative", () => {
+    expect(isConsultativeUserPrompt("切换上下文，会更新 touchMark 吗？")).toBe(true);
   });
 
-  it("detects contradiction after prior denial about switch side effects", () => {
-    const history = [
-      {
-        role: "assistant",
-        content: "**不会。** 切换会话不更新 `updatedAt`。",
-      },
-    ];
-    expect(
-      isBehaviorContradictionPrompt("但是不知道为啥，切换会话，选中的会话自动跑上面了", history),
-    ).toBe(true);
+  it("detects contradiction after prior denial about side effects", () => {
+    const history = [{ role: "assistant", content: FIXTURE_PRIOR_DENIAL }];
+    expect(isBehaviorContradictionPrompt(FIXTURE_CONTRADICTION_USER, history)).toBe(true);
     expect(buildBehaviorContradictionHint()).toContain("调用方");
   });
 
@@ -42,9 +43,19 @@ describe("agent audit regression fixtures", () => {
     expect(buildConsultativeExploreBudgetNudge(4)).toContain("咨询只读");
   });
 
-  it("covers wrong grep symbol recovery from audit turn 2", () => {
-    const nudge = buildGrepEmptyRecoveryNudge(["switchVibeSession"]);
-    expect(nudge).toContain("switchVibeSession");
-    expect(nudge).not.toMatch(/updatedAt|FilePanel/i);
+  it("covers grep empty recovery with arbitrary symbol", () => {
+    const nudge = buildGrepEmptyRecoveryNudge(["switchFooContext"]);
+    expect(nudge).toContain("switchFooContext");
+    expect(nudge).not.toMatch(/touchMark|BarPanel/i);
+  });
+
+  it("scheduled-task: nudge when Job read without registration trace", () => {
+    expect(isScheduledTaskConsultativePrompt(FIXTURE_SCHEDULED_TASK_QUESTION)).toBe(true);
+    expect(
+      buildConsultativeTopicHints(FIXTURE_SCHEDULED_TASK_QUESTION),
+    ).toContain("CronSchedule");
+    expect(shouldNudgeScheduledJobRegistration([FIXTURE_FOO_BACKFILL_JOB], [FIXTURE_BACKFILL_SERVICE])).toBe(
+      true,
+    );
   });
 });

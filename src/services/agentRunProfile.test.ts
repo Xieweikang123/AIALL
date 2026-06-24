@@ -260,13 +260,13 @@ describe("resolveAgentRunProfile", () => {
           { running: false, name: "grep", turn: 1, ok: true },
         ],
       },
-      "> Agent: PartialRefund = 1\n\n啥作用",
+      "> Agent: FlagPartial = 1\n\n啥作用",
       "build",
       undefined,
       [
         {
           role: "assistant",
-          content: "共有三种：NoRefund=0、PartialRefund=1、FullRefund=2",
+          content: "共有三种：FlagNone=0、FlagPartial=1、FlagFull=2",
         },
       ],
     );
