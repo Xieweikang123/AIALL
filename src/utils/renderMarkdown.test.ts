@@ -96,4 +96,20 @@ describe("renderMarkdown", () => {
     expect(html).toContain("size?:");
     expect(html).toContain("proportional");
   });
+
+  it("breaks inline numbered lists into separate list items", () => {
+    const html = renderMarkdown(
+      "发现 4 个 bug：1. `VibeChatMessageItem` 缺字段 2. AgentToolStep 未导出 3. turnTraces 缺少 hasToolCalls 4. `CodeMonacoEditor.vue` 缺少导入",
+    );
+    expect(html).toContain("<ol");
+    expect(html.match(/<li/g)?.length).toBe(4);
+    expect(html).toContain("VibeChatMessageItem");
+    expect(html).toContain("CodeMonacoEditor.vue");
+  });
+
+  it("breaks inline numbered lists in lite streaming mode", () => {
+    const html = renderMarkdownLite("修复如下：1. 第一项 2. 第二项");
+    expect(html).toContain("<ol");
+    expect(html.match(/<li/g)?.length).toBe(2);
+  });
 });

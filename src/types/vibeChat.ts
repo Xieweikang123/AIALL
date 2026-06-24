@@ -1,5 +1,6 @@
 import type { AgentRoundGroup } from "../services/agentRoundGroups";
 import type { AgentToolStep } from "../utils/toolHelpers";
+export type { AgentToolStep };
 import type { PersistedChatMessage } from "../services/vibeChatStorage";
 import type { VibeAgentSseEvent } from "../services/vibeAgentClient";
 

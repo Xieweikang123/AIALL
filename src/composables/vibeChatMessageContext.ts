@@ -19,6 +19,10 @@ export interface VibeChatMessageItem {
   agentAbortReason?: string;
   agentFailureReason?: string;
   agentFailureDetail?: string;
+  agentFailed?: boolean;
+  agentRecoverable?: boolean;
+  agentMaxTurns?: number;
+  agentContext?: import("../services/vibeChatStorage").PersistedAgentContext;
 }
 
 export interface VibeChatMessageContext {

@@ -1,10 +1,11 @@
 <template>
   <div class="agent-feed">
-    <AgentTimelineFeed
+    <AgentInlineFeed
       v-if="showTimeline"
-      :blocks="visibleBlocks"
+      :items="inlineFeed.items"
       :is-running="isRunning"
-      :compact-tools="compactFeed"
+      :has-answer="inlineFeed.hasAnswer"
+      :tool-count="inlineFeed.toolCount"
       :chat-mode="chatMode"
       :can-execute-plan="canExecutePlan"
       :layout-enhance-ready="layoutEnhanceReady"
@@ -15,7 +16,6 @@
       :resume-label="resumeLabel"
       :current-status="currentStatus"
       :has-running-tool="hasRunningTool"
-      :activity-detailed="activityDetailed"
       @execute-plan="emit('execute-plan')"
       @select-option="(option) => emit('select-option', option)"
       @toggle-debug="emit('toggle-debug')"
@@ -25,15 +25,15 @@
       <template #debug>
         <slot name="debug" />
       </template>
-    </AgentTimelineFeed>
+    </AgentInlineFeed>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import AgentTimelineFeed from "./AgentTimelineFeed.vue";
+import AgentInlineFeed from "./AgentInlineFeed.vue";
 import { useStableAgentAnswer } from "../composables/useStableAgentAnswer";
-import { buildUnifiedAgentTimelineBlocks } from "../services/agentCompactStatus";
+import { buildInlineAgentFeed } from "../services/agentInlineFeed";
 import type { AgentRoundGroupView, AgentRoundTool } from "../services/agentRoundGroups";
 import {
   buildWrittenFilesSummary,
@@ -121,27 +121,23 @@ const showTruncatedWarning = computed(
     isTruncatedAssistantAnswer(displayFinalAnswer.value),
 );
 
-const timelineBlocks = computed(() =>
-  buildUnifiedAgentTimelineBlocks({
+const inlineFeed = computed(() =>
+  buildInlineAgentFeed({
     roundGroups: props.roundGroups,
     answerPreview: displayFinalAnswer.value,
     answerStreaming: Boolean(props.answerStreaming),
     isRunning: props.isRunning,
     activityDetailed: Boolean(props.activityDetailed),
     compactFeed: props.compactFeed,
+    showProcess: props.showProcess,
     agentPhase: props.agentPhase,
     agentDetail: props.agentDetail,
   }),
 );
 
-const visibleBlocks = computed(() => {
-  if (props.showProcess) return timelineBlocks.value;
-  return timelineBlocks.value.filter((block) => block.kind === "answer");
-});
-
 const showTimeline = computed(
   () =>
-    visibleBlocks.value.length > 0 ||
+    inlineFeed.value.items.length > 0 ||
     (props.isRunning && Boolean(props.currentStatus?.trim()) && !displayFinalAnswer.value.trim()),
 );
 </script>

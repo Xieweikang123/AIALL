@@ -80,10 +80,25 @@ function restoreCornerBrackets(html: string): string {
   return html.replaceAll(CORNER_OPEN, "「").replaceAll(CORNER_CLOSE, "」");
 }
 
+/** LLM output often glues ordered lists inline: "如下：1. foo 2. bar". */
+export function normalizeInlineMarkdownBlocks(source: string): string {
+  let result = source;
+  result = result.replace(/([。：；！？)])([ \t]*)(\d+\.\s+)/g, "$1\n\n$3");
+  result = result.replace(
+    /(\S)[ \t]+(\d+\.\s+(?=[\u4e00-\u9fffA-Za-z「『（(`]))/g,
+    "$1\n\n$2",
+  );
+  result = result.replace(
+    /([：:])([ \t]*)([-*•]\s+(?=[\u4e00-\u9fffA-Za-z「『（(]))/g,
+    "$1\n\n$3",
+  );
+  return result;
+}
+
 const NEEDS_PREPARE_RE = /[\\*_\[`「」\uFF0A]/;
 
 function prepareMarkdownSource(text: string): string {
-  const source = String(text || "").trim();
+  const source = normalizeInlineMarkdownBlocks(String(text || "").trim());
   if (!source) return "";
   if (!NEEDS_PREPARE_RE.test(source)) return source;
   const unescaped = source.replace(/\\\*/g, "*").replace(/\\_/g, "_").replace(/\\\[/g, "[");

@@ -5,7 +5,7 @@
   >
     <div class="cursor-debug-body">
       <section
-        v-for="group in groups"
+        v-for="group in filteredGroups"
         :key="`debug-${group.turn}`"
         class="cursor-debug-round"
       >
@@ -73,6 +73,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { AgentRoundGroupView } from "../services/agentRoundGroups";
+import type { PersistedAgentContext } from "../services/vibeChatStorage";
 import {
   messagePreviewLength,
   shouldCollapseRequestMessage,
@@ -81,7 +82,7 @@ import { cleanStatusLogText, formatContextChars } from "../utils/vibeHelpers";
 
 const props = defineProps<{
   groups: AgentRoundGroupView[];
-  agentContext?: { systemPrompt: string; model: string };
+  agentContext?: PersistedAgentContext;
   showDebug: boolean;
 }>();
 

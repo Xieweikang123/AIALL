@@ -8,7 +8,7 @@ import {
   getRecentFeedActions,
   getRunningFeedAction,
   type CursorAgentTimeline,
-  type CursorFeedBlock,
+  type CursorFeedItem,
 } from "./agentCursorFeed";
 import {
   filterDuplicateFeedThoughts,
@@ -51,50 +51,6 @@ function resolveConnectAgentDetail(input: AgentCompactStatusInput): string {
   return agentDetail;
 }
 
-export function buildCursorAgentFeedForMessage(input: AgentCompactStatusInput) {
-  const live = input.live;
-  const answerStreaming = isAgentTimelineAnswerStreaming(
-    input.liveAgentSource,
-    input.isRunning,
-    input.hasRunningTool,
-  );
-  const items = buildCursorAgentFeed({
-    groups: input.roundGroupViews,
-    isRunning: input.isRunning,
-    agentPhase: live?.phase,
-    agentDetail: resolveConnectAgentDetail(input),
-    answerPreview: input.answerPreview,
-    streaming: answerStreaming,
-  });
-  return filterDuplicateFeedThoughts(items, input.answerPreview, {
-    suppressAllWhenBubble:
-      input.isRunning && answerStreaming && Boolean(input.answerPreview.trim()),
-  });
-}
-
-export function buildCursorAgentTimelineForMessage(
-  input: AgentCompactStatusInput,
-): CursorAgentTimeline {
-  const detailed = input.isActivityDetailed;
-  const stepCount = input.msg.tools?.length ?? 0;
-  const compactFeed =
-    input.isRunning && stepCount >= 4 && !detailed;
-  return buildUnifiedAgentTimeline({
-    roundGroups: input.roundGroupViews,
-    answerPreview: input.answerPreview,
-    answerStreaming: isAgentTimelineAnswerStreaming(
-      input.liveAgentSource,
-      input.isRunning,
-      input.hasRunningTool,
-    ),
-    isRunning: input.isRunning,
-    activityDetailed: detailed,
-    compactFeed,
-    agentPhase: input.live?.phase,
-    agentDetail: resolveConnectAgentDetail(input),
-  });
-}
-
 export type UnifiedAgentTimelineInput = {
   roundGroups: AgentRoundGroupView[];
   answerPreview: string;
@@ -106,12 +62,22 @@ export type UnifiedAgentTimelineInput = {
   agentDetail?: string;
 };
 
-/** Single chronological feed for AgentMergedContent (thought → tool → answer). */
-export function buildUnifiedAgentTimeline(
-  input: UnifiedAgentTimelineInput,
-): CursorAgentTimeline {
+export type CursorAgentFeedBuildInput = Pick<
+  UnifiedAgentTimelineInput,
+  | "roundGroups"
+  | "isRunning"
+  | "agentPhase"
+  | "agentDetail"
+  | "answerPreview"
+  | "answerStreaming"
+>;
+
+/** Shared feed pipeline: cursor items with duplicate-thought filtering. */
+export function buildFilteredCursorAgentFeedItems(
+  input: CursorAgentFeedBuildInput,
+): CursorFeedItem[] {
   const trimmedAnswer = input.answerPreview.trim();
-  const items = filterDuplicateFeedThoughts(
+  return filterDuplicateFeedThoughts(
     buildCursorAgentFeed({
       groups: input.roundGroups,
       isRunning: input.isRunning,
@@ -126,6 +92,39 @@ export function buildUnifiedAgentTimeline(
         input.isRunning && input.answerStreaming && Boolean(trimmedAnswer),
     },
   );
+}
+
+export function buildCursorAgentFeedForMessage(input: AgentCompactStatusInput) {
+  const live = input.live;
+  const answerStreaming = isAgentTimelineAnswerStreaming(
+    input.liveAgentSource,
+    input.isRunning,
+    input.hasRunningTool,
+  );
+  return buildFilteredCursorAgentFeedItems({
+    roundGroups: input.roundGroupViews,
+    isRunning: input.isRunning,
+    agentPhase: live?.phase,
+    agentDetail: resolveConnectAgentDetail(input),
+    answerPreview: input.answerPreview,
+    answerStreaming,
+  });
+}
+
+function resolveCompactHasAnswer(input: AgentCompactStatusInput): boolean {
+  if (input.answerPreview.trim()) return true;
+  return isAgentTimelineAnswerStreaming(
+    input.liveAgentSource,
+    input.isRunning,
+    input.hasRunningTool,
+  );
+}
+
+/** Single chronological feed for AgentMergedContent (thought → tool → answer). */
+export function buildUnifiedAgentTimeline(
+  input: UnifiedAgentTimelineInput,
+): CursorAgentTimeline {
+  const items = buildFilteredCursorAgentFeedItems(input);
 
   const detailed = input.activityDetailed;
   const compact = input.compactFeed;
@@ -148,12 +147,6 @@ export function buildUnifiedAgentTimeline(
 
   const blocks = timeline.blocks.filter((block) => block.kind !== "thought");
   return { ...timeline, blocks };
-}
-
-export function buildUnifiedAgentTimelineBlocks(
-  input: UnifiedAgentTimelineInput,
-): CursorFeedBlock[] {
-  return buildUnifiedAgentTimeline(input).blocks;
 }
 
 /** One footer line while running — avoids repeating tool-card details. */
@@ -208,8 +201,10 @@ export function buildCursorCompactLiveStatus(input: AgentCompactStatusInput): st
   const { msg, live } = input;
   if (!live) return null;
   if (buildCursorCompactRunningAction(input)) return null;
-  const timelineAnswer = buildCursorAgentTimelineForMessage(input).answer;
-  if (timelineAnswer && (live.phase === "streaming_model" || live.phase === "planning_tools")) {
+  if (
+    resolveCompactHasAnswer(input) &&
+    (live.phase === "streaming_model" || live.phase === "planning_tools")
+  ) {
     return null;
   }
 

@@ -1,4 +1,5 @@
 import { computed, type Ref } from "vue";
+import type { VibeChatMessage } from "../types/vibeChat";
 import { shouldUseCompactAgentFeed as shouldUseCompactAgentFeedByCount } from "../services/agentCursorFeed";
 import {
   buildAgentRoundGroupViewsForMessage,
@@ -13,6 +14,11 @@ import { createAgentActivityActions } from "./agentActivityPatch";
 import type { AgentMessage, UseAgentMessageOptions } from "./useAgentMessageTypes";
 
 export type { AgentMessage, UseAgentMessageOptions };
+
+/** Cast AgentMessage to VibeChatMessage for view-model functions. */
+function asVibeChatMessage(m: AgentMessage): VibeChatMessage {
+  return m as VibeChatMessage;
+}
 
 export function useAgentMessage(
   msg: Ref<AgentMessage>,
@@ -53,7 +59,7 @@ export function useAgentMessage(
     void agentLiveRevision.value;
     const liveSource = liveAgentSource(m);
     const running = isAgentRunning(m);
-    return buildAgentRoundGroupViewsForMessage(m, {
+    return buildAgentRoundGroupViewsForMessage(asVibeChatMessage(m), {
       isRunning: running,
       live: running
         ? { phase: liveSource.agentPhase ?? "", turn: liveSource.agentTurn }
@@ -62,7 +68,7 @@ export function useAgentMessage(
   }
 
   function isActivityExpanded(m: AgentMessage): boolean {
-    return isAgentActivityExpanded(m, isAgentRunning(m));
+    return isAgentActivityExpanded(asVibeChatMessage(m), isAgentRunning(m));
   }
 
   function isActivityDetailed(m: AgentMessage): boolean {
@@ -76,7 +82,7 @@ export function useAgentMessage(
 
   function agentAnswerPreview(m: AgentMessage): string {
     void agentLiveRevision.value;
-    return resolveAgentAnswerPreview(m, messageViewContext(m));
+    return resolveAgentAnswerPreview(asVibeChatMessage(m), messageViewContext(m));
   }
 
   function timelineAnswerContent(m: AgentMessage): string {
@@ -95,15 +101,15 @@ export function useAgentMessage(
   });
 
   function timelineAnswerStreaming(m: AgentMessage): boolean {
-    return isAgentAnswerStreaming(m, messageViewContext(m));
+    return isAgentAnswerStreaming(asVibeChatMessage(m), messageViewContext(m));
   }
 
   function currentAgentStatus(m: AgentMessage): string {
     void agentLiveRevision.value;
-    return resolveCurrentAgentStatus(m, messageViewContext(m));
+    return resolveCurrentAgentStatus(asVibeChatMessage(m), messageViewContext(m));
   }
 
-  const cursorActivitySummary = (m: AgentMessage) => buildCursorActivitySummary(m);
+  const cursorActivitySummary = (m: AgentMessage) => buildCursorActivitySummary(asVibeChatMessage(m));
 
   return {
     isFolded: computed(() => !isAgentRunning(msg.value) && !isActivityExpanded(msg.value)),
