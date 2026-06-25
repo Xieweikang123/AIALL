@@ -155,7 +155,6 @@ export function usePanelLayout(workspaceRef: Ref<HTMLElement | null>) {
   }
 
   function collapseEditor() {
-    if (chatCollapsed.value) expandChat();
     editorCollapsed.value = true;
     saveEditorCollapsed();
   }

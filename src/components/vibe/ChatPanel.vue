@@ -34,6 +34,13 @@
               </button>
               <span class="session-picker-title" :title="activeSessionTitle || '新会话'">{{ activeSessionTitle || "新会话" }}</span>
               <button
+                v-if="activeSessionId"
+                type="button"
+                class="session-nav-btn"
+                title="复制会话名和路径"
+                @click.stop="$emit('copy-session-name-path', sessionList.find(s => s.id === activeSessionId))"
+              >📋</button>
+              <button
                 v-if="sessionList.length > 1"
                 type="button"
                 class="session-nav-btn"
@@ -776,6 +783,7 @@ const emit = defineEmits<{
   (e: "apply-example", text: string): void;
   (e: "apply-suggestion", suggestion: AgentSuggestion): void;
   (e: "copy-session-info", session: VibeChatSessionMeta): void;
+  (e: "copy-session-name-path", session: VibeChatSessionMeta): void;
   (e: "clear-chat"): void;
   (e: "on-composer-field-keydown", event: KeyboardEvent): void;
   (e: "on-chat-input-box-mousedown"): void;

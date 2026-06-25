@@ -1,5 +1,6 @@
 import { computed, ref } from "vue";
 import {
+  compactProjectSessionRecord,
   deleteVibeChatSession,
   listVibeChatSessions,
   VIBE_CHAT_SESSIONS_LOGICAL_DIR,
@@ -40,6 +41,7 @@ export function useSessionManager(projectPath: () => string) {
       sessionList.value = [];
       return;
     }
+    compactProjectSessionRecord(p);
     sessionList.value = listVibeChatSessions(p);
   }
 

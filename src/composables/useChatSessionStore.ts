@@ -438,9 +438,6 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     const fromSessionId = activeSessionId.value.trim();
     const project = projectPath().trim();
     const fromMessages = fromSessionId ? sessionMessages.getSessionMessages(fromSessionId) : undefined;
-    if (fromSessionId && fromMessages?.length) {
-      saveVibeChatHistory(project, fromMessages, fromSessionId, { touchTimestamp: false });
-    }
     persistComposerDraft?.();
     if (fromSessionId && fromSessionId !== sessionId) {
       finalizeDraftSessionOnLeave(project, fromSessionId);
@@ -448,6 +445,10 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     cancelPendingChatPersistence();
     const gen = ++switchSessionGeneration;
     applySessionSwitch(project, sessionId);
+
+    if (fromSessionId && fromMessages?.length) {
+      saveVibeChatHistory(project, fromMessages, fromSessionId, { touchTimestamp: false, setActive: false });
+    }
 
     if (!projectChatNeedsDiskRestore(project, sessionId)) {
       void scrollToBottom?.(true);

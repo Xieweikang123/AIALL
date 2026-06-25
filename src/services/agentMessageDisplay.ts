@@ -95,7 +95,37 @@ export function appendAssistantStreamDelta(existing: string, delta: string): str
   const trimmedForCheck = delta.trim();
   if (trimmedForCheck && isEnglishToolNarration(trimmedForCheck)) return existing || "";
   if (trimmedForCheck && isAgentToolTurnNarration(trimmedForCheck)) return existing || "";
-  return `${existing || ""}${delta}`;
+  const base = existing || "";
+  if (base && delta && shouldBreakLatinCjkStreamBoundary(base, delta)) {
+    return `${base}\n\n${delta}`;
+  }
+  return `${base}${delta}`;
+}
+
+function shouldBreakLatinCjkStreamBoundary(existing: string, delta: string): boolean {
+  const first = delta[0] ?? "";
+  if (!/[\u4e00-\u9fff]/.test(first)) return false;
+  const tail = existing.trimEnd();
+  const last = tail.slice(-1);
+  if (/[:：]/.test(last)) return true;
+  return /[A-Za-z0-9)]/.test(last);
+}
+
+/** When streamed tool preamble wraps a substantive answer, keep the embedded answer only. */
+export function stripEmbeddedAnswerFromPreamble(container: string, embedded: string): string {
+  const trimmedEmbedded = embedded.trim();
+  if (!trimmedEmbedded) return container;
+  const index = container.indexOf(trimmedEmbedded);
+  if (index <= 0) return container;
+  const prefix = container.slice(0, index).trim();
+  if (!prefix) return trimmedEmbedded;
+  if (isEnglishToolNarration(prefix) || isAgentToolTurnNarration(prefix)) {
+    return trimmedEmbedded;
+  }
+  if (trimmedEmbedded.length >= SUBSTANTIVE_MIN_CHARS && /^[\x00-\x7F\s:：,.;!?'"()\-]+$/.test(prefix)) {
+    return trimmedEmbedded;
+  }
+  return container;
 }
 
 /** Merge streaming turn text without dropping a longer substantive answer. */
@@ -107,7 +137,7 @@ export function mergeAssistantTurnText(existing: string, incoming: string): stri
   if (!prev) return next;
   if (!next) return prev;
   if (prev === next) return prev;
-  if (prev.includes(next)) return prev;
+  if (prev.includes(next)) return stripEmbeddedAnswerFromPreamble(prev, next);
   if (next.includes(prev)) return next;
   if (next.length >= prev.length * 0.85) return next;
   if (prev.length >= SUBSTANTIVE_MIN_CHARS && next.length <= THIN_EPILOGUE_MAX_CHARS) {

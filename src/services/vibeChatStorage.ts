@@ -184,7 +184,6 @@ const CHAT_STORAGE_KEY = "vibe-coding-chat";
 export const STORE_VERSION = 3 as const;
 const MAX_MESSAGES_PER_SESSION = 120;
 const MAX_SESSIONS_PER_PROJECT = 40;
-const SESSION_DEDUP_TIME_WINDOW_MS = 60_000;
 const MAX_STATUS_LOG_LINES = 32;
 const MAX_TURN_TRACES = 24;
 const MAX_NARRATIVE_CHARS = 800;
@@ -472,6 +471,12 @@ function sessionHasLoadedMessages(session: Pick<VibeChatSession, "messages">): b
   );
 }
 
+function sessionMessageAnchor(session: Pick<VibeChatSession, "messages">): string {
+  const firstUser = session.messages.find((m) => m.role === "user");
+  const firstAssistant = session.messages.find((m) => m.role === "assistant");
+  return `${firstUser?.id?.trim() || ""}|${firstAssistant?.id?.trim() || ""}`;
+}
+
 function sessionSignature(
   session: Pick<VibeChatSession, "id" | "title" | "createdAt" | "messages">,
   indexedMessageCount?: number,
@@ -482,37 +487,63 @@ function sessionSignature(
   }
   const firstUser = session.messages.find((m) => m.role === "user")?.content?.trim() || "";
   const firstAssistant = session.messages.find((m) => m.role === "assistant")?.content?.trim() || "";
-  const createdMs = new Date(session.createdAt).getTime();
-  const createdBucket = Number.isFinite(createdMs)
-    ? Math.floor(createdMs / SESSION_DEDUP_TIME_WINDOW_MS)
-    : session.createdAt;
   const messageCount = Math.max(session.messages.length, indexedMessageCount ?? 0);
   return [
     normalizeSessionTitle(session.title),
     messageCount,
-    createdBucket,
+    sessionMessageAnchor(session),
     firstUser.slice(0, 120),
     firstAssistant.slice(0, 120),
   ].join("|");
 }
 
+function pickDedupeSessionWinner(
+  a: VibeChatSession,
+  b: VibeChatSession,
+  preferredSessionIds?: ReadonlySet<string>,
+): VibeChatSession {
+  if (preferredSessionIds?.size) {
+    const aPreferred = preferredSessionIds.has(a.id);
+    const bPreferred = preferredSessionIds.has(b.id);
+    if (aPreferred && !bPreferred) return a;
+    if (bPreferred && !aPreferred) return b;
+  }
+  return a.updatedAt.localeCompare(b.updatedAt) > 0 ? a : b;
+}
+
 function dedupeSessionsBySignature(
   sessions: VibeChatSession[],
   indexMessageCountById?: Map<string, number>,
+  preferredSessionIds?: ReadonlySet<string>,
 ): VibeChatSession[] {
   const seen = new Map<string, VibeChatSession>();
   for (const session of sessions) {
     const signature = sessionSignature(session, indexMessageCountById?.get(session.id));
     const existing = seen.get(signature);
-    if (!existing || session.updatedAt.localeCompare(existing.updatedAt) > 0) {
+    if (!existing) {
       seen.set(signature, session);
+      continue;
     }
+    seen.set(signature, pickDedupeSessionWinner(session, existing, preferredSessionIds));
   }
   return [...seen.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
-function normalizeProjectRecordSessions(record: ProjectChatRecord): ProjectChatRecord {
-  const sessions = dedupeSessionsBySignature(record.sessions);
+function normalizeProjectRecordSessions(
+  record: ProjectChatRecord,
+  extraPreferredSessionIds?: Iterable<string>,
+): ProjectChatRecord {
+  const preferredSessionIds = new Set<string>();
+  if (record.activeSessionId) preferredSessionIds.add(record.activeSessionId);
+  for (const id of extraPreferredSessionIds || []) {
+    const trimmed = id.trim();
+    if (trimmed) preferredSessionIds.add(trimmed);
+  }
+  const sessions = dedupeSessionsBySignature(
+    record.sessions,
+    undefined,
+    preferredSessionIds.size ? preferredSessionIds : undefined,
+  );
   const activeSessionId = sessions.some((s) => s.id === record.activeSessionId)
     ? record.activeSessionId
     : sessions[0]?.id || "";
@@ -906,8 +937,8 @@ function writeIndex(index: ChatStoreIndex): boolean {
   }
 }
 
-function persistRecord(key: string, record: ProjectChatRecord): boolean {
-  const normalized = normalizeProjectRecordSessions(record);
+function persistRecord(key: string, record: ProjectChatRecord, options?: { preferredSessionIds?: string[] }): boolean {
+  const normalized = normalizeProjectRecordSessions(record, options?.preferredSessionIds);
   memoryByProject.set(key, cloneRecord(normalized));
   const index = readIndex();
   const previous = index.byProject[key];
@@ -1329,7 +1360,14 @@ export function mergeChatStoreFromDiskSnapshot(
     }
   }
 
-  const sessions = dedupeSessionsBySignature([...mergedMap.values()]);
+  const preferredSessionIds = new Set<string>();
+  if (existing.activeSessionId) preferredSessionIds.add(existing.activeSessionId);
+  if (snapshot.activeSessionId) preferredSessionIds.add(snapshot.activeSessionId);
+  const sessions = dedupeSessionsBySignature(
+    [...mergedMap.values()],
+    undefined,
+    preferredSessionIds.size ? preferredSessionIds : undefined,
+  );
   const sessionIdSet = new Set(sessions.map((s) => s.id));
   const activeSessionId =
     existing.activeSessionId && sessionIdSet.has(existing.activeSessionId)
@@ -1556,7 +1594,7 @@ export function saveVibeChatHistory(
   if (setActive) {
     record.activeSessionId = session.id;
   }
-  return { ok: persistRecord(key, record), sessionId: session.id };
+  return { ok: persistRecord(key, record, { preferredSessionIds: [session.id] }), sessionId: session.id };
 }
 
 /** Read session messages without switching active session (for search / preview). */

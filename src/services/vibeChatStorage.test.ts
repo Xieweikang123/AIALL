@@ -730,6 +730,84 @@ describe("v3 chat storage (index + memory)", () => {
     expect(snapshot.sessions[0]?.messages[0]?.content).toBe("从磁盘恢复");
   });
 
+  it("deduplicates identical sessions even when created far apart", () => {
+    const projectPath = "D:/projects/session-dedupe-far-apart";
+    restoreChatStoreFromSnapshot({
+      version: STORE_VERSION,
+      projectPath,
+      activeSessionId: "older",
+      sessions: [
+        {
+          id: "older",
+          title: "重复会话",
+          createdAt: "2026-03-01T08:00:00.000Z",
+          updatedAt: "2026-03-01T08:01:00.000Z",
+          messageCount: 2,
+          messages: [
+            { id: "u1", role: "user", content: "同一个问题" },
+            { id: "a1", role: "assistant", content: "同一个回答" },
+          ],
+        },
+        {
+          id: "newer",
+          title: "重复会话",
+          createdAt: "2026-03-01T08:20:00.000Z",
+          updatedAt: "2026-03-01T08:21:00.000Z",
+          messageCount: 2,
+          messages: [
+            { id: "u1", role: "user", content: "同一个问题" },
+            { id: "a1", role: "assistant", content: "同一个回答" },
+          ],
+        },
+      ],
+    }, projectPath);
+
+    expect(listVibeChatSessions(projectPath).map((s) => s.id)).toEqual(["older"]);
+  });
+
+  it("deduplicates far-apart copies keeping the newer when neither duplicate is active", () => {
+    const projectPath = "D:/projects/session-dedupe-far-apart-newer";
+    restoreChatStoreFromSnapshot({
+      version: STORE_VERSION,
+      projectPath,
+      activeSessionId: "other",
+      sessions: [
+        {
+          id: "older",
+          title: "重复会话",
+          createdAt: "2026-03-01T08:00:00.000Z",
+          updatedAt: "2026-03-01T08:01:00.000Z",
+          messageCount: 2,
+          messages: [
+            { id: "u1", role: "user", content: "同一个问题" },
+            { id: "a1", role: "assistant", content: "同一个回答" },
+          ],
+        },
+        {
+          id: "newer",
+          title: "重复会话",
+          createdAt: "2026-03-01T08:20:00.000Z",
+          updatedAt: "2026-03-01T08:21:00.000Z",
+          messageCount: 2,
+          messages: [
+            { id: "u1", role: "user", content: "同一个问题" },
+            { id: "a1", role: "assistant", content: "同一个回答" },
+          ],
+        },
+        {
+          id: "other",
+          title: "其他会话",
+          createdAt: "2026-03-01T09:00:00.000Z",
+          updatedAt: "2026-03-01T09:01:00.000Z",
+          messageCount: 1,
+          messages: [{ id: "u2", role: "user", content: "别的" }],
+        },
+      ],
+    }, projectPath);
+
+    expect(listVibeChatSessions(projectPath).map((s) => s.id)).toEqual(["other", "newer"]);
+  });
+
   it("deduplicates visually identical sessions in the session list", () => {
     const projectPath = "D:/projects/session-dedupe";
     restoreChatStoreFromSnapshot({

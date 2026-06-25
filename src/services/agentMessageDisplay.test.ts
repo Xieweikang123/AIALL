@@ -129,6 +129,14 @@ describe("resolveAssistantBubbleContent", () => {
     expect(mergeAssistantTurnText(chinese, english)).toBe(chinese);
     expect(isEnglishToolNarration(english)).toBe(true);
   });
+
+  it("drops english stream preamble when final answer was already appended", () => {
+    const preamble =
+      "Now I have enough context to make all 3 patches. Let me also quickly check what session-related props ChatPanel has to ensure the button can emit the right data:";
+    const finalAnswer = "全部验证完毕，所有代码已在磁盘上就位，无需再改。\n\n**已完成的功能全链路：**";
+    const polluted = `${preamble}${finalAnswer}`;
+    expect(mergeAssistantTurnText(polluted, finalAnswer)).toBe(finalAnswer);
+  });
 });
 
 describe("appendAssistantStreamDelta", () => {
@@ -148,6 +156,13 @@ describe("appendAssistantStreamDelta", () => {
 
   it("preserves leading spaces in incremental chunks", () => {
     expect(appendAssistantStreamDelta("句号。", " 下一句")).toBe("句号。 下一句");
+  });
+
+  it("breaks latin tool preamble from following chinese answer chunks", () => {
+    const existing =
+      "Now I have enough context to make all 3 patches. Let me also quickly check what session-related props ChatPanel has to ensure the button can emit the right data:";
+    const delta = "全部验证完毕，所有代码已在磁盘上就位，无需再改。";
+    expect(appendAssistantStreamDelta(existing, delta)).toBe(`${existing}\n\n${delta}`);
   });
 });
 

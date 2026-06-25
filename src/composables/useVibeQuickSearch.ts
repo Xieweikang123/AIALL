@@ -10,6 +10,7 @@ export interface UseVibeQuickSearchOptions {
   switchingSession: Ref<boolean>;
   getSessionMessages: (sessionId: string) => ChatMessage[] | undefined;
   switchSession: (sessionId: string) => void;
+  expandChat: () => void;
   openFile: (filePath: string) => Promise<void>;
   chatPanelRef: Ref<InstanceType<typeof ChatPanel> | null>;
   editorPanelRef: Ref<InstanceType<typeof EditorPanel> | null>;
@@ -67,6 +68,7 @@ export function useVibeQuickSearch(options: UseVibeQuickSearchOptions) {
 
   async function onQuickSearchOpenSession(payload: { sessionId: string; messageId?: string }) {
     if (payload.sessionId && payload.sessionId !== options.activeSessionId.value) {
+      options.expandChat();
       options.switchSession(payload.sessionId);
       await waitUntilSwitchingSessionDone();
     }

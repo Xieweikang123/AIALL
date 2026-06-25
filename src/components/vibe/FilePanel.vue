@@ -64,9 +64,9 @@
           aria-label="展开 AI 助手"
           @click="$emit('expand-chat')"
         >
-          <svg class="file-panel-expand-side-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M3 4.5A1.5 1.5 0 0 1 4.5 3h7A1.5 1.5 0 0 1 13 4.5v7A1.5 1.5 0 0 1 11.5 13h-7A1.5 1.5 0 0 1 3 11.5v-7Z" stroke="currentColor" stroke-width="1.2" />
-            <path d="M6.5 3v10" stroke="currentColor" stroke-width="1.2" />
+          <svg class="file-panel-expand-side-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
+            <path d="M12 12 4 7.5m8 4.5 8-4.5M12 12v9" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
           </svg>
         </button>
       </div>
@@ -198,6 +198,18 @@
                 </button>
                 <button
                   type="button"
+                  class="session-icon-btn"
+                  title="复制会话名和路径"
+                  @click.stop="$emit('copy-session-name-path', s)"
+                >
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M6.5 2.5h-3a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M8.5 1.5h6v6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M14.5 1.5L8 8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                  </svg>
+                </button>
+                <button
+                  type="button"
                   class="session-icon-btn session-icon-btn--danger"
                   title="删除此会话"
                   @click.stop="$emit('remove-session', s.id)"
@@ -299,6 +311,7 @@ const emit = defineEmits<{
   (e: "remove-session", sessionId: string): void;
   (e: "start-new-session"): void;
   (e: "copy-session-info", session: VibeChatSessionMeta): void;
+  (e: "copy-session-name-path", session: VibeChatSessionMeta): void;
   (e: "sync-chat-store-to-disk"): void;
 }>();
 
@@ -374,18 +387,29 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  box-sizing: border-box;
   width: 30px;
   height: 30px;
+  padding: 0;
   border-radius: 8px;
-  border: 1px solid rgba(88, 166, 255, 0.35);
-  background: rgba(31, 111, 235, 0.12);
-  color: rgba(180, 210, 255, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.82);
   cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
 .file-panel-expand-side:hover {
-  background: rgba(31, 111, 235, 0.2);
-  border-color: rgba(88, 166, 255, 0.55);
+  background: rgba(31, 111, 235, 0.14);
+  border-color: rgba(88, 166, 255, 0.45);
+  color: rgba(220, 235, 255, 0.98);
+}
+
+.file-panel-expand-side-icon {
+  display: block;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
 }
 
 .file-panel-tabs {
