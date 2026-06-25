@@ -58,6 +58,7 @@
         @remove-session="removeSession"
         @start-new-session="handleStartNewSession"
         @copy-session-info="copySessionInfo"
+        @copy-session-name-path="copySessionNamePath"
         @sync-chat-store-to-disk="syncChatStoreToDisk"
       >
 
@@ -157,6 +158,7 @@
           layout="sidebar"
           :project-opened="projectOpened"
           :config-ready="configReady"
+          :api-key-ready="apiKeyReady"
           :has-knowledge="knowledgeHasContent"
           :knowledge-draft="knowledgeDraft"
           :knowledge-meta="knowledgeMeta"
@@ -165,6 +167,8 @@
           :knowledge-message="knowledgeMessage"
           :editing="knowledgeEditing"
           :display-body="knowledgeDisplayBody"
+          :saved-body="knowledgeBody"
+          :current-git-head="gitHeadCommit"
           :explore-run="knowledgeExploreRun"
           @start-explore="(depth) => void startKnowledgeExplore(depth)"
           @continue-explore="() => void continueKnowledgeExplore()"
@@ -174,6 +178,7 @@
           @save-draft="() => void saveKnowledgeDraft()"
           @follow-up="(text) => void sendKnowledgeFollowUp(text)"
           @open-file="openKnowledgeFile"
+          @open-source="openKnowledgeSourceFile"
           @expand-chat="expandChat"
           @update:draft="knowledgeDraft = $event"
         />
@@ -233,6 +238,7 @@
           :chat-collapsed="chatCollapsed"
           :project-opened="projectOpened"
           :config-ready="configReady"
+          :api-key-ready="apiKeyReady"
           :has-knowledge="knowledgeHasContent"
           :knowledge-draft="knowledgeDraft"
           :knowledge-meta="knowledgeMeta"
@@ -241,6 +247,8 @@
           :knowledge-message="knowledgeMessage"
           :editing="knowledgeEditing"
           :display-body="knowledgeDisplayBody"
+          :saved-body="knowledgeBody"
+          :current-git-head="gitHeadCommit"
           :explore-run="knowledgeExploreRun"
           @start-explore="(depth) => void startKnowledgeExplore(depth)"
           @continue-explore="() => void continueKnowledgeExplore()"
@@ -250,6 +258,7 @@
           @save-draft="() => void saveKnowledgeDraft()"
           @follow-up="(text) => void sendKnowledgeFollowUp(text)"
           @open-file="openKnowledgeFile"
+          @open-source="openKnowledgeSourceFile"
           @expand-chat="expandChat"
           @update:draft="knowledgeDraft = $event"
         />
@@ -337,6 +346,7 @@
         @collapse-chat="collapseChat"
         @switch-session="switchSession"
         @copy-session-info="copySessionInfo"
+        @copy-session-name-path="copySessionNamePath"
         @remove-session="removeSession"
         @clear-chat="clearChat"
         @apply-example="applyExample"
@@ -502,6 +512,7 @@ import { useVibeQuickSearch } from "../composables/useVibeQuickSearch";
 import { useVibeGlobalShortcuts } from "../composables/useVibeGlobalShortcuts";
 import { useProjectMemory } from "../composables/useProjectMemory";
 import { useProjectKnowledge } from "../composables/useProjectKnowledge";
+import { PROJECT_KNOWLEDGE_REL_PATH } from "../services/vibeProjectKnowledgeClient";
 import { distillExplorationRun } from "../services/explorationDistill";
 import { useAgentRun, type ChatMessage } from "../composables/useAgentRun";
 import { parseAgentSuggestions, type AgentSuggestion } from "../services/agentSuggestions";
@@ -560,6 +571,7 @@ import {
   stripReferenceAttachments,
   stripToolSummaryFromAssistantContent,
   updateVibeChatSessionStatus,
+  vibeChatSessionDiskFilePath,
   type PersistedChatMessage,
   type VibeChatSessionMeta,
 } from "../services/vibeChatStorage";
@@ -649,8 +661,7 @@ function normalizeChatMessages(
       activityExpanded:
         m.activityExpanded ??
         (m.role === "assistant" && hasAgentProcessSteps(m)),
-      activityDetailed:
-        m.activityDetailed ?? (m.role === "assistant" && hasAgentProcessSteps(m)),
+      activityDetailed: m.activityDetailed === true,
       tools: m.tools?.map((t) => ({
         id: t.id,
         name: t.name || "",
@@ -936,7 +947,7 @@ const projectHistoryList = ref<ProjectHistoryEntry[]>([]);
 
 // Git panel composable
 const {
-  gitPanelMode, gitStatus, gitBranch, gitIsRepo, gitStatusKnown, gitLoading, gitError,
+  gitPanelMode, gitStatus, gitBranch, gitHeadCommit, gitIsRepo, gitStatusKnown, gitLoading, gitError,
   gitCommitMessage, gitCommitting, gitGenStep, gitLogEntries, gitLogOpen,
   gitStagedOpen, gitUnstagedOpen, expandedGitLogEntries, selectedGitFiles,
   gitDiffLoadingKey, gitDiffContentCache, gitRemotes, gitTrackingBranch,
@@ -1058,7 +1069,10 @@ function refreshSessionList(path?: string) {
 
 function switchToAdjacentSession(delta: number) {
   const nextId = session.switchToAdjacentSession(delta);
-  if (nextId) switchSession(nextId);
+  if (nextId) {
+    expandChat();
+    switchSession(nextId);
+  }
 }
 
 function onChatDragEnter(e: DragEvent) {
@@ -1116,6 +1130,11 @@ async function startFileWatcherForProject(projectPath: string) {
           );
           if (relevantChanges.length > 0) {
             scheduleGitStatusRefreshFromWatcher();
+            if (
+              relevantChanges.some((change) => isProjectKnowledgeFilePath(change.path))
+            ) {
+              scheduleKnowledgeReloadFromDisk();
+            }
           }
         },
         (error) => {
@@ -1191,17 +1210,40 @@ const {
   continueKnowledgeExplore,
   sendKnowledgeFollowUp,
   stopKnowledgeExplore,
+  leaveProjectKnowledge,
 } = useProjectKnowledge({
   projectPath,
   projectOpened,
   configReady,
+  apiKeyReady,
   aiConfig,
-  gitHead: gitBranch,
+  gitHead: gitHeadCommit,
 });
+
+function normalizeKnowledgePathKey(path: string): string {
+  return path.replace(/\\/g, "/").toLowerCase();
+}
+
+function isProjectKnowledgeFilePath(filePath: string): boolean {
+  const root = projectPath.value.trim().replace(/\\/g, "/").replace(/\/$/, "");
+  if (!root || !filePath.trim()) return false;
+  const expected = normalizeKnowledgePathKey(`${root}/${PROJECT_KNOWLEDGE_REL_PATH}`);
+  const normalized = normalizeKnowledgePathKey(filePath.replace(/\\/g, "/"));
+  return normalized === expected || normalized.endsWith(`/${PROJECT_KNOWLEDGE_REL_PATH.toLowerCase()}`);
+}
+
+function scheduleKnowledgeReloadFromDisk() {
+  if (knowledgeExploreRun.value.running || knowledgeEditing.value) return;
+  void loadKnowledge();
+}
 
 function openKnowledgeFile(relPath: string) {
   const root = projectPath.value.trim().replace(/\\/g, "/").replace(/\/$/, "");
   void openFile(`${root}/${relPath.replace(/^[/\\]+/, "")}`);
+}
+
+function openKnowledgeSourceFile() {
+  openKnowledgeFile(PROJECT_KNOWLEDGE_REL_PATH);
 }
 
 watch([gitPanelMode, projectOpened], ([mode, opened]) => {
@@ -1404,6 +1446,7 @@ const {
   switchingSession,
   getSessionMessages,
   switchSession,
+  expandChat,
   openFile,
   chatPanelRef,
   editorPanelRef,
@@ -1674,6 +1717,23 @@ async function copySessionInfo(session: VibeChatSessionMeta) {
   if (sessionCopyHintTimer) clearTimeout(sessionCopyHintTimer);
   chatStoreSyncMessage.value = ok
     ? `已复制「${session.title}」的会话信息`
+    : "复制失败，请手动选择复制";
+  sessionCopyHintTimer = setTimeout(() => {
+    sessionCopyHintTimer = null;
+    if (chatStoreSyncMessage.value.startsWith("已复制") || chatStoreSyncMessage.value === "复制失败，请手动选择复制") {
+      chatStoreSyncMessage.value = "";
+    }
+  }, 3000);
+}
+
+async function copySessionNamePath(session: VibeChatSessionMeta) {
+  const diskFile = vibeChatSessionDiskFilePath(session.id);
+  const text = `${session.title}\n${diskFile}`;
+  debugLog(`copySessionNamePath: title="${session.title}", path="${diskFile}"`);
+  const ok = await copyText(text);
+  if (sessionCopyHintTimer) clearTimeout(sessionCopyHintTimer);
+  chatStoreSyncMessage.value = ok
+    ? `已复制「${session.title}」的会话名和路径`
     : "复制失败，请手动选择复制";
   sessionCopyHintTimer = setTimeout(() => {
     sessionCopyHintTimer = null;
@@ -2037,6 +2097,7 @@ async function openProjectByPath(dirPath: string) {
   if (sendingSessionIds.size) interruptAgentRun();
   sendingSessionIds.clear();
   chatSending.value = false;
+  leaveProjectKnowledge();
   log("persist-prev");
 
   loadingTree.value = true;
@@ -2435,9 +2496,10 @@ function gitFileCopyName() {
 }
 
 async function onSaveFile() {
+  const savedPath = activeFilePath.value;
   const ok = await saveFile();
-  if (ok) {
-    // Brief visual feedback - the dirty indicator already disappears
+  if (ok && isProjectKnowledgeFilePath(savedPath)) {
+    scheduleKnowledgeReloadFromDisk();
   }
 }
 

@@ -50,11 +50,18 @@ let purifyHookInstalled = false;
  * which breaks GFM bold (e.g. `**text **` stays literal).
  */
 export function normalizeLooseMarkdownEmphasis(source: string): string {
-  let result = source.replace(/\uFF0A/g, "*");
-  // Only trim horizontal whitespace — \s would swallow newlines after closing ** and break block structure.
-  result = result.replace(/([^\s*])[ \t]+\*\*(?!\*)/g, "$1**");
-  result = result.replace(/(?<!\*)\*\*(?!\*)[ \t]+/g, "**");
-  return result;
+  return source
+    .split("\n")
+    .map((line) => {
+      let result = line.replace(/\uFF0A/g, "*");
+      // Repair list markers already glued to bold (`-**路由**` → `- **路由**`).
+      result = result.replace(/^(\s*[-*+])(\*\*)/, "$1 $2");
+      result = result.replace(/^(\s*\d+\.\s+)(\*\*)/, "$1$2");
+      // Trim spaces inside each **pair** (`** 重点 **` / `**简单说：**`).
+      result = result.replace(/\*\*[ \t]*([^*\n]+?)[ \t]*\*\*/g, (_, inner) => `**${inner.trim()}**`);
+      return result;
+    })
+    .join("\n");
 }
 
 const CORNER_OPEN = "\uE000";
@@ -82,24 +89,61 @@ function restoreCornerBrackets(html: string): string {
 
 /** LLM output often glues ordered lists inline: "如下：1. foo 2. bar". */
 export function normalizeInlineMarkdownBlocks(source: string): string {
-  let result = source;
-  result = result.replace(/([。：；！？)])([ \t]*)(\d+\.\s+)/g, "$1\n\n$3");
-  result = result.replace(
-    /(\S)[ \t]+(\d+\.\s+(?=[\u4e00-\u9fffA-Za-z「『（(`]))/g,
-    "$1\n\n$2",
-  );
-  result = result.replace(
-    /([：:])([ \t]*)([-*•]\s+(?=[\u4e00-\u9fffA-Za-z「『（(]))/g,
-    "$1\n\n$3",
-  );
+  return source
+    .split("\n")
+    .map((line) => {
+      // Skip ATX headings (`#### 2. Title`) — otherwise `#` + `2.` gets split into a bogus list.
+      if (/^#{1,6}\s/.test(line)) return line;
+      let result = line;
+      result = result.replace(/([。：；！？)])([ \t]*)(\d+\.\s+)/g, "$1\n\n$3");
+      result = result.replace(
+        /(\S)[ \t]+(\d+\.\s+(?=[\u4e00-\u9fffA-Za-z「『（(`]))/g,
+        "$1\n\n$2",
+      );
+      result = result.replace(
+        /([：:])([ \t]*)([-*•]\s+(?=[\u4e00-\u9fffA-Za-z「『（(]))/g,
+        "$1\n\n$3",
+      );
+      return result;
+    })
+    .join("\n");
+}
+
+/** `####1. Title` → `#### 1. Title` so marked treats it as ATX heading. */
+export function normalizeAtxHeadings(source: string): string {
+  // LLM often indents module headings under a section; 4 spaces become a fenced code block in marked.
+  let result = source.replace(/^[ \t]{1,4}(#{1,6}\S[^\n]*)$/gm, "$1");
+  result = result.replace(/^(#{1,6})([^\s#\n])/gm, "$1 $2");
   return result;
 }
 
-const NEEDS_PREPARE_RE = /[\\*_\[`「」\uFF0A]/;
+/** Remove stray `\` before headings or emoji section lines (`\ 🔧 核心特点`). */
+export function normalizeStrayLineEscapes(source: string): string {
+  return source
+    .replace(/^\\(\s*(?:#{1,6}\s*))/gm, "$1")
+    .replace(/^\\(\s+[^\n\\])/gm, "$1");
+}
+
+/** Insert blank line before list items when glued to prior paragraph/heading line. */
+export function normalizeListBlockBreaks(source: string): string {
+  return source.replace(/([^\n|*+\-])\n([*+\-]\s+)/g, "$1\n\n$2");
+}
+
+/** SSE may glue English tool preamble to Chinese answer (`data:全部验证`). */
+export function normalizeGluedLatinCjkBoundary(source: string): string {
+  return source.replace(/([A-Za-z0-9)])([:：])(?=[\u4e00-\u9fff])/g, "$1$2\n\n");
+}
+
+const NEEDS_PREPARE_RE = /[\\*_\[`「」#\uFF0A]/;
 
 function prepareMarkdownSource(text: string): string {
-  const source = normalizeInlineMarkdownBlocks(String(text || "").trim());
+  let source = String(text || "").trim();
   if (!source) return "";
+  source = normalizeGluedLatinCjkBoundary(source);
+  source = normalizeAtxHeadings(source);
+  source = normalizeStrayLineEscapes(source);
+  source = normalizeListBlockBreaks(source);
+  source = normalizeInlineMarkdownBlocks(source);
   if (!NEEDS_PREPARE_RE.test(source)) return source;
   const unescaped = source.replace(/\\\*/g, "*").replace(/\\_/g, "_").replace(/\\\[/g, "[");
   return protectCornerBracketsForMarkdown(

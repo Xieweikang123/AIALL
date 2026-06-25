@@ -4,9 +4,9 @@ import { renderMarkdown, renderMarkdownLite } from "../utils/renderMarkdown";
 import { renderMermaidInContainer } from "../utils/mermaidRenderer";
 import { parseAiOptions, type AiOption } from "../utils/parseAiOptions";
 import AiOptionButtons from "./AiOptionButtons.vue";
-import { sanitizeMarkdownForDisplay } from "../services/markdownDisplaySanitize";
+import { sanitizeMarkdownForDisplay, sanitizeMarkdownForStreamingDisplay } from "../services/markdownDisplaySanitize";
 import { createStreamingMarkdownThrottle } from "../utils/streamingMarkdownThrottle";
-import { trimIncompleteStreamingMarkdown } from "../utils/streamingMarkdownTrim";
+import { prepareStreamingMarkdownForRender } from "../utils/streamingMarkdownTrim";
 
 const props = withDefaults(
   defineProps<{
@@ -40,8 +40,8 @@ const streamingThrottle = createStreamingMarkdownThrottle(undefined, (text) => {
 function buildStreamingHtml(sourceText: string): string {
   const parsed = props.interactive ? parseAiOptions(sourceText) : null;
   const markdown = parsed?.options.length ? parsed.before : sourceText;
-  const sanitized = sanitizeMarkdownForDisplay(markdown);
-  return renderMarkdownLite(trimIncompleteStreamingMarkdown(sanitized));
+  const sanitized = sanitizeMarkdownForStreamingDisplay(markdown);
+  return renderMarkdownLite(prepareStreamingMarkdownForRender(sanitized));
 }
 
 const effectiveStreaming = computed(() => props.streaming || streamingSettling.value);
@@ -106,7 +106,7 @@ watch(
       streamingMinHeight.value = 0;
     }
     if (props.streaming || streamingSettling.value) {
-      streamingThrottle.pushSource(value, true);
+      streamingThrottle.pushSource(value, props.streaming);
       return;
     }
     streamingThrottle.pushSource(value, false);
@@ -338,6 +338,11 @@ watch([displayHtml, effectiveStreaming], () => {
   font-size: 1.05em;
 }
 
+.msg-markdown :deep(h4) {
+  font-size: 0.98em;
+  color: rgba(240, 245, 250, 0.94);
+}
+
 .msg-markdown :deep(ul),
 .msg-markdown :deep(ol) {
   margin: 0.5em 0 0.75em;
@@ -346,6 +351,15 @@ watch([displayHtml, effectiveStreaming], () => {
 
 .msg-markdown :deep(li) {
   margin: 0.25em 0;
+}
+
+.msg-markdown :deep(li > ul),
+.msg-markdown :deep(li > ol) {
+  margin: 0.35em 0 0.15em;
+}
+
+.msg-markdown :deep(li > p) {
+  margin: 0;
 }
 
 .msg-markdown :deep(blockquote) {

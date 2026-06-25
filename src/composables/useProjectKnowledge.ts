@@ -7,9 +7,13 @@ import {
   type ExploreDepth,
   resolveExploreRequestMaxTurns,
 } from "../services/agentExplore";
+import {
+  classifyExploreKnowledgeIntent,
+  type ExploreKnowledgeIntent,
+} from "../services/knowledgeExplore";
 import { loadWebProxyUrlFromStorage } from "../services/aiLocalConfig";
 import {
-  extractReportBodyForArchive,
+  resolveKnowledgeBodyForSave,
   stripKnowledgeFrontmatter,
 } from "../services/projectReportDisplay";
 import {
@@ -37,6 +41,7 @@ export type KnowledgeExploreRunState = {
   aborted: boolean;
   failed: boolean;
   error: string;
+  intent: ExploreKnowledgeIntent;
 };
 
 function emptyRunState(): KnowledgeExploreRunState {
@@ -50,6 +55,7 @@ function emptyRunState(): KnowledgeExploreRunState {
     aborted: false,
     failed: false,
     error: "",
+    intent: "initial",
   };
 }
 
@@ -59,10 +65,23 @@ type AiConfig = {
   model: string;
 };
 
+type ActiveExploreContext = {
+  projectPath: string;
+  priorBody: string;
+  gitHead?: string;
+  baseExploreRounds: number;
+  intent: ExploreKnowledgeIntent;
+};
+
+function normalizeProjectPath(p: string): string {
+  return p.trim().replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
+}
+
 export function useProjectKnowledge(options: {
   projectPath: Ref<string>;
   projectOpened: Ref<boolean> | ComputedRef<boolean>;
   configReady: Ref<boolean> | ComputedRef<boolean>;
+  apiKeyReady?: Ref<boolean> | ComputedRef<boolean>;
   aiConfig: Ref<AiConfig>;
   gitHead?: Ref<string> | ComputedRef<string>;
 }) {
@@ -77,21 +96,38 @@ export function useProjectKnowledge(options: {
   const exploreRun = ref<KnowledgeExploreRunState>(emptyRunState());
   let abortHandle: { abort: () => void } | null = null;
   let completedTurns = 0;
+  let finalizeInFlight: Promise<void> | null = null;
+  let lastExploreIntent: ExploreKnowledgeIntent = "initial";
+  let activeExploreContext: ActiveExploreContext | null = null;
+
+  function isCurrentProject(path: string): boolean {
+    return normalizeProjectPath(path) === normalizeProjectPath(options.projectPath.value);
+  }
 
   const hasKnowledge = computed(() => Boolean(knowledgeBody.value.trim()));
-  const displayBody = computed(() =>
-    exploreRun.value.running && exploreRun.value.assistantText.trim()
-      ? exploreRun.value.assistantText
-      : editing.value
-        ? knowledgeDraft.value
-        : knowledgeBody.value,
-  );
+  const displayBody = computed(() => {
+    if (editing.value) return knowledgeDraft.value;
+    const streamingText = exploreRun.value.running
+      ? exploreRun.value.assistantText.trim()
+      : "";
+    if (streamingText && !hasKnowledge.value) {
+      return exploreRun.value.assistantText;
+    }
+    if (streamingText && hasKnowledge.value) {
+      return resolveKnowledgeBodyForSave(knowledgeBody.value, exploreRun.value.assistantText, {
+        intent: exploreRun.value.intent === "section_fill" ? "section_fill" : undefined,
+      });
+    }
+    return knowledgeBody.value;
+  });
 
-  async function loadKnowledge() {
+  async function loadKnowledge(loadOptions?: { force?: boolean }) {
     const path = options.projectPath.value.trim();
     if (!path || !options.projectOpened.value) return;
+    if (exploreRun.value.running && !loadOptions?.force) return;
+    if (editing.value && !loadOptions?.force) return;
     knowledgeLoading.value = true;
-    knowledgeMessage.value = "";
+    if (!loadOptions?.force) knowledgeMessage.value = "";
     try {
       const result = await fetchProjectKnowledge(path);
       if (!result.ok) {
@@ -142,6 +178,7 @@ export function useProjectKnowledge(options: {
   function resetExploreRun() {
     exploreRun.value = emptyRunState();
     completedTurns = 0;
+    lastExploreIntent = "initial";
   }
 
   function handleExploreEvent(event: VibeAgentSseEvent) {
@@ -187,26 +224,61 @@ export function useProjectKnowledge(options: {
     }
   }
 
-  async function finalizeExploreRun() {
-    const path = options.projectPath.value.trim();
-    const raw = exploreRun.value.assistantText.trim();
-    if (!path || !raw) return;
-    const body = extractReportBodyForArchive(raw);
-    const saveBody = body || raw;
-    if (!saveBody.trim()) return;
-    const result = await saveProjectKnowledge(path, saveBody, {
-      fromExplore: true,
-      gitHead: options.gitHead?.value?.trim() || knowledgeMeta.value.gitHead,
-      exploreRounds: (knowledgeMeta.value.exploreRounds ?? 0) + 1,
-    });
-    if (result.ok) {
-      knowledgeBody.value = result.body ?? saveBody;
-      knowledgeDraft.value = knowledgeBody.value;
-      knowledgeMeta.value = result.meta ?? {};
-      knowledgeMessage.value = exploreRun.value.aborted ? "已保存不完整知识库" : "知识库已更新";
-    } else {
-      knowledgeMessage.value = result.error || "保存知识库失败";
+  function resolveExploreSaveMessage(saved: boolean): string {
+    if (!saved) {
+      if (exploreRun.value.aborted) return "探索已停止";
+      if (exploreRun.value.failed) return exploreRun.value.error || "探索失败";
+      return "";
     }
+    if (exploreRun.value.failed) return "探索异常结束，已保存已有内容";
+    if (exploreRun.value.aborted) return "已保存不完整知识库";
+    return "知识库已更新";
+  }
+
+  async function finalizeExploreRun() {
+    if (finalizeInFlight) return finalizeInFlight;
+
+    finalizeInFlight = (async () => {
+      const ctx = activeExploreContext;
+      const path = ctx?.projectPath ?? options.projectPath.value.trim();
+      const raw = exploreRun.value.assistantText.trim();
+      const applyToUi = Boolean(path) && isCurrentProject(path);
+      if (!path) return;
+
+      if (!raw) {
+        const hint = resolveExploreSaveMessage(false);
+        if (hint && applyToUi) knowledgeMessage.value = hint;
+        return;
+      }
+
+      const priorBody = ctx?.priorBody ?? knowledgeBody.value.trim();
+      const exploreIntent = ctx?.intent ?? lastExploreIntent;
+      const saveBody = resolveKnowledgeBodyForSave(priorBody, raw, {
+        intent: exploreIntent === "section_fill" ? "section_fill" : undefined,
+      });
+      if (!saveBody.trim()) return;
+
+      const result = await saveProjectKnowledge(path, saveBody, {
+        fromExplore: true,
+        gitHead: ctx?.gitHead ?? (options.gitHead?.value?.trim() || knowledgeMeta.value.gitHead),
+        exploreRounds: (ctx?.baseExploreRounds ?? knowledgeMeta.value.exploreRounds ?? 0) + 1,
+      });
+      if (result.ok) {
+        if (applyToUi) {
+          knowledgeBody.value = result.body ?? saveBody;
+          knowledgeDraft.value = knowledgeBody.value;
+          knowledgeMeta.value = result.meta ?? {};
+          knowledgeMessage.value = resolveExploreSaveMessage(true);
+        }
+      } else if (applyToUi) {
+        knowledgeMessage.value = result.error || "保存知识库失败";
+      }
+    })().finally(() => {
+      activeExploreContext = null;
+      finalizeInFlight = null;
+    });
+
+    return finalizeInFlight;
   }
 
   async function runKnowledgeExplore(
@@ -214,10 +286,16 @@ export function useProjectKnowledge(options: {
     exploreOptions?: { maxTurns?: number; depth?: ExploreDepth; history?: Array<{ role: "user" | "assistant"; content: string }> },
   ): Promise<boolean> {
     const project = options.projectPath.value.trim();
-    if (!options.configReady.value || !options.projectOpened.value) {
-      knowledgeMessage.value = !options.configReady.value
-        ? "请先配置 AI 模型"
-        : "请先打开项目";
+    if (!options.projectOpened.value) {
+      knowledgeMessage.value = "请先打开项目";
+      return false;
+    }
+    if (!options.configReady.value) {
+      knowledgeMessage.value = "请先配置 AI 模型";
+      return false;
+    }
+    if (options.apiKeyReady && !options.apiKeyReady.value) {
+      knowledgeMessage.value = "请先保存 API Key";
       return false;
     }
     if (exploreRun.value.running) {
@@ -231,10 +309,20 @@ export function useProjectKnowledge(options: {
       exploreOptions?.maxTurns
       ?? resolveExploreRequestMaxTurns(prompt, history, undefined, completedTurns, depth);
 
+    lastExploreIntent = classifyExploreKnowledgeIntent(prompt, hasKnowledge.value);
+    activeExploreContext = {
+      projectPath: project,
+      priorBody: knowledgeBody.value.trim(),
+      gitHead: options.gitHead?.value?.trim() || knowledgeMeta.value.gitHead,
+      baseExploreRounds: knowledgeMeta.value.exploreRounds ?? 0,
+      intent: lastExploreIntent,
+    };
+
     exploreRun.value = {
       ...emptyRunState(),
       running: true,
       maxTurns,
+      intent: lastExploreIntent,
     };
     knowledgeMessage.value = "";
 
@@ -278,17 +366,12 @@ export function useProjectKnowledge(options: {
 
   async function continueKnowledgeExplore() {
     if (!hasKnowledge.value) return startKnowledgeExplore();
-    const history: Array<{ role: "user" | "assistant"; content: string }> = [
-      { role: "user", content: EXPLORE_PROJECT_PRESET_PROMPT },
-      { role: "assistant", content: knowledgeBody.value },
-    ];
     exploreRun.value.aborted = false;
     exploreRun.value.failed = false;
     return runKnowledgeExplore(EXPLORE_CONTINUE_PRESET_PROMPT, {
-      history,
       maxTurns: resolveExploreRequestMaxTurns(
         EXPLORE_CONTINUE_PRESET_PROMPT,
-        history,
+        undefined,
         undefined,
         knowledgeMeta.value.exploreRounds ?? completedTurns,
       ),
@@ -298,16 +381,7 @@ export function useProjectKnowledge(options: {
   async function sendKnowledgeFollowUp(text: string) {
     const trimmed = text.trim();
     if (!trimmed) return false;
-    const history: Array<{ role: "user" | "assistant"; content: string }> = [];
-    if (knowledgeBody.value.trim()) {
-      history.push(
-        { role: "user", content: EXPLORE_PROJECT_PRESET_PROMPT },
-        { role: "assistant", content: knowledgeBody.value },
-      );
-    }
-    history.push({ role: "user", content: trimmed });
     return runKnowledgeExplore(trimmed, {
-      history: history.slice(0, -1),
       maxTurns: EXPLORE_FOLLOWUP_MAX_TURNS,
     });
   }
@@ -317,8 +391,21 @@ export function useProjectKnowledge(options: {
     exploreRun.value.aborted = true;
     abortHandle?.abort();
     abortHandle = null;
-    exploreRun.value.running = false;
-    void finalizeExploreRun();
+  }
+
+  /** 切换/关闭项目：中止 SSE 并清空 UI，finalize 仍写入锁定的原项目路径 */
+  function leaveProjectKnowledge() {
+    if (exploreRun.value.running) {
+      exploreRun.value.aborted = true;
+      abortHandle?.abort();
+      abortHandle = null;
+      exploreRun.value.running = false;
+    }
+    editing.value = false;
+    knowledgeBody.value = "";
+    knowledgeDraft.value = "";
+    knowledgeMeta.value = {};
+    knowledgeMessage.value = "";
   }
 
   return {
@@ -340,5 +427,6 @@ export function useProjectKnowledge(options: {
     continueKnowledgeExplore,
     sendKnowledgeFollowUp,
     stopKnowledgeExplore,
+    leaveProjectKnowledge,
   };
 }

@@ -43,3 +43,14 @@ export function sanitizeMarkdownForDisplay(text: string): string {
   result = mergeSplitOptionalTypeInlineCode(result);
   return result.trim();
 }
+
+/**
+ * Lighter sanitize while SSE is still growing — avoid stripping partial answer tails
+ * that resemble tool logs, but still remove HTML comment leaks.
+ */
+export function sanitizeMarkdownForStreamingDisplay(text: string): string {
+  if (!text) return "";
+  let result = stripVisibleHtmlComments(text);
+  result = mergeSplitOptionalTypeInlineCode(result);
+  return result.trim();
+}

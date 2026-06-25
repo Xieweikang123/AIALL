@@ -55,6 +55,7 @@ export function useGitPanel(
   });
   const gitStatus = ref<GitStatusFile[]>([]);
   const gitBranch = ref("");
+  const gitHeadCommit = ref("");
   const gitIsRepo = ref(false);
   const gitStatusKnown = ref(false);
   const gitLoading = ref(false);
@@ -192,6 +193,7 @@ export function useGitPanel(
     gitLoading.value = false;
     gitError.value = "";
     gitBranch.value = "";
+    gitHeadCommit.value = "";
     gitStatus.value = [];
     gitLogEntries.value = [];
     clearGitDiffCache();
@@ -221,6 +223,7 @@ export function useGitPanel(
       }
       gitIsRepo.value = result.isRepo;
       gitBranch.value = result.branch;
+      gitHeadCommit.value = result.headCommit?.trim() || "";
       gitStatus.value = result.files;
       gitError.value = "";
       clearGitDiffCache();
@@ -829,6 +832,7 @@ export function useGitPanel(
     gitPanelMode,
     gitStatus,
     gitBranch,
+    gitHeadCommit,
     gitIsRepo,
     gitStatusKnown,
     gitLoading,

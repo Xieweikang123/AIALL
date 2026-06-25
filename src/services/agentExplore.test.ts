@@ -3,6 +3,7 @@ import {
   EXPLORE_CONTINUE_PRESET_PROMPT,
   EXPLORE_FOLLOWUP_MAX_TURNS,
   EXPLORE_PROJECT_PRESET_PROMPT,
+  buildKnowledgeQuoteFollowUpPrompt,
   isExploreContinuePrompt,
   resolveExploreRequestMaxTurns,
 } from "./agentExplore";
@@ -28,5 +29,13 @@ describe("agentExplore", () => {
     expect(
       resolveExploreRequestMaxTurns(EXPLORE_CONTINUE_PRESET_PROMPT, [{ role: "assistant", content: "x" }], undefined, 16),
     ).toBe(24);
+  });
+
+  it("buildKnowledgeQuoteFollowUpPrompt wraps excerpt and question", () => {
+    const prompt = buildKnowledgeQuoteFollowUpPrompt("Vue 3\nTypeScript", "技术栈对吗？");
+    expect(prompt).toContain("用户引用了知识库中的以下段落");
+    expect(prompt).toContain("> Vue 3");
+    expect(prompt).toContain("用户问题：技术栈对吗？");
+    expect(prompt).toContain("写入知识库");
   });
 });

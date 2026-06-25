@@ -41,6 +41,8 @@ export interface GitStatusFile {
 export interface GitStatusResult {
   ok: boolean;
   branch: string;
+  /** Full commit SHA at HEAD (for knowledge-base staleness tracking). */
+  headCommit: string;
   files: GitStatusFile[];
   stagedCount: number;
   unstagedCount: number;
@@ -115,8 +117,12 @@ async function gitExec(projectRoot: string, args: string[], timeoutMs = 10_000):
 
 export async function gitStatus(projectRoot: string): Promise<GitStatusResult> {
   try {
-    const { stdout: branchOut } = await gitExec(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]);
+    const [{ stdout: branchOut }, { stdout: headOut }] = await Promise.all([
+      gitExec(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]),
+      gitExec(projectRoot, ["rev-parse", "HEAD"]),
+    ]);
     const branch = branchOut.trim();
+    const headCommit = headOut.trim();
 
     const { stdout } = await gitExec(projectRoot, ["status", "--porcelain=v1", "-z"]);
     const files: GitStatusFile[] = [];
@@ -178,9 +184,38 @@ export async function gitStatus(projectRoot: string): Promise<GitStatusResult> {
     const stagedCount = files.filter((f) => f.staged).length;
     const unstagedCount = files.filter((f) => !f.staged).length;
 
-    return { ok: true, branch, files, stagedCount, unstagedCount };
+    return { ok: true, branch, headCommit, files, stagedCount, unstagedCount };
   } catch (error) {
-    return { ok: false, branch: "", files: [], stagedCount: 0, unstagedCount: 0, error: error instanceof Error ? error.message : "获取 Git 状态失败" };
+    return {
+      ok: false,
+      branch: "",
+      headCommit: "",
+      files: [],
+      stagedCount: 0,
+      unstagedCount: 0,
+      error: error instanceof Error ? error.message : "获取 Git 状态失败",
+    };
+  }
+}
+
+export async function gitChangedFilesSince(
+  projectRoot: string,
+  sinceCommit: string,
+): Promise<{ ok: boolean; files: string[]; error?: string }> {
+  const base = sinceCommit.trim();
+  if (!base) return { ok: true, files: [] };
+  try {
+    const { stdout } = await gitExec(projectRoot, ["diff", "--name-only", base, "HEAD"]);
+    return {
+      ok: true,
+      files: stdout.split("\n").map((line) => line.trim()).filter(Boolean),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      files: [],
+      error: error instanceof Error ? error.message : "获取变更文件失败",
+    };
   }
 }
 
@@ -216,6 +251,7 @@ export async function gitDiff(projectRoot: string, filePath?: string, staged = f
 
 export async function gitDiffFile(projectRoot: string, filePath: string, staged = false): Promise<GitDiffResult> {
   try {
+    if (filePath.endsWith('/')) return { ok: true, files: [], patch: '' };
     const diffArgs = staged ? ["diff", "--cached", "--", filePath] : ["diff", "--", filePath];
     const { stdout: patchOut } = await gitExec(projectRoot, diffArgs);
 

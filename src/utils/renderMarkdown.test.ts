@@ -8,6 +8,7 @@ vi.mock("dompurify", () => ({
 }));
 
 import { renderMarkdown, renderMarkdownLite } from "./renderMarkdown";
+import { prepareStreamingMarkdownForRender } from "./streamingMarkdownTrim";
 import { sanitizeMarkdownForDisplay } from "../services/markdownDisplaySanitize";
 
 const MERMAID_SAMPLE = "```mermaid\ngraph TD\n    A[开始] --> B[结束]\n```";
@@ -77,6 +78,26 @@ describe("renderMarkdown", () => {
     expect(html).toContain("<strong>重点内容</strong>");
   });
 
+  it("renders common summary lead-in bold patterns", () => {
+    expect(renderMarkdown("**简单说：** 正文从这里开始。")).toContain("<strong>简单说：</strong>");
+    expect(renderMarkdown("**简单说：  ** 正文从这里开始。")).toContain("<strong>简单说：</strong>");
+    expect(renderMarkdown("**简单说：  \n\n这是后面的段落。")).toContain("**");
+  });
+
+  it("renders bullet lists with bold labels", () => {
+    const html = renderMarkdown([
+      "### 1. Vibe Coding（主 IDE 页面）",
+      "- **路由**：`/vibe-coding`",
+      "- **功能**：打开本地项目后，包含：",
+      "  - **文件树**：浏览、创建、重命名项目文件/文件夹",
+      "  - **Monaco 编辑器**：支持代码编辑",
+    ].join("\n"));
+    expect(html).toContain("<ul");
+    expect(html.match(/<li/g)?.length).toBeGreaterThan(3);
+    expect(html).toContain("<strong>路由</strong>");
+    expect(html).not.toMatch(/<p>-/);
+  });
+
   it("renders bold wrapping inline code", () => {
     const html = renderMarkdown(
       "核心功能是对**`gw_energyrecorditem`表进行昨日能耗记录的补全**。",
@@ -111,5 +132,85 @@ describe("renderMarkdown", () => {
     const html = renderMarkdownLite("修复如下：1. 第一项 2. 第二项");
     expect(html).toContain("<ol");
     expect(html.match(/<li/g)?.length).toBe(2);
+  });
+
+  it("renders partial streaming bold after inline close helper", () => {
+    const html = renderMarkdownLite(
+      prepareStreamingMarkdownForRender("对应 **Git 面板**（`src/components/vibe/GitPanel.vue`"),
+    );
+    expect(html).toContain("<strong");
+    expect(html).toContain("Git 面板");
+    expect(html).toContain("<code");
+    expect(html).not.toContain("**");
+  });
+
+  it("renders ATX headings when LLM omits space after hash marks", () => {
+    const html = renderMarkdown("####1. Vibe Coding ( `/vibe-coding` ) — 主力 IDE 页面");
+    expect(html).toContain("<h4");
+    expect(html).toContain("Vibe Coding");
+    expect(html).not.toMatch(/####1\./);
+  });
+
+  it("renders ATX headings with fullwidth parens and numbered module titles", () => {
+    const html = renderMarkdown("####4. AI 配置（/ai-config）— 模型与 API 管理");
+    expect(html).toContain("<h4");
+    expect(html).toContain("AI 配置");
+    expect(html).not.toMatch(/####4\./);
+  });
+
+  it("renders module section headings inside explore-style report blocks", () => {
+    const html = renderMarkdown([
+      "## 2. 📦 四大功能模块",
+      "",
+      "####1. Vibe Coding ( `/vibe-coding` ) — 主力 IDE 页面",
+      "* 打开本地项目文件夹",
+      "",
+      "####4. AI 配置（/ai-config）— 模型与 API 管理",
+      "* 配置 API Key",
+    ].join("\n"));
+    expect(html.match(/<h4/g)?.length).toBe(2);
+    expect(html).toContain("AI 配置");
+    expect(html.match(/<li/g)?.length).toBe(2);
+    expect(html).not.toMatch(/####4\./);
+  });
+
+  it("normalizes indented and CRLF module headings from LLM output", () => {
+    const html = renderMarkdown("    ####4. AI 配置（/ai-config）— 模型与 API 管理\r\n* item");
+    expect(html).toContain("<h4");
+    expect(html).not.toMatch(/####4\./);
+  });
+
+  it("breaks glued english preamble before chinese markdown blocks", () => {
+    const html = renderMarkdown(
+      "Now I have enough context:全部验证完毕，所有代码已在磁盘上就位，无需再改。\n\n**已完成的功能全链路：**\n\n| 层级 | 文件 | 内容 |\n|------|------|------|\n| 按钮 | `ChatPanel.vue` | ok |",
+    );
+    expect(html).toContain("<table");
+    expect(html).toContain("<strong");
+    expect(html).not.toMatch(/\*\*已完成的功能全链路/);
+  });
+
+  it("renders h4 when heading line is indented after a section title", () => {
+    const html = renderMarkdown("## 模块\n    ####4. AI 配置（/ai-config）— 模型与 API 管理");
+    expect(html).toContain("<h4");
+    expect(html).toContain("AI 配置");
+    expect(html).not.toMatch(/####4\./);
+  });
+
+  it("renders bullet lists after glued heading lines", () => {
+    const html = renderMarkdown([
+      "####2. 通用对话 ( `/chat` ) — AI 聊天助手",
+      "* 打开本地项目文件夹",
+      "* 集成文件树、Git 面板、Monaco 代码编辑器",
+    ].join("\n"));
+    expect(html).toContain("<ul");
+    expect(html.match(/<li/g)?.length).toBe(2);
+    expect(html).not.toMatch(/\* 打开/);
+  });
+
+  it("normalizes stray backslash before emoji section lines", () => {
+    const html = renderMarkdown("\\ 🔧 核心特点\n\n* 多面板 IDE");
+    expect(html).toContain("核心特点");
+    expect(html).toContain("<ul");
+    expect(html).not.toContain("\\ 🔧");
   });
 });

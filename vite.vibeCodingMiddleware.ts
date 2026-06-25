@@ -1204,76 +1204,9 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         const body = (await readJsonBody(req)) as {
           projectPath?: string;
           body?: string;
-          gitHead?: string;
-          fromExplore?: boolean;
-          exploreRounds?: number;
-        };
-        const projectPath = body.projectPath?.trim() || "";
-        if (!projectPath) {
-          sendJson(res, 400, { ok: false, error: "缺少 projectPath" });
-          return;
-        }
-
-        const result = await writeProjectKnowledge(projectPath, body.body ?? "", {
-          gitHead: body.gitHead?.trim() || undefined,
-          fromExplore: Boolean(body.fromExplore),
-          exploreRounds:
-            typeof body.exploreRounds === "number" ? body.exploreRounds : undefined,
-        });
-        if (!result.ok) {
-          sendJson(res, 400, result);
-          return;
-        }
-        const readBack = await readProjectKnowledge(projectPath);
-        sendJson(res, 200, {
-          ok: true,
-          path: result.path,
-          size: result.size,
-          truncated: result.truncated,
-          meta: result.meta,
-          content: readBack.ok ? readBack.content : "",
-          body: readBack.ok ? readBack.body : "",
-          maxChars: readBack.ok ? readBack.maxChars : undefined,
-          promptMaxChars: readBack.ok ? readBack.promptMaxChars : undefined,
-        });
-        return;
-      }
-
-      sendJson(res, 405, { ok: false, error: "仅支持 GET / POST" });
-    } catch (error) {
-      sendJson(res, 500, {
-        ok: false,
-        error: error instanceof Error ? error.message : "项目知识库操作失败",
-      });
-    }
-  });
-
-  // GET/POST /backend/vibe/project-knowledge
-  middlewares.use("/backend/vibe/project-knowledge", async (req, res) => {
-    try {
-      if (req.method === "GET") {
-        const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
-        const projectPath = (url.searchParams.get("projectPath") || "").trim();
-        if (!projectPath) {
-          sendJson(res, 400, { ok: false, error: "缺少 projectPath" });
-          return;
-        }
-        const result = await readProjectKnowledge(projectPath);
-        if (!result.ok) {
-          sendJson(res, 400, result);
-          return;
-        }
-        sendJson(res, 200, result);
-        return;
-      }
-
-      if (req.method === "POST") {
-        const body = (await readJsonBody(req)) as {
-          projectPath?: string;
-          body?: string;
           content?: string;
-          fromExplore?: boolean;
           gitHead?: string;
+          fromExplore?: boolean;
           exploreRounds?: number;
         };
         const projectPath = body.projectPath?.trim() || "";
@@ -1281,10 +1214,11 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
           sendJson(res, 400, { ok: false, error: "缺少 projectPath" });
           return;
         }
+
         const knowledgeBody = String(body.body ?? body.content ?? "");
         const result = await writeProjectKnowledge(projectPath, knowledgeBody, {
-          fromExplore: Boolean(body.fromExplore),
           gitHead: body.gitHead?.trim() || undefined,
+          fromExplore: Boolean(body.fromExplore),
           exploreRounds:
             typeof body.exploreRounds === "number" ? body.exploreRounds : undefined,
         });

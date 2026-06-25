@@ -34,9 +34,21 @@ import {
   buildExploreAbortPartialReportNudge,
   buildExploreContinueNudge,
   buildExploreFollowUpHint,
+  buildExploreQuotedFollowUpHint,
+  buildExploreSectionFillNudge,
   buildExploreSystemPromptLines,
 } from "./agentExplorePrompt";
-import { isExploreContinuePrompt } from "../src/services/agentExplore";
+import {
+  classifyExploreKnowledgeIntent,
+  isExploreContinuePrompt,
+  isExploreSectionFillPrompt,
+  isKnowledgeQuoteFollowUpPrompt,
+} from "../src/services/knowledgeExplore";
+import {
+  buildKnowledgeExploreManifest,
+  buildKnowledgeRebuildHint,
+} from "../src/services/projectReportDisplay";
+import { gitChangedFilesSince } from "./vibeGit";
 import {
   ASK_EXPLORE_TURN_BUDGET,
   ASK_MAX_TOTAL_EXPLORE_HARD,
@@ -907,8 +919,9 @@ function buildExploreSystemPrompt(
   openFilePath?: string,
   openFileSnippet?: string,
   model?: string,
+  incremental = false,
 ): string {
-  const lines = [...buildExploreSystemPromptLines(projectRoot)];
+  const lines = [...buildExploreSystemPromptLines(projectRoot, incremental)];
   if (model?.trim()) {
     lines.push("", buildModelIdentityHint(model));
   }
@@ -1747,7 +1760,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     consultativeUiAppearanceRun
       ? Promise.resolve({ ok: false as const, content: "", truncated: false })
       : readProjectMemory(projectRoot),
-    consultativeUiAppearanceRun || isExplore
+    consultativeUiAppearanceRun
       ? Promise.resolve({ ok: false as const, body: "", truncated: false, content: "", meta: {}, path: "", maxChars: 0, promptMaxChars: 0 })
       : readProjectKnowledge(projectRoot),
     consultativeUiAppearanceRun
@@ -1771,6 +1784,33 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     projectContextBlock = `\n\n项目根：${projectRoot}（咨询只读·UI 观感题，已省略全项目扫描以加快首包）`;
   }
 
+  const hasExistingProjectKnowledge =
+    projectKnowledgeResult.ok && Boolean(projectKnowledgeResult.body.trim());
+  const exploreKnowledgeIntent = isExplore
+    ? classifyExploreKnowledgeIntent(prompt, hasExistingProjectKnowledge)
+    : null;
+  const exploreUsesManifest = exploreKnowledgeIntent != null
+    && exploreIntentUsesKnowledgeManifest(exploreKnowledgeIntent);
+
+  let exploreKnowledgeContextBlock = "";
+  if (isExplore && hasExistingProjectKnowledge) {
+    let changedPaths: string[] | undefined;
+    const savedHead = projectKnowledgeResult.meta.gitHead?.trim();
+    if (exploreUsesManifest && savedHead) {
+      const diff = await gitChangedFilesSince(projectRoot, savedHead);
+      if (diff.ok && diff.files.length) changedPaths = diff.files;
+    }
+    if (exploreKnowledgeIntent === "rebuild") {
+      exploreKnowledgeContextBlock = `\n\n${buildKnowledgeRebuildHint()}`;
+    } else if (exploreUsesManifest) {
+      exploreKnowledgeContextBlock = `\n\n${buildKnowledgeExploreManifest(
+        projectKnowledgeResult.body,
+        projectKnowledgeResult.meta,
+        { changedPaths },
+      )}`;
+    }
+  }
+
   const projectMemoryBlock =
     projectMemoryResult.ok && projectMemoryResult.content.trim()
       ? await formatProjectMemoryForPrompt(
@@ -1782,7 +1822,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       : "";
 
   const projectKnowledgeBlock =
-    projectKnowledgeResult.ok && projectKnowledgeResult.body.trim()
+    !isExplore && hasExistingProjectKnowledge
       ? await formatProjectKnowledgeForPrompt(
           projectKnowledgeResult.body,
           projectKnowledgeResult.truncated,
@@ -1806,7 +1846,13 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         projectContextBlock,
       ].join("\n")
     : isExplore
-      ? buildExploreSystemPrompt(projectRoot, openFilePath, openFileSnippet, model)
+      ? buildExploreSystemPrompt(
+          projectRoot,
+          openFilePath,
+          openFileSnippet,
+          model,
+          exploreUsesManifest,
+        )
     : isAsk
       ? buildAskSystemPrompt(projectRoot, openFilePath, openFileSnippet, model) +
         buildConsultativeTopicHints(
@@ -1836,7 +1882,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
   const systemPrompt = consultativeUiAppearanceRun
     ? `${systemPromptCore}\n${runtimeAwarenessBlock}`
-    : `${systemPromptCore}${projectContextBlock}${agentsGuideBlock}${projectSkillsBlock}${projectMemoryBlock}${projectKnowledgeBlock}${explorationArchiveBlock}${runtimeAwarenessBlock}`;
+    : `${systemPromptCore}${projectContextBlock}${agentsGuideBlock}${projectSkillsBlock}${projectMemoryBlock}${projectKnowledgeBlock}${exploreKnowledgeContextBlock}${explorationArchiveBlock}${runtimeAwarenessBlock}`;
 
   const writeStage = isReadOnlyAgent || isPlanExplore || readOnlyBuildRun ? null : createWriteStage();
   const readCache = new Map<string, string>();
@@ -1876,6 +1922,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   const patchFailureLog: Array<{ turn: number; path: string; reason: string }> = [];
   /** Track unique files read in explore-only turns to detect breadth sprawl. */
   const exploreFilesRead = new Set<string>();
+  let exploreAbortGraceTurnActive = false;
   let fileBreadthNudgeSent = false;
   /** Track consecutive user negations to detect dissatisfaction patterns. */
   let consecutiveUserNegations = 0;
@@ -1898,8 +1945,15 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   if (isExplore) {
     if (isExploreContinuePrompt(prompt)) {
       messages.push({ role: "system", content: buildExploreContinueNudge() });
-    } else if (params.history?.some((m) => m.role === "assistant")) {
-      messages.push({ role: "system", content: buildExploreFollowUpHint() });
+    } else if (isExploreSectionFillPrompt(prompt)) {
+      messages.push({ role: "system", content: buildExploreSectionFillNudge() });
+    } else if (exploreKnowledgeIntent === "followup") {
+      messages.push({
+        role: "system",
+        content: isKnowledgeQuoteFollowUpPrompt(prompt)
+          ? buildExploreQuotedFollowUpHint()
+          : buildExploreFollowUpHint(),
+      });
     }
   }
   let visionFallbackApplied = false;
@@ -1958,9 +2012,15 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   });
 
   if (signal?.aborted) {
-    onEvent({ type: "status", data: { phase: "aborted" } });
-    onEvent({ type: "done", data: buildDoneData(writeStage, 0) });
-    return;
+    if (!isExplore) {
+      onEvent({ type: "status", data: { phase: "aborted" } });
+      onEvent({ type: "done", data: buildDoneData(writeStage, 0) });
+      return;
+    }
+    onEvent({
+      type: "status",
+      data: { phase: "aborted", detail: "正在整理不完整知识库…", model },
+    });
   }
 
   onEvent({ type: "status", data: { phase: "building_context", model, detail: "上下文就绪，开始运行" } });
@@ -1980,16 +2040,31 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     }
 
     if (signal?.aborted) {
-      onEvent({
-        type: "status",
-        data: {
-          phase: "aborted",
-          turn,
-          ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
-        },
-      });
-      onEvent({ type: "done", data: buildDoneData(writeStage, turn - 1) });
-      return;
+      if (isExplore && !exploreAbortGraceTurnActive) {
+        exploreAbortGraceTurnActive = true;
+        onEvent({
+          type: "status",
+          data: {
+            phase: "aborted",
+            turn,
+            ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+            model,
+            detail: "正在整理不完整知识库…",
+          },
+        });
+        segmentMaxTurns = Math.max(segmentMaxTurns ?? 0, turn + 1);
+      } else {
+        onEvent({
+          type: "status",
+          data: {
+            phase: "aborted",
+            turn,
+            ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
+          },
+        });
+        onEvent({ type: "done", data: buildDoneData(writeStage, turn - 1) });
+        return;
+      }
     }
 
     if (
@@ -2058,6 +2133,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     const forceTextOutput =
       !forcePatchOutput &&
       (sameIssueFollowUpNeedsSummary ||
+        (isExplore && exploreAbortGraceTurnActive) ||
         (isExplore && totalExploreTurns >= EXPLORE_MAX_TOTAL_EXPLORE_HARD) ||
         (isAsk && totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_HARD) ||
         (isPlanExplore && totalExploreTurns >= PLAN_MAX_TOTAL_EXPLORE_HARD) ||
@@ -2101,7 +2177,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         content: sameIssueFollowUpNeedsSummary
           ? buildSameIssueFollowUpForceSummaryNudge(totalExploreTurns)
           : isExplore
-            ? buildExploreForceReportNudge(totalExploreTurns)
+            ? exploreAbortGraceTurnActive
+              ? buildExploreAbortPartialReportNudge(exploreFilesRead.size)
+              : buildExploreForceReportNudge(totalExploreTurns)
             : isReadOnlyAgent || readOnlyBuildRun
               ? buildAskForceAnswerNudge(totalExploreTurns)
               : buildForceOutputNudge(totalExploreTurns, mode),

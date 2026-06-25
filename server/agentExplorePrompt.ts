@@ -7,7 +7,16 @@ export const PROJECT_KNOWLEDGE_MARKER = "<!-- project-knowledge -->";
 export const PROJECT_REPORT_MARKER = "<!-- project-report -->";
 export const PROJECT_KNOWLEDGE_TITLE = "项目知识库";
 
-export function buildExploreExplorationHints(): string {
+export function buildExploreExplorationHints(incremental = false): string {
+  if (incremental) {
+    return [
+      "探索策略（增量更新知识库）：",
+      "1. 系统已注入知识库索引（章节状态）与项目目录摘要；正文须 read_file .aiall/project-knowledge.md 获取。",
+      "2. 优先补「未探索/待验证」章节；定位代码用 grep，search_files 仅按文件名。",
+      "3. read_file 单次约 200–400 行；避免重复 read 已在索引中确认无缺的章节对应代码。",
+      "4. 信息足够后输出：继续探索→完整知识库正文；补全章节→仅输出目标 ## 章节；追问→## 补充 或单章节。",
+    ].join("\n");
+  }
   return [
     "探索策略（项目理解）：",
     "1. 系统已注入目录树与关键文件摘要，勿重复 read 已注入内容；在其基础上深化。",
@@ -32,23 +41,42 @@ export function buildExploreReportFormatHint(): string {
     "   - ## 常用开发命令",
     "   - ## 建议阅读顺序",
     "3. 关键结论须附带 `相对路径` 或函数名作为证据；不确定处标明「待验证」。",
-    "4. 用户追问时：可输出 `## 补充：{主题}` 附在知识库后，或更新对应章节。",
+    "4. 用户追问时：优先只输出需更新的已有 `## 章节`（并入该节正文）；仅当无法归入任何章节时才用 `## 补充：{主题}`。",
   ].join("\n");
 }
 
 export function buildExploreContinueNudge(): string {
   return [
     "【继续探索】用户希望扩大覆盖面、补充知识库遗漏部分。",
-    "请自检知识库中标注「未探索」或缺失的模块/目录，针对性 read/grep 后更新知识库。",
+    "须先 read_file .aiall/project-knowledge.md 阅读现有正文，再针对性 read/grep 代码。",
     "禁止重头探索已覆盖内容；优先补缺口，再输出更新后的完整知识库正文（保留 project-knowledge 标记）。",
+  ].join("\n");
+}
+
+export function buildExploreSectionFillNudge(): string {
+  return [
+    "【补全章节】用户指定了待补全的知识库章节。",
+    "须先 read_file .aiall/project-knowledge.md；再 read/grep 相关代码。",
+    "仅输出指定章节的 `## 标题` 及更新内容，勿输出完整知识库或 project-knowledge 标记。",
   ].join("\n");
 }
 
 export function buildExploreFollowUpHint(): string {
   return [
     "【追问】用户针对知识库某方面追问。",
-    "定向 read 1–3 个相关文件后作答；若需结构化补充，输出 `## 补充：{主题}`。",
+    "须先 read_file .aiall/project-knowledge.md 了解现有内容；再定向 read 1–3 个相关代码文件。",
+    "优先只输出需更新的已有 `## 章节`（例如目录/路径类→目录结构，模块职责→核心模块）；勿把可并入现有章节的内容堆到文末。",
+    "仅当确实无法归入任何章节时，才输出 `## 补充：{主题}`。",
     "禁止无关广搜；禁止修改任何文件。",
+  ].join("\n");
+}
+
+export function buildExploreQuotedFollowUpHint(): string {
+  return [
+    "【引用追问】用户选中了知识库中的一段正文并提问。",
+    "须先 read_file .aiall/project-knowledge.md，定位引用段落所属章节；再 read/grep 相关代码核实。",
+    "回答须落实到知识库：优先更新引用所在 `## 章节` 的正文；若不适合并入原节，输出 `## 补充：{主题}`。",
+    "仅输出需新增/修订的章节内容，勿重复输出整库；禁止修改任何文件。",
   ].join("\n");
 }
 
@@ -60,13 +88,13 @@ export function buildExploreAbortPartialReportNudge(readCount: number): string {
   ].join("\n");
 }
 
-export function buildExploreSystemPromptLines(projectRoot: string): string[] {
+export function buildExploreSystemPromptLines(projectRoot: string, incremental = false): string[] {
   return [
     "你是项目知识库构建助手（Explore·只读）。",
     "回答请使用中文。",
     "你只能使用 list_dir、read_file、grep、search_files、web_search、web_extract 探索项目，禁止修改任何文件。",
     buildFileAccessPathHint(),
-    buildExploreExplorationHints(),
+    buildExploreExplorationHints(incremental),
     buildExploreReportFormatHint(),
     buildReplyAccuracyHint(),
     buildAgentSuggestionsPromptHint(),
@@ -74,6 +102,6 @@ export function buildExploreSystemPromptLines(projectRoot: string): string[] {
   ];
 }
 
-export function buildExploreSystemPrompt(projectRoot: string): string {
-  return buildExploreSystemPromptLines(projectRoot).join("\n");
+export function buildExploreSystemPrompt(projectRoot: string, incremental = false): string {
+  return buildExploreSystemPromptLines(projectRoot, incremental).join("\n");
 }

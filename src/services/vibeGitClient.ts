@@ -13,10 +13,10 @@ export interface GitStatusFile {
 export interface GitStatusResult {
   ok: boolean;
   branch: string;
+  headCommit?: string;
   files: GitStatusFile[];
   stagedCount: number;
   unstagedCount: number;
-  isRepo: boolean;
   error?: string;
 }
 

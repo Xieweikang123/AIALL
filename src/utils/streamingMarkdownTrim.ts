@@ -20,11 +20,44 @@ function hasGluedTableRows(line: string): boolean {
   return /\|\|/.test(trimmed);
 }
 
-function trimIncompleteFencedCodeBlock(source: string): string {
+function stabilizeIncompleteFencedCodeBlock(source: string): string {
   const fences = source.match(/^```/gm);
   if (!fences || fences.length % 2 === 0) return source;
-  const idx = source.lastIndexOf("```");
-  return source.slice(0, idx).trimEnd();
+  return `${source}\n\`\`\``;
+}
+
+function countTokenOutsideFences(source: string, token: string): number {
+  let count = 0;
+  let index = 0;
+  let inFence = false;
+  while (index < source.length) {
+    if (source.startsWith("```", index)) {
+      inFence = !inFence;
+      index += 3;
+      continue;
+    }
+    if (!inFence && source.startsWith(token, index)) {
+      count += 1;
+      index += token.length;
+      continue;
+    }
+    index += 1;
+  }
+  return count;
+}
+
+/** Close dangling inline markers so marked can render partial SSE chunks. */
+export function closeStreamingInlineMarkdown(source: string): string {
+  let result = source;
+  const boldCount = countTokenOutsideFences(result, "**");
+  // Only close a single opening ** — multiple pairs mean a partial second span, not a dangling opener.
+  if (boldCount === 1) {
+    result += "**";
+  }
+  if (countTokenOutsideFences(result, "`") % 2 === 1) {
+    result += "`";
+  }
+  return result;
 }
 
 function trimIncompleteTableTail(source: string): string {
@@ -68,13 +101,19 @@ function trimIncompleteTableTail(source: string): string {
 
 /**
  * Hold back block-level markdown that cannot parse correctly until streaming completes.
- * Prevents raw `| ... |` pipe walls and half-open code fences during SSE.
+ * Open code fences are closed synthetically so partial blocks still render.
  */
 export function trimIncompleteStreamingMarkdown(source: string): string {
   if (!source) return "";
-  if (!source.includes("```") && !source.includes("|")) return source;
-  let result = trimIncompleteFencedCodeBlock(source);
+  let result = closeStreamingInlineMarkdown(source);
+  if (!result.includes("```") && !result.includes("|")) return result;
+  result = stabilizeIncompleteFencedCodeBlock(result);
   if (!result.includes("|")) return result;
   result = trimIncompleteTableTail(result);
   return result;
+}
+
+/** Full streaming markdown prep: inline close + block stabilize. */
+export function prepareStreamingMarkdownForRender(source: string): string {
+  return trimIncompleteStreamingMarkdown(source);
 }
