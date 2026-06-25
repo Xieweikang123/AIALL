@@ -35,10 +35,11 @@ export function shouldOfferExplorationMemory(params: {
   agentAborted?: boolean;
   chatMode?: string;
 }): boolean {
-  if (params.agentAborted) return false;
+  if (params.agentAborted && params.chatMode !== "explore") return false;
   if (params.chatMode === "ask") return false;
   const reads = uniqueReadPathsFromTools(params.tools);
   const written = params.writtenFiles?.filter(Boolean) ?? [];
+  if (params.chatMode === "explore") return reads.length >= 3;
   return reads.length >= 3 || written.length >= 1;
 }
 

@@ -44,7 +44,31 @@
           >
             会话
           </button>
+          <button
+            type="button"
+            role="tab"
+            class="file-panel-tab"
+            :class="{ active: gitPanelMode === 'knowledge' }"
+            :aria-selected="gitPanelMode === 'knowledge'"
+            :disabled="!projectOpened"
+            @click="$emit('update:gitPanelMode', 'knowledge')"
+          >
+            知识库
+          </button>
         </div>
+        <button
+          v-if="chatCollapsed && projectOpened"
+          type="button"
+          class="file-panel-expand-side"
+          title="展开 AI 助手"
+          aria-label="展开 AI 助手"
+          @click="$emit('expand-chat')"
+        >
+          <svg class="file-panel-expand-side-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M3 4.5A1.5 1.5 0 0 1 4.5 3h7A1.5 1.5 0 0 1 13 4.5v7A1.5 1.5 0 0 1 11.5 13h-7A1.5 1.5 0 0 1 3 11.5v-7Z" stroke="currentColor" stroke-width="1.2" />
+            <path d="M6.5 3v10" stroke="currentColor" stroke-width="1.2" />
+          </svg>
+        </button>
       </div>
       <div v-if="gitPanelMode === 'files'" class="file-panel-row file-panel-search-row">
         <button
@@ -241,10 +265,11 @@ interface SessionGroup {
 
 interface Props {
   filePanelWidth: number;
-  gitPanelMode: "files" | "git" | "sessions";
+  gitPanelMode: "files" | "git" | "sessions" | "knowledge";
   projectOpened: boolean;
   loadingTree?: boolean;
   editorCollapsed: boolean;
+  chatCollapsed: boolean;
   gitChangeCount: number;
   gitUnstagedFiles: GitStatusFile[];
   gitStagedFiles: GitStatusFile[];
@@ -263,11 +288,12 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const emit = defineEmits<{
-  (e: "update:gitPanelMode", mode: "files" | "git" | "sessions"): void;
+  (e: "update:gitPanelMode", mode: "files" | "git" | "sessions" | "knowledge"): void;
   (e: "open-quick-search"): void;
   (e: "create-new-file"): void;
   (e: "create-new-folder"): void;
   (e: "expand-editor"): void;
+  (e: "expand-chat"): void;
   (e: "refresh-git-status"): void;
   (e: "switch-session", sessionId: string): void;
   (e: "remove-session", sessionId: string): void;
@@ -340,6 +366,26 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
 
 .file-panel-top-row {
   padding-bottom: 3px;
+  gap: 6px;
+}
+
+.file-panel-expand-side {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid rgba(88, 166, 255, 0.35);
+  background: rgba(31, 111, 235, 0.12);
+  color: rgba(180, 210, 255, 0.95);
+  cursor: pointer;
+}
+
+.file-panel-expand-side:hover {
+  background: rgba(31, 111, 235, 0.2);
+  border-color: rgba(88, 166, 255, 0.55);
 }
 
 .file-panel-tabs {
@@ -349,7 +395,7 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
   background: rgba(0, 0, 0, 0.28);
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 8px;
-  width: 100%;
+  flex: 1;
   min-width: 0;
 }
 

@@ -86,29 +86,31 @@ import {
   CONSULTATIVE_BUILD_EXPLORE_TURN_BUDGET,
   isProductiveWritePath,
   MAX_READ_SLICE_REPEATS,
-  MAX_TOTAL_EXPLORE_TURNS,
-  MAX_TOTAL_EXPLORE_TURNS_SOFT,
   MAX_UNIQUE_READ_FILES_BEFORE_NUDGE,
   PLAN_EXPLORE_TURN_BUDGET,
   PLAN_MAX_TOTAL_EXPLORE_HARD,
   PLAN_MAX_TOTAL_EXPLORE_SOFT,
-  SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE,
-  SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE_SOFT,
 } from "./agentExplorationBudget";
 import { buildReplyAccuracyHint } from "../src/services/agentReplyAccuracy";
 import {
   buildScheduledJobRegistrationNudge,
   buildConsultativeTopicHints,
-  isScheduledTaskConsultativePrompt,
   shouldNudgeScheduledJobRegistration,
 } from "../src/services/agentConsultativeTopics";
 import { resolveUserIntent, classifyUserIntentFromRules, shouldSkipAiIntentClassifier, formatIntentClassificationDetail } from "../src/services/agentIntentClassifier";
 import { classifyUserIntentWithAi } from "./agentIntentClassifier";
 import { extractJobClassNamesFromReadPaths } from "../src/services/agentStructuralPatterns";
-import { buildConsultativeBuildHint, buildAgentStepClarifyContinueHint, buildBuildWriteBlockedHint, buildImplementFollowUpHint, buildLocateStatusFollowUpHint, buildUiDefectBuildHint, buildWriteToolBlockedMessage, isSameIssueFollowUpRun, isUiAppearanceQuestionPrompt, historySuggestsActiveImplementation, historySuggestsQuotePositionFix } from "../src/services/agentUserIntent";
+import { buildConsultativeBuildHint, buildAgentStepClarifyContinueHint, buildBuildWriteBlockedHint, buildImplementFollowUpHint, buildLocateStatusFollowUpHint, buildUiDefectBuildHint, buildWriteToolBlockedMessage, isUiAppearanceQuestionPrompt, historySuggestsActiveImplementation, historySuggestsQuotePositionFix } from "../src/services/agentUserIntent";
 import { detectProjectRuntimeProfile, buildRuntimeAwarenessHint, buildShellAwarenessHint } from "./agentRuntimeHint";
-import { detectUserNegation, detectUserFailureReport, historyRecentUserFailureReport, stripQuotedReplyPrefix } from "../src/services/agentContinuation";
-import { resolveOriginalTaskFromResumePrompt } from "../src/services/agentRecovery";
+import { detectUserNegation, stripQuotedReplyPrefix } from "../src/services/agentContinuation";
+import {
+  ASK_MAX_CONTEXT_CHARS,
+  CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS,
+  EXECUTE_PLAN_MAX_CONTEXT_CHARS,
+  MAX_AGENT_CONTEXT_CHARS,
+  PLAN_MAX_CONTEXT_CHARS,
+  resolveAgentRunPolicy,
+} from "./agentRunPolicy";
 import { buildAgentSuggestionsPromptHint } from "../src/services/agentSuggestions";
 import {
   buildBlockedGrepAfterLocateMessage,
@@ -163,6 +165,10 @@ import {
   isProjectMemorySection,
   readProjectMemory,
 } from "./vibeProjectMemory";
+import {
+  formatProjectKnowledgeForPrompt,
+  readProjectKnowledge,
+} from "./vibeProjectKnowledge";
 import { formatAgentsGuideForPrompt, readProjectAgentsGuide } from "./vibeProjectAgentsGuide";
 import { buildMemoryProposalToolResult } from "./projectMemoryProposal";
 import { buildSkillProposalToolResult } from "./projectSkillProposal";
@@ -330,14 +336,15 @@ const MAX_HISTORY_CHARS = 120_000;
 const MAX_SSE_TEXT_CHARS = 24_000;
 const MAX_TOOL_RESULT_SSE_CHARS = 16_000;
 const MAX_TOOL_RESULT_MODEL_CHARS = 10_000;
-const MAX_AGENT_CONTEXT_CHARS = 200_000;
-export const EXECUTE_PLAN_MAX_CONTEXT_CHARS = 100_000;
-export const ASK_MAX_CONTEXT_CHARS = 80_000;
-/** Lighter cap for screenshot UI appearance consult — avoids 90k+ turn-1 model stalls. */
-export const CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS = 48_000;
+export {
+  MAX_AGENT_CONTEXT_CHARS,
+  EXECUTE_PLAN_MAX_CONTEXT_CHARS,
+  ASK_MAX_CONTEXT_CHARS,
+  CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS,
+  PLAN_MAX_CONTEXT_CHARS,
+} from "./agentRunPolicy";
 /** Proactively compress older tool outputs above this size to reduce model latency. */
 export const SOFT_COMPACT_CONTEXT_CHARS = 36_000;
-const PLAN_MAX_CONTEXT_CHARS = 150_000;
 const PROTECTED_RECENT_TOOL_RESULTS = 2;
 
 function truncateText(text: string, max: number, suffix: string): string {
@@ -824,7 +831,6 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "截图中内联 chip/标签/元信息样式（含聚合 badge）：grep 该 chip 的 class 名或 read 承载它的组件 `<style>` 段，勿用全局 theme 变量臆断局部配色。",
     "若系统标注【咨询任务·只读】：用户本条仅为提问/解释，只读探索后自然语言回答，禁止 patch_file / write_file / delete_file。",
     "其余 Build 任务：一旦你判断须改代码才能满足用户（含 bug、实测与描述不符、功能/体验需求），探索完成后同一轮立即 patch_file / write_file，禁止只输出方案并问「需要我执行吗」。",
-    "用户要求「点击输入区域任意位置可聚焦/输入」时：read_file 核对父容器与内层 contenteditable/textarea 的 DOM 层级与命中区域；常见修复为外层 mousedown 转发 focus 或子元素 min-height:100% 填满，勿默认只加 padding。",
     "工作流程：先 grep / search_files 快速定位（通常 1 轮），read_file 读关键片段，然后 patch_file / write_file 修改。",
     "Bug / 实测不符：用户报告行为不对、没效果、试了不行等，默认理解为须修复；定位后直接 patch，勿停下来征求确认。",
     "区分问题类型：「按钮跑别处/位置不对」若控件与选区在空间上分离，优先查 position:fixed/absolute 或 Teleport 浮层定位，勿默认只改 flex；「点击没反应」「不工作」查事件处理/JS 逻辑。同一组件在连续消息中被提及时，每条消息是独立问题，不要因为上一条修了布局就假设这一条也是布局问题。",
@@ -1562,7 +1568,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         ? { kind: "execute_plan", targetFiles: params.runProfile?.targetFiles }
         : undefined),
   );
-  const isExecutePlan = !isAsk && runProfile.kind === "execute_plan";
+  const isExecutePlan = !isReadOnlyAgent && runProfile.kind === "execute_plan";
   const isPlanExplore = mode === "plan" && !isExecutePlan;
   const toolMode: VibeChatMode = isExecutePlan ? "build" : mode;
   const nudgeMode = isExecutePlan && mode === "plan" ? "build" : mode;
@@ -1583,9 +1589,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     history: params.history,
     mode,
     hasImage: imageDataUrls.length > 0,
-    isAsk,
+    isAsk: isAsk || isExplore,
   });
-  const skipAiClassifier = shouldSkipAiIntentClassifier(rulesIntent, prompt, { isAsk });
+  const skipAiClassifier = shouldSkipAiIntentClassifier(rulesIntent, prompt, { isAsk: isReadOnlyAgent });
 
   onEvent({
     type: "status",
@@ -1613,7 +1619,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     history: params.history,
     mode,
     hasImage: imageDataUrls.length > 0,
-    isAsk,
+    isAsk: isAsk || isExplore,
     ai: aiIntentPayload,
   });
   if (skipAiClassifier) {
@@ -1628,111 +1634,42 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     },
   });
 
-  const implementFollowUpRun =
-    !isAsk &&
-    !isPlanExplore &&
-    !isExecutePlan &&
-    userIntent.implementFollowUp;
-  const sameIssueFollowUpRun =
-    !isAsk &&
-    !isPlanExplore &&
-    !isExecutePlan &&
-    !implementFollowUpRun &&
-    isSameIssueFollowUpRun(prompt, params.history);
-  const exploreHardCap = sameIssueFollowUpRun
-    ? SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE
-    : MAX_TOTAL_EXPLORE_TURNS;
-  const exploreSoftCap = sameIssueFollowUpRun
-    ? SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE_SOFT
-    : MAX_TOTAL_EXPLORE_TURNS_SOFT;
-  const codeReviewRun =
-    !isAsk &&
-    !isPlanExplore &&
-    !isExecutePlan &&
-    userIntent.codeReview &&
-    !implementFollowUpRun;
-  const userErrorQuoteRun =
-    !isAsk &&
-    !isPlanExplore &&
-    !isExecutePlan &&
-    userIntent.userErrorQuote &&
-    !implementFollowUpRun;
-  const userFailureReportRun =
-    !isAsk && !isPlanExplore && !isExecutePlan && detectUserFailureReport(prompt);
-  const userRecentlyReportedFailure = historyRecentUserFailureReport(params.history);
-  const sessionAuditRun =
-    !isAsk && !isPlanExplore && !isExecutePlan && userIntent.consultativeTopic === "session_audit";
-  const behaviorContradictionRun =
-    !isPlanExplore &&
-    !isExecutePlan &&
-    !implementFollowUpRun &&
-    userIntent.behaviorContradiction;
-  const resumeOriginalTask = resolveOriginalTaskFromResumePrompt(prompt);
-  const effectiveTaskPrompt = resumeOriginalTask ?? prompt;
-  const consultativeResumeRun =
-    !isAsk &&
-    !isPlanExplore &&
-    !isExecutePlan &&
-    Boolean(
-      resumeOriginalTask &&
-        classifyUserIntentFromRules({
-          prompt: resumeOriginalTask,
-          history: params.history,
-          mode,
-          hasImage: imageDataUrls.length > 0,
-          isAsk,
-        }).consultative,
-    );
-  const locateStatusFollowUpRun =
-    !isAsk &&
-    !isPlanExplore &&
-    !isExecutePlan &&
-    !implementFollowUpRun &&
-    userIntent.locateStatusFollowUp;
-  const readOnlyBuildRun =
-    !isAsk &&
-    !isExplore &&
-    !isPlanExplore &&
-    !isExecutePlan &&
-    (userIntent.consultative ||
-      consultativeResumeRun ||
-      codeReviewRun ||
-      sessionAuditRun ||
-      locateStatusFollowUpRun) &&
-    !implementFollowUpRun;
-  const behaviorPurposeRun =
-    !isPlanExplore &&
-    !isExecutePlan &&
-    !implementFollowUpRun &&
-    userIntent.behaviorPurpose;
-  const scheduledTaskConsultativeRun =
-    !isPlanExplore &&
-    !isExecutePlan &&
-    !implementFollowUpRun &&
-    isScheduledTaskConsultativePrompt(
-      stripQuotedReplyPrefix(effectiveTaskPrompt.trim()),
-      params.history,
-      userIntent.consultativeTopic,
-    );
-  const accuracyConsultativeRun =
-    readOnlyBuildRun && userIntent.accuracyQuestion;
-  const consultativeVisionRun = imageDataUrls.length > 0 && (isAsk || readOnlyBuildRun);
-  const consultativeUiAppearanceRun =
-    readOnlyBuildRun && consultativeVisionRun && userIntent.uiAppearance;
-  const uiDefectBuildRun =
-    !isAsk &&
-    !isPlanExplore &&
-    !readOnlyBuildRun &&
-    imageDataUrls.length > 0 &&
-    userIntent.uiDefect;
-  const agentStepClarifyRun = !isAsk && !isPlanExplore && userIntent.agentStepClarification;
-  const ultraShortOpenTaskRun =
-    !isAsk &&
-    !isPlanExplore &&
-    !isExecutePlan &&
-    !readOnlyBuildRun &&
-    !resumeOriginalTask &&
-    userIntent.ultraShortOpenTask;
+  const runPolicy = resolveAgentRunPolicy({
+    prompt,
+    mode,
+    history: params.history,
+    userIntent,
+    runProfile,
+    hasImage: imageDataUrls.length > 0,
+    isExecutePlan,
+    isPlanExplore,
+  });
+  const {
+    implementFollowUpRun,
+    sameIssueFollowUpRun,
+    codeReviewRun,
+    userErrorQuoteRun,
+    userFailureReportRun,
+    sessionAuditRun,
+    behaviorContradictionRun,
+    consultativeResumeRun,
+    locateStatusFollowUpRun,
+    readOnlyBuildRun,
+    behaviorPurposeRun,
+    scheduledTaskConsultativeRun,
+    accuracyConsultativeRun,
+    consultativeVisionRun,
+    consultativeUiAppearanceRun,
+    uiDefectBuildRun,
+    agentStepClarifyRun,
+    ultraShortOpenTaskRun,
+    exploreHardCap,
+    exploreSoftCap,
+    maxContextChars,
+    effectiveTaskPrompt,
+    resumeOriginalTask,
+    userRecentlyReportedFailure,
+  } = runPolicy;
 
   const segmentBudget = resolveAgentMaxTurns(
     mode,
@@ -1748,15 +1685,6 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       : isPlanExplore
         ? PLAN_EXPLORE_TURN_BUDGET
         : INTERACTIVE_EXPLORE_TURN_BUDGET;
-  const maxContextChars = isExecutePlan
-    ? EXECUTE_PLAN_MAX_CONTEXT_CHARS
-    : isPlanExplore
-      ? PLAN_MAX_CONTEXT_CHARS
-      : consultativeUiAppearanceRun
-        ? CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS
-        : isReadOnlyAgent
-          ? ASK_MAX_CONTEXT_CHARS
-          : MAX_AGENT_CONTEXT_CHARS;
 
   const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
   const openFileRel = openFile?.relative;
@@ -1810,6 +1738,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   const [
     projectContextOrNull,
     projectMemoryResult,
+    projectKnowledgeResult,
     agentsGuideResult,
     projectSkillsBlock,
     explorationArchiveBlock,
@@ -1818,6 +1747,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     consultativeUiAppearanceRun
       ? Promise.resolve({ ok: false as const, content: "", truncated: false })
       : readProjectMemory(projectRoot),
+    consultativeUiAppearanceRun || isExplore
+      ? Promise.resolve({ ok: false as const, body: "", truncated: false, content: "", meta: {}, path: "", maxChars: 0, promptMaxChars: 0 })
+      : readProjectKnowledge(projectRoot),
     consultativeUiAppearanceRun
       ? Promise.resolve({ ok: false as const, content: "", truncated: false })
       : readProjectAgentsGuide(projectRoot),
@@ -1846,6 +1778,14 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
           projectMemoryResult.truncated,
           memoryTaskContext,
           projectRoot,
+        )
+      : "";
+
+  const projectKnowledgeBlock =
+    projectKnowledgeResult.ok && projectKnowledgeResult.body.trim()
+      ? await formatProjectKnowledgeForPrompt(
+          projectKnowledgeResult.body,
+          projectKnowledgeResult.truncated,
         )
       : "";
 
@@ -1896,7 +1836,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
   const systemPrompt = consultativeUiAppearanceRun
     ? `${systemPromptCore}\n${runtimeAwarenessBlock}`
-    : `${systemPromptCore}${projectContextBlock}${agentsGuideBlock}${projectSkillsBlock}${projectMemoryBlock}${explorationArchiveBlock}${runtimeAwarenessBlock}`;
+    : `${systemPromptCore}${projectContextBlock}${agentsGuideBlock}${projectSkillsBlock}${projectMemoryBlock}${projectKnowledgeBlock}${explorationArchiveBlock}${runtimeAwarenessBlock}`;
 
   const writeStage = isReadOnlyAgent || isPlanExplore || readOnlyBuildRun ? null : createWriteStage();
   const readCache = new Map<string, string>();
@@ -2067,7 +2007,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     }
 
     // User negation detection: track consecutive dissatisfaction and inject direction-switch nudge.
-    if (!isAsk && !isPlanExplore && prompt && detectUserNegation(prompt)) {
+    if (!isReadOnlyAgent && !isPlanExplore && prompt && detectUserNegation(prompt)) {
       consecutiveUserNegations += 1;
     } else if (prompt) {
       // Reset negation count when user sends a non-negation message (e.g., confirming a direction).
@@ -2077,7 +2017,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     if (
       !negationNudgeSent &&
       consecutiveUserNegations >= 2 &&
-      !isAsk &&
+      !isReadOnlyAgent &&
       !isPlanExplore &&
       !readOnlyBuildRun
     ) {
@@ -2162,7 +2102,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
           ? buildSameIssueFollowUpForceSummaryNudge(totalExploreTurns)
           : isExplore
             ? buildExploreForceReportNudge(totalExploreTurns)
-            : isAsk || readOnlyBuildRun
+            : isReadOnlyAgent || readOnlyBuildRun
               ? buildAskForceAnswerNudge(totalExploreTurns)
               : buildForceOutputNudge(totalExploreTurns, mode),
       });
@@ -2172,7 +2112,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         content:
           isExplore
             ? buildExploreExploreSoftCapNudge(totalExploreTurns)
-            : isAsk || readOnlyBuildRun
+            : isReadOnlyAgent || readOnlyBuildRun
               ? buildAskExploreSoftCapNudge(totalExploreTurns)
               : buildExploreSoftCapNudge(totalExploreTurns, mode),
       });
@@ -2186,7 +2126,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
     if (
       !interimDiagnosisNudgeSent &&
-      !isAsk &&
+      !isReadOnlyAgent &&
       !isPlanExplore &&
       writeStage !== null &&
       totalExploreTurns >= EXPLORE_INTERIM_DIAGNOSIS_TURN
@@ -2580,7 +2520,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       const userText = sanitizeAgentUserVisibleText(rawText);
       const mustPatchBeforeFinish =
         writeStage !== null &&
-        !isAsk &&
+        !isReadOnlyAgent &&
         !isPlanExplore &&
         !readOnlyBuildRun &&
         writeStage.writtenList.length === 0 &&
@@ -2721,7 +2661,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       const failedPatchPaths = [...new Set(patchFailureLog.map((entry) => entry.path).filter(Boolean))];
       const successPatchPaths = writeStage?.writtenList.map((entry) => entry.key).filter(Boolean) ?? [];
       if (
-        !isAsk &&
+        !isReadOnlyAgent &&
         writeStage &&
         patchFailureLog.length > 0 &&
         claimsSuccessDespitePatchFailures(rawText, patchFailureLog.length) &&
@@ -2758,7 +2698,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       }
 
       // Inject modification audit before final reply to prevent false claims of success.
-      if (!isAsk && writeStage && patchFailureLog.length > 0) {
+      if (!isReadOnlyAgent && writeStage && patchFailureLog.length > 0) {
         const successCount = writeStage.writtenList.length;
         const failCount = patchFailureLog.length;
         const failFiles = [...new Set(patchFailureLog.map((f) => f.path))].join("、");
@@ -2777,7 +2717,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         !/以上是|仅供参考|建议|方案|思路/.test(rawText);
       const noWriteToolsThisTurn =
         writeStage !== null &&
-        !isAsk &&
+        !isReadOnlyAgent &&
         !isPlanExplore &&
         !readOnlyBuildRun &&
         writeStage.writtenList.length === 0;
@@ -3056,7 +2996,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         messages.push({ role: "system", content: buildEnglishPlanningNudge() });
         englishPlanningNudgeSent = true;
       }
-      if (isSubstantiveChineseToolPreamble(preamble) && !streamedChars && (isAsk || readOnlyBuildRun)) {
+      if (isSubstantiveChineseToolPreamble(preamble) && !streamedChars && (isReadOnlyAgent || readOnlyBuildRun)) {
         emitUserVisibleAssistantMessage(onEvent, preamble, streamedChars);
         streamedChars = sanitizeAgentUserVisibleText(preamble).length;
       }
@@ -3186,7 +3126,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       });
       if (!isToolResultFailure(outcome.result) && textIndicatesPatchAnchor(outcome.result)) {
         patchAnchorLocated = true;
-        if (writeStage !== null && !isAsk && !isPlanExplore && !readOnlyBuildRun) {
+        if (writeStage !== null && !isReadOnlyAgent && !isPlanExplore && !readOnlyBuildRun) {
           patchAnchorForcePending = true;
         }
       }
@@ -3332,7 +3272,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       }
     }
     if (
-      (isAsk || readOnlyBuildRun) &&
+      (isReadOnlyAgent || readOnlyBuildRun) &&
       scheduledTaskConsultativeRun &&
       turnExploreOnly &&
       !scheduledJobRegistrationNudgeSent &&
@@ -3370,7 +3310,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     if (
       patchAnchorLocated &&
       writeStage !== null &&
-      !isAsk &&
+      !isReadOnlyAgent &&
       !isPlanExplore &&
       !readOnlyBuildRun &&
       !patchAnchorNudgeSent &&
@@ -3389,7 +3329,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       if (
         !postPatchVerifyNudgeSent &&
         runtimeProfile.verifyScript &&
-        !isAsk &&
+        !isReadOnlyAgent &&
         !isPlanExplore &&
         !readOnlyBuildRun
       ) {

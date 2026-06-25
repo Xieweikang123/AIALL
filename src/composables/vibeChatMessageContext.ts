@@ -7,7 +7,7 @@ export interface VibeChatMessageItem {
   streaming?: boolean;
   status?: string;
   agentPhase?: string;
-  chatMode?: "ask" | "build" | "plan";
+  chatMode?: "ask" | "build" | "plan" | "explore";
   streamChars?: number;
   contextChars?: number;
   writtenFiles?: string[];

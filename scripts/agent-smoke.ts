@@ -24,7 +24,7 @@ type CliOptions = {
   endpoint: string;
   apiKey: string;
   model: string;
-  mode: "ask" | "build" | "plan";
+  mode: "ask" | "build" | "plan" | "explore";
   maxTurns: number;
   timeoutMs: number;
   imageDataUrls?: string[];
@@ -75,7 +75,7 @@ Options:
   --session <id>        Replay last user turn from AppData session JSON
   --no-image            Skip attached images when replaying a session
   --project <path>      Project root (default: cwd or AIALL_PROJECT)
-  --mode ask|build|plan Default: build
+  --mode ask|build|plan|explore Default: build
   --max-turns <n>       Default: 6
   --timeout <ms>        Abort after N ms (default: 180000)
 

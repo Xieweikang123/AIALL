@@ -262,7 +262,7 @@ export function buildLocateStatusFollowUpHint(): string {
   return [
     "【定位进度追问】用户仅问上一轮是否已在代码中定位到目标。",
     "须直接引用上一条已给出的文件路径与样式/CSS 结论作答；禁止重复 grep/read 整文件。",
-    "若上一条已给出 `.vue` 与 background 证据，回答「是的，已在 … 中找到」并复述关键一行即可。",
+    "若上一条已给出路径与样式证据，回答「是的，已在 … 中找到」并复述关键一行即可。",
   ].join("\n");
 }
 
@@ -475,8 +475,8 @@ export function buildAgentStepClarificationHint(): string {
 
 export function buildAgentStepClarifyContinueHint(): string {
   return [
-    "【解释已完成】若上文已回答用户「啥意思」，且仍在修浮层错位：",
-    "下一轮禁止重复解释或再读 Teleport；直接 patch show*At / getSelection* 相关逻辑，或 1 次 read 后立即 patch。",
+    "【解释已完成】若上文已回答用户「啥意思」，且仍在修浮层/定位类 UI 缺陷：",
+    "下一轮禁止重复解释或再读已定位的浮层/锚点代码；直接 patch 已 read 的定位逻辑，或至多 1 次 read 后立即 patch。",
   ].join("");
 }
 

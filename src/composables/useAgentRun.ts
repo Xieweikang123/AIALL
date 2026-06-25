@@ -11,6 +11,15 @@ import {
   type AgentRunProfile,
 } from "../services/agentRunProfile";
 import {
+  EXPLORE_CONTINUE_PRESET_PROMPT,
+  EXPLORE_DEPTH_MAX_TURNS,
+  EXPLORE_FOLLOWUP_MAX_TURNS,
+  EXPLORE_PROJECT_PRESET_PROMPT,
+  type ExploreDepth,
+  resolveExploreRequestMaxTurns,
+} from "../services/agentExplore";
+import { isProjectReport } from "../services/projectReportDisplay";
+import {
   AGENT_SILENT_CONTINUE_DELAY_MS,
   AGENT_SILENT_CONTINUE_MAX,
   AGENT_MODEL_WAIT_STALL_MS,
@@ -1584,7 +1593,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
       mergeDeferredCaptureIntoMsg(sessionId, assistantMsg);
 
-      if (assistantMsg.chatMode === "ask" && !wasAborted) {
+      if ((assistantMsg.chatMode === "ask" || assistantMsg.chatMode === "explore") && !wasAborted) {
         assistantMsg.totalTurns = completedTurns;
         if (projectPath.value.trim()) {
           updateAgentRunSessionStatus(sessionId, "completed");
@@ -2118,7 +2127,12 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         apiKey: aiConfig.value.apiKey,
         model: aiConfig.value.model,
         mode,
-        maxTurns: resolveResumeMaxTurns(mode, runProfile, resolveAgentCompletedTurns(assistantMsg)),
+        maxTurns: resolveResumeMaxTurns(
+          mode,
+          runProfile,
+          resolveAgentCompletedTurns(assistantMsg),
+          mode === "explore" ? assistantMsg.agentMaxTurns : undefined,
+        ),
         openFilePath: activeFilePath.value || undefined,
         runProfile: runProfile.kind === "execute_plan" ? runProfile : undefined,
         webProxyUrl: loadWebProxyUrlFromStorage() || undefined,
@@ -2169,6 +2183,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       sessionId?: string;
       /** When executing a specific plan message, use its content as the prior assistant plan. */
       planAssistantContent?: string;
+      maxTurns?: number;
+      exploreDepth?: ExploreDepth;
     },
   ): Promise<boolean> {
     const rawPrompt = userText.trim();
@@ -2348,6 +2364,18 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
     const history = buildAgentHistory(rawPrompt, runProfile);
 
+    const exploreDepth = options?.exploreDepth ?? "standard";
+    const maxTurns =
+      mode === "explore"
+        ? resolveExploreRequestMaxTurns(
+            rawPrompt,
+            history,
+            options?.maxTurns,
+            undefined,
+            exploreDepth,
+          )
+        : options?.maxTurns ?? resolveAgentMaxTurns(mode, runProfile);
+
     const runGen = runManager.has(sessionId)
       ? runManager.getGeneration(sessionId)
       : beginAssistantRunSlot(
@@ -2365,7 +2393,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       apiKey: aiConfig.value.apiKey,
       model: aiConfig.value.model,
       mode,
-      maxTurns: resolveAgentMaxTurns(mode, runProfile),
+      maxTurns,
       openFilePath: activeFilePath.value || undefined,
       runProfile: runProfile.kind === "execute_plan" ? runProfile : undefined,
       imageDataUrls: compressedImagesForRequest?.length ? compressedImagesForRequest : undefined,
@@ -2396,6 +2424,52 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     }
     if (hasAgentActivity(msg)) return false;
     return Boolean(messageDisplayContent(msg));
+  }
+
+  function canContinueExploreMessage(msg: ChatMessage): boolean {
+    if (msg.role !== "assistant" || msg.chatMode !== "explore") return false;
+    if (chatSending.value || isAgentRunning(msg)) return false;
+    if (msg.agentAborted || msg.agentFailed) return false;
+    return isProjectReport(messageDisplayContent(msg));
+  }
+
+  async function startExploreProject(depth: ExploreDepth = "standard") {
+    chatMode.value = "explore";
+    return runAgentTurn(EXPLORE_PROJECT_PRESET_PROMPT, {
+      maxTurns: EXPLORE_DEPTH_MAX_TURNS[depth],
+      exploreDepth: depth,
+    });
+  }
+
+  async function continueExploreFromMessage(assistantMsgId: string) {
+    chatMode.value = "explore";
+    const assistantIdx = chatMessages.value.findIndex((m) => m.id === assistantMsgId);
+    const history =
+      assistantIdx >= 0
+        ? chatMessages.value
+            .slice(0, assistantIdx)
+            .filter((m) => m.role === "user" || m.role === "assistant")
+            .map((m) => ({ role: m.role, content: m.content || "" }))
+        : undefined;
+    const completed =
+      assistantIdx >= 0
+        ? resolveAgentCompletedTurns(chatMessages.value[assistantIdx]!)
+        : 0;
+    return runAgentTurn(EXPLORE_CONTINUE_PRESET_PROMPT, {
+      maxTurns: resolveExploreRequestMaxTurns(
+        EXPLORE_CONTINUE_PRESET_PROMPT,
+        history,
+        undefined,
+        completed,
+      ),
+    });
+  }
+
+  async function sendExploreFollowUp(text: string) {
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    chatMode.value = "explore";
+    return runAgentTurn(trimmed, { maxTurns: EXPLORE_FOLLOWUP_MAX_TURNS });
   }
 
   function canExecutePlanMessage(msg: ChatMessage): boolean {

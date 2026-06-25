@@ -54,37 +54,57 @@
           role="status"
           aria-live="polite"
         >{{ chatStoreSyncMessage }}</span>
-        <button
-          type="button"
-          class="ghost small project-memory-btn"
-          :class="{ active: projectMemoryHasContent }"
-          :disabled="!projectOpened"
-          title="项目记忆、Skills 与探索归档"
-          @click="$emit('open-project-memory')"
-        >
-          记忆
-        </button>
-        <button
-          type="button"
-          class="ghost small"
-          :disabled="!projectOpened"
-          @click="$emit('start-new-session')"
-          title="新会话 (Ctrl+Shift+N)"
-        >
-          新会话
-        </button>
-        <button
-          v-if="chatMessages.length"
-          type="button"
-          class="ghost small"
-          :disabled="chatSending"
-          @click="$emit('clear-chat')"
-        >
-          清空
-        </button>
+        <div class="panel-head-actions">
+          <button
+            type="button"
+            class="ghost small project-memory-btn"
+            :class="{ active: projectMemoryHasContent }"
+            :disabled="!projectOpened"
+            title="项目记忆、Skills 与探索归档"
+            @click="$emit('open-project-memory')"
+          >
+            记忆
+          </button>
+          <button
+            type="button"
+            class="ghost small"
+            :disabled="!projectOpened"
+            @click="$emit('start-new-session')"
+            title="新会话 (Ctrl+Shift+N)"
+          >
+            新会话
+          </button>
+          <button
+            v-if="chatMessages.length"
+            type="button"
+            class="ghost small"
+            :disabled="chatSending"
+            @click="$emit('clear-chat')"
+          >
+            清空
+          </button>
+        </div>
         <span class="panel-meta" :class="{ warn: !configReady || !apiKeyReady }">
           {{ aiConfigStatusText }}
         </span>
+        <span class="panel-head-divider" aria-hidden="true" />
+        <button
+          type="button"
+          class="panel-fold-btn"
+          aria-label="收起 AI 助手"
+          title="收起 AI 助手"
+          @click="$emit('collapse-chat')"
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path
+              d="M5.5 3.5 10 8l-4.5 4.5M8.5 3.5 13 8l-4.5 4.5"
+              stroke="currentColor"
+              stroke-width="1.35"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
       </div>
     </div>
 
@@ -106,7 +126,7 @@
           </svg>
         </div>
         <p class="chat-empty-title">AI 编程助手</p>
-        <p class="chat-empty-desc">Ask 只读问答；Plan 先出方案再确认执行；Build 直接探索并改代码。输入 <code>@</code> 引用文件。</p>
+        <p class="chat-empty-desc">Ask 只读问答；Plan 先出方案再确认执行；Build 直接探索并改代码。输入 <code>@</code> 引用文件。项目知识库请使用左栏「知识库」Tab。</p>
         <div class="chips">
           <button type="button" class="chip" :disabled="chatSending" @click="$emit('apply-example', '解释这个项目是做什么的')">
             解释项目
@@ -303,7 +323,8 @@
               <span>{{ tokenDetailData.totalMessages }}</span>
             </div>
           </div>
-          <div class="chat-mode-switch" role="group" aria-label="对话模式">
+          <div class="composer-mode-row">
+            <div class="chat-mode-switch" role="group" aria-label="对话模式">
             <button
               type="button"
               class="mode-btn"
@@ -337,6 +358,7 @@
             >
               Build
             </button>
+          </div>
           </div>
           <div class="chat-actions">
             <button
@@ -718,15 +740,19 @@ const resumeBottomBtnTitle = computed(() => {
 
 function formatExplorationLabel(item: ExplorationIndexEntry): string {
   const stamp = item.createdAt?.trim();
-  if (!stamp) return item.id;
-  const date = new Date(stamp);
-  if (Number.isNaN(date.getTime())) return item.id;
-  return date.toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const timeLabel =
+    stamp && !Number.isNaN(new Date(stamp).getTime())
+      ? new Date(stamp).toLocaleString("zh-CN", {
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : item.id;
+  if (/project-overview/i.test(item.path) || /project-overview/i.test(item.id)) {
+    return `项目报告 · ${timeLabel}`;
+  }
+  return timeLabel;
 }
 
 const explorationContentHtml = computed(() => {
@@ -742,6 +768,7 @@ const emit = defineEmits<{
   (e: "cancel-auto-resume"): void;
   (e: "start-new-session"): void;
   (e: "expand-editor"): void;
+  (e: "collapse-chat"): void;
   (e: "switch-session", sessionId: string): void;
   (e: "remove-session", sessionId: string): void;
   (e: "switch-to-adjacent-session", delta: number): void;
@@ -902,6 +929,50 @@ function removeQuotedMessage(index: number) {
   gap: 8px;
   flex-shrink: 0;
   overflow: hidden;
+}
+
+.panel-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.panel-head-divider {
+  width: 1px;
+  height: 18px;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.panel-fold-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(139, 148, 158, 0.88);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.panel-fold-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(220, 225, 230, 0.96);
+}
+
+.panel-fold-btn:active {
+  transform: scale(0.96);
+}
+
+.panel-fold-btn:focus-visible {
+  outline: 2px solid rgba(88, 166, 255, 0.55);
+  outline-offset: 1px;
 }
 
 .session-copy-hint {
@@ -1068,6 +1139,14 @@ function removeQuotedMessage(index: number) {
   font-family: ui-monospace, monospace;
   font-size: 11px;
   color: #91beff;
+}
+
+.composer-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .chips {

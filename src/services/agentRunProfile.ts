@@ -11,7 +11,7 @@ import {
   stripQuotedReplyPrefix,
 } from "./agentContinuation";
 import { resolveAgentCompletedTurns, type AgentProgressSource, type AgentProgressTool } from "./agentRecovery";
-import { isConsultativeUserPrompt, type UserIntentHistoryMessage } from "./agentUserIntent";
+import { isConsultativeUserPrompt, isUltraShortOpenTaskPrompt, type UserIntentHistoryMessage } from "./agentUserIntent";
 
 export type AgentRunKind = "interactive" | "execute_plan";
 
@@ -19,6 +19,10 @@ export {
   ASK_MAX_TURNS,
   EXECUTE_PLAN_MAX_TURNS,
   INTERACTIVE_BUILD_MAX_TURNS,
+  EXPLORE_MAX_TURNS,
+  EXPLORE_QUICK_MAX_TURNS,
+  EXPLORE_DEEP_MAX_TURNS,
+  EXPLORE_FOLLOWUP_MAX_TURNS,
   PLAN_MAX_TURNS,
   resolveAgentMaxTurns,
   resolveResumeMaxTurns,
@@ -35,6 +39,7 @@ export interface ResolveAgentRunProfileInput {
   mode: "ask" | "build" | "plan";
   lastAssistantContent?: string;
   referencedFiles?: string[];
+  history?: UserIntentHistoryMessage[];
 }
 
 const MAX_SCOPED_TARGET_FILES = 8;
@@ -76,7 +81,14 @@ export function resolveAgentRunProfile(input: ResolveAgentRunProfileInput): Agen
 
   if (mode === "build") {
     const scopedFiles = resolveScopedTargetFiles(input);
-    const directIntent = hasDirectImplementationIntent(body || trimmed);
+    const directBody = body || trimmed;
+    if (isUltraShortOpenTaskPrompt(directBody)) {
+      return { kind: "interactive" };
+    }
+    if (isConsultativeUserPrompt(directBody, input.history)) {
+      return { kind: "interactive" };
+    }
+    const directIntent = hasDirectImplementationIntent(directBody);
     const isShortFollowUp = isExecutionContinuation(trimmed);
     if (directIntent) {
       if (followsReviewReport && isShortFollowUp) {
@@ -93,7 +105,7 @@ export function resolveAgentRunProfile(input: ResolveAgentRunProfileInput): Agen
       return {
         kind: "execute_plan",
         targetFiles,
-        userIntent: summarizeIntent(body || trimmed),
+        userIntent: summarizeIntent(directBody),
       };
     }
   }

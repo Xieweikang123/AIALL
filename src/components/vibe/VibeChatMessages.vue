@@ -177,7 +177,9 @@
         <span class="msg-status-text">
           {{
             ctx.agentStatusDisplay(m) ||
-            (m.chatMode === 'ask'
+            (m.chatMode === 'explore'
+              ? '正在了解项目…'
+              : m.chatMode === 'ask'
               ? '思考中…'
               : m.chatMode === 'plan' && ctx.isAgentRunning(m) && ctx.planExecutionActive.value
                 ? '执行方案中…'

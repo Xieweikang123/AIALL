@@ -184,18 +184,27 @@ export function buildExplorationArchiveMarkdown(params: {
   summary?: string;
   /** When provided, summary is auto-extracted if not given. */
   assistantText?: string;
+  kind?: "project_overview" | "exploration";
+  /** Full report body overrides summary-only archive for explore runs. */
+  fullBody?: string;
 }): string {
   const createdAt = params.createdAt ?? new Date().toISOString();
+  const kind = params.kind ?? "exploration";
   const summary = params.summary ?? extractExplorationSummary(params.assistantText);
   const lines = [
     "---",
     `createdAt: ${createdAt}`,
+    `kind: ${kind}`,
     `turns: ${params.turnCount}`,
     `readCount: ${params.readPaths.length}`,
     `writtenCount: ${params.writtenPaths.length}`,
     "---",
     "",
   ];
+  if (params.fullBody?.trim()) {
+    lines.push(params.fullBody.trim(), "");
+    return lines.join("\n").trim() + "\n";
+  }
   if (summary) {
     lines.push("# 探索快照", "", summary, "");
   } else {
@@ -267,11 +276,35 @@ export function distillExplorationRun(input: DistillInput): ExplorationDistillRe
   }
 
   const id = explorationArchiveId();
+  const isExplore = input.chatMode === "explore";
+  const assistantText = input.assistantText?.trim() ?? "";
+
+  if (isExplore) {
+    const skillProposals = buildSkillProposals({
+      readPaths,
+      writtenPaths,
+      hadAttachedImage: Boolean(input.hadAttachedImage),
+      turnCount,
+    });
+    return {
+      offer: memoryCandidates.length > 0 || skillProposals.length > 0,
+      memoryCandidates,
+      skillProposals,
+    };
+  }
+
   const summary = extractExplorationSummary(input.assistantText);
   const archive: ExplorationArchiveDraft = {
     id,
     filename: `${id}.md`,
-    content: buildExplorationArchiveMarkdown({ readPaths, writtenPaths, turnCount, summary }),
+    content: buildExplorationArchiveMarkdown({
+      readPaths,
+      writtenPaths,
+      turnCount,
+      summary,
+      assistantText: input.assistantText,
+      kind: "exploration",
+    }),
     readPaths,
     writtenPaths,
     turnCount,

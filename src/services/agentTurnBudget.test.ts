@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AGENT_SAFETY_MAX_TURNS,
   ASK_MAX_TURNS,
+  EXPLORE_MAX_TURNS,
   EXECUTE_PLAN_MAX_TURNS,
   INTERACTIVE_BUILD_MAX_TURNS,
   RESUME_MAX_TURNS_CAP,
@@ -40,6 +41,11 @@ describe("resolveAgentMaxTurns", () => {
     expect(resolveAgentMaxTurns("plan", { kind: "interactive" })).toBe(16);
     expect(resolveAgentMaxTurns("plan", { kind: "execute_plan" })).toBe(EXECUTE_PLAN_MAX_TURNS);
   });
+
+  it("limits explore mode runs", () => {
+    expect(resolveAgentMaxTurns("explore", undefined)).toBe(EXPLORE_MAX_TURNS);
+    expect(resolveAgentMaxTurns("explore", undefined, 24)).toBe(24);
+  });
 });
 
 describe("resolveResumeMaxTurns", () => {
@@ -50,6 +56,10 @@ describe("resolveResumeMaxTurns", () => {
   it("grants bonus turns after partial or full exhaustion", () => {
     expect(resolveResumeMaxTurns("build", undefined, 12)).toBe(48);
     expect(resolveResumeMaxTurns("build", undefined, 24)).toBe(RESUME_MAX_TURNS_CAP);
+  });
+
+  it("grants explore resume bonus", () => {
+    expect(resolveResumeMaxTurns("explore", undefined, 16)).toBe(24);
   });
 
   it("never exceeds resume cap or safety ceiling", () => {

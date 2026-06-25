@@ -10,9 +10,9 @@ import {
 
 const SAMPLE_PLAN = [
   "## 修改方案",
-  "改 `src/components/ChatComposerEditor.vue`：",
+  "改 `src/foo.ts`：",
   "```ts",
-  "const imageDataUrl = ref('');",
+  "const featureFlag = ref(false);",
   "```",
 ].join("\n");
 
@@ -24,7 +24,7 @@ describe("resolveAgentRunProfile", () => {
       lastAssistantContent: SAMPLE_PLAN,
     });
     expect(profile.kind).toBe("execute_plan");
-    expect(profile.targetFiles).toContain("src/components/ChatComposerEditor.vue");
+    expect(profile.targetFiles).toContain("src/foo.ts");
   });
 
   it("uses execute_plan for plan-mode confirmations after a plan", () => {
@@ -34,12 +34,12 @@ describe("resolveAgentRunProfile", () => {
       lastAssistantContent: SAMPLE_PLAN,
     });
     expect(profile.kind).toBe("execute_plan");
-    expect(profile.targetFiles).toContain("src/components/ChatComposerEditor.vue");
+    expect(profile.targetFiles).toContain("src/foo.ts");
   });
 
   it("uses execute_plan when user asks to implement after quoting the plan", () => {
     const profile = resolveAgentRunProfile({
-      prompt: "> Agent: …\n\n实现 vibe coding 页的发图功能",
+      prompt: "> Agent: …\n\n实现上述方案中的改动",
       mode: "build",
       lastAssistantContent: SAMPLE_PLAN,
     });
@@ -66,7 +66,7 @@ describe("resolveAgentRunProfile", () => {
       mode: "build",
       runProfile: {
         kind: "execute_plan",
-        targetFiles: ["src/components/ChatComposerEditor.vue"],
+        targetFiles: ["src/foo.ts"],
         userIntent: "改吧",
       },
     });
@@ -84,16 +84,16 @@ describe("resolveAgentRunProfile", () => {
 
   it("uses execute_plan when user @ references files with edit intent", () => {
     const profile = resolveAgentRunProfile({
-      prompt: "支持一下粘贴图片\n\n## 📎 参考文件\n\n### 📄 src/components/ChatComposerEditor.vue",
+      prompt: "支持一下这个功能\n\n## 📎 参考文件\n\n### 📄 src/foo.ts",
       mode: "build",
     });
     expect(profile.kind).toBe("execute_plan");
-    expect(profile.targetFiles).toContain("src/components/ChatComposerEditor.vue");
+    expect(profile.targetFiles).toContain("src/foo.ts");
   });
 
   it("stays interactive for pure questions even with @ refs", () => {
     const profile = resolveAgentRunProfile({
-      prompt: "有没有发图功能\n\n## 📎 参考文件\n\n### 📄 src/views/VibeCodingView.vue",
+      prompt: "有没有这个功能\n\n## 📎 参考文件\n\n### 📄 src/bar.ts",
       mode: "build",
     });
     expect(profile.kind).toBe("interactive");
@@ -101,7 +101,7 @@ describe("resolveAgentRunProfile", () => {
 
   it("uses execute_plan for implement intent without @ refs", () => {
     const profile = resolveAgentRunProfile({
-      prompt: "Vibe Coding 支持一下粘贴图片",
+      prompt: "支持一下接入该能力",
       mode: "build",
     });
     expect(profile.kind).toBe("execute_plan");
@@ -172,12 +172,12 @@ describe("resolveAgentRunProfile", () => {
     expect(profile.kind).toBe("execute_plan");
   });
 
-  it("uses execute_plan for standalone 优化 in build mode", () => {
+  it("stays interactive for ultra-short open task in build mode", () => {
     const profile = resolveAgentRunProfile({
       prompt: "优化",
       mode: "build",
     });
-    expect(profile.kind).toBe("execute_plan");
+    expect(profile.kind).toBe("interactive");
   });
 
   it("stays interactive for audit-report follow-up optimization", () => {
@@ -255,7 +255,7 @@ describe("resolveAgentRunProfile", () => {
             name: "read_file",
             turn: 7,
             ok: true,
-            args: { path: "src/foo/WorkOrderController.cs" },
+            args: { path: "src/foo/StatusController.cs" },
           },
           { running: false, name: "grep", turn: 1, ok: true },
         ],

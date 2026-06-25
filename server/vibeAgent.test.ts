@@ -302,4 +302,16 @@ describe("executeTool immediate persistence", () => {
     expect(result).toContain("Ask 模式下不支持");
     expect(result).not.toContain("Build 只读轮");
   });
+
+  it("patch_file in Explore mode returns Explore-specific error", async () => {
+    const root = await makeProject();
+    const result = await executeTool(
+      root,
+      "patch_file",
+      { path: "a.ts", old_string: "x", new_string: "y" },
+      null,
+      "explore",
+    );
+    expect(result).toContain("Explore 模式下不支持");
+  });
 });

@@ -368,10 +368,11 @@ describe("historySuggestsQuotePositionFix", () => {
 });
 
 describe("buildAgentStepClarifyContinueHint", () => {
-  it("contains tool prohibition and key positioning terms", () => {
+  it("steers toward patch after explanation without symbol-specific names", () => {
     const hint = buildAgentStepClarifyContinueHint();
     expect(hint).toContain("禁止");
-    expect(hint).toContain("show*At");
+    expect(hint).toContain("patch");
+    expect(hint).not.toMatch(/show\*At|getSelection/i);
   });
 });
 

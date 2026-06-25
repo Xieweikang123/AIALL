@@ -29,10 +29,19 @@ export const ORCHESTRATION_GUARDED_RELATIVE_PATHS = [
   "src/services/agentConsultativeTopics.ts",
   "src/services/agentScheduledTask.ts",
   "src/services/agentContinuation.ts",
+  "src/services/agentRunProfile.ts",
   "server/consultativeBehaviorTrace.ts",
   "server/agentExplorationBudget.ts",
   "server/agentAskPrompt.ts",
+  "server/agentExploreGuard.ts",
+  "server/agentRunPolicy.ts",
+  "server/visionMessage.ts",
+  "server/vibeAgent.ts",
 ] as const;
+
+/** Conditional fix recipes belong in dynamic hints, not always-on system prompt strings. */
+export const STATIC_FIX_RECIPE_RE =
+  /用户要求[「""].{4,48}[」""]时：|常见修复为/i;
 
 export function findForbiddenTermsInSource(source: string): string[] {
   const hits = new Set<string>();
@@ -42,13 +51,21 @@ export function findForbiddenTermsInSource(source: string): string[] {
   return [...hits];
 }
 
+export function findStaticFixRecipeViolations(source: string): string[] {
+  return STATIC_FIX_RECIPE_RE.test(source) ? ["static fix recipe (use dynamic build*Hint instead)"] : [];
+}
+
+export function findOrchestrationViolations(source: string): string[] {
+  return [...findForbiddenTermsInSource(source), ...findStaticFixRecipeViolations(source)];
+}
+
 export function scanOrchestrationGuardedFiles(repoRoot: string): Map<string, string[]> {
   const results = new Map<string, string[]>();
   for (const rel of ORCHESTRATION_GUARDED_RELATIVE_PATHS) {
     const abs = path.join(repoRoot, rel);
     if (!fs.existsSync(abs)) continue;
     const source = fs.readFileSync(abs, "utf8");
-    const hits = findForbiddenTermsInSource(source);
+    const hits = findOrchestrationViolations(source);
     if (hits.length) results.set(rel, hits);
   }
   return results;

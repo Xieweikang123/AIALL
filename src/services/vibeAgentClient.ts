@@ -22,7 +22,7 @@ function agentRunUrl(): string {
   return backendUrl("/backend/vibe/agent/run");
 }
 
-export type VibeChatMode = "ask" | "build" | "plan";
+export type VibeChatMode = "ask" | "build" | "plan" | "explore";
 
 export type VibeChatHistoryMessage = {
   role: "user" | "assistant";

@@ -17,7 +17,15 @@
       @test-notification="testNotification"
     />
 
-    <main ref="workspaceRef" class="workspace" :class="{ 'no-project': !projectOpened, 'editor-collapsed': editorCollapsed }">
+    <main
+      ref="workspaceRef"
+      class="workspace"
+      :class="{
+        'no-project': !projectOpened,
+        'editor-collapsed': editorCollapsed,
+        'chat-collapsed': chatCollapsed,
+      }"
+    >
       <VibeWorkspaceWelcome
         :show="!projectOpened && !loadingTree"
         :loading-tree="loadingTree"
@@ -30,6 +38,7 @@
         :git-panel-mode="gitPanelMode"
         :project-opened="projectOpened"
         :editor-collapsed="editorCollapsed"
+        :chat-collapsed="chatCollapsed"
         :git-change-count="gitChangeCount"
         :git-unstaged-files="gitUnstagedFiles"
         :git-staged-files="gitStagedFiles"
@@ -43,6 +52,7 @@
         @create-new-file="createNewFile"
         @create-new-folder="createNewFolder"
         @expand-editor="expandEditor"
+        @expand-chat="expandChat"
         @refresh-git-status="refreshGitStatus(gitIsRepo ? { showLoading: false } : undefined)"
         @switch-session="switchSession"
         @remove-session="removeSession"
@@ -141,6 +151,32 @@
             @file-drag-end="onFileDragEnd"
           />
         </div>
+
+        <KnowledgePanel
+          v-else-if="gitPanelMode === 'knowledge'"
+          layout="sidebar"
+          :project-opened="projectOpened"
+          :config-ready="configReady"
+          :has-knowledge="knowledgeHasContent"
+          :knowledge-draft="knowledgeDraft"
+          :knowledge-meta="knowledgeMeta"
+          :knowledge-loading="knowledgeLoading"
+          :knowledge-saving="knowledgeSaving"
+          :knowledge-message="knowledgeMessage"
+          :editing="knowledgeEditing"
+          :display-body="knowledgeDisplayBody"
+          :explore-run="knowledgeExploreRun"
+          @start-explore="(depth) => void startKnowledgeExplore(depth)"
+          @continue-explore="() => void continueKnowledgeExplore()"
+          @stop-explore="stopKnowledgeExplore"
+          @begin-edit="beginKnowledgeEdit"
+          @cancel-edit="cancelKnowledgeEdit"
+          @save-draft="() => void saveKnowledgeDraft()"
+          @follow-up="(text) => void sendKnowledgeFollowUp(text)"
+          @open-file="openKnowledgeFile"
+          @expand-chat="expandChat"
+          @update:draft="knowledgeDraft = $event"
+        />
       </FilePanel>
 
       <div
@@ -154,6 +190,7 @@
       ></div>
 
       <EditorPanel
+        v-if="gitPanelMode !== 'knowledge'"
         ref="editorPanelRef"
         :active-file-path="activeFilePath"
         :file-content="fileContent"
@@ -164,6 +201,7 @@
         :show-diff-mode="showDiffMode"
         :open-tabs="openTabs"
         :parent-editor-collapsed="editorCollapsed"
+        :chat-collapsed="chatCollapsed"
         :selected-code="selectedCode"
         :can-go-back="canGoBack"
         :can-go-forward="canGoForward"
@@ -174,6 +212,7 @@
         @save-file="onSaveFile"
         @reload-file="reloadFile"
         @collapse-editor="collapseEditor"
+        @expand-chat="expandChat"
         @editor-change="onEditorChange"
         @editor-select="onEditorSelect"
         @ask-ai-with-code="askAiWithCode"
@@ -184,8 +223,40 @@
         @navigate-forward="navigateForward"
       />
 
+      <section
+        v-show="gitPanelMode === 'knowledge' && projectOpened"
+        class="editor-panel knowledge-main-panel"
+        aria-label="项目知识库"
+      >
+        <KnowledgePanel
+          layout="main"
+          :chat-collapsed="chatCollapsed"
+          :project-opened="projectOpened"
+          :config-ready="configReady"
+          :has-knowledge="knowledgeHasContent"
+          :knowledge-draft="knowledgeDraft"
+          :knowledge-meta="knowledgeMeta"
+          :knowledge-loading="knowledgeLoading"
+          :knowledge-saving="knowledgeSaving"
+          :knowledge-message="knowledgeMessage"
+          :editing="knowledgeEditing"
+          :display-body="knowledgeDisplayBody"
+          :explore-run="knowledgeExploreRun"
+          @start-explore="(depth) => void startKnowledgeExplore(depth)"
+          @continue-explore="() => void continueKnowledgeExplore()"
+          @stop-explore="stopKnowledgeExplore"
+          @begin-edit="beginKnowledgeEdit"
+          @cancel-edit="cancelKnowledgeEdit"
+          @save-draft="() => void saveKnowledgeDraft()"
+          @follow-up="(text) => void sendKnowledgeFollowUp(text)"
+          @open-file="openKnowledgeFile"
+          @expand-chat="expandChat"
+          @update:draft="knowledgeDraft = $event"
+        />
+      </section>
+
       <div
-        v-show="!editorCollapsed"
+        v-show="!editorCollapsed && !chatCollapsed"
         class="resize-handle"
         role="separator"
         aria-orientation="vertical"
@@ -196,6 +267,7 @@
       ></div>
 
       <ChatPanel
+        v-show="!chatCollapsed"
         ref="chatPanelRef"
         :project-opened="projectOpened"
         :chat-sending="chatSending"
@@ -262,6 +334,7 @@
         @switch-to-adjacent-session="switchToAdjacentSession"
         @start-new-session="handleStartNewSession"
         @expand-editor="expandEditor"
+        @collapse-chat="collapseChat"
         @switch-session="switchSession"
         @copy-session-info="copySessionInfo"
         @remove-session="removeSession"
@@ -316,6 +389,23 @@
           />
         </template>
       </ChatPanel>
+
+      <button
+        v-if="chatCollapsed && projectOpened"
+        type="button"
+        class="chat-expand-rail"
+        title="展开 AI 助手"
+        aria-label="展开 AI 助手"
+        @click="expandChat"
+      >
+        <span class="chat-expand-rail-icon" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+            <path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+            <path d="M12 12 4 7.5m8 4.5 8-4.5M12 12v9" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <span class="chat-expand-rail-label">AI 助手</span>
+      </button>
     </main>
 
     <Teleport to="body">
@@ -393,6 +483,7 @@ import FileTreeNode, { type TreeNode } from "../components/FileTreeNode.vue";
 import AppToolbar from "../components/vibe/AppToolbar.vue";
 import FilePanel from "../components/vibe/FilePanel.vue";
 import GitPanel from "../components/vibe/GitPanel.vue";
+import KnowledgePanel from "../components/vibe/KnowledgePanel.vue";
 import EditorPanel from "../components/vibe/EditorPanel.vue";
 import ChatPanel from "../components/vibe/ChatPanel.vue";
 import VibeChatMessages from "../components/vibe/VibeChatMessages.vue";
@@ -410,6 +501,7 @@ import { useChatSessionStore } from "../composables/useChatSessionStore";
 import { useVibeQuickSearch } from "../composables/useVibeQuickSearch";
 import { useVibeGlobalShortcuts } from "../composables/useVibeGlobalShortcuts";
 import { useProjectMemory } from "../composables/useProjectMemory";
+import { useProjectKnowledge } from "../composables/useProjectKnowledge";
 import { distillExplorationRun } from "../services/explorationDistill";
 import { useAgentRun, type ChatMessage } from "../composables/useAgentRun";
 import { parseAgentSuggestions, type AgentSuggestion } from "../services/agentSuggestions";
@@ -1080,6 +1172,49 @@ const canSendChat = computed(
     && projectOpened.value,
 );
 
+const {
+  knowledgeBody,
+  knowledgeDraft,
+  knowledgeMeta,
+  knowledgeLoading,
+  knowledgeSaving,
+  knowledgeMessage,
+  editing: knowledgeEditing,
+  hasKnowledge: knowledgeHasContent,
+  displayBody: knowledgeDisplayBody,
+  exploreRun: knowledgeExploreRun,
+  loadKnowledge,
+  saveKnowledgeDraft,
+  beginEdit: beginKnowledgeEdit,
+  cancelEdit: cancelKnowledgeEdit,
+  startKnowledgeExplore,
+  continueKnowledgeExplore,
+  sendKnowledgeFollowUp,
+  stopKnowledgeExplore,
+} = useProjectKnowledge({
+  projectPath,
+  projectOpened,
+  configReady,
+  aiConfig,
+  gitHead: gitBranch,
+});
+
+function openKnowledgeFile(relPath: string) {
+  const root = projectPath.value.trim().replace(/\\/g, "/").replace(/\/$/, "");
+  void openFile(`${root}/${relPath.replace(/^[/\\]+/, "")}`);
+}
+
+watch([gitPanelMode, projectOpened], ([mode, opened]) => {
+  if (mode === "knowledge") {
+    if (editorCollapsed.value) expandEditor();
+    if (opened) void loadKnowledge();
+  }
+});
+
+watch(projectPath, () => {
+  if (gitPanelMode.value === "knowledge" && projectOpened.value) void loadKnowledge();
+});
+
 /** 无活跃会话时输入框草稿用固定 key，仅存 localStorage */
 const composerDraftKey = computed(
   () => activeSessionId.value || COMPOSER_PENDING_DRAFT_KEY,
@@ -1145,12 +1280,15 @@ const {
   filePanelWidth,
   chatPanelWidth,
   editorCollapsed,
+  chatCollapsed,
   chatPanelStyle,
   startResize,
   stopResize,
   onResizeKeydown,
   collapseEditor,
   expandEditor,
+  collapseChat,
+  expandChat,
   getChatPanelMaxWidth,
 } = usePanelLayout(workspaceRef);
 
@@ -1482,6 +1620,7 @@ registerEscapeDismiss(
 );
 
 function handleStartNewSession() {
+  expandChat();
   startNewSession();
   void nextTick(() => composerRef.value?.focus());
 }
@@ -2785,6 +2924,7 @@ function onWindowFocus() {
 }
 
 watch(chatMode, (mode) => {
+  if (mode === "explore") return;
   try {
     localStorage.setItem(CHAT_MODE_KEY, mode);
   } catch {

@@ -126,19 +126,19 @@ function closeImageViewer() {
   document.body.style.overflow = "";
 }
 
-export interface ComposerReferencedFile {
+interface ComposerReferencedFile {
   name: string;
   path: string;
   relative: string;
 }
 
-export interface ComposerDroppedFile {
+interface ComposerDroppedFile {
   name: string;
   path: string;
   content: string;
 }
 
-export interface ComposerPayload {
+interface ComposerPayload {
   text: string;
   refs: ComposerReferencedFile[];
   drops: ComposerDroppedFile[];

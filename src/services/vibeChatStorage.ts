@@ -62,7 +62,7 @@ export type PersistedChatMessage = {
   /** On-disk image paths under `.aiall/vibe-chat-sessions/`. */
   imageRefs?: PersistedImageRef[];
   imageCount?: number;
-  chatMode?: "ask" | "build" | "plan";
+  chatMode?: "ask" | "build" | "plan" | "explore";
   tools?: Array<{
     id: string;
     name?: string;

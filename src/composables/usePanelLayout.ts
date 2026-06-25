@@ -2,6 +2,7 @@ import { ref, computed, onBeforeUnmount, type Ref } from "vue";
 
 const PANEL_WIDTH_KEY = "vibe-coding-panel-widths";
 const EDITOR_COLLAPSED_KEY = "vibe-coding-editor-collapsed";
+const CHAT_COLLAPSED_KEY = "vibe-coding-chat-collapsed";
 
 const FILE_MIN_WIDTH = 180;
 const FILE_MAX_WIDTH = 500;
@@ -47,10 +48,27 @@ export function usePanelLayout(workspaceRef: Ref<HTMLElement | null>) {
     }
   }
 
+  function loadChatCollapsed(): boolean {
+    try {
+      return localStorage.getItem(CHAT_COLLAPSED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  function saveChatCollapsed() {
+    try {
+      localStorage.setItem(CHAT_COLLAPSED_KEY, chatCollapsed.value ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  }
+
   const savedWidths = loadPanelWidths();
   const filePanelWidth = ref(savedWidths.file);
   const chatPanelWidth = ref(savedWidths.chat);
   const editorCollapsed = ref(loadEditorCollapsed());
+  const chatCollapsed = ref(loadChatCollapsed());
   const isResizing = ref(false);
 
   let resizeType: "file" | "chat" | null = null;
@@ -137,6 +155,7 @@ export function usePanelLayout(workspaceRef: Ref<HTMLElement | null>) {
   }
 
   function collapseEditor() {
+    if (chatCollapsed.value) expandChat();
     editorCollapsed.value = true;
     saveEditorCollapsed();
   }
@@ -144,6 +163,16 @@ export function usePanelLayout(workspaceRef: Ref<HTMLElement | null>) {
   function expandEditor() {
     editorCollapsed.value = false;
     saveEditorCollapsed();
+  }
+
+  function collapseChat() {
+    chatCollapsed.value = true;
+    saveChatCollapsed();
+  }
+
+  function expandChat() {
+    chatCollapsed.value = false;
+    saveChatCollapsed();
   }
 
   onBeforeUnmount(() => {
@@ -155,6 +184,7 @@ export function usePanelLayout(workspaceRef: Ref<HTMLElement | null>) {
     filePanelWidth,
     chatPanelWidth,
     editorCollapsed,
+    chatCollapsed,
     isResizing,
     chatPanelStyle,
     startResize,
@@ -163,6 +193,8 @@ export function usePanelLayout(workspaceRef: Ref<HTMLElement | null>) {
     onResizeKeydown,
     collapseEditor,
     expandEditor,
+    collapseChat,
+    expandChat,
     getChatPanelMaxWidth,
     CHAT_MIN_WIDTH,
     CHAT_MAX_WIDTH,

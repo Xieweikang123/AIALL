@@ -108,6 +108,9 @@ export function formatAgentLiveStatus(
     return "正在发送模型请求…";
   }
   if (phase === "preparing" || phase === "starting") {
+    if (chatMode === "explore") {
+      return appendStatusDetail("正在了解项目…", detail);
+    }
     if (chatMode === "ask") {
       return openFile
         ? appendStatusDetail(`正在准备问答上下文（当前文件：${openFile}）…`, detail)

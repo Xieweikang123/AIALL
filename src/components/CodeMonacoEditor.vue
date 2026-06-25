@@ -125,10 +125,11 @@ const minimapSettings = ref({
 // Minimap 右键菜单位置
 const minimapMenuPos = ref({ x: 0, y: 0 });
 
-function showMinimapContextMenu(e: MouseEvent) {
-  e.preventDefault();
-  e.stopPropagation();
-  minimapMenuPos.value = { x: e.clientX, y: e.clientY };
+function showMinimapContextMenu(e: Event) {
+  const me = e as MouseEvent;
+  me.preventDefault();
+  me.stopPropagation();
+  minimapMenuPos.value = { x: me.clientX, y: me.clientY };
   showMinimapSettings.value = true;
 }
 

@@ -62,6 +62,15 @@
         <span v-if="fileDirty && !showDiffMode" class="dirty-badge" title="文件已修改">● 未保存</span>
         <span class="editor-action-divider" />
         <button
+          v-if="chatCollapsed"
+          type="button"
+          class="editor-action-btn"
+          title="展开 AI 助手"
+          @click="$emit('expand-chat')"
+        >
+          AI 助手
+        </button>
+        <button
           type="button"
           class="editor-action-btn collapse-btn"
           title="收起编辑器"
@@ -145,6 +154,7 @@ interface Props {
   showDiffMode: boolean;
   openTabs: OpenTab[];
   parentEditorCollapsed: boolean;
+  chatCollapsed?: boolean;
   selectedCode?: string;
   canGoBack?: boolean;
   canGoForward?: boolean;
@@ -162,6 +172,7 @@ const emit = defineEmits<{
   (e: "save-file"): void;
   (e: "reload-file"): void;
   (e: "collapse-editor"): void;
+  (e: "expand-chat"): void;
   (e: "editor-change", value: string): void;
   (e: "editor-select", text: string): void;
   (e: "ask-ai-with-code"): void;

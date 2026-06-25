@@ -1,10 +1,10 @@
-/** Default user message when starting project exploration from the UI button. */
+/** Default user message when starting project knowledge exploration. */
 export const EXPLORE_PROJECT_PRESET_PROMPT =
-  "请系统性地了解当前项目，输出完整的项目理解报告（技术栈、目录、入口、核心模块、依赖、开发命令、阅读顺序）。不要修改任何文件。";
+  "请系统性地了解当前项目，输出完整的项目知识库（技术栈、目录、入口、核心模块、依赖、开发命令、阅读顺序）。不要修改任何文件。";
 
-/** Sent when user clicks「继续探索」on a project report. */
+/** Sent when user clicks「继续探索」on the knowledge base. */
 export const EXPLORE_CONTINUE_PRESET_PROMPT =
-  "请继续探索项目中尚未覆盖的部分，补充并更新项目理解报告。不要修改任何文件。";
+  "请继续探索项目中尚未覆盖的部分，补充并更新项目知识库。不要修改任何文件。";
 
 export const EXPLORE_CONTINUE_PROMPT_RE =
   /^请继续探索项目中尚未覆盖的部分/i;
