@@ -13,10 +13,19 @@
       />
     </div>
 
-    <AgentProcessFlowLine
+    <div
+      v-else-if="item.kind === 'collapsed'"
+      class="stream-process-collapsed"
+      :class="{ 'stream-process-collapsed--nested': nested }"
+    >
+      {{ item.summary }}
+    </div>
+
+    <AgentProcessStepList
       v-else-if="item.kind === 'tool-batch'"
       :tools="item.steps"
       :is-running="isRunning"
+      :default-visible="toolDefaultVisible"
       @open-file="(path) => emit('openFile', path)"
     />
 
@@ -63,7 +72,7 @@ import { computed } from "vue";
 import ChatMarkdown from "./ChatMarkdown.vue";
 import PlanDocumentBlock from "./PlanDocumentBlock.vue";
 import ProjectReportBlock from "./ProjectReportBlock.vue";
-import AgentProcessFlowLine from "./AgentProcessFlowLine.vue";
+import AgentProcessStepList from "./AgentProcessStepList.vue";
 import type { InlineFeedItem, InlineFeedProcessItem } from "../services/agentInlineFeed";
 import { sanitizeFeedThoughtText } from "../services/agentProgressMarker";
 import { enrichPlanMarkdownForDisplay } from "../services/planDocumentDisplay";
@@ -74,7 +83,8 @@ defineOptions({ name: "AgentInlineFeedItems" });
 
 type DisplayItem =
   | InlineFeedProcessItem
-  | { kind: "tool-batch"; key: string; steps: AgentRoundTool[] };
+  | { kind: "tool-batch"; key: string; steps: AgentRoundTool[] }
+  | { kind: "collapsed"; key: string; summary: string };
 
 const props = withDefaults(
   defineProps<{
@@ -86,11 +96,15 @@ const props = withDefaults(
     nested?: boolean;
     answerOnly?: boolean;
     toolDisplay?: "card" | "inline";
+    preserveCollapsed?: boolean;
+    toolDefaultVisible?: number;
   }>(),
   {
     nested: false,
     answerOnly: false,
     toolDisplay: "inline",
+    preserveCollapsed: false,
+    toolDefaultVisible: 8,
   },
 );
 
@@ -109,15 +123,17 @@ function flattenProcessItems(items: InlineFeedItem[]): InlineFeedProcessItem[] {
   return flat;
 }
 
-const displayItems = computed((): DisplayItem[] => {
-  const source = props.answerOnly
-    ? props.items.filter((item) => item.kind === "text" && item.variant === "answer")
-    : flattenProcessItems(props.items);
-
-  if (props.toolDisplay !== "inline") {
-    return source;
+function sourceProcessItems(items: InlineFeedItem[]): InlineFeedItem[] {
+  if (props.answerOnly) {
+    return items.filter((item) => item.kind === "text" && item.variant === "answer");
   }
+  if (props.preserveCollapsed) {
+    return items.filter((item) => item.kind !== "text" || item.variant !== "answer");
+  }
+  return flattenProcessItems(items);
+}
 
+function mergeInlineToolBatches(source: Array<InlineFeedProcessItem | InlineFeedItem>): DisplayItem[] {
   const merged: DisplayItem[] = [];
   let toolBatch: AgentRoundTool[] = [];
 
@@ -137,14 +153,29 @@ const displayItems = computed((): DisplayItem[] => {
       continue;
     }
     flushTools();
+    if (item.kind === "collapsed") {
+      merged.push({ kind: "collapsed", key: item.key, summary: item.summary });
+      continue;
+    }
     merged.push(item);
   }
   flushTools();
   return merged;
+}
+
+const displayItems = computed((): DisplayItem[] => {
+  const source = sourceProcessItems(props.items);
+
+  if (props.toolDisplay !== "inline") {
+    return source as DisplayItem[];
+  }
+
+  return mergeInlineToolBatches(source);
 });
 
 function renderKey(item: DisplayItem): string {
   if (item.kind === "tool-batch") return item.key;
+  if (item.kind === "collapsed") return item.key;
   return `${item.kind}:${item.key}`;
 }
 
@@ -175,8 +206,41 @@ function answerMarkdown(text: string) {
   background: transparent;
 }
 
+.inline-feed-markdown--answer :deep(.msg-markdown) {
+  font-size: 14px;
+  line-height: 1.65;
+  color: rgba(240, 245, 250, 0.96);
+}
+
+.inline-feed-markdown--answer :deep(.msg-markdown--streaming p:last-child::after) {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.12em;
+  background: rgba(88, 166, 255, 0.85);
+  animation: stream-caret-blink 1s step-end infinite;
+}
+
+@keyframes stream-caret-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
 .stream-narrative {
   padding: 0 0 4px;
+}
+
+.stream-process-collapsed {
+  padding: 0 0 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(148, 163, 184, 0.55);
+}
+
+.stream-process-collapsed--nested {
+  font-size: 10px;
 }
 
 .inline-feed-markdown--narrative :deep(.msg-markdown) {

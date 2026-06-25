@@ -13,7 +13,7 @@
         :can-execute-plan="canExecutePlan"
         :chat-mode="msg.chatMode"
         :show-debug="showDebug"
-        :debug-expanded="false"
+        :debug-expanded="isActivityDetailed(msg)"
         :tools="msg.tools"
         :agent-turn="activeAgentTurn(msg)"
         :agent-max-turns="msg.agentMaxTurns"
@@ -45,7 +45,7 @@
         class="cursor-activity-collapse"
         @click="collapseAgentActivity(msg)"
       >
-        收起过程
+        收起
       </button>
 
       <button
@@ -167,13 +167,13 @@ function jumpToLatest() {
 .cursor-activity-collapse {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  margin: 0;
-  padding: 2px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.02);
-  color: rgba(139, 148, 158, 0.6);
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 3px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(139, 148, 158, 0.72);
   font-size: 11px;
   cursor: pointer;
   transition: all 0.15s ease;

@@ -13,7 +13,13 @@
       :key="m.id"
       v-memo="[messageMemoKey(m)]"
       class="msg"
-    :class="m.role"
+    :class="[
+      m.role,
+      {
+        'msg--live': m.role === 'assistant' && ctx.isAgentRunning(m),
+        'msg--agent-done': m.role === 'assistant' && !ctx.isAgentRunning(m) && ctx.hasAgentActivity(m),
+      },
+    ]"
     :data-message-id="m.id"
     @mouseup="ctx.onMessageSelect($event, m)"
     @dblclick="ctx.onMessageDoubleClick($event, m)"
@@ -21,8 +27,25 @@
     <div class="msg-avatar" aria-hidden="true">{{ m.role === "user" ? "你" : "AI" }}</div>
     <div class="msg-body">
       <div class="msg-head">
-        <div class="msg-role">{{ m.role === "user" ? "你" : "Agent" }}</div>
-        <div v-if="!ctx.chatSending.value" class="msg-toolbar">
+        <div class="msg-head-left">
+          <div class="msg-role">{{ m.role === "user" ? "你" : "Agent" }}</div>
+          <span v-if="m.role === 'assistant' && m.chatMode" class="msg-mode-badge">
+            {{ chatModeLabel(m.chatMode) }}
+          </span>
+        </div>
+        <div
+          v-if="!ctx.chatSending.value || ctx.isAgentRunning(m)"
+          class="msg-toolbar"
+        >
+          <button
+            v-if="m.role === 'assistant' || m.role === 'user'"
+            type="button"
+            class="ghost small"
+            title="复制此消息"
+            @click="ctx.copyText(ctx.messageDisplayContent(m))"
+          >
+            复制
+          </button>
           <button
             v-if="ctx.canExecutePlanMessage(m)"
             type="button"
@@ -31,9 +54,6 @@
             @click="ctx.executePlanFromMessage(m.id)"
           >
             执行方案
-          </button>
-          <button type="button" class="ghost small" title="复制此消息" @click="ctx.copyText(ctx.messageDisplayContent(m))">
-            复制
           </button>
           <button v-if="m.role === 'user'" type="button" class="ghost small" title="编辑此消息" @click="ctx.editUserMessage(m.id)">
             编辑
@@ -439,5 +459,17 @@ function planMarkdownContent(msg: VibeChatMessageItem): string {
   const raw = ctx.messageDisplayContent(msg);
   const whileStreaming = msg.role === "assistant" && ctx.isAgentRunning(msg);
   return enrichPlanMarkdownForDisplay(raw, { whileStreaming });
+}
+
+const CHAT_MODE_LABELS: Record<string, string> = {
+  ask: "问答",
+  build: "改代码",
+  plan: "方案",
+  explore: "探索",
+};
+
+function chatModeLabel(mode: string | undefined): string {
+  if (!mode) return "";
+  return CHAT_MODE_LABELS[mode] ?? mode;
 }
 </script>

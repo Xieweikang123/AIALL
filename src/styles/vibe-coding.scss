@@ -470,13 +470,23 @@ button:active:not(:disabled) {
 .msg-list {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  padding: 8px 0 16px;
+  gap: 16px;
+  padding: 10px 0 20px;
   overflow-anchor: none;
 }
 
 .msg-list--live-run {
-  padding-bottom: 24px;
+  padding-bottom: 28px;
+}
+
+.msg.assistant.msg--live .msg-body {
+  border-color: rgba(88, 166, 255, 0.22);
+  background: rgba(88, 166, 255, 0.04);
+  box-shadow: 0 0 0 1px rgba(88, 166, 255, 0.06);
+}
+
+.msg.assistant.msg--agent-done .msg-body {
+  border-color: rgba(255, 255, 255, 0.07);
 }
 
 .load-earlier-btn {
@@ -551,10 +561,11 @@ button:active:not(:disabled) {
 }
 
 .msg.assistant .msg-body {
-  padding: 6px 10px 8px;
+  padding: 8px 12px 10px;
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.025);
   border-radius: var(--radius-md);
+  transition: border-color 200ms ease, background 200ms ease, box-shadow 200ms ease;
 }
 
 .msg-head {
@@ -562,7 +573,27 @@ button:active:not(:disabled) {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
+}
+
+.msg-head-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.msg-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(179, 146, 240, 0.92);
+  background: rgba(179, 146, 240, 0.12);
+  border: 1px solid rgba(179, 146, 240, 0.18);
 }
 
 .msg-role {
@@ -604,18 +635,9 @@ button:active:not(:disabled) {
 }
 
 .msg-answer--streaming {
-  border-left: 2px solid var(--primary);
-  padding-left: 12px;
-  animation: streaming-border-glow 2s ease-in-out infinite;
-}
-
-@keyframes streaming-border-glow {
-  0%, 100% {
-    border-left-color: var(--primary);
-  }
-  50% {
-    border-left-color: rgba(88, 166, 255, 0.8);
-  }
+  padding-left: 0;
+  border-left: none;
+  animation: none;
 }
 
 .msg-status {
@@ -768,16 +790,17 @@ button:active:not(:disabled) {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 10px;
   padding-top: 8px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .applied-badge {
   font-size: 11px;
   color: #7ee787;
-  padding: 2px 8px;
-  background: rgba(126, 231, 135, 0.1);
+  padding: 3px 10px;
+  background: rgba(126, 231, 135, 0.08);
+  border: 1px solid rgba(126, 231, 135, 0.16);
   border-radius: 999px;
 }
 

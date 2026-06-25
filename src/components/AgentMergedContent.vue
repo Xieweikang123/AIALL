@@ -18,6 +18,7 @@
       :has-running-tool="hasRunningTool"
       :activity-detailed="activityDetailed"
       :activity-expanded="activityExpanded"
+      :agent-phase="agentPhase"
       @execute-plan="emit('execute-plan')"
       @select-option="(option) => emit('select-option', option)"
       @toggle-debug="emit('toggle-debug')"

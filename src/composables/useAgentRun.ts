@@ -1011,7 +1011,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       agentContinueCount: assistantMsg.agentContinueCount,
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
       activityExpanded: true,
-      activityDetailed: true,
+      activityDetailed: false,
       tools: assistantMsg.tools ? [...assistantMsg.tools] : undefined,
       ...syncRoundGroupsPatch(assistantMsg),
     }, sessionId);
@@ -2081,7 +2081,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       assistantMsg.content = "";
     }
     assistantMsg.activityExpanded = true;
-    assistantMsg.activityDetailed = true;
+    assistantMsg.activityDetailed = false;
     appendStatusLog(
       assistantMsg,
       options?.silent
@@ -2103,7 +2103,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       agentAbortReason: undefined,
       agentContinueCount: undefined,
       activityExpanded: true,
-      activityDetailed: true,
+      activityDetailed: false,
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
       ...assistantTransientUiClearPatch(),
       ...syncRoundGroupsPatch(assistantMsg),
@@ -2149,6 +2149,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     connectHasImages: boolean,
     detail?: string,
   ): number {
+    if (assistantMsg.activityDetailed) {
+      assistantMsg.activityDetailed = false;
+      patchAssistantMsg(assistantMsg.id, { activityDetailed: false }, sessionId);
+    }
     const existing = runManager.get(sessionId);
     if (existing && existing.assistantMsgId === assistantMsg.id) {
       runManager.applyStatus(sessionId, phase, { detail });
@@ -2267,7 +2271,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           tools: [],
           roundGroups: [],
           activityExpanded: true,
-          activityDetailed: mode !== "ask",
+          activityDetailed: false,
         };
         chatMessages.value.push(assistantMsg);
         beginAssistantRunSlot(sessionId, assistantMsg, "preparing", false);
@@ -2330,7 +2334,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           tools: [],
           roundGroups: [],
           activityExpanded: true,
-          activityDetailed: mode !== "ask",
+          activityDetailed: false,
         };
         chatMessages.value.push(assistantMsg);
         beginAssistantRunSlot(
