@@ -198,18 +198,35 @@ export async function gitStatus(projectRoot: string): Promise<GitStatusResult> {
   }
 }
 
+export type GitChangedFilesSinceOptions = {
+  /** Include unstaged + staged changes against HEAD. */
+  includeWorkingTree?: boolean;
+};
+
 export async function gitChangedFilesSince(
   projectRoot: string,
   sinceCommit: string,
+  options: GitChangedFilesSinceOptions = {},
 ): Promise<{ ok: boolean; files: string[]; error?: string }> {
   const base = sinceCommit.trim();
   if (!base) return { ok: true, files: [] };
+  const files = new Set<string>();
+  const addLines = (stdout: string) => {
+    for (const line of stdout.split("\n")) {
+      const trimmed = line.trim().replace(/\\/g, "/");
+      if (trimmed) files.add(trimmed);
+    }
+  };
   try {
-    const { stdout } = await gitExec(projectRoot, ["diff", "--name-only", base, "HEAD"]);
-    return {
-      ok: true,
-      files: stdout.split("\n").map((line) => line.trim()).filter(Boolean),
-    };
+    const { stdout: rangeOut } = await gitExec(projectRoot, ["diff", "--name-only", base, "HEAD"]);
+    addLines(rangeOut);
+    if (options.includeWorkingTree) {
+      const { stdout: wtOut } = await gitExec(projectRoot, ["diff", "--name-only", "HEAD"]);
+      addLines(wtOut);
+      const { stdout: stagedOut } = await gitExec(projectRoot, ["diff", "--name-only", "--cached", "HEAD"]);
+      addLines(stagedOut);
+    }
+    return { ok: true, files: [...files].sort() };
   } catch (error) {
     return {
       ok: false,

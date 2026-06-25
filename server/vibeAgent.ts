@@ -36,12 +36,14 @@ import {
   buildExploreFollowUpHint,
   buildExploreQuotedFollowUpHint,
   buildExploreSectionFillNudge,
+  buildExploreChangesNudge,
   buildExploreSystemPromptLines,
 } from "./agentExplorePrompt";
 import {
   classifyExploreKnowledgeIntent,
   isExploreContinuePrompt,
   isExploreSectionFillPrompt,
+  isExploreChangesPrompt,
   isKnowledgeQuoteFollowUpPrompt,
 } from "../src/services/knowledgeExplore";
 import {
@@ -1947,6 +1949,8 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       messages.push({ role: "system", content: buildExploreContinueNudge() });
     } else if (isExploreSectionFillPrompt(prompt)) {
       messages.push({ role: "system", content: buildExploreSectionFillNudge() });
+    } else if (isExploreChangesPrompt(prompt)) {
+      messages.push({ role: "system", content: buildExploreChangesNudge() });
     } else if (exploreKnowledgeIntent === "followup") {
       messages.push({
         role: "system",

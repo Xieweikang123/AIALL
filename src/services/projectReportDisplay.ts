@@ -3,6 +3,11 @@ import {
   PROJECT_KNOWLEDGE_TITLE,
   PROJECT_REPORT_MARKER,
 } from "../../server/agentExplorePrompt";
+import {
+  PROJECT_KNOWLEDGE_REL_PATH,
+  stripKnowledgeFrontmatter,
+  type ProjectKnowledgeMeta,
+} from "../../shared/projectKnowledgeFormat";
 
 export type ProjectReportSection = {
   id: string;
@@ -69,14 +74,9 @@ export function parseProjectReportDisplay(content: string): ProjectReportDisplay
   };
 }
 
-export const PROJECT_KNOWLEDGE_REL_PATH = ".aiall/project-knowledge.md";
+export { PROJECT_KNOWLEDGE_REL_PATH, stripKnowledgeFrontmatter };
 
-export type ProjectKnowledgeMetaLite = {
-  updatedAt?: string;
-  lastExploredAt?: string;
-  exploreRounds?: number;
-  gitHead?: string;
-};
+export type ProjectKnowledgeMetaLite = ProjectKnowledgeMeta;
 
 export type KnowledgeSectionBlock = {
   title: string;
@@ -472,7 +472,12 @@ export function mergeKnowledgeExploreOutput(existingBody: string, newOutput: str
     return mergeIncrementalFollowUp(existing, incoming);
   }
 
-  return incoming;
+  const sectionParts = incoming.split(/\n(?=## )/).filter((p) => /^##\s+/.test(p));
+  if (sectionParts.length > 1) {
+    return mergeSectionUpdatesIntoKnowledge(existing, incoming);
+  }
+
+  return mergeIncrementalFollowUp(existing, incoming);
 }
 
 export function resolveKnowledgeBodyForSave(
@@ -494,12 +499,6 @@ export function extractReportBodyForArchive(content: string): string {
   if (!trimmed) return "";
   if (isProjectReport(trimmed)) return trimmed;
   return trimmed;
-}
-
-export function stripKnowledgeFrontmatter(raw: string): string {
-  const normalized = raw.replace(/\r\n/g, "\n");
-  const match = normalized.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?([\s\S]*)$/);
-  return (match?.[1] ?? normalized).trim();
 }
 
 /** TOC for knowledge panel: report sections, or fallback to any h1/h2 headings. */

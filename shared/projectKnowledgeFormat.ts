@@ -1,0 +1,92 @@
+/** Relative to project root; listed in .gitignore by default. */
+export const PROJECT_KNOWLEDGE_REL_PATH = ".aiall/project-knowledge.md";
+
+/** Max chars stored on disk (soft cap for manual edits). */
+export const PROJECT_KNOWLEDGE_MAX_CHARS = 120_000;
+
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
+
+export type ProjectKnowledgeMeta = {
+  updatedAt?: string;
+  lastExploredAt?: string;
+  exploreRounds?: number;
+  gitHead?: string;
+};
+
+export type ProjectKnowledgeWriteMetaOptions = {
+  gitHead?: string;
+  fromExplore?: boolean;
+  exploreRounds?: number;
+};
+
+export function parseProjectKnowledgeFrontmatter(raw: string): {
+  meta: ProjectKnowledgeMeta;
+  body: string;
+} {
+  const normalized = raw.replace(/\r\n/g, "\n");
+  const match = normalized.match(FRONTMATTER_RE);
+  if (!match) {
+    return { meta: {}, body: normalized.trim() };
+  }
+
+  const metaBlock = match[1] ?? "";
+  const body = (match[2] ?? "").trim();
+  const meta: ProjectKnowledgeMeta = {};
+
+  const updatedAt = metaBlock.match(/^updatedAt:\s*(.+)\s*$/m)?.[1]?.trim();
+  const lastExploredAt = metaBlock.match(/^lastExploredAt:\s*(.+)\s*$/m)?.[1]?.trim();
+  const exploreRoundsRaw = metaBlock.match(/^exploreRounds:\s*(\d+)\s*$/m)?.[1];
+  const gitHead = metaBlock.match(/^gitHead:\s*(.+)\s*$/m)?.[1]?.trim();
+
+  if (updatedAt) meta.updatedAt = updatedAt;
+  if (lastExploredAt) meta.lastExploredAt = lastExploredAt;
+  if (exploreRoundsRaw) meta.exploreRounds = Number(exploreRoundsRaw);
+  if (gitHead) meta.gitHead = gitHead;
+
+  return { meta, body };
+}
+
+export function serializeProjectKnowledgeFrontmatter(
+  meta: ProjectKnowledgeMeta,
+  body: string,
+): string {
+  const lines = ["---"];
+  if (meta.updatedAt) lines.push(`updatedAt: ${meta.updatedAt}`);
+  if (meta.lastExploredAt) lines.push(`lastExploredAt: ${meta.lastExploredAt}`);
+  if (meta.exploreRounds != null) lines.push(`exploreRounds: ${meta.exploreRounds}`);
+  if (meta.gitHead) lines.push(`gitHead: ${meta.gitHead}`);
+  lines.push("---", "", body.trim());
+  return `${lines.join("\n")}\n`;
+}
+
+export function stripKnowledgeFrontmatter(raw: string): string {
+  const normalized = raw.replace(/\r\n/g, "\n");
+  const match = normalized.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?([\s\S]*)$/);
+  return (match?.[1] ?? normalized).trim();
+}
+
+export function normalizeProjectKnowledgeBody(raw: string): { content: string; truncated: boolean } {
+  const trimmed = raw.replace(/\r\n/g, "\n").trim();
+  if (trimmed.length <= PROJECT_KNOWLEDGE_MAX_CHARS) {
+    return { content: trimmed, truncated: false };
+  }
+  return {
+    content: `${trimmed.slice(0, PROJECT_KNOWLEDGE_MAX_CHARS)}\n\n…（已截断）`,
+    truncated: true,
+  };
+}
+
+export function buildProjectKnowledgeMetaForWrite(
+  priorMeta: ProjectKnowledgeMeta,
+  options: ProjectKnowledgeWriteMetaOptions = {},
+): ProjectKnowledgeMeta {
+  const now = new Date().toISOString();
+  return {
+    updatedAt: now,
+    lastExploredAt: options.fromExplore ? now : priorMeta.lastExploredAt,
+    exploreRounds: options.fromExplore
+      ? (options.exploreRounds ?? (priorMeta.exploreRounds ?? 0) + 1)
+      : priorMeta.exploreRounds,
+    gitHead: options.gitHead ?? priorMeta.gitHead,
+  };
+}

@@ -1,4 +1,5 @@
 import {
+  isExploreChangesPrompt,
   isExploreContinuePrompt,
   isExploreFollowUpPrompt,
   isExploreSectionFillPrompt,
@@ -7,6 +8,7 @@ import {
 export {
   classifyExploreKnowledgeIntent,
   exploreIntentUsesKnowledgeManifest,
+  isExploreChangesPrompt,
   isExploreContinuePrompt,
   isExploreFollowUpPrompt,
   isExploreSectionFillPrompt,
@@ -54,6 +56,17 @@ export function buildExploreUnexploredPrompt(sectionTitles: string[]): string {
   ].join("");
 }
 
+/** Targeted explore for files changed since the knowledge base gitHead. */
+export function buildExploreChangedFilesPrompt(changedFileCount: number): string {
+  const count = Math.max(1, changedFileCount);
+  return [
+    `请针对自上次探索以来变更的代码文件（共 ${count} 个），更新知识库中受影响的章节。`,
+    "先用 read_file 阅读 .aiall/project-knowledge.md 了解现有正文；再 read/grep 变更相关代码。",
+    "仅输出需修订的 `## 章节` 内容，勿输出完整知识库或 project-knowledge 标记。",
+    "不要修改任何文件。",
+  ].join("");
+}
+
 const KNOWLEDGE_QUOTE_EXCERPT_MAX = 2000;
 
 /** Build explore prompt for a user-selected knowledge excerpt + optional question. */
@@ -89,7 +102,7 @@ export function resolveExploreRequestMaxTurns(
       ? Math.min(48, completedTurns + EXPLORE_RESUME_BONUS_TURNS)
       : EXPLORE_DEPTH_MAX_TURNS[depth] + EXPLORE_RESUME_BONUS_TURNS;
   }
-  if (isExploreSectionFillPrompt(prompt) || isExploreFollowUpPrompt(prompt)) {
+  if (isExploreSectionFillPrompt(prompt) || isExploreChangesPrompt(prompt) || isExploreFollowUpPrompt(prompt)) {
     return EXPLORE_FOLLOWUP_MAX_TURNS;
   }
   return EXPLORE_DEPTH_MAX_TURNS[depth];

@@ -151,6 +151,21 @@ describe("mergeKnowledgeExploreOutput", () => {
     expect(saved).toContain("## 技术栈");
     expect(saved).toContain("npm test");
   });
+
+  it("does not replace entire doc when long output lacks full report marker", () => {
+    const longPartial = [
+      "## 技术栈",
+      "React 18",
+      "## 目录结构",
+      "src/\nserver/\n".repeat(80),
+      "## 核心模块",
+      "未探索",
+    ].join("\n");
+    expect(isFullKnowledgeReport(longPartial)).toBe(false);
+    const merged = mergeKnowledgeExploreOutput(existing, longPartial);
+    expect(merged).toContain("Vue 3");
+    expect(merged).toContain("React 18");
+  });
 });
 
 describe("replaceKnowledgeSection", () => {

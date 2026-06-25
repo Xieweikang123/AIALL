@@ -1,9 +1,10 @@
-import { computed, ref, type ComputedRef, type Ref } from "vue";
+import { computed, ref, type ComputedRef, type Ref, watch } from "vue";
 import {
   EXPLORE_CONTINUE_PRESET_PROMPT,
   EXPLORE_DEPTH_MAX_TURNS,
   EXPLORE_FOLLOWUP_MAX_TURNS,
   EXPLORE_PROJECT_PRESET_PROMPT,
+  buildExploreChangedFilesPrompt,
   type ExploreDepth,
   resolveExploreRequestMaxTurns,
 } from "../services/agentExplore";
@@ -11,6 +12,8 @@ import {
   classifyExploreKnowledgeIntent,
   type ExploreKnowledgeIntent,
 } from "../services/knowledgeExplore";
+import { filterKnowledgeChangePaths } from "../services/knowledgeGitChanges";
+import { fetchGitChangedSince } from "../services/vibeGitClient";
 import { loadWebProxyUrlFromStorage } from "../services/aiLocalConfig";
 import {
   resolveKnowledgeBodyForSave,
@@ -92,6 +95,8 @@ export function useProjectKnowledge(options: {
   const knowledgeSaving = ref(false);
   const knowledgeMessage = ref("");
   const editing = ref(false);
+  const knowledgeChangedFiles = ref<string[]>([]);
+  const knowledgeChangesLoading = ref(false);
 
   const exploreRun = ref<KnowledgeExploreRunState>(emptyRunState());
   let abortHandle: { abort: () => void } | null = null;
@@ -105,18 +110,19 @@ export function useProjectKnowledge(options: {
   }
 
   const hasKnowledge = computed(() => Boolean(knowledgeBody.value.trim()));
+  const knowledgeChangesAvailable = computed(() => {
+    const saved = knowledgeMeta.value.gitHead?.trim();
+    const current = options.gitHead?.value?.trim();
+    if (!saved || !hasKnowledge.value) return false;
+    if (current && saved !== current) return true;
+    return knowledgeChangedFiles.value.length > 0;
+  });
+
+  /** Stream preview uses raw model output; merge runs once in finalizeExploreRun. */
   const displayBody = computed(() => {
     if (editing.value) return knowledgeDraft.value;
-    const streamingText = exploreRun.value.running
-      ? exploreRun.value.assistantText.trim()
-      : "";
-    if (streamingText && !hasKnowledge.value) {
+    if (exploreRun.value.running && exploreRun.value.assistantText.trim()) {
       return exploreRun.value.assistantText;
-    }
-    if (streamingText && hasKnowledge.value) {
-      return resolveKnowledgeBodyForSave(knowledgeBody.value, exploreRun.value.assistantText, {
-        intent: exploreRun.value.intent === "section_fill" ? "section_fill" : undefined,
-      });
     }
     return knowledgeBody.value;
   });
@@ -137,8 +143,27 @@ export function useProjectKnowledge(options: {
       knowledgeBody.value = result.body ?? stripKnowledgeFrontmatter(result.content ?? "");
       knowledgeDraft.value = knowledgeBody.value;
       knowledgeMeta.value = result.meta ?? {};
+      void loadKnowledgeChangedFiles();
     } finally {
       knowledgeLoading.value = false;
+    }
+  }
+
+  async function loadKnowledgeChangedFiles() {
+    const path = options.projectPath.value.trim();
+    const since = knowledgeMeta.value.gitHead?.trim();
+    if (!path || !since || !options.projectOpened.value || !hasKnowledge.value) {
+      knowledgeChangedFiles.value = [];
+      return;
+    }
+    knowledgeChangesLoading.value = true;
+    try {
+      const result = await fetchGitChangedSince(path, since);
+      knowledgeChangedFiles.value = result.ok
+        ? filterKnowledgeChangePaths(result.files)
+        : [];
+    } finally {
+      knowledgeChangesLoading.value = false;
     }
   }
 
@@ -269,6 +294,7 @@ export function useProjectKnowledge(options: {
           knowledgeDraft.value = knowledgeBody.value;
           knowledgeMeta.value = result.meta ?? {};
           knowledgeMessage.value = resolveExploreSaveMessage(true);
+          void loadKnowledgeChangedFiles();
         }
       } else if (applyToUi) {
         knowledgeMessage.value = result.error || "保存知识库失败";
@@ -386,6 +412,17 @@ export function useProjectKnowledge(options: {
     });
   }
 
+  async function exploreKnowledgeChanges() {
+    if (!hasKnowledge.value) return startKnowledgeExplore();
+    if (!knowledgeChangedFiles.value.length) {
+      return continueKnowledgeExplore();
+    }
+    return runKnowledgeExplore(
+      buildExploreChangedFilesPrompt(knowledgeChangedFiles.value.length),
+      { maxTurns: EXPLORE_FOLLOWUP_MAX_TURNS },
+    );
+  }
+
   function stopKnowledgeExplore() {
     if (!exploreRun.value.running) return;
     exploreRun.value.aborted = true;
@@ -406,7 +443,22 @@ export function useProjectKnowledge(options: {
     knowledgeDraft.value = "";
     knowledgeMeta.value = {};
     knowledgeMessage.value = "";
+    knowledgeChangedFiles.value = [];
   }
+
+  watch(
+    () => [
+      options.projectPath.value,
+      options.projectOpened.value,
+      knowledgeMeta.value.gitHead,
+      options.gitHead?.value,
+      hasKnowledge.value,
+    ] as const,
+    () => {
+      void loadKnowledgeChangedFiles();
+    },
+    { immediate: true },
+  );
 
   return {
     knowledgeBody,
@@ -417,14 +469,19 @@ export function useProjectKnowledge(options: {
     knowledgeMessage,
     editing,
     hasKnowledge,
+    knowledgeChangedFiles,
+    knowledgeChangesLoading,
+    knowledgeChangesAvailable,
     displayBody,
     exploreRun,
     loadKnowledge,
+    loadKnowledgeChangedFiles,
     saveKnowledgeDraft,
     beginEdit,
     cancelEdit,
     startKnowledgeExplore,
     continueKnowledgeExplore,
+    exploreKnowledgeChanges,
     sendKnowledgeFollowUp,
     stopKnowledgeExplore,
     leaveProjectKnowledge,

@@ -141,8 +141,40 @@
       </div>
 
       <p v-if="knowledgeStale" class="knowledge-stale-hint" role="status">
-        知识库基于提交 {{ shortGitRef(knowledgeMeta.gitHead!) }}，当前 {{ shortGitRef(currentGitHead!) }}，代码可能已变更，建议「继续探索」或「补全未探索」
+        知识库基于提交 {{ shortGitRef(knowledgeMeta.gitHead!) }}，当前 {{ shortGitRef(currentGitHead!) }}，代码可能已变更
       </p>
+
+      <div
+        v-if="showChangesCard"
+        class="knowledge-changes-card"
+        aria-label="自上次探索以来的代码变更"
+      >
+        <div class="knowledge-changes-head">
+          <p class="knowledge-changes-title">
+            <template v-if="knowledgeChangesLoading">正在检测变更…</template>
+            <template v-else-if="changesSummary">{{ changesSummary }}</template>
+            <template v-else>代码可能已变更</template>
+          </p>
+          <button
+            type="button"
+            class="knowledge-btn knowledge-btn--accent knowledge-changes-action"
+            :disabled="!exploreReady || exploreRun.running || knowledgeChangesLoading"
+            @click="emit('explore-changes')"
+          >
+            {{ exploreChangesLabel }}
+          </button>
+        </div>
+        <ul v-if="shownChangedFiles.length" class="knowledge-changes-list">
+          <li v-for="file in shownChangedFiles" :key="file">
+            <button type="button" class="knowledge-changes-file" @click="emit('open-file', file)">
+              {{ file }}
+            </button>
+          </li>
+        </ul>
+        <p v-if="hiddenChangedFileCount > 0" class="knowledge-changes-more">
+          另有 {{ hiddenChangedFileCount }} 个文件未列出
+        </p>
+      </div>
 
       <div v-if="layout === 'sidebar' && knowledgeLoading" class="knowledge-loading">加载中…</div>
 
@@ -171,7 +203,7 @@
             · 覆盖 {{ knowledgeOverview.coveragePercent }}%
           </template>
         </span>
-        <span v-if="exploreRun.running" class="knowledge-main-badge">
+        <span v-if="exploreRun.running" class="knowledge-main-badge knowledge-main-badge--pulse">
           {{ hasKnowledge ? "更新中" : "构建中" }}
         </span>
         <div class="knowledge-main-head-actions">
@@ -205,13 +237,44 @@
       </header>
 
       <div
-        v-if="layout === 'main' && (knowledgeMessage || knowledgeStale)"
+        v-if="layout === 'main' && (knowledgeMessage || knowledgeStale || showChangesCard)"
         class="knowledge-main-alerts"
       >
         <p v-if="knowledgeMessage" class="knowledge-hint" role="status">{{ knowledgeMessage }}</p>
         <p v-if="knowledgeStale" class="knowledge-stale-hint" role="status">
-          知识库基于提交 {{ shortGitRef(knowledgeMeta.gitHead!) }}，当前 {{ shortGitRef(currentGitHead!) }}，代码可能已变更，建议「继续探索」或「补全未探索」
+          知识库基于提交 {{ shortGitRef(knowledgeMeta.gitHead!) }}，当前 {{ shortGitRef(currentGitHead!) }}，代码可能已变更
         </p>
+        <div
+          v-if="showChangesCard"
+          class="knowledge-changes-card knowledge-changes-card--main"
+          aria-label="自上次探索以来的代码变更"
+        >
+          <div class="knowledge-changes-head">
+            <p class="knowledge-changes-title">
+              <template v-if="knowledgeChangesLoading">正在检测变更…</template>
+              <template v-else-if="changesSummary">{{ changesSummary }}</template>
+              <template v-else>代码可能已变更</template>
+            </p>
+            <button
+              type="button"
+              class="knowledge-btn knowledge-btn--accent knowledge-changes-action"
+              :disabled="!exploreReady || exploreRun.running || knowledgeChangesLoading"
+              @click="emit('explore-changes')"
+            >
+              {{ exploreChangesLabel }}
+            </button>
+          </div>
+          <ul v-if="shownChangedFiles.length" class="knowledge-changes-list">
+            <li v-for="file in shownChangedFiles" :key="file">
+              <button type="button" class="knowledge-changes-file" @click="emit('open-file', file)">
+                {{ file }}
+              </button>
+            </li>
+          </ul>
+          <p v-if="hiddenChangedFileCount > 0" class="knowledge-changes-more">
+            另有 {{ hiddenChangedFileCount }} 个文件未列出
+          </p>
+        </div>
       </div>
 
       <div v-if="knowledgeLoading && !exploreRun.running" class="knowledge-loading">加载中…</div>
@@ -274,21 +337,59 @@
           <div class="knowledge-content-main">
             <div ref="bodyScrollRef" class="knowledge-body-scroll" @scroll="onBodyScroll">
               <template v-if="!editing">
-                <div
-                  ref="bodyRef"
-                  class="knowledge-body knowledge-markdown"
-                  :class="{ 'knowledge-body--live': exploreRun.running && hasKnowledge }"
-                  v-html="displayHtml"
-                  @click="onBodyClick"
-                />
+                <template v-if="showIncrementalLiveLayout">
+                  <div
+                    ref="bodyRef"
+                    class="knowledge-body knowledge-markdown knowledge-body--saved"
+                    :class="{ 'knowledge-body--saved-dim': liveDisplayHtml }"
+                    v-html="savedDisplayHtml"
+                    @click="onBodyClick"
+                  />
 
-                <p
-                  v-if="exploreRun.running && hasKnowledge && exploreRun.assistantText.trim()"
-                  class="knowledge-live-hint"
-                  role="status"
-                >
-                  正文随生成实时预览，完成后写入磁盘
-                </p>
+                  <div
+                    v-if="exploreRun.assistantText.trim()"
+                    class="knowledge-stream-preview"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <p class="knowledge-stream-preview-label">
+                      <span class="knowledge-status-spinner" aria-hidden="true" />
+                      {{ liveUpdateLabel }}
+                    </p>
+                    <div
+                      class="knowledge-body knowledge-markdown knowledge-stream-preview-body knowledge-body--streaming"
+                      v-html="liveDisplayHtml"
+                    />
+                  </div>
+
+                  <div
+                    v-else-if="exploreRun.running"
+                    class="knowledge-stream-waiting"
+                    role="status"
+                  >
+                    <span class="knowledge-status-spinner" aria-hidden="true" />
+                    正在阅读项目代码，更新内容将显示在下方…
+                  </div>
+                </template>
+
+                <template v-else>
+                  <div
+                    v-if="exploreRun.running && !hasKnowledge && !displayHtml"
+                    class="knowledge-stream-waiting knowledge-stream-waiting--initial"
+                    role="status"
+                  >
+                    <span class="knowledge-status-spinner" aria-hidden="true" />
+                    正在探索项目结构，知识库内容即将出现…
+                  </div>
+                  <div
+                    v-else
+                    ref="bodyRef"
+                    class="knowledge-body knowledge-markdown"
+                    :class="{ 'knowledge-body--streaming': exploreRun.running }"
+                    v-html="displayHtml"
+                    @click="onBodyClick"
+                  />
+                </template>
               </template>
 
               <textarea
@@ -425,6 +526,10 @@ import {
   type ExploreDepth,
 } from "../../services/agentExplore";
 import type { KnowledgeExploreRunState } from "../../composables/useProjectKnowledge";
+import {
+  KNOWLEDGE_CHANGES_LIST_MAX,
+  summarizeKnowledgeChanges,
+} from "../../services/knowledgeGitChanges";
 import type { ProjectKnowledgeMeta } from "../../services/vibeProjectKnowledgeClient";
 import {
   computeKnowledgeOverview,
@@ -435,7 +540,9 @@ import {
   isKnowledgeMarkdownFilePath,
   parseKnowledgeTocSections,
 } from "../../services/projectReportDisplay";
-import { renderMarkdown } from "../../utils/renderMarkdown";
+import { renderMarkdown, renderMarkdownLite } from "../../utils/renderMarkdown";
+import { createStreamingMarkdownThrottle } from "../../utils/streamingMarkdownThrottle";
+import { prepareStreamingMarkdownForRender } from "../../utils/streamingMarkdownTrim";
 
 const props = withDefaults(
   defineProps<{
@@ -453,18 +560,51 @@ const props = withDefaults(
     savedBody: string;
     exploreRun: KnowledgeExploreRunState;
     currentGitHead?: string;
+    knowledgeChangedFiles?: string[];
+    knowledgeChangesLoading?: boolean;
+    knowledgeChangesAvailable?: boolean;
     /** sidebar: controls only; main: readable content; full: legacy single-panel layout */
     layout?: "sidebar" | "main" | "full";
     chatCollapsed?: boolean;
   }>(),
-  { layout: "full", chatCollapsed: false, currentGitHead: "", savedBody: "", apiKeyReady: true },
+  { layout: "full", chatCollapsed: false, currentGitHead: "", savedBody: "", apiKeyReady: true, knowledgeChangedFiles: () => [], knowledgeChangesLoading: false, knowledgeChangesAvailable: false },
 );
 
 const exploreReady = computed(() => props.configReady && props.apiKeyReady);
 
+const knowledgeStale = computed(() => {
+  const saved = props.knowledgeMeta.gitHead?.trim();
+  const current = props.currentGitHead?.trim();
+  return Boolean(saved && current && saved !== current);
+});
+
+const showChangesCard = computed(
+  () => props.hasKnowledge && props.knowledgeChangesAvailable,
+);
+
+const shownChangedFiles = computed(
+  () => (props.knowledgeChangedFiles ?? []).slice(0, KNOWLEDGE_CHANGES_LIST_MAX),
+);
+
+const hiddenChangedFileCount = computed(() => {
+  const total = props.knowledgeChangedFiles?.length ?? 0;
+  return Math.max(0, total - shownChangedFiles.value.length);
+});
+
+const changesSummary = computed(() =>
+  summarizeKnowledgeChanges(props.knowledgeChangedFiles ?? [], {
+    knowledgeStale: knowledgeStale.value,
+  }),
+);
+
+const exploreChangesLabel = computed(() =>
+  (props.knowledgeChangedFiles?.length ?? 0) > 0 ? "针对变更探索" : "继续探索更新",
+);
+
 const emit = defineEmits<{
   (e: "start-explore", depth: ExploreDepth): void;
   (e: "continue-explore"): void;
+  (e: "explore-changes"): void;
   (e: "stop-explore"): void;
   (e: "begin-edit"): void;
   (e: "cancel-edit"): void;
@@ -540,12 +680,23 @@ const showContent = computed(
   () => props.layout === "main" || props.layout === "full",
 );
 
-const tocSections = computed(() => parseKnowledgeTocSections(props.displayBody));
-const unexploredSections = computed(() => findUnexploredSectionTitles(props.displayBody));
+/** TOC / coverage stats use saved body during incremental explore streaming. */
+const tocSourceBody = computed(() => {
+  if (props.exploreRun.running && props.hasKnowledge) {
+    return (props.savedBody || props.displayBody).trim();
+  }
+  return props.displayBody;
+});
+
+const tocSections = computed(() => parseKnowledgeTocSections(tocSourceBody.value));
+const unexploredSections = computed(() => findUnexploredSectionTitles(tocSourceBody.value));
 const unexploredSet = computed(() => new Set(unexploredSections.value));
 
 const overviewSourceBody = computed(() => {
   if (props.editing) return props.knowledgeDraft;
+  if (props.exploreRun.running && props.hasKnowledge) {
+    return (props.savedBody || props.displayBody).trim();
+  }
   if (props.exploreRun.running) return props.displayBody;
   if (props.hasKnowledge) return props.savedBody || props.displayBody;
   return "";
@@ -580,31 +731,146 @@ const filteredTocSections = computed(() => {
   return tocSections.value.filter((s) => s.title.toLowerCase().includes(q));
 });
 
-const displayHtml = computed(() => {
-  const html = injectReportHeadingIds(renderMarkdown(props.displayBody), tocSections.value);
+const showIncrementalLiveLayout = computed(
+  () => props.exploreRun.running && props.hasKnowledge && !props.editing,
+);
+
+const liveUpdateLabel = computed(() => {
+  switch (props.exploreRun.intent) {
+    case "section_fill":
+      return "正在补全章节（预览，完成后合并写入）";
+    case "changes":
+      return "正在根据代码变更更新（预览，完成后合并写入）";
+    case "continue":
+      return "正在扩展知识库（预览，完成后合并写入）";
+    case "followup":
+      return "正在处理追问（预览，完成后合并写入）";
+    case "rebuild":
+      return "正在重新构建（预览，完成后写入磁盘）";
+    default:
+      return "正在生成更新（预览，完成后写入磁盘）";
+  }
+});
+
+const displayHtml = ref("");
+const savedDisplayHtml = ref("");
+const liveDisplayHtml = ref("");
+const stickScrollToBottom = ref(true);
+const SCROLL_BOTTOM_THRESHOLD = 64;
+
+function buildFinalKnowledgeHtml(body: string, sections = tocSections.value): string {
+  if (!body.trim()) return "";
+  const html = injectReportHeadingIds(renderMarkdown(body), sections);
   return highlightHtmlText(html, searchQuery.value);
+}
+
+function buildStreamingKnowledgeHtml(body: string, sections = tocSections.value): string {
+  if (!body.trim()) return "";
+  const prepared = prepareStreamingMarkdownForRender(body);
+  const html = injectReportHeadingIds(renderMarkdownLite(prepared), sections);
+  return highlightHtmlText(html, searchQuery.value);
+}
+
+const streamingMarkdownThrottle = createStreamingMarkdownThrottle(undefined, (text) => {
+  displayHtml.value = buildStreamingKnowledgeHtml(text);
 });
 
-const knowledgeStale = computed(() => {
-  const saved = props.knowledgeMeta.gitHead?.trim();
-  const current = props.currentGitHead?.trim();
-  return Boolean(saved && current && saved !== current);
+const liveStreamingThrottle = createStreamingMarkdownThrottle(undefined, (text) => {
+  liveDisplayHtml.value = buildStreamingKnowledgeHtml(text);
 });
 
-const recentTools = computed(() => props.exploreRun.tools.slice(-6).reverse());
+function refreshSavedDisplayHtml() {
+  const body = (props.savedBody || "").trim();
+  savedDisplayHtml.value = body ? buildFinalKnowledgeHtml(body) : "";
+}
+
+function scrollBodyToBottom(force = false) {
+  const el = bodyScrollRef.value;
+  if (!el) return;
+  if (!force && !stickScrollToBottom.value) return;
+  el.scrollTo({ top: el.scrollHeight, behavior: "auto" });
+}
+
+function refreshDisplayHtml() {
+  if (props.editing) {
+    displayHtml.value = "";
+    savedDisplayHtml.value = "";
+    liveDisplayHtml.value = "";
+    return;
+  }
+
+  if (showIncrementalLiveLayout.value) {
+    displayHtml.value = "";
+    refreshSavedDisplayHtml();
+    const live = props.exploreRun.assistantText;
+    if (live.trim()) {
+      liveStreamingThrottle.pushSource(live, true);
+    } else {
+      liveDisplayHtml.value = "";
+      liveStreamingThrottle.pushSource("", false);
+    }
+    return;
+  }
+
+  savedDisplayHtml.value = "";
+  liveDisplayHtml.value = "";
+  liveStreamingThrottle.pushSource("", false);
+
+  const body = props.displayBody;
+  const streaming = props.exploreRun.running;
+  if (!body.trim()) {
+    displayHtml.value = "";
+    streamingMarkdownThrottle.dispose();
+    return;
+  }
+  if (streaming) {
+    streamingMarkdownThrottle.pushSource(body, true);
+    return;
+  }
+  streamingMarkdownThrottle.pushSource(body, false);
+  displayHtml.value = buildFinalKnowledgeHtml(body);
+}
+
+watch(
+  () => [
+    props.displayBody,
+    props.savedBody,
+    props.exploreRun.running,
+    props.exploreRun.assistantText,
+    props.exploreRun.intent,
+    props.hasKnowledge,
+    props.editing,
+    searchQuery.value,
+    tocSections.value,
+  ] as const,
+  () => refreshDisplayHtml(),
+  { immediate: true },
+);
 
 watch(
   () => props.exploreRun.running,
   (running, wasRunning) => {
+    if (running && !wasRunning) {
+      stickScrollToBottom.value = true;
+    }
     if (wasRunning && !running) {
       followUpDraft.value = "";
       pendingFollowUpText.value = "";
+      void nextTick(() => scrollBodyToBottom(true));
     }
   },
 );
 
 watch(
-  () => [props.displayBody, props.editing, displayHtml.value] as const,
+  () => [displayHtml.value, liveDisplayHtml.value, props.exploreRun.running] as const,
+  ([, , running]) => {
+    if (!running) return;
+    void nextTick(() => scrollBodyToBottom());
+  },
+);
+
+watch(
+  () => [props.displayBody, props.editing, displayHtml.value, savedDisplayHtml.value] as const,
   () => {
     void nextTick(() => updateActiveSectionFromScroll());
   },
@@ -619,6 +885,8 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  streamingMarkdownThrottle.dispose();
+  liveStreamingThrottle.dispose();
   if (actionHintTimer) clearTimeout(actionHintTimer);
   if (selectionQuoteTimer) clearTimeout(selectionQuoteTimer);
   if (!quoteSelectionEnabled.value) return;
@@ -626,6 +894,8 @@ onBeforeUnmount(() => {
   document.removeEventListener("selectionchange", onSelectionChangeForQuote);
   document.removeEventListener("mousedown", onDocumentMouseDownForQuote);
 });
+
+const recentTools = computed(() => props.exploreRun.tools.slice(-6).reverse());
 
 function formatTime(iso: string): string {
   const d = new Date(iso);
@@ -697,6 +967,10 @@ function updateActiveSectionFromScroll() {
 function onBodyScroll() {
   updateActiveSectionFromScroll();
   hideKnowledgeQuoteButton();
+  const el = bodyScrollRef.value;
+  if (!el || !props.exploreRun.running) return;
+  const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+  stickScrollToBottom.value = distance <= SCROLL_BOTTOM_THRESHOLD;
 }
 
 function selectionRectUsable(rect: DOMRect): boolean {
@@ -1275,6 +1549,76 @@ async function copySavedBody() {
   border: 1px solid rgba(210, 153, 34, 0.28);
 }
 
+.knowledge-changes-card {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(88, 166, 255, 0.06);
+  border: 1px solid rgba(88, 166, 255, 0.22);
+}
+
+.knowledge-changes-card--main {
+  margin-top: 0;
+}
+
+.knowledge-changes-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.knowledge-changes-title {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: rgba(190, 215, 255, 0.98);
+}
+
+.knowledge-changes-action {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.knowledge-changes-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 140px;
+  overflow: auto;
+}
+
+.knowledge-changes-file {
+  display: block;
+  width: 100%;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  text-align: left;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(180, 205, 245, 0.95);
+  cursor: pointer;
+}
+
+.knowledge-changes-file:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(220, 235, 255, 0.98);
+}
+
+.knowledge-changes-more {
+  margin: 6px 0 0;
+  font-size: 10px;
+  color: rgba(139, 170, 210, 0.9);
+}
+
 .knowledge-loading {
   padding: 16px;
   text-align: center;
@@ -1351,6 +1695,15 @@ async function copySavedBody() {
   color: rgba(255, 214, 130, 0.96);
   background: rgba(210, 153, 34, 0.14);
   border: 1px solid rgba(210, 153, 34, 0.25);
+}
+
+.knowledge-main-badge--pulse {
+  animation: knowledge-badge-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes knowledge-badge-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.65; }
 }
 
 .knowledge-panel--main .knowledge-body {
@@ -1454,16 +1807,47 @@ async function copySavedBody() {
   cursor: text;
 }
 
-.knowledge-body--live {
-  outline: 1px dashed rgba(88, 166, 255, 0.35);
-  outline-offset: 4px;
-  border-radius: 6px;
+.knowledge-body--saved-dim {
+  opacity: 0.82;
+  transition: opacity 0.2s ease;
 }
 
-.knowledge-live-hint {
-  margin: 0 24px 12px;
-  font-size: 11px;
-  color: rgba(139, 170, 210, 0.92);
+.knowledge-body--streaming::after {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 0.95em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: rgba(63, 185, 80, 0.92);
+  animation: knowledge-cursor-blink 1s step-end infinite;
+}
+
+@keyframes knowledge-cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.knowledge-stream-waiting {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 16px 20px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px dashed rgba(210, 153, 34, 0.32);
+  background: rgba(210, 153, 34, 0.06);
+  font-size: 12px;
+  color: rgba(200, 210, 220, 0.92);
+}
+
+.knowledge-panel--main .knowledge-stream-waiting {
+  margin: 16px 24px 24px;
+}
+
+.knowledge-stream-waiting--initial {
+  min-height: 120px;
+  justify-content: center;
 }
 
 .knowledge-panel--main .knowledge-editor {
@@ -1474,24 +1858,35 @@ async function copySavedBody() {
 }
 
 .knowledge-stream-preview {
-  margin: 0 24px 16px;
-  padding: 12px 14px;
+  margin: 8px 16px 20px;
+  padding: 12px 14px 14px;
   border-radius: 10px;
-  border: 1px dashed rgba(210, 153, 34, 0.35);
-  background: rgba(210, 153, 34, 0.06);
+  border: 1px solid rgba(88, 166, 255, 0.28);
+  background: linear-gradient(
+    180deg,
+    rgba(88, 166, 255, 0.1) 0%,
+    rgba(88, 166, 255, 0.04) 100%
+  );
+  box-shadow: 0 0 0 1px rgba(88, 166, 255, 0.06) inset;
+}
+
+.knowledge-panel--main .knowledge-stream-preview {
+  margin: 4px 24px 24px;
 }
 
 .knowledge-stream-preview-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0 0 10px;
   font-size: 11px;
   font-weight: 600;
-  color: rgba(255, 214, 130, 0.96);
+  color: rgba(180, 210, 255, 0.98);
 }
 
 .knowledge-stream-preview-body {
   font-size: 13px;
   line-height: 1.6;
-  opacity: 0.92;
 }
 
 .knowledge-panel--main .knowledge-tools {

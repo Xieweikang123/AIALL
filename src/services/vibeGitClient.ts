@@ -135,6 +135,35 @@ export async function fetchGitStatus(projectPath: string): Promise<GitStatusResu
   }
 }
 
+export type GitChangedSinceResult = {
+  ok: boolean;
+  files: string[];
+  error?: string;
+};
+
+export async function fetchGitChangedSince(
+  projectPath: string,
+  sinceCommit: string,
+): Promise<GitChangedSinceResult> {
+  const trimmedPath = projectPath.trim();
+  const since = sinceCommit.trim();
+  if (!trimmedPath || !since) {
+    return { ok: false, files: [], error: "缺少 path 或 since" };
+  }
+  try {
+    const url = backendUrl(
+      `/backend/vibe/git/changed-since?path=${encodeURIComponent(trimmedPath)}&since=${encodeURIComponent(since)}`,
+    );
+    const response = await fetch(url, { signal: gitStatusFetchSignal(30_000) });
+    return await readJsonResponse<GitChangedSinceResult>(response);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      return { ok: false, files: [], error: "获取变更文件超时" };
+    }
+    return { ok: false, files: [], error: error instanceof Error ? error.message : "网络错误" };
+  }
+}
+
 export async function fetchGitDiff(projectPath: string, filePath?: string, staged = false): Promise<GitDiffResult> {
   try {
     let url = backendUrl(`/backend/vibe/git/diff?path=${encodeURIComponent(projectPath)}`);

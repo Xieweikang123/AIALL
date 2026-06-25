@@ -170,8 +170,12 @@
           :saved-body="knowledgeBody"
           :current-git-head="gitHeadCommit"
           :explore-run="knowledgeExploreRun"
+          :knowledge-changed-files="knowledgeChangedFiles"
+          :knowledge-changes-loading="knowledgeChangesLoading"
+          :knowledge-changes-available="knowledgeChangesAvailable"
           @start-explore="(depth) => void startKnowledgeExplore(depth)"
           @continue-explore="() => void continueKnowledgeExplore()"
+          @explore-changes="() => void exploreKnowledgeChanges()"
           @stop-explore="stopKnowledgeExplore"
           @begin-edit="beginKnowledgeEdit"
           @cancel-edit="cancelKnowledgeEdit"
@@ -250,8 +254,12 @@
           :saved-body="knowledgeBody"
           :current-git-head="gitHeadCommit"
           :explore-run="knowledgeExploreRun"
+          :knowledge-changed-files="knowledgeChangedFiles"
+          :knowledge-changes-loading="knowledgeChangesLoading"
+          :knowledge-changes-available="knowledgeChangesAvailable"
           @start-explore="(depth) => void startKnowledgeExplore(depth)"
           @continue-explore="() => void continueKnowledgeExplore()"
+          @explore-changes="() => void exploreKnowledgeChanges()"
           @stop-explore="stopKnowledgeExplore"
           @begin-edit="beginKnowledgeEdit"
           @cancel-edit="cancelKnowledgeEdit"
@@ -1202,12 +1210,16 @@ const {
   hasKnowledge: knowledgeHasContent,
   displayBody: knowledgeDisplayBody,
   exploreRun: knowledgeExploreRun,
+  knowledgeChangedFiles,
+  knowledgeChangesLoading,
+  knowledgeChangesAvailable,
   loadKnowledge,
   saveKnowledgeDraft,
   beginEdit: beginKnowledgeEdit,
   cancelEdit: cancelKnowledgeEdit,
   startKnowledgeExplore,
   continueKnowledgeExplore,
+  exploreKnowledgeChanges,
   sendKnowledgeFollowUp,
   stopKnowledgeExplore,
   leaveProjectKnowledge,

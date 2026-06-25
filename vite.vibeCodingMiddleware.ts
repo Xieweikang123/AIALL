@@ -32,7 +32,7 @@ import {
   searchFiles,
   writeFileContent,
 } from "./server/vibeFs";
-import { gitStatus, gitDiff, gitDiffFile, gitDiffContent, gitCommitFileDiff, gitCommit, gitLog, gitIsRepo, gitAdd, gitReset, gitDiscard, gitDiscardAll, gitRemotes, gitFetch, gitPull, gitPush, gitStashList, gitStashSave, gitStashPop, gitStashApply, gitStashDrop } from "./server/vibeGit";
+import { gitStatus, gitDiff, gitDiffFile, gitDiffContent, gitCommitFileDiff, gitCommit, gitLog, gitIsRepo, gitAdd, gitReset, gitDiscard, gitDiscardAll, gitRemotes, gitFetch, gitPull, gitPush, gitStashList, gitStashSave, gitStashPop, gitStashApply, gitStashDrop, gitChangedFilesSince } from "./server/vibeGit";
 import { deleteChatStoreSession, mergeDeletedSessionIds, upsertChatStoreIndexEntry } from "./server/chatStoreIndex";
 import { mergeSessionPayloadForDisk } from "./server/chatStoreMerge";
 import { externalizeSessionPayload, readImageRefAsBuffer, readImageRefAsDataUrl } from "./server/vibeChatImages";
@@ -1758,6 +1758,47 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       sendJson(res, 200, { ...result, isRepo: true });
     } catch (error) {
       sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "获取 Git 状态失败" });
+    }
+  });
+
+  // GET /backend/vibe/git/changed-since?path=&since=
+  middlewares.use("/backend/vibe/git/changed-since", async (req, res) => {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { error: "仅支持 GET 请求" });
+      return;
+    }
+
+    try {
+      const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+      const projectPath = url.searchParams.get("path") || "";
+      const sinceCommit = url.searchParams.get("since") || "";
+
+      if (!projectPath) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 参数" });
+        return;
+      }
+      if (!sinceCommit.trim()) {
+        sendJson(res, 400, { ok: false, error: "缺少 since 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(projectPath);
+      const stat = await fs.promises.stat(resolved).catch(() => null);
+      if (!stat || !stat.isDirectory()) {
+        sendJson(res, 400, { ok: false, error: "路径不存在或不是目录" });
+        return;
+      }
+
+      const isRepo = await gitIsRepo(resolved);
+      if (!isRepo) {
+        sendJson(res, 200, { ok: true, files: [] });
+        return;
+      }
+
+      const result = await gitChangedFilesSince(resolved, sinceCommit, { includeWorkingTree: true });
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, files: [], error: error instanceof Error ? error.message : "获取变更文件失败" });
     }
   });
 

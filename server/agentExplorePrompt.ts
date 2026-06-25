@@ -61,6 +61,14 @@ export function buildExploreSectionFillNudge(): string {
   ].join("\n");
 }
 
+export function buildExploreChangesNudge(): string {
+  return [
+    "【变更探索】用户希望根据自上次探索以来的代码变更更新知识库。",
+    "须先 read_file .aiall/project-knowledge.md；系统已注入变更文件列表，优先 read/grep 这些路径。",
+    "只更新受影响的已有 `## 章节`；仅输出需修订的章节内容，勿输出完整知识库或 project-knowledge 标记。",
+  ].join("\n");
+}
+
 export function buildExploreFollowUpHint(): string {
   return [
     "【追问】用户针对知识库某方面追问。",
