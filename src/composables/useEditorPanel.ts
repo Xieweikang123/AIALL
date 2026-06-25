@@ -375,6 +375,8 @@ export function useEditorPanel(params: UseEditorPanelParams) {
   }
 
   async function showGitFileDiff(filePath: string, staged = false) {
+    // 防御：文件夹路径不应请求 diff
+    if (filePath.endsWith('/')) return
     if (!projectOpened.value) return;
     if (diffAbortController) diffAbortController.abort();
     const cacheKey = gitWorkingTreeDiffKey(filePath, staged);

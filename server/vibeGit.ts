@@ -248,6 +248,10 @@ export interface GitDiffContentResult {
 
 export async function gitDiffContent(projectRoot: string, filePath: string, staged = false): Promise<GitDiffContentResult> {
   try {
+    // 防御：文件夹路径不应请求 diff
+    if (filePath.endsWith('/')) {
+      return { ok: true, before: '', after: '' };
+    }
     const diffArgs = staged
       ? ["diff", "--cached", "--no-color", "-U100000", "--", filePath]
       : ["diff", "HEAD", "--no-color", "-U100000", "--", filePath];
@@ -316,6 +320,7 @@ async function readWorktreeFile(projectRoot: string, filePath: string): Promise<
   const fullPath = await import("node:path").then((p) => p.resolve(projectRoot, filePath));
   if (!fs.existsSync(fullPath)) return "";
   const stat = fs.statSync(fullPath);
+  if (stat.isDirectory()) return "";
   if (stat.size > MAX_DIFF_PREVIEW_CHARS) throw new Error(`${filePath} 过大，无法预览`);
   const buffer = fs.readFileSync(fullPath);
   if (buffer.includes(0)) throw new Error(`${filePath} 是二进制文件，无法预览`);

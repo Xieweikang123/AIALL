@@ -67,7 +67,7 @@
         v-if="m.role === 'assistant' && ctx.isAssistantStalled(m)"
         class="agent-recovery-banner agent-stall-banner"
       >
-        <span class="agent-recovery-text">运行似乎已卡住（长时间无进展），可停止或恢复运行。</span>
+        <span class="agent-recovery-text">运行似乎已卡住，可停止或恢复。</span>
         <div class="agent-recovery-actions">
           <button type="button" class="secondary compact" @click="ctx.stopAgent()">停止</button>
           <button
@@ -81,11 +81,15 @@
         </div>
       </div>
       <div
-        v-else-if="m.role === 'assistant' && ctx.canResumeAgentRun(m) && !ctx.isPartialWrittenRunInterrupt(m) && !ctx.isAgentRunning(m)"
+        v-else-if="m.role === 'assistant' && ctx.canResumeAgentRun(m) && !ctx.isAgentRunning(m)"
         class="agent-recovery-banner"
       >
         <span class="agent-recovery-text">
-          {{ ctx.recoverableAgentErrorHint(m, m.agentFailureReason || m.content || '连接中断') }}
+          {{
+            ctx.isPartialWrittenRunInterrupt(m)
+              ? '运行中断，可从中断处继续。'
+              : ctx.recoverableAgentErrorHint(m, m.agentFailureReason || m.content || '连接中断')
+          }}
         </span>
         <button
           type="button"
@@ -131,40 +135,35 @@
           @click="openImageViewer(url, '发送的图片')"
         />
       </div>
-      <PlanDocumentBlock
+      <ProjectReportBlock
         v-if="ctx.shouldShowMessageBubble(m, ctx.hasAgentActivity(m))"
         :content="ctx.messageDisplayContent(m)"
         :chat-mode="m.chatMode"
         :streaming="m.role === 'assistant' && ctx.isAgentRunning(m)"
-        :can-execute="ctx.canExecutePlanMessage(m)"
-        :enhance-layout="m.role === 'assistant' && !ctx.isAgentRunning(m)"
-        @execute="ctx.executePlanFromMessage(m.id)"
+        @open-file="(path) => ctx.previewAgentFile(m.id, path)"
       >
-        <ChatMarkdown
-          class="msg-answer"
-          :class="{
-            'msg-answer--streaming': m.role === 'assistant' && ctx.isAgentRunning(m),
-            'msg-answer--final': m.role === 'assistant' && !ctx.isAgentRunning(m),
-          }"
-          :content="planMarkdownContent(m)"
+        <PlanDocumentBlock
+          :content="ctx.messageDisplayContent(m)"
+          :chat-mode="m.chatMode"
           :streaming="m.role === 'assistant' && ctx.isAgentRunning(m)"
-          :interactive="m.role === 'assistant' && !ctx.isAgentRunning(m)"
-          @select-option="(option) => ctx.handleAiOptionSelect(option, m)"
-        />
-      </PlanDocumentBlock>
-      <div
-        v-if="m.role === 'assistant' && ctx.canResumeAgentRun(m) && ctx.isPartialWrittenRunInterrupt(m) && !ctx.isAgentRunning(m)"
-        class="agent-recovery-footer"
-      >
-        <button
-          type="button"
-          class="secondary compact"
-          :disabled="!ctx.configReady.value || !ctx.projectOpened.value || ctx.chatSending.value"
-          @click="ctx.resumeAgentRun(m.id)"
+          :can-execute="ctx.canExecutePlanMessage(m)"
+          :enhance-layout="m.role === 'assistant' && !ctx.isAgentRunning(m)"
+          @execute="ctx.executePlanFromMessage(m.id)"
         >
-          继续
-        </button>
-      </div>
+          <ChatMarkdown
+            class="msg-answer"
+            :class="{
+              'msg-answer--streaming': m.role === 'assistant' && ctx.isAgentRunning(m),
+              'msg-answer--final': m.role === 'assistant' && !ctx.isAgentRunning(m),
+            }"
+            :content="planMarkdownContent(m)"
+            :streaming="m.role === 'assistant' && ctx.isAgentRunning(m)"
+            :interactive="m.role === 'assistant' && !ctx.isAgentRunning(m)"
+            @select-option="(option) => ctx.handleAiOptionSelect(option, m)"
+          />
+        </PlanDocumentBlock>
+      </ProjectReportBlock>
+
       <div
         v-if="
           m.role === 'assistant' &&
@@ -330,6 +329,7 @@ import { computed, inject, nextTick, ref, watch } from "vue";
 import AgentMessage from "../AgentMessage.vue";
 import ChatMarkdown from "../ChatMarkdown.vue";
 import PlanDocumentBlock from "../PlanDocumentBlock.vue";
+import ProjectReportBlock from "../ProjectReportBlock.vue";
 import { enrichPlanMarkdownForDisplay } from "../../services/planDocumentDisplay";
 import { vibeChatMessageContextKey, type VibeChatMessageItem } from "../../composables/vibeChatMessageContext";
 import { isAwaitingAssistantPlaceholder, isOrphanedUserReply } from "../../utils/vibeHelpers";

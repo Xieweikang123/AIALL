@@ -153,6 +153,10 @@ export async function fetchGitDiffContent(
   staged = false,
   signal?: AbortSignal,
 ): Promise<GitDiffContentResult> {
+  // 防御：文件夹路径不应请求 diff
+  if (filePath.endsWith('/')) {
+    return { ok: true, before: '', after: '' };
+  }
   try {
     const stagedParam = staged ? "&staged=1" : "";
     const url = backendUrl(`/backend/vibe/git/diff-content?path=${encodeURIComponent(projectPath)}&file=${encodeURIComponent(filePath)}${stagedParam}`);

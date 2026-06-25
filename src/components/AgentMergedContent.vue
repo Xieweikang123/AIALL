@@ -16,9 +16,12 @@
       :resume-label="resumeLabel"
       :current-status="currentStatus"
       :has-running-tool="hasRunningTool"
+      :activity-detailed="activityDetailed"
+      :activity-expanded="activityExpanded"
       @execute-plan="emit('execute-plan')"
       @select-option="(option) => emit('select-option', option)"
       @toggle-debug="emit('toggle-debug')"
+      @toggle-process="(expanded) => emit('toggle-process', expanded)"
       @open-file="(path) => emit('openFile', path)"
       @resume="emit('resume')"
     >
@@ -49,8 +52,9 @@ const props = withDefaults(
     isRunning: boolean;
     currentStatus?: string;
     activityDetailed?: boolean;
+    activityExpanded?: boolean;
     canExecutePlan?: boolean;
-    chatMode?: "ask" | "build" | "plan";
+    chatMode?: "ask" | "build" | "plan" | "explore";
     showDebug?: boolean;
     debugExpanded?: boolean;
     showProcess?: boolean;
@@ -75,6 +79,7 @@ const emit = defineEmits<{
   "execute-plan": [];
   "select-option": [option: AiOption];
   "toggle-debug": [];
+  "toggle-process": [expanded: boolean];
   openFile: [path: string];
   resume: [];
 }>();
@@ -146,8 +151,8 @@ const showTimeline = computed(
 .agent-feed {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 4px 0;
+  gap: 0;
+  padding: 0;
   min-width: 0;
   overflow: hidden;
 }

@@ -50,7 +50,7 @@ const props = withDefaults(
     content: string;
     canExecute?: boolean;
     /** Only Plan mode messages use plan document chrome. */
-    chatMode?: "ask" | "build" | "plan";
+    chatMode?: "ask" | "build" | "plan" | "explore";
     /** When true, show raw markdown only (no plan chrome / anchors). */
     streaming?: boolean;
     /** When false, skip code-block folding (e.g. while streaming). */
@@ -136,12 +136,13 @@ onUpdated(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: rgba(88, 166, 255, 0.06);
-  border: 1px solid rgba(88, 166, 255, 0.18);
+  padding: 4px 0 6px;
+  border: none;
+  border-bottom: 1px solid rgba(88, 166, 255, 0.12);
+  border-radius: 0;
+  background: transparent;
 }
 
 .plan-document-title {

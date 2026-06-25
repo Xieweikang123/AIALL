@@ -1,97 +1,97 @@
 <template>
-  <template v-for="item in items" :key="renderKey(item)">
-    <details
-      v-if="item.kind === 'collapsed'"
-      class="inline-feed-collapsed"
-      :open="collapsedOpen"
-      @toggle="onCollapsedToggle"
-    >
-      <summary class="inline-feed-collapsed-summary">
-        <span class="inline-feed-collapsed-label">{{ item.summary }}</span>
-      </summary>
-      <div class="inline-feed-collapsed-body">
-        <AgentInlineFeedItems
-          :items="item.items"
-          :is-running="isRunning"
-          :chat-mode="chatMode"
-          :can-execute-plan="canExecutePlan"
-          :layout-enhance-ready="layoutEnhanceReady"
-          nested
-          @execute-plan="emit('execute-plan')"
-          @select-option="(option) => emit('select-option', option)"
-          @open-file="(path) => emit('openFile', path)"
-        />
-      </div>
-    </details>
-
+  <template v-for="item in displayItems" :key="renderKey(item)">
     <div
-      v-else-if="item.kind === 'text'"
-      class="inline-feed-segment"
-      :class="{ 'inline-feed-segment--answer': item.variant === 'answer' }"
+      v-if="item.kind === 'text' && item.variant === 'narrative' && item.text.trim()"
+      class="stream-narrative"
+      :class="{ 'stream-narrative--nested': nested }"
     >
-      <div
-        v-if="item.variant === 'answer' && item.streaming && isRunning && !item.text.trim()"
-        class="inline-feed-placeholder"
-      >
-        <span class="shimmer-text--fast">正在生成…</span>
-      </div>
-      <PlanDocumentBlock
-        v-else-if="item.variant === 'answer'"
-        :content="item.text"
-        :chat-mode="chatMode"
-        :streaming="item.streaming && isRunning"
-        :can-execute="canExecutePlan && !isRunning && !item.streaming"
-        :enhance-layout="layoutEnhanceReady && !isRunning && !item.streaming"
-        @execute="emit('execute-plan')"
-      >
-        <ChatMarkdown
-          class="inline-feed-markdown inline-feed-markdown--answer"
-          :content="answerMarkdown(item.text)"
-          :streaming="item.streaming && isRunning"
-          :interactive="true"
-          @select-option="(option) => emit('select-option', option)"
-        />
-      </PlanDocumentBlock>
       <ChatMarkdown
-        v-else-if="item.text.trim()"
         class="inline-feed-markdown inline-feed-markdown--narrative"
-        :class="{ 'inline-feed-markdown--nested': nested }"
         :content="narrativeMarkdown(item.text)"
         :streaming="false"
         :interactive="false"
       />
     </div>
 
-    <AgentInlineToolCard
-      v-else-if="item.kind === 'tool'"
-      :step="item.step"
+    <AgentProcessFlowLine
+      v-else-if="item.kind === 'tool-batch'"
+      :tools="item.steps"
+      :is-running="isRunning"
       @open-file="(path) => emit('openFile', path)"
     />
+
+    <div
+      v-else-if="item.kind === 'text' && item.variant === 'answer'"
+      class="inline-feed-segment inline-feed-segment--answer"
+    >
+      <div
+        v-if="item.streaming && isRunning && !item.text.trim()"
+        class="inline-feed-placeholder"
+      >
+        <span class="shimmer-text--fast">正在生成…</span>
+      </div>
+      <ProjectReportBlock
+        v-else-if="item.variant === 'answer'"
+        :content="item.text"
+        :chat-mode="chatMode"
+        :streaming="item.streaming && isRunning"
+        @open-file="(path) => emit('openFile', path)"
+      >
+        <PlanDocumentBlock
+          :content="item.text"
+          :chat-mode="chatMode"
+          :streaming="item.streaming && isRunning"
+          :can-execute="canExecutePlan && !isRunning && !item.streaming"
+          :enhance-layout="layoutEnhanceReady && !isRunning && !item.streaming"
+          @execute="emit('execute-plan')"
+        >
+          <ChatMarkdown
+            class="inline-feed-markdown inline-feed-markdown--answer"
+            :content="answerMarkdown(item.text)"
+            :streaming="item.streaming && isRunning"
+            :interactive="true"
+            @select-option="(option) => emit('select-option', option)"
+          />
+        </PlanDocumentBlock>
+      </ProjectReportBlock>
+    </div>
   </template>
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed } from "vue";
 import ChatMarkdown from "./ChatMarkdown.vue";
 import PlanDocumentBlock from "./PlanDocumentBlock.vue";
-import AgentInlineToolCard from "./AgentInlineToolCard.vue";
-import type { InlineFeedItem } from "../services/agentInlineFeed";
+import ProjectReportBlock from "./ProjectReportBlock.vue";
+import AgentProcessFlowLine from "./AgentProcessFlowLine.vue";
+import type { InlineFeedItem, InlineFeedProcessItem } from "../services/agentInlineFeed";
 import { sanitizeFeedThoughtText } from "../services/agentProgressMarker";
 import { enrichPlanMarkdownForDisplay } from "../services/planDocumentDisplay";
+import type { AgentRoundTool } from "../services/agentRoundGroups";
 import type { AiOption } from "../utils/parseAiOptions";
 
 defineOptions({ name: "AgentInlineFeedItems" });
+
+type DisplayItem =
+  | InlineFeedProcessItem
+  | { kind: "tool-batch"; key: string; steps: AgentRoundTool[] };
 
 const props = withDefaults(
   defineProps<{
     items: InlineFeedItem[];
     isRunning: boolean;
-    chatMode?: "ask" | "build" | "plan";
+    chatMode?: "ask" | "build" | "plan" | "explore";
     canExecutePlan?: boolean;
     layoutEnhanceReady?: boolean;
     nested?: boolean;
+    answerOnly?: boolean;
+    toolDisplay?: "card" | "inline";
   }>(),
-  { nested: false },
+  {
+    nested: false,
+    answerOnly: false,
+    toolDisplay: "inline",
+  },
 );
 
 const emit = defineEmits<{
@@ -100,16 +100,51 @@ const emit = defineEmits<{
   openFile: [path: string];
 }>();
 
-const collapsedOpen = ref(false);
-
-function onCollapsedToggle(event: Event) {
-  const target = event.target;
-  if (target instanceof HTMLDetailsElement) {
-    collapsedOpen.value = target.open;
+function flattenProcessItems(items: InlineFeedItem[]): InlineFeedProcessItem[] {
+  const flat: InlineFeedProcessItem[] = [];
+  for (const item of items) {
+    if (item.kind === "collapsed") flat.push(...flattenProcessItems(item.items));
+    else if (item.kind !== "text" || item.variant !== "answer") flat.push(item);
   }
+  return flat;
 }
 
-function renderKey(item: InlineFeedItem): string {
+const displayItems = computed((): DisplayItem[] => {
+  const source = props.answerOnly
+    ? props.items.filter((item) => item.kind === "text" && item.variant === "answer")
+    : flattenProcessItems(props.items);
+
+  if (props.toolDisplay !== "inline") {
+    return source;
+  }
+
+  const merged: DisplayItem[] = [];
+  let toolBatch: AgentRoundTool[] = [];
+
+  const flushTools = () => {
+    if (!toolBatch.length) return;
+    merged.push({
+      kind: "tool-batch",
+      key: `tools-${toolBatch[0]?.id}-${toolBatch.length}`,
+      steps: toolBatch,
+    });
+    toolBatch = [];
+  };
+
+  for (const item of source) {
+    if (item.kind === "tool") {
+      toolBatch.push(item.step);
+      continue;
+    }
+    flushTools();
+    merged.push(item);
+  }
+  flushTools();
+  return merged;
+});
+
+function renderKey(item: DisplayItem): string {
+  if (item.kind === "tool-batch") return item.key;
   return `${item.kind}:${item.key}`;
 }
 
@@ -130,7 +165,7 @@ function answerMarkdown(text: string) {
 }
 
 .inline-feed-segment--answer {
-  margin-top: 2px;
+  margin-top: 0;
 }
 
 .inline-feed-markdown {
@@ -140,23 +175,26 @@ function answerMarkdown(text: string) {
   background: transparent;
 }
 
-.inline-feed-markdown--narrative :deep(.msg-markdown) {
-  font-size: 13px;
-  line-height: 1.55;
-  color: rgba(230, 237, 243, 0.92);
+.stream-narrative {
+  padding: 0 0 4px;
 }
 
-.inline-feed-markdown--narrative.inline-feed-markdown--nested :deep(.msg-markdown) {
+.inline-feed-markdown--narrative :deep(.msg-markdown) {
   font-size: 12px;
-  color: rgba(186, 196, 208, 0.88);
+  line-height: 1.5;
+  color: rgba(186, 196, 208, 0.82);
+}
+
+.stream-narrative--nested .inline-feed-markdown--narrative :deep(.msg-markdown) {
+  font-size: 11px;
 }
 
 .inline-feed-markdown--narrative :deep(.msg-markdown p) {
-  margin: 0 0 0.5em;
+  margin: 0 0 0.45em;
 }
 
 .inline-feed-markdown--narrative :deep(.msg-markdown p:last-child) {
-  margin-bottom: 0.35em;
+  margin-bottom: 0;
 }
 
 .inline-feed-placeholder {
@@ -164,48 +202,5 @@ function answerMarkdown(text: string) {
   font-size: 12px;
   line-height: 1.5;
   color: rgba(148, 163, 184, 0.78);
-}
-
-.inline-feed-collapsed {
-  margin: 4px 0 6px;
-  min-width: 0;
-}
-
-.inline-feed-collapsed-summary {
-  list-style: none;
-  cursor: pointer;
-  user-select: none;
-  padding: 2px 0 4px;
-}
-
-.inline-feed-collapsed-summary::-webkit-details-marker {
-  display: none;
-}
-
-.inline-feed-collapsed-summary::before {
-  content: "▸ ";
-  font-size: 8px;
-  color: rgba(148, 163, 184, 0.35);
-}
-
-.inline-feed-collapsed[open] > .inline-feed-collapsed-summary::before {
-  content: "▾ ";
-}
-
-.inline-feed-collapsed-label {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 10px;
-  line-height: 1.35;
-  color: rgba(148, 163, 184, 0.62);
-}
-
-.inline-feed-collapsed-summary:hover .inline-feed-collapsed-label {
-  color: rgba(165, 214, 255, 0.88);
-}
-
-.inline-feed-collapsed-body {
-  padding: 4px 0 2px 12px;
-  border-left: 2px solid rgba(148, 163, 184, 0.1);
-  margin-left: 4px;
 }
 </style>

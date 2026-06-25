@@ -1,14 +1,7 @@
 <template>
-  <div class="cursor-agent-wrap" :class="{ collapsed: isFolded }">
-    <AgentFoldedView
-      v-if="isFolded"
-      :summary="summary"
-      @expand="toggleActivityExpanded(msg)"
-    />
-
+  <div class="cursor-agent-wrap">
     <div class="cursor-timeline">
       <AgentMergedContent
-        v-if="!isFolded"
         :compact-feed="showCompact"
         :round-groups="agentRoundGroupViews(msg)"
         :final-answer="timelineAnswerDisplay"
@@ -16,6 +9,7 @@
         :is-running="isAgentRunning(msg)"
         :current-status="displayAgentStatus(msg)"
         :activity-detailed="isActivityDetailed(msg)"
+        :activity-expanded="isActivityExpanded(msg)"
         :can-execute-plan="canExecutePlan"
         :chat-mode="msg.chatMode"
         :show-debug="showDebug"
@@ -32,6 +26,7 @@
         @execute-plan="emit('execute-plan')"
         @select-option="(option) => emit('select-option', option)"
         @toggle-debug="toggleActivityDetailed(msg)"
+        @toggle-process="onToggleProcess"
         @open-file="(path) => emit('open-file', path)"
         @resume="emit('resume')"
       >
@@ -45,7 +40,7 @@
       </AgentMergedContent>
 
       <button
-        v-if="!isFolded && !isAgentRunning(msg)"
+        v-if="!isAgentRunning(msg) && isActivityExpanded(msg) && hasProcessSteps(msg)"
         type="button"
         class="cursor-activity-collapse"
         @click="collapseAgentActivity(msg)"
@@ -67,11 +62,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, toRef, type Ref } from "vue";
-import AgentFoldedView from "./AgentFoldedView.vue";
+import { computed, toRef } from "vue";
 import AgentMergedContent from "./AgentMergedContent.vue";
 import AgentDebugPanel from "./AgentDebugPanel.vue";
 import { useAgentMessage, type AgentMessage } from "../composables/useAgentMessage";
+import { hasAgentProcessSteps } from "../utils/vibeHelpers";
 import type { AiOption } from "../utils/parseAiOptions";
 
 const props = defineProps<{
@@ -98,15 +93,13 @@ const emit = defineEmits<{
 }>();
 
 const {
-  isFolded,
   showDebug,
   isActivityExpanded,
   isActivityDetailed,
   agentRoundGroupViews,
-  toggleActivityExpanded,
   collapseAgentActivity,
   toggleActivityDetailed,
-  cursorActivitySummary,
+  toggleActivityExpanded,
   timelineAnswerDisplay,
   timelineAnswerStreamingDisplay,
   currentAgentStatus,
@@ -123,7 +116,15 @@ const {
   },
 );
 
-const summary = computed(() => cursorActivitySummary(props.msg));
+function hasProcessSteps(m: AgentMessage): boolean {
+  return hasAgentProcessSteps(m);
+}
+
+function onToggleProcess(expanded: boolean) {
+  const currently = isActivityExpanded(props.msg);
+  if (expanded && !currently) toggleActivityExpanded(props.msg);
+  else if (!expanded && currently) collapseAgentActivity(props.msg);
+}
 
 /** Prefer ephemeral run.live text (planning_tools / waiting_model); fall back to persisted msg fields. */
 function displayAgentStatus(m: AgentMessage): string {
@@ -152,27 +153,15 @@ function jumpToLatest() {
 
 <style scoped>
 .cursor-agent-wrap {
-  margin: 0 0 4px;
-  padding: 2px 0;
-}
-
-.cursor-agent-wrap.collapsed {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 0;
+  margin: 0;
   padding: 0;
 }
 
 .cursor-timeline {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 0;
-}
-
-.cursor-agent-wrap.collapsed .cursor-timeline {
-  padding-top: 0;
+  gap: 4px;
+  padding: 4px 0;
 }
 
 .cursor-activity-collapse {

@@ -2395,6 +2395,9 @@ function onComposerFieldKeydown(e: KeyboardEvent) {
 }
 
 function onGitFilePointerDown(e: PointerEvent, relativePath: string, staged = false) {
+  // 跳过文件夹条目（以 / 结尾），文件夹无需获取 diff
+  if (relativePath.endsWith('/')) return
+
   const shiftKey = e.shiftKey;
   const ctrlKey = e.ctrlKey || e.metaKey;
   

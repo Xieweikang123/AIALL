@@ -3,6 +3,8 @@ import {
   appendInlineAnswerBlock,
   buildInlineAgentFeed,
   collapseInlineFeedItems,
+  splitInlineFeedItems,
+  summarizeInlineFeedProcess,
 } from "./agentInlineFeed";
 import type { AgentRoundGroupView } from "./agentRoundGroups";
 import type { InlineFeedItem } from "./agentInlineFeed";
@@ -173,6 +175,18 @@ describe("buildInlineAgentFeed", () => {
     expect(feed.items).toHaveLength(1);
     expect(feed.items[0]).toMatchObject({ kind: "text", variant: "answer", text: "仅答案" });
     expect(feed.toolCount).toBe(0);
+  });
+
+  it("splits process and answer items", () => {
+    const items: InlineFeedItem[] = [
+      { kind: "text", key: "n1", text: "分析", variant: "narrative" },
+      { kind: "tool", key: "t1", step: readStep("t1") },
+      { kind: "text", key: "a1", text: "结论", variant: "answer" },
+    ];
+    const { process, answer } = splitInlineFeedItems(items);
+    expect(process).toHaveLength(2);
+    expect(answer).toMatchObject({ variant: "answer", text: "结论" });
+    expect(summarizeInlineFeedProcess(process, 1, false)).toMatch(/1 步/);
   });
 
   it("does not collapse running tools into the hidden prefix", () => {

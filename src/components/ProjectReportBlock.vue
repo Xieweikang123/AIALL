@@ -128,12 +128,13 @@ function onBodyClick(event: MouseEvent) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: rgba(63, 185, 80, 0.06);
-  border: 1px solid rgba(63, 185, 80, 0.2);
+  padding: 4px 0 6px;
+  border: none;
+  border-bottom: 1px solid rgba(63, 185, 80, 0.14);
+  border-radius: 0;
+  background: transparent;
 }
 
 .project-report-title {

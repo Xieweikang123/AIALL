@@ -1,4 +1,9 @@
-import { formatCollapsedStepsSummary, type CursorFeedItem } from "./agentCursorFeed";
+import {
+  computeExplorationStats,
+  formatCollapsedStepsSummary,
+  formatExplorationSummary,
+  type CursorFeedItem,
+} from "./agentCursorFeed";
 import {
   thoughtDuplicatesBubble,
 } from "./agentMessageDisplay";
@@ -206,6 +211,53 @@ export function appendInlineAnswerBlock(
     streaming: answerStreaming,
   });
   return result;
+}
+
+export function splitInlineFeedItems(items: InlineFeedItem[]): {
+  process: InlineFeedItem[];
+  answer: InlineFeedTextItem | null;
+} {
+  const process: InlineFeedItem[] = [];
+  let answer: InlineFeedTextItem | null = null;
+  for (const item of items) {
+    if (isAnswerItem(item)) {
+      answer = item;
+    } else {
+      process.push(item);
+    }
+  }
+  return { process, answer };
+}
+
+export function collectToolsFromInlineFeed(items: InlineFeedItem[]): AgentRoundTool[] {
+  const tools: AgentRoundTool[] = [];
+  for (const item of items) {
+    if (item.kind === "tool") tools.push(item.step);
+    else if (item.kind === "collapsed") tools.push(...collectToolsFromInlineFeed(item.items));
+  }
+  return tools;
+}
+
+/** One-line process summary for collapsed details (streamlined UI). */
+export function summarizeInlineFeedProcess(
+  items: InlineFeedItem[],
+  toolCount: number,
+  isRunning: boolean,
+): string {
+  const tools = collectToolsFromInlineFeed(items);
+  if (tools.length) {
+    const stats = computeExplorationStats(tools);
+    const body = formatExplorationSummary(stats, isRunning).replace(/^已完成 · /, "");
+    if (isRunning) return body;
+    return toolCount > 0 ? `${toolCount} 步 · ${body}` : body;
+  }
+  const narratives = items.filter(
+    (item): item is InlineFeedTextItem => item.kind === "text" && item.variant === "narrative",
+  );
+  if (narratives.length) {
+    return isRunning ? "思考中…" : `${narratives.length} 段分析`;
+  }
+  return isRunning ? "准备中…" : "查看过程";
 }
 
 /** Chronological inline stream: narrative ↔ tools interleaved, answer appended last. */
