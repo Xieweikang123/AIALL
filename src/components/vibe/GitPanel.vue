@@ -54,6 +54,27 @@
             </button>
           </div>
         </div>
+        <div v-if="gitAhead > 0" class="git-ahead-section">
+          <button type="button" class="git-ahead-toggle" @click="$emit('update:gitAheadCommitsOpen', !gitAheadCommitsOpen)">
+            <span class="git-section-chevron">{{ gitAheadCommitsOpen ? "▾" : "▸" }}</span>
+            <span class="git-ahead-title">待推送提交</span>
+            <span class="git-ahead-count">{{ gitAhead }}</span>
+          </button>
+          <div v-if="gitAheadCommitsOpen" class="git-ahead-list">
+            <div v-if="gitAheadCommitsLoading" class="git-ahead-loading">加载中…</div>
+            <div v-else-if="!gitAheadCommits.length" class="git-ahead-empty">无待推送提交</div>
+            <div v-for="entry in gitAheadCommits" :key="entry.hash" class="git-ahead-item">
+              <div class="git-ahead-entry-head">
+                <span class="git-ahead-hash">{{ entry.shortHash }}</span>
+                <span class="git-ahead-msg" :title="entry.message">{{ entry.message }}</span>
+              </div>
+              <div class="git-ahead-meta">
+                <span class="git-ahead-date">{{ formatDate(entry.date) }}</span>
+                <span class="git-ahead-files">{{ entry.files.length }} 文件</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="git-stash-section git-section-card">
@@ -362,6 +383,8 @@ interface GitFile {
 interface GitLogEntry {
   hash: string;
   shortHash: string;
+  author: string;
+  date: string;
   message: string;
   files: GitLogFile[];
 }
@@ -409,6 +432,9 @@ interface Props {
   batchGroups?: BatchGroup[];
   batchCommittingIndex: number | null;
   aiBatchGrouping: boolean;
+  gitAheadCommits: GitLogEntry[];
+  gitAheadCommitsOpen: boolean;
+  gitAheadCommitsLoading: boolean;
 }
 
 const props = defineProps<Props>();
@@ -455,6 +481,7 @@ const emit = defineEmits<{
   (e: "update:gitStagedOpen", value: boolean): void;
   (e: "update:gitUnstagedOpen", value: boolean): void;
   (e: "update:gitLogOpen", value: boolean): void;
+  (e: "update:gitAheadCommitsOpen", value: boolean): void;
   (e: "update:gitCommitMessage", value: string): void;
   (e: "update:gitStashMessage", value: string): void;
   (e: "toggle-git-log-entry", hash: string): void;
@@ -486,6 +513,26 @@ function gitStatusIcon(status: string): string {
     case "renamed": return "R";
     case "copied": return "C";
     default: return "?";
+  }
+}
+
+function formatDate(dateStr: string): string {
+  try {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return "刚刚";
+    if (diffMins < 60) return `${diffMins}分钟前`;
+    if (diffHours < 24) return `${diffHours}小时前`;
+    if (diffDays < 7) return `${diffDays}天前`;
+
+    return date.toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
+  } catch {
+    return dateStr;
   }
 }
 
@@ -667,6 +714,112 @@ function gitStatusClass(status: string): string {
 .git-remote-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.git-ahead-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.git-ahead-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.82);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.git-ahead-toggle:hover {
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.git-ahead-title {
+  flex: 1;
+}
+
+.git-ahead-count {
+  font-size: 11px;
+  color: #3fb950;
+  padding: 1px 6px;
+  background: rgba(63, 185, 80, 0.15);
+  border-radius: 999px;
+}
+
+.git-ahead-list {
+  margin-top: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.git-ahead-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.git-ahead-list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.git-ahead-loading,
+.git-ahead-empty {
+  font-size: 12px;
+  color: rgba(139, 148, 158, 0.55);
+  padding: 4px 0 2px 16px;
+}
+
+.git-ahead-item {
+  padding: 6px 8px;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+
+.git-ahead-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.git-ahead-entry-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.git-ahead-hash {
+  font-size: 11px;
+  font-family: var(--monospace-font, monospace);
+  color: rgba(139, 148, 158, 0.75);
+  flex-shrink: 0;
+}
+
+.git-ahead-msg {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.82);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-ahead-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+  padding-left: 44px;
+}
+
+.git-ahead-date,
+.git-ahead-files {
+  font-size: 11px;
+  color: rgba(139, 148, 158, 0.55);
 }
 
 .git-stash-section {
@@ -1159,7 +1312,7 @@ function gitStatusClass(status: string): string {
 .git-log-section--open {
   flex: 1 1 0;
   min-height: 120px;
-  overflow: hidden;
+  overflow-y: auto;
 }
 
 .git-log-section .git-log-list {

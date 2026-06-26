@@ -236,6 +236,16 @@ export async function gitChangedFilesSince(
   }
 }
 
+export async function gitHead(projectRoot: string): Promise<{ ok: boolean; hash?: string; error?: string }> {
+  try {
+    const { stdout } = await gitExec(projectRoot, ["rev-parse", "HEAD"]);
+    const hash = stdout.trim();
+    return { ok: true, hash };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "获取 HEAD 失败" };
+  }
+}
+
 export async function gitDiff(projectRoot: string, filePath?: string, staged = false): Promise<GitDiffResult> {
   try {
     const args = ["diff", "--stat=200", "--stat-graph-width=0"];
@@ -466,6 +476,80 @@ export async function gitLog(projectRoot: string, count = 20): Promise<GitLogRes
     return { ok: true, entries };
   } catch (error) {
     return { ok: false, entries: [], error: error instanceof Error ? error.message : "获取提交历史失败" };
+  }
+}
+
+export interface GitAheadCommitsResult {
+  ok: boolean;
+  entries: GitLogEntry[];
+  trackingBranch: string;
+  error?: string;
+}
+
+export async function gitAheadCommits(projectRoot: string, count = 20): Promise<GitAheadCommitsResult> {
+  try {
+    // 先获取 tracking branch
+    let trackingBranch = "";
+    try {
+      const { stdout: tbOut } = await gitExec(projectRoot, ["rev-parse", "--abbrev-ref", "@{upstream}"]);
+      trackingBranch = tbOut.trim();
+    } catch {
+      return { ok: true, entries: [], trackingBranch: "" };
+    }
+
+    if (!trackingBranch) {
+      return { ok: true, entries: [], trackingBranch: "" };
+    }
+
+    // 获取 ahead 的提交记录（本地有但远程没有的）
+    const { stdout } = await gitExec(projectRoot, [
+      "log",
+      `${trackingBranch}..HEAD`,
+      `--max-count=${count}`,
+      "--name-status",
+      "--format=%x1e%H%x1f%h%x1f%an%x1f%ai%x1f%B%x00",
+    ]);
+
+    const entries: GitLogEntry[] = [];
+    const blocks = stdout.split("\x1e").filter((block) => block.trim());
+
+    for (const block of blocks) {
+      const nullIdx = block.indexOf("\x00");
+      if (nullIdx === -1) continue;
+
+      const headerStr = block.substring(0, nullIdx);
+      const fileStr = block.substring(nullIdx + 1);
+      const headerParts = headerStr.split("\x1f");
+
+      if (headerParts.length >= 5) {
+        const files: GitLogFile[] = [];
+        const fileLines = fileStr.split("\n");
+        for (const line of fileLines) {
+          if (!line.trim()) continue;
+          const parts = line.split("\t");
+          const status = parts[0]?.trim() || "";
+          if (!status) continue;
+          if ((status.startsWith("R") || status.startsWith("C")) && parts.length >= 3) {
+            files.push({ status: status[0], oldPath: parts[1].trim(), path: parts[2].trim() });
+          } else if (parts[1]?.trim()) {
+            files.push({ status: status[0], path: parts[1].trim() });
+          }
+        }
+
+        entries.push({
+          hash: headerParts[0].trim(),
+          shortHash: headerParts[1].trim(),
+          author: headerParts[2].trim(),
+          date: headerParts[3].trim(),
+          message: headerParts.slice(4).join("\x1f").replace(/\n+$/, "").trim(),
+          files,
+        });
+      }
+    }
+
+    return { ok: true, entries, trackingBranch };
+  } catch (error) {
+    return { ok: false, entries: [], trackingBranch: "", error: error instanceof Error ? error.message : "获取待推送提交失败" };
   }
 }
 

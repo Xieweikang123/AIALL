@@ -8,6 +8,7 @@ import {
   fetchGitCommitFileDiff,
   commitGitChanges,
   fetchGitLog,
+  fetchAheadCommits,
   stageGitFiles,
   unstageGitFiles,
   discardGitFiles,
@@ -137,6 +138,9 @@ export function useGitPanel(
   const gitStashAction = ref("");
   const gitStashMessage = ref("");
   const gitAiPushStep = ref("");
+  const gitAheadCommits = ref<GitLogEntry[]>([]);
+  const gitAheadCommitsOpen = ref(false);
+  const gitAheadCommitsLoading = ref(false);
 
   const gitStagedFiles = computed(() => {
     const seen = new Set<string>();
@@ -862,6 +866,25 @@ export function useGitPanel(
     }
   }
 
+  async function refreshGitAheadCommits(aheadCount?: number) {
+    const ahead = aheadCount ?? gitAhead.value;
+    if (!projectOpened() || !gitIsRepo.value || ahead === 0) {
+      gitAheadCommits.value = [];
+      return;
+    }
+    gitAheadCommitsLoading.value = true;
+    try {
+      const result = await fetchAheadCommits(projectPath(), 20);
+      if (result.ok) {
+        gitAheadCommits.value = result.entries;
+      }
+    } catch {
+      // ignore
+    } finally {
+      gitAheadCommitsLoading.value = false;
+    }
+  }
+
   async function refreshGitRemotes() {
     if (!projectOpened() || !gitIsRepo.value) return;
     gitRemoteLoading.value = true;
@@ -872,6 +895,8 @@ export function useGitPanel(
         gitTrackingBranch.value = result.trackingBranch;
         gitAhead.value = result.ahead;
         gitBehind.value = result.behind;
+        // 用刚获取的 ahead 值刷新待推送提交，避免异步竞态
+        void refreshGitAheadCommits(result.ahead);
       }
     } catch {
       // ignore
@@ -1039,6 +1064,9 @@ export function useGitPanel(
     gitStashAction,
     gitStashMessage,
     gitAiPushStep,
+    gitAheadCommits,
+    gitAheadCommitsOpen,
+    gitAheadCommitsLoading,
 
     gitStagedFiles,
     gitUnstagedFiles,
@@ -1079,6 +1107,7 @@ export function useGitPanel(
     generateCommitMessage,
     aiCommitAndPush,
     refreshGitRemotes,
+    refreshGitAheadCommits,
     doFetch,
     doPull,
     doPush,

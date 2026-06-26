@@ -236,6 +236,24 @@ export async function fetchGitLog(projectPath: string, count = 20): Promise<GitL
   }
 }
 
+export interface GitAheadCommitsResult {
+  ok: boolean;
+  entries: GitLogEntry[];
+  trackingBranch: string;
+  error?: string;
+}
+
+export async function fetchAheadCommits(projectPath: string, count = 20): Promise<GitAheadCommitsResult> {
+  try {
+    const url = backendUrl(`/backend/vibe/git/ahead-commits?path=${encodeURIComponent(projectPath)}&count=${count}`);
+    const response = await fetch(url);
+    const data = await readJsonResponse<GitAheadCommitsResult>(response);
+    return { ...data, entries: data.entries?.map((entry) => ({ ...entry, files: entry.files || [] })) || [] };
+  } catch (error) {
+    return { ok: false, entries: [], trackingBranch: "", error: error instanceof Error ? error.message : "网络错误" };
+  }
+}
+
 export async function fetchGitCommitFileDiff(
   projectPath: string,
   hash: string,
