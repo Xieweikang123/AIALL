@@ -12,6 +12,8 @@ import {
   unstageGitFiles,
   discardGitFiles,
   generateCommitMessage as generateCommitMessageApi,
+  aiBatchGroups as aiBatchGroupsApi,
+  type AiBatchGroupItem,
   fetchGitRemotes,
   gitFetchRemote,
   gitPullRemote,
@@ -36,6 +38,7 @@ export type GitFileDiff = {
 export type BatchGroup = {
   dir: string;
   files: { path: string; status: string }[];
+  message?: string;
 };
 
 function getTopLevelDir(filePath: string): string {
@@ -319,7 +322,18 @@ export function useGitPanel(
     }
   }
 
+  const aiBatchGroupsResult = ref<AiBatchGroupItem[] | null>(null);
+  const aiBatchGrouping = ref(false);
+  const batchCommittingAll = ref(false);
+
   const batchGroups = computed<BatchGroup[]>(() => {
+    if (aiBatchGroupsResult.value) {
+      return aiBatchGroupsResult.value.map((g) => ({
+        dir: g.name,
+        files: g.files.map((p) => ({ path: p, status: "modified" })),
+        message: g.message,
+      }));
+    }
     const dirMap = new Map<string, { path: string; status: string }[]>();
     for (const f of gitUnstagedFiles.value) {
       const dir = getTopLevelDir(f.path);
@@ -332,6 +346,16 @@ export function useGitPanel(
   });
 
   const batchCommittingIndex = ref<number | null>(null);
+
+  watch(
+    () => gitUnstagedFiles.value.map((f) => f.path).join("\n"),
+    () => {
+      if (batchCommittingAll.value) return;
+      if (aiBatchGroupsResult.value) {
+        aiBatchGroupsResult.value = null;
+      }
+    },
+  );
 
   async function commitBatchGroup(index: number, message: string) {
     if (!projectOpened() || !message.trim()) return;
@@ -365,9 +389,73 @@ export function useGitPanel(
   }
 
   async function commitAllBatches(messages: string[]) {
-    for (let i = 0; i < batchGroups.value.length; i++) {
-      await commitBatchGroup(i, messages[i] || "");
-      if (gitError.value) break;
+    const snapshot = batchGroups.value.map((g, i) => ({
+      filePaths: g.files.map((f) => f.path),
+      message: messages[i] || "",
+    }));
+    batchCommittingAll.value = true;
+    try {
+      for (let i = 0; i < snapshot.length; i++) {
+        await commitBatchGroupByPaths(snapshot[i].filePaths, snapshot[i].message);
+        if (gitError.value) break;
+      }
+    } finally {
+      batchCommittingAll.value = false;
+    }
+  }
+
+  async function commitBatchGroupByPaths(filePaths: string[], message: string) {
+    if (!projectOpened() || !message.trim() || !filePaths.length) return;
+    batchCommittingIndex.value = 0;
+    gitError.value = "";
+    clearGitDiffCache();
+    try {
+      const stageResult = await stageGitFiles(projectPath(), filePaths);
+      if (!stageResult.ok) {
+        gitError.value = stageResult.error || "暂存失败";
+        await refreshGitStatus({ showLoading: false, force: true });
+        return;
+      }
+      const commitResult = await commitGitChanges(projectPath(), message.trim());
+      if (!commitResult.ok) {
+        gitError.value = commitResult.error || "提交失败";
+        await refreshGitStatus({ showLoading: false, force: true });
+        return;
+      }
+      await refreshGitStatus({ showLoading: false });
+    } catch (e) {
+      gitError.value = e instanceof Error ? e.message : "批量提交失败";
+      await refreshGitStatus({ showLoading: false, force: true });
+      onRefreshTree?.();
+    } finally {
+      batchCommittingIndex.value = null;
+    }
+  }
+
+  async function generateAiBatchGroups() {
+    if (!projectOpened() || aiBatchGrouping.value) return;
+    const cfg = aiConfig();
+    if (!cfg.endpoint.trim() || !cfg.model.trim()) return;
+    aiBatchGrouping.value = true;
+    gitError.value = "";
+    try {
+      const result = await aiBatchGroupsApi(
+        projectPath(),
+        cfg.endpoint.trim(),
+        cfg.apiKey.trim(),
+        cfg.model.trim(),
+      );
+      if (!result.ok) {
+        gitError.value = result.error || "AI 分组失败";
+        aiBatchGroupsResult.value = null;
+      } else {
+        aiBatchGroupsResult.value = result.groups.length > 0 ? result.groups : null;
+      }
+    } catch (e) {
+      gitError.value = e instanceof Error ? e.message : "AI 分组失败";
+      aiBatchGroupsResult.value = null;
+    } finally {
+      aiBatchGrouping.value = false;
     }
   }
 
@@ -961,6 +1049,8 @@ export function useGitPanel(
     batchCommittingIndex,
     commitBatchGroup,
     commitAllBatches,
+    aiBatchGrouping,
+    generateAiBatchGroups,
 
     clearGitDiffCache,
     evictOldestCacheEntry,

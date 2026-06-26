@@ -102,6 +102,7 @@
           :expanded-git-log-entries="expandedGitLogEntries"
           :batch-groups="batchGroups"
           :batch-committing-index="batchCommittingIndex"
+          :ai-batch-grouping="aiBatchGrouping"
           @refresh="refreshGitStatus()"
           @do-fetch="doFetch"
           @do-pull="doPull"
@@ -130,6 +131,7 @@
           @on-git-file-contextmenu="onGitFileContextMenu"
           @commit-batch-group="commitBatchGroup"
           @commit-all-batches="commitAllBatches"
+          @ai-batch-groups="generateAiBatchGroups"
         />
 
         <div v-if="gitPanelMode === 'files' && !projectOpened" class="panel-empty">
@@ -679,6 +681,8 @@ import {
   disconnectFileWatcherStream,
   type FileChangeEvent,
 } from "../services/fileWatcherClient";
+import { useAgentNotification } from "../composables/useAgentNotification";
+import { useFileWatcher } from "../composables/useFileWatcher";
 
 const { confirm, dismissPendingOverlay: dismissPendingConfirm, show: confirmShow } = useConfirm();
 const inputPrompt = useInputPrompt();
@@ -901,48 +905,12 @@ function snapshotAgentRunSession(_sessionId: string) {
 }
 
 // ── 系统通知（Agent 完成时） ──
-// 同步检测 Tauri 运行时，避免异步竞态导致降级误判
-const isTauriEnv = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__;
-
-// ensureNotificationPermission 已移除：仅使用 Tauri 原生通知（invoke('send_notification')）
-
-/**
- * 尝试 Tauri 原生通知
- * 桌面端（Windows/macOS/Linux）无需权限检查，直接发送即可。
- * 权限检查仅在移动端有意义。
- */
-async function tryTauriNotification(title: string, body: string): Promise<boolean> {
-  if (!isTauriEnv) {
-    return false;
-  }
-  try {
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('send_notification', { title, body });
-    return true;
-  } catch (e) {
-    debugLog(`tryTauriNotification failed: ${e}`);
-    return false;
-  }
-}
-
-function sendAgentCompleteNotification(sessionName: string) {
-  const title = 'AIALL · Agent 回复完毕';
-  const body = sessionName ? `「${sessionName}」已完成，点击查看` : 'Agent 已完成，可以查看结果';
-  // 只使用 Tauri 原生通知，不降级到 JS 插件或站内横幅
-  tryTauriNotification(title, body);
-}
-
-// Agent 真正收尾时弹通知（续跑/排队期间由 finishRunSession 抑制）
-function notifyAgentDoneIfNeeded(sessionId: string) {
-  const project = projectPath.value.trim();
-  const name = (project ? getSessionTitle(project, sessionId) : undefined) || sessionId;
-  sendAgentCompleteNotification(name);
-}
-
-/** 测试系统通知 */
-async function testNotification() {
-  await tryTauriNotification('AIALL · 通知测试', '系统通知正常工作 ✅');
-}
+const { notifyAgentDoneIfNeeded, testNotification } = useAgentNotification(
+  (sessionId) => {
+    const project = projectPath.value.trim();
+    return (project ? getSessionTitle(project, sessionId) : undefined) || sessionId;
+  },
+);
 
 function endAgentRunSession(sessionId?: string, silent = false) {
   const sid = (sessionId || "").trim();
@@ -1010,6 +978,7 @@ const {
   doFetch, doPull, doPush,
   refreshGitStashes, doStashSave, doStashApply, doStashDrop,
   batchGroups, batchCommittingIndex, commitBatchGroup, commitAllBatches,
+  aiBatchGrouping, generateAiBatchGroups,
 } = git;
 
 // Session manager composable
@@ -1143,73 +1112,20 @@ function onDocumentDropCapture(e: DragEvent) {
 }
 
 // File watcher state
-const fileWatcherActive = ref(false);
-const fileWatcherConnected = ref(false);
-const fileWatcherCleanup = ref<(() => void) | null>(null);
-let gitRefreshDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-
-function scheduleGitStatusRefreshFromWatcher() {
-  if (gitRefreshDebounceTimer) clearTimeout(gitRefreshDebounceTimer);
-  gitRefreshDebounceTimer = setTimeout(() => {
-    gitRefreshDebounceTimer = null;
-    // 二次 guard：debounce fire 时距上次暂存操作不足 1.5s 则跳过，防止竞态覆盖乐观更新导致闪烁
-    if (gitStagingInProgress.value) return;
-    if (gitLastStagingAt.value && Date.now() - gitLastStagingAt.value < 1500) return;
-    refreshGitStatus({ showLoading: false });
-  }, 300);
-}
-
-async function startFileWatcherForProject(projectPath: string) {
-  try {
-    const result = await startFileWatcher(projectPath);
-    if (result.ok) {
-      fileWatcherActive.value = true;
-      fileWatcherCleanup.value = connectFileWatcherStream(
-        (changes) => {
-          const guard1 = gitStagingInProgress.value;
-          const guard2 = Date.now() - gitLastStagingAt.value < 500;
-          if (guard1 || guard2) {
-            return;
-          }
-          const relevantChanges = changes.filter(
-            (change) =>
-              !change.path.includes(".git") &&
-              !change.path.includes("node_modules")
-          );
-          if (relevantChanges.length > 0) {
-            scheduleGitStatusRefreshFromWatcher();
-            if (
-              relevantChanges.some((change) => isProjectKnowledgeFilePath(change.path))
-            ) {
-              scheduleKnowledgeReloadFromDisk();
-            }
-          }
-        },
-        (error) => {
-          console.error("File watcher stream error:", error);
-        },
-        (connected) => {
-          fileWatcherConnected.value = connected;
-        },
-      );
-    }
-  } catch (e) {
-    console.error("Failed to start file watcher:", e);
-  }
-}
-
-async function stopFileWatcherForProject() {
-  if (fileWatcherCleanup.value) {
-    fileWatcherCleanup.value();
-    fileWatcherCleanup.value = null;
-  }
-  try {
-    await stopFileWatcher();
-    fileWatcherActive.value = false;
-  } catch (e) {
-    console.error("Failed to stop file watcher:", e);
-  }
-}
+const {
+  fileWatcherActive,
+  fileWatcherConnected,
+  startFileWatcherForProject,
+  stopFileWatcherForProject,
+} = useFileWatcher({
+  onFileChanges: () => {},
+  isProjectKnowledgeFilePath,
+  onKnowledgeFileChanged: () => {
+    scheduleKnowledgeReloadFromDisk();
+  },
+  gitStagingInProgress: () => gitStagingInProgress.value,
+  gitLastStagingAt: () => gitLastStagingAt.value,
+});
 
 const contextMenu = ref({ show: false, x: 0, y: 0, path: "" });
 const gitFileContextMenu = ref({ show: false, x: 0, y: 0, path: "" });
@@ -2250,7 +2166,7 @@ async function openProjectByPath(dirPath: string) {
     void refreshGitStatus();
     log(`chat-done(${Math.round(performance.now() - tChat0)}ms)`);
 
-    void startFileWatcherForProject(normalized).catch(() => {});
+    void startFileWatcherForProject(normalized, () => refreshGitStatus({ showLoading: false })).catch(() => {});
 
     syncEditorPanelForOpenFiles();
     maybeAutoResumeLastRecoverableAssistant();
@@ -3267,7 +3183,6 @@ onBeforeUnmount(() => {
   if (scrollChatRaf) cancelAnimationFrame(scrollChatRaf);
   cancelPendingChatPersistence();
   if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
-  if (gitRefreshDebounceTimer) clearTimeout(gitRefreshDebounceTimer);
   stopAgentUiTick();
   clearRetryTimer();
   if (sessionCopyHintTimer) {

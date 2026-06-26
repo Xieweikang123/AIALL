@@ -233,11 +233,22 @@
           class="git-batch-section git-section-card"
           :class="{ 'git-batch-section--open': batchSectionOpen }"
         >
-          <button type="button" class="git-batch-toggle" @click="batchSectionOpen = !batchSectionOpen">
-            <span class="git-section-chevron">{{ batchSectionOpen ? "▾" : "▸" }}</span>
-            <span>分批提交</span>
-            <span class="git-batch-count">{{ batchGroups.length }}</span>
-          </button>
+          <div class="git-batch-header-row">
+            <button type="button" class="git-batch-toggle" @click="batchSectionOpen = !batchSectionOpen">
+              <span class="git-section-chevron">{{ batchSectionOpen ? "▾" : "▸" }}</span>
+              <span>分批提交</span>
+              <span class="git-batch-count">{{ batchGroups.length }}</span>
+            </button>
+            <button
+              type="button"
+              class="secondary small git-ai-batch-btn"
+              :disabled="aiBatchGrouping || batchCommittingIndex !== null || !configReady"
+              :title="!configReady ? '请先配置 AI 模型' : 'AI 按功能模块智能分组'"
+              @click="$emit('ai-batch-groups')"
+            >
+              {{ aiBatchGrouping ? "分析中…" : "AI 划分" }}
+            </button>
+          </div>
           <div v-if="batchSectionOpen" class="git-batch-groups">
             <button
               type="button"
@@ -397,6 +408,7 @@ interface Props {
   expandedGitLogEntries: Set<string>;
   batchGroups?: BatchGroup[];
   batchCommittingIndex: number | null;
+  aiBatchGrouping: boolean;
 }
 
 const props = defineProps<Props>();
@@ -416,7 +428,7 @@ watch(
   () => props.batchGroups,
   (groups) => {
     batchMessages.value = (groups ?? []).map(
-      (g) => `${g.dir}: ${g.files.length === 1 ? g.files[0].path.split("/").pop() || g.dir : `update ${g.files.length} files`}`,
+      (g) => g.message || `${g.dir}: ${g.files.length === 1 ? g.files[0].path.split("/").pop() || g.dir : `update ${g.files.length} files`}`,
     );
   },
   { immediate: true },
@@ -451,6 +463,7 @@ const emit = defineEmits<{
   (e: "on-git-file-contextmenu", event: MouseEvent, path: string): void;
   (e: "commit-batch-group", index: number, message: string): void;
   (e: "commit-all-batches", messages: string[]): void;
+  (e: "ai-batch-groups"): void;
 }>();
 
 function isGitLogEntryOpen(hash: string): boolean {
@@ -1374,7 +1387,7 @@ function gitStatusClass(status: string): string {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
+  flex: 1;
   padding: 8px 10px;
   background: none;
   border: none;
@@ -1389,13 +1402,22 @@ function gitStatusClass(status: string): string {
   background: rgba(255, 255, 255, 0.05);
 }
 
+.git-batch-header-row {
+  display: flex;
+  align-items: center;
+}
+
 .git-batch-count {
   font-size: 10px;
   color: rgba(139, 148, 158, 0.6);
   padding: 1px 5px;
   background: rgba(255, 255, 255, 0.06);
   border-radius: 3px;
-  margin-left: auto;
+}
+
+.git-ai-batch-btn {
+  margin-right: 8px;
+  flex-shrink: 0;
 }
 
 .git-batch-all-btn {

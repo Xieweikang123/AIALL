@@ -86,6 +86,18 @@ export interface GitGenerateMessageResult {
   error?: string;
 }
 
+export interface AiBatchGroupItem {
+  name: string;
+  files: string[];
+  message: string;
+}
+
+export interface AiBatchGroupsResult {
+  ok: boolean;
+  groups: AiBatchGroupItem[];
+  error?: string;
+}
+
 export interface GitRemoteInfo {
   name: string;
   url: string;
@@ -353,6 +365,83 @@ export async function generateCommitMessage(
     return { ok: true, message: finalMessage };
   } catch (error) {
     return { ok: false, message: "", error: error instanceof Error ? error.message : "网络错误" };
+  }
+}
+
+export async function aiBatchGroups(
+  projectPath: string,
+  endpoint: string,
+  apiKey: string,
+  model: string,
+  onDelta?: (text: string) => void,
+): Promise<AiBatchGroupsResult> {
+  try {
+    const response = await fetch(backendUrl("/backend/vibe/git/ai-batch-groups"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: projectPath, endpoint, apiKey, model }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      try {
+        const parsed = JSON.parse(text) as { error?: string; message?: string };
+        return { ok: false, groups: [], error: parsed.error || parsed.message || `请求失败，HTTP ${response.status}` };
+      } catch {
+        return { ok: false, groups: [], error: text || `请求失败，HTTP ${response.status}` };
+      }
+    }
+
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("text/event-stream") || !response.body) {
+      const data = await readJsonResponse<AiBatchGroupsResult>(response);
+      return data;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    let finalGroups: AiBatchGroupItem[] = [];
+    let currentEvent = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith("event: ")) {
+          currentEvent = trimmed.slice(7).trim();
+          continue;
+        }
+        if (trimmed.startsWith("data: ")) {
+          const raw = trimmed.slice(6).trim();
+          if (!raw || raw === "[DONE]") continue;
+
+          try {
+            const parsed = JSON.parse(raw) as { text?: string; groups?: AiBatchGroupItem[]; error?: string };
+            if (currentEvent === "delta" && parsed.text && onDelta) {
+              onDelta(parsed.text);
+            } else if (currentEvent === "done" && parsed.groups) {
+              finalGroups = parsed.groups;
+            } else if (currentEvent === "error") {
+              return { ok: false, groups: [], error: parsed.error || "AI 请求失败" };
+            }
+          } catch {
+            // skip malformed SSE
+          }
+          currentEvent = "";
+        }
+      }
+    }
+
+    return { ok: true, groups: finalGroups };
+  } catch (error) {
+    return { ok: false, groups: [], error: error instanceof Error ? error.message : "网络错误" };
   }
 }
 
