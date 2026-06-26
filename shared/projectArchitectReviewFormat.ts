@@ -1,8 +1,17 @@
 /** Relative to project root; listed in .gitignore by default. */
 export const PROJECT_ARCHITECT_REVIEW_REL_PATH = ".aiall/project-architect-review.md";
 
+/** History directory relative to project root. */
+export const PROJECT_ARCHITECT_REVIEW_HISTORY_DIR = ".aiall/review-history";
+
+/** History index file name. */
+export const PROJECT_ARCHITECT_REVIEW_STORE_FILE = "review-store.json";
+
 /** Max chars stored on disk (soft cap). */
 export const PROJECT_ARCHITECT_REVIEW_MAX_CHARS = 120_000;
+
+/** Max history entries to keep. */
+export const PROJECT_ARCHITECT_REVIEW_HISTORY_MAX = 50;
 
 export type ArchitectReviewVerdict = "on_track" | "caution" | "off_track";
 
@@ -17,6 +26,27 @@ export type ArchitectReviewWriteMetaOptions = {
   gitHead?: string;
   verdict?: ArchitectReviewVerdict;
   fromReview?: boolean;
+  commitCount?: number;
+  changedFileCount?: number;
+};
+
+/** Single history entry in the review store index. */
+export type ArchitectReviewHistoryEntry = {
+  id: string;
+  gitHead?: string;
+  verdict?: ArchitectReviewVerdict;
+  commitCount?: number;
+  changedFileCount?: number;
+  createdAt: string;
+  file: string;
+};
+
+/** Review store index structure. */
+export type ArchitectReviewStoreIndex = {
+  version: number;
+  projectPath: string;
+  activeReviewId: string;
+  reviews: ArchitectReviewHistoryEntry[];
 };
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
@@ -102,4 +132,20 @@ export function buildArchitectReviewMetaForWrite(
     gitHead: options.gitHead ?? priorMeta.gitHead,
     verdict: options.verdict ?? priorMeta.verdict,
   };
+}
+
+/** Generate a review ID from timestamp. */
+export function generateReviewId(date: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `review-${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}T${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}`;
+}
+
+/** Sanitize ID for use as filename. */
+export function sanitizeReviewFilePart(id: string): string {
+  return id.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+/** Get the JSON filename for a review history entry. */
+export function reviewHistoryFileName(reviewId: string): string {
+  return `${sanitizeReviewFilePart(reviewId)}.json`;
 }

@@ -7,11 +7,20 @@ import {
   parseArchitectReviewVerdictFromBody,
   PROJECT_ARCHITECT_REVIEW_MAX_CHARS,
   PROJECT_ARCHITECT_REVIEW_REL_PATH,
+  PROJECT_ARCHITECT_REVIEW_HISTORY_DIR,
+  PROJECT_ARCHITECT_REVIEW_STORE_FILE,
   serializeArchitectReviewFrontmatter,
   type ArchitectReviewMeta,
   type ArchitectReviewWriteMetaOptions,
 } from "../shared/projectArchitectReviewFormat";
-import type { ArchitectReviewContextBundle } from "../shared/projectArchitectReview";
+import {
+  createEmptyStoreIndex,
+  buildReviewHistoryEntry,
+  appendToStoreIndex,
+  removeFromStoreIndex,
+  type ArchitectReviewStoreIndex,
+  type ReviewHistoryFileContent,
+} from "../shared/projectArchitectReviewHistory";
 import { resolveProjectPath } from "./vibeFs";
 import { buildProjectContext } from "./vibeProjectContext";
 import { gitChangedFilesSince, gitHead, gitLog } from "./vibeGit";
@@ -211,4 +220,142 @@ export async function buildArchitectReviewContext(
   };
 
   return { ok: true, context };
+}
+
+// --- Review History Functions ---
+
+function resolveHistoryDir(projectRoot: string): string {
+  return path.join(projectRoot, PROJECT_ARCHITECT_REVIEW_HISTORY_DIR);
+}
+
+function resolveStoreIndexPath(projectRoot: string): string {
+  return path.join(resolveHistoryDir(projectRoot), PROJECT_ARCHITECT_REVIEW_STORE_FILE);
+}
+
+async function ensureHistoryDir(projectRoot: string): Promise<void> {
+  const dir = resolveHistoryDir(projectRoot);
+  await fs.promises.mkdir(dir, { recursive: true });
+}
+
+export async function readReviewStoreIndex(projectRoot: string): Promise<ArchitectReviewStoreIndex> {
+  const indexPath = resolveStoreIndexPath(projectRoot);
+  try {
+    const raw = await fs.promises.readFile(indexPath, "utf-8");
+    const parsed = JSON.parse(raw) as ArchitectReviewStoreIndex;
+    if (parsed && typeof parsed === "object" && Array.isArray(parsed.reviews)) {
+      return parsed;
+    }
+    return createEmptyStoreIndex(projectRoot);
+  } catch {
+    return createEmptyStoreIndex(projectRoot);
+  }
+}
+
+async function writeReviewStoreIndex(
+  projectRoot: string,
+  index: ArchitectReviewStoreIndex,
+): Promise<void> {
+  await ensureHistoryDir(projectRoot);
+  const indexPath = resolveStoreIndexPath(projectRoot);
+  await fs.promises.writeFile(indexPath, JSON.stringify(index, null, 2), "utf-8");
+}
+
+async function writeReviewHistoryFile(
+  projectRoot: string,
+  content: ReviewHistoryFileContent,
+): Promise<void> {
+  await ensureHistoryDir(projectRoot);
+  const filePath = path.join(resolveHistoryDir(projectRoot), content.id.replace(/[^a-zA-Z0-9_-]/g, "_") + ".json");
+  await fs.promises.writeFile(filePath, JSON.stringify(content, null, 2), "utf-8");
+}
+
+async function readReviewHistoryFile(
+  projectRoot: string,
+  reviewId: string,
+): Promise<ReviewHistoryFileContent | null> {
+  const filePath = path.join(resolveHistoryDir(projectRoot), reviewId.replace(/[^a-zA-Z0-9_-]/g, "_") + ".json");
+  try {
+    const raw = await fs.promises.readFile(filePath, "utf-8");
+    return JSON.parse(raw) as ReviewHistoryFileContent;
+  } catch {
+    return null;
+  }
+}
+
+async function deleteReviewHistoryFile(
+  projectRoot: string,
+  reviewId: string,
+): Promise<void> {
+  const filePath = path.join(resolveHistoryDir(projectRoot), reviewId.replace(/[^a-zA-Z0-9_-]/g, "_") + ".json");
+  await fs.promises.unlink(filePath).catch(() => {});
+}
+
+export type ReviewHistoryResult =
+  | { ok: true; index: ArchitectReviewStoreIndex; reviews: ArchitectReviewHistoryEntry[] }
+  | { ok: false; error: string };
+
+export async function listReviewHistory(projectRoot: string): Promise<ReviewHistoryResult> {
+  const resolvedRoot = path.resolve(projectRoot);
+  const index = await readReviewStoreIndex(resolvedRoot);
+  return { ok: true, index, reviews: index.reviews };
+}
+
+export type ReviewHistoryDetailResult =
+  | { ok: true; review: ReviewHistoryFileContent }
+  | { ok: false; error: string };
+
+export async function getReviewHistoryDetail(
+  projectRoot: string,
+  reviewId: string,
+): Promise<ReviewHistoryDetailResult> {
+  const resolvedRoot = path.resolve(projectRoot);
+  const review = await readReviewHistoryFile(resolvedRoot, reviewId);
+  if (!review) {
+    return { ok: false, error: "未找到该审查记录" };
+  }
+  return { ok: true, review };
+}
+
+export type SaveReviewHistoryResult =
+  | { ok: true; entry: ArchitectReviewHistoryEntry; index: ArchitectReviewStoreIndex }
+  | { ok: false; error: string };
+
+export async function saveReviewToHistory(
+  projectRoot: string,
+  body: string,
+  options: {
+    gitHead?: string;
+    verdict?: ArchitectReviewMeta["verdict"];
+    commitCount?: number;
+    changedFileCount?: number;
+  } = {},
+): Promise<SaveReviewHistoryResult> {
+  const resolvedRoot = path.resolve(projectRoot);
+  const index = await readReviewStoreIndex(resolvedRoot);
+  const { entry, fileContent } = buildReviewHistoryEntry({
+    projectPath: resolvedRoot,
+    body,
+    gitHead: options.gitHead,
+    verdict: options.verdict,
+    commitCount: options.commitCount,
+    changedFileCount: options.changedFileCount,
+  });
+
+  await writeReviewHistoryFile(resolvedRoot, fileContent);
+  const newIndex = appendToStoreIndex(index, entry);
+  await writeReviewStoreIndex(resolvedRoot, newIndex);
+
+  return { ok: true, entry, index: newIndex };
+}
+
+export async function deleteReviewFromHistory(
+  projectRoot: string,
+  reviewId: string,
+): Promise<ReviewHistoryResult> {
+  const resolvedRoot = path.resolve(projectRoot);
+  const index = await readReviewStoreIndex(resolvedRoot);
+  await deleteReviewHistoryFile(resolvedRoot, reviewId);
+  const newIndex = removeFromStoreIndex(index, reviewId);
+  await writeReviewStoreIndex(resolvedRoot, newIndex);
+  return { ok: true, index: newIndex, reviews: newIndex.reviews };
 }
