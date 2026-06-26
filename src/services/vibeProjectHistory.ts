@@ -1,3 +1,5 @@
+import { lsGet, lsSetJson } from "../utils/localStorageSafe";
+
 export type ProjectHistoryEntry = {
   path: string;
   displayName: string;
@@ -24,7 +26,7 @@ function displayNameFromPath(path: string): string {
 }
 
 function readStore(): ProjectHistoryStore {
-  const raw = localStorage.getItem(STORAGE_KEY);
+  const raw = lsGet(STORAGE_KEY);
   if (!raw) return { version: STORE_VERSION, entries: [] };
   try {
     const parsed = JSON.parse(raw) as Partial<ProjectHistoryStore>;
@@ -47,11 +49,7 @@ function readStore(): ProjectHistoryStore {
 }
 
 function writeStore(store: ProjectHistoryStore) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
-  } catch {
-    // localStorage 可能已满或被禁用
-  }
+  lsSetJson(STORAGE_KEY, store);
 }
 
 export function listProjectHistory(): ProjectHistoryEntry[] {

@@ -3,6 +3,8 @@
  * 重载后自动恢复中断的 Agent 运行。
  */
 
+import { lsGet, lsSetJson, lsRemove } from "../utils/localStorageSafe";
+
 const STORAGE_KEY = "vibe-agent-hmr-pending";
 const STALE_MS = 5 * 60 * 1000; // 5 分钟过期
 
@@ -19,20 +21,16 @@ export type PendingAgentRun = {
 
 /** 持久化当前 Agent 运行状态 */
 export function persistAgentRunForHmr(run: PendingAgentRun): void {
-  try {
-    run.savedAt = Date.now();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(run));
-  } catch {
-    // localStorage 写入失败时静默忽略
-  }
+  run.savedAt = Date.now();
+  lsSetJson(STORAGE_KEY, run);
 }
 
 /** 读取待恢复的 Agent 运行（如果存在且未过期） */
 export function popPendingAgentRun(): PendingAgentRun | null {
+  const raw = lsGet(STORAGE_KEY);
+  if (!raw) return null;
+  lsRemove(STORAGE_KEY);
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    localStorage.removeItem(STORAGE_KEY);
     const parsed = JSON.parse(raw) as PendingAgentRun;
     if (!parsed || typeof parsed !== "object") return null;
     if (!parsed.request || !parsed.projectPath) return null;
@@ -45,11 +43,7 @@ export function popPendingAgentRun(): PendingAgentRun | null {
 
 /** 清除待恢复状态 */
 export function clearPendingAgentRun(): void {
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // ignore
-  }
+  lsRemove(STORAGE_KEY);
 }
 
 /**

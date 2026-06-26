@@ -36,18 +36,21 @@
         :file-panel-width="filePanelWidth"
         :loading-tree="loadingTree"
         :git-panel-mode="gitPanelMode"
+        :project-panel-view="projectPanelView"
         :project-opened="projectOpened"
         :editor-collapsed="editorCollapsed"
         :chat-collapsed="chatCollapsed"
         :git-change-count="gitChangeCount"
         :git-unstaged-files="gitUnstagedFiles"
         :git-staged-files="gitStagedFiles"
+        :review-attention-count="reviewAttentionBadgeCount"
         :session-list="sessionList"
         :active-session-id="activeSessionId"
         :session-sending-ids="sendingSessionIdList"
         :syncing-chat-store="syncingChatStore"
         :chat-store-sync-message="chatStoreSyncMessage"
         @update:git-panel-mode="gitPanelMode = $event"
+        @update:project-panel-view="projectPanelView = $event"
         @open-quick-search="openQuickSearch"
         @create-new-file="createNewFile"
         @create-new-folder="createNewFolder"
@@ -154,7 +157,7 @@
         </div>
 
         <KnowledgePanel
-          v-else-if="gitPanelMode === 'knowledge'"
+          v-else-if="gitPanelMode === 'project' && projectPanelView === 'knowledge'"
           layout="sidebar"
           :project-opened="projectOpened"
           :config-ready="configReady"
@@ -186,6 +189,23 @@
           @expand-chat="expandChat"
           @update:draft="knowledgeDraft = $event"
         />
+
+        <ProjectArchitectReviewPanel
+          v-else-if="gitPanelMode === 'project' && projectPanelView === 'health'"
+          :project-opened="projectOpened"
+          :review-ready="configReady && apiKeyReady"
+          :review-loading="reviewLoading"
+          :review-message="reviewMessage"
+          :has-review="reviewHasContent"
+          :review-meta="reviewMeta"
+          :review-verdict="reviewVerdict"
+          :review-run="reviewRun"
+          :changed-file-count="reviewContext?.changedFiles?.length ?? 0"
+          :commit-count="reviewContext?.recentCommits?.length ?? 0"
+          @start-review="() => void startArchitectReview()"
+          @stop-review="stopArchitectReview"
+          @open-source="openArchitectReviewSourceFile"
+        />
       </FilePanel>
 
       <div
@@ -199,7 +219,7 @@
       ></div>
 
       <EditorPanel
-        v-if="gitPanelMode !== 'knowledge'"
+        v-if="gitPanelMode !== 'project' || (projectPanelView !== 'knowledge' && projectPanelView !== 'health')"
         ref="editorPanelRef"
         :active-file-path="activeFilePath"
         :file-content="fileContent"
@@ -233,7 +253,7 @@
       />
 
       <section
-        v-show="gitPanelMode === 'knowledge' && projectOpened"
+        v-show="gitPanelMode === 'project' && projectPanelView === 'knowledge' && projectOpened"
         class="editor-panel knowledge-main-panel"
         aria-label="项目知识库"
       >
@@ -269,6 +289,24 @@
           @open-source="openKnowledgeSourceFile"
           @expand-chat="expandChat"
           @update:draft="knowledgeDraft = $event"
+        />
+      </section>
+
+      <section
+        v-show="gitPanelMode === 'project' && projectPanelView === 'health' && projectOpened"
+        class="editor-panel knowledge-main-panel"
+        aria-label="项目架构审视"
+      >
+        <ArchitectReviewMainPanel
+          :chat-collapsed="chatCollapsed"
+          :has-review="reviewHasContent"
+          :review-loading="reviewLoading"
+          :review-message="reviewMessage"
+          :display-body="reviewDisplayBody"
+          :review-verdict="reviewVerdict"
+          :review-run="reviewRun"
+          @open-source="openArchitectReviewSourceFile"
+          @expand-chat="expandChat"
         />
       </section>
 
@@ -492,6 +530,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref,
 import "../styles/vibe-coding.scss";
 import { appendStatusDetail, assistantTransientUiClearPatch, truncateDiffPreview, cleanStatusLogText, CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount, isNetworkError, fileName, genId, hasAgentProcessSteps, entryToNode, formatToolMeta, syncRoundGroupsPatch } from "../utils/vibeHelpers";
 import { debugLog } from "../utils/debugLog";
+import { lsGet, lsSet, lsSetJson, lsRemove } from "../utils/localStorageSafe";
 import { dismissBlockingOverlays, registerOverlayDismissDeps, scanDomBlockingOverlays } from "../utils/dismissBlockingOverlays";
 import { sessionDiag } from "../utils/sessionDiagLog";
 import ChatComposerEditor, { COMPOSER_PENDING_DRAFT_KEY } from "../components/ChatComposerEditor.vue";
@@ -502,6 +541,8 @@ import AppToolbar from "../components/vibe/AppToolbar.vue";
 import FilePanel from "../components/vibe/FilePanel.vue";
 import GitPanel from "../components/vibe/GitPanel.vue";
 import KnowledgePanel from "../components/vibe/KnowledgePanel.vue";
+import ProjectArchitectReviewPanel from "../components/vibe/ProjectArchitectReviewPanel.vue";
+import ArchitectReviewMainPanel from "../components/vibe/ArchitectReviewMainPanel.vue";
 import EditorPanel from "../components/vibe/EditorPanel.vue";
 import ChatPanel from "../components/vibe/ChatPanel.vue";
 import VibeChatMessages from "../components/vibe/VibeChatMessages.vue";
@@ -520,6 +561,8 @@ import { useVibeQuickSearch } from "../composables/useVibeQuickSearch";
 import { useVibeGlobalShortcuts } from "../composables/useVibeGlobalShortcuts";
 import { useProjectMemory } from "../composables/useProjectMemory";
 import { useProjectKnowledge } from "../composables/useProjectKnowledge";
+import { useProjectArchitectReview } from "../composables/useProjectArchitectReview";
+import { PROJECT_ARCHITECT_REVIEW_REL_PATH } from "../services/vibeProjectArchitectReviewClient";
 import { PROJECT_KNOWLEDGE_REL_PATH } from "../services/vibeProjectKnowledgeClient";
 import { distillExplorationRun } from "../services/explorationDistill";
 import { useAgentRun, type ChatMessage } from "../composables/useAgentRun";
@@ -822,13 +865,9 @@ const composerRef = ref<InstanceType<typeof ChatComposerEditor> | null>(null);
 const composerEmpty = ref(true);
 
 function loadChatMode(): VibeChatMode {
-  try {
-    const saved = localStorage.getItem(CHAT_MODE_KEY);
-    if (saved === "ask" || saved === "plan") return saved;
-    return "build";
-  } catch {
-    return "build";
-  }
+  const saved = lsGet(CHAT_MODE_KEY);
+  if (saved === "ask" || saved === "plan") return saved;
+  return "build";
 }
 
 const chatMode = ref<VibeChatMode>(loadChatMode());
@@ -921,14 +960,10 @@ let chatPinnedToBottom = true;
 const chatPanelRef = ref<InstanceType<typeof ChatPanel> | null>(null);
 const pendingPromptQueue = ref<string[]>([]);
 function persistPendingQueue() {
-  try {
-    if (pendingPromptQueue.value.length) {
-      localStorage.setItem(PENDING_QUEUE_KEY, JSON.stringify(pendingPromptQueue.value));
-    } else {
-      localStorage.removeItem(PENDING_QUEUE_KEY);
-    }
-  } catch {
-    // ignore
+  if (pendingPromptQueue.value.length) {
+    lsSetJson(PENDING_QUEUE_KEY, pendingPromptQueue.value);
+  } else {
+    lsRemove(PENDING_QUEUE_KEY);
   }
 }
 
@@ -955,7 +990,7 @@ const projectHistoryList = ref<ProjectHistoryEntry[]>([]);
 
 // Git panel composable
 const {
-  gitPanelMode, gitStatus, gitBranch, gitHeadCommit, gitIsRepo, gitStatusKnown, gitLoading, gitError,
+  gitPanelMode, projectPanelView, gitStatus, gitBranch, gitHeadCommit, gitIsRepo, gitStatusKnown, gitLoading, gitError,
   gitCommitMessage, gitCommitting, gitGenStep, gitLogEntries, gitLogOpen,
   gitStagedOpen, gitUnstagedOpen, expandedGitLogEntries, selectedGitFiles,
   gitDiffLoadingKey, gitDiffContentCache, gitRemotes, gitTrackingBranch,
@@ -1232,6 +1267,37 @@ const {
   gitHead: gitHeadCommit,
 });
 
+const {
+  reviewMeta,
+  reviewLoading,
+  reviewMessage,
+  reviewContext,
+  reviewRun,
+  hasReview: reviewHasContent,
+  reviewVerdict,
+  reviewAttentionCount,
+  displayBody: reviewDisplayBody,
+  loadReview,
+  startArchitectReview,
+  stopArchitectReview,
+  onProjectClosed: onReviewProjectClosed,
+  onProjectPathChanged: onReviewProjectPathChanged,
+} = useProjectArchitectReview({
+  projectPath,
+  projectOpened,
+  configReady,
+  apiKeyReady,
+  aiConfig,
+  gitHead: gitHeadCommit,
+});
+
+const reviewAttentionBadgeCount = computed(() => reviewAttentionCount.value);
+
+function openArchitectReviewSourceFile() {
+  const root = projectPath.value.trim().replace(/\\/g, "/").replace(/\/$/, "");
+  void openFile(`${root}/${PROJECT_ARCHITECT_REVIEW_REL_PATH}`);
+}
+
 function normalizeKnowledgePathKey(path: string): string {
   return path.replace(/\\/g, "/").toLowerCase();
 }
@@ -1258,15 +1324,21 @@ function openKnowledgeSourceFile() {
   openKnowledgeFile(PROJECT_KNOWLEDGE_REL_PATH);
 }
 
-watch([gitPanelMode, projectOpened], ([mode, opened]) => {
-  if (mode === "knowledge") {
+watch([gitPanelMode, projectPanelView, projectOpened], ([mode, view, opened]) => {
+  if (mode === "project" && view === "knowledge") {
     if (editorCollapsed.value) expandEditor();
     if (opened) void loadKnowledge();
+  }
+  if (mode === "project" && view === "health" && opened) {
+    if (editorCollapsed.value) expandEditor();
+    void loadReview();
   }
 });
 
 watch(projectPath, () => {
-  if (gitPanelMode.value === "knowledge" && projectOpened.value) void loadKnowledge();
+  onReviewProjectPathChanged();
+  if (gitPanelMode.value === "project" && projectPanelView.value === "knowledge" && projectOpened.value) void loadKnowledge();
+  if (gitPanelMode.value === "project" && projectPanelView.value === "health" && projectOpened.value) void loadReview();
 });
 
 /** 无活跃会话时输入框草稿用固定 key，仅存 localStorage */
@@ -1361,7 +1433,7 @@ function reloadAiConfig() {
 }
 
 function loadSavedProject() {
-  const saved = localStorage.getItem(STORAGE_KEY);
+  const saved = lsGet(STORAGE_KEY);
   if (saved) {
     projectPath.value = saved;
     void openProjectByPath(saved);
@@ -2110,6 +2182,7 @@ async function openProjectByPath(dirPath: string) {
   sendingSessionIds.clear();
   chatSending.value = false;
   leaveProjectKnowledge();
+  onReviewProjectClosed();
   log("persist-prev");
 
   loadingTree.value = true;
@@ -2150,7 +2223,7 @@ async function openProjectByPath(dirPath: string) {
     projectOpened.value = true;
     projectPath.value = normalized;
     selectedTreePath.value = normalized;
-    localStorage.setItem(STORAGE_KEY, normalized);
+    lsSet(STORAGE_KEY, normalized);
     addProjectToHistory(normalized);
     refreshProjectHistoryList();
     log("set-state");
@@ -3002,11 +3075,7 @@ function onWindowFocus() {
 
 watch(chatMode, (mode) => {
   if (mode === "explore") return;
-  try {
-    localStorage.setItem(CHAT_MODE_KEY, mode);
-  } catch {
-    // ignore
-  }
+  lsSet(CHAT_MODE_KEY, mode);
 });
 
 watch(gitLogOpen, async (open) => {

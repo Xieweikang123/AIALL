@@ -92,6 +92,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { lsGet, lsSetJson, lsRemove } from "../utils/localStorageSafe";
 import { extractWebText } from "../services/webExtractClient";
 import { testAiModel } from "../services/aiClient";
 import { fetchIconTemplateList } from "../services/iconTemplatesClient";
@@ -123,17 +124,13 @@ const messages = ref<UiMessage[]>([]);
 const scrollWrapRef = ref<HTMLElement | null>(null);
 
 function persistChatMessages() {
-  try {
-    const data = messages.value.slice(-MAX_PERSISTED_MESSAGES);
-    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(data));
-  } catch (e) {
-    console.warn("[ChatView] Failed to save chat history:", e);
-  }
+  const data = messages.value.slice(-MAX_PERSISTED_MESSAGES);
+  lsSetJson(CHAT_STORAGE_KEY, data);
 }
 
 function loadPersistedChatMessages(): UiMessage[] {
   try {
-    const raw = localStorage.getItem(CHAT_STORAGE_KEY);
+    const raw = lsGet(CHAT_STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -272,11 +269,7 @@ function clearAll() {
   messages.value = [];
   state.phase = "idle";
   state.message = "未开始";
-  try {
-    localStorage.removeItem(CHAT_STORAGE_KEY);
-  } catch {
-    // ignore
-  }
+  lsRemove(CHAT_STORAGE_KEY);
 }
 
 function applyExample(example: string) {

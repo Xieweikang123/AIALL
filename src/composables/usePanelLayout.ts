@@ -1,4 +1,5 @@
 import { ref, computed, onBeforeUnmount, type Ref } from "vue";
+import { lsGet, lsSet, lsGetJson, lsSetJson } from "../utils/localStorageSafe";
 
 const PANEL_WIDTH_KEY = "vibe-coding-panel-widths";
 const EDITOR_COLLAPSED_KEY = "vibe-coding-editor-collapsed";
@@ -13,55 +14,31 @@ const RESIZE_HANDLES_WIDTH = 8;
 
 export function usePanelLayout(workspaceRef: Ref<HTMLElement | null>) {
   function loadPanelWidths(): { file: number; chat: number } {
-    try {
-      const raw = localStorage.getItem(PANEL_WIDTH_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        return {
-          file: typeof parsed.file === "number" ? parsed.file : 280,
-          chat: typeof parsed.chat === "number" ? parsed.chat : 360,
-        };
-      }
-    } catch { /* ignore */ }
+    const parsed = lsGetJson<{ file?: number; chat?: number }>(PANEL_WIDTH_KEY);
+    if (parsed && typeof parsed.file === "number" && typeof parsed.chat === "number") {
+      return { file: parsed.file, chat: parsed.chat };
+    }
     return { file: 280, chat: 360 };
   }
 
   function savePanelWidths() {
-    try {
-      localStorage.setItem(PANEL_WIDTH_KEY, JSON.stringify({ file: filePanelWidth.value, chat: chatPanelWidth.value }));
-    } catch { /* ignore */ }
+    lsSetJson(PANEL_WIDTH_KEY, { file: filePanelWidth.value, chat: chatPanelWidth.value });
   }
 
   function loadEditorCollapsed(): boolean {
-    try {
-      return localStorage.getItem(EDITOR_COLLAPSED_KEY) === "1";
-    } catch {
-      return false;
-    }
+    return lsGet(EDITOR_COLLAPSED_KEY) === "1";
   }
 
   function saveEditorCollapsed() {
-    try {
-      localStorage.setItem(EDITOR_COLLAPSED_KEY, editorCollapsed.value ? "1" : "0");
-    } catch {
-      // ignore
-    }
+    lsSet(EDITOR_COLLAPSED_KEY, editorCollapsed.value ? "1" : "0");
   }
 
   function loadChatCollapsed(): boolean {
-    try {
-      return localStorage.getItem(CHAT_COLLAPSED_KEY) === "1";
-    } catch {
-      return false;
-    }
+    return lsGet(CHAT_COLLAPSED_KEY) === "1";
   }
 
   function saveChatCollapsed() {
-    try {
-      localStorage.setItem(CHAT_COLLAPSED_KEY, chatCollapsed.value ? "1" : "0");
-    } catch {
-      // ignore
-    }
+    lsSet(CHAT_COLLAPSED_KEY, chatCollapsed.value ? "1" : "0");
   }
 
   const savedWidths = loadPanelWidths();

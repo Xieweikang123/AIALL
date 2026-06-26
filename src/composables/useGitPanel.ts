@@ -1,5 +1,6 @@
 import { computed, onUnmounted, reactive, ref, watch } from "vue";
 import { debugLog } from "../utils/debugLog";
+import { lsGet, lsSet } from "../utils/localStorageSafe";
 import {
   fetchGitStatus,
   fetchGitDiff,
@@ -41,17 +42,44 @@ export function useGitPanel(
   onRefreshTree?: () => void,
 ) {
   const GIT_PANEL_MODE_KEY = "vibe-coding-git-panel-mode";
+  const PROJECT_PANEL_VIEW_KEY = "vibe-coding-project-panel-view";
 
-  const _storedPanelMode = localStorage.getItem(GIT_PANEL_MODE_KEY);
-  const gitPanelMode = ref<"files" | "git" | "sessions" | "knowledge">(
+  const _storedPanelMode = lsGet(GIT_PANEL_MODE_KEY);
+  if (_storedPanelMode === "knowledge" || _storedPanelMode === "health") {
+    lsSet(GIT_PANEL_MODE_KEY, "project");
+    lsSet(
+      PROJECT_PANEL_VIEW_KEY,
+      _storedPanelMode === "health" ? "health" : "knowledge",
+    );
+  }
+
+  type GitPanelMode = "files" | "git" | "sessions" | "project";
+  type ProjectPanelView = "knowledge" | "health";
+
+  const gitPanelMode = ref<GitPanelMode>(
     _storedPanelMode === "git"
       || _storedPanelMode === "sessions"
+      || _storedPanelMode === "project"
       || _storedPanelMode === "knowledge"
-      ? _storedPanelMode
+      || _storedPanelMode === "health"
+      ? (_storedPanelMode === "knowledge" || _storedPanelMode === "health" ? "project" : _storedPanelMode as GitPanelMode)
       : "files",
   );
+
+  const _storedProjectView = lsGet(PROJECT_PANEL_VIEW_KEY);
+  const projectPanelView = ref<ProjectPanelView>(
+    _storedProjectView === "health" || _storedProjectView === "knowledge"
+      ? _storedProjectView
+      : _storedPanelMode === "health"
+        ? "health"
+        : "knowledge",
+  );
+
   watch(gitPanelMode, (mode) => {
-    localStorage.setItem(GIT_PANEL_MODE_KEY, mode);
+    lsSet(GIT_PANEL_MODE_KEY, mode);
+  });
+  watch(projectPanelView, (view) => {
+    lsSet(PROJECT_PANEL_VIEW_KEY, view);
   });
   const gitStatus = ref<GitStatusFile[]>([]);
   const gitBranch = ref("");
@@ -830,6 +858,7 @@ export function useGitPanel(
 
   return {
     gitPanelMode,
+    projectPanelView,
     gitStatus,
     gitBranch,
     gitHeadCommit,

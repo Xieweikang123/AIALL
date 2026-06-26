@@ -54,6 +54,7 @@ import {
   composerDraftStorageKey,
   isPlaceholderComposerHtml,
 } from "../utils/composerDraftStorage";
+import { lsGet, lsSet, lsSetJson, lsRemove, lsGetJson } from "../utils/localStorageSafe";
 import {
   deleteVibeChatSession,
   peekVibeChatSessionMessages,
@@ -63,11 +64,7 @@ import {
 const LEGACY_DRAFT_MAP_KEY = "vibe-coding-draft-session-map";
 
 function getLegacyDraftSessionMap(): Record<string, string> {
-  try {
-    return JSON.parse(localStorage.getItem(LEGACY_DRAFT_MAP_KEY) || "{}");
-  } catch {
-    return {};
-  }
+  return lsGetJson<Record<string, string>>(LEGACY_DRAFT_MAP_KEY, {});
 }
 
 function getLegacyDraftSessionId(draftKey?: string): string | null {
@@ -79,7 +76,7 @@ function removeLegacyDraftSessionId(draftKey?: string): void {
   if (!draftKey) return;
   const map = getLegacyDraftSessionMap();
   delete map[draftKey];
-  localStorage.setItem(LEGACY_DRAFT_MAP_KEY, JSON.stringify(map));
+  lsSetJson(LEGACY_DRAFT_MAP_KEY, map);
 }
 
 function purgeLegacyDraftSession(draftKey: string, projectPath: string): void {
@@ -489,24 +486,20 @@ function applySavedDraft(root: HTMLElement, saved: string) {
 
 /** 将当前输入框完整 HTML（含图片 chip）保存到 localStorage，不写 chat-store */
 function saveDraftToKey(storageKey: string) {
-  try {
-    const root = editorRef.value;
-    if (!root || !props.draftKey) return;
+  const root = editorRef.value;
+  if (!root || !props.draftKey) return;
 
-    if (!hasContent()) {
-      localStorage.removeItem(storageKey);
-      return;
-    }
-
-    const html = root.innerHTML;
-    if (isPlaceholderEditorHtml(html)) {
-      localStorage.removeItem(storageKey);
-      return;
-    }
-    localStorage.setItem(storageKey, html);
-  } catch {
-    // ignore storage errors
+  if (!hasContent()) {
+    lsRemove(storageKey);
+    return;
   }
+
+  const html = root.innerHTML;
+  if (isPlaceholderEditorHtml(html)) {
+    lsRemove(storageKey);
+    return;
+  }
+  lsSet(storageKey, html);
 }
 
 /** 将当前输入框完整 HTML（含图片 chip）保存到 localStorage */
@@ -520,7 +513,7 @@ function restoreDraftFromStorage() {
     const root = editorRef.value;
     if (!root) return;
 
-    let saved = localStorage.getItem(getDraftStorageKey());
+    let saved = lsGet(getDraftStorageKey());
 
     if (!saved && props.draftKey && props.projectPath) {
       saved = readLegacyDraftText(props.projectPath, props.draftKey);
@@ -543,13 +536,9 @@ function restoreDraftFromStorage() {
 
 /** 清除已保存的草稿（发送消息后调用） */
 function clearDraftStorage() {
-  try {
-    localStorage.removeItem(getDraftStorageKey());
-    if (props.draftKey && props.projectPath) {
-      purgeLegacyDraftSession(props.draftKey, props.projectPath);
-    }
-  } catch {
-    // ignore
+  lsRemove(getDraftStorageKey());
+  if (props.draftKey && props.projectPath) {
+    purgeLegacyDraftSession(props.draftKey, props.projectPath);
   }
 }
 

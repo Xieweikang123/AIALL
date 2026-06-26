@@ -1,6 +1,8 @@
 /** 无活跃会话时输入框草稿的 localStorage key 后缀 */
 export const COMPOSER_PENDING_DRAFT_KEY = "__composer-pending__";
 
+import { lsGet, lsRemove } from "./localStorageSafe";
+
 export function composerDraftStorageKey(draftKey: string): string {
   return `vibe-coding-input-draft-${draftKey || "__global"}`;
 }
@@ -11,13 +13,9 @@ export function isPlaceholderComposerHtml(html: string): boolean {
 }
 
 export function readComposerDraftHtml(draftKey: string): string | null {
-  try {
-    const raw = localStorage.getItem(composerDraftStorageKey(draftKey));
-    if (!raw || isPlaceholderComposerHtml(raw)) return null;
-    return raw;
-  } catch {
-    return null;
-  }
+  const raw = lsGet(composerDraftStorageKey(draftKey));
+  if (!raw || isPlaceholderComposerHtml(raw)) return null;
+  return raw;
 }
 
 export function hasComposerDraft(draftKey: string): boolean {
@@ -40,9 +38,5 @@ export function composerDraftPreviewText(draftKey: string, maxLen = 48): string 
 }
 
 export function removeComposerDraft(draftKey: string): void {
-  try {
-    localStorage.removeItem(composerDraftStorageKey(draftKey));
-  } catch {
-    // ignore storage errors
-  }
+  lsRemove(composerDraftStorageKey(draftKey));
 }

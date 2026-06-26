@@ -11,7 +11,7 @@ export type PersistedFileDiff = {
 };
 
 export type PersistedAgentContext = {
-  mode: "ask" | "build" | "plan";
+  mode: "ask" | "build" | "plan" | "explore";
   systemPrompt: string;
   history: Array<{ role: string; content: string }>;
   projectContext?: string;
@@ -632,6 +632,7 @@ import {
   hasComposerDraft,
   removeComposerDraft,
 } from "../utils/composerDraftStorage";
+import { lsGet, lsSetJson } from "../utils/localStorageSafe";
 
 const MAX_PERSISTED_IMAGES = 4;
 /** Align with agent compress cap so memory previews match what session-sync can externalize. */
@@ -897,7 +898,7 @@ function migrateV2Store(raw: ChatStoreV2): ChatStoreIndex {
 }
 
 function readIndex(): ChatStoreIndex {
-  const raw = localStorage.getItem(CHAT_STORAGE_KEY);
+  const raw = lsGet(CHAT_STORAGE_KEY);
   if (!raw) return { version: STORE_VERSION, byProject: {} };
   try {
     const parsed = JSON.parse(raw) as Partial<ChatStoreIndex | ChatStoreV2 | ChatStoreV1>;
@@ -927,14 +928,12 @@ export function onStorageError(cb: (msg: string) => void) {
 }
 
 function writeIndex(index: ChatStoreIndex): boolean {
-  try {
-    localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(index));
-    return true;
-  } catch (e) {
-    console.warn("[vibeChatStorage] localStorage index write failed:", e);
+  if (!lsSetJson(CHAT_STORAGE_KEY, index)) {
+    console.warn("[vibeChatStorage] localStorage index write failed");
     storageErrorCallback?.("浏览器索引写入失败，会话已保存到项目目录。");
     return false;
   }
+  return true;
 }
 
 function persistRecord(key: string, record: ProjectChatRecord, options?: { preferredSessionIds?: string[] }): boolean {

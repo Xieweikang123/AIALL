@@ -1,4 +1,5 @@
 import { backendUrl } from "./backendBase";
+import { lsGet, lsSetJson } from "../utils/localStorageSafe";
 
 export interface AiTestRequest {
   endpoint: string;
@@ -265,7 +266,7 @@ function readModelsCache(cacheKey: string): CachedModelsPayload | undefined {
     return memoryHit;
   }
 
-  const raw = localStorage.getItem(cacheKey);
+  const raw = lsGet(cacheKey);
   if (!raw) return;
   try {
     const parsed = JSON.parse(raw) as CachedModelsPayload;
@@ -280,11 +281,7 @@ function readModelsCache(cacheKey: string): CachedModelsPayload | undefined {
 
 function writeModelsCache(cacheKey: string, payload: CachedModelsPayload) {
   memoryModelsCache.set(cacheKey, payload);
-  try {
-    localStorage.setItem(cacheKey, JSON.stringify(payload));
-  } catch {
-    // localStorage 可能满了或被禁用，忽略即可。
-  }
+  lsSetJson(cacheKey, payload);
 }
 
 export async function fetchAvailableModels(request: AiModelsRequest): Promise<AiModelsResult> {

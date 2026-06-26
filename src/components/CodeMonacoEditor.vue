@@ -48,6 +48,7 @@
 import type * as Monaco from "monaco-editor";
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { languageFromFilePath } from "../utils/monacoLanguage";
+import { lsGet, lsSetJson } from "../utils/localStorageSafe";
 
 const props = defineProps<{
   modelValue: string;
@@ -135,7 +136,7 @@ function showMinimapContextMenu(e: Event) {
 
 function applyMinimapSettings() {
   if (!editor) return;
-  localStorage.setItem("monaco-minimap-settings", JSON.stringify(minimapSettings.value));
+  lsSetJson("monaco-minimap-settings", minimapSettings.value);
   editor.updateOptions({
     minimap: {
       enabled: true,
@@ -148,17 +149,16 @@ function applyMinimapSettings() {
 }
 
 function loadMinimapSettings() {
+  const saved = lsGet("monaco-minimap-settings");
+  if (!saved) return;
   try {
-    const saved = localStorage.getItem("monaco-minimap-settings");
-    if (saved) {
-      const p = JSON.parse(saved);
-      minimapSettings.value = {
-        renderCharacters: p.renderCharacters ?? true,
-        size: p.size ?? "proportional",
-        showSlider: p.showSlider ?? "always",
-        side: p.side ?? "right",
-      };
-    }
+    const p = JSON.parse(saved);
+    minimapSettings.value = {
+      renderCharacters: p.renderCharacters ?? true,
+      size: p.size ?? "proportional",
+      showSlider: p.showSlider ?? "always",
+      side: p.side ?? "right",
+    };
   } catch {}
 }
 

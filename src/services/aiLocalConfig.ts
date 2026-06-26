@@ -1,5 +1,7 @@
 /** 与 AiConfigView 使用同一 localStorage 键，读取对话接口配置（供其它页面复用） */
 
+import { lsGet, lsSetJson } from "../utils/localStorageSafe";
+
 export const AI_LOCAL_CONFIG_KEY = "ai-config";
 
 export const AI_CONFIG_VERSION = 4 as const;
@@ -213,14 +215,14 @@ export function providerToChatBase(provider: AiProvider): AiChatBaseConfig {
 
 export function loadPersistedAiConfigFromStorage(): PersistedAiConfig | null {
   if (typeof localStorage === "undefined") return null;
-  const raw = localStorage.getItem(AI_LOCAL_CONFIG_KEY);
+  const raw = lsGet(AI_LOCAL_CONFIG_KEY);
   if (!raw) return null;
   return parsePersistedAiConfig(raw);
 }
 
 export function savePersistedAiConfigToStorage(config: PersistedAiConfig): void {
   if (typeof localStorage === "undefined") return;
-  localStorage.setItem(AI_LOCAL_CONFIG_KEY, JSON.stringify(config));
+  lsSetJson(AI_LOCAL_CONFIG_KEY, config);
 }
 
 export function loadAiChatBaseFromStorage(): AiChatBaseConfig | null {

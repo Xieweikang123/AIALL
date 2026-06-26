@@ -368,6 +368,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
+import { lsGet, lsRemove } from "../utils/localStorageSafe";
 import { fetchAvailableModels, testAiModel, testTtsModel } from "../services/aiClient";
 import InputPrompt from "../components/InputPrompt.vue";
 import { useInputPrompt } from "../composables/useInputPrompt";
@@ -952,7 +953,7 @@ function saveConfig() {
 function loadConfig() {
   const stored = loadPersistedAiConfigFromStorage();
   if (!stored) {
-    const raw = localStorage.getItem(AI_LOCAL_CONFIG_KEY);
+    const raw = lsGet(AI_LOCAL_CONFIG_KEY);
     if (!raw) return;
     try {
       const migrated = migratePersistedAiConfig(JSON.parse(raw) as unknown);
@@ -983,7 +984,7 @@ function applyPersistedConfig(payload: ReturnType<typeof migratePersistedAiConfi
 function handleExportConfig() {
   try {
     saveConfig();
-    const raw = localStorage.getItem(AI_LOCAL_CONFIG_KEY) || "";
+    const raw = lsGet(AI_LOCAL_CONFIG_KEY) || "";
     if (!raw) {
       saveHint.value = "当前没有可导出的配置（localStorage 为空）。";
       window.clearTimeout(saveHintTimer);
@@ -1022,11 +1023,7 @@ async function handleImportConfig() {
 function handleResetConfig() {
   const ok = window.confirm("确认重置？这会清空本页已保存的本地配置，并恢复默认值。");
   if (!ok) return;
-  try {
-    localStorage.removeItem(AI_LOCAL_CONFIG_KEY);
-  } catch {
-    // ignore
-  }
+  lsRemove(AI_LOCAL_CONFIG_KEY);
   window.location.reload();
 }
 
