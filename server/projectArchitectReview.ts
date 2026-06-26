@@ -333,11 +333,12 @@ export async function saveReviewToHistory(
 ): Promise<SaveReviewHistoryResult> {
   try {
     const resolvedRoot = path.resolve(projectRoot);
+    const gitHead = options.gitHead?.trim() || (await resolveCurrentGitHead(resolvedRoot));
     const index = await readReviewStoreIndex(resolvedRoot);
     const { entry, fileContent } = buildReviewHistoryEntry({
       projectPath: resolvedRoot,
       body,
-      gitHead: options.gitHead,
+      gitHead,
       verdict: options.verdict,
       commitCount: options.commitCount,
       changedFileCount: options.changedFileCount,

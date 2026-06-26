@@ -222,7 +222,8 @@
           @open-source="openArchitectReviewSourceFile"
           @load-history="() => void loadReviewHistory()"
           @view-history="(entry) => void viewHistoryReview(entry)"
-          @delete-history="(entry) => void deleteHistoryReview(entry)"
+          @delete-history="(entry, event) => void deleteHistoryReview(entry, event)"
+          @clear-history-view="clearHistoryReview"
         />
       </FilePanel>
 
@@ -1237,6 +1238,7 @@ const {
   apiKeyReady,
   aiConfig,
   gitHead: gitHeadCommit,
+  confirm,
 });
 
 const reviewAttentionBadgeCount = computed(() => reviewAttentionCount.value);

@@ -4,6 +4,7 @@ import {
   architectReviewBadgeCount,
   buildArchitectReviewPrompt,
   extractArchitectReviewBody,
+  formatArchitectReviewVerdictLabel,
   isArchitectReviewReport,
   parseArchitectReviewVerdictFromBody,
   type ArchitectReviewContextBundle,
@@ -79,6 +80,7 @@ export function useProjectArchitectReview(options: {
   apiKeyReady?: Ref<boolean> | ComputedRef<boolean>;
   aiConfig: Ref<AiConfig>;
   gitHead?: Ref<string> | ComputedRef<string>;
+  confirm?: (msg: string, event?: MouseEvent) => Promise<boolean>;
 }) {
   const reviewBody = ref("");
   const reviewMeta = ref<ArchitectReviewMeta>({});
@@ -173,9 +175,30 @@ export function useProjectArchitectReview(options: {
     }
   }
 
-  async function deleteHistoryReview(entry: ArchitectReviewHistoryEntry) {
+  async function deleteHistoryReview(entry: ArchitectReviewHistoryEntry, event?: MouseEvent) {
     const path = options.projectPath.value.trim();
     if (!path || !options.projectOpened.value) return;
+
+    const verdict = formatArchitectReviewVerdictLabel(entry.verdict ?? null);
+    let timeLabel = "";
+    if (entry.createdAt) {
+      try {
+        const d = new Date(entry.createdAt);
+        timeLabel = d.toLocaleString(undefined, {
+          month: "numeric",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+      } catch {
+        timeLabel = entry.createdAt;
+      }
+    }
+    const detail = timeLabel ? `${timeLabel} · ${verdict}` : verdict;
+    if (options.confirm && !(await options.confirm(`确定删除评审记录（${detail}）？此操作不可撤销。`, event))) {
+      return;
+    }
+
     reviewHistoryLoading.value = true;
     try {
       const result = await deleteReviewHistory(path, entry.id);
@@ -327,7 +350,7 @@ export function useProjectArchitectReview(options: {
       const commitCount = reviewContext.value?.recentCommits?.length;
       const changedFileCount = reviewContext.value?.changedFiles?.length;
       const archiveResult = await archiveReviewToHistory(project, reviewBody.value, {
-        gitHead: reviewMeta.value.gitHead,
+        gitHead: options.gitHead?.value?.trim() || reviewMeta.value.gitHead,
         verdict: reviewVerdict.value ?? undefined,
         commitCount,
         changedFileCount,

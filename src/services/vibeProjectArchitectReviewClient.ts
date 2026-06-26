@@ -16,11 +16,13 @@ import {
   appendToStoreIndex,
   buildReviewHistoryEntry,
   createEmptyStoreIndex,
+  removeFromStoreIndex,
   type ArchitectReviewHistoryEntry,
   type ArchitectReviewStoreIndex,
   type ReviewHistoryFileContent,
 } from "../../shared/projectArchitectReviewHistory";
 import {
+  deleteItem,
   formatFetchError,
   readFile,
   readJsonResponse,
@@ -140,6 +142,38 @@ async function appendReviewHistoryOnDisk(
   }
 
   return { ok: true, entry, index: newIndex };
+}
+
+function reviewHistoryFilePath(reviewId: string): string {
+  return `${PROJECT_ARCHITECT_REVIEW_HISTORY_DIR}/${reviewId.replace(/[^a-zA-Z0-9_-]/g, "_")}.json`;
+}
+
+async function deleteReviewHistoryFromDisk(
+  projectPath: string,
+  reviewId: string,
+): Promise<ReviewHistoryPayload> {
+  const storeRead = await readFile(REVIEW_STORE_REL_PATH, projectPath);
+  if (!storeRead.ok && !isMissingFileError(storeRead.error)) {
+    return { ok: false, error: storeRead.error || "读取评审历史失败" };
+  }
+
+  const index = storeRead.ok
+    ? parseReviewStoreIndex(storeRead.content, projectPath)
+    : createEmptyStoreIndex(projectPath);
+
+  if (!index.reviews.some((entry) => entry.id === reviewId)) {
+    return { ok: false, error: "未找到该评审记录" };
+  }
+
+  const newIndex = removeFromStoreIndex(index, reviewId);
+  const storeWrite = await writeFile(REVIEW_STORE_REL_PATH, JSON.stringify(newIndex, null, 2), projectPath);
+  if (!storeWrite.ok) {
+    return { ok: false, error: storeWrite.error || "更新评审历史索引失败" };
+  }
+
+  await deleteItem(reviewHistoryFilePath(reviewId), projectPath);
+
+  return { ok: true, index: newIndex, reviews: newIndex.reviews };
 }
 
 /** Archive current review into history; falls back to disk when backend lacks /history support. */
@@ -400,13 +434,28 @@ export async function deleteReviewHistory(
     );
     const response = await fetch(url, { method: "DELETE" });
     if (response.ok) {
-      return await readJsonResponse<ReviewHistoryPayload>(response);
+      const payload = await readJsonResponse<ReviewHistoryPayload>(response);
+      if (isReviewHistoryListPayload(payload)) {
+        return payload;
+      }
+      return deleteReviewHistoryFromDisk(trimmed, reviewId);
     }
-    return { ok: false, error: "删除评审记录失败" };
+    if (response.status === 404 || response.status === 405) {
+      return deleteReviewHistoryFromDisk(trimmed, reviewId);
+    }
+    let serverError = "删除评审记录失败";
+    try {
+      const errBody = await readJsonResponse<{ error?: string }>(response);
+      if (errBody.error) serverError = errBody.error;
+    } catch {
+      /* ignore parse errors */
+    }
+    return { ok: false, error: serverError };
   } catch (error) {
-    return {
-      ok: false,
-      error: formatFetchError(error, "删除评审记录失败"),
-    };
+    const message = formatFetchError(error, "删除评审记录失败");
+    if (/HTML|无效 JSON|空响应/i.test(message)) {
+      return deleteReviewHistoryFromDisk(trimmed, reviewId);
+    }
+    return { ok: false, error: message };
   }
 }

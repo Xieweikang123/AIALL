@@ -1383,8 +1383,8 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         // Save to history if fromReview is true
         if (body.fromReview && reviewBody.trim()) {
           const historyResult = await saveReviewToHistory(projectPath, reviewBody, {
-            gitHead: body.gitHead?.trim() || undefined,
-            verdict: body.verdict,
+            gitHead: body.gitHead?.trim() || result.meta?.gitHead?.trim() || undefined,
+            verdict: body.verdict ?? result.meta?.verdict,
             commitCount: body.commitCount,
             changedFileCount: body.changedFileCount,
           });

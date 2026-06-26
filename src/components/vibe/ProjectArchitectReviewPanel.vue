@@ -56,59 +56,95 @@
 
       <div v-if="reviewLoading && !reviewRun.running" class="review-loading">加载中…</div>
 
-      <div v-else-if="hasReview && !reviewRun.running" class="review-summary" aria-label="评审概况">
-        <span
-          class="review-verdict"
-          :class="`review-verdict--${reviewVerdict || 'unknown'}`"
-        >
-          {{ verdictLabel }}
-        </span>
-        <span v-if="lastReviewedAt" class="review-meta">{{ formatTime(lastReviewedAt) }}</span>
+      <div v-else-if="hasReview && !reviewRun.running && !activeHistoryReview" class="review-summary-card" aria-label="当前评审">
+        <div class="review-summary-head">
+          <span
+            class="review-verdict-badge"
+            :class="`review-verdict-badge--${reviewVerdict || 'unknown'}`"
+          >
+            {{ verdictLabel }}
+          </span>
+          <span v-if="lastReviewedAt" class="review-summary-time">{{ formatTime(lastReviewedAt) }}</span>
+        </div>
         <p v-if="contextHint" class="review-context-hint">{{ contextHint }}</p>
+        <p v-if="reviewMeta.gitHead" class="review-summary-git" :title="reviewMeta.gitHead">
+          基于提交 {{ shortGitRef(reviewMeta.gitHead) }}
+        </p>
+      </div>
+
+      <div
+        v-else-if="activeHistoryReview && !reviewRun.running"
+        class="review-viewing-banner"
+        role="status"
+      >
+        <span>正在查看历史评审</span>
+        <button type="button" class="review-viewing-back" @click="emit('clear-history-view')">
+          返回当前
+        </button>
       </div>
 
       <!-- Review History Section -->
-      <div v-if="!reviewRun.running && (reviewHistory.length > 0 || reviewHistoryLoading)" class="review-history-section">
+      <div
+        v-if="!reviewRun.running && (reviewHistory.length > 0 || reviewHistoryLoading)"
+        class="review-history-section"
+        aria-label="评审历史"
+      >
+        <p class="review-history-title">
+          历史记录
+          <span v-if="reviewHistory.length" class="review-history-count">{{ reviewHistory.length }}</span>
+        </p>
+
         <div v-if="reviewHistoryLoading" class="review-loading">加载中…</div>
-        
+
         <template v-else>
           <p v-if="reviewHistoryMessage" class="review-hint" role="status">{{ reviewHistoryMessage }}</p>
-          <div
-            v-for="entry in reviewHistory"
-            :key="entry.id"
-            class="review-history-item"
-            :class="{ 'review-history-item--active': activeHistoryReview?.id === entry.id }"
-          >
-            <button
-              type="button"
-              class="review-history-item-btn"
-              @click="emit('view-history', entry)"
+          <div class="review-history-list">
+            <div
+              v-for="(entry, index) in reviewHistory"
+              :key="entry.id"
+              class="review-history-item"
+              :class="[
+                `review-history-item--${entry.verdict || 'unknown'}`,
+                { 'review-history-item--active': activeHistoryReview?.id === entry.id },
+              ]"
             >
-              <span
-                class="review-history-item-verdict"
-                :class="`review-history-item-verdict--${entry.verdict || 'unknown'}`"
+              <button
+                type="button"
+                class="review-history-item-btn"
+                @click="emit('view-history', entry)"
               >
-                {{ formatVerdictLabel(entry.verdict) }}
-              </span>
-              <span class="review-history-item-time">{{ formatTime(entry.createdAt) }}</span>
-              <span v-if="entry.commitCount" class="review-history-item-meta">
-                {{ entry.commitCount }} commits
-              </span>
-              <span v-if="entry.changedFileCount" class="review-history-item-meta">
-                {{ entry.changedFileCount }} files
-              </span>
-              <span v-if="entry.gitHead" class="review-history-item-git">
-                {{ shortGitRef(entry.gitHead) }}
-              </span>
-            </button>
-            <button
-              type="button"
-              class="review-history-item-delete"
-              title="删除此记录"
-              @click.stop="emit('delete-history', entry)"
-            >
-              ×
-            </button>
+                <div class="review-history-item-main">
+                  <span
+                    class="review-history-item-verdict"
+                    :class="`review-history-item-verdict--${entry.verdict || 'unknown'}`"
+                  >
+                    {{ formatVerdictLabel(entry.verdict) }}
+                  </span>
+                  <span class="review-history-item-time">{{ formatTime(entry.createdAt) }}</span>
+                  <span class="review-history-item-index">#{{ reviewHistory.length - index }}</span>
+                </div>
+                <div v-if="formatHistoryScope(entry) || entry.gitHead" class="review-history-item-sub">
+                  <span v-if="formatHistoryScope(entry)" class="review-history-item-scope">
+                    {{ formatHistoryScope(entry) }}
+                  </span>
+                  <span
+                    v-if="entry.gitHead"
+                    class="review-history-item-git"
+                    :title="entry.gitHead"
+                  >
+                    提交 {{ shortGitRef(entry.gitHead) }}
+                  </span>
+                </div>
+              </button>
+              <button
+                type="button"
+                class="review-history-item-delete"
+                title="删除此记录"
+                @click.stop="emit('delete-history', entry, $event)"
+              >
+                ×
+              </button>
+            </div>
           </div>
         </template>
       </div>
@@ -117,7 +153,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed } from "vue";
 import { formatArchitectReviewVerdictLabel } from "../../../shared/projectArchitectReview";
 import type { ArchitectReviewMeta } from "../../services/vibeProjectArchitectReviewClient";
 import type { ArchitectReviewRunState } from "../../composables/useProjectArchitectReview";
@@ -147,7 +183,8 @@ const emit = defineEmits<{
   "open-source": [];
   "load-history": [];
   "view-history": [entry: ArchitectReviewHistoryEntry];
-  "delete-history": [entry: ArchitectReviewHistoryEntry];
+  "delete-history": [entry: ArchitectReviewHistoryEntry, event: MouseEvent];
+  "clear-history-view": [];
 }>();
 
 const verdictLabel = computed(() => formatArchitectReviewVerdictLabel(props.reviewVerdict));
@@ -175,7 +212,16 @@ function formatVerdictLabel(verdict?: ArchitectReviewVerdict | null): string {
 }
 
 function shortGitRef(ref: string): string {
-  return ref.length > 8 ? ref.slice(0, 8) : ref;
+  const trimmed = ref.trim();
+  if (!trimmed) return "";
+  return trimmed.length > 7 ? trimmed.slice(0, 7) : trimmed;
+}
+
+function formatHistoryScope(entry: ArchitectReviewHistoryEntry): string {
+  const parts: string[] = [];
+  if (entry.commitCount) parts.push(`${entry.commitCount} 次提交`);
+  if (entry.changedFileCount) parts.push(`${entry.changedFileCount} 个变更文件`);
+  return parts.join(" · ");
 }
 </script>
 
@@ -314,41 +360,92 @@ function shortGitRef(ref: string): string {
   color: rgba(139, 148, 158, 0.95);
 }
 
-.review-summary {
+.review-summary-card {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
   flex-direction: column;
-  gap: 2px;
-}
-
-.review-verdict {
-  font-size: 12px;
-  font-weight: 600;
-  padding-left: 8px;
-  display: inline-flex;
-  align-items: center;
   gap: 4px;
 }
 
-.review-verdict--on_track {
+.review-summary-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.review-verdict-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
+}
+
+.review-verdict-badge--on_track {
   color: rgba(183, 235, 198, 0.95);
+  border-color: rgba(183, 235, 198, 0.25);
+  background: rgba(183, 235, 198, 0.06);
 }
 
-.review-verdict--caution {
+.review-verdict-badge--caution {
   color: rgba(255, 210, 120, 0.98);
+  border-color: rgba(255, 210, 120, 0.3);
+  background: rgba(255, 210, 120, 0.06);
 }
 
-.review-verdict--off_track {
+.review-verdict-badge--off_track {
   color: rgba(255, 140, 135, 0.98);
+  border-color: rgba(255, 140, 135, 0.3);
+  background: rgba(255, 140, 135, 0.06);
 }
 
-.review-verdict--unknown {
+.review-verdict-badge--unknown {
   color: rgba(160, 175, 190, 0.95);
 }
 
-.review-meta {
+.review-summary-time {
   font-size: 10.5px;
-  color: rgba(139, 148, 158, 0.85);
-  padding-left: 8px;
+  color: rgba(139, 148, 158, 0.88);
+}
+
+.review-summary-git {
+  margin: 0;
+  font-size: 10px;
+  color: rgba(139, 148, 158, 0.75);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.review-viewing-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 10.5px;
+  color: rgba(180, 190, 200, 0.95);
+  background: rgba(88, 166, 255, 0.08);
+  border: 1px solid rgba(88, 166, 255, 0.2);
+}
+
+.review-viewing-back {
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(88, 166, 255, 0.35);
+  background: transparent;
+  color: rgba(200, 225, 255, 0.95);
+  font-size: 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.review-viewing-back:hover {
+  background: rgba(88, 166, 255, 0.12);
 }
 
 .review-context-hint {
@@ -356,59 +453,102 @@ function shortGitRef(ref: string): string {
   font-size: 10.5px;
   color: rgba(139, 148, 158, 0.8);
   line-height: 1.4;
-  padding-left: 8px;
 }
 
 /* Review History Styles */
 .review-history-section {
-  margin-top: 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  padding-top: 5px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  max-height: 180px;
+  gap: 6px;
+}
+
+.review-history-title {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(180, 190, 200, 0.95);
+  letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.review-history-count {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(139, 148, 158, 0.9);
+}
+
+.review-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
 }
 
-.review-history-section::-webkit-scrollbar {
+.review-history-list::-webkit-scrollbar {
   width: 4px;
 }
 
-.review-history-section::-webkit-scrollbar-thumb {
+.review-history-list::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.12);
 }
 
 .review-history-item {
   display: flex;
-  align-items: center;
-  gap: 3px;
-  padding: 3px 5px;
-  border-radius: 4px;
+  align-items: stretch;
+  gap: 4px;
+  border-radius: 6px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.06);
+  border-left-width: 3px;
   transition: background 0.15s, border-color 0.15s;
 }
 
+.review-history-item--on_track {
+  border-left-color: rgba(183, 235, 198, 0.5);
+}
+
+.review-history-item--caution {
+  border-left-color: rgba(255, 210, 120, 0.55);
+}
+
+.review-history-item--off_track {
+  border-left-color: rgba(255, 140, 135, 0.55);
+}
+
+.review-history-item--unknown {
+  border-left-color: rgba(139, 148, 158, 0.35);
+}
+
 .review-history-item:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.05);
   border-color: rgba(255, 255, 255, 0.1);
 }
 
 .review-history-item--active {
-  background: rgba(88, 166, 255, 0.1);
-  border-color: rgba(88, 166, 255, 0.25);
+  background: rgba(88, 166, 255, 0.08);
+  border-color: rgba(88, 166, 255, 0.22);
 }
 
 .review-history-item-btn {
   flex: 1;
   display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 8px;
   border: none;
   background: transparent;
   color: inherit;
@@ -417,8 +557,23 @@ function shortGitRef(ref: string): string {
   min-width: 0;
 }
 
+.review-history-item-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.review-history-item-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
 .review-history-item-verdict {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   flex-shrink: 0;
 }
@@ -440,33 +595,43 @@ function shortGitRef(ref: string): string {
 }
 
 .review-history-item-time {
-  font-size: 10px;
-  color: rgba(139, 148, 158, 0.88);
+  font-size: 10.5px;
+  color: rgba(139, 148, 158, 0.92);
   flex-shrink: 0;
 }
 
-.review-history-item-meta {
-  font-size: 9px;
-  color: rgba(139, 148, 158, 0.7);
+.review-history-item-index {
+  margin-left: auto;
+  font-size: 9.5px;
+  font-weight: 500;
+  color: rgba(139, 148, 158, 0.55);
+  font-variant-numeric: tabular-nums;
   flex-shrink: 0;
+}
+
+.review-history-item-scope {
+  font-size: 10px;
+  color: rgba(139, 148, 158, 0.75);
 }
 
 .review-history-item-git {
-  font-size: 9px;
-  color: rgba(139, 148, 158, 0.6);
-  font-family: monospace;
+  font-size: 10px;
+  color: rgba(139, 148, 158, 0.65);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   flex-shrink: 0;
 }
 
 .review-history-item-delete {
-  padding: 2px 4px;
+  align-self: center;
+  margin-right: 4px;
+  padding: 2px 6px;
   border: none;
   background: transparent;
   color: rgba(139, 148, 158, 0.6);
   cursor: pointer;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1;
-  border-radius: 3px;
+  border-radius: 4px;
   flex-shrink: 0;
   transition: color 0.15s, background 0.15s;
 }
