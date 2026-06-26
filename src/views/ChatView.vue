@@ -40,15 +40,21 @@
         <div v-else class="msg-list">
           <div v-for="m in messages" :key="m.id" class="msg" :class="m.role">
             <div class="avatar" aria-hidden="true">
-              <span v-if="m.role === 'user'">我</span>
-              <span v-else>AI</span>
+              <svg v-if="m.role === 'user'" width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.6"/>
+                <path d="M4 21c0-4 3.6-7 8-7s8 3 8 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              </svg>
+              <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+                <path d="M12 12 4 7.5m8 4.5 8-4.5M12 12v9" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+              </svg>
             </div>
             <div class="bubble">
               <div class="bubble-top">
                 <span class="role-name">{{ m.role === "user" ? "你" : "助手" }}</span>
                 <span v-if="m.meta" class="bubble-meta">{{ m.meta }}</span>
               </div>
-              <pre class="bubble-text">{{ m.content }}</pre>
+              <div class="bubble-text">{{ m.content }}</div>
               <div v-if="m.role === 'assistant'" class="bubble-actions">
                 <button type="button" class="ghost" :disabled="sending || !m.content" @click="copyText(m.content)">复制</button>
               </div>
@@ -648,14 +654,17 @@ button:disabled {
 
 .ghost {
   background: transparent;
-  color: rgba(255, 255, 255, 0.86);
+  color: rgba(255, 255, 255, 0.7);
   border: 1px solid var(--border);
   padding: 7px 10px;
   border-radius: 8px;
+  transition: all 0.15s ease;
 }
 
 .ghost:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.95);
+  border-color: rgba(255, 255, 255, 0.18);
 }
 
 .link-btn {
@@ -728,37 +737,43 @@ button:disabled {
 
 .msg {
   display: grid;
-  grid-template-columns: 34px 1fr;
+  grid-template-columns: 36px 1fr;
   gap: 12px;
   align-items: flex-start;
-  animation: msg-in 0.2s ease-out;
+  animation: msg-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes msg-in {
-  from { opacity: 0; transform: translateY(6px); }
+  from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
 .avatar {
   width: 36px;
   height: 36px;
-  border-radius: 12px;
+  border-radius: 10px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
-  font-weight: 700;
   border: 1px solid var(--border);
-  background: rgba(17, 24, 39, 0.7);
-  color: rgba(255, 255, 255, 0.86);
   flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.msg:hover .avatar {
+  transform: scale(1.05);
 }
 
 .msg.user .avatar {
-  border-color: rgba(31, 111, 235, 0.45);
-  color: rgba(170, 208, 255, 0.98);
-  background: rgba(31, 111, 235, 0.15);
-  box-shadow: 0 0 8px rgba(31, 111, 235, 0.12);
+  background: linear-gradient(135deg, rgba(31, 111, 235, 0.25), rgba(31, 111, 235, 0.1));
+  color: rgba(170, 208, 255, 0.95);
+  border-color: rgba(31, 111, 235, 0.4);
+}
+
+.msg.assistant .avatar {
+  background: linear-gradient(135deg, rgba(179, 146, 240, 0.2), rgba(179, 146, 240, 0.08));
+  color: rgba(210, 184, 255, 0.95);
+  border-color: rgba(179, 146, 240, 0.35);
 }
 
 .bubble {
@@ -767,17 +782,27 @@ button:disabled {
   border-radius: 16px;
   padding: 16px 18px 14px;
   min-width: 0;
-  transition: border-color 0.25s, box-shadow 0.25s;
+  transition: border-color 0.25s, box-shadow 0.25s, transform 0.15s ease;
 }
 
 .bubble:hover {
-  border-color: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
 }
 
 .msg.user .bubble {
   border-color: rgba(31, 111, 235, 0.35);
-  background: linear-gradient(135deg, rgba(31, 111, 235, 0.12), rgba(31, 111, 235, 0.06));
+  background: linear-gradient(135deg, rgba(31, 111, 235, 0.14), rgba(31, 111, 235, 0.06));
   box-shadow: 0 2px 12px rgba(31, 111, 235, 0.1);
+}
+
+.msg.user .bubble:hover {
+  border-color: rgba(31, 111, 235, 0.5);
+  box-shadow: 0 4px 20px rgba(31, 111, 235, 0.15);
+}
+
+.msg.assistant .bubble {
+  background: linear-gradient(135deg, rgba(17, 24, 39, 0.75), rgba(17, 24, 39, 0.6));
 }
 
 .bubble-top {
@@ -814,9 +839,9 @@ button:disabled {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   word-break: break-word;
-  font-size: 13px;
-  line-height: 1.65;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 14px;
+  line-height: 1.7;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   color: rgba(255, 255, 255, 0.92);
 }
 
