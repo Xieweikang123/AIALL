@@ -12,7 +12,7 @@ import {
 } from "./agentContinuation";
 import { resolveAgentCompletedTurns, type AgentProgressSource, type AgentProgressTool } from "./agentRecovery";
 import { isConsultativeUserPrompt, isUltraShortOpenTaskPrompt, type UserIntentHistoryMessage } from "./agentUserIntent";
-import type { VibeChatMode } from "./vibeAgentClient";
+import type { VibeChatMode } from "../../shared/agentTypes";
 
 export type AgentRunKind = "interactive" | "execute_plan";
 

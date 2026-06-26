@@ -16,7 +16,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { runVibeAgent, type VibeAgentEvent } from "../server/vibeAgent";
+import { runVibeAgent } from "../server/vibeAgent";
+import type { VibeAgentEvent } from "../shared/agentTypes";
 
 type CliOptions = {
   prompt: string;

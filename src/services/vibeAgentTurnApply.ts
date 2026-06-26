@@ -1,4 +1,5 @@
-export type VibeChatMode = "ask" | "build" | "plan" | "explore";
+import type { VibeChatMode } from "../../shared/agentTypes";
+export type { VibeChatMode } from "../../shared/agentTypes";
 
 export type AgentDoneFileAction = {
   autoApply: boolean;

@@ -1,5 +1,5 @@
 import type { AgentStatusData } from "../types/vibeChat";
-import type { VibeChatMode } from "./vibeAgentClient";
+import type { VibeChatMode } from "../../shared/agentTypes";
 import { appendStatusDetail } from "../utils/vibeHelpers";
 
 /** Ephemeral Agent progress — lives on SessionAgentRun only, never persisted. */

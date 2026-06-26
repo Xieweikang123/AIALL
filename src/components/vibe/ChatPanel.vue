@@ -596,7 +596,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, withDefaults, type CSSProperties } from "vue";
-import type { VibeChatMode } from "../../services/vibeAgentClient";
+import type { VibeChatMode } from "../../../shared/agentTypes";
 import type { AgentSuggestion } from "../../services/agentSuggestions";
 import type { PendingMemoryProposal } from "../../services/projectMemoryProposal";
 import type { PendingSkillProposal } from "../../services/projectSkillProposal";

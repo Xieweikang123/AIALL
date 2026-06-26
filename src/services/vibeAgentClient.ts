@@ -1,4 +1,29 @@
 import { backendUrl } from "./backendBase";
+import type { VibeAgentEvent, VibeChatMode, VibeChatHistoryMessage } from "../../shared/agentTypes";
+
+export type { VibeChatMode, VibeChatHistoryMessage };
+
+export type VibeAgentSseEvent = VibeAgentEvent | { type: "unknown"; data: unknown };
+
+export interface VibeAgentRunRequest {
+  prompt: string;
+  history?: VibeChatHistoryMessage[];
+  projectPath: string;
+  endpoint: string;
+  apiKey?: string;
+  model: string;
+  mode?: VibeChatMode;
+  maxTurns?: number;
+  openFilePath?: string;
+  imageDataUrls?: string[];
+  /** 与 AI 配置「网页抓取代理」一致，供 web_search / web_extract 使用 */
+  webProxyUrl?: string;
+  runProfile?: {
+    kind: "interactive" | "execute_plan";
+    targetFiles?: string[];
+    userIntent?: string;
+  };
+}
 
 const DEV_SIDECAR_ORIGIN = "http://127.0.0.1:37891";
 const AGENT_CONNECT_TIMEOUT_MS = 45_000;
@@ -21,101 +46,6 @@ function agentRunUrl(): string {
   if (import.meta.env.DEV) return `${DEV_SIDECAR_ORIGIN}/backend/vibe/agent/run`;
   return backendUrl("/backend/vibe/agent/run");
 }
-
-export type VibeChatMode = "ask" | "build" | "plan" | "explore";
-
-export type VibeChatHistoryMessage = {
-  role: "user" | "assistant";
-  content: string;
-};
-
-export interface VibeAgentRunRequest {
-  prompt: string;
-  history?: VibeChatHistoryMessage[];
-  projectPath: string;
-  endpoint: string;
-  apiKey?: string;
-  model: string;
-  mode?: VibeChatMode;
-  maxTurns?: number;
-  openFilePath?: string;
-  imageDataUrls?: string[];
-  /** 与 AI 配置「网页抓取代理」一致，供 web_search / web_extract 使用 */
-  webProxyUrl?: string;
-  runProfile?: {
-    kind: "interactive" | "execute_plan";
-    targetFiles?: string[];
-    userIntent?: string;
-  };
-}
-
-export type VibeAgentSseEvent =
-  | {
-      type: "status";
-      data: {
-        phase: string;
-        turn?: number;
-        maxTurns?: number;
-        openFile?: string;
-        model?: string;
-        retryAttempt?: number;
-        retryMaxAttempts?: number;
-        retryError?: string;
-        detail?: string;
-        contextMessages?: number;
-        contextChars?: number;
-        streamChars?: number;
-        streamChunks?: number;
-        toolCallCount?: number;
-        elapsedMs?: number;
-      };
-    }
-  | { type: "tool_start"; data: { id: string; name: string; args: Record<string, unknown> } }
-  | { type: "tool_end"; data: { id: string; name: string; ok: boolean; summary: string; result?: string } }
-  | { type: "message"; data: { text: string } }
-  | { type: "message_delta"; data: { delta: string } }
-  | { type: "file_diff"; data: { path: string; before: string; after: string; deleted?: boolean; created?: boolean } }
-  | {
-      type: "agent_context";
-      data: {
-        mode: VibeChatMode;
-        systemPrompt: string;
-        history: Array<{ role: string; content: string }>;
-        projectContext?: string;
-        maxTurns?: number;
-        model?: string;
-        openFile?: string;
-      };
-    }
-  | {
-      type: "turn_trace";
-      data: { turn: number; maxTurns?: number; assistantText: string; hasToolCalls: boolean };
-    }
-  | {
-      type: "turn_request";
-      data: {
-        turn: number;
-        maxTurns?: number;
-        model?: string;
-        contextMessages: number;
-        contextChars: number;
-        messages: Array<{ role: string; content: string; toolCalls?: string }>;
-      };
-    }
-  | {
-      type: "turn_response";
-      data: {
-        turn: number;
-        maxTurns?: number;
-        assistantText: string;
-        toolCalls: Array<{ id: string; name: string; arguments: string }>;
-        hasToolCalls: boolean;
-        isFinal: boolean;
-      };
-    }
-  | { type: "error"; data: { message: string } }
-  | { type: "done"; data: { writtenFiles: string[]; pendingFiles: string[]; turns: number; truncated?: boolean } }
-  | { type: "unknown"; data: unknown };
 
 function safeJsonParse(input: string): unknown | undefined {
   try {
