@@ -360,5 +360,18 @@ const displayHtml = computed(() => {
   font-size: 13px;
   line-height: 1.6;
   color: rgba(220, 228, 235, 0.94);
+  transition: opacity 0.15s ease;
+}
+
+.architect-review-body--switching {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.architect-review-switching-hint {
+  margin: 0;
+  padding: 0 20px 8px;
+  font-size: 11px;
+  color: rgba(139, 148, 158, 0.9);
 }
 </style>

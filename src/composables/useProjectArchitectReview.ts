@@ -10,7 +10,10 @@ import {
   type ArchitectReviewContextBundle,
 } from "../../shared/projectArchitectReview";
 import { stripArchitectReviewFrontmatter } from "../../shared/projectArchitectReviewFormat";
-import type { ArchitectReviewHistoryEntry } from "../../shared/projectArchitectReviewHistory";
+import type {
+  ArchitectReviewHistoryEntry,
+  ReviewHistoryFileContent,
+} from "../../shared/projectArchitectReviewHistory";
 import {
   fetchArchitectReviewContext,
   fetchProjectArchitectReview,
@@ -93,6 +96,11 @@ export function useProjectArchitectReview(options: {
   const reviewHistoryLoading = ref(false);
   const reviewHistoryMessage = ref("");
   const activeHistoryReview = ref<ArchitectReviewHistoryEntry | null>(null);
+  const reviewHistoryDetailLoading = ref(false);
+
+  const reviewHistoryDetailCache = new Map<string, ReviewHistoryFileContent>();
+  let currentReviewSnapshot: { body: string; meta: ArchitectReviewMeta } | null = null;
+  let historyDetailRequestToken = 0;
 
   const reviewRun = ref<ArchitectReviewRunState>(emptyRunState());
   let abortHandle: { abort: () => void } | null = null;
@@ -133,6 +141,37 @@ export function useProjectArchitectReview(options: {
     }
   }
 
+  function clearReviewHistoryCaches() {
+    reviewHistoryDetailCache.clear();
+    currentReviewSnapshot = null;
+    historyDetailRequestToken += 1;
+  }
+
+  function applyHistoryReviewContent(review: ReviewHistoryFileContent) {
+    reviewBody.value = review.body;
+    reviewMeta.value = {
+      gitHead: review.gitHead,
+      verdict: review.verdict,
+      lastReviewedAt: review.createdAt,
+      updatedAt: review.createdAt,
+    };
+  }
+
+  async function prefetchHistoryDetails(entries: ArchitectReviewHistoryEntry[]) {
+    const path = options.projectPath.value.trim();
+    if (!path || !options.projectOpened.value) return;
+    const missing = entries.filter((entry) => !reviewHistoryDetailCache.has(entry.id));
+    if (!missing.length) return;
+    await Promise.all(
+      missing.map(async (entry) => {
+        const result = await fetchReviewHistoryDetail(path, entry.id);
+        if (result.ok && result.review) {
+          reviewHistoryDetailCache.set(entry.id, result.review);
+        }
+      }),
+    );
+  }
+
   async function loadReviewHistory() {
     const path = options.projectPath.value.trim();
     if (!path || !options.projectOpened.value) return;
@@ -145,6 +184,7 @@ export function useProjectArchitectReview(options: {
         return;
       }
       reviewHistory.value = result.reviews ?? [];
+      void prefetchHistoryDetails(reviewHistory.value);
     } finally {
       reviewHistoryLoading.value = false;
     }
@@ -153,25 +193,40 @@ export function useProjectArchitectReview(options: {
   async function viewHistoryReview(entry: ArchitectReviewHistoryEntry) {
     const path = options.projectPath.value.trim();
     if (!path || !options.projectOpened.value) return;
+    if (activeHistoryReview.value?.id === entry.id) return;
+
+    if (!activeHistoryReview.value && reviewBody.value.trim()) {
+      currentReviewSnapshot = {
+        body: reviewBody.value,
+        meta: { ...reviewMeta.value },
+      };
+    }
+
     activeHistoryReview.value = entry;
-    reviewLoading.value = true;
+
+    const cached = reviewHistoryDetailCache.get(entry.id);
+    if (cached) {
+      applyHistoryReviewContent(cached);
+      return;
+    }
+
+    const requestToken = ++historyDetailRequestToken;
+    reviewHistoryDetailLoading.value = true;
     try {
       const result = await fetchReviewHistoryDetail(path, entry.id);
+      if (requestToken !== historyDetailRequestToken) return;
       if (!result.ok) {
         reviewMessage.value = result.error || "加载历史记录失败";
         return;
       }
       if (result.review) {
-        reviewBody.value = result.review.body;
-        reviewMeta.value = {
-          gitHead: result.review.gitHead,
-          verdict: result.review.verdict,
-          lastReviewedAt: result.review.createdAt,
-          updatedAt: result.review.createdAt,
-        };
+        reviewHistoryDetailCache.set(entry.id, result.review);
+        applyHistoryReviewContent(result.review);
       }
     } finally {
-      reviewLoading.value = false;
+      if (requestToken === historyDetailRequestToken) {
+        reviewHistoryDetailLoading.value = false;
+      }
     }
   }
 
@@ -207,10 +262,17 @@ export function useProjectArchitectReview(options: {
         return;
       }
       reviewHistory.value = result.reviews ?? [];
+      reviewHistoryDetailCache.delete(entry.id);
       // If viewing the deleted review, clear it
       if (activeHistoryReview.value?.id === entry.id) {
         activeHistoryReview.value = null;
-        await loadReview();
+        if (currentReviewSnapshot) {
+          reviewBody.value = currentReviewSnapshot.body;
+          reviewMeta.value = currentReviewSnapshot.meta;
+          currentReviewSnapshot = null;
+        } else {
+          await loadReview();
+        }
       }
     } finally {
       reviewHistoryLoading.value = false;
@@ -219,7 +281,15 @@ export function useProjectArchitectReview(options: {
 
   function clearHistoryReview() {
     activeHistoryReview.value = null;
-    loadReview();
+    historyDetailRequestToken += 1;
+    reviewHistoryDetailLoading.value = false;
+    if (currentReviewSnapshot) {
+      reviewBody.value = currentReviewSnapshot.body;
+      reviewMeta.value = currentReviewSnapshot.meta;
+      currentReviewSnapshot = null;
+      return;
+    }
+    void loadReview();
   }
 
   function handleReviewEvent(event: VibeAgentSseEvent) {
@@ -431,6 +501,8 @@ export function useProjectArchitectReview(options: {
     reviewHistory.value = [];
     reviewHistoryMessage.value = "";
     activeHistoryReview.value = null;
+    reviewHistoryDetailLoading.value = false;
+    clearReviewHistoryCaches();
   }
 
   function onProjectPathChanged() {
@@ -442,6 +514,8 @@ export function useProjectArchitectReview(options: {
     reviewHistory.value = [];
     reviewHistoryMessage.value = "";
     activeHistoryReview.value = null;
+    reviewHistoryDetailLoading.value = false;
+    clearReviewHistoryCaches();
   }
 
   return {
@@ -463,6 +537,7 @@ export function useProjectArchitectReview(options: {
     // History
     reviewHistory,
     reviewHistoryLoading,
+    reviewHistoryDetailLoading,
     reviewHistoryMessage,
     activeHistoryReview,
     loadReviewHistory,

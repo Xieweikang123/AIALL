@@ -35,6 +35,26 @@ export {
 
 const REVIEW_CACHE_TTL_MS = 30_000;
 const reviewCache = new Map<string, { builtAt: number; result: ArchitectReviewReadResult }>();
+const historyDetailCache = new Map<string, { builtAt: number; review: ReviewHistoryFileContent }>();
+
+function historyDetailCacheKey(projectRoot: string, reviewId: string): string {
+  return `${path.resolve(projectRoot)}\0${reviewId}`;
+}
+
+export function invalidateReviewHistoryDetailCache(projectPath?: string, reviewId?: string): void {
+  if (!projectPath) {
+    historyDetailCache.clear();
+    return;
+  }
+  const prefix = `${path.resolve(projectPath)}\0`;
+  if (reviewId) {
+    historyDetailCache.delete(historyDetailCacheKey(projectPath, reviewId));
+    return;
+  }
+  for (const key of historyDetailCache.keys()) {
+    if (key.startsWith(prefix)) historyDetailCache.delete(key);
+  }
+}
 
 const RECENT_COMMIT_COUNT = 12;
 const KNOWLEDGE_EXCERPT_MAX_CHARS = 4_000;
@@ -310,10 +330,17 @@ export async function getReviewHistoryDetail(
   reviewId: string,
 ): Promise<ReviewHistoryDetailResult> {
   const resolvedRoot = path.resolve(projectRoot);
+  const cacheKey = historyDetailCacheKey(resolvedRoot, reviewId);
+  const cached = historyDetailCache.get(cacheKey);
+  if (cached && Date.now() - cached.builtAt < REVIEW_CACHE_TTL_MS) {
+    return { ok: true, review: cached.review };
+  }
+
   const review = await readReviewHistoryFile(resolvedRoot, reviewId);
   if (!review) {
     return { ok: false, error: "未找到该评审记录" };
   }
+  historyDetailCache.set(cacheKey, { builtAt: Date.now(), review });
   return { ok: true, review };
 }
 
@@ -347,6 +374,10 @@ export async function saveReviewToHistory(
     await writeReviewHistoryFile(resolvedRoot, fileContent);
     const newIndex = appendToStoreIndex(index, entry);
     await writeReviewStoreIndex(resolvedRoot, newIndex);
+    historyDetailCache.set(historyDetailCacheKey(resolvedRoot, entry.id), {
+      builtAt: Date.now(),
+      review: fileContent,
+    });
 
     return { ok: true, entry, index: newIndex };
   } catch (err) {
@@ -362,6 +393,7 @@ export async function deleteReviewFromHistory(
   const resolvedRoot = path.resolve(projectRoot);
   const index = await readReviewStoreIndex(resolvedRoot);
   await deleteReviewHistoryFile(resolvedRoot, reviewId);
+  invalidateReviewHistoryDetailCache(resolvedRoot, reviewId);
   const newIndex = removeFromStoreIndex(index, reviewId);
   await writeReviewStoreIndex(resolvedRoot, newIndex);
   return { ok: true, index: newIndex, reviews: newIndex.reviews };

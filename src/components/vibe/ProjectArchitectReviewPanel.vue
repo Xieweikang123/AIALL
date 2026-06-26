@@ -54,7 +54,7 @@
 
       <p v-if="reviewMessage" class="review-hint" role="status">{{ reviewMessage }}</p>
 
-      <div v-if="reviewLoading && !reviewRun.running" class="review-loading">加载中…</div>
+      <div v-if="reviewLoading && !reviewRun.running && !reviewHistoryDetailLoading" class="review-loading">加载中…</div>
 
       <div v-else-if="hasReview && !reviewRun.running && !activeHistoryReview" class="review-summary-card" aria-label="当前评审">
         <div class="review-summary-head">
@@ -111,6 +111,7 @@
               <button
                 type="button"
                 class="review-history-item-btn"
+                :aria-current="activeHistoryReview?.id === entry.id ? 'true' : undefined"
                 @click="emit('view-history', entry)"
               >
                 <div class="review-history-item-main">
@@ -121,7 +122,18 @@
                     {{ formatVerdictLabel(entry.verdict) }}
                   </span>
                   <span class="review-history-item-time">{{ formatTime(entry.createdAt) }}</span>
-                  <span class="review-history-item-index">#{{ reviewHistory.length - index }}</span>
+                  <span
+                    class="review-history-item-index"
+                    :class="{ 'review-history-item-index--active': activeHistoryReview?.id === entry.id }"
+                  >
+                    <span
+                      v-if="activeHistoryReview?.id === entry.id"
+                      class="review-history-item-viewing"
+                    >
+                      查看中
+                    </span>
+                    <template v-else>#{{ reviewHistory.length - index }}</template>
+                  </span>
                 </div>
                 <div v-if="formatHistoryScope(entry) || entry.gitHead" class="review-history-item-sub">
                   <span v-if="formatHistoryScope(entry)" class="review-history-item-scope">
@@ -173,6 +185,7 @@ const props = defineProps<{
   commitCount?: number;
   reviewHistory: ArchitectReviewHistoryEntry[];
   reviewHistoryLoading: boolean;
+  reviewHistoryDetailLoading?: boolean;
   reviewHistoryMessage: string;
   activeHistoryReview: ArchitectReviewHistoryEntry | null;
 }>();
@@ -514,33 +527,93 @@ function formatHistoryScope(entry: ArchitectReviewHistoryEntry): string {
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-left-width: 3px;
-  transition: background 0.15s, border-color 0.15s;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.12s ease;
 }
 
 .review-history-item--on_track {
-  border-left-color: rgba(183, 235, 198, 0.5);
+  border-left-color: rgba(183, 235, 198, 0.45);
 }
 
 .review-history-item--caution {
-  border-left-color: rgba(255, 210, 120, 0.55);
+  border-left-color: rgba(255, 210, 120, 0.5);
 }
 
 .review-history-item--off_track {
-  border-left-color: rgba(255, 140, 135, 0.55);
+  border-left-color: rgba(255, 140, 135, 0.5);
 }
 
 .review-history-item--unknown {
   border-left-color: rgba(139, 148, 158, 0.35);
 }
 
-.review-history-item:hover {
+.review-history-item:hover:not(.review-history-item--active) {
   background: rgba(255, 255, 255, 0.05);
   border-color: rgba(255, 255, 255, 0.1);
 }
 
 .review-history-item--active {
-  background: rgba(88, 166, 255, 0.08);
-  border-color: rgba(88, 166, 255, 0.22);
+  border-left-width: 4px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.review-history-item--active.review-history-item--on_track {
+  background: linear-gradient(
+    90deg,
+    rgba(183, 235, 198, 0.14) 0%,
+    rgba(183, 235, 198, 0.04) 55%,
+    rgba(255, 255, 255, 0.02) 100%
+  );
+  border-color: rgba(183, 235, 198, 0.28);
+  border-left-color: rgba(183, 235, 198, 0.9);
+  box-shadow:
+    inset 0 0 0 1px rgba(183, 235, 198, 0.12),
+    0 0 0 1px rgba(183, 235, 198, 0.08);
+}
+
+.review-history-item--active.review-history-item--caution {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 210, 120, 0.16) 0%,
+    rgba(255, 210, 120, 0.05) 55%,
+    rgba(255, 255, 255, 0.02) 100%
+  );
+  border-color: rgba(255, 210, 120, 0.3);
+  border-left-color: rgba(255, 210, 120, 0.95);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 210, 120, 0.14),
+    0 0 0 1px rgba(255, 210, 120, 0.08);
+}
+
+.review-history-item--active.review-history-item--off_track {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 140, 135, 0.14) 0%,
+    rgba(255, 140, 135, 0.05) 55%,
+    rgba(255, 255, 255, 0.02) 100%
+  );
+  border-color: rgba(255, 140, 135, 0.28);
+  border-left-color: rgba(255, 140, 135, 0.92);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 140, 135, 0.12),
+    0 0 0 1px rgba(255, 140, 135, 0.08);
+}
+
+.review-history-item--active.review-history-item--unknown {
+  background: linear-gradient(
+    90deg,
+    rgba(88, 166, 255, 0.12) 0%,
+    rgba(88, 166, 255, 0.04) 55%,
+    rgba(255, 255, 255, 0.02) 100%
+  );
+  border-color: rgba(88, 166, 255, 0.24);
+  border-left-color: rgba(88, 166, 255, 0.75);
+  box-shadow:
+    inset 0 0 0 1px rgba(88, 166, 255, 0.1),
+    0 0 0 1px rgba(88, 166, 255, 0.06);
 }
 
 .review-history-item-btn {
@@ -555,6 +628,16 @@ function formatHistoryScope(entry: ArchitectReviewHistoryEntry): string {
   cursor: pointer;
   text-align: left;
   min-width: 0;
+  border-radius: 5px;
+}
+
+.review-history-item-btn:focus {
+  outline: none;
+}
+
+.review-history-item-btn:focus-visible {
+  outline: 2px solid rgba(88, 166, 255, 0.45);
+  outline-offset: -2px;
 }
 
 .review-history-item-main {
@@ -607,6 +690,41 @@ function formatHistoryScope(entry: ArchitectReviewHistoryEntry): string {
   color: rgba(139, 148, 158, 0.55);
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
+}
+
+.review-history-item-index--active {
+  color: rgba(200, 225, 255, 0.92);
+}
+
+.review-history-item-viewing {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(220, 235, 255, 0.98);
+  background: rgba(88, 166, 255, 0.22);
+  border: 1px solid rgba(88, 166, 255, 0.35);
+}
+
+.review-history-item--active.review-history-item--on_track .review-history-item-viewing {
+  color: rgba(210, 250, 220, 0.98);
+  background: rgba(183, 235, 198, 0.18);
+  border-color: rgba(183, 235, 198, 0.35);
+}
+
+.review-history-item--active.review-history-item--caution .review-history-item-viewing {
+  color: rgba(255, 235, 190, 0.98);
+  background: rgba(255, 210, 120, 0.2);
+  border-color: rgba(255, 210, 120, 0.38);
+}
+
+.review-history-item--active.review-history-item--off_track .review-history-item-viewing {
+  color: rgba(255, 210, 205, 0.98);
+  background: rgba(255, 140, 135, 0.18);
+  border-color: rgba(255, 140, 135, 0.35);
 }
 
 .review-history-item-scope {
