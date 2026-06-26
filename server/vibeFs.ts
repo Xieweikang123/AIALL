@@ -136,9 +136,11 @@ export async function listDirectory(dirPath: string) {
   });
 
   const _t3 = Date.now();
-  // 记录耗时到 debug log
-  const timings = { readdir: _t1 - _t0, stat: _t2 - _t1, sort: _t3 - _t2, total: _t3 - _t0, entries: entries.length, filtered: filtered.length, items: items.length };
-  try { fs.appendFileSync(path.join(os.tmpdir(), "aiall-list-perf.log"), `${new Date().toISOString()} ${dirPath} ${JSON.stringify(timings)}\n`); } catch {}
+  // 记录耗时到 debug log（仅在 AIALL_DEBUG_PERF=1 时启用）
+  if (process.env.AIALL_DEBUG_PERF) {
+    const timings = { readdir: _t1 - _t0, stat: _t2 - _t1, sort: _t3 - _t2, total: _t3 - _t0, entries: entries.length, filtered: filtered.length, items: items.length };
+    try { fs.appendFileSync(path.join(os.tmpdir(), "aiall-list-perf.log"), `${new Date().toISOString()} ${dirPath} ${JSON.stringify(timings)}\n`); } catch {}
+  }
 
   return items;
 }
