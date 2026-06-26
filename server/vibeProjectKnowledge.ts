@@ -66,15 +66,36 @@ export function truncateKnowledgeForPrompt(body: string, maxChars = PROJECT_KNOW
   if (!trimmed) return "";
   if (trimmed.length <= maxChars) return trimmed;
 
-  const sections = trimmed.split(/\n(?=## )/);
-  const summary = sections.find((s) => /##\s*一句话摘要/.test(s));
-  const structure = sections.find((s) => /##\s*目录结构/.test(s));
-  const modules = sections.find((s) => /##\s*核心模块/.test(s));
+  // Prefer to cut on `## ` boundaries so injected prompts don't get a dangling
+  // unclosed code fence or a half paragraph. Keeps earlier sections intact and
+  // appends a truncation marker rather than slicing mid-character.
+  const sections = trimmed.split(/\n(?=## )/).filter((s) => s.trim());
+  if (sections.length > 1) {
+    let acc = "";
+    for (const section of sections) {
+      const candidate = acc ? `${acc}\n\n${section.trim()}` : section.trim();
+      if (candidate.length > maxChars) {
+        break;
+      }
+      acc = candidate;
+    }
+    if (acc) {
+      const tail = acc.length < trimmed.length ? "\n\n…（知识库已截断，后续章节未注入）" : "";
+      return `${acc}${tail}`;
+    }
+  }
 
-  const parts = [summary, structure, modules].filter(Boolean) as string[];
-  const compact = parts.join("\n\n").trim();
-  if (compact && compact.length <= maxChars) return compact;
-  return `${trimmed.slice(0, maxChars)}\n\n…（知识库已截断）`;
+  // No section boundaries usable; fall back to a safe slice that ends at a line
+  // boundary so a code fence can't be cut open.
+  let cut = trimmed.slice(0, maxChars);
+  const fenceCount = (cut.match(/^```/gm) || []).length;
+  if (fenceCount % 2 === 1) {
+    const lastFence = cut.lastIndexOf("\n```");
+    if (lastFence > 0) {
+      cut = cut.slice(0, lastFence);
+    }
+  }
+  return `${cut.trimEnd()}\n\n…（知识库已截断）`;
 }
 
 export async function formatProjectKnowledgeForPrompt(
@@ -84,12 +105,16 @@ export async function formatProjectKnowledgeForPrompt(
   const filtered = truncateKnowledgeForPrompt(body);
   if (!filtered.trim()) return "";
 
+  // Use a fence tall enough to never collide with the body's own fences.
+  const bodyFence = (filtered.match(/^`{3,}/gm) || [])
+    .reduce((max, f) => (f.length > max ? f.length : max), 3);
+  const fence = "`".repeat(bodyFence + 1);
   const lines = [
     "",
     "项目知识库（只读探索生成的项目理解，请优先参考；与当前任务冲突时以用户最新消息与代码为准）：",
-    "```markdown",
+    `${fence}markdown`,
     filtered,
-    "```",
+    fence,
   ];
   if (truncated) {
     lines.push("", `（项目知识库已截断，完整内容见 ${PROJECT_KNOWLEDGE_REL_PATH}）`);

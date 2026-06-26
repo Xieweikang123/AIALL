@@ -166,6 +166,37 @@ describe("mergeKnowledgeExploreOutput", () => {
     expect(merged).toContain("Vue 3");
     expect(merged).toContain("React 18");
   });
+
+  it("does not treat supplement that merely quotes the title as full report", () => {
+    const quote = [
+      "## 补充：知识库",
+      "",
+      `引用：${PROJECT_KNOWLEDGE_MARKER}`,
+      `参考标题：# ${PROJECT_KNOWLEDGE_TITLE}`,
+      "项目内知识库位于 `.aiall/project-knowledge.md`。",
+    ].join("\n");
+    expect(isFullKnowledgeReport(quote)).toBe(false);
+    const merged = mergeKnowledgeExploreOutput(existing, quote);
+    expect(merged).toContain("## 技术栈");
+    expect(merged).toContain("## 补充：知识库");
+    expect(merged).not.toBe(quote);
+  });
+
+  it("requires marker at start and h1 immediately after", () => {
+    expect(
+      isFullKnowledgeReport(
+        [PROJECT_KNOWLEDGE_MARKER, `# ${PROJECT_KNOWLEDGE_TITLE}`, "## 一句话摘要", "x"].join("\n"),
+      ),
+    ).toBe(true);
+    // marker not at start
+    expect(
+      isFullKnowledgeReport(`前言\n${PROJECT_KNOWLEDGE_MARKER}\n# ${PROJECT_KNOWLEDGE_TITLE}`),
+    ).toBe(false);
+    // marker but no h1 right after
+    expect(
+      isFullKnowledgeReport(`${PROJECT_KNOWLEDGE_MARKER}\n## 一句话摘要\nx`),
+    ).toBe(false);
+  });
 });
 
 describe("replaceKnowledgeSection", () => {

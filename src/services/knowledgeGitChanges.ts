@@ -1,11 +1,40 @@
+const NOISE_TOP_DIRS = new Set([
+  "node_modules",
+  "dist",
+  "build",
+  "coverage",
+]);
+const NOISE_TOP_DOT_DIRS = new Set([
+  ".aiall",
+  ".github",
+  ".vscode",
+  ".husky",
+  ".git",
+]);
+
+const NOISE_FILENAMES = new Set([
+  "package-lock.json",
+  "yarn.lock",
+  "pnpm-lock.yaml",
+  "composer.lock",
+  ".gitignore",
+]);
+
+const NOISE_SUFFIXES = [".min.js", ".min.css"];
+
 /** Drop paths that should not drive knowledge-base change exploration. */
 export function filterKnowledgeChangePaths(files: string[]): string[] {
   return files.filter((raw) => {
     const path = raw.trim().replace(/\\/g, "/");
-    if (!path || path === ".git") return false;
-    if (path.startsWith(".aiall/")) return false;
-    if (path.includes("/node_modules/") || path.startsWith("node_modules/")) return false;
-    if (path.startsWith("dist/") || path.includes("/dist/")) return false;
+    if (!path) return false;
+    if (NOISE_FILENAMES.has(path)) return false;
+    if (NOISE_SUFFIXES.some((s) => path.endsWith(s))) return false;
+    if (/^[^/]+\.md$/i.test(path)) return false;
+    const segments = path.split("/");
+    if (segments.length < 2) return true;
+    for (const seg of segments.slice(0, -1)) {
+      if (NOISE_TOP_DIRS.has(seg) || NOISE_TOP_DOT_DIRS.has(seg)) return false;
+    }
     return true;
   });
 }

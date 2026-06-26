@@ -28,6 +28,19 @@ describe("knowledgeExplore", () => {
     expect(classifyExploreKnowledgeIntent("项目的测试如何运行？", true)).toBe("followup");
   });
 
+  it("buildExploreChangedFilesPrompt injects file list when provided", () => {
+    const without = buildExploreChangedFilesPrompt(3);
+    expect(without).not.toContain("变更文件列表");
+
+    const withFiles = buildExploreChangedFilesPrompt(2, ["src/foo.ts", "src/bar.ts"]);
+    expect(withFiles).toContain("共 2 个");
+    expect(withFiles).toContain("- src/foo.ts");
+    expect(withFiles).toContain("- src/bar.ts");
+
+    const many = buildExploreChangedFilesPrompt(20, Array.from({ length: 20 }, (_, i) => `f${i}.ts`));
+    expect(many).toContain("另有 4 个");
+  });
+
   it("manifest applies to incremental intents only", () => {
     expect(exploreIntentUsesKnowledgeManifest("continue")).toBe(true);
     expect(exploreIntentUsesKnowledgeManifest("section_fill")).toBe(true);

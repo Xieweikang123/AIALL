@@ -383,6 +383,10 @@ export function useProjectKnowledge(options: {
   }
 
   async function startKnowledgeExplore(depth: ExploreDepth = "standard") {
+    if (hasKnowledge.value) {
+      knowledgeMessage.value = "已有知识库，请使用「继续探索」或「补全未探索」";
+      return false;
+    }
     resetExploreRun();
     return runKnowledgeExplore(EXPLORE_PROJECT_PRESET_PROMPT, {
       maxTurns: EXPLORE_DEPTH_MAX_TURNS[depth],
@@ -418,7 +422,10 @@ export function useProjectKnowledge(options: {
       return continueKnowledgeExplore();
     }
     return runKnowledgeExplore(
-      buildExploreChangedFilesPrompt(knowledgeChangedFiles.value.length),
+      buildExploreChangedFilesPrompt(
+        knowledgeChangedFiles.value.length,
+        knowledgeChangedFiles.value,
+      ),
       { maxTurns: EXPLORE_FOLLOWUP_MAX_TURNS },
     );
   }

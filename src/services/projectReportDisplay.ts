@@ -183,9 +183,17 @@ export function findUnexploredSectionTitles(content: string): string[] {
   return titles;
 }
 
+// A full report must lead with the canonical marker line, immediately followed
+// by the H1 title. Anything else (an incremental section, a supplement that
+// merely quotes the title in prose, legacy `# 项目理解报告`) is treated as a
+// partial update and merged, never a wholesale replacement. Anchor the marker
+// to start-of-text so a body that merely *mentions* the marker string cannot
+// trip the detector.
 export function isFullKnowledgeReport(content: string): boolean {
-  const trimmed = content.trim();
-  return isProjectReport(trimmed) && trimmed.includes(`# ${PROJECT_KNOWLEDGE_TITLE}`);
+  const trimmed = content.replace(/\r\n/g, "\n").trimStart();
+  if (!trimmed.startsWith(PROJECT_KNOWLEDGE_MARKER)) return false;
+  const afterMarker = trimmed.slice(PROJECT_KNOWLEDGE_MARKER.length).replace(/^[\s>]+/, "");
+  return new RegExp(`^#\\s+${escapeRegExp(PROJECT_KNOWLEDGE_TITLE)}(\\s|$)`).test(afterMarker);
 }
 
 /** True when explore output is an incremental supplement, not a full knowledge base. */
@@ -252,6 +260,37 @@ export function extractPrimarySectionUpdate(content: string): { title: string; r
   return { title, raw: parts[0]!.trim() };
 }
 
+const CHINESE_NUM_MAP: Record<string, number> = {
+  "零": 0, "〇": 0,
+  "一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
+  "六": 6, "七": 7, "八": 8, "九": 9, "十": 10,
+  "十一": 11, "十二": 12, "十三": 13, "十四": 14, "十五": 15,
+  "十六": 16, "十七": 17, "十八": 18, "十九": 19, "二十": 20,
+  "二十一": 21, "二十二": 22, "二十三": 23, "二十四": 24, "二十五": 25,
+};
+
+function extractSectionNumber(title: string): number | null {
+  const m = title.match(/^([零〇一二三四五六七八九十百千]+)[、．.]/);
+  if (!m) return null;
+  const num = CHINESE_NUM_MAP[m[1]];
+  return num ?? null;
+}
+
+function findSectionInsertionIndex(existingSections: string[], newTitle: string): number {
+  const newNum = extractSectionNumber(newTitle);
+  if (newNum == null) return existingSections.length;
+  for (let i = 0; i < existingSections.length; i++) {
+    const existingTitle = existingSections[i]?.match(SECTION_H2_RE)?.[1]?.trim() ?? "";
+    const existingNum = extractSectionNumber(existingTitle);
+    if (existingNum != null && existingNum > newNum) return i;
+  }
+  return existingSections.length;
+}
+
+function stripTitleNumberPrefix(title: string): string {
+  return title.replace(/^([零〇一二三四五六七八九十百千]+)[、．.\s]+/, "").trim();
+}
+
 /** Replace one ## section in the knowledge base body. */
 export function replaceKnowledgeSection(
   fullBody: string,
@@ -269,9 +308,11 @@ export function replaceKnowledgeSection(
     return preamble ? `${preamble}\n\n${replacement}` : replacement;
   }
 
+  const targetBase = stripTitleNumberPrefix(targetTitle);
   let replaced = false;
   const nextSections = sections.map((section) => {
-    if (section.title !== targetTitle) {
+    const sectionBase = stripTitleNumberPrefix(section.title);
+    if (sectionBase !== targetBase) {
       return `## ${section.title}\n\n${section.content}`.trim();
     }
     replaced = true;
@@ -279,8 +320,20 @@ export function replaceKnowledgeSection(
   });
 
   if (!replaced) {
-    nextSections.push(replacement);
+    const insertionIdx = findSectionInsertionIndex(nextSections, targetTitle);
+    nextSections.splice(insertionIdx, 0, replacement);
   }
+
+  nextSections.sort((a, b) => {
+    const aTitle = a.match(SECTION_H2_RE)?.[1]?.trim() ?? "";
+    const bTitle = b.match(SECTION_H2_RE)?.[1]?.trim() ?? "";
+    const aNum = extractSectionNumber(aTitle);
+    const bNum = extractSectionNumber(bTitle);
+    if (aNum != null && bNum != null) return aNum - bNum;
+    if (aNum != null) return -1;
+    if (bNum != null) return 1;
+    return 0;
+  });
 
   const { parts } = splitRawKnowledgeParts(normalized);
   const supplementParts = parts.filter(isSupplementPart);

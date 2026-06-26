@@ -11,8 +11,15 @@ describe("knowledgeGitChanges", () => {
       ".aiall/project-knowledge.md",
       "node_modules/pkg/index.js",
       "dist/assets/app.js",
+      "package-lock.json",
+      "pnpm-lock.yaml",
+      ".github/workflows/ci.yml",
+      ".vscode/settings.json",
+      "public/lib/app.min.js",
+      "README.md",
+      "docs/guide.md",
     ]);
-    expect(files).toEqual(["src/foo.ts"]);
+    expect(files).toEqual(["src/foo.ts", "docs/guide.md"]);
   });
 
   it("summarizes file count and stale fallback", () => {

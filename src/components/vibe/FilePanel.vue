@@ -48,12 +48,17 @@
             type="button"
             role="tab"
             class="file-panel-tab"
-            :class="{ active: gitPanelMode === 'knowledge' }"
-            :aria-selected="gitPanelMode === 'knowledge'"
+            :class="{ active: gitPanelMode === 'project' }"
+            :aria-selected="gitPanelMode === 'project'"
             :disabled="!projectOpened"
-            @click="$emit('update:gitPanelMode', 'knowledge')"
+            @click="$emit('update:gitPanelMode', 'project')"
           >
-            知识库
+            项目
+            <span
+              v-if="reviewAttentionCount"
+              class="git-badge health-badge health-badge--dot"
+              :title="`${reviewAttentionCount} 个审视需关注项`"
+            >{{ reviewAttentionCount }}</span>
           </button>
         </div>
         <button
@@ -68,6 +73,36 @@
             <path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
             <path d="M12 12 4 7.5m8 4.5 8-4.5M12 12v9" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" />
           </svg>
+        </button>
+      </div>
+      <div
+        v-if="gitPanelMode === 'project' && projectOpened"
+        class="file-panel-project-segment"
+        role="group"
+        aria-label="项目面板"
+      >
+        <button
+          type="button"
+          class="file-panel-segment-btn"
+          :class="{ active: projectPanelView === 'knowledge' }"
+          :aria-pressed="projectPanelView === 'knowledge'"
+          @click="$emit('update:projectPanelView', 'knowledge')"
+        >
+          知识库
+        </button>
+        <button
+          type="button"
+          class="file-panel-segment-btn"
+          :class="{ active: projectPanelView === 'health' }"
+          :aria-pressed="projectPanelView === 'health'"
+          @click="$emit('update:projectPanelView', 'health')"
+        >
+          审视
+          <span
+            v-if="reviewAttentionCount"
+            class="git-badge health-badge"
+            :title="`${reviewAttentionCount} 个需关注项`"
+          >{{ reviewAttentionCount }}</span>
         </button>
       </div>
       <div v-if="gitPanelMode === 'files'" class="file-panel-row file-panel-search-row">
@@ -170,9 +205,22 @@
               <button type="button" class="session-item-main" :title="s.title" @click="$emit('switch-session', s.id)">
                 <span class="session-item-title-row">
                   <span class="session-item-status" aria-hidden="true">
-                    <span v-if="s.status === 'completed' && !sessionSendingIds.includes(s.id)" class="session-item-completed" title="已完成">✓</span>
-                    <span v-else-if="s.status === 'failed' && !sessionSendingIds.includes(s.id)" class="session-item-failed" title="失败">✗</span>
-                    <span v-else-if="s.status === 'interrupted' && !sessionSendingIds.includes(s.id)" class="session-item-interrupted" title="已中断">⚠</span>
+                    <span v-if="s.status === 'completed' && !sessionSendingIds.includes(s.id)" class="session-item-completed" title="已完成">
+                      <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                        <path d="M3 8.5l3.5 3.5L13 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                      </svg>
+                    </span>
+                    <span v-else-if="s.status === 'failed' && !sessionSendingIds.includes(s.id)" class="session-item-failed" title="失败">
+                      <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                        <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                      </svg>
+                    </span>
+                    <span v-else-if="s.status === 'interrupted' && !sessionSendingIds.includes(s.id)" class="session-item-interrupted" title="已中断">
+                      <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
+                        <path d="M7 2v7l4 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                        <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.3"/>
+                      </svg>
+                    </span>
                     <span v-else-if="sessionSendingIds.includes(s.id)" class="session-item-sending" title="运行中"><span class="session-spinner" /></span>
                   </span>
                   <span
@@ -277,7 +325,8 @@ interface SessionGroup {
 
 interface Props {
   filePanelWidth: number;
-  gitPanelMode: "files" | "git" | "sessions" | "knowledge";
+  gitPanelMode: "files" | "git" | "sessions" | "project";
+  projectPanelView: "knowledge" | "health";
   projectOpened: boolean;
   loadingTree?: boolean;
   editorCollapsed: boolean;
@@ -285,6 +334,7 @@ interface Props {
   gitChangeCount: number;
   gitUnstagedFiles: GitStatusFile[];
   gitStagedFiles: GitStatusFile[];
+  reviewAttentionCount?: number;
   sessionList: VibeChatSessionMeta[];
   activeSessionId: string;
   sessionSendingIds?: string[];
@@ -294,13 +344,15 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   loadingTree: false,
+  reviewAttentionCount: 0,
   sessionSendingIds: () => [],
   syncingChatStore: false,
   chatStoreSyncMessage: "",
 });
 
 const emit = defineEmits<{
-  (e: "update:gitPanelMode", mode: "files" | "git" | "sessions" | "knowledge"): void;
+  (e: "update:gitPanelMode", mode: "files" | "git" | "sessions" | "project"): void;
+  (e: "update:projectPanelView", view: "knowledge" | "health"): void;
   (e: "open-quick-search"): void;
   (e: "create-new-file"): void;
   (e: "create-new-folder"): void;
@@ -477,6 +529,53 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
 .git-badge-staged {
   color: #7ee787;
   background: rgba(63, 185, 80, 0.18);
+}
+
+.health-badge {
+  color: rgba(255, 200, 120, 0.98);
+  background: rgba(210, 120, 40, 0.22);
+}
+
+.health-badge--dot {
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  font-size: 9px;
+}
+
+.file-panel-project-segment {
+  display: flex;
+  gap: 4px;
+  padding: 0 8px 8px;
+}
+
+.file-panel-segment-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(160, 170, 180, 0.95);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.file-panel-segment-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(220, 228, 235, 0.98);
+}
+
+.file-panel-segment-btn.active {
+  border-color: rgba(88, 166, 255, 0.4);
+  background: rgba(88, 166, 255, 0.12);
+  color: rgba(200, 225, 255, 0.98);
+  font-weight: 600;
 }
 
 .file-toolbar {

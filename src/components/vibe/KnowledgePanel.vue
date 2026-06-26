@@ -19,7 +19,12 @@
           </button>
         </div>
         <template v-else>
-          <div class="knowledge-depth-switch" role="group" aria-label="探索深度">
+          <div
+            v-if="!hasKnowledge"
+            class="knowledge-depth-switch"
+            role="group"
+            aria-label="探索深度"
+          >
             <button
               v-for="opt in depthOptions"
               :key="opt.id"
@@ -36,12 +41,13 @@
           </div>
           <div class="knowledge-actions">
             <button
+              v-if="!hasKnowledge"
               type="button"
               class="knowledge-btn knowledge-btn--primary"
               :disabled="!exploreReady || exploreRun.running || knowledgeLoading"
               @click="emit('start-explore', depth)"
             >
-              {{ hasKnowledge ? "重新构建" : "开始构建知识库" }}
+              开始构建知识库
             </button>
             <button
               v-if="hasKnowledge"
@@ -156,6 +162,7 @@
             <template v-else>代码可能已变更</template>
           </p>
           <button
+            v-if="false"
             type="button"
             class="knowledge-btn knowledge-btn--accent knowledge-changes-action"
             :disabled="!exploreReady || exploreRun.running || knowledgeChangesLoading"
@@ -256,6 +263,7 @@
               <template v-else>代码可能已变更</template>
             </p>
             <button
+              v-if="false"
               type="button"
               class="knowledge-btn knowledge-btn--accent knowledge-changes-action"
               :disabled="!exploreReady || exploreRun.running || knowledgeChangesLoading"
@@ -478,7 +486,7 @@
                   type="button"
                   class="knowledge-btn"
                   :disabled="!exploreReady || !canSubmitFollowUp || exploreRun.running"
-                  @click="submitFollowUp"
+                  @click="() => submitFollowUp()"
                 >
                   追问
                 </button>
@@ -578,9 +586,7 @@ const knowledgeStale = computed(() => {
   return Boolean(saved && current && saved !== current);
 });
 
-const showChangesCard = computed(
-  () => props.hasKnowledge && props.knowledgeChangesAvailable,
-);
+const showChangesCard = computed(() => false);
 
 const shownChangedFiles = computed(
   () => (props.knowledgeChangedFiles ?? []).slice(0, KNOWLEDGE_CHANGES_LIST_MAX),
@@ -635,6 +641,7 @@ const bodyRef = ref<HTMLElement | null>(null);
 const bodyScrollRef = ref<HTMLElement | null>(null);
 const tocNavRef = ref<HTMLElement | null>(null);
 let actionHintTimer: ReturnType<typeof setTimeout> | null = null;
+let suppressScrollActiveSection = false;
 
 const depthOptions: Array<{ id: ExploreDepth; label: string; hint: string }> = [
   { id: "quick", label: "快速", hint: "8 轮" },
@@ -924,11 +931,13 @@ function scrollToSection(sectionId: string) {
   const target = root.querySelector(`#${sectionId}`);
   if (!(target instanceof HTMLElement)) return;
   activeSectionId.value = sectionId;
+  suppressScrollActiveSection = true;
   const scrollTop =
     target.getBoundingClientRect().top
     - scrollRoot.getBoundingClientRect().top
     + scrollRoot.scrollTop;
   scrollRoot.scrollTo({ top: Math.max(0, scrollTop - 8), behavior: "auto" });
+  requestAnimationFrame(() => { suppressScrollActiveSection = false; });
 }
 
 function scrollActiveTocIntoView(sectionId: string) {
@@ -941,6 +950,7 @@ function scrollActiveTocIntoView(sectionId: string) {
 }
 
 function updateActiveSectionFromScroll() {
+  if (suppressScrollActiveSection) return;
   const scrollRoot = bodyScrollRef.value;
   const root = bodyRef.value;
   if (!scrollRoot || !root || props.editing || !tocSections.value.length) return;

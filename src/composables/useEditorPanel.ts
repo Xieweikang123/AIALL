@@ -1,6 +1,6 @@
-import { computed, ref, type Ref } from "vue";
+import { computed, ref, unref, type Ref } from "vue";
 import { type TreeNode } from "../components/FileTreeNode.vue";
-import CodeMonacoEditor from "../components/CodeMonacoEditor.vue";
+import EditorPanel from "../components/vibe/EditorPanel.vue";
 import {
   readFile,
   writeFile,
@@ -33,6 +33,18 @@ type OpenTab = {
   dirty: boolean;
 };
 
+type MonacoNavHandle = {
+  getScrollTop?: () => number;
+  setScrollTop?: (v: number) => void;
+  getPosition?: () => { lineNumber: number; column: number } | null;
+  setPosition?: (v: { lineNumber: number; column: number }) => void;
+};
+
+function resolveMonacoNavHandle(editorPanelRef?: Ref<InstanceType<typeof EditorPanel> | null>): MonacoNavHandle | null {
+  const raw = unref(editorPanelRef?.value?.editorRef);
+  return raw && typeof raw === "object" ? (raw as MonacoNavHandle) : null;
+}
+
 export interface UseEditorPanelParams {
   projectPath: Ref<string>;
   projectOpened: Ref<boolean>;
@@ -41,7 +53,7 @@ export interface UseEditorPanelParams {
   confirm: (msg: string, event?: MouseEvent) => Promise<boolean>;
   inputPrompt: { prompt: (msg: string, options?: { defaultValue?: string }) => Promise<string | null> };
   composerRef: Ref<{ setPlainText: (text: string) => void; focus: () => void } | null>;
-  editorPanelRef?: Ref<{ editorRef: { value: { getScrollTop?: () => number; setScrollTop?: (v: number) => void; getPosition?: () => { lineNumber: number; column: number } | null; setPosition?: (v: { lineNumber: number; column: number }) => void } | null } } | null>;
+  editorPanelRef?: Ref<InstanceType<typeof EditorPanel> | null>;
   gitError: Ref<string>;
   gitDiffContentCache: Ref<Record<string, FileDiff>>;
   gitDiffLoadingKey: Ref<string>;
@@ -106,7 +118,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     const entry: NavEntry = { path: activeFilePath.value };
     // 尝试获取编辑器滚动位置和光标
     try {
-      const monacoEditor = editorPanelRef?.value?.editorRef?.value;
+      const monacoEditor = resolveMonacoNavHandle(editorPanelRef);
       if (monacoEditor?.getScrollTop) entry.scrollTop = monacoEditor.getScrollTop();
       if (monacoEditor?.getPosition) {
         const pos = monacoEditor.getPosition();
@@ -138,7 +150,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     await openFile(prev.path, { skipUnsavedCheck: true });
     // 恢复滚动和光标
     try {
-      const monacoEditor = editorPanelRef?.value?.editorRef?.value;
+      const monacoEditor = resolveMonacoNavHandle(editorPanelRef);
       if (monacoEditor) {
         if (prev.scrollTop != null && monacoEditor.setScrollTop) monacoEditor.setScrollTop(prev.scrollTop);
         if (prev.cursorLine != null && monacoEditor.setPosition) monacoEditor.setPosition({ lineNumber: prev.cursorLine, column: prev.cursorColumn || 1 });
@@ -155,7 +167,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     navSuppressNext = true;
     await openFile(next.path, { skipUnsavedCheck: true });
     try {
-      const monacoEditor = editorPanelRef?.value?.editorRef?.value;
+      const monacoEditor = resolveMonacoNavHandle(editorPanelRef);
       if (monacoEditor) {
         if (next.scrollTop != null && monacoEditor.setScrollTop) monacoEditor.setScrollTop(next.scrollTop);
         if (next.cursorLine != null && monacoEditor.setPosition) monacoEditor.setPosition({ lineNumber: next.cursorLine, column: next.cursorColumn || 1 });

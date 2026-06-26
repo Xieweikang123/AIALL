@@ -8,6 +8,7 @@ import {
   isProjectKnowledgeBody,
   PROJECT_KNOWLEDGE_REL_PATH,
   readProjectKnowledge,
+  truncateKnowledgeForPrompt,
   writeProjectKnowledge,
 } from "./vibeProjectKnowledge";
 
@@ -64,5 +65,31 @@ describe("vibeProjectKnowledge", () => {
 
   it("formatProjectKnowledgeForPrompt skips empty content", async () => {
     expect(await formatProjectKnowledgeForPrompt("")).toBe("");
+  });
+
+  it("truncateKnowledgeForPrompt cuts on section boundaries", () => {
+    const body = [
+      "# foo",
+      "## alpha",
+      "x".repeat(6_000),
+      "",
+      "## beta",
+      "y".repeat(6_000),
+      "",
+      "## gamma",
+      "z".repeat(6_000),
+    ].join("\n");
+    const out = truncateKnowledgeForPrompt(body, 12_500);
+    expect(out).toContain("## alpha");
+    expect(out).toContain("## beta");
+    expect(out).not.toContain("## gamma");
+    expect(out).toContain("已截断");
+  });
+
+  it("truncateKnowledgeForPrompt uses a longer fence when body has tall fences", async () => {
+    const body = `${PROJECT_KNOWLEDGE_MARKER}\n# ${PROJECT_KNOWLEDGE_TITLE}\nshort`;
+    const out = await formatProjectKnowledgeForPrompt(body);
+    expect(out).toContain("````markdown");
+    expect(out.trim().endsWith("````")).toBe(true);
   });
 });
