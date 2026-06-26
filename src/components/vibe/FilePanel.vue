@@ -57,7 +57,7 @@
             <span
               v-if="reviewAttentionCount"
               class="git-badge health-badge health-badge--dot"
-              :title="`${reviewAttentionCount} 个审视需关注项`"
+              :title="`${reviewAttentionCount} 个评审需关注项`"
             >{{ reviewAttentionCount }}</span>
           </button>
         </div>
@@ -97,7 +97,7 @@
           :aria-pressed="projectPanelView === 'health'"
           @click="$emit('update:projectPanelView', 'health')"
         >
-          审视
+          评审
           <span
             v-if="reviewAttentionCount"
             class="git-badge health-badge"

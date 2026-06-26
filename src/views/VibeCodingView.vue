@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="vibe-page">
     <AppToolbar
       :project-path="projectPath"
@@ -57,7 +57,7 @@
         @expand-editor="expandEditor"
         @expand-chat="expandChat"
         @refresh-git-status="refreshGitStatus(gitIsRepo ? { showLoading: false } : undefined)"
-        @switch-session="switchSession"
+        @switch-session="handleSwitchSession"
         @remove-session="removeSession"
         @start-new-session="handleStartNewSession"
         @copy-session-info="copySessionInfo"
@@ -103,6 +103,7 @@
           :batch-groups="batchGroups"
           :batch-committing-index="batchCommittingIndex"
           :ai-batch-grouping="aiBatchGrouping"
+          :ai-batch-grouping-step="aiBatchGroupingStep"
           :git-ahead-commits="gitAheadCommits"
           :git-ahead-commits-open="gitAheadCommitsOpen"
           :git-ahead-commits-loading="gitAheadCommitsLoading"
@@ -214,6 +215,7 @@
           :commit-count="reviewContext?.recentCommits?.length ?? 0"
           :review-history="reviewHistory"
           :review-history-loading="reviewHistoryLoading"
+          :review-history-message="reviewHistoryMessage"
           :active-history-review="activeHistoryReview"
           @start-review="() => void startArchitectReview()"
           @stop-review="stopArchitectReview"
@@ -311,7 +313,7 @@
       <section
         v-show="gitPanelMode === 'project' && projectPanelView === 'health' && projectOpened"
         class="editor-panel knowledge-main-panel"
-        aria-label="项目架构审视"
+        aria-label="项目架构评审"
       >
         <ArchitectReviewMainPanel
           :chat-collapsed="chatCollapsed"
@@ -406,7 +408,7 @@
         @start-new-session="handleStartNewSession"
         @expand-editor="expandEditor"
         @collapse-chat="collapseChat"
-        @switch-session="switchSession"
+        @switch-session="handleSwitchSession"
         @copy-session-info="copySessionInfo"
         @copy-session-name-path="copySessionNamePath"
         @remove-session="removeSession"
@@ -989,7 +991,7 @@ const {
   doFetch, doPull, doPush,
   refreshGitStashes, doStashSave, doStashApply, doStashDrop,
   batchGroups, batchCommittingIndex, commitBatchGroup, commitAllBatches,
-  aiBatchGrouping, generateAiBatchGroups,
+  aiBatchGrouping, aiBatchGroupingStep, generateAiBatchGroups,
 } = git;
 
 // Session manager composable
@@ -1101,6 +1103,11 @@ function switchToAdjacentSession(delta: number) {
     expandChat();
     switchSession(nextId);
   }
+}
+
+function handleSwitchSession(sessionId: string) {
+  expandChat();
+  switchSession(sessionId);
 }
 
 function onChatDragEnter(e: DragEvent) {
@@ -1266,14 +1273,17 @@ function openKnowledgeSourceFile() {
 }
 
 watch([gitPanelMode, projectPanelView, projectOpened], ([mode, view, opened]) => {
-  if (mode === "project" && view === "knowledge") {
-    if (editorCollapsed.value) expandEditor();
-    if (opened) void loadKnowledge();
-  }
-  if (mode === "project" && view === "health" && opened) {
-    if (editorCollapsed.value) expandEditor();
-    void loadReview();
-    void loadReviewHistory();
+  if (mode === "project") {
+    if (!chatCollapsed.value) collapseChat();
+    if (view === "knowledge") {
+      if (editorCollapsed.value) expandEditor();
+      if (opened) void loadKnowledge();
+    }
+    if (view === "health" && opened) {
+      if (editorCollapsed.value) expandEditor();
+      void loadReview();
+      void loadReviewHistory();
+    }
   }
 });
 
