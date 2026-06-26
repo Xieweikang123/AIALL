@@ -38,7 +38,7 @@ import {
   searchFiles,
   writeFileContent,
 } from "./server/vibeFs";
-import { gitStatus, gitDiff, gitDiffFile, gitDiffContent, gitCommitFileDiff, gitCommit, gitLog, gitIsRepo, gitAdd, gitReset, gitDiscard, gitDiscardAll, gitRemotes, gitFetch, gitPull, gitPush, gitStashList, gitStashSave, gitStashPop, gitStashApply, gitStashDrop, gitChangedFilesSince } from "./server/vibeGit";
+import { gitStatus, gitDiff, gitDiffFile, gitDiffContent, gitCommitFileDiff, gitCommit, gitLog, gitAheadCommits, gitIsRepo, gitAdd, gitReset, gitDiscard, gitDiscardAll, gitRemotes, gitFetch, gitPull, gitPush, gitStashList, gitStashSave, gitStashPop, gitStashApply, gitStashDrop, gitChangedFilesSince } from "./server/vibeGit";
 import { deleteChatStoreSession, mergeDeletedSessionIds, upsertChatStoreIndexEntry } from "./server/chatStoreIndex";
 import { mergeSessionPayloadForDisk } from "./server/chatStoreMerge";
 import { externalizeSessionPayload, readImageRefAsBuffer, readImageRefAsDataUrl } from "./server/vibeChatImages";
@@ -2326,6 +2326,31 @@ ${diffText.slice(0, 15000)}
       sendJson(res, 200, result);
     } catch (error) {
       sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "获取提交历史失败" });
+    }
+  });
+
+  // GET /backend/vibe/git/ahead-commits
+  middlewares.use("/backend/vibe/git/ahead-commits", async (req, res) => {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { error: "仅支持 GET 请求" });
+      return;
+    }
+
+    try {
+      const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+      const projectPath = url.searchParams.get("path") || "";
+      const count = Number(url.searchParams.get("count")) || 20;
+
+      if (!projectPath) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(projectPath);
+      const result = await gitAheadCommits(resolved, count);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "获取待推送提交失败" });
     }
   });
 

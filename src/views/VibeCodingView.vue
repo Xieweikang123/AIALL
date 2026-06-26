@@ -103,6 +103,9 @@
           :batch-groups="batchGroups"
           :batch-committing-index="batchCommittingIndex"
           :ai-batch-grouping="aiBatchGrouping"
+          :git-ahead-commits="gitAheadCommits"
+          :git-ahead-commits-open="gitAheadCommitsOpen"
+          :git-ahead-commits-loading="gitAheadCommitsLoading"
           @refresh="refreshGitStatus()"
           @do-fetch="doFetch"
           @do-pull="doPull"
@@ -123,6 +126,7 @@
           @update:git-staged-open="gitStagedOpen = $event"
           @update:git-unstaged-open="gitUnstagedOpen = $event"
           @update:git-log-open="gitLogOpen = $event"
+          @update:git-ahead-commits-open="gitAheadCommitsOpen = $event"
           @update:git-commit-message="gitCommitMessage = $event"
           @update:git-stash-message="gitStashMessage = $event"
           @toggle-git-log-entry="toggleGitLogEntry"
@@ -968,13 +972,14 @@ const {
   gitDiffLoadingKey, gitDiffContentCache, gitRemotes, gitTrackingBranch,
   gitAhead, gitBehind, gitRemoteLoading, gitRemoteAction, gitStashes, gitStashOpen,
   gitStashAction, gitStashMessage, gitAiPushStep,
+  gitAheadCommits, gitAheadCommitsOpen, gitAheadCommitsLoading,
   gitStagedFiles, gitUnstagedFiles, gitChangeCount, canGitCommit,
   clearGitDiffCache, evictOldestCacheEntry, gitStagingInProgress, gitLastStagingAt, gitStatusIcon, gitStatusColor,
   isGitLogEntryOpen, toggleGitLogEntry, gitHistoryDiffKey, gitWorkingTreeDiffKey,
   resetGitPanelState, refreshGitStatus, commitGit, stageFile, unstageFile,
   stageAll, unstageAll, discardFile, discardAll,
   stageSelectedFiles, unstageSelectedFiles, discardSelectedFiles, toggleGitFileSelection, clearGitSelection,
-  generateCommitMessage, aiCommitAndPush, refreshGitRemotes,
+  generateCommitMessage, aiCommitAndPush, refreshGitRemotes, refreshGitAheadCommits,
   doFetch, doPull, doPush,
   refreshGitStashes, doStashSave, doStashApply, doStashDrop,
   batchGroups, batchCommittingIndex, commitBatchGroup, commitAllBatches,
@@ -3005,6 +3010,12 @@ watch(gitLogOpen, async (open) => {
     if (logResult.ok) {
       gitLogEntries.value = logResult.entries;
     }
+  }
+});
+
+watch(gitAheadCommitsOpen, (open) => {
+  if (open && projectOpened.value && gitIsRepo.value && gitAhead.value > 0 && !gitAheadCommits.value.length) {
+    void refreshGitAheadCommits();
   }
 });
 
