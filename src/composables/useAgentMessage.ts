@@ -113,7 +113,7 @@ export function useAgentMessage(
 
   return {
     isFolded: computed(() => !isAgentRunning(msg.value) && !isActivityExpanded(msg.value)),
-    showDebug: computed(() => hasAgentDebugDetails(msg.value)),
+    showDebug: computed(() => false),
     showCompact: computed(() => shouldUseCompactAgentFeed(msg.value)),
     hasAgentActivity,
     hasAgentDebugDetails,
