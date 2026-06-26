@@ -228,6 +228,61 @@
             </button>
           </div>
         </div>
+        <div
+          v-if="batchGroups && batchGroups.length > 0"
+          class="git-batch-section git-section-card"
+          :class="{ 'git-batch-section--open': batchSectionOpen }"
+        >
+          <button type="button" class="git-batch-toggle" @click="batchSectionOpen = !batchSectionOpen">
+            <span class="git-section-chevron">{{ batchSectionOpen ? "▾" : "▸" }}</span>
+            <span>分批提交</span>
+            <span class="git-batch-count">{{ batchGroups.length }}</span>
+          </button>
+          <div v-if="batchSectionOpen" class="git-batch-groups">
+            <button
+              type="button"
+              class="primary small git-batch-all-btn"
+              :disabled="batchCommittingIndex !== null"
+              @click="$emit('commit-all-batches', [...batchMessages])"
+            >
+              {{ batchCommittingIndex !== null ? `提交中 (${batchCommittingIndex! + 1}/${batchGroups.length})…` : `全部提交 (${batchGroups.length})` }}
+            </button>
+            <div
+              v-for="(group, i) in batchGroups"
+              :key="group.dir"
+              class="git-batch-group"
+              :class="{ 'git-batch-group--busy': batchCommittingIndex === i }"
+            >
+              <div class="git-batch-group-header">
+                <span class="git-batch-group-dir">{{ group.dir }}/</span>
+                <span class="git-batch-group-count">{{ group.files.length }} 个文件</span>
+              </div>
+              <div class="git-batch-group-files">
+                <div v-for="f in group.files" :key="f.path" class="git-batch-file">
+                  <span class="git-file-status" :class="gitStatusClass(f.status)">{{ gitStatusIcon(f.status) }}</span>
+                  <span class="git-file-path">{{ f.path }}</span>
+                </div>
+              </div>
+              <div class="git-batch-group-commit">
+                <input
+                  :value="batchMessages[i]"
+                  class="git-batch-msg-input"
+                  placeholder="提交信息…"
+                  :disabled="batchCommittingIndex !== null"
+                  @input="batchMessages[i] = ($event.target as HTMLInputElement).value"
+                />
+                <button
+                  type="button"
+                  class="secondary small git-batch-commit-btn"
+                  :disabled="batchCommittingIndex !== null || !batchMessages[i]?.trim()"
+                  @click="$emit('commit-batch-group', i, batchMessages[i] || '')"
+                >
+                  {{ batchCommittingIndex === i ? "提交中…" : "提交" }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
         <div class="git-log-section git-section-card" :class="{ 'git-log-section--open': gitLogOpen }">
           <button type="button" class="git-log-toggle" @click="$emit('update:gitLogOpen', !gitLogOpen)">
             <span class="git-section-chevron">{{ gitLogOpen ? "▾" : "▸" }}</span>
@@ -280,6 +335,7 @@
 <script setup lang="ts">
 import { ref, watch } from "vue";
 import type { GitRemoteInfo } from "../../services/vibeGitClient";
+import type { BatchGroup } from "../../composables/useGitPanel";
 
 interface GitStash {
   index: number | string;
@@ -339,17 +395,31 @@ interface Props {
   fileWatcherActive: boolean;
   fileWatcherConnected: boolean;
   expandedGitLogEntries: Set<string>;
+  batchGroups?: BatchGroup[];
+  batchCommittingIndex: number | null;
 }
 
 const props = defineProps<Props>();
 
 const stashSectionOpen = ref(false);
+const batchSectionOpen = ref(false);
+const batchMessages = ref<string[]>([]);
 
 watch(
   () => props.gitStashes.length,
   (count, prev) => {
     if (count > 0 && (prev ?? 0) === 0) stashSectionOpen.value = true;
   },
+);
+
+watch(
+  () => props.batchGroups,
+  (groups) => {
+    batchMessages.value = (groups ?? []).map(
+      (g) => `${g.dir}: ${g.files.length === 1 ? g.files[0].path.split("/").pop() || g.dir : `update ${g.files.length} files`}`,
+    );
+  },
+  { immediate: true },
 );
 
 const emit = defineEmits<{
@@ -379,6 +449,8 @@ const emit = defineEmits<{
   (e: "open-git-log-file", entry: GitLogEntry, file: GitLogFile): void;
   (e: "on-git-file-pointer-down", event: PointerEvent, path: string, staged: boolean): void;
   (e: "on-git-file-contextmenu", event: MouseEvent, path: string): void;
+  (e: "commit-batch-group", index: number, message: string): void;
+  (e: "commit-all-batches", messages: string[]): void;
 }>();
 
 function isGitLogEntryOpen(hash: string): boolean {
@@ -1292,5 +1364,130 @@ function gitStatusClass(status: string): string {
 .small:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.git-batch-section {
+  margin-top: 6px;
+}
+
+.git-batch-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 10px;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 12px;
+  text-align: left;
+  border-radius: 6px;
+}
+
+.git-batch-toggle:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.git-batch-count {
+  font-size: 10px;
+  color: rgba(139, 148, 158, 0.6);
+  padding: 1px 5px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  margin-left: auto;
+}
+
+.git-batch-all-btn {
+  width: 100%;
+  margin-bottom: 6px;
+  display: block;
+  text-align: center;
+}
+
+.git-batch-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 8px 8px;
+}
+
+.git-batch-group {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.git-batch-group--busy {
+  opacity: 0.7;
+  border-color: rgba(31, 111, 235, 0.4);
+}
+
+.git-batch-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.git-batch-group-dir {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.git-batch-group-count {
+  font-size: 10px;
+  color: rgba(139, 148, 158, 0.6);
+}
+
+.git-batch-group-files {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 6px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.git-batch-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.65);
+  border-radius: 3px;
+}
+
+.git-batch-file .git-file-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-batch-group-commit {
+  display: flex;
+  gap: 4px;
+}
+
+.git-batch-msg-input {
+  flex: 1;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.2);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 12px;
+  outline: none;
+}
+
+.git-batch-msg-input:focus {
+  border-color: rgba(31, 111, 235, 0.5);
+}
+
+.git-batch-commit-btn {
+  white-space: nowrap;
 }
 </style>

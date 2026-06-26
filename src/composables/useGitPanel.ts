@@ -33,6 +33,17 @@ export type GitFileDiff = {
   created?: boolean;
 };
 
+export type BatchGroup = {
+  dir: string;
+  files: { path: string; status: string }[];
+};
+
+function getTopLevelDir(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, "/");
+  const slashIdx = normalized.indexOf("/");
+  return slashIdx === -1 ? normalized : normalized.slice(0, slashIdx);
+}
+
 export function useGitPanel(
   projectPath: () => string,
   projectOpened: () => boolean,
@@ -305,6 +316,58 @@ export function useGitPanel(
       onRefreshTree?.();
     } finally {
       gitCommitting.value = false;
+    }
+  }
+
+  const batchGroups = computed<BatchGroup[]>(() => {
+    const dirMap = new Map<string, { path: string; status: string }[]>();
+    for (const f of gitUnstagedFiles.value) {
+      const dir = getTopLevelDir(f.path);
+      if (!dirMap.has(dir)) dirMap.set(dir, []);
+      dirMap.get(dir)!.push({ path: f.path, status: f.status });
+    }
+    return Array.from(dirMap.entries())
+      .map(([dir, files]) => ({ dir, files }))
+      .sort((a, b) => a.dir.localeCompare(b.dir));
+  });
+
+  const batchCommittingIndex = ref<number | null>(null);
+
+  async function commitBatchGroup(index: number, message: string) {
+    if (!projectOpened() || !message.trim()) return;
+    const group = batchGroups.value[index];
+    if (!group) return;
+    batchCommittingIndex.value = index;
+    gitError.value = "";
+    clearGitDiffCache();
+    const filePaths = group.files.map((f) => f.path);
+    try {
+      const stageResult = await stageGitFiles(projectPath(), filePaths);
+      if (!stageResult.ok) {
+        gitError.value = stageResult.error || "暂存失败";
+        await refreshGitStatus({ showLoading: false, force: true });
+        return;
+      }
+      const commitResult = await commitGitChanges(projectPath(), message.trim());
+      if (!commitResult.ok) {
+        gitError.value = commitResult.error || "提交失败";
+        await refreshGitStatus({ showLoading: false, force: true });
+        return;
+      }
+      await refreshGitStatus({ showLoading: false });
+    } catch (e) {
+      gitError.value = e instanceof Error ? e.message : "批量提交失败";
+      await refreshGitStatus({ showLoading: false, force: true });
+      onRefreshTree?.();
+    } finally {
+      batchCommittingIndex.value = null;
+    }
+  }
+
+  async function commitAllBatches(messages: string[]) {
+    for (let i = 0; i < batchGroups.value.length; i++) {
+      await commitBatchGroup(i, messages[i] || "");
+      if (gitError.value) break;
     }
   }
 
@@ -893,6 +956,11 @@ export function useGitPanel(
     gitUnstagedFiles,
     gitChangeCount,
     canGitCommit,
+
+    batchGroups,
+    batchCommittingIndex,
+    commitBatchGroup,
+    commitAllBatches,
 
     clearGitDiffCache,
     evictOldestCacheEntry,

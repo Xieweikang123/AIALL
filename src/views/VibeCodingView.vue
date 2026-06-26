@@ -100,6 +100,8 @@
           :file-watcher-active="fileWatcherActive"
           :file-watcher-connected="fileWatcherConnected"
           :expanded-git-log-entries="expandedGitLogEntries"
+          :batch-groups="batchGroups"
+          :batch-committing-index="batchCommittingIndex"
           @refresh="refreshGitStatus()"
           @do-fetch="doFetch"
           @do-pull="doPull"
@@ -126,6 +128,8 @@
           @open-git-log-file="openGitLogFile"
           @on-git-file-pointer-down="onGitFilePointerDown"
           @on-git-file-contextmenu="onGitFileContextMenu"
+          @commit-batch-group="commitBatchGroup"
+          @commit-all-batches="commitAllBatches"
         />
 
         <div v-if="gitPanelMode === 'files' && !projectOpened" class="panel-empty">
@@ -1005,6 +1009,7 @@ const {
   generateCommitMessage, aiCommitAndPush, refreshGitRemotes,
   doFetch, doPull, doPush,
   refreshGitStashes, doStashSave, doStashApply, doStashDrop,
+  batchGroups, batchCommittingIndex, commitBatchGroup, commitAllBatches,
 } = git;
 
 // Session manager composable
