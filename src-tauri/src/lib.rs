@@ -49,7 +49,7 @@ fn start_backend_process(app: &tauri::App) -> Result<(), String> {
   let mut child = if cfg!(debug_assertions) {
     let npx = if cfg!(windows) { "npx.cmd" } else { "npx" };
     Command::new(npx)
-      .args(["tsx", "sidecar/main.ts"])
+      .args(["tsx", "watch", "--clear-screen=false", "sidecar/main.ts"])
       .current_dir(&project_root)
       .env("AIALL_PROJECT_ROOT", &project_root)
       .env("AIALL_BACKEND_PORT", &port)
