@@ -89,6 +89,13 @@ export function buildExploreQuotedFollowUpHint(): string {
 }
 
 export function buildExploreAbortPartialReportNudge(readCount: number): string {
+  if (readCount <= 0) {
+    return [
+      "【提前结束】用户在探索开始前就停止了，尚未读取任何项目文件。",
+      "不要输出知识库正文，也不要生成 `## 章节` 占位；如此时无任何探索证据，请直接以一句中文简述中止原因（例如「探索未开始即被中止」）。",
+      "禁止编造未读代码的章节内容。",
+    ].join("\n");
+  }
   return [
     `【提前结束】用户已停止探索（已读约 ${readCount} 个文件）。`,
     "请基于已有证据输出不完整版项目知识库（保留 project-knowledge 标记）。",

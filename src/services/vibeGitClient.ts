@@ -17,6 +17,7 @@ export interface GitStatusResult {
   files: GitStatusFile[];
   stagedCount: number;
   unstagedCount: number;
+  isRepo: boolean;
   error?: string;
 }
 

@@ -41,6 +41,7 @@ import {
 } from "./agentExplorePrompt";
 import {
   classifyExploreKnowledgeIntent,
+  exploreIntentUsesKnowledgeManifest,
   isExploreContinuePrompt,
   isExploreSectionFillPrompt,
   isExploreChangesPrompt,

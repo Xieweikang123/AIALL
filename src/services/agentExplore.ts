@@ -56,15 +56,28 @@ export function buildExploreUnexploredPrompt(sectionTitles: string[]): string {
   ].join("");
 }
 
+const EXPLORE_CHANGED_FILES_LIST_MAX = 16;
+
 /** Targeted explore for files changed since the knowledge base gitHead. */
-export function buildExploreChangedFilesPrompt(changedFileCount: number): string {
+export function buildExploreChangedFilesPrompt(
+  changedFileCount: number,
+  changedFiles?: readonly string[],
+): string {
   const count = Math.max(1, changedFileCount);
-  return [
+  const lines = [
     `请针对自上次探索以来变更的代码文件（共 ${count} 个），更新知识库中受影响的章节。`,
     "先用 read_file 阅读 .aiall/project-knowledge.md 了解现有正文；再 read/grep 变更相关代码。",
     "仅输出需修订的 `## 章节` 内容，勿输出完整知识库或 project-knowledge 标记。",
     "不要修改任何文件。",
-  ].join("");
+  ];
+  const files = changedFiles?.filter((f) => f && f.trim()).map((f) => f.trim());
+  if (files && files.length > 0) {
+    const shown = files.slice(0, EXPLORE_CHANGED_FILES_LIST_MAX);
+    const list = shown.map((f) => `- ${f}`).join("\n");
+    const tail = files.length > shown.length ? `\n（另有 ${files.length - shown.length} 个，请用 grep/find 自行定位）` : "";
+    lines.push("", "变更文件列表：", list + tail);
+  }
+  return lines.join("\n");
 }
 
 const KNOWLEDGE_QUOTE_EXCERPT_MAX = 2000;

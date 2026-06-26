@@ -225,11 +225,11 @@ interface FullscreenSession {
 
 let fullscreenSession: FullscreenSession | null = null;
 
-function insertMermaidSvgMarkup(container: HTMLElement, svgMarkup: string): SVGElement | null {
+function insertMermaidSvgMarkup(container: HTMLElement, svgMarkup: string): SVGSVGElement | null {
   const parser = new DOMParser();
   const doc = parser.parseFromString(svgMarkup, "image/svg+xml");
   const parsed = doc.documentElement;
-  if (parsed instanceof SVGElement) {
+  if (parsed instanceof SVGSVGElement) {
     container.appendChild(document.importNode(parsed, true));
     return container.querySelector("svg");
   }
@@ -250,7 +250,7 @@ function parseSvgPixelLength(value: string | null): number | null {
 }
 
 /** Mermaid SVG 常带 width="100%"，脱离原容器后会塌成 0×0；百分比也不能 parseFloat 成 100px。 */
-function normalizeSvgForFullscreen(svg: SVGElement): void {
+function normalizeSvgForFullscreen(svg: SVGSVGElement): void {
   svg.removeAttribute("style");
 
   if (svg.getAttribute("width")?.includes("%")) svg.removeAttribute("width");
@@ -643,7 +643,7 @@ async function openFullscreenAsync(node: HTMLElement) {
   document.body.appendChild(overlay);
   activeFullscreenOverlay = overlay;
 
-  let svg: SVGElement | null = null;
+  let svg: SVGSVGElement | null = null;
 
   if (source) {
     try {
@@ -661,7 +661,7 @@ async function openFullscreenAsync(node: HTMLElement) {
   if (!svg && inlineSvg) {
     chartWrapper.textContent = "";
     Object.assign(chartWrapper.style, { color: "", fontSize: "", textAlign: "", minWidth: "" });
-    const clone = inlineSvg.cloneNode(true) as SVGElement;
+    const clone = inlineSvg.cloneNode(true) as SVGSVGElement;
     chartWrapper.appendChild(clone);
     svg = clone;
   }

@@ -12,6 +12,7 @@ import {
 } from "./agentContinuation";
 import { resolveAgentCompletedTurns, type AgentProgressSource, type AgentProgressTool } from "./agentRecovery";
 import { isConsultativeUserPrompt, isUltraShortOpenTaskPrompt, type UserIntentHistoryMessage } from "./agentUserIntent";
+import type { VibeChatMode } from "./vibeAgentClient";
 
 export type AgentRunKind = "interactive" | "execute_plan";
 
@@ -36,7 +37,7 @@ export interface AgentRunProfile {
 
 export interface ResolveAgentRunProfileInput {
   prompt: string;
-  mode: "ask" | "build" | "plan";
+  mode: VibeChatMode;
   lastAssistantContent?: string;
   referencedFiles?: string[];
   history?: UserIntentHistoryMessage[];
@@ -209,7 +210,7 @@ function extractTargetFilesFromTools(tools: AgentProgressTool[]): string[] {
 export function resolveAgentResumeRunProfile(
   msg: AgentProgressSource,
   originalPrompt: string,
-  mode: "ask" | "build" | "plan",
+  mode: VibeChatMode,
   lastAssistantContent?: string,
   history?: UserIntentHistoryMessage[],
 ): AgentRunProfile {

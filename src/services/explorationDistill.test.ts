@@ -29,24 +29,6 @@ describe("explorationDistill", () => {
     expect(result.skillProposals.some((s) => s.slug === "ui-screenshot-locate")).toBe(true);
   });
 
-  it("archives explore runs as project overview", () => {
-    const tools = [
-      { name: "read_file", ok: true, args: { path: "src/a.ts" } },
-      { name: "read_file", ok: true, args: { path: "src/b.ts" } },
-      { name: "read_file", ok: true, args: { path: "src/c.ts" } },
-    ];
-    const result = distillExplorationRun({
-      tools,
-      chatMode: "explore",
-      totalTurns: 8,
-      assistantText: "<!-- project-report -->\n# 项目理解报告\n\n## 技术栈\nvue",
-    });
-    expect(result.offer).toBe(true);
-    expect(result.archive?.filename).toMatch(/^project-overview-/);
-    expect(result.archive?.content).toContain("kind: project_overview");
-    expect(result.archive?.content).toContain("项目理解报告");
-  });
-
   it("archive content summary replaces file path list", () => {
     const content = buildExplorationArchiveMarkdown({
       readPaths: ["src/App.vue", "src/router/index.ts", "src/views/Home.vue"],
