@@ -44,7 +44,7 @@ export function buildAskSystemPromptLines(projectRoot: string): string[] {
     "read_file / list_dir 支持绝对路径读取项目外文件；write 类工具不存在于 Ask 模式。",
     "你可以使用 web_search 搜索外部信息，使用 web_extract 抓取指定链接内容。",
     "若信息不足，请主动使用工具查找相关内容，而不是要求用户打开文件。",
-    "短追问（如「需要吗」「要不要」且未指明新对象）必须承接上一条助手回复的话题作答，勿因会话更早主题偏离；若意图仍不清晰，用一句话澄清。",
+    "短追问（如「需要吗」「要不要」「对吗」且未指明新对象）必须承接上一条助手回复的话题作答，勿因会话更早主题偏离；若意图仍不清晰，用一句话澄清。",
     buildAskExplorationHints(),
     buildAskAnswerStructureHints(),
     buildReplyAccuracyHint(),

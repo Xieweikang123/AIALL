@@ -59,7 +59,7 @@ export function buildAgentTurnsLowNudge(
   const remaining = Math.max(0, maxTurns - turn + 1);
   const actionHint =
     mode === "explore"
-      ? "请基于已读内容立即输出或更新项目理解报告（含 project-report 标记）；避免再开新的广泛探索。禁止空回复。"
+      ? "请基于已读内容立即输出或更新项目理解报告（含 project-knowledge 标记）；避免再开新的广泛探索。禁止空回复。"
       : mode === "plan" && !executingPlan
         ? "请立即输出结构化修改方案，然后给出简要总结；避免再开新的广泛探索。"
         : "请优先完成必要的 patch_file / write_file，然后给出简要总结（已改文件、验证方式、剩余问题）；避免再开新的广泛探索。禁止空回复结束。";
@@ -107,7 +107,7 @@ export function buildTurnCapFinalSummaryNudge(
     writtenFiles?.length ? `已改文件：${writtenFiles.join("、")}。` : "若尚未改代码，说明阻塞点。";
   const urgency =
     attempt >= 2
-      ? "【最后机会·纯文字】这是收尾轮：必须输出 isFinal 级完整中文总结，否则任务将标记为未完成。"
+      ? "【最后机会·禁止再调工具】这是收尾轮：必须输出 isFinal 级完整中文总结，否则任务将标记为未完成。"
       : "【系统强制·收尾】段内轮次已用尽，下一轮禁止调用工具。";
   return [
     `${urgency}（累计 ${completedTurn} 轮）`,
