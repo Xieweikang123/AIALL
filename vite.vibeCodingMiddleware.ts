@@ -7,7 +7,8 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { readJsonBody, sendJson, sendSseEvent, sendSseComment, sendSseHeaders } from "./server/httpUtils";
 import { chatCompletionWithTools, resolveChatEndpoint } from "./server/aiForward";
-import { runVibeAgent, type VibeChatMode } from "./server/vibeAgent";
+import { runVibeAgent } from "./server/vibeAgent";
+import type { VibeChatMode } from "./shared/agentTypes";
 import { buildProjectContext } from "./server/vibeProjectContext";
 import {
   appendProjectMemory,
@@ -2132,6 +2133,151 @@ ${diffText.slice(0, 12000)}
       res.end();
     } catch (error) {
       sendSseEvent(res, "error", { message: error instanceof Error ? error.message : "生成提交信息失败" });
+      res.end();
+    }
+  });
+
+  // POST /backend/vibe/git/ai-batch-groups
+  middlewares.use("/backend/vibe/git/ai-batch-groups", async (req, res) => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "仅支持 POST 请求" });
+      return;
+    }
+
+    try {
+      const body = (await readJsonBody(req)) as {
+        path?: string;
+        endpoint?: string;
+        apiKey?: string;
+        model?: string;
+      };
+      if (!body.path?.trim()) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 参数" });
+        return;
+      }
+      if (!body.endpoint?.trim() || !body.model?.trim()) {
+        sendJson(res, 400, { ok: false, error: "缺少 AI 配置" });
+        return;
+      }
+
+      const resolved = path.resolve(body.path.trim());
+      const statusResult = await gitStatus(resolved);
+      if (!statusResult.ok) {
+        sendJson(res, 400, { ok: false, error: statusResult.error || "获取 Git 状态失败" });
+        return;
+      }
+
+      const unstagedFiles = statusResult.files.filter((f) => !f.staged && f.status !== "ignored");
+      if (!unstagedFiles.length) {
+        sendSseHeaders(res);
+        sendSseEvent(res, "done", { groups: [] });
+        res.end();
+        return;
+      }
+
+      const diffResult = await gitDiff(resolved, undefined, false);
+      const diffText = diffResult.ok ? (diffResult.patch || "") : "";
+      const fileList = unstagedFiles.map((f) => `${f.status}: ${f.path}`).join("\n");
+      const prompt = `你是一个 Git 提交分组助手。根据以下未暂存的文件变更，将文件按功能/逻辑相关性分成多个批次，每个批次生成一条中文提交信息。
+
+未暂存文件列表：
+${fileList}
+
+Diff 内容：
+${diffText.slice(0, 15000)}
+
+要求：
+- 按功能模块或逻辑相关性分组，不要简单按目录分
+- 每组用简洁的中文名称命名（如「认证模块」「UI 样式调整」）
+- 每组生成一条中文 commit message（动词开头，描述做了什么）
+- 每个文件只能出现在一个组中
+- 如果只有一个逻辑变更，分成一组即可
+- 使用中文
+
+请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 标记：
+{"groups":[{"name":"分组名称","files":["文件路径"],"message":"提交信息"}]}`;
+
+      const chatEndpoint = resolveChatEndpoint(body.endpoint);
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (body.apiKey) headers.Authorization = `Bearer ${body.apiKey}`;
+
+      sendSseHeaders(res);
+
+      const aiResponse = await fetch(chatEndpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: body.model,
+          messages: [{ role: "user", content: prompt }],
+          stream: true,
+        }),
+      });
+
+      if (!aiResponse.ok) {
+        const errText = await aiResponse.text().catch(() => "");
+        sendSseEvent(res, "error", { message: `AI 请求失败，HTTP ${aiResponse.status}${errText ? `: ${errText.slice(0, 200)}` : ""}` });
+        res.end();
+        return;
+      }
+
+      const reader = aiResponse.body?.getReader();
+      if (!reader) {
+        sendSseEvent(res, "error", { message: "AI 响应体为空" });
+        res.end();
+        return;
+      }
+
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+      let content = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) continue;
+          const data = trimmed.slice(5).trim();
+          if (!data || data === "[DONE]") continue;
+
+          try {
+            const parsed = JSON.parse(data) as {
+              choices?: Array<{ delta?: { content?: string } }>;
+            };
+            const delta = parsed.choices?.[0]?.delta?.content;
+            if (delta) {
+              content += delta;
+              sendSseEvent(res, "delta", { text: delta });
+            }
+          } catch {
+            // skip malformed
+          }
+        }
+      }
+
+      const cleaned = content.trim();
+      let groups: Array<{ name: string; files: string[]; message: string }> = [];
+      try {
+        const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]) as { groups?: Array<{ name: string; files: string[]; message: string }> };
+          if (Array.isArray(parsed.groups)) {
+            groups = parsed.groups;
+          }
+        }
+      } catch {
+        // AI 返回的 JSON 解析失败，返回空分组
+      }
+
+      sendSseEvent(res, "done", { groups });
+      res.end();
+    } catch (error) {
+      sendSseEvent(res, "error", { message: error instanceof Error ? error.message : "AI 分批分组失败" });
       res.end();
     }
   });
