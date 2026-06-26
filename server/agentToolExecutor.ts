@@ -1,4 +1,5 @@
-import { execFile, promisify } from "node:util";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
 import type { VibeChatMode } from "../shared/agentTypes";
@@ -46,7 +47,6 @@ import {
   isBlockedGrepAfterVisionMisread,
   isLowSignalVisionLocateGrep,
   isOverlyBroadVisionGrep,
-  isRuntimeVisibleTextGrepPattern,
   isSearchFilesContentQuery,
   markPatchRecoveryFile,
   readLineRangeFromArgs,
@@ -58,6 +58,7 @@ import {
   buildSearchFilesContentQueryMessage,
   type ToolGuardContext,
 } from "./agentExploreGuard";
+import { isRuntimeVisibleTextGrepPattern } from "./visionAnchorPrefgrep";
 import { WRITE_AGENT_TOOL_NAMES } from "./agentToolDefinitions";
 
 export type WriteStage = {

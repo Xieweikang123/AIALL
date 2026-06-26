@@ -93,6 +93,10 @@
           :git-unstaged-open="gitUnstagedOpen"
           :git-log-open="gitLogOpen"
           :git-log-entries="gitLogEntries"
+          :git-log-search-query="gitLogSearchQuery"
+          :has-more-git-log="hasMoreGitLog"
+          :git-log-loading-more="gitLogLoadingMore"
+          :git-log-search-loading="gitLogSearchLoading"
           :selected-git-files="selectedGitFiles"
           :git-diff-loading-key="gitDiffLoadingKey"
           :git-remote-action="gitRemoteAction"
@@ -127,6 +131,8 @@
           @update:git-staged-open="gitStagedOpen = $event"
           @update:git-unstaged-open="gitUnstagedOpen = $event"
           @update:git-log-open="gitLogOpen = $event"
+          @load-more-git-log="loadMoreGitLog"
+          @search-git-log="searchGitLog"
           @update:git-ahead-commits-open="gitAheadCommitsOpen = $event"
           @update:git-commit-message="gitCommitMessage = $event"
           @update:git-stash-message="gitStashMessage = $event"
@@ -683,7 +689,6 @@ import {
 import {
   fetchGitDiffContent,
   fetchGitCommitFileDiff,
-  fetchGitLog,
   type GitLogEntry,
   type GitLogFile,
 } from "../services/vibeGitClient";
@@ -977,6 +982,8 @@ const projectHistoryList = ref<ProjectHistoryEntry[]>([]);
 const {
   gitPanelMode, projectPanelView, gitStatus, gitBranch, gitHeadCommit, gitIsRepo, gitStatusKnown, gitLoading, gitError,
   gitCommitMessage, gitCommitting, gitGenStep, gitLogEntries, gitLogOpen,
+  gitLogCount, gitLogSearchQuery, hasMoreGitLog, gitLogLoadingMore, gitLogSearchLoading, loadMoreGitLog,
+  searchGitLog,
   gitStagedOpen, gitUnstagedOpen, expandedGitLogEntries, selectedGitFiles,
   gitDiffLoadingKey, gitDiffContentCache, gitRemotes, gitTrackingBranch,
   gitAhead, gitBehind, gitRemoteLoading, gitRemoteAction, gitStashes, gitStashOpen,
@@ -3033,15 +3040,6 @@ function onWindowFocus() {
 watch(chatMode, (mode) => {
   if (mode === "explore") return;
   lsSet(CHAT_MODE_KEY, mode);
-});
-
-watch(gitLogOpen, async (open) => {
-  if (open && projectOpened.value && gitIsRepo.value) {
-    const logResult = await fetchGitLog(projectPath.value.trim(), 20);
-    if (logResult.ok) {
-      gitLogEntries.value = logResult.entries;
-    }
-  }
 });
 
 watch(gitAheadCommitsOpen, (open) => {

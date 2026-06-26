@@ -66,6 +66,19 @@
             <div v-for="entry in gitAheadCommits" :key="entry.hash" class="git-ahead-item">
               <div class="git-ahead-entry-head">
                 <span class="git-ahead-hash">{{ entry.shortHash }}</span>
+                <span v-if="entry.refs && entry.refs.length" class="git-log-refs">
+                  <span
+                    v-for="ref in entry.refs"
+                    :key="ref.name"
+                    class="git-log-ref"
+                    :class="'git-log-ref--' + ref.type"
+                    :title="ref.type + ': ' + ref.name"
+                  >
+                    <span v-if="ref.type === 'tag'" class="git-ref-icon">🏷️</span>
+                    <span v-else-if="ref.type === 'head'" class="git-ref-icon">⎇</span>
+                    {{ ref.name }}
+                  </span>
+                </span>
                 <span class="git-ahead-msg" :title="entry.message">{{ entry.message }}</span>
               </div>
               <div class="git-ahead-meta">
@@ -145,179 +158,202 @@
 
       <div v-if="gitError" class="git-error">{{ gitError }}</div>
       <div class="git-work-area" :class="{ 'git-work-area--log-open': gitLogOpen }">
-        <div class="git-changes-scroll">
-          <div v-if="!gitStatus.length" class="git-changes-empty">
-            <span class="git-changes-empty-icon" aria-hidden="true">✓</span>
-            <span>工作区干净，无本地改动</span>
-          </div>
-          <template v-else>
-            <div v-if="gitStagedFiles.length" class="git-section">
-              <div class="git-section-head">
-                <button type="button" class="git-section-toggle" @click="$emit('update:gitStagedOpen', !gitStagedOpen)">
-                  <span class="git-section-chevron">{{ gitStagedOpen ? "▾" : "▸" }}</span>
-                  <span class="git-section-title">已暂存 ({{ gitStagedFiles.length }})</span>
-                </button>
-                <button type="button" class="ghost tiny" @click="$emit('unstage-all')">取消全部</button>
+        <!-- 当前更改 (工作区折叠组) -->
+        <div class="git-local-section" :class="{ 'git-local-section--collapsed': gitLogOpen && !localChangesOpen }">
+          <button
+            v-if="gitLogOpen"
+            type="button"
+            class="git-local-toggle"
+            @click="localChangesOpen = !localChangesOpen"
+          >
+            <span class="git-section-chevron">{{ localChangesOpen ? "▾" : "▸" }}</span>
+            <span>当前更改</span>
+            <span v-if="gitStatus.length > 0" class="git-local-count-badge">{{ gitStatus.length }}</span>
+          </button>
+
+          <div v-show="!gitLogOpen || localChangesOpen" class="git-local-content">
+            <div class="git-changes-scroll">
+              <div v-if="!gitStatus.length" class="git-changes-empty">
+                <span class="git-changes-empty-icon" aria-hidden="true">✓</span>
+                <span>工作区干净，无本地改动</span>
               </div>
-              <div v-if="gitStagedOpen" class="git-file-list">
-                <div
-                  v-for="file in gitStagedFiles"
-                  :key="file.path"
-                  class="git-file-item"
-                  :class="{ active: selectedGitFiles.includes(file.path), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
-                  @pointerdown="$emit('on-git-file-pointer-down', $event, file.path, file.staged)"
-                  @contextmenu.prevent="$emit('on-git-file-contextmenu', $event, file.path)"
-                >
-                  <span class="git-file-check" @pointerdown.stop @click.stop="$emit('unstage-file', file.path)">✓</span>
-                  <span class="git-file-status" :class="gitStatusClass(file.status)">
-                    {{ gitStatusIcon(file.status) }}
-                  </span>
-                  <span class="git-file-path" :title="file.path">{{ file.path }}</span>
+              <template v-else>
+                <div v-if="gitStagedFiles.length" class="git-section">
+                  <div class="git-section-head">
+                    <button type="button" class="git-section-toggle" @click="$emit('update:gitStagedOpen', !gitStagedOpen)">
+                      <span class="git-section-chevron">{{ gitStagedOpen ? "▾" : "▸" }}</span>
+                      <span class="git-section-title">已暂存 ({{ gitStagedFiles.length }})</span>
+                    </button>
+                    <button type="button" class="ghost tiny" @click="$emit('unstage-all')">取消全部</button>
+                  </div>
+                  <div v-if="gitStagedOpen" class="git-file-list">
+                    <div
+                      v-for="file in gitStagedFiles"
+                      :key="file.path"
+                      class="git-file-item"
+                      :class="{ active: selectedGitFiles.includes(file.path), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
+                      @pointerdown="$emit('on-git-file-pointer-down', $event, file.path, file.staged)"
+                      @contextmenu.prevent="$emit('on-git-file-contextmenu', $event, file.path)"
+                    >
+                      <span class="git-file-check" @pointerdown.stop @click.stop="$emit('unstage-file', file.path)">✓</span>
+                      <span class="git-file-status" :class="gitStatusClass(file.status)">
+                        {{ gitStatusIcon(file.status) }}
+                      </span>
+                      <span class="git-file-path" :title="file.path">{{ file.path }}</span>
+                    </div>
+                  </div>
                 </div>
-              </div>
+                <div v-if="gitUnstagedFiles.length" class="git-section">
+                  <div class="git-section-head">
+                    <button type="button" class="git-section-toggle" @click="$emit('update:gitUnstagedOpen', !gitUnstagedOpen)">
+                      <span class="git-section-chevron">{{ gitUnstagedOpen ? "▾" : "▸" }}</span>
+                      <span class="git-section-title">未暂存 ({{ gitUnstagedFiles.length }})</span>
+                    </button>
+                    <div class="git-section-actions">
+                      <button type="button" class="ghost tiny" @click="$emit('stage-all')">全部暂存</button>
+                      <button type="button" class="ghost tiny danger" @click="$emit('discard-all', $event)">丢弃全部</button>
+                    </div>
+                  </div>
+                  <div v-if="gitUnstagedOpen" class="git-file-list">
+                    <div
+                      v-for="file in gitUnstagedFiles"
+                      :key="file.path"
+                      class="git-file-item"
+                      :class="{ active: selectedGitFiles.includes(file.path), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
+                      @pointerdown="$emit('on-git-file-pointer-down', $event, file.path, file.staged)"
+                      @contextmenu.prevent="$emit('on-git-file-contextmenu', $event, file.path)"
+                    >
+                      <span class="git-file-check" @pointerdown.stop @click.stop="$emit('stage-file', file.path)">+</span>
+                      <span class="git-file-status" :class="gitStatusClass(file.status)">
+                        {{ gitStatusIcon(file.status) }}
+                      </span>
+                      <span class="git-file-path" :title="file.path">{{ file.path }}</span>
+                      <button type="button" class="ghost tiny danger git-file-btn" title="丢弃更改" @pointerdown.stop @click.stop="$emit('discard-file', file.path, $event)">✕</button>
+                    </div>
+                  </div>
+                </div>
+              </template>
             </div>
-            <div v-if="gitUnstagedFiles.length" class="git-section">
-              <div class="git-section-head">
-                <button type="button" class="git-section-toggle" @click="$emit('update:gitUnstagedOpen', !gitUnstagedOpen)">
-                  <span class="git-section-chevron">{{ gitUnstagedOpen ? "▾" : "▸" }}</span>
-                  <span class="git-section-title">未暂存 ({{ gitUnstagedFiles.length }})</span>
-                </button>
-                <div class="git-section-actions">
-                  <button type="button" class="ghost tiny" @click="$emit('stage-all')">全部暂存</button>
-                  <button type="button" class="ghost tiny danger" @click="$emit('discard-all', $event)">丢弃全部</button>
-                </div>
-              </div>
-              <div v-if="gitUnstagedOpen" class="git-file-list">
-                <div
-                  v-for="file in gitUnstagedFiles"
-                  :key="file.path"
-                  class="git-file-item"
-                  :class="{ active: selectedGitFiles.includes(file.path), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
-                  @pointerdown="$emit('on-git-file-pointer-down', $event, file.path, file.staged)"
-                  @contextmenu.prevent="$emit('on-git-file-contextmenu', $event, file.path)"
-                >
-                  <span class="git-file-check" @pointerdown.stop @click.stop="$emit('stage-file', file.path)">+</span>
-                  <span class="git-file-status" :class="gitStatusClass(file.status)">
-                    {{ gitStatusIcon(file.status) }}
-                  </span>
-                  <span class="git-file-path" :title="file.path">{{ file.path }}</span>
-                  <button type="button" class="ghost tiny danger git-file-btn" title="丢弃更改" @pointerdown.stop @click.stop="$emit('discard-file', file.path, $event)">✕</button>
-                </div>
-              </div>
-            </div>
-          </template>
-        </div>
-        <div class="git-commit-box git-section-card">
-          <textarea
-            :value="gitCommitMessage"
-            class="git-commit-input"
-            rows="2"
-            placeholder="提交信息…"
-            :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep"
-            @input="$emit('update:gitCommitMessage', ($event.target as HTMLTextAreaElement).value)"
-            @keydown.ctrl.enter="$emit('commit-git')"
-            @keydown.meta.enter="$emit('commit-git')"
-          />
-          <div class="git-commit-actions">
-            <button
-              type="button"
-              class="secondary small git-commit-ai"
-              :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep || !gitStagedFiles.length || !configReady"
-              :title="!configReady ? '请先配置 AI 模型' : 'AI 生成提交信息'"
-              @click="$emit('generate-commit-message')"
-            >
-              {{ gitGenStep || "✦ AI" }}
-            </button>
-            <button
-              type="button"
-              class="small git-commit-btn"
-              :class="canGitCommit ? 'primary' : 'secondary'"
-              :disabled="!canGitCommit || !!gitAiPushStep"
-              :title="canGitCommit ? 'Ctrl+Enter 提交' : '请先填写提交信息'"
-              @click="$emit('commit-git')"
-            >
-              {{ gitCommitting ? "提交中…" : `提交 (${gitStagedFiles.length})` }}
-            </button>
-            <button
-              type="button"
-              class="small git-ai-push"
-              :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep || !gitStagedFiles.length || !configReady"
-              :title="!configReady ? '请先配置 AI 模型' : 'AI 生成提交信息并推送'"
-              @click="$emit('ai-commit-and-push')"
-            >
-              {{ gitAiPushStep || "推送" }}
-            </button>
-          </div>
-        </div>
-        <div
-          v-if="batchGroups && batchGroups.length > 0"
-          class="git-batch-section git-section-card"
-          :class="{ 'git-batch-section--open': batchSectionOpen, 'git-batch-section--grouping': aiBatchGrouping }"
-        >
-          <div class="git-batch-header-row">
-            <button type="button" class="git-batch-toggle" @click="batchSectionOpen = !batchSectionOpen">
-              <span class="git-section-chevron">{{ batchSectionOpen ? "▾" : "▸" }}</span>
-              <span>分批提交</span>
-              <span class="git-batch-count">{{ batchGroups.length }}</span>
-            </button>
-            <button
-              type="button"
-              class="secondary small git-ai-batch-btn"
-              :class="{ 'git-ai-batch-btn--loading': aiBatchGrouping }"
-              :disabled="aiBatchGrouping || batchCommittingIndex !== null || !configReady"
-              :title="!configReady ? '请先配置 AI 模型' : 'AI 按功能模块智能分组'"
-              @click="$emit('ai-batch-groups')"
-            >
-              <span v-if="aiBatchGrouping" class="panel-loading-spinner git-ai-batch-spinner" aria-hidden="true" />
-              {{ aiBatchGrouping ? (aiBatchGroupingStep || "分析中…") : "AI 划分" }}
-            </button>
-          </div>
-          <div v-if="batchSectionOpen" class="git-batch-groups">
-            <div v-if="aiBatchGrouping" class="git-batch-loading">
-              <span class="panel-loading-spinner git-batch-loading-spinner" aria-hidden="true" />
-              <span class="git-batch-loading-text">{{ aiBatchGroupingStep || "正在分析文件变更…" }}</span>
-            </div>
-            <button
-              type="button"
-              class="primary small git-batch-all-btn"
-              :disabled="batchCommittingIndex !== null"
-              @click="$emit('commit-all-batches', [...batchMessages])"
-            >
-              {{ batchCommittingIndex !== null ? `提交中 (${batchCommittingIndex! + 1}/${batchGroups.length})…` : `全部提交 (${batchGroups.length})` }}
-            </button>
-            <div
-              v-for="(group, i) in batchGroups"
-              :key="group.dir"
-              class="git-batch-group"
-              :class="{ 'git-batch-group--busy': batchCommittingIndex === i }"
-            >
-              <div class="git-batch-group-header">
-                <span class="git-batch-group-dir">{{ group.dir }}/</span>
-                <span class="git-batch-group-count">{{ group.files.length }} 个文件</span>
-              </div>
-              <div class="git-batch-group-files">
-                <div v-for="f in group.files" :key="f.path" class="git-batch-file">
-                  <span class="git-file-status" :class="gitStatusClass(f.status)">{{ gitStatusIcon(f.status) }}</span>
-                  <span class="git-file-path">{{ f.path }}</span>
-                </div>
-              </div>
-              <div class="git-batch-group-commit">
-                <input
-                  :value="batchMessages[i]"
-                  class="git-batch-msg-input"
-                  placeholder="提交信息…"
-                  :disabled="batchCommittingIndex !== null"
-                  @input="batchMessages[i] = ($event.target as HTMLInputElement).value"
-                />
+            <div class="git-commit-box git-section-card">
+              <textarea
+                :value="gitCommitMessage"
+                class="git-commit-input"
+                rows="2"
+                placeholder="提交信息…"
+                :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep"
+                @input="$emit('update:gitCommitMessage', ($event.target as HTMLTextAreaElement).value)"
+                @keydown.ctrl.enter="$emit('commit-git')"
+                @keydown.meta.enter="$emit('commit-git')"
+              />
+              <div class="git-commit-actions">
                 <button
                   type="button"
-                  class="secondary small git-batch-commit-btn"
-                  :disabled="batchCommittingIndex !== null || !batchMessages[i]?.trim()"
-                  @click="$emit('commit-batch-group', i, batchMessages[i] || '')"
+                  class="secondary small git-commit-ai"
+                  :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep || !gitStagedFiles.length || !configReady"
+                  :title="!configReady ? '请先配置 AI 模型' : 'AI 生成提交信息'"
+                  @click="$emit('generate-commit-message')"
                 >
-                  {{ batchCommittingIndex === i ? "提交中…" : "提交" }}
+                  {{ gitGenStep || "✦ AI" }}
+                </button>
+                <button
+                  type="button"
+                  class="small git-commit-btn"
+                  :class="canGitCommit ? 'primary' : 'secondary'"
+                  :disabled="!canGitCommit || !!gitAiPushStep"
+                  :title="canGitCommit ? 'Ctrl+Enter 提交' : '请先填写提交信息'"
+                  @click="$emit('commit-git')"
+                >
+                  {{ gitCommitting ? "提交中…" : `提交 (${gitStagedFiles.length})` }}
+                </button>
+                <button
+                  type="button"
+                  class="small git-ai-push"
+                  :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep || !gitStagedFiles.length || !configReady"
+                  :title="!configReady ? '请先配置 AI 模型' : 'AI 生成提交信息并推送'"
+                  @click="$emit('ai-commit-and-push')"
+                >
+                  {{ gitAiPushStep || "推送" }}
                 </button>
               </div>
+            </div>
+            <div
+              v-if="batchGroups && batchGroups.length > 0"
+              class="git-batch-section git-section-card"
+              :class="{ 'git-batch-section--open': batchSectionOpen, 'git-batch-section--grouping': aiBatchGrouping }"
+            >
+              <div class="git-batch-header-row">
+                <button type="button" class="git-batch-toggle" @click="batchSectionOpen = !batchSectionOpen">
+                  <span class="git-section-chevron">{{ batchSectionOpen ? "▾" : "▸" }}</span>
+                  <span>分批提交</span>
+                  <span class="git-batch-count">{{ batchGroups.length }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="secondary small git-ai-batch-btn"
+                  :class="{ 'git-ai-batch-btn--loading': aiBatchGrouping }"
+                  :disabled="aiBatchGrouping || batchCommittingIndex !== null || !configReady"
+                  :title="!configReady ? '请先配置 AI 模型' : 'AI 按功能模块智能分组'"
+                  @click="$emit('ai-batch-groups')"
+                >
+                  <span v-if="aiBatchGrouping" class="panel-loading-spinner git-ai-batch-spinner" aria-hidden="true" />
+                  {{ aiBatchGrouping ? (aiBatchGroupingStep || "分析中…") : "AI 划分" }}
+                </button>
+              </div>
+              <transition-group
+                v-if="batchSectionOpen"
+                name="batch-group-list"
+                tag="div"
+                class="git-batch-groups"
+              >
+                <div v-if="aiBatchGrouping" key="loading" class="git-batch-loading">
+                  <span class="panel-loading-spinner git-batch-loading-spinner" aria-hidden="true" />
+                  <span class="git-batch-loading-text">{{ aiBatchGroupingStep || "正在分析文件变更…" }}</span>
+                </div>
+                <button
+                  v-if="batchGroups && batchGroups.length > 0"
+                  key="commit-all-btn"
+                  type="button"
+                  class="primary small git-batch-all-btn"
+                  :disabled="batchCommittingIndex !== null"
+                  @click="$emit('commit-all-batches', [...batchMessages])"
+                >
+                  {{ batchCommittingIndex !== null ? `提交中 (${batchCommittingIndex! + 1}/${batchGroups.length})…` : `全部提交 (${batchGroups.length})` }}
+                </button>
+                <div
+                  v-for="(group, i) in batchGroups"
+                  :key="group.dir"
+                  class="git-batch-group"
+                  :class="{ 'git-batch-group--busy': batchCommittingIndex === i }"
+                >
+                  <div class="git-batch-group-header">
+                    <span class="git-batch-group-dir">{{ group.dir }}/</span>
+                    <span class="git-batch-group-count">{{ group.files.length }} 个文件</span>
+                  </div>
+                  <div class="git-batch-group-files">
+                    <div v-for="f in group.files" :key="f.path" class="git-batch-file">
+                      <span class="git-file-status" :class="gitStatusClass(f.status)">{{ gitStatusIcon(f.status) }}</span>
+                      <span class="git-file-path">{{ f.path }}</span>
+                    </div>
+                  </div>
+                  <div class="git-batch-group-commit">
+                    <input
+                      :value="batchMessages[i]"
+                      class="git-batch-msg-input"
+                      placeholder="提交信息…"
+                      :disabled="batchCommittingIndex !== null"
+                      @input="batchMessages[i] = ($event.target as HTMLInputElement).value"
+                    />
+                    <button
+                      type="button"
+                      class="secondary small git-batch-commit-btn"
+                      :disabled="batchCommittingIndex !== null || !batchMessages[i]?.trim()"
+                      @click="$emit('commit-batch-group', i, batchMessages[i] || '')"
+                    >
+                      {{ batchCommittingIndex === i ? "提交中…" : "提交" }}
+                    </button>
+                  </div>
+                </div>
+              </transition-group>
             </div>
           </div>
         </div>
@@ -327,16 +363,72 @@
             <span>提交历史</span>
             <span v-if="gitLogEntries.length" class="git-log-section-count">{{ gitLogEntries.length }}</span>
           </button>
-          <div v-if="gitLogOpen" class="git-log-list">
-            <div v-if="!gitLogEntries.length" class="git-log-empty">无历史</div>
+          <!-- Git 历史搜索框 -->
+          <div
+            v-if="gitLogOpen"
+            class="git-log-search-container"
+            :class="{ 'git-log-search-container--loading': gitLogSearchActive }"
+          >
+            <span v-if="gitLogSearchActive" class="panel-loading-spinner git-log-search-spinner" aria-hidden="true" />
+            <span v-else class="git-log-search-icon">🔍</span>
+            <input
+              type="text"
+              class="git-log-search-input"
+              placeholder="搜索提交信息、哈希或作者..."
+              v-model="searchVal"
+              :disabled="gitLogSearchLoading"
+              @keyup.enter="$emit('search-git-log', searchVal)"
+            />
+            <button
+              v-if="searchVal && !gitLogSearchActive"
+              type="button"
+              class="git-log-search-clear"
+              @click="clearSearch"
+              title="清除搜索"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div
+            v-if="gitLogOpen"
+            class="git-log-list"
+            :class="{ 'git-log-list--searching': gitLogSearchLoading }"
+            @scroll="handleLogScroll"
+          >
+            <div v-if="gitLogSearchLoading && !gitLogEntries.length" class="git-log-searching-hint">
+              <span class="panel-loading-spinner git-log-search-hint-spinner" aria-hidden="true" />
+              <span>正在搜索…</span>
+            </div>
+            <div v-else-if="!gitLogEntries.length" class="git-log-empty">
+              {{ gitLogSearchQuery ? "未找到匹配的提交记录" : "无历史" }}
+            </div>
             <div v-for="entry in gitLogEntries" :key="entry.hash" class="git-log-item">
               <button type="button" class="git-log-entry-head" @click="$emit('toggle-git-log-entry', entry.hash)">
                 <span class="git-log-chevron">{{ isGitLogEntryOpen(entry.hash) ? "▾" : "▸" }}</span>
                 <span class="git-log-hash">{{ entry.shortHash }}</span>
+                <span v-if="entry.refs && entry.refs.length" class="git-log-refs">
+                  <span
+                    v-for="ref in entry.refs"
+                    :key="ref.name"
+                    class="git-log-ref"
+                    :class="'git-log-ref--' + ref.type"
+                    :title="ref.type + ': ' + ref.name"
+                  >
+                    <span v-if="ref.type === 'tag'" class="git-ref-icon">🏷️</span>
+                    <span v-else-if="ref.type === 'head'" class="git-ref-icon">⎇</span>
+                    {{ ref.name }}
+                  </span>
+                </span>
                 <span class="git-log-msg" :title="entry.message">{{ entry.message }}</span>
+                <span class="git-log-date" :title="entry.date">{{ formatDate(entry.date) }}</span>
                 <span class="git-log-count">{{ entry.files.length }}</span>
               </button>
               <div v-if="isGitLogEntryOpen(entry.hash)" class="git-log-detail">
+                <div class="git-log-meta-expanded">
+                  <span class="git-log-meta-item"><span class="git-log-meta-label">作者:</span> {{ entry.author }}</span>
+                  <span class="git-log-meta-item"><span class="git-log-meta-label">日期:</span> {{ formatFullDate(entry.date) }}</span>
+                </div>
                 <div v-if="entry.message.includes('\n')" class="git-log-full-msg">{{ entry.message }}</div>
                 <div class="git-log-files">
                   <button
@@ -356,6 +448,18 @@
                 </div>
               </div>
             </div>
+            <!-- 加载更多按钮 -->
+            <div v-if="gitLogEntries.length && hasMoreGitLog" class="git-log-more-container">
+              <button
+                type="button"
+                class="secondary small git-log-more-btn"
+                :disabled="gitLogLoadingMore"
+                @click="$emit('load-more-git-log')"
+              >
+                <span v-if="gitLogLoadingMore" class="panel-loading-spinner git-log-more-spinner" aria-hidden="true" />
+                {{ gitLogLoadingMore ? "正在加载…" : "加载更多" }}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -371,7 +475,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { ref, watch, onUnmounted, computed } from "vue";
 import type { GitRemoteInfo } from "../../services/vibeGitClient";
 import type { BatchGroup } from "../../composables/useGitPanel";
 
@@ -386,6 +490,11 @@ interface GitFile {
   staged: boolean;
 }
 
+interface GitRef {
+  name: string;
+  type: "head" | "local" | "remote" | "tag" | "other";
+}
+
 interface GitLogEntry {
   hash: string;
   shortHash: string;
@@ -393,6 +502,7 @@ interface GitLogEntry {
   date: string;
   message: string;
   files: GitLogFile[];
+  refs?: GitRef[];
 }
 
 interface GitLogFile {
@@ -428,6 +538,7 @@ interface Props {
   gitUnstagedOpen: boolean;
   gitLogOpen: boolean;
   gitLogEntries: GitLogEntry[];
+  gitLogSearchQuery: string;
   selectedGitFiles: string[];
   gitDiffLoadingKey: string;
   gitRemoteAction: string;
@@ -442,12 +553,16 @@ interface Props {
   gitAheadCommits: GitLogEntry[];
   gitAheadCommitsOpen: boolean;
   gitAheadCommitsLoading: boolean;
+  hasMoreGitLog: boolean;
+  gitLogLoadingMore: boolean;
+  gitLogSearchLoading: boolean;
 }
 
 const props = defineProps<Props>();
 
 const stashSectionOpen = ref(false);
 const batchSectionOpen = ref(false);
+const localChangesOpen = ref(false);
 const batchMessages = ref<string[]>([]);
 
 watch(
@@ -461,6 +576,17 @@ watch(
   () => props.aiBatchGrouping,
   (grouping) => {
     if (grouping) batchSectionOpen.value = true;
+  },
+);
+
+watch(
+  () => props.gitLogOpen,
+  (open) => {
+    if (open) {
+      stashSectionOpen.value = false;
+      batchSectionOpen.value = false;
+      localChangesOpen.value = false;
+    }
   },
 );
 
@@ -505,7 +631,56 @@ const emit = defineEmits<{
   (e: "commit-batch-group", index: number, message: string): void;
   (e: "commit-all-batches", messages: string[]): void;
   (e: "ai-batch-groups"): void;
+  (e: "load-more-git-log"): void;
+  (e: "search-git-log", query: string): void;
 }>();
+
+const searchVal = ref(props.gitLogSearchQuery || "");
+const searchPending = ref(false);
+let searchTimeout: ReturnType<typeof setTimeout> | null = null;
+
+const gitLogSearchActive = computed(() => searchPending.value || props.gitLogSearchLoading);
+
+watch(() => props.gitLogSearchQuery, (val) => {
+  const next = val || "";
+  if (searchVal.value !== next) {
+    searchVal.value = next;
+  }
+});
+
+watch(() => props.gitLogSearchLoading, (loading) => {
+  if (!loading) searchPending.value = false;
+});
+
+watch(searchVal, (newVal) => {
+  const trimmed = newVal.trim();
+  if (trimmed === (props.gitLogSearchQuery || "")) {
+    searchPending.value = false;
+    return;
+  }
+  searchPending.value = true;
+  if (searchTimeout) {
+    clearTimeout(searchTimeout);
+  }
+  searchTimeout = setTimeout(() => {
+    emit("search-git-log", newVal);
+  }, 300);
+});
+
+function clearSearch() {
+  searchPending.value = false;
+  searchVal.value = "";
+  if (searchTimeout) {
+    clearTimeout(searchTimeout);
+  }
+  emit("search-git-log", "");
+}
+
+onUnmounted(() => {
+  if (searchTimeout) {
+    clearTimeout(searchTimeout);
+  }
+});
 
 function isGitLogEntryOpen(hash: string): boolean {
   return props.expandedGitLogEntries.has(hash);
@@ -521,10 +696,15 @@ function gitHistoryDiffKey(hash: string, path: string, oldPath?: string): string
 
 function gitStatusIcon(status: string): string {
   switch (status) {
+    case "A":
     case "added": return "A";
+    case "M":
     case "modified": return "M";
+    case "D":
     case "deleted": return "D";
+    case "R":
     case "renamed": return "R";
+    case "C":
     case "copied": return "C";
     default: return "?";
   }
@@ -550,16 +730,47 @@ function formatDate(dateStr: string): string {
   }
 }
 
+function formatFullDate(dateStr: string): string {
+  try {
+    const date = new Date(dateStr);
+    return date.toLocaleString("zh-CN", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  } catch {
+    return dateStr;
+  }
+}
+
+function handleLogScroll(event: Event) {
+  const target = event.target as HTMLElement;
+  if (!target) return;
+  const threshold = 25;
+  const isAtBottom = target.scrollHeight - target.scrollTop - target.clientHeight <= threshold;
+  if (isAtBottom && props.hasMoreGitLog && !props.gitLogLoadingMore && !props.gitLogSearchLoading) {
+    emit("load-more-git-log");
+  }
+}
+
 function gitTrackingShortName(): string {
   return props.gitTrackingBranch.replace(/^[^/]+\//, "");
 }
 
 function gitStatusClass(status: string): string {
   switch (status) {
+    case "A":
     case "added": return "git-status-added";
+    case "M":
     case "modified": return "git-status-modified";
+    case "D":
     case "deleted": return "git-status-deleted";
+    case "R":
     case "renamed":
+    case "C":
     case "copied": return "git-status-renamed";
     default: return "git-status-unknown";
   }
@@ -1138,9 +1349,23 @@ function gitStatusClass(status: string): string {
   gap: 10px;
 }
 
+.git-work-area--log-open .git-local-section {
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.git-work-area--log-open .git-local-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
 .git-work-area--log-open .git-changes-scroll {
-  flex: 1 1 0;
-  min-height: 72px;
+  flex: 0 1 auto;
+  max-height: 180px;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
@@ -1455,17 +1680,21 @@ function gitStatusClass(status: string): string {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 0;
+  padding: 5px 8px;
   background: none;
   border: none;
   color: rgba(255, 255, 255, 0.7);
   cursor: pointer;
   font-size: 12px;
   text-align: left;
+  border-radius: 4px;
+  transition: background 120ms ease, color 120ms ease;
+  width: 100%;
 }
 
 .git-log-file:hover {
-  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.95);
 }
 
 .git-log-file.loading {
@@ -1721,5 +1950,272 @@ function gitStatusClass(status: string): string {
 
 .git-batch-commit-btn {
   white-space: nowrap;
+}
+
+/* Batch group list transitions */
+.batch-group-list-enter-active,
+.batch-group-list-leave-active {
+  transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+.batch-group-list-enter-from {
+  opacity: 0;
+  transform: translateY(10px);
+}
+.batch-group-list-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+.batch-group-list-move {
+  transition: transform 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+/* Git reference (branches/tags) badges */
+.git-log-refs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-right: 2px;
+}
+
+.git-log-ref {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  line-height: 1.2;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.git-log-ref--head {
+  background: rgba(63, 185, 80, 0.12);
+  color: #3fb950;
+  border-color: rgba(63, 185, 80, 0.35);
+}
+
+.git-log-ref--local {
+  background: rgba(56, 139, 253, 0.12);
+  color: #58a6ff;
+  border-color: rgba(56, 139, 253, 0.35);
+}
+
+.git-log-ref--remote {
+  background: rgba(248, 81, 73, 0.08);
+  color: #ff7b72;
+  border-color: rgba(248, 81, 73, 0.3);
+}
+
+.git-log-ref--tag {
+  background: rgba(210, 153, 34, 0.12);
+  color: #d29922;
+  border-color: rgba(210, 153, 34, 0.35);
+}
+
+.git-ref-icon {
+  font-size: 9px;
+}
+
+.git-log-date {
+  font-size: 11px;
+  color: rgba(139, 148, 158, 0.55);
+  margin-left: auto;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.git-log-meta-expanded {
+  display: flex;
+  gap: 16px;
+  font-size: 11px;
+  color: rgba(139, 148, 158, 0.7);
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.git-log-meta-item {
+  display: inline-flex;
+  align-items: center;
+}
+
+.git-log-meta-label {
+  color: rgba(139, 148, 158, 0.55);
+  margin-right: 4px;
+}
+
+/* Collapsible local changes section */
+.git-local-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.git-local-toggle:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.git-local-count-badge {
+  font-size: 10px;
+  color: rgba(139, 148, 158, 0.6);
+  padding: 1px 5px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  margin-left: auto;
+}
+
+.git-local-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+/* Pagination load more button */
+.git-log-more-container {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  margin-top: 8px;
+}
+
+.git-log-more-btn {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.8);
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.git-log-more-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.git-log-more-spinner {
+  width: 12px;
+  height: 12px;
+  border-width: 1.5px;
+  flex-shrink: 0;
+}
+
+/* Git log search styling */
+.git-log-search-container {
+  display: flex;
+  align-items: center;
+  position: relative;
+  margin-top: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 0 8px;
+  height: 28px;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.git-log-search-container:focus-within {
+  border-color: rgba(66, 153, 225, 0.5);
+  box-shadow: 0 0 0 1px rgba(66, 153, 225, 0.25);
+}
+
+.git-log-search-container--loading {
+  border-color: rgba(66, 153, 225, 0.35);
+}
+
+.git-log-search-spinner {
+  width: 12px;
+  height: 12px;
+  border-width: 1.5px;
+  flex-shrink: 0;
+  margin-right: 6px;
+}
+
+.git-log-search-icon {
+  font-size: 11px;
+  opacity: 0.5;
+  margin-right: 6px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.git-log-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 11px;
+  padding: 0;
+  height: 100%;
+  outline: none;
+  width: 100%;
+}
+
+.git-log-search-input::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.git-log-search-clear {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 10px;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: color 120ms ease, background-color 120ms ease;
+  margin-left: 4px;
+}
+
+.git-log-search-clear:hover {
+  color: rgba(255, 255, 255, 0.85);
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.git-log-list--searching {
+  opacity: 0.55;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+
+.git-log-searching-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 4px 16px;
+  font-size: 12px;
+  color: rgba(139, 148, 158, 0.75);
+}
+
+.git-log-search-hint-spinner {
+  width: 12px;
+  height: 12px;
+  border-width: 1.5px;
+  flex-shrink: 0;
 }
 </style>

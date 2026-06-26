@@ -48,6 +48,58 @@ function getTopLevelDir(filePath: string): string {
   return slashIdx === -1 ? normalized : normalized.slice(0, slashIdx);
 }
 
+function parsePartialGroups(jsonStr: string): AiBatchGroupItem[] {
+  const groups: AiBatchGroupItem[] = [];
+  const groupsMatch = jsonStr.match(/"groups"\s*:\s*\[([\s\S]*)/);
+  if (!groupsMatch) return groups;
+
+  const arrayContent = groupsMatch[1];
+  let braceCount = 0;
+  let inString = false;
+  let escape = false;
+  let startIdx = -1;
+
+  for (let i = 0; i < arrayContent.length; i++) {
+    const char = arrayContent[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (char === "\\") {
+      escape = true;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (!inString) {
+      if (char === "{") {
+        if (braceCount === 0) {
+          startIdx = i;
+        }
+        braceCount++;
+      } else if (char === "}") {
+        braceCount--;
+        if (braceCount === 0 && startIdx !== -1) {
+          const objStr = arrayContent.slice(startIdx, i + 1);
+          try {
+            const parsed = JSON.parse(objStr) as AiBatchGroupItem;
+            if (parsed && typeof parsed.name === "string" && Array.isArray(parsed.files)) {
+              groups.push(parsed);
+            }
+          } catch {
+            // ignore incomplete
+          }
+        }
+      } else if (char === "]") {
+        if (braceCount === 0) break;
+      }
+    }
+  }
+  return groups;
+}
+
 export function useGitPanel(
   projectPath: () => string,
   projectOpened: () => boolean,
@@ -104,11 +156,19 @@ export function useGitPanel(
   const gitLoading = ref(false);
   const gitError = ref("");
   let gitStatusRefreshToken = 0;
+  let gitLogSearchToken = 0;
   const gitCommitMessage = ref("");
   const gitCommitting = ref(false);
   const gitGenStep = ref("");
   const gitLogEntries = ref<GitLogEntry[]>([]);
   const gitLogOpen = ref(false);
+  const gitLogCount = ref(30);
+  const gitLogSearchQuery = ref("");
+  const gitLogLoadingMore = ref(false);
+  const gitLogSearchLoading = ref(false);
+  const hasMoreGitLog = computed(() => {
+    return gitLogEntries.value.length === gitLogCount.value;
+  });
   const gitStagedOpen = ref(true);
   const gitUnstagedOpen = ref(true);
   const expandedGitLogEntries = ref<Set<string>>(new Set());
@@ -141,6 +201,28 @@ export function useGitPanel(
   const gitAheadCommits = ref<GitLogEntry[]>([]);
   const gitAheadCommitsOpen = ref(false);
   const gitAheadCommitsLoading = ref(false);
+
+  watch(gitLogOpen, (open) => {
+    if (open) {
+      gitStagedOpen.value = false;
+      gitUnstagedOpen.value = false;
+      gitAheadCommitsOpen.value = false;
+      gitStashOpen.value = false;
+      if (projectOpened() && gitIsRepo.value) {
+        const openSearch = gitLogSearchQuery.value || undefined;
+        gitLogLoadingMore.value = true;
+        fetchGitLog(projectPath(), gitLogCount.value, openSearch)
+          .then((logResult) => {
+            if (logResult.ok) {
+              gitLogEntries.value = logResult.entries;
+            }
+          })
+          .finally(() => {
+            gitLogLoadingMore.value = false;
+          });
+      }
+    }
+  });
 
   const gitStagedFiles = computed(() => {
     const seen = new Set<string>();
@@ -242,6 +324,10 @@ export function useGitPanel(
     gitHeadCommit.value = "";
     gitStatus.value = [];
     gitLogEntries.value = [];
+    gitLogCount.value = 30;
+    gitLogSearchQuery.value = "";
+    gitLogLoadingMore.value = false;
+    gitLogSearchLoading.value = false;
     clearGitDiffCache();
   }
 
@@ -278,7 +364,7 @@ export function useGitPanel(
         void refreshGitRemotes();
         void refreshGitStashes();
         if (gitLogOpen.value) {
-          const logResult = await fetchGitLog(pathAtStart, 20);
+          const logResult = await fetchGitLog(pathAtStart, gitLogCount.value, gitLogSearchQuery.value);
           if (token !== gitStatusRefreshToken || projectPath() !== pathAtStart) return;
           if (logResult.ok) {
             gitLogEntries.value = logResult.entries;
@@ -292,6 +378,48 @@ export function useGitPanel(
     } finally {
       if (token === gitStatusRefreshToken && projectPath() === pathAtStart) {
         gitLoading.value = false;
+      }
+    }
+  }
+
+  async function loadMoreGitLog() {
+    if (gitLogLoadingMore.value || gitLogSearchLoading.value || !projectOpened() || !gitIsRepo.value) return;
+    gitLogLoadingMore.value = true;
+    gitLogCount.value += 30;
+    try {
+      const logResult = await fetchGitLog(projectPath(), gitLogCount.value, gitLogSearchQuery.value);
+      if (logResult.ok) {
+        gitLogEntries.value = logResult.entries;
+      }
+    } catch (e) {
+      debugLog("加载更多提交历史失败:", e);
+    } finally {
+      gitLogLoadingMore.value = false;
+    }
+  }
+
+  async function searchGitLog(query: string) {
+    const trimmed = query.trim();
+    gitLogSearchQuery.value = trimmed;
+    gitLogCount.value = 30;
+    if (!projectOpened() || !gitIsRepo.value) {
+      gitLogSearchLoading.value = false;
+      return;
+    }
+
+    const token = ++gitLogSearchToken;
+    gitLogSearchLoading.value = true;
+    try {
+      const logResult = await fetchGitLog(projectPath(), gitLogCount.value, trimmed || undefined);
+      if (token !== gitLogSearchToken) return;
+      if (logResult.ok) {
+        gitLogEntries.value = logResult.entries;
+      }
+    } catch (e) {
+      debugLog("searchGitLog exception:", e);
+    } finally {
+      if (token === gitLogSearchToken) {
+        gitLogSearchLoading.value = false;
       }
     }
   }
@@ -333,11 +461,26 @@ export function useGitPanel(
 
   const batchGroups = computed<BatchGroup[]>(() => {
     if (aiBatchGroupsResult.value) {
-      return aiBatchGroupsResult.value.map((g) => ({
+      const groups = aiBatchGroupsResult.value.map((g) => ({
         dir: g.name,
-        files: g.files.map((p) => ({ path: p, status: "modified" })),
+        files: g.files.map((p) => {
+          const orig = gitUnstagedFiles.value.find((uf) => uf.path === p);
+          return { path: p, status: orig?.status || "modified" };
+        }),
         message: g.message,
       }));
+
+      // Find any unstaged files that haven't been grouped yet
+      const groupedPaths = new Set(aiBatchGroupsResult.value.flatMap((g) => g.files));
+      const remaining = gitUnstagedFiles.value.filter((f) => !groupedPaths.has(f.path));
+      if (remaining.length > 0) {
+        groups.push({
+          dir: aiBatchGrouping.value ? "正在分析其余变更" : "其他未分组变更",
+          files: remaining.map((f) => ({ path: f.path, status: f.status })),
+          message: "",
+        });
+      }
+      return groups;
     }
     const dirMap = new Map<string, { path: string; status: string }[]>();
     for (const f of gitUnstagedFiles.value) {
@@ -446,15 +589,21 @@ export function useGitPanel(
     aiBatchGrouping.value = true;
     aiBatchGroupingStep.value = "连接服务…";
     gitError.value = "";
+    let accumulatedJson = "";
     try {
       const result = await aiBatchGroupsApi(
         projectPath(),
         cfg.endpoint.trim(),
         cfg.apiKey.trim(),
         cfg.model.trim(),
-        () => {
+        (delta) => {
           if (!aiBatchGroupingStep.value.startsWith("AI")) {
             aiBatchGroupingStep.value = "AI 分析中…";
+          }
+          accumulatedJson += delta;
+          const partial = parsePartialGroups(accumulatedJson);
+          if (partial.length > 0) {
+            aiBatchGroupsResult.value = partial;
           }
         },
         (step) => {
@@ -1064,6 +1213,13 @@ export function useGitPanel(
     gitGenStep,
     gitLogEntries,
     gitLogOpen,
+    gitLogCount,
+    gitLogSearchQuery,
+    hasMoreGitLog,
+    gitLogLoadingMore,
+    gitLogSearchLoading,
+    loadMoreGitLog,
+    searchGitLog,
     gitStagedOpen,
     gitUnstagedOpen,
     expandedGitLogEntries,

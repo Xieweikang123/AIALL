@@ -54,6 +54,11 @@ export interface GitCommitResult {
   error?: string;
 }
 
+export interface GitRef {
+  name: string;
+  type: "head" | "local" | "remote" | "tag" | "other";
+}
+
 export interface GitLogEntry {
   hash: string;
   shortHash: string;
@@ -61,6 +66,7 @@ export interface GitLogEntry {
   date: string;
   message: string;
   files: GitLogFile[];
+  refs?: GitRef[];
 }
 
 export interface GitLogFile {
@@ -225,12 +231,16 @@ export async function commitGitChanges(projectPath: string, message: string): Pr
   }
 }
 
-export async function fetchGitLog(projectPath: string, count = 20): Promise<GitLogResult> {
+export async function fetchGitLog(projectPath: string, count = 20, search?: string): Promise<GitLogResult> {
   try {
-    const url = backendUrl(`/backend/vibe/git/log?path=${encodeURIComponent(projectPath)}&count=${count}`);
+    let url = backendUrl(`/backend/vibe/git/log?path=${encodeURIComponent(projectPath)}&count=${count}`);
+    if (search?.trim()) {
+      url += `&search=${encodeURIComponent(search.trim())}`;
+    }
     const response = await fetch(url);
     const data = await readJsonResponse<GitLogResult>(response);
-    return { ...data, entries: data.entries?.map((entry) => ({ ...entry, files: entry.files || [] })) || [] };
+    const result = { ...data, entries: data.entries?.map((entry) => ({ ...entry, files: entry.files || [] })) || [] };
+    return result;
   } catch (error) {
     return { ok: false, entries: [], error: error instanceof Error ? error.message : "网络错误" };
   }

@@ -28,6 +28,48 @@ import {
 } from "./server/vibeGit";
 import type { ServerResponse, IncomingMessage } from "node:http";
 
+function preprocessDiff(patch: string, maxCharsPerFile = 3000, totalMaxChars = 15000): string {
+  if (!patch) return "";
+
+  // Split diff by "diff --git "
+  const filesDiffs = patch.split(/^diff --git /m);
+  let processedPatch = "";
+  let currentTotal = 0;
+
+  for (const fileDiff of filesDiffs) {
+    if (!fileDiff.trim()) continue;
+
+    // Extract the header line (usually the first line)
+    const headerLine = fileDiff.split("\n")[0] || "";
+    // Check if it's a lockfile, minified file, or built asset
+    const isLockFile = /\b(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)\b/.test(headerLine);
+    const isMinifiedOrBuild = /\b(dist|build|out)\b|\.min\.(js|css)\b|\.map\b/.test(headerLine);
+
+    let filePatch = "diff --git " + fileDiff;
+    if (isLockFile || isMinifiedOrBuild) {
+      const lines = filePatch.split("\n");
+      // Keep only the first 4 lines of the diff header (e.g. diff --git, index, ---, +++)
+      filePatch = lines.slice(0, 4).join("\n") + "\n\n[Diff omitted: lock file or generated/minified asset]\n";
+    } else if (filePatch.length > maxCharsPerFile) {
+      filePatch = filePatch.slice(0, maxCharsPerFile) + `\n\n[Diff truncated: exceeded ${maxCharsPerFile} characters]\n`;
+    }
+
+    if (currentTotal + filePatch.length > totalMaxChars) {
+      const lines = filePatch.split("\n");
+      const truncatedNote = lines.slice(0, 4).join("\n") + "\n\n[Diff omitted: total AI budget limit reached]\n";
+      if (currentTotal + truncatedNote.length <= totalMaxChars + 1000) {
+        processedPatch += truncatedNote;
+      }
+      break;
+    }
+
+    processedPatch += filePatch;
+    currentTotal += filePatch.length;
+  }
+
+  return processedPatch;
+}
+
 export function registerGitRoutes(middlewares: Connect.Server) {
   // GET /backend/vibe/git/status
   middlewares.use("/backend/vibe/git/status", async (req: IncomingMessage, res: ServerResponse) => {
@@ -208,7 +250,7 @@ export function registerGitRoutes(middlewares: Connect.Server) {
         return;
       }
 
-      const diffText = diffResult.patch || "";
+      const diffText = preprocessDiff(diffResult.patch || "", 3000, 12000);
       const fileList = stagedFiles.map((f) => `${f.status}: ${f.path}`).join("\n");
       const prompt = `你是一个 Git 提交信息生成器。根据以下已暂存的文件变更生成一条准确的中文提交信息。
 
@@ -216,7 +258,7 @@ export function registerGitRoutes(middlewares: Connect.Server) {
 ${fileList}
 
 Diff 内容：
-${diffText.slice(0, 12000)}
+${diffText}
 
 要求：
 - 使用中文
@@ -348,7 +390,7 @@ ${diffText.slice(0, 12000)}
 
       sendSseEvent(res, "progress", { step: `读取 diff（${unstagedFiles.length} 个文件）…` });
       const diffResult = await gitDiff(resolved, undefined, false);
-      const diffText = diffResult.ok ? (diffResult.patch || "") : "";
+      const diffText = diffResult.ok ? preprocessDiff(diffResult.patch || "", 3000, 15000) : "";
       const fileList = unstagedFiles.map((f) => `${f.status}: ${f.path}`).join("\n");
       const prompt = `你是一个 Git 提交分组助手。根据以下未暂存的文件变更，将文件按功能/逻辑相关性分成多个批次，每个批次生成一条中文提交信息。
 
@@ -356,7 +398,7 @@ ${diffText.slice(0, 12000)}
 ${fileList}
 
 Diff 内容：
-${diffText.slice(0, 15000)}
+${diffText}
 
 要求：
 - 按功能模块或逻辑相关性分组，不要简单按目录分
@@ -491,6 +533,7 @@ ${diffText.slice(0, 15000)}
       const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
       const projectPath = url.searchParams.get("path") || "";
       const count = Number(url.searchParams.get("count")) || 20;
+      const search = url.searchParams.get("search") || "";
 
       if (!projectPath) {
         sendJson(res, 400, { ok: false, error: "缺少 path 参数" });
@@ -498,7 +541,7 @@ ${diffText.slice(0, 15000)}
       }
 
       const resolved = path.resolve(projectPath);
-      const result = await gitLog(resolved, count);
+      const result = await gitLog(resolved, count, search || undefined);
       sendJson(res, 200, result);
     } catch (error) {
       sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "获取提交历史失败" });

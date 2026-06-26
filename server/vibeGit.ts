@@ -68,6 +68,11 @@ export interface GitCommitResult {
   error?: string;
 }
 
+export interface GitRef {
+  name: string;
+  type: "head" | "local" | "remote" | "tag" | "other";
+}
+
 export interface GitLogEntry {
   hash: string;
   shortHash: string;
@@ -75,6 +80,7 @@ export interface GitLogEntry {
   date: string;
   message: string;
   files: GitLogFile[];
+  refs?: GitRef[];
 }
 
 export interface GitLogFile {
@@ -427,52 +433,144 @@ export async function gitCommit(projectRoot: string, message: string): Promise<G
   }
 }
 
-export async function gitLog(projectRoot: string, count = 20): Promise<GitLogResult> {
-  try {
-    const { stdout } = await gitExec(projectRoot, [
-      "log",
-      `--max-count=${count}`,
-      "--name-status",
-      "--format=%x1e%H%x1f%h%x1f%an%x1f%ai%x1f%B%x00",
-    ]);
-
-    const entries: GitLogEntry[] = [];
-    const blocks = stdout.split("\x1e").filter((block) => block.trim());
-
-    for (const block of blocks) {
-      const nullIdx = block.indexOf("\x00");
-      if (nullIdx === -1) continue;
-
-      const headerStr = block.substring(0, nullIdx);
-      const fileStr = block.substring(nullIdx + 1);
-      const headerParts = headerStr.split("\x1f");
-
-      if (headerParts.length >= 5) {
-        const files: GitLogFile[] = [];
-        const fileLines = fileStr.split("\n");
-        for (const line of fileLines) {
-          if (!line.trim()) continue;
-          const parts = line.split("\t");
-          const status = parts[0]?.trim() || "";
-          if (!status) continue;
-          if ((status.startsWith("R") || status.startsWith("C")) && parts.length >= 3) {
-            files.push({ status: status[0], oldPath: parts[1].trim(), path: parts[2].trim() });
-          } else if (parts[1]?.trim()) {
-            files.push({ status: status[0], path: parts[1].trim() });
-          }
-        }
-
-        entries.push({
-          hash: headerParts[0].trim(),
-          shortHash: headerParts[1].trim(),
-          author: headerParts[2].trim(),
-          date: headerParts[3].trim(),
-          message: headerParts.slice(4).join("\x1f").replace(/\n+$/, "").trim(),
-          files,
-        });
+function parseGitRefs(decorations: string): GitRef[] {
+  if (!decorations) return [];
+  const trimmed = decorations.trim();
+  if (!trimmed.startsWith("(") || !trimmed.endsWith(")")) return [];
+  const content = trimmed.slice(1, -1);
+  return content
+    .split(",")
+    .map((part) => {
+      const name = part.trim();
+      if (name.startsWith("HEAD -> ")) {
+        return { name: name.replace("HEAD -> ", ""), type: "head" as const };
       }
+      if (name === "HEAD") {
+        return { name, type: "head" as const };
+      }
+      if (name.startsWith("tag: ")) {
+        return { name: name.replace("tag: ", ""), type: "tag" as const };
+      }
+      const hasSlash = name.includes("/");
+      if (hasSlash) {
+        const firstPart = name.split("/")[0];
+        const commonLocalPrefixes = ["feature", "bugfix", "hotfix", "release", "dev", "personal"];
+        if (commonLocalPrefixes.includes(firstPart)) {
+          return { name, type: "local" as const };
+        }
+        return { name, type: "remote" as const };
+      }
+      return { name, type: "local" as const };
+    })
+    .filter((ref) => ref.name.length > 0);
+}
+
+const GIT_LOG_FORMAT = "%x1e%H%x1f%h%x1f%an%x1f%ai%x1f%d%x1f%B%x00";
+
+function parseGitLogStdout(stdout: string): GitLogEntry[] {
+  const entries: GitLogEntry[] = [];
+  const blocks = stdout.split("\x1e").filter((block) => block.trim());
+
+  for (const block of blocks) {
+    const nullIdx = block.indexOf("\x00");
+    if (nullIdx === -1) continue;
+
+    const headerStr = block.substring(0, nullIdx);
+    const fileStr = block.substring(nullIdx + 1);
+    const headerParts = headerStr.split("\x1f");
+
+    if (headerParts.length >= 6) {
+      const files: GitLogFile[] = [];
+      const fileLines = fileStr.split("\n");
+      for (const line of fileLines) {
+        if (!line.trim()) continue;
+        const parts = line.split("\t");
+        const status = parts[0]?.trim() || "";
+        if (!status) continue;
+        if ((status.startsWith("R") || status.startsWith("C")) && parts.length >= 3) {
+          files.push({ status: status[0], oldPath: parts[1].trim(), path: parts[2].trim() });
+        } else if (parts[1]?.trim()) {
+          files.push({ status: status[0], path: parts[1].trim() });
+        }
+      }
+
+      entries.push({
+        hash: headerParts[0].trim(),
+        shortHash: headerParts[1].trim(),
+        author: headerParts[2].trim(),
+        date: headerParts[3].trim(),
+        refs: parseGitRefs(headerParts[4]),
+        message: headerParts.slice(5).join("\x1f").replace(/\n+$/, "").trim(),
+        files,
+      });
+    }
+  }
+
+  return entries;
+}
+
+async function runGitLogQuery(projectRoot: string, count: number, extraArgs: string[] = []): Promise<GitLogEntry[]> {
+  const { stdout } = await gitExec(projectRoot, [
+    "log",
+    `--max-count=${count}`,
+    "--name-status",
+    `--format=${GIT_LOG_FORMAT}`,
+    ...extraArgs,
+  ]);
+  return parseGitLogStdout(stdout);
+}
+
+async function runGitLogQuerySafe(projectRoot: string, count: number, extraArgs: string[] = []): Promise<GitLogEntry[]> {
+  try {
+    return await runGitLogQuery(projectRoot, count, extraArgs);
+  } catch {
+    return [];
+  }
+}
+
+async function tryResolveCommitHash(projectRoot: string, query: string): Promise<string | null> {
+  if (!/^[0-9a-fA-F]{4,40}$/.test(query)) return null;
+  try {
+    const { stdout } = await gitExec(projectRoot, ["rev-parse", "--verify", `${query}^{commit}`]);
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function mergeGitLogEntries(lists: GitLogEntry[][], count: number): GitLogEntry[] {
+  const seen = new Set<string>();
+  const merged: GitLogEntry[] = [];
+  for (const list of lists) {
+    for (const entry of list) {
+      if (seen.has(entry.hash)) continue;
+      seen.add(entry.hash);
+      merged.push(entry);
+    }
+  }
+  merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  return merged.slice(0, count);
+}
+
+export async function gitLog(projectRoot: string, count = 20, search?: string): Promise<GitLogResult> {
+  try {
+    const trimmed = search?.trim();
+    if (!trimmed) {
+      const entries = await runGitLogQuery(projectRoot, count);
+      return { ok: true, entries };
     }
 
+    const queries: Promise<GitLogEntry[]>[] = [
+      runGitLogQuerySafe(projectRoot, count, ["-i", "--grep", trimmed]),
+      runGitLogQuerySafe(projectRoot, count, ["-i", "--author", trimmed]),
+    ];
+
+    const resolvedHash = await tryResolveCommitHash(projectRoot, trimmed);
+    if (resolvedHash) {
+      queries.push(runGitLogQuerySafe(projectRoot, count, [resolvedHash]));
+    }
+
+    const entries = mergeGitLogEntries(await Promise.all(queries), count);
     return { ok: true, entries };
   } catch (error) {
     return { ok: false, entries: [], error: error instanceof Error ? error.message : "获取提交历史失败" };
@@ -507,7 +605,7 @@ export async function gitAheadCommits(projectRoot: string, count = 20): Promise<
       `${trackingBranch}..HEAD`,
       `--max-count=${count}`,
       "--name-status",
-      "--format=%x1e%H%x1f%h%x1f%an%x1f%ai%x1f%B%x00",
+      "--format=%x1e%H%x1f%h%x1f%an%x1f%ai%x1f%d%x1f%B%x00",
     ]);
 
     const entries: GitLogEntry[] = [];
@@ -521,7 +619,7 @@ export async function gitAheadCommits(projectRoot: string, count = 20): Promise<
       const fileStr = block.substring(nullIdx + 1);
       const headerParts = headerStr.split("\x1f");
 
-      if (headerParts.length >= 5) {
+      if (headerParts.length >= 6) {
         const files: GitLogFile[] = [];
         const fileLines = fileStr.split("\n");
         for (const line of fileLines) {
@@ -541,7 +639,8 @@ export async function gitAheadCommits(projectRoot: string, count = 20): Promise<
           shortHash: headerParts[1].trim(),
           author: headerParts[2].trim(),
           date: headerParts[3].trim(),
-          message: headerParts.slice(4).join("\x1f").replace(/\n+$/, "").trim(),
+          refs: parseGitRefs(headerParts[4]),
+          message: headerParts.slice(5).join("\x1f").replace(/\n+$/, "").trim(),
           files,
         });
       }
