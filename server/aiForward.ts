@@ -82,14 +82,29 @@ function retryDelayForAttempt(attempt: number): number {
   return Math.min(30_000, 2000 * 2 ** (attempt - 1));
 }
 
+function cleanHtmlError(html: string): string {
+  const trimmed = html.trim();
+  if (!/<[a-z/!]/i.test(trimmed)) {
+    return trimmed.slice(0, 500);
+  }
+  const titleMatch = trimmed.match(/<title>([\s\S]*?)<\/title>/i);
+  if (titleMatch && titleMatch[1]) {
+    return `服务商返回错误 HTML 页面 (${titleMatch[1].replace(/\s+/g, " ").trim()})`;
+  }
+  const h1Match = trimmed.match(/<h1>([\s\S]*?)<\/h1>/i);
+  if (h1Match && h1Match[1]) {
+    return `服务商返回错误: ${h1Match[1].replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim()}`;
+  }
+  return "服务商返回了 HTML 错误页面 (可能由于网络拦截、Cloudflare 防护或服务商宕机)";
+}
+
 export function formatAiHttpError(status: number, rawText: string): string {
   let detail = "";
   try {
     const parsed = JSON.parse(rawText) as { error?: { message?: string }; message?: string };
     detail = String(parsed.error?.message || parsed.message || "").trim();
   } catch {
-    const trimmed = rawText.trim();
-    if (trimmed) detail = trimmed.slice(0, 500);
+    detail = cleanHtmlError(rawText);
   }
 
   const base = detail ? `请求失败，HTTP ${status}：${detail}` : `请求失败，HTTP ${status}`;
