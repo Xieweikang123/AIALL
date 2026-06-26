@@ -12,9 +12,7 @@ import {
 } from "./aiForward";
 import {
   TextToolCallStreamFilter,
-  hasTextToolCallMarkup,
   stripTextToolCallMarkup,
-  synthesizeToolCallsFromText,
 } from "./textToolCalls";
 import {
   AGENT_SAFETY_MAX_TURNS,
@@ -27,7 +25,6 @@ import {
 } from "./agentTurnBudget";
 import {
   buildAskSystemPromptLines,
-  buildFileAccessPathHint,
   buildSearchFilesEmptyHint,
 } from "./agentAskPrompt";
 import {
@@ -37,20 +34,13 @@ import {
   buildExploreQuotedFollowUpHint,
   buildExploreSectionFillNudge,
   buildExploreChangesNudge,
-  buildExploreSystemPromptLines,
 } from "./agentExplorePrompt";
 import {
-  classifyExploreKnowledgeIntent,
-  exploreIntentUsesKnowledgeManifest,
   isExploreContinuePrompt,
   isExploreSectionFillPrompt,
   isExploreChangesPrompt,
   isKnowledgeQuoteFollowUpPrompt,
 } from "../src/services/knowledgeExplore";
-import {
-  buildKnowledgeExploreManifest,
-  buildKnowledgeRebuildHint,
-} from "../src/services/projectReportDisplay";
 import { gitChangedFilesSince } from "./vibeGit";
 import {
   ASK_EXPLORE_TURN_BUDGET,
@@ -83,17 +73,11 @@ import {
   buildUserNegationNudge,
   buildEmptyReplyRetryNudge,
   buildPrematureCompletionRetryNudge,
-  buildCodeReviewHonestyNudge,
-  buildUserErrorQuoteHint,
-  buildUserFailureReportNudge,
-  buildSameIssueFollowUpHint,
   buildSameIssueFollowUpForceSummaryNudge,
   buildPatchFailureCompletionRetryNudge,
   buildExplorationArchiveWriteBlockedMessage,
   buildAlternateUiPatchStrategyNudge,
-  buildUltraShortOpenTaskHint,
   buildPostPatchVerifyNudge,
-  buildPostPatchReadVerifyNudge,
   isExplorationArchivePath,
   EXECUTE_PLAN_EXPLORE_TURN_BUDGET,
   EXPLORE_INTERIM_DIAGNOSIS_TURN,
@@ -106,30 +90,19 @@ import {
   PLAN_MAX_TOTAL_EXPLORE_HARD,
   PLAN_MAX_TOTAL_EXPLORE_SOFT,
 } from "./agentExplorationBudget";
-import { buildReplyAccuracyHint } from "../src/services/agentReplyAccuracy";
 import {
-  buildScheduledJobRegistrationNudge,
   buildConsultativeTopicHints,
   shouldNudgeScheduledJobRegistration,
 } from "../src/services/agentConsultativeTopics";
 import { resolveUserIntent, classifyUserIntentFromRules, shouldSkipAiIntentClassifier, formatIntentClassificationDetail } from "../src/services/agentIntentClassifier";
 import { classifyUserIntentWithAi } from "./agentIntentClassifier";
 import { extractJobClassNamesFromReadPaths } from "../src/services/agentStructuralPatterns";
-import { buildConsultativeBuildHint, buildAgentStepClarifyContinueHint, buildBuildWriteBlockedHint, buildImplementFollowUpHint, buildLocateStatusFollowUpHint, buildUiDefectBuildHint, buildWriteToolBlockedMessage, isUiAppearanceQuestionPrompt, historySuggestsActiveImplementation, historySuggestsQuotePositionFix } from "../src/services/agentUserIntent";
-import { detectProjectRuntimeProfile, buildRuntimeAwarenessHint, buildShellAwarenessHint } from "./agentRuntimeHint";
+import { buildConsultativeBuildHint, buildAgentStepClarifyContinueHint, buildImplementFollowUpHint, buildLocateStatusFollowUpHint, buildUiDefectBuildHint, isUiAppearanceQuestionPrompt, historySuggestsQuotePositionFix } from "../src/services/agentUserIntent";
+import { detectProjectRuntimeProfile } from "./agentRuntimeHint";
 import { detectUserNegation, stripQuotedReplyPrefix } from "../src/services/agentContinuation";
-import {
-  ASK_MAX_CONTEXT_CHARS,
-  CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS,
-  EXECUTE_PLAN_MAX_CONTEXT_CHARS,
-  MAX_AGENT_CONTEXT_CHARS,
-  PLAN_MAX_CONTEXT_CHARS,
-  resolveAgentRunPolicy,
-} from "./agentRunPolicy";
-import { buildAgentSuggestionsPromptHint } from "../src/services/agentSuggestions";
+import { resolveAgentRunPolicy } from "./agentRunPolicy";
 import {
   buildBlockedGrepAfterLocateMessage,
-  buildBlockedGrepMessage,
   buildEnglishPlanningNudge,
   buildLowSignalVisionLocateGrepMessage,
   buildOverlyBroadVisionGrepMessage,
@@ -162,34 +135,20 @@ import {
   type ToolGuardContext,
 } from "./agentExploreGuard";
 import {
-  buildExecutePlanSystemHint,
-  buildTargetFileManifest,
   normalizeRunProfile,
   type AgentRunProfileInput,
 } from "./agentRunProfile";
 import {
-  buildProjectContext,
   buildInjectedKeyFilePathSet,
   formatInjectedKeyFileReadNudge,
-  formatProjectContextForBuild,
-  formatProjectContextForPrompt,
   invalidateProjectContextCache,
 } from "./vibeProjectContext";
 import {
-  formatProjectMemoryForPrompt,
   isProjectMemorySection,
-  readProjectMemory,
 } from "./vibeProjectMemory";
-import {
-  formatProjectKnowledgeForPrompt,
-  readProjectKnowledge,
-} from "./vibeProjectKnowledge";
-import { formatAgentsGuideForPrompt, readProjectAgentsGuide } from "./vibeProjectAgentsGuide";
 import { buildMemoryProposalToolResult } from "./projectMemoryProposal";
 import { buildSkillProposalToolResult } from "./projectSkillProposal";
 import {
-  buildExplorationArchivePromptBlock,
-  buildProjectSkillsPromptBlock,
   listProjectSkills,
   readProjectSkill,
 } from "./vibeProjectSkills";
@@ -210,7 +169,6 @@ import {
   buildConsultativeUiAppearanceHint,
   buildConsultativeAppearanceAnswerAfterReadHint,
   buildConsultativeUiAppearanceRetryHint,
-  buildModelIdentityHint,
   buildConsultativeVisibleShellEmptyInnerHint,
   buildUnreconciledEmptyShellRetryHint,
   buildVisionConsultativeContinueHint,
@@ -219,8 +177,6 @@ import {
   buildVisionFirstTurnPrematureCompletionRetryHint,
   buildVisionFirstTurnRetryHint,
   buildVisionUserContent,
-  contentCharSize,
-  contentDisplayText,
   extractVisibleAnchorQuotes,
   isAdequateVisionFirstTurnDescription,
   isPrematureVisionCompletionClaim,
@@ -239,7 +195,6 @@ import {
 import {
   appendVisionAnchorPrefgrepMessages,
   buildVisionConsultativeReadAfterPrefgrepHint,
-  isRuntimeVisibleTextGrepPattern,
 } from "./visionAnchorPrefgrep";
 import {
   buildConsultativeAccuracyTraceHint,
@@ -250,6 +205,39 @@ import {
   buildBehaviorPurposeTraceRetryHint,
   shouldBlockBehaviorPurposeFinalize,
 } from "./consultativeBehaviorTrace";
+import { buildAgentContext, resolveOpenFileInProject } from "./agentContextBuilder";
+import type { VibeAgentEvent, VibeChatMode, VibeChatHistoryMessage } from "../shared/agentTypes";
+import {
+  VIBE_AGENT_TOOLS,
+  READ_ONLY_AGENT_TOOLS,
+  READ_ONLY_AGENT_TOOL_NAMES,
+  WRITE_AGENT_TOOL_NAMES,
+  isSubstantiveChineseToolPreamble,
+  canParallelizeToolBatch,
+  callIsProductiveWrite,
+  buildDoneData,
+  parseToolArgs,
+  resolveToolCallsFromAssistant,
+  toolSummary,
+} from "./agentClassifier";
+import {
+  compactMessagesForModel,
+  buildHistoryMessages,
+  historyForDisplay,
+  messagesForTurnDisplay,
+  formatCharCount,
+  formatElapsedMs,
+  emitAgentContext,
+  truncateForSse,
+  truncateToolResultForModel,
+  messageCharSize,
+  MAX_TOOL_RESULT_SSE_CHARS,
+} from "./agentContext";
+import {
+  streamProgressDetail,
+  streamProgressPhase,
+  emitUserVisibleAssistantMessage,
+} from "./agentStream";
 
 export type { VibeAgentEvent, VibeChatMode, VibeChatHistoryMessage } from "../shared/agentTypes";
 
@@ -274,11 +262,6 @@ export interface RunVibeAgentParams {
   signal?: AbortSignal;
 }
 
-const MAX_HISTORY_MESSAGES = 40;
-const MAX_HISTORY_CHARS = 120_000;
-const MAX_SSE_TEXT_CHARS = 24_000;
-const MAX_TOOL_RESULT_SSE_CHARS = 16_000;
-const MAX_TOOL_RESULT_MODEL_CHARS = 10_000;
 export {
   MAX_AGENT_CONTEXT_CHARS,
   EXECUTE_PLAN_MAX_CONTEXT_CHARS,
@@ -286,790 +269,12 @@ export {
   CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS,
   PLAN_MAX_CONTEXT_CHARS,
 } from "./agentRunPolicy";
-/** Proactively compress older tool outputs above this size to reduce model latency. */
-export const SOFT_COMPACT_CONTEXT_CHARS = 36_000;
-const PROTECTED_RECENT_TOOL_RESULTS = 2;
-
-function truncateText(text: string, max: number, suffix: string): string {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max)}\n\n${suffix.replace("{n}", String(text.length))}`;
-}
-
-function truncateForSse(text: string, max = MAX_SSE_TEXT_CHARS): string {
-  return truncateText(text, max, "…（内容较长，已自动续跑中…）");
-}
-
-function truncateToolResultForModel(text: string): string {
-  return truncateText(
-    text,
-    MAX_TOOL_RESULT_MODEL_CHARS,
-    "…（内容已截断，共 {n} 字符。如需更多请用 read_file 的 offset/limit 分段读取）",
-  );
-}
-
-function messageCharSize(message: ChatCompletionMessage): number {
-  let size = contentCharSize(message.content);
-  if (message.tool_calls?.length) {
-    size += JSON.stringify(message.tool_calls).length;
-  }
-  return size;
-}
-
-export function compactMessagesForModel(
-  messages: ChatCompletionMessage[],
-  maxContextChars = MAX_AGENT_CONTEXT_CHARS,
-): ChatCompletionMessage[] {
-  const result = messages.map((message) => {
-    if (message.role !== "tool" || !message.content) return { ...message };
-    return { ...message, content: truncateToolResultForModel(String(message.content)) };
-  });
-
-  let total = result.reduce((sum, message) => sum + messageCharSize(message), 0);
-  const needsHardCompact = total > maxContextChars;
-  const needsSoftCompact = total > SOFT_COMPACT_CONTEXT_CHARS;
-  if (!needsHardCompact && !needsSoftCompact) return result;
-
-  const compressTarget = needsHardCompact ? maxContextChars : SOFT_COMPACT_CONTEXT_CHARS;
-
-  const toolIndexes = result
-    .map((message, index) => (message.role === "tool" ? index : -1))
-    .filter((index) => index >= 0);
-  const compressible = Math.max(0, toolIndexes.length - PROTECTED_RECENT_TOOL_RESULTS);
-
-  for (let ti = 0; ti < compressible; ti += 1) {
-    const index = toolIndexes[ti];
-    const raw = String(result[index].content || "");
-    const lineHint = raw.match(/lines \d+-\d+/)?.[0] || "";
-    result[index] = {
-      ...result[index],
-      content: `（较早的工具输出已压缩${lineHint ? `，${lineHint}` : ""}，约 ${raw.length} 字符）`,
-    };
-    total = result.reduce((sum, message) => sum + messageCharSize(message), 0);
-    if (total <= compressTarget) break;
-  }
-
-  if (total > maxContextChars) {
-    const systemIdx = result.findIndex((message) => message.role === "system");
-    if (systemIdx >= 0) {
-      const sysContent = String(result[systemIdx]?.content || "");
-      const excess = total - maxContextChars;
-      if (sysContent.length > excess + 500) {
-        result[systemIdx] = {
-          ...result[systemIdx],
-          content: `${sysContent.slice(0, sysContent.length - excess - 80)}\n…（system 上下文已截断）`,
-        };
-      }
-    }
-  }
-
-  return result;
-}
-
-function historyForDisplay(history?: VibeChatHistoryMessage[]): Array<{ role: string; content: string }> {
-  return buildHistoryMessages(history).map((m) => ({
-    role: m.role,
-    content: truncateForSse(String(m.content || ""), 4000),
-  }));
-}
-
-const TURN_DISPLAY_MESSAGE_CHARS = 2_400;
-
-function messagesForTurnDisplay(messages: ChatCompletionMessage[]): Array<{ role: string; content: string; toolCalls?: string }> {
-  return messages.map((message) => {
-    const item: { role: string; content: string; toolCalls?: string } = {
-      role: message.role,
-      content: truncateForSse(contentDisplayText(message.content), TURN_DISPLAY_MESSAGE_CHARS),
-    };
-    if (message.tool_calls?.length) {
-      item.toolCalls = message.tool_calls
-        .map((call) => {
-          const args = call.function.arguments || "{}";
-          const argsPreview = args.length > 600 ? `${args.slice(0, 600)}…` : args;
-          return `${call.function.name}(${argsPreview})`;
-        })
-        .join("\n");
-    }
-    return item;
-  });
-}
-
-function emitAgentContext(
-  onEvent: RunVibeAgentParams["onEvent"],
-  data: Extract<VibeAgentEvent, { type: "agent_context" }>["data"],
-) {
-  onEvent({
-    type: "agent_context",
-    data: {
-      ...data,
-      systemPrompt: truncateForSse(data.systemPrompt),
-      projectContext: data.projectContext ? truncateForSse(data.projectContext) : undefined,
-    },
-  });
-}
-
-function buildHistoryMessages(history?: VibeChatHistoryMessage[]): ChatCompletionMessage[] {
-  if (!history?.length) return [];
-
-  const trimmed = history
-    .filter((m) => (m.role === "user" || m.role === "assistant") && m.content.trim())
-    .slice(-MAX_HISTORY_MESSAGES);
-
-  let totalChars = 0;
-  const result: ChatCompletionMessage[] = [];
-  for (let i = trimmed.length - 1; i >= 0; i -= 1) {
-    const item = trimmed[i];
-    const len = item.content.length;
-    if (totalChars + len > MAX_HISTORY_CHARS && result.length > 0) break;
-    totalChars += len;
-    result.unshift({ role: item.role, content: item.content });
-  }
-  return result;
-}
-
-function formatCharCount(chars: number): string {
-  if (chars >= 10_000) return `${(chars / 10_000).toFixed(1)} 万字符`;
-  if (chars >= 1000) return `${(chars / 1000).toFixed(1)}k 字符`;
-  return `${chars} 字符`;
-}
-
-function formatElapsedMs(ms: number): string {
-  const sec = Math.max(0, Math.floor(ms / 1000));
-  if (sec < 60) return `${sec}s`;
-  return `${Math.floor(sec / 60)}m ${sec % 60}s`;
-}
-
-function toolDisplayName(name: string): string {
-  const map: Record<string, string> = {
-    read_file: "读取文件",
-    list_dir: "列出目录",
-    grep: "搜索内容",
-    search_files: "搜索文件",
-    write_file: "写入文件",
-    patch_file: "局部修改",
-    delete_file: "删除文件",
-    web_search: "联网搜索",
-    web_extract: "抓取网页",
-  };
-  return map[name] || name;
-}
-
-function streamProgressDetail(progress: ModelStreamProgress): string {
-  const elapsed = formatElapsedMs(progress.elapsedMs);
-  if (progress.phase === "request_sent") return "正在发送请求…";
-  if (progress.phase === "waiting_first_byte") return `等待模型首包 · ${elapsed}`;
-  if (progress.phase === "planning_tools") {
-    const names = progress.toolNames.map(toolDisplayName).join("、");
-    return names
-      ? `规划工具：${names}${progress.toolCallCount > progress.toolNames.length ? "…" : ""} · ${elapsed}`
-      : `规划工具调用 · ${elapsed}`;
-  }
-  if (progress.streamChars > 0) {
-    return `流式输出 ${progress.streamChars} 字 · ${progress.streamChunks} 包 · ${elapsed}`;
-  }
-  if (progress.phase === "streaming") {
-    return `流式通道已连接 · 等待内容 · ${elapsed}`;
-  }
-  return `已等待 ${elapsed}`;
-}
-
-function streamProgressPhase(progress: ModelStreamProgress): string {
-  if (progress.phase === "request_sent") return "sending_request";
-  if (progress.phase === "waiting_first_byte") return "waiting_model";
-  if (progress.phase === "planning_tools") return "planning_tools";
-  if (progress.streamChars > 0) return "streaming_model";
-  return "waiting_model";
-}
-
-const VIBE_AGENT_TOOLS = [
-  {
-    type: "function",
-    function: {
-      name: "list_dir",
-      description: "列出目录下的文件和子目录。空 path 表示项目根；相对路径限于项目内；绝对路径可读本机任意目录。",
-      parameters: {
-        type: "object",
-        properties: {
-          path: { type: "string", description: "目录路径：''=项目根，相对=项目内，绝对=本机任意目录" },
-        },
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "read_file",
-      description: "读取文本文件。支持 offset/limit 按行读取大文件。相对路径限于项目内；绝对路径可读本机任意文件（如 AppData 下的配置/会话 JSON）。建议一次读取 200-500 行连续代码，避免小窗口（<80 行）反复读取同一文件。",
-      parameters: {
-        type: "object",
-        properties: {
-          path: { type: "string", description: "文件路径：相对项目根，或本机绝对路径" },
-          offset: { type: "number", description: "起始行号，从 1 开始，默认 1" },
-          limit: { type: "number", description: "读取行数，默认 500，最大 800" },
-        },
-        required: ["path"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "grep",
-      description: "在项目内搜索文本（正则或关键词）。",
-      parameters: {
-        type: "object",
-        properties: {
-          pattern: { type: "string", description: "搜索模式" },
-          max_matches: { type: "number", description: "最大匹配数，默认 40" },
-        },
-        required: ["pattern"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "search_files",
-      description: "按文件名关键词搜索文件。",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "文件名关键词" },
-          max_results: { type: "number", description: "最大结果数，默认 30" },
-        },
-        required: ["query"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "write_file",
-      description: "写入或覆盖整个文件（Build 模式下立即落盘）。大文件优先用 patch_file。",
-      parameters: {
-        type: "object",
-        properties: {
-          path: { type: "string", description: "相对项目根的文件路径" },
-          content: { type: "string", description: "完整文件内容" },
-        },
-        required: ["path", "content"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "patch_file",
-      description:
-        "对文件做精确局部替换（old_string 须在文件中唯一匹配）。适合大文件的小改动，比 write_file 更快。",
-      parameters: {
-        type: "object",
-        properties: {
-          path: { type: "string", description: "相对项目根的文件路径" },
-          old_string: { type: "string", description: "要被替换的原文（须精确匹配且唯一）" },
-          new_string: { type: "string", description: "替换后的内容" },
-        },
-        required: ["path", "old_string", "new_string"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "delete_file",
-      description: "删除文件（Build 模式下立即执行）。",
-      parameters: {
-        type: "object",
-        properties: {
-          path: { type: "string", description: "相对项目根的文件路径" },
-        },
-        required: ["path"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "append_memory",
-      description:
-        "向项目记忆（.aiall/project-memory.md）追加一条记录（自动写入，无需确认）。section 为 术语|导航|偏好。仅在遇到重要的项目约定、术语、导航信息时调用，不要滥用。",
-      parameters: {
-        type: "object",
-        properties: {
-          section: {
-            type: "string",
-            enum: ["术语", "导航", "偏好"],
-            description: "写入分区：术语 / 导航 / 偏好",
-          },
-          content: { type: "string", description: "单条要点（勿带 leading -），1–200 字" },
-        },
-        required: ["section", "content"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "list_skills",
-      description: "列出 .aiall/skills/ 下的 skill（slug、kind、title）。",
-      parameters: { type: "object", properties: {} },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "read_skill",
-      description: "读取指定 slug 的 skill 完整 Markdown 内容。",
-      parameters: {
-        type: "object",
-        properties: {
-          slug: { type: "string", description: "skill 文件名（不含 .md），如 ui-screenshot-locate" },
-        },
-        required: ["slug"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "propose_skill",
-      description:
-        "提议写入/更新 .aiall/skills/ 下的 skill 文件；须经用户确认。kind 为 fact|heuristic|preference。",
-      parameters: {
-        type: "object",
-        properties: {
-          slug: { type: "string", description: "skill 标识（kebab-case）" },
-          kind: { type: "string", enum: ["fact", "heuristic", "preference"] },
-          title: { type: "string", description: "短标题" },
-          content: { type: "string", description: "Markdown 正文（不含 frontmatter）" },
-        },
-        required: ["slug", "kind", "title", "content"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "run_command",
-      description: "在项目目录中执行 shell 命令（如 npm run dev、python main.py、go test）。返回 stdout 和 stderr。",
-      parameters: {
-        type: "object",
-        properties: {
-          command: { type: "string", description: "要执行的 shell 命令" },
-          timeout_ms: { type: "number", description: "超时时间（毫秒），默认 30000，最大 120000" },
-        },
-        required: ["command"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "web_search",
-      description: "联网搜索，获取最新信息。返回搜索结果列表（标题、链接、摘要）。",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "搜索关键词" },
-          engine: { type: "string", enum: ["google", "bing", "baidu", "duckduckgo"], description: "搜索引擎，默认 baidu；百度无静态结果时会自动回退" },
-          max_results: { type: "number", description: "最大结果数，默认 5，最大 10" },
-        },
-        required: ["query"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "web_extract",
-      description: "抓取指定 URL 的网页内容，返回标题和正文。",
-      parameters: {
-        type: "object",
-        properties: {
-          url: { type: "string", description: "要抓取的网页 URL（http/https）" },
-          mode: { type: "string", enum: ["auto", "html", "browser"], description: "抓取模式，默认 auto" },
-        },
-        required: ["url"],
-      },
-    },
-  },
-];
-
-const READ_ONLY_AGENT_TOOLS = VIBE_AGENT_TOOLS.filter((t) =>
-  ["list_dir", "read_file", "grep", "search_files", "web_search", "web_extract", "list_skills", "read_skill"].includes(
-    t.function.name,
-  ),
-);
-
-const READ_ONLY_AGENT_TOOL_NAMES = new Set([
-  "list_dir",
-  "read_file",
-  "grep",
-  "search_files",
-  "web_search",
-  "web_extract",
-  "list_skills",
-  "read_skill",
-]);
-const WRITE_AGENT_TOOL_NAMES = new Set(["write_file", "patch_file", "delete_file"]);
-
-function isEnglishToolNarration(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-  if (/^(?:Now let me|Let me|I'll|I need to|First,?\s+I)\b/i.test(trimmed)) return true;
-  const cjk = (trimmed.match(/[\u4e00-\u9fff]/g) || []).length;
-  const latin = (trimmed.match(/[a-zA-Z]/g) || []).length;
-  return latin >= 24 && cjk < 8 && trimmed.length <= 220;
-}
-
-function isSubstantiveChineseToolPreamble(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed || isEnglishToolNarration(trimmed)) return false;
-  return (trimmed.match(/[\u4e00-\u9fff]/g) || []).length >= 8;
-}
-
-function emitUserVisibleAssistantMessage(
-  onEvent: RunVibeAgentParams["onEvent"],
-  text: string,
-  streamedChars: number,
-  options?: { force?: boolean },
-): void {
-  const visible = sanitizeAgentUserVisibleText(text);
-  if (visible && (!streamedChars || options?.force)) {
-    onEvent({ type: "message", data: { text: visible } });
-  }
-}
-
-function canParallelizeToolBatch(calls: ChatToolCall[]): boolean {
-  if (calls.length <= 1) return false;
-  const names = calls.map((call) => call.function.name);
-  if (names.every((name) => READ_ONLY_AGENT_TOOL_NAMES.has(name))) return true;
-  if (!names.every((name) => WRITE_AGENT_TOOL_NAMES.has(name))) return false;
-  const paths = calls.map((call) => String(parseToolArgs(call.function.arguments || "{}").path || "").trim());
-  if (!paths.every(Boolean)) return false;
-  return new Set(paths).size === paths.length;
-}
-
-function callIsProductiveWrite(call: ChatToolCall): boolean {
-  if (!WRITE_AGENT_TOOL_NAMES.has(call.function.name)) return false;
-  const filePath = String(parseToolArgs(call.function.arguments || "{}").path || "").trim();
-  return isProductiveWritePath(filePath);
-}
-
-function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: string): string {
-  const lines = [
-    "你是一个专业的编程 Agent（Build 模式），可以调用工具探索并修改本地项目。",
-    "回答请使用中文。",
-    "用户可能在消息中附带截图或图片；若已附带，请结合图片内容理解需求并回答，不要声称无法查看图片。",
-    "用户附截图询问界面/功能时：先描述截图所见，再判断是否属于本项目（优先查 views/components 或项目惯用 UI 目录），勿默认是外部 IDE/桌面应用。",
-    "截图中有可见文字/图标/按钮时：先 grep 图中可见原文的最短可识别片段（通常 ≥3 字），而非猜 CSS class 名或 SVG 路径；从 grep 命中定位 template/组件。",
-    "用户针对截图局部提问（配色、按钮、某块区域）时：讨论阶段只谈其所指可见范围，勿擅自扩大到整页/全项目样式盘点；若用户明确要求修改，可在该范围内 grep/read 对应组件后 patch_file；用户明确说「整个/整页/全面板」时可按扩大后的范围实施。",
-    "截图中内联 chip/标签/元信息样式（含聚合 badge）：grep 该 chip 的 class 名或 read 承载它的组件 `<style>` 段，勿用全局 theme 变量臆断局部配色。",
-    "若系统标注【咨询任务·只读】：用户本条仅为提问/解释，只读探索后自然语言回答，禁止 patch_file / write_file / delete_file。",
-    "其余 Build 任务：一旦你判断须改代码才能满足用户（含 bug、实测与描述不符、功能/体验需求），探索完成后同一轮立即 patch_file / write_file，禁止只输出方案并问「需要我执行吗」。",
-    "工作流程：先 grep / search_files 快速定位（通常 1 轮），read_file 读关键片段，然后 patch_file / write_file 修改。",
-    "Bug / 实测不符：用户报告行为不对、没效果、试了不行等，默认理解为须修复；定位后直接 patch，勿停下来征求确认。",
-    "区分问题类型：「按钮跑别处/位置不对」若控件与选区在空间上分离，优先查 position:fixed/absolute 或 Teleport 浮层定位，勿默认只改 flex；「点击没反应」「不工作」查事件处理/JS 逻辑。同一组件在连续消息中被提及时，每条消息是独立问题，不要因为上一条修了布局就假设这一条也是布局问题。",
-    "短追问（如「需要吗」「要不要」「对吗」且未指明新对象）必须承接上一条助手回复的话题作答，勿因会话更早主题偏离；若意图仍不清晰，用一句话澄清，禁止回顾已完成工作清单或擅自改代码。",
-    "在已确认须改代码后，探索够了同一轮即 patch/write，勿连续多轮只 read；同一轮可并行 grep/read。",
-    "CSS/SCSS 样式定位：禁止 grep 推测出的全局 layout 选择器；应 read_file 已定位组件文件的 `<style>` 或 scoped 样式段。",
-    "CSS class 重命名时：修改前先 grep 旧 class 名在该文件中的所有出现次数，然后一次性补全所有匹配（如同时改 `.old-class`、`.old-class:hover`、`.old-class:active`、`.old-class-icon` 等）。改完后 grep 验证零残留，确认全部替换完毕再宣布完成。",
-    "用户选择执行：当你提供了多个方案/选项让用户选择时，用户选定后必须立即执行该方案（如 patch_file / write_file 落盘），不得自行改变方向或跳过执行去做其他调查。执行完毕并报告结果后，若需进一步排查再提出下一步建议。",
-    "Build 模式简短实施指令（如「执行」「继续」「改吧」「优化」）或用户明确提出要改时：若上一条助手回复已列出具体改动步骤、代码片段或目标文件，必须立即 patch_file / write_file，禁止再次征求确认；除非改动涉及大范围重构或明显高风险操作。",
-    "当前已在 Build 模式时，禁止再问用户是否切换到 Build；若上一条已列出多项改动，patch 须逐项落实，不得在回复中声称已完成尚未 patch 的项。",
-    buildBuildWriteBlockedHint(),
-    "Build 模式下用户追问「还能优化吗」「还能继续吗」「继续吧」「接着改」等，均视为执行指令，必须立即 patch_file / write_file，禁止再分析或询问。",
-    "修改前必须先 read_file 核对目标文件；patch_file 的 old_string 须从 read 返回原文复制（含缩进），可换更短且唯一的片段。",
-    "用户问「看出啥问题没」「检查一下」「这样对吗」等评价性问题时：必须先 read_file 读取你上次修改的文件，确认代码实际状态后再回答。禁止仅凭截图视觉判断或记忆作答。",
-    "用户报告「试了不行/没有效果」后，禁止再用同样方案做未经证实的「检查完成✅」；须承认未验证项并给出可执行排查步骤。",
-    "给用户的测试步骤须与项目实际运行环境一致（从 package.json scripts 判断 Web dev vs 桌面壳）；禁止混用。",
-    "解释项目时：从 package.json、README、入口文件等关键文件入手，不要臆测。",
-    buildReplyAccuracyHint(),
-    "修改代码时：小范围改动优先 patch_file（old_string 须唯一匹配）；全文件重写或新文件才用 write_file；大文件禁止 write_file 整文件覆盖。",
-    "需要确认现状时 read_file 用 offset/limit 读相关片段即可，不要读整个大文件。",
-    "write_file / patch_file / delete_file 会立即写入磁盘，无需用户确认。",
-    "探索结论或踩坑可调用 append_memory 提议写入项目记忆（## 术语|导航|偏好）；可调用 propose_skill 提议写入项目 skill 目录；均须用户确认后才会落盘。",
-    "可 list_skills / read_skill 按需读取项目 skill；冷启动时已注入 fact/heuristic 类 skill 摘要。",
-    "删除文件时：使用 delete_file 工具，不要用 write_file 清空内容来替代删除。",
-    "重要：必须通过 API 工具接口调用 list_dir、read_file 等，禁止在正文里输出 <function>、<parameter> 等标记。",
-    buildFileAccessPathHint(),
-    "write_file / patch_file / delete_file 的 path 必须相对项目根，禁止绝对路径。",
-    "run_command 可在项目目录执行 shell 命令（优先 package.json 中的 npm scripts；Windows 为 PowerShell，用 `;` 链式、勿用 head/&&），超时默认 30 秒，长时间命令请设置 timeout_ms；不要执行危险命令。",
-    "联网搜索：当需要最新信息、外部文档、API 用法时，使用 web_search 搜索；使用 web_extract 抓取指定链接内容。搜索结果可能较多，优先关注前 3 条结果，避免大量内容占用上下文。",
-    "如果系统提示你上一次回复被截断，请从截断处继续输出，不要重复已输出的内容。",
-    "附截图时：首轮输出截图描述后，后续轮次禁止再次描述同一张截图。若需追问用户意见，应在代码探索后给出具体方案对比，而非仅提问。",
-    buildAgentSuggestionsPromptHint(),
-    `项目根目录：${projectRoot}`,
-  ];
-  if (model?.trim()) {
-    lines.push("", buildModelIdentityHint(model));
-  }
-  const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
-  if (openFile) {
-    lines.push(`用户当前打开的文件：${openFile.relative}`);
-  }
-  return lines.join("\n");
-}
-
-function resolveOpenFileInProject(projectRoot: string, openFilePath?: string): { path: string; relative: string } | null {
-  if (!openFilePath?.trim()) return null;
-  const resolved = resolveProjectPath(projectRoot, openFilePath.trim());
-  if (!resolved.ok || !resolved.relative) return null;
-  return { path: resolved.path, relative: resolved.relative };
-}
-
-function buildAskSystemPrompt(
-  projectRoot: string,
-  openFilePath?: string,
-  openFileSnippet?: string,
-  model?: string,
-): string {
-  const lines = [...buildAskSystemPromptLines(projectRoot)];
-  if (model?.trim()) {
-    lines.push("", buildModelIdentityHint(model));
-  }
-  const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
-  if (openFile) {
-    lines.push(`用户当前打开的文件：${openFile.relative}`);
-    if (openFileSnippet?.trim()) {
-      lines.push("", "当前打开文件内容（节选）：", "```", openFileSnippet.trim(), "```");
-    }
-  }
-  return lines.join("\n");
-}
-
-function buildExploreSystemPrompt(
-  projectRoot: string,
-  openFilePath?: string,
-  openFileSnippet?: string,
-  model?: string,
-  incremental = false,
-): string {
-  const lines = [...buildExploreSystemPromptLines(projectRoot, incremental)];
-  if (model?.trim()) {
-    lines.push("", buildModelIdentityHint(model));
-  }
-  const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
-  if (openFile) {
-    lines.push(`用户当前打开的文件：${openFile.relative}`);
-    if (openFileSnippet?.trim()) {
-      lines.push("", "当前打开文件内容（节选）：", "```", openFileSnippet.trim(), "```");
-    }
-  }
-  return lines.join("\n");
-}
-
-function buildPlanSystemPrompt(
-  projectRoot: string,
-  openFilePath?: string,
-  openFileSnippet?: string,
-  model?: string,
-): string {
-  const lines = [
-    "你是一个编程架构师（Plan 模式），负责分析项目并输出结构化的修改方案。",
-    "回答请使用中文。",
-    "用户可能在消息中附带截图或图片；若已附带，请结合图片内容理解需求并回答，不要声称无法查看图片。",
-    "用户附截图询问界面/功能时：先描述截图所见，再判断是否属于本项目（优先查 src/views、src/components），勿默认是外部应用。",
-    "你可以使用 list_dir、read_file、grep、search_files 工具来探索项目、读取文件，但不能修改任何文件。",
-    "你可以使用 web_search 搜索外部信息，使用 web_extract 抓取指定链接内容。",
-    "短追问（如「需要吗」「要不要」且未指明新对象）必须承接上一条助手回复的话题作答，勿因会话更早主题偏离；若意图仍不清晰，用一句话澄清。",
-    "工作流程：先探索相关代码 → 输出结构化修改方案（规划文档）→ 等待用户确认 → 用户确认后系统进入执行阶段并写入代码。",
-    "当前处于【规划阶段】：只读探索，禁止 patch_file / write_file / delete_file / run_command。",
-    "输出格式要求（作为可执行的方案文档）：",
-    "0. 方案开头第一行必须是 `[PLAN]` 或 `## 修改方案`（二选一，便于系统识别）；",
-    "1. 标题使用「## 修改方案」；先概述需求和当前状态；",
-    "2. 列出涉及的文件清单（相对路径）；",
-    "3. 对每个文件给出具体改动说明和代码块（标明修改前/修改后或新增内容）；",
-    "4. 说明改动顺序和依赖关系；",
-    "5. 文末固定提示：「确认无误后回复「执行方案」或点击消息上的「执行方案」按钮，我将按方案改代码。」",
-    buildAgentSuggestionsPromptHint(),
-    buildReplyAccuracyHint(),
-    "收集到足够信息后立即输出方案，不要无意义地继续读文件。",
-    "重要：必须通过 API 工具接口调用 list_dir、read_file 等，禁止在正文里输出 <function>、<parameter> 等标记。",
-    "read_file / list_dir：项目内用相对路径；读项目外数据按 AGENTS.md 或用户给出的路径说明；大文件用 offset/limit，勿用 run_command 读文件。",
-    "write_file / patch_file / delete_file 的 path 必须相对项目根，禁止绝对路径。",
-    `项目根目录：${projectRoot}`,
-  ];
-  if (model?.trim()) {
-    lines.push("", buildModelIdentityHint(model));
-  }
-  const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
-  if (openFile) {
-    lines.push(`用户当前打开的文件：${openFile.relative}`);
-    if (openFileSnippet?.trim()) {
-      lines.push("", "当前打开文件内容（节选）：", "```", openFileSnippet.trim(), "```");
-    }
-  }
-  return lines.join("\n");
-}
-
-function buildDoneData(stage: WriteStage | null, turns: number, truncated = false) {
-  if (!stage) {
-    return { writtenFiles: [] as string[], pendingFiles: [] as string[], turns, ...(truncated ? { truncated: true } : {}) };
-  }
-  return {
-    writtenFiles: [...stage.writtenList],
-    pendingFiles: [] as string[],
-    turns,
-    ...(truncated ? { truncated: true } : {}),
-  };
-}
-
-function parseToolArgs(raw: string): Record<string, unknown> {
-  try {
-    return JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    return {};
-  }
-}
-
-function resolveToolCallsFromAssistant(content: string, apiToolCalls: ChatToolCall[]): ChatToolCall[] {
-  if (apiToolCalls.length) return apiToolCalls;
-  if (!hasTextToolCallMarkup(content)) return [];
-  return synthesizeToolCallsFromText(content);
-}
-
-function toolSummary(name: string, result: string): string {
-  if (result.startsWith("错误：")) {
-    return result.replace(/^错误：/, "").trim();
-  }
-
-  if (name === "list_dir") {
-    if (result === "（空目录）") return "空目录";
-    const lines = result.split("\n").filter(Boolean);
-    const dirs = lines.filter((l) => l.startsWith("[dir]")).length;
-    const files = lines.filter((l) => l.startsWith("[file]")).length;
-    return `${dirs} 个目录，${files} 个文件`;
-  }
-
-  if (name === "read_file") {
-    const lineCount = result.split("\n").filter((l) => l.length > 0).length;
-    return `读取 ${lineCount} 行内容`;
-  }
-
-  if (name === "grep") {
-    if (result === "（无匹配）") return "未找到匹配";
-    const n = result.split("\n").filter(Boolean).length;
-    return `找到 ${n} 处匹配`;
-  }
-
-  if (name === "search_files") {
-    if (result === "（无匹配文件）") return "未找到文件";
-    const n = result.split("\n").filter(Boolean).length;
-    return `找到 ${n} 个文件`;
-  }
-
-  if (name === "write_file") {
-    const m = result.match(/已写入\s+(.+?)（(\d+)\s*字符）/);
-    if (m) return `已写入 ${m[1]}（${m[2]} 字符）`;
-    return result;
-  }
-
-  if (name === "patch_file") {
-    const m = result.match(/已修改\s+(.+?)（/);
-    if (m) return `已修改 ${m[1]}`;
-    return result;
-  }
-
-  if (name === "delete_file") {
-    const m = result.match(/已删除\s+(.+)$/);
-    if (m) return `已删除 ${m[1]}`;
-    return result;
-  }
-
-  if (name === "run_command") {
-    if (result.startsWith("错误：") || result.startsWith("命令执行失败")) return `执行失败`;
-    const outMatch = result.match(/^stdout:\n(.+)/m);
-    const oneLine = (outMatch?.[1] || result).replace(/\s+/g, " ").trim();
-    return oneLine.length > 60 ? `${oneLine.slice(0, 60)}…` : oneLine || "执行完成";
-  }
-
-  if (name === "web_search") {
-    const n = result.split("\n").filter((l) => l.match(/^\d+\./)).length;
-    return n > 0 ? `找到 ${n} 条结果` : "搜索完成";
-  }
-
-  if (name === "web_extract") {
-    const m = result.match(/标题：(.+)/);
-    return m ? `抓取「${m[1].slice(0, 30)}」` : "抓取网页";
-  }
-
-  const oneLine = result.replace(/\s+/g, " ").trim();
-  return oneLine.length > 120 ? `${oneLine.slice(0, 120)}…` : oneLine;
-}
-
-function toolSummary(name: string, result: string): string {
-  if (result.startsWith("错误：")) {
-    return result.replace(/^错误：/, "").trim();
-  }
-
-  if (name === "list_dir") {
-    if (result === "（空目录）") return "空目录";
-    const lines = result.split("\n").filter(Boolean);
-    const dirs = lines.filter((l) => l.startsWith("[dir]")).length;
-    const files = lines.filter((l) => l.startsWith("[file]")).length;
-    return `${dirs} 个目录，${files} 个文件`;
-  }
-
-  if (name === "read_file") {
-    const lineCount = result.split("\n").filter((l) => l.length > 0).length;
-    return `读取 ${lineCount} 行内容`;
-  }
-
-  if (name === "grep") {
-    if (result === "（无匹配）") return "未找到匹配";
-    const n = result.split("\n").filter(Boolean).length;
-    return `找到 ${n} 处匹配`;
-  }
-
-  if (name === "search_files") {
-    if (result === "（无匹配文件）") return "未找到文件";
-    const n = result.split("\n").filter(Boolean).length;
-    return `找到 ${n} 个文件`;
-  }
-
-  if (name === "write_file") {
-    const m = result.match(/已写入\s+(.+?)（(\d+)\s*字符）/);
-    if (m) return `已写入 ${m[1]}（${m[2]} 字符）`;
-    return result;
-  }
-
-  if (name === "patch_file") {
-    const m = result.match(/已修改\s+(.+?)（/);
-    if (m) return `已修改 ${m[1]}`;
-    return result;
-  }
-
-  if (name === "delete_file") {
-    const m = result.match(/已删除\s+(.+)$/);
-    if (m) return `已删除 ${m[1]}`;
-    return result;
-  }
-
-  if (name === "run_command") {
-    if (result.startsWith("错误：") || result.startsWith("命令执行失败")) return `执行失败`;
-    const outMatch = result.match(/^stdout:\n(.+)/m);
-    const oneLine = (outMatch?.[1] || result).replace(/\s+/g, " ").trim();
-    return oneLine.length > 60 ? `${oneLine.slice(0, 60)}…` : oneLine || "执行完成";
-  }
-
-  if (name === "web_search") {
-    const n = result.split("\n").filter((l) => l.match(/^\d+\./)).length;
-    return n > 0 ? `找到 ${n} 条结果` : "搜索完成";
-  }
-
-  if (name === "web_extract") {
-    const m = result.match(/标题：(.+)/);
-    return m ? `抓取「${m[1].slice(0, 30)}」` : "抓取网页";
-  }
-
-  const oneLine = result.replace(/\s+/g, " ").trim();
-  return oneLine.length > 120 ? `${oneLine.slice(0, 120)}…` : oneLine;
-}
 
 export { createWriteStage, executeTool, trackWrittenFile, readStagedFileContent, isAgentsGuideOnlyPath, recordGrepHitVueFiles, requirePriorRead, type WriteStage } from "./agentToolExecutor";
 import { createWriteStage, executeTool, trackWrittenFile, readStagedFileContent, isAgentsGuideOnlyPath, recordGrepHitVueFiles, requirePriorRead, type WriteStage } from "./agentToolExecutor";
 
 export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
+  const mode = params.mode || "build";
   const isAsk = mode === "ask";
   const isExplore = mode === "explore";
   const isReadOnlyAgent = isAsk || isExplore;
@@ -1210,183 +415,49 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     },
   });
 
-  const targetManifest = isExecutePlan
-    ? await buildTargetFileManifest(projectRoot, runProfile.targetFiles || [])
-    : [];
-  let openFileSnippet = "";
-  if (!isExecutePlan && openFile) {
-    onEvent({
-      type: "status",
-      data: {
-        phase: "building_context",
-        model,
-        detail: openFileRel ? `读取当前文件 ${openFileRel}` : undefined,
-        ...(openFileRel ? { openFile: openFileRel } : {}),
-      },
-    });
-    const result = await readFileContent(openFile.path).catch(() => null);
-    if (result?.ok) {
-      openFileSnippet = sliceFileLines(result.content, 1, 400);
-    }
-  } else if (!isExecutePlan) {
-    onEvent({
-      type: "status",
-      data: {
-        phase: "building_context",
-        model,
-        detail: "扫描项目结构",
-      },
-    });
-  }
+  const ctx = await buildAgentContext({
+    projectRoot,
+    openFilePath,
+    prompt,
+    model,
+    mode,
+    history: params.history,
+    isAsk,
+    isExplore,
+    isExecutePlan,
+    isPlanExplore,
+    readOnlyBuildRun,
+    consultativeUiAppearanceRun,
+    codeReviewRun,
+    userErrorQuoteRun,
+    userFailureReportRun,
+    uiDefectBuildRun,
+    implementFollowUpRun,
+    sameIssueFollowUpRun,
+    locateStatusFollowUpRun,
+    ultraShortOpenTaskRun,
+    effectiveTaskPrompt,
+    userRecentlyReportedFailure,
+    runProfile,
+  }, onEvent);
 
-  const memoryTaskContext = [prompt, openFileRel].filter(Boolean).join(" ");
-
-  onEvent({
-    type: "status",
-    data: { phase: "building_context", model, detail: "加载项目上下文…" },
-  });
-
-  const [
-    projectContextOrNull,
-    projectMemoryResult,
-    projectKnowledgeResult,
-    agentsGuideResult,
+  const {
+    systemPrompt,
+    projectContextBlock,
+    agentsGuideBlock,
     projectSkillsBlock,
+    projectMemoryBlock,
+    projectKnowledgeBlock,
+    exploreKnowledgeContextBlock,
     explorationArchiveBlock,
-  ] = await Promise.all([
-    isExecutePlan || consultativeUiAppearanceRun ? Promise.resolve(null) : buildProjectContext(projectRoot),
-    consultativeUiAppearanceRun
-      ? Promise.resolve({ ok: false as const, content: "", truncated: false })
-      : readProjectMemory(projectRoot),
-    consultativeUiAppearanceRun
-      ? Promise.resolve({ ok: false as const, body: "", truncated: false, content: "", meta: {}, path: "", maxChars: 0, promptMaxChars: 0 })
-      : readProjectKnowledge(projectRoot),
-    consultativeUiAppearanceRun
-      ? Promise.resolve({ ok: false as const, content: "", truncated: false })
-      : readProjectAgentsGuide(projectRoot),
-    consultativeUiAppearanceRun ? Promise.resolve("") : buildProjectSkillsPromptBlock(projectRoot, prompt),
-    consultativeUiAppearanceRun
-      ? Promise.resolve("")
-      : buildExplorationArchivePromptBlock(projectRoot, prompt),
-  ]);
-
-  let projectContextBlock = "";
-  if (isExecutePlan) {
-    projectContextBlock = `\n\n项目根：${projectRoot}（方案执行阶段，已跳过全项目扫描）`;
-    projectContextBlock += buildExecutePlanSystemHint(targetManifest, runProfile.userIntent);
-  } else if (projectContextOrNull?.ok) {
-    projectContextBlock = isReadOnlyAgent
-      ? formatProjectContextForPrompt(projectContextOrNull)
-      : formatProjectContextForBuild(projectContextOrNull);
-  } else if (consultativeUiAppearanceRun) {
-    projectContextBlock = `\n\n项目根：${projectRoot}（咨询只读·UI 观感题，已省略全项目扫描以加快首包）`;
-  }
-
-  const hasExistingProjectKnowledge =
-    projectKnowledgeResult.ok && Boolean(projectKnowledgeResult.body.trim());
-  const exploreKnowledgeIntent = isExplore
-    ? classifyExploreKnowledgeIntent(prompt, hasExistingProjectKnowledge)
-    : null;
-  const exploreUsesManifest = exploreKnowledgeIntent != null
-    && exploreIntentUsesKnowledgeManifest(exploreKnowledgeIntent);
-
-  let exploreKnowledgeContextBlock = "";
-  if (isExplore && hasExistingProjectKnowledge) {
-    let changedPaths: string[] | undefined;
-    const savedHead = projectKnowledgeResult.meta.gitHead?.trim();
-    if (exploreUsesManifest && savedHead) {
-      const diff = await gitChangedFilesSince(projectRoot, savedHead);
-      if (diff.ok && diff.files.length) changedPaths = diff.files;
-    }
-    if (exploreKnowledgeIntent === "rebuild") {
-      exploreKnowledgeContextBlock = `\n\n${buildKnowledgeRebuildHint()}`;
-    } else if (exploreUsesManifest) {
-      exploreKnowledgeContextBlock = `\n\n${buildKnowledgeExploreManifest(
-        projectKnowledgeResult.body,
-        projectKnowledgeResult.meta,
-        { changedPaths },
-      )}`;
-    }
-  }
-
-  const projectMemoryBlock =
-    projectMemoryResult.ok && projectMemoryResult.content.trim()
-      ? await formatProjectMemoryForPrompt(
-          projectMemoryResult.content,
-          projectMemoryResult.truncated,
-          memoryTaskContext,
-          projectRoot,
-        )
-      : "";
-
-  const projectKnowledgeBlock =
-    !isExplore && hasExistingProjectKnowledge
-      ? await formatProjectKnowledgeForPrompt(
-          projectKnowledgeResult.body,
-          projectKnowledgeResult.truncated,
-        )
-      : "";
-
-  const agentsGuideBlock =
-    agentsGuideResult.ok && agentsGuideResult.content.trim()
-      ? formatAgentsGuideForPrompt(agentsGuideResult.content, agentsGuideResult.truncated)
-      : "";
-
-  const runtimeProfile = detectProjectRuntimeProfile(projectRoot);
-  const runtimeAwarenessBlock =
-    buildRuntimeAwarenessHint(runtimeProfile) + buildShellAwarenessHint(process.platform);
-
-  const systemPromptCore = consultativeUiAppearanceRun
-    ? [
-        "你是编程助手（Build·咨询只读）。用户附截图询问 UI 观感/CSS；须 grep/read 定位组件 `<style>` 或 scss 规则后作答，禁止 patch_file / write_file。",
-        "回答用中文；须引用 read 到的 background / opacity / var(--*) 等，勿猜测。",
-        buildConsultativeBuildHint(),
-        projectContextBlock,
-      ].join("\n")
-    : isExplore
-      ? buildExploreSystemPrompt(
-          projectRoot,
-          openFilePath,
-          openFileSnippet,
-          model,
-          exploreUsesManifest,
-        )
-    : isAsk
-      ? buildAskSystemPrompt(projectRoot, openFilePath, openFileSnippet, model) +
-        buildConsultativeTopicHints(
-          stripQuotedReplyPrefix(effectiveTaskPrompt.trim()),
-          params.history,
-          userIntent.consultativeTopic,
-        )
-      : isExecutePlan
-        ? buildSystemPrompt(projectRoot, openFilePath, model)
-        : isPlanExplore
-          ? buildPlanSystemPrompt(projectRoot, openFilePath, openFileSnippet, model)
-          : buildSystemPrompt(projectRoot, openFilePath, model) +
-            (readOnlyBuildRun ? buildConsultativeBuildHint() : "") +
-            buildConsultativeTopicHints(
-              stripQuotedReplyPrefix(effectiveTaskPrompt.trim()),
-              params.history,
-              userIntent.consultativeTopic,
-            ) +
-            (codeReviewRun ? buildCodeReviewHonestyNudge(userRecentlyReportedFailure) : "") +
-            (userErrorQuoteRun ? buildUserErrorQuoteHint() : "") +
-            (userFailureReportRun ? buildUserFailureReportNudge() : "") +
-            (uiDefectBuildRun ? buildUiDefectBuildHint() : "") +
-            (implementFollowUpRun ? buildImplementFollowUpHint(historySuggestsQuotePositionFix(params.history)) : "") +
-            (sameIssueFollowUpRun ? buildSameIssueFollowUpHint() : "") +
-            (locateStatusFollowUpRun ? buildLocateStatusFollowUpHint() : "") +
-            (ultraShortOpenTaskRun ? `\n${buildUltraShortOpenTaskHint()}` : "");
-
-  const systemPrompt = consultativeUiAppearanceRun
-    ? `${systemPromptCore}\n${runtimeAwarenessBlock}`
-    : `${systemPromptCore}${projectContextBlock}${agentsGuideBlock}${projectSkillsBlock}${projectMemoryBlock}${projectKnowledgeBlock}${exploreKnowledgeContextBlock}${explorationArchiveBlock}${runtimeAwarenessBlock}`;
+    openFileSnippet,
+    injectedKeyFilePaths,
+    exploreKnowledgeIntent,
+    exploreUsesManifest,
+  } = ctx;
 
   const writeStage = isReadOnlyAgent || isPlanExplore || readOnlyBuildRun ? null : createWriteStage();
   const readCache = new Map<string, string>();
-  const injectedKeyFilePaths = projectContextOrNull?.ok
-    ? buildInjectedKeyFilePathSet(projectContextOrNull)
-    : undefined;
   const readSliceCache = new Map<string, string>();
   const readSliceRepeatCounts = new Map<string, number>();
   const grepCache = new Map<string, string>();
