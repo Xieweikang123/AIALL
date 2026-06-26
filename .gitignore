@@ -36,3 +36,7 @@ tmp/
 
 ## local app state
 .aiall/
+
+## debug artifacts
+.debug/
+.vibe-chat-debug.json
