@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isRetryableAiError, MODEL_FIRST_BYTE_TIMEOUT_MS } from "../../server/aiForward";
-import { compactMessagesForModel, EXECUTE_PLAN_MAX_CONTEXT_CHARS, SOFT_COMPACT_CONTEXT_CHARS } from "../../server/vibeAgent";
+import { compactMessagesForModel, SOFT_COMPACT_CONTEXT_CHARS } from "../../server/agentContext";
+import { EXECUTE_PLAN_MAX_CONTEXT_CHARS } from "../../server/agentRunPolicy";
 import type { ChatCompletionMessage } from "../../server/aiForward";
 
 describe("isRetryableAiError", () => {
