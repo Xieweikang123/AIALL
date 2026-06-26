@@ -14,6 +14,7 @@ import {
   fetchArchitectReviewContext,
   fetchProjectArchitectReview,
   saveProjectArchitectReview,
+  archiveReviewToHistory,
   fetchReviewHistory,
   fetchReviewHistoryDetail,
   deleteReviewHistory,
@@ -137,9 +138,6 @@ export function useProjectArchitectReview(options: {
     reviewHistoryMessage.value = "";
     try {
       const result = await fetchReviewHistory(path);
-      // #region agent log
-      fetch('http://127.0.0.1:7681/ingest/c6f6b2fb-2f39-4dd4-897b-699ca68db244',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'be2226'},body:JSON.stringify({sessionId:'be2226',location:'useProjectArchitectReview.ts:loadReviewHistory',message:'history fetch result',data:{ok:result.ok,error:result.error,count:result.reviews?.length??0,ids:(result.reviews??[]).map(r=>r.id)},timestamp:Date.now(),hypothesisId:'D'})}).catch(()=>{});
-      // #endregion
       if (!result.ok) {
         reviewHistoryMessage.value = result.error || "加载历史失败";
         return;
@@ -310,52 +308,87 @@ export function useProjectArchitectReview(options: {
       reviewMessage.value = "请先打开项目";
       return false;
     }
+    if (!options.configReady.value) {
+      reviewMessage.value = "请先配置 AI 模型";
+      return false;
+    }
+    if (options.apiKeyReady && !options.apiKeyReady.value) {
+      reviewMessage.value = "请先保存 API Key";
+      return false;
+    }
+    if (reviewRun.value.running) {
+      reviewMessage.value = "评审进行中";
+      return false;
+    }
 
     reviewMessage.value = "";
-    reviewLoading.value = true;
 
-    // #region agent log
-    fetch('http://127.0.0.1:7681/ingest/c6f6b2fb-2f39-4dd4-897b-699ca68db244',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'be2226'},body:JSON.stringify({sessionId:'be2226',location:'useProjectArchitectReview.ts:startArchitectReview:entry',message:'start re-review',data:{hasReview:hasReview.value,bodyLen:reviewBody.value.length,project},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
-
-    // 1. Immediately archive the current active review to history if it exists
     if (hasReview.value) {
-      try {
-        const archiveResult = await saveProjectArchitectReview(project, reviewBody.value, {
-          fromReview: true,
-          gitHead: reviewMeta.value.gitHead,
-          verdict: reviewVerdict.value ?? undefined,
-        });
-        // #region agent log
-        fetch('http://127.0.0.1:7681/ingest/c6f6b2fb-2f39-4dd4-897b-699ca68db244',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'be2226'},body:JSON.stringify({sessionId:'be2226',location:'useProjectArchitectReview.ts:startArchitectReview:archive',message:'archive save result',data:{ok:archiveResult.ok,error:archiveResult.error,bodyLen:reviewBody.value.length},timestamp:Date.now(),hypothesisId:'B,F'})}).catch(()=>{});
-        // #endregion
-      } catch (e) {
-        // #region agent log
-        fetch('http://127.0.0.1:7681/ingest/c6f6b2fb-2f39-4dd4-897b-699ca68db244',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'be2226'},body:JSON.stringify({sessionId:'be2226',location:'useProjectArchitectReview.ts:startArchitectReview:archive-catch',message:'archive threw',data:{error:String(e)},timestamp:Date.now(),hypothesisId:'F'})}).catch(()=>{});
-        // #endregion
-        console.error("[architect-review] Failed to archive current review:", e);
-      }
-    }
-
-    // 2. Immediately write a new dummy active review report
-    const newEmptyBody = "<!-- project-architect-review -->\n\n# 新的架构评审报告\n\n这是一个新创建的架构评审报告占位内容，用于直接测试生成新记录的流程，未调用 AI 模型。";
-    try {
-      const result = await saveProjectArchitectReview(project, newEmptyBody, {
-        fromReview: false,
-        verdict: "on_track",
+      const commitCount = reviewContext.value?.recentCommits?.length;
+      const changedFileCount = reviewContext.value?.changedFiles?.length;
+      const archiveResult = await archiveReviewToHistory(project, reviewBody.value, {
+        gitHead: reviewMeta.value.gitHead,
+        verdict: reviewVerdict.value ?? undefined,
+        commitCount,
+        changedFileCount,
       });
-      if (result.ok) {
-        reviewBody.value = result.body ?? newEmptyBody;
-        reviewMeta.value = result.meta ?? {};
+      if (!archiveResult.ok) {
+        reviewMessage.value = archiveResult.error || "归档当前评审失败";
+        return false;
       }
-    } catch (e) {
-      console.error("[architect-review] Failed to create new active review:", e);
+      activeHistoryReview.value = null;
+      await loadReviewHistory();
     }
 
-    // 3. Reload history list so the UI displays the new archived record immediately
-    await loadReviewHistory();
-    reviewLoading.value = false;
-    return true;
+    const contextResult = await fetchArchitectReviewContext(project);
+    if (!contextResult.ok || !contextResult.context) {
+      reviewMessage.value = contextResult.error || "获取评审上下文失败";
+      return false;
+    }
+    reviewContext.value = contextResult.context;
+
+    const prompt = buildArchitectReviewPrompt(contextResult.context);
+    const maxTurns = ARCHITECT_REVIEW_MAX_TURNS;
+
+    activeReviewContext = {
+      projectPath: project,
+      gitHead: contextResult.context.currentGitHead ?? options.gitHead?.value?.trim(),
+    };
+
+    reviewRun.value = {
+      ...emptyRunState(),
+      running: true,
+      maxTurns,
+    };
+
+    const request = {
+      prompt,
+      history: [],
+      projectPath: project,
+      endpoint: options.aiConfig.value.endpoint,
+      apiKey: options.aiConfig.value.apiKey,
+      model: options.aiConfig.value.model,
+      mode: "explore" as const,
+      maxTurns,
+      webProxyUrl: loadWebProxyUrlFromStorage() || undefined,
+    };
+
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      const finish = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        reviewRun.value.running = false;
+        abortHandle = null;
+        void finalizeReviewRun().finally(() => resolve(ok));
+      };
+
+      abortHandle = runVibeAgentSse(request, (event) => {
+        handleReviewEvent(event);
+        if (event.type === "done") finish(true);
+        if (event.type === "error" && reviewRun.value.failed) finish(false);
+      });
+    });
   }
 
   function stopArchitectReview() {
