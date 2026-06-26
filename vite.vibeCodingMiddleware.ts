@@ -22,6 +22,7 @@ import {
 } from "./server/vibeProjectKnowledge";
 import {
   buildArchitectReviewContext,
+  invalidateArchitectReviewCache,
   readArchitectReview,
   writeArchitectReview,
   listReviewHistory,
@@ -1278,92 +1279,22 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         return;
       }
       const result = await buildArchitectReviewContext(projectPath);
+      if (result.ok) {
+        // Invalidate read cache so the next GET picks up fresh data after the review completes.
+        invalidateArchitectReviewCache(projectPath);
+      }
       sendJson(res, result.ok ? 200 : 400, result);
     } catch (error) {
       sendJson(res, 500, {
         ok: false,
-        error: error instanceof Error ? error.message : "获取架构审视上下文失败",
-      });
-    }
-  });
-
-  // GET/POST /backend/vibe/project-architect-review
-  middlewares.use("/backend/vibe/project-architect-review", async (req, res) => {
-    try {
-      if (req.method === "GET") {
-        const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
-        const projectPath = (url.searchParams.get("projectPath") || "").trim();
-        if (!projectPath) {
-          sendJson(res, 400, { ok: false, error: "缺少 projectPath" });
-          return;
-        }
-        const result = await readArchitectReview(projectPath);
-        sendJson(res, result.ok ? 200 : 400, result);
-        return;
-      }
-
-      if (req.method === "POST") {
-        const body = (await readJsonBody(req)) as {
-          projectPath?: string;
-          body?: string;
-          content?: string;
-          gitHead?: string;
-          fromReview?: boolean;
-          verdict?: "on_track" | "caution" | "off_track";
-          commitCount?: number;
-          changedFileCount?: number;
-        };
-        const projectPath = body.projectPath?.trim() || "";
-        if (!projectPath) {
-          sendJson(res, 400, { ok: false, error: "缺少 projectPath" });
-          return;
-        }
-
-        const reviewBody = String(body.body ?? body.content ?? "");
-        const result = await writeArchitectReview(projectPath, reviewBody, {
-          gitHead: body.gitHead?.trim() || undefined,
-          fromReview: Boolean(body.fromReview),
-          verdict: body.verdict,
-        });
-        if (!result.ok) {
-          sendJson(res, 400, result);
-          return;
-        }
-
-        // Save to history if fromReview is true
-        if (body.fromReview && reviewBody.trim()) {
-          await saveReviewToHistory(projectPath, reviewBody, {
-            gitHead: body.gitHead?.trim() || undefined,
-            verdict: body.verdict,
-            commitCount: body.commitCount,
-            changedFileCount: body.changedFileCount,
-          }).catch(() => {}); // Non-blocking, ignore errors
-        }
-
-        const readBack = await readArchitectReview(projectPath);
-        sendJson(res, 200, {
-          ok: true,
-          path: result.path,
-          size: result.size,
-          truncated: result.truncated,
-          meta: result.meta,
-          content: readBack.ok ? readBack.content : "",
-          body: readBack.ok ? readBack.body : reviewBody,
-          maxChars: readBack.ok ? readBack.maxChars : undefined,
-        });
-        return;
-      }
-
-      sendJson(res, 405, { ok: false, error: "仅支持 GET / POST" });
-    } catch (error) {
-      sendJson(res, 500, {
-        ok: false,
-        error: error instanceof Error ? error.message : "架构审视报告操作失败",
+        error: error instanceof Error ? error.message : "获取架构评审上下文失败",
       });
     }
   });
 
   // GET/DELETE /backend/vibe/project-architect-review/history
+  // MUST be registered before the generic /backend/vibe/project-architect-review handler
+  // to avoid the generic handler catching /history requests.
   middlewares.use("/backend/vibe/project-architect-review/history", async (req, res) => {
     try {
       if (req.method === "GET") {
@@ -1401,7 +1332,100 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
     } catch (error) {
       sendJson(res, 500, {
         ok: false,
-        error: error instanceof Error ? error.message : "审查历史操作失败",
+        error: error instanceof Error ? error.message : "评审历史操作失败",
+      });
+    }
+  });
+
+  // GET/POST /backend/vibe/project-architect-review
+  middlewares.use("/backend/vibe/project-architect-review", async (req, res) => {
+    try {
+      try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [middleware-architect-review] hit method=${req.method} url=${req.url}\n`); } catch {}
+      if (req.method === "GET") {
+        const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+        const projectPath = (url.searchParams.get("projectPath") || "").trim();
+        if (!projectPath) {
+          sendJson(res, 400, { ok: false, error: "缺少 projectPath" });
+          return;
+        }
+        const result = await readArchitectReview(projectPath);
+        sendJson(res, result.ok ? 200 : 400, result);
+        return;
+      }
+
+      if (req.method === "POST") {
+        const body = (await readJsonBody(req)) as {
+          projectPath?: string;
+          body?: string;
+          content?: string;
+          gitHead?: string;
+          fromReview?: boolean;
+          verdict?: "on_track" | "caution" | "off_track";
+          commitCount?: number;
+          changedFileCount?: number;
+        };
+        const projectPath = body.projectPath?.trim() || "";
+        if (!projectPath) {
+          sendJson(res, 400, { ok: false, error: "缺少 projectPath" });
+          return;
+        }
+
+        const reviewBody = String(body.body ?? body.content ?? "");
+        try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [middleware-architect-review] POST body.fromReview=${body.fromReview} body.body.length=${reviewBody.length}\n`); } catch {}
+        const result = await writeArchitectReview(projectPath, reviewBody, {
+          gitHead: body.gitHead?.trim() || undefined,
+          fromReview: Boolean(body.fromReview),
+          verdict: body.verdict,
+        });
+        if (!result.ok) {
+          try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [middleware-architect-review] writeArchitectReview failed: ${result.error}\n`); } catch {}
+          sendJson(res, 400, result);
+          return;
+        }
+
+        // Save to history if fromReview is true
+        // #region agent log
+        try { fs.appendFileSync("debug-be2226.log", JSON.stringify({sessionId:"be2226",location:"vite.vibeCodingMiddleware.ts:POST",message:"history gate",data:{fromReview:Boolean(body.fromReview),bodyLen:reviewBody.trim().length,willSave:Boolean(body.fromReview&&reviewBody.trim())},timestamp:Date.now(),hypothesisId:"B"})+"\n"); } catch {}
+        // #endregion
+        if (body.fromReview && reviewBody.trim()) {
+          try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [middleware-architect-review] calling saveReviewToHistory...\n`); } catch {}
+          const historyResult = await saveReviewToHistory(projectPath, reviewBody, {
+            gitHead: body.gitHead?.trim() || undefined,
+            verdict: body.verdict,
+            commitCount: body.commitCount,
+            changedFileCount: body.changedFileCount,
+          });
+          // #region agent log
+          try { fs.appendFileSync("debug-be2226.log", JSON.stringify({sessionId:"be2226",location:"vite.vibeCodingMiddleware.ts:saveReviewToHistory",message:"history save result",data:{ok:historyResult.ok,error:historyResult.ok?undefined:historyResult.error,reviewCount:historyResult.ok?historyResult.index.reviews.length:0,entryId:historyResult.ok?historyResult.entry.id:undefined},timestamp:Date.now(),hypothesisId:"C"})+"\n"); } catch {}
+          // #endregion
+          try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [middleware-architect-review] saveReviewToHistory result ok=${historyResult.ok}\n`); } catch {}
+          if (!historyResult.ok) {
+            console.error("[architect-review] saveReviewToHistory failed:", historyResult.error);
+            try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [middleware-architect-review] saveReviewToHistory failed: ${historyResult.error}\n`); } catch {}
+          }
+        }
+
+        const readBack = await readArchitectReview(projectPath);
+        sendJson(res, 200, {
+          ok: true,
+          path: result.path,
+          size: result.size,
+          truncated: result.truncated,
+          meta: result.meta,
+          content: readBack.ok ? readBack.content : "",
+          body: readBack.ok ? readBack.body : reviewBody,
+          maxChars: readBack.ok ? readBack.maxChars : undefined,
+        });
+        return;
+      }
+
+      sendJson(res, 405, { ok: false, error: "仅支持 GET / POST" });
+    } catch (error) {
+      const errMsg = error instanceof Error ? error.stack || error.message : String(error);
+      try { fs.appendFileSync(".debug.log", `[${new Date().toISOString()}] [middleware-architect-review] THROWN ERROR: ${errMsg}\n`); } catch {}
+      sendJson(res, 500, {
+        ok: false,
+        error: error instanceof Error ? error.message : "架构评审报告操作失败",
       });
     }
   });
