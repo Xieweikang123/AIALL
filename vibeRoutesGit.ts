@@ -328,21 +328,25 @@ ${diffText.slice(0, 12000)}
         return;
       }
 
+      sendSseHeaders(res);
+      sendSseEvent(res, "progress", { step: "读取变更…" });
+
       const resolved = path.resolve(body.path.trim());
       const statusResult = await gitStatus(resolved);
       if (!statusResult.ok) {
-        sendJson(res, 400, { ok: false, error: statusResult.error || "获取 Git 状态失败" });
+        sendSseEvent(res, "error", { error: statusResult.error || "获取 Git 状态失败" });
+        res.end();
         return;
       }
 
       const unstagedFiles = statusResult.files.filter((f) => !f.staged && f.status !== "ignored");
       if (!unstagedFiles.length) {
-        sendSseHeaders(res);
         sendSseEvent(res, "done", { groups: [] });
         res.end();
         return;
       }
 
+      sendSseEvent(res, "progress", { step: `读取 diff（${unstagedFiles.length} 个文件）…` });
       const diffResult = await gitDiff(resolved, undefined, false);
       const diffText = diffResult.ok ? (diffResult.patch || "") : "";
       const fileList = unstagedFiles.map((f) => `${f.status}: ${f.path}`).join("\n");
@@ -369,7 +373,7 @@ ${diffText.slice(0, 15000)}
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (body.apiKey) headers.Authorization = `Bearer ${body.apiKey}`;
 
-      sendSseHeaders(res);
+      sendSseEvent(res, "progress", { step: "AI 分析中…" });
 
       const aiResponse = await fetch(chatEndpoint, {
         method: "POST",
@@ -383,14 +387,14 @@ ${diffText.slice(0, 15000)}
 
       if (!aiResponse.ok) {
         const errText = await aiResponse.text().catch(() => "");
-        sendSseEvent(res, "error", { message: `AI 请求失败，HTTP ${aiResponse.status}${errText ? `: ${errText.slice(0, 200)}` : ""}` });
+        sendSseEvent(res, "error", { error: `AI 请求失败，HTTP ${aiResponse.status}${errText ? `: ${errText.slice(0, 200)}` : ""}` });
         res.end();
         return;
       }
 
       const reader = aiResponse.body?.getReader();
       if (!reader) {
-        sendSseEvent(res, "error", { message: "AI 响应体为空" });
+        sendSseEvent(res, "error", { error: "AI 响应体为空" });
         res.end();
         return;
       }
@@ -445,7 +449,11 @@ ${diffText.slice(0, 15000)}
       sendSseEvent(res, "done", { groups });
       res.end();
     } catch (error) {
-      sendSseEvent(res, "error", { message: error instanceof Error ? error.message : "AI 分批分组失败" });
+      if (!res.headersSent) {
+        sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "AI 分批分组失败" });
+        return;
+      }
+      sendSseEvent(res, "error", { error: error instanceof Error ? error.message : "AI 分批分组失败" });
       res.end();
     }
   });

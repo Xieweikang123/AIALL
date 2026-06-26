@@ -252,7 +252,7 @@
         <div
           v-if="batchGroups && batchGroups.length > 0"
           class="git-batch-section git-section-card"
-          :class="{ 'git-batch-section--open': batchSectionOpen }"
+          :class="{ 'git-batch-section--open': batchSectionOpen, 'git-batch-section--grouping': aiBatchGrouping }"
         >
           <div class="git-batch-header-row">
             <button type="button" class="git-batch-toggle" @click="batchSectionOpen = !batchSectionOpen">
@@ -263,14 +263,20 @@
             <button
               type="button"
               class="secondary small git-ai-batch-btn"
+              :class="{ 'git-ai-batch-btn--loading': aiBatchGrouping }"
               :disabled="aiBatchGrouping || batchCommittingIndex !== null || !configReady"
               :title="!configReady ? '请先配置 AI 模型' : 'AI 按功能模块智能分组'"
               @click="$emit('ai-batch-groups')"
             >
-              {{ aiBatchGrouping ? "分析中…" : "AI 划分" }}
+              <span v-if="aiBatchGrouping" class="panel-loading-spinner git-ai-batch-spinner" aria-hidden="true" />
+              {{ aiBatchGrouping ? (aiBatchGroupingStep || "分析中…") : "AI 划分" }}
             </button>
           </div>
           <div v-if="batchSectionOpen" class="git-batch-groups">
+            <div v-if="aiBatchGrouping" class="git-batch-loading">
+              <span class="panel-loading-spinner git-batch-loading-spinner" aria-hidden="true" />
+              <span class="git-batch-loading-text">{{ aiBatchGroupingStep || "正在分析文件变更…" }}</span>
+            </div>
             <button
               type="button"
               class="primary small git-batch-all-btn"
@@ -432,6 +438,7 @@ interface Props {
   batchGroups?: BatchGroup[];
   batchCommittingIndex: number | null;
   aiBatchGrouping: boolean;
+  aiBatchGroupingStep: string;
   gitAheadCommits: GitLogEntry[];
   gitAheadCommitsOpen: boolean;
   gitAheadCommitsLoading: boolean;
@@ -447,6 +454,13 @@ watch(
   () => props.gitStashes.length,
   (count, prev) => {
     if (count > 0 && (prev ?? 0) === 0) stashSectionOpen.value = true;
+  },
+);
+
+watch(
+  () => props.aiBatchGrouping,
+  (grouping) => {
+    if (grouping) batchSectionOpen.value = true;
   },
 );
 
@@ -1571,6 +1585,49 @@ function gitStatusClass(status: string): string {
 .git-ai-batch-btn {
   margin-right: 8px;
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 88px;
+}
+
+.git-ai-batch-btn--loading {
+  opacity: 0.85;
+}
+
+.git-ai-batch-spinner {
+  width: 12px;
+  height: 12px;
+  border-width: 1.5px;
+  flex-shrink: 0;
+}
+
+.git-batch-section--grouping .git-batch-groups {
+  position: relative;
+}
+
+.git-batch-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border-radius: 6px;
+  background: rgba(88, 166, 255, 0.08);
+  border: 1px solid rgba(88, 166, 255, 0.15);
+  font-size: 12px;
+  color: rgba(201, 209, 217, 0.9);
+}
+
+.git-batch-loading-spinner {
+  width: 14px;
+  height: 14px;
+  border-width: 1.5px;
+  flex-shrink: 0;
+}
+
+.git-batch-loading-text {
+  line-height: 1.4;
 }
 
 .git-batch-all-btn {

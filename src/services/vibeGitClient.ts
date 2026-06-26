@@ -392,6 +392,7 @@ export async function aiBatchGroups(
   apiKey: string,
   model: string,
   onDelta?: (text: string) => void,
+  onProgress?: (step: string) => void,
 ): Promise<AiBatchGroupsResult> {
   try {
     const response = await fetch(backendUrl("/backend/vibe/git/ai-batch-groups"), {
@@ -441,13 +442,15 @@ export async function aiBatchGroups(
           if (!raw || raw === "[DONE]") continue;
 
           try {
-            const parsed = JSON.parse(raw) as { text?: string; groups?: AiBatchGroupItem[]; error?: string };
-            if (currentEvent === "delta" && parsed.text && onDelta) {
+            const parsed = JSON.parse(raw) as { text?: string; step?: string; groups?: AiBatchGroupItem[]; error?: string; message?: string };
+            if (currentEvent === "progress" && parsed.step && onProgress) {
+              onProgress(parsed.step);
+            } else if (currentEvent === "delta" && parsed.text && onDelta) {
               onDelta(parsed.text);
             } else if (currentEvent === "done" && parsed.groups) {
               finalGroups = parsed.groups;
             } else if (currentEvent === "error") {
-              return { ok: false, groups: [], error: parsed.error || "AI 请求失败" };
+              return { ok: false, groups: [], error: parsed.error || parsed.message || "AI 请求失败" };
             }
           } catch {
             // skip malformed SSE

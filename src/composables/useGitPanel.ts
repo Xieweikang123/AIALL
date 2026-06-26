@@ -328,6 +328,7 @@ export function useGitPanel(
 
   const aiBatchGroupsResult = ref<AiBatchGroupItem[] | null>(null);
   const aiBatchGrouping = ref(false);
+  const aiBatchGroupingStep = ref("");
   const batchCommittingAll = ref(false);
 
   const batchGroups = computed<BatchGroup[]>(() => {
@@ -443,6 +444,7 @@ export function useGitPanel(
     const cfg = aiConfig();
     if (!cfg.endpoint.trim() || !cfg.model.trim()) return;
     aiBatchGrouping.value = true;
+    aiBatchGroupingStep.value = "连接服务…";
     gitError.value = "";
     try {
       const result = await aiBatchGroupsApi(
@@ -450,18 +452,31 @@ export function useGitPanel(
         cfg.endpoint.trim(),
         cfg.apiKey.trim(),
         cfg.model.trim(),
+        () => {
+          if (!aiBatchGroupingStep.value.startsWith("AI")) {
+            aiBatchGroupingStep.value = "AI 分析中…";
+          }
+        },
+        (step) => {
+          aiBatchGroupingStep.value = step;
+        },
       );
       if (!result.ok) {
         gitError.value = result.error || "AI 分组失败";
         aiBatchGroupsResult.value = null;
       } else {
         aiBatchGroupsResult.value = result.groups.length > 0 ? result.groups : null;
+        if (result.groups.length > 0) {
+          aiBatchGroupingStep.value = "完成 ✓";
+          await new Promise((r) => setTimeout(r, 500));
+        }
       }
     } catch (e) {
       gitError.value = e instanceof Error ? e.message : "AI 分组失败";
       aiBatchGroupsResult.value = null;
     } finally {
       aiBatchGrouping.value = false;
+      aiBatchGroupingStep.value = "";
     }
   }
 
@@ -1080,6 +1095,7 @@ export function useGitPanel(
     commitBatchGroup,
     commitAllBatches,
     aiBatchGrouping,
+    aiBatchGroupingStep,
     generateAiBatchGroups,
 
     clearGitDiffCache,
