@@ -20,6 +20,11 @@ import {
   writeProjectKnowledge,
 } from "./server/vibeProjectKnowledge";
 import {
+  buildArchitectReviewContext,
+  readArchitectReview,
+  writeArchitectReview,
+} from "./server/projectArchitectReview";
+import {
   archiveExplorationNote,
   listProjectSkills,
   readProjectSkill,
@@ -38,6 +43,7 @@ import { mergeSessionPayloadForDisk } from "./server/chatStoreMerge";
 import { externalizeSessionPayload, readImageRefAsBuffer, readImageRefAsDataUrl } from "./server/vibeChatImages";
 import { withFileLock } from "./server/fileLock";
 import { sessionDiagServer } from "./server/sessionDiagLog";
+import { scanProjectHealth } from "./server/projectHealthScan";
 
 const execFileAsync = promisify(execFile);
 
@@ -1250,6 +1256,92 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
     }
   });
 
+  // GET /backend/vibe/project-architect-review/context
+  middlewares.use("/backend/vibe/project-architect-review/context", async (req, res) => {
+    try {
+      if (req.method !== "GET") {
+        sendJson(res, 405, { ok: false, error: "仅支持 GET" });
+        return;
+      }
+      const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+      const projectPath = (url.searchParams.get("projectPath") || "").trim();
+      if (!projectPath) {
+        sendJson(res, 400, { ok: false, error: "缺少 projectPath" });
+        return;
+      }
+      const result = await buildArchitectReviewContext(projectPath);
+      sendJson(res, result.ok ? 200 : 400, result);
+    } catch (error) {
+      sendJson(res, 500, {
+        ok: false,
+        error: error instanceof Error ? error.message : "获取架构审视上下文失败",
+      });
+    }
+  });
+
+  // GET/POST /backend/vibe/project-architect-review
+  middlewares.use("/backend/vibe/project-architect-review", async (req, res) => {
+    try {
+      if (req.method === "GET") {
+        const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+        const projectPath = (url.searchParams.get("projectPath") || "").trim();
+        if (!projectPath) {
+          sendJson(res, 400, { ok: false, error: "缺少 projectPath" });
+          return;
+        }
+        const result = await readArchitectReview(projectPath);
+        sendJson(res, result.ok ? 200 : 400, result);
+        return;
+      }
+
+      if (req.method === "POST") {
+        const body = (await readJsonBody(req)) as {
+          projectPath?: string;
+          body?: string;
+          content?: string;
+          gitHead?: string;
+          fromReview?: boolean;
+          verdict?: "on_track" | "caution" | "off_track";
+        };
+        const projectPath = body.projectPath?.trim() || "";
+        if (!projectPath) {
+          sendJson(res, 400, { ok: false, error: "缺少 projectPath" });
+          return;
+        }
+
+        const reviewBody = String(body.body ?? body.content ?? "");
+        const result = await writeArchitectReview(projectPath, reviewBody, {
+          gitHead: body.gitHead?.trim() || undefined,
+          fromReview: Boolean(body.fromReview),
+          verdict: body.verdict,
+        });
+        if (!result.ok) {
+          sendJson(res, 400, result);
+          return;
+        }
+        const readBack = await readArchitectReview(projectPath);
+        sendJson(res, 200, {
+          ok: true,
+          path: result.path,
+          size: result.size,
+          truncated: result.truncated,
+          meta: result.meta,
+          content: readBack.ok ? readBack.content : "",
+          body: readBack.ok ? readBack.body : reviewBody,
+          maxChars: readBack.ok ? readBack.maxChars : undefined,
+        });
+        return;
+      }
+
+      sendJson(res, 405, { ok: false, error: "仅支持 GET / POST" });
+    } catch (error) {
+      sendJson(res, 500, {
+        ok: false,
+        error: error instanceof Error ? error.message : "架构审视报告操作失败",
+      });
+    }
+  });
+
   // GET/POST /backend/vibe/project-skills
   middlewares.use("/backend/vibe/project-skills", async (req, res) => {
     try {
@@ -1358,6 +1450,31 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       sendJson(res, 200, { ok: true, entries: store.entries });
     } catch (error) {
       sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "记忆使用追踪失败" });
+    }
+  });
+
+  // GET /backend/vibe/project-health-scan
+  middlewares.use("/backend/vibe/project-health-scan", async (req, res) => {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { error: "仅支持 GET 请求" });
+      return;
+    }
+
+    try {
+      const url = new URL(req.url || "", "http://localhost");
+      const projectPath = url.searchParams.get("projectPath")?.trim();
+      if (!projectPath) {
+        sendJson(res, 400, { ok: false, error: "缺少 projectPath 参数" });
+        return;
+      }
+
+      const result = await scanProjectHealth(projectPath);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, {
+        ok: false,
+        error: error instanceof Error ? error.message : "项目体检失败",
+      });
     }
   });
 
