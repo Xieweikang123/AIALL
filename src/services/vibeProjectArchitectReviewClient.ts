@@ -10,6 +10,11 @@ import {
   type ArchitectReviewWriteMetaOptions,
 } from "../../shared/projectArchitectReviewFormat";
 import type { ArchitectReviewContextBundle } from "../../shared/projectArchitectReview";
+import type {
+  ArchitectReviewHistoryEntry,
+  ArchitectReviewStoreIndex,
+  ReviewHistoryFileContent,
+} from "../../shared/projectArchitectReviewHistory";
 import {
   formatFetchError,
   readFile,
@@ -139,6 +144,8 @@ export async function saveProjectArchitectReview(
         fromReview: options?.fromReview ?? true,
         gitHead: options?.gitHead,
         verdict: options?.verdict,
+        commitCount: options?.commitCount,
+        changedFileCount: options?.changedFileCount,
       }),
     });
     if (response.ok) {
@@ -172,6 +179,89 @@ export async function fetchArchitectReviewContext(
     return {
       ok: false,
       error: formatFetchError(error, "获取审视上下文失败"),
+    };
+  }
+}
+
+// --- Review History API ---
+
+export type ReviewHistoryPayload = {
+  ok: boolean;
+  index?: ArchitectReviewStoreIndex;
+  reviews?: ArchitectReviewHistoryEntry[];
+  error?: string;
+};
+
+export type ReviewHistoryDetailPayload = {
+  ok: boolean;
+  review?: ReviewHistoryFileContent;
+  error?: string;
+};
+
+export async function fetchReviewHistory(projectPath: string): Promise<ReviewHistoryPayload> {
+  const trimmed = projectPath.trim();
+  if (!trimmed) return { ok: false, error: "缺少 projectPath" };
+  try {
+    const url = backendUrl(
+      `/backend/vibe/project-architect-review/history?projectPath=${encodeURIComponent(trimmed)}`,
+    );
+    const response = await fetch(url);
+    if (response.ok) {
+      return await readJsonResponse<ReviewHistoryPayload>(response);
+    }
+    return { ok: false, error: "获取审查历史失败" };
+  } catch (error) {
+    return {
+      ok: false,
+      error: formatFetchError(error, "获取审查历史失败"),
+    };
+  }
+}
+
+export async function fetchReviewHistoryDetail(
+  projectPath: string,
+  reviewId: string,
+): Promise<ReviewHistoryDetailPayload> {
+  const trimmed = projectPath.trim();
+  if (!trimmed) return { ok: false, error: "缺少 projectPath" };
+  if (!reviewId) return { ok: false, error: "缺少 reviewId" };
+  try {
+    const url = backendUrl(
+      `/backend/vibe/project-architect-review/history?projectPath=${encodeURIComponent(trimmed)}&reviewId=${encodeURIComponent(reviewId)}`,
+    );
+    const response = await fetch(url);
+    if (response.ok) {
+      return await readJsonResponse<ReviewHistoryDetailPayload>(response);
+    }
+    return { ok: false, error: "获取审查记录详情失败" };
+  } catch (error) {
+    return {
+      ok: false,
+      error: formatFetchError(error, "获取审查记录详情失败"),
+    };
+  }
+}
+
+export async function deleteReviewHistory(
+  projectPath: string,
+  reviewId: string,
+): Promise<ReviewHistoryPayload> {
+  const trimmed = projectPath.trim();
+  if (!trimmed) return { ok: false, error: "缺少 projectPath" };
+  if (!reviewId) return { ok: false, error: "缺少 reviewId" };
+  try {
+    const url = backendUrl(
+      `/backend/vibe/project-architect-review/history?projectPath=${encodeURIComponent(trimmed)}&reviewId=${encodeURIComponent(reviewId)}`,
+    );
+    const response = await fetch(url, { method: "DELETE" });
+    if (response.ok) {
+      return await readJsonResponse<ReviewHistoryPayload>(response);
+    }
+    return { ok: false, error: "删除审查记录失败" };
+  } catch (error) {
+    return {
+      ok: false,
+      error: formatFetchError(error, "删除审查记录失败"),
     };
   }
 }

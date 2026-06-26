@@ -212,9 +212,15 @@
           :review-run="reviewRun"
           :changed-file-count="reviewContext?.changedFiles?.length ?? 0"
           :commit-count="reviewContext?.recentCommits?.length ?? 0"
+          :review-history="reviewHistory"
+          :review-history-loading="reviewHistoryLoading"
+          :active-history-review="activeHistoryReview"
           @start-review="() => void startArchitectReview()"
           @stop-review="stopArchitectReview"
           @open-source="openArchitectReviewSourceFile"
+          @load-history="() => void loadReviewHistory()"
+          @view-history="(entry) => void viewHistoryReview(entry)"
+          @delete-history="(entry) => void deleteHistoryReview(entry)"
         />
       </FilePanel>
 
@@ -1208,6 +1214,15 @@ const {
   stopArchitectReview,
   onProjectClosed: onReviewProjectClosed,
   onProjectPathChanged: onReviewProjectPathChanged,
+  // History
+  reviewHistory,
+  reviewHistoryLoading,
+  reviewHistoryMessage,
+  activeHistoryReview,
+  loadReviewHistory,
+  viewHistoryReview,
+  deleteHistoryReview,
+  clearHistoryReview,
 } = useProjectArchitectReview({
   projectPath,
   projectOpened,
@@ -1258,13 +1273,17 @@ watch([gitPanelMode, projectPanelView, projectOpened], ([mode, view, opened]) =>
   if (mode === "project" && view === "health" && opened) {
     if (editorCollapsed.value) expandEditor();
     void loadReview();
+    void loadReviewHistory();
   }
 });
 
 watch(projectPath, () => {
   onReviewProjectPathChanged();
   if (gitPanelMode.value === "project" && projectPanelView.value === "knowledge" && projectOpened.value) void loadKnowledge();
-  if (gitPanelMode.value === "project" && projectPanelView.value === "health" && projectOpened.value) void loadReview();
+  if (gitPanelMode.value === "project" && projectPanelView.value === "health" && projectOpened.value) {
+    void loadReview();
+    void loadReviewHistory();
+  }
 });
 
 /** 无活跃会话时输入框草稿用固定 key，仅存 localStorage */

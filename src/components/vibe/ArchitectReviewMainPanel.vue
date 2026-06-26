@@ -35,6 +35,43 @@
 
     <p v-if="reviewMessage" class="architect-review-hint" role="status">{{ reviewMessage }}</p>
 
+    <div v-if="reviewRun.running" class="architect-review-running">
+      <div class="architect-review-running-header">
+        <span class="architect-review-spinner" aria-hidden="true" />
+        <span class="architect-review-running-status">
+          {{ reviewRun.statusDetail || "正在审视项目架构…" }}
+        </span>
+        <span v-if="reviewRun.maxTurns" class="architect-review-running-turns">
+          {{ reviewRun.turn }}/{{ reviewRun.maxTurns }}
+        </span>
+      </div>
+      
+      <div v-if="reviewRun.tools.length > 0" class="architect-review-tools">
+        <div class="architect-review-tools-label">已使用工具</div>
+        <div class="architect-review-tools-list">
+          <span
+            v-for="tool in reviewRun.tools"
+            :key="tool.id"
+            class="architect-review-tool-badge"
+            :class="{ 'architect-review-tool-badge--done': tool.ok !== undefined }"
+          >
+            {{ tool.name }}
+            <span v-if="tool.ok === true" class="architect-review-tool-status">✓</span>
+            <span v-else-if="tool.ok === false" class="architect-review-tool-status architect-review-tool-status--error">✗</span>
+          </span>
+        </div>
+      </div>
+      
+      <div class="architect-review-progress">
+        <div class="architect-review-progress-bar">
+          <div 
+            class="architect-review-progress-fill" 
+            :style="{ width: progressPercent + '%' }"
+          />
+        </div>
+      </div>
+    </div>
+
     <div v-if="reviewLoading && !reviewRun.running" class="architect-review-loading">加载中…</div>
 
     <div
@@ -78,6 +115,11 @@ const emit = defineEmits<{
 }>();
 
 const verdictLabel = computed(() => formatArchitectReviewVerdictLabel(props.reviewVerdict));
+
+const progressPercent = computed(() => {
+  if (!props.reviewRun.maxTurns) return 0;
+  return Math.min(100, Math.round((props.reviewRun.turn / props.reviewRun.maxTurns) * 100));
+});
 
 const displayHtml = computed(() => {
   const body = stripArchitectReviewFrontmatter(props.displayBody.trim());
@@ -181,6 +223,112 @@ const displayHtml = computed(() => {
   padding: 0 16px 8px;
   font-size: 11px;
   color: rgba(160, 175, 190, 0.95);
+}
+
+.architect-review-running {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.architect-review-running-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.architect-review-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(88, 166, 255, 0.15);
+  border-top-color: rgba(88, 166, 255, 0.85);
+  border-radius: 50%;
+  animation: architect-review-spin 0.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  flex-shrink: 0;
+}
+
+@keyframes architect-review-spin {
+  to { transform: rotate(360deg); }
+}
+
+.architect-review-running-status {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: rgba(180, 190, 200, 0.95);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.architect-review-running-turns {
+  font-size: 11px;
+  color: rgba(139, 148, 158, 0.88);
+  font-variant-numeric: tabular-nums;
+}
+
+.architect-review-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.architect-review-tools-label {
+  font-size: 10px;
+  color: rgba(139, 148, 158, 0.75);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.architect-review-tools-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.architect-review-tool-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(88, 166, 255, 0.08);
+  border: 1px solid rgba(88, 166, 255, 0.15);
+  font-size: 10px;
+  color: rgba(180, 200, 225, 0.9);
+}
+
+.architect-review-tool-badge--done {
+  background: rgba(139, 148, 158, 0.08);
+  border-color: rgba(139, 148, 158, 0.15);
+}
+
+.architect-review-tool-status {
+  font-size: 9px;
+  color: rgba(183, 235, 198, 0.9);
+}
+
+.architect-review-tool-status--error {
+  color: rgba(255, 140, 135, 0.9);
+}
+
+.architect-review-progress {
+  margin-top: 4px;
+}
+
+.architect-review-progress-bar {
+  height: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.architect-review-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, rgba(88, 166, 255, 0.6) 0%, rgba(88, 166, 255, 0.9) 100%);
+  border-radius: 2px;
+  transition: width 0.3s ease;
 }
 
 .architect-review-loading,

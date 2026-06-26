@@ -9,10 +9,14 @@ import {
   type ArchitectReviewContextBundle,
 } from "../../shared/projectArchitectReview";
 import { stripArchitectReviewFrontmatter } from "../../shared/projectArchitectReviewFormat";
+import type { ArchitectReviewHistoryEntry } from "../../shared/projectArchitectReviewHistory";
 import {
   fetchArchitectReviewContext,
   fetchProjectArchitectReview,
   saveProjectArchitectReview,
+  fetchReviewHistory,
+  fetchReviewHistoryDetail,
+  deleteReviewHistory,
   type ArchitectReviewMeta,
 } from "../services/vibeProjectArchitectReviewClient";
 import { loadWebProxyUrlFromStorage } from "../services/aiLocalConfig";
@@ -81,6 +85,12 @@ export function useProjectArchitectReview(options: {
   const reviewMessage = ref("");
   const reviewContext = ref<ArchitectReviewContextBundle | null>(null);
 
+  // Review history state
+  const reviewHistory = ref<ArchitectReviewHistoryEntry[]>([]);
+  const reviewHistoryLoading = ref(false);
+  const reviewHistoryMessage = ref("");
+  const activeHistoryReview = ref<ArchitectReviewHistoryEntry | null>(null);
+
   const reviewRun = ref<ArchitectReviewRunState>(emptyRunState());
   let abortHandle: { abort: () => void } | null = null;
   let finalizeInFlight: Promise<void> | null = null;
@@ -118,6 +128,74 @@ export function useProjectArchitectReview(options: {
     } finally {
       reviewLoading.value = false;
     }
+  }
+
+  async function loadReviewHistory() {
+    const path = options.projectPath.value.trim();
+    if (!path || !options.projectOpened.value) return;
+    reviewHistoryLoading.value = true;
+    reviewHistoryMessage.value = "";
+    try {
+      const result = await fetchReviewHistory(path);
+      if (!result.ok) {
+        reviewHistoryMessage.value = result.error || "加载历史失败";
+        return;
+      }
+      reviewHistory.value = result.reviews ?? [];
+    } finally {
+      reviewHistoryLoading.value = false;
+    }
+  }
+
+  async function viewHistoryReview(entry: ArchitectReviewHistoryEntry) {
+    const path = options.projectPath.value.trim();
+    if (!path || !options.projectOpened.value) return;
+    activeHistoryReview.value = entry;
+    reviewLoading.value = true;
+    try {
+      const result = await fetchReviewHistoryDetail(path, entry.id);
+      if (!result.ok) {
+        reviewMessage.value = result.error || "加载历史记录失败";
+        return;
+      }
+      if (result.review) {
+        reviewBody.value = result.review.body;
+        reviewMeta.value = {
+          gitHead: result.review.gitHead,
+          verdict: result.review.verdict,
+          lastReviewedAt: result.review.createdAt,
+          updatedAt: result.review.createdAt,
+        };
+      }
+    } finally {
+      reviewLoading.value = false;
+    }
+  }
+
+  async function deleteHistoryReview(entry: ArchitectReviewHistoryEntry) {
+    const path = options.projectPath.value.trim();
+    if (!path || !options.projectOpened.value) return;
+    reviewHistoryLoading.value = true;
+    try {
+      const result = await deleteReviewHistory(path, entry.id);
+      if (!result.ok) {
+        reviewHistoryMessage.value = result.error || "删除历史失败";
+        return;
+      }
+      reviewHistory.value = result.reviews ?? [];
+      // If viewing the deleted review, clear it
+      if (activeHistoryReview.value?.id === entry.id) {
+        activeHistoryReview.value = null;
+        await loadReview();
+      }
+    } finally {
+      reviewHistoryLoading.value = false;
+    }
+  }
+
+  function clearHistoryReview() {
+    activeHistoryReview.value = null;
+    loadReview();
   }
 
   function handleReviewEvent(event: VibeAgentSseEvent) {
@@ -193,16 +271,24 @@ export function useProjectArchitectReview(options: {
 
       const saveBody = extractArchitectReviewBody(raw);
       const verdict = parseArchitectReviewVerdictFromBody(saveBody) ?? undefined;
+      
+      // Extract commit count and changed file count from context
+      const commitCount = reviewContext.value?.recentCommits?.length;
+      const changedFileCount = reviewContext.value?.changedFiles?.length;
+      
       const result = await saveProjectArchitectReview(path, saveBody, {
         fromReview: true,
         gitHead: ctx?.gitHead ?? (options.gitHead?.value?.trim() || reviewMeta.value.gitHead),
         verdict,
+        commitCount,
+        changedFileCount,
       });
       if (result.ok) {
         if (applyToUi) {
           reviewBody.value = result.body ?? saveBody;
           reviewMeta.value = result.meta ?? {};
           reviewMessage.value = resolveReviewSaveMessage(true);
+          void loadReviewHistory();
         }
       } else if (applyToUi) {
         reviewMessage.value = result.error || "保存审视报告失败";
@@ -300,6 +386,9 @@ export function useProjectArchitectReview(options: {
     reviewMessage.value = "";
     reviewContext.value = null;
     reviewRun.value = emptyRunState();
+    reviewHistory.value = [];
+    reviewHistoryMessage.value = "";
+    activeHistoryReview.value = null;
   }
 
   function onProjectPathChanged() {
@@ -308,6 +397,9 @@ export function useProjectArchitectReview(options: {
     reviewMeta.value = {};
     reviewMessage.value = "";
     reviewContext.value = null;
+    reviewHistory.value = [];
+    reviewHistoryMessage.value = "";
+    activeHistoryReview.value = null;
   }
 
   return {
@@ -326,5 +418,14 @@ export function useProjectArchitectReview(options: {
     stopArchitectReview,
     onProjectClosed,
     onProjectPathChanged,
+    // History
+    reviewHistory,
+    reviewHistoryLoading,
+    reviewHistoryMessage,
+    activeHistoryReview,
+    loadReviewHistory,
+    viewHistoryReview,
+    deleteHistoryReview,
+    clearHistoryReview,
   };
 }
