@@ -105,6 +105,9 @@
           :file-watcher-connected="fileWatcherConnected"
           :expanded-git-log-entries="expandedGitLogEntries"
           :batch-groups="batchGroups"
+          :batch-groups-from-ai="batchGroupsFromAi"
+          :batch-messages="batchMessages"
+          :batch-section-open="batchSectionOpen"
           :batch-committing-index="batchCommittingIndex"
           :ai-batch-grouping="aiBatchGrouping"
           :ai-batch-grouping-step="aiBatchGroupingStep"
@@ -143,6 +146,8 @@
           @commit-batch-group="commitBatchGroup"
           @commit-all-batches="commitAllBatches"
           @ai-batch-groups="generateAiBatchGroups"
+          @update:batch-messages="batchMessages = $event"
+          @update:batch-section-open="batchSectionOpen = $event"
         />
 
         <div v-if="gitPanelMode === 'files' && !projectOpened" class="panel-empty">
@@ -221,6 +226,7 @@
           :commit-count="reviewContext?.recentCommits?.length ?? 0"
           :review-history="reviewHistory"
           :review-history-loading="reviewHistoryLoading"
+          :review-history-detail-loading="reviewHistoryDetailLoading"
           :review-history-message="reviewHistoryMessage"
           :active-history-review="activeHistoryReview"
           @start-review="() => void startArchitectReview()"
@@ -998,7 +1004,7 @@ const {
   generateCommitMessage, aiCommitAndPush, refreshGitRemotes, refreshGitAheadCommits,
   doFetch, doPull, doPush,
   refreshGitStashes, doStashSave, doStashApply, doStashDrop,
-  batchGroups, batchCommittingIndex, commitBatchGroup, commitAllBatches,
+  batchGroups, batchGroupsFromAi, batchMessages, batchSectionOpen, batchCommittingIndex, commitBatchGroup, commitAllBatches,
   aiBatchGrouping, aiBatchGroupingStep, generateAiBatchGroups,
 } = git;
 
@@ -1232,6 +1238,7 @@ const {
   // History
   reviewHistory,
   reviewHistoryLoading,
+  reviewHistoryDetailLoading,
   reviewHistoryMessage,
   activeHistoryReview,
   loadReviewHistory,

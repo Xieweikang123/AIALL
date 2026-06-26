@@ -279,13 +279,22 @@
             <div
               v-if="batchGroups && batchGroups.length > 0"
               class="git-batch-section git-section-card"
-              :class="{ 'git-batch-section--open': batchSectionOpen, 'git-batch-section--grouping': aiBatchGrouping }"
+              :class="{
+                'git-batch-section--open': batchSectionOpen,
+                'git-batch-section--grouping': aiBatchGrouping,
+                'git-batch-section--ai': batchGroupsFromAi,
+              }"
             >
-              <div class="git-batch-header-row">
-                <button type="button" class="git-batch-toggle" @click="batchSectionOpen = !batchSectionOpen">
+              <div class="git-section-head git-batch-head">
+                <button
+                  type="button"
+                  class="git-section-toggle git-batch-toggle"
+                  @click="$emit('update:batchSectionOpen', !batchSectionOpen)"
+                >
                   <span class="git-section-chevron">{{ batchSectionOpen ? "▾" : "▸" }}</span>
-                  <span>分批提交</span>
+                  <span class="git-section-title">分批提交</span>
                   <span class="git-batch-count">{{ batchGroups.length }}</span>
+                  <span v-if="batchGroupsFromAi" class="git-batch-ai-tag">AI</span>
                 </button>
                 <button
                   type="button"
@@ -299,61 +308,107 @@
                   {{ aiBatchGrouping ? (aiBatchGroupingStep || "分析中…") : "AI 划分" }}
                 </button>
               </div>
-              <transition-group
-                v-if="batchSectionOpen"
-                name="batch-group-list"
-                tag="div"
-                class="git-batch-groups"
-              >
-                <div v-if="aiBatchGrouping" key="loading" class="git-batch-loading">
+              <p v-if="!batchSectionOpen" class="git-batch-collapsed-hint">
+                {{ batchTotalFiles }} 个文件 · {{ batchReadyCount }}/{{ batchGroups.length }} 组已填写说明
+              </p>
+              <div v-if="batchSectionOpen" class="git-batch-body">
+                <div v-if="aiBatchGrouping" class="git-batch-loading">
                   <span class="panel-loading-spinner git-batch-loading-spinner" aria-hidden="true" />
                   <span class="git-batch-loading-text">{{ aiBatchGroupingStep || "正在分析文件变更…" }}</span>
                 </div>
-                <button
-                  v-if="batchGroups && batchGroups.length > 0"
-                  key="commit-all-btn"
-                  type="button"
-                  class="primary small git-batch-all-btn"
-                  :disabled="batchCommittingIndex !== null"
-                  @click="$emit('commit-all-batches', [...batchMessages])"
-                >
-                  {{ batchCommittingIndex !== null ? `提交中 (${batchCommittingIndex! + 1}/${batchGroups.length})…` : `全部提交 (${batchGroups.length})` }}
-                </button>
+                <div class="git-batch-toolbar">
+                  <span class="git-batch-toolbar-hint">
+                    {{ batchTotalFiles }} 个文件 · {{ batchReadyCount }}/{{ batchGroups.length }} 组就绪
+                  </span>
+                  <button
+                    type="button"
+                    class="small git-batch-all-btn"
+                    :class="canCommitAllBatches ? 'primary' : 'secondary'"
+                    :disabled="batchCommittingIndex !== null || !canCommitAllBatches"
+                    :title="canCommitAllBatches ? '按顺序提交全部分组' : '请先为每组填写提交说明'"
+                    @click="$emit('commit-all-batches', [...batchMessages])"
+                  >
+                    <template v-if="batchCommittingIndex !== null">
+                      提交中 {{ batchCommittingIndex + 1 }}/{{ batchGroups.length }}…
+                    </template>
+                    <template v-else>
+                      全部提交
+                    </template>
+                  </button>
+                </div>
                 <div
-                  v-for="(group, i) in batchGroups"
-                  :key="group.dir"
-                  class="git-batch-group"
-                  :class="{ 'git-batch-group--busy': batchCommittingIndex === i }"
+                  v-if="batchCommittingIndex !== null"
+                  class="git-batch-progress"
+                  role="progressbar"
+                  :aria-valuenow="batchCommittingIndex + 1"
+                  :aria-valuemin="1"
+                  :aria-valuemax="batchGroups.length"
                 >
-                  <div class="git-batch-group-header">
-                    <span class="git-batch-group-dir">{{ group.dir }}/</span>
-                    <span class="git-batch-group-count">{{ group.files.length }} 个文件</span>
-                  </div>
-                  <div class="git-batch-group-files">
-                    <div v-for="f in group.files" :key="f.path" class="git-batch-file">
-                      <span class="git-file-status" :class="gitStatusClass(f.status)">{{ gitStatusIcon(f.status) }}</span>
-                      <span class="git-file-path">{{ f.path }}</span>
+                  <div
+                    class="git-batch-progress-bar"
+                    :style="{ width: `${((batchCommittingIndex + 1) / batchGroups.length) * 100}%` }"
+                  />
+                </div>
+                <div class="git-batch-groups">
+                  <div
+                    v-for="(group, i) in batchGroups"
+                    :key="`${group.dir}-${i}`"
+                    class="git-batch-group"
+                    :class="{
+                      'git-batch-group--busy': batchCommittingIndex === i,
+                      'git-batch-group--done': batchCommittingIndex !== null && batchCommittingIndex > i,
+                      'git-batch-group--ready': !!batchMessages[i]?.trim(),
+                    }"
+                    :style="{ '--batch-accent': batchGroupAccent(i) }"
+                  >
+                    <div class="git-batch-group-header">
+                      <span class="git-batch-group-index">{{ i + 1 }}</span>
+                      <span class="git-batch-group-dir" :title="batchGroupTitle(group)">{{ batchGroupTitle(group) }}</span>
+                      <span class="git-batch-group-count">{{ group.files.length }} 文件</span>
+                      <span v-if="batchCommittingIndex === i" class="git-batch-group-status">提交中</span>
+                      <span v-else-if="!batchMessages[i]?.trim()" class="git-batch-group-status git-batch-group-status--warn">待填写</span>
+                    </div>
+                    <div class="git-batch-group-files">
+                      <div
+                        v-for="f in visibleBatchFiles(group, i)"
+                        :key="f.path"
+                        class="git-batch-file"
+                        :title="f.path"
+                      >
+                        <span class="git-file-status" :class="gitStatusClass(f.status)">{{ gitStatusIcon(f.status) }}</span>
+                        <span class="git-file-path">{{ f.path }}</span>
+                      </div>
+                    </div>
+                    <button
+                      v-if="group.files.length > BATCH_FILES_PREVIEW"
+                      type="button"
+                      class="git-batch-files-toggle"
+                      @click="toggleBatchGroupFiles(i)"
+                    >
+                      {{ isBatchGroupExpanded(i) ? "收起文件列表" : `展开其余 ${group.files.length - BATCH_FILES_PREVIEW} 个文件` }}
+                    </button>
+                    <div class="git-batch-group-commit">
+                      <textarea
+                        :value="batchMessages[i]"
+                        class="git-batch-msg-input"
+                        rows="2"
+                        placeholder="提交说明…"
+                        :disabled="batchCommittingIndex !== null"
+                        @input="onBatchMessageInput(i, ($event.target as HTMLTextAreaElement).value)"
+                      />
+                      <button
+                        type="button"
+                        class="small git-batch-commit-btn"
+                        :class="batchMessages[i]?.trim() ? 'primary' : 'secondary'"
+                        :disabled="batchCommittingIndex !== null || !batchMessages[i]?.trim()"
+                        @click="$emit('commit-batch-group', i, batchMessages[i] || '')"
+                      >
+                        {{ batchCommittingIndex === i ? "提交中…" : "提交" }}
+                      </button>
                     </div>
                   </div>
-                  <div class="git-batch-group-commit">
-                    <input
-                      :value="batchMessages[i]"
-                      class="git-batch-msg-input"
-                      placeholder="提交信息…"
-                      :disabled="batchCommittingIndex !== null"
-                      @input="batchMessages[i] = ($event.target as HTMLInputElement).value"
-                    />
-                    <button
-                      type="button"
-                      class="secondary small git-batch-commit-btn"
-                      :disabled="batchCommittingIndex !== null || !batchMessages[i]?.trim()"
-                      @click="$emit('commit-batch-group', i, batchMessages[i] || '')"
-                    >
-                      {{ batchCommittingIndex === i ? "提交中…" : "提交" }}
-                    </button>
-                  </div>
                 </div>
-              </transition-group>
+              </div>
             </div>
           </div>
         </div>
@@ -547,6 +602,9 @@ interface Props {
   fileWatcherConnected: boolean;
   expandedGitLogEntries: Set<string>;
   batchGroups?: BatchGroup[];
+  batchGroupsFromAi?: boolean;
+  batchMessages: string[];
+  batchSectionOpen: boolean;
   batchCommittingIndex: number | null;
   aiBatchGrouping: boolean;
   aiBatchGroupingStep: string;
@@ -561,9 +619,59 @@ interface Props {
 const props = defineProps<Props>();
 
 const stashSectionOpen = ref(false);
-const batchSectionOpen = ref(false);
 const localChangesOpen = ref(false);
-const batchMessages = ref<string[]>([]);
+
+const BATCH_FILES_PREVIEW = 4;
+const BATCH_GROUP_ACCENTS = ["#58a6ff", "#3fb950", "#d29922", "#bc8cff", "#f778ba", "#79c0ff"];
+
+const expandedBatchGroups = ref<Set<number>>(new Set());
+
+const batchTotalFiles = computed(() =>
+  (props.batchGroups ?? []).reduce((sum, g) => sum + g.files.length, 0),
+);
+
+const batchReadyCount = computed(() =>
+  props.batchMessages.filter((m) => m?.trim()).length,
+);
+
+const canCommitAllBatches = computed(() => {
+  const n = props.batchGroups?.length ?? 0;
+  if (!n || props.batchCommittingIndex !== null) return false;
+  return props.batchMessages.length === n && props.batchMessages.every((m) => m?.trim());
+});
+
+function batchGroupTitle(group: BatchGroup): string {
+  return props.batchGroupsFromAi ? group.dir : `${group.dir}/`;
+}
+
+function batchGroupAccent(index: number): string {
+  return BATCH_GROUP_ACCENTS[index % BATCH_GROUP_ACCENTS.length];
+}
+
+function isBatchGroupExpanded(index: number): boolean {
+  return expandedBatchGroups.value.has(index);
+}
+
+function toggleBatchGroupFiles(index: number) {
+  const next = new Set(expandedBatchGroups.value);
+  if (next.has(index)) next.delete(index);
+  else next.add(index);
+  expandedBatchGroups.value = next;
+}
+
+function visibleBatchFiles(group: BatchGroup, index: number) {
+  if (isBatchGroupExpanded(index) || group.files.length <= BATCH_FILES_PREVIEW) {
+    return group.files;
+  }
+  return group.files.slice(0, BATCH_FILES_PREVIEW);
+}
+
+watch(
+  () => props.batchGroups?.map((g) => `${g.dir}:${g.files.length}`).join("|"),
+  () => {
+    expandedBatchGroups.value = new Set();
+  },
+);
 
 watch(
   () => props.gitStashes.length,
@@ -573,31 +681,14 @@ watch(
 );
 
 watch(
-  () => props.aiBatchGrouping,
-  (grouping) => {
-    if (grouping) batchSectionOpen.value = true;
-  },
-);
-
-watch(
   () => props.gitLogOpen,
   (open) => {
     if (open) {
       stashSectionOpen.value = false;
-      batchSectionOpen.value = false;
+      emit("update:batchSectionOpen", false);
       localChangesOpen.value = false;
     }
   },
-);
-
-watch(
-  () => props.batchGroups,
-  (groups) => {
-    batchMessages.value = (groups ?? []).map(
-      (g) => g.message || `${g.dir}: ${g.files.length === 1 ? g.files[0].path.split("/").pop() || g.dir : `update ${g.files.length} files`}`,
-    );
-  },
-  { immediate: true },
 );
 
 const emit = defineEmits<{
@@ -631,9 +722,17 @@ const emit = defineEmits<{
   (e: "commit-batch-group", index: number, message: string): void;
   (e: "commit-all-batches", messages: string[]): void;
   (e: "ai-batch-groups"): void;
+  (e: "update:batchMessages", messages: string[]): void;
+  (e: "update:batchSectionOpen", open: boolean): void;
   (e: "load-more-git-log"): void;
   (e: "search-git-log", query: string): void;
 }>();
+
+function onBatchMessageInput(index: number, value: string) {
+  const next = [...props.batchMessages];
+  next[index] = value;
+  emit("update:batchMessages", next);
+}
 
 const searchVal = ref(props.gitLogSearchQuery || "");
 const searchPending = ref(false);
@@ -1777,47 +1876,65 @@ function gitStatusClass(status: string): string {
 
 .git-batch-section {
   margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.git-batch-section--open {
+  border-color: rgba(88, 166, 255, 0.18);
+}
+
+.git-batch-section--ai.git-batch-section--open {
+  border-color: rgba(63, 185, 80, 0.2);
+}
+
+.git-batch-head {
+  margin: -2px 0 0;
 }
 
 .git-batch-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex: 1;
-  padding: 8px 10px;
-  background: none;
-  border: none;
-  color: inherit;
-  cursor: pointer;
-  font-size: 12px;
-  text-align: left;
-  border-radius: 6px;
-}
-
-.git-batch-toggle:hover {
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.git-batch-header-row {
-  display: flex;
-  align-items: center;
+  min-width: 0;
 }
 
 .git-batch-count {
   font-size: 10px;
-  color: rgba(139, 148, 158, 0.6);
-  padding: 1px 5px;
+  color: rgba(139, 148, 158, 0.75);
+  padding: 1px 6px;
   background: rgba(255, 255, 255, 0.06);
-  border-radius: 3px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.git-batch-ai-tag {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: rgba(63, 185, 80, 0.95);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(63, 185, 80, 0.12);
+  border: 1px solid rgba(63, 185, 80, 0.22);
+  flex-shrink: 0;
+}
+
+.git-batch-collapsed-hint {
+  margin: 0;
+  padding: 0 2px 2px;
+  font-size: 11px;
+  color: rgba(139, 148, 158, 0.65);
+  line-height: 1.4;
 }
 
 .git-ai-batch-btn {
-  margin-right: 8px;
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-width: 88px;
+  min-width: 76px;
 }
 
 .git-ai-batch-btn--loading {
@@ -1831,8 +1948,10 @@ function gitStatusClass(status: string): string {
   flex-shrink: 0;
 }
 
-.git-batch-section--grouping .git-batch-groups {
-  position: relative;
+.git-batch-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .git-batch-loading {
@@ -1840,7 +1959,6 @@ function gitStatusClass(status: string): string {
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  margin-bottom: 8px;
   border-radius: 6px;
   background: rgba(88, 166, 255, 0.08);
   border: 1px solid rgba(88, 166, 255, 0.15);
@@ -1859,114 +1977,223 @@ function gitStatusClass(status: string): string {
   line-height: 1.4;
 }
 
+.git-batch-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.git-batch-toolbar-hint {
+  font-size: 11px;
+  color: rgba(139, 148, 158, 0.7);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .git-batch-all-btn {
-  width: 100%;
-  margin-bottom: 6px;
-  display: block;
-  text-align: center;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.git-batch-progress {
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.git-batch-progress-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(31, 111, 235, 0.85), rgba(88, 166, 255, 0.95));
+  transition: width 0.25s ease;
 }
 
 .git-batch-groups {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 0 8px 8px;
+  gap: 8px;
+  max-height: min(52vh, 520px);
+  overflow-y: auto;
+  padding-right: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.git-batch-groups::-webkit-scrollbar {
+  width: 5px;
+}
+
+.git-batch-groups::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 999px;
 }
 
 .git-batch-group {
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
-  padding: 8px;
-  background: rgba(255, 255, 255, 0.02);
+  padding: 10px 10px 10px 12px;
+  background: rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+}
+
+.git-batch-group::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--batch-accent, #58a6ff);
+  opacity: 0.85;
+}
+
+.git-batch-group--ready {
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
 .git-batch-group--busy {
-  opacity: 0.7;
-  border-color: rgba(31, 111, 235, 0.4);
+  border-color: rgba(88, 166, 255, 0.45);
+  box-shadow: 0 0 0 1px rgba(88, 166, 255, 0.08);
+}
+
+.git-batch-group--done {
+  opacity: 0.55;
 }
 
 .git-batch-group-header {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
+  min-width: 0;
+}
+
+.git-batch-group-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  flex-shrink: 0;
 }
 
 .git-batch-group-dir {
   font-size: 12px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.85);
+  color: rgba(255, 255, 255, 0.9);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .git-batch-group-count {
   font-size: 10px;
-  color: rgba(139, 148, 158, 0.6);
+  color: rgba(139, 148, 158, 0.65);
+  flex-shrink: 0;
+}
+
+.git-batch-group-status {
+  margin-left: auto;
+  font-size: 10px;
+  color: rgba(88, 166, 255, 0.9);
+  flex-shrink: 0;
+}
+
+.git-batch-group-status--warn {
+  color: rgba(210, 153, 34, 0.95);
 }
 
 .git-batch-group-files {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  margin-bottom: 6px;
-  max-height: 140px;
-  overflow-y: auto;
+  gap: 2px;
+  margin-bottom: 4px;
 }
 
 .git-batch-file {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 4px;
+  padding: 3px 6px;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.65);
-  border-radius: 3px;
+  color: rgba(255, 255, 255, 0.68);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .git-batch-file .git-file-path {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10.5px;
+}
+
+.git-batch-files-toggle {
+  display: block;
+  width: 100%;
+  margin: 0 0 6px;
+  padding: 2px 0 4px;
+  border: none;
+  background: none;
+  color: rgba(88, 166, 255, 0.85);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.git-batch-files-toggle:hover {
+  color: rgba(121, 192, 255, 0.95);
 }
 
 .git-batch-group-commit {
   display: flex;
-  gap: 4px;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .git-batch-msg-input {
-  flex: 1;
-  padding: 4px 8px;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(0, 0, 0, 0.2);
-  color: rgba(255, 255, 255, 0.85);
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.22);
+  color: rgba(255, 255, 255, 0.9);
   font-size: 12px;
+  line-height: 1.45;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 44px;
   outline: none;
 }
 
 .git-batch-msg-input:focus {
-  border-color: rgba(31, 111, 235, 0.5);
+  border-color: rgba(88, 166, 255, 0.45);
+}
+
+.git-batch-msg-input:disabled {
+  opacity: 0.45;
 }
 
 .git-batch-commit-btn {
+  align-self: flex-end;
   white-space: nowrap;
-}
-
-/* Batch group list transitions */
-.batch-group-list-enter-active,
-.batch-group-list-leave-active {
-  transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
-}
-.batch-group-list-enter-from {
-  opacity: 0;
-  transform: translateY(10px);
-}
-.batch-group-list-leave-to {
-  opacity: 0;
-  transform: translateY(-10px);
-}
-.batch-group-list-move {
-  transition: transform 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 
 /* Git reference (branches/tags) badges */
