@@ -3,14 +3,14 @@
     <div v-if="!projectOpened" class="panel-empty">
       <span class="panel-empty-icon" aria-hidden="true">🏛</span>
       <p class="panel-empty-title">尚未打开项目</p>
-      <p class="panel-empty-hint">打开项目后，在「项目 → 审视」中启动架构审视</p>
+      <p class="panel-empty-hint">打开项目后，在「项目 → 评审」中启动架构评审</p>
     </div>
 
     <template v-else>
       <div v-if="reviewRun.running" class="review-status">
         <span class="review-spinner" aria-hidden="true" />
         <span class="review-status-text">
-          {{ reviewRun.statusDetail || "架构审视中…" }}
+          {{ reviewRun.statusDetail || "架构评审中…" }}
           <template v-if="reviewRun.maxTurns"> · {{ reviewRun.turn }}/{{ reviewRun.maxTurns }}</template>
         </span>
         <button type="button" class="review-btn review-btn--danger" @click="emit('stop-review')">
@@ -20,7 +20,7 @@
 
       <template v-else>
         <div class="review-empty-card" v-if="!hasReview && !reviewLoading">
-          <p class="review-empty-title">架构审视</p>
+          <p class="review-empty-title">架构评审</p>
           <p class="review-empty-desc">全局视角评估方向是否跑偏，非语法/lint 检查</p>
           <button
             type="button"
@@ -28,7 +28,7 @@
             :disabled="!reviewReady"
             @click="emit('start-review')"
           >
-            开始审视
+            开始评审
           </button>
         </div>
 
@@ -39,7 +39,7 @@
             :disabled="!reviewReady || reviewLoading"
             @click="emit('start-review')"
           >
-            {{ hasReview ? "重新审视" : "开始审视" }}
+            {{ hasReview ? "重新评审" : "开始评审" }}
           </button>
           <button
             v-if="hasReview"
@@ -56,7 +56,7 @@
 
       <div v-if="reviewLoading && !reviewRun.running" class="review-loading">加载中…</div>
 
-      <div v-else-if="hasReview && !reviewRun.running" class="review-summary" aria-label="审视概况">
+      <div v-else-if="hasReview && !reviewRun.running" class="review-summary" aria-label="评审概况">
         <span
           class="review-verdict"
           :class="`review-verdict--${reviewVerdict || 'unknown'}`"
@@ -72,6 +72,7 @@
         <div v-if="reviewHistoryLoading" class="review-loading">加载中…</div>
         
         <template v-else>
+          <p v-if="reviewHistoryMessage" class="review-hint" role="status">{{ reviewHistoryMessage }}</p>
           <div
             v-for="entry in reviewHistory"
             :key="entry.id"
@@ -136,6 +137,7 @@ const props = defineProps<{
   commitCount?: number;
   reviewHistory: ArchitectReviewHistoryEntry[];
   reviewHistoryLoading: boolean;
+  reviewHistoryMessage: string;
   activeHistoryReview: ArchitectReviewHistoryEntry | null;
 }>();
 

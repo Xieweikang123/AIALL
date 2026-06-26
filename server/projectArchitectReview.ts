@@ -18,6 +18,7 @@ import {
   buildReviewHistoryEntry,
   appendToStoreIndex,
   removeFromStoreIndex,
+  type ArchitectReviewHistoryEntry,
   type ArchitectReviewStoreIndex,
   type ReviewHistoryFileContent,
 } from "../shared/projectArchitectReviewHistory";
@@ -105,7 +106,7 @@ export async function readArchitectReview(projectRoot: string): Promise<Architec
       reviewCache.set(resolvedRoot, { builtAt: Date.now(), result });
       return result;
     }
-    return { ok: false, error: error instanceof Error ? error.message : "读取架构审视报告失败" };
+    return { ok: false, error: error instanceof Error ? error.message : "读取架构评审报告失败" };
   }
 
   const { meta, body } = parseArchitectReviewFrontmatter(raw);
@@ -311,7 +312,7 @@ export async function getReviewHistoryDetail(
   const resolvedRoot = path.resolve(projectRoot);
   const review = await readReviewHistoryFile(resolvedRoot, reviewId);
   if (!review) {
-    return { ok: false, error: "未找到该审查记录" };
+    return { ok: false, error: "未找到该评审记录" };
   }
   return { ok: true, review };
 }
@@ -330,22 +331,27 @@ export async function saveReviewToHistory(
     changedFileCount?: number;
   } = {},
 ): Promise<SaveReviewHistoryResult> {
-  const resolvedRoot = path.resolve(projectRoot);
-  const index = await readReviewStoreIndex(resolvedRoot);
-  const { entry, fileContent } = buildReviewHistoryEntry({
-    projectPath: resolvedRoot,
-    body,
-    gitHead: options.gitHead,
-    verdict: options.verdict,
-    commitCount: options.commitCount,
-    changedFileCount: options.changedFileCount,
-  });
+  try {
+    const resolvedRoot = path.resolve(projectRoot);
+    const index = await readReviewStoreIndex(resolvedRoot);
+    const { entry, fileContent } = buildReviewHistoryEntry({
+      projectPath: resolvedRoot,
+      body,
+      gitHead: options.gitHead,
+      verdict: options.verdict,
+      commitCount: options.commitCount,
+      changedFileCount: options.changedFileCount,
+    });
 
-  await writeReviewHistoryFile(resolvedRoot, fileContent);
-  const newIndex = appendToStoreIndex(index, entry);
-  await writeReviewStoreIndex(resolvedRoot, newIndex);
+    await writeReviewHistoryFile(resolvedRoot, fileContent);
+    const newIndex = appendToStoreIndex(index, entry);
+    await writeReviewStoreIndex(resolvedRoot, newIndex);
 
-  return { ok: true, entry, index: newIndex };
+    return { ok: true, entry, index: newIndex };
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.stack || err.message : String(err);
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 export async function deleteReviewFromHistory(

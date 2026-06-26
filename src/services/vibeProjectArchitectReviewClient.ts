@@ -61,7 +61,7 @@ async function readReviewFromDisk(projectPath: string): Promise<ArchitectReviewP
         maxChars: PROJECT_ARCHITECT_REVIEW_MAX_CHARS,
       };
     }
-    return { ok: false, error: read.error || "读取架构审视报告失败" };
+    return { ok: false, error: read.error || "读取架构评审报告失败" };
   }
 
   const { meta, body } = parseArchitectReviewFrontmatter(read.content);
@@ -89,7 +89,7 @@ async function writeReviewToDisk(
   const content = serializeArchitectReviewFrontmatter(meta, normalized.content);
   const write = await writeFile(PROJECT_ARCHITECT_REVIEW_REL_PATH, content, projectPath);
   if (!write.ok) {
-    return { ok: false, error: write.error || "保存架构审视报告失败" };
+    return { ok: false, error: write.error || "保存架构评审报告失败" };
   }
   return {
     ok: true,
@@ -119,7 +119,7 @@ export async function fetchProjectArchitectReview(projectPath: string): Promise<
     }
     return await readJsonResponse<ArchitectReviewPayload>(response);
   } catch (error) {
-    const message = formatFetchError(error, "读取架构审视报告失败");
+    const message = formatFetchError(error, "读取架构评审报告失败");
     if (/HTML|无效 JSON|空响应/i.test(message)) {
       return readReviewFromDisk(trimmed);
     }
@@ -149,15 +149,25 @@ export async function saveProjectArchitectReview(
       }),
     });
     if (response.ok) {
-      return await readJsonResponse<ArchitectReviewPayload>(response);
+      const payload = await readJsonResponse<ArchitectReviewPayload>(response);
+      // #region agent log
+      fetch('http://127.0.0.1:7681/ingest/c6f6b2fb-2f39-4dd4-897b-699ca68db244',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'be2226'},body:JSON.stringify({sessionId:'be2226',location:'vibeProjectArchitectReviewClient.ts:saveProjectArchitectReview',message:'saved via middleware',data:{ok:payload.ok,fromReview:options?.fromReview??true,status:response.status,bodyLen:body.length},timestamp:Date.now(),hypothesisId:'B,E'})}).catch(()=>{});
+      // #endregion
+      return payload;
     }
     if (response.status === 404 || response.status === 405) {
+      // #region agent log
+      fetch('http://127.0.0.1:7681/ingest/c6f6b2fb-2f39-4dd4-897b-699ca68db244',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'be2226'},body:JSON.stringify({sessionId:'be2226',location:'vibeProjectArchitectReviewClient.ts:saveProjectArchitectReview',message:'disk fallback 404/405',data:{fromReview:options?.fromReview??true,status:response.status,bodyLen:body.length},timestamp:Date.now(),hypothesisId:'E'})}).catch(()=>{});
+      // #endregion
       return writeReviewToDisk(trimmed, body, options);
     }
     return await readJsonResponse<ArchitectReviewPayload>(response);
   } catch (error) {
-    const message = formatFetchError(error, "保存架构审视报告失败");
+    const message = formatFetchError(error, "保存架构评审报告失败");
     if (/HTML|无效 JSON|空响应/i.test(message)) {
+      // #region agent log
+      fetch('http://127.0.0.1:7681/ingest/c6f6b2fb-2f39-4dd4-897b-699ca68db244',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'be2226'},body:JSON.stringify({sessionId:'be2226',location:'vibeProjectArchitectReviewClient.ts:saveProjectArchitectReview',message:'disk fallback catch',data:{fromReview:options?.fromReview??true,error:message,bodyLen:body.length},timestamp:Date.now(),hypothesisId:'E'})}).catch(()=>{});
+      // #endregion
       return writeReviewToDisk(trimmed, body, options);
     }
     return { ok: false, error: message };
@@ -178,7 +188,7 @@ export async function fetchArchitectReviewContext(
   } catch (error) {
     return {
       ok: false,
-      error: formatFetchError(error, "获取审视上下文失败"),
+      error: formatFetchError(error, "获取评审上下文失败"),
     };
   }
 }
@@ -209,11 +219,11 @@ export async function fetchReviewHistory(projectPath: string): Promise<ReviewHis
     if (response.ok) {
       return await readJsonResponse<ReviewHistoryPayload>(response);
     }
-    return { ok: false, error: "获取审查历史失败" };
+    return { ok: false, error: "获取评审历史失败" };
   } catch (error) {
     return {
       ok: false,
-      error: formatFetchError(error, "获取审查历史失败"),
+      error: formatFetchError(error, "获取评审历史失败"),
     };
   }
 }
@@ -233,11 +243,11 @@ export async function fetchReviewHistoryDetail(
     if (response.ok) {
       return await readJsonResponse<ReviewHistoryDetailPayload>(response);
     }
-    return { ok: false, error: "获取审查记录详情失败" };
+    return { ok: false, error: "获取评审记录详情失败" };
   } catch (error) {
     return {
       ok: false,
-      error: formatFetchError(error, "获取审查记录详情失败"),
+      error: formatFetchError(error, "获取评审记录详情失败"),
     };
   }
 }
@@ -257,11 +267,11 @@ export async function deleteReviewHistory(
     if (response.ok) {
       return await readJsonResponse<ReviewHistoryPayload>(response);
     }
-    return { ok: false, error: "删除审查记录失败" };
+    return { ok: false, error: "删除评审记录失败" };
   } catch (error) {
     return {
       ok: false,
-      error: formatFetchError(error, "删除审查记录失败"),
+      error: formatFetchError(error, "删除评审记录失败"),
     };
   }
 }

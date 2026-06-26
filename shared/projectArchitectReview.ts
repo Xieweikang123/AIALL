@@ -1,13 +1,13 @@
 import { type ArchitectReviewVerdict, parseArchitectReviewVerdictFromBody } from "./projectArchitectReviewFormat";
 
 export const ARCHITECT_REVIEW_MARKER = "<!-- project-architect-review -->";
-export const ARCHITECT_REVIEW_TITLE = "项目架构审视报告";
+export const ARCHITECT_REVIEW_TITLE = "项目架构评审报告";
 
-export const ARCHITECT_REVIEW_MAX_TURNS = 20;
+export const ARCHITECT_REVIEW_MAX_TURNS = 3;
 
 /** Fixed user message when starting an architect review run. */
 export const ARCHITECT_REVIEW_PRESET_PROMPT =
-  "请从架构师视角审视当前项目：对照近期变更评估方向是否跑偏、模块边界是否清晰、是否存在重复或过度抽象、有哪些方向性风险。禁止修改任何文件；探索完成后输出完整《项目架构审视报告》。";
+  "请从架构师视角评审当前项目：对照近期变更评估方向是否跑偏、模块边界是否清晰、是否存在重复或过度抽象、有哪些方向性风险。禁止修改任何文件；探索完成后输出完整《项目架构评审报告》。";
 
 export type ArchitectReviewCommitSummary = {
   hash: string;
@@ -34,8 +34,9 @@ export function isArchitectReviewReport(content: string): boolean {
 export function extractArchitectReviewBody(content: string): string {
   const trimmed = content.trim();
   if (!trimmed) return "";
-  if (isArchitectReviewReport(trimmed)) return trimmed;
-  return trimmed;
+  const markerIndex = trimmed.indexOf(ARCHITECT_REVIEW_MARKER);
+  if (markerIndex === -1) return trimmed;
+  return trimmed.slice(markerIndex).trim();
 }
 
 export { parseArchitectReviewVerdictFromBody };
@@ -101,12 +102,12 @@ export function buildArchitectReviewPrompt(context: ArchitectReviewContextBundle
   const lines = [
     ARCHITECT_REVIEW_PRESET_PROMPT,
     "",
-    "审视策略：",
+    "评审策略：",
     "1. 系统已注入项目目录与关键文件摘要；在其基础上用 read_file / grep 抽样验证，勿重复 read 已注入内容。",
     "2. 优先 read/grep 下方「近期变更文件」与核心入口/编排层，再评估全局边界与方向。",
     "3. 若存在项目知识库，可先 read_file .aiall/project-knowledge.md 了解既有理解，再独立判断。",
     "4. 聚焦架构与方向，不要检查语法/lint/typecheck，不要罗列 grep 式坏味道清单。",
-    "5. 信息足够后立即输出完整审视报告，禁止无意义续读。",
+    "5. 信息足够后立即输出完整评审报告，禁止无意义续读。",
     "",
     buildArchitectReviewReportFormatHint(),
     "",
@@ -117,10 +118,10 @@ export function buildArchitectReviewPrompt(context: ArchitectReviewContextBundle
     lines.push(`当前 HEAD：${context.currentGitHead}`);
   }
   if (context.sinceGitRef) {
-    lines.push(`变更基准：${context.sinceGitRef}（上次审视或近 ${context.recentCommits.length || 0} 次提交）`);
+    lines.push(`变更基准：${context.sinceGitRef}（上次评审或近 ${context.recentCommits.length || 0} 次提交）`);
   }
   if (context.lastReviewedAt) {
-    lines.push(`上次审视：${context.lastReviewedAt}`);
+    lines.push(`上次评审：${context.lastReviewedAt}`);
   }
 
   lines.push("", "近期提交（从新到旧）：", formatCommitBlock(context.recentCommits));

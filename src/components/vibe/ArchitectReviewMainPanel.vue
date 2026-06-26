@@ -1,7 +1,7 @@
 <template>
   <div class="architect-review-main">
     <header class="architect-review-head">
-      <h2 class="architect-review-title">项目架构审视</h2>
+      <h2 class="architect-review-title">项目架构评审</h2>
       <span
         v-if="hasReview || reviewRun.running"
         class="architect-review-verdict-badge"
@@ -10,7 +10,7 @@
         {{ verdictLabel }}
       </span>
       <span v-if="reviewRun.running" class="architect-review-badge architect-review-badge--pulse">
-        审视中
+        评审中
       </span>
       <div class="architect-review-head-actions">
         <button
@@ -39,7 +39,7 @@
       <div class="architect-review-running-header">
         <span class="architect-review-spinner" aria-hidden="true" />
         <span class="architect-review-running-status">
-          {{ reviewRun.statusDetail || "正在审视项目架构…" }}
+          {{ reviewRun.statusDetail || "正在评审项目架构…" }}
         </span>
         <span v-if="reviewRun.maxTurns" class="architect-review-running-turns">
           {{ reviewRun.turn }}/{{ reviewRun.maxTurns }}
@@ -78,8 +78,8 @@
       v-else-if="!hasReview && !reviewRun.running"
       class="architect-review-empty"
     >
-      <p class="architect-review-empty-title">尚未生成审视报告</p>
-      <p class="architect-review-empty-desc">在左侧点击「开始审视」，AI 将从架构师视角分析整个项目与近期 Git 变更。</p>
+      <p class="architect-review-empty-title">尚未生成评审报告</p>
+      <p class="architect-review-empty-desc">在左侧点击「开始评审」，AI 将从架构师视角分析整个项目与近期 Git 变更。</p>
     </div>
 
     <article
@@ -118,7 +118,10 @@ const verdictLabel = computed(() => formatArchitectReviewVerdictLabel(props.revi
 
 const progressPercent = computed(() => {
   if (!props.reviewRun.maxTurns) return 0;
-  return Math.min(100, Math.round((props.reviewRun.turn / props.reviewRun.maxTurns) * 100));
+  const ratio = Math.min(1, props.reviewRun.turn / props.reviewRun.maxTurns);
+  // Use sqrt easeOut so the bar advances faster early and slows toward the end,
+  // which better matches real AI exploration patterns (many quick tool turns up front).
+  return Math.round(Math.sqrt(ratio) * 100);
 });
 
 const displayHtml = computed(() => {
