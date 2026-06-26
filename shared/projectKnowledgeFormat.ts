@@ -6,17 +6,26 @@ export const PROJECT_KNOWLEDGE_MAX_CHARS = 120_000;
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 
+export type ProjectKnowledgeUpdateLogEntry = {
+  timestamp: string;
+  charCount: number;
+  exploreRounds: number;
+  gitHead?: string;
+};
+
 export type ProjectKnowledgeMeta = {
   updatedAt?: string;
   lastExploredAt?: string;
   exploreRounds?: number;
   gitHead?: string;
+  updateHistory?: ProjectKnowledgeUpdateLogEntry[];
 };
 
 export type ProjectKnowledgeWriteMetaOptions = {
   gitHead?: string;
   fromExplore?: boolean;
   exploreRounds?: number;
+  charCount?: number;
 };
 
 export function parseProjectKnowledgeFrontmatter(raw: string): {
@@ -37,6 +46,23 @@ export function parseProjectKnowledgeFrontmatter(raw: string): {
   const lastExploredAt = metaBlock.match(/^lastExploredAt:\s*(.+)\s*$/m)?.[1]?.trim();
   const exploreRoundsRaw = metaBlock.match(/^exploreRounds:\s*(\d+)\s*$/m)?.[1];
   const gitHead = metaBlock.match(/^gitHead:\s*(.+)\s*$/m)?.[1]?.trim();
+  
+  const updateHistoryStart = metaBlock.match(/^updateHistory:\s*$/m);
+  if (updateHistoryStart) {
+    const afterLabel = metaBlock.slice(updateHistoryStart.index! + updateHistoryStart[0].length);
+    const entries: ProjectKnowledgeUpdateLogEntry[] = [];
+    const entryRegex = /- timestamp:\s*(.+)\s*\n\s+charCount:\s*(\d+)\s*\n\s+exploreRounds:\s*(\d+)(?:\s*\n\s+gitHead:\s*(.+))?/g;
+    let entryMatch;
+    while ((entryMatch = entryRegex.exec(afterLabel)) !== null) {
+      entries.push({
+        timestamp: entryMatch[1]?.trim() ?? "",
+        charCount: Number(entryMatch[2]) || 0,
+        exploreRounds: Number(entryMatch[3]) || 0,
+        gitHead: entryMatch[4]?.trim(),
+      });
+    }
+    if (entries.length > 0) meta.updateHistory = entries;
+  }
 
   if (updatedAt) meta.updatedAt = updatedAt;
   if (lastExploredAt) meta.lastExploredAt = lastExploredAt;
@@ -55,6 +81,15 @@ export function serializeProjectKnowledgeFrontmatter(
   if (meta.lastExploredAt) lines.push(`lastExploredAt: ${meta.lastExploredAt}`);
   if (meta.exploreRounds != null) lines.push(`exploreRounds: ${meta.exploreRounds}`);
   if (meta.gitHead) lines.push(`gitHead: ${meta.gitHead}`);
+  if (meta.updateHistory && meta.updateHistory.length > 0) {
+    lines.push("updateHistory:");
+    for (const entry of meta.updateHistory) {
+      lines.push(`  - timestamp: ${entry.timestamp}`);
+      lines.push(`    charCount: ${entry.charCount}`);
+      lines.push(`    exploreRounds: ${entry.exploreRounds}`);
+      if (entry.gitHead) lines.push(`    gitHead: ${entry.gitHead}`);
+    }
+  }
   lines.push("---", "", body.trim());
   return `${lines.join("\n")}\n`;
 }
@@ -81,12 +116,30 @@ export function buildProjectKnowledgeMetaForWrite(
   options: ProjectKnowledgeWriteMetaOptions = {},
 ): ProjectKnowledgeMeta {
   const now = new Date().toISOString();
+  const newExploreRounds = options.fromExplore
+    ? (options.exploreRounds ?? (priorMeta.exploreRounds ?? 0) + 1)
+    : priorMeta.exploreRounds;
+  
+  const updateHistory = priorMeta.updateHistory ? [...priorMeta.updateHistory] : [];
+  
+  if (options.fromExplore && options.charCount != null) {
+    updateHistory.push({
+      timestamp: now,
+      charCount: options.charCount,
+      exploreRounds: newExploreRounds ?? 0,
+      gitHead: options.gitHead ?? priorMeta.gitHead,
+    });
+    
+    if (updateHistory.length > 50) {
+      updateHistory.splice(0, updateHistory.length - 50);
+    }
+  }
+
   return {
     updatedAt: now,
     lastExploredAt: options.fromExplore ? now : priorMeta.lastExploredAt,
-    exploreRounds: options.fromExplore
-      ? (options.exploreRounds ?? (priorMeta.exploreRounds ?? 0) + 1)
-      : priorMeta.exploreRounds,
+    exploreRounds: newExploreRounds,
     gitHead: options.gitHead ?? priorMeta.gitHead,
+    updateHistory,
   };
 }

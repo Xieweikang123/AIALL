@@ -74,7 +74,10 @@ async function writeKnowledgeToDisk(
   const existing = await readKnowledgeFromDisk(projectPath);
   const priorMeta = existing.ok ? (existing.meta ?? {}) : {};
   const normalized = normalizeProjectKnowledgeBody(body);
-  const meta = buildProjectKnowledgeMetaForWrite(priorMeta, options);
+  const meta = buildProjectKnowledgeMetaForWrite(priorMeta, {
+    ...options,
+    charCount: normalized.content.length,
+  });
   const content = serializeProjectKnowledgeFrontmatter(meta, normalized.content);
   const write = await writeFile(PROJECT_KNOWLEDGE_REL_PATH, content, projectPath);
   if (!write.ok) {

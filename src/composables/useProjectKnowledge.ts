@@ -287,6 +287,7 @@ export function useProjectKnowledge(options: {
         fromExplore: true,
         gitHead: ctx?.gitHead ?? (options.gitHead?.value?.trim() || knowledgeMeta.value.gitHead),
         exploreRounds: (ctx?.baseExploreRounds ?? knowledgeMeta.value.exploreRounds ?? 0) + 1,
+        charCount: saveBody.length,
       });
       if (result.ok) {
         if (applyToUi) {

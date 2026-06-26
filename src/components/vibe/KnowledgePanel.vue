@@ -146,9 +146,25 @@
         </p>
       </div>
 
-      <p v-if="knowledgeStale" class="knowledge-stale-hint" role="status">
-        知识库基于提交 {{ shortGitRef(knowledgeMeta.gitHead!) }}，当前 {{ shortGitRef(currentGitHead!) }}，代码可能已变更
-      </p>
+      <div
+        v-if="hasKnowledge && updateHistory.length > 0"
+        class="knowledge-update-history"
+        aria-label="更新日志"
+      >
+        <p class="knowledge-update-history-title">更新日志</p>
+        <div class="knowledge-update-history-list">
+          <div
+            v-for="(entry, index) in updateHistory"
+            :key="index"
+            class="knowledge-update-history-entry"
+          >
+            <span class="knowledge-update-history-time">{{ formatTime(entry.timestamp) }}</span>
+            <span class="knowledge-update-history-charcount">{{ formatKnowledgeSize(entry.charCount) }}</span>
+            <span class="knowledge-update-history-round">第 {{ entry.exploreRounds }} 轮</span>
+            <span v-if="entry.gitHead" class="knowledge-update-history-git">{{ shortGitRef(entry.gitHead) }}</span>
+          </div>
+        </div>
+      </div>
 
       <div
         v-if="showChangesCard"
@@ -192,13 +208,6 @@
         <p class="knowledge-empty-title">项目知识库</p>
         <p class="knowledge-empty-desc">只读探索整个项目，生成一份可浏览、可增量更新的结构化知识库。</p>
       </div>
-
-      <p
-        v-else-if="layout === 'sidebar' && (hasKnowledge || exploreRun.running)"
-        class="knowledge-sidebar-hint"
-      >
-        正文在中间主区域展示，便于阅读表格与长文档。
-      </p>
     </template>
 
     <template v-if="showContent">
@@ -579,6 +588,12 @@ const props = withDefaults(
 );
 
 const exploreReady = computed(() => props.configReady && props.apiKeyReady);
+
+const updateHistory = computed(() => {
+  const history = props.knowledgeMeta.updateHistory;
+  if (!history || !Array.isArray(history)) return [];
+  return [...history].reverse();
+});
 
 const knowledgeStale = computed(() => {
   const saved = props.knowledgeMeta.gitHead?.trim();
@@ -1532,6 +1547,67 @@ async function copySavedBody() {
   font-size: 10px;
   line-height: 1.45;
   color: rgba(139, 148, 158, 0.92);
+}
+
+.knowledge-update-history {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.knowledge-update-history-title {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(180, 190, 200, 0.95);
+  letter-spacing: 0.02em;
+}
+
+.knowledge-update-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 150px;
+  overflow: auto;
+}
+
+.knowledge-update-history-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(180, 190, 200, 0.95);
+}
+
+.knowledge-update-history-entry:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.knowledge-update-history-time {
+  color: rgba(139, 148, 158, 0.92);
+  flex-shrink: 0;
+}
+
+.knowledge-update-history-charcount {
+  color: rgba(200, 245, 210, 0.98);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.knowledge-update-history-round {
+  color: rgba(160, 170, 180, 0.95);
+  flex-shrink: 0;
+}
+
+.knowledge-update-history-git {
+  color: rgba(139, 148, 158, 0.92);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  flex-shrink: 0;
 }
 
 .knowledge-main-stats {
