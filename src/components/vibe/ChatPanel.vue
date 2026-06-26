@@ -30,7 +30,9 @@
                 title="较新的会话 (Ctrl+Alt+↑)"
                 @click="$emit('switch-to-adjacent-session', -1)"
               >
-                ‹
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                  <path d="M10 3 5 8l5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
               </button>
               <span class="session-picker-title" :title="activeSessionTitle || '新会话'">{{ activeSessionTitle || "新会话" }}</span>
               <button
@@ -39,7 +41,12 @@
                 class="session-nav-btn"
                 title="复制会话名和路径"
                 @click.stop="$emit('copy-session-name-path', sessionList.find(s => s.id === activeSessionId))"
-              >📋</button>
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                  <rect x="5.5" y="5.5" width="7" height="8" rx="1" stroke="currentColor" stroke-width="1.2"/>
+                  <path d="M4.5 10.5V3.3A1.8 1.8 0 0 1 6.3 1.5H11" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                </svg>
+              </button>
               <button
                 v-if="sessionList.length > 1"
                 type="button"
@@ -48,7 +55,9 @@
                 title="较旧的会话 (Ctrl+Alt+↓)"
                 @click="$emit('switch-to-adjacent-session', 1)"
               >
-                ›
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                  <path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
               </button>
             </div>
           </div>

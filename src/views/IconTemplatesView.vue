@@ -1025,23 +1025,23 @@ onBeforeUnmount(() => {
 
 @media (prefers-color-scheme: dark) {
   .icon-tpl-page {
-    --bg: rgba(17, 24, 39, 0.78);
+    --bg: #0d1117;
     --text: rgba(255, 255, 255, 0.92);
     --muted: rgba(255, 255, 255, 0.72);
-    --subtle: rgba(255, 255, 255, 0.6);
-    --border: rgba(255, 255, 255, 0.14);
-    --card-shadow: 0 18px 44px rgba(0, 0, 0, 0.35), 0 2px 10px rgba(0, 0, 0, 0.2);
+    --subtle: rgba(255, 255, 255, 0.55);
+    --border: rgba(255, 255, 255, 0.12);
+    --card-shadow: 0 18px 44px rgba(0, 0, 0, 0.4), 0 2px 10px rgba(0, 0, 0, 0.25);
   }
 
   .card {
-    background: rgba(17, 24, 39, 0.72);
+    background: rgba(13, 17, 23, 0.8);
   }
 
   .field input,
   .field .tpl-select {
-    background: rgba(2, 6, 23, 0.55);
+    background: rgba(1, 4, 9, 0.6);
     color: rgba(255, 255, 255, 0.92);
-    border-color: rgba(255, 255, 255, 0.16);
+    border-color: rgba(255, 255, 255, 0.15);
   }
 
   .inline-code {
@@ -1049,17 +1049,17 @@ onBeforeUnmount(() => {
   }
 
   .item-row {
-    background: rgba(0, 0, 0, 0.12);
+    background: rgba(255, 255, 255, 0.04);
   }
 
   .item-meta.debug-line {
-    background: rgba(31, 111, 235, 0.14);
+    background: rgba(31, 111, 235, 0.15);
     color: rgba(255, 255, 255, 0.88);
   }
 
   .link-btn,
   .secondary {
-    background: rgba(17, 24, 39, 0.72);
+    background: rgba(13, 17, 23, 0.8);
     color: rgba(255, 255, 255, 0.9);
     border-color: rgba(255, 255, 255, 0.14);
   }

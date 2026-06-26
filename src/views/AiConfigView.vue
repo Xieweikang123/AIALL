@@ -1633,30 +1633,14 @@ button.primary {
 
 button {
   border: none;
-  background: var(--primary);
-  color: #fff;
+  background: transparent;
+  color: var(--text);
   border-radius: 8px;
-  padding: 10px 16px;
+  padding: 7px 14px;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  box-shadow: 0 1px 2px rgba(31, 111, 235, 0.2);
   transition: all 150ms ease;
-}
-
-button:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(31, 111, 235, 0.25);
-}
-
-button:active:not(:disabled) {
-  transform: translateY(0);
-  box-shadow: 0 1px 2px rgba(31, 111, 235, 0.2);
-}
-
-button.primary {
-  background: var(--primary);
-  font-weight: 600;
 }
 
 button:disabled {
@@ -1665,11 +1649,31 @@ button:disabled {
   box-shadow: none;
 }
 
+button.primary {
+  background: var(--primary);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(31, 111, 235, 0.2);
+}
+
+button.primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(31, 111, 235, 0.25);
+}
+
+button.primary:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(31, 111, 235, 0.2);
+}
+
 button.secondary {
   background: rgba(17, 24, 39, 0.06);
   color: var(--text);
-  box-shadow: none;
   border: 1px solid var(--border);
+}
+
+button.secondary:hover:not(:disabled) {
+  background: rgba(17, 24, 39, 0.1);
 }
 
 button.secondary:hover:not(:disabled) {
