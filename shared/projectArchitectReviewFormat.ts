@@ -69,6 +69,17 @@ export function stripArchitectReviewFrontmatter(raw: string): string {
   return (match?.[1] ?? normalized).trim();
 }
 
+const VERDICT_SECTION_RE = /##\s+总体判断[\s\S]*?(?=\n##\s|$)/i;
+
+export function parseArchitectReviewVerdictFromBody(body: string): ArchitectReviewVerdict | null {
+  const sectionMatch = body.match(VERDICT_SECTION_RE);
+  const section = sectionMatch?.[0] ?? body;
+  if (/明显跑偏/.test(section)) return "off_track";
+  if (/需关注/.test(section)) return "caution";
+  if (/方向正确/.test(section)) return "on_track";
+  return null;
+}
+
 export function normalizeArchitectReviewBody(raw: string): { content: string; truncated: boolean } {
   const trimmed = raw.replace(/\r\n/g, "\n").trim();
   if (trimmed.length <= PROJECT_ARCHITECT_REVIEW_MAX_CHARS) {

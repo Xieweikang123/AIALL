@@ -1,4 +1,4 @@
-import type { ArchitectReviewVerdict } from "./projectArchitectReviewFormat";
+import { type ArchitectReviewVerdict, parseArchitectReviewVerdictFromBody } from "./projectArchitectReviewFormat";
 
 export const ARCHITECT_REVIEW_MARKER = "<!-- project-architect-review -->";
 export const ARCHITECT_REVIEW_TITLE = "项目架构审视报告";
@@ -38,16 +38,7 @@ export function extractArchitectReviewBody(content: string): string {
   return trimmed;
 }
 
-const VERDICT_SECTION_RE = /##\s+总体判断[\s\S]*?(?=\n##\s|$)/i;
-
-export function parseArchitectReviewVerdictFromBody(body: string): ArchitectReviewVerdict | null {
-  const sectionMatch = body.match(VERDICT_SECTION_RE);
-  const section = sectionMatch?.[0] ?? body;
-  if (/明显跑偏/.test(section)) return "off_track";
-  if (/需关注/.test(section)) return "caution";
-  if (/方向正确/.test(section)) return "on_track";
-  return null;
-}
+export { parseArchitectReviewVerdictFromBody };
 
 export function architectReviewNeedsAttention(
   verdict: ArchitectReviewVerdict | null | undefined,
