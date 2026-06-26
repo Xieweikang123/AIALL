@@ -389,6 +389,7 @@ export function useGitPanel(
       onRefreshTree?.();
     } finally {
       batchCommittingIndex.value = null;
+      aiBatchGroupsResult.value = null;
     }
   }
 
@@ -400,17 +401,18 @@ export function useGitPanel(
     batchCommittingAll.value = true;
     try {
       for (let i = 0; i < snapshot.length; i++) {
-        await commitBatchGroupByPaths(snapshot[i].filePaths, snapshot[i].message);
+        await commitBatchGroupByPaths(snapshot[i].filePaths, snapshot[i].message, i, snapshot.length);
         if (gitError.value) break;
       }
     } finally {
       batchCommittingAll.value = false;
+      aiBatchGroupsResult.value = null;
     }
   }
 
-  async function commitBatchGroupByPaths(filePaths: string[], message: string) {
+  async function commitBatchGroupByPaths(filePaths: string[], message: string, index = 0, _total?: number) {
     if (!projectOpened() || !message.trim() || !filePaths.length) return;
-    batchCommittingIndex.value = 0;
+    batchCommittingIndex.value = index;
     gitError.value = "";
     clearGitDiffCache();
     try {
