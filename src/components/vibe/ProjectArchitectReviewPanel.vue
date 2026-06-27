@@ -56,7 +56,20 @@
 
       <div v-if="reviewLoading && !reviewRun.running && !reviewHistoryDetailLoading" class="review-loading">加载中…</div>
 
-      <div v-else-if="hasReview && !reviewRun.running && !activeHistoryReview" class="review-summary-card" aria-label="当前评审">
+      <div
+        v-else-if="hasReview && !reviewRun.running"
+        class="review-summary-card"
+        :class="[
+          `review-summary-card--${reviewVerdict || 'unknown'}`,
+          { 'review-summary-card--active': !activeHistoryReview },
+          { 'review-summary-card--clickable': activeHistoryReview }
+        ]"
+        role="button"
+        :tabindex="activeHistoryReview ? 0 : undefined"
+        aria-label="当前评审"
+        @click="activeHistoryReview ? emit('clear-history-view') : undefined"
+        @keydown.enter="activeHistoryReview ? emit('clear-history-view') : undefined"
+      >
         <div class="review-summary-head">
           <span
             class="review-verdict-badge"
@@ -65,22 +78,18 @@
             {{ verdictLabel }}
           </span>
           <span v-if="lastReviewedAt" class="review-summary-time">{{ formatTime(lastReviewedAt) }}</span>
+          <span
+            v-if="!activeHistoryReview"
+            class="review-history-item-viewing"
+            style="margin-left: auto;"
+          >
+            当前
+          </span>
         </div>
         <p v-if="contextHint" class="review-context-hint">{{ contextHint }}</p>
         <p v-if="reviewMeta.gitHead" class="review-summary-git" :title="reviewMeta.gitHead">
           基于提交 {{ shortGitRef(reviewMeta.gitHead) }}
         </p>
-      </div>
-
-      <div
-        v-else-if="activeHistoryReview && !reviewRun.running"
-        class="review-viewing-banner"
-        role="status"
-      >
-        <span>正在查看历史评审</span>
-        <button type="button" class="review-viewing-back" @click="emit('clear-history-view')">
-          返回当前
-        </button>
       </div>
 
       <!-- Review History Section -->
@@ -378,9 +387,105 @@ function formatHistoryScope(entry: ArchitectReviewHistoryEntry): string {
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 3px solid rgba(139, 148, 158, 0.35);
   display: flex;
   flex-direction: column;
   gap: 4px;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.12s ease;
+}
+
+.review-summary-card--on_track {
+  border-left-color: rgba(183, 235, 198, 0.45);
+}
+
+.review-summary-card--caution {
+  border-left-color: rgba(255, 210, 120, 0.5);
+}
+
+.review-summary-card--off_track {
+  border-left-color: rgba(255, 140, 135, 0.5);
+}
+
+.review-summary-card--unknown {
+  border-left-color: rgba(139, 148, 158, 0.35);
+}
+
+.review-summary-card--clickable {
+  cursor: pointer;
+}
+
+.review-summary-card--clickable:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.review-summary-card--clickable:active {
+  transform: scale(0.98);
+}
+
+.review-summary-card--active {
+  border-left-width: 4px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.review-summary-card--active.review-summary-card--on_track {
+  background: linear-gradient(
+    90deg,
+    rgba(183, 235, 198, 0.14) 0%,
+    rgba(183, 235, 198, 0.04) 55%,
+    rgba(255, 255, 255, 0.02) 100%
+  );
+  border-color: rgba(183, 235, 198, 0.28);
+  border-left-color: rgba(183, 235, 198, 0.9);
+  box-shadow:
+    inset 0 0 0 1px rgba(183, 235, 198, 0.12),
+    0 0 0 1px rgba(183, 235, 198, 0.08);
+}
+
+.review-summary-card--active.review-summary-card--caution {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 210, 120, 0.16) 0%,
+    rgba(255, 210, 120, 0.05) 55%,
+    rgba(255, 255, 255, 0.02) 100%
+  );
+  border-color: rgba(255, 210, 120, 0.3);
+  border-left-color: rgba(255, 210, 120, 0.95);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 210, 120, 0.14),
+    0 0 0 1px rgba(255, 210, 120, 0.08);
+}
+
+.review-summary-card--active.review-summary-card--off_track {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 140, 135, 0.14) 0%,
+    rgba(255, 140, 135, 0.05) 55%,
+    rgba(255, 255, 255, 0.02) 100%
+  );
+  border-color: rgba(255, 140, 135, 0.28);
+  border-left-color: rgba(255, 140, 135, 0.92);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 140, 135, 0.12),
+    0 0 0 1px rgba(255, 140, 135, 0.08);
+}
+
+.review-summary-card--active.review-summary-card--unknown {
+  background: linear-gradient(
+    90deg,
+    rgba(88, 166, 255, 0.12) 0%,
+    rgba(88, 166, 255, 0.04) 55%,
+    rgba(255, 255, 255, 0.02) 100%
+  );
+  border-color: rgba(88, 166, 255, 0.24);
+  border-left-color: rgba(88, 166, 255, 0.75);
+  box-shadow:
+    inset 0 0 0 1px rgba(88, 166, 255, 0.1),
+    0 0 0 1px rgba(88, 166, 255, 0.06);
 }
 
 .review-summary-head {
