@@ -2043,6 +2043,7 @@ function gitStatusClass(status: string): string {
   padding: 10px 10px 10px 12px;
   background: rgba(0, 0, 0, 0.15);
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .git-batch-group::before {
