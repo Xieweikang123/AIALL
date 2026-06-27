@@ -29,10 +29,38 @@ export type AiOptionsParseResult = {
  *   - Items are short (< 80 chars each)
  *   - Items appear near the end of the text (after a question)
  */
-const NUMBERED_ITEM_RE = /^(?:\d+[.)]\s*.+|[（(]\d+[)）]\s*.+)$/m;
-const TRAILING_QUESTION_RE = /\?|？|请选择|告诉我|告诉我是|你(?:是指|想要|希望)/;
+const TRAILING_QUESTION_RE = /\?|？|请选择|告诉我|告诉我是|你想|你是否|你(?:是指|想要|希望|需要|想让我)/i;
 const IMPLEMENT_CONFIRM_RE =
-  /(?:如果你?需要(?:添加|实现|改)?(?:这个|该)?功能，?我可以帮你实现|需要我(?:帮你)?实现(?:吗|这个功能吗|一下吗)?|你想让我实现吗)[？?]?\s*$/;
+  /(?:如果你?需要(?:添加|实现|改)?(?:这个|该)?功能，?我可以帮你实现|需要我(?:帮你)?(?:实现|修改|改)(?:一下|代码)?(?:吗|这个功能吗|一下吗|代码吗)?[？?]?|你想让我(?:实现|修改|改)吗[？?]?)\s*$/;
+
+const OPTION_PREFIX_RE = /^(?:(\d+)[.)]|[（(](\d+)[)）]|\[(\d+)\]|([a-fA-F])[.)])\s*(.+)/;
+
+function cleanMarkdownWrap(str: string): string {
+  let clean = str.trim();
+  if (clean.startsWith("**") && clean.endsWith("**")) {
+    clean = clean.slice(2, -2).trim();
+  } else if (clean.startsWith("*") && clean.endsWith("*")) {
+    clean = clean.slice(1, -1).trim();
+  } else if (clean.startsWith("`") && clean.endsWith("`")) {
+    clean = clean.slice(1, -1).trim();
+  }
+  return clean;
+}
+
+function parseOptionLine(line: string): { num: number; content: string } | null {
+  const clean = cleanMarkdownWrap(line);
+  const match = clean.match(OPTION_PREFIX_RE);
+  if (!match) return null;
+  const numStr = match[1] || match[2] || match[3];
+  let num = 0;
+  if (numStr) {
+    num = parseInt(numStr, 10);
+  } else if (match[4]) {
+    num = match[4].toLowerCase().charCodeAt(0) - 96; // a->1, b->2
+  }
+  const content = cleanMarkdownWrap(match[5]);
+  return { num, content };
+}
 
 export function parseAiOptions(text: string): AiOptionsParseResult | null {
   if (!text) return { before: text, options: [], after: "" };
@@ -45,15 +73,17 @@ export function parseAiOptions(text: string): AiOptionsParseResult | null {
   let questionLineIdx = -1;
   for (let i = lines.length - 1; i >= 0; i--) {
     const trimmed = lines[i].trim();
-    if (/^\d+[.)]\s/.test(trimmed)) continue;
+    if (parseOptionLine(trimmed)) continue;
     if (TRAILING_QUESTION_RE.test(trimmed)) {
       questionLineIdx = i;
       break;
     }
   }
 
+  const hasPrecedingQuestion = questionLineIdx >= 0;
+
   // Scan for numbered items starting from near the end
-  const optionLines: { line: string; index: number }[] = [];
+  const optionLines: { label: string; fullText: string; index: number }[] = [];
   const startScan = questionLineIdx >= 0 ? questionLineIdx + 1 : Math.max(0, lines.length - 8);
 
   for (let i = startScan; i < lines.length; i++) {
@@ -64,20 +94,23 @@ export function parseAiOptions(text: string): AiOptionsParseResult | null {
       continue;
     }
 
-    const numMatch = line.match(/^(\d+)[.)]\s*(.+)/);
-    if (numMatch) {
-      const num = parseInt(numMatch[1], 10);
-      const content = numMatch[2].trim();
-      // Interactive options are short prompts ending in ? / ？ — not doc numbered lists.
+    const parsed = parseOptionLine(line);
+    if (parsed) {
+      const { num, content } = parsed;
+      const endsWithQuestion = /[?？]$/.test(content);
+      
       if (
         content.length > 0 &&
         content.length < 80 &&
         num === optionLines.length + 1 &&
-        /[?？]$/.test(content) &&
-        !/^#{1,6}\s/.test(content) &&
-        !content.startsWith("**")
+        (endsWithQuestion || hasPrecedingQuestion) &&
+        !/^#{1,6}\s/.test(content)
       ) {
-        optionLines.push({ line: lines[i], index: i });
+        optionLines.push({
+          label: content,
+          fullText: content,
+          index: i
+        });
         continue;
       }
     }
@@ -91,14 +124,11 @@ export function parseAiOptions(text: string): AiOptionsParseResult | null {
   const firstIdx = optionLines[0].index;
   const lastIdx = optionLines[optionLines.length - 1].index;
 
-  const options: AiOption[] = optionLines.map((ol, i) => {
-    const match = ol.line.trim().match(/^(\d+)[.)]\s*(.+)/);
-    return {
-      index: i,
-      label: match?.[2]?.trim() ?? ol.line.trim(),
-      fullText: match?.[2]?.trim() ?? ol.line.trim(),
-    };
-  });
+  const options: AiOption[] = optionLines.map((ol, i) => ({
+    index: i,
+    label: ol.label,
+    fullText: ol.fullText,
+  }));
 
   const before = lines.slice(0, firstIdx).join("\n").trimEnd();
   const after = lines.slice(lastIdx + 1).join("\n").trimStart();
@@ -118,10 +148,16 @@ function parseImplementationConfirmOption(text: string): AiOptionsParseResult | 
     options: [
       {
         index: 0,
-        label: "实现",
+        label: "需要",
         fullText: "请实现上面提到的功能/修改",
         showIndex: false,
         action: "implement",
+      },
+      {
+        index: 1,
+        label: "不需要",
+        fullText: "不需要，谢谢",
+        showIndex: false,
       },
     ],
     after: "",

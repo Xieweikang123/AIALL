@@ -26,19 +26,33 @@ describe("parseAiOptions", () => {
     expect(parseAiOptions(text)).toBeNull();
   });
 
-  it("turns implementation confirmations into a single action button", () => {
+  it("turns implementation confirmations into interactive action buttons", () => {
     const text = "当前还没有点击放大逻辑。需要我实现吗？";
     const parsed = parseAiOptions(text);
     expect(parsed?.before).toBe(text);
     expect(parsed?.options).toEqual([
       {
         index: 0,
-        label: "实现",
+        label: "需要",
         fullText: "请实现上面提到的功能/修改",
         showIndex: false,
         action: "implement",
       },
+      {
+        index: 1,
+        label: "不需要",
+        fullText: "不需要，谢谢",
+        showIndex: false,
+      },
     ]);
+  });
+
+  it("handles variations like 需要我改吗？", () => {
+    const text = "这是要改的代码。需要我改吗？";
+    const parsed = parseAiOptions(text);
+    expect(parsed?.before).toBe(text);
+    expect(parsed?.options?.[0].label).toBe("需要");
+    expect(parsed?.options?.[1].label).toBe("不需要");
   });
 
   it("does not create implementation action for ordinary explanations", () => {
@@ -54,5 +68,51 @@ describe("parseAiOptions", () => {
     const parsed = parseAiOptions(text);
     expect(parsed?.options).toHaveLength(2);
     expect(parsed?.before).toContain("需要调整");
+  });
+
+  it("handles markdown bold wrappers inside options", () => {
+    const text = [
+      "你想要哪种效果？",
+      "1. **选项一**",
+      "2. **选项二**",
+    ].join("\n");
+    const parsed = parseAiOptions(text);
+    expect(parsed?.options).toHaveLength(2);
+    expect(parsed?.options?.[0].label).toBe("选项一");
+    expect(parsed?.options?.[1].label).toBe("选项二");
+  });
+
+  it("allows options without question marks if preceded by a question prompt", () => {
+    const text = [
+      "你想用什么语言？请选择：",
+      "1. TypeScript",
+      "2. JavaScript",
+    ].join("\n");
+    const parsed = parseAiOptions(text);
+    expect(parsed?.options).toHaveLength(2);
+    expect(parsed?.options?.[0].label).toBe("TypeScript");
+    expect(parsed?.options?.[1].label).toBe("JavaScript");
+  });
+
+  it("supports multiple list prefixes like letters and brackets", () => {
+    const text1 = [
+      "你想怎么处理？",
+      "A. 方式一",
+      "B. 方式二",
+    ].join("\n");
+    const parsed1 = parseAiOptions(text1);
+    expect(parsed1?.options).toHaveLength(2);
+    expect(parsed1?.options?.[0].label).toBe("方式一");
+    expect(parsed1?.options?.[1].label).toBe("方式二");
+
+    const text2 = [
+      "请问你想选择？",
+      "[1] TypeScript",
+      "[2] JavaScript",
+    ].join("\n");
+    const parsed2 = parseAiOptions(text2);
+    expect(parsed2?.options).toHaveLength(2);
+    expect(parsed2?.options?.[0].label).toBe("TypeScript");
+    expect(parsed2?.options?.[1].label).toBe("JavaScript");
   });
 });
