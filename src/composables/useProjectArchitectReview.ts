@@ -162,14 +162,19 @@ export function useProjectArchitectReview(options: {
     if (!path || !options.projectOpened.value) return;
     const missing = entries.filter((entry) => !reviewHistoryDetailCache.has(entry.id));
     if (!missing.length) return;
-    await Promise.all(
-      missing.map(async (entry) => {
-        const result = await fetchReviewHistoryDetail(path, entry.id);
-        if (result.ok && result.review) {
-          reviewHistoryDetailCache.set(entry.id, result.review);
-        }
-      }),
-    );
+    // Limit concurrent fetches to 3 to avoid flooding the server when history is large.
+    const CONCURRENCY = 3;
+    for (let i = 0; i < missing.length; i += CONCURRENCY) {
+      const chunk = missing.slice(i, i + CONCURRENCY);
+      await Promise.all(
+        chunk.map(async (entry) => {
+          const result = await fetchReviewHistoryDetail(path, entry.id);
+          if (result.ok && result.review) {
+            reviewHistoryDetailCache.set(entry.id, result.review);
+          }
+        }),
+      );
+    }
   }
 
   async function loadReviewHistory() {
@@ -254,29 +259,32 @@ export function useProjectArchitectReview(options: {
       return;
     }
 
-    reviewHistoryLoading.value = true;
-    try {
-      const result = await deleteReviewHistory(path, entry.id);
-      if (!result.ok) {
-        reviewHistoryMessage.value = result.error || "删除历史失败";
-        return;
+    // Optimistic update: remove from local list immediately so there is no loading flash.
+    const previousHistory = reviewHistory.value.slice();
+    reviewHistory.value = reviewHistory.value.filter((e) => e.id !== entry.id);
+    reviewHistoryDetailCache.delete(entry.id);
+
+    // If currently viewing the deleted review, restore previous state right away.
+    if (activeHistoryReview.value?.id === entry.id) {
+      activeHistoryReview.value = null;
+      if (currentReviewSnapshot) {
+        reviewBody.value = currentReviewSnapshot.body;
+        reviewMeta.value = currentReviewSnapshot.meta;
+        currentReviewSnapshot = null;
+      } else {
+        void loadReview();
       }
-      reviewHistory.value = result.reviews ?? [];
-      reviewHistoryDetailCache.delete(entry.id);
-      // If viewing the deleted review, clear it
-      if (activeHistoryReview.value?.id === entry.id) {
-        activeHistoryReview.value = null;
-        if (currentReviewSnapshot) {
-          reviewBody.value = currentReviewSnapshot.body;
-          reviewMeta.value = currentReviewSnapshot.meta;
-          currentReviewSnapshot = null;
-        } else {
-          await loadReview();
-        }
-      }
-    } finally {
-      reviewHistoryLoading.value = false;
     }
+
+    const result = await deleteReviewHistory(path, entry.id);
+    if (!result.ok) {
+      // Rollback: restore the previous list on failure.
+      reviewHistory.value = previousHistory;
+      reviewHistoryMessage.value = result.error || "删除历史失败";
+      return;
+    }
+    // Sync with the server-confirmed list in case of concurrent changes.
+    if (result.reviews) reviewHistory.value = result.reviews;
   }
 
   function clearHistoryReview() {
@@ -419,18 +427,28 @@ export function useProjectArchitectReview(options: {
     if (hasReview.value) {
       const commitCount = reviewContext.value?.recentCommits?.length;
       const changedFileCount = reviewContext.value?.changedFiles?.length;
-      const archiveResult = await archiveReviewToHistory(project, reviewBody.value, {
-        gitHead: options.gitHead?.value?.trim() || reviewMeta.value.gitHead,
-        verdict: reviewVerdict.value ?? undefined,
-        commitCount,
-        changedFileCount,
-      });
+      const archiveResult = await archiveReviewToHistory(
+        project,
+        reviewBody.value,
+        {
+          gitHead: options.gitHead?.value?.trim() || reviewMeta.value.gitHead,
+          verdict: reviewVerdict.value ?? undefined,
+          commitCount,
+          changedFileCount,
+        },
+        reviewHistory.value.length, // pass cached count so archiveReviewToHistory skips the "before" fetch
+      );
       if (!archiveResult.ok) {
         reviewMessage.value = archiveResult.error || "归档当前评审失败";
         return false;
       }
       activeHistoryReview.value = null;
-      await loadReviewHistory();
+      // Use the reviews list returned by archiveReviewToHistory to avoid a separate loadReviewHistory() call.
+      if (archiveResult.reviews) {
+        reviewHistory.value = archiveResult.reviews;
+      } else {
+        await loadReviewHistory();
+      }
     }
 
     const contextResult = await fetchArchitectReviewContext(project);

@@ -176,19 +176,22 @@ async function deleteReviewHistoryFromDisk(
   return { ok: true, index: newIndex, reviews: newIndex.reviews };
 }
 
-/** Archive current review into history; falls back to disk when backend lacks /history support. */
+/**
+ * Archive current review into history; falls back to disk when backend lacks /history support.
+ * @param priorHistoryCount - The history count already known to the caller (from cached state).
+ *   Avoids an extra "before" fetch by letting the caller supply the baseline. If omitted the
+ *   server-auto-archive detection is skipped and the function always falls back to disk.
+ */
 export async function archiveReviewToHistory(
   projectPath: string,
   body: string,
   options: ArchitectReviewWriteMetaOptions = {},
-): Promise<{ ok: boolean; entry?: ArchitectReviewHistoryEntry; error?: string }> {
+  priorHistoryCount?: number,
+): Promise<{ ok: boolean; entry?: ArchitectReviewHistoryEntry; reviews?: ArchitectReviewHistoryEntry[]; error?: string }> {
   const trimmedPath = projectPath.trim();
   const trimmedBody = body.trim();
   if (!trimmedPath) return { ok: false, error: "缺少 projectPath" };
   if (!trimmedBody) return { ok: false, error: "评审内容为空" };
-
-  const before = await fetchReviewHistory(trimmedPath);
-  const beforeCount = before.reviews?.length ?? 0;
 
   const saveResult = await saveProjectArchitectReview(trimmedPath, trimmedBody, {
     ...options,
@@ -199,15 +202,19 @@ export async function archiveReviewToHistory(
   }
 
   const after = await fetchReviewHistory(trimmedPath);
-  if ((after.reviews?.length ?? 0) > beforeCount) {
-    return { ok: true, entry: after.reviews?.[0] };
+  const afterReviews = after.reviews ?? [];
+  // Server auto-archived when the count grew relative to the caller's known baseline.
+  if (after.ok && priorHistoryCount !== undefined && afterReviews.length > priorHistoryCount) {
+    return { ok: true, entry: afterReviews[0], reviews: afterReviews };
   }
 
+  // Disk fallback: append the entry directly via the file API.
   const diskResult = await appendReviewHistoryOnDisk(trimmedPath, trimmedBody, options);
   if (!diskResult.ok) {
     return { ok: false, error: diskResult.error || "归档评审失败" };
   }
-  return { ok: true, entry: diskResult.entry };
+  const finalHistory = await fetchReviewHistory(trimmedPath);
+  return { ok: true, entry: diskResult.entry, reviews: finalHistory.reviews };
 }
 
 async function readReviewFromDisk(projectPath: string): Promise<ArchitectReviewPayload> {
