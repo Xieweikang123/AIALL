@@ -704,8 +704,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   function jumpChainToLatest(msgId: string) {
     const el = statusLogScrollRefs.get(msgId);
-    if (!el) return;
-    scrollElementToBottom(el, "smooth");
+    if (el && el.scrollHeight > el.clientHeight + 8) {
+      scrollElementToBottom(el, "smooth");
+    }
+    void scrollChatToBottom(true);
     chainScrollPinned.set(msgId, true);
     chainJumpVisible[msgId] = false;
   }
@@ -1274,6 +1276,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       );
       if (turnText && event.data.isFinal) {
         assistantMsg.content = mergeAssistantTurnText(assistantMsg.content || "", turnText);
+        assistantMsg.activityExpanded = false;
       }
       if (shouldMinimizeRunUiPatch(assistantMsg)) {
         scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
@@ -1282,6 +1285,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       patchAssistantMsg(msgId, {
         ...syncRoundGroupsPatch(assistantMsg),
         content: assistantMsg.content,
+        activityExpanded: assistantMsg.activityExpanded,
       });
       if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
       return;
@@ -1608,7 +1612,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
             agentFailed: false,
           }),
         );
-        assistantMsg.activityExpanded = Boolean(assistantMsg.content?.trim());
+        assistantMsg.activityExpanded = false;
         stopAgentUiTick();
         clearPendingAgentEvents();
         finishRunSession(sessionId);
@@ -1861,7 +1865,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         assistantMsg.agentContinueCount = undefined;
       }
 
-      assistantMsg.activityExpanded = Boolean(assistantMsg.content?.trim());
+      assistantMsg.activityExpanded = offerPartialResume || wasAborted
+        ? true
+        : false;
 
       // End the run before patching final content so the UI does not render
       // live-preview text while msg.content already holds the finalized answer.
@@ -2521,6 +2527,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     modelStepPhaseLabel,
     statusLogPhaseClass,
     jumpChainToLatest,
+    bindStatusLogScroll,
+    onChainViewportScroll,
     enqueueStreamDelta,
     clearStreamDeltaBuffer,
     cancelAutoResume,

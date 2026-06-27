@@ -23,6 +23,9 @@
         :resume-label="resumeLabel"
         :written-files="msg.writtenFiles"
         :was-aborted="msg.agentAborted"
+        :message-id="msg.id"
+        :bind-status-log-scroll="bindStatusLogScroll"
+        :on-status-log-scroll="onStatusLogScroll"
         @execute-plan="emit('execute-plan')"
         @select-option="(option) => emit('select-option', option)"
         @toggle-debug="toggleActivityDetailed(msg)"
@@ -45,7 +48,7 @@
         class="cursor-activity-collapse"
         @click="collapseAgentActivity(msg)"
       >
-        收起
+        收起步骤
       </button>
 
       <button
@@ -82,6 +85,8 @@ const props = defineProps<{
   canExecutePlan?: boolean;
   canResume?: boolean;
   resumeLabel?: string;
+  bindStatusLogScroll?: (el: HTMLElement | null, msgId: string) => void;
+  onStatusLogScroll?: (msgId: string) => void;
 }>();
 
 const emit = defineEmits<{

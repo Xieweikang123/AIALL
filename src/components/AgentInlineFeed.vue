@@ -1,33 +1,18 @@
 <template>
   <div class="agent-stream" :class="{ 'agent-stream--running': isRunning }">
-    <div v-if="showAnswerBlock" class="stream-answer">
+    <div
+      v-if="showLiveTimeline"
+      class="stream-timeline"
+      :class="{ 'stream-timeline--running': isRunning }"
+    >
       <AgentInlineFeedItems
-        v-if="answerItem"
-        :items="answerItems"
-        :is-running="isRunning"
-        :chat-mode="chatMode"
-        :can-execute-plan="canExecutePlan"
-        :layout-enhance-ready="layoutEnhanceReady"
-        answer-only
-        @execute-plan="emit('execute-plan')"
-        @select-option="(option) => emit('select-option', option)"
-        @open-file="(path) => emit('openFile', path)"
-      />
-      <div v-else-if="isRunning" class="stream-answer-wait">
-        <span class="stream-answer-wait-dot" aria-hidden="true" />
-        <span class="shimmer-text--fast">{{ answerWaitLabel }}</span>
-      </div>
-    </div>
-
-    <div v-if="showInlineProcess" class="stream-process-inline">
-      <AgentInlineFeedItems
-        :items="inlineProcessDisplay"
+        :items="liveTimelineItems"
         :is-running="isRunning"
         :chat-mode="chatMode"
         :can-execute-plan="false"
         :layout-enhance-ready="layoutEnhanceReady"
         :preserve-collapsed="true"
-        :tool-default-visible="isRunning ? 5 : 8"
+        :tool-default-visible="isRunning ? 3 : 8"
         tool-display="inline"
         @open-file="(path) => emit('openFile', path)"
       />
@@ -55,6 +40,21 @@
         />
       </div>
     </details>
+
+    <div v-if="showAnswerBlock" class="stream-answer">
+      <AgentInlineFeedItems
+        v-if="answerItem"
+        :items="answerItems"
+        :is-running="isRunning"
+        :chat-mode="chatMode"
+        :can-execute-plan="canExecutePlan"
+        :layout-enhance-ready="layoutEnhanceReady"
+        answer-only
+        @execute-plan="emit('execute-plan')"
+        @select-option="(option) => emit('select-option', option)"
+        @open-file="(path) => emit('openFile', path)"
+      />
+    </div>
 
     <div
       v-if="isRunning && liveRailVisible"
@@ -126,6 +126,7 @@ import { formatCursorActionLabel } from "../services/agentCursorFeed";
 import { buildAgentLiveFooterStatus } from "../services/agentCompactStatus";
 import {
   collectToolsFromInlineFeed,
+  filterInlineTimelineItems,
   splitInlineFeedItems,
   summarizeInlineFeedProcess,
   type InlineFeedItem,
@@ -182,49 +183,46 @@ const processOpen = computed(
   () => Boolean(props.activityExpanded) || Boolean(props.activityDetailed),
 );
 
-const showAnswerBlock = computed(
-  () => Boolean(answerItem.value) || props.isRunning,
+const showAnswerBlock = computed(() => {
+  if (answerItem.value?.text.trim()) return true;
+  if (answerItem.value?.streaming && props.isRunning) return true;
+  if (!props.isRunning && answerItem.value) return true;
+  return false;
+});
+
+const answerPreviewText = computed(() => answerItem.value?.text.trim() ?? "");
+
+const liveTimelineItems = computed((): InlineFeedItem[] => {
+  if (!processItems.value.length) return [];
+  return filterInlineTimelineItems(processItems.value, {
+    answerPreview: answerPreviewText.value,
+    hideNarratives: !props.isRunning && Boolean(answerPreviewText.value || props.hasAnswer),
+  });
+});
+
+const showLiveTimeline = computed(
+  () => props.isRunning && liveTimelineItems.value.length > 0,
 );
 
 const showCompletedProcessDetails = computed(
-  () => !props.isRunning && completedProcessDetails.value.length > 0,
+  () => !props.isRunning && processItems.value.length > 0,
 );
-
-const hideProcessNarrative = computed(
-  () => Boolean(answerItem.value?.text.trim()) || props.hasAnswer,
-);
-
-const inlineProcessDisplay = computed((): InlineFeedItem[] => {
-  if (!processItems.value.length) return [];
-  if (!hideProcessNarrative.value) return processItems.value;
-  return processItems.value.filter(
-    (item) => item.kind !== "text" || item.variant !== "narrative",
-  );
-});
-
-const showInlineProcess = computed(() => inlineProcessDisplay.value.length > 0);
 
 const completedProcessDetails = computed((): InlineFeedItem[] => {
   if (props.isRunning) return [];
-  return processItems.value.filter(
-    (item) => item.kind === "text" && item.variant === "narrative",
-  );
+  return filterInlineTimelineItems(processItems.value, {
+    answerPreview: answerPreviewText.value,
+    hideNarratives: Boolean(answerPreviewText.value || props.hasAnswer),
+  });
 });
 
 const MODEL_WAIT_PHASES = new Set(["waiting_model", "sending_request", "retrying_model"]);
-
-const answerWaitLabel = computed(() => {
-  const running = liveTools.value.find((step) => step.running);
-  if (running) return formatCursorActionLabel(running);
-  if (props.hasRunningTool) return "执行工具中…";
-  return "思考中…";
-});
 
 const liveRailPrimary = computed((): string => {
   const status = props.currentStatus?.trim();
   if (status) return status;
 
-  if (showInlineProcess.value && (props.hasRunningTool || liveTools.value.some((step) => step.running))) {
+  if (showLiveTimeline.value && (props.hasRunningTool || liveTools.value.some((step) => step.running))) {
     const footer = buildAgentLiveFooterStatus({
       currentStatus: props.currentStatus,
       isRunning: true,
@@ -290,7 +288,12 @@ const liveRailSecondary = computed((): string | null => {
   return stats;
 });
 
-const liveRailVisible = computed(() => Boolean(liveRailPrimary.value.trim()));
+const liveRailVisible = computed(() => {
+  if (!props.isRunning) return false;
+  if (props.hasRunningTool || liveTools.value.some((step) => step.running)) return false;
+  if (answerPreviewText.value && props.agentPhase === "streaming_model") return false;
+  return Boolean(liveRailPrimary.value.trim());
+});
 
 function onProcessToggle(event: Event) {
   const target = event.target;
@@ -303,50 +306,27 @@ function onProcessToggle(event: Event) {
 .agent-stream {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
   padding: 0;
 }
 
-.stream-answer {
+.stream-timeline {
   min-width: 0;
-  order: 1;
 }
 
-.stream-answer-wait {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 0 2px;
-  font-size: 13px;
-  line-height: 1.5;
-  color: rgba(148, 163, 184, 0.82);
+.stream-timeline--running :deep(.process-step-list) {
+  max-height: none;
+  background: transparent;
 }
 
-.stream-answer-wait-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: rgba(88, 166, 255, 0.65);
-  flex-shrink: 0;
-  animation: stream-live-pulse 1.4s ease-in-out infinite;
+.stream-timeline--running :deep(.stream-narrative) {
+  padding: 2px 0 6px;
 }
 
 .stream-process {
-  order: 2;
-  margin: 8px 0 0;
+  margin: 0;
   min-width: 0;
-}
-
-.stream-process-inline {
-  order: 2;
-  margin: 6px 0 0;
-  min-width: 0;
-}
-
-.stream-process-inline :deep(.process-step-list) {
-  max-height: 220px;
-  background: rgba(0, 0, 0, 0.08);
 }
 
 .stream-process--debug {
@@ -408,21 +388,12 @@ function onProcessToggle(event: Event) {
   margin: 2px 0 0;
 }
 
-.agent-stream--running .stream-live-rail {
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
-}
-
 .stream-live-rail {
-  order: 3;
-  margin-top: 12px;
+  margin: 0;
   padding: 0;
   border-radius: 8px;
-  border: 1px solid rgba(88, 166, 255, 0.16);
-  background: rgba(11, 18, 32, 0.72);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(88, 166, 255, 0.14);
+  background: rgba(11, 18, 32, 0.55);
   min-width: 0;
   overflow: hidden;
 }
@@ -463,7 +434,7 @@ function onProcessToggle(event: Event) {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 8px 10px;
+  padding: 6px 10px;
 }
 
 .stream-live-rail-dot {
@@ -543,14 +514,32 @@ function onProcessToggle(event: Event) {
   color: rgba(148, 163, 184, 0.75);
 }
 
+.stream-answer {
+  min-width: 0;
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.agent-stream--running .stream-answer:not(:empty) {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(88, 166, 255, 0.1);
+}
+
+.agent-stream:not(.agent-stream--running) .stream-answer {
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
 .stream-truncated {
-  order: 4;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
   flex-wrap: wrap;
-  margin-top: 8px;
+  margin-top: 4px;
   padding: 6px 10px;
   border-radius: 8px;
   background: rgba(210, 153, 34, 0.06);
@@ -576,8 +565,7 @@ function onProcessToggle(event: Event) {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .stream-live-rail-dot,
-  .stream-answer-wait-dot {
+  .stream-live-rail-dot {
     animation: none;
   }
 

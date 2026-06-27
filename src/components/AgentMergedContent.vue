@@ -1,11 +1,13 @@
 <template>
   <div class="agent-feed">
-    <AgentInlineFeed
+    <AgentCursorTimeline
       v-if="showTimeline"
-      :items="inlineFeed.items"
+      :process-blocks="agentTimeline.processBlocks"
+      :answer-text="answerText"
+      :answer-streaming="Boolean(answerStreaming)"
       :is-running="isRunning"
-      :has-answer="inlineFeed.hasAnswer"
-      :tool-count="inlineFeed.toolCount"
+      :has-answer="hasAnswer"
+      :tool-count="toolCount"
       :chat-mode="chatMode"
       :can-execute-plan="canExecutePlan"
       :layout-enhance-ready="layoutEnhanceReady"
@@ -19,6 +21,9 @@
       :activity-detailed="activityDetailed"
       :activity-expanded="activityExpanded"
       :agent-phase="agentPhase"
+      :message-id="messageId"
+      :bind-status-log-scroll="bindStatusLogScroll"
+      :on-status-log-scroll="onStatusLogScroll"
       @execute-plan="emit('execute-plan')"
       @select-option="(option) => emit('select-option', option)"
       @toggle-debug="emit('toggle-debug')"
@@ -29,15 +34,15 @@
       <template #debug>
         <slot name="debug" />
       </template>
-    </AgentInlineFeed>
+    </AgentCursorTimeline>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import AgentInlineFeed from "./AgentInlineFeed.vue";
+import AgentCursorTimeline from "./AgentCursorTimeline.vue";
 import { useStableAgentAnswer } from "../composables/useStableAgentAnswer";
-import { buildInlineAgentFeed } from "../services/agentInlineFeed";
+import { buildUnifiedAgentTimeline } from "../services/agentCompactStatus";
 import type { AgentRoundGroupView, AgentRoundTool } from "../services/agentRoundGroups";
 import {
   buildWrittenFilesSummary,
@@ -69,6 +74,9 @@ const props = withDefaults(
     resumeLabel?: string;
     writtenFiles?: string[];
     wasAborted?: boolean;
+    messageId?: string;
+    bindStatusLogScroll?: (el: HTMLElement | null, msgId: string) => void;
+    onStatusLogScroll?: (msgId: string) => void;
   }>(),
   {
     showProcess: true,
@@ -127,23 +135,37 @@ const showTruncatedWarning = computed(
     isTruncatedAssistantAnswer(displayFinalAnswer.value),
 );
 
-const inlineFeed = computed(() =>
-  buildInlineAgentFeed({
-    roundGroups: props.roundGroups,
+const agentTimeline = computed(() =>
+  buildUnifiedAgentTimeline({
+    roundGroups: props.showProcess === false ? [] : props.roundGroups,
     answerPreview: displayFinalAnswer.value,
     answerStreaming: Boolean(props.answerStreaming),
     isRunning: props.isRunning,
     activityDetailed: Boolean(props.activityDetailed),
     compactFeed: props.compactFeed,
-    showProcess: props.showProcess,
     agentPhase: props.agentPhase,
     agentDetail: props.agentDetail,
   }),
 );
 
+const answerText = computed(() => agentTimeline.value.answer?.text ?? displayFinalAnswer.value);
+const answerStreaming = computed(
+  () => agentTimeline.value.answer?.streaming ?? Boolean(props.answerStreaming),
+);
+const hasAnswer = computed(() => Boolean(agentTimeline.value.answer));
+const toolCount = computed(() => {
+  let count = 0;
+  for (const block of agentTimeline.value.processBlocks) {
+    if (block.kind === "actions") {
+      count += block.collapsed.length + block.visible.length;
+    }
+  }
+  return count || props.tools?.length || 0;
+});
+
 const showTimeline = computed(
   () =>
-    inlineFeed.value.items.length > 0 ||
+    agentTimeline.value.blocks.length > 0 ||
     (props.isRunning && Boolean(props.currentStatus?.trim()) && !displayFinalAnswer.value.trim()),
 );
 </script>

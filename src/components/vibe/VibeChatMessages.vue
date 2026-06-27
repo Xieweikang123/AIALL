@@ -134,6 +134,8 @@
         :can-execute-plan="ctx.canExecutePlanMessage(m)"
         :can-resume="ctx.canResumeAgentRun(m) && !ctx.isAgentRunning(m)"
         :resume-label="ctx.resolveAgentResumeButtonLabel(m)"
+        :bind-status-log-scroll="ctx.bindStatusLogScroll"
+        :on-status-log-scroll="ctx.onStatusLogScroll"
         @execute-plan="ctx.executePlanFromMessage(m.id)"
         @select-option="(option) => ctx.handleAiOptionSelect(option, m)"
         @jump-latest="ctx.jumpChainToLatest(m.id)"
