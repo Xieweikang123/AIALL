@@ -73,6 +73,7 @@
           :git-status-known="gitStatusKnown"
           :git-error="gitError"
           :git-branch="gitBranch"
+          :git-branches="gitBranches"
           :git-tracking-branch="gitTrackingBranch"
           :git-remotes="gitRemotes"
           :git-ahead="gitAhead"
@@ -148,6 +149,9 @@
           @ai-batch-groups="generateAiBatchGroups"
           @update:batch-messages="batchMessages = $event"
           @update:batch-section-open="batchSectionOpen = $event"
+          @checkout-branch="checkoutBranch"
+          @create-branch="createBranch"
+          @delete-branch="deleteBranch"
         />
 
         <div v-if="gitPanelMode === 'files' && !projectOpened" class="panel-empty">
@@ -986,6 +990,7 @@ const projectHistoryList = ref<ProjectHistoryEntry[]>([]);
 
 // Git panel composable
 const {
+  gitBranches, checkoutBranch, createBranch, deleteBranch,
   gitPanelMode, projectPanelView, gitStatus, gitBranch, gitHeadCommit, gitIsRepo, gitStatusKnown, gitLoading, gitError,
   gitCommitMessage, gitCommitting, gitGenStep, gitLogEntries, gitLogOpen,
   gitLogCount, gitLogSearchQuery, hasMoreGitLog, gitLogLoadingMore, gitLogSearchLoading, loadMoreGitLog,
