@@ -9,6 +9,7 @@
       >
         {{ verdictLabel }}
       </span>
+      <span v-if="hasReview && reviewRun.running" class="architect-review-head-sep" aria-hidden="true" />
       <span v-if="reviewRun.running" class="architect-review-badge architect-review-badge--pulse">
         评审中
       </span>
@@ -38,7 +39,7 @@
     <div v-if="reviewRun.running" class="architect-review-running">
       <div class="architect-review-running-header">
         <span class="architect-review-spinner" aria-hidden="true" />
-        <span class="architect-review-running-status">
+        <span class="architect-review-running-status" :title="reviewRun.statusDetail || undefined">
           {{ reviewRun.statusDetail || "正在评审项目架构…" }}
         </span>
         <span v-if="reviewRun.maxTurns" class="architect-review-running-turns">
@@ -64,9 +65,10 @@
       
       <div class="architect-review-progress">
         <div class="architect-review-progress-bar">
-          <div 
-            class="architect-review-progress-fill" 
-            :style="{ width: progressPercent + '%' }"
+          <div
+            class="architect-review-progress-fill"
+            :class="{ 'architect-review-progress-fill--indeterminate': !reviewRun.maxTurns }"
+            :style="reviewRun.maxTurns ? { width: progressPercent + '%' } : undefined"
           />
         </div>
       </div>
@@ -74,19 +76,19 @@
 
     <div v-if="reviewLoading && !reviewRun.running" class="architect-review-loading">加载中…</div>
 
-    <div
-      v-else-if="!hasReview && !reviewRun.running"
-      class="architect-review-empty"
-    >
-      <p class="architect-review-empty-title">尚未生成评审报告</p>
-      <p class="architect-review-empty-desc">在左侧点击「开始评审」，AI 将从架构师视角分析整个项目与近期 Git 变更。</p>
-    </div>
-
+    <!-- Body: shown whenever there is content (streaming or saved). Hidden when running but nothing streamed yet. -->
     <article
-      v-else
+      v-else-if="displayHtml"
       class="architect-review-body markdown-body"
+      :class="{ 'architect-review-body--switching': reviewHistoryDetailLoading }"
       v-html="displayHtml"
     />
+
+    <!-- Empty state: only when not running and no content available -->
+    <div v-else-if="!reviewRun.running" class="architect-review-empty">
+      <p class="architect-review-empty-title">尚未生成评审报告</p>
+      <p class="architect-review-empty-desc">点击左侧「开始评审」，AI 将从架构师视角分析整个项目与近期 Git 变更。</p>
+    </div>
   </div>
 </template>
 
@@ -107,6 +109,8 @@ const props = defineProps<{
   displayBody: string;
   reviewVerdict: ArchitectReviewVerdict | null;
   reviewRun: ArchitectReviewRunState;
+  /** When true the article body fades to signal a history detail is loading. */
+  reviewHistoryDetailLoading?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -373,5 +377,26 @@ const displayHtml = computed(() => {
   padding: 0 20px 8px;
   font-size: 11px;
   color: rgba(139, 148, 158, 0.9);
+}
+
+/* Visual separator between the verdict badge and the "评审中" running badge */
+.architect-review-head-sep {
+  width: 1px;
+  height: 12px;
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+/* Indeterminate progress bar animation used before maxTurns is known */
+.architect-review-progress-fill--indeterminate {
+  width: 35%;
+  animation: architect-review-indeterminate 1.6s ease-in-out infinite;
+}
+
+@keyframes architect-review-indeterminate {
+  0%   { transform: translateX(-300%); }
+  65%  { transform: translateX(420%); }
+  100% { transform: translateX(420%); }
 }
 </style>

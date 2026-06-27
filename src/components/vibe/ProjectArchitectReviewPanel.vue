@@ -26,6 +26,7 @@
             type="button"
             class="review-btn review-btn--primary review-btn--block"
             :disabled="!reviewReady"
+            :title="!reviewReady ? '请先在「AI 配置」中完成 API Key 与模型配置' : undefined"
             @click="emit('start-review')"
           >
             开始评审
@@ -107,7 +108,10 @@
 
         <template v-else>
           <p v-if="reviewHistoryMessage" class="review-hint" role="status">{{ reviewHistoryMessage }}</p>
-          <div class="review-history-list">
+          <div
+            class="review-history-list"
+            :class="{ 'review-history-list--overflow-fade': reviewHistory.length > 3 }"
+          >
             <div
               v-for="(entry, index) in reviewHistory"
               :key="entry.id"
@@ -613,6 +617,12 @@ function formatHistoryScope(entry: ArchitectReviewHistoryEntry): string {
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+
+/* Gradient fade at the bottom when the list is long enough to overflow */
+.review-history-list--overflow-fade {
+  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 28px), transparent 100%);
+  mask-image: linear-gradient(to bottom, black calc(100% - 28px), transparent 100%);
 }
 
 .review-history-list::-webkit-scrollbar {

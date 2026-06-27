@@ -340,6 +340,7 @@
           :display-body="reviewDisplayBody"
           :review-verdict="reviewVerdict"
           :review-run="reviewRun"
+          :review-history-detail-loading="reviewHistoryDetailLoading"
           @open-source="openArchitectReviewSourceFile"
           @expand-chat="expandChat"
         />
