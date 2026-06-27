@@ -1194,6 +1194,710 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     scheduleAgentEventFlush(assistantMsg, runGen, sessionId);
   }
 
+  type EventOf<T extends string> = Extract<VibeAgentSseEvent, { type: T }>;
+  type AgentEventFn = (
+    event: VibeAgentSseEvent,
+    assistantMsg: ChatMessage,
+    sessionId: string,
+    msgId: string,
+  ) => void;
+
+  function handleAgentContextEvent(event: EventOf<"agent_context">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
+    assistantMsg.agentContext = event.data;
+    if (shouldMinimizeRunUiPatch(assistantMsg)) {
+      scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
+    } else {
+      patchAssistantMsg(msgId, { agentContext: event.data });
+    }
+  }
+
+  function handleTurnRequestEvent(event: EventOf<"turn_request">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
+    if (event.data.contextChars !== undefined) {
+      assistantMsg.contextChars = event.data.contextChars;
+    }
+    if (event.data.turn) assistantMsg.agentTurn = event.data.turn;
+    if (event.data.maxTurns) assistantMsg.agentMaxTurns = event.data.maxTurns;
+    const run = runManager.get(sessionId);
+    if (run?.live) {
+      if (event.data.turn) run.live.turn = event.data.turn;
+      if (event.data.maxTurns) run.live.maxTurns = event.data.maxTurns;
+      if (event.data.contextChars !== undefined) run.live.contextChars = event.data.contextChars;
+    }
+    assistantMsg.roundGroups = recordAgentRoundRequest(
+      assistantMsg.roundGroups,
+      event.data.turn,
+      {
+        model: event.data.model,
+        contextMessages: event.data.contextMessages,
+        contextChars: event.data.contextChars,
+        messages: event.data.messages,
+      },
+      event.data.maxTurns,
+    );
+    if (shouldMinimizeRunUiPatch(assistantMsg)) {
+      scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
+      return;
+    }
+    patchAssistantMsg(msgId, syncRoundGroupsPatch(assistantMsg));
+    if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
+  }
+
+  function handleTurnResponseEvent(event: EventOf<"turn_response">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
+    if (event.data.isFinal) clearStreamDeltaBuffer();
+    assistantMsg.roundGroups = recordAgentRoundResponse(
+      assistantMsg.roundGroups,
+      event.data.turn,
+      {
+        assistantText: event.data.assistantText,
+        toolCalls: event.data.toolCalls,
+        hasToolCalls: event.data.hasToolCalls,
+        isFinal: event.data.isFinal,
+      },
+      event.data.maxTurns,
+    );
+    const turnText = stripTextToolCallMarkup(
+      stripToolSummaryFromAssistantContent(event.data.assistantText || ""),
+    );
+    if (turnText && event.data.isFinal) {
+      assistantMsg.content = mergeAssistantTurnText(assistantMsg.content || "", turnText);
+      assistantMsg.activityExpanded = false;
+    }
+    if (shouldMinimizeRunUiPatch(assistantMsg)) {
+      scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
+      return;
+    }
+    patchAssistantMsg(msgId, {
+      ...syncRoundGroupsPatch(assistantMsg),
+      content: assistantMsg.content,
+      activityExpanded: assistantMsg.activityExpanded,
+    });
+    if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
+  }
+
+  function handleTurnTraceEvent(event: EventOf<"turn_trace">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
+    if (!assistantMsg.turnTraces) assistantMsg.turnTraces = [];
+    assistantMsg.turnTraces.push({ ...event.data });
+    assistantMsg.roundGroups = recordAgentRoundNarrative(
+      assistantMsg.roundGroups,
+      event.data.turn,
+      event.data.assistantText,
+      event.data.maxTurns,
+    );
+    if (shouldMinimizeRunUiPatch(assistantMsg)) {
+      scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
+      return;
+    }
+    patchAssistantMsg(msgId, {
+      turnTraces: [...assistantMsg.turnTraces],
+      ...syncRoundGroupsPatch(assistantMsg),
+    });
+    if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
+  }
+
+  function handleStatusEvent(event: EventOf<"status">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
+    const { phase } = event.data;
+    const run = runManager.get(sessionId);
+    if (!run) return;
+    const prevPhase = run.live.phase;
+    setAgentStatus(sessionId, assistantMsg, phase, event.data, { log: phase !== prevPhase });
+
+    const phaseChanged = phase !== prevPhase;
+    const contextChanged =
+      event.data.contextChars !== undefined &&
+      event.data.contextChars !== assistantMsg.contextChars;
+    const streamChanged =
+      event.data.streamChars !== undefined &&
+      event.data.streamChars !== assistantMsg.streamChars;
+    const isTerminal = phase === "aborted" || phase === "finished";
+    // Heartbeat-only status (same phase, e.g.「已等待 12s」) updates run.live only;
+    // skip patching chatMessages to avoid re-rendering the whole UI every 2s.
+    if (!phaseChanged && !contextChanged && !streamChanged && !isTerminal) {
+      return;
+    }
+
+    if (shouldMinimizeRunUiPatch(assistantMsg)) {
+      if (phase === "aborted") {
+        clearStreamDeltaBuffer();
+        assistantMsg.agentAborted = true;
+        assistantMsg.agentAbortReason ||= "运行连接已中断";
+        stopAgentUiTick();
+        finishRunSession(sessionId);
+        updateAgentRunSessionStatus(sessionId, "interrupted");
+        patchAssistantMsg(msgId, {
+          agentAborted: true,
+          agentAbortReason: assistantMsg.agentAbortReason,
+          content: assistantMsg.content,
+        });
+        persistChatNow();
+        if (pendingPromptQueue.value.length) {
+          dequeuePendingPromptAndRun();
+        }
+        return;
+      }
+      const statusText = formatLiveStatus(run.live);
+      assistantMsg.roundGroups = recordAgentRoundStatus(
+        assistantMsg.roundGroups,
+        phase,
+        statusText,
+        assistantMsg.agentTurn ?? event.data.turn,
+        assistantMsg.agentMaxTurns ?? event.data.maxTurns,
+      );
+      scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
+      return;
+    }
+
+    const statusText = formatLiveStatus(run.live);
+    assistantMsg.roundGroups = recordAgentRoundStatus(
+      assistantMsg.roundGroups,
+      phase,
+      statusText,
+      assistantMsg.agentTurn ?? event.data.turn,
+      assistantMsg.agentMaxTurns ?? event.data.maxTurns,
+    );
+    patchAssistantMsg(msgId, {
+      streamChars: assistantMsg.streamChars,
+      contextChars: assistantMsg.contextChars,
+      statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
+      agentTurn: assistantMsg.agentTurn,
+      agentMaxTurns: assistantMsg.agentMaxTurns,
+      agentModel: assistantMsg.agentModel,
+      ...syncRoundGroupsPatch(assistantMsg),
+    });
+    if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
+    if (phase === "aborted") {
+      clearStreamDeltaBuffer();
+      assistantMsg.agentAborted = true;
+      assistantMsg.agentAbortReason ||= "运行连接已中断";
+      const abortTurn = assistantMsg.agentTurn ?? 1;
+      assistantMsg.roundGroups = recordAgentRoundResponse(
+        assistantMsg.roundGroups,
+        abortTurn,
+        { assistantText: "", toolCalls: [], hasToolCalls: false, isFinal: false },
+        assistantMsg.agentMaxTurns,
+      );
+      patchAssistantMsg(msgId, {
+        agentAborted: true,
+        agentAbortReason: assistantMsg.agentAbortReason,
+        ...syncRoundGroupsPatch(assistantMsg),
+      });
+      stopAgentUiTick();
+      finishRunSession(sessionId);
+      updateAgentRunSessionStatus(sessionId, "interrupted");
+      persistChatNow();
+      if (pendingPromptQueue.value.length) {
+        dequeuePendingPromptAndRun();
+      }
+    }
+    void scrollChatToBottom();
+  }
+
+  function handleToolStartEvent(event: EventOf<"tool_start">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
+    const meta = formatToolMeta(event.data.name, event.data.args);
+    const toolTurn = assistantMsg.agentTurn ?? runManager.get(sessionId)?.live.turn ?? 1;
+    const toolStep = {
+      id: event.data.id,
+      ...meta,
+      args: { ...event.data.args },
+      summary: "",
+      ok: true,
+      running: true,
+      turn: toolTurn,
+    };
+    if (!assistantMsg.tools) assistantMsg.tools = [];
+    assistantMsg.tools.push(toolStep);
+    assistantMsg.roundGroups = recordAgentRoundToolStart(assistantMsg.roundGroups, event.data.id, toolTurn);
+    setAgentStatus(sessionId, assistantMsg, "executing_tool", {
+      toolTitle: meta.title,
+      toolDetail: meta.detail,
+      turn: assistantMsg.agentTurn,
+      maxTurns: assistantMsg.agentMaxTurns,
+    });
+    if (shouldMinimizeRunUiPatch(assistantMsg)) {
+      scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
+      return;
+    }
+    patchAssistantMsg(msgId, {
+      tools: [...assistantMsg.tools],
+      statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
+      ...syncRoundGroupsPatch(assistantMsg),
+    });
+    if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
+    void scrollChatToBottom();
+  }
+
+  function handleFileDiffEvent(event: EventOf<"file_diff">, assistantMsg: ChatMessage, _sessionId: string, msgId: string) {
+    const relPath = event.data.path;
+    const diff = { before: event.data.before, after: event.data.after, deleted: event.data.deleted, created: event.data.created };
+    storeFileDiff(relPath, diff.before, diff.after, diff.deleted);
+    if (!assistantMsg.turnFileDiffs) assistantMsg.turnFileDiffs = {};
+    assistantMsg.turnFileDiffs[relPath] = diff;
+    const normalizedPath = relPath.replace(/\\/g, "/");
+    const writeStep = [...(assistantMsg.tools || [])].reverse().find((tool) => {
+      if (tool.name !== "write_file") return false;
+      const toolPath = String(tool.args?.path ?? tool.detail.split(" · ")[0] ?? "").replace(/\\/g, "/");
+      return toolPath === normalizedPath;
+    });
+    if (writeStep) {
+      writeStep.lineDelta = computeLineDelta(diff.before, diff.after, diff.created);
+    }
+    patchAssistantMsg(msgId, {
+      turnFileDiffs: { ...assistantMsg.turnFileDiffs },
+      tools: assistantMsg.tools ? [...assistantMsg.tools] : undefined,
+    });
+    void syncEditorAfterAgentFileChange(relPath, diff);
+    void scrollChatToBottom();
+  }
+
+  function handleToolEndEvent(event: EventOf<"tool_end">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
+    const step = assistantMsg.tools?.find((t) => t.id === event.data.id);
+    if (step) {
+      step.running = false;
+      step.ok = event.data.ok;
+      step.summary = event.data.summary;
+      if (event.data.result) {
+        const raw = event.data.result;
+        step.fullResult =
+          raw.length > MAX_TOOL_FULL_RESULT_CHARS
+            ? `${raw.slice(0, MAX_TOOL_FULL_RESULT_CHARS)}…`
+            : raw;
+      }
+    }
+    if (event.data.result) {
+      const proposal = parseMemoryProposalToolResult(event.data.result);
+      if (proposal) onMemoryProposal?.(msgId, proposal);
+      const skillProposal = parseSkillProposalToolResult(event.data.result);
+      if (skillProposal) onSkillProposal?.(msgId, skillProposal);
+    }
+    const pending = assistantMsg.tools?.some((t) => t.running);
+    setAgentStatus(sessionId, assistantMsg, pending ? "executing_tools" : "summarizing_tools", {
+      turn: assistantMsg.agentTurn,
+      maxTurns: assistantMsg.agentMaxTurns,
+    });
+    if (shouldMinimizeRunUiPatch(assistantMsg)) {
+      scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
+      return;
+    }
+    patchAssistantMsg(msgId, {
+      tools: assistantMsg.tools ? [...assistantMsg.tools] : undefined,
+      statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
+    });
+    if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
+    void scrollChatToBottom();
+  }
+
+  function handleMessageDeltaEvent(event: EventOf<"message_delta">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
+    const delta = event.data.delta || "";
+    if (!delta) return;
+    const run = runManager.get(sessionId);
+    const waitPhases = new Set(["waiting_model", "sending_request", "retrying_model"]);
+    if (run && waitPhases.has(run.live.phase)) {
+      setAgentStatus(sessionId, assistantMsg, "streaming_model", {
+        turn: assistantMsg.agentTurn,
+        maxTurns: assistantMsg.agentMaxTurns,
+        model: assistantMsg.agentModel,
+        streamChars: (assistantMsg.streamChars || 0) + delta.length,
+      });
+      if (!shouldMinimizeRunUiPatch(assistantMsg)) {
+        patchAssistantMsg(msgId, {
+          streamChars: assistantMsg.streamChars,
+        });
+      }
+    }
+    enqueueStreamDelta(msgId, assistantMsg, delta);
+  }
+
+  function handleMessageEvent(event: EventOf<"message">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
+    clearStreamDeltaBuffer();
+    const cleanText = stripTextToolCallMarkup(stripToolSummaryFromAssistantContent(event.data.text));
+    const minimizing = shouldMinimizeRunUiPatch(assistantMsg);
+    if (cleanText) {
+      assistantMsg.content = mergeAssistantTurnText(assistantMsg.content || "", cleanText);
+    }
+    if (minimizing) {
+      schedulePersistDuringRun(sessionId);
+      scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
+      return;
+    }
+    patchAssistantMsg(msgId, {
+      content: assistantMsg.content,
+    });
+    schedulePersistDuringRun(sessionId);
+    void scrollChatToBottom();
+  }
+
+  function handleErrorEvent(event: EventOf<"error">, assistantMsg: ChatMessage, sessionId: string, _msgId: string) {
+    if (isRunVisible(sessionId)) clearStreamDeltaBuffer();
+    planExecutionActive.value = false;
+    if (trySilentContinue(sessionId, assistantMsg, event.data.message)) {
+      runManager.setAbortHandle(sessionId, null);
+      return;
+    }
+    applyRecoverableAgentFailure(assistantMsg, event.data.message);
+    finishRunSession(sessionId);
+    maybePersistChat(sessionId);
+    maybeScrollChat(sessionId);
+
+    const recoverable = isRecoverableAgentError(event.data.message);
+    if (!recoverable && pendingPromptQueue.value.length && isRunVisible(sessionId)) {
+      dequeuePendingPromptAndRun();
+    }
+  }
+
+  function handleDoneEvent(event: EventOf<"done">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
+    if (isRunVisible(sessionId)) clearStreamDeltaBuffer();
+    planExecutionActive.value = false;
+    runManager.setAbortHandle(sessionId, null);
+    clearPendingAgentRun();
+    flushMinimizedRunUiPatch(sessionId, msgId, assistantMsg);
+
+    if (assistantMsg.agentFailed) {
+      finishRunSession(sessionId);
+      const completedTurns = resolveCompletedTurns(event.data.turns, assistantMsg);
+      if (!assistantMsg.totalTurns) assistantMsg.totalTurns = completedTurns;
+      patchAssistantMsg(msgId, {
+        totalTurns: assistantMsg.totalTurns,
+        ...assistantTransientUiClearPatch(),
+        ...syncRoundGroupsPatch(assistantMsg),
+      });
+      persistChatNow();
+      void scrollChatToBottom();
+      if (pendingPromptQueue.value.length) {
+        dequeuePendingPromptAndRun();
+      }
+      return;
+    }
+
+    const completedTurns = resolveCompletedTurns(event.data.turns, assistantMsg);
+    const wasAborted = !!assistantMsg.agentAborted;
+
+    mergeDeferredCaptureIntoMsg(sessionId, assistantMsg);
+
+    if ((assistantMsg.chatMode === "ask" || assistantMsg.chatMode === "explore") && !wasAborted) {
+      assistantMsg.totalTurns = completedTurns;
+      if (projectPath.value.trim()) {
+        updateAgentRunSessionStatus(sessionId, "completed");
+      }
+      assistantMsg.writtenFiles = event.data.writtenFiles?.length ? [...event.data.writtenFiles] : undefined;
+      assistantMsg.content = applySuggestionsToAssistantContent(
+        assistantMsg,
+        finalizeAssistantBubbleContent({
+          ...assistantMsg,
+          wasAborted: false,
+          writtenFiles: assistantMsg.writtenFiles,
+          agentFailed: false,
+        }),
+      );
+      assistantMsg.activityExpanded = false;
+      stopAgentUiTick();
+      clearPendingAgentEvents();
+      finishRunSession(sessionId);
+      patchAssistantMsg(msgId, {
+        ...assistantTransientUiClearPatch(),
+        activityExpanded: assistantMsg.activityExpanded,
+        content: assistantMsg.content,
+        totalTurns: assistantMsg.totalTurns,
+        writtenFiles: assistantMsg.writtenFiles,
+      });
+      window.setTimeout(() => {
+        persistChatNow(undefined, { flushStore: true, sessionId });
+        void scrollChatToBottom();
+        onAgentRunSettled?.(assistantMsg);
+      }, 0);
+      if (pendingPromptQueue.value.length) {
+        dequeuePendingPromptAndRun();
+      }
+      return;
+    }
+
+    // Update session status to completed if agent completed successfully
+    if (!wasAborted && !assistantMsg.agentFailed && projectPath.value.trim()) {
+      updateAgentRunSessionStatus(sessionId, "completed");
+    }
+    const hasRunningTools = assistantMsg.tools?.some((t) => t.running);
+    const hadProgress = hasRecoverableAgentProgress(assistantMsg);
+    const incompleteRun =
+      !wasAborted &&
+      hadProgress &&
+      (hasRunningTools || (completedTurns === 0 && event.data.turns === 0));
+    const maxTurnsExhausted =
+      !wasAborted &&
+      !assistantMsg.agentFailed &&
+      isAgentMaxTurnsExhausted(assistantMsg, completedTurns);
+
+    // 自动续跑：模型输出被截断时静默继续
+    if (event.data.truncated && !wasAborted && !assistantMsg.agentFailed) {
+      const continueCount = assistantMsg.agentContinueCount ?? 0;
+      const maxContinues = AGENT_SILENT_CONTINUE_MAX;
+      const truncatedNotice = `回复内容较长，正在自动补充完成（第 ${continueCount + 1}/${maxContinues} 次）…`;
+      if (trySilentContinue(sessionId, assistantMsg, truncatedNotice)) {
+        if (!assistantMsg.totalTurns) {
+          assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
+        }
+        patchAssistantMsg(msgId, {
+          totalTurns: assistantMsg.totalTurns,
+          ...syncRoundGroupsPatch(assistantMsg),
+        });
+        schedulePersistDuringRun(sessionId);
+        void scrollChatToBottom();
+        return;
+      }
+    }
+
+    if (incompleteRun) {
+      if (trySilentContinue(sessionId, assistantMsg, "连接中断（运行未完成）")) {
+        if (!assistantMsg.totalTurns) {
+          assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
+        }
+        patchAssistantMsg(msgId, {
+          totalTurns: assistantMsg.totalTurns,
+          ...syncRoundGroupsPatch(assistantMsg),
+        });
+        schedulePersistDuringRun(sessionId);
+        persistAgentRunSession(sessionId);
+        void scrollChatToBottom();
+        return;
+      }
+      const continueBefore = assistantMsg.agentContinueCount ?? 0;
+      handleRecoverableInterruption(sessionId, assistantMsg, "连接中断（运行未完成）", { logStatus: true });
+      if ((assistantMsg.agentContinueCount ?? 0) > continueBefore) {
+        if (!assistantMsg.totalTurns) {
+          assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
+        }
+        patchAssistantMsg(msgId, {
+          totalTurns: assistantMsg.totalTurns,
+          ...syncRoundGroupsPatch(assistantMsg),
+        });
+        schedulePersistDuringRun(sessionId);
+        persistAgentRunSession(sessionId);
+        void scrollChatToBottom();
+        return;
+      }
+      finishRunSession(sessionId);
+      if (!assistantMsg.totalTurns) {
+        assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
+      }
+      patchAssistantMsg(msgId, {
+        totalTurns: assistantMsg.totalTurns,
+        ...assistantTransientUiClearPatch(),
+        ...syncRoundGroupsPatch(assistantMsg),
+      });
+      persistChatNow();
+      void scrollChatToBottom();
+      if (pendingPromptQueue.value.length) {
+        dequeuePendingPromptAndRun();
+      }
+      return;
+    }
+
+    if (maxTurnsExhausted) {
+      const reason = buildAgentMaxTurnsExhaustedMessage(assistantMsg.agentMaxTurns ?? completedTurns);
+      if (trySilentContinue(sessionId, assistantMsg, reason)) {
+        assistantMsg.totalTurns = completedTurns;
+        patchAssistantMsg(msgId, { totalTurns: completedTurns, ...syncRoundGroupsPatch(assistantMsg) });
+        schedulePersistDuringRun(sessionId);
+        persistAgentRunSession(sessionId);
+        void scrollChatToBottom();
+        return;
+      }
+      const continueBefore = assistantMsg.agentContinueCount ?? 0;
+      handleRecoverableInterruption(sessionId, assistantMsg, reason, { logStatus: true });
+      if ((assistantMsg.agentContinueCount ?? 0) > continueBefore) {
+        assistantMsg.totalTurns = completedTurns;
+        patchAssistantMsg(msgId, { totalTurns: completedTurns, ...syncRoundGroupsPatch(assistantMsg) });
+        schedulePersistDuringRun(sessionId);
+        persistAgentRunSession(sessionId);
+        void scrollChatToBottom();
+        return;
+      }
+      finishRunSession(sessionId);
+      assistantMsg.totalTurns = completedTurns;
+      patchAssistantMsg(msgId, { totalTurns: completedTurns, ...syncRoundGroupsPatch(assistantMsg) });
+      persistChatNow();
+      void scrollChatToBottom();
+      if (pendingPromptQueue.value.length) {
+        dequeuePendingPromptAndRun();
+      }
+      return;
+    }
+
+    const spuriousDoneAfterInterrupt =
+      !wasAborted &&
+      event.data.turns === 0 &&
+      hadProgress &&
+      !hasRunningTools &&
+      !hasAgentFinalAnswer(assistantMsg);
+
+    if (spuriousDoneAfterInterrupt) {
+      if (trySilentContinue(sessionId, assistantMsg, "连接中断（运行未完成）")) {
+        if (!assistantMsg.totalTurns) {
+          assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
+        }
+        patchAssistantMsg(msgId, {
+          totalTurns: assistantMsg.totalTurns,
+          ...syncRoundGroupsPatch(assistantMsg),
+        });
+        schedulePersistDuringRun(sessionId);
+        persistAgentRunSession(sessionId);
+        void scrollChatToBottom();
+        return;
+      }
+      handleRecoverableInterruption(sessionId, assistantMsg, "连接中断（运行未完成）", { logStatus: true });
+      finishRunSession(sessionId);
+      if (!assistantMsg.totalTurns) {
+        assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
+      }
+      patchAssistantMsg(msgId, {
+        totalTurns: assistantMsg.totalTurns,
+        agentFailed: assistantMsg.agentFailed,
+        agentRecoverable: assistantMsg.agentRecoverable,
+        agentFailureReason: assistantMsg.agentFailureReason,
+        agentRecoveryDismissed: assistantMsg.agentRecoveryDismissed,
+        content: assistantMsg.content,
+        statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
+        ...syncRoundGroupsPatch(assistantMsg),
+      });
+      persistChatNow();
+      void scrollChatToBottom();
+      return;
+    }
+
+    assistantMsg.totalTurns = completedTurns;
+    const continueCount = assistantMsg.agentContinueCount ?? 0;
+    appendStatusLog(
+      assistantMsg,
+      wasAborted
+        ? `已停止（共 ${completedTurns} 轮）`
+        : continueCount > 0
+          ? `✅ 完成（共 ${completedTurns} 轮，含 ${continueCount} 次自动续跑）`
+          : `完成（共 ${completedTurns} 轮）`,
+    );
+
+    commitAgentFinalAnswerIfMissing(assistantMsg, completedTurns, assistantMsg.agentMaxTurns);
+
+    if (!wasAborted && hadProgress && !hasAgentFinalAnswer(assistantMsg)) {
+      handleRecoverableInterruption(sessionId, assistantMsg, "运行中断（未生成最终回复）", {
+        logStatus: true,
+      });
+      assistantMsg.content = resolveAgentFailureBubbleContent(assistantMsg);
+      finishRunSession(sessionId);
+      patchAssistantMsg(msgId, {
+        content: assistantMsg.content,
+        agentFailed: assistantMsg.agentFailed,
+        agentRecoverable: assistantMsg.agentRecoverable,
+        agentFailureReason: assistantMsg.agentFailureReason,
+        agentFailureDetail: assistantMsg.agentFailureDetail,
+        agentRecoveryDismissed: assistantMsg.agentRecoveryDismissed,
+        totalTurns: assistantMsg.totalTurns,
+        statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
+        activityExpanded: true,
+        ...syncRoundGroupsPatch(assistantMsg),
+      });
+      persistChatNow(undefined, { flushStore: true });
+      void scrollChatToBottom();
+      return;
+    }
+
+    const turnFileDiffPaths = assistantMsg.turnFileDiffs
+      ? Object.keys(assistantMsg.turnFileDiffs)
+      : [];
+    const fileAction = resolveAgentDoneFileAction({
+      chatMode: assistantMsg.chatMode ?? "build",
+      wasAborted,
+      serverPendingFiles: event.data.pendingFiles || [],
+      serverWrittenFiles: event.data.writtenFiles || [],
+      turnFileDiffPaths,
+    });
+
+    assistantMsg.pendingApproval = fileAction.pendingApproval;
+    assistantMsg.writtenFiles = fileAction.writtenFiles;
+
+    assistantMsg.content = applySuggestionsToAssistantContent(
+      assistantMsg,
+      finalizeAssistantBubbleContent({
+        ...assistantMsg,
+        wasAborted,
+        writtenFiles: fileAction.writtenFiles,
+        agentFailed: false,
+      }),
+    );
+
+    const offerPartialResume = shouldOfferPartialRunResume({
+      wasAborted,
+      writtenFiles: fileAction.writtenFiles,
+      msg: assistantMsg,
+    });
+
+    if (offerPartialResume) {
+      assistantMsg.agentFailed = true;
+      assistantMsg.agentRecoverable = true;
+      assistantMsg.agentFailureReason = PARTIAL_RUN_RESUME_REASON;
+      assistantMsg.agentRecoveryDismissed = false;
+    } else {
+      assistantMsg.agentFailed = false;
+      assistantMsg.agentRecoverable = false;
+      assistantMsg.agentFailureReason = undefined;
+      assistantMsg.agentRecoveryDismissed = true;
+      assistantMsg.agentContinueCount = undefined;
+    }
+
+    assistantMsg.activityExpanded = offerPartialResume || wasAborted
+      ? true
+      : false;
+
+    // End the run before patching final content so the UI does not render
+    // live-preview text while msg.content already holds the finalized answer.
+    finishRunSession(sessionId);
+
+    patchAssistantMsg(msgId, {
+      ...assistantTransientUiClearPatch(),
+      activityExpanded: assistantMsg.activityExpanded,
+      content: assistantMsg.content,
+      agentSuggestions: assistantMsg.agentSuggestions,
+      totalTurns: assistantMsg.totalTurns,
+      statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
+      ...syncRoundGroupsPatch(assistantMsg),
+      writtenFiles: assistantMsg.writtenFiles,
+      pendingApproval: assistantMsg.pendingApproval,
+      agentAborted: assistantMsg.agentAborted || undefined,
+      agentFailed: offerPartialResume ? true : undefined,
+      agentRecoverable: offerPartialResume ? true : undefined,
+      agentFailureReason: offerPartialResume ? PARTIAL_RUN_RESUME_REASON : undefined,
+      agentFailureDetail: undefined,
+      agentRecoveryDismissed: offerPartialResume ? false : true,
+      agentContinueCount: offerPartialResume ? assistantMsg.agentContinueCount : undefined,
+    });
+    persistChatNow(undefined, { flushStore: true });
+
+    if (fileAction.writtenFiles?.length) {
+      if (assistantMsg.turnFileDiffs) {
+        clearTurnFileDiffsFromStore(assistantMsg.turnFileDiffs);
+      }
+      void handleAgentWrittenFiles(fileAction.writtenFiles);
+    }
+    void scrollChatToBottom();
+
+    onAgentRunSettled?.(assistantMsg);
+
+    if (pendingPromptQueue.value.length) {
+      dequeuePendingPromptAndRun();
+    }
+  }
+
+  const agentEventHandlers = new Map<string, AgentEventFn>([
+    ["agent_context", handleAgentContextEvent as AgentEventFn],
+    ["turn_request", handleTurnRequestEvent as AgentEventFn],
+    ["turn_response", handleTurnResponseEvent as AgentEventFn],
+    ["turn_trace", handleTurnTraceEvent as AgentEventFn],
+    ["status", handleStatusEvent as AgentEventFn],
+    ["tool_start", handleToolStartEvent as AgentEventFn],
+    ["file_diff", handleFileDiffEvent as AgentEventFn],
+    ["tool_end", handleToolEndEvent as AgentEventFn],
+    ["message_delta", handleMessageDeltaEvent as AgentEventFn],
+    ["message", handleMessageEvent as AgentEventFn],
+    ["error", handleErrorEvent as AgentEventFn],
+    ["done", handleDoneEvent as AgentEventFn],
+  ]);
+
   function handleAgentEvent(
     event: VibeAgentSseEvent,
     assistantMsg: ChatMessage,
@@ -1211,702 +1915,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       return;
     }
     const msgId = assistantMsg.id;
-    const patchMsg = (patch: Partial<ChatMessage>) => patchAssistantMsg(msgId, patch, sessionId);
-
-    const isProgressEvent = isAgentSseProgressEvent(event.type);
-    if (isProgressEvent) touchAgentProgress(sessionId);
-
-    if (event.type === "agent_context") {
-      assistantMsg.agentContext = event.data;
-      if (shouldMinimizeRunUiPatch(assistantMsg)) {
-        scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
-      } else {
-        patchAssistantMsg(msgId, { agentContext: event.data });
-      }
-      return;
-    }
-
-    if (event.type === "turn_request") {
-      if (event.data.contextChars !== undefined) {
-        assistantMsg.contextChars = event.data.contextChars;
-      }
-      if (event.data.turn) assistantMsg.agentTurn = event.data.turn;
-      if (event.data.maxTurns) assistantMsg.agentMaxTurns = event.data.maxTurns;
-      const run = runManager.get(sessionId);
-      if (run?.live) {
-        if (event.data.turn) run.live.turn = event.data.turn;
-        if (event.data.maxTurns) run.live.maxTurns = event.data.maxTurns;
-        if (event.data.contextChars !== undefined) run.live.contextChars = event.data.contextChars;
-      }
-      assistantMsg.roundGroups = recordAgentRoundRequest(
-        assistantMsg.roundGroups,
-        event.data.turn,
-        {
-          model: event.data.model,
-          contextMessages: event.data.contextMessages,
-          contextChars: event.data.contextChars,
-          messages: event.data.messages,
-        },
-        event.data.maxTurns,
-      );
-      if (shouldMinimizeRunUiPatch(assistantMsg)) {
-        scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
-        return;
-      }
-      patchAssistantMsg(msgId, syncRoundGroupsPatch(assistantMsg));
-      if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
-      return;
-    }
-
-    if (event.type === "turn_response") {
-      if (event.data.isFinal) clearStreamDeltaBuffer();
-      assistantMsg.roundGroups = recordAgentRoundResponse(
-        assistantMsg.roundGroups,
-        event.data.turn,
-        {
-          assistantText: event.data.assistantText,
-          toolCalls: event.data.toolCalls,
-          hasToolCalls: event.data.hasToolCalls,
-          isFinal: event.data.isFinal,
-        },
-        event.data.maxTurns,
-      );
-      const turnText = stripTextToolCallMarkup(
-        stripToolSummaryFromAssistantContent(event.data.assistantText || ""),
-      );
-      if (turnText && event.data.isFinal) {
-        assistantMsg.content = mergeAssistantTurnText(assistantMsg.content || "", turnText);
-        assistantMsg.activityExpanded = false;
-      }
-      if (shouldMinimizeRunUiPatch(assistantMsg)) {
-        scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
-        return;
-      }
-      patchAssistantMsg(msgId, {
-        ...syncRoundGroupsPatch(assistantMsg),
-        content: assistantMsg.content,
-        activityExpanded: assistantMsg.activityExpanded,
-      });
-      if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
-      return;
-    }
-
-    if (event.type === "turn_trace") {
-      if (!assistantMsg.turnTraces) assistantMsg.turnTraces = [];
-      assistantMsg.turnTraces.push({ ...event.data });
-      assistantMsg.roundGroups = recordAgentRoundNarrative(
-        assistantMsg.roundGroups,
-        event.data.turn,
-        event.data.assistantText,
-        event.data.maxTurns,
-      );
-      if (shouldMinimizeRunUiPatch(assistantMsg)) {
-        scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
-        return;
-      }
-      patchAssistantMsg(msgId, {
-        turnTraces: [...assistantMsg.turnTraces],
-        ...syncRoundGroupsPatch(assistantMsg),
-      });
-      if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
-      return;
-    }
-
-    if (event.type === "status") {
-      const { phase } = event.data;
-      const run = runManager.get(sessionId);
-      if (!run) return;
-      const prevPhase = run.live.phase;
-      setAgentStatus(sessionId, assistantMsg, phase, event.data, { log: phase !== prevPhase });
-
-      const phaseChanged = phase !== prevPhase;
-      const contextChanged =
-        event.data.contextChars !== undefined &&
-        event.data.contextChars !== assistantMsg.contextChars;
-      const streamChanged =
-        event.data.streamChars !== undefined &&
-        event.data.streamChars !== assistantMsg.streamChars;
-      const isTerminal = phase === "aborted" || phase === "finished";
-      // Heartbeat-only status (same phase, e.g.「已等待 12s」) updates run.live only;
-      // skip patching chatMessages to avoid re-rendering the whole UI every 2s.
-      if (!phaseChanged && !contextChanged && !streamChanged && !isTerminal) {
-        return;
-      }
-
-      if (shouldMinimizeRunUiPatch(assistantMsg)) {
-        if (phase === "aborted") {
-          clearStreamDeltaBuffer();
-          assistantMsg.agentAborted = true;
-          assistantMsg.agentAbortReason ||= "运行连接已中断";
-          stopAgentUiTick();
-          finishRunSession(sessionId);
-          updateAgentRunSessionStatus(sessionId, "interrupted");
-          patchAssistantMsg(msgId, {
-            agentAborted: true,
-            agentAbortReason: assistantMsg.agentAbortReason,
-            content: assistantMsg.content,
-          });
-          persistChatNow();
-          if (pendingPromptQueue.value.length) {
-            dequeuePendingPromptAndRun();
-          }
-          return;
-        }
-        const statusText = formatLiveStatus(run.live);
-        assistantMsg.roundGroups = recordAgentRoundStatus(
-          assistantMsg.roundGroups,
-          phase,
-          statusText,
-          assistantMsg.agentTurn ?? event.data.turn,
-          assistantMsg.agentMaxTurns ?? event.data.maxTurns,
-        );
-        scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
-        return;
-      }
-
-      const statusText = formatLiveStatus(run.live);
-      assistantMsg.roundGroups = recordAgentRoundStatus(
-        assistantMsg.roundGroups,
-        phase,
-        statusText,
-        assistantMsg.agentTurn ?? event.data.turn,
-        assistantMsg.agentMaxTurns ?? event.data.maxTurns,
-      );
-      patchAssistantMsg(msgId, {
-        streamChars: assistantMsg.streamChars,
-        contextChars: assistantMsg.contextChars,
-        statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
-        agentTurn: assistantMsg.agentTurn,
-        agentMaxTurns: assistantMsg.agentMaxTurns,
-        agentModel: assistantMsg.agentModel,
-        ...syncRoundGroupsPatch(assistantMsg),
-      });
-      if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
-      if (phase === "aborted") {
-        clearStreamDeltaBuffer();
-        assistantMsg.agentAborted = true;
-        assistantMsg.agentAbortReason ||= "运行连接已中断";
-        const abortTurn = assistantMsg.agentTurn ?? 1;
-        assistantMsg.roundGroups = recordAgentRoundResponse(
-          assistantMsg.roundGroups,
-          abortTurn,
-          { assistantText: "", toolCalls: [], hasToolCalls: false, isFinal: false },
-          assistantMsg.agentMaxTurns,
-        );
-        patchAssistantMsg(msgId, {
-          agentAborted: true,
-          agentAbortReason: assistantMsg.agentAbortReason,
-          ...syncRoundGroupsPatch(assistantMsg),
-        });
-        stopAgentUiTick();
-        finishRunSession(sessionId);
-        updateAgentRunSessionStatus(sessionId, "interrupted");
-        persistChatNow();
-        if (pendingPromptQueue.value.length) {
-        dequeuePendingPromptAndRun();
-        }
-      }
-      void scrollChatToBottom();
-      return;
-    }
-
-    if (event.type === "tool_start") {
-      const meta = formatToolMeta(event.data.name, event.data.args);
-      const toolTurn = assistantMsg.agentTurn ?? runManager.get(sessionId)?.live.turn ?? 1;
-      const toolStep = {
-        id: event.data.id,
-        ...meta,
-        args: { ...event.data.args },
-        summary: "",
-        ok: true,
-        running: true,
-        turn: toolTurn,
-      };
-      if (!assistantMsg.tools) assistantMsg.tools = [];
-      assistantMsg.tools.push(toolStep);
-      assistantMsg.roundGroups = recordAgentRoundToolStart(assistantMsg.roundGroups, event.data.id, toolTurn);
-      setAgentStatus(sessionId, assistantMsg, "executing_tool", {
-        toolTitle: meta.title,
-        toolDetail: meta.detail,
-        turn: assistantMsg.agentTurn,
-        maxTurns: assistantMsg.agentMaxTurns,
-      });
-      if (shouldMinimizeRunUiPatch(assistantMsg)) {
-        scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
-        return;
-      }
-      patchAssistantMsg(msgId, {
-        tools: [...assistantMsg.tools],
-        statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
-        ...syncRoundGroupsPatch(assistantMsg),
-      });
-      if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
-      void scrollChatToBottom();
-      return;
-    }
-
-    if (event.type === "file_diff") {
-      const relPath = event.data.path;
-      const diff = { before: event.data.before, after: event.data.after, deleted: event.data.deleted, created: event.data.created };
-      storeFileDiff(relPath, diff.before, diff.after, diff.deleted);
-      if (!assistantMsg.turnFileDiffs) assistantMsg.turnFileDiffs = {};
-      assistantMsg.turnFileDiffs[relPath] = diff;
-      const normalizedPath = relPath.replace(/\\/g, "/");
-      const writeStep = [...(assistantMsg.tools || [])].reverse().find((tool) => {
-        if (tool.name !== "write_file") return false;
-        const toolPath = String(tool.args?.path ?? tool.detail.split(" · ")[0] ?? "").replace(/\\/g, "/");
-        return toolPath === normalizedPath;
-      });
-      if (writeStep) {
-        writeStep.lineDelta = computeLineDelta(diff.before, diff.after, diff.created);
-      }
-      patchAssistantMsg(msgId, {
-        turnFileDiffs: { ...assistantMsg.turnFileDiffs },
-        tools: assistantMsg.tools ? [...assistantMsg.tools] : undefined,
-      });
-      void syncEditorAfterAgentFileChange(relPath, diff);
-      void scrollChatToBottom();
-      return;
-    }
-
-    if (event.type === "tool_end") {
-      const step = assistantMsg.tools?.find((t) => t.id === event.data.id);
-      if (step) {
-        step.running = false;
-        step.ok = event.data.ok;
-        step.summary = event.data.summary;
-        if (event.data.result) {
-          const raw = event.data.result;
-          step.fullResult =
-            raw.length > MAX_TOOL_FULL_RESULT_CHARS
-              ? `${raw.slice(0, MAX_TOOL_FULL_RESULT_CHARS)}…`
-              : raw;
-        }
-      }
-      if (event.data.result) {
-        const proposal = parseMemoryProposalToolResult(event.data.result);
-        if (proposal) onMemoryProposal?.(msgId, proposal);
-        const skillProposal = parseSkillProposalToolResult(event.data.result);
-        if (skillProposal) onSkillProposal?.(msgId, skillProposal);
-      }
-      const pending = assistantMsg.tools?.some((t) => t.running);
-      setAgentStatus(sessionId, assistantMsg, pending ? "executing_tools" : "summarizing_tools", {
-        turn: assistantMsg.agentTurn,
-        maxTurns: assistantMsg.agentMaxTurns,
-      });
-      if (shouldMinimizeRunUiPatch(assistantMsg)) {
-        scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
-        return;
-      }
-      patchAssistantMsg(msgId, {
-        tools: assistantMsg.tools ? [...assistantMsg.tools] : undefined,
-        statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
-      });
-      if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
-      void scrollChatToBottom();
-      return;
-    }
-
-    if (event.type === "message_delta") {
-      const delta = event.data.delta || "";
-      if (!delta) return;
-      const run = runManager.get(sessionId);
-      const waitPhases = new Set(["waiting_model", "sending_request", "retrying_model"]);
-      if (run && waitPhases.has(run.live.phase)) {
-        setAgentStatus(sessionId, assistantMsg, "streaming_model", {
-          turn: assistantMsg.agentTurn,
-          maxTurns: assistantMsg.agentMaxTurns,
-          model: assistantMsg.agentModel,
-          streamChars: (assistantMsg.streamChars || 0) + delta.length,
-        });
-        if (!shouldMinimizeRunUiPatch(assistantMsg)) {
-          patchAssistantMsg(msgId, {
-            streamChars: assistantMsg.streamChars,
-          });
-        }
-      }
-      enqueueStreamDelta(msgId, assistantMsg, delta);
-      return;
-    }
-
-    if (event.type === "message") {
-      clearStreamDeltaBuffer();
-      const cleanText = stripTextToolCallMarkup(stripToolSummaryFromAssistantContent(event.data.text));
-      const minimizing = shouldMinimizeRunUiPatch(assistantMsg);
-      if (cleanText) {
-        assistantMsg.content = mergeAssistantTurnText(assistantMsg.content || "", cleanText);
-      }
-      if (minimizing) {
-        schedulePersistDuringRun(sessionId);
-        scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
-        return;
-      }
-      patchAssistantMsg(msgId, {
-        content: assistantMsg.content,
-      });
-      schedulePersistDuringRun(sessionId);
-      void scrollChatToBottom();
-      return;
-    }
-
-    if (event.type === "error") {
-      if (isRunVisible(sessionId)) clearStreamDeltaBuffer();
-      planExecutionActive.value = false;
-      if (trySilentContinue(sessionId, assistantMsg, event.data.message)) {
-        runManager.setAbortHandle(sessionId, null);
-        return;
-      }
-      applyRecoverableAgentFailure(assistantMsg, event.data.message);
-      finishRunSession(sessionId);
-      maybePersistChat(sessionId);
-      maybeScrollChat(sessionId);
-
-      const recoverable = isRecoverableAgentError(event.data.message);
-      if (!recoverable && pendingPromptQueue.value.length && isRunVisible(sessionId)) {
-        dequeuePendingPromptAndRun();
-      }
-      return;
-    }
-
-    if (event.type === "done") {
-      if (isRunVisible(sessionId)) clearStreamDeltaBuffer();
-      planExecutionActive.value = false;
-      runManager.setAbortHandle(sessionId, null);
-      clearPendingAgentRun();
-      flushMinimizedRunUiPatch(sessionId, msgId, assistantMsg);
-
-      if (assistantMsg.agentFailed) {
-        finishRunSession(sessionId);
-        const completedTurns = resolveCompletedTurns(event.data.turns, assistantMsg);
-        if (!assistantMsg.totalTurns) assistantMsg.totalTurns = completedTurns;
-        patchAssistantMsg(msgId, {
-          totalTurns: assistantMsg.totalTurns,
-          ...assistantTransientUiClearPatch(),
-          ...syncRoundGroupsPatch(assistantMsg),
-        });
-        persistChatNow();
-        void scrollChatToBottom();
-        if (pendingPromptQueue.value.length) {
-        dequeuePendingPromptAndRun();
-        }
-        return;
-      }
-
-      const completedTurns = resolveCompletedTurns(event.data.turns, assistantMsg);
-      const wasAborted = !!assistantMsg.agentAborted;
-
-      mergeDeferredCaptureIntoMsg(sessionId, assistantMsg);
-
-      if ((assistantMsg.chatMode === "ask" || assistantMsg.chatMode === "explore") && !wasAborted) {
-        assistantMsg.totalTurns = completedTurns;
-        if (projectPath.value.trim()) {
-          updateAgentRunSessionStatus(sessionId, "completed");
-        }
-        assistantMsg.writtenFiles = event.data.writtenFiles?.length ? [...event.data.writtenFiles] : undefined;
-        assistantMsg.content = applySuggestionsToAssistantContent(
-          assistantMsg,
-          finalizeAssistantBubbleContent({
-            ...assistantMsg,
-            wasAborted: false,
-            writtenFiles: assistantMsg.writtenFiles,
-            agentFailed: false,
-          }),
-        );
-        assistantMsg.activityExpanded = false;
-        stopAgentUiTick();
-        clearPendingAgentEvents();
-        finishRunSession(sessionId);
-        patchAssistantMsg(msgId, {
-          ...assistantTransientUiClearPatch(),
-          activityExpanded: assistantMsg.activityExpanded,
-          content: assistantMsg.content,
-          totalTurns: assistantMsg.totalTurns,
-          writtenFiles: assistantMsg.writtenFiles,
-        });
-        window.setTimeout(() => {
-          persistChatNow(undefined, { flushStore: true, sessionId });
-          void scrollChatToBottom();
-          onAgentRunSettled?.(assistantMsg);
-        }, 0);
-        if (pendingPromptQueue.value.length) {
-          dequeuePendingPromptAndRun();
-        }
-        return;
-      }
-      
-      // Update session status to completed if agent completed successfully
-      if (!wasAborted && !assistantMsg.agentFailed && projectPath.value.trim()) {
-        updateAgentRunSessionStatus(sessionId, "completed");
-      }
-      const hasRunningTools = assistantMsg.tools?.some((t) => t.running);
-      const hadProgress = hasRecoverableAgentProgress(assistantMsg);
-      const incompleteRun =
-        !wasAborted &&
-        hadProgress &&
-        (hasRunningTools || (completedTurns === 0 && event.data.turns === 0));
-      const maxTurnsExhausted =
-        !wasAborted &&
-        !assistantMsg.agentFailed &&
-        isAgentMaxTurnsExhausted(assistantMsg, completedTurns);
-
-      // 自动续跑：模型输出被截断时静默继续
-      if (event.data.truncated && !wasAborted && !assistantMsg.agentFailed) {
-        const continueCount = assistantMsg.agentContinueCount ?? 0;
-        const maxContinues = AGENT_SILENT_CONTINUE_MAX;
-        const truncatedNotice = `回复内容较长，正在自动补充完成（第 ${continueCount + 1}/${maxContinues} 次）…`;
-        if (trySilentContinue(sessionId, assistantMsg, truncatedNotice)) {
-          if (!assistantMsg.totalTurns) {
-            assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
-          }
-          patchAssistantMsg(msgId, {
-            totalTurns: assistantMsg.totalTurns,
-            ...syncRoundGroupsPatch(assistantMsg),
-          });
-          schedulePersistDuringRun(sessionId);
-          void scrollChatToBottom();
-          return;
-        }
-      }
-
-      if (incompleteRun) {
-        if (trySilentContinue(sessionId, assistantMsg, "连接中断（运行未完成）")) {
-          if (!assistantMsg.totalTurns) {
-            assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
-          }
-          patchAssistantMsg(msgId, {
-            totalTurns: assistantMsg.totalTurns,
-            ...syncRoundGroupsPatch(assistantMsg),
-          });
-          schedulePersistDuringRun(sessionId);
-          persistAgentRunSession(sessionId);
-          void scrollChatToBottom();
-          return;
-        }
-        const continueBefore = assistantMsg.agentContinueCount ?? 0;
-        handleRecoverableInterruption(sessionId, assistantMsg, "连接中断（运行未完成）", { logStatus: true });
-        if ((assistantMsg.agentContinueCount ?? 0) > continueBefore) {
-          if (!assistantMsg.totalTurns) {
-            assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
-          }
-          patchAssistantMsg(msgId, {
-            totalTurns: assistantMsg.totalTurns,
-            ...syncRoundGroupsPatch(assistantMsg),
-          });
-          schedulePersistDuringRun(sessionId);
-          persistAgentRunSession(sessionId);
-          void scrollChatToBottom();
-          return;
-        }
-        finishRunSession(sessionId);
-        if (!assistantMsg.totalTurns) {
-          assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
-        }
-        patchAssistantMsg(msgId, {
-          totalTurns: assistantMsg.totalTurns,
-          ...assistantTransientUiClearPatch(),
-          ...syncRoundGroupsPatch(assistantMsg),
-        });
-        persistChatNow();
-        void scrollChatToBottom();
-        if (pendingPromptQueue.value.length) {
-        dequeuePendingPromptAndRun();
-        }
-        return;
-      }
-
-      if (maxTurnsExhausted) {
-        const reason = buildAgentMaxTurnsExhaustedMessage(assistantMsg.agentMaxTurns ?? completedTurns);
-        if (trySilentContinue(sessionId, assistantMsg, reason)) {
-          assistantMsg.totalTurns = completedTurns;
-          patchAssistantMsg(msgId, { totalTurns: completedTurns, ...syncRoundGroupsPatch(assistantMsg) });
-          schedulePersistDuringRun(sessionId);
-          persistAgentRunSession(sessionId);
-          void scrollChatToBottom();
-          return;
-        }
-        const continueBefore = assistantMsg.agentContinueCount ?? 0;
-        handleRecoverableInterruption(sessionId, assistantMsg, reason, { logStatus: true });
-        if ((assistantMsg.agentContinueCount ?? 0) > continueBefore) {
-          assistantMsg.totalTurns = completedTurns;
-          patchAssistantMsg(msgId, { totalTurns: completedTurns, ...syncRoundGroupsPatch(assistantMsg) });
-          schedulePersistDuringRun(sessionId);
-          persistAgentRunSession(sessionId);
-          void scrollChatToBottom();
-          return;
-        }
-        finishRunSession(sessionId);
-        assistantMsg.totalTurns = completedTurns;
-        patchAssistantMsg(msgId, { totalTurns: completedTurns, ...syncRoundGroupsPatch(assistantMsg) });
-        persistChatNow();
-        void scrollChatToBottom();
-        if (pendingPromptQueue.value.length) {
-        dequeuePendingPromptAndRun();
-        }
-        return;
-      }
-
-      const spuriousDoneAfterInterrupt =
-        !wasAborted &&
-        event.data.turns === 0 &&
-        hadProgress &&
-        !hasRunningTools &&
-        !hasAgentFinalAnswer(assistantMsg);
-
-      if (spuriousDoneAfterInterrupt) {
-        if (trySilentContinue(sessionId, assistantMsg, "连接中断（运行未完成）")) {
-          if (!assistantMsg.totalTurns) {
-            assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
-          }
-          patchAssistantMsg(msgId, {
-            totalTurns: assistantMsg.totalTurns,
-            ...syncRoundGroupsPatch(assistantMsg),
-          });
-          schedulePersistDuringRun(sessionId);
-          persistAgentRunSession(sessionId);
-          void scrollChatToBottom();
-          return;
-        }
-        handleRecoverableInterruption(sessionId, assistantMsg, "连接中断（运行未完成）", { logStatus: true });
-        finishRunSession(sessionId);
-        if (!assistantMsg.totalTurns) {
-          assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
-        }
-        patchAssistantMsg(msgId, {
-          totalTurns: assistantMsg.totalTurns,
-          agentFailed: assistantMsg.agentFailed,
-          agentRecoverable: assistantMsg.agentRecoverable,
-          agentFailureReason: assistantMsg.agentFailureReason,
-          agentRecoveryDismissed: assistantMsg.agentRecoveryDismissed,
-          content: assistantMsg.content,
-          statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
-          ...syncRoundGroupsPatch(assistantMsg),
-        });
-        persistChatNow();
-        void scrollChatToBottom();
-        return;
-      }
-
-      assistantMsg.totalTurns = completedTurns;
-      const continueCount = assistantMsg.agentContinueCount ?? 0;
-      appendStatusLog(
-        assistantMsg,
-        wasAborted
-          ? `已停止（共 ${completedTurns} 轮）`
-          : continueCount > 0
-            ? `✅ 完成（共 ${completedTurns} 轮，含 ${continueCount} 次自动续跑）`
-            : `完成（共 ${completedTurns} 轮）`,
-      );
-
-      commitAgentFinalAnswerIfMissing(assistantMsg, completedTurns, assistantMsg.agentMaxTurns);
-
-      if (!wasAborted && hadProgress && !hasAgentFinalAnswer(assistantMsg)) {
-        handleRecoverableInterruption(sessionId, assistantMsg, "运行中断（未生成最终回复）", {
-          logStatus: true,
-        });
-        assistantMsg.content = resolveAgentFailureBubbleContent(assistantMsg);
-        finishRunSession(sessionId);
-        patchAssistantMsg(msgId, {
-          content: assistantMsg.content,
-          agentFailed: assistantMsg.agentFailed,
-          agentRecoverable: assistantMsg.agentRecoverable,
-          agentFailureReason: assistantMsg.agentFailureReason,
-          agentFailureDetail: assistantMsg.agentFailureDetail,
-          agentRecoveryDismissed: assistantMsg.agentRecoveryDismissed,
-          totalTurns: assistantMsg.totalTurns,
-          statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
-          activityExpanded: true,
-          ...syncRoundGroupsPatch(assistantMsg),
-        });
-        persistChatNow(undefined, { flushStore: true });
-        void scrollChatToBottom();
-        return;
-      }
-
-      const turnFileDiffPaths = assistantMsg.turnFileDiffs
-        ? Object.keys(assistantMsg.turnFileDiffs)
-        : [];
-      const fileAction = resolveAgentDoneFileAction({
-        chatMode: assistantMsg.chatMode ?? "build",
-        wasAborted,
-        serverPendingFiles: event.data.pendingFiles || [],
-        serverWrittenFiles: event.data.writtenFiles || [],
-        turnFileDiffPaths,
-      });
-
-      assistantMsg.pendingApproval = fileAction.pendingApproval;
-      assistantMsg.writtenFiles = fileAction.writtenFiles;
-
-      assistantMsg.content = applySuggestionsToAssistantContent(
-        assistantMsg,
-        finalizeAssistantBubbleContent({
-          ...assistantMsg,
-          wasAborted,
-          writtenFiles: fileAction.writtenFiles,
-          agentFailed: false,
-        }),
-      );
-
-      const offerPartialResume = shouldOfferPartialRunResume({
-        wasAborted,
-        writtenFiles: fileAction.writtenFiles,
-        msg: assistantMsg,
-      });
-
-      if (offerPartialResume) {
-        assistantMsg.agentFailed = true;
-        assistantMsg.agentRecoverable = true;
-        assistantMsg.agentFailureReason = PARTIAL_RUN_RESUME_REASON;
-        assistantMsg.agentRecoveryDismissed = false;
-      } else {
-        assistantMsg.agentFailed = false;
-        assistantMsg.agentRecoverable = false;
-        assistantMsg.agentFailureReason = undefined;
-        assistantMsg.agentRecoveryDismissed = true;
-        assistantMsg.agentContinueCount = undefined;
-      }
-
-      assistantMsg.activityExpanded = offerPartialResume || wasAborted
-        ? true
-        : false;
-
-      // End the run before patching final content so the UI does not render
-      // live-preview text while msg.content already holds the finalized answer.
-      finishRunSession(sessionId);
-
-      patchAssistantMsg(msgId, {
-        ...assistantTransientUiClearPatch(),
-        activityExpanded: assistantMsg.activityExpanded,
-        content: assistantMsg.content,
-        agentSuggestions: assistantMsg.agentSuggestions,
-        totalTurns: assistantMsg.totalTurns,
-        statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
-        ...syncRoundGroupsPatch(assistantMsg),
-        writtenFiles: assistantMsg.writtenFiles,
-        pendingApproval: assistantMsg.pendingApproval,
-        agentAborted: assistantMsg.agentAborted || undefined,
-        agentFailed: offerPartialResume ? true : undefined,
-        agentRecoverable: offerPartialResume ? true : undefined,
-        agentFailureReason: offerPartialResume ? PARTIAL_RUN_RESUME_REASON : undefined,
-        agentFailureDetail: undefined,
-        agentRecoveryDismissed: offerPartialResume ? false : true,
-        agentContinueCount: offerPartialResume ? assistantMsg.agentContinueCount : undefined,
-      });
-      persistChatNow(undefined, { flushStore: true });
-
-      if (fileAction.writtenFiles?.length) {
-        if (assistantMsg.turnFileDiffs) {
-          clearTurnFileDiffsFromStore(assistantMsg.turnFileDiffs);
-        }
-        void handleAgentWrittenFiles(fileAction.writtenFiles);
-      }
-      void scrollChatToBottom();
-
-      onAgentRunSettled?.(assistantMsg);
-
-      if (pendingPromptQueue.value.length) {
-        dequeuePendingPromptAndRun();
-      }
-    }
+    if (isAgentSseProgressEvent(event.type)) touchAgentProgress(sessionId);
+    const handler = agentEventHandlers.get(event.type);
+    if (handler) handler(event, assistantMsg, sessionId, msgId);
   }
 
   function interruptSessionRun(sessionId: string, options?: { logStatus?: boolean; reason?: string }) {
