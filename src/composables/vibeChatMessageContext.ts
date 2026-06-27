@@ -57,6 +57,8 @@ export interface VibeChatMessageContext {
   messageDisplayContent: (msg: VibeChatMessageItem) => string;
   resolveLiveAgentSource?: (msg: VibeChatMessageItem) => import("../services/agentMessageDisplay").LiveAgentAnswerSource;
   jumpChainToLatest: (messageId: string) => void;
+  bindStatusLogScroll: (el: HTMLElement | null, messageId: string) => void;
+  onStatusLogScroll: (messageId: string) => void;
   userMessageImages: (msg: VibeChatMessageItem) => string[];
   shouldShowMessageBubble: (msg: VibeChatMessageItem, hasActivity: boolean) => boolean;
   handleAiOptionSelect: (

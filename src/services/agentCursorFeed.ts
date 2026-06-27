@@ -198,9 +198,8 @@ export function layoutCursorFeedBlocks(
   items: CursorFeedItem[],
   options?: { keepVisible?: number; collapseAfter?: number; compactWhileRunning?: boolean },
 ): CursorFeedProcessBlock[] {
-  const compactWhileRunning = options?.compactWhileRunning ?? false;
-  const keepVisible = compactWhileRunning ? 1 : (options?.keepVisible ?? DEFAULT_KEEP_VISIBLE);
-  const collapseAfter = compactWhileRunning ? 2 : (options?.collapseAfter ?? DEFAULT_COLLAPSE_AFTER);
+  const keepVisible = options?.keepVisible ?? DEFAULT_KEEP_VISIBLE;
+  const collapseAfter = options?.collapseAfter ?? DEFAULT_COLLAPSE_AFTER;
   const blocks: CursorFeedProcessBlock[] = [];
   let actionBatch: Extract<CursorFeedItem, { kind: "action" }>[] = [];
   let batchIndex = 0;

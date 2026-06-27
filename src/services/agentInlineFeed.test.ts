@@ -3,6 +3,7 @@ import {
   appendInlineAnswerBlock,
   buildInlineAgentFeed,
   collapseInlineFeedItems,
+  filterInlineTimelineItems,
   splitInlineFeedItems,
   summarizeInlineFeedProcess,
 } from "./agentInlineFeed";
@@ -175,6 +176,17 @@ describe("buildInlineAgentFeed", () => {
     expect(feed.items).toHaveLength(1);
     expect(feed.items[0]).toMatchObject({ kind: "text", variant: "answer", text: "仅答案" });
     expect(feed.toolCount).toBe(0);
+  });
+
+  it("filters tool-turn filler from the live timeline", () => {
+    const items: InlineFeedItem[] = [
+      { kind: "text", key: "n1", text: "我先读文件。", variant: "narrative" },
+      { kind: "tool", key: "t1", step: readStep("t1") },
+      { kind: "text", key: "n2", text: "直接 patch：", variant: "narrative" },
+    ];
+    const filtered = filterInlineTimelineItems(items);
+    expect(filtered.map((item) => item.kind)).toEqual(["text", "tool"]);
+    expect(filtered[0]).toMatchObject({ text: "我先读文件。" });
   });
 
   it("splits process and answer items", () => {

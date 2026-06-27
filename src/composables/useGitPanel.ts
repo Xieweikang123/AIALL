@@ -388,11 +388,8 @@ export function useGitPanel(
         void refreshGitRemotes();
         void refreshGitStashes();
         if (gitLogOpen.value) {
-          const logResult = await fetchGitLog(pathAtStart, gitLogCount.value, gitLogSearchQuery.value);
+          await refreshGitLogIfOpen(pathAtStart);
           if (token !== gitStatusRefreshToken || projectPath() !== pathAtStart) return;
-          if (logResult.ok) {
-            gitLogEntries.value = logResult.entries;
-          }
         }
       }
     } catch (e) {
@@ -403,6 +400,19 @@ export function useGitPanel(
       if (token === gitStatusRefreshToken && projectPath() === pathAtStart) {
         gitLoading.value = false;
       }
+    }
+  }
+
+  async function refreshGitLogIfOpen(pathOverride?: string) {
+    if (!gitLogOpen.value || !projectOpened() || !gitIsRepo.value) return;
+    const path = pathOverride ?? projectPath();
+    try {
+      const logResult = await fetchGitLog(path, gitLogCount.value, gitLogSearchQuery.value);
+      if (logResult.ok && projectPath() === path) {
+        gitLogEntries.value = logResult.entries;
+      }
+    } catch {
+      // ignore
     }
   }
 
@@ -468,10 +478,10 @@ export function useGitPanel(
         await refreshGitStatus();
         return;
       }
-      await refreshGitStatus({ showLoading: false });
+      await refreshGitStatus({ showLoading: false, force: true });
     } catch (e) {
       gitError.value = e instanceof Error ? e.message : "提交失败";
-      await refreshGitStatus();
+      await refreshGitStatus({ force: true });
       onRefreshTree?.();
     } finally {
       gitCommitting.value = false;
@@ -1159,7 +1169,7 @@ export function useGitPanel(
         await refreshGitStatus();
         return;
       }
-      await refreshGitStatus({ showLoading: false });
+      await refreshGitStatus({ showLoading: false, force: true });
 
       gitAiPushStep.value = "推送中…";
       await new Promise((r) => setTimeout(r, 100));
@@ -1169,7 +1179,10 @@ export function useGitPanel(
         await refreshGitRemotes();
         return;
       }
+      await refreshGitStatus({ showLoading: false, force: true });
       await refreshGitRemotes();
+      await refreshGitLogIfOpen();
+      await refreshGitAheadCommits();
 
       gitAiPushStep.value = "完成 ✓";
       gitCommitMessage.value = "";
@@ -1251,6 +1264,7 @@ export function useGitPanel(
       }
       await refreshGitStatus();
       await refreshGitRemotes();
+      await refreshGitLogIfOpen();
     } catch (e) {
       gitError.value = e instanceof Error ? e.message : "Pull 失败";
     } finally {
@@ -1269,6 +1283,8 @@ export function useGitPanel(
         return;
       }
       await refreshGitRemotes();
+      await refreshGitLogIfOpen();
+      await refreshGitAheadCommits();
     } catch (e) {
       gitError.value = e instanceof Error ? e.message : "Push 失败";
     } finally {

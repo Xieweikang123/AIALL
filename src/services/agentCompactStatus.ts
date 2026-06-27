@@ -9,6 +9,7 @@ import {
   getRunningFeedAction,
   type CursorAgentTimeline,
   type CursorFeedItem,
+  type CursorFeedProcessBlock,
 } from "./agentCursorFeed";
 import {
   filterDuplicateFeedThoughts,
@@ -129,9 +130,8 @@ export function buildUnifiedAgentTimeline(
   const detailed = input.activityDetailed;
   const compact = input.compactFeed;
   const timeline = buildCursorAgentTimeline(items, input.answerPreview, {
-    keepVisible: compact ? 3 : detailed ? 8 : 4,
-    collapseAfter: compact ? 4 : detailed ? 10 : 5,
-    compactWhileRunning: compact,
+    keepVisible: compact ? 2 : detailed ? 8 : input.isRunning ? 3 : 4,
+    collapseAfter: compact ? 4 : detailed ? 10 : input.isRunning ? 4 : 5,
     streaming: input.answerStreaming,
   });
 
@@ -147,6 +147,33 @@ export function buildUnifiedAgentTimeline(
 
   const blocks = timeline.blocks.filter((block) => block.kind !== "thought");
   return { ...timeline, blocks };
+}
+
+export function summarizeCursorProcessBlocks(
+  blocks: CursorFeedProcessBlock[],
+  toolCount: number,
+  isRunning: boolean,
+): string {
+  const tools: AgentRoundTool[] = [];
+  for (const block of blocks) {
+    if (block.kind === "actions") {
+      for (const item of [...block.collapsed, ...block.visible]) {
+        tools.push(item.step);
+      }
+    }
+  }
+  const count = toolCount || tools.length;
+  if (tools.length) {
+    const stats = computeExplorationStats(tools);
+    const body = formatExplorationSummary(stats, isRunning).replace(/^已完成 · /, "");
+    if (isRunning) return body;
+    return count > 0 ? `${count} 步 · ${body}` : body;
+  }
+  const thoughtCount = blocks.filter((block) => block.kind === "thought").length;
+  if (thoughtCount) {
+    return isRunning ? "思考中…" : `${thoughtCount} 段推理`;
+  }
+  return isRunning ? "准备中…" : count > 0 ? `${count} 步` : "查看步骤";
 }
 
 /** One footer line while running — avoids repeating tool-card details. */

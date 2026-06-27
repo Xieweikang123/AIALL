@@ -593,7 +593,35 @@ describe("resolveLatestAgentProgressNarrative", () => {
 });
 
 describe("resolveAgentTimelineAnswer", () => {
-  it("streams live preview while running without active tools", () => {
+  it("streams live preview only during streaming_model", () => {
+    expect(
+      resolveAgentTimelineAnswer(
+        {
+          agentTurn: 1,
+          agentPhase: "streaming_model",
+          content: "流式片段",
+          roundGroups: [{ turn: 1, narrative: "流式片段", modelSteps: [], toolIds: [] }],
+        },
+        "",
+        true,
+        false,
+      ),
+    ).toBe("流式片段");
+  });
+
+  it("does not lift tool-turn narrative into the answer slot while exploring", () => {
+    expect(
+      resolveAgentTimelineAnswer(
+        {
+          agentTurn: 1,
+          agentPhase: "waiting_model",
+          roundGroups: [{ turn: 1, narrative: "直接 patch：", modelSteps: [], toolIds: [] }],
+        },
+        "",
+        true,
+        false,
+      ),
+    ).toBe("");
     expect(
       resolveAgentTimelineAnswer(
         {
@@ -604,15 +632,17 @@ describe("resolveAgentTimelineAnswer", () => {
         true,
         false,
       ),
-    ).toBe("流式片段");
+    ).toBe("");
   });
 
-  it("keeps live preview while a tool is running to avoid UI flicker", () => {
+  it("keeps streamed msg.content visible during tool execution", () => {
     expect(
       resolveAgentTimelineAnswer(
         {
           agentTurn: 1,
-          roundGroups: [{ turn: 1, narrative: "流式片段", modelSteps: [], toolIds: [] }],
+          agentPhase: "planning_tools",
+          content: "流式片段",
+          roundGroups: [{ turn: 1, narrative: "读文件中", modelSteps: [], toolIds: ["t1"] }],
         },
         "",
         true,
@@ -635,7 +665,7 @@ describe("resolveAgentTimelineAnswer", () => {
     ).toBe("## 完整回答");
   });
 
-  it("marks streaming while live preview is visible", () => {
+  it("does not mark streaming for live narrative preview while waiting on tools", () => {
     expect(
       isAgentTimelineAnswerStreaming(
         {
@@ -645,17 +675,18 @@ describe("resolveAgentTimelineAnswer", () => {
         true,
         false,
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       isAgentTimelineAnswerStreaming(
         {
           agentTurn: 1,
+          agentPhase: "waiting_model",
           roundGroups: [{ turn: 1, narrative: "流式片段", modelSteps: [], toolIds: [] }],
         },
         true,
-        true,
+        false,
       ),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("does not show progress fallback in timeline answer slot while running", () => {

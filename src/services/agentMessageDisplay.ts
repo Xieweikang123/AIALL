@@ -66,6 +66,7 @@ export function isAgentToolTurnNarration(text: string): boolean {
   const trimmed = normalizeBubbleText(text);
   if (!trimmed) return false;
   if (isEnglishToolNarration(trimmed)) return true;
+  if (/^直接\s+[\w.\u4e00-\u9fff]{1,16}[：:]\s*$/u.test(trimmed)) return true;
   return CHINESE_TOOL_NARRATION_RE.test(trimmed);
 }
 
@@ -429,13 +430,19 @@ export function resolveAgentTimelineAnswer(
   _hasRunningTool = false,
 ): string {
   if (!isRunning) return completedContent;
-  const live = resolveLiveAgentAnswerText(msg);
   if (hasAgentFinalAnswer(msg)) {
     const finalized = resolveCompletedAgentBubbleContent(msg);
+    const live = resolveLiveAgentAnswerText(msg);
     const merged = pickLongestSubstantiveAnswer(finalized, live, msg.content || "");
     if (merged) return merged;
   }
-  return live || pickLongestSubstantiveAnswer(msg.content || "") || "";
+  if (msg.agentPhase === "streaming_model") {
+    const live = resolveLiveAgentAnswerText(msg);
+    return live || normalizeBubbleText(msg.content || "") || "";
+  }
+  // Cursor-like: tool/wait phases keep the answer slot for stream deltas only,
+  // not turn narratives such as "直接 patch：".
+  return normalizeBubbleText(msg.content || "") || "";
 }
 
 export function isAgentTimelineAnswerStreaming(
@@ -445,7 +452,8 @@ export function isAgentTimelineAnswerStreaming(
 ): boolean {
   if (!isRunning) return false;
   if (msg.agentPhase === "streaming_model") return true;
-  if (Boolean(resolveLiveAgentAnswerText(msg).trim())) return true;
+  // Live narrative preview during tool/wait phases is not model streaming — avoid
+  // ChatMarkdown minHeight lock that leaves a large blank gap above tool steps.
   return hasRunningTool && Boolean(normalizeBubbleText(msg.content || ""));
 }
 

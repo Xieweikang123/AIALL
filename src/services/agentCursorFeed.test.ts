@@ -15,7 +15,7 @@ import {
   getRecentFeedActions,
   shouldUseCompactAgentFeed,
 } from "./agentCursorFeed";
-import { buildUnifiedAgentTimeline, buildAgentLiveFooterStatus } from "./agentCompactStatus";
+import { buildUnifiedAgentTimeline, buildAgentLiveFooterStatus, summarizeCursorProcessBlocks } from "./agentCompactStatus";
 import { formatToolMeta } from "../utils/vibeHelpers";
 import type { CursorFeedItem } from "./agentCursorFeed";
 import type { AgentRoundGroupView } from "./agentRoundGroups";
@@ -477,5 +477,84 @@ describe("agentCursorFeed", () => {
         hasActionBlocks: true,
       }),
     ).toBe("等待模型响应… · 第 2/24 轮 · 已等待 0s");
+  });
+
+  it("keeps three recent actions visible while running without compact feed", () => {
+    const groups: AgentRoundGroupView[] = [{
+      turn: 1,
+      modelSteps: [],
+      toolIds: Array.from({ length: 8 }, (_, index) => `t${index}`),
+      narrative: "",
+      tools: Array.from({ length: 8 }, (_, index) => ({
+        id: `t${index}`,
+        turn: 1,
+        name: "read_file",
+        icon: "📄",
+        title: "读取",
+        detail: `file-${index}.ts`,
+        label: "读取",
+        summary: "ok",
+        ok: true,
+        args: { path: `file-${index}.ts` },
+      })),
+    }];
+
+    const timeline = buildUnifiedAgentTimeline({
+      roundGroups: groups,
+      answerPreview: "",
+      answerStreaming: false,
+      isRunning: true,
+      activityDetailed: false,
+      compactFeed: false,
+    });
+
+    const actions = timeline.processBlocks.find((block) => block.kind === "actions");
+    expect(actions?.kind).toBe("actions");
+    if (actions?.kind !== "actions") return;
+    expect(actions.visible).toHaveLength(3);
+    expect(actions.collapsed).toHaveLength(5);
+  });
+
+  it("summarizes cursor process blocks for completed details", () => {
+    const summary = summarizeCursorProcessBlocks(
+      [{
+        kind: "actions",
+        key: "actions-0",
+        collapsed: [],
+        visible: [{
+          kind: "action",
+          key: "a-1",
+          step: {
+            id: "a-1",
+            turn: 1,
+            name: "grep",
+            icon: "🔍",
+            title: "搜索",
+            detail: "foo",
+            label: "搜索",
+            summary: "ok",
+            ok: true,
+          },
+        }],
+      }],
+      1,
+      false,
+    );
+    expect(summary).toContain("1 步");
+    expect(summary).toContain("搜索");
+  });
+
+  it("includes status blocks in unified timeline before answer", () => {
+    const timeline = buildUnifiedAgentTimeline({
+      roundGroups: [],
+      answerPreview: "",
+      answerStreaming: false,
+      isRunning: true,
+      activityDetailed: false,
+      compactFeed: false,
+      agentPhase: "waiting_model",
+    });
+
+    expect(timeline.processBlocks.some((block) => block.kind === "status")).toBe(true);
   });
 });

@@ -1,12 +1,13 @@
 import {
+  thoughtDuplicatesBubble,
+  isAgentToolTurnNarration,
+} from "./agentMessageDisplay";
+import {
   computeExplorationStats,
   formatCollapsedStepsSummary,
   formatExplorationSummary,
   type CursorFeedItem,
 } from "./agentCursorFeed";
-import {
-  thoughtDuplicatesBubble,
-} from "./agentMessageDisplay";
 import type { AgentRoundTool } from "./agentRoundGroups";
 import { buildFilteredCursorAgentFeedItems, type UnifiedAgentTimelineInput } from "./agentCompactStatus";
 
@@ -73,7 +74,29 @@ export function resolveInlineFeedCollapseOptions(
   if (input.compactFeed && input.isRunning) {
     return { collapseAfter: 4, keepVisible: 3, disabled: false };
   }
+  if (input.isRunning) {
+    return { collapseAfter: 6, keepVisible: 5, disabled: false };
+  }
   return { collapseAfter: DEFAULT_COLLAPSE_AFTER, keepVisible: DEFAULT_KEEP_VISIBLE, disabled: false };
+}
+
+/** Drop tool-turn filler and narratives already shown in the answer slot. */
+export function filterInlineTimelineItems(
+  items: InlineFeedItem[],
+  options?: { answerPreview?: string; hideNarratives?: boolean },
+): InlineFeedItem[] {
+  if (options?.hideNarratives) {
+    return items.filter((item) => item.kind !== "text" || item.variant !== "narrative");
+  }
+  const answerPreview = options?.answerPreview?.trim() ?? "";
+  return items.filter((item) => {
+    if (item.kind !== "text" || item.variant !== "narrative") return true;
+    const text = item.text.trim();
+    if (!text) return false;
+    if (isAgentToolTurnNarration(text)) return false;
+    if (answerPreview && thoughtDuplicatesBubble(text, answerPreview)) return false;
+    return true;
+  });
 }
 
 function isAnswerItem(item: InlineFeedItem): item is InlineFeedTextItem {
