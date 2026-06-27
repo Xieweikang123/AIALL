@@ -143,7 +143,8 @@ export function useProjectKnowledge(options: {
       knowledgeBody.value = result.body ?? stripKnowledgeFrontmatter(result.content ?? "");
       knowledgeDraft.value = knowledgeBody.value;
       knowledgeMeta.value = result.meta ?? {};
-      void loadKnowledgeChangedFiles();
+      // loadKnowledgeChangedFiles is triggered reactively by the watch below;
+      // no explicit call needed here to avoid double-fetching.
     } finally {
       knowledgeLoading.value = false;
     }
@@ -286,7 +287,11 @@ export function useProjectKnowledge(options: {
       const result = await saveProjectKnowledge(path, saveBody, {
         fromExplore: true,
         gitHead: ctx?.gitHead ?? (options.gitHead?.value?.trim() || knowledgeMeta.value.gitHead),
-        exploreRounds: (ctx?.baseExploreRounds ?? knowledgeMeta.value.exploreRounds ?? 0) + 1,
+        // Only increment exploreRounds when content actually changed.
+        exploreRounds:
+          saveBody.trim() !== priorBody.trim()
+            ? (ctx?.baseExploreRounds ?? knowledgeMeta.value.exploreRounds ?? 0) + 1
+            : (ctx?.baseExploreRounds ?? knowledgeMeta.value.exploreRounds ?? 0),
         charCount: saveBody.length,
       });
       if (result.ok) {

@@ -166,6 +166,10 @@
         </div>
       </div>
 
+      <p v-if="knowledgeStale" class="knowledge-stale-hint" role="status">
+        知识库基于提交 {{ shortGitRef(knowledgeMeta.gitHead!) }}，当前 {{ shortGitRef(currentGitHead!) }}，代码可能已变更
+      </p>
+
       <div
         v-if="showChangesCard"
         class="knowledge-changes-card"
@@ -178,7 +182,6 @@
             <template v-else>代码可能已变更</template>
           </p>
           <button
-            v-if="false"
             type="button"
             class="knowledge-btn knowledge-btn--accent knowledge-changes-action"
             :disabled="!exploreReady || exploreRun.running || knowledgeChangesLoading"
@@ -272,7 +275,6 @@
               <template v-else>代码可能已变更</template>
             </p>
             <button
-              v-if="false"
               type="button"
               class="knowledge-btn knowledge-btn--accent knowledge-changes-action"
               :disabled="!exploreReady || exploreRun.running || knowledgeChangesLoading"
@@ -601,7 +603,9 @@ const knowledgeStale = computed(() => {
   return Boolean(saved && current && saved !== current);
 });
 
-const showChangesCard = computed(() => false);
+const showChangesCard = computed(
+  () => props.hasKnowledge && props.knowledgeChangesAvailable && !props.exploreRun.running,
+);
 
 const shownChangedFiles = computed(
   () => (props.knowledgeChangedFiles ?? []).slice(0, KNOWLEDGE_CHANGES_LIST_MAX),
@@ -664,7 +668,14 @@ const depthOptions: Array<{ id: ExploreDepth; label: string; hint: string }> = [
   { id: "deep", label: "深入", hint: "24 轮" },
 ];
 
-const followUpChips = EXPLORE_QUICK_FOLLOWUP_CHIPS;
+/** Dynamic chips: prepend "补全未探索" when there are unexplored sections. */
+const followUpChips = computed(() => {
+  const base = [...EXPLORE_QUICK_FOLLOWUP_CHIPS];
+  if (unexploredSections.value.length > 0) {
+    return [`补全未探索（${unexploredSections.value.length}）`, ...base] as string[];
+  }
+  return base as string[];
+});
 
 const FOLLOWUP_STATUS_PREVIEW_MAX = 48;
 const QUOTED_EXCERPT_PREVIEW_MAX = 160;
@@ -752,6 +763,16 @@ const filteredTocSections = computed(() => {
   if (!q) return tocSections.value;
   return tocSections.value.filter((s) => s.title.toLowerCase().includes(q));
 });
+
+/** When search narrows results, auto-scroll body to the first matching section. */
+watch(
+  () => filteredTocSections.value,
+  (sections) => {
+    if (!searchQuery.value.trim()) return;
+    if (!sections.length) return;
+    void nextTick(() => scrollToSection(sections[0]!.id));
+  },
+);
 
 const showIncrementalLiveLayout = computed(
   () => props.exploreRun.running && props.hasKnowledge && !props.editing,
@@ -1196,7 +1217,11 @@ function submitFollowUp(text?: string) {
 }
 
 function submitFollowUpChip(chip: string) {
-  submitFollowUp(chip);
+  if (chip.startsWith("补全未探索")) {
+    fillUnexplored();
+  } else {
+    submitFollowUp(chip);
+  }
 }
 
 function fillUnexplored() {
