@@ -11,7 +11,7 @@
     "test": "vitest run",
     "agent:smoke": "tsx scripts/agent-smoke.ts",
     "agent:regression": "vitest run server/agentRegression.test.ts && tsx scripts/agent-regression.ts",
-    "agent:test-guards": "vitest run server/visionMessage.test.ts server/agentExplorationBudget.test.ts server/agentExploreGuard.test.ts server/vibeAgent.test.ts server/agentRegression.test.ts src/services/agentAuditRegression.test.ts",
+    "agent:test-guards": "vitest run src/services/agentOrchestrationGuard.test.ts server/visionMessage.test.ts server/agentExplorationBudget.test.ts server/agentExploreGuard.test.ts server/vibeAgent.test.ts server/agentRegression.test.ts src/services/agentAuditRegression.test.ts",
     "build:sidecar": "esbuild sidecar/main.ts --bundle --platform=node --format=cjs --outfile=sidecar/dist/main.cjs --packages=external",
     "build:tauri": "npm run build:sidecar && cross-env VITE_BACKEND_URL=http://127.0.0.1:37891 vue-tsc --noEmit && cross-env VITE_BACKEND_URL=http://127.0.0.1:37891 vite build",
     "build": "vue-tsc --noEmit && vite build",

@@ -45,13 +45,29 @@
 | `/icon-templates` | 录入任务栏/桌面截图模板，供 Chat 自动化匹配点击 |
 | `/ai-config` | 配置 API Key、模型、网页抓取代理等 |
 
+## Agent 编排分层
+
+编排代码分三层，修改前先确认自己动的是哪一层：
+
+| 层级 | 目录/文件 | 允许写什么 |
+|------|-----------|------------|
+| **通用分类器** | `src/orchestration/generic/`、`agentContinuation.ts`、`agentStructuralPatterns.ts`、`agentRunPolicy.ts` 等 | 仅消息**形态**（代码块、步骤结构、路径、句型）；禁止业务名词与静态个案修复话术 |
+| **通用机制** | `agentReplyAccuracy.ts`、`agentConsultativeTopics.ts`、`agentExplorationBudget.ts` 等 | 准确度/trace 契约；同分类器 guard |
+| **产品编排** | `src/orchestration/product/`、`visionMessage.ts`、`agentAskPrompt.ts`、`agentContextBuilder.ts`、`vibeAgent.ts` 等 | AIALL 模式（Ask/Build/Plan）、截图读图、会话审计；**可以**写产品语义，但仍禁止 `FilePanel` 等内部组件名 |
+
+路径清单见 `src/orchestration/orchestrationTiers.ts`；`agentOrchestrationGuard.test.ts` 按层扫描。
+
+用户意图已拆分：`userIntentClassifiers.ts`（分类） vs `userIntentHints.ts`（注入 prompt 的 hint）。
+
 ## Agent 编排与提示词（通用性）
 
-修改 Agent **编排 / 分类 / system prompt 分支**（如 `agentContinuation.ts`、`agentRunProfile.ts`、`vibeAgent.ts`）时：
+修改 **Tier 1 通用分类器**（如 `agentContinuation.ts`、`userIntentClassifiers.ts`）时：
 
 - **禁止**把具体功能、字段名、当前用户需求写进正则或 `PLAN_SIGNAL_*`（例：不要写 `粘贴图片`、`imageDataUrl` 等业务词）
 - **应使用**消息结构判断：代码块 / 明确步骤 + 目标文件路径 + 排除「是否需要我…」类征求确认
 - **测试**用通用 fixture（`foo.ts`、占位变量），不要用真实需求文案绑定分类器
+
+**Tier 3 产品编排**（截图流程、模式说明）允许产品语义；个案修复应走动态 `build*Hint`，勿写进全局 system prompt。
 
 完整约定见 Cursor 规则：`.cursor/rules/agent-orchestration.mdc`（`alwaysApply: true`）。
 
