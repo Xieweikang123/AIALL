@@ -111,3 +111,12 @@ AIALL 的 Vibe 会话文件**不在项目目录内**，存储在 AppData Roaming
 - **不要信任事件读到的"当前状态"**——mouseup 时 `getSelection()` 返回的不是 mouseup 造成的选区，而是 mouseup **之前**的残留；遇到"状态不对"先查这个值是谁、什么时候写入的
 - **抑制机制要精准**——用时间戳（自包含）优于状态标记（易漏清）；压制范围越窄副作用越少（如区分 `event.detail` 单击/多击）
 - **先测 edge case**——triple-click、快速拖拽等非常规操作是第一个要验证的，修交互 bug 时把所有触发路径过一遍再提交
+
+## 文件膨胀约束
+
+`src/composables/useAgentRun.ts` 已拆出 `useAgentChainScroll.ts`、`useAgentStreamPatch.ts` 两个子 composable，主文件负责 Agent 运行编排与 SSE 事件分发。
+
+- **新增 SSE 事件 handler**：一律加入 `handleAgentEvent` 的 `agentEventHandlers` 分发表，handler 实现为独立函数；禁止往 `handleAgentEvent` 主体内塞 if-else 分支
+- **新增流式/UI patch/滚动逻辑**：进对应的子 composable（`useAgentStreamPatch` / `useAgentChainScroll`），禁止内联回 `useAgentRun.ts`
+- **新增 stall/resume/autoResume 逻辑**：可与现有 `recoverAgentRunFromStall`、`trySilentContinue` 等 同处 `useAgentRun.ts`，但若该职责簇再增长，应抽新子 composable 而非继续堆叠
+- **修改前先确认层级**：纯展示/节流逻辑 → 子 composable；有状态编排（依赖 `runManager` + `assistantMsg` 双向变更）→ 主文件

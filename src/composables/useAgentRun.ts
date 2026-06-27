@@ -1,4 +1,4 @@
-import { ref, nextTick, reactive, type ComputedRef, type Ref } from "vue";
+import { ref, type ComputedRef, type Ref } from "vue";
 import { debugLog } from "../utils/debugLog";
 import {
   buildAgentPromptForProfile,
@@ -78,7 +78,6 @@ import {
   recordAgentRoundRequest,
   recordAgentRoundResponse,
   recordAgentRoundStatus,
-  recordAgentRoundStreamDelta,
   recordAgentRoundToolStart,
 } from "../services/agentRoundGroups";
 import { computeLineDelta } from "../services/agentCursorFeed";
@@ -88,7 +87,6 @@ import {
   hasAgentFinalAnswer,
   commitAgentFinalAnswerIfMissing,
   hasAgentRunStructure,
-  appendAssistantStreamDelta,
   mergeAssistantTurnText,
   resolveAgentTimelineAnswer,
   type LiveAgentAnswerSource,
@@ -105,7 +103,6 @@ import { parseMemoryProposalToolResult } from "../services/projectMemoryProposal
 import { parseSkillProposalToolResult } from "../services/projectSkillProposal";
 import { loadWebProxyUrlFromStorage } from "../services/aiLocalConfig";
 import { isAgentSseProgressEvent } from "../services/agentSseEventHandlers";
-import { isScrollNearBottom, scrollElementToBottom } from "../utils/scrollViewport";
 import {
   assistantTransientUiClearPatch,
   formatCharCount,
@@ -125,6 +122,8 @@ import {
   type AgentRunLiveState,
 } from "../services/agentRunLiveState";
 import { createAgentSessionRunManager } from "./agentSessionRuns";
+import { useAgentChainScroll } from "./useAgentChainScroll";
+import { useAgentStreamPatch } from "./useAgentStreamPatch";
 
 export type ChatMessage = VibeChatMessage;
 
@@ -174,9 +173,6 @@ export type UseAgentRunDeps = {
   onSkillProposal?: (msgId: string, proposal: import("../services/projectSkillProposal").SkillProposalPayload) => void;
 };
 
-const STREAM_SCROLL_THROTTLE_MS = 120;
-const RUN_UI_PATCH_MIN_MS = 200;
-const RUN_UI_STREAM_PATCH_MIN_MS = 48;
 const MAX_TOOL_FULL_RESULT_CHARS = 4_000;
 const AGENT_EVENT_FRAME_BUDGET_MS = 12;
 
@@ -340,9 +336,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   const stalledAssistantMsg = ref<ChatMessage | null>(null);
   const planExecutionActive = ref(false);
 
-  let streamDeltaRaf: number | null = null;
-  let streamScrollTimer: ReturnType<typeof setTimeout> | null = null;
-  let pendingStreamDelta: { msgId: string; assistantMsg: ChatMessage; pending: string } | null = null;
   const pendingAgentEvents: VibeAgentSseEvent[] = [];
   let agentEventFlushRaf = 0;
 
@@ -354,9 +347,36 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     }
   }
 
-  const statusLogScrollRefs = new Map<string, HTMLElement>();
-  const chainScrollPinned = new Map<string, boolean>();
-  const chainJumpVisible = reactive<Record<string, boolean>>({});
+  const {
+    chainJumpVisible,
+    bindStatusLogScroll,
+    onChainViewportScroll,
+    jumpChainToLatest,
+    scrollStatusLogToBottomInternal,
+  } = useAgentChainScroll({ scrollChatToBottom, chatSending, activeAssistantMsgId });
+
+  const {
+    shouldMinimizeRunUiPatch,
+    scheduleMinimizedRunUiPatch,
+    flushMinimizedRunUiPatch,
+    enqueueStreamDelta,
+    clearStreamDeltaBuffer,
+    scheduleStreamScroll,
+    buildRunUiFullPatch,
+  } = useAgentStreamPatch({
+    chatSending,
+    isChatPinnedToBottom,
+    scrollChatToBottom,
+    patchAssistantMsg,
+    findRunForMsg,
+    isAgentRunning,
+    isRunVisible,
+    formatLiveStatus,
+    bumpLiveRevision,
+    scrollStatusLogToBottomInternal,
+    getRunPhase: (sid: string) => runManager.get(sid)?.live.phase,
+    getRunAssistantMsg: (sid: string) => runManager.get(sid)?.assistantMsg,
+  });
 
   function appendStatusLog(msg: ChatMessage, line: string) {
     const text = line.trim();
@@ -678,217 +698,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     return "运行中…";
   }
 
-  function bindStatusLogScroll(el: HTMLElement | null, msgId: string) {
-    if (el) {
-      statusLogScrollRefs.set(msgId, el);
-      if (!chainScrollPinned.has(msgId)) chainScrollPinned.set(msgId, true);
-      if (chatSending.value && msgId === activeAssistantMsgId.value) {
-        scrollStatusLogToBottomInternal(msgId);
-      } else {
-        onChainViewportScroll(msgId);
-      }
-    } else {
-      statusLogScrollRefs.delete(msgId);
-      chainScrollPinned.delete(msgId);
-      delete chainJumpVisible[msgId];
-    }
-  }
-
-  function onChainViewportScroll(msgId: string) {
-    const el = statusLogScrollRefs.get(msgId);
-    if (!el) return;
-    const nearBottom = isScrollNearBottom(el);
-    chainScrollPinned.set(msgId, nearBottom);
-    chainJumpVisible[msgId] = !nearBottom && el.scrollHeight > el.clientHeight + 8;
-  }
-
-  function jumpChainToLatest(msgId: string) {
-    const el = statusLogScrollRefs.get(msgId);
-    if (el && el.scrollHeight > el.clientHeight + 8) {
-      scrollElementToBottom(el, "smooth");
-    }
-    void scrollChatToBottom(true);
-    chainScrollPinned.set(msgId, true);
-    chainJumpVisible[msgId] = false;
-  }
-
-  function scrollStatusLogToBottomInternal(msgId: string) {
-    void nextTick(() => {
-      const el = statusLogScrollRefs.get(msgId);
-      if (!el) return;
-      if (chainScrollPinned.get(msgId) ?? true) {
-        el.scrollTop = el.scrollHeight;
-      }
-      onChainViewportScroll(msgId);
-    });
-  }
-
-  function scheduleStreamScroll() {
-    if (!chatSending.value || !isChatPinnedToBottom()) return;
-    if (streamScrollTimer) return;
-    streamScrollTimer = setTimeout(() => {
-      streamScrollTimer = null;
-      void scrollChatToBottom();
-    }, STREAM_SCROLL_THROTTLE_MS);
-  }
-
-  function flushPendingStreamDelta() {
-    if (streamDeltaRaf !== null) {
-      cancelAnimationFrame(streamDeltaRaf);
-      streamDeltaRaf = null;
-    }
-    if (!pendingStreamDelta?.pending) return;
-
-    const { msgId, assistantMsg } = pendingStreamDelta;
-    const delta = pendingStreamDelta.pending;
-    pendingStreamDelta.pending = "";
-    const cleanDelta = stripTextToolCallMarkup(delta);
-
-    const run = findRunForMsg(assistantMsg);
-    const minimizing = shouldMinimizeRunUiPatch(assistantMsg);
-    if (cleanDelta) {
-      assistantMsg.content = appendAssistantStreamDelta(assistantMsg.content || "", cleanDelta);
-    }
-    if (minimizing) {
-      const nextStreamChars = (assistantMsg.streamChars || run?.live.streamChars || 0) + delta.length;
-      assistantMsg.streamChars = nextStreamChars;
-      if (run) run.live.streamChars = nextStreamChars;
-      const turn = assistantMsg.agentTurn ?? run?.live.turn ?? 1;
-      assistantMsg.roundGroups = recordAgentRoundStreamDelta(
-        assistantMsg.roundGroups,
-        turn,
-        delta,
-        assistantMsg.agentMaxTurns ?? run?.live.maxTurns,
-      );
-      if (run) scheduleMinimizedRunUiPatch(run.sessionId, msgId, "light");
-      bumpLiveRevision();
-      return;
-    }
-
-    assistantMsg.streamChars = (assistantMsg.streamChars || 0) + delta.length;
-    if (run) run.live.streamChars = assistantMsg.streamChars;
-
-    const turn = assistantMsg.agentTurn ?? 1;
-    assistantMsg.roundGroups = recordAgentRoundStreamDelta(
-      assistantMsg.roundGroups,
-      turn,
-      delta,
-      assistantMsg.agentMaxTurns,
-    );
-    patchAssistantMsg(msgId, {
-      streamChars: assistantMsg.streamChars,
-      content: assistantMsg.content,
-      ...syncRoundGroupsPatch(assistantMsg),
-    });
-    if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
-    scheduleStreamScroll();
-    bumpLiveRevision();
-  }
-
-  /** While agent is running (all modes): batch reactive chatMessages patches. */
-  function shouldMinimizeRunUiPatch(msg: ChatMessage): boolean {
-    return isAgentRunning(msg);
-  }
-
-  type PendingRunUiPatch = { sessionId: string; msgId: string; kind: RunUiPatchKind };
-  type RunUiPatchKind = "light" | "full";
-  let pendingRunUiPatch: PendingRunUiPatch | null = null;
-  let runUiPatchTimer: ReturnType<typeof setTimeout> | null = null;
-  let lastRunUiPatchAt = 0;
-
-  function buildRunUiLightPatch(assistantMsg: ChatMessage): Partial<ChatMessage> {
-    const run = findRunForMsg(assistantMsg);
-    const live = run?.live;
-    return {
-      content: assistantMsg.content,
-      streamChars: live?.streamChars ?? assistantMsg.streamChars,
-      contextChars: live?.contextChars ?? assistantMsg.contextChars,
-      agentTurn: live?.turn ?? assistantMsg.agentTurn,
-      agentMaxTurns: live?.maxTurns ?? assistantMsg.agentMaxTurns,
-      agentModel: live?.model ?? assistantMsg.agentModel,
-      agentPhase: live?.phase ?? assistantMsg.agentPhase,
-      status: live ? formatLiveStatus(live) : assistantMsg.status,
-      ...syncRoundGroupsPatch(assistantMsg),
-    };
-  }
-
-  function buildRunUiFullPatch(assistantMsg: ChatMessage): Partial<ChatMessage> {
-    const run = findRunForMsg(assistantMsg);
-    const live = run?.live;
-    return {
-      content: assistantMsg.content,
-      tools: assistantMsg.tools?.length ? [...assistantMsg.tools] : undefined,
-      turnTraces: assistantMsg.turnTraces?.length ? [...assistantMsg.turnTraces] : undefined,
-      statusLog: assistantMsg.statusLog?.length ? [...assistantMsg.statusLog] : undefined,
-      streamChars: live?.streamChars ?? assistantMsg.streamChars,
-      contextChars: live?.contextChars ?? assistantMsg.contextChars,
-      agentTurn: live?.turn ?? assistantMsg.agentTurn,
-      agentMaxTurns: live?.maxTurns ?? assistantMsg.agentMaxTurns,
-      agentModel: live?.model ?? assistantMsg.agentModel,
-      agentPhase: live?.phase ?? assistantMsg.agentPhase,
-      status: live ? formatLiveStatus(live) : assistantMsg.status,
-      ...syncRoundGroupsPatch(assistantMsg),
-    };
-  }
-
-  function flushPendingRunUiPatch() {
-    runUiPatchTimer = null;
-    const pending = pendingRunUiPatch;
-    pendingRunUiPatch = null;
-    if (!pending) return;
-    const run = runManager.get(pending.sessionId);
-    if (!run) return;
-    const patch =
-      pending.kind === "full"
-        ? buildRunUiFullPatch(run.assistantMsg)
-        : buildRunUiLightPatch(run.assistantMsg);
-    patchAssistantMsg(pending.msgId, patch, pending.sessionId);
-    lastRunUiPatchAt = Date.now();
-    if (isRunVisible(pending.sessionId)) {
-      scheduleStreamScroll();
-    }
-    bumpLiveRevision();
-  }
-
-  function scheduleMinimizedRunUiPatch(
-    sessionId: string,
-    msgId: string,
-    kind: RunUiPatchKind = "light",
-  ) {
-    if (pendingRunUiPatch) {
-      pendingRunUiPatch = {
-        sessionId,
-        msgId,
-        kind: pendingRunUiPatch.kind === "full" || kind === "full" ? "full" : "light",
-      };
-    } else {
-      pendingRunUiPatch = { sessionId, msgId, kind };
-    }
-    const elapsed = Date.now() - lastRunUiPatchAt;
-    const streaming = runManager.get(sessionId)?.live.phase === "streaming_model";
-    const minPatchMs = kind === "light" && streaming ? RUN_UI_STREAM_PATCH_MIN_MS : RUN_UI_PATCH_MIN_MS;
-    if ((kind === "full" || (kind === "light" && streaming)) && elapsed >= minPatchMs) {
-      if (runUiPatchTimer) {
-        clearTimeout(runUiPatchTimer);
-        runUiPatchTimer = null;
-      }
-      flushPendingRunUiPatch();
-      return;
-    }
-    if (runUiPatchTimer) return;
-    runUiPatchTimer = setTimeout(flushPendingRunUiPatch, Math.max(0, minPatchMs - elapsed));
-  }
-
-  function flushMinimizedRunUiPatch(sessionId: string, msgId: string, assistantMsg: ChatMessage) {
-    if (runUiPatchTimer) {
-      clearTimeout(runUiPatchTimer);
-      runUiPatchTimer = null;
-    }
-    pendingRunUiPatch = null;
-    patchAssistantMsg(msgId, buildRunUiFullPatch(assistantMsg), sessionId);
-    lastRunUiPatchAt = Date.now();
-  }
-
   function ensureDeferredCapture(sessionId: string) {
     const run = runManager.get(sessionId);
     if (!run) return undefined;
@@ -906,24 +715,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (!msg.tools) msg.tools = [];
     msg.tools.push(...captured.tools);
     run!.deferredCapture = undefined;
-  }
-
-  function enqueueStreamDelta(msgId: string, assistantMsg: ChatMessage, delta: string) {
-    if (!pendingStreamDelta || pendingStreamDelta.msgId !== msgId) {
-      flushPendingStreamDelta();
-      pendingStreamDelta = { msgId, assistantMsg, pending: "" };
-    }
-    pendingStreamDelta.pending += delta;
-    if (streamDeltaRaf !== null) return;
-    streamDeltaRaf = requestAnimationFrame(() => {
-      streamDeltaRaf = null;
-      flushPendingStreamDelta();
-    });
-  }
-
-  function clearStreamDeltaBuffer() {
-    flushPendingStreamDelta();
-    pendingStreamDelta = null;
   }
 
   function cancelAutoResume() {
