@@ -34,6 +34,10 @@ import {
   type GitLogEntry,
   type GitLogFile,
   type GitRemoteInfo,
+  fetchGitBranches,
+  gitCheckoutBranch as gitCheckoutBranchApi,
+  gitDeleteBranch as gitDeleteBranchApi,
+  type GitBranchInfo,
 } from "../services/vibeGitClient";
 
 export type GitFileDiff = {
@@ -185,8 +189,8 @@ export function useGitPanel(
   const hasMoreGitLog = computed(() => {
     return gitLogEntries.value.length === gitLogCount.value;
   });
-  const gitStagedOpen = ref(true);
-  const gitUnstagedOpen = ref(true);
+  const gitStagedOpen = ref(localStorage.getItem("git-staged-open") !== "false");
+  const gitUnstagedOpen = ref(localStorage.getItem("git-unstaged-open") !== "false");
   const expandedGitLogEntries = ref<Set<string>>(new Set());
   const selectedGitFiles = ref<string[]>([]);
   const gitDiffLoadingKey = ref("");
@@ -217,6 +221,7 @@ export function useGitPanel(
   const gitAheadCommits = ref<GitLogEntry[]>([]);
   const gitAheadCommitsOpen = ref(false);
   const gitAheadCommitsLoading = ref(false);
+  const gitBranches = ref<GitBranchInfo[]>([]);
 
   watch(gitLogOpen, (open) => {
     if (open) {
@@ -238,6 +243,17 @@ export function useGitPanel(
           });
       }
     }
+  });
+
+  // 持久化折叠状态到 localStorage
+  watch(gitUnstagedOpen, (v) => {
+    localStorage.setItem("git-unstaged-open", String(v));
+  });
+  watch(gitStagedOpen, (v) => {
+    localStorage.setItem("git-staged-open", String(v));
+  });
+  watch(gitStashOpen, (v) => {
+    localStorage.setItem("git-stash-open", String(v));
   });
 
   const gitStagedFiles = computed(() => {
@@ -339,6 +355,7 @@ export function useGitPanel(
     gitBranch.value = "";
     gitHeadCommit.value = "";
     gitStatus.value = [];
+    gitBranches.value = [];
     gitLogEntries.value = [];
     gitLogCount.value = 30;
     gitLogSearchQuery.value = "";
@@ -387,6 +404,7 @@ export function useGitPanel(
       if (result.isRepo) {
         void refreshGitRemotes();
         void refreshGitStashes();
+        void refreshGitBranches();
         if (gitLogOpen.value) {
           await refreshGitLogIfOpen(pathAtStart);
           if (token !== gitStatusRefreshToken || projectPath() !== pathAtStart) return;
@@ -1364,7 +1382,67 @@ export function useGitPanel(
     }
   }
 
+  async function refreshGitBranches() {
+    if (!projectOpened() || !gitIsRepo.value) return;
+    try {
+      const result = await fetchGitBranches(projectPath());
+      if (result.ok) {
+        gitBranches.value = result.branches;
+      }
+    } catch (e) {
+      debugLog("refreshGitBranches exception:", e);
+    }
+  }
+
+  async function checkoutBranch(branchName: string, createNew = false, startPoint?: string) {
+    if (!projectOpened()) return;
+    gitLoading.value = true;
+    gitError.value = "";
+    try {
+      const result = await gitCheckoutBranchApi(projectPath(), branchName, createNew, startPoint);
+      if (!result.ok) {
+        gitError.value = result.error || "切换分支失败";
+        return;
+      }
+      await refreshGitStatus({ force: true });
+      onRefreshTree?.();
+    } catch (e) {
+      gitError.value = e instanceof Error ? e.message : "切换分支失败";
+    } finally {
+      gitLoading.value = false;
+    }
+  }
+
+  async function createBranch(branchName: string, startPoint?: string) {
+    await checkoutBranch(branchName, true, startPoint);
+  }
+
+  async function deleteBranch(branchName: string, force = false) {
+    if (!projectOpened()) return;
+    const ok = await confirm(`确定要删除本地分支 ${branchName} 吗？`);
+    if (!ok) return;
+    gitLoading.value = true;
+    gitError.value = "";
+    try {
+      const result = await gitDeleteBranchApi(projectPath(), branchName, force);
+      if (!result.ok) {
+        gitError.value = result.error || "删除分支失败";
+        return;
+      }
+      await refreshGitBranches();
+    } catch (e) {
+      gitError.value = e instanceof Error ? e.message : "删除分支失败";
+    } finally {
+      gitLoading.value = false;
+    }
+  }
+
   return {
+    gitBranches,
+    refreshGitBranches,
+    checkoutBranch,
+    createBranch,
+    deleteBranch,
     gitPanelMode,
     projectPanelView,
     gitStatus,

@@ -889,3 +889,76 @@ export async function gitPush(projectRoot: string, remote?: string, branch?: str
     return { ok: false, output: "", error: error instanceof Error ? error.message : "Push 失败" };
   }
 }
+
+export interface GitBranchInfo {
+  name: string;
+  isCurrent: boolean;
+  isRemote: boolean;
+}
+
+export interface GitBranchesResult {
+  ok: boolean;
+  branches: GitBranchInfo[];
+  error?: string;
+}
+
+export async function gitListBranches(projectRoot: string): Promise<GitBranchesResult> {
+  try {
+    const { stdout } = await gitExec(projectRoot, ["branch", "-a", "--format=%(refname)|%(HEAD)"]);
+    const branches: GitBranchInfo[] = [];
+    const lines = stdout.trim().split("\n").filter(Boolean);
+    for (const line of lines) {
+      const [refname, head] = line.split("|");
+      const isCurrent = head?.trim() === "*";
+      if (refname.startsWith("refs/heads/")) {
+        const name = refname.slice("refs/heads/".length);
+        branches.push({ name, isCurrent, isRemote: false });
+      } else if (refname.startsWith("refs/remotes/")) {
+        const name = refname.slice("refs/remotes/".length);
+        // Skip HEAD pointer tracking
+        if (name.includes("/HEAD") || name.includes("->")) continue;
+        branches.push({ name, isCurrent, isRemote: true });
+      }
+    }
+    return { ok: true, branches };
+  } catch (error) {
+    return { ok: false, branches: [], error: error instanceof Error ? error.message : "获取分支列表失败" };
+  }
+}
+
+export async function gitCheckoutBranch(
+  projectRoot: string,
+  branchName: string,
+  createNew = false,
+  startPoint?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const args = ["checkout"];
+    if (createNew) {
+      args.push("-b", branchName);
+      if (startPoint) {
+        args.push(startPoint);
+      }
+    } else {
+      args.push(branchName);
+    }
+    await gitExec(projectRoot, args);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "切换分支失败" };
+  }
+}
+
+export async function gitDeleteBranch(
+  projectRoot: string,
+  branchName: string,
+  force = false,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const args = [force ? "-D" : "-d", branchName];
+    await gitExec(projectRoot, ["branch", ...args]);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "删除分支失败" };
+  }
+}

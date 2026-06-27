@@ -12,9 +12,18 @@
     <div v-else-if="gitIsRepo" class="git-panel-content">
       <div class="git-header git-section-card">
         <div class="git-header-row git-branch-row">
-          <div class="git-branch-info">
-            <span class="git-branch-icon" aria-hidden="true">⎇</span>
-            <span class="git-branch-name" :title="gitBranch">{{ gitBranch }}</span>
+          <div ref="branchSelectorRef" class="git-branch-selector-container">
+            <button
+              type="button"
+              class="git-branch-info-btn"
+              :class="{ 'git-branch-info-btn--open': branchDropdownOpen }"
+              @click="toggleBranchDropdown"
+              title="切换/管理分支"
+            >
+              <span class="git-branch-icon" aria-hidden="true">⎇</span>
+              <span class="git-branch-name">{{ gitBranch }}</span>
+              <span class="git-branch-chevron" aria-hidden="true">▾</span>
+            </button>
             <span
               v-if="gitTrackingBranch && gitTrackingShortName() !== gitBranch"
               class="git-tracking-badge"
@@ -22,6 +31,81 @@
             >
               ⟶ {{ gitTrackingShortName() }}
             </span>
+
+            <!-- Dropdown Menu -->
+            <div v-if="branchDropdownOpen" class="git-branch-dropdown">
+              <div class="git-branch-search-box">
+                <input
+                  v-model="branchSearchQuery"
+                  type="text"
+                  class="git-branch-search-input"
+                  placeholder="搜索分支..."
+                  @click.stop
+                />
+              </div>
+
+              <!-- Create new branch section -->
+              <div class="git-branch-create-box" @click.stop>
+                <input
+                  v-model="newBranchName"
+                  type="text"
+                  class="git-branch-create-input"
+                  placeholder="新分支名称..."
+                  @keyup.enter="handleCreateBranch"
+                />
+                <button
+                  type="button"
+                  class="git-branch-create-btn"
+                  title="以此 HEAD 新建分支"
+                  @click="handleCreateBranch"
+                >
+                  新建
+                </button>
+              </div>
+
+              <div class="git-branch-list">
+                <!-- Local Branches -->
+                <div class="git-branch-group-label">本地分支</div>
+                <div v-if="!filteredLocalBranches.length" class="git-branch-empty">
+                  未找到匹配分支
+                </div>
+                <div
+                  v-for="b in filteredLocalBranches"
+                  :key="b.name"
+                  class="git-branch-item"
+                  :class="{ active: b.isCurrent }"
+                  @click="handleSelectBranch(b)"
+                >
+                  <span class="git-branch-item-name" :title="b.name">{{ b.name }}</span>
+                  <div class="git-branch-item-actions">
+                    <span v-if="b.isCurrent" class="git-branch-active-indicator">✓</span>
+                    <button
+                      v-else
+                      type="button"
+                      class="git-branch-delete-btn"
+                      title="删除本地分支"
+                      @click="handleDeleteBranch(b.name, $event)"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Remote Branches -->
+                <div class="git-branch-group-label">远程分支</div>
+                <div v-if="!filteredRemoteBranches.length" class="git-branch-empty">
+                  未找到匹配分支
+                </div>
+                <div
+                  v-for="b in filteredRemoteBranches"
+                  :key="b.name"
+                  class="git-branch-item git-branch-item--remote"
+                  @click="handleSelectBranch(b)"
+                >
+                  <span class="git-branch-item-name" :title="b.name">{{ b.name }}</span>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="git-header-actions">
             <button type="button" class="ghost tiny" :disabled="gitLoading" @click="$emit('refresh')">刷新</button>
@@ -530,8 +614,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onUnmounted, computed } from "vue";
-import type { GitRemoteInfo } from "../../services/vibeGitClient";
+import { ref, watch, onMounted, onUnmounted, computed } from "vue";
+import type { GitRemoteInfo, GitBranchInfo } from "../../services/vibeGitClient";
 import type { BatchGroup } from "../../composables/useGitPanel";
 
 interface GitStash {
@@ -573,6 +657,7 @@ interface Props {
   gitStatusKnown: boolean;
   gitError: string;
   gitBranch: string;
+  gitBranches: GitBranchInfo[];
   gitTrackingBranch: string;
   gitRemotes: GitRemoteInfo[];
   gitAhead: number;
@@ -726,6 +811,9 @@ const emit = defineEmits<{
   (e: "update:batchSectionOpen", open: boolean): void;
   (e: "load-more-git-log"): void;
   (e: "search-git-log", query: string): void;
+  (e: "checkout-branch", branchName: string): void;
+  (e: "create-branch", branchName: string): void;
+  (e: "delete-branch", branchName: string): void;
 }>();
 
 function onBatchMessageInput(index: number, value: string) {
@@ -859,6 +947,69 @@ function gitTrackingShortName(): string {
   return props.gitTrackingBranch.replace(/^[^/]+\//, "");
 }
 
+const branchDropdownOpen = ref(false);
+const branchSearchQuery = ref("");
+const newBranchName = ref("");
+
+const filteredLocalBranches = computed(() => {
+  const query = branchSearchQuery.value.toLowerCase().trim();
+  const locals = props.gitBranches.filter(b => !b.isRemote);
+  if (!query) return locals;
+  return locals.filter(b => b.name.toLowerCase().includes(query));
+});
+
+const filteredRemoteBranches = computed(() => {
+  const query = branchSearchQuery.value.toLowerCase().trim();
+  const remotes = props.gitBranches.filter(b => b.isRemote);
+  if (!query) return remotes;
+  return remotes.filter(b => b.name.toLowerCase().includes(query));
+});
+
+function toggleBranchDropdown() {
+  branchDropdownOpen.value = !branchDropdownOpen.value;
+  if (branchDropdownOpen.value) {
+    branchSearchQuery.value = "";
+    newBranchName.value = "";
+  }
+}
+
+function handleSelectBranch(branch: GitBranchInfo) {
+  emit("checkout-branch", branch.name);
+  branchDropdownOpen.value = false;
+}
+
+function handleCreateBranch() {
+  const name = newBranchName.value.trim();
+  if (!name) return;
+  emit("create-branch", name);
+  newBranchName.value = "";
+  branchDropdownOpen.value = false;
+}
+
+function handleDeleteBranch(branchName: string, event: Event) {
+  event.stopPropagation();
+  emit("delete-branch", branchName);
+}
+
+const branchSelectorRef = ref<HTMLElement | null>(null);
+function handleGlobalClick(event: MouseEvent) {
+  if (
+    branchDropdownOpen.value &&
+    branchSelectorRef.value &&
+    !branchSelectorRef.value.contains(event.target as Node)
+  ) {
+    branchDropdownOpen.value = false;
+  }
+}
+
+onMounted(() => {
+  window.addEventListener("click", handleGlobalClick, true);
+});
+
+onUnmounted(() => {
+  window.removeEventListener("click", handleGlobalClick, true);
+});
+
 function gitStatusClass(status: string): string {
   switch (status) {
     case "A":
@@ -877,6 +1028,198 @@ function gitStatusClass(status: string): string {
 </script>
 
 <style scoped>
+.git-branch-selector-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.git-branch-info-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-color, #c9d1d9);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  min-width: 0;
+  transition: background 0.15s ease;
+}
+
+.git-branch-info-btn:hover,
+.git-branch-info-btn--open {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.git-branch-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.git-branch-chevron {
+  font-size: 10px;
+  color: rgba(139, 148, 158, 0.6);
+}
+
+.git-branch-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 100;
+  margin-top: 4px;
+  background: #1e1e1e;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  border-radius: 6px;
+  width: 260px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.git-branch-search-box {
+  display: flex;
+}
+
+.git-branch-search-input {
+  width: 100%;
+  padding: 5px 8px;
+  font-size: 12px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.3);
+  color: #c9d1d9;
+}
+
+.git-branch-create-box {
+  display: flex;
+  gap: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 6px;
+}
+
+.git-branch-create-input {
+  flex: 1;
+  padding: 4px 6px;
+  font-size: 11px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.3);
+  color: #c9d1d9;
+}
+
+.git-branch-create-btn {
+  padding: 4px 8px;
+  font-size: 11px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #c9d1d9;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.git-branch-create-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.git-branch-list {
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.git-branch-group-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: rgba(139, 148, 158, 0.6);
+  padding: 6px 4px 4px 4px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.git-branch-empty {
+  font-size: 11px;
+  color: rgba(139, 148, 158, 0.4);
+  padding: 4px 8px;
+}
+
+.git-branch-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #c9d1d9;
+  transition: background 0.12s ease;
+}
+
+.git-branch-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.git-branch-item.active {
+  background: rgba(88, 166, 255, 0.15);
+  color: #58a6ff;
+  font-weight: 500;
+}
+
+.git-branch-item--remote {
+  color: rgba(139, 148, 158, 0.85);
+}
+
+.git-branch-item-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.git-branch-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.git-branch-active-indicator {
+  font-weight: bold;
+  color: #58a6ff;
+  font-size: 12px;
+}
+
+.git-branch-delete-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 10px;
+  color: rgba(248, 81, 73, 0.6);
+  border-radius: 3px;
+  transition: all 0.12s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.git-branch-delete-btn:hover {
+  background: rgba(248, 81, 73, 0.15);
+  color: #f85149;
+}
+
 .git-panel {
   flex: 1;
   min-height: 0;

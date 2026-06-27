@@ -25,6 +25,9 @@ import {
   gitStashApply,
   gitStashDrop,
   gitChangedFilesSince,
+  gitListBranches,
+  gitCheckoutBranch,
+  gitDeleteBranch,
 } from "./server/vibeGit";
 import type { ServerResponse, IncomingMessage } from "node:http";
 
@@ -847,6 +850,82 @@ ${diffText}
       sendJson(res, 200, result);
     } catch (error) {
       sendJson(res, 500, { ok: false, output: "", error: error instanceof Error ? error.message : "删除贮藏失败" });
+    }
+  });
+
+  // GET /backend/vibe/git/branches
+  middlewares.use("/backend/vibe/git/branches", async (req: IncomingMessage, res: ServerResponse) => {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { error: "仅支持 GET 请求" });
+      return;
+    }
+
+    try {
+      const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+      const projectPath = url.searchParams.get("path");
+      if (!projectPath?.trim()) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(projectPath.trim());
+      const result = await gitListBranches(resolved);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, branches: [], error: error instanceof Error ? error.message : "获取分支列表失败" });
+    }
+  });
+
+  // POST /backend/vibe/git/checkout
+  middlewares.use("/backend/vibe/git/checkout", async (req: IncomingMessage, res: ServerResponse) => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "仅支持 POST 请求" });
+      return;
+    }
+
+    try {
+      const body = (await readJsonBody(req)) as {
+        path?: string;
+        branch?: string;
+        createNew?: boolean;
+        startPoint?: string;
+      };
+      if (!body.path?.trim() || !body.branch?.trim()) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 或 branch 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(body.path.trim());
+      const result = await gitCheckoutBranch(resolved, body.branch.trim(), body.createNew, body.startPoint);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "切换分支失败" });
+    }
+  });
+
+  // POST /backend/vibe/git/branch/delete
+  middlewares.use("/backend/vibe/git/branch/delete", async (req: IncomingMessage, res: ServerResponse) => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "仅支持 POST 请求" });
+      return;
+    }
+
+    try {
+      const body = (await readJsonBody(req)) as {
+        path?: string;
+        branch?: string;
+        force?: boolean;
+      };
+      if (!body.path?.trim() || !body.branch?.trim()) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 或 branch 参数" });
+        return;
+      }
+
+      const resolved = path.resolve(body.path.trim());
+      const result = await gitDeleteBranch(resolved, body.branch.trim(), body.force);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "删除分支失败" });
     }
   });
 }

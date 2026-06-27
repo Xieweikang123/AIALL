@@ -605,3 +605,61 @@ export async function gitStashDropRemote(projectPath: string, stashIndex: number
     return { ok: false, output: "", error: error instanceof Error ? error.message : "网络错误" };
   }
 }
+
+export interface GitBranchInfo {
+  name: string;
+  isCurrent: boolean;
+  isRemote: boolean;
+}
+
+export interface GitBranchesResult {
+  ok: boolean;
+  branches: GitBranchInfo[];
+  error?: string;
+}
+
+export async function fetchGitBranches(projectPath: string): Promise<GitBranchesResult> {
+  try {
+    const url = backendUrl(`/backend/vibe/git/branches?path=${encodeURIComponent(projectPath)}`);
+    const response = await fetch(url);
+    return await readJsonResponse<GitBranchesResult>(response);
+  } catch (error) {
+    return { ok: false, branches: [], error: error instanceof Error ? error.message : "网络错误" };
+  }
+}
+
+export async function gitCheckoutBranch(
+  projectPath: string,
+  branchName: string,
+  createNew = false,
+  startPoint?: string,
+): Promise<GitActionResult> {
+  try {
+    const response = await fetch(backendUrl("/backend/vibe/git/checkout"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: projectPath, branch: branchName, createNew, startPoint }),
+    });
+    return await readJsonResponse<GitActionResult>(response);
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "网络错误" };
+  }
+}
+
+export async function gitDeleteBranch(
+  projectPath: string,
+  branchName: string,
+  force = false,
+): Promise<GitActionResult> {
+  try {
+    const response = await fetch(backendUrl("/backend/vibe/git/branch/delete"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: projectPath, branch: branchName, force }),
+    });
+    return await readJsonResponse<GitActionResult>(response);
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "网络错误" };
+  }
+}
+
