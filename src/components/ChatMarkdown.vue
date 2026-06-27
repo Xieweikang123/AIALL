@@ -96,6 +96,7 @@ watch(
     if (!value.trim()) {
       cachedDisplayHtml.value = "";
       streamingHtmlCache.value = "";
+      streamingMinHeight.value = 0;
     }
     if (
       props.streaming &&
