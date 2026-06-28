@@ -1,7 +1,10 @@
 /** Bounded LRU for markdown HTML — helps final frame match last streaming frame. */
-const CACHE_MAX = 48;
+/** Full-render cache: covers the 80-message visible window plus some headroom. */
+const RENDER_CACHE_MAX = 120;
+/** Lite-render (streaming) cache: smaller since keys change every delta. */
+const LITE_CACHE_MAX = 80;
 
-function createMarkdownRenderCache() {
+function createMarkdownRenderCache(maxSize: number) {
   const store = new Map<string, string>();
 
   return {
@@ -13,7 +16,7 @@ function createMarkdownRenderCache() {
         store.delete(key);
       }
       store.set(key, value);
-      if (store.size > CACHE_MAX) {
+      if (store.size > maxSize) {
         const oldest = store.keys().next().value;
         if (oldest) store.delete(oldest);
       }
@@ -24,8 +27,9 @@ function createMarkdownRenderCache() {
   };
 }
 
-export const markdownRenderCache = createMarkdownRenderCache();
-export const markdownLiteRenderCache = createMarkdownRenderCache();
+export const markdownRenderCache = createMarkdownRenderCache(RENDER_CACHE_MAX);
+export const markdownLiteRenderCache = createMarkdownRenderCache(LITE_CACHE_MAX);
+
 
 export function getCachedMarkdownHtml(
   source: string,

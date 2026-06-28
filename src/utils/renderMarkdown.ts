@@ -134,11 +134,20 @@ export function normalizeGluedLatinCjkBoundary(source: string): string {
   return source.replace(/([A-Za-z0-9)])([:：])(?=[\u4e00-\u9fff])/g, "$1$2\n\n");
 }
 
+const NEEDS_NORMALIZE_RE = /[：:「」\d.\-*\\#\uFF0A]/;
 const NEEDS_PREPARE_RE = /[\\*_\[`「」#\uFF0A]/;
 
 function prepareMarkdownSource(text: string): string {
   let source = String(text || "").trim();
   if (!source) return "";
+  // 快速退出：不含需要 normalize 的特殊字符时跳过全部 5 步变换
+  if (!NEEDS_NORMALIZE_RE.test(source)) {
+    if (!NEEDS_PREPARE_RE.test(source)) return source;
+    const unescaped = source.replace(/\\\*/g, "*").replace(/\\_/g, "_").replace(/\\\[/g, "[");
+    return protectCornerBracketsForMarkdown(
+      expandBoldWithInlineCode(normalizeLooseMarkdownEmphasis(unescaped)),
+    );
+  }
   source = normalizeGluedLatinCjkBoundary(source);
   source = normalizeAtxHeadings(source);
   source = normalizeStrayLineEscapes(source);
@@ -269,39 +278,45 @@ const langRules: Record<string, TokenRule[]> = {
 /**
  * 对原始（未转义的）代码文本进行分词，
  * 返回 Token 数组。Token 不重叠，先匹配先生效。
+ *
+ * 算法：先收集所有规则的全部匹配（O(n×m)），按 start 排序后
+ * 贪心一趟过滤重叠区间（O(n log n)），消除原来 O(n²) 的线性扫描。
  */
 function tokenize(code: string, lang: string): Token[] {
   const key = lang.toLowerCase();
   const rules = [...commonRules, ...(langRules[key] || [])];
-  const tokens: Token[] = [];
-  const occupied: Array<[number, number]> = [];
 
-  function overlaps(start: number, end: number): boolean {
-    for (const [occupiedStart, occupiedEnd] of occupied) {
-      if (start < occupiedEnd && end > occupiedStart) return true;
-    }
-    return false;
-  }
+  // 第一步：收集所有候选 match，带规则优先级（rules 索引越小优先级越高）
+  type Candidate = { start: number; end: number; token: string; priority: number };
+  const candidates: Candidate[] = [];
 
-  function occupy(start: number, end: number) {
-    occupied.push([start, end]);
-  }
-
-  for (const rule of rules) {
-    // 每条规则重置 lastIndex（因为带 g flag）
+  for (let ri = 0; ri < rules.length; ri++) {
+    const rule = rules[ri]!;
     rule.pattern.lastIndex = 0;
     let match: RegExpExecArray | null;
     while ((match = rule.pattern.exec(code)) !== null) {
-      const start = match.index;
-      const end = start + match[0].length;
-      if (!overlaps(start, end)) {
-        tokens.push({ start, end, token: rule.token });
-        occupy(start, end);
-      }
+      candidates.push({
+        start: match.index,
+        end: match.index + match[0].length,
+        token: rule.token,
+        priority: ri,
+      });
     }
   }
 
-  tokens.sort((a, b) => a.start - b.start);
+  // 第二步：按 start 升序排序，start 相同时优先级低的（索引大）排后面
+  candidates.sort((a, b) => a.start - b.start || a.priority - b.priority);
+
+  // 第三步：贪心一趟过滤，跳过与上一个选中 token 重叠的候选
+  const tokens: Token[] = [];
+  let cursor = 0;
+  for (const c of candidates) {
+    if (c.start >= cursor) {
+      tokens.push({ start: c.start, end: c.end, token: c.token });
+      cursor = c.end;
+    }
+  }
+
   return tokens;
 }
 
