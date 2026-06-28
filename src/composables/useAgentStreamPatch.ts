@@ -242,6 +242,21 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
     pendingStreamDelta = null;
   }
 
+  function cleanupTimers() {
+    if (streamDeltaRaf !== null) {
+      cancelAnimationFrame(streamDeltaRaf);
+      streamDeltaRaf = null;
+    }
+    if (streamScrollTimer) {
+      clearTimeout(streamScrollTimer);
+      streamScrollTimer = null;
+    }
+    if (runUiPatchTimer) {
+      clearTimeout(runUiPatchTimer);
+      runUiPatchTimer = null;
+    }
+  }
+
   return {
     shouldMinimizeRunUiPatch,
     scheduleMinimizedRunUiPatch,
@@ -250,5 +265,6 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
     clearStreamDeltaBuffer,
     scheduleStreamScroll,
     buildRunUiFullPatch,
+    cleanupTimers,
   };
 }
