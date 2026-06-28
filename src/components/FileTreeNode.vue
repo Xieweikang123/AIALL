@@ -26,6 +26,12 @@
       <FileTreeNode
         v-for="child in node.children"
         :key="child.path"
+        v-memo="[
+          child.path === activePath,
+          child.path === selectedPath,
+          child.path === renamingPath,
+          expandedDirs.has(child.path),
+        ]"
         :node="child"
         :active-path="activePath"
         :selected-path="selectedPath"

@@ -1,5 +1,5 @@
 ﻿<template>
-  <section v-show="!parentEditorCollapsed" class="editor-panel">
+  <section v-show="!parentEditorCollapsed && openTabs.length > 0" class="editor-panel">
     <div class="editor-header">
       <div v-if="openTabs.length" ref="tabsContainerRef" class="editor-tabs" @wheel.prevent="onTabsWheel">
         <button

@@ -244,6 +244,7 @@
       </FilePanel>
 
       <div
+        v-show="openTabs.length > 0"
         class="resize-handle"
         role="separator"
         aria-orientation="vertical"
@@ -909,23 +910,22 @@ function loadChatMode(): VibeChatMode {
 
 const chatMode = ref<VibeChatMode>(loadChatMode());
 const chatSending = ref(false);
-// ── 按会话独立的发送状态 ──
-const sendingSessionIds = reactive(new Set<string>());
-
-const sendingSessionIdList = computed(() => [...sendingSessionIds]);
+const sendingSessionIdList = ref<string[]>([]);
 
 function isSessionSending(sessionId: string): boolean {
-  return sendingSessionIds.has(sessionId);
+  return sendingSessionIdList.value.includes(sessionId);
 }
 
 function syncActiveChatSending() {
-  chatSending.value = sendingSessionIds.has(activeSessionId.value);
+  chatSending.value = sendingSessionIdList.value.includes(activeSessionId.value);
 }
 
 function beginAgentRunSession(sessionId: string) {
   if (!sessionId) return;
   dismissBlockingOverlays("agent-run-start");
-  sendingSessionIds.add(sessionId);
+  if (!sendingSessionIdList.value.includes(sessionId)) {
+    sendingSessionIdList.value = [...sendingSessionIdList.value, sessionId];
+  }
   syncActiveChatSending();
 }
 
@@ -944,9 +944,9 @@ const { notifyAgentDoneIfNeeded, testNotification } = useAgentNotification(
 function endAgentRunSession(sessionId?: string, silent = false) {
   const sid = (sessionId || "").trim();
   if (!sid) return;
-  sendingSessionIds.delete(sid);
+  sendingSessionIdList.value = sendingSessionIdList.value.filter(id => id !== sid);
   syncActiveChatSending();
-  if (!sendingSessionIds.size) {
+  if (!sendingSessionIdList.value.length) {
     dismissBlockingOverlays("agent-run-end");
   }
   if (!silent) notifyAgentDoneIfNeeded(sid);
@@ -1815,7 +1815,7 @@ function patchAssistantMsg(msgId: string, patch: Partial<ChatMessage>, sessionId
   };
   if (isActive) {
     apply(chatMessages.value);
-  } else if (sid && sendingSessionIds.has(sid)) {
+  } else if (sid && sendingSessionIdList.value.includes(sid)) {
     patchSessionMessage(sid, msgId, patch);
   }
 }
@@ -2152,13 +2152,13 @@ async function openProjectByPath(dirPath: string) {
     pendingPromptQueue.value = [];
     persistPendingQueue();
     cancelPendingChatPersistence();
-    for (const sid of [...sendingSessionIds]) {
+    for (const sid of sendingSessionIdList.value) {
       persistSessionNow(sid, previousPathForPersist, { touchTimestamp: false });
     }
     persistChatNow(previousPathForPersist, { flushStore: true });
   }
-  if (sendingSessionIds.size) interruptAgentRun();
-  sendingSessionIds.clear();
+  if (sendingSessionIdList.value.length) interruptAgentRun();
+  sendingSessionIdList.value = [];
   chatSending.value = false;
   leaveProjectKnowledge();
   onReviewProjectClosed();
@@ -3166,9 +3166,9 @@ function reconcileOrphanedAgentSendingState() {
   dismissBlockingOverlays("mount-reconcile");
   hideGitFileContextMenu();
 
-  const orphaned = [...sendingSessionIds].filter((sid) => !hasActiveAgentRun(sid));
+  const orphaned = sendingSessionIdList.value.filter((sid) => !hasActiveAgentRun(sid));
 
-  if (!sendingSessionIds.size) return;
+  if (!sendingSessionIdList.value.length) return;
   for (const sid of orphaned) {
     endAgentRunSession(sid, true);
   }
