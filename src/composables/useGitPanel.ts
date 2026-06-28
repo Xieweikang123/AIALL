@@ -710,6 +710,10 @@ export function useGitPanel(
   }
 
   async function commitAllBatches(messages: string[]) {
+    if (!batchGroupsFromAi.value) {
+      gitError.value = "请先通过 AI 划分后再进行全部提交";
+      return;
+    }
     const snapshot = batchGroups.value.map((g, i) => ({
       filePaths: g.files.map((f) => f.path),
       message: messages[i] || "",

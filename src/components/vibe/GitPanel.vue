@@ -409,7 +409,7 @@
                     class="small git-batch-all-btn"
                     :class="canCommitAllBatches ? 'primary' : 'secondary'"
                     :disabled="batchCommittingIndex !== null || !canCommitAllBatches"
-                    :title="canCommitAllBatches ? '按顺序提交全部分组' : '请先为每组填写提交说明'"
+                    :title="canCommitAllBatches ? '按顺序提交全部分组' : (!batchGroupsFromAi ? '请先进行 AI 划分再全部提交' : '请先为每组填写提交说明')"
                     @click="$emit('commit-all-batches', [...batchMessages])"
                   >
                     <template v-if="batchCommittingIndex !== null">
@@ -722,6 +722,7 @@ const batchReadyCount = computed(() =>
 const canCommitAllBatches = computed(() => {
   const n = props.batchGroups?.length ?? 0;
   if (!n || props.batchCommittingIndex !== null) return false;
+  if (!props.batchGroupsFromAi) return false;
   return props.batchMessages.length === n && props.batchMessages.every((m) => m?.trim());
 });
 
