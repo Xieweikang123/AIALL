@@ -1,4 +1,4 @@
-import { ref, computed, onBeforeUnmount, type Ref } from "vue";
+import { ref, computed, onBeforeUnmount, getCurrentInstance, type Ref } from "vue";
 import { lsGet, lsSet, lsGetJson, lsSetJson } from "../utils/localStorageSafe";
 
 const PANEL_WIDTH_KEY = "vibe-coding-panel-widths";
@@ -151,10 +151,12 @@ export function usePanelLayout(workspaceRef: Ref<HTMLElement | null>) {
     saveChatCollapsed();
   }
 
-  onBeforeUnmount(() => {
-    document.removeEventListener("mousemove", onResize);
-    document.removeEventListener("mouseup", stopResize);
-  });
+  if (getCurrentInstance()) {
+    onBeforeUnmount(() => {
+      document.removeEventListener("mousemove", onResize);
+      document.removeEventListener("mouseup", stopResize);
+    });
+  }
 
   return {
     filePanelWidth,
