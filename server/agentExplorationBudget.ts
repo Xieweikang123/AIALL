@@ -183,7 +183,7 @@ export function buildExploreForceReportNudge(totalExploreTurns: number): string 
   return [
     `【系统强制】Explore 模式已累计 ${totalExploreTurns} 轮探索（超过 ${EXPLORE_MAX_TOTAL_EXPLORE_HARD}）。`,
     "下一轮已移除所有工具，你只能输出文字。",
-    "请基于已有信息输出完整项目理解报告；未覆盖章节标注「未探索」。",
+    "请基于已有信息输出完整项目理解报告；未覆盖章节在 `## 标题` 末尾加（未探索）。",
   ].join("");
 }
 

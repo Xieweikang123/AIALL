@@ -59,13 +59,13 @@
               继续探索
             </button>
             <button
-              v-if="hasKnowledge && unexploredSections.length && !editing"
+              v-if="hasKnowledge && gapSections.length && !editing"
               type="button"
               class="knowledge-btn knowledge-btn--accent"
               :disabled="!exploreReady || exploreRun.running"
               @click="fillUnexplored"
             >
-              补全未探索（{{ unexploredSections.length }}）
+              补全未探索（{{ gapSections.length }}）
             </button>
             <button
               v-if="hasKnowledge && !editing"
@@ -343,13 +343,13 @@
               </p>
             </nav>
             <button
-              v-if="unexploredSections.length && !exploreRun.running"
+              v-if="gapSections.length && !exploreRun.running"
               type="button"
               class="knowledge-toc-fill-btn"
               :disabled="!exploreReady"
               @click="fillUnexplored"
             >
-              补全未探索（{{ unexploredSections.length }}）
+              补全未探索（{{ gapSections.length }}）
             </button>
           </aside>
 
@@ -552,7 +552,7 @@ import {
 import type { ProjectKnowledgeMeta } from "../../services/vibeProjectKnowledgeClient";
 import {
   computeKnowledgeOverview,
-  findUnexploredSectionTitles,
+  findGapSectionTitles,
   formatKnowledgeSize,
   highlightHtmlText,
   injectReportHeadingIds,
@@ -671,8 +671,8 @@ const depthOptions: Array<{ id: ExploreDepth; label: string; hint: string }> = [
 /** Dynamic chips: prepend "补全未探索" when there are unexplored sections. */
 const followUpChips = computed(() => {
   const base = [...EXPLORE_QUICK_FOLLOWUP_CHIPS];
-  if (unexploredSections.value.length > 0) {
-    return [`补全未探索（${unexploredSections.value.length}）`, ...base] as string[];
+  if (gapSections.value.length > 0) {
+    return [`补全未探索（${gapSections.value.length}）`, ...base] as string[];
   }
   return base as string[];
 });
@@ -722,8 +722,8 @@ const tocSourceBody = computed(() => {
 });
 
 const tocSections = computed(() => parseKnowledgeTocSections(tocSourceBody.value));
-const unexploredSections = computed(() => findUnexploredSectionTitles(tocSourceBody.value));
-const unexploredSet = computed(() => new Set(unexploredSections.value));
+const gapSections = computed(() => findGapSectionTitles(tocSourceBody.value));
+const unexploredSet = computed(() => new Set(gapSections.value));
 
 const overviewSourceBody = computed(() => {
   if (props.editing) return props.knowledgeDraft;
@@ -1225,7 +1225,7 @@ function submitFollowUpChip(chip: string) {
 }
 
 function fillUnexplored() {
-  const prompt = buildExploreUnexploredPrompt(unexploredSections.value);
+  const prompt = buildExploreUnexploredPrompt(gapSections.value);
   pendingFollowUpText.value = "补全未探索章节";
   emit("follow-up", prompt);
 }

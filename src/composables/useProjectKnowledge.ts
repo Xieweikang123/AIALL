@@ -16,6 +16,7 @@ import { filterKnowledgeChangePaths } from "../services/knowledgeGitChanges";
 import { fetchGitChangedSince } from "../services/vibeGitClient";
 import { loadWebProxyUrlFromStorage } from "../services/aiLocalConfig";
 import {
+  findGapSectionTitles,
   resolveKnowledgeBodyForSave,
   stripKnowledgeFrontmatter,
 } from "../services/projectReportDisplay";
@@ -250,7 +251,10 @@ export function useProjectKnowledge(options: {
     }
   }
 
-  function resolveExploreSaveMessage(saved: boolean): string {
+  function resolveExploreSaveMessage(
+    saved: boolean,
+    options?: { remainingGaps?: string[] },
+  ): string {
     if (!saved) {
       if (exploreRun.value.aborted) return "探索已停止";
       if (exploreRun.value.failed) return exploreRun.value.error || "探索失败";
@@ -258,6 +262,12 @@ export function useProjectKnowledge(options: {
     }
     if (exploreRun.value.failed) return "探索异常结束，已保存已有内容";
     if (exploreRun.value.aborted) return "已保存不完整知识库";
+    const gaps = options?.remainingGaps ?? [];
+    if (gaps.length > 0) {
+      const shown = gaps.slice(0, 3).join("、");
+      const tail = gaps.length > 3 ? `等 ${gaps.length} 节` : "";
+      return `知识库已更新，仍有待补章节：${shown}${tail}`;
+    }
     return "知识库已更新";
   }
 
@@ -299,7 +309,9 @@ export function useProjectKnowledge(options: {
           knowledgeBody.value = result.body ?? saveBody;
           knowledgeDraft.value = knowledgeBody.value;
           knowledgeMeta.value = result.meta ?? {};
-          knowledgeMessage.value = resolveExploreSaveMessage(true);
+          knowledgeMessage.value = resolveExploreSaveMessage(true, {
+            remainingGaps: findGapSectionTitles(knowledgeBody.value),
+          });
           void loadKnowledgeChangedFiles();
         }
       } else if (applyToUi) {

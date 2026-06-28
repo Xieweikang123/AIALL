@@ -23,8 +23,89 @@ export type ProjectReportDisplay = {
 
 const HEADING_RE = /^(#{1,3})\s+(.+)$/;
 const SKIP_TITLES = new Set([PROJECT_KNOWLEDGE_TITLE, "项目理解报告"]);
-const UNEXPLORED_SECTION_RE = /未探索|待验证/;
+/** Title suffix flags for gap sections. */
+export const TITLE_UNEXPLORED_SUFFIX_RE = /[（(]未探索[）)]\s*$/;
+export const TITLE_PENDING_SUFFIX_RE = /[（(]待验证[）)]\s*$/;
+/** Standalone body placeholders — not inline prose mentions. */
+const BODY_UNEXPLORED_PLACEHOLDER_RE = /^(?:内容)?未探索[。.；;]?\s*$/;
+const BODY_PENDING_PLACEHOLDER_RE = /^待验证[。.；;]?\s*$/;
+const SECTION_NUMBER_PREFIX_RE = /^([零〇一二三四五六七八九十百千]+)[、．.\s]+/;
 const SUPPLEMENT_HEADING_RE = /^##\s+补充(?:：|:)/m;
+
+export function stripSectionTitleGapSuffix(title: string): string {
+  return title.replace(/[（(](?:未探索|待验证)[）)]/g, "").trim();
+}
+
+function stripSectionNumberPrefix(title: string): string {
+  return title.replace(SECTION_NUMBER_PREFIX_RE, "").trim();
+}
+
+export function extractSectionNumberPrefix(title: string): string {
+  const m = title.match(SECTION_NUMBER_PREFIX_RE);
+  return m ? `${m[1]}、` : "";
+}
+
+function isGapBodyPlaceholder(body: string): boolean {
+  const trimmed = body.trim();
+  if (!trimmed) return true;
+  return BODY_UNEXPLORED_PLACEHOLDER_RE.test(trimmed)
+    || BODY_PENDING_PLACEHOLDER_RE.test(trimmed);
+}
+
+export function resolveSectionGapStatus(
+  title: string,
+  content: string,
+): KnowledgeSectionBlock["status"] {
+  const body = content.trim();
+  if (body && !isGapBodyPlaceholder(body)) return "ok";
+
+  const trimmedTitle = title.trim();
+  if (TITLE_UNEXPLORED_SUFFIX_RE.test(trimmedTitle)) return "unexplored";
+  if (TITLE_PENDING_SUFFIX_RE.test(trimmedTitle)) return "pending";
+  if (!body) return "unexplored";
+  if (BODY_UNEXPLORED_PLACEHOLDER_RE.test(body)) return "unexplored";
+  if (BODY_PENDING_PLACEHOLDER_RE.test(body)) return "pending";
+  return "ok";
+}
+
+function formatKnowledgeSectionBlock(block: KnowledgeSectionBlock): string {
+  const prefix = extractSectionNumberPrefix(block.title);
+  const base = stripSectionTitleGapSuffix(stripSectionNumberPrefix(block.title));
+  const heading = prefix ? `${prefix}${base}` : base;
+  const status = resolveSectionGapStatus(block.title, block.content);
+
+  if (status === "ok") {
+    const body = block.content.trim();
+    return body ? `## ${heading}\n\n${body}` : `## ${heading}`;
+  }
+
+  const suffix = status === "pending" ? "（待验证）" : "（未探索）";
+  if (isGapBodyPlaceholder(block.content)) {
+    return `## ${heading}${suffix}`;
+  }
+  return `## ${heading}${suffix}\n\n${block.content.trim()}`;
+}
+
+/** Normalize gap markers to title suffixes; strip suffixes from covered sections. */
+export function canonicalizeKnowledgeGapMarkers(body: string): string {
+  const normalized = body.replace(/\r\n/g, "\n").trim();
+  if (!normalized) return "";
+
+  const { preamble, sections } = splitKnowledgeSectionBlocks(normalized);
+  const { parts } = splitRawKnowledgeParts(normalized);
+  const supplementParts = parts.filter(isSupplementPart);
+  const mainFormatted = sections.map(formatKnowledgeSectionBlock);
+  const assembled = [preamble, ...mainFormatted, ...supplementParts].filter(Boolean).join("\n\n");
+  return `${assembled.trim()}\n`;
+}
+
+function resolveReplacementSectionTitle(existingTitle: string, incomingTitle: string): string {
+  const prefix = extractSectionNumberPrefix(existingTitle);
+  const base = stripSectionTitleGapSuffix(
+    stripSectionNumberPrefix(incomingTitle.trim() || existingTitle),
+  );
+  return prefix ? `${prefix}${base}` : base;
+}
 
 export function isProjectReport(content: string): boolean {
   return (
@@ -103,11 +184,7 @@ export function splitKnowledgeSectionBlocks(body: string): {
     const title = part.match(SECTION_H2_RE)?.[1]?.trim();
     if (!title || title.startsWith("补充")) continue;
     const content = part.replace(SECTION_H2_RE, "").trim();
-    const status: KnowledgeSectionBlock["status"] = /未探索/.test(part)
-      ? "unexplored"
-      : /待验证/.test(part)
-        ? "pending"
-        : "ok";
+    const status = resolveSectionGapStatus(title, content);
     sections.push({ title, content, status });
   }
 
@@ -171,16 +248,22 @@ function sectionStatusLabel(status: KnowledgeSectionBlock["status"]): string {
   return "已覆盖";
 }
 
-/** Section titles whose body mentions 未探索 or 待验证. */
-export function findUnexploredSectionTitles(content: string): string[] {
+/** Section titles still marked as gap (unexplored or pending). */
+export function findGapSectionTitles(content: string): string[] {
   const titles: string[] = [];
   for (const part of content.split(/\n(?=## )/)) {
-    if (!UNEXPLORED_SECTION_RE.test(part)) continue;
     const title = part.match(/^##\s+(.+?)(?:\r?\n|$)/)?.[1]?.trim();
-    if (!title || title.startsWith("补充：")) continue;
-    titles.push(title);
+    if (!title || title.startsWith("补充")) continue;
+    const body = part.replace(SECTION_H2_RE, "").trim();
+    if (resolveSectionGapStatus(title, body) === "ok") continue;
+    titles.push(stripTitleNumberPrefix(title));
   }
   return titles;
+}
+
+/** @deprecated Use findGapSectionTitles */
+export function findUnexploredSectionTitles(content: string): string[] {
+  return findGapSectionTitles(content);
 }
 
 // A full report must lead with the canonical marker line, immediately followed
@@ -225,7 +308,7 @@ export function buildKnowledgeExploreManifest(
       lines.push(`- ${s.title}（${sectionStatusLabel(s.status)}）`);
     }
   }
-  const unexplored = findUnexploredSectionTitles(body);
+  const unexplored = findGapSectionTitles(body);
   if (unexplored.length) {
     lines.push("", `待补全：${unexplored.join("、")}`);
   }
@@ -288,7 +371,7 @@ function findSectionInsertionIndex(existingSections: string[], newTitle: string)
 }
 
 function stripTitleNumberPrefix(title: string): string {
-  return title.replace(/^([零〇一二三四五六七八九十百千]+)[、．.\s]+/, "").trim();
+  return stripSectionTitleGapSuffix(stripSectionNumberPrefix(title));
 }
 
 /** Replace one ## section in the knowledge base body. */
@@ -300,11 +383,13 @@ export function replaceKnowledgeSection(
   const normalized = fullBody.replace(/\r\n/g, "\n").trim();
   const targetTitle = sectionTitle.trim();
   const incoming = newSectionMarkdown.trim();
+  const incomingTitle = incoming.match(SECTION_H2_RE)?.[1]?.trim() ?? targetTitle;
   const bodyOnly = incoming.replace(SECTION_H2_RE, "").trim();
-  const replacement = `## ${targetTitle}\n\n${bodyOnly}`.trim();
 
   const { preamble, sections } = splitKnowledgeSectionBlocks(normalized);
   if (!sections.length) {
+    const cleanTitle = stripSectionTitleGapSuffix(stripSectionNumberPrefix(incomingTitle));
+    const replacement = `## ${cleanTitle}\n\n${bodyOnly}`.trim();
     return preamble ? `${preamble}\n\n${replacement}` : replacement;
   }
 
@@ -316,10 +401,13 @@ export function replaceKnowledgeSection(
       return `## ${section.title}\n\n${section.content}`.trim();
     }
     replaced = true;
-    return replacement;
+    const cleanTitle = resolveReplacementSectionTitle(section.title, incomingTitle);
+    return `## ${cleanTitle}\n\n${bodyOnly}`.trim();
   });
 
   if (!replaced) {
+    const cleanTitle = stripSectionTitleGapSuffix(stripSectionNumberPrefix(incomingTitle));
+    const replacement = `## ${cleanTitle}\n\n${bodyOnly}`.trim();
     const insertionIdx = findSectionInsertionIndex(nextSections, targetTitle);
     nextSections.splice(insertionIdx, 0, replacement);
   }
@@ -353,7 +441,7 @@ export function mergeSectionUpdatesIntoKnowledge(existingBody: string, newOutput
     if (!title || title.startsWith("补充")) continue;
     result = replaceKnowledgeSection(result, title, part.trim());
   }
-  return result.trim();
+  return canonicalizeKnowledgeGapMarkers(result);
 }
 
 function tokenizeForSectionMatch(text: string): string[] {
@@ -540,11 +628,12 @@ export function resolveKnowledgeBodyForSave(
 ): string {
   const incoming = extractReportBodyForArchive(newOutput) || newOutput.trim();
   if (!incoming) return existingBody.trim();
-  if (!existingBody.trim()) return incoming;
-  if (options?.intent === "section_fill") {
-    return mergeSectionUpdatesIntoKnowledge(existingBody, incoming);
-  }
-  return mergeKnowledgeExploreOutput(existingBody, incoming);
+  if (!existingBody.trim()) return canonicalizeKnowledgeGapMarkers(incoming);
+
+  const merged = options?.intent === "section_fill"
+    ? mergeSectionUpdatesIntoKnowledge(existingBody, incoming)
+    : mergeKnowledgeExploreOutput(existingBody, incoming);
+  return canonicalizeKnowledgeGapMarkers(merged.trim());
 }
 
 export function extractReportBodyForArchive(content: string): string {

@@ -41,7 +41,7 @@ export const EXPLORE_QUICK_FOLLOWUP_CHIPS = [
   "请补充数据流与关键依赖说明",
 ] as const;
 
-/** Targeted explore for sections marked 未探索 / 待验证 in the knowledge base. */
+/** Targeted explore for sections marked as gap in the knowledge base. */
 export function buildExploreUnexploredPrompt(sectionTitles: string[]): string {
   if (!sectionTitles.length) return EXPLORE_CONTINUE_PRESET_PROMPT;
   const shown = sectionTitles.slice(0, 8);
@@ -49,10 +49,10 @@ export function buildExploreUnexploredPrompt(sectionTitles: string[]): string {
   const suffix =
     sectionTitles.length > shown.length ? `等 ${sectionTitles.length} 个章节` : "";
   return [
-    `请针对性探索并补全以下标注为「未探索」或「待验证」的知识库章节：${list}${suffix}。`,
+    `请针对性探索并补全以下知识库缺口章节：${list}${suffix}。`,
     "先用 read_file 阅读 .aiall/project-knowledge.md 了解现有正文；再 read/grep 相关代码。",
-    "仅输出上述章节的更新内容：每个章节以 `## 章节标题` 开头，勿输出完整知识库或 project-knowledge 标记。",
-    "不要修改任何文件。",
+    "仅输出上述章节的更新内容：每个章节以 `## 标题` 开头（勿带（未探索）（待验证）后缀），正文须有实质内容。",
+    "勿输出完整知识库或 project-knowledge 标记。不要修改任何文件。",
   ].join("");
 }
 

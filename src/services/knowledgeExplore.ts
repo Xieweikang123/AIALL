@@ -6,7 +6,7 @@ export const EXPLORE_CONTINUE_PROMPT_RE =
 
 /** User clicked「补全未探索」. */
 export const EXPLORE_SECTION_FILL_PROMPT_RE =
-  /^请针对性探索并补全以下标注为「未探索」/;
+  /^请针对性探索并补全以下(?:知识库缺口章节|标注为「未探索」)/;
 
 /** User clicked「针对变更探索」. */
 export const EXPLORE_CHANGES_PROMPT_RE =

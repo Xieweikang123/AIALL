@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   buildKnowledgeExploreManifest,
+  canonicalizeKnowledgeGapMarkers,
   computeKnowledgeOverview,
+  findGapSectionTitles,
   findUnexploredSectionTitles,
   formatKnowledgeSize,
   injectReportHeadingIds,
@@ -92,6 +94,76 @@ describe("projectReportDisplay", () => {
       "已梳理",
     ].join("\n");
     expect(findUnexploredSectionTitles(content)).toEqual(["核心模块"]);
+  });
+
+  it("findUnexploredSectionTitles ignores feature names like 补全未探索", () => {
+    const content = [
+      PROJECT_KNOWLEDGE_MARKER,
+      "## 知识库构建系统",
+      "用户点击「补全未探索」（指定章节）",
+      "## 核心模块",
+      "内容未探索",
+    ].join("\n");
+    expect(findUnexploredSectionTitles(content)).toEqual(["核心模块"]);
+  });
+
+  it("findUnexploredSectionTitles ignores inline 待验证 in filled section body", () => {
+    const content = [
+      PROJECT_KNOWLEDGE_MARKER,
+      "## 项目测试如何运行？",
+      "运行 `npm test`。部分边界行为待验证。",
+      "## 核心模块",
+      "内容未探索",
+    ].join("\n");
+    expect(findUnexploredSectionTitles(content)).toEqual(["核心模块"]);
+  });
+
+  it("findGapSectionTitles detects title suffix flags", () => {
+    const content = [
+      PROJECT_KNOWLEDGE_MARKER,
+      "## 项目测试如何运行？（未探索）",
+      "",
+      "## 数据流 / 关键依赖",
+      "已梳理",
+    ].join("\n");
+    expect(findGapSectionTitles(content)).toEqual(["项目测试如何运行？"]);
+    expect(findUnexploredSectionTitles(content)).toEqual(["项目测试如何运行？"]);
+  });
+});
+
+describe("canonicalizeKnowledgeGapMarkers", () => {
+  it("moves body placeholder to title suffix", () => {
+    const body = [
+      PROJECT_KNOWLEDGE_MARKER,
+      `# ${PROJECT_KNOWLEDGE_TITLE}`,
+      "## 核心模块",
+      "内容未探索",
+      "## 技术栈",
+      "Vue 3",
+    ].join("\n");
+    const normalized = canonicalizeKnowledgeGapMarkers(body);
+    expect(normalized).toContain("## 核心模块（未探索）");
+    expect(normalized).not.toMatch(/\n内容未探索/);
+    expect(findGapSectionTitles(normalized)).toEqual(["核心模块"]);
+  });
+
+  it("strips suffix from covered sections", () => {
+    const body = [
+      "## 技术栈（未探索）",
+      "Vue 3 + TypeScript",
+    ].join("\n");
+    const normalized = canonicalizeKnowledgeGapMarkers(body);
+    expect(normalized).toContain("## 技术栈\n\nVue 3");
+    expect(normalized).not.toContain("（未探索）");
+    expect(findGapSectionTitles(normalized)).toEqual([]);
+  });
+
+  it("treats substantive body as covered even with stale title suffix", () => {
+    const content = [
+      "## 项目测试如何运行？（未探索）",
+      "运行 `npm test` 即可。",
+    ].join("\n");
+    expect(findGapSectionTitles(content)).toEqual([]);
   });
 });
 
@@ -237,6 +309,39 @@ describe("replaceKnowledgeSection", () => {
     );
     expect(merged).toContain("补全内容");
     expect(merged).toContain("Vue 3");
+  });
+
+  it("replaces section when existing title has unexplored suffix", () => {
+    const withSuffix = [
+      PROJECT_KNOWLEDGE_MARKER,
+      `# ${PROJECT_KNOWLEDGE_TITLE}`,
+      "## 技术栈",
+      "Vue 3",
+      "## 核心模块（未探索）",
+      "",
+    ].join("\n");
+    const merged = mergeSectionUpdatesIntoKnowledge(
+      withSuffix,
+      "## 核心模块\n\n| 模块 | 路径 |",
+    );
+    expect(merged).toContain("| 模块 | 路径 |");
+    expect(merged).not.toContain("（未探索）");
+    expect(findGapSectionTitles(merged)).toEqual([]);
+  });
+
+  it("preserves Chinese number prefix when replacing section", () => {
+    const withNumber = [
+      PROJECT_KNOWLEDGE_MARKER,
+      "## 八、核心模块（未探索）",
+      "",
+    ].join("\n");
+    const updated = replaceKnowledgeSection(
+      withNumber,
+      "核心模块",
+      "## 核心模块\n\n已梳理 server 与 src",
+    );
+    expect(updated).toContain("## 八、核心模块\n\n已梳理");
+    expect(updated).not.toContain("（未探索）");
   });
 });
 
