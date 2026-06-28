@@ -1,4 +1,4 @@
-import { nextTick, reactive, type ComputedRef, type Ref } from "vue";
+import { reactive, type ComputedRef, type Ref } from "vue";
 import { isScrollNearBottom, scrollElementToBottom } from "../utils/scrollViewport";
 
 export type UseAgentChainScrollDeps = {
@@ -39,8 +39,12 @@ export function useAgentChainScroll(deps: UseAgentChainScrollDeps): UseAgentChai
     chainJumpVisible[msgId] = false;
   }
 
+  const pendingScrollRafs = new Map<string, number>();
+
   function scrollStatusLogToBottomInternal(msgId: string) {
-    void nextTick(() => {
+    if (pendingScrollRafs.has(msgId)) return;
+    const rafId = requestAnimationFrame(() => {
+      pendingScrollRafs.delete(msgId);
       const el = statusLogScrollRefs.get(msgId);
       if (!el) return;
       if (chainScrollPinned.get(msgId) ?? true) {
@@ -48,6 +52,7 @@ export function useAgentChainScroll(deps: UseAgentChainScrollDeps): UseAgentChai
       }
       onChainViewportScroll(msgId);
     });
+    pendingScrollRafs.set(msgId, rafId);
   }
 
   function bindStatusLogScroll(el: HTMLElement | null, msgId: string) {
