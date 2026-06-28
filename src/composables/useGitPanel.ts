@@ -61,11 +61,15 @@ function getTopLevelDir(filePath: string): string {
 
 function defaultBatchMessage(g: BatchGroup): string {
   if (g.message) return g.message;
-  if (g.files.length === 1) {
-    const name = g.files[0].path.split("/").pop() || g.dir;
-    return `${g.dir}: ${name}`;
+  let dir = g.dir;
+  if (dir === "正在分析其余变更") {
+    dir = "其他未分组变更";
   }
-  return `${g.dir}: update ${g.files.length} files`;
+  if (g.files.length === 1) {
+    const name = g.files[0].path.split("/").pop() || dir;
+    return `${dir}: ${name}`;
+  }
+  return `${dir}: update ${g.files.length} files`;
 }
 
 function parsePartialGroups(jsonStr: string): AiBatchGroupItem[] {
@@ -634,6 +638,7 @@ export function useGitPanel(
   watch(
     () => gitUnstagedFiles.value.map((f) => f.path).join("\n"),
     () => {
+      if (!gitStatusKnown.value) return;
       if (batchCommittingAll.value) return;
       const current = currentUnstagedPaths();
       if (!current.length) {
