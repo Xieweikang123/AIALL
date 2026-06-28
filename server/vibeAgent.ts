@@ -1975,6 +1975,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       // Reset file-breadth tracking when the model finally writes (it found the target).
       exploreFilesRead.clear();
       fileBreadthNudgeSent = false;
+      const runtimeProfile = detectProjectRuntimeProfile(projectRoot);
       if (
         !postPatchVerifyNudgeSent &&
         runtimeProfile.verifyScript &&
