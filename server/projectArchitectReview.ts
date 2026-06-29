@@ -196,8 +196,13 @@ export async function buildArchitectReviewContext(
   const lastGitHead = existing.ok ? existing.meta.gitHead?.trim() : undefined;
   const lastReviewedAt = existing.ok ? existing.meta.lastReviewedAt : undefined;
 
-  const currentHead = await resolveCurrentGitHead(resolvedRoot);
-  const log = await gitLog(resolvedRoot, RECENT_COMMIT_COUNT);
+  // Run independent Git and knowledge retrieval tasks in parallel
+  const [currentHead, log, knowledge] = await Promise.all([
+    resolveCurrentGitHead(resolvedRoot),
+    gitLog(resolvedRoot, RECENT_COMMIT_COUNT),
+    readProjectKnowledge(resolvedRoot),
+  ]);
+
   const recentCommits = log.ok
     ? log.entries.map((e) => ({
         hash: e.hash,
@@ -222,13 +227,12 @@ export async function buildArchitectReviewContext(
   }
 
   let knowledgeExcerpt: string | undefined;
-  const knowledge = await readProjectKnowledge(resolvedRoot);
   if (knowledge.ok && knowledge.body.trim()) {
     knowledgeExcerpt = truncateKnowledgeForPrompt(knowledge.body, KNOWLEDGE_EXCERPT_MAX_CHARS);
   }
 
-  // Warm project context cache for subsequent agent run.
-  await buildProjectContext(resolvedRoot).catch(() => null);
+  // Warm project context cache for subsequent agent run in the background without blocking the response.
+  void buildProjectContext(resolvedRoot).catch(() => null);
 
   const context: ArchitectReviewContextBundle = {
     projectPath: resolvedRoot,
