@@ -1,5 +1,6 @@
 import http from "node:http";
 import connect from "connect";
+import { exec } from "node:child_process";
 import { registerAutomationMiddleware } from "../vite.automationMiddleware";
 import { registerIconTemplatesMiddleware } from "../vite.iconTemplatesMiddleware";
 import { registerVibeCodingMiddleware } from "../vite.vibeCodingMiddleware";
@@ -16,6 +17,46 @@ export function resolveProjectRoot(): string {
 export function createLocalApiApp(projectRoot: string) {
   const app = connect();
   app.use(corsMiddleware);
+
+  app.use("/backend/open-url", (req: any, res: any) => {
+    try {
+      const parsedUrl = new URL(req.url || "", `http://${req.headers.host || "localhost"}`);
+      const url = parsedUrl.searchParams.get("url");
+      if (!url) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Missing url parameter" }));
+        return;
+      }
+      const urlObj = new URL(url);
+      if (urlObj.protocol !== "http:" && urlObj.protocol !== "https:") {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "Only http and https protocols are allowed" }));
+        return;
+      }
+      const safeUrl = urlObj.toString().replace(/"/g, "%22");
+      let cmd = "";
+      if (process.platform === "win32") {
+        cmd = `start "" "${safeUrl}"`;
+      } else if (process.platform === "darwin") {
+        cmd = `open "${safeUrl}"`;
+      } else {
+        cmd = `xdg-open "${safeUrl}"`;
+      }
+      exec(cmd, (err) => {
+        if (err) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: err.message }));
+        } else {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: true }));
+        }
+      });
+    } catch (e: any) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error: e.message }));
+    }
+  });
+
   registerIconTemplatesMiddleware(app, projectRoot);
   registerAutomationMiddleware(app, projectRoot);
   registerVibeCodingMiddleware(app);
