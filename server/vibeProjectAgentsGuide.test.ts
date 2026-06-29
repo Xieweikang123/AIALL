@@ -84,6 +84,7 @@ describe("vibeProjectAgentsGuide", () => {
     if (!result.ok) return;
     expect(result.content).toBe("");
     expect(result.path).toBe(AGENTS_MD_REL_PATH);
+    expect(result.files).toEqual([]);
   });
 
   it("readProjectAgentsGuide reads project AGENTS.md", async () => {
@@ -94,5 +95,50 @@ describe("vibeProjectAgentsGuide", () => {
     if (!result.ok) return;
     expect(result.content).toContain("文件面板");
     expect(result.content).not.toContain("Agent 编排");
+    expect(result.files.length).toBe(1);
+    expect(result.files[0].filename).toBe("AGENTS.md");
+  });
+
+  it("readProjectAgentsGuide reads CLAUDE.md, .cursorrules, and AGENTS.md", async () => {
+    tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "agents-guide-"));
+    await fs.promises.writeFile(path.join(tmpDir, "CLAUDE.md"), "# Claude Guide\n\n## 开发约定\n\nBuild using npm.", "utf-8");
+    await fs.promises.writeFile(path.join(tmpDir, ".cursorrules"), "# Cursor Rules\n\nFollow these rules.", "utf-8");
+    await fs.promises.writeFile(path.join(tmpDir, "AGENTS.md"), SAMPLE_AGENTS, "utf-8");
+
+    const result = await readProjectAgentsGuide(tmpDir);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.files.length).toBe(3);
+    
+    const claudeFile = result.files.find(f => f.filename === "CLAUDE.md");
+    const cursorFile = result.files.find(f => f.filename === ".cursorrules");
+    const agentsFile = result.files.find(f => f.filename === "AGENTS.md");
+
+    expect(claudeFile).toBeDefined();
+    expect(cursorFile).toBeDefined();
+    expect(agentsFile).toBeDefined();
+
+    // Verify blocklist is NOT applied to CLAUDE.md
+    expect(claudeFile?.content).toContain("开发约定");
+
+    // Verify blocklist IS applied to AGENTS.md
+    expect(agentsFile?.content).not.toContain("开发约定");
+    expect(agentsFile?.content).toContain("文件面板");
+
+    expect(result.path).toBe("CLAUDE.md, .cursorrules, AGENTS.md");
+  });
+
+  it("formats multiple files correctly using formatAgentsGuideForPrompt", () => {
+    const files = [
+      { filename: "CLAUDE.md", content: "Claude rules", truncated: false },
+      { filename: ".cursorrules", content: "Cursor rules", truncated: true },
+    ];
+    const formatted = formatAgentsGuideForPrompt(files);
+    expect(formatted).toContain("项目规范与指南（CLAUDE.md 中的约定；用户最新消息与之冲突时以用户为准）：");
+    expect(formatted).toContain("Claude rules");
+    expect(formatted).toContain("项目规范与指南（.cursorrules 中的约定；用户最新消息与之冲突时以用户为准）：");
+    expect(formatted).toContain("Cursor rules");
+    expect(formatted).toContain("（该文件已截断，完整内容见项目根目录的 .cursorrules）");
   });
 });

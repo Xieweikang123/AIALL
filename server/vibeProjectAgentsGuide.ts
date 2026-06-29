@@ -5,6 +5,8 @@ import { resolveProjectPath } from "./vibeFs";
 /** Project-root agent guide (terminology, structure, session paths). */
 export const AGENTS_MD_REL_PATH = "AGENTS.md";
 
+export const SPEC_FILENAMES = ["CLAUDE.md", ".cursorrules", "AGENTS.md"] as const;
+
 /** Keep injected guide compact — high-signal sections only. */
 export const AGENTS_GUIDE_MAX_CHARS = 4_000;
 
@@ -15,8 +17,21 @@ const RUNTIME_SECTION_BLOCKLIST: RegExp[] = [
   /调试准则/,
 ];
 
+export interface ProjectAgentGuideFileResult {
+  filename: string;
+  content: string;
+  truncated: boolean;
+}
+
 export type ProjectAgentsGuideReadResult =
-  | { ok: true; content: string; truncated: boolean; path: string; maxChars: number }
+  | {
+      ok: true;
+      files: ProjectAgentGuideFileResult[];
+      content: string; // Merged content for backward compatibility
+      truncated: boolean; // True if any file was truncated
+      path: string; // List of read files, e.g. "CLAUDE.md, .cursorrules, AGENTS.md"
+      maxChars: number;
+    }
   | { ok: false; error: string };
 
 const guideCache = new Map<string, { builtAt: number; result: ProjectAgentsGuideReadResult }>();
@@ -27,11 +42,12 @@ export function isBlockedAgentsGuideSection(title: string): boolean {
   return RUNTIME_SECTION_BLOCKLIST.some((re) => re.test(t));
 }
 
-/** Extract agent-runtime sections from AGENTS.md (terminology preamble + non-blocklisted ## sections). */
-export function extractAgentsGuideForPrompt(markdown: string): { content: string; truncated: boolean } {
+/** Extract agent-runtime sections from the markdown file. */
+export function extractAgentsGuideForPrompt(markdown: string, filename?: string): { content: string; truncated: boolean } {
   const normalized = markdown.replace(/\r\n/g, "\n").trim();
   if (!normalized) return { content: "", truncated: false };
 
+  const isAgentsMd = filename === undefined || filename === "AGENTS.md";
   const parts = normalized.split(/\n(?=## )/);
   const sections: string[] = [];
 
@@ -43,7 +59,7 @@ export function extractAgentsGuideForPrompt(markdown: string): { content: string
       continue;
     }
     const titleLine = part.match(/^## (.+)$/m)?.[1] ?? "";
-    if (isBlockedAgentsGuideSection(titleLine)) continue;
+    if (isAgentsMd && isBlockedAgentsGuideSection(titleLine)) continue;
     sections.push(part);
   }
 
@@ -57,8 +73,31 @@ export function extractAgentsGuideForPrompt(markdown: string): { content: string
   };
 }
 
-export function formatAgentsGuideForPrompt(content: string, truncated = false): string {
-  const body = content.trim();
+export function formatAgentsGuideForPrompt(
+  contentOrFiles: string | ProjectAgentGuideFileResult[],
+  truncated = false
+): string {
+  if (Array.isArray(contentOrFiles)) {
+    const activeFiles = contentOrFiles.filter((f) => f.content.trim());
+    if (activeFiles.length === 0) return "";
+
+    const lines: string[] = [];
+    for (const file of activeFiles) {
+      lines.push(
+        "",
+        `项目规范与指南（${file.filename} 中的约定；用户最新消息与之冲突时以用户为准）：`,
+        "```markdown",
+        file.content.trim(),
+        "```"
+      );
+      if (file.truncated) {
+        lines.push(`（该文件已截断，完整内容见项目根目录的 ${file.filename}）`);
+      }
+    }
+    return lines.join("\n");
+  }
+
+  const body = contentOrFiles.trim();
   if (!body) return "";
 
   const lines = [
@@ -89,34 +128,51 @@ export async function readProjectAgentsGuide(projectRoot: string): Promise<Proje
     return cached.result;
   }
 
-  const resolved = resolveProjectPath(resolvedRoot, AGENTS_MD_REL_PATH);
-  if (!resolved.ok) {
-    return { ok: false, error: resolved.error };
+  const files: ProjectAgentGuideFileResult[] = [];
+  const readPaths: string[] = [];
+  let anyTruncated = false;
+
+  for (const filename of SPEC_FILENAMES) {
+    const resolved = resolveProjectPath(resolvedRoot, filename);
+    if (!resolved.ok) {
+      continue;
+    }
+
+    try {
+      const stats = await fs.promises.stat(resolved.path);
+      if (!stats.isFile()) {
+        continue;
+      }
+
+      const raw = await fs.promises.readFile(resolved.path, "utf-8");
+      const { content, truncated } = extractAgentsGuideForPrompt(raw, filename);
+      files.push({
+        filename,
+        content,
+        truncated,
+      });
+      readPaths.push(filename);
+      if (truncated) {
+        anyTruncated = true;
+      }
+    } catch {
+      // File doesn't exist or is not readable, skip silently
+    }
   }
 
-  let raw: string;
-  try {
-    raw = await fs.promises.readFile(resolved.path, "utf-8");
-  } catch {
-    const empty: ProjectAgentsGuideReadResult = {
-      ok: true,
-      content: "",
-      truncated: false,
-      path: AGENTS_MD_REL_PATH,
-      maxChars: AGENTS_GUIDE_MAX_CHARS,
-    };
-    guideCache.set(resolvedRoot, { builtAt: Date.now(), result: empty });
-    return empty;
-  }
+  // Create merged content for backward compatibility
+  const mergedContent = files.map((f) => f.content).join("\n\n").trim();
 
-  const { content, truncated } = extractAgentsGuideForPrompt(raw);
   const result: ProjectAgentsGuideReadResult = {
     ok: true,
-    content,
-    truncated,
-    path: AGENTS_MD_REL_PATH,
+    files,
+    content: mergedContent,
+    truncated: anyTruncated,
+    path: readPaths.join(", ") || AGENTS_MD_REL_PATH,
     maxChars: AGENTS_GUIDE_MAX_CHARS,
   };
+
   guideCache.set(resolvedRoot, { builtAt: Date.now(), result });
   return result;
 }
+

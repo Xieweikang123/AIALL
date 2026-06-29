@@ -400,8 +400,8 @@ export async function buildAgentContext(
       : "";
 
   const agentsGuideBlock =
-    agentsGuideResult.ok && agentsGuideResult.content.trim()
-      ? formatAgentsGuideForPrompt(agentsGuideResult.content, agentsGuideResult.truncated)
+    agentsGuideResult.ok && (agentsGuideResult.files?.length || agentsGuideResult.content.trim())
+      ? formatAgentsGuideForPrompt(agentsGuideResult.files || agentsGuideResult.content, agentsGuideResult.truncated)
       : "";
 
   const runtimeProfile = detectProjectRuntimeProfile(projectRoot);
