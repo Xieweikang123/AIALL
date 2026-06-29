@@ -423,83 +423,88 @@ export function useProjectArchitectReview(options: {
     }
 
     reviewMessage.value = "";
+    reviewLoading.value = true;
 
-    if (hasReview.value) {
-      const commitCount = reviewContext.value?.recentCommits?.length;
-      const changedFileCount = reviewContext.value?.changedFiles?.length;
-      const archiveResult = await archiveReviewToHistory(
-        project,
-        reviewBody.value,
-        {
-          gitHead: options.gitHead?.value?.trim() || reviewMeta.value.gitHead,
-          verdict: reviewVerdict.value ?? undefined,
-          commitCount,
-          changedFileCount,
-        },
-        reviewHistory.value.length, // pass cached count so archiveReviewToHistory skips the "before" fetch
-      );
-      if (!archiveResult.ok) {
-        reviewMessage.value = archiveResult.error || "归档当前评审失败";
+    try {
+      if (hasReview.value) {
+        const commitCount = reviewContext.value?.recentCommits?.length;
+        const changedFileCount = reviewContext.value?.changedFiles?.length;
+        const archiveResult = await archiveReviewToHistory(
+          project,
+          reviewBody.value,
+          {
+            gitHead: options.gitHead?.value?.trim() || reviewMeta.value.gitHead,
+            verdict: reviewVerdict.value ?? undefined,
+            commitCount,
+            changedFileCount,
+          },
+          reviewHistory.value.length, // pass cached count so archiveReviewToHistory skips the "before" fetch
+        );
+        if (!archiveResult.ok) {
+          reviewMessage.value = archiveResult.error || "归档当前评审失败";
+          return false;
+        }
+        activeHistoryReview.value = null;
+        // Use the reviews list returned by archiveReviewToHistory to avoid a separate loadReviewHistory() call.
+        if (archiveResult.reviews) {
+          reviewHistory.value = archiveResult.reviews;
+        } else {
+          await loadReviewHistory();
+        }
+      }
+
+      const contextResult = await fetchArchitectReviewContext(project);
+      if (!contextResult.ok || !contextResult.context) {
+        reviewMessage.value = contextResult.error || "获取评审上下文失败";
         return false;
       }
-      activeHistoryReview.value = null;
-      // Use the reviews list returned by archiveReviewToHistory to avoid a separate loadReviewHistory() call.
-      if (archiveResult.reviews) {
-        reviewHistory.value = archiveResult.reviews;
-      } else {
-        await loadReviewHistory();
-      }
-    }
+      reviewContext.value = contextResult.context;
 
-    const contextResult = await fetchArchitectReviewContext(project);
-    if (!contextResult.ok || !contextResult.context) {
-      reviewMessage.value = contextResult.error || "获取评审上下文失败";
-      return false;
-    }
-    reviewContext.value = contextResult.context;
+      const prompt = buildArchitectReviewPrompt(contextResult.context);
+      const maxTurns = ARCHITECT_REVIEW_MAX_TURNS;
 
-    const prompt = buildArchitectReviewPrompt(contextResult.context);
-    const maxTurns = ARCHITECT_REVIEW_MAX_TURNS;
-
-    activeReviewContext = {
-      projectPath: project,
-      gitHead: contextResult.context.currentGitHead ?? options.gitHead?.value?.trim(),
-    };
-
-    reviewRun.value = {
-      ...emptyRunState(),
-      running: true,
-      maxTurns,
-    };
-
-    const request = {
-      prompt,
-      history: [],
-      projectPath: project,
-      endpoint: options.aiConfig.value.endpoint,
-      apiKey: options.aiConfig.value.apiKey,
-      model: options.aiConfig.value.model,
-      mode: "explore" as const,
-      maxTurns,
-      webProxyUrl: loadWebProxyUrlFromStorage() || undefined,
-    };
-
-    return new Promise<boolean>((resolve) => {
-      let settled = false;
-      const finish = (ok: boolean) => {
-        if (settled) return;
-        settled = true;
-        reviewRun.value.running = false;
-        abortHandle = null;
-        void finalizeReviewRun().finally(() => resolve(ok));
+      activeReviewContext = {
+        projectPath: project,
+        gitHead: contextResult.context.currentGitHead ?? options.gitHead?.value?.trim(),
       };
 
-      abortHandle = runVibeAgentSse(request, (event) => {
-        handleReviewEvent(event);
-        if (event.type === "done") finish(true);
-        if (event.type === "error" && reviewRun.value.failed) finish(false);
+      reviewRun.value = {
+        ...emptyRunState(),
+        running: true,
+        maxTurns,
+      };
+
+      const request = {
+        prompt,
+        history: [],
+        projectPath: project,
+        endpoint: options.aiConfig.value.endpoint,
+        apiKey: options.aiConfig.value.apiKey,
+        model: options.aiConfig.value.model,
+        mode: "explore" as const,
+        maxTurns,
+        webProxyUrl: loadWebProxyUrlFromStorage() || undefined,
+      };
+
+      return new Promise<boolean>((resolve) => {
+        let settled = false;
+        const finish = (ok: boolean) => {
+          if (settled) return;
+          settled = true;
+          reviewRun.value.running = false;
+          abortHandle = null;
+          void finalizeReviewRun().finally(() => resolve(ok));
+        };
+
+        abortHandle = runVibeAgentSse(request, (event) => {
+          handleReviewEvent(event);
+          if (event.type === "done") finish(true);
+          if (event.type === "error" && reviewRun.value.failed) finish(false);
+        });
       });
-    });
+    } finally {
+      reviewLoading.value = false;
+    }
   }
 
   function stopArchitectReview() {

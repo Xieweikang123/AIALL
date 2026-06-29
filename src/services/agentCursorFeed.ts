@@ -29,10 +29,10 @@ export type CursorAgentTimeline = {
   answer: { text: string; streaming: boolean } | null;
 };
 
-const DEFAULT_KEEP_VISIBLE = 4;
-const DEFAULT_COLLAPSE_AFTER = 5;
-const COMPACT_FEED_MIN_STEPS = 4;
-const COMPACT_RECENT_VISIBLE = 6;
+const DEFAULT_KEEP_VISIBLE = 3;
+const DEFAULT_COLLAPSE_AFTER = 3;
+const COMPACT_FEED_MIN_STEPS = 3;
+const COMPACT_RECENT_VISIBLE = 3;
 
 export type AgentExplorationStats = {
   reads: number;

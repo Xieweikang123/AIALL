@@ -402,7 +402,9 @@ export function useGitPanel(
       gitBranch.value = result.branch;
       gitHeadCommit.value = result.headCommit?.trim() || "";
       gitStatus.value = result.files;
-      gitError.value = "";
+      if (showLoading) {
+        gitError.value = "";
+      }
       clearGitDiffCache();
 
       if (result.isRepo) {
@@ -660,8 +662,11 @@ export function useGitPanel(
   watch(
     aiBatchGroupsResult,
     (result) => {
-      if (!aiBatchGrouping.value || !result?.length) return;
-      batchMessages.value = batchGroups.value.map((g) => defaultBatchMessage(g));
+      if (aiBatchGrouping.value && result?.length) {
+        batchMessages.value = batchGroups.value.map((g) => defaultBatchMessage(g));
+      } else if (!result?.length) {
+        syncBatchMessagesFromGroups();
+      }
     },
     { deep: true },
   );
@@ -739,11 +744,20 @@ export function useGitPanel(
 
   async function commitBatchGroupByPaths(filePaths: string[], message: string, index = 0, _total?: number) {
     if (!projectOpened() || !message.trim() || !filePaths.length) return;
+    
+    // 过滤出当前确实处于未暂存/已修改状态的文件，避免提交空变更导致 git commit 报错
+    const filesToCommit = filePaths.filter((p) =>
+      gitUnstagedFiles.value.some((uf) => uf.path === p)
+    );
+    if (filesToCommit.length === 0) {
+      return;
+    }
+
     batchCommittingIndex.value = index;
     gitError.value = "";
     clearGitDiffCache();
     try {
-      const stageResult = await stageGitFiles(projectPath(), filePaths);
+      const stageResult = await stageGitFiles(projectPath(), filesToCommit);
       if (!stageResult.ok) {
         gitError.value = stageResult.error || "暂存失败";
         await refreshGitStatus({ showLoading: false, force: true });

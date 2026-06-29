@@ -348,7 +348,7 @@
       </section>
 
       <div
-        v-show="!editorCollapsed && !chatCollapsed"
+        v-show="!editorCollapsed && !chatCollapsed && !noActiveEditor"
         class="resize-handle"
         role="separator"
         aria-orientation="vertical"
@@ -1384,7 +1384,6 @@ const {
   chatPanelWidth,
   editorCollapsed,
   chatCollapsed,
-  chatPanelStyle,
   startResize,
   stopResize,
   onResizeKeydown,
@@ -1393,6 +1392,7 @@ const {
   collapseChat,
   expandChat,
   getChatPanelMaxWidth,
+  CHAT_MIN_WIDTH,
 } = usePanelLayout(workspaceRef);
 
 function reloadAiConfig() {
@@ -1493,6 +1493,24 @@ const {
   collapseEditor,
   expandEditor,
   autoRetryWithCountdown,
+});
+
+const noActiveEditor = computed(() => {
+  const isProjectView = gitPanelMode.value === "project" &&
+    (projectPanelView.value === "knowledge" || projectPanelView.value === "health");
+
+  if (isProjectView) {
+    return !projectOpened.value;
+  }
+
+  return openTabs.value.length === 0;
+});
+
+const chatPanelStyle = computed(() => {
+  if (editorCollapsed.value || noActiveEditor.value) {
+    return { flex: "1", minWidth: `${CHAT_MIN_WIDTH}px`, width: "auto" };
+  }
+  return { width: `${chatPanelWidth.value}px`, flexShrink: "0" };
 });
 
 const {

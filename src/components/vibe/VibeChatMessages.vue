@@ -178,7 +178,7 @@
               'msg-answer--streaming': m.role === 'assistant' && ctx.isAgentRunning(m),
               'msg-answer--final': m.role === 'assistant' && !ctx.isAgentRunning(m),
             }"
-            :content="planMarkdownContent(m)"
+            :content="planMarkdownContent(ctx.messageDisplayContent(m), m.role === 'assistant' && ctx.isAgentRunning(m))"
             :streaming="m.role === 'assistant' && ctx.isAgentRunning(m)"
             :interactive="m.role === 'assistant' && !ctx.isAgentRunning(m)"
             @select-option="(option) => ctx.handleAiOptionSelect(option, m)"
@@ -457,10 +457,8 @@ function hideBrokenUserImage(event: Event) {
   }
 }
 
-function planMarkdownContent(msg: VibeChatMessageItem): string {
-  const raw = ctx.messageDisplayContent(msg);
-  const whileStreaming = msg.role === "assistant" && ctx.isAgentRunning(msg);
-  return enrichPlanMarkdownForDisplay(raw, { whileStreaming });
+function planMarkdownContent(displayContent: string, whileStreaming: boolean): string {
+  return enrichPlanMarkdownForDisplay(displayContent, { whileStreaming });
 }
 
 const CHAT_MODE_LABELS: Record<string, string> = {

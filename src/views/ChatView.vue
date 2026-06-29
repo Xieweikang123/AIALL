@@ -457,7 +457,6 @@ async function handleSend() {
     state.phase = "success";
     state.message = "完成";
     assistantMsg.meta = "完成";
-    if (ai.rawText && ai.rawText.trim()) assistantMsg.content = ai.rawText;
     await scrollToBottom();
   } catch (error) {
     const message = error instanceof Error ? error.message : "未知错误";

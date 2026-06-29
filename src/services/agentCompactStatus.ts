@@ -130,23 +130,12 @@ export function buildUnifiedAgentTimeline(
   const detailed = input.activityDetailed;
   const compact = input.compactFeed;
   const timeline = buildCursorAgentTimeline(items, input.answerPreview, {
-    keepVisible: compact ? 2 : detailed ? 8 : input.isRunning ? 3 : 4,
-    collapseAfter: compact ? 4 : detailed ? 10 : input.isRunning ? 4 : 5,
+    keepVisible: compact ? 2 : detailed ? 8 : 3,
+    collapseAfter: compact ? 4 : detailed ? 10 : 3,
     streaming: input.answerStreaming,
   });
 
-  if (timeline.answer) {
-    const blocks = timeline.blocks.filter((block) => block.kind !== "thought");
-    const processBlocks = timeline.processBlocks.filter((block) => block.kind !== "thought");
-    return { ...timeline, blocks, processBlocks };
-  }
-
-  if (!compact || !input.isRunning) {
-    return timeline;
-  }
-
-  const blocks = timeline.blocks.filter((block) => block.kind !== "thought");
-  return { ...timeline, blocks };
+  return timeline;
 }
 
 export function summarizeCursorProcessBlocks(

@@ -166,41 +166,6 @@
         </div>
       </div>
 
-      <p v-if="knowledgeStale" class="knowledge-stale-hint" role="status">
-        知识库基于提交 {{ shortGitRef(knowledgeMeta.gitHead!) }}，当前 {{ shortGitRef(currentGitHead!) }}，代码可能已变更
-      </p>
-
-      <div
-        v-if="showChangesCard"
-        class="knowledge-changes-card"
-        aria-label="自上次探索以来的代码变更"
-      >
-        <div class="knowledge-changes-head">
-          <p class="knowledge-changes-title">
-            <template v-if="knowledgeChangesLoading">正在检测变更…</template>
-            <template v-else-if="changesSummary">{{ changesSummary }}</template>
-            <template v-else>代码可能已变更</template>
-          </p>
-          <button
-            type="button"
-            class="knowledge-btn knowledge-btn--accent knowledge-changes-action"
-            :disabled="!exploreReady || exploreRun.running || knowledgeChangesLoading"
-            @click="emit('explore-changes')"
-          >
-            {{ exploreChangesLabel }}
-          </button>
-        </div>
-        <ul v-if="shownChangedFiles.length" class="knowledge-changes-list">
-          <li v-for="file in shownChangedFiles" :key="file">
-            <button type="button" class="knowledge-changes-file" @click="emit('open-file', file)">
-              {{ file }}
-            </button>
-          </li>
-        </ul>
-        <p v-if="hiddenChangedFileCount > 0" class="knowledge-changes-more">
-          另有 {{ hiddenChangedFileCount }} 个文件未列出
-        </p>
-      </div>
 
       <div v-if="layout === 'sidebar' && knowledgeLoading" class="knowledge-loading">加载中…</div>
 
@@ -256,44 +221,10 @@
       </header>
 
       <div
-        v-if="layout === 'main' && (knowledgeMessage || knowledgeStale || showChangesCard)"
+        v-if="layout === 'main' && knowledgeMessage"
         class="knowledge-main-alerts"
       >
         <p v-if="knowledgeMessage" class="knowledge-hint" role="status">{{ knowledgeMessage }}</p>
-        <p v-if="knowledgeStale" class="knowledge-stale-hint" role="status">
-          知识库基于提交 {{ shortGitRef(knowledgeMeta.gitHead!) }}，当前 {{ shortGitRef(currentGitHead!) }}，代码可能已变更
-        </p>
-        <div
-          v-if="showChangesCard"
-          class="knowledge-changes-card knowledge-changes-card--main"
-          aria-label="自上次探索以来的代码变更"
-        >
-          <div class="knowledge-changes-head">
-            <p class="knowledge-changes-title">
-              <template v-if="knowledgeChangesLoading">正在检测变更…</template>
-              <template v-else-if="changesSummary">{{ changesSummary }}</template>
-              <template v-else>代码可能已变更</template>
-            </p>
-            <button
-              type="button"
-              class="knowledge-btn knowledge-btn--accent knowledge-changes-action"
-              :disabled="!exploreReady || exploreRun.running || knowledgeChangesLoading"
-              @click="emit('explore-changes')"
-            >
-              {{ exploreChangesLabel }}
-            </button>
-          </div>
-          <ul v-if="shownChangedFiles.length" class="knowledge-changes-list">
-            <li v-for="file in shownChangedFiles" :key="file">
-              <button type="button" class="knowledge-changes-file" @click="emit('open-file', file)">
-                {{ file }}
-              </button>
-            </li>
-          </ul>
-          <p v-if="hiddenChangedFileCount > 0" class="knowledge-changes-more">
-            另有 {{ hiddenChangedFileCount }} 个文件未列出
-          </p>
-        </div>
       </div>
 
       <div v-if="knowledgeLoading && !exploreRun.running" class="knowledge-loading">加载中…</div>

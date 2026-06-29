@@ -80,7 +80,10 @@
     <article
       v-else-if="displayHtml"
       class="architect-review-body markdown-body"
-      :class="{ 'architect-review-body--switching': reviewHistoryDetailLoading }"
+      :class="{
+        'architect-review-body--switching': reviewHistoryDetailLoading,
+        'architect-review-body--stale': reviewRun.running && !reviewRun.assistantText.trim()
+      }"
       v-html="displayHtml"
     />
 
@@ -369,6 +372,12 @@ const displayHtml = computed(() => {
 
 .architect-review-body--switching {
   opacity: 0.55;
+  pointer-events: none;
+}
+
+.architect-review-body--stale {
+  opacity: 0.45;
+  filter: grayscale(30%);
   pointer-events: none;
 }
 

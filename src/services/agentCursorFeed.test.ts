@@ -397,7 +397,7 @@ describe("agentCursorFeed", () => {
     });
 
     expect(timeline.blocks.at(-1)?.kind).toBe("answer");
-    expect(timeline.blocks.some((block) => block.kind === "thought")).toBe(false);
+    expect(timeline.blocks.some((block) => block.kind === "thought")).toBe(true);
     expect(timeline.blocks.some((block) => block.kind === "actions")).toBe(true);
   });
 
@@ -419,7 +419,7 @@ describe("agentCursorFeed", () => {
       compactFeed: true,
     });
 
-    expect(timeline.blocks.some((block) => block.kind === "thought")).toBe(false);
+    expect(timeline.blocks.some((block) => block.kind === "thought")).toBe(true);
   });
 
   it("shows placeholder answer while streaming_model before preview text", () => {
