@@ -370,4 +370,42 @@ describe("executeTool immediate persistence", () => {
     );
     expect(result).toContain("Explore 模式下不支持");
   });
+
+  it("read_file accepts injectedKeyFilePaths as string[] without throwing", async () => {
+    const root = await makeProject();
+    await fs.promises.writeFile(path.join(root, "key.ts"), "export const x = 1;\n", "utf8");
+    const injectedHint = await executeTool(
+      root,
+      "read_file",
+      { path: "key.ts" },
+      null,
+      "build",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      ["key.ts"],
+    );
+    expect(injectedHint).not.toContain("is not a function");
+    expect(injectedHint).toContain("关键文件");
+
+    const fileContent = await executeTool(
+      root,
+      "read_file",
+      { path: "key.ts" },
+      null,
+      "build",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      ["other.ts"],
+    );
+    expect(fileContent).toContain("export const x = 1");
+    expect(fileContent).not.toContain("is not a function");
+  });
 });

@@ -149,8 +149,14 @@ export async function executeTool(
   readSliceRepeatCounts?: Map<string, number>,
   toolGuard?: ToolGuardContext,
   webProxyUrl?: string,
-  injectedKeyFilePaths?: Set<string>,
+  injectedKeyFilePaths?: Set<string> | string[],
 ): Promise<string> {
+  const injectedKeyPathSet =
+    injectedKeyFilePaths instanceof Set
+      ? injectedKeyFilePaths
+      : injectedKeyFilePaths?.length
+        ? new Set(injectedKeyFilePaths)
+        : undefined;
   if (mode === "ask" && WRITE_AGENT_TOOL_NAMES.has(name)) {
     return buildWriteToolBlockedMessage("ask");
   }
@@ -221,7 +227,7 @@ export async function executeTool(
     const limit = Math.min(maxLimit, Math.max(1, Number(args.limit) || defaultLimit));
     const normalizedKey = resolved.key.replace(/\\/g, "/");
     if (
-      injectedKeyFilePaths?.has(normalizedKey) &&
+      injectedKeyPathSet?.has(normalizedKey) &&
       offset <= 1 &&
       !args.offset &&
       !args.limit

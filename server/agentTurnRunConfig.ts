@@ -23,18 +23,23 @@ export interface TurnRunConfig {
   maxContextChars: number;
   activeTools: { type: "function"; function: { name: string; description: string; parameters: object } }[];
   imageDataUrls: string[];
-  injectedKeyFilePaths: string[];
+  injectedKeyFilePaths: Set<string>;
   webProxyUrl?: string;
   visionLocateSingleTurnRun: boolean;
   signal?: AbortSignal;
 }
 
-export type TurnRunConfigInput = TurnRunConfig;
+export type TurnRunConfigInput = Omit<TurnRunConfig, "injectedKeyFilePaths"> & {
+  injectedKeyFilePaths?: Set<string> | string[];
+};
 
 export function buildTurnRunConfig(input: TurnRunConfigInput): TurnRunConfig {
+  const raw = input.injectedKeyFilePaths;
+  const injectedKeyFilePaths =
+    raw instanceof Set ? raw : new Set(Array.isArray(raw) ? raw : []);
   return {
     ...input,
-    injectedKeyFilePaths: input.injectedKeyFilePaths ?? [],
+    injectedKeyFilePaths,
   };
 }
 

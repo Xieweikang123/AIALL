@@ -290,7 +290,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     maxContextChars: runPolicy.maxContextChars,
     activeTools,
     imageDataUrls,
-    injectedKeyFilePaths: injectedKeyFilePaths ? [...injectedKeyFilePaths] : [],
+    injectedKeyFilePaths: injectedKeyFilePaths ?? new Set(),
     webProxyUrl,
     visionLocateSingleTurnRun,
     signal,

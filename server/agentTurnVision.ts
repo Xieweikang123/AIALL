@@ -118,7 +118,7 @@ export async function runTurnVision(
         onEvent({
           type: "status",
           data: {
-            phase: "vision_first_turn_skip",
+            phase: "vision_first_turn_skipped",
             turn,
             ...(ctx.segmentMaxTurns !== undefined ? { maxTurns: ctx.segmentMaxTurns } : {}),
             model,

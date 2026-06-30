@@ -1,4 +1,5 @@
 import {
+  AGENT_AI_MAX_RETRIES,
   chatCompletionWithTools,
   type ChatCompletionMessage,
   type ChatToolCall,
@@ -111,6 +112,7 @@ export async function runTurnModelCall(
       model,
       messages: compactedMessages,
       tools: toolsForTurn,
+      maxRetries: AGENT_AI_MAX_RETRIES,
       signal,
       onStreamProgress: (progress: ModelStreamProgress) => {
         if (progress.type === "status") {
