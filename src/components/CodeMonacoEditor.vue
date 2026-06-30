@@ -169,7 +169,7 @@ function loadMinimapSettings() {
   } catch {}
 }
 
-function getSelectionAnchorRect(monacoSelection: Monaco.editor.ISelection): MonacoSelectionAnchor | null {
+function getSelectionAnchorRect(monacoSelection: Monaco.IRange): MonacoSelectionAnchor | null {
   if (!editor) return null;
   const domNode = editor.getDomNode();
   if (!domNode) return null;

@@ -271,23 +271,19 @@
                     <button type="button" class="ghost tiny" @click="$emit('unstage-all')">取消全部</button>
                   </div>
                   <div v-if="gitStagedOpen" class="git-file-list">
-                    <div
-                      v-for="file in gitStagedFiles"
-                      :key="file.path"
-                      class="git-file-item"
-                      :class="{ active: selectedGitFiles.includes(file.path), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
-                      @pointerdown="$emit('on-git-file-pointer-down', $event, file.path, file.staged)"
-                      @contextmenu.prevent="$emit('on-git-file-contextmenu', $event, file.path)"
-                    >
-                      <span class="git-file-check" @pointerdown.stop @click.stop="$emit('unstage-file', file.path)">✓</span>
-                      <span class="git-file-status" :class="gitStatusClass(file.status)">
-                        {{ gitStatusIcon(file.status) }}
-                      </span>
-                      <span class="git-file-path" :title="file.path">
-                        <span v-if="splitGitFilePath(file.path).dir" class="git-file-path-dir">{{ splitGitFilePath(file.path).dir }}</span>
-                        <span class="git-file-path-name">{{ splitGitFilePath(file.path).name }}</span>
-                      </span>
-                    </div>
+                    <GitFileTreeNode
+                      v-for="node in gitStagedTree"
+                      :key="node.path"
+                      :node="node"
+                      staged
+                      :expanded-dirs="gitTreeExpandedDirs"
+                      :selected-git-files="selectedGitFiles"
+                      :git-diff-loading-key="gitDiffLoadingKey"
+                      @toggle-dir="toggleGitTreeDir"
+                      @unstage-file="$emit('unstage-file', $event)"
+                      @pointer-down="(event, path, isStaged) => $emit('on-git-file-pointer-down', event, path, isStaged)"
+                      @contextmenu="(event, path) => $emit('on-git-file-contextmenu', event, path)"
+                    />
                   </div>
                 </div>
                 <div v-if="gitUnstagedFiles.length" class="git-section">
@@ -302,24 +298,20 @@
                     </div>
                   </div>
                   <div v-if="gitUnstagedOpen" class="git-file-list">
-                    <div
-                      v-for="(file, idx) in gitUnstagedFiles"
-                      :key="`unstaged:${file.path}:${idx}`"
-                      class="git-file-item"
-                      :class="{ active: selectedGitFiles.includes(file.path), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
-                      @pointerdown="$emit('on-git-file-pointer-down', $event, file.path, file.staged)"
-                      @contextmenu.prevent="$emit('on-git-file-contextmenu', $event, file.path)"
-                    >
-                      <span class="git-file-check" @pointerdown.stop @click.stop="$emit('stage-file', file.path)">+</span>
-                      <span class="git-file-status" :class="gitStatusClass(file.status)">
-                        {{ gitStatusIcon(file.status) }}
-                      </span>
-                      <span class="git-file-path" :title="file.path">
-                        <span v-if="splitGitFilePath(file.path).dir" class="git-file-path-dir">{{ splitGitFilePath(file.path).dir }}</span>
-                        <span class="git-file-path-name">{{ splitGitFilePath(file.path).name }}</span>
-                      </span>
-                      <button type="button" class="ghost tiny danger git-file-btn" title="丢弃更改" @pointerdown.stop @click.stop="$emit('discard-file', file.path, $event)">✕</button>
-                    </div>
+                    <GitFileTreeNode
+                      v-for="node in gitUnstagedTree"
+                      :key="`unstaged:${node.path}`"
+                      :node="node"
+                      :staged="false"
+                      :expanded-dirs="gitTreeExpandedDirs"
+                      :selected-git-files="selectedGitFiles"
+                      :git-diff-loading-key="gitDiffLoadingKey"
+                      @toggle-dir="toggleGitTreeDir"
+                      @stage-file="$emit('stage-file', $event)"
+                      @discard-file="(path, event) => $emit('discard-file', path, event)"
+                      @pointer-down="(event, path, isStaged) => $emit('on-git-file-pointer-down', event, path, isStaged)"
+                      @contextmenu="(event, path) => $emit('on-git-file-contextmenu', event, path)"
+                    />
                   </div>
                 </div>
               </template>
@@ -467,8 +459,8 @@
                       >
                         <span class="git-file-status" :class="gitStatusClass(f.status)">{{ gitStatusIcon(f.status) }}</span>
                         <span class="git-file-path" :title="f.path">
-                          <span v-if="splitGitFilePath(f.path).dir" class="git-file-path-dir">{{ splitGitFilePath(f.path).dir }}</span>
                           <span class="git-file-path-name">{{ splitGitFilePath(f.path).name }}</span>
+                          <span v-if="splitGitFilePath(f.path).dir" class="git-file-path-dir">{{ splitGitFilePath(f.path).dir }}</span>
                         </span>
                       </div>
                     </div>
@@ -626,6 +618,8 @@
 import { ref, watch, onMounted, onUnmounted, computed } from "vue";
 import type { GitRemoteInfo, GitBranchInfo } from "../../services/vibeGitClient";
 import type { BatchGroup } from "../../composables/useGitPanel";
+import GitFileTreeNode from "./GitFileTreeNode.vue";
+import { buildGitFileTree, collectGitFolderPaths } from "../../utils/gitFileTree";
 
 interface GitStash {
   index: number | string;
@@ -714,6 +708,37 @@ const props = defineProps<Props>();
 
 const stashSectionOpen = ref(false);
 const localChangesOpen = ref(false);
+const gitTreeExpandedDirs = ref<Set<string>>(new Set());
+
+const gitStagedTree = computed(() => buildGitFileTree(props.gitStagedFiles));
+const gitUnstagedTree = computed(() => buildGitFileTree(props.gitUnstagedFiles));
+
+function toggleGitTreeDir(path: string) {
+  const next = new Set(gitTreeExpandedDirs.value);
+  if (next.has(path)) next.delete(path);
+  else next.add(path);
+  gitTreeExpandedDirs.value = next;
+}
+
+watch(
+  () => [
+    props.gitStagedFiles.map((f) => f.path).join("\n"),
+    props.gitUnstagedFiles.map((f) => f.path).join("\n"),
+  ],
+  () => {
+    const folderPaths = new Set([
+      ...collectGitFolderPaths(gitStagedTree.value),
+      ...collectGitFolderPaths(gitUnstagedTree.value),
+    ]);
+    const next = new Set(gitTreeExpandedDirs.value);
+    for (const path of folderPaths) next.add(path);
+    for (const path of next) {
+      if (!folderPaths.has(path)) next.delete(path);
+    }
+    gitTreeExpandedDirs.value = next;
+  },
+  { immediate: true },
+);
 
 const BATCH_FILES_PREVIEW = 4;
 const BATCH_GROUP_ACCENTS = ["#58a6ff", "#3fb950", "#d29922", "#bc8cff", "#f778ba", "#79c0ff"];
@@ -895,7 +920,7 @@ function splitGitFilePath(filePath: string): { dir: string; name: string } {
   const normalized = filePath.replace(/\\/g, "/");
   const slash = normalized.lastIndexOf("/");
   if (slash === -1) return { dir: "", name: normalized };
-  return { dir: `${normalized.slice(0, slash + 1)}`, name: normalized.slice(slash + 1) };
+  return { dir: normalized.slice(0, slash), name: normalized.slice(slash + 1) };
 }
 
 function gitStatusIcon(status: string): string {
@@ -1904,6 +1929,7 @@ function gitStatusClass(status: string): string {
 }
 
 .git-file-list {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -1997,22 +2023,38 @@ function gitStatusClass(status: string): string {
   min-width: 0;
   display: flex;
   align-items: baseline;
-  gap: 0;
+  justify-content: space-between;
+  gap: 8px;
   color: rgba(255, 255, 255, 0.88);
-}
-
-.git-file-path-dir {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: rgba(255, 255, 255, 0.52);
 }
 
 .git-file-path-name {
   flex: 0 0 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.git-file-path-dir {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  unicode-bidi: plaintext;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+@container (max-width: 200px) {
+  .git-file-path-dir {
+    display: none;
+  }
 }
 
 .git-file-btn {
@@ -2523,11 +2565,12 @@ function gitStatusClass(status: string): string {
 }
 
 .git-batch-file .git-file-path {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 10.5px;
+}
+
+.git-batch-file .git-file-path-dir {
+  max-width: 45%;
 }
 
 .git-batch-files-toggle {

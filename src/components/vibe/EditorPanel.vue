@@ -8,12 +8,19 @@
           :ref="(el) => setTabRef(tab.path, el as HTMLElement | null)"
           type="button"
           class="editor-tab"
-          :class="{ active: tab.path === activeFilePath, dirty: tab.dirty }"
-          :title="tab.path"
+          :class="[
+            {
+              active: tab.path === activeFilePath,
+              dirty: tab.dirty,
+            },
+            tabKindClass(tab),
+          ]"
+          :title="tabTitle(tab)"
           @click="$emit('switch-tab', tab.path)"
           @contextmenu.prevent="onTabContextMenu($event, tab.path)"
         >
-          <span class="editor-tab-name">{{ getFileName(tab.path) }}</span>
+          <span v-if="tabKindLabel(tab)" class="editor-tab-badge">{{ tabKindLabel(tab) }}</span>
+          <span class="editor-tab-name">{{ tabDisplayName(tab.path) }}</span>
           <span v-if="tab.dirty" class="editor-tab-dot" aria-hidden="true">•</span>
           <span
             class="editor-tab-close"
@@ -59,6 +66,13 @@
           title="前进 (导航历史)"
           @click="$emit('navigate-forward')"
         >→</button>
+        <button
+          v-if="showDiffMode"
+          type="button"
+          class="editor-action-btn diff-toggle-btn"
+          title="切换 Diff/编辑视图"
+          @click="$emit('toggle-diff-mode')"
+        >⇄ Diff</button>
         <span v-if="fileDirty && !showDiffMode" class="dirty-badge" title="文件已修改">● 未保存</span>
         <span class="editor-action-divider" />
         <button
@@ -101,6 +115,7 @@
       :original="activeFileDiff.before"
       :modified="activeFileDiff.after"
       :file-path="activeFilePath"
+      @select="(text, anchor) => $emit('editor-select', text, anchor)"
     />
 
     <CodeMonacoEditor
@@ -121,6 +136,13 @@
 import { ref, computed, watch, nextTick } from "vue";
 import CodeMonacoEditor, { type MonacoSelectionAnchor } from "../CodeMonacoEditor.vue";
 import CodeMonacoDiffEditor from "../CodeMonacoDiffEditor.vue";
+import {
+  type EditorTabKind,
+  editorTabDisplayName,
+  editorTabKindLabel,
+  editorTabTitle,
+  inferEditorTabKind,
+} from "../../utils/vibeHelpers";
 
 interface FileDiff {
   before: string;
@@ -133,6 +155,7 @@ interface OpenTab {
   path: string;
   content: string;
   dirty: boolean;
+  kind?: EditorTabKind;
 }
 
 interface Props {
@@ -264,9 +287,25 @@ const localContent = computed({
   set: (value) => emit("update:fileContent", value),
 });
 
-function getFileName(path: string): string {
-  const parts = path.replace(/\\/g, "/").split("/");
-  return parts[parts.length - 1] || path;
+function resolveTabKind(tab: OpenTab): EditorTabKind {
+  return tab.kind ?? inferEditorTabKind(tab.path);
+}
+
+function tabKindLabel(tab: OpenTab): string | null {
+  return editorTabKindLabel(resolveTabKind(tab));
+}
+
+function tabKindClass(tab: OpenTab): string {
+  const kind = resolveTabKind(tab);
+  return kind === "file" ? "" : `editor-tab--${kind}`;
+}
+
+function tabDisplayName(path: string): string {
+  return editorTabDisplayName(path);
+}
+
+function tabTitle(tab: OpenTab): string {
+  return editorTabTitle(tab.path, resolveTabKind(tab));
 }
 
 async function revealLineInEditor(line: number, column = 1): Promise<boolean> {
@@ -347,6 +386,43 @@ defineExpose({ editorRef, revealLineInEditor });
   background: rgba(255, 255, 255, 0.07);
   color: rgba(255, 255, 255, 0.95);
   box-shadow: inset 0 -2px 0 #58a6ff;
+}
+
+.editor-tab-badge {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: 0.02em;
+}
+
+.editor-tab--git-change .editor-tab-badge {
+  color: #e3b341;
+  background: rgba(227, 179, 65, 0.16);
+}
+
+.editor-tab--git-staged .editor-tab-badge {
+  color: #3fb950;
+  background: rgba(63, 185, 80, 0.16);
+}
+
+.editor-tab--git-history .editor-tab-badge {
+  color: #a371f7;
+  background: rgba(163, 113, 247, 0.16);
+}
+
+.editor-tab--git-change.active {
+  box-shadow: inset 0 -2px 0 #e3b341;
+}
+
+.editor-tab--git-staged.active {
+  box-shadow: inset 0 -2px 0 #3fb950;
+}
+
+.editor-tab--git-history.active {
+  box-shadow: inset 0 -2px 0 #a371f7;
 }
 
 .editor-tab.dirty .editor-tab-name {

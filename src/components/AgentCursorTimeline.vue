@@ -9,6 +9,7 @@
       <div v-if="processBlocks.length" class="stream-timeline stream-timeline--running">
         <AgentCursorProcessBlocks
           :blocks="processBlocks"
+          :is-running="true"
           @open-file="(path) => emit('openFile', path)"
         />
       </div>
@@ -21,8 +22,11 @@
           :chat-mode="chatMode"
           :can-execute-plan="canExecutePlan"
           :layout-enhance-ready="layoutEnhanceReady"
+          :message-id="messageId"
+          :plan-file-path="planFilePath"
           @execute-plan="emit('execute-plan')"
           @select-option="(option) => emit('select-option', option)"
+          @open-plan-file="emit('open-plan-file')"
         />
       </div>
 
@@ -46,6 +50,7 @@
         <div class="stream-timeline stream-timeline--expanded">
           <AgentCursorProcessBlocks
             :blocks="processBlocks"
+            :is-running="false"
             nested
             @open-file="(path) => emit('openFile', path)"
           />
@@ -58,8 +63,11 @@
             :chat-mode="chatMode"
             :can-execute-plan="canExecutePlan"
             :layout-enhance-ready="layoutEnhanceReady"
+            :message-id="messageId"
+            :plan-file-path="planFilePath"
             @execute-plan="emit('execute-plan')"
             @select-option="(option) => emit('select-option', option)"
+            @open-plan-file="emit('open-plan-file')"
           />
         </div>
       </template>
@@ -73,8 +81,11 @@
             :chat-mode="chatMode"
             :can-execute-plan="canExecutePlan"
             :layout-enhance-ready="layoutEnhanceReady"
+            :message-id="messageId"
+            :plan-file-path="planFilePath"
             @execute-plan="emit('execute-plan')"
             @select-option="(option) => emit('select-option', option)"
+            @open-plan-file="emit('open-plan-file')"
           />
         </div>
 
@@ -90,6 +101,7 @@
           <div class="stream-process-body">
             <AgentCursorProcessBlocks
               :blocks="processBlocks"
+              :is-running="false"
               nested
               @open-file="(path) => emit('openFile', path)"
             />
@@ -97,18 +109,6 @@
         </details>
       </template>
     </template>
-
-    <div v-if="showTruncatedWarning" class="stream-truncated">
-      <span class="stream-truncated__text">回答可能不完整</span>
-      <button
-        v-if="canResume"
-        type="button"
-        class="stream-truncated__action"
-        @click="emit('resume')"
-      >
-        {{ resumeLabel || "继续生成" }}
-      </button>
-    </div>
 
     <slot v-if="debugExpanded" name="debug" />
   </div>
@@ -137,9 +137,9 @@ const props = withDefaults(
     chatMode?: "ask" | "build" | "plan" | "explore";
     canExecutePlan?: boolean;
     layoutEnhanceReady?: boolean;
+    planFilePath?: string;
     showDebug?: boolean;
     debugExpanded?: boolean;
-    showTruncatedWarning?: boolean;
     canResume?: boolean;
     resumeLabel?: string;
     currentStatus?: string;
@@ -162,6 +162,7 @@ const emit = defineEmits<{
   "select-option": [option: AiOption];
   "toggle-debug": [];
   openFile: [path: string];
+  "open-plan-file": [];
   resume: [];
   "toggle-process": [expanded: boolean];
 }>();
@@ -193,6 +194,7 @@ const processOpen = computed(
 );
 
 const showAnswerBlock = computed(() => {
+  if (props.chatMode === "plan" && props.planFilePath?.trim()) return true;
   if (props.answerText.trim()) return true;
   if (props.answerStreaming && props.isRunning) return true;
   if (!props.isRunning && props.hasAnswer) return true;
@@ -367,36 +369,5 @@ watch(timelineRoot, (el) => bindScrollEl(el));
   margin-top: 0;
   padding-top: 0;
   border-top: none;
-}
-
-.stream-truncated {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-top: 4px;
-  padding: 6px 10px;
-  border-radius: 8px;
-  background: rgba(210, 153, 34, 0.06);
-  border: 1px solid rgba(210, 153, 34, 0.14);
-}
-
-.stream-truncated__text {
-  font-size: 12px;
-  line-height: 1.45;
-  color: rgba(255, 214, 130, 0.88);
-}
-
-.stream-truncated__action {
-  flex-shrink: 0;
-  padding: 3px 10px;
-  border-radius: 5px;
-  border: 1px solid rgba(210, 153, 34, 0.3);
-  background: rgba(210, 153, 34, 0.1);
-  color: rgba(255, 230, 170, 0.96);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
 }
 </style>

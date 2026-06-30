@@ -24,6 +24,7 @@
         :written-files="msg.writtenFiles"
         :was-aborted="msg.agentAborted"
         :message-id="msg.id"
+        :plan-file-path="msg.planFilePath"
         :bind-status-log-scroll="bindStatusLogScroll"
         :on-status-log-scroll="onStatusLogScroll"
         @execute-plan="emit('execute-plan')"
@@ -31,6 +32,7 @@
         @toggle-debug="toggleActivityDetailed(msg)"
         @toggle-process="onToggleProcess"
         @open-file="(path) => emit('open-file', path)"
+        @open-plan-file="emit('open-plan-file')"
         @resume="emit('resume')"
       >
         <template #debug>
@@ -94,6 +96,7 @@ const emit = defineEmits<{
   "execute-plan": [];
   "select-option": [option: AiOption];
   "open-file": [path: string];
+  "open-plan-file": [];
   resume: [];
 }>();
 

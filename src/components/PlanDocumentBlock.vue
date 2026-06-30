@@ -114,11 +114,7 @@ const display = computed(() => parsePlanDocumentDisplay(props.content));
 const showPlanChrome = computed(() => {
   if (props.chatMode !== "plan") return false;
   if (props.externalView) {
-    return (
-      display.value.isPlan
-      || Boolean(props.planFilePath?.trim())
-      || Boolean(props.content.trim())
-    );
+    return display.value.isPlan || Boolean(props.planFilePath?.trim());
   }
   return display.value.isPlan;
 });

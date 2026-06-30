@@ -1513,6 +1513,8 @@ const {
   syncEditorAfterAgentFileChange,
   closeOtherTabs, closeRightTabs, closeAllTabs,
   navigateBack, navigateForward, canGoBack, canGoForward,
+  persistEditorWorkspace, restoreEditorWorkspace,
+  prepareEditorWorkspaceProjectSwitch, finishEditorWorkspaceProjectSwitch,
 } = useEditorPanel({
   projectPath,
   projectOpened,
@@ -1719,7 +1721,7 @@ async function showQuoteButtonAt(anchor: DOMRect | MonacoSelectionAnchor) {
   let x = anchor.left + (anchor.width - estimatedWidth) / 2;
   let y = anchor.top - estimatedHeight - margin;
   // 上方空间不足时回退到下方，但不能超出底部安全区
-  if (y < margin) y = anchor.bottom + margin;
+  if (y < margin) y = anchor.top + anchor.height + margin;
   if (y + estimatedHeight > maxBottom) y = maxBottom - estimatedHeight;
   if (y < margin) y = margin;
   ({ x, y } = clampQuoteButtonPosition(x, y, estimatedWidth, estimatedHeight));
@@ -1732,7 +1734,7 @@ async function showQuoteButtonAt(anchor: DOMRect | MonacoSelectionAnchor) {
   const btnHeight = btn.offsetHeight;
   x = anchor.left + (anchor.width - btnWidth) / 2;
   y = anchor.top - btnHeight - margin;
-  if (y < margin) y = anchor.bottom + margin;
+  if (y < margin) y = anchor.top + anchor.height + margin;
   if (y + btnHeight > maxBottom) y = maxBottom - btnHeight;
   if (y < margin) y = margin;
   ({ x, y } = clampQuoteButtonPosition(x, y, btnWidth, btnHeight));
@@ -1908,31 +1910,6 @@ function patchAssistantMsg(msgId: string, patch: Partial<ChatMessage>, sessionId
 async function handleAgentWrittenFiles(files: string[]) {
   if (!files.length) return;
   await refreshTree();
-
-  const activeRel = activeFileRelativePath();
-  let handled = false;
-
-  for (const rel of files) {
-    const normalized = rel.replace(/\\/g, "/").toLowerCase();
-    if (activeRel && normalized === activeRel) {
-      await reloadFile();
-      fileDirty.value = false;
-      if (getFileDiff(activeFilePath.value)) {
-        showDiffMode.value = true;
-      }
-      handled = true;
-      break;
-    }
-  }
-
-  if (!handled) {
-    const firstRel = files[0];
-    const full = resolveFullPathFromRel(firstRel);
-    if (getFileDiff(full)) {
-      await openFile(full);
-      showDiffMode.value = true;
-    }
-  }
 }
 
 async function openPlanFileInEditor(relPath?: string) {
@@ -2046,6 +2023,7 @@ const agent = useAgentRun({
   clearTurnFileDiffsFromStore,
   storeFileDiff,
   syncEditorAfterAgentFileChange,
+  refreshTree,
   resolveUserMessageImages: userMessageImages,
   buildAgentHistory,
   buildAgentHistoryForResume,
@@ -2340,6 +2318,10 @@ async function openProjectByPath(dirPath: string) {
   leaveProjectKnowledge();
   onReviewProjectClosed();
   log("persist-prev");
+  if (projectOpened.value && previousPathForPersist) {
+    persistEditorWorkspace();
+  }
+  prepareEditorWorkspaceProjectSwitch();
 
   loadingTree.value = true;
   treeError.value = "";
@@ -2403,6 +2385,7 @@ async function openProjectByPath(dirPath: string) {
 
     void startFileWatcherForProject(normalized, () => refreshGitStatus({ showLoading: false })).catch(() => {});
 
+    await restoreEditorWorkspace();
     syncEditorPanelForOpenFiles();
     maybeAutoResumeLastRecoverableAssistant();
     await scrollChatToBottom(true);
@@ -2417,6 +2400,7 @@ async function openProjectByPath(dirPath: string) {
   } finally {
     loadingTree.value = false;
     switchingProject.value = false;
+    finishEditorWorkspaceProjectSwitch();
   }
 }
 
@@ -3310,6 +3294,10 @@ function onWindowFocus() {
   reloadAiConfig();
 }
 
+function onBeforeUnload() {
+  persistEditorWorkspace();
+}
+
 watch(chatMode, (mode) => {
   if (mode === "explore") return;
   lsSet(CHAT_MODE_KEY, mode);
@@ -3456,6 +3444,7 @@ onMounted(() => {
   loadSavedProject();
   chatPanelWidth.value = Math.min(chatPanelWidth.value, getChatPanelMaxWidth());
   window.addEventListener("focus", onWindowFocus);
+  window.addEventListener("beforeunload", onBeforeUnload);
   window.addEventListener("dragend", onWindowDragEnd);
   document.addEventListener("mousedown", onDocumentClick, true);
   document.addEventListener("selectionchange", onSelectionChange);
@@ -3487,6 +3476,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   fileDragGhost.value = null;
   window.removeEventListener("focus", onWindowFocus);
+  window.removeEventListener("beforeunload", onBeforeUnload);
   window.removeEventListener("dragend", onWindowDragEnd);
   document.removeEventListener("mousedown", onDocumentClick, true);
   document.removeEventListener("selectionchange", onSelectionChange);
@@ -3510,6 +3500,7 @@ onBeforeUnmount(() => {
     sessionCopyHintTimer = null;
   }
   cancelAutoResume();
+  persistEditorWorkspace();
   persistChatNow(undefined, { flushStore: true });
   stopFileWatcherForProject();
 });

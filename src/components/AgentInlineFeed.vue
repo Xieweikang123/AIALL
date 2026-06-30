@@ -103,18 +103,6 @@
       </div>
     </div>
 
-    <div v-if="showTruncatedWarning" class="stream-truncated">
-      <span class="stream-truncated__text">回答可能不完整</span>
-      <button
-        v-if="canResume"
-        type="button"
-        class="stream-truncated__action"
-        @click="emit('resume')"
-      >
-        {{ resumeLabel || "继续生成" }}
-      </button>
-    </div>
-
     <slot v-if="debugExpanded" name="debug" />
   </div>
 </template>
@@ -143,7 +131,6 @@ const props = defineProps<{
   layoutEnhanceReady?: boolean;
   showDebug?: boolean;
   debugExpanded?: boolean;
-  showTruncatedWarning?: boolean;
   canResume?: boolean;
   resumeLabel?: string;
   currentStatus?: string;
@@ -531,37 +518,6 @@ function onProcessToggle(event: Event) {
   margin-top: 2px;
   padding-top: 6px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.stream-truncated {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-top: 4px;
-  padding: 6px 10px;
-  border-radius: 8px;
-  background: rgba(210, 153, 34, 0.06);
-  border: 1px solid rgba(210, 153, 34, 0.14);
-}
-
-.stream-truncated__text {
-  font-size: 12px;
-  line-height: 1.45;
-  color: rgba(255, 214, 130, 0.88);
-}
-
-.stream-truncated__action {
-  flex-shrink: 0;
-  padding: 3px 10px;
-  border-radius: 5px;
-  border: 1px solid rgba(210, 153, 34, 0.3);
-  background: rgba(210, 153, 34, 0.1);
-  color: rgba(255, 230, 170, 0.96);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
 }
 
 @media (prefers-reduced-motion: reduce) {

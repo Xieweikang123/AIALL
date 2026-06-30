@@ -52,9 +52,11 @@
           :streaming="item.streaming && isRunning"
           :can-execute="canExecutePlan && !isRunning && !item.streaming"
           :enhance-layout="layoutEnhanceReady && !isRunning && !item.streaming"
+          :external-view="shouldUsePlanExternalView(item.text, { chatMode: chatMode ?? 'ask', planFilePath: undefined })"
           @execute="emit('execute-plan')"
         >
           <ChatMarkdown
+            v-if="!shouldUsePlanExternalView(item.text, { chatMode: chatMode ?? 'ask', planFilePath: undefined })"
             class="inline-feed-markdown inline-feed-markdown--answer"
             :content="answerMarkdown(item.text)"
             :streaming="item.streaming && isRunning"
@@ -76,6 +78,7 @@ import AgentProcessStepList from "./AgentProcessStepList.vue";
 import type { InlineFeedItem, InlineFeedProcessItem } from "../services/agentInlineFeed";
 import { sanitizeFeedThoughtText } from "../services/agentProgressMarker";
 import { enrichPlanMarkdownForDisplay } from "../services/planDocumentDisplay";
+import { shouldUsePlanExternalView } from "../services/planFile";
 import type { AgentRoundTool } from "../services/agentRoundGroups";
 import type { AiOption } from "../utils/parseAiOptions";
 

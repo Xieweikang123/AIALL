@@ -78,7 +78,7 @@ const emit = defineEmits<{
 
 const chatCtx = inject(vibeChatMessageContextKey, null);
 const planExternalView = computed(() =>
-  shouldUsePlanExternalView(props.text, { chatMode: props.chatMode ?? "ask" }),
+  shouldUsePlanExternalView(props.text, { chatMode: props.chatMode ?? "ask", planFilePath: props.planFilePath }),
 );
 const planPanelLinked = computed(() => {
   if (!chatCtx?.planPanelActive.value) return false;

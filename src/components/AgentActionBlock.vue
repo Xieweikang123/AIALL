@@ -34,7 +34,7 @@ type ActionsBlock = { kind: "actions"; key: string; collapsed: ActionItem[]; vis
 
 const props = defineProps<{ block: ActionsBlock }>();
 
-defineEmits<{
+const emit = defineEmits<{
   openFile: [path: string];
 }>();
 

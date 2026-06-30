@@ -8,7 +8,7 @@
         <ChatMarkdown
           class="inline-feed-markdown inline-feed-markdown--narrative"
           :content="narrativeMarkdown(block.text)"
-          :streaming="false"
+          :streaming="isThoughtStreaming(block)"
           :interactive="false"
         />
       </div>
@@ -36,22 +36,38 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from "vue";
 import ChatMarkdown from "./ChatMarkdown.vue";
 import AgentActionBlock from "./AgentActionBlock.vue";
 import type { CursorFeedProcessBlock } from "../services/agentCursorFeed";
 import { sanitizeFeedThoughtText } from "../services/agentProgressMarker";
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     blocks: CursorFeedProcessBlock[];
     nested?: boolean;
+    isRunning?: boolean;
   }>(),
   {
     nested: false,
+    isRunning: false,
   },
 );
 
-defineEmits<{
+const lastThoughtKey = computed((): string | null => {
+  if (!props.isRunning) return null;
+  for (let index = props.blocks.length - 1; index >= 0; index -= 1) {
+    const block = props.blocks[index];
+    if (block?.kind === "thought") return block.key;
+  }
+  return null;
+});
+
+function isThoughtStreaming(block: CursorFeedProcessBlock): boolean {
+  return block.kind === "thought" && block.key === lastThoughtKey.value;
+}
+
+const emit = defineEmits<{
   openFile: [path: string];
 }>();
 

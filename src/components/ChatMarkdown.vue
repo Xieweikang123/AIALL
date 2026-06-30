@@ -3,7 +3,10 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { renderMarkdown, renderMarkdownLite } from "../utils/renderMarkdown";
 import { renderMermaidInContainer } from "../utils/mermaidRenderer";
 import { parseAiOptions, type AiOption } from "../utils/parseAiOptions";
+import { parseClarificationChoices } from "../utils/parseClarificationChoices";
+import { looksLikeClarificationQuestion } from "../orchestration/generic/ambiguousTermTriggers";
 import AiOptionButtons from "./AiOptionButtons.vue";
+import ClarificationChoicePanel from "./ClarificationChoicePanel.vue";
 import { sanitizeMarkdownForDisplay, sanitizeMarkdownForStreamingDisplay } from "../services/markdownDisplaySanitize";
 import { createStreamingMarkdownThrottle } from "../utils/streamingMarkdownThrottle";
 import { prepareStreamingMarkdownForRender } from "../utils/streamingMarkdownTrim";
@@ -222,7 +225,18 @@ const parsedOptions = computed(() => {
   return parsed;
 });
 
+const parsedClarification = computed(() => {
+  if (!props.interactive || parsedOptions.value) return null;
+  const source = activeSource.value;
+  if (!looksLikeClarificationQuestion(source)) return null;
+  const parsed = parseClarificationChoices(source);
+  if (!parsed?.questions.length) return null;
+  return parsed;
+});
+
 const markdownContent = computed(() => {
+  const clarification = parsedClarification.value;
+  if (clarification) return clarification.displayText;
   const parsed = parsedOptions.value;
   if (!parsed) return activeSource.value;
   return parsed.before;
@@ -247,11 +261,23 @@ watch(
 const safeDisplayHtml = computed(() => displayHtml.value || cachedDisplayHtml.value);
 
 const showMarkdown = computed(
-  () => Boolean(safeDisplayHtml.value) || Boolean(parsedOptions.value?.options.length),
+  () =>
+    Boolean(safeDisplayHtml.value)
+    || Boolean(parsedOptions.value?.options.length)
+    || Boolean(parsedClarification.value?.questions.length),
 );
 
 function handleOptionSelect(option: AiOption) {
   emit("selectOption", option);
+}
+
+function handleClarificationSelect(payload: { question: string; option: AiOption }) {
+  emit("selectOption", {
+    index: payload.option.index,
+    label: payload.option.label,
+    fullText: `${payload.question}\n我选择：${payload.option.fullText}`,
+    showIndex: false,
+  });
 }
 
 let postProcessRaf = 0;
@@ -291,6 +317,11 @@ watch([displayHtml, effectiveStreaming], () => {
       v-if="parsedOptions?.options.length"
       :options="parsedOptions.options"
       @select="handleOptionSelect"
+    />
+    <ClarificationChoicePanel
+      v-if="parsedClarification?.questions.length"
+      :questions="parsedClarification.questions"
+      @select="handleClarificationSelect"
     />
   </div>
 </template>

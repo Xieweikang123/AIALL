@@ -10,11 +10,22 @@ import type * as Monaco from "monaco-editor";
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { languageFromFilePath } from "../utils/monacoLanguage";
 
+export type MonacoDiffSelectionAnchor = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
 const props = defineProps<{
   original: string;
   modified: string;
   filePath?: string;
   language?: string;
+}>();
+
+const emit = defineEmits<{
+  select: [text: string, anchor: MonacoDiffSelectionAnchor | null];
 }>();
 
 const containerRef = ref<HTMLElement | null>(null);
@@ -30,6 +41,63 @@ function resolveLanguage(): string {
   if (props.language) return props.language;
   if (props.filePath) return languageFromFilePath(props.filePath);
   return "plaintext";
+}
+
+function getSelectionAnchorRect(
+  codeEditor: Monaco.editor.IStandaloneCodeEditor,
+  monacoSelection: Monaco.IRange,
+): MonacoDiffSelectionAnchor | null {
+  const domNode = codeEditor.getDomNode();
+  if (!domNode) return null;
+
+  const startPos = codeEditor.getScrolledVisiblePosition({
+    lineNumber: monacoSelection.startLineNumber,
+    column: monacoSelection.startColumn,
+  });
+  if (!startPos) return null;
+
+  const editorRect = domNode.getBoundingClientRect();
+  let width = 80;
+  if (monacoSelection.startLineNumber === monacoSelection.endLineNumber) {
+    const endPos = codeEditor.getScrolledVisiblePosition({
+      lineNumber: monacoSelection.endLineNumber,
+      column: monacoSelection.endColumn,
+    });
+    if (endPos) width = Math.max(24, endPos.left - startPos.left);
+  } else {
+    width = Math.max(80, Math.min(editorRect.width * 0.35, 240));
+  }
+
+  return {
+    left: editorRect.left + startPos.left,
+    top: editorRect.top + startPos.top,
+    width,
+    height: startPos.height || 18,
+  };
+}
+
+function emitActiveSelection() {
+  if (!diffEditor) return;
+  const editors = [diffEditor.getModifiedEditor(), diffEditor.getOriginalEditor()];
+  for (const codeEditor of editors) {
+    const model = codeEditor.getModel();
+    const monacoSelection = codeEditor.getSelection();
+    if (!model || !monacoSelection || monacoSelection.isEmpty()) continue;
+    const text = model.getValueInRange(monacoSelection).trim();
+    if (!text) continue;
+    emit("select", text, getSelectionAnchorRect(codeEditor, monacoSelection));
+    return;
+  }
+  emit("select", "", null);
+}
+
+function attachSelectionListeners(codeEditor: Monaco.editor.IStandaloneCodeEditor) {
+  codeEditor.onDidChangeCursorSelection(() => {
+    emitActiveSelection();
+  });
+  codeEditor.onDidScrollChange(() => {
+    emit("select", "", null);
+  });
 }
 
 function bindModels() {
@@ -80,6 +148,8 @@ function createDiffEditor() {
   });
 
   bindModels();
+  attachSelectionListeners(diffEditor.getOriginalEditor());
+  attachSelectionListeners(diffEditor.getModifiedEditor());
 
   resizeObserver = new ResizeObserver(() => {
     diffEditor?.layout();

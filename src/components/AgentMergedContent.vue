@@ -13,7 +13,6 @@
       :layout-enhance-ready="layoutEnhanceReady"
       :show-debug="showDebug"
       :debug-expanded="debugExpanded"
-      :show-truncated-warning="showTruncatedWarning"
       :can-resume="canResume"
       :resume-label="resumeLabel"
       :current-status="currentStatus"
@@ -22,6 +21,7 @@
       :activity-expanded="activityExpanded"
       :agent-phase="agentPhase"
       :message-id="messageId"
+      :plan-file-path="planFilePath"
       :bind-status-log-scroll="bindStatusLogScroll"
       :on-status-log-scroll="onStatusLogScroll"
       @execute-plan="emit('execute-plan')"
@@ -29,6 +29,7 @@
       @toggle-debug="emit('toggle-debug')"
       @toggle-process="(expanded) => emit('toggle-process', expanded)"
       @open-file="(path) => emit('openFile', path)"
+      @open-plan-file="emit('open-plan-file')"
       @resume="emit('resume')"
     >
       <template #debug>
@@ -46,7 +47,6 @@ import { buildUnifiedAgentTimeline } from "../services/agentCompactStatus";
 import type { AgentRoundGroupView, AgentRoundTool } from "../services/agentRoundGroups";
 import {
   buildWrittenFilesSummary,
-  isTruncatedAssistantAnswer,
 } from "../services/agentMessageDisplay";
 import type { AiOption } from "../utils/parseAiOptions";
 
@@ -75,6 +75,7 @@ const props = withDefaults(
     writtenFiles?: string[];
     wasAborted?: boolean;
     messageId?: string;
+    planFilePath?: string;
     bindStatusLogScroll?: (el: HTMLElement | null, msgId: string) => void;
     onStatusLogScroll?: (msgId: string) => void;
   }>(),
@@ -90,6 +91,7 @@ const emit = defineEmits<{
   "toggle-debug": [];
   "toggle-process": [expanded: boolean];
   openFile: [path: string];
+  "open-plan-file": [];
   resume: [];
 }>();
 
@@ -127,13 +129,6 @@ const displayFinalAnswer = computed(() => {
 });
 
 const hasRunningTool = computed(() => Boolean(props.tools?.some((tool) => tool.running)));
-
-const showTruncatedWarning = computed(
-  () =>
-    !props.isRunning &&
-    Boolean(displayFinalAnswer.value.trim()) &&
-    isTruncatedAssistantAnswer(displayFinalAnswer.value),
-);
 
 const agentTimeline = computed(() =>
   buildUnifiedAgentTimeline({
