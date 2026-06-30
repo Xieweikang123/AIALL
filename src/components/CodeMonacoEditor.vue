@@ -57,11 +57,18 @@ const props = defineProps<{
   readOnly?: boolean;
 }>();
 
+export type MonacoSelectionAnchor = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
 const emit = defineEmits<{
   "update:modelValue": [value: string];
   change: [value: string];
   save: [];
-  select: [text: string];
+  select: [text: string, anchor: MonacoSelectionAnchor | null];
 }>();
 
 const containerRef = ref<HTMLElement | null>(null);
@@ -162,6 +169,37 @@ function loadMinimapSettings() {
   } catch {}
 }
 
+function getSelectionAnchorRect(monacoSelection: Monaco.editor.ISelection): MonacoSelectionAnchor | null {
+  if (!editor) return null;
+  const domNode = editor.getDomNode();
+  if (!domNode) return null;
+
+  const startPos = editor.getScrolledVisiblePosition({
+    lineNumber: monacoSelection.startLineNumber,
+    column: monacoSelection.startColumn,
+  });
+  if (!startPos) return null;
+
+  const editorRect = domNode.getBoundingClientRect();
+  let width = 80;
+  if (monacoSelection.startLineNumber === monacoSelection.endLineNumber) {
+    const endPos = editor.getScrolledVisiblePosition({
+      lineNumber: monacoSelection.endLineNumber,
+      column: monacoSelection.endColumn,
+    });
+    if (endPos) width = Math.max(24, endPos.left - startPos.left);
+  } else {
+    width = Math.max(80, Math.min(editorRect.width * 0.35, 240));
+  }
+
+  return {
+    left: editorRect.left + startPos.left,
+    top: editorRect.top + startPos.top,
+    width,
+    height: startPos.height || 18,
+  };
+}
+
 function createEditor() {
   const container = containerRef.value;
   if (!container || !monaco) return;
@@ -212,12 +250,28 @@ function createEditor() {
     emit("save");
   });
 
-  editor.onDidChangeCursorSelection(() => {
+  function emitSelectionChange() {
     if (!editor) return;
-    const selection = editor.getModel()?.getValueInRange(editor.getSelection() || { startLineNumber: 0, startColumn: 0, endLineNumber: 0, endColumn: 0 });
-    if (selection && selection.trim()) {
-      emit("select", selection);
+    const model = editor.getModel();
+    const monacoSelection = editor.getSelection();
+    if (!model || !monacoSelection || monacoSelection.isEmpty()) {
+      emit("select", "", null);
+      return;
     }
+    const text = model.getValueInRange(monacoSelection).trim();
+    if (!text) {
+      emit("select", "", null);
+      return;
+    }
+    emit("select", text, getSelectionAnchorRect(monacoSelection));
+  }
+
+  editor.onDidChangeCursorSelection(() => {
+    emitSelectionChange();
+  });
+
+  editor.onDidScrollChange(() => {
+    emit("select", "", null);
   });
 
   resizeObserver = new ResizeObserver(() => {

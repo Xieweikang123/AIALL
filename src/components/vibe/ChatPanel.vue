@@ -270,7 +270,7 @@
         <div class="quoted-preview-header">
           <span class="quoted-preview-label">
             <span class="quoted-preview-icon">❝</span>
-            引用 {{ q.source === "plan" ? "方案" : (q.role === "assistant" ? "Agent" : "你") }}
+            引用 {{ q.source === "plan" ? "方案" : q.source === "editor" ? (q.filePath || "代码") : (q.role === "assistant" ? "Agent" : "你") }}
           </span>
           <button type="button" class="quoted-preview-close" @click="removeQuotedMessage(quoteIndex)">×</button>
         </div>
@@ -622,7 +622,8 @@ interface QuotedMessage {
   messageId: string;
   content: string;
   role: "user" | "assistant";
-  source?: "plan";
+  source?: "plan" | "editor";
+  filePath?: string;
 }
 
 interface MentionItem {

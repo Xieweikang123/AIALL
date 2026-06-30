@@ -268,7 +268,6 @@
         :open-tabs="openTabs"
         :parent-editor-collapsed="editorCollapsed"
         :chat-collapsed="chatCollapsed"
-        :selected-code="selectedCode"
         :can-go-back="canGoBack"
         :can-go-forward="canGoForward"
         @update:file-content="fileContent = $event"
@@ -281,7 +280,6 @@
         @expand-chat="expandChat"
         @editor-change="onEditorChange"
         @editor-select="onEditorSelect"
-        @ask-ai-with-code="askAiWithCode"
         @close-other-tabs="closeOtherTabs"
         @close-right-tabs="closeRightTabs"
         @close-all-tabs="closeAllTabs"
@@ -605,6 +603,7 @@ import ProjectArchitectReviewPanel from "../components/vibe/ProjectArchitectRevi
 import ArchitectReviewMainPanel from "../components/vibe/ArchitectReviewMainPanel.vue";
 import PlanMainPanel from "../components/vibe/PlanMainPanel.vue";
 import EditorPanel from "../components/vibe/EditorPanel.vue";
+import type { MonacoSelectionAnchor } from "../components/CodeMonacoEditor.vue";
 import ChatPanel from "../components/vibe/ChatPanel.vue";
 import VibeChatMessages from "../components/vibe/VibeChatMessages.vue";
 import VibeWorkspaceWelcome from "../components/vibe/VibeWorkspaceWelcome.vue";
@@ -745,7 +744,7 @@ import {
 import { useAgentNotification } from "../composables/useAgentNotification";
 import { useFileWatcher } from "../composables/useFileWatcher";
 
-const { confirm, dismissPendingOverlay: dismissPendingConfirm, show: confirmShow } = useConfirm();
+const { confirm, confirmUnsaved, dismissPendingOverlay: dismissPendingConfirm, show: confirmShow } = useConfirm();
 const inputPrompt = useInputPrompt();
 
 const git = useGitPanel(
@@ -922,14 +921,17 @@ interface QuotedMessage {
   messageId: string;
   content: string;
   role: "user" | "assistant";
-  /** 引用自左侧方案面板（非聊天气泡正文） */
-  source?: "plan";
+  /** 引用自左侧方案面板（非聊天气泡正文）或编辑器选区 */
+  source?: "plan" | "editor";
+  /** 编辑器引用时的文件路径（展示用） */
+  filePath?: string;
 }
 
 const pendingQuote = ref<QuotedMessage | null>(null);
 const quotedMessages = ref<QuotedMessage[]>([]);
 const quoteButtonPosition = ref({ x: 0, y: 0 });
 const showQuoteButton = ref(false);
+const quoteButtonSource = ref<"chat" | "plan" | "editor" | null>(null);
 const quoteButtonRef = ref<HTMLElement | null>(null);
 const planPanelSectionRef = ref<HTMLElement | null>(null);
 const openingProject = ref(false);
@@ -1499,7 +1501,7 @@ async function scrollChatToBottom(force = false) {
 const {
   fileTree, expandedDirs, openTabs, activeFilePath, selectedTreePath,
   fileContent, fileDirty, fileLoadError, fileDiffs, readOnlyFileKeys,
-  showDiffMode, selectedCode, renamingPath, activeFileDiff, activeFileReadOnly,
+  showDiffMode, renamingPath, activeFileDiff, activeFileReadOnly,
   refreshTree, openFile: openFileCore, saveFile, reloadFile, closeTab, switchTab,
   switchReadOnlyTab, createNewFile, createNewFolder, commitRename, cancelRename,
   deleteSelectedItem, showGitFileDiff: showGitFileDiffCore, openGitLogFile: openGitLogFileCore, openDiffPreview,
@@ -1507,7 +1509,7 @@ const {
   joinProjectPath, resolveFullPathFromRel, storeFileDiff, getFileDiff, setFileDiff,
   findOpenTab, syncActiveTabToCache, ensureCanLeaveCurrentTab, ensureCanLeaveAllOpenTabs,
   syncEditorPanelForOpenFiles, parentDirForCreate, selectTreeItem,
-  onEditorChange, onEditorSelect,   askAiWithCode, activeFileRelativePath,
+  onEditorChange, activeFileRelativePath,
   syncEditorAfterAgentFileChange,
   closeOtherTabs, closeRightTabs, closeAllTabs,
   navigateBack, navigateForward, canGoBack, canGoForward,
@@ -1517,6 +1519,7 @@ const {
   aiConfig,
   configReady,
   confirm,
+  confirmUnsaved,
   inputPrompt,
   composerRef,
   editorPanelRef,
@@ -1630,9 +1633,9 @@ function removeRecentProject(path: string, event?: MouseEvent) {
 }
 
 function onDocumentClick(event: MouseEvent) {
-  const target = event.target as Element;
   if (showQuoteButton.value) {
     if (eventComposedPathIncludes(event, ".quote-floating")) return;
+    if (quoteButtonSource.value === "editor" && eventComposedPathIncludes(event, ".monaco-editor")) return;
     hideQuoteButtonNow();
   }
 }
@@ -1706,7 +1709,7 @@ function getSelectionAnchorRect(selection: Selection): DOMRect | null {
   return null;
 }
 
-async function showQuoteButtonAt(anchor: DOMRect) {
+async function showQuoteButtonAt(anchor: DOMRect | MonacoSelectionAnchor) {
   const margin = 8;
   const bottomSafe = 80; // 底部输入面板安全距离
   const estimatedWidth = 72;
@@ -1744,6 +1747,7 @@ let quoteHiddenAt = 0;
 function hideQuoteButtonNow() {
   showQuoteButton.value = false;
   pendingQuote.value = null;
+  quoteButtonSource.value = null;
   quoteHiddenAt = Date.now();
 }
 
@@ -2530,6 +2534,7 @@ function tryShowQuoteButtonFromSelection(message: ChatMessage): void {
     content: selectedText,
     role: message.role,
   };
+  quoteButtonSource.value = "chat";
 
   void showQuoteButtonAt(anchor);
 }
@@ -2573,6 +2578,7 @@ function tryShowQuoteButtonFromPlanPanel(): void {
     role: "assistant",
     source: "plan",
   };
+  quoteButtonSource.value = "plan";
 
   void showQuoteButtonAt(anchor);
 }
@@ -2593,6 +2599,24 @@ function onPlanPanelDoubleClick(event: MouseEvent) {
   tryShowQuoteButtonFromPlanPanel();
 }
 
+function onEditorSelect(text: string, anchor: MonacoSelectionAnchor | null) {
+  if (!text.trim() || !anchor || !activeFilePath.value) {
+    if (quoteButtonSource.value === "editor") hideQuoteButtonNow();
+    return;
+  }
+
+  const relPath = activeFileRelativePath() || fileName(activeFilePath.value);
+  pendingQuote.value = {
+    messageId: `editor:${activeFilePath.value}`,
+    content: text.trim(),
+    role: "user",
+    source: "editor",
+    filePath: relPath,
+  };
+  quoteButtonSource.value = "editor";
+  void showQuoteButtonAt(anchor);
+}
+
 function quoteSelectedText() {
   if (!pendingQuote.value) return;
 
@@ -2603,6 +2627,9 @@ function quoteSelectedText() {
   }
   pendingQuote.value = null;
   showQuoteButton.value = false;
+  quoteButtonSource.value = null;
+
+  expandChat();
 
   const selection = window.getSelection();
   if (selection) {
@@ -2617,6 +2644,7 @@ function quoteSelectedText() {
 let selectionChangeTimer: ReturnType<typeof setTimeout> | null = null;
 function onSelectionChange() {
   if (!showQuoteButton.value) return;
+  if (quoteButtonSource.value === "editor") return;
   if (selectionChangeTimer) clearTimeout(selectionChangeTimer);
   selectionChangeTimer = setTimeout(() => {
     selectionChangeTimer = null;
@@ -3203,6 +3231,10 @@ async function sendChat() {
   if (quotedMessages.value.length) {
     const quotedContent = quotedMessages.value
       .map((q) => {
+        if (q.source === "editor") {
+          const label = q.filePath || "代码";
+          return `> 代码（${label}）:\n> ${q.content.replace(/\n/g, "\n> ")}`;
+        }
         const prefix = q.source === "plan" ? "方案" : (q.role === "assistant" ? "Agent" : "你");
         return `> ${prefix}: ${q.content.replace(/\n/g, "\n> ")}`;
       })

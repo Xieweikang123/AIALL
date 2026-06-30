@@ -112,23 +112,14 @@
       :read-only="activeFileReadOnly"
       @change="$emit('editor-change', $event)"
       @save="$emit('save-file')"
-      @select="$emit('editor-select', $event)"
+      @select="(text, anchor) => $emit('editor-select', text, anchor)"
     />
-    <button
-      v-if="selectedCode"
-      type="button"
-      class="ask-ai-floating"
-      title="将选中代码发送给 AI"
-      @click="$emit('ask-ai-with-code')"
-    >
-      💬 问 AI
-    </button>
   </section>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from "vue";
-import CodeMonacoEditor from "../CodeMonacoEditor.vue";
+import CodeMonacoEditor, { type MonacoSelectionAnchor } from "../CodeMonacoEditor.vue";
 import CodeMonacoDiffEditor from "../CodeMonacoDiffEditor.vue";
 
 interface FileDiff {
@@ -155,7 +146,6 @@ interface Props {
   openTabs: OpenTab[];
   parentEditorCollapsed: boolean;
   chatCollapsed?: boolean;
-  selectedCode?: string;
   canGoBack?: boolean;
   canGoForward?: boolean;
 }
@@ -174,8 +164,7 @@ const emit = defineEmits<{
   (e: "collapse-editor"): void;
   (e: "expand-chat"): void;
   (e: "editor-change", value: string): void;
-  (e: "editor-select", text: string): void;
-  (e: "ask-ai-with-code"): void;
+  (e: "editor-select", text: string, anchor: MonacoSelectionAnchor | null): void;
   (e: "update:fileContent", value: string): void;
   (e: "navigate-back"): void;
   (e: "navigate-forward"): void;
@@ -520,25 +509,6 @@ defineExpose({ editorRef, revealLineInEditor });
 .code-editor {
   flex: 1;
   min-height: 0;
-}
-
-.ask-ai-floating {
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  padding: 8px 16px;
-  background: var(--accent-color, #58a6ff);
-  color: white;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 13px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  z-index: 100;
-}
-
-.ask-ai-floating:hover {
-  background: var(--accent-hover, #79c0ff);
 }
 
 /* 右键菜单 */

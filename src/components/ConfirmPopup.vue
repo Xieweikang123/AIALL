@@ -12,6 +12,14 @@
           <button type="button" class="confirm-btn confirm-cancel" @click="confirmState.onCancel()">
             {{ confirmState.cancelText.value }}
           </button>
+          <button
+            v-if="confirmState.neutralText.value"
+            type="button"
+            class="confirm-btn confirm-neutral"
+            @click="confirmState.onNeutral()"
+          >
+            {{ confirmState.neutralText.value }}
+          </button>
           <button type="button" class="confirm-btn confirm-ok" @click="confirmState.onConfirm()">
             {{ confirmState.confirmText.value }}
           </button>
@@ -118,6 +126,17 @@ watch(
 .confirm-cancel:hover {
   background: rgba(255, 255, 255, 0.14);
   color: rgba(255, 255, 255, 0.9);
+}
+
+.confirm-neutral {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.confirm-neutral:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.95);
 }
 
 .confirm-ok {

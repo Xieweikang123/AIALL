@@ -51,6 +51,11 @@ export interface UseEditorPanelParams {
   aiConfig: Ref<{ endpoint: string; apiKey: string; model: string; providerName: string }>;
   configReady: Ref<boolean>;
   confirm: (msg: string, event?: MouseEvent) => Promise<boolean>;
+  confirmUnsaved: (
+    fileName: string,
+    context: "switch" | "close" | "project",
+    event?: MouseEvent,
+  ) => Promise<"save" | "discard" | "cancel">;
   inputPrompt: { prompt: (msg: string, options?: { defaultValue?: string }) => Promise<string | null> };
   composerRef: Ref<{ setPlainText: (text: string) => void; focus: () => void } | null>;
   editorPanelRef?: Ref<InstanceType<typeof EditorPanel> | null>;
@@ -71,6 +76,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     projectPath,
     projectOpened,
     confirm,
+    confirmUnsaved,
     inputPrompt,
     composerRef,
     editorPanelRef,
@@ -97,7 +103,6 @@ export function useEditorPanel(params: UseEditorPanelParams) {
   const fileDiffs = ref<Record<string, FileDiff>>({});
   const readOnlyFileKeys = ref<Set<string>>(new Set());
   const showDiffMode = ref(false);
-  const selectedCode = ref("");
   const renamingPath = ref("");
 
   /* ---- 导航历史（浏览器式后退/前进） ---- */
@@ -245,31 +250,59 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     tab.dirty = fileDirty.value;
   }
 
+  async function discardTabChanges(path: string): Promise<boolean> {
+    const tab = findOpenTab(path);
+    if (!tab || !tab.dirty) return true;
+    if (isVirtualSchemePath(path)) {
+      tab.dirty = false;
+      if (activeFilePath.value === path) fileDirty.value = false;
+      return true;
+    }
+    const result = await readFile(path);
+    if (!result.ok) {
+      fileLoadError.value = result.error || "读取失败";
+      return false;
+    }
+    tab.content = result.content;
+    tab.dirty = false;
+    if (activeFilePath.value === path) {
+      fileContent.value = result.content;
+      fileDirty.value = false;
+      fileLoadError.value = "";
+    }
+    return true;
+  }
+
+  async function handleUnsavedTabChoice(
+    path: string,
+    context: "switch" | "close" | "project",
+  ): Promise<boolean> {
+    const name = fileName(path);
+    const choice = await confirmUnsaved(name, context);
+    if (choice === "cancel") return false;
+    if (choice === "discard") return discardTabChanges(path);
+    if (activeFilePath.value !== path) {
+      syncActiveTabToCache();
+      const tab = findOpenTab(path);
+      if (!tab) return false;
+      activeFilePath.value = path;
+      fileContent.value = tab.content;
+      fileDirty.value = tab.dirty;
+    }
+    await saveFile();
+    return !fileDirty.value;
+  }
+
   async function ensureCanLeaveCurrentTab(): Promise<boolean> {
     if (!fileDirty.value || !activeFilePath.value) return true;
-    const name = fileName(activeFilePath.value);
-    const choice = await confirm(`「${name}」未保存。确定保存？\n\n确定 = 保存后切换\n取消 = 留在当前文件`);
-    if (choice) {
-      await saveFile();
-      return !fileDirty.value;
-    }
-    return false;
+    return handleUnsavedTabChoice(activeFilePath.value, "switch");
   }
 
   async function ensureCanLeaveAllOpenTabs(): Promise<boolean> {
     for (const tab of [...openTabs.value]) {
       if (!tab.dirty) continue;
-      const name = fileName(tab.path);
-      const save = await confirm(`「${name}」未保存。确定保存？\n\n确定 = 保存后切换\n取消 = 留在当前项目`);
-      if (!save) return false;
-      if (activeFilePath.value !== tab.path) {
-        syncActiveTabToCache();
-        activeFilePath.value = tab.path;
-        fileContent.value = tab.content;
-        fileDirty.value = tab.dirty;
-      }
-      await saveFile();
-      if (fileDirty.value) return false;
+      const ok = await handleUnsavedTabChoice(tab.path, "project");
+      if (!ok) return false;
     }
     return true;
   }
@@ -530,20 +563,8 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     if (!tab) return;
 
     if (tab.dirty) {
-      const name = fileName(path);
-      const save = await confirm(`「${name}」未保存。确定保存？\n\n确定 = 保存后关闭\n取消 = 留在当前文件`);
-      if (save) {
-        if (activeFilePath.value !== path) {
-          syncActiveTabToCache();
-          activeFilePath.value = path;
-          fileContent.value = tab.content;
-          fileDirty.value = tab.dirty;
-        }
-        await saveFile();
-        if (fileDirty.value) return;
-      } else {
-        return;
-      }
+      const ok = await handleUnsavedTabChoice(path, "close");
+      if (!ok) return;
     }
 
     const idx = openTabs.value.findIndex((item) => item.path === path);
@@ -784,20 +805,6 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     if (tab) tab.dirty = true;
   }
 
-  function onEditorSelect(text: string) {
-    selectedCode.value = text.trim();
-  }
-
-  function askAiWithCode() {
-    if (!selectedCode.value) return;
-    const raw = activeFilePath.value || "";
-    const filePath = displayFilePath(raw) || "未知文件";
-    composerRef.value?.setPlainText(
-      `请帮我分析以下代码（${filePath}）：\n\n\`\`\`\n${selectedCode.value}\n\`\`\``,
-    );
-    selectedCode.value = "";
-  }
-
   function activeFileRelativePath(): string {
     if (!activeFilePath.value || !projectPath.value) return "";
     const root = projectPath.value.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
@@ -857,7 +864,6 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     fileDiffs,
     readOnlyFileKeys,
     showDiffMode,
-    selectedCode,
     renamingPath,
     activeFileDiff,
     activeFileReadOnly,
@@ -894,8 +900,6 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     parentDirForCreate,
     selectTreeItem,
     onEditorChange,
-    onEditorSelect,
-    askAiWithCode,
     activeFileRelativePath,
     syncEditorAfterAgentFileChange,
     closeOtherTabs,
