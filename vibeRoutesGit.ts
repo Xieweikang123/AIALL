@@ -177,8 +177,9 @@ export function registerGitRoutes(middlewares: Connect.Server) {
         return;
       }
 
+      const staged = url.searchParams.get("staged") === "1";
       const resolved = path.resolve(projectPath);
-      const result = await gitDiffContent(resolved, filePath);
+      const result = await gitDiffContent(resolved, filePath, staged);
       sendJson(res, 200, result);
     } catch (error) {
       sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "获取 diff 内容失败" });

@@ -333,19 +333,6 @@ async function pickProjectFolder(initialPath?: string) {
   return pickFolderLinux(initialPath);
 }
 
-function resolvePathInsideOptionalRoot(inputPath: string, projectRoot?: string): { ok: true; path: string } | { ok: false; error: string } {
-  const resolved = path.resolve(inputPath);
-  const rootInput = projectRoot?.trim();
-  if (!rootInput) return { ok: true, path: resolved };
-
-  const root = path.resolve(rootInput);
-  const relative = path.relative(root, resolved);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    return { ok: false, error: "路径超出项目根目录" };
-  }
-  return { ok: true, path: resolved };
-}
-
 export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
   // POST /backend/vibe/log — 简单日志端点
   middlewares.use("/backend/vibe/log", async (req, res) => {

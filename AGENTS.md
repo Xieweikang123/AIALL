@@ -31,6 +31,9 @@
 - `src/composables/useGitPanel.ts` — Git 状态管理
 - `src/composables/useEditorPanel.ts` — 编辑器状态
 - `src/services/vibeCodingClient.ts` — vibe coding 客户端服务
+- `src/services/vibeGitClient.ts` — Git 客户端（diff/status/commit 等 API 调用）
+- `vibeRoutesGit.ts` — Git HTTP 路由层（解析请求参数，转发给 server/vibeGit.ts）
+- `server/vibeGit.ts` — Git 命令执行层（直接调 git CLI）
 - `src/services/vibeAgentClient.ts` — AI agent 客户端
 - `src/services/vibeChatStorage.ts` — 聊天持久化
 - `src/utils/renderMarkdown.ts` — Markdown 渲染

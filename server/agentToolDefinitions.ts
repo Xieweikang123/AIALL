@@ -182,6 +182,31 @@ export const VIBE_AGENT_TOOLS = [
   {
     type: "function",
     function: {
+      name: "git_status",
+      description: "获取当前 Git 仓库工作区状态：分支、已暂存/未暂存/未跟踪文件列表。用户问「改了啥」「待提交」「git status」时优先调用。",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "git_diff",
+      description: "查看 Git diff。可查看全部变更或单个文件；staged=true 查看已暂存，false 查看未暂存/工作区相对 HEAD 的变更。",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "可选，相对项目根的文件路径；省略则返回全部变更" },
+          staged: { type: "boolean", description: "true=已暂存区，false=未暂存/工作区，默认 false" },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "web_search",
       description: "联网搜索，获取最新信息。返回搜索结果列表（标题、链接、摘要）。",
       parameters: {
@@ -213,9 +238,18 @@ export const VIBE_AGENT_TOOLS = [
 ];
 
 export const READ_ONLY_AGENT_TOOLS = VIBE_AGENT_TOOLS.filter((t) =>
-  ["list_dir", "read_file", "grep", "search_files", "web_search", "web_extract", "list_skills", "read_skill"].includes(
-    t.function.name,
-  ),
+  [
+    "list_dir",
+    "read_file",
+    "grep",
+    "search_files",
+    "git_status",
+    "git_diff",
+    "web_search",
+    "web_extract",
+    "list_skills",
+    "read_skill",
+  ].includes(t.function.name),
 );
 
 export const READ_ONLY_AGENT_TOOL_NAMES = new Set([
@@ -223,6 +257,8 @@ export const READ_ONLY_AGENT_TOOL_NAMES = new Set([
   "read_file",
   "grep",
   "search_files",
+  "git_status",
+  "git_diff",
   "web_search",
   "web_extract",
   "list_skills",

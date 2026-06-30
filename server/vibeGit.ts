@@ -375,7 +375,7 @@ export async function gitDiffContent(projectRoot: string, filePath: string, stag
 
     const diffArgs = staged
       ? ["diff", "--cached", "--no-color", "-U100000", "--", filePath]
-      : ["diff", "HEAD", "--no-color", "-U100000", "--", filePath];
+      : ["diff", "--no-color", "-U100000", "--", filePath];
 
     let before = "";
     let after = "";

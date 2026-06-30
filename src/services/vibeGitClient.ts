@@ -84,6 +84,7 @@ export interface GitLogResult {
 export interface GitActionResult {
   ok: boolean;
   error?: string;
+  warning?: string;
 }
 
 export interface GitGenerateMessageResult {

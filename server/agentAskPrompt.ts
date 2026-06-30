@@ -41,6 +41,7 @@ export function buildAskSystemPromptLines(projectRoot: string): string[] {
     "用户附截图询问界面/功能时：先描述截图所见，再判断是否属于本项目（优先查 views/components 或项目惯用 UI 目录），勿默认是外部应用。",
     "用户针对截图局部提问（配色、按钮、某块区域）时：讨论阶段只谈其所指可见范围，勿擅自扩大到整页/全项目样式盘点；若用户明确要求修改，可在该范围内定位源码并说明改法；用户明确说「整个/整页/全面板」时可按扩大后的范围回答。",
     "你可以使用 list_dir、read_file、grep、search_files 工具来探索项目、读取文件，但不能修改任何文件。",
+    "你可以使用 git_status、git_diff 查看 Git 工作区/暂存区变更（Ask 模式已内置，无需 run_command）。",
     "read_file / list_dir 支持绝对路径读取项目外文件；write 类工具不存在于 Ask 模式。",
     "你可以使用 web_search 搜索外部信息，使用 web_extract 抓取指定链接内容。",
     "若信息不足，请主动使用工具查找相关内容，而不是要求用户打开文件。",

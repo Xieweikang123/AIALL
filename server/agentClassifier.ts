@@ -12,6 +12,8 @@ export const READ_ONLY_AGENT_TOOL_NAMES = new Set([
   "read_file",
   "grep",
   "search_files",
+  "git_status",
+  "git_diff",
   "web_search",
   "web_extract",
   "list_skills",
@@ -203,6 +205,31 @@ export const VIBE_AGENT_TOOLS = [
   {
     type: "function",
     function: {
+      name: "git_status",
+      description: "获取当前 Git 仓库工作区状态：分支、已暂存/未暂存/未跟踪文件列表。用户问「改了啥」「待提交」「git status」时优先调用。",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "git_diff",
+      description: "查看 Git diff。可查看全部变更或单个文件；staged=true 查看已暂存，false 查看未暂存/工作区相对 HEAD 的变更。",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "可选，相对项目根的文件路径；省略则返回全部变更" },
+          staged: { type: "boolean", description: "true=已暂存区，false=未暂存/工作区，默认 false" },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "web_search",
       description: "联网搜索，获取最新信息。返回搜索结果列表（标题、链接、摘要）。",
       parameters: {
@@ -234,9 +261,18 @@ export const VIBE_AGENT_TOOLS = [
 ];
 
 export const READ_ONLY_AGENT_TOOLS = VIBE_AGENT_TOOLS.filter((t) =>
-  ["list_dir", "read_file", "grep", "search_files", "web_search", "web_extract", "list_skills", "read_skill"].includes(
-    t.function.name,
-  ),
+  [
+    "list_dir",
+    "read_file",
+    "grep",
+    "search_files",
+    "git_status",
+    "git_diff",
+    "web_search",
+    "web_extract",
+    "list_skills",
+    "read_skill",
+  ].includes(t.function.name),
 );
 
 export function isEnglishToolNarration(text: string): boolean {
@@ -349,6 +385,24 @@ export function toolSummary(name: string, result: string): string {
     const outMatch = result.match(/^stdout:\n(.+)/m);
     const oneLine = (outMatch?.[1] || result).replace(/\s+/g, " ").trim();
     return oneLine.length > 60 ? `${oneLine.slice(0, 60)}…` : oneLine || "执行完成";
+  }
+
+  if (name === "git_status") {
+    const staged = result.match(/已暂存（(\d+)）/);
+    const unstaged = result.match(/未暂存（(\d+)）/);
+    const parts: string[] = [];
+    if (staged) parts.push(`暂存 ${staged[1]}`);
+    if (unstaged) parts.push(`未暂存 ${unstaged[1]}`);
+    if (result.includes("工作区干净")) return "工作区干净";
+    return parts.length ? parts.join("，") : "已获取状态";
+  }
+
+  if (name === "git_diff") {
+    if (result.includes("（无 diff 输出）") || result.includes("无变更")) return "无变更";
+    const m = result.match(/^文件：(.+)/m);
+    if (m) return `diff ${m[1].trim()}`;
+    const n = (result.match(/^\s+\S+/gm) || []).length;
+    return n > 0 ? `${n} 个文件有变更` : "已获取 diff";
   }
 
   if (name === "web_search") {
