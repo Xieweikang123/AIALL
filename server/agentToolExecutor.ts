@@ -37,7 +37,7 @@ import {
 } from "./vibeProjectContext";
 import { buildSearchFilesEmptyHint } from "./agentAskPrompt";
 import { runGitDiffTool, runGitStatusTool } from "./agentGitTools";
-import { buildWriteToolBlockedMessage } from "../src/services/agentUserIntent";
+import { buildWriteToolBlockedMessage } from "../src/orchestration/product/userIntentHints";
 import {
   MAX_READ_SLICE_REPEATS,
   isExplorationArchivePath,

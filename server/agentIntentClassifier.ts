@@ -7,9 +7,9 @@ import {
   parseIntentClassifierResponse,
   resolveIntentClassifierModel,
   shouldUseAiIntentClassifier,
-  type UserIntentAiPayload,
-} from "../src/services/agentIntentClassifier";
-import type { UserIntentHistoryMessage } from "../src/services/agentUserIntent";
+} from "../src/services/intentClassifierAi";
+import type { UserIntentAiPayload } from "../src/services/intentClassifierTypes";
+import type { UserIntentHistoryMessage } from "../src/orchestration/agentIntentTypes";
 import { chatCompletionWithTools } from "./aiForward";
 
 const INTENT_CLASSIFIER_FIRST_BYTE_MS = 20_000;
