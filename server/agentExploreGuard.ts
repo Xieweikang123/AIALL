@@ -314,6 +314,13 @@ export function claimsPrematureCompletion(text: string): boolean {
   );
 }
 
+/** Reply claims code was written or the build task finished — used by finish gate. */
+export function claimsWriteCompletion(text: string): boolean {
+  const body = sanitizeAgentUserVisibleText(text);
+  if (!body) return false;
+  return WRITE_DONE_RE.test(body) || WRITE_SUCCESS_CLAIM_RE.test(body) || claimsPrematureCompletion(body);
+}
+
 /** True when assistant claims overall success while patch_file failures exist in the run. */
 export function claimsSuccessDespitePatchFailures(text: string, patchFailureCount: number): boolean {
   if (patchFailureCount <= 0) return false;

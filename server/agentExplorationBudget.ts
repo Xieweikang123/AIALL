@@ -155,6 +155,113 @@ export function buildAskExploreSoftCapNudge(totalExploreTurns: number): string {
   ].join("");
 }
 
+/** Plan explore — list_dir only with no read_file yet; soft nudge to output plan. */
+export function buildPlanListDirOnlySoftNudge(totalExploreTurns: number): string {
+  return [
+    `【系统提示·Plan】已累计 ${totalExploreTurns} 轮只读探索，且尚未 read_file 任何源码。`,
+    "若目录结构已足够理解需求，请立即输出 `[PLAN]` 或 `## 修改方案`（文件清单 + 代码块 + 改动说明）。",
+    "若需求是新建独立工程/服务，可直接写脚手架方案，勿继续空扫目录。",
+  ].join("");
+}
+
+/** Plan explore — force structured plan output after read budget is exhausted. */
+export function buildPlanForceAnswerNudge(totalExploreTurns: number): string {
+  return [
+    `【系统强制·Plan】已累计 ${totalExploreTurns} 轮只读探索，规划阶段必须结案。`,
+    "下一轮已移除所有工具，你只能输出文字。",
+    "请立即输出结构化修改方案（`[PLAN]` 或 `## 修改方案` + 文件清单 + 代码块 + 改动说明）。",
+    "若需求是新建独立项目/模块，直接给出脚手架与目录结构方案，勿再 list_dir/read。",
+  ].join("");
+}
+
+/** Plan mode hit segment turn cap — must output structured plan next turn. */
+export function buildPlanSegmentCapNudge(turn: number, totalExploreTurns: number): string {
+  return [
+    `【系统提示·Plan】规划阶段已达第 ${turn} 轮段内上限（累计探索 ${totalExploreTurns} 轮）。`,
+    "下一轮必须输出结构化修改方案（`[PLAN]` 或 `## 修改方案` + 文件清单 + 代码块）；禁止再调用工具。",
+  ].join("");
+}
+
+/** User quoted a plan excerpt and asked to change it — output a full revised plan. */
+export function buildPlanRevisionFollowUpHint(): string {
+  return [
+    "【方案修订】用户引用了当前方案中的一段并提出了修改意见。",
+    "须先 read_file 该条方案对应的 `.aiall/plans/` 文件（路径见 planFilePath），或承接会话中上一版完整方案，在全文基础上按用户意见增删改。",
+    "下一轮必须输出完整结构化修改方案（`[PLAN]` 或 `## 修改方案` + 文件清单 + 代码块），禁止只回复「好的/已去掉」等短句。",
+    "除非用户明确要求大范围重构，否则勿重新广泛探索；优先在既有方案上修订。",
+  ].join("");
+}
+
+/** Pending plan exists — user adopted a prior consultative suggestion; amend, do not spawn Plan 2. */
+export function buildPendingPlanAmendHint(planFilePath?: string): string {
+  const planPathHint = planFilePath?.trim()
+    ? `优先 read_file \`${planFilePath.trim()}\`；若用户已编辑该文件，以其为准。`
+    : "优先 read_file 会话中第一份未执行的 `[PLAN]` / `.aiall/plans/` 方案文件，或承接会话内上一版完整方案正文。";
+  return [
+    "【Pending Plan·方案增量修订】当前会话存在尚未执行的修改方案（用户未点「执行方案」、代码未落盘）。",
+    "用户已采纳你上一轮答疑中的建议，或在引用回复后给出短指令（如「持久化」「加上」「合并」）。",
+    planPathHint,
+    "禁止输出独立的新方案栈（Plan 2）；必须在既有 Pending Plan 全文基础上合并增量，输出一份完整修订版方案（`[PLAN]` 或 `## 修改方案` + 文件清单 + 代码块）。",
+    "勿重新 list_dir 广泛扫描；最多 read 方案文件与本次增量涉及的 1–2 个关键文件。",
+  ].join("");
+}
+
+/** Pending plan + ambiguous short follow-up — clarify merge vs separate before rewriting. */
+export function buildPendingPlanClarificationHint(): string {
+  return [
+    "【Pending Plan·澄清】当前会话有尚未执行的方案，用户本条短指令含义不够明确。",
+    "禁止输出 `[PLAN]` / `## 修改方案` / 新文件清单；用 2–4 句中文直接提问。",
+    "须问清：用户希望把刚讨论的内容并入现有 Pending Plan，还是单独作为独立模块/子方案；可提示用户回复「合并」或「单独」。",
+    "不要猜测后直接写方案。",
+  ].join("");
+}
+
+/** User quoted a plan excerpt and asked an informational question — answer in chat only. */
+export function buildPlanQuoteInformationalHint(): string {
+  return [
+    "【方案答疑】用户引用了当前方案中的一段并提问，未要求修改方案。",
+    "须 read_file/grep 相关代码或配置核实引用内容的行为（如日志落盘位置、配置项、调用链），在会话中用中文直接回答。",
+    "禁止输出 `[PLAN]` / `## 修改方案` / 文件清单 / 完整修订方案；勿改动 `.aiall/plans/` 下方案文件。",
+    "回答 2–8 句即可，可引用路径或配置键；探索够了立即作答，不要凑方案格式。",
+  ].join("");
+}
+
+/** User prompt has no target file paths — nudge plan without deep repo scan. */
+export function buildPlanNoTargetPathHint(): string {
+  return [
+    "【规划提示】用户未指明具体文件/模块路径。",
+    "请根据需求判断：若与当前仓库无关或是新建独立工程/服务，可直接输出脚手架方案，勿深入扫描无关目录；",
+    "若存在无法从仓库佐证的歧义术语/专有名词，须先走澄清流向用户提问，禁止猜测其含义后直接写方案；",
+    "若需对齐现有约定，最多 list_dir 一次后 read 关键入口文件，然后输出方案。",
+  ].join("");
+}
+
+/** Sparse repo + ungrounded ambiguous terms — force clarification before any plan/scaffold. */
+export function buildAmbiguousTermClarificationHint(terms: string[]): string {
+  const listed = terms.map((term) => `「${term}」`).join("、");
+  return [
+    `【歧义词澄清·强制】用户消息含当前仓库无法佐证含义的术语：${listed}。`,
+    "当前项目无可见业务代码可消歧，禁止猜测其指代（如臆测为某类技术栈、某个外部系统名、某个产品代号等）。",
+    "本轮须用中文向用户提出 1–3 个澄清问题（须覆盖上述术语的可能含义与边界），禁止输出 `[PLAN]` / `## 修改方案` 或完整脚手架/示例 API。",
+    "每个问题单独一段，标题行用「**1. …？**」格式；下一行起列出 2–4 个编号选项（1. 2. 3. 单独成行，每项不超过 60 字，供聊天区按钮点击），最后一项可为「其他（请说明）」；禁止用 - 子弹列表代替选项。",
+    "示例：",
+    "**1. 「foo」指的是什么？**",
+    "1. 外部业务系统",
+    "2. 可视化前端",
+    "3. 其他（请说明）",
+    "探索预算至少保留 1 轮用于澄清问答；收到用户明确答复后再探索或输出方案。",
+  ].join("");
+}
+
+/** Model attempted plan/scaffold while clarification is still required. */
+export function buildAmbiguousTermClarificationRetryNudge(terms: string[]): string {
+  const listed = terms.map((term) => `「${term}」`).join("、");
+  return [
+    `【系统强制·歧义词澄清】上一轮在未澄清 ${listed} 的情况下输出了方案或脚手架代码。`,
+    "禁止猜测；请立即改为仅向用户提问（1–3 个中文问句，覆盖术语可能含义），每个问题附 2–4 个编号选项（1. 2. 3. 单独成行）供聊天区点击；不要 bullet 列表、不要代码块、不要文件清单。",
+  ].join("");
+}
+
 export function buildAskForceAnswerNudge(totalExploreTurns: number): string {
   return [
     `【系统强制】Ask 模式已累计 ${totalExploreTurns} 轮探索（超过 ${ASK_MAX_TOTAL_EXPLORE_HARD}）。`,
@@ -197,6 +304,11 @@ export function buildExploreSoftCapNudge(totalExploreTurns: number, mode?: strin
     "已移除 grep / search_files，只能 read_file 做最后确认。",
     actionHint,
   ].join("");
+}
+
+/** Segment turn cap approaching — prioritize patch then summary. */
+export function buildSegmentEmergencyFinishNudge(remainingTurns: number): string {
+  return `【紧急提示】剩余 ${remainingTurns} 轮。请优先 patch_file 完成必要修改，然后输出中文总结；若任务已完成，直接写总结（已改文件、验证方式、剩余问题）。`;
 }
 
 /** Injected when Plan mode exploration exceeds the hard cap — forces text-only plan output. */

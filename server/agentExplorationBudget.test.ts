@@ -21,10 +21,20 @@ import {
   buildUltraShortOpenTaskHint,
   buildPostPatchVerifyNudge,
   buildPostPatchReadVerifyNudge,
+  buildPlanListDirOnlySoftNudge,
+  buildPlanNoTargetPathHint,
+  buildPlanQuoteInformationalHint,
+  buildPlanRevisionFollowUpHint,
+  buildPendingPlanAmendHint,
+  buildPendingPlanClarificationHint,
+  buildAmbiguousTermClarificationHint,
+  buildAmbiguousTermClarificationRetryNudge,
+  buildPlanSegmentCapNudge,
   CONSULTATIVE_BUILD_EXPLORE_TURN_BUDGET,
   EXECUTE_PLAN_EXPLORE_TURN_BUDGET,
   EXPLORE_INTERIM_DIAGNOSIS_TURN,
   INTERACTIVE_EXPLORE_TURN_BUDGET,
+  PLAN_EXPLORE_TURN_BUDGET,
   isExplorationArchivePath,
   isProductiveWritePath,
   SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE,
@@ -33,8 +43,31 @@ import {
 describe("agentExplorationBudget", () => {
   it("builds nudge with turn count", () => {
     expect(INTERACTIVE_EXPLORE_TURN_BUDGET).toBe(2);
+    expect(PLAN_EXPLORE_TURN_BUDGET).toBe(3);
     expect(buildExploreBudgetNudge(2)).toContain("已连续 2 轮");
     expect(buildExploreBudgetNudge(2)).toContain("patch_file");
+    expect(buildExploreBudgetNudge(3, "plan")).toContain("结构化修改方案");
+    expect(buildExploreBudgetNudge(3, "plan")).not.toContain("项目理解报告");
+  });
+
+  it("builds plan explore soft and segment cap nudges", () => {
+    expect(buildPlanListDirOnlySoftNudge(3)).toContain("[PLAN]");
+    expect(buildPlanListDirOnlySoftNudge(3)).not.toContain("移除所有工具");
+    expect(buildPlanSegmentCapNudge(16, 10)).toContain("段内上限");
+    expect(buildPlanNoTargetPathHint()).toContain("未指明具体文件");
+    expect(buildPlanNoTargetPathHint()).toContain("澄清");
+    expect(buildPlanRevisionFollowUpHint()).toContain("完整结构化修改方案");
+    expect(buildPlanRevisionFollowUpHint()).toContain(".aiall/plans/");
+    expect(buildPlanQuoteInformationalHint()).toContain("方案答疑");
+    expect(buildPlanQuoteInformationalHint()).toContain("禁止输出");
+    expect(buildPendingPlanAmendHint()).toContain("Pending Plan");
+    expect(buildPendingPlanAmendHint()).toContain("禁止输出独立");
+    expect(buildPendingPlanAmendHint(".aiall/plans/x.md")).toContain(".aiall/plans/x.md");
+    expect(buildPendingPlanClarificationHint()).toContain("合并");
+    expect(buildAmbiguousTermClarificationHint(["foo"])).toContain("「foo」");
+    expect(buildAmbiguousTermClarificationHint(["foo"])).toContain("禁止猜测");
+    expect(buildAmbiguousTermClarificationHint(["foo"])).toContain("编号");
+    expect(buildAmbiguousTermClarificationRetryNudge(["foo"])).toContain("脚手架");
   });
 
   it("uses a tighter explore budget for execute_plan", () => {
