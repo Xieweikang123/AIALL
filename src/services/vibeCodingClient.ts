@@ -350,6 +350,25 @@ export async function syncChatStore(projectPath: string, data: unknown): Promise
   }
 }
 
+export interface OpenFolderResult {
+  ok: boolean;
+  path?: string;
+  error?: string;
+}
+
+export async function openProjectFolderInExplorer(folderPath: string): Promise<OpenFolderResult> {
+  try {
+    const response = await fetch(backendUrl("/backend/vibe/open-folder"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: folderPath }),
+    });
+    return await readJsonResponse<OpenFolderResult>(response);
+  } catch (error) {
+    return { ok: false, error: formatFetchError(error, "打开文件夹失败") };
+  }
+}
+
 export async function pickProjectFolder(initialPath?: string): Promise<PickFolderResult> {
   try {
     const selected = await open({

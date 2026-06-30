@@ -1,6 +1,6 @@
 import type { Connect } from "vite";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -273,6 +273,36 @@ async function pickFolderMac(initialPath?: string): Promise<{ ok: boolean; path?
     const message = error instanceof Error ? error.message : String(error);
     if (/User canceled|用户取消|-128/.test(message)) return { ok: false, cancelled: true };
     return { ok: false, error: message };
+  }
+}
+
+async function openFolderInExplorer(folderPath: string): Promise<{ ok: boolean; path?: string; error?: string }> {
+  const resolved = path.resolve(folderPath.trim());
+  const stat = await fs.promises.stat(resolved).catch(() => null);
+  if (!stat || !stat.isDirectory()) {
+    return { ok: false, error: "路径不是有效文件夹" };
+  }
+  try {
+    if (process.platform === "win32") {
+      // explorer.exe 打开文件夹后常以非零码退出，不能 await execFile
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn("explorer.exe", [resolved], {
+          detached: true,
+          stdio: "ignore",
+          windowsHide: true,
+        });
+        child.once("error", reject);
+        child.unref();
+        resolve();
+      });
+    } else if (process.platform === "darwin") {
+      await execFileAsync("open", [resolved]);
+    } else {
+      await execFileAsync("xdg-open", [resolved]);
+    }
+    return { ok: true, path: resolved };
+  } catch (error) {
+    return { ok: false, error: formatExecError(error) };
   }
 }
 
@@ -1575,6 +1605,26 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       sendJson(res, 200, result);
     } catch (error) {
       sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "收集项目上下文失败" });
+    }
+  });
+
+  // POST /backend/vibe/open-folder
+  middlewares.use("/backend/vibe/open-folder", async (req, res) => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "仅支持 POST 请求" });
+      return;
+    }
+    try {
+      const body = (await readJsonBody(req)) as { path?: string };
+      const folderPath = body.path?.trim() || "";
+      if (!folderPath) {
+        sendJson(res, 400, { ok: false, error: "缺少 path 参数" });
+        return;
+      }
+      const result = await openFolderInExplorer(folderPath);
+      sendJson(res, result.ok ? 200 : 400, result);
+    } catch (error) {
+      sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "打开文件夹失败" });
     }
   });
 

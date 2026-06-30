@@ -24,6 +24,18 @@
       <button type="button" class="primary compact" :disabled="pickingFolder || loadingTree" @click="$emit('handle-open-project')">
         {{ pickingFolder ? "选择…" : loadingTree ? "" : projectOpened ? "切换" : "打开项目" }}<span v-if="loadingTree" class="shimmer-text--fast">加载中</span>
       </button>
+      <button
+        type="button"
+        class="icon-btn"
+        :disabled="!projectOpened || !projectPath.trim()"
+        title="在文件管理器中打开"
+        @click="$emit('open-folder-in-explorer')"
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M2.5 4.8A1.3 1.3 0 0 1 3.8 3.5h3.2l1.2 1.3h4.5A1.3 1.3 0 0 1 14 6.1v6.4a1.3 1.3 0 0 1-1.3 1.3H3.8A1.3 1.3 0 0 1 2.5 12.5V4.8Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+          <path d="M10.5 8.5 12 10l-3.5 3.5L6 11" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
       <button type="button" class="icon-btn" :disabled="!projectPath.trim()" @click="$emit('refresh-tree')" title="刷新文件树">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M13.65 2.35A7.96 7.96 0 0 0 8 0a8 8 0 1 0 8 8h-2A6 6 0 1 1 8 2c1.66 0 3.14.69 4.22 1.78L9 7h7V0l-2.35 2.35Z" fill="currentColor"/></svg>
       </button>
@@ -186,6 +198,7 @@ const emit = defineEmits<{
   (e: "clear-retry"): void;
   (e: "update:treeError", value: string): void;
   (e: "open-recent-project", path: string): void;
+  (e: "open-folder-in-explorer"): void;
   (e: "test-notification"): void;
 }>();
 

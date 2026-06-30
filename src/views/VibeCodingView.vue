@@ -14,6 +14,7 @@
       @clear-retry="clearRetryTimer"
       @update:tree-error="treeError = $event"
       @open-recent-project="openProjectByPath"
+      @open-folder-in-explorer="openCurrentFolderInExplorer"
       @test-notification="testNotification"
     />
 
@@ -690,6 +691,7 @@ import {
   createItem,
   deleteItem,
   listDirectory,
+  openProjectFolderInExplorer,
   pickProjectFolder,
   readFile,
   renameItem,
@@ -2278,6 +2280,15 @@ async function handleOpenProject() {
   } finally {
     pickingFolder.value = false;
     openingProject.value = false;
+  }
+}
+
+async function openCurrentFolderInExplorer() {
+  const folder = projectPath.value.trim();
+  if (!folder || !projectOpened.value) return;
+  const result = await openProjectFolderInExplorer(folder);
+  if (!result.ok && result.error) {
+    treeError.value = result.error;
   }
 }
 
