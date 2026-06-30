@@ -719,6 +719,31 @@ describe("resolveAgentTimelineAnswer", () => {
     ).toBe(finalAnswer);
   });
 
+  it("hides stale final answer while waiting on a later turn after resume", () => {
+    const finalAnswer = "## 上一轮总结\n\n已完成扫描。";
+    expect(
+      resolveAgentTimelineAnswer(
+        {
+          content: finalAnswer,
+          agentTurn: 36,
+          agentPhase: "waiting_model",
+          roundGroups: [
+            {
+              turn: 35,
+              narrative: finalAnswer,
+              modelSteps: [],
+              toolIds: [],
+              response: { assistantText: finalAnswer, hasToolCalls: false, isFinal: true, toolCalls: [] },
+            },
+          ],
+        },
+        finalAnswer,
+        true,
+        false,
+      ),
+    ).toBe("");
+  });
+
   it("keeps longer streamed narrative when isFinal snapshot is shorter", () => {
     const streamed = "这是一段较长的流式输出内容，用于验证不会被更短的响应覆盖。";
     const shortFinal = "这是一段较长的流式";

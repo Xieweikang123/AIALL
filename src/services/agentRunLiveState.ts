@@ -83,6 +83,18 @@ export function formatAgentLiveStatus(
         : "";
     return `正在重连${retryHint}…`;
   }
+  if (phase === "classifying_intent") {
+    return appendStatusDetail("正在分析用户意图…", detail);
+  }
+  if (phase === "clarify_continue") {
+    return appendStatusDetail("步骤澄清后继续执行…", detail);
+  }
+  if (phase === "intent_classified") {
+    return appendStatusDetail("意图已识别，准备执行…", detail);
+  }
+  if (phase === "ambiguous_term_clarification") {
+    return appendStatusDetail("用户表述不明确，正在澄清…", detail);
+  }
   if (phase === "building_context") {
     return appendStatusDetail("正在扫描项目上下文…", detail);
   }
@@ -100,6 +112,12 @@ export function formatAgentLiveStatus(
   }
   if (phase === "vision_first_turn_skipped") {
     return appendStatusDetail("读图描述不足，继续执行任务…", detail);
+  }
+  if (phase === "vision_first_turn_retry") {
+    return appendStatusDetail("读图描述不明确，正在重试…", detail);
+  }
+  if (phase === "vision_consultative_locate_single_turn") {
+    return appendStatusDetail("正在按描述在截图中定位元素…", detail);
   }
   if (phase === "vision_fallback") {
     return detail?.trim() ? detail.trim() : "当前模型不支持图片输入，已降级为纯文本请求";
@@ -166,9 +184,17 @@ export function formatAgentLiveStatus(
   }
   if (phase === "executing_tools") return "正在执行工具调用…";
   if (phase === "summarizing_tools") return "正在整理工具结果，准备下一轮推理…";
+  if (phase === "explore_segment_cap") return appendStatusDetail("探索内容较多，正在继续下一段…", detail);
+  if (phase === "plan_segment_cap") return appendStatusDetail("规划内容较多，正在继续下一段…", detail);
+  if (phase === "consultative_segment_cap") return appendStatusDetail("分析内容较多，正在继续下一段…", detail);
+  if (phase === "turn_cap_final_summary") return appendStatusDetail("已达轮次上限，正在汇总结果…", detail);
   if (phase === "continuing") return appendStatusDetail("任务较长，自动续跑下一段…", detail);
   if (phase === "finished") return "";
   if (phase === "aborted") return "已停止运行";
+  if (phase.endsWith("_retry")) {
+    const reason = live.retryError ? `：${live.retryError}` : "";
+    return appendStatusDetail(`正在重试${reason}…`, detail);
+  }
   return "";
 }
 

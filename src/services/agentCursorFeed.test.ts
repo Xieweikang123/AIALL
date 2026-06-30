@@ -575,6 +575,17 @@ describe("agentCursorFeed", () => {
     ).toBe("等待模型响应… · 第 2/24 轮 · 已等待 0s");
   });
 
+  it("buildAgentLiveFooterStatus keeps wait status visible when answer slot is occupied", () => {
+    expect(
+      buildAgentLiveFooterStatus({
+        currentStatus: "正在等待模型响应（第 35/24 轮）…",
+        isRunning: true,
+        hasAnswer: true,
+        agentPhase: "waiting_model",
+      }),
+    ).toBe("正在等待模型响应（第 35/24 轮）…");
+  });
+
   it("keeps three recent actions visible while running without compact feed", () => {
     const groups: AgentRoundGroupView[] = [{
       turn: 1,

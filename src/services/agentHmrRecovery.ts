@@ -1,6 +1,6 @@
 /**
- * Agent HMR Recovery — 在 Vite HMR 触发页面重载前持久化 Agent 运行状态，
- * 重载后自动恢复中断的 Agent 运行。
+ * Agent 页面刷新/HMR 恢复 — 在 Vite full reload 或浏览器刷新前持久化 Agent 运行状态，
+ * 重载后自动从断点恢复中断的 Agent 运行。
  */
 
 import { lsGet, lsSetJson, lsRemove } from "../utils/localStorageSafe";

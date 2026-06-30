@@ -24,7 +24,12 @@ import {
   shouldSilentAutoContinue,
   AGENT_AUTO_RESUME_SECONDS,
   AGENT_AUTO_RESUME_IMMEDIATE_SECONDS,
+  AGENT_RATE_LIMIT_AUTO_RESUME_SECONDS,
+  AGENT_RATE_LIMIT_SILENT_CONTINUE_DELAY_MS,
   AGENT_SILENT_CONTINUE_MAX,
+  extractRateLimitHintFromStatusLog,
+  isRateLimitAgentError,
+  resolveSilentContinueDelayMs,
   resolveAutoResumeSeconds,
   resolveModelWaitStallMs,
   AGENT_MODEL_WAIT_STALL_MS,
@@ -72,6 +77,15 @@ describe("isRecoverableAgentError", () => {
     ).toBe(true);
     expect(isRecoverableAgentError("请求失败，HTTP 400：invalid model name")).toBe(false);
   });
+
+  it("detects HTTP 429 rate limits as recoverable", () => {
+    expect(
+      isRecoverableAgentError(
+        "请求失败，HTTP 429：Error from provider (Xiaomi): Too many requests",
+      ),
+    ).toBe(true);
+    expect(isRecoverableAgentError("Too many requests from provider")).toBe(true);
+  });
 });
 
 describe("shouldAutoResumeAgentError", () => {
@@ -96,6 +110,15 @@ describe("shouldAutoResumeAgentError", () => {
       AGENT_AUTO_RESUME_IMMEDIATE_SECONDS,
     );
     expect(resolveAutoResumeSeconds("模型响应超时（等待首包超过 60s）")).toBe(AGENT_AUTO_RESUME_SECONDS);
+  });
+
+  it("uses longer delays for HTTP 429 rate limits", () => {
+    const rateLimitMsg = "请求失败，HTTP 429：Error from provider (Xiaomi): Too many requests";
+    expect(shouldAutoResumeAgentError(rateLimitMsg)).toBe(true);
+    expect(shouldSilentAutoContinue(rateLimitMsg)).toBe(true);
+    expect(resolveAutoResumeSeconds(rateLimitMsg)).toBe(AGENT_RATE_LIMIT_AUTO_RESUME_SECONDS);
+    expect(resolveSilentContinueDelayMs(rateLimitMsg)).toBe(AGENT_RATE_LIMIT_SILENT_CONTINUE_DELAY_MS);
+    expect(isRateLimitAgentError(rateLimitMsg)).toBe(true);
   });
 });
 
@@ -326,6 +349,17 @@ describe("canResumeAgentRun", () => {
         agentAborted: true,
         agentAbortReason: HMR_INTERRUPT_REASON,
         tools: [{ running: false, label: "读取文件", summary: "ok", turn: 1 }],
+      }),
+    ).toBe(true);
+  });
+
+  it("allows resume after HMR interrupt even without tool progress", () => {
+    expect(
+      canResumeAgentRun({
+        agentFailed: true,
+        agentRecoverable: true,
+        agentAborted: true,
+        agentAbortReason: HMR_INTERRUPT_REASON,
       }),
     ).toBe(true);
   });
@@ -635,6 +669,17 @@ describe("recoverableAgentErrorHint", () => {
     expect(hint).toContain("未生成最终回复");
     expect(hint).toContain("服务端持续探索未结案");
     expect(hint).toContain("恢复运行");
+  });
+});
+
+describe("extractRateLimitHintFromStatusLog", () => {
+  it("extracts the latest HTTP 429 line from statusLog", () => {
+    const hint = extractRateLimitHintFromStatusLog([
+      "正在等待模型响应（第 2/20 轮）…",
+      "模型请求失败：请求失败，HTTP 429：Error from provider (Xiaomi): Too many requests，正在重试（第 2/20 轮），第 1/3 次重试…",
+    ]);
+    expect(hint).toContain("HTTP 429");
+    expect(hint).toContain("Too many requests");
   });
 });
 

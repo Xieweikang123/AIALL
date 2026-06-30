@@ -139,8 +139,33 @@ export const AGENT_CONTINUE_MODEL_WAIT_STALL_MS = 60_000;
 /** Brief backoff before chaining the next SSE segment on the client. */
 export const AGENT_SILENT_CONTINUE_DELAY_MS = 400;
 
+/** Longer backoff when the provider returns HTTP 429 / rate limit. */
+export const AGENT_RATE_LIMIT_SILENT_CONTINUE_DELAY_MS = 12_000;
+
+/** Auto-resume countdown after rate-limit failures (seconds). */
+export const AGENT_RATE_LIMIT_AUTO_RESUME_SECONDS = 15;
+
+export function isRateLimitAgentError(message: string): boolean {
+  const msg = message.trim().toLowerCase();
+  return (
+    /\bhttp\s*429\b/.test(msg) ||
+    msg.includes("too many requests") ||
+    /rate.?limit/.test(msg)
+  );
+}
+
+/** Pick silent-continue delay from the failure message. */
+export function resolveSilentContinueDelayMs(errorMessage: string): number {
+  return isRateLimitAgentError(errorMessage)
+    ? AGENT_RATE_LIMIT_SILENT_CONTINUE_DELAY_MS
+    : AGENT_SILENT_CONTINUE_DELAY_MS;
+}
+
 /** Pick auto-resume countdown from the failure message. */
 export function resolveAutoResumeSeconds(errorMessage: string): number {
+  if (isRateLimitAgentError(errorMessage)) {
+    return AGENT_RATE_LIMIT_AUTO_RESUME_SECONDS;
+  }
   const msg = errorMessage.trim().toLowerCase();
   if (
     msg === "network error" ||
@@ -182,7 +207,9 @@ export function isRecoverableAgentError(message: string): boolean {
     msg.includes("可能已卡住") ||
     msg.includes("未生成最终回复") ||
     msg.includes("网络") ||
-    /\bhttp\s*(502|503|504|408)\b/.test(msg) ||
+    /\bhttp\s*(429|502|503|504|408)\b/.test(msg) ||
+    msg.includes("too many requests") ||
+    /rate.?limit/.test(msg) ||
     msg.includes("bad gateway") ||
     msg.includes("service unavailable") ||
     (/\bhttp\s*400\b/.test(msg) &&
@@ -277,6 +304,22 @@ function resolveAgentToolName(tool: AgentProgressTool): string {
   if (hint.includes("列出")) return "list_dir";
   if (hint.includes("搜索文件")) return "search_files";
   return tool.name?.trim() || "";
+}
+
+/** Scan statusLog for the most recent rate-limit provider error. */
+export function extractRateLimitHintFromStatusLog(statusLog?: string[]): string | null {
+  if (!statusLog?.length) return null;
+  for (let i = statusLog.length - 1; i >= 0; i -= 1) {
+    const line = statusLog[i]?.trim() || "";
+    if (!line || !isRateLimitAgentError(line)) continue;
+    const colonIdx = line.indexOf("：");
+    if (colonIdx >= 0) {
+      const afterPrefix = line.slice(colonIdx + 1).split("，正在重试")[0]?.trim();
+      if (afterPrefix && isRateLimitAgentError(afterPrefix)) return afterPrefix;
+    }
+    return line;
+  }
+  return null;
 }
 
 function extractMissingFinalAnswerStatusHint(statusLog?: string[]): string | null {
@@ -530,8 +573,7 @@ export function inferAgentRecoveryFlags(msg: AgentProgressSource & {
 
   if (
     msg.agentAborted &&
-    isHmrInterruptReason(msg.agentAbortReason || "") &&
-    hasRecoverableAgentProgress(msg)
+    isHmrInterruptReason(msg.agentAbortReason || "")
   ) {
     return {
       agentFailed: true,
@@ -897,8 +939,8 @@ function passesAgentAbortResumeGate(
 ): boolean {
   if (msg.agentAborted && !isPartialWrittenRunInterrupt(msg)) {
     const hmrReason = msg.agentAbortReason || msg.agentFailureReason || "";
-    // HMR 中断且有进展 → 允许恢复
-    if (isHmrInterruptReason(hmrReason) && hasRecoverableAgentProgress(msg)) return true;
+    // 页面刷新/热更新中断 → 允许恢复（含尚未产生工具步骤的运行）
+    if (isHmrInterruptReason(hmrReason)) return true;
     // 非 HMR 中断（如手动停止）→ 始终允许恢复
     if (!isHmrInterruptReason(hmrReason)) return true;
     return false;

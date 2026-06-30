@@ -167,8 +167,16 @@ export function buildAgentLiveFooterStatus(input: {
   hasAnswer: boolean;
   hasRunningTool?: boolean;
   hasActionBlocks?: boolean;
+  agentPhase?: string;
 }): string | null {
-  if (!input.isRunning || input.hasAnswer) return null;
+  if (!input.isRunning) return null;
+
+  const waitingModel =
+    input.agentPhase === "waiting_model" ||
+    input.agentPhase === "sending_request" ||
+    input.agentPhase === "retrying_model";
+
+  if (input.hasAnswer && !waitingModel) return null;
 
   const status = input.currentStatus?.trim();
   if (!status) return null;

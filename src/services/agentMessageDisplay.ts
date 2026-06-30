@@ -165,6 +165,17 @@ function resolveFinalAssistantText(msg: AssistantBubbleSource): string {
   );
 }
 
+function resolveLatestFinalTurn(msg: AssistantBubbleSource): number | undefined {
+  return msg.roundGroups?.filter((group) => group.response?.isFinal).at(-1)?.turn;
+}
+
+/** Active turn advanced past the last finalized answer — resume/continue should not replay stale final text. */
+function isActiveTurnAfterFinalAnswer(msg: LiveAgentAnswerSource): boolean {
+  const finalTurn = resolveLatestFinalTurn(msg);
+  const activeTurn = msg.agentTurn;
+  return Boolean(finalTurn && activeTurn && activeTurn > finalTurn);
+}
+
 /**
  * User-visible answer exists only after the server marks a turn `isFinal`,
  * or for non-agent assistant messages that only use `content`.
@@ -370,7 +381,7 @@ export function resolveLiveAgentAnswerText(msg: LiveAgentAnswerSource): string {
     if (contentFallback) return contentFallback;
   }
 
-  if (preStream && hasAgentFinalAnswer(msg)) {
+  if (preStream && hasAgentFinalAnswer(msg) && !isActiveTurnAfterFinalAnswer(msg)) {
     const finalText = normalizeBubbleText(resolveFinalAssistantText(msg));
     if (finalText && !isAgentToolTurnNarration(finalText)) return finalText;
   }
@@ -423,10 +434,10 @@ export function resolveAgentTimelineAnswer(
   msg: LiveAgentAnswerSource,
   completedContent: string,
   isRunning: boolean,
-  _hasRunningTool = false,
+  hasRunningTool = false,
 ): string {
   if (!isRunning) return completedContent;
-  if (hasAgentFinalAnswer(msg)) {
+  if (hasAgentFinalAnswer(msg) && !isActiveTurnAfterFinalAnswer(msg)) {
     const finalized = resolveCompletedAgentBubbleContent(msg);
     const live = resolveLiveAgentAnswerText(msg);
     const merged = pickLongestSubstantiveAnswer(finalized, live, msg.content || "");
@@ -436,8 +447,22 @@ export function resolveAgentTimelineAnswer(
     const live = resolveLiveAgentAnswerText(msg);
     return live || normalizeBubbleText(msg.content || "") || "";
   }
-  // Cursor-like: tool/wait phases keep the answer slot for stream deltas only,
-  // not turn narratives such as "直接 patch：".
+  const preStream = Boolean(
+    msg.agentPhase && AGENT_LIVE_PREVIEW_PRE_STREAM_PHASES.has(msg.agentPhase),
+  );
+  if (preStream) {
+    if (
+      hasRunningTool &&
+      (msg.agentPhase === "planning_tools" ||
+        msg.agentPhase === "executing_tool" ||
+        msg.agentPhase === "executing_tools")
+    ) {
+      return normalizeBubbleText(msg.content || "") || "";
+    }
+    const progress = resolveLatestAgentProgressNarrative(msg);
+    if (progress) return progress;
+    return "";
+  }
   return normalizeBubbleText(msg.content || "") || "";
 }
 
