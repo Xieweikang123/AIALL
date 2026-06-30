@@ -4,6 +4,8 @@ import {
   DEFAULT_AI_MAX_RETRIES,
   MODEL_FIRST_BYTE_TIMEOUT_MS,
   formatAiHttpError,
+  isRateLimitAiError,
+  isRetryableAiError,
   normalizeMessagesForChatApi,
   resolveFirstByteTimeoutMs,
 } from "./aiForward";
@@ -22,6 +24,30 @@ describe("resolveFirstByteTimeoutMs", () => {
 describe("agent retry budget", () => {
   it("allows one extra retry for agent runs", () => {
     expect(AGENT_AI_MAX_RETRIES).toBe(DEFAULT_AI_MAX_RETRIES + 1);
+  });
+});
+
+describe("isRateLimitAiError", () => {
+  it("detects HTTP 429 and provider rate-limit messages", () => {
+    expect(isRateLimitAiError({ status: 429 })).toBe(true);
+    expect(
+      isRateLimitAiError({
+        error: "请求失败，HTTP 429：Error from provider (Xiaomi): Too many requests",
+      }),
+    ).toBe(true);
+    expect(isRateLimitAiError({ error: "model overloaded, rate limit exceeded" })).toBe(true);
+    expect(isRateLimitAiError({ status: 502, error: "bad gateway" })).toBe(false);
+  });
+});
+
+describe("isRetryableAiError", () => {
+  it("retries HTTP 429 rate limits", () => {
+    expect(
+      isRetryableAiError({
+        status: 429,
+        error: "请求失败，HTTP 429：Error from provider (Xiaomi): Too many requests",
+      }),
+    ).toBe(true);
   });
 });
 

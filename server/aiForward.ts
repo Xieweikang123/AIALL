@@ -78,7 +78,20 @@ function delayMs(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-function retryDelayForAttempt(attempt: number): number {
+export function isRateLimitAiError(input: {
+  status?: number;
+  error?: string;
+  rawText?: string;
+}): boolean {
+  if (input.status === 429) return true;
+  const haystack = `${input.error || ""} ${input.rawText || ""}`.toLowerCase();
+  return /too many requests|rate.?limit/.test(haystack);
+}
+
+function retryDelayForAttempt(attempt: number, rateLimited = false): number {
+  if (rateLimited) {
+    return Math.min(90_000, 5000 * 2 ** (attempt - 1));
+  }
   return Math.min(30_000, 2000 * 2 ** (attempt - 1));
 }
 
@@ -515,7 +528,12 @@ export async function chatCompletionWithTools(params: {
         });
       if (!retryable || attempt >= maxAttempts) return result;
 
-      const delay = retryDelayForAttempt(attempt);
+      const rateLimited = isRateLimitAiError({
+        status: result.status,
+        error: result.error,
+        rawText: result.rawText,
+      });
+      const delay = retryDelayForAttempt(attempt, rateLimited);
       params.onRetry?.({
         attempt,
         maxAttempts,
