@@ -242,6 +242,22 @@
           @delete-history="(entry, event) => void deleteHistoryReview(entry, event)"
           @clear-history-view="clearHistoryReview"
         />
+
+        <AutoBugFixPanel
+          v-else-if="gitPanelMode === 'project' && projectPanelView === 'fix'"
+          :project-opened="projectOpened"
+          :phase="autoBugFixPhase"
+          :running="autoBugFixRunning"
+          :error="autoBugFixError"
+          :scan-result="autoBugFixScan"
+          :verify-result="autoBugFixVerify"
+          :last-summary="autoBugFixSummary"
+          v-model:include-warnings="autoBugFixIncludeWarnings"
+          @start="() => void startAutoBugFixFlow()"
+          @scan-only="() => void runAutoBugFixScanOnly()"
+          @verify-only="() => void runAutoBugFixVerifyOnly()"
+          @open-git="openGitPanelFromAutoFix"
+        />
       </FilePanel>
 
       <div
@@ -256,7 +272,7 @@
       ></div>
 
       <EditorPanel
-        v-if="openTabs.length > 0 && !planPanelInForeground && (gitPanelMode !== 'project' || (projectPanelView !== 'knowledge' && projectPanelView !== 'health'))"
+        v-if="openTabs.length > 0 && !planPanelInForeground && (gitPanelMode !== 'project' || (projectPanelView !== 'knowledge' && projectPanelView !== 'health' && projectPanelView !== 'fix'))"
         ref="editorPanelRef"
         :active-file-path="activeFilePath"
         :file-content="fileContent"
@@ -343,6 +359,27 @@
           :review-history-detail-loading="reviewHistoryDetailLoading"
           @open-source="openArchitectReviewSourceFile"
           @expand-chat="expandChat"
+        />
+      </section>
+
+      <section
+        v-show="gitPanelMode === 'project' && projectPanelView === 'fix' && projectOpened && !planWorkspaceOpen"
+        class="editor-panel knowledge-main-panel"
+        aria-label="自动修复"
+      >
+        <AutoBugFixPanel
+          :project-opened="projectOpened"
+          :phase="autoBugFixPhase"
+          :running="autoBugFixRunning"
+          :error="autoBugFixError"
+          :scan-result="autoBugFixScan"
+          :verify-result="autoBugFixVerify"
+          :last-summary="autoBugFixSummary"
+          v-model:include-warnings="autoBugFixIncludeWarnings"
+          @start="() => void startAutoBugFixFlow()"
+          @scan-only="() => void runAutoBugFixScanOnly()"
+          @verify-only="() => void runAutoBugFixVerifyOnly()"
+          @open-git="openGitPanelFromAutoFix"
         />
       </section>
 
@@ -622,6 +659,8 @@ import { useVibeGlobalShortcuts } from "../composables/useVibeGlobalShortcuts";
 import { useProjectMemory } from "../composables/useProjectMemory";
 import { useProjectKnowledge } from "../composables/useProjectKnowledge";
 import { useProjectArchitectReview } from "../composables/useProjectArchitectReview";
+import { useAutoBugFix } from "../composables/useAutoBugFix";
+import AutoBugFixPanel from "../components/vibe/AutoBugFixPanel.vue";
 import { usePlanPanel } from "../composables/usePlanPanel";
 import { PROJECT_ARCHITECT_REVIEW_REL_PATH } from "../services/vibeProjectArchitectReviewClient";
 import { PROJECT_KNOWLEDGE_REL_PATH } from "../services/vibeProjectKnowledgeClient";
@@ -1565,7 +1604,7 @@ async function openGitLogFile(...args: Parameters<typeof openGitLogFileCore>) {
 const noActiveEditor = computed(() => {
   if (planWorkspaceOpen.value) return false;
   const isProjectView = gitPanelMode.value === "project" &&
-    (projectPanelView.value === "knowledge" || projectPanelView.value === "health");
+    (projectPanelView.value === "knowledge" || projectPanelView.value === "health" || projectPanelView.value === "fix");
 
   if (isProjectView) {
     return !projectOpened.value;
@@ -2077,6 +2116,7 @@ const {
   autoResumeSecondsLeft,
   autoResumeTargetId,
   runAgentTurn,
+  runAutoBugFixAgent,
   resumeAgentRun,
   stopAgent,
   interruptAgentRun,
@@ -2107,6 +2147,31 @@ const {
   stopAgentUiTick,
   hasActiveAgentRun,
 } = agent;
+
+const autoBugFix = useAutoBugFix(projectPath, projectOpened, {
+  startAgent: (params) => runAutoBugFixAgent(params),
+  expandChat,
+  switchGitPanel: () => {
+    gitPanelMode.value = "git";
+  },
+});
+
+const {
+  phase: autoBugFixPhase,
+  error: autoBugFixError,
+  running: autoBugFixRunning,
+  scanResult: autoBugFixScan,
+  verifyResult: autoBugFixVerify,
+  lastSummary: autoBugFixSummary,
+  includeWarnings: autoBugFixIncludeWarnings,
+  startAutoBugFix: startAutoBugFixFlow,
+  runScanOnly: runAutoBugFixScanOnly,
+  runVerifyOnly: runAutoBugFixVerifyOnly,
+} = autoBugFix;
+
+function openGitPanelFromAutoFix() {
+  gitPanelMode.value = "git";
+}
 
 const planPanel = usePlanPanel({
   chatMessages,

@@ -150,7 +150,7 @@ export function useGitPanel(
   }
 
   type GitPanelMode = "files" | "git" | "sessions" | "project";
-  type ProjectPanelView = "knowledge" | "health";
+  type ProjectPanelView = "knowledge" | "health" | "fix";
 
   const gitPanelMode = ref<GitPanelMode>(
     _storedPanelMode === "git"

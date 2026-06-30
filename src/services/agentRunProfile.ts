@@ -17,6 +17,8 @@ import type { VibeChatMode } from "../../shared/agentTypes";
 
 export type AgentRunKind = "interactive" | "execute_plan";
 
+export type AgentRunTriggerSource = "auto_bug_fix";
+
 export {
   ASK_MAX_TURNS,
   EXECUTE_PLAN_MAX_TURNS,
@@ -26,6 +28,7 @@ export {
   EXPLORE_DEEP_MAX_TURNS,
   EXPLORE_FOLLOWUP_MAX_TURNS,
   PLAN_MAX_TURNS,
+  AUTO_BUG_FIX_MAX_TURNS,
   resolveAgentMaxTurns,
   resolveResumeMaxTurns,
 } from "../../server/agentTurnBudget";
@@ -34,6 +37,7 @@ export interface AgentRunProfile {
   kind: AgentRunKind;
   targetFiles?: string[];
   userIntent?: string;
+  triggerSource?: AgentRunTriggerSource;
 }
 
 export interface ResolveAgentRunProfileInput {

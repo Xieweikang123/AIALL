@@ -22,6 +22,7 @@ export interface VibeAgentRunRequest {
     kind: "interactive" | "execute_plan";
     targetFiles?: string[];
     userIntent?: string;
+    triggerSource?: "auto_bug_fix";
   };
 }
 

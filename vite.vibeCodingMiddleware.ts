@@ -50,6 +50,7 @@ import { externalizeSessionPayload, readImageRefAsBuffer, readImageRefAsDataUrl 
 import { withFileLock } from "./server/fileLock";
 import { sessionDiagServer } from "./server/sessionDiagLog";
 import { scanProjectHealth } from "./server/projectHealthScan";
+import { runProjectVerify } from "./server/projectVerifyRun";
 import { registerFileOpsRoutes } from "./vibeRoutesFileOps";
 import { registerGitRoutes } from "./vibeRoutesGit";
 import { registerFileWatcherRoutes } from "./vibeRoutesFileWatcher";
@@ -1565,6 +1566,31 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
       sendJson(res, 500, {
         ok: false,
         error: error instanceof Error ? error.message : "项目体检失败",
+      });
+    }
+  });
+
+  // POST /backend/vibe/project-verify-run
+  middlewares.use("/backend/vibe/project-verify-run", async (req, res) => {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "仅支持 POST 请求" });
+      return;
+    }
+
+    try {
+      const url = new URL(req.url || "", "http://localhost");
+      const projectPath = url.searchParams.get("projectPath")?.trim();
+      if (!projectPath) {
+        sendJson(res, 400, { ok: false, error: "缺少 projectPath 参数" });
+        return;
+      }
+
+      const result = await runProjectVerify(projectPath);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, {
+        ok: false,
+        error: error instanceof Error ? error.message : "项目验证运行失败",
       });
     }
   });

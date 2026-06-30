@@ -2,8 +2,11 @@ import { lsGetJson, lsRemove, lsSetJson } from "./localStorageSafe";
 
 export type PersistedEditorTab = {
   path: string;
+  kind?: string;
   dirty?: boolean;
   content?: string;
+  diff?: { before: string; after: string; deleted?: boolean; created?: boolean };
+  readOnly?: boolean;
 };
 
 export type PersistedEditorWorkspace = {

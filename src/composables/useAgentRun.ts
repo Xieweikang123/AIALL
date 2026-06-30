@@ -9,6 +9,7 @@ import {
   resolveAgentRunProfile,
   resolveAskExecutionEscalation,
   shapeAgentHistoryForProfile,
+  AUTO_BUG_FIX_MAX_TURNS,
   type AgentRunProfile,
 } from "../services/agentRunProfile";
 import {
@@ -749,6 +750,11 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   function trySilentContinue(sessionId: string, assistantMsg: ChatMessage, reason: string): boolean {
     if (!shouldSilentAutoContinue(reason)) { debugLog(`[stall-recover] trySilent: shouldSilentAutoContinue=false`); return false; }
+    const originalPrompt = resolveOriginalUserPrompt(assistantMsg.id) ?? "";
+    if (originalPrompt.includes("[AUTO_BUG_FIX]")) {
+      debugLog(`[stall-recover] trySilent: auto bug fix run — no silent continue`);
+      return false;
+    }
     const count = assistantMsg.agentContinueCount ?? 0;
     if (count >= AGENT_SILENT_CONTINUE_MAX) { debugLog(`[stall-recover] trySilent: count=${count}>=max`); return false; }
     if (!configReady.value || !projectOpened.value) { debugLog(`[stall-recover] trySilent: configReady=${configReady.value}, projectOpened=${projectOpened.value}`); return false; }
@@ -1915,6 +1921,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       planAssistantContent?: string;
       maxTurns?: number;
       exploreDepth?: ExploreDepth;
+      runProfileOverride?: AgentRunProfile;
+      forceBuildMode?: boolean;
+      noAutoResume?: boolean;
+      suppressHmrRecovery?: boolean;
     },
   ): Promise<boolean> {
     const rawPrompt = userText.trim();
@@ -1948,7 +1958,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
             referencedFiles: options?.referencedFiles,
           })
         : null;
-    const agentMode = askEscalation?.mode ?? uiMode;
+    const agentMode = options?.forceBuildMode ? "build" : (askEscalation?.mode ?? uiMode);
 
     function rollbackTurnPlaceholders(skipUserBubble?: boolean) {
       const msgs = chatMessages.value;
@@ -2087,9 +2097,14 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       }
     }
 
+    if (options?.noAutoResume && assistantMsg!) {
+      assistantMsg!.agentRecoveryDismissed = true;
+    }
+
     let planAssistantContent = options?.planAssistantContent;
     const lastAssistant = planAssistantContent ?? findLastAssistantContent();
     const runProfile =
+      options?.runProfileOverride ??
       askEscalation?.runProfile ??
       resolveAgentRunProfile({
         prompt: rawPrompt,
@@ -2124,7 +2139,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
             undefined,
             exploreDepth,
           )
-        : options?.maxTurns ?? resolveAgentMaxTurns(agentMode, runProfile);
+        : options?.maxTurns
+          ?? (runProfile.triggerSource === "auto_bug_fix" ? AUTO_BUG_FIX_MAX_TURNS : resolveAgentMaxTurns(agentMode, runProfile));
 
     const runGen = runManager.has(sessionId)
       ? runManager.getGeneration(sessionId)
@@ -2149,12 +2165,13 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       imageDataUrls: compressedImagesForRequest?.length ? compressedImagesForRequest : undefined,
       webProxyUrl: loadWebProxyUrlFromStorage() || undefined,
     };
-    // 持久化请求状态，以便 HMR 重载后恢复
-    persistAgentRunForHmr({
-      request: agentRequest as unknown as Record<string, unknown>,
-      projectPath: agentRequest.projectPath,
-      sessionId: sessionId || undefined,
-    });
+    if (!options?.suppressHmrRecovery) {
+      persistAgentRunForHmr({
+        request: agentRequest as unknown as Record<string, unknown>,
+        projectPath: agentRequest.projectPath,
+        sessionId: sessionId || undefined,
+      });
+    }
     const handle = runVibeAgentSse(
       agentRequest,
       (event) => enqueueAgentEvent(event, assistantMsg, runGen, sessionId),
@@ -2245,6 +2262,21 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     return getActiveRun()?.live.contextChars ?? 0;
   }
 
+  async function runAutoBugFixAgent(params: {
+    prompt: string;
+    userBubbleContent: string;
+    runProfile: AgentRunProfile;
+  }): Promise<boolean> {
+    chatMode.value = "build";
+    return runAgentTurn(params.prompt, {
+      userBubbleContent: params.userBubbleContent,
+      runProfileOverride: params.runProfile,
+      forceBuildMode: true,
+      noAutoResume: true,
+      suppressHmrRecovery: true,
+    });
+  }
+
   return {
     autoResumeSecondsLeft,
     autoResumeTargetId,
@@ -2284,6 +2316,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     forceRecoverStalledRun,
     handleAgentEvent,
     runAgentTurn,
+    runAutoBugFixAgent,
     resumeAgentRun,
     stopAgent,
     interruptAgentRun,

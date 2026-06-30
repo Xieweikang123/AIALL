@@ -104,6 +104,15 @@
             :title="`${reviewAttentionCount} 个需关注项`"
           >{{ reviewAttentionCount }}</span>
         </button>
+        <button
+          type="button"
+          class="file-panel-segment-btn"
+          :class="{ active: projectPanelView === 'fix' }"
+          :aria-pressed="projectPanelView === 'fix'"
+          @click="$emit('update:projectPanelView', 'fix')"
+        >
+          修复
+        </button>
       </div>
       <div v-if="gitPanelMode === 'files'" class="file-panel-row file-panel-search-row">
         <button
@@ -326,7 +335,7 @@ interface SessionGroup {
 interface Props {
   filePanelWidth: number;
   gitPanelMode: "files" | "git" | "sessions" | "project";
-  projectPanelView: "knowledge" | "health";
+  projectPanelView: "knowledge" | "health" | "fix";
   projectOpened: boolean;
   loadingTree?: boolean;
   editorCollapsed: boolean;
@@ -352,7 +361,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   (e: "update:gitPanelMode", mode: "files" | "git" | "sessions" | "project"): void;
-  (e: "update:projectPanelView", view: "knowledge" | "health"): void;
+  (e: "update:projectPanelView", view: "knowledge" | "health" | "fix"): void;
   (e: "open-quick-search"): void;
   (e: "create-new-file"): void;
   (e: "create-new-folder"): void;

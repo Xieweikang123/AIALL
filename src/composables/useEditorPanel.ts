@@ -20,7 +20,7 @@ import {
   type GitLogFile,
 } from "../services/vibeGitClient";
 import type { EditorTabKind } from "../utils/vibeHelpers";
-import { readEditorWorkspace, writeEditorWorkspace } from "../utils/editorWorkspaceStorage";
+import { readEditorWorkspace, writeEditorWorkspace, type PersistedEditorTab } from "../utils/editorWorkspaceStorage";
 
 type FileDiff = {
   before: string;
@@ -899,12 +899,23 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     const root = projectPath.value.trim();
     if (!root || !projectOpened.value) return;
     syncActiveTabToCache();
-    const tabs = openTabs.value
-      .filter((tab) => tab.kind === "file" && !isVirtualSchemePath(tab.path))
-      .map((tab) => ({
-        path: tab.path,
-        ...(tab.dirty ? { dirty: true, content: tab.content } : {}),
-      }));
+    const tabs: PersistedEditorTab[] = openTabs.value.map((tab) => {
+      const base: PersistedEditorTab = { path: tab.path, kind: tab.kind };
+      if (tab.kind === "file") {
+        if (tab.dirty) {
+          base.dirty = true;
+          base.content = tab.content;
+        }
+      } else {
+        base.content = tab.content;
+        const diff = getFileDiff(tab.path);
+        if (diff) base.diff = diff;
+        if (readOnlyFileKeys.value.has(normalizePathKey(tab.path))) {
+          base.readOnly = true;
+        }
+      }
+      return base;
+    });
     const active = activeFilePath.value.trim();
     const activePath = tabs.some((tab) => tab.path === active) ? active : (tabs[0]?.path ?? "");
     writeEditorWorkspace(root, { tabs, activePath });
@@ -932,29 +943,52 @@ export function useEditorPanel(params: UseEditorPanelParams) {
       navForwardStack.value = [];
 
       const restored: OpenTab[] = [];
+      const nextDiffs: Record<string, FileDiff> = {};
+      const nextReadOnly = new Set<string>();
+
       for (const item of saved.tabs) {
         const path = item.path.trim();
-        if (!path || isVirtualSchemePath(path)) continue;
-        if (item.dirty && item.content !== undefined) {
-          restored.push({ path, content: item.content, dirty: true, kind: "file" });
-          continue;
-        }
-        const result = await readFile(path);
-        if (result.ok) {
-          restored.push({ path, content: result.content, dirty: false, kind: "file" });
+        if (!path) continue;
+
+        const kind: EditorTabKind = (item.kind as EditorTabKind) || "file";
+
+        if (kind === "file") {
+          if (item.dirty && item.content !== undefined) {
+            restored.push({ path, content: item.content, dirty: true, kind: "file" });
+            continue;
+          }
+          const result = await readFile(path);
+          if (result.ok) {
+            restored.push({ path, content: result.content, dirty: false, kind: "file" });
+          }
+        } else {
+          restored.push({ path, content: item.content ?? "", dirty: false, kind });
+          if (item.diff) {
+            nextDiffs[normalizePathKey(path)] = item.diff;
+          }
+          if (item.readOnly) {
+            nextReadOnly.add(normalizePathKey(path));
+          }
         }
       }
       if (!restored.length) return;
 
       openTabs.value = restored;
+      if (Object.keys(nextDiffs).length) {
+        fileDiffs.value = { ...fileDiffs.value, ...nextDiffs };
+      }
+      if (nextReadOnly.size) {
+        readOnlyFileKeys.value = new Set([...readOnlyFileKeys.value, ...nextReadOnly]);
+      }
+
       const activeKey = normalizePathKey(saved.activePath.trim());
       const active = restored.find((tab) => normalizePathKey(tab.path) === activeKey) ?? restored[0];
       activeFilePath.value = active.path;
       fileContent.value = active.content;
       fileDirty.value = active.dirty;
-      selectedTreePath.value = active.path;
+      selectedTreePath.value = active.kind === "file" ? active.path : "";
       fileLoadError.value = "";
-      showDiffMode.value = false;
+      showDiffMode.value = active.kind !== "file" && Boolean(nextDiffs[normalizePathKey(active.path)]);
       expandEditor();
     } finally {
       restoringWorkspace = false;
