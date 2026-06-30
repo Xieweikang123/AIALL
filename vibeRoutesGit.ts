@@ -10,7 +10,6 @@ import {
   gitCommit,
   gitLog,
   gitAheadCommits,
-  gitIsRepo,
   gitAdd,
   gitReset,
   gitDiscard,
@@ -97,14 +96,8 @@ export function registerGitRoutes(middlewares: Connect.Server) {
         return;
       }
 
-      const isRepo = await gitIsRepo(resolved);
-      if (!isRepo) {
-        sendJson(res, 200, { ok: true, branch: "", files: [], isRepo: false });
-        return;
-      }
-
       const result = await gitStatus(resolved);
-      sendJson(res, 200, { ...result, isRepo: true });
+      sendJson(res, 200, { ...result, isRepo: result.isRepo ?? false });
     } catch (error) {
       sendJson(res, 500, { ok: false, error: error instanceof Error ? error.message : "获取 Git 状态失败" });
     }

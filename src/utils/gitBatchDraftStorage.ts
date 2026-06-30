@@ -8,49 +8,61 @@ export type GitBatchDraft = {
   sectionOpen: boolean;
 };
 
+export function normalizeGitPath(path: string): string {
+  return path.trim().replace(/\\/g, "/");
+}
+
 function normalizeProjectPath(projectPath: string): string {
-  return projectPath.trim().replace(/\\/g, "/").replace(/\/$/, "");
+  return projectPath.trim().replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
 }
 
-export function gitBatchDraftStorageKey(projectPath: string): string {
+export function normalizeGitBranch(branch: string): string {
+  return branch.trim().replace(/\\/g, "/").toLowerCase() || "__detached__";
+}
+
+export function gitBatchDraftStorageKey(projectPath: string, branch: string): string {
   const normalized = normalizeProjectPath(projectPath);
-  return `vibe-git-batch-draft-${normalized || "__global"}`;
+  const branchKey = normalizeGitBranch(branch);
+  return `vibe-git-batch-draft-${normalized || "__global"}--${branchKey}`;
 }
 
-export function readGitBatchDraft(projectPath: string): GitBatchDraft | null {
-  const key = gitBatchDraftStorageKey(projectPath);
+export function readGitBatchDraft(projectPath: string, branch: string): GitBatchDraft | null {
+  const key = gitBatchDraftStorageKey(projectPath, branch);
   const draft = lsGetJson<GitBatchDraft>(key);
   if (!draft || !Array.isArray(draft.unstagedPaths) || !Array.isArray(draft.messages)) {
     return null;
   }
-  if (draft.groups !== null && !Array.isArray(draft.groups)) {
+  if (draft.groups != null && !Array.isArray(draft.groups)) {
     return null;
   }
   return {
-    unstagedPaths: draft.unstagedPaths,
+    unstagedPaths: draft.unstagedPaths.map(normalizeGitPath),
     groups: draft.groups,
     messages: draft.messages,
     sectionOpen: Boolean(draft.sectionOpen),
   };
 }
 
-export function writeGitBatchDraft(projectPath: string, draft: GitBatchDraft): void {
+export function writeGitBatchDraft(projectPath: string, branch: string, draft: GitBatchDraft): void {
   if (!normalizeProjectPath(projectPath)) return;
-  lsSetJson(gitBatchDraftStorageKey(projectPath), draft);
+  lsSetJson(gitBatchDraftStorageKey(projectPath, branch), {
+    ...draft,
+    unstagedPaths: draft.unstagedPaths.map(normalizeGitPath),
+  });
 }
 
-export function removeGitBatchDraft(projectPath: string): void {
-  lsRemove(gitBatchDraftStorageKey(projectPath));
+export function removeGitBatchDraft(projectPath: string, branch: string): void {
+  lsRemove(gitBatchDraftStorageKey(projectPath, branch));
 }
 
 export function pathsEqual(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false;
+    if (normalizeGitPath(a[i]) !== normalizeGitPath(b[i])) return false;
   }
   return true;
 }
 
 export function sortedUnstagedPaths(paths: string[]): string[] {
-  return [...paths].sort();
+  return [...paths].map(normalizeGitPath).sort();
 }
