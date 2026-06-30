@@ -33,9 +33,16 @@ export function useStableAgentAnswer(
   );
 
   watch(isRunning, (running, wasRunning) => {
-    if (running && !wasRunning && !source().trim() && !stableAnswer.value.trim()) {
+    if (!running || wasRunning) return;
+    // New run / resume: live preview starts empty — drop stale failure or prior-run text.
+    const trimmed = source().trim();
+    if (!trimmed) {
+      stableAnswer.value = "";
       peakLength = 0;
+      return;
     }
+    stableAnswer.value = source();
+    peakLength = trimmed.length;
   });
 
   return { stableAnswer };

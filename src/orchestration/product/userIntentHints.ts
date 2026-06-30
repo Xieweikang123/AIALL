@@ -3,6 +3,7 @@
  * May reference AIALL modes (Ask/Build/Plan), screenshots, session audit paths.
  */
 import type { ConfigBindingTopic } from "../generic/userIntentClassifiers";
+import type { QuotedAmendIntent } from "../generic/quotedAmendIntent";
 
 export function buildLocateStatusFollowUpHint(): string {
   return [
@@ -67,6 +68,30 @@ export function buildImplementationStatusHint(): string {
     "【实施进度追问】用户在问前述改动是否已完成。",
     "只读 grep/read 核对仓库现状后直接回答进度；禁止 patch_file / write_file。",
     "禁止称 Ask 模式或让用户切换 Build（当前为 Build 模式的咨询只读轮）。",
+  ].join("\n");
+}
+
+export function buildQuotedAmendHint(resolved: QuotedAmendIntent): string {
+  const scope = resolved.scopeHint ? `scope「${resolved.scopeHint}」` : "引用行所指 scope";
+  const symbols =
+    resolved.symbolHints.length > 0
+      ? resolved.symbolHints.map((s) => `\`${s}\``).join("、")
+      : "引用块中的目标符号";
+
+  if (resolved.kind === "remove") {
+    return [
+      "",
+      "【引用修订·删除】用户引用上一轮助手总结/代码块，短句是对引用内容的删除指令（不是新任务）。",
+      `须从 ${scope} 删除 ${symbols} 对应配置/代码块；禁止删除 ${scope} 整段注册或服务块。`,
+      "禁止在其它 scope 重新添加用户要求移除的符号；禁止把「也移除/不要这个」理解成删除整个 scope。",
+      "patch 前 read 一次确认符号位置；完成后一句话说明已从哪段删除了哪些符号。",
+    ].join("\n");
+  }
+
+  return [
+    "",
+    "【引用修订·添加】用户引用上一轮内容并要求补充添加。",
+    `在 ${scope} 添加 ${symbols}；勿扩大至未引用的 scope。`,
   ].join("\n");
 }
 

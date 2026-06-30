@@ -357,7 +357,7 @@ export function useGitPanel(
   }
 
   function gitWorkingTreeDiffKey(filePath: string, staged = false): string {
-    return `${staged ? "staged" : "worktree"}:${filePath}`;
+    return `${staged ? "staged" : "unstaged"}:${filePath}`;
   }
 
   function mergeStageWarnings(blocked: string[], apiWarning?: string): string {

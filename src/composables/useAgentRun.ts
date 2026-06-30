@@ -982,7 +982,12 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   function handleTurnTraceEvent(event: EventOf<"turn_trace">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
     if (!assistantMsg.turnTraces) assistantMsg.turnTraces = [];
-    assistantMsg.turnTraces.push({ ...event.data });
+    assistantMsg.turnTraces.push({
+      turn: event.data.turn,
+      maxTurns: event.data.maxTurns,
+      assistantText: event.data.assistantText ?? "",
+      hasToolCalls: event.data.hasToolCalls ?? false,
+    });
     assistantMsg.roundGroups = recordAgentRoundNarrative(
       assistantMsg.roundGroups,
       event.data.turn,
@@ -1489,7 +1494,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         logStatus: true,
       });
       assistantMsg.content = resolveAgentFailureBubbleContent(assistantMsg);
-      flushMinimizedRunUiPatch();
+      flushMinimizedRunUiPatch(sessionId, msgId, assistantMsg);
       patchAssistantMsg(msgId, {
         ...buildRunUiFullPatch(assistantMsg),
         content: assistantMsg.content,

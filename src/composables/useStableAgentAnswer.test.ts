@@ -27,4 +27,21 @@ describe("useStableAgentAnswer", () => {
     await nextTick();
     expect(stableAnswer.value).toBe("最终定稿");
   });
+
+  it("clears stale failure text when a new run starts after recoverable interrupt", async () => {
+    const source = ref("[Agent 运行失败] 运行中断（未生成最终回复）");
+    const running = ref(false);
+    const { stableAnswer } = useStableAgentAnswer(
+      () => source.value,
+      () => running.value,
+    );
+
+    await nextTick();
+    expect(stableAnswer.value).toContain("运行失败");
+
+    running.value = true;
+    source.value = "";
+    await nextTick();
+    expect(stableAnswer.value).toBe("");
+  });
 });

@@ -36,6 +36,7 @@ export type UseAgentStreamPatch = {
   clearStreamDeltaBuffer: () => void;
   scheduleStreamScroll: () => void;
   buildRunUiFullPatch: (assistantMsg: VibeChatMessage) => Partial<VibeChatMessage>;
+  cleanupTimers: () => void;
 };
 
 type PendingRunUiPatch = { sessionId: string; msgId: string; kind: RunUiPatchKind };

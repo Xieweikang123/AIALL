@@ -3,8 +3,10 @@ import {
   resolvePlanContentForDisplay,
   canForceOpenPlanPanel,
   qualifiesPlanPanelSync,
+  assistantMessageHoldsPlanDocument,
 } from "../services/planFile";
-import type { ChatMessage } from "../services/vibeChatStorage";
+import { looksLikeStreamingPlanContent } from "../services/planDocumentDisplay";
+import type { VibeChatMessage } from "../types/vibeChat";
 
 export type PlanPanelSnapshot = {
   messageId: string;
@@ -15,15 +17,15 @@ export type PlanPanelSnapshot = {
 };
 
 export function usePlanPanel(options: {
-  chatMessages: Ref<ChatMessage[]>;
+  chatMessages: Ref<VibeChatMessage[]>;
   chatSending: Ref<boolean>;
   agentLiveRevision: Ref<number>;
   projectPath: Ref<string>;
   projectOpened: Ref<boolean>;
   activeSessionId: Ref<string>;
-  messageDisplayContent: (msg: ChatMessage) => string;
-  isAgentRunning: (msg: ChatMessage) => boolean;
-  canExecutePlanMessage: (msg: ChatMessage) => boolean;
+  messageDisplayContent: (msg: VibeChatMessage) => string;
+  isAgentRunning: (msg: VibeChatMessage) => boolean;
+  canExecutePlanMessage: (msg: VibeChatMessage) => boolean;
   expandEditor: () => void;
 }) {
   const active = ref(false);
@@ -46,7 +48,7 @@ export function usePlanPanel(options: {
     options.expandEditor();
   }
 
-  function resolvePlanMessage(): ChatMessage | undefined {
+  function resolvePlanMessage(): VibeChatMessage | undefined {
     if (pinnedMessageId.value) {
       const pinned = options.chatMessages.value.find((m) => m.id === pinnedMessageId.value);
       if (pinned?.role === "assistant" && pinned.chatMode === "plan") return pinned;
@@ -54,10 +56,19 @@ export function usePlanPanel(options: {
     const running = options.chatMessages.value.find(
       (m) => m.role === "assistant" && options.isAgentRunning(m) && m.chatMode === "plan",
     );
-    if (running) return running;
-    return [...options.chatMessages.value].reverse().find(
-      (m) => m.role === "assistant" && m.chatMode === "plan",
-    );
+    if (running) {
+      const runningText = options.messageDisplayContent(running);
+      if (
+        assistantMessageHoldsPlanDocument(runningText, running)
+        || looksLikeStreamingPlanContent(runningText)
+      ) {
+        return running;
+      }
+    }
+    return [...options.chatMessages.value].reverse().find((m) => {
+      if (m.role !== "assistant" || m.chatMode !== "plan") return false;
+      return assistantMessageHoldsPlanDocument(options.messageDisplayContent(m), m);
+    });
   }
 
   async function syncFromChat(opts?: { force?: boolean }) {
@@ -79,9 +90,10 @@ export function usePlanPanel(options: {
     const qualifies = qualifiesPlanPanelSync(text, msg, options.isAgentRunning(msg));
     const isRunning = options.isAgentRunning(msg);
     const canForce = canForceOpenPlanPanel(text, msg);
-    const shouldOpen = force ? canForce : qualifies || (canForce && !isRunning);
+    const shouldOpen = force ? canForce : qualifies;
     if (!shouldOpen) return;
-    if (!force && !active.value && userDismissed.value) return;
+    const isNewPlanRun = isRunning && msg.chatMode === "plan";
+    if (!force && !active.value && userDismissed.value && !isNewPlanRun) return;
 
     applySnapshot({
       messageId: msg.id,
@@ -112,11 +124,9 @@ export function usePlanPanel(options: {
     () => options.chatSending.value,
     (sending, prev) => {
       if (sending && !prev) {
-        userDismissed.value = false;
         pinnedMessageId.value = undefined;
       }
       if (!sending && prev) {
-        userDismissed.value = false;
         void syncFromChat();
       }
     },
@@ -137,8 +147,9 @@ export function usePlanPanel(options: {
   function patchFilePath(path: string, mid?: string) {
     if (mid && messageId.value && mid !== messageId.value) return;
     planFilePath.value = path;
-    userDismissed.value = false;
-    void syncFromChat();
+    if (!userDismissed.value) {
+      void syncFromChat();
+    }
   }
 
   return {

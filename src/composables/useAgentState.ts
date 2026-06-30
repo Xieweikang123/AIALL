@@ -11,6 +11,7 @@ import {
   resolveAgentTimelineAnswer,
   type LiveAgentAnswerSource,
 } from "../services/agentMessageDisplay";
+import { extractPlanContentFromStoredMessage } from "../services/planFile";
 import {
   buildAgentRoundGroupViewsForMessage,
   resolveAgentAnswerPreview,
@@ -30,7 +31,6 @@ import {
   hasRunningTool,
   assistantTransientUiClearPatch,
   syncRoundGroupsPatch,
-  resolveOriginalUserPrompt,
 } from "../utils/vibeHelpers";
 import { createAgentSessionRunManager, type SessionAgentRun } from "./agentSessionRuns";
 
@@ -107,11 +107,6 @@ export function useAgentState(deps: UseAgentStateDeps) {
       if (msg.imageCount && msg.imageCount > 0) return `（已发送 ${msg.imageCount} 张图片）`;
       return msg.content?.trim() || "";
     }
-    if (canResumeAgentRun(msg) || inferAgentRecoveryFlags(msg)?.agentRecoverable) {
-      const reason = msg.agentFailureReason || "";
-      // Inlined check from resolveAgentFailureBubbleContent
-      return `[Agent 运行失败] ${reason}`;
-    }
     if (isAgentRunning(msg)) {
       return resolveAgentTimelineAnswer(
         resolveLiveAgentSource(msg),
@@ -120,7 +115,18 @@ export function useAgentState(deps: UseAgentStateDeps) {
         hasRunningTool(msg),
       );
     }
-    return finalizeAssistantBubbleContent(msg);
+    if (canResumeAgentRun(msg)) {
+      const inferred = inferAgentRecoveryFlags(msg);
+      const reason =
+        msg.agentFailureReason?.trim() || inferred?.agentFailureReason?.trim() || "";
+      return `[Agent 运行失败] ${reason}`;
+    }
+    const base = finalizeAssistantBubbleContent(msg);
+    if (msg.chatMode === "plan") {
+      const recovered = extractPlanContentFromStoredMessage(msg, base);
+      if (recovered.trim()) return recovered;
+    }
+    return base;
   }
 
   function buildCompactStatusForMessage(msg: ChatMessage) {

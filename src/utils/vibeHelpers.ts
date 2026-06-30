@@ -305,6 +305,46 @@ export function displayFilePath(path: string): string {
   return path;
 }
 
+export type EditorTabKind = "file" | "git-change" | "git-staged" | "git-history";
+
+export function inferEditorTabKind(path: string): EditorTabKind {
+  if (path.startsWith("git-history://")) return "git-history";
+  if (path.startsWith("git-index://")) return "git-staged";
+  return "file";
+}
+
+export function editorTabKindLabel(kind: EditorTabKind): string | null {
+  switch (kind) {
+    case "git-change":
+      return "变更";
+    case "git-staged":
+      return "暂存";
+    case "git-history":
+      return "提交";
+    default:
+      return null;
+  }
+}
+
+export function editorTabDisplayName(path: string): string {
+  const display = displayFilePath(path);
+  const parts = display.replace(/\\/g, "/").split("/");
+  return parts[parts.length - 1] || display;
+}
+
+export function editorTabTitle(path: string, kind: EditorTabKind): string {
+  const display = displayFilePath(path);
+  const label = editorTabKindLabel(kind);
+  if (!label) return display;
+  if (kind === "git-history" && path.startsWith("git-history://")) {
+    const rest = path.slice("git-history://".length);
+    const slash = rest.indexOf("/");
+    const shortHash = slash >= 0 ? rest.slice(0, slash) : rest;
+    return shortHash ? `Git ${label} (${shortHash}) · ${display}` : `Git ${label} · ${display}`;
+  }
+  return `Git ${label} · ${display}`;
+}
+
 export function entryToNode<T extends { isDirectory: boolean; children?: T[] }>(entry: T): T & { loaded: boolean } {
   return { ...entry, children: entry.isDirectory ? [] : undefined, loaded: !entry.isDirectory };
 }

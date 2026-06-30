@@ -1,4 +1,4 @@
-import { computed, ref, unref, type Ref } from "vue";
+import { computed, ref, unref, watch, type Ref } from "vue";
 import { type TreeNode } from "../components/FileTreeNode.vue";
 import EditorPanel from "../components/vibe/EditorPanel.vue";
 import {
@@ -19,6 +19,8 @@ import {
   type GitLogEntry,
   type GitLogFile,
 } from "../services/vibeGitClient";
+import type { EditorTabKind } from "../utils/vibeHelpers";
+import { readEditorWorkspace, writeEditorWorkspace } from "../utils/editorWorkspaceStorage";
 
 type FileDiff = {
   before: string;
@@ -31,6 +33,7 @@ type OpenTab = {
   path: string;
   content: string;
   dirty: boolean;
+  kind: EditorTabKind;
 };
 
 type MonacoNavHandle = {
@@ -361,7 +364,18 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     }
   }
 
-  async function openDiffPreview(path: string, diff: FileDiff, options?: { readOnly?: boolean }) {
+  function resolveGitTabKind(path: string, explicit?: EditorTabKind): EditorTabKind {
+    if (explicit) return explicit;
+    if (path.startsWith("git-history://")) return "git-history";
+    if (path.startsWith("git-index://")) return "git-staged";
+    return "git-change";
+  }
+
+  async function openDiffPreview(
+    path: string,
+    diff: FileDiff,
+    options?: { readOnly?: boolean; tabKind?: EditorTabKind },
+  ) {
     if (!(await ensureCanLeaveCurrentTab())) return;
     syncActiveTabToCache();
     if (options?.readOnly) {
@@ -369,6 +383,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
       nextReadOnly.add(normalizePathKey(path));
       readOnlyFileKeys.value = nextReadOnly;
     }
+    const tabKind = resolveGitTabKind(path, options?.tabKind);
     expandEditor();
     setFileDiff(path, diff);
     selectedTreePath.value = options?.readOnly ? "" : path;
@@ -382,8 +397,9 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     if (cached) {
       cached.content = diff.after;
       cached.dirty = false;
+      cached.kind = tabKind;
     } else {
-      openTabs.value.push({ path, content: diff.after, dirty: false });
+      openTabs.value.push({ path, content: diff.after, dirty: false, kind: tabKind });
     }
   }
 
@@ -444,7 +460,10 @@ export function useEditorPanel(params: UseEditorPanelParams) {
         gitDiffContentCache.value = { ...gitDiffContentCache.value, [cacheKey]: diff };
         evictOldestCacheEntry();
       }
-      await openDiffPreview(previewPath, diff, { readOnly: staged });
+      await openDiffPreview(previewPath, diff, {
+        readOnly: staged,
+        tabKind: staged ? "git-staged" : "git-change",
+      });
     } catch (e) {
       if (!(e instanceof DOMException && e.name === "AbortError")) {
         gitError.value = e instanceof Error ? e.message : "获取 diff 失败";
@@ -479,6 +498,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
       activeFilePath.value = filePath;
       fileContent.value = cached.content;
       fileDirty.value = cached.dirty;
+      cached.kind = "file";
       return;
     }
 
@@ -506,8 +526,9 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     if (cached) {
       cached.content = result.content;
       cached.dirty = false;
+      cached.kind = "file";
     } else {
-      openTabs.value.push({ path: filePath, content: result.content, dirty: false });
+      openTabs.value.push({ path: filePath, content: result.content, dirty: false, kind: "file" });
     }
   }
 
@@ -803,6 +824,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     fileDirty.value = true;
     const tab = findOpenTab(activeFilePath.value);
     if (tab) tab.dirty = true;
+    schedulePersistEditorWorkspace();
   }
 
   function activeFileRelativePath(): string {
@@ -851,6 +873,108 @@ export function useEditorPanel(params: UseEditorPanelParams) {
 
   const activeFileDiff = computed(() => getFileDiff(activeFilePath.value));
   const activeFileReadOnly = computed(() => readOnlyFileKeys.value.has(normalizePathKey(activeFilePath.value)));
+
+  let restoringWorkspace = false;
+  let suppressWorkspacePersist = false;
+  let persistWorkspaceTimer = 0;
+
+  function cancelScheduledPersistEditorWorkspace() {
+    if (persistWorkspaceTimer) {
+      window.clearTimeout(persistWorkspaceTimer);
+      persistWorkspaceTimer = 0;
+    }
+  }
+
+  function prepareEditorWorkspaceProjectSwitch() {
+    suppressWorkspacePersist = true;
+    cancelScheduledPersistEditorWorkspace();
+  }
+
+  function finishEditorWorkspaceProjectSwitch() {
+    suppressWorkspacePersist = false;
+  }
+
+  function persistEditorWorkspace() {
+    if (restoringWorkspace || suppressWorkspacePersist) return;
+    const root = projectPath.value.trim();
+    if (!root || !projectOpened.value) return;
+    syncActiveTabToCache();
+    const tabs = openTabs.value
+      .filter((tab) => tab.kind === "file" && !isVirtualSchemePath(tab.path))
+      .map((tab) => ({
+        path: tab.path,
+        ...(tab.dirty ? { dirty: true, content: tab.content } : {}),
+      }));
+    const active = activeFilePath.value.trim();
+    const activePath = tabs.some((tab) => tab.path === active) ? active : (tabs[0]?.path ?? "");
+    writeEditorWorkspace(root, { tabs, activePath });
+  }
+
+  function schedulePersistEditorWorkspace() {
+    if (suppressWorkspacePersist || restoringWorkspace) return;
+    cancelScheduledPersistEditorWorkspace();
+    persistWorkspaceTimer = window.setTimeout(() => {
+      persistWorkspaceTimer = 0;
+      persistEditorWorkspace();
+    }, 250);
+  }
+
+  async function restoreEditorWorkspace() {
+    const root = projectPath.value.trim();
+    if (!root || !projectOpened.value) return;
+
+    const saved = readEditorWorkspace(root);
+    if (!saved?.tabs.length) return;
+
+    restoringWorkspace = true;
+    try {
+      navBackStack.value = [];
+      navForwardStack.value = [];
+
+      const restored: OpenTab[] = [];
+      for (const item of saved.tabs) {
+        const path = item.path.trim();
+        if (!path || isVirtualSchemePath(path)) continue;
+        if (item.dirty && item.content !== undefined) {
+          restored.push({ path, content: item.content, dirty: true, kind: "file" });
+          continue;
+        }
+        const result = await readFile(path);
+        if (result.ok) {
+          restored.push({ path, content: result.content, dirty: false, kind: "file" });
+        }
+      }
+      if (!restored.length) return;
+
+      openTabs.value = restored;
+      const activeKey = normalizePathKey(saved.activePath.trim());
+      const active = restored.find((tab) => normalizePathKey(tab.path) === activeKey) ?? restored[0];
+      activeFilePath.value = active.path;
+      fileContent.value = active.content;
+      fileDirty.value = active.dirty;
+      selectedTreePath.value = active.path;
+      fileLoadError.value = "";
+      showDiffMode.value = false;
+      expandEditor();
+    } finally {
+      restoringWorkspace = false;
+    }
+  }
+
+  watch(
+    () => ({
+      opened: projectOpened.value,
+      root: projectPath.value.trim(),
+      tabs: openTabs.value.map((tab) => `${tab.path}\0${tab.kind}\0${tab.dirty ? 1 : 0}`).join("\n"),
+      active: activeFilePath.value,
+    }),
+    () => {
+      if (suppressWorkspacePersist || restoringWorkspace) return;
+      if (projectOpened.value && projectPath.value.trim()) {
+        schedulePersistEditorWorkspace();
+      }
+    },
+  );
 
   return {
     fileTree,
@@ -909,5 +1033,9 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     navigateForward,
     canGoBack,
     canGoForward,
+    persistEditorWorkspace,
+    restoreEditorWorkspace,
+    prepareEditorWorkspaceProjectSwitch,
+    finishEditorWorkspaceProjectSwitch,
   };
 }
