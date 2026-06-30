@@ -1,5 +1,5 @@
 import type { AgentRoundTool } from "./agentRoundGroups";
-import { getToolPath } from "../utils/toolHelpers";
+import { formatRunCommandPreview, getRunCommandText, parseRunCommandOutputLines, getToolPath } from "../utils/toolHelpers";
 
 export type ToolAggregateKind = "file" | "search" | "edit" | "misc";
 
@@ -17,7 +17,7 @@ export type ToolAggregateCard = {
 };
 
 const WRITE_TOOLS = new Set(["write_file", "patch_file", "delete_file"]);
-const SEARCH_TOOLS = new Set(["grep", "search_files"]);
+const SEARCH_TOOLS = new Set(["grep", "search_files", "git_status", "git_diff"]);
 const COMMAND_TOOLS = new Set(["run_command"]);
 
 function fileNameFromPath(filePath: string): string {
@@ -154,11 +154,8 @@ function buildEditCard(path: string, steps: AgentRoundTool[]): ToolAggregateCard
 }
 
 function commandPreviewFromStep(step: AgentRoundTool): string {
-  const cmd = String(step.args?.command ?? "").trim();
-  if (cmd) {
-    const oneLine = cmd.replace(/\s+/g, " ");
-    return oneLine.length > 96 ? `${oneLine.slice(0, 96)}…` : oneLine;
-  }
+  const cmd = getRunCommandText(step.args);
+  if (cmd) return formatRunCommandPreview(cmd);
   const summary = step.summary?.trim();
   if (summary) return summary;
   if (!step.ok && !step.running) return "执行失败";
@@ -171,15 +168,26 @@ function buildCommandCard(steps: AgentRoundTool[]): ToolAggregateCard {
     .map(commandPreviewFromStep)
     .filter(Boolean)
     .slice(-4);
+  const singleTitle =
+    steps.length === 1 ? commandPreviewFromStep(steps[0]!) : "";
   return {
     key: "command:batch",
     kind: "misc",
     icon: "▶️",
-    title: "执行命令",
-    subtitle: failed ? `${steps.length} 次 · 有失败` : `${steps.length} 次`,
+    title: singleTitle ? `$ ${singleTitle}` : "执行命令",
+    subtitle:
+      steps.length === 1
+        ? failed
+          ? "失败"
+          : steps[0]?.running
+            ? "运行中"
+            : "完成"
+        : failed
+          ? `${steps.length} 次 · 有失败`
+          : `${steps.length} 次`,
     running: steps.some((s) => s.running),
     failed,
-    previewLines,
+    previewLines: steps.length === 1 ? parseRunCommandOutputLines(steps[0]?.fullResult ?? "", 4) : previewLines,
     stepCount: steps.length,
   };
 }

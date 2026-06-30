@@ -368,6 +368,12 @@ export function formatToolMeta(
     const detail = url.length > 72 ? `${url.slice(0, 72)}…` : url;
     return { name, icon: "🌐", title: "抓取网页", detail, label: detail ? `抓取网页 ${detail}` : "抓取网页" };
   }
+  if (name === "run_command") {
+    const command = String(args.command ?? "").trim().replace(/\s+/g, " ");
+    const detail = command.length > 72 ? `${command.slice(0, 72)}…` : command;
+    const label = detail ? `$ ${detail}` : "执行命令";
+    return { name, icon: "▶️", title: "执行命令", detail, label };
+  }
 
   return { name, icon: "⚙️", title: name, detail: "", label: name };
 }

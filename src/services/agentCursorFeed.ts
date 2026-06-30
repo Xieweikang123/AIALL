@@ -3,6 +3,7 @@ import { buildNarrativeSegments } from "./agentNarrativeSegments";
 import { isAgentToolTurnNarration, isAnswerLikeTimelineNarrative } from "./agentMessageDisplay";
 import { stripToolSummaryFromAssistantContent } from "./vibeChatStorage";
 import { aggregateToolSteps } from "./agentToolAggregates";
+import { formatRunCommandLabel } from "../utils/toolHelpers";
 
 export type CursorFeedItem =
   | { kind: "thought"; key: string; text: string }
@@ -346,6 +347,14 @@ export function formatCursorActionLabel(step: AgentRoundTool): string {
     if (running) return `Fetching ${target}`;
     if (failed) return `Fetch failed ${target}`;
     return `Fetched ${target}`;
+  }
+
+  if (step.name === "run_command") {
+    const { preview } = formatRunCommandLabel(step.args, step.detail);
+    const display = `$ ${preview}`;
+    if (running) return display;
+    if (failed) return `${display} · 失败`;
+    return display;
   }
 
   const fallback = step.title || step.label || step.name;

@@ -9,6 +9,7 @@ export function getToolIcon(name: string): string {
   if (name === 'grep') return '🔍';
   if (name === 'search_files') return '🔎';
   if (name === 'list_dir') return '📁';
+  if (name === 'git_status' || name === 'git_diff') return '⎇';
   if (name === 'delete_file') return '🗑️';
   if (name === 'run_command') return '▶️';
   if (name === 'web_search' || name === 'web_extract') return '🌐';
@@ -29,11 +30,62 @@ export function getToolLabel(name: string): string {
   if (name === 'grep') return '搜索';
   if (name === 'search_files') return '搜索文件';
   if (name === 'list_dir') return '列出';
+  if (name === 'git_status') return 'Git 状态';
+  if (name === 'git_diff') return 'Git diff';
   if (name === 'delete_file') return '删除';
   if (name === 'run_command') return '执行';
   if (name === 'web_search') return '联网搜索';
   if (name === 'web_extract') return '抓取网页';
   return name;
+}
+
+export function getRunCommandText(args?: Record<string, unknown>): string {
+  return String(args?.command ?? "").trim().replace(/\s+/g, " ");
+}
+
+export function formatRunCommandPreview(command: string, maxLen = 96): string {
+  const cmd = command.trim().replace(/\s+/g, " ");
+  if (!cmd) return "";
+  return cmd.length > maxLen ? `${cmd.slice(0, maxLen)}…` : cmd;
+}
+
+export function formatRunCommandLabel(
+  args?: Record<string, unknown>,
+  detail?: string,
+): { preview: string; full: string } {
+  const full = getRunCommandText(args) || detail?.trim() || "";
+  const preview = formatRunCommandPreview(full, 120) || "（空命令）";
+  return { preview, full };
+}
+
+const TRIVIAL_COMMAND_OUTPUT = new Set(["（命令执行完成，无输出）"]);
+
+export function parseRunCommandOutputLines(
+  raw: string,
+  maxLines = 6,
+  maxLen = 120,
+): string[] {
+  const text = raw.trim();
+  if (!text || TRIVIAL_COMMAND_OUTPUT.has(text)) return [];
+
+  const lines: string[] = [];
+  const body = text.replace(/^命令执行失败：\n?/m, "");
+  const sections = body.split(/\n\n+/);
+
+  for (const section of sections) {
+    const cleaned = section.replace(/^(stdout|stderr):\n?/i, "").trim();
+    if (!cleaned) continue;
+    for (const line of cleaned.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || /^exit code:/i.test(trimmed)) continue;
+      lines.push(trimmed.length > maxLen ? `${trimmed.slice(0, maxLen)}…` : trimmed);
+      if (lines.length >= maxLines) return lines;
+    }
+  }
+
+  if (!lines.length && body.length <= maxLen) return [body];
+  if (!lines.length) return [`${body.slice(0, maxLen)}…`];
+  return lines;
 }
 
 export function getToolPath(step: { args?: Record<string, unknown>; detail?: string }): string {
@@ -93,7 +145,13 @@ export function formatCollapsedStepsSummary(steps: Array<{ name?: string; args?:
   const count = steps.length;
   if (count === 0) return '';
   const first = steps[0];
-  if (count === 1) return `${getToolLabel(first.name || "")} ${getToolPath(first)}`;
+  if (count === 1) {
+    if (first.name === "run_command") {
+      const cmd = formatRunCommandPreview(getRunCommandText(first.args));
+      return cmd ? `$ ${cmd}` : getToolLabel(first.name || "");
+    }
+    return `${getToolLabel(first.name || "")} ${getToolPath(first)}`;
+  }
   return `${count} 个步骤已折叠`;
 }
 

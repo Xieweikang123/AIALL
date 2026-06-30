@@ -1,5 +1,9 @@
 <template>
-  <details v-if="previewLines.length" class="cursor-tool-row cursor-tool-row--details">
+  <details
+    v-if="previewLines.length"
+    class="cursor-tool-row cursor-tool-row--details"
+    :class="{ 'cursor-tool-row--command': parsedStep.isCommand }"
+  >
     <summary class="cursor-tool-row-summary">
       <div class="cursor-tool-row-content has-preview">
         <span class="cursor-tool-row-chevron">▸</span>
@@ -20,7 +24,11 @@
 
         <!-- Main Info -->
         <div class="cursor-tool-row-info">
-          <span class="cursor-tool-row-action" :class="{ 'is-running': step.running, 'is-failed': failed }">
+          <span
+            v-if="!parsedStep.isCommand"
+            class="cursor-tool-row-action"
+            :class="{ 'is-running': step.running, 'is-failed': failed }"
+          >
             {{ parsedStep.actionLabel }}
           </span>
 
@@ -45,6 +53,17 @@
             </span>
           </template>
 
+          <!-- Shell Command -->
+          <span
+            v-else-if="parsedStep.isCommand"
+            class="cursor-tool-row-command"
+            :class="{ 'is-running': step.running, 'is-failed': failed }"
+            :title="parsedStep.commandFullText"
+          >
+            <span class="cursor-tool-row-command-prompt">$</span>
+            <span class="cursor-tool-row-command-text">{{ parsedStep.commandText }}</span>
+          </span>
+
           <!-- Search Query -->
           <span v-else-if="parsedStep.isSearch && parsedStep.searchQuery" class="cursor-tool-row-query" :title="parsedStep.searchQuery">
             <code>{{ parsedStep.searchQuery }}</code>
@@ -57,12 +76,12 @@
         </div>
       </div>
     </summary>
-    <ul class="cursor-tool-row-preview">
+    <ul class="cursor-tool-row-preview" :class="{ 'cursor-tool-row-preview--terminal': parsedStep.isCommand }">
       <li v-for="(line, index) in previewLines" :key="index">{{ line }}</li>
     </ul>
   </details>
 
-  <div v-else class="cursor-tool-row">
+  <div v-else class="cursor-tool-row" :class="{ 'cursor-tool-row--command': parsedStep.isCommand }">
     <div class="cursor-tool-row-content">
       <!-- Icon -->
       <div 
@@ -81,7 +100,11 @@
 
       <!-- Main Info -->
       <div class="cursor-tool-row-info">
-        <span class="cursor-tool-row-action" :class="{ 'is-running': step.running, 'is-failed': failed }">
+        <span
+          v-if="!parsedStep.isCommand"
+          class="cursor-tool-row-action"
+          :class="{ 'is-running': step.running, 'is-failed': failed }"
+        >
           {{ parsedStep.actionLabel }}
         </span>
 
@@ -106,6 +129,17 @@
           </span>
         </template>
 
+        <!-- Shell Command -->
+        <span
+          v-else-if="parsedStep.isCommand"
+          class="cursor-tool-row-command"
+          :class="{ 'is-running': step.running, 'is-failed': failed }"
+          :title="parsedStep.commandFullText"
+        >
+          <span class="cursor-tool-row-command-prompt">$</span>
+          <span class="cursor-tool-row-command-text">{{ parsedStep.commandText }}</span>
+        </span>
+
         <!-- Search Query -->
         <span v-else-if="parsedStep.isSearch && parsedStep.searchQuery" class="cursor-tool-row-query" :title="parsedStep.searchQuery">
           <code>{{ parsedStep.searchQuery }}</code>
@@ -124,7 +158,7 @@
 import { computed, h } from "vue";
 import { isReadFilePolicyBlock } from "../services/agentCursorFeed";
 import type { AgentRoundTool } from "../services/agentRoundGroups";
-import { getToolPath } from "../utils/toolHelpers";
+import { formatRunCommandLabel, parseRunCommandOutputLines, getToolPath } from "../utils/toolHelpers";
 import { backendUrl } from "../services/backendBase";
 
 // Inline SVG Icon components for premium feel
@@ -191,6 +225,12 @@ function onLinkClick() {
 }
 
 const previewLines = computed((): string[] => {
+  if (props.step.name === "run_command") {
+    const raw = props.step.fullResult?.trim();
+    if (!raw) return [];
+    return parseRunCommandOutputLines(raw);
+  }
+
   const raw = props.step.fullResult?.trim();
   if (!raw || raw === "（无匹配）" || raw === "（无匹配文件）") return [];
   return raw
@@ -229,6 +269,9 @@ const parsedStep = computed(() => {
   let badgeType = "";
   let isSearch = false;
   let searchQuery = "";
+  let isCommand = false;
+  let commandText = "";
+  let commandFullText = "";
 
   if (name === "read_file") {
     iconComponent = FileIcon;
@@ -277,6 +320,13 @@ const parsedStep = computed(() => {
     actionLabel = running ? "Fetch" : failed.value ? "Fetch failed" : "Fetched";
     const url = String(props.step.args?.url ?? props.step.detail ?? "").trim();
     fileName = url.length > 32 ? `${url.slice(0, 32)}…` : url;
+  } else if (name === "run_command") {
+    iconComponent = TerminalIcon;
+    iconClass = "is-terminal";
+    isCommand = true;
+    const { preview, full } = formatRunCommandLabel(props.step.args, props.step.detail);
+    commandText = preview;
+    commandFullText = full || preview;
   } else {
     iconComponent = TerminalIcon;
     iconClass = "is-misc";
@@ -293,6 +343,9 @@ const parsedStep = computed(() => {
     badgeType,
     isSearch,
     searchQuery,
+    isCommand,
+    commandText,
+    commandFullText,
   };
 });
 </script>
@@ -404,6 +457,83 @@ const parsedStep = computed(() => {
 .cursor-tool-row-icon-wrap.is-web {
   background: rgba(20, 184, 166, 0.08);
   color: rgba(20, 184, 166, 0.8);
+}
+.cursor-tool-row-icon-wrap.is-terminal {
+  background: rgba(34, 197, 94, 0.08);
+  color: rgba(74, 222, 128, 0.85);
+}
+
+.cursor-tool-row--command .cursor-tool-row-content {
+  align-items: stretch;
+}
+
+.cursor-tool-row--command .cursor-tool-row-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.cursor-tool-row-command {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex: 1;
+  padding: 3px 8px;
+  border-radius: 5px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.cursor-tool-row-command.is-running {
+  border-color: rgba(56, 189, 248, 0.35);
+  background: rgba(56, 189, 248, 0.06);
+}
+
+.cursor-tool-row-command.is-failed {
+  border-color: rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.cursor-tool-row-command-prompt {
+  flex-shrink: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(74, 222, 128, 0.75);
+  user-select: none;
+}
+
+.cursor-tool-row-command.is-failed .cursor-tool-row-command-prompt {
+  color: rgba(248, 113, 113, 0.8);
+}
+
+.cursor-tool-row-command-text {
+  min-width: 0;
+  flex: 1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: rgba(248, 250, 252, 0.9);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cursor-tool-row-preview--terminal {
+  margin-top: 4px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.22);
+  border-left: 2px solid rgba(74, 222, 128, 0.35);
+}
+
+.cursor-tool-row-preview--terminal li {
+  color: rgba(148, 163, 184, 0.62);
+}
+
+.cursor-tool-row--command.cursor-tool-row--details[open] .cursor-tool-row-preview--terminal {
+  margin-left: 26px;
 }
 
 .cursor-tool-row-icon-wrap.is-running {

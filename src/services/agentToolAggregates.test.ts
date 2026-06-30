@@ -79,6 +79,21 @@ describe("aggregateToolSteps", () => {
     expect(cards[0]?.previewLines[0]).toContain("npm test");
   });
 
+  it("shows single run_command as terminal title", () => {
+    const cards = aggregateToolSteps([
+      step({
+        id: "c1",
+        name: "run_command",
+        args: { command: "npm test" },
+        fullResult: "stdout:\nTests passed",
+        ok: true,
+      }),
+    ]);
+    expect(cards[0]?.title).toBe("$ npm test");
+    expect(cards[0]?.subtitle).toBe("完成");
+    expect(cards[0]?.previewLines[0]).toBe("Tests passed");
+  });
+
   it("summarizes collapsed steps for fold header", () => {
     const summary = summarizeAggregateSteps([
       step({ id: "1", name: "read_file", args: { path: "src/a.ts" } }),

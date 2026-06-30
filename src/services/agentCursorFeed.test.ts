@@ -96,6 +96,43 @@ describe("agentCursorFeed", () => {
     })).toBe("Edited src/components/ChatComposerEditor.vue +5");
   });
 
+  it("formats run_command with the shell command", () => {
+    expect(formatCursorActionLabel({
+      id: "1",
+      name: "run_command",
+      icon: "▶️",
+      title: "run_command",
+      detail: "",
+      label: "run_command",
+      summary: "exit 0",
+      ok: true,
+      args: { command: "npm test" },
+    })).toBe("$ npm test");
+    expect(formatCursorActionLabel({
+      id: "2",
+      name: "run_command",
+      icon: "▶️",
+      title: "run_command",
+      detail: "",
+      label: "run_command",
+      summary: "failed",
+      ok: false,
+      running: true,
+      args: { command: "npm run build" },
+    })).toBe("$ npm run build");
+    expect(formatCursorActionLabel({
+      id: "3",
+      name: "run_command",
+      icon: "▶️",
+      title: "run_command",
+      detail: "",
+      label: "run_command",
+      summary: "failed",
+      ok: false,
+      args: { command: "npm run build" },
+    })).toBe("$ npm run build · 失败");
+  });
+
   it("computes line delta from before and after", () => {
     expect(computeLineDelta("a\nb", "a\nb\nc\nd\ne")).toBe(3);
     expect(computeLineDelta("", "new file", true)).toBe(1);
