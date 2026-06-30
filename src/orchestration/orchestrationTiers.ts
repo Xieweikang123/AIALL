@@ -12,6 +12,8 @@ export type OrchestrationTier = "generic_classifier" | "generic_mechanism" | "pr
 /** Tier 1 — intent/plan/continuation classifiers and routing flags. */
 export const GENERIC_CLASSIFIER_PATHS = [
   "src/orchestration/generic/userIntentClassifiers.ts",
+  "src/orchestration/generic/actionClassifier.ts",
+  "src/orchestration/generic/ambiguousTermTriggers.ts",
   "src/services/agentContinuation.ts",
   "src/services/agentStructuralPatterns.ts",
   "src/services/agentIntentClassifier.ts",
@@ -26,6 +28,7 @@ export const GENERIC_CLASSIFIER_PATHS = [
 export const GENERIC_MECHANISM_PATHS = [
   "src/services/agentReplyAccuracy.ts",
   "src/services/agentConsultativeTopics.ts",
+  "shared/agentProbeGuard.ts",
   "server/agentExplorationBudget.ts",
   "server/agentExploreGuard.ts",
 ] as const;

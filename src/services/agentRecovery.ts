@@ -15,6 +15,7 @@ import {
 import { stripQuotedReplyPrefix } from "./agentContinuation";
 import type { AgentRoundGroup } from "./agentRoundGroups";
 import { stripReferenceAttachments, stripToolSummaryFromAssistantContent } from "./vibeChatStorage";
+import { buildAbortExitSummary } from "../../shared/agentProbeGuard";
 
 export type AgentProgressTool = {
   running?: boolean;
@@ -592,6 +593,12 @@ export function resolveAgentFailureBubbleContent(
   const turns = resolveAgentCompletedTurns(msg);
   const toolCount = msg.tools?.filter((t) => !t.running).length ?? 0;
   if (turns > 0 || toolCount > 0) {
+    const abortSummary = buildAbortExitSummary({
+      tools: msg.tools,
+      writtenFiles: msg.writtenFiles,
+    });
+    if (abortSummary) return abortSummary;
+
     const reason = (msg as { agentFailureReason?: string }).agentFailureReason?.trim();
     const hint =
       reason && !isNoFinalAnswerReason(reason) ? `（原因：${reason}）` : "";

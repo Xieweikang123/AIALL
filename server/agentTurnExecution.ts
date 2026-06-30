@@ -13,10 +13,19 @@ import { buildScheduledJobRegistrationNudge, shouldNudgeScheduledJobRegistration
 import { extractJobClassNamesFromReadPaths } from "../src/services/agentStructuralPatterns";
 import { detectProjectRuntimeProfile } from "./agentRuntimeHint";
 import { buildPostPatchVerifyNudge } from "./agentExplorationBudget";
-import { resetExploreOnProductiveWrite, markExploreOnlyTurn, forceAnchorOnNoProductiveWrite } from "./agentTurnContext";
+import { resetExploreOnProductiveWrite, markExploreOnlyTurn, forceAnchorOnNoProductiveWrite, markStructuredAssetAcquired, resetStructuredAssetTracking, trackEphemeralProbeWrite, trackEphemeralProbeDelete } from "./agentTurnContext";
 import { buildConsultativeDuplicateExploreNudge } from "./agentExplorationBudget";
 import { isProductiveWritePath } from "./agentExplorationBudget";
 import { isExplorationArchivePath, buildExplorationArchiveWriteBlockedMessage } from "./agentExplorationBudget";
+import {
+  buildStructuredAssetWriteNudge,
+  countSchemaTablesInPayload,
+  isEphemeralProbePath,
+  isProbeExploreToolName,
+  isProductiveDeliverableWrite,
+  looksLikeStructuredSchemaPayload,
+  STRUCTURED_ASSET_PROBE_TURN_BUDGET,
+} from "../shared/agentProbeGuard";
 
 export interface ExecutionParams {
   turn: number;
@@ -217,6 +226,7 @@ export async function runTurnExecution(
     });
   }, 5000);
 
+  const turnOutcomes: ToolOutcome[] = [];
   try {
     for (let index = 0; index < toolCalls.length; ) {
       if (signal?.aborted) break;
@@ -236,14 +246,47 @@ export async function runTurnExecution(
         const outcomes = await Promise.all(batch.map((call) => runToolCall(call)));
         for (const outcome of outcomes) {
           emitToolOutcome(outcome);
+          turnOutcomes.push(outcome);
         }
       } else {
         for (const call of batch) {
           const outcome = await runToolCall(call);
           emitToolOutcome(outcome);
+          turnOutcomes.push(outcome);
         }
       }
       index = end;
+    }
+
+    if (!isReadOnlyAgent && !isPlanExplore && !readOnlyBuildRun) {
+      for (const outcome of turnOutcomes) {
+        if (isToolResultFailure(outcome.result)) continue;
+        const toolName = outcome.call.function.name;
+        const toolArgs = parseToolArgs(outcome.call.function.arguments || "{}");
+        const filePath = String(toolArgs.path ?? "").trim();
+
+        if (toolName === "write_file" && filePath && isEphemeralProbePath(filePath)) {
+          trackEphemeralProbeWrite(ctx, filePath);
+          if (looksLikeStructuredSchemaPayload(String(toolArgs.content ?? ""))) {
+            markStructuredAssetAcquired(
+              ctx,
+              turn,
+              countSchemaTablesInPayload(String(toolArgs.content ?? "")),
+            );
+          }
+        }
+        if (toolName === "delete_file" && filePath && isEphemeralProbePath(filePath)) {
+          trackEphemeralProbeDelete(ctx, filePath);
+        }
+        if (toolName === "read_file" && filePath && isEphemeralProbePath(filePath)) {
+          if (looksLikeStructuredSchemaPayload(outcome.result)) {
+            markStructuredAssetAcquired(ctx, turn, countSchemaTablesInPayload(outcome.result));
+          }
+        }
+        if (toolName === "run_command" && looksLikeStructuredSchemaPayload(outcome.result)) {
+          markStructuredAssetAcquired(ctx, turn, countSchemaTablesInPayload(outcome.result));
+        }
+      }
     }
   } finally {
     clearInterval(toolExecutionHeartbeat);
@@ -289,6 +332,41 @@ export async function runTurnExecution(
   }
 
   const turnHadProductiveWrite = toolCalls.some((call) => callIsProductiveWrite(call));
+  const turnHadDeliverableWrite = turnOutcomes.some((outcome) => {
+    if (isToolResultFailure(outcome.result)) return false;
+    const toolName = outcome.call.function.name;
+    const toolArgs = parseToolArgs(outcome.call.function.arguments || "{}");
+    return isProductiveDeliverableWrite(toolName, String(toolArgs.path ?? ""));
+  });
+
+  if (
+    !isReadOnlyAgent &&
+    !isPlanExplore &&
+    !readOnlyBuildRun &&
+    ctx.structuredAssetAcquiredTurn !== null
+  ) {
+    if (turnHadDeliverableWrite) {
+      resetStructuredAssetTracking(ctx);
+    } else {
+      const turnProbeOnly =
+        toolCalls.length > 0 &&
+        toolCalls.every((call) => isProbeExploreToolName(call.function.name));
+      if (turnProbeOnly) {
+        ctx.consecutiveProbeTurnsAfterAsset += 1;
+      }
+      if (
+        !ctx.structuredAssetWriteNudgeSent &&
+        ctx.consecutiveProbeTurnsAfterAsset >= STRUCTURED_ASSET_PROBE_TURN_BUDGET
+      ) {
+        ctx.messages.push({
+          role: "system",
+          content: buildStructuredAssetWriteNudge(ctx.structuredAssetTableCount),
+        });
+        ctx.structuredAssetWriteNudgeSent = true;
+        ctx.consecutiveProbeTurnsAfterAsset = 0;
+      }
+    }
+  }
 
   // ── Block 17d: Consultative grep-hit-Vue read nudge ──
   const turnExploreOnly =

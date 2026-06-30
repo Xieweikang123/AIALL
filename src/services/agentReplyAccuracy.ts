@@ -1,3 +1,5 @@
+import { buildProbeIntrospectAntiPatternHint } from "../../shared/agentProbeGuard";
+
 /** Generic reply-accuracy hints for Ask / Build / Plan system prompts. No business-specific terms. */
 export function buildReplyAccuracyHint(): string {
   return [
@@ -27,5 +29,6 @@ export function buildReplyAccuracyHint(): string {
     "22. 假设验证原则（Verify Your Assumptions）：诊断问题时，必须写下逻辑链假设，并逐一通过代码查看工具验证；严禁在未读取相关文件定义前假设任何布局方向（如 row/column）、数据格式或接口契约。",
     "23. 全局上下文盘点（Check Collaborative Symptoms）：绝不孤立分析单个异常症状；UI 截断必须盘点同级元素的可见性以判断整体坍缩；逻辑报错必须排查堆栈上下文生命周期与前置/后置条件。",
     "24. 智能检索分流（Smart Tooling）：在 grep 前确认搜索词是静态源码符号还是运行时动态数据（如草稿描述、随机 UUID）；严禁在源码中检索动态数据。",
+    buildProbeIntrospectAntiPatternHint(),
   ].join("\n");
 }

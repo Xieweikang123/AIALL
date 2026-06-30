@@ -39,7 +39,8 @@ import {
   shouldBlockBehaviorPurposeFinalize,
 } from "./consultativeBehaviorTrace";
 import { buildSearchFilesEmptyHint } from "./agentAskPrompt";
-import { markAnchorLocated, markTeleportBodyConfirmed, recordPatchFailure } from "./agentTurnContext";
+import { markAnchorLocated, markTeleportBodyConfirmed, recordPatchFailure, listUncleanedEphemeralProbeFiles } from "./agentTurnContext";
+import { buildWorkspaceCleanupNudge } from "../shared/agentProbeGuard";
 
 export interface ValidationParams {
   turn: number;
@@ -459,6 +460,46 @@ export async function validateAgentResponse(
       },
     });
     return { action: "continue" };
+  }
+
+  // ── 12k-pre: Workspace probe artifact cleanup before finish ──
+  if (
+    !params.isReadOnlyAgent &&
+    !params.isPlanExplore &&
+    !params.readOnlyBuildRun &&
+    ctx.writeStage
+  ) {
+    const uncleaned = listUncleanedEphemeralProbeFiles(ctx);
+    if (uncleaned.length > 0 && !ctx.workspaceCleanupNudgeSent) {
+      ctx.workspaceCleanupNudgeSent = true;
+      ctx.messages.push({ role: "assistant", content: rawContent });
+      ctx.messages.push({
+        role: "system",
+        content: buildWorkspaceCleanupNudge(uncleaned),
+      });
+      onEvent({
+        type: "turn_response",
+        data: {
+          turn,
+          ...(ctx.segmentMaxTurns !== undefined ? { maxTurns: ctx.segmentMaxTurns } : {}),
+          assistantText: userText,
+          toolCalls: [],
+          hasToolCalls: false,
+          isFinal: false,
+        },
+      });
+      onEvent({
+        type: "status",
+        data: {
+          phase: "workspace_cleanup_retry",
+          turn,
+          ...(ctx.segmentMaxTurns !== undefined ? { maxTurns: ctx.segmentMaxTurns } : {}),
+          model,
+          detail: "仍有探测临时文件未清理，已要求删除后再完成",
+        },
+      });
+      return { action: "continue" };
+    }
   }
 
   // ── 12l: Natural termination ──

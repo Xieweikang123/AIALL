@@ -15,6 +15,10 @@ import {
   writeFileContent,
   type RunExtractOutcome,
 } from "./vibeFs";
+import {
+  buildIntrospectProbeBlockedMessage,
+  isIntrospectBusinessRoutePatch,
+} from "../shared/agentProbeGuard";
 import { runWebExtract, runWebSearch } from "./webExtract";
 import {
   appendProjectMemory,
@@ -417,6 +421,11 @@ export async function executeTool(
         toolGuard?.readFileRanges,
       );
       return readCheck;
+    }
+    if (
+      isIntrospectBusinessRoutePatch(resolved.relative, oldString, newString)
+    ) {
+      return buildIntrospectProbeBlockedMessage();
     }
     const patchResult = applyUniquePatch(content, oldString, newString);
     if (!patchResult.ok) {

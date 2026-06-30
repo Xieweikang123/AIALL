@@ -44,6 +44,15 @@ export interface AgentTurnContext {
   fileBreadthNudgeSent: boolean;
   negationNudgeSent: boolean;
   postPatchVerifyNudgeSent: boolean;
+  structuredAssetWriteNudgeSent: boolean;
+  workspaceCleanupNudgeSent: boolean;
+
+  // ── External probe / schema asset tracking ──
+  structuredAssetAcquiredTurn: number | null;
+  structuredAssetTableCount: number | null;
+  consecutiveProbeTurnsAfterAsset: number;
+  ephemeralProbeFilesWritten: Set<string>;
+  ephemeralProbeFilesDeleted: Set<string>;
 
   // ── Location / anchor tracking ──
   patchAnchorLocated: boolean;
@@ -138,6 +147,14 @@ export function createAgentTurnContext(params: {
     fileBreadthNudgeSent: false,
     negationNudgeSent: false,
     postPatchVerifyNudgeSent: false,
+    structuredAssetWriteNudgeSent: false,
+    workspaceCleanupNudgeSent: false,
+
+    structuredAssetAcquiredTurn: null,
+    structuredAssetTableCount: null,
+    consecutiveProbeTurnsAfterAsset: 0,
+    ephemeralProbeFilesWritten: new Set(),
+    ephemeralProbeFilesDeleted: new Set(),
 
     patchAnchorLocated: false,
     teleportBodyConfirmed: false,
@@ -211,6 +228,41 @@ export function resetExploreOnProductiveWrite(ctx: AgentTurnContext): void {
   ctx.patchAnchorForcePending = false;
   ctx.exploreFilesRead.clear();
   ctx.fileBreadthNudgeSent = false;
+}
+
+export function markStructuredAssetAcquired(
+  ctx: AgentTurnContext,
+  turn: number,
+  tableCount: number | null,
+): void {
+  ctx.structuredAssetAcquiredTurn = turn;
+  ctx.structuredAssetTableCount = tableCount;
+  ctx.consecutiveProbeTurnsAfterAsset = 0;
+  ctx.structuredAssetWriteNudgeSent = false;
+}
+
+export function resetStructuredAssetTracking(ctx: AgentTurnContext): void {
+  ctx.structuredAssetAcquiredTurn = null;
+  ctx.structuredAssetTableCount = null;
+  ctx.consecutiveProbeTurnsAfterAsset = 0;
+  ctx.structuredAssetWriteNudgeSent = false;
+}
+
+export function trackEphemeralProbeWrite(ctx: AgentTurnContext, relativePath: string): void {
+  const key = relativePath.replace(/\\/g, "/").trim();
+  if (!key) return;
+  ctx.ephemeralProbeFilesWritten.add(key);
+  ctx.ephemeralProbeFilesDeleted.delete(key);
+}
+
+export function trackEphemeralProbeDelete(ctx: AgentTurnContext, relativePath: string): void {
+  const key = relativePath.replace(/\\/g, "/").trim();
+  if (!key) return;
+  ctx.ephemeralProbeFilesDeleted.add(key);
+}
+
+export function listUncleanedEphemeralProbeFiles(ctx: AgentTurnContext): string[] {
+  return [...ctx.ephemeralProbeFilesWritten].filter((p) => !ctx.ephemeralProbeFilesDeleted.has(p));
 }
 
 /** Called after an explore-only turn — increments counters and optionally tracks read files. */

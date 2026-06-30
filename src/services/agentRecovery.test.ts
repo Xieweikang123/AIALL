@@ -532,6 +532,30 @@ describe("resolveAgentFailureBubbleContent", () => {
     expect(text).not.toBe("Failed to fetch");
     expect(text).toContain("恢复运行");
   });
+
+  it("uses structured abort summary when schema probe tools ran", () => {
+    const text = resolveAgentFailureBubbleContent({
+      content: "",
+      tools: [
+        {
+          running: false,
+          name: "run_command",
+          ok: true,
+          summary: JSON.stringify({ tableCount: 2, schema: [{ tableName: "a" }, { tableName: "b" }] }),
+        },
+        {
+          running: false,
+          name: "write_file",
+          ok: true,
+          args: { path: "schema_result.json" },
+        },
+      ],
+      writtenFiles: ["schema_result.json"],
+      turnTraces: [{ turn: 1 }],
+    });
+    expect(text).toContain("运行中断摘要");
+    expect(text).toContain("实体");
+  });
 });
 
 describe("resolveAgentResumeButtonLabel", () => {
