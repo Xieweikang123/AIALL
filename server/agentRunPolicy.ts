@@ -4,10 +4,7 @@ import {
   SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE,
   SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE_SOFT,
 } from "./agentExplorationBudget";
-import {
-  classifyUserIntentFromRules,
-  type ResolvedUserIntent,
-} from "../src/services/agentIntentClassifier";
+import { classifyUserIntentFromRules, type ResolvedUserIntent } from "../src/services/intentClassifierRules";
 import { isScheduledTaskConsultativePrompt } from "../src/services/agentConsultativeTopics";
 import {
   detectUserFailureReport,
@@ -15,9 +12,14 @@ import {
   stripQuotedReplyPrefix,
 } from "../src/services/agentContinuation";
 import { resolveOriginalTaskFromResumePrompt } from "../src/services/agentRecovery";
-import { isSameIssueFollowUpRun } from "../src/services/agentUserIntent";
-import type { UserIntentHistoryMessage } from "../src/services/agentUserIntent";
-import type { AgentRunProfileInput } from "./agentRunProfile";
+import { isSameIssueFollowUpRun } from "../src/orchestration/generic/userIntentClassifiers";
+import type { UserIntentHistoryMessage } from "../src/orchestration/agentIntentTypes";
+import type { ExecutePlanContextInput } from "./agentExecutePlanContext";
+import {
+  expandQuotedAmendPrompt,
+  resolveQuotedAmendIntent,
+  type QuotedAmendIntent,
+} from "../src/orchestration/generic/quotedAmendIntent";
 
 export const MAX_AGENT_CONTEXT_CHARS = 200_000;
 export const EXECUTE_PLAN_MAX_CONTEXT_CHARS = 100_000;
@@ -45,6 +47,10 @@ export interface AgentRunPolicy {
   uiDefectBuildRun: boolean;
   agentStepClarifyRun: boolean;
   ultraShortOpenTaskRun: boolean;
+  pendingPlanAmendRun: boolean;
+  pendingPlanClarifyRun: boolean;
+  quotedAmendRun: boolean;
+  quotedAmendIntent: QuotedAmendIntent | null;
   exploreHardCap: number;
   exploreSoftCap: number;
   maxContextChars: number;
@@ -58,7 +64,7 @@ export interface ResolveAgentRunPolicyInput {
   mode: "ask" | "build" | "plan" | "explore";
   history?: UserIntentHistoryMessage[];
   userIntent: ResolvedUserIntent;
-  runProfile: AgentRunProfileInput;
+  runProfile: ExecutePlanContextInput;
   hasImage: boolean;
   isExecutePlan: boolean;
   isPlanExplore: boolean;
@@ -69,6 +75,13 @@ export function usesReadOnlyTools(
   ctx: { isReadOnlyAgent: boolean; isPlanExplore: boolean },
 ): boolean {
   return ctx.isReadOnlyAgent || ctx.isPlanExplore || policy.readOnlyBuildRun;
+}
+
+/** Session-level read-only turn (Ask/Explore/Plan explore/consultative Build). */
+export function isReadOnlyTurn(
+  cfg: Pick<{ isReadOnlyAgent: boolean; isPlanExplore: boolean; runPolicy: AgentRunPolicy }, "isReadOnlyAgent" | "isPlanExplore" | "runPolicy">,
+): boolean {
+  return usesReadOnlyTools(cfg.runPolicy, cfg);
 }
 
 export function resolveAgentRunPolicy(input: ResolveAgentRunPolicyInput): AgentRunPolicy {
@@ -120,7 +133,18 @@ export function resolveAgentRunPolicy(input: ResolveAgentRunPolicyInput): AgentR
     !isPlanExplore && !isExecutePlan && !implementFollowUpRun && userIntent.behaviorContradiction;
 
   const resumeOriginalTask = resolveOriginalTaskFromResumePrompt(prompt);
-  const effectiveTaskPrompt = resumeOriginalTask ?? prompt;
+  const quotedAmendIntent = resumeOriginalTask ? null : resolveQuotedAmendIntent(prompt);
+  const quotedAmendRun =
+    !isReadOnlyAgent &&
+    !isPlanExplore &&
+    !isExecutePlan &&
+    quotedAmendIntent !== null &&
+    quotedAmendIntent.kind !== "ambiguous";
+  const effectiveTaskPrompt =
+    resumeOriginalTask ??
+    (quotedAmendRun && quotedAmendIntent
+      ? expandQuotedAmendPrompt(prompt, quotedAmendIntent)
+      : prompt);
 
   const consultativeResumeRun =
     !isReadOnlyAgent &&
@@ -193,6 +217,9 @@ export function resolveAgentRunPolicy(input: ResolveAgentRunPolicyInput): AgentR
     !resumeOriginalTask &&
     userIntent.ultraShortOpenTask;
 
+  const pendingPlanAmendRun = isPlanExplore && userIntent.pendingPlanAmend;
+  const pendingPlanClarifyRun = isPlanExplore && userIntent.pendingPlanClarify;
+
   const maxContextChars = isExecutePlan
     ? EXECUTE_PLAN_MAX_CONTEXT_CHARS
     : isPlanExplore
@@ -222,6 +249,10 @@ export function resolveAgentRunPolicy(input: ResolveAgentRunPolicyInput): AgentR
     uiDefectBuildRun,
     agentStepClarifyRun,
     ultraShortOpenTaskRun,
+    pendingPlanAmendRun,
+    pendingPlanClarifyRun,
+    quotedAmendRun,
+    quotedAmendIntent,
     exploreHardCap,
     exploreSoftCap,
     maxContextChars,

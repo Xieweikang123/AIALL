@@ -13,20 +13,23 @@ import {
   buildKnowledgeExploreManifest,
   buildKnowledgeRebuildHint,
 } from "../src/services/projectReportDisplay";
-import { gitChangedFilesSince } from "./vibeGit";
+import { gitChangedFilesSince, gitDiffContent, gitStatus } from "./vibeGit";
+import { formatGitStatusForAgent, parseGitVirtualPath } from "./agentGitTools";
+import { isGitWorkingTreeTopicPrompt } from "../src/services/agentStructuralPatterns";
 import {
   buildReplyAccuracyHint,
 } from "../src/services/agentReplyAccuracy";
 import {
   buildConsultativeTopicHints,
 } from "../src/services/agentConsultativeTopics";
+import { historySuggestsQuotePositionFix } from "../src/orchestration/generic/userIntentClassifiers";
 import {
   buildBuildWriteBlockedHint,
   buildImplementFollowUpHint,
+  buildQuotedAmendHint,
   buildLocateStatusFollowUpHint,
   buildUiDefectBuildHint,
-  historySuggestsQuotePositionFix,
-} from "../src/services/agentUserIntent";
+} from "../src/orchestration/product/userIntentHints";
 import {
   buildCodeReviewHonestyNudge,
   buildUserErrorQuoteHint,
@@ -39,8 +42,8 @@ import { stripQuotedReplyPrefix } from "../src/services/agentContinuation";
 import {
   buildExecutePlanSystemHint,
   buildTargetFileManifest,
-  type AgentRunProfileInput,
-} from "./agentRunProfile";
+  type ExecutePlanContextInput,
+} from "./agentExecutePlanContext";
 import {
   buildProjectContext,
   buildInjectedKeyFilePathSet,
@@ -68,16 +71,71 @@ import {
 import {
   buildModelIdentityHint,
 } from "./visionMessage";
+import { buildPlanSystemPrompt } from "./agentPlanPrompt";
+import type { AgentRunPolicy } from "./agentRunPolicy";
 import type { VibeChatMode } from "../shared/agentTypes";
+
+export type ResolvedOpenFile = {
+  path: string;
+  relative: string;
+  gitIndexView?: boolean;
+  gitHistoryView?: boolean;
+};
 
 export function resolveOpenFileInProject(
   projectRoot: string,
   openFilePath?: string,
-): { path: string; relative: string } | null {
+): ResolvedOpenFile | null {
   if (!openFilePath?.trim()) return null;
+  const virtual = parseGitVirtualPath(openFilePath);
+  if (virtual) {
+    const resolved = resolveProjectPath(projectRoot, virtual.relative);
+    if (!resolved.ok || !resolved.relative) return null;
+    return {
+      path: resolved.path,
+      relative: resolved.relative,
+      gitIndexView: virtual.kind === "index",
+      gitHistoryView: virtual.kind === "history",
+    };
+  }
   const resolved = resolveProjectPath(projectRoot, openFilePath.trim());
   if (!resolved.ok || !resolved.relative) return null;
   return { path: resolved.path, relative: resolved.relative };
+}
+
+function formatOpenFileContextLine(openFile: ResolvedOpenFile): string {
+  if (openFile.gitIndexView) return `用户当前在 Git 暂存区查看：${openFile.relative}`;
+  if (openFile.gitHistoryView) return `用户当前在 Git 历史视图查看：${openFile.relative}`;
+  return `用户当前打开的文件：${openFile.relative}`;
+}
+
+async function buildOpenFileSnippet(
+  projectRoot: string,
+  openFile: ResolvedOpenFile,
+): Promise<string> {
+  if (openFile.gitIndexView) {
+    const diff = await gitDiffContent(projectRoot, openFile.relative, true);
+    if (diff.ok) {
+      if (diff.before.trim() && diff.after.trim() && diff.before !== diff.after) {
+        return [
+          `暂存区 diff（${openFile.relative}）`,
+          "--- 变更前",
+          sliceFileLines(diff.before, 1, 120),
+          "--- 变更后",
+          sliceFileLines(diff.after, 1, 120),
+        ].join("\n");
+      }
+      if (diff.after.trim()) {
+        return [
+          `暂存区内容（${openFile.relative}）`,
+          sliceFileLines(diff.after, 1, 200),
+        ].join("\n");
+      }
+    }
+  }
+  const result = await readFileContent(openFile.path).catch(() => null);
+  if (result?.ok) return sliceFileLines(result.content, 1, 400);
+  return "";
 }
 
 function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: string): string {
@@ -110,6 +168,7 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "给用户的测试步骤须与项目实际运行环境一致（从 package.json scripts 判断 Web dev vs 桌面壳）；禁止混用。",
     "解释项目时：从 package.json、README、入口文件等关键文件入手，不要臆测。",
     buildReplyAccuracyHint(),
+    "Build 阶段勿 read_file / write_file / patch_file `.aiall/plans/` 下方案文件或旧版 `.aiall/PLAN.md`；方案文档由 Plan 模式或客户端维护，你只改业务代码，勿在改码后「同步更新方案文件」。",
     "修改代码时：小范围改动优先 patch_file（old_string 须唯一匹配）；全文件重写或新文件才用 write_file；大文件禁止 write_file 整文件覆盖。",
     "需要确认现状时 read_file 用 offset/limit 读相关片段即可，不要读整个大文件。",
     "write_file / patch_file / delete_file 会立即写入磁盘，无需用户确认。",
@@ -130,7 +189,7 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
   }
   const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
   if (openFile) {
-    lines.push(`用户当前打开的文件：${openFile.relative}`);
+    lines.push(formatOpenFileContextLine(openFile));
   }
   return lines.join("\n");
 }
@@ -147,7 +206,7 @@ function buildAskSystemPrompt(
   }
   const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
   if (openFile) {
-    lines.push(`用户当前打开的文件：${openFile.relative}`);
+    lines.push(formatOpenFileContextLine(openFile));
     if (openFileSnippet?.trim()) {
       lines.push("", "当前打开文件内容（节选）：", "```", openFileSnippet.trim(), "```");
     }
@@ -168,7 +227,7 @@ function buildExploreSystemPrompt(
   }
   const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
   if (openFile) {
-    lines.push(`用户当前打开的文件：${openFile.relative}`);
+    lines.push(formatOpenFileContextLine(openFile));
     if (openFileSnippet?.trim()) {
       lines.push("", "当前打开文件内容（节选）：", "```", openFileSnippet.trim(), "```");
     }
@@ -176,48 +235,32 @@ function buildExploreSystemPrompt(
   return lines.join("\n");
 }
 
-function buildPlanSystemPrompt(
-  projectRoot: string,
-  openFilePath?: string,
-  openFileSnippet?: string,
-  model?: string,
-): string {
-  const lines = [
-    "你是一个编程架构师（Plan 模式），负责分析项目并输出结构化的修改方案。",
-    "回答请使用中文。",
-    "用户可能在消息中附带截图或图片；若已附带，请结合图片内容理解需求并回答，不要声称无法查看图片。",
-    "用户附截图询问界面/功能时：先描述截图所见，再判断是否属于本项目（优先查 src/views、src/components），勿默认是外部应用。",
-    "你可以使用 list_dir、read_file、grep、search_files 工具来探索项目、读取文件，但不能修改任何文件。",
-    "你可以使用 web_search 搜索外部信息，使用 web_extract 抓取指定链接内容。",
-    "短追问（如「需要吗」「要不要」「对吗」且未指明新对象）必须承接上一条助手回复的话题作答，勿因会话更早主题偏离；若意图仍不清晰，用一句话澄清。",
-    "工作流程：先探索相关代码 → 输出结构化修改方案（规划文档）→ 等待用户确认 → 用户确认后系统进入执行阶段并写入代码。",
-    "当前处于【规划阶段】：只读探索，禁止 patch_file / write_file / delete_file / run_command。",
-    "执行阶段（用户确认方案后）仍须遵守：禁止为临时 introspect 修改业务 Controller/路由；优先一次性 CLI 或 `.aiall/probe/` 脚本，完成后清理临时文件。",
-    "输出格式要求（作为可执行的方案文档）：",
-    "0. 方案开头第一行必须是 `[PLAN]` 或 `## 修改方案`（二选一，便于系统识别）；",
-    "1. 标题使用「## 修改方案」；先概述需求和当前状态；",
-    "2. 列出涉及的文件清单（相对路径）；",
-    "3. 对每个文件给出具体改动说明和代码块（标明修改前/修改后或新增内容）；",
-    "4. 说明改动顺序和依赖关系；",
-    "5. 文末固定提示：「确认无误后回复「执行方案」或点击消息上的「执行方案」按钮，我将按方案改代码。」",
-    buildReplyAccuracyHint(),
-    "收集到足够信息后立即输出方案，不要无意义地继续读文件。",
-    "重要：必须通过 API 工具接口调用 list_dir、read_file 等，禁止在正文里输出 <function>、<parameter> 等标记。",
-    "read_file / list_dir：项目内用相对路径；读项目外数据按 AGENTS.md 或用户给出的路径说明；大文件用 offset/limit，勿用 run_command 读文件。",
-    "write_file / patch_file / delete_file 的 path 必须相对项目根，禁止绝对路径。",
-    `项目根目录：${projectRoot}`,
-  ];
-  if (model?.trim()) {
-    lines.push("", buildModelIdentityHint(model));
-  }
-  const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
-  if (openFile) {
-    lines.push(`用户当前打开的文件：${openFile.relative}`);
-    if (openFileSnippet?.trim()) {
-      lines.push("", "当前打开文件内容（节选）：", "```", openFileSnippet.trim(), "```");
-    }
-  }
-  return lines.join("\n");
+type BuildHintContext = {
+  runPolicy: AgentRunPolicy;
+  history?: Array<{ role: string; content: string }>;
+  userRecentlyReportedFailure: boolean;
+};
+
+/** Declarative registry for interactive Build-mode system hints. */
+function buildInteractiveBuildHints(ctx: BuildHintContext): string {
+  const { runPolicy: p } = ctx;
+  const parts: string[] = [];
+  const append = (enabled: boolean, text: string | undefined) => {
+    if (enabled && text) parts.push(text);
+  };
+  append(p.codeReviewRun, buildCodeReviewHonestyNudge(ctx.userRecentlyReportedFailure));
+  append(p.userErrorQuoteRun, buildUserErrorQuoteHint());
+  append(p.userFailureReportRun, buildUserFailureReportNudge());
+  append(p.uiDefectBuildRun, buildUiDefectBuildHint());
+  append(
+    p.implementFollowUpRun,
+    buildImplementFollowUpHint(historySuggestsQuotePositionFix(ctx.history)),
+  );
+  append(p.quotedAmendRun && p.quotedAmendIntent !== null, p.quotedAmendIntent ? buildQuotedAmendHint(p.quotedAmendIntent) : undefined);
+  append(p.sameIssueFollowUpRun, buildSameIssueFollowUpHint());
+  append(p.locateStatusFollowUpRun, buildLocateStatusFollowUpHint());
+  append(p.ultraShortOpenTaskRun, buildUltraShortOpenTaskHint());
+  return parts.map((h) => (h.startsWith("\n") ? h : `\n${h}`)).join("");
 }
 
 export interface AgentContextBuildInput {
@@ -231,24 +274,16 @@ export interface AgentContextBuildInput {
   isExplore: boolean;
   isExecutePlan: boolean;
   isPlanExplore: boolean;
-  readOnlyBuildRun: boolean;
-  consultativeUiAppearanceRun: boolean;
-  codeReviewRun: boolean;
-  userErrorQuoteRun: boolean;
-  userFailureReportRun: boolean;
-  uiDefectBuildRun: boolean;
-  implementFollowUpRun: boolean;
-  sameIssueFollowUpRun: boolean;
-  locateStatusFollowUpRun: boolean;
-  ultraShortOpenTaskRun: boolean;
+  runPolicy: AgentRunPolicy;
   effectiveTaskPrompt: string;
   userRecentlyReportedFailure: boolean;
-  runProfile: AgentRunProfileInput;
+  runProfile: ExecutePlanContextInput;
 }
 
 export interface AgentContextBuildResult {
   systemPrompt: string;
   projectContextBlock: string;
+  projectContextSnapshot: import("./vibeProjectContext").ProjectContextResult | null;
   agentsGuideBlock: string;
   projectSkillsBlock: string;
   projectMemoryBlock: string;
@@ -270,12 +305,13 @@ export async function buildAgentContext(
   const {
     projectRoot, openFilePath, prompt, model, mode,
     isAsk, isExplore, isExecutePlan, isPlanExplore,
-    readOnlyBuildRun, consultativeUiAppearanceRun,
-    codeReviewRun, userErrorQuoteRun, userFailureReportRun,
-    uiDefectBuildRun, implementFollowUpRun, sameIssueFollowUpRun,
-    locateStatusFollowUpRun, ultraShortOpenTaskRun,
+    runPolicy,
     effectiveTaskPrompt, userRecentlyReportedFailure, runProfile,
   } = input;
+  const {
+    readOnlyBuildRun,
+    consultativeUiAppearanceRun,
+  } = runPolicy;
 
   const isReadOnlyAgent = isAsk || isExplore;
 
@@ -284,19 +320,21 @@ export async function buildAgentContext(
 
   let openFileSnippet = "";
   if (!isExecutePlan && openFile) {
+    const openFileDetail = openFile.gitIndexView
+      ? `读取 Git 暂存视图 ${openFileRel}`
+      : openFile.gitHistoryView
+        ? `读取 Git 历史视图 ${openFileRel}`
+        : `读取当前文件 ${openFileRel}`;
     onEvent({
       type: "status",
       data: {
         phase: "building_context",
         model,
-        detail: openFileRel ? `读取当前文件 ${openFileRel}` : undefined,
+        detail: openFileRel ? openFileDetail : undefined,
         ...(openFileRel ? { openFile: openFileRel } : {}),
       },
     });
-    const result = await readFileContent(openFile.path).catch(() => null);
-    if (result?.ok) {
-      openFileSnippet = sliceFileLines(result.content, 1, 400);
-    }
+    openFileSnippet = await buildOpenFileSnippet(projectRoot, openFile);
   } else if (!isExecutePlan) {
     onEvent({
       type: "status",
@@ -353,6 +391,14 @@ export async function buildAgentContext(
       : formatProjectContextForBuild(projectContextOrNull);
   } else if (consultativeUiAppearanceRun) {
     projectContextBlock = `\n\n项目根：${projectRoot}（咨询只读·UI 观感题，已省略全项目扫描以加快首包）`;
+  }
+
+  let gitSnapshotBlock = "";
+  if ((isAsk || isPlanExplore) && isGitWorkingTreeTopicPrompt(effectiveTaskPrompt.trim())) {
+    const status = await gitStatus(projectRoot);
+    if (status.ok) {
+      gitSnapshotBlock = `\n\n【Git 工作区快照】\n${formatGitStatusForAgent(status)}`;
+    }
   }
 
   const hasExistingProjectKnowledge =
@@ -433,25 +479,26 @@ export async function buildAgentContext(
       : isExecutePlan
         ? buildSystemPrompt(projectRoot, openFilePath, model)
         : isPlanExplore
-          ? buildPlanSystemPrompt(projectRoot, openFilePath, openFileSnippet, model)
+          ? buildPlanSystemPrompt(projectRoot, {
+              model,
+              openFileContextLine: openFile ? formatOpenFileContextLine(openFile) : undefined,
+              openFileSnippet: openFileSnippet || undefined,
+            })
           : buildSystemPrompt(projectRoot, openFilePath, model) +
             buildConsultativeTopicHints(
               stripQuotedReplyPrefix(effectiveTaskPrompt.trim()),
               input.history,
               undefined,
             ) +
-            (codeReviewRun ? buildCodeReviewHonestyNudge(userRecentlyReportedFailure) : "") +
-            (userErrorQuoteRun ? buildUserErrorQuoteHint() : "") +
-            (userFailureReportRun ? buildUserFailureReportNudge() : "") +
-            (uiDefectBuildRun ? buildUiDefectBuildHint() : "") +
-            (implementFollowUpRun ? buildImplementFollowUpHint(historySuggestsQuotePositionFix(input.history)) : "") +
-            (sameIssueFollowUpRun ? buildSameIssueFollowUpHint() : "") +
-            (locateStatusFollowUpRun ? buildLocateStatusFollowUpHint() : "") +
-            (ultraShortOpenTaskRun ? `\n${buildUltraShortOpenTaskHint()}` : "");
+            buildInteractiveBuildHints({
+              runPolicy,
+              history: input.history,
+              userRecentlyReportedFailure,
+            });
 
   const systemPrompt = consultativeUiAppearanceRun
     ? `${systemPromptCore}\n${runtimeAwarenessBlock}`
-    : `${systemPromptCore}${projectContextBlock}${agentsGuideBlock}${projectSkillsBlock}${projectMemoryBlock}${projectKnowledgeBlock}${exploreKnowledgeContextBlock}${explorationArchiveBlock}${runtimeAwarenessBlock}`;
+    : `${systemPromptCore}${projectContextBlock}${gitSnapshotBlock}${agentsGuideBlock}${projectSkillsBlock}${projectMemoryBlock}${projectKnowledgeBlock}${exploreKnowledgeContextBlock}${explorationArchiveBlock}${runtimeAwarenessBlock}`;
 
   const injectedKeyFilePaths = projectContextOrNull?.ok
     ? buildInjectedKeyFilePathSet(projectContextOrNull)
@@ -460,6 +507,7 @@ export async function buildAgentContext(
   return {
     systemPrompt,
     projectContextBlock,
+    projectContextSnapshot: projectContextOrNull,
     agentsGuideBlock,
     projectSkillsBlock,
     projectMemoryBlock,
