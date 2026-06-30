@@ -4,11 +4,14 @@ import { readFileContent, resolveProjectPath, searchFiles } from "./vibeFs";
 
 export type ExecutePlanKind = "interactive" | "execute_plan";
 
+export type ExecutePlanTriggerSource = "auto_bug_fix";
+
 /** Server-side execute-plan payload (target files, scoped intent). Not client run routing. */
 export interface ExecutePlanContextInput {
   kind?: ExecutePlanKind;
   targetFiles?: string[];
   userIntent?: string;
+  triggerSource?: ExecutePlanTriggerSource;
 }
 
 export type TargetFileStatus = "ok" | "missing" | "invalid";
@@ -32,6 +35,7 @@ export function normalizeExecutePlanContext(input?: ExecutePlanContextInput | nu
     kind: "execute_plan",
     targetFiles: [...new Set((input.targetFiles || []).map((p) => p.replace(/\\/g, "/").trim()).filter(Boolean))],
     userIntent: input.userIntent?.trim() || undefined,
+    triggerSource: input.triggerSource,
   };
 }
 

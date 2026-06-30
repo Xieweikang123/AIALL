@@ -107,6 +107,11 @@ export interface AgentTurnContext {
   // ── Truncation ──
   truncationRetryCount: number;
   outputTruncated: boolean;
+
+  /** One-click auto bug fix tracking */
+  autoBugFixWriteCount: number;
+  lastVerifyRunSucceeded: boolean | null;
+  runStartedAt: number;
 }
 
 export function createAgentTurnContext(params: {
@@ -212,6 +217,10 @@ export function createAgentTurnContext(params: {
 
     truncationRetryCount: 0,
     outputTruncated: false,
+
+    autoBugFixWriteCount: 0,
+    lastVerifyRunSucceeded: null,
+    runStartedAt: Date.now(),
   };
 }
 

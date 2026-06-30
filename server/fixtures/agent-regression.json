@@ -192,6 +192,25 @@
         "runProfileKind": "execute_plan",
         "readOnlyTools": true
       }
+    },
+    {
+      "id": "build-auto-bug-fix",
+      "description": "一键修复 triggerSource 走 automatedBugFixRun",
+      "prompt": "[AUTO_BUG_FIX]\n修复测试失败",
+      "mode": "build",
+      "runProfile": {
+        "kind": "execute_plan",
+        "triggerSource": "auto_bug_fix",
+        "targetFiles": ["src/foo.test.ts"]
+      },
+      "expect": {
+        "runProfileKind": "execute_plan",
+        "automatedBugFixRun": true,
+        "disableSegmentAutoExtend": true,
+        "exploreHardCap": 6,
+        "readOnlyBuildRun": false,
+        "readOnlyTools": false
+      }
     }
   ]
 }

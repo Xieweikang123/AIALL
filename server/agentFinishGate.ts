@@ -9,7 +9,9 @@ export type FinishGateViolation = {
     | "execute_plan_no_writes"
     | "phantom_file_claim"
     | "task_anchor_miss"
-    | "task_anchor_still_present";
+    | "task_anchor_still_present"
+    | "verify_not_run"
+    | "verify_regression";
   detail: string;
 };
 
@@ -23,6 +25,9 @@ export type FinishGateInput = {
   implementFollowUpRun: boolean;
   targetFiles?: string[];
   taskPrompt?: string;
+  automatedBugFixRun?: boolean;
+  verifyScriptAvailable?: boolean;
+  lastVerifyRunSucceeded?: boolean | null;
 };
 
 export type FinishGateResult = {
@@ -257,6 +262,25 @@ export function evaluateFinishGate(input: FinishGateInput): FinishGateResult {
         detail: `任务契约锚点未出现在已写入内容中：${missing.join("、")}`,
       });
     }
+  }
+
+  if (
+    input.automatedBugFixRun &&
+    claimsDone &&
+    input.verifyScriptAvailable &&
+    input.lastVerifyRunSucceeded !== true
+  ) {
+    violations.push({
+      code: "verify_not_run",
+      detail: "一键修复须在宣称完成前成功 run_command 执行 verify 脚本",
+    });
+  }
+
+  if (input.automatedBugFixRun && input.lastVerifyRunSucceeded === false && claimsDone) {
+    violations.push({
+      code: "verify_regression",
+      detail: "最近一次 verify 命令仍失败，不可宣称修复完成",
+    });
   }
 
   return {

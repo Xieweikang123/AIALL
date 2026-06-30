@@ -33,6 +33,8 @@ export interface AgentRegressionExpect {
   scheduledTaskConsultativeRun?: boolean;
   exploreHardCap?: number;
   maxContextChars?: number;
+  automatedBugFixRun?: boolean;
+  disableSegmentAutoExtend?: boolean;
 }
 
 export interface AgentRegressionCase {
@@ -43,6 +45,11 @@ export interface AgentRegressionCase {
   history?: UserIntentHistoryMessage[];
   lastAssistant?: string;
   hasImage?: boolean;
+  runProfile?: {
+    kind?: "interactive" | "execute_plan";
+    triggerSource?: "auto_bug_fix";
+    targetFiles?: string[];
+  };
   expect: AgentRegressionExpect;
 }
 
@@ -91,6 +98,8 @@ const EXPECT_FIELDS = new Set<string>([
   "quotedAmendRun",
   "exploreHardCap",
   "maxContextChars",
+  "automatedBugFixRun",
+  "disableSegmentAutoExtend",
 ]);
 
 export function defaultRegressionFilePath(projectRoot = process.cwd()): string {
@@ -167,12 +176,14 @@ export function evaluateAgentRegressionCase(caseInput: AgentRegressionCase): Age
       : null;
   const clientProfile =
     askEscalation?.runProfile ??
-    resolveAgentRunProfile({
-      prompt,
-      mode: profileModeValue,
-      lastAssistantContent: lastAssistant,
-      history,
-    });
+    (caseInput.runProfile
+      ? { kind: caseInput.runProfile.kind ?? "execute_plan", ...caseInput.runProfile }
+      : resolveAgentRunProfile({
+          prompt,
+          mode: profileModeValue,
+          lastAssistantContent: lastAssistant,
+          history,
+        }));
   const runProfile = normalizeExecutePlanContext(clientProfile);
   const isExecutePlan = runProfile.kind === "execute_plan";
   const isPlanExplore = mode === "plan" && !isExecutePlan;
@@ -211,6 +222,8 @@ export function evaluateAgentRegressionCase(caseInput: AgentRegressionCase): Age
     quotedAmendRun: policy.quotedAmendRun,
     exploreHardCap: policy.exploreHardCap,
     maxContextChars: policy.maxContextChars,
+    automatedBugFixRun: policy.automatedBugFixRun,
+    disableSegmentAutoExtend: policy.disableSegmentAutoExtend,
   };
 
   for (const [field, expected] of Object.entries(expect)) {

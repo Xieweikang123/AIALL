@@ -3,6 +3,7 @@ import {
   MAX_TOTAL_EXPLORE_TURNS_SOFT,
   SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE,
   SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE_SOFT,
+  AUTO_BUG_FIX_EXPLORE_HARD_CAP,
 } from "./agentExplorationBudget";
 import { classifyUserIntentFromRules, type ResolvedUserIntent } from "../src/services/intentClassifierRules";
 import { isScheduledTaskConsultativePrompt } from "../src/services/agentConsultativeTopics";
@@ -51,6 +52,8 @@ export interface AgentRunPolicy {
   pendingPlanClarifyRun: boolean;
   quotedAmendRun: boolean;
   quotedAmendIntent: QuotedAmendIntent | null;
+  automatedBugFixRun: boolean;
+  disableSegmentAutoExtend: boolean;
   exploreHardCap: number;
   exploreSoftCap: number;
   maxContextChars: number;
@@ -85,10 +88,13 @@ export function isReadOnlyTurn(
 }
 
 export function resolveAgentRunPolicy(input: ResolveAgentRunPolicyInput): AgentRunPolicy {
-  const { prompt, mode, history, userIntent, hasImage, isExecutePlan, isPlanExplore } = input;
+  const { prompt, mode, history, userIntent, hasImage, isExecutePlan, isPlanExplore, runProfile } = input;
   const isAsk = mode === "ask";
   const isExplore = mode === "explore";
   const isReadOnlyAgent = isAsk || isExplore;
+
+  const automatedBugFixRun =
+    isExecutePlan && runProfile.triggerSource === "auto_bug_fix";
 
   const implementFollowUpRun =
     !isReadOnlyAgent && !isPlanExplore && !isExecutePlan && userIntent.implementFollowUp;
@@ -100,9 +106,11 @@ export function resolveAgentRunPolicy(input: ResolveAgentRunPolicyInput): AgentR
     !implementFollowUpRun &&
     isSameIssueFollowUpRun(prompt, history);
 
-  const exploreHardCap = sameIssueFollowUpRun
-    ? SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE
-    : MAX_TOTAL_EXPLORE_TURNS;
+  const exploreHardCap = automatedBugFixRun
+    ? AUTO_BUG_FIX_EXPLORE_HARD_CAP
+    : sameIssueFollowUpRun
+      ? SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE
+      : MAX_TOTAL_EXPLORE_TURNS;
   const exploreSoftCap = sameIssueFollowUpRun
     ? SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE_SOFT
     : MAX_TOTAL_EXPLORE_TURNS_SOFT;
@@ -253,6 +261,8 @@ export function resolveAgentRunPolicy(input: ResolveAgentRunPolicyInput): AgentR
     pendingPlanClarifyRun,
     quotedAmendRun,
     quotedAmendIntent,
+    automatedBugFixRun,
+    disableSegmentAutoExtend: automatedBugFixRun,
     exploreHardCap,
     exploreSoftCap,
     maxContextChars,

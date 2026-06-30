@@ -24,6 +24,8 @@ import {
   isExplorationArchivePath,
   buildExplorationArchiveWriteBlockedMessage,
   isProductiveWritePath,
+  isWriteAllowedForAutoBugFix,
+  MAX_AUTO_BUG_FIX_WRITES,
 } from "./agentExplorationBudget";
 import {
   buildStructuredAssetWriteNudge,
@@ -73,7 +75,9 @@ export async function runTurnExecution(
     sameIssueFollowUpRun,
     consultativeVisionRun,
     scheduledTaskConsultativeRun,
+    automatedBugFixRun,
   } = p;
+  const targetFiles = cfg.runProfile.targetFiles ?? [];
 
   // ── Block 13: Tool preamble processing ──
   if (visibleContent.trim() && toolCalls.length > 0) {
@@ -127,6 +131,30 @@ export async function runTurnExecution(
     const toolName = call.function.name;
     const toolArgs = parseToolArgs(call.function.arguments || "{}");
     let pendingDiff: ToolOutcome["pendingDiff"] = null;
+
+    if (
+      automatedBugFixRun &&
+      (toolName === "patch_file" || toolName === "write_file" || toolName === "delete_file")
+    ) {
+      const filePath = String(toolArgs.path || "").trim();
+      if (toolName !== "delete_file" && ctx.autoBugFixWriteCount >= MAX_AUTO_BUG_FIX_WRITES) {
+        return {
+          call,
+          result: `错误：一键修复已达写入上限（${MAX_AUTO_BUG_FIX_WRITES} 个文件），请 run_command 复验或输出总结。`,
+          pendingDiff: null,
+        };
+      }
+      if (filePath) {
+        const guardResolved = resolveProjectPath(projectRoot, filePath);
+        if (guardResolved.ok && !isWriteAllowedForAutoBugFix(guardResolved.relative, targetFiles)) {
+          return {
+            call,
+            result: `错误：一键修复不允许修改 ${guardResolved.relative}（不在目标文件清单内）。`,
+            pendingDiff: null,
+          };
+        }
+      }
+    }
 
     if (ctx.writeStage && WRITE_AGENT_TOOL_NAMES.has(toolName)) {
       const filePath = String(toolArgs.path || "").trim();
@@ -217,6 +245,22 @@ export async function runTurnExecution(
       try {
         const args = JSON.parse(outcome.call.function.arguments || "{}");
         recordPatchFailure(ctx, turn, String(args.path || ""), outcome.result.slice(0, 200));
+      } catch { /* ignore */ }
+    }
+    if (automatedBugFixRun && toolName === "run_command") {
+      ctx.lastVerifyRunSucceeded = !isToolResultFailure(outcome.result);
+    }
+    if (
+      automatedBugFixRun &&
+      !isToolResultFailure(outcome.result) &&
+      (toolName === "patch_file" || toolName === "write_file")
+    ) {
+      try {
+        const args = parseToolArgs(outcome.call.function.arguments || "{}");
+        const rel = String(args.path || "").replace(/\\/g, "/").trim();
+        if (rel && isProductiveWritePath(rel)) {
+          ctx.autoBugFixWriteCount += 1;
+        }
       } catch { /* ignore */ }
     }
   };

@@ -167,6 +167,18 @@ export function handleTurnSegment(
     }
 
     // 19e: Auto-extend segment
+    if (p.disableSegmentAutoExtend) {
+      onEvent({
+        type: "status",
+        data: { phase: "finished", turn, maxTurns: ctx.segmentMaxTurns },
+      });
+      onEvent({
+        type: "error",
+        data: { message: buildTurnCapExhaustedMessage(turn) },
+      });
+      onEvent({ type: "done", data: buildDoneData(ctx.writeStage, turn, ctx.outputTruncated) });
+      return { action: "return" };
+    }
     ctx.segmentIndex += 1;
     ctx.segmentMaxTurns = extendSegmentMaxTurns(turn, segmentBudget);
     ctx.turnsLowNudgeSent = false;

@@ -66,6 +66,12 @@ export const EXPLORE_INTERIM_DIAGNOSIS_TURN = 4;
 export const SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE_SOFT = 5;
 export const SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE = 8;
 
+/** One-click auto bug fix — lower explore cap than interactive build. */
+export const AUTO_BUG_FIX_EXPLORE_HARD_CAP = 6;
+
+/** Max productive file writes per auto bug fix run. */
+export const MAX_AUTO_BUG_FIX_WRITES = 5;
+
 /** Paths written during exploration note-taking — do not reset explore-budget counters. */
 export function isExplorationArchivePath(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, "/").trim();
@@ -74,6 +80,31 @@ export function isExplorationArchivePath(filePath: string): boolean {
 
 export function isProductiveWritePath(filePath: string): boolean {
   return Boolean(filePath.trim()) && !isExplorationArchivePath(filePath);
+}
+
+export function isWriteAllowedForAutoBugFix(relativePath: string, targetFiles: string[]): boolean {
+  if (!targetFiles.length) return true;
+  const norm = relativePath.replace(/\\/g, "/").trim();
+  return targetFiles.some((target) => {
+    const t = target.replace(/\\/g, "/").trim();
+    if (!t) return false;
+    return norm === t || norm.endsWith(`/${t}`) || t.endsWith(`/${norm}`) || norm.endsWith(t);
+  });
+}
+
+/** System hint for one-click auto bug fix runs. */
+export function buildAutomatedBugFixHint(verifyScript?: string): string {
+  const verifyLine = verifyScript
+    ? `修复后须 run_command \`${verifyScript}\` 复验；`
+    : "修复后须 run_command 复验或 read_file 核对；";
+  return [
+    "",
+    "【一键自动修复】",
+    "仅修复任务清单内项；禁止重构、重命名、格式化或改无关文件。",
+    "流程：read_file 核实 → patch_file（局部优先）→ " + verifyLine,
+    "grep 圈定项须 read 确认；误报跳过并说明。",
+    `单轮最多修改 ${MAX_AUTO_BUG_FIX_WRITES} 个文件；仅可 patch 目标清单内路径。`,
+  ].join("\n");
 }
 
 /** Identical read_file slice requests allowed after the first read before hard-blocking. */

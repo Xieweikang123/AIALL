@@ -47,6 +47,7 @@ import {
 import { buildSearchFilesEmptyHint } from "./agentAskPrompt";
 import { markAnchorLocated, markTeleportBodyConfirmed, recordPatchFailure, listUncleanedEphemeralProbeFiles } from "./agentTurnContext";
 import { buildWorkspaceCleanupNudge } from "../shared/agentProbeGuard";
+import { detectProjectRuntimeProfile } from "./agentRuntimeHint";
 import {
   buildFinishGateRetryNudge,
   evaluateFinishGate,
@@ -89,6 +90,7 @@ export async function validateAgentResponse(
     consultativeVisionRun,
     behaviorPurposeRun,
     consultativeUiAppearanceRun,
+    automatedBugFixRun,
   } = p;
   const { rawContent, visibleContent, toolCalls, streamedChars, targetFiles, taskPrompt } = params;
   const userText = sanitizeAgentUserVisibleText(visibleContent.trim());
@@ -598,6 +600,9 @@ export async function validateAgentResponse(
 
   // ── 12m: Finish gate (deterministic critic before delivery) ──
   if (ctx.finishGateRetries < 2) {
+    const runtimeProfile = automatedBugFixRun
+      ? detectProjectRuntimeProfile(cfg.projectRoot)
+      : null;
     const finishGate = evaluateFinishGate({
       rawContent,
       writeStage: ctx.writeStage,
@@ -608,6 +613,9 @@ export async function validateAgentResponse(
       implementFollowUpRun,
       targetFiles,
       taskPrompt,
+      automatedBugFixRun,
+      verifyScriptAvailable: Boolean(runtimeProfile?.verifyScript),
+      lastVerifyRunSucceeded: ctx.lastVerifyRunSucceeded,
     });
     if (finishGate.blocked) {
       ctx.finishGateRetries += 1;

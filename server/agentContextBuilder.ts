@@ -36,6 +36,7 @@ import {
   buildUserFailureReportNudge,
   buildSameIssueFollowUpHint,
   buildUltraShortOpenTaskHint,
+  buildAutomatedBugFixHint,
 } from "./agentExplorationBudget";
 import { detectProjectRuntimeProfile, buildRuntimeAwarenessHint, buildShellAwarenessHint } from "./agentRuntimeHint";
 import { stripQuotedReplyPrefix } from "../src/services/agentContinuation";
@@ -498,7 +499,9 @@ export async function buildAgentContext(
 
   const systemPrompt = consultativeUiAppearanceRun
     ? `${systemPromptCore}\n${runtimeAwarenessBlock}`
-    : `${systemPromptCore}${projectContextBlock}${gitSnapshotBlock}${agentsGuideBlock}${projectSkillsBlock}${projectMemoryBlock}${projectKnowledgeBlock}${exploreKnowledgeContextBlock}${explorationArchiveBlock}${runtimeAwarenessBlock}`;
+    : `${systemPromptCore}${projectContextBlock}${gitSnapshotBlock}${agentsGuideBlock}${projectSkillsBlock}${projectMemoryBlock}${projectKnowledgeBlock}${exploreKnowledgeContextBlock}${explorationArchiveBlock}${runtimeAwarenessBlock}${
+        runPolicy.automatedBugFixRun ? buildAutomatedBugFixHint(runtimeProfile.verifyScript) : ""
+      }`;
 
   const injectedKeyFilePaths = projectContextOrNull?.ok
     ? buildInjectedKeyFilePathSet(projectContextOrNull)

@@ -1,5 +1,5 @@
 import { resolveFirstByteTimeoutMs } from "./aiForward";
-import { resolveAgentMaxTurns } from "./agentTurnBudget";
+import { resolveAgentMaxTurns, AUTO_BUG_FIX_WALL_CLOCK_MS } from "./agentTurnBudget";
 import {
   buildExploreContinueNudge,
   buildExploreFollowUpHint,
@@ -406,6 +406,22 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
 
   for (let turn = 1; ; turn += 1) {
     ctx.turn = turn;
+
+    if (
+      runPolicy.automatedBugFixRun &&
+      Date.now() - ctx.runStartedAt > AUTO_BUG_FIX_WALL_CLOCK_MS
+    ) {
+      onEvent({
+        type: "status",
+        data: { phase: "finished", turn, maxTurns: ctx.segmentMaxTurns },
+      });
+      onEvent({
+        type: "error",
+        data: { message: "一键修复已达时间上限（10 分钟），任务可能未完成。" },
+      });
+      onEvent({ type: "done", data: buildDoneData(ctx.writeStage, turn, ctx.outputTruncated) });
+      return;
+    }
 
     const preflight = runTurnPreflight(ctx, turn, activeTools, onEvent, signal);
     if (preflight.action === "return") {

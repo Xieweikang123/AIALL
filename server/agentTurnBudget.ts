@@ -1,6 +1,12 @@
 /** Hard ceiling to stop runaway tool loops. Normal tasks should finish well below this. */
 export const AGENT_SAFETY_MAX_TURNS = 200;
 
+/** One-click auto bug fix — tighter than execute_plan. */
+export const AUTO_BUG_FIX_MAX_TURNS = 12;
+
+/** Wall-clock limit for auto bug fix runs (ms). */
+export const AUTO_BUG_FIX_WALL_CLOCK_MS = 10 * 60 * 1000;
+
 /** Direct @-file / plan execution — fewer reads, more writes. */
 export const EXECUTE_PLAN_MAX_TURNS = 20;
 /** Open-ended build tasks (explore + modify). */
@@ -20,9 +26,10 @@ export const RESUME_MAX_TURNS_CAP = 48;
 
 export function resolveAgentMaxTurns(
   mode: "ask" | "build" | "plan" | "explore",
-  profile?: { kind?: "interactive" | "execute_plan" } | null,
+  profile?: { kind?: "interactive" | "execute_plan"; triggerSource?: string } | null,
   exploreMaxTurns?: number,
 ): number {
+  if (profile?.triggerSource === "auto_bug_fix") return AUTO_BUG_FIX_MAX_TURNS;
   if (mode === "ask") return ASK_MAX_TURNS;
   if (mode === "explore") return exploreMaxTurns ?? EXPLORE_MAX_TURNS;
   if (profile?.kind === "execute_plan") return EXECUTE_PLAN_MAX_TURNS;
