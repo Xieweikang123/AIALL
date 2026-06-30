@@ -86,6 +86,18 @@ describe("classifyUserIntentFromRules", () => {
     expect(result.consultative).toBe(false);
     expect(result.primary).toBe("implement");
   });
+
+  it("ActionClassifier forces consultative for 是啥 root verb with project_overview topic", () => {
+    const result = classifyUserIntentFromRules({
+      prompt: "当前项目测试接口是啥",
+      mode: "build",
+      hasImage: false,
+      isAsk: false,
+    });
+    expect(result.primary).toBe("consultative");
+    expect(result.consultative).toBe(true);
+    expect(result.consultativeTopic).toBe("project_overview");
+  });
 });
 
 describe("shouldSkipAiIntentClassifier", () => {
@@ -230,11 +242,65 @@ describe("formatIntentClassificationDetail", () => {
       configBindingTopic: null,
       ultraShortOpenTask: false,
       locateStatusFollowUp: false,
+      pendingPlanAmend: false,
+      pendingPlanClarify: false,
       classificationSource: "rules",
       skippedAiClassifier: true,
     });
     expect(detail).toContain("project_overview");
     expect(detail).toContain("规则短路");
+  });
+});
+
+describe("classifyUserIntentFromRules pending plan follow-up", () => {
+  const PLAN_MSG = [
+    "[PLAN]",
+    "## 修改方案",
+    "涉及 `src/foo.ts`：",
+    "```ts",
+    "export const featureFlag = true;",
+    "```",
+  ].join("\n");
+
+  const sessionHistory = [
+    { role: "user", content: "写一个定时任务" },
+    { role: "assistant", content: PLAN_MSG },
+    {
+      role: "user",
+      content: '> 方案: _logger.LogInformation("…");\n\n日志写到哪里了？',
+    },
+    {
+      role: "assistant",
+      content: "默认输出到控制台，不会写入文件。如需持久化可添加文件日志提供程序。",
+    },
+  ];
+
+  it("routes Agent-quote + 持久化 to pendingPlanAmend in plan mode", () => {
+    const prompt =
+      "> Agent: 当前方案下的 _logger 只会输出到控制台，不会写入文件。\n\n持久化";
+    const result = classifyUserIntentFromRules({
+      prompt,
+      history: sessionHistory,
+      mode: "plan",
+      hasImage: false,
+      isAsk: false,
+    });
+    expect(result.pendingPlanAmend).toBe(true);
+    expect(result.pendingPlanClarify).toBe(false);
+    expect(result.primary).toBe("consultative");
+    expect(result.consultative).toBe(false);
+    expect(shouldSkipAiIntentClassifier(result, prompt)).toBe(true);
+  });
+
+  it("does not amend when user breaks pending plan thread", () => {
+    const result = classifyUserIntentFromRules({
+      prompt: "另起一个方案，写独立模块",
+      history: sessionHistory,
+      mode: "plan",
+      hasImage: false,
+      isAsk: false,
+    });
+    expect(result.pendingPlanAmend).toBe(false);
   });
 });
 

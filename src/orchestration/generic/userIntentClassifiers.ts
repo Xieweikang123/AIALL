@@ -34,10 +34,20 @@ const BEHAVIOR_PURPOSE_PROMPT_RE =
 
 const PRIOR_ENUM_LISTING_RE = PRIOR_DEFINITION_LISTING_RE;
 
-const AUTOMATION_PROMPT_RE = /^\s*(?:【|\[)(?:方案执行|精准修改|效率|系统自动续跑|读图完成)/;
+/** System automation / resume markers — must not be classified as user consultative. */
+export const AUTOMATION_PROMPT_RE =
+  /^\s*(?:【|\[)(?:方案执行|精准修改|效率|系统自动续跑|读图完成)/;
 
-const SHORT_EVALUATIVE_FOLLOW_UP_RE =
-  /^(?:需要|要不要|是否|还得|还要|值得|可以|那)?[^。！!]{0,24}(?:吗|呢)[？?]?\s*$/;
+export function isAutomationResumePrompt(prompt: string): boolean {
+  return AUTOMATION_PROMPT_RE.test(prompt.trim());
+}
+
+/** Short follow-ups that depend on prior assistant context (e.g. 「需要吗」「还要吧」). */
+export function isShortContextDependentFollowUp(prompt: string): boolean {
+  const text = prompt.trim();
+  if (!text || text.length > 24) return false;
+  return /^(?:需要|要不要|是否|还得|还要|值得|可以|那)?[^。！!]{0,20}(?:吗|呢|吧|了)[？?]?\s*$/.test(text);
+}
 
 const IMPLEMENTATION_FAILURE_REPORT_RE =
   /没生效|不生效|未生效|没效果|没有效果|没变化|不起作用|试了.{0,16}(?:没有|没|不|无效)|仍然(?:没有|没|不)|还是(?:没有|没|不)|明明(?:没有|没|不)/i;
@@ -142,7 +152,12 @@ export function isUltraShortOpenTaskPrompt(prompt: string): boolean {
   return OPEN_ENDED_TAIL_RE.test(text);
 }
 
-export type UserIntentHistoryMessage = { role: string; content: string };
+export type UserIntentHistoryMessage = {
+  role: string;
+  content: string;
+  writtenFiles?: string[];
+  planFilePath?: string;
+};
 
 export function isImplementationStatusPrompt(prompt: string): boolean {
   const text = prompt.trim();
@@ -315,7 +330,7 @@ export function isConsultativeUserPrompt(
   if (isImplementationFailureReportPrompt(text)) return false;
   if (isBehaviorPurposePrompt(text, history)) return true;
   if (isUiLocateQuestionPrompt(text) && !IMPLEMENT_INTENT_RE.test(text)) return true;
-  if (SHORT_EVALUATIVE_FOLLOW_UP_RE.test(text)) return true;
+  if (isShortContextDependentFollowUp(text)) return true;
   if (ACCURACY_CONSULTATIVE_RE.test(text)) return true;
   if (OBSERVED_BEHAVIOR_QUESTION_RE.test(text)) return true;
   if (isQuestionShapedConsultative(text)) return true;
