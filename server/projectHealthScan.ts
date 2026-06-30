@@ -69,6 +69,7 @@ const SCAN_RULES: ScanRule[] = [
     severity: "error",
     pattern: String.raw`\beval\s*\(|new Function\s*\(`,
     title: "动态代码执行",
+    excludePathRe: /\.(test|spec)\.[cm]?[jt]sx?$/i,
     maxMatches: 8,
   },
   {
@@ -111,6 +112,11 @@ function shouldSkipMatch(relative: string, text: string, rule: ScanRule): boolea
     const lower = text.toLowerCase();
     if (/placeholder|example|changeme|your[-_]|xxx|dummy|fake|test/i.test(lower)) return true;
     if (/['"]\s*['"]/.test(text)) return true;
+    // short strings or programming keywords are never real secrets
+    const m = text.match(/['"]([^'"]+)['"]/);
+    const val = m?.[1] ?? "";
+    if (val.length < 12) return true;
+    if (/^(function|decorator|string|number|boolean|object|array|keyword|operator|variable|class|type|interface|module|namespace|property|method|param|return|this|super|true|false|null|undefined|readonly|private|public|protected|static|async|await|yield|const|let|var|import|export|default|from|enum|struct|impl|trait|crate|self|pub|fn|use|mod|match|loop|while|for|if|else|Some|None|Ok|Err|println|print|format|vec|assert|todo|unimplemented|unreachable)$/i.test(val)) return true;
   }
   return false;
 }
@@ -184,3 +190,4 @@ export async function scanProjectHealth(projectPath: string): Promise<ProjectHea
     checksRun,
   };
 }
+
