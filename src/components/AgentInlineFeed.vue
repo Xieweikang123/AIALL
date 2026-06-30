@@ -216,6 +216,7 @@ const liveRailPrimary = computed((): string => {
       hasAnswer: props.hasAnswer,
       hasRunningTool: true,
       hasActionBlocks: (props.toolCount ?? 0) > 0,
+      agentPhase: props.agentPhase,
     });
     if (footer) return footer;
     return "执行工具中…";
@@ -230,6 +231,7 @@ const liveRailPrimary = computed((): string => {
     hasAnswer: props.hasAnswer,
     hasRunningTool: props.hasRunningTool,
     hasActionBlocks: (props.toolCount ?? 0) > 0,
+    agentPhase: props.agentPhase,
   });
   if (footer) return footer;
 

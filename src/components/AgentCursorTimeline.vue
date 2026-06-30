@@ -214,6 +214,7 @@ const liveRailPrimary = computed((): string => {
     hasAnswer: props.hasAnswer,
     hasRunningTool: props.hasRunningTool,
     hasActionBlocks: (props.toolCount ?? 0) > 0,
+    agentPhase: props.agentPhase,
   });
   if (footer) return footer;
 
@@ -241,6 +242,7 @@ const liveRailVisible = computed(() => {
   if (!props.isRunning) return false;
   if (props.hasRunningTool || liveTools.value.some((step) => step.running)) return false;
   if (props.answerText.trim() && props.agentPhase === "streaming_model") return false;
+  if (isWaitingModel.value) return Boolean(liveRailPrimary.value.trim());
   return Boolean(liveRailPrimary.value.trim());
 });
 

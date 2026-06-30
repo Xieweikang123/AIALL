@@ -159,9 +159,7 @@ const toolCount = computed(() => {
 });
 
 const showTimeline = computed(
-  () =>
-    agentTimeline.value.blocks.length > 0 ||
-    (props.isRunning && Boolean(props.currentStatus?.trim()) && !displayFinalAnswer.value.trim()),
+  () => props.isRunning || agentTimeline.value.blocks.length > 0,
 );
 </script>
 
