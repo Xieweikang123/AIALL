@@ -5,7 +5,7 @@
       <p class="panel-empty-title">尚未打开项目</p>
       <p class="panel-empty-hint">打开项目后可查看 Git 状态与变更</p>
     </div>
-    <div v-else-if="gitLoading" class="panel-empty">
+    <div v-else-if="gitLoading && !gitStatusKnown" class="panel-empty">
       <span class="panel-loading-spinner panel-empty-spinner" aria-hidden="true" />
       <p class="panel-empty-title">正在加载 Git 状态…</p>
     </div>
@@ -255,68 +255,12 @@
             <span v-if="gitStatus.length > 0" class="git-local-count-badge">{{ gitStatus.length }}</span>
           </button>
 
-          <div v-show="!gitLogOpen || localChangesOpen" class="git-local-content">
-            <div class="git-changes-scroll">
-              <div v-if="!gitStatus.length" class="git-changes-empty">
-                <span class="git-changes-empty-icon" aria-hidden="true">✓</span>
-                <span>工作区干净，无本地改动</span>
-              </div>
-              <template v-else>
-                <div v-if="gitStagedFiles.length" class="git-section">
-                  <div class="git-section-head">
-                    <button type="button" class="git-section-toggle" @click="$emit('update:gitStagedOpen', !gitStagedOpen)">
-                      <span class="git-section-chevron">{{ gitStagedOpen ? "▾" : "▸" }}</span>
-                      <span class="git-section-title">已暂存 ({{ gitStagedFiles.length }})</span>
-                    </button>
-                    <button type="button" class="ghost tiny" @click="$emit('unstage-all')">取消全部</button>
-                  </div>
-                  <div v-if="gitStagedOpen" class="git-file-list">
-                    <GitFileTreeNode
-                      v-for="node in gitStagedTree"
-                      :key="node.path"
-                      :node="node"
-                      staged
-                      :expanded-dirs="gitTreeExpandedDirs"
-                      :selected-git-files="selectedGitFiles"
-                      :git-diff-loading-key="gitDiffLoadingKey"
-                      @toggle-dir="toggleGitTreeDir"
-                      @unstage-file="$emit('unstage-file', $event)"
-                      @pointer-down="(event, path, isStaged) => $emit('on-git-file-pointer-down', event, path, isStaged)"
-                      @contextmenu="(event, path) => $emit('on-git-file-contextmenu', event, path)"
-                    />
-                  </div>
-                </div>
-                <div v-if="gitUnstagedFiles.length" class="git-section">
-                  <div class="git-section-head">
-                    <button type="button" class="git-section-toggle" @click="$emit('update:gitUnstagedOpen', !gitUnstagedOpen)">
-                      <span class="git-section-chevron">{{ gitUnstagedOpen ? "▾" : "▸" }}</span>
-                      <span class="git-section-title">未暂存 ({{ gitUnstagedFiles.length }})</span>
-                    </button>
-                    <div class="git-section-actions">
-                      <button type="button" class="ghost tiny" @click="$emit('stage-all')">全部暂存</button>
-                      <button type="button" class="ghost tiny danger" @click="$emit('discard-all', $event)">丢弃全部</button>
-                    </div>
-                  </div>
-                  <div v-if="gitUnstagedOpen" class="git-file-list">
-                    <GitFileTreeNode
-                      v-for="node in gitUnstagedTree"
-                      :key="`unstaged:${node.path}`"
-                      :node="node"
-                      :staged="false"
-                      :expanded-dirs="gitTreeExpandedDirs"
-                      :selected-git-files="selectedGitFiles"
-                      :git-diff-loading-key="gitDiffLoadingKey"
-                      @toggle-dir="toggleGitTreeDir"
-                      @stage-file="$emit('stage-file', $event)"
-                      @discard-file="(path, event) => $emit('discard-file', path, event)"
-                      @pointer-down="(event, path, isStaged) => $emit('on-git-file-pointer-down', event, path, isStaged)"
-                      @contextmenu="(event, path) => $emit('on-git-file-contextmenu', event, path)"
-                    />
-                  </div>
-                </div>
-              </template>
-            </div>
-            <div class="git-commit-box git-section-card">
+          <div
+            v-show="!gitLogOpen || localChangesOpen"
+            class="git-local-content"
+            :class="{ 'git-local-content--batch-open': batchSectionOpen }"
+          >
+            <div v-show="!batchSectionOpen" class="git-commit-box git-section-card">
               <textarea
                 :value="gitCommitMessage"
                 class="git-commit-input"
@@ -354,9 +298,78 @@
                   :title="!configReady ? '请先配置 AI 模型' : 'AI 生成提交信息并推送'"
                   @click="$emit('ai-commit-and-push')"
                 >
-                  {{ gitAiPushStep || "推送" }}
+                  {{ gitAiPushStep || "AI 推送" }}
                 </button>
               </div>
+            </div>
+            <div
+              v-show="!batchSectionOpen"
+              class="git-changes-wrap"
+              :class="{ 'git-changes-wrap--compact': !hasExpandedFileList }"
+            >
+              <div v-if="!gitStatus.length" class="git-changes-empty">
+                <span class="git-changes-empty-icon" aria-hidden="true">✓</span>
+                <span>工作区干净，无本地改动</span>
+              </div>
+              <template v-else>
+                <div v-if="gitStagedFiles.length" class="git-section">
+                  <div class="git-section-head">
+                    <button type="button" class="git-section-toggle" @click="$emit('update:gitStagedOpen', !gitStagedOpen)">
+                      <span class="git-section-chevron">{{ gitStagedOpen ? "▾" : "▸" }}</span>
+                      <span class="git-section-title">已暂存 ({{ gitStagedFiles.length }})</span>
+                    </button>
+                    <button type="button" class="ghost tiny" @click="$emit('unstage-all')">取消全部</button>
+                  </div>
+                </div>
+                <div v-if="gitUnstagedFiles.length" class="git-section">
+                  <div class="git-section-head">
+                    <button type="button" class="git-section-toggle" @click="$emit('update:gitUnstagedOpen', !gitUnstagedOpen)">
+                      <span class="git-section-chevron">{{ gitUnstagedOpen ? "▾" : "▸" }}</span>
+                      <span class="git-section-title">未暂存 ({{ gitUnstagedFiles.length }})</span>
+                    </button>
+                    <div class="git-section-actions">
+                      <button type="button" class="ghost tiny" @click="$emit('stage-all')">全部暂存</button>
+                      <button type="button" class="ghost tiny danger" @click="$emit('discard-all', $event)">丢弃全部</button>
+                    </div>
+                  </div>
+                </div>
+                <div
+                  v-if="hasExpandedFileList"
+                  class="git-changes-list-scroll"
+                >
+                  <div v-if="gitStagedFiles.length && gitStagedOpen" class="git-file-list">
+                    <GitFileTreeNode
+                      v-for="node in gitStagedTree"
+                      :key="node.path"
+                      :node="node"
+                      staged
+                      :expanded-dirs="gitTreeExpandedDirs"
+                      :selected-git-files="selectedGitFiles"
+                      :git-diff-loading-key="gitDiffLoadingKey"
+                      @toggle-dir="toggleGitTreeDir"
+                      @unstage-file="$emit('unstage-file', $event)"
+                      @pointer-down="(event, path, isStaged) => $emit('on-git-file-pointer-down', event, path, isStaged)"
+                      @contextmenu="(event, path) => $emit('on-git-file-contextmenu', event, path)"
+                    />
+                  </div>
+                  <div v-if="gitUnstagedFiles.length && gitUnstagedOpen" class="git-file-list">
+                    <GitFileTreeNode
+                      v-for="node in gitUnstagedTree"
+                      :key="`unstaged:${node.path}`"
+                      :node="node"
+                      :staged="false"
+                      :expanded-dirs="gitTreeExpandedDirs"
+                      :selected-git-files="selectedGitFiles"
+                      :git-diff-loading-key="gitDiffLoadingKey"
+                      @toggle-dir="toggleGitTreeDir"
+                      @stage-file="$emit('stage-file', $event)"
+                      @discard-file="(path, event) => $emit('discard-file', path, event)"
+                      @pointer-down="(event, path, isStaged) => $emit('on-git-file-pointer-down', event, path, isStaged)"
+                      @contextmenu="(event, path) => $emit('on-git-file-contextmenu', event, path)"
+                    />
+                  </div>
+                </div>
+              </template>
             </div>
             <div
               v-if="batchGroups && batchGroups.length > 0"
@@ -710,8 +723,54 @@ const stashSectionOpen = ref(false);
 const localChangesOpen = ref(false);
 const gitTreeExpandedDirs = ref<Set<string>>(new Set());
 
+const emit = defineEmits<{
+  (e: "refresh"): void;
+  (e: "do-fetch"): void;
+  (e: "do-pull"): void;
+  (e: "do-push"): void;
+  (e: "commit-git"): void;
+  (e: "generate-commit-message"): void;
+  (e: "ai-commit-and-push"): void;
+  (e: "stage-file", path: string): void;
+  (e: "unstage-file", path: string): void;
+  (e: "stage-all"): void;
+  (e: "unstage-all"): void;
+  (e: "discard-file", path: string, event: MouseEvent): void;
+  (e: "discard-all", event: MouseEvent): void;
+  (e: "do-stash-save"): void;
+  (e: "do-stash-apply", index: number): void;
+  (e: "do-stash-drop", index: number): void;
+  (e: "update:gitStashOpen", value: boolean): void;
+  (e: "update:gitStagedOpen", value: boolean): void;
+  (e: "update:gitUnstagedOpen", value: boolean): void;
+  (e: "update:gitLogOpen", value: boolean): void;
+  (e: "update:gitAheadCommitsOpen", value: boolean): void;
+  (e: "update:gitCommitMessage", value: string): void;
+  (e: "update:gitStashMessage", value: string): void;
+  (e: "toggle-git-log-entry", hash: string): void;
+  (e: "open-git-log-file", entry: GitLogEntry, file: GitLogFile): void;
+  (e: "on-git-file-pointer-down", event: PointerEvent, path: string, staged: boolean): void;
+  (e: "on-git-file-contextmenu", event: MouseEvent, path: string): void;
+  (e: "commit-batch-group", index: number, message: string): void;
+  (e: "commit-all-batches", messages: string[]): void;
+  (e: "ai-batch-groups"): void;
+  (e: "update:batchMessages", messages: string[]): void;
+  (e: "update:batchSectionOpen", open: boolean): void;
+  (e: "load-more-git-log"): void;
+  (e: "search-git-log", query: string): void;
+  (e: "checkout-branch", branchName: string): void;
+  (e: "create-branch", branchName: string): void;
+  (e: "delete-branch", branchName: string): void;
+}>();
+
 const gitStagedTree = computed(() => buildGitFileTree(props.gitStagedFiles));
 const gitUnstagedTree = computed(() => buildGitFileTree(props.gitUnstagedFiles));
+
+const hasExpandedFileList = computed(
+  () =>
+    (props.gitStagedOpen && props.gitStagedFiles.length > 0)
+    || (props.gitUnstagedOpen && props.gitUnstagedFiles.length > 0),
+);
 
 function toggleGitTreeDir(path: string) {
   const next = new Set(gitTreeExpandedDirs.value);
@@ -810,46 +869,6 @@ watch(
     }
   },
 );
-
-const emit = defineEmits<{
-  (e: "refresh"): void;
-  (e: "do-fetch"): void;
-  (e: "do-pull"): void;
-  (e: "do-push"): void;
-  (e: "commit-git"): void;
-  (e: "generate-commit-message"): void;
-  (e: "ai-commit-and-push"): void;
-  (e: "stage-file", path: string): void;
-  (e: "unstage-file", path: string): void;
-  (e: "stage-all"): void;
-  (e: "unstage-all"): void;
-  (e: "discard-file", path: string, event: MouseEvent): void;
-  (e: "discard-all", event: MouseEvent): void;
-  (e: "do-stash-save"): void;
-  (e: "do-stash-apply", index: number): void;
-  (e: "do-stash-drop", index: number): void;
-  (e: "update:gitStashOpen", value: boolean): void;
-  (e: "update:gitStagedOpen", value: boolean): void;
-  (e: "update:gitUnstagedOpen", value: boolean): void;
-  (e: "update:gitLogOpen", value: boolean): void;
-  (e: "update:gitAheadCommitsOpen", value: boolean): void;
-  (e: "update:gitCommitMessage", value: string): void;
-  (e: "update:gitStashMessage", value: string): void;
-  (e: "toggle-git-log-entry", hash: string): void;
-  (e: "open-git-log-file", entry: GitLogEntry, file: GitLogFile): void;
-  (e: "on-git-file-pointer-down", event: PointerEvent, path: string, staged: boolean): void;
-  (e: "on-git-file-contextmenu", event: MouseEvent, path: string): void;
-  (e: "commit-batch-group", index: number, message: string): void;
-  (e: "commit-all-batches", messages: string[]): void;
-  (e: "ai-batch-groups"): void;
-  (e: "update:batchMessages", messages: string[]): void;
-  (e: "update:batchSectionOpen", open: boolean): void;
-  (e: "load-more-git-log"): void;
-  (e: "search-git-log", query: string): void;
-  (e: "checkout-branch", branchName: string): void;
-  (e: "create-branch", branchName: string): void;
-  (e: "delete-branch", branchName: string): void;
-}>();
 
 function onBatchMessageInput(index: number, value: string) {
   const next = [...props.batchMessages];
@@ -1758,16 +1777,18 @@ function gitStatusClass(status: string): string {
 }
 
 .git-commit-actions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
 }
 
 .git-commit-actions .git-commit-ai,
 .git-commit-actions .git-commit-btn,
 .git-commit-actions .git-ai-push {
-  flex: 1 1 0;
-  min-width: 72px;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .git-ai-push {
@@ -1837,23 +1858,54 @@ function gitStatusClass(status: string): string {
   overflow: hidden;
 }
 
-.git-changes-scroll {
-  flex: 1 1 auto;
+.git-local-content--batch-open .git-batch-section--open {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.git-local-content--batch-open .git-batch-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.git-local-content--batch-open .git-batch-groups {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+
+.git-changes-wrap {
+  flex: 1 1 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.git-changes-wrap--compact {
+  flex: 0 0 auto;
+}
+
+.git-changes-list-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
 
-.git-changes-scroll::-webkit-scrollbar {
+.git-changes-list-scroll::-webkit-scrollbar {
   width: 5px;
 }
 
-.git-changes-scroll::-webkit-scrollbar-thumb {
+.git-changes-list-scroll::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.18);
 }
@@ -2310,6 +2362,9 @@ function gitStatusClass(status: string): string {
 
 .git-batch-section--open {
   border-color: rgba(88, 166, 255, 0.18);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .git-batch-section--ai.git-batch-section--open {
@@ -2379,6 +2434,7 @@ function gitStatusClass(status: string): string {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-height: 0;
 }
 
 .git-batch-loading {
@@ -2736,12 +2792,6 @@ function gitStatusClass(status: string): string {
   margin-left: auto;
 }
 
-.git-local-content {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 6px;
-}
 
 /* Pagination load more button */
 .git-log-more-container {
