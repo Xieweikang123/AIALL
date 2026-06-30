@@ -27,6 +27,7 @@ export function usePlanPanel(options: {
   isAgentRunning: (msg: VibeChatMessage) => boolean;
   canExecutePlanMessage: (msg: VibeChatMessage) => boolean;
   expandEditor: () => void;
+  shouldSkipLayoutEffects?: () => boolean;
 }) {
   const active = ref(false);
   const content = ref("");
@@ -45,7 +46,9 @@ export function usePlanPanel(options: {
     messageId.value = snap.messageId;
     planFilePath.value = snap.planFilePath;
     canExecute.value = snap.canExecute;
-    options.expandEditor();
+    if (!options.shouldSkipLayoutEffects?.()) {
+      options.expandEditor();
+    }
   }
 
   function resolvePlanMessage(): VibeChatMessage | undefined {
@@ -159,6 +162,8 @@ export function usePlanPanel(options: {
     messageId,
     planFilePath,
     canExecute,
+    userDismissed,
+    pinnedMessageId,
     focusPanel,
     closePanel,
     patchFilePath,

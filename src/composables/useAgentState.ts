@@ -205,10 +205,13 @@ export function useAgentState(deps: UseAgentStateDeps) {
   }
 
   function buildAgentRunningStatusTextForMsg(msg: ChatMessage): string {
-    const display = agentStatusDisplay(msg);
-    const model = msg.agentModel || "";
-    const shortModel = model ? ` (${model.split("/").pop()})` : "";
-    return `Agent ${display}${shortModel}`;
+    const display = agentStatusDisplay(msg).trim();
+    const live = getLiveForMsg(msg);
+    const model = live?.model || msg.agentModel || "";
+    const shortModel = model ? ` · ${model.split("/").pop()}` : "";
+    if (display) return `${display}${shortModel}`;
+    if (live) return `${formatLiveStatus(live)}${shortModel}`;
+    return agentRunningHint(msg);
   }
 
   function agentAbortDisplayReason(msg: ChatMessage): string {

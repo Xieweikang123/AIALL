@@ -12,6 +12,30 @@ const position = ref({ x: 0, y: 0 });
 let resolvePromise: ((value: boolean) => void) | null = null;
 let resolveThreePromise: ((value: ConfirmThreeResult) => void) | null = null;
 
+function resolvePrevious() {
+  resolvePromise?.(false);
+  resolveThreePromise?.("cancel");
+  resolvePromise = null;
+  resolveThreePromise = null;
+}
+
+function getPositionFromEvent(event?: MouseEvent) {
+  if (!event) {
+    return { x: window.innerWidth / 2 - 130, y: window.innerHeight / 2 - 60 };
+  }
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return { x: window.innerWidth / 2 - 130, y: window.innerHeight / 2 - 60 };
+  }
+  const rect = target.getBoundingClientRect();
+  let x = rect.left + rect.width / 2;
+  let y = rect.bottom + 8;
+  if (x + 260 > window.innerWidth) x = window.innerWidth - 270;
+  if (x < 10) x = 10;
+  if (y + 120 > window.innerHeight) y = rect.top - 8;
+  return { x, y };
+}
+
 export function useConfirm() {
   function confirm(
     msg: string,
@@ -19,27 +43,13 @@ export function useConfirm() {
     options?: { confirmText?: string; cancelText?: string },
   ): Promise<boolean> {
     return new Promise((resolve) => {
+      resolvePrevious();
       resolvePromise = resolve;
-      resolveThreePromise = null;
       message.value = msg;
       confirmText.value = options?.confirmText ?? "确定";
       cancelText.value = options?.cancelText ?? "取消";
       neutralText.value = "";
-
-      if (event) {
-        const rect = (event.target as HTMLElement).getBoundingClientRect();
-        let x = rect.left + rect.width / 2;
-        let y = rect.bottom + 8;
-        if (x + 260 > window.innerWidth) x = window.innerWidth - 270;
-        if (x < 10) x = 10;
-        if (y + 120 > window.innerHeight) y = rect.top - 8;
-        position.value = { x, y };
-      } else {
-        position.value = {
-          x: window.innerWidth / 2 - 130,
-          y: window.innerHeight / 2 - 60,
-        };
-      }
+      position.value = getPositionFromEvent(event);
       show.value = true;
     });
   }
@@ -50,27 +60,13 @@ export function useConfirm() {
     options?: { confirmText?: string; cancelText?: string; neutralText?: string },
   ): Promise<ConfirmThreeResult> {
     return new Promise((resolve) => {
+      resolvePrevious();
       resolveThreePromise = resolve;
-      resolvePromise = null;
       message.value = msg;
       confirmText.value = options?.confirmText ?? "确定";
       cancelText.value = options?.cancelText ?? "取消";
       neutralText.value = options?.neutralText ?? "";
-
-      if (event) {
-        const rect = (event.target as HTMLElement).getBoundingClientRect();
-        let x = rect.left + rect.width / 2;
-        let y = rect.bottom + 8;
-        if (x + 260 > window.innerWidth) x = window.innerWidth - 270;
-        if (x < 10) x = 10;
-        if (y + 120 > window.innerHeight) y = rect.top - 8;
-        position.value = { x, y };
-      } else {
-        position.value = {
-          x: window.innerWidth / 2 - 130,
-          y: window.innerHeight / 2 - 60,
-        };
-      }
+      position.value = getPositionFromEvent(event);
       show.value = true;
     });
   }

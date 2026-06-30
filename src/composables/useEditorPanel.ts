@@ -874,7 +874,6 @@ export function useEditorPanel(params: UseEditorPanelParams) {
   const activeFileDiff = computed(() => getFileDiff(activeFilePath.value));
   const activeFileReadOnly = computed(() => readOnlyFileKeys.value.has(normalizePathKey(activeFilePath.value)));
 
-  let restoringWorkspace = false;
   let suppressWorkspacePersist = false;
   let persistWorkspaceTimer = 0;
 
@@ -895,7 +894,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
   }
 
   function persistEditorWorkspace() {
-    if (restoringWorkspace || suppressWorkspacePersist) return;
+    if (suppressWorkspacePersist) return;
     const root = projectPath.value.trim();
     if (!root || !projectOpened.value) return;
     syncActiveTabToCache();
@@ -922,7 +921,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
   }
 
   function schedulePersistEditorWorkspace() {
-    if (suppressWorkspacePersist || restoringWorkspace) return;
+    if (suppressWorkspacePersist) return;
     cancelScheduledPersistEditorWorkspace();
     persistWorkspaceTimer = window.setTimeout(() => {
       persistWorkspaceTimer = 0;
@@ -937,61 +936,69 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     const saved = readEditorWorkspace(root);
     if (!saved?.tabs.length) return;
 
-    restoringWorkspace = true;
-    try {
-      navBackStack.value = [];
-      navForwardStack.value = [];
+    navBackStack.value = [];
+    navForwardStack.value = [];
 
-      const restored: OpenTab[] = [];
-      const nextDiffs: Record<string, FileDiff> = {};
-      const nextReadOnly = new Set<string>();
+    const restored: OpenTab[] = [];
+    const nextDiffs: Record<string, FileDiff> = {};
+    const nextReadOnly = new Set<string>();
 
-      for (const item of saved.tabs) {
-        const path = item.path.trim();
-        if (!path) continue;
+    for (const item of saved.tabs) {
+      const path = item.path.trim();
+      if (!path) continue;
 
-        const kind: EditorTabKind = (item.kind as EditorTabKind) || "file";
+      const kind: EditorTabKind = (item.kind as EditorTabKind) || "file";
 
-        if (kind === "file") {
-          if (item.dirty && item.content !== undefined) {
-            restored.push({ path, content: item.content, dirty: true, kind: "file" });
-            continue;
-          }
-          const result = await readFile(path);
-          if (result.ok) {
-            restored.push({ path, content: result.content, dirty: false, kind: "file" });
-          }
-        } else {
-          restored.push({ path, content: item.content ?? "", dirty: false, kind });
-          if (item.diff) {
-            nextDiffs[normalizePathKey(path)] = item.diff;
-          }
-          if (item.readOnly) {
-            nextReadOnly.add(normalizePathKey(path));
-          }
+      if (kind === "file") {
+        if (item.dirty && item.content !== undefined) {
+          restored.push({ path, content: item.content, dirty: true, kind: "file" });
+          continue;
+        }
+        const result = await readFile(path);
+        if (result.ok) {
+          restored.push({ path, content: result.content, dirty: false, kind: "file" });
+        }
+      } else {
+        restored.push({ path, content: item.content ?? "", dirty: false, kind });
+        if (item.diff) {
+          nextDiffs[normalizePathKey(path)] = item.diff;
+        }
+        if (item.readOnly) {
+          nextReadOnly.add(normalizePathKey(path));
         }
       }
-      if (!restored.length) return;
+    }
+    if (!restored.length) return;
 
-      openTabs.value = restored;
-      if (Object.keys(nextDiffs).length) {
-        fileDiffs.value = { ...fileDiffs.value, ...nextDiffs };
-      }
-      if (nextReadOnly.size) {
-        readOnlyFileKeys.value = new Set([...readOnlyFileKeys.value, ...nextReadOnly]);
-      }
+    openTabs.value = restored;
+    if (Object.keys(nextDiffs).length) {
+      fileDiffs.value = { ...fileDiffs.value, ...nextDiffs };
+    }
+    if (nextReadOnly.size) {
+      readOnlyFileKeys.value = new Set([...readOnlyFileKeys.value, ...nextReadOnly]);
+    }
 
-      const activeKey = normalizePathKey(saved.activePath.trim());
-      const active = restored.find((tab) => normalizePathKey(tab.path) === activeKey) ?? restored[0];
-      activeFilePath.value = active.path;
-      fileContent.value = active.content;
-      fileDirty.value = active.dirty;
-      selectedTreePath.value = active.kind === "file" ? active.path : "";
-      fileLoadError.value = "";
-      showDiffMode.value = active.kind !== "file" && Boolean(nextDiffs[normalizePathKey(active.path)]);
-      expandEditor();
-    } finally {
-      restoringWorkspace = false;
+    const activeKey = normalizePathKey(saved.activePath.trim());
+    const active = restored.find((tab) => normalizePathKey(tab.path) === activeKey) ?? restored[0];
+    activeFilePath.value = active.path;
+    fileContent.value = active.content;
+    fileDirty.value = active.dirty;
+    selectedTreePath.value = active.kind === "file" ? active.path : "";
+    fileLoadError.value = "";
+    showDiffMode.value = active.kind !== "file" && Boolean(nextDiffs[normalizePathKey(active.path)]);
+  }
+
+  async function reloadExpandedDirChildren() {
+    for (const dirPath of expandedDirs.value) {
+      const node = findNode(fileTree.value, dirPath);
+      if (node?.isDirectory && !node.loaded) {
+        try {
+          node.children = await loadDirChildren(dirPath);
+          node.loaded = true;
+        } catch {
+          // ignore restore failures for missing dirs
+        }
+      }
     }
   }
 
@@ -1003,7 +1010,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
       active: activeFilePath.value,
     }),
     () => {
-      if (suppressWorkspacePersist || restoringWorkspace) return;
+      if (suppressWorkspacePersist) return;
       if (projectOpened.value && projectPath.value.trim()) {
         schedulePersistEditorWorkspace();
       }
@@ -1069,6 +1076,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     canGoForward,
     persistEditorWorkspace,
     restoreEditorWorkspace,
+    reloadExpandedDirChildren,
     prepareEditorWorkspaceProjectSwitch,
     finishEditorWorkspaceProjectSwitch,
   };

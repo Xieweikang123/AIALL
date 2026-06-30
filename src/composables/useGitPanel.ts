@@ -164,7 +164,7 @@ export function useGitPanel(
 
   const _storedProjectView = lsGet(PROJECT_PANEL_VIEW_KEY);
   const projectPanelView = ref<ProjectPanelView>(
-    _storedProjectView === "health" || _storedProjectView === "knowledge"
+    _storedProjectView === "health" || _storedProjectView === "knowledge" || _storedProjectView === "fix"
       ? _storedProjectView
       : _storedPanelMode === "health"
         ? "health"
@@ -201,6 +201,9 @@ export function useGitPanel(
   const gitStagedOpen = ref(localStorage.getItem("git-staged-open") !== "false");
   const gitUnstagedOpen = ref(localStorage.getItem("git-unstaged-open") !== "false");
   const expandedGitLogEntries = ref<Set<string>>(new Set());
+  const gitStashSectionOpen = ref(false);
+  const gitLocalChangesOpen = ref(false);
+  const gitTreeExpandedDirs = ref<Set<string>>(new Set());
   const selectedGitFiles = ref<string[]>([]);
   const gitDiffLoadingKey = ref("");
   const gitDiffContentCache = ref<Record<string, GitFileDiff>>({});
@@ -252,17 +255,6 @@ export function useGitPanel(
           });
       }
     }
-  });
-
-  // 持久化折叠状态到 localStorage
-  watch(gitUnstagedOpen, (v) => {
-    localStorage.setItem("git-unstaged-open", String(v));
-  });
-  watch(gitStagedOpen, (v) => {
-    localStorage.setItem("git-staged-open", String(v));
-  });
-  watch(gitStashOpen, (v) => {
-    localStorage.setItem("git-stash-open", String(v));
   });
 
   const gitStagedFiles = computed(() => {
@@ -402,6 +394,7 @@ export function useGitPanel(
     batchMessages.value = [];
     batchSectionOpen.value = false;
     batchUnstagedSnapshot.value = null;
+    batchDraftBranch.value = null;
     if (batchDraftPersistTimer) {
       clearTimeout(batchDraftPersistTimer);
       batchDraftPersistTimer = null;
@@ -426,7 +419,6 @@ export function useGitPanel(
     try {
       const result = await fetchGitStatus(pathAtStart);
       if (token !== gitStatusRefreshToken || projectPath() !== pathAtStart) return;
-      gitStatusKnown.value = true;
       if (!result.ok) {
         gitError.value = result.error || "获取 Git 状态失败";
         return;
@@ -435,6 +427,8 @@ export function useGitPanel(
       gitBranch.value = result.branch;
       gitHeadCommit.value = result.headCommit?.trim() || "";
       gitStatus.value = result.files;
+      gitStatusKnown.value = true;
+      syncBatchStateWithUnstagedFiles();
       if (showLoading) {
         gitError.value = "";
       }
@@ -445,13 +439,11 @@ export function useGitPanel(
         void refreshGitStashes();
         void refreshGitBranches();
         if (gitLogOpen.value) {
-          await refreshGitLogIfOpen(pathAtStart);
-          if (token !== gitStatusRefreshToken || projectPath() !== pathAtStart) return;
+          void refreshGitLogIfOpen(pathAtStart);
         }
       }
     } catch (e) {
       if (token !== gitStatusRefreshToken || projectPath() !== pathAtStart) return;
-      gitStatusKnown.value = true;
       gitError.value = e instanceof Error ? e.message : "获取 Git 状态失败";
     } finally {
       if (token === gitStatusRefreshToken && projectPath() === pathAtStart) {
@@ -552,10 +544,18 @@ export function useGitPanel(
   const batchMessages = ref<string[]>([]);
   const batchSectionOpen = ref(false);
   const batchUnstagedSnapshot = ref<string[] | null>(null);
+  const batchDraftBranch = ref<string | null>(null);
   let batchDraftPersistTimer: ReturnType<typeof setTimeout> | null = null;
 
   function currentUnstagedPaths(): string[] {
     return sortedUnstagedPaths(gitUnstagedFiles.value.map((f) => f.path));
+  }
+
+  function batchDraftScope() {
+    return {
+      project: projectPath(),
+      branch: gitBranch.value.trim() || "__detached__",
+    };
   }
 
   function syncBatchMessagesFromGroups() {
@@ -570,19 +570,29 @@ export function useGitPanel(
     }, 300);
   }
 
+  function flushBatchDraftPersist() {
+    if (batchDraftPersistTimer) {
+      clearTimeout(batchDraftPersistTimer);
+      batchDraftPersistTimer = null;
+    }
+    persistBatchDraft();
+  }
+
   function persistBatchDraft() {
     if (!projectOpened()) return;
+    const { project, branch } = batchDraftScope();
     const paths = currentUnstagedPaths();
     if (!paths.length || !batchUnstagedSnapshot.value) {
-      removeGitBatchDraft(projectPath());
+      removeGitBatchDraft(project, branch);
       return;
     }
-    writeGitBatchDraft(projectPath(), {
+    writeGitBatchDraft(project, branch, {
       unstagedPaths: paths,
       groups: aiBatchGroupsResult.value,
       messages: [...batchMessages.value],
       sectionOpen: batchSectionOpen.value,
     });
+    batchDraftBranch.value = branch;
   }
 
   function clearBatchDraftPersist() {
@@ -590,17 +600,29 @@ export function useGitPanel(
       clearTimeout(batchDraftPersistTimer);
       batchDraftPersistTimer = null;
     }
-    removeGitBatchDraft(projectPath());
+    const { project, branch } = batchDraftScope();
+    removeGitBatchDraft(project, branch);
     batchUnstagedSnapshot.value = null;
+    batchDraftBranch.value = null;
+  }
+
+  function resetBatchDraftSessionState() {
+    batchUnstagedSnapshot.value = null;
+    batchDraftBranch.value = null;
+    aiBatchGroupsResult.value = null;
+    batchMessages.value = [];
+    batchSectionOpen.value = false;
   }
 
   function tryRestoreBatchDraft() {
     const paths = currentUnstagedPaths();
     if (!paths.length) return;
 
-    const draft = readGitBatchDraft(projectPath());
+    const { project, branch } = batchDraftScope();
+    const draft = readGitBatchDraft(project, branch);
     if (draft && pathsEqual(draft.unstagedPaths, paths)) {
       batchUnstagedSnapshot.value = paths;
+      batchDraftBranch.value = branch;
       aiBatchGroupsResult.value = draft.groups?.length ? draft.groups : null;
       batchSectionOpen.value = draft.sectionOpen;
       const groups = batchGroups.value;
@@ -611,9 +633,10 @@ export function useGitPanel(
     }
 
     batchUnstagedSnapshot.value = paths;
+    batchDraftBranch.value = branch;
     syncBatchMessagesFromGroups();
     if (draft && !pathsEqual(draft.unstagedPaths, paths)) {
-      removeGitBatchDraft(projectPath());
+      removeGitBatchDraft(project, branch);
     }
   }
 
@@ -623,12 +646,15 @@ export function useGitPanel(
       clearTimeout(batchDraftPersistTimer);
       batchDraftPersistTimer = null;
     }
-    removeGitBatchDraft(projectPath());
+    const { project, branch } = batchDraftScope();
+    removeGitBatchDraft(project, branch);
     batchUnstagedSnapshot.value = null;
+    batchDraftBranch.value = null;
     syncBatchMessagesFromGroups();
     const paths = currentUnstagedPaths();
     if (paths.length) {
       batchUnstagedSnapshot.value = paths;
+      batchDraftBranch.value = branch;
     }
   }
 
@@ -670,25 +696,33 @@ export function useGitPanel(
 
   const batchCommittingIndex = ref<number | null>(null);
 
+  function syncBatchStateWithUnstagedFiles() {
+    if (!gitStatusKnown.value) return;
+    if (batchCommittingAll.value) return;
+
+    const branch = batchDraftScope().branch;
+    if (batchDraftBranch.value !== null && batchDraftBranch.value !== branch) {
+      resetBatchDraftSessionState();
+    }
+
+    const current = currentUnstagedPaths();
+    if (!current.length) {
+      resetBatchDraftSessionState();
+      clearBatchDraftPersist();
+      return;
+    }
+    if (!batchUnstagedSnapshot.value) {
+      tryRestoreBatchDraft();
+      return;
+    }
+    if (pathsEqual(current, batchUnstagedSnapshot.value)) return;
+    invalidateBatchDraft();
+  }
+
   watch(
     () => gitUnstagedFiles.value.map((f) => f.path).join("\n"),
     () => {
-      if (!gitStatusKnown.value) return;
-      if (batchCommittingAll.value) return;
-      const current = currentUnstagedPaths();
-      if (!current.length) {
-        aiBatchGroupsResult.value = null;
-        batchMessages.value = [];
-        batchSectionOpen.value = false;
-        clearBatchDraftPersist();
-        return;
-      }
-      if (!batchUnstagedSnapshot.value) {
-        tryRestoreBatchDraft();
-        return;
-      }
-      if (pathsEqual(current, batchUnstagedSnapshot.value)) return;
-      invalidateBatchDraft();
+      syncBatchStateWithUnstagedFiles();
     },
   );
 
@@ -747,7 +781,9 @@ export function useGitPanel(
       batchCommittingIndex.value = null;
       aiBatchGroupsResult.value = null;
       batchUnstagedSnapshot.value = null;
-      removeGitBatchDraft(projectPath());
+      batchDraftBranch.value = null;
+      const { project, branch } = batchDraftScope();
+      removeGitBatchDraft(project, branch);
     }
   }
 
@@ -770,7 +806,9 @@ export function useGitPanel(
       batchCommittingAll.value = false;
       aiBatchGroupsResult.value = null;
       batchUnstagedSnapshot.value = null;
-      removeGitBatchDraft(projectPath());
+      batchDraftBranch.value = null;
+      const { project, branch } = batchDraftScope();
+      removeGitBatchDraft(project, branch);
     }
   }
 
@@ -1534,6 +1572,9 @@ export function useGitPanel(
     gitStagedOpen,
     gitUnstagedOpen,
     expandedGitLogEntries,
+    gitStashSectionOpen,
+    gitLocalChangesOpen,
+    gitTreeExpandedDirs,
     selectedGitFiles,
     gitDiffLoadingKey,
     gitDiffContentCache,
@@ -1567,6 +1608,7 @@ export function useGitPanel(
     aiBatchGrouping,
     aiBatchGroupingStep,
     generateAiBatchGroups,
+    flushBatchDraftPersist,
 
     clearGitDiffCache,
     evictOldestCacheEntry,

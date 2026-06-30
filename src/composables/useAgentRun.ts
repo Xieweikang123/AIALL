@@ -22,8 +22,8 @@ import {
 } from "../services/agentExplore";
 import { isProjectReport } from "../services/projectReportDisplay";
 import {
-  AGENT_SILENT_CONTINUE_DELAY_MS,
   AGENT_SILENT_CONTINUE_MAX,
+  resolveSilentContinueDelayMs,
   AGENT_MODEL_WAIT_STALL_MS,
   AGENT_CONTINUE_MODEL_WAIT_STALL_MS,
   resolveModelWaitStallMs,
@@ -53,6 +53,7 @@ import {
   shouldOfferPartialRunResume,
   shouldSilentAutoContinue,
   resolveAutoResumeSeconds,
+  extractRateLimitHintFromStatusLog,
 } from "../services/agentRecovery";
 import {
   persistAgentRunForHmr,
@@ -358,6 +359,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   let autoResumeTimer: ReturnType<typeof setInterval> | null = null;
   let agentLastProgressAt = 0;
   let autoResumeSchedulePending = false;
+  let silentContinueTimer: number | null = null;
+  let pendingSettleTimer: number | null = null;
 
   const {
     chainJumpVisible,
@@ -404,6 +407,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     onBeforeUnmount(() => {
       stopAgentUiTick();
       cancelAutoResume();
+      if (silentContinueTimer) { clearTimeout(silentContinueTimer); silentContinueTimer = null; }
+      if (pendingSettleTimer) { clearTimeout(pendingSettleTimer); pendingSettleTimer = null; }
       cleanupStreamPatchTimers();
       if (sseConnection.agentEventFlushRaf) {
         cancelAnimationFrame(sseConnection.agentEventFlushRaf);
@@ -510,8 +515,24 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     agentUiTickTimer = setInterval(() => {
       agentUiTick.value += 1;
       let needsLiveRefresh = false;
+      const LIVE_REFRESH_PHASES = new Set([
+        "connecting_local",
+        "stream_connected",
+        "connected",
+        "reconnecting",
+        "building_context",
+        "compacting_context",
+        "waiting_model",
+        "sending_request",
+        "retrying_model",
+        "executing_tool",
+        "executing_tools",
+        "planning_tools",
+        "summarizing_tools",
+        "streaming_model",
+      ]);
       for (const run of runManager.listRuns()) {
-        if (isAgentConnectPhase(run.live.phase)) {
+        if (LIVE_REFRESH_PHASES.has(run.live.phase)) {
           needsLiveRefresh = true;
           break;
         }
@@ -729,12 +750,17 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (chatSending.value || !configReady.value || !projectOpened.value) return;
     for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
       const m = chatMessages.value[i]!;
-      if (m.role === "assistant" && canResumeAgentRun(m)) {
-        const reason = m.agentFailureReason || "";
+      if (m.role !== "assistant") continue;
+      const reason = m.agentFailureReason || m.agentAbortReason || "";
+      if (isHmrInterruptReason(reason) && canResumeAgentRun(m)) {
+        clearPendingAgentRun();
+        void resumeAgentRun(m.id, { silent: true });
+        return;
+      }
+      if (canResumeAgentRun(m)) {
         if (reason && shouldSilentAutoContinue(reason)) {
           trySilentContinue(activeSessionId.value, m, reason);
         } else {
-          // Fallback: auto-resume countdown for non-silent recoverable failures
           scheduleAutoResume(m.id, reason);
         }
         return;
@@ -778,9 +804,11 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     runManager.setAbortHandle(sessionId, null);
     finishRunSession(sessionId, true);
 
-    window.setTimeout(() => {
+    const silentContinueDelayMs = resolveSilentContinueDelayMs(reason);
+    silentContinueTimer = window.setTimeout(() => {
+      silentContinueTimer = null;
       void resumeAgentRun(assistantMsg.id, { silent: true });
-    }, AGENT_SILENT_CONTINUE_DELAY_MS);
+    }, silentContinueDelayMs);
     return true;
   }
 
@@ -1319,7 +1347,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         totalTurns: assistantMsg.totalTurns,
         writtenFiles: assistantMsg.writtenFiles,
       });
-      window.setTimeout(() => {
+      pendingSettleTimer = window.setTimeout(() => {
+        pendingSettleTimer = null;
         persistChatNow(undefined, { flushStore: true, sessionId });
         void scrollChatToBottom();
         onAgentRunSettled?.(assistantMsg);
@@ -1496,6 +1525,12 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     commitAgentFinalAnswerIfMissing(assistantMsg, completedTurns, assistantMsg.agentMaxTurns);
 
     if (!wasAborted && hadProgress && !hasAgentFinalAnswer(assistantMsg)) {
+      const rateLimitHint = extractRateLimitHintFromStatusLog(assistantMsg.statusLog);
+      if (rateLimitHint && trySilentContinue(sessionId, assistantMsg, rateLimitHint)) {
+        schedulePersistDuringRun(sessionId);
+        void scrollChatToBottom();
+        return;
+      }
       handleRecoverableInterruption(sessionId, assistantMsg, "运行中断（未生成最终回复）", {
         logStatus: true,
       });
@@ -1645,7 +1680,11 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   function interruptSessionRun(sessionId: string, options?: { logStatus?: boolean; reason?: string }) {
     debugLog(`[interrupt] interruptSessionRun sessionId=${sessionId}, reason=${options?.reason}`);
     cancelAutoResume();
-    clearPendingAgentRun();
+    const reason = options?.reason?.trim() || "已被新指令打断";
+    const hmrInterrupt = isHmrInterruptReason(reason);
+    if (!hmrInterrupt) {
+      clearPendingAgentRun();
+    }
     clearPendingAgentEvents();
 
     const run = runManager.get(sessionId);
@@ -1658,7 +1697,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     runManager.invalidate(sessionId);
 
     const running = run.assistantMsg;
-    const reason = options?.reason?.trim() || "已被新指令打断";
     running.agentAborted = true;
     running.agentAbortReason = reason;
     if (options?.logStatus !== false) {
@@ -1672,7 +1710,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       statusLog: running.statusLog ? [...running.statusLog] : undefined,
     };
 
-    if (isHmrInterruptReason(reason) && hasRecoverableAgentProgress(running)) {
+    if (hmrInterrupt) {
       running.agentFailed = true;
       running.agentRecoverable = true;
       running.agentFailureReason = reason;
@@ -1689,6 +1727,15 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       patch.activityExpanded = true;
       patch.statusLog = running.statusLog ? [...running.statusLog] : undefined;
       Object.assign(patch, syncRoundGroupsPatch(running));
+
+      const originalPrompt = resolveOriginalUserPrompt(running.id) || "";
+      if (originalPrompt) {
+        persistAgentRunForHmr({
+          request: { prompt: originalPrompt },
+          projectPath: projectPath.value.trim(),
+          sessionId: sessionId || undefined,
+        });
+      }
     }
 
     patchAssistantMsg(running.id, patch, sessionId);
@@ -1710,18 +1757,27 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   }
 
   function tryResumeHmrInterruptedRun(): void {
+    if (runManager.size() > 0 || chatSending.value) return;
+    if (!configReady.value || !projectOpened.value) return;
+
+    const currentProject = projectPath.value.trim();
+
+    for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
+      const m = chatMessages.value[i]!;
+      if (m.role !== "assistant") continue;
+      const reason = m.agentFailureReason || m.agentAbortReason || "";
+      if (!isHmrInterruptReason(reason) || !canResumeAgentRun(m)) continue;
+      clearPendingAgentRun();
+      void resumeAgentRun(m.id, { silent: true });
+      return;
+    }
+
     const pending = popPendingAgentRun();
     if (!pending) return;
-    if (runManager.size() > 0) return;
-    // 如果项目路径不匹配，不恢复
-    const currentProject = projectPath.value.trim();
     if (pending.projectPath && pending.projectPath !== currentProject) return;
     const prompt = (pending.request?.prompt as string) || "";
     if (!prompt) return;
-    // 如果配置尚未就绪，不恢复
-    if (!configReady.value || !projectOpened.value) return;
 
-    // 恢复运行：显示提示并自动重发（用户气泡已在会话中，仅重发请求）
     chatError.value = "检测到之前因页面刷新中断的 Agent 运行，正在恢复…";
     const storedImages = Array.isArray(pending.request?.imageDataUrls)
       ? (pending.request.imageDataUrls as string[]).filter(Boolean)
@@ -2266,15 +2322,21 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     prompt: string;
     userBubbleContent: string;
     runProfile: AgentRunProfile;
-  }): Promise<boolean> {
+  }): Promise<{ ok: boolean; assistantMsgId?: string }> {
     chatMode.value = "build";
-    return runAgentTurn(params.prompt, {
+    const ok = await runAgentTurn(params.prompt, {
       userBubbleContent: params.userBubbleContent,
       runProfileOverride: params.runProfile,
       forceBuildMode: true,
       noAutoResume: true,
       suppressHmrRecovery: true,
     });
+    if (!ok) return { ok: false };
+    for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
+      const msg = chatMessages.value[i];
+      if (msg?.role === "assistant") return { ok: true, assistantMsgId: msg.id };
+    }
+    return { ok: true };
   }
 
   return {
