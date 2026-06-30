@@ -41,6 +41,7 @@ export interface GitStatusFile {
 
 export interface GitStatusResult {
   ok: boolean;
+  isRepo?: boolean;
   branch: string;
   /** Full commit SHA at HEAD (for knowledge-base staleness tracking). */
   headCommit: string;
@@ -122,31 +123,7 @@ async function gitExec(projectRoot: string, args: string[], timeoutMs = 10_000):
   }
 }
 
-export async function gitStatus(projectRoot: string): Promise<GitStatusResult> {
-  try {
-    let branch = "main";
-    let headCommit = "";
-
-    try {
-      const { stdout } = await gitExec(projectRoot, ["symbolic-ref", "--short", "HEAD"]);
-      branch = stdout.trim();
-    } catch {
-      try {
-        const { stdout } = await gitExec(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]);
-        branch = stdout.trim();
-      } catch {
-        // fallback to main
-      }
-    }
-
-    try {
-      const { stdout } = await gitExec(projectRoot, ["rev-parse", "HEAD"]);
-      headCommit = stdout.trim();
-    } catch {
-      // no commits yet
-    }
-
-    const { stdout } = await gitExec(projectRoot, ["status", "--porcelain=v1", "-z", "-uall"]);
+function parseGitStatusPorcelain(stdout: string): GitStatusFile[] {
     const files: GitStatusFile[] = [];
     const entries = stdout.split("\0").filter(Boolean);
 
@@ -203,15 +180,45 @@ export async function gitStatus(projectRoot: string): Promise<GitStatusResult> {
       }
     }
 
-    const visibleFiles = files.filter((f) => f.status === "ignored" || shouldShowGitStatusPath(f.path));
+    return files;
+}
+
+export async function gitStatus(projectRoot: string): Promise<GitStatusResult> {
+  try {
+    try {
+      await gitExec(projectRoot, ["rev-parse", "--git-dir"]);
+    } catch {
+      return {
+        ok: true,
+        isRepo: false,
+        branch: "",
+        headCommit: "",
+        files: [],
+        stagedCount: 0,
+        unstagedCount: 0,
+      };
+    }
+
+    const [branchOut, headOut, statusOut] = await Promise.all([
+      gitExec(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]).catch(() => ({ stdout: "main", stderr: "" })),
+      gitExec(projectRoot, ["rev-parse", "HEAD"]).catch(() => ({ stdout: "", stderr: "" })),
+      gitExec(projectRoot, ["status", "--porcelain=v1", "-z", "-uall"]),
+    ]);
+
+    const branch = branchOut.stdout.trim() || "main";
+    const headCommit = headOut.stdout.trim();
+    const visibleFiles = parseGitStatusPorcelain(statusOut.stdout).filter(
+      (f) => f.status === "ignored" || shouldShowGitStatusPath(f.path),
+    );
 
     const stagedCount = visibleFiles.filter((f) => f.staged).length;
     const unstagedCount = visibleFiles.filter((f) => !f.staged).length;
 
-    return { ok: true, branch, headCommit, files: visibleFiles, stagedCount, unstagedCount };
+    return { ok: true, isRepo: true, branch, headCommit, files: visibleFiles, stagedCount, unstagedCount };
   } catch (error) {
     return {
       ok: false,
+      isRepo: false,
       branch: "",
       headCommit: "",
       files: [],

@@ -57,7 +57,7 @@
         @create-new-folder="createNewFolder"
         @expand-editor="expandEditor"
         @expand-chat="expandChat"
-        @refresh-git-status="refreshGitStatus(gitIsRepo ? { showLoading: false } : undefined)"
+        @refresh-git-status="refreshGitStatus(gitStatusKnown ? { showLoading: false } : undefined)"
         @switch-session="handleSwitchSession"
         @remove-session="removeSession"
         @start-new-session="handleStartNewSession"
@@ -116,6 +116,9 @@
           :git-ahead-commits="gitAheadCommits"
           :git-ahead-commits-open="gitAheadCommitsOpen"
           :git-ahead-commits-loading="gitAheadCommitsLoading"
+          :git-stash-section-open="gitStashSectionOpen"
+          :git-local-changes-open="gitLocalChangesOpen"
+          :git-tree-expanded-dirs="gitTreeExpandedDirs"
           @refresh="refreshGitStatus()"
           @do-fetch="doFetch"
           @do-pull="doPull"
@@ -139,6 +142,9 @@
           @load-more-git-log="loadMoreGitLog"
           @search-git-log="searchGitLog"
           @update:git-ahead-commits-open="gitAheadCommitsOpen = $event"
+          @update:git-stash-section-open="gitStashSectionOpen = $event"
+          @update:git-local-changes-open="gitLocalChangesOpen = $event"
+          @update:git-tree-expanded-dirs="gitTreeExpandedDirs = $event"
           @update:git-commit-message="gitCommitMessage = $event"
           @update:git-stash-message="gitStashMessage = $event"
           @toggle-git-log-entry="toggleGitLogEntry"
@@ -253,10 +259,13 @@
           :verify-result="autoBugFixVerify"
           :last-summary="autoBugFixSummary"
           v-model:include-warnings="autoBugFixIncludeWarnings"
+          :show-resume="autoBugFixShowResume"
+          :interrupted-hint="autoBugFixInterruptedHint"
           @start="() => void startAutoBugFixFlow()"
           @scan-only="() => void runAutoBugFixScanOnly()"
           @verify-only="() => void runAutoBugFixVerifyOnly()"
           @open-git="openGitPanelFromAutoFix"
+          @resume-agent="resumeAutoBugFixFromPanel"
         />
       </FilePanel>
 
@@ -376,10 +385,13 @@
           :verify-result="autoBugFixVerify"
           :last-summary="autoBugFixSummary"
           v-model:include-warnings="autoBugFixIncludeWarnings"
+          :show-resume="autoBugFixShowResume"
+          :interrupted-hint="autoBugFixInterruptedHint"
           @start="() => void startAutoBugFixFlow()"
           @scan-only="() => void runAutoBugFixScanOnly()"
           @verify-only="() => void runAutoBugFixVerifyOnly()"
           @open-git="openGitPanelFromAutoFix"
+          @resume-agent="resumeAutoBugFixFromPanel"
         />
       </section>
 
@@ -625,7 +637,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref,
 import "../styles/vibe-coding.scss";
 import { appendStatusDetail, assistantTransientUiClearPatch, truncateDiffPreview, cleanStatusLogText, CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount, isNetworkError, fileName, genId, hasAgentProcessSteps, entryToNode, formatToolMeta, syncRoundGroupsPatch } from "../utils/vibeHelpers";
 import { debugLog } from "../utils/debugLog";
-import { lsGet, lsSet, lsSetJson, lsRemove } from "../utils/localStorageSafe";
+import { lsGet, lsGetJson, lsSet, lsSetJson, lsRemove } from "../utils/localStorageSafe";
 import { dismissBlockingOverlays, registerOverlayDismissDeps, scanDomBlockingOverlays } from "../utils/dismissBlockingOverlays";
 import { sessionDiag } from "../utils/sessionDiagLog";
 import ChatComposerEditor, { COMPOSER_PENDING_DRAFT_KEY } from "../components/ChatComposerEditor.vue";
@@ -662,6 +674,7 @@ import { useProjectArchitectReview } from "../composables/useProjectArchitectRev
 import { useAutoBugFix } from "../composables/useAutoBugFix";
 import AutoBugFixPanel from "../components/vibe/AutoBugFixPanel.vue";
 import { usePlanPanel } from "../composables/usePlanPanel";
+import { restoreChatScrollPosition, useWorkspaceUiPersistence } from "../composables/useWorkspaceUiPersistence";
 import { PROJECT_ARCHITECT_REVIEW_REL_PATH } from "../services/vibeProjectArchitectReviewClient";
 import { PROJECT_KNOWLEDGE_REL_PATH } from "../services/vibeProjectKnowledgeClient";
 import { distillExplorationRun } from "../services/explorationDistill";
@@ -1033,6 +1046,8 @@ const editorPanelRef = ref<InstanceType<typeof EditorPanel> | null>(null);
 const workspaceRef = ref<HTMLElement | null>(null);
 let scrollChatRaf = 0;
 let chatPinnedToBottom = true;
+let chatScrollPersistTimer = 0;
+const restoringWorkspaceUi = ref(false);
 const chatPanelRef = ref<InstanceType<typeof ChatPanel> | null>(null);
 const pendingPromptQueue = ref<string[]>([]);
 function persistPendingQueue() {
@@ -1074,6 +1089,7 @@ const {
   gitLogCount, gitLogSearchQuery, hasMoreGitLog, gitLogLoadingMore, gitLogSearchLoading, loadMoreGitLog,
   searchGitLog,
   gitStagedOpen, gitUnstagedOpen, expandedGitLogEntries, selectedGitFiles,
+  gitStashSectionOpen, gitLocalChangesOpen, gitTreeExpandedDirs,
   gitDiffLoadingKey, gitDiffContentCache, gitRemotes, gitTrackingBranch,
   gitAhead, gitBehind, gitRemoteLoading, gitRemoteAction, gitStashes, gitStashOpen,
   gitStashAction, gitStashMessage, gitAiPushStep,
@@ -1088,7 +1104,7 @@ const {
   doFetch, doPull, doPush,
   refreshGitStashes, doStashSave, doStashApply, doStashDrop,
   batchGroups, batchGroupsFromAi, batchMessages, batchSectionOpen, batchCommittingIndex, commitBatchGroup, commitAllBatches,
-  aiBatchGrouping, aiBatchGroupingStep, generateAiBatchGroups,
+  aiBatchGrouping, aiBatchGroupingStep, generateAiBatchGroups, flushBatchDraftPersist,
 } = git;
 
 // Session manager composable
@@ -1372,18 +1388,16 @@ function openKnowledgeSourceFile() {
   openKnowledgeFile(PROJECT_KNOWLEDGE_REL_PATH);
 }
 
-watch([gitPanelMode, projectPanelView, projectOpened], ([mode, view, opened]) => {
-  if (mode === "project") {
+watch([gitPanelMode, projectPanelView, projectOpened], ([mode, view, opened], prev) => {
+  const prevMode = prev?.[0];
+  if (prevMode !== undefined && mode === "project" && prevMode !== "project") {
     if (!chatCollapsed.value) collapseChat();
-    if (view === "knowledge") {
-      if (editorCollapsed.value) expandEditor();
-      if (opened) void loadKnowledge();
-    }
-    if (view === "health" && opened) {
-      if (editorCollapsed.value) expandEditor();
-      void loadReview();
-      void loadReviewHistory();
-    }
+  }
+  if (!opened || mode !== "project") return;
+  if (view === "knowledge") void loadKnowledge();
+  if (view === "health") {
+    void loadReview();
+    void loadReviewHistory();
   }
 });
 
@@ -1395,6 +1409,13 @@ watch(projectPath, () => {
     void loadReviewHistory();
   }
 });
+
+watch(
+  () => `${projectOpened.value}|${projectPath.value.trim()}|${activeSessionId.value}|${chatMessages.value.length}`,
+  () => {
+    restoreAutoBugFixPanelIfNeeded();
+  },
+);
 
 /** 无活跃会话时输入框草稿用固定 key，仅存 localStorage */
 const composerDraftKey = computed(
@@ -1503,6 +1524,11 @@ function isChatNearBottom(): boolean {
 
 function onChatScroll() {
   chatPinnedToBottom = isChatNearBottom();
+  if (chatScrollPersistTimer) window.clearTimeout(chatScrollPersistTimer);
+  chatScrollPersistTimer = window.setTimeout(() => {
+    chatScrollPersistTimer = 0;
+    workspaceUi.persistNow();
+  }, 150);
   // 滚动时隐藏引用按钮，避免 fixed 定位与选区脱节
   if (showQuoteButton.value) hideQuoteButtonNow();
 }
@@ -1552,7 +1578,7 @@ const {
   syncEditorAfterAgentFileChange,
   closeOtherTabs, closeRightTabs, closeAllTabs,
   navigateBack, navigateForward, canGoBack, canGoForward,
-  persistEditorWorkspace, restoreEditorWorkspace,
+  persistEditorWorkspace, restoreEditorWorkspace, reloadExpandedDirChildren,
   prepareEditorWorkspaceProjectSwitch, finishEditorWorkspaceProjectSwitch,
 } = useEditorPanel({
   projectPath,
@@ -1831,13 +1857,15 @@ registerEscapeDismiss(
   ESCAPE_DISMISS_PRIORITY.MODAL + 5,
 );
 // 滚动时隐藏引用按钮，避免 fixed 定位与选区脱节
+let scrollQuoteHideHandler: ((() => void) | null) = null;
 onMounted(() => {
   nextTick(() => {
     const scrollHost = chatPanelRef.value?.chatScrollRef;
     if (scrollHost) {
-      scrollHost.addEventListener('scroll', () => {
+      scrollQuoteHideHandler = () => {
         if (showQuoteButton.value) hideQuoteButtonNow();
-      }, { passive: true });
+      };
+      scrollHost.addEventListener('scroll', scrollQuoteHideHandler, { passive: true });
     }
   });
 });
@@ -2036,6 +2064,13 @@ function findLastUserMessage(): { content: string } | null {
   return null;
 }
 
+const autoBugFixLifecycle = {
+  onAgentSettled: (_msg?: import("../types/vibeChat").VibeChatMessage) => {},
+  onAgentInterrupted: (_reason?: string) => {},
+  persistNow: () => {},
+  tryRestore: () => false,
+};
+
 const agent = useAgentRun({
   chatMessages,
   chatSending,
@@ -2074,6 +2109,7 @@ const agent = useAgentRun({
   snapshotAgentRunSession,
   onAgentRunSettled: (msg) => {
     refreshSessionList();
+    autoBugFixLifecycle.onAgentSettled(msg);
     const msgIndex = chatMessages.value.findIndex((m) => m.id === msg.id);
     let hadAttachedImage = false;
     for (let i = msgIndex - 1; i >= 0; i -= 1) {
@@ -2148,7 +2184,7 @@ const {
   hasActiveAgentRun,
 } = agent;
 
-const autoBugFix = useAutoBugFix(projectPath, projectOpened, {
+const autoBugFix = useAutoBugFix(projectPath, projectOpened, activeSessionId, {
   startAgent: (params) => runAutoBugFixAgent(params),
   expandChat,
   switchGitPanel: () => {
@@ -2164,10 +2200,45 @@ const {
   verifyResult: autoBugFixVerify,
   lastSummary: autoBugFixSummary,
   includeWarnings: autoBugFixIncludeWarnings,
+  assistantMsgId: autoBugFixAssistantMsgId,
+  interruptedHint: autoBugFixInterruptedHint,
   startAutoBugFix: startAutoBugFixFlow,
   runScanOnly: runAutoBugFixScanOnly,
   runVerifyOnly: runAutoBugFixVerifyOnly,
+  persistNow: persistAutoBugFixNow,
+  tryRestoreFromStorage: tryRestoreAutoBugFixFromStorage,
 } = autoBugFix;
+
+autoBugFixLifecycle.onAgentSettled = (msg) => autoBugFix.onAgentSettled(msg);
+autoBugFixLifecycle.onAgentInterrupted = (reason) => autoBugFix.onAgentInterrupted(reason);
+autoBugFixLifecycle.persistNow = () => autoBugFix.persistNow();
+autoBugFixLifecycle.tryRestore = () => tryRestoreAutoBugFixFromStorage(chatMessages.value);
+
+const autoBugFixShowResume = computed(() => {
+  if (!autoBugFixAssistantMsgId.value) return false;
+  const msg = chatMessages.value.find((m) => m.id === autoBugFixAssistantMsgId.value);
+  return Boolean(msg && canResumeAgentRun(msg));
+});
+
+function restoreAutoBugFixPanelIfNeeded() {
+  if (!projectOpened.value || !projectPath.value.trim()) return;
+  tryRestoreAutoBugFixFromStorage(chatMessages.value);
+  // Tab 由 localStorage（vibe-coding-git-panel-mode）恢复，不在此覆盖
+  if (
+    gitPanelMode.value === "project"
+    && projectPanelView.value === "fix"
+    && editorCollapsed.value
+  ) {
+    expandEditor();
+  }
+}
+
+function resumeAutoBugFixFromPanel() {
+  const msgId = autoBugFixAssistantMsgId.value;
+  if (!msgId) return;
+  expandChat();
+  void resumeAgentRun(msgId);
+}
 
 function openGitPanelFromAutoFix() {
   gitPanelMode.value = "git";
@@ -2184,6 +2255,7 @@ const planPanel = usePlanPanel({
   isAgentRunning,
   canExecutePlanMessage,
   expandEditor,
+  shouldSkipLayoutEffects: () => restoringWorkspaceUi.value,
 });
 planPanelApi = planPanel;
 
@@ -2194,9 +2266,70 @@ const {
   messageId: planPanelMessageId,
   planFilePath: planPanelFilePath,
   canExecute: planPanelCanExecute,
+  userDismissed: planUserDismissed,
+  pinnedMessageId: planPinnedMessageId,
   focusPanel: focusPlanPanelBase,
   closePanel: closePlanPanelBase,
 } = planPanel;
+
+const workspaceUi = useWorkspaceUiPersistence({
+  projectPath,
+  projectOpened,
+  expandedDirs,
+  selectedTreePath,
+  showDiffMode,
+  getChatScrollTop: () => chatPanelRef.value?.chatScrollRef?.scrollTop ?? 0,
+  getChatPinnedToBottom: () => chatPinnedToBottom,
+  setChatPinnedToBottom: (pinned) => {
+    chatPinnedToBottom = pinned;
+  },
+  git: {
+    gitLogOpen,
+    gitStagedOpen,
+    gitUnstagedOpen,
+    gitStashOpen,
+    gitAheadCommitsOpen,
+    batchSectionOpen,
+    gitStashSectionOpen,
+    gitLocalChangesOpen,
+    gitTreeExpandedDirs,
+    selectedGitFiles,
+    expandedGitLogEntries,
+    gitLogSearchQuery,
+  },
+  planPanelInForeground,
+  planPanelActive,
+  planUserDismissed,
+  planPinnedMessageId,
+  quickSearchOpen,
+  restoringRef: restoringWorkspaceUi,
+});
+
+async function restoreWorkspaceLayoutAfterOpen(savedUiHint: Awaited<ReturnType<typeof workspaceUi.restoreLayoutState>> = null) {
+  const normalized = projectPath.value.trim();
+  const savedUi = savedUiHint ?? await workspaceUi.restoreLayoutState();
+  if (!savedUi?.expandedDirs?.length) {
+    expandedDirs.value = new Set([normalized]);
+  }
+  if (openTabs.value.length === 0) {
+    selectedTreePath.value = savedUi?.selectedTreePath || normalized;
+  }
+  await reloadExpandedDirChildren();
+  await restoreEditorWorkspace();
+  syncEditorPanelForOpenFiles();
+  if (savedUi?.selectedTreePath && openTabs.value.length === 0) {
+    selectedTreePath.value = savedUi.selectedTreePath;
+  }
+  if (savedUi?.planPanelActive && !savedUi.planUserDismissed) {
+    await planPanel.syncFromChat({ force: true });
+  }
+  restoreChatScrollPosition(
+    savedUi,
+    () => chatPanelRef.value?.chatScrollRef,
+    () => { void scrollChatToBottom(true); },
+  );
+  return savedUi;
+}
 
 function focusPlanPanel(messageId?: string) {
   planPanelInForeground.value = true;
@@ -2384,6 +2517,7 @@ async function openProjectByPath(dirPath: string) {
   onReviewProjectClosed();
   log("persist-prev");
   if (projectOpened.value && previousPathForPersist) {
+    workspaceUi.persistNow();
     persistEditorWorkspace();
   }
   prepareEditorWorkspaceProjectSwitch();
@@ -2422,14 +2556,21 @@ async function openProjectByPath(dirPath: string) {
 
     treeError.value = "";
     fileTree.value = items;
-    expandedDirs.value = new Set([normalized]);
     projectOpened.value = true;
     projectPath.value = normalized;
-    selectedTreePath.value = normalized;
     lsSet(STORAGE_KEY, normalized);
     addProjectToHistory(normalized);
     refreshProjectHistoryList();
     log("set-state");
+
+    const savedUi = await workspaceUi.restoreLayoutState();
+    if (!savedUi?.expandedDirs?.length) {
+      expandedDirs.value = new Set([normalized]);
+    }
+    if (openTabs.value.length === 0) {
+      selectedTreePath.value = savedUi?.selectedTreePath || normalized;
+    }
+    await reloadExpandedDirChildren();
 
     switchingProject.value = true;
     try {
@@ -2450,10 +2591,9 @@ async function openProjectByPath(dirPath: string) {
 
     void startFileWatcherForProject(normalized, () => refreshGitStatus({ showLoading: false })).catch(() => {});
 
-    await restoreEditorWorkspace();
-    syncEditorPanelForOpenFiles();
+    await restoreWorkspaceLayoutAfterOpen(savedUi);
     maybeAutoResumeLastRecoverableAssistant();
-    await scrollChatToBottom(true);
+    tryResumeHmrInterruptedRun();
     log("final");
 
     flushLog(`total=${Math.round(performance.now() - t0)}ms | ${timings.join(" → ")}`);
@@ -3360,7 +3500,20 @@ function onWindowFocus() {
 }
 
 function onBeforeUnload() {
+  if (chatSending.value && getAgentAbortHandle()) {
+    const lastUser = findLastUserMessage();
+    if (lastUser) {
+      persistAgentRunForHmr({
+        request: { prompt: lastUser.content },
+        projectPath: projectPath.value.trim(),
+        sessionId: activeSessionId.value || undefined,
+      });
+    }
+  }
+  flushBatchDraftPersist();
+  workspaceUi.persistNow();
   persistEditorWorkspace();
+  autoBugFixLifecycle.persistNow();
 }
 
 watch(chatMode, (mode) => {
@@ -3504,8 +3657,10 @@ onMounted(() => {
   reconcileOrphanedAgentSendingState();
   reloadAiConfig();
   refreshProjectHistoryList();
-  pendingPromptQueue.value = [];
-  persistPendingQueue();
+  const savedQueue = lsGetJson<string[]>(PENDING_QUEUE_KEY);
+  pendingPromptQueue.value = Array.isArray(savedQueue)
+    ? savedQueue.filter((item) => typeof item === "string" && item.trim())
+    : [];
   loadSavedProject();
   chatPanelWidth.value = Math.min(chatPanelWidth.value, getChatPanelMaxWidth());
   window.addEventListener("focus", onWindowFocus);
@@ -3534,8 +3689,10 @@ onMounted(() => {
       }
     }
   });
-  // 页面加载后检查是否有因 HMR 中断的 Agent 运行
-  nextTick(() => tryResumeHmrInterruptedRun());
+  // 页面加载后检查是否有因 HMR 中断的 Agent 运行（项目打开后由 openProjectByPath 触发恢复）
+  nextTick(() => {
+    restoreAutoBugFixPanelIfNeeded();
+  });
 });
 
 onBeforeUnmount(() => {
@@ -3549,6 +3706,7 @@ onBeforeUnmount(() => {
   document.removeEventListener("dragover", onDocumentDragOverCapture, true);
   document.removeEventListener("drop", onDocumentDropCapture, true);
   if (chatSending.value && getAgentAbortHandle()) {
+    autoBugFixLifecycle.onAgentInterrupted(HMR_INTERRUPT_REASON);
     interruptAgentRun({ reason: HMR_INTERRUPT_REASON });
   } else {
     getAgentAbortHandle()?.abort();
@@ -3565,6 +3723,12 @@ onBeforeUnmount(() => {
     sessionCopyHintTimer = null;
   }
   cancelAutoResume();
+  if (scrollQuoteHideHandler && chatPanelRef.value?.chatScrollRef) {
+    chatPanelRef.value.chatScrollRef.removeEventListener('scroll', scrollQuoteHideHandler);
+    scrollQuoteHideHandler = null;
+  }
+  workspaceUi.persistNow();
+  autoBugFixLifecycle.persistNow();
   persistEditorWorkspace();
   persistChatNow(undefined, { flushStore: true });
   stopFileWatcherForProject();
