@@ -305,6 +305,8 @@ export function stripReferenceAttachments(content: string): string {
 export type AgentHistorySourceMessage = {
   role: string;
   content: string;
+  writtenFiles?: string[];
+  planFilePath?: string;
   imageRefs?: PersistedImageRef[];
   imageCount?: number;
   tools?: Array<{
@@ -428,7 +430,7 @@ export function findRecentUserImageRefs(
 
 export function buildAgentHistoryFromMessages(
   messages: AgentHistorySourceMessage[],
-): Array<{ role: "user" | "assistant"; content: string }> {
+): Array<{ role: "user" | "assistant"; content: string; writtenFiles?: string[]; planFilePath?: string }> {
   return messages
     .map((m) => {
       if (m.role !== "user" && m.role !== "assistant") return null;
@@ -449,9 +451,16 @@ export function buildAgentHistoryFromMessages(
         content = `${content}${summarizeToolsForHistory(m.tools)}`.trim();
       }
       if (!content) return null;
-      return { role: m.role, content };
+      return {
+        role: m.role,
+        content,
+        ...(m.role === "assistant" && m.writtenFiles?.length ? { writtenFiles: [...m.writtenFiles] } : {}),
+        ...(m.role === "assistant" && m.planFilePath?.trim()
+          ? { planFilePath: m.planFilePath.trim() }
+          : {}),
+      };
     })
-    .filter((m): m is { role: "user" | "assistant"; content: string } => m !== null);
+    .filter((m): m is { role: "user" | "assistant"; content: string; writtenFiles?: string[]; planFilePath?: string } => m !== null);
 }
 
 function sessionTitleFromMessages(messages: PersistedChatMessage[]): string {

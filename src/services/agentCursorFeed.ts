@@ -417,7 +417,7 @@ export function buildCursorAgentFeed(input: {
       if (
         thoughtText &&
         !isAgentToolTurnNarration(thoughtText) &&
-        !isAnswerLikeTimelineNarrative(thoughtText)
+        (input.isRunning || !isAnswerLikeTimelineNarrative(thoughtText))
       ) {
         items.push({
           kind: "thought",

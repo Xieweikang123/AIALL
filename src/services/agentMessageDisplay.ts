@@ -249,9 +249,6 @@ function pickBestAssistantBubbleText(candidates: string[], direct: string): stri
   }
 
   const longest = pickLongestText(candidates);
-  if (isTruncatedAssistantAnswer(direct) && longest.length > direct.length) {
-    return longest;
-  }
   if (direct.length >= SUBSTANTIVE_MIN_CHARS && direct.length >= longest.length * 0.85) {
     return direct;
   }
@@ -339,7 +336,6 @@ function isStaleStreamTailFragment(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed) return false;
   if (trimmed.length >= SUBSTANTIVE_MIN_CHARS) return false;
-  if (isTruncatedAssistantAnswer(trimmed)) return true;
   if (/^[`\-)\];:]/.test(trimmed)) return true;
   if (/^的/.test(trimmed)) return true;
   return false;
@@ -518,10 +514,6 @@ export function resolveCompletedAgentBubbleContent(msg: AssistantBubbleSource): 
   const visionPreamble = resolveVisionRegionPreamble(msg);
 
   if (finalText) {
-    if (isTruncatedAssistantAnswer(finalText)) {
-      const fallback = pickFallbackWhenFinalTruncated(msg, finalText);
-      if (fallback) return fallback;
-    }
     if (visionPreamble && !regionAnchorPresentInText(visionPreamble, finalText)) {
       return `${visionPreamble}\n\n${finalText}`;
     }
@@ -533,60 +525,6 @@ export function resolveCompletedAgentBubbleContent(msg: AssistantBubbleSource): 
 
 const COMPLETION_SUMMARY_RE = /(?:修改完成|已完成|已写入|总结|变更如下|完成了)/;
 
-const WRITTEN_FILES_LIST_HEADER_RE = /已写入\s+\d+\s*个文件[：:]\s*$/;
-const MARKDOWN_HEADING_COLON_RE = /^#{1,6}\s+\S.+[：:]\s*$/;
-
-function endsWithCompleteMarkdownTail(text: string): boolean {
-  return /`[^`\n]+`\s*$/.test(text);
-}
-
-function endsWithSuspiciousColon(text: string): boolean {
-  if (!/[：:]\s*$/.test(text)) return false;
-  const lastLine = text.split(/\n/).pop()?.trim() ?? text;
-  if (!/[：:]\s*$/.test(lastLine)) return false;
-  if (WRITTEN_FILES_LIST_HEADER_RE.test(lastLine)) return false;
-  if (MARKDOWN_HEADING_COLON_RE.test(lastLine)) return false;
-  return true;
-}
-
-/** Final model answer cut off mid-sentence (e.g. ends with a colon). */
-export function isTruncatedAssistantAnswer(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-  // 以冒号结尾（排除「已写入 N 个文件：」等列表标题行）
-  if (endsWithSuspiciousColon(trimmed)) return true;
-  // 短文本包含"已修复"等但没有句号
-  if (
-    trimmed.length < SUBSTANTIVE_MIN_CHARS &&
-    /已添加|已修复|已修改|已写入|已完成/.test(trimmed) &&
-    !/[。.!！?？]$/.test(trimmed)
-  ) {
-    return true;
-  }
-  // 以未闭合的 markdown 标记结尾（排除 `- \`path\`` 等已闭合的行内代码）
-  if (!endsWithCompleteMarkdownTail(trimmed) && /[*_`~]\s*$/.test(trimmed)) return true;
-  // 以左括号/左引号结尾
-  if (/[（(「『"'"'\[{]\s*$/.test(trimmed)) return true;
-  // 以省略号结尾
-  if (/…\s*$/.test(trimmed)) return true;
-  // 以未闭合的代码块标记结尾
-  if (/```\w*\s*$/.test(trimmed)) return true;
-  // 服务端截断标记（…已截断…字符…）
-  if (/…（已截断[）]/.test(trimmed)) return true;
-  return false;
-}
-
-function pickFallbackWhenFinalTruncated(msg: AssistantBubbleSource, finalText: string): string {
-  const direct = normalizeBubbleText(msg.content || "");
-  if (direct.length > finalText.length && !isTruncatedAssistantAnswer(direct)) {
-    return direct;
-  }
-  const candidates = collectAssistantTextCandidates(msg).filter(
-    (text) => text !== finalText && !isPrematureVisionCompletionClaim(text) && !isTruncatedAssistantAnswer(text),
-  );
-  return pickLongestText(candidates);
-}
-
 /** Whether the model already gave a substantive completion summary. */
 export function hasSubstantiveAgentSummary(msg: AssistantBubbleSource): boolean {
   if (hasAgentRunStructure(msg) && !hasAgentFinalAnswer(msg)) return false;
@@ -595,7 +533,6 @@ export function hasSubstantiveAgentSummary(msg: AssistantBubbleSource): boolean 
   const finalText = finalFromRound
     ? preferFullContentOverCompactedRoundGroup(normalizeBubbleText(finalFromRound), direct)
     : direct;
-  if (finalText && isTruncatedAssistantAnswer(finalText)) return false;
   if (finalText.length >= SUBSTANTIVE_MIN_CHARS) return true;
   if (COMPLETION_SUMMARY_RE.test(finalText)) return true;
   const bubble = resolveAssistantBubbleContent(msg);
@@ -668,7 +605,7 @@ export function thoughtDuplicatesBubble(thought: string, bubbleContent: string):
 }
 
 export type FilterFeedThoughtsOptions = {
-  /** While agent is running, bubble is the live preview — hide all feed thoughts. */
+  /** @deprecated Prefer duplicate-only filtering; kept for regression tests. */
   suppressAllWhenBubble?: boolean;
 };
 

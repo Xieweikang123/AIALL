@@ -129,9 +129,9 @@ export function recordAgentRoundStatus(
     ...group,
     modelSteps: group.modelSteps.map((step) => ({ ...step })),
     toolIds: [...group.toolIds],
-    request: group.request ? { ...group.request, messages: group.request.messages.map((m) => ({ ...m })) } : undefined,
+    request: group.request ? { ...group.request, messages: (group.request.messages || []).map((m) => ({ ...m })) } : undefined,
     response: group.response
-      ? { ...group.response, toolCalls: group.response.toolCalls.map((call) => ({ ...call })) }
+      ? { ...group.response, toolCalls: (group.response.toolCalls || []).map((call) => ({ ...call })) }
       : undefined,
   })) : [];
 
@@ -144,19 +144,19 @@ export function recordAgentRoundStatus(
 export function recordAgentRoundNarrative(
   groups: AgentRoundGroup[] | undefined,
   turn: number,
-  narrative: string,
+  narrative: string | undefined,
   maxTurns?: number,
 ): AgentRoundGroup[] {
-  const text = narrative.trim();
+  const text = (narrative ?? "").trim();
   if (!text || turn <= 0) return groups ? [...groups] : [];
 
   const next = groups ? groups.map((group) => ({
     ...group,
     modelSteps: group.modelSteps.map((step) => ({ ...step })),
     toolIds: [...group.toolIds],
-    request: group.request ? { ...group.request, messages: group.request.messages.map((m) => ({ ...m })) } : undefined,
+    request: group.request ? { ...group.request, messages: (group.request.messages || []).map((m) => ({ ...m })) } : undefined,
     response: group.response
-      ? { ...group.response, toolCalls: group.response.toolCalls.map((call) => ({ ...call })) }
+      ? { ...group.response, toolCalls: (group.response.toolCalls || []).map((call) => ({ ...call })) }
       : undefined,
   })) : [];
 
@@ -178,9 +178,9 @@ export function recordAgentRoundToolStart(
     ...group,
     modelSteps: group.modelSteps.map((step) => ({ ...step })),
     toolIds: [...group.toolIds],
-    request: group.request ? { ...group.request, messages: group.request.messages.map((m) => ({ ...m })) } : undefined,
+    request: group.request ? { ...group.request, messages: (group.request.messages || []).map((m) => ({ ...m })) } : undefined,
     response: group.response
-      ? { ...group.response, toolCalls: group.response.toolCalls.map((call) => ({ ...call })) }
+      ? { ...group.response, toolCalls: (group.response.toolCalls || []).map((call) => ({ ...call })) }
       : undefined,
   })) : [];
 
@@ -198,13 +198,13 @@ function cloneRoundGroups(groups: AgentRoundGroup[] | undefined): AgentRoundGrou
         request: group.request
           ? {
               ...group.request,
-              messages: group.request.messages.map((message) => ({ ...message })),
+              messages: (group.request.messages || []).map((message) => ({ ...message })),
             }
           : undefined,
         response: group.response
           ? {
               ...group.response,
-              toolCalls: group.response.toolCalls.map((call) => ({ ...call })),
+              toolCalls: (group.response.toolCalls || []).map((call) => ({ ...call })),
             }
           : undefined,
       }))
@@ -225,7 +225,7 @@ function mergeRoundNarrative(existing: string, incoming: string): string {
 }
 
 function compactTurnRequestForMemory(detail: AgentTurnRequestDetail): AgentTurnRequestDetail {
-  if (!detail.messages.length) return { ...detail, messages: [] };
+  if (!detail.messages || !detail.messages.length) return { ...detail, messages: [] };
   return {
     ...detail,
     messages: [
@@ -262,7 +262,7 @@ export function recordAgentRoundResponse(
   const group = ensureGroup(next, turn);
   group.response = {
     ...detail,
-    toolCalls: detail.toolCalls.map((call) => ({ ...call })),
+    toolCalls: (detail.toolCalls || []).map((call) => ({ ...call })),
   };
   if (detail.assistantText.trim()) {
     group.narrative = mergeRoundNarrative(group.narrative || "", detail.assistantText.trim());

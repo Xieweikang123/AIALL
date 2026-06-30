@@ -23,6 +23,15 @@ export const PROJECT_OVERVIEW_TOPIC_RE =
 export const SESSION_AUDIT_TASK_RE =
   /【任务】请自行排查以下\s*.+\s*会话|Agent\s*回复的准确度|会话文件.*chat-\d{10,}/i;
 
+/** Git working tree / staged changes overview (not implement intent). */
+export const GIT_WORKING_TREE_TOPIC_RE =
+  /(?:\bgit\b|暂存|未提交|工作区|待提交|staged|unstaged|working\s*tree).{0,24}(?:改|变|diff|状态|提交|啥|什么)|(?:改了啥|改了什么|有哪些改动)|\bgit\s+status\b/i;
+
+export function isGitWorkingTreeTopicPrompt(prompt: string): boolean {
+  const text = prompt.trim();
+  return Boolean(text && GIT_WORKING_TREE_TOPIC_RE.test(text));
+}
+
 export const JOB_FILE_PATH_RE = /([^/\\]+Job)\.cs$/i;
 
 export const SCHEDULE_REGISTRATION_RE =

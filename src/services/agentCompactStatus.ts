@@ -77,7 +77,6 @@ export type CursorAgentFeedBuildInput = Pick<
 export function buildFilteredCursorAgentFeedItems(
   input: CursorAgentFeedBuildInput,
 ): CursorFeedItem[] {
-  const trimmedAnswer = input.answerPreview.trim();
   return filterDuplicateFeedThoughts(
     buildCursorAgentFeed({
       groups: input.roundGroups,
@@ -88,10 +87,6 @@ export function buildFilteredCursorAgentFeedItems(
       streaming: input.answerStreaming,
     }),
     input.answerPreview,
-    {
-      suppressAllWhenBubble:
-        input.isRunning && input.answerStreaming && Boolean(trimmedAnswer),
-    },
   );
 }
 

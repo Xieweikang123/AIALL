@@ -15,7 +15,7 @@ import {
   getRecentFeedActions,
   shouldUseCompactAgentFeed,
 } from "./agentCursorFeed";
-import { buildUnifiedAgentTimeline, buildAgentLiveFooterStatus, summarizeCursorProcessBlocks } from "./agentCompactStatus";
+import { buildUnifiedAgentTimeline, buildAgentLiveFooterStatus, summarizeCursorProcessBlocks, buildFilteredCursorAgentFeedItems } from "./agentCompactStatus";
 import { formatToolMeta } from "../utils/vibeHelpers";
 import type { CursorFeedItem } from "./agentCursorFeed";
 import type { AgentRoundGroupView } from "./agentRoundGroups";
@@ -457,6 +457,65 @@ describe("agentCursorFeed", () => {
     });
 
     expect(timeline.blocks.some((block) => block.kind === "thought")).toBe(true);
+  });
+
+  it("keeps earlier thoughts visible while answer preview is streaming", () => {
+    const groups: AgentRoundGroupView[] = [
+      {
+        turn: 1,
+        modelSteps: [],
+        toolIds: ["t1"],
+        narrative: "我先读取配置文件，确认项目结构后再修改组件。",
+        tools: [{
+          id: "t1",
+          turn: 1,
+          name: "read_file",
+          icon: "📄",
+          title: "读取",
+          detail: "a.ts",
+          label: "读取",
+          summary: "ok",
+          ok: true,
+          args: { path: "a.ts" },
+        }],
+      },
+      {
+        turn: 2,
+        modelSteps: [],
+        toolIds: [],
+        narrative: "这是正在流式输出的最终回答正文，内容足够长以便触发去重逻辑。",
+        tools: [],
+      },
+    ];
+
+    const items = buildFilteredCursorAgentFeedItems({
+      roundGroups: groups,
+      isRunning: true,
+      agentPhase: "streaming_model",
+      answerPreview: "这是正在流式输出的最终回答正文，内容足够长以便触发去重逻辑。",
+      answerStreaming: true,
+    });
+
+    expect(items.some((item) => item.kind === "thought" && item.text.includes("我先读取"))).toBe(true);
+    expect(items.some((item) => item.kind === "thought" && item.text.includes("最终回答"))).toBe(false);
+  });
+
+  it("includes long streaming narrative as thought while running without answer preview", () => {
+    const longNarrative = "让我先梳理一下当前的实现路径，确认入口函数、中间层编排以及最终副作用分别落在哪些模块里。".repeat(2);
+    const feed = buildCursorAgentFeed({
+      groups: [{
+        turn: 1,
+        modelSteps: [],
+        toolIds: [],
+        narrative: longNarrative,
+        tools: [],
+      }],
+      isRunning: true,
+      agentPhase: "streaming_model",
+      answerPreview: "",
+      streaming: true,
+    });
+    expect(feed.some((item) => item.kind === "thought" && item.text.includes("梳理"))).toBe(true);
   });
 
   it("shows placeholder answer while streaming_model before preview text", () => {

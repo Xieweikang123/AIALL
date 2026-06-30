@@ -7,7 +7,9 @@ import {
 import { looksLikeModificationPlan } from "./agentContinuation";
 import { looksLikeClarificationQuestion } from "../orchestration/generic/ambiguousTermTriggers";
 import { looksLikeStreamingPlanContent } from "./planDocumentDisplay";
-import { stripToolSummaryFromAssistantContent, type ChatMessage } from "./vibeChatStorage";
+import { stripToolSummaryFromAssistantContent } from "./vibeChatStorage";
+import type { VibeChatMessage } from "../types/vibeChat";
+import type { AgentRoundGroup } from "./agentRoundGroups";
 
 /** Legacy shared plan path; new plans use {@link PLAN_DOCUMENTS_DIR}/&lt;messageId&gt;.md. */
 export const PLAN_FILE_REL_PATH = LEGACY_PLAN_DOCUMENT_REL_PATH;
@@ -145,7 +147,7 @@ export async function ensurePlanFileBeforeExecution(
 }
 
 type PlanMessageSource = Pick<
-  ChatMessage,
+  VibeChatMessage,
   "id" | "content" | "roundGroups" | "planFilePath" | "chatMode"
 >;
 
@@ -159,7 +161,7 @@ export function extractPlanContentFromStoredMessage(
     return displayed;
   }
 
-  const finalGroups = msg.roundGroups?.filter((group) => group.response?.isFinal) ?? [];
+  const finalGroups = msg.roundGroups?.filter((group: AgentRoundGroup) => group.response?.isFinal) ?? [];
   for (let i = finalGroups.length - 1; i >= 0; i -= 1) {
     const fromRound = stripToolSummaryFromAssistantContent(
       finalGroups[i]?.response?.assistantText || "",
@@ -182,31 +184,54 @@ export function isPlanClarificationOnly(content: string): boolean {
   return looksLikeClarificationQuestion(content);
 }
 
+/** Plan-mode reply that should render as normal chat text (not plan card / left panel). */
+export function isPlanInlineChatAnswer(
+  content: string,
+  msg: Pick<VibeChatMessage, "planFilePath" | "chatMode">,
+): boolean {
+  if (msg.chatMode !== "plan") return false;
+  const text = content.trim();
+  if (!text) return false;
+  if (isPlanClarificationOnly(text)) return true;
+  if (looksLikeModificationPlan(text) || looksLikeStreamingPlanContent(text)) return false;
+  if (msg.planFilePath?.trim()) return false;
+  return true;
+}
+
 /** Plan-mode chat teaser vs inline markdown + selectable options. */
 export function shouldUsePlanExternalView(
   content: string,
-  msg: Pick<ChatMessage, "chatMode">,
+  msg: Pick<VibeChatMessage, "planFilePath" | "chatMode">,
 ): boolean {
   if (msg.chatMode !== "plan") return false;
-  return !isPlanClarificationOnly(content);
+  return !isPlanInlineChatAnswer(content, msg);
+}
+
+/** Assistant turn that owns structured plan content (not inline Q&A / clarification). */
+export function assistantMessageHoldsPlanDocument(
+  content: string,
+  msg: Pick<VibeChatMessage, "planFilePath" | "chatMode">,
+): boolean {
+  if (msg.chatMode !== "plan") return false;
+  if (isPlanClarificationOnly(content)) return false;
+  if (isPlanInlineChatAnswer(content, msg)) return false;
+  if (msg.planFilePath?.trim()) return true;
+  const text = content.trim();
+  if (!text) return false;
+  return looksLikeModificationPlan(text) || looksLikeStreamingPlanContent(text);
 }
 
 export function messageQualifiesForPlanPanel(
   content: string,
-  msg: Pick<ChatMessage, "planFilePath" | "chatMode">,
+  msg: Pick<VibeChatMessage, "planFilePath" | "chatMode">,
 ): boolean {
-  if (msg.chatMode !== "plan") return false;
-  if (isPlanClarificationOnly(content)) return false;
-  if (msg.planFilePath?.trim()) return true;
-  const text = content.trim();
-  if (!text) return false;
-  return looksLikeStreamingPlanContent(text) || looksLikeModificationPlan(text);
+  return assistantMessageHoldsPlanDocument(content, msg);
 }
 
 /** Whether an in-flight or completed plan message should drive the left plan panel. */
 export function qualifiesPlanPanelSync(
   content: string,
-  msg: Pick<ChatMessage, "planFilePath" | "chatMode">,
+  msg: Pick<VibeChatMessage, "planFilePath" | "chatMode">,
   isRunning: boolean,
 ): boolean {
   if (isPlanClarificationOnly(content)) return false;
@@ -216,13 +241,12 @@ export function qualifiesPlanPanelSync(
   );
 }
 
-/** User explicitly opened the plan panel — allow any non-empty Plan-mode answer. */
+/** User explicitly opened the plan panel — only for structured plan documents. */
 export function canForceOpenPlanPanel(
   content: string,
-  msg: Pick<ChatMessage, "chatMode">,
+  msg: Pick<VibeChatMessage, "chatMode" | "planFilePath">,
 ): boolean {
-  if (msg.chatMode !== "plan" || !content.trim()) return false;
-  return !isPlanClarificationOnly(content);
+  return assistantMessageHoldsPlanDocument(content, msg);
 }
 
 export async function resolvePlanContentForDisplay(
@@ -232,7 +256,6 @@ export async function resolvePlanContentForDisplay(
 ): Promise<string> {
   const inline = extractPlanContentFromStoredMessage(msg, displayedContent).trim();
   if (inline && messageQualifiesForPlanPanel(inline, msg)) return inline;
-  if (msg.chatMode === "plan" && inline) return inline;
   const root = projectPath.trim();
   const targetPath = msg.id
     ? resolvePlanDocumentRelPath(msg.id, msg.planFilePath)

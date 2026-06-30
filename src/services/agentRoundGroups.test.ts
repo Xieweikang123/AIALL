@@ -82,6 +82,13 @@ describe("agentRoundGroups", () => {
     expect(groups[0].narrative).toContain("VibeCodingView");
   });
 
+  it("ignores missing narrative without throwing", () => {
+    resetAgentRoundGroupIds();
+    let groups = recordAgentRoundStatus(undefined, "waiting_model", "等待模型", 1);
+    groups = recordAgentRoundNarrative(groups, 1, undefined);
+    expect(groups[0].narrative).toBeUndefined();
+  });
+
   it("keeps longer streamed narrative when turn_response is shorter", () => {
     resetAgentRoundGroupIds();
     let groups = recordAgentRoundStreamDelta(undefined, 2, "这是一段较长的流式输出内容，用于验证不会被更短的响应覆盖。", 20);

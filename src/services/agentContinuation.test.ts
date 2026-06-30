@@ -10,8 +10,12 @@ import {
   findLastAssistantContentInMessages,
   historyRecentUserFailureReport,
   isExecutionContinuation,
+  isPlanQuoteInformationalPrompt,
+  isPlanQuoteRevisionPrompt,
+  isPendingPlanAmendPrompt,
   looksLikeActionableProposal,
   looksLikeModificationPlan,
+  resolvePendingPlanState,
 } from "./agentContinuation";
 
 const SAMPLE_PLAN = [
@@ -46,6 +50,35 @@ describe("isExecutionContinuation", () => {
     ).toBe(true);
     expect(isExecutionContinuation("帮我实现一下")).toBe(true);
     expect(isExecutionContinuation("那就做吧")).toBe(true);
+  });
+});
+
+describe("isPlanQuoteRevisionPrompt", () => {
+  it("detects quoted plan excerpt with revision instruction", () => {
+    const text = [
+      "> 方案: GET /api/foo - 示例",
+      "> POST /api/bar - 转换",
+      "",
+      "这个不要",
+    ].join("\n");
+    expect(isPlanQuoteRevisionPrompt(text)).toBe(true);
+    expect(isPlanQuoteInformationalPrompt(text)).toBe(false);
+  });
+
+  it("treats quoted excerpt with informational question as non-revision", () => {
+    const text = [
+      '> 方案: _logger.LogInformation("数据同步服务已禁用");',
+      "",
+      "日志写到哪里了？",
+    ].join("\n");
+    expect(isPlanQuoteRevisionPrompt(text)).toBe(false);
+    expect(isPlanQuoteInformationalPrompt(text)).toBe(true);
+  });
+
+  it("rejects normal prompts without plan quote", () => {
+    expect(isPlanQuoteRevisionPrompt("这个不要")).toBe(false);
+    expect(isPlanQuoteInformationalPrompt("日志写到哪里了？")).toBe(false);
+    expect(isPlanQuoteRevisionPrompt("> Agent: hello\n\n改吧")).toBe(false);
   });
 });
 
@@ -255,5 +288,60 @@ describe("historyRecentUserFailureReport", () => {
 
   it("returns false for unrelated history", () => {
     expect(historyRecentUserFailureReport([{ role: "user", content: "检查下" }])).toBe(false);
+  });
+});
+
+const PENDING_PLAN = [
+  "[PLAN]",
+  "## 修改方案",
+  "修改 `src/foo.ts`：",
+  "```ts",
+  "export const x = 1;",
+  "```",
+].join("\n");
+
+describe("resolvePendingPlanState", () => {
+  it("detects first unexecuted plan", () => {
+    const history = [
+      { role: "user", content: "task" },
+      { role: "assistant", content: PENDING_PLAN },
+      { role: "user", content: "日志写哪" },
+      { role: "assistant", content: "输出到控制台。" },
+    ];
+    const state = resolvePendingPlanState(history);
+    expect(state.hasPendingPlan).toBe(true);
+    expect(state.planContent).toContain("[PLAN]");
+  });
+
+  it("clears pending after execution continuation", () => {
+    const history = [
+      { role: "assistant", content: PENDING_PLAN },
+      { role: "user", content: "执行方案" },
+    ];
+    expect(resolvePendingPlanState(history).hasPendingPlan).toBe(false);
+  });
+
+  it("clears pending after writtenFiles on assistant turn", () => {
+    const history = [
+      { role: "assistant", content: PENDING_PLAN },
+      { role: "assistant", content: "已写入", writtenFiles: ["src/foo.ts"] },
+    ];
+    expect(resolvePendingPlanState(history).hasPendingPlan).toBe(false);
+  });
+});
+
+describe("isPendingPlanAmendPrompt", () => {
+  it("matches Agent quote + short acceptance after consultative turn", () => {
+    const history = [
+      { role: "assistant", content: PENDING_PLAN },
+      { role: "user", content: "写到哪里" },
+      { role: "assistant", content: "仅控制台；如需落盘可配置文件 sink。" },
+    ];
+    const prompt = "> Agent: 仅控制台\n\n持久化";
+    expect(isPendingPlanAmendPrompt(prompt, history)).toBe(true);
+  });
+
+  it("rejects without pending plan", () => {
+    expect(isPendingPlanAmendPrompt("持久化", [])).toBe(false);
   });
 });

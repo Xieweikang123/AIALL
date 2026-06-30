@@ -3,11 +3,12 @@
  * New topics register here instead of hardcoding business symbols in classifiers.
  */
 
-import type { ConsultativeTopicId } from "./agentIntentClassifier";
+import type { ConsultativeTopicId } from "./intentClassifierTypes";
 import {
   PROJECT_OVERVIEW_TOPIC_RE,
   SCHEDULED_TASK_TOPIC_RE,
   SESSION_AUDIT_TASK_RE,
+  isGitWorkingTreeTopicPrompt,
   shouldNudgeScheduledJobRegistration,
 } from "./agentStructuralPatterns";
 import {
@@ -16,6 +17,8 @@ import {
   buildConfigBindingTopicHint,
   buildImplementationStatusHint,
   buildSessionAuditHint,
+} from "../orchestration/product/userIntentHints";
+import {
   historySuggestsActiveImplementation,
   isAccuracyConsultativePrompt,
   isAgentStepClarificationPrompt,
@@ -25,8 +28,8 @@ import {
   isConsultativeUserPrompt,
   isImplementationStatusPrompt,
   resolveConfigBindingTopic,
-  type UserIntentHistoryMessage,
-} from "./agentUserIntent";
+} from "../orchestration/generic/userIntentClassifiers";
+import type { UserIntentHistoryMessage } from "../orchestration/agentIntentTypes";
 import { buildConsultativeAccuracyTraceHint } from "../../server/consultativeAccuracyTrace";
 import { buildBehaviorPurposeTraceHint } from "../../server/consultativeBehaviorTrace";
 
@@ -146,10 +149,21 @@ function configBindingTopic(): ConsultativeTopicModule {
   };
 }
 
+function gitWorkingTreeTopic(): ConsultativeTopicModule {
+  return {
+    id: "git_working_tree",
+    isActive(prompt) {
+      return isGitWorkingTreeTopicPrompt(prompt.trim());
+    },
+    buildSystemHint: () => buildGitWorkingTreeConsultativeHint(),
+  };
+}
+
 const CONSULTATIVE_TOPICS: ConsultativeTopicModule[] = [
   sessionAuditTopic(),
   scheduledTaskTopic(),
   projectOverviewTopic(),
+  gitWorkingTreeTopic(),
   behaviorPurposeTopic(),
   behaviorContradictionTopic(),
   accuracyTopic(),
@@ -222,6 +236,15 @@ export function buildCodeReviewConsultativeHint(): string {
     "",
     "【代码核对·只读】用户要求检查/核对/验证代码或改动，不是新实施请求。",
     "须 read_file 核对目标文件实际内容后作答；禁止仅凭记忆或截图断言「已正确」。",
+  ].join("\n");
+}
+
+export function buildGitWorkingTreeConsultativeHint(): string {
+  return [
+    "",
+    "【Git 工作区】用户问未提交/暂存变更。须先 git_status 列出文件，再用 git_diff 查看具体 diff。",
+    "区分已暂存、未暂存、未跟踪；回答时概括每个文件的改动要点。",
+    "禁止声称无法执行 Git 或要求用户粘贴 git status；禁止用 read_file 代替 diff 来猜测变更。",
   ].join("\n");
 }
 

@@ -709,6 +709,40 @@ describe("diagnoseMissingFinalAnswer", () => {
     });
     expect(diagnosis.kind).not.toBe("client_answer_not_committed");
   });
+
+  it("enriches plan explore-only diagnosis", () => {
+    const diagnosis = diagnoseMissingFinalAnswer(
+      {
+        chatMode: "plan",
+        tools: [
+          { running: false, name: "list_dir", summary: "ok", turn: 2 },
+          { running: false, name: "list_dir", summary: "ok", turn: 3 },
+        ],
+        roundGroups: [
+          { turn: 1, maxTurns: 16, modelSteps: [], toolIds: ["t1"] },
+          { turn: 2, maxTurns: 16, modelSteps: [], toolIds: ["t2"] },
+          { turn: 3, maxTurns: 16, modelSteps: [], toolIds: ["t3"] },
+        ],
+        totalTurns: 3,
+      },
+      { doneTurns: 3, chatMode: "plan" },
+    );
+    expect(diagnosis.kind).toBe("server_explore_no_finalize");
+    expect(diagnosis.detail).toContain("[PLAN]");
+    expect(diagnosis.detail).toContain("恢复运行");
+  });
+
+  it("surfaces prior model failure with plan explore context", () => {
+    const diagnosis = diagnoseMissingFinalAnswer({
+      chatMode: "plan",
+      agentFailureReason: "模型请求失败",
+      tools: [{ running: false, name: "list_dir", summary: "ok", turn: 1 }],
+      roundGroups: [{ turn: 1, maxTurns: 16, modelSteps: [], toolIds: ["t1"] }],
+    });
+    expect(diagnosis.kind).toBe("server_blocked_or_empty");
+    expect(diagnosis.detail).toContain("模型请求失败");
+    expect(diagnosis.detail).toContain("list_dir");
+  });
 });
 
 describe("silent continue helpers", () => {
@@ -720,6 +754,7 @@ describe("silent continue helpers", () => {
     expect(AGENT_SILENT_CONTINUE_MAX).toBeGreaterThanOrEqual(3);
     expect(shouldSilentAutoContinue(buildAgentMaxTurnsExhaustedMessage(20))).toBe(false);
     expect(shouldSilentAutoContinue("Failed to fetch")).toBe(true);
+    expect(shouldSilentAutoContinue("运行中断（未生成最终回复）")).toBe(false);
   });
 });
 

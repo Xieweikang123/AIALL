@@ -6,10 +6,12 @@ import {
   buildPlanFileDocument,
   stripPlanFilePreamble,
   extractPlanContentFromStoredMessage,
+  assistantMessageHoldsPlanDocument,
   messageQualifiesForPlanPanel,
   qualifiesPlanPanelSync,
   canForceOpenPlanPanel,
   isPlanClarificationOnly,
+  isPlanInlineChatAnswer,
   shouldUsePlanExternalView,
   ensurePlanFileBeforeExecution,
   resolvePlanDocumentRelPath,
@@ -97,7 +99,32 @@ describe("planFile", () => {
     expect(isPlanClarificationOnly(clarification)).toBe(true);
     expect(messageQualifiesForPlanPanel(clarification, { chatMode: "plan", planFilePath: undefined })).toBe(false);
     expect(qualifiesPlanPanelSync(clarification, { chatMode: "plan", planFilePath: undefined }, false)).toBe(false);
-    expect(shouldUsePlanExternalView(clarification, { chatMode: "plan" })).toBe(false);
+    expect(shouldUsePlanExternalView(clarification, { chatMode: "plan", planFilePath: undefined })).toBe(false);
+  });
+
+  it("renders informational plan Q&A inline in chat", () => {
+    const answer = "日志通过 Serilog 写入 `logs/app-.log`，级别由 appsettings 的 Logging 节配置。";
+    expect(isPlanInlineChatAnswer(answer, { chatMode: "plan", planFilePath: undefined })).toBe(true);
+    expect(shouldUsePlanExternalView(answer, { chatMode: "plan", planFilePath: undefined })).toBe(false);
+    expect(messageQualifiesForPlanPanel(answer, { chatMode: "plan", planFilePath: undefined })).toBe(false);
+    expect(assistantMessageHoldsPlanDocument(answer, { chatMode: "plan", planFilePath: undefined })).toBe(false);
+    expect(canForceOpenPlanPanel(answer, { chatMode: "plan", planFilePath: undefined })).toBe(false);
+  });
+
+  it("keeps plan panel on prior plan when follow-up is quoted plan Q&A", () => {
+    const answer = [
+      "会的。当前方案中的 `ExecuteAsync` 会先执行 `SyncDataAsync()`，再 `Task.Delay`。",
+      "启动时会立即同步一次，之后按间隔执行。",
+      "启动 -> SyncDataAsync() -> Task.Delay(30分钟) -> ...",
+    ].join("\n");
+    expect(isPlanInlineChatAnswer(answer, { chatMode: "plan", planFilePath: undefined })).toBe(true);
+    expect(assistantMessageHoldsPlanDocument(answer, { chatMode: "plan", planFilePath: undefined })).toBe(false);
+    expect(qualifiesPlanPanelSync(answer, { chatMode: "plan", planFilePath: undefined }, false)).toBe(false);
+    expect(assistantMessageHoldsPlanDocument(SAMPLE_PLAN, { chatMode: "plan", planFilePath: PLAN_PATH })).toBe(true);
+  });
+
+  it("still uses external view for structured plan documents", () => {
+    expect(shouldUsePlanExternalView(SAMPLE_PLAN, { chatMode: "plan", planFilePath: undefined })).toBe(true);
   });
 
   describe("ensurePlanFileBeforeExecution", () => {

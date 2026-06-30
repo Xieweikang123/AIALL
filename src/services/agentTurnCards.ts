@@ -41,9 +41,7 @@ export function buildTurnCardsFromRoundGroups(
     }
   }
 
-  const filtered = filterDuplicateFeedThoughts(items, answer, {
-    suppressAllWhenBubble: Boolean(options.isRunning && options.answerStreaming && answer),
-  });
+  const filtered = filterDuplicateFeedThoughts(items, answer);
   const detailed = options.activityDetailed === true;
   const collapseAfter = options.isRunning
     ? detailed

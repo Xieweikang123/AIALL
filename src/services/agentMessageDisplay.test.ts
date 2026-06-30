@@ -12,7 +12,6 @@ import {
   isAgentTimelineAnswerStreaming,
   isStorageCompactedAssistantText,
   isSubstantiveProgressSummary,
-  isTruncatedAssistantAnswer,
   appendAssistantStreamDelta,
   mergeAssistantTurnText,
   preferFullContentOverCompactedRoundGroup,
@@ -334,19 +333,6 @@ describe("finalizeAssistantBubbleContent", () => {
     expect(buildWrittenFilesSummary(["a.ts"], true)).toContain("点击下方");
   });
 
-  it("detects truncated final answers ending with a colon", () => {
-    expect(
-      isTruncatedAssistantAnswer(
-        "已添加 padding: 6px 10px，确保输入框内有足够点击区域。同时确保占位文字覆盖全宽，点击任意位置都能聚焦输入：",
-      ),
-    ).toBe(true);
-  });
-
-  it("does not flag written-files summary ending with closed inline code", () => {
-    const summary = buildWrittenFilesSummary(["src/components/vibe/AppToolbar.vue"], false);
-    expect(isTruncatedAssistantAnswer(summary)).toBe(false);
-  });
-
   it("does not flag short model answer plus appended written-files summary", () => {
     const modelAnswer = "已改回纯色 #0b1220 (深蓝黑色)，和应用主背景一致。";
     const result = finalizeAssistantBubbleContent({
@@ -367,18 +353,9 @@ describe("finalizeAssistantBubbleContent", () => {
       ],
     });
     expect(result).toContain("AppToolbar.vue");
-    expect(isTruncatedAssistantAnswer(result)).toBe(false);
   });
 
-  it("does not flag written-files list header ending with a colon", () => {
-    expect(
-      isTruncatedAssistantAnswer(
-        "已改回纯色 #0b1220 (深蓝黑色)，和应用主背景一致。\n\n## 修改完成\n\n已写入 1 个文件：",
-      ),
-    ).toBe(false);
-  });
-
-  it("appends written-files summary when final answer is truncated", () => {
+  it("treats long final answer as substantive even when ending with a colon", () => {
     const msg = {
       content:
         "已添加 padding: 6px 10px，确保输入框内有足够点击区域。同时确保占位文字覆盖全宽，点击任意位置都能聚焦输入：",
@@ -399,10 +376,10 @@ describe("finalizeAssistantBubbleContent", () => {
         },
       ],
     };
-    expect(hasSubstantiveAgentSummary(msg)).toBe(false);
+    expect(hasSubstantiveAgentSummary(msg)).toBe(true);
     const result = finalizeAssistantBubbleContent(msg);
-    expect(result).toContain("## 修改完成");
-    expect(result).toContain("ChatComposerEditor.vue");
+    expect(result).not.toContain("## 修改完成");
+    expect(result).toContain("聚焦输入：");
   });
 });
 

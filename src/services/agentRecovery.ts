@@ -2,16 +2,17 @@ import {
   hasAgentFinalAnswer,
   hasAgentRunStructure,
   hasSubstantiveAgentSummary,
-  isTruncatedAssistantAnswer,
   PARTIAL_WRITE_ABORT_HEADING,
   resolveAssistantBubbleContent,
 } from "./agentMessageDisplay";
 import {
   buildConsultativeResumeHint,
+} from "../orchestration/product/userIntentHints";
+import {
   isBehaviorPurposePrompt,
   isConsultativeUserPrompt,
-  type UserIntentHistoryMessage,
-} from "./agentUserIntent";
+} from "../orchestration/generic/userIntentClassifiers";
+import type { UserIntentHistoryMessage } from "../orchestration/agentIntentTypes";
 import { stripQuotedReplyPrefix } from "./agentContinuation";
 import type { AgentRoundGroup } from "./agentRoundGroups";
 import { stripReferenceAttachments, stripToolSummaryFromAssistantContent } from "./vibeChatStorage";
@@ -241,6 +242,8 @@ const READ_ONLY_AGENT_TOOLS = new Set([
   "grep",
   "search_files",
   "list_dir",
+  "git_status",
+  "git_diff",
   "web_search",
   "web_extract",
 ]);
@@ -281,6 +284,16 @@ function extractMissingFinalAnswerStatusHint(statusLog?: string[]): string | nul
   for (let i = statusLog.length - 1; i >= 0; i -= 1) {
     const line = statusLog[i]?.trim() || "";
     if (!line) continue;
+    if (line.includes("模型请求失败") || line.includes("错误：")) {
+      const errPart = line.replace(/^错误：/, "").trim();
+      return errPart || "模型请求失败，规划阶段未完成";
+    }
+    if (line.includes("retrying_model") || line.includes("重试")) {
+      return "模型请求曾重试但仍未产出带 isFinal 的最终答复";
+    }
+    if (line.includes("规划已达段内轮次上限") || line.includes("plan_segment_cap")) {
+      return "规划阶段已达段内轮次上限，系统已要求输出修改方案，但模型未发出带 isFinal 的最终答复";
+    }
     if (line.includes("咨询只读已达段内轮次上限")) {
       return "已达到咨询只读段内轮次上限，系统已要求输出结论，但模型未发出带 isFinal 的最终答复";
     }
@@ -343,19 +356,45 @@ function hasAgentRunProgressStructure(msg: AgentProgressSource): boolean {
   );
 }
 
+function buildPlanExploreNoFinalizeDetail(
+  turns: number,
+  toolSummary: string,
+  statusHint: string | null,
+): string {
+  const base = statusHint
+    ? statusHint
+    : `规划阶段已完成 ${turns} 轮只读探索（${toolSummary}），但未收到带 \`[PLAN]\` 或 \`## 修改方案\` 且 isFinal 的最终答复`;
+  return `${base}。可点「恢复运行」重试；若需求与当前仓库无关，可在提示中写明「勿探索，直接出脚手架方案」。`;
+}
+
 /** Classify why an agent run ended without an `isFinal` user-visible answer. */
 export function diagnoseMissingFinalAnswer(
-  msg: AgentProgressSource & { content?: string; statusLog?: string[] },
-  options?: { doneTurns?: number },
+  msg: AgentProgressSource & { content?: string; statusLog?: string[]; chatMode?: string; agentFailureReason?: string },
+  options?: { doneTurns?: number; chatMode?: string },
 ): MissingFinalAnswerDiagnosis {
   const draft = resolveUncommittedDraftText(msg);
   const hasProgressStructure = hasAgentRunProgressStructure(msg);
   const statusHint = extractMissingFinalAnswerStatusHint(msg.statusLog);
   const turns = options?.doneTurns ?? resolveAgentCompletedTurns(msg);
+  const chatMode = options?.chatMode ?? msg.chatMode;
   const completedTools = msg.tools?.filter((tool) => !tool.running) ?? [];
   const exploreOnly =
     completedTools.length > 0 &&
     completedTools.every((tool) => READ_ONLY_AGENT_TOOLS.has(resolveAgentToolName(tool)));
+
+  const priorFailure = msg.agentFailureReason?.trim();
+  if (priorFailure && priorFailure !== "运行中断（未生成最终回复）" && !isNoFinalAnswerReason(priorFailure)) {
+    const toolSummary = exploreOnly ? summarizeExploreTools(completedTools) : "";
+    const exploreCtx =
+      chatMode === "plan" && exploreOnly && toolSummary
+        ? `（规划阶段已探索：${toolSummary}）`
+        : "";
+    return {
+      kind: "server_blocked_or_empty",
+      label: MISSING_FINAL_ANSWER_LABELS.server_blocked_or_empty,
+      detail: `${priorFailure}${exploreCtx}`,
+    };
+  }
 
   if (hasProgressStructure && !hasStrictAgentFinalMarker(msg) && draft.length >= CLIENT_DRAFT_MIN_CHARS) {
     return {
@@ -375,12 +414,16 @@ export function diagnoseMissingFinalAnswer(
 
   if (exploreOnly && draft.length < CLIENT_DRAFT_MIN_CHARS) {
     const toolSummary = summarizeExploreTools(completedTools);
+    const detail =
+      chatMode === "plan"
+        ? buildPlanExploreNoFinalizeDetail(turns, toolSummary, statusHint)
+        : statusHint
+          ? `${statusHint}（${toolSummary}）`
+          : `模型持续只读探索（${toolSummary}），未发出带 isFinal 的最终答复。`;
     return {
       kind: "server_explore_no_finalize",
       label: MISSING_FINAL_ANSWER_LABELS.server_explore_no_finalize,
-      detail: statusHint
-        ? `${statusHint}（${toolSummary}）`
-        : `模型持续只读探索（${toolSummary}），未发出带 isFinal 的最终答复。`,
+      detail,
     };
   }
 
@@ -404,10 +447,15 @@ export function applyMissingFinalAnswerDiagnosis(
     agentFailureDetail?: string;
     content?: string;
     statusLog?: string[];
+    chatMode?: string;
+    agentFailureReason?: string;
   },
-  options?: { doneTurns?: number },
+  options?: { doneTurns?: number; chatMode?: string },
 ): MissingFinalAnswerDiagnosis {
-  const diagnosis = diagnoseMissingFinalAnswer(msg, options);
+  const diagnosis = diagnoseMissingFinalAnswer(msg, {
+    doneTurns: options?.doneTurns,
+    chatMode: options?.chatMode ?? msg.chatMode,
+  });
   msg.agentFailureDetail = formatMissingFinalAnswerDetail(diagnosis);
   return diagnosis;
 }
@@ -446,21 +494,6 @@ export function isIncompleteAgentRunWithoutFinalAnswer(
   return !hasAgentFinalAnswer(msg);
 }
 
-/** Detect truncated final answer: streaming stopped but answer was cut off mid-sentence. */
-export function isTruncatedFinalAnswer(msg: AgentProgressSource & {
-  streaming?: boolean;
-}): boolean {
-  if (!msg.streaming) return false;
-  if (!hasAgentFinalAnswer(msg)) return false;
-  // 获取最终回复文本
-  const finalText = msg.roundGroups
-    ?.filter((g) => g.response?.isFinal)
-    .at(-1)?.response?.assistantText?.trim() || "";
-  if (!finalText) return false;
-  // 检测是否被截断
-  return isTruncatedAssistantAnswer(finalText);
-}
-
 /** Infer recovery flags for legacy sessions or incomplete error handling. */
 export function inferAgentRecoveryFlags(msg: AgentProgressSource & {
   role?: string;
@@ -476,17 +509,6 @@ export function inferAgentRecoveryFlags(msg: AgentProgressSource & {
   statusLog?: string[];
 }): AgentRecoveryFlags | null {
   if (msg.role && msg.role !== "assistant") return null;
-  // 如果正在流式输出，只检测截断的最终回复
-  if (msg.streaming) {
-    if (isTruncatedFinalAnswer(msg)) {
-      return {
-        agentFailed: true,
-        agentRecoverable: true,
-        agentFailureReason: "回复被截断（模型输出不完整）",
-      };
-    }
-    return null;
-  }
 
   const completedTurns = resolveAgentCompletedTurns(msg);
   const maxTurns = resolveAgentMaxTurnsFromProgress(msg);

@@ -11,7 +11,8 @@ import {
   stripQuotedReplyPrefix,
 } from "./agentContinuation";
 import { resolveAgentCompletedTurns, type AgentProgressSource, type AgentProgressTool } from "./agentRecovery";
-import { isConsultativeUserPrompt, isUltraShortOpenTaskPrompt, type UserIntentHistoryMessage } from "./agentUserIntent";
+import { isConsultativeUserPrompt, isUltraShortOpenTaskPrompt } from "../orchestration/generic/userIntentClassifiers";
+import type { UserIntentHistoryMessage } from "../orchestration/agentIntentTypes";
 import type { VibeChatMode } from "../../shared/agentTypes";
 
 export type AgentRunKind = "interactive" | "execute_plan";

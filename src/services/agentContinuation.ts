@@ -84,6 +84,52 @@ const PLAN_CODE_BLOCKS_MAX_TOTAL = 18_000;
 
 export type AgentHistoryEntry = { role: "user" | "assistant"; content: string };
 
+/** User quoted an excerpt from the plan panel (`> 方案: …`). */
+const PLAN_QUOTE_PREFIX_RE = /^\s*>[^\n]*方案\s*[:：]/m;
+
+const PLAN_QUOTE_INFO_QUESTION_RE =
+  /(?:什么|啥|哪里|哪儿|为何|为什么|怎么|如何|是否|有没有|能不能|可以吗|到哪|写入|输出|配置|在哪|干啥|干什么|什么意思|含义|作用|行为|会.{0,4}(?:吗|么|嘛))/;
+
+const PLAN_QUOTE_EDIT_INTENT_RE =
+  /(?:这个|这段|上面|此处).{0,12}(?:不要|删掉|去掉|移除)|不要.{0,8}(?:这段|这个|上面)|(?:改成|改为|换成|更新(?:为|成)?)/;
+
+export function isPlanQuotePrompt(text: string): boolean {
+  return PLAN_QUOTE_PREFIX_RE.test(text.trim());
+}
+
+/** Quoted plan excerpt + user only asks to understand behavior, not to revise. */
+export function looksLikePlanQuoteInformationalQuestion(body: string): boolean {
+  const trimmed = body.trim();
+  if (!trimmed) return false;
+
+  const hasEditIntent =
+    CONCRETE_EDIT_VERB_RE.test(trimmed)
+    || IMPLEMENTATION_INTENT_RE.test(trimmed)
+    || PLAN_QUOTE_EDIT_INTENT_RE.test(trimmed);
+  if (hasEditIntent) return false;
+
+  if (ASK_ONLY_RE.test(trimmed)) return true;
+
+  const hasQuestion = /[?？]/.test(trimmed);
+  if (!hasQuestion) return false;
+
+  if (PLAN_QUOTE_INFO_QUESTION_RE.test(trimmed)) return true;
+
+  const lines = trimmed.split("\n").filter((line) => line.trim());
+  return lines.length <= 2 && !/(?:改|删|加|去掉|不要|替换)/.test(trimmed);
+}
+
+export function isPlanQuoteInformationalPrompt(text: string): boolean {
+  if (!isPlanQuotePrompt(text)) return false;
+  return looksLikePlanQuoteInformationalQuestion(stripQuotedReplyPrefix(text.trim()));
+}
+
+/** Quoted plan excerpt + user wants to revise the plan document. */
+export function isPlanQuoteRevisionPrompt(text: string): boolean {
+  if (!isPlanQuotePrompt(text)) return false;
+  return !looksLikePlanQuoteInformationalQuestion(stripQuotedReplyPrefix(text.trim()));
+}
+
 /** Remove markdown-style quote lines (`> …`) from a reply that references prior assistant text. */
 export function stripQuotedReplyPrefix(text: string): string {
   const body = text
@@ -354,4 +400,166 @@ function summarizeUserIntent(content: string): string {
   const trimmed = content.trim();
   if (trimmed.length <= 160) return trimmed;
   return `${trimmed.slice(0, 160)}…`;
+}
+
+/** History entry with optional execution metadata from the client. */
+export type AgentHistoryMessageMeta = {
+  role: string;
+  content: string;
+  writtenFiles?: string[];
+  planFilePath?: string;
+};
+
+export interface PendingPlanState {
+  hasPendingPlan: boolean;
+  planContent?: string;
+  planIndex?: number;
+  planFilePath?: string;
+  executedSincePlan?: boolean;
+}
+
+/** User explicitly abandons the current pending plan thread. */
+const PENDING_PLAN_BREAK_RE =
+  /(?:另起|重新(?:做|来|规划|出)?(?:一)?(?:个)?方案|换个话题|新方案|不要(?:之前|上面|先前)的方案|重来|从零)/;
+
+/** Short acceptance after consultative follow-up — amend pending plan, not spawn a new one. */
+const SHORT_PLAN_CONTINUATION_RE =
+  /^(?:持久化|落盘|写(?:入)?文件|合并|并入|加上(?:去)?|加进去|采纳|照(?:做|办)|就这样|按(?:你|上面|此|这个)?(?:说的|建议|来)?|可以|行|好|嗯|对|要|需要)(?:吧|了|下)?[。！!]?$/i;
+
+const EXPLICIT_PLAN_MERGE_RE = /^(?:合并|并入)/;
+const EXPLICIT_SEPARATE_PLAN_RE = /^(?:单独|独立|分开)/;
+
+/** User quoted prior assistant reply (`> Agent: …`), not the plan panel. */
+const AGENT_QUOTE_PREFIX_RE = /^\s*>[^\n]*(?:Agent|助手|Assistant)\s*[:：]/im;
+
+export function isPendingPlanBreakPrompt(text: string): boolean {
+  const body = stripQuotedReplyPrefix(text.trim());
+  return PENDING_PLAN_BREAK_RE.test(body);
+}
+
+export function isShortPlanContinuationBody(body: string): boolean {
+  const trimmed = body.trim();
+  if (!trimmed || trimmed.length > 40) return false;
+  if (/[?？]\s*$/.test(trimmed) && !EXPLICIT_PLAN_MERGE_RE.test(trimmed)) return false;
+  if (SHORT_PLAN_CONTINUATION_RE.test(trimmed)) return true;
+  if (trimmed.length <= 24 && IMPLEMENTATION_INTENT_RE.test(trimmed)) return true;
+  return false;
+}
+
+export function isQuotedAgentFollowUpPrompt(text: string): boolean {
+  return AGENT_QUOTE_PREFIX_RE.test(text.trim());
+}
+
+function isPlanExecutedAfterIndex(
+  history: ReadonlyArray<AgentHistoryMessageMeta>,
+  planIdx: number,
+): boolean {
+  for (let j = planIdx + 1; j < history.length; j += 1) {
+    const msg = history[j];
+    if (msg.role === "user" && isExecutionContinuation(msg.content)) return true;
+    if (msg.role === "assistant") {
+      if ((msg.writtenFiles?.length ?? 0) > 0) return true;
+      const kind = classifyAssistantReply(msg.content);
+      if (kind === "completion_summary" && /已写入|write_file|patch_file/.test(msg.content)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** First unexecuted structured plan in session history. */
+export function resolvePendingPlanState(
+  history?: ReadonlyArray<AgentHistoryMessageMeta>,
+): PendingPlanState {
+  if (!history?.length) return { hasPendingPlan: false };
+
+  for (let i = 0; i < history.length; i += 1) {
+    const msg = history[i];
+    if (msg.role !== "assistant") continue;
+    const text = msg.content.trim();
+    if (!looksLikeModificationPlan(text)) continue;
+    if (isPlanExecutedAfterIndex(history, i)) continue;
+    return {
+      hasPendingPlan: true,
+      planContent: text,
+      planIndex: i,
+      planFilePath: msg.planFilePath,
+    };
+  }
+  return { hasPendingPlan: false };
+}
+
+export function lastAssistantWasConsultativeExplanation(
+  history?: ReadonlyArray<AgentHistoryMessageMeta>,
+): boolean {
+  for (let i = (history?.length ?? 0) - 1; i >= 0; i -= 1) {
+    const msg = history![i];
+    if (msg.role !== "assistant") continue;
+    const text = msg.content.trim();
+    if (!text) continue;
+    if (looksLikeModificationPlan(text)) return false;
+    return classifyAssistantReply(text) === "explanation" || classifyAssistantReply(text) === "other";
+  }
+  return false;
+}
+
+/** Pending plan exists + user wants to amend (not ask, not break thread). Works without `> 方案:` prefix. */
+export function isPendingPlanAmendPrompt(
+  prompt: string,
+  history?: ReadonlyArray<AgentHistoryMessageMeta>,
+): boolean {
+  const text = prompt.trim();
+  if (!text) return false;
+  if (isPendingPlanBreakPrompt(text)) return false;
+  if (isPlanQuoteInformationalPrompt(text)) return false;
+
+  const pending = resolvePendingPlanState(history);
+  if (!pending.hasPendingPlan) return false;
+
+  if (isPlanQuoteRevisionPrompt(text)) return true;
+
+  const body = stripQuotedReplyPrefix(text);
+  if (!body) return false;
+
+  if (EXPLICIT_SEPARATE_PLAN_RE.test(body)) return false;
+
+  const shortContinuation =
+    isShortPlanContinuationBody(body)
+    || (body.length <= 40 && EXPLICIT_PLAN_MERGE_RE.test(body));
+
+  if (!shortContinuation) {
+    if (body.length <= 48 && hasDirectImplementationIntent(text) && !ASK_ONLY_RE.test(body)) {
+      return lastAssistantWasConsultativeExplanation(history) || isQuotedAgentFollowUpPrompt(text);
+    }
+    return false;
+  }
+
+  return (
+    lastAssistantWasConsultativeExplanation(history)
+    || isQuotedAgentFollowUpPrompt(text)
+    || isPlanQuotePrompt(text)
+  );
+}
+
+/** Ambiguous short follow-up while a plan is pending — ask merge vs separate before rewriting. */
+export function isPendingPlanClarifyPrompt(
+  prompt: string,
+  history?: ReadonlyArray<AgentHistoryMessageMeta>,
+): boolean {
+  const text = prompt.trim();
+  if (!text || isPendingPlanBreakPrompt(text)) return false;
+  if (isPlanQuoteInformationalPrompt(text)) return false;
+  if (isPendingPlanAmendPrompt(text, history)) return false;
+
+  const pending = resolvePendingPlanState(history);
+  if (!pending.hasPendingPlan) return false;
+
+  const body = stripQuotedReplyPrefix(text);
+  if (!body || body.length > 16) return false;
+  if (/[?？]/.test(body)) return false;
+  if (EXPLICIT_PLAN_MERGE_RE.test(body) || EXPLICIT_SEPARATE_PLAN_RE.test(body)) return false;
+  if (SHORT_PLAN_CONTINUATION_RE.test(body)) return false;
+
+  return lastAssistantWasConsultativeExplanation(history) || isQuotedAgentFollowUpPrompt(text);
 }
