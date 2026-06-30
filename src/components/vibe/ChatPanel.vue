@@ -297,13 +297,20 @@
       </div>
       <div class="chat-bottom">
         <div class="chat-status-row">
-          <span v-if="autoResumeSecondsLeft > 0" class="chat-recovery-hint chat-auto-resume-hint">
+          <span
+            v-if="chatSending && agentRunningStatus.trim()"
+            class="chat-running-status"
+            aria-live="polite"
+          >
+            <span class="status-pulse" aria-hidden="true" />
+            {{ agentRunningStatus }}
+          </span>
+          <span v-else-if="autoResumeSecondsLeft > 0" class="chat-recovery-hint chat-auto-resume-hint">
             {{ autoResumeSecondsLeft }}s 后自动恢复（可取消）
           </span>
           <span v-else-if="stalledAssistantMsg" class="chat-recovery-hint chat-stall-hint">
             运行似乎已卡住
           </span>
-          <!-- 重复状态已由消息列表内的 footer 展示，此处隐藏避免冗余 -->
           <span v-else-if="recoverableAssistantMsg && !chatSending" class="chat-recovery-hint">
             Agent 已中断，可恢复
           </span>
@@ -854,10 +861,10 @@ function scrollToBottom() {
 function scheduleSessionScrollToBottom() {
   if (props.switchingSession || !props.chatMessages.length) return;
   sessionScrollPending = true;
-  if (sessionScrollClearTimer) window.clearTimeout(sessionScrollClearTimer);
+  if (sessionScrollClearTimer) { clearTimeout(sessionScrollClearTimer); sessionScrollClearTimer = null; }
   sessionScrollClearTimer = window.setTimeout(() => {
     sessionScrollPending = false;
-    sessionScrollClearTimer = 0;
+    sessionScrollClearTimer = null;
   }, 900);
   scheduleScrollContainerToBottom(() => chatScrollRef.value, { behavior: "auto" });
   void nextTick(() => {
@@ -891,7 +898,7 @@ watch(
 
 let scrollResizeObserver: ResizeObserver | null = null;
 let sessionScrollPending = false;
-let sessionScrollClearTimer = 0;
+let sessionScrollClearTimer: number | null = null;
 
 onMounted(() => {
   void nextTick(() => {
@@ -912,7 +919,7 @@ onMounted(() => {
 onUnmounted(() => {
   scrollResizeObserver?.disconnect();
   scrollResizeObserver = null;
-  if (sessionScrollClearTimer) window.clearTimeout(sessionScrollClearTimer);
+  if (sessionScrollClearTimer) { clearTimeout(sessionScrollClearTimer); sessionScrollClearTimer = null; }
 });
 
 defineExpose({ chatScrollRef, chatDropZoneRef });
@@ -1338,6 +1345,19 @@ function removeQuotedMessage(index: number) {
   gap: 8px;
   min-height: 0;
   min-width: 0;
+}
+
+.chat-running-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(165, 214, 255, 0.92);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-error {

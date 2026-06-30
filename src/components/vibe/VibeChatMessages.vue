@@ -120,6 +120,26 @@
           {{ ctx.resolveAgentResumeButtonLabel(m) }}
         </button>
       </div>
+      <div
+        v-if="m.role === 'assistant' && ctx.isAgentRunning(m)"
+        class="msg-live-banner"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        <span class="status-pulse" aria-hidden="true" />
+        <span class="msg-status-text">{{
+          ctx.agentStatusDisplay(m) ||
+          (m.chatMode === 'explore'
+            ? '正在了解项目…'
+            : m.chatMode === 'ask'
+              ? '思考中…'
+              : m.chatMode === 'plan' && ctx.planExecutionActive.value
+                ? '执行方案中…'
+                : m.chatMode === 'plan'
+                  ? '规划中…'
+                  : 'Agent 运行中…')
+        }}</span>
+      </div>
       <AgentMessage
         v-if="m.role === 'assistant' && ctx.hasAgentActivity(m)"
         :msg="m"
@@ -199,7 +219,7 @@
           ctx.isAgentRunning(m) &&
           !ctx.hasAgentActivity(m)
         "
-        class="msg-status"
+        class="msg-status msg-status--legacy"
       >
         <span v-if="ctx.isAgentRunning(m)" class="status-pulse" aria-hidden="true" />
         <span class="msg-status-text">

@@ -363,7 +363,8 @@ function formatSessionTime(iso: string): string {
   font-weight: 700;
   margin: 0;
   white-space: nowrap;
-  overflow: visible;
+  overflow: hidden;
+  text-overflow: ellipsis;
   letter-spacing: -0.3px;
   color: var(--text-primary);
 }
