@@ -115,6 +115,7 @@ export function buildExecutePlanSystemHint(manifest: TargetFileManifestEntry[], 
     `3. 超过 ${LARGE_FILE_LINE_THRESHOLD} 行的大文件建议 patch_file 局部修改；`,
     "4. 路径不确定时可用 search_files / grep 定位；",
     "5. 可并行 read_file / patch_file / write_file；完成后 1–3 句总结。",
+    "6. 勿 read/write/patch `.aiall/plans/` 下方案文件或旧版 `.aiall/PLAN.md`；方案文档不在本阶段维护，只落实业务文件改动。",
     intentLine,
     manifestBlock,
   ]

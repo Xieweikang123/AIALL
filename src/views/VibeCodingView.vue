@@ -627,6 +627,11 @@ import { usePlanPanel } from "../composables/usePlanPanel";
 import { PROJECT_ARCHITECT_REVIEW_REL_PATH } from "../services/vibeProjectArchitectReviewClient";
 import { PROJECT_KNOWLEDGE_REL_PATH } from "../services/vibeProjectKnowledgeClient";
 import { distillExplorationRun } from "../services/explorationDistill";
+import {
+  ensurePlanFileBeforeExecution,
+  extractPlanContentFromStoredMessage,
+  isPlanDocumentPath,
+} from "../services/planFile";
 import { useAgentRun, type ChatMessage } from "../composables/useAgentRun";
 import { parseAgentSuggestions, type AgentSuggestion } from "../services/agentSuggestions";
 import type { TurnFileDiff } from "../types/vibeChat";
@@ -1932,6 +1937,34 @@ async function openPlanFileInEditor(relPath?: string) {
   if (!rel) return;
   const root = projectPath.value.trim();
   if (!root) return;
+
+  if (rel && isPlanDocumentPath(rel.replace(/\\/g, "/"))) {
+    const normalizedRel = rel.replace(/\\/g, "/");
+    const planMsg =
+      chatMessages.value.find(
+        (m) => m.role === "assistant" && m.planFilePath?.replace(/\\/g, "/") === normalizedRel,
+      )
+      ?? [...chatMessages.value].reverse().find(
+        (m) => m.role === "assistant" && m.chatMode === "plan",
+      );
+    const planText = planMsg
+      ? extractPlanContentFromStoredMessage(planMsg, planMsg.content || "").trim()
+      : "";
+    if (planText && planMsg?.id) {
+      const ensured = await ensurePlanFileBeforeExecution(
+        root,
+        planText,
+        planMsg.id,
+        planMsg.planFilePath || rel,
+      );
+      if (ensured.planFilePath && planMsg.planFilePath !== ensured.planFilePath) {
+        planMsg.planFilePath = ensured.planFilePath;
+        patchAssistantMsg(planMsg.id, { planFilePath: ensured.planFilePath });
+        planPanelApi?.patchFilePath(ensured.planFilePath, planMsg.id);
+      }
+    }
+  }
+
   await refreshTree();
   const normalized = rel.replace(/\\/g, "/");
   const full = /^[a-zA-Z]:[/\\]/.test(normalized) || normalized.startsWith("/")

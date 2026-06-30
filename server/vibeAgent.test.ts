@@ -275,6 +275,62 @@ describe("executeTool immediate persistence", () => {
     expect(result).not.toMatch(/错误：.*has/);
   });
 
+  it("blocks read_file on per-message plan files in build mode", async () => {
+    const root = await makeProject();
+    await fs.promises.mkdir(path.join(root, ".aiall", "plans"), { recursive: true });
+    await fs.promises.writeFile(
+      path.join(root, ".aiall", "plans", "msg-1.md"),
+      "# plan\n",
+      "utf-8",
+    );
+    const result = await executeTool(
+      root,
+      "read_file",
+      { path: ".aiall/plans/msg-1.md" },
+      null,
+      "build",
+    );
+    expect(result).toContain("Build/执行阶段");
+    expect(result).toContain(".aiall/plans/");
+  });
+
+  it("allows read_file on per-message plan files in plan mode", async () => {
+    const root = await makeProject();
+    await fs.promises.mkdir(path.join(root, ".aiall", "plans"), { recursive: true });
+    await fs.promises.writeFile(
+      path.join(root, ".aiall", "plans", "msg-1.md"),
+      "# plan B\n",
+      "utf-8",
+    );
+    const result = await executeTool(
+      root,
+      "read_file",
+      { path: ".aiall/plans/msg-1.md" },
+      null,
+      "plan",
+    );
+    expect(result).toContain("# plan B");
+    expect(result).not.toContain("Build/执行阶段");
+  });
+
+  it("blocks read_file on PLAN.md in build mode", async () => {
+    const root = await makeProject();
+    await fs.promises.mkdir(path.join(root, ".aiall"), { recursive: true });
+    await fs.promises.writeFile(path.join(root, ".aiall", "PLAN.md"), "# plan\n", "utf-8");
+    const result = await executeTool(root, "read_file", { path: ".aiall/PLAN.md" }, null, "build");
+    expect(result).toContain("Build/执行阶段");
+    expect(result).toContain(".aiall/PLAN.md");
+  });
+
+  it("allows read_file on PLAN.md in plan mode", async () => {
+    const root = await makeProject();
+    await fs.promises.mkdir(path.join(root, ".aiall"), { recursive: true });
+    await fs.promises.writeFile(path.join(root, ".aiall", "PLAN.md"), "# plan\n", "utf-8");
+    const result = await executeTool(root, "read_file", { path: ".aiall/PLAN.md" }, null, "plan");
+    expect(result).toContain("# plan");
+    expect(result).not.toContain("Build/执行阶段");
+  });
+
   it("patch_file in Build consultative run returns disambiguated error", async () => {
     const root = await makeProject();
     await fs.promises.writeFile(path.join(root, "a.ts"), "x\n", "utf-8");

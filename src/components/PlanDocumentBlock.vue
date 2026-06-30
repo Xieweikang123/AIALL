@@ -17,10 +17,10 @@
         v-if="planFilePath && !externalView"
         type="button"
         class="plan-document-open"
-        title="在编辑器打开 .aiall/PLAN.md"
+        title="在编辑器打开方案文件"
         @click="emit('open-plan-file')"
       >
-        编辑 PLAN.md
+        编辑方案
       </button>
       <button
         v-if="canExecute && !externalView"
@@ -48,9 +48,9 @@
     <div v-if="externalView" class="plan-document-teaser">
       <p class="plan-document-teaser-text">
         <template v-if="streaming && display.isPartialPlan">方案正在左侧窗口生成…</template>
-        <template v-else-if="planFilePath">方案已保存，可在左侧窗口查看</template>
-        <template v-else-if="planPanelActive">方案已在左侧窗口打开</template>
-        <template v-else>方案已生成，可在左侧窗口查看；选中文字可引用到对话提出修改</template>
+        <template v-else-if="planFilePath">方案已保存到 {{ planFilePath }}，可在左侧窗口查看</template>
+        <template v-else-if="planPanelActive">方案已在左侧窗口；执行前将自动保存到 .aiall/plans/</template>
+        <template v-else>方案正文在会话中；执行时将写入 .aiall/plans/（每条方案独立文件）</template>
       </p>
       <div class="plan-document-teaser-actions">
         <button

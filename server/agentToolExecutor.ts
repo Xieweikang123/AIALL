@@ -32,12 +32,17 @@ import {
   formatInjectedKeyFileReadNudge,
 } from "./vibeProjectContext";
 import { buildSearchFilesEmptyHint } from "./agentAskPrompt";
+import { runGitDiffTool, runGitStatusTool } from "./agentGitTools";
 import { buildWriteToolBlockedMessage } from "../src/services/agentUserIntent";
 import {
   MAX_READ_SLICE_REPEATS,
   isExplorationArchivePath,
   buildExplorationArchiveWriteBlockedMessage,
 } from "./agentExplorationBudget";
+import {
+  buildPlanDocumentBuildModeBlockedMessage,
+  isPlanDocumentPath,
+} from "../shared/planFilePath";
 import {
   checkOverlappingRead,
   checkPatchOldStringFromReads,
@@ -118,6 +123,16 @@ export function requirePriorRead(stage: WriteStage, relative: string, existsOnDi
   return `错误：请先 read_file 核对 ${relative} 的真实内容，再修改该文件`;
 }
 
+function planDocumentBuildModeBlock(
+  mode: VibeChatMode,
+  relativePath: string,
+  toolName: string,
+): string | null {
+  if (mode !== "build") return null;
+  if (!isPlanDocumentPath(relativePath)) return null;
+  return buildPlanDocumentBuildModeBlockedMessage(toolName);
+}
+
 export async function executeTool(
   projectRoot: string,
   name: string,
@@ -176,6 +191,10 @@ export async function executeTool(
     if (!filePath) return "错误：缺少 path";
     const resolved = resolveReadablePath(root, filePath);
     if (!resolved.ok) return `错误：${resolved.error}`;
+    const planBlock = !resolved.outsideProject
+      ? planDocumentBuildModeBlock(mode, resolved.key, "read_file")
+      : null;
+    if (planBlock) return planBlock;
     const fileStat = await fs.promises.stat(resolved.path).catch(() => null);
     if (!fileStat?.isFile()) {
       if (await isAgentsGuideOnlyPath(root, resolved.displayPath)) {
@@ -319,6 +338,8 @@ export async function executeTool(
     if (typeof content !== "string") return "错误：缺少 content";
     const resolved = resolveProjectPath(root, filePath);
     if (!resolved.ok) return `错误：${resolved.error}`;
+    const planWriteBlock = planDocumentBuildModeBlock(mode, resolved.relative, "write_file");
+    if (planWriteBlock) return planWriteBlock;
     if (toolGuard?.blockExplorationArchiveWrite && isExplorationArchivePath(resolved.relative)) {
       return buildExplorationArchiveWriteBlockedMessage();
     }
@@ -367,6 +388,8 @@ export async function executeTool(
     if (typeof newString !== "string") return "错误：缺少 new_string";
     const resolved = resolveProjectPath(root, filePath);
     if (!resolved.ok) return `错误：${resolved.error}`;
+    const planPatchBlock = planDocumentBuildModeBlock(mode, resolved.relative, "patch_file");
+    if (planPatchBlock) return planPatchBlock;
     const stat = await fs.promises.stat(resolved.path).catch(() => null);
     const readErr = requirePriorRead(stage, resolved.relative, !!stat?.isFile());
     if (readErr) return readErr;
@@ -435,6 +458,8 @@ export async function executeTool(
     if (!filePath) return "错误：缺少 path";
     const resolved = resolveProjectPath(root, filePath);
     if (!resolved.ok) return `错误：${resolved.error}`;
+    const planDeleteBlock = planDocumentBuildModeBlock(mode, resolved.relative, "delete_file");
+    if (planDeleteBlock) return planDeleteBlock;
     const stat = await fs.promises.stat(resolved.path).catch(() => null);
     if (!stat?.isFile()) return `错误：${resolved.relative} 不是文件或不存在`;
     stage.files.delete(resolved.relative);
@@ -535,6 +560,16 @@ export async function executeTool(
       if (error.status !== undefined) parts.push(`exit code: ${error.status}`);
       return parts.length ? `命令执行失败：\n${parts.join("\n\n")}` : `错误：${error.message}`;
     }
+  }
+
+  if (name === "git_status") {
+    return runGitStatusTool(root);
+  }
+
+  if (name === "git_diff") {
+    const filePath = String(args.path || "").trim() || undefined;
+    const staged = args.staged === true;
+    return runGitDiffTool(root, filePath, staged);
   }
 
   if (name === "web_search") {

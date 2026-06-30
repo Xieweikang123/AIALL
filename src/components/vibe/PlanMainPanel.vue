@@ -2,7 +2,9 @@
   <div class="plan-main">
     <header class="plan-main-head">
       <h2 class="plan-main-title">修改方案</h2>
-      <span v-if="!streaming && content.trim()" class="plan-main-hint">选中文字可引用到对话</span>
+      <span v-if="!streaming && content.trim()" class="plan-main-hint">
+        {{ planFilePath ? "选中文字可引用到对话" : "尚未保存；执行方案时将写入 .aiall/plans/" }}
+      </span>
       <span v-if="streaming" class="plan-main-badge plan-main-badge--draft">生成中</span>
       <span
         v-else-if="display.files.length || display.codeBlockCount"
@@ -17,10 +19,10 @@
           v-if="planFilePath"
           type="button"
           class="plan-main-btn plan-main-btn--ghost"
-          title="在编辑器打开 .aiall/PLAN.md"
+          title="在编辑器打开方案文件"
           @click="emit('open-plan-file')"
         >
-          编辑 PLAN.md
+          编辑方案
         </button>
         <button
           v-if="canExecute"

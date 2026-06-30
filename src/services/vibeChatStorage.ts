@@ -82,6 +82,8 @@ export type PersistedChatMessage = {
   roundGroups?: PersistedAgentRoundGroup[];
   totalTurns?: number;
   writtenFiles?: string[];
+  /** Relative path to on-disk plan document (e.g. `.aiall/plans/<messageId>.md`). */
+  planFilePath?: string;
   turnFileDiffs?: Record<string, PersistedFileDiff>;
   pendingApproval?: boolean;
   agentAborted?: boolean;
@@ -565,12 +567,15 @@ export function compactProjectSessionRecord(projectPath: string): boolean {
   return true;
 }
 
-function truncateText(text: string, max: number): string {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max)}…`;
+function truncateText(text: string | undefined | null, max: number): string {
+  if (text == null) return "";
+  const str = String(text);
+  if (str.length <= max) return str;
+  return `${str.slice(0, max)}…`;
 }
 
-function truncateNarrativeForStorage(text: string): string {
+function truncateNarrativeForStorage(text: string | undefined | null): string {
+  if (text == null) return "";
   const cleaned = stripToolSummaryFromAssistantContent(text);
   const max = hasAgentProgressMarker(text) ? MAX_PROGRESS_NARRATIVE_CHARS : MAX_NARRATIVE_CHARS;
   return truncateText(cleaned, max);
@@ -590,12 +595,12 @@ function compactRoundGroupsForStorage(
         : group.narrative
           ? truncateNarrativeForStorage(group.narrative)
           : undefined,
-      modelSteps: group.modelSteps.map((step) => ({
+      modelSteps: (group.modelSteps || []).map((step) => ({
         id: step.id,
         phase: step.phase,
         text: truncateText(step.text, MAX_MODEL_STEP_CHARS),
       })),
-      toolIds: [...group.toolIds],
+      toolIds: group.toolIds ? [...group.toolIds] : [],
       request: group.request
         ? {
             model: group.request.model,
@@ -613,7 +618,7 @@ function compactRoundGroupsForStorage(
               : truncateNarrativeForStorage(group.response.assistantText),
             hasToolCalls: group.response.hasToolCalls,
             isFinal: group.response.isFinal,
-            toolCalls: group.response.toolCalls.map((call) => ({
+            toolCalls: (group.response.toolCalls || []).map((call) => ({
               id: call.id,
               name: call.name,
               arguments: truncateText(call.arguments, MAX_TOOL_CALL_ARGS_CHARS),
@@ -731,6 +736,7 @@ function sanitizeMessages(
         roundGroups: compactRoundGroupsForStorage(m.roundGroups),
         totalTurns: m.totalTurns,
         writtenFiles: m.writtenFiles?.length ? [...m.writtenFiles] : undefined,
+        planFilePath: m.planFilePath || undefined,
         turnFileDiffs:
           m.pendingApproval && m.turnFileDiffs ? { ...m.turnFileDiffs } : undefined,
         pendingApproval: m.pendingApproval || undefined,

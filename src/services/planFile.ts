@@ -1,11 +1,23 @@
 import { writeFile, readFile } from "./vibeCodingClient";
+import {
+  LEGACY_PLAN_DOCUMENT_REL_PATH,
+  PLAN_DOCUMENTS_DIR,
+  resolvePlanDocumentRelPath,
+} from "../../shared/planFilePath";
 import { looksLikeModificationPlan } from "./agentContinuation";
 import { looksLikeClarificationQuestion } from "../orchestration/generic/ambiguousTermTriggers";
 import { looksLikeStreamingPlanContent } from "./planDocumentDisplay";
 import { stripToolSummaryFromAssistantContent, type ChatMessage } from "./vibeChatStorage";
 
-/** Canonical on-disk plan document (under project `.aiall/`). */
-export const PLAN_FILE_REL_PATH = ".aiall/PLAN.md";
+/** Legacy shared plan path; new plans use {@link PLAN_DOCUMENTS_DIR}/&lt;messageId&gt;.md. */
+export const PLAN_FILE_REL_PATH = LEGACY_PLAN_DOCUMENT_REL_PATH;
+
+export {
+  PLAN_DOCUMENTS_DIR,
+  buildPlanDocumentRelPath,
+  resolvePlanDocumentRelPath,
+  isPlanDocumentPath,
+} from "../../shared/planFilePath";
 
 const PLAN_FILE_PREAMBLE_RE = /^<!--\s*agent-plan-file[\s\S]*?-->\s*/i;
 
@@ -27,41 +39,115 @@ export function buildPlanFileDocument(planMarkdown: string): string {
 export async function persistPlanFile(
   projectPath: string,
   planMarkdown: string,
+  planFileRelPath: string,
 ): Promise<{ ok: boolean; path: string; error?: string }> {
   const root = projectPath.trim();
-  if (!root) return { ok: false, path: PLAN_FILE_REL_PATH, error: "项目未打开" };
+  const relPath = planFileRelPath.replace(/\\/g, "/").trim();
+  if (!root) return { ok: false, path: relPath, error: "项目未打开" };
+  if (!relPath) return { ok: false, path: relPath, error: "方案路径无效" };
   const document = buildPlanFileDocument(planMarkdown);
-  if (!document) return { ok: false, path: PLAN_FILE_REL_PATH, error: "方案正文为空" };
-  const result = await writeFile(PLAN_FILE_REL_PATH, document, root);
+  if (!document) return { ok: false, path: relPath, error: "方案正文为空" };
+  const result = await writeFile(relPath, document, root);
   if (!result.ok) {
-    return { ok: false, path: PLAN_FILE_REL_PATH, error: result.error || "写入失败" };
+    return { ok: false, path: relPath, error: result.error || "写入失败" };
   }
-  return { ok: true, path: PLAN_FILE_REL_PATH };
+  return { ok: true, path: relPath };
 }
 
 export async function readPlanFile(
   projectPath: string,
+  planFileRelPath: string,
 ): Promise<{ ok: boolean; content?: string; error?: string }> {
   const root = projectPath.trim();
+  const relPath = planFileRelPath.replace(/\\/g, "/").trim();
   if (!root) return { ok: false, error: "项目未打开" };
-  const result = await readFile(PLAN_FILE_REL_PATH, root);
+  if (!relPath) return { ok: false, error: "方案路径无效" };
+  const result = await readFile(relPath, root);
   if (!result.ok) return { ok: false, error: result.error };
   const content = stripPlanFilePreamble(result.content || "");
   if (!content) return { ok: false, error: "方案文件为空" };
   return { ok: true, content };
 }
 
-/** Prefer on-disk PLAN.md (user may have edited) over chat bubble text. */
+/** Prefer on-disk plan file (user may have edited) over chat bubble text. */
 export async function resolvePlanContentForExecution(
   projectPath: string,
   messageFallback: string,
+  planFileRelPath: string,
 ): Promise<string> {
-  const disk = await readPlanFile(projectPath);
+  const disk = await readPlanFile(projectPath, planFileRelPath);
   if (disk.ok && disk.content?.trim()) return disk.content;
   return messageFallback.trim();
 }
 
-type PlanMessageSource = Pick<ChatMessage, "content" | "roundGroups" | "planFilePath" | "chatMode">;
+export type EnsurePlanFileBeforeExecutionResult = {
+  planContent: string;
+  planFilePath?: string;
+  persistError?: string;
+};
+
+async function tryReadLegacySharedPlan(
+  projectPath: string,
+  existingPlanFilePath: string | undefined,
+): Promise<string | undefined> {
+  if (existingPlanFilePath?.replace(/\\/g, "/").trim() !== LEGACY_PLAN_DOCUMENT_REL_PATH) {
+    return undefined;
+  }
+  const legacy = await readPlanFile(projectPath, LEGACY_PLAN_DOCUMENT_REL_PATH);
+  return legacy.ok && legacy.content?.trim() ? legacy.content : undefined;
+}
+
+/** Persist plan when missing, then resolve execution content (disk preferred). */
+export async function ensurePlanFileBeforeExecution(
+  projectPath: string,
+  planMarkdown: string,
+  messageId: string,
+  existingPlanFilePath?: string,
+): Promise<EnsurePlanFileBeforeExecutionResult> {
+  const root = projectPath.trim();
+  const fallback = planMarkdown.trim();
+  const mid = messageId.trim();
+  if (!root || !mid) return { planContent: fallback };
+
+  const targetPath = resolvePlanDocumentRelPath(mid, existingPlanFilePath);
+  const disk = await readPlanFile(root, targetPath);
+  if (disk.ok && disk.content?.trim()) {
+    return { planContent: disk.content, planFilePath: targetPath };
+  }
+
+  const legacyContent = await tryReadLegacySharedPlan(root, existingPlanFilePath);
+  if (legacyContent) {
+    const migrated = await persistPlanFile(root, legacyContent, targetPath);
+    if (migrated.ok) {
+      return { planContent: legacyContent, planFilePath: targetPath };
+    }
+    return { planContent: legacyContent, planFilePath: targetPath };
+  }
+
+  const shouldPersist =
+    Boolean(fallback)
+    && (looksLikeModificationPlan(fallback) || Boolean(existingPlanFilePath?.trim()));
+  if (!shouldPersist) {
+    return { planContent: fallback, planFilePath: targetPath };
+  }
+
+  const saved = await persistPlanFile(root, fallback, targetPath);
+  if (!saved.ok) {
+    return {
+      planContent: fallback,
+      planFilePath: targetPath,
+      persistError: saved.error || "写入失败",
+    };
+  }
+
+  const planContent = await resolvePlanContentForExecution(root, fallback, targetPath);
+  return { planContent, planFilePath: targetPath };
+}
+
+type PlanMessageSource = Pick<
+  ChatMessage,
+  "id" | "content" | "roundGroups" | "planFilePath" | "chatMode"
+>;
 
 /** Recover plan markdown from persisted assistant message fields (post-refresh). */
 export function extractPlanContentFromStoredMessage(
@@ -148,9 +234,23 @@ export async function resolvePlanContentForDisplay(
   if (inline && messageQualifiesForPlanPanel(inline, msg)) return inline;
   if (msg.chatMode === "plan" && inline) return inline;
   const root = projectPath.trim();
-  if (root && msg.planFilePath?.trim()) {
-    const disk = await readPlanFile(root);
+  const targetPath = msg.id
+    ? resolvePlanDocumentRelPath(msg.id, msg.planFilePath)
+    : msg.planFilePath?.trim();
+  if (root && targetPath) {
+    const disk = await readPlanFile(root, targetPath);
     if (disk.ok && disk.content?.trim()) return disk.content.trim();
+    if (
+      inline
+      && msg.id
+      && (looksLikeModificationPlan(inline) || looksLikeStreamingPlanContent(inline))
+    ) {
+      const saved = await persistPlanFile(root, inline, targetPath);
+      if (saved.ok) {
+        const retry = await readPlanFile(root, targetPath);
+        if (retry.ok && retry.content?.trim()) return retry.content.trim();
+      }
+    }
   }
   return inline;
 }

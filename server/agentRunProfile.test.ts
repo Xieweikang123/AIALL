@@ -24,6 +24,7 @@ describe("buildExecutePlanSystemHint", () => {
     );
     expect(hint).toContain("read_file");
     expect(hint).toContain("search_files");
+    expect(hint).toContain(".aiall/plans/");
     expect(hint).not.toMatch(/禁止/);
   });
 });

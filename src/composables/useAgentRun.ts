@@ -7,6 +7,7 @@ import {
   resolveAgentResumeRunProfile,
   resolveResumeMaxTurns,
   resolveAgentRunProfile,
+  resolveAskExecutionEscalation,
   shapeAgentHistoryForProfile,
   type AgentRunProfile,
 } from "../services/agentRunProfile";
@@ -64,8 +65,16 @@ import {
   stripToolSummaryFromAssistantContent,
   updateVibeChatSessionStatus,
 } from "../services/vibeChatStorage";
-import { looksLikeModificationPlan, findLastAssistantContentInMessages } from "../services/agentContinuation";
-import { persistPlanFile, resolvePlanContentForExecution } from "../services/planFile";
+import {
+  isAssistantExecutionBrief,
+  looksLikeModificationPlan,
+  findLastAssistantContentInMessages,
+} from "../services/agentContinuation";
+import {
+  ensurePlanFileBeforeExecution,
+  persistPlanFile,
+  resolvePlanDocumentRelPath,
+} from "../services/planFile";
 import { parseAgentSuggestions, type AgentSuggestion } from "../services/agentSuggestions";
 import { stripTextToolCallMarkup } from "../services/textToolCallMarkup";
 import { isDeleteNotFoundError, resolveAgentDoneFileAction } from "../services/vibeAgentTurnApply";
@@ -175,7 +184,7 @@ export type UseAgentRunDeps = {
   persistAgentRunSession: (sessionId: string) => void;
   snapshotAgentRunSession?: (sessionId: string) => void;
   onAgentRunSettled?: (msg: ChatMessage) => void;
-  /** After Plan explore writes `.aiall/PLAN.md`, open it in the editor. */
+  /** After Plan explore writes a per-message plan file, open it in the editor. */
   onPlanFileReady?: (relPath: string, messageId: string) => void;
   onMemoryProposal?: (msgId: string, proposal: import("../services/projectMemoryProposal").MemoryProposalPayload) => void;
   onSkillProposal?: (msgId: string, proposal: import("../services/projectSkillProposal").SkillProposalPayload) => void;
@@ -596,6 +605,63 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     );
   }
 
+  function findLastActionablePlanMessage(): ChatMessage | undefined {
+    for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
+      const msg = chatMessages.value[i];
+      if (msg?.role !== "assistant") continue;
+      const text = messageDisplayContent(msg as ChatMessage).trim();
+      if (text && isAssistantExecutionBrief(text)) return msg as ChatMessage;
+    }
+    return undefined;
+  }
+
+  async function applyPlanFileEnsureForExecution(
+    planMarkdown: string,
+    sourceMsg?: ChatMessage,
+  ): Promise<{ planContent: string; persistError?: string }> {
+    if (!sourceMsg?.id?.trim()) {
+      return { planContent: planMarkdown.trim() };
+    }
+    const ensured = await ensurePlanFileBeforeExecution(
+      projectPath.value.trim(),
+      planMarkdown,
+      sourceMsg.id,
+      sourceMsg.planFilePath,
+    );
+    if (ensured.planFilePath && sourceMsg.planFilePath !== ensured.planFilePath) {
+      sourceMsg.planFilePath = ensured.planFilePath;
+      patchAssistantMsg(sourceMsg.id, { planFilePath: ensured.planFilePath });
+      onPlanFileReady?.(ensured.planFilePath, sourceMsg.id);
+      persistChatNow(undefined, { flushStore: true });
+    }
+    if (ensured.persistError) {
+      chatError.value = `方案未能保存到 ${ensured.planFilePath ?? "磁盘"}：${ensured.persistError}。将按会话内容执行。`;
+    } else {
+      chatError.value = "";
+    }
+    return { planContent: ensured.planContent, persistError: ensured.persistError };
+  }
+
+  async function tryPersistPlanMessageToDisk(
+    assistantMsg: ChatMessage,
+    msgId: string,
+  ): Promise<boolean> {
+    const planText = messageDisplayContent(assistantMsg).trim();
+    if (!looksLikeModificationPlan(planText)) return false;
+    const root = projectPath.value.trim();
+    if (!root) return false;
+    const relPath = resolvePlanDocumentRelPath(msgId, assistantMsg.planFilePath);
+    const saved = await persistPlanFile(root, planText, relPath);
+    if (!saved.ok) {
+      chatError.value = `方案未能保存到 ${relPath}：${saved.error || "写入失败"}`;
+      return false;
+    }
+    assistantMsg.planFilePath = saved.path;
+    patchAssistantMsg(msgId, { planFilePath: saved.path });
+    onPlanFileReady?.(saved.path, msgId);
+    return true;
+  }
+
   async function maybePersistPlanFileToDisk(
     assistantMsg: ChatMessage,
     msgId: string,
@@ -603,15 +669,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   ): Promise<void> {
     if (options.wasAborted || assistantMsg.agentFailed) return;
     if (assistantMsg.chatMode !== "plan" || options.wasExecutePlanRun) return;
-    const planText = messageDisplayContent(assistantMsg).trim();
-    if (!looksLikeModificationPlan(planText)) return;
-    const root = projectPath.value.trim();
-    if (!root) return;
-    const saved = await persistPlanFile(root, planText);
-    if (!saved.ok) return;
-    assistantMsg.planFilePath = saved.path;
-    patchAssistantMsg(msgId, { planFilePath: saved.path });
-    onPlanFileReady?.(saved.path, msgId);
+    if (await tryPersistPlanMessageToDisk(assistantMsg, msgId)) {
+      persistChatNow(undefined, { flushStore: true });
+    }
   }
 
 
@@ -1526,19 +1586,12 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     }
 
     void maybePersistPlanFileToDisk(assistantMsg, msgId, { wasExecutePlanRun, wasAborted }).then(() => {
-      if (assistantMsg.planFilePath) {
-        patchAssistantMsg(msgId, { planFilePath: assistantMsg.planFilePath });
-        persistChatNow(undefined, { flushStore: true });
+      void scrollChatToBottom();
+      onAgentRunSettled?.(assistantMsg);
+      if (pendingPromptQueue.value.length) {
+        dequeuePendingPromptAndRun();
       }
     });
-
-    void scrollChatToBottom();
-
-    onAgentRunSettled?.(assistantMsg);
-
-    if (pendingPromptQueue.value.length) {
-      dequeuePendingPromptAndRun();
-    }
   }
 
   const agentEventHandlers = new Map<string, AgentEventFn>([
@@ -1879,7 +1932,18 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       chatError.value = "会话已切换，发送已取消";
       return false;
     }
-    const mode = chatMode.value;
+    const uiMode = chatMode.value;
+    const earlyLastAssistant = options?.planAssistantContent ?? findLastAssistantContent();
+    const askEscalation =
+      uiMode === "ask"
+        ? resolveAskExecutionEscalation({
+            prompt: rawPrompt,
+            mode: uiMode,
+            lastAssistantContent: earlyLastAssistant,
+            referencedFiles: options?.referencedFiles,
+          })
+        : null;
+    const agentMode = askEscalation?.mode ?? uiMode;
 
     function rollbackTurnPlaceholders(skipUserBubble?: boolean) {
       const msgs = chatMessages.value;
@@ -1935,7 +1999,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           id: genId(),
           role: "assistant",
           content: "",
-          chatMode: mode,
+          chatMode: agentMode,
           tools: [],
           roundGroups: [],
           activityExpanded: true,
@@ -1998,7 +2062,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           id: genId(),
           role: "assistant",
           content: "",
-          chatMode: mode,
+          chatMode: agentMode,
           tools: [],
           roundGroups: [],
           activityExpanded: true,
@@ -2018,17 +2082,26 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       }
     }
 
-    const lastAssistant = options?.planAssistantContent ?? findLastAssistantContent();
-    const runProfile = resolveAgentRunProfile({
-      prompt: rawPrompt,
-      mode,
-      lastAssistantContent: lastAssistant,
-      referencedFiles: options?.referencedFiles,
-    });
-    planExecutionActive.value = mode === "plan" && runProfile.kind === "execute_plan";
+    let planAssistantContent = options?.planAssistantContent;
+    const lastAssistant = planAssistantContent ?? findLastAssistantContent();
+    const runProfile =
+      askEscalation?.runProfile ??
+      resolveAgentRunProfile({
+        prompt: rawPrompt,
+        mode: agentMode,
+        lastAssistantContent: lastAssistant,
+        referencedFiles: options?.referencedFiles,
+      });
+    if (runProfile.kind === "execute_plan" && !planAssistantContent && lastAssistant?.trim()) {
+      const sourceMsg = findLastActionablePlanMessage();
+      const ensured = await applyPlanFileEnsureForExecution(lastAssistant, sourceMsg);
+      planAssistantContent = ensured.planContent;
+    }
+    const effectiveLastAssistant = planAssistantContent ?? lastAssistant;
+    planExecutionActive.value = agentMode === "plan" && runProfile.kind === "execute_plan";
     const prompt = buildAgentPromptForProfile(
       enrichAgentUserPrompt(rawPrompt, {
-        lastAssistantContent: lastAssistant,
+        lastAssistantContent: effectiveLastAssistant,
         hasImages: hasImagesForRequest,
       }),
       runProfile,
@@ -2038,7 +2111,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
     const exploreDepth = options?.exploreDepth ?? "standard";
     const maxTurns =
-      mode === "explore"
+      uiMode === "explore"
         ? resolveExploreRequestMaxTurns(
             rawPrompt,
             history,
@@ -2046,7 +2119,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
             undefined,
             exploreDepth,
           )
-        : options?.maxTurns ?? resolveAgentMaxTurns(mode, runProfile);
+        : options?.maxTurns ?? resolveAgentMaxTurns(agentMode, runProfile);
 
     const runGen = runManager.has(sessionId)
       ? runManager.getGeneration(sessionId)
@@ -2064,7 +2137,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       endpoint: aiConfig.value.endpoint,
       apiKey: aiConfig.value.apiKey,
       model: aiConfig.value.model,
-      mode,
+      mode: agentMode,
       maxTurns,
       openFilePath: activeFilePath.value || undefined,
       runProfile: runProfile.kind === "execute_plan" ? runProfile : undefined,
@@ -2155,10 +2228,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   async function executePlanFromMessage(messageId: string) {
     const msg = chatMessages.value.find((m) => m.id === messageId);
     if (!msg || !canExecutePlanMessage(msg)) return;
-    const planContent = await resolvePlanContentForExecution(
-      projectPath.value.trim(),
-      messageDisplayContent(msg),
-    );
+    const planText = messageDisplayContent(msg).trim();
+    const { planContent } = await applyPlanFileEnsureForExecution(planText, msg);
     await runAgentTurn("改吧", {
       userBubbleContent: "执行方案",
       planAssistantContent: planContent,
