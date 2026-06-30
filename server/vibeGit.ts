@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { filterStageableGitPaths, formatGitStageSkippedHint, shouldShowGitStatusPath } from "../shared/gitStageGuard";
 
 const execFileAsync = promisify(execFile);
 const MAX_DIFF_PREVIEW_CHARS = 2 * 1024 * 1024;
@@ -123,14 +124,29 @@ async function gitExec(projectRoot: string, args: string[], timeoutMs = 10_000):
 
 export async function gitStatus(projectRoot: string): Promise<GitStatusResult> {
   try {
-    const [{ stdout: branchOut }, { stdout: headOut }] = await Promise.all([
-      gitExec(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]),
-      gitExec(projectRoot, ["rev-parse", "HEAD"]),
-    ]);
-    const branch = branchOut.trim();
-    const headCommit = headOut.trim();
+    let branch = "main";
+    let headCommit = "";
 
-    const { stdout } = await gitExec(projectRoot, ["status", "--porcelain=v1", "-z"]);
+    try {
+      const { stdout } = await gitExec(projectRoot, ["symbolic-ref", "--short", "HEAD"]);
+      branch = stdout.trim();
+    } catch {
+      try {
+        const { stdout } = await gitExec(projectRoot, ["rev-parse", "--abbrev-ref", "HEAD"]);
+        branch = stdout.trim();
+      } catch {
+        // fallback to main
+      }
+    }
+
+    try {
+      const { stdout } = await gitExec(projectRoot, ["rev-parse", "HEAD"]);
+      headCommit = stdout.trim();
+    } catch {
+      // no commits yet
+    }
+
+    const { stdout } = await gitExec(projectRoot, ["status", "--porcelain=v1", "-z", "-uall"]);
     const files: GitStatusFile[] = [];
     const entries = stdout.split("\0").filter(Boolean);
 
@@ -145,7 +161,7 @@ export async function gitStatus(projectRoot: string): Promise<GitStatusResult> {
         : undefined;
       if (!filePath) continue;
 
-      const hasIndexChange = indexStatus !== " " && indexStatus !== "?";
+      const hasIndexChange = indexStatus !== " " && indexStatus !== "?" && indexStatus !== "!";
       const hasWorktreeChange = worktreeStatus !== " " && worktreeStatus !== "?" && worktreeStatus !== "!";
 
       function getStatus(s: string): string {
@@ -187,10 +203,12 @@ export async function gitStatus(projectRoot: string): Promise<GitStatusResult> {
       }
     }
 
-    const stagedCount = files.filter((f) => f.staged).length;
-    const unstagedCount = files.filter((f) => !f.staged).length;
+    const visibleFiles = files.filter((f) => f.status === "ignored" || shouldShowGitStatusPath(f.path));
 
-    return { ok: true, branch, headCommit, files, stagedCount, unstagedCount };
+    const stagedCount = visibleFiles.filter((f) => f.staged).length;
+    const unstagedCount = visibleFiles.filter((f) => !f.staged).length;
+
+    return { ok: true, branch, headCommit, files: visibleFiles, stagedCount, unstagedCount };
   } catch (error) {
     return {
       ok: false,
@@ -215,7 +233,6 @@ export async function gitChangedFilesSince(
   options: GitChangedFilesSinceOptions = {},
 ): Promise<{ ok: boolean; files: string[]; error?: string }> {
   const base = sinceCommit.trim();
-  if (!base) return { ok: true, files: [] };
   const files = new Set<string>();
   const addLines = (stdout: string) => {
     for (const line of stdout.split("\n")) {
@@ -224,13 +241,31 @@ export async function gitChangedFilesSince(
     }
   };
   try {
-    const { stdout: rangeOut } = await gitExec(projectRoot, ["diff", "--name-only", base, "HEAD"]);
-    addLines(rangeOut);
+    let hasHead = false;
+    try {
+      await gitExec(projectRoot, ["rev-parse", "--verify", "HEAD"]);
+      hasHead = true;
+    } catch {
+      // no HEAD
+    }
+
+    if (base && hasHead) {
+      const { stdout: rangeOut } = await gitExec(projectRoot, ["diff", "--name-only", base, "HEAD"]);
+      addLines(rangeOut);
+    }
+
     if (options.includeWorkingTree) {
-      const { stdout: wtOut } = await gitExec(projectRoot, ["diff", "--name-only", "HEAD"]);
-      addLines(wtOut);
-      const { stdout: stagedOut } = await gitExec(projectRoot, ["diff", "--name-only", "--cached", "HEAD"]);
-      addLines(stagedOut);
+      if (hasHead) {
+        const { stdout: wtOut } = await gitExec(projectRoot, ["diff", "--name-only", "HEAD"]);
+        addLines(wtOut);
+        const { stdout: stagedOut } = await gitExec(projectRoot, ["diff", "--name-only", "--cached", "HEAD"]);
+        addLines(stagedOut);
+      } else {
+        const { stdout: wtOut } = await gitExec(projectRoot, ["diff", "--name-only"]);
+        addLines(wtOut);
+        const { stdout: stagedOut } = await gitExec(projectRoot, ["diff", "--name-only", "--cached"]);
+        addLines(stagedOut);
+      }
     }
     return { ok: true, files: [...files].sort() };
   } catch (error) {
@@ -321,6 +356,23 @@ export async function gitDiffContent(projectRoot: string, filePath: string, stag
     if (filePath.endsWith('/')) {
       return { ok: true, before: '', after: '' };
     }
+
+    let hasHead = false;
+    try {
+      await gitExec(projectRoot, ["rev-parse", "--verify", "HEAD"]);
+      hasHead = true;
+    } catch {
+      // no HEAD
+    }
+
+    if (!hasHead) {
+      const before = "";
+      const after = staged
+        ? (await readGitObjectForPreview(projectRoot, `:${filePath}`, filePath)) ?? ""
+        : await readWorktreeFile(projectRoot, filePath);
+      return { ok: true, before, after };
+    }
+
     const diffArgs = staged
       ? ["diff", "--cached", "--no-color", "-U100000", "--", filePath]
       : ["diff", "HEAD", "--no-color", "-U100000", "--", filePath];
@@ -584,82 +636,101 @@ export interface GitAheadCommitsResult {
   error?: string;
 }
 
+type GitPushBaseline = {
+  compareRef: string | null;
+  trackingLabel: string;
+  firstPushPending: boolean;
+  defaultRemote: string;
+};
+
+async function resolvePushBaseline(projectRoot: string): Promise<GitPushBaseline | null> {
+  const { stdout: remotesOut } = await gitExec(projectRoot, ["remote"]).catch(() => ({ stdout: "" }));
+  const remotes = remotesOut.trim().split("\n").filter(Boolean);
+  if (!remotes.length) return null;
+  const defaultRemote = remotes.includes("origin") ? "origin" : remotes[0]!;
+
+  try {
+    const { stdout } = await gitExec(projectRoot, ["rev-parse", "--abbrev-ref", "@{upstream}"]);
+    const upstream = stdout.trim();
+    if (upstream) {
+      return {
+        compareRef: upstream,
+        trackingLabel: upstream,
+        firstPushPending: false,
+        defaultRemote,
+      };
+    }
+  } catch {
+    // no upstream configured
+  }
+
+  let branch = "";
+  try {
+    const { stdout } = await gitExec(projectRoot, ["symbolic-ref", "--short", "HEAD"]);
+    branch = stdout.trim();
+  } catch {
+    return null;
+  }
+
+  const remoteBranch = `${defaultRemote}/${branch}`;
+  try {
+    await gitExec(projectRoot, ["rev-parse", "--verify", remoteBranch]);
+    return {
+      compareRef: remoteBranch,
+      trackingLabel: remoteBranch,
+      firstPushPending: false,
+      defaultRemote,
+    };
+  } catch {
+    return {
+      compareRef: null,
+      trackingLabel: remoteBranch,
+      firstPushPending: true,
+      defaultRemote,
+    };
+  }
+}
+
 export async function gitAheadCommits(projectRoot: string, count = 20): Promise<GitAheadCommitsResult> {
   try {
-    // 先获取 tracking branch
-    let trackingBranch = "";
-    try {
-      const { stdout: tbOut } = await gitExec(projectRoot, ["rev-parse", "--abbrev-ref", "@{upstream}"]);
-      trackingBranch = tbOut.trim();
-    } catch {
+    const baseline = await resolvePushBaseline(projectRoot);
+    if (!baseline) {
       return { ok: true, entries: [], trackingBranch: "" };
     }
 
-    if (!trackingBranch) {
-      return { ok: true, entries: [], trackingBranch: "" };
+    let entries: GitLogEntry[] = [];
+    if (baseline.firstPushPending) {
+      entries = await runGitLogQuery(projectRoot, count, [
+        "HEAD",
+        "--not",
+        `--remotes=${baseline.defaultRemote}`,
+      ]);
+    } else if (baseline.compareRef) {
+      entries = await runGitLogQuery(projectRoot, count, [`${baseline.compareRef}..HEAD`]);
     }
 
-    // 获取 ahead 的提交记录（本地有但远程没有的）
-    const { stdout } = await gitExec(projectRoot, [
-      "log",
-      `${trackingBranch}..HEAD`,
-      `--max-count=${count}`,
-      "--name-status",
-      "--format=%x1e%H%x1f%h%x1f%an%x1f%ai%x1f%d%x1f%B%x00",
-    ]);
-
-    const entries: GitLogEntry[] = [];
-    const blocks = stdout.split("\x1e").filter((block) => block.trim());
-
-    for (const block of blocks) {
-      const nullIdx = block.indexOf("\x00");
-      if (nullIdx === -1) continue;
-
-      const headerStr = block.substring(0, nullIdx);
-      const fileStr = block.substring(nullIdx + 1);
-      const headerParts = headerStr.split("\x1f");
-
-      if (headerParts.length >= 6) {
-        const files: GitLogFile[] = [];
-        const fileLines = fileStr.split("\n");
-        for (const line of fileLines) {
-          if (!line.trim()) continue;
-          const parts = line.split("\t");
-          const status = parts[0]?.trim() || "";
-          if (!status) continue;
-          if ((status.startsWith("R") || status.startsWith("C")) && parts.length >= 3) {
-            files.push({ status: status[0], oldPath: parts[1].trim(), path: parts[2].trim() });
-          } else if (parts[1]?.trim()) {
-            files.push({ status: status[0], path: parts[1].trim() });
-          }
-        }
-
-        entries.push({
-          hash: headerParts[0].trim(),
-          shortHash: headerParts[1].trim(),
-          author: headerParts[2].trim(),
-          date: headerParts[3].trim(),
-          refs: parseGitRefs(headerParts[4]),
-          message: headerParts.slice(5).join("\x1f").replace(/\n+$/, "").trim(),
-          files,
-        });
-      }
-    }
-
-    return { ok: true, entries, trackingBranch };
+    return { ok: true, entries, trackingBranch: baseline.trackingLabel };
   } catch (error) {
     return { ok: false, entries: [], trackingBranch: "", error: error instanceof Error ? error.message : "获取待推送提交失败" };
   }
 }
 
-export async function gitAdd(projectRoot: string, files: string[]): Promise<{ ok: boolean; error?: string }> {
+export async function gitAdd(
+  projectRoot: string,
+  files: string[],
+): Promise<{ ok: boolean; error?: string; warning?: string }> {
   try {
     if (files.length === 0) {
       await gitExec(projectRoot, ["add", "-A"]);
-    } else {
-      await gitExec(projectRoot, ["add", "--", ...files]);
+      return { ok: true };
     }
-    return { ok: true };
+    const { stageable, blocked } = filterStageableGitPaths(files);
+    if (!stageable.length) {
+      return { ok: false, error: formatGitStageSkippedHint(blocked) };
+    }
+    await gitExec(projectRoot, ["add", "--", ...stageable]);
+    const warning = blocked.length ? formatGitStageSkippedHint(blocked) : undefined;
+    return { ok: true, warning };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "暂存失败" };
   }
@@ -667,10 +738,28 @@ export async function gitAdd(projectRoot: string, files: string[]): Promise<{ ok
 
 export async function gitReset(projectRoot: string, files: string[]): Promise<{ ok: boolean; error?: string }> {
   try {
-    if (files.length === 0) {
-      await gitExec(projectRoot, ["reset", "HEAD"]);
+    let hasHead = false;
+    try {
+      await gitExec(projectRoot, ["rev-parse", "--verify", "HEAD"]);
+      hasHead = true;
+    } catch {
+      // no HEAD
+    }
+
+    if (hasHead) {
+      if (files.length === 0) {
+        await gitExec(projectRoot, ["reset", "HEAD"]);
+      } else {
+        await gitExec(projectRoot, ["reset", "HEAD", "--", ...files]);
+      }
     } else {
-      await gitExec(projectRoot, ["reset", "HEAD", "--", ...files]);
+      if (files.length === 0) {
+        await gitExec(projectRoot, ["read-tree", "--empty"]);
+      } else {
+        for (const file of files) {
+          await gitExec(projectRoot, ["rm", "--cached", "-r", "-f", "--", file]).catch(() => {});
+        }
+      }
     }
     return { ok: true };
   } catch (error) {
@@ -749,17 +838,34 @@ export async function gitRemotes(projectRoot: string): Promise<GitRemotesResult>
     let trackingBranch = "";
     let ahead = 0;
     let behind = 0;
-    try {
-      const [tbOut, abOut] = await Promise.all([
-        gitExec(projectRoot, ["rev-parse", "--abbrev-ref", "@{upstream}"]).catch(() => ({ stdout: "" })),
-        gitExec(projectRoot, ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"]).catch(() => ({ stdout: "0\t0" })),
-      ]);
-      trackingBranch = tbOut.stdout.trim();
-      const parts = abOut.stdout.trim().split(/\s+/);
-      ahead = Number(parts[0]) || 0;
-      behind = Number(parts[1]) || 0;
-    } catch {
-      // no upstream set
+    const baseline = await resolvePushBaseline(projectRoot);
+    if (baseline) {
+      trackingBranch = baseline.trackingLabel;
+      if (baseline.firstPushPending) {
+        try {
+          const { stdout } = await gitExec(projectRoot, ["rev-list", "--count", "HEAD"]);
+          ahead = Number(stdout.trim()) || 0;
+          behind = 0;
+        } catch {
+          ahead = 0;
+          behind = 0;
+        }
+      } else if (baseline.compareRef) {
+        try {
+          const { stdout } = await gitExec(projectRoot, [
+            "rev-list",
+            "--left-right",
+            "--count",
+            `HEAD...${baseline.compareRef}`,
+          ]);
+          const parts = stdout.trim().split(/\s+/);
+          ahead = Number(parts[0]) || 0;
+          behind = Number(parts[1]) || 0;
+        } catch {
+          ahead = 0;
+          behind = 0;
+        }
+      }
     }
 
     return { ok: true, remotes, trackingBranch, ahead, behind };

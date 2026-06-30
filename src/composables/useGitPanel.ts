@@ -2,6 +2,11 @@ import { computed, onUnmounted, reactive, ref, watch } from "vue";
 import { debugLog } from "../utils/debugLog";
 import { lsGet, lsSet } from "../utils/localStorageSafe";
 import {
+  filterStageableGitPaths,
+  formatGitStageSkippedHint,
+  isGitPathStageBlocked,
+} from "../../shared/gitStageGuard";
+import {
   pathsEqual,
   readGitBatchDraft,
   removeGitBatchDraft,
@@ -271,7 +276,12 @@ export function useGitPanel(
     }
     return result;
   });
-  const gitUnstagedFiles = computed(() => gitStatus.value.filter((f) => !f.staged));
+  const gitUnstagedFiles = computed(() => {
+    const unstaged = gitStatus.value.filter((f) => !f.staged);
+    const paths = sortedUnstagedPaths(unstaged.map((f) => f.path));
+    const byPath = new Map(unstaged.map((f) => [f.path, f]));
+    return paths.map((p) => byPath.get(p)).filter((f): f is GitStatusFile => f != null);
+  });
   const gitChangeCount = computed(() => gitStatus.value.length);
   const canGitCommit = computed(
     () =>
@@ -348,6 +358,29 @@ export function useGitPanel(
 
   function gitWorkingTreeDiffKey(filePath: string, staged = false): string {
     return `${staged ? "staged" : "worktree"}:${filePath}`;
+  }
+
+  function mergeStageWarnings(blocked: string[], apiWarning?: string): string {
+    return [blocked.length ? formatGitStageSkippedHint(blocked) : "", apiWarning || ""]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  async function runStageGitFiles(paths: string[]): Promise<{ ok: boolean; stageable: string[] }> {
+    const { stageable, blocked } = filterStageableGitPaths(paths);
+    if (!stageable.length) {
+      gitError.value = formatGitStageSkippedHint(blocked) || "没有可暂存的文件";
+      return { ok: false, stageable };
+    }
+    const result = await stageGitFiles(projectPath(), stageable);
+    const warning = mergeStageWarnings(blocked, result.warning);
+    if (!result.ok) {
+      gitError.value = result.error || "暂存失败";
+      await refreshGitStatus({ showLoading: false, force: true });
+      return { ok: false, stageable };
+    }
+    if (warning) gitError.value = warning;
+    return { ok: true, stageable };
   }
 
   function resetGitPanelState() {
@@ -694,9 +727,8 @@ export function useGitPanel(
     clearGitDiffCache();
     const filePaths = group.files.map((f) => f.path);
     try {
-      const stageResult = await stageGitFiles(projectPath(), filePaths);
+      const stageResult = await runStageGitFiles(filePaths);
       if (!stageResult.ok) {
-        gitError.value = stageResult.error || "暂存失败";
         await refreshGitStatus({ showLoading: false, force: true });
         return;
       }
@@ -757,9 +789,8 @@ export function useGitPanel(
     gitError.value = "";
     clearGitDiffCache();
     try {
-      const stageResult = await stageGitFiles(projectPath(), filesToCommit);
+      const stageResult = await runStageGitFiles(filesToCommit);
       if (!stageResult.ok) {
-        gitError.value = stageResult.error || "暂存失败";
         await refreshGitStatus({ showLoading: false, force: true });
         return;
       }
@@ -832,6 +863,10 @@ export function useGitPanel(
 
   async function stageFile(filePath: string) {
     if (!projectOpened()) return;
+    if (isGitPathStageBlocked(filePath)) {
+      gitError.value = formatGitStageSkippedHint([filePath]);
+      return;
+    }
     gitError.value = "";
     clearGitDiffCache();
     const t = Date.now();
@@ -841,10 +876,9 @@ export function useGitPanel(
     gitLastStagingAt.value = t;
     debugLog("stageFile start", filePath, "ts", t);
     try {
-      const result = await stageGitFiles(projectPath(), [filePath]);
+      const result = await runStageGitFiles([filePath]);
       debugLog("stageFile API done", "ok:", result.ok, "elapsed:", Date.now() - t);
       if (!result.ok) {
-        gitError.value = result.error || "暂存失败";
         await refreshGitStatus({ showLoading: false, force: true });
       }
     } catch (e) {
@@ -887,14 +921,20 @@ export function useGitPanel(
     clearGitDiffCache();
     const filesToStage = gitUnstagedFiles.value.map((f) => f.path);
     if (!filesToStage.length) return;
-    gitStatus.value = gitStatus.value.map((f) => ({ ...f, staged: true }));
+    const { stageable } = filterStageableGitPaths(filesToStage);
+    if (!stageable.length) {
+      gitError.value = formatGitStageSkippedHint(filesToStage) || "没有可暂存的文件";
+      return;
+    }
+    gitStatus.value = gitStatus.value.map((f) =>
+      stageable.includes(f.path) ? { ...f, staged: true } : f,
+    );
     gitStagingInProgress.value = true;
     gitStatusRefreshToken += 1;
     gitLastStagingAt.value = Date.now();
     try {
-      const result = await stageGitFiles(projectPath(), filesToStage);
+      const result = await runStageGitFiles(filesToStage);
       if (!result.ok) {
-        gitError.value = result.error || "暂存失败";
         await refreshGitStatus({ showLoading: false, force: true });
       }
     } catch (e) {
@@ -996,17 +1036,21 @@ export function useGitPanel(
       (path) => gitUnstagedFiles.value.some((f) => f.path === path),
     );
     if (!filesToStage.length) return;
+    const { stageable } = filterStageableGitPaths(filesToStage);
+    if (!stageable.length) {
+      gitError.value = formatGitStageSkippedHint(filesToStage) || "没有可暂存的文件";
+      return;
+    }
     gitStatus.value = gitStatus.value.map((f) =>
-      filesToStage.includes(f.path) ? { ...f, staged: true } : f,
+      stageable.includes(f.path) ? { ...f, staged: true } : f,
     );
     selectedGitFiles.value = [];
     gitStagingInProgress.value = true;
     gitStatusRefreshToken += 1;
     gitLastStagingAt.value = Date.now();
     try {
-      const result = await stageGitFiles(projectPath(), filesToStage);
+      const result = await runStageGitFiles(filesToStage);
       if (!result.ok) {
-        gitError.value = result.error || "暂存失败";
         await refreshGitStatus({ showLoading: false, force: true });
       }
     } catch (e) {

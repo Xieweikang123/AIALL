@@ -6,6 +6,7 @@ import {
   detectFileEOL,
   resolveProjectPath,
   resolveReadablePath,
+  shouldListDirectoryEntry,
 } from "./vibeFs";
 
 describe("resolveProjectPath", () => {
@@ -71,6 +72,25 @@ describe("resolveReadablePath", () => {
       expect(result.outsideProject).toBe(true);
       expect(result.path).toContain(`${path.sep}vibe-chat-sessions${path.sep}chat-abc.json`);
     }
+  });
+});
+
+describe("shouldListDirectoryEntry", () => {
+  it("lists dotfiles such as .gitignore", () => {
+    expect(shouldListDirectoryEntry(".gitignore", false)).toBe(true);
+    expect(shouldListDirectoryEntry(".env", false)).toBe(true);
+  });
+
+  it("lists useful dot directories but hides IDE/VCS metadata dirs", () => {
+    expect(shouldListDirectoryEntry(".aiall", true)).toBe(true);
+    expect(shouldListDirectoryEntry(".github", true)).toBe(true);
+    expect(shouldListDirectoryEntry(".git", true)).toBe(false);
+    expect(shouldListDirectoryEntry(".vs", true)).toBe(false);
+  });
+
+  it("still hides build and dependency directories", () => {
+    expect(shouldListDirectoryEntry("node_modules", true)).toBe(false);
+    expect(shouldListDirectoryEntry("dist", true)).toBe(false);
   });
 });
 

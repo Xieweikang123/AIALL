@@ -21,6 +21,27 @@ export const IGNORE_DIRS = new Set([
   "dist", "build", ".next", ".nuxt", "target",
 ]);
 
+/** Dot directories hidden from file tree (IDE/VCS); dot files like .gitignore are shown. */
+const HIDDEN_DOT_DIRECTORIES = new Set([
+  ".git",
+  ".svn",
+  ".hg",
+  ".vs",
+  ".idea",
+  ".cache",
+  ".next",
+  ".nuxt",
+]);
+
+export function shouldListDirectoryEntry(name: string, isDirectory: boolean): boolean {
+  if (IGNORE_DIRS.has(name)) return false;
+  if (name.startsWith(".")) {
+    if (isDirectory) return !HIDDEN_DOT_DIRECTORIES.has(name);
+    return true;
+  }
+  return true;
+}
+
 export function resolveProjectPath(
   projectRoot: string,
   inputPath: string,
@@ -104,7 +125,7 @@ export async function listDirectory(dirPath: string) {
   }> = [];
 
   // 用 readdir 的 withFileTypes 判断类型，只对文件取 size（减少 stat 调用）
-  const filtered = entries.filter((e) => !e.name.startsWith(".") && !IGNORE_DIRS.has(e.name));
+  const filtered = entries.filter((e) => shouldListDirectoryEntry(e.name, e.isDirectory()));
   const statResults = await Promise.all(
     filtered.map(async (entry) => {
       const fullPath = path.join(dirPath, entry.name);
@@ -336,7 +357,7 @@ export async function searchFiles(dirPath: string, query: string, maxResults = 3
       const entries = await fs.promises.readdir(currentDir, { withFileTypes: true });
       for (const entry of entries) {
         if (results.length >= maxResults) break;
-        if (entry.name.startsWith(".") || IGNORE_DIRS.has(entry.name)) continue;
+        if (!shouldListDirectoryEntry(entry.name, entry.isDirectory())) continue;
         if (entry.name.toLowerCase().includes(lowerQuery)) {
           const full = path.join(currentDir, entry.name);
           results.push({
@@ -435,7 +456,7 @@ async function grepInProjectNode(root: string, pattern: string, maxMatches: numb
 
     for (const entry of entries) {
       if (matches.length >= maxMatches) break;
-      if (entry.name.startsWith(".") || IGNORE_DIRS.has(entry.name)) continue;
+      if (!shouldListDirectoryEntry(entry.name, entry.isDirectory())) continue;
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         await walk(full, depth + 1);

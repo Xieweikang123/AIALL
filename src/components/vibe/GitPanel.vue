@@ -283,7 +283,10 @@
                       <span class="git-file-status" :class="gitStatusClass(file.status)">
                         {{ gitStatusIcon(file.status) }}
                       </span>
-                      <span class="git-file-path" :title="file.path">{{ file.path }}</span>
+                      <span class="git-file-path" :title="file.path">
+                        <span v-if="splitGitFilePath(file.path).dir" class="git-file-path-dir">{{ splitGitFilePath(file.path).dir }}</span>
+                        <span class="git-file-path-name">{{ splitGitFilePath(file.path).name }}</span>
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -300,8 +303,8 @@
                   </div>
                   <div v-if="gitUnstagedOpen" class="git-file-list">
                     <div
-                      v-for="file in gitUnstagedFiles"
-                      :key="file.path"
+                      v-for="(file, idx) in gitUnstagedFiles"
+                      :key="`unstaged:${file.path}:${idx}`"
                       class="git-file-item"
                       :class="{ active: selectedGitFiles.includes(file.path), loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(file.path, file.staged), 'file-item-draggable': true }"
                       @pointerdown="$emit('on-git-file-pointer-down', $event, file.path, file.staged)"
@@ -311,7 +314,10 @@
                       <span class="git-file-status" :class="gitStatusClass(file.status)">
                         {{ gitStatusIcon(file.status) }}
                       </span>
-                      <span class="git-file-path" :title="file.path">{{ file.path }}</span>
+                      <span class="git-file-path" :title="file.path">
+                        <span v-if="splitGitFilePath(file.path).dir" class="git-file-path-dir">{{ splitGitFilePath(file.path).dir }}</span>
+                        <span class="git-file-path-name">{{ splitGitFilePath(file.path).name }}</span>
+                      </span>
                       <button type="button" class="ghost tiny danger git-file-btn" title="丢弃更改" @pointerdown.stop @click.stop="$emit('discard-file', file.path, $event)">✕</button>
                     </div>
                   </div>
@@ -460,7 +466,10 @@
                         :title="f.path"
                       >
                         <span class="git-file-status" :class="gitStatusClass(f.status)">{{ gitStatusIcon(f.status) }}</span>
-                        <span class="git-file-path">{{ f.path }}</span>
+                        <span class="git-file-path" :title="f.path">
+                          <span v-if="splitGitFilePath(f.path).dir" class="git-file-path-dir">{{ splitGitFilePath(f.path).dir }}</span>
+                          <span class="git-file-path-name">{{ splitGitFilePath(f.path).name }}</span>
+                        </span>
                       </div>
                     </div>
                     <button
@@ -882,6 +891,13 @@ function gitHistoryDiffKey(hash: string, path: string, oldPath?: string): string
   return `history:${hash}:${oldPath || ''}:${path}`;
 }
 
+function splitGitFilePath(filePath: string): { dir: string; name: string } {
+  const normalized = filePath.replace(/\\/g, "/");
+  const slash = normalized.lastIndexOf("/");
+  if (slash === -1) return { dir: "", name: normalized };
+  return { dir: `${normalized.slice(0, slash + 1)}`, name: normalized.slice(slash + 1) };
+}
+
 function gitStatusIcon(status: string): string {
   switch (status) {
     case "A":
@@ -1222,11 +1238,15 @@ function gitStatusClass(status: string): string {
 }
 
 .git-panel {
-  flex: 1;
+  flex: 1 1 0;
+  align-self: stretch;
   min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
   padding: 12px;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .panel-empty {
@@ -1246,6 +1266,7 @@ function gitStatusClass(status: string): string {
   gap: 10px;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
 .git-section-card {
@@ -1767,60 +1788,69 @@ function gitStatusClass(status: string): string {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  overflow: hidden;
+}
+
+.git-local-section {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.git-local-section--collapsed {
+  flex: 0 0 auto;
+}
+
+.git-local-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.git-changes-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   overflow-y: auto;
+  overflow-x: hidden;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
 
-.git-work-area::-webkit-scrollbar {
+.git-changes-scroll::-webkit-scrollbar {
   width: 5px;
 }
 
-.git-work-area::-webkit-scrollbar-thumb {
+.git-changes-scroll::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.18);
+}
+
+.git-commit-box,
+.git-batch-section {
+  flex-shrink: 0;
 }
 
 .git-work-area--log-open {
   overflow: hidden;
 }
 
-.git-changes-scroll {
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+.git-work-area--log-open .git-local-section:not(.git-local-section--collapsed) {
+  flex: 1 1 45%;
+  min-height: 140px;
+  max-height: 58%;
 }
 
-.git-work-area--log-open .git-local-section {
-  flex: 0 1 auto;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.git-work-area--log-open .git-local-content {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 0;
-}
-
-.git-work-area--log-open .git-changes-scroll {
-  flex: 0 1 auto;
-  max-height: 180px;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
-}
-
-.git-work-area--log-open .git-changes-scroll::-webkit-scrollbar {
-  width: 5px;
-}
-
-.git-work-area--log-open .git-changes-scroll::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.18);
+.git-work-area--log-open .git-log-section--open {
+  flex: 1 1 55%;
+  min-height: 120px;
 }
 
 .git-section {
@@ -1965,13 +1995,24 @@ function gitStatusClass(status: string): string {
 .git-file-path {
   flex: 1;
   min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.git-file-path-dir {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  direction: rtl;
-  text-align: left;
-  unicode-bidi: plaintext;
-  color: rgba(255, 255, 255, 0.88);
+  color: rgba(255, 255, 255, 0.52);
+}
+
+.git-file-path-name {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .git-file-btn {
