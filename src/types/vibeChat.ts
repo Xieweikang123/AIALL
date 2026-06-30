@@ -30,6 +30,9 @@ export type VibeChatMessage = Omit<PersistedChatMessage, "tools" | "roundGroups"
   _expandedDiffs?: Record<string, boolean>;
 };
 
+/** @deprecated 请使用 VibeChatMessage；保留别名以兼容旧 import */
+export type ChatMessage = VibeChatMessage;
+
 export type TurnFileDiff = {
   before: string;
   after: string;

@@ -654,6 +654,24 @@ button:active:not(:disabled) {
   color: rgba(148, 163, 184, 0.78);
 }
 
+.msg-live-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(88, 166, 255, 0.06);
+  border: 1px solid rgba(88, 166, 255, 0.12);
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(165, 214, 255, 0.92);
+}
+
+.msg-status--legacy {
+  margin-top: 8px;
+}
+
 .status-pulse {
   width: 8px;
   height: 8px;
