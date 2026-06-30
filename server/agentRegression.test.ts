@@ -10,11 +10,8 @@ import {
   resolveAgentRunPolicy,
   usesReadOnlyTools,
 } from "./agentRunPolicy";
-import {
-  classifyUserIntentFromRules,
-  resolveUserIntent,
-} from "../src/services/agentIntentClassifier";
-import { normalizeRunProfile } from "./agentRunProfile";
+import { normalizeExecutePlanContext } from "./agentExecutePlanContext";
+import { classifyUserIntentFromRules, resolveUserIntent } from "../src/services/intentClassifierRules";
 import {
   evaluateAgentRegressionCase,
   formatAgentRegressionReport,
@@ -36,7 +33,7 @@ describe("resolveAgentRunPolicy", () => {
       prompt: "列表按啥字段排序的？",
       mode: "build",
       userIntent,
-      runProfile: normalizeRunProfile({ kind: "interactive" }),
+      runProfile: normalizeExecutePlanContext({ kind: "interactive" }),
       hasImage: false,
       isExecutePlan: false,
       isPlanExplore: false,
@@ -45,6 +42,29 @@ describe("resolveAgentRunPolicy", () => {
     expect(
       usesReadOnlyTools(policy, { isReadOnlyAgent: false, isPlanExplore: false }),
     ).toBe(true);
+  });
+
+  it("ActionClassifier routes 是啥 inquiry in build to read-only tools", () => {
+    const prompt = "当前项目测试接口是啥";
+    const userIntent = resolveUserIntent({
+      prompt,
+      mode: "build",
+      hasImage: false,
+      isAsk: false,
+      ai: null,
+    });
+    const policy = resolveAgentRunPolicy({
+      prompt,
+      mode: "build",
+      userIntent,
+      runProfile: normalizeExecutePlanContext({ kind: "interactive" }),
+      hasImage: false,
+      isExecutePlan: false,
+      isPlanExplore: false,
+    });
+    expect(userIntent.primary).toBe("consultative");
+    expect(userIntent.consultativeTopic).toBe("project_overview");
+    expect(policy.readOnlyBuildRun).toBe(true);
   });
 
   it("uses execute_plan context budget", () => {
@@ -58,7 +78,7 @@ describe("resolveAgentRunPolicy", () => {
       prompt: "改吧",
       mode: "build",
       userIntent,
-      runProfile: normalizeRunProfile({ kind: "execute_plan", targetFiles: ["src/foo.ts"] }),
+      runProfile: normalizeExecutePlanContext({ kind: "execute_plan", targetFiles: ["src/foo.ts"] }),
       hasImage: false,
       isExecutePlan: true,
       isPlanExplore: false,
@@ -79,7 +99,7 @@ describe("resolveAgentRunPolicy", () => {
       prompt: "弹窗背景透明的？",
       mode: "build",
       userIntent,
-      runProfile: normalizeRunProfile({ kind: "interactive" }),
+      runProfile: normalizeExecutePlanContext({ kind: "interactive" }),
       hasImage: true,
       isExecutePlan: false,
       isPlanExplore: false,
@@ -103,13 +123,37 @@ describe("resolveAgentRunPolicy", () => {
       mode: "build",
       history,
       userIntent,
-      runProfile: normalizeRunProfile({ kind: "interactive" }),
+      runProfile: normalizeExecutePlanContext({ kind: "interactive" }),
       hasImage: false,
       isExecutePlan: false,
       isPlanExplore: false,
     });
     expect(policy.behaviorContradictionRun).toBe(true);
     expect(policy.readOnlyBuildRun).toBe(true);
+  });
+
+  it("expands quoted amend follow-ups into effectiveTaskPrompt", () => {
+    const prompt = "> Agent: scopeA：保留 `TargetSymbol`\n\n也移除";
+    const userIntent = resolveUserIntent({
+      prompt,
+      mode: "build",
+      hasImage: false,
+      isAsk: false,
+      ai: null,
+    });
+    const policy = resolveAgentRunPolicy({
+      prompt,
+      mode: "build",
+      userIntent,
+      runProfile: normalizeExecutePlanContext({ kind: "interactive" }),
+      hasImage: false,
+      isExecutePlan: false,
+      isPlanExplore: false,
+    });
+    expect(policy.quotedAmendRun).toBe(true);
+    expect(policy.effectiveTaskPrompt).toContain("操作：remove");
+    expect(policy.effectiveTaskPrompt).toContain("目标符号：TargetSymbol");
+    expect(policy.readOnlyBuildRun).toBe(false);
   });
 });
 

@@ -1,16 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveAgentRunProfile } from "../src/services/agentRunProfile";
+import { resolveAgentRunProfile, resolveAskExecutionEscalation } from "../src/services/agentRunProfile";
 import {
   classifyUserIntentFromRules,
   resolveUserIntent,
   shouldSkipAiIntentClassifier,
-  type ConsultativeTopicId,
-  type UserIntentPrimary,
-} from "../src/services/agentIntentClassifier";
-import type { UserIntentHistoryMessage } from "../src/services/agentUserIntent";
-import { normalizeRunProfile } from "./agentRunProfile";
+} from "../src/services/intentClassifierRules";
+import type { ConsultativeTopicId, UserIntentPrimary } from "../src/services/intentClassifierTypes";
+import type { UserIntentHistoryMessage } from "../src/orchestration/agentIntentTypes";
+import { normalizeExecutePlanContext } from "./agentExecutePlanContext";
 import { resolveAgentRunPolicy, usesReadOnlyTools } from "./agentRunPolicy";
 
 export type AgentRegressionMode = "ask" | "build" | "plan" | "explore";
@@ -89,12 +88,24 @@ const EXPECT_FIELDS = new Set<string>([
   "sameIssueFollowUpRun",
   "behaviorContradictionRun",
   "scheduledTaskConsultativeRun",
+  "quotedAmendRun",
   "exploreHardCap",
   "maxContextChars",
 ]);
 
 export function defaultRegressionFilePath(projectRoot = process.cwd()): string {
   return path.join(projectRoot, ".aiall", "agent-regression.json");
+}
+
+/** Bundled regression cases shipped with the repo (CI / fresh clones). */
+export function bundledRegressionFilePath(): string {
+  return path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "agent-regression.json");
+}
+
+export function resolveDefaultRegressionFilePath(projectRoot = process.cwd()): string {
+  const local = defaultRegressionFilePath(projectRoot);
+  if (fs.existsSync(local)) return local;
+  return bundledRegressionFilePath();
 }
 
 export function loadAgentRegressionFile(filePath: string): AgentRegressionFile {
@@ -145,13 +156,24 @@ export function evaluateAgentRegressionCase(caseInput: AgentRegressionCase): Age
   });
 
   const profileModeValue = profileMode(mode);
-  const clientProfile = resolveAgentRunProfile({
-    prompt,
-    mode: profileModeValue,
-    lastAssistantContent: lastAssistant,
-    history,
-  });
-  const runProfile = normalizeRunProfile(clientProfile);
+  const askEscalation =
+    mode === "ask"
+      ? resolveAskExecutionEscalation({
+          prompt,
+          mode: "ask",
+          lastAssistantContent: lastAssistant,
+          history,
+        })
+      : null;
+  const clientProfile =
+    askEscalation?.runProfile ??
+    resolveAgentRunProfile({
+      prompt,
+      mode: profileModeValue,
+      lastAssistantContent: lastAssistant,
+      history,
+    });
+  const runProfile = normalizeExecutePlanContext(clientProfile);
   const isExecutePlan = runProfile.kind === "execute_plan";
   const isPlanExplore = mode === "plan" && !isExecutePlan;
 
@@ -186,6 +208,7 @@ export function evaluateAgentRegressionCase(caseInput: AgentRegressionCase): Age
     sameIssueFollowUpRun: policy.sameIssueFollowUpRun,
     behaviorContradictionRun: policy.behaviorContradictionRun,
     scheduledTaskConsultativeRun: policy.scheduledTaskConsultativeRun,
+    quotedAmendRun: policy.quotedAmendRun,
     exploreHardCap: policy.exploreHardCap,
     maxContextChars: policy.maxContextChars,
   };
@@ -233,12 +256,7 @@ export function formatAgentRegressionReport(report: AgentRegressionReport): stri
 }
 
 export function loadAndRunAgentRegression(projectRoot = process.cwd()): AgentRegressionReport {
-  const filePath = defaultRegressionFilePath(projectRoot);
+  const filePath = resolveDefaultRegressionFilePath(projectRoot);
   const file = loadAgentRegressionFile(filePath);
   return runAgentRegression(file.cases);
-}
-
-export function resolveDefaultRegressionFilePath(): string {
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  return defaultRegressionFilePath(path.resolve(here, ".."));
 }

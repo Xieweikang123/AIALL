@@ -1,0 +1,197 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "build-consultative-sort",
+      "description": "Build 模式下字段排序咨询应为只读",
+      "prompt": "列表按啥字段排序的？",
+      "mode": "build",
+      "expect": {
+        "consultative": true,
+        "readOnlyBuildRun": true,
+        "readOnlyTools": true,
+        "runProfileKind": "interactive"
+      }
+    },
+    {
+      "id": "ask-consultative-sort",
+      "description": "Ask 模式下同类咨询保持只读并跳过 AI 分类",
+      "prompt": "列表按啥字段排序的？",
+      "mode": "ask",
+      "expect": {
+        "consultative": true,
+        "readOnlyTools": true,
+        "skipAiClassifier": true
+      }
+    },
+    {
+      "id": "build-project-overview",
+      "description": "项目概览题识别为 project_overview 且只读",
+      "prompt": "解释这个项目是做什么的",
+      "mode": "build",
+      "expect": {
+        "consultative": true,
+        "consultativeTopic": "project_overview",
+        "readOnlyBuildRun": true,
+        "runProfileKind": "interactive",
+        "skipAiClassifier": true
+      }
+    },
+    {
+      "id": "build-execute-continuation",
+      "description": "用户确认执行上一轮方案 → execute_plan",
+      "prompt": "改吧",
+      "mode": "build",
+      "lastAssistant": "## 修改方案\n\n修改 `src/foo.ts`：\n\n```ts\nexport const x = 1;\n```",
+      "expect": {
+        "runProfileKind": "execute_plan",
+        "readOnlyBuildRun": false,
+        "readOnlyTools": false
+      }
+    },
+    {
+      "id": "build-direct-implement",
+      "description": "直接实现意图走 execute_plan",
+      "prompt": "帮我在 src/foo.ts 加上重试逻辑",
+      "mode": "build",
+      "expect": {
+        "primary": "implement",
+        "readOnlyBuildRun": false,
+        "runProfileKind": "execute_plan"
+      }
+    },
+    {
+      "id": "build-behavior-contradiction",
+      "description": "用户现象与上轮否定结论矛盾",
+      "prompt": "但是不知道为啥，切换上下文，选中的项自动跑到上面了",
+      "mode": "build",
+      "history": [
+        { "role": "assistant", "content": "**不会。** 切换上下文不更新 `touchMark`。" }
+      ],
+      "expect": {
+        "behaviorContradictionRun": true,
+        "consultative": true,
+        "readOnlyBuildRun": true
+      }
+    },
+    {
+      "id": "build-scheduled-task",
+      "description": "定时任务咨询只读",
+      "prompt": "有没有跑批数据的定时任务吗？",
+      "mode": "build",
+      "expect": {
+        "consultative": true,
+        "scheduledTaskConsultativeRun": true,
+        "readOnlyBuildRun": true,
+        "skipAiClassifier": true
+      }
+    },
+    {
+      "id": "build-ultra-short-task",
+      "description": "极短开放任务应注入澄清提示",
+      "prompt": "修一下",
+      "mode": "build",
+      "expect": {
+        "ultraShortOpenTaskRun": true,
+        "readOnlyBuildRun": false,
+        "runProfileKind": "interactive"
+      }
+    },
+    {
+      "id": "build-ui-appearance-screenshot",
+      "description": "附图 UI 观感题为咨询只读并缩小上下文",
+      "prompt": "弹窗背景透明的？",
+      "mode": "build",
+      "hasImage": true,
+      "expect": {
+        "consultativeUiAppearanceRun": true,
+        "readOnlyBuildRun": true,
+        "readOnlyTools": true,
+        "maxContextChars": 48000
+      }
+    },
+    {
+      "id": "build-ui-defect-screenshot",
+      "description": "附图缺陷报告走写入修复路径",
+      "prompt": "按钮明显错位了，你瞧",
+      "mode": "build",
+      "hasImage": true,
+      "expect": {
+        "uiDefectBuildRun": true,
+        "readOnlyBuildRun": false,
+        "primary": "implement"
+      }
+    },
+    {
+      "id": "build-same-issue-followup",
+      "description": "上轮声称已修复后用户反馈仍不行",
+      "prompt": "还是不行",
+      "mode": "build",
+      "history": [
+        { "role": "assistant", "content": "已修复，刷新页面后应该可以了。" }
+      ],
+      "expect": {
+        "sameIssueFollowUpRun": true,
+        "readOnlyBuildRun": false
+      }
+    },
+    {
+      "id": "plan-explore-interactive",
+      "description": "Plan 首轮探索为 interactive，非 execute_plan",
+      "prompt": "给 src/foo.ts 加重试",
+      "mode": "plan",
+      "expect": {
+        "runProfileKind": "interactive",
+        "readOnlyTools": true
+      }
+    },
+    {
+      "id": "build-code-review",
+      "description": "代码审查请求走咨询只读",
+      "prompt": "检查一下代码",
+      "mode": "build",
+      "expect": {
+        "codeReviewRun": true,
+        "readOnlyBuildRun": true,
+        "readOnlyTools": true
+      }
+    },
+    {
+      "id": "build-short-followup-ba",
+      "description": "短追问「还要吧」承接上文且规则短路",
+      "prompt": "还要吧",
+      "mode": "build",
+      "history": [
+        { "role": "assistant", "content": "建议先用 grep 定位符号，再 read 核对片段。" }
+      ],
+      "expect": {
+        "consultative": true,
+        "skipAiClassifier": true,
+        "readOnlyBuildRun": true,
+        "runProfileKind": "interactive"
+      }
+    },
+    {
+      "id": "build-quoted-amend",
+      "description": "引用块修改意图走 quotedAmendRun 且可写",
+      "prompt": "> Agent: scopeA：保留 `TargetSymbol`\n\n也移除",
+      "mode": "build",
+      "expect": {
+        "quotedAmendRun": true,
+        "readOnlyBuildRun": false,
+        "runProfileKind": "interactive"
+      }
+    },
+    {
+      "id": "build-execute-ask-escalation",
+      "description": "Ask 确认执行上一轮方案 → execute_plan",
+      "prompt": "改吧",
+      "mode": "ask",
+      "lastAssistant": "## 修改方案\n\n修改 `src/foo.ts`：\n\n```ts\nexport const x = 1;\n```",
+      "expect": {
+        "runProfileKind": "execute_plan",
+        "readOnlyTools": true
+      }
+    }
+  ]
+}

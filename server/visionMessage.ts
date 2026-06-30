@@ -2,9 +2,9 @@ import {
   isAccuracyConsultativePrompt,
   isUiAppearanceQuestionPrompt,
   isUiLocateQuestionPrompt,
-} from "../src/services/agentUserIntent";
+} from "../src/orchestration/generic/userIntentClassifiers";
 
-export { isUiAppearanceQuestionPrompt, isUiLocateQuestionPrompt } from "../src/services/agentUserIntent";
+export { isUiAppearanceQuestionPrompt, isUiLocateQuestionPrompt } from "../src/orchestration/generic/userIntentClassifiers";
 
 export type ChatContentPart =
   | { type: "text"; text: string }

@@ -2,7 +2,7 @@ import type { ChatToolCall } from "./aiForward";
 import type { VibeAgentEvent } from "../shared/agentTypes";
 import type { AgentTurnContext } from "./agentTurnContext";
 import { emitUserVisibleAssistantMessage } from "./agentStream";
-import { isUiAppearanceQuestionPrompt } from "../src/services/agentUserIntent";
+import { isUiAppearanceQuestionPrompt } from "../src/orchestration/generic/userIntentClassifiers";
 import {
   isAdequateVisionFirstTurnDescription,
   buildConsultativeUiAppearanceHint,
@@ -36,20 +36,9 @@ import {
 import { buildSearchFilesEmptyHint } from "./agentAskPrompt";
 
 export interface VisionTurnParams {
-  turn: number;
-  consultativeVisionRun: boolean;
-  accuracyConsultativeRun: boolean;
-  behaviorPurposeRun: boolean;
-  consultativeUiAppearanceRun: boolean;
-  isReadOnlyAgent: boolean;
-  isPlanExplore: boolean;
-  readOnlyBuildRun: boolean;
-  uiDefectBuildRun: boolean;
-  projectRoot: string;
-  prompt: string;
-  imageDataUrls: string[];
-  model: string;
-  visionLocateSingleTurnRun: boolean;
+  visibleContent: string;
+  toolCalls: ChatToolCall[];
+  streamedChars: number;
 }
 
 /**
@@ -57,15 +46,30 @@ export interface VisionTurnParams {
  */
 export async function runTurnVision(
   ctx: AgentTurnContext,
-  visibleContent: string,
-  toolCalls: ChatToolCall[],
-  streamedChars: number,
   params: VisionTurnParams,
   onEvent: (event: VibeAgentEvent) => void,
 ): Promise<{ action: "continue" | "next" }> {
-  const { turn, consultativeVisionRun, accuracyConsultativeRun, behaviorPurposeRun,
-    consultativeUiAppearanceRun, isReadOnlyAgent, isPlanExplore, readOnlyBuildRun,
-    uiDefectBuildRun, projectRoot, prompt, imageDataUrls, model, visionLocateSingleTurnRun } = params;
+  const cfg = ctx.runConfig;
+  const p = cfg.runPolicy;
+  const { visibleContent, toolCalls, streamedChars } = params;
+  const {
+    consultativeVisionRun,
+    accuracyConsultativeRun,
+    behaviorPurposeRun,
+    consultativeUiAppearanceRun,
+    uiDefectBuildRun,
+  } = p;
+  const {
+    isReadOnlyAgent,
+    isPlanExplore,
+    projectRoot,
+    prompt,
+    imageDataUrls,
+    model,
+    visionLocateSingleTurnRun,
+  } = cfg;
+  const { readOnlyBuildRun } = p;
+  const turn = ctx.turn;
 
   if (!ctx.visionFirstTurnPending && !visionLocateSingleTurnRun) {
     return { action: "next" };

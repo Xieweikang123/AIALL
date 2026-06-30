@@ -2,6 +2,8 @@ import type { ChatCompletionMessage } from "./aiForward";
 import type { ToolGuardContext } from "./agentExploreGuard";
 import type { WriteStage } from "./agentToolExecutor";
 import { createWriteStage } from "./agentToolExecutor";
+import type { TurnRunConfig } from "./agentTurnRunConfig";
+import { isReadOnlyTurn } from "./agentRunPolicy";
 
 /**
  * Central mutable state for a running Agent turn loop.
@@ -11,6 +13,9 @@ import { createWriteStage } from "./agentToolExecutor";
  * a property on this object, making data flow explicit across turn phases.
  */
 export interface AgentTurnContext {
+  /** Immutable session routing config — shared across turn phases. */
+  runConfig: TurnRunConfig;
+
   // ── Turn lifecycle ──
   turn: number;
   segmentMaxTurns: number | undefined;
@@ -42,6 +47,7 @@ export interface AgentTurnContext {
   buildExploreForcePatchNudgeSent: boolean;
   scheduledJobRegistrationNudgeSent: boolean;
   fileBreadthNudgeSent: boolean;
+  planListDirOnlyNudgeSent: boolean;
   negationNudgeSent: boolean;
   postPatchVerifyNudgeSent: boolean;
   structuredAssetWriteNudgeSent: boolean;
@@ -65,6 +71,7 @@ export interface AgentTurnContext {
   emptyReplyRetries: number;
   prematureCompletionRetries: number;
   patchFailureCompletionRetries: number;
+  finishGateRetries: number;
   turnCapFinalSummaryAttempts: number;
 
   // ── Vision / image state ──
@@ -85,7 +92,17 @@ export interface AgentTurnContext {
   lastConsultativeExploreSig: string;
   consultativeDuplicateExploreHits: number;
   agentStepClarifyPending: boolean;
+  ambiguousTermClarificationPending: boolean;
+  ambiguousTermClarificationTerms: string[];
+  ambiguousTermClarificationRetries: number;
   exploreAbortGraceTurnActive: boolean;
+
+  /** User quoted plan excerpt and asked an informational question (not revision). */
+  planQuoteInformationalRun: boolean;
+  /** Pending unexecuted plan — user adopted consultative suggestion; amend existing plan. */
+  planPendingAmendRun: boolean;
+  /** Pending plan + ambiguous short follow-up — clarify before rewriting. */
+  planPendingClarifyRun: boolean;
 
   // ── Truncation ──
   truncationRetryCount: number;
@@ -93,20 +110,20 @@ export interface AgentTurnContext {
 }
 
 export function createAgentTurnContext(params: {
-  isReadOnlyAgent: boolean;
-  isPlanExplore: boolean;
-  readOnlyBuildRun: boolean;
+  runConfig: TurnRunConfig;
   segmentBudget: number;
   initialMaxTurns: number | undefined;
-  implementFollowUpRun: boolean;
-  agentStepClarifyRun: boolean;
-  sameIssueFollowUpRun: boolean;
-  userRecentlyReportedFailure: boolean;
-  userFailureReportRun: boolean;
-  locateStatusFollowUpRun: boolean;
+  ambiguousTermClarificationRun: boolean;
+  ambiguousTermClarificationTerms: string[];
+  planQuoteInformationalRun: boolean;
+  planPendingAmendRun: boolean;
+  planPendingClarifyRun: boolean;
 }): AgentTurnContext {
-  const isReadOnly = params.isReadOnlyAgent || params.isPlanExplore || params.readOnlyBuildRun;
+  const { runConfig } = params;
+  const p = runConfig.runPolicy;
+  const isReadOnly = isReadOnlyTurn(runConfig);
   return {
+    runConfig,
     turn: 0,
     segmentMaxTurns: params.initialMaxTurns ?? params.segmentBudget,
     segmentIndex: 1,
@@ -128,8 +145,8 @@ export function createAgentTurnContext(params: {
       visionLocateActive: false,
       consultativeReadPaths: [],
       blockExplorationArchiveWrite:
-        params.sameIssueFollowUpRun &&
-        (params.userFailureReportRun || params.userRecentlyReportedFailure),
+        p.sameIssueFollowUpRun &&
+        (p.userFailureReportRun || p.userRecentlyReportedFailure),
     },
 
     consecutiveExploreTurns: 0,
@@ -145,6 +162,7 @@ export function createAgentTurnContext(params: {
     buildExploreForcePatchNudgeSent: false,
     scheduledJobRegistrationNudgeSent: false,
     fileBreadthNudgeSent: false,
+    planListDirOnlyNudgeSent: false,
     negationNudgeSent: false,
     postPatchVerifyNudgeSent: false,
     structuredAssetWriteNudgeSent: false,
@@ -158,13 +176,14 @@ export function createAgentTurnContext(params: {
 
     patchAnchorLocated: false,
     teleportBodyConfirmed: false,
-    patchAnchorForcePending: params.implementFollowUpRun,
+    patchAnchorForcePending: p.implementFollowUpRun,
 
     patchFailureLog: [],
     consecutiveUserNegations: 0,
     emptyReplyRetries: 0,
     prematureCompletionRetries: 0,
     patchFailureCompletionRetries: 0,
+    finishGateRetries: 0,
     turnCapFinalSummaryAttempts: 0,
 
     visionFallbackApplied: false,
@@ -179,15 +198,31 @@ export function createAgentTurnContext(params: {
     visionConsultativeAccuracyRetries: 0,
     behaviorPurposeRetries: 0,
 
-    consultativeForceAnswerPending: params.locateStatusFollowUpRun,
+    consultativeForceAnswerPending: p.locateStatusFollowUpRun,
     lastConsultativeExploreSig: "",
     consultativeDuplicateExploreHits: 0,
-    agentStepClarifyPending: params.agentStepClarifyRun,
+    agentStepClarifyPending: p.agentStepClarifyRun,
+    ambiguousTermClarificationPending: params.ambiguousTermClarificationRun,
+    ambiguousTermClarificationTerms: params.ambiguousTermClarificationTerms,
+    ambiguousTermClarificationRetries: 0,
     exploreAbortGraceTurnActive: false,
+    planQuoteInformationalRun: params.planQuoteInformationalRun,
+    planPendingAmendRun: params.planPendingAmendRun,
+    planPendingClarifyRun: params.planPendingClarifyRun,
 
     truncationRetryCount: 0,
     outputTruncated: false,
   };
+}
+
+/** Plan follow-up that must answer in chat only — no new `[PLAN]`. */
+export function isPlanTextOnlyFollowUpRun(ctx: AgentTurnContext): boolean {
+  return ctx.planQuoteInformationalRun || ctx.planPendingClarifyRun;
+}
+
+/** Plan follow-up that must revise the pending plan document. */
+export function isPlanRevisionFollowUpRun(ctx: AgentTurnContext): boolean {
+  return ctx.planPendingAmendRun;
 }
 
 // ── Semantic state transitions (replace scattered multi-field mutations) ──

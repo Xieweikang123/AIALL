@@ -3,6 +3,10 @@ export type VibeChatMode = "ask" | "build" | "plan" | "explore";
 export type VibeChatHistoryMessage = {
   role: "user" | "assistant";
   content: string;
+  /** Set on assistant turns after Build/Plan execution — used to detect pending plans. */
+  writtenFiles?: string[];
+  /** Plan document path when the assistant turn finalized a Plan-mode scheme. */
+  planFilePath?: string;
 };
 
 export type VibeAgentEvent =
@@ -45,7 +49,14 @@ export type VibeAgentEvent =
     }
   | {
       type: "turn_trace";
-      data: { turn: number; maxTurns?: number; assistantText: string; hasToolCalls: boolean };
+      data: {
+        turn: number;
+        maxTurns?: number;
+        assistantText?: string;
+        hasToolCalls?: boolean;
+        toolCallPreamble?: string;
+        toolCallPreambleSubstantive?: boolean;
+      };
     }
   | {
       type: "turn_request";

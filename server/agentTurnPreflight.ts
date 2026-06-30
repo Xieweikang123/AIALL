@@ -1,6 +1,6 @@
 import type { VibeAgentEvent } from "../shared/agentTypes";
 import type { AgentTurnContext } from "./agentTurnContext";
-import { syncToolGuard } from "./agentTurnContext";
+import { syncToolGuard, isPlanTextOnlyFollowUpRun } from "./agentTurnContext";
 import { AGENT_SAFETY_MAX_TURNS, buildAgentTurnsLowNudge } from "./agentTurnBudget";
 import {
   EXPLORE_MAX_TOTAL_EXPLORE_HARD,
@@ -21,6 +21,7 @@ import {
   buildExploreSoftCapNudge,
   buildFileBreadthNudge,
   buildForceOutputNudge,
+  buildPlanForceAnswerNudge,
   buildPatchAnchorForcePatchNudge,
   buildSameIssueFollowUpForceSummaryNudge,
   buildUiDefectForcePatchNudge,
@@ -41,28 +42,24 @@ import type { ChatCompletionMessage } from "./aiForward";
 export function runTurnPreflight(
   ctx: AgentTurnContext,
   turn: number,
-  params: {
-    isReadOnlyAgent: boolean;
-    isPlanExplore: boolean;
-    readOnlyBuildRun: boolean;
-    isExecutePlan: boolean;
-    isAsk: boolean;
-    isExplore: boolean;
-    mode: "ask" | "build" | "plan" | "explore";
-    nudgeMode: "ask" | "build" | "plan" | "explore";
-    exploreHardCap: number;
-    exploreSoftCap: number;
-    implementFollowUpRun: boolean;
-    sameIssueFollowUpRun: boolean;
-    uiDefectBuildRun: boolean;
-    model: string;
-    prompt: string;
-  },
   activeTools: { type: "function"; function: { name: string; description: string; parameters: object } }[],
   onEvent: (event: VibeAgentEvent) => void,
   signal?: AbortSignal,
 ): { action: "return" | "next"; toolsForTurn: typeof activeTools } {
-  const { isReadOnlyAgent, isPlanExplore, readOnlyBuildRun, isExecutePlan, isAsk, isExplore } = params;
+  const cfg = ctx.runConfig;
+  const p = cfg.runPolicy;
+  const {
+    isReadOnlyAgent,
+    isPlanExplore,
+    isExecutePlan,
+    isAsk,
+    isExplore,
+    mode,
+    nudgeMode,
+    prompt,
+    model,
+  } = cfg;
+  const { readOnlyBuildRun, exploreHardCap, exploreSoftCap, implementFollowUpRun, sameIssueFollowUpRun, uiDefectBuildRun } = p;
 
   // ── Block 1: Safety hard cap ──
   if (turn > AGENT_SAFETY_MAX_TURNS) {
@@ -88,7 +85,7 @@ export function runTurnPreflight(
           phase: "aborted",
           turn,
           ...(ctx.segmentMaxTurns !== undefined ? { maxTurns: ctx.segmentMaxTurns } : {}),
-          model: params.model,
+          model,
           detail: "正在整理不完整知识库…",
         },
       });
@@ -117,15 +114,15 @@ export function runTurnPreflight(
   ) {
     ctx.messages.push({
       role: "system",
-      content: buildAgentTurnsLowNudge(turn, ctx.segmentMaxTurns, params.nudgeMode, isExecutePlan && params.mode === "plan"),
+      content: buildAgentTurnsLowNudge(turn, ctx.segmentMaxTurns, nudgeMode, isExecutePlan && mode === "plan"),
     });
     ctx.turnsLowNudgeSent = true;
   }
 
   // ── Block 4: User negation detection ──
-  if (!isReadOnlyAgent && !isPlanExplore && params.prompt && detectUserNegation(params.prompt)) {
+  if (!isReadOnlyAgent && !isPlanExplore && prompt && detectUserNegation(prompt)) {
     ctx.consecutiveUserNegations += 1;
-  } else if (params.prompt) {
+  } else if (prompt) {
     ctx.consecutiveUserNegations = 0;
     ctx.negationNudgeSent = false;
   }
@@ -147,9 +144,9 @@ export function runTurnPreflight(
   syncToolGuard(ctx);
 
   const buildExploreHardCapReached =
-    !isReadOnlyAgent && !isPlanExplore && !readOnlyBuildRun && ctx.totalExploreTurns >= params.exploreHardCap;
+    !isReadOnlyAgent && !isPlanExplore && !readOnlyBuildRun && ctx.totalExploreTurns >= exploreHardCap;
   const sameIssueFollowUpNeedsSummary =
-    params.sameIssueFollowUpRun &&
+    sameIssueFollowUpRun &&
     buildExploreHardCapReached &&
     ctx.writeStage !== null &&
     !ctx.writeStage.writtenList.some((p) => isProductiveWritePath(p));
@@ -164,7 +161,7 @@ export function runTurnPreflight(
         ctx.patchAnchorLocated,
         ctx.patchAnchorForcePending,
         buildExploreHardCapReached,
-        params.implementFollowUpRun,
+        implementFollowUpRun,
       ));
   const forceTextOutput =
     !forcePatchOutput &&
@@ -172,19 +169,22 @@ export function runTurnPreflight(
       (isExplore && ctx.exploreAbortGraceTurnActive) ||
       (isExplore && ctx.totalExploreTurns >= EXPLORE_MAX_TOTAL_EXPLORE_HARD) ||
       (isAsk && ctx.totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_HARD) ||
-      (isPlanExplore && ctx.totalExploreTurns >= PLAN_MAX_TOTAL_EXPLORE_HARD) ||
+      (isPlanExplore &&
+        !isPlanTextOnlyFollowUpRun(ctx) &&
+        (ctx.consultativeForceAnswerPending ||
+          ctx.totalExploreTurns >= PLAN_MAX_TOTAL_EXPLORE_HARD)) ||
       (readOnlyBuildRun && ctx.totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_HARD));
   const stripWideSearch =
     !forceTextOutput &&
     !forcePatchOutput &&
     ((isExplore && ctx.totalExploreTurns >= EXPLORE_MAX_TOTAL_EXPLORE_SOFT) ||
       (isAsk && ctx.totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_SOFT) ||
-      (isPlanExplore && ctx.totalExploreTurns >= PLAN_MAX_TOTAL_EXPLORE_SOFT) ||
+      (isPlanExplore && !isPlanTextOnlyFollowUpRun(ctx) && ctx.totalExploreTurns >= PLAN_MAX_TOTAL_EXPLORE_SOFT) ||
       (readOnlyBuildRun && ctx.totalExploreTurns >= ASK_MAX_TOTAL_EXPLORE_SOFT) ||
-      (!isReadOnlyAgent && !isPlanExplore && !readOnlyBuildRun && ctx.totalExploreTurns >= params.exploreSoftCap));
+      (!isReadOnlyAgent && !isPlanExplore && !readOnlyBuildRun && ctx.totalExploreTurns >= exploreSoftCap));
 
   // ── Block 5c: Inject nudges based on exploration flags ──
-  if (forcePatchOutput && !ctx.uiDefectForcePatchNudgeSent && buildExploreHardCapReached && params.uiDefectBuildRun) {
+  if (forcePatchOutput && !ctx.uiDefectForcePatchNudgeSent && buildExploreHardCapReached && uiDefectBuildRun) {
     ctx.messages.push({
       role: "system",
       content: buildUiDefectForcePatchNudge(ctx.totalExploreTurns),
@@ -194,7 +194,7 @@ export function runTurnPreflight(
     forcePatchOutput &&
     buildExploreHardCapReached &&
     !ctx.buildExploreForcePatchNudgeSent &&
-    !params.uiDefectBuildRun &&
+    !uiDefectBuildRun &&
     !ctx.patchAnchorForcePending
   ) {
     ctx.messages.push({
@@ -217,9 +217,13 @@ export function runTurnPreflight(
           ? ctx.exploreAbortGraceTurnActive
             ? buildExploreAbortPartialReportNudge(ctx.exploreFilesRead.size)
             : buildExploreForceReportNudge(ctx.totalExploreTurns)
-          : isReadOnlyAgent || readOnlyBuildRun
-            ? buildAskForceAnswerNudge(ctx.totalExploreTurns)
-            : buildForceOutputNudge(ctx.totalExploreTurns, params.mode),
+          : isPlanExplore
+            ? isPlanTextOnlyFollowUpRun(ctx)
+              ? buildAskForceAnswerNudge(ctx.totalExploreTurns)
+              : buildPlanForceAnswerNudge(ctx.totalExploreTurns)
+            : isReadOnlyAgent || readOnlyBuildRun
+              ? buildAskForceAnswerNudge(ctx.totalExploreTurns)
+              : buildForceOutputNudge(ctx.totalExploreTurns, mode),
     });
   } else if (stripWideSearch) {
     ctx.messages.push({
@@ -228,14 +232,14 @@ export function runTurnPreflight(
         ? buildExploreExploreSoftCapNudge(ctx.totalExploreTurns)
         : isReadOnlyAgent || readOnlyBuildRun
           ? buildAskExploreSoftCapNudge(ctx.totalExploreTurns)
-          : buildExploreSoftCapNudge(ctx.totalExploreTurns, params.mode),
+          : buildExploreSoftCapNudge(ctx.totalExploreTurns, mode),
     });
   }
 
   // ── Block 6: File breadth nudge ──
   if (!ctx.fileBreadthNudgeSent && ctx.exploreFilesRead.size >= MAX_UNIQUE_READ_FILES_BEFORE_NUDGE) {
     const files = Array.from(ctx.exploreFilesRead);
-    ctx.messages.push({ role: "system", content: buildFileBreadthNudge(files, params.mode) });
+    ctx.messages.push({ role: "system", content: buildFileBreadthNudge(files, mode) });
     ctx.fileBreadthNudgeSent = true;
   }
 
@@ -261,13 +265,13 @@ export function runTurnPreflight(
       phase: ctx.visionFirstTurnPending ? "vision_first_turn" : "waiting_model",
       turn,
       ...(ctx.segmentMaxTurns !== undefined ? { maxTurns: ctx.segmentMaxTurns } : {}),
-      model: params.model,
+      model,
     },
   });
 
   // ── Block 9: Tool selection ──
   const toolsForTurn: typeof activeTools = (() => {
-    if (ctx.visionFirstTurnPending || forceTextOutput || ctx.consultativeForceAnswerPending || ctx.agentStepClarifyPending) {
+    if (ctx.visionFirstTurnPending || forceTextOutput || ctx.consultativeForceAnswerPending || ctx.agentStepClarifyPending || ctx.ambiguousTermClarificationPending) {
       return [];
     }
     if (forcePatchOutput) {

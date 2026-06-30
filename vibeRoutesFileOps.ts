@@ -7,21 +7,19 @@ import {
   grepInProject,
   listDirectory,
   readFileContent,
+  resolveProjectPath,
   searchFiles,
   writeFileContent,
 } from "./server/vibeFs";
 
 function resolvePathInsideOptionalRoot(inputPath: string, projectRoot?: string): { ok: true; path: string } | { ok: false; error: string } {
-  const resolved = path.resolve(inputPath);
-  const rootInput = projectRoot?.trim();
-  if (!rootInput) return { ok: true, path: resolved };
+  const trimmed = String(inputPath || "").trim();
+  if (!trimmed) return { ok: false, error: "路径不能为空" };
 
-  const root = path.resolve(rootInput);
-  const relative = path.relative(root, resolved);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    return { ok: false, error: "路径超出项目根目录" };
-  }
-  return { ok: true, path: resolved };
+  const rootInput = projectRoot?.trim();
+  if (!rootInput) return { ok: true, path: path.resolve(trimmed) };
+
+  return resolveProjectPath(rootInput, trimmed);
 }
 
 const dirListCache = new Map<string, { items: unknown[]; ts: number }>();

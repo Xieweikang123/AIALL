@@ -20,16 +20,8 @@ import type { VibeAgentEvent } from "../shared/agentTypes";
 
 export interface ModelCallParams {
   turn: number;
-  endpoint: string;
-  apiKey?: string;
-  model: string;
-  maxContextChars: number;
   toolsForTurn: { type: "function"; function: { name: string; description: string; parameters: object } }[];
-  readOnlyBuildRun: boolean;
-  isReadOnlyAgent: boolean;
-  imageDataUrls: string[];
-  prompt: string;
-  resolveFirstByteTimeoutMs: ReturnType<typeof import("./aiForward")["resolveFirstByteTimeoutMs"]> | undefined;
+  resolveFirstByteTimeoutMs?: ReturnType<typeof import("./aiForward")["resolveFirstByteTimeoutMs"]>;
 }
 
 export interface ModelCallResult {
@@ -49,19 +41,22 @@ export async function runTurnModelCall(
   onEvent: (event: VibeAgentEvent) => void,
   signal?: AbortSignal,
 ): Promise<ModelCallResult> {
+  const cfg = ctx.runConfig;
   const {
     turn,
+    toolsForTurn,
+    resolveFirstByteTimeoutMs,
+  } = params;
+  const {
     endpoint,
     apiKey,
     model,
     maxContextChars,
-    toolsForTurn,
-    readOnlyBuildRun,
-    isReadOnlyAgent,
     imageDataUrls,
     prompt,
-    resolveFirstByteTimeoutMs,
-  } = params;
+    runPolicy: { readOnlyBuildRun },
+    isReadOnlyAgent,
+  } = cfg;
 
   const firstByteTimeoutMs = (resolveFirstByteTimeoutMs as (m: string) => number | undefined)?.(model) ?? undefined;
   let modelStatusPhase = "waiting_model";

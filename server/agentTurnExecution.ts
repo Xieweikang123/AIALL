@@ -1,7 +1,7 @@
 import type { ChatCompletionMessage, ChatToolCall } from "./aiForward";
 import type { VibeAgentEvent } from "../shared/agentTypes";
 import type { AgentTurnContext } from "./agentTurnContext";
-import { markAnchorLocated, markTeleportBodyConfirmed, recordPatchFailure } from "./agentTurnContext";
+import { markAnchorLocated, markTeleportBodyConfirmed, recordPatchFailure, isPlanTextOnlyFollowUpRun } from "./agentTurnContext";
 import { executeTool, readStagedFileContent } from "./agentToolExecutor";
 import { WRITE_AGENT_TOOL_NAMES, READ_ONLY_AGENT_TOOL_NAMES, toolSummary, parseToolArgs, canParallelizeToolBatch, callIsProductiveWrite } from "./agentClassifier";
 import { applyUniquePatch, resolveProjectPath, resolveReadablePath } from "./vibeFs";
@@ -14,9 +14,17 @@ import { extractJobClassNamesFromReadPaths } from "../src/services/agentStructur
 import { detectProjectRuntimeProfile } from "./agentRuntimeHint";
 import { buildPostPatchVerifyNudge } from "./agentExplorationBudget";
 import { resetExploreOnProductiveWrite, markExploreOnlyTurn, forceAnchorOnNoProductiveWrite, markStructuredAssetAcquired, resetStructuredAssetTracking, trackEphemeralProbeWrite, trackEphemeralProbeDelete } from "./agentTurnContext";
-import { buildConsultativeDuplicateExploreNudge } from "./agentExplorationBudget";
-import { isProductiveWritePath } from "./agentExplorationBudget";
-import { isExplorationArchivePath, buildExplorationArchiveWriteBlockedMessage } from "./agentExplorationBudget";
+import {
+  buildAskExploreBudgetNudge,
+  buildAskForceAnswerNudge,
+  buildConsultativeDuplicateExploreNudge,
+  buildExploreBudgetNudge,
+  buildExploreExploreBudgetNudge,
+  buildPlanListDirOnlySoftNudge,
+  isExplorationArchivePath,
+  buildExplorationArchiveWriteBlockedMessage,
+  isProductiveWritePath,
+} from "./agentExplorationBudget";
 import {
   buildStructuredAssetWriteNudge,
   countSchemaTablesInPayload,
@@ -29,24 +37,6 @@ import {
 
 export interface ExecutionParams {
   turn: number;
-  projectRoot: string;
-  toolMode: "ask" | "build" | "plan" | "explore";
-  webProxyUrl?: string;
-  injectedKeyFilePaths: string[];
-  signal?: AbortSignal;
-  // Run-policy flags
-  isReadOnlyAgent: boolean;
-  isPlanExplore: boolean;
-  readOnlyBuildRun: boolean;
-  isExplore: boolean;
-  isAsk: boolean;
-  implementFollowUpRun: boolean;
-  sameIssueFollowUpRun: boolean;
-  consultativeVisionRun: boolean;
-  scheduledTaskConsultativeRun: boolean;
-  exploreTurnBudget: number;
-  mode: "ask" | "build" | "plan" | "explore";
-  model: string;
   visibleContent: string;
   toolCalls: ChatToolCall[];
   streamedChars: number;
@@ -60,10 +50,30 @@ export async function runTurnExecution(
   params: ExecutionParams,
   onEvent: (event: VibeAgentEvent) => void,
 ): Promise<void> {
-  const { turn, projectRoot, toolMode, webProxyUrl, injectedKeyFilePaths, signal, visibleContent,
-    streamedChars, toolCalls, model, isReadOnlyAgent, isPlanExplore, readOnlyBuildRun, isExplore,
-    isAsk, implementFollowUpRun, sameIssueFollowUpRun, consultativeVisionRun,
-    scheduledTaskConsultativeRun, exploreTurnBudget, mode } = params;
+  const cfg = ctx.runConfig;
+  const p = cfg.runPolicy;
+  const { turn, visibleContent, streamedChars, toolCalls } = params;
+  const {
+    projectRoot,
+    toolMode,
+    webProxyUrl,
+    injectedKeyFilePaths,
+    isReadOnlyAgent,
+    isPlanExplore,
+    isExplore,
+    isAsk,
+    mode,
+    model,
+    exploreTurnBudget,
+  } = cfg;
+  const signal = cfg.signal;
+  const {
+    readOnlyBuildRun,
+    implementFollowUpRun,
+    sameIssueFollowUpRun,
+    consultativeVisionRun,
+    scheduledTaskConsultativeRun,
+  } = p;
 
   // ── Block 13: Tool preamble processing ──
   if (visibleContent.trim() && toolCalls.length > 0) {
@@ -258,6 +268,7 @@ export async function runTurnExecution(
       index = end;
     }
 
+    // ── Block 16b: Track probe artifacts + structured assets from tool results ──
     if (!isReadOnlyAgent && !isPlanExplore && !readOnlyBuildRun) {
       for (const outcome of turnOutcomes) {
         if (isToolResultFailure(outcome.result)) continue;
@@ -339,6 +350,7 @@ export async function runTurnExecution(
     return isProductiveDeliverableWrite(toolName, String(toolArgs.path ?? ""));
   });
 
+  // ── Block 17i: Structured asset state advancer ──
   if (
     !isReadOnlyAgent &&
     !isPlanExplore &&
@@ -415,8 +427,26 @@ export async function runTurnExecution(
     }
   }
 
+  // ── Block 17f-pre: Plan list_dir-only soft nudge ──
+  if (
+    isPlanExplore &&
+    !isPlanTextOnlyFollowUpRun(ctx) &&
+    !ctx.planPendingAmendRun &&
+    turnExploreOnly &&
+    toolCalls.every((call) => call.function.name === "list_dir") &&
+    ctx.exploreFilesRead.size === 0 &&
+    ctx.totalExploreTurns >= 3 &&
+    !ctx.planListDirOnlyNudgeSent
+  ) {
+    ctx.messages.push({
+      role: "system",
+      content: buildPlanListDirOnlySoftNudge(ctx.totalExploreTurns),
+    });
+    ctx.planListDirOnlyNudgeSent = true;
+  }
+
   // ── Block 17f: Consultative duplicate explore detection ──
-  if (readOnlyBuildRun && turnExploreOnly && toolCalls.length > 0) {
+  if ((readOnlyBuildRun || isPlanExplore) && turnExploreOnly && toolCalls.length > 0) {
     const exploreSig = toolCalls
       .map((call) => `${call.function.name}:${call.function.arguments || "{}"}`)
       .sort()
@@ -487,7 +517,7 @@ export async function runTurnExecution(
 
   // Explore budget nudges
   if (isExplore && ctx.consecutiveExploreTurns >= 4) {
-    ctx.messages.push({ role: "system", content: buildExploreForceReportNudge(ctx.consecutiveExploreTurns) });
+    ctx.messages.push({ role: "system", content: buildExploreExploreBudgetNudge(ctx.consecutiveExploreTurns) });
     ctx.consecutiveExploreTurns = 0;
   } else if (isAsk && ctx.consecutiveExploreTurns >= 6) {
     ctx.messages.push({ role: "system", content: buildAskForceAnswerNudge(ctx.consecutiveExploreTurns) });
@@ -495,8 +525,35 @@ export async function runTurnExecution(
   } else if (readOnlyBuildRun && ctx.consecutiveExploreTurns >= 5) {
     ctx.messages.push({ role: "system", content: buildConsultativeDuplicateExploreNudge() });
     ctx.consecutiveExploreTurns = 0;
-  } else if (!isReadOnlyAgent && !readOnlyBuildRun && ctx.consecutiveExploreTurns >= exploreTurnBudget) {
-    ctx.messages.push({ role: "system", content: buildExploreForceReportNudge(ctx.consecutiveExploreTurns) });
+  } else if (
+    isPlanExplore &&
+    !isPlanTextOnlyFollowUpRun(ctx) &&
+    turnExploreOnly &&
+    ctx.consecutiveExploreTurns >= exploreTurnBudget
+  ) {
+    ctx.messages.push({
+      role: "system",
+      content: buildExploreBudgetNudge(ctx.consecutiveExploreTurns, "plan"),
+    });
+    ctx.consultativeForceAnswerPending = true;
+    ctx.consecutiveExploreTurns = 0;
+  } else if (
+    isPlanExplore &&
+    isPlanTextOnlyFollowUpRun(ctx) &&
+    turnExploreOnly &&
+    ctx.consecutiveExploreTurns >= exploreTurnBudget
+  ) {
+    ctx.messages.push({
+      role: "system",
+      content: buildAskExploreBudgetNudge(ctx.consecutiveExploreTurns),
+    });
+    ctx.consultativeForceAnswerPending = true;
+    ctx.consecutiveExploreTurns = 0;
+  } else if (!isReadOnlyAgent && !readOnlyBuildRun && !isPlanExplore && ctx.consecutiveExploreTurns >= exploreTurnBudget) {
+    ctx.messages.push({
+      role: "system",
+      content: buildExploreBudgetNudge(ctx.consecutiveExploreTurns, mode),
+    });
     ctx.consecutiveExploreTurns = 0;
   }
 }

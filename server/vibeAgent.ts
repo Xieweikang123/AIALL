@@ -1,34 +1,6 @@
-import { execFile } from "node:child_process";
-import fs from "node:fs";
-import path from "node:path";
-import { promisify } from "node:util";
+import { resolveFirstByteTimeoutMs } from "./aiForward";
+import { resolveAgentMaxTurns } from "./agentTurnBudget";
 import {
-  AGENT_AI_MAX_RETRIES,
-  chatCompletionWithTools,
-  resolveFirstByteTimeoutMs,
-  type ChatCompletionMessage,
-  type ChatToolCall,
-  type ModelStreamProgress,
-} from "./aiForward";
-import {
-  TextToolCallStreamFilter,
-  stripTextToolCallMarkup,
-} from "./textToolCalls";
-import {
-  AGENT_SAFETY_MAX_TURNS,
-  buildAgentTurnsLowNudge,
-  buildSegmentContinueNudge,
-  buildTurnCapFinalSummaryNudge,
-  buildTurnCapExhaustedMessage,
-  extendSegmentMaxTurns,
-  resolveAgentMaxTurns,
-} from "./agentTurnBudget";
-import {
-  buildAskSystemPromptLines,
-  buildSearchFilesEmptyHint,
-} from "./agentAskPrompt";
-import {
-  buildExploreAbortPartialReportNudge,
   buildExploreContinueNudge,
   buildExploreFollowUpHint,
   buildExploreQuotedFollowUpHint,
@@ -41,203 +13,52 @@ import {
   isExploreChangesPrompt,
   isKnowledgeQuoteFollowUpPrompt,
 } from "../src/services/knowledgeExplore";
-import { gitChangedFilesSince } from "./vibeGit";
 import {
-  ASK_EXPLORE_TURN_BUDGET,
-  ASK_MAX_TOTAL_EXPLORE_HARD,
-  ASK_MAX_TOTAL_EXPLORE_SOFT,
-  buildAskExploreBudgetNudge,
-  buildAskExploreSoftCapNudge,
-  buildAskForceAnswerNudge,
-  buildExploreExploreBudgetNudge,
-  buildExploreExploreSoftCapNudge,
-  buildExploreForceReportNudge,
-  EXPLORE_EXPLORE_TURN_BUDGET,
-  EXPLORE_MAX_TOTAL_EXPLORE_HARD,
-  EXPLORE_MAX_TOTAL_EXPLORE_SOFT,
-  buildConsultativeExploreBudgetNudge,
-  buildConsultativeDuplicateExploreNudge,
-  buildConsultativeSegmentCapNudge,
-  buildExploreBudgetNudge,
-  buildExploreInterimDiagnosisNudge,
-  buildExploreSoftCapNudge,
-  buildFileBreadthNudge,
-  buildBuildExploreForcePatchNudge,
-  buildForceOutputNudge,
-  buildGrepEmptyRecoveryNudge,
-  buildGrepHitVueReadNudge,
-  buildPatchAnchorForcePatchNudge,
-  buildPatchRequiredRetryNudge,
-  buildImplementPasteBlockedNudge,
-  buildUiDefectForcePatchNudge,
-  buildUserNegationNudge,
-  buildEmptyReplyRetryNudge,
-  buildPrematureCompletionRetryNudge,
-  buildSameIssueFollowUpForceSummaryNudge,
-  buildPatchFailureCompletionRetryNudge,
-  buildExplorationArchiveWriteBlockedMessage,
-  buildAlternateUiPatchStrategyNudge,
-  buildPostPatchVerifyNudge,
-  isExplorationArchivePath,
   EXECUTE_PLAN_EXPLORE_TURN_BUDGET,
-  EXPLORE_INTERIM_DIAGNOSIS_TURN,
+  EXPLORE_EXPLORE_TURN_BUDGET,
   INTERACTIVE_EXPLORE_TURN_BUDGET,
-  CONSULTATIVE_BUILD_EXPLORE_TURN_BUDGET,
-  isProductiveWritePath,
-  MAX_READ_SLICE_REPEATS,
-  MAX_UNIQUE_READ_FILES_BEFORE_NUDGE,
   PLAN_EXPLORE_TURN_BUDGET,
-  PLAN_MAX_TOTAL_EXPLORE_HARD,
-  PLAN_MAX_TOTAL_EXPLORE_SOFT,
+  buildAmbiguousTermClarificationHint,
+  buildPendingPlanAmendHint,
+  buildPendingPlanClarificationHint,
+  buildPlanNoTargetPathHint,
+  buildPlanQuoteInformationalHint,
+  buildPlanRevisionFollowUpHint,
 } from "./agentExplorationBudget";
-import {
-  buildConsultativeTopicHints,
-  shouldNudgeScheduledJobRegistration,
-} from "../src/services/agentConsultativeTopics";
-import { resolveUserIntent, classifyUserIntentFromRules, shouldSkipAiIntentClassifier, formatIntentClassificationDetail } from "../src/services/agentIntentClassifier";
+import { resolveAmbiguousClarificationTerms } from "../src/orchestration/generic/ambiguousTermTriggers";
+import { classifyUserIntentFromRules, resolveUserIntent, shouldSkipAiIntentClassifier } from "../src/services/intentClassifierRules";
+import { formatIntentClassificationDetail } from "../src/services/intentClassifierAi";
 import { classifyUserIntentWithAi } from "./agentIntentClassifier";
-import { extractJobClassNamesFromReadPaths } from "../src/services/agentStructuralPatterns";
-import { buildConsultativeBuildHint, buildAgentStepClarifyContinueHint, buildImplementFollowUpHint, buildLocateStatusFollowUpHint, buildUiDefectBuildHint, isUiAppearanceQuestionPrompt, historySuggestsQuotePositionFix } from "../src/services/agentUserIntent";
-import { detectProjectRuntimeProfile } from "./agentRuntimeHint";
-import { detectUserNegation, stripQuotedReplyPrefix } from "../src/services/agentContinuation";
-import { resolveAgentRunPolicy } from "./agentRunPolicy";
+import { isUiAppearanceQuestionPrompt } from "../src/orchestration/generic/userIntentClassifiers";
 import {
-  buildBlockedGrepAfterLocateMessage,
-  buildEnglishPlanningNudge,
-  buildLowSignalVisionLocateGrepMessage,
-  buildOverlyBroadVisionGrepMessage,
-  buildPatchAnchorLocatedNudge,
-  buildSearchFilesContentQueryMessage,
-  checkOverlappingRead,
-  checkPatchOldStringFromReads,
-  claimsPrematureCompletion,
-  claimsSuccessDespitePatchFailures,
-  shouldNudgeAlternateUiPatchStrategy,
-  invalidateFileReadState,
-  markPatchRecoveryFile,
-  consumePatchRecoveryRead,
-  isEmptyOrInsufficientFinalReply,
-  isToolResultFailure,
-  isAnalysisOnlyReplyUnderForcePatch,
-  isBlockedGrepAfterLocate,
-  isBlockedGrepAfterVisionMisread,
-  isLowSignalVisionLocateGrep,
-  isOverlyBroadVisionGrep,
-  isSearchFilesContentQuery,
-  isVisionGrepLowSpread,
-  readLineRangeFromArgs,
-  recordReadRange,
-  sanitizeAgentUserVisibleText,
-  shouldForcePatchAfterAnchorLocated,
-  shouldNudgeEnglishPlanning,
-  textConfirmsTeleportToBody,
-  textIndicatesPatchAnchor,
-  type ToolGuardContext,
-} from "./agentExploreGuard";
-import {
-  normalizeRunProfile,
-  type AgentRunProfileInput,
-} from "./agentRunProfile";
-import {
-  buildInjectedKeyFilePathSet,
-  formatInjectedKeyFileReadNudge,
-  invalidateProjectContextCache,
-} from "./vibeProjectContext";
-import {
-  isProjectMemorySection,
-} from "./vibeProjectMemory";
-import { buildMemoryProposalToolResult } from "./projectMemoryProposal";
-import { buildSkillProposalToolResult } from "./projectSkillProposal";
-import {
-  listProjectSkills,
-  readProjectSkill,
-} from "./vibeProjectSkills";
-import {
-  applyUniquePatch,
-  grepInProject,
-  listDirectory,
-  readFileContent,
-  resolveProjectPath,
-  resolveReadablePath,
-  searchFiles,
-  sliceFileLines,
-  writeFileContent,
-  type RunExtractOutcome,
-} from "./vibeFs";
-import { runWebExtract, runWebSearch } from "./webExtract";
+  extractPlanFilePaths,
+  isPlanQuoteInformationalPrompt,
+  isPlanQuoteRevisionPrompt,
+  resolvePendingPlanState,
+  stripQuotedReplyPrefix,
+} from "../src/services/agentContinuation";
+import { resolveAgentRunPolicy, usesReadOnlyTools } from "./agentRunPolicy";
+import { buildConsultativeAccuracyTraceHint } from "./consultativeAccuracyTrace";
+import { buildAgentContext, resolveOpenFileInProject } from "./agentContextBuilder";
+import type { VibeAgentEvent, VibeChatHistoryMessage, VibeChatMode } from "../shared/agentTypes";
+import { VIBE_AGENT_TOOLS, READ_ONLY_AGENT_TOOLS, buildDoneData } from "./agentClassifier";
+import { buildHistoryMessages, emitAgentContext, historyForDisplay } from "./agentContext";
 import {
   buildConsultativeUiAppearanceHint,
-  buildConsultativeAppearanceAnswerAfterReadHint,
-  buildConsultativeUiAppearanceRetryHint,
-  buildConsultativeVisibleShellEmptyInnerHint,
-  buildUnreconciledEmptyShellRetryHint,
-  buildVisionConsultativeContinueHint,
-  buildVisionConsultativeLocateRetryHint,
-  buildVisionBuildContinueHint,
-  buildVisionFirstTurnPrematureCompletionRetryHint,
-  buildVisionFirstTurnRetryHint,
   buildVisionUserContent,
-  extractVisibleAnchorQuotes,
-  isAdequateVisionFirstTurnDescription,
-  isPrematureVisionCompletionClaim,
-  isVisionUnsupportedError,
   sanitizeImageDataUrls,
-  shouldBlockConsultativeVisionLocateFinalize,
   shouldBypassVisionFirstTurn,
   shouldRequireVisionFirstTurn,
-  shouldRunVisionAnchorPrefgrep,
-  consultativeAppearanceNeedsVueRead,
-  isSpeculativeStyleAnswer,
-  isUnreconciledEmptyShellAnswer,
-  suggestsEmbeddedLayoutMisread,
-  suggestsVisibleShellEmptyInner,
 } from "./visionMessage";
-import {
-  appendVisionAnchorPrefgrepMessages,
-  buildVisionConsultativeReadAfterPrefgrepHint,
-} from "./visionAnchorPrefgrep";
-import {
-  buildConsultativeAccuracyTraceHint,
-  buildConsultativeAccuracyTraceRetryHint,
-  shouldBlockConsultativeAccuracyFinalize,
-} from "./consultativeAccuracyTrace";
-import {
-  buildBehaviorPurposeTraceRetryHint,
-  shouldBlockBehaviorPurposeFinalize,
-} from "./consultativeBehaviorTrace";
-import { buildAgentContext, resolveOpenFileInProject } from "./agentContextBuilder";
-import type { VibeAgentEvent, VibeChatMode, VibeChatHistoryMessage } from "../shared/agentTypes";
-import {
-  VIBE_AGENT_TOOLS,
-  READ_ONLY_AGENT_TOOLS,
-  READ_ONLY_AGENT_TOOL_NAMES,
-  WRITE_AGENT_TOOL_NAMES,
-  isSubstantiveChineseToolPreamble,
-  canParallelizeToolBatch,
-  callIsProductiveWrite,
-  buildDoneData,
-  parseToolArgs,
-  resolveToolCallsFromAssistant,
-  toolSummary,
-} from "./agentClassifier";
-import {
-  compactMessagesForModel,
-  buildHistoryMessages,
-  historyForDisplay,
-  messagesForTurnDisplay,
-  formatCharCount,
-  formatElapsedMs,
-  emitAgentContext,
-  truncateForSse,
-  truncateToolResultForModel,
-  messageCharSize,
-  MAX_TOOL_RESULT_SSE_CHARS,
-} from "./agentContext";
-import {
-  streamProgressDetail,
-  streamProgressPhase,
-  emitUserVisibleAssistantMessage,
-} from "./agentStream";
+import { createAgentTurnContext } from "./agentTurnContext";
+import { runTurnPreflight } from "./agentTurnPreflight";
+import { runTurnModelCall } from "./agentTurnModelCall";
+import { runTurnVision } from "./agentTurnVision";
+import { validateAgentResponse } from "./agentTurnValidator";
+import { runTurnExecution } from "./agentTurnExecution";
+import { handleTurnSegment } from "./agentTurnSegment";
+import { buildTurnRunConfig } from "./agentTurnRunConfig";
+import { normalizeExecutePlanContext, type ExecutePlanContextInput } from "./agentExecutePlanContext";
 
 export type { VibeAgentEvent, VibeChatMode, VibeChatHistoryMessage } from "../shared/agentTypes";
 
@@ -255,7 +76,7 @@ export interface RunVibeAgentParams {
   /** HTTP 代理，用于 Agent 联网搜索/抓取（与 AI 配置「网页抓取代理」一致） */
   webProxyUrl?: string;
   /** Run orchestration profile (interactive vs plan execution). */
-  runProfile?: AgentRunProfileInput;
+  runProfile?: ExecutePlanContextInput;
   /** @deprecated Use runProfile.kind === "execute_plan" */
   executionMode?: boolean;
   onEvent: (event: VibeAgentEvent) => void;
@@ -270,30 +91,23 @@ export {
   PLAN_MAX_CONTEXT_CHARS,
 } from "./agentRunPolicy";
 
-export { createWriteStage, executeTool, trackWrittenFile, readStagedFileContent, isAgentsGuideOnlyPath, recordGrepHitVueFiles, requirePriorRead, type WriteStage } from "./agentToolExecutor";
-import { executeTool, trackWrittenFile, readStagedFileContent, isAgentsGuideOnlyPath, recordGrepHitVueFiles, requirePriorRead, type WriteStage } from "./agentToolExecutor";
-import {
-  createAgentTurnContext,
-  syncToolGuard,
-  markAnchorLocated,
-  markTeleportBodyConfirmed,
-  recordPatchFailure,
-  resetExploreOnProductiveWrite,
-  type AgentTurnContext,
-} from "./agentTurnContext";
-import { runTurnPreflight } from "./agentTurnPreflight";
-import { runTurnModelCall } from "./agentTurnModelCall";
-import { runTurnVision } from "./agentTurnVision";
-import { validateAgentResponse } from "./agentTurnValidator";
-import { runTurnExecution } from "./agentTurnExecution";
-import { handleTurnSegment } from "./agentTurnSegment";
+export {
+  createWriteStage,
+  executeTool,
+  trackWrittenFile,
+  readStagedFileContent,
+  isAgentsGuideOnlyPath,
+  recordGrepHitVueFiles,
+  requirePriorRead,
+  type WriteStage,
+} from "./agentToolExecutor";
 
 export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   const mode = params.mode || "build";
   const isAsk = mode === "ask";
   const isExplore = mode === "explore";
   const isReadOnlyAgent = isAsk || isExplore;
-  const runProfile = normalizeRunProfile(
+  const runProfile = normalizeExecutePlanContext(
     params.runProfile ||
       (params.executionMode
         ? { kind: "execute_plan", targetFiles: params.runProfile?.targetFiles }
@@ -320,7 +134,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     history: params.history,
     mode,
     hasImage: imageDataUrls.length > 0,
-    isAsk: isAsk || isExplore,
+    isAsk: isReadOnlyAgent,
   });
   const skipAiClassifier = shouldSkipAiIntentClassifier(rulesIntent, prompt, { isAsk: isReadOnlyAgent });
 
@@ -350,7 +164,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     history: params.history,
     mode,
     hasImage: imageDataUrls.length > 0,
-    isAsk: isAsk || isExplore,
+    isAsk: isReadOnlyAgent,
     ai: aiIntentPayload,
   });
   if (skipAiClassifier) {
@@ -375,32 +189,6 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     isExecutePlan,
     isPlanExplore,
   });
-  const {
-    implementFollowUpRun,
-    sameIssueFollowUpRun,
-    codeReviewRun,
-    userErrorQuoteRun,
-    userFailureReportRun,
-    sessionAuditRun,
-    behaviorContradictionRun,
-    consultativeResumeRun,
-    locateStatusFollowUpRun,
-    readOnlyBuildRun,
-    behaviorPurposeRun,
-    scheduledTaskConsultativeRun,
-    accuracyConsultativeRun,
-    consultativeVisionRun,
-    consultativeUiAppearanceRun,
-    uiDefectBuildRun,
-    agentStepClarifyRun,
-    ultraShortOpenTaskRun,
-    exploreHardCap,
-    exploreSoftCap,
-    maxContextChars,
-    effectiveTaskPrompt,
-    resumeOriginalTask,
-    userRecentlyReportedFailure,
-  } = runPolicy;
 
   const segmentBudget = resolveAgentMaxTurns(
     mode,
@@ -415,14 +203,14 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
         ? PLAN_EXPLORE_TURN_BUDGET
         : INTERACTIVE_EXPLORE_TURN_BUDGET;
 
-  const openFile = resolveOpenFileInProject(projectRoot, openFilePath);
-  const openFileRel = openFile?.relative;
+  const openFileRel = resolveOpenFileInProject(projectRoot, openFilePath)?.relative;
+  const segmentMaxTurns = params.maxTurns ?? segmentBudget;
 
   onEvent({
     type: "status",
     data: {
       phase: "preparing",
-      ...(ctx.segmentMaxTurns !== undefined ? { maxTurns: ctx.segmentMaxTurns } : {}),
+      ...(segmentMaxTurns !== undefined ? { maxTurns: segmentMaxTurns } : {}),
       model,
       ...(openFileRel ? { openFile: openFileRel } : {}),
     },
@@ -439,18 +227,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     isExplore,
     isExecutePlan,
     isPlanExplore,
-    readOnlyBuildRun,
-    consultativeUiAppearanceRun,
-    codeReviewRun,
-    userErrorQuoteRun,
-    userFailureReportRun,
-    uiDefectBuildRun,
-    implementFollowUpRun,
-    sameIssueFollowUpRun,
-    locateStatusFollowUpRun,
-    ultraShortOpenTaskRun,
-    effectiveTaskPrompt,
-    userRecentlyReportedFailure,
+    runPolicy,
+    effectiveTaskPrompt: runPolicy.effectiveTaskPrompt,
+    userRecentlyReportedFailure: runPolicy.userRecentlyReportedFailure,
     runProfile,
   }, onEvent);
 
@@ -460,38 +239,74 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     agentsGuideBlock,
     projectSkillsBlock,
     projectMemoryBlock,
-    projectKnowledgeBlock,
-    exploreKnowledgeContextBlock,
-    explorationArchiveBlock,
-    openFileSnippet,
     injectedKeyFilePaths,
     exploreKnowledgeIntent,
-    exploreUsesManifest,
+    projectContextSnapshot,
   } = builtCtx;
 
-  const ctx = createAgentTurnContext({
-    isReadOnlyAgent,
+  const ambiguousClarificationTerms = resolveAmbiguousClarificationTerms({
+    prompt,
+    history: params.history,
+    projectContext: projectContextSnapshot,
+    mode,
+    isExecutePlan,
     isPlanExplore,
-    readOnlyBuildRun,
+    readOnlyBuildRun: runPolicy.readOnlyBuildRun,
+    implementFollowUpRun: runPolicy.implementFollowUpRun,
+  });
+  const ambiguousTermClarificationRun = ambiguousClarificationTerms.length > 0;
+
+  const planQuoteInformationalRun = isPlanExplore && isPlanQuoteInformationalPrompt(prompt);
+  const pendingPlanState = resolvePendingPlanState(params.history);
+
+  const visionLocateSingleTurnRun = shouldBypassVisionFirstTurn({
+    imageCount: imageDataUrls.length,
+    consultativeVisionRun: runPolicy.consultativeVisionRun,
+    prompt,
+  });
+
+  const activeTools = usesReadOnlyTools(runPolicy, { isReadOnlyAgent, isPlanExplore })
+    ? READ_ONLY_AGENT_TOOLS
+    : VIBE_AGENT_TOOLS;
+
+  const runConfig = buildTurnRunConfig({
+    projectRoot,
+    prompt,
+    endpoint,
+    apiKey,
+    model,
+    mode,
+    toolMode,
+    nudgeMode,
+    isAsk,
+    isExplore,
+    isReadOnlyAgent,
+    isExecutePlan,
+    isPlanExplore,
+    runPolicy,
+    runProfile,
+    exploreTurnBudget,
+    segmentBudget,
+    maxContextChars: runPolicy.maxContextChars,
+    activeTools,
+    imageDataUrls,
+    injectedKeyFilePaths: injectedKeyFilePaths ? [...injectedKeyFilePaths] : [],
+    webProxyUrl,
+    visionLocateSingleTurnRun,
+    signal,
+  });
+
+  const ctx = createAgentTurnContext({
+    runConfig,
     segmentBudget,
     initialMaxTurns: params.maxTurns,
-    implementFollowUpRun,
-    agentStepClarifyRun,
-    sameIssueFollowUpRun,
-    userRecentlyReportedFailure,
-    userFailureReportRun,
-    locateStatusFollowUpRun,
+    ambiguousTermClarificationRun,
+    ambiguousTermClarificationTerms: ambiguousClarificationTerms,
+    planQuoteInformationalRun,
+    planPendingAmendRun: runPolicy.pendingPlanAmendRun,
+    planPendingClarifyRun: runPolicy.pendingPlanClarifyRun,
   });
-  const MAX_EMPTY_REPLY_RETRIES = 2;
-  const MAX_PREMATURE_COMPLETION_RETRIES = 1;
-  const MAX_PATCH_FAILURE_COMPLETION_RETRIES = 1;
-  const MAX_BEHAVIOR_PURPOSE_RETRIES = 2;
-  const MAX_VISION_FIRST_TURN_RETRIES = 2;
-  const MAX_VISION_CONSULTATIVE_LOCATE_RETRIES = 2;
-  const MAX_VISION_CONSULTATIVE_ACCURACY_RETRIES = 2;
-  const MAX_TRUNCATION_RETRIES = 5;
 
-  const activeTools = isReadOnlyAgent || isPlanExplore || readOnlyBuildRun ? READ_ONLY_AGENT_TOOLS : VIBE_AGENT_TOOLS;
   const userContent = buildVisionUserContent(prompt, imageDataUrls);
   ctx.messages = [
     { role: "system", content: systemPrompt },
@@ -514,18 +329,44 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       });
     }
   }
-  if (readOnlyBuildRun && consultativeVisionRun && ctx.segmentMaxTurns !== undefined) {
+  if (ambiguousTermClarificationRun) {
+    ctx.messages.push({
+      role: "system",
+      content: buildAmbiguousTermClarificationHint(ambiguousClarificationTerms),
+    });
+    onEvent({
+      type: "status",
+      data: {
+        phase: "ambiguous_term_clarification",
+        model,
+        detail: `歧义词澄清：${ambiguousClarificationTerms.join("、")}`,
+      },
+    });
+  } else if (isPlanExplore && runPolicy.pendingPlanClarifyRun) {
+    ctx.messages.push({ role: "system", content: buildPendingPlanClarificationHint() });
+  } else if (isPlanExplore && runPolicy.pendingPlanAmendRun) {
+    ctx.messages.push({
+      role: "system",
+      content: buildPendingPlanAmendHint(pendingPlanState.planFilePath),
+    });
+  } else if (isPlanExplore && isPlanQuoteInformationalPrompt(prompt)) {
+    ctx.messages.push({ role: "system", content: buildPlanQuoteInformationalHint() });
+  } else if (isPlanExplore && isPlanQuoteRevisionPrompt(prompt)) {
+    ctx.messages.push({ role: "system", content: buildPlanRevisionFollowUpHint() });
+  } else if (
+    isPlanExplore &&
+    !extractPlanFilePaths(stripQuotedReplyPrefix(prompt)).length &&
+    !pendingPlanState.hasPendingPlan
+  ) {
+    ctx.messages.push({ role: "system", content: buildPlanNoTargetPathHint() });
+  }
+  if (runPolicy.readOnlyBuildRun && runPolicy.consultativeVisionRun && ctx.segmentMaxTurns !== undefined) {
     ctx.segmentMaxTurns = Math.min(ctx.segmentMaxTurns, 6);
   }
-  const visionLocateSingleTurnRun = shouldBypassVisionFirstTurn({
-    imageCount: imageDataUrls.length,
-    consultativeVisionRun,
-    prompt,
-  });
   if (visionLocateSingleTurnRun) {
     ctx.toolGuard.visionLocateActive = true;
   }
-  if (visionLocateSingleTurnRun && accuracyConsultativeRun) {
+  if (visionLocateSingleTurnRun && runPolicy.accuracyConsultativeRun) {
     ctx.messages.push({ role: "system", content: buildConsultativeAccuracyTraceHint() });
   }
   if (visionLocateSingleTurnRun && isUiAppearanceQuestionPrompt(prompt)) {
@@ -566,56 +407,58 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
   for (let turn = 1; ; turn += 1) {
     ctx.turn = turn;
 
-    const preflight = runTurnPreflight(ctx, turn, {
-      isReadOnlyAgent, isPlanExplore, readOnlyBuildRun, isExecutePlan, isAsk, isExplore,
-      mode, nudgeMode, exploreHardCap, exploreSoftCap, implementFollowUpRun,
-      sameIssueFollowUpRun, uiDefectBuildRun, model, prompt,
-    }, activeTools, onEvent, signal);
-    if (preflight.action === "return") return;
+    const preflight = runTurnPreflight(ctx, turn, activeTools, onEvent, signal);
+    if (preflight.action === "return") {
+      return;
+    }
 
     const mc = await runTurnModelCall(ctx, {
-      turn, endpoint, apiKey, model, maxContextChars, toolsForTurn: preflight.toolsForTurn,
-      readOnlyBuildRun, isReadOnlyAgent, imageDataUrls, prompt,
+      turn,
+      toolsForTurn: preflight.toolsForTurn,
+      resolveFirstByteTimeoutMs,
     }, onEvent, signal);
-    if (mc.action === "return") return;
+    if (mc.action === "return") {
+      return;
+    }
     if (mc.action === "continue") { turn -= 1; continue; }
 
     if (ctx.visionFirstTurnPending || visionLocateSingleTurnRun) {
-      const vis = await runTurnVision(ctx, mc.visibleContent, mc.toolCalls, mc.streamedChars, {
-        turn, consultativeVisionRun, accuracyConsultativeRun, behaviorPurposeRun,
-        consultativeUiAppearanceRun, isReadOnlyAgent, isPlanExplore, readOnlyBuildRun,
-        uiDefectBuildRun, projectRoot, prompt, imageDataUrls, model, visionLocateSingleTurnRun,
+      const vis = await runTurnVision(ctx, {
+        visibleContent: mc.visibleContent,
+        toolCalls: mc.toolCalls,
+        streamedChars: mc.streamedChars,
       }, onEvent);
       if (vis.action === "continue") continue;
     }
 
     if (!mc.toolCalls.length) {
       const val = await validateAgentResponse(ctx, {
-        turn, isReadOnlyAgent, isPlanExplore, readOnlyBuildRun, isAsk, isExplore,
-        implementFollowUpRun, sameIssueFollowUpRun, codeReviewRun, userFailureReportRun,
-        userRecentlyReportedFailure, uiDefectBuildRun, agentStepClarifyRun,
-        accuracyConsultativeRun, consultativeVisionRun, behaviorPurposeRun,
-        consultativeUiAppearanceRun, visionLocateSingleTurnRun,
-        model, rawContent: mc.rawContent, visibleContent: mc.visibleContent,
-        toolCalls: mc.toolCalls, streamedChars: mc.streamedChars,
+        rawContent: mc.rawContent,
+        visibleContent: mc.visibleContent,
+        toolCalls: mc.toolCalls,
+        streamedChars: mc.streamedChars,
+        targetFiles: runProfile.targetFiles,
+        taskPrompt: runPolicy.quotedAmendRun
+          ? runPolicy.effectiveTaskPrompt
+          : (runProfile.userIntent ?? runPolicy.effectiveTaskPrompt),
       }, onEvent);
-      if (val.action === "return") return;
+      if (val.action === "return") {
+        return;
+      }
       if (val.action === "continue") continue;
     }
 
     await runTurnExecution(ctx, {
-      turn, projectRoot, toolMode, webProxyUrl, injectedKeyFilePaths, signal,
-      isReadOnlyAgent, isPlanExplore, readOnlyBuildRun, isExplore, isAsk,
-      implementFollowUpRun, sameIssueFollowUpRun, consultativeVisionRun,
-      scheduledTaskConsultativeRun, exploreTurnBudget, mode, model,
-      visibleContent: mc.visibleContent, toolCalls: mc.toolCalls, streamedChars: mc.streamedChars,
+      turn,
+      visibleContent: mc.visibleContent,
+      toolCalls: mc.toolCalls,
+      streamedChars: mc.streamedChars,
     }, onEvent);
 
-    const seg = handleTurnSegment(ctx, {
-      turn, isReadOnlyAgent, isExplore, readOnlyBuildRun, isExecutePlan,
-      mode, nudgeMode, segmentBudget, model, outputTruncated: ctx.outputTruncated,
-    }, onEvent);
-    if (seg.action === "return") return;
+    const seg = handleTurnSegment(ctx, onEvent);
+    if (seg.action === "return") {
+      return;
+    }
     if (seg.action === "continue") continue;
   }
 }

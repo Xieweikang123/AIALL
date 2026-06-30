@@ -12,7 +12,7 @@ import {
   textIndicatesPatchAnchor,
   textConfirmsTeleportToBody,
 } from "./agentExploreGuard";
-import { buildAgentStepClarifyContinueHint } from "../src/services/agentUserIntent";
+import { buildAgentStepClarifyContinueHint } from "../src/orchestration/product/userIntentHints";
 import {
   buildEmptyReplyRetryNudge,
   buildPrematureCompletionRetryNudge,
@@ -22,12 +22,18 @@ import {
   buildBuildExploreForcePatchNudge,
   buildExploreForceReportNudge,
   buildSameIssueFollowUpForceSummaryNudge,
+  buildAmbiguousTermClarificationRetryNudge,
 } from "./agentExplorationBudget";
+import {
+  looksLikeClarificationQuestion,
+  looksLikePrematurePlanOrScaffold,
+} from "../src/orchestration/generic/ambiguousTermTriggers";
 import {
   shouldBlockConsultativeVisionLocateFinalize,
   buildVisionConsultativeLocateRetryHint,
   buildConsultativeUiAppearanceRetryHint,
   buildConsultativeAppearanceAnswerAfterReadHint,
+  consultativeAppearanceNeedsVueRead,
 } from "./visionMessage";
 import { buildVisionConsultativeReadAfterPrefgrepHint } from "./visionAnchorPrefgrep";
 import {
@@ -41,31 +47,19 @@ import {
 import { buildSearchFilesEmptyHint } from "./agentAskPrompt";
 import { markAnchorLocated, markTeleportBodyConfirmed, recordPatchFailure, listUncleanedEphemeralProbeFiles } from "./agentTurnContext";
 import { buildWorkspaceCleanupNudge } from "../shared/agentProbeGuard";
+import {
+  buildFinishGateRetryNudge,
+  evaluateFinishGate,
+  writtenStagePaths,
+} from "./agentFinishGate";
 
 export interface ValidationParams {
-  turn: number;
-  isReadOnlyAgent: boolean;
-  isPlanExplore: boolean;
-  readOnlyBuildRun: boolean;
-  isAsk: boolean;
-  isExplore: boolean;
-  implementFollowUpRun: boolean;
-  sameIssueFollowUpRun: boolean;
-  codeReviewRun: boolean;
-  userFailureReportRun: boolean;
-  userRecentlyReportedFailure: boolean;
-  uiDefectBuildRun: boolean;
-  agentStepClarifyRun: boolean;
-  accuracyConsultativeRun: boolean;
-  consultativeVisionRun: boolean;
-  behaviorPurposeRun: boolean;
-  consultativeUiAppearanceRun: boolean;
-  visionLocateSingleTurnRun: boolean;
-  model: string;
   rawContent: string;
   visibleContent: string;
   toolCalls: ChatToolCall[];
   streamedChars: number;
+  targetFiles?: string[];
+  taskPrompt?: string;
 }
 
 export type ValidationAction = "return" | "continue" | "final";
@@ -78,16 +72,76 @@ export async function validateAgentResponse(
   params: ValidationParams,
   onEvent: (event: VibeAgentEvent) => void,
 ): Promise<{ action: ValidationAction }> {
-  const { turn, rawContent, visibleContent, toolCalls, streamedChars, model } = params;
+  const cfg = ctx.runConfig;
+  const p = cfg.runPolicy;
+  const turn = ctx.turn;
+  const { model, isReadOnlyAgent, isPlanExplore, isAsk, isExplore, isExecutePlan, visionLocateSingleTurnRun } = cfg;
+  const {
+    readOnlyBuildRun,
+    implementFollowUpRun,
+    sameIssueFollowUpRun,
+    codeReviewRun,
+    userFailureReportRun,
+    userRecentlyReportedFailure,
+    uiDefectBuildRun,
+    agentStepClarifyRun,
+    accuracyConsultativeRun,
+    consultativeVisionRun,
+    behaviorPurposeRun,
+    consultativeUiAppearanceRun,
+  } = p;
+  const { rawContent, visibleContent, toolCalls, streamedChars, targetFiles, taskPrompt } = params;
   const userText = sanitizeAgentUserVisibleText(visibleContent.trim());
 
   const mustPatchBeforeFinish =
     ctx.writeStage !== null &&
-    !params.isReadOnlyAgent &&
-    !params.isPlanExplore &&
-    !params.readOnlyBuildRun &&
+    !isReadOnlyAgent &&
+    !isPlanExplore &&
+    !readOnlyBuildRun &&
     ctx.writeStage.writtenList.length === 0 &&
-    (params.implementFollowUpRun || (ctx.patchAnchorLocated && ctx.patchAnchorForcePending));
+    (implementFollowUpRun || (ctx.patchAnchorLocated && ctx.patchAnchorForcePending));
+
+  // ── 12a-pre: Ambiguous term clarification — block premature plan/scaffold ──
+  if (ctx.ambiguousTermClarificationPending) {
+    if (looksLikePrematurePlanOrScaffold(rawContent)) {
+      ctx.ambiguousTermClarificationRetries += 1;
+      ctx.messages.push({ role: "assistant", content: rawContent });
+      ctx.messages.push({
+        role: "system",
+        content: buildAmbiguousTermClarificationRetryNudge(ctx.ambiguousTermClarificationTerms),
+      });
+      onEvent({
+        type: "turn_response",
+        data: {
+          turn,
+          ...(ctx.segmentMaxTurns !== undefined ? { maxTurns: ctx.segmentMaxTurns } : {}),
+          assistantText: userText,
+          toolCalls: [],
+          hasToolCalls: false,
+          isFinal: false,
+        },
+      });
+      onEvent({
+        type: "status",
+        data: {
+          phase: "ambiguous_term_clarify_retry",
+          turn,
+          ...(ctx.segmentMaxTurns !== undefined ? { maxTurns: ctx.segmentMaxTurns } : {}),
+          model,
+          detail: `歧义词未澄清即输出方案，第 ${ctx.ambiguousTermClarificationRetries} 次要求改为提问`,
+        },
+      });
+      if (ctx.ambiguousTermClarificationRetries <= 2) {
+        return { action: "continue" };
+      }
+    }
+    if (
+      looksLikeClarificationQuestion(rawContent) ||
+      !looksLikePrematurePlanOrScaffold(rawContent)
+    ) {
+      ctx.ambiguousTermClarificationPending = false;
+    }
+  }
 
   // ── 12a: Agent step clarify ──
   if (ctx.agentStepClarifyPending) {
@@ -105,7 +159,7 @@ export async function validateAgentResponse(
       },
     });
     emitUserVisibleAssistantMessage(onEvent, rawContent, streamedChars);
-    if (params.uiDefectBuildRun || ctx.patchAnchorLocated || ctx.patchAnchorForcePending) {
+    if (uiDefectBuildRun || ctx.patchAnchorLocated || ctx.patchAnchorForcePending) {
       ctx.messages.push({ role: "system", content: buildAgentStepClarifyContinueHint() });
       onEvent({
         type: "status",
@@ -188,8 +242,8 @@ export async function validateAgentResponse(
   if (
     claimsPrematureCompletion(rawContent) &&
     ctx.prematureCompletionRetries < 1 &&
-    (params.userRecentlyReportedFailure || params.codeReviewRun ||
-      params.userFailureReportRun || params.sameIssueFollowUpRun)
+    (userRecentlyReportedFailure || codeReviewRun ||
+      userFailureReportRun || sameIssueFollowUpRun)
   ) {
     ctx.prematureCompletionRetries += 1;
     ctx.messages.push({ role: "assistant", content: rawContent });
@@ -220,9 +274,9 @@ export async function validateAgentResponse(
 
   // ── 12e: Patch failure completion retry ──
   const failedPatchPaths = [...new Set(ctx.patchFailureLog.map((e) => e.path).filter(Boolean))];
-  const successPatchPaths = ctx.writeStage?.writtenList.map((e) => e.key).filter(Boolean) ?? [];
+  const successPatchPaths = ctx.writeStage ? writtenStagePaths(ctx.writeStage) : [];
   if (
-    !params.isReadOnlyAgent &&
+    !isReadOnlyAgent &&
     ctx.writeStage &&
     ctx.patchFailureLog.length > 0 &&
     claimsSuccessDespitePatchFailures(rawContent, ctx.patchFailureLog.length) &&
@@ -259,14 +313,14 @@ export async function validateAgentResponse(
   }
 
   // ── 12f: Inject modification audit ──
-  if (!params.isReadOnlyAgent && ctx.writeStage && ctx.patchFailureLog.length > 0) {
+  if (!isReadOnlyAgent && ctx.writeStage && ctx.patchFailureLog.length > 0) {
     const successCount = ctx.writeStage.writtenList.length;
     const failCount = ctx.patchFailureLog.length;
     const failFiles = [...new Set(ctx.patchFailureLog.map((f) => f.path))].join("、");
     ctx.messages.push({
       role: "system",
       content:
-        `【修改审计】本轮会话中：${successCount} 个文件修改成功（${ctx.writeStage.writtenList.map((w) => w.key).join("、") || "无"}），` +
+        `【修改审计】本轮会话中：${successCount} 个文件修改成功（${writtenStagePaths(ctx.writeStage).join("、") || "无"}），` +
         `${failCount} 个 patch_file 调用失败（${failFiles}）。` +
         "在最终回复的总结中，只可声称上述成功修改的文件已完成；失败的修改必须如实标注'未生效'或'失败'，禁止虚假声称已完成。",
     });
@@ -278,9 +332,9 @@ export async function validateAgentResponse(
     !/以上是|仅供参考|建议|方案|思路/.test(rawContent);
   const noWriteToolsThisTurn =
     ctx.writeStage !== null &&
-    !params.isReadOnlyAgent &&
-    !params.isPlanExplore &&
-    !params.readOnlyBuildRun &&
+    !isReadOnlyAgent &&
+    !isPlanExplore &&
+    !readOnlyBuildRun &&
     ctx.writeStage.writtenList.length === 0;
   if (claimsModification && noWriteToolsThisTurn && turn > 1) {
     ctx.messages.push({ role: "assistant", content: rawContent });
@@ -315,7 +369,7 @@ export async function validateAgentResponse(
   }
 
   // ── 12h: Vision consultative locate single-turn ──
-  if (params.visionLocateSingleTurnRun && !ctx.visionLocateToolsUsed && params.consultativeVisionRun) {
+  if (visionLocateSingleTurnRun && !ctx.visionLocateToolsUsed && consultativeVisionRun) {
     // Handled in agentTurnVision.ts pre-grep path
     // Falls through to natural termination only if tools were already used
   }
@@ -326,15 +380,15 @@ export async function validateAgentResponse(
     ctx.toolGuard.grepHitVueFiles ? [...ctx.toolGuard.grepHitVueFiles] : undefined,
     ctx.toolGuard.consultativeReadPaths ?? [],
   );
-  const appearanceRetry = params.consultativeUiAppearanceRun && appearanceAnswerAfterRead;
+  const appearanceRetry = consultativeUiAppearanceRun && appearanceAnswerAfterRead;
   if (
     shouldBlockConsultativeVisionLocateFinalize({
-      visionConsultative: params.consultativeVisionRun,
+      visionConsultative: consultativeVisionRun,
       visionLocateToolsUsed: ctx.visionLocateToolsUsed,
       consultativeReadPaths: ctx.toolGuard.consultativeReadPaths ?? [],
       replyText: rawContent,
       grepHitVueFiles: ctx.toolGuard.grepHitVueFiles ? [...ctx.toolGuard.grepHitVueFiles] : [],
-      visionLocateSingleTurn: params.visionLocateSingleTurnRun,
+      visionLocateSingleTurn: visionLocateSingleTurnRun,
     }) &&
     ctx.visionConsultativeLocateRetries < 2
   ) {
@@ -384,7 +438,7 @@ export async function validateAgentResponse(
   if (
     !ctx.consultativeForceAnswerPending &&
     shouldBlockConsultativeAccuracyFinalize({
-      accuracyConsultative: params.accuracyConsultativeRun,
+      accuracyConsultative: accuracyConsultativeRun,
       visionLocateToolsUsed: ctx.visionLocateToolsUsed,
       consultativeReadPaths: ctx.toolGuard.consultativeReadPaths ?? [],
       replyText: rawContent,
@@ -421,9 +475,49 @@ export async function validateAgentResponse(
     return { action: "continue" };
   }
 
+  // ── 12k-pre: Workspace probe artifact cleanup before finish ──
+  if (
+    !isReadOnlyAgent &&
+    !isPlanExplore &&
+    !readOnlyBuildRun &&
+    ctx.writeStage
+  ) {
+    const uncleaned = listUncleanedEphemeralProbeFiles(ctx);
+    if (uncleaned.length > 0 && !ctx.workspaceCleanupNudgeSent) {
+      ctx.workspaceCleanupNudgeSent = true;
+      ctx.messages.push({ role: "assistant", content: rawContent });
+      ctx.messages.push({
+        role: "system",
+        content: buildWorkspaceCleanupNudge(uncleaned),
+      });
+      onEvent({
+        type: "turn_response",
+        data: {
+          turn,
+          ...(ctx.segmentMaxTurns !== undefined ? { maxTurns: ctx.segmentMaxTurns } : {}),
+          assistantText: userText,
+          toolCalls: [],
+          hasToolCalls: false,
+          isFinal: false,
+        },
+      });
+      onEvent({
+        type: "status",
+        data: {
+          phase: "workspace_cleanup_retry",
+          turn,
+          ...(ctx.segmentMaxTurns !== undefined ? { maxTurns: ctx.segmentMaxTurns } : {}),
+          model,
+          detail: "仍有探测临时文件未清理，已要求删除后再完成",
+        },
+      });
+      return { action: "continue" };
+    }
+  }
+
   // ── 12k: Behavior purpose trace retry ──
   if (
-    params.behaviorPurposeRun &&
+    behaviorPurposeRun &&
     shouldBlockBehaviorPurposeFinalize({
       behaviorPurpose: true,
       consultativeReadPaths: ctx.toolGuard.consultativeReadPaths ?? [],
@@ -464,9 +558,9 @@ export async function validateAgentResponse(
 
   // ── 12k-pre: Workspace probe artifact cleanup before finish ──
   if (
-    !params.isReadOnlyAgent &&
-    !params.isPlanExplore &&
-    !params.readOnlyBuildRun &&
+    !isReadOnlyAgent &&
+    !isPlanExplore &&
+    !readOnlyBuildRun &&
     ctx.writeStage
   ) {
     const uncleaned = listUncleanedEphemeralProbeFiles(ctx);
@@ -496,6 +590,51 @@ export async function validateAgentResponse(
           ...(ctx.segmentMaxTurns !== undefined ? { maxTurns: ctx.segmentMaxTurns } : {}),
           model,
           detail: "仍有探测临时文件未清理，已要求删除后再完成",
+        },
+      });
+      return { action: "continue" };
+    }
+  }
+
+  // ── 12m: Finish gate (deterministic critic before delivery) ──
+  if (ctx.finishGateRetries < 2) {
+    const finishGate = evaluateFinishGate({
+      rawContent,
+      writeStage: ctx.writeStage,
+      isReadOnlyAgent,
+      isPlanExplore,
+      readOnlyBuildRun,
+      isExecutePlan,
+      implementFollowUpRun,
+      targetFiles,
+      taskPrompt,
+    });
+    if (finishGate.blocked) {
+      ctx.finishGateRetries += 1;
+      ctx.messages.push({ role: "assistant", content: rawContent });
+      ctx.messages.push({
+        role: "system",
+        content: buildFinishGateRetryNudge(finishGate),
+      });
+      onEvent({
+        type: "turn_response",
+        data: {
+          turn,
+          ...(ctx.segmentMaxTurns !== undefined ? { maxTurns: ctx.segmentMaxTurns } : {}),
+          assistantText: userText,
+          toolCalls: [],
+          hasToolCalls: false,
+          isFinal: false,
+        },
+      });
+      onEvent({
+        type: "status",
+        data: {
+          phase: "finish_gate_retry",
+          turn,
+          ...(ctx.segmentMaxTurns !== undefined ? { maxTurns: ctx.segmentMaxTurns } : {}),
+          model,
+          detail: finishGate.violations.map((v) => v.detail).join("；"),
         },
       });
       return { action: "continue" };

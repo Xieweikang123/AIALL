@@ -1,5 +1,6 @@
 import type { VibeAgentEvent } from "../shared/agentTypes";
 import type { AgentTurnContext } from "./agentTurnContext";
+import { isPlanTextOnlyFollowUpRun } from "./agentTurnContext";
 import { buildDoneData } from "./agentClassifier";
 import {
   AGENT_SAFETY_MAX_TURNS,
@@ -12,38 +13,41 @@ import {
   buildExploreForceReportNudge,
   buildAskForceAnswerNudge,
   buildConsultativeSegmentCapNudge,
+  buildPlanSegmentCapNudge,
+  buildPlanForceAnswerNudge,
+  buildSegmentEmergencyFinishNudge,
   EXPLORE_MAX_TOTAL_EXPLORE_SOFT,
   ASK_MAX_TOTAL_EXPLORE_SOFT,
+  PLAN_MAX_TOTAL_EXPLORE_SOFT,
 } from "./agentExplorationBudget";
-
-export interface SegmentParams {
-  turn: number;
-  isReadOnlyAgent: boolean;
-  isExplore: boolean;
-  readOnlyBuildRun: boolean;
-  isExecutePlan: boolean;
-  mode: "ask" | "build" | "plan" | "explore";
-  nudgeMode: "ask" | "build" | "plan" | "explore";
-  segmentBudget: number;
-  model: string;
-  outputTruncated: boolean;
-}
 
 /**
  * Handle turn-cap emergency nudges and segment boundary (Blocks 18–19).
  */
 export function handleTurnSegment(
   ctx: AgentTurnContext,
-  params: SegmentParams,
   onEvent: (event: VibeAgentEvent) => void,
 ): { action: "return" | "continue" | "next" } {
-  const { turn, isReadOnlyAgent, isExplore, readOnlyBuildRun, isExecutePlan,
-    mode, nudgeMode, segmentBudget, model } = params;
+  const cfg = ctx.runConfig;
+  const p = cfg.runPolicy;
+  const {
+    isReadOnlyAgent,
+    isExplore,
+    isPlanExplore,
+    isExecutePlan,
+    mode,
+    nudgeMode,
+    segmentBudget,
+    model,
+  } = cfg;
+  const { readOnlyBuildRun } = p;
+  const turn = ctx.turn;
 
   // ── Block 18: Turn cap emergency finish nudge ──
   if (
     !readOnlyBuildRun &&
     !isExplore &&
+    !isPlanExplore &&
     ctx.segmentMaxTurns !== undefined &&
     turn >= ctx.segmentMaxTurns - 3 &&
     turn < ctx.segmentMaxTurns
@@ -51,7 +55,7 @@ export function handleTurnSegment(
     const remaining = ctx.segmentMaxTurns - turn;
     ctx.messages.push({
       role: "system",
-      content: `【紧急提示】剩余 ${remaining} 轮。请优先 patch_file 完成必要修改，然后输出中文总结；若任务已完成，直接写总结（已改文件、验证方式、剩余问题）。`,
+      content: buildSegmentEmergencyFinishNudge(remaining),
     });
   }
 
@@ -69,19 +73,32 @@ export function handleTurnSegment(
           data: { message: `已达安全上限（${AGENT_SAFETY_MAX_TURNS} 轮），任务可能未完成。` },
         });
       }
-      onEvent({ type: "done", data: buildDoneData(ctx.writeStage, turn, params.outputTruncated) });
+      onEvent({ type: "done", data: buildDoneData(ctx.writeStage, turn, ctx.outputTruncated) });
       return { action: "return" };
     }
 
-    // 19b: Read-only / explore segment cap
-    if (readOnlyBuildRun || isExplore) {
+    // 19b: Read-only / explore / plan segment cap
+    if (readOnlyBuildRun || isExplore || isPlanExplore) {
       ctx.messages.push({
         role: "system",
         content: isExplore
           ? buildExploreForceReportNudge(Math.max(ctx.totalExploreTurns, EXPLORE_MAX_TOTAL_EXPLORE_SOFT))
-          : buildConsultativeSegmentCapNudge(turn, ctx.totalExploreTurns),
+          : isPlanExplore
+            ? buildPlanSegmentCapNudge(turn, ctx.totalExploreTurns)
+            : buildConsultativeSegmentCapNudge(turn, ctx.totalExploreTurns),
       });
-      if (!isExplore) {
+      if (!isExplore && !isPlanExplore) {
+        ctx.messages.push({
+          role: "system",
+          content: buildAskForceAnswerNudge(Math.max(ctx.totalExploreTurns, ASK_MAX_TOTAL_EXPLORE_SOFT)),
+        });
+      }
+      if (isPlanExplore && !isPlanTextOnlyFollowUpRun(ctx)) {
+        ctx.messages.push({
+          role: "system",
+          content: buildPlanForceAnswerNudge(Math.max(ctx.totalExploreTurns, PLAN_MAX_TOTAL_EXPLORE_SOFT)),
+        });
+      } else if (isPlanExplore && isPlanTextOnlyFollowUpRun(ctx)) {
         ctx.messages.push({
           role: "system",
           content: buildAskForceAnswerNudge(Math.max(ctx.totalExploreTurns, ASK_MAX_TOTAL_EXPLORE_SOFT)),
@@ -92,11 +109,15 @@ export function handleTurnSegment(
       onEvent({
         type: "status",
         data: {
-          phase: isExplore ? "explore_segment_cap" : "consultative_segment_cap",
+          phase: isExplore ? "explore_segment_cap" : isPlanExplore ? "plan_segment_cap" : "consultative_segment_cap",
           turn,
           maxTurns: ctx.segmentMaxTurns,
           model,
-          detail: isExplore ? "探索已达段内轮次上限，须输出项目报告" : "咨询只读已达段内轮次上限，须输出结论",
+          detail: isExplore
+            ? "探索已达段内轮次上限，须输出项目报告"
+            : isPlanExplore
+              ? "规划已达段内轮次上限，须输出修改方案"
+              : "咨询只读已达段内轮次上限，须输出结论",
         },
       });
       return { action: "continue" };
@@ -141,7 +162,7 @@ export function handleTurnSegment(
         type: "error",
         data: { message: buildTurnCapExhaustedMessage(turn) },
       });
-      onEvent({ type: "done", data: buildDoneData(ctx.writeStage, turn, params.outputTruncated) });
+      onEvent({ type: "done", data: buildDoneData(ctx.writeStage, turn, ctx.outputTruncated) });
       return { action: "return" };
     }
 
@@ -149,7 +170,7 @@ export function handleTurnSegment(
     ctx.segmentIndex += 1;
     ctx.segmentMaxTurns = extendSegmentMaxTurns(turn, segmentBudget);
     ctx.turnsLowNudgeSent = false;
-    if (!readOnlyBuildRun && !isExplore) {
+    if (!readOnlyBuildRun && !isExplore && !isPlanExplore) {
       ctx.messages.push({
         role: "system",
         content: buildSegmentContinueNudge(turn, ctx.segmentIndex, nudgeMode, isExecutePlan && mode === "plan"),

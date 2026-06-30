@@ -1,6 +1,9 @@
 import type { ChatCompletionMessage, ChatToolCall } from "./aiForward";
 import type { VibeAgentEvent } from "../shared/agentTypes";
 
+export type { TurnRunConfig } from "./agentTurnRunConfig";
+export { buildTurnRunConfig, isReadOnlyTurn } from "./agentTurnRunConfig";
+
 /** Control-flow directive returned by each turn phase. */
 export type TurnPhaseAction = "return" | "continue" | "next";
 
@@ -68,58 +71,3 @@ export interface TurnSegmentResult extends TurnPhaseResult {
 // ── Shared helper types ──
 
 export type OnEventFn = (event: VibeAgentEvent) => void;
-
-/** Read-only parameters that don't change across turn iterations. */
-export interface TurnRunConfig {
-  projectRoot: string;
-  prompt: string;
-  endpoint: string;
-  apiKey?: string;
-  model: string;
-  mode: "ask" | "build" | "plan" | "explore";
-  toolMode: "ask" | "build" | "plan" | "explore";
-  nudgeMode: "ask" | "build" | "plan" | "explore";
-  isAsk: boolean;
-  isExplore: boolean;
-  isReadOnlyAgent: boolean;
-  isExecutePlan: boolean;
-  isPlanExplore: boolean;
-  readOnlyBuildRun: boolean;
-  exploreHardCap: number;
-  exploreSoftCap: number;
-  exploreTurnBudget: number;
-  maxContextChars: number;
-  activeTools: { type: "function"; function: { name: string; description: string; parameters: object } }[];
-  systemPrompt: string;
-  imageDataUrls: string[];
-  injectedKeyFilePaths: string[];
-  webProxyUrl?: string;
-  // Run-policy derived flags
-  implementFollowUpRun: boolean;
-  sameIssueFollowUpRun: boolean;
-  codeReviewRun: boolean;
-  userErrorQuoteRun: boolean;
-  userFailureReportRun: boolean;
-  sessionAuditRun: boolean;
-  behaviorContradictionRun: boolean;
-  consultativeResumeRun: boolean;
-  locateStatusFollowUpRun: boolean;
-  behaviorPurposeRun: boolean;
-  scheduledTaskConsultativeRun: boolean;
-  accuracyConsultativeRun: boolean;
-  consultativeVisionRun: boolean;
-  consultativeUiAppearanceRun: boolean;
-  uiDefectBuildRun: boolean;
-  agentStepClarifyRun: boolean;
-  ultraShortOpenTaskRun: boolean;
-  userRecentlyReportedFailure: boolean;
-  effectiveTaskPrompt: string;
-  resumeOriginalTask: string | null;
-  // Vision config
-  visionLocateSingleTurnRun: boolean;
-  visionFirstTurnPending: boolean;
-  // On-event callback
-  onEvent: OnEventFn;
-  // Signal
-  signal?: AbortSignal;
-}
