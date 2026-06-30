@@ -4,7 +4,9 @@
       v-if="streaming && isRunning && !text.trim()"
       class="timeline-answer-placeholder"
     >
-      <span class="shimmer-text--fast">正在生成…</span>
+      <span class="shimmer-text--fast">
+        {{ planExternalView ? "方案正在左侧窗口生成…" : "正在生成…" }}
+      </span>
     </div>
     <ProjectReportBlock
       v-else
@@ -18,10 +20,16 @@
         :chat-mode="chatMode"
         :streaming="streaming && isRunning"
         :can-execute="canExecutePlan && !isRunning && !streaming"
+        :plan-file-path="planFilePath"
+        :plan-panel-active="planPanelActive"
         :enhance-layout="layoutEnhanceReady && !isRunning && !streaming"
+        :external-view="planExternalView"
         @execute="emit('execute-plan')"
+        @open-plan-file="() => chatCtx?.openPlanFileInEditor(props.planFilePath)"
+        @focus-panel="focusPlanPanel"
       >
         <ChatMarkdown
+          v-if="!planExternalView"
           class="inline-feed-markdown inline-feed-markdown--answer"
           :content="answerMarkdown(text)"
           :streaming="streaming && isRunning"
@@ -34,10 +42,13 @@
 </template>
 
 <script setup lang="ts">
+import { computed, inject } from "vue";
 import ChatMarkdown from "./ChatMarkdown.vue";
 import PlanDocumentBlock from "./PlanDocumentBlock.vue";
 import ProjectReportBlock from "./ProjectReportBlock.vue";
 import { enrichPlanMarkdownForDisplay } from "../services/planDocumentDisplay";
+import { shouldUsePlanExternalView } from "../services/planFile";
+import { vibeChatMessageContextKey } from "../composables/vibeChatMessageContext";
 import type { AiOption } from "../utils/parseAiOptions";
 
 const props = withDefaults(
@@ -48,6 +59,8 @@ const props = withDefaults(
     chatMode?: "ask" | "build" | "plan" | "explore";
     canExecutePlan?: boolean;
     layoutEnhanceReady?: boolean;
+    planFilePath?: string;
+    messageId?: string;
   }>(),
   {
     streaming: false,
@@ -60,7 +73,25 @@ const emit = defineEmits<{
   "execute-plan": [];
   "select-option": [option: AiOption];
   openFile: [path: string];
+  "open-plan-file": [];
 }>();
+
+const chatCtx = inject(vibeChatMessageContextKey, null);
+const planExternalView = computed(() =>
+  shouldUsePlanExternalView(props.text, { chatMode: props.chatMode ?? "ask" }),
+);
+const planPanelLinked = computed(() => {
+  if (!chatCtx?.planPanelActive.value) return false;
+  if (!props.messageId || !chatCtx.planPanelMessageId.value) return false;
+  return chatCtx.planPanelMessageId.value === props.messageId;
+});
+const planPanelActive = computed(
+  () => planPanelLinked.value && Boolean(chatCtx?.planWorkspaceOpen?.value),
+);
+
+function focusPlanPanel() {
+  chatCtx?.focusPlanPanel(props.messageId);
+}
 
 function answerMarkdown(text: string) {
   return enrichPlanMarkdownForDisplay(text, {

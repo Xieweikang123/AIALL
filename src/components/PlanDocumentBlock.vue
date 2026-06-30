@@ -1,5 +1,5 @@
 <template>
-  <div v-if="showPlanChrome" class="plan-document">
+  <div v-if="showPlanChrome" class="plan-document" @scroll.passive="emit('content-scroll')">
     <div class="plan-document-head">
       <div class="plan-document-title">
         <span class="plan-document-badge">方案</span>
@@ -12,8 +12,18 @@
           <template v-if="display.codeBlockCount">{{ display.codeBlockCount }} 处代码</template>
         </span>
       </div>
+      <div class="plan-document-actions">
       <button
-        v-if="canExecute"
+        v-if="planFilePath && !externalView"
+        type="button"
+        class="plan-document-open"
+        title="在编辑器打开 .aiall/PLAN.md"
+        @click="emit('open-plan-file')"
+      >
+        编辑 PLAN.md
+      </button>
+      <button
+        v-if="canExecute && !externalView"
         type="button"
         class="plan-document-exec"
         title="按此方案开始改代码"
@@ -21,9 +31,10 @@
       >
         执行方案
       </button>
+      </div>
     </div>
 
-    <details v-if="display.files.length" class="plan-files-fold" :open="filesExpanded">
+    <details v-if="display.files.length && !externalView" class="plan-files-fold" :open="filesExpanded">
       <summary class="plan-files-summary">涉及文件（{{ display.files.length }}）</summary>
       <ul class="plan-file-list">
         <li v-for="(file, index) in display.files" :key="`${file}-${index}`">
@@ -34,7 +45,34 @@
       </ul>
     </details>
 
-    <div ref="bodyRef" class="plan-document-body">
+    <div v-if="externalView" class="plan-document-teaser">
+      <p class="plan-document-teaser-text">
+        <template v-if="streaming && display.isPartialPlan">方案正在左侧窗口生成…</template>
+        <template v-else-if="planFilePath">方案已保存，可在左侧窗口查看</template>
+        <template v-else-if="planPanelActive">方案已在左侧窗口打开</template>
+        <template v-else>方案已生成，可在左侧窗口查看；选中文字可引用到对话提出修改</template>
+      </p>
+      <div class="plan-document-teaser-actions">
+        <button
+          v-if="canOpenPlanPanel"
+          type="button"
+          class="plan-document-teaser-btn"
+          @click="onFocusPanelClick"
+        >
+          {{ planPanelActive ? "聚焦方案窗口" : "打开方案窗口" }}
+        </button>
+        <button
+          v-if="canExecute"
+          type="button"
+          class="plan-document-exec"
+          @click="emit('execute')"
+        >
+          执行方案
+        </button>
+      </div>
+    </div>
+
+    <div v-else ref="bodyRef" class="plan-document-body">
       <slot />
     </div>
   </div>
@@ -44,29 +82,61 @@
 <script setup lang="ts">
 import { computed, nextTick, onUpdated, ref, watch } from "vue";
 import { parsePlanDocumentDisplay } from "../services/planDocumentDisplay";
+import { messageQualifiesForPlanPanel } from "../services/planFile";
 
 const props = withDefaults(
   defineProps<{
     content: string;
     canExecute?: boolean;
+    planFilePath?: string;
     /** Only Plan mode messages use plan document chrome. */
     chatMode?: "ask" | "build" | "plan" | "explore";
     /** When true, show raw markdown only (no plan chrome / anchors). */
     streaming?: boolean;
     /** When false, skip code-block folding (e.g. while streaming). */
     enhanceLayout?: boolean;
+    /** Chat teaser only; full body lives in PlanMainPanel. */
+    externalView?: boolean;
+    planPanelActive?: boolean;
   }>(),
-  { canExecute: false, streaming: false, enhanceLayout: true },
+  { canExecute: false, streaming: false, enhanceLayout: true, externalView: false, planPanelActive: false },
 );
 
 const emit = defineEmits<{
   execute: [];
+  "open-plan-file": [];
+  "focus-panel": [];
+  "content-scroll": [];
 }>();
 
 const bodyRef = ref<HTMLElement | null>(null);
 const display = computed(() => parsePlanDocumentDisplay(props.content));
-const showPlanChrome = computed(() => props.chatMode === "plan" && display.value.isPlan);
+const showPlanChrome = computed(() => {
+  if (props.chatMode !== "plan") return false;
+  if (props.externalView) {
+    return (
+      display.value.isPlan
+      || Boolean(props.planFilePath?.trim())
+      || Boolean(props.content.trim())
+    );
+  }
+  return display.value.isPlan;
+});
 const filesExpanded = computed(() => display.value.files.length <= (props.streaming ? 8 : 6));
+const canOpenPlanPanel = computed(() => {
+  if (props.chatMode !== "plan") return false;
+  if (!props.content.trim()) return false;
+  if (props.externalView) return true;
+  if (props.planFilePath?.trim()) return true;
+  return messageQualifiesForPlanPanel(props.content, {
+    chatMode: props.chatMode,
+    planFilePath: props.planFilePath,
+  });
+});
+
+function onFocusPanelClick() {
+  emit("focus-panel");
+}
 
 function scrollToFile(index: number) {
   const root = bodyRef.value;
@@ -145,6 +215,13 @@ onUpdated(() => {
   background: transparent;
 }
 
+.plan-document-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .plan-document-title {
   display: flex;
   align-items: center;
@@ -186,6 +263,24 @@ onUpdated(() => {
   font-weight: 600;
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease;
+}
+
+.plan-document-open {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(201, 209, 217, 0.95);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.plan-document-open:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.22);
 }
 
 .plan-document-exec:hover {
@@ -294,5 +389,44 @@ onUpdated(() => {
   margin: 0;
   border-radius: 0;
   border: none;
+}
+
+.plan-document-teaser {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(88, 166, 255, 0.18);
+  background: rgba(88, 166, 255, 0.06);
+}
+
+.plan-document-teaser-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(201, 209, 217, 0.92);
+}
+
+.plan-document-teaser-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.plan-document-teaser-btn {
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(88, 166, 255, 0.35);
+  background: rgba(88, 166, 255, 0.1);
+  color: rgba(190, 218, 255, 0.98);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.plan-document-teaser-btn:hover {
+  background: rgba(88, 166, 255, 0.18);
 }
 </style>

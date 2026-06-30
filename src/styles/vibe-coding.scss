@@ -94,7 +94,8 @@
 }
 
 .workspace.chat-collapsed .editor-panel,
-.workspace.chat-collapsed .knowledge-main-panel {
+.workspace.chat-collapsed .knowledge-main-panel,
+.workspace.chat-collapsed .plan-main-panel {
   flex: 1;
   min-width: 0;
   border-right: none;

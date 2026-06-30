@@ -270,7 +270,7 @@
         <div class="quoted-preview-header">
           <span class="quoted-preview-label">
             <span class="quoted-preview-icon">❝</span>
-            引用 {{ q.role === "assistant" ? "Agent" : "你" }}
+            引用 {{ q.source === "plan" ? "方案" : (q.role === "assistant" ? "Agent" : "你") }}
           </span>
           <button type="button" class="quoted-preview-close" @click="removeQuotedMessage(quoteIndex)">×</button>
         </div>
@@ -622,6 +622,7 @@ interface QuotedMessage {
   messageId: string;
   content: string;
   role: "user" | "assistant";
+  source?: "plan";
 }
 
 interface MentionItem {
@@ -913,7 +914,7 @@ onUnmounted(() => {
   if (sessionScrollClearTimer) window.clearTimeout(sessionScrollClearTimer);
 });
 
-defineExpose({ chatScrollRef });
+defineExpose({ chatScrollRef, chatDropZoneRef });
 
 function removeQuotedMessage(index: number) {
   const next = props.quotedMessages.filter((_, i) => i !== index);

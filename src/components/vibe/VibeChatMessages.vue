@@ -140,6 +140,7 @@
         @select-option="(option) => ctx.handleAiOptionSelect(option, m)"
         @jump-latest="ctx.jumpChainToLatest(m.id)"
         @open-file="(path) => ctx.previewAgentFile(m.id, path)"
+        @open-plan-file="ctx.openPlanFileInEditor(m.planFilePath)"
         @resume="ctx.resumeAgentRun(m.id)"
       />
       <div
@@ -169,10 +170,16 @@
           :chat-mode="m.chatMode"
           :streaming="m.role === 'assistant' && ctx.isAgentRunning(m)"
           :can-execute="ctx.canExecutePlanMessage(m)"
+          :plan-file-path="m.planFilePath"
+          :plan-panel-active="ctx.planPanelActive.value && ctx.planPanelMessageId.value === m.id && ctx.planWorkspaceOpen.value"
           :enhance-layout="m.role === 'assistant' && !ctx.isAgentRunning(m)"
+          :external-view="shouldUsePlanExternalView(ctx.messageDisplayContent(m), m)"
           @execute="ctx.executePlanFromMessage(m.id)"
+          @open-plan-file="ctx.openPlanFileInEditor(m.planFilePath)"
+          @focus-panel="ctx.focusPlanPanel(m.id)"
         >
           <ChatMarkdown
+            v-if="!shouldUsePlanExternalView(ctx.messageDisplayContent(m), m)"
             class="msg-answer"
             :class="{
               'msg-answer--streaming': m.role === 'assistant' && ctx.isAgentRunning(m),
@@ -353,6 +360,7 @@ import ChatMarkdown from "../ChatMarkdown.vue";
 import PlanDocumentBlock from "../PlanDocumentBlock.vue";
 import ProjectReportBlock from "../ProjectReportBlock.vue";
 import { enrichPlanMarkdownForDisplay } from "../../services/planDocumentDisplay";
+import { shouldUsePlanExternalView } from "../../services/planFile";
 import { vibeChatMessageContextKey, type VibeChatMessageItem } from "../../composables/vibeChatMessageContext";
 import { isAwaitingAssistantPlaceholder, isOrphanedUserReply } from "../../utils/vibeHelpers";
 

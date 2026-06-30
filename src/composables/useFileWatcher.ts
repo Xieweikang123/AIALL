@@ -6,8 +6,16 @@ import {
   type FileChangeEvent,
 } from "../services/fileWatcherClient";
 
+const TREE_STRUCTURAL_CHANGE_TYPES = new Set<FileChangeEvent["type"]>([
+  "add",
+  "unlink",
+  "addDir",
+  "unlinkDir",
+]);
+
 export interface UseFileWatcherOptions {
-  onFileChanges: (changes: FileChangeEvent[]) => void;
+  onFileChanges?: (changes: FileChangeEvent[]) => void;
+  refreshTree?: () => void | Promise<void>;
   isProjectKnowledgeFilePath: (path: string) => boolean;
   onKnowledgeFileChanged: () => void;
   gitStagingInProgress: () => boolean;
@@ -19,6 +27,16 @@ export function useFileWatcher(options: UseFileWatcherOptions) {
   const fileWatcherConnected = ref(false);
   const fileWatcherCleanup = ref<(() => void) | null>(null);
   let gitRefreshDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let treeRefreshDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function scheduleTreeRefreshFromWatcher() {
+    if (!options.refreshTree) return;
+    if (treeRefreshDebounceTimer) clearTimeout(treeRefreshDebounceTimer);
+    treeRefreshDebounceTimer = setTimeout(() => {
+      treeRefreshDebounceTimer = null;
+      void options.refreshTree?.();
+    }, 300);
+  }
 
   function scheduleGitStatusRefreshFromWatcher(refreshGitStatus: () => void) {
     if (gitRefreshDebounceTimer) clearTimeout(gitRefreshDebounceTimer);
@@ -48,6 +66,13 @@ export function useFileWatcher(options: UseFileWatcherOptions) {
             );
             if (relevantChanges.length > 0) {
               scheduleGitStatusRefreshFromWatcher(refreshGitStatus);
+              const treeChanges = relevantChanges.filter((change) =>
+                TREE_STRUCTURAL_CHANGE_TYPES.has(change.type),
+              );
+              if (treeChanges.length > 0) {
+                scheduleTreeRefreshFromWatcher();
+                options.onFileChanges?.(treeChanges);
+              }
               if (relevantChanges.some((change) => options.isProjectKnowledgeFilePath(change.path))) {
                 options.onKnowledgeFileChanged();
               }

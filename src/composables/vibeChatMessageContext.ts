@@ -11,6 +11,7 @@ export interface VibeChatMessageItem {
   streamChars?: number;
   contextChars?: number;
   writtenFiles?: string[];
+  planFilePath?: string;
   reverted?: boolean;
   rejected?: boolean;
   turnFileDiffs?: Record<string, { before?: string; after?: string; deleted?: boolean }>;
@@ -71,7 +72,12 @@ export interface VibeChatMessageContext {
   isDiffExpanded: (messageId: string, relPath: string) => boolean;
   canExecutePlanMessage: (msg: VibeChatMessageItem) => boolean;
   executePlanFromMessage: (messageId: string) => void | Promise<void>;
+  openPlanFileInEditor: (relPath?: string) => void | Promise<void>;
   planExecutionActive: Ref<boolean>;
+  planPanelActive: Ref<boolean>;
+  planPanelMessageId: Ref<string>;
+  planWorkspaceOpen: Ref<boolean>;
+  focusPlanPanel: (messageId?: string) => void;
 }
 
 export const vibeChatMessageContextKey: InjectionKey<VibeChatMessageContext> = Symbol("vibeChatMessageContext");

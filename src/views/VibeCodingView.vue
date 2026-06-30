@@ -245,7 +245,7 @@
       </FilePanel>
 
       <div
-        v-show="openTabs.length > 0"
+        v-show="projectOpened"
         class="resize-handle"
         role="separator"
         aria-orientation="vertical"
@@ -256,7 +256,7 @@
       ></div>
 
       <EditorPanel
-        v-if="gitPanelMode !== 'project' || (projectPanelView !== 'knowledge' && projectPanelView !== 'health')"
+        v-if="openTabs.length > 0 && !planPanelInForeground && (gitPanelMode !== 'project' || (projectPanelView !== 'knowledge' && projectPanelView !== 'health'))"
         ref="editorPanelRef"
         :active-file-path="activeFilePath"
         :file-content="fileContent"
@@ -290,7 +290,7 @@
       />
 
       <section
-        v-show="gitPanelMode === 'project' && projectPanelView === 'knowledge' && projectOpened"
+        v-show="gitPanelMode === 'project' && projectPanelView === 'knowledge' && projectOpened && !planWorkspaceOpen"
         class="editor-panel knowledge-main-panel"
         aria-label="项目知识库"
       >
@@ -330,7 +330,7 @@
       </section>
 
       <section
-        v-show="gitPanelMode === 'project' && projectPanelView === 'health' && projectOpened"
+        v-show="gitPanelMode === 'project' && projectPanelView === 'health' && projectOpened && !planWorkspaceOpen"
         class="editor-panel knowledge-main-panel"
         aria-label="项目架构评审"
       >
@@ -345,6 +345,28 @@
           :review-history-detail-loading="reviewHistoryDetailLoading"
           @open-source="openArchitectReviewSourceFile"
           @expand-chat="expandChat"
+        />
+      </section>
+
+      <section
+        ref="planPanelSectionRef"
+        v-show="planWorkspaceOpen && projectOpened && (openTabs.length === 0 || planPanelInForeground)"
+        class="editor-panel plan-main-panel"
+        aria-label="修改方案"
+        @mouseup="onPlanPanelMouseUp"
+        @dblclick="onPlanPanelDoubleClick"
+      >
+        <PlanMainPanel
+          :content="planPanelContent"
+          :streaming="planPanelStreaming"
+          :plan-file-path="planPanelFilePath"
+          :can-execute="planPanelCanExecute"
+          :chat-collapsed="chatCollapsed"
+          @execute="executePlanFromMessage(planPanelMessageId)"
+          @close="closePlanPanel()"
+          @open-plan-file="openPlanFileInEditor(planPanelFilePath)"
+          @expand-chat="expandChat"
+          @content-scroll="hideQuoteButtonNow"
         />
       </section>
 
@@ -581,6 +603,7 @@ import GitPanel from "../components/vibe/GitPanel.vue";
 import KnowledgePanel from "../components/vibe/KnowledgePanel.vue";
 import ProjectArchitectReviewPanel from "../components/vibe/ProjectArchitectReviewPanel.vue";
 import ArchitectReviewMainPanel from "../components/vibe/ArchitectReviewMainPanel.vue";
+import PlanMainPanel from "../components/vibe/PlanMainPanel.vue";
 import EditorPanel from "../components/vibe/EditorPanel.vue";
 import ChatPanel from "../components/vibe/ChatPanel.vue";
 import VibeChatMessages from "../components/vibe/VibeChatMessages.vue";
@@ -600,6 +623,7 @@ import { useVibeGlobalShortcuts } from "../composables/useVibeGlobalShortcuts";
 import { useProjectMemory } from "../composables/useProjectMemory";
 import { useProjectKnowledge } from "../composables/useProjectKnowledge";
 import { useProjectArchitectReview } from "../composables/useProjectArchitectReview";
+import { usePlanPanel } from "../composables/usePlanPanel";
 import { PROJECT_ARCHITECT_REVIEW_REL_PATH } from "../services/vibeProjectArchitectReviewClient";
 import { PROJECT_KNOWLEDGE_REL_PATH } from "../services/vibeProjectKnowledgeClient";
 import { distillExplorationRun } from "../services/explorationDistill";
@@ -893,6 +917,8 @@ interface QuotedMessage {
   messageId: string;
   content: string;
   role: "user" | "assistant";
+  /** 引用自左侧方案面板（非聊天气泡正文） */
+  source?: "plan";
 }
 
 const pendingQuote = ref<QuotedMessage | null>(null);
@@ -900,6 +926,7 @@ const quotedMessages = ref<QuotedMessage[]>([]);
 const quoteButtonPosition = ref({ x: 0, y: 0 });
 const showQuoteButton = ref(false);
 const quoteButtonRef = ref<HTMLElement | null>(null);
+const planPanelSectionRef = ref<HTMLElement | null>(null);
 const openingProject = ref(false);
 const composerRef = ref<InstanceType<typeof ChatComposerEditor> | null>(null);
 const composerEmpty = ref(true);
@@ -979,7 +1006,9 @@ interface ProjectFileItem {
 }
 
 const dismissedSuggestionMsgId = ref<string | null>(null);
-const chatDropZoneRef = ref<HTMLElement | null>(null);
+function getChatDropZoneEl(): HTMLElement | null {
+  return chatPanelRef.value?.chatDropZoneRef ?? null;
+}
 const chatInputFocused = ref(false);
 function onChatInputBoxMouseDown() {
   composerRef.value?.focus();
@@ -1139,26 +1168,27 @@ function onChatDragOver(e: DragEvent) {
   onChatDragOverBase(e);
 }
 function onChatDragLeave(e: DragEvent) {
-  onChatDragLeaveBase(e, chatDropZoneRef.value);
+  onChatDragLeaveBase(e, getChatDropZoneEl());
 }
 function onChatDrop(e: DragEvent) {
-  onChatDropBase(e, chatDropZoneRef.value);
+  onChatDropBase(e, getChatDropZoneEl());
 }
 function onDocumentDragOverCapture(e: DragEvent) {
-  onDocumentDragOverCaptureBase(e, chatDropZoneRef.value);
+  onDocumentDragOverCaptureBase(e, getChatDropZoneEl());
 }
 function onDocumentDropCapture(e: DragEvent) {
-  onDocumentDropCaptureBase(e, chatDropZoneRef.value);
+  onDocumentDropCaptureBase(e, getChatDropZoneEl());
 }
 
-// File watcher state
+// File watcher state — refreshTree wired after useEditorPanel (see fileWatcherTreeRefresh)
+const fileWatcherTreeRefresh = { fn: (() => {}) as () => void | Promise<void> };
 const {
   fileWatcherActive,
   fileWatcherConnected,
   startFileWatcherForProject,
   stopFileWatcherForProject,
 } = useFileWatcher({
-  onFileChanges: () => {},
+  refreshTree: () => fileWatcherTreeRefresh.fn(),
   isProjectKnowledgeFilePath,
   onKnowledgeFileChanged: () => {
     scheduleKnowledgeReloadFromDisk();
@@ -1465,9 +1495,9 @@ const {
   fileTree, expandedDirs, openTabs, activeFilePath, selectedTreePath,
   fileContent, fileDirty, fileLoadError, fileDiffs, readOnlyFileKeys,
   showDiffMode, selectedCode, renamingPath, activeFileDiff, activeFileReadOnly,
-  refreshTree, openFile, saveFile, reloadFile, closeTab, switchTab,
+  refreshTree, openFile: openFileCore, saveFile, reloadFile, closeTab, switchTab,
   switchReadOnlyTab, createNewFile, createNewFolder, commitRename, cancelRename,
-  deleteSelectedItem, showGitFileDiff, openGitLogFile, openDiffPreview,
+  deleteSelectedItem, showGitFileDiff: showGitFileDiffCore, openGitLogFile: openGitLogFileCore, openDiffPreview,
   toggleDiffMode, toggleDir, findNode, findNodeByKey, normalizePathKey,
   joinProjectPath, resolveFullPathFromRel, storeFileDiff, getFileDiff, setFileDiff,
   findOpenTab, syncActiveTabToCache, ensureCanLeaveCurrentTab, ensureCanLeaveAllOpenTabs,
@@ -1497,7 +1527,33 @@ const {
   autoRetryWithCountdown,
 });
 
+fileWatcherTreeRefresh.fn = refreshTree;
+
+const planWorkspaceOpen = ref(false);
+const planPanelInForeground = ref(false);
+let planPanelApi: ReturnType<typeof import("../composables/usePlanPanel").usePlanPanel> | null = null;
+
+function dismissPlanPanelForeground() {
+  planPanelInForeground.value = false;
+}
+
+async function openFile(path: string, options?: Parameters<typeof openFileCore>[1]) {
+  dismissPlanPanelForeground();
+  return openFileCore(path, options);
+}
+
+async function showGitFileDiff(filePath: string, staged = false) {
+  dismissPlanPanelForeground();
+  return showGitFileDiffCore(filePath, staged);
+}
+
+async function openGitLogFile(...args: Parameters<typeof openGitLogFileCore>) {
+  dismissPlanPanelForeground();
+  return openGitLogFileCore(...args);
+}
+
 const noActiveEditor = computed(() => {
+  if (planWorkspaceOpen.value) return false;
   const isProjectView = gitPanelMode.value === "project" &&
     (projectPanelView.value === "knowledge" || projectPanelView.value === "health");
 
@@ -1870,6 +1926,20 @@ async function handleAgentWrittenFiles(files: string[]) {
   }
 }
 
+async function openPlanFileInEditor(relPath?: string) {
+  dismissPlanPanelForeground();
+  const rel = relPath?.trim();
+  if (!rel) return;
+  const root = projectPath.value.trim();
+  if (!root) return;
+  await refreshTree();
+  const normalized = rel.replace(/\\/g, "/");
+  const full = /^[a-zA-Z]:[/\\]/.test(normalized) || normalized.startsWith("/")
+    ? normalized
+    : `${root}/${normalized.replace(/^[/\\]+/, "")}`;
+  await openFile(full);
+}
+
 function clearTurnFileDiffsFromStore(turnFileDiffs: Record<string, FileDiff>) {
   const next = { ...fileDiffs.value };
   for (const relPath of Object.keys(turnFileDiffs)) {
@@ -1980,6 +2050,9 @@ const agent = useAgentRun({
   onSkillProposal: (_msgId, proposal) => {
     addPendingSkillProposal(proposal);
   },
+  onPlanFileReady: (path, msgId) => {
+    planPanelApi?.patchFilePath(path, msgId);
+  },
 });
 
 const {
@@ -2019,6 +2092,53 @@ const {
   stopAgentUiTick,
   hasActiveAgentRun,
 } = agent;
+
+const planPanel = usePlanPanel({
+  chatMessages,
+  chatSending,
+  agentLiveRevision,
+  projectPath,
+  projectOpened,
+  activeSessionId,
+  messageDisplayContent,
+  isAgentRunning,
+  canExecutePlanMessage,
+  expandEditor,
+});
+planPanelApi = planPanel;
+
+const {
+  active: planPanelActive,
+  content: planPanelContent,
+  streaming: planPanelStreaming,
+  messageId: planPanelMessageId,
+  planFilePath: planPanelFilePath,
+  canExecute: planPanelCanExecute,
+  focusPanel: focusPlanPanelBase,
+  closePanel: closePlanPanelBase,
+} = planPanel;
+
+function focusPlanPanel(messageId?: string) {
+  planPanelInForeground.value = true;
+  focusPlanPanelBase(messageId);
+}
+
+function closePlanPanel() {
+  planPanelInForeground.value = false;
+  closePlanPanelBase();
+  if (openTabs.value.length === 0) {
+    collapseEditor();
+  }
+}
+
+watch(
+  planPanelActive,
+  (open) => {
+    planWorkspaceOpen.value = open;
+    if (!open) planPanelInForeground.value = false;
+  },
+  { immediate: true },
+);
 
 const totalTokenUsage = computed(() => {
   let totalStreamChars = 0;
@@ -2396,6 +2516,50 @@ function onMessageDoubleClick(event: MouseEvent, message: ChatMessage) {
   tryShowQuoteButtonFromSelection(message);
 }
 
+function shouldIgnorePlanQuoteSelectEvent(event: MouseEvent): boolean {
+  if (shouldIgnoreQuoteSelectEvent(event)) return true;
+  const target = event.target;
+  return target instanceof Element
+    && Boolean(target.closest(".plan-main-head, .plan-main-btn, .plan-main-head-actions"));
+}
+
+function tryShowQuoteButtonFromPlanPanel(): void {
+  if (!planPanelMessageId.value) return;
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || !selection.toString().trim()) return;
+
+  const selectedText = selection.toString().trim();
+  if (!selectedText) return;
+
+  const anchor = getSelectionAnchorRect(selection);
+  if (!anchor || !selectionRectUsable(anchor)) return;
+
+  pendingQuote.value = {
+    messageId: planPanelMessageId.value,
+    content: selectedText,
+    role: "assistant",
+    source: "plan",
+  };
+
+  void showQuoteButtonAt(anchor);
+}
+
+function onPlanPanelMouseUp(event: MouseEvent) {
+  if (!planWorkspaceOpen.value) return;
+  if (shouldIgnorePlanQuoteSelectEvent(event)) return;
+  if (event.detail >= 2) {
+    queueMicrotask(() => tryShowQuoteButtonFromPlanPanel());
+    return;
+  }
+  tryShowQuoteButtonFromPlanPanel();
+}
+
+function onPlanPanelDoubleClick(event: MouseEvent) {
+  if (!planWorkspaceOpen.value) return;
+  if (shouldIgnorePlanQuoteSelectEvent(event)) return;
+  tryShowQuoteButtonFromPlanPanel();
+}
+
 function quoteSelectedText() {
   if (!pendingQuote.value) return;
 
@@ -2566,7 +2730,7 @@ function onGitFilePointerDown(e: PointerEvent, relativePath: string, staged = fa
     const fullPath = resolveFullPathFromRel(relativePath);
     startPathDrag(fullPath, fileName(relativePath), e, () => {
       void showGitFileDiff(relativePath, staged);
-    }, chatDropZoneRef.value);
+    }, getChatDropZoneEl());
   }
 }
 
@@ -2608,13 +2772,13 @@ function selectMention(item: ProjectFileItem) {
 }
 
 function onFileDragStart(node: TreeNode, x: number, y: number) {
-  fileDrag.onFileDragStart(node, x, y, chatDropZoneRef.value);
+  fileDrag.onFileDragStart(node, x, y, getChatDropZoneEl());
 }
 function onFileDragMove(x: number, y: number) {
-  fileDrag.onFileDragMove(x, y, chatDropZoneRef.value);
+  fileDrag.onFileDragMove(x, y, getChatDropZoneEl());
 }
 function onFileDragEnd(node: TreeNode, x: number, y: number) {
-  fileDrag.onFileDragEnd(node, x, y, chatDropZoneRef.value);
+  fileDrag.onFileDragEnd(node, x, y, getChatDropZoneEl());
 }
 
 function removeOpenTabForPath(targetPath: string) {
@@ -3006,7 +3170,7 @@ async function sendChat() {
   if (quotedMessages.value.length) {
     const quotedContent = quotedMessages.value
       .map((q) => {
-        const prefix = q.role === "assistant" ? "Agent" : "你";
+        const prefix = q.source === "plan" ? "方案" : (q.role === "assistant" ? "Agent" : "你");
         return `> ${prefix}: ${q.content.replace(/\n/g, "\n> ")}`;
       })
       .join("\n\n");
@@ -3189,6 +3353,11 @@ provide(vibeChatMessageContextKey, {
   canExecutePlanMessage,
   executePlanFromMessage,
   planExecutionActive,
+  openPlanFileInEditor,
+  planPanelActive,
+  planPanelMessageId,
+  planWorkspaceOpen,
+  focusPlanPanel,
 } as VibeChatMessageContext);
 
 function reconcileOrphanedAgentSendingState() {

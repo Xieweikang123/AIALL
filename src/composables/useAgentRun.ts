@@ -41,6 +41,7 @@ import {
   isRecoverableAgentError,
   isIncompleteAgentRunWithoutFinalAnswer,
   applyInferredAgentRecovery,
+  diagnoseMissingFinalAnswer,
   applyMissingFinalAnswerDiagnosis,
   isHmrInterruptReason,
   PARTIAL_RUN_RESUME_REASON,
@@ -64,6 +65,7 @@ import {
   updateVibeChatSessionStatus,
 } from "../services/vibeChatStorage";
 import { looksLikeModificationPlan, findLastAssistantContentInMessages } from "../services/agentContinuation";
+import { persistPlanFile, resolvePlanContentForExecution } from "../services/planFile";
 import { parseAgentSuggestions, type AgentSuggestion } from "../services/agentSuggestions";
 import { stripTextToolCallMarkup } from "../services/textToolCallMarkup";
 import { isDeleteNotFoundError, resolveAgentDoneFileAction } from "../services/vibeAgentTurnApply";
@@ -162,6 +164,7 @@ export type UseAgentRunDeps = {
   clearTurnFileDiffsFromStore: (diffs: Record<string, TurnFileDiff>) => void;
   storeFileDiff: (relPath: string, before: string, after: string, deleted?: boolean, created?: boolean) => void;
   syncEditorAfterAgentFileChange: (relPath: string, diff: TurnFileDiff) => void;
+  refreshTree: () => void | Promise<void>;
   resolveUserMessageImages: (msg: ChatMessage) => string[];
   buildAgentHistory: (prompt: string, profile: AgentRunProfile) => VibeChatHistoryMessage[];
   buildAgentHistoryForResume: (assistantMsgId: string) => VibeChatHistoryMessage[];
@@ -172,6 +175,8 @@ export type UseAgentRunDeps = {
   persistAgentRunSession: (sessionId: string) => void;
   snapshotAgentRunSession?: (sessionId: string) => void;
   onAgentRunSettled?: (msg: ChatMessage) => void;
+  /** After Plan explore writes `.aiall/PLAN.md`, open it in the editor. */
+  onPlanFileReady?: (relPath: string, messageId: string) => void;
   onMemoryProposal?: (msgId: string, proposal: import("../services/projectMemoryProposal").MemoryProposalPayload) => void;
   onSkillProposal?: (msgId: string, proposal: import("../services/projectSkillProposal").SkillProposalPayload) => void;
 };
@@ -206,6 +211,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     clearTurnFileDiffsFromStore,
     storeFileDiff,
     syncEditorAfterAgentFileChange,
+    refreshTree,
     resolveUserMessageImages,
     buildAgentHistory,
     buildAgentHistoryForResume,
@@ -216,6 +222,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     persistAgentRunSession,
     snapshotAgentRunSession,
     onAgentRunSettled,
+    onPlanFileReady,
     onMemoryProposal,
     onSkillProposal,
   } = deps;
@@ -589,6 +596,24 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     );
   }
 
+  async function maybePersistPlanFileToDisk(
+    assistantMsg: ChatMessage,
+    msgId: string,
+    options: { wasExecutePlanRun: boolean; wasAborted: boolean },
+  ): Promise<void> {
+    if (options.wasAborted || assistantMsg.agentFailed) return;
+    if (assistantMsg.chatMode !== "plan" || options.wasExecutePlanRun) return;
+    const planText = messageDisplayContent(assistantMsg).trim();
+    if (!looksLikeModificationPlan(planText)) return;
+    const root = projectPath.value.trim();
+    if (!root) return;
+    const saved = await persistPlanFile(root, planText);
+    if (!saved.ok) return;
+    assistantMsg.planFilePath = saved.path;
+    patchAssistantMsg(msgId, { planFilePath: saved.path });
+    onPlanFileReady?.(saved.path, msgId);
+  }
+
 
 
   function cancelAutoResume() {
@@ -716,6 +741,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (message.trim() === "运行中断（未生成最终回复）") {
       applyMissingFinalAnswerDiagnosis(assistantMsg, {
         doneTurns: resolveAgentCompletedTurns(assistantMsg),
+        chatMode: assistantMsg.chatMode,
       });
     } else {
       assistantMsg.agentFailureDetail = undefined;
@@ -900,7 +926,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     assistantMsg.roundGroups = recordAgentRoundNarrative(
       assistantMsg.roundGroups,
       event.data.turn,
-      event.data.assistantText,
+      event.data.assistantText ?? event.data.toolCallPreamble,
       event.data.maxTurns,
     );
     if (shouldMinimizeRunUiPatch(assistantMsg)) {
@@ -1088,6 +1114,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       const skillProposal = parseSkillProposalToolResult(event.data.result);
       if (skillProposal) onSkillProposal?.(msgId, skillProposal);
     }
+    if (event.data.name === "run_command" && event.data.ok) {
+      void refreshTree();
+    }
     const pending = assistantMsg.tools?.some((t) => t.running);
     setAgentStatus(sessionId, assistantMsg, pending ? "executing_tools" : "summarizing_tools", {
       turn: assistantMsg.agentTurn,
@@ -1165,6 +1194,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   function handleDoneEvent(event: EventOf<"done">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
     if (isRunVisible(sessionId)) clearStreamDeltaBuffer();
+    const wasExecutePlanRun = planExecutionActive.value;
     planExecutionActive.value = false;
     runManager.setAbortHandle(sessionId, null);
     clearPendingAgentRun();
@@ -1399,8 +1429,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         logStatus: true,
       });
       assistantMsg.content = resolveAgentFailureBubbleContent(assistantMsg);
-      finishRunSession(sessionId);
+      flushMinimizedRunUiPatch();
       patchAssistantMsg(msgId, {
+        ...buildRunUiFullPatch(assistantMsg),
         content: assistantMsg.content,
         agentFailed: assistantMsg.agentFailed,
         agentRecoverable: assistantMsg.agentRecoverable,
@@ -1408,11 +1439,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         agentFailureDetail: assistantMsg.agentFailureDetail,
         agentRecoveryDismissed: assistantMsg.agentRecoveryDismissed,
         totalTurns: assistantMsg.totalTurns,
-        statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
         activityExpanded: true,
-        ...syncRoundGroupsPatch(assistantMsg),
       });
       persistChatNow(undefined, { flushStore: true });
+      finishRunSession(sessionId);
       void scrollChatToBottom();
       return;
     }
@@ -1494,6 +1524,14 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       }
       void handleAgentWrittenFiles(fileAction.writtenFiles);
     }
+
+    void maybePersistPlanFileToDisk(assistantMsg, msgId, { wasExecutePlanRun, wasAborted }).then(() => {
+      if (assistantMsg.planFilePath) {
+        patchAssistantMsg(msgId, { planFilePath: assistantMsg.planFilePath });
+        persistChatNow(undefined, { flushStore: true });
+      }
+    });
+
     void scrollChatToBottom();
 
     onAgentRunSettled?.(assistantMsg);
@@ -1700,12 +1738,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (!aiConfig.value.apiKey) aiConfig.value.apiKey = savedApiKey;
     if (!aiConfig.value.model) aiConfig.value.model = savedModel;
     clearStreamDeltaBuffer();
-    beginAgentRunSession(sessionId);
     chatError.value = "";
     resetChatScrollPin();
-    const runGen = runManager.start(sessionId, assistantMsg.id, assistantMsg, false, "connecting_local");
-    startAgentUiTick();
-    const connectStatus = formatLiveStatus(runManager.get(sessionId)!.live);
 
     assistantMsg.agentFailed = false;
     assistantMsg.agentRecoverable = false;
@@ -1719,6 +1753,11 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     }
     assistantMsg.activityExpanded = true;
     assistantMsg.activityDetailed = false;
+
+    beginAgentRunSession(sessionId);
+    const runGen = runManager.start(sessionId, assistantMsg.id, assistantMsg, false, "connecting_local");
+    startAgentUiTick();
+    const connectStatus = formatLiveStatus(runManager.get(sessionId)!.live);
     appendStatusLog(
       assistantMsg,
       options?.silent
@@ -2116,9 +2155,13 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   async function executePlanFromMessage(messageId: string) {
     const msg = chatMessages.value.find((m) => m.id === messageId);
     if (!msg || !canExecutePlanMessage(msg)) return;
+    const planContent = await resolvePlanContentForExecution(
+      projectPath.value.trim(),
+      messageDisplayContent(msg),
+    );
     await runAgentTurn("改吧", {
       userBubbleContent: "执行方案",
-      planAssistantContent: messageDisplayContent(msg),
+      planAssistantContent: planContent,
     });
   }
 
