@@ -249,25 +249,6 @@
           @clear-history-view="clearHistoryReview"
         />
 
-        <AutoBugFixPanel
-          v-if="gitPanelMode === 'project' && projectPanelView === 'fix' && projectOpened"
-          :project-opened="projectOpened"
-          :phase="autoBugFixPhase"
-          :running="autoBugFixRunning"
-          :error="autoBugFixError"
-          :scan-result="autoBugFixScan"
-          :verify-result="autoBugFixVerify"
-          :last-summary="autoBugFixSummary"
-          v-model:include-warnings="autoBugFixIncludeWarnings"
-          :show-resume="autoBugFixShowResume"
-          :interrupted-hint="autoBugFixInterruptedHint"
-          @start="() => void startAutoBugFixFlow()"
-          @scan-only="() => void runAutoBugFixScanOnly()"
-          @verify-only="() => void runAutoBugFixVerifyOnly()"
-          @open-git="openGitPanelFromAutoFix"
-          @resume-agent="resumeAutoBugFixFromPanel"
-        />
-
       </FilePanel>
 
       <div

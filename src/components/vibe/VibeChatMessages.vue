@@ -241,39 +241,52 @@
         v-if="m.role === 'assistant' && m.turnFileDiffs && Object.keys(m.turnFileDiffs).length"
         class="inline-diff-list"
       >
+        <div v-if="Object.keys(m.turnFileDiffs).length > 1" class="inline-diff-list-head">
+          变更文件 · {{ Object.keys(m.turnFileDiffs).length }}
+        </div>
         <div
           v-for="relPath in Object.keys(m.turnFileDiffs)"
           :key="relPath"
           class="inline-diff-card"
+          :class="{ 'inline-diff-card--open': ctx.isDiffExpanded(m.id, relPath) }"
         >
-          <div class="inline-diff-head">
-            <span class="inline-diff-path">{{ relPath }}</span>
+          <div
+            class="inline-diff-head"
+            role="button"
+            tabindex="0"
+            :aria-expanded="ctx.isDiffExpanded(m.id, relPath)"
+            @click="ctx.toggleExpandedDiff(m.id, relPath)"
+            @keydown.enter.prevent="ctx.toggleExpandedDiff(m.id, relPath)"
+            @keydown.space.prevent="ctx.toggleExpandedDiff(m.id, relPath)"
+          >
+            <span class="inline-diff-chevron" aria-hidden="true">
+              {{ ctx.isDiffExpanded(m.id, relPath) ? "▾" : "▸" }}
+            </span>
+            <span class="inline-diff-path" :title="relPath">{{ shortDiffPath(relPath) }}</span>
             <span v-if="m.turnFileDiffs[relPath].deleted" class="inline-diff-tag delete">删除</span>
             <span v-else class="inline-diff-tag modify">修改</span>
-            <button
-              type="button"
-              class="ghost small"
-              :disabled="!ctx.projectOpened.value"
-              @click="ctx.previewAgentFile(m.id, relPath)"
-            >
-              编辑器预览
-            </button>
-            <button
-              type="button"
-              class="ghost small diff-toggle-btn"
-              @click="ctx.toggleExpandedDiff(m.id, relPath)"
-            >
-              {{ ctx.isDiffExpanded(m.id, relPath) ? '收起' : '展开' }}
-            </button>
+            <div class="inline-diff-actions" @click.stop>
+              <button
+                type="button"
+                class="inline-diff-action"
+                :disabled="!ctx.projectOpened.value"
+                title="在编辑器中预览"
+                @click="ctx.previewAgentFile(m.id, relPath)"
+              >
+                预览
+              </button>
+            </div>
           </div>
           <div class="inline-diff-wrap" :class="{ open: ctx.isDiffExpanded(m.id, relPath) }">
-            <div class="inline-diff-col">
-              <div class="inline-diff-label">修改前</div>
-              <pre class="trace-pre compact">{{ ctx.truncateDiffPreview(m.turnFileDiffs[relPath].before || "（空 / 新文件）") }}</pre>
-            </div>
-            <div class="inline-diff-col">
-              <div class="inline-diff-label">{{ m.turnFileDiffs[relPath].deleted ? "删除后" : "修改后" }}</div>
-              <pre class="trace-pre compact">{{ ctx.truncateDiffPreview(m.turnFileDiffs[relPath].deleted ? "（文件已删除）" : (m.turnFileDiffs[relPath].after || "")) }}</pre>
+            <div class="inline-diff-cols">
+              <div class="inline-diff-col">
+                <div class="inline-diff-label">修改前</div>
+                <pre class="trace-pre compact">{{ ctx.truncateDiffPreview(m.turnFileDiffs[relPath].before || "（空 / 新文件）") }}</pre>
+              </div>
+              <div class="inline-diff-col">
+                <div class="inline-diff-label">{{ m.turnFileDiffs[relPath].deleted ? "删除后" : "修改后" }}</div>
+                <pre class="trace-pre compact">{{ ctx.truncateDiffPreview(m.turnFileDiffs[relPath].deleted ? "（文件已删除）" : (m.turnFileDiffs[relPath].after || "")) }}</pre>
+              </div>
             </div>
           </div>
         </div>
@@ -505,5 +518,12 @@ const CHAT_MODE_LABELS: Record<string, string> = {
 function chatModeLabel(mode: string | undefined): string {
   if (!mode) return "";
   return CHAT_MODE_LABELS[mode] ?? mode;
+}
+
+function shortDiffPath(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  const parts = normalized.split("/").filter(Boolean);
+  if (parts.length <= 2) return normalized;
+  return parts.slice(-2).join("/");
 }
 </script>

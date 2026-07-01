@@ -15,10 +15,41 @@
 
     <div
       v-else-if="item.kind === 'collapsed'"
-      class="stream-process-collapsed"
-      :class="{ 'stream-process-collapsed--nested': nested }"
+      class="stream-process-collapsed-wrap"
+      :class="{ 'stream-process-collapsed-wrap--nested': nested }"
     >
-      {{ item.summary }}
+      <button
+        type="button"
+        class="stream-process-collapsed-btn"
+        :aria-expanded="isCollapsedExpanded(item.key)"
+        @click="toggleCollapsed(item.key)"
+      >
+        <span class="stream-process-collapsed-chevron" aria-hidden="true">
+          {{ isCollapsedExpanded(item.key) ? "▾" : "▸" }}
+        </span>
+        <span class="stream-process-collapsed-label">{{ item.summary }}</span>
+      </button>
+      <div
+        v-if="isCollapsedExpanded(item.key)"
+        class="stream-process-collapsed-body"
+      >
+        <AgentInlineFeedItems
+          :items="item.items"
+          :is-running="isRunning"
+          :chat-mode="chatMode"
+          :can-execute-plan="canExecutePlan"
+          :layout-enhance-ready="layoutEnhanceReady"
+          :plan-file-path="planFilePath"
+          :message-id="messageId"
+          :progress-hint="progressHint"
+          nested
+          :tool-default-visible="toolDefaultVisible"
+          tool-display="inline"
+          @execute-plan="emit('execute-plan')"
+          @select-option="(option) => emit('select-option', option)"
+          @open-file="(path) => emit('openFile', path)"
+        />
+      </div>
     </div>
 
     <AgentProcessStepList
@@ -81,7 +112,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject } from "vue";
+import { computed, inject, ref, watch } from "vue";
 import ChatMarkdown from "./ChatMarkdown.vue";
 import PlanDocumentBlock from "./PlanDocumentBlock.vue";
 import ProjectReportBlock from "./ProjectReportBlock.vue";
@@ -99,7 +130,7 @@ defineOptions({ name: "AgentInlineFeedItems" });
 type DisplayItem =
   | InlineFeedProcessItem
   | { kind: "tool-batch"; key: string; steps: AgentRoundTool[] }
-  | { kind: "collapsed"; key: string; summary: string };
+  | { kind: "collapsed"; key: string; summary: string; items: InlineFeedItem[] };
 
 const props = withDefaults(
   defineProps<{
@@ -195,7 +226,7 @@ function mergeInlineToolBatches(source: Array<InlineFeedProcessItem | InlineFeed
     }
     flushTools();
     if (item.kind === "collapsed") {
-      merged.push({ kind: "collapsed", key: item.key, summary: item.summary });
+      merged.push({ kind: "collapsed", key: item.key, summary: item.summary, items: item.items });
       continue;
     }
     merged.push(item);
@@ -204,14 +235,27 @@ function mergeInlineToolBatches(source: Array<InlineFeedProcessItem | InlineFeed
   return merged;
 }
 
-const displayItems = computed((): DisplayItem[] => {
-  const source = sourceProcessItems(props.items);
+function extractAnswerItems(items: InlineFeedItem[]) {
+  return items.filter(
+    (item): item is Extract<InlineFeedItem, { kind: "text"; variant: "answer" }> =>
+      item.kind === "text" && item.variant === "answer",
+  );
+}
 
-  if (props.toolDisplay !== "inline") {
-    return source as DisplayItem[];
+const displayItems = computed((): DisplayItem[] => {
+  if (props.answerOnly) {
+    return extractAnswerItems(props.items);
   }
 
-  return mergeInlineToolBatches(source);
+  const answerItems = extractAnswerItems(props.items);
+  const source = sourceProcessItems(props.items);
+
+  const processDisplay: DisplayItem[] =
+    props.toolDisplay !== "inline"
+      ? (source as DisplayItem[])
+      : mergeInlineToolBatches(source);
+
+  return answerItems.length ? [...processDisplay, ...answerItems] : processDisplay;
 });
 
 function renderKey(item: DisplayItem): string {
@@ -228,6 +272,26 @@ function answerMarkdown(text: string) {
   return enrichPlanMarkdownForDisplay(text, {
     whileStreaming: Boolean(props.isRunning),
   });
+}
+
+const expandedCollapsedKeys = ref<Set<string>>(new Set());
+
+watch(
+  () => props.items.map((item) => (item.kind === "collapsed" ? item.key : "")).join("|"),
+  () => {
+    expandedCollapsedKeys.value = new Set();
+  },
+);
+
+function isCollapsedExpanded(key: string): boolean {
+  return expandedCollapsedKeys.value.has(key);
+}
+
+function toggleCollapsed(key: string) {
+  const next = new Set(expandedCollapsedKeys.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  expandedCollapsedKeys.value = next;
 }
 </script>
 
@@ -273,15 +337,58 @@ function answerMarkdown(text: string) {
   padding: 0 0 4px;
 }
 
-.stream-process-collapsed {
+.stream-process-collapsed-wrap {
   padding: 0 0 4px;
-  font-size: 11px;
-  line-height: 1.4;
-  color: rgba(148, 163, 184, 0.55);
 }
 
-.stream-process-collapsed--nested {
+.stream-process-collapsed-wrap--nested {
+  padding-left: 4px;
+}
+
+.stream-process-collapsed-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 3px 8px 3px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(148, 163, 184, 0.72);
+  font-size: 11px;
+  line-height: 1.35;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.stream-process-collapsed-wrap--nested .stream-process-collapsed-btn {
   font-size: 10px;
+  padding: 2px 7px 2px 5px;
+}
+
+.stream-process-collapsed-btn:hover {
+  color: rgba(165, 214, 255, 0.92);
+  background: rgba(88, 166, 255, 0.06);
+  border-color: rgba(88, 166, 255, 0.14);
+}
+
+.stream-process-collapsed-chevron {
+  flex-shrink: 0;
+  font-size: 9px;
+  opacity: 0.7;
+}
+
+.stream-process-collapsed-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stream-process-collapsed-body {
+  margin: 4px 0 2px 6px;
+  padding-left: 8px;
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .stream-progress-hint {

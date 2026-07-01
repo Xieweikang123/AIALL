@@ -12,16 +12,16 @@
         <p class="fix-desc">规则扫描 + 测试验证 → Agent 局部 patch → 复验</p>
       </div>
 
-      <!-- Progress bar -->
-      <div v-if="phase !== 'idle'" class="fix-progress" role="progressbar" :aria-valuenow="progressValue" aria-valuemin="0" aria-valuemax="100">
-        <div class="fix-progress-track">
-          <div class="fix-progress-fill" :style="{ width: progressValue + '%' }"></div>
-        </div>
+      <!-- Steps -->
+      <div v-if="phase !== 'idle'" class="fix-progress">
         <div class="fix-steps">
-          <span v-for="s in stepList" :key="s.key" :class="stepClass(s.key)">
-            <span class="fix-step-dot"></span>
-            <span class="fix-step-label">{{ s.label }}</span>
-          </span>
+          <template v-for="(s, idx) in stepList" :key="s.key">
+            <span :class="stepClass(s.key)">
+              <span class="fix-step-dot"></span>
+              <span class="fix-step-label">{{ s.label }}</span>
+            </span>
+            <span v-if="idx < stepList.length - 1" class="fix-step-line" :class="{'fix-step-line--active': isStepActive(s.key)}"></span>
+          </template>
         </div>
       </div>
 
@@ -40,7 +40,7 @@
 
       <!-- Actions -->
       <div class="fix-toolbar">
-        <button type="button" class="fix-btn fix-btn--primary fix-btn--block" :disabled="running" @click="emit('start')">
+        <button type="button" class="fix-btn fix-btn--primary" :disabled="running" @click="emit('start')">
           <span v-if="running" class="fix-spinner"></span>
           {{ running ? phaseLabel : "开始自动修复" }}
         </button>
@@ -126,10 +126,10 @@
       <!-- Resume -->
       <div v-if="showResume" class="fix-resume">
         <p v-if="interruptedHint" class="fix-resume-hint">{{ interruptedHint }}</p>
-        <button type="button" class="fix-btn fix-btn--primary fix-btn--block" @click="emit('resume-agent')">恢复运行</button>
+        <button type="button" class="fix-btn fix-btn--primary" @click="emit('resume-agent')">恢复运行</button>
       </div>
 
-      <button v-if="phase === 'done' && !running" type="button" class="fix-btn fix-btn--ghost fix-btn--block" @click="emit('open-git')">查看 Git 变更</button>
+      <button v-if="phase === 'done' && !running" type="button" class="fix-btn fix-btn--secondary" @click="emit('open-git')">查看 Git 变更</button>
     </template>
   </div>
 </template>
@@ -193,6 +193,13 @@ function stepClass(step: AutoBugFixPhase): string {
   const stepIdx = phaseOrder.indexOf(step);
   if (props.phase === "error" || props.phase === "idle") return "fix-step";
   return curIdx >= stepIdx ? "fix-step fix-step--active" : "fix-step";
+}
+
+function isStepActive(step: AutoBugFixPhase): boolean {
+  const curIdx = phaseOrder.indexOf(props.phase);
+  const stepIdx = phaseOrder.indexOf(step);
+  if (props.phase === "error" || props.phase === "idle") return false;
+  return curIdx > stepIdx;
 }
 
 const progressValue = computed(() => {
@@ -260,46 +267,56 @@ const verifyDuration = computed(() => {
   gap: 6px;
   margin: 2px 0;
 }
-.fix-progress-track {
-  height: 4px;
-  border-radius: 2px;
-  background: var(--border, #333);
-  overflow: hidden;
-}
-.fix-progress-fill {
-  height: 100%;
-  border-radius: 2px;
-  background: var(--accent, #0078d4);
-  transition: width 0.5s ease;
-}
+
 .fix-steps {
   display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: 0;
+  padding: 0 2px;
 }
 .fix-step {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   font-size: 11px;
   color: var(--text-muted, #666);
+  flex-shrink: 0;
 }
 .fix-step--active {
   color: var(--accent, #0078d4);
   font-weight: 600;
 }
+.fix-step--done { color: color-mix(in srgb, var(--accent, #0078d4) 55%, var(--text-muted, #666)); }
 .fix-step-dot {
-  width: 7px;
-  height: 7px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   background: var(--border, #444);
   flex-shrink: 0;
+  transition: background 0.3s, box-shadow 0.3s;
 }
 .fix-step--active .fix-step-dot {
   background: var(--accent, #0078d4);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #0078d4) 25%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #0078d4) 20%, transparent), 0 0 8px color-mix(in srgb, var(--accent, #0078d4) 40%, transparent);
+}
+.fix-step--done .fix-step-dot {
+  background: color-mix(in srgb, var(--accent, #0078d4) 50%, var(--border, #444));
+}
+.fix-step-line {
+  display: inline-block;
+  width: 20px;
+  height: 2px;
+  background: var(--border, #333);
+  margin: 0 4px;
+  vertical-align: middle;
+  flex-shrink: 0;
+  transition: background 0.3s;
+}
+.fix-step-line--active {
+  background: linear-gradient(90deg, var(--accent-dim, #0058a3), var(--accent, #0078d4));
 }
 .fix-step-label { white-space: nowrap; }
-
 /* Scope */
 .fix-scope { display: flex; flex-direction: column; gap: 6px; }
 .fix-check { display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; }
@@ -307,7 +324,7 @@ const verifyDuration = computed(() => {
 .fix-scope-hint { font-size: 11px; color: var(--text-muted, #888); margin: 0; line-height: 1.35; }
 
 /* Buttons */
-.fix-toolbar { display: flex; flex-direction: column; gap: 8px; }
+.fix-toolbar { display: flex; flex-direction: column; gap: 16px; }
 .fix-toolbar-row { display: flex; gap: 8px; }
 .fix-btn {
   font-size: 12px;
@@ -324,6 +341,8 @@ const verifyDuration = computed(() => {
 }
 .fix-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .fix-btn--primary { background: var(--accent, #0078d4); border-color: transparent; color: #fff; }
+.fix-btn--secondary { background: var(--surface-hover, #2a2d2e); border-color: var(--border, #333); }
+.fix-btn--secondary:hover { background: var(--accent, #0078d4); border-color: transparent; color: #fff; }
 .fix-btn--ghost { background: transparent; }
 .fix-btn--block { width: 100%; }
 

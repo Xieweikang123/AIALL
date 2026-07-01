@@ -22,6 +22,7 @@
       <span v-if="row.state === 'running'" class="process-step-spinner" aria-hidden="true" />
       <span v-else-if="row.state === 'fail'" class="process-step-mark process-step-mark--fail">✕</span>
       <span v-else-if="row.state === 'skipped'" class="process-step-mark process-step-mark--skip">−</span>
+      <span v-else class="process-step-mark process-step-mark--ok">✓</span>
     </div>
     <button
       v-if="!expanded && hiddenCount > 0"
@@ -276,6 +277,11 @@ button.process-step-target:hover {
 
 .process-step-mark--skip {
   color: rgba(210, 153, 34, 0.9);
+}
+
+.process-step-mark--ok {
+  color: rgba(126, 182, 255, 0.55);
+  font-size: 9px;
 }
 
 .process-step-more {
