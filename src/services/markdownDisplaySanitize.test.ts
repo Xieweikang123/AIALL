@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  collapseDuplicateMarkdownHeaders,
   mergeSplitOptionalTypeInlineCode,
   sanitizeMarkdownForDisplay,
   stripVisibleHtmlComments,
@@ -33,6 +34,13 @@ describe("mergeSplitOptionalTypeInlineCode", () => {
   it("leaves already correct inline code unchanged", () => {
     const input = "类型 `size?: 'proportional' | 'fill' | 'fit';`";
     expect(mergeSplitOptionalTypeInlineCode(input)).toBe(input);
+  });
+});
+
+describe("collapseDuplicateMarkdownHeaders", () => {
+  it("removes repeated section headers while streaming", () => {
+    const text = "## 截图描述\n\n## 截图描述\n\n顶部导航栏。";
+    expect(collapseDuplicateMarkdownHeaders(text)).toBe("## 截图描述\n\n顶部导航栏。");
   });
 });
 

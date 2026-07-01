@@ -28,14 +28,26 @@ export function mergeSplitOptionalTypeInlineCode(source: string): string {
   return source.replace(/`([^`\n]+)\?`\s*:\s*`([^`\n]+)`/g, "`$1?: $2`");
 }
 
+/** Collapse repeated markdown section headers (common while SSE appends section blocks). */
+export function collapseDuplicateMarkdownHeaders(text: string): string {
+  let result = text;
+  let prev = "";
+  while (prev !== result) {
+    prev = result;
+    result = result.replace(/(^|\n)(#{1,3}\s+[^\n]+)\n+\2(?=\n|$)/gm, "$1$2");
+  }
+  return result;
+}
+
 /** Normalize assistant/thought markdown before ChatMarkdown rendering. */
 export function sanitizeMarkdownForDisplay(text: string): string {
   if (!text) return "";
   const trimmed = text.trim();
   if (!trimmed) return "";
-  if (!needsMarkdownDisplaySanitize(trimmed)) return trimmed;
+  let normalized = collapseDuplicateMarkdownHeaders(trimmed);
+  if (!needsMarkdownDisplaySanitize(normalized)) return normalized;
 
-  let result = stripTextToolCallMarkup(trimmed);
+  let result = stripTextToolCallMarkup(normalized);
   result = stripToolSummaryFromAssistantContent(result);
   result = stripAgentSuggestions(result);
   result = stripAgentProgressMarker(result);

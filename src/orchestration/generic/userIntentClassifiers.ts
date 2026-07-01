@@ -55,8 +55,50 @@ const IMPLEMENTATION_FAILURE_REPORT_RE =
 const BEHAVIOR_CONTRADICTION_MARKER_RE =
   /但是|可是|然而|不对|不知道为啥|奇怪|咋会|怎么会|实际上|明明/i;
 
+const PRIOR_ANSWER_CHALLENGE_RE =
+  /^(?:你)?觉得.{0,12}(?:有问题|不对|靠谱|准确)|(?:这样|那(?:样)?).{0,8}(?:对吗|行不行|有问题)|(?:有问题吗|对不对|对吗|靠谱吗)[？?]?\s*$/;
+
+const PRIOR_ASSISTANT_BEHAVIOR_CLAIM_RE =
+  /(?:不会|会.{0,16}(?:打开|关闭|恢复|保留|改变|更新|折叠|展开)|独立|互不干扰|无需.{0,8}再)/;
+
 const PRIOR_NEGATIVE_BEHAVIOR_CLAIM_RE =
   /(?:^|\n)\s*(?:\*\*)?(?:不会|不(?:会|能)?更新|没有.{0,12}更新|不改变|不涉及|只是.{0,16}(?:改|设置|指向))(?:\*\*)?/im;
+
+export const UI_STATE_PERSISTENCE_QUESTION_RE =
+  /(?:切|换|切换).{0,20}(?:再|回|之后|然后).{0,20}(?:切|换|回)|(?:还会|会不会|是不是会|是否会|会不会再).{0,24}(?:再次|重新|仍然|保留|恢复|打开|关闭|展开|折叠|显示|隐藏|保持)|再次.{0,12}(?:打开|展开|显示|出现|恢复)/;
+
+export function isUiStatePersistenceQuestionPrompt(prompt: string): boolean {
+  const text = prompt.trim();
+  if (!text) return false;
+  if (IMPLEMENT_INTENT_RE.test(text) && !/[？?]/.test(text)) return false;
+  return UI_STATE_PERSISTENCE_QUESTION_RE.test(text);
+}
+
+export function historyPriorAssistantBehaviorClaim(
+  history?: UserIntentHistoryMessage[],
+): boolean {
+  const lastAssistant = (history ?? [])
+    .filter((m) => m.role === "assistant")
+    .slice(-1)[0]?.content;
+  if (!lastAssistant?.trim()) return false;
+  if (PRIOR_NEGATIVE_BEHAVIOR_CLAIM_RE.test(lastAssistant)) return true;
+  return (
+    PRIOR_ASSISTANT_BEHAVIOR_CLAIM_RE.test(lastAssistant) &&
+    assistantProvidedCodeLocationEvidence(lastAssistant)
+  );
+}
+
+export function isPriorAnswerChallengePrompt(
+  prompt: string,
+  history?: UserIntentHistoryMessage[],
+): boolean {
+  const text = prompt.trim();
+  if (!text || text.length > 48) return false;
+  if (IMPLEMENT_INTENT_RE.test(text)) return false;
+  if (isImplementationFailureReportPrompt(text)) return false;
+  if (!PRIOR_ANSWER_CHALLENGE_RE.test(text)) return false;
+  return historyPriorAssistantBehaviorClaim(history);
+}
 
 const IMPLEMENTATION_STATUS_PROMPT_RE =
   /(?:改好|做完|写好|弄好|搞定|完成|实现好|落地)[了吗呢]?[？?]?\s*$|(?:好了吗|完成了吗|做完了吗|改完了吗)[？?]?\s*$/i;
@@ -279,6 +321,7 @@ export function isBehaviorContradictionPrompt(
 ): boolean {
   const text = prompt.trim();
   if (!text) return false;
+  if (isPriorAnswerChallengePrompt(text, history)) return true;
   if (isImplementationFailureReportPrompt(text)) return false;
   if (isShortImplementPrompt(text)) return false;
   if (IMPLEMENT_INTENT_RE.test(text) && !BEHAVIOR_CONTRADICTION_MARKER_RE.test(text)) return false;
@@ -329,6 +372,7 @@ export function isConsultativeUserPrompt(
   if (isAgentStepClarificationPrompt(text)) return false;
   if (isImplementationFailureReportPrompt(text)) return false;
   if (isBehaviorPurposePrompt(text, history)) return true;
+  if (isUiStatePersistenceQuestionPrompt(text)) return true;
   if (isUiLocateQuestionPrompt(text) && !IMPLEMENT_INTENT_RE.test(text)) return true;
   if (isShortContextDependentFollowUp(text)) return true;
   if (ACCURACY_CONSULTATIVE_RE.test(text)) return true;

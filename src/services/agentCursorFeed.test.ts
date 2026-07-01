@@ -181,7 +181,7 @@ describe("agentCursorFeed", () => {
     expect(feed.some((item) => item.kind === "status")).toBe(false);
   });
 
-  it("keeps waiting status before answer preview arrives", () => {
+  it("keeps in-feed planning status while waiting without answer preview", () => {
     const feed = buildCursorAgentFeed({
       groups: [],
       isRunning: true,
@@ -189,10 +189,21 @@ describe("agentCursorFeed", () => {
       answerPreview: "",
       streaming: false,
     });
-    expect(feed.find((item) => item.kind === "status")?.kind).toBe("status");
+    expect(feed.some((item) => item.kind === "status")).toBe(true);
     if (feed[0]?.kind === "status") {
       expect(feed[0].text).toContain("整合信息中");
     }
+  });
+
+  it("suppresses in-feed planning status when thinking preview is present", () => {
+    const feed = buildCursorAgentFeed({
+      groups: [],
+      isRunning: true,
+      agentPhase: "waiting_model",
+      answerPreview: "## 截图描述\n正文",
+      streaming: false,
+    });
+    expect(feed.some((item) => item.kind === "status")).toBe(false);
   });
 
   it("shouldSuppressFeedPlanningStatus covers streaming and preview cases", () => {
@@ -207,6 +218,13 @@ describe("agentCursorFeed", () => {
       shouldSuppressFeedPlanningStatus({
         agentPhase: "waiting_model",
         answerPreview: "上一轮遗留",
+        streaming: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldSuppressFeedPlanningStatus({
+        agentPhase: "waiting_model",
+        answerPreview: "",
         streaming: false,
       }),
     ).toBe(false);
@@ -500,6 +518,65 @@ describe("agentCursorFeed", () => {
     expect(items.some((item) => item.kind === "thought" && item.text.includes("最终回答"))).toBe(false);
   });
 
+  it("excludes answer-like narrative from thought rows when answer preview exists", () => {
+    const structured = "## 截图描述\n\n顶部导航栏包含「会话」与「项目」两个 Tab。";
+    const feed = buildCursorAgentFeed({
+      groups: [{
+        turn: 1,
+        modelSteps: [],
+        toolIds: ["t1"],
+        narrative: structured,
+        tools: [{
+          id: "t1",
+          turn: 1,
+          name: "grep",
+          icon: "🔍",
+          title: "代码搜索",
+          detail: "panel",
+          label: "搜索",
+          summary: "ok",
+          ok: true,
+          args: { pattern: "panel" },
+        }],
+      }],
+      isRunning: true,
+      agentPhase: "waiting_model",
+      answerPreview: structured,
+      streaming: false,
+    });
+    expect(feed.some((item) => item.kind === "thought")).toBe(false);
+    expect(feed.some((item) => item.kind === "action")).toBe(true);
+  });
+
+  it("includes answer-like narrative as thought while exploring without answer preview", () => {
+    const structured = "## 截图描述\n\n顶部导航栏包含「会话」与「项目」两个 Tab。";
+    const feed = buildCursorAgentFeed({
+      groups: [{
+        turn: 1,
+        modelSteps: [],
+        toolIds: ["t1"],
+        narrative: structured,
+        tools: [{
+          id: "t1",
+          turn: 1,
+          name: "grep",
+          icon: "🔍",
+          title: "代码搜索",
+          detail: "panel",
+          label: "搜索",
+          summary: "ok",
+          ok: true,
+          args: { pattern: "panel" },
+        }],
+      }],
+      isRunning: true,
+      agentPhase: "waiting_model",
+      answerPreview: "",
+      streaming: false,
+    });
+    expect(feed.some((item) => item.kind === "thought" && item.text.includes("截图描述"))).toBe(true);
+  });
+
   it("includes long streaming narrative as thought while running without answer preview", () => {
     const longNarrative = "让我先梳理一下当前的实现路径，确认入口函数、中间层编排以及最终副作用分别落在哪些模块里。".repeat(2);
     const feed = buildCursorAgentFeed({
@@ -651,7 +728,7 @@ describe("agentCursorFeed", () => {
     expect(summary).toContain("搜索");
   });
 
-  it("includes status blocks in unified timeline before answer", () => {
+  it("includes in-feed planning status while waiting without preview", () => {
     const timeline = buildUnifiedAgentTimeline({
       roundGroups: [],
       answerPreview: "",

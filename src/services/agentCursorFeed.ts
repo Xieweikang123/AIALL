@@ -387,15 +387,15 @@ export function cursorPlanningLabel(phase?: string, detail?: string): string | n
   return null;
 }
 
-/** Hide idle planning rows while the timeline answer is already streaming. */
+/** Hide idle planning rows once answer/thinking preview is visible or model is streaming. */
 export function shouldSuppressFeedPlanningStatus(input: {
   agentPhase?: string;
   answerPreview?: string;
   streaming?: boolean;
 }): boolean {
   if (input.streaming) return true;
-  if (input.agentPhase !== "streaming_model" && input.agentPhase !== "planning_tools") return false;
-  return Boolean(input.answerPreview?.trim());
+  if (input.answerPreview?.trim()) return true;
+  return false;
 }
 
 export function buildCursorAgentFeed(input: {
@@ -414,10 +414,11 @@ export function buildCursorAgentFeed(input: {
     const segments = buildNarrativeSegments(group.narrative, group.tools);
     for (const [index, segment] of segments.entries()) {
       const thoughtText = stripToolSummaryFromAssistantContent(segment.text.trim());
+      const suppressAnswerLikeThought = Boolean(input.answerPreview?.trim());
       if (
         thoughtText &&
         !isAgentToolTurnNarration(thoughtText) &&
-        (input.isRunning || !isAnswerLikeTimelineNarrative(thoughtText))
+        (!isAnswerLikeTimelineNarrative(thoughtText) || !suppressAnswerLikeThought)
       ) {
         items.push({
           kind: "thought",

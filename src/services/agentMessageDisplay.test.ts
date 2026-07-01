@@ -18,6 +18,7 @@ import {
   resolveAgentTimelineAnswer,
   resolveAssistantBubbleContent,
   resolveCompletedAgentBubbleContent,
+  resolveExplorationThinkingPreview,
   resolveLatestAgentProgressNarrative,
   resolveLiveAgentAnswerPreview,
   resolveLiveAgentAnswerText,
@@ -68,7 +69,7 @@ describe("resolveAssistantBubbleContent", () => {
     ).toBe("");
   });
 
-  it("falls back to last narrative when content and final response are empty", () => {
+  it("falls back to substantive narrative when run ends without isFinal", () => {
     expect(
       resolveAssistantBubbleContent({
         roundGroups: [
@@ -76,7 +77,7 @@ describe("resolveAssistantBubbleContent", () => {
           { turn: 2, narrative: "## 总结\n表格", modelSteps: [], toolIds: [] },
         ],
       }),
-    ).toBe("");
+    ).toBe("## 总结\n表格");
   });
 
   it("strips leaked tool summaries from bubble content", () => {
@@ -283,6 +284,31 @@ describe("resolveCompletedAgentBubbleContent", () => {
 });
 
 describe("finalizeAssistantBubbleContent", () => {
+  it("promotes answer-like narrative when run ends without isFinal and no file writes", () => {
+    const narrative =
+      "## 根因判断\n\n`chatCollapsed` 由父组件独立管理，切换左侧 Tab 不会改它，因此回到 Chat 时面板状态应保持不变。";
+    expect(
+      finalizeAssistantBubbleContent({
+        content: "",
+        roundGroups: [
+          {
+            turn: 3,
+            narrative,
+            modelSteps: [],
+            toolIds: ["t1"],
+            response: {
+              assistantText: narrative,
+              toolCalls: [{ id: "t1", name: "grep", arguments: "{}" }],
+              hasToolCalls: true,
+              isFinal: false,
+            },
+          },
+        ],
+        tools: [{ running: false, turn: 3 }],
+      }),
+    ).toBe(narrative);
+  });
+
   it("shows written-files summary when run ends without a final answer", () => {
     const result = finalizeAssistantBubbleContent({
       content: "现在开始批量修改：",
@@ -612,6 +638,35 @@ describe("resolveAgentTimelineAnswer", () => {
     ).toBe("");
   });
 
+  it("lifts structured narrative into the answer slot while waiting on the model", () => {
+    const structured = "## 截图描述\n\n顶部导航栏包含「会话」与「项目」两个 Tab。";
+    expect(
+      resolveAgentTimelineAnswer(
+        {
+          agentTurn: 1,
+          agentPhase: "waiting_model",
+          roundGroups: [{ turn: 1, narrative: structured, modelSteps: [], toolIds: [] }],
+        },
+        "",
+        true,
+        false,
+      ),
+    ).toBe(structured);
+  });
+
+  it("resolveExplorationThinkingPreview returns latest substantive round narrative", () => {
+    const structured = "## 截图描述\n\n顶部导航栏包含「会话」与「项目」两个 Tab。";
+    expect(
+      resolveExplorationThinkingPreview({
+        agentTurn: 2,
+        roundGroups: [
+          { turn: 1, narrative: "让我先搜索相关组件。", modelSteps: [], toolIds: [] },
+          { turn: 2, narrative: structured, modelSteps: [], toolIds: [] },
+        ],
+      }),
+    ).toBe(structured);
+  });
+
   it("keeps streamed msg.content visible during tool execution", () => {
     expect(
       resolveAgentTimelineAnswer(
@@ -912,5 +967,31 @@ describe("commitAgentFinalAnswerIfMissing", () => {
       ],
     };
     expect(commitAgentFinalAnswerIfMissing(msg, 2)).toBe(false);
+  });
+
+  it("writes isFinal from substantive round narrative when content is empty", () => {
+    const narrative =
+      "## 根因判断\n\n切换 Tab 只 emit update:gitPanelMode，不会改变 chatCollapsed，因此回到 Chat 时面板状态应保持不变。";
+    const msg = {
+      content: "",
+      tools: [{ running: false, turn: 2 }],
+      roundGroups: [
+        {
+          turn: 2,
+          narrative,
+          modelSteps: [],
+          toolIds: ["t1"],
+          response: {
+            assistantText: narrative,
+            toolCalls: [{ id: "t1", name: "grep", arguments: "{}" }],
+            hasToolCalls: true,
+            isFinal: false,
+          },
+        },
+      ],
+    };
+    expect(commitAgentFinalAnswerIfMissing(msg, 2, 40)).toBe(true);
+    expect(msg.content).toBe(narrative);
+    expect(hasAgentFinalAnswer(msg)).toBe(true);
   });
 });

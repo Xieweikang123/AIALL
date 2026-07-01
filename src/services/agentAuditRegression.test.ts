@@ -13,6 +13,7 @@ import {
   CONSULTATIVE_BUILD_EXPLORE_TURN_BUDGET,
   buildConsultativeExploreBudgetNudge,
   buildGrepEmptyRecoveryNudge,
+  buildReadFileFailedRecoveryNudge,
 } from "../../server/agentExplorationBudget";
 import {
   FIXTURE_CONTRADICTION_USER,
@@ -50,6 +51,12 @@ describe("agent audit regression fixtures", () => {
     const nudge = buildGrepEmptyRecoveryNudge(["switchFooContext"]);
     expect(nudge).toContain("switchFooContext");
     expect(nudge).not.toMatch(/touchMark|BarPanel/i);
+  });
+
+  it("covers read_file failure recovery nudge", () => {
+    const nudge = buildReadFileFailedRecoveryNudge(["src/missing.vue"]);
+    expect(nudge).toContain("read_file 失败");
+    expect(nudge).toContain("禁止重复 read");
   });
 
   it("covers config binding hint without business terms", () => {

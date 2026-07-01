@@ -66,16 +66,19 @@ const DEFAULT_COLLAPSE_AFTER = 5;
 const DEFAULT_KEEP_VISIBLE = 4;
 
 export function resolveInlineFeedCollapseOptions(
-  input: Pick<UnifiedAgentTimelineInput, "activityDetailed" | "compactFeed" | "isRunning">,
+  input: Pick<UnifiedAgentTimelineInput, "activityDetailed" | "compactFeed" | "isRunning" | "chatMode">,
 ): InlineFeedCollapseOptions {
   if (input.activityDetailed) {
-    return { collapseAfter: 12, keepVisible: 8, disabled: false };
+    return { collapseAfter: 12, keepVisible: 8, disabled: true };
+  }
+  if (input.chatMode === "ask" && input.isRunning) {
+    return { collapseAfter: 2, keepVisible: 2, disabled: false };
   }
   if (input.compactFeed && input.isRunning) {
     return { collapseAfter: 4, keepVisible: 3, disabled: false };
   }
   if (input.isRunning) {
-    return { collapseAfter: 6, keepVisible: 5, disabled: false };
+    return { collapseAfter: 5, keepVisible: 4, disabled: false };
   }
   return { collapseAfter: DEFAULT_COLLAPSE_AFTER, keepVisible: DEFAULT_KEEP_VISIBLE, disabled: false };
 }
@@ -283,6 +286,23 @@ export function summarizeInlineFeedProcess(
   return isRunning ? "准备中…" : "查看过程";
 }
 
+function stripInlineStatusItems(items: InlineFeedItem[], isRunning: boolean): InlineFeedItem[] {
+  if (!isRunning) return items;
+  const result: InlineFeedItem[] = [];
+  for (const item of items) {
+    if (item.kind === "status") continue;
+    if (item.kind === "collapsed") {
+      result.push({
+        ...item,
+        items: stripInlineStatusItems(item.items, isRunning) as InlineFeedProcessItem[],
+      });
+      continue;
+    }
+    result.push(item);
+  }
+  return result;
+}
+
 /** Chronological inline stream: narrative ↔ tools interleaved, answer appended last. */
 export function buildInlineAgentFeed(input: InlineAgentFeedInput): InlineAgentFeed {
   if (input.showProcess === false) {
@@ -305,11 +325,12 @@ export function buildInlineAgentFeed(input: InlineAgentFeedInput): InlineAgentFe
 
   const collapseOptions = resolveInlineFeedCollapseOptions(input);
   const collapsed = collapseInlineFeedItems(withAnswer, collapseOptions);
+  const items = stripInlineStatusItems(collapsed, input.isRunning);
 
   return {
-    items: collapsed,
-    hasAnswer: resolveInlineAnswerHasContent(collapsed),
-    toolCount: countToolsInInlineFeed(collapsed),
+    items,
+    hasAnswer: resolveInlineAnswerHasContent(items),
+    toolCount: countToolsInInlineFeed(items),
     answerStreaming: input.answerStreaming,
   };
 }

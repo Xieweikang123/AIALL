@@ -27,11 +27,13 @@ import {
   isCodeReviewPrompt,
   isConsultativeUserPrompt,
   isImplementationStatusPrompt,
+  isUiStatePersistenceQuestionPrompt,
   resolveConfigBindingTopic,
 } from "../orchestration/generic/userIntentClassifiers";
 import type { UserIntentHistoryMessage } from "../orchestration/agentIntentTypes";
 import { buildConsultativeAccuracyTraceHint } from "../../server/consultativeAccuracyTrace";
 import { buildBehaviorPurposeTraceHint } from "../../server/consultativeBehaviorTrace";
+import { buildConsultativeUiBehaviorTraceHint } from "../../server/consultativeUiBehaviorTrace";
 
 export interface ConsultativeTopicModule {
   id: ConsultativeTopicId;
@@ -192,9 +194,13 @@ export function buildConsultativeTopicHints(
   history?: UserIntentHistoryMessage[],
   aiTopic?: ConsultativeTopicId | null,
 ): string {
-  return resolveActiveConsultativeTopics(prompt, history, aiTopic)
+  const topicHints = resolveActiveConsultativeTopics(prompt, history, aiTopic)
     .map((topic) => topic.buildSystemHint(prompt, history))
     .join("");
+  const uiStateHint = isUiStatePersistenceQuestionPrompt(prompt.trim())
+    ? buildConsultativeUiBehaviorTraceHint()
+    : "";
+  return topicHints + uiStateHint;
 }
 
 export function isScheduledTaskTopicPrompt(prompt: string): boolean {

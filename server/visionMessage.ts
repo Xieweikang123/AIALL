@@ -2,9 +2,14 @@ import {
   isAccuracyConsultativePrompt,
   isUiAppearanceQuestionPrompt,
   isUiLocateQuestionPrompt,
+  isUiStatePersistenceQuestionPrompt,
 } from "../src/orchestration/generic/userIntentClassifiers";
 
-export { isUiAppearanceQuestionPrompt, isUiLocateQuestionPrompt } from "../src/orchestration/generic/userIntentClassifiers";
+export {
+  isUiAppearanceQuestionPrompt,
+  isUiLocateQuestionPrompt,
+  isUiStatePersistenceQuestionPrompt,
+} from "../src/orchestration/generic/userIntentClassifiers";
 
 export type ChatContentPart =
   | { type: "text"; text: string }
@@ -220,6 +225,19 @@ export function buildVisionAccuracySingleTurnRule(): string {
   ].join("\n");
 }
 
+/** UI state persistence after tab/mode switch — trace side effects in same turn. */
+export function buildVisionStatePersistenceSingleTurnRule(): string {
+  return [
+    "【附图·UI 状态题·同轮读图追溯】用户问切换/返回后某面板或区域是否仍展开/可见/再次打开，未要求改代码。",
+    "本轮允许 list_dir / read_file / grep / search_files。同轮须完成：",
+    "① 查看附图，引用可见 tab/标签原文（用「」括起）；",
+    "② grep 该文案或 mode/composable 符号定位切换入口；",
+    "③ read 切换 handler，并 grep/read watch、collapse/expand 或 emit 副作用；",
+    "④ 基于已读代码给出最终中文答案，说明切换时是否主动改另一状态；禁止只断言两个 ref 独立。",
+    "禁止写「下一轮再确认」；禁止在未 grep/read 的情况下引用路径或行号；禁止输出 [图已理解] 暗号。",
+  ].join("\n");
+}
+
 /** Screenshot locate or accuracy question — skip vision-first no-tools turn; use same-turn grep/trace instead. */
 export function shouldBypassVisionFirstTurn(params: {
   imageCount: number;
@@ -231,7 +249,8 @@ export function shouldBypassVisionFirstTurn(params: {
   return (
     isUiLocateQuestionPrompt(params.prompt) ||
     isAccuracyConsultativePrompt(params.prompt) ||
-    isUiAppearanceQuestionPrompt(params.prompt)
+    isUiAppearanceQuestionPrompt(params.prompt) ||
+    isUiStatePersistenceQuestionPrompt(params.prompt)
   );
 }
 
@@ -526,6 +545,9 @@ export function shouldBlockConsultativeVisionLocateFinalize(params: {
   if (params.visionLocateToolsUsed) return false;
 
   if (isUiLocateQuestionPrompt(params.prompt)) return true;
+  if (isUiStatePersistenceQuestionPrompt(params.prompt) && !params.visionLocateToolsUsed) {
+    return true;
+  }
   if (isSpeculativeLocateReply(params.replyText)) return true;
   if (
     params.visionFirstTurnText &&
@@ -654,6 +676,9 @@ export function buildVisionTaskText(text: string, imageCount: number): string {
   }
   if (isAccuracyConsultativePrompt(body)) {
     return `${buildVisionAccuracySingleTurnRule()}\n\n${body}`;
+  }
+  if (isUiStatePersistenceQuestionPrompt(body) && !hasUiImplementationIntent(body)) {
+    return `${buildVisionStatePersistenceSingleTurnRule()}\n\n${body}`;
   }
   const firstTurnRule = buildVisionFirstTurnRule();
   const clickFocusHint = UI_CLICK_FOCUS_INTERACTION_RE.test(body)

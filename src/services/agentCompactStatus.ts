@@ -61,6 +61,7 @@ export type UnifiedAgentTimelineInput = {
   compactFeed: boolean;
   agentPhase?: string;
   agentDetail?: string;
+  chatMode?: "ask" | "build" | "plan" | "explore";
 };
 
 export type CursorAgentFeedBuildInput = Pick<

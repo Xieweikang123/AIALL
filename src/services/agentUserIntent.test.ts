@@ -182,6 +182,17 @@ describe("isBehaviorContradictionPrompt", () => {
   it("rejects implementation failure reports handled elsewhere", () => {
     expect(isBehaviorContradictionPrompt("试了不行，还是没效果", priorDenial)).toBe(false);
   });
+
+  it("detects prior-answer challenge after behavior claim", () => {
+    const priorBehavior = [
+      {
+        role: "assistant" as const,
+        content: "根据代码，`src/foo.vue` 不会自动再次打开。",
+      },
+    ];
+    expect(isBehaviorContradictionPrompt("你觉得有问题吗？", priorBehavior)).toBe(true);
+    expect(isBehaviorContradictionPrompt("改吧", priorBehavior)).toBe(false);
+  });
 });
 
 describe("buildBehaviorContradictionHint", () => {

@@ -199,7 +199,13 @@ export function commitAgentFinalAnswerIfMissing(
   maxTurns?: number,
 ): boolean {
   if (hasAgentFinalAnswer(msg) || turn <= 0) return false;
-  const finalText = normalizeBubbleText(msg.content || "");
+  let finalText = normalizeBubbleText(msg.content || "");
+  if (!finalText || finalText.length < 16 || isAgentToolTurnNarration(finalText)) {
+    finalText = normalizeBubbleText(resolveExplorationThinkingPreview(msg));
+    if (finalText && !msg.content?.trim()) {
+      msg.content = finalText;
+    }
+  }
   if (!finalText || finalText.length < 16 || isAgentToolTurnNarration(finalText)) return false;
 
   msg.roundGroups = recordAgentRoundResponse(
@@ -342,6 +348,49 @@ export function resolveLatestAgentProgressNarrative(
   return "";
 }
 
+/** User-visible exploration reasoning before the final answer is ready. */
+export function resolveExplorationThinkingPreview(msg: LiveAgentAnswerSource): string {
+  const progress = resolveLatestAgentProgressNarrative(msg);
+  if (progress) return progress;
+
+  const activeAfterFinal = isActiveTurnAfterFinalAnswer(msg);
+
+  if (!activeAfterFinal) {
+    const content = normalizeBubbleText(msg.content || "");
+    if (
+      content &&
+      !isAgentToolTurnNarration(content) &&
+      !isStaleStreamTailFragment(content) &&
+      (isAnswerLikeTimelineNarrative(content) ||
+        isSubstantiveProgressSummary(content) ||
+        content.length >= SUBSTANTIVE_MIN_CHARS)
+    ) {
+      return content;
+    }
+  }
+
+  const activeTurn = msg.agentTurn ?? 0;
+  const groups = [...(msg.roundGroups ?? [])]
+    .filter((item) => item.turn > 0)
+    .sort((a, b) => b.turn - a.turn);
+  for (const group of groups) {
+    if (activeAfterFinal && group.response?.isFinal) continue;
+    if (activeTurn > 0 && group.turn < activeTurn && group.response?.isFinal) continue;
+    const raw = (group.narrative || group.response?.assistantText || "").trim();
+    if (!raw || isAgentToolTurnNarration(raw)) continue;
+    const text = normalizeBubbleText(stripAgentProgressMarker(raw));
+    if (!text || isStaleStreamTailFragment(text)) continue;
+    if (
+      isAnswerLikeTimelineNarrative(text) ||
+      isSubstantiveProgressSummary(raw) ||
+      text.length >= SUBSTANTIVE_MIN_CHARS
+    ) {
+      return text;
+    }
+  }
+  return "";
+}
+
 /** Mid-stream tail left over from a prior tool turn — not a user-facing answer. */
 function isStaleStreamTailFragment(text: string): boolean {
   const trimmed = text.trim();
@@ -461,6 +510,18 @@ export function resolveAgentTimelineAnswer(
     }
     const progress = resolveLatestAgentProgressNarrative(msg);
     if (progress) return progress;
+    const group = resolveActiveRoundGroup(msg);
+    const activeTurn = msg.agentTurn;
+    const live = resolveLiveAgentAnswerText(msg);
+    if (
+      live &&
+      isAnswerLikeTimelineNarrative(live) &&
+      (!activeTurn || !group || group.turn === activeTurn)
+    ) {
+      return live;
+    }
+    const thinking = resolveExplorationThinkingPreview(msg);
+    if (thinking) return thinking;
     return "";
   }
   return normalizeBubbleText(msg.content || "") || "";
@@ -480,7 +541,11 @@ export function isAgentTimelineAnswerStreaming(
 
 /** Resolve the text shown in the assistant chat bubble (with fallbacks for agent runs). */
 export function resolveAssistantBubbleContent(msg: AssistantBubbleSource): string {
-  if (hasAgentRunStructure(msg) && !hasAgentFinalAnswer(msg)) return "";
+  if (hasAgentRunStructure(msg) && !hasAgentFinalAnswer(msg)) {
+    const fallback = resolveExplorationThinkingPreview(msg);
+    if (fallback) return fallback;
+    return "";
+  }
   return resolveAssistantBubbleFromCandidates(msg);
 }
 
@@ -552,7 +617,12 @@ const COMPLETION_SUMMARY_RE = /(?:修改完成|已完成|已写入|总结|变更
 
 /** Whether the model already gave a substantive completion summary. */
 export function hasSubstantiveAgentSummary(msg: AssistantBubbleSource): boolean {
-  if (hasAgentRunStructure(msg) && !hasAgentFinalAnswer(msg)) return false;
+  if (hasAgentRunStructure(msg) && !hasAgentFinalAnswer(msg)) {
+    const fallback = resolveExplorationThinkingPreview(msg);
+    if (fallback.length >= SUBSTANTIVE_MIN_CHARS) return true;
+    if (COMPLETION_SUMMARY_RE.test(fallback)) return true;
+    return false;
+  }
   const finalFromRound = resolveFinalAssistantText(msg);
   const direct = normalizeBubbleText(msg.content || "");
   const finalText = finalFromRound
@@ -585,6 +655,8 @@ export function finalizeAssistantBubbleContent(msg: FinalizeAssistantBubbleSourc
     if (writtenFiles.length) {
       return buildWrittenFilesSummary(writtenFiles, Boolean(msg.wasAborted));
     }
+    const fallback = resolveExplorationThinkingPreview(msg);
+    if (fallback) return fallback;
     return "";
   }
 

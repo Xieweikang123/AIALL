@@ -38,6 +38,13 @@ describe("splitAssistantNarrative", () => {
     expect(parts[0]).toContain("edit a");
     expect(parts.some((part) => part.includes("edit b"))).toBe(true);
   });
+
+  it("merges consecutive segments with the same markdown header", () => {
+    const text = "## 截图描述\n## 截图描述\n\n第二段。";
+    const parts = splitAssistantNarrative(text);
+    expect(parts).toHaveLength(1);
+    expect(parts[0]).toContain("第二段");
+  });
 });
 
 describe("buildNarrativeSegments", () => {

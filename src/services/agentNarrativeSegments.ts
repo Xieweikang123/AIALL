@@ -10,6 +10,30 @@ const SPLIT_PATTERNS = [/\n\n+/, /\n(?=#{1,3}\s+)/];
 
 const MERGE_SHORT_SEGMENT_MAX_CHARS = 80;
 
+function extractLeadingHeader(text: string): string | null {
+  const match = text.trim().match(/^(#{1,3}\s+.+?)(?:\n|$)/);
+  return match?.[1]?.trim() ?? null;
+}
+
+/** Merge consecutive segments that repeat the same markdown heading (common while streaming). */
+function mergeDuplicateHeaderSegments(segments: string[]): string[] {
+  if (segments.length <= 1) return segments;
+
+  const merged: string[] = [segments[0]!];
+  for (let index = 1; index < segments.length; index += 1) {
+    const segment = segments[index]!;
+    const header = extractLeadingHeader(segment);
+    const last = merged[merged.length - 1]!;
+    if (header && extractLeadingHeader(last) === header) {
+      const body = segment.replace(/^#{1,3}\s+.+?(?:\n|$)/, "").trim();
+      merged[merged.length - 1] = body ? `${last}\n\n${body}` : last;
+      continue;
+    }
+    merged.push(segment);
+  }
+  return merged;
+}
+
 function mergeShortNarrativeSegments(segments: string[]): string[] {
   if (segments.length <= 1) return segments;
 
@@ -42,7 +66,7 @@ export function splitAssistantNarrative(text: string): string[] {
     );
   }
 
-  const merged = mergeShortNarrativeSegments(parts);
+  const merged = mergeShortNarrativeSegments(mergeDuplicateHeaderSegments(parts));
   return merged.length ? merged : [trimmed];
 }
 
