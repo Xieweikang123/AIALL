@@ -1,7 +1,11 @@
 /** Detect and strip pseudo tool-call markup leaked into assistant text. */
 
 export const TOOL_MARKUP_START_RE =
-  /<function_calls\b|<function[=>]|<invoke\b|<tool_call\b|\[Tool call[:\]]/i;
+  /<function_calls\b|<function[=>]|<invoke\b|<tool_call\b|<tool_invocation\b|\[Tool call[:\]]/i;
+
+/** Hold back trailing partial markup tokens until the next delta completes the tag. */
+export const PARTIAL_TOOL_MARKUP_TAIL_RE =
+  /<(?:function_calls?|function(?:=[^>]*)?|invoke(?:\s|$)|tool_call(?:\s|>)|tool_inv(?:ocation(?:\s|$)?)?|\[Tool call:?)?$/i;
 
 const LEGACY_TOOL_BLOCK_RE = /<function[=>](\w+)>?\s*([\s\S]*?)(?=<function[=>]|<function_calls\b|<invoke\b|<tool_call\b|$)/gi;
 const LEGACY_PARAM_RE = /<parameter[=>](\w+)>([^<]*)/gi;
@@ -121,6 +125,52 @@ function parseInvokeToolBlocks(content: string, results: ParsedTextToolCall[]): 
   }
 }
 
+function parseToolInvocationBlocks(content: string, results: ParsedTextToolCall[]): void {
+  const re = /<tool_invocation\b/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(content)) !== null) {
+    const slice = content.slice(match.index);
+    const nameMatch = slice.match(/^<tool_invocation\b[^>]*\bname=["']([^"']+)["']/i);
+    if (!nameMatch) continue;
+
+    const rawName = nameMatch[1];
+    const argsMarker = slice.match(/\barguments\s*=\s*\{/i);
+    if (!argsMarker || argsMarker.index === undefined) continue;
+
+    const braceStart = slice.indexOf("{", argsMarker.index);
+    if (braceStart < 0) continue;
+
+    let depth = 0;
+    let braceEnd = -1;
+    for (let i = braceStart; i < slice.length; i++) {
+      const ch = slice[i];
+      if (ch === "{") depth++;
+      else if (ch === "}") {
+        depth--;
+        if (depth === 0) {
+          braceEnd = i;
+          break;
+        }
+      }
+    }
+    if (braceEnd < 0) continue;
+
+    const argsStr = slice.slice(braceStart, braceEnd + 1);
+    let args: Record<string, unknown> = {};
+    try {
+      args = JSON.parse(argsStr) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+
+    const name = normalizeTextToolName(rawName);
+    if (name) results.push({ name, args: normalizeTextToolArgs(args) });
+
+    const closeIdx = slice.indexOf(">", braceEnd);
+    if (closeIdx >= 0) re.lastIndex = match.index + closeIdx + 1;
+  }
+}
+
 function parseJsonToolCalls(content: string, results: ParsedTextToolCall[]): void {
   JSON_TOOL_CALL_RE.lastIndex = 0;
   let jsonMatch: RegExpExecArray | null;
@@ -146,10 +196,48 @@ function parseJsonToolCalls(content: string, results: ParsedTextToolCall[]): voi
 export function parseTextToolCallsFromContent(content: string): ParsedTextToolCall[] {
   if (!hasTextToolCallMarkup(content)) return [];
   const results: ParsedTextToolCall[] = [];
+  parseToolInvocationBlocks(content, results);
   parseInvokeToolBlocks(content, results);
   parseLegacyToolBlocks(content, results);
   parseJsonToolCalls(content, results);
   return results;
+}
+
+const TOOL_MARKUP_START_PREFIXES = [
+  "<function_calls",
+  "<function=",
+  "<function>",
+  "<invoke",
+  "<tool_call",
+  "<tool_invocation",
+  "[Tool call",
+];
+
+function isIncompleteToolMarkupPrefix(fragment: string): boolean {
+  const tail = fragment.trimEnd();
+  if (!tail) return false;
+  const lower = tail.toLowerCase();
+  for (const prefix of TOOL_MARKUP_START_PREFIXES) {
+    const p = prefix.toLowerCase();
+    if (lower.length <= p.length && p.startsWith(lower)) return true;
+  }
+  return false;
+}
+
+function visibleEmitEnd(raw: string): number {
+  const partialTail = raw.match(PARTIAL_TOOL_MARKUP_TAIL_RE);
+  if (partialTail?.index !== undefined) {
+    return raw.length - partialTail[0].length;
+  }
+  const lt = raw.lastIndexOf("<");
+  if (lt >= 0 && isIncompleteToolMarkupPrefix(raw.slice(lt))) {
+    return lt;
+  }
+  const bracket = raw.lastIndexOf("[Tool");
+  if (bracket >= 0 && isIncompleteToolMarkupPrefix(raw.slice(bracket))) {
+    return bracket;
+  }
+  return raw.length;
 }
 
 /** Filter streaming deltas: hide pseudo tool-call markup from the user. */
@@ -164,8 +252,9 @@ export class TextToolCallStreamFilter {
     this.raw += delta;
     const markupAt = findToolMarkupStart(this.raw);
     if (markupAt < 0) {
-      const userDelta = this.raw.slice(this.visibleLen);
-      this.visibleLen = this.raw.length;
+      const emitEnd = visibleEmitEnd(this.raw);
+      const userDelta = this.raw.slice(this.visibleLen, emitEnd);
+      this.visibleLen = emitEnd;
       return userDelta;
     }
 

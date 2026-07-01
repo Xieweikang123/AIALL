@@ -60,6 +60,8 @@ export function useAgentToolDispatch(deps: UseAgentToolDispatchDeps) {
       serverPendingFiles: serverPendingFiles || [],
       serverWrittenFiles: serverWrittenFiles || [],
       turnFileDiffPaths,
+      tools: assistantMsg.tools,
+      priorWrittenFiles: assistantMsg.writtenFiles,
     });
 
     assistantMsg.pendingApproval = fileAction.pendingApproval;

@@ -24,6 +24,8 @@ export interface VibeAgentRunRequest {
     userIntent?: string;
     triggerSource?: "auto_bug_fix";
   };
+  /** Paths already written in earlier segments of the same assistant turn (resume). */
+  taskWrittenFiles?: string[];
 }
 
 const DEV_SIDECAR_ORIGIN = "http://127.0.0.1:37891";

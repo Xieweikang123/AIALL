@@ -3,6 +3,7 @@ import { recordAgentRoundResponse } from "./agentRoundGroups";
 import type { CursorFeedItem } from "./agentCursorFeed";
 import { isPrematureVisionCompletionClaim } from "../../shared/visionCompletionClaim";
 import { sanitizeMarkdownForDisplay } from "./markdownDisplaySanitize";
+import { hasTextToolCallMarkup, stripTextToolCallMarkup } from "./textToolCallMarkup";
 import {
   AGENT_PROGRESS_MARKER,
   AGENT_PROGRESS_MARKER_RE,
@@ -57,7 +58,8 @@ export function isSubstantiveProgressSummary(text: string): boolean {
 }
 
 function normalizeBubbleText(text: string): string {
-  return sanitizeMarkdownForDisplay(text);
+  const sanitized = sanitizeMarkdownForDisplay(text);
+  return hasTextToolCallMarkup(sanitized) ? stripTextToolCallMarkup(sanitized) : sanitized;
 }
 
 /** Short planning lines emitted before tool calls — not user-facing answers. */

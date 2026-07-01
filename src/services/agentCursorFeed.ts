@@ -1,6 +1,7 @@
 import type { AgentRoundGroupView, AgentRoundTool } from "./agentRoundGroups";
 import { buildNarrativeSegments } from "./agentNarrativeSegments";
 import { isAgentToolTurnNarration, isAnswerLikeTimelineNarrative } from "./agentMessageDisplay";
+import { stripTextToolCallMarkup } from "./textToolCallMarkup";
 import { stripToolSummaryFromAssistantContent } from "./vibeChatStorage";
 import { aggregateToolSteps } from "./agentToolAggregates";
 import { formatRunCommandLabel } from "../utils/toolHelpers";
@@ -413,7 +414,9 @@ export function buildCursorAgentFeed(input: {
 
     const segments = buildNarrativeSegments(group.narrative, group.tools);
     for (const [index, segment] of segments.entries()) {
-      const thoughtText = stripToolSummaryFromAssistantContent(segment.text.trim());
+      const thoughtText = stripToolSummaryFromAssistantContent(
+        stripTextToolCallMarkup(segment.text.trim()),
+      );
       const suppressAnswerLikeThought = Boolean(input.answerPreview?.trim());
       if (
         thoughtText &&

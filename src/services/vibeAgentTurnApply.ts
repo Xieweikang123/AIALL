@@ -1,5 +1,15 @@
 import type { VibeChatMode } from "../../shared/agentTypes";
+import {
+  type AgentToolWriteRecord,
+  resolveCumulativeWrittenFiles,
+} from "./agentWriteTracking";
 export type { VibeChatMode } from "../../shared/agentTypes";
+export {
+  collectSuccessfulWritePathsFromTools,
+  mergeWrittenFilePaths,
+  resolveCumulativeWrittenFiles,
+  resolveTaskWrittenFilesForResume,
+} from "./agentWriteTracking";
 
 export type AgentDoneFileAction = {
   autoApply: boolean;
@@ -20,18 +30,20 @@ export function resolveAgentDoneFileAction(params: {
   serverPendingFiles: string[];
   serverWrittenFiles: string[];
   turnFileDiffPaths: string[];
+  tools?: AgentToolWriteRecord[];
+  priorWrittenFiles?: string[];
 }): AgentDoneFileAction {
-  const written =
-    params.serverWrittenFiles.length > 0
-      ? [...params.serverWrittenFiles]
-      : params.turnFileDiffPaths.length > 0
-        ? [...params.turnFileDiffPaths]
-        : undefined;
+  const written = resolveCumulativeWrittenFiles({
+    priorWrittenFiles: params.priorWrittenFiles,
+    tools: params.tools,
+    serverWrittenFiles: params.serverWrittenFiles,
+    turnFileDiffPaths: params.turnFileDiffPaths,
+  });
 
   return {
     autoApply: false,
     pendingApproval: false,
-    writtenFiles: written,
+    writtenFiles: written.length > 0 ? written : undefined,
   };
 }
 

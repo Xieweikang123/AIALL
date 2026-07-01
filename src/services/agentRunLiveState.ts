@@ -41,7 +41,10 @@ export function patchLiveFromStatusEvent(
     model: extra?.model ?? prev.model,
     contextChars: extra?.contextChars ?? prev.contextChars,
     streamChars: extra?.streamChars ?? prev.streamChars,
-    elapsedMs: extra?.elapsedMs ?? prev.elapsedMs,
+    elapsedMs:
+      typeof extra?.elapsedMs === "number" && extra.elapsedMs > 0
+        ? extra.elapsedMs
+        : prev.elapsedMs,
     toolTitle: extra?.toolTitle ?? prev.toolTitle,
     toolDetail: extra?.toolDetail ?? prev.toolDetail,
     retryAttempt: extra?.retryAttempt ?? prev.retryAttempt,
@@ -200,4 +203,18 @@ export function formatAgentLiveStatus(
 
 export function resolveLiveContextChars(live?: AgentRunLiveState): number {
   return live?.contextChars ?? 0;
+}
+
+/** Elapsed whole seconds while waiting for model; prefers client clock over stale server 0. */
+export function resolveModelWaitElapsedSeconds(
+  live: AgentRunLiveState,
+  now = Date.now(),
+): number | null {
+  if (!live.waitStartedAt) return null;
+  const fromClock = Math.max(0, Math.floor((now - live.waitStartedAt) / 1000));
+  const fromServer =
+    typeof live.elapsedMs === "number" && live.elapsedMs > 0
+      ? Math.floor(live.elapsedMs / 1000)
+      : null;
+  return fromServer === null ? fromClock : Math.max(fromClock, fromServer);
 }

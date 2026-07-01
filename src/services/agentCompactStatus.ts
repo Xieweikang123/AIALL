@@ -17,7 +17,7 @@ import {
   type LiveAgentAnswerSource,
 } from "./agentMessageDisplay";
 import type { AgentRoundGroupView, AgentRoundTool } from "./agentRoundGroups";
-import type { AgentRunLiveState } from "./agentRunLiveState";
+import { resolveModelWaitElapsedSeconds, type AgentRunLiveState } from "./agentRunLiveState";
 import { isAgentConnectPhase } from "./agentRecovery";
 import type { AgentLogLineItem } from "../types/agentLog";
 import type { VibeChatMessage } from "../types/vibeChat";
@@ -246,11 +246,12 @@ export function buildCursorCompactLiveStatus(input: AgentCompactStatusInput): st
 
   const turn = live.turn ?? msg.agentTurn;
   if (turn) parts.push(`第 ${turn} 轮`);
-  if (live.waitStartedAt && waitingModel) {
-    const elapsedMs = live.elapsedMs ?? (Date.now() - live.waitStartedAt);
-    const elapsed = Math.max(0, Math.floor(elapsedMs / 1000));
-    parts.push(`已等待 ${elapsed}s`);
-    if (elapsed > 45) parts.push("模型较慢，可取消后 @ 具体文件重试");
+  if (waitingModel) {
+    const elapsed = resolveModelWaitElapsedSeconds(live);
+    if (elapsed !== null) {
+      parts.push(`已等待 ${elapsed}s`);
+      if (elapsed > 45) parts.push("模型较慢，可取消后 @ 具体文件重试");
+    }
   } else if (live.detail?.trim()) {
     parts.push(live.detail.trim());
   }

@@ -4,6 +4,7 @@ import {
   createInitialLiveState,
   patchLiveFromStatusEvent,
   formatAgentLiveStatus,
+  resolveModelWaitElapsedSeconds,
   type AgentRunLiveState,
 } from "../services/agentRunLiveState";
 import {
@@ -157,11 +158,13 @@ export function useAgentState(deps: UseAgentStateDeps) {
 
   function cursorCompactLiveStatus(msg: ChatMessage): string | null {
     void agentLiveRevision.value;
+    void agentUiTick.value;
     return buildCursorCompactLiveStatus(buildCompactStatusForMessage(msg));
   }
 
   function agentStatusDisplay(msg: ChatMessage): string {
     void agentLiveRevision.value;
+    void agentUiTick.value;
     const compactStatus = cursorCompactLiveStatus(msg);
     if (compactStatus) return compactStatus;
 
@@ -185,13 +188,12 @@ export function useAgentState(deps: UseAgentStateDeps) {
       live.phase === "waiting_model" ||
       live.phase === "sending_request" ||
       live.phase === "retrying_model";
-    if (live.waitStartedAt && waitingModel) {
-      const elapsedMs = live.elapsedMs ?? (Date.now() - live.waitStartedAt);
-      const elapsed = Math.max(0, Math.floor(elapsedMs / 1000));
-      if (elapsed >= 15) {
+    if (waitingModel) {
+      const elapsed = resolveModelWaitElapsedSeconds(live);
+      if (elapsed !== null && elapsed >= 15) {
         statusText = `${statusText} · ${elapsed}s`;
       }
-      if (elapsed > 45) {
+      if (elapsed !== null && elapsed > 45) {
         statusText += " · 可 @ 文件缩小范围";
       }
     }

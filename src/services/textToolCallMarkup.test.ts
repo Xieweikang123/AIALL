@@ -31,6 +31,14 @@ describe("stripTextToolCallMarkup", () => {
   it("strips legacy function= markup", () => {
     expect(stripTextToolCallMarkup("说明\n<function=grep>\n<parameter=pattern>plan")).toBe("说明");
   });
+
+  it("strips tool_invocation blocks with inline JSON arguments", () => {
+    const sample = [
+      "我来修改样式。",
+      '<tool_invocation name="patch_file" arguments={"path":"src/components/vibe/AutoBugFixPanel.vue","old_string":"foo","new_string":"bar"}>',
+    ].join("\n");
+    expect(stripTextToolCallMarkup(sample)).toBe("我来修改样式。");
+  });
 });
 
 describe("hasTextToolCallMarkup", () => {
@@ -70,6 +78,14 @@ describe("parseTextToolCallsFromContent", () => {
       },
     ]);
   });
+
+  it("parses tool_invocation blocks with JSON arguments", () => {
+    const content =
+      '<tool_invocation name="patch_file" arguments={"path":"src/foo.vue","old_string":"a","new_string":"b"}>';
+    expect(parseTextToolCallsFromContent(content)).toEqual([
+      { name: "patch_file", args: { path: "src/foo.vue", old_string: "a", new_string: "b" } },
+    ]);
+  });
 });
 
 describe("TextToolCallStreamFilter", () => {
@@ -78,5 +94,24 @@ describe("TextToolCallStreamFilter", () => {
     expect(filter.push("说明文字")).toBe("说明文字");
     expect(filter.push("<function_calls>")).toBe("");
     expect(filter.getVisibleText()).toBe("说明文字");
+  });
+
+  it("holds back partial tool_invocation tag until complete", () => {
+    const filter = new TextToolCallStreamFilter();
+    expect(filter.push("说明")).toBe("说明");
+    expect(filter.push("<tool_inv")).toBe("");
+    expect(filter.push('ocation name="grep" arguments={"pattern":"plan"}>')).toBe("");
+    expect(filter.getVisibleText()).toBe("说明");
+  });
+
+  it("does not leak tool_invocation prefix while tag streams char by char", () => {
+    const filter = new TextToolCallStreamFilter();
+    expect(filter.push("我来修改。")).toBe("我来修改。");
+    const tag =
+      '<tool_invocation name="patch_file" arguments={"path":"src/foo.vue","old_string":"a","new_string":"b"}>';
+    for (const ch of tag) {
+      expect(filter.push(ch)).toBe("");
+    }
+    expect(filter.getVisibleText()).toBe("我来修改。");
   });
 });

@@ -5,7 +5,7 @@ import { stripToolSummaryFromAssistantContent } from "./vibeChatStorage";
 
 /** Quick scan — skip full sanitize pipeline for typical assistant prose. */
 const SANITIZE_HINT_RE =
-  /<!--|<!(?:[^->]|-(?!->))|<function|<invoke|<tool_call|\[Tool call|agent-progress|agent-suggestions|agent-tool-log|\[工具摘要\]|#\s*工具摘要|`[^`\n]+\?`\s*:\s*`[^`\n]+`|(?:^|\n)[-*•>\s]*(?:读取文件|列出目录|浏览目录|搜索代码|搜索内容|搜索文件|写入文件|局部修改|删除文件|执行命令|联网搜索|抓取网页)[：:]/i;
+  /<!--|<!(?:[^->]|-(?!->))|<function|<invoke|<tool_call|<tool_invocation|\[Tool call|agent-progress|agent-suggestions|agent-tool-log|\[工具摘要\]|#\s*工具摘要|`[^`\n]+\?`\s*:\s*`[^`\n]+`|(?:^|\n)[-*•>\s]*(?:读取文件|列出目录|浏览目录|搜索代码|搜索内容|搜索文件|写入文件|局部修改|删除文件|执行命令|联网搜索|抓取网页)[：:]/i;
 
 export function needsMarkdownDisplaySanitize(text: string): boolean {
   return SANITIZE_HINT_RE.test(text) || TOOL_MARKUP_START_RE.test(text);
@@ -56,13 +56,15 @@ export function sanitizeMarkdownForDisplay(text: string): string {
   return result.trim();
 }
 
-/**
- * Lighter sanitize while SSE is still growing — avoid stripping partial answer tails
- * that resemble tool logs, but still remove HTML comment leaks.
+/** Lighter sanitize while SSE is still growing — avoid stripping partial answer tails
+ * that resemble tool logs, but still remove HTML comment leaks and completed tool markup.
  */
 export function sanitizeMarkdownForStreamingDisplay(text: string): string {
   if (!text) return "";
   let result = stripVisibleHtmlComments(text);
+  if (TOOL_MARKUP_START_RE.test(result)) {
+    result = stripTextToolCallMarkup(result);
+  }
   result = mergeSplitOptionalTypeInlineCode(result);
   return result.trim();
 }

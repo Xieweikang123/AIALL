@@ -79,7 +79,7 @@ import {
 } from "../services/planFile";
 import { parseAgentSuggestions, type AgentSuggestion } from "../services/agentSuggestions";
 import { stripTextToolCallMarkup } from "../services/textToolCallMarkup";
-import { isDeleteNotFoundError, resolveAgentDoneFileAction } from "../services/vibeAgentTurnApply";
+import { isDeleteNotFoundError, resolveAgentDoneFileAction, resolveTaskWrittenFilesForResume } from "../services/vibeAgentTurnApply";
 import {
   runVibeAgentSse,
   type VibeAgentSseEvent,
@@ -983,21 +983,25 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   }
 
   function handleTurnResponseEvent(event: EventOf<"turn_response">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
-    if (event.data.isFinal) clearStreamDeltaBuffer();
+    clearStreamDeltaBuffer();
+    assistantMsg.content = stripTextToolCallMarkup(
+      stripToolSummaryFromAssistantContent(assistantMsg.content || ""),
+    );
+    const strippedAssistantText = stripTextToolCallMarkup(
+      stripToolSummaryFromAssistantContent(event.data.assistantText || ""),
+    );
     assistantMsg.roundGroups = recordAgentRoundResponse(
       assistantMsg.roundGroups,
       event.data.turn,
       {
-        assistantText: event.data.assistantText,
+        assistantText: strippedAssistantText,
         toolCalls: event.data.toolCalls,
         hasToolCalls: event.data.hasToolCalls,
         isFinal: event.data.isFinal,
       },
       event.data.maxTurns,
     );
-    const turnText = stripTextToolCallMarkup(
-      stripToolSummaryFromAssistantContent(event.data.assistantText || ""),
-    );
+    const turnText = strippedAssistantText;
     if (turnText && event.data.isFinal) {
       assistantMsg.content = mergeAssistantTurnText(assistantMsg.content || "", turnText);
       assistantMsg.activityExpanded = false;
@@ -1015,17 +1019,22 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   }
 
   function handleTurnTraceEvent(event: EventOf<"turn_trace">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
+    const traceText = stripTextToolCallMarkup(
+      stripToolSummaryFromAssistantContent(
+        event.data.assistantText ?? event.data.toolCallPreamble ?? "",
+      ),
+    );
     if (!assistantMsg.turnTraces) assistantMsg.turnTraces = [];
     assistantMsg.turnTraces.push({
       turn: event.data.turn,
       maxTurns: event.data.maxTurns,
-      assistantText: event.data.assistantText ?? "",
+      assistantText: traceText,
       hasToolCalls: event.data.hasToolCalls ?? false,
     });
     assistantMsg.roundGroups = recordAgentRoundNarrative(
       assistantMsg.roundGroups,
       event.data.turn,
-      event.data.assistantText ?? event.data.toolCallPreamble,
+      traceText,
       event.data.maxTurns,
     );
     if (shouldMinimizeRunUiPatch(assistantMsg)) {
@@ -1326,7 +1335,15 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       if (projectPath.value.trim()) {
         updateAgentRunSessionStatus(sessionId, "completed");
       }
-      assistantMsg.writtenFiles = event.data.writtenFiles?.length ? [...event.data.writtenFiles] : undefined;
+      assistantMsg.writtenFiles = resolveAgentDoneFileAction({
+        chatMode: assistantMsg.chatMode ?? "ask",
+        wasAborted: false,
+        serverPendingFiles: [],
+        serverWrittenFiles: event.data.writtenFiles ?? [],
+        turnFileDiffPaths: [],
+        tools: assistantMsg.tools,
+        priorWrittenFiles: assistantMsg.writtenFiles,
+      }).writtenFiles;
       assistantMsg.content = applySuggestionsToAssistantContent(
         assistantMsg,
         finalizeAssistantBubbleContent({
@@ -1562,6 +1579,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       serverPendingFiles: event.data.pendingFiles || [],
       serverWrittenFiles: event.data.writtenFiles || [],
       turnFileDiffPaths,
+      tools: assistantMsg.tools,
+      priorWrittenFiles: assistantMsg.writtenFiles,
     });
 
     assistantMsg.pendingApproval = fileAction.pendingApproval;
@@ -1932,6 +1951,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         openFilePath: activeFilePath.value || undefined,
         runProfile: runProfile.kind === "execute_plan" ? runProfile : undefined,
         webProxyUrl: loadWebProxyUrlFromStorage() || undefined,
+        taskWrittenFiles: resolveTaskWrittenFilesForResume({
+          writtenFiles: assistantMsg.writtenFiles,
+          tools: assistantMsg.tools,
+        }),
       },
       (event) => enqueueAgentEvent(event, assistantMsg, runGen, sessionId),
     );

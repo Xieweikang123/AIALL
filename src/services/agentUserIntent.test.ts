@@ -286,6 +286,12 @@ describe("isUiDefectReportPrompt", () => {
     expect(isUiDefectReportPrompt("能看到我截图的问题吗", true)).toBe(true);
     expect(isUiDefectReportPrompt("能看到我截图的问题吗", false)).toBe(false);
   });
+
+  it("treats short aesthetic feedback with image as UI defect", () => {
+    expect(isUiDefectReportPrompt("也不好看", true)).toBe(true);
+    expect(isUiDefectReportPrompt("好丑", true)).toBe(true);
+    expect(isUiDefectReportPrompt("也不好看", false)).toBe(false);
+  });
 });
 
 describe("isImplementFollowUpRun", () => {
@@ -323,6 +329,28 @@ describe("isImplementFollowUpRun", () => {
 
   it("rejects 修复吧 without relevant history", () => {
     expect(isImplementFollowUpRun("修复吧", [])).toBe(false);
+  });
+
+  it("detects bulk execute after prior implementation context", () => {
+    const history = [
+      {
+        role: "assistant" as const,
+        content: "建议去掉 fix-btn--block，需要我实际执行这些修改吗？",
+      },
+    ];
+    expect(isImplementFollowUpRun("全部执行", history)).toBe(true);
+  });
+
+  it("detects numbered option selection after assistant offered priorities", () => {
+    const history = [
+      {
+        role: "assistant" as const,
+        content: "1. 主按钮去掉 block\n2. 增大圆点\n需要我实际执行吗？",
+      },
+    ];
+    expect(
+      isImplementFollowUpRun("> Agent: 连接线拉长\n\n1", history),
+    ).toBe(true);
   });
 });
 

@@ -508,6 +508,28 @@ describe("resolveLiveAgentAnswerPreview", () => {
     ).toBe(partial);
   });
 
+  it("strips tool_invocation markup from live answer preview", () => {
+    const leaked = [
+      "我来修改样式。",
+      '<tool_invocation name="patch_file" arguments={"path":"src/components/vibe/AutoBugFixPanel.vue","old_string":"foo","new_string":"bar"}>',
+    ].join("\n");
+    expect(
+      resolveLiveAgentAnswerText({
+        agentTurn: 3,
+        agentPhase: "streaming_model",
+        content: leaked,
+        roundGroups: [
+          {
+            turn: 3,
+            narrative: leaked,
+            modelSteps: [],
+            toolIds: [],
+          },
+        ],
+      }),
+    ).toBe("我来修改样式。");
+  });
+
   it("falls back to the last round when agentTurn is missing", () => {
     expect(
       resolveLiveAgentAnswerPreview({

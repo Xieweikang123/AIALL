@@ -2,7 +2,7 @@ import type { Ref } from "vue";
 import type { VibeChatMessage } from "../types/vibeChat";
 import type { AgentRunLiveState } from "../services/agentRunLiveState";
 import type { SessionAgentRun } from "./agentSessionRuns";
-import { stripTextToolCallMarkup } from "../services/textToolCallMarkup";
+import { TextToolCallStreamFilter } from "../services/textToolCallMarkup";
 import { appendAssistantStreamDelta } from "../services/agentMessageDisplay";
 import { recordAgentRoundStreamDelta } from "../services/agentRoundGroups";
 import { syncRoundGroupsPatch } from "../utils/vibeHelpers";
@@ -65,6 +65,16 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
   let pendingRunUiPatch: PendingRunUiPatch | null = null;
   let runUiPatchTimer: ReturnType<typeof setTimeout> | null = null;
   let lastRunUiPatchAt = 0;
+  const streamToolFilters = new Map<string, TextToolCallStreamFilter>();
+
+  function getStreamToolFilter(msgId: string): TextToolCallStreamFilter {
+    let filter = streamToolFilters.get(msgId);
+    if (!filter) {
+      filter = new TextToolCallStreamFilter();
+      streamToolFilters.set(msgId, filter);
+    }
+    return filter;
+  }
 
   function scheduleStreamScroll() {
     if (!chatSending.value || !isChatPinnedToBottom()) return;
@@ -182,7 +192,7 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
     const { msgId, assistantMsg } = pendingStreamDelta;
     const delta = pendingStreamDelta.pending;
     pendingStreamDelta.pending = "";
-    const cleanDelta = stripTextToolCallMarkup(delta);
+    const cleanDelta = getStreamToolFilter(msgId).push(delta);
 
     const run = findRunForMsg(assistantMsg);
     const minimizing = shouldMinimizeRunUiPatch(assistantMsg);
@@ -197,7 +207,7 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
       assistantMsg.roundGroups = recordAgentRoundStreamDelta(
         assistantMsg.roundGroups,
         turn,
-        delta,
+        cleanDelta,
         assistantMsg.agentMaxTurns ?? run?.live.maxTurns,
       );
       if (run) scheduleMinimizedRunUiPatch(run.sessionId, msgId, "light");
@@ -211,7 +221,7 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
     assistantMsg.roundGroups = recordAgentRoundStreamDelta(
       assistantMsg.roundGroups,
       turn,
-      delta,
+      cleanDelta,
       assistantMsg.agentMaxTurns,
     );
     patchAssistantMsg(msgId, {
@@ -239,6 +249,14 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
 
   function clearStreamDeltaBuffer() {
     flushPendingStreamDelta();
+    if (pendingStreamDelta) {
+      const { msgId, assistantMsg } = pendingStreamDelta;
+      const filter = streamToolFilters.get(msgId);
+      if (filter) {
+        assistantMsg.content = filter.getVisibleText();
+        streamToolFilters.delete(msgId);
+      }
+    }
     pendingStreamDelta = null;
   }
 

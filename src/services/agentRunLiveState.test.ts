@@ -7,6 +7,7 @@ import {
   createInitialLiveState,
   formatAgentLiveStatus,
   patchLiveFromStatusEvent,
+  resolveModelWaitElapsedSeconds,
 } from "./agentRunLiveState";
 
 describe("agentRunLiveState", () => {
@@ -21,6 +22,28 @@ describe("agentRunLiveState", () => {
     expect(
       appendStatusDetail("正在等待模型响应（第 3 轮）…", "第 3 轮：等待模型响应"),
     ).toBe("正在等待模型响应（第 3 轮）…");
+  });
+
+  it("ignores server elapsedMs heartbeat of zero", () => {
+    const waiting = patchLiveFromStatusEvent(createInitialLiveState(), "waiting_model", {
+      elapsedMs: 0,
+    });
+    expect(waiting.elapsedMs).toBeUndefined();
+
+    const updated = patchLiveFromStatusEvent(waiting, "waiting_model", {
+      elapsedMs: 4000,
+    });
+    expect(updated.elapsedMs).toBe(4000);
+  });
+
+  it("resolveModelWaitElapsedSeconds uses client clock when server sends 0", () => {
+    const now = 1_700_000_010_000;
+    const live = {
+      phase: "waiting_model",
+      waitStartedAt: now - 12_000,
+      elapsedMs: 0,
+    };
+    expect(resolveModelWaitElapsedSeconds(live, now)).toBe(12);
   });
 
   it("tracks waitStartedAt on model-wait phases only", () => {
