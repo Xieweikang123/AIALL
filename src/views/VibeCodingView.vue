@@ -1536,18 +1536,20 @@ async function scrollChatToBottom(force = false) {
   await nextTick();
   if (scrollChatRaf) cancelAnimationFrame(scrollChatRaf);
   scrollChatRaf = requestAnimationFrame(() => {
-    const el = chatPanelRef.value?.chatScrollRef;
-    if (!el) {
-      scrollChatRaf = 0;
-      return;
-    }
+    scrollChatRaf = requestAnimationFrame(() => {
+      const el = chatPanelRef.value?.chatScrollRef;
+      if (!el) {
+        scrollChatRaf = 0;
+        return;
+      }
 
-    if (force) {
-      scheduleScrollContainerToBottom(() => chatPanelRef.value?.chatScrollRef ?? null, { behavior: "auto" });
-    } else {
-      scrollContainerToBottom(el, "auto");
-    }
-    scrollChatRaf = 0;
+      if (force) {
+        scheduleScrollContainerToBottom(() => chatPanelRef.value?.chatScrollRef ?? null, { behavior: "auto" });
+      } else {
+        scrollContainerToBottom(el, "auto");
+      }
+      scrollChatRaf = 0;
+    });
   });
 }
 
@@ -1952,7 +1954,7 @@ function patchAssistantMsg(msgId: string, patch: Partial<ChatMessage>, sessionId
   const apply = (list: ChatMessage[]) => {
     const idx = list.findIndex((m) => m.id === msgId);
     if (idx < 0) return false;
-    list[idx] = { ...list[idx], ...patch };
+    Object.assign(list[idx]!, patch);
     return true;
   };
   if (isActive) {
@@ -2384,9 +2386,12 @@ const agentRunningStatusText = computed(() => {
   if (!chatSending.value) return "";
   for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
     const m = chatMessages.value[i];
-    if (m?.role === "assistant") return buildAgentRunningStatusTextForMsg(m);
+    if (m?.role !== "assistant") continue;
+    // 运行状态已在消息气泡内展示，底部不再重复
+    if (isAgentRunning(m)) return "";
+    return buildAgentRunningStatusTextForMsg(m);
   }
-  return "Agent 运行中…";
+  return "";
 });
 
 function findLastCompletedAssistantMessage(): ChatMessage | undefined {
@@ -3528,23 +3533,27 @@ watch(
 
 watch(
   () => {
-    if (!chatSending.value) return 0;
+    if (!chatSending.value) return "";
     const last = chatMessages.value[chatMessages.value.length - 1];
-    if (!last) return 0;
+    if (!last) return "";
     const activeNarrative =
       last.roundGroups?.find((g) => g.turn === last.agentTurn)?.narrative ??
       last.roundGroups?.filter((g) => g.turn > 0).at(-1)?.narrative ??
       "";
-    return (
-      (last.content?.length ?? 0)
-      + (last.streamChars ?? 0)
-      + activeNarrative.length
-      + (last.tools?.length ?? 0) * 1000
-    );
+    return [
+      agentLiveRevision.value,
+      last.agentPhase ?? "",
+      last.status ?? "",
+      last.content?.length ?? 0,
+      last.streamChars ?? 0,
+      activeNarrative.length,
+      last.tools?.length ?? 0,
+    ].join("|");
   },
   () => {
     if (chatSending.value) scheduleStreamScroll();
   },
+  { flush: "post" },
 );
 
 let chatImageHydrateToken = 0;

@@ -474,7 +474,12 @@ button:active:not(:disabled) {
   flex-direction: column;
   gap: 16px;
   padding: 10px 0 20px;
-  overflow-anchor: none;
+}
+
+.chat-scroll-anchor {
+  height: 1px;
+  flex-shrink: 0;
+  overflow-anchor: auto;
 }
 
 .msg-list--live-run {
@@ -485,6 +490,16 @@ button:active:not(:disabled) {
   border-color: rgba(88, 166, 255, 0.22);
   background: rgba(88, 166, 255, 0.04);
   box-shadow: 0 0 0 1px rgba(88, 166, 255, 0.06);
+}
+
+.msg.assistant.msg--live.msg--live-waiting .msg-body {
+  border-color: rgba(88, 166, 255, 0.14);
+  background: rgba(88, 166, 255, 0.025);
+  box-shadow: none;
+}
+
+.msg-live-status-wrap {
+  margin-top: 0;
 }
 
 .msg.assistant.msg--agent-done .msg-body {
@@ -509,7 +524,6 @@ button:active:not(:disabled) {
   padding: 2px 12px;
   border-radius: 12px;
   transition: box-shadow 0.25s ease, background 0.25s ease;
-  overflow-anchor: none;
 }
 
 .msg--search-highlight {
@@ -598,6 +612,30 @@ button:active:not(:disabled) {
   border: 1px solid rgba(179, 146, 240, 0.18);
 }
 
+.msg-mode-badge--ask {
+  color: rgba(165, 214, 255, 0.92);
+  background: rgba(88, 166, 255, 0.1);
+  border-color: rgba(88, 166, 255, 0.18);
+}
+
+.msg-mode-badge--plan {
+  color: rgba(255, 210, 130, 0.92);
+  background: rgba(210, 153, 34, 0.12);
+  border-color: rgba(210, 153, 34, 0.22);
+}
+
+.msg-mode-badge--build {
+  color: rgba(179, 146, 240, 0.92);
+  background: rgba(179, 146, 240, 0.12);
+  border-color: rgba(179, 146, 240, 0.18);
+}
+
+.msg-mode-badge--explore {
+  color: rgba(126, 210, 185, 0.92);
+  background: rgba(46, 160, 130, 0.12);
+  border-color: rgba(46, 160, 130, 0.2);
+}
+
 .msg-role {
   font-size: 11px;
   font-weight: 700;
@@ -654,24 +692,6 @@ button:active:not(:disabled) {
   color: rgba(148, 163, 184, 0.78);
 }
 
-.msg-live-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 2px 0 8px;
-  padding: 6px 10px;
-  border-radius: 8px;
-  background: rgba(88, 166, 255, 0.06);
-  border: 1px solid rgba(88, 166, 255, 0.12);
-  font-size: 12px;
-  line-height: 1.45;
-  color: rgba(165, 214, 255, 0.92);
-}
-
-.msg-status--legacy {
-  margin-top: 8px;
-}
-
 .status-pulse {
   width: 8px;
   height: 8px;
@@ -698,7 +718,7 @@ button:active:not(:disabled) {
 
 .shimmer-text--fast {
   @extend .shimmer-text;
-  animation-duration: 5.6s;
+  animation-duration: 2.8s;
 }
 
 @keyframes shimmer {
