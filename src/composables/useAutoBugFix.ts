@@ -3,12 +3,19 @@ import { fetchProjectHealthScan, type ProjectHealthScanResult } from "../service
 import { fetchProjectVerifyRun, type ProjectVerifyRunResult } from "../services/projectVerifyRunClient";
 import {
   buildAutoBugFixPrompt,
+  buildAutoBugFixNoWorkSummary,
   buildAutoBugFixUserIntent,
   collectAutoBugFixTargetFiles,
   countAutoBugFixWorkItems,
   needsAutoBugFix,
   type AutoBugFixScope,
 } from "../../shared/autoBugFixPrompt";
+import {
+  compareVerifyRuns,
+  formatVerifyComparisonSummary,
+  isVerifyRunRequestFailed,
+  type VerifyRegressionKind,
+} from "../../shared/projectVerifyRun";
 import type { AgentRunProfile } from "../services/agentRunProfile";
 import { AUTO_BUG_FIX_MAX_TURNS } from "../services/agentRunProfile";
 import { canResumeAgentRun, HMR_INTERRUPT_REASON, isHmrInterruptReason } from "../services/agentRecovery";
@@ -21,11 +28,12 @@ import {
 } from "../utils/autoBugFixStorage";
 import type { ChatMessage } from "../types/vibeChat";
 
-export type AutoBugFixPhase = "idle" | "scanning" | "testing" | "fixing" | "done" | "no_work" | "error";
+export type AutoBugFixPhase = "idle" | "scanning" | "testing" | "fixing" | "verifying" | "done" | "no_work" | "error";
 
 export type AutoBugFixRunOptions = {
   scope?: AutoBugFixScope;
   includeWarnings?: boolean;
+  includeLogicReview?: boolean;
 };
 
 export type StartAutoBugFixAgentResult = {
@@ -37,12 +45,16 @@ export type StartAutoBugFixAgentParams = {
   prompt: string;
   runProfile: AgentRunProfile;
   userBubbleContent: string;
+  sessionId: string;
 };
 
-const AUTO_BUG_FIX_USER_BUBBLE_PREFIX = "一键修复";
+const AUTO_BUG_FIX_USER_BUBBLE_PREFIX = "扫描修复";
+const LEGACY_AUTO_BUG_FIX_USER_BUBBLE_PREFIX = "一键修复";
 
 function isAutoBugFixUserBubble(content: string): boolean {
-  return content.trim().startsWith(AUTO_BUG_FIX_USER_BUBBLE_PREFIX);
+  const trimmed = content.trim();
+  return trimmed.startsWith(AUTO_BUG_FIX_USER_BUBBLE_PREFIX)
+    || trimmed.startsWith(LEGACY_AUTO_BUG_FIX_USER_BUBBLE_PREFIX);
 }
 
 export function useAutoBugFix(
@@ -51,8 +63,12 @@ export function useAutoBugFix(
   activeSessionId: { value: string },
   deps: {
     startAgent: (params: StartAutoBugFixAgentParams) => Promise<StartAutoBugFixAgentResult>;
+    startNewSession: () => void;
+    switchSession?: (sessionId: string) => void;
+    getSessionMessages?: (sessionId: string) => ChatMessage[] | undefined;
     expandChat: () => void;
     switchGitPanel?: () => void;
+    stopFixAgent?: (sessionId: string) => void;
   },
 ) {
   const phase = ref<AutoBugFixPhase>("idle");
@@ -60,12 +76,18 @@ export function useAutoBugFix(
   const scanResult = ref<ProjectHealthScanResult | null>(null);
   const verifyResult = ref<ProjectVerifyRunResult | null>(null);
   const baselineVerify = ref<ProjectVerifyRunResult | null>(null);
+  const postFixVerify = ref<ProjectVerifyRunResult | null>(null);
+  const verifyComparison = ref<{ kind: VerifyRegressionKind; detail: string } | null>(null);
   const scope = ref<AutoBugFixScope>("tests_and_errors");
   const includeWarnings = ref(false);
+  const includeLogicReview = ref(false);
   const lastSummary = ref("");
   const assistantMsgId = ref("");
+  const fixSessionId = ref("");
   const interruptedHint = ref("");
-  const running = computed(() => phase.value === "scanning" || phase.value === "testing" || phase.value === "fixing");
+  const fixRunCancelled = ref(false);
+  const abortGeneration = ref(0);
+  const running = computed(() => phase.value === "scanning" || phase.value === "testing" || phase.value === "fixing" || phase.value === "verifying");
 
   function clearInterruptedHint() {
     interruptedHint.value = "";
@@ -80,7 +102,11 @@ export function useAutoBugFix(
         phase: phase.value,
         scanResult: scanResult.value,
         verifyResult: verifyResult.value,
+        baselineVerify: baselineVerify.value,
+        postFixVerify: postFixVerify.value,
+        verifyComparison: verifyComparison.value,
         includeWarnings: includeWarnings.value,
+        includeLogicReview: includeLogicReview.value,
         lastSummary: lastSummary.value,
         error: error.value,
         assistantMsgId: assistantMsgId.value || undefined,
@@ -95,10 +121,36 @@ export function useAutoBugFix(
     scanResult.value = null;
     verifyResult.value = null;
     baselineVerify.value = null;
+    postFixVerify.value = null;
+    verifyComparison.value = null;
     lastSummary.value = "";
     assistantMsgId.value = "";
+    fixSessionId.value = "";
     clearInterruptedHint();
+    fixRunCancelled.value = false;
     removeAutoBugFixState(projectPath.value.trim());
+  }
+
+  function cancelAutoBugFix() {
+    const path = projectPath.value.trim();
+    if (!path || !projectOpened.value) return;
+    const wasActive = phase.value !== "idle" && phase.value !== "no_work" && phase.value !== "done";
+    if (!wasActive && !assistantMsgId.value) return;
+
+    fixRunCancelled.value = true;
+    abortGeneration.value += 1;
+    const sessionId = fixSessionId.value.trim() || activeSessionId.value.trim();
+    if (sessionId) deps.stopFixAgent?.(sessionId);
+
+    clearInterruptedHint();
+    assistantMsgId.value = "";
+    fixSessionId.value = "";
+    phase.value = "idle";
+    error.value = "";
+    if (wasActive) {
+      lastSummary.value = "已终止本轮修复。扫描与测试结果仍保留，可重新点击「开始扫描修复」。";
+    }
+    removeAutoBugFixState(path);
   }
 
   function restoreVerifyResult(
@@ -132,16 +184,54 @@ export function useAutoBugFix(
     return null;
   }
 
+  async function rerunVerifyAfterFix() {
+    const path = projectPath.value.trim();
+    if (!path || !projectOpened.value || !baselineVerify.value) return;
+    const after = await fetchProjectVerifyRun(path);
+    if (isVerifyRunRequestFailed(after)) return;
+    postFixVerify.value = after;
+    verifyResult.value = after;
+    const comparison = compareVerifyRuns(baselineVerify.value, after);
+    verifyComparison.value = comparison;
+    lastSummary.value = formatVerifyComparisonSummary(comparison, baselineVerify.value, after);
+    persistNow();
+  }
+
   function applyInterruptedAssistantState(msg: ChatMessage | null) {
     if (!msg) {
       clearInterruptedHint();
+      if (phase.value === "verifying") {
+        if (baselineVerify.value) {
+          lastSummary.value = "修复任务已完成，正在复验…";
+          void rerunVerifyAfterFix().then(() => {
+            phase.value = "done";
+            if (!verifyComparison.value) {
+              lastSummary.value = "修复任务已完成，可在 Git 面板查看变更。";
+              persistNow();
+            }
+          });
+        } else {
+          phase.value = "done";
+          if (!lastSummary.value) {
+            lastSummary.value = "修复任务已完成，可在 Git 面板查看变更。";
+          }
+          persistNow();
+        }
+      }
       return;
     }
     assistantMsgId.value = msg.id;
     if (hasAgentFinalAnswer(msg)) {
-      phase.value = "done";
-      lastSummary.value = "修复任务已完成，可在 Git 面板查看变更。";
+      phase.value = "verifying";
+      lastSummary.value = "修复任务已完成，正在复验…";
       clearInterruptedHint();
+      void rerunVerifyAfterFix().then(() => {
+        phase.value = "done";
+        if (!verifyComparison.value) {
+          lastSummary.value = "修复任务已完成，可在 Git 面板查看变更。";
+          persistNow();
+        }
+      });
       return;
     }
     if (canResumeAgentRun(msg)) {
@@ -149,7 +239,9 @@ export function useAutoBugFix(
       const reason = msg.agentFailureReason || msg.agentAbortReason || "";
       interruptedHint.value = isHmrInterruptReason(reason)
         ? "修复因页面刷新中断，可点击下方「恢复运行」从断点继续。"
-        : "修复尚未完成，可点击下方「恢复运行」继续。";
+        : reason.includes("未生成最终回复")
+          ? "修复未生成完整总结，可点击下方「恢复运行」继续，或「终止修复」。"
+          : "修复尚未完成，可点击下方「恢复运行」继续。";
       lastSummary.value = interruptedHint.value;
       return;
     }
@@ -159,9 +251,10 @@ export function useAutoBugFix(
       interruptedHint.value = "";
       return;
     }
-    phase.value = "fixing";
-    interruptedHint.value = "修复任务进行中，请在聊天面板查看 Agent 进度。";
-    lastSummary.value = interruptedHint.value;
+    phase.value = "error";
+    error.value = "Agent 未输出修复总结即结束";
+    lastSummary.value = "请在聊天中点击「恢复运行」，或重新「开始扫描修复」。";
+    interruptedHint.value = "";
   }
 
   /** Restore fix panel state after refresh; returns whether fix tab should open. */
@@ -170,19 +263,33 @@ export function useAutoBugFix(
     if (!path || !projectOpened.value) return false;
 
     const stored = readAutoBugFixState(path);
-    const sessionMatches = !stored?.sessionId || stored.sessionId === activeSessionId.value.trim();
 
-    if (stored && sessionMatches) {
+    if (stored) {
+      const storedSessionId = stored.sessionId?.trim() ?? "";
+      if (storedSessionId && storedSessionId !== activeSessionId.value.trim()) {
+        deps.switchSession?.(storedSessionId);
+      }
+      const restoreMessages = storedSessionId && deps.getSessionMessages
+        ? (deps.getSessionMessages(storedSessionId) ?? messages)
+        : messages;
+
       scanResult.value = stored.scanResult ?? null;
-      verifyResult.value = restoreVerifyResult(stored.verifyResult);
-      baselineVerify.value = verifyResult.value;
+      baselineVerify.value = restoreVerifyResult(
+        stored.baselineVerify ?? (stored.phase === "done" ? null : stored.verifyResult),
+      );
+      postFixVerify.value = restoreVerifyResult(stored.postFixVerify ?? null);
+      verifyComparison.value = stored.verifyComparison ?? null;
+      verifyResult.value = restoreVerifyResult(
+        stored.postFixVerify ?? stored.verifyResult,
+      ) ?? baselineVerify.value;
       includeWarnings.value = Boolean(stored.includeWarnings);
+      includeLogicReview.value = Boolean(stored.includeLogicReview);
       lastSummary.value = stored.lastSummary || "";
       error.value = stored.error || "";
 
       if (stored.phase === "scanning" || stored.phase === "testing") {
         phase.value = "error";
-        error.value = "页面刷新中断了扫描或测试，请重新点击「开始自动修复」。";
+        error.value = "页面刷新中断了扫描或测试，请重新点击「开始扫描修复」。";
         lastSummary.value = "";
         clearInterruptedHint();
         persistNow();
@@ -190,8 +297,16 @@ export function useAutoBugFix(
       }
 
       phase.value = stored.phase;
+
+      if (stored.phase === "done" || stored.phase === "no_work") {
+        if (stored.assistantMsgId) assistantMsgId.value = stored.assistantMsgId;
+        if (stored.sessionId?.trim()) fixSessionId.value = stored.sessionId.trim();
+        persistNow();
+        return true;
+      }
+
       applyInterruptedAssistantState(
-        resolveInterruptedAssistant(messages, stored.assistantMsgId),
+        resolveInterruptedAssistant(restoreMessages, stored.assistantMsgId),
       );
       persistNow();
       return true;
@@ -206,7 +321,21 @@ export function useAutoBugFix(
   }
 
   watch(
-    [phase, scanResult, verifyResult, lastSummary, error, includeWarnings, assistantMsgId, projectPath, activeSessionId],
+    [
+      phase,
+      scanResult,
+      verifyResult,
+      baselineVerify,
+      postFixVerify,
+      verifyComparison,
+      lastSummary,
+      error,
+      includeWarnings,
+      includeLogicReview,
+      assistantMsgId,
+      projectPath,
+      activeSessionId,
+    ],
     () => {
       persistNow();
     },
@@ -216,11 +345,14 @@ export function useAutoBugFix(
   async function runScanOnly() {
     const path = projectPath.value.trim();
     if (!path || !projectOpened.value) return;
+    const gen = ++abortGeneration.value;
+    fixRunCancelled.value = false;
     clearInterruptedHint();
     phase.value = "scanning";
     error.value = "";
     try {
       const result = await fetchProjectHealthScan(path);
+      if (gen !== abortGeneration.value) return;
       if (!result.ok) {
         error.value = result.error || "扫描失败";
         phase.value = "error";
@@ -238,17 +370,23 @@ export function useAutoBugFix(
   async function runVerifyOnly() {
     const path = projectPath.value.trim();
     if (!path || !projectOpened.value) return;
+    const gen = ++abortGeneration.value;
+    fixRunCancelled.value = false;
     clearInterruptedHint();
     phase.value = "testing";
     error.value = "";
     try {
       const result = await fetchProjectVerifyRun(path);
-      if (!result.ok) {
+      if (gen !== abortGeneration.value) return;
+      if (isVerifyRunRequestFailed(result)) {
         error.value = result.error || "测试运行失败";
         phase.value = "error";
         return;
       }
       verifyResult.value = result;
+      baselineVerify.value = null;
+      postFixVerify.value = null;
+      verifyComparison.value = null;
       phase.value = "idle";
     } catch (e) {
       error.value = e instanceof Error ? e.message : "测试运行失败";
@@ -262,14 +400,19 @@ export function useAutoBugFix(
 
     const effectiveScope: AutoBugFixScope = options?.scope
       ?? (options?.includeWarnings || includeWarnings.value ? "include_warnings" : scope.value);
+    const effectiveLogicReview = options?.includeLogicReview ?? includeLogicReview.value;
 
+    fixRunCancelled.value = false;
     error.value = "";
     lastSummary.value = "";
     clearInterruptedHint();
     assistantMsgId.value = "";
+    fixSessionId.value = "";
 
+    const gen = ++abortGeneration.value;
     phase.value = "scanning";
     const scan = await fetchProjectHealthScan(path);
+    if (gen !== abortGeneration.value) return;
     if (!scan.ok) {
       error.value = scan.error || "扫描失败";
       phase.value = "error";
@@ -279,17 +422,20 @@ export function useAutoBugFix(
 
     phase.value = "testing";
     const verify = await fetchProjectVerifyRun(path);
-    if (!verify.ok) {
+    if (gen !== abortGeneration.value) return;
+    if (isVerifyRunRequestFailed(verify)) {
       error.value = verify.error || "测试运行失败";
       phase.value = "error";
       return;
     }
     verifyResult.value = verify;
     baselineVerify.value = verify;
+    postFixVerify.value = null;
+    verifyComparison.value = null;
 
-    if (!needsAutoBugFix(scan, verify, effectiveScope)) {
+    if (!needsAutoBugFix(scan, verify, effectiveScope, effectiveLogicReview)) {
       phase.value = "no_work";
-      lastSummary.value = "未发现需自动修复的测试失败或 error 级扫描项。";
+      lastSummary.value = buildAutoBugFixNoWorkSummary(scan, verify, effectiveScope);
       return;
     }
 
@@ -299,17 +445,32 @@ export function useAutoBugFix(
       scan,
       verifyRun: verify,
       scope: effectiveScope,
-      verifyScript: verify.command || undefined,
+      includeLogicReview: effectiveLogicReview,
+      verifyCommands: verify.verifyCommands,
     });
-    const userIntent = buildAutoBugFixUserIntent(effectiveScope);
-    const bubble = `一键修复：${counts.testFailures ? `${counts.testFailures} 项测试问题` : ""}${counts.testFailures && counts.scanItems ? " · " : ""}${counts.scanItems ? `${counts.scanItems} 项扫描 error` : ""}`.trim();
+    const userIntent = buildAutoBugFixUserIntent(effectiveScope, effectiveLogicReview);
+    const bubbleParts: string[] = [];
+    if (counts.testFailures) bubbleParts.push(`${counts.testFailures} 项测试问题`);
+    if (counts.scanItems) bubbleParts.push(`${counts.scanItems} 项扫描 error`);
+    if (effectiveLogicReview) bubbleParts.push("含逻辑审查");
+    const bubble = bubbleParts.length ? `扫描修复：${bubbleParts.join(" · ")}` : "";
+
+    deps.startNewSession();
+    const sessionId = activeSessionId.value.trim();
+    fixSessionId.value = sessionId;
+    if (!sessionId) {
+      error.value = "无法创建修复会话";
+      phase.value = "error";
+      return;
+    }
 
     phase.value = "fixing";
     deps.expandChat();
 
     const started = await deps.startAgent({
       prompt,
-      userBubbleContent: bubble || "一键自动修复",
+      userBubbleContent: bubble || "扫描与测试修复",
+      sessionId: fixSessionId.value,
       runProfile: {
         kind: "execute_plan",
         triggerSource: "auto_bug_fix",
@@ -330,14 +491,16 @@ export function useAutoBugFix(
   }
 
   function onAgentSettled(msg?: ChatMessage) {
+    if (fixRunCancelled.value) return;
     if (msg?.id && assistantMsgId.value && msg.id !== assistantMsgId.value) return;
-    if (phase.value === "fixing" || assistantMsgId.value) {
+    if ((phase.value === "fixing" || phase.value === "verifying" || assistantMsgId.value) && phase.value !== "done") {
       applyInterruptedAssistantState(msg ?? null);
       persistNow();
     }
   }
 
   function onAgentInterrupted(reason?: string) {
+    if (fixRunCancelled.value) return;
     if (phase.value !== "fixing" && !assistantMsgId.value) return;
     if (isHmrInterruptReason(reason || HMR_INTERRUPT_REASON)) {
       interruptedHint.value = "修复因页面刷新中断，可点击下方「恢复运行」从断点继续。";
@@ -346,6 +509,8 @@ export function useAutoBugFix(
       persistNow();
     }
   }
+
+  const canStopFix = computed(() => phase.value === "fixing");
 
   function openGitDiff() {
     deps.switchGitPanel?.();
@@ -358,17 +523,22 @@ export function useAutoBugFix(
     scanResult,
     verifyResult,
     baselineVerify,
+    postFixVerify,
+    verifyComparison,
     scope,
     includeWarnings,
+    includeLogicReview,
     lastSummary,
     assistantMsgId,
     interruptedHint,
+    canStopFix,
     reset,
     persistNow,
     tryRestoreFromStorage,
     runScanOnly,
     runVerifyOnly,
     startAutoBugFix,
+    cancelAutoBugFix,
     onAgentSettled,
     onAgentInterrupted,
     openGitDiff,

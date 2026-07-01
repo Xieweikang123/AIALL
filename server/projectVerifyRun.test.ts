@@ -33,6 +33,7 @@ describe("projectVerifyRun", () => {
     const result = await runProjectVerify(root);
     expect(result.skipped).toBe(true);
     expect(result.command).toBe("");
+    expect(result.ok).toBe(true);
   });
 
   it("runs npm test when defined", async () => {
@@ -49,10 +50,12 @@ describe("projectVerifyRun", () => {
     const result = await runProjectVerify(root);
     expect(result.command).toBe("npm run test");
     expect(result.exitCode).toBe(0);
+    expect(result.ok).toBe(true);
     expect(result.failingFiles).toEqual([]);
+    expect(result.verifyCommands).toEqual(["npm run test"]);
   });
 
-  it("extracts failing files from output", async () => {
+  it("marks ok false when shell command fails", async () => {
     const root = makeProject({
       "package.json": JSON.stringify({ scripts: { test: "vitest run" } }),
     });
@@ -64,6 +67,45 @@ describe("projectVerifyRun", () => {
       timedOut: false,
     });
     const result = await runProjectVerify(root);
+    expect(result.ok).toBe(false);
+    expect(result.exitCode).toBe(1);
     expect(result.failingFiles).toContain("src/foo.test.ts");
+  });
+
+  it("runs verify scripts in order and stops on first failure", async () => {
+    const root = makeProject({
+      "package.json": JSON.stringify({
+        scripts: {
+          typecheck: "vue-tsc --noEmit",
+          lint: "eslint .",
+          test: "vitest run",
+        },
+      }),
+    });
+    const run = vi.spyOn(projectShell, "runProjectShellCommand");
+    run.mockResolvedValueOnce({
+      ok: true,
+      exitCode: 0,
+      stdout: "types ok",
+      stderr: "",
+      timedOut: false,
+    });
+    run.mockResolvedValueOnce({
+      ok: false,
+      exitCode: 1,
+      stdout: "lint failed",
+      stderr: "",
+      timedOut: false,
+    });
+
+    const result = await runProjectVerify(root);
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(result.ok).toBe(false);
+    expect(result.exitCode).toBe(1);
+    expect(result.steps).toHaveLength(2);
+    expect(result.steps?.[0]?.ok).toBe(true);
+    expect(result.steps?.[1]?.ok).toBe(false);
+    expect(result.verifyCommands).toEqual(["npm run typecheck", "npm run lint", "npm run test"]);
+    expect(result.command).toBe("npm run typecheck → npm run lint");
   });
 });

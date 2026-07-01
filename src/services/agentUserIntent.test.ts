@@ -115,7 +115,7 @@ describe("isConsultativeUserPrompt", () => {
   });
 
   it("treats evaluative opinion prompts as consultative despite 修复 in topic", () => {
-    const prompt = '"自动找 Bug 并修复" 功能，你觉得如何？';
+    const prompt = '"扫描与测试修复" 功能，你觉得如何？';
     expect(isEvaluativeOpinionPrompt(prompt)).toBe(true);
     expect(isConsultativeUserPrompt(prompt)).toBe(true);
     expect(

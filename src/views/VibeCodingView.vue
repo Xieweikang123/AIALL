@@ -356,7 +356,7 @@
       <section
         v-show="gitPanelMode === 'project' && projectPanelView === 'fix' && projectOpened && !planWorkspaceOpen"
         class="editor-panel knowledge-main-panel"
-        aria-label="自动修复"
+        aria-label="测试修复"
       >
         <AutoBugFixPanel
           :project-opened="projectOpened"
@@ -365,15 +365,21 @@
           :error="autoBugFixError"
           :scan-result="autoBugFixScan"
           :verify-result="autoBugFixVerify"
+          :baseline-verify="autoBugFixBaselineVerify"
+          :post-fix-verify="autoBugFixPostFixVerify"
+          :verify-comparison="autoBugFixVerifyComparison"
           :last-summary="autoBugFixSummary"
           v-model:include-warnings="autoBugFixIncludeWarnings"
+          v-model:include-logic-review="autoBugFixIncludeLogicReview"
           :show-resume="autoBugFixShowResume"
+          :show-stop="autoBugFixCanStop"
           :interrupted-hint="autoBugFixInterruptedHint"
-          @start="() => void startAutoBugFixFlow()"
+          @start="() => void startAutoBugFixFlow({ includeWarnings: autoBugFixIncludeWarnings, includeLogicReview: autoBugFixIncludeLogicReview })"
           @scan-only="() => void runAutoBugFixScanOnly()"
           @verify-only="() => void runAutoBugFixVerifyOnly()"
           @open-git="openGitPanelFromAutoFix"
           @resume-agent="resumeAutoBugFixFromPanel"
+          @stop-fix="stopAutoBugFixFromPanel"
         />
       </section>
 
@@ -2176,9 +2182,19 @@ const {
 
 const autoBugFix = useAutoBugFix(projectPath, projectOpened, activeSessionId, {
   startAgent: (params) => runAutoBugFixAgent(params),
+  startNewSession,
+  switchSession,
+  getSessionMessages,
   expandChat,
   switchGitPanel: () => {
     gitPanelMode.value = "git";
+  },
+  stopFixAgent: (sessionId: string) => {
+    const sid = sessionId.trim();
+    if (sid && sid !== activeSessionId.value.trim()) {
+      switchSession(sid);
+    }
+    interruptAgentRun({ reason: "已终止扫描修复" });
   },
 });
 
@@ -2188,15 +2204,21 @@ const {
   running: autoBugFixRunning,
   scanResult: autoBugFixScan,
   verifyResult: autoBugFixVerify,
+  baselineVerify: autoBugFixBaselineVerify,
+  postFixVerify: autoBugFixPostFixVerify,
+  verifyComparison: autoBugFixVerifyComparison,
   lastSummary: autoBugFixSummary,
   includeWarnings: autoBugFixIncludeWarnings,
+  includeLogicReview: autoBugFixIncludeLogicReview,
   assistantMsgId: autoBugFixAssistantMsgId,
   interruptedHint: autoBugFixInterruptedHint,
+  canStopFix: autoBugFixCanStop,
   startAutoBugFix: startAutoBugFixFlow,
   runScanOnly: runAutoBugFixScanOnly,
   runVerifyOnly: runAutoBugFixVerifyOnly,
   persistNow: persistAutoBugFixNow,
   tryRestoreFromStorage: tryRestoreAutoBugFixFromStorage,
+  cancelAutoBugFix: stopAutoBugFixFlow,
 } = autoBugFix;
 
 autoBugFixLifecycle.onAgentSettled = (msg) => autoBugFix.onAgentSettled(msg);
@@ -2209,6 +2231,10 @@ const autoBugFixShowResume = computed(() => {
   const msg = chatMessages.value.find((m) => m.id === autoBugFixAssistantMsgId.value);
   return Boolean(msg && canResumeAgentRun(msg));
 });
+
+function stopAutoBugFixFromPanel() {
+  stopAutoBugFixFlow();
+}
 
 function restoreAutoBugFixPanelIfNeeded() {
   if (!projectOpened.value || !projectPath.value.trim()) return;

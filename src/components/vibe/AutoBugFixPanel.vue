@@ -3,13 +3,13 @@
     <div v-if="!projectOpened" class="panel-empty">
       <span class="panel-empty-icon" aria-hidden="true">🔧</span>
       <p class="panel-empty-title">尚未打开项目</p>
-      <p class="panel-empty-hint">打开项目后，在「项目 → 修复」中一键扫描并修复</p>
+      <p class="panel-empty-hint">打开项目后，在「项目 → 测试修复」中扫描并修复</p>
     </div>
 
     <template v-else>
       <div class="fix-intro">
-        <p class="fix-title">自动找 Bug 并修复</p>
-        <p class="fix-desc">规则扫描 + 测试验证 → Agent 局部 patch → 复验</p>
+        <p class="fix-title">扫描与测试修复</p>
+        <p class="fix-desc">先跑规则扫描和测试；仅对失败用例与 error 级扫描项启动 Agent 修复并复验</p>
       </div>
 
       <!-- Steps -->
@@ -32,21 +32,30 @@
           <span>包含警告级扫描项</span>
         </label>
         <p class="fix-scope-hint">默认：测试失败 + error 级扫描；TODO 等提示项不会自动修改</p>
-        <label class="fix-check fix-check--disabled" title="Phase 2">
-          <input type="checkbox" disabled />
-          <span>包含逻辑审查（即将推出）</span>
+        <label class="fix-check">
+          <input v-model="includeLogicReview" type="checkbox" :disabled="running" />
+          <span>包含逻辑审查</span>
         </label>
+        <p class="fix-scope-hint">审查逻辑隐患、竞态、边界与错误处理；须 read 确认后才修改</p>
       </div>
 
       <!-- Actions -->
       <div class="fix-toolbar">
         <button type="button" class="fix-btn fix-btn--primary" :disabled="running" @click="emit('start')">
           <span v-if="running" class="fix-spinner"></span>
-          {{ running ? phaseLabel : "开始自动修复" }}
+          {{ running ? phaseLabel : "开始扫描修复" }}
         </button>
         <div class="fix-toolbar-row">
           <button type="button" class="fix-btn fix-btn--ghost" :disabled="running" @click="emit('scan-only')">仅扫描</button>
           <button type="button" class="fix-btn fix-btn--ghost" :disabled="running" @click="emit('verify-only')">仅跑测试</button>
+          <button
+            v-if="showStop"
+            type="button"
+            class="fix-btn fix-btn--danger"
+            @click="emit('stop-fix')"
+          >
+            终止修复
+          </button>
         </div>
       </div>
 
@@ -57,9 +66,9 @@
         <div class="fix-card-header" @click="scanExpanded = !scanExpanded" role="button" tabindex="0" @keydown.enter="scanExpanded = !scanExpanded">
           <div class="fix-card-title">扫描结果</div>
           <div class="fix-card-badges">
-            <span v-if="summary" class="fix-badge fix-badge--error">{{ summary.errorCount }}</span>
-            <span v-if="summary" class="fix-badge fix-badge--warning">{{ summary.warningCount }}</span>
-            <span v-if="summary" class="fix-badge fix-badge--info">{{ summary.infoCount }}</span>
+            <span v-if="summary && summary.errorCount" class="fix-badge fix-badge--error">{{ summary.errorCount }}</span>
+            <span v-if="summary && summary.warningCount" class="fix-badge fix-badge--warning">{{ summary.warningCount }}</span>
+            <span v-if="summary && summary.infoCount" class="fix-badge fix-badge--info">{{ summary.infoCount }}</span>
             <span v-if="scanDuration" class="fix-card-duration">{{ scanDuration }}</span>
             <span class="fix-card-arrow">{{ scanExpanded ? '▾' : '▸' }}</span>
           </div>
@@ -85,18 +94,27 @@
       <!-- Verify result card -->
       <div v-if="verifyResult" class="fix-card fix-card--verify">
         <div class="fix-card-header" @click="verifyExpanded = !verifyExpanded" role="button" tabindex="0" @keydown.enter="verifyExpanded = !verifyExpanded">
-          <div class="fix-card-title">测试结果</div>
+          <div class="fix-card-title">{{ verifyCardTitle }}</div>
           <div class="fix-card-badges">
             <span v-if="verifyResult.skipped" class="fix-badge fix-badge--info">跳过</span>
-            <span v-else :class="['fix-badge', verifyResult.ok ? 'fix-badge--ok' : 'fix-badge--error']">
-              {{ verifyResult.ok ? '通过' : '失败' }}
+            <span v-else :class="['fix-badge', verifyPassed ? 'fix-badge--ok' : 'fix-badge--error']">
+              {{ verifyPassed ? '通过' : '失败' }}
             </span>
             <span v-if="verifyDuration" class="fix-card-duration">{{ verifyDuration }}</span>
             <span class="fix-card-arrow">{{ verifyExpanded ? '▾' : '▸' }}</span>
           </div>
         </div>
         <div v-if="verifyExpanded && !verifyResult.skipped" class="fix-card-body">
-          <div class="fix-verify-detail">
+          <div v-if="verifySteps.length" class="fix-verify-steps">
+            <div v-for="(step, idx) in verifySteps" :key="idx" class="fix-verify-step">
+              <span :class="['fix-badge', 'fix-badge--compact', step.ok ? 'fix-badge--ok' : 'fix-badge--error']">
+                {{ step.ok ? '通过' : '失败' }}
+              </span>
+              <code class="fix-verify-code">{{ step.command }}</code>
+              <span v-if="!step.ok" class="fix-verify-step-meta">exit {{ step.exitCode }}</span>
+            </div>
+          </div>
+          <div v-else class="fix-verify-detail">
             <span class="fix-verify-label">命令：</span>
             <code class="fix-verify-code">{{ verifyResult.command }}</code>
           </div>
@@ -104,12 +122,13 @@
             <span class="fix-verify-label">退出码：</span>
             <code class="fix-verify-code">{{ verifyResult.exitCode }}</code>
           </div>
+          <p v-if="verifyEnvironmentNote" class="fix-verify-note">{{ verifyEnvironmentNote }}</p>
           <div v-if="verifyResult.stdout" class="fix-verify-detail">
             <span class="fix-verify-label">输出：</span>
             <pre class="fix-verify-pre">{{ verifyResult.stdout.slice(0, 300) }}{{ verifyResult.stdout.length > 300 ? '…' : '' }}</pre>
           </div>
           <div v-if="verifyResult.stderr" class="fix-verify-detail">
-            <span class="fix-verify-label">错误：</span>
+            <span class="fix-verify-label">stderr：</span>
             <pre class="fix-verify-pre fix-verify-pre--err">{{ verifyResult.stderr.slice(0, 300) }}{{ verifyResult.stderr.length > 300 ? '…' : '' }}</pre>
           </div>
           <div v-if="verifyResult.failingFiles.length" class="fix-verify-detail">
@@ -121,12 +140,36 @@
         </div>
       </div>
 
+      <div
+        v-if="verifyComparison && baselineVerify && postFixVerify"
+        class="fix-card fix-card--compare"
+      >
+        <div class="fix-card-header">
+          <div class="fix-card-title">修复前后对比</div>
+          <span :class="['fix-badge', comparisonBadgeClass]">{{ comparisonBadgeLabel }}</span>
+        </div>
+        <div class="fix-card-body">
+          <p class="fix-compare-detail">{{ verifyComparison.detail }}</p>
+          <div class="fix-compare-row">
+            <span class="fix-verify-label">修复前：</span>
+            <span>{{ formatVerifyStatus(baselineVerify) }}</span>
+          </div>
+          <div class="fix-compare-row">
+            <span class="fix-verify-label">修复后：</span>
+            <span>{{ formatVerifyStatus(postFixVerify) }}</span>
+          </div>
+        </div>
+      </div>
+
       <p v-if="lastSummary" class="fix-result">{{ lastSummary }}</p>
 
       <!-- Resume -->
       <div v-if="showResume" class="fix-resume">
         <p v-if="interruptedHint" class="fix-resume-hint">{{ interruptedHint }}</p>
-        <button type="button" class="fix-btn fix-btn--primary" @click="emit('resume-agent')">恢复运行</button>
+        <div class="fix-resume-actions">
+          <button type="button" class="fix-btn fix-btn--primary" @click="emit('resume-agent')">恢复运行</button>
+          <button type="button" class="fix-btn fix-btn--danger" @click="emit('stop-fix')">终止修复</button>
+        </div>
       </div>
 
       <button v-if="phase === 'done' && !running" type="button" class="fix-btn fix-btn--secondary" @click="emit('open-git')">查看 Git 变更</button>
@@ -135,10 +178,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, watch } from "vue";
 import type { AutoBugFixPhase } from "../../composables/useAutoBugFix";
 import type { ProjectHealthScanResult } from "../../services/projectHealthScanClient";
 import type { ProjectVerifyRunResult } from "../../services/projectVerifyRunClient";
+import { getVerifyEnvironmentNote } from "../../services/projectVerifyRunClient";
+import type { VerifyRegressionKind } from "../../../shared/projectVerifyRun";
 
 const props = defineProps<{
   projectOpened: boolean;
@@ -147,9 +192,14 @@ const props = defineProps<{
   error: string;
   scanResult: ProjectHealthScanResult | null;
   verifyResult: ProjectVerifyRunResult | null;
+  baselineVerify?: ProjectVerifyRunResult | null;
+  postFixVerify?: ProjectVerifyRunResult | null;
+  verifyComparison?: { kind: VerifyRegressionKind; detail: string } | null;
   lastSummary: string;
   includeWarnings: boolean;
+  includeLogicReview: boolean;
   showResume?: boolean;
+  showStop?: boolean;
   interruptedHint?: string;
 }>();
 
@@ -159,15 +209,40 @@ const emit = defineEmits<{
   "verify-only": [];
   "open-git": [];
   "resume-agent": [];
+  "stop-fix": [];
   "update:includeWarnings": [value: boolean];
+  "update:includeLogicReview": [value: boolean];
 }>();
 
 const scanExpanded = ref(false);
 const verifyExpanded = ref(false);
 
+watch(
+  () => [props.phase, props.scanResult?.issues.length ?? 0] as const,
+  ([phase, issueCount]) => {
+    if ((phase === "no_work" || phase === "done") && issueCount > 0) {
+      scanExpanded.value = true;
+    }
+  },
+);
+
+watch(
+  () => props.verifyResult,
+  (result) => {
+    if (result && (!result.ok || (result.steps?.some(s => !s.ok && !s.skipped) ?? false))) {
+      verifyExpanded.value = true;
+    }
+  },
+);
+
 const includeWarnings = computed({
   get: () => props.includeWarnings,
   set: (v: boolean) => emit("update:includeWarnings", v),
+});
+
+const includeLogicReview = computed({
+  get: () => props.includeLogicReview,
+  set: (v: boolean) => emit("update:includeLogicReview", v),
 });
 
 const phaseLabel = computed(() => {
@@ -175,6 +250,7 @@ const phaseLabel = computed(() => {
     case "scanning": return "扫描中…";
     case "testing": return "测试中…";
     case "fixing": return "修复中…";
+    case "verifying": return "复验中…";
     default: return "处理中…";
   }
 });
@@ -183,16 +259,19 @@ const stepList = [
   { key: "scanning" as AutoBugFixPhase, label: "扫描" },
   { key: "testing" as AutoBugFixPhase, label: "测试" },
   { key: "fixing" as AutoBugFixPhase, label: "修复" },
+  { key: "verifying" as AutoBugFixPhase, label: "复验" },
   { key: "done" as AutoBugFixPhase, label: "完成" },
 ];
 
-const phaseOrder: AutoBugFixPhase[] = ["scanning", "testing", "fixing", "done", "no_work"];
+const phaseOrder: AutoBugFixPhase[] = ["scanning", "testing", "fixing", "verifying", "done", "no_work"];
 
 function stepClass(step: AutoBugFixPhase): string {
   const curIdx = phaseOrder.indexOf(props.phase);
   const stepIdx = phaseOrder.indexOf(step);
   if (props.phase === "error" || props.phase === "idle") return "fix-step";
-  return curIdx >= stepIdx ? "fix-step fix-step--active" : "fix-step";
+  if (curIdx === stepIdx) return "fix-step fix-step--active";
+  if (curIdx > stepIdx) return "fix-step fix-step--done";
+  return "fix-step";
 }
 
 function isStepActive(step: AutoBugFixPhase): boolean {
@@ -204,9 +283,10 @@ function isStepActive(step: AutoBugFixPhase): boolean {
 
 const progressValue = computed(() => {
   switch (props.phase) {
-    case "scanning": return 25;
-    case "testing": return 50;
-    case "fixing": return 75;
+    case "scanning": return 20;
+    case "testing": return 40;
+    case "fixing": return 60;
+    case "verifying": return 80;
     case "done":
     case "no_work": return 100;
     default: return 0;
@@ -247,6 +327,53 @@ const verifyDuration = computed(() => {
   if (!props.verifyResult?.durationMs) return "";
   return formatDuration(props.verifyResult.durationMs);
 });
+
+const verifyPassed = computed(() => {
+  if (!props.verifyResult || props.verifyResult.skipped) return false;
+  if (!props.verifyResult.ok) return false;
+  return (props.verifyResult.failingFiles?.length ?? 0) === 0;
+});
+
+const verifySteps = computed(() => props.verifyResult?.steps ?? []);
+
+const verifyCardTitle = computed(() => {
+  if (props.phase === "done" && props.postFixVerify) return "复验结果";
+  return verifySteps.value.length > 1 ? "验证结果" : "测试结果";
+});
+
+const verifyEnvironmentNote = computed(() => {
+  if (!props.verifyResult || props.verifyResult.skipped || !props.verifyResult.ok) return "";
+  return getVerifyEnvironmentNote(props.verifyResult);
+});
+
+const comparisonBadgeClass = computed(() => {
+  switch (props.verifyComparison?.kind) {
+    case "improved": return "fix-badge--ok";
+    case "worse": return "fix-badge--error";
+    default: return "fix-badge--info";
+  }
+});
+
+const comparisonBadgeLabel = computed(() => {
+  switch (props.verifyComparison?.kind) {
+    case "improved": return "已改善";
+    case "worse": return "可能回归";
+    case "unchanged": return "无变化";
+    default: return "对比";
+  }
+});
+
+function formatVerifyStatus(result: ProjectVerifyRunResult): string {
+  if (result.skipped) return "跳过";
+  if (result.ok) {
+    const fails = result.failingFiles?.length ?? 0;
+    return fails ? `通过（${fails} 个失败文件待确认）` : "通过";
+  }
+  const failCount = result.failingFiles?.length ?? 0;
+  return failCount
+    ? `失败 (exit ${result.exitCode}，${failCount} 个失败文件)`
+    : `失败 (exit ${result.exitCode})`;
+}
 </script>
 
 <style scoped>
@@ -355,6 +482,15 @@ const verifyDuration = computed(() => {
 .fix-btn--secondary { background: var(--surface-hover, #2a2d2e); border-color: var(--border, #333); }
 .fix-btn--secondary:hover { background: var(--accent, #0078d4); border-color: transparent; color: #fff; }
 .fix-btn--ghost { background: transparent; }
+.fix-btn--danger {
+  background: rgba(248, 81, 73, 0.12);
+  border-color: rgba(248, 81, 73, 0.35);
+  color: rgba(255, 180, 175, 0.98);
+}
+.fix-btn--danger:hover {
+  background: rgba(248, 81, 73, 0.22);
+  border-color: rgba(248, 81, 73, 0.5);
+}
 .fix-btn--block { width: 100%; }
 
 /* Spinner */
@@ -487,6 +623,24 @@ const verifyDuration = computed(() => {
 .fix-verify-pre--err { color: #e55; }
 .fix-verify-files { display: flex; flex-direction: column; gap: 2px; margin-top: 3px; }
 .fix-verify-file { font-size: 10px; font-family: monospace; padding: 1px 5px; }
+.fix-verify-steps { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
+.fix-verify-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.fix-verify-step-meta { font-size: 10px; color: var(--text-muted, #888); }
+.fix-verify-note {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--text-muted, #aaa);
+  line-height: 1.4;
+}
+.fix-badge--compact { font-size: 10px; padding: 1px 6px; }
+.fix-card--compare .fix-card-header { cursor: default; }
+.fix-compare-detail { margin: 0 0 6px; font-size: 12px; line-height: 1.4; }
+.fix-compare-row { font-size: 11px; line-height: 1.5; }
 
 /* Result */
 .fix-result { font-size: 12px; margin: 0; line-height: 1.4; color: var(--text-muted, #aaa); }

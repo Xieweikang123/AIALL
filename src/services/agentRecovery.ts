@@ -669,6 +669,11 @@ export function resolveAgentFailureBubbleContent(
     return `运行中断（已完成 ${turns} 轮${toolCount > 0 ? `，${toolCount} 个工具步骤` : ""}）${hint}，可点击「恢复运行」继续。`;
   }
 
+  const reason = (msg as { agentFailureReason?: string }).agentFailureReason?.trim();
+  if ((msg as { agentFailed?: boolean }).agentFailed && isNoFinalAnswerReason(reason || "")) {
+    return "运行未生成修复总结，可点击「恢复运行」继续，或重新发起扫描修复。";
+  }
+
   return direct;
 }
 

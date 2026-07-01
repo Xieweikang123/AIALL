@@ -96,17 +96,20 @@ export function isWriteAllowedForAutoBugFix(relativePath: string, targetFiles: s
 }
 
 /** System hint for one-click auto bug fix runs. */
-export function buildAutomatedBugFixHint(verifyScript?: string): string {
+export function buildAutomatedBugFixHint(verifyScript?: string, includeLogicReview = false): string {
   const verifyLine = verifyScript
     ? `修复后须 run_command \`${verifyScript}\` 复验；`
     : "修复后须 run_command 复验或 read_file 核对；";
+  const writeLine = includeLogicReview
+    ? `单轮最多修改 ${MAX_AUTO_BUG_FIX_WRITES} 个文件；逻辑审查项须 read 确认，无清单路径时可从入口探索。`
+    : `单轮最多修改 ${MAX_AUTO_BUG_FIX_WRITES} 个文件；仅可 patch 目标清单内路径。`;
   return [
     "",
-    "【一键自动修复】",
+    "【扫描与测试修复】",
     "仅修复任务清单内项；禁止重构、重命名、格式化或改无关文件。",
     "流程：read_file 核实 → patch_file（局部优先）→ " + verifyLine,
     "grep 圈定项须 read 确认；误报跳过并说明。",
-    `单轮最多修改 ${MAX_AUTO_BUG_FIX_WRITES} 个文件；仅可 patch 目标清单内路径。`,
+    writeLine,
   ].join("\n");
 }
 
@@ -498,6 +501,15 @@ export function buildEmptyReplyRetryNudge(): string {
     "【系统强制】上一轮未输出任何面向用户的有效正文（空回复或仅空白）。",
     "请用中文写出完整结论：做了什么、验证了什么、用户下一步如何测试；若任务未完成，说明阻塞点与所需信息。",
     "禁止无正文结束；若仍需工具，先写 1–2 句进度摘要再调用。",
+  ].join("");
+}
+
+/** Empty final reply during automated scan-and-fix — require structured summary. */
+export function buildAutoBugFixEmptyReplyNudge(): string {
+  return [
+    "【系统强制·扫描修复】禁止空回复结束。",
+    "须用中文输出修复总结，至少包含：① 已修复项（文件+问题）② 跳过/待验证项 ③ 是否已 run_command 复验及结果。",
+    "若无须修改：说明审查范围与结论；若仍须工具，先写 1–2 句进度再调用。",
   ].join("");
 }
 

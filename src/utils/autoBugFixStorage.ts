@@ -1,6 +1,7 @@
 import type { AutoBugFixPhase } from "../composables/useAutoBugFix";
 import type { ProjectHealthScanResult } from "../services/projectHealthScanClient";
 import type { ProjectVerifyRunResult } from "../services/projectVerifyRunClient";
+import type { VerifyRegressionKind } from "../../shared/projectVerifyRun";
 import { lsGetJson, lsRemove, lsSetJson } from "./localStorageSafe";
 
 /** Persist auto bug fix UI across page refresh (per project). */
@@ -22,8 +23,13 @@ export type PersistedAutoBugFixVerify = Pick<
 export type PersistedAutoBugFixState = {
   phase: AutoBugFixPhase;
   scanResult?: ProjectHealthScanResult | null;
+  /** Latest verify snapshot shown in the panel (baseline before fix, post-fix after rerun). */
   verifyResult?: PersistedAutoBugFixVerify | null;
+  baselineVerify?: PersistedAutoBugFixVerify | null;
+  postFixVerify?: PersistedAutoBugFixVerify | null;
+  verifyComparison?: { kind: VerifyRegressionKind; detail: string } | null;
   includeWarnings?: boolean;
+  includeLogicReview?: boolean;
   lastSummary?: string;
   error?: string;
   assistantMsgId?: string;
@@ -79,6 +85,9 @@ export function writeAutoBugFixState(
   lsSetJson(autoBugFixStorageKey(projectPath), {
     ...state,
     verifyResult: state.verifyResult ?? null,
+    baselineVerify: state.baselineVerify ?? null,
+    postFixVerify: state.postFixVerify ?? null,
+    verifyComparison: state.verifyComparison ?? null,
     savedAt: Date.now(),
   });
 }
@@ -92,7 +101,11 @@ export function buildPersistedAutoBugFixState(input: {
   phase: AutoBugFixPhase;
   scanResult: ProjectHealthScanResult | null;
   verifyResult: ProjectVerifyRunResult | null;
+  baselineVerify?: ProjectVerifyRunResult | null;
+  postFixVerify?: ProjectVerifyRunResult | null;
+  verifyComparison?: { kind: VerifyRegressionKind; detail: string } | null;
   includeWarnings: boolean;
+  includeLogicReview: boolean;
   lastSummary: string;
   error: string;
   assistantMsgId?: string;
@@ -102,7 +115,11 @@ export function buildPersistedAutoBugFixState(input: {
     phase: input.phase,
     scanResult: input.scanResult,
     verifyResult: slimVerifyResult(input.verifyResult),
+    baselineVerify: slimVerifyResult(input.baselineVerify ?? null),
+    postFixVerify: slimVerifyResult(input.postFixVerify ?? null),
+    verifyComparison: input.verifyComparison ?? null,
     includeWarnings: input.includeWarnings,
+    includeLogicReview: input.includeLogicReview,
     lastSummary: input.lastSummary,
     error: input.error,
     assistantMsgId: input.assistantMsgId,

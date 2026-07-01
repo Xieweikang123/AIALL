@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAutoBugFixPrompt,
+  buildAutoBugFixNoWorkSummary,
   collectAutoBugFixTargetFiles,
   needsAutoBugFix,
 } from "./autoBugFixPrompt";
@@ -51,7 +52,7 @@ const baseScan: ProjectHealthScanPayload = {
 const failingVerify: ProjectVerifyRunPayload = {
   projectPath: "/proj",
   command: "npm run test",
-  ok: true,
+  ok: false,
   exitCode: 1,
   durationMs: 100,
   stdout: "FAIL src/app.test.ts",
@@ -83,15 +84,39 @@ describe("autoBugFixPrompt", () => {
     expect(files).not.toContain("src/todo.ts");
   });
 
+  it("includeLogicReview adds section and marker", () => {
+    const okVerify: ProjectVerifyRunPayload = {
+      ...failingVerify,
+      ok: true,
+      exitCode: 0,
+      failingFiles: [],
+      stdout: "ok",
+    };
+    const cleanScan = { ...baseScan, issues: [], summary: { errorCount: 0, warningCount: 0, infoCount: 0 } };
+    expect(needsAutoBugFix(cleanScan, okVerify, "tests_and_errors", true)).toBe(true);
+    const prompt = buildAutoBugFixPrompt({
+      scan: baseScan,
+      verifyRun: okVerify,
+      includeLogicReview: true,
+    });
+    expect(prompt).toContain("[AUTO_BUG_FIX_LOGIC_REVIEW]");
+    expect(prompt).toContain("## 逻辑审查");
+    expect(prompt).toContain("竞态");
+  });
+
   it("needsAutoBugFix false when all clear", () => {
     const okVerify: ProjectVerifyRunPayload = {
       ...failingVerify,
+      ok: true,
       exitCode: 0,
       failingFiles: [],
       stdout: "ok",
     };
     const cleanScan = { ...baseScan, issues: [], summary: { errorCount: 0, warningCount: 0, infoCount: 0 } };
     expect(needsAutoBugFix(cleanScan, okVerify)).toBe(false);
+    expect(buildAutoBugFixNoWorkSummary(cleanScan, okVerify)).toContain("规则扫描未发现匹配项");
+    expect(buildAutoBugFixNoWorkSummary(baseScan, okVerify)).toContain("1 error");
+    expect(buildAutoBugFixNoWorkSummary(baseScan, okVerify)).toContain("warning/info 默认不自动修复");
   });
 });
 

@@ -176,6 +176,23 @@ describe("evaluateFinishGate", () => {
     expect(result.blocked).toBe(false);
   });
 
+  it("blocks automated bug fix with empty summary", () => {
+    const stage = createWriteStage();
+    const result = evaluateFinishGate({
+      rawContent: "   ",
+      writeStage: stage,
+      isReadOnlyAgent: false,
+      isPlanExplore: false,
+      readOnlyBuildRun: false,
+      isExecutePlan: true,
+      implementFollowUpRun: false,
+      automatedBugFixRun: true,
+    });
+
+    expect(result.blocked).toBe(true);
+    expect(result.violations.some((v) => v.code === "empty_summary")).toBe(true);
+  });
+
   it("does not require removed symbols to appear in diff (must_exclude)", () => {
     const stage = createWriteStage();
     stage.files.set("src/config.ts", "export const Other = 1;\n");

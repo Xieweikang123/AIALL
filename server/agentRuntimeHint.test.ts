@@ -62,6 +62,16 @@ describe("agentRuntimeHint", () => {
 
     const withTestOnly = makeProject({ test: "vitest run" }, false);
     expect(detectProjectRuntimeProfile(withTestOnly).verifyScript).toBe("npm run test");
+
+    const withPipeline = makeProject(
+      { typecheck: "vue-tsc --noEmit", lint: "eslint .", test: "vitest run" },
+      false,
+    );
+    expect(detectProjectRuntimeProfile(withPipeline).verifyScripts).toEqual([
+      "npm run typecheck",
+      "npm run lint",
+      "npm run test",
+    ]);
   });
 
   it("builds PowerShell shell hint on Windows", () => {

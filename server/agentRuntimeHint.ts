@@ -6,20 +6,32 @@ export type ProjectRuntimeProfile = {
   hasDesktopShell: boolean;
   webDevScript?: string;
   desktopDevScript?: string;
-  /** npm script for post-change verification (typecheck / lint / test), if detectable. */
+  /** First npm verify script (backward compat for single-command hints). */
   verifyScript?: string;
+  /** All verify scripts to run in order (typecheck → check → lint → test). */
+  verifyScripts?: string[];
 };
 
 const VERIFY_SCRIPT_NAMES = ["typecheck", "check", "lint", "test"] as const;
 
-function resolveVerifyScript(scripts: Record<string, string>): string | undefined {
+export function resolveVerifyScripts(scripts: Record<string, string>): string[] {
+  const commands: string[] = [];
   for (const name of VERIFY_SCRIPT_NAMES) {
-    if (scripts[name]) return `npm run ${name}`;
+    if (scripts[name]) commands.push(`npm run ${name}`);
   }
-  const build = scripts.build ?? "";
-  if (/\bvue-tsc\b/.test(build) && /--noEmit/.test(build)) return "npx vue-tsc --noEmit";
-  if (/\btsc\b/.test(build) && /--noEmit/.test(build)) return "npx tsc --noEmit";
-  return undefined;
+  if (!commands.length) {
+    const build = scripts.build ?? "";
+    if (/\bvue-tsc\b/.test(build) && /--noEmit/.test(build)) {
+      commands.push("npx vue-tsc --noEmit");
+    } else if (/\btsc\b/.test(build) && /--noEmit/.test(build)) {
+      commands.push("npx tsc --noEmit");
+    }
+  }
+  return commands;
+}
+
+function resolveVerifyScript(scripts: Record<string, string>): string | undefined {
+  return resolveVerifyScripts(scripts)[0];
 }
 
 /** Structural detection from package.json scripts + desktop shell folder — topic-agnostic. */
@@ -28,6 +40,7 @@ export function detectProjectRuntimeProfile(projectRoot: string): ProjectRuntime
   let webDevScript: string | undefined;
   let desktopDevScript: string | undefined;
   let verifyScript: string | undefined;
+  let verifyScripts: string[] | undefined;
   try {
     const pkgPath = path.join(projectRoot, "package.json");
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8")) as { scripts?: Record<string, string> };
@@ -35,11 +48,12 @@ export function detectProjectRuntimeProfile(projectRoot: string): ProjectRuntime
     if (scripts.dev) webDevScript = "npm run dev";
     if (scripts["tauri:dev"]) desktopDevScript = "npm run tauri:dev";
     if (scripts["electron:dev"]) desktopDevScript = "npm run electron:dev";
-    verifyScript = resolveVerifyScript(scripts);
+    verifyScripts = resolveVerifyScripts(scripts);
+    verifyScript = verifyScripts[0];
   } catch {
     /* ignore missing or invalid package.json */
   }
-  return { hasDesktopShell, webDevScript, desktopDevScript, verifyScript };
+  return { hasDesktopShell, webDevScript, desktopDevScript, verifyScript, verifyScripts };
 }
 
 /** Shell syntax for run_command — Windows uses PowerShell, not bash. */

@@ -424,7 +424,7 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
       });
       onEvent({
         type: "error",
-        data: { message: "一键修复已达时间上限（10 分钟），任务可能未完成。" },
+        data: { message: "扫描修复已达时间上限（10 分钟），任务可能未完成。" },
       });
       onEvent({ type: "done", data: buildDoneData(ctx.writeStage, turn, ctx.outputTruncated) });
       return;

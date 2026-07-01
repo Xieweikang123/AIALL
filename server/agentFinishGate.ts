@@ -1,6 +1,6 @@
 import type { WriteStage } from "./agentToolExecutor";
 import { isProductiveWritePath } from "./agentExplorationBudget";
-import { claimsWriteCompletion, sanitizeAgentUserVisibleText } from "./agentExploreGuard";
+import { claimsWriteCompletion, isEmptyOrInsufficientFinalReply, sanitizeAgentUserVisibleText } from "./agentExploreGuard";
 import { detectTaskAnchorPolarity } from "../src/orchestration/generic/quotedAmendIntent";
 
 export type FinishGateViolation = {
@@ -11,7 +11,8 @@ export type FinishGateViolation = {
     | "task_anchor_miss"
     | "task_anchor_still_present"
     | "verify_not_run"
-    | "verify_regression";
+    | "verify_regression"
+    | "empty_summary";
   detail: string;
 };
 
@@ -272,7 +273,7 @@ export function evaluateFinishGate(input: FinishGateInput): FinishGateResult {
   ) {
     violations.push({
       code: "verify_not_run",
-      detail: "一键修复须在宣称完成前成功 run_command 执行 verify 脚本",
+      detail: "扫描修复须在宣称完成前成功 run_command 执行 verify 脚本",
     });
   }
 
@@ -280,6 +281,16 @@ export function evaluateFinishGate(input: FinishGateInput): FinishGateResult {
     violations.push({
       code: "verify_regression",
       detail: "最近一次 verify 命令仍失败，不可宣称修复完成",
+    });
+  }
+
+  if (
+    input.automatedBugFixRun &&
+    isEmptyOrInsufficientFinalReply(sanitizeAgentUserVisibleText(input.rawContent))
+  ) {
+    violations.push({
+      code: "empty_summary",
+      detail: "扫描修复结束前须输出中文总结（已修复项 / 跳过项 / 复验结果）；禁止空回复结束",
     });
   }
 

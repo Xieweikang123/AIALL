@@ -40,6 +40,7 @@ import {
 } from "./agentExplorationBudget";
 import { detectProjectRuntimeProfile, buildRuntimeAwarenessHint, buildShellAwarenessHint } from "./agentRuntimeHint";
 import { stripQuotedReplyPrefix } from "../src/services/agentContinuation";
+import { AUTO_BUG_FIX_LOGIC_REVIEW_MARKER } from "../shared/autoBugFixPrompt";
 import {
   buildExecutePlanSystemHint,
   buildTargetFileManifest,
@@ -500,7 +501,12 @@ export async function buildAgentContext(
   const systemPrompt = consultativeUiAppearanceRun
     ? `${systemPromptCore}\n${runtimeAwarenessBlock}`
     : `${systemPromptCore}${projectContextBlock}${gitSnapshotBlock}${agentsGuideBlock}${projectSkillsBlock}${projectMemoryBlock}${projectKnowledgeBlock}${exploreKnowledgeContextBlock}${explorationArchiveBlock}${runtimeAwarenessBlock}${
-        runPolicy.automatedBugFixRun ? buildAutomatedBugFixHint(runtimeProfile.verifyScript) : ""
+        runPolicy.automatedBugFixRun ? buildAutomatedBugFixHint(
+          runtimeProfile.verifyScripts?.length
+            ? runtimeProfile.verifyScripts.join("; ")
+            : runtimeProfile.verifyScript,
+          prompt.includes(AUTO_BUG_FIX_LOGIC_REVIEW_MARKER),
+        ) : ""
       }`;
 
   const injectedKeyFilePaths = projectContextOrNull?.ok

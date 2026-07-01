@@ -354,7 +354,7 @@ export function isToolResultFailure(result: string): boolean {
 
 /** Intentional guard/validation — agent should adapt; still counts toward explore budget. */
 const AGENT_TOOL_GUARD_FAILURE_RE =
-  /^错误：(缺少|不是(?:目录|文件)|路径|无效|未知工具|请先 read_file|已连续|grep「|读图|已确认|不允许|不支持|Ask 模式|Explore 模式|规划模式|咨询只读|一键修复)/;
+  /^错误：(缺少|不是(?:目录|文件)|路径|无效|未知工具|请先 read_file|已连续|grep「|读图|已确认|不允许|不支持|Ask 模式|Explore 模式|规划模式|咨询只读|扫描修复|一键修复)/;
 
 /** Environment/runtime failure (ReferenceError, CLI crash, etc.) — not agent mis-exploration. */
 export function isSystemRuntimeToolFailure(result: string): boolean {

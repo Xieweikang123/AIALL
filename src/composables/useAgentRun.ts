@@ -1541,6 +1541,43 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
     commitAgentFinalAnswerIfMissing(assistantMsg, completedTurns, assistantMsg.agentMaxTurns);
 
+    const autoBugFixOriginalPrompt = resolveOriginalUserPrompt(assistantMsg.id) ?? "";
+    const isAutoBugFixRun = autoBugFixOriginalPrompt.includes("[AUTO_BUG_FIX]");
+    if (
+      isAutoBugFixRun &&
+      !wasAborted &&
+      !assistantMsg.agentFailed &&
+      !hasAgentFinalAnswer(assistantMsg)
+    ) {
+      handleRecoverableInterruption(sessionId, assistantMsg, "运行中断（未生成最终回复）", {
+        logStatus: true,
+        noAutoResume: true,
+      });
+      assistantMsg.content = resolveAgentFailureBubbleContent(assistantMsg);
+      if (!assistantMsg.content?.trim()) {
+        assistantMsg.content = "运行未生成修复总结，可点击「恢复运行」继续，或重新发起扫描修复。";
+      }
+      flushMinimizedRunUiPatch(sessionId, msgId, assistantMsg);
+      patchAssistantMsg(msgId, {
+        ...buildRunUiFullPatch(assistantMsg),
+        content: assistantMsg.content,
+        agentFailed: assistantMsg.agentFailed,
+        agentRecoverable: assistantMsg.agentRecoverable,
+        agentFailureReason: assistantMsg.agentFailureReason,
+        agentFailureDetail: assistantMsg.agentFailureDetail,
+        agentRecoveryDismissed: assistantMsg.agentRecoveryDismissed,
+        totalTurns: assistantMsg.totalTurns,
+        activityExpanded: true,
+      });
+      persistChatNow(undefined, { flushStore: true });
+      finishRunSession(sessionId);
+      void scrollChatToBottom();
+      void maybePersistPlanFileToDisk(assistantMsg, msgId, { wasExecutePlanRun, wasAborted }).then(() => {
+        onAgentRunSettled?.(assistantMsg);
+      });
+      return;
+    }
+
     if (!wasAborted && hadProgress && !hasAgentFinalAnswer(assistantMsg)) {
       const rateLimitHint = extractRateLimitHintFromStatusLog(assistantMsg.statusLog);
       if (rateLimitHint && trySilentContinue(sessionId, assistantMsg, rateLimitHint)) {
@@ -2345,9 +2382,12 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     prompt: string;
     userBubbleContent: string;
     runProfile: AgentRunProfile;
+    sessionId: string;
   }): Promise<{ ok: boolean; assistantMsgId?: string }> {
     chatMode.value = "build";
+    const sessionId = params.sessionId.trim();
     const ok = await runAgentTurn(params.prompt, {
+      sessionId,
       userBubbleContent: params.userBubbleContent,
       runProfileOverride: params.runProfile,
       forceBuildMode: true,

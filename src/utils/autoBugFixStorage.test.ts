@@ -53,6 +53,7 @@ describe("autoBugFixStorage", () => {
         ranAt: "2026-01-01T00:00:01Z",
       },
       includeWarnings: false,
+      includeLogicReview: false,
       lastSummary: "修复中",
       error: "",
       assistantMsgId: "a1",
@@ -64,6 +65,46 @@ describe("autoBugFixStorage", () => {
     expect(restored?.assistantMsgId).toBe("a1");
     expect(restored?.verifyResult?.command).toBe("npm test");
     expect(restored?.verifyResult).not.toHaveProperty("stdout");
+  });
+
+  it("persists baseline, post-fix verify, and comparison separately", () => {
+    const project = "D:/project/qux";
+    const baseline = {
+      ok: false,
+      projectPath: project,
+      command: "npm run test",
+      exitCode: 1,
+      durationMs: 100,
+      stdout: "fail",
+      stderr: "",
+      failingFiles: ["src/foo.test.ts"],
+      ranAt: "2026-01-01T00:00:00Z",
+    };
+    const postFix = {
+      ...baseline,
+      ok: true,
+      exitCode: 0,
+      failingFiles: [] as string[],
+      ranAt: "2026-01-01T00:00:01Z",
+    };
+    writeAutoBugFixState(project, buildPersistedAutoBugFixState({
+      phase: "done",
+      scanResult: null,
+      verifyResult: postFix,
+      baselineVerify: baseline,
+      postFixVerify: postFix,
+      verifyComparison: { kind: "improved", detail: "复验通过，基线曾失败" },
+      includeWarnings: false,
+      includeLogicReview: false,
+      lastSummary: "复验已改善",
+      error: "",
+    }));
+
+    const restored = readAutoBugFixState(project);
+    expect(restored?.baselineVerify?.ok).toBe(false);
+    expect(restored?.postFixVerify?.ok).toBe(true);
+    expect(restored?.verifyComparison?.kind).toBe("improved");
+    expect(restored?.verifyResult?.ok).toBe(true);
   });
 
   it("expires stale state", () => {
@@ -87,6 +128,7 @@ describe("autoBugFixStorage", () => {
       scanResult: null,
       verifyResult: null,
       includeWarnings: false,
+      includeLogicReview: false,
       lastSummary: "",
       error: "",
     }));

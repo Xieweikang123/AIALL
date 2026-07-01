@@ -1,31 +1,50 @@
 import { backendUrl } from "./backendBase";
 import { formatFetchError, readJsonResponse } from "./vibeCodingClient";
-import type { ProjectVerifyRunPayload } from "../../shared/projectVerifyRun";
+import {
+  isVerifyRunRequestFailed,
+  type ProjectVerifyRunPayload,
+} from "../../shared/projectVerifyRun";
 
 export type ProjectVerifyRunResult = ProjectVerifyRunPayload & {
-  ok: boolean;
   error?: string;
 };
 
+function emptyVerifyResult(projectPath: string, error: string): ProjectVerifyRunResult {
+  return {
+    ok: false,
+    error,
+    projectPath,
+    command: "",
+    exitCode: -1,
+    durationMs: 0,
+    stdout: "",
+    stderr: "",
+    failingFiles: [],
+    ranAt: "",
+  };
+}
+
 export async function fetchProjectVerifyRun(projectPath: string): Promise<ProjectVerifyRunResult> {
   const trimmed = projectPath.trim();
-  if (!trimmed) return { ok: false, error: "缺少 projectPath" } as ProjectVerifyRunResult;
+  if (!trimmed) return emptyVerifyResult("", "缺少 projectPath");
   try {
     const url = backendUrl(
       `/backend/vibe/project-verify-run?projectPath=${encodeURIComponent(trimmed)}`,
     );
     const response = await fetch(url, { method: "POST" });
-    const data = await readJsonResponse<ProjectVerifyRunPayload & { ok?: boolean; error?: string }>(response);
-    if (data.ok === false || data.error) {
-      return { ok: false, error: data.error || "项目验证运行失败" } as ProjectVerifyRunResult;
+    const data = await readJsonResponse<ProjectVerifyRunPayload & { error?: string }>(response);
+    if (isVerifyRunRequestFailed(data) || (!response.ok && !data.ranAt)) {
+      return emptyVerifyResult(trimmed, data.error || "项目验证运行失败");
     }
-    return { ...data, ok: true };
+    return data;
   } catch (error) {
-    return {
-      ok: false,
-      error: formatFetchError(error, "项目验证运行失败"),
-    } as ProjectVerifyRunResult;
+    return emptyVerifyResult(trimmed, formatFetchError(error, "项目验证运行失败"));
   }
 }
 
-export { compareVerifyRuns } from "../../shared/projectVerifyRun";
+export {
+  compareVerifyRuns,
+  formatVerifyComparisonSummary,
+  getVerifyEnvironmentNote,
+  isVerifyRunRequestFailed,
+} from "../../shared/projectVerifyRun";

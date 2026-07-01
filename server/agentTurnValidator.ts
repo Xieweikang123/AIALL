@@ -15,6 +15,7 @@ import {
 import { buildAgentStepClarifyContinueHint } from "../src/orchestration/product/userIntentHints";
 import {
   buildEmptyReplyRetryNudge,
+  buildAutoBugFixEmptyReplyNudge,
   buildPrematureCompletionRetryNudge,
   buildPatchFailureCompletionRetryNudge,
   buildPatchAnchorForcePatchNudge,
@@ -218,10 +219,14 @@ export async function validateAgentResponse(
   }
 
   // ── 12c: Empty reply retry ──
-  if (isEmptyOrInsufficientFinalReply(rawContent) && ctx.emptyReplyRetries < 2) {
+  const emptyReplyLimit = automatedBugFixRun ? 5 : 2;
+  if (isEmptyOrInsufficientFinalReply(rawContent) && ctx.emptyReplyRetries < emptyReplyLimit) {
     ctx.emptyReplyRetries += 1;
     ctx.messages.push({ role: "assistant", content: rawContent });
-    ctx.messages.push({ role: "system", content: buildEmptyReplyRetryNudge(ctx.emptyReplyRetries) });
+    ctx.messages.push({
+      role: "system",
+      content: automatedBugFixRun ? buildAutoBugFixEmptyReplyNudge() : buildEmptyReplyRetryNudge(),
+    });
     onEvent({
       type: "turn_response",
       data: {
@@ -668,7 +673,9 @@ export async function validateAgentResponse(
       targetFiles,
       taskPrompt,
       automatedBugFixRun,
-      verifyScriptAvailable: Boolean(runtimeProfile?.verifyScript),
+      verifyScriptAvailable: Boolean(
+        runtimeProfile?.verifyScripts?.length || runtimeProfile?.verifyScript,
+      ),
       lastVerifyRunSucceeded: ctx.lastVerifyRunSucceeded,
     });
     if (finishGate.blocked) {

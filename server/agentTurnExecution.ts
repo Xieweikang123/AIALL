@@ -32,6 +32,7 @@ import { extractJobClassNamesFromReadPaths } from "../src/services/agentStructur
 import { detectProjectRuntimeProfile } from "./agentRuntimeHint";
 import { buildPostPatchVerifyNudge } from "./agentExplorationBudget";
 import { resetExploreOnProductiveWrite, markExploreOnlyTurn, forceAnchorOnNoProductiveWrite, markStructuredAssetAcquired, resetStructuredAssetTracking, trackEphemeralProbeWrite, trackEphemeralProbeDelete } from "./agentTurnContext";
+import { isVerifyRunCommand } from "../shared/projectVerifyRun";
 import {
   buildAskExploreBudgetNudge,
   buildAskForceAnswerNudge,
@@ -96,6 +97,14 @@ export async function runTurnExecution(
     automatedBugFixRun,
   } = p;
   const targetFiles = cfg.runProfile.targetFiles ?? [];
+  const autoBugFixRuntimeProfile = automatedBugFixRun
+    ? detectProjectRuntimeProfile(projectRoot)
+    : null;
+  const verifyScriptsForRun = autoBugFixRuntimeProfile?.verifyScripts?.length
+    ? autoBugFixRuntimeProfile.verifyScripts
+    : autoBugFixRuntimeProfile?.verifyScript
+      ? [autoBugFixRuntimeProfile.verifyScript]
+      : [];
 
   // ── Block 13: Tool preamble processing ──
   if (visibleContent.trim() && toolCalls.length > 0) {
@@ -155,19 +164,27 @@ export async function runTurnExecution(
       (toolName === "patch_file" || toolName === "write_file" || toolName === "delete_file")
     ) {
       const filePath = String(toolArgs.path || "").trim();
-      if (toolName !== "delete_file" && ctx.autoBugFixWriteCount >= MAX_AUTO_BUG_FIX_WRITES) {
-        return {
-          call,
-          result: `错误：一键修复已达写入上限（${MAX_AUTO_BUG_FIX_WRITES} 个文件），请 run_command 复验或输出总结。`,
-          pendingDiff: null,
-        };
+      if (toolName !== "delete_file" && filePath) {
+        const guardResolved = resolveProjectPath(projectRoot, filePath);
+        if (
+          guardResolved.ok
+          && isProductiveWritePath(guardResolved.relative)
+          && !ctx.autoBugFixWrittenFiles.has(guardResolved.relative)
+          && ctx.autoBugFixWrittenFiles.size >= MAX_AUTO_BUG_FIX_WRITES
+        ) {
+          return {
+            call,
+            result: `错误：扫描修复已达写入上限（${MAX_AUTO_BUG_FIX_WRITES} 个文件），请 run_command 复验或输出总结。`,
+            pendingDiff: null,
+          };
+        }
       }
       if (filePath) {
         const guardResolved = resolveProjectPath(projectRoot, filePath);
         if (guardResolved.ok && !isWriteAllowedForAutoBugFix(guardResolved.relative, targetFiles)) {
           return {
             call,
-            result: `错误：一键修复不允许修改 ${guardResolved.relative}（不在目标文件清单内）。`,
+            result: `错误：扫描修复不允许修改 ${guardResolved.relative}（不在目标文件清单内）。`,
             pendingDiff: null,
           };
         }
@@ -265,8 +282,20 @@ export async function runTurnExecution(
         recordPatchFailure(ctx, turn, String(args.path || ""), outcome.result.slice(0, 200));
       } catch { /* ignore */ }
     }
-    if (automatedBugFixRun && toolName === "run_command") {
-      ctx.lastVerifyRunSucceeded = !isToolResultFailure(outcome.result);
+    if (automatedBugFixRun && toolName === "run_command" && verifyScriptsForRun.length) {
+      try {
+        const args = parseToolArgs(outcome.call.function.arguments || "{}");
+        const cmd = String(args.command ?? args.cmd ?? "").trim();
+        if (!cmd || !isVerifyRunCommand(cmd, verifyScriptsForRun)) return;
+        const succeeded = !isToolResultFailure(outcome.result);
+        const lastVerifyScript = verifyScriptsForRun[verifyScriptsForRun.length - 1];
+        const isFinalVerifyStep = isVerifyRunCommand(cmd, [lastVerifyScript]);
+        if (!succeeded) {
+          ctx.lastVerifyRunSucceeded = false;
+        } else if (isFinalVerifyStep) {
+          ctx.lastVerifyRunSucceeded = true;
+        }
+      } catch { /* ignore */ }
     }
     if (
       automatedBugFixRun &&
@@ -277,7 +306,7 @@ export async function runTurnExecution(
         const args = parseToolArgs(outcome.call.function.arguments || "{}");
         const rel = String(args.path || "").replace(/\\/g, "/").trim();
         if (rel && isProductiveWritePath(rel)) {
-          ctx.autoBugFixWriteCount += 1;
+          ctx.autoBugFixWrittenFiles.add(rel);
         }
       } catch { /* ignore */ }
     }

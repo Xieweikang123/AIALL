@@ -222,7 +222,7 @@ describe("resolveUserIntent", () => {
   });
 
   it("rules consultative wins over AI implementFollowUp on evaluative prompts", () => {
-    const prompt = '"自动找 Bug 并修复" 功能，你觉得如何？';
+    const prompt = '"扫描与测试修复" 功能，你觉得如何？';
     const merged = resolveUserIntent({
       prompt,
       mode: "build",
