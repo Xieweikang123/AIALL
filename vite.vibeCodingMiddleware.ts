@@ -1001,6 +1001,7 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
         userIntent?: string;
       };
       executionMode?: boolean;
+      taskWrittenFiles?: string[];
     };
 
     try {
@@ -1103,6 +1104,9 @@ export function registerVibeCodingMiddleware(middlewares: Connect.Server) {
               ? { kind: "execute_plan" }
               : undefined,
         executionMode: body.executionMode === true,
+        taskWrittenFiles: Array.isArray(body.taskWrittenFiles)
+          ? body.taskWrittenFiles.map((p) => String(p).trim()).filter(Boolean)
+          : undefined,
         signal: controller.signal,
         onEvent: (event) => {
           try {

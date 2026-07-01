@@ -3,6 +3,7 @@
  * Shape / syntax / history structure only. No build*Hint strings (see product/userIntentHints).
  */
 import { stripQuotedReplyPrefix } from "../../services/agentContinuation";
+import { extractAmendBody } from "./quotedAmendIntent";
 import {
   assistantProvidedCodeLocationEvidence,
   PRIOR_DEFINITION_LISTING_RE,
@@ -112,6 +113,14 @@ const UI_DEFECT_REPORT_RE =
 const UI_DEFECT_SUBJECT_RE =
   /按钮|控件|布局|位置|样式|界面|面板|输入框|弹窗|浮动|图标/i;
 
+const UI_AESTHETIC_FEEDBACK_RE =
+  /(?:不|真|太|好|看着|也)?(?:好看|美观|顺眼|丑|乱|糙|简陋|挤|土)/;
+
+const BULK_EXECUTE_PROMPT_RE =
+  /^(?:请?)?(?:全部|都|通通)(?:执行|落地|改|做|应用)|^按(?:上面|此|方案|推荐)(?:全部)?(?:执行|改|做)/i;
+
+const NUMBERED_OPTION_BODY_RE = /^[1-9]\d?(?:[.、)]\s*)?$/;
+
 const STEP_CLARIFICATION_RE = /啥意思|什么意思|啥是|是什么|干吗|干嘛|怎么理解|confirm\s*啥|确认.*(?:啥|什么)/i;
 
 const CODE_REVIEW_PROMPT_RE =
@@ -158,10 +167,43 @@ export function isScreenshotVisibilityPrompt(prompt: string): boolean {
   return /能看到|看见|看清|看到.*问题|截图.*问题|问题.*截图/i.test(text);
 }
 
+export function isUiAestheticFeedbackPrompt(prompt: string): boolean {
+  const text = prompt.trim();
+  if (!text || text.length > 24) return false;
+  return UI_AESTHETIC_FEEDBACK_RE.test(text);
+}
+
+export function historyOffersNumberedImplementOptions(
+  history?: UserIntentHistoryMessage[],
+): boolean {
+  const last = (history ?? [])
+    .filter((m) => m.role === "assistant")
+    .slice(-1)[0]?.content;
+  if (!last?.trim()) return false;
+  if (/需要我(?:实际)?执行|请确认优先级|我可以逐个|逐个 patch/i.test(last)) return true;
+  if (/^\s*\|\s*[#№]?/m.test(last) && /优先级|修改项|优化项/i.test(last)) return true;
+  if (/^\s*[1-9][.、)]/m.test(last) && /建议|方案|改造/i.test(last)) return true;
+  return false;
+}
+
+export function isNumberedImplementSelection(
+  prompt: string,
+  history?: UserIntentHistoryMessage[],
+): boolean {
+  const body = extractAmendBody(prompt.trim()) || prompt.trim();
+  if (!NUMBERED_OPTION_BODY_RE.test(body)) return false;
+  return historyOffersNumberedImplementOptions(history) || historySuggestsActiveImplementation(history);
+}
+
+export function isBulkExecutePrompt(prompt: string): boolean {
+  return BULK_EXECUTE_PROMPT_RE.test(prompt.trim());
+}
+
 export function isUiDefectReportPrompt(prompt: string, hasImage = false): boolean {
   const text = prompt.trim();
   if (!text) return false;
   if (hasImage && isScreenshotVisibilityPrompt(text)) return true;
+  if (hasImage && isUiAestheticFeedbackPrompt(text)) return true;
   return UI_DEFECT_REPORT_RE.test(text) && UI_DEFECT_SUBJECT_RE.test(text);
 }
 
@@ -228,7 +270,7 @@ export function historySuggestsActiveImplementation(history?: UserIntentHistoryM
     .join("\n");
   if (!text.trim()) return false;
   if (historySuggestsQuotePositionFix(history)) return true;
-  return /(?:改吧|实现吧|执行吧|继续改|动手吧|patch_file|write_file|已修改|修改方案|实施计划|下一步需要|部分改好|未完成|须改代码|让我完成|剩余(?:的)?实现)/i.test(
+  return /(?:改吧|实现吧|执行吧|继续改|动手吧|patch_file|write_file|已修改|修改方案|实施计划|下一步需要|部分改好|未完成|须改代码|让我完成|剩余(?:的)?实现|需要我(?:实际)?执行|请确认优先级)/i.test(
     text,
   );
 }
@@ -242,6 +284,8 @@ export function isImplementFollowUpRun(
   const text = prompt.trim();
   if (!text) return false;
   if (!historySuggestsActiveImplementation(history)) return false;
+  if (isBulkExecutePrompt(text)) return true;
+  if (isNumberedImplementSelection(text, history)) return true;
   if (isShortImplementPrompt(text)) return true;
   if (CONTINUE_IMPLEMENT_PROMPT_RE.test(text)) return true;
   if (isImplementationFailureReportPrompt(text)) return true;
