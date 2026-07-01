@@ -29,6 +29,7 @@ import {
   isCodeReviewPrompt,
   isAccuracyConsultativePrompt,
   isConsultativeUserPrompt,
+  isEvaluativeOpinionPrompt,
   isEnumerationCountQuestionPrompt,
   isExternalApiLookupPrompt,
   isImplementationStatusPrompt,
@@ -111,6 +112,18 @@ describe("isConsultativeUserPrompt", () => {
   it("treats descriptive 更新 in question-shaped prompts as consultative", () => {
     expect(isConsultativeUserPrompt("昨天的会话，今天更新了，为啥还处在昨天？")).toBe(true);
     expect(isConsultativeUserPrompt("请更新一下这个功能？")).toBe(false);
+  });
+
+  it("treats evaluative opinion prompts as consultative despite 修复 in topic", () => {
+    const prompt = '"自动找 Bug 并修复" 功能，你觉得如何？';
+    expect(isEvaluativeOpinionPrompt(prompt)).toBe(true);
+    expect(isConsultativeUserPrompt(prompt)).toBe(true);
+    expect(
+      isImplementFollowUpRun(prompt, [
+        { role: "user", content: "改" },
+        { role: "assistant", content: "✅ 已完成修改。patch_file AutoBugFixPanel.vue" },
+      ]),
+    ).toBe(false);
   });
 });
 

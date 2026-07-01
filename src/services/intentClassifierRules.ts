@@ -7,6 +7,7 @@ import {
   isBehaviorPurposePrompt,
   isCodeReviewPrompt,
   isConsultativeUserPrompt,
+  isEvaluativeOpinionPrompt,
   isImplementationStatusPrompt,
   isImplementFollowUpRun,
   isLocateStatusFollowUpPrompt,
@@ -112,7 +113,8 @@ export function classifyUserIntentFromRules(input: ResolveUserIntentInput): Reso
 }
 
 function buildResolvedFromAi(ai: UserIntentAiPayload, rules: ResolvedUserIntent): ResolvedUserIntent {
-  const implementFollowUp = rules.implementFollowUp || ai.implementFollowUp;
+  const implementFollowUp =
+    rules.implementFollowUp || (ai.implementFollowUp && !rules.consultative);
   const primary: UserIntentPrimary = implementFollowUp
     ? "implement"
     : ai.primary === "automation"
@@ -195,6 +197,7 @@ export function shouldSkipAiIntentClassifier(
   if (rules.pendingPlanAmend || rules.pendingPlanClarify) return true;
   if (isQuotedAmendPrompt(text)) return true;
   if (rules.primary === "automation" || rules.uiDefect || rules.implementFollowUp) return true;
+  if (isEvaluativeOpinionPrompt(text)) return true;
   if (rules.primary === "implement" && IMPLEMENT_INTENT_RE.test(text)) return true;
   if (rules.consultativeTopic !== "none" && rules.consultativeTopic !== "general") return true;
   if (opts?.isAsk && rules.consultative) return true;

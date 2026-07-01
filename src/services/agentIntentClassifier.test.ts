@@ -220,6 +220,39 @@ describe("resolveUserIntent", () => {
       expect(merged.primary).toBe("implement");
     }
   });
+
+  it("rules consultative wins over AI implementFollowUp on evaluative prompts", () => {
+    const prompt = '"自动找 Bug 并修复" 功能，你觉得如何？';
+    const merged = resolveUserIntent({
+      prompt,
+      mode: "build",
+      hasImage: false,
+      isAsk: false,
+      history: [
+        { role: "user", content: "改" },
+        { role: "assistant", content: "✅ 已完成修改。" },
+      ],
+      ai: {
+        primary: "implement",
+        consultativeTopic: "none",
+        implementFollowUp: true,
+        uiDefect: false,
+        codeReview: false,
+        behaviorContradiction: false,
+        behaviorPurpose: false,
+        scheduledTask: false,
+        accuracyQuestion: false,
+        implementationStatus: false,
+        agentStepClarification: false,
+        userErrorQuote: false,
+        uiAppearance: false,
+        configBindingTopic: null,
+      },
+    });
+    expect(merged.consultative).toBe(true);
+    expect(merged.primary).toBe("consultative");
+    expect(merged.implementFollowUp).toBe(false);
+  });
 });
 
 describe("formatIntentClassificationDetail", () => {

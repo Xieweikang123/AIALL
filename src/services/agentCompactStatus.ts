@@ -191,6 +191,33 @@ export function buildAgentLiveFooterStatus(input: {
   return status;
 }
 
+export type AgentLiveStatusParts = { phase: string; meta: string[] };
+
+export const AGENT_MODEL_WAIT_PHASES = new Set([
+  "waiting_model",
+  "sending_request",
+  "retrying_model",
+]);
+
+/** Split a footer/status line into primary phase + secondary chips. */
+export function splitAgentLiveStatusLine(primary: string): AgentLiveStatusParts {
+  const trimmed = primary.trim();
+  if (!trimmed) return { phase: "运行中…", meta: [] };
+  const segments = trimmed.split(" · ").map((part) => part.trim()).filter(Boolean);
+  if (segments.length <= 1) return { phase: trimmed, meta: [] };
+  return { phase: segments[0]!, meta: segments.slice(1) };
+}
+
+export function isAgentWaitingModelPhase(input: {
+  agentPhase?: string;
+  statusLine?: string;
+  hasRunningTool?: boolean;
+}): boolean {
+  if (input.hasRunningTool) return false;
+  if (input.agentPhase && AGENT_MODEL_WAIT_PHASES.has(input.agentPhase)) return true;
+  return Boolean(input.statusLine?.includes("等待模型"));
+}
+
 export function buildCursorCompactExplorationSummary(input: AgentCompactStatusInput): string {
   const stats = computeExplorationStats((input.msg.tools ?? []) as AgentRoundTool[]);
   return formatExplorationSummary(stats, input.isRunning);

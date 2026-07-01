@@ -36,7 +36,7 @@ export function useSessionMessageRegistry<T>() {
     if (!list) return;
     const idx = list.findIndex((m) => (m as { id?: string }).id === msgId);
     if (idx < 0) return;
-    list[idx] = { ...list[idx], ...patch };
+    list[idx] = Object.assign(list[idx] as object, patch) as T;
   }
 
   return {

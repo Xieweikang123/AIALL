@@ -15,7 +15,7 @@ import {
   getRecentFeedActions,
   shouldUseCompactAgentFeed,
 } from "./agentCursorFeed";
-import { buildUnifiedAgentTimeline, buildAgentLiveFooterStatus, summarizeCursorProcessBlocks, buildFilteredCursorAgentFeedItems } from "./agentCompactStatus";
+import { buildUnifiedAgentTimeline, buildAgentLiveFooterStatus, splitAgentLiveStatusLine, isAgentWaitingModelPhase, summarizeCursorProcessBlocks, buildFilteredCursorAgentFeedItems } from "./agentCompactStatus";
 import { formatToolMeta } from "../utils/vibeHelpers";
 import type { CursorFeedItem } from "./agentCursorFeed";
 import type { AgentRoundGroupView } from "./agentRoundGroups";
@@ -661,6 +661,25 @@ describe("agentCursorFeed", () => {
         agentPhase: "waiting_model",
       }),
     ).toBe("正在等待模型响应（第 35/24 轮）…");
+  });
+
+  it("splitAgentLiveStatusLine splits phase and meta chips", () => {
+    expect(splitAgentLiveStatusLine("")).toEqual({ phase: "运行中…", meta: [] });
+    expect(splitAgentLiveStatusLine("Agent 运行中…")).toEqual({
+      phase: "Agent 运行中…",
+      meta: [],
+    });
+    expect(splitAgentLiveStatusLine("等待模型响应… · 第 1 轮 · 已等待 1s")).toEqual({
+      phase: "等待模型响应…",
+      meta: ["第 1 轮", "已等待 1s"],
+    });
+  });
+
+  it("isAgentWaitingModelPhase detects model wait phases", () => {
+    expect(isAgentWaitingModelPhase({ agentPhase: "waiting_model" })).toBe(true);
+    expect(isAgentWaitingModelPhase({ statusLine: "等待模型响应… · 第 1 轮" })).toBe(true);
+    expect(isAgentWaitingModelPhase({ hasRunningTool: true, agentPhase: "waiting_model" })).toBe(false);
+    expect(isAgentWaitingModelPhase({ agentPhase: "streaming_model" })).toBe(false);
   });
 
   it("keeps three recent actions visible while running without compact feed", () => {

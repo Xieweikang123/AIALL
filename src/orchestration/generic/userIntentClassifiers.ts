@@ -283,6 +283,7 @@ export function isImplementFollowUpRun(
   if (opts?.isAsk) return false;
   const text = prompt.trim();
   if (!text) return false;
+  if (isEvaluativeOpinionPrompt(text)) return false;
   if (!historySuggestsActiveImplementation(history)) return false;
   if (isBulkExecutePrompt(text)) return true;
   if (isNumberedImplementSelection(text, history)) return true;
@@ -398,6 +399,16 @@ export function isBehaviorPurposePrompt(
   return /(?:作用|用途|干嘛|干啥|干啥用|怎么用|何时|什么时候)/.test(text) && text.length <= 120;
 }
 
+const EVALUATIVE_OPINION_PROMPT_RE =
+  /(?:你觉得|你认为|您觉得|你感觉|评价一下|有何评价|什么看法|怎么样|如何)[？?]?\s*$|(?:你觉得|你认为|您觉得).{0,24}(?:如何|怎样|怎么样|靠谱|可行)[？?]?\s*$/;
+
+/** Opinion / evaluation questions — not implement follow-ups even when topic text contains 修复/优化. */
+export function isEvaluativeOpinionPrompt(prompt: string): boolean {
+  const text = prompt.trim();
+  if (!text || !/[？?]\s*$/.test(text)) return false;
+  return EVALUATIVE_OPINION_PROMPT_RE.test(text);
+}
+
 function isQuestionShapedConsultative(text: string): boolean {
   if (!/[？?]\s*$/.test(text)) return false;
   if (!CONSULTATIVE_MARKERS_RE.test(text)) return false;
@@ -421,6 +432,7 @@ export function isConsultativeUserPrompt(
   if (isShortContextDependentFollowUp(text)) return true;
   if (ACCURACY_CONSULTATIVE_RE.test(text)) return true;
   if (OBSERVED_BEHAVIOR_QUESTION_RE.test(text)) return true;
+  if (isEvaluativeOpinionPrompt(text)) return true;
   if (isQuestionShapedConsultative(text)) return true;
   if (IMPLEMENT_INTENT_RE.test(text)) return false;
   return CONSULTATIVE_MARKERS_RE.test(text);
