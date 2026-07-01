@@ -201,7 +201,6 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
         assistantMsg.agentMaxTurns ?? run?.live.maxTurns,
       );
       if (run) scheduleMinimizedRunUiPatch(run.sessionId, msgId, "light");
-      bumpLiveRevision();
       return;
     }
 

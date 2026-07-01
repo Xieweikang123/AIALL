@@ -8,8 +8,14 @@
         {{ planExternalView ? "方案正在左侧窗口生成…" : "正在生成…" }}
       </span>
     </div>
+    <div
+      v-else-if="showThinkingPlaceholder"
+      class="timeline-answer-placeholder timeline-answer-placeholder--exploring"
+    >
+      <span class="shimmer-text--fast">{{ thinkingPlaceholder }}</span>
+    </div>
     <ProjectReportBlock
-      v-else
+      v-else-if="hasRenderableContent"
       :content="text"
       :chat-mode="chatMode"
       :streaming="streaming && isRunning"
@@ -56,6 +62,7 @@ const props = withDefaults(
     text: string;
     streaming?: boolean;
     isRunning: boolean;
+    thinkingPlaceholder?: string;
     chatMode?: "ask" | "build" | "plan" | "explore";
     canExecutePlan?: boolean;
     layoutEnhanceReady?: boolean;
@@ -89,6 +96,13 @@ const planPanelActive = computed(
   () => planPanelLinked.value && Boolean(chatCtx?.planWorkspaceOpen?.value),
 );
 
+const showThinkingPlaceholder = computed(
+  () =>
+    Boolean(props.isRunning && props.thinkingPlaceholder?.trim() && !props.text.trim() && !props.streaming),
+);
+
+const hasRenderableContent = computed(() => Boolean(props.text.trim()) || Boolean(props.streaming && props.isRunning));
+
 function focusPlanPanel() {
   chatCtx?.focusPlanPanel(props.messageId);
 }
@@ -108,6 +122,12 @@ function answerMarkdown(text: string) {
 .timeline-answer-placeholder {
   padding: 4px 0;
   font-size: 13px;
+}
+
+.timeline-answer-placeholder--exploring {
+  color: rgba(148, 163, 184, 0.82);
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 .inline-feed-markdown--answer :deep(.msg-markdown) {

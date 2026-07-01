@@ -250,7 +250,7 @@
         />
 
         <AutoBugFixPanel
-          v-else-if="gitPanelMode === 'project' && projectPanelView === 'fix'"
+          v-if="gitPanelMode === 'project' && projectPanelView === 'fix' && projectOpened"
           :project-opened="projectOpened"
           :phase="autoBugFixPhase"
           :running="autoBugFixRunning"
@@ -267,6 +267,7 @@
           @open-git="openGitPanelFromAutoFix"
           @resume-agent="resumeAutoBugFixFromPanel"
         />
+
       </FilePanel>
 
       <div
@@ -1388,10 +1389,16 @@ function openKnowledgeSourceFile() {
   openKnowledgeFile(PROJECT_KNOWLEDGE_REL_PATH);
 }
 
+let chatWasOpenBeforeProjectTab = false;
+
 watch([gitPanelMode, projectPanelView, projectOpened], ([mode, view, opened], prev) => {
   const prevMode = prev?.[0];
   if (prevMode !== undefined && mode === "project" && prevMode !== "project") {
+    chatWasOpenBeforeProjectTab = !chatCollapsed.value;
     if (!chatCollapsed.value) collapseChat();
+  }
+  if (prevMode !== undefined && prevMode === "project" && mode !== "project") {
+    if (chatWasOpenBeforeProjectTab && chatCollapsed.value) expandChat();
   }
   if (!opened || mode !== "project") return;
   if (view === "knowledge") void loadKnowledge();

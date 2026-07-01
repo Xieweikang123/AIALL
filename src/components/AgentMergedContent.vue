@@ -2,23 +2,16 @@
   <div class="agent-feed">
     <AgentCursorTimeline
       v-if="showTimeline"
-      :process-blocks="agentTimeline.processBlocks"
-      :answer-text="answerText"
-      :answer-streaming="Boolean(answerStreaming)"
+      :inline-items="inlineFeed.items"
       :is-running="isRunning"
-      :has-answer="hasAnswer"
-      :tool-count="toolCount"
       :chat-mode="chatMode"
       :can-execute-plan="canExecutePlan"
       :layout-enhance-ready="layoutEnhanceReady"
       :show-debug="showDebug"
       :debug-expanded="debugExpanded"
-      :can-resume="canResume"
-      :resume-label="resumeLabel"
       :current-status="currentStatus"
       :has-running-tool="hasRunningTool"
       :activity-detailed="activityDetailed"
-      :activity-expanded="activityExpanded"
       :agent-phase="agentPhase"
       :message-id="messageId"
       :plan-file-path="planFilePath"
@@ -27,10 +20,8 @@
       @execute-plan="emit('execute-plan')"
       @select-option="(option) => emit('select-option', option)"
       @toggle-debug="emit('toggle-debug')"
-      @toggle-process="(expanded) => emit('toggle-process', expanded)"
       @open-file="(path) => emit('openFile', path)"
       @open-plan-file="emit('open-plan-file')"
-      @resume="emit('resume')"
     >
       <template #debug>
         <slot name="debug" />
@@ -43,11 +34,9 @@
 import { computed, nextTick, ref, watch } from "vue";
 import AgentCursorTimeline from "./AgentCursorTimeline.vue";
 import { useStableAgentAnswer } from "../composables/useStableAgentAnswer";
-import { buildUnifiedAgentTimeline } from "../services/agentCompactStatus";
+import { buildInlineAgentFeed } from "../services/agentInlineFeed";
 import type { AgentRoundGroupView, AgentRoundTool } from "../services/agentRoundGroups";
-import {
-  buildWrittenFilesSummary,
-} from "../services/agentMessageDisplay";
+import { buildWrittenFilesSummary } from "../services/agentMessageDisplay";
 import type { AiOption } from "../utils/parseAiOptions";
 
 const props = withDefaults(
@@ -130,8 +119,8 @@ const displayFinalAnswer = computed(() => {
 
 const hasRunningTool = computed(() => Boolean(props.tools?.some((tool) => tool.running)));
 
-const agentTimeline = computed(() =>
-  buildUnifiedAgentTimeline({
+const inlineFeed = computed(() =>
+  buildInlineAgentFeed({
     roundGroups: props.showProcess === false ? [] : props.roundGroups,
     answerPreview: displayFinalAnswer.value,
     answerStreaming: Boolean(props.answerStreaming),
@@ -140,26 +129,13 @@ const agentTimeline = computed(() =>
     compactFeed: props.compactFeed,
     agentPhase: props.agentPhase,
     agentDetail: props.agentDetail,
+    chatMode: props.chatMode,
+    showProcess: props.showProcess !== false,
   }),
 );
 
-const answerText = computed(() => agentTimeline.value.answer?.text ?? displayFinalAnswer.value);
-const answerStreaming = computed(
-  () => agentTimeline.value.answer?.streaming ?? Boolean(props.answerStreaming),
-);
-const hasAnswer = computed(() => Boolean(agentTimeline.value.answer));
-const toolCount = computed(() => {
-  let count = 0;
-  for (const block of agentTimeline.value.processBlocks) {
-    if (block.kind === "actions") {
-      count += block.collapsed.length + block.visible.length;
-    }
-  }
-  return count || props.tools?.length || 0;
-});
-
 const showTimeline = computed(
-  () => props.isRunning || agentTimeline.value.blocks.length > 0,
+  () => props.isRunning || inlineFeed.value.items.length > 0,
 );
 </script>
 

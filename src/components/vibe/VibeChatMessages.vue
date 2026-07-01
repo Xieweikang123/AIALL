@@ -121,7 +121,7 @@
         </button>
       </div>
       <div
-        v-if="m.role === 'assistant' && ctx.isAgentRunning(m)"
+        v-if="m.role === 'assistant' && ctx.isAgentRunning(m) && !ctx.hasAgentActivity(m)"
         class="msg-live-banner"
         aria-live="polite"
         aria-atomic="true"
@@ -422,7 +422,13 @@ const visibleMessages = computed(() => {
 
 function messageMemoKey(m: VibeChatMessageItem): unknown[] {
   if (ctx.isAgentRunning(m)) {
-    return [m.id, "running-lite", ctx.agentLiveRevision.value];
+    return [
+      m.id,
+      "running-lite",
+      m.streamChars ?? 0,
+      m.agentPhase,
+      m.content?.length ?? 0,
+    ];
   }
   return [
     m.id,

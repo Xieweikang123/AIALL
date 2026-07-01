@@ -1,5 +1,5 @@
 <template>
-  <div v-if="rows.length" class="process-step-list">
+  <div v-if="rows.length" class="process-step-list" :class="{ 'process-step-list--compact': compact }">
     <div
       v-for="row in visibleRows"
       :key="row.key"
@@ -53,8 +53,9 @@ const props = withDefaults(
     tools: AgentRoundTool[];
     isRunning?: boolean;
     defaultVisible?: number;
+    compact?: boolean;
   }>(),
-  { isRunning: false, defaultVisible: 8 },
+  { isRunning: false, defaultVisible: 8, compact: false },
 );
 
 const emit = defineEmits<{
@@ -157,6 +158,19 @@ const visibleRows = computed(() => {
   padding: 2px 0;
   border-radius: 6px;
   background: rgba(0, 0, 0, 0.12);
+}
+
+.process-step-list--compact {
+  max-height: 160px;
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 4px;
+}
+
+.process-step-list--compact .process-step {
+  min-height: 24px;
+  padding: 2px 6px;
+  font-size: 10px;
+  grid-template-columns: 16px 44px minmax(0, 1fr) auto 12px;
 }
 
 .process-step-list::-webkit-scrollbar {

@@ -26,6 +26,7 @@
       :tools="item.steps"
       :is-running="isRunning"
       :default-visible="toolDefaultVisible"
+      :compact="chatMode === 'ask'"
       @open-file="(path) => emit('openFile', path)"
     />
 
@@ -34,13 +35,19 @@
       class="inline-feed-segment inline-feed-segment--answer"
     >
       <div
+        v-if="progressHint && isRunning && !item.text.trim() && !item.streaming"
+        class="stream-progress-hint"
+      >
+        <span class="shimmer-text--fast">{{ progressHint }}</span>
+      </div>
+      <div
         v-if="item.streaming && isRunning && !item.text.trim()"
         class="inline-feed-placeholder"
       >
         <span class="shimmer-text--fast">正在生成…</span>
       </div>
       <ProjectReportBlock
-        v-else-if="item.variant === 'answer'"
+        v-else-if="item.text.trim() || (!item.streaming && item.variant === 'answer')"
         :content="item.text"
         :chat-mode="chatMode"
         :streaming="item.streaming && isRunning"
@@ -51,12 +58,16 @@
           :chat-mode="chatMode"
           :streaming="item.streaming && isRunning"
           :can-execute="canExecutePlan && !isRunning && !item.streaming"
+          :plan-file-path="planFilePath"
+          :plan-panel-active="planPanelActive"
           :enhance-layout="layoutEnhanceReady && !isRunning && !item.streaming"
-          :external-view="shouldUsePlanExternalView(item.text, { chatMode: chatMode ?? 'ask', planFilePath: undefined })"
+          :external-view="planExternalViewFor(item.text)"
           @execute="emit('execute-plan')"
+          @open-plan-file="() => chatCtx?.openPlanFileInEditor(planFilePath)"
+          @focus-panel="focusPlanPanel"
         >
           <ChatMarkdown
-            v-if="!shouldUsePlanExternalView(item.text, { chatMode: chatMode ?? 'ask', planFilePath: undefined })"
+            v-if="!planExternalViewFor(item.text)"
             class="inline-feed-markdown inline-feed-markdown--answer"
             :content="answerMarkdown(item.text)"
             :streaming="item.streaming && isRunning"
@@ -70,7 +81,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, inject } from "vue";
 import ChatMarkdown from "./ChatMarkdown.vue";
 import PlanDocumentBlock from "./PlanDocumentBlock.vue";
 import ProjectReportBlock from "./ProjectReportBlock.vue";
@@ -79,6 +90,7 @@ import type { InlineFeedItem, InlineFeedProcessItem } from "../services/agentInl
 import { sanitizeFeedThoughtText } from "../services/agentProgressMarker";
 import { enrichPlanMarkdownForDisplay } from "../services/planDocumentDisplay";
 import { shouldUsePlanExternalView } from "../services/planFile";
+import { vibeChatMessageContextKey } from "../composables/vibeChatMessageContext";
 import type { AgentRoundTool } from "../services/agentRoundGroups";
 import type { AiOption } from "../utils/parseAiOptions";
 
@@ -96,6 +108,9 @@ const props = withDefaults(
     chatMode?: "ask" | "build" | "plan" | "explore";
     canExecutePlan?: boolean;
     layoutEnhanceReady?: boolean;
+    planFilePath?: string;
+    messageId?: string;
+    progressHint?: string;
     nested?: boolean;
     answerOnly?: boolean;
     toolDisplay?: "card" | "inline";
@@ -110,6 +125,29 @@ const props = withDefaults(
     toolDefaultVisible: 8,
   },
 );
+
+const chatCtx = inject(vibeChatMessageContextKey, null);
+
+const planPanelLinked = computed(() => {
+  if (!chatCtx?.planPanelActive.value) return false;
+  if (!props.messageId || !chatCtx.planPanelMessageId.value) return false;
+  return chatCtx.planPanelMessageId.value === props.messageId;
+});
+
+const planPanelActive = computed(
+  () => planPanelLinked.value && Boolean(chatCtx?.planWorkspaceOpen?.value),
+);
+
+function focusPlanPanel() {
+  chatCtx?.focusPlanPanel(props.messageId);
+}
+
+function planExternalViewFor(text: string) {
+  return shouldUsePlanExternalView(text, {
+    chatMode: props.chatMode ?? "ask",
+    planFilePath: props.planFilePath,
+  });
+}
 
 const emit = defineEmits<{
   "execute-plan": [];
@@ -244,6 +282,13 @@ function answerMarkdown(text: string) {
 
 .stream-process-collapsed--nested {
   font-size: 10px;
+}
+
+.stream-progress-hint {
+  padding: 6px 0 8px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: rgba(148, 163, 184, 0.82);
 }
 
 .inline-feed-markdown--narrative :deep(.msg-markdown) {

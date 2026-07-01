@@ -62,9 +62,9 @@ function syncStreamingMinHeight() {
     const prevHold = streamingMinHeight.value;
     const naturalHeight = node.offsetHeight;
     if (naturalHeight <= 0) return;
-    if (naturalHeight >= prevHold) {
-      if (naturalHeight !== prevHold) streamingMinHeight.value = naturalHeight;
-    } else if (naturalHeight < prevHold * 0.9) {
+    // Monotonic during streaming: lite markdown re-parses can briefly shrink layout;
+    // shrinking minHeight causes visible wobble. Reset only via content watch / stream end.
+    if (naturalHeight > prevHold) {
       streamingMinHeight.value = naturalHeight;
     }
   });

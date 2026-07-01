@@ -55,8 +55,21 @@ export function useAgentMessage(
     };
   }
 
-  function agentRoundGroupViews(m: AgentMessage) {
+  /** Track reactive message fields during a run so stream deltas don't need revision bumps. */
+  function trackLiveMessageDeps(m: AgentMessage) {
     void agentLiveRevision.value;
+    if (!isAgentRunning(m)) return;
+    void m.content;
+    void m.streamChars;
+    void m.agentPhase;
+    void m.agentTurn;
+    void m.roundGroups;
+    void m.tools?.length;
+    void m.status;
+  }
+
+  function agentRoundGroupViews(m: AgentMessage) {
+    trackLiveMessageDeps(m);
     const liveSource = liveAgentSource(m);
     const running = isAgentRunning(m);
     return buildAgentRoundGroupViewsForMessage(asVibeChatMessage(m), {
@@ -81,7 +94,7 @@ export function useAgentMessage(
   }
 
   function agentAnswerPreview(m: AgentMessage): string {
-    void agentLiveRevision.value;
+    trackLiveMessageDeps(m);
     return resolveAgentAnswerPreview(asVibeChatMessage(m), messageViewContext(m));
   }
 
@@ -91,12 +104,12 @@ export function useAgentMessage(
   }
 
   const timelineAnswerDisplay = computed(() => {
-    void agentLiveRevision.value;
+    trackLiveMessageDeps(msg.value);
     return timelineAnswerContent(msg.value);
   });
 
   const timelineAnswerStreamingDisplay = computed(() => {
-    void agentLiveRevision.value;
+    trackLiveMessageDeps(msg.value);
     return timelineAnswerStreaming(msg.value);
   });
 
@@ -105,7 +118,7 @@ export function useAgentMessage(
   }
 
   function currentAgentStatus(m: AgentMessage): string {
-    void agentLiveRevision.value;
+    trackLiveMessageDeps(m);
     return resolveCurrentAgentStatus(asVibeChatMessage(m), messageViewContext(m));
   }
 
