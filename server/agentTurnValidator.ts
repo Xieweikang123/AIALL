@@ -105,7 +105,9 @@ export async function validateAgentResponse(
     !isPlanExplore &&
     !readOnlyBuildRun &&
     ctx.writeStage.writtenList.length === 0 &&
-    (implementFollowUpRun || (ctx.patchAnchorLocated && ctx.patchAnchorForcePending));
+    (implementFollowUpRun ||
+      uiDefectBuildRun ||
+      (ctx.patchAnchorLocated && ctx.patchAnchorForcePending));
 
   // ── 12a-pre: Ambiguous term clarification — block premature plan/scaffold ──
   if (ctx.ambiguousTermClarificationPending) {
@@ -286,7 +288,7 @@ export async function validateAgentResponse(
     ctx.writeStage &&
     ctx.patchFailureLog.length > 0 &&
     claimsSuccessDespitePatchFailures(rawContent, ctx.patchFailureLog.length) &&
-    ctx.patchFailureCompletionRetries < 1
+    ctx.patchFailureCompletionRetries < 2
   ) {
     ctx.patchFailureCompletionRetries += 1;
     ctx.messages.push({ role: "assistant", content: rawContent });
