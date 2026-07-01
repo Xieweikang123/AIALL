@@ -130,8 +130,12 @@ function hasProcessSteps(m: AgentMessage): boolean {
 
 function onToggleProcess(expanded: boolean) {
   const currently = isActivityExpanded(props.msg);
-  if (expanded && !currently) toggleActivityExpanded(props.msg);
-  else if (!expanded && currently) collapseAgentActivity(props.msg);
+  if (expanded === currently) return;
+  if (expanded) {
+    if (!currently) toggleActivityExpanded(props.msg);
+    return;
+  }
+  collapseAgentActivity(props.msg);
 }
 
 /** Prefer ephemeral run.live text (planning_tools / waiting_model); fall back to persisted msg fields. */

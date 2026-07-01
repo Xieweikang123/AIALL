@@ -1,12 +1,25 @@
 <template>
-  <div v-if="rows.length" class="process-step-list" :class="{ 'process-step-list--compact': compact }">
+  <div
+    v-if="rows.length"
+    class="process-step-list"
+    :class="{ 'process-step-list--compact': compact, 'process-step-list--running': isRunning }"
+    :style="{ '--rail-progress': `${railProgressPercent}%` }"
+  >
+    <div v-if="visibleRows.length > 1" class="process-step-rail-track" aria-hidden="true" />
     <div
-      v-for="row in visibleRows"
+      v-for="(row, index) in visibleRows"
       :key="row.key"
       class="process-step"
-      :class="`process-step--${row.state}`"
+      :class="[
+        `process-step--${row.state}`,
+        {
+          'process-step--first': index === 0,
+          'process-step--last': index === visibleRows.length - 1,
+        },
+      ]"
       :title="row.fullLabel"
     >
+      <span class="process-step-node" aria-hidden="true" />
       <span class="process-step-icon" aria-hidden="true">{{ row.icon }}</span>
       <span class="process-step-verb">{{ row.verb }}</span>
       <button
@@ -19,10 +32,6 @@
       </button>
       <span v-else class="process-step-target process-step-target--plain">{{ row.target }}</span>
       <span v-if="row.meta" class="process-step-meta">{{ row.meta }}</span>
-      <span v-if="row.state === 'running'" class="process-step-spinner" aria-hidden="true" />
-      <span v-else-if="row.state === 'fail'" class="process-step-mark process-step-mark--fail">✕</span>
-      <span v-else-if="row.state === 'skipped'" class="process-step-mark process-step-mark--skip">−</span>
-      <span v-else class="process-step-mark process-step-mark--ok">✓</span>
     </div>
     <button
       v-if="!expanded && hiddenCount > 0"
@@ -147,31 +156,99 @@ const visibleRows = computed(() => {
   if (expanded.value || hiddenCount.value === 0) return rows.value;
   return rows.value.slice(-props.defaultVisible);
 });
+
+const railProgressPercent = computed(() => {
+  const list = visibleRows.value;
+  if (list.length <= 1) return 0;
+
+  const runningIdx = list.findIndex((row) => row.state === "running");
+  if (runningIdx >= 0) {
+    return Math.min(100, ((runningIdx + 0.45) / (list.length - 1)) * 100);
+  }
+
+  let lastDone = -1;
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const state = list[i]?.state;
+    if (state === "ok" || state === "fail" || state === "skipped") {
+      lastDone = i;
+      break;
+    }
+  }
+  if (lastDone < 0) return 0;
+  return Math.min(100, (lastDone / (list.length - 1)) * 100);
+});
 </script>
 
 <style scoped>
 .process-step-list {
+  --step-rail-x: 14px;
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 0;
   max-height: 240px;
   overflow-y: auto;
-  padding: 2px 0;
+  padding: 4px 0 4px 4px;
   border-radius: 6px;
   background: rgba(0, 0, 0, 0.12);
+}
+
+.process-step-list--running {
+  max-height: none;
+  background: transparent;
 }
 
 .process-step-list--compact {
   max-height: 160px;
   background: rgba(0, 0, 0, 0.06);
   border-radius: 4px;
+  --step-rail-x: 12px;
+}
+
+.process-step-list--compact.process-step-list--running {
+  background: transparent;
+}
+
+.process-step-rail-track {
+  position: absolute;
+  left: var(--step-rail-x);
+  top: 20px;
+  bottom: 20px;
+  width: 2px;
+  border-radius: 1px;
+  background: rgba(148, 163, 184, 0.14);
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.process-step-rail-track::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: var(--rail-progress, 0%);
+  border-radius: 1px;
+  background: linear-gradient(
+    180deg,
+    rgba(88, 166, 255, 0.35),
+    rgba(88, 166, 255, 0.72),
+    rgba(126, 182, 255, 0.88)
+  );
+  transition: height 0.35s ease;
+}
+
+.process-step-list--compact .process-step-rail-track {
+  top: 16px;
+  bottom: 16px;
 }
 
 .process-step-list--compact .process-step {
   min-height: 24px;
-  padding: 2px 6px;
+  padding: 2px 6px 2px 4px;
   font-size: 10px;
-  grid-template-columns: 16px 44px minmax(0, 1fr) auto 12px;
+  grid-template-columns: 12px 16px 44px minmax(0, 1fr) auto;
 }
 
 .process-step-list::-webkit-scrollbar {
@@ -184,15 +261,57 @@ const visibleRows = computed(() => {
 }
 
 .process-step {
+  position: relative;
+  z-index: 1;
   display: grid;
-  grid-template-columns: 18px 52px minmax(0, 1fr) auto 14px;
+  grid-template-columns: 14px 18px 52px minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
   min-height: 28px;
-  padding: 4px 8px;
+  padding: 4px 8px 4px 4px;
   font-size: 11px;
   line-height: 1.35;
   color: rgba(186, 196, 208, 0.88);
+}
+
+.process-step-node {
+  justify-self: center;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 2px solid rgba(148, 163, 184, 0.32);
+  background: rgba(12, 18, 28, 0.96);
+  box-sizing: border-box;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.process-step--running .process-step-node {
+  border-color: rgba(88, 166, 255, 0.95);
+  background: rgba(88, 166, 255, 0.28);
+  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.12);
+  animation: process-step-node-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes process-step-node-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.12); }
+  50% { box-shadow: 0 0 0 5px rgba(88, 166, 255, 0.06); }
+}
+
+.process-step--ok .process-step-node,
+.process-step--fail .process-step-node,
+.process-step--skipped .process-step-node {
+  border-color: rgba(88, 166, 255, 0.62);
+  background: rgba(88, 166, 255, 0.48);
+}
+
+.process-step--fail .process-step-node {
+  border-color: rgba(255, 123, 114, 0.75);
+  background: rgba(255, 123, 114, 0.42);
+}
+
+.process-step--skipped .process-step-node {
+  border-color: rgba(210, 153, 34, 0.65);
+  background: rgba(210, 153, 34, 0.38);
 }
 
 .process-step:hover {
@@ -257,33 +376,6 @@ button.process-step-target:hover {
   font-variant-numeric: tabular-nums;
 }
 
-.process-step-spinner {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  border: 2px solid rgba(88, 166, 255, 0.22);
-  border-top-color: rgba(88, 166, 255, 0.85);
-  animation: process-step-spin 0.75s linear infinite;
-}
-
-.process-step-mark {
-  font-size: 10px;
-  text-align: center;
-}
-
-.process-step-mark--fail {
-  color: rgba(255, 123, 114, 0.95);
-}
-
-.process-step-mark--skip {
-  color: rgba(210, 153, 34, 0.9);
-}
-
-.process-step-mark--ok {
-  color: rgba(126, 182, 255, 0.55);
-  font-size: 9px;
-}
-
 .process-step-more {
   align-self: flex-start;
   margin: 4px 8px 2px;
@@ -301,15 +393,13 @@ button.process-step-target:hover {
   text-underline-offset: 2px;
 }
 
-@keyframes process-step-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .process-step-spinner {
+  .process-step--running .process-step-node {
     animation: none;
+  }
+
+  .process-step-rail-track::after {
+    transition: none;
   }
 }
 </style>

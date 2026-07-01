@@ -12,6 +12,7 @@
       :current-status="currentStatus"
       :has-running-tool="hasRunningTool"
       :activity-detailed="activityDetailed"
+      :activity-expanded="activityExpanded"
       :agent-phase="agentPhase"
       :message-id="messageId"
       :plan-file-path="planFilePath"
@@ -20,6 +21,7 @@
       @execute-plan="emit('execute-plan')"
       @select-option="(option) => emit('select-option', option)"
       @toggle-debug="emit('toggle-debug')"
+      @toggle-process="emit('toggle-process')"
       @open-file="(path) => emit('openFile', path)"
       @open-plan-file="emit('open-plan-file')"
     >

@@ -5,7 +5,65 @@
     :class="{ 'agent-stream--running': isRunning }"
     @scroll="onTimelineScroll"
   >
-    <div class="stream-unified">
+    <div v-if="isRunning" class="stream-unified">
+      <AgentInlineFeedItems
+        :items="inlineItems"
+        :is-running="true"
+        :chat-mode="chatMode"
+        :can-execute-plan="canExecutePlan"
+        :layout-enhance-ready="layoutEnhanceReady"
+        :plan-file-path="planFilePath"
+        :message-id="messageId"
+        :tool-display="'inline'"
+        :tool-default-visible="toolDefaultVisible"
+        :progress-hint="progressHint"
+        @execute-plan="emit('execute-plan')"
+        @select-option="(option) => emit('select-option', option)"
+        @open-file="(path) => emit('openFile', path)"
+      />
+    </div>
+
+    <template v-else-if="useCompletedLayout">
+      <details
+        v-if="completedProcessItems.length"
+        class="stream-process"
+        :open="processOpen"
+        @toggle="onProcessToggle"
+      >
+        <summary class="stream-process-summary">
+          <span class="stream-process-label">执行过程</span>
+          <span class="stream-process-meta">{{ processSummary }}</span>
+        </summary>
+        <div class="stream-process-body">
+          <AgentInlineFeedItems
+            :items="completedProcessItems"
+            :is-running="false"
+            :chat-mode="chatMode"
+            :can-execute-plan="false"
+            :layout-enhance-ready="layoutEnhanceReady"
+            tool-display="inline"
+            @open-file="(path) => emit('openFile', path)"
+          />
+        </div>
+      </details>
+      <div v-if="answerItems.length" class="stream-answer">
+        <AgentInlineFeedItems
+          :items="answerItems"
+          :is-running="false"
+          :chat-mode="chatMode"
+          :can-execute-plan="canExecutePlan"
+          :layout-enhance-ready="layoutEnhanceReady"
+          :plan-file-path="planFilePath"
+          :message-id="messageId"
+          answer-only
+          @execute-plan="emit('execute-plan')"
+          @select-option="(option) => emit('select-option', option)"
+          @open-file="(path) => emit('openFile', path)"
+        />
+      </div>
+    </template>
+
+    <div v-else class="stream-unified">
       <AgentInlineFeedItems
         :items="inlineItems"
         :is-running="isRunning"
@@ -23,19 +81,12 @@
       />
     </div>
 
-    <div
+    <AgentLiveStatusRail
       v-if="liveRailVisible"
-      class="cursor-live-status"
-      aria-live="polite"
-      aria-atomic="true"
-    >
-      <span
-        class="cursor-status-text"
-        :class="{ 'shimmer-text--fast': isWaitingModel || !hasAnswerContent }"
-      >
-        {{ liveRailPrimary }}
-      </span>
-    </div>
+      :status-line="liveRailPrimary"
+      :waiting-model="isWaitingModel"
+      :shimmer="isWaitingModel || !hasAnswerContent"
+    />
 
     <slot v-if="debugExpanded" name="debug" />
   </div>
@@ -44,13 +95,17 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import AgentInlineFeedItems from "./AgentInlineFeedItems.vue";
+import AgentLiveStatusRail from "./AgentLiveStatusRail.vue";
 import {
   buildAgentLiveFooterStatus,
+  isAgentWaitingModelPhase,
 } from "../services/agentCompactStatus";
 import {
   collectToolsFromInlineFeed,
+  filterInlineTimelineItems,
+  splitInlineFeedItems,
+  summarizeInlineFeedProcess,
   type InlineFeedItem,
-  type InlineFeedTextItem,
 } from "../services/agentInlineFeed";
 import { formatExplorationSummary, computeExplorationStats } from "../services/agentCursorFeed";
 import type { AiOption } from "../utils/parseAiOptions";
@@ -68,6 +123,7 @@ const props = withDefaults(
     currentStatus?: string;
     hasRunningTool?: boolean;
     activityDetailed?: boolean;
+    activityExpanded?: boolean;
     agentPhase?: string;
     messageId?: string;
     bindStatusLogScroll?: (el: HTMLElement | null, msgId: string) => void;
@@ -90,18 +146,17 @@ const emit = defineEmits<{
 
 const timelineRoot = ref<HTMLElement | null>(null);
 
-const liveTools = computed(() => collectToolsFromInlineFeed(props.inlineItems));
+const splitFeed = computed(() => splitInlineFeedItems(props.inlineItems));
+const processItems = computed(() => splitFeed.value.process);
+const answerItem = computed(() => splitFeed.value.answer);
+const answerItems = computed((): InlineFeedItem[] =>
+  answerItem.value ? [answerItem.value] : [],
+);
 
+const liveTools = computed(() => collectToolsFromInlineFeed(processItems.value));
 const toolCount = computed(() => liveTools.value.length);
-
-const answerItem = computed((): InlineFeedTextItem | null => {
-  for (const item of props.inlineItems) {
-    if (item.kind === "text" && item.variant === "answer") return item;
-  }
-  return null;
-});
-
 const hasAnswerContent = computed(() => Boolean(answerItem.value?.text.trim()));
+const answerPreviewText = computed(() => answerItem.value?.text.trim() ?? "");
 
 const toolDefaultVisible = computed(() => {
   if (props.activityDetailed) return 12;
@@ -110,7 +165,28 @@ const toolDefaultVisible = computed(() => {
   return 4;
 });
 
-const MODEL_WAIT_PHASES = new Set(["waiting_model", "sending_request", "retrying_model"]);
+const useCompletedLayout = computed(
+  () =>
+    !props.isRunning &&
+    hasAnswerContent.value &&
+    completedProcessItems.value.length > 0,
+);
+
+const completedProcessItems = computed((): InlineFeedItem[] => {
+  if (props.isRunning) return [];
+  return filterInlineTimelineItems(processItems.value, {
+    answerPreview: answerPreviewText.value,
+    hideNarratives: true,
+  });
+});
+
+const processSummary = computed(() =>
+  summarizeInlineFeedProcess(processItems.value, toolCount.value, false),
+);
+
+const processOpen = computed(
+  () => Boolean(props.activityExpanded) || Boolean(props.activityDetailed),
+);
 
 const liveRailPrimary = computed((): string => {
   if (!props.isRunning) return "";
@@ -137,14 +213,16 @@ const liveRailPrimary = computed((): string => {
     return formatExplorationSummary(stats, true);
   }
 
-  return "Planning next moves…";
+  return "规划下一步…";
 });
 
-const isWaitingModel = computed(() => {
-  if (props.hasRunningTool) return false;
-  if (props.agentPhase && MODEL_WAIT_PHASES.has(props.agentPhase)) return true;
-  return liveRailPrimary.value.includes("等待模型");
-});
+const isWaitingModel = computed(() =>
+  isAgentWaitingModelPhase({
+    agentPhase: props.agentPhase,
+    statusLine: liveRailPrimary.value,
+    hasRunningTool: props.hasRunningTool,
+  }),
+);
 
 const liveRailVisible = computed(() => {
   if (!props.isRunning) return false;
@@ -160,6 +238,12 @@ const progressHint = computed((): string | undefined => {
   const summary = formatExplorationSummary(stats, true).replace(/^探索代码库 · /, "");
   return summary ? `已${summary}，正在整理结论…` : "正在整理结论…";
 });
+
+function onProcessToggle(event: Event) {
+  const target = event.target;
+  if (!(target instanceof HTMLDetailsElement)) return;
+  emit("toggle-process", target.open);
+}
 
 function onTimelineScroll() {
   if (props.messageId && props.onStatusLogScroll) {
@@ -190,16 +274,75 @@ watch(timelineRoot, (el) => bindScrollEl(el));
   min-width: 0;
 }
 
-.cursor-live-status {
-  padding: 4px 0 2px;
-  margin-top: 2px;
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+.stream-process {
+  margin: 0;
+  min-width: 0;
 }
 
-.cursor-live-status .cursor-status-text {
+.stream-process-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: rgba(148, 163, 184, 0.78);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.stream-process-summary::-webkit-details-marker {
+  display: none;
+}
+
+.stream-process-summary::before {
+  content: "▸";
+  font-size: 9px;
+  color: rgba(148, 163, 184, 0.45);
+  flex-shrink: 0;
+}
+
+.stream-process[open] > .stream-process-summary::before {
+  content: "▾";
+}
+
+.stream-process-summary:hover {
+  color: rgba(165, 214, 255, 0.92);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.stream-process-label {
+  flex-shrink: 0;
   font-size: 11px;
-  line-height: 1.45;
-  color: rgba(148, 163, 184, 0.62);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(148, 163, 184, 0.55);
+}
+
+.stream-process-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stream-process-body {
+  padding: 4px 0 2px;
+  margin: 2px 0 0;
+}
+
+.stream-answer {
+  min-width: 0;
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.agent-stream--running :deep(.process-step-list) {
+  max-height: none;
+  background: transparent;
 }
 </style>
