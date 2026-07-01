@@ -44,6 +44,10 @@ import {
   buildBehaviorPurposeTraceRetryHint,
   shouldBlockBehaviorPurposeFinalize,
 } from "./consultativeBehaviorTrace";
+import {
+  buildConsultativeUiBehaviorTraceRetryHint,
+  shouldBlockConsultativeUiBehaviorFinalize,
+} from "./consultativeUiBehaviorTrace";
 import { buildSearchFilesEmptyHint } from "./agentAskPrompt";
 import { markAnchorLocated, markTeleportBodyConfirmed, recordPatchFailure, listUncleanedEphemeralProbeFiles } from "./agentTurnContext";
 import { buildWorkspaceCleanupNudge } from "../shared/agentProbeGuard";
@@ -553,6 +557,54 @@ export async function validateAgentResponse(
         ...(ctx.segmentMaxTurns !== undefined ? { maxTurns: ctx.segmentMaxTurns } : {}),
         model,
         detail: "行为目的题须 trace 到事件触发点，已要求重试",
+      },
+    });
+    return { action: "continue" };
+  }
+
+  // ── 12k-ui: Consultative UI state / unverified code citation retry ──
+  if (
+    readOnlyBuildRun &&
+    !ctx.consultativeForceAnswerPending &&
+    shouldBlockConsultativeUiBehaviorFinalize({
+      readOnlyBuildRun: true,
+      prompt: cfg.prompt,
+      replyText: rawContent,
+      consultativeReadPaths: ctx.toolGuard.consultativeReadPaths ?? [],
+      consultativeReadFailedPaths: ctx.toolGuard.consultativeReadFailedPaths ?? [],
+      visionLocateToolsUsed: ctx.visionLocateToolsUsed,
+      grepPatterns: ctx.toolGuard.grepPatterns ?? [],
+    }) &&
+    ctx.consultativeUiBehaviorRetries < 2
+  ) {
+    ctx.consultativeUiBehaviorRetries += 1;
+    ctx.messages.push({ role: "assistant", content: rawContent });
+    ctx.messages.push({
+      role: "system",
+      content: buildConsultativeUiBehaviorTraceRetryHint(
+        ctx.toolGuard.consultativeReadPaths ?? [],
+        ctx.toolGuard.consultativeReadFailedPaths ?? [],
+      ),
+    });
+    onEvent({
+      type: "turn_response",
+      data: {
+        turn,
+        ...(ctx.segmentMaxTurns !== undefined ? { maxTurns: ctx.segmentMaxTurns } : {}),
+        assistantText: userText,
+        toolCalls: [],
+        hasToolCalls: false,
+        isFinal: false,
+      },
+    });
+    onEvent({
+      type: "status",
+      data: {
+        phase: "consultative_ui_behavior_retry",
+        turn,
+        ...(ctx.segmentMaxTurns !== undefined ? { maxTurns: ctx.segmentMaxTurns } : {}),
+        model,
+        detail: "UI 状态/代码引用未验证，已要求 trace 后重答",
       },
     });
     return { action: "continue" };

@@ -56,6 +56,7 @@ import {
   isBlockedGrepAfterVisionMisread,
   isLowSignalVisionLocateGrep,
   isOverlyBroadVisionGrep,
+  isVisionGrepLowSpread,
   isSearchFilesContentQuery,
   markPatchRecoveryFile,
   readLineRangeFromArgs,

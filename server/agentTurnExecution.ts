@@ -1,13 +1,31 @@
 import type { ChatCompletionMessage, ChatToolCall } from "./aiForward";
 import type { VibeAgentEvent } from "../shared/agentTypes";
 import type { AgentTurnContext } from "./agentTurnContext";
-import { markAnchorLocated, markTeleportBodyConfirmed, recordPatchFailure, isPlanTextOnlyFollowUpRun } from "./agentTurnContext";
+import {
+  markAnchorLocated,
+  markTeleportBodyConfirmed,
+  recordPatchFailure,
+  isPlanTextOnlyFollowUpRun,
+  shouldSkipExploreTurnForRuntimeFailures,
+} from "./agentTurnContext";
 import { executeTool, readStagedFileContent } from "./agentToolExecutor";
 import { WRITE_AGENT_TOOL_NAMES, READ_ONLY_AGENT_TOOL_NAMES, toolSummary, parseToolArgs, canParallelizeToolBatch, callIsProductiveWrite } from "./agentClassifier";
 import { applyUniquePatch, resolveProjectPath, resolveReadablePath } from "./vibeFs";
-import { isToolResultFailure, textIndicatesPatchAnchor, textConfirmsTeleportToBody } from "./agentExploreGuard";
+import {
+  isRuntimeExploreFailureTurn,
+  isToolResultFailure,
+  textIndicatesPatchAnchor,
+  textConfirmsTeleportToBody,
+} from "./agentExploreGuard";
 import { truncateForSse, truncateToolResultForModel, MAX_TOOL_RESULT_SSE_CHARS } from "./agentContext";
-import { buildGrepEmptyRecoveryNudge, buildGrepHitVueReadNudge, buildAlternateUiPatchStrategyNudge } from "./agentExplorationBudget";
+import {
+  buildGrepEmptyRecoveryNudge,
+  buildGrepHitVueReadNudge,
+  buildAlternateUiPatchStrategyNudge,
+  buildRuntimeToolFailureRecoveryNudge,
+  buildReadFileFailedRecoveryNudge,
+  MAX_CONSECUTIVE_RUNTIME_TOOL_FAILURE_TURNS,
+} from "./agentExplorationBudget";
 import { buildPatchAnchorLocatedNudge, shouldNudgeAlternateUiPatchStrategy } from "./agentExploreGuard";
 import { buildScheduledJobRegistrationNudge, shouldNudgeScheduledJobRegistration } from "../src/services/agentConsultativeTopics";
 import { extractJobClassNamesFromReadPaths } from "../src/services/agentStructuralPatterns";
@@ -355,6 +373,29 @@ export async function runTurnExecution(
     });
   }
 
+  const turnReadFailedPaths: string[] = [];
+  for (const outcome of turnOutcomes) {
+    if (outcome.call.function.name !== "read_file") continue;
+    if (!isToolResultFailure(outcome.result)) continue;
+    const toolArgs = parseToolArgs(outcome.call.function.arguments || "{}");
+    const path = String(toolArgs.path ?? "").trim();
+    if (path) turnReadFailedPaths.push(path);
+  }
+  if (turnReadFailedPaths.length > 0) {
+    if (!ctx.toolGuard.consultativeReadFailedPaths) {
+      ctx.toolGuard.consultativeReadFailedPaths = [];
+    }
+    for (const path of turnReadFailedPaths) {
+      if (!ctx.toolGuard.consultativeReadFailedPaths.includes(path)) {
+        ctx.toolGuard.consultativeReadFailedPaths.push(path);
+      }
+    }
+    ctx.messages.push({
+      role: "system",
+      content: buildReadFileFailedRecoveryNudge(turnReadFailedPaths),
+    });
+  }
+
   // ── Block 17b: Vision locate tool tracking ──
   if (consultativeVisionRun && ctx.toolGuard.visionLocateActive) {
     for (const call of toolCalls) {
@@ -556,7 +597,27 @@ export async function runTurnExecution(
         } catch { /* ignore */ }
       }
     }
-    markExploreOnlyTurn(ctx, readArgsList, readOnlyBuildRun || isReadOnlyAgent);
+    const runtimeFailureTurn = isRuntimeExploreFailureTurn(turnOutcomes);
+    const skipExploreBudget = shouldSkipExploreTurnForRuntimeFailures(ctx, turnOutcomes);
+    if (runtimeFailureTurn && skipExploreBudget) {
+      ctx.consecutiveRuntimeToolFailureTurns += 1;
+      ctx.messages.push({
+        role: "system",
+        content: buildRuntimeToolFailureRecoveryNudge(ctx.consecutiveRuntimeToolFailureTurns, false),
+      });
+    } else {
+      if (
+        runtimeFailureTurn &&
+        ctx.consecutiveRuntimeToolFailureTurns >= MAX_CONSECUTIVE_RUNTIME_TOOL_FAILURE_TURNS
+      ) {
+        ctx.messages.push({
+          role: "system",
+          content: buildRuntimeToolFailureRecoveryNudge(ctx.consecutiveRuntimeToolFailureTurns, true),
+        });
+      }
+      markExploreOnlyTurn(ctx, readArgsList, readOnlyBuildRun || isReadOnlyAgent);
+      ctx.consecutiveRuntimeToolFailureTurns = 0;
+    }
   }
 
   // Explore budget nudges

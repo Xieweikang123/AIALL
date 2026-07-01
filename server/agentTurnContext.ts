@@ -1,5 +1,9 @@
 import type { ChatCompletionMessage } from "./aiForward";
-import type { ToolGuardContext } from "./agentExploreGuard";
+import {
+  isRuntimeExploreFailureTurn,
+  type ToolGuardContext,
+} from "./agentExploreGuard";
+import { MAX_CONSECUTIVE_RUNTIME_TOOL_FAILURE_TURNS } from "./agentExplorationBudget";
 import type { WriteStage } from "./agentToolExecutor";
 import { createWriteStage } from "./agentToolExecutor";
 import type { TurnRunConfig } from "./agentTurnRunConfig";
@@ -35,6 +39,8 @@ export interface AgentTurnContext {
   // ── Exploration tracking ──
   consecutiveExploreTurns: number;
   totalExploreTurns: number;
+  /** Skipped explore turns due to runtime tool failures — capped to avoid infinite loops. */
+  consecutiveRuntimeToolFailureTurns: number;
   exploreFilesRead: Set<string>;
 
   // ── Nudge-sent flags (each nudge fires at most once) ──
@@ -86,6 +92,7 @@ export interface AgentTurnContext {
   visionConsultativeLocateRetries: number;
   visionConsultativeAccuracyRetries: number;
   behaviorPurposeRetries: number;
+  consultativeUiBehaviorRetries: number;
 
   // ── Consultative mode state ──
   consultativeForceAnswerPending: boolean;
@@ -149,6 +156,7 @@ export function createAgentTurnContext(params: {
       visionAnchorQuotes: [],
       visionLocateActive: false,
       consultativeReadPaths: [],
+      consultativeReadFailedPaths: [],
       blockExplorationArchiveWrite:
         p.sameIssueFollowUpRun &&
         (p.userFailureReportRun || p.userRecentlyReportedFailure),
@@ -156,6 +164,7 @@ export function createAgentTurnContext(params: {
 
     consecutiveExploreTurns: 0,
     totalExploreTurns: 0,
+    consecutiveRuntimeToolFailureTurns: 0,
     exploreFilesRead: new Set(),
 
     turnsLowNudgeSent: false,
@@ -202,6 +211,7 @@ export function createAgentTurnContext(params: {
     visionConsultativeLocateRetries: 0,
     visionConsultativeAccuracyRetries: 0,
     behaviorPurposeRetries: 0,
+    consultativeUiBehaviorRetries: 0,
 
     consultativeForceAnswerPending: p.locateStatusFollowUpRun,
     lastConsultativeExploreSig: "",
@@ -268,10 +278,20 @@ export function recordPatchFailure(
 /** Called after a turn where the model made productive writes — resets explore tracking. */
 export function resetExploreOnProductiveWrite(ctx: AgentTurnContext): void {
   ctx.consecutiveExploreTurns = 0;
+  ctx.consecutiveRuntimeToolFailureTurns = 0;
   ctx.interimDiagnosisNudgeSent = false;
   ctx.patchAnchorForcePending = false;
   ctx.exploreFilesRead.clear();
   ctx.fileBreadthNudgeSent = false;
+}
+
+/** Whether to skip explore-budget increment for a runtime tool failure turn. */
+export function shouldSkipExploreTurnForRuntimeFailures(
+  ctx: AgentTurnContext,
+  outcomes: Array<{ result: string }>,
+): boolean {
+  if (!isRuntimeExploreFailureTurn(outcomes)) return false;
+  return ctx.consecutiveRuntimeToolFailureTurns < MAX_CONSECUTIVE_RUNTIME_TOOL_FAILURE_TURNS;
 }
 
 export function markStructuredAssetAcquired(
