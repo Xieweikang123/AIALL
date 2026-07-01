@@ -61,13 +61,14 @@ export async function runTurnModelCall(
 
   const firstByteTimeoutMs = (resolveFirstByteTimeoutMs as (m: string) => number | undefined)?.(model) ?? undefined;
   let modelStatusPhase = "waiting_model";
+  let modelWaitStartedAt: number | null = null;
   let streamedChars = 0;
   let streamedMsgContent = "";
   let streamedContentChunks: string[] = [];
 
   const heartbeat = setInterval(() => {
-    if (signal?.aborted) return;
-    const modelWaitStartedAt = Date.now() - 0;
+    if (signal?.aborted || modelWaitStartedAt === null) return;
+    const elapsedMs = Date.now() - modelWaitStartedAt;
     onEvent({
       type: "status",
       data: {
@@ -75,8 +76,8 @@ export async function runTurnModelCall(
         turn,
         ...(ctx.segmentMaxTurns !== undefined ? { maxTurns: ctx.segmentMaxTurns } : {}),
         model,
-        detail: `已等待 ${formatElapsedMs(Date.now() - Date.now() + 0)}`,
-        elapsedMs: 0,
+        detail: `已等待 ${formatElapsedMs(elapsedMs)}`,
+        elapsedMs,
       },
     });
   }, 2000);
@@ -103,6 +104,19 @@ export async function runTurnModelCall(
         ...(ctx.segmentMaxTurns !== undefined ? { maxTurns: ctx.segmentMaxTurns } : {}),
         contextMessages: compactedMessages.length,
         contextChars,
+      },
+    });
+
+    modelWaitStartedAt = Date.now();
+    onEvent({
+      type: "status",
+      data: {
+        phase: modelStatusPhase,
+        turn,
+        ...(ctx.segmentMaxTurns !== undefined ? { maxTurns: ctx.segmentMaxTurns } : {}),
+        model,
+        detail: "已等待 0s",
+        elapsedMs: 0,
       },
     });
 
