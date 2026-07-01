@@ -14,7 +14,7 @@
 
       <!-- Steps -->
       <div v-if="phase !== 'idle'" class="fix-progress">
-        <div class="fix-steps">
+        <div class="fix-steps" :style="{ '--progress': progressPercent + '%' }">
           <template v-for="(s, idx) in stepList" :key="s.key">
             <span :class="stepClass(s.key)">
               <span class="fix-step-dot"></span>
@@ -213,6 +213,10 @@ const progressValue = computed(() => {
   }
 });
 
+const progressPercent = computed(() => {
+  return progressValue.value;
+});
+
 const summary = computed(() => props.scanResult?.summary ?? null);
 
 const groupedIssues = computed(() => {
@@ -269,19 +273,22 @@ const verifyDuration = computed(() => {
 }
 
 .fix-steps {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0;
-  padding: 0 2px;
+  padding: 6px 0;
 }
 .fix-step {
   display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 5px;
   font-size: 11px;
   color: var(--text-muted, #666);
   flex-shrink: 0;
+  z-index: 1;
 }
 .fix-step--active {
   color: var(--accent, #0078d4);
@@ -289,34 +296,38 @@ const verifyDuration = computed(() => {
 }
 .fix-step--done { color: color-mix(in srgb, var(--accent, #0078d4) 55%, var(--text-muted, #666)); }
 .fix-step-dot {
-  width: 12px;
-  height: 12px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   background: var(--border, #444);
+  border: 2px solid var(--surface, #1e1e1e);
   flex-shrink: 0;
   transition: background 0.3s, box-shadow 0.3s;
 }
 .fix-step--active .fix-step-dot {
   background: var(--accent, #0078d4);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent, #0078d4) 20%, transparent), 0 0 8px color-mix(in srgb, var(--accent, #0078d4) 40%, transparent);
+  border-color: var(--accent, #0078d4);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent, #0078d4) 15%, transparent), 0 0 12px color-mix(in srgb, var(--accent, #0078d4) 35%, transparent);
 }
 .fix-step--done .fix-step-dot {
   background: color-mix(in srgb, var(--accent, #0078d4) 50%, var(--border, #444));
 }
 .fix-step-line {
   display: inline-block;
-  width: 20px;
-  height: 2px;
+  flex: 1;
+  height: 3px;
   background: var(--border, #333);
-  margin: 0 4px;
+  border-radius: 2px;
+  margin: 0;
   vertical-align: middle;
-  flex-shrink: 0;
+  flex-shrink: 1;
   transition: background 0.3s;
 }
 .fix-step-line--active {
-  background: linear-gradient(90deg, var(--accent-dim, #0058a3), var(--accent, #0078d4));
+  background: linear-gradient(90deg, var(--accent, #0078d4), color-mix(in srgb, var(--accent, #0078d4) 70%, #00b4d8));
+  box-shadow: 0 0 6px color-mix(in srgb, var(--accent, #0078d4) 30%, transparent);
 }
-.fix-step-label { white-space: nowrap; }
+.fix-step-label { white-space: nowrap; font-size: 11px; letter-spacing: 0.02em; }
 /* Scope */
 .fix-scope { display: flex; flex-direction: column; gap: 6px; }
 .fix-check { display: flex; align-items: center; gap: 8px; font-size: 12px; cursor: pointer; }

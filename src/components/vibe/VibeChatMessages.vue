@@ -17,6 +17,8 @@
       m.role,
       {
         'msg--live': m.role === 'assistant' && ctx.isAgentRunning(m),
+        'msg--live-waiting':
+          m.role === 'assistant' && ctx.isAgentRunning(m) && !ctx.hasAgentActivity(m),
         'msg--agent-done': m.role === 'assistant' && !ctx.isAgentRunning(m) && ctx.hasAgentActivity(m),
       },
     ]"
@@ -29,7 +31,7 @@
       <div class="msg-head">
         <div class="msg-head-left">
           <div class="msg-role">{{ m.role === "user" ? "你" : "Agent" }}</div>
-          <span v-if="m.role === 'assistant' && m.chatMode" class="msg-mode-badge">
+          <span v-if="m.role === 'assistant' && m.chatMode" class="msg-mode-badge" :class="`msg-mode-badge--${m.chatMode}`">
             {{ chatModeLabel(m.chatMode) }}
           </span>
         </div>
@@ -38,7 +40,7 @@
           class="msg-toolbar"
         >
           <button
-            v-if="m.role === 'assistant' || m.role === 'user'"
+            v-if="(m.role === 'user' || (m.role === 'assistant' && !ctx.isAgentRunning(m)))"
             type="button"
             class="ghost small"
             title="复制此消息"
@@ -72,7 +74,7 @@
             重发
           </button>
           <button
-            v-if="ctx.canResumeAgentRun(m) && !ctx.isPartialWrittenRunInterrupt(m)"
+            v-if="ctx.canResumeAgentRun(m) && !ctx.isPartialWrittenRunInterrupt(m) && !ctx.isAgentRunning(m)"
             type="button"
             class="ghost small resume-btn"
             title="从断点继续运行，保留已完成步骤"
@@ -122,23 +124,14 @@
       </div>
       <div
         v-if="m.role === 'assistant' && ctx.isAgentRunning(m) && !ctx.hasAgentActivity(m)"
-        class="msg-live-banner"
-        aria-live="polite"
-        aria-atomic="true"
+        class="msg-live-status-wrap"
       >
-        <span class="status-pulse" aria-hidden="true" />
-        <span class="msg-status-text">{{
-          ctx.agentStatusDisplay(m) ||
-          (m.chatMode === 'explore'
-            ? '正在了解项目…'
-            : m.chatMode === 'ask'
-              ? '思考中…'
-              : m.chatMode === 'plan' && ctx.planExecutionActive.value
-                ? '执行方案中…'
-                : m.chatMode === 'plan'
-                  ? '规划中…'
-                  : 'Agent 运行中…')
-        }}</span>
+        <AgentLiveStatusRail
+          :status-line="agentRunningLabel(m)"
+          :waiting-model="isMessageWaitingModel(m)"
+          shimmer
+          variant="banner"
+        />
       </div>
       <AgentMessage
         v-if="m.role === 'assistant' && ctx.hasAgentActivity(m)"
@@ -213,30 +206,6 @@
         </PlanDocumentBlock>
       </ProjectReportBlock>
 
-      <div
-        v-if="
-          m.role === 'assistant' &&
-          ctx.isAgentRunning(m) &&
-          !ctx.hasAgentActivity(m)
-        "
-        class="msg-status msg-status--legacy"
-      >
-        <span v-if="ctx.isAgentRunning(m)" class="status-pulse" aria-hidden="true" />
-        <span class="msg-status-text">
-          {{
-            ctx.agentStatusDisplay(m) ||
-            (m.chatMode === 'explore'
-              ? '正在了解项目…'
-              : m.chatMode === 'ask'
-              ? '思考中…'
-              : m.chatMode === 'plan' && ctx.isAgentRunning(m) && ctx.planExecutionActive.value
-                ? '执行方案中…'
-                : m.chatMode === 'plan'
-                  ? '规划中…'
-                  : 'Agent 运行中…')
-          }}
-        </span>
-      </div>
       <div
         v-if="m.role === 'assistant' && m.turnFileDiffs && Object.keys(m.turnFileDiffs).length"
         class="inline-diff-list"
@@ -355,6 +324,8 @@
         </div>
       </div>
     </div>
+
+    <div class="chat-scroll-anchor" aria-hidden="true" />
   </div>
 
   <!-- 图片查看器模态框 -->
@@ -389,7 +360,9 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, ref, watch } from "vue";
 import AgentMessage from "../AgentMessage.vue";
+import AgentLiveStatusRail from "../AgentLiveStatusRail.vue";
 import ChatMarkdown from "../ChatMarkdown.vue";
+import { isAgentWaitingModelPhase } from "../../services/agentCompactStatus";
 import PlanDocumentBlock from "../PlanDocumentBlock.vue";
 import ProjectReportBlock from "../ProjectReportBlock.vue";
 import { enrichPlanMarkdownForDisplay } from "../../services/planDocumentDisplay";
@@ -438,6 +411,7 @@ function messageMemoKey(m: VibeChatMessageItem): unknown[] {
     return [
       m.id,
       "running-lite",
+      ctx.agentLiveRevision.value,
       m.streamChars ?? 0,
       m.agentPhase,
       m.content?.length ?? 0,
@@ -518,6 +492,23 @@ const CHAT_MODE_LABELS: Record<string, string> = {
 function chatModeLabel(mode: string | undefined): string {
   if (!mode) return "";
   return CHAT_MODE_LABELS[mode] ?? mode;
+}
+
+function agentRunningLabel(m: VibeChatMessageItem): string {
+  const live = ctx.agentStatusDisplay(m)?.trim();
+  if (live) return live;
+  if (m.chatMode === "explore") return "正在了解项目…";
+  if (m.chatMode === "ask") return "思考中…";
+  if (m.chatMode === "plan" && ctx.planExecutionActive.value) return "执行方案中…";
+  if (m.chatMode === "plan") return "规划中…";
+  return "Agent 运行中…";
+}
+
+function isMessageWaitingModel(m: VibeChatMessageItem): boolean {
+  return isAgentWaitingModelPhase({
+    agentPhase: m.agentPhase,
+    statusLine: agentRunningLabel(m),
+  });
 }
 
 function shortDiffPath(path: string): string {

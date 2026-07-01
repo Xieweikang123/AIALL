@@ -903,16 +903,17 @@ let sessionScrollClearTimer: number | null = null;
 onMounted(() => {
   void nextTick(() => {
     checkScrollPosition();
-    const el = chatScrollRef.value;
-    if (!el || typeof ResizeObserver === "undefined") return;
+    const scrollEl = chatScrollRef.value;
+    if (!scrollEl || typeof ResizeObserver === "undefined") return;
+    const contentEl = scrollEl.querySelector(".msg-list") ?? scrollEl;
     scrollResizeObserver = new ResizeObserver(() => {
-      if (sessionScrollPending) {
+      if (sessionScrollPending || (props.chatSending && isAtBottom.value)) {
         scrollToBottom();
-      } else {
-        checkScrollPosition();
+        return;
       }
+      checkScrollPosition();
     });
-    scrollResizeObserver.observe(el);
+    scrollResizeObserver.observe(contentEl);
   });
 });
 
@@ -1112,7 +1113,6 @@ function removeQuotedMessage(index: number) {
   flex: 1;
   overflow-y: auto;
   overflow-x: clip;
-  overflow-anchor: none;
   scroll-padding-bottom: 12px;
   padding: 20px 18px;
   position: relative;
@@ -1358,6 +1358,10 @@ function removeQuotedMessage(index: number) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat-running-status .status-pulse {
+  flex-shrink: 0;
 }
 
 .chat-error {
