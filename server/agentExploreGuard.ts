@@ -304,7 +304,13 @@ const UNVERIFIED_ALL_CLEAR_RE =
 
 /** Reply claims write/patch success — used with patch failure audit. */
 const WRITE_SUCCESS_CLAIM_RE =
-  /(?:✅|修复完成|修改已完成|已完成|改动已全部|全部到位|两处修改|三处修改|均已?成功|patch\s*均成功)/i;
+  /(?:✅|修复完成|修改已完成|已完成|改动已全部|全部到位|两处修改|三处修改|均已?成功|patch\s*均成功|无失败项|无剩余问题)/i;
+
+const DEFER_EXECUTE_REPLY_RE =
+  /(?:下一步|接下来|随后|稍后)我会|按你的要求.{0,24}(?:只)?(?:执行|修改|patch)/i;
+
+const BUILD_CONFIRM_ASK_RE =
+  /需要我(?:实际)?执行|请确认优先级|我可以逐个/i;
 
 export function claimsPrematureCompletion(text: string): boolean {
   const body = sanitizeAgentUserVisibleText(text);
@@ -392,7 +398,9 @@ export function isAnalysisOnlyReplyUnderForcePatch(text: string): boolean {
   const body = sanitizeAgentUserVisibleText(text);
   if (!body) return true;
   if (MANUAL_PASTE_INSTRUCTION_RE.test(body)) return true;
-  if (/修复方案|以下是具体修改|###\s*修改/i.test(body) && /```[\s\S]+```/.test(body) && !WRITE_DONE_RE.test(body)) {
+  if (DEFER_EXECUTE_REPLY_RE.test(body) && !WRITE_DONE_RE.test(body)) return true;
+  if (BUILD_CONFIRM_ASK_RE.test(body) && !WRITE_DONE_RE.test(body)) return true;
+  if (/修复方案|以下是具体修改|###\s*修改|建议改造方案/i.test(body) && /```[\s\S]+```/.test(body) && !WRITE_DONE_RE.test(body)) {
     return true;
   }
   if (WRITE_DONE_RE.test(body)) return false;

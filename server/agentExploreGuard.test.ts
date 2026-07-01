@@ -86,6 +86,12 @@ describe("agentExploreGuard", () => {
     expect(isAnalysisOnlyReplyUnderForcePatch(analysis)).toBe(true);
     expect(isAnalysisOnlyReplyUnderForcePatch("已修复 getSelectionAnchorRect，改动如下：…")).toBe(false);
     expect(isAnalysisOnlyReplyUnderForcePatch("请将这两处修改应用到 src/views/VibeCodingView.vue")).toBe(true);
+    expect(
+      isAnalysisOnlyReplyUnderForcePatch("明白了——下一步我会只执行代码修改"),
+    ).toBe(true);
+    expect(
+      isAnalysisOnlyReplyUnderForcePatch("需要我实际执行这些修改吗？请确认优先级。"),
+    ).toBe(true);
   });
 
   it("force-patch when anchor located and pending", () => {
@@ -163,6 +169,7 @@ describe("agentExploreGuard", () => {
   it("detects success claims despite patch failures", () => {
     expect(claimsSuccessDespitePatchFailures("✅ 两处修改已完成", 1)).toBe(true);
     expect(claimsSuccessDespitePatchFailures("结论：当前代码没有 bug", 2)).toBe(true);
+    expect(claimsSuccessDespitePatchFailures("全部修改项均已 patch 成功，无失败项。", 1)).toBe(true);
     expect(claimsSuccessDespitePatchFailures("仍需 read 后再 patch", 1)).toBe(false);
     expect(claimsSuccessDespitePatchFailures("✅ 修复完成", 0)).toBe(false);
   });
