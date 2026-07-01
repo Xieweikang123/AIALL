@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createWriteStage } from "./agentToolExecutor";
+import { createWriteStage, hydrateWriteStageFromPriorPaths } from "./agentToolExecutor";
 import {
   buildFinishGateRetryNudge,
   evaluateFinishGate,
@@ -194,6 +194,30 @@ describe("evaluateFinishGate", () => {
     });
 
     expect(result.violations.some((v) => v.code === "task_anchor_miss")).toBe(false);
+  });
+
+  it("passes when prior-segment writes are hydrated into writeStage", () => {
+    const stage = createWriteStage();
+    hydrateWriteStageFromPriorPaths(stage, ["src/views/VibeCodingView.vue"]);
+    stage.files.set("src/components/vibe/AutoBugFixPanel.vue", "export default {};\n");
+    stage.writtenList.push("src/components/vibe/AutoBugFixPanel.vue");
+
+    const result = evaluateFinishGate({
+      rawContent:
+        "已修改 src/views/VibeCodingView.vue 与 src/components/vibe/AutoBugFixPanel.vue。",
+      writeStage: stage,
+      isReadOnlyAgent: false,
+      isPlanExplore: false,
+      readOnlyBuildRun: false,
+      isExecutePlan: false,
+      implementFollowUpRun: false,
+    });
+
+    expect(result.blocked).toBe(false);
+    expect(productiveWrittenPaths(stage)).toEqual([
+      "src/views/VibeCodingView.vue",
+      "src/components/vibe/AutoBugFixPanel.vue",
+    ]);
   });
 
   it("buildFinishGateRetryNudge includes violation details", () => {

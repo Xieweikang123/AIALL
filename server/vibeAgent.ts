@@ -59,6 +59,7 @@ import { runTurnExecution } from "./agentTurnExecution";
 import { handleTurnSegment } from "./agentTurnSegment";
 import { buildTurnRunConfig } from "./agentTurnRunConfig";
 import { normalizeExecutePlanContext, type ExecutePlanContextInput } from "./agentExecutePlanContext";
+import { hydrateWriteStageFromPriorPaths } from "./agentToolExecutor";
 
 export type { VibeAgentEvent, VibeChatMode, VibeChatHistoryMessage } from "../shared/agentTypes";
 
@@ -79,6 +80,8 @@ export interface RunVibeAgentParams {
   runProfile?: ExecutePlanContextInput;
   /** @deprecated Use runProfile.kind === "execute_plan" */
   executionMode?: boolean;
+  /** Productive paths already written in earlier segments of the same assistant turn. */
+  taskWrittenFiles?: string[];
   onEvent: (event: VibeAgentEvent) => void;
   signal?: AbortSignal;
 }
@@ -95,6 +98,7 @@ export {
   createWriteStage,
   executeTool,
   trackWrittenFile,
+  hydrateWriteStageFromPriorPaths,
   readStagedFileContent,
   isAgentsGuideOnlyPath,
   recordGrepHitVueFiles,
@@ -306,6 +310,9 @@ export async function runVibeAgent(params: RunVibeAgentParams): Promise<void> {
     planPendingAmendRun: runPolicy.pendingPlanAmendRun,
     planPendingClarifyRun: runPolicy.pendingPlanClarifyRun,
   });
+  if (params.taskWrittenFiles?.length) {
+    hydrateWriteStageFromPriorPaths(ctx.writeStage, params.taskWrittenFiles);
+  }
 
   const userContent = buildVisionUserContent(prompt, imageDataUrls);
   ctx.messages = [

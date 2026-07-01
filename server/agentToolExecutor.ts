@@ -83,8 +83,18 @@ export function createWriteStage(): WriteStage {
 }
 
 export function trackWrittenFile(stage: WriteStage, relative: string) {
-  if (!stage.writtenList.includes(relative)) {
-    stage.writtenList.push(relative);
+  const normalized = relative.replace(/\\/g, "/").trim();
+  if (!normalized) return;
+  if (!stage.writtenList.includes(normalized)) {
+    stage.writtenList.push(normalized);
+  }
+}
+
+/** Restore productive write paths after client resume so finish gate sees prior segments. */
+export function hydrateWriteStageFromPriorPaths(stage: WriteStage | null, paths: string[]): void {
+  if (!stage || !paths.length) return;
+  for (const raw of paths) {
+    trackWrittenFile(stage, raw);
   }
 }
 
