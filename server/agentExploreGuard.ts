@@ -138,6 +138,8 @@ export type ToolGuardContext = {
   patchRecoveryFiles?: Set<string>;
   /** Paths read during consultative read-only runs — for accuracy trace depth checks. */
   consultativeReadPaths?: string[];
+  /** read_file paths that failed this run — do not cite in answers. */
+  consultativeReadFailedPaths?: string[];
   /** Grep patterns used this run — for scheduled-job registration trace checks. */
   grepPatterns?: string[];
   /** Full vision-first-turn narrative — extra anchor for grep guard. */
@@ -342,6 +344,26 @@ export function shouldNudgeAlternateUiPatchStrategy(
 /** Tool handlers prefix failures with these markers — keep in sync with executeTool / toolSummary. */
 export function isToolResultFailure(result: string): boolean {
   return result.startsWith("错误：") || result.startsWith("命令执行失败");
+}
+
+/** Intentional guard/validation — agent should adapt; still counts toward explore budget. */
+const AGENT_TOOL_GUARD_FAILURE_RE =
+  /^错误：(缺少|不是(?:目录|文件)|路径|无效|未知工具|请先 read_file|已连续|grep「|读图|已确认|不允许|不支持|Ask 模式|Explore 模式|规划模式|咨询只读|一键修复)/;
+
+/** Environment/runtime failure (ReferenceError, CLI crash, etc.) — not agent mis-exploration. */
+export function isSystemRuntimeToolFailure(result: string): boolean {
+  if (result.startsWith("命令执行失败")) return true;
+  if (!result.startsWith("错误：")) return false;
+  if (AGENT_TOOL_GUARD_FAILURE_RE.test(result)) return false;
+  if (/不应 grep|过宽|高度重叠/.test(result)) return false;
+  return true;
+}
+
+/** Explore-only turn where every tool failed due to system/runtime errors. */
+export function isRuntimeExploreFailureTurn(outcomes: Array<{ result: string }>): boolean {
+  if (!outcomes.length) return false;
+  if (!outcomes.every((o) => isToolResultFailure(o.result))) return false;
+  return outcomes.some((o) => isSystemRuntimeToolFailure(o.result));
 }
 
 export function isEmptyOrInsufficientFinalReply(text: string): boolean {

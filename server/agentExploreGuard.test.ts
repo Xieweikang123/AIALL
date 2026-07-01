@@ -16,6 +16,8 @@ import {
   isOverlyBroadVisionGrep,
   isSearchFilesContentQuery,
   isVisionGrepLowSpread,
+  isSystemRuntimeToolFailure,
+  isRuntimeExploreFailureTurn,
   readLineRangeFromArgs,
   readRangesOverlap,
   recordReadRange,
@@ -204,5 +206,27 @@ describe("agentExploreGuard", () => {
     expect(isToolResultFailure("错误：文件不存在")).toBe(true);
     expect(isToolResultFailure("命令执行失败：\nstderr: foo")).toBe(true);
     expect(isToolResultFailure("stdout:\nok")).toBe(false);
+  });
+
+  it("distinguishes runtime tool failures from guard failures", () => {
+    expect(isSystemRuntimeToolFailure("错误：isVisionGrepLowSpread is not defined")).toBe(true);
+    expect(isSystemRuntimeToolFailure("命令执行失败：\nstderr: boom")).toBe(true);
+    expect(isSystemRuntimeToolFailure("错误：grep「foo」过宽，易扫出大量无关命中。")).toBe(false);
+    expect(isSystemRuntimeToolFailure("错误：缺少 pattern")).toBe(false);
+  });
+
+  it("detects runtime explore failure turns", () => {
+    expect(
+      isRuntimeExploreFailureTurn([{ result: "错误：is not defined" }]),
+    ).toBe(true);
+    expect(
+      isRuntimeExploreFailureTurn([{ result: "错误：grep「x」过宽，易扫出大量无关命中。" }]),
+    ).toBe(false);
+    expect(
+      isRuntimeExploreFailureTurn([
+        { result: "错误：is not defined" },
+        { result: "src/foo.ts:1: match" },
+      ]),
+    ).toBe(false);
   });
 });

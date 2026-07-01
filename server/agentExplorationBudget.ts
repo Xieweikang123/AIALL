@@ -23,6 +23,9 @@ export const ASK_EXPLORE_TURN_BUDGET = 5;
 /** Consecutive read-only turns in consultative build (read-only) before nudging to answer. */
 export const CONSULTATIVE_BUILD_EXPLORE_TURN_BUDGET = 4;
 
+/** Max explore turns skipped for consecutive runtime tool failures before counting resumes. */
+export const MAX_CONSECUTIVE_RUNTIME_TOOL_FAILURE_TURNS = 3;
+
 /** Ask mode soft cap — strip wide-search tools, still allow read_file. */
 export const ASK_MAX_TOTAL_EXPLORE_SOFT = 8;
 
@@ -165,6 +168,23 @@ export function buildConsultativeDuplicateExploreNudge(): string {
   ].join("");
 }
 
+/** Injected when tools fail due to environment/runtime errors — turn not counted toward explore budget. */
+export function buildRuntimeToolFailureRecoveryNudge(
+  consecutiveSkipped: number,
+  forcedCount: boolean,
+): string {
+  if (forcedCount) {
+    return [
+      `【系统提示】工具已连续 ${consecutiveSkipped} 轮运行时异常失败，本轮计入探索预算以防卡死。`,
+      "请改换工具或 pattern 重试；若仍失败，基于已有证据作答并标明未能读码确认的部分。",
+    ].join("");
+  }
+  return [
+    `【系统提示】本轮工具因环境/运行时异常失败（第 ${consecutiveSkipped}/${MAX_CONSECUTIVE_RUNTIME_TOOL_FAILURE_TURNS} 次豁免），不计入探索轮次。`,
+    "请改换 grep 符号或 read 已知路径重试；勿重复相同调用。",
+  ].join("");
+}
+
 /** Injected when grep returns no matches for a pattern in the current turn. */
 export function buildGrepEmptyRecoveryNudge(patterns: string[]): string {
   const listed = patterns
@@ -175,6 +195,20 @@ export function buildGrepEmptyRecoveryNudge(patterns: string[]): string {
     `【系统提示】本轮 grep 未找到匹配：${listed}。`,
     "禁止重复相同 pattern；请改用精确函数/导出名、调用方符号，或更短的英文标识符。",
     "行为类问题：底层未命中时应 grep 上层 handler/composable 再 read，禁止广搜凑轮次。",
+  ].join("");
+}
+
+/** Injected when read_file fails — especially paths cited in prior assistant replies. */
+export function buildReadFileFailedRecoveryNudge(failedPaths: string[]): string {
+  const listed = failedPaths
+    .slice(0, 3)
+    .map((path) => `\`${path}\``)
+    .join("、");
+  return [
+    `【系统提示】本轮 read_file 失败：${listed}。`,
+    "禁止重复 read 同一路径；禁止在答复中引用该路径下的行号或符号。",
+    "请 grep 可见 tab 文案、kebab-case class 或 composable/mode 符号重新定位，read 成功后再引用代码。",
+    "若会话 history 中 assistant 曾引用不存在路径，须显式更正，勿沿用。",
   ].join("");
 }
 

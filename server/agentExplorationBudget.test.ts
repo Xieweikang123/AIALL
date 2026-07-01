@@ -11,6 +11,9 @@ import {
   buildExploreInterimDiagnosisNudge,
   buildGrepEmptyRecoveryNudge,
   buildGrepHitVueReadNudge,
+  buildReadFileFailedRecoveryNudge,
+  buildRuntimeToolFailureRecoveryNudge,
+  MAX_CONSECUTIVE_RUNTIME_TOOL_FAILURE_TURNS,
   buildPatchAnchorForcePatchNudge,
   buildPatchFailureCompletionRetryNudge,
   buildExplorationArchiveWriteBlockedMessage,
@@ -120,6 +123,18 @@ describe("agentExplorationBudget", () => {
     expect(nudge).toContain("switchFooContext");
     expect(nudge).toContain("禁止重复相同 pattern");
     expect(nudge).toContain("handler/composable");
+  });
+
+  it("builds read_file failure recovery nudge", () => {
+    const nudge = buildReadFileFailedRecoveryNudge(["src/missing.vue"]);
+    expect(nudge).toContain("read_file 失败");
+    expect(nudge).toContain("禁止重复 read");
+  });
+
+  it("builds runtime tool failure recovery nudge", () => {
+    expect(MAX_CONSECUTIVE_RUNTIME_TOOL_FAILURE_TURNS).toBe(3);
+    expect(buildRuntimeToolFailureRecoveryNudge(1, false)).toContain("不计入探索轮次");
+    expect(buildRuntimeToolFailureRecoveryNudge(3, true)).toContain("计入探索预算");
   });
 
   it("builds grep hit vue read nudge and consultative segment cap", () => {
