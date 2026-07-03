@@ -665,6 +665,7 @@ import { usePlanPanel } from "../composables/usePlanPanel";
 import { restoreChatScrollPosition, useWorkspaceUiPersistence } from "../composables/useWorkspaceUiPersistence";
 import { PROJECT_ARCHITECT_REVIEW_REL_PATH } from "../services/vibeProjectArchitectReviewClient";
 import { PROJECT_KNOWLEDGE_REL_PATH } from "../services/vibeProjectKnowledgeClient";
+import { isTauriEnv } from "../services/tauriInvoke";
 import { distillExplorationRun } from "../services/explorationDistill";
 import {
   ensurePlanFileBeforeExecution,
@@ -2511,6 +2512,7 @@ async function openProjectByPath(dirPath: string) {
   };
 
   const flushLog = (result: string) => {
+    if (!isTauriEnv()) return;
     const line = `[${new Date().toISOString()}] ${normalized} | ${result}`;
     fetch("/backend/vibe/log", {
       method: "POST",

@@ -111,7 +111,7 @@
           :aria-pressed="projectPanelView === 'fix'"
           @click="$emit('update:projectPanelView', 'fix')"
         >
-          修复
+          测试修复
         </button>
       </div>
       <div v-if="gitPanelMode === 'files'" class="file-panel-row file-panel-search-row">

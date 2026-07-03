@@ -1,6 +1,7 @@
 import type { AgentStatusData } from "../types/vibeChat";
 import type { VibeChatMode } from "../../shared/agentTypes";
 import { appendStatusDetail } from "../utils/vibeHelpers";
+import { agentConnectingStatusText } from "./agentConnectCopy";
 
 /** Ephemeral Agent progress — lives on SessionAgentRun only, never persisted. */
 export type AgentRunLiveState = {
@@ -76,7 +77,7 @@ export function formatAgentLiveStatus(
   const { chatMode, openFile, compact = false } = options;
   const { phase, turn, maxTurns, model, toolTitle, toolDetail, detail } = live;
 
-  if (phase === "connecting_local") return "正在连接本地服务（127.0.0.1:37891）…";
+  if (phase === "connecting_local") return agentConnectingStatusText();
   if (phase === "stream_connected") return "本地服务已连接，等待 Agent 启动…";
   if (phase === "connected") return "本地 Agent 服务已就绪，正在启动任务…";
   if (phase === "reconnecting") {

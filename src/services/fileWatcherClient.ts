@@ -1,4 +1,6 @@
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { backendUrl } from "./backendBase";
+import { isTauriEnv, tauriInvoke } from "./tauriInvoke";
 import { readJsonResponse } from "./vibeCodingClient";
 
 export interface FileChangeEvent {
@@ -20,10 +22,39 @@ export interface FileWatcherStopResult {
   error?: string;
 }
 
+type TauriWatcherPayload = {
+  type?: FileChangeEvent["type"] | "change";
+  path?: string;
+  paths?: string[];
+  timestamp?: number;
+};
+
+const FILE_CHANGE_TYPES = new Set<FileChangeEvent["type"]>([
+  "add",
+  "change",
+  "unlink",
+  "addDir",
+  "unlinkDir",
+]);
+
 export async function startFileWatcher(
   projectPath: string,
   watchPaths?: string[]
 ): Promise<FileWatcherStartResult> {
+  if (isTauriEnv()) {
+    const paths = watchPaths?.length ? watchPaths : [projectPath];
+    try {
+      const result = await tauriInvoke<{ ok?: boolean }>("file_watcher_start", { paths });
+      return { ok: result.ok !== false, message: "", watchedPaths: paths };
+    } catch (error) {
+      return {
+        ok: false,
+        message: "",
+        watchedPaths: [],
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
   try {
     watchedProjectPath = projectPath;
     const url = backendUrl("/backend/vibe/file-watcher/start");
@@ -44,6 +75,18 @@ export async function startFileWatcher(
 }
 
 export async function stopFileWatcher(): Promise<FileWatcherStopResult> {
+  if (isTauriEnv()) {
+    try {
+      await tauriInvoke("file_watcher_stop");
+      return { ok: true, message: "" };
+    } catch (error) {
+      return {
+        ok: false,
+        message: "",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
   try {
     const url = backendUrl("/backend/vibe/file-watcher/stop");
     const response = await fetch(url, {
@@ -65,14 +108,47 @@ export type FileWatcherErrorCallback = (error: string) => void;
 export type FileWatcherStatusCallback = (connected: boolean) => void;
 
 let eventSource: EventSource | null = null;
+let tauriUnlisten: UnlistenFn | null = null;
 let changeCallback: FileWatcherChangeCallback | null = null;
 let errorCallback: FileWatcherErrorCallback | null = null;
 let statusCallback: FileWatcherStatusCallback | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let changeFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingChanges: FileChangeEvent[] = [];
 let disposed = false;
 let watchedProjectPath: string | null = null;
 
 const RECONNECT_DELAY = 3000;
+const CHANGE_FLUSH_DELAY = 300;
+
+function mapTauriWatcherPayload(payload: TauriWatcherPayload): FileChangeEvent[] {
+  const timestamp = payload.timestamp ?? Date.now();
+  if (payload.path) {
+    const type = payload.type && FILE_CHANGE_TYPES.has(payload.type as FileChangeEvent["type"])
+      ? payload.type as FileChangeEvent["type"]
+      : "change";
+    return [{ type, path: payload.path, timestamp }];
+  }
+  if (payload.paths?.length) {
+    return payload.paths.map((path) => ({
+      type: "change" as const,
+      path,
+      timestamp,
+    }));
+  }
+  return [];
+}
+
+function scheduleChangeFlush() {
+  if (changeFlushTimer) clearTimeout(changeFlushTimer);
+  changeFlushTimer = setTimeout(() => {
+    changeFlushTimer = null;
+    if (pendingChanges.length === 0 || !changeCallback) return;
+    const batch = pendingChanges;
+    pendingChanges = [];
+    changeCallback(batch);
+  }, CHANGE_FLUSH_DELAY);
+}
 
 function bindStreamListeners() {
   if (!eventSource) return;
@@ -116,7 +192,6 @@ async function reconnect() {
   reconnectTimer = setTimeout(async () => {
     reconnectTimer = null;
     if (disposed || !changeCallback) return;
-    // 重新启动服务器端 watcher（如果之前有项目路径）
     if (watchedProjectPath) {
       try {
         await startFileWatcher(watchedProjectPath);
@@ -141,6 +216,31 @@ export function connectFileWatcherStream(
   errorCallback = onError || null;
   statusCallback = onStatus || null;
 
+  if (isTauriEnv()) {
+    void listen<TauriWatcherPayload>("file-watcher", (event) => {
+      if (disposed) return;
+      const mapped = mapTauriWatcherPayload(event.payload);
+      if (mapped.length === 0) return;
+      pendingChanges.push(...mapped);
+      scheduleChangeFlush();
+    })
+      .then((unlisten) => {
+        if (disposed) {
+          void unlisten();
+          return;
+        }
+        tauriUnlisten = unlisten;
+        statusCallback?.(true);
+      })
+      .catch((error) => {
+        statusCallback?.(false);
+        errorCallback?.(error instanceof Error ? error.message : "文件监听连接失败");
+      });
+    return () => {
+      disconnectFileWatcherStream();
+    };
+  }
+
   eventSource = new EventSource(backendUrl("/backend/vibe/file-watcher/stream"));
   bindStreamListeners();
 
@@ -155,11 +255,22 @@ export function disconnectFileWatcherStream(): void {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
+  if (changeFlushTimer) {
+    clearTimeout(changeFlushTimer);
+    changeFlushTimer = null;
+  }
+  pendingChanges = [];
+  if (tauriUnlisten) {
+    void tauriUnlisten();
+    tauriUnlisten = null;
+  }
   if (eventSource) {
     eventSource.close();
     eventSource = null;
   }
   changeCallback = null;
   errorCallback = null;
+  statusCallback?.(false);
+  statusCallback = null;
   watchedProjectPath = null;
 }

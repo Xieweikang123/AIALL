@@ -14,7 +14,7 @@ function readBackendBaseEnv(): string {
 
 const BACKEND_BASE = readBackendBaseEnv();
 
-/** 桌面版走绝对 URL；Web 开发走 Vite 代理的相对路径。 */
+/** 浏览器 UI 预览；后端能力需 Tauri 桌面版（npm run dev）。 */
 export function backendUrl(path: string): string {
   const normalized = path.startsWith("/") ? path : `/${path}`;
   return BACKEND_BASE ? `${BACKEND_BASE}${normalized}` : normalized;

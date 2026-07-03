@@ -18,6 +18,8 @@ import type { AgentRoundGroup } from "./agentRoundGroups";
 import { stripReferenceAttachments, stripToolSummaryFromAssistantContent } from "./vibeChatStorage";
 import { buildAbortExitSummary } from "../../shared/agentProbeGuard";
 
+export { agentConnectStallMessage } from "./agentConnectCopy";
+
 export type AgentProgressTool = {
   running?: boolean;
   label?: string;
@@ -88,12 +90,6 @@ export function isAgentConnectStalled(
   return now - connectStartedAt >= thresholdMs;
 }
 
-export function agentConnectStallMessage(hasImages = false): string {
-  if (hasImages) {
-    return "连接本地 Agent 超时（可能因图片过大或 sidecar 未运行）。请确认已执行 npm run sidecar，或缩小截图后重试。";
-  }
-  return "无法连接本地 Agent（127.0.0.1:37891）。请在项目目录运行 npm run sidecar 或 npm run dev。";
-}
 
 export function buildAgentMaxTurnsExhaustedMessage(maxTurns: number): string {
   return `已达最大轮次（${maxTurns}），任务可能未完成。`;

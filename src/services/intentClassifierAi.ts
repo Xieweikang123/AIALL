@@ -11,8 +11,23 @@ import type { ConfigBindingTopic } from "../orchestration/agentIntentTypes";
 
 const SHORT_FOLLOW_UP_ASSISTANT_CHARS = 2_000;
 
+function readIntentEnv(key: string): string {
+  if (typeof process !== "undefined") {
+    const fromProcess = process.env?.[key];
+    if (typeof fromProcess === "string" && fromProcess.trim()) {
+      return fromProcess.trim();
+    }
+  }
+  const viteKey = `VITE_${key}` as keyof ImportMetaEnv;
+  const fromVite = import.meta.env?.[viteKey];
+  if (typeof fromVite === "string" && fromVite.trim()) {
+    return fromVite.trim();
+  }
+  return "";
+}
+
 export function resolveIntentClassifierModel(mainModel: string): string {
-  const override = (process.env.AIALL_INTENT_CLASSIFIER_MODEL || "").trim();
+  const override = readIntentEnv("AIALL_INTENT_CLASSIFIER_MODEL");
   return override || mainModel;
 }
 
@@ -177,6 +192,6 @@ export function parseIntentClassifierResponse(text: string): UserIntentAiPayload
 }
 
 export function shouldUseAiIntentClassifier(): boolean {
-  const flag = (process.env.AIALL_INTENT_CLASSIFIER || "ai").trim().toLowerCase();
+  const flag = (readIntentEnv("AIALL_INTENT_CLASSIFIER") || "ai").trim().toLowerCase();
   return flag !== "rules" && flag !== "off" && flag !== "0";
 }

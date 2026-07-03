@@ -8,8 +8,6 @@ repository = ""
 edition = "2021"
 rust-version = "1.77.2"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [lib]
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
@@ -25,3 +23,21 @@ tauri = { version = "2.11.2", features = [] }
 tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-opener = "2"
+tokio = { version = "1", features = ["full"] }
+regex = "1"
+walkdir = "2"
+notify = "6"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+futures-util = "0.3"
+chrono = { version = "0.4", features = ["serde"] }
+base64 = "0.22"
+fs2 = "0.4"
+uuid = { version = "1", features = ["v4"] }
+thiserror = "2"
+once_cell = "1"
+image = "0.25"
+rand = "0.8"
+urlencoding = "2"
+headless_chrome = "1.0"

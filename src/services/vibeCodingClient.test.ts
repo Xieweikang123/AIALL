@@ -9,10 +9,6 @@ import {
   writeFile,
 } from "./vibeCodingClient";
 
-vi.mock("@tauri-apps/plugin-dialog", () => ({
-  open: vi.fn(),
-}));
-
 function mockFetchJson(data: unknown) {
   const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(data), { status: 200 }));
   vi.stubGlobal("fetch", fetchMock);
@@ -105,7 +101,7 @@ describe("vibeCodingClient", () => {
       ok: false,
       path: "D:/demo",
       items: [],
-      error: "后端服务未启动或已崩溃（HTTP 502），请运行 npm run dev 重启",
+      error: "后端服务未响应（HTTP 502），请重启应用",
     });
   });
 

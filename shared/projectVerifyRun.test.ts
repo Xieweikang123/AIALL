@@ -3,6 +3,7 @@ import {
   classifyVerifyStderr,
   compareVerifyRuns,
   computeVerifyPassed,
+  extractFailingFilesFromVerifyOutput,
   formatVerifyComparisonSummary,
   getVerifyEnvironmentNote,
   isVerifyRunCommand,
@@ -62,5 +63,15 @@ describe("projectVerifyRun helpers", () => {
     expect(isVerifyRunCommand("cd D:\\proj; npm run test", scripts)).toBe(true);
     expect(isVerifyRunCommand("echo hello", scripts)).toBe(false);
     expect(isVerifyRunCommand("npm install", scripts)).toBe(false);
+  });
+
+  it("extractFailingFilesFromVerifyOutput parses vitest FAIL lines and stack traces", () => {
+    const stdout = "FAIL src/foo.test.ts > case\n";
+    expect(extractFailingFilesFromVerifyOutput(stdout, "")).toContain("src/foo.test.ts");
+    const withStderr = extractFailingFilesFromVerifyOutput(stdout, "at src/foo.test.ts:12:3");
+    expect(withStderr).toContain("src/foo.test.ts");
+    expect(extractFailingFilesFromVerifyOutput("FAIL src\\bar\\foo.test.ts > case\n", "")).toContain(
+      "src/bar/foo.test.ts",
+    );
   });
 });

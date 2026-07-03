@@ -5,7 +5,11 @@ node_modules/
 dist/
 dist-ssr/
 sidecar/dist/
+src-tauri/resources/node/
+src-tauri/resources/.node-extract/
+src-tauri/resources/node-v*/
 src-tauri/target/
+src-tauri/agent-regression-vectors.json
 *.local
 
 ## logs

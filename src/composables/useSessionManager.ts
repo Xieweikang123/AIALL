@@ -55,7 +55,9 @@ export function useSessionManager(projectPath: () => string) {
   }
 
   function switchToAdjacentSession(delta: number) {
-    if (!projectPath() || !sessionList.value.length) return;
+    if (!projectPath()) return;
+    refreshSessionList();
+    if (!sessionList.value.length) return;
     let nextIdx = activeSessionIndex.value + delta;
     if (activeSessionIndex.value < 0 && delta > 0) nextIdx = 0;
     if (nextIdx < 0 || nextIdx >= sessionList.value.length) return;

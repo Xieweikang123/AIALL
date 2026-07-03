@@ -31,13 +31,12 @@
 - `src/composables/useGitPanel.ts` — Git 状态管理
 - `src/composables/useEditorPanel.ts` — 编辑器状态
 - `src/services/vibeCodingClient.ts` — vibe coding 客户端服务
-- `src/services/vibeGitClient.ts` — Git 客户端（diff/status/commit 等 API 调用）
-- `vibeRoutesGit.ts` — Git HTTP 路由层（解析请求参数，转发给 server/vibeGit.ts）
-- `server/vibeGit.ts` — Git 命令执行层（直接调 git CLI）
+- `src/services/vibeGitClient.ts` — Git 客户端（Tauri invoke → `src-tauri/src/git/`）
+- `server/vibeGit.ts` — Git 逻辑参考实现（Vitest / `agent-smoke` 用，非 HTTP 运行时）
 - `src/services/vibeAgentClient.ts` — AI agent 客户端
 - `src/services/vibeChatStorage.ts` — 聊天持久化
 - `src/utils/renderMarkdown.ts` — Markdown 渲染
-- `server/vibeAgent.ts` — AI agent 后端服务
+- `server/vibeAgent.ts` — Node Agent 参考实现（Vitest / `agent-smoke` 用；桌面运行时走 `src-tauri/`）
 
 ## 产品入口（顶层路由）
 
@@ -47,6 +46,17 @@
 | `/chat` | 通用对话：网页 URL 总结、结合图标模板的桌面 UI 自动化 |
 | `/icon-templates` | 录入任务栏/桌面截图模板，供 Chat 自动化匹配点击 |
 | `/ai-config` | 配置 API Key、模型、网页抓取代理等 |
+
+## 开发与运行
+
+| 命令 | 用途 |
+|------|------|
+| `npm run dev` | **默认**：Tauri 桌面版（Agent / Git / FS 全走 Rust） |
+| `npm run tauri:build` | 打包桌面应用 |
+| `npm run dev:web` | 浏览器 UI 预览（Agent/Git/FS 不可用，提示使用桌面版） |
+| `npm run test:rust-agent` | Rust Agent parity 单测 |
+
+Sidecar 已按策略 B 删除，见 [`SIDECAR_DELETION.md`](SIDECAR_DELETION.md)。桌面功能以 `src-tauri/` 为准；`server/` 保留编排逻辑与 Vitest，不再提供 HTTP 服务。
 
 ## Agent 编排分层
 
@@ -99,6 +109,13 @@ AIALL 的 Vibe 会话文件**不在项目目录内**，存储在 AppData Roaming
 
 - **禁止** 在代码中添加 `console.log` 用于调试
 - **应使用** 写入临时文件的日志：追加到 `.debug.log`（项目根目录），调试完成后删除该文件
+
+## Rust 化迁移
+
+迁移规划记录在 `RUST_MIGRATION.md`，所有 AI 实例在开始迁移前必须先查阅该文档：
+1. 找到待迁移模块，将状态改为 `[~]`，责任人写自己的 ID
+2. 完成迁移后改为 `[x]`，清除责任人
+3. 同一函数不允许两个 AI 同时修改
 
 ## 事实核查
 

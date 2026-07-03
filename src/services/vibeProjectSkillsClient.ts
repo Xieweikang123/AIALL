@@ -1,5 +1,6 @@
-import { backendUrl } from "./backendBase";
-import { formatFetchError, readJsonResponse } from "./vibeCodingClient";
+﻿import { backendUrl } from "./backendBase";
+import { invokeBackend } from "./tauriInvoke";
+import { formatFetchError, readJsonResponse, writeFile } from "./vibeCodingClient";
 import type { ExplorationIndexEntry, SkillIndexEntry } from "./projectSkills";
 
 export type ProjectSkillsListPayload = {
@@ -34,23 +35,25 @@ export type ExplorationArchivePayload = {
 
 export async function fetchProjectSkills(projectPath: string): Promise<ProjectSkillsListPayload> {
   const trimmed = projectPath.trim();
-  if (!trimmed) return { ok: false, error: "缺少 projectPath" };
-  try {
-    const response = await fetch(
-      backendUrl(`/backend/vibe/project-skills?projectPath=${encodeURIComponent(trimmed)}`),
-    );
-    const data = await readJsonResponse<
-      ProjectSkillsListPayload & { index?: { skills?: SkillIndexEntry[]; exploration?: ExplorationIndexEntry[] } }
-    >(response);
-    if (!data.ok) return data;
-    return {
-      ok: true,
-      skills: data.skills ?? data.index?.skills ?? [],
-      exploration: data.exploration ?? data.index?.exploration ?? [],
-    };
-  } catch (error) {
-    return { ok: false, error: formatFetchError(error, "读取 skills 失败") };
-  }
+  if (!trimmed) return { ok: false, error: "缂哄皯 projectPath" };
+  return invokeBackend<ProjectSkillsListPayload>(
+    "project_skills_list",
+    { projectPath: trimmed },
+    async () => {
+      const response = await fetch(
+        backendUrl(`/backend/vibe/project-skills?projectPath=${encodeURIComponent(trimmed)}`),
+      );
+      const data = await readJsonResponse<
+        ProjectSkillsListPayload & { index?: { skills?: SkillIndexEntry[]; exploration?: ExplorationIndexEntry[] } }
+      >(response);
+      if (!data.ok) return data;
+      return {
+        ok: true,
+        skills: data.skills ?? data.index?.skills ?? [],
+        exploration: data.exploration ?? data.index?.exploration ?? [],
+      };
+    },
+  );
 }
 
 export async function fetchProjectSkill(
@@ -58,17 +61,19 @@ export async function fetchProjectSkill(
   slug: string,
 ): Promise<ProjectSkillReadPayload> {
   const trimmed = projectPath.trim();
-  if (!trimmed) return { ok: false, error: "缺少 projectPath" };
-  try {
-    const response = await fetch(
-      backendUrl(
-        `/backend/vibe/project-skills?projectPath=${encodeURIComponent(trimmed)}&slug=${encodeURIComponent(slug)}`,
-      ),
-    );
-    return await readJsonResponse<ProjectSkillReadPayload>(response);
-  } catch (error) {
-    return { ok: false, error: formatFetchError(error, "读取 skill 失败") };
-  }
+  if (!trimmed) return { ok: false, error: "缂哄皯 projectPath" };
+  return invokeBackend<ProjectSkillReadPayload>(
+    "project_skills_list",
+    { projectPath: trimmed, slug },
+    async () => {
+      const response = await fetch(
+        backendUrl(
+          `/backend/vibe/project-skills?projectPath=${encodeURIComponent(trimmed)}&slug=${encodeURIComponent(slug)}`,
+        ),
+      );
+      return readJsonResponse<ProjectSkillReadPayload>(response);
+    },
+  );
 }
 
 export async function upsertProjectSkill(
@@ -76,17 +81,19 @@ export async function upsertProjectSkill(
   payload: { slug: string; kind: "fact" | "heuristic" | "preference"; title: string; content: string },
 ): Promise<ProjectSkillUpsertPayload> {
   const trimmed = projectPath.trim();
-  if (!trimmed) return { ok: false, error: "缺少 projectPath" };
-  try {
-    const response = await fetch(backendUrl("/backend/vibe/project-skills"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectPath: trimmed, action: "upsert", ...payload }),
-    });
-    return await readJsonResponse<ProjectSkillUpsertPayload>(response);
-  } catch (error) {
-    return { ok: false, error: formatFetchError(error, "写入 skill 失败") };
-  }
+  if (!trimmed) return { ok: false, error: "缂哄皯 projectPath" };
+  return invokeBackend<ProjectSkillUpsertPayload>(
+    "project_skills_save",
+    { projectPath: trimmed, slug: payload.slug, content: payload.content },
+    async () => {
+      const response = await fetch(backendUrl("/backend/vibe/project-skills"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath: trimmed, action: "upsert", ...payload }),
+      });
+      return readJsonResponse<ProjectSkillUpsertPayload>(response);
+    },
+  );
 }
 
 export async function archiveExplorationSnapshot(
@@ -99,22 +106,9 @@ export async function archiveExplorationSnapshot(
   },
 ): Promise<ExplorationArchivePayload> {
   const trimmed = projectPath.trim();
-  if (!trimmed) return { ok: false, error: "缺少 projectPath" };
-  try {
-    const response = await fetch(backendUrl("/backend/vibe/project-skills"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        projectPath: trimmed,
-        action: "archive",
-        filename: payload.filename,
-        archiveContent: payload.content,
-        readCount: payload.readCount,
-        writtenCount: payload.writtenCount,
-      }),
-    });
-    return await readJsonResponse<ExplorationArchivePayload>(response);
-  } catch (error) {
-    return { ok: false, error: formatFetchError(error, "归档探索快照失败") };
-  }
+  if (!trimmed) return { ok: false, error: "缂哄皯 projectPath" };
+  const write = await writeFile(`.aiall/exploration/${payload.filename}`, payload.content, trimmed);
+  if (!write.ok) return { ok: false, error: write.error || "褰掓。鎺㈢储蹇収澶辫触" };
+  return { ok: true, path: write.path, id: payload.filename };
 }
+

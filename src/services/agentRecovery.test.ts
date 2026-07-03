@@ -816,8 +816,10 @@ describe("agent connect stall", () => {
   });
 
   it("builds helpful connect stall message", () => {
-    expect(agentConnectStallMessage(true)).toContain("sidecar");
-    expect(agentConnectStallMessage(false)).toContain("37891");
+    expect(agentConnectStallMessage(true, "web")).toContain("Tauri");
+    expect(agentConnectStallMessage(false, "web")).toContain("npm run dev");
+    expect(agentConnectStallMessage(true, "tauri")).not.toContain("sidecar");
+    expect(agentConnectStallMessage(false, "tauri")).toContain("重启应用");
   });
 });
 

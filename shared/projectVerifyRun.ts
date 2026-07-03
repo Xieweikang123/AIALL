@@ -36,7 +36,7 @@ export type VerifyRunSnapshot = Pick<
 >;
 
 const FAILING_FILE_RES =
-  /(?:FAIL|✓|×|✗)\s+[^\s]*[/\\]?([\w./-]+\.(?:test|spec)\.[cm]?[jt]sx?)/gi;
+  /(?:FAIL|✓|×|✗)\s+([\w./\\-]+\.(?:test|spec)\.[cm]?[jt]sx?)(?=\s*(?:>|\n|$))/gi;
 
 /** Extract relative test file paths from vitest/jest-style output. */
 export function extractFailingFilesFromVerifyOutput(stdout: string, stderr: string): string[] {

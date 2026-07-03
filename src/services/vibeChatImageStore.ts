@@ -1,5 +1,6 @@
 import type { PersistedChatMessage, PersistedImageRef } from "./vibeChatStorage";
 import { fetchChatImageDataUrl, buildChatImageFileUrl } from "./vibeCodingClient";
+import { isTauriEnv } from "./tauriInvoke";
 
 function safeFilePart(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -23,11 +24,17 @@ export function resolveChatMessageImageUrls(
   if (!projectPath.trim()) return [];
 
   if (message.imageRefs?.length) {
+    if (isTauriEnv()) {
+      return [];
+    }
     return message.imageRefs.map((ref) => buildChatImageFileUrl(projectPath, ref.path));
   }
 
   const count = message.imageCount ?? 0;
   if (count > 0 && sessionId && message.id) {
+    if (isTauriEnv()) {
+      return [];
+    }
     const refs = buildImageRefsForMessage(
       sessionId,
       message.id,
@@ -36,6 +43,29 @@ export function resolveChatMessageImageUrls(
     return refs.map((ref) => buildChatImageFileUrl(projectPath, ref.path));
   }
 
+  return [];
+}
+
+export async function resolveChatMessageImageUrlsAsync(
+  projectPath: string,
+  message: Pick<PersistedChatMessage, "imageDataUrls" | "imageRefs" | "imageCount" | "id">,
+  sessionId?: string,
+): Promise<string[]> {
+  const inline = message.imageDataUrls?.filter(Boolean) ?? [];
+  if (inline.length) return inline;
+  if (!projectPath.trim()) return [];
+  if (message.imageRefs?.length) {
+    return loadImageRefsAsDataUrls(projectPath, message.imageRefs);
+  }
+  const count = message.imageCount ?? 0;
+  if (count > 0 && sessionId && message.id) {
+    const refs = buildImageRefsForMessage(
+      sessionId,
+      message.id,
+      Array.from({ length: count }, () => "data:image/png;base64,"),
+    );
+    return loadImageRefsAsDataUrls(projectPath, refs);
+  }
   return [];
 }
 

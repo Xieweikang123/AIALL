@@ -160,6 +160,7 @@ import { isReadFilePolicyBlock } from "../services/agentCursorFeed";
 import type { AgentRoundTool } from "../services/agentRoundGroups";
 import { formatRunCommandLabel, parseRunCommandOutputLines, getToolPath } from "../utils/toolHelpers";
 import { backendUrl } from "../services/backendBase";
+import { isTauriEnv, tauriInvoke } from "../services/tauriInvoke";
 
 // Inline SVG Icon components for premium feel
 const FileIcon = () => h("svg", { class: "step-icon-svg icon-file", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2" }, [
@@ -215,6 +216,12 @@ const filePath = computed(() => {
 function onLinkClick() {
   const target = filePath.value;
   if (/^https?:\/\//i.test(target)) {
+    if (isTauriEnv()) {
+      void tauriInvoke("system_open_url", { url: target }).catch(() => {
+        window.open(target, "_blank", "noopener,noreferrer");
+      });
+      return;
+    }
     fetch(backendUrl(`/backend/open-url?url=${encodeURIComponent(target)}`)).catch((err) => {
       console.error("Failed to open URL via backend:", err);
       window.open(target, "_blank", "noopener,noreferrer");

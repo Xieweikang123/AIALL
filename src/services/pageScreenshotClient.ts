@@ -1,4 +1,5 @@
 import { backendUrl } from "./backendBase";
+import { isTauriEnv, tauriInvoke } from "./tauriInvoke";
 
 export interface PageScreenshotRequest {
   url: string;
@@ -15,6 +16,22 @@ export type PageScreenshotResult =
   | { ok: false; error: string };
 
 export async function requestPageScreenshot(req: PageScreenshotRequest): Promise<PageScreenshotResult> {
+  if (isTauriEnv()) {
+    try {
+      const result = await tauriInvoke<{ ok: boolean; error?: string; mime?: string; base64?: string; byteLength?: number }>(
+        "web_screenshot_page",
+        { url: req.url, proxyUrl: req.proxyUrl || null, headed: req.headed ?? true, waitAfterGotoMs: req.waitAfterGotoMs ?? 0, navigationTimeoutMs: req.navigationTimeoutMs ?? 90_000 },
+      );
+      if (!result.ok || !result.base64) {
+        return { ok: false, error: result.error || "截图失败" };
+      }
+      const mime = result.mime || "image/jpeg";
+      return { ok: true, dataUrl: `data:${mime};base64,${result.base64}`, byteLength: result.byteLength ?? 0, mime };
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) };
+    }
+  }
+
   try {
     const response = await fetch(backendUrl("/backend/web/screenshot-page"), {
       method: "POST",

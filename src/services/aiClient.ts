@@ -1,4 +1,6 @@
 import { backendUrl } from "./backendBase";
+import { Channel } from "@tauri-apps/api/core";
+import { isTauriEnv, tauriInvoke } from "./tauriInvoke";
 import { lsGet, lsSetJson } from "../utils/localStorageSafe";
 
 export interface AiTestRequest {
@@ -145,7 +147,110 @@ function parseStreamContentFromLine(line: string): string {
   }
 }
 
+async function readAiStreamResponse(
+  response: Response,
+  onStreamChunk?: (chunkText: string) => void,
+): Promise<{ ok: boolean; status: number; rawText: string; error?: string }> {
+  if (!response.ok) {
+    const rawText = await response.text();
+    return {
+      ok: false,
+      status: response.status,
+      rawText,
+      error: formatAiHttpError(response.status, rawText),
+    };
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    return { ok: false, status: response.status, rawText: "", error: "无法读取响应流" };
+  }
+
+  const decoder = new TextDecoder("utf-8");
+  let pending = "";
+  let fullText = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+
+    pending += decoder.decode(value, { stream: true });
+    const lines = pending.split(/\r?\n/);
+    pending = lines.pop() || "";
+
+    for (const line of lines) {
+      const chunkText = parseStreamContentFromLine(line);
+      if (chunkText) {
+        fullText += chunkText;
+        onStreamChunk?.(chunkText);
+      }
+    }
+  }
+
+  pending += decoder.decode();
+  if (pending.trim()) {
+    const tailChunk = parseStreamContentFromLine(pending);
+    if (tailChunk) {
+      fullText += tailChunk;
+      onStreamChunk?.(tailChunk);
+    }
+  }
+
+  return { ok: true, status: response.status, rawText: fullText };
+}
+
 export async function testAiModel(request: AiTestRequest): Promise<AiTestResult> {
+  // Tauri: only non-streaming case
+  if (isTauriEnv() && !request.stream) {
+    try {
+      const payload = buildPayload(request.model, request.prompt, false, request.imageDataUrl);
+      const result = await tauriInvoke<{ ok: boolean; data?: any; error?: string }>("ai_test", {
+        endpoint: request.endpoint,
+        apiKey: request.apiKey || null,
+        body: payload,
+      });
+      if (!result.ok) {
+        return { ok: false, status: 0, rawText: "", error: result.error || "AI 测试失败" };
+      }
+      const rawText = JSON.stringify(result.data);
+      return { ok: true, status: 200, rawText, parsed: result.data };
+    } catch (e: any) {
+      return { ok: false, status: 0, rawText: "", error: e?.message || String(e) };
+    }
+  }
+
+  if (isTauriEnv() && request.stream) {
+    try {
+      const payload = buildPayload(request.model, request.prompt, true, request.imageDataUrl);
+      const channel = new Channel<string>();
+      channel.onmessage = (chunk) => {
+        if (chunk) request.onStreamChunk?.(chunk);
+      };
+      const result = await tauriInvoke<{ ok: boolean; status?: number; rawText?: string; error?: string }>(
+        "ai_test_stream",
+        {
+          endpoint: request.endpoint,
+          apiKey: request.apiKey || null,
+          body: payload,
+          onChunk: channel,
+        },
+      );
+      if (!result.ok) {
+        return {
+          ok: false,
+          status: result.status ?? 0,
+          rawText: result.rawText ?? "",
+          error: result.error || "AI 流式测试失败",
+        };
+      }
+      const rawText = result.rawText ?? "";
+      return { ok: true, status: result.status ?? 200, rawText };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "未知网络错误";
+      return { ok: false, status: 0, rawText: "", error: errorMessage };
+    }
+  }
+
   try {
     const payload = buildPayload(request.model, request.prompt, request.stream, request.imageDataUrl);
     payload.endpoint = request.endpoint;
@@ -160,52 +265,12 @@ export async function testAiModel(request: AiTestRequest): Promise<AiTestResult>
     });
 
     if (request.stream && response.body) {
-      if (!response.ok) {
-        const rawText = await response.text();
-        return {
-          ok: false,
-          status: response.status,
-          rawText,
-          error: formatAiHttpError(response.status, rawText),
-        };
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder("utf-8");
-      let pending = "";
-      let fullText = "";
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-
-        pending += decoder.decode(value, { stream: true });
-        const lines = pending.split(/\r?\n/);
-        pending = lines.pop() || "";
-
-        for (const line of lines) {
-          const chunkText = parseStreamContentFromLine(line);
-          if (chunkText) {
-            fullText += chunkText;
-            request.onStreamChunk?.(chunkText);
-          }
-        }
-      }
-
-      // 补一次尾部解码，避免最后一个分片遗漏。
-      pending += decoder.decode();
-      if (pending.trim()) {
-        const tailChunk = parseStreamContentFromLine(pending);
-        if (tailChunk) {
-          fullText += tailChunk;
-          request.onStreamChunk?.(tailChunk);
-        }
-      }
-
+      const streamResult = await readAiStreamResponse(response, request.onStreamChunk);
       return {
-        ok: true,
-        status: response.status,
-        rawText: fullText,
+        ok: streamResult.ok,
+        status: streamResult.status,
+        rawText: streamResult.rawText,
+        error: streamResult.error,
       };
     }
 
@@ -317,6 +382,28 @@ export async function fetchAvailableModels(request: AiModelsRequest): Promise<Ai
       }
     }
 
+    // Tauri path
+    if (isTauriEnv()) {
+      try {
+        const result = await tauriInvoke<{ ok: boolean; data?: any; error?: string }>("ai_models", {
+          endpoint: modelsEndpoint,
+          apiKey: request.apiKey || null,
+        });
+        if (!result.ok) {
+          return { ok: false, status: 0, models: [], rawText: "", error: result.error || "获取模型失败", fromCache: false };
+        }
+        const source = result.data?.data || result.data?.models || [];
+        const modelNames = (Array.isArray(source) ? source : []).map((m: any) => m.id || "").filter(Boolean) as string[];
+        const rawText = JSON.stringify(result.data);
+        if (modelNames.length) {
+          writeModelsCache(cacheKey, { cachedAt: Date.now(), models: modelNames, rawText });
+        }
+        return { ok: true, status: 200, models: modelNames, rawText, fromCache: false };
+      } catch (e: any) {
+        return { ok: false, status: 0, models: [], rawText: "", error: e?.message || String(e), fromCache: false };
+      }
+    }
+
     const response = await fetch(backendUrl("/backend/ai/models"), {
       method: "POST",
       headers: {
@@ -399,7 +486,7 @@ function resolveTtsEndpoint(endpoint: string): string {
 }
 
 export async function testTtsModel(request: AiTtsRequest): Promise<AiTtsResult> {
-  try {
+  const httpFallback = async (): Promise<AiTtsResult> => {
     const ttsEndpoint = resolveTtsEndpoint(request.endpoint);
     const response = await fetch(backendUrl("/backend/ai/tts"), {
       method: "POST",
@@ -441,6 +528,40 @@ export async function testTtsModel(request: AiTtsRequest): Promise<AiTtsResult> 
       status: response.status,
       audioBlob,
     };
+  };
+
+  if (!isTauriEnv()) {
+    return httpFallback();
+  }
+
+  try {
+    const ttsEndpoint = resolveTtsEndpoint(request.endpoint);
+    const result = await tauriInvoke<{ ok: boolean; mime?: string; data?: string; error?: string; status?: number }>(
+      "ai_tts",
+      {
+        endpoint: ttsEndpoint,
+        apiKey: request.apiKey || null,
+        body: {
+          model: request.model,
+          input: request.input,
+          voice: request.voice,
+          format: request.format,
+        },
+      },
+    );
+
+    if (!result.ok) {
+      return { ok: false, status: result.status || 0, error: result.error || "TTS 请求失败" };
+    }
+
+    const byteString = atob(result.data || "");
+    const ab = new ArrayBuffer(byteString.length);
+    const ia = new Uint8Array(ab);
+    for (let i = 0; i < byteString.length; i++) {
+      ia[i] = byteString.charCodeAt(i);
+    }
+    const audioBlob = new Blob([ab], { type: result.mime || "audio/mpeg" });
+    return { ok: true, status: 200, audioBlob };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "未知网络错误";
     return {

@@ -335,16 +335,27 @@ export function useProjectMemory(projectPath: Ref<string>, projectOpened: Ref<bo
     const path = projectPath.value.trim();
     if (!path || !projectMemoryContent.value.trim()) return;
     try {
-      const { backendUrl } = await import("../services/backendBase");
-      await fetch(backendUrl("/backend/vibe/memory-usage"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const { invokeBackend } = await import("../services/tauriInvoke");
+      await invokeBackend(
+        "memory_usage",
+        {
           projectPath: path,
           memoryContent: projectMemoryContent.value,
           assistantResponse,
-        }),
-      });
+        },
+        async () => {
+          const { backendUrl } = await import("../services/backendBase");
+          await fetch(backendUrl("/backend/vibe/memory-usage"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              projectPath: path,
+              memoryContent: projectMemoryContent.value,
+              assistantResponse,
+            }),
+          });
+        },
+      );
     } catch {
       // silent
     }

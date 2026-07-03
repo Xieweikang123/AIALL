@@ -11,7 +11,7 @@ describe("consultativeAccuracyTrace", () => {
     expect(
       hasConsultativeAccuracyTraceDepth([
         "src/composables/useGitPanel.ts",
-        "vite.vibeCodingMiddleware.ts",
+        "server/agentContextBuilder.ts",
       ]),
     ).toBe(true);
     expect(
@@ -55,7 +55,7 @@ describe("consultativeAccuracyTrace", () => {
         visionLocateToolsUsed: true,
         consultativeReadPaths: [
           "src/composables/useGitPanel.ts",
-          "vite.vibeCodingMiddleware.ts",
+          "server/agentContextBuilder.ts",
         ],
         replyText: "prompt 注入 staged diff 与文件状态列表，准确度取决于 diff 规模。",
       }),

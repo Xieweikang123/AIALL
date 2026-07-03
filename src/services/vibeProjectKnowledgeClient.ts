@@ -1,4 +1,3 @@
-import { backendUrl } from "./backendBase";
 import {
   buildProjectKnowledgeMetaForWrite,
   normalizeProjectKnowledgeBody,
@@ -12,9 +11,9 @@ import {
 import {
   formatFetchError,
   readFile,
-  readJsonResponse,
   writeFile,
 } from "./vibeCodingClient";
+import { invokeBackend } from "./tauriInvoke";
 
 export type { ProjectKnowledgeMeta };
 export { PROJECT_KNOWLEDGE_REL_PATH, PROJECT_KNOWLEDGE_MAX_CHARS };
@@ -98,25 +97,11 @@ async function writeKnowledgeToDisk(
 export async function fetchProjectKnowledge(projectPath: string): Promise<ProjectKnowledgePayload> {
   const trimmed = projectPath.trim();
   if (!trimmed) return { ok: false, error: "缺少 projectPath" };
-  try {
-    const url = backendUrl(
-      `/backend/vibe/project-knowledge?projectPath=${encodeURIComponent(trimmed)}`,
-    );
-    const response = await fetch(url);
-    if (response.ok) {
-      return await readJsonResponse<ProjectKnowledgePayload>(response);
-    }
-    if (response.status === 404 || response.status === 405) {
-      return readKnowledgeFromDisk(trimmed);
-    }
-    return await readJsonResponse<ProjectKnowledgePayload>(response);
-  } catch (error) {
-    const message = formatFetchError(error, "读取项目知识库失败");
-    if (/HTML|无效 JSON|空响应/i.test(message)) {
-      return readKnowledgeFromDisk(trimmed);
-    }
-    return { ok: false, error: message };
-  }
+  return invokeBackend<ProjectKnowledgePayload>(
+    "project_knowledge_get",
+    { projectPath: trimmed },
+    async () => readKnowledgeFromDisk(trimmed),
+  );
 }
 
 export async function saveProjectKnowledge(
@@ -126,30 +111,9 @@ export async function saveProjectKnowledge(
 ): Promise<ProjectKnowledgePayload> {
   const trimmed = projectPath.trim();
   if (!trimmed) return { ok: false, error: "缺少 projectPath" };
-  try {
-    const response = await fetch(backendUrl("/backend/vibe/project-knowledge"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        projectPath: trimmed,
-        body,
-        fromExplore: options?.fromExplore,
-        gitHead: options?.gitHead,
-        exploreRounds: options?.exploreRounds,
-      }),
-    });
-    if (response.ok) {
-      return await readJsonResponse<ProjectKnowledgePayload>(response);
-    }
-    if (response.status === 404 || response.status === 405) {
-      return writeKnowledgeToDisk(trimmed, body, options);
-    }
-    return await readJsonResponse<ProjectKnowledgePayload>(response);
-  } catch (error) {
-    const message = formatFetchError(error, "保存项目知识库失败");
-    if (/HTML|无效 JSON|空响应/i.test(message)) {
-      return writeKnowledgeToDisk(trimmed, body, options);
-    }
-    return { ok: false, error: message };
-  }
+  return invokeBackend<ProjectKnowledgePayload>(
+    "project_knowledge_save",
+    { projectPath: trimmed, content: body },
+    async () => writeKnowledgeToDisk(trimmed, body, options),
+  );
 }

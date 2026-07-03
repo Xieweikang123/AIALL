@@ -435,6 +435,7 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     if (sessionId === activeSessionId.value) {
       return;
     }
+    switchingSession.value = false;
     const fromSessionId = activeSessionId.value.trim();
     const project = projectPath().trim();
     const fromMessages = fromSessionId ? sessionMessages.getSessionMessages(fromSessionId) : undefined;
@@ -463,11 +464,13 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
         const diskMessages = peekVibeChatSessionMessages(project, sessionId);
         const resolved = resolveMessagesForSession(sessionId, diskMessages);
         bindSessionMessages(sessionId, normalizeMessages(resolved));
+        onAfterSwitch?.();
       } finally {
         if (gen === switchSessionGeneration) {
           switchingSession.value = false;
           void scrollToBottom?.(true);
         }
+        schedulePersistChat();
       }
     })();
   }

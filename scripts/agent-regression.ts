@@ -1,6 +1,9 @@
 /**
  * Print agent routing regression pass rate from .aiall/agent-regression.json
  *
+ * Web/shared parity: validates TS intent classifier + server/agentRunPolicy fields.
+ * Desktop policy fields are validated first by scripts/agent-regression-rust.ts (Rust).
+ *
  * Usage: npm run agent:regression
  */
 
@@ -11,7 +14,7 @@ import {
   loadAgentRegressionFile,
   runAgentRegression,
   defaultRegressionFilePath,
-} from "../server/agentRegression";
+} from "../src/services/agentRegression";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const filePath = defaultRegressionFilePath(projectRoot);

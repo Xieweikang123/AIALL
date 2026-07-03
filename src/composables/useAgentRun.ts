@@ -23,37 +23,24 @@ import {
 import { isProjectReport } from "../services/projectReportDisplay";
 import {
   AGENT_SILENT_CONTINUE_MAX,
-  resolveSilentContinueDelayMs,
-  AGENT_MODEL_WAIT_STALL_MS,
-  AGENT_CONTINUE_MODEL_WAIT_STALL_MS,
-  resolveModelWaitStallMs,
-  agentStallRecoveryReason,
-  agentConnectStallMessage,
   buildAgentMaxTurnsExhaustedMessage,
   buildAgentRunningStatusText,
   buildAgentResumePrompt,
-  buildSilentContinueStatusLog,
   canResumeAgentRun,
   hasRecoverableAgentProgress,
   inferAgentRecoveryFlags,
   isAgentMaxTurnsExhausted,
-  isAgentConnectPhase,
-  isAgentConnectStalled,
-  isAgentRunStalled,
-  isRecoverableAgentError,
   isIncompleteAgentRunWithoutFinalAnswer,
   applyInferredAgentRecovery,
   diagnoseMissingFinalAnswer,
-  applyMissingFinalAnswerDiagnosis,
   isHmrInterruptReason,
   PARTIAL_RUN_RESUME_REASON,
   recoverableAgentErrorHint,
   resolveAgentCompletedTurns,
   resolveAgentFailureBubbleContent,
   shouldOfferPartialRunResume,
-  shouldSilentAutoContinue,
-  resolveAutoResumeSeconds,
   extractRateLimitHintFromStatusLog,
+  isRecoverableAgentError,
 } from "../services/agentRecovery";
 import {
   persistAgentRunForHmr,
@@ -86,6 +73,7 @@ import {
   type VibeChatHistoryMessage,
   type VibeChatMode,
 } from "../services/vibeAgentClient";
+import { resolveAgentRequestUserIntentAsync } from "../services/agentRequestIntent";
 import {
   recordAgentRoundNarrative,
   recordAgentRoundRequest,
@@ -140,14 +128,10 @@ import { useAgentStreamPatch } from "./useAgentStreamPatch";
 import { useAgentState } from "./useAgentState";
 import { useAgentSSEConnection } from "./useAgentSSEConnection";
 import { useAgentToolDispatch } from "./useAgentToolDispatch";
+import { useAgentStallRecovery } from "./useAgentStallRecovery";
+import { useAgentEventHandlers } from "./useAgentEventHandlers";
 
 export type ChatMessage = VibeChatMessage;
-
-function applySuggestionsToAssistantContent(assistantMsg: ChatMessage, rawContent: string): string {
-  const { content, suggestions } = parseAgentSuggestions(rawContent);
-  assistantMsg.agentSuggestions = suggestions.length ? suggestions : undefined;
-  return content;
-}
 
 export type UseAgentRunDeps = {
   chatMessages: Ref<ChatMessage[]>;
@@ -191,9 +175,6 @@ export type UseAgentRunDeps = {
   onMemoryProposal?: (msgId: string, proposal: import("../services/projectMemoryProposal").MemoryProposalPayload) => void;
   onSkillProposal?: (msgId: string, proposal: import("../services/projectSkillProposal").SkillProposalPayload) => void;
 };
-
-const MAX_TOOL_FULL_RESULT_CHARS = 4_000;
-const AGENT_EVENT_FRAME_BUDGET_MS = 12;
 
 export function useAgentRun(deps: UseAgentRunDeps) {
   const {
@@ -309,11 +290,13 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     else persistAgentRunSession(sessionId);
   }
 
+  let stallRecovery!: ReturnType<typeof useAgentStallRecovery>;
+
   /** 续跑、排队或倒计时恢复期间不弹「已完成」通知，仅在真正收尾时通知。 */
   function shouldSuppressAgentCompleteNotification(silent: boolean): boolean {
     if (silent) return true;
     if (pendingPromptQueue.value.length > 0) return true;
-    if (autoResumeSchedulePending || autoResumeTargetId.value) return true;
+    if (stallRecovery.isAutoResumePending()) return true;
     return false;
   }
 
@@ -341,9 +324,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     endAgentRunSession(sessionId, shouldSuppressAgentCompleteNotification(silent));
     runManager.remove(sessionId);
     if (runManager.size() === 0) {
-      agentLastProgressAt = 0;
+      stallRecovery.resetAgentLastProgressAt();
       stalledAssistantMsg.value = null;
-      stopAgentUiTick();
+      stallRecovery.stopAgentUiTick();
     }
   }
 
@@ -355,12 +338,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (project && sessionId) updateVibeChatSessionStatus(project, sessionId, status);
   }
 
-  let agentUiTickTimer: ReturnType<typeof setInterval> | null = null;
-  let autoResumeTimer: ReturnType<typeof setInterval> | null = null;
-  let agentLastProgressAt = 0;
-  let autoResumeSchedulePending = false;
-  let silentContinueTimer: number | null = null;
-  let pendingSettleTimer: number | null = null;
+  const pendingSettleTimerRef = { current: null as number | null };
 
   const {
     chainJumpVisible,
@@ -394,28 +372,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     getRunAssistantMsg: (sid: string) => runManager.get(sid)?.assistantMsg,
   });
 
-  const sseConnection = useAgentSSEConnection({
-    handleAgentEvent,
-  });
-
-  const {
-    clearPendingAgentEvents,
-    enqueueAgentEvent,
-  } = sseConnection;
-
-  if (getCurrentInstance()) {
-    onBeforeUnmount(() => {
-      stopAgentUiTick();
-      cancelAutoResume();
-      if (silentContinueTimer) { clearTimeout(silentContinueTimer); silentContinueTimer = null; }
-      if (pendingSettleTimer) { clearTimeout(pendingSettleTimer); pendingSettleTimer = null; }
-      cleanupStreamPatchTimers();
-      if (sseConnection.agentEventFlushRaf) {
-        cancelAnimationFrame(sseConnection.agentEventFlushRaf);
-      }
-    });
-  }
-
   function appendStatusLog(msg: ChatMessage, line: string) {
     const text = line.trim();
     if (!text) return;
@@ -424,26 +380,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (last !== text) msg.statusLog.push(text);
   }
 
-  function refreshStalledAssistantMsg() {
-    const run = getActiveRun();
-    if (!run || run.lastProgressAt <= 0) {
-      stalledAssistantMsg.value = null;
-      return;
-    }
-    if (!isAgentRunStalled(run.lastProgressAt, true)) {
-      stalledAssistantMsg.value = null;
-      return;
-    }
-    const msg = findRunningAssistantMsg();
-    if (!msg || !hasRecoverableAgentProgress(msg)) {
-      stalledAssistantMsg.value = null;
-      return;
-    }
-    stalledAssistantMsg.value = msg;
-  }
-
-  function isAssistantStalled(msg: ChatMessage): boolean {
-    return Boolean(stalledAssistantMsg.value && stalledAssistantMsg.value.id === msg.id);
+  function getActiveRun() {
+    return runManager.get(activeSessionId.value);
   }
 
   function findRunningAssistantMsgForSession(sessionId: string): ChatMessage | null {
@@ -461,139 +399,46 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     return findRunningAssistantMsgForSession(activeSessionId.value);
   }
 
-  function checkAgentStallForSession(sessionId: string) {
-    const run = runManager.get(sessionId);
-    if (!run) return;
-    const msg = findRunningAssistantMsgForSession(sessionId);
-    if (!msg) return;
-    const { live } = run;
+  stallRecovery = useAgentStallRecovery({
+    runManager,
+    chatMessages,
+    activeSessionId,
+    chatSending,
+    chatError,
+    projectPath,
+    projectOpened,
+    configReady,
+    stalledAssistantMsg,
+    autoResumeSecondsLeft,
+    autoResumeTargetId,
+    agentUiTick,
+    bumpLiveRevision,
+    patchAssistantMsg,
+    isRunVisible,
+    resolveOriginalUserPrompt,
+    appendStatusLog,
+    clearStreamDeltaBuffer,
+    shouldMinimizeRunUiPatch,
+    buildRunUiFullPatch,
+    finishRunSession,
+    maybePersistChat,
+    maybeScrollChat,
+    updateAgentRunSessionStatus,
+    resumeAgentRun,
+    getActiveRun,
+    findRunningAssistantMsgForSession,
+    findRunningAssistantMsg,
+  });
 
-    if (
-      isAgentConnectStalled(run.connectStartedAt, live.phase, true) &&
-      isAgentConnectPhase(live.phase)
-    ) {
-      abortAgentConnectStall(sessionId, msg);
-      return;
-    }
-
-    const MODEL_WAIT_PHASES = ["sending_request", "waiting_model", "retrying_model"];
-    const waitThreshold = resolveModelWaitStallMs(
-      live.contextChars ?? 0,
-      msg.agentContinueCount ?? 0,
-    );
-    if (
-      MODEL_WAIT_PHASES.includes(live.phase) &&
-      live.waitStartedAt &&
-      Date.now() - live.waitStartedAt >= waitThreshold
-    ) {
-      recoverAgentRunFromStall(sessionId, msg, "模型请求长时间无响应（可能已卡住）");
-      return;
-    }
-
-    if (run.lastProgressAt <= 0) return;
-    if (!isAgentRunStalled(run.lastProgressAt, true)) return;
-    if (!hasRecoverableAgentProgress(msg)) return;
-    recoverAgentRunFromStall(sessionId, msg, agentStallRecoveryReason());
-  }
-
-  function checkAgentStall() {
-    if (runManager.size() === 0) return;
-    for (const run of runManager.listRuns()) {
-      checkAgentStallForSession(run.sessionId);
-    }
-  }
-
-  function touchAgentProgress(sessionId: string) {
-    runManager.touchProgress(sessionId);
-    if (sessionId === activeSessionId.value) {
-      agentLastProgressAt = runManager.get(sessionId)?.lastProgressAt ?? Date.now();
-    }
-  }
-
-  function startAgentUiTick() {
-    if (agentUiTickTimer) return;
-    agentUiTickTimer = setInterval(() => {
-      agentUiTick.value += 1;
-      let needsLiveRefresh = false;
-      const LIVE_REFRESH_PHASES = new Set([
-        "connecting_local",
-        "stream_connected",
-        "connected",
-        "reconnecting",
-        "building_context",
-        "compacting_context",
-        "waiting_model",
-        "sending_request",
-        "retrying_model",
-        "executing_tool",
-        "executing_tools",
-        "planning_tools",
-        "summarizing_tools",
-        "streaming_model",
-      ]);
-      for (const run of runManager.listRuns()) {
-        if (LIVE_REFRESH_PHASES.has(run.live.phase)) {
-          needsLiveRefresh = true;
-          break;
-        }
-      }
-      if (needsLiveRefresh) bumpLiveRevision();
-      syncRunningAssistantOnUiTick();
-      refreshStalledAssistantMsg();
-      checkAgentStall();
-    }, 2000);
-  }
-
-  function syncRunningAssistantOnUiTick() {
-    for (const run of runManager.listRuns()) {
-      if (!shouldMinimizeRunUiPatch(run.assistantMsg)) continue;
-      patchAssistantMsg(
-        run.assistantMsg.id,
-        buildRunUiFullPatch(run.assistantMsg),
-        run.sessionId,
-      );
-    }
-  }
-
-  function stopAgentUiTick() {
-    if (runManager.size() > 0) return;
-    if (agentUiTickTimer) {
-      clearInterval(agentUiTickTimer);
-      agentUiTickTimer = null;
-    }
-    stalledAssistantMsg.value = null;
-  }
-
-  function getActiveRun() {
-    return runManager.get(activeSessionId.value);
+  if (getCurrentInstance()) {
+    onBeforeUnmount(() => {
+      stallRecovery.cleanupStallRecoveryTimers();
+    });
   }
 
   function hasActiveAgentRun(sessionId?: string): boolean {
     const sid = (sessionId ?? activeSessionId.value).trim();
     return Boolean(sid && runManager.has(sid));
-  }
-
-  function abortAgentConnectStall(sessionId: string, msg: ChatMessage) {
-    const connectHasImages = runManager.get(sessionId)?.connectHasImages ?? false;
-    runManager.abort(sessionId);
-    runManager.setAbortHandle(sessionId, null);
-    runManager.invalidate(sessionId);
-    finishRunSession(sessionId);
-    clearPendingAgentRun();
-    const reason = agentConnectStallMessage(connectHasImages);
-    msg.agentFailed = true;
-    msg.agentRecoverable = true;
-    msg.agentFailureReason = reason;
-    patchAssistantMsg(msg.id, {
-      agentFailed: true,
-      agentRecoverable: true,
-      agentFailureReason: reason,
-    }, sessionId);
-    if (projectPath.value.trim()) {
-      updateAgentRunSessionStatus(sessionId, "failed");
-    }
-    maybePersistChat(sessionId);
-    if (isRunVisible(sessionId)) chatError.value = reason;
   }
 
   function setAgentStatus(
@@ -619,6 +464,34 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     const shouldLog = !minimizing && (options?.log ?? phase !== prevPhase);
     if (shouldLog) appendStatusLog(msg, statusText);
     bumpLiveRevision();
+  }
+
+  async function resolveIntentForAgentRequest(input: {
+    prompt: string;
+    history?: Array<{ role: string; content: string }>;
+    mode: VibeChatMode;
+    hasImage: boolean;
+    sessionId: string;
+    assistantMsg: ChatMessage;
+  }) {
+    return resolveAgentRequestUserIntentAsync(
+      {
+        prompt: input.prompt,
+        history: input.history,
+        mode: input.mode,
+        hasImage: input.hasImage,
+        endpoint: aiConfig.value.endpoint,
+        apiKey: aiConfig.value.apiKey,
+        model: aiConfig.value.model,
+        projectPath: projectPath.value.trim() || undefined,
+      },
+      (phase, detail) => {
+        setAgentStatus(input.sessionId, input.assistantMsg, phase, {
+          model: aiConfig.value.model,
+          detail,
+        });
+      },
+    );
   }
 
   function findLastAssistantContent(): string | undefined {
@@ -698,226 +571,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
 
 
-  function cancelAutoResume() {
-    autoResumeSchedulePending = false;
-    if (autoResumeTimer) {
-      clearInterval(autoResumeTimer);
-      autoResumeTimer = null;
-    }
-    autoResumeSecondsLeft.value = 0;
-    autoResumeTargetId.value = "";
-  }
-
-  function startAutoResumeCountdown(assistantMsgId: string, errorMessage: string) {
-    const msg = chatMessages.value.find((m) => m.id === assistantMsgId);
-    if (!msg || !canResumeAgentRun(msg)) return;
-
-    autoResumeTargetId.value = assistantMsgId;
-    autoResumeSecondsLeft.value = resolveAutoResumeSeconds(
-      errorMessage || msg.agentFailureReason || "",
-    );
-    autoResumeTimer = setInterval(() => {
-      if (autoResumeSecondsLeft.value <= 1) {
-        const targetId = autoResumeTargetId.value;
-        cancelAutoResume();
-        if (targetId && !chatSending.value) void resumeAgentRun(targetId);
-        return;
-      }
-      autoResumeSecondsLeft.value -= 1;
-    }, 1000);
-  }
-
-  function scheduleAutoResume(assistantMsgId: string, errorMessage = "") {
-    cancelAutoResume();
-    if (!assistantMsgId || !configReady.value || !projectOpened.value) return;
-
-    autoResumeSchedulePending = true;
-
-    const run = () => {
-      autoResumeSchedulePending = false;
-      if (!assistantMsgId || chatSending.value || !configReady.value || !projectOpened.value) return;
-      startAutoResumeCountdown(assistantMsgId, errorMessage);
-    };
-
-    if (chatSending.value) {
-      queueMicrotask(run);
-      return;
-    }
-    run();
-  }
-
-  function maybeAutoResumeLastRecoverableAssistant() {
-    if (chatSending.value || !configReady.value || !projectOpened.value) return;
-    for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
-      const m = chatMessages.value[i]!;
-      if (m.role !== "assistant") continue;
-      const reason = m.agentFailureReason || m.agentAbortReason || "";
-      if (isHmrInterruptReason(reason) && canResumeAgentRun(m)) {
-        clearPendingAgentRun();
-        void resumeAgentRun(m.id, { silent: true });
-        return;
-      }
-      if (canResumeAgentRun(m)) {
-        if (reason && shouldSilentAutoContinue(reason)) {
-          trySilentContinue(activeSessionId.value, m, reason);
-        } else {
-          scheduleAutoResume(m.id, reason);
-        }
-        return;
-      }
-    }
-  }
-
-  function prepareAssistantForSilentContinue(assistantMsg: ChatMessage) {
-    for (const tool of assistantMsg.tools || []) {
-      if (tool.running) tool.running = false;
-    }
-  }
-
-  function trySilentContinue(sessionId: string, assistantMsg: ChatMessage, reason: string): boolean {
-    if (!shouldSilentAutoContinue(reason)) { debugLog(`[stall-recover] trySilent: shouldSilentAutoContinue=false`); return false; }
-    const originalPrompt = resolveOriginalUserPrompt(assistantMsg.id) ?? "";
-    if (originalPrompt.includes("[AUTO_BUG_FIX]")) {
-      debugLog(`[stall-recover] trySilent: auto bug fix run — no silent continue`);
-      return false;
-    }
-    const count = assistantMsg.agentContinueCount ?? 0;
-    if (count >= AGENT_SILENT_CONTINUE_MAX) { debugLog(`[stall-recover] trySilent: count=${count}>=max`); return false; }
-    if (!configReady.value || !projectOpened.value) { debugLog(`[stall-recover] trySilent: configReady=${configReady.value}, projectOpened=${projectOpened.value}`); return false; }
-    if (!resolveOriginalUserPrompt(assistantMsg.id)) { debugLog(`[stall-recover] trySilent: originalPrompt empty`); return false; }
-
-    prepareAssistantForSilentContinue(assistantMsg);
-    assistantMsg.agentContinueCount = count + 1;
-    if (isRunVisible(sessionId)) chatError.value = "";
-    const statusLogReason = reason.includes("自动续跑") ? reason : `连接中断（自动续跑 ${count + 1}/${AGENT_SILENT_CONTINUE_MAX}）`;
-    appendStatusLog(assistantMsg, buildSilentContinueStatusLog(statusLogReason, assistantMsg.agentContinueCount));
-    patchAssistantMsg(assistantMsg.id, {
-      agentContinueCount: assistantMsg.agentContinueCount,
-      statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
-      activityExpanded: true,
-      activityDetailed: false,
-      tools: assistantMsg.tools ? [...assistantMsg.tools] : undefined,
-      ...syncRoundGroupsPatch(assistantMsg),
-    }, sessionId);
-
-    runManager.abort(sessionId);
-    runManager.setAbortHandle(sessionId, null);
-    finishRunSession(sessionId, true);
-
-    const silentContinueDelayMs = resolveSilentContinueDelayMs(reason);
-    silentContinueTimer = window.setTimeout(() => {
-      silentContinueTimer = null;
-      void resumeAgentRun(assistantMsg.id, { silent: true });
-    }, silentContinueDelayMs);
-    return true;
-  }
-
-  function handleRecoverableInterruption(
-    sessionId: string,
-    assistantMsg: ChatMessage,
-    reason: string,
-    options?: { logStatus?: boolean; noAutoResume?: boolean },
-  ) {
-    if (trySilentContinue(sessionId, assistantMsg, reason)) return;
-    applyRecoverableAgentFailure(assistantMsg, reason, { ...options, noAutoResume: true });
-  }
-
-  function applyRecoverableAgentFailure(
-    assistantMsg: ChatMessage,
-    message: string,
-    options?: { logStatus?: boolean; noAutoResume?: boolean },
-  ) {
-    const recoverable = isRecoverableAgentError(message);
-    assistantMsg.agentFailed = true;
-    assistantMsg.agentRecoverable = recoverable;
-    assistantMsg.agentFailureReason = message;
-    assistantMsg.agentRecoveryDismissed = false;
-    if (message.trim() === "运行中断（未生成最终回复）") {
-      applyMissingFinalAnswerDiagnosis(assistantMsg, {
-        doneTurns: resolveAgentCompletedTurns(assistantMsg),
-        chatMode: assistantMsg.chatMode,
-      });
-    } else {
-      assistantMsg.agentFailureDetail = undefined;
-    }
-
-    const progressContent = resolveAgentFailureBubbleContent(assistantMsg);
-    assistantMsg.content = progressContent;
-    if (options?.logStatus !== false) {
-      appendStatusLog(
-        assistantMsg,
-        recoverable ? `连接中断：${message}（可恢复运行）` : `错误：${message}`,
-      );
-    }
-    if (recoverable) {
-      assistantMsg.activityExpanded = true;
-      assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
-    }
-
-    chatError.value = recoverable
-      ? recoverableAgentErrorHint(assistantMsg, message)
-      : message;
-
-    patchAssistantMsg(assistantMsg.id, {
-      agentFailed: true,
-      agentRecoverable: recoverable,
-      agentFailureReason: message,
-      agentFailureDetail: assistantMsg.agentFailureDetail,
-      agentRecoveryDismissed: false,
-      content: assistantMsg.content,
-      activityExpanded: recoverable ? true : assistantMsg.activityExpanded,
-      totalTurns: assistantMsg.totalTurns,
-      statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
-      ...syncRoundGroupsPatch(assistantMsg),
-    });
-
-    // Auto-resume countdown for recoverable errors (skip if noAutoResume is set)
-    if (recoverable && !options?.noAutoResume) {
-      scheduleAutoResume(assistantMsg.id, message);
-    }
-  }
-
-  function recoverAgentRunFromStall(sessionId: string, assistantMsg: ChatMessage, reason: string) {
-    debugLog(`[stall-recover] recoverAgentRunFromStall sessionId=${sessionId}, reason=${reason}`);
-    runManager.invalidate(sessionId);
-    clearStreamDeltaBuffer();
-    runManager.abort(sessionId);
-    runManager.setAbortHandle(sessionId, null);
-
-    const silentResult = trySilentContinue(sessionId, assistantMsg, reason);
-    debugLog(`[stall-recover] trySilentContinue result=${silentResult}`);
-    if (silentResult) {
-      maybePersistChat(sessionId);
-      maybeScrollChat(sessionId);
-      return;
-    }
-
-    debugLog(`[stall-recover] trySilentContinue failed, calling finishRunSession + handleRecoverableInterruption`);
-    finishRunSession(sessionId);
-    handleRecoverableInterruption(sessionId, assistantMsg, reason);
-    if (projectPath.value.trim()) updateAgentRunSessionStatus(sessionId, "failed");
-    maybePersistChat(sessionId);
-    maybeScrollChat(sessionId);
-  }
-
-  function forceRecoverStalledRun(assistantMsgId: string) {
-    const msg = chatMessages.value.find((m) => m.id === assistantMsgId);
-    if (!msg || msg.role !== "assistant") { debugLog(`[stall-recover] msg not found or not assistant: id=${assistantMsgId}`); return; }
-    const run = getActiveRun();
-    debugLog(`[stall-recover] msg found, chatSending=${chatSending.value}, run=${!!run}, runMsgId=${run?.assistantMsgId}, msgId=${msg.id}, configReady=${configReady.value}, projectOpened=${projectOpened.value}`);
-    if (chatSending.value && run?.assistantMsgId === msg.id) {
-      debugLog(`[stall-recover] -> recoverAgentRunFromStall`);
-      recoverAgentRunFromStall(activeSessionId.value, msg, agentStallRecoveryReason());
-      return;
-    }
-    if (canResumeAgentRun(msg)) {
-      debugLog(`[stall-recover] -> resumeAgentRun (no active run)`);
-      void resumeAgentRun(assistantMsgId);
-    } else {
-      debugLog(`[stall-recover] canResume=false, no action`);
-    }
-  }
-
   function resolveCompletedTurns(reported: number, msg: ChatMessage): number {
     if (reported > 0) {
       return (msg.totalTurns ?? 0) + reported;
@@ -934,808 +587,69 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
 
 
-  type EventOf<T extends string> = Extract<VibeAgentSseEvent, { type: T }>;
-  type AgentEventFn = (
-    event: VibeAgentSseEvent,
-    assistantMsg: ChatMessage,
-    sessionId: string,
-    msgId: string,
-  ) => void;
+  const { handleAgentEvent } = useAgentEventHandlers({
+    runManager,
+    stallRecovery,
+    chatSending,
+    projectPath,
+    planExecutionActive,
+    pendingPromptQueue,
+    pendingSettleTimerRef,
+    patchAssistantMsg,
+    shouldMinimizeRunUiPatch,
+    scheduleMinimizedRunUiPatch,
+    flushMinimizedRunUiPatch,
+    buildRunUiFullPatch,
+    clearStreamDeltaBuffer,
+    enqueueStreamDelta,
+    formatLiveStatus,
+    setAgentStatus,
+    isAgentRunning,
+    scrollStatusLogToBottomInternal,
+    scrollChatToBottom,
+    finishRunSession,
+    updateAgentRunSessionStatus,
+    persistChatNow,
+    schedulePersistDuringRun,
+    persistAgentRunSession,
+    maybePersistChat,
+    maybeScrollChat,
+    dequeuePendingPromptAndRun,
+    clearPendingAgentEvents: () => sseConnection.clearPendingAgentEvents(),
+    isRunVisible,
+    mergeDeferredCaptureIntoMsg,
+    appendStatusLog,
+    resolveOriginalUserPrompt,
+    maybePersistPlanFileToDisk,
+    onAgentRunSettled,
+    onMemoryProposal,
+    onSkillProposal,
+    storeFileDiff,
+    syncEditorAfterAgentFileChange,
+    refreshTree,
+    clearTurnFileDiffsFromStore,
+    handleAgentWrittenFiles,
+    resolveCompletedTurns,
+  });
 
-  function handleAgentContextEvent(event: EventOf<"agent_context">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
-    assistantMsg.agentContext = event.data;
-    if (shouldMinimizeRunUiPatch(assistantMsg)) {
-      scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
-    } else {
-      patchAssistantMsg(msgId, { agentContext: event.data });
-    }
-  }
+  const sseConnection = useAgentSSEConnection({ handleAgentEvent });
+  const { clearPendingAgentEvents, enqueueAgentEvent } = sseConnection;
 
-  function handleTurnRequestEvent(event: EventOf<"turn_request">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
-    if (event.data.contextChars !== undefined) {
-      assistantMsg.contextChars = event.data.contextChars;
-    }
-    if (event.data.turn) assistantMsg.agentTurn = event.data.turn;
-    if (event.data.maxTurns) assistantMsg.agentMaxTurns = event.data.maxTurns;
-    const run = runManager.get(sessionId);
-    if (run?.live) {
-      if (event.data.turn) run.live.turn = event.data.turn;
-      if (event.data.maxTurns) run.live.maxTurns = event.data.maxTurns;
-      if (event.data.contextChars !== undefined) run.live.contextChars = event.data.contextChars;
-    }
-    assistantMsg.roundGroups = recordAgentRoundRequest(
-      assistantMsg.roundGroups,
-      event.data.turn,
-      {
-        model: event.data.model,
-        contextMessages: event.data.contextMessages,
-        contextChars: event.data.contextChars,
-        messages: event.data.messages,
-      },
-      event.data.maxTurns,
-    );
-    if (shouldMinimizeRunUiPatch(assistantMsg)) {
-      scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
-      return;
-    }
-    patchAssistantMsg(msgId, syncRoundGroupsPatch(assistantMsg));
-    if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
-  }
-
-  function handleTurnResponseEvent(event: EventOf<"turn_response">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
-    clearStreamDeltaBuffer();
-    assistantMsg.content = stripTextToolCallMarkup(
-      stripToolSummaryFromAssistantContent(assistantMsg.content || ""),
-    );
-    const strippedAssistantText = stripTextToolCallMarkup(
-      stripToolSummaryFromAssistantContent(event.data.assistantText || ""),
-    );
-    assistantMsg.roundGroups = recordAgentRoundResponse(
-      assistantMsg.roundGroups,
-      event.data.turn,
-      {
-        assistantText: strippedAssistantText,
-        toolCalls: event.data.toolCalls,
-        hasToolCalls: event.data.hasToolCalls,
-        isFinal: event.data.isFinal,
-      },
-      event.data.maxTurns,
-    );
-    const turnText = strippedAssistantText;
-    if (turnText && event.data.isFinal) {
-      assistantMsg.content = mergeAssistantTurnText(assistantMsg.content || "", turnText);
-      assistantMsg.activityExpanded = false;
-    }
-    if (shouldMinimizeRunUiPatch(assistantMsg)) {
-      scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
-      return;
-    }
-    patchAssistantMsg(msgId, {
-      ...syncRoundGroupsPatch(assistantMsg),
-      content: assistantMsg.content,
-      activityExpanded: assistantMsg.activityExpanded,
-    });
-    if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
-  }
-
-  function handleTurnTraceEvent(event: EventOf<"turn_trace">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
-    const traceText = stripTextToolCallMarkup(
-      stripToolSummaryFromAssistantContent(
-        event.data.assistantText ?? event.data.toolCallPreamble ?? "",
-      ),
-    );
-    if (!assistantMsg.turnTraces) assistantMsg.turnTraces = [];
-    assistantMsg.turnTraces.push({
-      turn: event.data.turn,
-      maxTurns: event.data.maxTurns,
-      assistantText: traceText,
-      hasToolCalls: event.data.hasToolCalls ?? false,
-    });
-    assistantMsg.roundGroups = recordAgentRoundNarrative(
-      assistantMsg.roundGroups,
-      event.data.turn,
-      traceText,
-      event.data.maxTurns,
-    );
-    if (shouldMinimizeRunUiPatch(assistantMsg)) {
-      scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
-      return;
-    }
-    patchAssistantMsg(msgId, {
-      turnTraces: [...assistantMsg.turnTraces],
-      ...syncRoundGroupsPatch(assistantMsg),
-    });
-    if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
-  }
-
-  function handleStatusEvent(event: EventOf<"status">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
-    const { phase } = event.data;
-    const run = runManager.get(sessionId);
-    if (!run) return;
-    const prevPhase = run.live.phase;
-    setAgentStatus(sessionId, assistantMsg, phase, event.data, { log: phase !== prevPhase });
-
-    const phaseChanged = phase !== prevPhase;
-    const contextChanged =
-      event.data.contextChars !== undefined &&
-      event.data.contextChars !== assistantMsg.contextChars;
-    const streamChanged =
-      event.data.streamChars !== undefined &&
-      event.data.streamChars !== assistantMsg.streamChars;
-    const isTerminal = phase === "aborted" || phase === "finished";
-    // Heartbeat-only status (same phase, e.g.「已等待 12s」) updates run.live only;
-    // skip patching chatMessages to avoid re-rendering the whole UI every 2s.
-    if (!phaseChanged && !contextChanged && !streamChanged && !isTerminal) {
-      return;
-    }
-
-    if (shouldMinimizeRunUiPatch(assistantMsg)) {
-      if (phase === "aborted") {
-        clearStreamDeltaBuffer();
-        assistantMsg.agentAborted = true;
-        assistantMsg.agentAbortReason ||= "运行连接已中断";
-        stopAgentUiTick();
-        finishRunSession(sessionId);
-        updateAgentRunSessionStatus(sessionId, "interrupted");
-        patchAssistantMsg(msgId, {
-          agentAborted: true,
-          agentAbortReason: assistantMsg.agentAbortReason,
-          content: assistantMsg.content,
-        });
-        persistChatNow();
-        if (pendingPromptQueue.value.length) {
-          dequeuePendingPromptAndRun();
-        }
-        return;
+  if (getCurrentInstance()) {
+    onBeforeUnmount(() => {
+      if (pendingSettleTimerRef.current) {
+        clearTimeout(pendingSettleTimerRef.current);
+        pendingSettleTimerRef.current = null;
       }
-      const statusText = formatLiveStatus(run.live);
-      assistantMsg.roundGroups = recordAgentRoundStatus(
-        assistantMsg.roundGroups,
-        phase,
-        statusText,
-        assistantMsg.agentTurn ?? event.data.turn,
-        assistantMsg.agentMaxTurns ?? event.data.maxTurns,
-      );
-      scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
-      return;
-    }
-
-    const statusText = formatLiveStatus(run.live);
-    assistantMsg.roundGroups = recordAgentRoundStatus(
-      assistantMsg.roundGroups,
-      phase,
-      statusText,
-      assistantMsg.agentTurn ?? event.data.turn,
-      assistantMsg.agentMaxTurns ?? event.data.maxTurns,
-    );
-    patchAssistantMsg(msgId, {
-      streamChars: assistantMsg.streamChars,
-      contextChars: assistantMsg.contextChars,
-      statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
-      agentTurn: assistantMsg.agentTurn,
-      agentMaxTurns: assistantMsg.agentMaxTurns,
-      agentModel: assistantMsg.agentModel,
-      ...syncRoundGroupsPatch(assistantMsg),
-    });
-    if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
-    if (phase === "aborted") {
-      clearStreamDeltaBuffer();
-      assistantMsg.agentAborted = true;
-      assistantMsg.agentAbortReason ||= "运行连接已中断";
-      const abortTurn = assistantMsg.agentTurn ?? 1;
-      assistantMsg.roundGroups = recordAgentRoundResponse(
-        assistantMsg.roundGroups,
-        abortTurn,
-        { assistantText: "", toolCalls: [], hasToolCalls: false, isFinal: false },
-        assistantMsg.agentMaxTurns,
-      );
-      patchAssistantMsg(msgId, {
-        agentAborted: true,
-        agentAbortReason: assistantMsg.agentAbortReason,
-        ...syncRoundGroupsPatch(assistantMsg),
-      });
-      stopAgentUiTick();
-      finishRunSession(sessionId);
-      updateAgentRunSessionStatus(sessionId, "interrupted");
-      persistChatNow();
-      if (pendingPromptQueue.value.length) {
-        dequeuePendingPromptAndRun();
-      }
-    }
-    void scrollChatToBottom();
-  }
-
-  function handleToolStartEvent(event: EventOf<"tool_start">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
-    const meta = formatToolMeta(event.data.name, event.data.args);
-    const toolTurn = assistantMsg.agentTurn ?? runManager.get(sessionId)?.live.turn ?? 1;
-    const toolStep = {
-      id: event.data.id,
-      ...meta,
-      args: { ...event.data.args },
-      summary: "",
-      ok: true,
-      running: true,
-      turn: toolTurn,
-    };
-    if (!assistantMsg.tools) assistantMsg.tools = [];
-    assistantMsg.tools.push(toolStep);
-    assistantMsg.roundGroups = recordAgentRoundToolStart(assistantMsg.roundGroups, event.data.id, toolTurn);
-    setAgentStatus(sessionId, assistantMsg, "executing_tool", {
-      toolTitle: meta.title,
-      toolDetail: meta.detail,
-      turn: assistantMsg.agentTurn,
-      maxTurns: assistantMsg.agentMaxTurns,
-    });
-    if (shouldMinimizeRunUiPatch(assistantMsg)) {
-      scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
-      return;
-    }
-    patchAssistantMsg(msgId, {
-      tools: [...assistantMsg.tools],
-      statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
-      ...syncRoundGroupsPatch(assistantMsg),
-    });
-    if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
-    void scrollChatToBottom();
-  }
-
-  function handleFileDiffEvent(event: EventOf<"file_diff">, assistantMsg: ChatMessage, _sessionId: string, msgId: string) {
-    const relPath = event.data.path;
-    const diff = { before: event.data.before, after: event.data.after, deleted: event.data.deleted, created: event.data.created };
-    storeFileDiff(relPath, diff.before, diff.after, diff.deleted);
-    if (!assistantMsg.turnFileDiffs) assistantMsg.turnFileDiffs = {};
-    assistantMsg.turnFileDiffs[relPath] = diff;
-    const normalizedPath = relPath.replace(/\\/g, "/");
-    const writeStep = [...(assistantMsg.tools || [])].reverse().find((tool) => {
-      if (tool.name !== "write_file") return false;
-      const toolPath = String(tool.args?.path ?? tool.detail.split(" · ")[0] ?? "").replace(/\\/g, "/");
-      return toolPath === normalizedPath;
-    });
-    if (writeStep) {
-      writeStep.lineDelta = computeLineDelta(diff.before, diff.after, diff.created);
-    }
-    patchAssistantMsg(msgId, {
-      turnFileDiffs: { ...assistantMsg.turnFileDiffs },
-      tools: assistantMsg.tools ? [...assistantMsg.tools] : undefined,
-    });
-    void syncEditorAfterAgentFileChange(relPath, diff);
-    void scrollChatToBottom();
-  }
-
-  function handleToolEndEvent(event: EventOf<"tool_end">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
-    const step = assistantMsg.tools?.find((t) => t.id === event.data.id);
-    if (step) {
-      step.running = false;
-      step.ok = event.data.ok;
-      step.summary = event.data.summary;
-      if (event.data.result) {
-        const raw = event.data.result;
-        step.fullResult =
-          raw.length > MAX_TOOL_FULL_RESULT_CHARS
-            ? `${raw.slice(0, MAX_TOOL_FULL_RESULT_CHARS)}…`
-            : raw;
-      }
-    }
-    if (event.data.result) {
-      const proposal = parseMemoryProposalToolResult(event.data.result);
-      if (proposal) onMemoryProposal?.(msgId, proposal);
-      const skillProposal = parseSkillProposalToolResult(event.data.result);
-      if (skillProposal) onSkillProposal?.(msgId, skillProposal);
-    }
-    if (event.data.name === "run_command" && event.data.ok) {
-      void refreshTree();
-    }
-    const pending = assistantMsg.tools?.some((t) => t.running);
-    setAgentStatus(sessionId, assistantMsg, pending ? "executing_tools" : "summarizing_tools", {
-      turn: assistantMsg.agentTurn,
-      maxTurns: assistantMsg.agentMaxTurns,
-    });
-    if (shouldMinimizeRunUiPatch(assistantMsg)) {
-      scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
-      return;
-    }
-    patchAssistantMsg(msgId, {
-      tools: assistantMsg.tools ? [...assistantMsg.tools] : undefined,
-      statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
-    });
-    if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
-    void scrollChatToBottom();
-  }
-
-  function handleMessageDeltaEvent(event: EventOf<"message_delta">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
-    const delta = event.data.delta || "";
-    if (!delta) return;
-    const run = runManager.get(sessionId);
-    const waitPhases = new Set(["waiting_model", "sending_request", "retrying_model"]);
-    if (run && waitPhases.has(run.live.phase)) {
-      setAgentStatus(sessionId, assistantMsg, "streaming_model", {
-        turn: assistantMsg.agentTurn,
-        maxTurns: assistantMsg.agentMaxTurns,
-        model: assistantMsg.agentModel,
-        streamChars: (assistantMsg.streamChars || 0) + delta.length,
-      });
-      if (!shouldMinimizeRunUiPatch(assistantMsg)) {
-        patchAssistantMsg(msgId, {
-          streamChars: assistantMsg.streamChars,
-        });
-      }
-    }
-    enqueueStreamDelta(msgId, assistantMsg, delta);
-  }
-
-  function handleMessageEvent(event: EventOf<"message">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
-    clearStreamDeltaBuffer();
-    const cleanText = stripTextToolCallMarkup(stripToolSummaryFromAssistantContent(event.data.text));
-    const minimizing = shouldMinimizeRunUiPatch(assistantMsg);
-    if (cleanText) {
-      assistantMsg.content = mergeAssistantTurnText(assistantMsg.content || "", cleanText);
-    }
-    if (minimizing) {
-      schedulePersistDuringRun(sessionId);
-      scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
-      return;
-    }
-    patchAssistantMsg(msgId, {
-      content: assistantMsg.content,
-    });
-    schedulePersistDuringRun(sessionId);
-    void scrollChatToBottom();
-  }
-
-  function handleErrorEvent(event: EventOf<"error">, assistantMsg: ChatMessage, sessionId: string, _msgId: string) {
-    if (isRunVisible(sessionId)) clearStreamDeltaBuffer();
-    planExecutionActive.value = false;
-    if (trySilentContinue(sessionId, assistantMsg, event.data.message)) {
-      runManager.setAbortHandle(sessionId, null);
-      return;
-    }
-    applyRecoverableAgentFailure(assistantMsg, event.data.message);
-    finishRunSession(sessionId);
-    maybePersistChat(sessionId);
-    maybeScrollChat(sessionId);
-
-    const recoverable = isRecoverableAgentError(event.data.message);
-    if (!recoverable && pendingPromptQueue.value.length && isRunVisible(sessionId)) {
-      dequeuePendingPromptAndRun();
-    }
-  }
-
-  function handleDoneEvent(event: EventOf<"done">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
-    if (isRunVisible(sessionId)) clearStreamDeltaBuffer();
-    const wasExecutePlanRun = planExecutionActive.value;
-    planExecutionActive.value = false;
-    runManager.setAbortHandle(sessionId, null);
-    clearPendingAgentRun();
-    flushMinimizedRunUiPatch(sessionId, msgId, assistantMsg);
-
-    if (assistantMsg.agentFailed) {
-      finishRunSession(sessionId);
-      const completedTurns = resolveCompletedTurns(event.data.turns, assistantMsg);
-      if (!assistantMsg.totalTurns) assistantMsg.totalTurns = completedTurns;
-      patchAssistantMsg(msgId, {
-        totalTurns: assistantMsg.totalTurns,
-        ...assistantTransientUiClearPatch(),
-        ...syncRoundGroupsPatch(assistantMsg),
-      });
-      persistChatNow();
-      void scrollChatToBottom();
-      if (pendingPromptQueue.value.length) {
-        dequeuePendingPromptAndRun();
-      }
-      return;
-    }
-
-    const completedTurns = resolveCompletedTurns(event.data.turns, assistantMsg);
-    const wasAborted = !!assistantMsg.agentAborted;
-
-    mergeDeferredCaptureIntoMsg(sessionId, assistantMsg);
-
-    if ((assistantMsg.chatMode === "ask" || assistantMsg.chatMode === "explore") && !wasAborted) {
-      assistantMsg.totalTurns = completedTurns;
-      if (projectPath.value.trim()) {
-        updateAgentRunSessionStatus(sessionId, "completed");
-      }
-      assistantMsg.writtenFiles = resolveAgentDoneFileAction({
-        chatMode: assistantMsg.chatMode ?? "ask",
-        wasAborted: false,
-        serverPendingFiles: [],
-        serverWrittenFiles: event.data.writtenFiles ?? [],
-        turnFileDiffPaths: [],
-        tools: assistantMsg.tools,
-        priorWrittenFiles: assistantMsg.writtenFiles,
-      }).writtenFiles;
-      assistantMsg.content = applySuggestionsToAssistantContent(
-        assistantMsg,
-        finalizeAssistantBubbleContent({
-          ...assistantMsg,
-          wasAborted: false,
-          writtenFiles: assistantMsg.writtenFiles,
-          agentFailed: false,
-        }),
-      );
-      assistantMsg.activityExpanded = false;
-      stopAgentUiTick();
-      clearPendingAgentEvents();
-      finishRunSession(sessionId);
-      patchAssistantMsg(msgId, {
-        ...assistantTransientUiClearPatch(),
-        activityExpanded: assistantMsg.activityExpanded,
-        content: assistantMsg.content,
-        totalTurns: assistantMsg.totalTurns,
-        writtenFiles: assistantMsg.writtenFiles,
-      });
-      pendingSettleTimer = window.setTimeout(() => {
-        pendingSettleTimer = null;
-        persistChatNow(undefined, { flushStore: true, sessionId });
-        void scrollChatToBottom();
-        onAgentRunSettled?.(assistantMsg);
-      }, 0);
-      if (pendingPromptQueue.value.length) {
-        dequeuePendingPromptAndRun();
-      }
-      return;
-    }
-
-    // Update session status to completed if agent completed successfully
-    if (!wasAborted && !assistantMsg.agentFailed && projectPath.value.trim()) {
-      updateAgentRunSessionStatus(sessionId, "completed");
-    }
-    const hasRunningTools = assistantMsg.tools?.some((t) => t.running);
-    const hadProgress = hasRecoverableAgentProgress(assistantMsg);
-    const incompleteRun =
-      !wasAborted &&
-      hadProgress &&
-      (hasRunningTools || (completedTurns === 0 && event.data.turns === 0));
-    const maxTurnsExhausted =
-      !wasAborted &&
-      !assistantMsg.agentFailed &&
-      isAgentMaxTurnsExhausted(assistantMsg, completedTurns);
-
-    // 自动续跑：模型输出被截断时静默继续
-    if (event.data.truncated && !wasAborted && !assistantMsg.agentFailed) {
-      const continueCount = assistantMsg.agentContinueCount ?? 0;
-      const maxContinues = AGENT_SILENT_CONTINUE_MAX;
-      const truncatedNotice = `回复内容较长，正在自动补充完成（第 ${continueCount + 1}/${maxContinues} 次）…`;
-      if (trySilentContinue(sessionId, assistantMsg, truncatedNotice)) {
-        if (!assistantMsg.totalTurns) {
-          assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
-        }
-        patchAssistantMsg(msgId, {
-          totalTurns: assistantMsg.totalTurns,
-          ...syncRoundGroupsPatch(assistantMsg),
-        });
-        schedulePersistDuringRun(sessionId);
-        void scrollChatToBottom();
-        return;
-      }
-    }
-
-    if (incompleteRun) {
-      if (trySilentContinue(sessionId, assistantMsg, "连接中断（运行未完成）")) {
-        if (!assistantMsg.totalTurns) {
-          assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
-        }
-        patchAssistantMsg(msgId, {
-          totalTurns: assistantMsg.totalTurns,
-          ...syncRoundGroupsPatch(assistantMsg),
-        });
-        schedulePersistDuringRun(sessionId);
-        persistAgentRunSession(sessionId);
-        void scrollChatToBottom();
-        return;
-      }
-      const continueBefore = assistantMsg.agentContinueCount ?? 0;
-      handleRecoverableInterruption(sessionId, assistantMsg, "连接中断（运行未完成）", { logStatus: true });
-      if ((assistantMsg.agentContinueCount ?? 0) > continueBefore) {
-        if (!assistantMsg.totalTurns) {
-          assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
-        }
-        patchAssistantMsg(msgId, {
-          totalTurns: assistantMsg.totalTurns,
-          ...syncRoundGroupsPatch(assistantMsg),
-        });
-        schedulePersistDuringRun(sessionId);
-        persistAgentRunSession(sessionId);
-        void scrollChatToBottom();
-        return;
-      }
-      finishRunSession(sessionId);
-      if (!assistantMsg.totalTurns) {
-        assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
-      }
-      patchAssistantMsg(msgId, {
-        totalTurns: assistantMsg.totalTurns,
-        ...assistantTransientUiClearPatch(),
-        ...syncRoundGroupsPatch(assistantMsg),
-      });
-      persistChatNow();
-      void scrollChatToBottom();
-      if (pendingPromptQueue.value.length) {
-        dequeuePendingPromptAndRun();
-      }
-      return;
-    }
-
-    if (maxTurnsExhausted) {
-      const reason = buildAgentMaxTurnsExhaustedMessage(assistantMsg.agentMaxTurns ?? completedTurns);
-      if (trySilentContinue(sessionId, assistantMsg, reason)) {
-        assistantMsg.totalTurns = completedTurns;
-        patchAssistantMsg(msgId, { totalTurns: completedTurns, ...syncRoundGroupsPatch(assistantMsg) });
-        schedulePersistDuringRun(sessionId);
-        persistAgentRunSession(sessionId);
-        void scrollChatToBottom();
-        return;
-      }
-      const continueBefore = assistantMsg.agentContinueCount ?? 0;
-      handleRecoverableInterruption(sessionId, assistantMsg, reason, { logStatus: true });
-      if ((assistantMsg.agentContinueCount ?? 0) > continueBefore) {
-        assistantMsg.totalTurns = completedTurns;
-        patchAssistantMsg(msgId, { totalTurns: completedTurns, ...syncRoundGroupsPatch(assistantMsg) });
-        schedulePersistDuringRun(sessionId);
-        persistAgentRunSession(sessionId);
-        void scrollChatToBottom();
-        return;
-      }
-      finishRunSession(sessionId);
-      assistantMsg.totalTurns = completedTurns;
-      patchAssistantMsg(msgId, { totalTurns: completedTurns, ...syncRoundGroupsPatch(assistantMsg) });
-      persistChatNow();
-      void scrollChatToBottom();
-      if (pendingPromptQueue.value.length) {
-        dequeuePendingPromptAndRun();
-      }
-      return;
-    }
-
-    const spuriousDoneAfterInterrupt =
-      !wasAborted &&
-      event.data.turns === 0 &&
-      hadProgress &&
-      !hasRunningTools &&
-      !hasAgentFinalAnswer(assistantMsg);
-
-    if (spuriousDoneAfterInterrupt) {
-      if (trySilentContinue(sessionId, assistantMsg, "连接中断（运行未完成）")) {
-        if (!assistantMsg.totalTurns) {
-          assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
-        }
-        patchAssistantMsg(msgId, {
-          totalTurns: assistantMsg.totalTurns,
-          ...syncRoundGroupsPatch(assistantMsg),
-        });
-        schedulePersistDuringRun(sessionId);
-        persistAgentRunSession(sessionId);
-        void scrollChatToBottom();
-        return;
-      }
-      handleRecoverableInterruption(sessionId, assistantMsg, "连接中断（运行未完成）", { logStatus: true });
-      finishRunSession(sessionId);
-      if (!assistantMsg.totalTurns) {
-        assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
-      }
-      patchAssistantMsg(msgId, {
-        totalTurns: assistantMsg.totalTurns,
-        agentFailed: assistantMsg.agentFailed,
-        agentRecoverable: assistantMsg.agentRecoverable,
-        agentFailureReason: assistantMsg.agentFailureReason,
-        agentRecoveryDismissed: assistantMsg.agentRecoveryDismissed,
-        content: assistantMsg.content,
-        statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
-        ...syncRoundGroupsPatch(assistantMsg),
-      });
-      persistChatNow();
-      void scrollChatToBottom();
-      return;
-    }
-
-    assistantMsg.totalTurns = completedTurns;
-    const continueCount = assistantMsg.agentContinueCount ?? 0;
-    appendStatusLog(
-      assistantMsg,
-      wasAborted
-        ? `已停止（共 ${completedTurns} 轮）`
-        : continueCount > 0
-          ? `✅ 完成（共 ${completedTurns} 轮，含 ${continueCount} 次自动续跑）`
-          : `完成（共 ${completedTurns} 轮）`,
-    );
-
-    commitAgentFinalAnswerIfMissing(assistantMsg, completedTurns, assistantMsg.agentMaxTurns);
-
-    const autoBugFixOriginalPrompt = resolveOriginalUserPrompt(assistantMsg.id) ?? "";
-    const isAutoBugFixRun = autoBugFixOriginalPrompt.includes("[AUTO_BUG_FIX]");
-    if (
-      isAutoBugFixRun &&
-      !wasAborted &&
-      !assistantMsg.agentFailed &&
-      !hasAgentFinalAnswer(assistantMsg)
-    ) {
-      handleRecoverableInterruption(sessionId, assistantMsg, "运行中断（未生成最终回复）", {
-        logStatus: true,
-        noAutoResume: true,
-      });
-      assistantMsg.content = resolveAgentFailureBubbleContent(assistantMsg);
-      if (!assistantMsg.content?.trim()) {
-        assistantMsg.content = "运行未生成修复总结，可点击「恢复运行」继续，或重新发起扫描修复。";
-      }
-      flushMinimizedRunUiPatch(sessionId, msgId, assistantMsg);
-      patchAssistantMsg(msgId, {
-        ...buildRunUiFullPatch(assistantMsg),
-        content: assistantMsg.content,
-        agentFailed: assistantMsg.agentFailed,
-        agentRecoverable: assistantMsg.agentRecoverable,
-        agentFailureReason: assistantMsg.agentFailureReason,
-        agentFailureDetail: assistantMsg.agentFailureDetail,
-        agentRecoveryDismissed: assistantMsg.agentRecoveryDismissed,
-        totalTurns: assistantMsg.totalTurns,
-        activityExpanded: true,
-      });
-      persistChatNow(undefined, { flushStore: true });
-      finishRunSession(sessionId);
-      void scrollChatToBottom();
-      void maybePersistPlanFileToDisk(assistantMsg, msgId, { wasExecutePlanRun, wasAborted }).then(() => {
-        onAgentRunSettled?.(assistantMsg);
-      });
-      return;
-    }
-
-    if (!wasAborted && hadProgress && !hasAgentFinalAnswer(assistantMsg)) {
-      const rateLimitHint = extractRateLimitHintFromStatusLog(assistantMsg.statusLog);
-      if (rateLimitHint && trySilentContinue(sessionId, assistantMsg, rateLimitHint)) {
-        schedulePersistDuringRun(sessionId);
-        void scrollChatToBottom();
-        return;
-      }
-      handleRecoverableInterruption(sessionId, assistantMsg, "运行中断（未生成最终回复）", {
-        logStatus: true,
-      });
-      assistantMsg.content = resolveAgentFailureBubbleContent(assistantMsg);
-      flushMinimizedRunUiPatch(sessionId, msgId, assistantMsg);
-      patchAssistantMsg(msgId, {
-        ...buildRunUiFullPatch(assistantMsg),
-        content: assistantMsg.content,
-        agentFailed: assistantMsg.agentFailed,
-        agentRecoverable: assistantMsg.agentRecoverable,
-        agentFailureReason: assistantMsg.agentFailureReason,
-        agentFailureDetail: assistantMsg.agentFailureDetail,
-        agentRecoveryDismissed: assistantMsg.agentRecoveryDismissed,
-        totalTurns: assistantMsg.totalTurns,
-        activityExpanded: true,
-      });
-      persistChatNow(undefined, { flushStore: true });
-      finishRunSession(sessionId);
-      void scrollChatToBottom();
-      return;
-    }
-
-    const turnFileDiffPaths = assistantMsg.turnFileDiffs
-      ? Object.keys(assistantMsg.turnFileDiffs)
-      : [];
-    const fileAction = resolveAgentDoneFileAction({
-      chatMode: assistantMsg.chatMode ?? "build",
-      wasAborted,
-      serverPendingFiles: event.data.pendingFiles || [],
-      serverWrittenFiles: event.data.writtenFiles || [],
-      turnFileDiffPaths,
-      tools: assistantMsg.tools,
-      priorWrittenFiles: assistantMsg.writtenFiles,
-    });
-
-    assistantMsg.pendingApproval = fileAction.pendingApproval;
-    assistantMsg.writtenFiles = fileAction.writtenFiles;
-
-    assistantMsg.content = applySuggestionsToAssistantContent(
-      assistantMsg,
-      finalizeAssistantBubbleContent({
-        ...assistantMsg,
-        wasAborted,
-        writtenFiles: fileAction.writtenFiles,
-        agentFailed: false,
-      }),
-    );
-
-    const offerPartialResume = shouldOfferPartialRunResume({
-      wasAborted,
-      writtenFiles: fileAction.writtenFiles,
-      msg: assistantMsg,
-    });
-
-    if (offerPartialResume) {
-      assistantMsg.agentFailed = true;
-      assistantMsg.agentRecoverable = true;
-      assistantMsg.agentFailureReason = PARTIAL_RUN_RESUME_REASON;
-      assistantMsg.agentRecoveryDismissed = false;
-    } else {
-      assistantMsg.agentFailed = false;
-      assistantMsg.agentRecoverable = false;
-      assistantMsg.agentFailureReason = undefined;
-      assistantMsg.agentRecoveryDismissed = true;
-      assistantMsg.agentContinueCount = undefined;
-    }
-
-    assistantMsg.activityExpanded = offerPartialResume || wasAborted
-      ? true
-      : false;
-
-    // End the run before patching final content so the UI does not render
-    // live-preview text while msg.content already holds the finalized answer.
-    finishRunSession(sessionId);
-
-    patchAssistantMsg(msgId, {
-      ...assistantTransientUiClearPatch(),
-      activityExpanded: assistantMsg.activityExpanded,
-      content: assistantMsg.content,
-      agentSuggestions: assistantMsg.agentSuggestions,
-      totalTurns: assistantMsg.totalTurns,
-      statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
-      ...syncRoundGroupsPatch(assistantMsg),
-      writtenFiles: assistantMsg.writtenFiles,
-      pendingApproval: assistantMsg.pendingApproval,
-      agentAborted: assistantMsg.agentAborted || undefined,
-      agentFailed: offerPartialResume ? true : undefined,
-      agentRecoverable: offerPartialResume ? true : undefined,
-      agentFailureReason: offerPartialResume ? PARTIAL_RUN_RESUME_REASON : undefined,
-      agentFailureDetail: undefined,
-      agentRecoveryDismissed: offerPartialResume ? false : true,
-      agentContinueCount: offerPartialResume ? assistantMsg.agentContinueCount : undefined,
-    });
-    persistChatNow(undefined, { flushStore: true });
-
-    if (fileAction.writtenFiles?.length) {
-      if (assistantMsg.turnFileDiffs) {
-        clearTurnFileDiffsFromStore(assistantMsg.turnFileDiffs);
-      }
-      void handleAgentWrittenFiles(fileAction.writtenFiles);
-    }
-
-    void maybePersistPlanFileToDisk(assistantMsg, msgId, { wasExecutePlanRun, wasAborted }).then(() => {
-      void scrollChatToBottom();
-      onAgentRunSettled?.(assistantMsg);
-      if (pendingPromptQueue.value.length) {
-        dequeuePendingPromptAndRun();
+      cleanupStreamPatchTimers();
+      if (sseConnection.agentEventFlushRaf) {
+        cancelAnimationFrame(sseConnection.agentEventFlushRaf);
       }
     });
   }
-
-  const agentEventHandlers = new Map<string, AgentEventFn>([
-    ["agent_context", handleAgentContextEvent as AgentEventFn],
-    ["turn_request", handleTurnRequestEvent as AgentEventFn],
-    ["turn_response", handleTurnResponseEvent as AgentEventFn],
-    ["turn_trace", handleTurnTraceEvent as AgentEventFn],
-    ["status", handleStatusEvent as AgentEventFn],
-    ["tool_start", handleToolStartEvent as AgentEventFn],
-    ["file_diff", handleFileDiffEvent as AgentEventFn],
-    ["tool_end", handleToolEndEvent as AgentEventFn],
-    ["message_delta", handleMessageDeltaEvent as AgentEventFn],
-    ["message", handleMessageEvent as AgentEventFn],
-    ["error", handleErrorEvent as AgentEventFn],
-    ["done", handleDoneEvent as AgentEventFn],
-  ]);
-
-  function handleAgentEvent(
-    event: VibeAgentSseEvent,
-    assistantMsg: ChatMessage,
-    runGen: number,
-    sessionId: string,
-  ) {
-    if (!runManager.isValid(sessionId, runGen)) {
-      if (event.type === "done" || event.type === "error") {
-        if (runManager.get(sessionId)) {
-          finishRunSession(sessionId);
-        } else if (chatSending.value) {
-          finishRunSession(sessionId);
-        }
-      }
-      return;
-    }
-    const msgId = assistantMsg.id;
-    if (isAgentSseProgressEvent(event.type)) touchAgentProgress(sessionId);
-    const handler = agentEventHandlers.get(event.type);
-    if (handler) handler(event, assistantMsg, sessionId, msgId);
-  }
-
   function interruptSessionRun(sessionId: string, options?: { logStatus?: boolean; reason?: string }) {
     debugLog(`[interrupt] interruptSessionRun sessionId=${sessionId}, reason=${options?.reason}`);
-    cancelAutoResume();
+    stallRecovery.cancelAutoResume();
     const reason = options?.reason?.trim() || "已被新指令打断";
     const hmrInterrupt = isHmrInterruptReason(reason);
     if (!hmrInterrupt) {
@@ -1845,7 +759,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   }
 
   async function resumeAgentRun(assistantMsgId: string, options?: { silent?: boolean }) {
-    cancelAutoResume();
+    stallRecovery.cancelAutoResume();
     const sessionId = activeSessionId.value;
     if (!configReady.value || !projectOpened.value) {
       debugLog(`[resume] early return: configReady=${configReady.value}, projectOpened=${projectOpened.value}`);
@@ -1932,7 +846,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
     beginAgentRunSession(sessionId);
     const runGen = runManager.start(sessionId, assistantMsg.id, assistantMsg, false, "connecting_local");
-    startAgentUiTick();
+    stallRecovery.startAgentUiTick();
     const connectStatus = formatLiveStatus(runManager.get(sessionId)!.live);
     appendStatusLog(
       assistantMsg,
@@ -1969,6 +883,19 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       runProfile,
       resumePrompt,
     );
+    const resumeHasImage = Boolean(
+      assistantMsg.imageDataUrls?.length
+        || assistantMsg.imageRefs?.length
+        || assistantMsg.imageCount,
+    );
+    const resolvedUserIntent = await resolveIntentForAgentRequest({
+      prompt: resumePrompt,
+      history,
+      mode,
+      hasImage: resumeHasImage,
+      sessionId,
+      assistantMsg,
+    });
 
     const handle = runVibeAgentSse(
       {
@@ -1992,6 +919,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           writtenFiles: assistantMsg.writtenFiles,
           tools: assistantMsg.tools,
         }),
+        resolvedUserIntent,
       },
       (event) => enqueueAgentEvent(event, assistantMsg, runGen, sessionId),
     );
@@ -2017,7 +945,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     }
     const gen = runManager.start(sessionId, assistantMsg.id, assistantMsg, connectHasImages, phase);
     if (detail) runManager.setLive(sessionId, { detail });
-    startAgentUiTick();
+    stallRecovery.startAgentUiTick();
     return gen;
   }
 
@@ -2267,6 +1195,14 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           hasImagesForRequest,
           hasImagesForRequest ? "上传图片中…" : undefined,
         );
+    const resolvedUserIntent = await resolveIntentForAgentRequest({
+      prompt,
+      history,
+      mode: agentMode,
+      hasImage: Boolean(compressedImagesForRequest?.length),
+      sessionId,
+      assistantMsg: assistantMsg!,
+    });
     const agentRequest = {
       prompt,
       history,
@@ -2280,6 +1216,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       runProfile: runProfile.kind === "execute_plan" ? runProfile : undefined,
       imageDataUrls: compressedImagesForRequest?.length ? compressedImagesForRequest : undefined,
       webProxyUrl: loadWebProxyUrlFromStorage() || undefined,
+      resolvedUserIntent,
     };
     if (!options?.suppressHmrRecovery) {
       persistAgentRunForHmr({
@@ -2401,6 +1338,21 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     }
     return { ok: true };
   }
+
+  const {
+    touchAgentProgress,
+    startAgentUiTick,
+    stopAgentUiTick,
+    isAssistantStalled,
+    cancelAutoResume,
+    startAutoResumeCountdown,
+    scheduleAutoResume,
+    maybeAutoResumeLastRecoverableAssistant,
+    prepareAssistantForSilentContinue,
+    trySilentContinue,
+    applyRecoverableAgentFailure,
+    forceRecoverStalledRun,
+  } = stallRecovery;
 
   return {
     autoResumeSecondsLeft,

@@ -1,4 +1,5 @@
 import { backendUrl } from "./backendBase";
+import { isTauriEnv, tauriInvoke } from "./tauriInvoke";
 
 export interface WebExtractRequest {
   url: string;
@@ -104,6 +105,47 @@ export async function extractWebText(
 ): Promise<WebExtractResult> {
   const { onProgress, stream: _stream, ...rest } = request;
 
+  if (onProgress && isTauriEnv()) {
+    onProgress("正在抓取网页…");
+    try {
+      const result = await tauriInvoke<{
+        ok: boolean;
+        status?: number;
+        kind?: string;
+        mode?: string;
+        title?: string;
+        text?: string;
+        content?: string;
+        rawText?: string;
+        error?: string;
+      }>(
+        "web_extract",
+        { url: rest.url, mode: rest.mode || null, limit: rest.limit || null, proxyUrl: rest.proxyUrl || null },
+      );
+      onProgress(result.ok ? "抓取完成。" : "抓取失败。");
+      if (!result.ok) {
+        return {
+          ok: false,
+          status: result.status ?? 0,
+          error: result.error || "抓取失败",
+          rawText: result.rawText,
+        };
+      }
+      const kind = (result.kind || result.mode || "html") as WebExtractResult["kind"];
+      const text = result.text ?? result.content;
+      return {
+        ok: true,
+        status: result.status ?? 200,
+        kind,
+        title: result.title,
+        text,
+        rawText: result.rawText ?? text,
+      };
+    } catch (e: any) {
+      return { ok: false, status: 0, error: e?.message || String(e) };
+    }
+  }
+
   if (onProgress) {
     try {
       const response = await fetch(backendUrl("/backend/web/extract"), {
@@ -132,6 +174,46 @@ export async function extractWebText(
     } catch (error) {
       const message = error instanceof Error ? error.message : "未知网络错误";
       return { ok: false, status: 0, error: message };
+    }
+  }
+
+  // Tauri: invoke Rust web_extract (auto / html / browser / discourse_latest)
+  if (isTauriEnv()) {
+    try {
+      const result = await tauriInvoke<{
+        ok: boolean;
+        status?: number;
+        kind?: string;
+        mode?: string;
+        title?: string;
+        text?: string;
+        content?: string;
+        rawText?: string;
+        error?: string;
+      }>(
+        "web_extract",
+        { url: rest.url, mode: rest.mode || null, limit: rest.limit || null, proxyUrl: rest.proxyUrl || null },
+      );
+      if (!result.ok) {
+        return {
+          ok: false,
+          status: result.status ?? 0,
+          error: result.error || "抓取失败",
+          rawText: result.rawText,
+        };
+      }
+      const kind = (result.kind || result.mode || "html") as WebExtractResult["kind"];
+      const text = result.text ?? result.content;
+      return {
+        ok: true,
+        status: result.status ?? 200,
+        kind,
+        title: result.title,
+        text,
+        rawText: result.rawText ?? text,
+      };
+    } catch (e: any) {
+      return { ok: false, status: 0, error: e?.message || String(e) };
     }
   }
 

@@ -1,4 +1,5 @@
 import { backendUrl } from "./backendBase";
+import { invokeBackend } from "./tauriInvoke";
 import { formatFetchError, readJsonResponse } from "./vibeCodingClient";
 import {
   buildCodeReviewPrompt,
@@ -26,20 +27,26 @@ export { buildCodeReviewPrompt, healthIssueCount };
 export async function fetchProjectHealthScan(projectPath: string): Promise<ProjectHealthScanResult> {
   const trimmed = projectPath.trim();
   if (!trimmed) return { ok: false, error: "缺少 projectPath" } as ProjectHealthScanResult;
-  try {
-    const url = backendUrl(
-      `/backend/vibe/project-health-scan?projectPath=${encodeURIComponent(trimmed)}`,
-    );
-    const response = await fetch(url);
-    const data = await readJsonResponse<ProjectHealthScanPayload & { ok?: boolean; error?: string }>(response);
-    if (data.ok === false || data.error) {
-      return { ok: false, error: data.error || "项目体检失败" } as ProjectHealthScanResult;
-    }
-    return { ok: true, ...data };
-  } catch (error) {
-    return {
-      ok: false,
-      error: formatFetchError(error, "项目体检失败"),
-    } as ProjectHealthScanResult;
-  }
+  return invokeBackend<ProjectHealthScanResult>(
+    "project_health_scan",
+    { projectPath: trimmed },
+    async () => {
+      try {
+        const url = backendUrl(
+          `/backend/vibe/project-health-scan?projectPath=${encodeURIComponent(trimmed)}`,
+        );
+        const response = await fetch(url);
+        const data = await readJsonResponse<ProjectHealthScanPayload & { ok?: boolean; error?: string }>(response);
+        if (data.ok === false || data.error) {
+          return { ok: false, error: data.error || "项目体检失败" } as ProjectHealthScanResult;
+        }
+        return { ok: true, ...data } as ProjectHealthScanResult;
+      } catch (error) {
+        return {
+          ok: false,
+          error: formatFetchError(error, "项目体检失败"),
+        } as ProjectHealthScanResult;
+      }
+    },
+  );
 }

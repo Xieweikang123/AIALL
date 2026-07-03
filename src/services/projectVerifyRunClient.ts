@@ -1,4 +1,5 @@
 import { backendUrl } from "./backendBase";
+import { invokeBackend } from "./tauriInvoke";
 import { formatFetchError, readJsonResponse } from "./vibeCodingClient";
 import {
   isVerifyRunRequestFailed,
@@ -27,19 +28,25 @@ function emptyVerifyResult(projectPath: string, error: string): ProjectVerifyRun
 export async function fetchProjectVerifyRun(projectPath: string): Promise<ProjectVerifyRunResult> {
   const trimmed = projectPath.trim();
   if (!trimmed) return emptyVerifyResult("", "缺少 projectPath");
-  try {
-    const url = backendUrl(
-      `/backend/vibe/project-verify-run?projectPath=${encodeURIComponent(trimmed)}`,
-    );
-    const response = await fetch(url, { method: "POST" });
-    const data = await readJsonResponse<ProjectVerifyRunPayload & { error?: string }>(response);
-    if (isVerifyRunRequestFailed(data) || (!response.ok && !data.ranAt)) {
-      return emptyVerifyResult(trimmed, data.error || "项目验证运行失败");
-    }
-    return data;
-  } catch (error) {
-    return emptyVerifyResult(trimmed, formatFetchError(error, "项目验证运行失败"));
-  }
+  return invokeBackend<ProjectVerifyRunResult>(
+    "project_verify_run",
+    { projectPath: trimmed },
+    async () => {
+      try {
+        const url = backendUrl(
+          `/backend/vibe/project-verify-run?projectPath=${encodeURIComponent(trimmed)}`,
+        );
+        const response = await fetch(url, { method: "POST" });
+        const data = await readJsonResponse<ProjectVerifyRunPayload & { error?: string }>(response);
+        if (isVerifyRunRequestFailed(data) || (!response.ok && !data.ranAt)) {
+          return emptyVerifyResult(trimmed, data.error || "项目验证运行失败");
+        }
+        return data;
+      } catch (error) {
+        return emptyVerifyResult(trimmed, formatFetchError(error, "项目验证运行失败"));
+      }
+    },
+  );
 }
 
 export {

@@ -21,7 +21,7 @@
       @execute-plan="emit('execute-plan')"
       @select-option="(option) => emit('select-option', option)"
       @toggle-debug="emit('toggle-debug')"
-      @toggle-process="emit('toggle-process')"
+      @toggle-process="(v: boolean) => emit('toggle-process', v)"
       @open-file="(path) => emit('openFile', path)"
       @open-plan-file="emit('open-plan-file')"
     >
