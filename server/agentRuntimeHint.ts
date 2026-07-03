@@ -20,7 +20,7 @@ export function resolveVerifyScripts(scripts: Record<string, string>): string[] 
     if (scripts[name]) commands.push(`npm run ${name}`);
   }
   if (!commands.length) {
-    const build = scripts.build ?? "";
+    const build = scripts.build ?? scripts["build:tauri"] ?? "";
     if (/\bvue-tsc\b/.test(build) && /--noEmit/.test(build)) {
       commands.push("npx vue-tsc --noEmit");
     } else if (/\btsc\b/.test(build) && /--noEmit/.test(build)) {
@@ -45,9 +45,17 @@ export function detectProjectRuntimeProfile(projectRoot: string): ProjectRuntime
     const pkgPath = path.join(projectRoot, "package.json");
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8")) as { scripts?: Record<string, string> };
     const scripts = pkg.scripts ?? {};
-    if (scripts.dev) webDevScript = "npm run dev";
-    if (scripts["tauri:dev"]) desktopDevScript = "npm run tauri:dev";
-    if (scripts["electron:dev"]) desktopDevScript = "npm run electron:dev";
+    if (scripts["dev:web"]) webDevScript = "npm run dev:web";
+    if (scripts["tauri:dev"]) {
+      desktopDevScript = "npm run tauri:dev";
+    } else if (scripts["electron:dev"]) {
+      desktopDevScript = "npm run electron:dev";
+    } else if (scripts.dev && /\btauri\b/.test(scripts.dev)) {
+      desktopDevScript = "npm run dev";
+    }
+    if (scripts.dev && !/\btauri\b/.test(scripts.dev) && !webDevScript) {
+      webDevScript = "npm run dev";
+    }
     verifyScripts = resolveVerifyScripts(scripts);
     verifyScript = verifyScripts[0];
   } catch {

@@ -1,4 +1,4 @@
-import { ref, type Ref } from "vue";
+import { computed, ref, type Ref } from "vue";
 import {
   beginVibeChatDraftSession,
   finalizeDraftSessionOnLeave,
@@ -62,8 +62,11 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
   const switchingSession = ref(false);
   const syncingChatStore = ref(false);
   const chatStoreSyncMessage = ref("");
-  /** UI binds here; always the same array reference as registry.get(activeSessionId). */
-  const activeMessages = ref<T[]>([]) as Ref<T[]>;
+  /** Bumped when registry bindings change so UI always reads the active session array. */
+  const registryVersion = ref(0);
+  function bumpRegistryVersion() {
+    registryVersion.value += 1;
+  }
 
   const sessionMessages = useSessionMessageRegistry<T>();
 
@@ -96,28 +99,49 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     resetSessionUi,
   } = session;
 
+  /** UI binds here; always reads registry.get(activeSessionId) without stale array refs. */
+  const activeMessages = computed({
+    get(): T[] {
+      void registryVersion.value;
+      const id = activeSessionId.value.trim();
+      if (!id) {
+        if (orphanMessages) return orphanMessages;
+        return sessionMessages.getOrCreateSessionMessages("__orphan__");
+      }
+      return sessionMessages.getOrCreateSessionMessages(id);
+    },
+    set(next: T[]) {
+      const id = activeSessionId.value.trim();
+      if (!id) {
+        orphanMessages = next;
+        bumpRegistryVersion();
+        return;
+      }
+      sessionMessages.setSessionMessages(id, next);
+      bumpRegistryVersion();
+    },
+  }) as Ref<T[]>;
+
   function refreshList(path?: string) {
     refreshSessionList(path);
   }
 
-  /** Bind session id + messages atomically; activeMessages points into the registry. */
+  /** Bind session id + messages atomically; activeMessages reads from the registry. */
   function activateSession(sessionId: string, messages?: T[]) {
     const id = sessionId.trim();
     if (!id) return;
     const bound = messages ?? sessionMessages.getSessionMessages(id) ?? [];
     sessionMessages.setSessionMessages(id, bound);
     setActiveSession(id);
-    activeMessages.value = sessionMessages.getSessionMessages(id)!;
     orphanMessages = null;
+    bumpRegistryVersion();
   }
 
   function bindSessionMessages(sessionId: string, messages: T[]) {
     const id = sessionId.trim();
     if (!id) return;
     sessionMessages.setSessionMessages(id, messages);
-    if (activeSessionId.value.trim() === id) {
-      activeMessages.value = messages;
-    }
+    bumpRegistryVersion();
   }
 
   function resolveMessagesForSession(sessionId: string, diskMessages: PersistedChatMessage[]): T[] {
@@ -145,8 +169,7 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
 
   async function restoreIndexedSessionsFromDisk(project: string, sessionIds: string[]): Promise<void> {
     if (!sessionIds.length) return;
-    const indexedIds = getSessionDiagSnapshot(project).indexSessionIds;
-    for (const id of sessionIds.filter((sid) => indexedIds.includes(sid))) {
+    for (const id of sessionIds) {
       if (isSessionRecentlyDeletedLocally(project, id)) continue;
       if (!projectChatNeedsDiskRestore(project, id)) continue;
       const result = await fetchSessionMessages(project, id);
@@ -229,7 +252,7 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     resetSessionUi();
     sessionMessages.clearAll();
     orphanMessages = null;
-    activeMessages.value = [];
+    bumpRegistryVersion();
   }
 
   function cancelPendingChatPersistence() {
@@ -327,7 +350,18 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
 
       const stamped = stampImageRefsAfterSync(sessionId, messagesForDiskSync);
       saveVibeChatHistory(path, stamped, sessionId, { setActive: sameActiveSession, touchTimestamp: false });
-      bindSessionMessages(sessionId, normalizeMessages(stamped) as T[]);
+      const live = sessionMessages.getSessionMessages(sessionId);
+      if (live?.length) {
+        for (const sm of stamped) {
+          if (sm.role !== "user" || !sm.imageRefs?.length) continue;
+          const idx = live.findIndex((m) => (m as { id?: string }).id === sm.id);
+          if (idx >= 0) {
+            Object.assign(live[idx] as object, { imageRefs: sm.imageRefs, imageCount: sm.imageCount });
+          }
+        }
+      } else {
+        bindSessionMessages(sessionId, normalizeMessages(stamped) as T[]);
+      }
       refreshList(path);
     }
     if (options?.flushStore) {
@@ -422,57 +456,92 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
 
   function applySessionSwitch(project: string, sessionId: string) {
     switchVibeChatSession(project, sessionId);
-    const diskMessages = peekVibeChatSessionMessages(project, sessionId);
-    const resolved = resolveMessagesForSession(sessionId, diskMessages);
-    activateSession(sessionId, normalizeMessages(resolved));
+    const id = sessionId.trim();
+    const diskMessages = peekVibeChatSessionMessages(project, id);
+    const resolved = resolveMessagesForSession(id, diskMessages);
+    activateSession(id, resolved);
     chatError.value = "";
     refreshList(project);
     onAfterSwitch?.();
   }
 
+  function hydrateSessionFromDiskAfterSwitch(project: string, sessionId: string, gen: number) {
+    void (async () => {
+      let registryDirty = false;
+      try {
+        await ensureProjectChatLoadedFromDisk(project, sessionId);
+        const id = sessionId.trim();
+        const stillActive = activeSessionId.value.trim() === id;
+        const diskMessages = peekVibeChatSessionMessages(project, id);
+        const cached = sessionMessages.getSessionMessages(id);
+        if (stillActive) {
+          const cachedLen = cached?.length ?? 0;
+          if (diskMessages.length && cachedLen < diskMessages.length) {
+            bindSessionMessages(id, resolveMessagesForSession(id, diskMessages));
+            registryDirty = true;
+          } else if (diskMessages.length) {
+            bumpRegistryVersion();
+            registryDirty = true;
+          }
+          onAfterSwitch?.();
+        }
+      } finally {
+        const id = sessionId.trim();
+        if (activeSessionId.value.trim() === id) {
+          switchingSession.value = false;
+          if (!registryDirty) bumpRegistryVersion();
+          void scrollToBottom?.(true);
+        } else if (gen === switchSessionGeneration) {
+          switchingSession.value = false;
+        }
+        schedulePersistChat();
+      }
+    })();
+  }
+
   function switchSession(sessionId: string) {
-    if (!projectPath().trim()) return;
-    if (sessionId === activeSessionId.value) {
+    const id = sessionId.trim();
+    const project = projectPath().trim();
+    const currentId = activeSessionId.value.trim();
+    if (!project || !id) {
       return;
     }
+
+    if (id === currentId) {
+      applySessionSwitch(project, id);
+      void scrollToBottom?.(true);
+      return;
+    }
+
     switchingSession.value = false;
-    const fromSessionId = activeSessionId.value.trim();
-    const project = projectPath().trim();
+    const fromSessionId = currentId;
     const fromMessages = fromSessionId ? sessionMessages.getSessionMessages(fromSessionId) : undefined;
     persistComposerDraft?.();
-    if (fromSessionId && fromSessionId !== sessionId) {
+    if (fromSessionId && fromSessionId !== id) {
       finalizeDraftSessionOnLeave(project, fromSessionId);
     }
     cancelPendingChatPersistence();
     const gen = ++switchSessionGeneration;
-    applySessionSwitch(project, sessionId);
+    applySessionSwitch(project, id);
 
     if (fromSessionId && fromMessages?.length) {
       saveVibeChatHistory(project, fromMessages, fromSessionId, { touchTimestamp: false, setActive: false });
     }
 
-    if (!projectChatNeedsDiskRestore(project, sessionId)) {
+    if (!projectChatNeedsDiskRestore(project, id)) {
+      void scrollToBottom?.(true);
+      return;
+    }
+
+    const hasDisplayableMessages = (sessionMessages.getSessionMessages(id)?.length ?? 0) > 0;
+    if (hasDisplayableMessages) {
+      hydrateSessionFromDiskAfterSwitch(project, id, gen);
       void scrollToBottom?.(true);
       return;
     }
 
     switchingSession.value = true;
-    void (async () => {
-      try {
-        await ensureProjectChatLoadedFromDisk(project, sessionId);
-        if (gen !== switchSessionGeneration) return;
-        const diskMessages = peekVibeChatSessionMessages(project, sessionId);
-        const resolved = resolveMessagesForSession(sessionId, diskMessages);
-        bindSessionMessages(sessionId, normalizeMessages(resolved));
-        onAfterSwitch?.();
-      } finally {
-        if (gen === switchSessionGeneration) {
-          switchingSession.value = false;
-          void scrollToBottom?.(true);
-        }
-        schedulePersistChat();
-      }
-    })();
+    hydrateSessionFromDiskAfterSwitch(project, id, gen);
   }
 
   async function removeSession(sessionId: string) {

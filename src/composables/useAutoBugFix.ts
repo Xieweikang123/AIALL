@@ -266,9 +266,6 @@ export function useAutoBugFix(
 
     if (stored) {
       const storedSessionId = stored.sessionId?.trim() ?? "";
-      if (storedSessionId && storedSessionId !== activeSessionId.value.trim()) {
-        deps.switchSession?.(storedSessionId);
-      }
       const restoreMessages = storedSessionId && deps.getSessionMessages
         ? (deps.getSessionMessages(storedSessionId) ?? messages)
         : messages;

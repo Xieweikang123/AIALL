@@ -34,7 +34,12 @@
                   <path d="M10 3 5 8l5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
               </button>
-              <span class="session-picker-title" :title="activeSessionTitle || '新会话'">{{ activeSessionTitle || "新会话" }}</span>
+              <button
+                type="button"
+                class="session-picker-title-btn"
+                :title="activeSessionTitle || '新会话'"
+                @click="$emit('open-session-list')"
+              >{{ activeSessionTitle || "新会话" }}</button>
               <button
                 v-if="activeSessionId"
                 type="button"
@@ -795,6 +800,7 @@ const emit = defineEmits<{
   (e: "expand-editor"): void;
   (e: "collapse-chat"): void;
   (e: "switch-session", sessionId: string): void;
+  (e: "open-session-list"): void;
   (e: "remove-session", sessionId: string): void;
   (e: "switch-to-adjacent-session", delta: number): void;
   (e: "clear-pending-queue"): void;
@@ -1046,7 +1052,8 @@ function removeQuotedMessage(index: number) {
   line-height: 1.2;
 }
 
-.session-picker-title {
+.session-picker-title,
+.session-picker-title-btn {
   font-size: 11px;
   font-weight: 500;
   color: rgba(139, 148, 158, 0.85);
@@ -1055,6 +1062,18 @@ function removeQuotedMessage(index: number) {
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.3;
+}
+
+.session-picker-title-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.session-picker-title-btn:hover {
+  color: rgba(201, 209, 217, 0.95);
 }
 
 .session-picker-wrap {

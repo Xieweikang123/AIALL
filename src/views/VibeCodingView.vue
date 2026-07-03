@@ -486,6 +486,7 @@
         @expand-editor="expandEditor"
         @collapse-chat="collapseChat"
         @switch-session="handleSwitchSession"
+        @open-session-list="gitPanelMode = 'sessions'"
         @copy-session-info="copySessionInfo"
         @copy-session-name-path="copySessionNamePath"
         @remove-session="removeSession"
@@ -3596,11 +3597,21 @@ watch(
       .join(";")}`,
   () => {
     if (!projectPath.value.trim() || !chatMessagesNeedImageHydration(chatMessages.value)) return;
+    const sid = activeSessionId.value.trim();
+    if (!sid) return;
     const token = ++chatImageHydrateToken;
     void (async () => {
       const next = await applyChatMessageImageHydration(chatMessages.value);
       if (token !== chatImageHydrateToken) return;
-      bindSessionMessages(activeSessionId.value, next);
+      if (activeSessionId.value.trim() !== sid) return;
+      const live = getSessionMessages(sid);
+      if (!live?.length || live !== chatMessages.value) return;
+      for (let i = 0; i < next.length; i += 1) {
+        const patch = next[i];
+        if (!patch?.id) continue;
+        const idx = live.findIndex((m) => m.id === patch.id);
+        if (idx >= 0) Object.assign(live[idx]!, patch);
+      }
     })();
   },
 );

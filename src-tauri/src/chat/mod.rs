@@ -10,12 +10,94 @@ pub(crate) fn store_file() -> PathBuf {
   chat_dir().join("chat-store.json")
 }
 
-pub(crate) fn session_file(session_id: &str) -> PathBuf {
-  let safe: String = session_id
+fn session_id_safe(session_id: &str) -> String {
+  session_id
     .chars()
     .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
-    .collect();
-  chat_dir().join(format!("chat-{safe}.json"))
+    .collect()
+}
+
+pub(crate) fn session_file(session_id: &str) -> PathBuf {
+  chat_dir().join(format!("chat-{}.json", session_id_safe(session_id)))
+}
+
+fn message_array_len(value: &Value) -> usize {
+  value
+    .get("messages")
+    .and_then(|m| m.as_array())
+    .map(|a| a.len())
+    .unwrap_or(0)
+}
+
+fn messages_len(messages: &Value) -> usize {
+  messages.as_array().map(|a| a.len()).unwrap_or(0)
+}
+
+fn messages_from_session_json(session: &Value) -> Value {
+  session.get("messages").cloned().unwrap_or(json!([]))
+}
+
+async fn recover_messages_from_tmp_backups(session_id: &str) -> Option<Value> {
+  let dir = chat_dir();
+  let prefix = format!(".tmp-chat-{}", session_id_safe(session_id));
+  let mut entries = tokio::fs::read_dir(&dir).await.ok()?;
+  let mut candidates: Vec<(u64, PathBuf)> = Vec::new();
+  while let Ok(Some(entry)) = entries.next_entry().await {
+    let name = entry.file_name().to_string_lossy().to_string();
+    if !name.starts_with(&prefix) {
+      continue;
+    }
+    let len = entry.metadata().await.ok()?.len();
+    candidates.push((len, entry.path()));
+  }
+  candidates.sort_by(|a, b| b.0.cmp(&a.0));
+  for (_, path) in candidates {
+    let content = tokio::fs::read_to_string(&path).await.ok()?;
+    let session: Value = serde_json::from_str(&content).ok()?;
+    let messages = messages_from_session_json(&session);
+    if messages_len(&messages) > 0 {
+      return Some(messages);
+    }
+  }
+  None
+}
+
+async fn load_session_messages_with_recovery(session_id: &str) -> Value {
+  let path = session_file(session_id);
+  let mut session: Value = json!({});
+  if let Ok(content) = tokio::fs::read_to_string(&path).await {
+    session = serde_json::from_str(&content).unwrap_or(json!({}));
+  }
+  let mut messages = messages_from_session_json(&session);
+  if messages_len(&messages) == 0 {
+    if let Some(recovered) = recover_messages_from_tmp_backups(session_id).await {
+      messages = recovered;
+      if session.is_object() {
+        if let Some(obj) = session.as_object_mut() {
+          obj.insert("messages".into(), messages.clone());
+          let _ = tokio::fs::write(
+            &path,
+            serde_json::to_string_pretty(&session).unwrap_or_default(),
+          )
+          .await;
+        }
+      }
+    }
+  }
+  messages
+}
+
+async fn should_skip_empty_session_overwrite(file: &Path, incoming: &Value) -> bool {
+  if message_array_len(incoming) > 0 {
+    return false;
+  }
+  let Ok(existing_raw) = tokio::fs::read_to_string(file).await else {
+    return false;
+  };
+  let Ok(existing) = serde_json::from_str::<Value>(&existing_raw) else {
+    return false;
+  };
+  message_array_len(&existing) > 0
 }
 
 pub async fn chat_store_load(project_path: &str, load_messages: bool) -> Value {
@@ -46,14 +128,10 @@ pub async fn chat_store_load(project_path: &str, load_messages: bool) -> Value {
       if sid.is_empty() {
         continue;
       }
-      let path = session_file(sid);
-      if let Ok(content) = tokio::fs::read_to_string(&path).await {
-        if let Ok(session) = serde_json::from_str::<Value>(&content) {
-          if let Some(msgs) = session.get("messages") {
-            meta.as_object_mut()
-              .map(|o| o.insert("messages".into(), msgs.clone()));
-          }
-        }
+      let messages = load_session_messages_with_recovery(sid).await;
+      if messages_len(&messages) > 0 {
+        meta.as_object_mut()
+          .map(|o| o.insert("messages".into(), messages));
       }
     }
   }
@@ -63,19 +141,19 @@ pub async fn chat_store_load(project_path: &str, load_messages: bool) -> Value {
 pub async fn chat_session_messages(project_path: &str, session_id: &str) -> Value {
   let _ = project_path;
   let path = session_file(session_id);
-  match tokio::fs::read_to_string(&path).await {
-    Ok(content) => {
-      let session: Value = serde_json::from_str(&content).unwrap_or(json!({}));
-      json!({
-        "ok": true,
-        "data": {
-          "sessionId": session_id,
-          "messages": session.get("messages").cloned().unwrap_or(json!([]))
-        }
-      })
-    }
-    Err(_) => json!({ "ok": false, "error": "会话文件不存在" }),
+  let file_exists = tokio::fs::try_exists(&path).await.unwrap_or(false);
+  let messages = load_session_messages_with_recovery(session_id).await;
+  let message_len = messages_len(&messages);
+  if !file_exists && message_len == 0 {
+    return json!({ "ok": false, "error": "会话文件不存在" });
   }
+  json!({
+    "ok": true,
+    "data": {
+      "sessionId": session_id,
+      "messages": messages
+    }
+  })
 }
 
 pub async fn chat_store_sync(_project_path: &str, data: Value) -> Value {
@@ -86,6 +164,9 @@ pub async fn chat_store_sync(_project_path: &str, data: Value) -> Value {
     for session in sessions {
       if let Some(id) = session.get("id").and_then(|v| v.as_str()) {
         let file = session_file(id);
+        if should_skip_empty_session_overwrite(&file, session).await {
+          continue;
+        }
         let _ = tokio::fs::write(&file, serde_json::to_string_pretty(session).unwrap_or_default()).await;
       }
     }
@@ -108,7 +189,10 @@ pub async fn chat_store_sync(_project_path: &str, data: Value) -> Value {
 pub async fn chat_session_sync(project_path: &str, session_id: &str, data: Value, active_session_id: Option<&str>) -> Value {
   let dir = chat_dir();
   let _ = tokio::fs::create_dir_all(&dir).await;
-  let _ = tokio::fs::write(session_file(session_id), serde_json::to_string_pretty(&data).unwrap_or_default()).await;
+  let session_path = session_file(session_id);
+  if !should_skip_empty_session_overwrite(&session_path, &data).await {
+    let _ = tokio::fs::write(&session_path, serde_json::to_string_pretty(&data).unwrap_or_default()).await;
+  }
   let store_path = store_file();
   let mut index: Value = tokio::fs::read_to_string(&store_path)
     .await

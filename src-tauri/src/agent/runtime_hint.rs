@@ -25,17 +25,24 @@ pub async fn detect_project_runtime_profile(project_root: &str) -> ProjectRuntim
     if let Ok(pkg) = serde_json::from_str::<serde_json::Value>(&content) {
       let scripts = pkg.get("scripts");
       if let Some(scripts) = scripts {
-        if let Some(dev) = scripts.get("dev").and_then(|v| v.as_str()) {
-          web_dev = Some(dev.to_string());
+        if scripts.get("dev:web").and_then(|v| v.as_str()).is_some_and(|s| !s.is_empty()) {
+          web_dev = Some("dev:web".to_string());
         }
         if has_tauri {
-          if let Some(tdev) = scripts.get("tauri:dev").or_else(|| scripts.get("tauri-dev")).and_then(|v| v.as_str()) {
-            desktop_dev = Some(tdev.to_string());
+          if scripts.get("tauri:dev").or_else(|| scripts.get("tauri-dev")).and_then(|v| v.as_str()).is_some_and(|s| !s.is_empty()) {
+            desktop_dev = Some("tauri:dev".to_string());
+          } else if scripts.get("dev").and_then(|v| v.as_str()).is_some_and(|s| s.contains("tauri")) {
+            desktop_dev = Some("dev".to_string());
           }
         }
         if has_electron {
-          if let Some(edev) = scripts.get("electron:dev").or_else(|| scripts.get("electron-dev")).and_then(|v| v.as_str()) {
-            desktop_dev = Some(edev.to_string());
+          if scripts.get("electron:dev").or_else(|| scripts.get("electron-dev")).and_then(|v| v.as_str()).is_some_and(|s| !s.is_empty()) {
+            desktop_dev = Some("electron:dev".to_string());
+          }
+        }
+        if web_dev.is_none() && desktop_dev.as_deref() != Some("dev") {
+          if scripts.get("dev").and_then(|v| v.as_str()).is_some_and(|s| !s.is_empty() && !s.contains("tauri")) {
+            web_dev = Some("dev".to_string());
           }
         }
         for script_name in &["typecheck", "check", "lint", "test"] {

@@ -161,13 +161,7 @@
     </div>
 
     <div class="panel-body">
-      <div v-if="loadingTree" class="panel-loading-overlay" aria-live="polite">
-        <span class="panel-loading-spinner" aria-hidden="true" />
-        <span>正在加载项目…</span>
-      </div>
-      <slot></slot>
-
-      <!-- 会话管理面板 -->
+      <!-- 会话 Tab 独立渲染，避免文件树 loading 遮罩挡住点击 -->
       <div v-if="gitPanelMode === 'sessions'" class="sessions-panel">
         <div class="sessions-header">
           <button
@@ -279,6 +273,14 @@
             </li>
           </template>
         </ul>
+      </div>
+
+      <div v-else class="panel-body-main">
+        <div v-if="loadingTree" class="panel-loading-overlay" aria-live="polite">
+          <span class="panel-loading-spinner" aria-hidden="true" />
+          <span>正在加载项目…</span>
+        </div>
+        <slot></slot>
       </div>
     </div>
   </aside>
@@ -417,6 +419,15 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
 }
 
 .panel-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel-body-main {
   position: relative;
   flex: 1;
   min-height: 0;

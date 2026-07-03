@@ -28,12 +28,20 @@ describe("agentRuntimeHint", () => {
     return root;
   }
 
-  it("detects desktop shell and dev scripts", () => {
+  it("detects desktop shell and dev scripts (split web + tauri:dev)", () => {
     const root = makeProject({ dev: "vite", "tauri:dev": "tauri dev" });
     const profile = detectProjectRuntimeProfile(root);
     expect(profile.hasDesktopShell).toBe(true);
     expect(profile.webDevScript).toBe("npm run dev");
     expect(profile.desktopDevScript).toBe("npm run tauri:dev");
+  });
+
+  it("detects desktop shell when dev runs tauri and dev:web serves vite", () => {
+    const root = makeProject({ dev: "tauri dev", "dev:web": "vite" });
+    const profile = detectProjectRuntimeProfile(root);
+    expect(profile.hasDesktopShell).toBe(true);
+    expect(profile.webDevScript).toBe("npm run dev:web");
+    expect(profile.desktopDevScript).toBe("npm run dev");
   });
 
   it("returns empty hint for web-only projects", () => {
@@ -42,11 +50,11 @@ describe("agentRuntimeHint", () => {
   });
 
   it("builds runtime awareness hint for desktop shell projects", () => {
-    const root = makeProject({ dev: "vite", "tauri:dev": "tauri dev" });
+    const root = makeProject({ dev: "tauri dev", "dev:web": "vite" });
     const hint = buildRuntimeAwarenessHint(detectProjectRuntimeProfile(root));
     expect(hint).toContain("桌面壳");
+    expect(hint).toContain("npm run dev:web");
     expect(hint).toContain("npm run dev");
-    expect(hint).toContain("npm run tauri:dev");
     expect(hint).toContain("降级");
   });
 

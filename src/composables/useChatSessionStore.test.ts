@@ -234,6 +234,50 @@ describe("useChatSessionStore", () => {
     expect(peekVibeChatSessionMessages(projectPath, sessionA)[0]?.content).toBe("session A");
   });
 
+  it("switchSession preserves in-memory message object references", async () => {
+    const projectPath = "D:/projects/switch-preserve-refs";
+    const { sessionId: sessionA } = saveVibeChatHistory(projectPath, [
+      { id: "u1", role: "user", content: "session A" },
+    ]);
+    const { sessionId: sessionB } = saveVibeChatHistory(projectPath, [
+      { id: "u2", role: "user", content: "session B" },
+    ]);
+
+    const session = useSessionManager(() => projectPath);
+    const store = useChatSessionStore({
+      projectPath: () => projectPath,
+      chatError: ref(""),
+      chatSending: () => false,
+      session,
+      // Mirror production: normalize clones message objects.
+      normalizeMessages: (msgs) => msgs.map((m) => ({ ...m })),
+      confirm: async () => true,
+    });
+    const chatMessages = store.activeMessages;
+
+    session.setActiveSession(sessionA);
+    session.refreshSessionList();
+
+    const assistantMsg = { id: "a1", role: "assistant" as const, content: "", statusLog: ["running"] };
+    const liveA = [
+      { id: "u1", role: "user" as const, content: "session A live" },
+      assistantMsg,
+    ];
+    store.activateSession(sessionA, liveA);
+
+    store.switchSession(sessionB);
+    expect(session.activeSessionId.value).toBe(sessionB);
+    expect(store.getSessionMessages(sessionA)?.find((m) => m.id === "a1")).toBe(assistantMsg);
+
+    store.switchSession(sessionA);
+
+    expect(session.activeSessionId.value).toBe(sessionA);
+    expect(store.getSessionMessages(sessionA)?.find((m) => m.id === "a1")).toBe(assistantMsg);
+    expect(chatMessages.value).toBe(store.getSessionMessages(sessionA));
+    expect(chatMessages.value.find((m) => m.id === "a1")).toBe(assistantMsg);
+    expect(chatMessages.value.find((m) => m.id === "u1")?.content).toBe("session A live");
+  });
+
   it("switchSession applies local state immediately without waiting on disk hydrate", async () => {
     const projectPath = "D:/projects/switch-immediate";
     const { sessionId: sessionA } = saveVibeChatHistory(projectPath, [
