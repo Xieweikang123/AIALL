@@ -10,10 +10,9 @@ import {
 import type { ConsultativeTopicId, UserIntentPrimary } from "./intentClassifierTypes";
 import type { ResolvedUserIntent } from "./intentClassifierTypes";
 import type { UserIntentHistoryMessage } from "../orchestration/agentIntentTypes";
-import { normalizeExecutePlanContext } from "../../server/agentExecutePlanContext";
-import { resolveAgentRunPolicy, usesReadOnlyTools } from "../../server/agentRunPolicy";
-import type { ExecutePlanContextInput } from "../../server/agentExecutePlanContext";
-
+import { normalizeExecutePlanContext } from "./agentExecutePlanContext";
+import { resolveAgentRunPolicy, usesReadOnlyTools } from "./agentRunPolicy";
+import type { ExecutePlanContextInput } from "./agentExecutePlanContext";
 export type AgentRegressionMode = "ask" | "build" | "plan" | "explore";
 
 export interface AgentRegressionExpect {

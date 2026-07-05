@@ -2,8 +2,7 @@ import {
   PROJECT_KNOWLEDGE_MARKER,
   PROJECT_KNOWLEDGE_TITLE,
   PROJECT_REPORT_MARKER,
-} from "../../server/agentExplorePrompt";
-import {
+} from "../../shared/projectKnowledgeFormat";import {
   PROJECT_KNOWLEDGE_REL_PATH,
   stripKnowledgeFrontmatter,
   type ProjectKnowledgeMeta,

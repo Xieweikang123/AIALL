@@ -1,6 +1,11 @@
 /** Relative to project root; listed in .gitignore by default. */
 export const PROJECT_KNOWLEDGE_REL_PATH = ".aiall/project-knowledge.md";
 
+export const PROJECT_KNOWLEDGE_MARKER = "<!-- project-knowledge -->";
+/** @deprecated Use PROJECT_KNOWLEDGE_MARKER; kept for parsing legacy archives. */
+export const PROJECT_REPORT_MARKER = "<!-- project-report -->";
+export const PROJECT_KNOWLEDGE_TITLE = "项目知识库";
+
 /** Max chars stored on disk (soft cap for manual edits). */
 export const PROJECT_KNOWLEDGE_MAX_CHARS = 120_000;
 

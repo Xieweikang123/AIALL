@@ -1,7 +1,7 @@
 /** Consultative UI state / persistence behavior Q&A — trace side effects before finalize. */
 
-import { assistantProvidedCodeLocationEvidence } from "../src/services/agentStructuralPatterns";
-import { isUiStatePersistenceQuestionPrompt } from "../src/orchestration/generic/userIntentClassifiers";
+import { assistantProvidedCodeLocationEvidence } from "./agentStructuralPatterns";
+import { isUiStatePersistenceQuestionPrompt } from "../orchestration/generic/userIntentClassifiers";
 
 export const SPECULATIVE_CODE_ANALYSIS_RE =
   /(?:根据代码|查阅了|通过\s*grep|在该文件中|代码分析)/;

@@ -31,7 +31,7 @@ describe("agentOrchestrationGuard", () => {
   });
 
   it("maps vision and userIntentHints to product tier", () => {
-    expect(tierForGuardedPath("server/visionMessage.ts")).toBe("product");
+    expect(tierForGuardedPath("src/orchestration/product/visionMessage.ts")).toBe("product");
     expect(tierForGuardedPath("src/orchestration/product/userIntentHints.ts")).toBe("product");
     expect(tierForGuardedPath("src/orchestration/generic/userIntentClassifiers.ts")).toBe(
       "generic_classifier",

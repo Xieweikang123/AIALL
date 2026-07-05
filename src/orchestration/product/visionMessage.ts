@@ -3,13 +3,13 @@ import {
   isUiAppearanceQuestionPrompt,
   isUiLocateQuestionPrompt,
   isUiStatePersistenceQuestionPrompt,
-} from "../src/orchestration/generic/userIntentClassifiers";
+} from "../generic/userIntentClassifiers";
 
 export {
   isUiAppearanceQuestionPrompt,
   isUiLocateQuestionPrompt,
   isUiStatePersistenceQuestionPrompt,
-} from "../src/orchestration/generic/userIntentClassifiers";
+} from "../generic/userIntentClassifiers";
 
 export type ChatContentPart =
   | { type: "text"; text: string }
@@ -584,7 +584,7 @@ export function buildVisionFirstTurnPrematureCompletionRetryHint(): string {
   ].join("");
 }
 
-import { isPrematureVisionCompletionClaim } from "../shared/visionCompletionClaim";
+import { isPrematureVisionCompletionClaim } from "../../../shared/visionCompletionClaim";
 export { isPrematureVisionCompletionClaim };
 
 function hasVisibleAnchorQuote(text: string): boolean {

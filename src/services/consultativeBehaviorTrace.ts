@@ -1,7 +1,7 @@
 /** Consultative behavior-purpose Q&A — trace usage branches before finalize. */
 
 import { isDeferredBehaviorAnswerReply } from "./consultativeAccuracyTrace";
-import { DEFINITION_VALUE_TOKEN_RE } from "../src/services/agentStructuralPatterns";
+import { DEFINITION_VALUE_TOKEN_RE } from "./agentStructuralPatterns";
 
 /** Reply hedges purpose without citing code branches or call sites. */
 export function isSpeculativeBehaviorPurposeReply(text: string): boolean {

@@ -23,11 +23,11 @@ export const GENERIC_CLASSIFIER_PATHS = [
   "src/services/intentClassifierAi.ts",
   "src/services/intentClassifierTypes.ts",
   "src/services/agentRunProfile.ts",
-  "server/agentExecutePlanContext.ts",
-  "server/agentRunPolicy.ts",
-  "server/agentTurnBudget.ts",
-  "server/consultativeBehaviorTrace.ts",
-  "server/consultativeAccuracyTrace.ts",
+  "src/services/agentExecutePlanContext.ts",
+  "src/services/agentRunPolicy.ts",
+  "src/services/agentTurnBudget.ts",
+  "src/services/consultativeBehaviorTrace.ts",
+  "src/services/consultativeAccuracyTrace.ts",
 ] as const;
 
 /** Tier 2 — shared accuracy / consultative mechanism strings (not mode-specific prompts). */
@@ -35,7 +35,7 @@ export const GENERIC_MECHANISM_PATHS = [
   "src/services/agentReplyAccuracy.ts",
   "src/services/agentConsultativeTopics.ts",
   "shared/agentProbeGuard.ts",
-  "server/agentExplorationBudget.ts",
+  "src/services/agentExplorationBudget.ts",
   "server/agentExploreGuard.ts",
   "server/agentFinishGate.ts",
   "server/agentTurnPreflight.ts",
@@ -46,12 +46,14 @@ export const GENERIC_MECHANISM_PATHS = [
 /** Tier 3 — product orchestration: system prompts, vision, runtime hints. */
 export const PRODUCT_ORCHESTRATION_PATHS = [
   "src/orchestration/product/userIntentHints.ts",
-  "server/agentAskPrompt.ts",
-  "server/agentExplorePrompt.ts",
+  "src/orchestration/product/agentAskPrompt.ts",
+  "src/orchestration/product/agentExplorePrompt.ts",
+  "src/orchestration/product/agentTopicFollowUp.ts",
+  "src/orchestration/product/visionMessage.ts",
+  /** Vitest / agent-smoke fixtures — guarded until Node Agent path is removed. */
   "server/agentPlanPrompt.ts",
   "server/agentContextBuilder.ts",
   "server/agentRuntimeHint.ts",
-  "server/visionMessage.ts",
   "server/vibeAgent.ts",
 ] as const;
 

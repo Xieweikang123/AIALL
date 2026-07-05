@@ -1,11 +1,13 @@
 import { buildFileAccessPathHint } from "./agentAskPrompt";
 import { buildReplyAccuracyHint } from "../src/services/agentReplyAccuracy";
 import { buildAgentSuggestionsPromptHint } from "../src/services/agentSuggestions";
+import {
+  PROJECT_KNOWLEDGE_MARKER,
+  PROJECT_KNOWLEDGE_TITLE,
+  PROJECT_REPORT_MARKER,
+} from "../shared/projectKnowledgeFormat";
 
-export const PROJECT_KNOWLEDGE_MARKER = "<!-- project-knowledge -->";
-/** @deprecated Use PROJECT_KNOWLEDGE_MARKER; kept for parsing legacy archives. */
-export const PROJECT_REPORT_MARKER = "<!-- project-report -->";
-export const PROJECT_KNOWLEDGE_TITLE = "项目知识库";
+export { PROJECT_KNOWLEDGE_MARKER, PROJECT_KNOWLEDGE_TITLE, PROJECT_REPORT_MARKER };
 
 export function buildExploreExplorationHints(incremental = false): string {
   if (incremental) {

@@ -5,22 +5,22 @@ import {
   SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE_SOFT,
   AUTO_BUG_FIX_EXPLORE_HARD_CAP,
 } from "./agentExplorationBudget";
-import { classifyUserIntentFromRules, type ResolvedUserIntent } from "../src/services/intentClassifierRules";
-import { isScheduledTaskConsultativePrompt } from "../src/services/agentConsultativeTopics";
+import { classifyUserIntentFromRules, type ResolvedUserIntent } from "./intentClassifierRules";
+import { isScheduledTaskConsultativePrompt } from "./agentConsultativeTopics";
 import {
   detectUserFailureReport,
   historyRecentUserFailureReport,
   stripQuotedReplyPrefix,
-} from "../src/services/agentContinuation";
-import { resolveOriginalTaskFromResumePrompt } from "../src/services/agentRecovery";
-import { isSameIssueFollowUpRun } from "../src/orchestration/generic/userIntentClassifiers";
-import type { UserIntentHistoryMessage } from "../src/orchestration/agentIntentTypes";
+} from "./agentContinuation";
+import { resolveOriginalTaskFromResumePrompt } from "./agentRecovery";
+import { isSameIssueFollowUpRun } from "../orchestration/generic/userIntentClassifiers";
+import type { UserIntentHistoryMessage } from "../orchestration/agentIntentTypes";
 import type { ExecutePlanContextInput } from "./agentExecutePlanContext";
 import {
   expandQuotedAmendPrompt,
   resolveQuotedAmendIntent,
   type QuotedAmendIntent,
-} from "../src/orchestration/generic/quotedAmendIntent";
+} from "../orchestration/generic/quotedAmendIntent";
 
 export const MAX_AGENT_CONTEXT_CHARS = 200_000;
 export const EXECUTE_PLAN_MAX_CONTEXT_CHARS = 100_000;

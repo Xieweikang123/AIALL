@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { externalizeMessageImages } from "../../server/vibeChatImages";
+import { externalizeMessageImages } from "./vibeChatImages";
 import { stampImageRefsAfterSync } from "./vibeChatImageStore";
 import { composerDraftStorageKey } from "../utils/composerDraftStorage";
 import { shapeAgentHistoryForProfile } from "./agentRunProfile";

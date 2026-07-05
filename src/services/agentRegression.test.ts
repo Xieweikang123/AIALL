@@ -9,8 +9,8 @@ import {
   EXECUTE_PLAN_MAX_CONTEXT_CHARS,
   resolveAgentRunPolicy,
   usesReadOnlyTools,
-} from "../../server/agentRunPolicy";
-import { normalizeExecutePlanContext } from "../../server/agentExecutePlanContext";
+} from "./agentRunPolicy";
+import { normalizeExecutePlanContext } from "./agentExecutePlanContext";
 import { classifyUserIntentFromRules, resolveUserIntent } from "./intentClassifierRules";
 import {
   evaluateAgentRegressionCase,

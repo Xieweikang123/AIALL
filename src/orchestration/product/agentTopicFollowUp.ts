@@ -1,4 +1,4 @@
-import { stripQuotedReplyPrefix } from "../src/services/agentContinuation";
+import { stripQuotedReplyPrefix } from "../../services/agentContinuation";
 
 /** Terse yes/no follow-up without restating the subject (e.g. 「需要优化吗」). */
 const SHORT_TOPIC_FOLLOW_UP_RE =

@@ -31,10 +31,9 @@ import {
   resolveConfigBindingTopic,
 } from "../orchestration/generic/userIntentClassifiers";
 import type { UserIntentHistoryMessage } from "../orchestration/agentIntentTypes";
-import { buildConsultativeAccuracyTraceHint } from "../../server/consultativeAccuracyTrace";
-import { buildBehaviorPurposeTraceHint } from "../../server/consultativeBehaviorTrace";
-import { buildConsultativeUiBehaviorTraceHint } from "../../server/consultativeUiBehaviorTrace";
-
+import { buildConsultativeAccuracyTraceHint } from "./consultativeAccuracyTrace";
+import { buildBehaviorPurposeTraceHint } from "./consultativeBehaviorTrace";
+import { buildConsultativeUiBehaviorTraceHint } from "./consultativeUiBehaviorTrace";
 export interface ConsultativeTopicModule {
   id: ConsultativeTopicId;
   isActive(prompt: string, history?: UserIntentHistoryMessage[]): boolean;

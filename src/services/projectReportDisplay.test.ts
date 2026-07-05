@@ -17,7 +17,7 @@ import {
   resolveKnowledgeBodyForSave,
   slugifyReportHeading,
 } from "./projectReportDisplay";
-import { PROJECT_KNOWLEDGE_MARKER, PROJECT_KNOWLEDGE_TITLE, PROJECT_REPORT_MARKER } from "../../server/agentExplorePrompt";
+import { PROJECT_KNOWLEDGE_MARKER, PROJECT_KNOWLEDGE_TITLE, PROJECT_REPORT_MARKER } from "../../shared/projectKnowledgeFormat";
 import { buildExploreUnexploredPrompt } from "./agentExplore";
 
 describe("projectReportDisplay", () => {
