@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { PROJECT_KNOWLEDGE_MARKER, PROJECT_KNOWLEDGE_TITLE } from "./agentExplorePrompt";
+import { PROJECT_KNOWLEDGE_MARKER, PROJECT_KNOWLEDGE_TITLE } from "../src/orchestration/product/agentExplorePrompt";
 import {
   buildProjectKnowledgeMetaForWrite,
   normalizeProjectKnowledgeBody,

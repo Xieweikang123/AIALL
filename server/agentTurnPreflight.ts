@@ -1,7 +1,7 @@
 import type { VibeAgentEvent } from "../shared/agentTypes";
 import type { AgentTurnContext } from "./agentTurnContext";
 import { syncToolGuard, isPlanTextOnlyFollowUpRun } from "./agentTurnContext";
-import { AGENT_SAFETY_MAX_TURNS, buildAgentTurnsLowNudge } from "./agentTurnBudget";
+import { AGENT_SAFETY_MAX_TURNS, buildAgentTurnsLowNudge } from "../shared/agentTurnBudget";
 import {
   EXPLORE_MAX_TOTAL_EXPLORE_HARD,
   EXPLORE_MAX_TOTAL_EXPLORE_SOFT,
@@ -26,8 +26,8 @@ import {
   buildSameIssueFollowUpForceSummaryNudge,
   buildUiDefectForcePatchNudge,
   buildUserNegationNudge,
-} from "./agentExplorationBudget";
-import { buildExploreAbortPartialReportNudge } from "./agentExplorePrompt";
+} from "../shared/agentExplorationBudget";
+import { buildExploreAbortPartialReportNudge } from "../src/orchestration/product/agentExplorePrompt";
 import { detectUserNegation } from "../src/services/agentContinuation";
 import { buildDoneData } from "./agentClassifier";
 import { shouldForcePatchAfterAnchorLocated } from "./agentExploreGuard";

@@ -32,7 +32,7 @@ import {
   sanitizeImageDataUrls,
   shouldRequireVisionFirstTurn,
   suggestsEmbeddedLayoutMisread,
-} from "./visionMessage";
+} from "../src/orchestration/product/visionMessage";
 
 const PNG_DATA_URL = "data:image/png;base64,iVBORw0KGgo=";
 

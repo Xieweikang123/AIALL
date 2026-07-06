@@ -4,7 +4,7 @@ import {
   hasTextToolCallMarkup,
   synthesizeToolCallsFromText,
 } from "./textToolCalls";
-import { isProductiveWritePath } from "./agentExplorationBudget";
+import { isProductiveWritePath } from "../shared/agentExplorationBudget";
 import { isToolResultFailure } from "./agentExploreGuard";
 
 export const READ_ONLY_AGENT_TOOL_NAMES = new Set([

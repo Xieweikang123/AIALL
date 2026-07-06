@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildImmediateTopicFollowUpHint } from "./agentTopicFollowUp";
+import { buildImmediateTopicFollowUpHint } from "../src/orchestration/product/agentTopicFollowUp";
 
 const EXPLANATION = [
   "这个错误出现在 `patch_file` 工具调用时：",

@@ -1,8 +1,18 @@
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::Duration;
 
 const MEMORY_USAGE_REL: &str = ".aiall/memory-usage.json";
 const MEMORY_USAGE_MAX_ENTRIES: usize = 200;
+const MEMORY_USAGE_FLUSH_DEBOUNCE_MS: u64 = 2000;
+
+static STORE_CACHE: Lazy<Mutex<HashMap<String, MemoryUsageStore>>> =
+  Lazy::new(|| Mutex::new(HashMap::new()));
+static FLUSH_GENERATION: Lazy<Mutex<HashMap<String, u64>>> =
+  Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,12 +35,25 @@ fn empty_store() -> MemoryUsageStore {
   }
 }
 
-async fn read_store(project_root: &str) -> MemoryUsageStore {
+async fn read_store_from_disk(project_root: &str) -> MemoryUsageStore {
   let path = crate::project::project_file(project_root, MEMORY_USAGE_REL);
   let Ok(raw) = tokio::fs::read_to_string(&path).await else {
     return empty_store();
   };
   serde_json::from_str(&raw).unwrap_or_else(|_| empty_store())
+}
+
+async fn read_store(project_root: &str) -> MemoryUsageStore {
+  if let Ok(cache) = STORE_CACHE.lock() {
+    if let Some(store) = cache.get(project_root) {
+      return store.clone();
+    }
+  }
+  let store = read_store_from_disk(project_root).await;
+  if let Ok(mut cache) = STORE_CACHE.lock() {
+    cache.entry(project_root.to_string()).or_insert(store.clone());
+  }
+  store
 }
 
 async fn write_store(project_root: &str, mut store: MemoryUsageStore) -> Result<(), String> {
@@ -43,7 +66,41 @@ async fn write_store(project_root: &str, mut store: MemoryUsageStore) -> Result<
   store.entries.sort_by(|a, b| b.count.cmp(&a.count));
   store.entries.truncate(MEMORY_USAGE_MAX_ENTRIES);
   let raw = serde_json::to_string_pretty(&store).map_err(|e| e.to_string())?;
-  tokio::fs::write(&path, raw).await.map_err(|e| e.to_string())
+  tokio::fs::write(&path, raw).await.map_err(|e| e.to_string())?;
+  if let Ok(mut cache) = STORE_CACHE.lock() {
+    cache.insert(project_root.to_string(), store);
+  }
+  Ok(())
+}
+
+fn schedule_debounced_flush(project_root: String) {
+  let generation = {
+    let mut gens = FLUSH_GENERATION.lock().expect("memory usage flush generation lock");
+    let next = gens.get(&project_root).copied().unwrap_or(0) + 1;
+    gens.insert(project_root.clone(), next);
+    next
+  };
+
+  tokio::spawn(async move {
+    tokio::time::sleep(Duration::from_millis(MEMORY_USAGE_FLUSH_DEBOUNCE_MS)).await;
+    let still_current = FLUSH_GENERATION
+      .lock()
+      .expect("memory usage flush generation lock")
+      .get(&project_root)
+      .copied()
+      == Some(generation);
+    if !still_current {
+      return;
+    }
+    let store = STORE_CACHE
+      .lock()
+      .expect("memory usage store cache lock")
+      .get(&project_root)
+      .cloned();
+    if let Some(store) = store {
+      let _ = write_store(&project_root, store).await;
+    }
+  });
 }
 
 fn memory_line_key(line: &str) -> String {
@@ -116,7 +173,10 @@ pub async fn track_memory_usage(
   }
 
   if changed {
-    write_store(project_root, store).await?;
+    if let Ok(mut cache) = STORE_CACHE.lock() {
+      cache.insert(project_root.to_string(), store);
+    }
+    schedule_debounced_flush(project_root.to_string());
   }
   Ok(())
 }

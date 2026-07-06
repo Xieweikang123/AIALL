@@ -1,12 +1,12 @@
 import { resolveFirstByteTimeoutMs } from "./aiForward";
-import { resolveAgentMaxTurns, AUTO_BUG_FIX_WALL_CLOCK_MS } from "./agentTurnBudget";
+import { resolveAgentMaxTurns, AUTO_BUG_FIX_WALL_CLOCK_MS } from "../shared/agentTurnBudget";
 import {
   buildExploreContinueNudge,
   buildExploreFollowUpHint,
   buildExploreQuotedFollowUpHint,
   buildExploreSectionFillNudge,
   buildExploreChangesNudge,
-} from "./agentExplorePrompt";
+} from "../src/orchestration/product/agentExplorePrompt";
 import {
   isExploreContinuePrompt,
   isExploreSectionFillPrompt,
@@ -24,7 +24,7 @@ import {
   buildPlanNoTargetPathHint,
   buildPlanQuoteInformationalHint,
   buildPlanRevisionFollowUpHint,
-} from "./agentExplorationBudget";
+} from "../shared/agentExplorationBudget";
 import { resolveAmbiguousClarificationTerms } from "../src/orchestration/generic/ambiguousTermTriggers";
 import { classifyUserIntentFromRules, resolveUserIntent, shouldSkipAiIntentClassifier } from "../src/services/intentClassifierRules";
 import { formatIntentClassificationDetail } from "../src/services/intentClassifierAi";
@@ -49,7 +49,7 @@ import {
   sanitizeImageDataUrls,
   shouldBypassVisionFirstTurn,
   shouldRequireVisionFirstTurn,
-} from "./visionMessage";
+} from "../src/orchestration/product/visionMessage";
 import { createAgentTurnContext } from "./agentTurnContext";
 import { runTurnPreflight } from "./agentTurnPreflight";
 import { runTurnModelCall } from "./agentTurnModelCall";

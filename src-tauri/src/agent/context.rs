@@ -13,8 +13,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::path::Path;
 
-const MAX_HISTORY_MESSAGES: usize = 40;
-const MAX_HISTORY_CHARS: usize = 120_000;
+use super::context_limits::{MAX_HISTORY_CHARS, MAX_HISTORY_MESSAGES};
+
 const MAX_MEMORY_CHARS: usize = 8_000;
 const MAX_KNOWLEDGE_CHARS: usize = 8_000;
 const MAX_SKILLS_PROMPT_CHARS: usize = 4_000;

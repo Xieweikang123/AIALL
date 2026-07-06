@@ -16,7 +16,7 @@ use super::run_preflight::{
   apply_turn_preflight, TurnPreflightMut, TurnPreflightParams, TurnPreflightState,
 };
 use super::run_startup_hints::{apply_run_startup_hints, RunStartupHintsParams};
-use super::run_compact::compact_messages_for_model;
+use super::run_compact::{compact_messages_for_model, messages_char_size};
 use super::run_finalize::{handle_final_turn, FinalizeTurnMut, FinalizeTurnOutcome, FinalizeTurnParams};
 use super::run_post_tools::{apply_post_tool_turn, PostToolNudgeParams, PostToolTurnMut};
 use super::run_stream::consume_model_sse_stream;
@@ -426,6 +426,27 @@ pub async fn agent_run(
 
     let compacted_messages =
       compact_messages_for_model(&messages, run_policy.max_context_chars);
+    let context_chars = messages_char_size(&compacted_messages);
+    emit(&channel, json!({
+      "type": "status",
+      "data": {
+        "phase": "compacting_context",
+        "turn": turn,
+        "maxTurns": segment_max_turns,
+        "model": request.model,
+        "contextMessages": compacted_messages.len(),
+        "contextChars": context_chars,
+      }
+    }));
+    emit(&channel, json!({
+      "type": "turn_request",
+      "data": {
+        "turn": turn,
+        "maxTurns": segment_max_turns,
+        "contextMessages": compacted_messages.len(),
+        "contextChars": context_chars,
+      }
+    }));
     let body = json!({
       "model": request.model,
       "messages": compacted_messages,
@@ -434,7 +455,30 @@ pub async fn agent_run(
       "stream": true
     });
 
-    let stream_resp = ai::chat_completion_stream_raw(&request.endpoint, request.api_key.as_deref(), body).await.map_err(|e| e.to_string())?;
+    let stream_resp = ai::chat_completion_stream_with_retry(
+      &request.endpoint,
+      request.api_key.as_deref(),
+      body,
+      ai::AGENT_AI_MAX_RETRIES,
+      context_chars,
+      |attempt, max_attempts, error| {
+        emit(&channel, json!({
+          "type": "status",
+          "data": {
+            "phase": "retrying_model",
+            "turn": turn,
+            "maxTurns": segment_max_turns,
+            "model": request.model,
+            "retryAttempt": attempt,
+            "retryMaxAttempts": max_attempts,
+            "retryError": error,
+          }
+        }));
+      },
+      || is_cancelled(&cancel),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
     let Some(turn_output) = consume_model_sse_stream(
       stream_resp,
       &channel,

@@ -40,8 +40,9 @@ import {
   PLAN_EXPLORE_TURN_BUDGET,
   isExplorationArchivePath,
   isProductiveWritePath,
+  MAX_TOTAL_EXPLORE_TURNS,
   SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE,
-} from "./agentExplorationBudget";
+} from "../shared/agentExplorationBudget";
 
 describe("agentExplorationBudget", () => {
   it("builds nudge with turn count", () => {
@@ -153,7 +154,7 @@ describe("agentExplorationBudget", () => {
   });
 
   it("builds same-issue follow-up hints", () => {
-    expect(SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE).toBeLessThan(10);
+    expect(SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE).toBeLessThan(MAX_TOTAL_EXPLORE_TURNS);
     expect(buildSameIssueFollowUpHint()).toContain("同问题追问");
     expect(buildSameIssueFollowUpHint()).toContain("运行时入口");
     expect(buildSameIssueFollowUpHint()).toContain("分症状排查");

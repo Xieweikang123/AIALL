@@ -1,4 +1,5 @@
 use crate::fs;
+use futures_util::future::join_all;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use serde_json::{json, Value};
@@ -170,9 +171,19 @@ pub async fn project_health_scan(project_path: &str) -> Value {
   let mut issues: Vec<HealthIssue> = Vec::new();
   let mut checks_run: Vec<String> = Vec::new();
 
-  for rule in SCAN_RULES {
+  let grep_results = join_all(SCAN_RULES.iter().map(|rule| {
+    let path = project_path.to_string();
+    let pattern = rule.pattern.to_string();
+    let max_matches = rule.max_matches;
+    async move {
+      fs::grep_in_project(&path, &pattern, max_matches).await
+    }
+  }))
+  .await;
+
+  for (rule, grep_result) in SCAN_RULES.iter().zip(grep_results) {
     checks_run.push(format!("grep:{}", rule.id));
-    let Ok(matches) = fs::grep_in_project(project_path, rule.pattern, rule.max_matches).await else {
+    let Ok(matches) = grep_result else {
       continue;
     };
     for m in matches {

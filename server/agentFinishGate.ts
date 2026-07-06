@@ -1,5 +1,5 @@
 import type { WriteStage } from "./agentToolExecutor";
-import { isProductiveWritePath } from "./agentExplorationBudget";
+import { isProductiveWritePath } from "../shared/agentExplorationBudget";
 import { claimsWriteCompletion, isEmptyOrInsufficientFinalReply, sanitizeAgentUserVisibleText } from "./agentExploreGuard";
 import { detectTaskAnchorPolarity } from "../src/orchestration/generic/quotedAmendIntent";
 

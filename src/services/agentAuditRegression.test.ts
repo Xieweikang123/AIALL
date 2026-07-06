@@ -14,7 +14,7 @@ import {
   buildConsultativeExploreBudgetNudge,
   buildGrepEmptyRecoveryNudge,
   buildReadFileFailedRecoveryNudge,
-} from "./agentExplorationBudget";
+} from "../../shared/agentExplorationBudget";
 import {
   FIXTURE_CONTRADICTION_USER,
   FIXTURE_FOO_BACKFILL_JOB,

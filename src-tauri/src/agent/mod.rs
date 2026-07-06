@@ -1,3 +1,4 @@
+mod context_limits;
 mod ambiguous_term;
 mod continuation;
 mod agent_git_tools;

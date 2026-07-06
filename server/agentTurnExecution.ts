@@ -25,12 +25,12 @@ import {
   buildRuntimeToolFailureRecoveryNudge,
   buildReadFileFailedRecoveryNudge,
   MAX_CONSECUTIVE_RUNTIME_TOOL_FAILURE_TURNS,
-} from "./agentExplorationBudget";
+} from "../shared/agentExplorationBudget";
 import { buildPatchAnchorLocatedNudge, shouldNudgeAlternateUiPatchStrategy } from "./agentExploreGuard";
 import { buildScheduledJobRegistrationNudge, shouldNudgeScheduledJobRegistration } from "../src/services/agentConsultativeTopics";
 import { extractJobClassNamesFromReadPaths } from "../src/services/agentStructuralPatterns";
 import { detectProjectRuntimeProfile } from "./agentRuntimeHint";
-import { buildPostPatchVerifyNudge } from "./agentExplorationBudget";
+import { buildPostPatchVerifyNudge } from "../shared/agentExplorationBudget";
 import { resetExploreOnProductiveWrite, markExploreOnlyTurn, forceAnchorOnNoProductiveWrite, markStructuredAssetAcquired, resetStructuredAssetTracking, trackEphemeralProbeWrite, trackEphemeralProbeDelete } from "./agentTurnContext";
 import { isVerifyRunCommand } from "../shared/projectVerifyRun";
 import {
@@ -45,7 +45,7 @@ import {
   isProductiveWritePath,
   isWriteAllowedForAutoBugFix,
   MAX_AUTO_BUG_FIX_WRITES,
-} from "./agentExplorationBudget";
+} from "../shared/agentExplorationBudget";
 import {
   buildStructuredAssetWriteNudge,
   countSchemaTablesInPayload,

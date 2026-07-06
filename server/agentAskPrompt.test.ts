@@ -5,7 +5,7 @@ import {
   buildAskSystemPromptLines,
   buildFileAccessPathHint,
   buildSearchFilesEmptyHint,
-} from "./agentAskPrompt";
+} from "../src/orchestration/product/agentAskPrompt";
 
 describe("agentAskPrompt", () => {
   it("prioritizes grep over search_files in exploration hints", () => {

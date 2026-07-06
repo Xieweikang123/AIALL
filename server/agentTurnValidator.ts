@@ -24,7 +24,7 @@ import {
   buildExploreForceReportNudge,
   buildSameIssueFollowUpForceSummaryNudge,
   buildAmbiguousTermClarificationRetryNudge,
-} from "./agentExplorationBudget";
+} from "../shared/agentExplorationBudget";
 import {
   looksLikeClarificationQuestion,
   looksLikePrematurePlanOrScaffold,
@@ -35,7 +35,7 @@ import {
   buildConsultativeUiAppearanceRetryHint,
   buildConsultativeAppearanceAnswerAfterReadHint,
   consultativeAppearanceNeedsVueRead,
-} from "./visionMessage";
+} from "../src/orchestration/product/visionMessage";
 import { buildVisionConsultativeReadAfterPrefgrepHint } from "./visionAnchorPrefgrep";
 import {
   buildConsultativeAccuracyTraceRetryHint,
@@ -49,7 +49,7 @@ import {
   buildConsultativeUiBehaviorTraceRetryHint,
   shouldBlockConsultativeUiBehaviorFinalize,
 } from "./consultativeUiBehaviorTrace";
-import { buildSearchFilesEmptyHint } from "./agentAskPrompt";
+import { buildSearchFilesEmptyHint } from "../src/orchestration/product/agentAskPrompt";
 import { markAnchorLocated, markTeleportBodyConfirmed, recordPatchFailure, listUncleanedEphemeralProbeFiles } from "./agentTurnContext";
 import { buildWorkspaceCleanupNudge } from "../shared/agentProbeGuard";
 import { detectProjectRuntimeProfile } from "./agentRuntimeHint";

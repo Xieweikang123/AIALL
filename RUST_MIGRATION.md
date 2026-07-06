@@ -129,6 +129,19 @@
 | Knowledge manifest | `projectReportDisplay.ts` / `agentContextBuilder.ts` | `knowledge_manifest.rs` + `context.rs` | `[x]` |
 | Explore system prompt | `agentExplorePrompt.ts` | `explore_prompt.rs` + `prompt_hints.rs` | `[x]` |
 
+### 第 10 批：Agent 上下文 / AI 重试 shared parity
+
+| 模块 | TS 源 | Rust 目标 | 状态 | 说明 |
+|------|-------|-----------|------|------|
+| 上下文上限常量 | `shared/agentContextLimits.ts` | `src-tauri/src/agent/context_limits.rs` | `[x]` | policy / compact / history 共用；`shared/agentConstantsParity.test.ts` 校验 |
+| 消息 compact | `shared/agentMessageCompact.ts` | `src-tauri/src/agent/run_compact.rs` | `[x]` | `run.rs` 每轮 model call 前 compact；Vitest + Rust 单测 |
+| AI 重试 | `shared/aiRetry.ts` | `src-tauri/src/ai/retry.rs` | `[x]` | 首包超时、429/5xx、空回复；`AGENT_AI_MAX_RETRIES` |
+| 消息 normalize | `shared/chatMessageNormalize.ts` | `src-tauri/src/ai/normalize.rs` | `[x]` | assistant tool_calls / tool content 规范化 |
+| Chat 消息类型 | `shared/chatCompletionTypes.ts` | — | `[x]` | TS 编排与 Vitest 共用；Rust 用 `serde_json::Value` |
+| AI 流式重试接线 | `server/aiForward.ts` | `src-tauri/src/ai/forward.rs` | `[x]` | `chat_completion_stream_with_retry` + `retrying_model` SSE |
+| Server 上下文 barrel | `server/agentContext.ts` | — | `[x]` | 历史/display/SSE 截断；compact 逻辑 re-export 自 `shared/` |
+| 前端重复模块删除 | `src/services/agentContext.ts` | — | `[x]` | 测试改 import `shared/`；桌面运行时走 Rust |
+
 ## 协作规则
 
 ### 认领机制

@@ -3,7 +3,7 @@ import {
   isRuntimeExploreFailureTurn,
   type ToolGuardContext,
 } from "./agentExploreGuard";
-import { MAX_CONSECUTIVE_RUNTIME_TOOL_FAILURE_TURNS } from "./agentExplorationBudget";
+import { MAX_CONSECUTIVE_RUNTIME_TOOL_FAILURE_TURNS } from "../shared/agentExplorationBudget";
 import type { WriteStage } from "./agentToolExecutor";
 import { createWriteStage } from "./agentToolExecutor";
 import type { TurnRunConfig } from "./agentTurnRunConfig";

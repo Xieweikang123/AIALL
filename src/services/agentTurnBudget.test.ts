@@ -11,7 +11,7 @@ import {
   buildTurnCapExhaustedMessage,
   resolveAgentMaxTurns,
   resolveResumeMaxTurns,
-} from "./agentTurnBudget";
+} from "../../shared/agentTurnBudget";
 
 describe("AGENT_SAFETY_MAX_TURNS", () => {
   it("is a high ceiling for runaway tool loops only", () => {

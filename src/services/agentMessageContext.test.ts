@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { isRetryableAiError, MODEL_FIRST_BYTE_TIMEOUT_MS } from "../../server/aiForward";
-import { compactMessagesForModel, SOFT_COMPACT_CONTEXT_CHARS } from "../../server/agentContext";
-import { EXECUTE_PLAN_MAX_CONTEXT_CHARS } from "./agentRunPolicy";
-import type { ChatCompletionMessage } from "../../server/aiForward";
+import { isRetryableAiError, MODEL_FIRST_BYTE_TIMEOUT_MS } from "../../shared/aiRetry";
+import { compactMessagesForModel, SOFT_COMPACT_CONTEXT_CHARS } from "../../shared/agentMessageCompact";
+import { EXECUTE_PLAN_MAX_CONTEXT_CHARS } from "../../shared/agentContextLimits";
+import type { ChatCompletionMessage } from "../../shared/chatCompletionTypes";
 
 describe("isRetryableAiError", () => {
   it("retries empty model responses", () => {

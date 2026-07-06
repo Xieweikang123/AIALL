@@ -4,12 +4,14 @@ import {
   isUiLocateQuestionPrompt,
   isUiStatePersistenceQuestionPrompt,
 } from "../generic/userIntentClassifiers";
+import { isPrematureVisionCompletionClaim } from "../../../shared/visionCompletionClaim";
 
 export {
   isUiAppearanceQuestionPrompt,
   isUiLocateQuestionPrompt,
   isUiStatePersistenceQuestionPrompt,
 } from "../generic/userIntentClassifiers";
+export { isPrematureVisionCompletionClaim };
 
 export type ChatContentPart =
   | { type: "text"; text: string }
@@ -583,9 +585,6 @@ export function buildVisionFirstTurnPrematureCompletionRetryHint(): string {
     "真正理解截图后，在末尾加上暗号 [图已理解]。",
   ].join("");
 }
-
-import { isPrematureVisionCompletionClaim } from "../../../shared/visionCompletionClaim";
-export { isPrematureVisionCompletionClaim };
 
 function hasVisibleAnchorQuote(text: string): boolean {
   return VISIBLE_ANCHOR_QUOTE_TEST_RE.test(text);

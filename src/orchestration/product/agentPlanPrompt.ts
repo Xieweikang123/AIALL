@@ -1,4 +1,4 @@
-import { buildReplyAccuracyHint } from "../src/services/agentReplyAccuracy";
+import { buildReplyAccuracyHint } from "../../services/agentReplyAccuracy";
 import { buildModelIdentityHint } from "./visionMessage";
 
 /** Tier 3 — Plan mode system prompt lines (planning phase, read-only exploration). */

@@ -25,7 +25,7 @@ export const GENERIC_CLASSIFIER_PATHS = [
   "src/services/agentRunProfile.ts",
   "src/services/agentExecutePlanContext.ts",
   "src/services/agentRunPolicy.ts",
-  "src/services/agentTurnBudget.ts",
+  "shared/agentTurnBudget.ts",
   "src/services/consultativeBehaviorTrace.ts",
   "src/services/consultativeAccuracyTrace.ts",
 ] as const;
@@ -35,7 +35,7 @@ export const GENERIC_MECHANISM_PATHS = [
   "src/services/agentReplyAccuracy.ts",
   "src/services/agentConsultativeTopics.ts",
   "shared/agentProbeGuard.ts",
-  "src/services/agentExplorationBudget.ts",
+  "shared/agentExplorationBudget.ts",
   "server/agentExploreGuard.ts",
   "server/agentFinishGate.ts",
   "server/agentTurnPreflight.ts",
@@ -51,7 +51,7 @@ export const PRODUCT_ORCHESTRATION_PATHS = [
   "src/orchestration/product/agentTopicFollowUp.ts",
   "src/orchestration/product/visionMessage.ts",
   /** Vitest / agent-smoke fixtures — guarded until Node Agent path is removed. */
-  "server/agentPlanPrompt.ts",
+  "src/orchestration/product/agentPlanPrompt.ts",
   "server/agentContextBuilder.ts",
   "server/agentRuntimeHint.ts",
   "server/vibeAgent.ts",

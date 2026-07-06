@@ -35,14 +35,14 @@ import {
   invalidateProjectContextCache,
   formatInjectedKeyFileReadNudge,
 } from "./vibeProjectContext";
-import { buildSearchFilesEmptyHint } from "./agentAskPrompt";
+import { buildSearchFilesEmptyHint } from "../src/orchestration/product/agentAskPrompt";
 import { runGitDiffTool, runGitStatusTool } from "./agentGitTools";
 import { buildWriteToolBlockedMessage } from "../src/orchestration/product/userIntentHints";
 import {
   MAX_READ_SLICE_REPEATS,
   isExplorationArchivePath,
   buildExplorationArchiveWriteBlockedMessage,
-} from "./agentExplorationBudget";
+} from "../shared/agentExplorationBudget";
 import {
   buildPlanDocumentBuildModeBlockedMessage,
   isPlanDocumentPath,

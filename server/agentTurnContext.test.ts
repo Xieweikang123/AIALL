@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_CONSECUTIVE_RUNTIME_TOOL_FAILURE_TURNS } from "./agentExplorationBudget";
+import { MAX_CONSECUTIVE_RUNTIME_TOOL_FAILURE_TURNS } from "../shared/agentExplorationBudget";
 import { shouldSkipExploreTurnForRuntimeFailures, type AgentTurnContext } from "./agentTurnContext";
 
 function makeCtx(consecutiveRuntimeToolFailureTurns: number): AgentTurnContext {

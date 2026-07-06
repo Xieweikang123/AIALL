@@ -1,5 +1,6 @@
 import { buildImmediateTopicFollowUpHint } from "../orchestration/product/agentTopicFollowUp";
-import { buildUiScopeFollowUpHint } from "../orchestration/product/visionMessage";import {
+import { buildUiScopeFollowUpHint } from "../orchestration/product/visionMessage";
+import {
   classifyAssistantReply,
   compressHistoryForExecution,
   extractPlanFilePaths,
@@ -30,7 +31,7 @@ export {
   AUTO_BUG_FIX_MAX_TURNS,
   resolveAgentMaxTurns,
   resolveResumeMaxTurns,
-} from "./agentTurnBudget";
+} from "../../shared/agentTurnBudget";
 export interface AgentRunProfile {
   kind: AgentRunKind;
   targetFiles?: string[];

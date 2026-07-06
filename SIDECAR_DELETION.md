@@ -44,7 +44,7 @@ npm run agent:test-guards
 ## 保留
 
 - `src-tauri/` — 桌面运行时
-- `shared/` — 共享类型与格式
+- `shared/` — 共享类型与格式（含 `agentContextLimits`、`agentMessageCompact`、`aiRetry`、`chatMessageNormalize`；TS/Rust 常量 parity 见 `shared/agentConstantsParity.test.ts`）
 - `server/` — 编排逻辑 + Vitest（**非 HTTP**）
 - Vitest 中编排/准确度相关测试
 

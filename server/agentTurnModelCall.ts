@@ -15,7 +15,7 @@ import {
   MAX_TOOL_RESULT_SSE_CHARS,
 } from "./agentContext";
 import { streamProgressDetail, streamProgressPhase, emitUserVisibleAssistantMessage } from "./agentStream";
-import { isVisionUnsupportedError } from "./visionMessage";
+import { isVisionUnsupportedError } from "../src/orchestration/product/visionMessage";
 import type { AgentTurnContext } from "./agentTurnContext";
 import type { VibeAgentEvent } from "../shared/agentTypes";
 

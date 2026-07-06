@@ -1,10 +1,10 @@
 import {
   buildAskSystemPromptLines,
   buildFileAccessPathHint,
-} from "./agentAskPrompt";
+} from "../src/orchestration/product/agentAskPrompt";
 import {
   buildExploreSystemPromptLines,
-} from "./agentExplorePrompt";
+} from "../src/orchestration/product/agentExplorePrompt";
 import {
   classifyExploreKnowledgeIntent,
   exploreIntentUsesKnowledgeManifest,
@@ -37,7 +37,7 @@ import {
   buildSameIssueFollowUpHint,
   buildUltraShortOpenTaskHint,
   buildAutomatedBugFixHint,
-} from "./agentExplorationBudget";
+} from "../shared/agentExplorationBudget";
 import { detectProjectRuntimeProfile, buildRuntimeAwarenessHint, buildShellAwarenessHint } from "./agentRuntimeHint";
 import { stripQuotedReplyPrefix } from "../src/services/agentContinuation";
 import { AUTO_BUG_FIX_LOGIC_REVIEW_MARKER } from "../shared/autoBugFixPrompt";
@@ -72,8 +72,8 @@ import {
 } from "./vibeFs";
 import {
   buildModelIdentityHint,
-} from "./visionMessage";
-import { buildPlanSystemPrompt } from "./agentPlanPrompt";
+} from "../src/orchestration/product/visionMessage";
+import { buildPlanSystemPrompt } from "../src/orchestration/product/agentPlanPrompt";
 import type { AgentRunPolicy } from "./agentRunPolicy";
 import type { VibeChatMode } from "../shared/agentTypes";
 

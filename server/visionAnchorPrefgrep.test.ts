@@ -9,7 +9,7 @@ import {
 import {
   shouldBlockConsultativeVisionLocateFinalize,
   shouldRunVisionAnchorPrefgrep,
-} from "./visionMessage";
+} from "../src/orchestration/product/visionMessage";
 
 describe("visionAnchorPrefgrep", () => {
   it("selectVisionAnchorGrepPatterns extracts full quote and CJK substrings", () => {

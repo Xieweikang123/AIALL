@@ -4,8 +4,9 @@ import {
   SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE,
   SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE_SOFT,
   AUTO_BUG_FIX_EXPLORE_HARD_CAP,
-} from "./agentExplorationBudget";
-import { classifyUserIntentFromRules, type ResolvedUserIntent } from "../src/services/intentClassifierRules";
+} from "../shared/agentExplorationBudget";
+import { classifyUserIntentFromRules } from "../src/services/intentClassifierRules";
+import type { ResolvedUserIntent } from "../src/services/intentClassifierTypes";
 import { isScheduledTaskConsultativePrompt } from "../src/services/agentConsultativeTopics";
 import {
   detectUserFailureReport,
@@ -22,11 +23,21 @@ import {
   type QuotedAmendIntent,
 } from "../src/orchestration/generic/quotedAmendIntent";
 
-export const MAX_AGENT_CONTEXT_CHARS = 200_000;
-export const EXECUTE_PLAN_MAX_CONTEXT_CHARS = 100_000;
-export const ASK_MAX_CONTEXT_CHARS = 80_000;
-export const CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS = 48_000;
-export const PLAN_MAX_CONTEXT_CHARS = 150_000;
+import {
+  ASK_MAX_CONTEXT_CHARS,
+  CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS,
+  EXECUTE_PLAN_MAX_CONTEXT_CHARS,
+  MAX_AGENT_CONTEXT_CHARS,
+  PLAN_MAX_CONTEXT_CHARS,
+} from "../shared/agentContextLimits";
+
+export {
+  ASK_MAX_CONTEXT_CHARS,
+  CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS,
+  EXECUTE_PLAN_MAX_CONTEXT_CHARS,
+  MAX_AGENT_CONTEXT_CHARS,
+  PLAN_MAX_CONTEXT_CHARS,
+};
 
 /** Consolidated routing flags — single source for vibeAgent turn loop. */
 export interface AgentRunPolicy {

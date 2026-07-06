@@ -1,10 +1,15 @@
-//! Compact message list before model calls (ported from server/agentContext.ts).
+//! Compact message list before model calls (ported from shared/agentMessageCompact.ts).
 
 use serde_json::{json, Value};
 
-pub const SOFT_COMPACT_CONTEXT_CHARS: usize = 36_000;
-pub const MAX_TOOL_RESULT_MODEL_CHARS: usize = 10_000;
+use super::context_limits::{
+  MAX_TOOL_RESULT_MODEL_CHARS, SOFT_COMPACT_CONTEXT_CHARS,
+};
+
 const PROTECTED_RECENT_TOOL_RESULTS: usize = 2;
+
+static LINE_HINT_RE: once_cell::sync::Lazy<regex::Regex> =
+  once_cell::sync::Lazy::new(|| regex::Regex::new(r"lines \d+-\d+").unwrap());
 
 fn truncate_text(text: &str, max: usize, suffix: &str) -> String {
   if text.chars().count() <= max {
@@ -25,16 +30,43 @@ fn truncate_tool_result_for_model(text: &str) -> String {
   )
 }
 
+fn content_char_size(content: &Value) -> usize {
+  match content {
+    Value::String(text) => text.chars().count(),
+    Value::Array(parts) => parts
+      .iter()
+      .map(|part| match part.get("type").and_then(|v| v.as_str()) {
+        Some("text") => part
+          .get("text")
+          .and_then(|v| v.as_str())
+          .map(|s| s.chars().count())
+          .unwrap_or(0),
+        Some("image_url") => part
+          .get("image_url")
+          .and_then(|v| v.get("url"))
+          .and_then(|v| v.as_str())
+          .map(|s| s.chars().count())
+          .unwrap_or(0),
+        _ => 0,
+      })
+      .sum(),
+    _ => 0,
+  }
+}
+
 fn message_char_size(message: &Value) -> usize {
   let mut size = message
     .get("content")
-    .and_then(|v| v.as_str())
-    .map(|s| s.chars().count())
+    .map(content_char_size)
     .unwrap_or(0);
   if let Some(tool_calls) = message.get("tool_calls") {
     size += tool_calls.to_string().chars().count();
   }
   size
+}
+
+pub fn messages_char_size(messages: &[Value]) -> usize {
+  messages.iter().map(message_char_size).sum()
 }
 
 pub fn compact_messages_for_model(messages: &[Value], max_context_chars: usize) -> Vec<Value> {
@@ -91,8 +123,6 @@ pub fn compact_messages_for_model(messages: &[Value], max_context_chars: usize) 
       .and_then(|v| v.as_str())
       .unwrap_or("")
       .to_string();
-    static LINE_HINT_RE: once_cell::sync::Lazy<regex::Regex> =
-      once_cell::sync::Lazy::new(|| regex::Regex::new(r"lines \d+-\d+").unwrap());
     let line_hint = LINE_HINT_RE
       .find(&raw)
       .map(|m| m.as_str())
@@ -144,19 +174,115 @@ pub fn compact_messages_for_model(messages: &[Value], max_context_chars: usize) 
 #[cfg(test)]
 mod tests {
   use super::*;
-  use super::super::policy::MAX_AGENT_CONTEXT_CHARS;
+  use super::super::policy::{EXECUTE_PLAN_MAX_CONTEXT_CHARS, MAX_AGENT_CONTEXT_CHARS};
 
   #[test]
   fn truncates_long_tool_results() {
     let long = "x".repeat(MAX_TOOL_RESULT_MODEL_CHARS + 100);
     let messages = vec![
       json!({ "role": "system", "content": "sys" }),
+      json!({ "role": "user", "content": "hi" }),
       json!({ "role": "tool", "tool_call_id": "1", "content": long }),
     ];
     let compacted = compact_messages_for_model(&messages, MAX_AGENT_CONTEXT_CHARS);
-    let tool_content = compacted[1]["content"].as_str().unwrap();
-    assert!(tool_content.chars().count() < MAX_TOOL_RESULT_MODEL_CHARS + 200);
+    let tool_content = compacted[2]["content"].as_str().unwrap();
+    assert!(tool_content.chars().count() < 20_000);
     assert!(tool_content.contains("截断"));
+  }
+
+  #[test]
+  fn compresses_older_tool_outputs_when_total_context_is_too_large() {
+    let messages = vec![
+      json!({ "role": "system", "content": "s".repeat(90_000) }),
+      json!({ "role": "user", "content": "u".repeat(90_000) }),
+      json!({
+        "role": "tool",
+        "tool_call_id": "1",
+        "content": format!("// lines 1-200 of 9000\n{}", "a".repeat(60_000))
+      }),
+      json!({
+        "role": "tool",
+        "tool_call_id": "2",
+        "content": format!("// lines 201-400 of 9000\n{}", "b".repeat(60_000))
+      }),
+      json!({
+        "role": "tool",
+        "tool_call_id": "3",
+        "content": format!("// lines 401-600 of 9000\n{}", "c".repeat(60_000))
+      }),
+    ];
+    let compacted = compact_messages_for_model(&messages, MAX_AGENT_CONTEXT_CHARS);
+    assert!(compacted[2]["content"].as_str().unwrap().contains("已压缩"));
+    assert!(compacted[3]["content"].as_str().unwrap().contains("lines 201-400"));
+    assert!(compacted[4]["content"].as_str().unwrap().contains("lines 401-600"));
+  }
+
+  #[test]
+  fn uses_lower_context_ceiling_for_execute_plan_runs() {
+    let messages = vec![
+      json!({ "role": "system", "content": "s".repeat(40_000) }),
+      json!({ "role": "user", "content": "u".repeat(40_000) }),
+      json!({
+        "role": "tool",
+        "tool_call_id": "1",
+        "content": format!("lines 1-100\n{}", "a".repeat(30_000))
+      }),
+      json!({
+        "role": "tool",
+        "tool_call_id": "2",
+        "content": format!("lines 101-200\n{}", "b".repeat(30_000))
+      }),
+      json!({
+        "role": "tool",
+        "tool_call_id": "3",
+        "content": format!("lines 201-300\n{}", "c".repeat(30_000))
+      }),
+    ];
+    assert_eq!(EXECUTE_PLAN_MAX_CONTEXT_CHARS, 100_000);
+    assert!(
+      compact_messages_for_model(&messages, MAX_AGENT_CONTEXT_CHARS)[2]["content"]
+        .as_str()
+        .unwrap()
+        .contains("已压缩")
+    );
+    assert!(
+      compact_messages_for_model(&messages, EXECUTE_PLAN_MAX_CONTEXT_CHARS)[2]["content"]
+        .as_str()
+        .unwrap()
+        .contains("已压缩")
+    );
+  }
+
+  #[test]
+  fn soft_compacts_older_tool_outputs_before_hard_context_ceiling() {
+    let messages = vec![
+      json!({ "role": "system", "content": "s".repeat(8_000) }),
+      json!({ "role": "user", "content": "u".repeat(8_000) }),
+      json!({
+        "role": "tool",
+        "tool_call_id": "1",
+        "content": format!("lines 1-100\n{}", "a".repeat(12_000))
+      }),
+      json!({
+        "role": "tool",
+        "tool_call_id": "2",
+        "content": format!("lines 101-200\n{}", "b".repeat(12_000))
+      }),
+      json!({
+        "role": "tool",
+        "tool_call_id": "3",
+        "content": format!("lines 201-300\n{}", "c".repeat(12_000))
+      }),
+    ];
+    assert_eq!(SOFT_COMPACT_CONTEXT_CHARS, 36_000);
+    let total_before: usize = messages
+      .iter()
+      .map(|m| m["content"].as_str().unwrap_or("").chars().count())
+      .sum();
+    assert!(total_before > SOFT_COMPACT_CONTEXT_CHARS);
+    let compacted = compact_messages_for_model(&messages, MAX_AGENT_CONTEXT_CHARS);
+    assert!(compacted[2]["content"].as_str().unwrap().contains("已压缩"));
+    assert!(compacted[4]["content"].as_str().unwrap().contains("lines 201-300"));
   }
 
   #[test]

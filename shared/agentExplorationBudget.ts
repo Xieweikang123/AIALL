@@ -42,19 +42,16 @@ export const EXPLORE_MAX_TOTAL_EXPLORE_HARD = 14;
 /**
  * Hard cap on total exploration-only turns (read-only turns, not reset by nudges).
  * When exceeded, tools are stripped from the next request, forcing text output.
- *
- * Was 6 — raised to 10 to give legitimately complex multi-file tasks enough room,
- * while still stopping runaway exploration loops. The progressive soft-cap at 6
- * (stripping grep/search_files) provides an earlier, gentler guardrail.
+ * Must stay aligned with `src-tauri/src/agent/policy.rs` (desktop runtime source of truth).
  */
-export const MAX_TOTAL_EXPLORE_TURNS = 10;
+export const MAX_TOTAL_EXPLORE_TURNS = 30;
 
 /**
  * Soft cap — when total exploration turns reach this, wide-search tools
  * (grep / search_files) are removed. The model can still read_file to
  * verify targeted locations, but cannot branch out further.
  */
-export const MAX_TOTAL_EXPLORE_TURNS_SOFT = 6;
+export const MAX_TOTAL_EXPLORE_TURNS_SOFT = 25;
 
 /**
  * Unique files read before injecting a "narrow your focus" nudge.
@@ -66,8 +63,8 @@ export const MAX_UNIQUE_READ_FILES_BEFORE_NUDGE = 4;
 export const EXPLORE_INTERIM_DIAGNOSIS_TURN = 4;
 
 /** Tighter caps when user continues reporting issues after a prior「修复完成」claim in the same thread. */
-export const SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE_SOFT = 5;
-export const SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE = 8;
+export const SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE_SOFT = 15;
+export const SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE = 20;
 
 /** One-click auto bug fix — lower explore cap than interactive build. */
 export const AUTO_BUG_FIX_EXPLORE_HARD_CAP = 6;

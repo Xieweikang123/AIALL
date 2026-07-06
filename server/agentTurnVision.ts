@@ -19,7 +19,7 @@ import {
   shouldRunVisionAnchorPrefgrep,
   suggestsVisibleShellEmptyInner,
   consultativeAppearanceNeedsVueRead,
-} from "./visionMessage";
+} from "../src/orchestration/product/visionMessage";
 import {
   appendVisionAnchorPrefgrepMessages,
   buildVisionConsultativeReadAfterPrefgrepHint,
@@ -33,7 +33,7 @@ import {
   buildBehaviorPurposeTraceRetryHint,
   shouldBlockBehaviorPurposeFinalize,
 } from "./consultativeBehaviorTrace";
-import { buildSearchFilesEmptyHint } from "./agentAskPrompt";
+import { buildSearchFilesEmptyHint } from "../src/orchestration/product/agentAskPrompt";
 
 export interface VisionTurnParams {
   visibleContent: string;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isWriteAllowedForAutoBugFix } from "./agentExplorationBudget";
+import { isWriteAllowedForAutoBugFix } from "../shared/agentExplorationBudget";
 
 describe("isWriteAllowedForAutoBugFix", () => {
   it("allows paths in target list", () => {

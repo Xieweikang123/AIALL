@@ -8,7 +8,7 @@ import {
   buildTurnCapFinalSummaryNudge,
   buildTurnCapExhaustedMessage,
   extendSegmentMaxTurns,
-} from "./agentTurnBudget";
+} from "../shared/agentTurnBudget";
 import {
   buildExploreForceReportNudge,
   buildAskForceAnswerNudge,
@@ -19,7 +19,7 @@ import {
   EXPLORE_MAX_TOTAL_EXPLORE_SOFT,
   ASK_MAX_TOTAL_EXPLORE_SOFT,
   PLAN_MAX_TOTAL_EXPLORE_SOFT,
-} from "./agentExplorationBudget";
+} from "../shared/agentExplorationBudget";
 
 /**
  * Handle turn-cap emergency nudges and segment boundary (Blocks 18–19).
