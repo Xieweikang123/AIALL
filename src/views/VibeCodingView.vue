@@ -625,7 +625,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from "vue";
 import "../styles/vibe-coding.scss";
 import { appendStatusDetail, assistantTransientUiClearPatch, truncateDiffPreview, cleanStatusLogText, CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount, isNetworkError, fileName, genId, hasAgentProcessSteps, entryToNode, formatToolMeta, syncRoundGroupsPatch } from "../utils/vibeHelpers";
-import { debugLog } from "../utils/debugLog";
+import { appendDebugLogFile, debugLog } from "../utils/debugLog";
 import { lsGet, lsGetJson, lsSet, lsSetJson, lsRemove } from "../utils/localStorageSafe";
 import { dismissBlockingOverlays, registerOverlayDismissDeps, scanDomBlockingOverlays } from "../utils/dismissBlockingOverlays";
 import { sessionDiag } from "../utils/sessionDiagLog";
@@ -2515,11 +2515,7 @@ async function openProjectByPath(dirPath: string) {
   const flushLog = (result: string) => {
     if (!isTauriEnv()) return;
     const line = `[${new Date().toISOString()}] ${normalized} | ${result}`;
-    fetch("/backend/vibe/log", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: "tab-perf.log", line }),
-    }).catch(() => {});
+    appendDebugLogFile("tab-perf.log", line, normalized);
   };
 
   const previousPathForPersist = projectPath.value.trim();

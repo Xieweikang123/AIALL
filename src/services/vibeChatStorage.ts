@@ -10,6 +10,17 @@ import type {
   VibeChatSession,
   VibeChatSessionMeta,
 } from "./vibeChatStorageTypes";
+import { hasAgentProgressMarker } from "./agentProgressMarker";
+import { sanitizeUserVisibleAssistantText } from "./agentVisibleText";
+import { MAX_AGENT_IMAGE_BYTES } from "./imageCompress";
+import { resolveChatMessageImageUrls } from "./vibeChatImageStore";
+import {
+  composerDraftPreviewText,
+  hasComposerDraft,
+  removeComposerDraft,
+} from "../utils/composerDraftStorage";
+import { sessionDiag } from "../utils/sessionDiagLog";
+import { lsGet, lsSetJson } from "../utils/localStorageSafe";
 
 export type {
   PersistedAgentContext,
@@ -56,15 +67,22 @@ const MAX_PROGRESS_NARRATIVE_CHARS = 2400;
 const MAX_MODEL_STEP_CHARS = 500;
 const MAX_TOOL_CALL_ARGS_CHARS = 240;
 const MAX_TOOL_ARGS_DISK_CHARS = 400;
+const MAX_PERSISTED_IMAGES = 4;
+/** Align with agent compress cap so memory previews match what session-sync can externalize. */
+const MAX_PERSISTED_IMAGE_CHARS = MAX_AGENT_IMAGE_BYTES;
+const MAX_DISK_IMAGES = 8;
+const MAX_DISK_IMAGE_CHARS = MAX_AGENT_IMAGE_BYTES;
 
 /** Full session payloads live in memory (and on disk); not in localStorage. */
 const memoryByProject = new Map<string, ProjectChatRecord>();
+/** Parsed localStorage index; invalidated when backing storage changes. */
+let indexCache: ChatStoreIndex | null = null;
+let indexCacheRaw: string | null = null;
 
 const MAX_DELETED_SESSION_IDS = 200;
 
-function readDeletedSessionIds(projectKey: string): Set<string> {
-  const ids = readIndex().byProject[projectKey]?.deletedSessionIds;
-  return new Set(ids || []);
+function readDeletedSessionIds(projectKey: string): string[] {
+  return readIndex().byProject[projectKey]?.deletedSessionIds || [];
 }
 
 function persistDeletedSessionId(projectPath: string, sessionId: string): void {
@@ -94,7 +112,7 @@ function isRecentlyDeletedSession(projectPath: string, sessionId: string): boole
   const key = normalizeProjectKey(projectPath);
   const id = sessionId.trim();
   if (!key || !id) return false;
-  return readDeletedSessionIds(key).has(id);
+  return readDeletedSessionIds(key).includes(id);
 }
 
 function mergeDeletedSessionIds(existing?: string[], incoming?: string[]): string[] | undefined {
@@ -203,9 +221,6 @@ const TOOL_ACTION_LINE_RE =
   /^[-*•>\s]*(?:读取文件|列出目录|浏览目录|搜索代码|搜索内容|搜索文件|写入文件|局部修改|删除文件|执行命令|联网搜索|抓取网页)[：:]\s*.+$/u;
 
 const TOOL_SUMMARY_HEADING_RE = /^#{1,3}\s*工具摘要\s*$/;
-
-import { sanitizeUserVisibleAssistantText } from "./agentVisibleText";
-import { resolveChatMessageImageUrls } from "./vibeChatImageStore";
 
 /** Strip tool-log blocks and leaked tool-action bullet lines from assistant text shown to the user. */
 export function stripToolSummaryFromAssistantContent(text: string): string {
@@ -501,22 +516,6 @@ function compactRoundGroupsForStorage(
   });
 }
 
-import { MAX_AGENT_IMAGE_BYTES } from "./imageCompress";
-import { hasAgentProgressMarker } from "./agentProgressMarker";
-import { sessionDiag } from "../utils/sessionDiagLog";
-import {
-  composerDraftPreviewText,
-  hasComposerDraft,
-  removeComposerDraft,
-} from "../utils/composerDraftStorage";
-import { lsGet, lsSetJson } from "../utils/localStorageSafe";
-
-const MAX_PERSISTED_IMAGES = 4;
-/** Align with agent compress cap so memory previews match what session-sync can externalize. */
-const MAX_PERSISTED_IMAGE_CHARS = MAX_AGENT_IMAGE_BYTES;
-const MAX_DISK_IMAGES = 8;
-const MAX_DISK_IMAGE_CHARS = MAX_AGENT_IMAGE_BYTES;
-
 function compactImageDataUrls(
   urls: string[] | undefined,
   options?: { forDisk?: boolean },
@@ -717,12 +716,22 @@ function adoptSessionWithId(
   };
 }
 
-function cloneRecord(record: ProjectChatRecord): ProjectChatRecord {
+function cloneMessagesShallow(messages: PersistedChatMessage[]): PersistedChatMessage[] {
+  return messages.map((m) => ({ ...m }));
+}
+
+function cloneRecord(
+  record: ProjectChatRecord,
+  options?: { sanitizeMessages?: boolean },
+): ProjectChatRecord {
+  const sanitize = options?.sanitizeMessages !== false;
   return {
     activeSessionId: record.activeSessionId,
     sessions: record.sessions.map((session) => ({
       ...session,
-      messages: sanitizeMessages(session.messages),
+      messages: sanitize
+        ? sanitizeMessages(session.messages)
+        : cloneMessagesShallow(session.messages),
     })),
   };
 }
@@ -777,11 +786,19 @@ function migrateV2Store(raw: ChatStoreV2): ChatStoreIndex {
 
 function readIndex(): ChatStoreIndex {
   const raw = lsGet(CHAT_STORAGE_KEY);
-  if (!raw) return { version: STORE_VERSION, byProject: {} };
+  const rawKey = raw ?? "";
+  if (indexCache && indexCacheRaw === rawKey) return indexCache;
+  if (!raw) {
+    indexCache = { version: STORE_VERSION, byProject: {} };
+    indexCacheRaw = rawKey;
+    return indexCache;
+  }
   try {
     const parsed = JSON.parse(raw) as Partial<ChatStoreIndex | ChatStoreV2 | ChatStoreV1>;
     if (!parsed || typeof parsed !== "object" || !parsed.byProject) {
-      return { version: STORE_VERSION, byProject: {} };
+      indexCache = { version: STORE_VERSION, byProject: {} };
+      indexCacheRaw = rawKey;
+      return indexCache;
     }
     if (parsed.version === 1) {
       const migrated = migrateV1Store(parsed as ChatStoreV1);
@@ -793,9 +810,13 @@ function readIndex(): ChatStoreIndex {
       writeIndex(migrated);
       return migrated;
     }
-    return { version: STORE_VERSION, byProject: parsed.byProject as Record<string, ProjectIndexRecord> };
+    indexCache = { version: STORE_VERSION, byProject: parsed.byProject as Record<string, ProjectIndexRecord> };
+    indexCacheRaw = rawKey;
+    return indexCache;
   } catch {
-    return { version: STORE_VERSION, byProject: {} };
+    indexCache = { version: STORE_VERSION, byProject: {} };
+    indexCacheRaw = rawKey;
+    return indexCache;
   }
 }
 
@@ -811,6 +832,8 @@ function writeIndex(index: ChatStoreIndex): boolean {
     storageErrorCallback?.("浏览器索引写入失败，会话已保存到项目目录。");
     return false;
   }
+  indexCache = index;
+  indexCacheRaw = JSON.stringify(index);
   return true;
 }
 
@@ -823,13 +846,33 @@ function persistRecord(key: string, record: ProjectChatRecord, options?: { prefe
   return writeIndex(index);
 }
 
-function getProjectRecord(key: string): ProjectChatRecord | undefined {
+/** Switch active session without re-sanitizing every session payload. */
+function persistActiveSessionId(key: string, sessionId: string): boolean {
+  const id = sessionId.trim();
+  if (!key || !id) return false;
+
   const cached = memoryByProject.get(key);
-  if (cached?.sessions?.length) return cloneRecord(cached);
+  if (cached?.sessions.some((s) => s.id === id)) {
+    cached.activeSessionId = id;
+  }
+
+  const index = readIndex();
+  const previous = index.byProject[key];
+  if (!previous?.sessions.some((s) => s.id === id)) return false;
+  if (previous.activeSessionId === id && (!cached || cached.activeSessionId === id)) return true;
+
+  index.byProject[key] = { ...previous, activeSessionId: id };
+  return writeIndex(index);
+}
+
+function getProjectRecord(key: string): ProjectChatRecord | undefined {
+  const readOnlyClone = { sanitizeMessages: false as const };
+  const cached = memoryByProject.get(key);
+  if (cached?.sessions?.length) return cloneRecord(cached, readOnlyClone);
 
   readIndex();
   const migrated = memoryByProject.get(key);
-  if (migrated?.sessions?.length) return cloneRecord(migrated);
+  if (migrated?.sessions?.length) return cloneRecord(migrated, readOnlyClone);
 
   const index = readIndex().byProject[key];
   if (!index?.sessions?.length) return undefined;
@@ -866,8 +909,12 @@ function getActiveSession(record: ProjectChatRecord): VibeChatSession {
   return session || record.sessions[0];
 }
 
-function touchSession(session: VibeChatSession, messages: PersistedChatMessage[], options?: { touchTimestamp?: boolean }) {
-  session.messages = sanitizeMessages(messages);
+function touchSession(
+  session: VibeChatSession,
+  messages: PersistedChatMessage[],
+  options?: { touchTimestamp?: boolean; skipSanitize?: boolean },
+) {
+  session.messages = options?.skipSanitize ? messages : sanitizeMessages(messages);
   if (options?.touchTimestamp !== false) {
     session.updatedAt = new Date().toISOString();
   }
@@ -1462,7 +1509,10 @@ export function saveVibeChatHistory(
       // #endregion
     }
   } else {
-    touchSession(session, sanitized, { touchTimestamp: options?.touchTimestamp });
+    touchSession(session, sanitized, {
+      touchTimestamp: options?.touchTimestamp,
+      skipSanitize: true,
+    });
   }
 
   if (record.sessions.length > MAX_SESSIONS_PER_PROJECT) {
@@ -1498,16 +1548,11 @@ export function chatMessagesMatchSessionAnchor(
   return messages[0]?.id?.trim() === anchorId;
 }
 
-export function switchVibeChatSession(projectPath: string, sessionId: string): PersistedChatMessage[] {
+export function switchVibeChatSession(projectPath: string, sessionId: string): void {
   const key = normalizeProjectKey(projectPath);
-  if (!key) return [];
-  const record = getProjectRecord(key);
-  if (!record) return [];
-  const target = record.sessions.find((s) => s.id === sessionId);
-  if (!target) return sanitizeMessages(getActiveSession(record).messages);
-  record.activeSessionId = sessionId;
-  persistRecord(key, record);
-  return sanitizeMessages(target.messages);
+  const id = sessionId.trim();
+  if (!key || !id) return;
+  persistActiveSessionId(key, id);
 }
 
 /** Update draft session metadata when leaving with unsent composer content. */

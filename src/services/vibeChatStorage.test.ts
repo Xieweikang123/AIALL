@@ -30,6 +30,7 @@ import {
   listVibeChatSessions,
   loadVibeChatHistory,
   mirrorLocalIndexFromDiskMeta,
+  peekVibeChatSessionMessages,
   projectChatNeedsDiskRestore,
   replaceChatStoreFromDiskSnapshot,
   restoreChatStoreFromSnapshot,
@@ -37,6 +38,7 @@ import {
   sanitizePersistedChatMessages,
   saveVibeChatHistory,
   shouldPersistAssistantMessage,
+  switchVibeChatSession,
   type PersistedChatMessage,
   STORE_VERSION,
   stripReferenceAttachments,
@@ -668,6 +670,36 @@ describe("v3 chat storage (index + memory)", () => {
 
     const snapshot = getActiveSessionSnapshot(projectPath, sessionId);
     expect(snapshot?.messages).toHaveLength(2);
+  });
+
+  it("switchVibeChatSession only updates activeSessionId without touching session payloads", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T08:00:00.000Z"));
+    const projectPath = "D:/projects/switch-light";
+    const { sessionId: sessionA } = saveVibeChatHistory(projectPath, [
+      { id: "u1", role: "user", content: "session A" },
+    ]);
+    const updatedAtA = listVibeChatSessions(projectPath).find((s) => s.id === sessionA)!.updatedAt;
+
+    vi.setSystemTime(new Date("2026-01-01T10:00:00.000Z"));
+    const { sessionId: sessionB } = saveVibeChatHistory(projectPath, [
+      { id: "u2", role: "user", content: "session B" },
+    ]);
+    const updatedAtB = listVibeChatSessions(projectPath).find((s) => s.id === sessionB)!.updatedAt;
+    expect(getActiveVibeChatSessionId(projectPath)).toBe(sessionB);
+
+    switchVibeChatSession(projectPath, sessionA);
+
+    expect(getActiveVibeChatSessionId(projectPath)).toBe(sessionA);
+    expect(loadVibeChatHistory(projectPath)).toEqual([
+      { id: "u1", role: "user", content: "session A" },
+    ]);
+    expect(peekVibeChatSessionMessages(projectPath, sessionB)).toEqual([
+      { id: "u2", role: "user", content: "session B" },
+    ]);
+    expect(listVibeChatSessions(projectPath).find((s) => s.id === sessionA)!.updatedAt).toBe(updatedAtA);
+    expect(listVibeChatSessions(projectPath).find((s) => s.id === sessionB)!.updatedAt).toBe(updatedAtB);
+    vi.useRealTimers();
   });
 
   it("migrates v2 full store into memory and writes a lightweight v3 index", () => {
