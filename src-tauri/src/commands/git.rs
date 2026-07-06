@@ -357,30 +357,37 @@ pub async fn git_ai_batch_groups(
   }
 
   let unstaged_files: Vec<_> = status_result.files.iter().filter(|f| !f.staged && f.status != "ignored").collect();
-  if unstaged_files.is_empty() {
+  let staged_files: Vec<_> = status_result.files.iter().filter(|f| f.staged).collect();
+
+  let (source_files, use_staged_diff) = if !unstaged_files.is_empty() {
+    (unstaged_files, false)
+  } else if !staged_files.is_empty() {
+    (staged_files, true)
+  } else {
     send_event("done", json!({ "groups": [] }));
     return;
-  }
+  };
 
-  send_event("progress", json!({ "step": format!("读取 diff（{} 个文件）…", unstaged_files.len()) }));
+  send_event("progress", json!({ "step": format!("读取 diff（{} 个文件）…", source_files.len()) }));
 
-  let diff_result = git::git_diff(&path, None, false).await;
+  let diff_result = git::git_diff(&path, None, use_staged_diff).await;
   let diff_text = if diff_result.ok {
     preprocess_diff(&diff_result.patch, 3000, 15000)
   } else {
     String::new()
   };
 
-  let file_list_str: Vec<String> = unstaged_files
+  let file_list_str: Vec<String> = source_files
     .iter()
     .map(|f| format!("{}: {}", f.status, f.path))
     .collect();
   let file_list_str = file_list_str.join("\n");
 
+  let change_scope = if use_staged_diff { "已暂存" } else { "未暂存" };
   let prompt = format!(
-    "你是一个 Git 提交分组助手。根据以下未暂存的文件变更，将文件按功能/逻辑相关性分成多个批次，每个批次生成一条中文提交信息。
+    "你是一个 Git 提交分组助手。根据以下{change_scope}的文件变更，将文件按功能/逻辑相关性分成多个批次，每个批次生成一条中文提交信息。
 
-未暂存文件列表：
+{change_scope}文件列表：
 {file_list_str}
 
 Diff 内容：

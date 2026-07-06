@@ -138,6 +138,12 @@ export function useGitPanel(
   onRefreshTree?: () => void,
 ) {
   const GIT_PANEL_MODE_KEY = "vibe-coding-git-panel-mode";
+  const GIT_STAGED_OPEN_KEY = "git-staged-open";
+  const GIT_UNSTAGED_OPEN_KEY = "git-unstaged-open";
+
+  function readGitSectionOpen(key: string): boolean {
+    return lsGet(key) !== "false";
+  }
   const PROJECT_PANEL_VIEW_KEY = "vibe-coding-project-panel-view";
 
   const _storedPanelMode = lsGet(GIT_PANEL_MODE_KEY);
@@ -198,8 +204,8 @@ export function useGitPanel(
   const hasMoreGitLog = computed(() => {
     return gitLogEntries.value.length === gitLogCount.value;
   });
-  const gitStagedOpen = ref(localStorage.getItem("git-staged-open") !== "false");
-  const gitUnstagedOpen = ref(localStorage.getItem("git-unstaged-open") !== "false");
+  const gitStagedOpen = ref(readGitSectionOpen(GIT_STAGED_OPEN_KEY));
+  const gitUnstagedOpen = ref(readGitSectionOpen(GIT_UNSTAGED_OPEN_KEY));
   const expandedGitLogEntries = ref<Set<string>>(new Set());
   const gitStashSectionOpen = ref(false);
   const gitLocalChangesOpen = ref(false);
@@ -257,6 +263,13 @@ export function useGitPanel(
     }
   });
 
+  watch(gitStagedOpen, (open) => {
+    lsSet(GIT_STAGED_OPEN_KEY, String(open));
+  });
+  watch(gitUnstagedOpen, (open) => {
+    lsSet(GIT_UNSTAGED_OPEN_KEY, String(open));
+  });
+
   const gitStagedFiles = computed(() => {
     const seen = new Set<string>();
     const result: GitStatusFile[] = [];
@@ -273,6 +286,11 @@ export function useGitPanel(
     const paths = sortedUnstagedPaths(unstaged.map((f) => f.path));
     const byPath = new Map(unstaged.map((f) => [f.path, f]));
     return paths.map((p) => byPath.get(p)).filter((f): f is GitStatusFile => f != null);
+  });
+  /** 分批提交数据源：优先未暂存；若已全部暂存则回退到已暂存列表 */
+  const gitBatchSourceFiles = computed(() => {
+    if (gitUnstagedFiles.value.length > 0) return gitUnstagedFiles.value;
+    return gitStagedFiles.value;
   });
   const gitChangeCount = computed(() => gitStatus.value.length);
   const canGitCommit = computed(
@@ -428,7 +446,7 @@ export function useGitPanel(
       gitHeadCommit.value = result.headCommit?.trim() || "";
       gitStatus.value = result.files;
       gitStatusKnown.value = true;
-      syncBatchStateWithUnstagedFiles();
+      syncBatchStateWithSourceFiles();
       if (showLoading) {
         gitError.value = "";
       }
@@ -547,8 +565,8 @@ export function useGitPanel(
   const batchDraftBranch = ref<string | null>(null);
   let batchDraftPersistTimer: ReturnType<typeof setTimeout> | null = null;
 
-  function currentUnstagedPaths(): string[] {
-    return sortedUnstagedPaths(gitUnstagedFiles.value.map((f) => f.path));
+  function currentBatchPaths(): string[] {
+    return sortedUnstagedPaths(gitBatchSourceFiles.value.map((f) => f.path));
   }
 
   function batchDraftScope() {
@@ -581,7 +599,7 @@ export function useGitPanel(
   function persistBatchDraft() {
     if (!projectOpened()) return;
     const { project, branch } = batchDraftScope();
-    const paths = currentUnstagedPaths();
+    const paths = currentBatchPaths();
     if (!paths.length || !batchUnstagedSnapshot.value) {
       removeGitBatchDraft(project, branch);
       return;
@@ -615,7 +633,7 @@ export function useGitPanel(
   }
 
   function tryRestoreBatchDraft() {
-    const paths = currentUnstagedPaths();
+    const paths = currentBatchPaths();
     if (!paths.length) return;
 
     const { project, branch } = batchDraftScope();
@@ -651,7 +669,7 @@ export function useGitPanel(
     batchUnstagedSnapshot.value = null;
     batchDraftBranch.value = null;
     syncBatchMessagesFromGroups();
-    const paths = currentUnstagedPaths();
+    const paths = currentBatchPaths();
     if (paths.length) {
       batchUnstagedSnapshot.value = paths;
       batchDraftBranch.value = branch;
@@ -659,19 +677,20 @@ export function useGitPanel(
   }
 
   const batchGroups = computed<BatchGroup[]>(() => {
+    const sourceFiles = gitBatchSourceFiles.value;
     if (aiBatchGroupsResult.value) {
       const groups = aiBatchGroupsResult.value.map((g) => ({
         dir: g.name,
         files: g.files.map((p) => {
-          const orig = gitUnstagedFiles.value.find((uf) => uf.path === p);
+          const orig = sourceFiles.find((uf) => uf.path === p);
           return { path: p, status: orig?.status || "modified" };
         }),
         message: g.message,
       }));
 
-      // Find any unstaged files that haven't been grouped yet
+      // Find any batch source files that haven't been grouped yet
       const groupedPaths = new Set(aiBatchGroupsResult.value.flatMap((g) => g.files));
-      const remaining = gitUnstagedFiles.value.filter((f) => !groupedPaths.has(f.path));
+      const remaining = sourceFiles.filter((f) => !groupedPaths.has(f.path));
       if (remaining.length > 0) {
         groups.push({
           dir: aiBatchGrouping.value ? "正在分析其余变更" : "其他未分组变更",
@@ -682,7 +701,7 @@ export function useGitPanel(
       return groups;
     }
     const dirMap = new Map<string, { path: string; status: string }[]>();
-    for (const f of gitUnstagedFiles.value) {
+    for (const f of sourceFiles) {
       const dir = getTopLevelDir(f.path);
       if (!dirMap.has(dir)) dirMap.set(dir, []);
       dirMap.get(dir)!.push({ path: f.path, status: f.status });
@@ -696,7 +715,7 @@ export function useGitPanel(
 
   const batchCommittingIndex = ref<number | null>(null);
 
-  function syncBatchStateWithUnstagedFiles() {
+  function syncBatchStateWithSourceFiles() {
     if (!gitStatusKnown.value) return;
     if (batchCommittingAll.value) return;
 
@@ -705,7 +724,7 @@ export function useGitPanel(
       resetBatchDraftSessionState();
     }
 
-    const current = currentUnstagedPaths();
+    const current = currentBatchPaths();
     if (!current.length) {
       resetBatchDraftSessionState();
       clearBatchDraftPersist();
@@ -720,9 +739,9 @@ export function useGitPanel(
   }
 
   watch(
-    () => gitUnstagedFiles.value.map((f) => f.path).join("\n"),
+    () => gitBatchSourceFiles.value.map((f) => f.path).join("\n"),
     () => {
-      syncBatchStateWithUnstagedFiles();
+      syncBatchStateWithSourceFiles();
     },
   );
 
@@ -752,6 +771,32 @@ export function useGitPanel(
     if (grouping) batchSectionOpen.value = true;
   });
 
+  async function clearStagedIndexForBatchCommit(): Promise<boolean> {
+    const stagedPaths = gitStagedFiles.value.map((f) => f.path);
+    if (!stagedPaths.length) return true;
+    gitError.value = "";
+    gitStatus.value = gitStatus.value.map((f) => ({ ...f, staged: false }));
+    gitStagingInProgress.value = true;
+    gitStatusRefreshToken += 1;
+    gitLastStagingAt.value = Date.now();
+    try {
+      const result = await unstageGitFiles(projectPath(), stagedPaths);
+      if (!result.ok) {
+        gitError.value = result.error || "取消暂存失败";
+        await refreshGitStatus({ showLoading: false, force: true });
+        return false;
+      }
+      return true;
+    } catch (e) {
+      gitError.value = e instanceof Error ? e.message : "取消暂存失败";
+      await refreshGitStatus({ showLoading: false, force: true });
+      return false;
+    } finally {
+      gitLastStagingAt.value = Date.now();
+      gitStagingInProgress.value = false;
+    }
+  }
+
   async function commitBatchGroup(index: number, message: string) {
     if (!projectOpened() || !message.trim()) return;
     const group = batchGroups.value[index];
@@ -761,6 +806,7 @@ export function useGitPanel(
     clearGitDiffCache();
     const filePaths = group.files.map((f) => f.path);
     try {
+      if (!(await clearStagedIndexForBatchCommit())) return;
       const stageResult = await runStageGitFiles(filePaths);
       if (!stageResult.ok) {
         await refreshGitStatus({ showLoading: false, force: true });
@@ -814,11 +860,9 @@ export function useGitPanel(
 
   async function commitBatchGroupByPaths(filePaths: string[], message: string, index = 0, _total?: number) {
     if (!projectOpened() || !message.trim() || !filePaths.length) return;
-    
-    // 过滤出当前确实处于未暂存/已修改状态的文件，避免提交空变更导致 git commit 报错
-    const filesToCommit = filePaths.filter((p) =>
-      gitUnstagedFiles.value.some((uf) => uf.path === p)
-    );
+
+    const batchPathSet = new Set(gitBatchSourceFiles.value.map((f) => f.path));
+    const filesToCommit = filePaths.filter((p) => batchPathSet.has(p));
     if (filesToCommit.length === 0) {
       return;
     }
@@ -827,6 +871,7 @@ export function useGitPanel(
     gitError.value = "";
     clearGitDiffCache();
     try {
+      if (!(await clearStagedIndexForBatchCommit())) return;
       const stageResult = await runStageGitFiles(filesToCommit);
       if (!stageResult.ok) {
         await refreshGitStatus({ showLoading: false, force: true });
@@ -882,7 +927,7 @@ export function useGitPanel(
       } else {
         aiBatchGroupsResult.value = result.groups.length > 0 ? result.groups : null;
         if (result.groups.length > 0) {
-          batchUnstagedSnapshot.value = currentUnstagedPaths();
+          batchUnstagedSnapshot.value = currentBatchPaths();
           batchSectionOpen.value = true;
           batchMessages.value = batchGroups.value.map((g) => defaultBatchMessage(g));
           persistBatchDraft();

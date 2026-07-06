@@ -66,6 +66,16 @@ function unstagedFile(path: string): GitStatusFile {
   };
 }
 
+function stagedFile(path: string): GitStatusFile {
+  return {
+    path,
+    status: "modified",
+    indexStatus: "M",
+    worktreeStatus: " ",
+    staged: true,
+  };
+}
+
 function gitStatusResult(branch: string, unstagedPaths: string[]) {
   return {
     ok: true,
@@ -75,6 +85,18 @@ function gitStatusResult(branch: string, unstagedPaths: string[]) {
     stagedCount: 0,
     unstagedCount: unstagedPaths.length,
     files: unstagedPaths.map(unstagedFile),
+  };
+}
+
+function gitStagedStatusResult(branch: string, stagedPaths: string[]) {
+  return {
+    ok: true,
+    branch,
+    headCommit: "abc123",
+    isRepo: true,
+    stagedCount: stagedPaths.length,
+    unstagedCount: 0,
+    files: stagedPaths.map(stagedFile),
   };
 }
 
@@ -241,6 +263,17 @@ describe("useGitPanel batch draft", () => {
     await git.refreshGitStatus();
     expect(readGitBatchDraft(PROJECT, "main")).toBeNull();
     expect(git.batchMessages.value).toEqual([]);
+    expect(git.batchSectionOpen.value).toBe(false);
+  });
+
+  it("shows batch groups when all changes are staged", async () => {
+    fetchGitStatusMock.mockResolvedValue(gitStagedStatusResult("main", ["pkg/a.ts", "src/b.ts"]));
+
+    const git = createGitPanel();
+    await git.refreshGitStatus();
+
+    expect(git.batchGroups.value).toHaveLength(2);
+    expect(git.batchGroups.value.map((g) => g.dir)).toEqual(["pkg", "src"]);
     expect(git.batchSectionOpen.value).toBe(false);
   });
 
