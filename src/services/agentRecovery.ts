@@ -213,6 +213,11 @@ export function isRecoverableAgentError(message: string): boolean {
   );
 }
 
+/** JS ReferenceError-style agent/runtime failures; retrying the same segment rarely helps. */
+export function isAgentRuntimeReferenceError(message: string): boolean {
+  return /\bis not defined\b/i.test(message.trim());
+}
+
 /** Auto-resume after disconnect; prefer silent continuation in the UI layer. */
 export function shouldAutoResumeAgentError(message: string): boolean {
   return shouldSilentAutoContinue(message);
@@ -220,6 +225,8 @@ export function shouldAutoResumeAgentError(message: string): boolean {
 
 /** Whether the client should chain another SSE segment without asking the user. */
 export function shouldSilentAutoContinue(message: string): boolean {
+  if (isAgentRuntimeReferenceError(message)) return false;
+  if (isAgentBillingOrAuthError(message)) return false;
   if (!isRecoverableAgentError(message)) return false;
   if (isMaxTurnsExhaustedReason(message)) return false;
   if (isNoFinalAnswerReason(message)) return false;
@@ -587,6 +594,18 @@ export function inferAgentRecoveryFlags(msg: AgentProgressSource & {
   }
 
   if (msg.agentAborted) return null;
+
+  const explicitFailure = msg.agentFailureReason?.trim();
+  if (msg.agentFailed && explicitFailure && !isNoFinalAnswerReason(explicitFailure)) {
+    return {
+      agentFailed: true,
+      agentRecoverable: Boolean(msg.agentRecoverable),
+      agentFailureReason: explicitFailure,
+      ...((msg as { agentFailureDetail?: string }).agentFailureDetail?.trim()
+        ? { agentFailureDetail: (msg as { agentFailureDetail?: string }).agentFailureDetail }
+        : {}),
+    };
+  }
 
   if (isIncompleteAgentRunWithoutFinalAnswer(msg)) {
     const preserved = (msg as { agentFailureDetail?: string }).agentFailureDetail?.trim();
@@ -1008,6 +1027,28 @@ function isStallReason(errorMessage: string): boolean {
 
 function isNoFinalAnswerReason(errorMessage: string): boolean {
   return errorMessage.trim() === "运行中断（未生成最终回复）";
+}
+
+/** User-facing normalization for invoke / model transport errors. */
+export function formatAgentTransportErrorMessage(message: string): string {
+  const trimmed = message.trim();
+  if (!trimmed) return trimmed;
+  if (/insufficient balance|creditserror/i.test(trimmed)) {
+    return "模型 API 余额不足，请充值或更换 API Key 后再试";
+  }
+  if (/\bhttp\s*401\b/i.test(trimmed)) {
+    return "模型 API 认证失败（401），请检查 API Key 或账户余额";
+  }
+  return trimmed;
+}
+
+export function isAgentBillingOrAuthError(message: string): boolean {
+  const msg = message.trim().toLowerCase();
+  return (
+    msg.includes("insufficient balance")
+    || msg.includes("creditserror")
+    || /\bhttp\s*401\b/.test(msg)
+  );
 }
 
 export function recoverableAgentErrorHint(

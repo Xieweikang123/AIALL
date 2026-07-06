@@ -74,6 +74,8 @@ import {
   type VibeChatMode,
 } from "../services/vibeAgentClient";
 import { resolveAgentRequestUserIntentAsync } from "../services/agentRequestIntent";
+import { formatInvokeError } from "../services/tauriInvoke";
+import { formatAgentTransportErrorMessage } from "../services/agentRecovery";
 import {
   recordAgentRoundNarrative,
   recordAgentRoundRequest,
@@ -635,6 +637,29 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   const sseConnection = useAgentSSEConnection({ handleAgentEvent });
   const { clearPendingAgentEvents, enqueueAgentEvent } = sseConnection;
 
+  function bindAgentRunInvoke(
+    sessionId: string,
+    assistantMsg: ChatMessage,
+    runGen: number,
+    handle: ReturnType<typeof runVibeAgentSse>,
+  ) {
+    runManager.setAbortHandle(sessionId, handle);
+    const promise = handle.promise;
+    if (!promise) return;
+    void promise.catch((error: unknown) => {
+      if (!runManager.isValid(sessionId, runGen)) return;
+      const message = formatAgentTransportErrorMessage(
+        formatInvokeError(error, "Agent 运行异常退出"),
+      );
+      handleAgentEvent(
+        { type: "error", data: { message } },
+        assistantMsg,
+        runGen,
+        sessionId,
+      );
+    });
+  }
+
   if (getCurrentInstance()) {
     onBeforeUnmount(() => {
       if (pendingSettleTimerRef.current) {
@@ -923,7 +948,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       },
       (event) => enqueueAgentEvent(event, assistantMsg, runGen, sessionId),
     );
-    runManager.setAbortHandle(sessionId, handle);
+    bindAgentRunInvoke(sessionId, assistantMsg, runGen, handle);
   }
 
   function beginAssistantRunSlot(
@@ -1229,7 +1254,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       agentRequest,
       (event) => enqueueAgentEvent(event, assistantMsg, runGen, sessionId),
     );
-    runManager.setAbortHandle(sessionId, handle);
+    bindAgentRunInvoke(sessionId, assistantMsg!, runGen, handle);
     return true;
   }
 

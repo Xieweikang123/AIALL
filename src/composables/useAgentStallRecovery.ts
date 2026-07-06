@@ -11,6 +11,7 @@ import {
   isAgentConnectPhase,
   isAgentConnectStalled,
   isAgentRunStalled,
+  isAgentRuntimeReferenceError,
   isHmrInterruptReason,
   isRecoverableAgentError,
   applyMissingFinalAnswerDiagnosis,
@@ -20,6 +21,7 @@ import {
   resolveAutoResumeSeconds,
   resolveModelWaitStallMs,
   shouldSilentAutoContinue,
+  formatAgentTransportErrorMessage,
 } from "../services/agentRecovery";
 import { clearPendingAgentRun } from "../services/agentHmrRecovery";
 import { syncRoundGroupsPatch } from "../utils/vibeHelpers";
@@ -335,6 +337,10 @@ export function useAgentStallRecovery(deps: UseAgentStallRecoveryDeps) {
   }
 
   function trySilentContinue(sessionId: string, assistantMsg: ChatMessage, reason: string): boolean {
+    if (isAgentRuntimeReferenceError(reason)) {
+      debugLog(`[stall-recover] trySilent: runtime reference error — no silent continue`);
+      return false;
+    }
     if (!shouldSilentAutoContinue(reason)) { debugLog(`[stall-recover] trySilent: shouldSilentAutoContinue=false`); return false; }
     const originalPrompt = resolveOriginalUserPrompt(assistantMsg.id) ?? "";
     if (originalPrompt.includes("[AUTO_BUG_FIX]")) {
@@ -387,12 +393,13 @@ export function useAgentStallRecovery(deps: UseAgentStallRecoveryDeps) {
     message: string,
     options?: { logStatus?: boolean; noAutoResume?: boolean },
   ) {
-    const recoverable = isRecoverableAgentError(message);
+    const normalizedMessage = formatAgentTransportErrorMessage(message);
+    const recoverable = isRecoverableAgentError(normalizedMessage);
     assistantMsg.agentFailed = true;
     assistantMsg.agentRecoverable = recoverable;
-    assistantMsg.agentFailureReason = message;
+    assistantMsg.agentFailureReason = normalizedMessage;
     assistantMsg.agentRecoveryDismissed = false;
-    if (message.trim() === "运行中断（未生成最终回复）") {
+    if (normalizedMessage === "运行中断（未生成最终回复）") {
       applyMissingFinalAnswerDiagnosis(assistantMsg, {
         doneTurns: resolveAgentCompletedTurns(assistantMsg),
         chatMode: assistantMsg.chatMode,
@@ -406,7 +413,7 @@ export function useAgentStallRecovery(deps: UseAgentStallRecoveryDeps) {
     if (options?.logStatus !== false) {
       appendStatusLog(
         assistantMsg,
-        recoverable ? `连接中断：${message}（可恢复运行）` : `错误：${message}`,
+        recoverable ? `连接中断：${normalizedMessage}（可恢复运行）` : `错误：${normalizedMessage}`,
       );
     }
     if (recoverable) {
@@ -415,13 +422,13 @@ export function useAgentStallRecovery(deps: UseAgentStallRecoveryDeps) {
     }
 
     chatError.value = recoverable
-      ? recoverableAgentErrorHint(assistantMsg, message)
-      : message;
+      ? recoverableAgentErrorHint(assistantMsg, normalizedMessage)
+      : normalizedMessage;
 
     patchAssistantMsg(assistantMsg.id, {
       agentFailed: true,
       agentRecoverable: recoverable,
-      agentFailureReason: message,
+      agentFailureReason: normalizedMessage,
       agentFailureDetail: assistantMsg.agentFailureDetail,
       agentRecoveryDismissed: false,
       content: assistantMsg.content,

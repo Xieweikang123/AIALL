@@ -16,6 +16,7 @@ import { isAgentSseProgressEvent } from "../services/agentSseEventHandlers";
 import { parseAgentSuggestions } from "../services/agentSuggestions";
 import { computeLineDelta } from "../services/agentCursorFeed";
 import {
+  buildWrittenFilesSummary,
   finalizeAssistantBubbleContent,
   hasAgentFinalAnswer,
   commitAgentFinalAnswerIfMissing,
@@ -114,6 +115,52 @@ export interface UseAgentEventHandlersDeps {
   clearTurnFileDiffsFromStore: (diffs: Record<string, TurnFileDiff>) => void;
   handleAgentWrittenFiles: (files: string[]) => Promise<void>;
   resolveCompletedTurns: (reported: number, msg: ChatMessage) => number;
+}
+
+type DoneEventPayload = {
+  data: { writtenFiles?: string[]; pendingFiles?: string[]; turns: number };
+};
+
+function resolveDoneEventWrittenFiles(
+  assistantMsg: ChatMessage,
+  event: DoneEventPayload,
+  wasAborted: boolean,
+): string[] {
+  const turnFileDiffPaths = assistantMsg.turnFileDiffs
+    ? Object.keys(assistantMsg.turnFileDiffs)
+    : [];
+  return (
+    resolveAgentDoneFileAction({
+      chatMode: assistantMsg.chatMode ?? "build",
+      wasAborted,
+      serverPendingFiles: event.data.pendingFiles || [],
+      serverWrittenFiles: event.data.writtenFiles || [],
+      turnFileDiffPaths,
+      tools: assistantMsg.tools,
+      priorWrittenFiles: assistantMsg.writtenFiles,
+    }).writtenFiles ?? []
+  );
+}
+
+function commitSynthesizedWriteSummary(
+  assistantMsg: ChatMessage,
+  completedTurns: number,
+  writtenFiles: string[],
+): void {
+  const summary = buildWrittenFilesSummary(writtenFiles, false);
+  assistantMsg.writtenFiles = writtenFiles;
+  assistantMsg.content = summary;
+  assistantMsg.roundGroups = recordAgentRoundResponse(
+    assistantMsg.roundGroups,
+    completedTurns,
+    {
+      assistantText: summary,
+      toolCalls: [],
+      hasToolCalls: false,
+      isFinal: true,
+    },
+    assistantMsg.agentMaxTurns,
+  );
 }
 
 export function useAgentEventHandlers(deps: UseAgentEventHandlersDeps) {
@@ -813,26 +860,34 @@ function handleDoneEvent(event: EventOf<"done">, assistantMsg: ChatMessage, sess
       void scrollChatToBottom();
       return;
     }
-    stallRecovery.handleRecoverableInterruption(sessionId, assistantMsg, "运行中断（未生成最终回复）", {
-      logStatus: true,
-    });
-    assistantMsg.content = resolveAgentFailureBubbleContent(assistantMsg);
-    flushMinimizedRunUiPatch(sessionId, msgId, assistantMsg);
-    patchAssistantMsg(msgId, {
-      ...buildRunUiFullPatch(assistantMsg),
-      content: assistantMsg.content,
-      agentFailed: assistantMsg.agentFailed,
-      agentRecoverable: assistantMsg.agentRecoverable,
-      agentFailureReason: assistantMsg.agentFailureReason,
-      agentFailureDetail: assistantMsg.agentFailureDetail,
-      agentRecoveryDismissed: assistantMsg.agentRecoveryDismissed,
-      totalTurns: assistantMsg.totalTurns,
-      activityExpanded: true,
-    });
-    persistChatNow(undefined, { flushStore: true });
-    finishRunSession(sessionId);
-    void scrollChatToBottom();
-    return;
+    const writtenFiles = resolveDoneEventWrittenFiles(assistantMsg, event, wasAborted);
+    if (
+      writtenFiles.length > 0
+      && (assistantMsg.chatMode === "build" || !assistantMsg.chatMode)
+    ) {
+      commitSynthesizedWriteSummary(assistantMsg, completedTurns, writtenFiles);
+    } else {
+      stallRecovery.handleRecoverableInterruption(sessionId, assistantMsg, "运行中断（未生成最终回复）", {
+        logStatus: true,
+      });
+      assistantMsg.content = resolveAgentFailureBubbleContent(assistantMsg);
+      flushMinimizedRunUiPatch(sessionId, msgId, assistantMsg);
+      patchAssistantMsg(msgId, {
+        ...buildRunUiFullPatch(assistantMsg),
+        content: assistantMsg.content,
+        agentFailed: assistantMsg.agentFailed,
+        agentRecoverable: assistantMsg.agentRecoverable,
+        agentFailureReason: assistantMsg.agentFailureReason,
+        agentFailureDetail: assistantMsg.agentFailureDetail,
+        agentRecoveryDismissed: assistantMsg.agentRecoveryDismissed,
+        totalTurns: assistantMsg.totalTurns,
+        activityExpanded: true,
+      });
+      persistChatNow(undefined, { flushStore: true });
+      finishRunSession(sessionId);
+      void scrollChatToBottom();
+      return;
+    }
   }
 
   const turnFileDiffPaths = assistantMsg.turnFileDiffs

@@ -22,6 +22,9 @@ import {
   shouldOfferPartialRunResume,
   shouldAutoResumeAgentError,
   shouldSilentAutoContinue,
+  isAgentRuntimeReferenceError,
+  formatAgentTransportErrorMessage,
+  isAgentBillingOrAuthError,
   AGENT_AUTO_RESUME_SECONDS,
   AGENT_AUTO_RESUME_IMMEDIATE_SECONDS,
   AGENT_RATE_LIMIT_AUTO_RESUME_SECONDS,
@@ -450,6 +453,19 @@ describe("inferAgentRecoveryFlags", () => {
     expect(flags?.agentFailureReason).toBe("Failed to fetch");
   });
 
+  it("preserves explicit API failure instead of masking as missing final answer", () => {
+    const flags = inferAgentRecoveryFlags({
+      role: "assistant",
+      agentFailed: true,
+      agentRecoverable: false,
+      agentFailureReason: "模型 API 余额不足，请充值或更换 API Key 后再试",
+      roundGroups: [{ turn: 2, maxTurns: 40, modelSteps: [], toolIds: [] }],
+      tools: [{ name: "patch_file", running: false, ok: true, summary: "已修改", turn: 2 }],
+    });
+    expect(flags?.agentFailureReason).toBe("模型 API 余额不足，请充值或更换 API Key 后再试");
+    expect(flags?.agentRecoverable).toBe(false);
+  });
+
   it("skips inference after recovery was dismissed for network errors", () => {
     expect(
       inferAgentRecoveryFlags({
@@ -800,6 +816,13 @@ describe("silent continue helpers", () => {
     expect(shouldSilentAutoContinue(buildAgentMaxTurnsExhaustedMessage(20))).toBe(false);
     expect(shouldSilentAutoContinue("Failed to fetch")).toBe(true);
     expect(shouldSilentAutoContinue("运行中断（未生成最终回复）")).toBe(false);
+    expect(isAgentRuntimeReferenceError("runtimeProfile is not defined")).toBe(true);
+    expect(shouldSilentAutoContinue("runtimeProfile is not defined")).toBe(false);
+    expect(formatAgentTransportErrorMessage("请求失败，HTTP 401：Insufficient balance")).toBe(
+      "模型 API 余额不足，请充值或更换 API Key 后再试",
+    );
+    expect(isAgentBillingOrAuthError("CreditsError insufficient balance")).toBe(true);
+    expect(shouldSilentAutoContinue("请求失败，HTTP 401：Insufficient balance")).toBe(false);
   });
 });
 
