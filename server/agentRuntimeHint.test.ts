@@ -32,6 +32,7 @@ describe("agentRuntimeHint", () => {
     const root = makeProject({ dev: "vite", "tauri:dev": "tauri dev" });
     const profile = detectProjectRuntimeProfile(root);
     expect(profile.hasDesktopShell).toBe(true);
+    expect(profile.hasDotNetProject).toBe(false);
     expect(profile.webDevScript).toBe("npm run dev");
     expect(profile.desktopDevScript).toBe("npm run tauri:dev");
   });
@@ -47,6 +48,12 @@ describe("agentRuntimeHint", () => {
   it("returns empty hint for web-only projects", () => {
     const root = makeProject({ dev: "vite" }, false);
     expect(buildRuntimeAwarenessHint(detectProjectRuntimeProfile(root))).toBe("");
+  });
+
+  it("detects dotnet project from csproj at repo root", () => {
+    const root = makeProject({ dev: "vite" }, false);
+    fs.writeFileSync(path.join(root, "App.csproj"), "<Project></Project>", "utf8");
+    expect(detectProjectRuntimeProfile(root).hasDotNetProject).toBe(true);
   });
 
   it("builds runtime awareness hint for desktop shell projects", () => {

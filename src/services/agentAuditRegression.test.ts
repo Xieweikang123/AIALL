@@ -70,7 +70,7 @@ describe("agent audit regression fixtures", () => {
     expect(isScheduledTaskConsultativePrompt(FIXTURE_SCHEDULED_TASK_QUESTION)).toBe(true);
     expect(
       buildConsultativeTopicHints(FIXTURE_SCHEDULED_TASK_QUESTION),
-    ).toContain("CronSchedule");
+    ).toContain("项目栈 Profile");
     expect(shouldNudgeScheduledJobRegistration([FIXTURE_FOO_BACKFILL_JOB], [FIXTURE_BACKFILL_SERVICE])).toBe(
       true,
     );

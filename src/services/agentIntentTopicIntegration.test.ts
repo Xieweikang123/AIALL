@@ -42,7 +42,7 @@ describe("intent + consultative topic integration", () => {
 
   it("AI topic id routes to module even when prompt shape is generic", () => {
     const hints = buildConsultativeTopicHints("随便问问", undefined, "scheduled_task");
-    expect(hints).toContain("CronSchedule");
+    expect(hints).toContain("项目栈 Profile");
     expect(hints).not.toContain("项目概览");
   });
 

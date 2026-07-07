@@ -12,21 +12,20 @@ describe("buildReplyAccuracyHint", () => {
     expect(hint).toContain("read 验证");
     expect(hint).toContain("你之前");
     expect(hint).toContain("运行时入口");
-    expect(hint).toContain("多可见症状");
-    expect(hint).toContain("单点提问");
-    expect(hint).toContain("观感闭环");
     expect(hint).toContain("行号");
-    expect(hint).toContain("全局 element");
-    expect(hint).toContain("工具前禁猜");
     expect(hint).toContain("修复宣称");
-    expect(hint).toContain("定时/调度类");
     expect(hint).toContain("list_dir");
     expect(hint).toContain("外部配置映射");
     expect(hint).toContain("枚举个数优先");
+    expect(hint).toContain("假设验证原则");
+    expect(hint).toContain("全局上下文盘点");
   });
 
-  it("avoids business-specific terms", () => {
+  it("avoids topic-specific playbook terms", () => {
     const hint = buildReplyAccuracyHint();
+    expect(hint).not.toContain("CronSchedule");
+    expect(hint).not.toContain("IJob");
+    expect(hint).not.toContain("v-if/shimmer");
     expect(hint).not.toMatch(/updatedAt|touchTimestamp|switchSession|FilePanel|vibeChat/i);
   });
 });

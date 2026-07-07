@@ -39,6 +39,11 @@ import {
   buildAutomatedBugFixHint,
 } from "../shared/agentExplorationBudget";
 import { detectProjectRuntimeProfile, buildRuntimeAwarenessHint, buildShellAwarenessHint } from "./agentRuntimeHint";
+import {
+  detectProjectStackProfile,
+  formatProjectStackProfileForPrompt,
+  stackProfileHasDotNet,
+} from "./projectStackProfile";
 import { stripQuotedReplyPrefix } from "../src/services/agentContinuation";
 import { AUTO_BUG_FIX_LOGIC_REVIEW_MARKER } from "../shared/autoBugFixPrompt";
 import {
@@ -146,26 +151,19 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "回答请使用中文。",
     "用户可能在消息中附带截图或图片；若已附带，请结合图片内容理解需求并回答，不要声称无法查看图片。",
     "仅当当前用户消息附带图片时才引用截图；续跑确认（如「改吧」「优化」「继续」）且本条无附图时，禁止写「看到截图/如图所示」等读图表述。",
-    "用户附截图询问界面/功能时：先描述截图所见，再判断是否属于本项目（优先查 views/components 或项目惯用 UI 目录），勿默认是外部 IDE/桌面应用。",
-    "截图中有可见文字/图标/按钮时：先 grep 图中可见原文的最短可识别片段（通常 ≥3 字），而非猜 CSS class 名或 SVG 路径；从 grep 命中定位 template/组件。",
-    "用户针对截图局部提问（配色、按钮、某块区域）时：讨论阶段只谈其所指可见范围，勿擅自扩大到整页/全项目样式盘点；若用户明确要求修改，可在该范围内 grep/read 对应组件后 patch_file；用户明确说「整个/整页/全面板」时可按扩大后的范围实施。",
-    "截图中内联 chip/标签/元信息样式（含聚合 badge）：grep 该 chip 的 class 名或 read 承载它的组件 `<style>` 段，勿用全局 theme 变量臆断局部配色。",
     "若系统标注【咨询任务·只读】：用户本条仅为提问/解释，只读探索后自然语言回答，禁止 patch_file / write_file / delete_file。",
     "其余 Build 任务：一旦你判断须改代码才能满足用户（含 bug、实测与描述不符、功能/体验需求），探索完成后同一轮立即 patch_file / write_file，禁止只输出方案并问「需要我执行吗」。",
     "工作流程：先 grep / search_files 快速定位（通常 1 轮），read_file 读关键片段，然后 patch_file / write_file 修改。",
     "Bug / 实测不符：用户报告行为不对、没效果、试了不行等，默认理解为须修复；定位后直接 patch，勿停下来征求确认。",
-    "区分问题类型：「按钮跑别处/位置不对」若控件与选区在空间上分离，优先查 position:fixed/absolute 或 Teleport 浮层定位，勿默认只改 flex；「点击没反应」「不工作」查事件处理/JS 逻辑。同一组件在连续消息中被提及时，每条消息是独立问题，不要因为上一条修了布局就假设这一条也是布局问题。",
     "短追问（如「需要吗」「要不要」「对吗」且未指明新对象）必须承接上一条助手回复的话题作答，勿因会话更早主题偏离；若意图仍不清晰，用一句话澄清，禁止回顾已完成工作清单或擅自改代码。",
     "在已确认须改代码后，探索够了同一轮即 patch/write，勿连续多轮只 read；同一轮可并行 grep/read。",
-    "CSS/SCSS 样式定位：禁止 grep 推测出的全局 layout 选择器；应 read_file 已定位组件文件的 `<style>` 或 scoped 样式段。",
-    "CSS class 重命名时：修改前先 grep 旧 class 名在该文件中的所有出现次数，然后一次性补全所有匹配（如同时改 `.old-class`、`.old-class:hover`、`.old-class:active`、`.old-class-icon` 等）。改完后 grep 验证零残留，确认全部替换完毕再宣布完成。",
     "用户选择执行：当你提供了多个方案/选项让用户选择时，用户选定后必须立即执行该方案（如 patch_file / write_file 落盘），不得自行改变方向或跳过执行去做其他调查。执行完毕并报告结果后，若需进一步排查再提出下一步建议。",
     "Build 模式简短实施指令（如「执行」「继续」「改吧」「优化」）或用户明确提出要改时：若上一条助手回复已列出具体改动步骤、代码片段或目标文件，必须立即 patch_file / write_file，禁止再次征求确认；除非改动涉及大范围重构或明显高风险操作。",
     "当前已在 Build 模式时，禁止再问用户是否切换到 Build；若上一条已列出多项改动，patch 须逐项落实，不得在回复中声称已完成尚未 patch 的项。",
     buildBuildWriteBlockedHint(),
     "Build 模式下用户追问「还能优化吗」「还能继续吗」「继续吧」「接着改」等，均视为执行指令，必须立即 patch_file / write_file，禁止再分析或询问。",
     "修改前必须先 read_file 核对目标文件；patch_file 的 old_string 须从 read 返回原文复制（含缩进），可换更短且唯一的片段。",
-    "用户问「看出啥问题没」「检查一下」「这样对吗」等评价性问题时：必须先 read_file 读取你上次修改的文件，确认代码实际状态后再回答。禁止仅凭截图视觉判断或记忆作答。",
+    "用户问「看出啥问题没」「检查一下」「这样对吗」等评价性问题时：必须先 read_file 读取你上次修改的文件，确认代码实际状态后再回答。禁止仅凭记忆作答。",
     "用户报告「试了不行/没有效果」后，禁止再用同样方案做未经证实的「检查完成✅」；须承认未验证项并给出可执行排查步骤。",
     "给用户的测试步骤须与项目实际运行环境一致（从 package.json scripts 判断 Web dev vs 桌面壳）；禁止混用。",
     "解释项目时：从 package.json、README、入口文件等关键文件入手，不要臆测。",
@@ -183,7 +181,6 @@ function buildSystemPrompt(projectRoot: string, openFilePath?: string, model?: s
     "run_command 可在项目目录执行 shell 命令（优先 package.json 中的 npm scripts；Windows 为 PowerShell，用 `;` 链式、勿用 head/&&），超时默认 30 秒，长时间命令请设置 timeout_ms；不要执行危险命令。",
     "联网搜索：当需要最新信息、外部文档、API 用法时，使用 web_search 搜索；使用 web_extract 抓取指定链接内容。搜索结果可能较多，优先关注前 3 条结果，避免大量内容占用上下文。",
     "如果系统提示你上一次回复被截断，请从截断处继续输出，不要重复已输出的内容。",
-    "附截图时：首轮输出截图描述后，后续轮次禁止再次描述同一张截图。若需追问用户意见，应在代码探索后给出具体方案对比，而非仅提问。",
     `项目根目录：${projectRoot}`,
   ];
   if (model?.trim()) {
@@ -293,6 +290,7 @@ export interface AgentContextBuildResult {
   exploreKnowledgeContextBlock: string;
   explorationArchiveBlock: string;
   runtimeAwarenessBlock: string;
+  stackProfileBlock: string;
   openFile: { path: string; relative: string } | null;
   openFileSnippet: string;
   injectedKeyFilePaths: Set<string> | undefined;
@@ -454,8 +452,10 @@ export async function buildAgentContext(
       : "";
 
   const runtimeProfile = detectProjectRuntimeProfile(projectRoot);
+  const stackProfile = detectProjectStackProfile(projectRoot);
   const runtimeAwarenessBlock =
     buildRuntimeAwarenessHint(runtimeProfile) + buildShellAwarenessHint(process.platform);
+  const stackProfileBlock = formatProjectStackProfileForPrompt(stackProfile);
 
   const systemPromptCore = consultativeUiAppearanceRun
     ? [
@@ -499,8 +499,8 @@ export async function buildAgentContext(
             });
 
   const systemPrompt = consultativeUiAppearanceRun
-    ? `${systemPromptCore}\n${runtimeAwarenessBlock}`
-    : `${systemPromptCore}${projectContextBlock}${gitSnapshotBlock}${agentsGuideBlock}${projectSkillsBlock}${projectMemoryBlock}${projectKnowledgeBlock}${exploreKnowledgeContextBlock}${explorationArchiveBlock}${runtimeAwarenessBlock}${
+    ? `${systemPromptCore}\n${stackProfileBlock}${runtimeAwarenessBlock}`
+    : `${systemPromptCore}${projectContextBlock}${gitSnapshotBlock}${agentsGuideBlock}${projectSkillsBlock}${projectMemoryBlock}${projectKnowledgeBlock}${exploreKnowledgeContextBlock}${explorationArchiveBlock}${stackProfileBlock}${runtimeAwarenessBlock}${
         runPolicy.automatedBugFixRun ? buildAutomatedBugFixHint(
           runtimeProfile.verifyScripts?.length
             ? runtimeProfile.verifyScripts.join("; ")
@@ -524,6 +524,7 @@ export async function buildAgentContext(
     exploreKnowledgeContextBlock,
     explorationArchiveBlock,
     runtimeAwarenessBlock,
+    stackProfileBlock,
     openFile,
     openFileSnippet,
     injectedKeyFilePaths,

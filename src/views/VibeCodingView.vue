@@ -3218,8 +3218,11 @@ function findExchangeBounds(index: number): { start: number; end: number } {
 
   if (msg.role === "user") {
     let end = index;
-    if (index + 1 < chatMessages.value.length && chatMessages.value[index + 1].role === "assistant") {
-      end = index + 1;
+    while (
+      end + 1 < chatMessages.value.length
+      && chatMessages.value[end + 1]?.role === "assistant"
+    ) {
+      end += 1;
     }
     return { start: index, end };
   }
@@ -3414,18 +3417,28 @@ function handleAiOptionSelect(
   void runAgentTurn(userText, runOptions);
 }
 
+function restoreComposerPayload(
+  composer: InstanceType<typeof ChatComposerEditor>,
+  payload: ReturnType<InstanceType<typeof ChatComposerEditor>["extractPayload"]>,
+) {
+  const text = payload.text.trim();
+  composer.setPlainText(text);
+  for (const url of payload.imageDataUrls) {
+    if (url) composer.insertImage(url);
+  }
+  for (const ref of payload.refs) {
+    if (ref.path) composer.insertFileRef(ref);
+  }
+  for (const drop of payload.drops) {
+    composer.insertDroppedFile(drop);
+  }
+}
+
 async function sendChat() {
   if (!canSendChat.value) return;
   dismissAgentSuggestions();
   const composer = composerRef.value;
   if (!composer) return;
-
-  // 无活跃会话时仅在发送瞬间创建 chat-store 会话，不打字建会话
-  let sendSessionId = activeSessionId.value.trim();
-  if (!sendSessionId) {
-    sendSessionId = ensureSessionForSend();
-    if (!sendSessionId) return;
-  }
 
   const payload = composer.extractPayload();
   mentionOpen.value = false;
@@ -3451,6 +3464,7 @@ async function sendChat() {
     quotedMessages.value = [];
   }
 
+  let composerCleared = false;
   try {
     const refSection =
       chatMode.value === "build" &&
@@ -3476,6 +3490,13 @@ async function sendChat() {
       fullPrompt = `${fullPrompt}\n\n## 📎 参考文件\n\n${sections.join("\n\n")}`;
     }
 
+    // 无活跃会话时仅在发送瞬间创建 chat-store 会话，不打字建会话
+    let sendSessionId = activeSessionId.value.trim();
+    if (!sendSessionId) {
+      sendSessionId = ensureSessionForSend();
+      if (!sendSessionId) return;
+    }
+
     if (activeSessionId.value !== sendSessionId) {
       chatError.value = "会话已切换，发送已取消";
       return;
@@ -3487,6 +3508,9 @@ async function sendChat() {
       userBubbleContent: bubbleText,
       sessionId: sendSessionId,
     };
+
+    composer.clear();
+    composerCleared = true;
 
     let started = false;
     if (chatSending.value) {
@@ -3504,10 +3528,13 @@ async function sendChat() {
       started = await runAgentTurn(fullPrompt, runOptions);
     }
 
-    if (started) {
-      composer.clear();
+    if (!started) {
+      restoreComposerPayload(composer, payload);
     }
   } catch (error) {
+    if (composerCleared) {
+      restoreComposerPayload(composer, payload);
+    }
     chatError.value = error instanceof Error ? error.message : "发送失败";
   }
 }

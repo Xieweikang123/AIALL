@@ -32,6 +32,7 @@ import { detectUserNegation } from "../src/services/agentContinuation";
 import { buildDoneData } from "./agentClassifier";
 import { shouldForcePatchAfterAnchorLocated } from "./agentExploreGuard";
 import type { ChatCompletionMessage } from "./aiForward";
+import { detectProjectRuntimeProfile } from "./agentRuntimeHint";
 
 /**
  * Run the turn preflight phase — safety checks, abort handling, nudges,
@@ -239,7 +240,11 @@ export function runTurnPreflight(
   // ── Block 6: File breadth nudge ──
   if (!ctx.fileBreadthNudgeSent && ctx.exploreFilesRead.size >= MAX_UNIQUE_READ_FILES_BEFORE_NUDGE) {
     const files = Array.from(ctx.exploreFilesRead);
-    ctx.messages.push({ role: "system", content: buildFileBreadthNudge(files, mode) });
+    const exploreRuntime = detectProjectRuntimeProfile(cfg.projectRoot);
+    ctx.messages.push({
+      role: "system",
+      content: buildFileBreadthNudge(files, mode, exploreRuntime),
+    });
     ctx.fileBreadthNudgeSent = true;
   }
 

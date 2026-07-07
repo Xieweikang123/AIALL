@@ -9,6 +9,24 @@ export const SPECULATIVE_CODE_ANALYSIS_RE =
 const SHALLOW_STATE_INDEPENDENCE_RE =
   /(?:两个独立|互不干扰|不会触动|只改\s*\w+|存储在不同)/;
 
+/** State/logic layer vs view/presentation layer — stack-agnostic path shapes. */
+const STATE_LAYER_PATH_RE =
+  /(?:^|\/)(?:composables|hooks|stores|state|services|models|lib|domain)(?:\/|$)/i;
+const VIEW_LAYER_PATH_RE =
+  /(?:^|\/)(?:views|pages|components|screens|ui|app|widgets)(?:\/|$)/i;
+
+function normalizeTracePath(filePath: string): string {
+  return filePath.replace(/\\/g, "/");
+}
+
+function pathInStateLayer(filePath: string): boolean {
+  return STATE_LAYER_PATH_RE.test(normalizeTracePath(filePath));
+}
+
+function pathInViewLayer(filePath: string): boolean {
+  return VIEW_LAYER_PATH_RE.test(normalizeTracePath(filePath));
+}
+
 const CITED_FILE_PATH_RE =
   /[`("']?((?:[\w.-]+\/)+[\w.-]+\.(?:vue|tsx?|jsx?|ts|cs|scss|css))[`)"']?/gi;
 
@@ -81,12 +99,12 @@ export function isShallowStateIndependenceClaim(
   if (/watch|collapse|expand/i.test(grepBlob)) return false;
 
   if (consultativeReadPaths.length >= 2) {
-    const hasComposable = consultativeReadPaths.some((p) => /composables\//i.test(p));
-    const hasView = consultativeReadPaths.some((p) => /views\//i.test(p));
-    if (hasComposable && hasView) return false;
+    const hasStateLayer = consultativeReadPaths.some(pathInStateLayer);
+    const hasViewLayer = consultativeReadPaths.some(pathInViewLayer);
+    if (hasStateLayer && hasViewLayer) return false;
   }
 
-  if (consultativeReadPaths.length === 1 && /views\//i.test(consultativeReadPaths[0]!)) {
+  if (consultativeReadPaths.length === 1 && pathInViewLayer(consultativeReadPaths[0]!)) {
     return true;
   }
 

@@ -113,12 +113,34 @@ export function buildAutomatedBugFixHint(verifyScript?: string, includeLogicRevi
 /** Identical read_file slice requests allowed after the first read before hard-blocking. */
 export const MAX_READ_SLICE_REPEATS = 2;
 
-export function buildExploreBudgetNudge(consecutiveExploreTurns: number, mode?: string): string {
+/** Subset of runtime profile used for interaction-debug nudges. */
+export type ExploreRuntimeHintProfile = {
+  webDevScript?: string;
+  hasDesktopShell?: boolean;
+};
+
+function buildInteractionFailureDebugHint(runtime?: ExploreRuntimeHintProfile): string {
+  if (!runtime) return "";
+  if (runtime.hasDesktopShell) {
+    return "\n\n💡 桌面壳交互异常：请用桌面 dev script 复现，并查看终端/WebView 控制台与 IPC 桥日志。";
+  }
+  if (runtime.webDevScript) {
+    return "\n\n💡 浏览器前端交互异常（点击没反应等）：可请用户在 DevTools Console 查看报错。";
+  }
+  return "\n\n💡 运行时交互异常：查看进程 stderr、服务日志或最近一次改动的副作用。";
+}
+
+export function buildExploreBudgetNudge(
+  consecutiveExploreTurns: number,
+  mode?: string,
+  runtime?: ExploreRuntimeHintProfile,
+): string {
+  const interactionHint = buildInteractionFailureDebugHint(runtime);
   const actionHint = mode === "plan"
     ? "请立即输出结构化修改方案（文件清单 + 代码块 + 改动说明），不要再继续读文件。"
     : mode === "build"
     ? "下一轮必须调用 patch_file 或 write_file；若目标文件已 read 过，直接改，不要再 grep/read。\n若仍缺路径：最多 1 次 grep/search，然后立即修改。\n禁止重复 read 同一文件相同片段；禁止用英文写长分析。\n先用 1–2 句中文写根因假设，然后直接改代码。\n\n⚠️ Build 模式下分析不是产出，patch 才是产出。"
-    : "下一轮必须调用 patch_file 或 write_file；若目标文件已 read 过，直接改，不要再 grep/read。\n若仍缺路径：最多 1 次 grep/search，然后立即修改。\n禁止重复 read 同一文件相同片段；禁止用英文写长分析。\n先用 2–4 句中文写可见进度（根因假设 + 下一步），再调用工具。\n\n💡 提示：如果问题表现为「点击没反应」「按钮不工作」等前端交互异常，优先请用户打开浏览器 DevTools Console 查看报错信息——这比读代码更快定位根因。";
+    : `下一轮必须调用 patch_file 或 write_file；若目标文件已 read 过，直接改，不要再 grep/read。\n若仍缺路径：最多 1 次 grep/search，然后立即修改。\n禁止重复 read 同一文件相同片段；禁止用英文写长分析。\n先用 2–4 句中文写可见进度（根因假设 + 下一步），再调用工具。${interactionHint}`;
   return [
     `【系统提示】已连续 ${consecutiveExploreTurns} 轮仅探索、尚未修改。`,
     actionHint,
@@ -620,11 +642,16 @@ export function buildSameIssueFollowUpForceSummaryNudge(totalExploreTurns: numbe
   ].join("");
 }
 
-export function buildFileBreadthNudge(uniqueReadFiles: string[], mode?: string): string {
+export function buildFileBreadthNudge(
+  uniqueReadFiles: string[],
+  mode?: string,
+  runtime?: ExploreRuntimeHintProfile,
+): string {
   const fileList = uniqueReadFiles.slice(-4).join("、");
+  const interactionHint = buildInteractionFailureDebugHint(runtime);
   const actionHint = mode === "plan"
     ? "请基于以上已读文件立即输出结构化方案，不要再读新文件。"
-    : "请基于以上已读文件确定下一步操作。如果需要修改，请直接 patch；如果还需要信息，请在已读文件中搜索而非打开新文件。\n\n💡 如果任务是一类前端交互问题（点击没反应 / 样式异常），优先怀疑 JS 运行时错误（Console 报错）或最近一次改动引入的副作用，而非大范围探索代码。";
+    : `请基于以上已读文件确定下一步操作。如果需要修改，请直接 patch；如果还需要信息，请在已读文件中搜索而非打开新文件。${interactionHint}`;
   return [
     `【系统提示】已探索 ${uniqueReadFiles.length} 个不同文件（${fileList} 等）。`,
     "请缩小范围，聚焦在已读文件中定位问题。",

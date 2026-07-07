@@ -280,7 +280,7 @@ describe("buildBuildWriteBlockedHint", () => {
 describe("buildUiDefectBuildHint", () => {
   it("requires patch and mentions overlay positioning", () => {
     expect(buildUiDefectBuildHint()).toContain("patch_file");
-    expect(buildUiDefectBuildHint()).toContain("Teleport");
+    expect(buildUiDefectBuildHint()).toContain("portal");
     expect(buildUiDefectBuildHint()).toContain("getSelection");
   });
 });

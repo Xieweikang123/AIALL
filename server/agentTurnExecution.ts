@@ -28,6 +28,7 @@ import {
 } from "../shared/agentExplorationBudget";
 import { buildPatchAnchorLocatedNudge, shouldNudgeAlternateUiPatchStrategy } from "./agentExploreGuard";
 import { buildScheduledJobRegistrationNudge, shouldNudgeScheduledJobRegistration } from "../src/services/agentConsultativeTopics";
+import { detectProjectStackProfile, stackProfileHasDotNet } from "./projectStackProfile";
 import { extractJobClassNamesFromReadPaths } from "../src/services/agentStructuralPatterns";
 import { detectProjectRuntimeProfile } from "./agentRuntimeHint";
 import { buildPostPatchVerifyNudge } from "../shared/agentExplorationBudget";
@@ -529,7 +530,8 @@ export async function runTurnExecution(
   ) {
     const readPaths = ctx.toolGuard.consultativeReadPaths;
     const grepPatterns = ctx.toolGuard.grepPatterns ?? [];
-    if (shouldNudgeScheduledJobRegistration(readPaths, grepPatterns)) {
+    const hasDotNetProject = stackProfileHasDotNet(detectProjectStackProfile(projectRoot));
+    if (shouldNudgeScheduledJobRegistration(readPaths, grepPatterns, hasDotNetProject)) {
       const jobNames = extractJobClassNamesFromReadPaths(readPaths);
       if (jobNames.length > 0) {
         ctx.messages.push({
@@ -684,9 +686,10 @@ export async function runTurnExecution(
     ctx.consultativeForceAnswerPending = true;
     ctx.consecutiveExploreTurns = 0;
   } else if (!isReadOnlyAgent && !readOnlyBuildRun && !isPlanExplore && ctx.consecutiveExploreTurns >= exploreTurnBudget) {
+    const exploreRuntime = detectProjectRuntimeProfile(projectRoot);
     ctx.messages.push({
       role: "system",
-      content: buildExploreBudgetNudge(ctx.consecutiveExploreTurns, mode),
+      content: buildExploreBudgetNudge(ctx.consecutiveExploreTurns, mode, exploreRuntime),
     });
     ctx.consecutiveExploreTurns = 0;
   }

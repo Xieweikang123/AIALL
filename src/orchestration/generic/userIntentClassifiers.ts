@@ -130,7 +130,7 @@ const ERROR_QUOTE_SHAPE_RE =
   /^(?:错误|警告|提示|通知|失败|已被拒绝|不可用|权限|拒绝|未授权)/;
 
 const STEP_OR_API_REFERENCE_RE =
-  /(?:读取|read|grep|opening|Teleport|target|anchor|定位|浮层|fixed|patch|工具|这一步|这步|opening tag)/i;
+  /(?:读取|read|grep|opening|portal|overlay|target|anchor|定位|浮层|fixed|patch|工具|这一步|这步|opening tag)/i;
 
 export function isAgentStepClarificationPrompt(prompt: string): boolean {
   const text = prompt.trim();
@@ -256,7 +256,7 @@ export function historySuggestsQuotePositionFix(history?: UserIntentHistoryMessa
     .map((m) => m.content)
     .join("\n");
   if (!text.trim()) return false;
-  const hasPositionAnalysis = /定位|坐标|位置|浮层|fixed|absolute|Teleport|锚点|偏移/i.test(text);
+  const hasPositionAnalysis = /定位|坐标|位置|浮层|fixed|absolute|portal|锚点|偏移/i.test(text);
   const hasAnalysisConclusion = /根因|原因|问题在于|分析|诊断|排查/i.test(text);
   const hasFixProposal = /修复方案|修改方案|建议|patch|改法/i.test(text);
   return hasPositionAnalysis && (hasAnalysisConclusion || hasFixProposal);

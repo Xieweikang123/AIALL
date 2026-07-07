@@ -4,6 +4,8 @@ import path from "node:path";
 export type ProjectRuntimeProfile = {
   /** Project contains a desktop shell directory (e.g. src-tauri). */
   hasDesktopShell: boolean;
+  /** Project root contains at least one .csproj (ASP.NET / Quartz-style backends). */
+  hasDotNetProject: boolean;
   webDevScript?: string;
   desktopDevScript?: string;
   /** First npm verify script (backward compat for single-command hints). */
@@ -34,9 +36,18 @@ function resolveVerifyScript(scripts: Record<string, string>): string | undefine
   return resolveVerifyScripts(scripts)[0];
 }
 
+function detectHasDotNetProject(projectRoot: string): boolean {
+  try {
+    return fs.readdirSync(projectRoot).some((name) => name.endsWith(".csproj"));
+  } catch {
+    return false;
+  }
+}
+
 /** Structural detection from package.json scripts + desktop shell folder — topic-agnostic. */
 export function detectProjectRuntimeProfile(projectRoot: string): ProjectRuntimeProfile {
   const hasDesktopShell = fs.existsSync(path.join(projectRoot, "src-tauri"));
+  const hasDotNetProject = detectHasDotNetProject(projectRoot);
   let webDevScript: string | undefined;
   let desktopDevScript: string | undefined;
   let verifyScript: string | undefined;
@@ -61,7 +72,7 @@ export function detectProjectRuntimeProfile(projectRoot: string): ProjectRuntime
   } catch {
     /* ignore missing or invalid package.json */
   }
-  return { hasDesktopShell, webDevScript, desktopDevScript, verifyScript, verifyScripts };
+  return { hasDesktopShell, hasDotNetProject, webDevScript, desktopDevScript, verifyScript, verifyScripts };
 }
 
 /** Shell syntax for run_command — Windows uses PowerShell, not bash. */

@@ -23,9 +23,11 @@ describe("agentConsultativeTopics", () => {
     expect(isScheduledTaskConsultativePrompt("帮我把定时任务改成每小时")).toBe(false);
   });
 
-  it("buildConsultativeTopicHints injects scheduled hint when active", () => {
+  it("buildConsultativeTopicHints injects scheduled trace hint when active", () => {
     const hints = buildConsultativeTopicHints(FIXTURE_SCHEDULED_TASK_QUESTION);
-    expect(hints).toContain("CronSchedule");
+    expect(hints).toContain("定时/调度类");
+    expect(hints).toContain("项目栈 Profile");
+    expect(hints).not.toContain("CronSchedule");
     expect(hints).not.toMatch(/EnergyRecord|gw_energy/i);
   });
 

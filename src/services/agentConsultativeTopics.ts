@@ -34,6 +34,7 @@ import type { UserIntentHistoryMessage } from "../orchestration/agentIntentTypes
 import { buildConsultativeAccuracyTraceHint } from "./consultativeAccuracyTrace";
 import { buildBehaviorPurposeTraceHint } from "./consultativeBehaviorTrace";
 import { buildConsultativeUiBehaviorTraceHint } from "./consultativeUiBehaviorTrace";
+
 export interface ConsultativeTopicModule {
   id: ConsultativeTopicId;
   isActive(prompt: string, history?: UserIntentHistoryMessage[]): boolean;
@@ -218,9 +219,9 @@ export function buildScheduledTaskConsultativeHint(): string {
   return [
     "",
     "【定时/调度类】用户问的是有无定时任务、何时触发、执行频率等。",
-    "read 到 IJob / Job 实现后，须 grep Job 类名或 Schedule/Trigger/CronSchedule/TriggerBuilder 找注册处并 read，再作答。",
+    "read 到 job/task 实现后，须继续 trace 到调度注册/触发配置处并 read；符号与入口路径依上方【项目栈 Profile】与 manifest 自行选用，勿凭记忆臆测。",
     "禁止只 trace Execute→Service 即收工；答案须含触发时机/频率（代码中有则写明）。",
-    "探索时避免连续 list_dir 逐级下探超过 2 层，优先 grep/search_files 定位 Tasks 或调度注册文件。",
+    "探索时避免连续 list_dir 逐级下探超过 2 层，优先 grep/search_files 定位调度注册文件。",
   ].join("\n");
 }
 
@@ -257,7 +258,7 @@ export function buildScheduledJobRegistrationNudge(jobClassNames: string[]): str
   const listed = jobClassNames.slice(0, 2).join("、");
   return [
     `【系统提示】你已 read Job 类（${listed}），但尚未 read/grep 调度注册处。`,
-    `下一轮 grep \`${jobClassNames[0]}\` 或 CronSchedule/TriggerBuilder/ScheduleJob，read Startup 或调度配置文件。`,
+    `下一轮 grep \`${jobClassNames[0]}\` 并 trace 到调度注册/触发配置（符号依【项目栈 Profile】）；read 注册入口后再作答。`,
     "作答须含触发时机/频率（如 cron、启动即跑）；禁止只写 Execute→Service 业务逻辑即结束。",
   ].join("\n");
 }

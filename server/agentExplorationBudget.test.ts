@@ -54,6 +54,17 @@ describe("agentExplorationBudget", () => {
     expect(buildExploreBudgetNudge(3, "plan")).not.toContain("项目理解报告");
   });
 
+  it("gates interaction debug hint by runtime profile", () => {
+    expect(buildExploreBudgetNudge(2, undefined, { webDevScript: "npm run dev" })).toContain(
+      "DevTools Console",
+    );
+    expect(buildExploreBudgetNudge(2, undefined, { hasDesktopShell: true })).toContain("IPC");
+    expect(buildExploreBudgetNudge(2, undefined, { hasDesktopShell: true })).not.toContain(
+      "DevTools Console",
+    );
+    expect(buildExploreBudgetNudge(2, "build")).not.toContain("DevTools Console");
+  });
+
   it("builds plan explore soft and segment cap nudges", () => {
     expect(buildPlanListDirOnlySoftNudge(3)).toContain("[PLAN]");
     expect(buildPlanListDirOnlySoftNudge(3)).not.toContain("移除所有工具");

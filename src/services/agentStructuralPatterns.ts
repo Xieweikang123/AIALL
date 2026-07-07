@@ -13,7 +13,7 @@ export const DEFINITION_VALUE_TOKEN_RE =
 
 /** Scheduled/cron job topic in user message (not implement intent). */
 export const SCHEDULED_TASK_TOPIC_RE =
-  /(?:有没有|是否有|有无).{0,32}(?:定时|调度|cron|Cron|周期)|(?:定时|调度).{0,24}(?:任务|job|Job|触发)|\bcron\b|CronSchedule|何时执行|什么时候跑|几点执行|执行频率|多久执行一次/i;
+  /(?:有没有|是否有|有无).{0,32}(?:定时|调度|cron|Cron|周期)|(?:定时|调度).{0,24}(?:任务|job|Job|触发)|\bcron\b|何时执行|什么时候跑|几点执行|执行频率|多久执行一次/i;
 
 /** Whole-repo / app purpose overview (not a single symbol). */
 export const PROJECT_OVERVIEW_TOPIC_RE =
@@ -34,8 +34,21 @@ export function isGitWorkingTreeTopicPrompt(prompt: string): boolean {
 
 export const JOB_FILE_PATH_RE = /([^/\\]+Job)\.cs$/i;
 
-export const SCHEDULE_REGISTRATION_RE =
-  /CronSchedule|TriggerBuilder|ScheduleJob|WithCronSchedule|IScheduler|IJobDetail|AddJob|Schedule.*Job/i;
+/** Stack-agnostic schedule registration markers. */
+export const GENERIC_SCHEDULE_REGISTRATION_RE =
+  /ScheduleJob|AddJob|Schedule.*Job|cron\.schedule|node-cron|@Cron|registerSchedule|setInterval/i;
+
+/** .NET / Quartz registration markers — use only when hasDotNetProject. */
+export const DOTNET_SCHEDULE_REGISTRATION_RE =
+  /CronSchedule|TriggerBuilder|WithCronSchedule|IScheduler|IJobDetail|Startup/i;
+
+export function scheduleRegistrationPatternMatches(
+  grepBlob: string,
+  hasDotNetProject = false,
+): boolean {
+  if (GENERIC_SCHEDULE_REGISTRATION_RE.test(grepBlob)) return true;
+  return hasDotNetProject && DOTNET_SCHEDULE_REGISTRATION_RE.test(grepBlob);
+}
 
 /** Assistant reply cited a code location or style evidence (generic). */
 export function assistantProvidedCodeLocationEvidence(text: string): boolean {
@@ -59,11 +72,12 @@ export function extractJobClassNamesFromReadPaths(readPaths: string[]): string[]
 export function hasScheduleRegistrationEvidence(
   readPaths: string[],
   grepPatterns: string[],
+  hasDotNetProject = false,
 ): boolean {
   const normalizedReads = readPaths.map((p) => p.replace(/\\/g, "/"));
-  if (normalizedReads.some((p) => /startup/i.test(p))) return true;
+  if (hasDotNetProject && normalizedReads.some((p) => /startup/i.test(p))) return true;
   const grepBlob = grepPatterns.join("\n");
-  if (SCHEDULE_REGISTRATION_RE.test(grepBlob)) return true;
+  if (scheduleRegistrationPatternMatches(grepBlob, hasDotNetProject)) return true;
   const jobNames = extractJobClassNamesFromReadPaths(readPaths);
   if (jobNames.some((name) => grepPatterns.some((pattern) => pattern.includes(name)))) return true;
   return false;
@@ -72,8 +86,9 @@ export function hasScheduleRegistrationEvidence(
 export function shouldNudgeScheduledJobRegistration(
   readPaths: string[],
   grepPatterns: string[],
+  hasDotNetProject = false,
 ): boolean {
   const jobNames = extractJobClassNamesFromReadPaths(readPaths);
   if (!jobNames.length) return false;
-  return !hasScheduleRegistrationEvidence(readPaths, grepPatterns);
+  return !hasScheduleRegistrationEvidence(readPaths, grepPatterns, hasDotNetProject);
 }

@@ -137,12 +137,19 @@ export function buildWriteToolBlockedMessage(reason: WriteToolBlockReason): stri
 export function buildUiDefectBuildHint(): string {
   return [
     "",
-    "【UI 缺陷·须修复】用户用截图反馈控件/布局异常。",
+    "【UI 缺陷·须修复】用户用截图反馈控件/布局/交互异常。",
     "须定位后 patch_file/write_file；禁止只分析并反问「要不要修」。",
-    "控件与选区/焦点在空间上分离时优先查浮层定位（fixed/absolute/Teleport），勿查底栏 flex。",
-    "排查 mouseup 与 getSelection 时序：选区在 mouseup 时可能尚未就绪，关注异步回调链路。",
-    "外框可见但图标/文字空白：read 全局样式表中同标签选择器（如 button { padding }）是否与 compact 控件 width/height 冲突；须在组件内显式 padding:0 + box-sizing:border-box，勿重复只调 stroke/currentColor。",
-    "说明控件含义或修复可见性时须附带 v-if/v-show 等显示前提；用户截图 tab/模式与当前讨论不一致时先核对条件。",
+    "诊断清单（按序核对，勿预设修法）：",
+    "1. 读图：描述所见；判断是否本项目 UI（查 AGENTS.md / 已注入项目结构中的 UI 源码目录），勿默认外部 IDE。",
+    "2. 定位：grep 图中可见原文最短片段（≥3 字）定位 template/组件，勿先猜 CSS class 或 SVG 路径。",
+    "3. 范围：局部提问只改所指区域；用户明确「整页/全面板」时再扩大。",
+    "4. 布局：控件与选区/焦点空间分离 → 查 fixed/absolute/portal 浮层；同容器拥挤 → 查 flex/overflow/gap/min-width。",
+    "5. 交互：「点击没反应/不工作」→ 查事件 handler/绑定；注意 mouseup 与 getSelection 时序与异步回调。",
+    "6. 样式：read 已定位组件 scoped `<style>`；chip/badge 查承载组件局部样式，勿臆断全局 theme。",
+    "7. 可见性：外框有内层空 → 查 v-if/shimmer/显示条件与全局 element 选择器是否冲突 compact 尺寸。",
+    "8. class 重命名：grep 旧名全部出现再一次性 patch，改完 grep 验证零残留。",
+    "同一组件在连续消息中每条独立排查，勿因上一条修了布局假设本条同因。",
+    "附截图时首轮描述后，后续轮禁止重复描述同一张截图。",
   ].join("\n");
 }
 
