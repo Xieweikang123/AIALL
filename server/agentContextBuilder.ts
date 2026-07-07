@@ -394,12 +394,12 @@ export async function buildAgentContext(
     projectContextBlock = `\n\n项目根：${projectRoot}（方案执行阶段，已跳过全项目扫描）`;
     projectContextBlock += buildExecutePlanSystemHint(targetManifest, runProfile.userIntent);
   } else if (consultativeUiAppearanceRun) {
-    projectContextBlock = formatMinimalProjectContextBlock(projectRoot, stackProfile);
+    projectContextBlock = formatMinimalProjectContextBlock(projectRoot, stackProfile, []);
   } else {
     projectContextBlock = formatMinimalProjectContextBlock(
       projectRoot,
       stackProfile,
-      routeEntries.length ? routeEntries : undefined,
+      routeEntries,
     );
   }
 

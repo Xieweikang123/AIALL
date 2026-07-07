@@ -47,11 +47,22 @@ export function extractVuePageDescription(vueSource: string, maxLen = 220): stri
 function resolveComponentFilePath(projectRoot: string, componentRef: string): string | null {
   const normalized = componentRef.replace(/\\/g, "/");
   if (normalized.includes("/")) {
-    const rel = normalized.startsWith("src/") ? normalized : `src/${normalized}`;
-    if (rel.endsWith(".vue") || rel.endsWith(".tsx") || rel.endsWith(".jsx")) {
-      return path.join(projectRoot, rel);
+    let rel: string;
+    if (normalized.startsWith("src/")) {
+      rel = normalized;
+    } else if (normalized.startsWith("../")) {
+      rel = `src/router/${normalized}`;
+    } else {
+      rel = `src/${normalized}`;
     }
-    return path.join(projectRoot, `${rel}.vue`);
+    const base = path.join(projectRoot, rel);
+    const resolved = fs.existsSync(base) ? base : path.normalize(base);
+    if (fs.existsSync(resolved)) return resolved;
+    if (rel.endsWith(".vue") || rel.endsWith(".tsx") || rel.endsWith(".jsx")) {
+      return fs.existsSync(resolved) ? resolved : null;
+    }
+    const withVue = path.join(projectRoot, `${rel}.vue`);
+    return fs.existsSync(withVue) ? withVue : null;
   }
   const candidates = [
     path.join(projectRoot, "src", "views", `${componentRef}.vue`),

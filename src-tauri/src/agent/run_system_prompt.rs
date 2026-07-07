@@ -35,16 +35,9 @@ pub async fn build_agent_system_prompt(
     false
   };
 
-  let runtime_hint_text = runtime_hint::build_runtime_awareness_hint(params.runtime_profile);
-  let shell_hint = runtime_hint::build_shell_awareness_hint();
-
   let mut system_prompt = format!("项目根：{}\n", params.request.project_path);
   system_prompt.push_str(&format!("模式：{}\n", params.mode));
   system_prompt.push_str(&format!("可用工具：{}\n", params.tool_names));
-  if !runtime_hint_text.is_empty() {
-    system_prompt.push_str(&format!("{runtime_hint_text}\n"));
-  }
-  system_prompt.push_str(&format!("{shell_hint}\n\n"));
   system_prompt.push_str(&format!(
     "{}\n",
     crate::agent::build_model_identity_hint(&params.request.model)
@@ -108,13 +101,30 @@ pub async fn build_agent_system_prompt(
     system_prompt.push('\n');
   }
 
-  let context_blocks = context::build_context_blocks(context::ContextBuildInput {
+  let mut open_file_rel = None;
+  if !params.run_policy.consultative_ui_appearance_run {
+    if let Some(open_path) = params
+      .request
+      .open_file_path
+      .as_deref()
+      .filter(|p| !p.trim().is_empty())
+    {
+      if let Some((relative, block)) =
+        context::build_open_file_prompt_block(&params.request.project_path, open_path).await
+      {
+        open_file_rel = Some(relative);
+        system_prompt.push_str(&block);
+      }
+    }
+  }
+
+  let mut context_blocks = context::build_context_blocks(context::ContextBuildInput {
     project_path: &params.request.project_path,
     task_context: Some(params.effective_task_prompt),
-    open_file_path: params.request.open_file_path.as_deref(),
     mode: params.mode,
     is_plan_explore: params.mode == "plan",
     is_execute_plan: params.is_execute_plan,
+    consultative_ui_appearance_run: params.run_policy.consultative_ui_appearance_run,
     target_files: params
       .request
       .run_profile
@@ -122,7 +132,17 @@ pub async fn build_agent_system_prompt(
       .and_then(|p| p.target_files.as_deref()),
   })
   .await;
+  context_blocks.open_file_rel = open_file_rel;
   system_prompt.push_str(&context_blocks.system_suffix);
+
+  let runtime_hint_text = runtime_hint::build_runtime_awareness_hint(params.runtime_profile);
+  let shell_hint = runtime_hint::build_shell_awareness_hint();
+  if !runtime_hint_text.is_empty() {
+    system_prompt.push_str(&format!("\n{runtime_hint_text}"));
+  }
+  if !shell_hint.is_empty() {
+    system_prompt.push_str(&format!("\n{shell_hint}"));
+  }
 
   if params.run_policy.automated_bug_fix_run {
     let verify_script = if params.runtime_profile.verify_scripts.is_empty() {

@@ -5,14 +5,16 @@ use std::path::{Path, PathBuf};
 
 mod health_scan;
 mod memory_usage;
+mod route_context;
 mod stack_profile;
 mod verify_run;
 
 pub use health_scan::project_health_scan;
 pub use memory_usage::memory_usage_track_command;
+pub use route_context::build_top_level_route_entries;
 pub use stack_profile::{
-  detect_project_stack_profile, format_minimal_project_context_block, MinimalProjectContextRoute,
-  ProjectStackProfile,
+  build_minimal_project_context_payload, detect_project_stack_profile,
+  format_minimal_project_context_block, MinimalProjectContextRoute, ProjectStackProfile,
 };
 pub use verify_run::project_verify_run;
 

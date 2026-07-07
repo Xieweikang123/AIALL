@@ -177,43 +177,38 @@ export type MinimalProjectContextRoute = {
 
 export type MinimalProjectContextPayload = {
   root: string;
-  languages?: string[];
-  runtimes?: string[];
-  frameworks?: string[];
-  capabilities?: string[];
-  entryHints?: string[];
-  routes?: MinimalProjectContextRoute[];
+  languages: string[];
+  runtimes: string[];
+  frameworks: string[];
+  capabilities: string[];
+  entryHints: string[];
+  routes: MinimalProjectContextRoute[];
 };
 
-function compactPayload<T extends Record<string, unknown>>(payload: T): T {
-  const out = { ...payload };
-  for (const key of Object.keys(out)) {
-    const value = out[key];
-    if (value == null) delete out[key];
-    else if (Array.isArray(value) && value.length === 0) delete out[key];
-  }
-  return out;
+/** Fixed-schema payload — all array keys always present (may be empty). */
+export function buildMinimalProjectContextPayload(
+  projectRoot: string,
+  profile: ProjectStackProfile,
+  routes: MinimalProjectContextRoute[] = [],
+): MinimalProjectContextPayload {
+  return {
+    root: projectRoot,
+    languages: [...profile.languages],
+    runtimes: [...profile.runtimes],
+    frameworks: [...profile.frameworks],
+    capabilities: [...profile.capabilities],
+    entryHints: [...profile.entryHints],
+    routes,
+  };
 }
 
 /** Minimal JSON block injected as projectContextBlock — stack facts only, no symbol playbooks. */
 export function formatMinimalProjectContextBlock(
   projectRoot: string,
   profile: ProjectStackProfile,
-  routes?: MinimalProjectContextRoute[],
+  routes: MinimalProjectContextRoute[] = [],
 ): string {
-  const payload = compactPayload({
-    root: projectRoot,
-    languages: profile.languages,
-    runtimes: profile.runtimes,
-    frameworks: profile.frameworks,
-    capabilities: profile.capabilities,
-    entryHints: profile.entryHints,
-    routes,
-  });
-
-  if (Object.keys(payload).length <= 1 && !routes?.length) {
-    return `\n\n项目根：${projectRoot}`;
-  }
+  const payload = buildMinimalProjectContextPayload(projectRoot, profile, routes);
 
   return [
     "",
@@ -227,5 +222,5 @@ export function formatMinimalProjectContextBlock(
 /** @deprecated Use formatMinimalProjectContextBlock — kept for tests. */
 export function formatProjectStackProfileForPrompt(profile: ProjectStackProfile): string {
   if (!profile.manifestFiles.length) return "";
-  return formatMinimalProjectContextBlock("", profile);
+  return formatMinimalProjectContextBlock("", profile, []);
 }

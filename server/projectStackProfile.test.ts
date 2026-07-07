@@ -3,6 +3,10 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  assertMinimalProjectContextShape,
+} from "../shared/projectContextSchema";
+import {
+  buildMinimalProjectContextPayload,
   detectProjectStackProfile,
   formatMinimalProjectContextBlock,
   formatProjectStackProfileForPrompt,
@@ -86,7 +90,30 @@ describe("projectStackProfile", () => {
     expect(block).toContain("【项目上下文】");
     expect(block).toContain('"frameworks"');
     expect(block).toContain("vue3");
+    expect(block).toContain('"routes": []');
     expect(block).not.toContain("CronSchedule");
+  });
+
+  it("fixed schema always includes all array keys", () => {
+    const payload = buildMinimalProjectContextPayload("/tmp/demo", {
+      languages: [],
+      runtimes: [],
+      frameworks: [],
+      capabilities: [],
+      manifestFiles: [],
+      entryHints: [],
+    });
+    assertMinimalProjectContextShape(payload as Record<string, unknown>);
+    expect(Object.keys(payload).sort()).toEqual([
+      "capabilities",
+      "entryHints",
+      "frameworks",
+      "languages",
+      "root",
+      "routes",
+      "runtimes",
+    ]);
+    expect(payload.routes).toEqual([]);
   });
 
   it("detects vue3 from package version", () => {

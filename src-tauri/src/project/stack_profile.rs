@@ -168,34 +168,91 @@ pub fn detect_project_stack_profile(project_root: &str) -> ProjectStackProfile {
   profile
 }
 
-pub fn format_minimal_project_context_block(
+/// Fixed-schema payload — all array keys always present (may be empty).
+pub fn build_minimal_project_context_payload(
   project_root: &str,
   profile: &ProjectStackProfile,
-  routes: Option<&[MinimalProjectContextRoute]>,
-) -> String {
-  let mut payload = json!({
+  routes: &[MinimalProjectContextRoute],
+) -> serde_json::Value {
+  json!({
     "root": project_root,
     "languages": profile.languages,
     "runtimes": profile.runtimes,
     "frameworks": profile.frameworks,
     "capabilities": profile.capabilities,
     "entryHints": profile.entry_hints,
-  });
-  if let Some(routes) = routes.filter(|r| !r.is_empty()) {
-    payload["routes"] = serde_json::to_value(routes).unwrap_or(Value::Null);
-  }
-  if let Some(obj) = payload.as_object_mut() {
-    obj.retain(|_, value| {
-      !value.is_null()
-        && !(value.is_array() && value.as_array().is_some_and(|a| a.is_empty()))
-        && !(value.is_string() && value.as_str().is_some_and(|s| s.is_empty()))
-    });
-  }
-  if payload.as_object().is_some_and(|o| o.len() <= 1) && routes.is_none() {
-    return format!("\n\n项目根：{project_root}");
-  }
+    "routes": routes,
+  })
+}
+
+pub fn format_minimal_project_context_block(
+  project_root: &str,
+  profile: &ProjectStackProfile,
+  routes: &[MinimalProjectContextRoute],
+) -> String {
+  let payload = build_minimal_project_context_payload(project_root, profile, routes);
   format!(
     "\n\n【项目上下文】manifest 检测的结构化事实；排查时依此栈自行选用符号与入口，勿凭记忆臆测。\n```json\n{}\n```",
     serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string())
   )
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn fixed_schema_includes_empty_routes_array() {
+    let profile = ProjectStackProfile {
+      languages: vec!["typescript".into()],
+      runtimes: vec!["node".into()],
+      frameworks: vec!["vue3".into()],
+      capabilities: vec![],
+      manifest_files: vec!["package.json".into()],
+      entry_hints: vec![],
+    };
+    let payload = build_minimal_project_context_payload("/tmp/demo", &profile, &[]);
+    assert_eq!(payload["routes"], json!([]));
+    assert!(payload.get("languages").is_some());
+    assert!(payload.get("entryHints").is_some());
+    let block = format_minimal_project_context_block("/tmp/demo", &profile, &[]);
+    assert!(block.contains("\"routes\": []"));
+  }
+
+  /// Invoked from Vitest with PARITY_FIXTURE_ROOT + node-payload.json written by Node.
+  #[test]
+  fn parity_project_context_payload_from_env() {
+    let Ok(root) = std::env::var("PARITY_FIXTURE_ROOT") else {
+      panic!("PARITY_FIXTURE_ROOT must be set when running this test");
+    };
+    let node_payload_path = format!("{root}/node-payload.json");
+    let expected_raw = std::fs::read_to_string(&node_payload_path)
+      .unwrap_or_else(|e| panic!("read {node_payload_path}: {e}"));
+    let expected: serde_json::Value = serde_json::from_str(&expected_raw)
+      .unwrap_or_else(|e| panic!("parse node payload: {e}"));
+
+    let profile = detect_project_stack_profile(&root);
+    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+    let routes = rt.block_on(super::super::route_context::build_top_level_route_entries(
+      &root, 12,
+    ));
+    let mut actual = build_minimal_project_context_payload(&root.replace('\\', "/"), &profile, &routes);
+    if let Some(arr) = actual.get_mut("languages").and_then(|v| v.as_array_mut()) {
+      arr.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
+    }
+    if let Some(arr) = actual.get_mut("runtimes").and_then(|v| v.as_array_mut()) {
+      arr.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
+    }
+    if let Some(arr) = actual.get_mut("frameworks").and_then(|v| v.as_array_mut()) {
+      arr.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
+    }
+    if let Some(arr) = actual.get_mut("capabilities").and_then(|v| v.as_array_mut()) {
+      arr.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
+    }
+    if let Some(arr) = actual.get_mut("entryHints").and_then(|v| v.as_array_mut()) {
+      arr.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
+    }
+
+    assert_eq!(actual, expected, "Rust payload must match Node node-payload.json");
+  }
 }
