@@ -51,6 +51,7 @@ import {
   checkOverlappingRead,
   checkPatchOldStringFromReads,
   consumePatchRecoveryRead,
+  invalidateFileReadCache,
   invalidateFileReadState,
   isBlockedGrepAfterLocate,
   isBlockedGrepAfterVisionMisread,
@@ -254,8 +255,8 @@ export async function executeTool(
         readSliceCache,
         readSliceRepeatCounts,
         toolGuard?.readFileRanges,
+        readCache,
       );
-      readCache?.delete(resolved.key);
       content = await readStagedFileContent(resolved, stage);
       if (content !== null) readCache?.set(resolved.key, content);
       if (content === null) return `错误：${resolved.displayPath} 不存在或无法读取`;
@@ -395,6 +396,7 @@ export async function executeTool(
       readSliceCache,
       readSliceRepeatCounts,
       toolGuard?.readFileRanges,
+      readCache,
     );
     return `已写入 ${resolved.relative}（${content.length} 字符）`;
   }
@@ -431,11 +433,11 @@ export async function executeTool(
     );
     if (readCheck) {
       markPatchRecoveryFile(toolGuard, resolved.relative);
-      invalidateFileReadState(
+      invalidateFileReadCache(
         resolved.relative,
         readSliceCache,
         readSliceRepeatCounts,
-        toolGuard?.readFileRanges,
+        readCache,
       );
       return readCheck;
     }
@@ -447,11 +449,11 @@ export async function executeTool(
     const patchResult = applyUniquePatch(content, oldString, newString);
     if (!patchResult.ok) {
       markPatchRecoveryFile(toolGuard, resolved.relative);
-      invalidateFileReadState(
+      invalidateFileReadCache(
         resolved.relative,
         readSliceCache,
         readSliceRepeatCounts,
-        toolGuard?.readFileRanges,
+        readCache,
       );
       return patchResult.error;
     }
@@ -471,6 +473,7 @@ export async function executeTool(
       readSliceCache,
       readSliceRepeatCounts,
       toolGuard?.readFileRanges,
+      readCache,
     );
     if (toolGuard) toolGuard.visionLocateActive = false;
     return `已修改 ${resolved.relative}（${oldString.length} → ${newString.length} 字符）`;

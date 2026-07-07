@@ -33,7 +33,7 @@ pub fn build_reply_accuracy_hint() -> String {
     "13. 外框有内层无：排查时须 grep/read 全局 element 选择器（如 button、input）与组件 scoped 样式是否 padding/box-sizing/color 冲突；compact 控件常见根因是继承全局 padding 裁切内容，勿只调 SVG stroke 或 color。",
     "14. 工具前禁猜：调用 grep/read 前禁止在正文写具体元素身份或「占位/未实现」结论；读图与 read 不一致须显式更正先前猜测。",
     "15. 修复宣称：patch 后须 read 验证再写「已修复」；用户反馈仍无效时须承认前轮未验证成功并换排查方向，禁止重复同一层改动。",
-    "16. 定时/调度类（有无定时任务、何时跑、cron）：read 到 IJob/Job 后须 grep 类名或 Schedule/Trigger/CronSchedule 找注册处并 read；禁止只 trace Execute→Service；答案须含触发时机/频率（代码有则写）。",
+    "16. 定时/调度类（有无定时任务、何时跑、cron）：read 到 job/task 后须 trace 到调度注册/触发配置并 read；符号依【项目上下文】JSON；禁止只 trace Execute→Service；答案须含触发时机/频率（代码有则写）。",
     "17. 目录探索：禁止连续 list_dir 逐级下探超过 2 层；应用 grep/search_files 定位目标目录或符号。",
     "18. 外部配置映射：项目 UI 或代码绑定外部库/内置组件的配置字段时，须先 read 类型定义或 web_search/web_extract 官方文档再写映射；禁止凭字段名相似猜测（enum 与 number、同义不同名混用）。",
     "19. UI 入口归因：说明截图中设置/菜单/面板来源须区分上下文菜单、命令面板或设置页、项目自研控件；无 read 或文档证据禁止指定触发方式。",

@@ -219,7 +219,7 @@ export function buildScheduledTaskConsultativeHint(): string {
   return [
     "",
     "【定时/调度类】用户问的是有无定时任务、何时触发、执行频率等。",
-    "read 到 job/task 实现后，须继续 trace 到调度注册/触发配置处并 read；符号与入口路径依上方【项目栈 Profile】与 manifest 自行选用，勿凭记忆臆测。",
+    "read 到 job/task 实现后，须继续 trace 到调度注册/触发配置处并 read；符号与入口路径依上方【项目上下文】JSON 与 manifest 自行选用，勿凭记忆臆测。",
     "禁止只 trace Execute→Service 即收工；答案须含触发时机/频率（代码中有则写明）。",
     "探索时避免连续 list_dir 逐级下探超过 2 层，优先 grep/search_files 定位调度注册文件。",
   ].join("\n");
@@ -229,10 +229,10 @@ export function buildProjectOverviewConsultativeHint(): string {
   return [
     "",
     "【项目概览】用户问的是整个应用/仓库做什么，不是某个函数行为。",
-    "1. 优先引用 system 已注入的「顶层路由与页面说明」与 AGENTS.md 产品入口；",
+    "1. 优先引用 system 已注入的【项目上下文】JSON 中的 routes 与 AGENTS.md 产品入口；",
     "2. 仅当摘要不足时再 read 路由入口或各 view 首屏 desc（offset/limit 约 1–80 行）；",
     "3. 回答按「入口 → 用途」逐项说明全部顶层路由，勿只深挖单一子系统；",
-    "4. 已注入的关键文件（如 package.json）勿重复 read_file；",
+    "4. 已注入的项目上下文 JSON 勿重复 read_file 相同 manifest；",
     "5. 禁止用单一产品类比替代多入口说明。",
   ].join("\n");
 }
@@ -258,7 +258,7 @@ export function buildScheduledJobRegistrationNudge(jobClassNames: string[]): str
   const listed = jobClassNames.slice(0, 2).join("、");
   return [
     `【系统提示】你已 read Job 类（${listed}），但尚未 read/grep 调度注册处。`,
-    `下一轮 grep \`${jobClassNames[0]}\` 并 trace 到调度注册/触发配置（符号依【项目栈 Profile】）；read 注册入口后再作答。`,
+    `下一轮 grep \`${jobClassNames[0]}\` 并 trace 到调度注册/触发配置（符号依【项目上下文】JSON）；read 注册入口后再作答。`,
     "作答须含触发时机/频率（如 cron、启动即跑）；禁止只写 Execute→Service 业务逻辑即结束。",
   ].join("\n");
 }

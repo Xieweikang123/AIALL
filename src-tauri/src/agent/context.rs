@@ -20,7 +20,6 @@ const MAX_KNOWLEDGE_CHARS: usize = 8_000;
 const MAX_SKILLS_PROMPT_CHARS: usize = 4_000;
 const MAX_OPEN_FILE_CHARS: usize = 12_000;
 const MAX_AGENTS_GUIDE_CHARS: usize = 6_000;
-const MAX_TREE_CHARS: usize = 8_000;
 const EXPLORATION_ARCHIVE_PROMPT_MAX_CHARS: usize = 1_500;
 const MAX_RELEVANT_ARCHIVES: usize = 3;
 
@@ -428,17 +427,12 @@ pub async fn build_context_blocks(input: ContextBuildInput<'_>) -> ContextBlocks
       }
     }
   } else {
-    let ctx = project::project_context(input.project_path).await;
-    if ctx.get("ok").and_then(|v| v.as_bool()) == Some(true) {
-      if let Some(tree) = ctx.get("tree").and_then(|v| v.as_str()) {
-        if !tree.trim().is_empty() {
-          parts.push(format!(
-            "\n\n【项目结构（节选）】\n```\n{}\n```",
-            truncate_chars(tree, MAX_TREE_CHARS)
-          ));
-        }
-      }
-    }
+    let profile = project::detect_project_stack_profile(input.project_path);
+    parts.push(project::format_minimal_project_context_block(
+      input.project_path,
+      &profile,
+      None,
+    ));
   }
 
   let memory = project::read_text_file(input.project_path, ".aiall/project-memory.md").await;

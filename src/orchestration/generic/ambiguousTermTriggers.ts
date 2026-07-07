@@ -12,19 +12,28 @@ import type { UserIntentHistoryMessage } from "../agentIntentTypes";
 export type ProjectContextSnapshot =
   | {
       ok: true;
-      tree: string;
-      keyFiles: Array<{ path: string; content: string }>;
+      tree?: string;
+      keyFiles?: Array<{ path: string; content: string }>;
+      stackProfile?: {
+        languages?: string[];
+        frameworks?: string[];
+        capabilities?: string[];
+        manifestFiles?: string[];
+        entryHints?: string[];
+      };
     }
   | { ok: false }
   | null
   | undefined;
 
-/** Visible tree has no business source files to ground domain terms. */
+/** Visible context lacks manifest facts or source structure to ground domain terms. */
 export function isSparseProjectContext(context: ProjectContextSnapshot): boolean {
   if (!context?.ok) return true;
-  const treeLines = context.tree.split("\n").map((line) => line.trim()).filter(Boolean);
+  if (context.stackProfile?.manifestFiles?.length) return false;
+  const treeLines = (context.tree ?? "").split("\n").map((line) => line.trim()).filter(Boolean);
   if (treeLines.length === 0) return true;
-  if (context.keyFiles.length === 0 && treeLines.length <= 3) return true;
+  const keyFiles = context.keyFiles ?? [];
+  if (keyFiles.length === 0 && treeLines.length <= 3) return true;
   return false;
 }
 
@@ -184,7 +193,21 @@ function isGroundedInProject(term: string, contextText: string): boolean {
 
 function collectProjectContextText(context: ProjectContextSnapshot): string {
   if (!context?.ok) return "";
-  const parts = [context.tree, ...context.keyFiles.map((f) => `${f.path}\n${f.content}`)];
+  const profile = context.stackProfile;
+  const profileParts = profile
+    ? [
+        ...(profile.languages ?? []),
+        ...(profile.frameworks ?? []),
+        ...(profile.capabilities ?? []),
+        ...(profile.manifestFiles ?? []),
+        ...(profile.entryHints ?? []),
+      ]
+    : [];
+  const parts = [
+    context.tree ?? "",
+    ...profileParts,
+    ...(context.keyFiles ?? []).map((f) => `${f.path}\n${f.content}`),
+  ];
   return parts.join("\n");
 }
 

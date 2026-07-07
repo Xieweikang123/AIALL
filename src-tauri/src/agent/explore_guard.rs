@@ -81,7 +81,7 @@ pub struct ReadLineRange {
 }
 
 pub const MAX_OVERLAPPING_READ_ATTEMPTS: u32 = 2;
-pub const OVERLAP_READ_MIN_SHARE: f64 = 0.5;
+pub const OVERLAP_READ_LINE_MARGIN: u32 = 30;
 
 pub fn read_line_range_from_args(offset: u32, limit: u32) -> ReadLineRange {
   let start = offset.max(1);
@@ -90,16 +90,11 @@ pub fn read_line_range_from_args(offset: u32, limit: u32) -> ReadLineRange {
 }
 
 pub fn read_ranges_overlap(a: ReadLineRange, b: ReadLineRange) -> bool {
-  let overlap_start = a.start.max(b.start);
-  let overlap_end = a.end.min(b.end);
-  if overlap_end < overlap_start {
-    return false;
-  }
-  let overlap_len = overlap_end - overlap_start + 1;
-  let span_a = a.end - a.start + 1;
-  let span_b = b.end - b.start + 1;
-  let smaller = span_a.min(span_b);
-  overlap_len as f64 >= smaller as f64 * OVERLAP_READ_MIN_SHARE
+  let a_start = a.start.saturating_sub(OVERLAP_READ_LINE_MARGIN);
+  let a_end = a.end.saturating_add(OVERLAP_READ_LINE_MARGIN);
+  let b_start = b.start.saturating_sub(OVERLAP_READ_LINE_MARGIN);
+  let b_end = b.end.saturating_add(OVERLAP_READ_LINE_MARGIN);
+  a_start <= b_end && b_start <= a_end
 }
 
 pub fn check_overlapping_read(
@@ -237,12 +232,16 @@ static LOW_SIGNAL_VISION_LOCATE_GREP_RE: Lazy<Regex> = Lazy::new(|| {
   Regex::new(r"(?i)^(active|selected|current|default)(Tab|Index|Mode|View|Panel|Item|Id)$").unwrap()
 });
 
-pub fn invalidate_file_read_state(guard: &mut ToolGuardState, file_key: &str) {
+pub fn invalidate_file_read_cache(guard: &mut ToolGuardState, file_key: &str) {
   let prefix = format!("{file_key}:");
-  guard.read_file_ranges.remove(file_key);
   guard.read_slice_cache.retain(|k, _| !k.starts_with(&prefix));
   guard.read_slice_repeat_counts.retain(|k, _| !k.starts_with(&prefix));
   guard.read_cache.remove(file_key);
+}
+
+pub fn invalidate_file_read_state(guard: &mut ToolGuardState, file_key: &str) {
+  invalidate_file_read_cache(guard, file_key);
+  guard.read_file_ranges.remove(file_key);
 }
 
 pub fn mark_patch_recovery_file(guard: &mut ToolGuardState, file_key: &str) {
@@ -255,6 +254,17 @@ pub fn consume_patch_recovery_read(guard: &mut ToolGuardState, file_key: &str) -
     return true;
   }
   false
+}
+
+static MANUAL_HANDOFF_RE: Lazy<Regex> = Lazy::new(|| {
+  Regex::new(
+    r"(?i)手动(?:或另起对话|执行|修改)|另起对话|建议的修复（手动|请手动|手动步骤",
+  )
+  .unwrap()
+});
+
+fn normalize_patch_guard_text(text: &str) -> String {
+  text.replace("\r\n", "\n")
 }
 
 pub fn check_patch_old_string_from_reads(
@@ -276,7 +286,10 @@ pub fn check_patch_old_string_from_reads(
     return None;
   }
   let combined = chunks.join("\n");
-  if combined.contains(old_string) {
+  let normalized_old = normalize_patch_guard_text(old_string);
+  if combined.contains(old_string)
+    || normalize_patch_guard_text(&combined).contains(&normalized_old)
+  {
     return None;
   }
   Some(format!(
@@ -412,6 +425,33 @@ pub fn claims_ghost_modification_reply(text: &str) -> bool {
 pub fn build_ghost_reply_retry_nudge() -> &'static str {
   "【系统强制】你声称已完成修改，但本轮未调用任何 patch_file / write_file 工具，代码实际未被修改。\
   请立即调用 patch_file 或 write_file 提交真实的代码修改；禁止只输出文字描述。"
+}
+
+pub fn is_manual_handoff_without_write_reply(text: &str, has_patch_failures: bool) -> bool {
+  let body = sanitize_agent_user_visible_text(text);
+  if body.is_empty() {
+    return false;
+  }
+  if MANUAL_PASTE_INSTRUCTION_RE.is_match(&body) || MANUAL_HANDOFF_RE.is_match(&body) {
+    return true;
+  }
+  if has_patch_failures
+    && body.contains("```")
+    && (body.contains("未成功")
+      || body.contains("阻塞")
+      || body.contains("建议的修复")
+      || body.contains("手动或另"))
+    && !WRITE_DONE_RE.is_match(&body)
+  {
+    return true;
+  }
+  false
+}
+
+pub fn build_manual_handoff_retry_nudge() -> &'static str {
+  "【系统强制·Build】你已给出修改方案但尚未落盘任何代码。禁止以「请手动执行/另开对话粘贴」收尾。\
+  若 patch_file 仍失败：① read_file 后从返回原文复制 old_string（Windows 文件可含 \\r\\n）；\
+  ② 小范围改动可用 write_file 写入已 read 的完整文件；③ 说明真实阻塞点。必须在本会话内提交 patch/write。"
 }
 
 pub fn should_nudge_alternate_ui_patch_strategy(
@@ -830,5 +870,50 @@ mod tests {
   fn english_planning_nudge() {
     assert!(should_nudge_english_planning("Now let me check the template"));
     assert!(!should_nudge_english_planning("让我查看定位逻辑"));
+  }
+
+  #[test]
+  fn invalidate_file_read_cache_preserves_overlap_ranges() {
+    let mut guard = ToolGuardState::default();
+    record_read_range(
+      "src/foo.ts",
+      read_line_range_from_args(260, 35),
+      &mut guard.read_file_ranges,
+    );
+    guard
+      .read_slice_cache
+      .insert("src/foo.ts:260:35".into(), "cached".into());
+    invalidate_file_read_cache(&mut guard, "src/foo.ts");
+    assert!(guard.read_slice_cache.is_empty());
+    assert_eq!(guard.read_file_ranges.get("src/foo.ts").map(|v| v.len()), Some(1));
+  }
+
+  #[test]
+  fn read_ranges_overlap_within_line_margin() {
+    let a = read_line_range_from_args(260, 35);
+    let b = read_line_range_from_args(262, 30);
+    assert!(read_ranges_overlap(a, b));
+  }
+
+  #[test]
+  fn patch_old_string_guard_accepts_lf_against_lf_read_slice() {
+    let slices = HashMap::from([(
+      "src/foo.ts:260:35".to_string(),
+      "  chip.appendChild(img);\n  return chip;\n".to_string(),
+    )]);
+    assert!(check_patch_old_string_from_reads(
+      "src/foo.ts",
+      "  chip.appendChild(img);\n  return chip;",
+      &slices,
+      None,
+    )
+    .is_none());
+  }
+
+  #[test]
+  fn manual_handoff_without_write_reply_detected() {
+    let summary = "## 总结\n**未成功修改代码**。建议的修复（手动或另起对话执行）\n```js\nchip.remove();\n```";
+    assert!(is_manual_handoff_without_write_reply(summary, true));
+    assert!(!is_manual_handoff_without_write_reply("已修改 foo.ts，改动如下", false));
   }
 }

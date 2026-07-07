@@ -12,7 +12,7 @@ export type ReadLineRange = { start: number; end: number };
  * - Tighter blocking caused the agent to waste turns on run_command workarounds
  */
 export const MAX_OVERLAPPING_READ_ATTEMPTS = 2;
-export const OVERLAP_READ_MIN_SHARE = 0.5;
+export const OVERLAP_READ_LINE_MARGIN = 30;
 
 export function readLineRangeFromArgs(offset: number, limit: number): ReadLineRange {
   const start = Math.max(1, offset);
@@ -21,14 +21,11 @@ export function readLineRangeFromArgs(offset: number, limit: number): ReadLineRa
 }
 
 export function readRangesOverlap(a: ReadLineRange, b: ReadLineRange): boolean {
-  const overlapStart = Math.max(a.start, b.start);
-  const overlapEnd = Math.min(a.end, b.end);
-  if (overlapEnd < overlapStart) return false;
-  const overlapLen = overlapEnd - overlapStart + 1;
-  const spanA = a.end - a.start + 1;
-  const spanB = b.end - b.start + 1;
-  const smaller = Math.min(spanA, spanB);
-  return overlapLen >= smaller * OVERLAP_READ_MIN_SHARE;
+  const aStart = Math.max(1, a.start - OVERLAP_READ_LINE_MARGIN);
+  const aEnd = a.end + OVERLAP_READ_LINE_MARGIN;
+  const bStart = Math.max(1, b.start - OVERLAP_READ_LINE_MARGIN);
+  const bEnd = b.end + OVERLAP_READ_LINE_MARGIN;
+  return aStart <= bEnd && bStart <= aEnd;
 }
 
 export function checkOverlappingRead(
@@ -148,12 +145,12 @@ export type ToolGuardContext = {
   grepHitVueFiles?: Set<string>;
 };
 
-/** Clear cached read windows so patch failure can re-read fresh content from disk. */
-export function invalidateFileReadState(
+/** Clear cached read slices so patch failure can re-read fresh content from disk. */
+export function invalidateFileReadCache(
   fileKey: string,
   readSliceCache?: Map<string, string>,
   readSliceRepeatCounts?: Map<string, number>,
-  readFileRanges?: Map<string, ReadLineRange[]>,
+  readCache?: Map<string, string>,
 ): void {
   if (readSliceCache) {
     for (const key of [...readSliceCache.keys()]) {
@@ -165,6 +162,18 @@ export function invalidateFileReadState(
       if (key.startsWith(`${fileKey}:`)) readSliceRepeatCounts.delete(key);
     }
   }
+  readCache?.delete(fileKey);
+}
+
+/** Clear cached read windows so patch failure can re-read fresh content from disk. */
+export function invalidateFileReadState(
+  fileKey: string,
+  readSliceCache?: Map<string, string>,
+  readSliceRepeatCounts?: Map<string, number>,
+  readFileRanges?: Map<string, ReadLineRange[]>,
+  readCache?: Map<string, string>,
+): void {
+  invalidateFileReadCache(fileKey, readSliceCache, readSliceRepeatCounts, readCache);
   readFileRanges?.delete(fileKey);
 }
 
@@ -258,6 +267,10 @@ export function buildLowSignalVisionLocateGrepMessage(pattern: string): string {
   ].join("");
 }
 
+function normalizePatchGuardText(text: string): string {
+  return text.replace(/\r\n/g, "\n");
+}
+
 /** patch old_string must appear in content the agent already read for that file. */
 export function checkPatchOldStringFromReads(
   fileKey: string,
@@ -273,7 +286,10 @@ export function checkPatchOldStringFromReads(
   if (full) chunks.push(full);
   if (!chunks.length) return null;
   const combined = chunks.join("\n");
-  if (combined.includes(oldString)) return null;
+  const normalizedOld = normalizePatchGuardText(oldString);
+  if (combined.includes(oldString) || normalizePatchGuardText(combined).includes(normalizedOld)) {
+    return null;
+  }
   return [
     `错误：old_string 未出现在你对 ${fileKey} 的已读片段中，禁止凭记忆构造。`,
     "请从已读输出中复制更短且唯一的片段作为 old_string；若仍缺上下文，read_file 更大范围（300–500 行）后从返回原文复制再 patch。",
@@ -392,6 +408,32 @@ export function claimsFallbackAsPrimarySuccess(text: string): boolean {
 
 const MANUAL_PASTE_INSTRUCTION_RE =
   /请将.{0,24}(?:应用|粘贴|手动)|请自行.{0,12}(?:应用|修改|粘贴)|手动.{0,8}(?:应用|修改|粘贴)/i;
+
+const MANUAL_HANDOFF_RE =
+  /手动(?:或另起对话|执行|修改)|另起对话|建议的修复（手动|请手动|手动步骤/i;
+
+export function isManualHandoffWithoutWriteReply(text: string, hasPatchFailures: boolean): boolean {
+  const body = sanitizeAgentUserVisibleText(text);
+  if (!body) return false;
+  if (MANUAL_PASTE_INSTRUCTION_RE.test(body) || MANUAL_HANDOFF_RE.test(body)) return true;
+  if (
+    hasPatchFailures &&
+    /```[\s\S]+```/.test(body) &&
+    /未成功|阻塞|建议的修复|手动或另/.test(body) &&
+    !WRITE_DONE_RE.test(body)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function buildManualHandoffRetryNudge(): string {
+  return [
+    "【系统强制·Build】你已给出修改方案但尚未落盘任何代码。禁止以「请手动执行/另开对话粘贴」收尾。",
+    "若 patch_file 仍失败：① read_file 后从返回原文复制 old_string（Windows 文件可含 \\r\\n）；",
+    "② 小范围改动可用 write_file 写入已 read 的完整文件；③ 说明真实阻塞点。必须在本会话内提交 patch/write。",
+  ].join("");
+}
 
 /** True when the model re-output screenshot analysis instead of patching under force-patch. */
 export function isAnalysisOnlyReplyUnderForcePatch(text: string): boolean {

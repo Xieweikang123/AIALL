@@ -17,6 +17,28 @@ alwaysApply: true
 - **产品 hint** → `src/orchestration/product/`（如 `userIntentHints.ts`）
 - `src/services/agentUserIntent.ts` 仅为兼容 barrel，新代码请按 tier 直接 import
 
+## 设计原则：上下文检索优先于 Bug Playbook
+
+Agent 能力应主要来自 **高精度上下文检索（Context Retrieval）** 与 **大模型泛化**，而非用提示词工程（Prompt Engineering）教模型如何修具体 Bug。
+
+模型本身具备框架/栈层面的排查知识；编排侧若缺 **ground truth**（项目栈、符号索引、运行时事实），不应靠堆 Playbook 补偿。
+
+### 应投入（事实与机制）
+
+- **结构化项目事实**：栈 Profile、manifest 解析、路由/关键文件注入、按需 knowledge / RAG 片段
+- **Tier 机制**：trace 深度契约、探索预算、工具校验、完成门控（validator / finish gate）
+- **条件注入**：topic/症状命中时追加**诊断步骤**（查什么、trace 到哪一层），不写具体修法处方
+
+### 禁止 / 应避免
+
+- always-on prompt 中写栈专有符号、框架 API 名、个案排查 playbook（「命中 X → grep Y → patch Z」）
+- 用正则猜栈再手写对应符号列表；应扩 Profile / 符号索引，让模型据事实选用符号
+- 同一 bug 经验复制到多处 hint；应进知识库或单一 dynamic hint 注册表
+
+### 新增 hint / prompt 前先问
+
+这是在补 **缺失的 ground truth**，还是在 **替模型写排查手册**？后者应改为上下文注入、检索或工具反馈。
+
 ## Tier 1：通用分类器
 
 ### 适用范围
@@ -58,3 +80,9 @@ alwaysApply: true
 1. 这条规则/常量里有没有具体功能名或本次需求的词？
 2. 换成 unrelated 需求（如改路由、加重试），规则仍成立吗？
 3. 分析回复里**提到**某标识符，会不会误触发？
+
+## Code Review 三问（编排设计）
+
+1. 这条 hint 是在注入**事实**，还是在教模型**修某类 Bug**？
+2. 去掉这条 hint，补上正确的 Profile / 检索 / 工具，模型能否自行完成？
+3. 内容是否应迁出 prompt，进入 knowledge、Profile 或 validator？

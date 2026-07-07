@@ -182,6 +182,7 @@ pub async fn agent_run(
   let mut premature_completion_retries: u32 = 0;
   let mut patch_required_retries: u32 = 0;
   let mut patch_failure_completion_retries: u32 = 0;
+  let mut manual_handoff_retries: u32 = 0;
   let mut patch_failure_log: Vec<PatchFailureEntry> = Vec::new();
   let mut consecutive_runtime_tool_failure_turns: u32 = 0;
   let mut last_consultative_explore_sig: Option<String> = None;
@@ -651,6 +652,7 @@ pub async fn agent_run(
         modification_audit_sent,
         patch_required_retries,
         patch_failure_completion_retries,
+        manual_handoff_retries,
         premature_completion_retries,
         empty_reply_retries,
         workspace_cleanup_nudge_sent,
@@ -702,6 +704,7 @@ pub async fn agent_run(
       modification_audit_sent = finalize_mut.modification_audit_sent;
       patch_required_retries = finalize_mut.patch_required_retries;
       patch_failure_completion_retries = finalize_mut.patch_failure_completion_retries;
+      manual_handoff_retries = finalize_mut.manual_handoff_retries;
       premature_completion_retries = finalize_mut.premature_completion_retries;
       empty_reply_retries = finalize_mut.empty_reply_retries;
       workspace_cleanup_nudge_sent = finalize_mut.workspace_cleanup_nudge_sent;

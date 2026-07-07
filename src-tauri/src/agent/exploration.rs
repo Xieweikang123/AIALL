@@ -366,7 +366,8 @@ pub fn build_turn_cap_final_summary_nudge(
     "{urgency}（累计 {completed_turn} 轮）\
      必须用中文输出结构化总结：① 做了什么/改了哪些文件；② 如何验证（命令或手动步骤）；③ 仍存问题或未修项。\
      {files}\
-     禁止空回复；禁止仅重复 progress 块而不给用户可见结论。"
+     禁止空回复；禁止仅重复 progress 块而不给用户可见结论。\
+     若本轮未改任何代码：禁止以「请手动执行/另开对话粘贴」收尾；须说明真实阻塞点。"
   )
 }
 
@@ -447,13 +448,18 @@ pub fn build_grep_hit_vue_read_nudge(vue_files: &[String]) -> String {
 
 pub fn build_alternate_ui_patch_strategy_nudge(file_path: &str) -> String {
   format!(
-    "【系统提示】{file_path} 已连续多次 patch_file 失败（old_string 不匹配）。禁止凭记忆再构造 old_string；read_file 后从返回原文复制更短且唯一的片段；或一次读更大范围（300–500 行）。若属 UI 浮层/滚动区问题，考虑换 overlay sibling 方案，勿再微调同一组 position/bottom。"
+    "【系统提示】{file_path} 已连续多次 patch_file 失败（old_string 不匹配）。\
+     禁止凭记忆再构造 old_string；read_file 后从返回原文复制更短且唯一的片段；或一次读更大范围（300–500 行）。\
+     若 patch 仍失败：对小型已读文件可用 write_file 写回完整内容；Windows 注意 \\r\\n。\
+     若属 UI 浮层/滚动区问题，考虑换 overlay sibling 方案，勿再微调同一组 position/bottom。"
   )
 }
 
 pub fn build_turn_patch_failure_nudge(failure_count: usize, failed_files: &str) -> String {
   format!(
-    "【系统纠正】本轮 {failure_count} 个 patch_file 调用失败（文件：{failed_files}）。请 read_file 重新读取；从返回原文复制更短且唯一的 old_string 再 patch。禁止凭记忆构造 old_string。"
+    "【系统纠正】本轮 {failure_count} 个 patch_file 调用失败（文件：{failed_files}）。\
+     请 read_file 重新读取；从返回原文复制更短且唯一的 old_string 再 patch（Windows 磁盘文件常为 \\r\\n，工具会自动尝试 EOL 归一化）。\
+     若仍失败且改动范围小：可对已 read 的完整文件用 write_file 局部替换后写回。禁止凭记忆构造 old_string。"
   )
 }
 

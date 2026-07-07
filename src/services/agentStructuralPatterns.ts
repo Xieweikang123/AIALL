@@ -36,18 +36,10 @@ export const JOB_FILE_PATH_RE = /([^/\\]+Job)\.cs$/i;
 
 /** Stack-agnostic schedule registration markers. */
 export const GENERIC_SCHEDULE_REGISTRATION_RE =
-  /ScheduleJob|AddJob|Schedule.*Job|cron\.schedule|node-cron|@Cron|registerSchedule|setInterval/i;
+  /ScheduleJob|AddJob|Schedule.*Job|cron\.schedule|node-cron|@Cron|registerSchedule|setInterval|CronSchedule|TriggerBuilder|WithCronSchedule|IScheduler|IJobDetail|Startup/i;
 
-/** .NET / Quartz registration markers — use only when hasDotNetProject. */
-export const DOTNET_SCHEDULE_REGISTRATION_RE =
-  /CronSchedule|TriggerBuilder|WithCronSchedule|IScheduler|IJobDetail|Startup/i;
-
-export function scheduleRegistrationPatternMatches(
-  grepBlob: string,
-  hasDotNetProject = false,
-): boolean {
-  if (GENERIC_SCHEDULE_REGISTRATION_RE.test(grepBlob)) return true;
-  return hasDotNetProject && DOTNET_SCHEDULE_REGISTRATION_RE.test(grepBlob);
+export function scheduleRegistrationPatternMatches(grepBlob: string): boolean {
+  return GENERIC_SCHEDULE_REGISTRATION_RE.test(grepBlob);
 }
 
 /** Assistant reply cited a code location or style evidence (generic). */
@@ -72,12 +64,13 @@ export function extractJobClassNamesFromReadPaths(readPaths: string[]): string[]
 export function hasScheduleRegistrationEvidence(
   readPaths: string[],
   grepPatterns: string[],
-  hasDotNetProject = false,
 ): boolean {
   const normalizedReads = readPaths.map((p) => p.replace(/\\/g, "/"));
-  if (hasDotNetProject && normalizedReads.some((p) => /startup/i.test(p))) return true;
+  if (normalizedReads.some((p) => /startup|program\.cs|scheduler|quartz|hangfire|cron/i.test(p))) {
+    return true;
+  }
   const grepBlob = grepPatterns.join("\n");
-  if (scheduleRegistrationPatternMatches(grepBlob, hasDotNetProject)) return true;
+  if (scheduleRegistrationPatternMatches(grepBlob)) return true;
   const jobNames = extractJobClassNamesFromReadPaths(readPaths);
   if (jobNames.some((name) => grepPatterns.some((pattern) => pattern.includes(name)))) return true;
   return false;
@@ -86,9 +79,8 @@ export function hasScheduleRegistrationEvidence(
 export function shouldNudgeScheduledJobRegistration(
   readPaths: string[],
   grepPatterns: string[],
-  hasDotNetProject = false,
 ): boolean {
   const jobNames = extractJobClassNamesFromReadPaths(readPaths);
   if (!jobNames.length) return false;
-  return !hasScheduleRegistrationEvidence(readPaths, grepPatterns, hasDotNetProject);
+  return !hasScheduleRegistrationEvidence(readPaths, grepPatterns);
 }

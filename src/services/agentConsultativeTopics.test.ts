@@ -26,7 +26,7 @@ describe("agentConsultativeTopics", () => {
   it("buildConsultativeTopicHints injects scheduled trace hint when active", () => {
     const hints = buildConsultativeTopicHints(FIXTURE_SCHEDULED_TASK_QUESTION);
     expect(hints).toContain("定时/调度类");
-    expect(hints).toContain("项目栈 Profile");
+    expect(hints).toContain("项目上下文");
     expect(hints).not.toContain("CronSchedule");
     expect(hints).not.toMatch(/EnergyRecord|gw_energy/i);
   });
@@ -39,7 +39,7 @@ describe("agentConsultativeTopics", () => {
 
   it("buildConsultativeTopicHints injects project overview hint", () => {
     const hints = buildConsultativeTopicHints("解释这个项目是做什么的");
-    expect(hints).toContain("顶层路由与页面说明");
+    expect(hints).toContain("项目上下文");
   });
 
   it("session audit topic injects audit hint", () => {

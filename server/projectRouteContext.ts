@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { readFileContent } from "./vibeFs";
+import type { MinimalProjectContextRoute } from "./projectStackProfile";
 
 export type TopLevelRouteEntry = {
   path: string;
@@ -60,6 +61,45 @@ function resolveComponentFilePath(projectRoot: string, componentRef: string): st
     if (fs.existsSync(candidate)) return candidate;
   }
   return null;
+}
+
+export async function buildTopLevelRouteEntries(
+  projectRoot: string,
+  maxRoutes = 12,
+): Promise<MinimalProjectContextRoute[]> {
+  const routerCandidates = [
+    path.join(projectRoot, "src", "router", "index.ts"),
+    path.join(projectRoot, "src", "router", "index.js"),
+    path.join(projectRoot, "src", "router.ts"),
+  ];
+  let routerSource = "";
+  for (const candidate of routerCandidates) {
+    const result = await readFileContent(candidate).catch(() => null);
+    if (result?.ok && result.content.trim()) {
+      routerSource = result.content;
+      break;
+    }
+  }
+  if (!routerSource) return [];
+
+  const routes = extractTopLevelRoutes(routerSource).filter((r) => r.path !== "/" || r.componentRef);
+  const entries: MinimalProjectContextRoute[] = [];
+  for (const route of routes.slice(0, maxRoutes)) {
+    const filePath = resolveComponentFilePath(projectRoot, route.componentRef);
+    let desc = "";
+    if (filePath) {
+      const vueResult = await readFileContent(filePath).catch(() => null);
+      if (vueResult?.ok) {
+        desc = extractVuePageDescription(vueResult.content.slice(0, 4_000));
+      }
+    }
+    entries.push({
+      path: route.path,
+      component: route.componentRef,
+      ...(desc ? { desc } : {}),
+    });
+  }
+  return entries;
 }
 
 export async function buildRouteContextSummary(projectRoot: string): Promise<string> {

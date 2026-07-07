@@ -613,6 +613,7 @@ export function buildAlternateUiPatchStrategyNudge(filePath: string): string {
   return [
     `【系统提示】${filePath} 已连续多次 patch_file 失败（old_string 不匹配）。`,
     "禁止凭记忆再构造 old_string；read_file 后从返回原文复制更短且唯一的片段；或一次读更大范围（300–500 行）。",
+    "若 patch 仍失败：对小型已读文件可用 write_file 写回完整内容；Windows 注意 \\r\\n。",
     "若属 UI 浮层/滚动区问题，考虑换 overlay sibling 方案，勿再微调同一组 position/bottom。",
   ].join("");
 }

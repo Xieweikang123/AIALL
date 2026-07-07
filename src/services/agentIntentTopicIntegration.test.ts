@@ -23,7 +23,7 @@ describe("intent + consultative topic integration", () => {
 
     expect(rules.consultativeTopic).toBe("project_overview");
     expect(hints).toContain("项目概览");
-    expect(hints).toContain("顶层路由与页面说明");
+    expect(hints).toContain("routes");
     expect(hints).not.toContain("read 路由入口（如 src/router");
   });
 
@@ -42,7 +42,7 @@ describe("intent + consultative topic integration", () => {
 
   it("AI topic id routes to module even when prompt shape is generic", () => {
     const hints = buildConsultativeTopicHints("随便问问", undefined, "scheduled_task");
-    expect(hints).toContain("项目栈 Profile");
+    expect(hints).toContain("项目上下文");
     expect(hints).not.toContain("项目概览");
   });
 

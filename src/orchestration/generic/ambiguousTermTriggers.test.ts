@@ -17,6 +17,12 @@ describe("ambiguousTermTriggers", () => {
     expect(
       isSparseProjectContext({
         ok: true,
+        stackProfile: { manifestFiles: ["package.json"], frameworks: ["vue3"] },
+      }),
+    ).toBe(false);
+    expect(
+      isSparseProjectContext({
+        ok: true,
         tree: "[dir] src\n  App.vue",
         keyFiles: [{ path: "package.json", content: "{}" }],
       }),

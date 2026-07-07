@@ -8,6 +8,8 @@ import {
   claimsPrematureCompletion,
   claimsSuccessDespitePatchFailures,
   isAnalysisOnlyReplyUnderForcePatch,
+  isManualHandoffWithoutWriteReply,
+  buildManualHandoffRetryNudge,
   sanitizeAgentUserVisibleText,
   textIndicatesPatchAnchor,
   textConfirmsTeleportToBody,
@@ -376,6 +378,44 @@ export async function validateAgentResponse(
         ...(ctx.segmentMaxTurns !== undefined ? { maxTurns: ctx.segmentMaxTurns } : {}),
         model,
         detail: "检测到幻觉回复（声称修改但未执行工具），已要求重试",
+      },
+    });
+    return { action: "continue" };
+  }
+
+  // ── 12g2: Manual handoff without write ──
+  const sessionWrittenEmpty =
+    ctx.writeStage !== null && ctx.writeStage.writtenList.length === 0;
+  if (
+    !isReadOnlyAgent &&
+    !isPlanExplore &&
+    !readOnlyBuildRun &&
+    sessionWrittenEmpty &&
+    ctx.manualHandoffRetries < 1 &&
+    isManualHandoffWithoutWriteReply(rawContent, ctx.patchFailureLog.length > 0)
+  ) {
+    ctx.manualHandoffRetries += 1;
+    ctx.messages.push({ role: "assistant", content: rawContent });
+    ctx.messages.push({ role: "system", content: buildManualHandoffRetryNudge() });
+    onEvent({
+      type: "turn_response",
+      data: {
+        turn,
+        ...(ctx.segmentMaxTurns !== undefined ? { maxTurns: ctx.segmentMaxTurns } : {}),
+        assistantText: userText,
+        toolCalls: [],
+        hasToolCalls: false,
+        isFinal: false,
+      },
+    });
+    onEvent({
+      type: "status",
+      data: {
+        phase: "manual_handoff_retry",
+        turn,
+        ...(ctx.segmentMaxTurns !== undefined ? { maxTurns: ctx.segmentMaxTurns } : {}),
+        model,
+        detail: "有方案但未落盘，已禁止手动粘贴收尾",
       },
     });
     return { action: "continue" };

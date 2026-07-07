@@ -41,9 +41,9 @@ import {
 import { detectProjectRuntimeProfile, buildRuntimeAwarenessHint, buildShellAwarenessHint } from "./agentRuntimeHint";
 import {
   detectProjectStackProfile,
-  formatProjectStackProfileForPrompt,
-  stackProfileHasDotNet,
+  formatMinimalProjectContextBlock,
 } from "./projectStackProfile";
+import { buildTopLevelRouteEntries } from "./projectRouteContext";
 import { stripQuotedReplyPrefix } from "../src/services/agentContinuation";
 import { AUTO_BUG_FIX_LOGIC_REVIEW_MARKER } from "../shared/autoBugFixPrompt";
 import {
@@ -51,12 +51,7 @@ import {
   buildTargetFileManifest,
   type ExecutePlanContextInput,
 } from "./agentExecutePlanContext";
-import {
-  buildProjectContext,
-  buildInjectedKeyFilePathSet,
-  formatProjectContextForBuild,
-  formatProjectContextForPrompt,
-} from "./vibeProjectContext";
+import type { ProjectStackProfile } from "./projectStackProfile";
 import {
   formatProjectMemoryForPrompt,
   readProjectMemory,
@@ -282,7 +277,7 @@ export interface AgentContextBuildInput {
 export interface AgentContextBuildResult {
   systemPrompt: string;
   projectContextBlock: string;
-  projectContextSnapshot: import("./vibeProjectContext").ProjectContextResult | null;
+  projectContextSnapshot: ProjectContextSnapshot | null;
   agentsGuideBlock: string;
   projectSkillsBlock: string;
   projectMemoryBlock: string;
@@ -290,13 +285,22 @@ export interface AgentContextBuildResult {
   exploreKnowledgeContextBlock: string;
   explorationArchiveBlock: string;
   runtimeAwarenessBlock: string;
-  stackProfileBlock: string;
   openFile: { path: string; relative: string } | null;
   openFileSnippet: string;
   injectedKeyFilePaths: Set<string> | undefined;
   exploreKnowledgeIntent: "initial" | "rebuild" | "continue" | "section_fill" | "changes" | "followup" | null;
   exploreUsesManifest: boolean;
 }
+
+export type ProjectContextSnapshot =
+  | {
+      ok: true;
+      stackProfile: ProjectStackProfile;
+      tree?: string;
+      keyFiles?: Array<{ path: string; content: string }>;
+    }
+  | { ok: false }
+  | null;
 
 export async function buildAgentContext(
   input: AgentContextBuildInput,
@@ -341,7 +345,7 @@ export async function buildAgentContext(
       data: {
         phase: "building_context",
         model,
-        detail: "扫描项目结构",
+        detail: "检测项目栈与路由",
       },
     });
   }
@@ -354,14 +358,16 @@ export async function buildAgentContext(
   });
 
   const [
-    projectContextOrNull,
+    routeEntries,
     projectMemoryResult,
     projectKnowledgeResult,
     agentsGuideResult,
     projectSkillsBlock,
     explorationArchiveBlock,
   ] = await Promise.all([
-    isExecutePlan || consultativeUiAppearanceRun ? Promise.resolve(null) : buildProjectContext(projectRoot),
+    isExecutePlan || consultativeUiAppearanceRun
+      ? Promise.resolve([] as import("./projectStackProfile").MinimalProjectContextRoute[])
+      : buildTopLevelRouteEntries(projectRoot),
     consultativeUiAppearanceRun
       ? Promise.resolve({ ok: false as const, content: "", truncated: false })
       : readProjectMemory(projectRoot),
@@ -381,16 +387,20 @@ export async function buildAgentContext(
     ? await buildTargetFileManifest(projectRoot, runProfile.targetFiles || [])
     : [];
 
+  const stackProfile = detectProjectStackProfile(projectRoot);
+
   let projectContextBlock = "";
   if (isExecutePlan) {
     projectContextBlock = `\n\n项目根：${projectRoot}（方案执行阶段，已跳过全项目扫描）`;
     projectContextBlock += buildExecutePlanSystemHint(targetManifest, runProfile.userIntent);
-  } else if (projectContextOrNull?.ok) {
-    projectContextBlock = isReadOnlyAgent
-      ? formatProjectContextForPrompt(projectContextOrNull)
-      : formatProjectContextForBuild(projectContextOrNull);
   } else if (consultativeUiAppearanceRun) {
-    projectContextBlock = `\n\n项目根：${projectRoot}（咨询只读·UI 观感题，已省略全项目扫描以加快首包）`;
+    projectContextBlock = formatMinimalProjectContextBlock(projectRoot, stackProfile);
+  } else {
+    projectContextBlock = formatMinimalProjectContextBlock(
+      projectRoot,
+      stackProfile,
+      routeEntries.length ? routeEntries : undefined,
+    );
   }
 
   let gitSnapshotBlock = "";
@@ -452,10 +462,8 @@ export async function buildAgentContext(
       : "";
 
   const runtimeProfile = detectProjectRuntimeProfile(projectRoot);
-  const stackProfile = detectProjectStackProfile(projectRoot);
   const runtimeAwarenessBlock =
     buildRuntimeAwarenessHint(runtimeProfile) + buildShellAwarenessHint(process.platform);
-  const stackProfileBlock = formatProjectStackProfileForPrompt(stackProfile);
 
   const systemPromptCore = consultativeUiAppearanceRun
     ? [
@@ -499,8 +507,8 @@ export async function buildAgentContext(
             });
 
   const systemPrompt = consultativeUiAppearanceRun
-    ? `${systemPromptCore}\n${stackProfileBlock}${runtimeAwarenessBlock}`
-    : `${systemPromptCore}${projectContextBlock}${gitSnapshotBlock}${agentsGuideBlock}${projectSkillsBlock}${projectMemoryBlock}${projectKnowledgeBlock}${exploreKnowledgeContextBlock}${explorationArchiveBlock}${stackProfileBlock}${runtimeAwarenessBlock}${
+    ? `${systemPromptCore}${projectContextBlock}${runtimeAwarenessBlock}`
+    : `${systemPromptCore}${projectContextBlock}${gitSnapshotBlock}${agentsGuideBlock}${projectSkillsBlock}${projectMemoryBlock}${projectKnowledgeBlock}${exploreKnowledgeContextBlock}${explorationArchiveBlock}${runtimeAwarenessBlock}${
         runPolicy.automatedBugFixRun ? buildAutomatedBugFixHint(
           runtimeProfile.verifyScripts?.length
             ? runtimeProfile.verifyScripts.join("; ")
@@ -509,14 +517,13 @@ export async function buildAgentContext(
         ) : ""
       }`;
 
-  const injectedKeyFilePaths = projectContextOrNull?.ok
-    ? buildInjectedKeyFilePathSet(projectContextOrNull)
-    : undefined;
+  const projectContextSnapshot: ProjectContextSnapshot =
+    isExecutePlan ? null : { ok: true, stackProfile };
 
   return {
     systemPrompt,
     projectContextBlock,
-    projectContextSnapshot: projectContextOrNull,
+    projectContextSnapshot,
     agentsGuideBlock,
     projectSkillsBlock,
     projectMemoryBlock,
@@ -524,10 +531,9 @@ export async function buildAgentContext(
     exploreKnowledgeContextBlock,
     explorationArchiveBlock,
     runtimeAwarenessBlock,
-    stackProfileBlock,
     openFile,
     openFileSnippet,
-    injectedKeyFilePaths,
+    injectedKeyFilePaths: undefined,
     exploreKnowledgeIntent,
     exploreUsesManifest,
   };

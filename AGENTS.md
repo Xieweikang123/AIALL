@@ -70,6 +70,8 @@ Sidecar 已按策略 B 删除，见 [`SIDECAR_DELETION.md`](SIDECAR_DELETION.md)
 
 路径清单见 `src/orchestration/orchestrationTiers.ts`；`agentOrchestrationGuard.test.ts` 按层扫描。
 
+**设计原则**：编排侧优先 **Context Retrieval + 模型泛化**，不用 Prompt Engineering 堆 Bug Playbook。always-on 只放机制契约；栈/症状相关事实走 Profile、knowledge、条件 hint 或工具校验。详见 `.cursor/rules/agent-orchestration.mdc`「设计原则」节。
+
 用户意图已拆分：`userIntentClassifiers.ts`（分类） vs `userIntentHints.ts`（注入 prompt 的 hint）。
 
 ## Agent 编排与提示词（通用性）

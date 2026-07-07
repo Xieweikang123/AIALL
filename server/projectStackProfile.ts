@@ -41,8 +41,9 @@ function detectFromPackageJson(projectRoot: string, profile: ProjectStackProfile
   const deps = { ...pkg.dependencies, ...pkg.devDependencies };
   const depNames = Object.keys(deps).map((d) => d.toLowerCase());
 
+  const vueVersion = deps.vue ?? deps.Vue ?? "";
   if (depNames.some((d) => d === "vue" || d.startsWith("@vue/"))) {
-    profile.frameworks.push("vue");
+    profile.frameworks.push(/^[\^~>=<]*3/.test(String(vueVersion)) ? "vue3" : "vue");
   }
   if (depNames.some((d) => d === "react" || d.startsWith("@react"))) {
     profile.frameworks.push("react");
@@ -88,6 +89,11 @@ function detectFromCsproj(projectRoot: string, profile: ProjectStackProfile): vo
     csprojText = "";
   }
 
+  if (/Microsoft\.AspNetCore|Sdk="Microsoft\.NET\.Sdk\.Web"/i.test(csprojText)) {
+    profile.frameworks.push("aspnet-core");
+  } else if (profile.runtimes.includes("dotnet")) {
+    profile.frameworks.push("dotnet");
+  }
   if (/Quartz/i.test(csprojText)) {
     profile.frameworks.push("quartz-net");
     profile.capabilities.push("scheduled-tasks");
@@ -163,24 +169,63 @@ export function stackProfileHasDotNet(profile: ProjectStackProfile): boolean {
   return profile.languages.includes("csharp") || profile.runtimes.includes("dotnet");
 }
 
-/** Compact JSON block for system prompt — facts only, no grep symbol prescriptions. */
-export function formatProjectStackProfileForPrompt(profile: ProjectStackProfile): string {
-  if (!profile.manifestFiles.length) return "";
+export type MinimalProjectContextRoute = {
+  path: string;
+  component: string;
+  desc?: string;
+};
 
-  const payload = {
+export type MinimalProjectContextPayload = {
+  root: string;
+  languages?: string[];
+  runtimes?: string[];
+  frameworks?: string[];
+  capabilities?: string[];
+  entryHints?: string[];
+  routes?: MinimalProjectContextRoute[];
+};
+
+function compactPayload<T extends Record<string, unknown>>(payload: T): T {
+  const out = { ...payload };
+  for (const key of Object.keys(out)) {
+    const value = out[key];
+    if (value == null) delete out[key];
+    else if (Array.isArray(value) && value.length === 0) delete out[key];
+  }
+  return out;
+}
+
+/** Minimal JSON block injected as projectContextBlock — stack facts only, no symbol playbooks. */
+export function formatMinimalProjectContextBlock(
+  projectRoot: string,
+  profile: ProjectStackProfile,
+  routes?: MinimalProjectContextRoute[],
+): string {
+  const payload = compactPayload({
+    root: projectRoot,
     languages: profile.languages,
     runtimes: profile.runtimes,
     frameworks: profile.frameworks,
     capabilities: profile.capabilities,
-    manifestFiles: profile.manifestFiles,
-    entryHints: profile.entryHints.length ? profile.entryHints : undefined,
-  };
+    entryHints: profile.entryHints,
+    routes,
+  });
+
+  if (Object.keys(payload).length <= 1 && !routes?.length) {
+    return `\n\n项目根：${projectRoot}`;
+  }
 
   return [
     "",
-    "【项目栈 Profile】以下为启动时从 manifest 检测的结构化事实；排查调度/API/框架问题时优先依据 Profile，勿凭记忆臆测栈。",
+    "【项目上下文】manifest 检测的结构化事实；排查时依此栈自行选用符号与入口，勿凭记忆臆测。",
     "```json",
     JSON.stringify(payload, null, 2),
     "```",
   ].join("\n");
+}
+
+/** @deprecated Use formatMinimalProjectContextBlock — kept for tests. */
+export function formatProjectStackProfileForPrompt(profile: ProjectStackProfile): string {
+  if (!profile.manifestFiles.length) return "";
+  return formatMinimalProjectContextBlock("", profile);
 }

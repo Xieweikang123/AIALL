@@ -6,7 +6,7 @@ use super::policy::{AgentRunPolicy, UserIntent};
 static SCHEDULED_TASK_TOPIC_RE: once_cell::sync::Lazy<regex::Regex> =
   once_cell::sync::Lazy::new(|| {
     regex::Regex::new(
-      r"(?:有没有|是否有|有无).{0,32}(?:定时|调度|cron|Cron|周期)|(?:定时|调度).{0,24}(?:任务|job|Job|触发)|\bcron\b|CronSchedule|何时执行|什么时候跑|几点执行|执行频率|多久执行一次",
+      r"(?:有没有|是否有|有无).{0,32}(?:定时|调度|cron|Cron|周期)|(?:定时|调度).{0,24}(?:任务|job|Job|触发)|\bcron\b|何时执行|什么时候跑|几点执行|执行频率|多久执行一次",
     )
     .unwrap()
   });
@@ -49,7 +49,7 @@ static JOB_FILE_PATH_RE: once_cell::sync::Lazy<regex::Regex> =
 static SCHEDULE_REGISTRATION_RE: once_cell::sync::Lazy<regex::Regex> =
   once_cell::sync::Lazy::new(|| {
     regex::Regex::new(
-      r"CronSchedule|TriggerBuilder|ScheduleJob|WithCronSchedule|IScheduler|IJobDetail|AddJob|Schedule.*Job",
+      r"ScheduleJob|AddJob|Schedule.*Job|cron\.schedule|node-cron|@Cron|registerSchedule|setInterval|CronSchedule|TriggerBuilder|WithCronSchedule|IScheduler|IJobDetail|Startup",
     )
     .unwrap()
   });
@@ -70,17 +70,17 @@ const TOPIC_IDS: &[&str] = &[
 
 pub fn build_scheduled_task_consultative_hint() -> &'static str {
   "\n【定时/调度类】用户问的是有无定时任务、何时触发、执行频率等。\n\
-   read 到 IJob / Job 实现后，须 grep Job 类名或 Schedule/Trigger/CronSchedule/TriggerBuilder 找注册处并 read，再作答。\n\
+   read 到 job/task 实现后，须继续 trace 到调度注册/触发配置处并 read；符号与入口路径依上方【项目上下文】JSON 与 manifest 自行选用，勿凭记忆臆测。\n\
    禁止只 trace Execute→Service 即收工；答案须含触发时机/频率（代码中有则写明）。\n\
-   探索时避免连续 list_dir 逐级下探超过 2 层，优先 grep/search_files 定位 Tasks 或调度注册文件。"
+   探索时避免连续 list_dir 逐级下探超过 2 层，优先 grep/search_files 定位调度注册文件。"
 }
 
 pub fn build_project_overview_consultative_hint() -> &'static str {
   "\n【项目概览】用户问的是整个应用/仓库做什么，不是某个函数行为。\n\
-   1. 优先引用 system 已注入的「顶层路由与页面说明」与 AGENTS.md 产品入口；\n\
+   1. 优先引用 system 已注入的【项目上下文】JSON 中的 routes 与 AGENTS.md 产品入口；\n\
    2. 仅当摘要不足时再 read 路由入口或各 view 首屏 desc（offset/limit 约 1–80 行）；\n\
    3. 回答按「入口 → 用途」逐项说明全部顶层路由，勿只深挖单一子系统；\n\
-   4. 已注入的关键文件（如 package.json）勿重复 read_file；\n\
+   4. 已注入的项目上下文 JSON 勿重复 read_file 相同 manifest；\n\
    5. 禁止用单一产品类比替代多入口说明。"
 }
 
@@ -133,7 +133,7 @@ pub fn build_scheduled_job_registration_nudge(job_class_names: &[String]) -> Str
   let first = job_class_names.first().map(String::as_str).unwrap_or("Job");
   format!(
     "【系统提示】你已 read Job 类（{listed}），但尚未 read/grep 调度注册处。\n\
-     下一轮 grep `{first}` 或 CronSchedule/TriggerBuilder/ScheduleJob，read Startup 或调度配置文件。\n\
+     下一轮 grep `{first}` 并 trace 到调度注册/触发配置（符号依【项目上下文】JSON）；read 注册入口后再作答。\n\
      作答须含触发时机/频率（如 cron、启动即跑）；禁止只写 Execute→Service 业务逻辑即结束。"
   )
 }
@@ -316,7 +316,15 @@ pub fn extract_job_class_names_from_read_paths(read_paths: &[String]) -> Vec<Str
 }
 
 pub fn has_schedule_registration_evidence(read_paths: &[String], grep_patterns: &[String]) -> bool {
-  if read_paths.iter().any(|p| p.replace('\\', "/").contains("startup")) {
+  if read_paths.iter().any(|p| {
+    let normalized = p.replace('\\', "/").to_lowercase();
+    normalized.contains("startup")
+      || normalized.contains("program.cs")
+      || normalized.contains("scheduler")
+      || normalized.contains("quartz")
+      || normalized.contains("hangfire")
+      || normalized.contains("cron")
+  }) {
     return true;
   }
   let grep_blob = grep_patterns.join("\n");

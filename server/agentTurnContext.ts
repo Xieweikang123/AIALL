@@ -77,6 +77,7 @@ export interface AgentTurnContext {
   emptyReplyRetries: number;
   prematureCompletionRetries: number;
   patchFailureCompletionRetries: number;
+  manualHandoffRetries: number;
   finishGateRetries: number;
   turnCapFinalSummaryAttempts: number;
 
@@ -197,6 +198,7 @@ export function createAgentTurnContext(params: {
     emptyReplyRetries: 0,
     prematureCompletionRetries: 0,
     patchFailureCompletionRetries: 0,
+    manualHandoffRetries: 0,
     finishGateRetries: 0,
     turnCapFinalSummaryAttempts: 0,
 

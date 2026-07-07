@@ -6,7 +6,9 @@ import {
   claimsSuccessDespitePatchFailures,
   shouldNudgeAlternateUiPatchStrategy,
   consumePatchRecoveryRead,
+  invalidateFileReadCache,
   invalidateFileReadState,
+  isManualHandoffWithoutWriteReply,
   isAnalysisOnlyReplyUnderForcePatch,
   isBlockedGrepAfterLocate,
   isBlockedGrepAfterVisionMisread,
@@ -189,18 +191,56 @@ describe("agentExploreGuard", () => {
     const readFileRanges = new Map<string, ReturnType<typeof readLineRangeFromArgs>[]>([
       ["src/foo.ts", [readLineRangeFromArgs(1, 50)]],
     ]);
+    const readCache = new Map<string, string>([["src/foo.ts", "full"]]);
     const toolGuard: ToolGuardContext = {
       readFileRanges,
       patchRecoveryFiles: new Set(["src/foo.ts"]),
     } as ToolGuardContext;
 
-    invalidateFileReadState("src/foo.ts", readSliceCache, readSliceRepeatCounts, readFileRanges);
+    invalidateFileReadState("src/foo.ts", readSliceCache, readSliceRepeatCounts, readFileRanges, readCache);
     expect(readSliceCache.size).toBe(0);
     expect(readSliceRepeatCounts.size).toBe(0);
     expect(readFileRanges.has("src/foo.ts")).toBe(false);
+    expect(readCache.has("src/foo.ts")).toBe(false);
 
     expect(consumePatchRecoveryRead(toolGuard, "src/foo.ts")).toBe(true);
     expect(toolGuard.patchRecoveryFiles?.has("src/foo.ts")).toBe(false);
+  });
+
+  it("invalidateFileReadCache preserves overlap ranges", () => {
+    const readSliceCache = new Map<string, string>([["src/foo.ts:1:50", "cached"]]);
+    const readFileRanges = new Map<string, ReturnType<typeof readLineRangeFromArgs>[]>([
+      ["src/foo.ts", [readLineRangeFromArgs(260, 35)]],
+    ]);
+    invalidateFileReadCache("src/foo.ts", readSliceCache, undefined, undefined);
+    expect(readSliceCache.size).toBe(0);
+    expect(readFileRanges.get("src/foo.ts")?.length).toBe(1);
+  });
+
+  it("detects near-overlap within line margin", () => {
+    const a = readLineRangeFromArgs(260, 35);
+    const b = readLineRangeFromArgs(262, 30);
+    expect(readRangesOverlap(a, b)).toBe(true);
+  });
+
+  it("accepts patch old_string with LF against CRLF read slice via normalization", () => {
+    const slices = new Map<string, string>([
+      ["src/foo.ts:260:35", "  chip.appendChild(img);\n  return chip;\n"],
+    ]);
+    expect(
+      checkPatchOldStringFromReads(
+        "src/foo.ts",
+        "  chip.appendChild(img);\n  return chip;",
+        slices,
+      ),
+    ).toBeNull();
+  });
+
+  it("detects manual handoff final reply without writes", () => {
+    const summary =
+      "## 总结\n**未成功修改代码**。建议的修复（手动或另起对话执行）\n```js\nchip.remove();\n```";
+    expect(isManualHandoffWithoutWriteReply(summary, true)).toBe(true);
+    expect(isManualHandoffWithoutWriteReply("已修改 foo.ts，改动如下", false)).toBe(false);
   });
 
   it("detects empty or insufficient final replies", () => {

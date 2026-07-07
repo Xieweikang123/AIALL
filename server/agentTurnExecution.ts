@@ -28,7 +28,6 @@ import {
 } from "../shared/agentExplorationBudget";
 import { buildPatchAnchorLocatedNudge, shouldNudgeAlternateUiPatchStrategy } from "./agentExploreGuard";
 import { buildScheduledJobRegistrationNudge, shouldNudgeScheduledJobRegistration } from "../src/services/agentConsultativeTopics";
-import { detectProjectStackProfile, stackProfileHasDotNet } from "./projectStackProfile";
 import { extractJobClassNamesFromReadPaths } from "../src/services/agentStructuralPatterns";
 import { detectProjectRuntimeProfile } from "./agentRuntimeHint";
 import { buildPostPatchVerifyNudge } from "../shared/agentExplorationBudget";
@@ -447,8 +446,8 @@ export async function runTurnExecution(
       role: "system",
       content:
         `【系统纠正】本轮 ${thisTurnPatchFailures.length} 个 patch_file 调用失败（文件：${failedFiles}）。` +
-        "请 read_file 重新读取；从返回原文复制更短且唯一的 old_string 再 patch。" +
-        "禁止凭记忆构造 old_string。",
+        "请 read_file 重新读取；从返回原文复制更短且唯一的 old_string 再 patch（Windows 磁盘文件常为 \\r\\n，工具会自动尝试 EOL 归一化）。" +
+        "若仍失败且改动范围小：可对已 read 的完整文件用 write_file 写回。禁止凭记忆构造 old_string。",
     });
     for (const path of new Set(thisTurnPatchFailures.map((f) => f.path).filter(Boolean))) {
       if (shouldNudgeAlternateUiPatchStrategy(ctx.patchFailureLog, path)) {
@@ -530,8 +529,7 @@ export async function runTurnExecution(
   ) {
     const readPaths = ctx.toolGuard.consultativeReadPaths;
     const grepPatterns = ctx.toolGuard.grepPatterns ?? [];
-    const hasDotNetProject = stackProfileHasDotNet(detectProjectStackProfile(projectRoot));
-    if (shouldNudgeScheduledJobRegistration(readPaths, grepPatterns, hasDotNetProject)) {
+    if (shouldNudgeScheduledJobRegistration(readPaths, grepPatterns)) {
       const jobNames = extractJobClassNamesFromReadPaths(readPaths);
       if (jobNames.length > 0) {
         ctx.messages.push({

@@ -5,10 +5,15 @@ use std::path::{Path, PathBuf};
 
 mod health_scan;
 mod memory_usage;
+mod stack_profile;
 mod verify_run;
 
 pub use health_scan::project_health_scan;
 pub use memory_usage::memory_usage_track_command;
+pub use stack_profile::{
+  detect_project_stack_profile, format_minimal_project_context_block, MinimalProjectContextRoute,
+  ProjectStackProfile,
+};
 pub use verify_run::project_verify_run;
 
 pub(crate) fn project_file(root: &str, rel: &str) -> PathBuf {

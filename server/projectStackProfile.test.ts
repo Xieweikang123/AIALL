@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   detectProjectStackProfile,
+  formatMinimalProjectContextBlock,
   formatProjectStackProfileForPrompt,
   stackProfileHasDotNet,
 } from "./projectStackProfile";
@@ -38,7 +39,7 @@ describe("projectStackProfile", () => {
     });
     const profile = detectProjectStackProfile(root);
     expect(profile.languages).toContain("typescript");
-    expect(profile.frameworks).toContain("vue");
+    expect(profile.frameworks).toContain("vue3");
     expect(profile.frameworks).toContain("tauri");
     expect(profile.runtimes).toContain("node");
     expect(profile.runtimes).toContain("desktop-shell");
@@ -74,18 +75,42 @@ describe("projectStackProfile", () => {
   });
 
   it("formats compact json block for prompt injection", () => {
-    const block = formatProjectStackProfileForPrompt({
+    const block = formatMinimalProjectContextBlock("/tmp/demo", {
       languages: ["typescript"],
       runtimes: ["node"],
-      frameworks: ["vue"],
+      frameworks: ["vue3"],
       capabilities: [],
       manifestFiles: ["package.json"],
       entryHints: [],
     });
-    expect(block).toContain("【项目栈 Profile】");
+    expect(block).toContain("【项目上下文】");
     expect(block).toContain('"frameworks"');
-    expect(block).toContain("vue");
+    expect(block).toContain("vue3");
     expect(block).not.toContain("CronSchedule");
+  });
+
+  it("detects vue3 from package version", () => {
+    const root = makeRoot((r) => {
+      fs.writeFileSync(
+        path.join(r, "package.json"),
+        JSON.stringify({ dependencies: { vue: "^3.5.0" } }),
+        "utf8",
+      );
+    });
+    const profile = detectProjectStackProfile(root);
+    expect(profile.frameworks).toContain("vue3");
+  });
+
+  it("detects aspnet-core from csproj", () => {
+    const root = makeRoot((r) => {
+      fs.writeFileSync(
+        path.join(r, "App.csproj"),
+        '<Project Sdk="Microsoft.NET.Sdk.Web"><ItemGroup><PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.0" /></ItemGroup></Project>',
+        "utf8",
+      );
+    });
+    const profile = detectProjectStackProfile(root);
+    expect(profile.frameworks).toContain("aspnet-core");
   });
 
   it("returns empty format block when no manifests", () => {

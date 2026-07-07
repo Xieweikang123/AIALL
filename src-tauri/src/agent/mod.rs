@@ -9,6 +9,7 @@ mod consultative_topics;
 mod consultative_trace;
 mod explore_prompt;
 mod explore_guard;
+mod patch;
 mod knowledge_explore;
 mod knowledge_manifest;
 pub mod exploration;

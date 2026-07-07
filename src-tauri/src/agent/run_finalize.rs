@@ -8,7 +8,8 @@ use super::consultative_trace::{
 };
 use super::explore_guard::{
   claims_ghost_modification_reply, claims_success_despite_patch_failures,
-  build_ghost_reply_retry_nudge, is_analysis_only_reply_under_force_patch,
+  build_ghost_reply_retry_nudge, build_manual_handoff_retry_nudge,
+  is_analysis_only_reply_under_force_patch, is_manual_handoff_without_write_reply,
   PatchFailureEntry, ToolGuardState,
 };
 use super::ambiguous_term::{looks_like_clarification_question, looks_like_premature_plan_or_scaffold};
@@ -72,6 +73,7 @@ pub(crate) struct FinalizeTurnMut {
   pub modification_audit_sent: bool,
   pub patch_required_retries: u32,
   pub patch_failure_completion_retries: u32,
+  pub manual_handoff_retries: u32,
   pub premature_completion_retries: u32,
   pub empty_reply_retries: u32,
   pub workspace_cleanup_nudge_sent: bool,
@@ -328,6 +330,39 @@ pub(crate) fn handle_final_turn(
       "role": "user",
       "content": build_patch_required_retry_nudge()
     }));
+    return FinalizeTurnOutcome::Continue;
+  }
+
+  if !params.is_read_only_run
+    && params.mode != "plan"
+    && !params.run_policy.read_only_build_run
+    && params.written_files.is_empty()
+    && state.manual_handoff_retries < 1
+    && is_manual_handoff_without_write_reply(
+      params.assistant_text,
+      !params.patch_failure_log.is_empty(),
+    )
+  {
+    state.manual_handoff_retries += 1;
+    params
+      .messages
+      .push(json!({ "role": "assistant", "content": params.assistant_text }));
+    params.messages.push(json!({
+      "role": "user",
+      "content": build_manual_handoff_retry_nudge()
+    }));
+    emit(
+      params.channel,
+      json!({
+        "type": "status",
+        "data": {
+          "phase": "manual_handoff_retry",
+          "turn": params.turn,
+          "maxTurns": params.segment_max_turns,
+          "detail": "有方案但未落盘，已禁止手动粘贴收尾"
+        }
+      }),
+    );
     return FinalizeTurnOutcome::Continue;
   }
 

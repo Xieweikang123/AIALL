@@ -4,7 +4,7 @@ use super::explore_guard::{
   build_blocked_grep_after_locate_message, build_blocked_grep_message,
   build_low_signal_vision_locate_grep_message, build_overly_broad_vision_grep_message,
   build_search_files_content_query_message, check_overlapping_read, check_patch_old_string_from_reads,
-  consume_patch_recovery_read, invalidate_file_read_state, is_blocked_grep_after_locate,
+  consume_patch_recovery_read, invalidate_file_read_cache, invalidate_file_read_state, is_blocked_grep_after_locate,
   is_blocked_grep_after_vision_misread, is_low_signal_vision_locate_grep, is_overly_broad_vision_grep,
   is_search_files_content_query, is_vision_grep_low_spread, mark_patch_recovery_file,
   read_line_range_from_args, record_grep_hit_vue_files, record_read_range, require_prior_read,
@@ -394,7 +394,7 @@ async fn exec_patch_file(ctx: &mut ToolExecContext<'_>, args: &Value) -> (bool, 
         Some(&ctx.tool_guard.read_cache),
       ) {
         mark_patch_recovery_file(ctx.tool_guard, &file_key);
-        invalidate_file_read_state(ctx.tool_guard, &file_key);
+        invalidate_file_read_cache(ctx.tool_guard, &file_key);
         return (false, err);
       }
       if is_introspect_business_route_patch(&file_key, old_str, new_str) {
@@ -404,25 +404,22 @@ async fn exec_patch_file(ctx: &mut ToolExecContext<'_>, args: &Value) -> (bool, 
       if !read_result.ok {
         return (false, read_result.error.unwrap_or_else(|| "读取失败".into()));
       }
-      let count = read_result.content.matches(old_str).count();
-      if count == 0 {
-        mark_patch_recovery_file(ctx.tool_guard, &file_key);
-        invalidate_file_read_state(ctx.tool_guard, &file_key);
-        return (false, "错误：未在文件中找到匹配的 old_string".into());
-      }
-      if count > 1 {
-        mark_patch_recovery_file(ctx.tool_guard, &file_key);
-        invalidate_file_read_state(ctx.tool_guard, &file_key);
-        return (false, "错误：old_string 在文件中出现多次，请提供更多上下文".into());
-      }
-      let patched = read_result.content.replace(old_str, new_str);
-      match crate::fs::write_file_content(&resolved.to_string_lossy(), &patched).await {
-        Ok(_) => {
-          invalidate_file_read_state(ctx.tool_guard, &file_key);
-          ctx.tool_guard.vision_locate_active = false;
-          (true, format!("已修改 {path}"))
+      match super::patch::apply_unique_patch(&read_result.content, old_str, new_str) {
+        super::patch::UniquePatchResult::Ok { patched } => {
+          match crate::fs::write_file_content(&resolved.to_string_lossy(), &patched).await {
+            Ok(_) => {
+              invalidate_file_read_state(ctx.tool_guard, &file_key);
+              ctx.tool_guard.vision_locate_active = false;
+              (true, format!("已修改 {path}"))
+            }
+            Err(e) => (false, e),
+          }
         }
-        Err(e) => (false, e),
+        super::patch::UniquePatchResult::Err { error, .. } => {
+          mark_patch_recovery_file(ctx.tool_guard, &file_key);
+          invalidate_file_read_cache(ctx.tool_guard, &file_key);
+          (false, error)
+        }
       }
     }
     Err(e) => (false, e),
