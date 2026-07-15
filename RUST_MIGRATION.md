@@ -210,6 +210,6 @@ async function mySimpleCmd(arg: string): Promise<Result> {
 ### 注意事项
 
 - **Web 预览** — 浏览器 `dev:web` 不再连接 sidecar；`invokeBackend` 提示使用 Tauri 桌面版。Vitest 中仍可通过 `httpFallback` 测客户端契约
-- **不删除 Node 编排** — `server/vibeAgent.ts` 等保留供 Vitest / `agent-smoke`；HTTP 运行时已移除
+- **Node 编排按 SSOT 收缩** — `server/vibeAgent.ts` 等暂留供 Vitest / legacy `agent-smoke`；行为真相源为 Rust。归属表与删除队列见 [`AGENT_SSOT.md`](AGENT_SSOT.md)；HTTP 运行时已移除
 - **`cargo check`** — 修改 Rust 代码后必须通过 `cargo check`
 - **每种 AI 采用不同的系统 Prompt 指向此文档**，并在文档中标注自己当前负责的模块

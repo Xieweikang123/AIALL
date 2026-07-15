@@ -37,6 +37,30 @@ use super::vision_consultative::{
 };
 use super::probe_guard::{is_ephemeral_probe_path, ProbeArtifactTracker};
 
+/// Run the desktop Agent without a WebView, forwarding events to `on_event`.
+/// Used by `agent-smoke` CLI — same loop as Tauri `agent_run`.
+pub async fn agent_run_headless(
+  request: AgentRunRequest,
+  on_event: Arc<dyn Fn(Value) + Send + Sync>,
+  cancel: Arc<AtomicBool>,
+) -> Result<(), String> {
+  use tauri::ipc::InvokeResponseBody;
+  let on_event_cb = on_event.clone();
+  let channel = Channel::new(move |body| {
+    let value = match body {
+      InvokeResponseBody::Json(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
+        json!({ "type": "error", "data": { "message": format!("event json: {e}") } })
+      }),
+      InvokeResponseBody::Raw(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+        json!({ "type": "error", "data": { "message": format!("event raw: {e}") } })
+      }),
+    };
+    on_event_cb(value);
+    Ok(())
+  });
+  agent_run(request, channel, cancel).await
+}
+
 pub async fn agent_run(
   request: AgentRunRequest,
   channel: Channel<Value>,

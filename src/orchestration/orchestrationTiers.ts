@@ -50,7 +50,7 @@ export const PRODUCT_ORCHESTRATION_PATHS = [
   "src/orchestration/product/agentExplorePrompt.ts",
   "src/orchestration/product/agentTopicFollowUp.ts",
   "src/orchestration/product/visionMessage.ts",
-  /** Vitest / agent-smoke fixtures — guarded until Node Agent path is removed. */
+  /** Vitest / legacy agent-smoke fixtures — guarded until Node Agent path is removed (AGENT_SSOT.md). */
   "src/orchestration/product/agentPlanPrompt.ts",
   "server/agentContextBuilder.ts",
   "server/agentRuntimeHint.ts",

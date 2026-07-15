@@ -1,4 +1,4 @@
-mod agent;
+pub mod agent;
 mod ai;
 mod automation;
 mod chat;

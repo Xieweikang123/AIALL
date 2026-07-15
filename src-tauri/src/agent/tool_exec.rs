@@ -179,12 +179,18 @@ async fn exec_read_file(ctx: &mut ToolExecContext<'_>, args: &Value) -> (bool, S
 }
 
 async fn exec_list_dir(project_path: &str, args: &Value) -> (bool, String) {
-  let path = args
+  let input = args
     .get("path")
     .and_then(|v| v.as_str())
-    .filter(|s| !s.is_empty())
-    .unwrap_or(project_path);
-  match crate::fs::list_directory(path).await {
+    .filter(|s| !s.is_empty());
+  let path = match input {
+    Some(p) => match crate::paths::resolve_readable_path(project_path, p) {
+      Ok((resolved, _, _)) => resolved.to_string_lossy().to_string(),
+      Err(e) => return (false, e),
+    },
+    None => project_path.to_string(),
+  };
+  match crate::fs::list_directory(&path).await {
     Ok(items) => {
       let lines: Vec<String> = items
         .iter()
@@ -529,7 +535,36 @@ async fn exec_web_extract(args: &Value, proxy_url: Option<&str>) -> (bool, Strin
 
 #[cfg(test)]
 mod tests {
-  use super::block_write;
+  use super::{block_write, exec_list_dir};
+  use serde_json::json;
+
+  #[tokio::test]
+  async fn exec_list_dir_resolves_relative_path() {
+    let tmp = std::env::temp_dir().join("opencode-test-list-dir");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(tmp.join("subdir")).unwrap();
+    std::fs::write(tmp.join("subdir").join("a.txt"), "").unwrap();
+    std::fs::write(tmp.join("subdir").join("b.rs"), "").unwrap();
+    let args = json!({ "path": "subdir" });
+    let (ok, out) = exec_list_dir(tmp.to_str().unwrap(), &args).await;
+    assert!(ok, "expected Ok, got error: {out}");
+    assert!(out.contains("a.txt"), "should list a.txt, got: {out}");
+    assert!(out.contains("b.rs"), "should list b.rs, got: {out}");
+    let _ = std::fs::remove_dir_all(&tmp);
+  }
+
+  #[tokio::test]
+  async fn exec_list_dir_defaults_to_project_root() {
+    let tmp = std::env::temp_dir().join("opencode-test-list-dir-root");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    std::fs::write(tmp.join("root-file.ts"), "").unwrap();
+    let args = json!({});
+    let (ok, out) = exec_list_dir(tmp.to_str().unwrap(), &args).await;
+    assert!(ok, "expected Ok, got error: {out}");
+    assert!(out.contains("root-file.ts"), "should list root-file.ts, got: {out}");
+    let _ = std::fs::remove_dir_all(&tmp);
+  }
 
   #[test]
   fn block_write_ask_returns_some() {

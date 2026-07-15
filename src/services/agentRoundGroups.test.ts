@@ -13,7 +13,7 @@ import {
 describe("agentRoundGroups", () => {
   it("groups model phases under the same turn", () => {
     resetAgentRoundGroupIds();
-    let groups = recordAgentRoundStatus(undefined, "compacting_context", "正在压缩并准备模型上下文… · 48 条", 3);
+    let groups = recordAgentRoundStatus(undefined, "compacting_context", "正在整理上下文… · 48 条", 3);
     groups = recordAgentRoundStatus(groups, "sending_request", "正在发送模型请求… · 正在发送请求", 3);
     groups = recordAgentRoundStatus(groups, "waiting_model", "正在等待模型响应（第 3 轮）… · 等待首包 · 3s", 3);
 
@@ -33,7 +33,7 @@ describe("agentRoundGroups", () => {
 
   it("attaches narrative, model steps, and tools to one round view", () => {
     resetAgentRoundGroupIds();
-    let groups = recordAgentRoundStatus(undefined, "compacting_context", "正在压缩并准备模型上下文…", 1);
+    let groups = recordAgentRoundStatus(undefined, "compacting_context", "正在整理上下文…", 1);
     groups = recordAgentRoundNarrative(groups, 1, "让我看看 VibeCodingView 中发送消息的逻辑");
     groups = recordAgentRoundToolStart(groups, "tool-1", 1);
 

@@ -43,10 +43,10 @@ npm run agent:test-guards
 
 ## 保留
 
-- `src-tauri/` — 桌面运行时
+- `src-tauri/` — 桌面运行时（Agent 行为真相源）
 - `shared/` — 共享类型与格式（含 `agentContextLimits`、`agentMessageCompact`、`aiRetry`、`chatMessageNormalize`；TS/Rust 常量 parity 见 `shared/agentConstantsParity.test.ts`）
-- `server/` — 编排逻辑 + Vitest（**非 HTTP**）
-- Vitest 中编排/准确度相关测试
+- `server/` — Node Agent / 工具链仅供 Vitest + **legacy** `agent-smoke`（**非 HTTP**）；收缩计划见 [`AGENT_SSOT.md`](AGENT_SSOT.md)
+- Vitest 中编排/准确度相关测试（契约在 `src/orchestration` / `src/services`）
 
 ## 快速检查
 

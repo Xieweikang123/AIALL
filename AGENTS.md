@@ -56,7 +56,7 @@
 | `npm run dev:web` | 浏览器 UI 预览（Agent/Git/FS 不可用，提示使用桌面版） |
 | `npm run test:rust-agent` | Rust Agent parity 单测 |
 
-Sidecar 已按策略 B 删除，见 [`SIDECAR_DELETION.md`](SIDECAR_DELETION.md)。桌面功能以 `src-tauri/` 为准；`server/` 保留编排逻辑与 Vitest，不再提供 HTTP 服务。
+Sidecar 已按策略 B 删除，见 [`SIDECAR_DELETION.md`](SIDECAR_DELETION.md)。桌面功能以 `src-tauri/` 为准；`server/` 保留 Node Agent 参考实现与 Vitest（非 HTTP），按 [`AGENT_SSOT.md`](AGENT_SSOT.md) 逐步收缩到「Rust 跑行为、TS 测契约、shared 钉常量」。
 
 ## Agent 编排分层
 

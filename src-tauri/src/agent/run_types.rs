@@ -83,6 +83,37 @@ pub struct AgentRunRequest {
   pub(crate) resolved_user_intent: Option<ResolvedUserIntentPayload>,
 }
 
+impl AgentRunRequest {
+  /// Headless / CLI smoke entry — no UI history or run profile.
+  pub fn for_smoke(
+    project_path: String,
+    prompt: String,
+    endpoint: String,
+    api_key: Option<String>,
+    model: String,
+    mode: Option<String>,
+    max_turns: Option<u32>,
+    image_data_urls: Option<Vec<String>>,
+  ) -> Self {
+    Self {
+      prompt,
+      history: None,
+      project_path,
+      endpoint,
+      api_key,
+      model,
+      mode,
+      max_turns,
+      open_file_path: None,
+      image_data_urls,
+      task_written_files: None,
+      web_proxy_url: None,
+      run_profile: None,
+      resolved_user_intent: None,
+    }
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::AgentRunProfile;

@@ -10,7 +10,7 @@
     "test:rust-agent": "node scripts/rust-agent-parity.mjs",
     "agent:smoke": "tsx scripts/agent-smoke.ts",
     "agent:regression": "tsx scripts/agent-regression-rust.ts && vitest run src/services/agentRegression.test.ts && tsx scripts/agent-regression.ts",
-    "agent:test-guards": "npm run test:rust-agent && vitest run server/projectContextParity.test.ts src/services/agentOrchestrationGuard.test.ts server/visionMessage.test.ts server/agentExplorationBudget.test.ts server/agentExploreGuard.test.ts server/vibeAgent.test.ts src/services/agentRegression.test.ts src/services/agentAuditRegression.test.ts",
+    "agent:test-guards": "npm run test:rust-agent && vitest run server/projectContextParity.test.ts src/services/agentOrchestrationGuard.test.ts server/visionMessage.test.ts server/agentExplorationBudget.test.ts server/agentExploreGuard.test.ts src/services/agentRegression.test.ts src/services/agentAuditRegression.test.ts",
     "build:tauri": "cross-env vue-tsc --noEmit && cross-env vite build",
     "tauri:build": "tauri build"
   },

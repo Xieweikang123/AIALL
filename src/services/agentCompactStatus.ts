@@ -265,7 +265,7 @@ export function buildCursorCompactLiveStatus(input: AgentCompactStatusInput): st
     live.phase === "waiting_model" ||
     live.phase === "sending_request" ||
     live.phase === "retrying_model";
-  if (live.phase === "compacting_context") parts.push("压缩上下文…");
+  if (live.phase === "compacting_context") parts.push("整理上下文…");
   else if (live.phase === "summarizing_tools") parts.push("整理工具结果…");
   else if (live.phase === "executing_tool" || live.phase === "executing_tools") return null;
   else if (waitingModel) parts.push("等待模型响应…");

@@ -103,7 +103,7 @@ export function formatAgentLiveStatus(
     return appendStatusDetail("正在扫描项目上下文…", detail);
   }
   if (phase === "compacting_context") {
-    return appendStatusDetail("正在压缩并准备模型上下文…", detail);
+    return appendStatusDetail("正在整理上下文…", detail);
   }
   if (phase === "vision_first_turn") {
     return appendStatusDetail("正在查看附图并描述所见…", detail);
