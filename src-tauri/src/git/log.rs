@@ -12,6 +12,14 @@ pub struct GitLogFile {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GitLogRef {
+  pub name: String,
+  #[serde(rename = "type")]
+  pub ref_type: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GitLogEntry {
   pub hash: String,
   pub short_hash: String,
@@ -19,6 +27,8 @@ pub struct GitLogEntry {
   pub date: String,
   pub message: String,
   pub files: Vec<GitLogFile>,
+  #[serde(skip_serializing_if = "Vec::is_empty")]
+  pub refs: Vec<GitLogRef>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -87,6 +97,7 @@ pub(crate) fn parse_git_log(stdout: &str) -> Vec<GitLogEntry> {
         });
       }
     }
+    let refs = parse_refs(parts[4]);
     entries.push(GitLogEntry {
       hash: parts[0].trim().to_string(),
       short_hash: parts[1].trim().to_string(),
@@ -94,9 +105,48 @@ pub(crate) fn parse_git_log(stdout: &str) -> Vec<GitLogEntry> {
       date: parts[3].trim().to_string(),
       message: parts[5..].join("\x1f").trim().to_string(),
       files,
+      refs,
     });
   }
   entries
+}
+
+fn parse_refs(decorate_str: &str) -> Vec<GitLogRef> {
+  let mut refs = Vec::new();
+  let trimmed = decorate_str.trim();
+  if trimmed.is_empty() || trimmed == "()" {
+    return refs;
+  }
+  let inner = trimmed.trim_start_matches('(').trim_end_matches(')');
+  for part in inner.split(", ") {
+    let part = part.trim();
+    if part.is_empty() {
+      continue;
+    }
+    if let Some(tag) = part.strip_prefix("tag: ") {
+      refs.push(GitLogRef {
+        name: tag.to_string(),
+        ref_type: "tag".to_string(),
+      });
+    } else if part.starts_with("HEAD -> ") {
+      let name = part.trim_start_matches("HEAD -> ");
+      refs.push(GitLogRef {
+        name: name.to_string(),
+        ref_type: "head".to_string(),
+      });
+    } else if part.contains('/') {
+      refs.push(GitLogRef {
+        name: part.to_string(),
+        ref_type: "remote".to_string(),
+      });
+    } else {
+      refs.push(GitLogRef {
+        name: part.to_string(),
+        ref_type: "local".to_string(),
+      });
+    }
+  }
+  refs
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -242,5 +292,49 @@ mod tests {
   fn test_parse_git_log_only_separators() {
     let entries = parse_git_log("\x1e");
     assert!(entries.is_empty());
+  }
+
+  #[test]
+  fn test_parse_refs_tag() {
+    let refs = parse_refs(" (tag: v1.0)");
+    assert_eq!(refs.len(), 1);
+    assert_eq!(refs[0].name, "v1.0");
+    assert_eq!(refs[0].ref_type, "tag");
+  }
+
+  #[test]
+  fn test_parse_refs_head() {
+    let refs = parse_refs(" (HEAD -> main, origin/main)");
+    assert_eq!(refs.len(), 2);
+    assert_eq!(refs[0].name, "main");
+    assert_eq!(refs[0].ref_type, "head");
+    assert_eq!(refs[1].name, "origin/main");
+    assert_eq!(refs[1].ref_type, "remote");
+  }
+
+  #[test]
+  fn test_parse_refs_local() {
+    let refs = parse_refs(" (feature-branch)");
+    assert_eq!(refs.len(), 1);
+    assert_eq!(refs[0].name, "feature-branch");
+    assert_eq!(refs[0].ref_type, "local");
+  }
+
+  #[test]
+  fn test_parse_refs_empty() {
+    let refs = parse_refs("");
+    assert!(refs.is_empty());
+  }
+
+  #[test]
+  fn test_parse_git_log_with_refs() {
+    let input = "\x1eabc1234def\x1fabc1234\x1fAlice\x1f2024-01-01\x1f (HEAD -> main, tag: v1)\x1fInitial commit\x00M\tREADME.md";
+    let entries = parse_git_log(input);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].refs.len(), 2);
+    assert_eq!(entries[0].refs[0].name, "main");
+    assert_eq!(entries[0].refs[0].ref_type, "head");
+    assert_eq!(entries[0].refs[1].name, "v1");
+    assert_eq!(entries[0].refs[1].ref_type, "tag");
   }
 }
