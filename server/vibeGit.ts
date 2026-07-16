@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { filterStageableGitPaths, formatGitStageSkippedHint, shouldShowGitStatusPath } from "../shared/gitStageGuard";
+import { filterStageableGitPaths, formatGitStageSkippedHint, isGitPathStageBlocked, shouldShowGitStatusPath } from "../shared/gitStageGuard";
 
 const execFileAsync = promisify(execFile);
 const MAX_DIFF_PREVIEW_CHARS = 2 * 1024 * 1024;
@@ -208,7 +208,7 @@ export async function gitStatus(projectRoot: string): Promise<GitStatusResult> {
     const branch = branchOut.stdout.trim() || "main";
     const headCommit = headOut.stdout.trim();
     const visibleFiles = parseGitStatusPorcelain(statusOut.stdout).filter(
-      (f) => f.status === "ignored" || shouldShowGitStatusPath(f.path),
+      (f) => f.status === "ignored" || (shouldShowGitStatusPath(f.path) && !isGitPathStageBlocked(f.path)),
     );
 
     const stagedCount = visibleFiles.filter((f) => f.staged).length;
