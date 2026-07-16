@@ -10,6 +10,7 @@ import {
   hasAgentProgressMarker,
   stripAgentProgressMarker,
 } from "./agentProgressMarker";
+import { debugLog } from "../utils/debugLog";
 
 export { AGENT_PROGRESS_MARKER, AGENT_PROGRESS_MARKER_RE, hasAgentProgressMarker, stripAgentProgressMarker };
 
@@ -99,7 +100,16 @@ export function appendAssistantStreamDelta(existing: string, delta: string): str
   if (trimmedForCheck && isEnglishToolNarration(trimmedForCheck)) return existing || "";
   if (trimmedForCheck && isAgentToolTurnNarration(trimmedForCheck)) return existing || "";
   const base = existing || "";
-  if (base && delta && shouldBreakLatinCjkStreamBoundary(base, delta)) {
+  const shouldBreak = base && delta && shouldBreakLatinCjkStreamBoundary(base, delta);
+
+  debugLog("[msgDisplay] appendAssistantStreamDelta", {
+    existingLen: existing.length,
+    deltaLen: delta.length,
+    delta: delta.slice(0, 50),
+    shouldBreak,
+  });
+
+  if (shouldBreak) {
     return `${base}\n\n${delta}`;
   }
   return `${base}${delta}`;
@@ -114,40 +124,25 @@ function shouldBreakLatinCjkStreamBoundary(existing: string, delta: string): boo
   return /[A-Za-z0-9)]/.test(last);
 }
 
-/** When streamed tool preamble wraps a substantive answer, keep the embedded answer only. */
-export function stripEmbeddedAnswerFromPreamble(container: string, embedded: string): string {
-  const trimmedEmbedded = embedded.trim();
-  if (!trimmedEmbedded) return container;
-  const index = container.indexOf(trimmedEmbedded);
-  if (index <= 0) return container;
-  const prefix = container.slice(0, index).trim();
-  if (!prefix) return trimmedEmbedded;
-  if (isEnglishToolNarration(prefix) || isAgentToolTurnNarration(prefix)) {
-    return trimmedEmbedded;
-  }
-  if (trimmedEmbedded.length >= SUBSTANTIVE_MIN_CHARS && /^[\x00-\x7F\s:：,.;!?'"()\-]+$/.test(prefix)) {
-    return trimmedEmbedded;
-  }
-  return container;
-}
-
-/** Merge streaming turn text without dropping a longer substantive answer. */
+/** Append single-turn text — never replaces previous content. */
 export function mergeAssistantTurnText(existing: string, incoming: string): string {
   const prev = normalizeBubbleText(existing);
   const next = normalizeBubbleText(incoming);
+
+  debugLog("[msgDisplay] mergeAssistantTurnText", {
+    existingLen: existing.length,
+    incomingLen: incoming.length,
+    prev: prev.slice(0, 80),
+    next: next.slice(0, 80),
+  });
+
   if (isEnglishToolNarration(next)) return prev;
   if (isAgentToolTurnNarration(next)) return prev;
-  if (!prev) return next;
-  if (!next) return prev;
-  if (prev === next) return prev;
-  if (prev.includes(next)) return stripEmbeddedAnswerFromPreamble(prev, next);
-  if (next.includes(prev)) return next;
-  if (next.length >= prev.length * 0.85) return next;
-  if (prev.length >= SUBSTANTIVE_MIN_CHARS && next.length <= THIN_EPILOGUE_MAX_CHARS) {
-    return `${prev}\n\n${next}`;
-  }
-  if (prev.length > next.length * 2 && next.length <= THIN_EPILOGUE_MAX_CHARS) return prev;
-  return `${prev}\n\n${next}`;
+  if (!prev) return incoming;
+  if (!next) return existing;
+  if (prev === next) return existing;
+  if (prev.includes(next) || next.includes(prev)) return existing;
+  return `${existing}\n\n${incoming}`;
 }
 
 /** Agent run with tool/turn metadata (distinct from plain assistant chat). */
@@ -419,8 +414,39 @@ function isOrphanedPriorTurnPreview(
   return true;
 }
 
+/** Collect all historical answer narratives from roundGroups, ordered by turn. */
+export function resolveAllAgentAnswerNarratives(
+  msg: LiveAgentAnswerSource,
+): Array<{ turn: number; text: string }> {
+  const groups = msg.roundGroups ?? [];
+  const result: Array<{ turn: number; text: string }> = [];
+
+  for (const group of groups) {
+    if (group.turn <= 0) continue;
+    const text = normalizeBubbleText(
+      group.response?.assistantText || group.narrative || "",
+    );
+    if (!text || isAgentToolTurnNarration(text)) continue;
+    result.push({ turn: group.turn, text });
+  }
+
+  debugLog("[msgDisplay] resolveAllAgentAnswerNarratives", {
+    groupsCount: groups.length,
+    resultCount: result.length,
+    narratives: result.map((r) => ({ turn: r.turn, text: r.text.slice(0, 60) })),
+  });
+
+  return result;
+}
+
 /** Direct model answer on the active turn — excludes progress-narrative fallback. */
 export function resolveLiveAgentAnswerText(msg: LiveAgentAnswerSource): string {
+  debugLog("[msgDisplay] resolveLiveAgentAnswerText", {
+    agentPhase: msg.agentPhase,
+    agentTurn: msg.agentTurn,
+    content: (msg.content || "").slice(0, 80),
+  });
+
   if (msg.agentPhase && AGENT_LIVE_PREVIEW_PREP_PHASES.has(msg.agentPhase)) return "";
 
   const contentFallback = normalizeBubbleText(msg.content || "");
@@ -429,12 +455,22 @@ export function resolveLiveAgentAnswerText(msg: LiveAgentAnswerSource): string {
   );
 
   if (msg.agentPhase === "streaming_model") {
-    if (contentFallback) return contentFallback;
+    if (contentFallback) {
+      debugLog("[msgDisplay] returning contentFallback (streaming_model)", {
+        contentFallback: contentFallback.slice(0, 80),
+      });
+      return contentFallback;
+    }
   }
 
   if (preStream && hasAgentFinalAnswer(msg) && !isActiveTurnAfterFinalAnswer(msg)) {
     const finalText = normalizeBubbleText(resolveFinalAssistantText(msg));
-    if (finalText && !isAgentToolTurnNarration(finalText)) return finalText;
+    if (finalText && !isAgentToolTurnNarration(finalText)) {
+      debugLog("[msgDisplay] returning finalText (preStream)", {
+        finalText: finalText.slice(0, 80),
+      });
+      return finalText;
+    }
   }
 
   const group = resolveActiveRoundGroup(msg);
@@ -453,6 +489,14 @@ export function resolveLiveAgentAnswerText(msg: LiveAgentAnswerSource): string {
       groupAnswers.push(text);
     }
     picked = pickLongestSubstantiveAnswer(...groupAnswers, contentFallback) || "";
+
+    debugLog("[msgDisplay] resolved from group", {
+      groupTurn: group.turn,
+      narrative: (group.narrative || "").slice(0, 80),
+      responseAssistantText: (group.response?.assistantText || "").slice(0, 80),
+      groupAnswersCount: groupAnswers.length,
+      picked: picked.slice(0, 80),
+    });
   } else {
     picked = contentFallback;
   }
@@ -461,6 +505,10 @@ export function resolveLiveAgentAnswerText(msg: LiveAgentAnswerSource): string {
     if (isStaleStreamTailFragment(picked)) return "";
     if (!hasAgentFinalAnswer(msg) && isOrphanedPriorTurnPreview(group, picked)) return "";
   }
+
+  debugLog("[msgDisplay] resolveLiveAgentAnswerText result", {
+    picked: picked.slice(0, 80),
+  });
 
   return picked;
 }
@@ -487,16 +535,34 @@ export function resolveAgentTimelineAnswer(
   isRunning: boolean,
   hasRunningTool = false,
 ): string {
+  debugLog("[msgDisplay] resolveAgentTimelineAnswer", {
+    isRunning,
+    hasRunningTool,
+    agentPhase: msg.agentPhase,
+    agentTurn: msg.agentTurn,
+    completedContent: completedContent.slice(0, 80),
+  });
+
   if (!isRunning) return completedContent;
   if (hasAgentFinalAnswer(msg) && !isActiveTurnAfterFinalAnswer(msg)) {
     const finalized = resolveCompletedAgentBubbleContent(msg);
     const live = resolveLiveAgentAnswerText(msg);
     const merged = pickLongestSubstantiveAnswer(finalized, live, msg.content || "");
+    debugLog("[msgDisplay] using finalized answer", {
+      finalized: finalized.slice(0, 80),
+      live: live.slice(0, 80),
+      merged: merged.slice(0, 80),
+    });
     if (merged) return merged;
   }
   if (msg.agentPhase === "streaming_model") {
     const live = resolveLiveAgentAnswerText(msg);
-    return live || normalizeBubbleText(msg.content || "") || "";
+    const result = live || normalizeBubbleText(msg.content || "") || "";
+    debugLog("[msgDisplay] streaming_model answer", {
+      live: live.slice(0, 80),
+      result: result.slice(0, 80),
+    });
+    return result;
   }
   const preStream = Boolean(
     msg.agentPhase && AGENT_LIVE_PREVIEW_PRE_STREAM_PHASES.has(msg.agentPhase),
@@ -590,29 +656,39 @@ export function preferFullContentOverCompactedRoundGroup(compacted: string, full
   return left;
 }
 
-/** Prefer the final agent turn; prepend vision region when the final answer omits it. */
+/** Prefer isFinal round texts (including narrative); fall back to raw content when compacted or empty. */
 export function resolveCompletedAgentBubbleContent(msg: AssistantBubbleSource): string {
-  const finalGroup = msg.roundGroups?.filter((group) => group.response?.isFinal).at(-1);
-  const finalFromRound = normalizeBubbleText(resolveFinalAssistantText(msg));
-  const narrativeFromFinal = normalizeBubbleText(finalGroup?.narrative || "");
-  const direct = normalizeBubbleText(msg.content || "");
-  const preferredFromRound = finalFromRound
-    ? preferFullContentOverCompactedRoundGroup(finalFromRound, direct)
-    : "";
-  const streamedOrSnapshot = pickLongestSubstantiveAnswer(preferredFromRound, narrativeFromFinal);
-  const finalText = streamedOrSnapshot
-    ? preferFullContentOverCompactedRoundGroup(streamedOrSnapshot, direct)
-    : pickLongestSubstantiveAnswer(direct);
-  const visionPreamble = resolveVisionRegionPreamble(msg);
+  const finalGroups = (msg.roundGroups ?? [])
+    .filter((group) => group.response?.isFinal && group.response.assistantText.trim());
 
-  if (finalText) {
-    if (visionPreamble && !regionAnchorPresentInText(visionPreamble, finalText)) {
-      return `${visionPreamble}\n\n${finalText}`;
-    }
-    return finalText;
+  const allFinalTexts = finalGroups.map((group) => normalizeBubbleText(group.response!.assistantText)).filter(Boolean);
+  const finalNarratives = finalGroups.map((group) => normalizeBubbleText(group.narrative || "")).filter(Boolean);
+
+  const combined = allFinalTexts.length ? allFinalTexts.join("\n\n---\n\n") : "";
+  const direct = normalizeBubbleText(msg.content || "");
+
+  if (combined) {
+    // Also consider narrative from isFinal groups (may be longer than response text)
+    const narrative = finalNarratives.sort((a, b) => b.length - a.length)[0] || "";
+    const candidates = [combined, narrative].filter(Boolean);
+    const preferred = candidates.sort((a, b) => b.length - a.length)[0]!;
+    const result = preferFullContentOverCompactedRoundGroup(preferred, direct);
+    return prependVisionPreamble(msg, result);
   }
 
-  return resolveAssistantBubbleFromCandidates(msg);
+  if (direct) return prependVisionPreamble(msg, direct);
+
+  const fallback = resolveAssistantBubbleFromCandidates(msg);
+  return prependVisionPreamble(msg, fallback);
+}
+
+function prependVisionPreamble(msg: AssistantBubbleSource, text: string): string {
+  if (!text) return text;
+  const visionPreamble = resolveVisionRegionPreamble(msg);
+  if (visionPreamble && !regionAnchorPresentInText(visionPreamble, text)) {
+    return `${visionPreamble}\n\n${text}`;
+  }
+  return text;
 }
 
 const COMPLETION_SUMMARY_RE = /(?:修改完成|已完成|已写入|总结|变更如下|完成了)/;

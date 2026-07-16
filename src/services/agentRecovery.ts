@@ -246,6 +246,87 @@ export function hasRecoverableAgentProgress(msg: AgentProgressSource): boolean {
   );
 }
 
+/**
+ * Empty / early-aborted assistant bubbles may be reused for the next skipUserBubble
+ * run under the same user turn instead of stacking another shell.
+ */
+export function canReuseZeroProgressAssistantSlot(
+  msg: AgentProgressSource & {
+    role?: string;
+    streaming?: boolean;
+  },
+): boolean {
+  if (msg.role && msg.role !== "assistant") return false;
+  if (msg.streaming) return false;
+  if (hasAgentFinalAnswer(msg)) return false;
+  if (hasRecoverableAgentProgress(msg)) return false;
+  return true;
+}
+
+/** Wipe run state on a reusable assistant slot so a new run can own the same message id. */
+export function resetAssistantMessageForNewRun<
+  T extends AgentProgressSource & {
+    content?: string;
+    chatMode?: string;
+    statusLog?: string[];
+    status?: string;
+    agentPhase?: string;
+    agentTurn?: number;
+    agentMaxTurns?: number;
+    agentDetail?: string;
+    streamChars?: number;
+    streaming?: boolean;
+    activityExpanded?: boolean;
+    activityDetailed?: boolean;
+    agentAborted?: boolean;
+    agentAbortReason?: string;
+    agentFailed?: boolean;
+    agentRecoverable?: boolean;
+    agentFailureReason?: string;
+    agentFailureDetail?: string;
+    agentRecoveryDismissed?: boolean;
+    agentContinueCount?: number;
+    writtenFiles?: string[];
+    turnFileDiffs?: Record<string, unknown>;
+    turnTraces?: Array<{ turn?: number; assistantText?: string }>;
+    tools?: AgentProgressTool[];
+    roundGroups?: AgentRoundGroup[];
+    totalTurns?: number;
+    suggestions?: unknown;
+    planFilePath?: string;
+  },
+>(msg: T, chatMode: string): T {
+  msg.content = "";
+  msg.chatMode = chatMode;
+  msg.tools = [];
+  msg.roundGroups = [];
+  msg.turnTraces = undefined;
+  msg.statusLog = undefined;
+  msg.status = undefined;
+  msg.agentPhase = undefined;
+  msg.agentTurn = undefined;
+  msg.agentMaxTurns = undefined;
+  msg.agentDetail = undefined;
+  msg.streamChars = undefined;
+  msg.streaming = false;
+  msg.totalTurns = undefined;
+  msg.writtenFiles = undefined;
+  msg.turnFileDiffs = undefined;
+  msg.suggestions = undefined;
+  msg.planFilePath = undefined;
+  msg.activityExpanded = true;
+  msg.activityDetailed = false;
+  msg.agentAborted = false;
+  msg.agentAbortReason = undefined;
+  msg.agentFailed = false;
+  msg.agentRecoverable = false;
+  msg.agentFailureReason = undefined;
+  msg.agentFailureDetail = undefined;
+  msg.agentRecoveryDismissed = undefined;
+  msg.agentContinueCount = undefined;
+  return msg;
+}
+
 export function isAgentRunStalled(
   lastProgressAt: number,
   chatSending: boolean,

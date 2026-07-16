@@ -7,8 +7,10 @@ import {
   buildAgentResumePrompt,
   buildSilentContinueStatusLog,
   canResumeAgentRun,
+  canReuseZeroProgressAssistantSlot,
   hasRecoverableAgentProgress,
   HMR_INTERRUPT_REASON,
+  resetAssistantMessageForNewRun,
   inferAgentRecoveryFlags,
   isAgentMaxTurnsExhausted,
   isAgentConnectPhase,
@@ -171,6 +173,81 @@ describe("hasRecoverableAgentProgress", () => {
         tools: [{ running: false, label: "读取文件", summary: "ok" }],
       }),
     ).toBe(true);
+  });
+});
+
+describe("canReuseZeroProgressAssistantSlot", () => {
+  it("allows empty or early-aborted assistant shells", () => {
+    expect(canReuseZeroProgressAssistantSlot({ role: "assistant", tools: [], content: "" })).toBe(
+      true,
+    );
+    expect(
+      canReuseZeroProgressAssistantSlot({
+        role: "assistant",
+        tools: [],
+        agentAborted: true,
+        agentAbortReason: "已被新指令打断",
+        statusLog: ["已被新指令打断"],
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects runs with progress or a final answer", () => {
+    expect(
+      canReuseZeroProgressAssistantSlot({
+        role: "assistant",
+        tools: [{ running: false, label: "读取", summary: "ok" }],
+      }),
+    ).toBe(false);
+    expect(
+      canReuseZeroProgressAssistantSlot({
+        role: "assistant",
+        roundGroups: [
+          {
+            turn: 1,
+            modelSteps: [],
+            response: {
+              assistantText: "结论",
+              toolCalls: [],
+              hasToolCalls: false,
+              isFinal: true,
+            },
+          },
+        ],
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("resetAssistantMessageForNewRun", () => {
+  it("keeps id and clears run artifacts", () => {
+    const msg = resetAssistantMessageForNewRun(
+      {
+        id: "a1",
+        role: "assistant",
+        content: "stale",
+        chatMode: "ask",
+        tools: [{ running: false, label: "x", summary: "y" }],
+        roundGroups: [{ turn: 1, modelSteps: [] }],
+        statusLog: ["old"],
+        agentAborted: true,
+        agentAbortReason: "已被新指令打断",
+        agentFailed: true,
+        agentRecoverable: true,
+        agentFailureReason: "x",
+        agentContinueCount: 2,
+      },
+      "build",
+    );
+    expect(msg.id).toBe("a1");
+    expect(msg.chatMode).toBe("build");
+    expect(msg.content).toBe("");
+    expect(msg.tools).toEqual([]);
+    expect(msg.roundGroups).toEqual([]);
+    expect(msg.statusLog).toBeUndefined();
+    expect(msg.agentAborted).toBe(false);
+    expect(msg.agentFailed).toBe(false);
+    expect(msg.agentContinueCount).toBeUndefined();
   });
 });
 

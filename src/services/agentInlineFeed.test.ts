@@ -195,9 +195,10 @@ describe("buildInlineAgentFeed", () => {
       { kind: "tool", key: "t1", step: readStep("t1") },
       { kind: "text", key: "a1", text: "结论", variant: "answer" },
     ];
-    const { process, answer } = splitInlineFeedItems(items);
+    const { process, answers } = splitInlineFeedItems(items);
     expect(process).toHaveLength(2);
-    expect(answer).toMatchObject({ variant: "answer", text: "结论" });
+    expect(answers).toHaveLength(1);
+    expect(answers[0]).toMatchObject({ variant: "answer", text: "结论" });
     expect(summarizeInlineFeedProcess(process, 1, false)).toMatch(/1 步/);
   });
 

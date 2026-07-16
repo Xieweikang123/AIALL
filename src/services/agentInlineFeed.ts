@@ -8,8 +8,9 @@ import {
   formatExplorationSummary,
   type CursorFeedItem,
 } from "./agentCursorFeed";
-import type { AgentRoundTool } from "./agentRoundGroups";
+import type { AgentRoundGroupView, AgentRoundTool } from "./agentRoundGroups";
 import { buildFilteredCursorAgentFeedItems, type UnifiedAgentTimelineInput } from "./agentCompactStatus";
+import { debugLog } from "../utils/debugLog";
 
 export type InlineFeedTextItem = {
   kind: "text";
@@ -125,35 +126,43 @@ export function countToolsInInlineFeed(items: InlineFeedItem[]): number {
   return count;
 }
 
-/** Fold early process steps when tool count exceeds threshold; answer block is never collapsed. */
+/** Fold early tools when count exceeds threshold; answer items stay visible. */
 export function collapseInlineFeedItems(
   items: InlineFeedItem[],
   options: InlineFeedCollapseOptions,
 ): InlineFeedItem[] {
   if (options.disabled) return items;
 
-  const answerItems = items.filter(isAnswerItem);
-  const processItems = items.filter(isProcessItem);
-
+  // Count tool items across the full array
   const toolIndices: number[] = [];
-  for (let index = 0; index < processItems.length; index += 1) {
-    if (processItems[index]?.kind === "tool") toolIndices.push(index);
+  for (let index = 0; index < items.length; index += 1) {
+    if (items[index]?.kind === "tool") toolIndices.push(index);
   }
 
   if (toolIndices.length <= options.collapseAfter) return items;
 
-  const runningIndex = processItems.findIndex(
+  const runningIndex = items.findIndex(
     (item) => item.kind === "tool" && item.step.running,
   );
 
-  let splitAt = toolIndices[toolIndices.length - options.keepVisible] ?? processItems.length;
+  let splitAt = toolIndices[toolIndices.length - options.keepVisible] ?? items.length;
   if (runningIndex >= 0 && runningIndex < splitAt) {
     splitAt = runningIndex;
   }
   if (splitAt <= 0) return items;
 
-  const hidden = processItems.slice(0, splitAt);
-  const visible = processItems.slice(splitAt);
+  // Preserve answer items outside the hidden portion
+  const hidden: InlineFeedItem[] = [];
+  const visible: InlineFeedItem[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const isAnswer = items[i]?.kind === "text" && items[i]?.variant === "answer";
+    if (i < splitAt && !isAnswer) {
+      hidden.push(items[i]);
+    } else {
+      visible.push(items[i]);
+    }
+  }
+
   const hiddenTools = collectToolsFromProcessItems(hidden);
   if (!hiddenTools.length) return items;
 
@@ -165,7 +174,6 @@ export function collapseInlineFeedItems(
       items: hidden,
     },
     ...visible,
-    ...answerItems,
   ];
 }
 
@@ -203,6 +211,63 @@ function resolveInlineAnswerHasContent(
   );
 }
 
+/** Per-turn answer blocks from roundGroups — stable key for the first/streaming answer. */
+function buildPerTurnAnswerItems(
+  roundGroups: AgentRoundGroupView[],
+  answerStreaming: boolean,
+  answerPreview: string,
+): InlineFeedTextItem[] {
+  const items: InlineFeedTextItem[] = [];
+  let firstFinal = true;
+
+  for (const group of roundGroups) {
+    if (group.turn <= 0) continue;
+    const text = group.response?.assistantText?.trim();
+    if (!text || !group.response?.isFinal) continue;
+    // First answer reuses "inline-answer" key to avoid Vue unmount flash
+    items.push({
+      kind: "text",
+      key: firstFinal ? "inline-answer" : `turn-answer-${group.turn}`,
+      text,
+      variant: "answer",
+      streaming: false,
+    });
+    firstFinal = false;
+  }
+
+  // Streaming placeholder when no completed answer yet — uses answerPreview for live text
+  if (!items.length && answerStreaming) {
+    items.push({
+      kind: "text",
+      key: "inline-answer",
+      text: answerPreview,
+      variant: "answer",
+      streaming: true,
+    });
+  }
+
+  debugLog("[inlineFeed] buildPerTurnAnswerItems", {
+    roundGroupCount: roundGroups.length,
+    answerItemCount: items.length,
+    turnKeys: items.map((i) => i.key),
+  });
+
+  return items;
+}
+
+/** Single merged-answer fallback when no per-turn data is available (pre-stream / plain assistant). */
+function mergedAnswerFallback(answerPreview: string, answerStreaming: boolean): InlineFeedTextItem[] {
+  const text = answerPreview.trim();
+  if (!text && !answerStreaming) return [];
+  return [{
+    kind: "text",
+    key: "inline-answer",
+    text: answerPreview,
+    variant: "answer",
+    streaming: answerStreaming,
+  }];
+}
+
 /** Drop trailing narrative text duplicated by the final answer block. */
 export function appendInlineAnswerBlock(
   items: InlineFeedItem[],
@@ -215,11 +280,23 @@ export function appendInlineAnswerBlock(
   const result = [...items];
   let lastNarrative = "";
 
+  debugLog("[inlineFeed] appendInlineAnswerBlock", {
+    itemCount: items.length,
+    answerPreview: trimmed.slice(0, 80),
+    answerStreaming,
+    itemKinds: items.map((i) => `${i.kind}:${i.kind === "text" ? i.variant : ""}`).join(", "),
+  });
+
   for (let index = result.length - 1; index >= 0; index -= 1) {
     const item = result[index];
     if (item?.kind !== "text" || item.variant !== "narrative") continue;
     lastNarrative = item.text;
     if (trimmed && thoughtDuplicatesBubble(item.text, trimmed)) {
+      debugLog("[inlineFeed] removing duplicate narrative", {
+        index,
+        narrative: item.text.slice(0, 80),
+        answer: trimmed.slice(0, 80),
+      });
       result.splice(index, 1);
     }
     break;
@@ -228,6 +305,12 @@ export function appendInlineAnswerBlock(
   const answerText = trimmed
     ? normalizeInlineAnswerText(answerPreview, lastNarrative)
     : answerPreview;
+
+  debugLog("[inlineFeed] pushing answer item", {
+    answerText: answerText.slice(0, 80),
+    lastNarrative: lastNarrative.slice(0, 80),
+    resultLength: result.length,
+  });
 
   result.push({
     kind: "text",
@@ -241,18 +324,24 @@ export function appendInlineAnswerBlock(
 
 export function splitInlineFeedItems(items: InlineFeedItem[]): {
   process: InlineFeedItem[];
-  answer: InlineFeedTextItem | null;
+  answers: InlineFeedTextItem[];
 } {
   const process: InlineFeedItem[] = [];
-  let answer: InlineFeedTextItem | null = null;
+  const answers: InlineFeedTextItem[] = [];
   for (const item of items) {
     if (isAnswerItem(item)) {
-      answer = item;
+      answers.push(item);
     } else {
       process.push(item);
     }
   }
-  return { process, answer };
+  debugLog("[inlineFeed] splitInlineFeedItems", {
+    inputCount: items.length,
+    processCount: process.length,
+    answerCount: answers.length,
+    answerTexts: answers.map((a) => a.text.slice(0, 60)),
+  });
+  return { process, answers };
 }
 
 export function collectToolsFromInlineFeed(items: InlineFeedItem[]): AgentRoundTool[] {
@@ -303,13 +392,110 @@ function stripInlineStatusItems(items: InlineFeedItem[], isRunning: boolean): In
   return result;
 }
 
-/** Chronological inline stream: narrative ↔ tools interleaved, answer appended last. */
+/** Position each answer after the latest item from a strictly earlier turn; append floating items at end. */
+function interleaveTurnAnswers(
+  items: InlineFeedItem[],
+  roundGroups: AgentRoundGroupView[],
+  allAnswerItems: InlineFeedTextItem[],
+): InlineFeedItem[] {
+  // Build toolId → turn map
+  const toolIdToTurn = new Map<string, number>();
+  for (const group of roundGroups) {
+    for (const tool of group.tools) {
+      toolIdToTurn.set(tool.id, group.turn);
+    }
+  }
+
+  // Map every item to its turn (0 = unknown/untyped)
+  const itemTurn = new Map<number, number>();
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (item.kind === "tool") {
+      const turn = toolIdToTurn.get(item.step.id);
+      if (turn) itemTurn.set(i, turn);
+    } else if (item.kind === "text" && item.variant === "narrative") {
+      const m = item.key.match(/^thought-(\d+)/);
+      if (m) itemTurn.set(i, parseInt(m[1]));
+    }
+  }
+
+  // Collect isFinal turns from roundGroups for fallback turn resolution
+  const finalTurns = roundGroups
+    .filter((g) => g.turn > 0 && g.response?.isFinal)
+    .map((g) => g.turn)
+    .sort((a, b) => a - b);
+  let finalIndex = 0;
+
+  // Separate turn-keyed answers vs floating answers
+  const turnAnswers: Array<{ turn: number; item: InlineFeedTextItem }> = [];
+  const floating: InlineFeedTextItem[] = [];
+  for (const item of allAnswerItems) {
+    const m = item.key.match(/^turn-answer-(\d+)/);
+    if (m) {
+      turnAnswers.push({ turn: parseInt(m[1]), item });
+    } else if (item.key === "inline-answer" && finalIndex < finalTurns.length) {
+      // First answer without explicit turn — resolve from roundGroups
+      turnAnswers.push({ turn: finalTurns[finalIndex], item });
+      finalIndex += 1;
+    } else {
+      floating.push(item);
+    }
+  }
+
+  // Sort answer turns ascending for stable insertions
+  turnAnswers.sort((a, b) => a.turn - b.turn);
+
+  const result = [...items];
+  let insertedCount = 0;
+
+  for (const ta of turnAnswers) {
+    // Find last item whose turn is strictly < ta.turn
+    let anchor = -1;
+    for (let i = result.length - 1; i >= 0; i--) {
+      const turn = itemTurn.get(i);
+      if (turn && turn < ta.turn) { anchor = i; break; }
+    }
+    // When no earlier turn found, fall back to before any process item or at end
+    if (anchor < 0) {
+      anchor = result.findIndex((it) => it.kind !== "text" || it.variant !== "answer") - 1;
+    }
+    result.splice(anchor + 1, 0, ta.item);
+    insertedCount += 1;
+    // Shift itemTurn indices for items after the insertion point
+    const shifted = new Map<number, number>();
+    for (const [idx, turn] of itemTurn) {
+      shifted.set(idx < anchor + 1 ? idx : idx + 1, turn);
+    }
+    itemTurn.clear();
+    for (const [idx, turn] of shifted) itemTurn.set(idx, turn);
+  }
+
+  if (floating.length) result.push(...floating);
+  return result;
+}
+
+/** Linear timeline: narrative ↔ tools per turn, per-turn answer blocks interleaved. */
 export function buildInlineAgentFeed(input: InlineAgentFeedInput): InlineAgentFeed {
+  debugLog("[inlineFeed] buildInlineAgentFeed", {
+    showProcess: input.showProcess,
+    answerPreview: input.answerPreview.slice(0, 80),
+    answerStreaming: input.answerStreaming,
+    roundGroupsCount: input.roundGroups?.length,
+    isRunning: input.isRunning,
+  });
+
+  const answerItems = buildPerTurnAnswerItems(input.roundGroups, input.answerStreaming, input.answerPreview);
+
+  // Fallback: use answerPreview when no per-turn answer derived from roundGroups
+  // (e.g. pre-stream or non-agent messages)
+  const resolvedAnswerItems = answerItems.length
+    ? answerItems
+    : mergedAnswerFallback(input.answerPreview, input.answerStreaming);
+
   if (input.showProcess === false) {
-    const items = appendInlineAnswerBlock([], input.answerPreview, input.answerStreaming);
     return {
-      items,
-      hasAnswer: resolveInlineAnswerHasContent(items),
+      items: resolvedAnswerItems,
+      hasAnswer: resolveInlineAnswerHasContent(resolvedAnswerItems),
       toolCount: 0,
       answerStreaming: input.answerStreaming,
     };
@@ -317,14 +503,18 @@ export function buildInlineAgentFeed(input: InlineAgentFeedInput): InlineAgentFe
 
   const feedItems = buildFilteredCursorAgentFeedItems(input);
 
-  const withAnswer = appendInlineAnswerBlock(
-    cursorItemsToInline(feedItems),
-    input.answerPreview,
-    input.answerStreaming,
-  );
+  debugLog("[inlineFeed] feedItems built", {
+    feedItemCount: feedItems.length,
+    kinds: feedItems.map((i) => i.kind).join(","),
+  });
+
+  const inline = cursorItemsToInline(feedItems);
+
+  // Interleave: insert turn-keyed answer items after their turn's process items
+  const withAnswers = interleaveTurnAnswers(inline, input.roundGroups, resolvedAnswerItems);
 
   const collapseOptions = resolveInlineFeedCollapseOptions(input);
-  const collapsed = collapseInlineFeedItems(withAnswer, collapseOptions);
+  const collapsed = collapseInlineFeedItems(withAnswers, collapseOptions);
   const items = stripInlineStatusItems(collapsed, input.isRunning);
 
   return {
