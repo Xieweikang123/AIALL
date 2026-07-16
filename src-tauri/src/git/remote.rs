@@ -46,12 +46,32 @@ pub async fn git_remotes(project_root: &str) -> GitRemotesResult {
         .await
         .map(|o| o.stdout.trim().to_string())
         .unwrap_or_default();
+
+      let (ahead, behind) = if !tracking_branch.is_empty() {
+        let count_result = git_exec(
+          project_root,
+          &["rev-list", "--count", "--left-right", &format!("HEAD...{tracking_branch}")],
+        )
+        .await;
+        match count_result {
+          Ok(o) => {
+            let parts: Vec<&str> = o.stdout.trim().split_whitespace().collect();
+            let a = parts.first().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+            let b = parts.get(1).and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+            (a, b)
+          }
+          Err(_) => (0, 0),
+        }
+      } else {
+        (0, 0)
+      };
+
       GitRemotesResult {
         ok: true,
         remotes,
         tracking_branch,
-        ahead: 0,
-        behind: 0,
+        ahead,
+        behind,
         error: None,
       }
     }

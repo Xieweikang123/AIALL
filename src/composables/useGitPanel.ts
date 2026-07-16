@@ -546,6 +546,7 @@ export function useGitPanel(
         return;
       }
       await refreshGitStatus({ showLoading: false, force: true });
+      await refreshGitRemotes();
     } catch (e) {
       gitError.value = e instanceof Error ? e.message : "提交失败";
       await refreshGitStatus({ force: true });
@@ -819,6 +820,7 @@ export function useGitPanel(
         return;
       }
       await refreshGitStatus({ showLoading: false });
+      await refreshGitRemotes();
     } catch (e) {
       gitError.value = e instanceof Error ? e.message : "批量提交失败";
       await refreshGitStatus({ showLoading: false, force: true });
@@ -884,6 +886,7 @@ export function useGitPanel(
         return;
       }
       await refreshGitStatus({ showLoading: false });
+      await refreshGitRemotes();
     } catch (e) {
       gitError.value = e instanceof Error ? e.message : "批量提交失败";
       await refreshGitStatus({ showLoading: false, force: true });
