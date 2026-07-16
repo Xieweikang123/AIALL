@@ -27,9 +27,8 @@ export type AiOptionsParseResult = {
  * Requirements:
  *   - 2-6 consecutive numbered items
  *   - Items are short (< 80 chars each)
- *   - Items appear near the end of the text (after a question)
+ *   - Preceded by an explicit choice prompt, or each item ends with ?/？
  */
-const TRAILING_QUESTION_RE = /\?|？|请选择|告诉我|告诉我是|你想|你是否|你(?:是指|想要|希望|需要|想让我)/i;
 const IMPLEMENT_CONFIRM_RE =
   /(?:如果你?需要(?:添加|实现|改)?(?:这个|该)?功能，?我可以帮你实现|需要我(?:帮你)?(?:实现|修改|改)(?:一下|代码)?(?:吗|这个功能吗|一下吗|代码吗)?[？?]?|你想让我(?:实现|修改|改)吗[？?]?)\s*$/;
 
@@ -62,6 +61,28 @@ function parseOptionLine(line: string): { num: number; content: string } | null 
   return { num, content };
 }
 
+/** Line that introduces an explicit choice block — not prose that merely mentions 你想/你需要. */
+function isChoicePromptLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed || parseOptionLine(trimmed)) return false;
+  if (/[?？][）)]*\s*$/.test(trimmed)) return true;
+  if (/请选择[：:]\s*$/.test(trimmed)) return true;
+  return false;
+}
+
+/** Numbered list intro that should stay plain markdown (summaries, conclusions, doc sections). */
+function isSummaryListIntro(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  if (/^#{1,6}\s*总结\b/i.test(trimmed)) return true;
+  if (/^(?:\*\*)?总结(?:\*\*)?[：:]/i.test(trimmed)) return true;
+  if (/集中在[：:]\s*$/.test(trimmed)) return true;
+  if (/[：:]\s*$/.test(trimmed) && /核心建议|建议如下|结论如下|注意事项|变更如下|最终答案|如下/.test(trimmed)) {
+    return true;
+  }
+  return false;
+}
+
 export function parseAiOptions(text: string): AiOptionsParseResult | null {
   if (!text) return { before: text, options: [], after: "" };
   const implementConfirm = parseImplementationConfirmOption(text);
@@ -69,18 +90,19 @@ export function parseAiOptions(text: string): AiOptionsParseResult | null {
 
   const lines = text.split("\n");
 
-  // Find the last question/prompt line to anchor the option block (not numbered option lines).
+  // Find the last explicit choice prompt to anchor the option block.
   let questionLineIdx = -1;
   for (let i = lines.length - 1; i >= 0; i--) {
     const trimmed = lines[i].trim();
     if (parseOptionLine(trimmed)) continue;
-    if (TRAILING_QUESTION_RE.test(trimmed)) {
+    if (isChoicePromptLine(trimmed)) {
       questionLineIdx = i;
       break;
     }
   }
 
-  const hasPrecedingQuestion = questionLineIdx >= 0;
+  const promptLine = questionLineIdx >= 0 ? lines[questionLineIdx].trim() : "";
+  const hasStrictPrompt = isChoicePromptLine(promptLine);
 
   // Scan for numbered items starting from near the end
   const optionLines: { label: string; fullText: string; index: number }[] = [];
@@ -98,18 +120,18 @@ export function parseAiOptions(text: string): AiOptionsParseResult | null {
     if (parsed) {
       const { num, content } = parsed;
       const endsWithQuestion = /[?？]$/.test(content);
-      
+
       if (
         content.length > 0 &&
         content.length < 80 &&
         num === optionLines.length + 1 &&
-        (endsWithQuestion || hasPrecedingQuestion) &&
+        (endsWithQuestion || hasStrictPrompt) &&
         !/^#{1,6}\s/.test(content)
       ) {
         optionLines.push({
           label: content,
           fullText: content,
-          index: i
+          index: i,
         });
         continue;
       }
@@ -124,6 +146,9 @@ export function parseAiOptions(text: string): AiOptionsParseResult | null {
   const firstIdx = optionLines[0].index;
   const lastIdx = optionLines[optionLines.length - 1].index;
 
+  const introLine = firstIdx > 0 ? lines[firstIdx - 1].trim() : promptLine;
+  if (isSummaryListIntro(introLine)) return null;
+
   const options: AiOption[] = optionLines.map((ol, i) => ({
     index: i,
     label: ol.label,
@@ -132,6 +157,8 @@ export function parseAiOptions(text: string): AiOptionsParseResult | null {
 
   const before = lines.slice(0, firstIdx).join("\n").trimEnd();
   const after = lines.slice(lastIdx + 1).join("\n").trimStart();
+
+  if (/^#{1,6}\s*总结\b/im.test(before)) return null;
 
   // Residual prose after options means this was a normal list, not a choice block.
   if (after.length > 20) return null;
