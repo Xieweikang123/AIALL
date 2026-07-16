@@ -7,6 +7,7 @@ export interface VibeGlobalShortcutHandlers {
   startNewSession: () => void;
   navigateBack?: () => void;
   navigateForward?: () => void;
+  toggleFilePanel?: () => void;
 }
 
 export function useVibeGlobalShortcuts(handlers: VibeGlobalShortcutHandlers) {
@@ -43,6 +44,11 @@ export function useVibeGlobalShortcuts(handlers: VibeGlobalShortcutHandlers) {
     if (e.altKey && e.key === "ArrowRight") {
       e.preventDefault();
       handlers.navigateForward?.();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === "\\") {
+      e.preventDefault();
+      handlers.toggleFilePanel?.();
       return;
     }
   }

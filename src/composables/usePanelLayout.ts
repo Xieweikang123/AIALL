@@ -4,6 +4,7 @@ import { lsGet, lsSet, lsGetJson, lsSetJson } from "../utils/localStorageSafe";
 const PANEL_WIDTH_KEY = "vibe-coding-panel-widths";
 const EDITOR_COLLAPSED_KEY = "vibe-coding-editor-collapsed";
 const CHAT_COLLAPSED_KEY = "vibe-coding-chat-collapsed";
+const FILE_COLLAPSED_KEY = "vibe-coding-file-collapsed";
 
 const FILE_MIN_WIDTH = 180;
 const FILE_MAX_WIDTH = 500;
@@ -41,11 +42,20 @@ export function usePanelLayout(workspaceRef: Ref<HTMLElement | null>) {
     lsSet(CHAT_COLLAPSED_KEY, chatCollapsed.value ? "1" : "0");
   }
 
+  function loadFilePanelCollapsed(): boolean {
+    return lsGet(FILE_COLLAPSED_KEY) === "1";
+  }
+
+  function saveFilePanelCollapsed() {
+    lsSet(FILE_COLLAPSED_KEY, filePanelCollapsed.value ? "1" : "0");
+  }
+
   const savedWidths = loadPanelWidths();
   const filePanelWidth = ref(savedWidths.file);
   const chatPanelWidth = ref(savedWidths.chat);
   const editorCollapsed = ref(loadEditorCollapsed());
   const chatCollapsed = ref(loadChatCollapsed());
+  const filePanelCollapsed = ref(loadFilePanelCollapsed());
   const isResizing = ref(false);
 
   let resizeType: "file" | "chat" | null = null;
@@ -151,6 +161,16 @@ export function usePanelLayout(workspaceRef: Ref<HTMLElement | null>) {
     saveChatCollapsed();
   }
 
+  function collapseFilePanel() {
+    filePanelCollapsed.value = true;
+    saveFilePanelCollapsed();
+  }
+
+  function expandFilePanel() {
+    filePanelCollapsed.value = false;
+    saveFilePanelCollapsed();
+  }
+
   if (getCurrentInstance()) {
     onBeforeUnmount(() => {
       document.removeEventListener("mousemove", onResize);
@@ -163,6 +183,7 @@ export function usePanelLayout(workspaceRef: Ref<HTMLElement | null>) {
     chatPanelWidth,
     editorCollapsed,
     chatCollapsed,
+    filePanelCollapsed,
     isResizing,
     chatPanelStyle,
     startResize,
@@ -173,6 +194,8 @@ export function usePanelLayout(workspaceRef: Ref<HTMLElement | null>) {
     expandEditor,
     collapseChat,
     expandChat,
+    collapseFilePanel,
+    expandFilePanel,
     getChatPanelMaxWidth,
     CHAT_MIN_WIDTH,
     CHAT_MAX_WIDTH,

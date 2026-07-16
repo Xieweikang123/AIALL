@@ -1,5 +1,78 @@
 <template>
-  <aside class="file-panel" :style="{ width: filePanelWidth + 'px' }">
+  <aside
+    class="file-panel"
+    :class="{ 'file-panel--collapsed': filePanelCollapsed }"
+    :style="{ width: (filePanelCollapsed ? 48 : filePanelWidth) + 'px' }"
+  >
+    <!-- Collapsed sidebar: vertical tab icons -->
+    <div v-if="filePanelCollapsed" class="file-panel-collapsed">
+      <button
+        type="button"
+        class="file-panel-collapsed-tab"
+        :class="{ active: gitPanelMode === 'files' }"
+        title="文件"
+        @click="$emit('update:gitPanelMode', 'files'); $emit('expand-file-panel')"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M3 7V17a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <button
+        type="button"
+        class="file-panel-collapsed-tab"
+        :class="{ active: gitPanelMode === 'git' }"
+        title="Git"
+        :disabled="!projectOpened"
+        @click="$emit('update:gitPanelMode', 'git'); $emit('expand-file-panel'); $emit('refresh-git-status')"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="6" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+          <circle cx="18" cy="18" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+          <circle cx="6" cy="14" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M12 8.5v3.5M9.2 13.2 15.5 16.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <span v-if="gitChangeCount" class="file-panel-collapsed-badge">{{ gitChangeCount }}</span>
+      </button>
+      <button
+        type="button"
+        class="file-panel-collapsed-tab"
+        :class="{ active: gitPanelMode === 'sessions' }"
+        title="会话"
+        @click="$emit('update:gitPanelMode', 'sessions'); $emit('expand-file-panel')"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <button
+        type="button"
+        class="file-panel-collapsed-tab"
+        :class="{ active: gitPanelMode === 'project' }"
+        title="项目"
+        :disabled="!projectOpened"
+        @click="$emit('update:gitPanelMode', 'project'); $emit('expand-file-panel')"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+          <path d="M12 12 4 7.5m8 4.5 8-4.5M12 12v9" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        </svg>
+        <span v-if="reviewAttentionCount" class="file-panel-collapsed-badge file-panel-collapsed-badge--warn">{{ reviewAttentionCount }}</span>
+      </button>
+      <div class="file-panel-collapsed-spacer" />
+      <button
+        type="button"
+        class="file-panel-collapsed-tab file-panel-collapsed-expand"
+        title="展开面板"
+        @click="$emit('expand-file-panel')"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M9 18l6-6-6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Expanded panel -->
+    <template v-else>
     <div class="file-panel-head">
       <div class="file-panel-row file-panel-top-row">
         <div class="file-panel-tabs" role="tablist" aria-label="左侧面板">
@@ -62,6 +135,17 @@
           </button>
         </div>
         <button
+          type="button"
+          class="file-panel-collapse-btn"
+          title="折叠面板 (Ctrl+\\)"
+          aria-label="折叠面板"
+          @click="$emit('collapse-file-panel')"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <button
           v-if="chatCollapsed && projectOpened"
           type="button"
           class="file-panel-expand-side"
@@ -81,15 +165,7 @@
         role="group"
         aria-label="项目面板"
       >
-        <button
-          type="button"
-          class="file-panel-segment-btn"
-          :class="{ active: projectPanelView === 'knowledge' }"
-          :aria-pressed="projectPanelView === 'knowledge'"
-          @click="$emit('update:projectPanelView', 'knowledge')"
-        >
-          知识库
-        </button>
+        <!-- 知识库已禁用 -->
         <button
           type="button"
           class="file-panel-segment-btn"
@@ -163,116 +239,159 @@
     <div class="panel-body">
       <!-- 会话 Tab 独立渲染，避免文件树 loading 遮罩挡住点击 -->
       <div v-if="gitPanelMode === 'sessions'" class="sessions-panel">
-        <div class="sessions-header">
+        <div class="sessions-toolbar">
           <button
             type="button"
             class="sessions-new-btn"
-            title="新会话"
+            title="新建会话 (Ctrl+N)"
             @click="$emit('start-new-session')"
           >
-            <span class="sessions-new-icon" aria-hidden="true">+</span>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
             新建会话
           </button>
+        </div>
+        <div class="sessions-search-box">
+          <svg class="sessions-search-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="7" cy="7" r="4.2" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M10.2 10.2 13.5 13.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
           <input
-            v-if="sessionList.length > 6"
+            ref="sessionSearchInput"
             v-model="sessionSearchQuery"
-            class="sessions-search"
+            class="sessions-search-input"
             type="search"
             placeholder="搜索会话…"
             aria-label="搜索会话"
           />
+          <kbd v-if="!sessionSearchQuery" class="sessions-search-kbd">Ctrl+K</kbd>
+          <button
+            v-else
+            type="button"
+            class="sessions-search-clear"
+            title="清除搜索"
+            @click="sessionSearchQuery = ''"
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </button>
         </div>
         <p v-if="chatStoreSyncMessage" class="sessions-sync-hint" role="status" aria-live="polite">
           {{ chatStoreSyncMessage }}
         </p>
-        <div v-if="!sessionList.length" class="panel-empty" style="padding: 24px 12px;">
-          <span class="panel-empty-icon" aria-hidden="true">💬</span>
-          <p class="panel-empty-title">当前项目还没有会话记录</p>
-          <p class="panel-empty-hint">开始对话后，会话会显示在这里</p>
-        </div>
-        <div v-else-if="!filteredGroupedSessions.length" class="sessions-search-empty">
-          没有匹配的会话
-        </div>
-        <ul v-else class="sessions-list">
-          <template v-for="group in filteredGroupedSessions" :key="group.label">
-            <li class="session-group-header">
-              <span class="session-group-label">{{ group.label }}</span>
-              <span class="session-group-count">{{ group.items.length }}</span>
-            </li>
-            <li
-              v-for="s in group.items"
-              :key="s.id"
-              class="session-item"
-              :class="{ active: s.id === activeSessionId, 'session-item--syncing': sessionSendingIds.includes(s.id) || s.status === 'active' }"
-            >
-              <button type="button" class="session-item-main" :title="s.title" @click="$emit('switch-session', s.id)">
-                <span class="session-item-title-row">
-                  <span class="session-item-status" aria-hidden="true">
-                    <span v-if="s.status === 'completed' && !sessionSendingIds.includes(s.id)" class="session-item-completed" title="已完成">
-                      <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
-                        <path d="M3 8.5l3.5 3.5L13 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                      </svg>
-                    </span>
-                    <span v-else-if="s.status === 'failed' && !sessionSendingIds.includes(s.id)" class="session-item-failed" title="失败">
-                      <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
-                        <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                      </svg>
-                    </span>
-                    <span v-else-if="s.status === 'interrupted' && !sessionSendingIds.includes(s.id)" class="session-item-interrupted" title="已中断">
-                      <svg width="10" height="10" viewBox="0 0 16 16" fill="none">
-                        <path d="M7 2v7l4 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-                        <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.3"/>
-                      </svg>
-                    </span>
-                    <span v-else-if="sessionSendingIds.includes(s.id)" class="session-item-sending" title="运行中"><span class="session-spinner" /></span>
-                  </span>
-                  <span
-                    class="session-item-text"
-                    :class="{ 'shimmer-text--fast': sessionSendingIds.includes(s.id) || s.status === 'active' }"
-                  >{{ s.title }}</span>
-                </span>
-                <span class="session-item-meta" :class="{ 'shimmer-text--fast': sessionSendingIds.includes(s.id) || s.status === 'active' }">
-                  {{ formatSessionTime(s.updatedAt) }}<template v-if="s.messageCount"> · {{ formatCount(s.messageCount) }} 条</template>
-                </span>
+        <div class="sessions-scroll">
+          <div v-if="!sessionList.length" class="sessions-empty">
+            <div class="sessions-empty-icon" aria-hidden="true">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
+                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
+            <p class="sessions-empty-title">暂无会话</p>
+            <p class="sessions-empty-hint">开始对话后，会话会显示在这里</p>
+          </div>
+          <div v-else-if="!filteredGroupedSessions.length" class="sessions-empty">
+            <p class="sessions-empty-hint">没有匹配的会话</p>
+          </div>
+          <template v-else>
+            <div v-for="group in filteredGroupedSessions" :key="group.label" class="session-group">
+              <button
+                type="button"
+                class="session-group-header"
+                @click="toggleGroupCollapse(group.label)"
+              >
+                <svg
+                  class="session-group-chevron"
+                  :class="{ collapsed: collapsedGroups.has(group.label) }"
+                  width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+                >
+                  <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span class="session-group-label">{{ group.label }}</span>
+                <span class="session-group-count">{{ group.items.length }}</span>
               </button>
-              <div class="session-item-actions">
-                <button
-                  type="button"
-                  class="session-icon-btn"
-                  title="复制会话信息"
-                  @click.stop="$emit('copy-session-info', s)"
+              <ul v-if="!collapsedGroups.has(group.label)" class="session-group-list">
+                <li
+                  v-for="s in group.items"
+                  :key="s.id"
+                  class="session-item"
+                  :class="{ active: s.id === activeSessionId, 'session-item--syncing': sessionSendingIds.includes(s.id) || s.status === 'active' }"
                 >
-                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <rect x="5" y="5" width="8" height="9" rx="1.2" stroke="currentColor" stroke-width="1.2"/>
-                    <path d="M4 11V3.8A1.8 1.8 0 0 1 5.8 2H11" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  class="session-icon-btn"
-                  title="复制会话名和路径"
-                  @click.stop="$emit('copy-session-name-path', s)"
-                >
-                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <path d="M6.5 2.5h-3a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M8.5 1.5h6v6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
-                    <path d="M14.5 1.5L8 8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  class="session-icon-btn session-icon-btn--danger"
-                  title="删除此会话"
-                  @click.stop="$emit('remove-session', s.id)"
-                >
-                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                    <path d="M3.5 4.5h9M6 4.5V3.2a.8.8 0 0 1 .8-.8h2.4a.8.8 0 0 1 .8.8V4.5M6.2 7v4.2M9.8 7v4.2M5 4.5l.4 8.2a.8.8 0 0 0 .8.8h3.6a.8.8 0 0 0 .8-.8l.4-8.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
-                  </svg>
-                </button>
-              </div>
-            </li>
+                  <button
+                    type="button"
+                    class="session-item-main"
+                    :title="sessionItemTitle(s)"
+                    @click="$emit('switch-session', s.id)"
+                  >
+                    <span class="session-item-icon" aria-hidden="true">
+                      <span v-if="s.status === 'completed' && !sessionSendingIds.includes(s.id)" class="status-dot status-dot--completed" title="已完成" />
+                      <span v-else-if="s.status === 'failed' && !sessionSendingIds.includes(s.id)" class="status-dot status-dot--failed" title="失败" />
+                      <span v-else-if="s.status === 'interrupted' && !sessionSendingIds.includes(s.id)" class="status-dot status-dot--interrupted" title="已中断" />
+                      <span v-else-if="sessionSendingIds.includes(s.id)" class="status-dot status-dot--running" title="运行中"><span class="session-spinner" /></span>
+                      <span v-else class="status-dot" />
+                    </span>
+                    <span
+                      class="session-item-title"
+                      :class="{ 'shimmer-text--fast': sessionSendingIds.includes(s.id) || s.status === 'active' }"
+                    >{{ s.title }}</span>
+                  </button>
+                  <div class="session-item-trailing">
+                    <span
+                      class="session-item-pill"
+                      :title="s.messageCount ? `${formatCount(s.messageCount)} 条消息` : undefined"
+                    >{{ formatSessionTime(s.updatedAt) }}</span>
+                    <div class="session-item-actions">
+                      <button
+                        type="button"
+                        class="session-action-icon-btn"
+                        title="复制会话信息"
+                        @click.stop="$emit('copy-session-info', s)"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                          <rect x="5" y="5" width="8" height="9" rx="1.2" stroke="currentColor" stroke-width="1.2"/>
+                          <path d="M4 11V3.8A1.8 1.8 0 0 1 5.8 2H11" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        class="session-action-icon-btn"
+                        title="复制会话名和路径"
+                        @click.stop="$emit('copy-session-name-path', s)"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                          <path d="M6.5 2.5h-3a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+                          <path d="M8.5 1.5h6v6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+                          <path d="M14.5 1.5L8 8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        class="session-action-icon-btn"
+                        title="重命名"
+                        @click.stop="startRename(s)"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                          <path d="M11.5 1.5l3 3L5 14H2v-3L11.5 1.5z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        class="session-action-icon-btn session-action-icon-btn--danger"
+                        title="删除"
+                        @click.stop="$emit('remove-session', s.id)"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                          <path d="M3.5 4.5h9M6 4.5V3.2a.8.8 0 0 1 .8-.8h2.4a.8.8 0 0 1 .8.8V4.5M6.2 7v4.2M9.8 7v4.2M5 4.5l.4 8.2a.8.8 0 0 0 .8.8h3.6a.8.8 0 0 0 .8-.8l.4-8.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                </li>
+              </ul>
+            </div>
           </template>
-        </ul>
+        </div>
       </div>
 
       <div v-else class="panel-body-main">
@@ -283,6 +402,7 @@
         <slot></slot>
       </div>
     </div>
+    </template>
   </aside>
 </template>
 
@@ -290,6 +410,8 @@
 import { ref, computed, withDefaults } from "vue";
 import type { GitStatusFile } from "../../services/vibeGitClient";
 import type { VibeChatSessionMeta } from "../../services/vibeChatStorage";
+
+const sessionSearchInput = ref<HTMLInputElement | null>(null);
 
 function formatSessionTime(timestamp: number | string): string {
   const date = new Date(timestamp);
@@ -313,6 +435,11 @@ function formatSessionTime(timestamp: number | string): string {
 function formatCount(n: number): string {
   if (n > 99) return "99+";
   return String(n);
+}
+
+function sessionItemTitle(s: VibeChatSessionMeta): string {
+  if (s.messageCount) return `${s.title} · ${formatCount(s.messageCount)} 条`;
+  return s.title;
 }
 
 function getDateGroup(timestamp: number | string): string {
@@ -342,6 +469,7 @@ interface Props {
   loadingTree?: boolean;
   editorCollapsed: boolean;
   chatCollapsed: boolean;
+  filePanelCollapsed: boolean;
   gitChangeCount: number;
   gitUnstagedFiles: GitStatusFile[];
   gitStagedFiles: GitStatusFile[];
@@ -369,6 +497,8 @@ const emit = defineEmits<{
   (e: "create-new-folder"): void;
   (e: "expand-editor"): void;
   (e: "expand-chat"): void;
+  (e: "collapse-file-panel"): void;
+  (e: "expand-file-panel"): void;
   (e: "refresh-git-status"): void;
   (e: "switch-session", sessionId: string): void;
   (e: "remove-session", sessionId: string): void;
@@ -376,9 +506,40 @@ const emit = defineEmits<{
   (e: "copy-session-info", session: VibeChatSessionMeta): void;
   (e: "copy-session-name-path", session: VibeChatSessionMeta): void;
   (e: "sync-chat-store-to-disk"): void;
+  (e: "toggle-favorite", sessionId: string): void;
+  (e: "rename-session", sessionId: string, newTitle: string): void;
 }>();
 
 const sessionSearchQuery = ref("");
+const collapsedGroups = ref(new Set<string>());
+const favoriteIds = ref(new Set<string>());
+const renamingSessionId = ref("");
+const renameValue = ref("");
+
+function toggleGroupCollapse(label: string) {
+  if (collapsedGroups.value.has(label)) {
+    collapsedGroups.value.delete(label);
+  } else {
+    collapsedGroups.value.add(label);
+  }
+}
+
+function startRename(s: VibeChatSessionMeta) {
+  renamingSessionId.value = s.id;
+  renameValue.value = s.title;
+}
+
+function commitRename(s: VibeChatSessionMeta) {
+  const trimmed = renameValue.value.trim();
+  if (trimmed && trimmed !== s.title) {
+    emit("rename-session", s.id, trimmed);
+  }
+  renamingSessionId.value = "";
+}
+
+function cancelRename() {
+  renamingSessionId.value = "";
+}
 
 const groupedSessions = computed<SessionGroup[]>(() => {
   const order = ["今天", "昨天", "本周", "本月", "更早"];
@@ -482,6 +643,105 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
   flex-shrink: 0;
   width: 14px;
   height: 14px;
+}
+
+.file-panel-collapse-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.file-panel-collapse-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.88);
+}
+
+/* Collapsed sidebar */
+.file-panel-collapsed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0;
+  gap: 2px;
+  background: rgba(11, 18, 32, 0.55);
+  border-right: 1px solid var(--border);
+  height: 100%;
+}
+
+.file-panel-collapsed-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.file-panel-collapsed-tab:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.file-panel-collapsed-tab.active {
+  background: rgba(88, 166, 255, 0.14);
+  color: #58a6ff;
+}
+
+.file-panel-collapsed-tab:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.file-panel-collapsed-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(88, 166, 255, 0.55);
+  border-radius: 999px;
+}
+
+.file-panel-collapsed-badge--warn {
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(210, 120, 40, 0.65);
+}
+
+.file-panel-collapsed-spacer {
+  flex: 1;
+}
+
+.file-panel-collapsed-expand {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.file-panel-collapsed-expand:hover {
+  color: rgba(255, 255, 255, 0.88);
 }
 
 .file-panel-tabs {
@@ -746,273 +1006,234 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
   min-height: 0;
 }
 
-.sessions-header {
+.sessions-toolbar {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 10px 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px 6px;
   flex-shrink: 0;
-}
-
-.sessions-search {
-  width: 100%;
-  box-sizing: border-box;
-  height: 30px;
-  padding: 0 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 7px;
-  background: rgba(0, 0, 0, 0.15);
-  color: rgba(255, 255, 255, 0.88);
-  font-size: 12px;
-  outline: none;
-}
-
-.sessions-search::placeholder {
-  color: rgba(139, 148, 158, 0.6);
-}
-
-.sessions-search:focus {
-  border-color: rgba(88, 166, 255, 0.3);
 }
 
 .sessions-new-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
-  padding: 9px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 7px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(255, 255, 255, 0.88);
+  background: rgba(88, 166, 255, 0.1);
+  color: #79c0ff;
   font-size: 12.5px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  transition: all 0.15s ease;
 }
 
 .sessions-new-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.16);
-  color: rgba(255, 255, 255, 0.96);
+  background: rgba(88, 166, 255, 0.18);
+  border-color: rgba(88, 166, 255, 0.3);
+  color: #a5d6ff;
 }
 
-.sessions-new-icon {
-  display: inline-flex;
+.sessions-new-btn:active {
+  background: rgba(88, 166, 255, 0.22);
+}
+
+.sessions-search-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 10px 6px;
+  padding: 0 8px;
+  height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.sessions-search-box:focus-within {
+  border-color: rgba(88, 166, 255, 0.35);
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.sessions-search-icon {
+  flex-shrink: 0;
+  color: rgba(139, 148, 158, 0.5);
+}
+
+.sessions-search-box:focus-within .sessions-search-icon {
+  color: rgba(88, 166, 255, 0.7);
+}
+
+.sessions-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: none;
+  background: none;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 12px;
+  outline: none;
+}
+
+.sessions-search-input::placeholder {
+  color: rgba(139, 148, 158, 0.5);
+}
+
+.sessions-search-kbd {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-family: ui-monospace, monospace;
+  padding: 2px 5px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(139, 148, 158, 0.45);
+  line-height: 1;
+}
+
+.sessions-search-clear {
+  display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   width: 18px;
   height: 18px;
-  border-radius: 50%;
-  background: rgba(88, 166, 255, 0.16);
-  color: #79c0ff;
-  font-size: 14px;
-  line-height: 1;
-  font-weight: 600;
-}
-
-.sessions-search-empty {
-  padding: 20px 12px;
-  text-align: center;
-  font-size: 12px;
-  color: rgba(139, 148, 158, 0.65);
-}
-
-.session-action-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  width: 100%;
-  padding: 10px 12px;
-  font-size: 13px;
-  font-weight: 500;
-  color: #6c8cff;
-  background: linear-gradient(135deg, rgba(108, 140, 255, 0.06) 0%, rgba(108, 140, 255, 0.02) 100%);
-  border: 1.5px dashed rgba(108, 140, 255, 0.35);
-  border-radius: 8px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(139, 148, 158, 0.6);
   cursor: pointer;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  white-space: nowrap;
-  flex-shrink: 0;
-  position: relative;
-  overflow: hidden;
+  transition: background 0.12s, color 0.12s;
 }
 
-.session-action-btn::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, rgba(108, 140, 255, 0.12) 0%, rgba(108, 140, 255, 0.04) 100%);
-  opacity: 0;
-  transition: opacity 0.25s ease;
-  border-radius: 7px;
+.sessions-search-clear:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.8);
 }
 
-.session-action-btn:hover {
-  color: #8ba8ff;
-  border-color: rgba(108, 140, 255, 0.55);
-  background: linear-gradient(135deg, rgba(108, 140, 255, 0.12) 0%, rgba(108, 140, 255, 0.04) 100%);
-  transform: translateY(-1px);
-  box-shadow: 0 3px 12px rgba(108, 140, 255, 0.15);
-}
-
-.session-action-btn:hover::before {
-  opacity: 1;
-}
-
-.session-action-btn:active {
-  transform: translateY(0);
-  box-shadow: 0 1px 4px rgba(108, 140, 255, 0.1);
-}
-
-.session-action-btn:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
-}
-
-.session-action-btn-glass {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  width: 100%;
-  padding: 6px 12px;
-  color: rgba(255, 255, 255, 0.7);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid transparent;
-  border-top-color: rgba(255, 255, 255, 0.08);
-  border-bottom-color: rgba(0, 0, 0, 0.15);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  white-space: nowrap;
-  flex-shrink: 0;
-  position: relative;
-  overflow: hidden;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.05),
-    0 1px 2px rgba(0, 0, 0, 0.1);
-}
-
-.session-action-btn-glass::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, transparent 60%);
-  opacity: 1;
-  border-radius: 5px;
-  pointer-events: none;
-}
-
-.session-action-btn-glass:hover {
-  color: rgba(255, 255, 255, 0.9);
-  background: rgba(255, 255, 255, 0.08);
-  border-top-color: rgba(255, 255, 255, 0.12);
-  border-bottom-color: rgba(0, 0, 0, 0.2);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 2px 6px rgba(0, 0, 0, 0.15);
-}
-
-.session-action-btn-glass:active {
-  background: rgba(255, 255, 255, 0.1);
-  border-top-color: rgba(0, 0, 0, 0.1);
-  border-bottom-color: rgba(255, 255, 255, 0.06);
-  box-shadow:
-    inset 0 1px 2px rgba(0, 0, 0, 0.15),
-    0 0 2px rgba(0, 0, 0, 0.1);
-}
-
-.session-action-btn-glass:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-  box-shadow: none;
-}
-
-.session-action-icon {
-  font-size: 15px;
-  line-height: 1;
-  font-weight: 600;
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(108, 140, 255, 0.15);
-  border-radius: 50%;
-  color: #6c8cff;
-  transition: background 0.2s ease;
-}
-
-.session-action-btn-glass:hover .session-action-icon {
-  color: #6c8cff;
-  background: rgba(108, 140, 255, 0.15);
-}
-
-.session-action-label {
-  line-height: 1;
-  letter-spacing: 0.3px;
-}
-
-.sessions-list {
-  list-style: none;
-  margin: 0;
-  padding: 6px 8px 10px;
-  overflow-y: auto;
+.sessions-scroll {
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+  scrollbar-color: transparent transparent;
+  padding: 2px 0;
 }
 
-.sessions-list::-webkit-scrollbar {
+.sessions-scroll:hover {
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+.sessions-scroll::-webkit-scrollbar {
   width: 5px;
 }
 
-.sessions-list::-webkit-scrollbar-thumb {
+.sessions-scroll::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
+  background: transparent;
+  transition: background 0.2s;
+}
+
+.sessions-scroll:hover::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.sessions-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.sessions-empty-icon {
+  color: rgba(139, 148, 158, 0.25);
+  margin-bottom: 4px;
+}
+
+.sessions-empty-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.sessions-empty-hint {
+  margin: 0;
+  font-size: 12px;
+  color: rgba(139, 148, 158, 0.5);
+}
+
+.sessions-search-empty {
+  padding: 24px 12px;
+  text-align: center;
+  font-size: 12px;
+  color: rgba(139, 148, 158, 0.55);
+}
+
+.session-group {
+  margin-bottom: 2px;
 }
 
 .session-group-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 6px 6px;
+  gap: 4px;
+  width: 100%;
+  padding: 6px 10px 4px 10px;
+  border: none;
+  background: none;
+  cursor: pointer;
   list-style: none;
 }
 
-.session-group-header:first-child {
-  padding-top: 2px;
+.session-group-chevron {
+  flex-shrink: 0;
+  color: rgba(139, 148, 158, 0.4);
+  transition: transform 0.15s ease;
+}
+
+.session-group-chevron.collapsed {
+  transform: rotate(-90deg);
 }
 
 .session-group-label {
   font-size: 11px;
   font-weight: 600;
-  color: rgba(139, 148, 158, 0.55);
-  letter-spacing: 0.02em;
+  color: rgba(139, 148, 158, 0.5);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
 }
 
 .session-group-count {
   font-size: 10px;
-  color: rgba(139, 148, 158, 0.4);
+  color: rgba(139, 148, 158, 0.3);
+  margin-left: 2px;
+}
+
+.session-group-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 6px;
 }
 
 .session-item {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   gap: 2px;
   border-radius: 8px;
   position: relative;
-  transition: background 0.15s ease;
+  transition: background 0.12s ease;
 }
 
 .session-item + .session-item {
-  margin-top: 2px;
+  margin-top: 1px;
 }
 
 .session-item:hover {
@@ -1020,107 +1241,165 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
 }
 
 .session-item.active {
-  background: rgba(88, 166, 255, 0.1);
+  background: rgba(88, 166, 255, 0.08);
 }
 
 .session-item.active::before {
   content: "";
   position: absolute;
   left: 0;
-  top: 8px;
-  bottom: 8px;
-  width: 2px;
-  border-radius: 0 2px 2px 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
   background: #58a6ff;
 }
 
 .session-item-main {
   flex: 1;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  padding: 8px 10px 8px 12px;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 6px 7px 10px;
   border: none;
   background: none;
   color: var(--text-primary, #e6edf3);
   cursor: pointer;
   text-align: left;
   min-width: 0;
-  border-radius: 8px;
+  border-radius: 6px;
   position: relative;
   z-index: 1;
 }
 
-.session-item-title-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  width: 100%;
-  min-width: 0;
-}
-
-.session-item-status {
+.session-item-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 18px;
+  width: 8px;
+  height: 8px;
   flex-shrink: 0;
 }
 
-.session-item-text {
-  flex: 1;
-  min-width: 0;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  word-break: break-word;
-  font-size: 12.5px;
-  font-weight: 500;
-  line-height: 1.45;
-  color: rgba(255, 255, 255, 0.92);
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(139, 148, 158, 0.25);
+  flex-shrink: 0;
 }
 
-.session-item-meta {
-  padding-left: 24px;
-  font-size: 11px;
-  line-height: 1.3;
-  color: rgba(139, 148, 158, 0.55);
+.status-dot--completed {
+  background: rgba(63, 185, 80, 0.7);
+}
+
+.status-dot--failed {
+  background: rgba(248, 81, 73, 0.7);
+}
+
+.status-dot--interrupted {
+  background: rgba(210, 153, 34, 0.7);
+}
+
+.status-dot--running {
+  width: 14px;
+  height: 14px;
+  background: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.session-item-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.session-item.active .session-item-title {
+  color: rgba(200, 225, 255, 0.95);
+}
+
+.session-item-trailing {
+  position: relative;
+  display: grid;
+  align-items: center;
+  justify-items: end;
+  flex-shrink: 0;
+  min-width: 100px;
+  height: 24px;
+  padding-right: 4px;
+  z-index: 2;
+}
+
+.session-item-pill,
+.session-item-actions {
+  grid-area: 1 / 1;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.session-item-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  color: rgba(139, 148, 158, 0.72);
+  background: rgba(139, 148, 158, 0.1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  opacity: 1;
+  transform: scale(1);
 }
 
 .session-item-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding-right: 4px;
+  gap: 1px;
   opacity: 0;
-  transition: opacity 0.15s;
-  flex-shrink: 0;
+  transform: scale(0.96);
+  pointer-events: none;
 }
 
-.session-item-sending {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
+.session-item:hover .session-item-pill,
+.session-item:focus-within .session-item-pill {
+  opacity: 0;
+  transform: scale(0.96);
 }
 
-.session-item--syncing .session-item-text {
+.session-item:hover .session-item-actions,
+.session-item:focus-within .session-item-actions {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+.session-item--syncing .session-item-title {
   color: rgba(201, 224, 255, 0.95);
 }
 
 .session-item--syncing:not(.active) {
-  background: rgba(88, 166, 255, 0.06);
+  background: rgba(88, 166, 255, 0.04);
 }
 
 .session-spinner {
   width: 12px;
   height: 12px;
-  border: 2px solid rgba(88, 166, 255, 0.2);
+  border: 1.5px solid rgba(88, 166, 255, 0.2);
   border-top-color: #58a6ff;
   border-radius: 50%;
   animation: session-spin 0.75s linear infinite;
@@ -1130,74 +1409,28 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
   to { transform: rotate(360deg); }
 }
 
-.session-item-completed {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: rgba(63, 185, 80, 0.15);
-  color: #3fb950;
-  font-size: 8px;
-  font-weight: 700;
-  flex-shrink: 0;
-}
-
-.session-item-failed {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: rgba(248, 81, 73, 0.15);
-  color: #f85149;
-  font-size: 8px;
-  font-weight: 700;
-  flex-shrink: 0;
-}
-
-.session-item-interrupted {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: rgba(210, 153, 34, 0.15);
-  color: #d29922;
-  font-size: 8px;
-  font-weight: 700;
-  flex-shrink: 0;
-}
-
-.session-item:hover .session-item-actions {
-  opacity: 1;
-}
-
-.session-icon-btn {
+.session-action-icon-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: none;
-  border-radius: 5px;
+  border-radius: 6px;
   background: transparent;
-  color: rgba(139, 148, 158, 0.65);
+  color: rgba(139, 148, 158, 0.55);
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
 }
 
-.session-icon-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.92);
+.session-action-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.88);
 }
 
-.session-icon-btn--danger:hover {
-  background: rgba(248, 81, 73, 0.15);
-  color: #ff9a9a;
+.session-action-icon-btn--danger:hover {
+  background: rgba(248, 81, 73, 0.12);
+  color: #f85149;
 }
 </style>
