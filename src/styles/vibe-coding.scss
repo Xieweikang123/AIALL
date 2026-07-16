@@ -101,6 +101,13 @@
   border-right: none;
 }
 
+.workspace.file-panel-collapsed .chat-panel.chat-expanded {
+  flex: 1;
+  width: auto !important;
+  min-width: 260px;
+  border-left: none;
+}
+
 .chat-expand-rail {
   display: flex;
   flex-direction: column;

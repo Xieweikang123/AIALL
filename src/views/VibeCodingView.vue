@@ -25,6 +25,7 @@
         'no-project': !projectOpened,
         'editor-collapsed': editorCollapsed,
         'chat-collapsed': chatCollapsed,
+        'file-panel-collapsed': filePanelCollapsed,
       }"
     >
       <VibeWorkspaceWelcome
@@ -41,6 +42,7 @@
         :project-opened="projectOpened"
         :editor-collapsed="editorCollapsed"
         :chat-collapsed="chatCollapsed"
+        :file-panel-collapsed="filePanelCollapsed"
         :git-change-count="gitChangeCount"
         :git-unstaged-files="gitUnstagedFiles"
         :git-staged-files="gitStagedFiles"
@@ -57,6 +59,8 @@
         @create-new-folder="createNewFolder"
         @expand-editor="expandEditor"
         @expand-chat="expandChat"
+        @collapse-file-panel="collapseFilePanel"
+        @expand-file-panel="expandFilePanel"
         @refresh-git-status="refreshGitStatus(gitStatusKnown ? { showLoading: false } : undefined)"
         @switch-session="handleSwitchSession"
         @remove-session="removeSession"
@@ -252,7 +256,7 @@
       </FilePanel>
 
       <div
-        v-show="projectOpened"
+        v-show="projectOpened && !filePanelCollapsed"
         class="resize-handle"
         role="separator"
         aria-orientation="vertical"
@@ -625,7 +629,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from "vue";
 import "../styles/vibe-coding.scss";
 import { appendStatusDetail, assistantTransientUiClearPatch, truncateDiffPreview, cleanStatusLogText, CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount, isNetworkError, fileName, genId, hasAgentProcessSteps, entryToNode, formatToolMeta, syncRoundGroupsPatch } from "../utils/vibeHelpers";
-import { appendDebugLogFile, debugLog } from "../utils/debugLog";
+import { appendDebugLogFile, debugLog, setDebugLogProjectRoot } from "../utils/debugLog";
 import { lsGet, lsGetJson, lsSet, lsSetJson, lsRemove } from "../utils/localStorageSafe";
 import { dismissBlockingOverlays, registerOverlayDismissDeps, scanDomBlockingOverlays } from "../utils/dismissBlockingOverlays";
 import { sessionDiag } from "../utils/sessionDiagLog";
@@ -1479,6 +1483,7 @@ const {
   chatPanelWidth,
   editorCollapsed,
   chatCollapsed,
+  filePanelCollapsed,
   startResize,
   stopResize,
   onResizeKeydown,
@@ -1486,6 +1491,8 @@ const {
   expandEditor,
   collapseChat,
   expandChat,
+  collapseFilePanel,
+  expandFilePanel,
   getChatPanelMaxWidth,
   CHAT_MIN_WIDTH,
 } = usePanelLayout(workspaceRef);
@@ -1508,6 +1515,7 @@ function loadSavedProject() {
   const saved = lsGet(STORAGE_KEY);
   if (saved) {
     projectPath.value = saved;
+    setDebugLogProjectRoot(saved);
     void openProjectByPath(saved);
   }
 }
@@ -1669,6 +1677,7 @@ useVibeGlobalShortcuts({
   startNewSession,
   navigateBack,
   navigateForward,
+  toggleFilePanel: filePanelCollapsed.value ? expandFilePanel : collapseFilePanel,
 });
 
 async function applyChatMessageImageHydration(messages: PersistedChatMessage[]): Promise<ChatMessage[]> {
@@ -1957,6 +1966,15 @@ async function copySessionNamePath(session: VibeChatSessionMeta) {
 }
 
 function patchAssistantMsg(msgId: string, patch: Partial<ChatMessage>, sessionId?: string) {
+  if (patch.content !== undefined) {
+    debugLog("[VibeCodingView] patchAssistantMsg content", {
+      msgId: msgId.slice(0, 20),
+      contentLen: patch.content.length,
+      content: patch.content.slice(0, 80),
+      hasRoundGroups: !!patch.roundGroups,
+    });
+  }
+
   const sid = (sessionId || activeSessionId.value).trim();
   const isActive = sid === activeSessionId.value;
   const apply = (list: ChatMessage[]) => {
@@ -2576,6 +2594,7 @@ async function openProjectByPath(dirPath: string) {
     fileTree.value = items;
     projectOpened.value = true;
     projectPath.value = normalized;
+    setDebugLogProjectRoot(normalized);
     lsSet(STORAGE_KEY, normalized);
     addProjectToHistory(normalized);
     refreshProjectHistoryList();

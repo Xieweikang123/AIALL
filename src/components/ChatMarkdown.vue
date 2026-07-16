@@ -40,9 +40,14 @@ const streamingThrottle = createStreamingMarkdownThrottle(undefined, (text) => {
   streamingHtmlCache.value = buildStreamingHtml(text);
 });
 
+function joinParsedMarkdown(parsed: { before: string; after: string }): string {
+  const after = parsed.after.trim();
+  return after ? `${parsed.before}\n\n${after}` : parsed.before;
+}
+
 function buildStreamingHtml(sourceText: string): string {
   const parsed = props.interactive ? parseAiOptions(sourceText) : null;
-  const markdown = parsed?.options.length ? parsed.before : sourceText;
+  const markdown = parsed?.options.length ? joinParsedMarkdown(parsed) : sourceText;
   const sanitized = sanitizeMarkdownForStreamingDisplay(markdown);
   return renderMarkdownLite(prepareStreamingMarkdownForRender(sanitized));
 }
@@ -239,7 +244,7 @@ const markdownContent = computed(() => {
   if (clarification) return clarification.displayText;
   const parsed = parsedOptions.value;
   if (!parsed) return activeSource.value;
-  return parsed.before;
+  return joinParsedMarkdown(parsed);
 });
 
 const sanitizedMarkdown = computed(() => sanitizeMarkdownForDisplay(markdownContent.value));
