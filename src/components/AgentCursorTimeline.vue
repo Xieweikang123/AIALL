@@ -5,65 +5,7 @@
     :class="{ 'agent-stream--running': isRunning }"
     @scroll="onTimelineScroll"
   >
-    <div v-if="isRunning" class="stream-unified">
-      <AgentInlineFeedItems
-        :items="inlineItems"
-        :is-running="true"
-        :chat-mode="chatMode"
-        :can-execute-plan="canExecutePlan"
-        :layout-enhance-ready="layoutEnhanceReady"
-        :plan-file-path="planFilePath"
-        :message-id="messageId"
-        :tool-display="'inline'"
-        :tool-default-visible="toolDefaultVisible"
-        :progress-hint="progressHint"
-        @execute-plan="emit('execute-plan')"
-        @select-option="(option) => emit('select-option', option)"
-        @open-file="(path) => emit('openFile', path)"
-      />
-    </div>
-
-    <template v-else-if="useCompletedLayout">
-      <details
-        v-if="completedProcessItems.length"
-        class="stream-process"
-        :open="processOpen"
-        @toggle="onProcessToggle"
-      >
-        <summary class="stream-process-summary">
-          <span class="stream-process-label">执行过程</span>
-          <span class="stream-process-meta">{{ processSummary }}</span>
-        </summary>
-        <div class="stream-process-body">
-          <AgentInlineFeedItems
-            :items="completedProcessItems"
-            :is-running="false"
-            :chat-mode="chatMode"
-            :can-execute-plan="false"
-            :layout-enhance-ready="layoutEnhanceReady"
-            tool-display="inline"
-            @open-file="(path) => emit('openFile', path)"
-          />
-        </div>
-      </details>
-      <div v-if="answerItems.length" class="stream-answer">
-        <AgentInlineFeedItems
-          :items="answerItems"
-          :is-running="false"
-          :chat-mode="chatMode"
-          :can-execute-plan="canExecutePlan"
-          :layout-enhance-ready="layoutEnhanceReady"
-          :plan-file-path="planFilePath"
-          :message-id="messageId"
-          answer-only
-          @execute-plan="emit('execute-plan')"
-          @select-option="(option) => emit('select-option', option)"
-          @open-file="(path) => emit('openFile', path)"
-        />
-      </div>
-    </template>
-
-    <div v-else class="stream-unified">
+    <div class="stream-unified">
       <AgentInlineFeedItems
         :items="inlineItems"
         :is-running="isRunning"
@@ -100,11 +42,10 @@ import {
   buildAgentLiveFooterStatus,
   isAgentWaitingModelPhase,
 } from "../services/agentCompactStatus";
+import type { AgentRoundGroup } from "../services/agentRoundGroups";
 import {
   collectToolsFromInlineFeed,
-  filterInlineTimelineItems,
   splitInlineFeedItems,
-  summarizeInlineFeedProcess,
   type InlineFeedItem,
 } from "../services/agentInlineFeed";
 import { formatExplorationSummary, computeExplorationStats } from "../services/agentCursorFeed";
@@ -125,6 +66,8 @@ const props = withDefaults(
     activityDetailed?: boolean;
     activityExpanded?: boolean;
     agentPhase?: string;
+    agentTurn?: number;
+    roundGroups?: AgentRoundGroup[];
     messageId?: string;
     bindStatusLogScroll?: (el: HTMLElement | null, msgId: string) => void;
     onStatusLogScroll?: (msgId: string) => void;
@@ -148,15 +91,10 @@ const timelineRoot = ref<HTMLElement | null>(null);
 
 const splitFeed = computed(() => splitInlineFeedItems(props.inlineItems));
 const processItems = computed(() => splitFeed.value.process);
-const answerItem = computed(() => splitFeed.value.answer);
-const answerItems = computed((): InlineFeedItem[] =>
-  answerItem.value ? [answerItem.value] : [],
-);
 
 const liveTools = computed(() => collectToolsFromInlineFeed(processItems.value));
 const toolCount = computed(() => liveTools.value.length);
-const hasAnswerContent = computed(() => Boolean(answerItem.value?.text.trim()));
-const answerPreviewText = computed(() => answerItem.value?.text.trim() ?? "");
+const hasAnswerContent = computed(() => splitFeed.value.answers.some((a) => a.text.trim()));
 
 const toolDefaultVisible = computed(() => {
   if (props.activityDetailed) return 12;
@@ -164,29 +102,6 @@ const toolDefaultVisible = computed(() => {
   if (props.chatMode === "build" || props.chatMode === "plan") return 5;
   return 4;
 });
-
-const useCompletedLayout = computed(
-  () =>
-    !props.isRunning &&
-    hasAnswerContent.value &&
-    completedProcessItems.value.length > 0,
-);
-
-const completedProcessItems = computed((): InlineFeedItem[] => {
-  if (props.isRunning) return [];
-  return filterInlineTimelineItems(processItems.value, {
-    answerPreview: answerPreviewText.value,
-    hideNarratives: true,
-  });
-});
-
-const processSummary = computed(() =>
-  summarizeInlineFeedProcess(processItems.value, toolCount.value, false),
-);
-
-const processOpen = computed(
-  () => Boolean(props.activityExpanded) || Boolean(props.activityDetailed),
-);
 
 const liveRailPrimary = computed((): string => {
   if (!props.isRunning) return "";
@@ -232,18 +147,12 @@ const liveRailVisible = computed(() => {
 });
 
 const progressHint = computed((): string | undefined => {
-  if (!props.isRunning || hasAnswerContent.value || answerItem.value?.streaming) return undefined;
+  if (!props.isRunning || hasAnswerContent.value || splitFeed.value.answers.some((a) => a.streaming)) return undefined;
   if (!toolCount.value || !isWaitingModel.value) return undefined;
   const stats = computeExplorationStats(liveTools.value);
   const summary = formatExplorationSummary(stats, true).replace(/^探索代码库 · /, "");
   return summary ? `已${summary}，正在整理结论…` : "正在整理结论…";
 });
-
-function onProcessToggle(event: Event) {
-  const target = event.target;
-  if (!(target instanceof HTMLDetailsElement)) return;
-  emit("toggle-process", target.open);
-}
 
 function onTimelineScroll() {
   if (props.messageId && props.onStatusLogScroll) {
@@ -339,6 +248,59 @@ watch(timelineRoot, (el) => bindScrollEl(el));
   margin-top: 2px;
   padding-top: 6px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.stream-answer-history {
+  margin-bottom: 8px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.stream-answer-history-item {
+  padding: 6px 0;
+}
+
+.stream-answer-history-item + .stream-answer-history-item {
+  border-top: 1px dashed rgba(255, 255, 255, 0.06);
+}
+
+.stream-answer-history-turn {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(139, 148, 158, 0.5);
+  margin-bottom: 4px;
+}
+
+.stream-answer-history-text {
+  font-size: 13px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.7);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.stream-answer-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: rgba(139, 148, 158, 0.6);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.stream-answer-toggle:hover {
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
 .agent-stream--running :deep(.process-step-list) {

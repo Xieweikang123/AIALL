@@ -247,15 +247,16 @@ const displayItems = computed((): DisplayItem[] => {
     return extractAnswerItems(props.items);
   }
 
-  const answerItems = extractAnswerItems(props.items);
-  const source = sourceProcessItems(props.items);
+  // Keep original item order — answer items stay in place, tool batches
+  // merge adjacent tools (answer items naturally break the batch).
+  const source: Array<InlineFeedProcessItem | InlineFeedItem> =
+    props.preserveCollapsed
+      ? props.items.filter((item) => item.kind !== "text" || item.variant !== "answer")
+      : props.items;
 
-  const processDisplay: DisplayItem[] =
-    props.toolDisplay !== "inline"
-      ? (source as DisplayItem[])
-      : mergeInlineToolBatches(source);
-
-  return answerItems.length ? [...processDisplay, ...answerItems] : processDisplay;
+  return props.toolDisplay !== "inline"
+    ? (source as DisplayItem[])
+    : mergeInlineToolBatches(source);
 });
 
 function renderKey(item: DisplayItem): string {

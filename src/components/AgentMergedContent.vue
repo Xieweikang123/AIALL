@@ -14,6 +14,8 @@
       :activity-detailed="activityDetailed"
       :activity-expanded="activityExpanded"
       :agent-phase="agentPhase"
+      :agent-turn="agentTurn"
+      :round-groups="roundGroups"
       :message-id="messageId"
       :plan-file-path="planFilePath"
       :bind-status-log-scroll="bindStatusLogScroll"
