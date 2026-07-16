@@ -108,6 +108,15 @@
             </div>
           </div>
           <div class="git-header-actions">
+            <button
+              type="button"
+              class="ghost tiny"
+              :class="{ active: stashSectionOpen }"
+              title="贮藏工作区修改"
+              @click="stashSectionOpen = !stashSectionOpen"
+            >
+              📦 贮藏<span v-if="gitStashes.length" class="git-stash-btn-count">{{ gitStashes.length }}</span>
+            </button>
             <button type="button" class="ghost tiny" :disabled="gitLoading" @click="$emit('refresh')">刷新</button>
             <span
               v-if="fileWatcherActive"
@@ -174,7 +183,7 @@
         </div>
       </div>
 
-      <div class="git-stash-section git-section-card">
+      <div v-if="stashSectionOpen" class="git-stash-section git-section-card">
         <button type="button" class="git-stash-collapse-toggle" @click="stashSectionOpen = !stashSectionOpen">
           <span class="git-section-chevron">{{ stashSectionOpen ? "▾" : "▸" }}</span>
           <span class="git-stash-icon">📦</span>
@@ -849,13 +858,6 @@ watch(
   () => props.batchGroups?.map((g) => `${g.dir}:${g.files.length}`).join("|"),
   () => {
     expandedBatchGroups.value = new Set();
-  },
-);
-
-watch(
-  () => props.gitStashes.length,
-  (count, prev) => {
-    if (count > 0 && (prev ?? 0) === 0) stashSectionOpen.value = true;
   },
 );
 
@@ -1609,6 +1611,15 @@ function gitStatusClass(status: string): string {
   padding: 2px 6px;
   background: rgba(255, 255, 255, 0.06);
   border-radius: 3px;
+}
+
+.git-stash-btn-count {
+  font-size: 10px;
+  margin-left: 4px;
+  padding: 1px 5px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.7);
 }
 
 .git-stash-save-row {
