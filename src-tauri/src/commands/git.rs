@@ -359,35 +359,47 @@ pub async fn git_ai_batch_groups(
   let unstaged_files: Vec<_> = status_result.files.iter().filter(|f| !f.staged && f.status != "ignored").collect();
   let staged_files: Vec<_> = status_result.files.iter().filter(|f| f.staged).collect();
 
-  let (source_files, use_staged_diff) = if !unstaged_files.is_empty() {
-    (unstaged_files, false)
-  } else if !staged_files.is_empty() {
-    (staged_files, true)
-  } else {
+  if unstaged_files.is_empty() && staged_files.is_empty() {
     send_event("done", json!({ "groups": [] }));
     return;
-  };
+  }
+
+  let source_files: Vec<_> = staged_files.iter().chain(unstaged_files.iter()).collect();
 
   send_event("progress", json!({ "step": format!("读取 diff（{} 个文件）…", source_files.len()) }));
 
-  let diff_result = git::git_diff(&path, None, use_staged_diff).await;
-  let diff_text = if diff_result.ok {
-    preprocess_diff(&diff_result.patch, 3000, 15000)
-  } else {
-    String::new()
-  };
+  let unstaged_diff = git::git_diff(&path, None, false).await;
+  let staged_diff = git::git_diff(&path, None, true).await;
 
-  let file_list_str: Vec<String> = source_files
-    .iter()
-    .map(|f| format!("{}: {}", f.status, f.path))
-    .collect();
-  let file_list_str = file_list_str.join("\n");
+  let mut diff_parts = Vec::new();
+  if !unstaged_files.is_empty() {
+    if unstaged_diff.ok {
+      diff_parts.push(format!("未暂存 diff：\n{}", preprocess_diff(&unstaged_diff.patch, 3000, 15000)));
+    }
+  }
+  if !staged_files.is_empty() {
+    if staged_diff.ok {
+      diff_parts.push(format!("已暂存 diff：\n{}", preprocess_diff(&staged_diff.patch, 3000, 15000)));
+    }
+  }
+  let diff_text = diff_parts.join("\n\n");
 
-  let change_scope = if use_staged_diff { "已暂存" } else { "未暂存" };
+  let mut file_list_parts = Vec::new();
+  if !staged_files.is_empty() {
+    let staged_list: Vec<String> = staged_files.iter().map(|f| format!("{}: {} [已暂存]", f.status, f.path)).collect();
+    file_list_parts.push(staged_list.join("\n"));
+  }
+  if !unstaged_files.is_empty() {
+    let unstaged_list: Vec<String> = unstaged_files.iter().map(|f| format!("{}: {} [未暂存]", f.status, f.path)).collect();
+    file_list_parts.push(unstaged_list.join("\n"));
+  }
+  let file_list_str = file_list_parts.join("\n");
+
   let prompt = format!(
-    "你是一个 Git 提交分组助手。根据以下{change_scope}的文件变更，将文件按功能/逻辑相关性分成多个批次，每个批次生成一条中文提交信息。
+    "你是一个 Git 提交分组助手。根据以下文件变更，将文件按功能/逻辑相关性分成多个批次，每个批次生成一条中文提交信息。
+每个文件标注了 [已暂存] 或 [未暂存] 状态，请一并纳入分组考虑。
 
-{change_scope}文件列表：
+文件列表：
 {file_list_str}
 
 Diff 内容：
