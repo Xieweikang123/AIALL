@@ -123,8 +123,10 @@ pub struct ContextBlocks {
   pub explore_uses_manifest: bool,
 }
 
-pub async fn resolve_explore_uses_manifest(project_path: &str, prompt: &str) -> bool {
-  let knowledge = project::read_text_file(project_path, PROJECT_KNOWLEDGE_REL).await;
+pub async fn resolve_explore_uses_manifest(_project_path: &str, _prompt: &str) -> bool {
+  // 知识库已禁用 — 代码保留供后续启用
+  if false {
+  let knowledge = project::read_text_file(_project_path, PROJECT_KNOWLEDGE_REL).await;
   if knowledge.get("ok").and_then(|v| v.as_bool()) != Some(true) {
     return false;
   }
@@ -135,8 +137,10 @@ pub async fn resolve_explore_uses_manifest(project_path: &str, prompt: &str) -> 
   if body.trim().is_empty() {
     return false;
   }
-  let intent = classify_explore_knowledge_intent(prompt, true);
-  explore_intent_uses_knowledge_manifest(intent)
+  let intent = classify_explore_knowledge_intent(_prompt, true);
+  let _ = explore_intent_uses_knowledge_manifest(intent);
+  }
+  false
 }
 
 fn truncate_chars(text: &str, max: usize) -> String {
@@ -496,7 +500,8 @@ pub async fn build_context_blocks(input: ContextBuildInput<'_>) -> ContextBlocks
       }
     }
 
-    // 6. 知识库 / Explore 知识清单 — Node: projectKnowledgeBlock + exploreKnowledgeContextBlock
+    // 6. 知识库 — 已禁用（AI 自产自消的闭环𑁋行号过时问题），代码保留供后续启用
+    if false {
     let knowledge = project::read_text_file(input.project_path, PROJECT_KNOWLEDGE_REL).await;
     if knowledge.get("ok").and_then(|v| v.as_bool()) == Some(true) {
       if let Some(raw) = knowledge.get("content").and_then(|v| v.as_str()) {
@@ -539,6 +544,7 @@ pub async fn build_context_blocks(input: ContextBuildInput<'_>) -> ContextBlocks
         }
       }
     }
+    } // end if false (知识库已禁用)
 
     // 7. 探索归档 — Node: explorationArchiveBlock
     let exploration_block =
@@ -609,7 +615,7 @@ mod tests {
       "【AGENTS.md】",
       "项目 Skills",
       "【项目记忆】",
-      "【项目知识库】",
+      // "【项目知识库】", // 知识库已禁用
     ];
     let mut last = 0usize;
     for marker in markers {

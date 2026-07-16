@@ -411,32 +411,13 @@ export async function buildAgentContext(
     }
   }
 
-  const hasExistingProjectKnowledge =
-    projectKnowledgeResult.ok && Boolean(projectKnowledgeResult.body.trim());
-  const exploreKnowledgeIntent = isExplore
-    ? classifyExploreKnowledgeIntent(prompt, hasExistingProjectKnowledge)
-    : null;
-  const exploreUsesManifest = exploreKnowledgeIntent != null
-    && exploreIntentUsesKnowledgeManifest(exploreKnowledgeIntent);
-
+  // ============================================================
+  // 知识库 — 已禁用，代码保留供后续启用
+  // ============================================================
+  const hasExistingProjectKnowledge = false;
+  const exploreKnowledgeIntent = null;
+  const exploreUsesManifest = false;
   let exploreKnowledgeContextBlock = "";
-  if (isExplore && hasExistingProjectKnowledge) {
-    let changedPaths: string[] | undefined;
-    const savedHead = projectKnowledgeResult.meta.gitHead?.trim();
-    if (exploreUsesManifest && savedHead) {
-      const diff = await gitChangedFilesSince(projectRoot, savedHead);
-      if (diff.ok && diff.files.length) changedPaths = diff.files;
-    }
-    if (exploreKnowledgeIntent === "rebuild") {
-      exploreKnowledgeContextBlock = `\n\n${buildKnowledgeRebuildHint()}`;
-    } else if (exploreUsesManifest) {
-      exploreKnowledgeContextBlock = `\n\n${buildKnowledgeExploreManifest(
-        projectKnowledgeResult.body,
-        projectKnowledgeResult.meta,
-        { changedPaths },
-      )}`;
-    }
-  }
 
   const projectMemoryBlock =
     projectMemoryResult.ok && projectMemoryResult.content.trim()
@@ -448,13 +429,7 @@ export async function buildAgentContext(
         )
       : "";
 
-  const projectKnowledgeBlock =
-    !isExplore && hasExistingProjectKnowledge
-      ? await formatProjectKnowledgeForPrompt(
-          projectKnowledgeResult.body,
-          projectKnowledgeResult.truncated,
-        )
-      : "";
+  const projectKnowledgeBlock = "";
 
   const agentsGuideBlock =
     agentsGuideResult.ok && (agentsGuideResult.files?.length || agentsGuideResult.content.trim())
