@@ -102,3 +102,33 @@ pub async fn memory_usage(payload: serde_json::Value) -> Value {
     .to_string();
   project::memory_usage_track_command(project_path, memory_content, assistant_response).await
 }
+
+#[tauri::command]
+pub async fn debug_log_write(label: String, data: Option<String>) -> Value {
+  use std::fs::OpenOptions;
+  use std::io::Write;
+
+  let timestamp = chrono::Utc::now().format("%H:%M:%S%.3f").to_string();
+  let line = if let Some(d) = &data {
+    format!("[{}] {}: {}\n", timestamp, label, d)
+  } else {
+    format!("[{}] {}\n", timestamp, label)
+  };
+
+  // 写入项目根目录的 .debug.log
+  let log_path = std::env::current_dir()
+    .map(|p| p.join(".debug.log"))
+    .unwrap_or_else(|_| std::path::PathBuf::from(".debug.log"));
+
+  match OpenOptions::new()
+    .create(true)
+    .append(true)
+    .open(&log_path)
+  {
+    Ok(mut f) => {
+      let _ = f.write_all(line.as_bytes());
+      serde_json::json!({ "ok": true })
+    }
+    Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
+  }
+}
