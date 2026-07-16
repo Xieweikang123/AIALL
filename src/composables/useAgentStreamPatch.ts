@@ -6,6 +6,7 @@ import { TextToolCallStreamFilter } from "../services/textToolCallMarkup";
 import { appendAssistantStreamDelta } from "../services/agentMessageDisplay";
 import { recordAgentRoundStreamDelta } from "../services/agentRoundGroups";
 import { syncRoundGroupsPatch } from "../utils/vibeHelpers";
+import { debugLog } from "../utils/debugLog";
 
 const STREAM_SCROLL_THROTTLE_MS = 120;
 const RUN_UI_PATCH_MIN_MS = 200;
@@ -193,6 +194,15 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
     const delta = pendingStreamDelta.pending;
     pendingStreamDelta.pending = "";
     const cleanDelta = getStreamToolFilter(msgId).push(delta);
+
+    debugLog("[streamPatch] flushPendingStreamDelta", {
+      msgId: msgId.slice(0, 20),
+      deltaLen: delta.length,
+      delta: delta.slice(0, 50),
+      cleanDelta: cleanDelta?.slice(0, 50),
+      existingContentLen: (assistantMsg.content || "").length,
+      agentTurn: assistantMsg.agentTurn,
+    });
 
     const run = findRunForMsg(assistantMsg);
     const minimizing = shouldMinimizeRunUiPatch(assistantMsg);

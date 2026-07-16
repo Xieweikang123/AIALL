@@ -28,6 +28,8 @@ import {
   buildAgentResumePrompt,
   canResumeAgentRun,
   hasRecoverableAgentProgress,
+  canReuseZeroProgressAssistantSlot,
+  resetAssistantMessageForNewRun,
   inferAgentRecoveryFlags,
   isAgentMaxTurnsExhausted,
   isIncompleteAgentRunWithoutFinalAnswer,
@@ -1046,6 +1048,51 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       }
     }
 
+    /** Same user turn + skipUserBubble: reuse a zero-progress assistant shell instead of stacking. */
+    function takeOrCreateAssistantSlot(): ChatMessage {
+      if (options?.skipUserBubble) {
+        const last = chatMessages.value[chatMessages.value.length - 1];
+        if (last?.role === "assistant" && canReuseZeroProgressAssistantSlot(last)) {
+          resetAssistantMessageForNewRun(last, agentMode);
+          patchAssistantMsg(last.id, {
+            content: "",
+            chatMode: agentMode,
+            tools: [],
+            roundGroups: [],
+            turnTraces: undefined,
+            statusLog: undefined,
+            writtenFiles: undefined,
+            turnFileDiffs: undefined,
+            totalTurns: undefined,
+            agentAborted: false,
+            agentAbortReason: undefined,
+            agentFailed: false,
+            agentRecoverable: false,
+            agentFailureReason: undefined,
+            agentFailureDetail: undefined,
+            agentRecoveryDismissed: undefined,
+            agentContinueCount: undefined,
+            activityExpanded: true,
+            activityDetailed: false,
+            ...assistantTransientUiClearPatch(),
+          }, sessionId);
+          return last;
+        }
+      }
+      const created: ChatMessage = {
+        id: genId(),
+        role: "assistant",
+        content: "",
+        chatMode: agentMode,
+        tools: [],
+        roundGroups: [],
+        activityExpanded: true,
+        activityDetailed: false,
+      };
+      chatMessages.value.push(created);
+      return created;
+    }
+
     let assistantMsg: ChatMessage;
     let compressedImagesForRequest: string[] | undefined;
     let hasImagesForRequest = false;
@@ -1079,17 +1126,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           });
         }
 
-        assistantMsg = {
-          id: genId(),
-          role: "assistant",
-          content: "",
-          chatMode: agentMode,
-          tools: [],
-          roundGroups: [],
-          activityExpanded: true,
-          activityDetailed: false,
-        };
-        chatMessages.value.push(assistantMsg);
+        assistantMsg = takeOrCreateAssistantSlot();
         beginAssistantRunSlot(sessionId, assistantMsg, "preparing", false);
         const bootRun = runManager.get(sessionId);
         if (bootRun) {
@@ -1142,17 +1179,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
             imageDataUrls: compressedImagesForRequest?.length ? [...compressedImagesForRequest] : undefined,
           });
         }
-        assistantMsg = {
-          id: genId(),
-          role: "assistant",
-          content: "",
-          chatMode: agentMode,
-          tools: [],
-          roundGroups: [],
-          activityExpanded: true,
-          activityDetailed: false,
-        };
-        chatMessages.value.push(assistantMsg);
+        assistantMsg = takeOrCreateAssistantSlot();
         beginAssistantRunSlot(
           sessionId,
           assistantMsg,

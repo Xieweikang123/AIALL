@@ -13,6 +13,7 @@ import {
   shouldOfferPartialRunResume,
 } from "../services/agentRecovery";
 import { isAgentSseProgressEvent } from "../services/agentSseEventHandlers";
+import { debugLog } from "../utils/debugLog";
 import { parseAgentSuggestions } from "../services/agentSuggestions";
 import { computeLineDelta } from "../services/agentCursorFeed";
 import {
@@ -258,7 +259,20 @@ function handleTurnRequestEvent(event: EventOf<"turn_request">, assistantMsg: Ch
 }
 
 function handleTurnResponseEvent(event: EventOf<"turn_response">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
+  debugLog("[eventHandlers] handleTurnResponseEvent", {
+    turn: event.data.turn,
+    isFinal: event.data.isFinal,
+    hasToolCalls: event.data.hasToolCalls,
+    assistantText: (event.data.assistantText || "").slice(0, 80),
+    contentBefore: (assistantMsg.content || "").slice(0, 80),
+    agentTurn: assistantMsg.agentTurn,
+  });
+
   clearStreamDeltaBuffer();
+
+  // 保存流式输出的原始内容
+  const streamedContent = assistantMsg.content || "";
+
   assistantMsg.content = stripTextToolCallMarkup(
     stripToolSummaryFromAssistantContent(assistantMsg.content || ""),
   );
@@ -278,8 +292,13 @@ function handleTurnResponseEvent(event: EventOf<"turn_response">, assistantMsg: 
   );
   const turnText = strippedAssistantText;
   if (turnText && event.data.isFinal) {
-    assistantMsg.content = mergeAssistantTurnText(assistantMsg.content || "", turnText);
+    // 合并：流式内容在前，turn_response 在后
+    assistantMsg.content = mergeAssistantTurnText(streamedContent || assistantMsg.content || "", turnText);
     assistantMsg.activityExpanded = false;
+
+    debugLog("[eventHandlers] merged final turn text", {
+      contentAfter: assistantMsg.content.slice(0, 80),
+    });
   }
   if (shouldMinimizeRunUiPatch(assistantMsg)) {
     scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
@@ -294,6 +313,11 @@ function handleTurnResponseEvent(event: EventOf<"turn_response">, assistantMsg: 
 }
 
 function handleTurnTraceEvent(event: EventOf<"turn_trace">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
+  debugLog("[eventHandlers] handleTurnTraceEvent", {
+    turn: event.data.turn,
+    assistantText: (event.data.assistantText ?? event.data.toolCallPreamble ?? "").slice(0, 80),
+  });
+
   const traceText = stripTextToolCallMarkup(
     stripToolSummaryFromAssistantContent(
       event.data.assistantText ?? event.data.toolCallPreamble ?? "",
