@@ -3,12 +3,14 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
+mod code_map;
 mod health_scan;
 mod memory_usage;
 mod route_context;
 mod stack_profile;
 mod verify_run;
 
+pub use code_map::build_code_map;
 pub use health_scan::project_health_scan;
 pub use memory_usage::memory_usage_track_command;
 pub use route_context::build_top_level_route_entries;

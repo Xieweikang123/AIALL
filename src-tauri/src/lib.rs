@@ -102,6 +102,7 @@ pub fn run() {
       commands::project::project_health_scan,
       commands::project::project_verify_run,
       commands::project::project_context,
+      commands::project::code_map_build,
       commands::project::memory_usage,
       commands::system::system_open_url,
       commands::system::system_open_folder,

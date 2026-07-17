@@ -81,6 +81,11 @@ pub async fn project_context(path: String) -> Value {
 }
 
 #[tauri::command]
+pub async fn code_map_build(project_path: String, git_head: Option<String>) -> Value {
+  project::build_code_map(&project_path, git_head.as_deref()).await
+}
+
+#[tauri::command]
 pub async fn memory_usage(payload: serde_json::Value) -> Value {
   let project_path = payload
     .get("projectPath")
@@ -105,7 +110,8 @@ pub async fn memory_usage(payload: serde_json::Value) -> Value {
 
 #[tauri::command]
 pub async fn debug_log_write(label: String, data: Option<String>) -> Value {
-  use std::fs::OpenOptions;
+  use crate::paths::resolve_debug_log_path;
+  use std::fs::{create_dir_all, OpenOptions};
   use std::io::Write;
 
   let timestamp = chrono::Utc::now().format("%H:%M:%S%.3f").to_string();
@@ -115,10 +121,13 @@ pub async fn debug_log_write(label: String, data: Option<String>) -> Value {
     format!("[{}] {}\n", timestamp, label)
   };
 
-  // 写入项目根目录的 .debug.log
-  let log_path = std::env::current_dir()
-    .map(|p| p.join(".debug.log"))
-    .unwrap_or_else(|_| std::path::PathBuf::from(".debug.log"));
+  let log_path = match resolve_debug_log_path("debug.log", None) {
+    Ok(p) => p,
+    Err(e) => return serde_json::json!({ "ok": false, "error": e }),
+  };
+  if let Some(parent) = log_path.parent() {
+    let _ = create_dir_all(parent);
+  }
 
   match OpenOptions::new()
     .create(true)
