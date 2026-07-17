@@ -1,3 +1,5 @@
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::{Component, Path, PathBuf};
 
 pub const AIALL_SESSION_LOGICAL_PREFIX: &str = "aiall/vibe-chat-sessions/";
@@ -12,6 +14,76 @@ pub fn resolve_aiall_session_data_dir() -> PathBuf {
     .join(".config")
     .join("aiall")
     .join("vibe-chat-sessions")
+}
+
+/// App-private debug logs: `%APPDATA%/aiall/debug-logs` (Windows) or `~/.config/aiall/debug-logs`.
+pub fn resolve_aiall_debug_log_dir() -> PathBuf {
+  if cfg!(windows) {
+    if let Ok(appdata) = std::env::var("APPDATA") {
+      return PathBuf::from(appdata).join("aiall").join("debug-logs");
+    }
+  }
+  dirs_home()
+    .join(".config")
+    .join("aiall")
+    .join("debug-logs")
+}
+
+/// Resolve a debug log file under AppData. `filename` must be a bare name (no dirs / `..`).
+/// When `project_root` is set, logs go under `debug-logs/<project-slug>/`.
+pub fn resolve_debug_log_path(
+  filename: &str,
+  project_root: Option<&str>,
+) -> Result<PathBuf, String> {
+  let trimmed = filename.trim();
+  if trimmed.is_empty() {
+    return Err("路径不能为空".into());
+  }
+  let normalized = trimmed.replace('\\', "/");
+  if Path::new(trimmed).is_absolute()
+    || normalized.contains('/')
+    || normalized.contains("..")
+    || !is_safe_debug_log_filename(trimmed)
+  {
+    return Err("调试日志仅允许安全文件名".into());
+  }
+  let mut dir = resolve_aiall_debug_log_dir();
+  if let Some(root) = project_root.map(str::trim).filter(|s| !s.is_empty()) {
+    dir = dir.join(project_debug_log_slug(root));
+  }
+  Ok(dir.join(trimmed))
+}
+
+fn is_safe_debug_log_filename(name: &str) -> bool {
+  !name.is_empty()
+    && name
+      .chars()
+      .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+}
+
+fn project_debug_log_slug(project_root: &str) -> String {
+  let normalized = project_root
+    .trim()
+    .replace('\\', "/")
+    .trim_end_matches('/')
+    .to_lowercase();
+  let base = Path::new(&normalized)
+    .file_name()
+    .and_then(|s| s.to_str())
+    .unwrap_or("project");
+  let safe_base: String = base
+    .chars()
+    .map(|c| {
+      if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+        c
+      } else {
+        '_'
+      }
+    })
+    .collect();
+  let mut hasher = DefaultHasher::new();
+  normalized.hash(&mut hasher);
+  format!("{}_{:08x}", safe_base, hasher.finish() as u32)
 }
 
 fn dirs_home() -> PathBuf {
@@ -142,6 +214,35 @@ mod tests {
     let path = resolve_aiall_session_data_dir();
     let s = path.to_string_lossy().replace('\\', "/");
     assert!(s.ends_with("aiall/vibe-chat-sessions"), "got: {s}");
+  }
+
+  #[test]
+  fn test_resolve_aiall_debug_log_dir_ends_with_aiall() {
+    let path = resolve_aiall_debug_log_dir();
+    let s = path.to_string_lossy().replace('\\', "/");
+    assert!(s.ends_with("aiall/debug-logs"), "got: {s}");
+  }
+
+  #[test]
+  fn test_resolve_debug_log_path_bare_filename() {
+    let path = resolve_debug_log_path("debug.log", None).unwrap();
+    let s = path.to_string_lossy().replace('\\', "/");
+    assert!(s.ends_with("aiall/debug-logs/debug.log"), "got: {s}");
+  }
+
+  #[test]
+  fn test_resolve_debug_log_path_with_project_slug() {
+    let path = resolve_debug_log_path("tab-perf.log", Some(r"D:\work\MyApp")).unwrap();
+    let s = path.to_string_lossy().replace('\\', "/");
+    assert!(s.contains("aiall/debug-logs/myapp_"), "got: {s}");
+    assert!(s.ends_with("/tab-perf.log"), "got: {s}");
+  }
+
+  #[test]
+  fn test_resolve_debug_log_path_rejects_unsafe() {
+    assert!(resolve_debug_log_path("../x.log", None).is_err());
+    assert!(resolve_debug_log_path("a/b.log", None).is_err());
+    assert!(resolve_debug_log_path("", None).is_err());
   }
 
   #[test]

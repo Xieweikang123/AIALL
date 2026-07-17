@@ -5,9 +5,10 @@ const TAG = "[session-diag]";
 
 export function sessionDiagServer(event: string, data: Record<string, unknown> = {}) {
   const line = `[${new Date().toISOString()}] ${TAG} ${event} ${JSON.stringify(data)}`;
-  const logPath = path.join(process.cwd(), ".debug.log");
   try {
-    fs.appendFileSync(logPath, line + "\n");
+    const dir = path.join(process.cwd(), ".debug");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, "debug.log"), line + "\n");
   } catch {
     // ignore
   }

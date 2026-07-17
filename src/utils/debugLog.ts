@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
-const LOG_FILE = ".debug.log";
+/** Bare filename under `%APPDATA%/aiall/debug-logs[/project-slug]/`. */
+const LOG_FILE = "debug.log";
 
 let projectRoot = "";
 
@@ -47,6 +48,7 @@ export function clearDebugLog() {
   void invoke("system_debug_log_append", { path: LOG_FILE, line: "--- cleared ---", projectRoot: projectRoot || undefined }).catch(() => {});
 }
 
+/** Append to a named AppData debug log (bare filename only, e.g. `tab-perf.log`). */
 export function appendDebugLogFile(path: string, content: string, label?: string) {
   const line = `[${new Date().toISOString()}] ${label ? label + " | " : ""}${content}`;
   void invoke("system_debug_log_append", { path, line, projectRoot: projectRoot || undefined }).catch(() => {});

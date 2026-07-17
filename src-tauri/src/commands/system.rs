@@ -1,4 +1,4 @@
-use crate::paths::resolve_path_inside_optional_root;
+use crate::paths::resolve_debug_log_path;
 use serde_json::json;
 use tauri::AppHandle;
 use tauri_plugin_dialog::DialogExt;
@@ -21,13 +21,15 @@ pub async fn system_open_folder(app: AppHandle, path: String) -> serde_json::Val
   }
 }
 
+/// Append a line to an AppData debug log (`%APPDATA%/aiall/debug-logs[/project-slug]/name`).
+/// `path` must be a bare filename (e.g. `debug.log`). `project_root` scopes the file per project.
 #[tauri::command]
 pub async fn system_debug_log_append(
   path: String,
   line: String,
   project_root: Option<String>,
 ) -> Result<(), String> {
-  let resolved = resolve_path_inside_optional_root(&path, project_root.as_deref())?;
+  let resolved = resolve_debug_log_path(&path, project_root.as_deref())?;
   if let Some(parent) = resolved.parent() {
     if !parent.as_os_str().is_empty() {
       tokio::fs::create_dir_all(parent)

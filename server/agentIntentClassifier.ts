@@ -20,8 +20,12 @@ const intentCache = new Map<string, { builtAt: number; payload: UserIntentAiPayl
 
 function appendIntentClassifierDebug(message: string): void {
   try {
-    const logPath = path.join(process.cwd(), ".debug.log");
-    fs.appendFileSync(logPath, `[${new Date().toISOString()}] [intent-classifier] ${message}\n`);
+    const dir = path.join(process.cwd(), ".debug");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(
+      path.join(dir, "debug.log"),
+      `[${new Date().toISOString()}] [intent-classifier] ${message}\n`,
+    );
   } catch {
     // ignore
   }
