@@ -253,6 +253,27 @@
           @clear-history-view="clearHistoryReview"
         />
 
+        <ProjectCodeMapPanel
+          v-else-if="gitPanelMode === 'project' && projectPanelView === 'map'"
+          :project-opened="projectOpened"
+          :has-document="codeMapHasDocument"
+          :loading="codeMapLoading"
+          :building="codeMapBuilding"
+          :annotating="codeMapAnnotating"
+          :message="codeMapMessage"
+          :error="codeMapError"
+          :generated-at-label="codeMapGeneratedAtLabel"
+          :node-count="codeMapDocument?.nodes.length ?? 0"
+          :edge-count="codeMapDocument?.edges.length ?? 0"
+          :truncated-count="codeMapDocument?.truncatedCount ?? 0"
+          :annotate-enabled="codeMapAnnotateEnabled"
+          :annotate-ready="configReady && apiKeyReady"
+          @update:annotate-enabled="codeMapAnnotateEnabled = $event"
+          @generate="() => void generateCodeMap()"
+          @annotate="() => void runCodeMapAnnotate()"
+          @reset-layout="() => void resetCodeMapLayout()"
+        />
+
       </FilePanel>
 
       <div
@@ -267,7 +288,7 @@
       ></div>
 
       <EditorPanel
-        v-if="openTabs.length > 0 && !planPanelInForeground && (gitPanelMode !== 'project' || (projectPanelView !== 'knowledge' && projectPanelView !== 'health' && projectPanelView !== 'fix'))"
+        v-if="openTabs.length > 0 && !planPanelInForeground && (gitPanelMode !== 'project' || (projectPanelView !== 'knowledge' && projectPanelView !== 'health' && projectPanelView !== 'fix' && projectPanelView !== 'map'))"
         ref="editorPanelRef"
         :active-file-path="activeFilePath"
         :file-content="fileContent"
@@ -353,6 +374,39 @@
           :review-run="reviewRun"
           :review-history-detail-loading="reviewHistoryDetailLoading"
           @open-source="openArchitectReviewSourceFile"
+          @expand-chat="expandChat"
+        />
+      </section>
+
+      <section
+        v-show="gitPanelMode === 'project' && projectPanelView === 'map' && projectOpened && !planWorkspaceOpen"
+        class="editor-panel knowledge-main-panel"
+        aria-label="项目架构图"
+      >
+        <CodeMapMainPanel
+          :chat-collapsed="chatCollapsed"
+          :document="codeMapDocument"
+          :positions="codeMapPositions"
+          :collapsed-ids="codeMapCollapsedIds"
+          :selected-node-id="codeMapSelectedNodeId"
+          :selected-node="codeMapSelectedNode"
+          :related-edges="codeMapRelatedEdges"
+          :has-document="codeMapHasDocument"
+          :loading="codeMapLoading"
+          :building="codeMapBuilding"
+          :annotating="codeMapAnnotating"
+          :message="codeMapMessage"
+          :error="codeMapError"
+          :generated-at-label="codeMapGeneratedAtLabel"
+          :layout-epoch="codeMapLayoutEpoch"
+          @select="selectCodeMapNode"
+          @toggle-collapse="toggleCodeMapCollapsed"
+          @node-moved="updateCodeMapPosition"
+          @open-file="openCodeMapFile"
+          @explain-node="explainCodeMapNode"
+          @reset-layout="() => void resetCodeMapLayout()"
+          @export-mermaid="exportCodeMapMermaid"
+          @export-svg="() => void exportCodeMapAsSvg()"
           @expand-chat="expandChat"
         />
       </section>
@@ -643,6 +697,8 @@ import GitPanel from "../components/vibe/GitPanel.vue";
 import KnowledgePanel from "../components/vibe/KnowledgePanel.vue";
 import ProjectArchitectReviewPanel from "../components/vibe/ProjectArchitectReviewPanel.vue";
 import ArchitectReviewMainPanel from "../components/vibe/ArchitectReviewMainPanel.vue";
+import ProjectCodeMapPanel from "../components/vibe/ProjectCodeMapPanel.vue";
+import CodeMapMainPanel from "../components/vibe/CodeMapMainPanel.vue";
 import PlanMainPanel from "../components/vibe/PlanMainPanel.vue";
 import EditorPanel from "../components/vibe/EditorPanel.vue";
 import type { MonacoSelectionAnchor } from "../components/CodeMonacoEditor.vue";
@@ -664,7 +720,10 @@ import { useVibeGlobalShortcuts } from "../composables/useVibeGlobalShortcuts";
 import { useProjectMemory } from "../composables/useProjectMemory";
 import { useProjectKnowledge } from "../composables/useProjectKnowledge";
 import { useProjectArchitectReview } from "../composables/useProjectArchitectReview";
+import { useCodeMap } from "../composables/useCodeMap";
 import { useAutoBugFix } from "../composables/useAutoBugFix";
+import { buildExplainNodePrompt } from "../../shared/codeMapAnnotate";
+import { codeMapToMermaid, downloadTextFile, exportCodeMapSvg } from "../utils/codeMapToMermaid";
 import AutoBugFixPanel from "../components/vibe/AutoBugFixPanel.vue";
 import { usePlanPanel } from "../composables/usePlanPanel";
 import { restoreChatScrollPosition, useWorkspaceUiPersistence } from "../composables/useWorkspaceUiPersistence";
@@ -1035,6 +1094,7 @@ function endAgentRunSession(sessionId?: string, silent = false) {
 }
 
 const switchingProject = ref(false);
+let projectSwitchGeneration = 0;
 const chatError = ref("");
 const editorPanelRef = ref<InstanceType<typeof EditorPanel> | null>(null);
 const workspaceRef = ref<HTMLElement | null>(null);
@@ -1349,7 +1409,73 @@ const {
   confirm,
 });
 
+const {
+  document: codeMapDocument,
+  positions: codeMapPositions,
+  collapsedIds: codeMapCollapsedIds,
+  selectedNodeId: codeMapSelectedNodeId,
+  selectedNode: codeMapSelectedNode,
+  relatedEdges: codeMapRelatedEdges,
+  hasDocument: codeMapHasDocument,
+  generatedAtLabel: codeMapGeneratedAtLabel,
+  loading: codeMapLoading,
+  building: codeMapBuilding,
+  annotating: codeMapAnnotating,
+  message: codeMapMessage,
+  error: codeMapError,
+  annotateEnabled: codeMapAnnotateEnabled,
+  layoutEpoch: codeMapLayoutEpoch,
+  loadCached: loadCodeMapCached,
+  generate: generateCodeMap,
+  runAnnotate: runCodeMapAnnotate,
+  selectNode: selectCodeMapNode,
+  toggleCollapsed: toggleCodeMapCollapsed,
+  updatePosition: updateCodeMapPosition,
+  resetLayout: resetCodeMapLayout,
+  onProjectPathChanged: onCodeMapProjectPathChanged,
+} = useCodeMap({
+  projectPath,
+  gitHead: gitHeadCommit,
+  configReady,
+  aiConfig: () => ({
+    endpoint: aiConfig.value.endpoint,
+    apiKey: aiConfig.value.apiKey,
+    model: aiConfig.value.model,
+  }),
+});
+
 const reviewAttentionBadgeCount = computed(() => reviewAttentionCount.value);
+
+function openCodeMapFile(relPath: string) {
+  const root = projectPath.value.trim().replace(/\\/g, "/").replace(/\/$/, "");
+  const rel = relPath.replace(/^[/\\]+/, "").replace(/^\.$/, "");
+  if (!rel) return;
+  void openFile(`${root}/${rel}`);
+}
+
+function explainCodeMapNode() {
+  const node = codeMapSelectedNode.value;
+  if (!node) return;
+  expandChat();
+  composerRef.value?.setPlainText(buildExplainNodePrompt(node));
+  void nextTick(() => composerRef.value?.focus());
+}
+
+function exportCodeMapMermaid() {
+  const doc = codeMapDocument.value;
+  if (!doc) return;
+  downloadTextFile("code-map.mmd", codeMapToMermaid(doc), "text/plain");
+}
+
+async function exportCodeMapAsSvg() {
+  const doc = codeMapDocument.value;
+  if (!doc) return;
+  try {
+    await exportCodeMapSvg(doc);
+  } catch {
+    codeMapError.value = "导出 SVG 失败";
+  }
+}
 
 function openArchitectReviewSourceFile() {
   const root = projectPath.value.trim().replace(/\\/g, "/").replace(/\/$/, "");
@@ -1399,14 +1525,19 @@ watch([gitPanelMode, projectPanelView, projectOpened], ([mode, view, opened], pr
     void loadReview();
     void loadReviewHistory();
   }
+  if (view === "map") void loadCodeMapCached();
 });
 
 watch(projectPath, () => {
   onReviewProjectPathChanged();
+  onCodeMapProjectPathChanged();
   if (gitPanelMode.value === "project" && projectPanelView.value === "knowledge" && projectOpened.value) void loadKnowledge();
   if (gitPanelMode.value === "project" && projectPanelView.value === "health" && projectOpened.value) {
     void loadReview();
     void loadReviewHistory();
+  }
+  if (gitPanelMode.value === "project" && projectPanelView.value === "map" && projectOpened.value) {
+    void loadCodeMapCached();
   }
 });
 
@@ -1636,7 +1767,10 @@ async function openGitLogFile(...args: Parameters<typeof openGitLogFileCore>) {
 const noActiveEditor = computed(() => {
   if (planWorkspaceOpen.value) return false;
   const isProjectView = gitPanelMode.value === "project" &&
-    (projectPanelView.value === "knowledge" || projectPanelView.value === "health" || projectPanelView.value === "fix");
+    (projectPanelView.value === "knowledge"
+      || projectPanelView.value === "health"
+      || projectPanelView.value === "fix"
+      || projectPanelView.value === "map");
 
   if (isProjectView) {
     return !projectOpened.value;
@@ -2523,6 +2657,8 @@ async function openProjectByPath(dirPath: string) {
 
   if (!(await ensureCanLeaveAllOpenTabs())) return;
 
+  const gen = ++projectSwitchGeneration;
+
   const t0 = performance.now();
   const timings: string[] = [];
   const log = (label: string) => {
@@ -2587,6 +2723,7 @@ async function openProjectByPath(dirPath: string) {
     const files = items.filter(i => !i.isDirectory).length;
     log(`dir-stats(${dirs}dirs, ${files}files)`);
 
+    if (gen !== projectSwitchGeneration) return;
     const tChat0 = performance.now();
     log(`chat-check`);
 
@@ -2612,6 +2749,7 @@ async function openProjectByPath(dirPath: string) {
     switchingProject.value = true;
     try {
       const chatState = await loadProjectChatState(normalized);
+      if (gen !== projectSwitchGeneration) return;
       activateSession(
         chatState.activeSessionId,
         normalizeChatMessages(chatState.messages, { stripTransientUi: true }),
@@ -2635,14 +2773,18 @@ async function openProjectByPath(dirPath: string) {
 
     flushLog(`total=${Math.round(performance.now() - t0)}ms | ${timings.join(" → ")}`);
   } catch (e) {
-    projectOpened.value = false;
-    fileTree.value = [];
+    if (gen === projectSwitchGeneration) {
+      projectOpened.value = false;
+      fileTree.value = [];
+    }
     treeError.value = formatFetchError(e, "打开项目失败（已重试）");
     flushLog(`FAILED total=${Math.round(performance.now() - t0)}ms | ${timings.join(" → ")}`);
   } finally {
     loadingTree.value = false;
-    switchingProject.value = false;
-    finishEditorWorkspaceProjectSwitch();
+    if (gen === projectSwitchGeneration) {
+      switchingProject.value = false;
+      finishEditorWorkspaceProjectSwitch();
+    }
   }
 }
 
