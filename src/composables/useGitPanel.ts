@@ -156,7 +156,7 @@ export function useGitPanel(
   }
 
   type GitPanelMode = "files" | "git" | "sessions" | "project";
-  type ProjectPanelView = "knowledge" | "health" | "fix";
+  type ProjectPanelView = "knowledge" | "health" | "fix" | "map";
 
   const gitPanelMode = ref<GitPanelMode>(
     _storedPanelMode === "git"
@@ -170,7 +170,10 @@ export function useGitPanel(
 
   const _storedProjectView = lsGet(PROJECT_PANEL_VIEW_KEY);
   const projectPanelView = ref<ProjectPanelView>(
-    _storedProjectView === "health" || _storedProjectView === "knowledge" || _storedProjectView === "fix"
+    _storedProjectView === "health"
+      || _storedProjectView === "knowledge"
+      || _storedProjectView === "fix"
+      || _storedProjectView === "map"
       ? _storedProjectView
       : _storedPanelMode === "health"
         ? "health"

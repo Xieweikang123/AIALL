@@ -22,7 +22,7 @@
       />
       <span v-else class="path-current" :title="projectPath">{{ currentFolderName }}</span>
       <button type="button" class="primary compact" :disabled="pickingFolder || loadingTree" @click="$emit('handle-open-project')">
-        {{ pickingFolder ? "选择…" : loadingTree ? "" : projectOpened ? "切换" : "打开项目" }}<span v-if="loadingTree" class="shimmer-text--fast">加载中</span>
+        {{ pickingFolder ? "选择…" : loadingTree ? "" : projectOpened ? "切换项目" : "打开项目" }}<span v-if="loadingTree" class="shimmer-text--fast">加载中</span>
       </button>
       <button
         type="button"

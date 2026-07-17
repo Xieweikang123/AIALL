@@ -183,6 +183,15 @@
         <button
           type="button"
           class="file-panel-segment-btn"
+          :class="{ active: projectPanelView === 'map' }"
+          :aria-pressed="projectPanelView === 'map'"
+          @click="$emit('update:projectPanelView', 'map')"
+        >
+          架构图
+        </button>
+        <button
+          type="button"
+          class="file-panel-segment-btn"
           :class="{ active: projectPanelView === 'fix' }"
           :aria-pressed="projectPanelView === 'fix'"
           @click="$emit('update:projectPanelView', 'fix')"
@@ -464,7 +473,7 @@ interface SessionGroup {
 interface Props {
   filePanelWidth: number;
   gitPanelMode: "files" | "git" | "sessions" | "project";
-  projectPanelView: "knowledge" | "health" | "fix";
+  projectPanelView: "knowledge" | "health" | "fix" | "map";
   projectOpened: boolean;
   loadingTree?: boolean;
   editorCollapsed: boolean;
@@ -491,7 +500,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   (e: "update:gitPanelMode", mode: "files" | "git" | "sessions" | "project"): void;
-  (e: "update:projectPanelView", view: "knowledge" | "health" | "fix"): void;
+  (e: "update:projectPanelView", view: "knowledge" | "health" | "fix" | "map"): void;
   (e: "open-quick-search"): void;
   (e: "create-new-file"): void;
   (e: "create-new-folder"): void;
