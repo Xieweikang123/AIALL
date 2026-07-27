@@ -54,14 +54,14 @@
       <div class="editor-header-actions">
         <button
           type="button"
-          class="editor-action-btn nav-btn"
+          class="icon tiny editor-action-btn nav-btn"
           :disabled="!canGoBack"
           title="后退 (导航历史)"
           @click="$emit('navigate-back')"
         >←</button>
         <button
           type="button"
-          class="editor-action-btn nav-btn"
+          class="icon tiny editor-action-btn nav-btn"
           :disabled="!canGoForward"
           title="前进 (导航历史)"
           @click="$emit('navigate-forward')"
@@ -69,16 +69,24 @@
         <button
           v-if="showDiffMode"
           type="button"
-          class="editor-action-btn diff-toggle-btn"
+          class="ghost tiny editor-action-btn diff-toggle-btn"
           title="切换 Diff/编辑视图"
           @click="$emit('toggle-diff-mode')"
         >⇄ Diff</button>
+        <button
+          v-if="isMarkdownFile && !showDiffMode"
+          type="button"
+          class="ghost tiny editor-action-btn"
+          :class="{ active: showPreview }"
+          :title="showPreview ? '切换到编辑' : '预览 Markdown'"
+          @click="showPreview = !showPreview"
+        >{{ showPreview ? '编辑' : '预览' }}</button>
         <span v-if="fileDirty && !showDiffMode" class="dirty-badge" title="文件已修改">● 未保存</span>
         <span class="editor-action-divider" />
         <button
           v-if="chatCollapsed"
           type="button"
-          class="editor-action-btn"
+          class="ghost tiny editor-action-btn"
           title="展开 AI 助手"
           @click="$emit('expand-chat')"
         >
@@ -86,7 +94,7 @@
         </button>
         <button
           type="button"
-          class="editor-action-btn collapse-btn"
+          class="ghost tiny editor-action-btn collapse-btn"
           title="收起编辑器"
           @click="$emit('collapse-editor')"
         >
@@ -104,10 +112,16 @@
       </div>
       <p class="editor-empty-title">从左侧选择文件开始编辑</p>
       <p class="editor-empty-hint">支持多标签 · Diff 对比 · Ctrl+S 保存</p>
-      <button type="button" class="editor-action-btn collapse-btn" @click="$emit('collapse-editor')">收起编辑器</button>
+      <button type="button" class="ghost tiny editor-action-btn collapse-btn" @click="$emit('collapse-editor')">收起编辑器</button>
     </div>
 
     <div v-else-if="fileLoadError" class="editor-empty error">{{ fileLoadError }}</div>
+
+    <div
+      v-else-if="showPreview && isMarkdownFile"
+      class="code-editor markdown-preview"
+      v-html="previewHtml"
+    />
 
     <CodeMonacoDiffEditor
       v-else-if="showDiffMode && activeFileDiff"
@@ -136,6 +150,8 @@
 import { ref, computed, watch, nextTick } from "vue";
 import CodeMonacoEditor, { type MonacoSelectionAnchor } from "../CodeMonacoEditor.vue";
 import CodeMonacoDiffEditor from "../CodeMonacoDiffEditor.vue";
+import { renderMarkdown } from "../../utils/renderMarkdown";
+import DOMPurify from "dompurify";
 import {
   type EditorTabKind,
   editorTabDisplayName,
@@ -285,6 +301,46 @@ const editorRef = ref<InstanceType<typeof CodeMonacoEditor> | null>(null);
 const localContent = computed({
   get: () => props.fileContent,
   set: (value) => emit("update:fileContent", value),
+});
+
+const STORAGE_KEY = "editor-md-preview";
+
+function loadPreviewState(): Record<string, boolean> {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+function savePreviewState(state: Record<string, boolean>) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+const previewState = ref<Record<string, boolean>>(loadPreviewState());
+
+const isMarkdownFile = computed(() => /\.md$/i.test(props.activeFilePath));
+
+const showPreview = computed({
+  get: () => previewState.value[props.activeFilePath] ?? false,
+  set: (val) => {
+    if (val) previewState.value[props.activeFilePath] = val;
+    else delete previewState.value[props.activeFilePath];
+    savePreviewState(previewState.value);
+  },
+});
+
+const previewHtml = computed(() => {
+  if (!isMarkdownFile.value) return "";
+  return DOMPurify.sanitize(renderMarkdown(props.fileContent), {
+    USE_PROFILES: { html: true },
+    ADD_ATTR: ["data-mermaid-rendered", "data-collapsed"],
+    FORBID_TAGS: ["input", "form", "select", "textarea", "iframe", "script", "style", "object", "embed"],
+  });
+});
+
+watch(isMarkdownFile, (val) => {
+  if (!val) showPreview.value = false;
 });
 
 function resolveTabKind(tab: OpenTab): EditorTabKind {
@@ -465,32 +521,9 @@ defineExpose({ editorRef, revealLineInEditor });
 }
 
 .editor-action-btn {
-  padding: 3px 10px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-secondary, #999);
-  background: transparent;
-  border: 1px solid var(--border-color, #333);
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.15s ease;
+  /* 消费全局 ghost / icon token */
   white-space: nowrap;
   letter-spacing: 0.02em;
-}
-
-.editor-action-btn:hover:not(:disabled) {
-  color: var(--text-primary, #e0e0e0);
-  background: var(--bg-tertiary, #2a2a2a);
-  border-color: var(--text-secondary, #666);
-}
-
-.editor-action-btn:active:not(:disabled) {
-  transform: scale(0.97);
-}
-
-.editor-action-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }
 
 .editor-action-btn.save-btn {
@@ -506,28 +539,11 @@ defineExpose({ editorRef, revealLineInEditor });
 .editor-action-btn.nav-btn {
   font-size: 14px;
   font-weight: 700;
-  padding: 2px 6px;
-  color: var(--text-secondary, #999);
-  border-color: transparent;
-  background: transparent;
-  min-width: 22px;
-  text-align: center;
-}
-
-.editor-action-btn.nav-btn:hover:not(:disabled) {
-  color: var(--text-primary, #e0e0e0);
-  background: var(--bg-tertiary, #2a2a2a);
 }
 
 .editor-action-btn.collapse-btn {
-  color: var(--text-tertiary, #888);
   border-color: transparent;
-  background: var(--bg-tertiary, #2a2a2a);
-}
-
-.editor-action-btn.collapse-btn:hover {
-  color: var(--text-primary, #e0e0e0);
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .editor-action-divider {
@@ -585,6 +601,93 @@ defineExpose({ editorRef, revealLineInEditor });
 .code-editor {
   flex: 1;
   min-height: 0;
+}
+
+/* Markdown 预览 */
+.markdown-preview {
+  padding: 24px 32px;
+  overflow-y: auto;
+  line-height: 1.7;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.markdown-preview h1 { font-size: 1.7em; font-weight: 700; margin: 0.8em 0 0.4em; color: #e6edf3; }
+.markdown-preview h2 { font-size: 1.4em; font-weight: 700; margin: 0.8em 0 0.4em; color: #e6edf3; }
+.markdown-preview h3 { font-size: 1.2em; font-weight: 600; margin: 0.8em 0 0.4em; color: #e6edf3; }
+.markdown-preview h4 { font-size: 1.05em; font-weight: 600; margin: 0.8em 0 0.4em; color: #e6edf3; }
+.markdown-preview p { margin: 0.5em 0; }
+.markdown-preview a { color: #58a6ff; text-decoration: none; }
+.markdown-preview a:hover { text-decoration: underline; }
+.markdown-preview code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+}
+.markdown-preview pre {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  margin: 0.8em 0;
+}
+.markdown-preview pre code {
+  background: none;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.markdown-preview blockquote {
+  border-left: 3px solid #58a6ff;
+  margin: 0.6em 0;
+  padding: 4px 16px;
+  color: rgba(255, 255, 255, 0.6);
+}
+.markdown-preview table {
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  width: 100%;
+}
+.markdown-preview th, .markdown-preview td {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 8px 12px;
+  text-align: left;
+}
+.markdown-preview th {
+  background: rgba(255, 255, 255, 0.05);
+  font-weight: 600;
+}
+.markdown-preview ul, .markdown-preview ol {
+  padding-left: 24px;
+  margin: 0.4em 0;
+}
+.markdown-preview li { margin: 0.2em 0; }
+.markdown-preview hr {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin: 1.2em 0;
+}
+.markdown-preview img {
+  max-width: 100%;
+  border-radius: 6px;
+}
+.markdown-preview .tok-comment { color: #8b949e; font-style: italic; }
+.markdown-preview .tok-keyword { color: #ff7b72; }
+.markdown-preview .tok-string { color: #a5d6ff; }
+.markdown-preview .tok-number { color: #79c0ff; }
+.markdown-preview .tok-boolean { color: #ffa657; }
+.markdown-preview .tok-type { color: #ffa657; }
+.markdown-preview .tok-function { color: #d2a8ff; }
+.markdown-preview .tok-decorator { color: #d2a8ff; }
+.markdown-preview .tok-variable { color: #ffa657; }
+
+.editor-action-btn.active {
+  background: rgba(88, 166, 255, 0.15);
+  color: #58a6ff;
+  border-color: rgba(88, 166, 255, 0.4);
 }
 
 /* 右键菜单 */
