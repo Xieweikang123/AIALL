@@ -75,7 +75,7 @@ export interface AgentRunPolicy {
 
 export interface ResolveAgentRunPolicyInput {
   prompt: string;
-  mode: "ask" | "build" | "plan" | "explore";
+  mode: "ask" | "build" | "plan" | "explore" | "auto";
   history?: UserIntentHistoryMessage[];
   userIntent: ResolvedUserIntent;
   runProfile: ExecutePlanContextInput;

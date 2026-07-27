@@ -214,8 +214,8 @@ export async function testAiModel(request: AiTestRequest): Promise<AiTestResult>
       }
       const rawText = JSON.stringify(result.data);
       return { ok: true, status: 200, rawText, parsed: result.data };
-    } catch (e: any) {
-      return { ok: false, status: 0, rawText: "", error: e?.message || String(e) };
+    } catch (e: unknown) {
+      return { ok: false, status: 0, rawText: "", error: e instanceof Error ? e.message : String(e) };
     }
   }
 
@@ -399,8 +399,8 @@ export async function fetchAvailableModels(request: AiModelsRequest): Promise<Ai
           writeModelsCache(cacheKey, { cachedAt: Date.now(), models: modelNames, rawText });
         }
         return { ok: true, status: 200, models: modelNames, rawText, fromCache: false };
-      } catch (e: any) {
-        return { ok: false, status: 0, models: [], rawText: "", error: e?.message || String(e), fromCache: false };
+      } catch (e: unknown) {
+        return { ok: false, status: 0, models: [], rawText: "", error: e instanceof Error ? e.message : String(e), fromCache: false };
       }
     }
 

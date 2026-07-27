@@ -101,7 +101,7 @@ export function summarizeIntentHistory(history?: UserIntentHistoryMessage[], max
 export function buildIntentClassifierUserMessage(input: {
   prompt: string;
   history?: UserIntentHistoryMessage[];
-  mode: "ask" | "build" | "plan" | "explore";
+  mode: "ask" | "build" | "plan" | "explore" | "auto";
   hasImage: boolean;
 }): string {
   const lines = [

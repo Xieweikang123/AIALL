@@ -494,8 +494,8 @@ export function lastAssistantWasConsultativeExplanation(
   history?: ReadonlyArray<AgentHistoryMessageMeta>,
 ): boolean {
   for (let i = (history?.length ?? 0) - 1; i >= 0; i -= 1) {
-    const msg = history![i];
-    if (msg.role !== "assistant") continue;
+    const msg = history?.[i];
+    if (!msg || msg.role !== "assistant") continue;
     const text = msg.content.trim();
     if (!text) continue;
     if (looksLikeModificationPlan(text)) return false;

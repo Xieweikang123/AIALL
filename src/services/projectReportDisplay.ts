@@ -136,9 +136,9 @@ export function parseProjectReportDisplay(content: string): ProjectReportDisplay
   for (const line of lines) {
     const match = line.match(HEADING_RE);
     if (!match) continue;
-    const level = match[1]!.length;
+    const level = match[1]?.length ?? 0;
     if (level > 2) continue;
-    const title = match[2]!.trim();
+    const title = match[2]?.trim() ?? "";
     if (!title || SKIP_TITLES.has(title)) continue;
     sections.push({
       id: slugifyReportHeading(title, index),
@@ -337,9 +337,11 @@ export function extractPrimarySectionUpdate(content: string): { title: string; r
 
   const parts = trimmed.split(/\n(?=## )/).filter((p) => /^##\s+/.test(p));
   if (parts.length !== 1) return null;
-  const title = parts[0]!.match(SECTION_H2_RE)?.[1]?.trim();
+  const first = parts[0];
+  if (!first) return null;
+  const title = first.match(SECTION_H2_RE)?.[1]?.trim();
   if (!title || title.startsWith("补充")) return null;
-  return { title, raw: parts[0]!.trim() };
+  return { title, raw: first.trim() };
 }
 
 const CHINESE_NUM_MAP: Record<string, number> = {
@@ -558,7 +560,7 @@ function parseSupplementSection(content: string): { topic: string; body: string 
   const trimmed = content.trim();
   const match = trimmed.match(/^##\s+补充(?:：|:)\s*(.+?)(?:\r?\n|$)([\s\S]*)$/);
   if (!match) return null;
-  return { topic: match[1]!.trim(), body: match[2]!.trim() };
+  return { topic: (match[1] ?? "").trim(), body: (match[2] ?? "").trim() };
 }
 
 function mergeFollowUpIntoBestSection(existingBody: string, incoming: string): string | null {
@@ -652,9 +654,9 @@ export function parseKnowledgeTocSections(content: string): ProjectReportSection
   for (const line of content.split("\n")) {
     const match = line.match(HEADING_RE);
     if (!match) continue;
-    const level = match[1]!.length;
+    const level = match[1]?.length ?? 0;
     if (level > 2) continue;
-    const title = match[2]!.trim();
+    const title = match[2]?.trim() ?? "";
     if (!title || SKIP_TITLES.has(title)) continue;
     sections.push({
       id: slugifyReportHeading(title, index),

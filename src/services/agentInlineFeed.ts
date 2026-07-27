@@ -152,14 +152,15 @@ export function collapseInlineFeedItems(
   if (splitAt <= 0) return items;
 
   // Preserve answer items outside the hidden portion
-  const hidden: InlineFeedItem[] = [];
+  const hidden: InlineFeedProcessItem[] = [];
   const visible: InlineFeedItem[] = [];
   for (let i = 0; i < items.length; i++) {
-    const isAnswer = items[i]?.kind === "text" && items[i]?.variant === "answer";
-    if (i < splitAt && !isAnswer) {
-      hidden.push(items[i]);
+    const item = items[i];
+    if (!item) continue;
+    if (i < splitAt && isProcessItem(item)) {
+      hidden.push(item);
     } else {
-      visible.push(items[i]);
+      visible.push(item);
     }
   }
 

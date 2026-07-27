@@ -135,6 +135,22 @@ describe("resolveAssistantBubbleContent", () => {
     // When existing already contains the incoming text, keep existing (no duplicate)
     expect(mergeAssistantTurnText(existingContent, existingContent)).toBe(existingContent);
   });
+
+  it("prefers longer incoming when it supersedes a stream prefix", () => {
+    const prefix = "抱歉，我无法直接查看截图。";
+    const full = `${prefix}\n\n完整接口列表如下。`;
+    expect(mergeAssistantTurnText(prefix, full)).toBe(full);
+  });
+
+  it("on preferIncoming replaces divergent corrupt stream instead of concatenating", () => {
+    const corrupt =
+      "| GET | `api/dualdatabase/schema-db1`年度碳排放\" | 获取完整表结构 |\n\n/carbon-summary`---";
+    const clean =
+      "抱歉，我无法直接查看到你附的截图内容。\n\n### EnergyController\n| GET | `api/energy/carbon-summary` | 年度碳排放 |";
+    expect(mergeAssistantTurnText(corrupt, clean, { preferIncoming: true })).toBe(clean);
+    expect(mergeAssistantTurnText(corrupt, clean)).toContain(corrupt);
+    expect(mergeAssistantTurnText(corrupt, clean)).toContain(clean);
+  });
 });
 
 describe("appendAssistantStreamDelta", () => {
@@ -254,6 +270,32 @@ describe("resolveCompletedAgentBubbleContent", () => {
         ],
       }),
     ).toBe(streamed);
+  });
+
+  it("ignores longer corrupt narrative that does not extend isFinal text", () => {
+    const clean = "抱歉，完整接口列表如下。\n\n| GET | `api/energy/carbon-summary` |";
+    const corrupt =
+      "抱歉，我无法查看。\n\n| GET | `api/dualdatabase/schema-db1`年度碳排放\" | 获取完整表结构 |\n\n/carbon-summary`---";
+    expect(corrupt.includes(clean)).toBe(false);
+    expect(
+      resolveCompletedAgentBubbleContent({
+        content: clean,
+        roundGroups: [
+          {
+            turn: 3,
+            narrative: corrupt,
+            modelSteps: [],
+            toolIds: [],
+            response: {
+              assistantText: clean,
+              toolCalls: [],
+              hasToolCalls: false,
+              isFinal: true,
+            },
+          },
+        ],
+      }),
+    ).toBe(clean);
   });
 
   it("prefers full msg.content over shorter final-group narrative fragment", () => {

@@ -101,4 +101,24 @@ describe("agentRoundGroups", () => {
 
     expect(groups[0].narrative).toContain("用于验证不会被更短的响应覆盖");
   });
+
+  it("replaces streamed narrative with authoritative text on isFinal", () => {
+    resetAgentRoundGroupIds();
+    const corrupt =
+      "| GET | `api/dualdatabase/schema-db1`年度碳排放\" | 获取完整表结构 |\n\n/carbon-summary`";
+    const clean = "### EnergyController\n| GET | `api/energy/carbon-summary` | 年度碳排放 |";
+    let groups = recordAgentRoundStreamDelta(undefined, 3, corrupt, 24);
+    groups = recordAgentRoundResponse(
+      groups,
+      3,
+      {
+        assistantText: clean,
+        toolCalls: [],
+        hasToolCalls: false,
+        isFinal: true,
+      },
+      24,
+    );
+    expect(groups[0].narrative).toBe(clean);
+  });
 });

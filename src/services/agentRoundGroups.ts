@@ -224,6 +224,37 @@ function mergeRoundNarrative(existing: string, incoming: string): string {
   return prev;
 }
 
+/** Highest turn that still lacks `isFinal` (stream / tools in progress). */
+export function resolveIncompleteStreamTurn(msg: {
+  roundGroups?: AgentRoundGroup[];
+  agentTurn?: number;
+}): number | undefined {
+  const groups = msg.roundGroups || [];
+  const active = msg.agentTurn;
+  if (active && active > 0) {
+    const group = groups.find((g) => g.turn === active);
+    if (group && !group.response?.isFinal) return active;
+  }
+  const incomplete = groups
+    .filter((g) => g.turn > 0 && !g.response?.isFinal)
+    .sort((a, b) => b.turn - a.turn);
+  return incomplete[0]?.turn;
+}
+
+/** Drop streamed narrative on an incomplete turn; keep tools / request / steps. */
+export function truncateIncompleteTurnNarrative(
+  groups: AgentRoundGroup[] | undefined,
+  turn: number,
+): AgentRoundGroup[] {
+  if (!groups?.length || turn <= 0) return groups ? cloneRoundGroups(groups) : [];
+  const next = cloneRoundGroups(groups);
+  const group = next.find((g) => g.turn === turn);
+  if (group && !group.response?.isFinal) {
+    group.narrative = undefined;
+  }
+  return next;
+}
+
 function compactTurnRequestForMemory(detail: AgentTurnRequestDetail): AgentTurnRequestDetail {
   if (!detail.messages || !detail.messages.length) return { ...detail, messages: [] };
   return {
@@ -265,7 +296,10 @@ export function recordAgentRoundResponse(
     toolCalls: (detail.toolCalls || []).map((call) => ({ ...call })),
   };
   if (detail.assistantText.trim()) {
-    group.narrative = mergeRoundNarrative(group.narrative || "", detail.assistantText.trim());
+    // On isFinal, replace corrupt/partial stream with the authoritative snapshot.
+    group.narrative = detail.isFinal
+      ? detail.assistantText.trim()
+      : mergeRoundNarrative(group.narrative || "", detail.assistantText.trim());
   }
   if (maxTurns) group.maxTurns = maxTurns;
   return next;

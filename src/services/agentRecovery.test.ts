@@ -11,6 +11,7 @@ import {
   hasRecoverableAgentProgress,
   HMR_INTERRUPT_REASON,
   resetAssistantMessageForNewRun,
+  prepareAssistantForResume,
   inferAgentRecoveryFlags,
   isAgentMaxTurnsExhausted,
   isAgentConnectPhase,
@@ -248,6 +249,40 @@ describe("resetAssistantMessageForNewRun", () => {
     expect(msg.agentAborted).toBe(false);
     expect(msg.agentFailed).toBe(false);
     expect(msg.agentContinueCount).toBeUndefined();
+  });
+});
+
+describe("prepareAssistantForResume", () => {
+  it("clears incomplete-turn content and narrative even when an earlier turn isFinal", () => {
+    const corrupt =
+      "| GET | `api/dualdatabase/schema-db1`年度碳排放\" | 获取完整表结构 |\n\n/carbon-summary`";
+    const msg = prepareAssistantForResume({
+      content: corrupt,
+      streamChars: corrupt.length,
+      agentTurn: 3,
+      roundGroups: [
+        {
+          turn: 2,
+          modelSteps: [],
+          toolIds: [],
+          response: {
+            assistantText: "中间工具轮",
+            toolCalls: [],
+            hasToolCalls: true,
+            isFinal: false,
+          },
+        },
+        {
+          turn: 3,
+          narrative: corrupt,
+          modelSteps: [],
+          toolIds: [],
+        },
+      ],
+    });
+    expect(msg.content).toBe("");
+    expect(msg.streamChars).toBeUndefined();
+    expect(msg.roundGroups?.find((g) => g.turn === 3)?.narrative).toBeUndefined();
   });
 });
 

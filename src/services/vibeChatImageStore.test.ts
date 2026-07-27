@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  applySyncedImageRefs,
   buildImageRefsForMessage,
-  chatMessagesNeedImageHydration,
   resolveChatMessageImageUrls,
 } from "./vibeChatImageStore";
 
@@ -36,5 +36,22 @@ describe("vibeChatImageStore", () => {
     );
     expect(urls).toHaveLength(1);
     expect(urls[0]).toContain("images%2Fsess-1%2Fmsg-1-0.png");
+  });
+
+  it("applySyncedImageRefs prefers verified server refs", () => {
+    const messages = [
+      {
+        id: "msg-1",
+        role: "user" as const,
+        content: "附图",
+        imageDataUrls: ["data:image/jpeg;base64,QQ=="],
+      },
+    ];
+    const stamped = applySyncedImageRefs(messages, {
+      "msg-1": [{ path: "images/sess/msg-1-0.jpg" }],
+    });
+    expect(stamped[0].imageRefs).toEqual([{ path: "images/sess/msg-1-0.jpg" }]);
+    expect(stamped[0].imageCount).toBe(1);
+    expect(stamped[0].imageDataUrls).toHaveLength(1);
   });
 });

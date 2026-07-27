@@ -307,6 +307,56 @@ export async function unstageGitFiles(projectPath: string, files: string[]): Pro
   });
 }
 
+export type GitResetMode = "soft" | "mixed" | "hard";
+
+export async function gitResetToCommit(
+  projectPath: string,
+  commit: string,
+  mode: GitResetMode = "mixed",
+): Promise<GitActionResult> {
+  return invokeBackend<GitActionResult>(
+    "git_reset_to_commit",
+    { path: projectPath, commit, mode },
+    async () => {
+      try {
+        const response = await fetch(backendUrl("/backend/vibe/git/reset-to-commit"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: projectPath, commit, mode }),
+        });
+        return await readJsonResponse<GitActionResult>(response);
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : "网络错误" };
+      }
+    },
+  );
+}
+
+export type GitConflictSide = "ours" | "theirs";
+
+export async function gitResolveConflict(
+  projectPath: string,
+  file: string,
+  side: GitConflictSide,
+): Promise<GitActionResult> {
+  return invokeBackend<GitActionResult>(
+    "git_resolve_conflict",
+    { path: projectPath, file, side },
+    async () => {
+      try {
+        const response = await fetch(backendUrl("/backend/vibe/git/resolve-conflict"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: projectPath, file, side }),
+        });
+        return await readJsonResponse<GitActionResult>(response);
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : "网络错误" };
+      }
+    },
+  );
+}
+
 export async function discardGitFiles(projectPath: string, files: string[]): Promise<GitActionResult> {
   return invokeBackend<GitActionResult>("git_discard", { path: projectPath, files }, async () => {
     try {
@@ -433,28 +483,73 @@ export async function aiBatchGroups(
   onDelta?: (text: string) => void,
   onProgress?: (step: string) => void,
 ): Promise<AiBatchGroupsResult> {
+  /** Client watchdog — covers total stall including model stream. */
+  const CLIENT_TIMEOUT_MS = 180_000;
+  /** If Rust never leaves the git-summary phase (e.g. hung teardown), fail fast on UI. */
+  const SUMMARY_STALL_MS = 20_000;
+
   // Tauri: use Channel for streaming
   if (isTauriEnv()) {
     return new Promise<AiBatchGroupsResult>((resolve) => {
+      let settled = false;
+      let sawModelPhase = false;
+      const settle = (result: AiBatchGroupsResult) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(watchdog);
+        clearTimeout(summaryStall);
+        resolve(result);
+      };
+      const watchdog = setTimeout(() => {
+        settle({
+          ok: false,
+          groups: [],
+          error: "AI 划分超时（超过 3 分钟）。可减少变更文件后重试，或检查模型服务是否可用。",
+        });
+      }, CLIENT_TIMEOUT_MS);
+      const summaryStall = setTimeout(() => {
+        if (settled || sawModelPhase) return;
+        settle({
+          ok: false,
+          groups: [],
+          error: "读取变更摘要超时。请重试；若仍失败可先手动分组提交。",
+        });
+      }, SUMMARY_STALL_MS);
+
       const channel = new Channel<{ type: string; data: { text?: string; step?: string; groups?: AiBatchGroupItem[]; error?: string; message?: string } }>();
       channel.onmessage = (event) => {
         switch (event.type) {
           case "progress":
-            if (event.data?.step && onProgress) onProgress(event.data.step);
+            if (event.data?.step && onProgress) {
+              const step = event.data.step;
+              if (
+                step.includes("请求模型") ||
+                step.includes("等待模型") ||
+                step.includes("模型输出") ||
+                step.includes("改用文件列表") ||
+                step.includes("整理上下文")
+              ) {
+                sawModelPhase = true;
+                clearTimeout(summaryStall);
+              }
+              onProgress(step);
+            }
             break;
           case "delta":
+            sawModelPhase = true;
+            clearTimeout(summaryStall);
             if (event.data?.text && onDelta) onDelta(event.data.text);
             break;
           case "done":
-            resolve({ ok: true, groups: event.data?.groups || [] });
+            settle({ ok: true, groups: event.data?.groups || [] });
             break;
           case "error":
-            resolve({ ok: false, groups: [], error: event.data?.error || "AI 请求失败" });
+            settle({ ok: false, groups: [], error: event.data?.error || "AI 请求失败" });
             break;
         }
       };
       invoke("git_ai_batch_groups", { path: projectPath, endpoint, apiKey, model, onEvent: channel }).catch((err: unknown) => {
-        resolve({ ok: false, groups: [], error: err instanceof Error ? err.message : "Tauri invoke 失败" });
+        settle({ ok: false, groups: [], error: err instanceof Error ? err.message : "Tauri invoke 失败" });
       });
     });
   }
@@ -710,5 +805,135 @@ export async function gitDeleteBranch(projectPath: string, branchName: string, f
       return { ok: false, error: error instanceof Error ? error.message : "网络错误" };
     }
   });
+}
+
+export interface GitOpStateResult {
+  ok: boolean;
+  mergeInProgress: boolean;
+  rebaseInProgress: boolean;
+  error?: string;
+}
+
+export async function fetchGitOpState(projectPath: string): Promise<GitOpStateResult> {
+  return invokeBackend<GitOpStateResult>("git_op_state", { path: projectPath }, async () => ({
+    ok: true,
+    mergeInProgress: false,
+    rebaseInProgress: false,
+  }));
+}
+
+export async function gitMerge(projectPath: string, branch: string): Promise<GitActionResult> {
+  return invokeBackend<GitActionResult>("git_merge", { path: projectPath, branch }, async () => ({
+    ok: false,
+    error: "仅桌面版支持 merge",
+  }));
+}
+
+export async function gitMergeAbort(projectPath: string): Promise<GitActionResult> {
+  return invokeBackend<GitActionResult>("git_merge_abort", { path: projectPath }, async () => ({
+    ok: false,
+    error: "仅桌面版支持",
+  }));
+}
+
+export async function gitRebase(projectPath: string, onto: string): Promise<GitActionResult> {
+  return invokeBackend<GitActionResult>("git_rebase", { path: projectPath, onto }, async () => ({
+    ok: false,
+    error: "仅桌面版支持 rebase",
+  }));
+}
+
+export async function gitRebaseAbort(projectPath: string): Promise<GitActionResult> {
+  return invokeBackend<GitActionResult>("git_rebase_abort", { path: projectPath }, async () => ({
+    ok: false,
+    error: "仅桌面版支持",
+  }));
+}
+
+export async function gitCherryPick(projectPath: string, commit: string): Promise<GitActionResult> {
+  return invokeBackend<GitActionResult>("git_cherry_pick", { path: projectPath, commit }, async () => ({
+    ok: false,
+    error: "仅桌面版支持 cherry-pick",
+  }));
+}
+
+export async function gitRevertCommit(projectPath: string, commit: string): Promise<GitActionResult> {
+  return invokeBackend<GitActionResult>("git_revert_commit", { path: projectPath, commit }, async () => ({
+    ok: false,
+    error: "仅桌面版支持 revert",
+  }));
+}
+
+export async function gitAmend(projectPath: string, message?: string): Promise<GitActionResult> {
+  return invokeBackend<GitActionResult>(
+    "git_amend",
+    { path: projectPath, message: message || null },
+    async () => ({ ok: false, error: "仅桌面版支持 amend" }),
+  );
+}
+
+export interface GitTagInfo {
+  name: string;
+  commit: string;
+}
+
+export interface GitTagsResult {
+  ok: boolean;
+  tags: GitTagInfo[];
+  error?: string;
+}
+
+export async function fetchGitTags(projectPath: string): Promise<GitTagsResult> {
+  return invokeBackend<GitTagsResult>("git_tag_list", { path: projectPath }, async () => ({
+    ok: true,
+    tags: [],
+  }));
+}
+
+export async function gitTagCreate(
+  projectPath: string,
+  name: string,
+  commit?: string,
+  message?: string,
+): Promise<GitActionResult> {
+  return invokeBackend<GitActionResult>(
+    "git_tag_create",
+    { path: projectPath, name, commit: commit || null, message: message || null },
+    async () => ({ ok: false, error: "仅桌面版支持 tag" }),
+  );
+}
+
+export async function gitTagDelete(projectPath: string, name: string): Promise<GitActionResult> {
+  return invokeBackend<GitActionResult>("git_tag_delete", { path: projectPath, name }, async () => ({
+    ok: false,
+    error: "仅桌面版支持",
+  }));
+}
+
+export interface GitSubmoduleInfo {
+  path: string;
+  status: string;
+  sha: string;
+}
+
+export interface GitSubmodulesResult {
+  ok: boolean;
+  submodules: GitSubmoduleInfo[];
+  error?: string;
+}
+
+export async function fetchGitSubmodules(projectPath: string): Promise<GitSubmodulesResult> {
+  return invokeBackend<GitSubmodulesResult>("git_submodule_status", { path: projectPath }, async () => ({
+    ok: true,
+    submodules: [],
+  }));
+}
+
+export async function gitSubmoduleUpdate(projectPath: string, init = true): Promise<GitActionResult> {
+  return invokeBackend<GitActionResult>(
+    "git_submodule_update",
+    { path: projectPath, init },
+    async () => ({ ok: false, error: "仅桌面版支持 submodule" }),
+  );
 }
 

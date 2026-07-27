@@ -65,7 +65,7 @@ export interface ResolvedUserIntent extends UserIntentAiPayload {
 export interface ResolveUserIntentInput {
   prompt: string;
   history?: UserIntentHistoryMessage[];
-  mode: "ask" | "build" | "plan" | "explore";
+  mode: "ask" | "build" | "plan" | "explore" | "auto";
   hasImage: boolean;
   isAsk: boolean;
   ai?: UserIntentAiPayload | null;

@@ -124,8 +124,12 @@ function shouldBreakLatinCjkStreamBoundary(existing: string, delta: string): boo
   return /[A-Za-z0-9)]/.test(last);
 }
 
-/** Append single-turn text — never replaces previous content. */
-export function mergeAssistantTurnText(existing: string, incoming: string): string {
+/** Append single-turn text — never replaces previous content unless preferIncoming. */
+export function mergeAssistantTurnText(
+  existing: string,
+  incoming: string,
+  options?: { preferIncoming?: boolean },
+): string {
   const prev = normalizeBubbleText(existing);
   const next = normalizeBubbleText(incoming);
 
@@ -134,6 +138,7 @@ export function mergeAssistantTurnText(existing: string, incoming: string): stri
     incomingLen: incoming.length,
     prev: prev.slice(0, 80),
     next: next.slice(0, 80),
+    preferIncoming: Boolean(options?.preferIncoming),
   });
 
   if (isEnglishToolNarration(next)) return prev;
@@ -141,7 +146,11 @@ export function mergeAssistantTurnText(existing: string, incoming: string): stri
   if (!prev) return incoming;
   if (!next) return existing;
   if (prev === next) return existing;
-  if (prev.includes(next) || next.includes(prev)) return existing;
+  // Prefer the longer / superseding text when one contains the other.
+  if (next.includes(prev)) return incoming;
+  if (prev.includes(next)) return existing;
+  // On isFinal, trust the server snapshot over a divergent stream prefix.
+  if (options?.preferIncoming) return incoming;
   return `${existing}\n\n${incoming}`;
 }
 
@@ -661,17 +670,23 @@ export function resolveCompletedAgentBubbleContent(msg: AssistantBubbleSource): 
   const finalGroups = (msg.roundGroups ?? [])
     .filter((group) => group.response?.isFinal && group.response.assistantText.trim());
 
-  const allFinalTexts = finalGroups.map((group) => normalizeBubbleText(group.response!.assistantText)).filter(Boolean);
+  const allFinalTexts = finalGroups.map((group) => normalizeBubbleText(group.response?.assistantText ?? "")).filter(Boolean);
   const finalNarratives = finalGroups.map((group) => normalizeBubbleText(group.narrative || "")).filter(Boolean);
 
   const combined = allFinalTexts.length ? allFinalTexts.join("\n\n---\n\n") : "";
   const direct = normalizeBubbleText(msg.content || "");
 
   if (combined) {
-    // Also consider narrative from isFinal groups (may be longer than response text)
+    // Prefer response.assistantText; only use a longer narrative when it cleanly extends it
+    // (avoids keeping a corrupt stream that is longer but not a proper superset).
     const narrative = finalNarratives.sort((a, b) => b.length - a.length)[0] || "";
-    const candidates = [combined, narrative].filter(Boolean);
-    const preferred = candidates.sort((a, b) => b.length - a.length)[0]!;
+    let preferred = combined;
+    if (narrative && narrative.length > combined.length) {
+      const probe = combined.slice(0, Math.min(64, combined.length));
+      if ((probe.length >= 16 && narrative.startsWith(probe)) || narrative.includes(combined)) {
+        preferred = narrative;
+      }
+    }
     const result = preferFullContentOverCompactedRoundGroup(preferred, direct);
     return prependVisionPreamble(msg, result);
   }

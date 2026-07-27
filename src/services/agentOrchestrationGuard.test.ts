@@ -36,11 +36,14 @@ describe("agentOrchestrationGuard", () => {
     expect(tierForGuardedPath("src/orchestration/generic/userIntentClassifiers.ts")).toBe(
       "generic_classifier",
     );
-    expect(PRODUCT_ORCHESTRATION_PATHS).toContain("server/agentContextBuilder.ts");
+    expect(PRODUCT_ORCHESTRATION_PATHS).toContain("src/orchestration/product/visionMessage.ts");
   });
 
   it("detects static fix recipes in prompt strings", () => {
     expect(findStaticFixRecipeViolations('用户要求「点击输入」时：常见修复为 padding')).toEqual([
+      "static fix recipe (use dynamic build*Hint instead)",
+    ]);
+    expect(findStaticFixRecipeViolations("常见修复：加大 padding")).toEqual([
       "static fix recipe (use dynamic build*Hint instead)",
     ]);
     expect(findStaticFixRecipeViolations("grep 精确符号后再 read")).toEqual([]);

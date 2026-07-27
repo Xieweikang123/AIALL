@@ -26,6 +26,9 @@ describe("buildReplyAccuracyHint", () => {
     expect(hint).not.toContain("CronSchedule");
     expect(hint).not.toContain("IJob");
     expect(hint).not.toContain("v-if/shimmer");
+    expect(hint).not.toContain("常见修复");
+    expect(hint).not.toContain("padding:0");
+    expect(hint).not.toContain("Execute→Service");
     expect(hint).not.toMatch(/updatedAt|touchTimestamp|switchSession|FilePanel|vibeChat/i);
   });
 });

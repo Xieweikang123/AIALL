@@ -13,7 +13,7 @@ import type { UserIntentHistoryMessage } from "../orchestration/agentIntentTypes
 import { normalizeExecutePlanContext } from "./agentExecutePlanContext";
 import { resolveAgentRunPolicy, usesReadOnlyTools } from "./agentRunPolicy";
 import type { ExecutePlanContextInput } from "./agentExecutePlanContext";
-export type AgentRegressionMode = "ask" | "build" | "plan" | "explore";
+export type AgentRegressionMode = "ask" | "build" | "plan" | "explore" | "auto";
 
 export interface AgentRegressionExpect {
   consultative?: boolean;
@@ -141,7 +141,7 @@ export function loadAgentRegressionFile(filePath: string): AgentRegressionFile {
 }
 
 function profileMode(mode: AgentRegressionMode): "ask" | "build" | "plan" {
-  if (mode === "explore") return "build";
+  if (mode === "explore" || mode === "auto") return "build";
   return mode;
 }
 

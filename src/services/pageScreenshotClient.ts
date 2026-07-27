@@ -27,8 +27,8 @@ export async function requestPageScreenshot(req: PageScreenshotRequest): Promise
       }
       const mime = result.mime || "image/jpeg";
       return { ok: true, dataUrl: `data:${mime};base64,${result.base64}`, byteLength: result.byteLength ?? 0, mime };
-    } catch (e: any) {
-      return { ok: false, error: e?.message || String(e) };
+    } catch (e: unknown) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
     }
   }
 

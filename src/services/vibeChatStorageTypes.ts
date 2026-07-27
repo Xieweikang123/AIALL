@@ -11,7 +11,7 @@ export type PersistedFileDiff = {
 };
 
 export type PersistedAgentContext = {
-  mode: "ask" | "build" | "plan" | "explore";
+  mode: "ask" | "build" | "plan" | "explore" | "auto";
   systemPrompt: string;
   history: Array<{ role: string; content: string }>;
   projectContext?: string;
@@ -62,7 +62,7 @@ export type PersistedChatMessage = {
   /** On-disk image paths under `.aiall/vibe-chat-sessions/`. */
   imageRefs?: PersistedImageRef[];
   imageCount?: number;
-  chatMode?: "ask" | "build" | "plan" | "explore";
+  chatMode?: "ask" | "build" | "plan" | "explore" | "auto";
   tools?: Array<{
     id: string;
     name?: string;

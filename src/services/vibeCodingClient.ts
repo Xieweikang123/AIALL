@@ -185,7 +185,9 @@ export async function fetchProjectContext(projectPath: string): Promise<ProjectC
   }
 }
 
-export type ChatSessionSyncResult = { ok: true } | { ok: false; error?: string };
+export type ChatSessionSyncResult =
+  | { ok: true; imageRefsByMessageId?: Record<string, Array<{ path: string }>> }
+  | { ok: false; error?: string };
 
 export async function syncChatSession(
   projectPath: string,
@@ -195,7 +197,11 @@ export async function syncChatSession(
 ): Promise<ChatSessionSyncResult> {
   try {
     const activeSessionId = options?.activeSessionId || sessionId;
-    const body = await invokeBackend<{ ok?: boolean; error?: string }>(
+    const body = await invokeBackend<{
+      ok?: boolean;
+      error?: string;
+      imageRefsByMessageId?: Record<string, Array<{ path: string }>>;
+    }>(
       "chat_session_sync",
       { projectPath, sessionId, data, activeSessionId },
       async () => {
@@ -207,13 +213,22 @@ export async function syncChatSession(
         if (!response.ok) {
           return { ok: false, error: `HTTP ${response.status}` };
         }
-        return readJsonResponse<{ ok?: boolean; error?: string }>(response);
+        return readJsonResponse<{
+          ok?: boolean;
+          error?: string;
+          imageRefsByMessageId?: Record<string, Array<{ path: string }>>;
+        }>(response);
       },
     );
     if (body.ok === false) {
       return { ok: false, error: body.error || "写入会话文件失败" };
     }
-    return { ok: true };
+    return {
+      ok: true,
+      ...(body.imageRefsByMessageId && Object.keys(body.imageRefsByMessageId).length
+        ? { imageRefsByMessageId: body.imageRefsByMessageId }
+        : {}),
+    };
   } catch (error) {
     return { ok: false, error: formatInvokeError(error, formatFetchError(error, "网络错误")) };
   }

@@ -19,7 +19,7 @@ const intentCache = new Map<string, { builtAt: number; payload: UserIntentAiPayl
 export interface ClassifyUserIntentWithAiClientParams {
   prompt: string;
   history?: UserIntentHistoryMessage[];
-  mode: "ask" | "build" | "plan" | "explore";
+  mode: "ask" | "build" | "plan" | "explore" | "auto";
   hasImage: boolean;
   endpoint: string;
   apiKey?: string;

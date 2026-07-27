@@ -40,7 +40,7 @@ export const FORBIDDEN_ORCHESTRATION_TERMS = [
 
 /** Conditional fix recipes belong in dynamic hints, not always-on system prompt strings. */
 export const STATIC_FIX_RECIPE_RE =
-  /用户要求[「""].{4,48}[」""]时：|常见修复为/i;
+  /用户要求[「""].{4,48}[」""]时：|常见修复[为:：]/i;
 
 export function findForbiddenTermsInSource(source: string): string[] {
   const hits = new Set<string>();

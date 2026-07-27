@@ -16,10 +16,14 @@ export function isConsultativeClientLayerPath(filePath: string): boolean {
   return /(?:^|\/)src\/services\//.test(p);
 }
 
-/** Backend route, handler, or middleware where prompt/data is assembled. */
+/** Backend / desktop runtime where prompt/data is assembled (Rust agent or remaining Node fixtures). */
 export function isConsultativeBackendLayerPath(filePath: string): boolean {
   const p = normalizeConsultativeReadPath(filePath);
-  return /(?:^|\/)server\//.test(p) || /middleware/.test(p);
+  return (
+    /(?:^|\/)src-tauri\//.test(p) ||
+    /(?:^|\/)server\//.test(p) ||
+    /middleware/.test(p)
+  );
 }
 
 /**

@@ -1,6 +1,7 @@
 import {
   applyAnnotationsToDocument,
   buildCodeMapAnnotateMessages,
+  nodesForAnnotation,
   parseCodeMapAnnotations,
 } from "../../shared/codeMapAnnotate";
 import type { CodeMapDocument } from "../../shared/codeMapTypes";
@@ -12,16 +13,23 @@ export async function annotateCodeMapDocument(params: {
   apiKey?: string;
   model: string;
   signal?: AbortSignal;
-}): Promise<{ ok: boolean; document?: CodeMapDocument; error?: string }> {
+  /** When false (default), skip nodes that already have a summary. */
+  force?: boolean;
+}): Promise<{ ok: boolean; document?: CodeMapDocument; error?: string; skipped?: boolean }> {
   if (params.signal?.aborted) return { ok: false, error: "已取消" };
   if (!isTauriEnv()) return { ok: false, error: "需在桌面版中标注" };
   if (!params.endpoint.trim() || !params.model.trim()) {
     return { ok: false, error: "AI 配置不完整" };
   }
 
+  const force = params.force === true;
+  if (nodesForAnnotation(params.document, { force }).length === 0) {
+    return { ok: true, document: params.document, skipped: true };
+  }
+
   const body = {
     model: params.model,
-    messages: buildCodeMapAnnotateMessages(params.document),
+    messages: buildCodeMapAnnotateMessages(params.document, { force }),
     stream: false,
     temperature: 0.2,
   };

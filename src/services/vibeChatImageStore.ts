@@ -156,3 +156,23 @@ export function stampImageRefsAfterSync(
     };
   });
 }
+
+/** Apply verified on-disk refs returned by chat_session_sync (preferred over path-only stamp). */
+export function applySyncedImageRefs(
+  messages: PersistedChatMessage[],
+  imageRefsByMessageId?: Record<string, PersistedImageRef[]>,
+): PersistedChatMessage[] {
+  if (!imageRefsByMessageId || !Object.keys(imageRefsByMessageId).length) {
+    return messages;
+  }
+  return messages.map((m) => {
+    if (m.role !== "user") return m;
+    const refs = imageRefsByMessageId[m.id];
+    if (!refs?.length) return m;
+    return {
+      ...m,
+      imageRefs: refs.map((r) => ({ path: r.path })),
+      imageCount: refs.length,
+    };
+  });
+}

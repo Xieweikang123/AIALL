@@ -38,7 +38,7 @@ function resurrectionHints(data: Record<string, unknown>): Record<string, unknow
 
 export function sessionDiag(event: string, data: Record<string, unknown> = {}) {
   const payload = { ...data, ...resurrectionHints(data) };
-  debugLog(TAG, event, payload);
+  debugLog(`${TAG} ${event}`, payload);
 }
 
 export type SessionDiagSnapshot = {

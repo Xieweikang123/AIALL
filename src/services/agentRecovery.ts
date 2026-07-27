@@ -14,7 +14,11 @@ import {
 } from "../orchestration/generic/userIntentClassifiers";
 import type { UserIntentHistoryMessage } from "../orchestration/agentIntentTypes";
 import { stripQuotedReplyPrefix } from "./agentContinuation";
-import type { AgentRoundGroup } from "./agentRoundGroups";
+import {
+  resolveIncompleteStreamTurn,
+  truncateIncompleteTurnNarrative,
+  type AgentRoundGroup,
+} from "./agentRoundGroups";
 import { stripReferenceAttachments, stripToolSummaryFromAssistantContent } from "./vibeChatStorage";
 import { buildAbortExitSummary } from "../../shared/agentProbeGuard";
 
@@ -261,6 +265,37 @@ export function canReuseZeroProgressAssistantSlot(
   if (hasAgentFinalAnswer(msg)) return false;
   if (hasRecoverableAgentProgress(msg)) return false;
   return true;
+}
+
+/**
+ * Clear live stream draft before resume so a re-generated answer does not append
+ * onto a corrupt/partial bubble (or a longer incomplete narrative).
+ */
+export function prepareAssistantForResume<
+  T extends AgentProgressSource & {
+    content?: string;
+    streamChars?: number;
+  },
+>(msg: T): T {
+  const finalTurn = msg.roundGroups?.filter((g) => g.response?.isFinal).at(-1)?.turn;
+  const incompleteTurn = resolveIncompleteStreamTurn(msg);
+  const activeTurn = incompleteTurn ?? msg.agentTurn;
+
+  if (activeTurn && activeTurn > 0 && (!finalTurn || activeTurn > finalTurn)) {
+    msg.content = "";
+    msg.streamChars = undefined;
+    msg.roundGroups = truncateIncompleteTurnNarrative(msg.roundGroups, activeTurn);
+    return msg;
+  }
+
+  if (hasAgentRunStructure(msg) && !hasAgentFinalAnswer(msg)) {
+    msg.content = "";
+    msg.streamChars = undefined;
+    if (incompleteTurn) {
+      msg.roundGroups = truncateIncompleteTurnNarrative(msg.roundGroups, incompleteTurn);
+    }
+  }
+  return msg;
 }
 
 /** Wipe run state on a reusable assistant slot so a new run can own the same message id. */
@@ -868,7 +903,7 @@ function summarizeReadFileRanges(tools: AgentProgressTool[]): string {
     const end = start + limit - 1;
 
     if (!fileRanges.has(path)) fileRanges.set(path, []);
-    fileRanges.get(path)!.push({ start, end });
+    fileRanges.get(path)?.push({ start, end });
   }
 
   if (!fileRanges.size) return "";

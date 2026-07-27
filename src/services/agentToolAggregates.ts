@@ -44,11 +44,16 @@ function formatLineRanges(ranges: Array<{ start: number; end: number }>): string
       merged.push({ ...range });
     }
   }
-  if (merged.length === 1) return `行 ${merged[0]!.start}–${merged[0]!.end}`;
+  if (merged.length === 1) {
+    const r = merged[0];
+    return `行 ${r.start}–${r.end}`;
+  }
   if (merged.length <= 3) {
     return merged.map((r) => `${r.start}–${r.end}`).join("、");
   }
-  return `行 ${merged[0]!.start}–${merged[merged.length - 1]!.end}（${merged.length} 段）`;
+  const first = merged[0];
+  const last = merged[merged.length - 1];
+  return `行 ${first.start}–${last.end}（${merged.length} 段）`;
 }
 
 function grepHitPreviews(step: AgentRoundTool, maxLines = 3): string[] {
@@ -207,7 +212,7 @@ function buildMiscCard(step: AgentRoundTool): ToolAggregateCard {
     running: Boolean(step.running),
     failed: !step.ok && !step.running,
     previewLines: useResultPreview
-      ? step.fullResult!.split("\n").filter(Boolean).slice(0, 3)
+      ? (step.fullResult ?? "").split("\n").filter(Boolean).slice(0, 3)
       : [],
     stepCount: 1,
   };
@@ -238,7 +243,7 @@ export function aggregateToolSteps(steps: AgentRoundTool[]): ToolAggregateCard[]
         fileGroups.set(path, []);
         order.push({ kind: "file", key: path, firstIndex: index });
       }
-      fileGroups.get(path)!.push(step);
+      fileGroups.get(path)?.push(step);
       return;
     }
     if (SEARCH_TOOLS.has(step.name)) {
@@ -261,7 +266,7 @@ export function aggregateToolSteps(steps: AgentRoundTool[]): ToolAggregateCard[]
         editGroups.set(path, []);
         order.push({ kind: "edit", key: path, firstIndex: index });
       }
-      editGroups.get(path)!.push(step);
+      editGroups.get(path)?.push(step);
       return;
     }
     order.push({ kind: "misc", key: step.id, firstIndex: index, stepId: step.id });
