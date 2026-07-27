@@ -96,7 +96,7 @@ export function useFileDrag(
     const startX = e.clientX;
     const startY = e.clientY;
     let dragging = false;
-    const stubNode = { path, name, isDirectory: false } as unknown as TreeNode;
+    const stubNode: TreeNode = { path, name, isDirectory: false, isFile: true, extension: name.includes(".") ? name.split(".").pop() ?? "" : "" };
 
     const cleanup = (ev: PointerEvent) => {
       el.releasePointerCapture(ev.pointerId);

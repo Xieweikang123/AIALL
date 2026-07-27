@@ -292,8 +292,12 @@ function handleTurnResponseEvent(event: EventOf<"turn_response">, assistantMsg: 
   );
   const turnText = strippedAssistantText;
   if (turnText && event.data.isFinal) {
-    // 合并：流式内容在前，turn_response 在后
-    assistantMsg.content = mergeAssistantTurnText(streamedContent || assistantMsg.content || "", turnText);
+    // Prefer authoritative turn_response over a divergent/corrupt stream prefix.
+    assistantMsg.content = mergeAssistantTurnText(
+      streamedContent || assistantMsg.content || "",
+      turnText,
+      { preferIncoming: true },
+    );
     assistantMsg.activityExpanded = false;
 
     debugLog("[eventHandlers] merged final turn text", {
@@ -873,6 +877,8 @@ function handleDoneEvent(event: EventOf<"done">, assistantMsg: ChatMessage, sess
     void scrollChatToBottom();
     void maybePersistPlanFileToDisk(assistantMsg, msgId, { wasExecutePlanRun, wasAborted }).then(() => {
       onAgentRunSettled?.(assistantMsg);
+    }).catch((err: unknown) => {
+      console.error("maybePersistPlanFileToDisk failed:", err);
     });
     return;
   }
@@ -1000,6 +1006,8 @@ function handleDoneEvent(event: EventOf<"done">, assistantMsg: ChatMessage, sess
     if (pendingPromptQueue.value.length) {
       dequeuePendingPromptAndRun();
     }
+  }).catch((err: unknown) => {
+    console.error("maybePersistPlanFileToDisk failed:", err);
   });
 }
 

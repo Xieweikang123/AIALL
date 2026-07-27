@@ -34,7 +34,7 @@ export type UseAgentStreamPatch = {
   scheduleMinimizedRunUiPatch: (sessionId: string, msgId: string, kind?: RunUiPatchKind) => void;
   flushMinimizedRunUiPatch: (sessionId: string, msgId: string, assistantMsg: VibeChatMessage) => void;
   enqueueStreamDelta: (msgId: string, assistantMsg: VibeChatMessage, delta: string) => void;
-  clearStreamDeltaBuffer: () => void;
+  clearStreamDeltaBuffer: (options?: { discard?: boolean; msgId?: string }) => void;
   scheduleStreamScroll: () => void;
   buildRunUiFullPatch: (assistantMsg: VibeChatMessage) => Partial<VibeChatMessage>;
   cleanupTimers: () => void;
@@ -259,7 +259,17 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
     });
   }
 
-  function clearStreamDeltaBuffer() {
+  function clearStreamDeltaBuffer(options?: { discard?: boolean; msgId?: string }) {
+    if (options?.discard) {
+      if (streamDeltaRaf !== null) {
+        cancelAnimationFrame(streamDeltaRaf);
+        streamDeltaRaf = null;
+      }
+      const id = options.msgId ?? pendingStreamDelta?.msgId;
+      if (id) streamToolFilters.delete(id);
+      pendingStreamDelta = null;
+      return;
+    }
     flushPendingStreamDelta();
     if (pendingStreamDelta) {
       const { msgId, assistantMsg } = pendingStreamDelta;

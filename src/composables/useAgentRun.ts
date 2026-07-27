@@ -30,6 +30,7 @@ import {
   hasRecoverableAgentProgress,
   canReuseZeroProgressAssistantSlot,
   resetAssistantMessageForNewRun,
+  prepareAssistantForResume,
   inferAgentRecoveryFlags,
   isAgentMaxTurnsExhausted,
   isIncompleteAgentRunWithoutFinalAnswer,
@@ -50,6 +51,7 @@ import {
   clearPendingAgentRun,
 } from "../services/agentHmrRecovery";
 import { compressImageDataUrlsForAgent } from "../services/imageCompress";
+import { resolveImagesForAgentTurn } from "../services/vibeChatImageStore";
 import {
   buildAgentHistoryFromMessages,
   stripReferenceAttachments,
@@ -89,10 +91,7 @@ import { computeLineDelta } from "../services/agentCursorFeed";
 import type { AgentStatusData, TurnFileDiff, VibeChatMessage } from "../types/vibeChat";
 import {
   finalizeAssistantBubbleContent,
-  hasAgentFinalAnswer,
   commitAgentFinalAnswerIfMissing,
-  hasAgentRunStructure,
-  mergeAssistantTurnText,
   resolveAgentTimelineAnswer,
   type LiveAgentAnswerSource,
 } from "../services/agentMessageDisplay";
@@ -168,7 +167,7 @@ export type UseAgentRunDeps = {
   buildAgentHistory: (prompt: string, profile: AgentRunProfile) => VibeChatHistoryMessage[];
   buildAgentHistoryForResume: (assistantMsgId: string) => VibeChatHistoryMessage[];
   resolveOriginalUserPrompt: (assistantMsgId: string) => string;
-  findLastUserMessage: () => { content: string } | null;
+  findLastUserMessage: () => { content: string; imageDataUrls?: string[] } | null;
   beginAgentRunSession: (sessionId: string) => void;
   endAgentRunSession: (sessionId?: string, silent?: boolean) => void;
   persistAgentRunSession: (sessionId: string) => void;
@@ -646,7 +645,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     handle: ReturnType<typeof runVibeAgentSse>,
   ) {
     runManager.setAbortHandle(sessionId, handle);
-    const promise = handle.promise;
+    const promise = "promise" in handle ? handle.promise : undefined;
     if (!promise) return;
     void promise.catch((error: unknown) => {
       if (!runManager.isValid(sessionId, runGen)) return;
@@ -727,8 +726,16 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
       const originalPrompt = resolveOriginalUserPrompt(running.id) || "";
       if (originalPrompt) {
+        const priorUser = [...chatMessages.value]
+          .slice(0, chatMessages.value.findIndex((m) => m.id === running.id))
+          .reverse()
+          .find((m) => m.role === "user");
+        const imageDataUrls = priorUser?.imageDataUrls?.filter(Boolean);
         persistAgentRunForHmr({
-          request: { prompt: originalPrompt },
+          request: {
+            prompt: originalPrompt,
+            ...(imageDataUrls?.length ? { imageDataUrls: [...imageDataUrls] } : {}),
+          },
           projectPath: projectPath.value.trim(),
           sessionId: sessionId || undefined,
         });
@@ -773,13 +780,13 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (!pending) return;
     if (pending.projectPath && pending.projectPath !== currentProject) return;
     const prompt = (pending.request?.prompt as string) || "";
-    if (!prompt) return;
-
-    chatError.value = "检测到之前因页面刷新中断的 Agent 运行，正在恢复…";
     const storedImages = Array.isArray(pending.request?.imageDataUrls)
       ? (pending.request.imageDataUrls as string[]).filter(Boolean)
       : [];
-    void runAgentTurn(prompt, {
+    if (!prompt && !storedImages.length) return;
+
+    chatError.value = "检测到之前因页面刷新中断的 Agent 运行，正在恢复…";
+    void runAgentTurn(prompt || "请结合附带的图片回答。", {
       skipUserBubble: true,
       imageDataUrls: storedImages,
     });
@@ -854,7 +861,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (!aiConfig.value.endpoint) aiConfig.value.endpoint = savedEndpoint;
     if (!aiConfig.value.apiKey) aiConfig.value.apiKey = savedApiKey;
     if (!aiConfig.value.model) aiConfig.value.model = savedModel;
-    clearStreamDeltaBuffer();
+    clearStreamDeltaBuffer({ discard: true, msgId: assistantMsgId });
     chatError.value = "";
     resetChatScrollPin();
 
@@ -865,16 +872,15 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     assistantMsg.agentAborted = false;
     assistantMsg.agentAbortReason = undefined;
     assistantMsg.agentContinueCount = undefined;
-    if (hasAgentRunStructure(assistantMsg) && !hasAgentFinalAnswer(assistantMsg)) {
-      assistantMsg.content = "";
-    }
+    prepareAssistantForResume(assistantMsg);
     assistantMsg.activityExpanded = true;
     assistantMsg.activityDetailed = false;
 
     beginAgentRunSession(sessionId);
     const runGen = runManager.start(sessionId, assistantMsg.id, assistantMsg, false, "connecting_local");
     stallRecovery.startAgentUiTick();
-    const connectStatus = formatLiveStatus(runManager.get(sessionId)!.live);
+    const run = runManager.get(sessionId);
+    const connectStatus = formatLiveStatus(run?.live ?? { phase: "connecting_local" });
     appendStatusLog(
       assistantMsg,
       options?.silent
@@ -910,11 +916,14 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       runProfile,
       resumePrompt,
     );
-    const resumeHasImage = Boolean(
-      assistantMsg.imageDataUrls?.length
-        || assistantMsg.imageRefs?.length
-        || assistantMsg.imageCount,
+    const resumeImageSources = await resolveImagesForAgentTurn(
+      projectPath.value.trim(),
+      chatMessages.value.slice(0, assistantIdx),
     );
+    const resumeImagesForRequest = resumeImageSources.length
+      ? await compressImageDataUrlsForAgent(resumeImageSources)
+      : undefined;
+    const resumeHasImage = Boolean(resumeImagesForRequest?.length);
     const resolvedUserIntent = await resolveIntentForAgentRequest({
       prompt: resumePrompt,
       history,
@@ -947,6 +956,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           tools: assistantMsg.tools,
         }),
         resolvedUserIntent,
+        imageDataUrls: resumeImagesForRequest,
       },
       (event) => enqueueAgentEvent(event, assistantMsg, runGen, sessionId),
     );
@@ -1093,7 +1103,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       return created;
     }
 
-    let assistantMsg: ChatMessage;
+    let assistantMsg: ChatMessage | undefined;
     let compressedImagesForRequest: string[] | undefined;
     let hasImagesForRequest = false;
 
@@ -1193,8 +1203,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       }
     }
 
-    if (options?.noAutoResume && assistantMsg!) {
-      assistantMsg!.agentRecoveryDismissed = true;
+    if (!assistantMsg) return false;
+
+    if (options?.noAutoResume) {
+      assistantMsg.agentRecoveryDismissed = true;
     }
 
     let planAssistantContent = options?.planAssistantContent;
@@ -1242,7 +1254,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       ? runManager.getGeneration(sessionId)
       : beginAssistantRunSlot(
           sessionId,
-          assistantMsg!,
+          assistantMsg,
           "connecting_local",
           hasImagesForRequest,
           hasImagesForRequest ? "上传图片中…" : undefined,
@@ -1253,7 +1265,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       mode: agentMode,
       hasImage: Boolean(compressedImagesForRequest?.length),
       sessionId,
-      assistantMsg: assistantMsg!,
+      assistantMsg,
     });
     const agentRequest = {
       prompt,
@@ -1273,7 +1285,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (!options?.suppressHmrRecovery) {
       persistAgentRunForHmr({
         request: agentRequest as unknown as Record<string, unknown>,
-        projectPath: agentRequest.projectPath,
+        projectPath: projectPath.value.trim(),
         sessionId: sessionId || undefined,
       });
     }
@@ -1281,7 +1293,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       agentRequest,
       (event) => enqueueAgentEvent(event, assistantMsg, runGen, sessionId),
     );
-    bindAgentRunInvoke(sessionId, assistantMsg!, runGen, handle);
+    bindAgentRunInvoke(sessionId, assistantMsg, runGen, handle);
     return true;
   }
 

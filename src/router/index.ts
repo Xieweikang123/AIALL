@@ -1,5 +1,4 @@
 import { createRouter, createWebHashHistory, RouteRecordRaw } from "vue-router";
-import ChatView from "../views/ChatView.vue";
 
 const routes: RouteRecordRaw[] = [
   {
@@ -9,7 +8,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: "/chat",
     name: "Chat",
-    component: ChatView,
+    component: () => import("../views/ChatView.vue"),
   },
   {
     path: "/ai-config",

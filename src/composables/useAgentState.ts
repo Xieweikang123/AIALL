@@ -248,7 +248,7 @@ export function useAgentState(deps: UseAgentStateDeps) {
     }
     if (!msg.tools) msg.tools = [];
     msg.tools.push(...captured.tools);
-    run!.deferredCapture = undefined;
+    if (run) run.deferredCapture = undefined;
   }
 
   return {

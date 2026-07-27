@@ -36,11 +36,6 @@ export const GENERIC_MECHANISM_PATHS = [
   "src/services/agentConsultativeTopics.ts",
   "shared/agentProbeGuard.ts",
   "shared/agentExplorationBudget.ts",
-  "server/agentExploreGuard.ts",
-  "server/agentFinishGate.ts",
-  "server/agentTurnPreflight.ts",
-  "server/agentTurnValidator.ts",
-  "server/agentTurnSegment.ts",
 ] as const;
 
 /** Tier 3 — product orchestration: system prompts, vision, runtime hints. */
@@ -50,11 +45,7 @@ export const PRODUCT_ORCHESTRATION_PATHS = [
   "src/orchestration/product/agentExplorePrompt.ts",
   "src/orchestration/product/agentTopicFollowUp.ts",
   "src/orchestration/product/visionMessage.ts",
-  /** Vitest / legacy agent-smoke fixtures — guarded until Node Agent path is removed (AGENT_SSOT.md). */
   "src/orchestration/product/agentPlanPrompt.ts",
-  "server/agentContextBuilder.ts",
-  "server/agentRuntimeHint.ts",
-  "server/vibeAgent.ts",
 ] as const;
 
 /** All guarded paths (union). Used by CI guard tests. */

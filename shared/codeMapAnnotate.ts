@@ -6,8 +6,20 @@ const SYSTEM_PROMPT = `你是代码库架构标注助手。根据给定的模块
 只输出 JSON 对象：键为节点 id，值为摘要字符串。不要输出 markdown 代码围栏或其它文字。
 若信息不足可写「待确认」类短句，禁止编造不存在的框架细节。`;
 
-export function buildCodeMapAnnotateUserMessage(doc: CodeMapDocument): string {
-  const payload = doc.nodes.map((n) => ({
+/** Nodes that still need an AI summary (or all nodes when force). */
+export function nodesForAnnotation(
+  doc: CodeMapDocument,
+  opts?: { force?: boolean },
+): CodeMapNode[] {
+  if (opts?.force) return doc.nodes;
+  return doc.nodes.filter((n) => !n.summary?.trim());
+}
+
+export function buildCodeMapAnnotateUserMessage(
+  doc: CodeMapDocument,
+  opts?: { force?: boolean },
+): string {
+  const payload = nodesForAnnotation(doc, opts).map((n) => ({
     id: n.id,
     kind: n.kind,
     label: n.label,
@@ -16,11 +28,31 @@ export function buildCodeMapAnnotateUserMessage(doc: CodeMapDocument): string {
   return `项目：${doc.projectRoot}\n节点：\n${JSON.stringify(payload, null, 2)}`;
 }
 
-export function buildCodeMapAnnotateMessages(doc: CodeMapDocument): Array<{ role: string; content: string }> {
+export function buildCodeMapAnnotateMessages(
+  doc: CodeMapDocument,
+  opts?: { force?: boolean },
+): Array<{ role: string; content: string }> {
   return [
     { role: "system", content: SYSTEM_PROMPT },
-    { role: "user", content: buildCodeMapAnnotateUserMessage(doc) },
+    { role: "user", content: buildCodeMapAnnotateUserMessage(doc, opts) },
   ];
+}
+
+/** Carry forward summaries from a prior map when regenerating (same node ids). */
+export function mergeCodeMapSummaries(
+  next: CodeMapDocument,
+  prior: CodeMapDocument | null | undefined,
+): CodeMapDocument {
+  if (!prior?.nodes?.length) return next;
+  const priorById = new Map(prior.nodes.map((n) => [n.id, n.summary]));
+  return {
+    ...next,
+    nodes: next.nodes.map((n) => {
+      if (n.summary?.trim()) return n;
+      const prev = priorById.get(n.id);
+      return prev?.trim() ? { ...n, summary: prev } : n;
+    }),
+  };
 }
 
 export function parseCodeMapAnnotations(raw: string): CodeMapAnnotationMap | null {

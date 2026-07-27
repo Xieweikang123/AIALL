@@ -25,7 +25,7 @@ export const PLAN_MAX_TURNS = 16;
 export const RESUME_MAX_TURNS_CAP = 48;
 
 export function resolveAgentMaxTurns(
-  mode: "ask" | "build" | "plan" | "explore",
+  mode: "ask" | "build" | "plan" | "explore" | "auto",
   profile?: { kind?: "interactive" | "execute_plan"; triggerSource?: string } | null,
   exploreMaxTurns?: number,
 ): number {
@@ -39,7 +39,7 @@ export function resolveAgentMaxTurns(
 
 /** Extra turns when resuming after interruption or turn-cap exhaustion. */
 export function resolveResumeMaxTurns(
-  mode: "ask" | "build" | "plan" | "explore",
+  mode: "ask" | "build" | "plan" | "explore" | "auto",
   profile?: { kind?: "interactive" | "execute_plan" } | null,
   completedTurns = 0,
   exploreMaxTurns?: number,

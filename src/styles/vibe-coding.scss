@@ -1,6 +1,10 @@
 // Vibe Coding 主样式
 // 从 VibeCodingView.vue 提取
 
+:global(html) {
+  background: #0b1220;
+}
+
 :global(body) {
   margin: 0;
   background: radial-gradient(900px 520px at 18% 8%, rgba(31, 111, 235, 0.16), transparent 62%),
@@ -75,6 +79,24 @@
   overscroll-behavior: none;
 }
 
+.vibe-web-banner {
+  flex: 0 0 auto;
+  padding: 8px 14px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #f0e6c8;
+  background: rgba(210, 153, 34, 0.18);
+  border-bottom: 1px solid rgba(210, 153, 34, 0.35);
+}
+
+.vibe-web-banner code {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
 .workspace {
   flex: 1;
   display: flex;
@@ -93,9 +115,16 @@
   border-left: none;
 }
 
+.workspace.editor-collapsed .git-foreground-panel {
+  flex: 1;
+  min-width: 0;
+  border-right: none;
+}
+
 .workspace.chat-collapsed .editor-panel,
 .workspace.chat-collapsed .knowledge-main-panel,
-.workspace.chat-collapsed .plan-main-panel {
+.workspace.chat-collapsed .plan-main-panel,
+.workspace.chat-collapsed .git-foreground-panel {
   flex: 1;
   min-width: 0;
   border-right: none;
@@ -105,6 +134,24 @@
   flex: 1;
   width: auto !important;
   min-width: 260px;
+  border-left: none;
+}
+
+.workspace.file-panel-collapsed .git-foreground-panel {
+  flex: 1;
+  min-width: 0;
+  border-right: none;
+}
+
+.workspace.git-foreground .file-panel {
+  border-right: none;
+}
+
+.workspace.git-foreground .resize-handle {
+  display: none;
+}
+
+.workspace.git-foreground .chat-panel {
   border-left: none;
 }
 
@@ -344,7 +391,7 @@
 
 .vibe-welcome-card {
   pointer-events: auto;
-  max-width: 400px;
+  max-width: 440px;
   width: 100%;
   padding: 32px 28px;
   text-align: center;
@@ -389,6 +436,92 @@
   color: var(--text-dim);
 }
 
+.vibe-welcome-steps {
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.vibe-welcome-step {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.18);
+  opacity: 0.75;
+}
+
+.vibe-welcome-step.is-active {
+  opacity: 1;
+  border-color: rgba(88, 166, 255, 0.4);
+  background: rgba(88, 166, 255, 0.1);
+}
+
+.vibe-welcome-step.is-done {
+  opacity: 1;
+  border-color: rgba(63, 185, 80, 0.35);
+}
+
+.vibe-welcome-step-num {
+  flex: 0 0 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+}
+
+.vibe-welcome-step.is-active .vibe-welcome-step-num {
+  background: rgba(88, 166, 255, 0.25);
+  color: #91beff;
+}
+
+.vibe-welcome-step.is-done .vibe-welcome-step-num {
+  background: rgba(63, 185, 80, 0.22);
+  color: #3fb950;
+}
+
+.vibe-welcome-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.vibe-welcome-step-body strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.vibe-welcome-step-body span {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.vibe-welcome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.vibe-welcome-footnote {
+  margin: 10px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+
 .vibe-page :focus-visible {
   outline: 2px solid rgba(88, 166, 255, 0.55);
   outline-offset: 2px;
@@ -398,7 +531,7 @@
   outline: none;
 }
 
-// 按钮样式
+// 按钮样式：primary / secondary / ghost / icon（+ small|tiny|compact 尺寸）
 button {
   border: none;
   background: var(--primary);
@@ -408,7 +541,7 @@ button {
   cursor: pointer;
   font-size: 13px;
   font-weight: 500;
-  transition: all 180ms ease;
+  transition: background 180ms ease, border-color 180ms ease, color 180ms ease, opacity 180ms ease;
 }
 
 button:hover:not(:disabled) {
@@ -417,6 +550,7 @@ button:hover:not(:disabled) {
 
 button.primary {
   background: var(--primary);
+  color: #fff;
   font-weight: 600;
 }
 
@@ -428,6 +562,7 @@ button.secondary {
 
 button.secondary:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.12);
+  opacity: 1;
 }
 
 button.ghost {
@@ -441,6 +576,32 @@ button.ghost {
 button.ghost:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.06);
   color: var(--text);
+  opacity: 1;
+}
+
+button.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(139, 148, 158, 0.88);
+  flex-shrink: 0;
+}
+
+button.icon:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(220, 225, 230, 0.96);
+  opacity: 1;
+}
+
+button.icon:focus-visible {
+  outline: 2px solid rgba(88, 166, 255, 0.55);
+  outline-offset: 1px;
 }
 
 button:disabled {
@@ -460,6 +621,12 @@ button:active:not(:disabled) {
 .tiny {
   padding: 2px 6px;
   font-size: 11px;
+}
+
+button.icon.tiny {
+  width: 22px;
+  height: 22px;
+  padding: 0;
 }
 
 .compact {
@@ -641,6 +808,12 @@ button:active:not(:disabled) {
   color: rgba(126, 210, 185, 0.92);
   background: rgba(46, 160, 130, 0.12);
   border-color: rgba(46, 160, 130, 0.2);
+}
+
+.msg-mode-badge--auto {
+  color: rgba(129, 199, 132, 0.92);
+  background: rgba(129, 199, 132, 0.12);
+  border-color: rgba(129, 199, 132, 0.2);
 }
 
 .msg-role {
@@ -1590,6 +1763,30 @@ button:active:not(:disabled) {
 
 .image-viewer-fade-leave-to .image-viewer-image {
   transform: scale(0.8);
+}
+
+.git-foreground-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.git-foreground-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(11, 18, 32, 0.45);
+  flex-shrink: 0;
+}
+
+.git-foreground-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(200, 210, 220, 0.88);
 }
 
 // Responsive

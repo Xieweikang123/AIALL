@@ -1,4 +1,7 @@
 import { computed, ref, type Ref } from "vue";
+import {
+  mergeCodeMapSummaries,
+} from "../../shared/codeMapAnnotate";
 import { CODE_MAP_SCHEMA_VERSION, type CodeMapDocument, type CodeMapLayoutFile, type CodeMapNode } from "../../shared/codeMapTypes";
 import { annotateCodeMapDocument } from "../services/codeMapAnnotateClient";
 import {
@@ -35,6 +38,8 @@ export function useCodeMap(options: {
   const annotateEnabled = ref(true);
   /** Bumped on resetLayout so the canvas remounts and fits the view. */
   const layoutEpoch = ref(0);
+  /** Bumped when we want the canvas to center on focusHint / selected entry. */
+  const focusEpoch = ref(0);
 
   let annotateAbort: AbortController | null = null;
   let layoutSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -60,10 +65,28 @@ export function useCodeMap(options: {
     return d.toLocaleString();
   });
 
+  /** True when cached map was built on a different git HEAD than current. */
+  const isStale = computed(() => {
+    const docHead = document.value?.gitHead?.trim();
+    const current = options.gitHead.value.trim();
+    if (!docHead || !current) return false;
+    return docHead !== current;
+  });
+
+  const focusNodeId = computed(() => document.value?.focusHint?.trim() || null);
+
+  function applyFocusHint(doc: CodeMapDocument, opts?: { center?: boolean }) {
+    const hint = doc.focusHint?.trim();
+    if (hint && doc.nodes.some((n) => n.id === hint)) {
+      selectedNodeId.value = hint;
+      if (opts?.center) focusEpoch.value += 1;
+    }
+  }
+
   function applyDocument(
     doc: CodeMapDocument,
     layout?: CodeMapLayoutFile | null,
-    opts?: { resetLayout?: boolean },
+    opts?: { resetLayout?: boolean; focus?: boolean },
   ) {
     document.value = doc;
     const computedPositions = computeTreeLayout(doc);
@@ -75,6 +98,9 @@ export function useCodeMap(options: {
       : new Set(layout?.collapsedIds ?? []);
     if (selectedNodeId.value && !doc.nodes.some((n) => n.id === selectedNodeId.value)) {
       selectedNodeId.value = null;
+    }
+    if (opts?.focus) {
+      applyFocusHint(doc, { center: true });
     }
   }
 
@@ -103,7 +129,7 @@ export function useCodeMap(options: {
         message.value = "尚未生成架构图";
         return false;
       }
-      applyDocument(mapRes.document, layoutRes.layout ?? null);
+      applyDocument(mapRes.document, layoutRes.layout ?? null, { focus: true });
       message.value = "";
       return true;
     } finally {
@@ -129,7 +155,7 @@ export function useCodeMap(options: {
         message.value = "";
         return false;
       }
-      let doc = built.document;
+      let doc = mergeCodeMapSummaries(built.document, document.value);
       const saved = await saveCodeMap(root, doc);
       if (!saved.ok) {
         error.value = saved.error || "保存失败";
@@ -138,7 +164,7 @@ export function useCodeMap(options: {
       }
 
       // Fresh generate always uses the current compact layout algorithm.
-      applyDocument(doc, null, { resetLayout: true });
+      applyDocument(doc, null, { resetLayout: true, focus: true });
       await persistLayout();
 
       const truncated = doc.truncatedCount ?? 0;
@@ -148,7 +174,7 @@ export function useCodeMap(options: {
 
       const shouldAnnotate = opts?.withAnnotate ?? annotateEnabled.value;
       if (shouldAnnotate && options.configReady.value) {
-        void runAnnotate(doc);
+        void runAnnotate(doc, { force: false });
       }
       return true;
     } finally {
@@ -156,7 +182,10 @@ export function useCodeMap(options: {
     }
   }
 
-  async function runAnnotate(baseDoc?: CodeMapDocument): Promise<boolean> {
+  async function runAnnotate(
+    baseDoc?: CodeMapDocument,
+    opts?: { force?: boolean },
+  ): Promise<boolean> {
     const root = options.projectPath.value.trim();
     const doc = baseDoc ?? document.value;
     if (!root || !doc) return false;
@@ -165,10 +194,11 @@ export function useCodeMap(options: {
       message.value = "已生成（跳过 AI 标注：配置不完整）";
       return false;
     }
+    const force = opts?.force === true;
     annotateAbort?.abort();
     annotateAbort = new AbortController();
     annotating.value = true;
-    message.value = "正在 AI 标注节点…";
+    message.value = force ? "正在 AI 重新标注…" : "正在 AI 标注节点…";
     try {
       const result = await annotateCodeMapDocument({
         document: doc,
@@ -176,6 +206,7 @@ export function useCodeMap(options: {
         apiKey: cfg.apiKey,
         model: cfg.model,
         signal: annotateAbort.signal,
+        force,
       });
       if (!result.ok || !result.document) {
         // Silent degrade: keep graph
@@ -183,6 +214,10 @@ export function useCodeMap(options: {
           ? `已生成（标注未完成：${result.error || "未知错误"}）`
           : "";
         return false;
+      }
+      if (result.skipped) {
+        message.value = "已生成（节点均已有标注）";
+        return true;
       }
       const saved = await saveCodeMap(root, result.document);
       if (!saved.ok) {
@@ -253,6 +288,7 @@ export function useCodeMap(options: {
     collapsedIds.value = new Set();
     selectedNodeId.value = null;
     layoutEpoch.value += 1;
+    applyFocusHint(doc, { center: true });
     message.value = "已重置布局";
     error.value = "";
     await persistLayout();
@@ -287,6 +323,9 @@ export function useCodeMap(options: {
     relatedEdges,
     hasDocument,
     generatedAtLabel,
+    isStale,
+    focusNodeId,
+    focusEpoch,
     loading,
     building,
     annotating,

@@ -8,6 +8,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const MAX_NODES: usize = 80;
 const MAX_EDGES: usize = 120;
 const MAX_DIR_DEPTH: usize = 3;
+const MAX_IMPORT_EDGES: usize = 40;
+const MAX_EXTERNAL_NODES: usize = 8;
 const SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize)]
@@ -71,6 +73,10 @@ fn route_id(route_path: &str) -> String {
 
 fn edge_id(kind: &str, source: &str, target: &str) -> String {
   format!("{kind}:{source}->{target}")
+}
+
+fn external_id(pkg: &str) -> String {
+  format!("ext:{}", normalize_rel(pkg))
 }
 
 fn project_name(root: &Path) -> String {
@@ -368,6 +374,267 @@ fn add_cheap_depends(
   }
 }
 
+/// Extract import/require/from specifiers from JS/TS/Vue source (lightweight regex).
+fn extract_import_specs(source: &str) -> Vec<String> {
+  let mut out: BTreeSet<String> = BTreeSet::new();
+  // from '…' / from "…"
+  for cap in regex_lite_find_all(r#"(?:from|import)\s*['"]([^'"]+)['"]"#, source) {
+    out.insert(cap);
+  }
+  // require('…') / import('…')
+  for cap in regex_lite_find_all(r#"(?:require|import)\(\s*['"]([^'"]+)['"]\s*\)"#, source) {
+    out.insert(cap);
+  }
+  out.into_iter().collect()
+}
+
+/// Minimal capture helper: find all group-1 matches for a simple pattern with one ([^'"]+) group.
+fn regex_lite_find_all(pattern_hint: &str, source: &str) -> Vec<String> {
+  // Hand-rolled scanners to avoid pulling regex crate into this module's hot path deps.
+  // pattern_hint is only for documentation of which scanner to use.
+  let mut out = Vec::new();
+  if pattern_hint.contains("require|import") {
+    let needles = ["require(", "import("];
+    for needle in needles {
+      let mut rest = source;
+      while let Some(idx) = rest.find(needle) {
+        let after = &rest[idx + needle.len()..];
+        let trimmed = after.trim_start();
+        let quote = trimmed.chars().next();
+        if quote == Some('\'') || quote == Some('"') {
+          let q = quote.unwrap();
+          if let Some(end) = trimmed[1..].find(q) {
+            let spec = &trimmed[1..1 + end];
+            if !spec.is_empty() {
+              out.push(spec.to_string());
+            }
+          }
+        }
+        rest = &rest[idx + needle.len()..];
+      }
+    }
+  } else {
+    // from '…' and import '…' (side-effect imports)
+    for keyword in ["from ", "import "] {
+      let mut rest = source;
+      while let Some(idx) = rest.find(keyword) {
+        let after = &rest[idx + keyword.len()..];
+        let trimmed = after.trim_start();
+        // skip `import type` / `import {` — only bare string side-effect or from-clause already matched
+        let quote = trimmed.chars().next();
+        if quote == Some('\'') || quote == Some('"') {
+          let q = quote.unwrap();
+          if let Some(end) = trimmed[1..].find(q) {
+            let spec = &trimmed[1..1 + end];
+            if !spec.is_empty() && !spec.starts_with('.') && keyword == "import " {
+              // bare package side-effect: keep
+              out.push(spec.to_string());
+            } else if !spec.is_empty() && keyword == "from " {
+              out.push(spec.to_string());
+            } else if !spec.is_empty() && spec.starts_with('.') {
+              out.push(spec.to_string());
+            }
+          }
+        }
+        rest = &rest[idx + keyword.len()..];
+      }
+    }
+  }
+  out
+}
+
+fn resolve_import_rel(from_file: &str, spec: &str) -> Option<String> {
+  if !spec.starts_with('.') {
+    return None;
+  }
+  let from_dir = match from_file.rfind('/') {
+    Some(i) => &from_file[..i],
+    None => "",
+  };
+  let mut parts: Vec<&str> = if from_dir.is_empty() {
+    Vec::new()
+  } else {
+    from_dir.split('/').collect()
+  };
+  for seg in spec.split('/') {
+    if seg == "." || seg.is_empty() {
+      continue;
+    }
+    if seg == ".." {
+      let _ = parts.pop();
+      continue;
+    }
+    parts.push(seg);
+  }
+  Some(parts.join("/"))
+}
+
+fn strip_known_ext(rel: &str) -> String {
+  for ext in [".ts", ".tsx", ".js", ".jsx", ".vue", ".mjs", ".cjs", ".json"] {
+    if let Some(stripped) = rel.strip_suffix(ext) {
+      return stripped.to_string();
+    }
+  }
+  rel.to_string()
+}
+
+fn resolve_existing_import_path(root: &Path, rel_no_ext_guess: &str) -> Option<String> {
+  let candidates = [
+    rel_no_ext_guess.to_string(),
+    format!("{rel_no_ext_guess}.ts"),
+    format!("{rel_no_ext_guess}.tsx"),
+    format!("{rel_no_ext_guess}.js"),
+    format!("{rel_no_ext_guess}.jsx"),
+    format!("{rel_no_ext_guess}.vue"),
+    format!("{rel_no_ext_guess}/index.ts"),
+    format!("{rel_no_ext_guess}/index.js"),
+    format!("{rel_no_ext_guess}/index.vue"),
+  ];
+  for cand in candidates {
+    let norm = normalize_rel(&cand);
+    if root.join(&norm).is_file() {
+      return Some(norm);
+    }
+    if root.join(&norm).is_dir() {
+      return Some(norm);
+    }
+  }
+  None
+}
+
+fn package_name_from_spec(spec: &str) -> Option<String> {
+  let s = spec.trim();
+  if s.is_empty() || s.starts_with('.') || s.starts_with('/') {
+    return None;
+  }
+  // skip URL / absolute aliases that look like paths
+  if s.starts_with('@') {
+    let mut parts = s.split('/');
+    let scope = parts.next()?;
+    let name = parts.next()?;
+    return Some(format!("{scope}/{name}"));
+  }
+  Some(s.split('/').next()?.to_string())
+}
+
+fn best_target_for_rel(
+  rel: &str,
+  node_ids: &HashMap<String, ()>,
+) -> Option<String> {
+  let entry = entry_id(rel);
+  if node_ids.contains_key(&entry) {
+    return Some(entry);
+  }
+  // Walk up directories to find a module node.
+  let mut cursor = normalize_rel(rel);
+  if let Some(stripped) = strip_known_ext(&cursor).strip_suffix("/index") {
+    cursor = stripped.to_string();
+  } else {
+    cursor = strip_known_ext(&cursor);
+  }
+  loop {
+    let mid = module_id(&cursor);
+    if node_ids.contains_key(&mid) {
+      return Some(mid);
+    }
+    match cursor.rfind('/') {
+      Some(i) => cursor = cursor[..i].to_string(),
+      None => {
+        if cursor.is_empty() {
+          break;
+        }
+        cursor.clear();
+      }
+    }
+  }
+  None
+}
+
+fn add_import_edges(
+  root: &Path,
+  nodes: &mut Vec<CodeMapNode>,
+  edges: &mut Vec<CodeMapEdge>,
+  node_ids: &mut HashMap<String, ()>,
+) {
+  let mut import_budget = MAX_IMPORT_EDGES;
+  let mut external_budget = MAX_EXTERNAL_NODES;
+
+  let scan_nodes: Vec<(String, String)> = nodes
+    .iter()
+    .filter(|n| n.kind == "entry" || n.kind == "route")
+    .filter_map(|n| {
+      let path = n.path.as_ref()?;
+      if path == "." {
+        return None;
+      }
+      Some((n.id.clone(), path.clone()))
+    })
+    .collect();
+
+  for (source_id, file_rel) in scan_nodes {
+    if import_budget == 0 {
+      break;
+    }
+    let abs = root.join(&file_rel);
+    let Ok(raw) = std::fs::read_to_string(&abs) else {
+      continue;
+    };
+    // Vue SFCs: only scan script blocks roughly (still fine to scan whole file).
+    let specs = extract_import_specs(&raw);
+    for spec in specs {
+      if import_budget == 0 {
+        break;
+      }
+      let target_id = if let Some(rel) = resolve_import_rel(&file_rel, &spec) {
+        let guessed = strip_known_ext(&rel);
+        let resolved = resolve_existing_import_path(root, &guessed).unwrap_or(guessed);
+        best_target_for_rel(&resolved, node_ids)
+      } else if let Some(pkg) = package_name_from_spec(&spec) {
+        let eid = external_id(&pkg);
+        if !node_ids.contains_key(&eid) {
+          if external_budget == 0 {
+            continue;
+          }
+          nodes.push(CodeMapNode {
+            id: eid.clone(),
+            kind: "external".into(),
+            label: pkg.clone(),
+            path: None,
+            summary: Some("npm".into()),
+            collapsed: None,
+          });
+          node_ids.insert(eid.clone(), ());
+          external_budget -= 1;
+        }
+        Some(eid)
+      } else {
+        None
+      };
+
+      let Some(target_id) = target_id else {
+        continue;
+      };
+      if target_id == source_id {
+        continue;
+      }
+      if !node_ids.contains_key(&target_id) {
+        continue;
+      }
+      let eid = edge_id("imports", &source_id, &target_id);
+      if edges.iter().any(|e| e.id == eid) {
+        continue;
+      }
+      edges.push(CodeMapEdge {
+        id: eid,
+        source: source_id.clone(),
+        target: target_id,
+        kind: "imports".into(),
+      });
+      import_budget -= 1;
+    }
+  }
+}
+
 pub async fn build_code_map(project_path: &str, git_head: Option<&str>) -> Value {
   let root = Path::new(project_path);
   if !root.is_dir() {
@@ -522,6 +789,7 @@ pub async fn build_code_map(project_path: &str, git_head: Option<&str>) -> Value
   }
 
   add_cheap_depends(root, &mut nodes, &mut edges, &mut node_ids);
+  add_import_edges(root, &mut nodes, &mut edges, &mut node_ids);
 
   let (nodes, edges, truncated) = apply_size_gate(nodes, edges);
   let truncated_count = if truncated > 0 { Some(truncated) } else { None };
@@ -561,7 +829,7 @@ mod tests {
     fs::create_dir_all(root.join("server")).unwrap();
     fs::create_dir_all(root.join("src/router")).unwrap();
     fs::write(root.join("package.json"), r#"{"name":"demo","dependencies":{"vue":"^3.0.0"}}"#).unwrap();
-    fs::write(root.join("src/main.ts"), "console.log(1)").unwrap();
+    fs::write(root.join("src/main.ts"), "import { createApp } from 'vue'\nimport './App.vue'\n").unwrap();
     fs::write(
       root.join("src/router/index.ts"),
       r#"{ path: '/demo', component: () => import('../views/DemoView.vue') }"#,
@@ -569,9 +837,10 @@ mod tests {
     .unwrap();
     fs::write(
       root.join("src/views/DemoView.vue"),
-      r#"<template><p class="desc">Demo page</p></template>"#,
+      r#"<script setup>import { ref } from 'vue'</script><template><p class="desc">Demo page</p></template>"#,
     )
     .unwrap();
+    fs::write(root.join("src/App.vue"), "<template><div/></template>").unwrap();
 
     let rt = tokio::runtime::Runtime::new().unwrap();
     let result = rt.block_on(build_code_map(root.to_string_lossy().as_ref(), Some("abc123")));
@@ -583,6 +852,9 @@ mod tests {
     assert!(nodes.iter().any(|n| n["kind"] == "module" && n["path"] == "src"));
     assert!(nodes.iter().any(|n| n["kind"] == "entry"));
     assert!(nodes.iter().any(|n| n["kind"] == "route"));
+    assert!(nodes.iter().any(|n| n["kind"] == "external" && n["label"] == "vue"));
+    let edges = doc["edges"].as_array().unwrap();
+    assert!(edges.iter().any(|e| e["kind"] == "imports"));
     let _ = fs::remove_dir_all(&root);
   }
 }

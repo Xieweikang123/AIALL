@@ -580,12 +580,12 @@ export function buildUserFailureReportNudge(): string {
   ].join("\n");
 }
 
-/** Structural UI symptom checklist — not bound to any specific feature. */
+/** Structural UI symptom checklist — diagnostic steps only, no fix recipes. */
 export function buildUiSymptomDiagnosisHint(): string {
   return [
-    "【UI 分症状排查】禁止在同一文件反复微调 position/bottom/sticky 组合；按序核对：",
-    "① v-if/显示条件与 scroll/resize 事件是否更新；② 控件是否在 overflow-y:auto 子树内（改 overlay sibling）；",
-    "③ 外框可见但符号/文字空白：grep/read 全局 element 选择器（如 button { padding }）是否与 compact 控件 width/height 冲突，组件内须 padding:0 + box-sizing:border-box，再查内层 text/SVG；勿只改 stroke/currentColor；",
+    "【UI 分症状排查】禁止在同一文件反复微调同一组定位属性；按序核对（勿预设修法）：",
+    "① v-if/显示条件与 scroll/resize 事件是否更新；② 控件是否在 overflow 滚动子树内（浮层是否应作 sibling overlay）；",
+    "③ 外框可见但符号/文字空白：grep/read 全局 element 选择器与组件 scoped 样式，核对尺寸/padding/box-sizing 是否互相裁切，并查内层 text/SVG；勿只改单一装饰属性；",
     "④ 给出用户可复现验证步骤（含当前 tab/模式前提）。",
   ].join("");
 }
@@ -624,7 +624,7 @@ export function buildSameIssueFollowUpHint(): string {
     "",
     "【同问题追问·前轮已宣称修复】用户在同一会话继续报告异常或质疑修复是否完整。",
     "① 先回顾前轮改了什么、针对哪个可见症状；列出仍存疑的现象，勿假设已解决。",
-    "② 从用户操作入口 trace 完整链路（入口→编排→副作用/持久化→UI 展示）；禁止只修展示/format 单分支而忽略状态默认值、列表投影、切换/路由等关联路径。",
+    "② 从用户操作入口 trace 完整链路（入口→编排→副作用/持久化→UI 展示）；禁止只改展示层而忽略状态默认值、列表投影、切换/路由等关联路径。",
     "③ patch 前 grep import 确认运行时入口；未引用的同名/近似路径文件勿改。",
     "④ 若前轮修复不完整须显式承认并扩大范围；禁止再次无验证「修复完成」。",
     "⑤ 探索预算收紧：基于会话已有上下文优先 patch 或分症状结论，禁止从零广搜全链路。",

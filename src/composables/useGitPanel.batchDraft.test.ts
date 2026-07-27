@@ -115,8 +115,15 @@ function createGitPanel(ai = { endpoint: "", apiKey: "", model: "" }) {
 async function runGenerateAiBatchGroups(git: ReturnType<typeof createGitPanel>) {
   vi.useFakeTimers();
   try {
-    const run = git.generateAiBatchGroups();
-    await vi.runAllTimersAsync();
+    let finished = false;
+    const run = git.generateAiBatchGroups().finally(() => {
+      finished = true;
+    });
+    // 进度条用 setInterval 计时，不能 runAllTimersAsync（会无限转）
+    for (let i = 0; i < 40 && !finished; i++) {
+      await vi.advanceTimersByTimeAsync(250);
+      await Promise.resolve();
+    }
     await run;
   } finally {
     vi.useRealTimers();

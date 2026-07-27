@@ -20,6 +20,8 @@ export interface UseFileWatcherOptions {
   onKnowledgeFileChanged: () => void;
   gitStagingInProgress: () => boolean;
   gitLastStagingAt: () => number;
+  /** When true, skip git status refresh from watcher (e.g. AI batch grouping). */
+  gitRefreshPaused?: () => boolean;
 }
 
 export function useFileWatcher(options: UseFileWatcherOptions) {
@@ -42,6 +44,7 @@ export function useFileWatcher(options: UseFileWatcherOptions) {
     if (gitRefreshDebounceTimer) clearTimeout(gitRefreshDebounceTimer);
     gitRefreshDebounceTimer = setTimeout(() => {
       gitRefreshDebounceTimer = null;
+      if (options.gitRefreshPaused?.()) return;
       if (options.gitStagingInProgress()) return;
       if (options.gitLastStagingAt() && Date.now() - options.gitLastStagingAt() < 1500) return;
       refreshGitStatus();
@@ -60,7 +63,8 @@ export function useFileWatcher(options: UseFileWatcherOptions) {
           (changes) => {
             const guard1 = options.gitStagingInProgress();
             const guard2 = Date.now() - options.gitLastStagingAt() < 500;
-            if (guard1 || guard2) return;
+            const guard3 = Boolean(options.gitRefreshPaused?.());
+            if (guard1 || guard2 || guard3) return;
             const relevantChanges = changes.filter(
               (change) => !change.path.includes(".git") && !change.path.includes("node_modules"),
             );
@@ -92,6 +96,14 @@ export function useFileWatcher(options: UseFileWatcherOptions) {
   }
 
   async function stopFileWatcherForProject() {
+    if (gitRefreshDebounceTimer) {
+      clearTimeout(gitRefreshDebounceTimer);
+      gitRefreshDebounceTimer = null;
+    }
+    if (treeRefreshDebounceTimer) {
+      clearTimeout(treeRefreshDebounceTimer);
+      treeRefreshDebounceTimer = null;
+    }
     if (fileWatcherCleanup.value) {
       fileWatcherCleanup.value();
       fileWatcherCleanup.value = null;

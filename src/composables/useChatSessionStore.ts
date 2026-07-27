@@ -36,7 +36,7 @@ import {
   syncChatStore,
   type ChatStoreSyncResult,
 } from "../services/vibeCodingClient";
-import { stampImageRefsAfterSync } from "../services/vibeChatImageStore";
+import { stampImageRefsAfterSync, applySyncedImageRefs } from "../services/vibeChatImageStore";
 import { sessionDiag } from "../utils/sessionDiagLog";
 import type { useSessionManager } from "./useSessionManager";
 import { useSessionMessageRegistry } from "./useSessionMessageRegistry";
@@ -329,8 +329,9 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
       buildActiveSessionDiskSyncPayload(path, sessionId, messagesForDiskSync) ??
       getActiveSessionSnapshot(path, sessionId);
     let syncOk = false;
+    let syncResult: Awaited<ReturnType<typeof syncChatSession>> | undefined;
     if (snapshot) {
-      const syncResult = await syncChatSession(path, sessionId, snapshot, {
+      syncResult = await syncChatSession(path, sessionId, snapshot, {
         activeSessionId: activeSessionId.value || sessionId,
       });
       syncOk = syncResult.ok;
@@ -348,7 +349,10 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
       if (persistGen !== undefined && persistGen !== persistChatGeneration) return;
       if (isSessionRecentlyDeletedLocally(path, sessionId)) return;
 
-      const stamped = stampImageRefsAfterSync(sessionId, messagesForDiskSync);
+      const syncedRefs = syncResult?.ok ? syncResult.imageRefsByMessageId : undefined;
+      const stamped = syncedRefs && Object.keys(syncedRefs).length
+        ? applySyncedImageRefs(messagesForDiskSync, syncedRefs)
+        : stampImageRefsAfterSync(sessionId, messagesForDiskSync);
       saveVibeChatHistory(path, stamped, sessionId, { setActive: sameActiveSession, touchTimestamp: false });
       const live = sessionMessages.getSessionMessages(sessionId);
       if (live?.length) {

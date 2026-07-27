@@ -269,7 +269,7 @@ export interface ResolveAmbiguousClarificationInput {
   prompt: string;
   history?: UserIntentHistoryMessage[];
   projectContext: ProjectContextSnapshot;
-  mode: "ask" | "build" | "plan" | "explore";
+  mode: "ask" | "build" | "plan" | "explore" | "auto";
   isExecutePlan: boolean;
   isPlanExplore: boolean;
   readOnlyBuildRun: boolean;

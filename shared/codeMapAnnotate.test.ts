@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   applyAnnotationsToDocument,
   buildExplainNodePrompt,
+  mergeCodeMapSummaries,
+  nodesForAnnotation,
   parseCodeMapAnnotations,
 } from "./codeMapAnnotate";
 import type { CodeMapDocument } from "./codeMapTypes";
@@ -37,6 +39,31 @@ describe("applyAnnotationsToDocument", () => {
   it("merges summaries by node id", () => {
     const next = applyAnnotationsToDocument(sampleDoc, { "mod:src": "模块根" });
     expect(next.nodes[0].summary).toBe("模块根");
+    expect(next.nodes[1].summary).toBeUndefined();
+  });
+});
+
+describe("nodesForAnnotation / mergeCodeMapSummaries", () => {
+  it("skips nodes that already have summaries unless force", () => {
+    const doc: CodeMapDocument = {
+      ...sampleDoc,
+      nodes: [
+        { id: "mod:src", kind: "module", label: "src", path: "src", summary: "已有" },
+        { id: "entry:src/main.ts", kind: "entry", label: "main.ts", path: "src/main.ts" },
+      ],
+    };
+    expect(nodesForAnnotation(doc).map((n) => n.id)).toEqual(["entry:src/main.ts"]);
+    expect(nodesForAnnotation(doc, { force: true })).toHaveLength(2);
+  });
+
+  it("carries prior summaries onto regenerated nodes", () => {
+    const prior: CodeMapDocument = {
+      ...sampleDoc,
+      nodes: [{ id: "mod:src", kind: "module", label: "src", path: "src", summary: "前端" }],
+      edges: [],
+    };
+    const next = mergeCodeMapSummaries(sampleDoc, prior);
+    expect(next.nodes[0].summary).toBe("前端");
     expect(next.nodes[1].summary).toBeUndefined();
   });
 });

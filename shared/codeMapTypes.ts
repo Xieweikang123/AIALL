@@ -10,6 +10,10 @@ export const CODE_MAP_LAYOUT_REL = `${CODE_MAP_DIR}/layout.json`;
 export const CODE_MAP_MAX_NODES = 80;
 export const CODE_MAP_MAX_EDGES = 120;
 
+/** Agent system-context injection caps (must stay in sync with Rust `context.rs`). */
+export const CODE_MAP_AGENT_CONTEXT_MAX_NODES = 24;
+export const CODE_MAP_AGENT_CONTEXT_MAX_CHARS = 2_500;
+
 export type CodeMapNodeKind = "root" | "module" | "entry" | "route" | "external";
 export type CodeMapEdgeKind = "contains" | "imports" | "routes_to" | "depends";
 
@@ -95,6 +99,21 @@ export function kindLabel(kind: CodeMapNodeKind): string {
       return "路由";
     case "external":
       return "外部";
+    default:
+      return kind;
+  }
+}
+
+export function edgeKindLabel(kind: CodeMapEdgeKind): string {
+  switch (kind) {
+    case "contains":
+      return "包含";
+    case "imports":
+      return "导入";
+    case "routes_to":
+      return "路由";
+    case "depends":
+      return "依赖";
     default:
       return kind;
   }

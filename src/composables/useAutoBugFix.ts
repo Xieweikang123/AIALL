@@ -209,6 +209,10 @@ export function useAutoBugFix(
               lastSummary.value = "修复任务已完成，可在 Git 面板查看变更。";
               persistNow();
             }
+          }).catch((err: unknown) => {
+            console.error("rerunVerifyAfterFix failed:", err);
+            phase.value = "done";
+            persistNow();
           });
         } else {
           phase.value = "done";
@@ -231,6 +235,10 @@ export function useAutoBugFix(
           lastSummary.value = "修复任务已完成，可在 Git 面板查看变更。";
           persistNow();
         }
+      }).catch((err: unknown) => {
+        console.error("rerunVerifyAfterFix failed:", err);
+        phase.value = "done";
+        persistNow();
       });
       return;
     }

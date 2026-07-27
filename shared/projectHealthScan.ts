@@ -1,3 +1,11 @@
+/** Persisted scan snapshot for Agent context injection (Rust writes on each scan). */
+export const HEALTH_SCAN_DIR = ".aiall/health-scan";
+export const HEALTH_SCAN_LATEST_REL = `${HEALTH_SCAN_DIR}/latest.json`;
+
+/** Agent system-context injection caps (must stay in sync with Rust `context.rs`). */
+export const HEALTH_SCAN_AGENT_CONTEXT_MAX_ISSUES = 8;
+export const HEALTH_SCAN_AGENT_CONTEXT_MAX_CHARS = 1_500;
+
 export type HealthIssueSeverity = "error" | "warning" | "info";
 
 export type HealthIssueCategory = "debt" | "debug" | "smell" | "security";

@@ -1,4 +1,4 @@
-export type VibeChatMode = "ask" | "build" | "plan" | "explore";
+export type VibeChatMode = "ask" | "build" | "plan" | "explore" | "auto";
 
 export type VibeChatHistoryMessage = {
   role: "user" | "assistant";

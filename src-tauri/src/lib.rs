@@ -10,6 +10,7 @@ mod paths;
 mod project;
 mod web_fetch;
 
+use commands::dev_manage::DevServerState;
 use commands::fs::DirCache;
 use commands::watcher::WatcherState;
 use tauri::Manager;
@@ -42,6 +43,7 @@ pub fn run() {
       app.manage(DirCache::default());
       app.manage(WatcherState::default());
       app.manage(commands::agent::AgentRunState::default());
+      app.manage(DevServerState::default());
       app.handle().plugin(tauri_plugin_dialog::init())?;
       app.handle().plugin(tauri_plugin_notification::init())?;
       Ok(())
@@ -66,6 +68,8 @@ pub fn run() {
       commands::git::git_ahead_commits,
       commands::git::git_add,
       commands::git::git_reset,
+      commands::git::git_reset_to_commit,
+      commands::git::git_resolve_conflict,
       commands::git::git_discard,
       commands::git::git_remotes,
       commands::git::git_fetch,
@@ -79,6 +83,19 @@ pub fn run() {
       commands::git::git_branches,
       commands::git::git_checkout,
       commands::git::git_branch_delete,
+      commands::git::git_op_state,
+      commands::git::git_merge,
+      commands::git::git_merge_abort,
+      commands::git::git_rebase,
+      commands::git::git_rebase_abort,
+      commands::git::git_cherry_pick,
+      commands::git::git_revert_commit,
+      commands::git::git_amend,
+      commands::git::git_tag_list,
+      commands::git::git_tag_create,
+      commands::git::git_tag_delete,
+      commands::git::git_submodule_status,
+      commands::git::git_submodule_update,
       commands::git::git_generate_message,
       commands::git::git_ai_batch_groups,
       commands::chat::chat_store_load,
@@ -127,6 +144,10 @@ pub fn run() {
       commands::watcher::file_watcher_stop,
       commands::agent::agent_run,
       commands::agent::agent_cancel,
+      commands::dev_manage::dev_server_start,
+      commands::dev_manage::dev_server_stop,
+      commands::dev_manage::dev_server_status,
+      commands::dev_manage::dev_build,
     ])
     .build(tauri::generate_context!())
     .expect("error while running tauri application")

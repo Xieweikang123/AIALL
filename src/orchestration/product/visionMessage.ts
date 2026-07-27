@@ -88,16 +88,16 @@ const UI_MODULE_STATEMENT_RE =
 export function buildClickFocusInteractionHint(): string {
   return [
     "【点击/聚焦交互】用户要求点击输入区域任意位置即可输入或聚焦。",
-    "这通常不是单纯加大 padding：须核对父容器与内层 contenteditable/textarea 的命中区域是否一致；",
-    "常见修复：外层 mousedown 转发 focus、或让 editable 用 min-height:100% 填满父容器；改 padding 前先 read_file 看清 DOM 层级。",
+    "诊断（勿预设修法）：read 父容器与内层可编辑节点（contenteditable/textarea/input）的 DOM 层级与命中区域是否一致；",
+    "核对点击/mousedown 落点是否落在可编辑层、focus 如何转发、可编辑层是否铺满父容器；改样式前先有完整层级证据。",
   ].join("");
 }
 
 export function buildFloatingControlPositioningHint(): string {
   return [
     "【浮动/绝对定位控件】若图中某按钮/标签与上方选区、焦点区域在空间上分离（如选区在消息区、按钮却出现在底栏/角落），",
-    "该控件多半是 position:fixed/absolute 或 Teleport 到 body 的浮层，而非父容器 flex 内嵌元素。",
-    "读图时须区分「浮层错位」与「底栏 flex 拥挤」；后续 grep 优先搜 kebab-case class（如 *-floating、*-popup）及 Teleport，勿仅凭可见中文文案锁定错误组件。",
+    "诊断（勿预设修法）：先区分「浮层/绝对定位错位」与「同容器流式布局拥挤」两条假设，用工具证据择一；",
+    "检索时优先结构线索（定位属性、portal/Teleport、浮层相关 class），勿仅凭可见中文文案锁定错误组件。",
   ].join("");
 }
 
@@ -141,9 +141,9 @@ export function suggestsEmbeddedLayoutMisread(visionDescription: string): boolea
 export function buildVisionGrepAnchorHint(visionDescription: string): string {
   if (!suggestsEmbeddedLayoutMisread(visionDescription)) return "";
   return [
-    "【读图校正·定位方式】读图把浮层按钮误判为底栏 flex 内嵌控件。",
-    "下一轮勿再 grep 纯中文泛词；改 grep kebab-case class（如 *-floating、Teleport）或 position:fixed / show*At / getSelection* 等结构符号。",
-    "read_file 定位到浮层/坐标计算相关代码后应 patch 或输出诊断，勿反复读与截图区域无关的 layout template。",
+    "【读图校正·定位方式】读图可能把浮层控件误判为底栏/流式布局内嵌控件。",
+    "下一轮勿再 grep 纯中文泛词或底栏布局词；改用定位/浮层相关结构符号检索，read 核对与截图是否一致后再改。",
+    "证据不足时并列假设，勿预设唯一修法；勿反复读与截图区域无关的 layout template。",
   ].join("");
 }
 
@@ -194,8 +194,8 @@ export function buildVisionFirstTurnRule(): string {
     "本轮禁止调用任何工具；仅输出读图描述，下一轮可用 grep 图中摘录的文案定位源码。",
     "读图首轮禁止写「已修改/已修复/已添加/已做」等完成时态，禁止描述尚未执行的 patch。",
     "禁止在未 read template 前断言控件语义（如状态圆点、计数含义、占位/未实现）；须 grep/read 后再解释元素作用。",
-    "布局问题后续修改时：底栏内元素拥挤查 flex-shrink、min-width、overflow、gap、margin；若控件与选区/焦点在空间上分离，优先怀疑 position:fixed/absolute 或 Teleport 浮层错位，勿误判为 flex。",
-    "点击/聚焦问题另查 DOM 层级与 focus 转发，勿默认只加 padding。",
+    "布局问题后续修改时：若同容器拥挤，查 flex/overflow/gap/min-width 等；若控件与选区/焦点在空间上分离，须同时验证「浮层/绝对定位」与「流式布局」两种假设，勿只认其一。",
+    "点击/聚焦问题另查 DOM 层级与 focus 转发，勿默认只改一层样式。",
     "当你真正理解了截图内容后，在描述末尾加上暗号 [图已理解]。只有加上此暗号，才表示你已完成读图。",
   ].join("\n");
 }
@@ -283,8 +283,9 @@ export function suggestsVisibleShellEmptyInner(text: string): boolean {
 
 export function buildVisibleShellEmptyInnerHint(): string {
   return [
-    "【读图·内外层】外框可见但内层符号/文字不可见：grep/read 全局 element 选择器（如 button { padding }）是否与 compact 控件 width/height 冲突；",
-    "冲突时组件内须 padding:0 + box-sizing:border-box，再改内层 text/SVG 尺寸/stroke；勿只调 currentColor 或外层 position/bottom。",
+    "【读图·内外层】外框可见但内层符号/文字不可见：诊断（勿预设修法）——",
+    "① grep/read 全局 element 选择器与组件 scoped 样式，核对 padding/box-sizing/尺寸是否互相裁切；",
+    "② 同时核对内层 text/SVG 尺寸与颜色/透明度；③ 勿只改外层定位或只改内层装饰属性其一。",
   ].join("");
 }
 

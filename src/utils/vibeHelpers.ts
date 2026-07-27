@@ -436,3 +436,16 @@ export function syncRoundGroupsPatch(msg: { roundGroups?: AgentRoundGroup[] }): 
 
 /** 聊天消息区「视为在底部」的 scroll 余量（px），ChatPanel 与 VibeCodingView 共用 */
 export const CHAT_SCROLL_BOTTOM_THRESHOLD = 80;
+
+/**
+ * 统一获取表单事件目标的值，替代模板中重复的 `($event.target as HTMLXXXElement).value`。
+ * 内部仅做一次 `as` 断言，避免 17 处散落。
+ */
+export function getEventValue(e: Event): string {
+  return (e.target as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement).value ?? "";
+}
+
+/** 标准化错误信息提取，替代散落的 `e instanceof Error ? e.message : String(e)` 模式。 */
+export function toErrorMessage(e: unknown, fallback = "操作失败"): string {
+  return e instanceof Error ? e.message : fallback;
+}

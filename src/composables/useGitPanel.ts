@@ -275,7 +275,6 @@ export function useGitPanel(
   const gitMergeTarget = ref("");
   const gitRebaseOnto = ref("");
   const gitConflictedFiles = ref<GitStatusFile[]>([]);
-  const aiBatchGroupingDetail = ref("");
 
   watch(gitLogOpen, (open) => {
     if (open) {
@@ -772,7 +771,9 @@ export function useGitPanel(
       return;
     }
     if (pathsEqual(current, batchUnstagedSnapshot.value)) return;
-    invalidateBatchDraft();
+    // 文件列表变了但保留已有 AI 分组，batchGroups computed 会自动把新文件追加到"其他未分组变更"组
+    batchUnstagedSnapshot.value = current;
+    schedulePersistBatchDraft();
   }
 
   watch(
@@ -1907,7 +1908,6 @@ export function useGitPanel(
     gitMergeTarget,
     gitRebaseOnto,
     gitConflictedFiles,
-    aiBatchGroupingDetail,
     gitPanelMode,
     projectPanelView,
     gitStatus,
