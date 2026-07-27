@@ -1,5 +1,6 @@
 use crate::paths::resolve_aiall_session_data_dir;
-use serde_json::{json, Value};
+use base64::Engine;
+use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 
 fn chat_dir() -> PathBuf {
@@ -19,6 +20,188 @@ fn session_id_safe(session_id: &str) -> String {
 
 pub(crate) fn session_file(session_id: &str) -> PathBuf {
   chat_dir().join(format!("chat-{}.json", session_id_safe(session_id)))
+}
+
+fn safe_file_part(value: &str) -> String {
+  value
+    .chars()
+    .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+    .collect()
+}
+
+fn extension_for_mime(mime: &str) -> &'static str {
+  let m = mime.to_ascii_lowercase();
+  if m.contains("jpeg") || m.contains("jpg") {
+    "jpg"
+  } else if m.contains("webp") {
+    "webp"
+  } else if m.contains("gif") {
+    "gif"
+  } else {
+    "png"
+  }
+}
+
+fn mime_from_ext(ext: &str) -> &'static str {
+  match ext.to_ascii_lowercase().as_str() {
+    "jpg" | "jpeg" => "image/jpeg",
+    "webp" => "image/webp",
+    "gif" => "image/gif",
+    _ => "image/png",
+  }
+}
+
+fn parse_data_url(data_url: &str) -> Option<(String, Vec<u8>)> {
+  let trimmed = data_url.trim();
+  let rest = trimmed.strip_prefix("data:")?;
+  let (meta, b64) = rest.split_once(";base64,")?;
+  if !meta.starts_with("image/") {
+    return None;
+  }
+  let bytes = base64::engine::general_purpose::STANDARD.decode(b64).ok()?;
+  if bytes.is_empty() {
+    return None;
+  }
+  Some((meta.to_string(), bytes))
+}
+
+fn normalize_image_ref_path(ref_path: &str) -> Option<String> {
+  let normalized = ref_path.replace('\\', "/").trim_start_matches('/').to_string();
+  if !normalized.starts_with("images/") || normalized.contains("..") {
+    return None;
+  }
+  Some(normalized)
+}
+
+fn image_ref_abs(ref_path: &str) -> Option<PathBuf> {
+  let normalized = normalize_image_ref_path(ref_path)?;
+  Some(chat_dir().join(normalized.replace('/', std::path::MAIN_SEPARATOR_STR)))
+}
+
+async fn image_ref_exists(ref_path: &str) -> bool {
+  let Some(abs) = image_ref_abs(ref_path) else {
+    return false;
+  };
+  tokio::fs::metadata(abs).await.is_ok()
+}
+
+async fn write_image_ref(
+  session_id: &str,
+  message_id: &str,
+  index: usize,
+  data_url: &str,
+) -> Option<String> {
+  let (mime, bytes) = parse_data_url(data_url)?;
+  let ext = extension_for_mime(&mime);
+  let rel = format!(
+    "images/{}/{}-{}.{}",
+    safe_file_part(session_id),
+    safe_file_part(message_id),
+    index,
+    ext
+  );
+  let abs = image_ref_abs(&rel)?;
+  if let Some(parent) = abs.parent() {
+    let _ = tokio::fs::create_dir_all(parent).await;
+  }
+  tokio::fs::write(&abs, bytes).await.ok()?;
+  Some(rel)
+}
+
+/// Persist `imageDataUrls` under AppData session dir; strip base64 from the session payload.
+/// Returns `(payload, imageRefsByMessageId)`.
+async fn externalize_session_images(
+  session_id: &str,
+  mut data: Value,
+) -> (Value, Map<String, Value>) {
+  let mut refs_by_message = Map::new();
+  let Some(messages) = data.get_mut("messages").and_then(|m| m.as_array_mut()) else {
+    return (data, refs_by_message);
+  };
+
+  for (idx, message) in messages.iter_mut().enumerate() {
+    let role = message
+      .get("role")
+      .and_then(|v| v.as_str())
+      .unwrap_or("")
+      .to_string();
+    if role != "user" {
+      if let Some(obj) = message.as_object_mut() {
+        obj.remove("imageDataUrls");
+      }
+      continue;
+    }
+
+    let message_id = message
+      .get("id")
+      .and_then(|v| v.as_str())
+      .map(|s| s.to_string())
+      .filter(|s| !s.trim().is_empty())
+      .unwrap_or_else(|| format!("msg-{idx}"));
+
+    let urls: Vec<String> = message
+      .get("imageDataUrls")
+      .and_then(|v| v.as_array())
+      .map(|arr| {
+        arr
+          .iter()
+          .filter_map(|u| u.as_str())
+          .filter(|u| u.starts_with("data:image/"))
+          .map(|u| u.to_string())
+          .collect()
+      })
+      .unwrap_or_default();
+
+    let mut refs: Vec<Value> = message
+      .get("imageRefs")
+      .and_then(|v| v.as_array())
+      .cloned()
+      .unwrap_or_default();
+
+    for (i, url) in urls.iter().enumerate() {
+      let existing_path = refs
+        .get(i)
+        .and_then(|r| r.get("path"))
+        .and_then(|p| p.as_str())
+        .map(|s| s.to_string());
+      if let Some(path) = existing_path {
+        if image_ref_exists(&path).await {
+          continue;
+        }
+      }
+      if let Some(rel) = write_image_ref(session_id, &message_id, i, url).await {
+        let entry = json!({ "path": rel });
+        if i < refs.len() {
+          refs[i] = entry;
+        } else {
+          refs.push(entry);
+        }
+      }
+    }
+
+    let mut verified = Vec::new();
+    for r in refs {
+      if let Some(path) = r.get("path").and_then(|p| p.as_str()) {
+        if image_ref_exists(path).await {
+          verified.push(json!({ "path": path }));
+        }
+      }
+    }
+
+    if let Some(obj) = message.as_object_mut() {
+      obj.remove("imageDataUrls");
+      if verified.is_empty() {
+        obj.remove("imageRefs");
+        obj.remove("imageCount");
+      } else {
+        obj.insert("imageRefs".into(), Value::Array(verified.clone()));
+        obj.insert("imageCount".into(), json!(verified.len()));
+        refs_by_message.insert(message_id, Value::Array(verified));
+      }
+    }
+  }
+
+  (data, refs_by_message)
 }
 
 fn message_array_len(value: &Value) -> usize {
@@ -160,15 +343,24 @@ pub async fn chat_store_sync(_project_path: &str, data: Value) -> Value {
   let dir = chat_dir();
   let _ = tokio::fs::create_dir_all(&dir).await;
   let store_path = store_file();
-  if let Some(sessions) = data.get("sessions").and_then(|s| s.as_array()) {
-    for session in sessions {
-      if let Some(id) = session.get("id").and_then(|v| v.as_str()) {
-        let file = session_file(id);
-        if should_skip_empty_session_overwrite(&file, session).await {
-          continue;
-        }
-        let _ = tokio::fs::write(&file, serde_json::to_string_pretty(session).unwrap_or_default()).await;
+  let mut data = data;
+  if let Some(sessions) = data.get_mut("sessions").and_then(|s| s.as_array_mut()) {
+    for session in sessions.iter_mut() {
+      let id = session
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+      if id.is_empty() {
+        continue;
       }
+      let (externalized, _) = externalize_session_images(&id, session.clone()).await;
+      *session = externalized;
+      let file = session_file(&id);
+      if should_skip_empty_session_overwrite(&file, session).await {
+        continue;
+      }
+      let _ = tokio::fs::write(&file, serde_json::to_string_pretty(session).unwrap_or_default()).await;
     }
   }
   match tokio::fs::write(&store_path, serde_json::to_string_pretty(&data).unwrap_or_default()).await {
@@ -189,6 +381,7 @@ pub async fn chat_store_sync(_project_path: &str, data: Value) -> Value {
 pub async fn chat_session_sync(project_path: &str, session_id: &str, data: Value, active_session_id: Option<&str>) -> Value {
   let dir = chat_dir();
   let _ = tokio::fs::create_dir_all(&dir).await;
+  let (data, image_refs_by_message_id) = externalize_session_images(session_id, data).await;
   let session_path = session_file(session_id);
   if !should_skip_empty_session_overwrite(&session_path, &data).await {
     let _ = tokio::fs::write(&session_path, serde_json::to_string_pretty(&data).unwrap_or_default()).await;
@@ -228,7 +421,10 @@ pub async fn chat_session_sync(project_path: &str, session_id: &str, data: Value
   }
   index["syncedAt"] = json!(chrono::Utc::now().to_rfc3339());
   let _ = tokio::fs::write(&store_path, serde_json::to_string_pretty(&index).unwrap_or_default()).await;
-  json!({ "ok": true })
+  json!({
+    "ok": true,
+    "imageRefsByMessageId": Value::Object(image_refs_by_message_id)
+  })
 }
 
 pub async fn chat_session_delete(project_path: &str, session_id: &str, active_session_id: Option<&str>) -> Value {
@@ -260,19 +456,26 @@ pub async fn chat_session_delete(project_path: &str, session_id: &str, active_se
   })
 }
 
-pub async fn chat_image_data_url(project_path: &str, ref_path: &str) -> Value {
-  let full = Path::new(project_path).join(ref_path);
+pub async fn chat_image_data_url(_project_path: &str, ref_path: &str) -> Value {
+  let Some(full) = image_ref_abs(ref_path) else {
+    return json!({ "ok": false, "error": "invalid image ref path" });
+  };
   match tokio::fs::read(&full).await {
     Ok(bytes) => {
+      let ext = full
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("png");
+      let mime = mime_from_ext(ext);
       let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes);
-      json!({ "ok": true, "dataUrl": format!("data:image/png;base64,{b64}") })
+      json!({ "ok": true, "dataUrl": format!("data:{mime};base64,{b64}") })
     }
     Err(e) => json!({ "ok": false, "error": e.to_string() }),
   }
 }
 
-pub async fn chat_image_file_bytes(project_path: &str, ref_path: &str) -> Result<Vec<u8>, String> {
-  let full = Path::new(project_path).join(ref_path);
+pub async fn chat_image_file_bytes(_project_path: &str, ref_path: &str) -> Result<Vec<u8>, String> {
+  let full = image_ref_abs(ref_path).ok_or_else(|| "invalid image ref path".to_string())?;
   tokio::fs::read(&full).await.map_err(|e| e.to_string())
 }
 
@@ -330,5 +533,29 @@ mod tests {
     let store = store_file();
     let session = session_file("test");
     assert_eq!(store.parent(), session.parent());
+  }
+
+  #[test]
+  fn test_parse_data_url_jpeg() {
+    let raw = "data:image/jpeg;base64,QQ==";
+    let (mime, bytes) = parse_data_url(raw).expect("parse");
+    assert_eq!(mime, "image/jpeg");
+    assert_eq!(bytes, b"A");
+    assert_eq!(extension_for_mime(&mime), "jpg");
+  }
+
+  #[test]
+  fn test_normalize_image_ref_path_rejects_escape() {
+    assert!(normalize_image_ref_path("images/s/a.jpg").is_some());
+    assert!(normalize_image_ref_path("../etc/passwd").is_none());
+    assert!(normalize_image_ref_path("images/../x.jpg").is_none());
+  }
+
+  #[test]
+  fn test_image_ref_abs_uses_session_data_dir() {
+    let abs = image_ref_abs("images/sess/msg-0.jpg").expect("abs");
+    let dir = chat_dir();
+    assert!(abs.starts_with(&dir));
+    assert!(abs.ends_with(std::path::Path::new("images").join("sess").join("msg-0.jpg")));
   }
 }

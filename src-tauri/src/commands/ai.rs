@@ -30,7 +30,7 @@ pub async fn ai_test_stream(
 
   let status = resp.status().as_u16();
   let mut byte_stream = resp.bytes_stream();
-  let mut sse_buffer = String::new();
+  let mut sse_buffer: Vec<u8> = Vec::new();
   let mut full_text = String::new();
 
   while let Some(chunk) = byte_stream.next().await {
@@ -38,14 +38,11 @@ pub async fn ai_test_stream(
       Ok(c) => c,
       Err(error) => return json!({ "ok": false, "error": error.to_string(), "status": status }),
     };
-    sse_buffer.push_str(&String::from_utf8_lossy(&chunk));
+    sse_buffer.extend_from_slice(&chunk);
 
-    loop {
-      let Some(pos) = sse_buffer.find('\n') else {
-        break;
-      };
-      let line = sse_buffer[..pos].trim().to_string();
-      sse_buffer = sse_buffer[pos + 1..].to_string();
+    while let Some(pos) = sse_buffer.iter().position(|&b| b == b'\n') {
+      let line_bytes: Vec<u8> = sse_buffer.drain(..=pos).collect();
+      let line = String::from_utf8_lossy(&line_bytes).trim().to_string();
       if !line.starts_with("data:") {
         continue;
       }
