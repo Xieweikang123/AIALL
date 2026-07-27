@@ -191,13 +191,15 @@ pub fn is_blocked_grep_after_locate(
 
 pub fn build_blocked_grep_message(pattern: &str) -> String {
   format!(
-    "错误：读图已判定控件为 Teleport/fixed 浮层错位，不应 grep「{pattern}」查底栏 flex。请改 grep kebab-case 浮层 class（*-floating）或 show*At / getSelection* 符号。"
+    "错误：读图已判定控件更可能是浮层/绝对定位错位，不应 grep「{pattern}」去查底栏/流式布局。\
+     请改用与浮层/定位相关的结构符号检索（如 position、portal/Teleport、浮层 class），再 read 核对后再改；勿预设具体修法。"
   )
 }
 
 pub fn build_blocked_grep_after_locate_message(pattern: &str) -> String {
   format!(
-    "错误：已确认 Teleport/fixed 浮层或已定位 show*At/getSelection*，不应 grep「{pattern}」。请 patch 坐标计算逻辑，勿查 transform 或底栏 flex。"
+    "错误：已定位到浮层/定位相关代码，不应再 grep「{pattern}」查无关布局或 transform。\
+     基于已 read 证据修改或输出诊断；勿改搜底栏 flex，勿预设唯一修法路径。"
   )
 }
 
@@ -720,6 +722,21 @@ mod tests {
     assert!(is_blocked_grep_after_vision_misread("chat-action-row|chat-status-row", true));
     assert!(!is_blocked_grep_after_vision_misread("quote-floating", true));
     assert!(!is_blocked_grep_after_vision_misread("chat-action-row", false));
+  }
+
+  #[test]
+  fn blocked_grep_messages_block_direction_without_fix_recipe() {
+    let misread = build_blocked_grep_message("chat-action-row");
+    assert!(misread.contains("不应 grep"));
+    assert!(misread.contains("勿预设具体修法"));
+    assert!(!misread.contains("show*At"));
+    assert!(!misread.contains("请 patch"));
+
+    let after_locate = build_blocked_grep_after_locate_message("transform");
+    assert!(after_locate.contains("不应再 grep"));
+    assert!(after_locate.contains("勿预设唯一修法路径"));
+    assert!(!after_locate.contains("show*At"));
+    assert!(!after_locate.contains("请 patch 坐标"));
   }
 
   #[test]

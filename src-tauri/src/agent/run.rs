@@ -72,8 +72,25 @@ pub async fn agent_run(
   let segment_budget = max_turns;
   let mut segment_max_turns = max_turns;
   let mut segment_index = 1u32;
-  let mode = request.mode.as_deref().unwrap_or("build");
-  let agent_mode = AgentMode::from_str(mode);
+  let requested_mode = request.mode.as_deref().unwrap_or("build");
+  let mut agent_mode = AgentMode::from_str(requested_mode);
+
+  // Resolve Auto mode to a concrete mode based on intent
+  let effective_mode_str;
+  if agent_mode == AgentMode::Auto {
+    let (resolved_mode, _) = policy::resolve_auto_mode(&request.prompt, request.resolved_user_intent.as_ref());
+    agent_mode = resolved_mode;
+    effective_mode_str = match agent_mode {
+      AgentMode::Ask => "ask",
+      AgentMode::Plan => "plan",
+      AgentMode::Explore => "explore",
+      _ => "build",
+    };
+    // Notify frontend of the resolved mode
+    emit(&channel, json!({ "type": "status", "data": { "phase": "auto_mode_resolved", "detail": effective_mode_str } }));
+  } else {
+    effective_mode_str = requested_mode;
+  }
 
   let image_data_urls = request
     .image_data_urls
@@ -98,7 +115,7 @@ pub async fn agent_run(
     user_intent: user_intent.clone(),
     has_image,
     is_execute_plan,
-    is_plan_explore: mode == "plan",
+    is_plan_explore: effective_mode_str == "plan",
     trigger_source: request.run_profile.as_ref().and_then(|p| p.trigger_source.clone()),
     history: request.history.clone(),
   };
@@ -131,7 +148,7 @@ pub async fn agent_run(
 
   let (system_prompt, context_blocks) = build_agent_system_prompt(SystemPromptBuildParams {
     request: &request,
-    mode,
+    mode: effective_mode_str,
     tool_names: &tool_names,
     is_execute_plan,
     has_image,
@@ -152,20 +169,20 @@ pub async fn agent_run(
   let startup_outcome = apply_run_startup_hints(&mut RunStartupHintsParams {
     messages: &mut messages,
     prompt: &request.prompt,
-    mode,
+    mode: effective_mode_str,
     project_path: &request.project_path,
     history: request.history.as_deref(),
     is_execute_plan,
-    is_plan_explore: mode == "plan",
+    is_plan_explore: effective_mode_str == "plan",
     run_policy: &run_policy,
   });
   let mut ambiguous_term_clarification_pending = startup_outcome.ambiguous_term_clarification_pending;
-  let mut ambiguous_term_clarification_terms = startup_outcome.ambiguous_term_clarification_terms;
+  let ambiguous_term_clarification_terms = startup_outcome.ambiguous_term_clarification_terms;
   let mut ambiguous_term_clarification_retries: u32 = 0;
 
   emit(&channel, json!({
     "type": "agent_context", "data": {
-      "mode": mode, "systemPrompt": "Rust agent backend",
+      "mode": effective_mode_str, "systemPrompt": "Rust agent backend",
       "history": context::history_for_display(request.history.as_deref().unwrap_or(&[])),
       "model": request.model,
       "maxTurns": max_turns,
@@ -218,13 +235,13 @@ pub async fn agent_run(
   let mut scheduled_job_registration_nudge_sent = false;
   let mut preflight_state = TurnPreflightState::new();
   let mut explore_files_read: std::collections::HashSet<String> = std::collections::HashSet::new();
-  let is_plan_explore = mode == "plan";
+  let is_plan_explore = effective_mode_str == "plan";
   let plan_quote_informational_run =
     is_plan_explore && super::continuation::is_plan_quote_informational_prompt(&request.prompt);
   let is_plan_text_only_follow_up =
     run_policy.pending_plan_clarify_run || plan_quote_informational_run;
-  let nudge_mode = if mode == "ask" || mode == "explore" || mode == "plan" {
-    mode
+  let nudge_mode = if effective_mode_str == "ask" || effective_mode_str == "explore" || effective_mode_str == "plan" {
+    effective_mode_str
   } else {
     "build"
   };
@@ -250,12 +267,12 @@ pub async fn agent_run(
         break;
       }
 
-      let is_plan_explore = mode == "plan";
+      let is_plan_explore = effective_mode_str == "plan";
       let read_only_segment_cap = is_read_only_run || run_policy.read_only_build_run;
 
-      if read_only_segment_cap || mode == "explore" || is_plan_explore {
+      if read_only_segment_cap || effective_mode_str == "explore" || is_plan_explore {
         let explore_turns = total_read_tool_calls.max(crate::agent::EXPLORE_MAX_TOTAL_EXPLORE_SOFT);
-        let cap_nudge = if mode == "explore" {
+        let cap_nudge = if effective_mode_str == "explore" {
           crate::agent::build_explore_force_report_nudge(explore_turns)
         } else if is_plan_explore {
           crate::agent::build_plan_segment_cap_nudge(actual_turns, total_read_tool_calls)
@@ -263,7 +280,7 @@ pub async fn agent_run(
           crate::agent::build_consultative_segment_cap_nudge(actual_turns, total_read_tool_calls)
         };
         messages.push(json!({ "role": "system", "content": cap_nudge }));
-        if mode == "ask" || run_policy.read_only_build_run {
+        if effective_mode_str == "ask" || run_policy.read_only_build_run {
           messages.push(json!({
             "role": "system",
             "content": crate::agent::build_ask_force_answer_nudge(explore_turns)
@@ -276,7 +293,7 @@ pub async fn agent_run(
           }));
         }
         segment_max_turns = actual_turns + 1;
-        let phase = if mode == "explore" {
+        let phase = if effective_mode_str == "explore" {
           "explore_segment_cap"
         } else if is_plan_explore {
           "plan_segment_cap"
@@ -289,7 +306,7 @@ pub async fn agent_run(
             "phase": phase,
             "turn": actual_turns,
             "maxTurns": segment_max_turns,
-            "detail": if mode == "explore" {
+            "detail": if effective_mode_str == "explore" {
               "探索轮数已达上限，请输出报告"
             } else if is_plan_explore {
               "规划轮数已达上限，请输出方案"
@@ -368,7 +385,7 @@ pub async fn agent_run(
       return Ok(());
     }
     if is_cancelled(&cancel) {
-      if mode == "explore" && !preflight_state.explore_abort_grace_turn_active {
+      if effective_mode_str == "explore" && !preflight_state.explore_abort_grace_turn_active {
         preflight_state.explore_abort_grace_turn_active = true;
         segment_max_turns = segment_max_turns.max(turn + 1);
         emit(&channel, json!({
@@ -398,7 +415,7 @@ pub async fn agent_run(
     let preflight_outcome = apply_turn_preflight(
       &mut TurnPreflightParams {
         messages: &mut messages,
-        mode,
+        mode: effective_mode_str,
         prompt: &request.prompt,
         is_read_only_run,
         is_execute_plan,
@@ -429,7 +446,7 @@ pub async fn agent_run(
     consultative_force_answer_pending = preflight_flags.consultative_force_answer_pending;
     active_tools = preflight_outcome.active_tools;
 
-    if !is_read_only_run && mode != "explore" && mode != "plan" {
+    if !is_read_only_run && effective_mode_str != "explore" && effective_mode_str != "plan" {
       if turn + 3 >= segment_max_turns && turn < segment_max_turns {
         let remaining = segment_max_turns.saturating_sub(turn);
         messages.push(json!({
@@ -690,7 +707,7 @@ pub async fn agent_run(
           written_files: &written_files,
           tool_guard: &tool_guard,
           run_policy: &run_policy,
-          mode,
+          mode: effective_mode_str,
           is_read_only_run,
           is_execute_plan,
           verify_script_available,
@@ -748,7 +765,7 @@ pub async fn agent_run(
     let mut turn_patch_failures: Vec<PatchFailureEntry> = Vec::new();
     let mut tool_ctx = tool_exec::ToolExecContext {
       project_path: &request.project_path,
-      mode,
+      mode: effective_mode_str,
       web_proxy_url,
       automated_bug_fix,
       written_files: &mut written_files,
@@ -773,7 +790,7 @@ pub async fn agent_run(
       }
       turn_tool_outcomes.push(result.clone());
       if !is_read_only_run
-        && mode != "plan"
+        && effective_mode_str != "plan"
         && !run_policy.read_only_build_run
         && ok
       {
@@ -886,7 +903,7 @@ pub async fn agent_run(
         is_read_only_run,
         written_files: &written_files,
         scheduled_task_consultative_run: run_policy.scheduled_task_consultative_run,
-        mode,
+        mode: effective_mode_str,
         is_execute_plan,
         is_plan_explore,
         is_plan_text_only_follow_up,

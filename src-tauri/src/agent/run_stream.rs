@@ -24,7 +24,7 @@ pub(crate) async fn consume_model_sse_stream(
   let mut accumulated_content = String::new();
   let mut accumulated_tool_calls: Vec<Value> = Vec::new();
   let mut byte_stream = stream_resp.bytes_stream();
-  let mut line_buf = String::new();
+  let mut line_buf: Vec<u8> = Vec::new();
 
   while let Some(chunk_result) = byte_stream.next().await {
     if is_cancelled(cancel) {
@@ -32,18 +32,16 @@ pub(crate) async fn consume_model_sse_stream(
       return Ok(None);
     }
     let chunk = chunk_result.map_err(|e| e.to_string())?;
-    let chunk_str = String::from_utf8_lossy(&chunk);
-    for ch in chunk_str.chars() {
-      if ch == '\n' {
-        parse_sse_line(&line_buf, &mut accumulated_content, &mut accumulated_tool_calls, channel);
-        line_buf.clear();
-      } else {
-        line_buf.push(ch);
-      }
+    line_buf.extend_from_slice(&chunk);
+    while let Some(pos) = line_buf.iter().position(|&b| b == b'\n') {
+      let line_bytes: Vec<u8> = line_buf.drain(..=pos).collect();
+      let line_str = String::from_utf8_lossy(&line_bytes);
+      parse_sse_line(&line_str, &mut accumulated_content, &mut accumulated_tool_calls, channel);
     }
   }
   if !line_buf.is_empty() {
-    parse_sse_line(&line_buf, &mut accumulated_content, &mut accumulated_tool_calls, channel);
+    let line_str = String::from_utf8_lossy(&line_buf);
+    parse_sse_line(&line_str, &mut accumulated_content, &mut accumulated_tool_calls, channel);
   }
 
   let tool_calls_value = if accumulated_tool_calls.is_empty() {

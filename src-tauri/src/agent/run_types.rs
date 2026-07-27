@@ -3,6 +3,7 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedUserIntentPayload {
+  pub primary: Option<String>,
   pub consultative: bool,
   pub consultative_topic: Option<String>,
   pub implement_follow_up: bool,

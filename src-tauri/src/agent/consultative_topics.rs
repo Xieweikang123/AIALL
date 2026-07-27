@@ -71,7 +71,7 @@ const TOPIC_IDS: &[&str] = &[
 pub fn build_scheduled_task_consultative_hint() -> &'static str {
   "\n【定时/调度类】用户问的是有无定时任务、何时触发、执行频率等。\n\
    read 到 job/task 实现后，须继续 trace 到调度注册/触发配置处并 read；符号与入口路径依上方【项目上下文】JSON 与 manifest 自行选用，勿凭记忆臆测。\n\
-   禁止只 trace Execute→Service 即收工；答案须含触发时机/频率（代码中有则写明）。\n\
+   禁止只读到 job/task 实现层即收工，须继续到调度注册/触发配置；答案须含触发时机/频率（代码中有则写明）。\n\
    探索时避免连续 list_dir 逐级下探超过 2 层，优先 grep/search_files 定位调度注册文件。"
 }
 
@@ -134,7 +134,7 @@ pub fn build_scheduled_job_registration_nudge(job_class_names: &[String]) -> Str
   format!(
     "【系统提示】你已 read Job 类（{listed}），但尚未 read/grep 调度注册处。\n\
      下一轮 grep `{first}` 并 trace 到调度注册/触发配置（符号依【项目上下文】JSON）；read 注册入口后再作答。\n\
-     作答须含触发时机/频率（如 cron、启动即跑）；禁止只写 Execute→Service 业务逻辑即结束。"
+     作答须含触发时机/频率（如 cron、启动即跑）；禁止只写 job 实现层业务逻辑即结束。"
   )
 }
 

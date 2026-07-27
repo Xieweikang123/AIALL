@@ -49,6 +49,7 @@ pub enum AgentMode {
   Build,
   Plan,
   Explore,
+  Auto,
 }
 
 impl AgentMode {
@@ -57,6 +58,7 @@ impl AgentMode {
       "ask" => AgentMode::Ask,
       "plan" => AgentMode::Plan,
       "explore" => AgentMode::Explore,
+      "auto" => AgentMode::Auto,
       _ => AgentMode::Build,
     }
   }
@@ -267,6 +269,57 @@ pub fn infer_user_intent_from_prompt(prompt: &str) -> UserIntent {
       && has_question,
     ..Default::default()
   }
+}
+
+/// Resolve Auto mode to a concrete mode based on prompt intent heuristics.
+/// Returns (resolved_mode, was_auto).
+pub fn resolve_auto_mode(prompt: &str, resolved_user_intent: Option<&super::run_types::ResolvedUserIntentPayload>) -> (AgentMode, bool) {
+  let text = prompt.trim();
+  if text.is_empty() {
+    return (AgentMode::Build, false);
+  }
+
+  // Use the richer resolvedUserIntent from frontend (AI classifier result) if available
+  if let Some(intent) = resolved_user_intent {
+    // AI 分类器的 primary 字段是最可靠的信号
+    let mode = match intent.primary.as_deref() {
+      Some("implement") => AgentMode::Build,
+      Some("automation") => AgentMode::Build,
+      Some("consultative") => AgentMode::Ask,
+      None => {
+        // Fallback: 使用字段级信号
+        if intent.implement_follow_up
+          || intent.ui_defect
+          || intent.ui_appearance
+          || intent.behavior_contradiction
+        {
+          AgentMode::Build
+        } else if intent.consultative {
+          AgentMode::Ask
+        } else {
+          AgentMode::Build
+        }
+      }
+      _ => AgentMode::Build,
+    };
+    return (mode, true);
+  }
+
+  // Fallback: lightweight heuristics from prompt text
+  let intent = infer_user_intent_from_prompt(text);
+  let has_implement = IMPLEMENT_INTENT_RE.is_match(text);
+
+  let mode = if has_implement {
+    // 有实施动词（不管是不是问句）→ Build
+    AgentMode::Build
+  } else if intent.consultative || intent.behavior_purpose || intent.accuracy_question {
+    // 纯咨询、用途问题、准确性问题 → Ask
+    AgentMode::Ask
+  } else {
+    // 默认 Build
+    AgentMode::Build
+  };
+  (mode, true)
 }
 
 impl AgentRunPolicy {
