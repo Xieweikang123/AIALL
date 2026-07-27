@@ -8,6 +8,7 @@ pub mod web;
 pub mod automation;
 pub mod watcher;
 pub mod agent;
+pub mod dev_manage;
 
 #[cfg(test)]
 mod tests {

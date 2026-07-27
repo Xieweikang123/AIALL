@@ -3,7 +3,10 @@ use std::time::Duration;
 use tokio::process::Command;
 use tokio::time::timeout;
 
-const GIT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Local ops (status / commit / diff): fail fast when git hangs.
+const GIT_TIMEOUT_LOCAL: Duration = Duration::from_secs(15);
+/// Network ops (push / pull / fetch): allow slow links and multi-commit uploads.
+const GIT_TIMEOUT_REMOTE: Duration = Duration::from_secs(180);
 
 #[derive(Debug)]
 pub struct GitOutput {
@@ -12,8 +15,35 @@ pub struct GitOutput {
 }
 
 pub async fn git_exec(project_root: &str, args: &[&str]) -> Result<GitOutput, String> {
+  git_exec_with_timeout(project_root, args, GIT_TIMEOUT_LOCAL).await
+}
+
+/// Short-budget local ops (AI batch numstat / sampled diffs).
+pub async fn git_exec_short(project_root: &str, args: &[&str]) -> Result<GitOutput, String> {
+  git_exec_with_timeout(project_root, args, Duration::from_secs(5)).await
+}
+
+/// Fetch / pull / push and other network-bound git commands.
+pub async fn git_exec_remote(project_root: &str, args: &[&str]) -> Result<GitOutput, String> {
+  git_exec_with_timeout(project_root, args, GIT_TIMEOUT_REMOTE).await
+}
+
+async fn git_exec_with_timeout(
+  project_root: &str,
+  args: &[&str],
+  limit: Duration,
+) -> Result<GitOutput, String> {
   let mut cmd = Command::new("git");
-  cmd.args(args).current_dir(project_root).stdout(Stdio::piped()).stderr(Stdio::piped());
+  cmd.args(args)
+    .current_dir(project_root)
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .kill_on_drop(true)
+    // Avoid interactive prompts / pager / lock waits that can stall UI flows.
+    .env("GIT_TERMINAL_PROMPT", "0")
+    .env("GIT_OPTIONAL_LOCKS", "0")
+    .env("GIT_PAGER", "cat")
+    .env("PAGER", "cat");
   #[cfg(windows)]
   {
     use std::os::windows::process::CommandExt;
@@ -26,9 +56,10 @@ pub async fn git_exec(project_root: &str, args: &[&str]) -> Result<GitOutput, St
       e.to_string()
     }
   })?;
-  let output = timeout(GIT_TIMEOUT, child.wait_with_output())
+  let secs = limit.as_secs();
+  let output = timeout(limit, child.wait_with_output())
     .await
-    .map_err(|_| "Git 命令超时".to_string())?
+    .map_err(|_| format!("Git 命令超时（{secs}s）"))?
     .map_err(|e| e.to_string())?;
   let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
   let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
@@ -62,6 +93,13 @@ mod tests {
   #[test]
   fn git_exec_ok_compiles() {
     assert!(true, "git_exec_ok compiles");
+  }
+
+  #[test]
+  fn remote_timeout_longer_than_local() {
+    assert!(GIT_TIMEOUT_REMOTE > GIT_TIMEOUT_LOCAL);
+    assert_eq!(GIT_TIMEOUT_LOCAL.as_secs(), 15);
+    assert_eq!(GIT_TIMEOUT_REMOTE.as_secs(), 180);
   }
 
   #[test]

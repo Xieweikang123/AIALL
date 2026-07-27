@@ -1,4 +1,4 @@
-use super::exec::git_exec;
+use super::exec::{git_exec, git_exec_remote};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
@@ -129,7 +129,7 @@ pub async fn git_push(
 }
 
 async fn run_remote_action(project_root: &str, args: &[&str]) -> GitRemoteActionResult {
-  match git_exec(project_root, args).await {
+  match git_exec_remote(project_root, args).await {
     Ok(out) => GitRemoteActionResult {
       ok: true,
       output: format!("{}{}", out.stdout, out.stderr).trim().to_string(),

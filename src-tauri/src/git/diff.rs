@@ -50,7 +50,11 @@ pub async fn git_diff(project_root: &str, file_path: Option<&str>, staged: bool)
     patch_args.push("--");
     patch_args.push(f);
   }
-  match (git_exec(project_root, &stat_args).await, git_exec(project_root, &patch_args).await) {
+  let (stat_res, patch_res) = tokio::join!(
+    git_exec(project_root, &stat_args),
+    git_exec(project_root, &patch_args)
+  );
+  match (stat_res, patch_res) {
     (Ok(stat_out), Ok(patch_out)) => {
       let re = Regex::new(r"^\s*(.+?)\s*\|\s*(\d+)").unwrap();
       let mut files = Vec::new();
@@ -77,6 +81,119 @@ pub async fn git_diff(project_root: &str, file_path: Option<&str>, staged: bool)
       error: Some(error),
     },
   }
+}
+
+#[derive(Debug, Clone)]
+pub struct GitNumstatEntry {
+  pub path: String,
+  pub additions: u32,
+  pub deletions: u32,
+}
+
+impl GitNumstatEntry {
+  pub fn churn(&self) -> u32 {
+    self.additions.saturating_add(self.deletions)
+  }
+}
+
+/// Parse `git diff --numstat` lines. Binary files use `-` for add/del → treated as 0.
+pub(crate) fn parse_numstat_stdout(stdout: &str) -> Vec<GitNumstatEntry> {
+  let mut out = Vec::new();
+  for line in stdout.lines() {
+    let line = line.trim();
+    if line.is_empty() {
+      continue;
+    }
+    let mut parts = line.splitn(3, '\t');
+    let (Some(add_s), Some(del_s), Some(path)) = (parts.next(), parts.next(), parts.next()) else {
+      continue;
+    };
+    let path = path.trim();
+    if path.is_empty() {
+      continue;
+    }
+    // Rename format: `{old => new}` — keep the new side when present.
+    let path = if let Some(idx) = path.rfind(" => ") {
+      path[idx + 4..].trim().trim_matches('{').trim_matches('}').to_string()
+    } else {
+      path.to_string()
+    };
+    let additions = if add_s == "-" {
+      0
+    } else {
+      add_s.parse().unwrap_or(0)
+    };
+    let deletions = if del_s == "-" {
+      0
+    } else {
+      del_s.parse().unwrap_or(0)
+    };
+    out.push(GitNumstatEntry {
+      path,
+      additions,
+      deletions,
+    });
+  }
+  out
+}
+
+pub async fn git_diff_numstat(project_root: &str, staged: bool) -> Result<Vec<GitNumstatEntry>, String> {
+  let mut args = vec![
+    "-c",
+    "core.quotepath=false",
+    "diff",
+    "--numstat",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--ignore-submodules=dirty",
+  ];
+  if staged {
+    args.insert(3, "--cached");
+  }
+  let out = super::exec::git_exec_short(project_root, &args).await?;
+  Ok(parse_numstat_stdout(&out.stdout))
+}
+
+pub async fn git_diff_file_patch_quick(
+  project_root: &str,
+  file_path: &str,
+  staged: bool,
+) -> Result<String, String> {
+  let mut args = vec![
+    "-c",
+    "core.quotepath=false",
+    "diff",
+    "--no-color",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--ignore-submodules=dirty",
+    "-U1",
+    "--",
+    file_path,
+  ];
+  if staged {
+    args.insert(3, "--cached");
+  }
+  let out = super::exec::git_exec_short(project_root, &args).await?;
+  Ok(out.stdout)
+}
+
+pub fn is_low_value_ai_diff_path(path: &str) -> bool {
+  let lower = path.replace('\\', "/").to_ascii_lowercase();
+  lower.ends_with("package-lock.json")
+    || lower.ends_with("pnpm-lock.yaml")
+    || lower.ends_with("yarn.lock")
+    || lower.ends_with("cargo.lock")
+    || lower.ends_with(".min.js")
+    || lower.ends_with(".min.css")
+    || lower.ends_with(".map")
+    || lower.contains("/dist/")
+    || lower.starts_with("dist/")
+    || lower.contains("/build/")
+    || lower.starts_with("build/")
+    || lower.contains("/out/")
+    || lower.starts_with("out/")
+    || lower.contains("/node_modules/")
 }
 
 pub(crate) fn parse_unified_diff(diff_output: &str) -> (String, String) {
@@ -286,5 +403,29 @@ index a..b 100644
     let (before, after) = parse_unified_diff(diff);
     assert_eq!(before, "entirely removed");
     assert!(after.is_empty());
+  }
+
+  #[test]
+  fn test_parse_numstat_stdout() {
+    let raw = "\
+12\t3\tsrc/a.ts
+-\t-\tassets/logo.png
+0\t5\told/x.ts => new/x.ts
+";
+    let entries = parse_numstat_stdout(raw);
+    assert_eq!(entries.len(), 3);
+    assert_eq!(entries[0].path, "src/a.ts");
+    assert_eq!(entries[0].churn(), 15);
+    assert_eq!(entries[1].path, "assets/logo.png");
+    assert_eq!(entries[1].churn(), 0);
+    assert_eq!(entries[2].path, "new/x.ts");
+    assert_eq!(entries[2].deletions, 5);
+  }
+
+  #[test]
+  fn test_is_low_value_ai_diff_path() {
+    assert!(is_low_value_ai_diff_path("package-lock.json"));
+    assert!(is_low_value_ai_diff_path("src/dist/bundle.js"));
+    assert!(!is_low_value_ai_diff_path("src/composables/useGitPanel.ts"));
   }
 }

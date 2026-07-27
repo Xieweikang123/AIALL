@@ -95,6 +95,100 @@ pub async fn git_reset(project_root: &str, files: Vec<String>) -> GitActionResul
   }
 }
 
+pub(crate) fn is_safe_git_rev(rev: &str) -> bool {
+  let rev = rev.trim();
+  if rev.is_empty() || rev.len() > 64 {
+    return false;
+  }
+  if rev == "HEAD" {
+    return true;
+  }
+  if let Some(rest) = rev.strip_prefix("HEAD~") {
+    return !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit());
+  }
+  if let Some(rest) = rev.strip_prefix("HEAD^") {
+    return rest.is_empty() || rest.chars().all(|c| c == '^');
+  }
+  rev.chars().all(|c| c.is_ascii_hexdigit()) && rev.len() >= 7
+}
+
+/// Reset current branch to `commit` with soft/mixed/hard mode.
+pub async fn git_reset_to_commit(
+  project_root: &str,
+  commit: &str,
+  mode: &str,
+) -> GitActionResult {
+  if !is_safe_git_rev(commit) {
+    return GitActionResult {
+      ok: false,
+      error: Some("无效的提交引用".into()),
+      warning: None,
+    };
+  }
+  let flag = match mode.trim().to_ascii_lowercase().as_str() {
+    "soft" => "--soft",
+    "hard" => "--hard",
+    "mixed" | "" => "--mixed",
+    _ => {
+      return GitActionResult {
+        ok: false,
+        error: Some("无效的重置模式（仅支持 soft / mixed / hard）".into()),
+        warning: None,
+      };
+    }
+  };
+  match git_exec(project_root, &["reset", flag, commit.trim()]).await {
+    Ok(_) => GitActionResult { ok: true, error: None, warning: None },
+    Err(error) => GitActionResult {
+      ok: false,
+      error: Some(error),
+      warning: None,
+    },
+  }
+}
+
+/// Resolve a conflicted path by taking ours/theirs, then stage the result.
+pub async fn git_resolve_conflict(
+  project_root: &str,
+  file: &str,
+  side: &str,
+) -> GitActionResult {
+  let path = file.trim();
+  if path.is_empty() || path.contains('\0') {
+    return GitActionResult {
+      ok: false,
+      error: Some("无效的文件路径".into()),
+      warning: None,
+    };
+  }
+  let flag = match side.trim().to_ascii_lowercase().as_str() {
+    "ours" => "--ours",
+    "theirs" => "--theirs",
+    _ => {
+      return GitActionResult {
+        ok: false,
+        error: Some("无效的冲突解决方式（仅支持 ours / theirs）".into()),
+        warning: None,
+      };
+    }
+  };
+  if let Err(error) = git_exec(project_root, &["checkout", flag, "--", path]).await {
+    return GitActionResult {
+      ok: false,
+      error: Some(error),
+      warning: None,
+    };
+  }
+  match git_exec(project_root, &["add", "--", path]).await {
+    Ok(_) => GitActionResult { ok: true, error: None, warning: None },
+    Err(error) => GitActionResult {
+      ok: false,
+      error: Some(error),
+      warning: None,
+    },
+  }
+}
+
 pub async fn git_discard(project_root: &str, files: Vec<String>) -> GitActionResult {
   for file in files {
     let tracked = git_exec(project_root, &["ls-files", "--error-unmatch", "--", &file])
@@ -212,5 +306,23 @@ mod tests {
   fn test_extract_commit_hash_stdin_format() {
     let out = "[main abc1234def1234567890abc1234def1234567890] commit message";
     assert_eq!(extract_commit_hash(out), "");
+  }
+
+  #[test]
+  fn test_is_safe_git_rev() {
+    assert!(is_safe_git_rev("abc1234"));
+    assert!(is_safe_git_rev("abcdef0123456789abcdef0123456789abcdef01"));
+    assert!(is_safe_git_rev("HEAD"));
+    assert!(is_safe_git_rev("HEAD~1"));
+    assert!(is_safe_git_rev("HEAD~12"));
+    assert!(is_safe_git_rev("HEAD^"));
+    assert!(is_safe_git_rev("HEAD^^"));
+    assert!(!is_safe_git_rev(""));
+    assert!(!is_safe_git_rev("abc"));
+    assert!(!is_safe_git_rev("HEAD~"));
+    assert!(!is_safe_git_rev("main"));
+    assert!(!is_safe_git_rev("origin/main"));
+    assert!(!is_safe_git_rev("--hard"));
+    assert!(!is_safe_git_rev("abc1234; rm -rf /"));
   }
 }

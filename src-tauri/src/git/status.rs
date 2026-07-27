@@ -41,7 +41,7 @@ pub(crate) fn parse_git_status_porcelain(stdout: &str) -> Vec<GitStatusFile> {
     }
     let index_status = line.chars().next().unwrap_or(' ').to_string();
     let worktree_status = line.chars().nth(1).unwrap_or(' ').to_string();
-    let mut file_path = line[3..].to_string();
+    let file_path = line[3..].to_string();
     let mut old_path = None;
     let idx = index_status.chars().next().unwrap_or(' ');
     let wt = worktree_status.chars().next().unwrap_or(' ');
@@ -50,6 +50,19 @@ pub(crate) fn parse_git_status_porcelain(stdout: &str) -> Vec<GitStatusFile> {
       if i < entries.len() {
         old_path = Some(entries[i].to_string());
       }
+    }
+    let unmerged = is_unmerged_status(idx, wt);
+    if unmerged {
+      files.push(GitStatusFile {
+        path: file_path,
+        old_path,
+        status: "conflicted".into(),
+        index_status,
+        worktree_status,
+        staged: false,
+      });
+      i += 1;
+      continue;
     }
     let has_index = idx != ' ' && idx != '?' && idx != '!';
     let has_worktree = wt != ' ' && wt != '?' && wt != '!';
@@ -105,6 +118,13 @@ pub(crate) fn parse_git_status_porcelain(stdout: &str) -> Vec<GitStatusFile> {
     i += 1;
   }
   files
+}
+
+fn is_unmerged_status(idx: char, wt: char) -> bool {
+  matches!(
+    (idx, wt),
+    ('U', _) | (_, 'U') | ('A', 'A') | ('D', 'D')
+  )
 }
 
 pub async fn git_status(project_root: &str) -> GitStatusResult {
@@ -309,5 +329,28 @@ mod tests {
     assert_eq!(result[4].status, "untracked");
     assert_eq!(result[5].path, "target/debug.log");
     assert_eq!(result[5].status, "ignored");
+  }
+
+  #[test]
+  fn test_parse_conflict_uu() {
+    let result = parse_git_status_porcelain(&s(&["UU src/conflict.rs"]));
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].path, "src/conflict.rs");
+    assert_eq!(result[0].status, "conflicted");
+    assert!(!result[0].staged);
+    assert_eq!(result[0].index_status, "U");
+    assert_eq!(result[0].worktree_status, "U");
+  }
+
+  #[test]
+  fn test_parse_conflict_variants() {
+    let result = parse_git_status_porcelain(&s(&[
+      "AA both_added.rs",
+      "DU deleted_by_us.rs",
+      "UD deleted_by_them.rs",
+      "AU added_by_us.rs",
+    ]));
+    assert_eq!(result.len(), 4);
+    assert!(result.iter().all(|f| f.status == "conflicted" && !f.staged));
   }
 }
