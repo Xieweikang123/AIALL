@@ -156,9 +156,7 @@ type ChatStoreIndex = {
   byProject: Record<string, ProjectIndexRecord>;
 };
 
-function normalizeProjectKey(path: string): string {
-  return path.trim().replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
-}
+import { normalizeProjectPath as normalizeProjectKey } from "../utils/normalizePath";
 
 export function vibeProjectPathsMatch(a: string, b: string): boolean {
   const left = normalizeProjectKey(a);

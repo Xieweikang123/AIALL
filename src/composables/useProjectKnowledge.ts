@@ -27,6 +27,7 @@ import {
 } from "../services/vibeProjectKnowledgeClient";
 import { runVibeAgentSse, type VibeAgentSseEvent } from "../services/vibeAgentClient";
 import { stripTextToolCallMarkup } from "../services/textToolCallMarkup";
+import { normalizeProjectPath } from "../utils/normalizePath";
 
 export type KnowledgeExploreTool = {
   id: string;
@@ -76,10 +77,6 @@ type ActiveExploreContext = {
   baseExploreRounds: number;
   intent: ExploreKnowledgeIntent;
 };
-
-function normalizeProjectPath(p: string): string {
-  return p.trim().replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
-}
 
 export function useProjectKnowledge(options: {
   projectPath: Ref<string>;

@@ -27,6 +27,7 @@ import {
 import { loadWebProxyUrlFromStorage } from "../services/aiLocalConfig";
 import { runVibeAgentSse, type VibeAgentSseEvent } from "../services/vibeAgentClient";
 import { stripTextToolCallMarkup } from "../services/textToolCallMarkup";
+import { normalizeProjectPath } from "../utils/normalizePath";
 
 export type ArchitectReviewTool = {
   id: string;
@@ -71,10 +72,6 @@ type ActiveReviewContext = {
   projectPath: string;
   gitHead?: string;
 };
-
-function normalizeProjectPath(p: string): string {
-  return p.trim().replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
-}
 
 export function useProjectArchitectReview(options: {
   projectPath: Ref<string>;

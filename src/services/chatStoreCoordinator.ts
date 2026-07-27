@@ -1,12 +1,13 @@
 import type { ChatSessionDeleteResult, ChatStoreSyncResult } from "./vibeCodingClient";
 import { deleteChatSessionFromDisk } from "./vibeCodingClient";
 import { syncLocalIndexFromRecord } from "./vibeChatStorage";
+import { normalizeProjectPath } from "../utils/normalizePath";
 
 const queues = new Map<string, Promise<unknown>>();
 const queueDepth = new Map<string, number>();
 
 function queueKey(projectPath: string): string {
-  return projectPath.trim().replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
+  return normalizeProjectPath(projectPath);
 }
 
 /** Serialize disk hydrate / flush / delete for one project to prevent merge races. Reentrant-safe. */

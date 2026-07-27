@@ -10,7 +10,9 @@
     "test:rust-agent": "node scripts/rust-agent-parity.mjs",
     "agent:smoke": "tsx scripts/agent-smoke.ts",
     "agent:regression": "tsx scripts/agent-regression-rust.ts && vitest run src/services/agentRegression.test.ts && tsx scripts/agent-regression.ts",
-    "agent:test-guards": "npm run test:rust-agent && vitest run server/projectContextParity.test.ts src/services/agentOrchestrationGuard.test.ts server/visionMessage.test.ts server/agentExplorationBudget.test.ts server/agentExploreGuard.test.ts src/services/agentRegression.test.ts src/services/agentAuditRegression.test.ts",
+    "agent:test-guards": "npm run test:rust-agent && vitest run server/projectContextParity.test.ts src/services/agentOrchestrationGuard.test.ts server/visionMessage.test.ts server/agentExplorationBudget.test.ts src/services/agentRegression.test.ts src/services/agentAuditRegression.test.ts",
+    "lint": "vue-tsc --noEmit",
+    "typecheck": "vue-tsc --noEmit",
     "build:tauri": "cross-env vue-tsc --noEmit && cross-env vite build",
     "tauri:build": "tauri build"
   },
@@ -26,8 +28,6 @@
     "marked": "^18.0.5",
     "mermaid": "^11.15.0",
     "monaco-editor": "^0.55.1",
-    "playwright": "^1.61.0",
-    "undici": "^7.25.0",
     "vue": "^3.5.13",
     "vue-router": "^4.5.1"
   },
@@ -40,7 +40,6 @@
     "esbuild": "^0.28.0",
     "sass-embedded": "^1.100.0",
     "tsx": "^4.22.4",
-    "type-fest": "^5.7.0",
     "typescript": "^5.8.3",
     "vite": "^6.3.5",
     "vitest": "^4.1.8",

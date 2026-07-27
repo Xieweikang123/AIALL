@@ -141,8 +141,8 @@ export async function extractWebText(
         text,
         rawText: result.rawText ?? text,
       };
-    } catch (e: any) {
-      return { ok: false, status: 0, error: e?.message || String(e) };
+    } catch (e: unknown) {
+      return { ok: false, status: 0, error: e instanceof Error ? e.message : String(e) };
     }
   }
 
@@ -212,8 +212,8 @@ export async function extractWebText(
         text,
         rawText: result.rawText ?? text,
       };
-    } catch (e: any) {
-      return { ok: false, status: 0, error: e?.message || String(e) };
+    } catch (e: unknown) {
+      return { ok: false, status: 0, error: e instanceof Error ? e.message : String(e) };
     }
   }
 

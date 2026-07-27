@@ -35,6 +35,10 @@ async function ensureMermaid(): Promise<typeof Mermaid> {
       });
       mermaidModule = m;
       return m;
+    }).catch((err: unknown) => {
+      console.error("Failed to load mermaid:", err);
+      initPromise = null;
+      throw err;
     });
   }
   return initPromise;
@@ -381,6 +385,8 @@ function buildFullscreenOverlay(): HTMLElement {
 
 let wheelDelegated = false;
 
+let wheelHandler: ((e: WheelEvent) => void) | null = null;
+
 function handlePinchWheelZoom(e: WheelEvent): boolean {
   if (activeFullscreenOverlay?.contains(e.target as Node)) return false;
 
@@ -403,13 +409,10 @@ function setupWheelDelegation() {
   if (wheelDelegated) return;
   wheelDelegated = true;
 
-  document.addEventListener(
-    "wheel",
-    (e) => {
-      handlePinchWheelZoom(e);
-    },
-    WHEEL_CAPTURE_OPTS,
-  );
+  wheelHandler = (e) => {
+    handlePinchWheelZoom(e);
+  };
+  document.addEventListener("wheel", wheelHandler, WHEEL_CAPTURE_OPTS);
 }
 
 interface GestureEventLike extends Event {
@@ -468,11 +471,15 @@ function bindZoomEvents(node: HTMLElement) {
 
 let delegated = false;
 
+let delegationClickToolbar: ((e: MouseEvent) => void) | null = null;
+let delegationClickFullscreen: ((e: MouseEvent) => void) | null = null;
+let delegationKeydown: ((e: KeyboardEvent) => void) | null = null;
+
 function setupDelegation() {
   if (delegated) return;
   delegated = true;
 
-  document.addEventListener("click", (e) => {
+  delegationClickToolbar = (e) => {
     const target = e.target as HTMLElement;
     const btn = target.closest<HTMLElement>(
       ".mermaid-zoom-in, .mermaid-zoom-out, .mermaid-zoom-reset, .mermaid-fullscreen-btn"
@@ -492,9 +499,10 @@ function setupDelegation() {
       e.stopPropagation();
       openFullscreen(node);
     }
-  });
+  };
+  document.addEventListener("click", delegationClickToolbar);
 
-  document.addEventListener("click", (e) => {
+  delegationClickFullscreen = (e) => {
     const overlay = (e.target as HTMLElement).closest<HTMLElement>(".mermaid-fullscreen-overlay");
     if (!overlay) return;
     const target = e.target as HTMLElement;
@@ -505,11 +513,13 @@ function setupDelegation() {
     ) {
       closeFullscreen();
     }
-  });
+  };
+  document.addEventListener("click", delegationClickFullscreen);
 
-  document.addEventListener("keydown", (e) => {
+  delegationKeydown = (e) => {
     if (e.key === "Escape") closeFullscreen();
-  });
+  };
+  document.addEventListener("keydown", delegationKeydown);
 }
 
 function bindFullscreenInteractions(overlay: HTMLElement) {
@@ -708,6 +718,29 @@ function closeFullscreen() {
 export function dismissMermaidFullscreen(): void {
   closeFullscreen();
   document.querySelectorAll(".mermaid-fullscreen-overlay").forEach((el) => el.remove());
+}
+
+/** Remove all document-level event listeners and reset module state for cleanup/re-init. */
+export function disposeMermaidRenderer(): void {
+  dismissMermaidFullscreen();
+  if (wheelHandler) {
+    document.removeEventListener("wheel", wheelHandler, WHEEL_CAPTURE_OPTS);
+    wheelHandler = null;
+  }
+  if (delegationClickToolbar) {
+    document.removeEventListener("click", delegationClickToolbar);
+    delegationClickToolbar = null;
+  }
+  if (delegationClickFullscreen) {
+    document.removeEventListener("click", delegationClickFullscreen);
+    delegationClickFullscreen = null;
+  }
+  if (delegationKeydown) {
+    document.removeEventListener("keydown", delegationKeydown);
+    delegationKeydown = null;
+  }
+  wheelDelegated = false;
+  delegated = false;
 }
 
 // 页面加载时设置一次事件委托

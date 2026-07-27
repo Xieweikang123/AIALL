@@ -37,9 +37,7 @@ export type PersistedAutoBugFixState = {
   savedAt: number;
 };
 
-function normalizeProjectPath(projectPath: string): string {
-  return projectPath.trim().replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
-}
+import { normalizeProjectPath } from "./normalizePath";
 
 export function autoBugFixStorageKey(projectPath: string): string {
   const normalized = normalizeProjectPath(projectPath);

@@ -32,9 +32,7 @@ export type PersistedWorkspaceUi = {
   quickSearchOpen?: boolean;
 };
 
-function normalizeProjectPath(projectPath: string): string {
-  return projectPath.trim().replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
-}
+import { normalizeProjectPath } from "./normalizePath";
 
 export function workspaceUiStorageKey(projectPath: string): string {
   const normalized = normalizeProjectPath(projectPath);

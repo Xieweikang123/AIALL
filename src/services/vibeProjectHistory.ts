@@ -1,4 +1,5 @@
 import { lsGet, lsSetJson } from "../utils/localStorageSafe";
+import { normalizeProjectPath } from "../utils/normalizePath";
 
 export type ProjectHistoryEntry = {
   path: string;
@@ -16,7 +17,7 @@ type ProjectHistoryStore = {
 };
 
 function normalizePathKey(path: string): string {
-  return path.trim().replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
+  return normalizeProjectPath(path);
 }
 
 function displayNameFromPath(path: string): string {

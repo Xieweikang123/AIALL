@@ -12,9 +12,7 @@ export function normalizeGitPath(path: string): string {
   return path.trim().replace(/\\/g, "/");
 }
 
-function normalizeProjectPath(projectPath: string): string {
-  return projectPath.trim().replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
-}
+import { normalizeProjectPath } from "./normalizePath";
 
 export function normalizeGitBranch(branch: string): string {
   return branch.trim().replace(/\\/g, "/").toLowerCase() || "__detached__";

@@ -1,5 +1,6 @@
-import { computed, onUnmounted, reactive, ref, watch } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { debugLog } from "../utils/debugLog";
+import { toErrorMessage } from "../utils/vibeHelpers";
 import { lsGet, lsSet } from "../utils/localStorageSafe";
 import {
   filterStageableGitPaths,
@@ -43,6 +44,25 @@ import {
   gitCheckoutBranch as gitCheckoutBranchApi,
   gitDeleteBranch as gitDeleteBranchApi,
   type GitBranchInfo,
+  gitMerge,
+  gitMergeAbort,
+  gitRebase,
+  gitRebaseAbort,
+  gitCherryPick,
+  gitRevertCommit,
+  gitAmend,
+  gitTagCreate,
+  gitTagDelete,
+  gitSubmoduleUpdate,
+  gitResolveConflict,
+  gitResetToCommit,
+  gitStashPopRemote,
+  fetchGitTags,
+  fetchGitSubmodules,
+  type GitTagInfo,
+  type GitSubmoduleInfo,
+  type GitConflictSide,
+  type GitResetMode,
 } from "../services/vibeGitClient";
 
 export type GitFileDiff = {
@@ -243,6 +263,19 @@ export function useGitPanel(
   const gitAheadCommitsOpen = ref(false);
   const gitAheadCommitsLoading = ref(false);
   const gitBranches = ref<GitBranchInfo[]>([]);
+  const gitSecondaryHint = ref("");
+  const gitSelectedRemote = ref("");
+  const gitMergeInProgress = ref(false);
+  const gitRebaseInProgress = ref(false);
+  const gitAdvancedOpen = ref(false);
+  const gitAdvancedAction = ref("");
+  const gitTags = ref<GitTagInfo[]>([]);
+  const gitSubmodules = ref<GitSubmoduleInfo[]>([]);
+  const gitTagNameInput = ref("");
+  const gitMergeTarget = ref("");
+  const gitRebaseOnto = ref("");
+  const gitConflictedFiles = ref<GitStatusFile[]>([]);
+  const aiBatchGroupingDetail = ref("");
 
   watch(gitLogOpen, (open) => {
     if (open) {
@@ -465,7 +498,7 @@ export function useGitPanel(
       }
     } catch (e) {
       if (token !== gitStatusRefreshToken || projectPath() !== pathAtStart) return;
-      gitError.value = e instanceof Error ? e.message : "获取 Git 状态失败";
+      gitError.value = toErrorMessage(e, "获取 Git 状态失败");
     } finally {
       if (token === gitStatusRefreshToken && projectPath() === pathAtStart) {
         gitLoading.value = false;
@@ -551,7 +584,7 @@ export function useGitPanel(
       await refreshGitStatus({ showLoading: false, force: true });
       await refreshGitRemotes();
     } catch (e) {
-      gitError.value = e instanceof Error ? e.message : "提交失败";
+      gitError.value = toErrorMessage(e, "提交失败");
       await refreshGitStatus({ force: true });
       onRefreshTree?.();
     } finally {
@@ -792,7 +825,7 @@ export function useGitPanel(
       }
       return true;
     } catch (e) {
-      gitError.value = e instanceof Error ? e.message : "取消暂存失败";
+      gitError.value = toErrorMessage(e, "取消暂存失败");
       await refreshGitStatus({ showLoading: false, force: true });
       return false;
     } finally {
@@ -825,7 +858,7 @@ export function useGitPanel(
       await refreshGitStatus({ showLoading: false });
       await refreshGitRemotes();
     } catch (e) {
-      gitError.value = e instanceof Error ? e.message : "批量提交失败";
+      gitError.value = toErrorMessage(e, "批量提交失败");
       await refreshGitStatus({ showLoading: false, force: true });
       onRefreshTree?.();
     } finally {
@@ -891,7 +924,7 @@ export function useGitPanel(
       await refreshGitStatus({ showLoading: false });
       await refreshGitRemotes();
     } catch (e) {
-      gitError.value = e instanceof Error ? e.message : "批量提交失败";
+      gitError.value = toErrorMessage(e, "批量提交失败");
       await refreshGitStatus({ showLoading: false, force: true });
       onRefreshTree?.();
     } finally {
@@ -942,7 +975,7 @@ export function useGitPanel(
         }
       }
     } catch (e) {
-      gitError.value = e instanceof Error ? e.message : "AI 分组失败";
+      gitError.value = toErrorMessage(e, "AI 分组失败");
       aiBatchGroupsResult.value = null;
     } finally {
       aiBatchGrouping.value = false;
@@ -963,15 +996,15 @@ export function useGitPanel(
     gitStagingInProgress.value = true;
     gitStatusRefreshToken += 1;
     gitLastStagingAt.value = t;
-    debugLog("stageFile start", filePath, "ts", t);
+    debugLog("stageFile start", { filePath, ts: t });
     try {
       const result = await runStageGitFiles([filePath]);
-      debugLog("stageFile API done", "ok:", result.ok, "elapsed:", Date.now() - t);
+      debugLog("stageFile API done", { ok: result.ok, elapsed: Date.now() - t });
       if (!result.ok) {
         await refreshGitStatus({ showLoading: false, force: true });
       }
     } catch (e) {
-      gitError.value = e instanceof Error ? e.message : "暂存失败";
+      gitError.value = toErrorMessage(e, "暂存失败");
       await refreshGitStatus({ showLoading: false, force: true });
     } finally {
       // 先重置时间戳再释放标志，确保 watcher 监听 gitStagingInProgress=false 时
@@ -996,7 +1029,7 @@ export function useGitPanel(
         await refreshGitStatus({ showLoading: false, force: true });
       }
     } catch (e) {
-      gitError.value = e instanceof Error ? e.message : "取消暂存失败";
+      gitError.value = toErrorMessage(e, "取消暂存失败");
       await refreshGitStatus({ showLoading: false, force: true });
     } finally {
       gitLastStagingAt.value = Date.now();
@@ -1027,7 +1060,7 @@ export function useGitPanel(
         await refreshGitStatus({ showLoading: false, force: true });
       }
     } catch (e) {
-      gitError.value = e instanceof Error ? e.message : "暂存失败";
+      gitError.value = toErrorMessage(e, "暂存失败");
       await refreshGitStatus({ showLoading: false, force: true });
     } finally {
       // 必须先重置时间戳再释放标志，防止 watcher 在两行间隙触发 refresh 拉回旧态闪烁
@@ -1054,7 +1087,7 @@ export function useGitPanel(
         await refreshGitStatus({ showLoading: false, force: true });
       }
     } catch (e) {
-      gitError.value = e instanceof Error ? e.message : "取消暂存失败";
+      gitError.value = toErrorMessage(e, "取消暂存失败");
       await refreshGitStatus({ showLoading: false, force: true });
     } finally {
       gitLastStagingAt.value = Date.now();
@@ -1079,7 +1112,7 @@ export function useGitPanel(
       }
       onRefreshTree?.();
     } catch (e) {
-      gitError.value = e instanceof Error ? e.message : "丢弃更改失败";
+      gitError.value = toErrorMessage(e, "丢弃更改失败");
       await refreshGitStatus({ showLoading: false, force: true });
       onRefreshTree?.();
     } finally {
@@ -1107,7 +1140,7 @@ export function useGitPanel(
       }
       onRefreshTree?.();
     } catch (e) {
-      gitError.value = e instanceof Error ? e.message : "丢弃更改失败";
+      gitError.value = toErrorMessage(e, "丢弃更改失败");
       await refreshGitStatus({ showLoading: false, force: true });
       onRefreshTree?.();
     } finally {
@@ -1143,7 +1176,7 @@ export function useGitPanel(
         await refreshGitStatus({ showLoading: false, force: true });
       }
     } catch (e) {
-      gitError.value = e instanceof Error ? e.message : "暂存失败";
+      gitError.value = toErrorMessage(e, "暂存失败");
       await refreshGitStatus({ showLoading: false, force: true });
     } finally {
       gitLastStagingAt.value = Date.now();
@@ -1174,7 +1207,7 @@ export function useGitPanel(
         await refreshGitStatus({ showLoading: false, force: true });
       }
     } catch (e) {
-      gitError.value = e instanceof Error ? e.message : "取消暂存失败";
+      gitError.value = toErrorMessage(e, "取消暂存失败");
       await refreshGitStatus({ showLoading: false, force: true });
     } finally {
       gitLastStagingAt.value = Date.now();
@@ -1204,7 +1237,7 @@ export function useGitPanel(
       }
       onRefreshTree?.();
     } catch (e) {
-      gitError.value = e instanceof Error ? e.message : "丢弃更改失败";
+      gitError.value = toErrorMessage(e, "丢弃更改失败");
       await refreshGitStatus({ showLoading: false, force: true });
       onRefreshTree?.();
     } finally {
@@ -1295,7 +1328,7 @@ export function useGitPanel(
       gitCommitMessage.value = result.message;
       await new Promise((r) => setTimeout(r, 600));
     } catch (e) {
-      gitError.value = e instanceof Error ? e.message : "AI 生成提交信息失败";
+      gitError.value = toErrorMessage(e, "AI 生成提交信息失败");
     } finally {
       gitGenStep.value = "";
     }
@@ -1362,7 +1395,7 @@ export function useGitPanel(
       gitCommitMessage.value = "";
       await new Promise((r) => setTimeout(r, 800));
     } catch (e) {
-      gitError.value = e instanceof Error ? e.message : "AI 一键推送失败";
+      gitError.value = toErrorMessage(e, "AI 一键推送失败");
       await refreshGitStatus();
     } finally {
       gitAiPushStep.value = "";
@@ -1420,7 +1453,7 @@ export function useGitPanel(
       }
       await refreshGitRemotes();
     } catch (e) {
-      gitError.value = e instanceof Error ? e.message : "Fetch 失败";
+      gitError.value = toErrorMessage(e, "Fetch 失败");
     } finally {
       gitRemoteAction.value = "";
     }
@@ -1440,7 +1473,7 @@ export function useGitPanel(
       await refreshGitRemotes();
       await refreshGitLogIfOpen();
     } catch (e) {
-      gitError.value = e instanceof Error ? e.message : "Pull 失败";
+      gitError.value = toErrorMessage(e, "Pull 失败");
     } finally {
       gitRemoteAction.value = "";
     }
@@ -1460,7 +1493,7 @@ export function useGitPanel(
       await refreshGitLogIfOpen();
       await refreshGitAheadCommits();
     } catch (e) {
-      gitError.value = e instanceof Error ? e.message : "Push 失败";
+      gitError.value = toErrorMessage(e, "Push 失败");
     } finally {
       gitRemoteAction.value = "";
     }
@@ -1492,7 +1525,7 @@ export function useGitPanel(
       await refreshGitStashes();
       await refreshGitStatus({ showLoading: false });
     } catch (e) {
-      gitError.value = e instanceof Error ? e.message : "贮藏失败";
+      gitError.value = toErrorMessage(e, "贮藏失败");
     } finally {
       gitStashAction.value = "";
     }
@@ -1512,7 +1545,7 @@ export function useGitPanel(
       await refreshGitStashes();
       await refreshGitStatus({ showLoading: false });
     } catch (e) {
-      gitError.value = e instanceof Error ? e.message : "应用贮藏失败";
+      gitError.value = toErrorMessage(e, "应用贮藏失败");
     } finally {
       gitStashAction.value = "";
     }
@@ -1532,7 +1565,7 @@ export function useGitPanel(
       }
       await refreshGitStashes();
     } catch (e) {
-      gitError.value = e instanceof Error ? e.message : "删除贮藏失败";
+      gitError.value = toErrorMessage(e, "删除贮藏失败");
     } finally {
       gitStashAction.value = "";
     }
@@ -1563,7 +1596,7 @@ export function useGitPanel(
       await refreshGitStatus({ force: true });
       onRefreshTree?.();
     } catch (e) {
-      gitError.value = e instanceof Error ? e.message : "切换分支失败";
+      gitError.value = toErrorMessage(e, "切换分支失败");
     } finally {
       gitLoading.value = false;
     }
@@ -1587,9 +1620,258 @@ export function useGitPanel(
       }
       await refreshGitBranches();
     } catch (e) {
-      gitError.value = e instanceof Error ? e.message : "删除分支失败";
+      gitError.value = toErrorMessage(e, "删除分支失败");
     } finally {
       gitLoading.value = false;
+    }
+  }
+
+  async function resolveConflict(filePath: string, side: GitConflictSide = "ours") {
+    if (!projectOpened()) return;
+    gitError.value = "";
+    try {
+      const result = await gitResolveConflict(projectPath(), filePath, side);
+      if (!result.ok) {
+        gitError.value = result.error || "解决冲突失败";
+        return;
+      }
+      await refreshGitStatus({ force: true });
+    } catch (e) {
+      gitError.value = toErrorMessage(e, "解决冲突失败");
+    }
+  }
+
+  async function doMerge(source: string, event?: MouseEvent) {
+    if (!projectOpened()) return;
+    const ok = await confirm(`确定合并分支 ${source} 到当前分支？`, event);
+    if (!ok) return;
+    gitError.value = "";
+    gitMergeInProgress.value = true;
+    try {
+      const result = await gitMerge(projectPath(), source);
+      if (!result.ok) {
+        gitError.value = result.error || "合并失败";
+        return;
+      }
+      await refreshGitStatus({ force: true });
+      await refreshGitBranches();
+      onRefreshTree?.();
+    } catch (e) {
+      gitError.value = toErrorMessage(e, "合并失败");
+    } finally {
+      gitMergeInProgress.value = false;
+    }
+  }
+
+  async function doMergeAbort(event?: MouseEvent) {
+    if (!projectOpened()) return;
+    const ok = await confirm("确定中止合并？", event);
+    if (!ok) return;
+    gitError.value = "";
+    try {
+      const result = await gitMergeAbort(projectPath());
+      if (!result.ok) {
+        gitError.value = result.error || "中止合并失败";
+        return;
+      }
+      await refreshGitStatus({ force: true });
+      await refreshGitBranches();
+    } catch (e) {
+      gitError.value = toErrorMessage(e, "中止合并失败");
+    }
+  }
+
+  async function doRebase(onto: string, event?: MouseEvent) {
+    if (!projectOpened()) return;
+    const ok = await confirm(`确定变基到 ${onto}？`, event);
+    if (!ok) return;
+    gitError.value = "";
+    gitRebaseInProgress.value = true;
+    try {
+      const result = await gitRebase(projectPath(), onto);
+      if (!result.ok) {
+        gitError.value = result.error || "变基失败";
+        return;
+      }
+      await refreshGitStatus({ force: true });
+      await refreshGitBranches();
+    } catch (e) {
+      gitError.value = toErrorMessage(e, "变基失败");
+    } finally {
+      gitRebaseInProgress.value = false;
+    }
+  }
+
+  async function doRebaseAbort(event?: MouseEvent) {
+    if (!projectOpened()) return;
+    const ok = await confirm("确定中止变基？", event);
+    if (!ok) return;
+    gitError.value = "";
+    try {
+      const result = await gitRebaseAbort(projectPath());
+      if (!result.ok) {
+        gitError.value = result.error || "中止变基失败";
+        return;
+      }
+      await refreshGitStatus({ force: true });
+    } catch (e) {
+      gitError.value = toErrorMessage(e, "中止变基失败");
+    }
+  }
+
+  async function doCherryPick(hash: string, event?: MouseEvent) {
+    if (!projectOpened()) return;
+    const ok = await confirm(`确定拣选提交 ${hash.slice(0, 8)}？`, event);
+    if (!ok) return;
+    gitError.value = "";
+    try {
+      const result = await gitCherryPick(projectPath(), hash);
+      if (!result.ok) {
+        gitError.value = result.error || "拣选失败";
+        return;
+      }
+      await refreshGitStatus({ force: true });
+    } catch (e) {
+      gitError.value = toErrorMessage(e, "拣选失败");
+    }
+  }
+
+  async function doRevertCommit(hash: string, event?: MouseEvent) {
+    if (!projectOpened()) return;
+    const ok = await confirm(`确定还原提交 ${hash.slice(0, 8)}？`, event);
+    if (!ok) return;
+    gitError.value = "";
+    try {
+      const result = await gitRevertCommit(projectPath(), hash);
+      if (!result.ok) {
+        gitError.value = result.error || "还原提交失败";
+        return;
+      }
+      await refreshGitStatus({ force: true });
+    } catch (e) {
+      gitError.value = toErrorMessage(e, "还原提交失败");
+    }
+  }
+
+  async function doAmend(event?: MouseEvent) {
+    if (!projectOpened()) return;
+    const ok = await confirm("确定修改上次提交？", event);
+    if (!ok) return;
+    gitError.value = "";
+    try {
+      const result = await gitAmend(projectPath(), gitCommitMessage.value.trim() || undefined);
+      if (!result.ok) {
+        gitError.value = result.error || "修改提交失败";
+        return;
+      }
+      await refreshGitStatus({ force: true });
+      await refreshGitBranches();
+    } catch (e) {
+      gitError.value = toErrorMessage(e, "修改提交失败");
+    }
+  }
+
+  async function doCreateTag(name?: string, hash?: string, event?: MouseEvent) {
+    const tagName = name || gitTagNameInput.value.trim();
+    if (!projectOpened() || !tagName) return;
+    const ok = await confirm(`确定创建标签 ${tagName}？`, event);
+    if (!ok) return;
+    gitError.value = "";
+    try {
+      const result = await gitTagCreate(projectPath(), tagName, hash);
+      if (!result.ok) {
+        gitError.value = result.error || "创建标签失败";
+        return;
+      }
+      gitTagNameInput.value = "";
+      const tagsResult = await fetchGitTags(projectPath());
+      if (tagsResult.ok) gitTags.value = tagsResult.tags;
+    } catch (e) {
+      gitError.value = toErrorMessage(e, "创建标签失败");
+    }
+  }
+
+  async function doDeleteTag(name: string, event?: MouseEvent) {
+    if (!projectOpened()) return;
+    const ok = await confirm(`确定删除标签 ${name}？`, event);
+    if (!ok) return;
+    gitError.value = "";
+    try {
+      const result = await gitTagDelete(projectPath(), name);
+      if (!result.ok) {
+        gitError.value = result.error || "删除标签失败";
+        return;
+      }
+      const tagsResult = await fetchGitTags(projectPath());
+      if (tagsResult.ok) gitTags.value = tagsResult.tags;
+    } catch (e) {
+      gitError.value = toErrorMessage(e, "删除标签失败");
+    }
+  }
+
+  async function doSubmoduleUpdate(event?: MouseEvent) {
+    if (!projectOpened()) return;
+    const ok = await confirm("确定更新子模块？", event);
+    if (!ok) return;
+    gitError.value = "";
+    try {
+      const result = await gitSubmoduleUpdate(projectPath());
+      if (!result.ok) {
+        gitError.value = result.error || "子模块更新失败";
+        return;
+      }
+      const subResult = await fetchGitSubmodules(projectPath());
+      if (subResult.ok) gitSubmodules.value = subResult.submodules;
+    } catch (e) {
+      gitError.value = toErrorMessage(e, "子模块更新失败");
+    }
+  }
+
+  async function doResetCommit(hash: string, mode: GitResetMode = "mixed", shortHash?: string, event?: MouseEvent) {
+    if (!projectOpened()) return;
+    const label = shortHash || hash.slice(0, 8);
+    const ok = await confirm(`确定重置到 ${label}（${mode} 模式）？此操作可能丢失更改。`, event);
+    if (!ok) return;
+    gitError.value = "";
+    try {
+      const result = await gitResetToCommit(projectPath(), hash, mode);
+      if (!result.ok) {
+        gitError.value = result.error || "重置失败";
+        return;
+      }
+      await refreshGitStatus({ force: true });
+      await refreshGitBranches();
+      onRefreshTree?.();
+    } catch (e) {
+      gitError.value = toErrorMessage(e, "重置失败");
+    }
+  }
+
+  async function undoLastCommit(event?: MouseEvent) {
+    if (!projectOpened()) return;
+    const ok = await confirm("确定撤销上次提交（soft reset）？", event);
+    if (!ok) return;
+    await doResetCommit("HEAD~1", "soft", "HEAD~1", event);
+  }
+
+  async function doStashPop(stashIndex: string, event?: MouseEvent) {
+    if (!projectOpened()) return;
+    const ok = await confirm(`确定弹出 stash@{${stashIndex}}？`, event);
+    if (!ok) return;
+    gitStashAction.value = `pop-${stashIndex}`;
+    gitError.value = "";
+    try {
+      const result = await gitStashPopRemote(projectPath(), Number(stashIndex));
+      if (!result.ok) {
+        gitError.value = result.error || "弹出贮藏失败";
+        return;
+      }
+      await refreshGitStashes();
+      await refreshGitStatus({ showLoading: false });
+    } catch (e) {
+      gitError.value = toErrorMessage(e, "弹出贮藏失败");
+    } finally {
+      gitStashAction.value = "";
     }
   }
 
@@ -1599,6 +1881,33 @@ export function useGitPanel(
     checkoutBranch,
     createBranch,
     deleteBranch,
+    resolveConflict,
+    doMerge,
+    doMergeAbort,
+    doRebase,
+    doRebaseAbort,
+    doCherryPick,
+    doRevertCommit,
+    doAmend,
+    doCreateTag,
+    doDeleteTag,
+    doSubmoduleUpdate,
+    doResetCommit,
+    undoLastCommit,
+    doStashPop,
+    gitSecondaryHint,
+    gitSelectedRemote,
+    gitMergeInProgress,
+    gitRebaseInProgress,
+    gitAdvancedOpen,
+    gitAdvancedAction,
+    gitTags,
+    gitSubmodules,
+    gitTagNameInput,
+    gitMergeTarget,
+    gitRebaseOnto,
+    gitConflictedFiles,
+    aiBatchGroupingDetail,
     gitPanelMode,
     projectPanelView,
     gitStatus,

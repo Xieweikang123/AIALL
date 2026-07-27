@@ -1,5 +1,8 @@
 <template>
   <div class="vibe-page">
+    <div v-if="!isDesktopRuntime" class="vibe-web-banner" role="status">
+      当前为浏览器预览：Agent / Git / 文件读写仅桌面版可用。请运行 <code>npm run dev</code> 启动 Tauri。
+    </div>
     <AppToolbar
       :project-path="projectPath"
       :loading-tree="loadingTree"
@@ -26,13 +29,17 @@
         'editor-collapsed': editorCollapsed,
         'chat-collapsed': chatCollapsed,
         'file-panel-collapsed': filePanelCollapsed,
+        'git-foreground': gitPanelInForeground,
       }"
     >
       <VibeWorkspaceWelcome
         :show="!projectOpened && !loadingTree"
         :loading-tree="loadingTree"
         :picking-folder="pickingFolder"
+        :config-ready="configReady"
+        :api-key-ready="apiKeyReady"
         @open-project="handleOpenProject"
+        @open-ai-config="openAiConfigPage"
       />
       <FilePanel
         :file-panel-width="filePanelWidth"
@@ -71,22 +78,25 @@
       >
 
         <GitPanel
-          v-if="gitPanelMode === 'git'"
+          v-if="gitPanelMode === 'git' && !gitPanelInForeground"
           :project-opened="projectOpened"
           :git-loading="gitLoading"
           :git-is-repo="gitIsRepo"
           :git-status-known="gitStatusKnown"
           :git-error="gitError"
+          :git-secondary-hint="gitSecondaryHint"
           :git-branch="gitBranch"
           :git-branches="gitBranches"
           :git-tracking-branch="gitTrackingBranch"
           :git-remotes="gitRemotes"
+          :git-selected-remote="gitSelectedRemote"
           :git-ahead="gitAhead"
           :git-behind="gitBehind"
           :git-stashes="gitStashes"
           :git-status="gitStatus"
           :git-staged-files="gitStagedFiles"
           :git-unstaged-files="gitUnstagedFiles"
+          :git-conflicted-files="gitConflictedFiles"
           :can-git-commit="canGitCommit"
           :git-commit-message="gitCommitMessage"
           :git-committing="gitCommitting"
@@ -117,12 +127,22 @@
           :batch-committing-index="batchCommittingIndex"
           :ai-batch-grouping="aiBatchGrouping"
           :ai-batch-grouping-step="aiBatchGroupingStep"
+          :ai-batch-grouping-detail="aiBatchGroupingDetail"
           :git-ahead-commits="gitAheadCommits"
           :git-ahead-commits-open="gitAheadCommitsOpen"
           :git-ahead-commits-loading="gitAheadCommitsLoading"
           :git-stash-section-open="gitStashSectionOpen"
           :git-local-changes-open="gitLocalChangesOpen"
           :git-tree-expanded-dirs="gitTreeExpandedDirs"
+          :git-advanced-open="gitAdvancedOpen"
+          :git-advanced-action="gitAdvancedAction"
+          :git-merge-in-progress="gitMergeInProgress"
+          :git-rebase-in-progress="gitRebaseInProgress"
+          :git-merge-target="gitMergeTarget"
+          :git-rebase-onto="gitRebaseOnto"
+          :git-tag-name-input="gitTagNameInput"
+          :git-tags="gitTags"
+          :git-submodules="gitSubmodules"
           @refresh="refreshGitStatus()"
           @do-fetch="doFetch"
           @do-pull="doPull"
@@ -134,10 +154,17 @@
           @unstage-file="unstageFile"
           @stage-all="stageAll"
           @unstage-all="unstageAll"
+          @stage-selected="stageSelectedFiles"
+          @unstage-selected="unstageSelectedFiles"
+          @discard-selected="discardSelectedFiles"
+          @clear-selection="clearGitSelection"
           @discard-file="discardFile"
           @discard-all="discardAll"
+          @resolve-conflict="resolveConflict"
+          @open-conflict-file="openConflictFile"
           @do-stash-save="doStashSave"
           @do-stash-apply="doStashApply"
+          @do-stash-pop="doStashPop"
           @do-stash-drop="doStashDrop"
           @update:git-stash-open="gitStashOpen = $event"
           @update:git-staged-open="gitStagedOpen = $event"
@@ -153,6 +180,24 @@
           @update:git-stash-message="gitStashMessage = $event"
           @toggle-git-log-entry="toggleGitLogEntry"
           @open-git-log-file="openGitLogFile"
+          @reset-to-commit="(hash, mode, shortHash, event) => doResetCommit(hash, mode, shortHash, event)"
+          @undo-last-commit="undoLastCommit"
+          @do-amend="doAmend"
+          @do-merge="doMerge"
+          @do-merge-abort="doMergeAbort"
+          @do-rebase="doRebase"
+          @do-rebase-abort="doRebaseAbort"
+          @do-cherry-pick="doCherryPick"
+          @do-revert-commit="doRevertCommit"
+          @do-create-tag="doCreateTag"
+          @do-create-tag-at="(hash, event) => doCreateTag(undefined, hash, event)"
+          @do-delete-tag="doDeleteTag"
+          @do-submodule-update="doSubmoduleUpdate"
+          @update:git-selected-remote="gitSelectedRemote = $event"
+          @update:git-advanced-open="gitAdvancedOpen = $event"
+          @update:git-merge-target="gitMergeTarget = $event"
+          @update:git-rebase-onto="gitRebaseOnto = $event"
+          @update:git-tag-name-input="gitTagNameInput = $event"
           @on-git-file-pointer-down="onGitFilePointerDown"
           @on-git-file-contextmenu="onGitFileContextMenu"
           @commit-batch-group="commitBatchGroup"
@@ -160,9 +205,10 @@
           @ai-batch-groups="generateAiBatchGroups"
           @update:batch-messages="batchMessages = $event"
           @update:batch-section-open="batchSectionOpen = $event"
-          @checkout-branch="checkoutBranch"
+          @checkout-branch="(name) => checkoutBranch(name)"
           @create-branch="createBranch"
           @delete-branch="deleteBranch"
+          @focus-git-panel="focusGitPanel"
         />
 
         <div v-if="gitPanelMode === 'files' && !projectOpened" class="panel-empty">
@@ -268,9 +314,10 @@
           :truncated-count="codeMapDocument?.truncatedCount ?? 0"
           :annotate-enabled="codeMapAnnotateEnabled"
           :annotate-ready="configReady && apiKeyReady"
+          :is-stale="codeMapIsStale"
           @update:annotate-enabled="codeMapAnnotateEnabled = $event"
           @generate="() => void generateCodeMap()"
-          @annotate="() => void runCodeMapAnnotate()"
+          @annotate="() => void runCodeMapAnnotate(undefined, { force: true })"
           @reset-layout="() => void resetCodeMapLayout()"
         />
 
@@ -288,7 +335,7 @@
       ></div>
 
       <EditorPanel
-        v-if="openTabs.length > 0 && !planPanelInForeground && (gitPanelMode !== 'project' || (projectPanelView !== 'knowledge' && projectPanelView !== 'health' && projectPanelView !== 'fix' && projectPanelView !== 'map'))"
+        v-if="openTabs.length > 0 && !planPanelInForeground && !gitPanelInForeground && (gitPanelMode !== 'project' || (projectPanelView !== 'knowledge' && projectPanelView !== 'health' && projectPanelView !== 'fix' && projectPanelView !== 'map'))"
         ref="editorPanelRef"
         :active-file-path="activeFilePath"
         :file-content="fileContent"
@@ -399,6 +446,9 @@
           :error="codeMapError"
           :generated-at-label="codeMapGeneratedAtLabel"
           :layout-epoch="codeMapLayoutEpoch"
+          :focus-node-id="codeMapFocusNodeId"
+          :focus-epoch="codeMapFocusEpoch"
+          :is-stale="codeMapIsStale"
           @select="selectCodeMapNode"
           @toggle-collapse="toggleCodeMapCollapsed"
           @node-moved="updateCodeMapPosition"
@@ -408,6 +458,7 @@
           @export-mermaid="exportCodeMapMermaid"
           @export-svg="() => void exportCodeMapAsSvg()"
           @expand-chat="expandChat"
+          @generate="() => void generateCodeMap()"
         />
       </section>
 
@@ -460,6 +511,150 @@
           @open-plan-file="openPlanFileInEditor(planPanelFilePath)"
           @expand-chat="expandChat"
           @content-scroll="hideQuoteButtonNow"
+        />
+      </section>
+
+      <section
+        v-show="gitPanelInForeground && projectOpened"
+        class="editor-panel git-foreground-panel"
+        aria-label="Git 聚焦"
+      >
+        <div class="git-foreground-header">
+          <button type="button" class="ghost tiny" @click="closeGitPanel()" title="退出 Git 聚焦 (Esc)">
+            ← 返回编辑器
+          </button>
+          <span class="git-foreground-title">Git 变更</span>
+        </div>
+        <GitPanel
+          :project-opened="projectOpened"
+          :git-loading="gitLoading"
+          :git-is-repo="gitIsRepo"
+          :git-status-known="gitStatusKnown"
+          :git-error="gitError"
+          :git-secondary-hint="gitSecondaryHint"
+          :git-branch="gitBranch"
+          :git-branches="gitBranches"
+          :git-tracking-branch="gitTrackingBranch"
+          :git-remotes="gitRemotes"
+          :git-selected-remote="gitSelectedRemote"
+          :git-ahead="gitAhead"
+          :git-behind="gitBehind"
+          :git-stashes="gitStashes"
+          :git-status="gitStatus"
+          :git-staged-files="gitStagedFiles"
+          :git-unstaged-files="gitUnstagedFiles"
+          :git-conflicted-files="gitConflictedFiles"
+          :can-git-commit="canGitCommit"
+          :git-commit-message="gitCommitMessage"
+          :git-committing="gitCommitting"
+          :git-gen-step="gitGenStep"
+          :git-ai-push-step="gitAiPushStep"
+          :git-stash-action="gitStashAction"
+          :git-stash-message="gitStashMessage"
+          :git-stash-open="gitStashOpen"
+          :git-staged-open="gitStagedOpen"
+          :git-unstaged-open="gitUnstagedOpen"
+          :git-log-open="gitLogOpen"
+          :git-log-entries="gitLogEntries"
+          :git-log-search-query="gitLogSearchQuery"
+          :has-more-git-log="hasMoreGitLog"
+          :git-log-loading-more="gitLogLoadingMore"
+          :git-log-search-loading="gitLogSearchLoading"
+          :selected-git-files="selectedGitFiles"
+          :git-diff-loading-key="gitDiffLoadingKey"
+          :git-remote-action="gitRemoteAction"
+          :config-ready="configReady"
+          :file-watcher-active="fileWatcherActive"
+          :file-watcher-connected="fileWatcherConnected"
+          :expanded-git-log-entries="expandedGitLogEntries"
+          :batch-groups="batchGroups"
+          :batch-groups-from-ai="batchGroupsFromAi"
+          :batch-messages="batchMessages"
+          :batch-section-open="batchSectionOpen"
+          :batch-committing-index="batchCommittingIndex"
+          :ai-batch-grouping="aiBatchGrouping"
+          :ai-batch-grouping-step="aiBatchGroupingStep"
+          :ai-batch-grouping-detail="aiBatchGroupingDetail"
+          :git-ahead-commits="gitAheadCommits"
+          :git-ahead-commits-open="gitAheadCommitsOpen"
+          :git-ahead-commits-loading="gitAheadCommitsLoading"
+          :git-stash-section-open="gitStashSectionOpen"
+          :git-local-changes-open="gitLocalChangesOpen"
+          :git-tree-expanded-dirs="gitTreeExpandedDirs"
+          :git-advanced-open="gitAdvancedOpen"
+          :git-advanced-action="gitAdvancedAction"
+          :git-merge-in-progress="gitMergeInProgress"
+          :git-rebase-in-progress="gitRebaseInProgress"
+          :git-merge-target="gitMergeTarget"
+          :git-rebase-onto="gitRebaseOnto"
+          :git-tag-name-input="gitTagNameInput"
+          :git-tags="gitTags"
+          :git-submodules="gitSubmodules"
+          @refresh="refreshGitStatus()"
+          @do-fetch="doFetch"
+          @do-pull="doPull"
+          @do-push="doPush"
+          @commit-git="commitGit"
+          @generate-commit-message="generateCommitMessage"
+          @ai-commit-and-push="aiCommitAndPush"
+          @stage-file="stageFile"
+          @unstage-file="unstageFile"
+          @stage-all="stageAll"
+          @unstage-all="unstageAll"
+          @stage-selected="stageSelectedFiles"
+          @unstage-selected="unstageSelectedFiles"
+          @discard-selected="discardSelectedFiles"
+          @clear-selection="clearGitSelection"
+          @discard-file="discardFile"
+          @discard-all="discardAll"
+          @resolve-conflict="resolveConflict"
+          @open-conflict-file="openConflictFile"
+          @do-stash-save="doStashSave"
+          @do-stash-apply="doStashApply"
+          @do-stash-pop="doStashPop"
+          @do-stash-drop="doStashDrop"
+          @update:git-stash-open="gitStashOpen = $event"
+          @update:git-staged-open="gitStagedOpen = $event"
+          @update:git-unstaged-open="gitUnstagedOpen = $event"
+          @update:git-log-open="gitLogOpen = $event"
+          @load-more-git-log="loadMoreGitLog"
+          @search-git-log="searchGitLog"
+          @update:git-ahead-commits-open="gitAheadCommitsOpen = $event"
+          @update:git-stash-section-open="gitStashSectionOpen = $event"
+          @update:git-local-changes-open="gitLocalChangesOpen = $event"
+          @update:git-tree-expanded-dirs="gitTreeExpandedDirs = $event"
+          @update:git-commit-message="gitCommitMessage = $event"
+          @update:git-stash-message="gitStashMessage = $event"
+          @toggle-git-log-entry="toggleGitLogEntry"
+          @open-git-log-file="openGitLogFile"
+          @reset-to-commit="(hash, mode, shortHash, event) => doResetCommit(hash, mode, shortHash, event)"
+          @undo-last-commit="undoLastCommit"
+          @do-amend="doAmend"
+          @do-merge="doMerge"
+          @do-merge-abort="doMergeAbort"
+          @do-rebase="doRebase"
+          @do-rebase-abort="doRebaseAbort"
+          @do-cherry-pick="doCherryPick"
+          @do-revert-commit="doRevertCommit"
+          @do-create-tag="doCreateTag"
+          @do-create-tag-at="(hash, event) => doCreateTag(undefined, hash, event)"
+          @do-delete-tag="doDeleteTag"
+          @do-submodule-update="doSubmoduleUpdate"
+          @update:git-selected-remote="gitSelectedRemote = $event"
+          @update:git-advanced-open="gitAdvancedOpen = $event"
+          @update:git-merge-target="gitMergeTarget = $event"
+          @update:git-rebase-onto="gitRebaseOnto = $event"
+          @update:git-tag-name-input="gitTagNameInput = $event"
+          @on-git-file-pointer-down="onGitFilePointerDown"
+          @on-git-file-contextmenu="onGitFileContextMenu"
+          @commit-batch-group="commitBatchGroup"
+          @commit-all-batches="commitAllBatches"
+          @ai-batch-groups="generateAiBatchGroups"
+          @update:batch-messages="batchMessages = $event"
+          @update:batch-section-open="batchSectionOpen = $event"
+          @checkout-branch="(name) => checkoutBranch(name)"
+          @create-branch="createBranch"
+          @delete-branch="deleteBranch"
         />
       </section>
 
@@ -550,6 +745,9 @@
         @remove-session="removeSession"
         @clear-chat="clearChat"
         @apply-example="applyExample"
+        @open-project="handleOpenProject"
+        @open-ai-config="openAiConfigPage"
+        @open-project-view="openProjectPanelView"
         @apply-suggestion="handleAgentSuggestion"
         @on-chat-scroll="onChatScroll"
         @scroll-to-bottom="scrollChatToBottom(true)"
@@ -587,7 +785,7 @@
             ref="composerRef"
             class="chat-composer-editor"
             :placeholder="chatSending ? '输入新指令将打断当前任务…' : chatPlaceholder"
-            :disabled="!configReady || !projectOpened"
+            :disabled="!configReady || !apiKeyReady || !projectOpened || !isDesktopRuntime"
             :draft-key="composerDraftKey"
             :project-path="projectPath"
             @mention-change="onComposerMentionChange"
@@ -648,6 +846,31 @@
       </div>
       <div v-if="gitFileContextMenu.show" class="ctx-overlay" @click="hideGitFileContextMenu" @contextmenu.prevent="hideGitFileContextMenu">
         <div class="ctx-menu" :style="{ left: gitFileContextMenu.x + 'px', top: gitFileContextMenu.y + 'px' }" @click.stop>
+          <button
+            v-if="gitFileCtxCanStage"
+            type="button"
+            class="ctx-item"
+            @click="gitFileCtxStage"
+          >
+            暂存选中
+          </button>
+          <button
+            v-if="gitFileCtxCanUnstage"
+            type="button"
+            class="ctx-item"
+            @click="gitFileCtxUnstage"
+          >
+            取消暂存
+          </button>
+          <button
+            v-if="gitFileCtxCanDiscard"
+            type="button"
+            class="ctx-item danger"
+            @click="gitFileCtxDiscard"
+          >
+            丢弃更改
+          </button>
+          <div v-if="gitFileCtxCanStage || gitFileCtxCanUnstage || gitFileCtxCanDiscard" class="ctx-sep" />
           <button type="button" class="ctx-item" @click="gitFileCopyName">复制文件名</button>
         </div>
       </div>
@@ -681,12 +904,14 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 import "../styles/vibe-coding.scss";
 import { appendStatusDetail, assistantTransientUiClearPatch, truncateDiffPreview, cleanStatusLogText, CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount, isNetworkError, fileName, genId, hasAgentProcessSteps, entryToNode, formatToolMeta, syncRoundGroupsPatch } from "../utils/vibeHelpers";
 import { appendDebugLogFile, debugLog, setDebugLogProjectRoot } from "../utils/debugLog";
 import { lsGet, lsGetJson, lsSet, lsSetJson, lsRemove } from "../utils/localStorageSafe";
 import { dismissBlockingOverlays, registerOverlayDismissDeps, scanDomBlockingOverlays } from "../utils/dismissBlockingOverlays";
 import { sessionDiag } from "../utils/sessionDiagLog";
+import { normalizePath, normalizeProjectPath as normalizeProjectPathUtil } from "../utils/normalizePath";
 import ChatComposerEditor, { COMPOSER_PENDING_DRAFT_KEY } from "../components/ChatComposerEditor.vue";
 import ConfirmPopup from "../components/ConfirmPopup.vue";
 import InputPrompt from "../components/InputPrompt.vue";
@@ -701,7 +926,6 @@ import ProjectCodeMapPanel from "../components/vibe/ProjectCodeMapPanel.vue";
 import CodeMapMainPanel from "../components/vibe/CodeMapMainPanel.vue";
 import PlanMainPanel from "../components/vibe/PlanMainPanel.vue";
 import EditorPanel from "../components/vibe/EditorPanel.vue";
-import type { MonacoSelectionAnchor } from "../components/CodeMonacoEditor.vue";
 import ChatPanel from "../components/vibe/ChatPanel.vue";
 import VibeChatMessages from "../components/vibe/VibeChatMessages.vue";
 import VibeWorkspaceWelcome from "../components/vibe/VibeWorkspaceWelcome.vue";
@@ -726,6 +950,8 @@ import { buildExplainNodePrompt } from "../../shared/codeMapAnnotate";
 import { codeMapToMermaid, downloadTextFile, exportCodeMapSvg } from "../utils/codeMapToMermaid";
 import AutoBugFixPanel from "../components/vibe/AutoBugFixPanel.vue";
 import { usePlanPanel } from "../composables/usePlanPanel";
+import { useMessageQuote } from "../composables/useMessageQuote";
+import { useChatMention } from "../composables/useChatMention";
 import { restoreChatScrollPosition, useWorkspaceUiPersistence } from "../composables/useWorkspaceUiPersistence";
 import { PROJECT_ARCHITECT_REVIEW_REL_PATH } from "../services/vibeProjectArchitectReviewClient";
 import { PROJECT_KNOWLEDGE_REL_PATH } from "../services/vibeProjectKnowledgeClient";
@@ -827,8 +1053,6 @@ import {
   openProjectFolderInExplorer,
   pickProjectFolder,
   readFile,
-  renameItem,
-  searchFiles,
   formatFetchError,
   writeFile,
   type FileEntry,
@@ -851,6 +1075,17 @@ import { useFileWatcher } from "../composables/useFileWatcher";
 
 const { confirm, confirmUnsaved, dismissPendingOverlay: dismissPendingConfirm, show: confirmShow } = useConfirm();
 const inputPrompt = useInputPrompt();
+const router = useRouter();
+const isDesktopRuntime = computed(() => isTauriEnv());
+
+function openAiConfigPage() {
+  void router.push("/ai-config");
+}
+
+const quoteButtonRef = ref<HTMLElement | null>(null);
+const planPanelSectionRef = ref<HTMLElement | null>(null);
+const composerRef = ref<InstanceType<typeof ChatComposerEditor> | null>(null);
+const composerEmpty = ref(true);
 
 const git = useGitPanel(
   () => projectPath.value.trim(),
@@ -1022,30 +1257,11 @@ async function autoRetryWithCountdown<T>(
   throw lastErr;
 }
 
-interface QuotedMessage {
-  messageId: string;
-  content: string;
-  role: "user" | "assistant";
-  /** 引用自左侧方案面板（非聊天气泡正文）或编辑器选区 */
-  source?: "plan" | "editor";
-  /** 编辑器引用时的文件路径（展示用） */
-  filePath?: string;
-}
-
-const pendingQuote = ref<QuotedMessage | null>(null);
-const quotedMessages = ref<QuotedMessage[]>([]);
-const quoteButtonPosition = ref({ x: 0, y: 0 });
-const showQuoteButton = ref(false);
-const quoteButtonSource = ref<"chat" | "plan" | "editor" | null>(null);
-const quoteButtonRef = ref<HTMLElement | null>(null);
-const planPanelSectionRef = ref<HTMLElement | null>(null);
 const openingProject = ref(false);
-const composerRef = ref<InstanceType<typeof ChatComposerEditor> | null>(null);
-const composerEmpty = ref(true);
 
 function loadChatMode(): VibeChatMode {
   const saved = lsGet(CHAT_MODE_KEY);
-  if (saved === "ask" || saved === "plan") return saved;
+  if (saved === "ask" || saved === "plan" || saved === "auto") return saved;
   return "build";
 }
 
@@ -1114,12 +1330,6 @@ function persistPendingQueue() {
 
 import { type ReferencedFile } from "../composables/useFileDrag";
 
-interface ProjectFileItem {
-  name: string;
-  path: string;
-  relative: string;
-}
-
 const dismissedSuggestionMsgId = ref<string | null>(null);
 function getChatDropZoneEl(): HTMLElement | null {
   return chatPanelRef.value?.chatDropZoneRef ?? null;
@@ -1128,27 +1338,27 @@ const chatInputFocused = ref(false);
 function onChatInputBoxMouseDown() {
   composerRef.value?.focus();
 }
-const mentionOpen = ref(false);
-const mentionQuery = ref("");
-const mentionActiveIndex = ref(0);
-const mentionRemoteResults = ref<ProjectFileItem[]>([]);
-let mentionSearchTimer: ReturnType<typeof setTimeout> | null = null;
 const projectHistoryList = ref<ProjectHistoryEntry[]>([]);
 
 // Git panel composable
 const {
-  gitBranches, checkoutBranch, createBranch, deleteBranch,
+  gitBranches, checkoutBranch, createBranch, deleteBranch, resolveConflict,
+  doMerge, doMergeAbort, doRebase, doRebaseAbort, doCherryPick, doRevertCommit,
+  doAmend, doCreateTag, doDeleteTag, doSubmoduleUpdate,
   gitPanelMode, projectPanelView, gitStatus, gitBranch, gitHeadCommit, gitIsRepo, gitStatusKnown, gitLoading, gitError,
+  gitSecondaryHint,
   gitCommitMessage, gitCommitting, gitGenStep, gitLogEntries, gitLogOpen,
   gitLogCount, gitLogSearchQuery, hasMoreGitLog, gitLogLoadingMore, gitLogSearchLoading, loadMoreGitLog,
   searchGitLog,
   gitStagedOpen, gitUnstagedOpen, expandedGitLogEntries, selectedGitFiles,
   gitStashSectionOpen, gitLocalChangesOpen, gitTreeExpandedDirs,
-  gitDiffLoadingKey, gitDiffContentCache, gitRemotes, gitTrackingBranch,
+  gitDiffLoadingKey, gitDiffContentCache, gitRemotes, gitSelectedRemote, gitTrackingBranch,
   gitAhead, gitBehind, gitRemoteLoading, gitRemoteAction, gitStashes, gitStashOpen,
   gitStashAction, gitStashMessage, gitAiPushStep,
   gitAheadCommits, gitAheadCommitsOpen, gitAheadCommitsLoading,
-  gitStagedFiles, gitUnstagedFiles, gitChangeCount, canGitCommit,
+  gitMergeInProgress, gitRebaseInProgress, gitAdvancedOpen, gitAdvancedAction,
+  gitTags, gitSubmodules, gitTagNameInput, gitMergeTarget, gitRebaseOnto,
+  gitStagedFiles, gitUnstagedFiles, gitConflictedFiles, gitChangeCount, canGitCommit,
   clearGitDiffCache, evictOldestCacheEntry, gitStagingInProgress, gitLastStagingAt, gitStatusIcon, gitStatusColor,
   isGitLogEntryOpen, toggleGitLogEntry, gitHistoryDiffKey, gitWorkingTreeDiffKey,
   resetGitPanelState, refreshGitStatus, commitGit, stageFile, unstageFile,
@@ -1156,10 +1366,16 @@ const {
   stageSelectedFiles, unstageSelectedFiles, discardSelectedFiles, toggleGitFileSelection, clearGitSelection,
   generateCommitMessage, aiCommitAndPush, refreshGitRemotes, refreshGitAheadCommits,
   doFetch, doPull, doPush,
-  refreshGitStashes, doStashSave, doStashApply, doStashDrop,
+  doResetCommit, undoLastCommit,
+  refreshGitStashes, doStashSave, doStashApply, doStashPop, doStashDrop,
   batchGroups, batchGroupsFromAi, batchMessages, batchSectionOpen, batchCommittingIndex, commitBatchGroup, commitAllBatches,
-  aiBatchGrouping, aiBatchGroupingStep, generateAiBatchGroups, flushBatchDraftPersist,
+  aiBatchGrouping, aiBatchGroupingStep, aiBatchGroupingDetail, generateAiBatchGroups, flushBatchDraftPersist,
 } = git;
+
+function openProjectPanelView(view: "knowledge" | "health" | "map" | "fix") {
+  gitPanelMode.value = "project";
+  projectPanelView.value = view;
+}
 
 // Session manager composable
 const {
@@ -1311,6 +1527,7 @@ const {
   },
   gitStagingInProgress: () => gitStagingInProgress.value,
   gitLastStagingAt: () => gitLastStagingAt.value,
+  gitRefreshPaused: () => aiBatchGrouping.value,
 });
 
 const contextMenu = ref({ show: false, x: 0, y: 0, path: "" });
@@ -1338,7 +1555,9 @@ const canSendChat = computed(
   () =>
     !composerEmpty.value
     && configReady.value
-    && projectOpened.value,
+    && apiKeyReady.value
+    && projectOpened.value
+    && isDesktopRuntime.value,
 );
 
 const {
@@ -1425,6 +1644,9 @@ const {
   error: codeMapError,
   annotateEnabled: codeMapAnnotateEnabled,
   layoutEpoch: codeMapLayoutEpoch,
+  isStale: codeMapIsStale,
+  focusNodeId: codeMapFocusNodeId,
+  focusEpoch: codeMapFocusEpoch,
   loadCached: loadCodeMapCached,
   generate: generateCodeMap,
   runAnnotate: runCodeMapAnnotate,
@@ -1447,7 +1669,7 @@ const {
 const reviewAttentionBadgeCount = computed(() => reviewAttentionCount.value);
 
 function openCodeMapFile(relPath: string) {
-  const root = projectPath.value.trim().replace(/\\/g, "/").replace(/\/$/, "");
+  const root = normalizePath(projectPath.value);
   const rel = relPath.replace(/^[/\\]+/, "").replace(/^\.$/, "");
   if (!rel) return;
   void openFile(`${root}/${rel}`);
@@ -1478,7 +1700,7 @@ async function exportCodeMapAsSvg() {
 }
 
 function openArchitectReviewSourceFile() {
-  const root = projectPath.value.trim().replace(/\\/g, "/").replace(/\/$/, "");
+  const root = normalizePath(projectPath.value);
   void openFile(`${root}/${PROJECT_ARCHITECT_REVIEW_REL_PATH}`);
 }
 
@@ -1487,7 +1709,7 @@ function normalizeKnowledgePathKey(path: string): string {
 }
 
 function isProjectKnowledgeFilePath(filePath: string): boolean {
-  const root = projectPath.value.trim().replace(/\\/g, "/").replace(/\/$/, "");
+  const root = normalizePath(projectPath.value);
   if (!root || !filePath.trim()) return false;
   const expected = normalizeKnowledgePathKey(`${root}/${PROJECT_KNOWLEDGE_REL_PATH}`);
   const normalized = normalizeKnowledgePathKey(filePath.replace(/\\/g, "/"));
@@ -1500,7 +1722,7 @@ function scheduleKnowledgeReloadFromDisk() {
 }
 
 function openKnowledgeFile(relPath: string) {
-  const root = projectPath.value.trim().replace(/\\/g, "/").replace(/\/$/, "");
+  const root = normalizePath(projectPath.value);
   void openFile(`${root}/${relPath.replace(/^[/\\]+/, "")}`);
 }
 
@@ -1554,7 +1776,9 @@ const composerDraftKey = computed(
 );
 
 const chatPlaceholder = computed(() =>
-  chatMode.value === "ask"
+  chatMode.value === "auto"
+    ? "自动识别意图，智能切换模式（Enter 发送，Shift+Enter 换行）"
+    : chatMode.value === "ask"
     ? "提问、解释代码"
     : chatMode.value === "plan"
     ? "描述需求 → AI 输出方案 → 确认后执行（可点「执行方案」或回复「执行方案」）"
@@ -1664,8 +1888,6 @@ function onChatScroll() {
     chatScrollPersistTimer = 0;
     workspaceUi.persistNow();
   }, 150);
-  // 滚动时隐藏引用按钮，避免 fixed 定位与选区脱节
-  if (showQuoteButton.value) hideQuoteButtonNow();
 }
 
 function resetChatScrollPin() {
@@ -1741,9 +1963,30 @@ const {
 
 fileWatcherTreeRefresh.fn = refreshTree;
 
+const {
+  mentionOpen,
+  mentionActiveIndex,
+  mentionResults,
+  onComposerMentionChange,
+  onComposerFieldKeydown,
+  selectMention,
+} = useChatMention({
+  projectPath,
+  projectOpened,
+  fileTree,
+  insertFileRef: (item) => {
+    composerRef.value?.insertFileRef(item);
+  },
+  focusComposer: () => {
+    composerRef.value?.focus();
+  },
+});
+
 const planWorkspaceOpen = ref(false);
 const planPanelInForeground = ref(false);
 let planPanelApi: ReturnType<typeof import("../composables/usePlanPanel").usePlanPanel> | null = null;
+
+const gitPanelInForeground = ref(false);
 
 function dismissPlanPanelForeground() {
   planPanelInForeground.value = false;
@@ -1751,21 +1994,31 @@ function dismissPlanPanelForeground() {
 
 async function openFile(path: string, options?: Parameters<typeof openFileCore>[1]) {
   dismissPlanPanelForeground();
+  dismissGitPanelForeground();
   return openFileCore(path, options);
 }
 
 async function showGitFileDiff(filePath: string, staged = false) {
   dismissPlanPanelForeground();
+  dismissGitPanelForeground();
   return showGitFileDiffCore(filePath, staged);
+}
+
+function openConflictFile(relativePath: string) {
+  const root = normalizePath(projectPath.value);
+  if (!root || !relativePath) return;
+  void openFile(`${root}/${relativePath.replace(/^[/\\]+/, "")}`);
 }
 
 async function openGitLogFile(...args: Parameters<typeof openGitLogFileCore>) {
   dismissPlanPanelForeground();
+  dismissGitPanelForeground();
   return openGitLogFileCore(...args);
 }
 
 const noActiveEditor = computed(() => {
   if (planWorkspaceOpen.value) return false;
+  if (gitPanelInForeground.value) return false;
   const isProjectView = gitPanelMode.value === "project" &&
     (projectPanelView.value === "knowledge"
       || projectPanelView.value === "health"
@@ -1830,133 +2083,13 @@ function refreshProjectHistoryList() {
 function isCurrentProject(path: string): boolean {
   const current = projectPath.value.trim();
   if (!current || !path.trim()) return false;
-  const norm = (p: string) => p.trim().replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
-  return norm(current) === norm(path);
+  return normalizeProjectPathUtil(current) === normalizeProjectPathUtil(path);
 }
 
 function removeRecentProject(path: string, event?: MouseEvent) {
   event?.stopPropagation();
   removeProjectFromHistory(path);
   refreshProjectHistoryList();
-}
-
-function onDocumentClick(event: MouseEvent) {
-  if (showQuoteButton.value) {
-    if (eventComposedPathIncludes(event, ".quote-floating")) return;
-    if (quoteButtonSource.value === "editor" && eventComposedPathIncludes(event, ".monaco-editor")) return;
-    hideQuoteButtonNow();
-  }
-}
-
-function eventComposedPathIncludes(event: MouseEvent, selector: string): boolean {
-  return event.composedPath().some(
-    (node) => node instanceof Element && Boolean(node.closest(selector)),
-  );
-}
-
-function clampQuoteButtonPosition(x: number, y: number, btnWidth: number, btnHeight: number) {
-  const margin = 8;
-  return {
-    x: Math.max(margin, Math.min(x, window.innerWidth - btnWidth - margin)),
-    y: Math.max(margin, Math.min(y, window.innerHeight - btnHeight - margin)),
-  };
-}
-
-/** 选区包围盒在多行时会横跨整行宽度；优先用最后一行的 client rect 锚定按钮。 */
-function selectionRectUsable(rect: DOMRect): boolean {
-  return rect.width > 0 || rect.height > 0;
-}
-
-/** 判断 rect 是否包含指定点（视口坐标） */
-function rectContainsPoint(rect: DOMRect, px: number, py: number): boolean {
-  return px >= rect.left && px <= rect.right && py >= rect.top && py <= rect.bottom;
-}
-
-function getSelectionFocusRect(selection: Selection): DOMRect | null {
-  const { focusNode, focusOffset } = selection;
-  if (!focusNode) return null;
-
-  const focusRange = document.createRange();
-  try {
-    focusRange.setStart(focusNode, focusOffset);
-    focusRange.collapse(true);
-  } catch {
-    return null;
-  }
-
-  const focusRects = focusRange.getClientRects();
-  for (let i = focusRects.length - 1; i >= 0; i--) {
-    const rect = focusRects[i];
-    if (rect.width > 0 || rect.height > 0) return rect;
-  }
-
-  const collapsed = focusRange.getBoundingClientRect();
-  if (collapsed.width > 0 || collapsed.height > 0) return collapsed;
-
-  const endRange = selection.getRangeAt(0).cloneRange();
-  endRange.collapse(false);
-  const endRects = endRange.getClientRects();
-  if (endRects.length > 0) return endRects[endRects.length - 1];
-  return endRange.getBoundingClientRect();
-}
-
-function getSelectionAnchorRect(selection: Selection): DOMRect | null {
-  const range = selection.getRangeAt(0);
-  const lineRects = Array.from(range.getClientRects()).filter(selectionRectUsable);
-  if (lineRects.length > 0) {
-    // 优先取第一行 rect，使引用按钮始终在选区顶部附近，
-    // 避免多行选区时按钮出现在最后一行导致与选区视觉分离
-    return lineRects[0]!;
-  }
-
-  const focusRect = getSelectionFocusRect(selection);
-  if (focusRect && selectionRectUsable(focusRect)) return focusRect;
-
-  const bounds = range.getBoundingClientRect();
-  if (selectionRectUsable(bounds)) return bounds;
-  return null;
-}
-
-async function showQuoteButtonAt(anchor: DOMRect | MonacoSelectionAnchor) {
-  const margin = 8;
-  const bottomSafe = 80; // 底部输入面板安全距离
-  const estimatedWidth = 72;
-  const estimatedHeight = 32;
-  const maxBottom = window.innerHeight - bottomSafe;
-
-  let x = anchor.left + (anchor.width - estimatedWidth) / 2;
-  let y = anchor.top - estimatedHeight - margin;
-  // 上方空间不足时回退到下方，但不能超出底部安全区
-  if (y < margin) y = anchor.top + anchor.height + margin;
-  if (y + estimatedHeight > maxBottom) y = maxBottom - estimatedHeight;
-  if (y < margin) y = margin;
-  ({ x, y } = clampQuoteButtonPosition(x, y, estimatedWidth, estimatedHeight));
-  quoteButtonPosition.value = { x, y };
-  showQuoteButton.value = true;
-  await nextTick();
-  const btn = quoteButtonRef.value;
-  if (!btn) return;
-  const btnWidth = btn.offsetWidth;
-  const btnHeight = btn.offsetHeight;
-  x = anchor.left + (anchor.width - btnWidth) / 2;
-  y = anchor.top - btnHeight - margin;
-  if (y < margin) y = anchor.top + anchor.height + margin;
-  if (y + btnHeight > maxBottom) y = maxBottom - btnHeight;
-  if (y < margin) y = margin;
-  ({ x, y } = clampQuoteButtonPosition(x, y, btnWidth, btnHeight));
-  quoteButtonPosition.value = { x, y };
-}
-
-function quoteMessageKey(message: QuotedMessage): string {
-  return `${message.messageId}:${message.content}`;
-}
-
-let quoteHiddenAt = 0;
-function hideQuoteButtonNow() {
-  showQuoteButton.value = false;
-  pendingQuote.value = null;
-  quoteButtonSource.value = null;
-  quoteHiddenAt = Date.now();
 }
 
 registerEscapeDismiss(() => contextMenu.value.show, hideContextMenu, ESCAPE_DISMISS_PRIORITY.CONTEXT_MENU);
@@ -1966,13 +2099,7 @@ registerEscapeDismiss(
   ESCAPE_DISMISS_PRIORITY.CONTEXT_MENU,
 );
 registerEscapeDismiss(projectMemoryOpen, closeProjectMemoryEditor, ESCAPE_DISMISS_PRIORITY.PROJECT_MEMORY);
-registerEscapeDismiss(
-  mentionOpen,
-  () => {
-    mentionOpen.value = false;
-  },
-  ESCAPE_DISMISS_PRIORITY.MENTION,
-);
+registerEscapeDismiss(gitPanelInForeground, closeGitPanel, ESCAPE_DISMISS_PRIORITY.PROJECT_MEMORY - 1);
 registerEscapeDismiss(
   showTokenDetail,
   () => {
@@ -1980,7 +2107,6 @@ registerEscapeDismiss(
   },
   ESCAPE_DISMISS_PRIORITY.TOKEN_DETAIL,
 );
-registerEscapeDismiss(showQuoteButton, hideQuoteButtonNow, ESCAPE_DISMISS_PRIORITY.QUOTE_BUTTON);
 registerEscapeDismiss(
   () => chatSending.value,
   () => stopAgent(),
@@ -1996,26 +2122,6 @@ registerEscapeDismiss(
     projectMemoryOpen.value,
   () => dismissBlockingOverlays("escape"),
   ESCAPE_DISMISS_PRIORITY.MODAL + 5,
-);
-// 滚动时隐藏引用按钮，避免 fixed 定位与选区脱节
-let scrollQuoteHideHandler: ((() => void) | null) = null;
-onMounted(() => {
-  nextTick(() => {
-    const scrollHost = chatPanelRef.value?.chatScrollRef;
-    if (scrollHost) {
-      scrollQuoteHideHandler = () => {
-        if (showQuoteButton.value) hideQuoteButtonNow();
-      };
-      scrollHost.addEventListener('scroll', scrollQuoteHideHandler, { passive: true });
-    }
-  });
-});
-registerEscapeDismiss(
-  () => quotedMessages.value.length > 0,
-  () => {
-    quotedMessages.value = [];
-  },
-  ESCAPE_DISMISS_PRIORITY.QUOTED_PREVIEW,
 );
 
 function handleStartNewSession() {
@@ -2206,10 +2312,20 @@ function resolveOriginalUserPrompt(assistantMsgId: string): string {
   return resolveResumeOriginalUserPrompt(chatMessages.value, assistantMsgId);
 }
 
-function findLastUserMessage(): { content: string } | null {
+function findLastUserMessage(): {
+  content: string;
+  imageDataUrls?: string[];
+} | null {
   for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
     const m = chatMessages.value[i];
-    if (m.role === "user") return { content: m.content };
+    if (m.role === "user") {
+      return {
+        content: m.content,
+        imageDataUrls: m.imageDataUrls?.filter(Boolean)?.length
+          ? [...m.imageDataUrls.filter(Boolean)]
+          : undefined,
+      };
+    }
   }
   return null;
 }
@@ -2442,6 +2558,30 @@ const {
   closePanel: closePlanPanelBase,
 } = planPanel;
 
+const {
+  quotedMessages,
+  quoteButtonPosition,
+  showQuoteButton,
+  hideQuoteButtonNow,
+  quoteSelectedText,
+  onMessageSelect,
+  onMessageDoubleClick,
+  onPlanPanelMouseUp,
+  onPlanPanelDoubleClick,
+  onEditorSelect,
+} = useMessageQuote({
+  quoteButtonRef,
+  getChatScrollEl: () => chatPanelRef.value?.chatScrollRef,
+  expandChat,
+  focusComposer: () => {
+    composerRef.value?.focus();
+  },
+  planPanelMessageId,
+  planWorkspaceOpen,
+  activeFilePath,
+  activeFileRelativePath,
+});
+
 const workspaceUi = useWorkspaceUiPersistence({
   projectPath,
   projectOpened,
@@ -2512,6 +2652,18 @@ function closePlanPanel() {
   if (openTabs.value.length === 0) {
     collapseEditor();
   }
+}
+
+function focusGitPanel() {
+  gitPanelInForeground.value = true;
+}
+
+function closeGitPanel() {
+  gitPanelInForeground.value = false;
+}
+
+function dismissGitPanelForeground() {
+  gitPanelInForeground.value = false;
 }
 
 watch(
@@ -2643,14 +2795,11 @@ async function openProjectByPath(dirPath: string) {
     return;
   }
 
-  const normalizeProjectPath = (p: string) =>
-    p.trim().replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
-
   const previousPath = projectPath.value.trim();
   if (
     projectOpened.value &&
     previousPath &&
-    normalizeProjectPath(previousPath) === normalizeProjectPath(normalized)
+    normalizeProjectPathUtil(previousPath) === normalizeProjectPathUtil(normalized)
   ) {
     return;
   }
@@ -2878,267 +3027,12 @@ function contextMenuDelete() {
   void deleteSelectedItem();
 }
 
-function shouldIgnoreQuoteSelectEvent(event: MouseEvent): boolean {
-  if (event.detail <= 1 && Date.now() - quoteHiddenAt < 150) return true;
-  const target = event.target;
-  return target instanceof Element
-    && Boolean(target.closest(".msg-toolbar, .agent-recovery-actions, .agent-recovery-footer, .inline-diff-head, .msg-actions, .ai-option-buttons"));
-}
-
-function tryShowQuoteButtonFromSelection(message: ChatMessage): void {
-  const selection = window.getSelection();
-  if (!selection || selection.isCollapsed || !selection.toString().trim()) {
-    return;
-  }
-
-  const selectedText = selection.toString().trim();
-  if (!selectedText) return;
-
-  const anchor = getSelectionAnchorRect(selection);
-  if (!anchor || !selectionRectUsable(anchor)) return;
-
-  pendingQuote.value = {
-    messageId: message.id,
-    content: selectedText,
-    role: message.role,
-  };
-  quoteButtonSource.value = "chat";
-
-  void showQuoteButtonAt(anchor);
-}
-
-function onMessageSelect(event: MouseEvent, message: ChatMessage) {
-  if (shouldIgnoreQuoteSelectEvent(event)) return;
-  // 双击/三击时选区在 mouseup 时尚未就绪，推迟到 microtask（dblclick 也会再触发一次）
-  if (event.detail >= 2) {
-    queueMicrotask(() => tryShowQuoteButtonFromSelection(message));
-    return;
-  }
-  tryShowQuoteButtonFromSelection(message);
-}
-
-function onMessageDoubleClick(event: MouseEvent, message: ChatMessage) {
-  if (shouldIgnoreQuoteSelectEvent(event)) return;
-  tryShowQuoteButtonFromSelection(message);
-}
-
-function shouldIgnorePlanQuoteSelectEvent(event: MouseEvent): boolean {
-  if (shouldIgnoreQuoteSelectEvent(event)) return true;
-  const target = event.target;
-  return target instanceof Element
-    && Boolean(target.closest(".plan-main-head, .plan-main-btn, .plan-main-head-actions"));
-}
-
-function tryShowQuoteButtonFromPlanPanel(): void {
-  if (!planPanelMessageId.value) return;
-  const selection = window.getSelection();
-  if (!selection || selection.isCollapsed || !selection.toString().trim()) return;
-
-  const selectedText = selection.toString().trim();
-  if (!selectedText) return;
-
-  const anchor = getSelectionAnchorRect(selection);
-  if (!anchor || !selectionRectUsable(anchor)) return;
-
-  pendingQuote.value = {
-    messageId: planPanelMessageId.value,
-    content: selectedText,
-    role: "assistant",
-    source: "plan",
-  };
-  quoteButtonSource.value = "plan";
-
-  void showQuoteButtonAt(anchor);
-}
-
-function onPlanPanelMouseUp(event: MouseEvent) {
-  if (!planWorkspaceOpen.value) return;
-  if (shouldIgnorePlanQuoteSelectEvent(event)) return;
-  if (event.detail >= 2) {
-    queueMicrotask(() => tryShowQuoteButtonFromPlanPanel());
-    return;
-  }
-  tryShowQuoteButtonFromPlanPanel();
-}
-
-function onPlanPanelDoubleClick(event: MouseEvent) {
-  if (!planWorkspaceOpen.value) return;
-  if (shouldIgnorePlanQuoteSelectEvent(event)) return;
-  tryShowQuoteButtonFromPlanPanel();
-}
-
-function onEditorSelect(text: string, anchor: MonacoSelectionAnchor | null) {
-  if (!text.trim() || !anchor || !activeFilePath.value) {
-    if (quoteButtonSource.value === "editor") hideQuoteButtonNow();
-    return;
-  }
-
-  const relPath = activeFileRelativePath() || fileName(activeFilePath.value);
-  pendingQuote.value = {
-    messageId: `editor:${activeFilePath.value}`,
-    content: text.trim(),
-    role: "user",
-    source: "editor",
-    filePath: relPath,
-  };
-  quoteButtonSource.value = "editor";
-  void showQuoteButtonAt(anchor);
-}
-
-function quoteSelectedText() {
-  if (!pendingQuote.value) return;
-
-  const next = pendingQuote.value;
-  const key = quoteMessageKey(next);
-  if (!quotedMessages.value.some((item) => quoteMessageKey(item) === key)) {
-    quotedMessages.value = [...quotedMessages.value, next];
-  }
-  pendingQuote.value = null;
-  showQuoteButton.value = false;
-  quoteButtonSource.value = null;
-
-  expandChat();
-
-  const selection = window.getSelection();
-  if (selection) {
-    selection.removeAllRanges();
-  }
-
-  nextTick(() => {
-    composerRef.value?.focus();
-  });
-}
-
-let selectionChangeTimer: ReturnType<typeof setTimeout> | null = null;
-function onSelectionChange() {
-  if (!showQuoteButton.value) return;
-  if (quoteButtonSource.value === "editor") return;
-  if (selectionChangeTimer) clearTimeout(selectionChangeTimer);
-  selectionChangeTimer = setTimeout(() => {
-    selectionChangeTimer = null;
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed || !sel.toString().trim()) {
-      hideQuoteButtonNow();
-    }
-  }, 120);
-}
-
 function applyExample(text: string) {
   composerRef.value?.setPlainText(text);
 }
 
-function collectProjectFiles(nodes: TreeNode[], base = projectPath.value): ProjectFileItem[] {
-  const items: ProjectFileItem[] = [];
-  const root = base.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
-
-  function walk(list: TreeNode[]) {
-    for (const node of list) {
-      if (node.isDirectory) {
-        if (node.children?.length) walk(node.children);
-        continue;
-      }
-      const full = node.path.replace(/\\/g, "/");
-      const relative = full.toLowerCase().startsWith(`${root}/`)
-        ? full.slice(root.length + 1)
-        : fileName(full);
-      items.push({ name: node.name, path: node.path, relative });
-    }
-  }
-
-  walk(nodes);
-  return items;
-}
-
-const allProjectFiles = computed(() => collectProjectFiles(fileTree.value));
-
-const mentionResults = computed(() => {
-  if (!mentionOpen.value || !projectOpened.value) return [];
-  const q = mentionQuery.value.trim().toLowerCase();
-  if (q && mentionRemoteResults.value.length) {
-    return mentionRemoteResults.value.slice(0, 12);
-  }
-  return allProjectFiles.value
-    .filter((item) => {
-      if (!q) return true;
-      return item.relative.toLowerCase().includes(q) || item.name.toLowerCase().includes(q);
-    })
-    .slice(0, 12);
-});
-
-async function refreshMentionRemoteResults(query: string) {
-  if (!projectPath.value.trim()) {
-    mentionRemoteResults.value = [];
-    return;
-  }
-  const result = await searchFiles(projectPath.value.trim(), query);
-  if (!result.ok) {
-    mentionRemoteResults.value = [];
-    return;
-  }
-  const root = projectPath.value.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
-  mentionRemoteResults.value = result.results
-    .filter((item) => !item.isDirectory)
-    .map((item) => {
-      const full = item.path.replace(/\\/g, "/");
-      const relative = full.toLowerCase().startsWith(`${root}/`)
-        ? full.slice(root.length + 1)
-        : item.name;
-      return { name: item.name, path: item.path, relative };
-    });
-}
-
-function scheduleMentionSearch() {
-  if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
-  const q = mentionQuery.value.trim();
-  if (!q) {
-    mentionRemoteResults.value = [];
-    return;
-  }
-  mentionSearchTimer = setTimeout(() => {
-    mentionSearchTimer = null;
-    void refreshMentionRemoteResults(q);
-  }, 200);
-}
-
-function onComposerMentionChange(payload: { open: boolean; query: string }) {
-  mentionOpen.value = payload.open;
-  mentionQuery.value = payload.query;
-  if (payload.open) {
-    mentionActiveIndex.value = 0;
-    scheduleMentionSearch();
-    return;
-  }
-  mentionRemoteResults.value = [];
-}
-
 function onComposerImageError(message: string) {
   chatError.value = message;
-}
-
-function onComposerFieldKeydown(e: KeyboardEvent) {
-  if (!mentionOpen.value || !mentionResults.value.length) return;
-  if (e.key === "ArrowDown") {
-    e.preventDefault();
-    mentionActiveIndex.value = (mentionActiveIndex.value + 1) % mentionResults.value.length;
-    return;
-  }
-  if (e.key === "ArrowUp") {
-    e.preventDefault();
-    mentionActiveIndex.value =
-      (mentionActiveIndex.value - 1 + mentionResults.value.length) % mentionResults.value.length;
-    return;
-  }
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    e.stopPropagation();
-    const item = mentionResults.value[mentionActiveIndex.value];
-    if (item) selectMention(item);
-    return;
-  }
-  if (e.key === "Escape") {
-    e.preventDefault();
-    mentionOpen.value = false;
-  }
 }
 
 function onGitFilePointerDown(e: PointerEvent, relativePath: string, staged = false) {
@@ -3164,8 +3058,16 @@ function onGitFilePointerDown(e: PointerEvent, relativePath: string, staged = fa
 }
 
 function onGitFileContextMenu(e: MouseEvent, path: string) {
+  // 右键未选中文件时，改为只选中该文件；已在多选内则保持选择
+  if (!selectedGitFiles.value.includes(path)) {
+    selectedGitFiles.value = [path];
+  }
+  const itemCount =
+    1
+    + (selectedGitFiles.value.some((p) => gitUnstagedFiles.value.some((f) => f.path === p)) ? 2 : 0)
+    + (selectedGitFiles.value.some((p) => gitStagedFiles.value.some((f) => f.path === p)) ? 1 : 0);
   const menuW = 160;
-  const menuH = 40;
+  const menuH = Math.min(40 + itemCount * 32, 200);
   const clampedX = Math.min(e.clientX, window.innerWidth - menuW);
   const clampedY = Math.min(e.clientY, window.innerHeight - menuH);
   gitFileContextMenu.value = { show: true, x: Math.max(0, clampedX), y: Math.max(0, clampedY), path };
@@ -3175,10 +3077,33 @@ function hideGitFileContextMenu() {
   gitFileContextMenu.value.show = false;
 }
 
+const gitFileCtxCanStage = computed(() =>
+  selectedGitFiles.value.some((p) => gitUnstagedFiles.value.some((f) => f.path === p)),
+);
+const gitFileCtxCanUnstage = computed(() =>
+  selectedGitFiles.value.some((p) => gitStagedFiles.value.some((f) => f.path === p)),
+);
+const gitFileCtxCanDiscard = computed(() => gitFileCtxCanStage.value);
+
 function gitFileCopyName() {
   const path = gitFileContextMenu.value.path;
   void copyText(fileName(path));
   hideGitFileContextMenu();
+}
+
+async function gitFileCtxStage() {
+  hideGitFileContextMenu();
+  await stageSelectedFiles();
+}
+
+async function gitFileCtxUnstage() {
+  hideGitFileContextMenu();
+  await unstageSelectedFiles();
+}
+
+async function gitFileCtxDiscard(event: MouseEvent) {
+  hideGitFileContextMenu();
+  await discardSelectedFiles(event);
 }
 
 async function onSaveFile() {
@@ -3187,17 +3112,6 @@ async function onSaveFile() {
   if (ok && isProjectKnowledgeFilePath(savedPath)) {
     scheduleKnowledgeReloadFromDisk();
   }
-}
-
-function selectMention(item: ProjectFileItem) {
-  composerRef.value?.insertFileRef({
-    name: item.name,
-    path: item.path,
-    relative: item.relative,
-  });
-  mentionOpen.value = false;
-  mentionQuery.value = "";
-  void nextTick(() => composerRef.value?.focus());
 }
 
 function onFileDragStart(node: TreeNode, x: number, y: number) {
@@ -3412,6 +3326,8 @@ function undoExchange(messageId: string, event?: MouseEvent) {
     chatError.value = "";
     persistChatNow();
     void scrollChatToBottom();
+  }).catch((err: unknown) => {
+    console.error("confirm failed:", err);
   });
 }
 
@@ -3710,7 +3626,12 @@ function onBeforeUnload() {
     const lastUser = findLastUserMessage();
     if (lastUser) {
       persistAgentRunForHmr({
-        request: { prompt: lastUser.content },
+        request: {
+          prompt: lastUser.content,
+          ...(lastUser.imageDataUrls?.length
+            ? { imageDataUrls: lastUser.imageDataUrls }
+            : {}),
+        },
         projectPath: projectPath.value.trim(),
         sessionId: activeSessionId.value || undefined,
       });
@@ -3886,8 +3807,6 @@ onMounted(() => {
   window.addEventListener("focus", onWindowFocus);
   window.addEventListener("beforeunload", onBeforeUnload);
   window.addEventListener("dragend", onWindowDragEnd);
-  document.addEventListener("mousedown", onDocumentClick, true);
-  document.addEventListener("selectionchange", onSelectionChange);
   document.addEventListener("dragover", onDocumentDragOverCapture, true);
   document.addEventListener("drop", onDocumentDropCapture, true);
   onStorageError((msg) => {
@@ -3902,7 +3821,12 @@ onMounted(() => {
       const lastUser = findLastUserMessage();
       if (lastUser) {
         persistAgentRunForHmr({
-          request: { prompt: lastUser.content },
+          request: {
+            prompt: lastUser.content,
+            ...(lastUser.imageDataUrls?.length
+              ? { imageDataUrls: lastUser.imageDataUrls }
+              : {}),
+          },
           projectPath: projectPath.value.trim(),
           sessionId: activeSessionId.value || undefined,
         });
@@ -3920,9 +3844,6 @@ onBeforeUnmount(() => {
   window.removeEventListener("focus", onWindowFocus);
   window.removeEventListener("beforeunload", onBeforeUnload);
   window.removeEventListener("dragend", onWindowDragEnd);
-  document.removeEventListener("mousedown", onDocumentClick, true);
-  document.removeEventListener("selectionchange", onSelectionChange);
-  if (selectionChangeTimer) clearTimeout(selectionChangeTimer);
   document.removeEventListener("dragover", onDocumentDragOverCapture, true);
   document.removeEventListener("drop", onDocumentDropCapture, true);
   if (chatSending.value && getAgentAbortHandle()) {
@@ -3935,7 +3856,6 @@ onBeforeUnmount(() => {
   stopResize();
   if (scrollChatRaf) cancelAnimationFrame(scrollChatRaf);
   cancelPendingChatPersistence();
-  if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
   stopAgentUiTick();
   clearRetryTimer();
   if (sessionCopyHintTimer) {
@@ -3943,10 +3863,6 @@ onBeforeUnmount(() => {
     sessionCopyHintTimer = null;
   }
   cancelAutoResume();
-  if (scrollQuoteHideHandler && chatPanelRef.value?.chatScrollRef) {
-    chatPanelRef.value.chatScrollRef.removeEventListener('scroll', scrollQuoteHideHandler);
-    scrollQuoteHideHandler = null;
-  }
   workspaceUi.persistNow();
   autoBugFixLifecycle.persistNow();
   persistEditorWorkspace();

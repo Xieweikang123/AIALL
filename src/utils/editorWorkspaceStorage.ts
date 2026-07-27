@@ -14,9 +14,7 @@ export type PersistedEditorWorkspace = {
   activePath: string;
 };
 
-function normalizeProjectPath(projectPath: string): string {
-  return projectPath.trim().replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
-}
+import { normalizeProjectPath } from "./normalizePath";
 
 export function editorWorkspaceStorageKey(projectPath: string): string {
   const normalized = normalizeProjectPath(projectPath);
