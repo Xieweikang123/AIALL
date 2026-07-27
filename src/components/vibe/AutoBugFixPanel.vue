@@ -1,10 +1,11 @@
 <template>
   <div class="fix-panel">
-    <div v-if="!projectOpened" class="panel-empty">
-      <span class="panel-empty-icon" aria-hidden="true">🔧</span>
-      <p class="panel-empty-title">尚未打开项目</p>
-      <p class="panel-empty-hint">打开项目后，在「项目 → 测试修复」中扫描并修复</p>
-    </div>
+    <PanelEmptyState
+      v-if="!projectOpened"
+      icon="🔧"
+      title="尚未打开项目"
+      hint="打开项目后，在「项目 → 测试修复」中扫描并修复"
+    />
 
     <template v-else>
       <div class="fix-intro">
@@ -179,6 +180,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
+import PanelEmptyState from "./PanelEmptyState.vue";
 import type { AutoBugFixPhase } from "../../composables/useAutoBugFix";
 import type { ProjectHealthScanResult } from "../../services/projectHealthScanClient";
 import type { ProjectVerifyRunResult } from "../../services/projectVerifyRunClient";

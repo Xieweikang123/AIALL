@@ -27,6 +27,7 @@
         @discard-file="(path, event) => $emit('discard-file', path, event)"
         @pointer-down="(event, path, isStaged) => $emit('pointer-down', event, path, isStaged)"
         @contextmenu="(event, path) => $emit('contextmenu', event, path)"
+        @open-file="(path) => $emit('open-file', path)"
       />
     </div>
   </div>
@@ -40,6 +41,7 @@
     :style="{ paddingLeft }"
     @pointerdown="$emit('pointer-down', $event, node.path, staged)"
     @contextmenu.prevent="$emit('contextmenu', $event, node.path)"
+    @dblclick="$emit('open-file', node.path)"
   >
     <span
       v-if="staged"
@@ -90,6 +92,7 @@ defineEmits<{
   "discard-file": [path: string, event: MouseEvent];
   "pointer-down": [event: PointerEvent, path: string, staged: boolean];
   contextmenu: [event: MouseEvent, path: string];
+  "open-file": [path: string];
 }>();
 
 const depth = computed(() => props.depth ?? 0);

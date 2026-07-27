@@ -359,6 +359,7 @@
                       @unstage-file="$emit('unstage-file', $event)"
                       @pointer-down="(event, path, isStaged) => $emit('on-git-file-pointer-down', event, path, isStaged)"
                       @contextmenu="(event, path) => $emit('on-git-file-contextmenu', event, path)"
+                      @open-file="(path) => $emit('open-file', path)"
                     />
                   </div>
                   <div v-if="gitUnstagedFiles.length && gitUnstagedOpen" class="git-file-list">
@@ -375,6 +376,7 @@
                       @discard-file="(path, event) => $emit('discard-file', path, event)"
                       @pointer-down="(event, path, isStaged) => $emit('on-git-file-pointer-down', event, path, isStaged)"
                       @contextmenu="(event, path) => $emit('on-git-file-contextmenu', event, path)"
+                      @open-file="(path) => $emit('open-file', path)"
                     />
                   </div>
                 </div>
@@ -758,6 +760,7 @@ const emit = defineEmits<{
   (e: "update:gitStashMessage", value: string): void;
   (e: "toggle-git-log-entry", hash: string): void;
   (e: "open-git-log-file", entry: GitLogEntry, file: GitLogFile): void;
+  (e: "open-file", path: string): void;
   (e: "on-git-file-pointer-down", event: PointerEvent, path: string, staged: boolean): void;
   (e: "on-git-file-contextmenu", event: MouseEvent, path: string): void;
   (e: "commit-batch-group", index: number, message: string): void;
@@ -1322,6 +1325,65 @@ function gitStatusClass(status: string): string {
   padding: 10px 12px;
 }
 
+.git-commit-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.git-commit-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  font-size: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  background: rgba(11, 18, 32, 0.72);
+  color: rgba(255, 255, 255, 0.92);
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.git-commit-input:focus {
+  outline: none;
+  border-color: rgba(88, 166, 255, 0.5);
+}
+
+.git-commit-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.git-commit-btn { min-width: 72px; }
+
+.git-ai-push {
+  font-size: 11px;
+  padding: 3px 8px;
+  border: 1px solid rgba(210, 153, 34, 0.35);
+  background: rgba(210, 153, 34, 0.08);
+  border-radius: 4px;
+  color: #e3b341;
+  cursor: pointer;
+}
+
+.git-ai-push:disabled { opacity: 0.4; cursor: default; }
+
+.git-commit-ai {
+  font-size: 11px;
+  padding: 3px 8px;
+  border: 1px solid rgba(88, 166, 255, 0.25);
+  background: rgba(88, 166, 255, 0.1);
+  border-radius: 4px;
+  color: #58a6ff;
+  cursor: pointer;
+}
+
+.git-commit-ai:disabled { opacity: 0.4; cursor: default; }
+
 .git-header {
   display: flex;
   flex-direction: column;
@@ -1451,167 +1513,9 @@ function gitStatusClass(status: string): string {
   cursor: not-allowed;
 }
 
-.git-ahead-section {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
 
-.git-ahead-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 0;
-  background: none;
-  border: none;
-  color: rgba(255, 255, 255, 0.82);
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 600;
-  text-align: left;
-}
 
-.git-ahead-toggle:hover {
-  color: rgba(255, 255, 255, 0.95);
-}
 
-.git-ahead-title {
-  flex: 1;
-}
-
-.git-ahead-count {
-  font-size: 11px;
-  color: #3fb950;
-  padding: 1px 6px;
-  background: rgba(63, 185, 80, 0.15);
-  border-radius: 999px;
-}
-
-.git-ahead-list {
-  margin-top: 8px;
-  max-height: 200px;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
-}
-
-.git-ahead-list::-webkit-scrollbar {
-  width: 5px;
-}
-
-.git-ahead-list::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.18);
-}
-
-.git-ahead-loading,
-.git-ahead-empty {
-  font-size: 12px;
-  color: rgba(139, 148, 158, 0.55);
-  padding: 4px 0 2px 16px;
-}
-
-.git-ahead-item {
-  padding: 6px 8px;
-  border-radius: 6px;
-  transition: background 0.15s;
-}
-
-.git-ahead-item:hover {
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.git-ahead-entry-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.git-ahead-hash {
-  font-size: 11px;
-  font-family: var(--monospace-font, monospace);
-  color: rgba(139, 148, 158, 0.75);
-  flex-shrink: 0;
-}
-
-.git-ahead-msg {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.82);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.git-ahead-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 2px;
-  padding-left: 44px;
-}
-
-.git-ahead-date,
-.git-ahead-files {
-  font-size: 11px;
-  color: rgba(139, 148, 158, 0.55);
-}
-
-.git-stash-section {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.git-stash-collapse-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 0;
-  background: none;
-  border: none;
-  color: rgba(255, 255, 255, 0.82);
-  cursor: pointer;
-  font-size: 13px;
-  text-align: left;
-}
-
-.git-stash-collapse-toggle:hover {
-  color: rgba(255, 255, 255, 0.95);
-}
-
-.git-stash-header {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.git-stash-title-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.git-stash-icon {
-  font-size: 12px;
-  line-height: 1;
-}
-
-.git-stash-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.85);
-}
-
-.git-stash-count {
-  font-size: 11px;
-  color: rgba(139, 148, 158, 0.6);
-  padding: 2px 6px;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 3px;
-}
 
 .git-stash-btn-count {
   font-size: 10px;
@@ -1622,44 +1526,7 @@ function gitStatusClass(status: string): string {
   color: rgba(255, 255, 255, 0.7);
 }
 
-.git-stash-save-row {
-  display: flex;
-  gap: 6px;
-}
 
-.git-stash-msg-input {
-  flex: 1;
-  box-sizing: border-box;
-  padding: 5px 8px;
-  font-size: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.2);
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.git-stash-msg-input:focus {
-  outline: none;
-  border-color: rgba(88, 166, 255, 0.5);
-}
-
-.git-stash-msg-input:disabled {
-  opacity: 0.4;
-}
-
-.stash-save-btn {
-  flex-shrink: 0;
-}
-
-.git-stash-list {
-  margin-top: 8px;
-}
-
-.git-stash-list-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
 
 .git-section-toggle {
   display: flex;
@@ -1682,56 +1549,8 @@ function gitStatusClass(status: string): string {
   width: 10px;
 }
 
-.git-stash-list-title,
 .git-section-title {
   font-weight: 500;
-}
-
-.git-stash-list-content {
-  margin-top: 4px;
-}
-
-.git-stash-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 8px;
-  font-size: 12px;
-  border-radius: 4px;
-  transition: background 120ms ease;
-}
-
-.git-stash-item:hover {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.git-stash-label {
-  color: #bb9af7;
-  font-family: monospace;
-  font-size: 11px;
-  background: rgba(187, 154, 247, 0.08);
-  padding: 1px 5px;
-  border-radius: 3px;
-  flex-shrink: 0;
-}
-
-.git-stash-msg {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: rgba(255, 255, 255, 0.8);
-}
-
-.git-stash-actions {
-  display: flex;
-  gap: 6px;
-}
-
-.git-stash-empty {
-  color: rgba(139, 148, 158, 0.55);
-  font-size: 11px;
-  padding: 0 0 2px 16px;
 }
 
 .git-error {
@@ -1741,77 +1560,6 @@ function gitStatusClass(status: string): string {
   border-radius: 4px;
   color: #ff9a9a;
   font-size: 12px;
-}
-
-.git-commit-box {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.git-commit-input {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 8px 10px;
-  font-size: 13px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.2);
-  color: rgba(255, 255, 255, 0.9);
-  resize: vertical;
-  min-height: 44px;
-  font-family: inherit;
-
-  /* 滚动条优化 —— 与全局一致的半透明滑块 + 圆角 */
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
-}
-.git-commit-input::-webkit-scrollbar {
-  width: 5px;
-}
-.git-commit-input::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 999px;
-}
-.git-commit-input::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
-}
-
-.git-commit-input:focus {
-  outline: none;
-  border-color: rgba(88, 166, 255, 0.5);
-}
-
-.git-commit-input:disabled {
-  opacity: 0.4;
-}
-
-.git-commit-actions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6px;
-}
-
-.git-commit-actions .git-commit-ai,
-.git-commit-actions .git-commit-btn,
-.git-commit-actions .git-ai-push {
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.git-ai-push {
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.72);
-}
-
-.git-ai-push:hover:not(:disabled) {
-  background: rgba(88, 166, 255, 0.1);
-  border-color: rgba(88, 166, 255, 0.28);
-  color: rgba(147, 197, 253, 0.95);
 }
 
 .git-changes-empty {
@@ -1921,7 +1669,6 @@ function gitStatusClass(status: string): string {
   background: rgba(255, 255, 255, 0.18);
 }
 
-.git-commit-box,
 .git-batch-section {
   flex-shrink: 0;
 }

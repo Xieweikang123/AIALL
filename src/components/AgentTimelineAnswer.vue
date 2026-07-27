@@ -63,7 +63,7 @@ const props = withDefaults(
     streaming?: boolean;
     isRunning: boolean;
     thinkingPlaceholder?: string;
-    chatMode?: "ask" | "build" | "plan" | "explore";
+    chatMode?: "ask" | "build" | "plan" | "explore" | "auto";
     canExecutePlan?: boolean;
     layoutEnhanceReady?: boolean;
     planFilePath?: string;

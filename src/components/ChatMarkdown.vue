@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { renderMarkdown, renderMarkdownLite } from "../utils/renderMarkdown";
-import { renderMermaidInContainer } from "../utils/mermaidRenderer";
+import { disposeMermaidRenderer, renderMermaidInContainer } from "../utils/mermaidRenderer";
 import { parseAiOptions, type AiOption } from "../utils/parseAiOptions";
 import { parseClarificationChoices } from "../utils/parseClarificationChoices";
 import { looksLikeClarificationQuestion } from "../orchestration/generic/ambiguousTermTriggers";
@@ -134,6 +134,7 @@ onBeforeUnmount(() => {
     postProcessRaf = 0;
   }
   streamingThrottle.dispose();
+  disposeMermaidRenderer();
 });
 
 /** Wrap tool summary blocks (h3[工具摘要] + following ul) into collapsible cards. */
@@ -168,7 +169,7 @@ function wrapToolSummaryBlocks(el: HTMLElement) {
     }
 
     // Replace h3 with wrapper
-    h3.parentNode!.insertBefore(wrapper, h3);
+    h3.parentNode?.insertBefore(wrapper, h3);
     wrapper.appendChild(header);
     wrapper.appendChild(content);
     content.appendChild(h3); // put h3 inside content (hidden)

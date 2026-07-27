@@ -75,43 +75,77 @@
           role="status"
           aria-live="polite"
         >{{ chatStoreSyncMessage }}</span>
-        <div class="panel-head-actions">
+        <button
+          type="button"
+          class="config-status-btn"
+          :class="{ warn: !configReady || !apiKeyReady }"
+          :title="aiConfigStatusText"
+          :aria-label="aiConfigStatusText"
+          @click="$emit('open-ai-config')"
+        >
+          <svg v-if="configReady && apiKeyReady" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M5.5 8.2 7.2 9.8 10.6 6" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <svg v-else width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M8 2.8 14 13.2H2L8 2.8Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+            <path d="M8 6.5v3.2M8 11.4h.01" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <div ref="headMenuRef" class="panel-head-menu">
           <button
             type="button"
-            class="ghost small project-memory-btn"
-            :class="{ active: projectMemoryHasContent }"
-            :disabled="!projectOpened"
-            title="项目记忆、Skills 与探索归档"
-            @click="$emit('open-project-memory')"
+            class="icon panel-more-btn"
+            :class="{ open: headMenuOpen }"
+            aria-label="更多操作"
+            title="更多操作"
+            aria-haspopup="menu"
+            :aria-expanded="headMenuOpen"
+            @click="headMenuOpen = !headMenuOpen"
           >
-            记忆
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle cx="3.5" cy="8" r="1.2" fill="currentColor"/>
+              <circle cx="8" cy="8" r="1.2" fill="currentColor"/>
+              <circle cx="12.5" cy="8" r="1.2" fill="currentColor"/>
+            </svg>
           </button>
-          <button
-            type="button"
-            class="ghost small"
-            :disabled="!projectOpened"
-            @click="$emit('start-new-session')"
-            title="新会话 (Ctrl+Shift+N)"
-          >
-            新会话
-          </button>
-          <button
-            v-if="chatMessages.length"
-            type="button"
-            class="ghost small"
-            :disabled="chatSending"
-            @click="$emit('clear-chat')"
-          >
-            清空
-          </button>
+          <div v-if="headMenuOpen" class="panel-head-dropdown" role="menu">
+            <button
+              type="button"
+              class="panel-head-menu-item"
+              role="menuitem"
+              :class="{ active: projectMemoryHasContent }"
+              :disabled="!projectOpened"
+              @click="onHeadMenuAction('memory')"
+            >
+              记忆
+            </button>
+            <button
+              type="button"
+              class="panel-head-menu-item"
+              role="menuitem"
+              :disabled="!projectOpened"
+              @click="onHeadMenuAction('new-session')"
+            >
+              新会话
+              <span class="panel-head-menu-hint">Ctrl+Shift+N</span>
+            </button>
+            <button
+              v-if="chatMessages.length"
+              type="button"
+              class="panel-head-menu-item danger"
+              role="menuitem"
+              :disabled="chatSending"
+              @click="onHeadMenuAction('clear')"
+            >
+              清空会话
+            </button>
+          </div>
         </div>
-        <span class="panel-meta" :class="{ warn: !configReady || !apiKeyReady }">
-          {{ aiConfigStatusText }}
-        </span>
         <span class="panel-head-divider" aria-hidden="true" />
         <button
           type="button"
-          class="panel-fold-btn"
+          class="icon panel-fold-btn"
           aria-label="收起 AI 助手"
           title="收起 AI 助手"
           @click="$emit('collapse-chat')"
@@ -146,22 +180,49 @@
             <path d="M8 10h8M8 14h5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.5" />
           </svg>
         </div>
-        <p class="chat-empty-title">AI 编程助手</p>
-        <p class="chat-empty-desc">Ask 只读问答；Plan 先出方案再确认执行；Build 直接探索并改代码。输入 <code>@</code> 引用文件。项目知识库请使用左栏「知识库」Tab。</p>
-        <div class="chips">
-          <button type="button" class="chip" :disabled="chatSending" @click="$emit('apply-example', '解释这个项目是做什么的')">
-            解释项目
-          </button>
-          <button type="button" class="chip" :disabled="chatSending" @click="$emit('apply-example', '解释这段代码在做什么')">
-            解释代码
-          </button>
-          <button type="button" class="chip" :disabled="chatSending" @click="$emit('apply-example', '帮我优化这段代码，并给出修改后的完整代码')">
-            优化代码
-          </button>
-          <button type="button" class="chip" :disabled="chatSending" @click="$emit('apply-example', '找出潜在 bug 并修复')">
-            修复 bug
-          </button>
-        </div>
+        <template v-if="!projectOpened">
+          <p class="chat-empty-title">先打开项目</p>
+          <p class="chat-empty-desc">选择本地文件夹后，即可在此提问或让 Agent 改代码。</p>
+          <button type="button" class="chat-empty-action" @click="$emit('open-project')">打开项目</button>
+        </template>
+        <template v-else-if="!configReady || !apiKeyReady">
+          <p class="chat-empty-title">先配置模型</p>
+          <p class="chat-empty-desc">{{ !configReady ? "前往 AI 配置填写接口与模型。" : "模型已选，请保存 API Key 后再发送。" }}</p>
+          <button type="button" class="chat-empty-action" @click="$emit('open-ai-config')">去配置</button>
+        </template>
+        <template v-else>
+          <p class="chat-empty-title">描述你要改什么</p>
+          <p class="chat-empty-desc">直接输入需求即可。可用 <code>@</code> 引用文件。</p>
+          <div class="chips">
+            <button type="button" class="chip" :disabled="chatSending" @click="$emit('apply-example', '解释这个项目是做什么的')">
+              解释项目
+            </button>
+            <button type="button" class="chip" :disabled="chatSending" @click="$emit('apply-example', '解释这段代码在做什么')">
+              解释代码
+            </button>
+            <button type="button" class="chip" :disabled="chatSending" @click="$emit('apply-example', '帮我优化这段代码，并给出修改后的完整代码')">
+              优化代码
+            </button>
+            <button type="button" class="chip" :disabled="chatSending" @click="$emit('apply-example', '找出潜在 bug 并修复')">
+              修复 bug
+            </button>
+          </div>
+          <p class="chat-empty-project-label">项目能力</p>
+          <div class="chips">
+            <button type="button" class="chip chip--ghost" :disabled="chatSending" @click="$emit('open-project-view', 'knowledge')">
+              构建知识库
+            </button>
+            <button type="button" class="chip chip--ghost" :disabled="chatSending" @click="$emit('open-project-view', 'health')">
+              跑架构评审
+            </button>
+            <button type="button" class="chip chip--ghost" :disabled="chatSending" @click="$emit('open-project-view', 'map')">
+              生成架构图
+            </button>
+            <button type="button" class="chip chip--ghost" :disabled="chatSending" @click="$emit('open-project-view', 'fix')">
+              扫描并修复
+            </button>
+          </div>
+        </template>
       </div>
 
       <div v-else class="msg-list">
@@ -301,106 +362,36 @@
         </div>
       </div>
       <div class="chat-bottom">
-        <div class="chat-status-row">
-          <span
-            v-if="chatSending && agentRunningStatus.trim()"
-            class="chat-running-status"
-            aria-live="polite"
-          >
-            <span class="status-pulse" aria-hidden="true" />
-            {{ agentRunningStatus }}
+        <div
+          v-if="showRecoveryBanner"
+          class="chat-recovery-banner"
+          role="status"
+          aria-live="polite"
+        >
+          <span class="chat-recovery-hint">
+            <template v-if="autoResumeSecondsLeft > 0">
+              {{ autoResumeSecondsLeft }}s 后自动恢复
+            </template>
+            <template v-else-if="stalledAssistantMsg">
+              运行似乎已卡住
+            </template>
+            <template v-else>
+              Agent 已中断，可恢复
+            </template>
           </span>
-          <span v-else-if="autoResumeSecondsLeft > 0" class="chat-recovery-hint chat-auto-resume-hint">
-            {{ autoResumeSecondsLeft }}s 后自动恢复（可取消）
-          </span>
-          <span v-else-if="stalledAssistantMsg" class="chat-recovery-hint chat-stall-hint">
-            运行似乎已卡住
-          </span>
-          <span v-else-if="recoverableAssistantMsg && !chatSending" class="chat-recovery-hint">
-            Agent 已中断，可恢复
-          </span>
-          <span v-else-if="chatError" class="chat-error">{{ chatError }}</span>
-
-        </div>
-        <div class="chat-action-row">
-          <button
-            v-if="totalTokenUsage"
-            type="button"
-            class="token-usage-btn"
-            :class="{ open: showTokenDetail }"
-            :title="showTokenDetail ? '收起用量详情' : '查看用量详情'"
-            @click="$emit('update:showTokenDetail', !showTokenDetail)"
-          >
-            {{ totalTokenUsage }}
-          </button>
-          <div v-if="showTokenDetail && tokenDetailData" class="token-detail-popover">
-            <div class="token-detail-row">
-              <span>助手回复</span>
-              <span>{{ tokenDetailData.assistantCount }} 条</span>
-            </div>
-            <div v-if="tokenDetailData.totalStreamChars > 0" class="token-detail-row">
-              <span>累计输出</span>
-              <span>{{ formatCharCount(tokenDetailData.totalStreamChars) }}</span>
-            </div>
-            <div v-if="tokenDetailData.maxContextChars > 0" class="token-detail-row">
-              <span>最大上下文</span>
-              <span>{{ formatCharCount(tokenDetailData.maxContextChars) }}</span>
-            </div>
-            <div class="token-detail-row">
-              <span>消息总数</span>
-              <span>{{ tokenDetailData.totalMessages }}</span>
-            </div>
-          </div>
-          <div class="composer-mode-row">
-            <div class="chat-mode-switch" role="group" aria-label="对话模式">
-            <button
-              type="button"
-              class="mode-btn"
-              :class="{ active: chatMode === 'ask' }"
-              :aria-pressed="chatMode === 'ask'"
-              :disabled="chatSending"
-              title="只读探索，自然语言答疑"
-              @click="$emit('update:chatMode', 'ask')"
-            >
-              Ask
-            </button>
-            <button
-              type="button"
-              class="mode-btn"
-              :class="{ active: chatMode === 'plan' }"
-              :aria-pressed="chatMode === 'plan'"
-              :disabled="chatSending"
-              title="先输出结构化修改方案，确认后再执行"
-              @click="$emit('update:chatMode', 'plan')"
-            >
-              Plan
-            </button>
-            <button
-              type="button"
-              class="mode-btn"
-              :class="{ active: chatMode === 'build' }"
-              :aria-pressed="chatMode === 'build'"
-              :disabled="chatSending"
-              title="直接探索并修改文件，无需先出方案"
-              @click="$emit('update:chatMode', 'build')"
-            >
-              Build
-            </button>
-          </div>
-          </div>
-          <div class="chat-actions">
+          <div class="chat-recovery-actions">
             <button
               v-if="autoResumeSecondsLeft > 0"
               type="button"
-              class="secondary"
+              class="ghost tiny"
               @click="$emit('cancel-auto-resume')"
             >
-              取消恢复
+              取消
             </button>
             <button
               v-if="stalledAssistantMsg"
               type="button"
-              class="secondary resume-bottom-btn"
+              class="secondary tiny resume-bottom-btn"
               :disabled="!configReady || !projectOpened"
               :title="resumeBottomBtnTitle"
               @click="$emit('force-recover-stalled-run', stalledAssistantMsg.id)"
@@ -410,13 +401,107 @@
             <button
               v-else-if="recoverableAssistantMsg && !chatSending"
               type="button"
-              class="secondary resume-bottom-btn"
+              class="secondary tiny resume-bottom-btn"
               :disabled="!configReady || !projectOpened"
               :title="resumeBottomBtnTitle"
               @click="$emit('resume-agent-run', recoverableAssistantMsg.id)"
             >
               {{ autoResumeSecondsLeft > 0 ? "立即继续" : recoverableResumeLabel }}
             </button>
+          </div>
+        </div>
+
+        <div
+          v-if="chatSending && agentRunningStatus.trim()"
+          class="chat-status-row"
+        >
+          <span class="chat-running-status" aria-live="polite">
+            <span class="status-pulse" aria-hidden="true" />
+            {{ agentRunningStatus }}
+          </span>
+        </div>
+        <div v-else-if="chatError && !showRecoveryBanner" class="chat-status-row">
+          <span class="chat-error">{{ chatError }}</span>
+        </div>
+
+        <div class="chat-action-row">
+          <div class="composer-mode-row">
+            <div class="chat-mode-switch" role="group" aria-label="对话模式">
+              <button
+                type="button"
+                class="mode-btn mode-btn-auto"
+                :class="{ active: chatMode === 'auto' }"
+                :aria-pressed="chatMode === 'auto'"
+                :disabled="chatSending"
+                title="自动识别意图，智能切换模式"
+                @click="$emit('update:chatMode', 'auto')"
+              >
+                Auto
+              </button>
+              <button
+                type="button"
+                class="mode-btn"
+                :class="{ active: chatMode === 'ask' }"
+                :aria-pressed="chatMode === 'ask'"
+                :disabled="chatSending"
+                title="只读探索，自然语言答疑"
+                @click="$emit('update:chatMode', 'ask')"
+              >
+                Ask
+              </button>
+              <button
+                type="button"
+                class="mode-btn"
+                :class="{ active: chatMode === 'plan' }"
+                :aria-pressed="chatMode === 'plan'"
+                :disabled="chatSending"
+                title="先输出结构化修改方案，确认后再执行"
+                @click="$emit('update:chatMode', 'plan')"
+              >
+                Plan
+              </button>
+              <button
+                type="button"
+                class="mode-btn"
+                :class="{ active: chatMode === 'build' }"
+                :aria-pressed="chatMode === 'build'"
+                :disabled="chatSending"
+                title="直接探索并修改文件，无需先出方案"
+                @click="$emit('update:chatMode', 'build')"
+              >
+                Build
+              </button>
+            </div>
+            <button
+              v-if="totalTokenUsage"
+              type="button"
+              class="token-usage-btn"
+              :class="{ open: showTokenDetail }"
+              :title="showTokenDetail ? '收起用量详情' : '查看用量详情'"
+              @click="$emit('update:showTokenDetail', !showTokenDetail)"
+            >
+              {{ totalTokenUsage }}
+            </button>
+            <div v-if="showTokenDetail && tokenDetailData" class="token-detail-popover">
+              <div class="token-detail-row">
+                <span>助手回复</span>
+                <span>{{ tokenDetailData.assistantCount }} 条</span>
+              </div>
+              <div v-if="tokenDetailData.totalStreamChars > 0" class="token-detail-row">
+                <span>累计输出</span>
+                <span>{{ formatCharCount(tokenDetailData.totalStreamChars) }}</span>
+              </div>
+              <div v-if="tokenDetailData.maxContextChars > 0" class="token-detail-row">
+                <span>最大上下文</span>
+                <span>{{ formatCharCount(tokenDetailData.maxContextChars) }}</span>
+              </div>
+              <div class="token-detail-row">
+                <span>消息总数</span>
+                <span>{{ tokenDetailData.totalMessages }}</span>
+              </div>
+            </div>
+          </div>
+          <div class="chat-actions">
             <button v-if="chatSending" type="button" class="secondary" @click="$emit('stop-agent')">停止</button>
             <button type="button" class="primary send-btn" :disabled="!canSendChat" @click="$emit('send-chat')">
               {{ chatSending ? "打断并发送" : "发送" }}
@@ -500,7 +585,7 @@
             :value="projectMemoryDraft"
             :maxlength="projectMemoryMaxChars"
             placeholder="# 项目记忆&#10;&#10;## 术语 / ## 导航 / ## 偏好"
-            @input="$emit('update:projectMemoryDraft', ($event.target as HTMLTextAreaElement).value)"
+            @input="$emit('update:projectMemoryDraft', getEventValue($event))"
           />
         </div>
 
@@ -531,7 +616,7 @@
                 <textarea
                   class="project-memory-editor project-memory-editor-detail"
                   :value="skillDraftBody"
-                  @input="$emit('update:skillDraftBody', ($event.target as HTMLTextAreaElement).value)"
+                  @input="$emit('update:skillDraftBody', getEventValue($event))"
                 />
               </template>
               <div v-else class="project-memory-status">选择左侧 Skill 查看内容</div>
@@ -615,7 +700,7 @@ import type { PendingSkillProposal } from "../../services/projectSkillProposal";
 import type { ExplorationIndexEntry, SkillIndexEntry, SkillKind } from "../../services/projectSkills";
 import type { ProjectMemoryTab } from "../../composables/useProjectMemory";
 import type { VibeChatSessionMeta } from "../../services/vibeChatStorage";
-import { CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount } from "../../utils/vibeHelpers";
+import { CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount, getEventValue } from "../../utils/vibeHelpers";
 import { scheduleScrollContainerToBottom, scrollContainerToBottom } from "../../utils/scrollViewport";
 import { resolveAgentResumeButtonLabel } from "../../services/agentRecovery";
 import { renderMarkdown } from "../../utils/renderMarkdown";
@@ -762,6 +847,13 @@ const recoverableResumeLabel = computed(() => {
   return resolveAgentResumeButtonLabel(msg);
 });
 
+const showRecoveryBanner = computed(
+  () =>
+    props.autoResumeSecondsLeft > 0
+    || Boolean(props.stalledAssistantMsg)
+    || Boolean(props.recoverableAssistantMsg && !props.chatSending),
+);
+
 const resumeBottomBtnTitle = computed(() => {
   if (props.configReady && props.projectOpened) return undefined;
   if (!props.configReady) return "请先配置 AI 模型";
@@ -805,6 +897,9 @@ const emit = defineEmits<{
   (e: "switch-to-adjacent-session", delta: number): void;
   (e: "clear-pending-queue"): void;
   (e: "apply-example", text: string): void;
+  (e: "open-project"): void;
+  (e: "open-ai-config"): void;
+  (e: "open-project-view", view: "knowledge" | "health" | "map" | "fix"): void;
   (e: "apply-suggestion", suggestion: AgentSuggestion): void;
   (e: "copy-session-info", session: VibeChatSessionMeta): void;
   (e: "copy-session-name-path", session: VibeChatSessionMeta): void;
@@ -840,6 +935,22 @@ const emit = defineEmits<{
 
 const chatScrollRef = ref<HTMLElement | null>(null);
 const chatDropZoneRef = ref<HTMLElement | null>(null);
+const headMenuRef = ref<HTMLElement | null>(null);
+const headMenuOpen = ref(false);
+
+function onHeadMenuAction(action: "memory" | "new-session" | "clear") {
+  headMenuOpen.value = false;
+  if (action === "memory") emit("open-project-memory");
+  else if (action === "new-session") emit("start-new-session");
+  else emit("clear-chat");
+}
+
+function onHeadMenuPointerDown(event: PointerEvent) {
+  const el = headMenuRef.value;
+  if (!el || !headMenuOpen.value) return;
+  const target = event.target as Node | null;
+  if (target && !el.contains(target)) headMenuOpen.value = false;
+}
 
 const isAtBottom = ref(true);
 const showScrollToBottom = computed(() => !isAtBottom.value && props.chatMessages.length > 0);
@@ -907,6 +1018,7 @@ let sessionScrollPending = false;
 let sessionScrollClearTimer: number | null = null;
 
 onMounted(() => {
+  document.addEventListener("pointerdown", onHeadMenuPointerDown, true);
   void nextTick(() => {
     checkScrollPosition();
     const scrollEl = chatScrollRef.value;
@@ -924,6 +1036,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  document.removeEventListener("pointerdown", onHeadMenuPointerDown, true);
   scrollResizeObserver?.disconnect();
   scrollResizeObserver = null;
   if (sessionScrollClearTimer) { clearTimeout(sessionScrollClearTimer); sessionScrollClearTimer = null; }
@@ -959,16 +1072,9 @@ function removeQuotedMessage(index: number) {
 .panel-head-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   flex-shrink: 0;
-  overflow: hidden;
-}
-
-.panel-head-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
+  min-width: 0;
 }
 
 .panel-head-divider {
@@ -976,36 +1082,99 @@ function removeQuotedMessage(index: number) {
   height: 18px;
   flex-shrink: 0;
   background: rgba(255, 255, 255, 0.1);
+  margin: 0 2px;
 }
 
-.panel-fold-btn {
-  display: flex;
+.config-status-btn {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
   width: 28px;
   height: 28px;
+  flex-shrink: 0;
   padding: 0;
   border: none;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(139, 148, 158, 0.88);
+  background: transparent;
+  color: rgba(63, 185, 80, 0.9);
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
 }
 
-.panel-fold-btn:hover {
+.config-status-btn:hover {
+  background: var(--surface-hover, rgba(255, 255, 255, 0.06));
+}
+
+.config-status-btn.warn {
+  color: #e0af68;
+}
+
+.panel-head-menu {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.panel-more-btn.open {
   background: rgba(255, 255, 255, 0.1);
   color: rgba(220, 225, 230, 0.96);
 }
 
-.panel-fold-btn:active {
-  transform: scale(0.96);
+.panel-head-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  min-width: 168px;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(22, 27, 34, 0.98);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
-.panel-fold-btn:focus-visible {
-  outline: 2px solid rgba(88, 166, 255, 0.55);
-  outline-offset: 1px;
+.panel-head-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(230, 237, 243, 0.92);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.panel-head-menu-item:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  opacity: 1;
+}
+
+.panel-head-menu-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.panel-head-menu-item.active {
+  color: #91beff;
+}
+
+.panel-head-menu-item.danger {
+  color: #f85149;
+}
+
+.panel-head-menu-hint {
+  font-size: 10px;
+  font-weight: 400;
+  color: rgba(139, 148, 158, 0.75);
+}
+
+.panel-fold-btn {
+  width: 28px;
+  height: 28px;
 }
 
 .session-copy-hint {
@@ -1186,12 +1355,37 @@ function removeQuotedMessage(index: number) {
   color: #91beff;
 }
 
+.chat-empty-action {
+  margin-top: 4px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(145, 190, 255, 0.35);
+  background: rgba(31, 111, 235, 0.22);
+  color: #c9ddff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chat-empty-action:hover {
+  background: rgba(31, 111, 235, 0.34);
+}
+
+.chat-empty-project-label {
+  margin: 14px 0 0;
+  font-size: 11px;
+  color: rgba(139, 148, 158, 0.85);
+  letter-spacing: 0.02em;
+}
+
 .composer-mode-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   min-width: 0;
+  flex: 1;
 }
 
 .chips {
@@ -1222,6 +1416,13 @@ function removeQuotedMessage(index: number) {
 .chip:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.chip--ghost {
+  border-radius: 8px;
+  border-style: dashed;
+  background: transparent;
+  color: rgba(139, 148, 158, 0.95);
 }
 
 .agent-suggestion-chips {
@@ -1355,15 +1556,35 @@ function removeQuotedMessage(index: number) {
   padding-bottom: 4px;
 }
 
+.chat-recovery-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(88, 166, 255, 0.28);
+  background: rgba(88, 166, 255, 0.08);
+}
+
+.chat-recovery-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .chat-status-row {
   position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 8px;
   min-height: 0;
   min-width: 0;
+  margin-bottom: 4px;
 }
 
 .chat-running-status {
@@ -1399,6 +1620,16 @@ function removeQuotedMessage(index: number) {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.chat-action-row .chat-mode-switch {
+  flex-shrink: 0;
+}
+
+.chat-action-row .chat-actions {
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 .chat-mode-switch {
@@ -1437,6 +1668,16 @@ function removeQuotedMessage(index: number) {
 .mode-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.mode-btn-auto {
+  position: relative;
+}
+
+.mode-btn-auto.active {
+  background: linear-gradient(135deg, rgba(129, 199, 132, 0.25), rgba(129, 199, 132, 0.15));
+  color: #81c784;
+  box-shadow: 0 1px 3px rgba(129, 199, 132, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
 .chat-actions {

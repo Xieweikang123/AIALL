@@ -127,7 +127,7 @@
           :batch-committing-index="batchCommittingIndex"
           :ai-batch-grouping="aiBatchGrouping"
           :ai-batch-grouping-step="aiBatchGroupingStep"
-          :ai-batch-grouping-detail="aiBatchGroupingDetail"
+
           :git-ahead-commits="gitAheadCommits"
           :git-ahead-commits-open="gitAheadCommitsOpen"
           :git-ahead-commits-loading="gitAheadCommitsLoading"
@@ -209,6 +209,7 @@
           @create-branch="createBranch"
           @delete-branch="deleteBranch"
           @focus-git-panel="focusGitPanel"
+          @open-file="openFile"
         />
 
         <div v-if="gitPanelMode === 'files' && !projectOpened" class="panel-empty">
@@ -574,7 +575,7 @@
           :batch-committing-index="batchCommittingIndex"
           :ai-batch-grouping="aiBatchGrouping"
           :ai-batch-grouping-step="aiBatchGroupingStep"
-          :ai-batch-grouping-detail="aiBatchGroupingDetail"
+
           :git-ahead-commits="gitAheadCommits"
           :git-ahead-commits-open="gitAheadCommitsOpen"
           :git-ahead-commits-loading="gitAheadCommitsLoading"
@@ -655,6 +656,7 @@
           @checkout-branch="(name) => checkoutBranch(name)"
           @create-branch="createBranch"
           @delete-branch="deleteBranch"
+          @open-file="openFile"
         />
       </section>
 
@@ -1369,7 +1371,7 @@ const {
   doResetCommit, undoLastCommit,
   refreshGitStashes, doStashSave, doStashApply, doStashPop, doStashDrop,
   batchGroups, batchGroupsFromAi, batchMessages, batchSectionOpen, batchCommittingIndex, commitBatchGroup, commitAllBatches,
-  aiBatchGrouping, aiBatchGroupingStep, aiBatchGroupingDetail, generateAiBatchGroups, flushBatchDraftPersist,
+  aiBatchGrouping, aiBatchGroupingStep, generateAiBatchGroups, flushBatchDraftPersist,
 } = git;
 
 function openProjectPanelView(view: "knowledge" | "health" | "map" | "fix") {

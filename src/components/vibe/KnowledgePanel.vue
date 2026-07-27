@@ -348,7 +348,7 @@
                 :value="knowledgeDraft"
                 rows="18"
                 spellcheck="false"
-                @input="emit('update:draft', ($event.target as HTMLTextAreaElement).value)"
+                @input="emit('update:draft', getEventValue($event))"
               />
 
               <div v-if="exploreRun.tools.length && exploreRun.running" class="knowledge-tools">
@@ -490,6 +490,7 @@ import {
   isKnowledgeMarkdownFilePath,
   parseKnowledgeTocSections,
 } from "../../services/projectReportDisplay";
+import { getEventValue } from "../../utils/vibeHelpers";
 import { renderMarkdown, renderMarkdownLite } from "../../utils/renderMarkdown";
 import { createStreamingMarkdownThrottle } from "../../utils/streamingMarkdownThrottle";
 import { prepareStreamingMarkdownForRender } from "../../utils/streamingMarkdownTrim";
@@ -701,7 +702,8 @@ watch(
   (sections) => {
     if (!searchQuery.value.trim()) return;
     if (!sections.length) return;
-    void nextTick(() => scrollToSection(sections[0]!.id));
+    const first = sections[0];
+    void nextTick(() => scrollToSection(first.id));
   },
 );
 
@@ -923,7 +925,7 @@ function updateActiveSectionFromScroll() {
   if (!scrollRoot || !root || props.editing || !tocSections.value.length) return;
 
   const anchorTop = scrollRoot.getBoundingClientRect().top + 12;
-  let nextId = tocSections.value[0]!.id;
+  let nextId = tocSections.value[0].id;
 
   for (const section of tocSections.value) {
     const el = root.querySelector(`#${section.id}`);

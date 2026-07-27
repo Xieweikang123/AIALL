@@ -48,12 +48,13 @@ export { COMPOSER_PENDING_DRAFT_KEY } from "../utils/composerDraftStorage";
 </script>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { nextTick, onMounted, ref, watch } from "vue";
 
 import {
   composerDraftStorageKey,
   isPlaceholderComposerHtml,
 } from "../utils/composerDraftStorage";
+import DOMPurify from "dompurify";
 import { lsGet, lsSet, lsSetJson, lsRemove, lsGetJson } from "../utils/localStorageSafe";
 import {
   deleteVibeChatSession,
@@ -473,7 +474,7 @@ function isPlaceholderEditorHtml(html: string): boolean {
 function applySavedDraft(root: HTMLElement, saved: string) {
   const looksLikeHtml = /<[a-z][\s\S]*>/i.test(saved);
   if (looksLikeHtml) {
-    root.innerHTML = saved;
+    root.innerHTML = DOMPurify.sanitize(saved);
     bindImageChipClickHandlers(root);
   } else {
     root.innerHTML = "";

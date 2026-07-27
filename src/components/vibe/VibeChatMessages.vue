@@ -487,6 +487,7 @@ const CHAT_MODE_LABELS: Record<string, string> = {
   build: "改代码",
   plan: "方案",
   explore: "探索",
+  auto: "自动",
 };
 
 function chatModeLabel(mode: string | undefined): string {

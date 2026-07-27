@@ -17,6 +17,7 @@
           ]"
           :title="tabTitle(tab)"
           @click="$emit('switch-tab', tab.path)"
+          @mousedown.middle.prevent="$emit('close-tab', tab.path)"
           @contextmenu.prevent="onTabContextMenu($event, tab.path)"
         >
           <span v-if="tabKindLabel(tab)" class="editor-tab-badge">{{ tabKindLabel(tab) }}</span>

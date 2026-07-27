@@ -5,6 +5,7 @@
       <span v-if="building || annotating" class="code-map-badge code-map-badge--pulse">
         {{ annotating ? "标注中" : "生成中" }}
       </span>
+      <span v-else-if="isStale" class="code-map-badge code-map-badge--warn">可能过期</span>
       <span v-else-if="generatedAtLabel" class="code-map-meta">{{ generatedAtLabel }}</span>
       <div class="code-map-head-actions">
         <button
@@ -47,7 +48,10 @@
 
     <p v-if="statusText" class="code-map-hint" role="status">{{ statusText }}</p>
 
-    <div v-if="loading && !hasDocument" class="code-map-loading">加载中…</div>
+    <div v-if="loading && !hasDocument" class="code-map-loading">
+      <span class="panel-loading-spinner" aria-hidden="true" />
+      <p class="code-map-empty-title">正在加载架构图…</p>
+    </div>
 
     <div v-else-if="hasDocument && document" class="code-map-body">
       <div class="code-map-canvas-wrap">
@@ -57,11 +61,22 @@
           :positions="positions"
           :collapsed-ids="collapsedIds"
           :selected-node-id="selectedNodeId"
+          :focus-node-id="focusNodeId"
+          :focus-epoch="focusEpoch"
           @select="emit('select', $event)"
           @toggle-collapse="emit('toggle-collapse', $event)"
           @node-moved="(id, x, y) => emit('node-moved', id, x, y)"
           @open-file="emit('open-file', $event)"
         />
+        <div
+          v-if="building || annotating"
+          class="code-map-canvas-busy"
+          role="status"
+          aria-live="polite"
+        >
+          <span class="panel-loading-spinner" aria-hidden="true" />
+          <span>{{ annotating ? "标注中…" : "生成中…" }}</span>
+        </div>
       </div>
       <aside class="code-map-side" aria-label="节点详情">
         <template v-if="selectedNode">
@@ -77,7 +92,8 @@
             <div class="code-map-side-label">关联边</div>
             <ul>
               <li v-for="edge in relatedEdges" :key="edge.id">
-                {{ edge.kind }}: {{ edge.source === selectedNode.id ? "→" : "←" }}
+                {{ edgeKindLabel(edge.kind) }}:
+                {{ edge.source === selectedNode.id ? "→" : "←" }}
                 {{ edge.source === selectedNode.id ? shortId(edge.target) : shortId(edge.source) }}
               </li>
             </ul>
@@ -112,7 +128,15 @@
 
     <div v-else class="code-map-empty">
       <p class="code-map-empty-title">尚未生成架构图</p>
-      <p class="code-map-empty-desc">点击左侧「生成架构图」，将根据目录、入口与路由构建可交互模块脑图。</p>
+      <p class="code-map-empty-desc">根据目录、入口与路由构建可交互模块脑图。</p>
+      <button
+        type="button"
+        class="code-map-btn code-map-btn--primary"
+        :disabled="building || loading"
+        @click="emit('generate')"
+      >
+        {{ building ? "生成中…" : "生成架构图" }}
+      </button>
     </div>
   </div>
 </template>
@@ -120,6 +144,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import {
+  edgeKindLabel,
   kindLabel,
   type CodeMapDocument,
   type CodeMapEdge,
@@ -143,6 +168,9 @@ const props = defineProps<{
   error: string;
   generatedAtLabel: string;
   layoutEpoch: number;
+  focusNodeId?: string | null;
+  focusEpoch?: number;
+  isStale?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -155,6 +183,7 @@ const emit = defineEmits<{
   "export-mermaid": [];
   "export-svg": [];
   "expand-chat": [];
+  generate: [];
 }>();
 
 const statusText = computed(() => props.error || props.message);
@@ -181,7 +210,7 @@ function shortId(id: string): string {
   height: 100%;
   min-height: 0;
   padding: 12px 14px 14px;
-  color: #cdd6f4;
+  color: var(--text, rgba(255, 255, 255, 0.92));
 }
 
 .code-map-head {
@@ -200,19 +229,24 @@ function shortId(id: string): string {
 
 .code-map-meta {
   font-size: 12px;
-  color: #6c7086;
+  color: var(--text-dim, rgba(255, 255, 255, 0.48));
 }
 
 .code-map-badge {
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 999px;
-  background: rgba(137, 180, 250, 0.15);
-  color: #89b4fa;
+  background: color-mix(in srgb, var(--accent-color, #58a6ff) 18%, transparent);
+  color: var(--accent-color, #58a6ff);
 }
 
 .code-map-badge--pulse {
   animation: code-map-pulse 1.2s ease-in-out infinite;
+}
+
+.code-map-badge--warn {
+  background: color-mix(in srgb, var(--warning-color, #d29922) 18%, transparent);
+  color: var(--warning-color, #d29922);
 }
 
 @keyframes code-map-pulse {
@@ -227,10 +261,10 @@ function shortId(id: string): string {
 }
 
 .code-map-btn {
-  border: 1px solid rgba(137, 180, 250, 0.35);
-  background: rgba(137, 180, 250, 0.12);
-  color: #cdd6f4;
-  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--accent-color, #58a6ff) 40%, transparent);
+  background: color-mix(in srgb, var(--accent-color, #58a6ff) 14%, transparent);
+  color: var(--text, rgba(255, 255, 255, 0.92));
+  border-radius: var(--radius-sm, 6px);
   padding: 4px 10px;
   font-size: 12px;
   cursor: pointer;
@@ -238,33 +272,49 @@ function shortId(id: string): string {
 
 .code-map-btn--ghost {
   background: transparent;
-  border-color: rgba(205, 214, 244, 0.16);
+  border-color: var(--border, rgba(255, 255, 255, 0.1));
 }
 
-.code-map-btn:hover {
-  border-color: rgba(137, 180, 250, 0.55);
+.code-map-btn--primary {
+  margin-top: 10px;
+  padding: 7px 16px;
+  font-size: 13px;
+  background: var(--primary, #1f6feb);
+  border-color: var(--primary, #1f6feb);
+  color: #fff;
+}
+
+.code-map-btn--primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.code-map-btn:hover:not(:disabled) {
+  border-color: var(--accent-hover, #79c0ff);
 }
 
 .code-map-hint {
   margin: 0 0 8px;
   font-size: 12px;
-  color: #a6adc8;
+  color: var(--muted, rgba(255, 255, 255, 0.62));
 }
 
 .code-map-loading,
 .code-map-empty {
   flex: 1;
-  display: grid;
-  place-content: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   text-align: center;
-  color: #a6adc8;
-  gap: 6px;
+  color: var(--muted, rgba(255, 255, 255, 0.62));
+  gap: 8px;
 }
 
 .code-map-empty-title {
   margin: 0;
   font-size: 14px;
-  color: #cdd6f4;
+  color: var(--text, rgba(255, 255, 255, 0.92));
 }
 
 .code-map-empty-desc {
@@ -282,21 +332,38 @@ function shortId(id: string): string {
 }
 
 .code-map-canvas-wrap {
+  position: relative;
   min-width: 0;
   min-height: 0;
 }
 
-.code-map-side {
-  border: 1px solid rgba(205, 214, 244, 0.1);
+.code-map-canvas-busy {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: color-mix(in srgb, var(--bg, #0b1220) 55%, transparent);
+  backdrop-filter: blur(2px);
+  color: var(--text, rgba(255, 255, 255, 0.92));
+  font-size: 13px;
   border-radius: 8px;
-  background: #181825;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.code-map-side {
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: 8px;
+  background: var(--bg-secondary, rgba(17, 24, 39, 0.65));
   padding: 12px;
   overflow: auto;
 }
 
 .code-map-side-kind {
   font-size: 11px;
-  color: #89b4fa;
+  color: var(--accent-color, #58a6ff);
   margin-bottom: 4px;
 }
 
@@ -314,7 +381,7 @@ function shortId(id: string): string {
 .code-map-link {
   border: none;
   background: none;
-  color: #89b4fa;
+  color: var(--accent-color, #58a6ff);
   cursor: pointer;
   padding: 0;
   text-align: left;
@@ -325,7 +392,7 @@ function shortId(id: string): string {
 .code-map-side-summary {
   margin: 0 0 10px;
   font-size: 12px;
-  color: #a6adc8;
+  color: var(--muted, rgba(255, 255, 255, 0.62));
   line-height: 1.45;
 }
 
@@ -335,7 +402,7 @@ function shortId(id: string): string {
 
 .code-map-side-label {
   font-size: 11px;
-  color: #6c7086;
+  color: var(--text-dim, rgba(255, 255, 255, 0.48));
   margin-bottom: 4px;
 }
 
@@ -343,7 +410,7 @@ function shortId(id: string): string {
   margin: 0;
   padding-left: 16px;
   font-size: 11px;
-  color: #a6adc8;
+  color: var(--muted, rgba(255, 255, 255, 0.62));
 }
 
 .code-map-side-actions {
@@ -355,7 +422,7 @@ function shortId(id: string): string {
 .code-map-side-empty {
   margin: 0;
   font-size: 12px;
-  color: #6c7086;
+  color: var(--text-dim, rgba(255, 255, 255, 0.48));
   line-height: 1.5;
 }
 

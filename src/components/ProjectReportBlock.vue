@@ -61,7 +61,7 @@ import { parseProjectReportDisplay } from "../services/projectReportDisplay";
 const props = withDefaults(
   defineProps<{
     content: string;
-    chatMode?: "ask" | "build" | "plan" | "explore";
+    chatMode?: "ask" | "build" | "plan" | "explore" | "auto";
     streaming?: boolean;
     canContinue?: boolean;
     showArchiveLink?: boolean;

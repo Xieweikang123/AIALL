@@ -1,10 +1,11 @@
 <template>
   <div class="review-panel">
-    <div v-if="!projectOpened" class="panel-empty">
-      <span class="panel-empty-icon" aria-hidden="true">🏛</span>
-      <p class="panel-empty-title">尚未打开项目</p>
-      <p class="panel-empty-hint">打开项目后，在「项目 → 评审」中启动架构评审</p>
-    </div>
+    <PanelEmptyState
+      v-if="!projectOpened"
+      icon="🏛"
+      title="尚未打开项目"
+      hint="打开项目后，在「项目 → 评审」中启动架构评审"
+    />
 
     <template v-else>
       <div v-if="reviewRun.running" class="review-status">
@@ -179,6 +180,7 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
+import PanelEmptyState from "./PanelEmptyState.vue";
 import { formatArchitectReviewVerdictLabel } from "../../../shared/projectArchitectReview";
 import type { ArchitectReviewMeta } from "../../services/vibeProjectArchitectReviewClient";
 import type { ArchitectReviewRunState } from "../../composables/useProjectArchitectReview";

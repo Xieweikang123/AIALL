@@ -53,7 +53,7 @@ const props = withDefaults(
     activityDetailed?: boolean;
     activityExpanded?: boolean;
     canExecutePlan?: boolean;
-    chatMode?: "ask" | "build" | "plan" | "explore";
+    chatMode?: "ask" | "build" | "plan" | "explore" | "auto";
     showDebug?: boolean;
     debugExpanded?: boolean;
     showProcess?: boolean;

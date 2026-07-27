@@ -17,7 +17,7 @@
         class="path-input"
         type="text"
         placeholder="项目路径"
-        @input="$emit('update:projectPath', ($event.target as HTMLInputElement).value)"
+        @input="$emit('update:projectPath', getEventValue($event))"
         @keydown.enter="$emit('open-project-by-input')"
       />
       <span v-else class="path-current" :title="projectPath">{{ currentFolderName }}</span>
@@ -145,11 +145,20 @@
       </div>
       <div class="toolbar-sep" />
       <nav class="toolbar-nav" aria-label="快捷导航">
-        <button type="button" class="toolbar-nav-btn" title="AI 对话" @click="router.push('/chat')">
+        <button type="button" class="toolbar-nav-btn" title="通用对话：网页总结 / 桌面自动化（非改码）" @click="router.push('/chat')">
           <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v5A1.5 1.5 0 0 1 12.5 10H8l-3 2.5V10H3.5A1.5 1.5 0 0 1 2 8.5v-5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
           </svg>
           <span class="toolbar-nav-label">对话</span>
+        </button>
+        <button type="button" class="toolbar-nav-btn" title="图标模板：供对话页桌面自动化匹配点击" @click="router.push('/icon-templates')">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <rect x="2.5" y="2.5" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/>
+            <rect x="8.5" y="2.5" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/>
+            <rect x="2.5" y="8.5" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/>
+            <path d="M9.5 11h3M11 9.5v3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+          </svg>
+          <span class="toolbar-nav-label">模板</span>
         </button>
         <button type="button" class="toolbar-nav-btn" title="AI 配置" @click="router.push('/ai-config')">
           <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -158,7 +167,13 @@
           </svg>
           <span class="toolbar-nav-label">配置</span>
         </button>
-        <button type="button" class="toolbar-nav-btn" title="通知测试" @click="$emit('test-notification')">
+        <button
+          v-if="isDev"
+          type="button"
+          class="toolbar-nav-btn"
+          title="通知测试"
+          @click="$emit('test-notification')"
+        >
           <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M8 1.8c-2.2 0-3.5 1.8-3.5 4v2.2L3.2 10.5h9.6L11.5 8V5.8c0-2.2-1.3-4-3.5-4Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
             <path d="M6.5 12.5a1.5 1.5 0 0 0 3 0" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
@@ -172,6 +187,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { useRouter } from "vue-router";
+import { getEventValue } from "../../utils/vibeHelpers";
 import {
   listProjectHistory,
   removeProjectFromHistory,
@@ -189,6 +205,8 @@ interface Props {
 }
 
 const props = defineProps<Props>();
+
+const isDev = import.meta.env.DEV;
 
 const emit = defineEmits<{
   (e: "update:projectPath", value: string): void;

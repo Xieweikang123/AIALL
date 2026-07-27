@@ -33,9 +33,10 @@
 </template>
 
 <script setup lang="ts">
-import { markRaw, ref, watch } from "vue";
+import { markRaw, nextTick, ref, watch } from "vue";
 import {
   VueFlow,
+  useVueFlow,
   type NodeMouseEvent,
   type NodeTypesObject,
 } from "@vue-flow/core";
@@ -46,7 +47,7 @@ import "@vue-flow/core/dist/style.css";
 import "@vue-flow/core/dist/theme-default.css";
 import "@vue-flow/controls/dist/style.css";
 import "@vue-flow/minimap/dist/style.css";
-import type { CodeMapDocument, CodeMapNodeKind } from "../../../shared/codeMapTypes";
+import { edgeKindLabel, type CodeMapDocument, type CodeMapNodeKind } from "../../../shared/codeMapTypes";
 import { visibleNodeIds } from "../../utils/codeMapLayout";
 import CodeMapFlowNode from "./CodeMapFlowNode.vue";
 
@@ -55,6 +56,8 @@ const props = defineProps<{
   positions: Record<string, { x: number; y: number }>;
   collapsedIds: Set<string>;
   selectedNodeId: string | null;
+  focusNodeId?: string | null;
+  focusEpoch?: number;
 }>();
 
 const emit = defineEmits<{
@@ -73,6 +76,21 @@ const nodeTypes = {
 const localNodes = ref<any[]>([]);
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const localEdges = ref<any[]>([]);
+
+const { setCenter, findNode } = useVueFlow({ id: "code-map-flow" });
+
+function edgeStroke(kind: string): string {
+  switch (kind) {
+    case "depends":
+      return "#d29922";
+    case "routes_to":
+      return "#58a6ff";
+    case "imports":
+      return "#3fb950";
+    default:
+      return "rgba(255, 255, 255, 0.28)";
+  }
+}
 
 function rebuildGraph() {
   const parentsWithChildren = new Set<string>();
@@ -108,28 +126,97 @@ function rebuildGraph() {
       id: e.id,
       source: e.source,
       target: e.target,
-      animated: e.kind === "depends" || e.kind === "routes_to",
-      label: e.kind === "contains" ? undefined : e.kind,
-      style: {
-        stroke:
-          e.kind === "depends"
-            ? "#f9e2af"
-            : e.kind === "routes_to"
-              ? "#89b4fa"
-              : "rgba(205, 214, 244, 0.35)",
-      },
+      animated: e.kind === "depends" || e.kind === "routes_to" || e.kind === "imports",
+      label: e.kind === "contains" ? undefined : edgeKindLabel(e.kind),
+      style: { stroke: edgeStroke(e.kind) },
     }));
+}
+
+function patchPositions() {
+  for (const node of localNodes.value) {
+    const pos = props.positions[node.id];
+    if (!pos) continue;
+    if (node.position.x !== pos.x || node.position.y !== pos.y) {
+      node.position = { x: pos.x, y: pos.y };
+    }
+  }
+}
+
+function patchSelection() {
+  for (const node of localNodes.value) {
+    node.selected = props.selectedNodeId === node.id;
+  }
+}
+
+function patchSummaries() {
+  const byId = new Map(props.document.nodes.map((n) => [n.id, n]));
+  for (const node of localNodes.value) {
+    const src = byId.get(node.id);
+    if (!src) continue;
+    if (node.data.summary !== src.summary) {
+      node.data = { ...node.data, summary: src.summary };
+    }
+  }
+}
+
+async function centerOnFocus() {
+  const id = props.focusNodeId?.trim();
+  if (!id) return;
+  await nextTick();
+  // Wait a frame so Vue Flow has measured nodes after remount/rebuild.
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  const node = findNode(id);
+  if (!node) return;
+  const w = node.dimensions?.width || 200;
+  const h = node.dimensions?.height || 72;
+  setCenter(node.position.x + w / 2, node.position.y + h / 2, {
+    zoom: 1,
+    duration: 280,
+  });
 }
 
 watch(
   () => ({
     docKey: `${props.document.generatedAt}:${props.document.nodes.length}:${props.document.edges.length}`,
-    posKey: JSON.stringify(props.positions),
     collapsedKey: [...props.collapsedIds].sort().join("|"),
-    selected: props.selectedNodeId,
-    summaries: props.document.nodes.map((n) => n.summary || "").join("\0"),
   }),
   () => rebuildGraph(),
+  { immediate: true },
+);
+
+watch(
+  () => props.positions,
+  () => {
+    if (!localNodes.value.length) {
+      rebuildGraph();
+      return;
+    }
+    const ids = new Set(localNodes.value.map((n) => n.id as string));
+    const posIds = Object.keys(props.positions);
+    const structureChanged =
+      posIds.some((id) => !ids.has(id)) ||
+      [...ids].some((id) => !(id in props.positions));
+    if (structureChanged) rebuildGraph();
+    else patchPositions();
+  },
+  { deep: true },
+);
+
+watch(
+  () => props.selectedNodeId,
+  () => patchSelection(),
+);
+
+watch(
+  () => props.document.nodes.map((n) => n.summary || "").join("\0"),
+  () => patchSummaries(),
+);
+
+watch(
+  () => props.focusEpoch ?? 0,
+  (epoch) => {
+    if (epoch > 0) void centerOnFocus();
+  },
   { immediate: true },
 );
 
@@ -155,7 +242,8 @@ function onNodeDragStop(ev: NodeMouseEvent) {
   width: 100%;
   height: 100%;
   min-height: 320px;
-  background: #11111b;
+  background: var(--bg, #0b1220);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
   border-radius: 8px;
   overflow: hidden;
 }
@@ -164,27 +252,36 @@ function onNodeDragStop(ev: NodeMouseEvent) {
   display: grid;
   place-items: center;
   height: 100%;
-  color: #6c7086;
+  color: var(--text-dim, rgba(255, 255, 255, 0.48));
   font-size: 13px;
 }
 
 :deep(.vue-flow__controls) {
   box-shadow: none;
-  border: 1px solid rgba(205, 214, 244, 0.12);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
   overflow: hidden;
   border-radius: 6px;
 }
 
 :deep(.vue-flow__controls-button) {
-  background: #1e1e2e;
+  background: var(--bg-secondary, rgba(17, 24, 39, 0.65));
   border: none;
-  border-bottom: 1px solid rgba(205, 214, 244, 0.08);
-  fill: #cdd6f4;
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  fill: var(--text, rgba(255, 255, 255, 0.92));
 }
 
 :deep(.vue-flow__minimap) {
-  background: #181825;
-  border: 1px solid rgba(205, 214, 244, 0.12);
+  background: var(--bg-secondary, rgba(17, 24, 39, 0.65));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
   border-radius: 6px;
+}
+
+:deep(.vue-flow__edge-text) {
+  fill: var(--muted, rgba(255, 255, 255, 0.62));
+  font-size: 10px;
+}
+
+:deep(.vue-flow__edge-textbg) {
+  fill: var(--bg, #0b1220);
 }
 </style>

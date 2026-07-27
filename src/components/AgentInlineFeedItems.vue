@@ -136,7 +136,7 @@ const props = withDefaults(
   defineProps<{
     items: InlineFeedItem[];
     isRunning: boolean;
-    chatMode?: "ask" | "build" | "plan" | "explore";
+    chatMode?: "ask" | "build" | "plan" | "explore" | "auto";
     canExecutePlan?: boolean;
     layoutEnhanceReady?: boolean;
     planFilePath?: string;

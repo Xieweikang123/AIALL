@@ -1,10 +1,11 @@
 <template>
   <div class="health-panel">
-    <div v-if="!projectOpened" class="panel-empty">
-      <span class="panel-empty-icon" aria-hidden="true">🩺</span>
-      <p class="panel-empty-title">尚未打开项目</p>
-      <p class="panel-empty-hint">打开项目后，在「项目 → 体检」中扫描问题代码</p>
-    </div>
+    <PanelEmptyState
+      v-if="!projectOpened"
+      icon="🩺"
+      title="尚未打开项目"
+      hint="打开项目后，可在「项目 → 测试修复」中扫描并自动修复问题代码"
+    />
 
     <template v-else-if="!hasResult && !scanning && !error">
       <div class="health-empty-card">
@@ -108,6 +109,7 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
+import PanelEmptyState from "./PanelEmptyState.vue";
 import {
   HEALTH_CATEGORY_LABELS,
   HEALTH_CATEGORY_ORDER,

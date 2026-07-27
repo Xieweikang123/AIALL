@@ -1,14 +1,15 @@
 <template>
   <div class="code-map-panel">
-    <div v-if="!projectOpened" class="panel-empty">
-      <p class="panel-empty-title">尚未打开项目</p>
-      <p class="panel-empty-hint">打开项目后，在「项目 → 架构图」中生成模块脑图</p>
-    </div>
+    <PanelEmptyState
+      v-if="!projectOpened"
+      title="尚未打开项目"
+      hint="打开项目后，在「项目 → 架构图」中生成模块脑图"
+    />
 
     <template v-else>
       <div class="code-map-panel-card">
         <p class="code-map-panel-title">架构图</p>
-        <p class="code-map-panel-desc">根据目录、入口与路由生成可交互模块脑图</p>
+        <p class="code-map-panel-desc">根据目录、入口、路由与 import 生成可交互模块脑图</p>
         <label class="code-map-panel-check">
           <input v-model="annotateProxy" type="checkbox" :disabled="building || annotating" />
           生成后 AI 标注
@@ -42,6 +43,18 @@
         </button>
       </div>
 
+      <div v-if="isStale && hasDocument" class="code-map-panel-stale" role="status">
+        <p class="code-map-panel-stale-text">提交已变更，架构图可能过期</p>
+        <button
+          type="button"
+          class="code-map-panel-btn"
+          :disabled="building || annotating || loading"
+          @click="emit('generate')"
+        >
+          刷新架构图
+        </button>
+      </div>
+
       <p v-if="statusText" class="code-map-panel-hint" role="status">{{ statusText }}</p>
 
       <div v-if="hasDocument" class="code-map-panel-stats">
@@ -56,6 +69,7 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
+import PanelEmptyState from "./PanelEmptyState.vue";
 
 const props = defineProps<{
   projectOpened: boolean;
@@ -71,6 +85,7 @@ const props = defineProps<{
   truncatedCount: number;
   annotateEnabled: boolean;
   annotateReady: boolean;
+  isStale?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -166,6 +181,23 @@ const annotateProxy = computed({
 .code-map-panel-btn--ghost {
   background: transparent;
   border-color: rgba(205, 214, 244, 0.16);
+}
+
+.code-map-panel-stale {
+  border: 1px solid rgba(249, 226, 175, 0.35);
+  border-radius: 8px;
+  background: rgba(249, 226, 175, 0.08);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.code-map-panel-stale-text {
+  margin: 0;
+  font-size: 12px;
+  color: #f9e2af;
+  line-height: 1.4;
 }
 
 .code-map-panel-hint {

@@ -223,7 +223,7 @@
           </div>
 
           <small v-if="imageError" class="tips error">{{ imageError }}</small>
-          <small v-else class="tips">提示：只有多模态模型（如 `mimo-v2-omni`）才会真正理解图片。</small>
+          <small v-else class="tips">提示：可在此用当前聊天模型测试图片输入是否可用。</small>
         </div>
 
         <label class="checkbox">

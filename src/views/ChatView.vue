@@ -11,8 +11,8 @@
           </span>
         </div>
         <p class="desc">
-          支持：<code class="inline-code">总结 + URL</code> 抓取后由模型总结；<code class="inline-code">打开 微信</code> 等（需「图标模板」+ 本机
-          Windows 开发服）在屏幕上匹配并点击。
+          通用对话：<code class="inline-code">总结 + URL</code> 抓取总结；<code class="inline-code">打开 微信</code> 等桌面自动化（需「图标模板」）。
+          项目内改码请用 <router-link class="inline-link" to="/vibe-coding">Vibe Coding</router-link>。
         </p>
       </div>
 
@@ -570,6 +570,15 @@ onBeforeUnmount(() => {
   color: var(--muted);
   margin: 10px 0 0;
   font-size: 13px;
+}
+
+.inline-link {
+  color: #91beff;
+  text-decoration: none;
+}
+
+.inline-link:hover {
+  text-decoration: underline;
 }
 
 .meta {

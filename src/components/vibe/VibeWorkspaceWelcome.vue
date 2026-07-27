@@ -14,24 +14,73 @@
       </div>
       <h2 class="vibe-welcome-title">开始 Vibe Coding</h2>
       <p class="vibe-welcome-desc">
-        打开本地项目，让 AI Agent 探索代码、修改文件、执行任务。支持 Ask / Plan / Build 三种模式。
+        打开本地项目，让 Agent 探索代码、修改文件。支持 Ask / Plan / Build。
       </p>
-      <button type="button" class="primary" :disabled="pickingFolder || loadingTree" @click="$emit('open-project')">
-        {{ pickingFolder ? "选择文件夹…" : "打开项目" }}
-      </button>
+
+      <ol class="vibe-welcome-steps" aria-label="上手步骤">
+        <li class="vibe-welcome-step is-active">
+          <span class="vibe-welcome-step-num">1</span>
+          <div class="vibe-welcome-step-body">
+            <strong>打开项目</strong>
+            <span>选择本地代码文件夹</span>
+          </div>
+        </li>
+        <li class="vibe-welcome-step" :class="{ 'is-done': configReady && apiKeyReady }">
+          <span class="vibe-welcome-step-num">2</span>
+          <div class="vibe-welcome-step-body">
+            <strong>配置模型</strong>
+            <span>{{ configStepHint }}</span>
+          </div>
+        </li>
+        <li class="vibe-welcome-step">
+          <span class="vibe-welcome-step-num">3</span>
+          <div class="vibe-welcome-step-body">
+            <strong>在助手中提问</strong>
+            <span>Ask 答疑 · Plan 方案 · Build 改码</span>
+          </div>
+        </li>
+      </ol>
+
+      <div class="vibe-welcome-actions">
+        <button type="button" class="primary" :disabled="pickingFolder || loadingTree" @click="$emit('open-project')">
+          {{ pickingFolder ? "选择文件夹…" : "打开项目" }}
+        </button>
+        <button
+          v-if="!configReady || !apiKeyReady"
+          type="button"
+          class="secondary"
+          @click="$emit('open-ai-config')"
+        >
+          去配置模型
+        </button>
+      </div>
       <p class="vibe-welcome-hint">或在顶部输入项目路径后按 Enter</p>
+      <p class="vibe-welcome-footnote">
+        改码用本页；网页总结 / 桌面自动化请用顶部「对话」与「图标模板」。
+      </p>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-defineProps<{
+import { computed } from "vue";
+
+const props = defineProps<{
   show: boolean;
   loadingTree?: boolean;
   pickingFolder?: boolean;
+  configReady?: boolean;
+  apiKeyReady?: boolean;
 }>();
 
 defineEmits<{
   (e: "open-project"): void;
+  (e: "open-ai-config"): void;
 }>();
+
+const configStepHint = computed(() => {
+  if (!props.configReady) return "填写接口与模型";
+  if (!props.apiKeyReady) return "请保存 API Key";
+  return "已就绪";
+});
 </script>

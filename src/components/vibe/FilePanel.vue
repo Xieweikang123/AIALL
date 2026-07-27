@@ -75,16 +75,25 @@
     <template v-else>
     <div class="file-panel-head">
       <div class="file-panel-row file-panel-top-row">
-        <div class="file-panel-tabs" role="tablist" aria-label="左侧面板">
+        <div
+          class="file-panel-tabs"
+          :class="{ 'file-panel-tabs--icons': narrowTabs }"
+          role="tablist"
+          aria-label="左侧面板"
+        >
           <button
             type="button"
             role="tab"
             class="file-panel-tab"
             :class="{ active: gitPanelMode === 'files' }"
             :aria-selected="gitPanelMode === 'files'"
+            :title="narrowTabs ? '文件' : undefined"
             @click="$emit('update:gitPanelMode', 'files')"
           >
-            文件
+            <svg v-if="narrowTabs" class="file-panel-tab-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M3 7V17a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+            </svg>
+            <span v-else>文件</span>
           </button>
           <button
             type="button"
@@ -93,18 +102,21 @@
             :class="{ active: gitPanelMode === 'git' }"
             :aria-selected="gitPanelMode === 'git'"
             :disabled="!projectOpened"
+            :title="narrowTabs ? gitTabTitle : undefined"
             @click="$emit('update:gitPanelMode', 'git'); $emit('refresh-git-status')"
           >
-            Git
+            <svg v-if="narrowTabs" class="file-panel-tab-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="12" cy="6" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+              <circle cx="18" cy="18" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+              <circle cx="6" cy="14" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M12 8.5v3.5M9.2 13.2 15.5 16.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            <span v-else>Git</span>
             <span
               v-if="gitChangeCount"
               class="git-badge"
               :class="{ 'git-badge-staged': !gitUnstagedFiles.length }"
-              :title="gitUnstagedFiles.length && gitStagedFiles.length
-                ? `${gitStagedFiles.length} 已暂存 · ${gitUnstagedFiles.length} 未暂存`
-                : gitStagedFiles.length
-                  ? `${gitStagedFiles.length} 已暂存`
-                  : `${gitUnstagedFiles.length} 未暂存`"
+              :title="gitTabTitle"
             >{{ gitChangeCount }}</span>
           </button>
           <button
@@ -113,9 +125,13 @@
             class="file-panel-tab"
             :class="{ active: gitPanelMode === 'sessions' }"
             :aria-selected="gitPanelMode === 'sessions'"
+            :title="narrowTabs ? '会话' : undefined"
             @click="$emit('update:gitPanelMode', 'sessions')"
           >
-            会话
+            <svg v-if="narrowTabs" class="file-panel-tab-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span v-else>会话</span>
           </button>
           <button
             type="button"
@@ -124,9 +140,14 @@
             :class="{ active: gitPanelMode === 'project' }"
             :aria-selected="gitPanelMode === 'project'"
             :disabled="!projectOpened"
+            :title="narrowTabs ? '项目：知识库 / 架构评审 / 架构图 / 测试修复' : undefined"
             @click="$emit('update:gitPanelMode', 'project')"
           >
-            项目
+            <svg v-if="narrowTabs" class="file-panel-tab-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+              <path d="M12 12 4 7.5m8 4.5 8-4.5M12 12v9" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+            </svg>
+            <span v-else>项目</span>
             <span
               v-if="reviewAttentionCount"
               class="git-badge health-badge health-badge--dot"
@@ -161,43 +182,27 @@
       </div>
       <div
         v-if="gitPanelMode === 'project' && projectOpened"
-        class="file-panel-project-segment"
-        role="group"
-        aria-label="项目面板"
+        class="file-panel-project-nav"
       >
-        <!-- 知识库已禁用 -->
-        <button
-          type="button"
-          class="file-panel-segment-btn"
-          :class="{ active: projectPanelView === 'health' }"
-          :aria-pressed="projectPanelView === 'health'"
-          @click="$emit('update:projectPanelView', 'health')"
-        >
-          评审
-          <span
-            v-if="reviewAttentionCount"
-            class="git-badge health-badge"
-            :title="`${reviewAttentionCount} 个需关注项`"
-          >{{ reviewAttentionCount }}</span>
-        </button>
-        <button
-          type="button"
-          class="file-panel-segment-btn"
-          :class="{ active: projectPanelView === 'map' }"
-          :aria-pressed="projectPanelView === 'map'"
-          @click="$emit('update:projectPanelView', 'map')"
-        >
-          架构图
-        </button>
-        <button
-          type="button"
-          class="file-panel-segment-btn"
-          :class="{ active: projectPanelView === 'fix' }"
-          :aria-pressed="projectPanelView === 'fix'"
-          @click="$emit('update:projectPanelView', 'fix')"
-        >
-          测试修复
-        </button>
+        <label class="file-panel-project-select-wrap">
+          <span class="sr-only">项目子视图</span>
+          <select
+            class="file-panel-project-select"
+            :value="projectPanelView"
+            aria-label="项目子视图"
+            @change="onProjectViewChange"
+          >
+            <option value="knowledge">知识库</option>
+            <option value="health">
+              架构评审{{ reviewAttentionCount ? ` (${reviewAttentionCount})` : "" }}
+            </option>
+            <option value="map">架构图</option>
+            <option value="fix">测试修复</option>
+          </select>
+          <svg class="file-panel-project-select-chevron" width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </label>
       </div>
       <div v-if="gitPanelMode === 'files'" class="file-panel-row file-panel-search-row">
         <button
@@ -217,12 +222,12 @@
           <kbd class="quick-search-kbd">Ctrl+P</kbd>
         </button>
         <div v-if="projectOpened" class="file-toolbar">
-          <button type="button" class="file-toolbar-btn" title="新建文件" @click="$emit('create-new-file')">
+          <button type="button" class="icon file-toolbar-btn" title="新建文件" @click="$emit('create-new-file')">
             <svg class="file-toolbar-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
             </svg>
           </button>
-          <button type="button" class="file-toolbar-btn" title="新建文件夹" @click="$emit('create-new-folder')">
+          <button type="button" class="icon file-toolbar-btn" title="新建文件夹" @click="$emit('create-new-folder')">
             <svg class="file-toolbar-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <path d="M2.5 4.8A1.3 1.3 0 0 1 3.8 3.5h3.2l1.2 1.3h4.5A1.3 1.3 0 0 1 14 6.1v6.4a1.3 1.3 0 0 1-1.3 1.3H3.8A1.3 1.3 0 0 1 2.5 12.5V4.8Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
             </svg>
@@ -231,7 +236,7 @@
             <span class="toolbar-sep" />
             <button
               type="button"
-              class="file-toolbar-btn"
+              class="icon file-toolbar-btn"
               title="展开编辑器"
               @click="$emit('expand-editor')"
             >
@@ -519,6 +524,26 @@ const emit = defineEmits<{
   (e: "rename-session", sessionId: string, newTitle: string): void;
 }>();
 
+/** 窄于约一屏四文字 Tab 时改图标，避免挤压 */
+const NARROW_TAB_WIDTH = 240;
+const narrowTabs = computed(() => props.filePanelWidth < NARROW_TAB_WIDTH);
+
+const gitTabTitle = computed(() => {
+  if (props.gitUnstagedFiles.length && props.gitStagedFiles.length) {
+    return `${props.gitStagedFiles.length} 已暂存 · ${props.gitUnstagedFiles.length} 未暂存`;
+  }
+  if (props.gitStagedFiles.length) return `${props.gitStagedFiles.length} 已暂存`;
+  if (props.gitUnstagedFiles.length) return `${props.gitUnstagedFiles.length} 未暂存`;
+  return "Git";
+});
+
+function onProjectViewChange(event: Event) {
+  const value = (event.target as HTMLSelectElement).value;
+  if (value === "knowledge" || value === "health" || value === "map" || value === "fix") {
+    emit("update:projectPanelView", value);
+  }
+}
+
 const sessionSearchQuery = ref("");
 const collapsedGroups = ref(new Set<string>());
 const favoriteIds = ref(new Set<string>());
@@ -559,10 +584,10 @@ const groupedSessions = computed<SessionGroup[]>(() => {
     map.get(group)?.push(s);
   }
   return order
-    .filter((label) => map.get(label)!.length > 0)
+    .filter((label) => (map.get(label)?.length ?? 0) > 0)
     .map((label) => ({
       label,
-      items: [...map.get(label)!].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+      items: [...(map.get(label) ?? [])].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
     }));
 });
 
@@ -779,6 +804,17 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
   cursor: pointer;
   border-radius: 6px;
   transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+  min-width: 0;
+}
+
+.file-panel-tabs--icons .file-panel-tab {
+  padding: 6px 4px;
+  gap: 3px;
+}
+
+.file-panel-tab-icon {
+  display: block;
+  flex-shrink: 0;
 }
 
 .file-panel-tab:hover:not(:disabled) {
@@ -796,6 +832,18 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
 .file-panel-tab:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .git-badge {
@@ -832,39 +880,51 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
   font-size: 9px;
 }
 
-.file-panel-project-segment {
-  display: flex;
-  gap: 4px;
+.file-panel-project-nav {
   padding: 0 8px 8px;
 }
 
-.file-panel-segment-btn {
-  flex: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 4px 8px;
+.file-panel-project-select-wrap {
+  position: relative;
+  display: block;
+}
+
+.file-panel-project-select {
+  width: 100%;
+  appearance: none;
+  padding: 6px 28px 6px 10px;
   border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.03);
-  color: rgba(160, 170, 180, 0.95);
-  font-size: 11px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(220, 228, 235, 0.98);
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  outline: none;
 }
 
-.file-panel-segment-btn:hover:not(:disabled) {
+.file-panel-project-select:hover {
+  border-color: rgba(255, 255, 255, 0.18);
   background: rgba(255, 255, 255, 0.06);
-  color: rgba(220, 228, 235, 0.98);
 }
 
-.file-panel-segment-btn.active {
-  border-color: rgba(88, 166, 255, 0.4);
-  background: rgba(88, 166, 255, 0.12);
-  color: rgba(200, 225, 255, 0.98);
-  font-weight: 600;
+.file-panel-project-select:focus-visible {
+  border-color: rgba(88, 166, 255, 0.5);
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.2);
+}
+
+.file-panel-project-select option {
+  background: #161b22;
+  color: #e6edf3;
+}
+
+.file-panel-project-select-chevron {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: rgba(139, 148, 158, 0.85);
+  pointer-events: none;
 }
 
 .file-toolbar {
@@ -875,35 +935,12 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
 }
 
 .file-toolbar-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
+  /* 消费全局 button.icon token，仅覆盖工具栏尺寸 */
   width: 26px;
   height: 26px;
-  padding: 0;
-  border: 1px solid transparent;
+  border-radius: 5px;
   background: transparent;
   color: rgba(255, 255, 255, 0.62);
-  cursor: pointer;
-  border-radius: 5px;
-  flex-shrink: 0;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
-}
-
-.file-toolbar-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.95);
-}
-
-.file-toolbar-btn:active {
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.file-toolbar-btn:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
 }
 
 .file-toolbar-icon {

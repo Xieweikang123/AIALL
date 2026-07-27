@@ -90,7 +90,7 @@ const props = withDefaults(
     canExecute?: boolean;
     planFilePath?: string;
     /** Only Plan mode messages use plan document chrome. */
-    chatMode?: "ask" | "build" | "plan" | "explore";
+    chatMode?: "ask" | "build" | "plan" | "explore" | "auto";
     /** When true, show raw markdown only (no plan chrome / anchors). */
     streaming?: boolean;
     /** When false, skip code-block folding (e.g. while streaming). */

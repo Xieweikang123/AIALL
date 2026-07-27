@@ -3,7 +3,7 @@
     class="cm-node"
     :class="[
       `cm-node--${data.kind}`,
-      { 'cm-node--selected': selected, 'cm-node--collapsed': data.collapsed },
+      { 'cm-node--selected': selected, 'cm-node--truncated': data.truncated },
     ]"
   >
     <Handle type="target" :position="Position.Top" />
@@ -14,6 +14,8 @@
         type="button"
         class="cm-node-collapse"
         :title="data.collapsed ? '展开子节点' : '折叠子节点'"
+        :aria-label="data.collapsed ? '展开子节点' : '折叠子节点'"
+        :aria-expanded="!data.collapsed"
         @click.stop="data.onToggleCollapse?.()"
       >
         {{ data.collapsed ? "+" : "−" }}
@@ -44,6 +46,7 @@ withDefaults(
       label: string;
       summary?: string;
       path?: string;
+      truncated?: boolean;
       collapsed?: boolean;
       collapsible?: boolean;
       onToggleCollapse?: () => void;
@@ -65,31 +68,37 @@ withDefaults(
   max-width: 220px;
   padding: 8px 10px;
   border-radius: 8px;
-  border: 1px solid rgba(205, 214, 244, 0.18);
-  background: #1e1e2e;
-  color: #cdd6f4;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  background: var(--bg-secondary, rgba(17, 24, 39, 0.85));
+  color: var(--text, rgba(255, 255, 255, 0.92));
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
 }
 
 .cm-node--selected {
-  border-color: #89b4fa;
-  box-shadow: 0 0 0 1px rgba(137, 180, 250, 0.45);
+  border-color: var(--accent-color, #58a6ff);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-color, #58a6ff) 45%, transparent);
 }
 
 .cm-node--root {
-  border-color: rgba(203, 166, 247, 0.55);
-  background: #252536;
+  border-color: color-mix(in srgb, var(--primary, #1f6feb) 55%, transparent);
+  background: color-mix(in srgb, var(--primary, #1f6feb) 12%, var(--bg-secondary, rgba(17, 24, 39, 0.85)));
 }
 
 .cm-node--entry {
-  border-color: rgba(166, 227, 161, 0.45);
+  border-color: color-mix(in srgb, var(--success-color, #3fb950) 45%, transparent);
 }
 
 .cm-node--route {
-  border-color: rgba(137, 180, 250, 0.45);
+  border-color: color-mix(in srgb, var(--accent-color, #58a6ff) 45%, transparent);
 }
 
-.cm-node--collapsed .cm-node-label {
+.cm-node--external {
+  border-color: color-mix(in srgb, var(--success-color, #3fb950) 35%, transparent);
+  border-style: dashed;
+  background: var(--panel, rgba(17, 24, 39, 0.72));
+}
+
+.cm-node--truncated .cm-node-label {
   opacity: 0.85;
 }
 
@@ -103,14 +112,14 @@ withDefaults(
 
 .cm-node-kind {
   font-size: 10px;
-  color: #a6adc8;
+  color: var(--muted, rgba(255, 255, 255, 0.62));
   letter-spacing: 0.02em;
 }
 
 .cm-node-collapse {
   border: none;
-  background: rgba(255, 255, 255, 0.06);
-  color: #cdd6f4;
+  background: var(--surface-hover, rgba(255, 255, 255, 0.06));
+  color: var(--text, rgba(255, 255, 255, 0.92));
   width: 18px;
   height: 18px;
   border-radius: 4px;
@@ -129,7 +138,7 @@ withDefaults(
 .cm-node-summary {
   margin-top: 4px;
   font-size: 11px;
-  color: #a6adc8;
+  color: var(--muted, rgba(255, 255, 255, 0.62));
   line-height: 1.35;
 }
 </style>
