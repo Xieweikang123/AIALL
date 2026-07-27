@@ -1,7 +1,7 @@
 /**
  * Print agent routing regression pass rate from .aiall/agent-regression.json
  *
- * Web/shared parity: validates TS intent classifier + server/agentRunPolicy fields.
+ * Web/shared parity: validates TS intent classifier + src/services/agentRunPolicy fields.
  * Desktop policy fields are validated first by scripts/agent-regression-rust.ts (Rust).
  *
  * Usage: npm run agent:regression

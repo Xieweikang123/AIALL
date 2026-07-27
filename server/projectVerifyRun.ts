@@ -1,5 +1,5 @@
 import path from "node:path";
-import { detectProjectRuntimeProfile } from "./agentRuntimeHint";
+import { detectProjectRuntimeProfile } from "./projectRuntimeProfile";
 import { runProjectShellCommand } from "./projectShell";
 import {
   computeVerifyPassed,

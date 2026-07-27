@@ -9,7 +9,8 @@
     "isolatedModules": true,
     "esModuleInterop": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["vite/client", "node"]
+    "skipLibCheck": true,
+    "types": ["vite/client", "node", "web-bluetooth"]
   },
   "include": ["src/**/*.ts", "src/**/*.vue"],
   "exclude": ["src/**/*.test.*", "src/**/*.spec.*"]

@@ -1,7 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
-import { readFileContent } from "./vibeFs";
 import type { MinimalProjectContextRoute } from "./projectStackProfile";
+
+async function readTextFile(filePath: string): Promise<string | null> {
+  try {
+    const content = await fs.promises.readFile(filePath, "utf8");
+    return content.trim() ? content : null;
+  } catch {
+    return null;
+  }
+}
 
 export type TopLevelRouteEntry = {
   path: string;
@@ -85,9 +93,9 @@ export async function buildTopLevelRouteEntries(
   ];
   let routerSource = "";
   for (const candidate of routerCandidates) {
-    const result = await readFileContent(candidate).catch(() => null);
-    if (result?.ok && result.content.trim()) {
-      routerSource = result.content;
+    const content = await readTextFile(candidate);
+    if (content) {
+      routerSource = content;
       break;
     }
   }
@@ -99,9 +107,9 @@ export async function buildTopLevelRouteEntries(
     const filePath = resolveComponentFilePath(projectRoot, route.componentRef);
     let desc = "";
     if (filePath) {
-      const vueResult = await readFileContent(filePath).catch(() => null);
-      if (vueResult?.ok) {
-        desc = extractVuePageDescription(vueResult.content.slice(0, 4_000));
+      const vueContent = await readTextFile(filePath);
+      if (vueContent) {
+        desc = extractVuePageDescription(vueContent.slice(0, 4_000));
       }
     }
     entries.push({
@@ -121,9 +129,9 @@ export async function buildRouteContextSummary(projectRoot: string): Promise<str
   ];
   let routerSource = "";
   for (const candidate of routerCandidates) {
-    const result = await readFileContent(candidate).catch(() => null);
-    if (result?.ok && result.content.trim()) {
-      routerSource = result.content;
+    const content = await readTextFile(candidate);
+    if (content) {
+      routerSource = content;
       break;
     }
   }
@@ -137,9 +145,9 @@ export async function buildRouteContextSummary(projectRoot: string): Promise<str
     const filePath = resolveComponentFilePath(projectRoot, route.componentRef);
     let desc = "";
     if (filePath) {
-      const vueResult = await readFileContent(filePath).catch(() => null);
-      if (vueResult?.ok) {
-        desc = extractVuePageDescription(vueResult.content.slice(0, 4_000));
+      const vueContent = await readTextFile(filePath);
+      if (vueContent) {
+        desc = extractVuePageDescription(vueContent.slice(0, 4_000));
       }
     }
     const tail = desc ? ` — ${desc}` : "";

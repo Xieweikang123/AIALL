@@ -158,12 +158,12 @@
 1. **了解逻辑** — 读 Node.js 源实现
 2. **Rust 实现** — 在 `src-tauri/src/` 对应位置实现功能
 3. **注册命令** — 在 `src-tauri/src/lib.rs` 的 `invoke_handler` 中注册（如需要）
-4. **前端切换** — 在前端服务文件中加入 Tauri invoke 路径，保留 HTTP fallback
+4. **前端切换** — 在前端服务文件中加入 Tauri invoke / Channel（桌面 only；浏览器 `dev:web` 不可用）
 5. **验证** — `cargo check` 通过，不破坏已有功能
 
 ### 后端调用模式
 
-Tauri invoke 模式（推荐用于新的 Rust 命令）：
+Tauri invoke 模式（桌面唯一路径）：
 
 ```rust
 // Rust 端 — 用 Channel 做流式
@@ -176,12 +176,14 @@ pub async fn my_cmd(arg: String, on_event: Channel<Value>) {
 ```
 
 ```typescript
-// 前端 — Tauri env 走 Channel，否则 HTTP fallback
+// 前端 — 仅 Tauri env；非桌面由 invokeBackend 拒绝
 import { invoke, Channel } from "@tauri-apps/api/core";
 import { isTauriEnv } from "./tauriInvoke";
 
 function myCmdTauri(arg: string, onProgress: (s: string) => void): Promise<Result> {
-  if (!isTauriEnv()) return httpFallback();
+  if (!isTauriEnv()) {
+    return Promise.resolve({ ok: false, error: "请使用 Tauri 桌面版" } as Result);
+  }
   return new Promise((resolve) => {
     const channel = new Channel<{ type: string; data: any }>();
     channel.onmessage = (e) => {
@@ -194,22 +196,19 @@ function myCmdTauri(arg: string, onProgress: (s: string) => void): Promise<Resul
 }
 ```
 
-非流式命令用 `invokeBackend` 模式：
+非流式命令用 `invokeBackend`：
 
 ```typescript
 import { invokeBackend } from "./tauriInvoke";
 
 async function mySimpleCmd(arg: string): Promise<Result> {
-  return invokeBackend<Result>("my_cmd", { arg }, async () => {
-    const resp = await fetch(backendUrl("/backend/..."), { ... });
-    return readJsonResponse<Result>(resp);
-  });
+  return invokeBackend<Result>("my_cmd", { arg });
 }
 ```
 
 ### 注意事项
 
-- **Web 预览** — 浏览器 `dev:web` 不再连接 sidecar；`invokeBackend` 提示使用 Tauri 桌面版。Vitest 中仍可通过 `httpFallback` 测客户端契约
-- **Node 编排按 SSOT 收缩** — `server/vibeAgent.ts` 等暂留供 Vitest / legacy `agent-smoke`；行为真相源为 Rust。归属表与删除队列见 [`AGENT_SSOT.md`](AGENT_SSOT.md)；HTTP 运行时已移除
+- **Web 预览** — 浏览器 `dev:web` 不再连接 sidecar；`invokeBackend` 提示使用 Tauri 桌面版。Vitest 中仍可通过可选 `httpFallback` 测客户端契约（非产品路径）
+- **Node 双写已清** — Agent / FS / Git / AI / Web 的 Node 参考实现已删；行为真相源为 Rust。见 [`AGENT_SSOT.md`](AGENT_SSOT.md)
 - **`cargo check`** — 修改 Rust 代码后必须通过 `cargo check`
 - **每种 AI 采用不同的系统 Prompt 指向此文档**，并在文档中标注自己当前负责的模块

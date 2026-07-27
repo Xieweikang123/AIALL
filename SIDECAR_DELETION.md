@@ -26,7 +26,7 @@ npm run agent:test-guards
 
 - 已删除 `sidecar/main.ts`、Vite middleware、`vibeRoutes*.ts`、`server/localApiServer.ts` 及 HTTP-only 模块
 - `dev:web` 仅 UI 预览；`invokeBackend` 在浏览器中返回「请使用 Tauri 桌面版」
-- `server/` **保留**编排逻辑（`vibeAgent.ts`、`agentRunPolicy.ts` 等）供 Vitest 与 `agent-smoke` 使用
+- `server/` **保留** Vitest 契约 / parity（barrel re-export、project context 等）；`agent:smoke` 已切 Rust
 
 ## 已删除清单
 
@@ -39,13 +39,13 @@ npm run agent:test-guards
 | 桌面自动化（Node） | `server/winDesktop.ts`、`server/templateMatch.ts`、`server/tolerantTemplateMatch.ts`、`server/selfDevProbeMatch.ts` |
 | 文件监视（Node） | `server/fileWatcher.ts` |
 | 构建脚本 | `scripts/build-sidecar.mjs`、`scripts/fetch-node-runtime.mjs` |
-| npm 依赖 | `connect`、`chokidar`、`sharp`、`concurrently`（`playwright` 保留供 `server/webExtract.ts` 工具链） |
+| npm 依赖 | `connect`、`chokidar`、`sharp`、`concurrently`、`playwright`（随 Node webExtract 删除） |
 
 ## 保留
 
 - `src-tauri/` — 桌面运行时（Agent 行为真相源）
 - `shared/` — 共享类型与格式（含 `agentContextLimits`、`agentMessageCompact`、`aiRetry`、`chatMessageNormalize`；TS/Rust 常量 parity 见 `shared/agentConstantsParity.test.ts`）
-- `server/` — Node Agent / 工具链仅供 Vitest + **legacy** `agent-smoke`（**非 HTTP**）；收缩计划见 [`AGENT_SSOT.md`](AGENT_SSOT.md)
+- `server/` — Vitest 契约 / parity（**非 HTTP**、非桌面行为真相源）；见 [`AGENT_SSOT.md`](AGENT_SSOT.md)
 - Vitest 中编排/准确度相关测试（契约在 `src/orchestration` / `src/services`）
 
 ## 快速检查

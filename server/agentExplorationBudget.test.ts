@@ -176,8 +176,9 @@ describe("agentExplorationBudget", () => {
     expect(buildPatchFailureCompletionRetryNudge(["src/foo.ts"], ["src/bar.ts"])).toContain("patch_file 失败");
     expect(buildPatchFailureCompletionRetryNudge(["src/foo.ts"], [])).toContain("src/foo.ts");
     expect(buildExplorationArchiveWriteBlockedMessage()).toContain("探索笔记");
-    expect(buildUiSymptomDiagnosisHint()).toContain("overflow-y:auto");
-    expect(buildUiSymptomDiagnosisHint()).toContain("padding:0");
+    expect(buildUiSymptomDiagnosisHint()).toContain("overflow");
+    expect(buildUiSymptomDiagnosisHint()).toContain("勿预设修法");
+    expect(buildUiSymptomDiagnosisHint()).not.toContain("padding:0");
   });
 
   it("builds ultra-short open task and post-patch verify nudges", () => {

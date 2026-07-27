@@ -19,6 +19,8 @@ alwaysApply: true
 
 ## 设计原则：上下文检索优先于 Bug Playbook
 
+> **产品总纲**：做 Cursor 类通用 Agent；详见 `product-north-star.mdc`（最核心，冲突时以彼为准）。
+
 Agent 能力应主要来自 **高精度上下文检索（Context Retrieval）** 与 **大模型泛化**，而非用提示词工程（Prompt Engineering）教模型如何修具体 Bug。
 
 模型本身具备框架/栈层面的排查知识；编排侧若缺 **ground truth**（项目栈、符号索引、运行时事实），不应靠堆 Playbook 补偿。

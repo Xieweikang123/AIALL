@@ -327,7 +327,8 @@ describe("visionMessage", () => {
     const text = buildVisionTaskText("我要的效果是，点击输入框任何位置，都能输入", 1);
     expect(text).toContain("点击/聚焦交互");
     expect(text).toContain("contenteditable");
-    expect(text).not.toMatch(/勿默认只加 padding.*勿默认只加 padding/);
+    expect(text).toContain("勿预设修法");
+    expect(text).not.toMatch(/常见修复|mousedown 转发/);
   });
 
   it("isPrematureVisionCompletionClaim rejects done-state before tools", () => {
@@ -364,7 +365,9 @@ describe("visionMessage", () => {
   it("buildVisionTaskText adds floating control hint for positioning bugs", () => {
     const text = buildVisionTaskText("看到没，引用按钮跑别的地方了？", 1);
     expect(text).toContain("浮动/绝对定位控件");
-    expect(text).toContain("position:fixed");
+    expect(text).toContain("勿预设修法");
+    expect(text).not.toContain("多半是");
+    expect(text).not.toMatch(/show\*At|请 patch/);
   });
 
   it("suggestsEmbeddedLayoutMisread when selection and button are spatially separated", () => {
@@ -383,9 +386,10 @@ describe("visionMessage", () => {
     const vision =
       "选区在上方… 底部状态栏「引用」按钮… chat-bottom flex 布局 [图已理解]";
     const hint = buildVisionBuildContinueHint(vision, "引用按钮跑别的地方了");
-    expect(hint).toContain("*-floating");
+    expect(hint).toContain("读图校正·定位方式");
     expect(hint).toContain("进度");
     expect(hint).toContain("截图 UI 定位·通用");
+    expect(hint).not.toMatch(/show\*At|请 patch 坐标|\*-floating/);
   });
 
   it("extractVisibleAnchorQuotes pulls quoted strings from vision text", () => {
@@ -452,8 +456,9 @@ describe("visionMessage", () => {
     const vision = "深色圆底按钮容器可见，但箭头图标不可见 [图已理解]";
     expect(suggestsVisibleShellEmptyInner(vision)).toBe(true);
     expect(suggestsVisibleShellEmptyInner("深灰色圆角矩形无明显内容，像空的 toggle")).toBe(true);
-    expect(buildVisionBuildContinueHint(vision, "优化按钮")).toContain("padding:0");
-    expect(buildVisibleShellEmptyInnerHint()).not.toMatch(/scroll-to-bottom|回到最新/);
+    expect(buildVisionBuildContinueHint(vision, "优化按钮")).toContain("互相裁切");
+    expect(buildVisionBuildContinueHint(vision, "优化按钮")).not.toContain("padding:0");
+    expect(buildVisibleShellEmptyInnerHint()).not.toMatch(/scroll-to-bottom|回到最新|常见修复|padding:0/);
   });
 
   it("isUnreconciledEmptyShellAnswer blocks numeric claims without reconcile", () => {

@@ -1,3 +1,18 @@
+# 产品北极星（最核心）
+
+AIALL 要做 **Cursor 类通用编程助手**：会查仓库、会改、会验——不是堆个案修法口令的专用脚本。
+
+**能力来自：上下文检索 + 工具闭环 + 模型泛化。不来自：Prompt 里教模型怎么修某一类 Bug。**
+
+| 应投入 | 禁止当作核心 |
+|--------|--------------|
+| 索引/项目事实进上下文 | always-on 个案 playbook（命中 X → grep Y → patch Z） |
+| 改 → 验证 → 复现闭环 | 把某次 UI/业务 bug 写死成固定符号与修法 |
+| 流式 / 中断 / 续跑 / diff | 护栏文案直接下令「请 patch 某某」 |
+| 桌面 FS/Git 单一真相源 | 再分叉一套 Node 行为实现 |
+
+护栏可以留「别乱搜」；永远别写死「该 patch 哪」。完整条文（含新增编排三问）见 [`.cursor/rules/product-north-star.mdc`](.cursor/rules/product-north-star.mdc)（`alwaysApply`）。编排分层细则见 `agent-orchestration.mdc`。
+
 # 项目术语约定
 
 当用户提到以下术语时，请理解为对应的模块/文件：
@@ -33,11 +48,10 @@
 - `src/composables/useEditorPanel.ts` — 编辑器状态
 - `src/services/vibeCodingClient.ts` — vibe coding 客户端服务
 - `src/services/vibeGitClient.ts` — Git 客户端（Tauri invoke → `src-tauri/src/git/`）
-- `server/vibeGit.ts` — Git 逻辑参考实现（Vitest / `agent-smoke` 用，非 HTTP 运行时）
 - `src/services/vibeAgentClient.ts` — AI agent 客户端
 - `src/services/vibeChatStorage.ts` — 聊天持久化
 - `src/utils/renderMarkdown.ts` — Markdown 渲染
-- `server/vibeAgent.ts` — Node Agent 参考实现（Vitest / `agent-smoke` 用；桌面运行时走 `src-tauri/`）
+- `src-tauri/src/agent/` — 桌面 Agent 运行时（行为真相源）
 
 ## 产品入口（顶层路由）
 
@@ -57,7 +71,7 @@
 | `npm run dev:web` | 浏览器 UI 预览（Agent/Git/FS 不可用，提示使用桌面版） |
 | `npm run test:rust-agent` | Rust Agent parity 单测 |
 
-Sidecar 已按策略 B 删除，见 [`SIDECAR_DELETION.md`](SIDECAR_DELETION.md)。桌面功能以 `src-tauri/` 为准；`server/` 保留 Node Agent 参考实现与 Vitest（非 HTTP），按 [`AGENT_SSOT.md`](AGENT_SSOT.md) 逐步收缩到「Rust 跑行为、TS 测契约、shared 钉常量」。
+Sidecar 已按策略 B 删除，见 [`SIDECAR_DELETION.md`](SIDECAR_DELETION.md)。桌面功能以 `src-tauri/` 为准；`server/` 仅 Vitest 契约 / parity（非 HTTP）。SSOT 见 [`AGENT_SSOT.md`](AGENT_SSOT.md)：Rust 跑行为、TS 测契约、shared 钉常量。
 
 ## Agent 编排分层
 
@@ -71,7 +85,7 @@ Sidecar 已按策略 B 删除，见 [`SIDECAR_DELETION.md`](SIDECAR_DELETION.md)
 
 路径清单见 `src/orchestration/orchestrationTiers.ts`；`agentOrchestrationGuard.test.ts` 按层扫描。
 
-**设计原则**：编排侧优先 **Context Retrieval + 模型泛化**，不用 Prompt Engineering 堆 Bug Playbook。always-on 只放机制契约；栈/症状相关事实走 Profile、knowledge、条件 hint 或工具校验。详见 `.cursor/rules/agent-orchestration.mdc`「设计原则」节。
+**设计原则**：编排侧优先 **Context Retrieval + 模型泛化**，不用 Prompt Engineering 堆 Bug Playbook。always-on 只放机制契约；栈/症状相关事实走 Profile、knowledge、条件 hint 或工具校验。产品总纲见文首「产品北极星」与 `.cursor/rules/product-north-star.mdc`；编排细则见 `.cursor/rules/agent-orchestration.mdc`「设计原则」节。
 
 用户意图已拆分：`userIntentClassifiers.ts`（分类） vs `userIntentHints.ts`（注入 prompt 的 hint）。
 
