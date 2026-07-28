@@ -464,7 +464,7 @@
             <div v-else-if="!gitLogEntries.length" class="git-log-empty">
               {{ gitLogSearchQuery ? "未找到匹配的提交记录" : "无历史" }}
             </div>
-            <div v-for="entry in gitLogEntries" :key="entry.hash" class="git-log-item">
+            <div v-for="entry in gitLogEntries" :key="entry.hash" class="git-log-item" @contextmenu="onGitLogContextMenu($event, entry)">
               <button type="button" class="git-log-entry-head" @click="$emit('toggle-git-log-entry', entry.hash)">
                 <span class="git-log-chevron">{{ isGitLogEntryOpen(entry.hash) ? "▾" : "▸" }}</span>
                 <span class="git-log-hash">{{ entry.shortHash }}</span>
@@ -533,6 +533,28 @@
     <div v-else-if="gitStatusKnown" class="panel-empty">当前目录不是 Git 仓库</div>
     <div v-else class="panel-empty shimmer-text--fast">加载中…</div>
   </div>
+
+  <!-- 提交历史右键菜单 -->
+  <Teleport to="body">
+    <div v-if="gitLogContextMenu.show" class="ctx-overlay" @click="hideGitLogContextMenu" @contextmenu.prevent="hideGitLogContextMenu">
+      <div
+        class="ctx-menu git-log-ctx-menu"
+        :style="{ left: gitLogContextMenu.x + 'px', top: gitLogContextMenu.y + 'px' }"
+        @click.stop
+      >
+        <button type="button" class="ctx-item" @click="gitLogCtxCopyHash">复制提交哈希</button>
+        <div class="ctx-sep" />
+        <button type="button" class="ctx-item" @click="gitLogCtxCherryPick">拣选 (cherry-pick)</button>
+        <button type="button" class="ctx-item" @click="gitLogCtxRevert">还原 (revert)</button>
+        <div class="ctx-sep" />
+        <button type="button" class="ctx-item" @click="gitLogCtxReset('soft')">重置到此提交 (soft)</button>
+        <button type="button" class="ctx-item" @click="gitLogCtxReset('mixed')">重置到此提交 (mixed)</button>
+        <button type="button" class="ctx-item" @click="gitLogCtxReset('hard')">重置到此提交 (hard)</button>
+        <div class="ctx-sep" />
+        <button type="button" class="ctx-item" @click="gitLogCtxCreateTag">在此创建标签</button>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -665,6 +687,10 @@ const emit = defineEmits<{
   (e: "open-file", path: string): void;
   (e: "on-git-file-pointer-down", event: PointerEvent, path: string, staged: boolean): void;
   (e: "on-git-file-contextmenu", event: MouseEvent, path: string): void;
+  (e: "do-cherry-pick", hash: string): void;
+  (e: "do-revert-commit", hash: string): void;
+  (e: "do-create-tag-at", hash: string): void;
+  (e: "reset-to-commit", hash: string, mode: string, shortHash: string): void;
   (e: "commit-batch-group", index: number, message: string): void;
   (e: "commit-all-batches", messages: string[]): void;
   (e: "ai-batch-groups"): void;
@@ -968,6 +994,67 @@ function handleCreateBranch() {
 function handleDeleteBranch(branchName: string, event: Event) {
   event.stopPropagation();
   emit("delete-branch", branchName);
+}
+
+// --- 提交历史右键菜单 ---
+interface GitLogCtxMenu {
+  show: boolean;
+  x: number;
+  y: number;
+  hash: string;
+  shortHash: string;
+}
+
+const gitLogContextMenu = ref<GitLogCtxMenu>({ show: false, x: 0, y: 0, hash: "", shortHash: "" });
+
+function onGitLogContextMenu(event: MouseEvent, entry: GitLogEntry) {
+  event.preventDefault();
+  const menuW = 200;
+  const menuH = 200;
+  const clampedX = Math.min(event.clientX, window.innerWidth - menuW);
+  const clampedY = Math.min(event.clientY, window.innerHeight - menuH);
+  gitLogContextMenu.value = {
+    show: true,
+    x: Math.max(0, clampedX),
+    y: Math.max(0, clampedY),
+    hash: entry.hash,
+    shortHash: entry.shortHash,
+  };
+}
+
+function hideGitLogContextMenu() {
+  gitLogContextMenu.value.show = false;
+}
+
+function gitLogCtxCherryPick() {
+  const h = gitLogContextMenu.value.hash;
+  hideGitLogContextMenu();
+  if (h) emit("do-cherry-pick", h);
+}
+
+function gitLogCtxRevert() {
+  const h = gitLogContextMenu.value.hash;
+  hideGitLogContextMenu();
+  if (h) emit("do-revert-commit", h);
+}
+
+function gitLogCtxCreateTag() {
+  const h = gitLogContextMenu.value.hash;
+  hideGitLogContextMenu();
+  if (h) emit("do-create-tag-at", h);
+}
+
+function gitLogCtxReset(mode: string) {
+  const h = gitLogContextMenu.value.hash;
+  const s = gitLogContextMenu.value.shortHash;
+  hideGitLogContextMenu();
+  if (h) emit("reset-to-commit", h, mode, s);
+}
+
+function gitLogCtxCopyHash() {
+  const h = gitLogContextMenu.value.hash;
+  hideGitLogContextMenu();
+  if (h) navigator.clipboard.writeText(h);
 }
 
 const branchSelectorRef = ref<HTMLElement | null>(null);

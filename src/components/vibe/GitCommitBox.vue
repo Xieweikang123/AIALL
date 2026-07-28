@@ -31,18 +31,6 @@
         :title="!configReady ? '请先配置 AI 模型' : 'AI 生成提交信息并推送'"
         @click="$emit('aiPush')"
       >{{ aiPushStep || "AI 推送" }}</button>
-      <button
-        type="button" class="ghost tiny git-undo-commit"
-        :disabled="loading || committing || !!aiPushStep"
-        title="Soft 重置：撤销上一提交，更改保留在暂存区"
-        @click="$emit('undoCommit')"
-      >撤销提交</button>
-      <button
-        type="button" class="ghost tiny"
-        :disabled="loading || committing || !!aiPushStep || !!advancedAction"
-        title="Amend 上一提交（有填写则用当前信息，否则保留原文）"
-        @click="$emit('amend')"
-      >{{ advancedAction === 'amend' ? '…' : 'Amend' }}</button>
     </div>
   </div>
 </template>
@@ -58,7 +46,6 @@ defineProps<{
   canCommit: boolean;
   conflictCount: number;
   loading: boolean;
-  advancedAction: string | null;
 }>();
 
 defineEmits<{
@@ -66,8 +53,6 @@ defineEmits<{
   commit: [];
   generateMessage: [];
   aiPush: [];
-  undoCommit: [];
-  amend: [];
 }>();
 </script>
 
@@ -122,5 +107,4 @@ defineEmits<{
   cursor: pointer;
 }
 .git-commit-ai:disabled { opacity: 0.4; cursor: default; }
-.git-undo-commit { font-size: 11px; margin-left: auto; }
 </style>
