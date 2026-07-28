@@ -47,14 +47,12 @@ import {
 import type { createAgentSessionRunManager } from "./agentSessionRuns";
 import type { useAgentStallRecovery } from "./useAgentStallRecovery";
 
-export type ChatMessage = VibeChatMessage;
-
 const MAX_TOOL_FULL_RESULT_CHARS = 4_000;
 
-type SessionRunManager = ReturnType<typeof createAgentSessionRunManager<ChatMessage>>;
+type SessionRunManager = ReturnType<typeof createAgentSessionRunManager<VibeChatMessage>>;
 type StallRecovery = ReturnType<typeof useAgentStallRecovery>;
 
-function applySuggestionsToAssistantContent(assistantMsg: ChatMessage, rawContent: string): string {
+function applySuggestionsToAssistantContent(assistantMsg: VibeChatMessage, rawContent: string): string {
   const { content, suggestions } = parseAgentSuggestions(rawContent);
   assistantMsg.agentSuggestions = suggestions.length ? suggestions : undefined;
   return content;
@@ -68,22 +66,22 @@ export interface UseAgentEventHandlersDeps {
   planExecutionActive: Ref<boolean>;
   pendingPromptQueue: Ref<string[]>;
   pendingSettleTimerRef: { current: number | null };
-  patchAssistantMsg: (id: string, patch: Partial<ChatMessage>, sessionId?: string) => void;
-  shouldMinimizeRunUiPatch: (msg: ChatMessage) => boolean;
+  patchAssistantMsg: (id: string, patch: Partial<VibeChatMessage>, sessionId?: string) => void;
+  shouldMinimizeRunUiPatch: (msg: VibeChatMessage) => boolean;
   scheduleMinimizedRunUiPatch: (sessionId: string, msgId: string, kind?: RunUiPatchKind) => void;
-  flushMinimizedRunUiPatch: (sessionId: string, msgId: string, msg: ChatMessage) => void;
-  buildRunUiFullPatch: (msg: ChatMessage) => Partial<ChatMessage>;
+  flushMinimizedRunUiPatch: (sessionId: string, msgId: string, msg: VibeChatMessage) => void;
+  buildRunUiFullPatch: (msg: VibeChatMessage) => Partial<VibeChatMessage>;
   clearStreamDeltaBuffer: () => void;
-  enqueueStreamDelta: (msgId: string, msg: ChatMessage, delta: string) => void;
+  enqueueStreamDelta: (msgId: string, msg: VibeChatMessage, delta: string) => void;
   formatLiveStatus: (live: AgentRunLiveState) => string;
   setAgentStatus: (
     sessionId: string,
-    msg: ChatMessage,
+    msg: VibeChatMessage,
     phase: AgentStatusData["phase"],
     data?: Partial<AgentStatusData>,
     options?: { log?: boolean },
   ) => void;
-  isAgentRunning: (msg: ChatMessage) => boolean;
+  isAgentRunning: (msg: VibeChatMessage) => boolean;
   scrollStatusLogToBottomInternal: (msgId: string) => void;
   scrollChatToBottom: (force?: boolean) => Promise<void>;
   finishRunSession: (sessionId: string, silent?: boolean) => void;
@@ -99,15 +97,15 @@ export interface UseAgentEventHandlersDeps {
   dequeuePendingPromptAndRun: () => void;
   clearPendingAgentEvents: () => void;
   isRunVisible: (sessionId: string) => boolean;
-  mergeDeferredCaptureIntoMsg: (sessionId: string, msg: ChatMessage) => void;
-  appendStatusLog: (msg: ChatMessage, line: string) => void;
+  mergeDeferredCaptureIntoMsg: (sessionId: string, msg: VibeChatMessage) => void;
+  appendStatusLog: (msg: VibeChatMessage, line: string) => void;
   resolveOriginalUserPrompt: (assistantMsgId: string) => string;
   maybePersistPlanFileToDisk: (
-    assistantMsg: ChatMessage,
+    assistantMsg: VibeChatMessage,
     msgId: string,
     options: { wasExecutePlanRun: boolean; wasAborted: boolean },
   ) => Promise<void>;
-  onAgentRunSettled?: (msg: ChatMessage) => void;
+  onAgentRunSettled?: (msg: VibeChatMessage) => void;
   onMemoryProposal?: (msgId: string, proposal: import("../services/projectMemoryProposal").MemoryProposalPayload) => void;
   onSkillProposal?: (msgId: string, proposal: import("../services/projectSkillProposal").SkillProposalPayload) => void;
   storeFileDiff: (relPath: string, before: string, after: string, deleted?: boolean, created?: boolean) => void;
@@ -115,7 +113,7 @@ export interface UseAgentEventHandlersDeps {
   refreshTree: () => void | Promise<void>;
   clearTurnFileDiffsFromStore: (diffs: Record<string, TurnFileDiff>) => void;
   handleAgentWrittenFiles: (files: string[]) => Promise<void>;
-  resolveCompletedTurns: (reported: number, msg: ChatMessage) => number;
+  resolveCompletedTurns: (reported: number, msg: VibeChatMessage) => number;
 }
 
 type DoneEventPayload = {
@@ -123,7 +121,7 @@ type DoneEventPayload = {
 };
 
 function resolveDoneEventWrittenFiles(
-  assistantMsg: ChatMessage,
+  assistantMsg: VibeChatMessage,
   event: DoneEventPayload,
   wasAborted: boolean,
 ): string[] {
@@ -144,7 +142,7 @@ function resolveDoneEventWrittenFiles(
 }
 
 function commitSynthesizedWriteSummary(
-  assistantMsg: ChatMessage,
+  assistantMsg: VibeChatMessage,
   completedTurns: number,
   writtenFiles: string[],
 ): void {
@@ -213,12 +211,12 @@ export function useAgentEventHandlers(deps: UseAgentEventHandlersDeps) {
 type EventOf<T extends string> = Extract<VibeAgentSseEvent, { type: T }>;
 type AgentEventFn = (
   event: VibeAgentSseEvent,
-  assistantMsg: ChatMessage,
+  assistantMsg: VibeChatMessage,
   sessionId: string,
   msgId: string,
 ) => void;
 
-function handleAgentContextEvent(event: EventOf<"agent_context">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
+function handleAgentContextEvent(event: EventOf<"agent_context">, assistantMsg: VibeChatMessage, sessionId: string, msgId: string) {
   assistantMsg.agentContext = event.data;
   if (shouldMinimizeRunUiPatch(assistantMsg)) {
     scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
@@ -227,7 +225,7 @@ function handleAgentContextEvent(event: EventOf<"agent_context">, assistantMsg: 
   }
 }
 
-function handleTurnRequestEvent(event: EventOf<"turn_request">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
+function handleTurnRequestEvent(event: EventOf<"turn_request">, assistantMsg: VibeChatMessage, sessionId: string, msgId: string) {
   if (event.data.contextChars !== undefined) {
     assistantMsg.contextChars = event.data.contextChars;
   }
@@ -258,7 +256,7 @@ function handleTurnRequestEvent(event: EventOf<"turn_request">, assistantMsg: Ch
   if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
 }
 
-function handleTurnResponseEvent(event: EventOf<"turn_response">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
+function handleTurnResponseEvent(event: EventOf<"turn_response">, assistantMsg: VibeChatMessage, sessionId: string, msgId: string) {
   debugLog("[eventHandlers] handleTurnResponseEvent", {
     turn: event.data.turn,
     isFinal: event.data.isFinal,
@@ -316,7 +314,7 @@ function handleTurnResponseEvent(event: EventOf<"turn_response">, assistantMsg: 
   if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
 }
 
-function handleTurnTraceEvent(event: EventOf<"turn_trace">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
+function handleTurnTraceEvent(event: EventOf<"turn_trace">, assistantMsg: VibeChatMessage, sessionId: string, msgId: string) {
   debugLog("[eventHandlers] handleTurnTraceEvent", {
     turn: event.data.turn,
     assistantText: (event.data.assistantText ?? event.data.toolCallPreamble ?? "").slice(0, 80),
@@ -351,7 +349,7 @@ function handleTurnTraceEvent(event: EventOf<"turn_trace">, assistantMsg: ChatMe
   if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
 }
 
-function handleStatusEvent(event: EventOf<"status">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
+function handleStatusEvent(event: EventOf<"status">, assistantMsg: VibeChatMessage, sessionId: string, msgId: string) {
   const { phase } = event.data;
   const run = runManager.get(sessionId);
   if (!run) return;
@@ -448,7 +446,7 @@ function handleStatusEvent(event: EventOf<"status">, assistantMsg: ChatMessage, 
   void scrollChatToBottom();
 }
 
-function handleToolStartEvent(event: EventOf<"tool_start">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
+function handleToolStartEvent(event: EventOf<"tool_start">, assistantMsg: VibeChatMessage, sessionId: string, msgId: string) {
   const meta = formatToolMeta(event.data.name, event.data.args);
   const toolTurn = assistantMsg.agentTurn ?? runManager.get(sessionId)?.live.turn ?? 1;
   const toolStep = {
@@ -482,7 +480,7 @@ function handleToolStartEvent(event: EventOf<"tool_start">, assistantMsg: ChatMe
   void scrollChatToBottom();
 }
 
-function handleFileDiffEvent(event: EventOf<"file_diff">, assistantMsg: ChatMessage, _sessionId: string, msgId: string) {
+function handleFileDiffEvent(event: EventOf<"file_diff">, assistantMsg: VibeChatMessage, _sessionId: string, msgId: string) {
   const relPath = event.data.path;
   const diff = { before: event.data.before, after: event.data.after, deleted: event.data.deleted, created: event.data.created };
   storeFileDiff(relPath, diff.before, diff.after, diff.deleted);
@@ -505,7 +503,7 @@ function handleFileDiffEvent(event: EventOf<"file_diff">, assistantMsg: ChatMess
   void scrollChatToBottom();
 }
 
-function handleToolEndEvent(event: EventOf<"tool_end">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
+function handleToolEndEvent(event: EventOf<"tool_end">, assistantMsg: VibeChatMessage, sessionId: string, msgId: string) {
   const step = assistantMsg.tools?.find((t) => t.id === event.data.id);
   if (step) {
     step.running = false;
@@ -545,7 +543,7 @@ function handleToolEndEvent(event: EventOf<"tool_end">, assistantMsg: ChatMessag
   void scrollChatToBottom();
 }
 
-function handleMessageDeltaEvent(event: EventOf<"message_delta">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
+function handleMessageDeltaEvent(event: EventOf<"message_delta">, assistantMsg: VibeChatMessage, sessionId: string, msgId: string) {
   const delta = event.data.delta || "";
   if (!delta) return;
   const run = runManager.get(sessionId);
@@ -566,7 +564,7 @@ function handleMessageDeltaEvent(event: EventOf<"message_delta">, assistantMsg: 
   enqueueStreamDelta(msgId, assistantMsg, delta);
 }
 
-function handleMessageEvent(event: EventOf<"message">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
+function handleMessageEvent(event: EventOf<"message">, assistantMsg: VibeChatMessage, sessionId: string, msgId: string) {
   clearStreamDeltaBuffer();
   const cleanText = stripTextToolCallMarkup(stripToolSummaryFromAssistantContent(event.data.text));
   const minimizing = shouldMinimizeRunUiPatch(assistantMsg);
@@ -585,7 +583,7 @@ function handleMessageEvent(event: EventOf<"message">, assistantMsg: ChatMessage
   void scrollChatToBottom();
 }
 
-function handleErrorEvent(event: EventOf<"error">, assistantMsg: ChatMessage, sessionId: string, _msgId: string) {
+function handleErrorEvent(event: EventOf<"error">, assistantMsg: VibeChatMessage, sessionId: string, _msgId: string) {
   if (isRunVisible(sessionId)) clearStreamDeltaBuffer();
   planExecutionActive.value = false;
   if (stallRecovery.trySilentContinue(sessionId, assistantMsg, event.data.message)) {
@@ -603,7 +601,7 @@ function handleErrorEvent(event: EventOf<"error">, assistantMsg: ChatMessage, se
   }
 }
 
-function handleDoneEvent(event: EventOf<"done">, assistantMsg: ChatMessage, sessionId: string, msgId: string) {
+function handleDoneEvent(event: EventOf<"done">, assistantMsg: VibeChatMessage, sessionId: string, msgId: string) {
   if (isRunVisible(sessionId)) clearStreamDeltaBuffer();
   const wasExecutePlanRun = planExecutionActive.value;
   planExecutionActive.value = false;
@@ -878,7 +876,7 @@ function handleDoneEvent(event: EventOf<"done">, assistantMsg: ChatMessage, sess
     void maybePersistPlanFileToDisk(assistantMsg, msgId, { wasExecutePlanRun, wasAborted }).then(() => {
       onAgentRunSettled?.(assistantMsg);
     }).catch((err: unknown) => {
-      console.error("maybePersistPlanFileToDisk failed:", err);
+      debugLog("maybePersistPlanFileToDisk failed:", err);
     });
     return;
   }
@@ -1007,7 +1005,7 @@ function handleDoneEvent(event: EventOf<"done">, assistantMsg: ChatMessage, sess
       dequeuePendingPromptAndRun();
     }
   }).catch((err: unknown) => {
-    console.error("maybePersistPlanFileToDisk failed:", err);
+    debugLog("maybePersistPlanFileToDisk failed:", err);
   });
 }
 
@@ -1028,7 +1026,7 @@ const agentEventHandlers = new Map<string, AgentEventFn>([
 
 function handleAgentEvent(
   event: VibeAgentSseEvent,
-  assistantMsg: ChatMessage,
+  assistantMsg: VibeChatMessage,
   runGen: number,
   sessionId: string,
 ) {

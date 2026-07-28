@@ -28,35 +28,33 @@ import { syncRoundGroupsPatch } from "../utils/vibeHelpers";
 import type { VibeChatMessage } from "../types/vibeChat";
 import type { createAgentSessionRunManager } from "./agentSessionRuns";
 
-type ChatMessage = VibeChatMessage;
-
-type SessionRunManager = ReturnType<typeof createAgentSessionRunManager<ChatMessage>>;
+type SessionRunManager = ReturnType<typeof createAgentSessionRunManager<VibeChatMessage>>;
 
 export interface UseAgentStallRecoveryDeps {
   runManager: SessionRunManager;
-  chatMessages: Ref<ChatMessage[]>;
+  chatMessages: Ref<VibeChatMessage[]>;
   activeSessionId: Ref<string>;
   chatSending: Ref<boolean>;
   chatError: Ref<string>;
   projectPath: Ref<string>;
   projectOpened: Ref<boolean>;
   configReady: Ref<boolean>;
-  stalledAssistantMsg: Ref<ChatMessage | null>;
+  stalledAssistantMsg: Ref<VibeChatMessage | null>;
   autoResumeSecondsLeft: Ref<number>;
   autoResumeTargetId: Ref<string>;
   agentUiTick: Ref<number>;
   bumpLiveRevision: () => void;
   patchAssistantMsg: (
     msgId: string,
-    patch: Partial<ChatMessage>,
+    patch: Partial<VibeChatMessage>,
     sessionId?: string,
   ) => void;
   isRunVisible: (sessionId: string) => boolean;
   resolveOriginalUserPrompt: (msgId: string) => string | undefined;
-  appendStatusLog: (msg: ChatMessage, line: string) => void;
+  appendStatusLog: (msg: VibeChatMessage, line: string) => void;
   clearStreamDeltaBuffer: () => void;
-  shouldMinimizeRunUiPatch: (msg: ChatMessage) => boolean;
-  buildRunUiFullPatch: (msg: ChatMessage) => Partial<ChatMessage>;
+  shouldMinimizeRunUiPatch: (msg: VibeChatMessage) => boolean;
+  buildRunUiFullPatch: (msg: VibeChatMessage) => Partial<VibeChatMessage>;
   finishRunSession: (sessionId: string, silent?: boolean) => void;
   maybePersistChat: (sessionId: string) => void;
   maybeScrollChat: (sessionId: string) => void;
@@ -66,8 +64,8 @@ export interface UseAgentStallRecoveryDeps {
   ) => void;
   resumeAgentRun: (assistantMsgId: string, options?: { silent?: boolean }) => Promise<void>;
   getActiveRun: () => ReturnType<SessionRunManager["get"]>;
-  findRunningAssistantMsgForSession: (sessionId: string) => ChatMessage | null;
-  findRunningAssistantMsg: () => ChatMessage | null;
+  findRunningAssistantMsgForSession: (sessionId: string) => VibeChatMessage | null;
+  findRunningAssistantMsg: () => VibeChatMessage | null;
 }
 
 export function useAgentStallRecovery(deps: UseAgentStallRecoveryDeps) {
@@ -233,11 +231,11 @@ export function useAgentStallRecovery(deps: UseAgentStallRecoveryDeps) {
     stalledAssistantMsg.value = msg;
   }
 
-  function isAssistantStalled(msg: ChatMessage): boolean {
+  function isAssistantStalled(msg: VibeChatMessage): boolean {
     return Boolean(stalledAssistantMsg.value && stalledAssistantMsg.value.id === msg.id);
   }
 
-  function abortAgentConnectStall(sessionId: string, msg: ChatMessage) {
+  function abortAgentConnectStall(sessionId: string, msg: VibeChatMessage) {
     const connectHasImages = runManager.get(sessionId)?.connectHasImages ?? false;
     runManager.abort(sessionId);
     runManager.setAbortHandle(sessionId, null);
@@ -330,13 +328,13 @@ export function useAgentStallRecovery(deps: UseAgentStallRecoveryDeps) {
     }
   }
 
-  function prepareAssistantForSilentContinue(assistantMsg: ChatMessage) {
+  function prepareAssistantForSilentContinue(assistantMsg: VibeChatMessage) {
     for (const tool of assistantMsg.tools || []) {
       if (tool.running) tool.running = false;
     }
   }
 
-  function trySilentContinue(sessionId: string, assistantMsg: ChatMessage, reason: string): boolean {
+  function trySilentContinue(sessionId: string, assistantMsg: VibeChatMessage, reason: string): boolean {
     if (isAgentRuntimeReferenceError(reason)) {
       debugLog(`[stall-recover] trySilent: runtime reference error — no silent continue`);
       return false;
@@ -380,7 +378,7 @@ export function useAgentStallRecovery(deps: UseAgentStallRecoveryDeps) {
 
   function handleRecoverableInterruption(
     sessionId: string,
-    assistantMsg: ChatMessage,
+    assistantMsg: VibeChatMessage,
     reason: string,
     options?: { logStatus?: boolean; noAutoResume?: boolean },
   ) {
@@ -389,7 +387,7 @@ export function useAgentStallRecovery(deps: UseAgentStallRecoveryDeps) {
   }
 
   function applyRecoverableAgentFailure(
-    assistantMsg: ChatMessage,
+    assistantMsg: VibeChatMessage,
     message: string,
     options?: { logStatus?: boolean; noAutoResume?: boolean },
   ) {
@@ -443,7 +441,7 @@ export function useAgentStallRecovery(deps: UseAgentStallRecoveryDeps) {
     }
   }
 
-  function recoverAgentRunFromStall(sessionId: string, assistantMsg: ChatMessage, reason: string) {
+  function recoverAgentRunFromStall(sessionId: string, assistantMsg: VibeChatMessage, reason: string) {
     debugLog(`[stall-recover] recoverAgentRunFromStall sessionId=${sessionId}, reason=${reason}`);
     runManager.invalidate(sessionId);
     clearStreamDeltaBuffer();

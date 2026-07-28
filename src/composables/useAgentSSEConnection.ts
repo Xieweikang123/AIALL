@@ -2,12 +2,10 @@ import { ref } from "vue";
 import type { VibeAgentSseEvent } from "../services/vibeAgentClient";
 import type { VibeChatMessage } from "../types/vibeChat";
 
-export type ChatMessage = VibeChatMessage;
-
 export interface UseAgentSSEConnectionDeps {
   handleAgentEvent: (
     event: VibeAgentSseEvent,
-    assistantMsg: ChatMessage,
+    assistantMsg: VibeChatMessage,
     runGen: number,
     sessionId: string,
   ) => void;
@@ -30,7 +28,7 @@ export function useAgentSSEConnection(deps: UseAgentSSEConnectionDeps) {
   }
 
   function flushAgentEventQueue(
-    assistantMsg: ChatMessage,
+    assistantMsg: VibeChatMessage,
     runGen: number,
     sessionId: string,
   ) {
@@ -50,7 +48,7 @@ export function useAgentSSEConnection(deps: UseAgentSSEConnectionDeps) {
   }
 
   function scheduleAgentEventFlush(
-    assistantMsg: ChatMessage,
+    assistantMsg: VibeChatMessage,
     runGen: number,
     sessionId: string,
   ) {
@@ -62,7 +60,7 @@ export function useAgentSSEConnection(deps: UseAgentSSEConnectionDeps) {
 
   function enqueueAgentEvent(
     event: VibeAgentSseEvent,
-    assistantMsg: ChatMessage,
+    assistantMsg: VibeChatMessage,
     runGen: number,
     sessionId: string,
   ) {

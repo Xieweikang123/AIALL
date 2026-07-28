@@ -134,10 +134,8 @@ import { useAgentToolDispatch } from "./useAgentToolDispatch";
 import { useAgentStallRecovery } from "./useAgentStallRecovery";
 import { useAgentEventHandlers } from "./useAgentEventHandlers";
 
-export type ChatMessage = VibeChatMessage;
-
 export type UseAgentRunDeps = {
-  chatMessages: Ref<ChatMessage[]>;
+  chatMessages: Ref<VibeChatMessage[]>;
   chatSending: Ref<boolean>;
   chatMode: Ref<VibeChatMode>;
   chatError: Ref<string>;
@@ -149,7 +147,7 @@ export type UseAgentRunDeps = {
   activeSessionId: Ref<string>;
   activeFilePath: Ref<string>;
   pendingPromptQueue: Ref<string[]>;
-  patchAssistantMsg: (id: string, patch: Partial<ChatMessage>, sessionId?: string) => void;
+  patchAssistantMsg: (id: string, patch: Partial<VibeChatMessage>, sessionId?: string) => void;
   schedulePersistChat: () => void;
   schedulePersistDuringAgentRun: (options?: { sessionId?: string; flushStore?: boolean }) => void;
   persistChatNow: (path?: string, options?: { flushStore?: boolean; sessionId?: string }) => void;
@@ -163,7 +161,7 @@ export type UseAgentRunDeps = {
   storeFileDiff: (relPath: string, before: string, after: string, deleted?: boolean, created?: boolean) => void;
   syncEditorAfterAgentFileChange: (relPath: string, diff: TurnFileDiff) => void;
   refreshTree: () => void | Promise<void>;
-  resolveUserMessageImages: (msg: ChatMessage) => string[];
+  resolveUserMessageImages: (msg: VibeChatMessage) => string[];
   buildAgentHistory: (prompt: string, profile: AgentRunProfile) => VibeChatHistoryMessage[];
   buildAgentHistoryForResume: (assistantMsgId: string) => VibeChatHistoryMessage[];
   resolveOriginalUserPrompt: (assistantMsgId: string) => string;
@@ -172,7 +170,7 @@ export type UseAgentRunDeps = {
   endAgentRunSession: (sessionId?: string, silent?: boolean) => void;
   persistAgentRunSession: (sessionId: string) => void;
   snapshotAgentRunSession?: (sessionId: string) => void;
-  onAgentRunSettled?: (msg: ChatMessage) => void;
+  onAgentRunSettled?: (msg: VibeChatMessage) => void;
   /** After Plan explore writes a per-message plan file, open it in the editor. */
   onPlanFileReady?: (relPath: string, messageId: string) => void;
   onMemoryProposal?: (msgId: string, proposal: import("../services/projectMemoryProposal").MemoryProposalPayload) => void;
@@ -375,7 +373,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     getRunAssistantMsg: (sid: string) => runManager.get(sid)?.assistantMsg,
   });
 
-  function appendStatusLog(msg: ChatMessage, line: string) {
+  function appendStatusLog(msg: VibeChatMessage, line: string) {
     const text = line.trim();
     if (!text) return;
     if (!msg.statusLog) msg.statusLog = [];
@@ -387,7 +385,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     return runManager.get(activeSessionId.value);
   }
 
-  function findRunningAssistantMsgForSession(sessionId: string): ChatMessage | null {
+  function findRunningAssistantMsgForSession(sessionId: string): VibeChatMessage | null {
     const run = runManager.get(sessionId);
     if (!run) return null;
     if (isRunVisible(sessionId)) {
@@ -396,7 +394,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     return run.assistantMsg;
   }
 
-  function findRunningAssistantMsg(): ChatMessage | null {
+  function findRunningAssistantMsg(): VibeChatMessage | null {
     const run = getActiveRun();
     if (!run) return null;
     return findRunningAssistantMsgForSession(activeSessionId.value);
@@ -446,7 +444,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   function setAgentStatus(
     sessionId: string,
-    msg: ChatMessage,
+    msg: VibeChatMessage,
     phase: string,
     extra?: Partial<AgentStatusData> & { toolTitle?: string; toolDetail?: string },
     options?: { log?: boolean },
@@ -475,7 +473,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     mode: VibeChatMode;
     hasImage: boolean;
     sessionId: string;
-    assistantMsg: ChatMessage;
+    assistantMsg: VibeChatMessage;
   }) {
     return resolveAgentRequestUserIntentAsync(
       {
@@ -499,23 +497,23 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   function findLastAssistantContent(): string | undefined {
     return findLastAssistantContentInMessages(chatMessages.value, (msg) =>
-      messageDisplayContent(msg as ChatMessage),
+      messageDisplayContent(msg as VibeChatMessage),
     );
   }
 
-  function findLastActionablePlanMessage(): ChatMessage | undefined {
+  function findLastActionablePlanMessage(): VibeChatMessage | undefined {
     for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
       const msg = chatMessages.value[i];
       if (msg?.role !== "assistant") continue;
-      const text = messageDisplayContent(msg as ChatMessage).trim();
-      if (text && isAssistantExecutionBrief(text)) return msg as ChatMessage;
+      const text = messageDisplayContent(msg as VibeChatMessage).trim();
+      if (text && isAssistantExecutionBrief(text)) return msg as VibeChatMessage;
     }
     return undefined;
   }
 
   async function applyPlanFileEnsureForExecution(
     planMarkdown: string,
-    sourceMsg?: ChatMessage,
+    sourceMsg?: VibeChatMessage,
   ): Promise<{ planContent: string; persistError?: string }> {
     if (!sourceMsg?.id?.trim()) {
       return { planContent: planMarkdown.trim() };
@@ -541,7 +539,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   }
 
   async function tryPersistPlanMessageToDisk(
-    assistantMsg: ChatMessage,
+    assistantMsg: VibeChatMessage,
     msgId: string,
   ): Promise<boolean> {
     const planText = messageDisplayContent(assistantMsg).trim();
@@ -561,7 +559,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   }
 
   async function maybePersistPlanFileToDisk(
-    assistantMsg: ChatMessage,
+    assistantMsg: VibeChatMessage,
     msgId: string,
     options: { wasExecutePlanRun: boolean; wasAborted: boolean },
   ): Promise<void> {
@@ -574,7 +572,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
 
 
-  function resolveCompletedTurns(reported: number, msg: ChatMessage): number {
+  function resolveCompletedTurns(reported: number, msg: VibeChatMessage): number {
     if (reported > 0) {
       return (msg.totalTurns ?? 0) + reported;
     }
@@ -640,7 +638,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   function bindAgentRunInvoke(
     sessionId: string,
-    assistantMsg: ChatMessage,
+    assistantMsg: VibeChatMessage,
     runGen: number,
     handle: ReturnType<typeof runVibeAgentSse>,
   ) {
@@ -700,7 +698,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       setAgentStatus(sessionId, running, "aborted", undefined, { log: false });
     }
 
-    const patch: Partial<ChatMessage> = {
+    const patch: Partial<VibeChatMessage> = {
       agentAborted: true,
       agentAbortReason: reason,
       statusLog: running.statusLog ? [...running.statusLog] : undefined,
@@ -965,7 +963,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   function beginAssistantRunSlot(
     sessionId: string,
-    assistantMsg: ChatMessage,
+    assistantMsg: VibeChatMessage,
     phase: string,
     connectHasImages: boolean,
     detail?: string,
@@ -992,7 +990,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     userText: string,
     options?: {
       skipUserBubble?: boolean;
-      resumeAssistantMsg?: ChatMessage;
+      resumeAssistantMsg?: VibeChatMessage;
       referencedFiles?: string[];
       imageDataUrls?: string[];
       userBubbleContent?: string;
@@ -1059,7 +1057,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     }
 
     /** Same user turn + skipUserBubble: reuse a zero-progress assistant shell instead of stacking. */
-    function takeOrCreateAssistantSlot(): ChatMessage {
+    function takeOrCreateAssistantSlot(): VibeChatMessage {
       if (options?.skipUserBubble) {
         const last = chatMessages.value[chatMessages.value.length - 1];
         if (last?.role === "assistant" && canReuseZeroProgressAssistantSlot(last)) {
@@ -1089,7 +1087,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           return last;
         }
       }
-      const created: ChatMessage = {
+      const created: VibeChatMessage = {
         id: genId(),
         role: "assistant",
         content: "",
@@ -1103,7 +1101,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       return created;
     }
 
-    let assistantMsg: ChatMessage | undefined;
+    let assistantMsg: VibeChatMessage | undefined;
     let compressedImagesForRequest: string[] | undefined;
     let hasImagesForRequest = false;
 
@@ -1297,7 +1295,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     return true;
   }
 
-  function shouldShowMessageBubble(msg: ChatMessage): boolean {
+  function shouldShowMessageBubble(msg: VibeChatMessage): boolean {
     if (msg.role === "user") {
       return Boolean(
         msg.content?.trim()
@@ -1310,7 +1308,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     return Boolean(messageDisplayContent(msg));
   }
 
-  function canContinueExploreMessage(msg: ChatMessage): boolean {
+  function canContinueExploreMessage(msg: VibeChatMessage): boolean {
     if (msg.role !== "assistant" || msg.chatMode !== "explore") return false;
     if (chatSending.value || isAgentRunning(msg)) return false;
     if (msg.agentAborted || msg.agentFailed) return false;
@@ -1356,7 +1354,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     return runAgentTurn(trimmed, { maxTurns: EXPLORE_FOLLOWUP_MAX_TURNS });
   }
 
-  function canExecutePlanMessage(msg: ChatMessage): boolean {
+  function canExecutePlanMessage(msg: VibeChatMessage): boolean {
     if (msg.role !== "assistant") return false;
     if (chatMode.value !== "plan") return false;
     if (chatSending.value || isAgentRunning(msg)) return false;
@@ -1453,7 +1451,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     prepareAssistantForSilentContinue,
     trySilentContinue,
     applyRecoverableAgentFailure,
-    recoverableAgentErrorHint: (msg: ChatMessage, reason: string) => recoverableAgentErrorHint(msg, reason),
+    recoverableAgentErrorHint: (msg: VibeChatMessage, reason: string) => recoverableAgentErrorHint(msg, reason),
     forceRecoverStalledRun,
     handleAgentEvent,
     runAgentTurn,

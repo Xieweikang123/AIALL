@@ -1,18 +1,18 @@
 import type { Ref } from "vue";
 import type { VibeChatMessage, TurnFileDiff } from "../types/vibeChat";
+import type { MemoryProposalPayload } from "../services/projectMemoryProposal";
+import type { SkillProposalPayload } from "../services/projectSkillProposal";
 import { parseMemoryProposalToolResult } from "../services/projectMemoryProposal";
 import { parseSkillProposalToolResult } from "../services/projectSkillProposal";
 import { resolveAgentDoneFileAction } from "../services/vibeAgentTurnApply";
-
-export type ChatMessage = VibeChatMessage;
 
 export interface UseAgentToolDispatchDeps {
   handleAgentWrittenFiles: (files: string[]) => Promise<void>;
   clearTurnFileDiffsFromStore: (diffs: Record<string, TurnFileDiff>) => void;
   storeFileDiff: (relPath: string, before: string, after: string, deleted?: boolean, created?: boolean) => void;
   syncEditorAfterAgentFileChange: (relPath: string, diff: TurnFileDiff) => void;
-  onMemoryProposal?: (msgId: string, proposal: any) => void;
-  onSkillProposal?: (msgId: string, proposal: any) => void;
+  onMemoryProposal?: (msgId: string, proposal: MemoryProposalPayload) => void;
+  onSkillProposal?: (msgId: string, proposal: SkillProposalPayload) => void;
 }
 
 export function useAgentToolDispatch(deps: UseAgentToolDispatchDeps) {
@@ -46,7 +46,7 @@ export function useAgentToolDispatch(deps: UseAgentToolDispatchDeps) {
   }
 
   function applyFileChanges(
-    assistantMsg: ChatMessage,
+    assistantMsg: VibeChatMessage,
     wasAborted: boolean,
     serverPendingFiles: string[],
     serverWrittenFiles: string[],

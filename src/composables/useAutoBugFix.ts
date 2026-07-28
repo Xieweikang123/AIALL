@@ -1,4 +1,5 @@
 import { ref, computed, watch } from "vue";
+import { debugLog } from "../utils/debugLog";
 import { fetchProjectHealthScan, type ProjectHealthScanResult } from "../services/projectHealthScanClient";
 import { fetchProjectVerifyRun, type ProjectVerifyRunResult } from "../services/projectVerifyRunClient";
 import {
@@ -26,7 +27,7 @@ import {
   removeAutoBugFixState,
   writeAutoBugFixState,
 } from "../utils/autoBugFixStorage";
-import type { ChatMessage } from "../types/vibeChat";
+import type { VibeChatMessage } from "../types/vibeChat";
 
 export type AutoBugFixPhase = "idle" | "scanning" | "testing" | "fixing" | "verifying" | "done" | "no_work" | "error";
 
@@ -65,7 +66,7 @@ export function useAutoBugFix(
     startAgent: (params: StartAutoBugFixAgentParams) => Promise<StartAutoBugFixAgentResult>;
     startNewSession: () => void;
     switchSession?: (sessionId: string) => void;
-    getSessionMessages?: (sessionId: string) => ChatMessage[] | undefined;
+    getSessionMessages?: (sessionId: string) => VibeChatMessage[] | undefined;
     expandChat: () => void;
     switchGitPanel?: () => void;
     stopFixAgent?: (sessionId: string) => void;
@@ -165,9 +166,9 @@ export function useAutoBugFix(
   }
 
   function resolveInterruptedAssistant(
-    messages: ChatMessage[],
+    messages: VibeChatMessage[],
     preferredId?: string,
-  ): ChatMessage | null {
+  ): VibeChatMessage | null {
     if (preferredId) {
       const direct = messages.find((m) => m.id === preferredId);
       if (direct?.role === "assistant") return direct;
@@ -197,7 +198,7 @@ export function useAutoBugFix(
     persistNow();
   }
 
-  function applyInterruptedAssistantState(msg: ChatMessage | null) {
+  function applyInterruptedAssistantState(msg: VibeChatMessage | null) {
     if (!msg) {
       clearInterruptedHint();
       if (phase.value === "verifying") {
@@ -210,7 +211,7 @@ export function useAutoBugFix(
               persistNow();
             }
           }).catch((err: unknown) => {
-            console.error("rerunVerifyAfterFix failed:", err);
+            debugLog("rerunVerifyAfterFix failed:", err);
             phase.value = "done";
             persistNow();
           });
@@ -236,7 +237,7 @@ export function useAutoBugFix(
           persistNow();
         }
       }).catch((err: unknown) => {
-        console.error("rerunVerifyAfterFix failed:", err);
+        debugLog("rerunVerifyAfterFix failed:", err);
         phase.value = "done";
         persistNow();
       });
@@ -266,7 +267,7 @@ export function useAutoBugFix(
   }
 
   /** Restore fix panel state after refresh; returns whether fix tab should open. */
-  function tryRestoreFromStorage(messages: ChatMessage[]): boolean {
+  function tryRestoreFromStorage(messages: VibeChatMessage[]): boolean {
     const path = projectPath.value.trim();
     if (!path || !projectOpened.value) return false;
 
@@ -495,7 +496,7 @@ export function useAutoBugFix(
     persistNow();
   }
 
-  function onAgentSettled(msg?: ChatMessage) {
+  function onAgentSettled(msg?: VibeChatMessage) {
     if (fixRunCancelled.value) return;
     if (msg?.id && assistantMsgId.value && msg.id !== assistantMsgId.value) return;
     if ((phase.value === "fixing" || phase.value === "verifying" || assistantMsgId.value) && phase.value !== "done") {

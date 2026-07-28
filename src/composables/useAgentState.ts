@@ -35,23 +35,21 @@ import {
 } from "../utils/vibeHelpers";
 import { createAgentSessionRunManager, type SessionAgentRun } from "./agentSessionRuns";
 
-export type ChatMessage = VibeChatMessage;
-
 export interface UseAgentStateDeps {
   activeSessionId: Ref<string>;
-  chatMessages: Ref<ChatMessage[]>;
+  chatMessages: Ref<VibeChatMessage[]>;
   chatMode: Ref<string>;
-  resolveUserMessageImages: (msg: ChatMessage) => string[];
+  resolveUserMessageImages: (msg: VibeChatMessage) => string[];
 }
 
 export function useAgentState(deps: UseAgentStateDeps) {
   const { activeSessionId, chatMessages, chatMode, resolveUserMessageImages } = deps;
 
-  const runManager = createAgentSessionRunManager<ChatMessage>();
+  const runManager = createAgentSessionRunManager<VibeChatMessage>();
 
   const agentUiTick = ref(0);
   const agentLiveRevision = ref(0);
-  const stalledAssistantMsg = ref<ChatMessage | null>(null);
+  const stalledAssistantMsg = ref<VibeChatMessage | null>(null);
   const planExecutionActive = ref(false);
 
   const autoResumeSecondsLeft = ref(0);
@@ -62,19 +60,19 @@ export function useAgentState(deps: UseAgentStateDeps) {
     agentLiveRevision.value += 1;
   }
 
-  function findRunForMsg(msgOrId: ChatMessage | string): SessionAgentRun<ChatMessage> | undefined {
+  function findRunForMsg(msgOrId: VibeChatMessage | string): SessionAgentRun<VibeChatMessage> | undefined {
     const msgId = typeof msgOrId === "string" ? msgOrId : msgOrId.id;
     return runManager.findByAssistantMsgId(msgId);
   }
 
-  function getLiveForMsg(msg: ChatMessage): AgentRunLiveState | undefined {
+  function getLiveForMsg(msg: VibeChatMessage): AgentRunLiveState | undefined {
     return findRunForMsg(msg)?.live;
   }
 
-  function resolveLiveAgentSource(msg: ChatMessage): LiveAgentAnswerSource {
+  function resolveLiveAgentSource(msg: VibeChatMessage): LiveAgentAnswerSource {
     const run = findRunForMsg(msg);
     const live = run?.live ?? getLiveForMsg(msg);
-    const source = run?.assistantMsgId === msg.id ? (run.assistantMsg as ChatMessage) : msg;
+    const source = run?.assistantMsgId === msg.id ? (run.assistantMsg as VibeChatMessage) : msg;
     return {
       content: source.content,
       roundGroups: source.roundGroups,
@@ -92,15 +90,15 @@ export function useAgentState(deps: UseAgentStateDeps) {
     return sessionId === activeSessionId.value;
   }
 
-  function isAgentRunning(msg: ChatMessage): boolean {
+  function isAgentRunning(msg: VibeChatMessage): boolean {
     return Boolean(findRunForMsg(msg));
   }
 
-  function isActivityDetailed(msg: ChatMessage): boolean {
+  function isActivityDetailed(msg: VibeChatMessage): boolean {
     return msg.activityDetailed === true;
   }
 
-  function messageDisplayContent(msg: ChatMessage): string {
+  function messageDisplayContent(msg: VibeChatMessage): string {
     if (msg.role === "user") {
       const text = stripReferenceAttachments(msg.content || "").trim();
       if (text) return text;
@@ -130,7 +128,7 @@ export function useAgentState(deps: UseAgentStateDeps) {
     return base;
   }
 
-  function buildCompactStatusForMessage(msg: ChatMessage) {
+  function buildCompactStatusForMessage(msg: VibeChatMessage) {
     const run = findRunForMsg(msg);
     const running = isAgentRunning(msg);
     const liveSource = resolveLiveAgentSource(msg);
@@ -156,13 +154,13 @@ export function useAgentState(deps: UseAgentStateDeps) {
     });
   }
 
-  function cursorCompactLiveStatus(msg: ChatMessage): string | null {
+  function cursorCompactLiveStatus(msg: VibeChatMessage): string | null {
     void agentLiveRevision.value;
     void agentUiTick.value;
     return buildCursorCompactLiveStatus(buildCompactStatusForMessage(msg));
   }
 
-  function agentStatusDisplay(msg: ChatMessage): string {
+  function agentStatusDisplay(msg: VibeChatMessage): string {
     void agentLiveRevision.value;
     void agentUiTick.value;
     const compactStatus = cursorCompactLiveStatus(msg);
@@ -206,7 +204,7 @@ export function useAgentState(deps: UseAgentStateDeps) {
     return statusText;
   }
 
-  function buildAgentRunningStatusTextForMsg(msg: ChatMessage): string {
+  function buildAgentRunningStatusTextForMsg(msg: VibeChatMessage): string {
     const display = agentStatusDisplay(msg).trim();
     const live = getLiveForMsg(msg);
     const model = live?.model || msg.agentModel || "";
@@ -216,11 +214,11 @@ export function useAgentState(deps: UseAgentStateDeps) {
     return agentRunningHint(msg);
   }
 
-  function agentAbortDisplayReason(msg: ChatMessage): string {
+  function agentAbortDisplayReason(msg: VibeChatMessage): string {
     return msg.agentAbortReason?.trim() || msg.agentFailureReason?.trim() || "运行已中断";
   }
 
-  function agentRunningHint(msg: ChatMessage): string {
+  function agentRunningHint(msg: VibeChatMessage): string {
     const live = getLiveForMsg(msg);
     const streamChars = live?.streamChars ?? msg.streamChars ?? 0;
     if (streamChars > 0) return `${streamChars} 字`;
@@ -239,7 +237,7 @@ export function useAgentState(deps: UseAgentStateDeps) {
     return run.deferredCapture;
   }
 
-  function mergeDeferredCaptureIntoMsg(sessionId: string, msg: ChatMessage) {
+  function mergeDeferredCaptureIntoMsg(sessionId: string, msg: VibeChatMessage) {
     const run = runManager.get(sessionId);
     const captured = run?.deferredCapture;
     if (!captured?.tools.length) {
