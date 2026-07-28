@@ -137,7 +137,14 @@ function showMinimapContextMenu(e: Event) {
   const me = e as MouseEvent;
   me.preventDefault();
   me.stopPropagation();
-  minimapMenuPos.value = { x: me.clientX, y: me.clientY };
+  const menuW = 280;
+  const menuH = 200;
+  let x = me.clientX - menuW;
+  let y = me.clientY;
+  if (x < 0) x = 8;
+  if (y + menuH > window.innerHeight) y = window.innerHeight - menuH - 8;
+  if (y < 0) y = 8;
+  minimapMenuPos.value = { x, y };
   showMinimapSettings.value = true;
 }
 
@@ -448,7 +455,7 @@ defineExpose({ getSelectedText, revealLine, revealLineWhenReady });
 /* Minimap 右键上下文菜单 */
 .minimap-context-menu {
   position: fixed;
-  width: 240px;
+  width: 280px;
   background: rgba(24, 28, 42, 0.95);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
