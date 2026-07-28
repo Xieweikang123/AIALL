@@ -36,6 +36,8 @@
 </template>
 
 <script setup lang="ts">
+import { formatDate } from "../../utils/gitHelpers";
+
 interface GitRef {
   name: string;
   type: "head" | "local" | "remote" | "tag" | "other";
@@ -65,24 +67,6 @@ defineProps<{
 defineEmits<{
   "update:open": [value: boolean];
 }>();
-
-function formatDate(dateStr: string): string {
-  try {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-    if (diffMins < 1) return "刚刚";
-    if (diffMins < 60) return `${diffMins}分钟前`;
-    if (diffHours < 24) return `${diffHours}小时前`;
-    if (diffDays < 7) return `${diffDays}天前`;
-    return date.toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
-  } catch {
-    return dateStr;
-  }
-}
 </script>
 
 <style scoped>

@@ -75,6 +75,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { GitFileTreeNode } from "../../utils/gitFileTree";
+import { gitStatusIcon, gitStatusClass } from "../../utils/gitHelpers";
 
 const props = defineProps<{
   node: GitFileTreeNode;
@@ -129,36 +130,6 @@ const fileTypeLabel = computed(() => {
 
 function gitWorkingTreeDiffKey(path: string, isStaged: boolean): string {
   return `${isStaged ? "staged" : "unstaged"}:${path}`;
-}
-
-function gitStatusIcon(status: string): string {
-  switch (status) {
-    case "A":
-    case "added": return "A";
-    case "M":
-    case "modified": return "M";
-    case "D":
-    case "deleted": return "D";
-    case "R":
-    case "renamed": return "R";
-    case "C":
-    case "copied": return "C";
-    default: return "?";
-  }
-}
-
-function gitStatusClass(status: string): string {
-  switch (status) {
-    case "A":
-    case "added": return "git-status-added";
-    case "M":
-    case "modified": return "git-status-modified";
-    case "D":
-    case "deleted": return "git-status-deleted";
-    case "R":
-    case "renamed": return "git-status-renamed";
-    default: return "git-status-unknown";
-  }
 }
 </script>
 

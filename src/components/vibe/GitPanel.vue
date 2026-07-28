@@ -482,9 +482,13 @@
                   </span>
                 </span>
                 <span class="git-log-msg" :title="entry.message">{{ entry.message }}</span>
-                <span class="git-log-date" :title="entry.date">{{ formatDate(entry.date) }}</span>
-                <span class="git-log-count">{{ entry.files.length }}</span>
               </button>
+              <div class="git-log-meta-row">
+                <span class="git-log-author">{{ entry.author }}</span>
+                <span class="git-log-sep">·</span>
+                <span class="git-log-date" :title="entry.date">{{ formatDate(entry.date) }}</span>
+                <span class="git-log-count">{{ entry.files.length }} 文件</span>
+              </div>
               <div v-if="isGitLogEntryOpen(entry.hash)" class="git-log-detail">
                 <div class="git-log-meta-expanded">
                   <span class="git-log-meta-item"><span class="git-log-meta-label">作者:</span> {{ entry.author }}</span>
@@ -543,6 +547,9 @@
         @click.stop
       >
         <button type="button" class="ctx-item" @click="gitLogCtxCopyHash">复制提交哈希</button>
+        <button type="button" class="ctx-item" @click="gitLogCtxCopyMessage">复制提交消息</button>
+        <div class="ctx-sep" />
+        <button type="button" class="ctx-item" @click="gitLogCtxCreateBranch">在此创建分支</button>
         <div class="ctx-sep" />
         <button type="button" class="ctx-item" @click="gitLogCtxCherryPick">拣选 (cherry-pick)</button>
         <button type="button" class="ctx-item" @click="gitLogCtxRevert">还原 (revert)</button>
@@ -566,6 +573,7 @@ import GitAheadCommits from "./GitAheadCommits.vue";
 import GitStashPanel from "./GitStashPanel.vue";
 import GitCommitBox from "./GitCommitBox.vue";
 import { buildGitFileTree, collectGitFolderPaths } from "../../utils/gitFileTree";
+import { gitStatusIcon, gitStatusClass, formatDate, formatFullDate, splitGitFilePath } from "../../utils/gitHelpers";
 
 interface GitStash {
   index: number | string;
@@ -690,6 +698,7 @@ const emit = defineEmits<{
   (e: "do-cherry-pick", hash: string): void;
   (e: "do-revert-commit", hash: string): void;
   (e: "do-create-tag-at", hash: string): void;
+  (e: "do-create-branch-at", hash: string): void;
   (e: "reset-to-commit", hash: string, mode: string, shortHash: string): void;
   (e: "commit-batch-group", index: number, message: string): void;
   (e: "commit-all-batches", messages: string[]): void;
@@ -879,64 +888,9 @@ function gitHistoryDiffKey(hash: string, path: string, oldPath?: string): string
   return `history:${hash}:${oldPath || ''}:${path}`;
 }
 
-function splitGitFilePath(filePath: string): { dir: string; name: string } {
-  const normalized = filePath.replace(/\\/g, "/");
-  const slash = normalized.lastIndexOf("/");
-  if (slash === -1) return { dir: "", name: normalized };
-  return { dir: normalized.slice(0, slash), name: normalized.slice(slash + 1) };
-}
 
-function gitStatusIcon(status: string): string {
-  switch (status) {
-    case "A":
-    case "added": return "A";
-    case "M":
-    case "modified": return "M";
-    case "D":
-    case "deleted": return "D";
-    case "R":
-    case "renamed": return "R";
-    case "C":
-    case "copied": return "C";
-    default: return "?";
-  }
-}
 
-function formatDate(dateStr: string): string {
-  try {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
 
-    if (diffMins < 1) return "刚刚";
-    if (diffMins < 60) return `${diffMins}分钟前`;
-    if (diffHours < 24) return `${diffHours}小时前`;
-    if (diffDays < 7) return `${diffDays}天前`;
-
-    return date.toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
-  } catch {
-    return dateStr;
-  }
-}
-
-function formatFullDate(dateStr: string): string {
-  try {
-    const date = new Date(dateStr);
-    return date.toLocaleString("zh-CN", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
-  } catch {
-    return dateStr;
-  }
-}
 
 function handleLogScroll(event: Event) {
   const target = event.target as HTMLElement;
@@ -1003,14 +957,15 @@ interface GitLogCtxMenu {
   y: number;
   hash: string;
   shortHash: string;
+  message: string;
 }
 
-const gitLogContextMenu = ref<GitLogCtxMenu>({ show: false, x: 0, y: 0, hash: "", shortHash: "" });
+const gitLogContextMenu = ref<GitLogCtxMenu>({ show: false, x: 0, y: 0, hash: "", shortHash: "", message: "" });
 
 function onGitLogContextMenu(event: MouseEvent, entry: GitLogEntry) {
   event.preventDefault();
   const menuW = 200;
-  const menuH = 200;
+  const menuH = 220;
   const clampedX = Math.min(event.clientX, window.innerWidth - menuW);
   const clampedY = Math.min(event.clientY, window.innerHeight - menuH);
   gitLogContextMenu.value = {
@@ -1019,6 +974,7 @@ function onGitLogContextMenu(event: MouseEvent, entry: GitLogEntry) {
     y: Math.max(0, clampedY),
     hash: entry.hash,
     shortHash: entry.shortHash,
+    message: entry.message,
   };
 }
 
@@ -1044,6 +1000,12 @@ function gitLogCtxCreateTag() {
   if (h) emit("do-create-tag-at", h);
 }
 
+function gitLogCtxCreateBranch() {
+  const h = gitLogContextMenu.value.hash;
+  hideGitLogContextMenu();
+  if (h) emit("do-create-branch-at", h);
+}
+
 function gitLogCtxReset(mode: string) {
   const h = gitLogContextMenu.value.hash;
   const s = gitLogContextMenu.value.shortHash;
@@ -1055,6 +1017,12 @@ function gitLogCtxCopyHash() {
   const h = gitLogContextMenu.value.hash;
   hideGitLogContextMenu();
   if (h) navigator.clipboard.writeText(h);
+}
+
+function gitLogCtxCopyMessage() {
+  const msg = gitLogContextMenu.value.message;
+  hideGitLogContextMenu();
+  if (msg) navigator.clipboard.writeText(msg);
 }
 
 const branchSelectorRef = ref<HTMLElement | null>(null);
@@ -1076,21 +1044,6 @@ onUnmounted(() => {
   window.removeEventListener("click", handleGlobalClick, true);
 });
 
-function gitStatusClass(status: string): string {
-  switch (status) {
-    case "A":
-    case "added": return "git-status-added";
-    case "M":
-    case "modified": return "git-status-modified";
-    case "D":
-    case "deleted": return "git-status-deleted";
-    case "R":
-    case "renamed":
-    case "C":
-    case "copied": return "git-status-renamed";
-    default: return "git-status-unknown";
-  }
-}
 </script>
 
 <style src="./styles/GitPanel.scss" scoped></style>
