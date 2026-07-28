@@ -428,4 +428,52 @@ index a..b 100644
     assert!(is_low_value_ai_diff_path("src/dist/bundle.js"));
     assert!(!is_low_value_ai_diff_path("src/composables/useGitPanel.ts"));
   }
+
+  #[test]
+  fn test_parse_unified_diff_utf8_content() {
+    let diff = "\
+diff --git a/README.md b/README.md
+index abc..def 100644
+--- a/README.md
++++ b/README.md
+@@ -1 +1 @@
+-你好，世界
++你好，AIALL
+";
+    let (before, after) = parse_unified_diff(diff);
+    assert_eq!(before, "你好，世界");
+    assert_eq!(after, "你好，AIALL");
+  }
+
+  #[test]
+  fn test_parse_unified_diff_emoji_content() {
+    let diff = "\
+diff --git a/emoji.txt b/emoji.txt
+--- a/emoji.txt
++++ b/emoji.txt
+@@ -1 +1,2 @@
+-foo
++bar
++🎉 emoji added
+";
+    let (before, after) = parse_unified_diff(diff);
+    assert_eq!(before, "foo");
+    assert_eq!(after, "bar\n🎉 emoji added");
+  }
+
+  #[test]
+  fn test_parse_unified_diff_cjk_paths() {
+    let diff = "\
+diff --git a/中文文件.txt b/中文文件.txt
+index a..b 100644
+--- a/中文文件.txt
++++ b/中文文件.txt
+@@ -1 +1 @@
+-foo
++bar
+";
+    let (before, after) = parse_unified_diff(diff);
+    assert_eq!(before, "foo");
+    assert_eq!(after, "bar");
+  }
 }

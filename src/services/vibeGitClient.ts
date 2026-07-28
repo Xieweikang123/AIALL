@@ -603,7 +603,9 @@ export async function aiBatchGroups(
             else if (currentEvent === "delta" && parsed.text && onDelta) onDelta(parsed.text);
             else if (currentEvent === "done" && parsed.groups) finalGroups = parsed.groups;
             else if (currentEvent === "error") return { ok: false, groups: [], error: parsed.error || parsed.message || "AI 请求失败" };
-          } catch {}
+          } catch {
+            // skip malformed JSON lines from SSE stream
+          }
           currentEvent = "";
         }
       }

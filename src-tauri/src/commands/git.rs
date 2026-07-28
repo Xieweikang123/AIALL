@@ -247,7 +247,8 @@ fn preprocess_diff(patch: &str, max_chars_per_file: usize, total_max_chars: usiz
   // Cap before section scan — AI budget is small; avoid walking multi-MB patches.
   const RAW_SCAN_CAP: usize = 200_000;
   let patch = if patch.len() > RAW_SCAN_CAP {
-    &patch[..RAW_SCAN_CAP]
+    let cutoff = patch.char_indices().nth(RAW_SCAN_CAP).map(|(i, _)| i).unwrap_or(patch.len());
+    &patch[..cutoff]
   } else {
     patch
   };

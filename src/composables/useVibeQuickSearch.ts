@@ -1,14 +1,14 @@
 import { nextTick, ref, watch, type Ref } from "vue";
 import type EditorPanel from "../components/vibe/EditorPanel.vue";
 import type ChatPanel from "../components/vibe/ChatPanel.vue";
-import type { ChatMessage } from "./useAgentRun";
+import type { VibeChatMessage } from "../types/vibeChat";
 import type { PersistedChatMessage } from "../services/vibeChatStorage";
 
 export interface UseVibeQuickSearchOptions {
   activeSessionId: Ref<string>;
-  chatMessages: Ref<ChatMessage[]>;
+  chatMessages: Ref<VibeChatMessage[]>;
   switchingSession: Ref<boolean>;
-  getSessionMessages: (sessionId: string) => ChatMessage[] | undefined;
+  getSessionMessages: (sessionId: string) => VibeChatMessage[] | undefined;
   switchSession: (sessionId: string) => void;
   expandChat: () => void;
   openFile: (filePath: string) => Promise<void>;

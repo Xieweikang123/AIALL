@@ -77,13 +77,20 @@ pub async fn git_reset(project_root: &str, files: Vec<String>) -> GitActionResul
   } else if files.is_empty() {
     git_exec(project_root, &["read-tree", "--empty"]).await
   } else {
+    let mut errors: Vec<String> = Vec::new();
     for file in &files {
-      let _ = git_exec(project_root, &["rm", "--cached", "-r", "-f", "--", file]).await;
+      if let Err(e) = git_exec(project_root, &["rm", "--cached", "-r", "-f", "--", file]).await {
+        errors.push(e);
+      }
     }
-    Ok(super::exec::GitOutput {
-      stdout: String::new(),
-      stderr: String::new(),
-    })
+    if !errors.is_empty() {
+      Err(errors.join("; "))
+    } else {
+      Ok(super::exec::GitOutput {
+        stdout: String::new(),
+        stderr: String::new(),
+      })
+    }
   };
   match result {
     Ok(_) => GitActionResult { ok: true, error: None, warning: None },
@@ -306,6 +313,39 @@ mod tests {
   fn test_extract_commit_hash_stdin_format() {
     let out = "[main abc1234def1234567890abc1234def1234567890] commit message";
     assert_eq!(extract_commit_hash(out), "");
+  }
+
+  #[test]
+  fn test_extract_commit_hash_utf8_boundary() {
+    // Non-ASCII chars in input should not cause issues
+    let result = extract_commit_hash("提交 abc1234 完成");
+    assert_eq!(result, "abc1234");
+  }
+
+  #[test]
+  fn test_extract_commit_hash_multibyte_surround() {
+    // CJK characters around the hash
+    let result = extract_commit_hash("合并请求 #42 abc1234def 已验证");
+    assert_eq!(result, "abc1234def");
+  }
+
+  #[test]
+  fn test_extract_commit_hash_emoji() {
+    let result = extract_commit_hash("🐛 fix: abc1234 fix the bug");
+    assert_eq!(result, "abc1234");
+  }
+
+  #[test]
+  fn test_extract_commit_hash_mixed_script() {
+    // Mixed Arabic numerals with non-ASCII
+    let result = extract_commit_hash("Гит abc1234def 完成です");
+    assert_eq!(result, "abc1234def");
+  }
+
+  #[test]
+  fn test_extract_commit_hash_only_non_ascii_no_hash() {
+    let result = extract_commit_hash("完全中文没有哈希");
+    assert_eq!(result, "");
   }
 
   #[test]
