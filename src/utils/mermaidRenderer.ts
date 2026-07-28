@@ -36,7 +36,7 @@ async function ensureMermaid(): Promise<typeof Mermaid> {
       mermaidModule = m;
       return m;
     }).catch((err: unknown) => {
-      console.error("Failed to load mermaid:", err);
+      console.debug("Failed to load mermaid:", err);
       initPromise = null;
       throw err;
     });
@@ -81,7 +81,7 @@ export async function renderMermaidInContainer(el: HTMLElement): Promise<void> {
       // 绑定缩放事件
       bindZoomEvents(node);
     } catch (err) {
-      console.warn("[mermaid] render failed:", err);
+      console.debug("[mermaid] render failed:", err);
       node.innerHTML = `<pre style="color:#f38ba8;font-size:12px;">Mermaid 渲染失败: ${err instanceof Error ? err.message : String(err)}</pre>`;
       node.setAttribute("data-mermaid-rendered", "error");
     }
@@ -664,7 +664,7 @@ async function openFullscreenAsync(node: HTMLElement) {
       Object.assign(chartWrapper.style, { color: "", fontSize: "", textAlign: "", minWidth: "" });
       svg = insertMermaidSvgMarkup(chartWrapper, svgMarkup);
     } catch (err) {
-      console.warn("[mermaid] fullscreen render failed:", err);
+      console.debug("[mermaid] fullscreen render failed:", err);
     }
   }
 

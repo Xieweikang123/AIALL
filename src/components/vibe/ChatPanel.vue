@@ -101,7 +101,7 @@
             title="更多操作"
             aria-haspopup="menu"
             :aria-expanded="headMenuOpen"
-            @click="headMenuOpen = !headMenuOpen"
+            @click="toggleHeadMenu"
           >
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <circle cx="3.5" cy="8" r="1.2" fill="currentColor"/>
@@ -109,38 +109,45 @@
               <circle cx="12.5" cy="8" r="1.2" fill="currentColor"/>
             </svg>
           </button>
-          <div v-if="headMenuOpen" class="panel-head-dropdown" role="menu">
-            <button
-              type="button"
-              class="panel-head-menu-item"
-              role="menuitem"
-              :class="{ active: projectMemoryHasContent }"
-              :disabled="!projectOpened"
-              @click="onHeadMenuAction('memory')"
+          <Teleport to="body">
+            <div
+              v-if="headMenuOpen"
+              class="panel-head-dropdown"
+              role="menu"
+              :style="{ top: headMenuTop + 'px', right: headMenuRight + 'px' }"
             >
-              记忆
-            </button>
-            <button
-              type="button"
-              class="panel-head-menu-item"
-              role="menuitem"
-              :disabled="!projectOpened"
-              @click="onHeadMenuAction('new-session')"
-            >
-              新会话
-              <span class="panel-head-menu-hint">Ctrl+Shift+N</span>
-            </button>
-            <button
-              v-if="chatMessages.length"
-              type="button"
-              class="panel-head-menu-item danger"
-              role="menuitem"
-              :disabled="chatSending"
-              @click="onHeadMenuAction('clear')"
-            >
-              清空会话
-            </button>
-          </div>
+              <button
+                type="button"
+                class="panel-head-menu-item"
+                role="menuitem"
+                :class="{ active: projectMemoryHasContent }"
+                :disabled="!projectOpened"
+                @click="onHeadMenuAction('memory')"
+              >
+                记忆
+              </button>
+              <button
+                type="button"
+                class="panel-head-menu-item"
+                role="menuitem"
+                :disabled="!projectOpened"
+                @click="onHeadMenuAction('new-session')"
+              >
+                新会话
+                <span class="panel-head-menu-hint">Ctrl+Shift+N</span>
+              </button>
+              <button
+                v-if="chatMessages.length"
+                type="button"
+                class="panel-head-menu-item danger"
+                role="menuitem"
+                :disabled="chatSending"
+                @click="onHeadMenuAction('clear')"
+              >
+                清空会话
+              </button>
+            </div>
+          </Teleport>
         </div>
         <span class="panel-head-divider" aria-hidden="true" />
         <button
@@ -937,6 +944,23 @@ const chatScrollRef = ref<HTMLElement | null>(null);
 const chatDropZoneRef = ref<HTMLElement | null>(null);
 const headMenuRef = ref<HTMLElement | null>(null);
 const headMenuOpen = ref(false);
+const headMenuTop = ref(0);
+const headMenuRight = ref(0);
+
+function updateHeadMenuPosition() {
+  if (headMenuRef.value) {
+    const rect = headMenuRef.value.getBoundingClientRect();
+    headMenuTop.value = rect.bottom + 6;
+    headMenuRight.value = window.innerWidth - rect.right;
+  }
+}
+
+function toggleHeadMenu() {
+  headMenuOpen.value = !headMenuOpen.value;
+  if (headMenuOpen.value) {
+    nextTick(updateHeadMenuPosition);
+  }
+}
 
 function onHeadMenuAction(action: "memory" | "new-session" | "clear") {
   headMenuOpen.value = false;
@@ -946,10 +970,12 @@ function onHeadMenuAction(action: "memory" | "new-session" | "clear") {
 }
 
 function onHeadMenuPointerDown(event: PointerEvent) {
+  if (!headMenuOpen.value) return;
   const el = headMenuRef.value;
-  if (!el || !headMenuOpen.value) return;
   const target = event.target as Node | null;
-  if (target && !el.contains(target)) headMenuOpen.value = false;
+  const insideMenu = el && el.contains(target);
+  const insideDropdown = target && target instanceof HTMLElement && target.closest('.panel-head-dropdown');
+  if (!insideMenu && !insideDropdown) headMenuOpen.value = false;
 }
 
 const isAtBottom = ref(true);

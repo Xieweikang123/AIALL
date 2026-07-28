@@ -779,6 +779,15 @@ watch(
   },
 );
 
+watch(
+  () => props.gitLocalChangesOpen,
+  (open) => {
+    if (open) {
+      emit("update:gitLogOpen", false);
+    }
+  },
+);
+
 function onBatchMessageInput(index: number, value: string) {
   const next = [...props.batchMessages];
   next[index] = value;

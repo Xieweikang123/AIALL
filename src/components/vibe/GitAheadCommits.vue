@@ -87,49 +87,69 @@ function formatDate(dateStr: string): string {
 
 <style scoped>
 .git-ahead-section {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  padding-bottom: 4px;
-  margin-bottom: 4px;
+  padding: 2px 0;
 }
 .git-ahead-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
   width: 100%;
-  padding: 8px 12px;
+  padding: 6px 4px;
   background: none;
   border: none;
-  color: var(--text-color, #c9d1d9);
+  color: rgba(255, 255, 255, 0.85);
   cursor: pointer;
   font-size: 12px;
   border-radius: 4px;
   transition: background 0.15s ease;
 }
-.git-ahead-toggle:hover { background: rgba(255,255,255,0.06); }
-.git-section-chevron { font-size: 10px; color: rgba(139,148,158,0.6); width: 14px; flex-shrink: 0; }
+.git-ahead-toggle:hover { background: rgba(255, 255, 255, 0.06); }
+.git-section-chevron { font-size: 10px; color: rgba(139, 148, 158, 0.5); width: 14px; flex-shrink: 0; }
 .git-ahead-title { font-weight: 600; }
 .git-ahead-count {
   margin-left: auto;
-  background: rgba(255,255,255,0.1);
-  padding: 0 6px;
-  border-radius: 8px;
   font-size: 11px;
-  line-height: 18px;
+  color: rgba(139, 148, 158, 0.7);
 }
-.git-ahead-list { padding: 0 12px 8px; display: flex; flex-direction: column; gap: 6px; }
-.git-ahead-loading, .git-ahead-empty { font-size: 12px; color: rgba(139,148,158,0.7); padding: 4px 0; }
-.git-ahead-item {
-  padding: 6px 8px;
-  border-radius: 4px;
-  background: rgba(255,255,255,0.03);
+.git-ahead-list {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
+  padding: 4px 0 4px 20px;
 }
-.git-ahead-entry-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.git-ahead-hash { font-family: monospace; font-size: 11px; color: rgba(139,148,158,0.7); flex-shrink: 0; }
+.git-ahead-loading,
+.git-ahead-empty {
+  font-size: 12px;
+  color: rgba(139, 148, 158, 0.6);
+  padding: 4px 0;
+}
+.git-ahead-item {
+  padding: 5px 8px;
+  border-radius: 4px;
+  border-left: 2px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: background 0.12s ease;
+}
+.git-ahead-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.git-ahead-entry-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.git-ahead-hash {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: rgba(139, 148, 158, 0.65);
+  flex-shrink: 0;
+}
 .git-ahead-msg {
   font-size: 12px;
+  color: rgba(255, 255, 255, 0.88);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -144,9 +164,15 @@ function formatDate(dateStr: string): string {
   white-space: nowrap;
   line-height: 16px;
 }
-.git-log-ref--tag { background: rgba(87,171,90,0.2); color: #7ee787; }
-.git-log-ref--head { background: rgba(56,139,253,0.2); color: #58a6ff; }
-.git-log-ref--local { background: rgba(139,148,158,0.15); color: #8b949e; }
+.git-log-ref--tag { background: rgba(87, 171, 90, 0.2); color: #7ee787; }
+.git-log-ref--head { background: rgba(56, 139, 253, 0.2); color: #58a6ff; }
+.git-log-ref--local { background: rgba(139, 148, 158, 0.15); color: #8b949e; }
 .git-ref-icon { margin-right: 2px; }
-.git-ahead-meta { display: flex; gap: 8px; font-size: 11px; color: rgba(139,148,158,0.6); padding-left: 2px; }
+.git-ahead-meta {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  color: rgba(139, 148, 158, 0.5);
+  padding-left: 0;
+}
 </style>

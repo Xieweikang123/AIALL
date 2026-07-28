@@ -485,7 +485,7 @@ function formatSessionTime(iso: string): string {
   color: rgba(255, 255, 255, 0.72);
   font-size: 12px;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  transition: background 0.15s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.15s ease, color 0.15s ease;
 }
 
 .project-history-trigger:hover:not(:disabled),
@@ -493,11 +493,13 @@ function formatSessionTime(iso: string): string {
   background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.14);
   color: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
 }
 
 .project-history-trigger.active {
-  border-color: rgba(31, 111, 235, 0.28);
-  background: rgba(31, 111, 235, 0.1);
+  border-color: rgba(31, 111, 235, 0.32);
+  background: rgba(31, 111, 235, 0.12);
+  box-shadow: 0 0 0 1px rgba(31, 111, 235, 0.1);
 }
 
 .project-history-trigger:disabled {
@@ -522,19 +524,21 @@ function formatSessionTime(iso: string): string {
   flex-shrink: 0;
   min-width: 16px;
   height: 16px;
-  padding: 0 4px;
+  padding: 0 5px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.1);
   color: rgba(255, 255, 255, 0.65);
   font-size: 10px;
   font-weight: 600;
   line-height: 16px;
+  letter-spacing: 0.3px;
 }
 
 .project-history-chevron {
   flex-shrink: 0;
   font-size: 9px;
   color: rgba(255, 255, 255, 0.45);
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .path-current {
@@ -551,7 +555,8 @@ function formatSessionTime(iso: string): string {
 
 .project-history-footer {
   padding: 8px 10px 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .project-history-open-new {
@@ -560,7 +565,7 @@ function formatSessionTime(iso: string): string {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 8px 12px;
+  padding: 9px 12px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);
@@ -568,13 +573,15 @@ function formatSessionTime(iso: string): string {
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  transition: background 0.15s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.15s ease, color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 .project-history-open-new:hover:not(:disabled) {
-  background: rgba(88, 166, 255, 0.1);
-  border-color: rgba(88, 166, 255, 0.28);
+  background: rgba(88, 166, 255, 0.12);
+  border-color: rgba(88, 166, 255, 0.32);
   color: #c9e4ff;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(88, 166, 255, 0.15);
 }
 
 .project-history-open-new:disabled {
@@ -586,19 +593,20 @@ function formatSessionTime(iso: string): string {
   width: min(420px, calc(100vw - 24px));
   max-height: min(420px, calc(100vh - 80px));
   overflow-y: auto;
-  background: rgba(17, 24, 39, 0.96);
-  backdrop-filter: blur(16px);
+  background: rgba(22, 27, 40, 0.98);
+  backdrop-filter: blur(24px);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 10px;
-  box-shadow: var(--shadow-panel, 0 8px 32px rgba(0, 0, 0, 0.35));
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.2);
   z-index: 1000;
   margin-top: 4px;
   scrollbar-width: thin;
   scrollbar-color: rgba(128, 128, 128, 0.3) transparent;
+  animation: dropdown-fade-in 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .project-history-dropdown::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
 }
 
 .project-history-dropdown::-webkit-scrollbar-track {
@@ -606,7 +614,7 @@ function formatSessionTime(iso: string): string {
 }
 
 .project-history-dropdown::-webkit-scrollbar-thumb {
-  background: rgba(128, 128, 128, 0.3);
+  background: rgba(128, 128, 128, 0.35);
   border-radius: 3px;
   transition: background 0.2s ease;
 }
@@ -615,13 +623,25 @@ function formatSessionTime(iso: string): string {
   background: rgba(128, 128, 128, 0.5);
 }
 
+@keyframes dropdown-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .project-history-head {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
   padding: 14px 14px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .project-history-title {
@@ -630,11 +650,12 @@ function formatSessionTime(iso: string): string {
   margin: 0;
   color: var(--text-primary);
   letter-spacing: -0.01em;
+  line-height: 1.3;
 }
 
 .project-history-desc {
   font-size: 11px;
-  color: rgba(139, 148, 158, 0.85);
+  color: rgba(201, 209, 217, 0.65);
   margin: 3px 0 0;
   line-height: 1.4;
 }
@@ -643,8 +664,8 @@ function formatSessionTime(iso: string): string {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 28px 20px;
+  gap: 10px;
+  padding: 32px 20px;
   text-align: center;
   color: rgba(139, 148, 158, 0.8);
   font-size: 12px;
@@ -655,7 +676,8 @@ function formatSessionTime(iso: string): string {
 }
 
 .project-history-empty-icon {
-  color: rgba(139, 148, 158, 0.45);
+  color: rgba(139, 148, 158, 0.4);
+  opacity: 0.8;
 }
 
 .project-history-list {
@@ -664,7 +686,7 @@ function formatSessionTime(iso: string): string {
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
 .project-history-item {
@@ -674,15 +696,15 @@ function formatSessionTime(iso: string): string {
   min-width: 0;
   border-radius: 8px;
   position: relative;
-  transition: background 0.12s ease;
+  transition: background 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .project-history-item:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .project-history-item.active {
-  background: rgba(88, 166, 255, 0.12);
+  background: rgba(88, 166, 255, 0.14);
 }
 
 .project-history-item.active::before {
@@ -692,10 +714,11 @@ function formatSessionTime(iso: string): string {
   top: 50%;
   transform: translateY(-50%);
   width: 2px;
-  height: 56%;
-  min-height: 18px;
+  height: 60%;
+  min-height: 20px;
   border-radius: 0 2px 2px 0;
-  background: #58a6ff;
+  background: linear-gradient(180deg, #79c0ff 0%, #58a6ff 100%);
+  box-shadow: 0 0 6px rgba(88, 166, 255, 0.3);
 }
 
 .project-history-item-main {
@@ -707,7 +730,7 @@ function formatSessionTime(iso: string): string {
   text-align: left;
   background: none;
   border: none;
-  padding: 8px 6px 8px 10px;
+  padding: 9px 6px 9px 10px;
   cursor: pointer;
   color: inherit;
 }
@@ -721,16 +744,17 @@ function formatSessionTime(iso: string): string {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   flex-shrink: 0;
-  border-radius: 7px;
-  background: rgba(210, 153, 34, 0.14);
+  border-radius: 8px;
+  background: rgba(210, 153, 34, 0.12);
   color: #d29922;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .project-history-item.active .project-history-item-icon {
-  background: rgba(88, 166, 255, 0.18);
+  background: rgba(88, 166, 255, 0.2);
   color: #79c0ff;
 }
 
@@ -739,52 +763,56 @@ function formatSessionTime(iso: string): string {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
 }
 
 .project-history-item-top {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 
 .project-history-item-title {
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  line-height: 1.3;
 }
 
 .project-history-item-badge {
   flex-shrink: 0;
-  padding: 1px 6px;
+  padding: 1px 7px;
   border-radius: 999px;
   background: rgba(88, 166, 255, 0.18);
   color: #79c0ff;
   font-size: 10px;
   font-weight: 600;
   line-height: 1.5;
+  letter-spacing: 0.3px;
 }
 
 .project-history-item-path {
   font-size: 11px;
-  color: rgba(139, 148, 158, 0.85);
+  color: rgba(201, 209, 217, 0.72);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.35;
+  font-variant-numeric: tabular-nums;
 }
 
 .project-history-item-meta {
   flex-shrink: 0;
   margin-left: auto;
   font-size: 10px;
-  color: rgba(139, 148, 158, 0.65);
+  color: rgba(201, 209, 217, 0.6);
   font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2px;
 }
 
 .project-history-delete {
@@ -792,17 +820,17 @@ function formatSessionTime(iso: string): string {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   margin-right: 4px;
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: 7px;
   background: transparent;
-  color: rgba(139, 148, 158, 0.55);
+  color: rgba(139, 148, 158, 0.5);
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
+  transition: opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
 
 .project-history-item:hover .project-history-delete,
@@ -812,17 +840,19 @@ function formatSessionTime(iso: string): string {
 }
 
 .project-history-delete:hover {
-  background: rgba(248, 81, 73, 0.14);
+  background: rgba(248, 81, 73, 0.16);
   color: #ff9a9a;
+  transform: scale(1.05);
 }
 
 .project-history-clear {
   flex-shrink: 0;
   color: rgba(139, 148, 158, 0.85);
+  font-weight: 500;
 }
 
 .project-history-clear:hover {
-  background: rgba(248, 81, 73, 0.1);
+  background: rgba(248, 81, 73, 0.12);
   color: #ff9a9a;
 }
 

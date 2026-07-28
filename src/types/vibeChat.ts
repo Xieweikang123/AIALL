@@ -3,6 +3,7 @@ import type { AgentToolStep } from "../utils/toolHelpers";
 export type { AgentToolStep };
 import type { PersistedChatMessage } from "../services/vibeChatStorage";
 import type { VibeAgentSseEvent } from "../services/vibeAgentClient";
+import type { PersistedFileDiff } from "../services/vibeChatStorageTypes";
 
 export type VibeChatMessage = Omit<PersistedChatMessage, "tools" | "roundGroups"> & {
   tools?: AgentToolStep[];
@@ -30,15 +31,7 @@ export type VibeChatMessage = Omit<PersistedChatMessage, "tools" | "roundGroups"
   _expandedDiffs?: Record<string, boolean>;
 };
 
-/** @deprecated 请使用 VibeChatMessage；保留别名以兼容旧 import */
-export type ChatMessage = VibeChatMessage;
-
-export type TurnFileDiff = {
-  before: string;
-  after: string;
-  deleted?: boolean;
-  created?: boolean;
-};
+export type TurnFileDiff = PersistedFileDiff;
 
 export type AgentStatusData = Extract<VibeAgentSseEvent, { type: "status" }>["data"] & {
   toolTitle?: string;

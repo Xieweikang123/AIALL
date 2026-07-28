@@ -964,7 +964,8 @@ import {
   extractPlanContentFromStoredMessage,
   isPlanDocumentPath,
 } from "../services/planFile";
-import { useAgentRun, type ChatMessage } from "../composables/useAgentRun";
+import { useAgentRun } from "../composables/useAgentRun";
+import type { VibeChatMessage } from "../types/vibeChat";
 import { parseAgentSuggestions, type AgentSuggestion } from "../services/agentSuggestions";
 import type { TurnFileDiff } from "../types/vibeChat";
 import { ESCAPE_DISMISS_PRIORITY, registerEscapeDismiss } from "../composables/useEscapeDismiss";
@@ -1115,9 +1116,9 @@ type FileDiff = TurnFileDiff;
 function normalizeChatMessages(
   messages: PersistedChatMessage[],
   options?: { stripTransientUi?: boolean },
-): ChatMessage[] {
+): VibeChatMessage[] {
   return messages.map((m) => {
-    const normalized: ChatMessage = {
+    const normalized: VibeChatMessage = {
       ...m,
       activityExpanded:
         m.activityExpanded ??
@@ -2069,7 +2070,7 @@ useVibeGlobalShortcuts({
   toggleFilePanel: filePanelCollapsed.value ? expandFilePanel : collapseFilePanel,
 });
 
-async function applyChatMessageImageHydration(messages: PersistedChatMessage[]): Promise<ChatMessage[]> {
+async function applyVibeChatMessageImageHydration(messages: PersistedChatMessage[]): Promise<VibeChatMessage[]> {
   const project = projectPath.value.trim();
   if (!project || !chatMessagesNeedImageHydration(messages)) {
     return normalizeChatMessages(messages);
@@ -2207,7 +2208,7 @@ async function copySessionNamePath(session: VibeChatSessionMeta) {
   }, 3000);
 }
 
-function patchAssistantMsg(msgId: string, patch: Partial<ChatMessage>, sessionId?: string) {
+function patchAssistantMsg(msgId: string, patch: Partial<VibeChatMessage>, sessionId?: string) {
   if (patch.content !== undefined) {
     debugLog("[VibeCodingView] patchAssistantMsg content", {
       msgId: msgId.slice(0, 20),
@@ -2219,7 +2220,7 @@ function patchAssistantMsg(msgId: string, patch: Partial<ChatMessage>, sessionId
 
   const sid = (sessionId || activeSessionId.value).trim();
   const isActive = sid === activeSessionId.value;
-  const apply = (list: ChatMessage[]) => {
+  const apply = (list: VibeChatMessage[]) => {
     const idx = list.findIndex((m) => m.id === msgId);
     if (idx < 0) return false;
     Object.assign(list[idx]!, patch);
@@ -2288,7 +2289,7 @@ function clearTurnFileDiffsFromStore(turnFileDiffs: Record<string, FileDiff>) {
   fileDiffs.value = next;
 }
 
-function userMessageImages(msg: ChatMessage): string[] {
+function userMessageImages(msg: VibeChatMessage): string[] {
   return resolveChatMessageImageUrls(
     projectPath.value.trim(),
     msg,
@@ -2728,7 +2729,7 @@ const agentRunningStatusText = computed(() => {
   return "";
 });
 
-function findLastCompletedAssistantMessage(): ChatMessage | undefined {
+function findLastCompletedAssistantMessage(): VibeChatMessage | undefined {
   for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
     const msg = chatMessages.value[i];
     if (msg?.role === "assistant" && !isAgentRunning(msg)) return msg;
@@ -3329,7 +3330,7 @@ function undoExchange(messageId: string, event?: MouseEvent) {
     persistChatNow();
     void scrollChatToBottom();
   }).catch((err: unknown) => {
-    console.error("confirm failed:", err);
+    debugLog("confirm failed:", err);
   });
 }
 
@@ -3466,7 +3467,7 @@ function handleAgentSuggestion(suggestion: AgentSuggestion) {
 
 function handleAiOptionSelect(
   option: { index: number; label: string; fullText: string; action?: "implement" },
-  msg?: ChatMessage,
+  msg?: VibeChatMessage,
 ) {
   const userText = option.fullText;
   if (!userText) return;
@@ -3708,7 +3709,7 @@ watch(
     if (!sid) return;
     const token = ++chatImageHydrateToken;
     void (async () => {
-      const next = await applyChatMessageImageHydration(chatMessages.value);
+      const next = await applyVibeChatMessageImageHydration(chatMessages.value);
       if (token !== chatImageHydrateToken) return;
       if (activeSessionId.value.trim() !== sid) return;
       const live = getSessionMessages(sid);

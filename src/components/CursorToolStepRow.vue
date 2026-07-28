@@ -222,8 +222,9 @@ function onLinkClick() {
       });
       return;
     }
+    const debugLog = (msg: string, ...args: unknown[]) => console.debug(msg, ...args);
     fetch(backendUrl(`/backend/open-url?url=${encodeURIComponent(target)}`)).catch((err) => {
-      console.error("Failed to open URL via backend:", err);
+      debugLog("Failed to open URL via backend:", err);
       window.open(target, "_blank", "noopener,noreferrer");
     });
   } else {
