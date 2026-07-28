@@ -189,6 +189,7 @@
           @do-revert-commit="doRevertCommit"
           @do-create-tag="doCreateTag"
           @do-create-tag-at="(hash, event) => doCreateTag(undefined, hash, event)"
+          @do-create-branch-at="doCreateBranchAt"
           @do-delete-tag="doDeleteTag"
           @do-submodule-update="doSubmoduleUpdate"
           @update:git-selected-remote="gitSelectedRemote = $event"
@@ -635,6 +636,7 @@
           @do-revert-commit="doRevertCommit"
           @do-create-tag="doCreateTag"
           @do-create-tag-at="(hash, event) => doCreateTag(undefined, hash, event)"
+          @do-create-branch-at="doCreateBranchAt"
           @do-delete-tag="doDeleteTag"
           @do-submodule-update="doSubmoduleUpdate"
           @update:git-selected-remote="gitSelectedRemote = $event"
@@ -1374,6 +1376,11 @@ const {
 function openProjectPanelView(view: "knowledge" | "health" | "map" | "fix") {
   gitPanelMode.value = "project";
   projectPanelView.value = view;
+}
+
+function doCreateBranchAt(hash: string) {
+  const name = globalThis.prompt("在此提交创建分支：");
+  if (name) createBranch(name, hash);
 }
 
 // Session manager composable
