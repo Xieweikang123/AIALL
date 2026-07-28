@@ -113,7 +113,7 @@
               class="ghost tiny"
               :class="{ active: stashSectionOpen }"
               title="贮藏工作区修改"
-              @click="stashSectionOpen = !stashSectionOpen"
+              @click="emit('update:gitStashSectionOpen', !stashSectionOpen)"
             >
               📦 贮藏<span v-if="gitStashes.length" class="git-stash-btn-count">{{ gitStashes.length }}</span>
             </button>
@@ -147,107 +147,28 @@
             </button>
           </div>
         </div>
-        <div v-if="gitAhead > 0" class="git-ahead-section">
-          <button type="button" class="git-ahead-toggle" @click="$emit('update:gitAheadCommitsOpen', !gitAheadCommitsOpen)">
-            <span class="git-section-chevron">{{ gitAheadCommitsOpen ? "▾" : "▸" }}</span>
-            <span class="git-ahead-title">待推送提交</span>
-            <span class="git-ahead-count">{{ gitAhead }}</span>
-          </button>
-          <div v-if="gitAheadCommitsOpen" class="git-ahead-list">
-            <div v-if="gitAheadCommitsLoading" class="git-ahead-loading">加载中…</div>
-            <div v-else-if="!gitAheadCommits.length" class="git-ahead-empty">无待推送提交</div>
-            <div v-for="entry in gitAheadCommits" :key="entry.hash" class="git-ahead-item">
-              <div class="git-ahead-entry-head">
-                <span class="git-ahead-hash">{{ entry.shortHash }}</span>
-                <span v-if="entry.refs && entry.refs.length" class="git-log-refs">
-                  <span
-                    v-for="ref in entry.refs"
-                    :key="ref.name"
-                    class="git-log-ref"
-                    :class="'git-log-ref--' + ref.type"
-                    :title="ref.type + ': ' + ref.name"
-                  >
-                    <span v-if="ref.type === 'tag'" class="git-ref-icon">🏷️</span>
-                    <span v-else-if="ref.type === 'head'" class="git-ref-icon">⎇</span>
-                    {{ ref.name }}
-                  </span>
-                </span>
-                <span class="git-ahead-msg" :title="entry.message">{{ entry.message }}</span>
-              </div>
-              <div class="git-ahead-meta">
-                <span class="git-ahead-date">{{ formatDate(entry.date) }}</span>
-                <span class="git-ahead-files">{{ entry.files.length }} 文件</span>
-              </div>
-            </div>
-          </div>
-        </div>
+        <GitAheadCommits
+          :ahead="gitAhead"
+          :open="gitAheadCommitsOpen"
+          :loading="gitAheadCommitsLoading"
+          :commits="gitAheadCommits"
+          @update:open="$emit('update:gitAheadCommitsOpen', $event)"
+        />
       </div>
 
-      <div v-if="stashSectionOpen" class="git-stash-section git-section-card">
-        <button type="button" class="git-stash-collapse-toggle" @click="stashSectionOpen = !stashSectionOpen">
-          <span class="git-section-chevron">{{ stashSectionOpen ? "▾" : "▸" }}</span>
-          <span class="git-stash-icon">📦</span>
-          <span class="git-stash-title">贮藏</span>
-          <span v-if="gitStashes.length" class="git-stash-count">{{ gitStashes.length }}</span>
-        </button>
-        <div v-if="stashSectionOpen" class="git-stash-header">
-          <div class="git-stash-save-row">
-            <input
-              :value="gitStashMessage"
-              class="git-stash-msg-input"
-              type="text"
-              placeholder="贮藏信息（可选）"
-              :disabled="!!gitStashAction"
-              @input="$emit('update:gitStashMessage', ($event.target as HTMLInputElement).value)"
-              @keydown.enter="$emit('do-stash-save')"
-            />
-            <button
-              type="button"
-              class="ghost tiny stash-save-btn"
-              :disabled="!!gitStashAction"
-              @click="$emit('do-stash-save')"
-            >
-              {{ gitStashAction === 'save' ? '…' : '贮藏' }}
-            </button>
-          </div>
-        </div>
-        <div v-if="stashSectionOpen && gitStashes.length" class="git-stash-list">
-          <div class="git-stash-list-header">
-            <button type="button" class="git-section-toggle" @click="$emit('update:gitStashOpen', !gitStashOpen)">
-              <span class="git-section-chevron">{{ gitStashOpen ? "▾" : "▸" }}</span>
-              <span class="git-stash-list-title">贮藏列表</span>
-            </button>
-          </div>
-          <div v-if="gitStashOpen" class="git-stash-list-content">
-            <div v-for="stash in gitStashes" :key="stash.index" class="git-stash-item">
-              <span class="git-stash-label">{{ 'stash@{' + stash.index + '}' }}</span>
-              <span class="git-stash-msg">{{ stash.message }}</span>
-              <div class="git-stash-actions">
-                <button
-                  type="button"
-                  class="ghost tiny"
-                  :disabled="!!gitStashAction"
-                  @click="$emit('do-stash-apply', stash.index)"
-                  title="应用贮藏（保留贮藏）"
-                >
-                  {{ gitStashAction === 'apply-' + stash.index ? '…' : 'Apply' }}
-                </button>
-                <button
-                  type="button"
-                  class="ghost tiny danger"
-                  :disabled="!!gitStashAction"
-                  @click="$emit('do-stash-drop', stash.index)"
-                  title="移除此贮藏（不应用）"
-                >
-                  {{ gitStashAction === 'drop-' + stash.index ? '…' : 'Drop' }}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div v-else-if="stashSectionOpen && gitStashAction === 'list'" class="git-stash-empty shimmer-text--fast">加载中…</div>
-        <div v-else-if="stashSectionOpen" class="git-stash-empty">暂无贮藏</div>
-      </div>
+      <GitStashPanel
+        :section-open="stashSectionOpen"
+        :stashes="gitStashes"
+        :stash-message="gitStashMessage"
+        :stash-action="gitStashAction"
+        :list-open="gitStashOpen"
+        @update:section-open="$emit('update:gitStashSectionOpen', $event)"
+        @update:list-open="$emit('update:gitStashOpen', $event)"
+        @update:stash-message="$emit('update:gitStashMessage', $event)"
+        @save="$emit('do-stash-save')"
+        @apply="(index) => $emit('do-stash-apply', index)"
+        @drop="(index) => $emit('do-stash-drop', index)"
+      />
 
       <div v-if="gitError" class="git-error">{{ gitError }}</div>
       <div class="git-work-area" :class="{ 'git-work-area--log-open': gitLogOpen }">
@@ -257,7 +178,7 @@
             v-if="gitLogOpen"
             type="button"
             class="git-local-toggle"
-            @click="localChangesOpen = !localChangesOpen"
+            @click="emit('update:gitLocalChangesOpen', !localChangesOpen)"
           >
             <span class="git-section-chevron">{{ localChangesOpen ? "▾" : "▸" }}</span>
             <span>当前更改</span>
@@ -269,47 +190,23 @@
             class="git-local-content"
             :class="{ 'git-local-content--batch-open': batchSectionOpen }"
           >
-            <div v-show="!batchSectionOpen" class="git-commit-box git-section-card">
-              <textarea
-                :value="gitCommitMessage"
-                class="git-commit-input"
-                rows="2"
-                placeholder="提交信息…"
-                :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep"
-                @input="$emit('update:gitCommitMessage', ($event.target as HTMLTextAreaElement).value)"
-                @keydown.ctrl.enter="$emit('commit-git')"
-                @keydown.meta.enter="$emit('commit-git')"
+            <div v-show="!batchSectionOpen">
+              <GitCommitBox
+                :message="gitCommitMessage"
+                :committing="gitCommitting"
+                :gen-step="gitGenStep"
+                :ai-push-step="gitAiPushStep"
+                :staged-count="gitStagedFiles.length"
+                :config-ready="configReady"
+                :can-commit="canGitCommit"
+                :conflict-count="0"
+                :loading="gitLoading"
+                :advanced-action="null"
+                @update:message="$emit('update:gitCommitMessage', $event)"
+                @commit="$emit('commit-git')"
+                @generate-message="$emit('generate-commit-message')"
+                @ai-push="$emit('ai-commit-and-push')"
               />
-              <div class="git-commit-actions">
-                <button
-                  type="button"
-                  class="secondary small git-commit-ai"
-                  :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep || !gitStagedFiles.length || !configReady"
-                  :title="!configReady ? '请先配置 AI 模型' : 'AI 生成提交信息'"
-                  @click="$emit('generate-commit-message')"
-                >
-                  {{ gitGenStep || "✦ AI" }}
-                </button>
-                <button
-                  type="button"
-                  class="small git-commit-btn"
-                  :class="canGitCommit ? 'primary' : 'secondary'"
-                  :disabled="!canGitCommit || !!gitAiPushStep"
-                  :title="canGitCommit ? 'Ctrl+Enter 提交' : '请先填写提交信息'"
-                  @click="$emit('commit-git')"
-                >
-                  {{ gitCommitting ? "提交中…" : `提交 (${gitStagedFiles.length})` }}
-                </button>
-                <button
-                  type="button"
-                  class="small git-ai-push"
-                  :disabled="gitCommitting || !!gitGenStep || !!gitAiPushStep || !gitStagedFiles.length || !configReady"
-                  :title="!configReady ? '请先配置 AI 模型' : 'AI 生成提交信息并推送'"
-                  @click="$emit('ai-commit-and-push')"
-                >
-                  {{ gitAiPushStep || "AI 推送" }}
-                </button>
-              </div>
             </div>
             <div
               v-show="!batchSectionOpen"
@@ -643,6 +540,9 @@ import { ref, watch, onMounted, onUnmounted, computed } from "vue";
 import type { GitRemoteInfo, GitBranchInfo } from "../../services/vibeGitClient";
 import type { BatchGroup } from "../../composables/useGitPanel";
 import GitFileTreeNode from "./GitFileTreeNode.vue";
+import GitAheadCommits from "./GitAheadCommits.vue";
+import GitStashPanel from "./GitStashPanel.vue";
+import GitCommitBox from "./GitCommitBox.vue";
 import { buildGitFileTree, collectGitFolderPaths } from "../../utils/gitFileTree";
 
 interface GitStash {
@@ -726,12 +626,14 @@ interface Props {
   hasMoreGitLog: boolean;
   gitLogLoadingMore: boolean;
   gitLogSearchLoading: boolean;
+  gitLocalChangesOpen: boolean;
+  gitStashSectionOpen: boolean;
 }
 
 const props = defineProps<Props>();
 
-const stashSectionOpen = ref(false);
-const localChangesOpen = ref(false);
+const stashSectionOpen = computed(() => props.gitStashSectionOpen);
+const localChangesOpen = computed(() => props.gitLocalChangesOpen);
 const gitTreeExpandedDirs = ref<Set<string>>(new Set());
 
 const emit = defineEmits<{
@@ -768,6 +670,8 @@ const emit = defineEmits<{
   (e: "ai-batch-groups"): void;
   (e: "update:batchMessages", messages: string[]): void;
   (e: "update:batchSectionOpen", open: boolean): void;
+  (e: "update:gitLocalChangesOpen", open: boolean): void;
+  (e: "update:gitStashSectionOpen", open: boolean): void;
   (e: "load-more-git-log"): void;
   (e: "search-git-log", query: string): void;
   (e: "checkout-branch", branchName: string): void;
@@ -868,9 +772,9 @@ watch(
   () => props.gitLogOpen,
   (open) => {
     if (open) {
-      stashSectionOpen.value = false;
+      emit("update:gitStashSectionOpen", false);
       emit("update:batchSectionOpen", false);
-      localChangesOpen.value = false;
+      emit("update:gitLocalChangesOpen", false);
     }
   },
 );
@@ -1325,65 +1229,6 @@ function gitStatusClass(status: string): string {
   padding: 10px 12px;
 }
 
-.git-commit-box {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 6px;
-}
-
-.git-commit-input {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 6px 8px;
-  font-size: 13px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 4px;
-  background: rgba(11, 18, 32, 0.72);
-  color: rgba(255, 255, 255, 0.92);
-  resize: vertical;
-  font-family: inherit;
-  line-height: 1.5;
-}
-
-.git-commit-input:focus {
-  outline: none;
-  border-color: rgba(88, 166, 255, 0.5);
-}
-
-.git-commit-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.git-commit-btn { min-width: 72px; }
-
-.git-ai-push {
-  font-size: 11px;
-  padding: 3px 8px;
-  border: 1px solid rgba(210, 153, 34, 0.35);
-  background: rgba(210, 153, 34, 0.08);
-  border-radius: 4px;
-  color: #e3b341;
-  cursor: pointer;
-}
-
-.git-ai-push:disabled { opacity: 0.4; cursor: default; }
-
-.git-commit-ai {
-  font-size: 11px;
-  padding: 3px 8px;
-  border: 1px solid rgba(88, 166, 255, 0.25);
-  background: rgba(88, 166, 255, 0.1);
-  border-radius: 4px;
-  color: #58a6ff;
-  cursor: pointer;
-}
-
-.git-commit-ai:disabled { opacity: 0.4; cursor: default; }
-
 .git-header {
   display: flex;
   flex-direction: column;
@@ -1633,6 +1478,7 @@ function gitStatusClass(status: string): string {
   flex: 1;
   min-height: 0;
   max-height: none;
+  overflow-y: auto;
 }
 
 .git-changes-wrap {
@@ -2682,4 +2528,5 @@ function gitStatusClass(status: string): string {
   border-width: 1.5px;
   flex-shrink: 0;
 }
+
 </style>
