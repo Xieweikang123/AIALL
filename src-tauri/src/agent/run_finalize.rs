@@ -81,6 +81,7 @@ pub(crate) struct FinalizeTurnMut {
   pub ambiguous_term_clarification_retries: u32,
 }
 
+#[derive(Debug, PartialEq)]
 pub(crate) enum FinalizeTurnOutcome {
   Continue,
   Break,
@@ -474,4 +475,340 @@ pub(crate) fn handle_final_turn(
   }
 
   FinalizeTurnOutcome::Break
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn dummy_channel() -> Channel<Value> {
+    Channel::new(|_| Ok(()))
+  }
+
+  #[test]
+  fn finalize_ambiguous_term_clarify_blocked_then_cleared() {
+    let mut messages = Vec::new();
+    let mut state = FinalizeTurnMut {
+      consultative_force_answer_pending: false,
+      vision_consultative_locate_retries: 0,
+      accuracy_retries: 0,
+      behavior_purpose_retries: 0,
+      ui_behavior_retries: 0,
+      modification_audit_sent: false,
+      patch_required_retries: 0,
+      patch_failure_completion_retries: 0,
+      manual_handoff_retries: 0,
+      premature_completion_retries: 0,
+      empty_reply_retries: 0,
+      workspace_cleanup_nudge_sent: false,
+      ambiguous_term_clarification_pending: true,
+      ambiguous_term_clarification_retries: 0,
+    };
+    // Reply that looks like a premature plan/scaffold — triggers retry
+    let mut params = FinalizeTurnParams {
+      messages: &mut messages,
+      assistant_text: "## 修改方案\n1. 修改 src/main.rs",
+      written_files: &[],
+      tool_guard: &ToolGuardState::default(),
+      run_policy: &AgentRunPolicy::default(),
+      mode: "build",
+      is_read_only_run: false,
+      is_execute_plan: false,
+      verify_script_available: false,
+      task_prompt: "implement feature",
+      target_files: None,
+      pregrep_unique_files: &[],
+      consultative_read_paths: &[],
+      consultative_read_failed_paths: &[],
+      consultative_grep_patterns: &[],
+      vision_locate_tools_used: false,
+      vision_auto_grep_had_matches: false,
+      vision_locate_read_used: false,
+      effective_read_only_build: false,
+      patch_failure_log: &[],
+      probe_tracker: &ProbeArtifactTracker::default(),
+      build_explore_force_patch_sent: false,
+      patch_anchor_force_pending: false,
+      turn: 2,
+      segment_max_turns: 200,
+      channel: &dummy_channel(),
+      ambiguous_term_clarification_pending: true,
+      ambiguous_term_clarification_terms: &["歧义词1".to_string()],
+    };
+    let result = handle_final_turn(&mut params, &mut state);
+    assert_eq!(result, FinalizeTurnOutcome::Continue);
+    assert_eq!(state.ambiguous_term_clarification_retries, 1);
+    assert!(state.ambiguous_term_clarification_pending); // still pending after 1 retry
+  }
+
+  #[test]
+  fn finalize_ambiguous_term_cleared_when_looks_like_clarification() {
+    let mut messages = Vec::new();
+    let mut state = FinalizeTurnMut {
+      consultative_force_answer_pending: false,
+      vision_consultative_locate_retries: 0,
+      accuracy_retries: 0,
+      behavior_purpose_retries: 0,
+      ui_behavior_retries: 0,
+      modification_audit_sent: false,
+      patch_required_retries: 0,
+      patch_failure_completion_retries: 0,
+      manual_handoff_retries: 0,
+      premature_completion_retries: 0,
+      empty_reply_retries: 0,
+      workspace_cleanup_nudge_sent: false,
+      ambiguous_term_clarification_pending: true,
+      ambiguous_term_clarification_retries: 0,
+    };
+    let mut params = FinalizeTurnParams {
+      messages: &mut messages,
+      assistant_text: "请问你指的是哪个模块？",
+      written_files: &[],
+      tool_guard: &ToolGuardState::default(),
+      run_policy: &AgentRunPolicy::default(),
+      mode: "build",
+      is_read_only_run: false,
+      is_execute_plan: false,
+      verify_script_available: false,
+      task_prompt: "implement feature",
+      target_files: None,
+      pregrep_unique_files: &[],
+      consultative_read_paths: &[],
+      consultative_read_failed_paths: &[],
+      consultative_grep_patterns: &[],
+      vision_locate_tools_used: false,
+      vision_auto_grep_had_matches: false,
+      vision_locate_read_used: false,
+      effective_read_only_build: false,
+      patch_failure_log: &[],
+      probe_tracker: &ProbeArtifactTracker::default(),
+      build_explore_force_patch_sent: false,
+      patch_anchor_force_pending: false,
+      turn: 2,
+      segment_max_turns: 200,
+      channel: &dummy_channel(),
+      ambiguous_term_clarification_pending: true,
+      ambiguous_term_clarification_terms: &[],
+    };
+    let _ = handle_final_turn(&mut params, &mut state);
+    // The reply looks like a clarification question, so pending should clear
+    assert!(!state.ambiguous_term_clarification_pending);
+  }
+
+  #[test]
+  fn finalize_breaks_when_no_issues() {
+    let mut messages = Vec::new();
+    let mut state = FinalizeTurnMut {
+      consultative_force_answer_pending: false,
+      vision_consultative_locate_retries: 0,
+      accuracy_retries: 0,
+      behavior_purpose_retries: 0,
+      ui_behavior_retries: 0,
+      modification_audit_sent: false,
+      patch_required_retries: 0,
+      patch_failure_completion_retries: 0,
+      manual_handoff_retries: 0,
+      premature_completion_retries: 0,
+      empty_reply_retries: 0,
+      workspace_cleanup_nudge_sent: false,
+      ambiguous_term_clarification_pending: false,
+      ambiguous_term_clarification_retries: 0,
+    };
+    let mut params = FinalizeTurnParams {
+      messages: &mut messages,
+      assistant_text: "已经完成了修改，添加了新文件 src/foo.ts",
+      written_files: &["src/foo.ts".to_string()],
+      tool_guard: &ToolGuardState::default(),
+      run_policy: &AgentRunPolicy::default(),
+      mode: "build",
+      is_read_only_run: false,
+      is_execute_plan: false,
+      verify_script_available: false,
+      task_prompt: "implement feature",
+      target_files: None,
+      pregrep_unique_files: &[],
+      consultative_read_paths: &[],
+      consultative_read_failed_paths: &[],
+      consultative_grep_patterns: &[],
+      vision_locate_tools_used: false,
+      vision_auto_grep_had_matches: false,
+      vision_locate_read_used: false,
+      effective_read_only_build: false,
+      patch_failure_log: &[],
+      probe_tracker: &ProbeArtifactTracker::default(),
+      build_explore_force_patch_sent: false,
+      patch_anchor_force_pending: false,
+      turn: 5,
+      segment_max_turns: 200,
+      channel: &dummy_channel(),
+      ambiguous_term_clarification_pending: false,
+      ambiguous_term_clarification_terms: &[],
+    };
+    let result = handle_final_turn(&mut params, &mut state);
+    assert_eq!(result, FinalizeTurnOutcome::Break,
+      "should break when no issues detected");
+  }
+
+  #[test]
+  fn finalize_empty_reply_triggers_retry() {
+    let mut messages = Vec::new();
+    let mut state = FinalizeTurnMut {
+      consultative_force_answer_pending: false,
+      vision_consultative_locate_retries: 0,
+      accuracy_retries: 0,
+      behavior_purpose_retries: 0,
+      ui_behavior_retries: 0,
+      modification_audit_sent: false,
+      patch_required_retries: 0,
+      patch_failure_completion_retries: 0,
+      manual_handoff_retries: 0,
+      premature_completion_retries: 0,
+      empty_reply_retries: 0,
+      workspace_cleanup_nudge_sent: false,
+      ambiguous_term_clarification_pending: false,
+      ambiguous_term_clarification_retries: 0,
+    };
+    let mut params = FinalizeTurnParams {
+      messages: &mut messages,
+      assistant_text: "ok",
+      written_files: &[],
+      tool_guard: &ToolGuardState::default(),
+      run_policy: &AgentRunPolicy::default(),
+      mode: "build",
+      is_read_only_run: false,
+      is_execute_plan: false,
+      verify_script_available: false,
+      task_prompt: "implement feature",
+      target_files: None,
+      pregrep_unique_files: &[],
+      consultative_read_paths: &[],
+      consultative_read_failed_paths: &[],
+      consultative_grep_patterns: &[],
+      vision_locate_tools_used: false,
+      vision_auto_grep_had_matches: false,
+      vision_locate_read_used: false,
+      effective_read_only_build: false,
+      patch_failure_log: &[],
+      probe_tracker: &ProbeArtifactTracker::default(),
+      build_explore_force_patch_sent: false,
+      patch_anchor_force_pending: false,
+      turn: 5,
+      segment_max_turns: 200,
+      channel: &dummy_channel(),
+      ambiguous_term_clarification_pending: false,
+      ambiguous_term_clarification_terms: &[],
+    };
+    let result = handle_final_turn(&mut params, &mut state);
+    assert_eq!(result, FinalizeTurnOutcome::Continue);
+    assert_eq!(state.empty_reply_retries, 1);
+    assert!(!messages.is_empty(), "retry nudge should be added");
+  }
+
+  #[test]
+  fn finalize_empty_reply_exhaustion_emits_error() {
+    let mut messages = Vec::new();
+    let mut state = FinalizeTurnMut {
+      consultative_force_answer_pending: false,
+      vision_consultative_locate_retries: 0,
+      accuracy_retries: 0,
+      behavior_purpose_retries: 0,
+      ui_behavior_retries: 0,
+      modification_audit_sent: false,
+      patch_required_retries: 0,
+      patch_failure_completion_retries: 0,
+      manual_handoff_retries: 0,
+      premature_completion_retries: 0,
+      empty_reply_retries: 2, // Already exhausted 2 retries
+      workspace_cleanup_nudge_sent: false,
+      ambiguous_term_clarification_pending: false,
+      ambiguous_term_clarification_retries: 0,
+    };
+    let mut params = FinalizeTurnParams {
+      messages: &mut messages,
+      assistant_text: "好的",
+      written_files: &[],
+      tool_guard: &ToolGuardState::default(),
+      run_policy: &AgentRunPolicy::default(),
+      mode: "build",
+      is_read_only_run: false,
+      is_execute_plan: false,
+      verify_script_available: false,
+      task_prompt: "implement feature",
+      target_files: None,
+      pregrep_unique_files: &[],
+      consultative_read_paths: &[],
+      consultative_read_failed_paths: &[],
+      consultative_grep_patterns: &[],
+      vision_locate_tools_used: false,
+      vision_auto_grep_had_matches: false,
+      vision_locate_read_used: false,
+      effective_read_only_build: false,
+      patch_failure_log: &[],
+      probe_tracker: &ProbeArtifactTracker::default(),
+      build_explore_force_patch_sent: false,
+      patch_anchor_force_pending: false,
+      turn: 5,
+      segment_max_turns: 200,
+      channel: &dummy_channel(),
+      ambiguous_term_clarification_pending: false,
+      ambiguous_term_clarification_terms: &[],
+    };
+    let result = handle_final_turn(&mut params, &mut state);
+    // Despite exhausted retries, still Break because empty_reply >= 2 + insufficient
+    assert_eq!(result, FinalizeTurnOutcome::Break);
+  }
+
+  #[test]
+  fn finalize_breaks_with_non_empty_reply_after_retries_exhausted() {
+    let mut messages = Vec::new();
+    let mut state = FinalizeTurnMut {
+      consultative_force_answer_pending: false,
+      vision_consultative_locate_retries: 0,
+      accuracy_retries: 0,
+      behavior_purpose_retries: 0,
+      ui_behavior_retries: 0,
+      modification_audit_sent: false,
+      patch_required_retries: 0,
+      patch_failure_completion_retries: 0,
+      manual_handoff_retries: 0,
+      premature_completion_retries: 0,
+      empty_reply_retries: 2,
+      workspace_cleanup_nudge_sent: false,
+      ambiguous_term_clarification_pending: false,
+      ambiguous_term_clarification_retries: 0,
+    };
+    let mut params = FinalizeTurnParams {
+      messages: &mut messages,
+      assistant_text: "已修改 src/main.rs 中的 bug，添加了空值检查。",
+      written_files: &["src/main.rs".to_string()],
+      tool_guard: &ToolGuardState::default(),
+      run_policy: &AgentRunPolicy::default(),
+      mode: "build",
+      is_read_only_run: false,
+      is_execute_plan: false,
+      verify_script_available: false,
+      task_prompt: "implement feature",
+      target_files: None,
+      pregrep_unique_files: &[],
+      consultative_read_paths: &[],
+      consultative_read_failed_paths: &[],
+      consultative_grep_patterns: &[],
+      vision_locate_tools_used: false,
+      vision_auto_grep_had_matches: false,
+      vision_locate_read_used: false,
+      effective_read_only_build: false,
+      patch_failure_log: &[],
+      probe_tracker: &ProbeArtifactTracker::default(),
+      build_explore_force_patch_sent: false,
+      patch_anchor_force_pending: false,
+      turn: 5,
+      segment_max_turns: 200,
+      channel: &dummy_channel(),
+      ambiguous_term_clarification_pending: false,
+      ambiguous_term_clarification_terms: &[],
+    };
+    // Non-empty, substantive reply should break even if retries exhausted
+    let result = handle_final_turn(&mut params, &mut state);
+    assert_eq!(result, FinalizeTurnOutcome::Break);
+  }
 }

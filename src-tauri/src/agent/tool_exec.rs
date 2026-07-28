@@ -452,6 +452,22 @@ async fn exec_delete_file(ctx: &mut ToolExecContext<'_>, args: &Value) -> (bool,
   }
 }
 
+fn is_dangerous_command(command: &str) -> bool {
+  let lower = command.to_ascii_lowercase();
+  // Unix: rm with recursive+force flags (e.g. rm -rf /, rm -fr .)
+  let unix_rm = lower.contains("rm ") && (lower.contains("-rf") || lower.contains("-fr") || lower.contains("--recursive"))
+    && (lower.contains("-f") || lower.contains("--force") || lower.contains("-rf") || lower.contains("-fr"));
+  // Windows: del /s or erase /s (recursive delete)
+  let win_del = (lower.contains("del ") || lower.contains("erase ")) && (lower.contains("/s") || lower.contains("-recurse"));
+  // rmdir /s (Windows)
+  let cmd_rm = lower.contains("rmdir ") && (lower.contains("/s") || lower.contains("-recurse"));
+  // PowerShell: Remove-Item with Recurse+Force
+  let ps_rm = lower.contains("remove-item") && lower.contains("-recurse") && lower.contains("-force");
+  // Dangerous system modifications (format with drive or filesystem flags)
+  let dangerous_cmd = lower.contains("format ") && (lower.contains("c:") || lower.contains("d:") || lower.contains("/fs:") || lower.contains("/q"));
+  unix_rm || win_del || cmd_rm || ps_rm || dangerous_cmd
+}
+
 async fn exec_run_command(project_path: &str, args: &Value, mode: &str) -> (bool, String) {
   if let Some(msg) = block_write(mode, "执行命令") {
     return (false, msg);
@@ -460,7 +476,7 @@ async fn exec_run_command(project_path: &str, args: &Value, mode: &str) -> (bool
   if command.is_empty() {
     return (false, "错误：缺少 command".into());
   }
-  if command.contains("rm -rf") || command.contains("format ") {
+  if is_dangerous_command(command) {
     return (false, "错误：禁止执行危险命令".into());
   }
   let timeout_ms = args
@@ -535,7 +551,7 @@ async fn exec_web_extract(args: &Value, proxy_url: Option<&str>) -> (bool, Strin
 
 #[cfg(test)]
 mod tests {
-  use super::{block_write, exec_list_dir};
+  use super::{block_write, exec_list_dir, is_dangerous_command};
   use serde_json::json;
 
   #[tokio::test]
@@ -624,5 +640,76 @@ mod tests {
     ] {
       assert!(block_write("build", tool).is_none(), "build should not block {tool}");
     }
+  }
+
+  // ── is_dangerous_command ──
+
+  #[test]
+  fn dangerous_unix_rm_rf_detected() {
+    assert!(is_dangerous_command("rm -rf /"));
+    assert!(is_dangerous_command("rm -rf *"));
+    assert!(is_dangerous_command("rm -rf ."));
+    assert!(is_dangerous_command("rm -rf directory"));
+    assert!(is_dangerous_command("rm -fr /"));
+    assert!(is_dangerous_command("rm --recursive --force ."));
+  }
+
+  #[test]
+  fn dangerous_safe_rm_not_blocked() {
+    assert!(!is_dangerous_command("rm file.txt"));
+    assert!(!is_dangerous_command("rm -i file.txt"));
+    assert!(!is_dangerous_command("rmdir empty_dir"));
+    assert!(!is_dangerous_command("remove-item file.txt"));
+  }
+
+  #[test]
+  fn dangerous_powershell_remove_item_detected() {
+    assert!(is_dangerous_command("Remove-Item -Recurse -Force C:\\Windows"));
+    assert!(is_dangerous_command("remove-item -recurse -force ."));
+    assert!(is_dangerous_command("Remove-Item -Recurse -Force -Path ."));
+  }
+
+  #[test]
+  fn dangerous_windows_del_recurse_detected() {
+    assert!(is_dangerous_command("del /s /q *"));
+    assert!(is_dangerous_command("erase /s *"));
+    assert!(is_dangerous_command("del -recurse -force *"));
+  }
+
+  #[test]
+  fn dangerous_rmdir_s_detected() {
+    assert!(is_dangerous_command("rmdir /s C:\\"));
+    assert!(is_dangerous_command("rmdir -recurse C:\\"));
+  }
+
+  #[test]
+  fn dangerous_format_detected() {
+    assert!(is_dangerous_command("format c:"));
+    assert!(is_dangerous_command("format d: /fs:ntfs"));
+    assert!(is_dangerous_command("format C: /q"));
+  }
+
+  #[test]
+  fn dangerous_harmless_format_not_blocked() {
+    assert!(!is_dangerous_command("fmt.Println(\"hello\")"));
+    assert!(!is_dangerous_command("echo \"format string\""));
+    assert!(!is_dangerous_command("Prettier.format(code)"));
+    assert!(!is_dangerous_command("format!("));
+    assert!(!is_dangerous_command("JSON.stringify({})"));
+  }
+
+  #[test]
+  fn dangerous_innocent_commands_allowed() {
+    assert!(!is_dangerous_command("ls -la"));
+    assert!(!is_dangerous_command("cat file.txt"));
+    assert!(!is_dangerous_command("npm install"));
+    assert!(!is_dangerous_command("git status"));
+    assert!(!is_dangerous_command("python script.py"));
+    assert!(!is_dangerous_command("cargo build"));
+  }
+
+  #[test]
+  fn dangerous_empty_command_safe() {
+    assert!(!is_dangerous_command(""));
   }
 }

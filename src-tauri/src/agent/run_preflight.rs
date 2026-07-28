@@ -283,3 +283,427 @@ pub(crate) fn apply_turn_preflight(
 
   TurnPreflightOutcome { active_tools }
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use serde_json::json;
+
+  fn default_policy() -> AgentRunPolicy {
+    AgentRunPolicy::default()
+  }
+
+  fn default_tool_guard() -> ToolGuardState {
+    ToolGuardState::default()
+  }
+
+  fn make_tool(name: &str) -> Value {
+    json!({ "function": { "name": name, "arguments": "{}" } })
+  }
+
+  fn read_set() -> HashSet<&'static str> {
+    ["read_file", "grep", "list_dir", "search_files"].into_iter().collect()
+  }
+
+  #[test]
+  fn preflight_no_nudge_at_start() {
+    let mut messages = Vec::new();
+    let mut state = TurnPreflightState::new();
+    let mut flags = TurnPreflightMut {
+      ui_defect_force_patch_nudge_sent: false,
+      build_explore_force_patch_nudge_sent: false,
+      patch_anchor_force_patch_nudge_sent: false,
+      patch_anchor_force_pending: false,
+      force_write_only_tools: false,
+      consultative_force_answer_pending: false,
+    };
+    let mut policy = default_policy();
+    policy.explore_hard_cap = 50;
+    policy.explore_soft_cap = 30;
+    let all_tools = json!([make_tool("read_file"), make_tool("grep")]);
+    let mut params = TurnPreflightParams {
+      messages: &mut messages,
+      mode: "build",
+      prompt: "fix the bug",
+      is_read_only_run: false,
+      is_execute_plan: false,
+      is_plan_explore: false,
+      is_plan_text_only_follow_up: false,
+      run_policy: &policy,
+      total_read_tool_calls: 0,
+      written_files: &[],
+      explore_files_read: &HashSet::new(),
+      tool_guard: &default_tool_guard(),
+      all_tools: &all_tools,
+      read_set: &read_set(),
+      segment_max_turns: 200,
+      turn: 1,
+      vision_first_turn_pending: false,
+      agent_step_clarify_pending: false,
+      ambiguous_term_clarification_pending: false,
+      nudge_mode: "build",
+    };
+    let outcome = apply_turn_preflight(&mut params, &mut state, &mut flags);
+    // At turn 1 with 0 reads, no nudge should be sent
+    assert!(messages.is_empty(), "no nudge expected at turn 1, got: {:?}", messages);
+    // All tools should be active
+    assert_eq!(outcome.active_tools.as_array().unwrap().len(), 2);
+  }
+
+  #[test]
+  fn preflight_turns_low_nudge_at_threshold() {
+    let mut messages = Vec::new();
+    let mut state = TurnPreflightState::new();
+    let mut flags = TurnPreflightMut {
+      ui_defect_force_patch_nudge_sent: false,
+      build_explore_force_patch_nudge_sent: false,
+      patch_anchor_force_patch_nudge_sent: false,
+      patch_anchor_force_pending: false,
+      force_write_only_tools: false,
+      consultative_force_answer_pending: false,
+    };
+    let mut policy = default_policy();
+    policy.explore_hard_cap = 50;
+    policy.explore_soft_cap = 30;
+    let all_tools = json!([make_tool("read_file")]);
+    let mut params = TurnPreflightParams {
+      messages: &mut messages,
+      mode: "build",
+      prompt: "continue",
+      is_read_only_run: false,
+      is_execute_plan: false,
+      is_plan_explore: false,
+      is_plan_text_only_follow_up: false,
+      run_policy: &policy,
+      total_read_tool_calls: 0,
+      written_files: &[],
+      explore_files_read: &HashSet::new(),
+      tool_guard: &default_tool_guard(),
+      all_tools: &all_tools,
+      read_set: &read_set(),
+      segment_max_turns: 10,
+      turn: 8, // >= 10 - 3 = 7, triggers low nudge
+      vision_first_turn_pending: false,
+      agent_step_clarify_pending: false,
+      ambiguous_term_clarification_pending: false,
+      nudge_mode: "build",
+    };
+    let _outcome = apply_turn_preflight(&mut params, &mut state, &mut flags);
+    assert!(!messages.is_empty(), "should send turns low nudge");
+    assert!(messages[0]["content"].as_str().unwrap().contains("剩余约 3 轮"));
+    assert!(state.turns_low_nudge_sent);
+  }
+
+  #[test]
+  fn preflight_turns_low_nudge_only_once() {
+    let mut messages = Vec::new();
+    let mut state = TurnPreflightState::new();
+    let mut flags = TurnPreflightMut {
+      ui_defect_force_patch_nudge_sent: false,
+      build_explore_force_patch_nudge_sent: false,
+      patch_anchor_force_patch_nudge_sent: false,
+      patch_anchor_force_pending: false,
+      force_write_only_tools: false,
+      consultative_force_answer_pending: false,
+    };
+    let mut policy = default_policy();
+    policy.explore_hard_cap = 50;
+    policy.explore_soft_cap = 30;
+    let all_tools = json!([make_tool("read_file")]);
+    let mut params = TurnPreflightParams {
+      messages: &mut messages,
+      mode: "build",
+      prompt: "continue",
+      is_read_only_run: false,
+      is_execute_plan: false,
+      is_plan_explore: false,
+      is_plan_text_only_follow_up: false,
+      run_policy: &policy,
+      total_read_tool_calls: 0,
+      written_files: &[],
+      explore_files_read: &HashSet::new(),
+      tool_guard: &default_tool_guard(),
+      all_tools: &all_tools,
+      read_set: &read_set(),
+      segment_max_turns: 10,
+      turn: 8,
+      vision_first_turn_pending: false,
+      agent_step_clarify_pending: false,
+      ambiguous_term_clarification_pending: false,
+      nudge_mode: "build",
+    };
+    let _ = apply_turn_preflight(&mut params, &mut state, &mut flags);
+    let count_before = params.messages.len();
+    // Create new params for second call (params dropped)
+    let mut params2 = TurnPreflightParams {
+      messages: &mut messages,
+      mode: "build",
+      prompt: "continue",
+      is_read_only_run: false,
+      is_execute_plan: false,
+      is_plan_explore: false,
+      is_plan_text_only_follow_up: false,
+      run_policy: &policy,
+      total_read_tool_calls: 0,
+      written_files: &[],
+      explore_files_read: &HashSet::new(),
+      tool_guard: &default_tool_guard(),
+      all_tools: &all_tools,
+      read_set: &read_set(),
+      segment_max_turns: 10,
+      turn: 9,
+      vision_first_turn_pending: false,
+      agent_step_clarify_pending: false,
+      ambiguous_term_clarification_pending: false,
+      nudge_mode: "build",
+    };
+    let _ = apply_turn_preflight(&mut params2, &mut state, &mut flags);
+    assert_eq!(messages.len(), count_before, "should not send nudge again");
+  }
+
+  #[test]
+  fn preflight_read_only_run_skips_nudge_and_uses_read_only_tools() {
+    let mut messages = Vec::new();
+    let mut state = TurnPreflightState::new();
+    let mut flags = TurnPreflightMut {
+      ui_defect_force_patch_nudge_sent: false,
+      build_explore_force_patch_nudge_sent: false,
+      patch_anchor_force_patch_nudge_sent: false,
+      patch_anchor_force_pending: false,
+      force_write_only_tools: false,
+      consultative_force_answer_pending: false,
+    };
+    // Include a write tool to verify it's filtered out
+    let all_tools = json!([make_tool("read_file"), make_tool("write_file"), make_tool("grep")]);
+    let mut params = TurnPreflightParams {
+      messages: &mut messages,
+      mode: "ask",
+      prompt: "read this file",
+      is_read_only_run: true,
+      is_execute_plan: false,
+      is_plan_explore: false,
+      is_plan_text_only_follow_up: false,
+      run_policy: &default_policy(),
+      total_read_tool_calls: 0,
+      written_files: &[],
+      explore_files_read: &HashSet::new(),
+      tool_guard: &default_tool_guard(),
+      all_tools: &all_tools,
+      read_set: &read_set(),
+      segment_max_turns: 10,
+      turn: 8, // would trigger low nudge if not read_only
+      vision_first_turn_pending: false,
+      agent_step_clarify_pending: false,
+      ambiguous_term_clarification_pending: false,
+      nudge_mode: "ask",
+    };
+    let outcome = apply_turn_preflight(&mut params, &mut state, &mut flags);
+    // No nudge despite turn >= 8 because is_read_only_run
+    assert!(messages.is_empty());
+    // Only read_file and grep should be active, not write_file
+    let active: Vec<&str> = outcome.active_tools.as_array().unwrap()
+      .iter().map(|t| t["function"]["name"].as_str().unwrap()).collect();
+    assert_eq!(active, vec!["read_file", "grep"]);
+  }
+
+  #[test]
+  fn preflight_user_negation_two_consecutive_triggers_nudge() {
+    let mut messages = Vec::new();
+    let mut state = TurnPreflightState::new();
+    let mut flags = TurnPreflightMut {
+      ui_defect_force_patch_nudge_sent: false,
+      build_explore_force_patch_nudge_sent: false,
+      patch_anchor_force_patch_nudge_sent: false,
+      patch_anchor_force_pending: false,
+      force_write_only_tools: false,
+      consultative_force_answer_pending: false,
+    };
+    let mut policy = default_policy();
+    policy.explore_hard_cap = 50;
+    policy.explore_soft_cap = 30;
+    let all_tools = json!([make_tool("read_file")]);
+
+    // First negation
+    let mut params = TurnPreflightParams {
+      messages: &mut messages,
+      mode: "build",
+      prompt: "不好，换一种方法",
+      is_read_only_run: false,
+      is_execute_plan: false,
+      is_plan_explore: false,
+      is_plan_text_only_follow_up: false,
+      run_policy: &policy,
+      total_read_tool_calls: 0,
+      written_files: &[],
+      explore_files_read: &HashSet::new(),
+      tool_guard: &default_tool_guard(),
+      all_tools: &all_tools,
+      read_set: &read_set(),
+      segment_max_turns: 200,
+      turn: 1,
+      vision_first_turn_pending: false,
+      agent_step_clarify_pending: false,
+      ambiguous_term_clarification_pending: false,
+      nudge_mode: "build",
+    };
+    let _ = apply_turn_preflight(&mut params, &mut state, &mut flags);
+    // First negation should not trigger nudge (needs 2+)
+    assert!(messages.is_empty(), "first negation should not send nudge, got: {messages:?}");
+
+    // Second negation (reusing state with consecutive_user_negations == 1)
+    let mut params2 = TurnPreflightParams {
+      messages: &mut messages,
+      mode: "build",
+      prompt: "还是不对，完全重写",
+      is_read_only_run: false,
+      is_execute_plan: false,
+      is_plan_explore: false,
+      is_plan_text_only_follow_up: false,
+      run_policy: &policy,
+      total_read_tool_calls: 0,
+      written_files: &[],
+      explore_files_read: &HashSet::new(),
+      tool_guard: &default_tool_guard(),
+      all_tools: &all_tools,
+      read_set: &read_set(),
+      segment_max_turns: 200,
+      turn: 2,
+      vision_first_turn_pending: false,
+      agent_step_clarify_pending: false,
+      ambiguous_term_clarification_pending: false,
+      nudge_mode: "build",
+    };
+    let _ = apply_turn_preflight(&mut params2, &mut state, &mut flags);
+    assert!(!messages.is_empty(), "second negation should trigger nudge");
+  }
+
+  #[test]
+  fn preflight_force_patch_when_hard_cap_reached() {
+    let mut messages = Vec::new();
+    let mut state = TurnPreflightState::new();
+    let mut flags = TurnPreflightMut {
+      ui_defect_force_patch_nudge_sent: false,
+      build_explore_force_patch_nudge_sent: false,
+      patch_anchor_force_patch_nudge_sent: false,
+      patch_anchor_force_pending: false,
+      force_write_only_tools: false,
+      consultative_force_answer_pending: false,
+    };
+    let all_tools = json!([make_tool("read_file"), make_tool("write_file"), make_tool("grep")]);
+    let mut policy = default_policy();
+    policy.explore_hard_cap = 5;
+    policy.explore_soft_cap = 3;
+    let mut params = TurnPreflightParams {
+      messages: &mut messages,
+      mode: "build",
+      prompt: "fix it",
+      is_read_only_run: false,
+      is_execute_plan: false,
+      is_plan_explore: false,
+      is_plan_text_only_follow_up: false,
+      run_policy: &policy,
+      total_read_tool_calls: 5, // reached hard cap
+      written_files: &[],
+      explore_files_read: &HashSet::new(),
+      tool_guard: &default_tool_guard(),
+      all_tools: &all_tools,
+      read_set: &read_set(),
+      segment_max_turns: 200,
+      turn: 10,
+      vision_first_turn_pending: false,
+      agent_step_clarify_pending: false,
+      ambiguous_term_clarification_pending: false,
+      nudge_mode: "build",
+    };
+    let outcome = apply_turn_preflight(&mut params, &mut state, &mut flags);
+    assert!(!messages.is_empty(), "should send force patch nudge");
+    // Force patch tools should be limited
+    let active: Vec<&str> = outcome.active_tools.as_array().unwrap()
+      .iter().map(|t| t["function"]["name"].as_str().unwrap()).collect();
+    // write_file, patch_file, read_file, grep, list_dir, search_files, run_command
+    assert!(active.contains(&"write_file"));
+    assert!(active.contains(&"read_file"));
+    assert!(flags.force_write_only_tools);
+  }
+
+  #[test]
+  fn preflight_vision_first_turn_empties_tools() {
+    let mut messages = Vec::new();
+    let mut state = TurnPreflightState::new();
+    let mut flags = TurnPreflightMut {
+      ui_defect_force_patch_nudge_sent: false,
+      build_explore_force_patch_nudge_sent: false,
+      patch_anchor_force_patch_nudge_sent: false,
+      patch_anchor_force_pending: false,
+      force_write_only_tools: false,
+      consultative_force_answer_pending: false,
+    };
+    let all_tools = json!([make_tool("read_file")]);
+    let mut params = TurnPreflightParams {
+      messages: &mut messages,
+      mode: "build",
+      prompt: "fix it",
+      is_read_only_run: false,
+      is_execute_plan: false,
+      is_plan_explore: false,
+      is_plan_text_only_follow_up: false,
+      run_policy: &default_policy(),
+      total_read_tool_calls: 0,
+      written_files: &[],
+      explore_files_read: &HashSet::new(),
+      tool_guard: &default_tool_guard(),
+      all_tools: &all_tools,
+      read_set: &read_set(),
+      segment_max_turns: 200,
+      turn: 1,
+      vision_first_turn_pending: true, // vision first turn → no tools
+      agent_step_clarify_pending: false,
+      ambiguous_term_clarification_pending: false,
+      nudge_mode: "build",
+    };
+    let outcome = apply_turn_preflight(&mut params, &mut state, &mut flags);
+    assert_eq!(outcome.active_tools.as_array().unwrap().len(), 0,
+      "vision first turn should have no tools");
+  }
+
+  #[test]
+  fn preflight_file_breadth_nudge() {
+    let mut messages = Vec::new();
+    let mut state = TurnPreflightState::new();
+    let mut flags = TurnPreflightMut {
+      ui_defect_force_patch_nudge_sent: false,
+      build_explore_force_patch_nudge_sent: false,
+      patch_anchor_force_patch_nudge_sent: false,
+      patch_anchor_force_pending: false,
+      force_write_only_tools: false,
+      consultative_force_answer_pending: false,
+    };
+    let all_tools = json!([make_tool("read_file")]);
+    let many_files: HashSet<String> = (0..25).map(|i| format!("file_{i}.rs")).collect();
+    let mut params = TurnPreflightParams {
+      messages: &mut messages,
+      mode: "build",
+      prompt: "fix it",
+      is_read_only_run: false,
+      is_execute_plan: false,
+      is_plan_explore: false,
+      is_plan_text_only_follow_up: false,
+      run_policy: &default_policy(),
+      total_read_tool_calls: 10,
+      written_files: &[],
+      explore_files_read: &many_files,
+      tool_guard: &default_tool_guard(),
+      all_tools: &all_tools,
+      read_set: &read_set(),
+      segment_max_turns: 200,
+      turn: 5,
+      vision_first_turn_pending: false,
+      agent_step_clarify_pending: false,
+      ambiguous_term_clarification_pending: false,
+      nudge_mode: "build",
+    };
+    let _ = apply_turn_preflight(&mut params, &mut state, &mut flags);
+    assert!(!messages.is_empty(), "should send file breadth nudge");
+    assert!(state.file_breadth_nudge_sent);
+  }
+}

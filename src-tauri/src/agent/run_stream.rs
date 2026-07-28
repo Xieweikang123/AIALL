@@ -93,7 +93,7 @@ fn parse_sse_line(
   }
   if let Some(tcs) = delta.get("tool_calls").and_then(|t| t.as_array()) {
     for tc in tcs {
-      let idx = tc.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
+      let idx = tc.get("index").and_then(|i| i.as_u64()).unwrap_or(0).min(100) as usize;
       while accumulated_tool_calls.len() <= idx {
         accumulated_tool_calls.push(json!({
           "id": "", "type": "function",
@@ -121,5 +121,251 @@ fn parse_sse_line(
         }
       }
     }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  /// Construct a dummy channel for testing (events are silent no-ops).
+  fn dummy_channel() -> Channel<Value> {
+    Channel::new(|_| Ok(()))
+  }
+
+  #[test]
+  fn parse_sse_line_skips_empty_line() {
+    let mut content = String::new();
+    let mut calls = Vec::new();
+    parse_sse_line("", &mut content, &mut calls, &dummy_channel());
+    assert!(content.is_empty());
+    assert!(calls.is_empty());
+  }
+
+  #[test]
+  fn parse_sse_line_skips_non_data_line() {
+    let mut content = String::new();
+    let mut calls = Vec::new();
+    parse_sse_line(": heartbeat", &mut content, &mut calls, &dummy_channel());
+    assert!(content.is_empty());
+  }
+
+  #[test]
+  fn parse_sse_line_skips_done_signal() {
+    let mut content = String::new();
+    let mut calls = Vec::new();
+    parse_sse_line("data: [DONE]", &mut content, &mut calls, &dummy_channel());
+    assert!(content.is_empty());
+  }
+
+  #[test]
+  fn parse_sse_line_invalid_json() {
+    let mut content = String::new();
+    let mut calls = Vec::new();
+    parse_sse_line("data: {invalid", &mut content, &mut calls, &dummy_channel());
+    assert!(content.is_empty());
+  }
+
+  #[test]
+  fn parse_sse_line_no_choices() {
+    let mut content = String::new();
+    let mut calls = Vec::new();
+    parse_sse_line("data: {}", &mut content, &mut calls, &dummy_channel());
+    assert!(content.is_empty());
+  }
+
+  #[test]
+  fn parse_sse_line_empty_choices() {
+    let mut content = String::new();
+    let mut calls = Vec::new();
+    parse_sse_line("data: {\"choices\":[]}", &mut content, &mut calls, &dummy_channel());
+    assert!(content.is_empty());
+  }
+
+  #[test]
+  fn parse_sse_line_content_delta() {
+    let mut content = String::new();
+    let mut calls = Vec::new();
+    parse_sse_line(
+      "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}",
+      &mut content, &mut calls, &dummy_channel(),
+    );
+    assert_eq!(content, "Hello");
+    assert!(calls.is_empty());
+  }
+
+  #[test]
+  fn parse_sse_line_accumulates_content() {
+    let mut content = String::new();
+    let mut calls = Vec::new();
+    parse_sse_line(
+      "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}",
+      &mut content, &mut calls, &dummy_channel(),
+    );
+    parse_sse_line(
+      "data: {\"choices\":[{\"delta\":{\"content\":\" World\"}}]}",
+      &mut content, &mut calls, &dummy_channel(),
+    );
+    assert_eq!(content, "Hello World");
+  }
+
+  #[test]
+  fn parse_sse_line_tool_call_creates_entry() {
+    let mut content = String::new();
+    let mut calls = Vec::new();
+    parse_sse_line(
+      "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"read_file\",\"arguments\":\"{}\"}}]}}]}",
+      &mut content, &mut calls, &dummy_channel(),
+    );
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0]["function"]["name"], "read_file");
+  }
+
+  #[test]
+  fn parse_sse_line_tool_call_accumulates_arguments() {
+    let mut content = String::new();
+    let mut calls = Vec::new();
+    // First chunk: tool call starts
+    parse_sse_line(
+      "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"\"}}]}}]}",
+      &mut content, &mut calls, &dummy_channel(),
+    );
+    // Second chunk: argument continues
+    parse_sse_line(
+      "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"src/foo.ts\\\"}\"}}]}}]}",
+      &mut content, &mut calls, &dummy_channel(),
+    );
+    assert_eq!(calls[0]["function"]["arguments"], "{\"path\":\"src/foo.ts\"}");
+  }
+
+  #[test]
+  fn parse_sse_line_tool_call_with_id() {
+    let mut content = String::new();
+    let mut calls = Vec::new();
+    parse_sse_line(
+      "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_abc123\",\"function\":{\"name\":\"grep\",\"arguments\":\"{}\"}}]}}]}",
+      &mut content, &mut calls, &dummy_channel(),
+    );
+    assert_eq!(calls[0]["id"], "call_abc123");
+    assert_eq!(calls[0]["function"]["name"], "grep");
+  }
+
+  #[test]
+  fn parse_sse_line_multiple_tool_calls() {
+    let mut content = String::new();
+    let mut calls = Vec::new();
+    parse_sse_line(
+      "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"read_file\",\"arguments\":\"{}\"}},{\"index\":1,\"function\":{\"name\":\"grep\",\"arguments\":\"{}\"}}]}}]}",
+      &mut content, &mut calls, &dummy_channel(),
+    );
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0]["function"]["name"], "read_file");
+    assert_eq!(calls[1]["function"]["name"], "grep");
+  }
+
+  #[test]
+  fn parse_sse_line_tool_call_fills_gaps() {
+    let mut content = String::new();
+    let mut calls = Vec::new();
+    // Index 2, but indices 0 and 1 don't exist yet — should fill with empty placeholders
+    parse_sse_line(
+      "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":2,\"function\":{\"name\":\"write_file\",\"arguments\":\"{}\"}}]}}]}",
+      &mut content, &mut calls, &dummy_channel(),
+    );
+    assert_eq!(calls.len(), 3);
+    assert!(calls[0]["function"]["name"].as_str().unwrap().is_empty());
+    assert!(calls[1]["function"]["name"].as_str().unwrap().is_empty());
+    assert_eq!(calls[2]["function"]["name"], "write_file");
+  }
+
+  #[test]
+  fn parse_sse_line_tool_call_index_capped_at_100() {
+    let mut content = String::new();
+    let mut calls = Vec::new();
+    // Index 999 should be capped to 100, resulting in vec of 101 elements (0..=100)
+    parse_sse_line(
+      "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":999,\"function\":{\"name\":\"x\",\"arguments\":\"{}\"}}]}}]}",
+      &mut content, &mut calls, &dummy_channel(),
+    );
+    assert_eq!(calls.len(), 101, "index 999 capped to 100 → vec len 101");
+    assert_eq!(calls[100]["function"]["name"], "x");
+  }
+
+  #[test]
+  fn parse_sse_line_interleaved_content_and_tool_calls() {
+    let mut content = String::new();
+    let mut calls = Vec::new();
+    // First: text content
+    parse_sse_line(
+      "data: {\"choices\":[{\"delta\":{\"content\":\"Let me check\"}}]}",
+      &mut content, &mut calls, &dummy_channel(),
+    );
+    // Then: tool call
+    parse_sse_line(
+      "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"read_file\",\"arguments\":\"{}\"}}]}}]}",
+      &mut content, &mut calls, &dummy_channel(),
+    );
+    assert_eq!(content, "Let me check");
+    assert_eq!(calls.len(), 1);
+  }
+
+  #[test]
+  fn parse_sse_line_empty_name_skipped() {
+    let mut content = String::new();
+    let mut calls = Vec::new();
+    parse_sse_line(
+      "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"\",\"arguments\":\"{}\"}}]}}]}",
+      &mut content, &mut calls, &dummy_channel(),
+    );
+    // Name is empty, should remain as default ""
+    assert_eq!(calls[0]["function"]["name"], "");
+  }
+
+  #[test]
+  fn parse_sse_line_empty_id_skipped() {
+    let mut content = String::new();
+    let mut calls = Vec::new();
+    parse_sse_line(
+      "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"\",\"function\":{\"name\":\"foo\",\"arguments\":\"{}\"}}]}}]}",
+      &mut content, &mut calls, &dummy_channel(),
+    );
+    // ID is empty, should remain as default ""
+    assert_eq!(calls[0]["id"], "");
+  }
+
+  #[test]
+  fn parse_sse_line_malformed_choices_ignored() {
+    let mut content = String::new();
+    let mut calls = Vec::new();
+    // choices is not an array
+    parse_sse_line(
+      "data: {\"choices\":{\"delta\":{\"content\":\"x\"}}}",
+      &mut content, &mut calls, &dummy_channel(),
+    );
+    assert!(content.is_empty());
+  }
+
+  #[test]
+  fn parse_sse_line_no_delta_ignored() {
+    let mut content = String::new();
+    let mut calls = Vec::new();
+    parse_sse_line(
+      "data: {\"choices\":[{}]}",
+      &mut content, &mut calls, &dummy_channel(),
+    );
+    assert!(content.is_empty());
+  }
+
+  #[test]
+  fn parse_sse_line_tool_call_without_function() {
+    let mut content = String::new();
+    let mut calls = Vec::new();
+    parse_sse_line(
+      "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0}]}}]}",
+      &mut content, &mut calls, &dummy_channel(),
+    );
+    assert_eq!(calls.len(), 1);
+    // Should still have the placeholder entry
+    assert!(calls[0]["function"]["name"].as_str().unwrap().is_empty());
   }
 }

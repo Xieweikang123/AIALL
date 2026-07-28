@@ -12,10 +12,19 @@ pub(crate) fn store_file() -> PathBuf {
 }
 
 fn session_id_safe(session_id: &str) -> String {
-  session_id
+  let sanitized: String = session_id
     .chars()
     .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
-    .collect()
+    .collect();
+  if sanitized.chars().all(|c| c == '_') && !session_id.is_empty() {
+    use std::hash::{Hash, Hasher};
+    use std::collections::hash_map::DefaultHasher;
+    let mut hasher = DefaultHasher::new();
+    session_id.hash(&mut hasher);
+    format!("session_{:016x}", hasher.finish())
+  } else {
+    sanitized
+  }
 }
 
 pub(crate) fn session_file(session_id: &str) -> PathBuf {
@@ -508,17 +517,27 @@ mod tests {
   }
 
   #[test]
-  fn test_session_file_unicode_becomes_underscore() {
+  fn test_session_file_unicode_becomes_hash_slug() {
     let path = session_file("会话测试");
     let name = path.file_name().unwrap().to_string_lossy();
-    assert_eq!(name, "chat-____.json");
+    // Non-ASCII session IDs get a hash-based name to avoid collision
+    assert!(name.starts_with("chat-session_"), "got: {name}");
+    assert!(name.ends_with(".json"), "got: {name}");
+    // Hash is 16 hex chars
+    let stem = name.strip_prefix("chat-session_").unwrap().strip_suffix(".json").unwrap();
+    assert_eq!(stem.len(), 16, "hash should be 16 hex chars, got: {stem}");
+    assert!(stem.chars().all(|c| c.is_ascii_hexdigit()), "hash should be hex, got: {stem}");
   }
 
   #[test]
   fn test_session_file_all_special_chars() {
     let path = session_file("!@#$%^&*()");
     let name = path.file_name().unwrap().to_string_lossy();
-    assert_eq!(name, "chat-__________.json");
+    // All-special-char session IDs get a hash-based name
+    assert!(name.starts_with("chat-session_"), "got: {name}");
+    assert!(name.ends_with(".json"), "got: {name}");
+    let stem = name.strip_prefix("chat-session_").unwrap().strip_suffix(".json").unwrap();
+    assert_eq!(stem.len(), 16);
   }
 
   #[test]
