@@ -826,7 +826,7 @@ export function onStorageError(cb: (msg: string) => void) {
 
 function writeIndex(index: ChatStoreIndex): boolean {
   if (!lsSetJson(CHAT_STORAGE_KEY, index)) {
-    console.warn("[vibeChatStorage] localStorage index write failed");
+    console.debug("[vibeChatStorage] localStorage index write failed");
     storageErrorCallback?.("浏览器索引写入失败，会话已保存到项目目录。");
     return false;
   }

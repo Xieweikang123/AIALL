@@ -113,14 +113,26 @@ pub async fn fs_read(path: String, project_root: Option<String>) -> ReadResult {
     }
   };
   let meta = tokio::fs::metadata(&resolved).await;
-  if meta.as_ref().map(|m| m.is_file()).unwrap_or(false) == false {
-    return ReadResult {
-      ok: false,
-      content: String::new(),
-      path: resolved.to_string_lossy().into_owned(),
-      size: 0,
-      error: Some("文件不存在".into()),
-    };
+  match meta {
+    Err(e) => {
+      return ReadResult {
+        ok: false,
+        content: String::new(),
+        path: resolved.to_string_lossy().into_owned(),
+        size: 0,
+        error: Some(format!("无法读取文件元数据: {}", e)),
+      };
+    }
+    Ok(m) if !m.is_file() => {
+      return ReadResult {
+        ok: false,
+        content: String::new(),
+        path: resolved.to_string_lossy().into_owned(),
+        size: 0,
+        error: Some("文件不存在".into()),
+      };
+    }
+    _ => {}
   }
   let result = fs::read_file_content(&resolved.to_string_lossy()).await;
   ReadResult {

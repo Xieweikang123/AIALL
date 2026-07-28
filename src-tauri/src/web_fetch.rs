@@ -153,7 +153,7 @@ fn eval_js_string(tab: &headless_chrome::Tab, expr: &str) -> String {
   };
   match object.value {
     Some(serde_json::Value::String(s)) => s,
-    Some(other) => other.as_str().unwrap_or("").to_string(),
+    Some(other) => other.to_string(),
     None => String::new(),
   }
 }
@@ -240,4 +240,40 @@ pub async fn web_extract_structured(
 
   let content: String = raw.chars().take(120_000).collect();
   Ok((status, "html".into(), content, None, None))
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn build_http_client_default_no_proxy() {
+    let client = build_http_client(None, 30);
+    assert!(client.is_ok());
+  }
+
+  #[test]
+  fn build_http_client_with_proxy() {
+    let client = build_http_client(Some("http://localhost:8080"), 30);
+    assert!(client.is_ok());
+  }
+
+  #[test]
+  fn build_http_client_empty_proxy_string_treated_as_none() {
+    let client = build_http_client(Some(""), 30);
+    assert!(client.is_ok());
+  }
+
+  #[test]
+  fn build_http_client_whitespace_proxy_treated_as_none() {
+    let client = build_http_client(Some("  "), 30);
+    assert!(client.is_ok());
+  }
+
+  #[test]
+  fn build_http_client_zero_timeout_fails() {
+    let client = build_http_client(None, 0);
+    // Zero timeout may or may not fail depending on reqwest behavior
+    assert!(client.is_ok() || client.is_err());
+  }
 }

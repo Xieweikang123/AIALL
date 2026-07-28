@@ -1,4 +1,5 @@
 import { ref } from "vue";
+import { debugLog } from "../utils/debugLog";
 import {
   startFileWatcher,
   stopFileWatcher,
@@ -83,7 +84,7 @@ export function useFileWatcher(options: UseFileWatcherOptions) {
             }
           },
           (error) => {
-            console.error("File watcher stream error:", error);
+            debugLog("File watcher stream error:", error);
           },
           (connected) => {
             fileWatcherConnected.value = connected;
@@ -91,7 +92,7 @@ export function useFileWatcher(options: UseFileWatcherOptions) {
         );
       }
     } catch (e) {
-      console.error("Failed to start file watcher:", e);
+      debugLog("Failed to start file watcher:", e);
     }
   }
 
@@ -112,7 +113,7 @@ export function useFileWatcher(options: UseFileWatcherOptions) {
       await stopFileWatcher();
       fileWatcherActive.value = false;
     } catch (e) {
-      console.error("Failed to stop file watcher:", e);
+      debugLog("Failed to stop file watcher:", e);
     }
   }
 

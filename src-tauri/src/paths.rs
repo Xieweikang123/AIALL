@@ -83,7 +83,7 @@ fn project_debug_log_slug(project_root: &str) -> String {
     .collect();
   let mut hasher = DefaultHasher::new();
   normalized.hash(&mut hasher);
-  format!("{}_{:08x}", safe_base, hasher.finish() as u32)
+  format!("{}_{:016x}", safe_base, hasher.finish())
 }
 
 fn dirs_home() -> PathBuf {
@@ -378,5 +378,38 @@ mod tests {
       resolve_readable_path("/project", "aiall/vibe-chat-sessions/session-1").unwrap();
     assert!(is_absolute);
     assert_eq!(display.replace("\\", "/"), resolved.to_string_lossy().replace('\\', "/"));
+  }
+
+  // ── project_debug_log_slug ──
+
+  #[test]
+  fn test_project_debug_log_slug_ascii() {
+    let slug = project_debug_log_slug(r"D:\project\MyApp");
+    assert!(slug.starts_with("myapp_"), "slug should start with project name, got: {slug}");
+    // Should have 16 hex chars (full u64 hash)
+    let suffix = slug.strip_prefix("myapp_").unwrap();
+    assert_eq!(suffix.len(), 16, "hash suffix should be 16 hex chars, got: {suffix}");
+    assert!(suffix.chars().all(|c| c.is_ascii_hexdigit()), "hash should be hex, got: {suffix}");
+  }
+
+  #[test]
+  fn test_project_debug_log_slug_cjk_path() {
+    let slug = project_debug_log_slug("/home/user/中文项目");
+    assert!(slug.starts_with("____"), "non-ASCII chars mapped to underscores");
+    assert!(slug.len() > 16, "should include hash suffix");
+  }
+
+  #[test]
+  fn test_project_debug_log_slug_deterministic() {
+    let a = project_debug_log_slug("/path/to/project");
+    let b = project_debug_log_slug("/path/to/project");
+    assert_eq!(a, b, "same input should produce same slug");
+  }
+
+  #[test]
+  fn test_project_debug_log_slug_different_projects_differ() {
+    let a = project_debug_log_slug("/path/to/project-a");
+    let b = project_debug_log_slug("/path/to/project-b");
+    assert_ne!(a, b, "different projects should produce different slugs");
   }
 }

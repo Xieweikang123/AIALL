@@ -1,4 +1,5 @@
 import { ref, computed, nextTick } from "vue";
+import { debugLog } from "../utils/debugLog";
 import { listDirectory, createItem, deleteItem, renameItem, type FileEntry } from "../services/vibeCodingClient";
 
 export interface TreeNode {
@@ -97,7 +98,7 @@ export function useFileTree(projectPath: () => string) {
         }
       }
     } catch (e) {
-      console.error("Failed to load directory:", e);
+      debugLog("Failed to load directory:", e);
     }
   }
 
