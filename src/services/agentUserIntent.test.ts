@@ -6,21 +6,6 @@ import {
   FIXTURE_PRIOR_DENIAL,
 } from "./agentTestFixtures";
 import {
-  buildAgentStepClarificationHint,
-  buildAgentStepClarifyContinueHint,
-  buildBehaviorContradictionHint,
-  buildBuildWriteBlockedHint,
-  buildConsultativeBuildHint,
-  buildConfigBindingTopicHint,
-  buildConsultativeResumeHint,
-  buildExternalApiLookupHint,
-  buildImplementFollowUpHint,
-  buildImplementationStatusHint,
-  buildSessionAuditHint,
-  buildUiDefectBuildHint,
-  buildUserOptionMismatchHint,
-  buildWriteToolBlockedMessage,
-  resolveConfigBindingTopic,
   historySuggestsActiveImplementation,
   historySuggestsQuotePositionFix,
   isAgentStepClarificationPrompt,
@@ -46,7 +31,24 @@ import {
   isUserOptionMismatchPrompt,
   isUltraShortOpenTaskPrompt,
   historyPriorAssistantClaimedFix,
-} from "./agentUserIntent";
+  resolveConfigBindingTopic,
+} from "../orchestration/generic/userIntentClassifiers";
+import {
+  buildAgentStepClarificationHint,
+  buildAgentStepClarifyContinueHint,
+  buildBehaviorContradictionHint,
+  buildBuildWriteBlockedHint,
+  buildConsultativeBuildHint,
+  buildConfigBindingTopicHint,
+  buildConsultativeResumeHint,
+  buildExternalApiLookupHint,
+  buildImplementFollowUpHint,
+  buildImplementationStatusHint,
+  buildSessionAuditHint,
+  buildUiDefectBuildHint,
+  buildUserOptionMismatchHint,
+  buildWriteToolBlockedMessage,
+} from "../orchestration/product/userIntentHints";
 
 describe("isConsultativeUserPrompt", () => {
   it("detects question-only prompts", () => {

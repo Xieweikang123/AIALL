@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   isScheduledTaskConsultativePrompt,
   shouldNudgeScheduledJobRegistration,
-} from "./agentScheduledTask";
+} from "./agentConsultativeTopics";
 
 /** Re-export surface stays stable for legacy import paths. */
 describe("agentScheduledTask re-exports", () => {

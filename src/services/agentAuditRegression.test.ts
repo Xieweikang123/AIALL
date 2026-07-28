@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  isBehaviorContradictionPrompt,
+  isConsultativeUserPrompt,
+  isUserOptionMismatchPrompt,
+} from "../orchestration/generic/userIntentClassifiers";
+import {
   buildBehaviorContradictionHint,
   buildConfigBindingTopicHint,
   buildConsultativeBuildHint,
   buildUserOptionMismatchHint,
-  isBehaviorContradictionPrompt,
-  isConsultativeUserPrompt,
-  isUserOptionMismatchPrompt,
-} from "./agentUserIntent";
+} from "../orchestration/product/userIntentHints";
 import { isScheduledTaskConsultativePrompt, shouldNudgeScheduledJobRegistration, buildConsultativeTopicHints } from "./agentConsultativeTopics";
 import {
   CONSULTATIVE_BUILD_EXPLORE_TURN_BUDGET,

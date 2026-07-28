@@ -19,7 +19,7 @@ export function enqueueChatStoreOp<T>(projectPath: string, op: () => Promise<T>)
   }
 
   const tail = queues.get(key) ?? Promise.resolve();
-  const run = tail.catch(() => {}).then(async () => {
+  const run = tail.then(async () => {
     queueDepth.set(key, (queueDepth.get(key) ?? 0) + 1);
     try {
       return await op();
