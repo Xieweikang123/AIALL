@@ -415,10 +415,11 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
     batchCommittingAll.value = true;
     try {
       for (let i = 0; i < snapshot.length; i++) {
-        await commitBatchGroupByPaths(snapshot[i].filePaths, snapshot[i].message, i, snapshot.length);
+        await commitBatchGroupByPaths(snapshot[i].filePaths, snapshot[i].message, i, snapshot.length, false);
         if (gitError.value) break;
       }
     } finally {
+      batchCommittingIndex.value = null;
       batchCommittingAll.value = false;
       aiBatchGroupsResult.value = null;
       batchUnstagedSnapshot.value = null;
@@ -428,7 +429,7 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
     }
   }
 
-  async function commitBatchGroupByPaths(filePaths: string[], message: string, index = 0, _total?: number) {
+  async function commitBatchGroupByPaths(filePaths: string[], message: string, index = 0, _total?: number, resetIndex = true) {
     if (!projectPath().trim() || !message.trim() || !filePaths.length) return;
 
     const batchPathSet = new Set(gitBatchSourceFiles.value.map((f) => f.path));
@@ -460,7 +461,9 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
       await refreshGitStatus({ showLoading: false, force: true });
       onRefreshTree?.();
     } finally {
-      batchCommittingIndex.value = null;
+      if (resetIndex) {
+        batchCommittingIndex.value = null;
+      }
     }
   }
 

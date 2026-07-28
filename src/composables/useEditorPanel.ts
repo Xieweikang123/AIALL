@@ -284,15 +284,17 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     const choice = await confirmUnsaved(name, context);
     if (choice === "cancel") return false;
     if (choice === "discard") return discardTabChanges(path);
-    if (activeFilePath.value !== path) {
-      syncActiveTabToCache();
+    // "save" 分支：先保存当前文件，再切换到目标标签
+    const switching = activeFilePath.value !== path;
+    if (switching) syncActiveTabToCache();
+    await saveFile();
+    if (switching) {
       const tab = findOpenTab(path);
       if (!tab) return false;
       activeFilePath.value = path;
       fileContent.value = tab.content;
       fileDirty.value = tab.dirty;
     }
-    await saveFile();
     return !fileDirty.value;
   }
 
@@ -502,8 +504,15 @@ export function useEditorPanel(params: UseEditorPanelParams) {
       return;
     }
 
+    // 对于新文件，先加入 openTabs 占位，确保 DOM 就绪后 activeFilePath 变化
+    // 能滚动标签到可视区；内容在 readFile 完成后更新。
+    if (!cached) {
+      openTabs.value.push({ path: filePath, content: "", dirty: false, kind: "file" });
+    }
     activeFilePath.value = filePath;
+    fileContent.value = "";        // 清除旧内容，避免 await 期间残留上一文件
     fileDirty.value = false;
+    fileLoadError.value = "";
 
     if (isVirtualSchemePath(filePath)) {
       fileContent.value = cached?.content || "";
@@ -528,7 +537,12 @@ export function useEditorPanel(params: UseEditorPanelParams) {
       cached.dirty = false;
       cached.kind = "file";
     } else {
-      openTabs.value.push({ path: filePath, content: result.content, dirty: false, kind: "file" });
+      const tab = openTabs.value.find((t) => t.path === filePath);
+      if (tab) {
+        tab.content = result.content;
+        tab.dirty = false;
+        tab.kind = "file";
+      }
     }
   }
 
@@ -711,7 +725,6 @@ export function useEditorPanel(params: UseEditorPanelParams) {
   }
 
   async function commitRename(path: string, newName: string) {
-    renamingPath.value = "";
     const from = path;
     const parent = from.replace(/\\/g, "/").replace(/\/[^/]+$/, "");
     const to = joinProjectPath(parent, newName);
@@ -720,6 +733,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
       treeError.value = result.error || "重命名失败";
       return;
     }
+    renamingPath.value = "";          // 重命名确认成功后再清状态
     treeError.value = "";
     if (activeFilePath.value === from) {
       activeFilePath.value = to;

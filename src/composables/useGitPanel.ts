@@ -10,6 +10,7 @@ import {
 import {
   sortedUnstagedPaths,
 } from "../utils/gitBatchDraftStorage";
+import { gitStatusIcon, gitStatusColor } from "../utils/gitHelpers";
 import {
   fetchGitStatus,
   fetchGitDiff,
@@ -260,52 +261,6 @@ export function useGitPanel(
     gitDiffLoadingKey.value = "";
   }
 
-  function gitStatusIcon(status: string): string {
-    switch (status) {
-      case "M":
-      case "modified":
-        return "M";
-      case "A":
-      case "added":
-        return "A";
-      case "D":
-      case "deleted":
-        return "D";
-      case "R":
-      case "renamed":
-        return "R";
-      case "C":
-        return "C";
-      case "untracked":
-        return "?";
-      default:
-        return "!";
-    }
-  }
-
-  function gitStatusColor(status: string): string {
-    switch (status) {
-      case "M":
-      case "modified":
-        return "#e2c08c";
-      case "A":
-      case "added":
-        return "#73daca";
-      case "D":
-      case "deleted":
-        return "#f7768e";
-      case "R":
-      case "renamed":
-        return "#bb9af7";
-      case "C":
-        return "#bb9af7";
-      case "untracked":
-        return "#7aa2f7";
-      default:
-        return "#9aa5ce";
-    }
-  }
-
   function isGitLogEntryOpen(hash: string): boolean {
     return expandedGitLogEntries.value.has(hash);
   }
@@ -494,6 +449,7 @@ export function useGitPanel(
       }
       await refreshGitStatus({ showLoading: false, force: true });
       await refreshGitRemotes();
+      onRefreshTree?.();
     } catch (e) {
       gitError.value = toErrorMessage(e, "提交失败");
       await refreshGitStatus({ force: true });
