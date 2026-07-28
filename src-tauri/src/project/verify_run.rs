@@ -1,18 +1,18 @@
 use crate::agent::runtime_hint;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use regex::Regex;
 use serde_json::{json, Value};
 use std::path::Path;
 use std::time::{Duration, Instant};
 use tokio::process::Command;
 
-static FAILING_FILE_RES: Lazy<Regex> = Lazy::new(|| {
+static FAILING_FILE_RES: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(
     r"(?i)(?:FAIL|✓|×|✗)\s+([\w./\\-]+\.(?:test|spec)\.[cm]?[jt]sx?)(?:\s*>|\s|$)",
   )
   .unwrap()
 });
-static FAILING_FILE_AT_RES: Lazy<Regex> = Lazy::new(|| {
+static FAILING_FILE_AT_RES: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r"(?i)(?:at\s+)?(?:\./)?([\w./-]+\.(?:test|spec)\.[cm]?[jt]sx?):\d+").unwrap()
 });
 

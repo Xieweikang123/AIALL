@@ -1,4 +1,4 @@
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
@@ -9,10 +9,10 @@ const MEMORY_USAGE_REL: &str = ".aiall/memory-usage.json";
 const MEMORY_USAGE_MAX_ENTRIES: usize = 200;
 const MEMORY_USAGE_FLUSH_DEBOUNCE_MS: u64 = 2000;
 
-static STORE_CACHE: Lazy<Mutex<HashMap<String, MemoryUsageStore>>> =
-  Lazy::new(|| Mutex::new(HashMap::new()));
-static FLUSH_GENERATION: Lazy<Mutex<HashMap<String, u64>>> =
-  Lazy::new(|| Mutex::new(HashMap::new()));
+static STORE_CACHE: LazyLock<Mutex<HashMap<String, MemoryUsageStore>>> =
+  LazyLock::new(|| Mutex::new(HashMap::new()));
+static FLUSH_GENERATION: LazyLock<Mutex<HashMap<String, u64>>> =
+  LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -111,11 +111,11 @@ fn memory_line_key(line: &str) -> String {
     }
   }
   let stripped = stripped.to_lowercase();
-  let mut hash: i32 = 0;
+  let mut hash: u64 = 0;
   for ch in stripped.chars() {
-    hash = hash.wrapping_shl(5).wrapping_sub(hash).wrapping_add(ch as i32);
+    hash = hash.wrapping_shl(5).wrapping_sub(hash).wrapping_add(ch as u64);
   }
-  format!("m{}", (hash as u32).to_string())
+  format!("m{}", hash)
 }
 
 pub fn extract_memory_snippets(content: &str) -> Vec<String> {

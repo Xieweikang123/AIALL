@@ -9,39 +9,39 @@ pub const VISION_ANCHOR_PREFGREP_MAX_PATTERNS: usize = 3;
 pub const VISION_ANCHOR_PREFGREP_MAX_MATCHES: usize = 40;
 
 // ── Lazily compiled regex patterns ──
-static UI_IMAGE_QUESTION_RE: once_cell::sync::Lazy<Regex> = once_cell::sync::Lazy::new(|| {
+static UI_IMAGE_QUESTION_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
   Regex::new(r"(?i)截图|图片|界面|面板|哪块|哪里|看到的|发图|粘贴|screen|screenshot|ui").unwrap()
 });
 
-pub static UI_CLICK_FOCUS_INTERACTION_RE: once_cell::sync::Lazy<Regex> = once_cell::sync::Lazy::new(|| {
+pub static UI_CLICK_FOCUS_INTERACTION_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
   Regex::new(r"(?i)任何位置|任意位置|点到哪|点哪里|点击.{0,8}(输入|聚焦|focus)|都能输入|都能聚焦|点.{0,6}空白|点不到|没反应|聚焦输入").unwrap()
 });
 
-pub static UI_REQUIREMENT_SPEC_RE: once_cell::sync::Lazy<Regex> = once_cell::sync::Lazy::new(|| {
+pub static UI_REQUIREMENT_SPEC_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
   Regex::new(r"(?i)我要的效果|我期望|期望效果|应该是|需要能|要能|得能|想要的效果").unwrap()
 });
 
-static UI_LAYOUT_FEEDBACK_RE: once_cell::sync::Lazy<Regex> = once_cell::sync::Lazy::new(|| {
+static UI_LAYOUT_FEEDBACK_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
   Regex::new(r"(?i)挤|贴|挨|重叠|太紧|间距|spacing|overlap|cramped|你看|看一下|一块|不好看|丑|效果|太小|太大|偏小|偏大|比例|不协调").unwrap()
 });
 
-pub static UI_POSITIONING_BUG_RE: once_cell::sync::Lazy<Regex> = once_cell::sync::Lazy::new(|| {
+pub static UI_POSITIONING_BUG_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
   Regex::new(r"(?i)跑(?:到|去|别的)|错位|位置不对|飘到|歪了|不在.{0,8}旁边|离.{0,8}远|跑到.{0,12}(底|顶|角)").unwrap()
 });
 
-static VISIBLE_ANCHOR_QUOTE_RE: once_cell::sync::Lazy<Regex> = once_cell::sync::Lazy::new(|| {
+static VISIBLE_ANCHOR_QUOTE_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
   Regex::new(r#"[「『"']([^」』"']{3,})[」』"']|占位符[^，。；\n]{0,16}[「『"']([^」』"']{3,})[」』"']?|(?:标签|按钮|标题|Tab)[:：]?\s*[「『"']([^」』"']{3,})[」』"']?"#).unwrap()
 });
 
-pub static VISION_INTERNAL_MARKER_RE: once_cell::sync::Lazy<Regex> = once_cell::sync::Lazy::new(|| {
+pub static VISION_INTERNAL_MARKER_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
   Regex::new(r"\s*\[图已理解\]\s*").unwrap()
 });
 
-static ANCHOR_TO_REGION_RE: once_cell::sync::Lazy<Regex> = once_cell::sync::Lazy::new(|| {
+static ANCHOR_TO_REGION_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
   Regex::new(r"(判断|可判断|可推断|据此|由此|说明|对应|属于|定位为|应是|这是|应该是|像是|表明|可定位)[^。\n]{0,48}(助手|聊天|输入框|面板|模块|区域|底栏|侧栏|编辑器|对话|占位|工具栏|列表)").unwrap()
 });
 
-static UI_REGION_STATEMENT_RE: once_cell::sync::Lazy<Regex> = once_cell::sync::Lazy::new(|| {
+static UI_REGION_STATEMENT_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
   Regex::new(r"(这是|这个是|这里|这个区域|这块|这部分|这边|此区域|该区域|对应的是|呈现的是|该面板|该对话框|该弹出层|该窗口|该弹窗|该界面|此处)").unwrap()
 });
 

@@ -1,29 +1,29 @@
 //! Project knowledge manifest for Explore mode — ported from projectReportDisplay.ts
 //! and shared/projectKnowledgeFormat.ts.
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use regex::Regex;
 
 pub const PROJECT_KNOWLEDGE_REL: &str = ".aiall/project-knowledge.md";
 
-static FRONTMATTER_RE: Lazy<Regex> = Lazy::new(|| {
+static FRONTMATTER_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r"^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$").expect("FRONTMATTER_RE")
 });
-static SECTION_H2_RE: Lazy<Regex> =
-  Lazy::new(|| Regex::new(r"^##\s+(.+?)(?:\r?\n|$)").expect("SECTION_H2_RE"));
-static TITLE_UNEXPLORED_SUFFIX_RE: Lazy<Regex> = Lazy::new(|| {
+static SECTION_H2_RE: LazyLock<Regex> =
+  LazyLock::new(|| Regex::new(r"^##\s+(.+?)(?:\r?\n|$)").expect("SECTION_H2_RE"));
+static TITLE_UNEXPLORED_SUFFIX_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r"[（(]未探索[）)]\s*$").expect("TITLE_UNEXPLORED_SUFFIX_RE")
 });
-static TITLE_PENDING_SUFFIX_RE: Lazy<Regex> = Lazy::new(|| {
+static TITLE_PENDING_SUFFIX_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r"[（(]待验证[）)]\s*$").expect("TITLE_PENDING_SUFFIX_RE")
 });
-static BODY_UNEXPLORED_PLACEHOLDER_RE: Lazy<Regex> = Lazy::new(|| {
+static BODY_UNEXPLORED_PLACEHOLDER_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r"^(?:内容)?未探索[。.；;]?\s*$").expect("BODY_UNEXPLORED_PLACEHOLDER_RE")
 });
-static BODY_PENDING_PLACEHOLDER_RE: Lazy<Regex> = Lazy::new(|| {
+static BODY_PENDING_PLACEHOLDER_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r"^待验证[。.；;]?\s*$").expect("BODY_PENDING_PLACEHOLDER_RE")
 });
-static SECTION_NUMBER_PREFIX_RE: Lazy<Regex> = Lazy::new(|| {
+static SECTION_NUMBER_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r"^([零〇一二三四五六七八九十百千]+)[、．.\s]+").expect("SECTION_NUMBER_PREFIX_RE")
 });
 

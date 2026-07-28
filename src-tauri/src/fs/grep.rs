@@ -1,12 +1,12 @@
 use super::{is_text_extension, should_list_directory_entry};
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use regex::Regex;
 use serde::Serialize;
 use std::path::Path;
 
-static RG_LINE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(.+?):(\d+):(.*)$").unwrap());
-static SKIP_GREP_PATH_RE: Lazy<Regex> =
-  Lazy::new(|| Regex::new(r"node_modules|(^|/)dist/|(^|/)\.git/|(^|/)build/|(^|/)coverage/").unwrap());
+static RG_LINE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(.+?):(\d+):(.*)$").unwrap());
+static SKIP_GREP_PATH_RE: LazyLock<Regex> =
+  LazyLock::new(|| Regex::new(r"node_modules|(^|/)dist/|(^|/)\.git/|(^|/)build/|(^|/)coverage/").unwrap());
 
 const RG_SKIP_GLOBS: &[&str] = &[
   "!node_modules/**",

@@ -8,8 +8,8 @@ use super::context_limits::{
 
 const PROTECTED_RECENT_TOOL_RESULTS: usize = 2;
 
-static LINE_HINT_RE: once_cell::sync::Lazy<regex::Regex> =
-  once_cell::sync::Lazy::new(|| regex::Regex::new(r"lines \d+-\d+").unwrap());
+static LINE_HINT_RE: std::sync::LazyLock<regex::Regex> =
+  std::sync::LazyLock::new(|| regex::Regex::new(r"lines \d+-\d+").unwrap());
 
 fn truncate_text(text: &str, max: usize, suffix: &str) -> String {
   if text.chars().count() <= max {

@@ -1,68 +1,68 @@
 //! Vision consultative finalize gates and hints.
 //! Ported from server/visionMessage.ts (consultative locate/style subset).
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use regex::Regex;
 
 use super::policy::prompt_has_implement_intent_without_question;
 use super::vision::{is_unreconciled_empty_shell_answer, VISION_INTERNAL_MARKER_RE};
 
-static UI_LOCATE_QUESTION_RE: Lazy<Regex> = Lazy::new(|| {
+static UI_LOCATE_QUESTION_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(
     r"(?:哪(?:儿|里|块|个)|什么|啥)(?:的)?(?:按钮|控件|面板|区域|组件|元素|部分|内容)|(?:知道|看得出|认得|识别).{0,12}(?:哪儿|哪里|哪块|哪个)|显示的(?:什么|啥)|(?:这里|这边|旁边|此处).{0,12}(?:啥|什么)|(?:这是|那是)(?:什么|啥)",
   )
   .unwrap()
 });
 
-static UI_APPEARANCE_QUESTION_RE: Lazy<Regex> = Lazy::new(|| {
+static UI_APPEARANCE_QUESTION_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(
     r"(?i)背景.{0,12}(?:透明|半透明|模糊|毛玻璃|虚化)|(?:透明|半透明|毛玻璃|blur|backdrop).{0,12}(?:吗|么|[？?]\s*$)|(?:opacity|rgba).{0,12}(?:吗|么|[？?]\s*$)",
   )
   .unwrap()
 });
 
-static UI_STATE_PERSISTENCE_QUESTION_RE: Lazy<Regex> = Lazy::new(|| {
+static UI_STATE_PERSISTENCE_QUESTION_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(
     r"(?:切|换|切换).{0,20}(?:再|回|之后|然后).{0,20}(?:切|换|回)|(?:还会|会不会|是不是会|是否会|会不会再).{0,24}(?:再次|重新|仍然|保留|恢复|打开|关闭|展开|折叠|显示|隐藏|保持)|再次.{0,12}(?:打开|展开|显示|出现|恢复)",
   )
   .unwrap()
 });
 
-static ACCURACY_CONSULTATIVE_RE: Lazy<Regex> = Lazy::new(|| {
+static ACCURACY_CONSULTATIVE_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r"(?i)是否.{0,20}(?:准确|正确|总是|一直|可靠)|(?:准确|正确|可靠).{0,12}(?:吗|么)[？?]?$").unwrap()
 });
 
-static DEFERRED_LOCATE_REPLY_RE: Lazy<Regex> = Lazy::new(|| {
+static DEFERRED_LOCATE_REPLY_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(
     r"(?:下一(?:轮|步)|再.{0,8}(?:搜索|确认|核对|定位|查))|(?:需要|须|应).{0,16}(?:搜索|确认|核对|定位)|通过搜索.{0,16}确认|精确确认",
   )
   .unwrap()
 });
 
-static SPECULATIVE_LOCATE_REPLY_RE: Lazy<Regex> = Lazy::new(|| {
+static SPECULATIVE_LOCATE_REPLY_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(
     r"(?:极有可能|很可能|可能属于|或许在|猜测|推断.{0,24}(?:属于|位于)).{0,48}(?:或|/)",
   )
   .unwrap()
 });
 
-static SPECULATIVE_PATH_GUESS_RE: Lazy<Regex> = Lazy::new(|| {
+static SPECULATIVE_PATH_GUESS_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r#"(?:极有可能|很可能|可能属于|或许|猜测).{0,48}['"`][\w./-]+\.(?:vue|tsx?|jsx?)['"`]"#)
     .unwrap()
 });
 
-static SPECULATIVE_PLACEHOLDER_CLAIM_RE: Lazy<Regex> = Lazy::new(|| {
+static SPECULATIVE_PLACEHOLDER_CLAIM_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(
     r"(?:占位|placeholder|尚未实现|无(?:内容|图标|点击)|待办功能|早期规划).{0,32}(?:占位|placeholder|未实现|无内容|无图标|无点击)",
   )
   .unwrap()
 });
 
-static SPECULATIVE_STYLE_ANSWER_RE: Lazy<Regex> = Lazy::new(|| {
+static SPECULATIVE_STYLE_ANSWER_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r"(?i)(?:rgba\s*\(|backdrop-filter|毛玻璃|半透明|透明背景|blur\s*\()").unwrap()
 });
 
-static BINARY_STYLE_CONCLUSION_RE: Lazy<Regex> = Lazy::new(|| {
+static BINARY_STYLE_CONCLUSION_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r"(?:是的|不是|并非|确实|属于).{0,24}(?:透明|半透明|毛玻璃|实色|不透明)").unwrap()
 });
 

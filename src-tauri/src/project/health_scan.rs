@@ -1,27 +1,27 @@
 use crate::fs;
 use futures_util::future::join_all;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use regex::Regex;
 use serde_json::{json, Value};
 use std::time::Instant;
 
 use super::HealthIssue;
 
-static SKIP_PATH_RE: Lazy<Regex> =
-  Lazy::new(|| Regex::new(r"node_modules|dist/|\.git/|build/|coverage/").unwrap());
-static EXCLUDE_TEST_SPEC_RE: Lazy<Regex> =
-  Lazy::new(|| Regex::new(r"\.(test|spec)\.[cm]?[jt]sx?$").unwrap());
-static EXCLUDE_SECRET_PATH_RE: Lazy<Regex> = Lazy::new(|| {
+static SKIP_PATH_RE: LazyLock<Regex> =
+  LazyLock::new(|| Regex::new(r"node_modules|dist/|\.git/|build/|coverage/").unwrap());
+static EXCLUDE_TEST_SPEC_RE: LazyLock<Regex> =
+  LazyLock::new(|| Regex::new(r"\.(test|spec)\.[cm]?[jt]sx?$").unwrap());
+static EXCLUDE_SECRET_PATH_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r"\.(example|sample|template)|\.env\.|mock|fixture|test|spec").unwrap()
 });
-static SECRET_PLACEHOLDER_RE: Lazy<Regex> = Lazy::new(|| {
+static SECRET_PLACEHOLDER_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r"(?i)placeholder|example|changeme|your[-_]|xxx|dummy|fake|test").unwrap()
 });
-static SECRET_EMPTY_QUOTES_RE: Lazy<Regex> =
-  Lazy::new(|| Regex::new(r#"['"]\s*['"]"#).unwrap());
-static SECRET_VALUE_RE: Lazy<Regex> =
-  Lazy::new(|| Regex::new(r#"['"]([^'"]+)['"]"#).unwrap());
-static SECRET_KEYWORD_VAL_RE: Lazy<Regex> = Lazy::new(|| {
+static SECRET_EMPTY_QUOTES_RE: LazyLock<Regex> =
+  LazyLock::new(|| Regex::new(r#"['"]\s*['"]"#).unwrap());
+static SECRET_VALUE_RE: LazyLock<Regex> =
+  LazyLock::new(|| Regex::new(r#"['"]([^'"]+)['"]"#).unwrap());
+static SECRET_KEYWORD_VAL_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r"(?i)^(function|decorator|string|number|boolean|object|array|keyword|operator|variable|class|type|interface|module|namespace|property|method|param|return|this|super|true|false|null|undefined|readonly|private|public|protected|static|async|await|yield|const|let|var|import|export|default|from|enum|struct|impl|trait|crate|self|pub|fn|use|mod|match|loop|while|for|if|else|Some|None|Ok|Err|println|print|format|vec|assert|todo|unimplemented|unreachable)$").unwrap()
 });
 
@@ -32,7 +32,7 @@ struct ScanRule {
   title: &'static str,
   pattern: &'static str,
   max_matches: usize,
-  exclude_path_re: Option<&'static Lazy<Regex>>,
+  exclude_path_re: Option<&'static LazyLock<Regex>>,
 }
 
 const SCAN_RULES: &[ScanRule] = &[

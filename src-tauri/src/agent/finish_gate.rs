@@ -1,4 +1,4 @@
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use regex::Regex;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -37,19 +37,19 @@ pub struct FinishGateResult {
     pub violations: Vec<FinishGateViolation>,
 }
 
-static SOURCE_FILE_EXT: Lazy<Regex> = Lazy::new(|| {
+static SOURCE_FILE_EXT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\.(?:ts|tsx|js|jsx|vue|cs|json|md|yaml|yml|css|scss|html|xml|sql|go|rs|py|toml)$")
         .unwrap()
 });
 
-static MODIFY_CONTEXT_RE: Lazy<Regex> = Lazy::new(|| {
+static MODIFY_CONTEXT_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?:已(?:经)?(?:修改|更新|修复|调整|写入|改为|改成|添加|删除)|改动|变更|patch|write|更新于)",
     )
     .unwrap()
 });
 
-static GENERIC_ANCHOR_BLOCKLIST: Lazy<HashSet<&'static str>> = Lazy::new(|| {
+static GENERIC_ANCHOR_BLOCKLIST: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     [
         "true", "false", "null", "undefined", "string", "number", "object", "function", "import",
         "export", "return", "async", "await", "class", "interface", "type", "const", "let", "var",
@@ -59,76 +59,76 @@ static GENERIC_ANCHOR_BLOCKLIST: Lazy<HashSet<&'static str>> = Lazy::new(|| {
     .collect()
 });
 
-static WRITE_DONE_RE: Lazy<Regex> = Lazy::new(|| {
+static WRITE_DONE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"已(?:经)?(?:修复|修改|写入|调整|完成)|改动(?:如下|点)|file_diff|已写入").unwrap()
 });
 
-static PREMATURE_COMPLETION_RE: Lazy<Regex> = Lazy::new(|| {
+static PREMATURE_COMPLETION_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?:全部|所有).{0,10}(?:正确|无误|完成|落盘)|无需再改|无需修改|链路完整|无逻辑漏洞|可以启动测试|代码质量检查|均(?:已)?(?:正确|完成)|都(?:已)?(?:正确|完成)",
     )
     .unwrap()
 });
 
-static FALSE_VERIFICATION_PASS_RE: Lazy<Regex> = Lazy::new(|| {
+static FALSE_VERIFICATION_PASS_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"检查完成|核对完成|验证通过|自检.{0,6}(?:通过|完成)|.{0,6}✅.{0,6}正确").unwrap()
 });
 
-static UNVERIFIED_ALL_CLEAR_RE: Lazy<Regex> = Lazy::new(|| {
+static UNVERIFIED_ALL_CLEAR_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?:没有|无)\s*bug|应(?:该)?(?:能)?正常(?:工作)?|代码(?:逻辑|结构).{0,20}(?:正确|没问题)|结论：.{0,24}(?:没有|无)\s*bug|审查结果.{0,16}无需修改",
     )
     .unwrap()
 });
 
-static WRITE_SUCCESS_CLAIM_RE: Lazy<Regex> = Lazy::new(|| {
+static WRITE_SUCCESS_CLAIM_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?:✅|修复完成|修改已完成|已完成|改动已全部|全部到位|两处修改|三处修改|均已?成功|patch\s*均成功|无失败项|无剩余问题)",
     )
     .unwrap()
 });
 
-static VISION_INTERNAL_MARKER_RE: Lazy<Regex> = Lazy::new(|| {
+static VISION_INTERNAL_MARKER_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\s*\[图已理解\]\s*").unwrap()
 });
 
-static CONSULTATIVE_OFFER_RE: Lazy<Regex> = Lazy::new(|| {
+static CONSULTATIVE_OFFER_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\n*(?:需要我|要不要我|是否要我).{0,32}(?:吗|么)[？?]?\s*$").unwrap()
 });
 
-static EXPANDED_REMOVE_MARKER_RE: Lazy<Regex> = Lazy::new(|| {
+static EXPANDED_REMOVE_MARKER_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?m)^操作：remove\s*$").unwrap()
 });
 
-static EXPANDED_SYMBOLS_RE: Lazy<Regex> = Lazy::new(|| {
+static EXPANDED_SYMBOLS_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?m)^目标符号：(.+)$").unwrap()
 });
 
-static QUOTED_LINE_RE: Lazy<Regex> = Lazy::new(|| {
+static QUOTED_LINE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\s*>").unwrap()
 });
 
-static REMOVE_AMEND_BODY_RE: Lazy<Regex> = Lazy::new(|| {
+static REMOVE_AMEND_BODY_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(?:也|同样|一样)?(?:移除|去掉|删除|删掉|不要(?:这段|这个|上面)?|取消|撤销)\s*[。！!]?$").unwrap()
 });
 
-static PATH_RE: Lazy<Regex> = Lazy::new(|| {
+static PATH_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)([\w./-]+\.(?:ts|tsx|js|jsx|vue|cs|json|md|yaml|yml|css|scss))").unwrap()
 });
 
-static CAMEL_RE: Lazy<Regex> = Lazy::new(|| {
+static CAMEL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\b[A-Z][a-zA-Z0-9]{2,}(?:[A-Z][a-zA-Z0-9]+)+\b").unwrap()
 });
 
-static BACKTICK_RE: Lazy<Regex> = Lazy::new(|| {
+static BACKTICK_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"`([^`]{2,80})`").unwrap()
 });
 
-static DURATION_RE: Lazy<Regex> = Lazy::new(|| {
+static DURATION_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(\d+)\s*(?:分钟|min(?:ute)?s?|m|秒|sec(?:ond)?s?|s|毫秒|ms|小时|h)").unwrap()
 });
 
-static PATH_PATTERN_RE: Lazy<Regex> = Lazy::new(|| {
+static PATH_PATTERN_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\.?/?[\w./-]+$").unwrap()
 });
 

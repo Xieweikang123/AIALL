@@ -6,14 +6,14 @@ pub const DEFAULT_AI_MAX_RETRIES: u32 = 3;
 pub const AGENT_AI_MAX_RETRIES: u32 = DEFAULT_AI_MAX_RETRIES + 1;
 pub const MODEL_FIRST_BYTE_TIMEOUT_MS: u64 = 60_000;
 
-static RETRYABLE_RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+static RETRYABLE_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
   regex::Regex::new(
     r"(?i)gateway error|请求超时|timeout|timed out|econnreset|etimedout|socket hang up|fetch failed|network error|overload|rate.?limit|too many requests|service unavailable|bad gateway",
   )
   .unwrap()
 });
 
-static RATE_LIMIT_RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+static RATE_LIMIT_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
   regex::Regex::new(r"(?i)too many requests|rate.?limit").unwrap()
 });
 

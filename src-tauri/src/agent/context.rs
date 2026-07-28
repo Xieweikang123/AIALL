@@ -23,8 +23,8 @@ const MAX_AGENTS_GUIDE_CHARS: usize = 6_000;
 const EXPLORATION_ARCHIVE_PROMPT_MAX_CHARS: usize = 1_500;
 const MAX_RELEVANT_ARCHIVES: usize = 3;
 
-static GIT_WORKING_TREE_TOPIC_RE: once_cell::sync::Lazy<regex::Regex> =
-  once_cell::sync::Lazy::new(|| {
+static GIT_WORKING_TREE_TOPIC_RE: std::sync::LazyLock<regex::Regex> =
+  std::sync::LazyLock::new(|| {
     regex::Regex::new(
       r"(?i)(?:\bgit\b|暂存|未提交|工作区|待提交|staged|unstaged|working\s*tree).{0,24}(?:改|变|diff|状态|提交|啥|什么)|(?:改了啥|改了什么|有哪些改动)|\bgit\s+status\b",
     )

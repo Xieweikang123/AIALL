@@ -1,36 +1,36 @@
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
 
 use super::vision::{extract_visible_anchor_quotes, suggests_embedded_layout_misread};
 
-static AGENT_TOOL_GUARD_FAILURE_RE: Lazy<Regex> = Lazy::new(|| {
+static AGENT_TOOL_GUARD_FAILURE_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(
     r"^错误：(缺少|不是(?:目录|文件)|路径|无效|未知工具|请先 read_file|已连续|grep「|读图|已确认|不允许|不支持|Ask 模式|Explore 模式|规划模式|咨询只读|扫描修复|一键修复)",
   )
   .unwrap()
 });
 
-static MANUAL_PASTE_INSTRUCTION_RE: Lazy<Regex> = Lazy::new(|| {
+static MANUAL_PASTE_INSTRUCTION_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(
     r"(?i)请将.{0,24}(?:应用|粘贴|手动)|请自行.{0,12}(?:应用|修改|粘贴)|手动.{0,8}(?:应用|修改|粘贴)",
   )
   .unwrap()
 });
 
-static DEFER_EXECUTE_REPLY_RE: Lazy<Regex> = Lazy::new(|| {
+static DEFER_EXECUTE_REPLY_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(
     r"(?i)(?:下一步|接下来|随后|稍后)我会|按你的要求.{0,24}(?:只)?(?:执行|修改|patch)",
   )
   .unwrap()
 });
 
-static BUILD_CONFIRM_ASK_RE: Lazy<Regex> = Lazy::new(|| {
+static BUILD_CONFIRM_ASK_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r"(?i)需要我(?:实际)?执行|请确认优先级|我可以逐个|需要我帮你|要我帮你|是否帮你|要不要帮你")
     .unwrap()
 });
 
-static WRITE_DONE_RE: Lazy<Regex> = Lazy::new(|| {
+static WRITE_DONE_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r"已(?:经)?(?:修复|修改|写入|调整|完成)|改动(?:如下|点)|file_diff|已写入").unwrap()
 });
 
@@ -131,28 +131,28 @@ pub fn record_read_range(
 
 // ── Grep / search guard ──
 
-static VISION_MISREAD_BLOCKED_GREP_RE: Lazy<Regex> = Lazy::new(|| {
+static VISION_MISREAD_BLOCKED_GREP_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(
     r"(?i)(?:[\w-]+-)?(?:bottom|footer|toolbar|status|action)(?:-(?:row|bar|area))?|(?:layout|container)-(?:bottom|footer)|transform\s*\|\s*will-change",
   )
   .unwrap()
 });
 
-static POST_LOCATE_BLOCKED_GREP_RE: Lazy<Regex> = Lazy::new(|| {
+static POST_LOCATE_BLOCKED_GREP_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(
     r"(?i)(?:^|\|)transform(?:\s*\||$)|will-change|(?:[\w-]+-)?(?:bottom|footer|toolbar|status|action)(?:-(?:row|bar|area))?",
   )
   .unwrap()
 });
 
-static PATCH_ANCHOR_SYMBOL_RE: Lazy<Regex> = Lazy::new(|| {
+static PATCH_ANCHOR_SYMBOL_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(
     r"(?i)\b(?:function|async function|const)\s+(show[A-Z]\w*At|tryShow[A-Z]\w*|getSelection[A-Z]\w*|clamp[A-Z]\w*)\b|<Teleport\b|\bposition:\s*fixed\b|\b[\w-]*-floating\b",
   )
   .unwrap()
 });
 
-static VISION_MARKER_RE: Lazy<Regex> = Lazy::new(|| {
+static VISION_MARKER_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r"\s*\[图已理解\]\s*").unwrap()
 });
 
@@ -160,7 +160,7 @@ pub fn text_indicates_patch_anchor(text: &str) -> bool {
   PATCH_ANCHOR_SYMBOL_RE.is_match(text)
 }
 
-static TELEPORT_TO_BODY_RE: Lazy<Regex> = Lazy::new(|| {
+static TELEPORT_TO_BODY_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r#"(?i)<Teleport[^>]*\s+to\s*=\s*["']body["']|Teleport[\s\S]{0,80}to\s*=\s*["']body["']"#)
     .unwrap()
 });
@@ -223,14 +223,14 @@ pub fn build_search_files_content_query_message(query: &str) -> String {
 
 // ── Read slice cache / patch old_string guard ──
 
-static STRUCTURAL_GREP_RE: Lazy<Regex> = Lazy::new(|| {
+static STRUCTURAL_GREP_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(
     r"(?i)[a-z0-9]-[a-z0-9]|title\s*=|class\s*=|`\s*[\w.-]+\s*`|\.[\w-]+\s*\{|@click|<Teleport|\bposition:\s*(?:fixed|absolute)",
   )
   .unwrap()
 });
 
-static LOW_SIGNAL_VISION_LOCATE_GREP_RE: Lazy<Regex> = Lazy::new(|| {
+static LOW_SIGNAL_VISION_LOCATE_GREP_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r"(?i)^(active|selected|current|default)(Tab|Index|Mode|View|Panel|Item|Id)$").unwrap()
 });
 
@@ -258,7 +258,7 @@ pub fn consume_patch_recovery_read(guard: &mut ToolGuardState, file_key: &str) -
   false
 }
 
-static MANUAL_HANDOFF_RE: Lazy<Regex> = Lazy::new(|| {
+static MANUAL_HANDOFF_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(
     r"(?i)手动(?:或另起对话|执行|修改)|另起对话|建议的修复（手动|请手动|手动步骤",
   )
@@ -380,7 +380,7 @@ pub fn build_low_signal_vision_locate_grep_message(pattern: &str) -> String {
   )
 }
 
-static WRITE_SUCCESS_CLAIM_RE: Lazy<Regex> = Lazy::new(|| {
+static WRITE_SUCCESS_CLAIM_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(
     r"(?i)(?:✅|修复完成|修改已完成|已完成|改动已全部|全部到位|两处修改|三处修改|均已?成功|patch\s*均成功|无失败项|无剩余问题)",
   )
@@ -405,14 +405,14 @@ pub fn claims_success_despite_patch_failures(text: &str, patch_failure_count: us
   WRITE_SUCCESS_CLAIM_RE.is_match(&body) || super::finish_gate::claims_premature_completion(&body)
 }
 
-static GHOST_MODIFICATION_CLAIM_RE: Lazy<Regex> = Lazy::new(|| {
+static GHOST_MODIFICATION_CLAIM_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(
     r"(?i)(?:已完成修改|已更新|已修复|已添加|已删除|已改为|已改成|改动如下|优化完成|修改如下|刷新查看)",
   )
   .unwrap()
 });
 
-static GHOST_MODIFICATION_EXCLUSION_RE: Lazy<Regex> = Lazy::new(|| {
+static GHOST_MODIFICATION_EXCLUSION_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r"(?i)(?:以上是|仅供参考|建议|方案|思路)").unwrap()
 });
 

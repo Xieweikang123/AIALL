@@ -1,4 +1,4 @@
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use regex::Regex;
 
 fn strip_vision_marker(text: &str) -> String {
@@ -32,7 +32,7 @@ pub fn has_consultative_accuracy_trace_depth(read_paths: &[String]) -> bool {
     has_entry && has_backend
 }
 
-static DEFERRED_ANSWER_RE: Lazy<Regex> = Lazy::new(|| {
+static DEFERRED_ANSWER_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"想让我.{0,32}(?:看|深入|确认|排查|读)|(?:要不要|是否需要|是否).{0,16}(?:看|深入|确认).{0,16}(?:prompt|构造|实现)|基于已有信息直接回答").unwrap()
 });
 
@@ -41,11 +41,11 @@ pub fn is_deferred_behavior_answer_reply(text: &str) -> bool {
     !body.is_empty() && DEFERRED_ANSWER_RE.is_match(&body)
 }
 
-static SPECULATIVE_IMPL_RE: Lazy<Regex> = Lazy::new(|| {
+static SPECULATIVE_IMPL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?:如果|若).{0,40}(?:prompt|注入|上下文).{0,48}(?:较|会|可能|偏高|偏低|够|不够)").unwrap()
 });
 
-static SPECULATIVE_IMPL_SHORT_RE: Lazy<Regex> = Lazy::new(|| {
+static SPECULATIVE_IMPL_SHORT_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"如果只是.{0,24}(?:文件名|列表|名字)").unwrap()
 });
 
@@ -86,17 +86,17 @@ pub fn should_block_consultative_accuracy_finalize(
     vision_locate_tools_used && !has_consultative_accuracy_trace_depth(consultative_read_paths)
 }
 
-static DEFINITION_VALUE_TOKEN_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?:=\s*\d+|`[^`]+`\s*=\s*\d+|\b=\s*0\b|\b=\s*1\b|\b=\s*2\b)").unwrap());
+static DEFINITION_VALUE_TOKEN_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?:=\s*\d+|`[^`]+`\s*=\s*\d+|\b=\s*0\b|\b=\s*1\b|\b=\s*2\b)").unwrap());
 
-static SPECULATIVE_PURPOSE_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"可能.{0,32}(?:作为|用于|在).{0,32}(?:标识|状态|流程|标记)").unwrap());
+static SPECULATIVE_PURPOSE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"可能.{0,32}(?:作为|用于|在).{0,32}(?:标识|状态|流程|标记)").unwrap());
 
-static SPECULATIVE_PURPOSE_NEED_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"具体使用位置需要查看|需要查看引用|须查看引用|具体用法需要").unwrap());
+static SPECULATIVE_PURPOSE_NEED_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"具体使用位置需要查看|需要查看引用|须查看引用|具体用法需要").unwrap());
 
-static SPECULATIVE_PURPOSE_MAYBE_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"可能在.{0,20}(?:流程|场景|处理)中").unwrap());
+static SPECULATIVE_PURPOSE_MAYBE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"可能在.{0,20}(?:流程|场景|处理)中").unwrap());
 
 pub fn is_speculative_behavior_purpose_reply(text: &str) -> bool {
     let body = strip_vision_marker(text);
@@ -111,18 +111,18 @@ pub fn is_enum_listing_without_usage_reply(text: &str) -> bool {
     hits >= 2 && !has_behavior_usage_evidence_in_reply(&body)
 }
 
-static USAGE_EVIDENCE_CODE_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?:if\s*\(|switch\s*\(|==|!=|===|!==)").unwrap());
+static USAGE_EVIDENCE_CODE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?:if\s*\(|switch\s*\(|==|!=|===|!==)").unwrap());
 
-static USAGE_EVIDENCE_ZH_RE: Lazy<Regex> = Lazy::new(|| {
+static USAGE_EVIDENCE_ZH_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?:当|若|只有|满足|否则|则|时会|才会|分支|调用|更新|修改|校验|回滚|写入|改为|设置为)").unwrap()
 });
 
-static USAGE_EVIDENCE_SYMBOL_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"`[A-Za-z_][\w]*`\s*(?:方法|函数|逻辑|分支)").unwrap());
+static USAGE_EVIDENCE_SYMBOL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"`[A-Za-z_][\w]*`\s*(?:方法|函数|逻辑|分支)").unwrap());
 
-static USAGE_EVIDENCE_PASCAL_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?:Process|Update|Revert|Handle)[A-Za-z]+\w*").unwrap());
+static USAGE_EVIDENCE_PASCAL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?:Process|Update|Revert|Handle)[A-Za-z]+\w*").unwrap());
 
 pub fn has_behavior_usage_evidence_in_reply(text: &str) -> bool {
     let body = strip_vision_marker(text);
@@ -131,8 +131,8 @@ pub fn has_behavior_usage_evidence_in_reply(text: &str) -> bool {
         || USAGE_EVIDENCE_SYMBOL_RE.is_match(&body) || USAGE_EVIDENCE_PASCAL_RE.is_match(&body)
 }
 
-static EXPLORE_PREAMBLE_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"让我在.{0,40}(?:搜索|查看|排查|定位|read|grep)").unwrap());
+static EXPLORE_PREAMBLE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"让我在.{0,40}(?:搜索|查看|排查|定位|read|grep)").unwrap());
 
 pub fn has_unfulfilled_explore_preamble(text: &str) -> bool {
     let body = strip_vision_marker(text);
@@ -175,13 +175,13 @@ pub fn should_block_behavior_purpose_finalize(
     consultative_read_paths.len() >= 2 && !has_behavior_usage_evidence_in_reply(reply_text)
 }
 
-static SPECULATIVE_CODE_ANALYSIS_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?:根据代码|查阅了|通过\s*grep|在该文件中|代码分析)").unwrap());
+static SPECULATIVE_CODE_ANALYSIS_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?:根据代码|查阅了|通过\s*grep|在该文件中|代码分析)").unwrap());
 
-static SHALLOW_STATE_INDEPENDENCE_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"(?:两个独立|互不干扰|不会触动|只改\s*\w+|存储在不同)").unwrap());
+static SHALLOW_STATE_INDEPENDENCE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?:两个独立|互不干扰|不会触动|只改\s*\w+|存储在不同)").unwrap());
 
-static CITED_FILE_PATH_RE: Lazy<Regex> = Lazy::new(|| {
+static CITED_FILE_PATH_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?i)[`("']?((?:[\w.\/-]+)+[\w.\/-]+\.(?:vue|tsx?|jsx?|ts|cs|scss|css))[`)"']?"#).unwrap()
 });
 
@@ -251,11 +251,11 @@ pub fn is_shallow_state_independence_claim(
     consultative_read_paths.is_empty()
 }
 
-static IMPLEMENT_INTENT_RE: Lazy<Regex> = Lazy::new(|| {
+static IMPLEMENT_INTENT_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(?:帮我|请|麻烦)?(?:改|修|修复|实现|添加|新增|删除|创建|优化|调整|更新|写入|落地|开发|执行|替换|重构|改成|改为|改一下|改下|写一[个份]?|做一[个份]?|fix|implement|add\b|create\b|update\b|refactor\b)").unwrap()
 });
 
-static UI_STATE_PERSISTENCE_QUESTION_RE: Lazy<Regex> = Lazy::new(|| {
+static UI_STATE_PERSISTENCE_QUESTION_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?:切|换|切换).{0,20}(?:再|回|之后|然后).{0,20}(?:切|换|回)|(?:还会|会不会|是不是会|是否会|会不会再).{0,24}(?:再次|重新|仍然|保留|恢复|打开|关闭|展开|折叠|显示|隐藏|保持)|再次.{0,12}(?:打开|展开|显示|出现|恢复)").unwrap()
 });
 

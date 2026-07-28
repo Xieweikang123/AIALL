@@ -1,6 +1,6 @@
 //! Tier 1 — quoted amend intent (ported from quotedAmendIntent.ts).
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use regex::Regex;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,16 +20,16 @@ pub struct QuotedAmendIntent {
   pub symbol_hints: Vec<String>,
 }
 
-static QUOTED_LINE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^\s*>").unwrap());
+static QUOTED_LINE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*>").unwrap());
 
-static REMOVE_AMEND_BODY_RE: Lazy<Regex> = Lazy::new(|| {
+static REMOVE_AMEND_BODY_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(
     r"^(?:也|同样|一样)?(?:移除|去掉|删除|删掉|不要(?:这段|这个|上面)?|取消|撤销)\s*[。！!]?$",
   )
   .unwrap()
 });
 
-static REMOVE_AMEND_LOOSE_RE: Lazy<Regex> = Lazy::new(|| {
+static REMOVE_AMEND_LOOSE_RE: LazyLock<Regex> = LazyLock::new(|| {
   Regex::new(r"(?:也|同样|一样)(?:移除|去掉|删除|删掉)|不要(?:这段|这个|上面)").unwrap()
 });
 
@@ -71,14 +71,14 @@ pub fn extract_symbol_hints(text: &str) -> Vec<String> {
     }
   };
 
-  static BACKTICK_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"`([^`]{2,80})`").unwrap());
+  static BACKTICK_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`([^`]{2,80})`").unwrap());
   for cap in BACKTICK_RE.captures_iter(text) {
     if let Some(m) = cap.get(1) {
       add(m.as_str());
     }
   }
-  static PASCAL_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\b[A-Z][a-zA-Z0-9]{2,}(?:[A-Z][a-zA-Z0-9]+)+\b").unwrap());
+  static PASCAL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b[A-Z][a-zA-Z0-9]{2,}(?:[A-Z][a-zA-Z0-9]+)+\b").unwrap());
   for cap in PASCAL_RE.captures_iter(text) {
     if let Some(m) = cap.get(0) {
       add(m.as_str());
@@ -90,9 +90,9 @@ pub fn extract_symbol_hints(text: &str) -> Vec<String> {
 }
 
 fn extract_scope_hint(quoted_lines: &[String]) -> Option<String> {
-  static AGENT_PREFIX_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^(?:Agent|助手|Assistant)\s*[:：]\s*").unwrap());
-  static SCOPE_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(.+?)[：:]\s*.+").unwrap());
+  static AGENT_PREFIX_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(?:Agent|助手|Assistant)\s*[:：]\s*").unwrap());
+  static SCOPE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(.+?)[：:]\s*.+").unwrap());
 
   for line in quoted_lines {
     let cleaned = AGENT_PREFIX_RE.replace(line, "").trim().to_string();

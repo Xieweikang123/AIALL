@@ -100,7 +100,7 @@ pub struct ResolvePolicyInput {
   pub history: Option<Vec<super::context::HistoryMessage>>,
 }
 
-static IMPLEMENT_INTENT_RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+static IMPLEMENT_INTENT_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
   regex::Regex::new(
     r"(?i)(?:帮我|请|麻烦)?(?:改|修|修复|实现|添加|新增|删除|创建|优化|调整|更新|写入|落地|开发|执行|替换|重构|改成|改为|改一下|改下|写一[个份]?|做一[个份]?|fix|implement|add\b|create\b|update\b|refactor\b)",
   )
@@ -112,32 +112,32 @@ pub fn prompt_has_implement_intent_without_question(text: &str) -> bool {
   IMPLEMENT_INTENT_RE.is_match(text) && !has_question
 }
 
-static USER_FAILURE_REPORT_RE: once_cell::sync::Lazy<regex::Regex> =
-  once_cell::sync::Lazy::new(|| {
+static USER_FAILURE_REPORT_RE: std::sync::LazyLock<regex::Regex> =
+  std::sync::LazyLock::new(|| {
     regex::Regex::new(
       r"试了.{0,20}(?:没有|没|不|无效)|并没有|没效果|没有效果|没生效|不生效|未生效|没变化|不起作用|仍然(?:没有|没|不)|还是(?:没有|没|不|不(?:显示|可见|出来))|明明(?:没有|没|不)|看不到|看不见|电脑没|系统没|实际没|并未",
     )
     .unwrap()
   });
 
-static IMPLEMENTATION_FAILURE_REPORT_RE: once_cell::sync::Lazy<regex::Regex> =
-  once_cell::sync::Lazy::new(|| {
+static IMPLEMENTATION_FAILURE_REPORT_RE: std::sync::LazyLock<regex::Regex> =
+  std::sync::LazyLock::new(|| {
     regex::Regex::new(
       r"没生效|不生效|未生效|没效果|没有效果|没变化|不起作用|试了.{0,16}(?:没有|没|不|无效)|仍然(?:没有|没|不)|还是(?:没有|没|不)|明明(?:没有|没|不)",
     )
     .unwrap()
   });
 
-static PRIOR_FIX_CLAIM_RE: once_cell::sync::Lazy<regex::Regex> =
-  once_cell::sync::Lazy::new(|| {
+static PRIOR_FIX_CLAIM_RE: std::sync::LazyLock<regex::Regex> =
+  std::sync::LazyLock::new(|| {
     regex::Regex::new(
       r"(?:✅|修复完成|修改已完成|已完成修复|问题已修复|已修复|已改完|应该(?:可以|没问题|能看到)了|(?:现在|已).{0,8}(?:可见|清晰|能看))|刷新(?:应用|页面)?(?:后|看看)",
     )
     .unwrap()
   });
 
-static SAME_ISSUE_FOLLOW_UP_RE: once_cell::sync::Lazy<regex::Regex> =
-  once_cell::sync::Lazy::new(|| {
+static SAME_ISSUE_FOLLOW_UP_RE: std::sync::LazyLock<regex::Regex> =
+  std::sync::LazyLock::new(|| {
     regex::Regex::new(
       r"(?:还有|仍(?:然)?有|依然).{0,8}问题|发现.{0,12}问题|问题.{0,8}(?:没|吗)[？?]?|还是有问题|没(?:解决|修好)|(?:排查|检查).{0,8}(?:下|一下)",
     )
@@ -227,13 +227,13 @@ pub fn history_suggests_quote_position_fix(history: Option<&[super::context::His
   if text.trim().is_empty() {
     return false;
   }
-  static POSITION_RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+  static POSITION_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(r"定位|坐标|位置|浮层|fixed|absolute|Teleport|锚点|偏移").unwrap()
   });
-  static CONCLUSION_RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+  static CONCLUSION_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(r"根因|原因|问题在于|分析|诊断|排查").unwrap()
   });
-  static FIX_RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+  static FIX_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(r"修复方案|修改方案|建议|patch|改法").unwrap()
   });
   POSITION_RE.is_match(&text) && (CONCLUSION_RE.is_match(&text) || FIX_RE.is_match(&text))

@@ -1,25 +1,25 @@
 use super::stack_profile::MinimalProjectContextRoute;
 use std::path::{Path, PathBuf};
 
-static ROUTE_BLOCK_RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+static ROUTE_BLOCK_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
   regex::Regex::new(r#"\{\s*path:\s*["']([^"']+)["'][\s\S]*?\}"#).unwrap()
 });
 
-static REDIRECT_ONLY_RE: once_cell::sync::Lazy<regex::Regex> =
-  once_cell::sync::Lazy::new(|| regex::Regex::new(r"redirect\s*:").unwrap());
+static REDIRECT_ONLY_RE: std::sync::LazyLock<regex::Regex> =
+  std::sync::LazyLock::new(|| regex::Regex::new(r"redirect\s*:").unwrap());
 
-static COMPONENT_IMPORT_RE: once_cell::sync::Lazy<regex::Regex> =
-  once_cell::sync::Lazy::new(|| {
+static COMPONENT_IMPORT_RE: std::sync::LazyLock<regex::Regex> =
+  std::sync::LazyLock::new(|| {
     regex::Regex::new(
       r#"component:\s*\(\)\s*=>\s*import\(\s*["']([^"']+)["']\s*\)"#,
     )
     .unwrap()
   });
 
-static COMPONENT_IDENT_RE: once_cell::sync::Lazy<regex::Regex> =
-  once_cell::sync::Lazy::new(|| regex::Regex::new(r"component:\s*([A-Za-z]\w*)\s*,?").unwrap());
+static COMPONENT_IDENT_RE: std::sync::LazyLock<regex::Regex> =
+  std::sync::LazyLock::new(|| regex::Regex::new(r"component:\s*([A-Za-z]\w*)\s*,?").unwrap());
 
-static VUE_DESC_RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+static VUE_DESC_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
   regex::Regex::new(r#"(?is)<p[^>]*class="[^"]*\bdesc\b[^"]*"[^>]*>([\s\S]*?)</p>"#).unwrap()
 });
 

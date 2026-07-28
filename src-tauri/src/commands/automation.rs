@@ -4,7 +4,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 
 fn icon_templates_dirs() -> (PathBuf, PathBuf) {
   let mut base = crate::paths::resolve_aiall_session_data_dir();
@@ -13,8 +13,8 @@ fn icon_templates_dirs() -> (PathBuf, PathBuf) {
   (base.join("store.json"), base.join("images"))
 }
 
-static ICON_TEMPLATE_ID_RE: Lazy<Regex> =
-  Lazy::new(|| Regex::new(r"^[a-z0-9][a-z0-9_-]{0,63}$").unwrap());
+static ICON_TEMPLATE_ID_RE: LazyLock<Regex> =
+  LazyLock::new(|| Regex::new(r"^[a-z0-9][a-z0-9_-]{0,63}$").unwrap());
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

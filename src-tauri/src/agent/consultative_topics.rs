@@ -3,51 +3,51 @@
 use super::context::HistoryMessage;
 use super::policy::{AgentRunPolicy, UserIntent};
 
-static SCHEDULED_TASK_TOPIC_RE: once_cell::sync::Lazy<regex::Regex> =
-  once_cell::sync::Lazy::new(|| {
+static SCHEDULED_TASK_TOPIC_RE: std::sync::LazyLock<regex::Regex> =
+  std::sync::LazyLock::new(|| {
     regex::Regex::new(
       r"(?:有没有|是否有|有无).{0,32}(?:定时|调度|cron|Cron|周期)|(?:定时|调度).{0,24}(?:任务|job|Job|触发)|\bcron\b|何时执行|什么时候跑|几点执行|执行频率|多久执行一次",
     )
     .unwrap()
   });
 
-static PROJECT_OVERVIEW_TOPIC_RE: once_cell::sync::Lazy<regex::Regex> =
-  once_cell::sync::Lazy::new(|| {
+static PROJECT_OVERVIEW_TOPIC_RE: std::sync::LazyLock<regex::Regex> =
+  std::sync::LazyLock::new(|| {
     regex::Regex::new(
       r"(?:项目|仓库|代码库|应用).{0,12}(?:做什么|是啥|是什么|介绍|概览|用途)|(?:解释|介绍|说明).{0,8}(?:项目|仓库|应用)",
     )
     .unwrap()
   });
 
-static SESSION_AUDIT_TASK_RE: once_cell::sync::Lazy<regex::Regex> =
-  once_cell::sync::Lazy::new(|| {
+static SESSION_AUDIT_TASK_RE: std::sync::LazyLock<regex::Regex> =
+  std::sync::LazyLock::new(|| {
     regex::Regex::new(
       r"【任务】请自行排查以下\s*.+\s*会话|Agent\s*回复的准确度|会话文件.*chat-\d{10,}",
     )
     .unwrap()
   });
 
-static GIT_WORKING_TREE_TOPIC_RE: once_cell::sync::Lazy<regex::Regex> =
-  once_cell::sync::Lazy::new(|| {
+static GIT_WORKING_TREE_TOPIC_RE: std::sync::LazyLock<regex::Regex> =
+  std::sync::LazyLock::new(|| {
     regex::Regex::new(
       r"(?:\bgit\b|暂存|未提交|工作区|待提交|staged|unstaged|working\s*tree).{0,24}(?:改|变|diff|状态|提交|啥|什么)|(?:改了啥|改了什么|有哪些改动)|\bgit\s+status\b",
     )
     .unwrap()
   });
 
-static IMPLEMENTATION_STATUS_RE: once_cell::sync::Lazy<regex::Regex> =
-  once_cell::sync::Lazy::new(|| {
+static IMPLEMENTATION_STATUS_RE: std::sync::LazyLock<regex::Regex> =
+  std::sync::LazyLock::new(|| {
     regex::Regex::new(
       r"(?:改完|改好了|弄完|做完|完成了吗|好了吗|搞定了吗|是否已经|有没有改|是否已经改|进度|实施完|落地完)",
     )
     .unwrap()
   });
 
-static JOB_FILE_PATH_RE: once_cell::sync::Lazy<regex::Regex> =
-  once_cell::sync::Lazy::new(|| regex::Regex::new(r"([^/\\]+Job)\.cs$").unwrap());
+static JOB_FILE_PATH_RE: std::sync::LazyLock<regex::Regex> =
+  std::sync::LazyLock::new(|| regex::Regex::new(r"([^/\\]+Job)\.cs$").unwrap());
 
-static SCHEDULE_REGISTRATION_RE: once_cell::sync::Lazy<regex::Regex> =
-  once_cell::sync::Lazy::new(|| {
+static SCHEDULE_REGISTRATION_RE: std::sync::LazyLock<regex::Regex> =
+  std::sync::LazyLock::new(|| {
     regex::Regex::new(
       r"ScheduleJob|AddJob|Schedule.*Job|cron\.schedule|node-cron|@Cron|registerSchedule|setInterval|CronSchedule|TriggerBuilder|WithCronSchedule|IScheduler|IJobDetail|Startup",
     )
@@ -178,25 +178,25 @@ fn resolve_config_binding_topic(prompt: &str) -> Option<&'static str> {
   if text.is_empty() {
     return None;
   }
-  static REJECT_RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+  static REJECT_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(
       r"(?:不对|不是这个|不要这个|错了|搞错|映射错|选项不对|没有这个选项|不在列表|列表里没有)",
     )
     .unwrap()
   });
-  static ENUM_RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+  static ENUM_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(
       r"(?:几个|多少|几种|几个选项|有哪些选项|可选值|枚举值|选项列表)",
     )
     .unwrap()
   });
-  static DOC_RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+  static DOC_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(
       r"(?:官方文档|文档怎么说|查文档|API文档|文档里|spec|规范)",
     )
     .unwrap()
   });
-  static CONFIG_CTX_RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+  static CONFIG_CTX_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(
       r"(?:字段|属性|参数|配置|选项|枚举|映射|绑定|prop|Props|attribute)",
     )
