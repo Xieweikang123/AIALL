@@ -866,14 +866,20 @@ function persistActiveSessionId(key: string, sessionId: string): boolean {
 function getProjectRecord(key: string): ProjectChatRecord | undefined {
   const readOnlyClone = { sanitizeMessages: false as const };
   const cached = memoryByProject.get(key);
-  if (cached?.sessions?.length) return cloneRecord(cached, readOnlyClone);
+  if (cached?.sessions?.length) {
+    return cloneRecord(cached, readOnlyClone);
+  }
 
   readIndex();
   const migrated = memoryByProject.get(key);
-  if (migrated?.sessions?.length) return cloneRecord(migrated, readOnlyClone);
+  if (migrated?.sessions?.length) {
+    return cloneRecord(migrated, readOnlyClone);
+  }
 
   const index = readIndex().byProject[key];
-  if (!index?.sessions?.length) return undefined;
+  if (!index?.sessions?.length) {
+    return undefined;
+  }
 
   const record: ProjectChatRecord = {
     activeSessionId: index.activeSessionId,
@@ -900,6 +906,26 @@ function ensureProjectRecord(key: string): ProjectChatRecord {
     persistRecord(key, record);
   }
   return record;
+}
+
+/** 清除指定项目的内存缓存，用于项目切换时防止脏数据残留。调用前需确保数据已持久化到 localStorage。 */
+export function clearProjectMemoryCache(projectPath: string): void {
+  const key = normalizeProjectKey(projectPath);
+  if (!key) return;
+  memoryByProject.delete(key);
+}
+
+/** 清除指定项目的 localStorage 索引和内存缓存（但不清除磁盘上的会话文件）。
+ *  用于检测到 localStorage 数据已污染时的应急清理。 */
+export function clearProjectSessionIndex(projectPath: string): void {
+  const key = normalizeProjectKey(projectPath);
+  if (!key) return;
+  memoryByProject.delete(key);
+  const index = readIndex();
+  if (index.byProject[key]) {
+    delete index.byProject[key];
+    writeIndex(index);
+  }
 }
 
 function getActiveSession(record: ProjectChatRecord): VibeChatSession {
@@ -1071,8 +1097,10 @@ export function listVibeChatSessions(projectPath: string): VibeChatSessionMeta[]
   const key = normalizeProjectKey(projectPath);
   if (!key) return [];
   const record = getProjectRecord(key);
-  if (!record?.sessions?.length) return [];
-  return record.sessions
+  if (!record?.sessions?.length) {
+    return [];
+  }
+  const result = record.sessions
     .filter((s) => sessionHasListableContent(key, s))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .map((s) => {
@@ -1086,6 +1114,7 @@ export function listVibeChatSessions(projectPath: string): VibeChatSessionMeta[]
         status: s.status,
       };
     });
+  return result;
 }
 
 export function getSessionTitle(projectPath: string, sessionId: string): string | undefined {

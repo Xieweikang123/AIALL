@@ -4,6 +4,8 @@ import {
   finalizeDraftSessionOnLeave,
   buildActiveSessionDiskSyncPayload,
   chatMessagesHavePendingImageBase64,
+  clearProjectMemoryCache,
+  clearProjectSessionIndex,
   clearVibeChatHistory,
   cloneChatMessagesForDiskSync,
   diskChatStoreAheadOfLocalIndex,
@@ -50,6 +52,8 @@ export type ChatSessionStoreDeps<T extends PersistedChatMessage = PersistedChatM
   confirm: (message: string) => Promise<boolean>;
   onAfterSwitch?: () => void;
   scrollToBottom?: (force?: boolean) => void | Promise<void>;
+  /** True while a project switch is in progress; timers skip themselves. */
+  isSwitchingProject?: () => boolean;
   /** Prefer in-memory registry over disk when switching back. */
   resolveSessionMessages?: (sessionId: string, diskMessages: PersistedChatMessage[]) => T[];
   /** Save composer input before leaving a session (must run before draft cleanup). */
@@ -88,6 +92,7 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     scrollToBottom,
     resolveSessionMessages,
     persistComposerDraft,
+    isSwitchingProject,
   } = deps;
 
   const {
@@ -224,11 +229,18 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
         && diskIndex.data.sessions.length > 0
         && vibeProjectPathsMatch(project, diskIndex.data.projectPath);
       const indexEmpty = !getSessionDiagSnapshot(project).indexSessionIds.length;
+      // 检测：磁盘拒绝此项目（projectPath 不匹配）但 localStorage 有数据 → 数据已污染
+      if (!diskOk && !indexEmpty && "error" in diskIndex && diskIndex.error === "会话属于其他项目，已忽略") {
+        clearProjectSessionIndex(project);
+      }
       const activeId = getActiveVibeChatSessionId(project);
       const needsDisk =
         (indexEmpty && diskOk)
         || (activeId ? projectChatNeedsDiskRestore(project, activeId) : false)
         || (diskOk && diskChatStoreAheadOfLocalIndex(project, diskIndex.data.sessions));
+      // #region agent log — hydrateProjectChatFromDisk
+      fetch('http://127.0.0.1:7609/ingest/b47c6406-f957-4d1a-8fa6-a213745e4c76',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c47255'},body:JSON.stringify({sessionId:'c47255',runId:'switch',hypothesisId:'F',location:'useChatSessionStore.ts:225',message:'hydrateProjectChatFromDisk:check',data:{project:project,diskOk:diskOk,diskProjectPath:diskIndex.data?.projectPath,diskSessionCount:diskIndex.data?.sessions?.length,indexEmpty:indexEmpty,activeId:activeId,needsDisk:needsDisk},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (!needsDisk) return false;
       if (indexEmpty) {
         await loadFullChatStoreFromDisk(project);
@@ -243,16 +255,26 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     activeSessionId: string;
     messages: PersistedChatMessage[];
   }> {
+    // #region agent log — loadProjectChatState entry
+    fetch('http://127.0.0.1:7609/ingest/b47c6406-f957-4d1a-8fa6-a213745e4c76',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c47255'},body:JSON.stringify({sessionId:'c47255',runId:'switch',hypothesisId:'E',location:'useChatSessionStore.ts:249',message:'loadProjectChatState:entry',data:{project:project},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     await hydrateProjectChatFromDisk(project);
     const activeId = resolveActiveVibeChatSessionId(project);
-    return { activeSessionId: activeId, messages: loadVibeChatHistory(project) };
+    const msgs = loadVibeChatHistory(project);
+    // #region agent log — loadProjectChatState result
+    fetch('http://127.0.0.1:7609/ingest/b47c6406-f957-4d1a-8fa6-a213745e4c76',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c47255'},body:JSON.stringify({sessionId:'c47255',runId:'switch',hypothesisId:'E',location:'useChatSessionStore.ts:253',message:'loadProjectChatState:result',data:{project:project,activeId:activeId,msgCount:msgs.length,msgSample:msgs.slice(0,2).map(m=>({role:m.role,content:String(m.content).slice(0,80)}))},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    return { activeSessionId: activeId, messages: msgs };
   }
 
-  function resetUiForProjectSwitch() {
+  function resetUiForProjectSwitch(oldProjectPath?: string) {
     resetSessionUi();
     sessionMessages.clearAll();
     orphanMessages = null;
     bumpRegistryVersion();
+    if (oldProjectPath) {
+      clearProjectMemoryCache(oldProjectPath);
+    }
   }
 
   function cancelPendingChatPersistence() {
@@ -271,6 +293,7 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     if (!projectPath().trim()) return;
     if (chatSending()) return;
     if (switchingSession.value) return;
+    if (isSwitchingProject?.()) return;
     const scheduledSessionId = activeSessionId.value.trim();
     if (!scheduledSessionId) return;
     if (saveChatTimer) clearTimeout(saveChatTimer);
@@ -408,6 +431,15 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     }
     saveVibeChatHistory(path, messages, id, { touchTimestamp });
     refreshList(path);
+
+    // 项目切换中跳过延迟同步定时器
+    if (isSwitchingProject?.()) {
+      // 但如果请求了 flushStore，直接执行磁盘同步以确保 chat-store.json 的 projectPath 及时更新
+      if (options?.flushStore) {
+        void flushChatStoreToDisk(path, { quiet: true });
+      }
+      return;
+    }
 
     if (persistDelayTimer) clearTimeout(persistDelayTimer);
     persistDelayTimer = setTimeout(() => {
