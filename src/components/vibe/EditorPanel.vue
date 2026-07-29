@@ -49,6 +49,9 @@
           <button type="button" :disabled="openTabs.length <= 1" @click="ctxCloseOthers">关闭其它</button>
           <button type="button" :disabled="!hasTabsToRight" @click="ctxCloseRight">关闭右侧</button>
           <div class="ctx-sep" />
+          <button type="button" @click="ctxCopyPath">复制路径</button>
+          <button type="button" @click="ctxRevealInFolder">在文件管理器中显示</button>
+          <div class="ctx-sep" />
           <button type="button" :disabled="openTabs.length === 0" @click="ctxCloseAll">关闭全部</button>
         </div>
       </Teleport>
@@ -282,6 +285,22 @@ function ctxCloseRight() {
 function ctxCloseAll() {
   hideCtx();
   emit("close-all-tabs");
+}
+
+function ctxCopyPath() {
+  const p = contextMenu.value.path;
+  hideCtx();
+  navigator.clipboard.writeText(p).catch(() => {});
+}
+
+function ctxRevealInFolder() {
+  const p = contextMenu.value.path;
+  hideCtx();
+  if (p) {
+    import("@tauri-apps/plugin-opener").then(({ revealItemInDir }) =>
+      revealItemInDir(p).catch(() => {}),
+    );
+  }
 }
 
 /* 点击页面任意位置或按 Escape 关闭菜单 */
@@ -635,11 +654,35 @@ defineExpose({ editorRef, revealLineInEditor });
   overflow-x: auto;
   margin: 0.8em 0;
 }
+
+/* 无语言 / plaintext 代码块强化 */
+.markdown-preview pre:not([class*="language-"]) code,
+.markdown-preview code.language-text,
+.markdown-preview code.language-plaintext {
+  white-space: pre !important;
+  word-break: normal !important;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
 .markdown-preview pre code {
+  font-family:
+    "Cascadia Code",
+    "Fira Code",
+    "JetBrains Mono",
+    Consolas,
+    "Courier New",
+    "PingFang SC",
+    "Microsoft YaHei",
+    monospace !important;
   background: none;
   padding: 0;
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 1.25;
+  font-variant-ligatures: none !important;
+  font-variant-numeric: tabular-nums;
+  word-spacing: 0;
+  letter-spacing: 0;
+  font-feature-settings: "tnum" 1;
 }
 .markdown-preview blockquote {
   border-left: 3px solid #58a6ff;
@@ -675,15 +718,7 @@ defineExpose({ editorRef, revealLineInEditor });
   max-width: 100%;
   border-radius: 6px;
 }
-.markdown-preview .tok-comment { color: #8b949e; font-style: italic; }
-.markdown-preview .tok-keyword { color: #ff7b72; }
-.markdown-preview .tok-string { color: #a5d6ff; }
-.markdown-preview .tok-number { color: #79c0ff; }
-.markdown-preview .tok-boolean { color: #ffa657; }
-.markdown-preview .tok-type { color: #ffa657; }
-.markdown-preview .tok-function { color: #d2a8ff; }
-.markdown-preview .tok-decorator { color: #d2a8ff; }
-.markdown-preview .tok-variable { color: #ffa657; }
+/* highlight.js 主题由 github-dark.css 全局提供 */
 
 .editor-action-btn.active {
   background: rgba(88, 166, 255, 0.15);

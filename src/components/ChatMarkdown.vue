@@ -429,14 +429,40 @@ watch([displayHtml, effectiveStreaming], () => {
   border-radius: 8px;
 }
 
+/* 无语言 / plaintext 代码块：确保不换行、横向滚动、消除硬件层模糊 */
+.msg-markdown :deep(pre:not([class*="language-"]) code),
+.msg-markdown :deep(code.language-text),
+.msg-markdown :deep(code.language-plaintext) {
+  white-space: pre !important;
+  word-break: normal !important;
+  overflow-x: auto;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
 .msg-markdown :deep(pre code) {
+  /* 字体链：现代等宽字体优先，含完备 Box Drawing 支持，中文字体兜底 */
+  font-family:
+    "Cascadia Code",
+    "Fira Code",
+    "JetBrains Mono",
+    Consolas,
+    "Courier New",
+    "PingFang SC",
+    "Microsoft YaHei",
+    monospace !important;
   display: block;
   padding: 0;
   border: none;
   background: transparent;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.25;
   white-space: pre;
+  font-variant-ligatures: none !important;
+  font-variant-numeric: tabular-nums;
+  word-spacing: 0;
+  letter-spacing: 0;
+  font-feature-settings: "tnum" 1;
 }
 
 .msg-markdown :deep(a) {
@@ -623,35 +649,7 @@ watch([displayHtml, effectiveStreaming], () => {
   box-shadow: 0 0 3px var(--dot-color, transparent);
 }
 
-/* ─── 语法高亮 ─────────────────────────────────────── */
-.msg-markdown :deep(.tok-keyword) {
-  color: #c678dd; /* 紫色 - 关键字 */
-}
-.msg-markdown :deep(.tok-string) {
-  color: #98c379; /* 绿色 - 字符串 */
-}
-.msg-markdown :deep(.tok-number) {
-  color: #d19a66; /* 橙色 - 数字 */
-}
-.msg-markdown :deep(.tok-comment) {
-  color: #5c6370; /* 灰色 - 注释 */
-  font-style: italic;
-}
-.msg-markdown :deep(.tok-type) {
-  color: #e5c07b; /* 黄色 - 类型/类名 */
-}
-.msg-markdown :deep(.tok-function) {
-  color: #61afef; /* 蓝色 - 函数调用 */
-}
-.msg-markdown :deep(.tok-boolean) {
-  color: #d19a66; /* 橙色 - 布尔值 */
-}
-.msg-markdown :deep(.tok-decorator) {
-  color: #e06c75; /* 红色 - 装饰器/注解 */
-}
-.msg-markdown :deep(.tok-variable) {
-  color: #56b6c2; /* 青色 - 变量引用 $var */
-}
+/* highlight.js 主题由 github-dark.css 全局提供 */
 
 /* ─── Mermaid 图表 ────────────────────────────────── */
 .msg-markdown :deep(.mermaid-render:not([data-mermaid-rendered]) code.language-mermaid) {

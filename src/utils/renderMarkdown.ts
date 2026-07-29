@@ -1,41 +1,80 @@
 import hljs from "highlight.js";
 import DOMPurify from "dompurify";
-import { marked } from "marked";
+import { Marked, marked } from "marked";
+import { markedHighlight } from "marked-highlight";
 import {
   getCachedMarkdownHtml,
   markdownLiteRenderCache,
   markdownRenderCache,
 } from "./markdownRenderCache";
 
-/** Mermaid source lives in <code> textContent so both render paths survive DOMPurify. */
-function renderMermaidPlaceholder(code: string): string {
-  return `<div class="mermaid-render"><code class="language-mermaid">${escapeHtml(code)}</code></div>`;
+// ─── Mermaid 预提取 ────────────────────────────────────
+
+const MERMAID_PLACEHOLDER_PREFIX = "\x00MERMAID_";
+
+/** 从 markdown 源文中提取 ```mermaid 块，替换为占位符，返回处理后的文本和块列表 */
+function extractMermaidBlocks(source: string): { text: string; blocks: string[] } {
+  const blocks: string[] = [];
+  const result = source.replace(
+    /```mermaid[\s\S]*?```/g,
+    (match) => {
+      const idx = blocks.length;
+      blocks.push(match);
+      return `${MERMAID_PLACEHOLDER_PREFIX}${idx}`;
+    },
+  );
+  return { text: result, blocks };
 }
 
-const renderer = new marked.Renderer();
-renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
-  if (lang === "mermaid") {
-    return renderMermaidPlaceholder(text);
-  }
-  const langAttr = lang ? ` class="language-${lang}"` : "";
-  const { html } = highlightCode(text, lang || "");
-  return `<pre${langAttr}><code${langAttr}>${html}</code></pre>`;
-};
+/** 将 marked 输出的 HTML 中 mermaid 占位符恢复为真实的 placeholder div */
+function restoreMermaidPlaceholders(html: string, blocks: string[]): string {
+  if (!blocks.length) return html;
+  return html.replace(
+    new RegExp(`${MERMAID_PLACEHOLDER_PREFIX}(\\d+)`, "g"),
+    (_, idx) => {
+      const raw = blocks[Number(idx)];
+      // raw = ```mermaid\n...\n``` → 提取内容部分
+      const code = raw.replace(/^```mermaid\n?/, "").replace(/\n?```$/, "");
+      return `<div class="mermaid-render"><code class="language-mermaid">${escapeHtml(code)}</code></div>`;
+    },
+  );
+}
 
-marked.setOptions({
-  breaks: true,
-  gfm: true,
-  renderer,
-});
+// ─── 完整渲染器（markedHighlight 插件） ─────────────────
+
+marked.use(markedHighlight({
+  langPrefix: 'hljs language-',
+  emptyLangClass: 'hljs',
+  highlight(code: string, lang: string) {
+    if (!lang || !hljs.getLanguage(lang)) return escapeHtml(code);
+    if (code.length > HIGHLIGHT_MAX_CHARS) return escapeHtml(code);
+    try {
+      return hljs.highlight(code, { language: lang, ignoreIllegals: true }).value;
+    } catch {
+      return escapeHtml(code);
+    }
+  },
+}));
+
+marked.setOptions({ breaks: true, gfm: true });
+
+// ─── Lite 渲染器（流式，跳过语法高亮，独立实例避免 walkTokens 冲突） ──
+
+const liteMarked = new Marked();
+liteMarked.setOptions({ breaks: true, gfm: true });
 
 const liteRenderer = new marked.Renderer();
 liteRenderer.code = function ({ text, lang }: { text: string; lang?: string }) {
   if (lang === "mermaid") {
-    return renderMermaidPlaceholder(text);
+    return `<div class="mermaid-render"><code class="language-mermaid">${escapeHtml(text)}</code></div>`;
   }
+  // no-lang 块也加 hljs 类保证有背景色
   const langAttr = lang ? ` class="language-${lang}"` : "";
-  return `<pre${langAttr}><code${langAttr}>${escapeHtml(text)}</code></pre>`;
+  const codeAttr = lang ? ` class="language-${lang} hljs"` : ' class="hljs"';
+  return `<pre${langAttr}><code${codeAttr}>${escapeHtml(text)}</code></pre>`;
 };
+
+// ─── 公共常量 & 导出 ──────────────────────────────────
 
 /** Skip regex tokenization on very large blocks — full render still escapes HTML. */
 const HIGHLIGHT_MAX_CHARS = 8_192;
@@ -199,8 +238,14 @@ export function renderMarkdown(text: string): string {
   return getCachedMarkdownHtml(text, markdownRenderCache, () => {
     const prepared = prepareMarkdownSource(text);
     if (!prepared) return "";
-    const raw = marked.parse(prepared, { async: false }) as string;
-    const sanitized = sanitizeMarkdownHtml(raw);
+    // 1) 预先提取 mermaid 块（避免与 marked-highlight 插件冲突）
+    const { text: noMermaid, blocks } = extractMermaidBlocks(prepared);
+    // 2) marked 渲染（含 syntax highlight）
+    const raw = marked.parse(noMermaid, { async: false }) as string;
+    // 3) 还原 mermaid 占位符
+    const withMermaid = restoreMermaidPlaceholders(raw, blocks);
+    // 4) 清理
+    const sanitized = sanitizeMarkdownHtml(withMermaid);
     return restoreCornerBrackets(stripTrailingEmptyBlocks(sanitized));
   });
 }
@@ -210,44 +255,12 @@ export function renderMarkdownLite(text: string): string {
   return getCachedMarkdownHtml(text, markdownLiteRenderCache, () => {
     const prepared = prepareMarkdownSource(text);
     if (!prepared) return "";
-    const raw = marked.parse(prepared, { async: false, renderer: liteRenderer }) as string;
-    const sanitized = sanitizeMarkdownHtml(raw);
+    const { text: noMermaid, blocks } = extractMermaidBlocks(prepared);
+    const raw = liteMarked.parse(noMermaid, { async: false, renderer: liteRenderer }) as string;
+    const withMermaid = restoreMermaidPlaceholders(raw, blocks);
+    const sanitized = sanitizeMarkdownHtml(withMermaid);
     return restoreCornerBrackets(stripTrailingEmptyBlocks(sanitized));
   });
-}
-
-// ─── highlight.js 语法高亮（成熟方案，替换了手写正则） ───
-
-/** 将 highlight.js 的 hljs-* 类名映射为 tok-* 以兼容现有 CSS */
-function mapHljsToTok(html: string): string {
-  return html.replace(/\bhljs-/g, "tok-");
-}
-
-/**
- * 对代码文本进行语法高亮，返回 HTML。
- * 使用 highlight.js 替代手写正则 tokenizer。
- */
-function highlightCode(code: string, lang: string): { html: string } {
-  if (code.length > HIGHLIGHT_MAX_CHARS) {
-    return { html: escapeHtml(code) };
-  }
-
-  const langLower = lang.toLowerCase();
-
-  // highlight.js 能识别的语言才高亮，否则直接转义
-  if (!hljs.getLanguage(langLower)) {
-    return { html: escapeHtml(code) };
-  }
-
-  try {
-    const result = hljs.highlight(code, {
-      language: langLower,
-      ignoreIllegals: true,
-    });
-    return { html: mapHljsToTok(result.value) };
-  } catch {
-    return { html: escapeHtml(code) };
-  }
 }
 
 function escapeHtml(s: string): string {
