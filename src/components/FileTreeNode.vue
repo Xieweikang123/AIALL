@@ -5,8 +5,8 @@
       class="file-item dir"
       :class="{ selected: node.path === selectedPath, expanded }"
       :style="{ paddingLeft }"
-      @click="onDirClick"
       @contextmenu.prevent="onContextMenu"
+      @pointerdown="onDirPointerDown"
     >
       <span class="tree-chevron" aria-hidden="true">{{ expanded ? "▾" : "▸" }}</span>
       <span class="file-type-icon file-type-icon--dir" aria-hidden="true" />
@@ -155,8 +155,8 @@ function onContextMenu(e: MouseEvent) {
   emit("contextmenu", props.node.path, e.clientX, e.clientY);
 }
 
-function onFilePointerDown(e: PointerEvent) {
-  if (props.node.isDirectory || e.button !== 0) return;
+function startDragFromPointer(e: PointerEvent, onTap: () => void) {
+  if (e.button !== 0) return;
   e.preventDefault();
 
   const el = e.currentTarget as HTMLElement;
@@ -190,12 +190,21 @@ function onFilePointerDown(e: PointerEvent) {
       emit("file-drag-end", props.node, ev.clientX, ev.clientY);
       return;
     }
-    onFileTap();
+    onTap();
   };
 
   el.addEventListener("pointermove", onMove);
   el.addEventListener("pointerup", onUp);
   el.addEventListener("pointercancel", onUp);
+}
+
+function onDirPointerDown(e: PointerEvent) {
+  startDragFromPointer(e, onDirClick);
+}
+
+function onFilePointerDown(e: PointerEvent) {
+  if (props.node.isDirectory) return;
+  startDragFromPointer(e, onFileTap);
 }
 
 const depth = computed(() => props.depth ?? 0);

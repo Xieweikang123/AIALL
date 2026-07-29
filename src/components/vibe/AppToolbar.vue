@@ -115,6 +115,7 @@
                 </span>
               </button>
               <button
+                v-if="!isCurrentProject(item.path)"
                 type="button"
                 class="project-history-delete"
                 title="从历史中移除"
@@ -332,10 +333,23 @@ function formatSessionTime(iso: string): string {
     d.getFullYear() === now.getFullYear() &&
     d.getMonth() === now.getMonth() &&
     d.getDate() === now.getDate();
+  
   if (sameDay) {
     return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
   }
+  
+  const sameYear = d.getFullYear() === now.getFullYear();
+  if (sameYear) {
+    return d.toLocaleString("zh-CN", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }
+  
   return d.toLocaleString("zh-CN", {
+    year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
@@ -590,6 +604,14 @@ function formatSessionTime(iso: string): string {
 }
 
 .project-history-dropdown {
+  /* Teleport 到 body 后脱离 .vibe-page 作用域，需在此重新声明 CSS 变量 */
+  --text-primary: rgba(255, 255, 255, 0.92);
+  --text-secondary: rgba(255, 255, 255, 0.62);
+  --text-tertiary: rgba(255, 255, 255, 0.45);
+  --bg-tertiary: rgba(255, 255, 255, 0.06);
+  --error-text: #ff9a9a;
+  --error-bg: rgba(248, 81, 73, 0.12);
+
   width: min(420px, calc(100vw - 24px));
   max-height: min(420px, calc(100vh - 80px));
   overflow-y: auto;
@@ -648,14 +670,14 @@ function formatSessionTime(iso: string): string {
   font-size: 13px;
   font-weight: 600;
   margin: 0;
-  color: var(--text-primary);
+  color: rgba(255, 255, 255, 0.9);
   letter-spacing: -0.01em;
   line-height: 1.3;
 }
 
 .project-history-desc {
   font-size: 11px;
-  color: rgba(201, 209, 217, 0.65);
+  color: rgba(201, 209, 217, 0.85);
   margin: 3px 0 0;
   line-height: 1.4;
 }
@@ -704,7 +726,7 @@ function formatSessionTime(iso: string): string {
 }
 
 .project-history-item.active {
-  background: rgba(88, 166, 255, 0.14);
+  background: rgba(88, 166, 255, 0.12);
 }
 
 .project-history-item.active::before {
@@ -753,11 +775,6 @@ function formatSessionTime(iso: string): string {
   transition: background 0.15s ease, color 0.15s ease;
 }
 
-.project-history-item.active .project-history-item-icon {
-  background: rgba(88, 166, 255, 0.2);
-  color: #79c0ff;
-}
-
 .project-history-item-body {
   flex: 1;
   min-width: 0;
@@ -776,12 +793,17 @@ function formatSessionTime(iso: string): string {
 .project-history-item-title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: rgba(255, 255, 255, 0.92);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
   line-height: 1.3;
+  transition: color 0.15s ease;
+}
+
+.project-history-item:not(.active) .project-history-item-title {
+  color: rgba(255, 255, 255, 0.85);
 }
 
 .project-history-item-badge {
@@ -798,7 +820,7 @@ function formatSessionTime(iso: string): string {
 
 .project-history-item-path {
   font-size: 11px;
-  color: rgba(201, 209, 217, 0.72);
+  color: rgba(201, 209, 217, 0.8);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -809,10 +831,17 @@ function formatSessionTime(iso: string): string {
 .project-history-item-meta {
   flex-shrink: 0;
   margin-left: auto;
+  margin-right: 8px;
   font-size: 10px;
-  color: rgba(201, 209, 217, 0.6);
+  color: rgba(201, 209, 217, 0.7);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.2px;
+  transition: opacity 0.15s ease;
+}
+
+.project-history-item:hover .project-history-item-meta,
+.project-history-item.active .project-history-item-meta {
+  opacity: 0;
 }
 
 .project-history-delete {
@@ -834,7 +863,6 @@ function formatSessionTime(iso: string): string {
 }
 
 .project-history-item:hover .project-history-delete,
-.project-history-item.active .project-history-delete,
 .project-history-delete:focus-visible {
   opacity: 1;
 }
@@ -845,13 +873,14 @@ function formatSessionTime(iso: string): string {
   transform: scale(1.05);
 }
 
-.project-history-clear {
+.ghost.project-history-clear {
   flex-shrink: 0;
-  color: rgba(139, 148, 158, 0.85);
+  color: rgba(201, 209, 217, 0.9);
   font-weight: 500;
+  transition: color 0.15s ease;
 }
 
-.project-history-clear:hover {
+.ghost.project-history-clear:hover {
   background: rgba(248, 81, 73, 0.12);
   color: #ff9a9a;
 }
@@ -1023,4 +1052,5 @@ function formatSessionTime(iso: string): string {
   font-size: 13px;
   line-height: 1;
 }
+
 </style>

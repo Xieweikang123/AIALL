@@ -1417,6 +1417,7 @@ const chatSession = useChatSessionStore({
   persistComposerDraft: () => composerRef.value?.saveDraftNow?.(),
   onAfterSwitch: () => chatSessionHooks.onAfterSwitch?.(),
   scrollToBottom: (force) => chatSessionHooks.scrollToBottom?.(force),
+  isSwitchingProject: () => switchingProject.value,
 });
 
 const {
@@ -1470,6 +1471,8 @@ const {
 
 // Session convenience functions
 function refreshSessionList(path?: string) {
+  // 项目切换中：没有显式路径时跳过，避免异步间隙被旧项目路径重新填充 sessionList
+  if (switchingProject.value && !path) return;
   const p = path ?? projectPath.value.trim();
   const beforeIds = p ? sessionList.value.map((s) => s.id) : [];
   session.refreshSessionList(path);
@@ -2807,6 +2810,7 @@ async function openProjectByPath(dirPath: string) {
     previousPath &&
     normalizeProjectPathUtil(previousPath) === normalizeProjectPathUtil(normalized)
   ) {
+    treeError.value = "已在当前项目中";
     return;
   }
 
@@ -2828,6 +2832,7 @@ async function openProjectByPath(dirPath: string) {
   };
 
   const previousPathForPersist = projectPath.value.trim();
+  switchingProject.value = true;
   if (projectOpened.value && previousPathForPersist) {
     pendingPromptQueue.value = [];
     persistPendingQueue();
@@ -2857,8 +2862,6 @@ async function openProjectByPath(dirPath: string) {
   fileDirty.value = false;
   fileLoadError.value = "";
   showDiffMode.value = false;
-  resetGitPanelState();
-  resetUiForProjectSwitch();
   log("reset-state");
 
   try {
@@ -2901,19 +2904,106 @@ async function openProjectByPath(dirPath: string) {
     }
     await reloadExpandedDirChildren();
 
-    switchingProject.value = true;
-    try {
-      const chatState = await loadProjectChatState(normalized);
-      if (gen !== projectSwitchGeneration) return;
-      activateSession(
-        chatState.activeSessionId,
-        normalizeChatMessages(chatState.messages, { stripTransientUi: true }),
-      );
-      refreshSessionList(normalized);
-      log(`chat-active(${chatState.activeSessionId}, ${chatState.messages.length}msgs)`);
-    } finally {
-      switchingProject.value = false;
-    }
+    // #region agent log — project switch session debug
+    fetch("http://127.0.0.1:7609/ingest/b47c6406-f957-4d1a-8fa6-a213745e4c76", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c47255" },
+      body: JSON.stringify({
+        sessionId: "c47255",
+        runId: "switch",
+        hypothesisId: "A",
+        location: "VibeCodingView.vue:2906",
+        message: "BEFORE resetUiForProjectSwitch",
+        data: {
+          activeSessionId: activeSessionId.value,
+          sessionListLen: sessionList.value.length,
+          sessionListIds: sessionList.value.map((s) => s.id),
+          chatMsgCount: chatMessages.value.length,
+          oldProjectPath: previousPathForPersist,
+          newProjectPath: normalized,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+
+    // 切换项目时重置 UI 状态，清除旧项目的会话缓存
+    resetUiForProjectSwitch(previousPathForPersist);
+
+    // #region agent log — after reset
+    fetch("http://127.0.0.1:7609/ingest/b47c6406-f957-4d1a-8fa6-a213745e4c76", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c47255" },
+      body: JSON.stringify({
+        sessionId: "c47255",
+        runId: "switch",
+        hypothesisId: "A",
+        location: "VibeCodingView.vue:2912",
+        message: "AFTER resetUiForProjectSwitch",
+        data: {
+          activeSessionId: activeSessionId.value,
+          sessionListLen: sessionList.value.length,
+          chatMsgCount: chatMessages.value.length,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+
+    const chatState = await loadProjectChatState(normalized);
+    if (gen !== projectSwitchGeneration) return;
+
+    // #region agent log — after loadProjectChatState
+    fetch("http://127.0.0.1:7609/ingest/b47c6406-f957-4d1a-8fa6-a213745e4c76", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c47255" },
+      body: JSON.stringify({
+        sessionId: "c47255",
+        runId: "switch",
+        hypothesisId: "B",
+        location: "VibeCodingView.vue:2915",
+        message: "AFTER loadProjectChatState",
+        data: {
+          newActiveSessionId: chatState.activeSessionId,
+          newMsgCount: chatState.messages.length,
+          newMsgSample: chatState.messages.slice(0, 3).map((m) => ({ role: m.role, content: String(m.content).slice(0, 60) })),
+          projectPath: normalized,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+
+    activateSession(
+      chatState.activeSessionId,
+      normalizeChatMessages(chatState.messages, { stripTransientUi: true }),
+    );
+    refreshSessionList(normalized);
+
+    // #region agent log — after activateSession + refreshSessionList
+    fetch("http://127.0.0.1:7609/ingest/b47c6406-f957-4d1a-8fa6-a213745e4c76", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c47255" },
+      body: JSON.stringify({
+        sessionId: "c47255",
+        runId: "switch",
+        hypothesisId: "C",
+        location: "VibeCodingView.vue:2921",
+        message: "AFTER activateSession + refreshSessionList",
+        data: {
+          activeSessionId: activeSessionId.value,
+          sessionListLen: sessionList.value.length,
+          sessionListIds: sessionList.value.map((s) => s.id),
+          chatMsgCount: chatMessages.value.length,
+          chatMsgSample: chatMessages.value.slice(0, 3).map((m) => ({ role: m.role, content: String(m.content).slice(0, 60) })),
+          projectPath: normalized,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+
+    log(`chat-active(${chatState.activeSessionId}, ${chatState.messages.length}msgs)`);
 
     loadingTree.value = false;
     void refreshGitStatus();
@@ -2924,6 +3014,27 @@ async function openProjectByPath(dirPath: string) {
     await restoreWorkspaceLayoutAfterOpen(savedUi);
     maybeAutoResumeLastRecoverableAssistant();
     tryResumeHmrInterruptedRun();
+
+    // #region agent log — after autoResume
+    fetch("http://127.0.0.1:7609/ingest/b47c6406-f957-4d1a-8fa6-a213745e4c76", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c47255" },
+      body: JSON.stringify({
+        sessionId: "c47255",
+        runId: "switch",
+        hypothesisId: "D",
+        location: "VibeCodingView.vue:2935",
+        message: "AFTER maybeAutoResume + tryResume",
+        data: {
+          activeSessionId: activeSessionId.value,
+          chatMsgCount: chatMessages.value.length,
+          chatMsgSample: chatMessages.value.slice(0, 3).map((m) => ({ role: m.role, content: String(m.content).slice(0, 60) })),
+          projectPath: normalized,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     log("final");
 
     flushLog(`total=${Math.round(performance.now() - t0)}ms | ${timings.join(" → ")}`);
@@ -2936,8 +3047,8 @@ async function openProjectByPath(dirPath: string) {
     flushLog(`FAILED total=${Math.round(performance.now() - t0)}ms | ${timings.join(" → ")}`);
   } finally {
     loadingTree.value = false;
+    switchingProject.value = false;
     if (gen === projectSwitchGeneration) {
-      switchingProject.value = false;
       finishEditorWorkspaceProjectSwitch();
     }
   }
@@ -2950,13 +3061,18 @@ async function handleOpenProject() {
   treeError.value = "";
 
   try {
-    const picked = await pickProjectFolder(projectPath.value.trim());
+    const currentPath = projectPath.value.trim();
+    // 切换项目时，打开父目录而不是当前项目目录，方便选择其他项目
+    const initialDir = currentPath ? currentPath.replace(/[\\/][^\\/]+$/, "") : currentPath;
+    const picked = await pickProjectFolder(initialDir);
     if (picked.cancelled) return;
     if (!picked.ok || !picked.path) {
       treeError.value = picked.error || "未选择文件夹";
       return;
     }
     await openProjectByPath(picked.path);
+  } catch (e) {
+    treeError.value = formatFetchError(e, "切换项目失败");
   } finally {
     pickingFolder.value = false;
     openingProject.value = false;
