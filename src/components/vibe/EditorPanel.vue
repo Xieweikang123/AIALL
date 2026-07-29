@@ -3,15 +3,19 @@
     <div class="editor-header">
       <div v-if="openTabs.length" ref="tabsContainerRef" class="editor-tabs" @wheel.prevent="onTabsWheel">
         <button
-          v-for="tab in openTabs"
+          v-for="(tab, index) in openTabs"
           :key="tab.path"
           :ref="(el) => setTabRef(tab.path, el as HTMLElement | null)"
           type="button"
+          draggable="true"
           class="editor-tab"
           :class="[
             {
               active: tab.path === activeFilePath,
               dirty: tab.dirty,
+              'editor-tab--dragging': dragState.tabIndex === index,
+              'editor-tab--drop-before': dragState.dropIndex === index && dragState.dropSide === 'before',
+              'editor-tab--drop-after': dragState.dropIndex === index && dragState.dropSide === 'after',
             },
             tabKindClass(tab),
           ]"
@@ -19,6 +23,12 @@
           @click="$emit('switch-tab', tab.path)"
           @mousedown.middle.prevent="$emit('close-tab', tab.path)"
           @contextmenu.prevent="onTabContextMenu($event, tab.path)"
+          @dragstart="onTabDragStart($event, index)"
+          @dragover="onTabDragOver($event, index)"
+          @dragenter="onTabDragEnter($event, index)"
+          @dragleave="onTabDragLeave($event, index)"
+          @drop="onTabDrop($event, index)"
+          @dragend="onTabDragEnd"
         >
           <span v-if="tabKindLabel(tab)" class="editor-tab-badge">{{ tabKindLabel(tab) }}</span>
           <span class="editor-tab-name">{{ tabDisplayName(tab.path) }}</span>
@@ -211,6 +221,7 @@ const emit = defineEmits<{
   (e: "update:fileContent", value: string): void;
   (e: "navigate-back"): void;
   (e: "navigate-forward"): void;
+  (e: "reorder-tabs", payload: { fromIndex: number; toIndex: number }): void;
 }>();
 
 /* ---- 标签滚轮横向滚动 ---- */
@@ -252,6 +263,79 @@ watch(() => props.activeFilePath, async (newPath) => {
   await nextTick();
   scrollTabIntoView(newPath);
 });
+
+/* ---- 标签拖拽排序 ---- */
+const dragState = ref<{
+  tabIndex: number;
+  dropIndex: number;
+  dropSide: "before" | "after" | null;
+}>({ tabIndex: -1, dropIndex: -1, dropSide: null });
+
+function onTabDragStart(e: DragEvent, index: number) {
+  if (index < 0 || index >= props.openTabs.length) return;
+  dragState.value = { tabIndex: index, dropIndex: -1, dropSide: null };
+  e.dataTransfer?.setData("text/plain", String(index));
+  e.dataTransfer!.effectAllowed = "move";
+  // Small delay so the "dragging" class takes effect visually
+  requestAnimationFrame(() => {
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+  });
+}
+
+function onTabDragOver(e: DragEvent, index: number) {
+  e.preventDefault();
+  if (dragState.value.tabIndex < 0) return;
+  if (dragState.value.tabIndex === index) {
+    dragState.value.dropIndex = -1;
+    dragState.value.dropSide = null;
+    return;
+  }
+  e.dataTransfer!.dropEffect = "move";
+}
+
+function onTabDragEnter(e: DragEvent, index: number) {
+  e.preventDefault();
+  if (dragState.value.tabIndex < 0) return;
+  if (dragState.value.tabIndex === index) {
+    dragState.value.dropIndex = -1;
+    dragState.value.dropSide = null;
+    return;
+  }
+  const tabEl = tabElMap.get(props.openTabs[index]?.path ?? "");
+  if (!tabEl) return;
+  const rect = tabEl.getBoundingClientRect();
+  const midX = rect.left + rect.width / 2;
+  const side = e.clientX < midX ? "before" : "after";
+  dragState.value = { ...dragState.value, dropIndex: index, dropSide: side };
+}
+
+function onTabDragLeave(e: DragEvent, index: number) {
+  // Only clear when the leave event is for the current target element
+  const target = e.currentTarget as HTMLElement;
+  const related = e.relatedTarget as Node | null;
+  if (related && target.contains(related)) return;
+  if (dragState.value.dropIndex === index) {
+    dragState.value.dropIndex = -1;
+    dragState.value.dropSide = null;
+  }
+}
+
+function onTabDrop(e: DragEvent, index: number) {
+  e.preventDefault();
+  const fromIndex = dragState.value.tabIndex;
+  const dropSide = dragState.value.dropSide;
+  dragState.value = { tabIndex: -1, dropIndex: -1, dropSide: null };
+  if (fromIndex < 0 || fromIndex === index) return;
+  // toIndex is the position in the original array where the tab should be inserted.
+  // "before" tab at i  → toIndex = i
+  // "after"  tab at i  → toIndex = i + 1  (can be length for "after last")
+  const toIndex = dropSide === "after" ? index + 1 : index;
+  emit("reorder-tabs", { fromIndex, toIndex });
+}
+
+function onTabDragEnd() {
+  dragState.value = { tabIndex: -1, dropIndex: -1, dropSide: null };
+}
 
 /* ---- 右键菜单 ---- */
 const contextMenu = ref({ visible: false, x: 0, y: 0, path: "" });
@@ -526,6 +610,28 @@ defineExpose({ editorRef, revealLineInEditor });
 .editor-tab-close:hover {
   background: rgba(255, 255, 255, 0.1);
   color: var(--text-primary, #fff);
+}
+
+/* ---- 标签拖拽反馈 ---- */
+.editor-tab--dragging {
+  opacity: 0.45;
+  cursor: grabbing;
+}
+
+.editor-tab--drop-before {
+  box-shadow: inset 2px 0 0 0 var(--accent-color, #58a6ff);
+}
+
+.editor-tab--drop-after {
+  box-shadow: inset -2px 0 0 0 var(--accent-color, #58a6ff);
+}
+
+.editor-tab[draggable="true"] {
+  cursor: grab;
+}
+
+.editor-tab[draggable="true"]:active {
+  cursor: grabbing;
 }
 
 .editor-header-title {

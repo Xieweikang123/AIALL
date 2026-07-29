@@ -261,4 +261,89 @@ describe("useEditorPanel — 异步缺口修复", () => {
       expect((params.treeError as Ref<string>).value).toBe("rename failed");
     });
   });
+
+  // ─── 4. reorderTabs: 标签拖拽排序 ─────────────────────
+  describe("reorderTabs", () => {
+    const a = `${PROJECT_PATH}/src/a.ts`;
+    const b = `${PROJECT_PATH}/src/b.ts`;
+    const c = `${PROJECT_PATH}/src/c.ts`;
+    const d = `${PROJECT_PATH}/src/d.ts`;
+
+    async function makeEditorWithTabs() {
+      readFileMock.mockResolvedValue({ ok: true, content: "content" });
+      const editor = (await import("./useEditorPanel")).useEditorPanel(makeParams());
+      await editor.openFile(a);
+      await editor.openFile(b);
+      await editor.openFile(c);
+      await editor.openFile(d);
+      return editor;
+    }
+
+    it("将标签从索引 0 移到索引 2（移到索引 2 的标签之前）", async () => {
+      const { openTabs, reorderTabs } = await makeEditorWithTabs();
+      expect(openTabs.value.map((t) => t.path)).toEqual([a, b, c, d]);
+
+      reorderTabs(0, 2); // 将 a 移到 c 之前
+
+      // a(idx0) removed→[b,c,d]; fromIndex<toIndex adj 2→1; splice(1,0,a)→[b,a,c,d]
+      expect(openTabs.value.map((t) => t.path)).toEqual([b, a, c, d]);
+    });
+
+    it("将标签从索引 3 移到索引 0（移到开头）", async () => {
+      const { openTabs, reorderTabs } = await makeEditorWithTabs();
+      // 将 d(idx3) 移到 a 之前
+      reorderTabs(3, 0);
+
+      // d(idx3) removed→[a,b,c]; fromIndex>toIndex adj→0; splice(0,0,d)→[d,a,b,c]
+      expect(openTabs.value.map((t) => t.path)).toEqual([d, a, b, c]);
+    });
+
+    it("将标签从索引 0 移到末尾（toIndex = length）", async () => {
+      const { openTabs, reorderTabs } = await makeEditorWithTabs();
+      // 将 a 追加到末尾
+      reorderTabs(0, 4);
+
+      // a(idx0) removed→[b,c,d]; adj 4-1=3; splice(3,0,a)→[b,c,d,a]
+      expect(openTabs.value.map((t) => t.path)).toEqual([b, c, d, a]);
+    });
+
+    it("相同索引时不做任何操作", async () => {
+      const { openTabs, reorderTabs } = await makeEditorWithTabs();
+      const before = openTabs.value.map((t) => t.path);
+
+      reorderTabs(1, 1);
+
+      expect(openTabs.value.map((t) => t.path)).toEqual(before);
+    });
+
+    it("超出边界的索引不报错", async () => {
+      const { openTabs, reorderTabs } = await makeEditorWithTabs();
+      const before = openTabs.value.map((t) => t.path);
+
+      reorderTabs(-1, 2);
+      expect(openTabs.value.map((t) => t.path)).toEqual(before);
+
+      reorderTabs(0, 999);
+      expect(openTabs.value.map((t) => t.path)).toEqual(before);
+    });
+
+    it("将标签从索引 2 移到索引 1（移到索引 1 的标签之前）", async () => {
+      const { openTabs, reorderTabs } = await makeEditorWithTabs();
+      // 将 c(idx2) 移到 b(idx1) 之前 → [a,c,b,d]
+      reorderTabs(2, 1);
+
+      // c(idx2) removed→[a,b,d]; fromIndex>toIndex adj→1; splice(1,0,c)→[a,c,b,d]
+      expect(openTabs.value.map((t) => t.path)).toEqual([a, c, b, d]);
+    });
+
+    it("活跃标签路径不应因排序而改变", async () => {
+      const { openTabs, activeFilePath, reorderTabs } = await makeEditorWithTabs();
+      expect(activeFilePath.value).toBe(d);
+
+      reorderTabs(0, 3); // 将 a 移到 d 之前
+
+      expect(activeFilePath.value).toBe(d);
+      expect(openTabs.value.map((t) => t.path)).toHaveLength(4);
+    });
+  });
 });

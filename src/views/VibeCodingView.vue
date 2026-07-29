@@ -359,6 +359,7 @@
         @expand-chat="expandChat"
         @editor-change="onEditorChange"
         @editor-select="onEditorSelect"
+        @reorder-tabs="({ fromIndex, toIndex }) => reorderTabs(fromIndex, toIndex)"
         @close-other-tabs="closeOtherTabs"
         @close-right-tabs="closeRightTabs"
         @close-all-tabs="closeAllTabs"
@@ -869,7 +870,11 @@
             丢弃更改
           </button>
           <div v-if="gitFileCtxCanStage || gitFileCtxCanUnstage || gitFileCtxCanDiscard" class="ctx-sep" />
+          <button type="button" class="ctx-item" @click="gitFileOpenInEditor">打开文件</button>
+          <button type="button" class="ctx-item" @click="gitFileRevealInFolder">在文件管理器中显示</button>
+          <div class="ctx-sep" />
           <button type="button" class="ctx-item" @click="gitFileCopyName">复制文件名</button>
+          <button type="button" class="ctx-item" @click="gitFileCopyFullPath">复制完整路径</button>
         </div>
       </div>
       <button
@@ -1944,6 +1949,7 @@ const {
   syncEditorAfterAgentFileChange,
   closeOtherTabs, closeRightTabs, closeAllTabs,
   navigateBack, navigateForward, canGoBack, canGoForward,
+  reorderTabs,
   persistEditorWorkspace, restoreEditorWorkspace, reloadExpandedDirChildren,
   prepareEditorWorkspaceProjectSwitch, finishEditorWorkspaceProjectSwitch,
 } = useEditorPanel({
@@ -3211,6 +3217,31 @@ function gitFileCopyName() {
   const path = gitFileContextMenu.value.path;
   void copyText(fileName(path));
   hideGitFileContextMenu();
+}
+
+function gitFileCopyFullPath() {
+  const relPath = gitFileContextMenu.value.path;
+  const fullPath = resolveFullPathFromRel(relPath);
+  void copyText(fullPath);
+  hideGitFileContextMenu();
+}
+
+function gitFileRevealInFolder() {
+  const relPath = gitFileContextMenu.value.path;
+  const fullPath = resolveFullPathFromRel(relPath);
+  hideGitFileContextMenu();
+  if (fullPath) {
+    import("@tauri-apps/plugin-opener").then(({ revealItemInDir }) =>
+      revealItemInDir(fullPath).catch(() => {}),
+    );
+  }
+}
+
+function gitFileOpenInEditor() {
+  const relPath = gitFileContextMenu.value.path;
+  const fullPath = resolveFullPathFromRel(relPath);
+  hideGitFileContextMenu();
+  if (fullPath) void openFile(fullPath);
 }
 
 async function gitFileCtxStage() {

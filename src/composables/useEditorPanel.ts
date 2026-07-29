@@ -674,6 +674,23 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     }
   }
 
+  function reorderTabs(fromIndex: number, toIndex: number) {
+    if (fromIndex === toIndex) return;
+    if (fromIndex < 0 || fromIndex >= openTabs.value.length) return;
+    // Allow toIndex == length (drop at the end)
+    if (toIndex < 0 || toIndex > openTabs.value.length) return;
+
+    const tabs = [...openTabs.value];
+    const [moved] = tabs.splice(fromIndex, 1);
+    // After splicing fromIndex, items after it shift left by 1.
+    // Adjust toIndex for the shift when moving forward.
+    const adjustedTo = fromIndex < toIndex ? toIndex - 1 : toIndex;
+    tabs.splice(adjustedTo, 0, moved);
+    openTabs.value = tabs;
+
+    schedulePersistEditorWorkspace();
+  }
+
   function updateOpenTabPath(from: string, to: string) {
     const tab = findOpenTab(from);
     if (tab) tab.path = to;
@@ -1088,6 +1105,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     navigateForward,
     canGoBack,
     canGoForward,
+    reorderTabs,
     persistEditorWorkspace,
     restoreEditorWorkspace,
     reloadExpandedDirChildren,
