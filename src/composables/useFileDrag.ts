@@ -3,6 +3,45 @@ import { readFile } from "../services/vibeCodingClient";
 import type FileTreeNode from "../components/FileTreeNode.vue";
 type TreeNode = InstanceType<typeof FileTreeNode>["$props"]["node"];
 
+const MAX_FOLDER_DROP_FILES = 200;
+const SKIP_DIRECTORIES = new Set(["node_modules", "dist", ".git", ".svn", ".hg", "__pycache__"]);
+
+async function traverseDirectoryEntry(
+  entry: FileSystemDirectoryEntry,
+): Promise<File[]> {
+  const files: File[] = [];
+  try {
+    const reader = entry.createReader();
+    let entries: FileSystemEntry[];
+    let done = false;
+    do {
+      entries = await new Promise<FileSystemEntry[]>((resolve, reject) => {
+        reader.readEntries(resolve, reject);
+      });
+      for (const childEntry of entries) {
+        if (files.length >= MAX_FOLDER_DROP_FILES) {
+          done = true;
+          break;
+        }
+        if (childEntry.isFile) {
+          const fileEntry = childEntry as FileSystemFileEntry;
+          const file = await new Promise<File>((resolve, reject) => {
+            fileEntry.file(resolve, reject);
+          });
+          files.push(file);
+        } else if (childEntry.isDirectory) {
+          if (SKIP_DIRECTORIES.has(childEntry.name) || childEntry.name.startsWith(".")) continue;
+          const subFiles = await traverseDirectoryEntry(childEntry as FileSystemDirectoryEntry);
+          files.push(...subFiles);
+        }
+      }
+    } while (entries.length > 0 && !done);
+  } catch {
+    // ignore directory read errors (e.g. permission denied)
+  }
+  return files;
+}
+
 export interface ReferencedFile {
   name: string;
   path: string;
@@ -154,6 +193,70 @@ export function useFileDrag(
     isDragging.value = false;
     dragCounter = 0;
 
+    const items = e.dataTransfer?.items;
+    if (items?.length) {
+      const allFiles: Array<{ name: string; path: string; content: string }> = [];
+
+      for (const item of Array.from(items)) {
+        const entry = (item as DataTransferItem & { webkitGetAsEntry?: () => FileSystemEntry | null }).webkitGetAsEntry?.();
+        if (!entry) {
+          // Fallback: process as regular file
+          const file = item.getAsFile();
+          if (!file) continue;
+          const path = (file as File & { path?: string }).path || "";
+          if (!path) continue;
+          try {
+            const result = await readFile(path);
+            if (result.ok) {
+              allFiles.push({ name: file.name, path, content: result.content });
+            }
+          } catch {
+            // ignore unreadable files
+          }
+          continue;
+        }
+
+        if (entry.isDirectory) {
+          const dirFiles = await traverseDirectoryEntry(entry as FileSystemDirectoryEntry);
+          for (const file of dirFiles) {
+            const path = (file as File & { path?: string }).path || "";
+            if (!path) continue;
+            try {
+              const result = await readFile(path);
+              if (result.ok) {
+                allFiles.push({ name: file.name, path, content: result.content });
+              }
+            } catch {
+              // ignore unreadable files
+            }
+          }
+        } else {
+          const fileEntry = entry as FileSystemFileEntry;
+          const file = await new Promise<File>((resolve, reject) => {
+            fileEntry.file(resolve, reject);
+          });
+          const path = (file as File & { path?: string }).path || "";
+          if (!path) continue;
+          try {
+            const result = await readFile(path);
+            if (result.ok) {
+              allFiles.push({ name: file.name, path, content: result.content });
+            }
+          } catch {
+            // ignore unreadable files
+          }
+        }
+      }
+
+      if (insertDroppedFile) {
+        for (const f of allFiles) {
+          insertDroppedFile(f);
+        }
+      }
+      return;
+    }
+
+    // Fallback: old file-based approach (DataTransferItem API not available)
     const files = e.dataTransfer?.files;
     if (!files || !files.length) return;
 
