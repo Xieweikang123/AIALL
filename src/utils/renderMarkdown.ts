@@ -1,3 +1,4 @@
+import hljs from "highlight.js";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import {
@@ -134,6 +135,20 @@ export function normalizeGluedLatinCjkBoundary(source: string): string {
   return source.replace(/([A-Za-z0-9)])([:：])(?=[\u4e00-\u9fff])/g, "$1$2\n\n");
 }
 
+/**
+ * Strip trailing empty block-level elements (hr, empty h1-h6, empty p) that render as visible
+ * but content-free regions. LLM output often ends with stylistic separators like `---` (→ &lt;hr&gt;)
+ * or empty headings, and round-group aggregation via `\n\n---\n\n` can leave trailing artifacts.
+ *
+ * We operate at the HTML level so fenced code blocks are never affected.
+ */
+function stripTrailingEmptyBlocks(html: string): string {
+  return html.replace(
+    /(?:\s*<(?:hr\b[^>]*|h[1-6]\b[^>]*>\s*<\/h[1-6]>|p\b[^>]*>\s*<\/p>)\s*)+$/i,
+    "",
+  );
+}
+
 const NEEDS_NORMALIZE_RE = /[：:「」\d.\-*\\#\uFF0A]/;
 const NEEDS_PREPARE_RE = /[\\*_\[`「」#\uFF0A]/;
 
@@ -185,7 +200,8 @@ export function renderMarkdown(text: string): string {
     const prepared = prepareMarkdownSource(text);
     if (!prepared) return "";
     const raw = marked.parse(prepared, { async: false }) as string;
-    return restoreCornerBrackets(sanitizeMarkdownHtml(raw));
+    const sanitized = sanitizeMarkdownHtml(raw);
+    return restoreCornerBrackets(stripTrailingEmptyBlocks(sanitized));
   });
 }
 
@@ -195,163 +211,43 @@ export function renderMarkdownLite(text: string): string {
     const prepared = prepareMarkdownSource(text);
     if (!prepared) return "";
     const raw = marked.parse(prepared, { async: false, renderer: liteRenderer }) as string;
-    return restoreCornerBrackets(sanitizeMarkdownHtml(raw));
+    const sanitized = sanitizeMarkdownHtml(raw);
+    return restoreCornerBrackets(stripTrailingEmptyBlocks(sanitized));
   });
 }
 
-// ─── 轻量语法高亮（零依赖） ───────────────────────────
+// ─── highlight.js 语法高亮（成熟方案，替换了手写正则） ───
 
-interface Token {
-  start: number;
-  end: number;
-  token: string; // CSS class name: tok-keyword, tok-string, etc.
-}
-
-interface TokenRule {
-  pattern: RegExp;
-  token: string;
-}
-
-// 通用规则（适用于大多数语言）
-const commonRules: TokenRule[] = [
-  { pattern: /\/\/.*$/gm, token: "comment" },
-  { pattern: /#.*$/gm, token: "comment" },
-  { pattern: /\/\*[\s\S]*?\*\//g, token: "comment" },
-  { pattern: /"(?:[^"\\]|\\.)*"/g, token: "string" },
-  { pattern: /'(?:[^'\\]|\\.)*'/g, token: "string" },
-  { pattern: /`(?:[^`\\]|\\.)*`/g, token: "string" },
-  { pattern: /\b\d+(?:\.\d+)?(?:_\d+)*\b/g, token: "number" },
-  { pattern: /\b(?:true|false|null|undefined|None|True|False)\b/g, token: "boolean" },
-];
-
-// 语言特定规则
-const langRules: Record<string, TokenRule[]> = {
-  typescript: [
-    { pattern: /\b(?:const|let|var|function|return|if|else|for|while|do|switch|case|break|continue|new|delete|typeof|instanceof|in|of|class|extends|super|import|from|export|default|async|await|try|catch|finally|throw|yield|static|public|private|protected|readonly|abstract|interface|type|enum|implements|declare|namespace|module|as|is|keyof|infer|satisfies|override|using)\b/g, token: "keyword" },
-    { pattern: /\b(?:string|number|boolean|any|unknown|never|void|object|symbol|bigint|Promise|Record|Partial|Required|Pick|Omit|Array|Map|Set|RegExp|Date|Error)\b/g, token: "type" },
-    { pattern: /(?<=\.)\w+(?=\s*\()/g, token: "function" },
-    { pattern: /\b[A-Z]\w*\b/g, token: "type" },
-    { pattern: /@\w+/g, token: "decorator" },
-  ],
-  javascript: [
-    { pattern: /\b(?:const|let|var|function|return|if|else|for|while|do|switch|case|break|continue|new|delete|typeof|instanceof|in|of|class|extends|super|import|from|export|default|async|await|try|catch|finally|throw|yield|static)\b/g, token: "keyword" },
-    { pattern: /\b(?:Promise|Array|Map|Set|RegExp|Date|Error|Math|JSON|console|window|document)\b/g, token: "type" },
-    { pattern: /(?<=\.)\w+(?=\s*\()/g, token: "function" },
-    { pattern: /\b[A-Z]\w*\b/g, token: "type" },
-  ],
-  python: [
-    { pattern: /\b(?:def|class|return|if|elif|else|for|while|break|continue|pass|import|from|as|with|try|except|finally|raise|yield|lambda|global|nonlocal|del|assert|and|or|not|is|in|async|await)\b/g, token: "keyword" },
-    { pattern: /\b(?:True|False|None|int|str|float|bool|list|dict|tuple|set|bytes|type|object|range|enumerate|zip|map|filter|len|print|super|property|staticmethod|classmethod|self|cls)\b/g, token: "type" },
-    { pattern: /(?<=\.)\w+(?=\s*\()/g, token: "function" },
-    { pattern: /@\w+/g, token: "decorator" },
-  ],
-  rust: [
-    { pattern: /\b(?:fn|let|mut|const|if|else|for|while|loop|break|continue|return|match|use|pub|struct|enum|impl|trait|type|mod|crate|self|super|where|async|await|move|ref|unsafe|extern|dyn|as|in|static|box)\b/g, token: "keyword" },
-    { pattern: /\b(?:i8|i16|i32|i64|i128|u8|u16|u32|u64|u128|f32|f64|bool|char|str|String|Vec|Option|Result|Box|Rc|Arc|HashMap|HashSet|Self|true|false|Some|None|Ok|Err)\b/g, token: "type" },
-    { pattern: /\b(?:println!|print!|format!|vec!|assert!|assert_eq!|todo!|unimplemented!|panic!|dbg!)\b/g, token: "function" },
-    { pattern: /(?<=\.)\w+(?=\s*\()/g, token: "function" },
-    { pattern: /#\[[\w:(),]+\]/g, token: "decorator" },
-  ],
-  html: [
-    { pattern: /<\/?[\w-]+/g, token: "keyword" },
-    { pattern: /\b[\w-]+(?==)/g, token: "type" },
-  ],
-  css: [
-    { pattern: /\.[\w-]+/g, token: "type" },
-    { pattern: /#[\w-]+/g, token: "number" },
-    { pattern: /@[\w-]+/g, token: "keyword" },
-  ],
-  json: [
-    { pattern: /"(?:[^"\\]|\\.)*"(?=\s*:)/g, token: "keyword" },
-    { pattern: /"(?:[^"\\]|\\.)*"/g, token: "string" },
-  ],
-  shell: [
-    { pattern: /\b(?:echo|cd|ls|mkdir|rm|cp|mv|cat|grep|sed|awk|chmod|chown|sudo|npm|npx|yarn|pnpm|git|docker|curl|wget|tar|zip|unzip|apt|brew|pip|cargo|rustc|node|tsx|ts-node)\b/g, token: "function" },
-    { pattern: /#.*/g, token: "comment" },
-    { pattern: /"(?:[^"\\]|\\.)*"/g, token: "string" },
-    { pattern: /'(?:[^'\\]|\\.)*'/g, token: "string" },
-    { pattern: /--?[\w-]+/g, token: "type" },
-    { pattern: /\$\w+/g, token: "variable" },
-  ],
-};
-
-/**
- * 对原始（未转义的）代码文本进行分词，
- * 返回 Token 数组。Token 不重叠，先匹配先生效。
- *
- * 算法：先收集所有规则的全部匹配（O(n×m)），按 start 排序后
- * 贪心一趟过滤重叠区间（O(n log n)），消除原来 O(n²) 的线性扫描。
- */
-function tokenize(code: string, lang: string): Token[] {
-  const key = lang.toLowerCase();
-  const rules = [...commonRules, ...(langRules[key] || [])];
-
-  // 第一步：收集所有候选 match，带规则优先级（rules 索引越小优先级越高）
-  type Candidate = { start: number; end: number; token: string; priority: number };
-  const candidates: Candidate[] = [];
-
-  for (let ri = 0; ri < rules.length; ri++) {
-    const rule = rules[ri]!;
-    rule.pattern.lastIndex = 0;
-    let match: RegExpExecArray | null;
-    while ((match = rule.pattern.exec(code)) !== null) {
-      candidates.push({
-        start: match.index,
-        end: match.index + match[0].length,
-        token: rule.token,
-        priority: ri,
-      });
-    }
-  }
-
-  // 第二步：按 start 升序排序，start 相同时优先级低的（索引大）排后面
-  candidates.sort((a, b) => a.start - b.start || a.priority - b.priority);
-
-  // 第三步：贪心一趟过滤，跳过与上一个选中 token 重叠的候选
-  const tokens: Token[] = [];
-  let cursor = 0;
-  for (const c of candidates) {
-    if (c.start >= cursor) {
-      tokens.push({ start: c.start, end: c.end, token: c.token });
-      cursor = c.end;
-    }
-  }
-
-  return tokens;
+/** 将 highlight.js 的 hljs-* 类名映射为 tok-* 以兼容现有 CSS */
+function mapHljsToTok(html: string): string {
+  return html.replace(/\bhljs-/g, "tok-");
 }
 
 /**
  * 对代码文本进行语法高亮，返回 HTML。
- * 内部完成 HTML 转义 + span 包裹。
+ * 使用 highlight.js 替代手写正则 tokenizer。
  */
 function highlightCode(code: string, lang: string): { html: string } {
   if (code.length > HIGHLIGHT_MAX_CHARS) {
     return { html: escapeHtml(code) };
   }
-  const tokens = tokenize(code, lang);
-  if (!tokens.length) {
+
+  const langLower = lang.toLowerCase();
+
+  // highlight.js 能识别的语言才高亮，否则直接转义
+  if (!hljs.getLanguage(langLower)) {
     return { html: escapeHtml(code) };
   }
 
-  let html = "";
-  let cursor = 0;
-
-  for (const t of tokens) {
-    // Token 之前的普通文本
-    if (cursor < t.start) {
-      html += escapeHtml(code.slice(cursor, t.start));
-    }
-    // Token 本身（HTML 转义后再包裹 span）
-    html += `<span class="tok-${t.token}">${escapeHtml(code.slice(t.start, t.end))}</span>`;
-    cursor = t.end;
+  try {
+    const result = hljs.highlight(code, {
+      language: langLower,
+      ignoreIllegals: true,
+    });
+    return { html: mapHljsToTok(result.value) };
+  } catch {
+    return { html: escapeHtml(code) };
   }
-
-  // 最后的普通文本
-  if (cursor < code.length) {
-    html += escapeHtml(code.slice(cursor));
-  }
-
-  return { html };
 }
 
 function escapeHtml(s: string): string {
