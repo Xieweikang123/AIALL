@@ -306,7 +306,7 @@ pub async fn chat_store_load(project_path: &str, load_messages: bool) -> Value {
   let stored_path = index.get("projectPath").and_then(|v| v.as_str()).unwrap_or("");
   let norm = |p: &str| p.trim().replace('\\', "/").trim_end_matches('/').to_lowercase();
   if !stored_path.is_empty() && norm(stored_path) != norm(project_path) {
-    return json!({ "ok": false, "error": "磁盘上没有会话备份" });
+    return json!({ "ok": false, "error": "会话属于其他项目，已忽略" });
   }
   if !load_messages {
     return json!({ "ok": true, "data": index });
