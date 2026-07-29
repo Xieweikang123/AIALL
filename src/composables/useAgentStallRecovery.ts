@@ -483,7 +483,12 @@ export function useAgentStallRecovery(deps: UseAgentStallRecoveryDeps) {
   }
 
   function cleanupStallRecoveryTimers() {
-    stopAgentUiTick();
+    // 组件卸载时强制清除定时器（HMR 场景），不受活跃 run 限制
+    if (agentUiTickTimer) {
+      clearInterval(agentUiTickTimer);
+      agentUiTickTimer = null;
+    }
+    stalledAssistantMsg.value = null;
     cancelAutoResume();
     if (silentContinueTimer) {
       clearTimeout(silentContinueTimer);

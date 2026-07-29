@@ -1265,6 +1265,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       sessionId,
       assistantMsg,
     });
+    // await 期间如果 interruptSessionRun 被调用，run 已被移除，不要起 SSE 连接
+    if (!runManager.isValid(sessionId, runGen)) {
+      return false;
+    }
     const agentRequest = {
       prompt,
       history,
