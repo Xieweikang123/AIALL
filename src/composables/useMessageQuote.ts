@@ -27,6 +27,8 @@ export type UseMessageQuoteOptions = {
   planWorkspaceOpen: Ref<boolean>;
   activeFilePath: Ref<string>;
   activeFileRelativePath: () => string;
+  /** 替换旧的 quotedMessages 机制：选中内容后直接插入 Composer */
+  onQuoteReady: (content: string, filePath?: string) => void;
 };
 
 function eventComposedPathIncludes(event: MouseEvent, selector: string): boolean {
@@ -93,13 +95,8 @@ function getSelectionAnchorRect(selection: Selection): DOMRect | null {
   return null;
 }
 
-function quoteMessageKey(message: QuotedMessage): string {
-  return `${message.messageId}:${message.content}`;
-}
-
 export function useMessageQuote(options: UseMessageQuoteOptions) {
   const pendingQuote = ref<QuotedMessage | null>(null);
-  const quotedMessages = ref<QuotedMessage[]>([]);
   const quoteButtonPosition = ref({ x: 0, y: 0 });
   const showQuoteButton = ref(false);
   const quoteButtonSource = ref<"chat" | "plan" | "editor" | null>(null);
@@ -271,20 +268,12 @@ export function useMessageQuote(options: UseMessageQuoteOptions) {
     if (!pendingQuote.value) return;
 
     const next = pendingQuote.value;
-    const key = quoteMessageKey(next);
-    if (!quotedMessages.value.some((item) => quoteMessageKey(item) === key)) {
-      quotedMessages.value = [...quotedMessages.value, next];
-    }
+    options.onQuoteReady(next.content, next.filePath);
     pendingQuote.value = null;
     showQuoteButton.value = false;
     quoteButtonSource.value = null;
 
     options.expandChat();
-
-    const selection = window.getSelection();
-    if (selection) {
-      selection.removeAllRanges();
-    }
 
     nextTick(() => {
       options.focusComposer();
@@ -305,13 +294,6 @@ export function useMessageQuote(options: UseMessageQuoteOptions) {
   }
 
   registerEscapeDismiss(showQuoteButton, hideQuoteButtonNow, ESCAPE_DISMISS_PRIORITY.QUOTE_BUTTON);
-  registerEscapeDismiss(
-    () => quotedMessages.value.length > 0,
-    () => {
-      quotedMessages.value = [];
-    },
-    ESCAPE_DISMISS_PRIORITY.QUOTED_PREVIEW,
-  );
 
   onMounted(() => {
     document.addEventListener("mousedown", onDocumentClick, true);
@@ -340,7 +322,6 @@ export function useMessageQuote(options: UseMessageQuoteOptions) {
 
   return {
     pendingQuote,
-    quotedMessages,
     quoteButtonPosition,
     showQuoteButton,
     quoteButtonSource,

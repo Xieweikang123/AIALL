@@ -331,25 +331,6 @@
           {{ suggestion.label }}
         </button>
       </div>
-    <div
-      v-if="quotedMessages.length"
-      class="quoted-preview-stack"
-    >
-      <div
-        v-for="(q, quoteIndex) in quotedMessages"
-        :key="`${q.messageId}-${quoteIndex}`"
-        class="quoted-preview"
-      >
-        <div class="quoted-preview-header">
-          <span class="quoted-preview-label">
-            <span class="quoted-preview-icon">❝</span>
-            引用 {{ q.source === "plan" ? "方案" : q.source === "editor" ? (q.filePath || "代码") : (q.role === "assistant" ? "Agent" : "你") }}
-          </span>
-          <button type="button" class="quoted-preview-close" @click="removeQuotedMessage(quoteIndex)">×</button>
-        </div>
-        <div class="quoted-preview-body">{{ q.content }}</div>
-      </div>
-    </div>
       <div class="chat-input-field" @keydown.capture="$emit('on-composer-field-keydown', $event)">
         <div v-if="mentionOpen && mentionResults.length" class="mention-dropdown">
           <button
@@ -768,7 +749,6 @@ interface Props {
   chatStoreSyncMessage: string;
   isDragging: boolean;
   editorCollapsed: boolean;
-  quotedMessages: QuotedMessage[];
   mentionOpen: boolean;
   mentionResults: MentionItem[];
   mentionActiveIndex: number;
@@ -832,10 +812,9 @@ const props = withDefaults(defineProps<Props>(), {
   explorationDetailLoading: false,
   memorySuggestSaving: false,
   pendingMemoryProposals: () => [],
-  pendingSkillProposals: () => [],
-  quotedMessages: () => [],
-  agentRunningStatus: "",
-  agentSuggestions: () => [],
+	pendingSkillProposals: () => [],
+	agentRunningStatus: "",
+	agentSuggestions: () => [],
 });
 
 const panelStyle = computed(() => {
@@ -921,7 +900,6 @@ const emit = defineEmits<{
   (e: "on-chat-drag-leave", event: DragEvent): void;
   (e: "on-chat-drop", event: DragEvent): void;
   (e: "update:chatMode", mode: VibeChatMode): void;
-  (e: "update:quotedMessages", value: QuotedMessage[]): void;
   (e: "update:showTokenDetail", value: boolean): void;
   (e: "update:projectMemoryDraft", value: string): void;
   (e: "open-project-memory"): void;
@@ -1069,11 +1047,6 @@ onUnmounted(() => {
 });
 
 defineExpose({ chatScrollRef, chatDropZoneRef });
-
-function removeQuotedMessage(index: number) {
-  const next = props.quotedMessages.filter((_, i) => i !== index);
-  emit("update:quotedMessages", next);
-}
 </script>
 
 <style src="./styles/ChatPanel.scss" scoped></style>

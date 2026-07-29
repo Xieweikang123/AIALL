@@ -693,7 +693,6 @@
         :chat-store-sync-message="chatStoreSyncMessage"
         :is-dragging="isDragging"
         :editor-collapsed="editorCollapsed"
-        :quoted-messages="quotedMessages"
         :mention-open="mentionOpen"
         :mention-results="mentionResults"
         :mention-active-index="mentionActiveIndex"
@@ -752,7 +751,6 @@
         @on-chat-scroll="onChatScroll"
         @scroll-to-bottom="scrollChatToBottom(true)"
         @clear-pending-queue="clearPendingPromptQueue"
-        @update:quoted-messages="quotedMessages = $event"
         @on-composer-field-keydown="onComposerFieldKeydown"
         @select-mention="selectMention"
         @on-chat-input-box-mousedown="onChatInputBoxMouseDown"
@@ -2568,7 +2566,6 @@ const {
 } = planPanel;
 
 const {
-  quotedMessages,
   quoteButtonPosition,
   showQuoteButton,
   hideQuoteButtonNow,
@@ -2589,6 +2586,9 @@ const {
   planWorkspaceOpen,
   activeFilePath,
   activeFileRelativePath,
+  onQuoteReady: (content, filePath) => {
+    composerRef.value?.insertQuote(content, filePath);
+  },
 });
 
 const workspaceUi = useWorkspaceUiPersistence({
@@ -3647,21 +3647,6 @@ async function sendChat() {
   let fullPrompt = userText || (imageDataUrls.length ? "请结合附带的图片回答。" : "请结合引用的文件回答。");
 
   let bubbleText = userText;
-  if (quotedMessages.value.length) {
-    const quotedContent = quotedMessages.value
-      .map((q) => {
-        if (q.source === "editor") {
-          const label = q.filePath || "代码";
-          return `> 代码（${label}）:\n> ${q.content.replace(/\n/g, "\n> ")}`;
-        }
-        const prefix = q.source === "plan" ? "方案" : (q.role === "assistant" ? "Agent" : "你");
-        return `> ${prefix}: ${q.content.replace(/\n/g, "\n> ")}`;
-      })
-      .join("\n\n");
-    fullPrompt = `${quotedContent}\n\n${fullPrompt}`;
-    bubbleText = userText ? `${quotedContent}\n\n${userText}` : quotedContent;
-    quotedMessages.value = [];
-  }
 
   let composerCleared = false;
   try {

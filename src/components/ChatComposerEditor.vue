@@ -141,12 +141,15 @@ interface ComposerPayload {
   refs: ComposerReferencedFile[];
   drops: ComposerDroppedFile[];
   imageDataUrls: string[];
+  /** Quote chips serialize into text as fenced code blocks */
+  quotes?: { content: string; filePath?: string }[];
 }
 
 const CHIP = "composer-chip";
 const CHIP_REF = "composer-chip-ref";
 const CHIP_DROP = "composer-chip-drop";
 const CHIP_IMAGE = "composer-chip-image";
+const CHIP_QUOTE = "composer-chip-quote";
 
 const props = defineProps<{
   placeholder?: string;
@@ -295,6 +298,27 @@ function insertImage(dataUrl: string) {
   syncEmpty();
 }
 
+function createQuoteChip(text: string, filePath?: string): HTMLSpanElement {
+  const chip = document.createElement("span");
+  chip.className = `${CHIP} ${CHIP_QUOTE}`;
+  chip.contentEditable = "false";
+  chip.dataset.quoteText = text;
+  chip.dataset.quoteFile = filePath ?? "";
+  chip.title = `引用${filePath ? ` ${filePath}` : ""}`;
+
+  // 显示内容预览（首行前 30 个字符）
+  const preview = text.split("\n")[0]!.trim().slice(0, 30);
+  const label = filePath || "选中内容";
+  chip.textContent = `❝ ${preview}`;
+  return chip;
+}
+
+function insertQuote(text: string, filePath?: string) {
+  insertNodesAtCursor([createQuoteChip(text, filePath)]);
+  syncEmpty();
+  emitMentionChange();
+}
+
 function getPlainTextBeforeCursor(): string {
   const root = editorRef.value;
   const sel = window.getSelection();
@@ -327,10 +351,11 @@ function extractPayload(): ComposerPayload {
   const refs: ComposerReferencedFile[] = [];
   const drops: ComposerDroppedFile[] = [];
   const imageDataUrls: string[] = [];
+  const quotes: { content: string; filePath?: string }[] = [];
   const textParts: string[] = [];
 
   if (!root) {
-    return { text: "", refs, drops, imageDataUrls };
+    return { text: "", refs, drops, imageDataUrls, quotes };
   }
 
   function walk(node: Node) {
@@ -369,6 +394,15 @@ function extractPayload(): ComposerPayload {
       return;
     }
 
+    if (el.classList.contains(CHIP_QUOTE)) {
+      const content = el.dataset.quoteText ?? "";
+      const filePath = el.dataset.quoteFile ?? "";
+      quotes.push({ content, filePath: filePath || undefined });
+      const label = filePath || "选中内容";
+      textParts.push(`\n\`\`\`${label}\n${content}\n\`\`\`\n`);
+      return;
+    }
+
     if (el.tagName === "BR") {
       textParts.push("\n");
       return;
@@ -390,6 +424,7 @@ function extractPayload(): ComposerPayload {
     refs,
     drops,
     imageDataUrls,
+    quotes,
   };
 }
 
@@ -664,6 +699,7 @@ defineExpose({
   insertFileRef,
   insertDroppedFile,
   insertImage,
+  insertQuote,
   extractPayload,
   clear,
   setPlainText,
@@ -762,7 +798,6 @@ onMounted(() => {
   line-height: 1.45;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   vertical-align: baseline;
-  user-select: none;
   white-space: nowrap;
 }
 
@@ -787,6 +822,13 @@ onMounted(() => {
   border: 1px solid rgba(31, 111, 235, 0.3);
   vertical-align: bottom;
   line-height: 0;
+}
+
+.composer-editor :deep(.composer-chip-quote) {
+  background: rgba(255, 152, 0, 0.15);
+  border: 1px solid rgba(255, 152, 0, 0.35);
+  color: #ffcc80;
+  cursor: default;
 }
 
 .composer-editor :deep(.composer-image-preview) {
