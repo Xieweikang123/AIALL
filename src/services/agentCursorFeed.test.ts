@@ -195,9 +195,15 @@ describe("agentCursorFeed", () => {
     }
   });
 
-  it("suppresses in-feed planning status when thinking preview is present", () => {
+  it("suppresses in-feed planning status when narrative or tools exist", () => {
     const feed = buildCursorAgentFeed({
-      groups: [],
+      groups: [{
+        turn: 1,
+        modelSteps: [],
+        toolIds: [],
+        narrative: "## 截图描述\n正文",
+        tools: [],
+      }],
       isRunning: true,
       agentPhase: "waiting_model",
       answerPreview: "## 截图描述\n正文",
@@ -206,28 +212,34 @@ describe("agentCursorFeed", () => {
     expect(feed.some((item) => item.kind === "status")).toBe(false);
   });
 
-  it("shouldSuppressFeedPlanningStatus covers streaming and preview cases", () => {
+  it("shouldSuppressFeedPlanningStatus covers streaming, narrative and tool cases", () => {
     expect(
       shouldSuppressFeedPlanningStatus({
         agentPhase: "streaming_model",
-        answerPreview: "已有正文",
+        streaming: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldSuppressFeedPlanningStatus({
+        agentPhase: "waiting_model",
+        narrativeText: "已有正文",
         streaming: false,
       }),
     ).toBe(true);
     expect(
       shouldSuppressFeedPlanningStatus({
         agentPhase: "waiting_model",
-        answerPreview: "上一轮遗留",
-        streaming: false,
-      }),
-    ).toBe(true);
-    expect(
-      shouldSuppressFeedPlanningStatus({
-        agentPhase: "waiting_model",
-        answerPreview: "",
+        narrativeText: "",
         streaming: false,
       }),
     ).toBe(false);
+    expect(
+      shouldSuppressFeedPlanningStatus({
+        agentPhase: "waiting_model",
+        hasToolCalls: true,
+        streaming: false,
+      }),
+    ).toBe(true);
   });
 
   it("appends answer to process timeline without mixing into scroll blocks", () => {
@@ -518,7 +530,7 @@ describe("agentCursorFeed", () => {
     expect(items.some((item) => item.kind === "thought" && item.text.includes("最终回答"))).toBe(false);
   });
 
-  it("excludes answer-like narrative from thought rows when answer preview exists", () => {
+  it("includes answer-like narrative as thought in single-stream model (no separate answer item)", () => {
     const structured = "## 截图描述\n\n顶部导航栏包含「会话」与「项目」两个 Tab。";
     const feed = buildCursorAgentFeed({
       groups: [{
@@ -544,7 +556,8 @@ describe("agentCursorFeed", () => {
       answerPreview: structured,
       streaming: false,
     });
-    expect(feed.some((item) => item.kind === "thought")).toBe(false);
+    // In single-stream model, answer-like narrative appears as thought (there's no separate answer item)
+    expect(feed.some((item) => item.kind === "thought")).toBe(true);
     expect(feed.some((item) => item.kind === "action")).toBe(true);
   });
 

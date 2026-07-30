@@ -239,7 +239,7 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
         || (activeId ? projectChatNeedsDiskRestore(project, activeId) : false)
         || (diskOk && diskChatStoreAheadOfLocalIndex(project, diskIndex.data.sessions));
       // #region agent log — hydrateProjectChatFromDisk
-      fetch('http://127.0.0.1:7609/ingest/b47c6406-f957-4d1a-8fa6-a213745e4c76',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c47255'},body:JSON.stringify({sessionId:'c47255',runId:'switch',hypothesisId:'F',location:'useChatSessionStore.ts:225',message:'hydrateProjectChatFromDisk:check',data:{project:project,diskOk:diskOk,diskProjectPath:diskIndex.data?.projectPath,diskSessionCount:diskIndex.data?.sessions?.length,indexEmpty:indexEmpty,activeId:activeId,needsDisk:needsDisk},timestamp:Date.now()})}).catch(()=>{});
+      fetch('http://127.0.0.1:7609/ingest/b47c6406-f957-4d1a-8fa6-a213745e4c76',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c47255'},body:JSON.stringify({sessionId:'c47255',runId:'switch',hypothesisId:'F',location:'useChatSessionStore.ts:225',message:'hydrateProjectChatFromDisk:check',data:{project:project,diskOk:diskOk,diskProjectPath:diskOk ? diskIndex.data.projectPath : undefined,diskSessionCount:diskOk ? diskIndex.data.sessions.length : undefined,indexEmpty:indexEmpty,activeId:activeId,needsDisk:needsDisk},timestamp:Date.now()})}).catch(()=>{});
       // #endregion
       if (!needsDisk) return false;
       if (indexEmpty) {

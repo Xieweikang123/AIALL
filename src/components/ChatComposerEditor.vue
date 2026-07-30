@@ -638,7 +638,9 @@ async function onPaste(e: ClipboardEvent) {
   // Fall back to text
   const text = e.clipboardData?.getData("text/plain") ?? "";
   if (!text) return;
-  insertNodesAtCursor([document.createTextNode(text)], false);
+  // 使用 execCommand 而非手动 insertNode，保证浏览器 undo 栈能正确跟踪粘贴操作
+  editorRef.value?.focus();
+  document.execCommand("insertText", false, text);
   syncEmpty();
   emitMentionChange();
 }

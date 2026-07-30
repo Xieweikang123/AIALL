@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  appendInlineAnswerBlock,
   buildInlineAgentFeed,
   collapseInlineFeedItems,
-  filterInlineTimelineItems,
-  splitInlineFeedItems,
   summarizeInlineFeedProcess,
 } from "./agentInlineFeed";
 import type { AgentRoundGroupView } from "./agentRoundGroups";
@@ -26,7 +23,7 @@ function readStep(id: string): AgentRoundGroupView["tools"][number] {
 }
 
 describe("buildInlineAgentFeed", () => {
-  it("interleaves narrative text and tools in chronological order", () => {
+  it("renders narrative and tools in chronological order with no separate answer item", () => {
     const groups: AgentRoundGroupView[] = [{
       turn: 1,
       modelSteps: [],
@@ -44,50 +41,35 @@ describe("buildInlineAgentFeed", () => {
       compactFeed: false,
     });
 
+    // No answer item: narrative + tools only
     const kinds = feed.items.map((item) => item.kind);
-    expect(kinds).toEqual(["text", "tool", "text"]);
+    expect(kinds).toEqual(["text", "tool"]);
     expect(feed.items[0]).toMatchObject({ kind: "text", variant: "narrative", text: "我先读文件。" });
     expect(feed.items[1]).toMatchObject({ kind: "tool", key: "t1" });
-    expect(feed.items[2]).toMatchObject({ kind: "text", variant: "answer", text: "这是最终回答" });
   });
 
-  it("appends streaming answer placeholder when preview is empty", () => {
+  it("shows only narrative when there are no tools", () => {
     const feed = buildInlineAgentFeed({
       roundGroups: [{
         turn: 1,
         modelSteps: [],
-        toolIds: ["t1"],
-        narrative: "",
-        tools: [readStep("t1")],
+        toolIds: [],
+        narrative: "直接回答。",
+        tools: [],
       }],
-      answerPreview: "",
-      answerStreaming: true,
-      isRunning: true,
+      answerPreview: "直接回答。",
+      answerStreaming: false,
+      isRunning: false,
       activityDetailed: false,
       compactFeed: false,
-      agentPhase: "streaming_model",
     });
 
-    const answer = feed.items.at(-1);
-    expect(answer).toMatchObject({
-      kind: "text",
-      variant: "answer",
-      text: "",
-      streaming: true,
-    });
+    const kinds = feed.items.map((item) => item.kind);
+    expect(kinds).toEqual(["text"]);
+    expect(feed.items[0]).toMatchObject({ kind: "text", variant: "narrative", text: "直接回答。" });
   });
 
-  it("dedupes trailing narrative duplicated by the final answer", () => {
-    const items: InlineFeedItem[] = [
-      { kind: "text", key: "n1", text: "完整回答正文", variant: "narrative" },
-    ];
-
-    const merged = appendInlineAnswerBlock(items, "完整回答正文", false);
-    expect(merged).toHaveLength(1);
-    expect(merged[0]).toMatchObject({ kind: "text", variant: "answer", text: "完整回答正文" });
-  });
-
-  it("keeps tools before answer across multiple turns", () => {
+  it("keeps tools before next narrative across multiple turns", () => {
     const groups: AgentRoundGroupView[] = [
       {
         turn: 1,
@@ -124,7 +106,8 @@ describe("buildInlineAgentFeed", () => {
 
     const toolKeys = feed.items.filter((item) => item.kind === "tool").map((item) => item.key);
     expect(toolKeys).toEqual(["t1", "t2"]);
-    expect(feed.items.at(-1)).toMatchObject({ kind: "text", variant: "answer" });
+    // In single-stream linear model, the last item is the last turn's tool, not a separate answer
+    expect(feed.items.at(-1)).toMatchObject({ kind: "tool" });
   });
 
   it("collapses early tools when step count exceeds threshold", () => {
@@ -145,7 +128,7 @@ describe("buildInlineAgentFeed", () => {
       }],
       answerPreview: "完成。",
       answerStreaming: false,
-      isRunning: false,
+      isRunning: true,
       activityDetailed: false,
       compactFeed: false,
     });
@@ -153,10 +136,9 @@ describe("buildInlineAgentFeed", () => {
     expect(feed.items[0]?.kind).toBe("collapsed");
     const visibleTools = feed.items.filter((item) => item.kind === "tool");
     expect(visibleTools).toHaveLength(4);
-    expect(feed.items.at(-1)).toMatchObject({ kind: "text", variant: "answer" });
   });
 
-  it("skips process items when showProcess is false", () => {
+  it("returns empty feed when showProcess is false", () => {
     const feed = buildInlineAgentFeed({
       roundGroups: [{
         turn: 1,
@@ -173,33 +155,8 @@ describe("buildInlineAgentFeed", () => {
       showProcess: false,
     });
 
-    expect(feed.items).toHaveLength(1);
-    expect(feed.items[0]).toMatchObject({ kind: "text", variant: "answer", text: "仅答案" });
+    expect(feed.items).toHaveLength(0);
     expect(feed.toolCount).toBe(0);
-  });
-
-  it("filters tool-turn filler from the live timeline", () => {
-    const items: InlineFeedItem[] = [
-      { kind: "text", key: "n1", text: "我先读文件。", variant: "narrative" },
-      { kind: "tool", key: "t1", step: readStep("t1") },
-      { kind: "text", key: "n2", text: "直接 patch：", variant: "narrative" },
-    ];
-    const filtered = filterInlineTimelineItems(items);
-    expect(filtered.map((item) => item.kind)).toEqual(["text", "tool"]);
-    expect(filtered[0]).toMatchObject({ text: "我先读文件。" });
-  });
-
-  it("splits process and answer items", () => {
-    const items: InlineFeedItem[] = [
-      { kind: "text", key: "n1", text: "分析", variant: "narrative" },
-      { kind: "tool", key: "t1", step: readStep("t1") },
-      { kind: "text", key: "a1", text: "结论", variant: "answer" },
-    ];
-    const { process, answers } = splitInlineFeedItems(items);
-    expect(process).toHaveLength(2);
-    expect(answers).toHaveLength(1);
-    expect(answers[0]).toMatchObject({ variant: "answer", text: "结论" });
-    expect(summarizeInlineFeedProcess(process, 1, false)).toMatch(/1 步/);
   });
 
   it("does not collapse running tools into the hidden prefix", () => {
@@ -212,7 +169,7 @@ describe("buildInlineAgentFeed", () => {
 
     const collapsed = collapseInlineFeedItems(
       [
-        { kind: "text", key: "n0", text: "开始", variant: "narrative" },
+        { kind: "text" as const, key: "n0", text: "开始", variant: "narrative" as const },
         ...tools.map((step) => ({ kind: "tool" as const, key: step.id, step })),
       ],
       { collapseAfter: 5, keepVisible: 2 },
@@ -223,5 +180,14 @@ describe("buildInlineAgentFeed", () => {
     );
     expect(runningVisible).toBe(true);
     expect(collapsed.some((item) => item.kind === "collapsed")).toBe(true);
+  });
+});
+
+describe("summarizeInlineFeedProcess", () => {
+  it("summarizes narrative-only feed", () => {
+    expect(summarizeInlineFeedProcess([], 0, false)).toBe("查看过程");
+    expect(summarizeInlineFeedProcess([
+      { kind: "text", key: "n1", text: "hello", variant: "narrative" },
+    ], 0, false)).toBe("1 段分析");
   });
 });

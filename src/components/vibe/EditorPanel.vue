@@ -1,49 +1,57 @@
 ﻿<template>
   <section v-show="!parentEditorCollapsed && openTabs.length > 0" class="editor-panel">
     <div class="editor-header">
-      <div v-if="openTabs.length" ref="tabsContainerRef" class="editor-tabs" @wheel.prevent="onTabsWheel">
-        <button
-          v-for="(tab, index) in openTabs"
-          :key="tab.path"
-          :ref="(el) => setTabRef(tab.path, el as HTMLElement | null)"
-          type="button"
-          draggable="true"
-          class="editor-tab"
-          :class="[
-            {
-              active: tab.path === activeFilePath,
-              dirty: tab.dirty,
-              'editor-tab--dragging': dragState.tabIndex === index,
-              'editor-tab--drop-before': dragState.dropIndex === index && dragState.dropSide === 'before',
-              'editor-tab--drop-after': dragState.dropIndex === index && dragState.dropSide === 'after',
-            },
-            tabKindClass(tab),
-          ]"
-          :title="tabTitle(tab)"
-          @click="$emit('switch-tab', tab.path)"
-          @mousedown.middle.prevent="$emit('close-tab', tab.path)"
-          @contextmenu.prevent="onTabContextMenu($event, tab.path)"
-          @dragstart="onTabDragStart($event, index)"
-          @dragover="onTabDragOver($event, index)"
-          @dragenter="onTabDragEnter($event, index)"
-          @dragleave="onTabDragLeave($event, index)"
-          @drop="onTabDrop($event, index)"
-          @dragend="onTabDragEnd"
-        >
-          <span v-if="tabKindLabel(tab)" class="editor-tab-badge">{{ tabKindLabel(tab) }}</span>
-          <span class="editor-tab-name">{{ tabDisplayName(tab.path) }}</span>
-          <span v-if="tab.dirty" class="editor-tab-dot" aria-hidden="true">•</span>
-          <span
-            class="editor-tab-close"
-            role="button"
-            tabindex="0"
-            title="关闭"
-            @click.stop="$emit('close-tab', tab.path)"
-            @keydown.enter.stop.prevent="$emit('close-tab', tab.path)"
+      <div v-if="openTabs.length" class="editor-tabs-row">
+        <div ref="tabsContainerRef" class="editor-tabs" @wheel.prevent="onTabsWheel">
+          <button
+            v-for="(tab, index) in openTabs"
+            :key="tab.path"
+            :ref="(el) => setTabRef(tab.path, el as HTMLElement | null)"
+            type="button"
+            draggable="true"
+            class="editor-tab"
+            :class="[
+              {
+                active: tab.path === activeFilePath,
+                dirty: tab.dirty,
+                'editor-tab--dragging': dragState.tabIndex === index,
+                'editor-tab--drop-before': dragState.dropIndex === index && dragState.dropSide === 'before',
+                'editor-tab--drop-after': dragState.dropIndex === index && dragState.dropSide === 'after',
+              },
+              tabKindClass(tab),
+            ]"
+            :title="tabTitle(tab)"
+            @click="$emit('switch-tab', tab.path)"
+            @mousedown.middle.prevent="$emit('close-tab', tab.path)"
+            @contextmenu.prevent="onTabContextMenu($event, tab.path)"
+            @dragstart="onTabDragStart($event, index)"
+            @dragover="onTabDragOver($event, index)"
+            @dragenter="onTabDragEnter($event, index)"
+            @dragleave="onTabDragLeave($event, index)"
+            @drop="onTabDrop($event, index)"
+            @dragend="onTabDragEnd"
           >
-            ×
-          </span>
-        </button>
+            <span v-if="tabKindLabel(tab)" class="editor-tab-badge">{{ tabKindLabel(tab) }}</span>
+            <span class="editor-tab-name">{{ tabDisplayName(tab.path) }}</span>
+            <span v-if="tab.dirty" class="editor-tab-dot" aria-hidden="true">•</span>
+            <span
+              class="editor-tab-close"
+              role="button"
+              tabindex="0"
+              title="关闭"
+              @click.stop="$emit('close-tab', tab.path)"
+              @keydown.enter.stop.prevent="$emit('close-tab', tab.path)"
+            >
+              ×
+            </span>
+          </button>
+        </div>
+        <button
+          type="button"
+          class="editor-tab-add"
+          title="新建临时窗口"
+          @click="$emit('new-scratch')"
+        >+</button>
       </div>
       <div v-else class="editor-header-title">未打开文件</div>
 
@@ -231,6 +239,7 @@ const emit = defineEmits<{
   (e: "navigate-forward"): void;
   (e: "reorder-tabs", payload: { fromIndex: number; toIndex: number }): void;
   (e: "hunk-action", index: number): void;
+  (e: "new-scratch"): void;
 }>();
 
 /* ---- 标签滚轮横向滚动 ---- */
@@ -510,6 +519,14 @@ defineExpose({ editorRef, diffEditorRef, revealLineInEditor, revealLineInDiff })
   flex-shrink: 0;
 }
 
+.editor-tabs-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1 1 0%;
+  min-width: 0;
+}
+
 .editor-tabs {
   display: flex;
   gap: 4px;
@@ -522,6 +539,30 @@ defineExpose({ editorRef, diffEditorRef, revealLineInEditor, revealLineInDiff })
 
 .editor-tabs::-webkit-scrollbar {
   display: none;
+}
+
+.editor-tab-add {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  margin: 0 2px 0 4px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.editor-tab-add:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.92);
 }
 
 .editor-empty.error {
@@ -577,6 +618,11 @@ defineExpose({ editorRef, diffEditorRef, revealLineInEditor, revealLineInDiff })
   background: rgba(227, 179, 65, 0.16);
 }
 
+.editor-tab--scratch .editor-tab-badge {
+  color: #8b949e;
+  background: rgba(139, 148, 158, 0.16);
+}
+
 .editor-tab--git-staged .editor-tab-badge {
   color: #3fb950;
   background: rgba(63, 185, 80, 0.16);
@@ -589,6 +635,10 @@ defineExpose({ editorRef, diffEditorRef, revealLineInEditor, revealLineInDiff })
 
 .editor-tab--git-change.active {
   box-shadow: inset 0 -2px 0 #e3b341;
+}
+
+.editor-tab--scratch.active {
+  box-shadow: inset 0 -2px 0 #8b949e;
 }
 
 .editor-tab--git-staged.active {

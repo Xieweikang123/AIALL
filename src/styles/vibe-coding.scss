@@ -1560,11 +1560,13 @@ button.icon.tiny {
 }
 
 .ctx-item.danger {
-  color: var(--danger);
+  background: transparent;
+  color: #ff9a9a;
 }
 
 .ctx-item.danger:hover {
   background: rgba(255, 77, 94, 0.15);
+  color: #ff9a9a;
 }
 
 .ctx-sep {

@@ -373,6 +373,7 @@
         @close-all-tabs="closeAllTabs"
         @navigate-back="navigateBack"
         @navigate-forward="navigateForward"
+        @new-scratch="() => void openScratchTab()"
       />
 
       <section
@@ -1939,7 +1940,7 @@ const {
   fileContent, fileDirty, fileLoadError, fileDiffs, readOnlyFileKeys,
   showDiffMode, renamingPath, activeFileDiff, activeFileReadOnly,
   refreshTree, openFile: openFileCore, saveFile, reloadFile, closeTab, switchTab,
-  switchReadOnlyTab, createNewFile, createNewFolder, commitRename, cancelRename,
+  switchReadOnlyTab, createNewFile, createNewFolder, openScratchTab, commitRename, cancelRename,
   deleteSelectedItem, showGitFileDiff: showGitFileDiffCore, openGitLogFile: openGitLogFileCore, openDiffPreview,
   toggleDiffMode, toggleDir, findNode, findNodeByKey, normalizePathKey,
   joinProjectPath, resolveFullPathFromRel, storeFileDiff, getFileDiff, setFileDiff,

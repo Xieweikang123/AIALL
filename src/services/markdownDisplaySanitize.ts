@@ -7,6 +7,27 @@ import { stripToolSummaryFromAssistantContent } from "./vibeChatStorage";
 const SANITIZE_HINT_RE =
   /<!--|<!(?:[^->]|-(?!->))|<function|<invoke|<tool_call|<tool_invocation|\[Tool call|agent-progress|agent-suggestions|agent-tool-log|\[工具摘要\]|#\s*工具摘要|`[^`\n]+\?`\s*:\s*`[^`\n]+`|(?:^|\n)[-*•>\s]*(?:读取文件|列出目录|浏览目录|搜索代码|搜索内容|搜索文件|写入文件|局部修改|删除文件|执行命令|联网搜索|抓取网页)[：:]/i;
 
+/**
+ * Strip trailing markdown artifacts at source level — GFM horizontal rules (---, ***, ___)
+ * and empty ATX headings (### on its own line) — that render as content-free block elements
+ * (&lt;hr&gt;, &lt;h3&gt;&lt;/h3&gt;) at the bottom of messages.
+ *
+ * We strip at source level (not HTML) so the cleaned text enters the render cache;
+ * stale cache entries from before the fix won't be hit because the input key has changed.
+ */
+function stripTrailingMarkdownArtifacts(text: string): string {
+  // Remove trailing HR lines and empty headings. Match from start-of-string (^) or after \n
+  // so that standalone `---` (no preceding newline) is also caught.
+  let result = text.replace(
+    /(?:(?:^|\n)\s*(?:[-*_]){3,}(?:\s+(?:[-*_]))*\s*)+(?:\n?\s*#+\s*)?$/,
+    "",
+  ).trim();
+  // Post-strip guard: if after removal the entire result is still an HR or empty heading, clear it
+  if (/^\s*(?:[-*_]){3,}(?:\s+(?:[-*_]))*\s*$/.test(result)) return "";
+  if (/^\s*#+\s*$/.test(result)) return "";
+  return result;
+}
+
 export function needsMarkdownDisplaySanitize(text: string): boolean {
   return SANITIZE_HINT_RE.test(text) || TOOL_MARKUP_START_RE.test(text);
 }
@@ -42,9 +63,9 @@ export function collapseDuplicateMarkdownHeaders(text: string): string {
 /** Normalize assistant/thought markdown before ChatMarkdown rendering. */
 export function sanitizeMarkdownForDisplay(text: string): string {
   if (!text) return "";
-  const trimmed = text.trim();
-  if (!trimmed) return "";
-  let normalized = collapseDuplicateMarkdownHeaders(trimmed);
+  let normalized = stripTrailingMarkdownArtifacts(text);
+  if (!normalized) return "";
+  normalized = collapseDuplicateMarkdownHeaders(normalized);
   if (!needsMarkdownDisplaySanitize(normalized)) return normalized;
 
   let result = stripTextToolCallMarkup(normalized);
@@ -61,7 +82,9 @@ export function sanitizeMarkdownForDisplay(text: string): string {
  */
 export function sanitizeMarkdownForStreamingDisplay(text: string): string {
   if (!text) return "";
-  let result = stripVisibleHtmlComments(text);
+  let result = stripTrailingMarkdownArtifacts(text);
+  if (!result) return "";
+  result = stripVisibleHtmlComments(result);
   if (TOOL_MARKUP_START_RE.test(result)) {
     result = stripTextToolCallMarkup(result);
   }

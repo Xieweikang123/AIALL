@@ -92,6 +92,13 @@ function resolveUri(): Monaco.Uri {
   if (!monaco) throw new Error("Monaco not loaded");
   const filePath = props.filePath?.trim();
   if (!filePath) return monaco.Uri.parse("inmemory://model/untitled");
+  if (
+    filePath.startsWith("untitled://") ||
+    filePath.startsWith("git-index://") ||
+    filePath.startsWith("git-history://")
+  ) {
+    return monaco.Uri.parse(`inmemory://model/${encodeURIComponent(filePath)}`);
+  }
   const normalized = filePath.replace(/\\/g, "/");
   return monaco.Uri.parse(`file:///${normalized.startsWith("/") ? normalized.slice(1) : normalized}`);
 }
@@ -225,6 +232,8 @@ function createEditor() {
       side: minimapSettings.value.side,
     },
     scrollBeyondLastLine: false,
+    mouseWheelScrollSensitivity: 3,
+    fastScrollSensitivity: 8,
     wordWrap: "off",
     lineNumbers: "on",
     renderWhitespace: "selection",

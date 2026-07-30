@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { renderMarkdown, renderMarkdownLite } from "../utils/renderMarkdown";
+import { renderMarkdown } from "../utils/renderMarkdown";
 import { disposeMermaidRenderer, renderMermaidInContainer } from "../utils/mermaidRenderer";
 import { parseAiOptions, type AiOption } from "../utils/parseAiOptions";
 import { parseClarificationChoices } from "../utils/parseClarificationChoices";
 import { looksLikeClarificationQuestion } from "../orchestration/generic/ambiguousTermTriggers";
 import AiOptionButtons from "./AiOptionButtons.vue";
 import ClarificationChoicePanel from "./ClarificationChoicePanel.vue";
-import { sanitizeMarkdownForDisplay, sanitizeMarkdownForStreamingDisplay } from "../services/markdownDisplaySanitize";
+import { sanitizeMarkdownForDisplay } from "../services/markdownDisplaySanitize";
 import { createStreamingMarkdownThrottle } from "../utils/streamingMarkdownThrottle";
-import { prepareStreamingMarkdownForRender } from "../utils/streamingMarkdownTrim";
+import {
+  IncrementalMarkdownRenderer,
+} from "../utils/incrementalMarkdownRenderer";
+import { patchDomWithHtml } from "../utils/domBlockPatcher";
 
 const props = withDefaults(
   defineProps<{
@@ -27,17 +30,26 @@ const emit = defineEmits<{
 }>();
 
 const markdownRef = ref<HTMLElement | null>(null);
+const streamingContentRef = ref<HTMLElement | null>(null);
 const renderSource = ref(props.content);
 const streamingRenderText = ref("");
 const streamingMinHeight = ref(0);
-/** Keep last painted HTML while switching streaming → final render to avoid blank flash. */
+/** Keep last painted HTML while switching streaming -> final render to avoid blank flash. */
 const cachedDisplayHtml = ref("");
 /** One paint cycle after streaming ends: still use lite path until full markdown is ready. */
 const streamingSettling = ref(false);
 const streamingHtmlCache = ref("");
+
+/** Incremental renderer: caches completed blocks, only re-renders the last block. */
+const incrementalRenderer = new IncrementalMarkdownRenderer();
+
+/** Last HTML written via DOM patch — skip no-op patches; reset on clear / stream end. */
+let lastStreamPatchHtml = "";
+let postProcessRaf = 0;
+
 const streamingThrottle = createStreamingMarkdownThrottle(undefined, (text) => {
   streamingRenderText.value = text;
-  streamingHtmlCache.value = buildStreamingHtml(text);
+  streamingHtmlCache.value = incrementalRenderer.render(text);
 });
 
 function joinParsedMarkdown(parsed: { before: string; after: string }): string {
@@ -48,8 +60,7 @@ function joinParsedMarkdown(parsed: { before: string; after: string }): string {
 function buildStreamingHtml(sourceText: string): string {
   const parsed = props.interactive ? parseAiOptions(sourceText) : null;
   const markdown = parsed?.options.length ? joinParsedMarkdown(parsed) : sourceText;
-  const sanitized = sanitizeMarkdownForStreamingDisplay(markdown);
-  return renderMarkdownLite(prepareStreamingMarkdownForRender(sanitized));
+  return incrementalRenderer.render(markdown);
 }
 
 const effectiveStreaming = computed(() => props.streaming || streamingSettling.value);
@@ -81,6 +92,12 @@ function releaseStreamingLayoutHold() {
       requestAnimationFrame(() => {
         streamingSettling.value = false;
         streamingMinHeight.value = 0;
+        // Clear streaming DOM so final v-html render takes over
+        if (streamingContentRef.value) {
+          streamingContentRef.value.innerHTML = "";
+        }
+        lastStreamPatchHtml = "";
+        incrementalRenderer.reset();
       });
     });
   });
@@ -105,6 +122,8 @@ watch(
       cachedDisplayHtml.value = "";
       streamingHtmlCache.value = "";
       streamingMinHeight.value = 0;
+      incrementalRenderer.reset();
+      lastStreamPatchHtml = "";
     }
     if (
       props.streaming &&
@@ -134,6 +153,7 @@ onBeforeUnmount(() => {
     postProcessRaf = 0;
   }
   streamingThrottle.dispose();
+  incrementalRenderer.reset();
   disposeMermaidRenderer();
 });
 
@@ -266,6 +286,30 @@ watch(
 
 const safeDisplayHtml = computed(() => displayHtml.value || cachedDisplayHtml.value);
 
+/** During streaming, patch DOM incrementally instead of v-html full replace. */
+function applyStreamingDomPatch(html: string) {
+  if (!streamingContentRef.value) return;
+  if (html === lastStreamPatchHtml) return;
+  lastStreamPatchHtml = html;
+  patchDomWithHtml(streamingContentRef.value, html);
+}
+
+watch(
+  [streamingHtmlCache, effectiveStreaming],
+  ([html, streaming]) => {
+    if (streaming && html) {
+      applyStreamingDomPatch(html);
+    }
+  },
+);
+
+/** Reset last patch marker when streaming ends so final render always applies. */
+watch(effectiveStreaming, (streaming, wasStreaming) => {
+  if (wasStreaming && !streaming) {
+    lastStreamPatchHtml = "";
+  }
+});
+
 const showMarkdown = computed(
   () =>
     Boolean(safeDisplayHtml.value)
@@ -285,8 +329,6 @@ function handleClarificationSelect(payload: { question: string; option: AiOption
     showIndex: false,
   });
 }
-
-let postProcessRaf = 0;
 
 // After render, wrap tool summary blocks (skip while streaming for perf)
 function schedulePostProcess() {
@@ -318,7 +360,10 @@ watch([displayHtml, effectiveStreaming], () => {
     :class="{ 'msg-markdown--streaming': effectiveStreaming }"
     :style="effectiveStreaming && streamingMinHeight ? { minHeight: `${streamingMinHeight}px` } : undefined"
   >
-    <div v-if="safeDisplayHtml" v-html="safeDisplayHtml" />
+    <!-- Streaming: DOM is patched incrementally via applyStreamingDomPatch() -->
+    <div ref="streamingContentRef" v-show="effectiveStreaming" />
+    <!-- Final render: full v-html replace (only when streaming is done) -->
+    <div v-if="!effectiveStreaming && safeDisplayHtml" v-html="safeDisplayHtml" />
     <AiOptionButtons
       v-if="parsedOptions?.options.length"
       :options="parsedOptions.options"
@@ -341,6 +386,7 @@ watch([displayHtml, effectiveStreaming], () => {
   overflow-wrap: anywhere;
   word-break: break-word;
   color: rgba(255, 255, 255, 0.92);
+  transition: min-height 0.2s ease;
 }
 
 .msg-markdown--streaming {

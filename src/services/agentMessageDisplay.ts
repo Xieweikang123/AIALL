@@ -665,6 +665,18 @@ export function preferFullContentOverCompactedRoundGroup(compacted: string, full
   return left;
 }
 
+/**
+ * Safe multi-stage concatenation: filter empty/null/blank stages then join with `---`.
+ * Never produces trailing `---` because join places separators only between items,
+ * and each item is trimmed + checked for meaningful content beforehand.
+ */
+function joinFinalStages(stages: (string | undefined | null)[]): string {
+  return stages
+    .map((s) => (s || "").trim())
+    .filter(Boolean)
+    .join("\n\n---\n\n");
+}
+
 /** Prefer isFinal round texts (including narrative); fall back to raw content when compacted or empty. */
 export function resolveCompletedAgentBubbleContent(msg: AssistantBubbleSource): string {
   const finalGroups = (msg.roundGroups ?? [])
@@ -673,7 +685,7 @@ export function resolveCompletedAgentBubbleContent(msg: AssistantBubbleSource): 
   const allFinalTexts = finalGroups.map((group) => normalizeBubbleText(group.response?.assistantText ?? "")).filter(Boolean);
   const finalNarratives = finalGroups.map((group) => normalizeBubbleText(group.narrative || "")).filter(Boolean);
 
-  const combined = allFinalTexts.length ? allFinalTexts.join("\n\n---\n\n") : "";
+  const combined = joinFinalStages(allFinalTexts);
   const direct = normalizeBubbleText(msg.content || "");
 
   if (combined) {

@@ -290,12 +290,28 @@ export function joinProjectPath(base: string, relative: string): string {
   return `${baseNorm}/${rel}`;
 }
 
+export const UNTITLED_SCHEME = "untitled://";
+
+export function isScratchPath(path: string): boolean {
+  return path.startsWith(UNTITLED_SCHEME);
+}
+
 export function isVirtualSchemePath(path: string): boolean {
-  return path.startsWith("git-index://") || path.startsWith("git-history://");
+  return (
+    path.startsWith("git-index://") ||
+    path.startsWith("git-history://") ||
+    isScratchPath(path)
+  );
+}
+
+export function scratchDisplayName(path: string): string {
+  const id = path.slice(UNTITLED_SCHEME.length).trim() || "1";
+  return `未命名-${id}`;
 }
 
 export function displayFilePath(path: string): string {
   if (!path) return "";
+  if (isScratchPath(path)) return scratchDisplayName(path);
   if (path.startsWith("git-index://")) return path.slice("git-index://".length);
   if (path.startsWith("git-history://")) {
     const rest = path.slice("git-history://".length);
@@ -305,16 +321,19 @@ export function displayFilePath(path: string): string {
   return path;
 }
 
-export type EditorTabKind = "file" | "git-change" | "git-staged" | "git-history";
+export type EditorTabKind = "file" | "scratch" | "git-change" | "git-staged" | "git-history";
 
 export function inferEditorTabKind(path: string): EditorTabKind {
   if (path.startsWith("git-history://")) return "git-history";
   if (path.startsWith("git-index://")) return "git-staged";
+  if (isScratchPath(path)) return "scratch";
   return "file";
 }
 
 export function editorTabKindLabel(kind: EditorTabKind): string | null {
   switch (kind) {
+    case "scratch":
+      return "临时";
     case "git-change":
       return "变更";
     case "git-staged":
@@ -327,12 +346,16 @@ export function editorTabKindLabel(kind: EditorTabKind): string | null {
 }
 
 export function editorTabDisplayName(path: string): string {
+  if (isScratchPath(path)) return scratchDisplayName(path);
   const display = displayFilePath(path);
   const parts = display.replace(/\\/g, "/").split("/");
   return parts[parts.length - 1] || display;
 }
 
 export function editorTabTitle(path: string, kind: EditorTabKind): string {
+  if (kind === "scratch" || isScratchPath(path)) {
+    return `${scratchDisplayName(path)}（未保存到磁盘）`;
+  }
   const display = displayFilePath(path);
   const label = editorTabKindLabel(kind);
   if (!label) return display;
@@ -435,7 +458,7 @@ export function syncRoundGroupsPatch(msg: { roundGroups?: AgentRoundGroup[] }): 
 }
 
 /** 聊天消息区「视为在底部」的 scroll 余量（px），ChatPanel 与 VibeCodingView 共用 */
-export const CHAT_SCROLL_BOTTOM_THRESHOLD = 80;
+export const CHAT_SCROLL_BOTTOM_THRESHOLD = 30;
 
 /**
  * 统一获取表单事件目标的值，替代模板中重复的 `($event.target as HTMLXXXElement).value`。

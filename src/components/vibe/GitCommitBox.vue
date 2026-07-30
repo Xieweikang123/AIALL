@@ -1,12 +1,13 @@
 <template>
   <div class="git-commit-box git-section-card">
     <textarea
+      ref="inputEl"
       :value="message"
       class="git-commit-input"
-      rows="2"
-      placeholder="提交信息…"
+      rows="1"
+      placeholder="例：修了登录态偶发丢…"
       :disabled="committing || !!genStep || !!aiPushStep"
-      @input="$emit('update:message', ($event.target as HTMLTextAreaElement).value)"
+      @input="onInput"
       @keydown.ctrl.enter="$emit('commit')"
       @keydown.meta.enter="$emit('commit')"
     />
@@ -36,7 +37,9 @@
 </template>
 
 <script setup lang="ts">
-defineProps<{
+import { nextTick, ref, watch } from "vue";
+
+const props = defineProps<{
   message: string;
   committing: boolean;
   genStep: string | null;
@@ -48,12 +51,40 @@ defineProps<{
   loading: boolean;
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   "update:message": [value: string];
   commit: [];
   generateMessage: [];
   aiPush: [];
 }>();
+
+const inputEl = ref<HTMLTextAreaElement | null>(null);
+
+const MIN_HEIGHT_PX = 36;
+const MAX_HEIGHT_PX = 160;
+
+function resizeInput() {
+  const el = inputEl.value;
+  if (!el) return;
+  el.style.height = "auto";
+  const next = Math.min(Math.max(el.scrollHeight, MIN_HEIGHT_PX), MAX_HEIGHT_PX);
+  el.style.height = `${next}px`;
+  el.style.overflowY = el.scrollHeight > MAX_HEIGHT_PX ? "auto" : "hidden";
+}
+
+function onInput(event: Event) {
+  emit("update:message", (event.target as HTMLTextAreaElement).value);
+  void nextTick(resizeInput);
+}
+
+watch(
+  () => props.message,
+  async () => {
+    await nextTick();
+    resizeInput();
+  },
+  { immediate: true },
+);
 </script>
 
 <style scoped>
@@ -66,15 +97,19 @@ defineEmits<{
 .git-commit-input {
   width: 100%;
   box-sizing: border-box;
+  min-height: 36px;
+  max-height: 160px;
   padding: 6px 8px;
   font-size: 13px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 4px;
   background: rgba(11, 18, 32, 0.72);
   color: rgba(255, 255, 255, 0.92);
-  resize: vertical;
+  resize: none;
   font-family: inherit;
   line-height: 1.5;
+  overflow-y: hidden;
+  field-sizing: content;
 }
 .git-commit-input:focus {
   outline: none;

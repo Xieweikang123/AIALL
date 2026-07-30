@@ -20,6 +20,11 @@ import {
   type GitLogFile,
 } from "../services/vibeGitClient";
 import type { EditorTabKind } from "../utils/vibeHelpers";
+import {
+  UNTITLED_SCHEME,
+  isScratchPath,
+  scratchDisplayName,
+} from "../utils/vibeHelpers";
 import { readEditorWorkspace, writeEditorWorkspace, type PersistedEditorTab } from "../utils/editorWorkspaceStorage";
 
 type FileDiff = {
@@ -107,6 +112,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
   const readOnlyFileKeys = ref<Set<string>>(new Set());
   const showDiffMode = ref(false);
   const renamingPath = ref("");
+  let scratchSeq = 0;
 
   /* ---- 导航历史（浏览器式后退/前进） ---- */
   interface NavEntry {
@@ -280,21 +286,36 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     path: string,
     context: "switch" | "close" | "project",
   ): Promise<boolean> {
-    const name = fileName(path);
+    const name = isScratchPath(path) ? scratchDisplayName(path) : fileName(path);
     const choice = await confirmUnsaved(name, context);
     if (choice === "cancel") return false;
-    if (choice === "discard") return discardTabChanges(path);
+    if (choice === "discard") {
+      if (isScratchPath(path) && context === "close") return true;
+      return discardTabChanges(path);
+    }
     // "save" 分支：先保存当前文件，再切换到目标标签
     const switching = activeFilePath.value !== path;
-    if (switching) syncActiveTabToCache();
-    await saveFile();
     if (switching) {
+      syncActiveTabToCache();
+      // 保存非当前页签：先切过去再保存（临时窗口走「另存为」）
       const tab = findOpenTab(path);
       if (!tab) return false;
+      const prevPath = activeFilePath.value;
+      const prevContent = fileContent.value;
+      const prevDirty = fileDirty.value;
       activeFilePath.value = path;
       fileContent.value = tab.content;
       fileDirty.value = tab.dirty;
+      const saved = await saveFile();
+      if (!saved) {
+        activeFilePath.value = prevPath;
+        fileContent.value = prevContent;
+        fileDirty.value = prevDirty;
+        return false;
+      }
+      return true;
     }
+    await saveFile();
     return !fileDirty.value;
   }
 
@@ -323,6 +344,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
 
   function displayFilePath(path: string): string {
     if (!path) return "";
+    if (isScratchPath(path)) return scratchDisplayName(path);
     if (path.startsWith("git-index://")) return path.slice("git-index://".length);
     if (path.startsWith("git-history://")) {
       const rest = path.slice("git-history://".length);
@@ -333,7 +355,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
   }
 
   function isVirtualSchemePath(path: string): boolean {
-    return path.startsWith("git-index://") || path.startsWith("git-history://");
+    return path.startsWith("git-index://") || path.startsWith("git-history://") || isScratchPath(path);
   }
 
   function gitWorkingTreePreviewPath(filePath: string, staged = false): string {
@@ -493,21 +515,28 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     expandEditor();
     showDiffMode.value = false;
     fileLoadError.value = "";
-    selectedTreePath.value = filePath;
+    selectedTreePath.value = isVirtualSchemePath(filePath) ? selectedTreePath.value : filePath;
 
     const cached = findOpenTab(filePath);
     if (cached && !options?.force) {
       activeFilePath.value = filePath;
       fileContent.value = cached.content;
       fileDirty.value = cached.dirty;
-      cached.kind = "file";
+      if (!isVirtualSchemePath(filePath) && cached.kind !== "scratch") {
+        cached.kind = "file";
+      }
       return;
     }
 
     // 对于新文件，先加入 openTabs 占位，确保 DOM 就绪后 activeFilePath 变化
     // 能滚动标签到可视区；内容在 readFile 完成后更新。
     if (!cached) {
-      openTabs.value.push({ path: filePath, content: "", dirty: false, kind: "file" });
+      openTabs.value.push({
+        path: filePath,
+        content: "",
+        dirty: false,
+        kind: isScratchPath(filePath) ? "scratch" : "file",
+      });
     }
     activeFilePath.value = filePath;
     fileContent.value = "";        // 清除旧内容，避免 await 期间残留上一文件
@@ -516,7 +545,8 @@ export function useEditorPanel(params: UseEditorPanelParams) {
 
     if (isVirtualSchemePath(filePath)) {
       fileContent.value = cached?.content || "";
-      fileLoadError.value = cached ? "" : "预览文件不可直接读取";
+      fileDirty.value = cached?.dirty || false;
+      fileLoadError.value = cached || isScratchPath(filePath) ? "" : "预览文件不可直接读取";
       return;
     }
 
@@ -549,12 +579,80 @@ export function useEditorPanel(params: UseEditorPanelParams) {
   async function reloadFile() {
     if (!activeFilePath.value) return;
     if (activeFileReadOnly.value) return;
+    if (isScratchPath(activeFilePath.value)) return;
     await openFile(activeFilePath.value, { force: true, skipUnsavedCheck: true });
+  }
+
+  function nextScratchPath(): string {
+    scratchSeq += 1;
+    while (findOpenTab(`${UNTITLED_SCHEME}${scratchSeq}`)) {
+      scratchSeq += 1;
+    }
+    return `${UNTITLED_SCHEME}${scratchSeq}`;
+  }
+
+  async function openScratchTab() {
+    if (!projectOpened.value) return;
+    if (activeFilePath.value) {
+      const canLeave = await ensureCanLeaveCurrentTab();
+      if (!canLeave) return;
+      syncActiveTabToCache();
+    }
+
+    const path = nextScratchPath();
+    expandEditor();
+    showDiffMode.value = false;
+    fileLoadError.value = "";
+    openTabs.value.push({ path, content: "", dirty: false, kind: "scratch" });
+    activeFilePath.value = path;
+    fileContent.value = "";
+    fileDirty.value = false;
+    schedulePersistEditorWorkspace();
+  }
+
+  async function saveScratchAs(): Promise<boolean> {
+    const from = activeFilePath.value;
+    if (!from || !isScratchPath(from)) return false;
+
+    const name = await inputPrompt.prompt("保存临时窗口为（相对项目路径，可含子目录）", {
+      defaultValue: "untitled.txt",
+    });
+    if (!name?.trim()) return false;
+
+    const target = joinProjectPath(parentDirForCreate(), name.trim());
+    const content = fileContent.value;
+    const createResult = await createItem(target, false, content);
+    if (!createResult.ok) {
+      const writeResult = await writeFile(target, content);
+      if (!writeResult.ok) {
+        fileLoadError.value = writeResult.error || createResult.error || "保存失败";
+        return false;
+      }
+    }
+
+    const tab = findOpenTab(from);
+    if (tab) {
+      tab.path = target;
+      tab.content = content;
+      tab.dirty = false;
+      tab.kind = "file";
+    }
+    activeFilePath.value = target;
+    fileDirty.value = false;
+    fileLoadError.value = "";
+    selectedTreePath.value = target;
+    treeError.value = "";
+    await refreshTree();
+    schedulePersistEditorWorkspace();
+    return true;
   }
 
   async function saveFile(): Promise<boolean> {
     if (!activeFilePath.value) return false;
     if (activeFileReadOnly.value) return false;
+    if (isScratchPath(activeFilePath.value)) {
+      return saveScratchAs();
+    }
     const result = await writeFile(activeFilePath.value, fileContent.value);
     if (!result.ok) {
       fileLoadError.value = result.error || "保存失败";
@@ -623,7 +721,8 @@ export function useEditorPanel(params: UseEditorPanelParams) {
       fileDirty.value = nextTab.dirty;
       fileLoadError.value = "";
       showDiffMode.value = readOnlyFileKeys.value.has(normalizePathKey(nextTab.path)) && Boolean(getFileDiff(nextTab.path));
-      selectedTreePath.value = showDiffMode.value ? "" : nextTab.path;
+      selectedTreePath.value =
+        showDiffMode.value || isVirtualSchemePath(nextTab.path) ? "" : nextTab.path;
       return;
     }
 
@@ -697,12 +796,21 @@ export function useEditorPanel(params: UseEditorPanelParams) {
   }
 
   function parentDirForCreate(): string {
-    const sel = selectedTreePath.value || activeFilePath.value || projectPath.value;
-    const node = findNode(fileTree.value, sel);
-    if (node?.isDirectory) return sel;
-    const norm = sel.replace(/\\/g, "/");
-    const idx = norm.lastIndexOf("/");
-    return idx > 0 ? norm.slice(0, idx) : projectPath.value;
+    const treeSel = selectedTreePath.value.trim();
+    const active = activeFilePath.value;
+    const candidates = [treeSel, active, projectPath.value].filter(Boolean);
+    for (const sel of candidates) {
+      if (isVirtualSchemePath(sel)) continue;
+      const node = findNode(fileTree.value, sel);
+      if (node?.isDirectory) return sel;
+      const norm = sel.replace(/\\/g, "/");
+      const idx = norm.lastIndexOf("/");
+      if (idx > 0) {
+        const parent = norm.slice(0, idx);
+        if (parent && !isVirtualSchemePath(parent)) return parent;
+      }
+    }
+    return projectPath.value;
   }
 
   async function createNewFile() {
@@ -936,6 +1044,9 @@ export function useEditorPanel(params: UseEditorPanelParams) {
           base.dirty = true;
           base.content = tab.content;
         }
+      } else if (tab.kind === "scratch") {
+        base.dirty = tab.dirty;
+        base.content = tab.content;
       } else {
         base.content = tab.content;
         const diff = getFileDiff(tab.path);
@@ -980,6 +1091,18 @@ export function useEditorPanel(params: UseEditorPanelParams) {
 
       const kind: EditorTabKind = (item.kind as EditorTabKind) || "file";
 
+      if (kind === "scratch" || isScratchPath(path)) {
+        const id = Number(path.slice(UNTITLED_SCHEME.length));
+        if (Number.isFinite(id) && id > scratchSeq) scratchSeq = id;
+        restored.push({
+          path,
+          content: item.content ?? "",
+          dirty: Boolean(item.dirty),
+          kind: "scratch",
+        });
+        continue;
+      }
+
       if (kind === "file") {
         if (item.dirty && item.content !== undefined) {
           restored.push({ path, content: item.content, dirty: true, kind: "file" });
@@ -1016,7 +1139,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     fileDirty.value = active.dirty;
     selectedTreePath.value = active.kind === "file" ? active.path : "";
     fileLoadError.value = "";
-    showDiffMode.value = active.kind !== "file" && Boolean(nextDiffs[normalizePathKey(active.path)]);
+    showDiffMode.value = active.kind !== "file" && active.kind !== "scratch" && Boolean(nextDiffs[normalizePathKey(active.path)]);
   }
 
   async function reloadExpandedDirChildren() {
@@ -1072,6 +1195,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     switchReadOnlyTab,
     createNewFile,
     createNewFolder,
+    openScratchTab,
     commitRename,
     cancelRename,
     deleteSelectedItem,
