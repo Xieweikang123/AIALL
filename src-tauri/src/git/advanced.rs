@@ -113,16 +113,6 @@ pub async fn git_revert_commit(project_root: &str, commit: &str) -> GitActionRes
   action_from_exec(git_exec(project_root, &["revert", "--no-edit", commit.trim()]).await)
 }
 
-pub async fn git_amend(project_root: &str, message: Option<&str>) -> GitActionResult {
-  let msg = message.map(str::trim).filter(|s| !s.is_empty());
-  let result = if let Some(m) = msg {
-    git_exec(project_root, &["commit", "--amend", "-m", m]).await
-  } else {
-    git_exec(project_root, &["commit", "--amend", "--no-edit"]).await
-  };
-  action_from_exec(result)
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitTagInfo {

@@ -466,20 +466,22 @@ pub async fn agent_run(
       }
     }));
 
-    let compacted_messages =
-      compact_messages_for_model(&messages, run_policy.max_context_chars);
+    let compacted = compact_messages_for_model(&messages, run_policy.max_context_chars);
+    let compacted_messages = compacted.messages;
     let context_chars = messages_char_size(&compacted_messages);
-    emit(&channel, json!({
-      "type": "status",
-      "data": {
-        "phase": "compacting_context",
-        "turn": turn,
-        "maxTurns": segment_max_turns,
-        "model": request.model,
-        "contextMessages": compacted_messages.len(),
-        "contextChars": context_chars,
-      }
-    }));
+    if compacted.did_compact {
+      emit(&channel, json!({
+        "type": "status",
+        "data": {
+          "phase": "compacting_context",
+          "turn": turn,
+          "maxTurns": segment_max_turns,
+          "model": request.model,
+          "contextMessages": compacted_messages.len(),
+          "contextChars": context_chars,
+        }
+      }));
+    }
     emit(&channel, json!({
       "type": "turn_request",
       "data": {

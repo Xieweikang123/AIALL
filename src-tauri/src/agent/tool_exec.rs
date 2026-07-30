@@ -20,8 +20,24 @@ use super::probe_guard::{
 };
 use super::tools;
 use super::vision::is_runtime_visible_text_grep_pattern;
+use std::fs::OpenOptions;
+use std::io::Write;
+use crate::paths::resolve_debug_log_path;
 
 const MAX_AUTO_BUG_FIX_WRITES: usize = 5;
+
+fn append_tool_exec_log(project_path: &str, tool_name: &str, path: &str, ok: bool, error: &str) {
+    let log_file = match resolve_debug_log_path("tool-exec.log", Some(project_path)) {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let mut file = match OpenOptions::new().create(true).append(true).open(&log_file) {
+        Ok(f) => f,
+        Err(_) => return,
+    };
+    let status = if ok { "OK" } else { "FAIL" };
+    let _ = writeln!(file, "{} path=\"{}\" status={} error=\"{}\"", tool_name, path, status, error);
+}
 
 pub struct ToolExecContext<'a> {
   pub project_path: &'a str,
@@ -111,6 +127,7 @@ pub fn block_write(mode: &str, tool: &str) -> Option<String> {
 async fn exec_read_file(ctx: &mut ToolExecContext<'_>, args: &Value) -> (bool, String) {
   let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
   if path.is_empty() {
+    append_tool_exec_log(ctx.project_path, "read_file", "", false, "缺少 path");
     return (false, "错误：缺少 path".into());
   }
   match crate::paths::resolve_readable_path(ctx.project_path, path) {
@@ -132,6 +149,7 @@ async fn exec_read_file(ctx: &mut ToolExecContext<'_>, args: &Value) -> (bool, S
       } else if let Some(err) =
         check_overlapping_read(&file_key, line_range, &ctx.tool_guard.read_file_ranges)
       {
+        append_tool_exec_log(ctx.project_path, "read_file", &file_key, false, &err);
         return (false, err);
       } else if let Some(cached) = ctx.tool_guard.read_slice_cache.get(&slice_key) {
         let repeats = ctx
@@ -141,12 +159,11 @@ async fn exec_read_file(ctx: &mut ToolExecContext<'_>, args: &Value) -> (bool, S
           .or_insert(0);
         *repeats += 1;
         if *repeats > super::exploration::MAX_READ_SLICE_REPEATS {
-          return (
-            false,
-            format!(
-              "错误：已连续 {repeats} 次读取相同片段 {file_key}（offset {offset_u32} limit {limit_u32}），请基于已有内容继续分析或 patch_file，若需更多行请一次读更大范围（300-500 行），勿重复读相同片段。"
-            ),
+          let err_msg = format!(
+            "错误：已连续 {repeats} 次读取相同片段 {file_key}（offset {offset_u32} limit {limit_u32}），请基于已有内容继续分析或 patch_file，若需更多行请一次读更大范围（300-500 行），勿重复读相同片段。"
           );
+          append_tool_exec_log(ctx.project_path, "read_file", &file_key, false, &err_msg);
+          return (false, err_msg);
         }
         return (
           true,
@@ -158,7 +175,9 @@ async fn exec_read_file(ctx: &mut ToolExecContext<'_>, args: &Value) -> (bool, S
       let limit = limit_u32 as usize;
       let result = crate::fs::read_file_content(&resolved.to_string_lossy()).await;
       if !result.ok {
-        return (false, result.error.unwrap_or_else(|| "读取失败".into()));
+        let err_msg = result.error.unwrap_or_else(|| "读取失败".into());
+        append_tool_exec_log(ctx.project_path, "read_file", &file_key, false, &err_msg);
+        return (false, err_msg);
       }
       let content = if offset > 1 || limit < 800 {
         let lines: Vec<&str> = result.content.lines().skip(offset - 1).take(limit).collect();

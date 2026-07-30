@@ -8,6 +8,11 @@ use super::context_limits::{
 
 const PROTECTED_RECENT_TOOL_RESULTS: usize = 2;
 
+pub struct CompactResult {
+  pub messages: Vec<Value>,
+  pub did_compact: bool,
+}
+
 static LINE_HINT_RE: std::sync::LazyLock<regex::Regex> =
   std::sync::LazyLock::new(|| regex::Regex::new(r"lines \d+-\d+").unwrap());
 
@@ -69,7 +74,7 @@ pub fn messages_char_size(messages: &[Value]) -> usize {
   messages.iter().map(message_char_size).sum()
 }
 
-pub fn compact_messages_for_model(messages: &[Value], max_context_chars: usize) -> Vec<Value> {
+pub fn compact_messages_for_model(messages: &[Value], max_context_chars: usize) -> CompactResult {
   let mut result: Vec<Value> = messages
     .iter()
     .map(|message| {
@@ -95,7 +100,7 @@ pub fn compact_messages_for_model(messages: &[Value], max_context_chars: usize) 
   let needs_hard_compact = total > max_context_chars;
   let needs_soft_compact = total > SOFT_COMPACT_CONTEXT_CHARS;
   if !needs_hard_compact && !needs_soft_compact {
-    return result;
+    return CompactResult { messages: result, did_compact: false };
   }
 
   let compress_target = if needs_hard_compact {
@@ -168,7 +173,7 @@ pub fn compact_messages_for_model(messages: &[Value], max_context_chars: usize) 
     }
   }
 
-  result
+  CompactResult { messages: result, did_compact: true }
 }
 
 #[cfg(test)]
@@ -185,7 +190,7 @@ mod tests {
       json!({ "role": "tool", "tool_call_id": "1", "content": long }),
     ];
     let compacted = compact_messages_for_model(&messages, MAX_AGENT_CONTEXT_CHARS);
-    let tool_content = compacted[2]["content"].as_str().unwrap();
+    let tool_content = compacted.messages[2]["content"].as_str().unwrap();
     assert!(tool_content.chars().count() < 20_000);
     assert!(tool_content.contains("截断"));
   }
@@ -212,9 +217,9 @@ mod tests {
       }),
     ];
     let compacted = compact_messages_for_model(&messages, MAX_AGENT_CONTEXT_CHARS);
-    assert!(compacted[2]["content"].as_str().unwrap().contains("已压缩"));
-    assert!(compacted[3]["content"].as_str().unwrap().contains("lines 201-400"));
-    assert!(compacted[4]["content"].as_str().unwrap().contains("lines 401-600"));
+    assert!(compacted.messages[2]["content"].as_str().unwrap().contains("已压缩"));
+    assert!(compacted.messages[3]["content"].as_str().unwrap().contains("lines 201-400"));
+    assert!(compacted.messages[4]["content"].as_str().unwrap().contains("lines 401-600"));
   }
 
   #[test]
@@ -240,13 +245,13 @@ mod tests {
     ];
     assert_eq!(EXECUTE_PLAN_MAX_CONTEXT_CHARS, 100_000);
     assert!(
-      compact_messages_for_model(&messages, MAX_AGENT_CONTEXT_CHARS)[2]["content"]
+      compact_messages_for_model(&messages, MAX_AGENT_CONTEXT_CHARS).messages[2]["content"]
         .as_str()
         .unwrap()
         .contains("已压缩")
     );
     assert!(
-      compact_messages_for_model(&messages, EXECUTE_PLAN_MAX_CONTEXT_CHARS)[2]["content"]
+      compact_messages_for_model(&messages, EXECUTE_PLAN_MAX_CONTEXT_CHARS).messages[2]["content"]
         .as_str()
         .unwrap()
         .contains("已压缩")
@@ -281,8 +286,8 @@ mod tests {
       .sum();
     assert!(total_before > SOFT_COMPACT_CONTEXT_CHARS);
     let compacted = compact_messages_for_model(&messages, MAX_AGENT_CONTEXT_CHARS);
-    assert!(compacted[2]["content"].as_str().unwrap().contains("已压缩"));
-    assert!(compacted[4]["content"].as_str().unwrap().contains("lines 201-300"));
+    assert!(compacted.messages[2]["content"].as_str().unwrap().contains("已压缩"));
+    assert!(compacted.messages[4]["content"].as_str().unwrap().contains("lines 201-300"));
   }
 
   #[test]
@@ -296,7 +301,7 @@ mod tests {
       }));
     }
     let compacted = compact_messages_for_model(&messages, 200_000);
-    let first_tool = compacted[1]["content"].as_str().unwrap();
+    let first_tool = compacted.messages[1]["content"].as_str().unwrap();
     assert!(first_tool.contains("已压缩"));
   }
 }

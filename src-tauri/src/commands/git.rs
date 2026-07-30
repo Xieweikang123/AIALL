@@ -399,6 +399,34 @@ pub async fn git_generate_message(
     .collect();
   let file_list_str = file_list.join("\n");
 
+  let recent_style = {
+    let log = git::git_log(&path, 8, None).await;
+    if log.ok && !log.entries.is_empty() {
+      let lines: Vec<String> = log
+        .entries
+        .iter()
+        .filter_map(|e| {
+          let subject = e.message.lines().next().unwrap_or("").trim();
+          if subject.is_empty() {
+            None
+          } else {
+            Some(format!("- {subject}"))
+          }
+        })
+        .collect();
+      if lines.is_empty() {
+        String::new()
+      } else {
+        format!(
+          "\n\n本仓库近期提交（请贴近其语气与长度，不要照抄内容）：\n{}",
+          lines.join("\n")
+        )
+      }
+    } else {
+      String::new()
+    }
+  };
+
   let prompt = format!(
     "你是一个 Git 提交信息生成器。根据以下已暂存的文件变更生成一条准确、口语化的中文提交信息。
 
@@ -406,20 +434,20 @@ pub async fn git_generate_message(
 {file_list_str}
 
 Diff 内容：
-{diff_text}
+{diff_text}{recent_style}
 
 要求：
 - 使用中文，语气像开发者随手写的备注，自然口语，不要公文腔或宣传口号
-- 第一行：简洁说清改了啥（不超过72字符），可用「修了」「加了」「改了」「整理了」等日常说法
-- 如果需要，在第一行后空一行，补一两句更细的说明（可选，同样口语）
-- 说清改动意图和影响即可，不必罗列文件名或技术细节堆砌
+- 默认只输出一行（不超过72字符），说清改了啥即可；仅当变更很大、一行说不清时，才空一行再补一两句
+- 可用「修了」「加了」「改了」「整理了」等日常说法
+- 说清改动意图即可，不必罗列文件名或技术细节堆砌
 - 不要加前缀如 'feat:' 或 'fix:'，不要加引号或句号
 - 避免「提升可维护性」「优化用户体验」这类空泛套话
 
 示例：
-加了登录，邮箱和手机号都能验证
-修了支付状态不同步，库存也跟着对上了
-把用户模块拆开整理了一下，方便后面写测试
+修了支付状态不同步
+加了登录，邮箱手机号都能验
+把用户模块拆开整理了一下
 文档补了几段 API 用法"
   );
 
@@ -637,7 +665,7 @@ Diff 内容：
 要求：
 - 按功能模块或逻辑相关性分组，不要简单按目录分
 - 每组用简洁的中文名称命名（如「登录相关」「界面样式」）
-- 每组生成一条口语化 commit message（像开发者随手备注，可用「修了」「加了」「改了」等说法，说清做了什么）
+- 每组生成一条口语化 commit message：默认一行、不超过72字，像开发者随手备注（「修了」「加了」「改了」等）
 - 避免公文腔和「提升可维护性」这类空泛套话；不要加 feat:/fix: 前缀
 - 每个文件只能出现在一个组中
 - 如果只有一个逻辑变更，分成一组即可
