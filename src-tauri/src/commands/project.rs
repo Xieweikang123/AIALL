@@ -86,6 +86,17 @@ pub async fn code_map_build(project_path: String, git_head: Option<String>) -> V
 }
 
 #[tauri::command]
+pub async fn project_symbol_search(
+  project_path: String,
+  query: String,
+  max_results: Option<u32>,
+) -> Value {
+  let max = max_results.unwrap_or(20) as usize;
+  let results = project::project_symbol_search(&project_path, &query, max);
+  serde_json::json!({ "ok": true, "results": results })
+}
+
+#[tauri::command]
 pub async fn memory_usage(payload: serde_json::Value) -> Value {
   let project_path = payload
     .get("projectPath")

@@ -374,6 +374,21 @@
         @navigate-back="navigateBack"
         @navigate-forward="navigateForward"
         @new-scratch="() => void openScratchTab()"
+        @inline-ai="onEditorInlineAi"
+      />
+
+      <EditorInlineAiPanel
+        :open="editorInlineAi.open"
+        :instruction="editorInlineAi.instruction"
+        :loading="editorInlineAi.loading"
+        :preview="editorInlineAi.preview"
+        :error="editorInlineAi.error"
+        :anchor-top="editorInlineAi.anchorTop"
+        :anchor-left="editorInlineAi.anchorLeft"
+        @update:instruction="editorInlineAi.instruction = $event"
+        @close="editorInlineAi.closePanel()"
+        @submit="editorInlineAi.submitInstruction()"
+        @accept="editorInlineAi.acceptPreview()"
       />
 
       <section
@@ -940,6 +955,7 @@ import ProjectCodeMapPanel from "../components/vibe/ProjectCodeMapPanel.vue";
 import CodeMapMainPanel from "../components/vibe/CodeMapMainPanel.vue";
 import PlanMainPanel from "../components/vibe/PlanMainPanel.vue";
 import EditorPanel from "../components/vibe/EditorPanel.vue";
+import EditorInlineAiPanel from "../components/vibe/EditorInlineAiPanel.vue";
 import ChatPanel from "../components/vibe/ChatPanel.vue";
 import VibeChatMessages from "../components/vibe/VibeChatMessages.vue";
 import VibeWorkspaceWelcome from "../components/vibe/VibeWorkspaceWelcome.vue";
@@ -951,6 +967,7 @@ import { usePanelLayout } from "../composables/usePanelLayout";
 import { useGitPanel, type GitFileDiff } from "../composables/useGitPanel";
 import { useInputPrompt } from "../composables/useInputPrompt";
 import { useEditorPanel } from "../composables/useEditorPanel";
+import { useEditorInlineAi } from "../composables/useEditorInlineAi";
 import { useSessionManager } from "../composables/useSessionManager";
 import { useChatSessionStore } from "../composables/useChatSessionStore";
 import { useVibeQuickSearch } from "../composables/useVibeQuickSearch";
@@ -1046,7 +1063,9 @@ import {
 } from "../services/vibeChatImageStore";
 import {
   isDeleteNotFoundError,
+  formatPendingApprovalLabel,
 } from "../services/vibeAgentTurnApply";
+import { revertTurnFileDiffs } from "../services/agentTurnRevert";
 import {
   type VibeChatHistoryMessage,
   type VibeChatMode,
@@ -1974,6 +1993,27 @@ const {
   expandEditor,
   autoRetryWithCountdown,
 });
+
+const editorInlineAi = useEditorInlineAi({
+  aiConfig,
+  configReady,
+  activeFilePath,
+  fileContent,
+  getSelectedText: () => editorPanelRef.value?.getSelectedText() ?? "",
+  replaceSelection: (text) => editorPanelRef.value?.replaceSelection(text) ?? false,
+});
+
+function onEditorInlineAi() {
+  const anchor = editorPanelRef.value?.getInlineAiAnchor();
+  editorInlineAi.openPanel(
+    anchor
+      ? {
+          top: Math.min(window.innerHeight - 280, Math.max(80, anchor.top + anchor.height + 12)),
+          left: Math.min(window.innerWidth - 540, Math.max(16, anchor.left)),
+        }
+      : undefined,
+  );
+}
 
 fileWatcherTreeRefresh.fn = refreshTree;
 
@@ -3477,29 +3517,68 @@ async function acceptAgentTurn(messageId: string) {
   if (chatSending.value || !projectOpened.value) return;
   const msg = chatMessages.value.find((m) => m.id === messageId);
   if (!msg?.pendingApproval || !msg.turnFileDiffs) return;
-  await completeAgentTurnApplication(messageId);
+
+  patchAssistantMsg(messageId, { applying: true, reverting: false });
+  chatError.value = "";
+  try {
+    clearTurnFileDiffsFromStore(msg.turnFileDiffs);
+    patchAssistantMsg(messageId, {
+      pendingApproval: false,
+      applying: false,
+      writtenFiles: msg.writtenFiles ?? Object.keys(msg.turnFileDiffs),
+    });
+    persistChatNow();
+    await refreshGitStatus({ showLoading: false });
+  } catch (error) {
+    patchAssistantMsg(messageId, { applying: false });
+    chatError.value = error instanceof Error ? error.message : "确认修改失败";
+  }
 }
 
 async function rejectAgentTurn(messageId: string, event?: MouseEvent) {
-  if (chatSending.value) return;
-  const idx = chatMessages.value.findIndex((m) => m.id === messageId);
-  if (idx < 0) return;
+  if (chatSending.value || !projectOpened.value) return;
+  const msg = chatMessages.value.find((m) => m.id === messageId);
+  if (!msg?.pendingApproval || !msg.turnFileDiffs) return;
+  if (!await confirm("确定拒绝本轮所有修改并回滚文件？", event)) return;
 
-  const msg = chatMessages.value[idx];
-  if (!msg.pendingApproval || !msg.turnFileDiffs) return;
-  if (!await confirm("确定拒绝本轮所有暂存修改？", event)) return;
-
-  clearTurnFileDiffsFromStore(msg.turnFileDiffs);
-  msg.pendingApproval = false;
-  msg.rejected = true;
-  msg.writtenFiles = undefined;
-  showDiffMode.value = false;
-  patchAssistantMsg(messageId, {
-    pendingApproval: false,
-    rejected: true,
-    writtenFiles: undefined,
-  });
-  persistChatNow();
+  patchAssistantMsg(messageId, { reverting: true });
+  chatError.value = "";
+  try {
+    await revertTurnFileDiffs({
+      turnFileDiffs: msg.turnFileDiffs,
+      projectPath: projectPath.value,
+      resolveFullPathFromRel,
+      removeOpenTabForPath,
+      clearFileDiffForPath: (fullPath) => {
+        const key = normalizePathKey(fullPath);
+        if (fileDiffs.value[key]) {
+          const next = { ...fileDiffs.value };
+          delete next[key];
+          fileDiffs.value = next;
+        }
+      },
+      reloadOpenFile: async (fullPath) => {
+        if (activeFilePath.value && normalizePathKey(activeFilePath.value) === normalizePathKey(fullPath)) {
+          await openFile(fullPath);
+          showDiffMode.value = false;
+        }
+      },
+    });
+    clearTurnFileDiffsFromStore(msg.turnFileDiffs);
+    showDiffMode.value = false;
+    patchAssistantMsg(messageId, {
+      pendingApproval: false,
+      rejected: true,
+      reverting: false,
+      writtenFiles: undefined,
+    });
+    persistChatNow();
+    await refreshTree();
+    await refreshGitStatus({ showLoading: false });
+  } catch (error) {
+    patchAssistantMsg(messageId, { reverting: false });
+    chatError.value = error instanceof Error ? error.message : "拒绝修改失败";
+  }
 }
 
 function previewAgentFile(messageId: string, relPath: string) {
@@ -3514,11 +3593,8 @@ function previewAgentFile(messageId: string, relPath: string) {
 
 async function revertAgentTurn(messageId: string, event?: MouseEvent) {
   if (chatSending.value || !projectOpened.value) return;
-  const idx = chatMessages.value.findIndex((m) => m.id === messageId);
-  if (idx < 0) return;
-
-  const msg = chatMessages.value[idx];
-  if (!msg.turnFileDiffs || msg.reverted || msg.pendingApproval) return;
+  const msg = chatMessages.value.find((m) => m.id === messageId);
+  if (!msg?.turnFileDiffs || msg.reverted || msg.pendingApproval) return;
 
   const fileCount = Object.keys(msg.turnFileDiffs).length;
   if (!await confirm(`确定回滚本轮 Agent 对 ${fileCount} 个文件的修改？`, event)) return;
@@ -3527,31 +3603,26 @@ async function revertAgentTurn(messageId: string, event?: MouseEvent) {
   chatError.value = "";
 
   try {
-    for (const [relPath, diff] of Object.entries(msg.turnFileDiffs)) {
-      const fullPath = resolveFullPathFromRel(relPath);
-      if (diff.deleted) {
-        const result = await writeFile(fullPath, diff.before, projectPath.value.trim());
-        if (!result.ok) throw new Error(result.error || `恢复 ${relPath} 失败`);
-      } else if (diff.created) {
-        const result = await deleteItem(fullPath, projectPath.value.trim());
-        if (!result.ok) throw new Error(result.error || `删除 ${relPath} 失败`);
-        removeOpenTabForPath(fullPath);
-      } else {
-        const result = await writeFile(fullPath, diff.before, projectPath.value.trim());
-        if (!result.ok) throw new Error(result.error || `恢复 ${relPath} 失败`);
-      }
-
-      const key = normalizePathKey(fullPath);
-      if (fileDiffs.value[key]) {
-        const next = { ...fileDiffs.value };
-        delete next[key];
-        fileDiffs.value = next;
-      }
-      if (activeFilePath.value && normalizePathKey(activeFilePath.value) === key) {
-        await openFile(fullPath);
-        showDiffMode.value = false;
-      }
-    }
+    await revertTurnFileDiffs({
+      turnFileDiffs: msg.turnFileDiffs,
+      projectPath: projectPath.value,
+      resolveFullPathFromRel,
+      removeOpenTabForPath,
+      clearFileDiffForPath: (fullPath) => {
+        const key = normalizePathKey(fullPath);
+        if (fileDiffs.value[key]) {
+          const next = { ...fileDiffs.value };
+          delete next[key];
+          fileDiffs.value = next;
+        }
+      },
+      reloadOpenFile: async (fullPath) => {
+        if (activeFilePath.value && normalizePathKey(activeFilePath.value) === normalizePathKey(fullPath)) {
+          await openFile(fullPath);
+          showDiffMode.value = false;
+        }
+      },
+    });
 
     patchAssistantMsg(messageId, { reverted: true, reverting: false });
     persistChatNow();
@@ -4030,6 +4101,10 @@ provide(vibeChatMessageContextKey, {
   shouldShowMessageBubble,
   handleAiOptionSelect,
   previewAgentFile,
+  acceptAgentTurn,
+  rejectAgentTurn,
+  revertAgentTurn,
+  formatPendingApprovalLabel,
   truncateDiffPreview,
   toggleExpandedDiff,
   isDiffExpanded,

@@ -14,6 +14,9 @@ export interface VibeChatMessageItem {
   planFilePath?: string;
   reverted?: boolean;
   rejected?: boolean;
+  pendingApproval?: boolean;
+  applying?: boolean;
+  reverting?: boolean;
   turnFileDiffs?: Record<string, { before?: string; after?: string; deleted?: boolean }>;
   imageCount?: number;
   agentAborted?: boolean;
@@ -67,6 +70,13 @@ export interface VibeChatMessageContext {
     msg?: VibeChatMessageItem,
   ) => void;
   previewAgentFile: (messageId: string, relPath: string) => void;
+  acceptAgentTurn: (messageId: string) => void | Promise<void>;
+  rejectAgentTurn: (messageId: string, event?: MouseEvent) => void | Promise<void>;
+  revertAgentTurn: (messageId: string, event?: MouseEvent) => void | Promise<void>;
+  formatPendingApprovalLabel: (
+    turnFileDiffs: Record<string, { deleted?: boolean }>,
+    aborted?: boolean,
+  ) => string;
   truncateDiffPreview: (text: string) => string;
   toggleExpandedDiff: (messageId: string, relPath: string) => void;
   isDiffExpanded: (messageId: string, relPath: string) => boolean;

@@ -981,6 +981,7 @@ function handleDoneEvent(event: EventOf<"done">, assistantMsg: VibeChatMessage, 
     ...syncRoundGroupsPatch(assistantMsg),
     writtenFiles: assistantMsg.writtenFiles,
     pendingApproval: assistantMsg.pendingApproval,
+    turnFileDiffs: assistantMsg.turnFileDiffs ? { ...assistantMsg.turnFileDiffs } : undefined,
     agentAborted: assistantMsg.agentAborted || undefined,
     agentFailed: offerPartialResume ? true : undefined,
     agentRecoverable: offerPartialResume ? true : undefined,
@@ -992,7 +993,7 @@ function handleDoneEvent(event: EventOf<"done">, assistantMsg: VibeChatMessage, 
   persistChatNow(undefined, { flushStore: true });
 
   if (fileAction.writtenFiles?.length) {
-    if (assistantMsg.turnFileDiffs) {
+    if (!fileAction.pendingApproval && assistantMsg.turnFileDiffs) {
       clearTurnFileDiffsFromStore(assistantMsg.turnFileDiffs);
     }
     void handleAgentWrittenFiles(fileAction.writtenFiles);

@@ -1015,6 +1015,22 @@ button.icon.tiny {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+.pending-badge {
+  font-size: 11px;
+  color: #e3b341;
+  padding: 3px 10px;
+  background: rgba(227, 179, 65, 0.08);
+  border: 1px solid rgba(227, 179, 65, 0.18);
+  border-radius: 999px;
+}
+
+.turn-review-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .applied-badge {
   font-size: 11px;
   color: #7ee787;

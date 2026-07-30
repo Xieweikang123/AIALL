@@ -64,6 +64,21 @@ pub fn agent_tool_definitions() -> Value {
     {
       "type": "function",
       "function": {
+        "name": "search_symbols",
+        "description": "按符号名搜索项目内的函数、类、接口、类型等定义（比 grep 更适合找 API/组件名）。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": { "type": "string", "description": "符号名或片段" },
+            "max_results": { "type": "number", "description": "最大结果数，默认 20" }
+          },
+          "required": ["query"]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
         "name": "write_file",
         "description": "写入或覆盖整个文件（Build 模式下立即落盘）。大文件优先用 patch_file。",
         "parameters": {
@@ -178,7 +193,7 @@ pub fn agent_tool_definitions() -> Value {
 
 pub fn read_only_tool_names() -> Vec<&'static str> {
   vec![
-    "list_dir", "read_file", "grep", "search_files",
+    "list_dir", "read_file", "grep", "search_files", "search_symbols",
     "git_status", "git_diff", "web_search", "web_extract",
   ]
 }
@@ -199,7 +214,7 @@ mod tests {
     fn test_agent_tool_definitions_returns_12_tools() {
         let defs = agent_tool_definitions();
         let arr = defs.as_array().unwrap();
-        assert_eq!(arr.len(), 12);
+        assert_eq!(arr.len(), 13);
     }
 
     #[test]
@@ -208,7 +223,7 @@ mod tests {
         let names: Vec<&str> = defs.as_array().unwrap().iter()
             .map(|v| v["function"]["name"].as_str().unwrap())
             .collect();
-        for name in &["list_dir", "read_file", "grep", "search_files", "write_file",
+        for name in &["list_dir", "read_file", "grep", "search_files", "search_symbols", "write_file",
                        "patch_file", "delete_file", "git_status", "git_diff",
                        "run_command", "web_search", "web_extract"] {
             assert!(names.contains(name), "missing tool: {}", name);
@@ -217,13 +232,13 @@ mod tests {
 
     #[test]
     fn test_read_only_tool_names_returns_eight() {
-        assert_eq!(read_only_tool_names().len(), 8);
+        assert_eq!(read_only_tool_names().len(), 9);
     }
 
     #[test]
     fn test_read_only_tool_names_contains_expected() {
         let names = read_only_tool_names();
-        for name in &["list_dir", "read_file", "grep", "search_files",
+        for name in &["list_dir", "read_file", "grep", "search_files", "search_symbols",
                        "git_status", "git_diff", "web_search", "web_extract"] {
             assert!(names.contains(name));
         }

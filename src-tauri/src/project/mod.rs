@@ -8,6 +8,7 @@ mod health_scan;
 mod memory_usage;
 mod route_context;
 mod stack_profile;
+mod symbol_index;
 mod verify_run;
 
 pub use code_map::build_code_map;
@@ -18,6 +19,7 @@ pub use stack_profile::{
   build_minimal_project_context_payload, detect_project_stack_profile,
   format_minimal_project_context_block, MinimalProjectContextRoute, ProjectStackProfile,
 };
+pub use symbol_index::{format_symbol_search_results, project_symbol_search, SymbolEntry};
 pub use verify_run::project_verify_run;
 
 pub(crate) fn project_file(root: &str, rel: &str) -> PathBuf {

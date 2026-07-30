@@ -169,6 +169,7 @@
       @change="$emit('editor-change', $event)"
       @save="$emit('save-file')"
       @select="(text, anchor) => $emit('editor-select', text, anchor)"
+      @inline-ai="$emit('inline-ai')"
     />
   </section>
 </template>
@@ -240,6 +241,7 @@ const emit = defineEmits<{
   (e: "reorder-tabs", payload: { fromIndex: number; toIndex: number }): void;
   (e: "hunk-action", index: number): void;
   (e: "new-scratch"): void;
+  (e: "inline-ai"): void;
 }>();
 
 /* ---- 标签滚轮横向滚动 ---- */
@@ -495,7 +497,27 @@ async function revealLineInDiff(line: number, column = 1): Promise<boolean> {
   return diffEditorRef.value?.revealLineWhenReady(line, column) ?? false;
 }
 
-defineExpose({ editorRef, diffEditorRef, revealLineInEditor, revealLineInDiff });
+function getSelectedText(): string {
+  return editorRef.value?.getSelectedText() ?? "";
+}
+
+function replaceSelection(text: string): boolean {
+  return editorRef.value?.replaceSelection(text) ?? false;
+}
+
+function getInlineAiAnchor(): MonacoSelectionAnchor | null {
+  return editorRef.value?.getInlineAiAnchor() ?? null;
+}
+
+defineExpose({
+  editorRef,
+  diffEditorRef,
+  revealLineInEditor,
+  revealLineInDiff,
+  getSelectedText,
+  replaceSelection,
+  getInlineAiAnchor,
+});
 </script>
 
 <style scoped>

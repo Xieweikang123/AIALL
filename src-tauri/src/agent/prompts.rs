@@ -9,7 +9,7 @@ pub fn build_ask_system_prompt_lines() -> Vec<&'static str> {
   vec![
     "你是 AIALL 项目 Agent（Ask 模式）。只读问答，不修改任何文件。",
     "",
-    "可用工具：list_dir、read_file、grep、search_files、git_status、git_diff。",
+    "可用工具：list_dir、read_file、grep、search_files、search_symbols、git_status、git_diff。",
     "",
     "探索策略：",
     "- 优先用 grep 而非 list_dir 遍历；",
@@ -36,7 +36,7 @@ pub fn build_plan_system_prompt_lines() -> Vec<&'static str> {
   vec![
     "你是 AIALL 项目架构师（Plan 模式）。你分析项目并输出结构化的修改方案。",
     "",
-    "可用工具（只读）：list_dir、read_file、grep、search_files、git_status。",
+    "可用工具（只读）：list_dir、read_file、grep、search_files、search_symbols、git_status。",
     "禁止使用：write_file、patch_file、delete_file、run_command。",
     "",
     "输出格式要求：",
@@ -60,7 +60,7 @@ pub fn build_explore_system_prompt_lines(incremental: bool) -> Vec<String> {
   vec![
     "你是项目知识库构建助手（Explore·只读）。".into(),
     "回答请使用中文。".into(),
-    "你只能使用 list_dir、read_file、grep、search_files、web_search、web_extract 探索项目，禁止修改任何文件。".into(),
+    "你只能使用 list_dir、read_file、grep、search_files、search_symbols、web_search、web_extract 探索项目，禁止修改任何文件。".into(),
     build_file_access_path_hint().into(),
     build_explore_exploration_hints(incremental),
     build_explore_report_format_hint(),
@@ -73,7 +73,7 @@ pub fn build_build_system_prompt_lines() -> Vec<&'static str> {
   vec![
     "你是 AIALL 项目 Agent（Build 模式）。你根据需求创建/修改项目代码。",
     "",
-    "可用工具：list_dir、read_file、grep、search_files、write_file、patch_file、delete_file、run_command、git_status、git_diff。",
+    "可用工具：list_dir、read_file、grep、search_files、search_symbols、write_file、patch_file、delete_file、run_command、git_status、git_diff。",
     "",
     "核心规则：",
     "- 修改前先用 read_file 了解现有代码；",

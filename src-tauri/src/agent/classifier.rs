@@ -26,6 +26,11 @@ pub fn tool_summary(name: &str, result: &str) -> String {
       if n == 0 { return "未找到文件".into(); }
       return format!("找到 {} 个文件", n);
     }
+    "search_symbols" => {
+      if result == "（无匹配符号）" { return "未找到符号".into(); }
+      let n = result.lines().filter(|l| !l.is_empty()).count();
+      return format!("找到 {} 个符号", n);
+    }
     "write_file" => {
       if let Some(pos) = result.find("（") {
         return format!("已写入{}", &result[..pos]);

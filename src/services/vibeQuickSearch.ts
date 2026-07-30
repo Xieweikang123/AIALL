@@ -1,7 +1,7 @@
 import type { GrepMatch, SearchResult } from "./vibeCodingClient";
 import type { PersistedChatMessage, VibeChatSessionMeta } from "./vibeChatStorage";
 
-export type QuickSearchKind = "file" | "content" | "session-title" | "session-message";
+export type QuickSearchKind = "file" | "content" | "symbol" | "session-title" | "session-message";
 
 export interface QuickSearchItem {
   id: string;
@@ -28,6 +28,7 @@ export interface QuickSearchRemoteInput {
   query: string;
   searchFiles: (dir: string, q: string) => Promise<{ ok: boolean; results: SearchResult[]; error?: string }>;
   grepContent: (dir: string, q: string) => Promise<{ ok: boolean; results: GrepMatch[]; error?: string }>;
+  searchSymbols?: (dir: string, q: string) => Promise<{ ok: boolean; results: Array<{ name: string; kind: string; file: string; line: number }>; error?: string }>;
   loadSessionMessages: (sessionId: string) => Promise<PersistedChatMessage[]>;
   sessions: VibeChatSessionMeta[];
   sessionMessages: Map<string, PersistedChatMessage[]>;
@@ -35,6 +36,7 @@ export interface QuickSearchRemoteInput {
 
 const MAX_FILES = 8;
 const MAX_CONTENT = 8;
+const MAX_SYMBOLS = 8;
 const MAX_SESSION_TITLES = 6;
 const MAX_SESSION_MESSAGES = 10;
 const MAX_DISK_SESSION_FETCH = 12;
@@ -127,6 +129,19 @@ export function mapFileResults(results: SearchResult[]): QuickSearchItem[] {
   }));
 }
 
+export function mapSymbolResults(
+  results: Array<{ name: string; kind: string; file: string; line: number }>,
+): QuickSearchItem[] {
+  return results.slice(0, MAX_SYMBOLS).map((item) => ({
+    id: `symbol:${item.file}:${item.line}:${item.name}`,
+    kind: "symbol" as const,
+    title: item.name,
+    subtitle: `${item.kind} · ${item.file}:${item.line}`,
+    filePath: item.file,
+    line: item.line,
+  }));
+}
+
 export function mapContentResults(results: GrepMatch[]): QuickSearchItem[] {
   return results.slice(0, MAX_CONTENT).map((item) => ({
     id: `content:${item.path}:${item.line}`,
@@ -142,12 +157,13 @@ export function mapContentResults(results: GrepMatch[]): QuickSearchItem[] {
 export async function runQuickSearchRemote(input: QuickSearchRemoteInput): Promise<{
   files: QuickSearchItem[];
   content: QuickSearchItem[];
+  symbols: QuickSearchItem[];
   sessions: QuickSearchItem[];
   error?: string;
 }> {
   const query = normalizeSearchQuery(input.query);
   if (!query || !input.projectPath.trim()) {
-    return { files: [], content: [], sessions: [] };
+    return { files: [], content: [], symbols: [], sessions: [] };
   }
 
   const localSessions = searchSessionsLocally({
@@ -194,15 +210,19 @@ export async function runQuickSearchRemote(input: QuickSearchRemoteInput): Promi
     }
   }
 
-  const [fileResult, grepResult] = await Promise.all([
+  const [fileResult, grepResult, symbolResult] = await Promise.all([
     input.searchFiles(input.projectPath.trim(), query),
     input.grepContent(input.projectPath.trim(), query),
+    input.searchSymbols
+      ? input.searchSymbols(input.projectPath.trim(), query)
+      : Promise.resolve({ ok: true, results: [] }),
   ]);
 
-  const errors = [fileResult.error, grepResult.error].filter(Boolean);
+  const errors = [fileResult.error, grepResult.error, symbolResult.error].filter(Boolean);
   return {
     files: fileResult.ok ? mapFileResults(fileResult.results) : [],
     content: grepResult.ok ? mapContentResults(grepResult.results) : [],
+    symbols: symbolResult.ok ? mapSymbolResults(symbolResult.results) : [],
     sessions,
     error: errors.length ? errors.join(" · ") : undefined,
   };
@@ -211,6 +231,7 @@ export async function runQuickSearchRemote(input: QuickSearchRemoteInput): Promi
 export function groupQuickSearchItems(items: {
   files: QuickSearchItem[];
   content: QuickSearchItem[];
+  symbols: QuickSearchItem[];
   sessions: QuickSearchItem[];
 }): Array<{ label: string; items: QuickSearchItem[] }> {
   const groups: Array<{ label: string; items: QuickSearchItem[] }> = [];
@@ -218,6 +239,7 @@ export function groupQuickSearchItems(items: {
   const sessionMessages = items.sessions.filter((i) => i.kind === "session-message");
   if (sessionTitles.length) groups.push({ label: "会话", items: sessionTitles });
   if (sessionMessages.length) groups.push({ label: "会话消息", items: sessionMessages });
+  if (items.symbols.length) groups.push({ label: "符号", items: items.symbols });
   if (items.files.length) groups.push({ label: "文件", items: items.files });
   if (items.content.length) groups.push({ label: "代码", items: items.content });
   return groups;

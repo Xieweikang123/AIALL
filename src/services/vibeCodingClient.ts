@@ -521,6 +521,36 @@ export async function searchFiles(dirPath: string, query: string): Promise<Searc
   }
 }
 
+export interface SymbolSearchResult {
+  name: string;
+  kind: string;
+  file: string;
+  line: number;
+  container?: string;
+}
+
+export interface SymbolSearchResults {
+  ok: boolean;
+  results: SymbolSearchResult[];
+  error?: string;
+}
+
+export async function searchSymbols(
+  projectPath: string,
+  query: string,
+  maxResults = 20,
+): Promise<SymbolSearchResults> {
+  try {
+    return await invokeBackend<SymbolSearchResults>(
+      "project_symbol_search",
+      { projectPath, query, maxResults },
+      async () => ({ ok: false, results: [], error: "符号搜索仅桌面版可用" }),
+    );
+  } catch (error) {
+    return { ok: false, results: [], error: formatFetchError(error, "网络错误") };
+  }
+}
+
 export async function grepContent(dirPath: string, pattern: string): Promise<GrepResults> {
   try {
     return await invokeBackend<GrepResults>(

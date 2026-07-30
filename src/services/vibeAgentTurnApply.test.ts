@@ -34,10 +34,22 @@ describe("resolveAgentDoneFileAction", () => {
         serverWrittenFiles: diffs,
         turnFileDiffPaths: diffs,
       }),
+    ).toEqual({ autoApply: false, pendingApproval: true, writtenFiles: diffs });
+  });
+
+  it("does not prompt for approval in ask mode", () => {
+    expect(
+      resolveAgentDoneFileAction({
+        chatMode: "ask",
+        wasAborted: false,
+        serverPendingFiles: [],
+        serverWrittenFiles: diffs,
+        turnFileDiffPaths: diffs,
+      }),
     ).toEqual({ autoApply: false, pendingApproval: false, writtenFiles: diffs });
   });
 
-  it("does not prompt for approval when build mode was stopped mid-run", () => {
+  it("still prompts for approval when build mode was stopped mid-run", () => {
     expect(
       resolveAgentDoneFileAction({
         chatMode: "build",
@@ -46,7 +58,7 @@ describe("resolveAgentDoneFileAction", () => {
         serverWrittenFiles: diffs,
         turnFileDiffPaths: diffs,
       }),
-    ).toEqual({ autoApply: false, pendingApproval: false, writtenFiles: diffs });
+    ).toEqual({ autoApply: false, pendingApproval: true, writtenFiles: diffs });
   });
 
   it("falls back to turn diffs when server writtenFiles are empty", () => {
@@ -58,7 +70,7 @@ describe("resolveAgentDoneFileAction", () => {
         serverWrittenFiles: [],
         turnFileDiffPaths: ["lib/x.ts"],
       }),
-    ).toEqual({ autoApply: false, pendingApproval: false, writtenFiles: ["lib/x.ts"] });
+    ).toEqual({ autoApply: false, pendingApproval: true, writtenFiles: ["lib/x.ts"] });
   });
 
   it("does not report written files without changes", () => {
@@ -98,7 +110,7 @@ describe("resolveAgentDoneFileAction", () => {
       }),
     ).toEqual({
       autoApply: false,
-      pendingApproval: false,
+      pendingApproval: true,
       writtenFiles: ["src/views/VibeCodingView.vue", "src/components/vibe/AutoBugFixPanel.vue"],
     });
   });
@@ -118,4 +130,4 @@ describe("formatPendingApprovalLabel", () => {
     expect(formatPendingApprovalLabel({ "a.ts": {} }, true)).toBe("已停止 · 1 个文件修改");
   });
 });
-
+

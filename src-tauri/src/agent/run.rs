@@ -730,7 +730,22 @@ pub async fn agent_run(
 
       emit(&channel, json!({ "type": "tool_start", "data": { "id": id, "name": name, "args": args } }));
 
-      let (ok, result) = tool_exec::execute_tool(&mut tool_ctx, name, &args).await;
+      let (ok, result) = {
+        let outcome = tool_exec::execute_tool(&mut tool_ctx, name, &args).await;
+        if let Some(diff) = outcome.file_diff {
+          emit(&channel, json!({
+            "type": "file_diff",
+            "data": {
+              "path": diff.path,
+              "before": diff.before,
+              "after": diff.after,
+              "deleted": diff.deleted,
+              "created": diff.created,
+            }
+          }));
+        }
+        (outcome.ok, outcome.message)
+      };
       if !is_tool_result_failure(&result) {
         tool_ctx.tool_guard.note_tool_output(&result);
       }

@@ -1,3 +1,4 @@
+use serde::Serialize;
 use serde_json::Value;
 
 use super::explore_guard::{
@@ -48,56 +49,105 @@ pub struct ToolExecContext<'a> {
   pub tool_guard: &'a mut ToolGuardState,
 }
 
-pub async fn execute_tool(ctx: &mut ToolExecContext<'_>, name: &str, args: &Value) -> (bool, String) {
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolFileDiff {
+  pub path: String,
+  pub before: String,
+  pub after: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub deleted: Option<bool>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub created: Option<bool>,
+}
+
+pub struct ToolExecOutcome {
+  pub ok: bool,
+  pub message: String,
+  pub file_diff: Option<ToolFileDiff>,
+}
+
+pub async fn execute_tool(ctx: &mut ToolExecContext<'_>, name: &str, args: &Value) -> ToolExecOutcome {
   if tools::is_write_tool(name) {
     if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
       if is_exploration_archive_path(path) {
-        return (
-          false,
-          build_exploration_archive_write_blocked_message().to_string(),
-        );
+        return ToolExecOutcome {
+          ok: false,
+          message: build_exploration_archive_write_blocked_message().to_string(),
+          file_diff: None,
+        };
       }
     }
     if let Some(msg) = block_write(ctx.mode, name) {
-      return (false, msg);
+      return ToolExecOutcome {
+        ok: false,
+        message: msg,
+        file_diff: None,
+      };
     }
     if ctx.automated_bug_fix && ctx.written_files.len() >= MAX_AUTO_BUG_FIX_WRITES {
-      return (
-        false,
-        format!(
+      return ToolExecOutcome {
+        ok: false,
+        message: format!(
           "错误：扫描修复已达写入上限（{MAX_AUTO_BUG_FIX_WRITES} 个文件），请 run_command 复验或输出总结。"
         ),
-      );
+        file_diff: None,
+      };
     }
   }
 
-  let result = match name {
-    "read_file" => exec_read_file(ctx, args).await,
-    "list_dir" | "list_directory" => exec_list_dir(ctx.project_path, args).await,
-    "grep" => exec_grep(ctx, args).await,
-    "search_files" => exec_search_files(ctx, args).await,
+  let (ok, message, file_diff) = match name {
+    "read_file" => {
+      let (ok, msg) = exec_read_file(ctx, args).await;
+      (ok, msg, None)
+    }
+    "list_dir" | "list_directory" => {
+      let (ok, msg) = exec_list_dir(ctx.project_path, args).await;
+      (ok, msg, None)
+    }
+    "grep" => {
+      let (ok, msg) = exec_grep(ctx, args).await;
+      (ok, msg, None)
+    }
+    "search_files" => {
+      let (ok, msg) = exec_search_files(ctx, args).await;
+      (ok, msg, None)
+    }
+    "search_symbols" => {
+      let (ok, msg) = exec_search_symbols(ctx, args).await;
+      (ok, msg, None)
+    }
     "write_file" => exec_write_file(ctx, args).await,
     "patch_file" => exec_patch_file(ctx, args).await,
     "delete_file" => exec_delete_file(ctx, args).await,
     "git_status" => {
       let text = super::agent_git_tools::run_git_status_tool(ctx.project_path).await;
       let ok = !text.starts_with("错误：");
-      (ok, text)
+      (ok, text, None)
     }
     "git_diff" => {
       let file_path = args.get("path").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
       let staged = args.get("staged").and_then(|v| v.as_bool()).unwrap_or(false);
       let text = super::agent_git_tools::run_git_diff_tool(ctx.project_path, file_path, staged).await;
       let ok = !text.starts_with("错误：");
-      (ok, text)
+      (ok, text, None)
     }
-    "run_command" => exec_run_command(ctx.project_path, args, ctx.mode).await,
-    "web_search" => exec_web_search(args, ctx.web_proxy_url).await,
-    "web_extract" => exec_web_extract(args, ctx.web_proxy_url).await,
-    _ => (false, format!("未知工具: {name}")),
+    "run_command" => {
+      let (ok, msg) = exec_run_command(ctx.project_path, args, ctx.mode).await;
+      (ok, msg, None)
+    }
+    "web_search" => {
+      let (ok, msg) = exec_web_search(args, ctx.web_proxy_url).await;
+      (ok, msg, None)
+    }
+    "web_extract" => {
+      let (ok, msg) = exec_web_extract(args, ctx.web_proxy_url).await;
+      (ok, msg, None)
+    }
+    _ => (false, format!("未知工具: {name}"), None),
   };
 
-  if result.0 && tools::is_write_tool(name) {
+  if ok && tools::is_write_tool(name) {
     if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
       let norm = path.replace('\\', "/");
       if !ctx.written_files.contains(&norm) {
@@ -106,7 +156,7 @@ pub async fn execute_tool(ctx: &mut ToolExecContext<'_>, name: &str, args: &Valu
     }
   }
 
-  result
+  ToolExecOutcome { ok, message, file_diff }
 }
 
 pub fn block_write(mode: &str, tool: &str) -> Option<String> {
@@ -340,77 +390,106 @@ async fn exec_search_files(ctx: &mut ToolExecContext<'_>, args: &Value) -> (bool
   }
 }
 
-async fn exec_write_file(ctx: &mut ToolExecContext<'_>, args: &Value) -> (bool, String) {
+async fn exec_search_symbols(ctx: &ToolExecContext<'_>, args: &Value) -> (bool, String) {
+  let query = args.get("query").or_else(|| args.get("q")).and_then(|v| v.as_str()).unwrap_or("");
+  if query.is_empty() {
+    return (false, "错误：缺少 query".into());
+  }
+  let max_results = args
+    .get("max_results")
+    .and_then(|v| v.as_u64())
+    .unwrap_or(20)
+    .min(80) as usize;
+  let results = crate::project::project_symbol_search(ctx.project_path, query, max_results);
+  (true, crate::project::format_symbol_search_results(&results))
+}
+
+async fn exec_write_file(ctx: &mut ToolExecContext<'_>, args: &Value) -> (bool, String, Option<ToolFileDiff>) {
   let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
   let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
   if path.is_empty() {
-    return (false, "错误：缺少 path".into());
+    return (false, "错误：缺少 path".into(), None);
   }
   if content.is_empty() {
-    return (false, "错误：缺少 content".into());
+    return (false, "错误：缺少 content".into(), None);
   }
   match crate::paths::resolve_project_path(ctx.project_path, path) {
     Ok((resolved, relative)) => {
       let file_key = relative.replace('\\', "/");
       if let Some(msg) = plan_document_build_mode_block(ctx.mode, &file_key, "write_file") {
-        return (false, msg);
+        return (false, msg, None);
       }
       let exists = tokio::fs::metadata(&resolved)
         .await
         .map(|m| m.is_file())
         .unwrap_or(false);
       if let Some(err) = require_prior_read(&ctx.tool_guard.read_paths, &file_key, exists) {
-        return (false, err);
+        return (false, err, None);
       }
-      if exists {
+      let before = if exists {
         let read_result = crate::fs::read_file_content(&resolved.to_string_lossy()).await;
-        if read_result.ok {
-          let existing_lines = read_result.content.lines().count();
-          let new_lines = content.lines().count();
-          let line_count = existing_lines.max(new_lines);
-          if line_count >= LARGE_FILE_LINE_THRESHOLD {
-            return (
-              false,
-              format!("错误：{file_key} 为大文件（{line_count} 行），请用 patch_file 局部修改"),
-            );
-          }
+        if !read_result.ok {
+          return (false, read_result.error.unwrap_or_else(|| "读取失败".into()), None);
         }
-      }
+        let existing_lines = read_result.content.lines().count();
+        let new_lines = content.lines().count();
+        let line_count = existing_lines.max(new_lines);
+        if line_count >= LARGE_FILE_LINE_THRESHOLD {
+          return (
+            false,
+            format!("错误：{file_key} 为大文件（{line_count} 行），请用 patch_file 局部修改"),
+            None,
+          );
+        }
+        read_result.content
+      } else {
+        String::new()
+      };
       match crate::fs::write_file_content(&resolved.to_string_lossy(), content).await {
         Ok(_) => {
           invalidate_file_read_state(ctx.tool_guard, &file_key);
           ctx.tool_guard.vision_locate_active = false;
-          (true, format!("已写入 {path}（{} 字符）", content.len()))
+          (
+            true,
+            format!("已写入 {path}（{} 字符）", content.len()),
+            Some(ToolFileDiff {
+              path: file_key,
+              before,
+              after: content.to_string(),
+              deleted: None,
+              created: Some(!exists),
+            }),
+          )
         }
-        Err(e) => (false, e),
+        Err(e) => (false, e, None),
       }
     }
-    Err(e) => (false, e),
+    Err(e) => (false, e, None),
   }
 }
 
-async fn exec_patch_file(ctx: &mut ToolExecContext<'_>, args: &Value) -> (bool, String) {
+async fn exec_patch_file(ctx: &mut ToolExecContext<'_>, args: &Value) -> (bool, String, Option<ToolFileDiff>) {
   let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
   let old_str = args.get("old_string").and_then(|v| v.as_str()).unwrap_or("");
   let new_str = args.get("new_string").and_then(|v| v.as_str()).unwrap_or("");
   if path.is_empty() {
-    return (false, "错误：缺少 path".into());
+    return (false, "错误：缺少 path".into(), None);
   }
   if old_str.is_empty() {
-    return (false, "错误：缺少 old_string".into());
+    return (false, "错误：缺少 old_string".into(), None);
   }
   match crate::paths::resolve_project_path(ctx.project_path, path) {
     Ok((resolved, relative)) => {
       let file_key = relative.replace('\\', "/");
       if let Some(msg) = plan_document_build_mode_block(ctx.mode, &file_key, "patch_file") {
-        return (false, msg);
+        return (false, msg, None);
       }
       let exists = tokio::fs::metadata(&resolved)
         .await
         .map(|m| m.is_file())
         .unwrap_or(false);
       if let Some(err) = require_prior_read(&ctx.tool_guard.read_paths, &file_key, exists) {
-        return (false, err);
+        return (false, err, None);
       }
       if let Some(err) = check_patch_old_string_from_reads(
         &file_key,
@@ -420,54 +499,83 @@ async fn exec_patch_file(ctx: &mut ToolExecContext<'_>, args: &Value) -> (bool, 
       ) {
         mark_patch_recovery_file(ctx.tool_guard, &file_key);
         invalidate_file_read_cache(ctx.tool_guard, &file_key);
-        return (false, err);
+        return (false, err, None);
       }
       if is_introspect_business_route_patch(&file_key, old_str, new_str) {
-        return (false, build_introspect_probe_blocked_message());
+        return (false, build_introspect_probe_blocked_message(), None);
       }
       let read_result = crate::fs::read_file_content(&resolved.to_string_lossy()).await;
       if !read_result.ok {
-        return (false, read_result.error.unwrap_or_else(|| "读取失败".into()));
+        return (false, read_result.error.unwrap_or_else(|| "读取失败".into()), None);
       }
+      let before = read_result.content.clone();
       match super::patch::apply_unique_patch(&read_result.content, old_str, new_str) {
         super::patch::UniquePatchResult::Ok { patched } => {
           match crate::fs::write_file_content(&resolved.to_string_lossy(), &patched).await {
             Ok(_) => {
               invalidate_file_read_state(ctx.tool_guard, &file_key);
               ctx.tool_guard.vision_locate_active = false;
-              (true, format!("已修改 {path}"))
+              (
+                true,
+                format!("已修改 {path}"),
+                Some(ToolFileDiff {
+                  path: file_key,
+                  before,
+                  after: patched,
+                  deleted: None,
+                  created: None,
+                }),
+              )
             }
-            Err(e) => (false, e),
+            Err(e) => (false, e, None),
           }
         }
         super::patch::UniquePatchResult::Err { error, .. } => {
           mark_patch_recovery_file(ctx.tool_guard, &file_key);
           invalidate_file_read_cache(ctx.tool_guard, &file_key);
-          (false, error)
+          (false, error, None)
         }
       }
     }
-    Err(e) => (false, e),
+    Err(e) => (false, e, None),
   }
 }
 
-async fn exec_delete_file(ctx: &mut ToolExecContext<'_>, args: &Value) -> (bool, String) {
+async fn exec_delete_file(ctx: &mut ToolExecContext<'_>, args: &Value) -> (bool, String, Option<ToolFileDiff>) {
   let path = args.get("path").and_then(|v| v.as_str()).unwrap_or("");
   if path.is_empty() {
-    return (false, "错误：缺少 path".into());
+    return (false, "错误：缺少 path".into(), None);
   }
   match crate::paths::resolve_project_path(ctx.project_path, path) {
     Ok((resolved, relative)) => {
       let file_key = relative.replace('\\', "/");
       if let Some(msg) = plan_document_build_mode_block(ctx.mode, &file_key, "delete_file") {
-        return (false, msg);
+        return (false, msg, None);
       }
+      let before = {
+        let read_result = crate::fs::read_file_content(&resolved.to_string_lossy()).await;
+        if read_result.ok {
+          read_result.content
+        } else {
+          String::new()
+        }
+      };
       match crate::fs::delete_item(&resolved.to_string_lossy()).await {
-        Ok(_) => (true, format!("已删除 {path}")),
-        Err(e) => (false, e),
+        Ok(_) => (
+          true,
+          format!("已删除 {path}"),
+          Some(ToolFileDiff {
+            path: file_key,
+            before,
+            after: String::new(),
+            deleted: Some(true),
+            created: None,
+          }),
+        ),
+        Err(e) => (false, e, None),
       }
     }
-    Err(e) => (false, e),
+    Err(e) => (false, e, None),
   }
 }
 

@@ -90,7 +90,7 @@ import {
   type QuickSearchItem,
 } from "../../services/vibeQuickSearch";
 import type { PersistedChatMessage, VibeChatSessionMeta } from "../../services/vibeChatStorage";
-import { grepContent, searchFiles, fetchSessionMessages } from "../../services/vibeCodingClient";
+import { grepContent, searchFiles, searchSymbols, fetchSessionMessages } from "../../services/vibeCodingClient";
 import { peekVibeChatSessionMessages } from "../../services/vibeChatStorage";
 
 interface Props {
@@ -121,6 +121,7 @@ const listRef = ref<HTMLElement | null>(null);
 
 const resultFiles = ref<QuickSearchItem[]>([]);
 const resultContent = ref<QuickSearchItem[]>([]);
+const resultSymbols = ref<QuickSearchItem[]>([]);
 const resultSessions = ref<QuickSearchItem[]>([]);
 const diskSessionCache = ref(new Map<string, PersistedChatMessage[]>());
 
@@ -131,6 +132,7 @@ const groupedItems = computed(() =>
   groupQuickSearchItems({
     files: resultFiles.value,
     content: resultContent.value,
+    symbols: resultSymbols.value,
     sessions: resultSessions.value,
   }),
 );
@@ -169,6 +171,7 @@ async function runSearch() {
   if (!q) {
     resultFiles.value = [];
     resultContent.value = [];
+    resultSymbols.value = [];
     resultSessions.value = [];
     error.value = "";
     loading.value = false;
@@ -177,6 +180,7 @@ async function runSearch() {
   if (!props.projectOpened || !props.projectPath.trim()) {
     resultFiles.value = [];
     resultContent.value = [];
+    resultSymbols.value = [];
     resultSessions.value = [];
     error.value = "";
     loading.value = false;
@@ -195,6 +199,7 @@ async function runSearch() {
       sessionMessages: buildSessionMessagesMap(),
       searchFiles,
       grepContent,
+      searchSymbols: (dir, queryText) => searchSymbols(dir, queryText),
       loadSessionMessages: async (sessionId) => {
         const cached = diskSessionCache.value.get(sessionId);
         if (cached?.length) return cached;
@@ -217,6 +222,7 @@ async function runSearch() {
     if (token !== searchToken) return;
     resultFiles.value = result.files;
     resultContent.value = result.content;
+    resultSymbols.value = result.symbols;
     resultSessions.value = result.sessions;
     error.value = result.error || "";
     selectedIndex.value = 0;
@@ -236,6 +242,7 @@ function scheduleSearch() {
 function iconForKind(kind: QuickSearchItem["kind"]): string {
   if (kind === "file") return "📄";
   if (kind === "content") return "⌗";
+  if (kind === "symbol") return "ƒ";
   if (kind === "session-title") return "💬";
   return "📝";
 }
@@ -243,12 +250,13 @@ function iconForKind(kind: QuickSearchItem["kind"]): string {
 function kindLabel(kind: QuickSearchItem["kind"]): string {
   if (kind === "file") return "文件";
   if (kind === "content") return "代码";
+  if (kind === "symbol") return "符号";
   if (kind === "session-title") return "会话";
   return "消息";
 }
 
 function selectItem(item: QuickSearchItem) {
-  if (item.kind === "file" || item.kind === "content") {
+  if (item.kind === "file" || item.kind === "content" || item.kind === "symbol") {
     if (!item.filePath) return;
     emit("open-file", { path: item.filePath, line: item.line });
     emit("close");
@@ -301,6 +309,7 @@ watch(
       query.value = "";
       resultFiles.value = [];
       resultContent.value = [];
+      resultSymbols.value = [];
       resultSessions.value = [];
       error.value = "";
       loading.value = false;

@@ -40,10 +40,15 @@ export function resolveAgentDoneFileAction(params: {
     turnFileDiffPaths: params.turnFileDiffPaths,
   });
 
+  const hasChanges = written.length > 0;
+  const reviewMode =
+    params.chatMode === "build" || params.chatMode === "auto";
+  const pendingApproval = hasChanges && reviewMode;
+
   return {
     autoApply: false,
-    pendingApproval: false,
-    writtenFiles: written.length > 0 ? written : undefined,
+    pendingApproval,
+    writtenFiles: hasChanges ? written : undefined,
   };
 }
 

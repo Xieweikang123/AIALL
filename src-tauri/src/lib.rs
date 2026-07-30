@@ -1,4 +1,4 @@
-pub mod agent;
+﻿pub mod agent;
 mod ai;
 mod automation;
 mod chat;
@@ -24,7 +24,7 @@ fn send_notification(app: tauri::AppHandle, title: String, body: String) -> Resu
     .title(&title)
     .body(&body)
     .show()
-    .map_err(|e| format!("发送通知失败: {e}"))
+    .map_err(|e| format!("鍙戦€侀€氱煡澶辫触: {e}"))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -122,6 +122,7 @@ pub fn run() {
       commands::project::project_verify_run,
       commands::project::project_context,
       commands::project::code_map_build,
+      commands::project::project_symbol_search,
       commands::project::memory_usage,
       commands::system::system_open_url,
       commands::system::system_open_folder,
