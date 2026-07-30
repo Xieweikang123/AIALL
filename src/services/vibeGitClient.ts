@@ -536,7 +536,7 @@ export async function aiBatchGroups(
   /** Client watchdog — covers total stall including model stream. */
   const CLIENT_TIMEOUT_MS = 180_000;
   /** If Rust never leaves the git-summary phase (e.g. hung teardown), fail fast on UI. */
-  const SUMMARY_STALL_MS = 20_000;
+  const SUMMARY_STALL_MS = 45_000;
 
   // Tauri: use Channel for streaming
   if (isTauriEnv()) {
@@ -577,7 +577,8 @@ export async function aiBatchGroups(
                 step.includes("等待模型") ||
                 step.includes("模型输出") ||
                 step.includes("改用文件列表") ||
-                step.includes("整理上下文")
+                step.includes("整理上下文") ||
+                step.includes("读取变更摘要")
               ) {
                 sawModelPhase = true;
                 clearTimeout(summaryStall);

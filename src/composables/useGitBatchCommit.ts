@@ -373,6 +373,7 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
     gitError.value = "";
     clearGitDiffCache();
     const filePaths = group.files.map((f) => f.path);
+    let committed = false;
     try {
       if (!(await clearStagedIndexForBatchCommit())) return;
       const stageResult = await runStageGitFiles(filePaths);
@@ -386,6 +387,7 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
         await refreshGitStatus({ showLoading: false, force: true });
         return;
       }
+      committed = true;
       await refreshGitStatus({ showLoading: false });
       await refreshGitRemotes();
     } catch (e) {
@@ -394,11 +396,35 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
       onRefreshTree?.();
     } finally {
       batchCommittingIndex.value = null;
-      aiBatchGroupsResult.value = null;
+      if (committed) {
+        pruneAiBatchGroupsAfterCommit(filePaths);
+      }
+    }
+  }
+
+  function pruneAiBatchGroupsAfterCommit(committedPaths: string[]) {
+    const committed = new Set(committedPaths);
+    if (aiBatchGroupsResult.value) {
+      const next = aiBatchGroupsResult.value
+        .map((g) => ({
+          ...g,
+          files: g.files.filter((p) => !committed.has(p)),
+        }))
+        .filter((g) => g.files.length > 0);
+      aiBatchGroupsResult.value = next.length > 0 ? next : null;
+    }
+
+    if (aiBatchGroupsResult.value) {
+      batchUnstagedSnapshot.value = currentBatchPaths();
+      batchDraftBranch.value = batchDraftScope().branch;
+      batchMessages.value = batchGroups.value.map((g) => defaultBatchMessage(g));
+      persistBatchDraft();
+    } else {
       batchUnstagedSnapshot.value = null;
       batchDraftBranch.value = null;
       const { project, branch } = batchDraftScope();
       removeGitBatchDraft(project, branch);
+      syncBatchMessagesFromGroups();
     }
   }
 
@@ -471,7 +497,10 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
   async function generateAiBatchGroups() {
     if (!projectPath().trim() || aiBatchGrouping.value) return;
     const cfg = aiConfig();
-    if (!cfg.endpoint.trim() || !cfg.model.trim()) return;
+    if (!cfg.endpoint.trim() || !cfg.model.trim()) {
+      gitError.value = "请先配置 AI 模型";
+      return;
+    }
     aiBatchGrouping.value = true;
     aiBatchGroupingStep.value = "连接服务…";
     gitError.value = "";
@@ -499,16 +528,17 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
       if (!result.ok) {
         gitError.value = result.error || "AI 分组失败";
         aiBatchGroupsResult.value = null;
+      } else if (result.groups.length === 0) {
+        gitError.value = "AI 未返回有效分组，请重试或手动按目录提交";
+        aiBatchGroupsResult.value = null;
       } else {
-        aiBatchGroupsResult.value = result.groups.length > 0 ? result.groups : null;
-        if (result.groups.length > 0) {
-          batchUnstagedSnapshot.value = currentBatchPaths();
-          batchSectionOpen.value = true;
-          batchMessages.value = batchGroups.value.map((g) => defaultBatchMessage(g));
-          persistBatchDraft();
-          aiBatchGroupingStep.value = "完成 ✓";
-          await new Promise((r) => setTimeout(r, 500));
-        }
+        aiBatchGroupsResult.value = result.groups;
+        batchUnstagedSnapshot.value = currentBatchPaths();
+        batchSectionOpen.value = true;
+        batchMessages.value = batchGroups.value.map((g) => defaultBatchMessage(g));
+        persistBatchDraft();
+        aiBatchGroupingStep.value = "完成 ✓";
+        await new Promise((r) => setTimeout(r, 500));
       }
     } catch (e) {
       gitError.value = toErrorMessage(e, "AI 分组失败");

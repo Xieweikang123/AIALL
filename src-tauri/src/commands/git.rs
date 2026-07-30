@@ -354,12 +354,102 @@ async fn stream_ai_completion(
   Ok(full_content)
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AiBatchGroup {
   name: String,
   files: Vec<String>,
   message: String,
+}
+
+fn normalize_ai_batch_path(path: &str) -> String {
+  path.trim().replace('\\', "/").trim_start_matches("./").to_string()
+}
+
+fn resolve_ai_batch_path<'a>(raw: &str, known: &'a [String]) -> Option<&'a str> {
+  let norm = normalize_ai_batch_path(raw);
+  if norm.is_empty() {
+    return None;
+  }
+  if let Some(exact) = known.iter().find(|p| p.as_str() == norm) {
+    return Some(exact.as_str());
+  }
+  let lower = norm.to_ascii_lowercase();
+  known
+    .iter()
+    .find(|p| p.eq_ignore_ascii_case(&norm) || p.to_ascii_lowercase().ends_with(&lower))
+    .map(|p| p.as_str())
+}
+
+fn parse_ai_batch_groups_json(content: &str, known_paths: &[String]) -> Result<Vec<AiBatchGroup>, String> {
+  let cleaned = content.trim();
+  let Some(start) = cleaned.find('{') else {
+    return Err("模型未返回 JSON 分组".into());
+  };
+  let Some(end_rel) = cleaned[start..].rfind('}') else {
+    return Err("模型返回的 JSON 不完整".into());
+  };
+  let json_str = &cleaned[start..=start + end_rel];
+  let parsed: Value =
+    serde_json::from_str(json_str).map_err(|_| "模型返回的 JSON 无法解析".to_string())?;
+  let Some(arr) = parsed.get("groups").and_then(|v| v.as_array()) else {
+    return Err("模型 JSON 缺少 groups 数组".into());
+  };
+
+  let mut groups: Vec<AiBatchGroup> = Vec::new();
+  let mut used = std::collections::HashSet::<String>::new();
+
+  for g in arr {
+    let name = g
+      .get("name")
+      .and_then(|v| v.as_str())
+      .unwrap_or("")
+      .trim()
+      .to_string();
+    let message = g
+      .get("message")
+      .and_then(|v| v.as_str())
+      .unwrap_or("")
+      .trim()
+      .to_string();
+    let Some(files_val) = g.get("files").and_then(|v| v.as_array()) else {
+      continue;
+    };
+    let mut files: Vec<String> = Vec::new();
+    for f in files_val {
+      let Some(raw) = f.as_str() else { continue };
+      let Some(resolved) = resolve_ai_batch_path(raw, known_paths) else {
+        continue;
+      };
+      if used.insert(resolved.to_string()) {
+        files.push(resolved.to_string());
+      }
+    }
+    if files.is_empty() {
+      continue;
+    }
+    let name = if name.is_empty() {
+      files
+        .first()
+        .map(|p| {
+          let parts: Vec<_> = p.split('/').collect();
+          if parts.len() > 1 {
+            parts[0].to_string()
+          } else {
+            "变更".to_string()
+          }
+        })
+        .unwrap_or_else(|| "变更".to_string())
+    } else {
+      name
+    };
+    groups.push(AiBatchGroup { name, files, message });
+  }
+
+  if groups.is_empty() {
+    return Err("模型未产出可用分组（路径可能对不上当前变更）".into());
+  }
+  Ok(groups)
 }
 
 #[tauri::command]
@@ -502,14 +592,21 @@ pub async fn git_ai_batch_groups(
   let unstaged_files: Vec<_> = status_result.files.iter().filter(|f| !f.staged && f.status != "ignored").collect();
   let staged_files: Vec<_> = status_result.files.iter().filter(|f| f.staged).collect();
 
-  if unstaged_files.is_empty() && staged_files.is_empty() {
+  // 与前端分批数据源一致：有未暂存则只划未暂存；否则划已暂存。
+  let source_files: Vec<_> = if !unstaged_files.is_empty() {
+    unstaged_files.clone()
+  } else {
+    staged_files.clone()
+  };
+
+  if source_files.is_empty() {
     send_event("done", json!({ "groups": [] }));
     return;
   }
 
-  let source_files_len = staged_files.len() + unstaged_files.len();
-  let need_unstaged = !unstaged_files.is_empty();
-  let need_staged = !staged_files.is_empty();
+  let source_files_len = source_files.len();
+  let need_unstaged = source_files.iter().any(|f| !f.staged);
+  let need_staged = source_files.iter().any(|f| f.staged);
   let allow_patch_samples = source_files_len <= SAMPLE_PATCH_FILE_LIMIT;
 
   send_event(
@@ -642,15 +739,18 @@ pub async fn git_ai_batch_groups(
   };
 
   let mut file_list_parts = Vec::new();
-  if !staged_files.is_empty() {
-    let staged_list: Vec<String> = staged_files.iter().map(|f| format!("{}: {} [已暂存]", f.status, f.path)).collect();
+  let source_staged: Vec<_> = source_files.iter().filter(|f| f.staged).collect();
+  let source_unstaged: Vec<_> = source_files.iter().filter(|f| !f.staged).collect();
+  if !source_staged.is_empty() {
+    let staged_list: Vec<String> = source_staged.iter().map(|f| format!("{}: {} [已暂存]", f.status, f.path)).collect();
     file_list_parts.push(staged_list.join("\n"));
   }
-  if !unstaged_files.is_empty() {
-    let unstaged_list: Vec<String> = unstaged_files.iter().map(|f| format!("{}: {} [未暂存]", f.status, f.path)).collect();
+  if !source_unstaged.is_empty() {
+    let unstaged_list: Vec<String> = source_unstaged.iter().map(|f| format!("{}: {} [未暂存]", f.status, f.path)).collect();
     file_list_parts.push(unstaged_list.join("\n"));
   }
   let file_list_str = file_list_parts.join("\n");
+  let known_paths: Vec<String> = source_files.iter().map(|f| normalize_ai_batch_path(&f.path)).collect();
 
   let prompt = format!(
     "你是一个 Git 提交分组助手。根据以下文件变更，将文件按功能/逻辑相关性分成多个批次，每个批次生成一条口语化的中文提交信息。
@@ -746,30 +846,49 @@ Diff 内容：
   }
 
   let cleaned = content.trim().to_string();
-  let mut groups: Vec<AiBatchGroup> = Vec::new();
-  if let Some(json_match) = cleaned.find('{') {
-    let json_str = &cleaned[json_match..];
-    if let Some(end) = json_str.rfind('}') {
-      let json_str = &json_str[..=end];
-      if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
-        if let Some(arr) = parsed["groups"].as_array() {
-          for g in arr {
-            if let (Some(name), Some(files), Some(message)) = (
-              g["name"].as_str(),
-              g["files"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()),
-              g["message"].as_str(),
-            ) {
-              groups.push(AiBatchGroup {
-                name: name.to_string(),
-                files,
-                message: message.to_string(),
-              });
-            }
-          }
-        }
-      }
+  match parse_ai_batch_groups_json(&cleaned, &known_paths) {
+    Ok(groups) => {
+      send_event("done", json!({ "groups": groups }));
+    }
+    Err(err) => {
+      let preview: String = cleaned.chars().take(180).collect();
+      let detail = if preview.is_empty() {
+        err
+      } else {
+        format!("{err}。原文摘要：{preview}")
+      };
+      send_event("error", json!({ "error": detail }));
     }
   }
+}
 
-  send_event("done", json!({ "groups": groups }));
+#[cfg(test)]
+mod ai_batch_parse_tests {
+  use super::*;
+
+  #[test]
+  fn parses_groups_without_message() {
+    let known = vec!["src/a.ts".into(), "pkg/b.ts".into()];
+    let raw = r#"{"groups":[{"name":"src","files":["src/a.ts"]},{"name":"pkg","files":["pkg/b.ts"],"message":"改了 b"}]}"#;
+    let groups = parse_ai_batch_groups_json(raw, &known).unwrap();
+    assert_eq!(groups.len(), 2);
+    assert_eq!(groups[0].message, "");
+    assert_eq!(groups[1].message, "改了 b");
+  }
+
+  #[test]
+  fn remaps_backslash_and_dedupes() {
+    let known = vec!["src/a.ts".into()];
+    let raw = r#"{"groups":[{"name":"x","files":["src\\a.ts","src/a.ts"],"message":"m"}]}"#;
+    let groups = parse_ai_batch_groups_json(raw, &known).unwrap();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].files, vec!["src/a.ts"]);
+  }
+
+  #[test]
+  fn rejects_unusable_payload() {
+    let known = vec!["src/a.ts".into()];
+    let err = parse_ai_batch_groups_json("sorry I cannot", &known).unwrap_err();
+    assert!(err.contains("JSON"));
+  }
 }
