@@ -30,6 +30,7 @@ mod run_preflight;
 mod run_startup_hints;
 mod run_stream;
 mod run_system_prompt;
+mod run_state;
 mod run_types;
 pub mod runtime_hint;
 pub mod tools;

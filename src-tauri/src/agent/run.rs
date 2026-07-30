@@ -12,13 +12,15 @@ use super::run_emit::{
   extend_segment_max_turns, is_cancelled,
   AGENT_SAFETY_MAX_TURNS,
 };
-use super::run_preflight::{
-  apply_turn_preflight, TurnPreflightMut, TurnPreflightParams, TurnPreflightState,
-};
+use super::run_preflight::{apply_turn_preflight, TurnPreflightParams};
 use super::run_startup_hints::{apply_run_startup_hints, RunStartupHintsParams};
 use super::run_compact::{compact_messages_for_model, messages_char_size};
-use super::run_finalize::{handle_final_turn, FinalizeTurnMut, FinalizeTurnOutcome, FinalizeTurnParams};
-use super::run_post_tools::{apply_post_tool_turn, PostToolNudgeParams, PostToolTurnMut};
+use super::run_finalize::{handle_final_turn, FinalizeTurnOutcome, FinalizeTurnParams};
+use super::run_post_tools::{apply_post_tool_turn, PostToolNudgeParams};
+use super::run_state::{
+  AgentRunState, ConsultativeTrackState, PatchNudgeState, RunNudgeFlags, RunRetryCounters,
+  SegmentState, VisionRunState,
+};
 use super::run_stream::consume_model_sse_stream;
 use super::run_system_prompt::{build_agent_system_prompt, SystemPromptBuildParams};
 use super::run_types::AgentRunRequest;
@@ -35,7 +37,8 @@ use super::vision_pregrep::{
 use super::vision_consultative::{
   should_bypass_vision_first_turn, should_run_vision_anchor_pgrep,
 };
-use super::probe_guard::{is_ephemeral_probe_path, ProbeArtifactTracker};
+use super::probe_guard::is_ephemeral_probe_path;
+use super::run_preflight::TurnPreflightState;
 
 /// Run the desktop Agent without a WebView, forwarding events to `on_event`.
 /// Used by `agent-smoke` CLI — same loop as Tauri `agent_run`.
@@ -70,8 +73,6 @@ pub async fn agent_run(
 
   let max_turns = request.max_turns.unwrap_or(12).min(40);
   let segment_budget = max_turns;
-  let mut segment_max_turns = max_turns;
-  let mut segment_index = 1u32;
   let requested_mode = request.mode.as_deref().unwrap_or("build");
   let mut agent_mode = AgentMode::from_str(requested_mode);
 
@@ -130,7 +131,7 @@ pub async fn agent_run(
   let all_tools = tools::agent_tool_definitions();
   let read_set: std::collections::HashSet<&str> = tools::read_only_tool_names().iter().cloned().collect();
   let is_read_only_run = agent_mode.is_read_only() || run_policy.read_only_build_run;
-  let mut active_tools: Value = if is_read_only_run {
+  let active_tools: Value = if is_read_only_run {
     let filtered = all_tools.as_array().map(|a| {
       a.iter().filter(|t| {
         t["function"]["name"].as_str().map_or(false, |n| read_set.contains(n))
@@ -176,9 +177,6 @@ pub async fn agent_run(
     is_plan_explore: effective_mode_str == "plan",
     run_policy: &run_policy,
   });
-  let mut ambiguous_term_clarification_pending = startup_outcome.ambiguous_term_clarification_pending;
-  let ambiguous_term_clarification_terms = startup_outcome.ambiguous_term_clarification_terms;
-  let mut ambiguous_term_clarification_retries: u32 = 0;
 
   emit(&channel, json!({
     "type": "agent_context", "data": {
@@ -200,41 +198,35 @@ pub async fn agent_run(
       }
     }
   }
-  let mut consecutive_read_turns: u32 = 0;
-  let mut total_read_tool_calls: u32 = 0;
-  let mut consultative_read_paths: Vec<String> = Vec::new();
-  let mut consultative_read_failed_paths: Vec<String> = Vec::new();
-  let mut consultative_grep_patterns: Vec<String> = Vec::new();
-  let mut vision_locate_tools_used = false;
-  let mut vision_locate_read_used = false;
-  let mut vision_auto_grep_had_matches = false;
-  let mut pregrep_unique_files: Vec<String> = Vec::new();
-  let mut vision_consultative_locate_retries: u32 = 0;
-  let mut consultative_force_answer_pending = run_policy.locate_status_follow_up_run;
-  let mut agent_step_clarify_pending = run_policy.agent_step_clarify_run;
-  let mut modification_audit_sent = false;
-  let mut workspace_cleanup_nudge_sent = false;
-  let mut probe_tracker = ProbeArtifactTracker::default();
-  let mut accuracy_retries: u32 = 0;
-  let mut behavior_purpose_retries: u32 = 0;
-  let mut ui_behavior_retries: u32 = 0;
-  let mut turn_cap_final_summary_attempts: u32 = 0;
-  let mut empty_reply_retries: u32 = 0;
-  let mut premature_completion_retries: u32 = 0;
-  let mut patch_required_retries: u32 = 0;
-  let mut patch_failure_completion_retries: u32 = 0;
-  let mut manual_handoff_retries: u32 = 0;
-  let mut patch_failure_log: Vec<PatchFailureEntry> = Vec::new();
-  let mut consecutive_runtime_tool_failure_turns: u32 = 0;
-  let mut last_consultative_explore_sig: Option<String> = None;
-  let mut build_explore_force_patch_sent = false;
-  let mut ui_defect_force_patch_sent = false;
-  let mut patch_anchor_force_patch_nudge_sent = false;
-  let mut patch_anchor_force_pending = false;
-  let mut force_write_only_tools = false;
-  let mut scheduled_job_registration_nudge_sent = false;
-  let mut preflight_state = TurnPreflightState::new();
-  let mut explore_files_read: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+  let mut tool_guard = ToolGuardState::new(has_image, has_image);
+  if vision_locate_single_turn_run {
+    tool_guard.vision_locate_active = true;
+  }
+
+  let mut run_state = AgentRunState {
+    segment: SegmentState::new(max_turns),
+    written_files,
+    consultative: ConsultativeTrackState {
+      force_answer_pending: run_policy.locate_status_follow_up_run,
+      ..ConsultativeTrackState::default()
+    },
+    vision: VisionRunState::new(has_image, vision_locate_single_turn_run),
+    patch: PatchNudgeState::default(),
+    retries: RunRetryCounters::default(),
+    nudge_flags: RunNudgeFlags {
+      agent_step_clarify_pending: run_policy.agent_step_clarify_run,
+      ..RunNudgeFlags::default()
+    },
+    probe_tracker: Default::default(),
+    preflight_state: TurnPreflightState::new(),
+    tool_guard,
+    active_tools,
+    messages,
+    ambiguous_term_clarification_pending: startup_outcome.ambiguous_term_clarification_pending,
+    ambiguous_term_clarification_terms: startup_outcome.ambiguous_term_clarification_terms,
+  };
+
   let is_plan_explore = effective_mode_str == "plan";
   let plan_quote_informational_run =
     is_plan_explore && super::continuation::is_plan_quote_informational_prompt(&request.prompt);
@@ -245,21 +237,13 @@ pub async fn agent_run(
   } else {
     "build"
   };
-  let mut tool_guard = ToolGuardState::new(has_image, has_image);
-  if vision_locate_single_turn_run {
-    tool_guard.vision_locate_active = true;
-  }
-  let mut vision_first_turn_pending = has_image && !vision_locate_single_turn_run;
-  let mut vision_first_turn_retries = 0u32;
-  let mut vision_pregrep_done = false;
   let effective_read_only_build =
     run_policy.read_only_build_run || crate::agent::is_ui_state_behavior_question(&request.prompt);
-  let mut actual_turns = 0u32;
   let run_started_at = std::time::Instant::now();
 
   loop {
-    if actual_turns >= segment_max_turns {
-      if actual_turns >= AGENT_SAFETY_MAX_TURNS {
+    if run_state.segment.actual_turns >= run_state.segment.max_turns {
+      if run_state.segment.actual_turns >= AGENT_SAFETY_MAX_TURNS {
         emit(&channel, json!({
           "type": "error",
           "data": { "message": format!("已达安全上限（{AGENT_SAFETY_MAX_TURNS} 轮），任务可能未完成。") }
@@ -271,28 +255,28 @@ pub async fn agent_run(
       let read_only_segment_cap = is_read_only_run || run_policy.read_only_build_run;
 
       if read_only_segment_cap || effective_mode_str == "explore" || is_plan_explore {
-        let explore_turns = total_read_tool_calls.max(crate::agent::EXPLORE_MAX_TOTAL_EXPLORE_SOFT);
+        let explore_turns = run_state.consultative.total_read_tool_calls.max(crate::agent::EXPLORE_MAX_TOTAL_EXPLORE_SOFT);
         let cap_nudge = if effective_mode_str == "explore" {
           crate::agent::build_explore_force_report_nudge(explore_turns)
         } else if is_plan_explore {
-          crate::agent::build_plan_segment_cap_nudge(actual_turns, total_read_tool_calls)
+          crate::agent::build_plan_segment_cap_nudge(run_state.segment.actual_turns, run_state.consultative.total_read_tool_calls)
         } else {
-          crate::agent::build_consultative_segment_cap_nudge(actual_turns, total_read_tool_calls)
+          crate::agent::build_consultative_segment_cap_nudge(run_state.segment.actual_turns, run_state.consultative.total_read_tool_calls)
         };
-        messages.push(json!({ "role": "system", "content": cap_nudge }));
+        run_state.messages.push(json!({ "role": "system", "content": cap_nudge }));
         if effective_mode_str == "ask" || run_policy.read_only_build_run {
-          messages.push(json!({
+          run_state.messages.push(json!({
             "role": "system",
             "content": crate::agent::build_ask_force_answer_nudge(explore_turns)
           }));
         }
         if is_plan_explore {
-          messages.push(json!({
+          run_state.messages.push(json!({
             "role": "system",
-            "content": crate::agent::build_plan_force_answer_nudge(total_read_tool_calls)
+            "content": crate::agent::build_plan_force_answer_nudge(run_state.consultative.total_read_tool_calls)
           }));
         }
-        segment_max_turns = actual_turns + 1;
+        run_state.segment.max_turns = run_state.segment.actual_turns + 1;
         let phase = if effective_mode_str == "explore" {
           "explore_segment_cap"
         } else if is_plan_explore {
@@ -304,8 +288,8 @@ pub async fn agent_run(
           "type": "status",
           "data": {
             "phase": phase,
-            "turn": actual_turns,
-            "maxTurns": segment_max_turns,
+            "turn": run_state.segment.actual_turns,
+            "maxTurns": run_state.segment.max_turns,
             "detail": if effective_mode_str == "explore" {
               "探索轮数已达上限，请输出报告"
             } else if is_plan_explore {
@@ -315,24 +299,24 @@ pub async fn agent_run(
             }
           }
         }));
-      } else if turn_cap_final_summary_attempts < 2 {
-        turn_cap_final_summary_attempts += 1;
-        messages.push(json!({
+      } else if run_state.segment.turn_cap_final_summary_attempts < 2 {
+        run_state.segment.turn_cap_final_summary_attempts += 1;
+        run_state.messages.push(json!({
           "role": "system",
           "content": crate::agent::build_turn_cap_final_summary_nudge(
-            actual_turns,
-            &written_files,
-            turn_cap_final_summary_attempts,
+            run_state.segment.actual_turns,
+            &run_state.written_files,
+            run_state.segment.turn_cap_final_summary_attempts,
           )
         }));
-        segment_max_turns = actual_turns + 1;
+        run_state.segment.max_turns = run_state.segment.actual_turns + 1;
         emit(&channel, json!({
           "type": "status",
           "data": {
             "phase": "turn_cap_final_summary",
-            "turn": actual_turns,
-            "maxTurns": segment_max_turns,
-            "detail": if turn_cap_final_summary_attempts >= 2 {
+            "turn": run_state.segment.actual_turns,
+            "maxTurns": run_state.segment.max_turns,
+            "detail": if run_state.segment.turn_cap_final_summary_attempts >= 2 {
               "已达最终总结轮，请输出总结"
             } else {
               "轮数即将用尽，请输出总结"
@@ -342,36 +326,36 @@ pub async fn agent_run(
       } else if run_policy.disable_segment_auto_extend {
         emit(&channel, json!({
           "type": "error",
-          "data": { "message": build_turn_cap_exhausted_message(actual_turns) }
+          "data": { "message": build_turn_cap_exhausted_message(run_state.segment.actual_turns) }
         }));
         break;
       } else {
-        segment_index += 1;
-        segment_max_turns = extend_segment_max_turns(actual_turns, segment_budget);
-        messages.push(json!({
+        run_state.segment.index += 1;
+        run_state.segment.max_turns = extend_segment_max_turns(run_state.segment.actual_turns, segment_budget);
+        run_state.messages.push(json!({
           "role": "system",
-          "content": build_segment_continue_nudge(actual_turns, segment_index, "build")
+          "content": build_segment_continue_nudge(run_state.segment.actual_turns, run_state.segment.index, "build")
         }));
         emit(&channel, json!({
           "type": "status",
           "data": {
             "phase": "continuing",
-            "turn": actual_turns,
-            "maxTurns": segment_max_turns,
-            "detail": format!("自动续跑第 {segment_index} 段（累计 {actual_turns} 轮）…")
+            "turn": run_state.segment.actual_turns,
+            "maxTurns": run_state.segment.max_turns,
+            "detail": format!("自动续跑第 {} 段（累计 {} 轮）…", run_state.segment.index, run_state.segment.actual_turns)
           }
         }));
       }
     }
 
-    actual_turns += 1;
-    let turn = actual_turns;
+    run_state.segment.actual_turns += 1;
+    let turn = run_state.segment.actual_turns;
     if run_policy.automated_bug_fix_run
       && run_started_at.elapsed().as_millis() as u128 > AUTO_BUG_FIX_WALL_CLOCK_MS
     {
       emit(&channel, json!({
         "type": "status",
-        "data": { "phase": "finished", "turn": turn, "maxTurns": segment_max_turns }
+        "data": { "phase": "finished", "turn": turn, "maxTurns": run_state.segment.max_turns }
       }));
       emit(&channel, json!({
         "type": "error",
@@ -379,42 +363,35 @@ pub async fn agent_run(
       }));
       emit(&channel, json!({
         "type": "done", "data": {
-          "writtenFiles": written_files, "pendingFiles": [], "turns": actual_turns
+          "writtenFiles": run_state.written_files, "pendingFiles": [], "turns": run_state.segment.actual_turns
         }
       }));
       return Ok(());
     }
     if is_cancelled(&cancel) {
-      if effective_mode_str == "explore" && !preflight_state.explore_abort_grace_turn_active {
-        preflight_state.explore_abort_grace_turn_active = true;
-        segment_max_turns = segment_max_turns.max(turn + 1);
+      if effective_mode_str == "explore" && !run_state.preflight_state.explore_abort_grace_turn_active {
+        run_state.preflight_state.explore_abort_grace_turn_active = true;
+        run_state.segment.max_turns = run_state.segment.max_turns.max(turn + 1);
         emit(&channel, json!({
           "type": "status",
           "data": {
             "phase": "aborted",
             "turn": turn,
-            "maxTurns": segment_max_turns,
+            "maxTurns": run_state.segment.max_turns,
             "model": request.model,
             "detail": "正在整理不完整知识库…"
           }
         }));
       } else {
-        emit_aborted_done(&channel, &written_files, actual_turns.saturating_sub(1).max(1));
+        emit_aborted_done(&channel, &run_state.written_files, run_state.segment.actual_turns.saturating_sub(1).max(1));
         return Ok(());
       }
     }
 
-    let mut preflight_flags = TurnPreflightMut {
-      ui_defect_force_patch_nudge_sent: ui_defect_force_patch_sent,
-      build_explore_force_patch_nudge_sent: build_explore_force_patch_sent,
-      patch_anchor_force_patch_nudge_sent: patch_anchor_force_patch_nudge_sent,
-      patch_anchor_force_pending,
-      force_write_only_tools,
-      consultative_force_answer_pending,
-    };
+    let mut preflight_flags = run_state.preflight_mut();
     let preflight_outcome = apply_turn_preflight(
       &mut TurnPreflightParams {
-        messages: &mut messages,
+        messages: &mut run_state.messages,
         mode: effective_mode_str,
         prompt: &request.prompt,
         is_read_only_run,
@@ -422,34 +399,29 @@ pub async fn agent_run(
         is_plan_explore,
         is_plan_text_only_follow_up,
         run_policy: &run_policy,
-        total_read_tool_calls,
-        written_files: &written_files,
-        explore_files_read: &explore_files_read,
-        tool_guard: &tool_guard,
+        total_read_tool_calls: run_state.consultative.total_read_tool_calls,
+        written_files: &run_state.written_files,
+        explore_files_read: &run_state.consultative.explore_files_read,
+        tool_guard: &run_state.tool_guard,
         all_tools: &all_tools,
         read_set: &read_set,
-        segment_max_turns,
+        segment_max_turns: run_state.segment.max_turns,
         turn,
-        vision_first_turn_pending,
-        agent_step_clarify_pending,
-        ambiguous_term_clarification_pending,
+        vision_first_turn_pending: run_state.vision.first_turn_pending,
+        agent_step_clarify_pending: run_state.nudge_flags.agent_step_clarify_pending,
+        ambiguous_term_clarification_pending: run_state.ambiguous_term_clarification_pending,
         nudge_mode,
       },
-      &mut preflight_state,
+      &mut run_state.preflight_state,
       &mut preflight_flags,
     );
-    ui_defect_force_patch_sent = preflight_flags.ui_defect_force_patch_nudge_sent;
-    build_explore_force_patch_sent = preflight_flags.build_explore_force_patch_nudge_sent;
-    patch_anchor_force_patch_nudge_sent = preflight_flags.patch_anchor_force_patch_nudge_sent;
-    patch_anchor_force_pending = preflight_flags.patch_anchor_force_pending;
-    force_write_only_tools = preflight_flags.force_write_only_tools;
-    consultative_force_answer_pending = preflight_flags.consultative_force_answer_pending;
-    active_tools = preflight_outcome.active_tools;
+    run_state.apply_preflight_mut(preflight_flags);
+    run_state.active_tools = preflight_outcome.active_tools;
 
     if !is_read_only_run && effective_mode_str != "explore" && effective_mode_str != "plan" {
-      if turn + 3 >= segment_max_turns && turn < segment_max_turns {
-        let remaining = segment_max_turns.saturating_sub(turn);
-        messages.push(json!({
+      if turn + 3 >= run_state.segment.max_turns && turn < run_state.segment.max_turns {
+        let remaining = run_state.segment.max_turns.saturating_sub(turn);
+        run_state.messages.push(json!({
           "role": "system",
           "content": crate::agent::build_segment_emergency_finish_nudge(remaining)
         }));
@@ -459,14 +431,14 @@ pub async fn agent_run(
     emit(&channel, json!({
       "type": "status",
       "data": {
-        "phase": if vision_first_turn_pending { "vision_first_turn" } else { "waiting_model" },
+        "phase": if run_state.vision.first_turn_pending { "vision_first_turn" } else { "waiting_model" },
         "turn": turn,
-        "maxTurns": segment_max_turns,
+        "maxTurns": run_state.segment.max_turns,
         "model": request.model
       }
     }));
 
-    let compacted = compact_messages_for_model(&messages, run_policy.max_context_chars);
+    let compacted = compact_messages_for_model(&run_state.messages, run_policy.max_context_chars);
     let compacted_messages = compacted.messages;
     let context_chars = messages_char_size(&compacted_messages);
     if compacted.did_compact {
@@ -475,7 +447,7 @@ pub async fn agent_run(
         "data": {
           "phase": "compacting_context",
           "turn": turn,
-          "maxTurns": segment_max_turns,
+          "maxTurns": run_state.segment.max_turns,
           "model": request.model,
           "contextMessages": compacted_messages.len(),
           "contextChars": context_chars,
@@ -486,7 +458,7 @@ pub async fn agent_run(
       "type": "turn_request",
       "data": {
         "turn": turn,
-        "maxTurns": segment_max_turns,
+        "maxTurns": run_state.segment.max_turns,
         "contextMessages": compacted_messages.len(),
         "contextChars": context_chars,
       }
@@ -494,7 +466,7 @@ pub async fn agent_run(
     let body = json!({
       "model": request.model,
       "messages": compacted_messages,
-      "tools": active_tools,
+      "tools": run_state.active_tools,
       "tool_choice": "auto",
       "stream": true
     });
@@ -511,7 +483,7 @@ pub async fn agent_run(
           "data": {
             "phase": "retrying_model",
             "turn": turn,
-            "maxTurns": segment_max_turns,
+            "maxTurns": run_state.segment.max_turns,
             "model": request.model,
             "retryAttempt": attempt,
             "retryMaxAttempts": max_attempts,
@@ -527,8 +499,8 @@ pub async fn agent_run(
       stream_resp,
       &channel,
       &cancel,
-      &written_files,
-      actual_turns,
+      &run_state.written_files,
+      run_state.segment.actual_turns,
     )
     .await?
     else {
@@ -536,7 +508,7 @@ pub async fn agent_run(
     };
 
     let assistant_text = turn_output.assistant_text;
-    tool_guard.note_vision_assistant_text(&assistant_text);
+    run_state.tool_guard.note_vision_assistant_text(&assistant_text);
     let tool_calls_value = turn_output.tool_calls_value;
     let tool_calls = turn_output.tool_calls;
     let is_final = turn_output.is_final;
@@ -547,13 +519,13 @@ pub async fn agent_run(
 
     emit(&channel, json!({
       "type": "turn_response", "data": {
-        "turn": turn, "maxTurns": segment_max_turns,
+        "turn": turn, "maxTurns": run_state.segment.max_turns,
         "assistantText": assistant_text, "toolCalls": tool_calls,
         "hasToolCalls": !is_final, "isFinal": is_final
       }
     }));
 
-    messages.push(json!({
+    run_state.messages.push(json!({
       "role": "assistant",
       "content": assistant_text,
       "tool_calls": tool_calls_value
@@ -562,43 +534,43 @@ pub async fn agent_run(
     if is_final
       && vision_locate_single_turn_run
       && run_policy.consultative_vision_run
-      && !vision_locate_tools_used
-      && !vision_pregrep_done
+      && !run_state.vision.locate_tools_used
+      && !run_state.vision.pregrep_done
     {
-      if tool_guard.vision_anchor_quotes.is_empty() {
+      if run_state.tool_guard.vision_anchor_quotes.is_empty() {
         let quotes = crate::agent::vision::extract_visible_anchor_quotes(&assistant_text);
         if !quotes.is_empty() {
-          tool_guard.vision_anchor_quotes = quotes;
-          tool_guard.vision_narrative_text = Some(assistant_text.clone());
-          tool_guard.vision_locate_active = true;
+          run_state.tool_guard.vision_anchor_quotes = quotes;
+          run_state.tool_guard.vision_narrative_text = Some(assistant_text.clone());
+          run_state.tool_guard.vision_locate_active = true;
         }
       }
       if should_run_vision_anchor_pgrep(
         run_policy.consultative_vision_run,
         &request.prompt,
-        &tool_guard.vision_anchor_quotes,
-      ) && !tool_guard.vision_anchor_quotes.is_empty()
+        &run_state.tool_guard.vision_anchor_quotes,
+      ) && !run_state.tool_guard.vision_anchor_quotes.is_empty()
       {
         let pregrep_state = apply_vision_anchor_pgrep_messages(
-          &mut messages,
+          &mut run_state.messages,
           &request.project_path,
-          &tool_guard.vision_anchor_quotes,
+          &run_state.tool_guard.vision_anchor_quotes,
         )
         .await;
-        vision_pregrep_done = pregrep_state.vision_pregrep_done;
+        run_state.vision.pregrep_done = pregrep_state.vision_pregrep_done;
         if pregrep_state.vision_locate_tools_used {
-          vision_locate_tools_used = true;
+          run_state.vision.locate_tools_used = true;
         }
         if pregrep_state.vision_auto_grep_had_matches {
-          vision_auto_grep_had_matches = true;
+          run_state.vision.auto_grep_had_matches = true;
         }
-        pregrep_unique_files = pregrep_state.unique_files;
+        run_state.vision.pregrep_unique_files = pregrep_state.unique_files;
         emit(&channel, json!({
           "type": "status",
           "data": {
             "phase": "vision_consultative_locate_single_turn",
             "turn": turn,
-            "maxTurns": segment_max_turns,
+            "maxTurns": run_state.segment.max_turns,
             "detail": "单轮读图定位需要 grep 确认，已继续"
           }
         }));
@@ -606,61 +578,61 @@ pub async fn agent_run(
       }
     }
 
-    if vision_first_turn_pending {
+    if run_state.vision.first_turn_pending {
       if !tool_calls.is_empty() {
-        vision_first_turn_pending = false;
+        run_state.vision.first_turn_pending = false;
       } else if !crate::agent::vision::is_adequate_vision_first_turn_description(&assistant_text) {
-        vision_first_turn_retries += 1;
-        if vision_first_turn_retries >= 2 {
-          vision_first_turn_pending = false;
-          messages.push(json!({
+        run_state.vision.first_turn_retries += 1;
+        if run_state.vision.first_turn_retries >= 2 {
+          run_state.vision.first_turn_pending = false;
+          run_state.messages.push(json!({
             "role": "system",
             "content": "首轮读图描述不充分，已跳过多轮读图重试，请直接根据已有信息继续。"
           }));
         } else {
-          messages.push(json!({
+          run_state.messages.push(json!({
             "role": "user",
-            "content": build_vision_first_turn_retry_hint(vision_first_turn_retries)
+            "content": build_vision_first_turn_retry_hint(run_state.vision.first_turn_retries)
           }));
           emit(&channel, json!({
             "type": "status",
-            "data": { "phase": "vision_first_turn_retry", "turn": turn, "maxTurns": segment_max_turns }
+            "data": { "phase": "vision_first_turn_retry", "turn": turn, "maxTurns": run_state.segment.max_turns }
           }));
           continue;
         }
-      } else if !vision_pregrep_done && !tool_guard.vision_anchor_quotes.is_empty() {
-        vision_first_turn_pending = false;
+      } else if !run_state.vision.pregrep_done && !run_state.tool_guard.vision_anchor_quotes.is_empty() {
+        run_state.vision.first_turn_pending = false;
         let pregrep_state = apply_vision_anchor_pgrep_messages(
-          &mut messages,
+          &mut run_state.messages,
           &request.project_path,
-          &tool_guard.vision_anchor_quotes,
+          &run_state.tool_guard.vision_anchor_quotes,
         )
         .await;
-        vision_pregrep_done = pregrep_state.vision_pregrep_done;
+        run_state.vision.pregrep_done = pregrep_state.vision_pregrep_done;
         if pregrep_state.vision_locate_tools_used {
-          vision_locate_tools_used = true;
+          run_state.vision.locate_tools_used = true;
         }
         if pregrep_state.vision_auto_grep_had_matches {
-          vision_auto_grep_had_matches = true;
+          run_state.vision.auto_grep_had_matches = true;
         }
-        pregrep_unique_files = pregrep_state.unique_files;
+        run_state.vision.pregrep_unique_files = pregrep_state.unique_files;
         emit(&channel, json!({
           "type": "status",
-          "data": { "phase": "vision_anchor_prefgrep", "turn": turn, "maxTurns": segment_max_turns }
+          "data": { "phase": "vision_anchor_prefgrep", "turn": turn, "maxTurns": run_state.segment.max_turns }
         }));
         continue;
       } else {
-        vision_first_turn_pending = false;
+        run_state.vision.first_turn_pending = false;
       }
     }
 
-    if is_final && agent_step_clarify_pending {
-      agent_step_clarify_pending = false;
+    if is_final && run_state.nudge_flags.agent_step_clarify_pending {
+      run_state.nudge_flags.agent_step_clarify_pending = false;
       if run_policy.ui_defect_build_run
-        || tool_guard.patch_anchor_located
-        || patch_anchor_force_pending
+        || run_state.tool_guard.patch_anchor_located
+        || run_state.patch.patch_anchor_force_pending
       {
-        messages.push(json!({
+        run_state.messages.push(json!({
           "role": "system",
           "content": intent_hints::build_agent_step_clarify_continue_hint()
         }));
@@ -669,7 +641,7 @@ pub async fn agent_run(
           "data": {
             "phase": "clarify_continue",
             "turn": turn,
-            "maxTurns": segment_max_turns,
+            "maxTurns": run_state.segment.max_turns,
             "detail": "步骤澄清后继续完成修改"
           }
         }));
@@ -678,7 +650,7 @@ pub async fn agent_run(
     }
 
     if is_final && should_nudge_english_planning(&assistant_text) {
-      messages.push(json!({
+      run_state.messages.push(json!({
         "role": "user",
         "content": build_english_planning_nudge()
       }));
@@ -686,28 +658,13 @@ pub async fn agent_run(
     }
 
     if is_final {
-      let mut finalize_mut = FinalizeTurnMut {
-        consultative_force_answer_pending,
-        vision_consultative_locate_retries,
-        accuracy_retries,
-        behavior_purpose_retries,
-        ui_behavior_retries,
-        modification_audit_sent,
-        patch_required_retries,
-        patch_failure_completion_retries,
-        manual_handoff_retries,
-        premature_completion_retries,
-        empty_reply_retries,
-        workspace_cleanup_nudge_sent,
-        ambiguous_term_clarification_pending,
-        ambiguous_term_clarification_retries,
-      };
+      let mut finalize_mut = run_state.finalize_mut();
       let outcome = handle_final_turn(
         &mut FinalizeTurnParams {
-          messages: &mut messages,
+          messages: &mut run_state.messages,
           assistant_text: &assistant_text,
-          written_files: &written_files,
-          tool_guard: &tool_guard,
+          written_files: &run_state.written_files,
+          tool_guard: &run_state.tool_guard,
           run_policy: &run_policy,
           mode: effective_mode_str,
           is_read_only_run,
@@ -719,40 +676,27 @@ pub async fn agent_run(
             request.prompt.as_str()
           },
           target_files: request.run_profile.as_ref().and_then(|p| p.target_files.clone()),
-          pregrep_unique_files: &pregrep_unique_files,
-          consultative_read_paths: &consultative_read_paths,
-          consultative_read_failed_paths: &consultative_read_failed_paths,
-          consultative_grep_patterns: &consultative_grep_patterns,
-          vision_locate_tools_used,
-          vision_auto_grep_had_matches,
-          vision_locate_read_used,
+          pregrep_unique_files: &run_state.vision.pregrep_unique_files,
+          consultative_read_paths: &run_state.consultative.read_paths,
+          consultative_read_failed_paths: &run_state.consultative.read_failed_paths,
+          consultative_grep_patterns: &run_state.consultative.grep_patterns,
+          vision_locate_tools_used: run_state.vision.locate_tools_used,
+          vision_auto_grep_had_matches: run_state.vision.auto_grep_had_matches,
+          vision_locate_read_used: run_state.vision.locate_read_used,
           effective_read_only_build,
-          patch_failure_log: &patch_failure_log,
-          probe_tracker: &probe_tracker,
-          build_explore_force_patch_sent,
-          patch_anchor_force_pending,
+          patch_failure_log: &run_state.patch.failure_log,
+          probe_tracker: &run_state.probe_tracker,
+          build_explore_force_patch_sent: run_state.patch.build_explore_force_patch_sent,
+          patch_anchor_force_pending: run_state.patch.patch_anchor_force_pending,
           turn,
-          segment_max_turns,
+          segment_max_turns: run_state.segment.max_turns,
           channel: &channel,
-          ambiguous_term_clarification_pending,
-          ambiguous_term_clarification_terms: &ambiguous_term_clarification_terms,
+          ambiguous_term_clarification_pending: run_state.ambiguous_term_clarification_pending,
+          ambiguous_term_clarification_terms: &run_state.ambiguous_term_clarification_terms,
         },
         &mut finalize_mut,
       );
-      consultative_force_answer_pending = finalize_mut.consultative_force_answer_pending;
-      vision_consultative_locate_retries = finalize_mut.vision_consultative_locate_retries;
-      accuracy_retries = finalize_mut.accuracy_retries;
-      behavior_purpose_retries = finalize_mut.behavior_purpose_retries;
-      ui_behavior_retries = finalize_mut.ui_behavior_retries;
-      modification_audit_sent = finalize_mut.modification_audit_sent;
-      patch_required_retries = finalize_mut.patch_required_retries;
-      patch_failure_completion_retries = finalize_mut.patch_failure_completion_retries;
-      manual_handoff_retries = finalize_mut.manual_handoff_retries;
-      premature_completion_retries = finalize_mut.premature_completion_retries;
-      empty_reply_retries = finalize_mut.empty_reply_retries;
-      workspace_cleanup_nudge_sent = finalize_mut.workspace_cleanup_nudge_sent;
-      ambiguous_term_clarification_pending = finalize_mut.ambiguous_term_clarification_pending;
-      ambiguous_term_clarification_retries = finalize_mut.ambiguous_term_clarification_retries;
+      run_state.apply_finalize_mut(finalize_mut);
       match outcome {
         FinalizeTurnOutcome::Continue => continue,
         FinalizeTurnOutcome::Break => break,
@@ -770,12 +714,12 @@ pub async fn agent_run(
       mode: effective_mode_str,
       web_proxy_url,
       automated_bug_fix,
-      written_files: &mut written_files,
-      tool_guard: &mut tool_guard,
+      written_files: &mut run_state.written_files,
+      tool_guard: &mut run_state.tool_guard,
     };
     for call in tool_calls {
       if is_cancelled(&cancel) {
-        emit_aborted_done(&channel, &written_files, actual_turns);
+        emit_aborted_done(&channel, &run_state.written_files, run_state.segment.actual_turns);
         return Ok(());
       }
       let id = call.get("id").and_then(|v| v.as_str()).unwrap_or("");
@@ -798,9 +742,9 @@ pub async fn agent_run(
       {
         if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
           if name == "write_file" && is_ephemeral_probe_path(path) {
-            probe_tracker.track_write(path);
+            run_state.probe_tracker.track_write(path);
           } else if name == "delete_file" && is_ephemeral_probe_path(path) {
-            probe_tracker.track_delete(path);
+            run_state.probe_tracker.track_delete(path);
           }
         }
       }
@@ -812,7 +756,7 @@ pub async fn agent_run(
             path: norm.clone(),
             reason: result.clone(),
           };
-          patch_failure_log.push(entry.clone());
+          run_state.patch.failure_log.push(entry.clone());
           turn_patch_failures.push(entry);
         }
       } else if name == "grep" {
@@ -823,18 +767,18 @@ pub async fn agent_run(
         if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
           let norm = path.replace('\\', "/");
           if ok {
-            if !consultative_read_paths.contains(&norm) {
-              consultative_read_paths.push(norm.clone());
+            if !run_state.consultative.read_paths.contains(&norm) {
+              run_state.consultative.read_paths.push(norm.clone());
             }
-            explore_files_read.insert(norm);
+            run_state.consultative.explore_files_read.insert(norm);
             if has_image {
-              vision_locate_tools_used = true;
+              run_state.vision.locate_tools_used = true;
             }
             if run_policy.consultative_vision_run && tool_ctx.tool_guard.vision_locate_active {
-              vision_locate_read_used = true;
+              run_state.vision.locate_read_used = true;
             }
-          } else if !consultative_read_failed_paths.contains(&norm) {
-            consultative_read_failed_paths.push(norm.clone());
+          } else if !run_state.consultative.read_failed_paths.contains(&norm) {
+            run_state.consultative.read_failed_paths.push(norm.clone());
             if !turn_read_failed_paths.contains(&norm) {
               turn_read_failed_paths.push(norm);
             }
@@ -842,7 +786,7 @@ pub async fn agent_run(
         }
       } else if name == "grep" {
         if ok && has_image {
-          vision_locate_tools_used = true;
+          run_state.vision.locate_tools_used = true;
         }
         if ok && result.contains("（无匹配）") {
           if let Some(pattern) = args.get("pattern").or_else(|| args.get("q")).and_then(|v| v.as_str()) {
@@ -854,8 +798,8 @@ pub async fn agent_run(
         }
         if let Some(pattern) = args.get("pattern").or_else(|| args.get("q")).and_then(|v| v.as_str()) {
           let trimmed = pattern.trim();
-          if !trimmed.is_empty() && !consultative_grep_patterns.iter().any(|p| p == trimmed) {
-            consultative_grep_patterns.push(trimmed.to_string());
+          if !trimmed.is_empty() && !run_state.consultative.grep_patterns.iter().any(|p| p == trimmed) {
+            run_state.consultative.grep_patterns.push(trimmed.to_string());
           }
         }
       }
@@ -872,38 +816,28 @@ pub async fn agent_run(
         }
       }));
 
-      messages.push(json!({ "role": "tool", "tool_call_id": id, "content": result }));
+      run_state.messages.push(json!({ "role": "tool", "tool_call_id": id, "content": result }));
     }
 
-    let mut post_tool_mut = PostToolTurnMut {
-      consecutive_runtime_tool_failure_turns,
-      last_consultative_explore_sig,
-      consecutive_read_turns,
-      total_read_tool_calls,
-      build_explore_force_patch_sent,
-      patch_anchor_force_pending,
-      force_write_only_tools,
-      scheduled_job_registration_nudge_sent,
-      consultative_force_answer_pending,
-    };
+    let mut post_tool_mut = run_state.post_tool_mut();
     apply_post_tool_turn(
       &mut PostToolNudgeParams {
-        messages: &mut messages,
+        messages: &mut run_state.messages,
         turn,
         turn_grep_empty_patterns: &turn_grep_empty_patterns,
         turn_read_failed_paths: &turn_read_failed_paths,
         turn_patch_failures: &turn_patch_failures,
-        patch_failure_log: &patch_failure_log,
+        patch_failure_log: &run_state.patch.failure_log,
         effective_read_only_build,
         consultative_vision_run: run_policy.consultative_vision_run,
         turn_had_only_read_tools,
         turn_had_grep,
-        tool_guard: &tool_guard,
-        consultative_read_paths: &consultative_read_paths,
+        tool_guard: &run_state.tool_guard,
+        consultative_read_paths: &run_state.consultative.read_paths,
         turn_tool_outcomes: &turn_tool_outcomes,
-        consultative_grep_patterns: &consultative_grep_patterns,
+        consultative_grep_patterns: &run_state.consultative.grep_patterns,
         is_read_only_run,
-        written_files: &written_files,
+        written_files: &run_state.written_files,
         scheduled_task_consultative_run: run_policy.scheduled_task_consultative_run,
         mode: effective_mode_str,
         is_execute_plan,
@@ -913,20 +847,12 @@ pub async fn agent_run(
       },
       &mut post_tool_mut,
     );
-    consecutive_runtime_tool_failure_turns = post_tool_mut.consecutive_runtime_tool_failure_turns;
-    last_consultative_explore_sig = post_tool_mut.last_consultative_explore_sig;
-    consecutive_read_turns = post_tool_mut.consecutive_read_turns;
-    total_read_tool_calls = post_tool_mut.total_read_tool_calls;
-    build_explore_force_patch_sent = post_tool_mut.build_explore_force_patch_sent;
-    patch_anchor_force_pending = post_tool_mut.patch_anchor_force_pending;
-    force_write_only_tools = post_tool_mut.force_write_only_tools;
-    scheduled_job_registration_nudge_sent = post_tool_mut.scheduled_job_registration_nudge_sent;
-    consultative_force_answer_pending = post_tool_mut.consultative_force_answer_pending;
+    run_state.apply_post_tool_mut(post_tool_mut);
   }
 
   emit(&channel, json!({
     "type": "done", "data": {
-      "writtenFiles": written_files, "pendingFiles": [], "turns": actual_turns
+      "writtenFiles": run_state.written_files, "pendingFiles": [], "turns": run_state.segment.actual_turns
     }
   }));
   Ok(())
