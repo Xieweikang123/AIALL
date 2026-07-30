@@ -7,6 +7,7 @@ mod remote;
 mod stash;
 mod branches;
 mod ops;
+mod hunks;
 mod advanced;
 
 pub use status::*;
@@ -16,4 +17,5 @@ pub use remote::*;
 pub use stash::*;
 pub use branches::*;
 pub use ops::*;
+pub use hunks::*;
 pub use advanced::*;

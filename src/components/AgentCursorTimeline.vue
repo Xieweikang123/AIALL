@@ -45,7 +45,6 @@ import {
 import type { AgentRoundGroup } from "../services/agentRoundGroups";
 import {
   collectToolsFromInlineFeed,
-  splitInlineFeedItems,
   type InlineFeedItem,
 } from "../services/agentInlineFeed";
 import { formatExplorationSummary, computeExplorationStats } from "../services/agentCursorFeed";
@@ -89,12 +88,11 @@ const emit = defineEmits<{
 
 const timelineRoot = ref<HTMLElement | null>(null);
 
-const splitFeed = computed(() => splitInlineFeedItems(props.inlineItems));
-const processItems = computed(() => splitFeed.value.process);
+const processItems = computed(() => props.inlineItems);
 
 const liveTools = computed(() => collectToolsFromInlineFeed(processItems.value));
 const toolCount = computed(() => liveTools.value.length);
-const hasAnswerContent = computed(() => splitFeed.value.answers.some((a) => a.text.trim()));
+const hasAnswerContent = computed(() => props.inlineItems.some((item) => item.kind === "text" && item.text.trim()));
 
 const toolDefaultVisible = computed(() => {
   if (props.activityDetailed) return 12;
@@ -147,7 +145,7 @@ const liveRailVisible = computed(() => {
 });
 
 const progressHint = computed((): string | undefined => {
-  if (!props.isRunning || hasAnswerContent.value || splitFeed.value.answers.some((a) => a.streaming)) return undefined;
+  if (!props.isRunning || hasAnswerContent.value) return undefined;
   if (!toolCount.value || !isWaitingModel.value) return undefined;
   const stats = computeExplorationStats(liveTools.value);
   const summary = formatExplorationSummary(stats, true).replace(/^探索代码库 · /, "");
@@ -172,6 +170,7 @@ watch(timelineRoot, (el) => bindScrollEl(el));
 
 <style scoped>
 .agent-stream {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 6px;

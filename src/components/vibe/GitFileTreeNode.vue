@@ -1,16 +1,46 @@
 <template>
   <div v-if="node.isDirectory" class="git-tree-dir">
-    <button
-      type="button"
+    <div
       class="git-tree-row git-tree-row--dir"
       :style="{ paddingLeft }"
-      @click="$emit('toggle-dir', node.path)"
     >
-      <span class="git-tree-check-spacer" aria-hidden="true" />
-      <span class="git-tree-chevron" aria-hidden="true">{{ expanded ? "▾" : "▸" }}</span>
-      <span class="git-tree-folder-icon" aria-hidden="true" />
-      <span class="git-tree-name">{{ node.name }}</span>
-    </button>
+      <button
+        type="button"
+        class="git-tree-dir-toggle"
+        @click="$emit('toggle-dir', node.path)"
+      >
+        <span class="git-tree-check-spacer" aria-hidden="true" />
+        <span class="git-tree-chevron" aria-hidden="true">{{ expanded ? "▾" : "▸" }}</span>
+        <span class="git-tree-folder-icon" aria-hidden="true" />
+        <span class="git-tree-name">{{ node.name }}</span>
+      </button>
+      <div class="git-file-actions">
+        <button
+          v-if="staged"
+          type="button"
+          class="git-file-btn"
+          title="取消暂存此文件夹"
+          @pointerdown.stop
+          @click.stop="$emit('unstage-dir', node.path)"
+        >✓</button>
+        <template v-else>
+          <button
+            type="button"
+            class="git-file-btn"
+            title="暂存此文件夹"
+            @pointerdown.stop
+            @click.stop="$emit('stage-dir', node.path)"
+          >+</button>
+          <button
+            type="button"
+            class="git-file-btn danger"
+            title="丢弃此文件夹（未跟踪将删除）"
+            @pointerdown.stop
+            @click.stop="$emit('discard-dir', node.path, $event)"
+          >✕</button>
+        </template>
+      </div>
+    </div>
     <div v-if="expanded && node.children?.length" class="git-tree-children">
       <GitFileTreeNode
         v-for="child in node.children"
@@ -18,6 +48,7 @@
         :node="child"
         :depth="depth + 1"
         :staged="staged"
+        :list-scope="listScope"
         :expanded-dirs="expandedDirs"
         :selected-git-files="selectedGitFiles"
         :git-diff-loading-key="gitDiffLoadingKey"
@@ -25,8 +56,11 @@
         @stage-file="$emit('stage-file', $event)"
         @unstage-file="$emit('unstage-file', $event)"
         @discard-file="(path, event) => $emit('discard-file', path, event)"
-        @pointer-down="(event, path, isStaged) => $emit('pointer-down', event, path, isStaged)"
-        @contextmenu="(event, path) => $emit('contextmenu', event, path)"
+        @stage-dir="$emit('stage-dir', $event)"
+        @unstage-dir="$emit('unstage-dir', $event)"
+        @discard-dir="(path, event) => $emit('discard-dir', path, event)"
+        @pointer-down="(event, path, scope) => $emit('pointer-down', event, path, scope)"
+        @contextmenu="(event, path, scope) => $emit('contextmenu', event, path, scope)"
         @open-file="(path) => $emit('open-file', path)"
       />
     </div>
@@ -35,52 +69,64 @@
     v-else
     class="git-tree-row git-tree-row--file file-item-draggable"
     :class="{
-      active: selectedGitFiles.includes(node.path),
+      active: selectedGitFiles.includes(gitFileSelectionKey(node.path, staged)),
       loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(node.path, staged),
     }"
     :style="{ paddingLeft }"
-    @pointerdown="$emit('pointer-down', $event, node.path, staged)"
-    @contextmenu.prevent="$emit('contextmenu', $event, node.path)"
+    @pointerdown="$emit('pointer-down', $event, node.path, listScope)"
+    @contextmenu.prevent="$emit('contextmenu', $event, node.path, listScope)"
     @dblclick="$emit('open-file', node.path)"
   >
-    <span
-      v-if="staged"
-      class="git-file-check"
-      @pointerdown.stop
-      @click.stop="$emit('unstage-file', node.path)"
-    >✓</span>
-    <span
-      v-else
-      class="git-file-check"
-      @pointerdown.stop
-      @click.stop="$emit('stage-file', node.path)"
-    >+</span>
-    <span class="git-tree-chevron git-tree-chevron--spacer" aria-hidden="true" />
+    <span class="git-tree-check-spacer" aria-hidden="true" />
     <span class="git-tree-file-icon" :class="fileTypeClass" aria-hidden="true">{{ fileTypeLabel }}</span>
     <span class="git-tree-name" :title="node.path">{{ node.name }}</span>
     <span class="git-file-status" :class="gitStatusClass(node.file?.status ?? '')">
       {{ gitStatusIcon(node.file?.status ?? "") }}
     </span>
-    <button
-      v-if="!staged"
-      type="button"
-      class="ghost tiny danger git-file-btn"
-      title="丢弃更改"
-      @pointerdown.stop
-      @click.stop="$emit('discard-file', node.path, $event)"
-    >✕</button>
+    <div class="git-file-actions">
+      <button
+        v-if="staged"
+        type="button"
+        class="git-file-btn"
+        title="取消暂存"
+        @pointerdown.stop
+        @click.stop="$emit('unstage-file', node.path)"
+      >✓</button>
+      <template v-else>
+        <button
+          type="button"
+          class="git-file-btn"
+          title="暂存更改"
+          @pointerdown.stop
+          @click.stop="$emit('stage-file', node.path)"
+        >+</button>
+        <button
+          type="button"
+          class="git-file-btn danger"
+          :title="node.file?.status === 'untracked' ? '删除未跟踪文件' : '丢弃更改'"
+          @pointerdown.stop
+          @click.stop="$emit('discard-file', node.path, $event)"
+        >✕</button>
+      </template>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from "vue";
 import type { GitFileTreeNode } from "../../utils/gitFileTree";
-import { gitStatusIcon, gitStatusClass } from "../../utils/gitHelpers";
+import {
+  gitStatusIcon,
+  gitStatusClass,
+  gitFileSelectionKey,
+  type GitFileListScope,
+} from "../../utils/gitHelpers";
 
 const props = defineProps<{
   node: GitFileTreeNode;
   depth?: number;
   staged: boolean;
+  listScope: GitFileListScope;
   expandedDirs: Set<string>;
   selectedGitFiles: string[];
   gitDiffLoadingKey: string;
@@ -91,13 +137,16 @@ defineEmits<{
   "stage-file": [path: string];
   "unstage-file": [path: string];
   "discard-file": [path: string, event: MouseEvent];
-  "pointer-down": [event: PointerEvent, path: string, staged: boolean];
-  contextmenu: [event: MouseEvent, path: string];
+  "stage-dir": [path: string];
+  "unstage-dir": [path: string];
+  "discard-dir": [path: string, event: MouseEvent];
+  "pointer-down": [event: PointerEvent, path: string, listScope: GitFileListScope];
+  contextmenu: [event: MouseEvent, path: string, listScope: GitFileListScope];
   "open-file": [path: string];
 }>();
 
 const depth = computed(() => props.depth ?? 0);
-const paddingLeft = computed(() => `${4 + depth.value * 12}px`);
+const paddingLeft = computed(() => `${8 + depth.value * 24}px`);
 const expanded = computed(() => props.expandedDirs.has(props.node.path));
 
 const FILE_KIND_BY_EXT: Record<string, string> = {
@@ -150,8 +199,24 @@ function gitWorkingTreeDiffKey(path: string, isStaged: boolean): string {
 .git-tree-row--dir {
   border: none;
   background: transparent;
-  cursor: pointer;
+  cursor: default;
   text-align: left;
+  gap: 0;
+}
+
+.git-tree-dir-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+  font: inherit;
 }
 
 .git-tree-row--file {
@@ -181,10 +246,6 @@ function gitWorkingTreeDiffKey(path: string, isStaged: boolean): string {
   font-size: 10px;
   color: rgba(139, 148, 158, 0.85);
   text-align: center;
-}
-
-.git-tree-chevron--spacer {
-  visibility: hidden;
 }
 
 .git-tree-folder-icon {
@@ -242,28 +303,6 @@ function gitWorkingTreeDiffKey(path: string, isStaged: boolean): string {
   font-weight: 500;
 }
 
-:deep(.git-file-check) {
-  width: 20px;
-  height: 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 600;
-  color: rgba(139, 148, 158, 0.7);
-  cursor: pointer;
-  border-radius: 4px;
-  border: 1px solid transparent;
-  flex-shrink: 0;
-  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
-}
-
-:deep(.git-file-check:hover) {
-  color: rgba(255, 255, 255, 0.95);
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.12);
-}
-
 :deep(.git-file-status) {
   font-size: 10px;
   font-weight: 700;
@@ -274,7 +313,7 @@ function gitWorkingTreeDiffKey(path: string, isStaged: boolean): string {
   justify-content: center;
   border-radius: 3px;
   flex-shrink: 0;
-  margin-left: auto;
+  margin-left: 4px;
 }
 
 :deep(.git-status-added) {
@@ -297,18 +336,61 @@ function gitWorkingTreeDiffKey(path: string, isStaged: boolean): string {
   background: rgba(88, 166, 255, 0.14);
 }
 
+:deep(.git-status-untracked) {
+  color: #79c0ff;
+  background: rgba(88, 166, 255, 0.12);
+}
+
+:deep(.git-status-conflicted) {
+  color: #f85149;
+  background: rgba(248, 81, 73, 0.14);
+}
+
 :deep(.git-status-unknown) {
   color: #8b949e;
   background: rgba(139, 148, 158, 0.12);
 }
 
-:deep(.git-file-btn) {
+.git-file-actions {
   opacity: 0;
-  transition: opacity 0.15s;
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
   flex-shrink: 0;
 }
 
-.git-tree-row--file:hover :deep(.git-file-btn) {
+.git-tree-row--file:hover .git-file-actions,
+.git-tree-row--dir:hover .git-file-actions {
   opacity: 1;
+}
+
+:deep(.git-file-btn) {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.6);
+  transition: all 0.15s ease;
+  cursor: pointer;
+  line-height: 1;
+}
+
+:deep(.git-file-btn:hover) {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+:deep(.git-file-btn.danger:hover) {
+  background: rgba(248, 81, 73, 0.15);
+  border-color: rgba(248, 81, 73, 0.3);
+  color: #f85149;
 }
 </style>

@@ -239,6 +239,28 @@ async fn read_worktree_file(project_root: &str, file_path: &str) -> Result<Strin
   Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
+async fn git_show_blob(project_root: &str, spec: &str) -> Result<String, String> {
+  let out = git_exec(project_root, &["show", "--textconv", spec]).await?;
+  if out.stdout.as_bytes().contains(&0) {
+    return Err(format!("{spec} 是二进制内容，无法预览"));
+  }
+  if out.stdout.len() > MAX_DIFF {
+    return Err(format!("{spec} 过大，无法预览"));
+  }
+  Ok(out.stdout)
+}
+
+fn truncate_diff_text(text: String) -> String {
+  if text.len() <= MAX_DIFF {
+    return text;
+  }
+  let mut end = MAX_DIFF.min(text.len());
+  while end > 0 && !text.is_char_boundary(end) {
+    end -= 1;
+  }
+  format!("{}\n\n…（内容过大，已截断预览）", &text[..end])
+}
+
 pub async fn git_diff_content(
   project_root: &str,
   file_path: &str,
@@ -252,30 +274,41 @@ pub async fn git_diff_content(
       error: None,
     };
   }
-  let diff_args = if staged {
-    vec!["diff", "--cached", "--no-color", "-U100000", "--", file_path]
+
+  // Prefer blob/worktree reads over `diff -U100000` — avoids huge unified patches
+  // and keeps Monaco side-by-side previews responsive on large files.
+  let (before_res, after_res): (Result<String, String>, Result<String, String>) = if staged {
+    let before = git_show_blob(project_root, &format!("HEAD:{file_path}"))
+      .await
+      .unwrap_or_default();
+    let after = match git_show_blob(project_root, &format!(":{file_path}")).await {
+      Ok(text) => Ok(text),
+      Err(_) => read_worktree_file(project_root, file_path).await,
+    };
+    (Ok(before), after)
   } else {
-    vec!["diff", "--no-color", "-U100000", "--", file_path]
+    let before = match git_show_blob(project_root, &format!(":{file_path}")).await {
+      Ok(text) => text,
+      Err(_) => git_show_blob(project_root, &format!("HEAD:{file_path}"))
+        .await
+        .unwrap_or_default(),
+    };
+    (Ok(before), read_worktree_file(project_root, file_path).await)
   };
-  match git_exec(project_root, &diff_args).await {
-    Ok(out) if !out.stdout.trim().is_empty() => {
-      let (before, after) = parse_unified_diff(&out.stdout);
-      GitDiffContentResult {
-        ok: true,
-        before,
-        after,
-        error: None,
-      }
-    }
-    _ => {
-      let after = read_worktree_file(project_root, file_path).await.unwrap_or_default();
-      GitDiffContentResult {
-        ok: true,
-        before: String::new(),
-        after,
-        error: None,
-      }
-    }
+
+  match (before_res, after_res) {
+    (Ok(before), Ok(after)) => GitDiffContentResult {
+      ok: true,
+      before: truncate_diff_text(before),
+      after: truncate_diff_text(after),
+      error: None,
+    },
+    (_, Err(error)) | (Err(error), _) => GitDiffContentResult {
+      ok: false,
+      before: String::new(),
+      after: String::new(),
+      error: Some(error),
+    },
   }
 }
 

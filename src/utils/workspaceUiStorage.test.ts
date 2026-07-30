@@ -41,7 +41,7 @@ describe("workspaceUiStorage", () => {
       git: {
         logOpen: true,
         selectedFiles: ["src/a.ts"],
-        treeExpandedDirs: ["src"],
+        untrackedOpen: false,
       },
       planPanelInForeground: true,
       quickSearchOpen: false,
@@ -55,7 +55,7 @@ describe("workspaceUiStorage", () => {
       git: {
         logOpen: true,
         selectedFiles: ["src/a.ts"],
-        treeExpandedDirs: ["src"],
+        untrackedOpen: false,
       },
       planPanelInForeground: true,
       quickSearchOpen: false,

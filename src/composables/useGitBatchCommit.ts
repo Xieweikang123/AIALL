@@ -311,7 +311,6 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
   const canCommitAllBatches = computed(() => {
     const n = batchGroups.value?.length ?? 0;
     if (!n || batchCommittingIndex.value !== null) return false;
-    if (!batchGroupsFromAi.value) return false;
     return batchMessages.value.length === n && batchMessages.value.every((m) => m?.trim());
   });
 
@@ -404,8 +403,10 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
   }
 
   async function commitAllBatches(messages: string[]) {
-    if (!batchGroupsFromAi.value) {
-      gitError.value = "请先通过 AI 划分后再进行全部提交";
+    const n = batchGroups.value?.length ?? 0;
+    if (!n) return;
+    if (messages.length !== n || messages.some((m) => !m?.trim())) {
+      gitError.value = "请先为每组填写提交说明";
       return;
     }
     const snapshot = batchGroups.value.map((g, i) => ({

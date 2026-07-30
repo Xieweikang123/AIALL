@@ -293,6 +293,56 @@ export async function stageGitFiles(projectPath: string, files: string[]): Promi
   });
 }
 
+export interface GitHunkInfo {
+  index: number;
+  header: string;
+  preview: string;
+}
+
+export interface GitHunksResult {
+  ok: boolean;
+  hunks: GitHunkInfo[];
+  error?: string;
+}
+
+export async function fetchGitHunks(
+  projectPath: string,
+  filePath: string,
+  staged = false,
+): Promise<GitHunksResult> {
+  return invokeBackend<GitHunksResult>(
+    "git_list_hunks",
+    { path: projectPath, file: filePath, staged },
+    async () => {
+      return { ok: false, hunks: [], error: "桌面版可用" };
+    },
+  );
+}
+
+export async function stageGitHunk(
+  projectPath: string,
+  filePath: string,
+  hunkIndex: number,
+): Promise<GitActionResult> {
+  return invokeBackend<GitActionResult>(
+    "git_stage_hunk",
+    { path: projectPath, file: filePath, hunkIndex },
+    async () => ({ ok: false, error: "桌面版可用" }),
+  );
+}
+
+export async function unstageGitHunk(
+  projectPath: string,
+  filePath: string,
+  hunkIndex: number,
+): Promise<GitActionResult> {
+  return invokeBackend<GitActionResult>(
+    "git_unstage_hunk",
+    { path: projectPath, file: filePath, hunkIndex },
+    async () => ({ ok: false, error: "桌面版可用" }),
+  );
+}
+
 export async function unstageGitFiles(projectPath: string, files: string[]): Promise<GitActionResult> {
   return invokeBackend<GitActionResult>("git_reset", { path: projectPath, files }, async () => {
     try {
@@ -864,14 +914,6 @@ export async function gitRevertCommit(projectPath: string, commit: string): Prom
     ok: false,
     error: "仅桌面版支持 revert",
   }));
-}
-
-export async function gitAmend(projectPath: string, message?: string): Promise<GitActionResult> {
-  return invokeBackend<GitActionResult>(
-    "git_amend",
-    { path: projectPath, message: message || null },
-    async () => ({ ok: false, error: "仅桌面版支持 amend" }),
-  );
 }
 
 export interface GitTagInfo {

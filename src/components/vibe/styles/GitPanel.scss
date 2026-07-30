@@ -481,32 +481,42 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  overflow: hidden;
-}
-
-.git-changes-wrap--compact {
-  flex: 0 0 auto;
-}
-
-.git-changes-list-scroll {
-  flex: 1 1 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  overflow-y: auto;
   overflow-x: hidden;
+  overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
 
-.git-changes-list-scroll::-webkit-scrollbar {
+.git-changes-wrap::-webkit-scrollbar {
   width: 5px;
 }
 
-.git-changes-list-scroll::-webkit-scrollbar-thumb {
+.git-changes-wrap::-webkit-scrollbar-thumb {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.18);
+}
+
+.git-changes-wrap--compact {
+  flex: 0 0 auto;
+  overflow: hidden;
+}
+
+.git-selection-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(88, 166, 255, 0.1);
+  border: 1px solid rgba(88, 166, 255, 0.22);
+}
+
+.git-selection-count {
+  font-size: 11px;
+  color: rgba(139, 148, 158, 0.95);
+  margin-right: 2px;
 }
 
 .git-batch-section {

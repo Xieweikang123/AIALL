@@ -48,6 +48,8 @@ pub fn format_git_stage_skipped_hint(blocked_roots: &[String]) -> String {
 }
 
 pub fn should_show_git_status_path(file_path: &str) -> bool {
+  // Hide directory-only entries (`dir/`); file visibility follows git status / .gitignore.
+  // Stage blocking (`is_git_path_stage_blocked`) is applied only when staging, not here.
   !file_path.replace('\\', "/").ends_with('/')
 }
 

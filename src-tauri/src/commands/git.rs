@@ -58,6 +58,25 @@ pub async fn git_add(path: String, files: Vec<String>) -> git::GitActionResult {
 }
 
 #[tauri::command]
+pub async fn git_list_hunks(
+  path: String,
+  file: String,
+  staged: Option<bool>,
+) -> git::GitHunksResult {
+  git::git_list_hunks(&path, &file, staged.unwrap_or(false)).await
+}
+
+#[tauri::command]
+pub async fn git_stage_hunk(path: String, file: String, hunk_index: u32) -> git::GitActionResult {
+  git::git_stage_hunk(&path, &file, hunk_index).await
+}
+
+#[tauri::command]
+pub async fn git_unstage_hunk(path: String, file: String, hunk_index: u32) -> git::GitActionResult {
+  git::git_unstage_hunk(&path, &file, hunk_index).await
+}
+
+#[tauri::command]
 pub async fn git_reset(path: String, files: Vec<String>) -> git::GitActionResult {
   git::git_reset(&path, files).await
 }
@@ -194,11 +213,6 @@ pub async fn git_cherry_pick(path: String, commit: String) -> git::GitActionResu
 #[tauri::command]
 pub async fn git_revert_commit(path: String, commit: String) -> git::GitActionResult {
   git::git_revert_commit(&path, &commit).await
-}
-
-#[tauri::command]
-pub async fn git_amend(path: String, message: Option<String>) -> git::GitActionResult {
-  git::git_amend(&path, message.as_deref()).await
 }
 
 #[tauri::command]
@@ -386,7 +400,7 @@ pub async fn git_generate_message(
   let file_list_str = file_list.join("\n");
 
   let prompt = format!(
-    "你是一个 Git 提交信息生成器。根据以下已暂存的文件变更生成一条准确的中文提交信息。
+    "你是一个 Git 提交信息生成器。根据以下已暂存的文件变更生成一条准确、口语化的中文提交信息。
 
 已暂存文件列表：
 {file_list_str}
@@ -395,19 +409,18 @@ Diff 内容：
 {diff_text}
 
 要求：
-- 使用中文
-- 第一行：简洁概括变更（不超过72字符），使用动词开头，描述'做了什么'
-- 如果需要，在第一行后空一行，提供更详细的说明（可选）
-- 分析变更类型：新功能、修复、重构、文档、样式、测试、构建、配置等
-- 描述变更的目的和影响，而不仅仅是代码改动
-- 不要加前缀如 'feat:' 或 'fix:'，直接描述变更内容
-- 不要加引号或句号
+- 使用中文，语气像开发者随手写的备注，自然口语，不要公文腔或宣传口号
+- 第一行：简洁说清改了啥（不超过72字符），可用「修了」「加了」「改了」「整理了」等日常说法
+- 如果需要，在第一行后空一行，补一两句更细的说明（可选，同样口语）
+- 说清改动意图和影响即可，不必罗列文件名或技术细节堆砌
+- 不要加前缀如 'feat:' 或 'fix:'，不要加引号或句号
+- 避免「提升可维护性」「优化用户体验」这类空泛套话
 
 示例：
-添加用户登录功能，支持邮箱和手机号验证
-修复订单支付状态同步问题，确保库存及时更新
-重构用户模块代码结构，提升可维护性和测试覆盖率
-更新项目文档，补充API接口使用说明"
+加了登录，邮箱和手机号都能验证
+修了支付状态不同步，库存也跟着对上了
+把用户模块拆开整理了一下，方便后面写测试
+文档补了几段 API 用法"
   );
 
   match stream_ai_completion(
@@ -612,7 +625,7 @@ pub async fn git_ai_batch_groups(
   let file_list_str = file_list_parts.join("\n");
 
   let prompt = format!(
-    "你是一个 Git 提交分组助手。根据以下文件变更，将文件按功能/逻辑相关性分成多个批次，每个批次生成一条中文提交信息。
+    "你是一个 Git 提交分组助手。根据以下文件变更，将文件按功能/逻辑相关性分成多个批次，每个批次生成一条口语化的中文提交信息。
 每个文件标注了 [已暂存] 或 [未暂存] 状态，请一并纳入分组考虑。
 
 文件列表：
@@ -623,8 +636,9 @@ Diff 内容：
 
 要求：
 - 按功能模块或逻辑相关性分组，不要简单按目录分
-- 每组用简洁的中文名称命名（如「认证模块」「UI 样式调整」）
-- 每组生成一条中文 commit message（动词开头，描述做了什么）
+- 每组用简洁的中文名称命名（如「登录相关」「界面样式」）
+- 每组生成一条口语化 commit message（像开发者随手备注，可用「修了」「加了」「改了」等说法，说清做了什么）
+- 避免公文腔和「提升可维护性」这类空泛套话；不要加 feat:/fix: 前缀
 - 每个文件只能出现在一个组中
 - 如果只有一个逻辑变更，分成一组即可
 - 使用中文

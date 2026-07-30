@@ -10,7 +10,8 @@ import {
 import {
   sortedUnstagedPaths,
 } from "../utils/gitBatchDraftStorage";
-import { gitStatusIcon, gitStatusColor } from "../utils/gitHelpers";
+import { gitPathsUnderDir } from "../utils/gitFileTree";
+import { gitStatusIcon, gitStatusColor, gitFileSelectionKey, parseGitFileSelectionKey, gitFileListScopeIsStaged, type GitFileListScope } from "../utils/gitHelpers";
 import {
   fetchGitStatus,
   fetchGitDiff,
@@ -45,7 +46,6 @@ import {
   gitRebaseAbort,
   gitCherryPick,
   gitRevertCommit,
-  gitAmend,
   gitTagCreate,
   gitTagDelete,
   gitSubmoduleUpdate,
@@ -58,6 +58,10 @@ import {
   type GitSubmoduleInfo,
   type GitConflictSide,
   type GitResetMode,
+  fetchGitHunks,
+  stageGitHunk,
+  unstageGitHunk,
+  type GitHunkInfo,
 } from "../services/vibeGitClient";
 import { useGitBatchCommit } from "./useGitBatchCommit";
 
@@ -79,12 +83,7 @@ export function useGitPanel(
   onRefreshTree?: () => void,
 ) {
   const GIT_PANEL_MODE_KEY = "vibe-coding-git-panel-mode";
-  const GIT_STAGED_OPEN_KEY = "git-staged-open";
-  const GIT_UNSTAGED_OPEN_KEY = "git-unstaged-open";
 
-  function readGitSectionOpen(key: string): boolean {
-    return lsGet(key) !== "false";
-  }
   const PROJECT_PANEL_VIEW_KEY = "vibe-coding-project-panel-view";
 
   const _storedPanelMode = lsGet(GIT_PANEL_MODE_KEY);
@@ -148,12 +147,12 @@ export function useGitPanel(
   const hasMoreGitLog = computed(() => {
     return gitLogEntries.value.length === gitLogCount.value;
   });
-  const gitStagedOpen = ref(readGitSectionOpen(GIT_STAGED_OPEN_KEY));
-  const gitUnstagedOpen = ref(readGitSectionOpen(GIT_UNSTAGED_OPEN_KEY));
+  const gitStagedOpen = ref(true);
+  const gitUnstagedOpen = ref(true);
+  const gitUntrackedOpen = ref(true);
   const expandedGitLogEntries = ref<Set<string>>(new Set());
   const gitStashSectionOpen = ref(false);
   const gitLocalChangesOpen = ref(false);
-  const gitTreeExpandedDirs = ref<Set<string>>(new Set());
   const selectedGitFiles = ref<string[]>([]);
   const gitDiffLoadingKey = ref("");
   const gitDiffContentCache = ref<Record<string, GitFileDiff>>({});
@@ -195,7 +194,6 @@ export function useGitPanel(
   const gitTagNameInput = ref("");
   const gitMergeTarget = ref("");
   const gitRebaseOnto = ref("");
-  const gitConflictedFiles = ref<GitStatusFile[]>([]);
 
   watch(gitLogOpen, (open) => {
     if (open) {
@@ -219,17 +217,21 @@ export function useGitPanel(
     }
   });
 
-  watch(gitStagedOpen, (open) => {
-    lsSet(GIT_STAGED_OPEN_KEY, String(open));
+  const gitConflictedFiles = computed(() => {
+    const seen = new Set<string>();
+    const result: GitStatusFile[] = [];
+    for (const f of gitStatus.value) {
+      if (f.status !== "conflicted" || seen.has(f.path)) continue;
+      seen.add(f.path);
+      result.push(f);
+    }
+    return result;
   });
-  watch(gitUnstagedOpen, (open) => {
-    lsSet(GIT_UNSTAGED_OPEN_KEY, String(open));
-  });
-
   const gitStagedFiles = computed(() => {
     const seen = new Set<string>();
     const result: GitStatusFile[] = [];
     for (const f of gitStatus.value) {
+      if (f.status === "conflicted") continue;
       if (f.staged && !seen.has(f.path)) {
         seen.add(f.path);
         result.push(f);
@@ -238,17 +240,37 @@ export function useGitPanel(
     return result;
   });
   const gitUnstagedFiles = computed(() => {
-    const unstaged = gitStatus.value.filter((f) => !f.staged);
+    const unstaged = gitStatus.value.filter(
+      (f) => !f.staged && f.status !== "conflicted",
+    );
     const paths = sortedUnstagedPaths(unstaged.map((f) => f.path));
     const byPath = new Map(unstaged.map((f) => [f.path, f]));
     return paths.map((p) => byPath.get(p)).filter((f): f is GitStatusFile => f != null);
   });
+  const gitModifiedFiles = computed(() =>
+    gitUnstagedFiles.value.filter((f) => f.status !== "untracked"),
+  );
+  const gitUntrackedFiles = computed(() =>
+    gitUnstagedFiles.value.filter((f) => f.status === "untracked"),
+  );
+  const gitHunkTargetFile = ref("");
+  const gitHunks = ref<GitHunkInfo[]>([]);
+  const gitStagedHunks = ref<GitHunkInfo[]>([]);
+  const gitHunkStagingIndex = ref<number | null>(null);
+  const gitHunkUnstagingIndex = ref<number | null>(null);
+  let hunkLoadToken = 0;
   /** 分批提交数据源：优先未暂存；若已全部暂存则回退到已暂存列表 */
   const gitBatchSourceFiles = computed(() => {
     if (gitUnstagedFiles.value.length > 0) return gitUnstagedFiles.value;
     return gitStagedFiles.value;
   });
-  const gitChangeCount = computed(() => gitStatus.value.length);
+  const gitChangeCount = computed(() => {
+    const paths = new Set<string>();
+    for (const f of gitStagedFiles.value) paths.add(f.path);
+    for (const f of gitUnstagedFiles.value) paths.add(f.path);
+    for (const f of gitConflictedFiles.value) paths.add(f.path);
+    return paths.size;
+  });
   const canGitCommit = computed(
     () =>
       !gitCommitting.value &&
@@ -320,6 +342,11 @@ export function useGitPanel(
     gitLogSearchLoading.value = false;
     batch.resetBatchDraftSessionState();
     clearGitDiffCache();
+    gitHunkTargetFile.value = "";
+    gitHunks.value = [];
+    gitStagedHunks.value = [];
+    gitHunkStagingIndex.value = null;
+    gitHunkUnstagingIndex.value = null;
   }
 
   async function refreshGitStatus(options?: { showLoading?: boolean; force?: boolean }) {
@@ -498,9 +525,7 @@ export function useGitPanel(
     try {
       const result = await runStageGitFiles([filePath]);
       debugLog("stageFile API done", { ok: result.ok, elapsed: Date.now() - t });
-      if (!result.ok) {
-        await refreshGitStatus({ showLoading: false, force: true });
-      }
+      await refreshGitStatus({ showLoading: false, force: true });
     } catch (e) {
       gitError.value = toErrorMessage(e, "暂存失败");
       await refreshGitStatus({ showLoading: false, force: true });
@@ -524,8 +549,8 @@ export function useGitPanel(
       const result = await unstageGitFiles(projectPath(), [filePath]);
       if (!result.ok) {
         gitError.value = result.error || "取消暂存失败";
-        await refreshGitStatus({ showLoading: false, force: true });
       }
+      await refreshGitStatus({ showLoading: false, force: true });
     } catch (e) {
       gitError.value = toErrorMessage(e, "取消暂存失败");
       await refreshGitStatus({ showLoading: false, force: true });
@@ -539,7 +564,7 @@ export function useGitPanel(
     if (!projectOpened()) return;
     gitError.value = "";
     clearGitDiffCache();
-    const filesToStage = gitUnstagedFiles.value.map((f) => f.path);
+    const filesToStage = gitModifiedFiles.value.map((f) => f.path);
     if (!filesToStage.length) return;
     const { stageable } = filterStageableGitPaths(filesToStage);
     if (!stageable.length) {
@@ -555,8 +580,9 @@ export function useGitPanel(
     try {
       const result = await runStageGitFiles(filesToStage);
       if (!result.ok) {
-        await refreshGitStatus({ showLoading: false, force: true });
+        // keep error from runStageGitFiles / below refresh
       }
+      await refreshGitStatus({ showLoading: false, force: true });
     } catch (e) {
       gitError.value = toErrorMessage(e, "暂存失败");
       await refreshGitStatus({ showLoading: false, force: true });
@@ -565,6 +591,10 @@ export function useGitPanel(
       gitLastStagingAt.value = Date.now();
       gitStagingInProgress.value = false;
     }
+  }
+
+  async function stageUntracked() {
+    await stagePaths(gitUntrackedFiles.value.map((f) => f.path));
   }
 
   async function unstageAll() {
@@ -582,8 +612,8 @@ export function useGitPanel(
       const result = await unstageGitFiles(projectPath(), pathsToUnstage);
       if (!result.ok) {
         gitError.value = result.error || "取消暂存失败";
-        await refreshGitStatus({ showLoading: false, force: true });
       }
+      await refreshGitStatus({ showLoading: false, force: true });
     } catch (e) {
       gitError.value = toErrorMessage(e, "取消暂存失败");
       await refreshGitStatus({ showLoading: false, force: true });
@@ -606,8 +636,8 @@ export function useGitPanel(
       const result = await discardGitFiles(projectPath(), [filePath]);
       if (!result.ok) {
         gitError.value = result.error || "丢弃更改失败";
-        await refreshGitStatus({ showLoading: false, force: true });
       }
+      await refreshGitStatus({ showLoading: false, force: true });
       onRefreshTree?.();
     } catch (e) {
       gitError.value = toErrorMessage(e, "丢弃更改失败");
@@ -620,22 +650,82 @@ export function useGitPanel(
   }
 
   async function discardAll(event?: MouseEvent) {
-    if (!projectOpened()) return;
-    if (!(await confirm("确定丢弃所有未暂存的更改？", event))) return;
+    const paths = gitModifiedFiles.value.map((f) => f.path);
+    if (!paths.length) return;
+    await discardPaths(paths, event);
+  }
+
+  async function stagePaths(paths: string[]) {
+    if (!projectOpened() || !paths.length) return;
     gitError.value = "";
     clearGitDiffCache();
-    const unstagedPaths = gitUnstagedFiles.value.map((f) => f.path);
-    if (!unstagedPaths.length) return;
-    gitStatus.value = gitStagedFiles.value;
+    const { stageable } = filterStageableGitPaths(paths);
+    if (!stageable.length) {
+      gitError.value = formatGitStageSkippedHint(paths) || "没有可暂存的文件";
+      return;
+    }
+    gitStatus.value = gitStatus.value.map((f) =>
+      stageable.includes(f.path) ? { ...f, staged: true } : f,
+    );
     gitStagingInProgress.value = true;
     gitStatusRefreshToken.value += 1;
     gitLastStagingAt.value = Date.now();
     try {
-      const result = await discardGitFiles(projectPath(), unstagedPaths);
-      if (!result.ok) {
-        gitError.value = result.error || "丢弃更改失败";
-        await refreshGitStatus({ showLoading: false, force: true });
-      }
+      await runStageGitFiles(stageable);
+      await refreshGitStatus({ showLoading: false, force: true });
+    } catch (e) {
+      gitError.value = toErrorMessage(e, "暂存失败");
+      await refreshGitStatus({ showLoading: false, force: true });
+    } finally {
+      gitLastStagingAt.value = Date.now();
+      gitStagingInProgress.value = false;
+    }
+  }
+
+  async function unstagePaths(paths: string[]) {
+    if (!projectOpened() || !paths.length) return;
+    gitError.value = "";
+    clearGitDiffCache();
+    gitStatus.value = gitStatus.value.map((f) =>
+      paths.includes(f.path) ? { ...f, staged: false } : f,
+    );
+    gitStagingInProgress.value = true;
+    gitStatusRefreshToken.value += 1;
+    gitLastStagingAt.value = Date.now();
+    try {
+      const result = await unstageGitFiles(projectPath(), paths);
+      if (!result.ok) gitError.value = result.error || "取消暂存失败";
+      await refreshGitStatus({ showLoading: false, force: true });
+    } catch (e) {
+      gitError.value = toErrorMessage(e, "取消暂存失败");
+      await refreshGitStatus({ showLoading: false, force: true });
+    } finally {
+      gitLastStagingAt.value = Date.now();
+      gitStagingInProgress.value = false;
+    }
+  }
+
+  async function discardPaths(paths: string[], event?: MouseEvent) {
+    if (!projectOpened() || !paths.length) return;
+    const untrackedSet = new Set(gitUntrackedFiles.value.map((f) => f.path));
+    const allUntracked = paths.every((p) => untrackedSet.has(p));
+    const label = paths.length === 1 ? paths[0] : `${paths.length} 个文件`;
+    const confirmMsg = allUntracked
+      ? paths.length === 1
+        ? `确定删除未跟踪文件 ${paths[0]}？此操作不可恢复。`
+        : `确定删除 ${paths.length} 个未跟踪文件？此操作不可恢复。`
+      : `确定丢弃 ${label} 的更改？`;
+    if (!(await confirm(confirmMsg, event))) return;
+    gitError.value = "";
+    clearGitDiffCache();
+    gitStatus.value = gitStatus.value.filter((f) => !paths.includes(f.path));
+    gitStagingInProgress.value = true;
+    gitStatusRefreshToken.value += 1;
+    gitLastStagingAt.value = Date.now();
+    try {
+      const result = await discardGitFiles(projectPath(), paths);
+      if (!result.ok) gitError.value = result.error || "丢弃更改失败";
+      await refreshGitStatus({ showLoading: false, force: true });
       onRefreshTree?.();
     } catch (e) {
       gitError.value = toErrorMessage(e, "丢弃更改失败");
@@ -647,14 +737,150 @@ export function useGitPanel(
     }
   }
 
+  type GitDirScope = "modified" | "untracked" | "staged";
+
+  function filesForDirScope(scope: GitDirScope) {
+    if (scope === "staged") return gitStagedFiles.value;
+    if (scope === "modified") return gitModifiedFiles.value;
+    return gitUntrackedFiles.value;
+  }
+
+  async function stageDir(dirPath: string, scope: GitDirScope = "modified") {
+    if (scope === "staged") return;
+    await stagePaths(gitPathsUnderDir(filesForDirScope(scope), dirPath));
+  }
+
+  async function unstageDir(dirPath: string) {
+    await unstagePaths(gitPathsUnderDir(gitStagedFiles.value, dirPath));
+  }
+
+  async function discardDir(dirPath: string, scope: GitDirScope = "modified", event?: MouseEvent) {
+    if (scope === "staged") return;
+    await discardPaths(gitPathsUnderDir(filesForDirScope(scope), dirPath), event);
+  }
+
+  async function stageHunk(filePath: string, hunkIndex: number) {
+    if (!projectOpened()) return;
+    gitError.value = "";
+    gitHunkStagingIndex.value = hunkIndex;
+    gitStagingInProgress.value = true;
+    gitLastStagingAt.value = Date.now();
+    try {
+      const result = await stageGitHunk(projectPath(), filePath, hunkIndex);
+      if (!result.ok) {
+        gitError.value = result.error || "暂存变更块失败";
+      }
+      await refreshGitStatus({ showLoading: false, force: true });
+      if (gitHunkTargetFile.value === filePath) {
+        await reloadHunksForTarget(filePath);
+      }
+    } catch (e) {
+      gitError.value = toErrorMessage(e, "暂存变更块失败");
+      await refreshGitStatus({ showLoading: false, force: true });
+    } finally {
+      gitHunkStagingIndex.value = null;
+      gitLastStagingAt.value = Date.now();
+      gitStagingInProgress.value = false;
+    }
+  }
+
+  async function unstageHunk(filePath: string, hunkIndex: number) {
+    if (!projectOpened()) return;
+    gitError.value = "";
+    gitHunkUnstagingIndex.value = hunkIndex;
+    gitStagingInProgress.value = true;
+    gitLastStagingAt.value = Date.now();
+    try {
+      const result = await unstageGitHunk(projectPath(), filePath, hunkIndex);
+      if (!result.ok) {
+        gitError.value = result.error || "取消暂存变更块失败";
+      }
+      await refreshGitStatus({ showLoading: false, force: true });
+      if (gitHunkTargetFile.value === filePath) {
+        await reloadHunksForTarget(filePath);
+      }
+    } catch (e) {
+      gitError.value = toErrorMessage(e, "取消暂存变更块失败");
+      await refreshGitStatus({ showLoading: false, force: true });
+    } finally {
+      gitHunkUnstagingIndex.value = null;
+      gitLastStagingAt.value = Date.now();
+      gitStagingInProgress.value = false;
+    }
+  }
+
+  async function loadHunksForFile(filePath: string, staged = false): Promise<GitHunkInfo[]> {
+    if (!projectOpened() || !filePath) return [];
+    const result = await fetchGitHunks(projectPath(), filePath, staged);
+    if (!result.ok) {
+      gitError.value = result.error || "读取变更块失败";
+      return [];
+    }
+    return result.hunks || [];
+  }
+
+  async function reloadHunksForTarget(filePath: string) {
+    const [unstaged, staged] = await Promise.all([
+      loadHunksForFile(filePath, false),
+      loadHunksForFile(filePath, true),
+    ]);
+    gitHunks.value = unstaged;
+    gitStagedHunks.value = staged;
+  }
+
+  watch(
+    () =>
+      [
+        selectedGitFiles.value.join("\n"),
+        gitModifiedFiles.value.map((f) => f.path).join("\n"),
+        gitStagedFiles.value.map((f) => f.path).join("\n"),
+      ] as const,
+    async () => {
+      const selected = selectedGitFiles.value;
+      const token = ++hunkLoadToken;
+      if (selected.length !== 1) {
+        gitHunkTargetFile.value = "";
+        gitHunks.value = [];
+        gitStagedHunks.value = [];
+        return;
+      }
+      const parsed = parseGitFileSelectionKey(selected[0]);
+      if (!parsed) {
+        gitHunkTargetFile.value = "";
+        gitHunks.value = [];
+        gitStagedHunks.value = [];
+        return;
+      }
+      const path = parsed.path;
+      const hasUnstaged = gitModifiedFiles.value.some((f) => f.path === path);
+      const hasStaged = gitStagedFiles.value.some((f) => f.path === path);
+      if (!hasUnstaged && !hasStaged) {
+        gitHunkTargetFile.value = "";
+        gitHunks.value = [];
+        gitStagedHunks.value = [];
+        return;
+      }
+      gitHunkTargetFile.value = path;
+      const [unstaged, staged] = await Promise.all([
+        hasUnstaged ? loadHunksForFile(path, false) : Promise.resolve([] as GitHunkInfo[]),
+        hasStaged ? loadHunksForFile(path, true) : Promise.resolve([] as GitHunkInfo[]),
+      ]);
+      if (token !== hunkLoadToken) return;
+      gitHunks.value = unstaged;
+      gitStagedHunks.value = staged;
+    },
+  );
+
   async function stageSelectedFiles() {
     if (!projectOpened()) return;
     if (!selectedGitFiles.value.length) return;
     gitError.value = "";
     clearGitDiffCache();
-    const filesToStage = selectedGitFiles.value.filter(
-      (path) => gitUnstagedFiles.value.some((f) => f.path === path),
-    );
+    const filesToStage = selectedGitFiles.value
+      .map((key) => parseGitFileSelectionKey(key))
+      .filter((x): x is { path: string; staged: boolean } => !!x && !x.staged)
+      .map((x) => x.path)
+      .filter((path) => gitUnstagedFiles.value.some((f) => f.path === path));
     if (!filesToStage.length) return;
     const { stageable } = filterStageableGitPaths(filesToStage);
     if (!stageable.length) {
@@ -671,8 +897,9 @@ export function useGitPanel(
     try {
       const result = await runStageGitFiles(filesToStage);
       if (!result.ok) {
-        await refreshGitStatus({ showLoading: false, force: true });
+        // error already set by runStageGitFiles path when empty; refresh restores truth
       }
+      await refreshGitStatus({ showLoading: false, force: true });
     } catch (e) {
       gitError.value = toErrorMessage(e, "暂存失败");
       await refreshGitStatus({ showLoading: false, force: true });
@@ -687,9 +914,11 @@ export function useGitPanel(
     if (!selectedGitFiles.value.length) return;
     gitError.value = "";
     clearGitDiffCache();
-    const filesToUnstage = selectedGitFiles.value.filter(
-      (path) => gitStagedFiles.value.some((f) => f.path === path),
-    );
+    const filesToUnstage = selectedGitFiles.value
+      .map((key) => parseGitFileSelectionKey(key))
+      .filter((x): x is { path: string; staged: boolean } => !!x && x.staged)
+      .map((x) => x.path)
+      .filter((path) => gitStagedFiles.value.some((f) => f.path === path));
     if (!filesToUnstage.length) return;
     gitStatus.value = gitStatus.value.map((f) =>
       filesToUnstage.includes(f.path) ? { ...f, staged: false } : f,
@@ -702,8 +931,8 @@ export function useGitPanel(
       const result = await unstageGitFiles(projectPath(), filesToUnstage);
       if (!result.ok) {
         gitError.value = result.error || "取消暂存失败";
-        await refreshGitStatus({ showLoading: false, force: true });
       }
+      await refreshGitStatus({ showLoading: false, force: true });
     } catch (e) {
       gitError.value = toErrorMessage(e, "取消暂存失败");
       await refreshGitStatus({ showLoading: false, force: true });
@@ -716,13 +945,15 @@ export function useGitPanel(
   async function discardSelectedFiles(event?: MouseEvent) {
     if (!projectOpened()) return;
     if (!selectedGitFiles.value.length) return;
-    if (!(await confirm(`确定丢弃 ${selectedGitFiles.value.length} 个文件的更改？`, event))) return;
+    const filesToDiscard = selectedGitFiles.value
+      .map((key) => parseGitFileSelectionKey(key))
+      .filter((x): x is { path: string; staged: boolean } => !!x && !x.staged)
+      .map((x) => x.path)
+      .filter((path) => gitUnstagedFiles.value.some((f) => f.path === path));
+    if (!filesToDiscard.length) return;
+    if (!(await confirm(`确定丢弃 ${filesToDiscard.length} 个文件的更改？`, event))) return;
     gitError.value = "";
     clearGitDiffCache();
-    const filesToDiscard = selectedGitFiles.value.filter((path) =>
-      gitUnstagedFiles.value.some((f) => f.path === path),
-    );
-    if (!filesToDiscard.length) return;
     gitStatus.value = gitStatus.value.filter((f) => !filesToDiscard.includes(f.path));
     selectedGitFiles.value = [];
     gitStagingInProgress.value = true;
@@ -731,8 +962,8 @@ export function useGitPanel(
       const result = await discardGitFiles(projectPath(), filesToDiscard);
       if (!result.ok) {
         gitError.value = result.error || "丢弃更改失败";
-        await refreshGitStatus({ showLoading: false, force: true });
       }
+      await refreshGitStatus({ showLoading: false, force: true });
       onRefreshTree?.();
     } catch (e) {
       gitError.value = toErrorMessage(e, "丢弃更改失败");
@@ -744,45 +975,60 @@ export function useGitPanel(
     }
   }
 
-  function toggleGitFileSelection(path: string, shiftKey: boolean, ctrlKey: boolean) {
-    const allFiles = [
-      ...gitStagedFiles.value.map((f) => f.path),
-      ...gitUnstagedFiles.value.map((f) => f.path),
-    ];
-    const uniqueFiles = [...new Set(allFiles)];
+  function toggleGitFileSelection(
+    path: string,
+    shiftKey: boolean,
+    ctrlKey: boolean,
+    listScope: GitFileListScope = "modified",
+  ) {
+    const staged = gitFileListScopeIsStaged(listScope);
+    const key = gitFileSelectionKey(path, staged);
+    const scopeFiles =
+      listScope === "staged"
+        ? gitStagedFiles.value.map((f) => f.path)
+        : listScope === "untracked"
+          ? gitUntrackedFiles.value.map((f) => f.path)
+          : gitModifiedFiles.value.map((f) => f.path);
 
     if (shiftKey && selectedGitFiles.value.length > 0) {
-      const lastSelected = selectedGitFiles.value[selectedGitFiles.value.length - 1];
-      const lastIndex = uniqueFiles.indexOf(lastSelected);
-      const currentIndex = uniqueFiles.indexOf(path);
-      if (lastIndex !== -1 && currentIndex !== -1) {
-        const start = Math.min(lastIndex, currentIndex);
-        const end = Math.max(lastIndex, currentIndex);
-        const rangeFiles = uniqueFiles.slice(start, end + 1);
-        if (ctrlKey) {
-          const newSet = new Set(selectedGitFiles.value);
-          rangeFiles.forEach((f) => newSet.add(f));
-          selectedGitFiles.value = Array.from(newSet);
-        } else {
-          selectedGitFiles.value = rangeFiles;
+      const last = parseGitFileSelectionKey(selectedGitFiles.value[selectedGitFiles.value.length - 1]);
+      if (last && last.staged === staged) {
+        const lastIndex = scopeFiles.indexOf(last.path);
+        const currentIndex = scopeFiles.indexOf(path);
+        if (lastIndex !== -1 && currentIndex !== -1) {
+          const start = Math.min(lastIndex, currentIndex);
+          const end = Math.max(lastIndex, currentIndex);
+          const rangeFiles = scopeFiles.slice(start, end + 1).map((p) => gitFileSelectionKey(p, staged));
+          if (ctrlKey) {
+            const newSet = new Set(selectedGitFiles.value);
+            rangeFiles.forEach((f) => newSet.add(f));
+            selectedGitFiles.value = Array.from(newSet);
+          } else {
+            selectedGitFiles.value = rangeFiles;
+          }
+          return;
         }
-        return;
       }
     }
 
     if (ctrlKey) {
-      const index = selectedGitFiles.value.indexOf(path);
+      const sameStageSide = selectedGitFiles.value.every((k) => {
+        const parsed = parseGitFileSelectionKey(k);
+        return parsed && parsed.staged === staged;
+      });
+      if (!sameStageSide && selectedGitFiles.value.length > 0) {
+        selectedGitFiles.value = [key];
+        return;
+      }
+      const index = selectedGitFiles.value.indexOf(key);
       if (index === -1) {
-        selectedGitFiles.value = [...selectedGitFiles.value, path];
+        selectedGitFiles.value = [...selectedGitFiles.value, key];
       } else {
-        selectedGitFiles.value = selectedGitFiles.value.filter((f) => f !== path);
+        selectedGitFiles.value = selectedGitFiles.value.filter((f) => f !== key);
       }
     } else {
-      if (selectedGitFiles.value.length === 1 && selectedGitFiles.value[0] === path) {
-        selectedGitFiles.value = [];
-      } else {
-        selectedGitFiles.value = [path];
-      }
+      // 单击保持选中；用 staged/unstaged 键，避免同一路径在两边同时高亮
+      selectedGitFiles.value = [key];
     }
   }
 
@@ -878,7 +1124,18 @@ export function useGitPanel(
 
       gitAiPushStep.value = "推送中…";
       await new Promise((r) => setTimeout(r, 100));
-      const pushResult = await gitPushRemote(projectPath());
+      const needsUpstream = !gitTrackingBranch.value.trim();
+      const remote =
+        gitSelectedRemote.value.trim()
+        || gitRemotes.value[0]?.name
+        || "origin";
+      const branch = gitBranch.value.trim() || undefined;
+      const pushResult = await gitPushRemote(
+        projectPath(),
+        needsUpstream ? remote : undefined,
+        needsUpstream ? branch : undefined,
+        needsUpstream,
+      );
       if (!pushResult.ok) {
         gitError.value = pushResult.error || "推送失败";
         await refreshGitRemotes();
@@ -982,7 +1239,18 @@ export function useGitPanel(
     gitRemoteAction.value = "push";
     gitError.value = "";
     try {
-      const result = await gitPushRemote(projectPath());
+      const needsUpstream = !gitTrackingBranch.value.trim();
+      const remote =
+        gitSelectedRemote.value.trim()
+        || gitRemotes.value[0]?.name
+        || "origin";
+      const branch = gitBranch.value.trim() || undefined;
+      const result = await gitPushRemote(
+        projectPath(),
+        needsUpstream ? remote : undefined,
+        needsUpstream ? branch : undefined,
+        needsUpstream,
+      );
       if (!result.ok) {
         gitError.value = result.error || "Push 失败";
         return;
@@ -1251,24 +1519,6 @@ export function useGitPanel(
     }
   }
 
-  async function doAmend(event?: MouseEvent) {
-    if (!projectOpened()) return;
-    const ok = await confirm("确定修改上次提交？", event);
-    if (!ok) return;
-    gitError.value = "";
-    try {
-      const result = await gitAmend(projectPath(), gitCommitMessage.value.trim() || undefined);
-      if (!result.ok) {
-        gitError.value = result.error || "修改提交失败";
-        return;
-      }
-      await refreshGitStatus({ force: true });
-      await refreshGitBranches();
-    } catch (e) {
-      gitError.value = toErrorMessage(e, "修改提交失败");
-    }
-  }
-
   async function doCreateTag(name?: string, hash?: string, event?: MouseEvent) {
     const tagName = name || gitTagNameInput.value.trim();
     if (!projectOpened() || !tagName) return;
@@ -1345,13 +1595,6 @@ export function useGitPanel(
     }
   }
 
-  async function undoLastCommit(event?: MouseEvent) {
-    if (!projectOpened()) return;
-    const ok = await confirm("确定撤销上次提交（soft reset）？", event);
-    if (!ok) return;
-    await doResetCommit("HEAD~1", "soft", "HEAD~1", event);
-  }
-
   async function doStashPop(stashIndex: string, event?: MouseEvent) {
     if (!projectOpened()) return;
     const ok = await confirm(`确定弹出 stash@{${stashIndex}}？`, event);
@@ -1386,12 +1629,10 @@ export function useGitPanel(
     doRebaseAbort,
     doCherryPick,
     doRevertCommit,
-    doAmend,
     doCreateTag,
     doDeleteTag,
     doSubmoduleUpdate,
     doResetCommit,
-    undoLastCommit,
     doStashPop,
     gitSecondaryHint,
     gitSelectedRemote,
@@ -1428,10 +1669,10 @@ export function useGitPanel(
     searchGitLog,
     gitStagedOpen,
     gitUnstagedOpen,
+    gitUntrackedOpen,
     expandedGitLogEntries,
     gitStashSectionOpen,
     gitLocalChangesOpen,
-    gitTreeExpandedDirs,
     selectedGitFiles,
     gitDiffLoadingKey,
     gitDiffContentCache,
@@ -1452,6 +1693,13 @@ export function useGitPanel(
 
     gitStagedFiles,
     gitUnstagedFiles,
+    gitModifiedFiles,
+    gitUntrackedFiles,
+    gitHunkTargetFile,
+    gitHunks,
+    gitStagedHunks,
+    gitHunkStagingIndex,
+    gitHunkUnstagingIndex,
     gitChangeCount,
     canGitCommit,
 
@@ -1473,9 +1721,16 @@ export function useGitPanel(
     stageFile,
     unstageFile,
     stageAll,
+    stageUntracked,
     unstageAll,
     discardFile,
     discardAll,
+    stageDir,
+    unstageDir,
+    discardDir,
+    stageHunk,
+    unstageHunk,
+    loadHunksForFile,
     stageSelectedFiles,
     unstageSelectedFiles,
     discardSelectedFiles,

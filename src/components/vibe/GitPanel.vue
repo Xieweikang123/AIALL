@@ -167,6 +167,7 @@
         @update:stash-message="$emit('update:gitStashMessage', $event)"
         @save="$emit('do-stash-save')"
         @apply="(index) => $emit('do-stash-apply', index)"
+        @pop="(index) => $emit('do-stash-pop', index)"
         @drop="(index) => $emit('do-stash-drop', index)"
       />
 
@@ -182,7 +183,7 @@
           >
             <span class="git-section-chevron">{{ localChangesOpen ? "▾" : "▸" }}</span>
             <span>当前更改</span>
-            <span v-if="gitStatus.length > 0" class="git-local-count-badge">{{ gitStatus.length }}</span>
+            <span v-if="uniqueChangeCount > 0" class="git-local-count-badge">{{ uniqueChangeCount }}</span>
           </button>
 
           <div
@@ -190,34 +191,68 @@
             class="git-local-content"
             :class="{ 'git-local-content--batch-open': batchSectionOpen }"
           >
-            <div v-show="!batchSectionOpen">
-              <GitCommitBox
-                :message="gitCommitMessage"
-                :committing="gitCommitting"
-                :gen-step="gitGenStep"
-                :ai-push-step="gitAiPushStep"
-                :staged-count="gitStagedFiles.length"
-                :config-ready="configReady"
-                :can-commit="canGitCommit"
-                :conflict-count="0"
-                :loading="gitLoading"
-                :advanced-action="null"
-                @update:message="$emit('update:gitCommitMessage', $event)"
-                @commit="$emit('commit-git')"
-                @generate-message="$emit('generate-commit-message')"
-                @ai-push="$emit('ai-commit-and-push')"
-              />
-            </div>
+            <GitCommitBox
+              :message="gitCommitMessage"
+              :committing="gitCommitting"
+              :gen-step="gitGenStep"
+              :ai-push-step="gitAiPushStep"
+              :staged-count="gitStagedFiles.length"
+              :config-ready="configReady"
+              :can-commit="canGitCommit"
+              :conflict-count="gitConflictedFiles.length"
+              :loading="gitLoading"
+              @update:message="$emit('update:gitCommitMessage', $event)"
+              @commit="$emit('commit-git')"
+              @generate-message="$emit('generate-commit-message')"
+              @ai-push="$emit('ai-commit-and-push')"
+            />
             <div
-              v-show="!batchSectionOpen"
               class="git-changes-wrap"
               :class="{ 'git-changes-wrap--compact': !hasExpandedFileList }"
             >
+              <div
+                v-if="selectedGitFiles.length"
+                class="git-selection-bar"
+              >
+                <span class="git-selection-count">已选 {{ selectedGitFiles.length }}</span>
+                <button
+                  v-if="selectedCanStage"
+                  type="button"
+                  class="ghost tiny"
+                  title="暂存选中"
+                  @click="$emit('stage-selected')"
+                >暂存</button>
+                <button
+                  v-if="selectedCanUnstage"
+                  type="button"
+                  class="ghost tiny"
+                  title="取消暂存选中"
+                  @click="$emit('unstage-selected')"
+                >取消暂存</button>
+                <button
+                  v-if="selectedCanDiscard"
+                  type="button"
+                  class="ghost tiny danger"
+                  title="丢弃选中"
+                  @click="$emit('discard-selected', $event)"
+                >丢弃</button>
+                <button
+                  type="button"
+                  class="ghost tiny"
+                  title="清除选择"
+                  @click="$emit('clear-selection')"
+                >清除</button>
+              </div>
               <div v-if="!gitStatus.length" class="git-changes-empty">
                 <span class="git-changes-empty-icon" aria-hidden="true">✓</span>
                 <span>工作区干净，无本地改动</span>
               </div>
               <template v-else>
+                <GitConflictList
+                  :files="gitConflictedFiles"
+                  @open-file="(path) => $emit('open-file', path)"
+                  @resolve="(path, side) => $emit('resolve-conflict', path, side)"
+                />
                 <div v-if="gitStagedFiles.length" class="git-section">
                   <div class="git-section-head">
                     <button type="button" class="git-section-toggle" @click="$emit('update:gitStagedOpen', !gitStagedOpen)">
@@ -226,53 +261,84 @@
                     </button>
                     <button type="button" class="ghost tiny" @click="$emit('unstage-all')">取消全部</button>
                   </div>
+                  <div v-if="gitStagedOpen" class="git-file-list">
+                    <GitFileTreeNode
+                      v-for="node in gitStagedTree"
+                      :key="node.path"
+                      :node="node"
+                      staged
+                      list-scope="staged"
+                      :expanded-dirs="gitStagedExpandedDirs"
+                      :selected-git-files="selectedGitFiles"
+                      :git-diff-loading-key="gitDiffLoadingKey"
+                      @toggle-dir="(path) => toggleGitTreeDir(path, 'staged')"
+                      @unstage-file="$emit('unstage-file', $event)"
+                      @unstage-dir="$emit('unstage-dir', $event)"
+                      @pointer-down="(event, path, scope) => $emit('on-git-file-pointer-down', event, path, scope)"
+                      @contextmenu="(event, path, scope) => $emit('on-git-file-contextmenu', event, path, scope)"
+                      @open-file="(path) => $emit('open-file', path)"
+                    />
+                  </div>
                 </div>
-                <div v-if="gitUnstagedFiles.length" class="git-section">
+                <div v-if="gitModifiedFiles.length" class="git-section">
                   <div class="git-section-head">
                     <button type="button" class="git-section-toggle" @click="$emit('update:gitUnstagedOpen', !gitUnstagedOpen)">
                       <span class="git-section-chevron">{{ gitUnstagedOpen ? "▾" : "▸" }}</span>
-                      <span class="git-section-title">未暂存 ({{ gitUnstagedFiles.length }})</span>
+                      <span class="git-section-title">更改 ({{ gitModifiedFiles.length }})</span>
                     </button>
                     <div class="git-section-actions">
                       <button type="button" class="ghost tiny" @click="$emit('stage-all')">全部暂存</button>
                       <button type="button" class="ghost tiny danger" @click="$emit('discard-all', $event)">丢弃全部</button>
                     </div>
                   </div>
-                </div>
-                <div
-                  v-if="hasExpandedFileList"
-                  class="git-changes-list-scroll"
-                >
-                  <div v-if="gitStagedFiles.length && gitStagedOpen" class="git-file-list">
+                  <div v-if="gitUnstagedOpen" class="git-file-list">
                     <GitFileTreeNode
-                      v-for="node in gitStagedTree"
-                      :key="node.path"
+                      v-for="node in gitModifiedTree"
+                      :key="`modified:${node.path}`"
                       :node="node"
-                      staged
-                      :expanded-dirs="gitTreeExpandedDirs"
+                      :staged="false"
+                      list-scope="modified"
+                      :expanded-dirs="gitModifiedExpandedDirs"
                       :selected-git-files="selectedGitFiles"
                       :git-diff-loading-key="gitDiffLoadingKey"
-                      @toggle-dir="toggleGitTreeDir"
-                      @unstage-file="$emit('unstage-file', $event)"
-                      @pointer-down="(event, path, isStaged) => $emit('on-git-file-pointer-down', event, path, isStaged)"
-                      @contextmenu="(event, path) => $emit('on-git-file-contextmenu', event, path)"
+                      @toggle-dir="(path) => toggleGitTreeDir(path, 'modified')"
+                      @stage-file="$emit('stage-file', $event)"
+                      @discard-file="(path, event) => $emit('discard-file', path, event)"
+                      @stage-dir="(path) => $emit('stage-dir', path, 'modified')"
+                      @discard-dir="(path, event) => $emit('discard-dir', path, 'modified', event)"
+                      @pointer-down="(event, path, scope) => $emit('on-git-file-pointer-down', event, path, scope)"
+                      @contextmenu="(event, path, scope) => $emit('on-git-file-contextmenu', event, path, scope)"
                       @open-file="(path) => $emit('open-file', path)"
                     />
                   </div>
-                  <div v-if="gitUnstagedFiles.length && gitUnstagedOpen" class="git-file-list">
+                </div>
+                <div v-if="gitUntrackedFiles.length" class="git-section">
+                  <div class="git-section-head">
+                    <button type="button" class="git-section-toggle" @click="$emit('update:gitUntrackedOpen', !gitUntrackedOpen)">
+                      <span class="git-section-chevron">{{ gitUntrackedOpen ? "▾" : "▸" }}</span>
+                      <span class="git-section-title">未跟踪 ({{ gitUntrackedFiles.length }})</span>
+                    </button>
+                    <div class="git-section-actions">
+                      <button type="button" class="ghost tiny" @click="$emit('stage-untracked')">暂存未跟踪</button>
+                    </div>
+                  </div>
+                  <div v-if="gitUntrackedOpen" class="git-file-list">
                     <GitFileTreeNode
-                      v-for="node in gitUnstagedTree"
-                      :key="`unstaged:${node.path}`"
+                      v-for="node in gitUntrackedTree"
+                      :key="`untracked:${node.path}`"
                       :node="node"
                       :staged="false"
-                      :expanded-dirs="gitTreeExpandedDirs"
+                      list-scope="untracked"
+                      :expanded-dirs="gitUntrackedExpandedDirs"
                       :selected-git-files="selectedGitFiles"
                       :git-diff-loading-key="gitDiffLoadingKey"
-                      @toggle-dir="toggleGitTreeDir"
+                      @toggle-dir="(path) => toggleGitTreeDir(path, 'untracked')"
                       @stage-file="$emit('stage-file', $event)"
                       @discard-file="(path, event) => $emit('discard-file', path, event)"
-                      @pointer-down="(event, path, isStaged) => $emit('on-git-file-pointer-down', event, path, isStaged)"
-                      @contextmenu="(event, path) => $emit('on-git-file-contextmenu', event, path)"
+                      @stage-dir="(path) => $emit('stage-dir', path, 'untracked')"
+                      @discard-dir="(path, event) => $emit('discard-dir', path, 'untracked', event)"
+                      @pointer-down="(event, path, scope) => $emit('on-git-file-pointer-down', event, path, scope)"
+                      @contextmenu="(event, path, scope) => $emit('on-git-file-contextmenu', event, path, scope)"
                       @open-file="(path) => $emit('open-file', path)"
                     />
                   </div>
@@ -328,7 +394,7 @@
                     class="small git-batch-all-btn"
                     :class="canCommitAllBatches ? 'primary' : 'secondary'"
                     :disabled="batchCommittingIndex !== null || !canCommitAllBatches"
-                    :title="canCommitAllBatches ? '按顺序提交全部分组' : (!batchGroupsFromAi ? '请先进行 AI 划分再全部提交' : '请先为每组填写提交说明')"
+                    :title="canCommitAllBatches ? '按顺序提交全部分组' : '请先为每组填写提交说明'"
                     @click="$emit('commit-all-batches', [...batchMessages])"
                   >
                     <template v-if="batchCommittingIndex !== null">
@@ -572,8 +638,9 @@ import GitFileTreeNode from "./GitFileTreeNode.vue";
 import GitAheadCommits from "./GitAheadCommits.vue";
 import GitStashPanel from "./GitStashPanel.vue";
 import GitCommitBox from "./GitCommitBox.vue";
+import GitConflictList from "./GitConflictList.vue";
 import { buildGitFileTree, collectGitFolderPaths } from "../../utils/gitFileTree";
-import { gitStatusIcon, gitStatusClass, formatDate, formatFullDate, splitGitFilePath } from "../../utils/gitHelpers";
+import { gitStatusIcon, gitStatusClass, formatDate, formatFullDate, splitGitFilePath, parseGitFileSelectionKey, type GitFileListScope } from "../../utils/gitHelpers";
 
 interface GitStash {
   index: number | string;
@@ -623,6 +690,7 @@ interface Props {
   gitStatus: unknown[];
   gitStagedFiles: GitFile[];
   gitUnstagedFiles: GitFile[];
+  gitConflictedFiles: GitFile[];
   canGitCommit: boolean;
   gitCommitMessage: string;
   gitCommitting: boolean;
@@ -633,6 +701,7 @@ interface Props {
   gitStashOpen: boolean;
   gitStagedOpen: boolean;
   gitUnstagedOpen: boolean;
+  gitUntrackedOpen: boolean;
   gitLogOpen: boolean;
   gitLogEntries: GitLogEntry[];
   gitLogSearchQuery: string;
@@ -664,7 +733,12 @@ const props = defineProps<Props>();
 
 const stashSectionOpen = computed(() => props.gitStashSectionOpen);
 const localChangesOpen = computed(() => props.gitLocalChangesOpen);
-const gitTreeExpandedDirs = ref<Set<string>>(new Set());
+const gitStagedExpandedDirs = ref<Set<string>>(new Set());
+const gitModifiedExpandedDirs = ref<Set<string>>(new Set());
+const gitUntrackedExpandedDirs = ref<Set<string>>(new Set());
+const gitStagedKnownDirs = ref<Set<string>>(new Set());
+const gitModifiedKnownDirs = ref<Set<string>>(new Set());
+const gitUntrackedKnownDirs = ref<Set<string>>(new Set());
 
 const emit = defineEmits<{
   (e: "refresh"): void;
@@ -676,16 +750,26 @@ const emit = defineEmits<{
   (e: "ai-commit-and-push"): void;
   (e: "stage-file", path: string): void;
   (e: "unstage-file", path: string): void;
+  (e: "stage-dir", path: string, scope: "modified" | "untracked"): void;
+  (e: "unstage-dir", path: string): void;
+  (e: "discard-dir", path: string, scope: "modified" | "untracked", event: MouseEvent): void;
   (e: "stage-all"): void;
+  (e: "stage-untracked"): void;
   (e: "unstage-all"): void;
+  (e: "stage-selected"): void;
+  (e: "unstage-selected"): void;
+  (e: "discard-selected", event: MouseEvent): void;
+  (e: "clear-selection"): void;
   (e: "discard-file", path: string, event: MouseEvent): void;
   (e: "discard-all", event: MouseEvent): void;
   (e: "do-stash-save"): void;
   (e: "do-stash-apply", index: number): void;
+  (e: "do-stash-pop", index: number | string): void;
   (e: "do-stash-drop", index: number): void;
   (e: "update:gitStashOpen", value: boolean): void;
   (e: "update:gitStagedOpen", value: boolean): void;
   (e: "update:gitUnstagedOpen", value: boolean): void;
+  (e: "update:gitUntrackedOpen", value: boolean): void;
   (e: "update:gitLogOpen", value: boolean): void;
   (e: "update:gitAheadCommitsOpen", value: boolean): void;
   (e: "update:gitCommitMessage", value: string): void;
@@ -693,8 +777,9 @@ const emit = defineEmits<{
   (e: "toggle-git-log-entry", hash: string): void;
   (e: "open-git-log-file", entry: GitLogEntry, file: GitLogFile): void;
   (e: "open-file", path: string): void;
-  (e: "on-git-file-pointer-down", event: PointerEvent, path: string, staged: boolean): void;
-  (e: "on-git-file-contextmenu", event: MouseEvent, path: string): void;
+  (e: "resolve-conflict", path: string, side: "ours" | "theirs"): void;
+  (e: "on-git-file-pointer-down", event: PointerEvent, path: string, listScope: GitFileListScope): void;
+  (e: "on-git-file-contextmenu", event: MouseEvent, path: string, listScope: GitFileListScope): void;
   (e: "do-cherry-pick", hash: string): void;
   (e: "do-revert-commit", hash: string): void;
   (e: "do-create-tag-at", hash: string): void;
@@ -715,38 +800,99 @@ const emit = defineEmits<{
 }>();
 
 const gitStagedTree = computed(() => buildGitFileTree(props.gitStagedFiles));
-const gitUnstagedTree = computed(() => buildGitFileTree(props.gitUnstagedFiles));
+const gitModifiedFiles = computed(() =>
+  props.gitUnstagedFiles.filter((f) => f.status !== "untracked"),
+);
+const gitUntrackedFiles = computed(() =>
+  props.gitUnstagedFiles.filter((f) => f.status === "untracked"),
+);
+const gitModifiedTree = computed(() => buildGitFileTree(gitModifiedFiles.value));
+const gitUntrackedTree = computed(() => buildGitFileTree(gitUntrackedFiles.value));
+
+const uniqueChangeCount = computed(() => {
+  const paths = new Set<string>();
+  for (const f of props.gitStagedFiles) paths.add(f.path);
+  for (const f of props.gitUnstagedFiles) paths.add(f.path);
+  for (const f of props.gitConflictedFiles) paths.add(f.path);
+  return paths.size;
+});
+
+const selectedCanStage = computed(() =>
+  props.selectedGitFiles.some((key) => {
+    const parsed = parseGitFileSelectionKey(key);
+    return !!parsed && !parsed.staged && props.gitUnstagedFiles.some((f) => f.path === parsed.path);
+  }),
+);
+const selectedCanUnstage = computed(() =>
+  props.selectedGitFiles.some((key) => {
+    const parsed = parseGitFileSelectionKey(key);
+    return !!parsed && parsed.staged && props.gitStagedFiles.some((f) => f.path === parsed.path);
+  }),
+);
+const selectedCanDiscard = computed(() => selectedCanStage.value);
 
 const hasExpandedFileList = computed(
   () =>
-    (props.gitStagedOpen && props.gitStagedFiles.length > 0)
-    || (props.gitUnstagedOpen && props.gitUnstagedFiles.length > 0),
+    props.gitConflictedFiles.length > 0
+    || (props.gitStagedOpen && props.gitStagedFiles.length > 0)
+    || (props.gitUnstagedOpen && gitModifiedFiles.value.length > 0)
+    || (props.gitUntrackedOpen && gitUntrackedFiles.value.length > 0),
 );
 
-function toggleGitTreeDir(path: string) {
-  const next = new Set(gitTreeExpandedDirs.value);
+type GitTreeKind = "staged" | "modified" | "untracked";
+
+function expandedDirsFor(kind: GitTreeKind) {
+  if (kind === "staged") return gitStagedExpandedDirs;
+  if (kind === "modified") return gitModifiedExpandedDirs;
+  return gitUntrackedExpandedDirs;
+}
+
+function toggleGitTreeDir(path: string, kind: GitTreeKind) {
+  const dirs = expandedDirsFor(kind);
+  const next = new Set(dirs.value);
   if (next.has(path)) next.delete(path);
   else next.add(path);
-  gitTreeExpandedDirs.value = next;
+  dirs.value = next;
+}
+
+function syncExpandedDirs(
+  tree: ReturnType<typeof buildGitFileTree>,
+  target: typeof gitStagedExpandedDirs,
+  known: typeof gitStagedKnownDirs,
+) {
+  const folderPaths = new Set(collectGitFolderPaths(tree));
+  const prev = target.value;
+  const next = new Set<string>();
+  for (const path of folderPaths) {
+    if (!known.value.has(path)) {
+      // New folder since last sync — expand by default.
+      next.add(path);
+    } else if (prev.has(path)) {
+      // Still present and was expanded — keep.
+      next.add(path);
+    }
+    // else: known but collapsed by user — stay collapsed
+  }
+  const nextKnown = new Set(folderPaths);
+  known.value = nextKnown;
+  target.value = next;
 }
 
 watch(
-  () => [
-    props.gitStagedFiles.map((f) => f.path).join("\n"),
-    props.gitUnstagedFiles.map((f) => f.path).join("\n"),
-  ],
-  () => {
-    const folderPaths = new Set([
-      ...collectGitFolderPaths(gitStagedTree.value),
-      ...collectGitFolderPaths(gitUnstagedTree.value),
-    ]);
-    const next = new Set(gitTreeExpandedDirs.value);
-    for (const path of folderPaths) next.add(path);
-    for (const path of next) {
-      if (!folderPaths.has(path)) next.delete(path);
-    }
-    gitTreeExpandedDirs.value = next;
-  },
+  () => props.gitStagedFiles.map((f) => f.path).join("\n"),
+  () => syncExpandedDirs(gitStagedTree.value, gitStagedExpandedDirs, gitStagedKnownDirs),
+  { immediate: true },
+);
+
+watch(
+  () => gitModifiedFiles.value.map((f) => f.path).join("\n"),
+  () => syncExpandedDirs(gitModifiedTree.value, gitModifiedExpandedDirs, gitModifiedKnownDirs),
+  { immediate: true },
+);
+
+watch(
+  () => gitUntrackedFiles.value.map((f) => f.path).join("\n"),
+  () => syncExpandedDirs(gitUntrackedTree.value, gitUntrackedExpandedDirs, gitUntrackedKnownDirs),
   { immediate: true },
 );
 
@@ -766,7 +912,6 @@ const batchReadyCount = computed(() =>
 const canCommitAllBatches = computed(() => {
   const n = props.batchGroups?.length ?? 0;
   if (!n || props.batchCommittingIndex !== null) return false;
-  if (!props.batchGroupsFromAi) return false;
   return props.batchMessages.length === n && props.batchMessages.every((m) => m?.trim());
 });
 

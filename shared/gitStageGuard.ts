@@ -54,7 +54,8 @@ export function isGitDirectoryPath(filePath: string): boolean {
   return filePath.replace(/\\/g, "/").endsWith("/");
 }
 
-/** Whether a git status path should appear in the panel (files only; staging may still be blocked). */
+/** Whether a git status path should appear in the panel (files only).
+ * Staging may still be blocked via `isGitPathStageBlocked` — display follows git status / .gitignore. */
 export function shouldShowGitStatusPath(filePath: string): boolean {
   return !isGitDirectoryPath(filePath);
 }

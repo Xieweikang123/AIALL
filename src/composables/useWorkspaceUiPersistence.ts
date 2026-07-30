@@ -1,17 +1,18 @@
 import { nextTick, watch, type Ref } from "vue";
 import type { PersistedGitPanelUi, PersistedWorkspaceUi } from "../utils/workspaceUiStorage";
 import { readWorkspaceUi, writeWorkspaceUi } from "../utils/workspaceUiStorage";
+import { gitFileSelectionKey, parseGitFileSelectionKey } from "../utils/gitHelpers";
 
 export type GitPanelUiRefs = {
   gitLogOpen: Ref<boolean>;
   gitStagedOpen: Ref<boolean>;
   gitUnstagedOpen: Ref<boolean>;
+  gitUntrackedOpen: Ref<boolean>;
   gitStashOpen: Ref<boolean>;
   gitAheadCommitsOpen: Ref<boolean>;
   batchSectionOpen: Ref<boolean>;
   gitStashSectionOpen: Ref<boolean>;
   gitLocalChangesOpen: Ref<boolean>;
-  gitTreeExpandedDirs: Ref<Set<string>>;
   selectedGitFiles: Ref<string[]>;
   expandedGitLogEntries: Ref<Set<string>>;
   gitLogSearchQuery: Ref<string>;
@@ -40,12 +41,12 @@ export function snapshotGitPanelUi(git: GitPanelUiRefs): PersistedGitPanelUi {
     logOpen: git.gitLogOpen.value,
     stagedOpen: git.gitStagedOpen.value,
     unstagedOpen: git.gitUnstagedOpen.value,
+    untrackedOpen: git.gitUntrackedOpen.value,
     stashOpen: git.gitStashOpen.value,
     aheadCommitsOpen: git.gitAheadCommitsOpen.value,
     batchSectionOpen: git.batchSectionOpen.value,
     stashSectionOpen: git.gitStashSectionOpen.value,
     localChangesOpen: git.gitLocalChangesOpen.value,
-    treeExpandedDirs: Array.from(git.gitTreeExpandedDirs.value),
     selectedFiles: [...git.selectedGitFiles.value],
     expandedLogEntries: Array.from(git.expandedGitLogEntries.value),
     logSearchQuery: git.gitLogSearchQuery.value,
@@ -56,15 +57,20 @@ export function applyGitPanelUi(git: GitPanelUiRefs, saved?: PersistedGitPanelUi
   if (!saved) return;
   if (typeof saved.stagedOpen === "boolean") git.gitStagedOpen.value = saved.stagedOpen;
   if (typeof saved.unstagedOpen === "boolean") git.gitUnstagedOpen.value = saved.unstagedOpen;
+  if (typeof saved.untrackedOpen === "boolean") git.gitUntrackedOpen.value = saved.untrackedOpen;
   if (typeof saved.stashOpen === "boolean") git.gitStashOpen.value = saved.stashOpen;
   if (typeof saved.aheadCommitsOpen === "boolean") git.gitAheadCommitsOpen.value = saved.aheadCommitsOpen;
   if (typeof saved.batchSectionOpen === "boolean") git.batchSectionOpen.value = saved.batchSectionOpen;
   if (typeof saved.stashSectionOpen === "boolean") git.gitStashSectionOpen.value = saved.stashSectionOpen;
   if (typeof saved.localChangesOpen === "boolean") git.gitLocalChangesOpen.value = saved.localChangesOpen;
-  if (saved.treeExpandedDirs?.length) {
-    git.gitTreeExpandedDirs.value = new Set(saved.treeExpandedDirs);
+  if (saved.selectedFiles) {
+    // Normalize legacy plain paths and scoped keys (`staged:path` / `unstaged:path`)
+    git.selectedGitFiles.value = saved.selectedFiles.map((raw) => {
+      const parsed = parseGitFileSelectionKey(raw);
+      if (!parsed) return raw;
+      return gitFileSelectionKey(parsed.path, parsed.staged);
+    });
   }
-  if (saved.selectedFiles) git.selectedGitFiles.value = [...saved.selectedFiles];
   if (saved.expandedLogEntries?.length) {
     git.expandedGitLogEntries.value = new Set(saved.expandedLogEntries);
   }
@@ -183,12 +189,12 @@ export function useWorkspaceUiPersistence(deps: WorkspaceUiPersistenceDeps) {
       deps.git.gitLogOpen.value,
       deps.git.gitStagedOpen.value,
       deps.git.gitUnstagedOpen.value,
+      deps.git.gitUntrackedOpen.value,
       deps.git.gitStashOpen.value,
       deps.git.gitAheadCommitsOpen.value,
       deps.git.batchSectionOpen.value,
       deps.git.gitStashSectionOpen.value,
       deps.git.gitLocalChangesOpen.value,
-      Array.from(deps.git.gitTreeExpandedDirs.value).join("\n"),
       deps.git.selectedGitFiles.value.join("\n"),
       Array.from(deps.git.expandedGitLogEntries.value).join("\n"),
       deps.git.gitLogSearchQuery.value,

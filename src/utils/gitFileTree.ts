@@ -71,6 +71,29 @@ export function collectGitFolderPaths(nodes: GitFileTreeNode[]): string[] {
   return paths;
 }
 
+/** Collect every file path under a directory node (non-recursive helper over flat lists). */
+export function gitPathsUnderDir(files: { path: string }[], dirPath: string): string[] {
+  const normalized = dirPath.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (!normalized) return [];
+  const prefix = `${normalized}/`;
+  return files
+    .map((f) => f.path.replace(/\\/g, "/"))
+    .filter((p) => p === normalized || p.startsWith(prefix));
+}
+
+/** Flatten all file paths from a tree (directories excluded). */
+export function collectGitFilePaths(nodes: GitFileTreeNode[]): string[] {
+  const paths: string[] = [];
+  for (const node of nodes) {
+    if (node.isDirectory) {
+      if (node.children?.length) paths.push(...collectGitFilePaths(node.children));
+    } else {
+      paths.push(node.path);
+    }
+  }
+  return paths;
+}
+
 function sortGitFileTreeNodes(nodes: GitFileTreeNode[]): void {
   nodes.sort((a, b) => {
     if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;

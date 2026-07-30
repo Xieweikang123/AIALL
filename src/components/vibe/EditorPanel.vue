@@ -138,12 +138,17 @@
     />
 
     <CodeMonacoDiffEditor
+      ref="diffEditorRef"
       v-else-if="showDiffMode && activeFileDiff"
       class="code-editor"
       :original="activeFileDiff.before"
       :modified="activeFileDiff.after"
       :file-path="activeFilePath"
+      :hunk-action-mode="hunkActionMode"
+      :hunks="hunkActions"
+      :hunk-busy-index="hunkBusyIndex"
       @select="(text, anchor) => $emit('editor-select', text, anchor)"
+      @hunk-action="(index) => $emit('hunk-action', index)"
     />
 
     <CodeMonacoEditor
@@ -163,7 +168,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from "vue";
 import CodeMonacoEditor, { type MonacoSelectionAnchor } from "../CodeMonacoEditor.vue";
-import CodeMonacoDiffEditor from "../CodeMonacoDiffEditor.vue";
+import CodeMonacoDiffEditor, { type MonacoDiffHunkAction } from "../CodeMonacoDiffEditor.vue";
 import { renderMarkdown } from "../../utils/renderMarkdown";
 import DOMPurify from "dompurify";
 import {
@@ -201,6 +206,9 @@ interface Props {
   chatCollapsed?: boolean;
   canGoBack?: boolean;
   canGoForward?: boolean;
+  hunkActionMode?: "stage" | "unstage" | null;
+  hunkActions?: MonacoDiffHunkAction[];
+  hunkBusyIndex?: number | null;
 }
 
 const props = defineProps<Props>();
@@ -222,6 +230,7 @@ const emit = defineEmits<{
   (e: "navigate-back"): void;
   (e: "navigate-forward"): void;
   (e: "reorder-tabs", payload: { fromIndex: number; toIndex: number }): void;
+  (e: "hunk-action", index: number): void;
 }>();
 
 /* ---- 标签滚轮横向滚动 ---- */
@@ -401,6 +410,7 @@ onBeforeUnmount(() => {
 });
 
 const editorRef = ref<InstanceType<typeof CodeMonacoEditor> | null>(null);
+const diffEditorRef = ref<InstanceType<typeof CodeMonacoDiffEditor> | null>(null);
 
 const localContent = computed({
   get: () => props.fileContent,
@@ -472,7 +482,11 @@ async function revealLineInEditor(line: number, column = 1): Promise<boolean> {
   return editorRef.value?.revealLineWhenReady(line, column) ?? false;
 }
 
-defineExpose({ editorRef, revealLineInEditor });
+async function revealLineInDiff(line: number, column = 1): Promise<boolean> {
+  return diffEditorRef.value?.revealLineWhenReady(line, column) ?? false;
+}
+
+defineExpose({ editorRef, diffEditorRef, revealLineInEditor, revealLineInDiff });
 </script>
 
 <style scoped>

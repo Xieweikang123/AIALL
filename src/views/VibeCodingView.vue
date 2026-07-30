@@ -107,6 +107,7 @@
           :git-stash-open="gitStashOpen"
           :git-staged-open="gitStagedOpen"
           :git-unstaged-open="gitUnstagedOpen"
+          :git-untracked-open="gitUntrackedOpen"
           :git-log-open="gitLogOpen"
           :git-log-entries="gitLogEntries"
           :git-log-search-query="gitLogSearchQuery"
@@ -133,7 +134,6 @@
           :git-ahead-commits-loading="gitAheadCommitsLoading"
           :git-stash-section-open="gitStashSectionOpen"
           :git-local-changes-open="gitLocalChangesOpen"
-          :git-tree-expanded-dirs="gitTreeExpandedDirs"
           :git-advanced-open="gitAdvancedOpen"
           :git-advanced-action="gitAdvancedAction"
           :git-merge-in-progress="gitMergeInProgress"
@@ -152,7 +152,11 @@
           @ai-commit-and-push="aiCommitAndPush"
           @stage-file="stageFile"
           @unstage-file="unstageFile"
+          @stage-dir="stageDir"
+          @unstage-dir="unstageDir"
+          @discard-dir="discardDir"
           @stage-all="stageAll"
+          @stage-untracked="stageUntracked"
           @unstage-all="unstageAll"
           @stage-selected="stageSelectedFiles"
           @unstage-selected="unstageSelectedFiles"
@@ -169,13 +173,13 @@
           @update:git-stash-open="gitStashOpen = $event"
           @update:git-staged-open="gitStagedOpen = $event"
           @update:git-unstaged-open="gitUnstagedOpen = $event"
+          @update:git-untracked-open="gitUntrackedOpen = $event"
           @update:git-log-open="gitLogOpen = $event"
           @load-more-git-log="loadMoreGitLog"
           @search-git-log="searchGitLog"
           @update:git-ahead-commits-open="gitAheadCommitsOpen = $event"
           @update:git-stash-section-open="gitStashSectionOpen = $event"
           @update:git-local-changes-open="gitLocalChangesOpen = $event"
-          @update:git-tree-expanded-dirs="gitTreeExpandedDirs = $event"
           @update:git-commit-message="gitCommitMessage = $event"
           @update:git-stash-message="gitStashMessage = $event"
           @toggle-git-log-entry="toggleGitLogEntry"
@@ -349,6 +353,9 @@
         :chat-collapsed="chatCollapsed"
         :can-go-back="canGoBack"
         :can-go-forward="canGoForward"
+        :hunk-action-mode="editorHunkActionMode"
+        :hunk-actions="editorHunkActions"
+        :hunk-busy-index="editorHunkBusyIndex"
         @update:file-content="fileContent = $event"
         @switch-tab="switchTab"
         @close-tab="closeTab"
@@ -359,6 +366,7 @@
         @expand-chat="expandChat"
         @editor-change="onEditorChange"
         @editor-select="onEditorSelect"
+        @hunk-action="onEditorHunkAction"
         @reorder-tabs="({ fromIndex, toIndex }) => reorderTabs(fromIndex, toIndex)"
         @close-other-tabs="closeOtherTabs"
         @close-right-tabs="closeRightTabs"
@@ -555,6 +563,7 @@
           :git-stash-open="gitStashOpen"
           :git-staged-open="gitStagedOpen"
           :git-unstaged-open="gitUnstagedOpen"
+          :git-untracked-open="gitUntrackedOpen"
           :git-log-open="gitLogOpen"
           :git-log-entries="gitLogEntries"
           :git-log-search-query="gitLogSearchQuery"
@@ -581,7 +590,6 @@
           :git-ahead-commits-loading="gitAheadCommitsLoading"
           :git-stash-section-open="gitStashSectionOpen"
           :git-local-changes-open="gitLocalChangesOpen"
-          :git-tree-expanded-dirs="gitTreeExpandedDirs"
           :git-advanced-open="gitAdvancedOpen"
           :git-advanced-action="gitAdvancedAction"
           :git-merge-in-progress="gitMergeInProgress"
@@ -600,7 +608,11 @@
           @ai-commit-and-push="aiCommitAndPush"
           @stage-file="stageFile"
           @unstage-file="unstageFile"
+          @stage-dir="stageDir"
+          @unstage-dir="unstageDir"
+          @discard-dir="discardDir"
           @stage-all="stageAll"
+          @stage-untracked="stageUntracked"
           @unstage-all="unstageAll"
           @stage-selected="stageSelectedFiles"
           @unstage-selected="unstageSelectedFiles"
@@ -617,13 +629,13 @@
           @update:git-stash-open="gitStashOpen = $event"
           @update:git-staged-open="gitStagedOpen = $event"
           @update:git-unstaged-open="gitUnstagedOpen = $event"
+          @update:git-untracked-open="gitUntrackedOpen = $event"
           @update:git-log-open="gitLogOpen = $event"
           @load-more-git-log="loadMoreGitLog"
           @search-git-log="searchGitLog"
           @update:git-ahead-commits-open="gitAheadCommitsOpen = $event"
           @update:git-stash-section-open="gitStashSectionOpen = $event"
           @update:git-local-changes-open="gitLocalChangesOpen = $event"
-          @update:git-tree-expanded-dirs="gitTreeExpandedDirs = $event"
           @update:git-commit-message="gitCommitMessage = $event"
           @update:git-stash-message="gitStashMessage = $event"
           @toggle-git-log-entry="toggleGitLogEntry"
@@ -827,15 +839,12 @@
       </div>
       <div v-if="contextMenu.show" class="ctx-overlay" @click="hideContextMenu" @contextmenu.prevent="hideContextMenu">
         <div class="ctx-menu" :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }" @click.stop>
-          <button
-            v-if="contextMenuTargetIsFile"
-            type="button"
-            class="ctx-item"
-            @click="contextMenuAttachToChat"
-          >
-            引用到对话
-          </button>
-          <div v-if="contextMenuTargetIsFile" class="ctx-sep" />
+          <button type="button" class="ctx-item" @click="contextMenuAttachToChat">引用到对话</button>
+          <div class="ctx-sep" />
+          <button type="button" class="ctx-item" @click="contextMenuCopyRelativePath">复制相对路径</button>
+          <button type="button" class="ctx-item" @click="contextMenuCopyFullPath">复制完整路径</button>
+          <button type="button" class="ctx-item" @click="contextMenuRevealInFolder">在文件管理器中显示</button>
+          <div class="ctx-sep" />
           <button type="button" class="ctx-item" @click="contextMenuCreateFile">+ 新建文件</button>
           <button type="button" class="ctx-item" @click="contextMenuCreateFolder">+ 新建文件夹</button>
           <div class="ctx-sep" />
@@ -909,7 +918,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import "../styles/vibe-coding.scss";
-import { appendStatusDetail, assistantTransientUiClearPatch, truncateDiffPreview, cleanStatusLogText, CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount, isNetworkError, fileName, genId, hasAgentProcessSteps, entryToNode, formatToolMeta, syncRoundGroupsPatch } from "../utils/vibeHelpers";
+import { appendStatusDetail, assistantTransientUiClearPatch, truncateDiffPreview, cleanStatusLogText, CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount, isNetworkError, fileName, genId, hasAgentProcessSteps, entryToNode, formatToolMeta, syncRoundGroupsPatch, inferEditorTabKind, displayFilePath } from "../utils/vibeHelpers";
+import { gitFileSelectionKey, parseGitFileSelectionKey, gitFileListScopeIsStaged, type GitFileListScope } from "../utils/gitHelpers";
 import { appendDebugLogFile, debugLog, setDebugLogProjectRoot } from "../utils/debugLog";
 import { lsGet, lsGetJson, lsSet, lsSetJson, lsRemove } from "../utils/localStorageSafe";
 import { dismissBlockingOverlays, registerOverlayDismissDeps, scanDomBlockingOverlays } from "../utils/dismissBlockingOverlays";
@@ -1348,14 +1358,14 @@ const projectHistoryList = ref<ProjectHistoryEntry[]>([]);
 const {
   gitBranches, checkoutBranch, createBranch, deleteBranch, resolveConflict,
   doMerge, doMergeAbort, doRebase, doRebaseAbort, doCherryPick, doRevertCommit,
-  doAmend, doCreateTag, doDeleteTag, doSubmoduleUpdate,
+  doCreateTag, doDeleteTag, doSubmoduleUpdate,
   gitPanelMode, projectPanelView, gitStatus, gitBranch, gitHeadCommit, gitIsRepo, gitStatusKnown, gitLoading, gitError,
   gitSecondaryHint,
   gitCommitMessage, gitCommitting, gitGenStep, gitLogEntries, gitLogOpen,
   gitLogCount, gitLogSearchQuery, hasMoreGitLog, gitLogLoadingMore, gitLogSearchLoading, loadMoreGitLog,
   searchGitLog,
-  gitStagedOpen, gitUnstagedOpen, expandedGitLogEntries, selectedGitFiles,
-  gitStashSectionOpen, gitLocalChangesOpen, gitTreeExpandedDirs,
+  gitStagedOpen, gitUnstagedOpen, gitUntrackedOpen, expandedGitLogEntries, selectedGitFiles,
+  gitStashSectionOpen, gitLocalChangesOpen,
   gitDiffLoadingKey, gitDiffContentCache, gitRemotes, gitSelectedRemote, gitTrackingBranch,
   gitAhead, gitBehind, gitRemoteLoading, gitRemoteAction, gitStashes, gitStashOpen,
   gitStashAction, gitStashMessage, gitAiPushStep,
@@ -1363,14 +1373,18 @@ const {
   gitMergeInProgress, gitRebaseInProgress, gitAdvancedOpen, gitAdvancedAction,
   gitTags, gitSubmodules, gitTagNameInput, gitMergeTarget, gitRebaseOnto,
   gitStagedFiles, gitUnstagedFiles, gitConflictedFiles, gitChangeCount, canGitCommit,
+  gitModifiedFiles,
+  gitHunkTargetFile, gitHunks, gitStagedHunks, gitHunkStagingIndex, gitHunkUnstagingIndex,
   clearGitDiffCache, evictOldestCacheEntry, gitStagingInProgress, gitLastStagingAt, gitStatusIcon, gitStatusColor,
   isGitLogEntryOpen, toggleGitLogEntry, gitHistoryDiffKey, gitWorkingTreeDiffKey,
   resetGitPanelState, refreshGitStatus, commitGit, stageFile, unstageFile,
-  stageAll, unstageAll, discardFile, discardAll,
+  stageAll, stageUntracked, unstageAll, discardFile, discardAll, stageDir, unstageDir, discardDir,
+  stageHunk,
+  unstageHunk,
   stageSelectedFiles, unstageSelectedFiles, discardSelectedFiles, toggleGitFileSelection, clearGitSelection,
   generateCommitMessage, aiCommitAndPush, refreshGitRemotes, refreshGitAheadCommits,
   doFetch, doPull, doPush,
-  doResetCommit, undoLastCommit,
+  doResetCommit,
   refreshGitStashes, doStashSave, doStashApply, doStashPop, doStashDrop,
   batchGroups, batchGroupsFromAi, batchMessages, batchSectionOpen, batchCommittingIndex, commitBatchGroup, commitAllBatches,
   aiBatchGrouping, aiBatchGroupingStep, generateAiBatchGroups, flushBatchDraftPersist,
@@ -1545,10 +1559,6 @@ const {
 const contextMenu = ref({ show: false, x: 0, y: 0, path: "" });
 const gitFileContextMenu = ref({ show: false, x: 0, y: 0, path: "" });
 
-const contextMenuTargetIsFile = computed(() => {
-  const node = findNode(fileTree.value, contextMenu.value.path);
-  return Boolean(node && !node.isDirectory);
-});
 const aiConfig = ref({ endpoint: "", apiKey: "", model: "", providerName: "" });
 
 const configReady = computed(() => Boolean(aiConfig.value.endpoint.trim()) && Boolean(aiConfig.value.model.trim()));
@@ -1742,17 +1752,7 @@ function openKnowledgeSourceFile() {
   openKnowledgeFile(PROJECT_KNOWLEDGE_REL_PATH);
 }
 
-let chatWasOpenBeforeProjectTab = false;
-
-watch([gitPanelMode, projectPanelView, projectOpened], ([mode, view, opened], prev) => {
-  const prevMode = prev?.[0];
-  if (prevMode !== undefined && mode === "project" && prevMode !== "project") {
-    chatWasOpenBeforeProjectTab = !chatCollapsed.value;
-    if (!chatCollapsed.value) collapseChat();
-  }
-  if (prevMode !== undefined && prevMode === "project" && mode !== "project") {
-    if (chatWasOpenBeforeProjectTab && chatCollapsed.value) expandChat();
-  }
+watch([gitPanelMode, projectPanelView, projectOpened], ([mode, view, opened]) => {
   if (!opened || mode !== "project") return;
   if (view === "knowledge") void loadKnowledge();
   if (view === "health") {
@@ -2015,6 +2015,91 @@ async function showGitFileDiff(filePath: string, staged = false) {
   dismissPlanPanelForeground();
   dismissGitPanelForeground();
   return showGitFileDiffCore(filePath, staged);
+}
+
+const activeGitDiffContext = computed(() => {
+  if (!showDiffMode.value || !activeFilePath.value || !activeFileDiff.value) return null;
+  const path = activeFilePath.value;
+  const tab = openTabs.value.find((t) => t.path === path);
+  const kind = tab?.kind ?? inferEditorTabKind(path);
+  if (kind === "git-history" || path.startsWith("git-history://")) return null;
+
+  if (kind === "git-staged" || path.startsWith("git-index://")) {
+    const relative = path.startsWith("git-index://")
+      ? path.slice("git-index://".length)
+      : displayFilePath(path);
+    return { relative, staged: true as const };
+  }
+
+  // Working-tree diffs: absolute path + kind "git-change" (or recovered via git status).
+  const root = normalizePath(projectPath.value).replace(/\/$/, "");
+  const norm = normalizePath(path);
+  let relative = "";
+  if (root && norm.toLowerCase().startsWith(`${root.toLowerCase()}/`)) {
+    relative = norm.slice(root.length + 1);
+  } else if (kind === "git-change") {
+    relative = displayFilePath(path);
+  } else {
+    return null;
+  }
+
+  const inGit =
+    gitModifiedFiles.value.some((f) => f.path === relative)
+    || gitStagedFiles.value.some((f) => f.path === relative);
+  if (kind === "git-change" || inGit) {
+    return { relative, staged: false as const };
+  }
+  return null;
+});
+
+const editorHunkActionMode = computed(() => {
+  const ctx = activeGitDiffContext.value;
+  if (!ctx) return null;
+  return ctx.staged ? "unstage" : "stage";
+});
+
+const editorHunkActions = computed(() => {
+  const ctx = activeGitDiffContext.value;
+  if (!ctx) return [];
+  const list = ctx.staged ? gitStagedHunks.value : gitHunks.value;
+  return list.map((h) => ({ index: h.index, header: h.header }));
+});
+
+const editorHunkBusyIndex = computed(() => {
+  const ctx = activeGitDiffContext.value;
+  if (!ctx) return null;
+  return ctx.staged ? gitHunkUnstagingIndex.value : gitHunkStagingIndex.value;
+});
+
+watch(activeGitDiffContext, (ctx) => {
+  if (!ctx?.relative) return;
+  const key = gitFileSelectionKey(ctx.relative, ctx.staged);
+  if (selectedGitFiles.value.length === 1 && selectedGitFiles.value[0] === key) return;
+  selectedGitFiles.value = [key];
+});
+
+async function onEditorHunkAction(index: number) {
+  const ctx = activeGitDiffContext.value;
+  if (!ctx) return;
+  const beforeError = gitError.value;
+  gitError.value = "";
+  if (ctx.staged) await unstageHunk(ctx.relative, index);
+  else await stageHunk(ctx.relative, index);
+  if (gitError.value && gitError.value !== beforeError) {
+    // Action failed — keep current diff; status/hunks already refreshed inside stage/unstage
+    return;
+  }
+
+  clearGitDiffCache();
+  const stillRelevant = ctx.staged
+    ? gitStagedFiles.value.some((f) => f.path === ctx.relative)
+    : gitModifiedFiles.value.some((f) => f.path === ctx.relative);
+
+  if (stillRelevant) {
+    await showGitFileDiff(ctx.relative, ctx.staged);
+  } else if (activeFilePath.value) {
+    await closeTab(activeFilePath.value);
+  }
 }
 
 function openConflictFile(relativePath: string) {
@@ -2612,12 +2697,12 @@ const workspaceUi = useWorkspaceUiPersistence({
     gitLogOpen,
     gitStagedOpen,
     gitUnstagedOpen,
+    gitUntrackedOpen,
     gitStashOpen,
     gitAheadCommitsOpen,
     batchSectionOpen,
     gitStashSectionOpen,
     gitLocalChangesOpen,
-    gitTreeExpandedDirs,
     selectedGitFiles,
     expandedGitLogEntries,
     gitLogSearchQuery,
@@ -3106,8 +3191,8 @@ async function renameSelectedItem() {
 
 function showContextMenu(path: string, x: number, y: number) {
   selectedTreePath.value = path;
-  const menuW = 180;
-  const menuH = 160;
+  const menuW = 200;
+  const menuH = 340;
   const clampedX = Math.min(x, window.innerWidth - menuW);
   const clampedY = Math.min(y, window.innerHeight - menuH);
   contextMenu.value = { show: true, x: Math.max(0, clampedX), y: Math.max(0, clampedY), path };
@@ -3139,8 +3224,33 @@ function contextMenuAttachToChat() {
   const path = contextMenu.value.path;
   const node = findNode(fileTree.value, path);
   hideContextMenu();
-  if (!path || node?.isDirectory) return;
+  if (!path) return;
   attachFileToChat(path, node?.name);
+}
+
+function contextMenuCopyRelativePath() {
+  const path = contextMenu.value.path;
+  hideContextMenu();
+  if (!path) return;
+  const node = findNode(fileTree.value, path);
+  const ref = buildReferencedFile(path, node?.name ?? fileName(path));
+  void copyText(ref.relative);
+}
+
+function contextMenuCopyFullPath() {
+  const path = contextMenu.value.path;
+  hideContextMenu();
+  if (!path) return;
+  void copyText(path);
+}
+
+function contextMenuRevealInFolder() {
+  const path = contextMenu.value.path;
+  hideContextMenu();
+  if (!path) return;
+  import("@tauri-apps/plugin-opener").then(({ revealItemInDir }) =>
+    revealItemInDir(path).catch(() => {}),
+  );
 }
 
 function contextMenuRename() {
@@ -3163,19 +3273,20 @@ function onComposerImageError(message: string) {
   chatError.value = message;
 }
 
-function onGitFilePointerDown(e: PointerEvent, relativePath: string, staged = false) {
+function onGitFilePointerDown(e: PointerEvent, relativePath: string, listScope: GitFileListScope = "modified") {
   // 跳过文件夹条目（以 / 结尾），文件夹无需获取 diff
   if (relativePath.endsWith('/')) return
 
   const shiftKey = e.shiftKey;
   const ctrlKey = e.ctrlKey || e.metaKey;
+  const staged = gitFileListScopeIsStaged(listScope);
   
   if (shiftKey || ctrlKey) {
     e.preventDefault();
     e.stopPropagation();
   }
   
-  toggleGitFileSelection(relativePath, shiftKey, ctrlKey);
+  toggleGitFileSelection(relativePath, shiftKey, ctrlKey, listScope);
   
   if (!shiftKey && !ctrlKey) {
     const fullPath = resolveFullPathFromRel(relativePath);
@@ -3185,15 +3296,20 @@ function onGitFilePointerDown(e: PointerEvent, relativePath: string, staged = fa
   }
 }
 
-function onGitFileContextMenu(e: MouseEvent, path: string) {
-  // 右键未选中文件时，改为只选中该文件；已在多选内则保持选择
-  if (!selectedGitFiles.value.includes(path)) {
-    selectedGitFiles.value = [path];
+function onGitFileContextMenu(e: MouseEvent, path: string, listScope: GitFileListScope = "modified") {
+  // 右键未选中该分区条目时，改为只选中该分区文件；已在多选内则保持选择
+  const staged = gitFileListScopeIsStaged(listScope);
+  const key = gitFileSelectionKey(path, staged);
+  if (!selectedGitFiles.value.includes(key)) {
+    selectedGitFiles.value = [key];
   }
+  const selected = selectedGitFiles.value
+    .map((k) => parseGitFileSelectionKey(k))
+    .filter((x): x is { path: string; staged: boolean } => !!x);
   const itemCount =
     1
-    + (selectedGitFiles.value.some((p) => gitUnstagedFiles.value.some((f) => f.path === p)) ? 2 : 0)
-    + (selectedGitFiles.value.some((p) => gitStagedFiles.value.some((f) => f.path === p)) ? 1 : 0);
+    + (selected.some((s) => !s.staged && gitUnstagedFiles.value.some((f) => f.path === s.path)) ? 2 : 0)
+    + (selected.some((s) => s.staged && gitStagedFiles.value.some((f) => f.path === s.path)) ? 1 : 0);
   const menuW = 160;
   const menuH = Math.min(40 + itemCount * 32, 200);
   const clampedX = Math.min(e.clientX, window.innerWidth - menuW);
@@ -3206,10 +3322,16 @@ function hideGitFileContextMenu() {
 }
 
 const gitFileCtxCanStage = computed(() =>
-  selectedGitFiles.value.some((p) => gitUnstagedFiles.value.some((f) => f.path === p)),
+  selectedGitFiles.value.some((key) => {
+    const parsed = parseGitFileSelectionKey(key);
+    return !!parsed && !parsed.staged && gitUnstagedFiles.value.some((f) => f.path === parsed.path);
+  }),
 );
 const gitFileCtxCanUnstage = computed(() =>
-  selectedGitFiles.value.some((p) => gitStagedFiles.value.some((f) => f.path === p)),
+  selectedGitFiles.value.some((key) => {
+    const parsed = parseGitFileSelectionKey(key);
+    return !!parsed && parsed.staged && gitStagedFiles.value.some((f) => f.path === parsed.path);
+  }),
 );
 const gitFileCtxCanDiscard = computed(() => gitFileCtxCanStage.value);
 
@@ -3556,7 +3678,10 @@ function buildReferencedFilePathsSection(refs: ReferencedFile[]): string {
   for (const file of refs) {
     if (seen.has(file.path)) continue;
     seen.add(file.path);
-    chunks.push(`### 📄 ${file.relative}`);
+    const node =
+      findNode(fileTree.value, file.path)
+      || findNodeByKey(fileTree.value, normalizePathKey(file.path));
+    chunks.push(`### ${node?.isDirectory ? "📁" : "📄"} ${file.relative}`);
   }
   return chunks.join("\n\n");
 }
@@ -3568,6 +3693,13 @@ async function buildReferencedFileSection(refs: ReferencedFile[]): Promise<strin
   for (const file of refs) {
     if (seen.has(file.path)) continue;
     seen.add(file.path);
+    const node =
+      findNode(fileTree.value, file.path)
+      || findNodeByKey(fileTree.value, normalizePathKey(file.path));
+    if (node?.isDirectory) {
+      chunks.push(`### 📁 ${file.relative}`);
+      continue;
+    }
     const result = await readFile(file.path);
     if (result.ok) {
       const content = truncatePromptAttachment(result.content);

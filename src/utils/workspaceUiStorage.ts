@@ -6,12 +6,12 @@ export type PersistedGitPanelUi = {
   logOpen?: boolean;
   stagedOpen?: boolean;
   unstagedOpen?: boolean;
+  untrackedOpen?: boolean;
   stashOpen?: boolean;
   aheadCommitsOpen?: boolean;
   batchSectionOpen?: boolean;
   stashSectionOpen?: boolean;
   localChangesOpen?: boolean;
-  treeExpandedDirs?: string[];
   selectedFiles?: string[];
   expandedLogEntries?: string[];
   logSearchQuery?: string;
@@ -52,13 +52,12 @@ function slimGitPanelUi(raw: unknown): PersistedGitPanelUi | undefined {
   if (typeof src.logOpen === "boolean") git.logOpen = src.logOpen;
   if (typeof src.stagedOpen === "boolean") git.stagedOpen = src.stagedOpen;
   if (typeof src.unstagedOpen === "boolean") git.unstagedOpen = src.unstagedOpen;
+  if (typeof src.untrackedOpen === "boolean") git.untrackedOpen = src.untrackedOpen;
   if (typeof src.stashOpen === "boolean") git.stashOpen = src.stashOpen;
   if (typeof src.aheadCommitsOpen === "boolean") git.aheadCommitsOpen = src.aheadCommitsOpen;
   if (typeof src.batchSectionOpen === "boolean") git.batchSectionOpen = src.batchSectionOpen;
   if (typeof src.stashSectionOpen === "boolean") git.stashSectionOpen = src.stashSectionOpen;
   if (typeof src.localChangesOpen === "boolean") git.localChangesOpen = src.localChangesOpen;
-  const treeExpandedDirs = slimStringArray(src.treeExpandedDirs);
-  if (treeExpandedDirs) git.treeExpandedDirs = treeExpandedDirs;
   const selectedFiles = slimStringArray(src.selectedFiles);
   if (selectedFiles) git.selectedFiles = selectedFiles;
   const expandedLogEntries = slimStringArray(src.expandedLogEntries);

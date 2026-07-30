@@ -15,6 +15,8 @@ export function gitStatusIcon(status: string): string {
     case "renamed": return "R";
     case "C":
     case "copied": return "C";
+    case "untracked": return "U";
+    case "conflicted": return "!";
     default: return "?";
   }
 }
@@ -32,6 +34,8 @@ export function gitStatusClass(status: string): string {
     case "renamed":
     case "C":
     case "copied": return "git-status-renamed";
+    case "untracked": return "git-status-untracked";
+    case "conflicted": return "git-status-conflicted";
     default: return "git-status-unknown";
   }
 }
@@ -104,4 +108,39 @@ export function splitGitFilePath(filePath: string): { dir: string; name: string 
   const slash = normalized.lastIndexOf("/");
   if (slash === -1) return { dir: "", name: normalized };
   return { dir: normalized.slice(0, slash), name: normalized.slice(slash + 1) };
+}
+
+export type GitSelectionScope = "staged" | "unstaged";
+
+/** Visible Git file list section (Shift 多选范围按分区，不跨区串选). */
+export type GitFileListScope = "staged" | "modified" | "untracked";
+
+export function gitFileListScopeIsStaged(scope: GitFileListScope): boolean {
+  return scope === "staged";
+}
+
+/** Selection key that distinguishes the same path in staged vs changes lists. */
+export function gitFileSelectionKey(path: string, staged: boolean): string {
+  return `${staged ? "staged" : "unstaged"}:${path}`;
+}
+
+export function parseGitFileSelectionKey(
+  key: string,
+): { path: string; staged: boolean } | null {
+  if (key.startsWith("staged:")) return { path: key.slice("staged:".length), staged: true };
+  if (key.startsWith("unstaged:")) return { path: key.slice("unstaged:".length), staged: false };
+  // Legacy plain path → treat as unstaged for highlight compatibility
+  if (key.trim()) return { path: key, staged: false };
+  return null;
+}
+
+/** Parse new-side start line from a unified diff hunk header (`@@ -a,b +c,d @@`).
+ * Falls back to old-side start when the hunk is a pure deletion (`+0,0`). */
+export function parseHunkNewStartLine(header: string): number {
+  const m = /^@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)/.exec(header.trim());
+  if (!m) return 0;
+  const neu = Number(m[2]);
+  if (Number.isFinite(neu) && neu > 0) return neu;
+  const old = Number(m[1]);
+  return Number.isFinite(old) && old > 0 ? old : 0;
 }

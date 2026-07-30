@@ -157,11 +157,7 @@ pub async fn git_status(project_root: &str) -> GitStatusResult {
     Ok(out) => {
       let visible: Vec<_> = parse_git_status_porcelain(&out.stdout)
         .into_iter()
-        .filter(|f| {
-          f.status == "ignored"
-            || (should_show_git_status_path(&f.path)
-              && !super::stage_guard::is_git_path_stage_blocked(&f.path))
-        })
+        .filter(|f| should_show_git_status_path(&f.path))
         .collect();
       let staged_count = visible.iter().filter(|f| f.staged).count() as u32;
       let unstaged_count = visible.iter().filter(|f| !f.staged).count() as u32;
