@@ -265,18 +265,20 @@ pub struct GitGenerateMessageResult {
   pub error: Option<String>,
 }
 
+fn truncate_at_char_boundary(s: &str, max_chars: usize) -> &str {
+  match s.char_indices().nth(max_chars) {
+    Some((i, _)) => &s[..i],
+    None => s,
+  }
+}
+
 fn preprocess_diff(patch: &str, max_chars_per_file: usize, total_max_chars: usize) -> String {
   if patch.is_empty() {
     return String::new();
   }
   // Cap before section scan — AI budget is small; avoid walking multi-MB patches.
   const RAW_SCAN_CAP: usize = 200_000;
-  let patch = if patch.len() > RAW_SCAN_CAP {
-    let cutoff = patch.char_indices().nth(RAW_SCAN_CAP).map(|(i, _)| i).unwrap_or(patch.len());
-    &patch[..cutoff]
-  } else {
-    patch
-  };
+  let patch = truncate_at_char_boundary(patch, RAW_SCAN_CAP);
   let mut result = String::new();
   let mut current_total = 0;
 
@@ -296,11 +298,15 @@ fn preprocess_diff(patch: &str, max_chars_per_file: usize, total_max_chars: usiz
       || header_line.contains(".min.css");
 
     let file_patch = format!("diff --git {section}");
+    let char_len = file_patch.chars().count();
     let processed = if is_lock_file || is_minified_or_build {
       let lines: Vec<&str> = file_patch.lines().take(4).collect();
       format!("{}\n\n[Diff omitted: lock file or generated/minified asset]\n", lines.join("\n"))
-    } else if file_patch.len() > max_chars_per_file {
-      format!("{}...\n\n[Diff truncated: exceeded {max_chars_per_file} characters]\n", &file_patch[..max_chars_per_file])
+    } else if char_len > max_chars_per_file {
+      format!(
+        "{}...\n\n[Diff truncated: exceeded {max_chars_per_file} characters]\n",
+        truncate_at_char_boundary(&file_patch, max_chars_per_file)
+      )
     } else {
       file_patch
     };
@@ -326,12 +332,16 @@ async fn stream_ai_completion(
   messages: Value,
   channel: &Channel<Value>,
   event_type: &str,
+  temperature: Option<f32>,
 ) -> Result<String, String> {
-  let body = json!({
+  let mut body = json!({
     "model": model,
     "messages": messages,
     "stream": true
   });
+  if let Some(temp) = temperature {
+    body["temperature"] = json!(temp);
+  }
   let resp = ai::chat_completion_stream_raw(endpoint, api_key, body).await?;
   let mut stream = resp.bytes_stream();
   let mut sse_buffer: Vec<u8> = Vec::new();
@@ -488,8 +498,13 @@ pub async fn git_generate_message(
   }
 
   let diff_result = git::git_diff(&path, None, true).await;
+  let (per_file_budget, total_budget) = if staged_files.len() <= 5 {
+    (8000, 24000)
+  } else {
+    (3000, 12000)
+  };
   let diff_text = if diff_result.ok {
-    preprocess_diff(&diff_result.patch, 3000, 12000)
+    preprocess_diff(&diff_result.patch, per_file_budget, total_budget)
   } else {
     String::new()
   };
@@ -519,7 +534,7 @@ pub async fn git_generate_message(
         String::new()
       } else {
         format!(
-          "\n\n本仓库近期提交（请贴近其语气与长度，不要照抄内容）：\n{}",
+          "\n\n本仓库近期提交（只学语气与长度；禁止借用旧主题或措辞内容）：\n{}",
           lines.join("\n")
         )
       }
@@ -529,7 +544,7 @@ pub async fn git_generate_message(
   };
 
   let prompt = format!(
-    "你是一个 Git 提交信息生成器。根据以下已暂存的文件变更生成一条准确、口语化的中文提交信息。
+    "你是一个 Git 提交信息生成器。根据以下已暂存变更，生成一条中文提交信息。
 
 已暂存文件列表：
 {file_list_str}
@@ -537,19 +552,19 @@ pub async fn git_generate_message(
 Diff 内容：
 {diff_text}{recent_style}
 
-要求：
-- 使用中文，语气像开发者随手写的备注，自然口语，不要公文腔或宣传口号
-- 默认只输出一行（不超过72字符），说清改了啥即可；仅当变更很大、一行说不清时，才空一行再补一两句
-- 可用「修了」「加了」「改了」「整理了」等日常说法
-- 说清改动意图即可，不必罗列文件名或技术细节堆砌
-- 不要加前缀如 'feat:' 或 'fix:'，不要加引号或句号
-- 避免「提升可维护性」「优化用户体验」这类空泛套话
+输出格式（必须）：
+- 一句说完，结构为「[功能/模块] + [具体改了啥]」
+- 功能/模块名只能从路径、符号、diff 上下文推断；推断不出就直接写更具体的改动，禁止瞎编功能名
+- 必须依据 Diff 里真实出现的改动写；禁止写 diff 未出现的能力、原因或效果
+- 中文口语即可（可用「修了」「加了」「改了」），但信息要准，不要空话
+- 默认一行、不超过72字；不要 feat:/fix: 前缀，不要引号或句号
+- 禁止「提升可维护性」「优化用户体验」等套话
 
 示例：
-修了支付状态不同步
-加了登录，邮箱手机号都能验
-把用户模块拆开整理了一下
-文档补了几段 API 用法"
+登录态偶发丢失修好了
+Git 面板 AI 注释改成按功能写清改动
+支付回调状态同步修了
+用户模块拆开整理了一下"
   );
 
   match stream_ai_completion(
@@ -559,6 +574,7 @@ Diff 内容：
     json!([{ "role": "user", "content": prompt }]),
     &on_event,
     "delta",
+    Some(0.2),
   )
   .await
   {
