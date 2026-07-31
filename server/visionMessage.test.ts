@@ -405,7 +405,7 @@ describe("visionMessage", () => {
     const hint = buildVisionUiLocateHint(["示例标题", "今天·3条"]);
     expect(hint).toContain("截图 UI 定位·通用");
     expect(hint).toContain("grep");
-    expect(hint).toContain("item-meta");
+    expect(hint).toContain("结构标识");
     expect(hint).not.toMatch(/VibeCodingView|FilePanel|src\/views/);
   });
 

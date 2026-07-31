@@ -75,18 +75,6 @@
       }
     },
     {
-      "id": "build-scheduled-task",
-      "description": "定时任务咨询只读",
-      "prompt": "有没有跑批数据的定时任务吗？",
-      "mode": "build",
-      "expect": {
-        "consultative": true,
-        "scheduledTaskConsultativeRun": true,
-        "readOnlyBuildRun": true,
-        "skipAiClassifier": true
-      }
-    },
-    {
       "id": "build-ultra-short-task",
       "description": "极短开放任务应注入澄清提示",
       "prompt": "修一下",

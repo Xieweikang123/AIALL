@@ -216,7 +216,7 @@ export function buildGrepEmptyRecoveryNudge(patterns: string[]): string {
   return [
     `【系统提示】本轮 grep 未找到匹配：${listed}。`,
     "禁止重复相同 pattern；请改用精确函数/导出名、调用方符号，或更短的英文标识符。",
-    "行为类问题：底层未命中时应 grep 上层 handler/composable 再 read，禁止广搜凑轮次。",
+    "行为类问题：底层未命中时应根据已知符号继续 grep 相关调用方或上层 handler/composable 处理逻辑，再 read；禁止广搜凑轮次。",
   ].join("");
 }
 
@@ -229,7 +229,7 @@ export function buildReadFileFailedRecoveryNudge(failedPaths: string[]): string 
   return [
     `【系统提示】本轮 read_file 失败：${listed}。`,
     "禁止重复 read 同一路径；禁止在答复中引用该路径下的行号或符号。",
-    "请 grep 可见 tab 文案、kebab-case class 或 composable/mode 符号重新定位，read 成功后再引用代码。",
+    "请根据已知的可见文本、结构标识或调用关系重新定位，read 成功后再引用代码。",
     "若会话 history 中 assistant 曾引用不存在路径，须显式更正，勿沿用。",
   ].join("");
 }
@@ -624,7 +624,7 @@ export function buildSameIssueFollowUpHint(): string {
     "",
     "【同问题追问·前轮已宣称修复】用户在同一会话继续报告异常或质疑修复是否完整。",
     "① 先回顾前轮改了什么、针对哪个可见症状；列出仍存疑的现象，勿假设已解决。",
-    "② 从用户操作入口 trace 完整链路（入口→编排→副作用/持久化→UI 展示）；禁止只改展示层而忽略状态默认值、列表投影、切换/路由等关联路径。",
+    "② 围绕用户现象核对相关状态、数据、调用关系与最终结果；禁止只改表层而忽略决定行为的默认值、数据投影、切换或路由等关联逻辑。",
     "③ patch 前 grep import 确认运行时入口；未引用的同名/近似路径文件勿改。",
     "④ 若前轮修复不完整须显式承认并扩大范围；禁止再次无验证「修复完成」。",
     "⑤ 探索预算收紧：基于会话已有上下文优先 patch 或分症状结论，禁止从零广搜全链路。",

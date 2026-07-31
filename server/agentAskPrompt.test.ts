@@ -16,7 +16,7 @@ describe("agentAskPrompt", () => {
 
   it("requires entry write/revert/none classification in answer hints", () => {
     const hints = buildAskAnswerStructureHints();
-    expect(hints).toMatch(/正向写入|回滚|不涉及/);
+    expect(hints).toContain("输入、前提、结果与可观察影响");
     expect(hints).toContain("AND");
   });
 

@@ -13,20 +13,21 @@ alwaysApply: true
 - `server/vibeAgent.ts`、`server/agentAskPrompt.ts` 中的 system prompt 片段
 - 以及任何 `*ReplyAccuracy*`、`*ExplorationHint*`、`*AnswerStructure*` 类逻辑
 
-## 行为类问题
+## 机制事实结论
 
-用户问「做 X 时会不会发生 Y」：
+用户询问代码如何工作、实际走哪条路径，或是否会产生某结果时：
 
-1. 找**用户操作入口**（事件处理、对外 API、路由 handler）
-2. 向下 trace **至少两层**：入口 → 编排/中间层 → 副作用或持久化
-3. 禁止只打开最底层、名字相近的函数就下结论
+1. 先拆出结论涉及的定义、调用关系、输入、条件分支与结果。
+2. 按代码实际结构追踪，不强制固定入口、层数或中间层；可以从调用方、定义、数据来源或触发点开始，取决于当前问题。
+3. 继续追到直接决定结论的最后证据，例如返回值、输出、异常、状态、事件、缓存结果或外部副作用。
+4. 禁止只打开最底层、名字相近的函数、类型字段或注释就下结论；必须区分实际执行路径与旁路 API。
 
 ## 二元结论
 
 「会/不会」「是/不是」类问题：
 
 - grep 命中后必须 read **完整函数体**及**直接调用方**
-- 有完整执行路径证据再作答；禁止凭记忆或单层符号断言
+- 确认所有相关结果路径及其前提后再作答；禁止凭记忆或单层符号断言，证据不足明确说不确定
 
 ## 工具策略
 
@@ -37,7 +38,7 @@ alwaysApply: true
 ## 多轮自洽
 
 - 新结论与先前回复矛盾时：**显式更正** + 引用新证据
-- 用户现象与浅层结论不符时：注入 `buildBehaviorContradictionHint`（`isBehaviorContradictionPrompt`），Ask/Build 均适用；自动加深一层调用链
+- 用户现象与当前证据不符时：注入 `buildBehaviorContradictionHint`（`isBehaviorContradictionPrompt`），Ask/Build 均适用；回到决定结论的分支或结果点继续核对
 - 咨询只读连续探索：`CONSULTATIVE_BUILD_EXPLORE_TURN_BUDGET`（默认 4 轮）后注入 `buildConsultativeExploreBudgetNudge`
 - grep 零命中：当轮注入 `buildGrepEmptyRecoveryNudge`，提示换符号/搜调用方
 

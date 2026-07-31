@@ -7,20 +7,21 @@ import {
 } from "./consultativeAccuracyTrace";
 
 describe("consultativeAccuracyTrace", () => {
-  it("requires entry and backend layer reads before accuracy finalize", () => {
+  it("requires two distinct reads without assuming repository directories", () => {
     expect(
       hasConsultativeAccuracyTraceDepth([
-        "src/composables/useGitPanel.ts",
-        "src-tauri/src/agent/context.rs",
+        "ui/editor.ts",
+        "api/handler.py",
       ]),
     ).toBe(true);
     expect(
       hasConsultativeAccuracyTraceDepth([
-        "src/composables/useGitPanel.ts",
-        "src/services/vibeGitClient.ts",
+        "frontend/view.tsx",
+        "frontend/client.ts",
       ]),
-    ).toBe(false);
-    expect(hasConsultativeAccuracyTraceDepth(["src/composables/useGitPanel.ts"])).toBe(false);
+    ).toBe(true);
+    expect(hasConsultativeAccuracyTraceDepth(["ui/editor.ts"])).toBe(false);
+    expect(hasConsultativeAccuracyTraceDepth(["UI\\Editor.ts", "ui/editor.ts"])).toBe(false);
   });
 
   it("detects deferred behavior answers", () => {
