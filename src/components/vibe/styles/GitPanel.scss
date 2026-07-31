@@ -564,6 +564,40 @@
   margin-left: auto;
 }
 
+.git-log-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  margin-top: 8px;
+  padding: 2px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+}
+
+.git-log-scope-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: rgba(139, 148, 158, 0.85);
+  font-size: 11px;
+  line-height: 1;
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.git-log-scope-btn:hover {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.git-log-scope-btn.active {
+  background: rgba(88, 166, 255, 0.18);
+  color: #58a6ff;
+  font-weight: 500;
+}
+
 .git-log-empty {
   font-size: 12px;
   color: rgba(139, 148, 158, 0.55);

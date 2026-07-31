@@ -42,16 +42,25 @@ pub struct GitLogResult {
 
 const GIT_LOG_FORMAT: &str = "%x1e%H%x1f%h%x1f%an%x1f%ai%x1f%d%x1f%B%x00";
 
-pub async fn git_log(project_root: &str, count: u32, search: Option<&str>) -> GitLogResult {
+pub async fn git_log(
+  project_root: &str,
+  count: u32,
+  search: Option<&str>,
+  all_branches: bool,
+) -> GitLogResult {
   let count_str = count.to_string();
   let format_arg = format!("--format={GIT_LOG_FORMAT}");
   let max_count_arg = format!("--max-count={count_str}");
-  let mut args: Vec<&str> = vec![
-    "log",
+  let mut args: Vec<&str> = vec!["log"];
+  if all_branches {
+    args.push("--all");
+  }
+  args.extend_from_slice(&[
     &max_count_arg,
+    "--decorate=short",
     "--name-status",
     &format_arg,
-  ];
+  ]);
   if let Some(s) = search {
     if !s.is_empty() {
       args.push("--grep");

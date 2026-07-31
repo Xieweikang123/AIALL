@@ -16,6 +16,7 @@ export type GitPanelUiRefs = {
   selectedGitFiles: Ref<string[]>;
   expandedGitLogEntries: Ref<Set<string>>;
   gitLogSearchQuery: Ref<string>;
+  gitLogAllBranches: Ref<boolean>;
 };
 
 export type WorkspaceUiPersistenceDeps = {
@@ -50,6 +51,7 @@ export function snapshotGitPanelUi(git: GitPanelUiRefs): PersistedGitPanelUi {
     selectedFiles: [...git.selectedGitFiles.value],
     expandedLogEntries: Array.from(git.expandedGitLogEntries.value),
     logSearchQuery: git.gitLogSearchQuery.value,
+    logAllBranches: git.gitLogAllBranches.value,
   };
 }
 
@@ -75,6 +77,7 @@ export function applyGitPanelUi(git: GitPanelUiRefs, saved?: PersistedGitPanelUi
     git.expandedGitLogEntries.value = new Set(saved.expandedLogEntries);
   }
   if (typeof saved.logSearchQuery === "string") git.gitLogSearchQuery.value = saved.logSearchQuery;
+  if (typeof saved.logAllBranches === "boolean") git.gitLogAllBranches.value = saved.logAllBranches;
   if (typeof saved.logOpen === "boolean") git.gitLogOpen.value = saved.logOpen;
 }
 
@@ -198,6 +201,7 @@ export function useWorkspaceUiPersistence(deps: WorkspaceUiPersistenceDeps) {
       deps.git.selectedGitFiles.value.join("\n"),
       Array.from(deps.git.expandedGitLogEntries.value).join("\n"),
       deps.git.gitLogSearchQuery.value,
+      deps.git.gitLogAllBranches.value,
     ] as const,
     () => schedulePersist(),
   );

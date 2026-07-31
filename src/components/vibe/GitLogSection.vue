@@ -5,6 +5,26 @@
       <span>提交历史</span>
       <span v-if="gitLogEntries.length" class="git-log-section-count">{{ gitLogEntries.length }}</span>
     </button>
+    <div v-if="gitLogOpen" class="git-log-scope" role="group" aria-label="提交历史范围">
+      <button
+        type="button"
+        class="git-log-scope-btn"
+        :class="{ active: !gitLogAllBranches }"
+        title="仅当前分支"
+        @click="$emit('update:gitLogAllBranches', false)"
+      >
+        当前
+      </button>
+      <button
+        type="button"
+        class="git-log-scope-btn"
+        :class="{ active: gitLogAllBranches }"
+        title="所有分支与标签"
+        @click="$emit('update:gitLogAllBranches', true)"
+      >
+        全部
+      </button>
+    </div>
     <div
       v-if="gitLogOpen"
       class="git-log-search-container"
@@ -152,6 +172,7 @@ const props = defineProps<{
   gitLogEntries: GitLogEntryView[];
   gitLogSearchQuery: string;
   gitLogSearchLoading: boolean;
+  gitLogAllBranches: boolean;
   hasMoreGitLog: boolean;
   gitLogLoadingMore: boolean;
   gitDiffLoadingKey: string;
@@ -160,6 +181,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "update:gitLogOpen", value: boolean): void;
+  (e: "update:gitLogAllBranches", value: boolean): void;
   (e: "search-git-log", query: string): void;
   (e: "load-more-git-log"): void;
   (e: "toggle-git-log-entry", hash: string): void;

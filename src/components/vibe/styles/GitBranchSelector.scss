@@ -171,11 +171,20 @@
   min-width: 0;
 }
 
+.git-branch-item-date {
+  font-size: 11px;
+  color: rgba(139, 148, 158, 0.55);
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
 .git-branch-item-actions {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+  margin-left: 6px;
 }
 
 .git-branch-active-indicator {

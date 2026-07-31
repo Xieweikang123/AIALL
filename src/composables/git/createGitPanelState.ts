@@ -33,6 +33,8 @@ export interface GitPanelState {
   gitLogOpen: Ref<boolean>;
   gitLogCount: Ref<number>;
   gitLogSearchQuery: Ref<string>;
+  /** When true, log uses `git log --all` (all branches/refs). */
+  gitLogAllBranches: Ref<boolean>;
   gitLogLoadingMore: Ref<boolean>;
   gitLogSearchLoading: Ref<boolean>;
   hasMoreGitLog: ComputedRef<boolean>;
@@ -154,6 +156,7 @@ export function createGitPanelState(
   const gitLogOpen = ref(false);
   const gitLogCount = ref(30);
   const gitLogSearchQuery = ref("");
+  const gitLogAllBranches = ref(false);
   const gitLogLoadingMore = ref(false);
   const gitLogSearchLoading = ref(false);
   const hasMoreGitLog = computed(() => {
@@ -216,7 +219,9 @@ export function createGitPanelState(
       if (projectOpened() && gitIsRepo.value) {
         const openSearch = gitLogSearchQuery.value || undefined;
         gitLogLoadingMore.value = true;
-        fetchGitLog(projectPath(), gitLogCount.value, openSearch)
+        fetchGitLog(projectPath(), gitLogCount.value, openSearch, {
+          all: gitLogAllBranches.value,
+        })
           .then((logResult) => {
             if (logResult.ok) {
               gitLogEntries.value = logResult.entries;
@@ -378,6 +383,7 @@ export function createGitPanelState(
     gitLogOpen,
     gitLogCount,
     gitLogSearchQuery,
+    gitLogAllBranches,
     gitLogLoadingMore,
     gitLogSearchLoading,
     hasMoreGitLog,

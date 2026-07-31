@@ -111,6 +111,7 @@
           :git-log-open="gitLogOpen"
           :git-log-entries="gitLogEntries"
           :git-log-search-query="gitLogSearchQuery"
+          :git-log-all-branches="gitLogAllBranches"
           :has-more-git-log="hasMoreGitLog"
           :git-log-loading-more="gitLogLoadingMore"
           :git-log-search-loading="gitLogSearchLoading"
@@ -175,6 +176,7 @@
           @update:git-unstaged-open="gitUnstagedOpen = $event"
           @update:git-untracked-open="gitUntrackedOpen = $event"
           @update:git-log-open="gitLogOpen = $event"
+          @update:git-log-all-branches="setGitLogAllBranches"
           @load-more-git-log="loadMoreGitLog"
           @search-git-log="searchGitLog"
           @update:git-ahead-commits-open="gitAheadCommitsOpen = $event"
@@ -583,6 +585,7 @@
           :git-log-open="gitLogOpen"
           :git-log-entries="gitLogEntries"
           :git-log-search-query="gitLogSearchQuery"
+          :git-log-all-branches="gitLogAllBranches"
           :has-more-git-log="hasMoreGitLog"
           :git-log-loading-more="gitLogLoadingMore"
           :git-log-search-loading="gitLogSearchLoading"
@@ -647,6 +650,7 @@
           @update:git-unstaged-open="gitUnstagedOpen = $event"
           @update:git-untracked-open="gitUntrackedOpen = $event"
           @update:git-log-open="gitLogOpen = $event"
+          @update:git-log-all-branches="setGitLogAllBranches"
           @load-more-git-log="loadMoreGitLog"
           @search-git-log="searchGitLog"
           @update:git-ahead-commits-open="gitAheadCommitsOpen = $event"
@@ -1382,8 +1386,8 @@ const {
   gitPanelMode, projectPanelView, gitStatus, gitBranch, gitHeadCommit, gitIsRepo, gitStatusKnown, gitLoading, gitError,
   gitSecondaryHint,
   gitCommitMessage, gitCommitting, gitGenStep, gitLogEntries, gitLogOpen,
-  gitLogCount, gitLogSearchQuery, hasMoreGitLog, gitLogLoadingMore, gitLogSearchLoading, loadMoreGitLog,
-  searchGitLog,
+  gitLogCount, gitLogSearchQuery, gitLogAllBranches, hasMoreGitLog, gitLogLoadingMore, gitLogSearchLoading, loadMoreGitLog,
+  searchGitLog, setGitLogAllBranches,
   gitStagedOpen, gitUnstagedOpen, gitUntrackedOpen, expandedGitLogEntries, selectedGitFiles,
   gitStashSectionOpen, gitLocalChangesOpen,
   gitDiffLoadingKey, gitDiffContentCache, gitRemotes, gitSelectedRemote, gitTrackingBranch,
@@ -2747,6 +2751,7 @@ const workspaceUi = useWorkspaceUiPersistence({
     selectedGitFiles,
     expandedGitLogEntries,
     gitLogSearchQuery,
+    gitLogAllBranches,
   },
   planPanelInForeground,
   planPanelActive,

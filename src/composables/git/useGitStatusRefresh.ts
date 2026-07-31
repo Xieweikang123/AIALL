@@ -100,11 +100,20 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
     }
   }
 
+  function logFetchOptions() {
+    return { all: state.gitLogAllBranches.value };
+  }
+
   async function refreshGitLogIfOpen(pathOverride?: string) {
     if (!state.gitLogOpen.value || !projectOpened() || !state.gitIsRepo.value) return;
     const path = pathOverride ?? projectPath();
     try {
-      const logResult = await fetchGitLog(path, state.gitLogCount.value, state.gitLogSearchQuery.value);
+      const logResult = await fetchGitLog(
+        path,
+        state.gitLogCount.value,
+        state.gitLogSearchQuery.value,
+        logFetchOptions(),
+      );
       if (logResult.ok && projectPath() === path) {
         state.gitLogEntries.value = logResult.entries;
       }
@@ -118,7 +127,12 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
     state.gitLogLoadingMore.value = true;
     state.gitLogCount.value += 30;
     try {
-      const logResult = await fetchGitLog(projectPath(), state.gitLogCount.value, state.gitLogSearchQuery.value);
+      const logResult = await fetchGitLog(
+        projectPath(),
+        state.gitLogCount.value,
+        state.gitLogSearchQuery.value,
+        logFetchOptions(),
+      );
       if (logResult.ok) {
         state.gitLogEntries.value = logResult.entries;
       }
@@ -141,7 +155,12 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
     const token = ++state.gitLogSearchToken.value;
     state.gitLogSearchLoading.value = true;
     try {
-      const logResult = await fetchGitLog(projectPath(), state.gitLogCount.value, trimmed || undefined);
+      const logResult = await fetchGitLog(
+        projectPath(),
+        state.gitLogCount.value,
+        trimmed || undefined,
+        logFetchOptions(),
+      );
       if (token !== state.gitLogSearchToken.value) return;
       if (logResult.ok) {
         state.gitLogEntries.value = logResult.entries;
@@ -155,11 +174,40 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
     }
   }
 
+  async function setGitLogAllBranches(all: boolean) {
+    if (state.gitLogAllBranches.value === all) return;
+    state.gitLogAllBranches.value = all;
+    state.gitLogCount.value = 30;
+    if (!state.gitLogOpen.value || !projectOpened() || !state.gitIsRepo.value) return;
+
+    const token = ++state.gitLogSearchToken.value;
+    state.gitLogSearchLoading.value = true;
+    try {
+      const logResult = await fetchGitLog(
+        projectPath(),
+        state.gitLogCount.value,
+        state.gitLogSearchQuery.value || undefined,
+        logFetchOptions(),
+      );
+      if (token !== state.gitLogSearchToken.value) return;
+      if (logResult.ok) {
+        state.gitLogEntries.value = logResult.entries;
+      }
+    } catch (e) {
+      debugLog("setGitLogAllBranches exception:", e);
+    } finally {
+      if (token === state.gitLogSearchToken.value) {
+        state.gitLogSearchLoading.value = false;
+      }
+    }
+  }
+
   return {
     resetGitPanelState,
     refreshGitStatus,
     refreshGitLogIfOpen,
     loadMoreGitLog,
     searchGitLog,
+    setGitLogAllBranches,
   };
 }

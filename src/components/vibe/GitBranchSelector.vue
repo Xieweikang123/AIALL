@@ -61,6 +61,11 @@
           @click="handleSelectBranch(b)"
         >
           <span class="git-branch-item-name" :title="b.name">{{ b.name }}</span>
+          <span
+            v-if="b.lastCommitDate"
+            class="git-branch-item-date"
+            :title="formatFullDate(b.lastCommitDate)"
+          >{{ formatDate(b.lastCommitDate) }}</span>
           <div class="git-branch-item-actions">
             <span v-if="b.isCurrent" class="git-branch-active-indicator">✓</span>
             <button
@@ -86,6 +91,11 @@
           @click="handleSelectBranch(b)"
         >
           <span class="git-branch-item-name" :title="b.name">{{ b.name }}</span>
+          <span
+            v-if="b.lastCommitDate"
+            class="git-branch-item-date"
+            :title="formatFullDate(b.lastCommitDate)"
+          >{{ formatDate(b.lastCommitDate) }}</span>
         </div>
       </div>
     </div>
@@ -95,6 +105,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from "vue";
 import type { GitBranchInfo } from "../../services/vibeGitClient";
+import { formatDate, formatFullDate } from "../../utils/gitHelpers";
 
 const props = defineProps<{
   gitBranch: string;
@@ -113,18 +124,29 @@ const branchSearchQuery = ref("");
 const newBranchName = ref("");
 const branchSelectorRef = ref<HTMLElement | null>(null);
 
+function compareBranchRecency(a: GitBranchInfo, b: GitBranchInfo): number {
+  const ta = a.lastCommitDate ? Date.parse(a.lastCommitDate) : 0;
+  const tb = b.lastCommitDate ? Date.parse(b.lastCommitDate) : 0;
+  if (tb !== ta) return tb - ta;
+  return a.name.localeCompare(b.name);
+}
+
 const filteredLocalBranches = computed(() => {
   const query = branchSearchQuery.value.toLowerCase().trim();
   const locals = props.gitBranches.filter((b) => !b.isRemote);
-  if (!query) return locals;
-  return locals.filter((b) => b.name.toLowerCase().includes(query));
+  const filtered = query
+    ? locals.filter((b) => b.name.toLowerCase().includes(query))
+    : locals;
+  return filtered.slice().sort(compareBranchRecency);
 });
 
 const filteredRemoteBranches = computed(() => {
   const query = branchSearchQuery.value.toLowerCase().trim();
   const remotes = props.gitBranches.filter((b) => b.isRemote);
-  if (!query) return remotes;
-  return remotes.filter((b) => b.name.toLowerCase().includes(query));
+  const filtered = query
+    ? remotes.filter((b) => b.name.toLowerCase().includes(query))
+    : remotes;
+  return filtered.slice().sort(compareBranchRecency);
 });
 
 function gitTrackingShortName(): string {

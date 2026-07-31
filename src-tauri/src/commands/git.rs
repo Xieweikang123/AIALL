@@ -43,8 +43,19 @@ pub async fn git_commit(path: String, message: String) -> git::GitCommitResult {
 }
 
 #[tauri::command]
-pub async fn git_log(path: String, count: Option<u32>, search: Option<String>) -> git::GitLogResult {
-  git::git_log(&path, count.unwrap_or(20), search.as_deref()).await
+pub async fn git_log(
+  path: String,
+  count: Option<u32>,
+  search: Option<String>,
+  all: Option<bool>,
+) -> git::GitLogResult {
+  git::git_log(
+    &path,
+    count.unwrap_or(20),
+    search.as_deref(),
+    all.unwrap_or(false),
+  )
+  .await
 }
 
 #[tauri::command]
@@ -490,7 +501,7 @@ pub async fn git_generate_message(
   let file_list_str = file_list.join("\n");
 
   let recent_style = {
-    let log = git::git_log(&path, 8, None).await;
+    let log = git::git_log(&path, 8, None, false).await;
     if log.ok && !log.entries.is_empty() {
       let lines: Vec<String> = log
         .entries

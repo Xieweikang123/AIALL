@@ -232,18 +232,34 @@ export async function commitGitChanges(projectPath: string, message: string): Pr
   });
 }
 
-export async function fetchGitLog(projectPath: string, count = 20, search?: string): Promise<GitLogResult> {
-  return invokeBackend<GitLogResult>("git_log", { path: projectPath, count, search: search?.trim() || null }, async () => {
-    try {
-      let url = backendUrl(`/backend/vibe/git/log?path=${encodeURIComponent(projectPath)}&count=${count}`);
-      if (search?.trim()) url += `&search=${encodeURIComponent(search.trim())}`;
-      const response = await fetch(url);
-      const data = await readJsonResponse<GitLogResult>(response);
-      return { ...data, entries: data.entries?.map((entry) => ({ ...entry, files: entry.files || [] })) || [] };
-    } catch (error) {
-      return { ok: false, entries: [], error: error instanceof Error ? error.message : "网络错误" };
-    }
-  });
+export type FetchGitLogOptions = {
+  /** Include commits reachable from any ref (`git log --all`). */
+  all?: boolean;
+};
+
+export async function fetchGitLog(
+  projectPath: string,
+  count = 20,
+  search?: string,
+  options?: FetchGitLogOptions,
+): Promise<GitLogResult> {
+  const all = Boolean(options?.all);
+  return invokeBackend<GitLogResult>(
+    "git_log",
+    { path: projectPath, count, search: search?.trim() || null, all },
+    async () => {
+      try {
+        let url = backendUrl(`/backend/vibe/git/log?path=${encodeURIComponent(projectPath)}&count=${count}`);
+        if (search?.trim()) url += `&search=${encodeURIComponent(search.trim())}`;
+        if (all) url += "&all=1";
+        const response = await fetch(url);
+        const data = await readJsonResponse<GitLogResult>(response);
+        return { ...data, entries: data.entries?.map((entry) => ({ ...entry, files: entry.files || [] })) || [] };
+      } catch (error) {
+        return { ok: false, entries: [], error: error instanceof Error ? error.message : "网络错误" };
+      }
+    },
+  );
 }
 
 export interface GitAheadCommitsResult {
@@ -812,6 +828,8 @@ export interface GitBranchInfo {
   name: string;
   isCurrent: boolean;
   isRemote: boolean;
+  /** Tip committer date (ISO-like from git), omitted when unavailable. */
+  lastCommitDate?: string;
 }
 
 export interface GitBranchesResult {

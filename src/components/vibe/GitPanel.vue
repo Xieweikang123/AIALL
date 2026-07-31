@@ -155,11 +155,13 @@
           :git-log-entries="gitLogEntries"
           :git-log-search-query="gitLogSearchQuery"
           :git-log-search-loading="gitLogSearchLoading"
+          :git-log-all-branches="gitLogAllBranches"
           :has-more-git-log="hasMoreGitLog"
           :git-log-loading-more="gitLogLoadingMore"
           :git-diff-loading-key="gitDiffLoadingKey"
           :expanded-git-log-entries="expandedGitLogEntries"
           @update:git-log-open="$emit('update:gitLogOpen', $event)"
+          @update:git-log-all-branches="$emit('update:gitLogAllBranches', $event)"
           @search-git-log="$emit('search-git-log', $event)"
           @load-more-git-log="$emit('load-more-git-log')"
           @toggle-git-log-entry="$emit('toggle-git-log-entry', $event)"
@@ -258,6 +260,7 @@ const props = defineProps<{
   gitLogOpen: boolean;
   gitLogEntries: GitLogEntry[];
   gitLogSearchQuery: string;
+  gitLogAllBranches: boolean;
   selectedGitFiles: string[];
   gitDiffLoadingKey: string;
   gitRemoteAction: string;
@@ -313,6 +316,7 @@ const emit = defineEmits<{
   (e: "update:gitUnstagedOpen", value: boolean): void;
   (e: "update:gitUntrackedOpen", value: boolean): void;
   (e: "update:gitLogOpen", value: boolean): void;
+  (e: "update:gitLogAllBranches", value: boolean): void;
   (e: "update:gitAheadCommitsOpen", value: boolean): void;
   (e: "update:gitCommitMessage", value: string): void;
   (e: "update:gitStashMessage", value: string): void;

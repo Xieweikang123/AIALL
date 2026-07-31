@@ -7,6 +7,9 @@ pub struct GitBranchInfo {
   pub name: String,
   pub is_current: bool,
   pub is_remote: bool,
+  /// Tip committer date (`%(committerdate:iso8601)`), empty when unavailable.
+  #[serde(skip_serializing_if = "String::is_empty")]
+  pub last_commit_date: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -21,24 +24,33 @@ pub struct GitBranchesResult {
 pub async fn git_list_branches(project_root: &str) -> GitBranchesResult {
   match git_exec(
     project_root,
-    &["branch", "-a", "--format=%(refname)|%(HEAD)"],
+    &[
+      "branch",
+      "-a",
+      "--format=%(refname)|%(HEAD)|%(committerdate:iso8601)",
+    ],
   )
   .await
   {
     Ok(out) => {
       let mut branches = Vec::new();
       for line in out.stdout.lines().filter(|l| !l.trim().is_empty()) {
-        let parts: Vec<&str> = line.split('|').collect();
+        let parts: Vec<&str> = line.splitn(3, '|').collect();
         if parts.len() < 2 {
           continue;
         }
         let refname = parts[0];
         let is_current = parts[1].trim() == "*";
+        let last_commit_date = parts
+          .get(2)
+          .map(|s| s.trim().to_string())
+          .unwrap_or_default();
         if let Some(name) = refname.strip_prefix("refs/heads/") {
           branches.push(GitBranchInfo {
             name: name.to_string(),
             is_current,
             is_remote: false,
+            last_commit_date,
           });
         } else if let Some(name) = refname.strip_prefix("refs/remotes/") {
           if name.contains("/HEAD") || name.contains("->") {
@@ -48,6 +60,7 @@ pub async fn git_list_branches(project_root: &str) -> GitBranchesResult {
             name: name.to_string(),
             is_current,
             is_remote: true,
+            last_commit_date,
           });
         }
       }
@@ -109,11 +122,13 @@ mod tests {
       name: "main".into(),
       is_current: true,
       is_remote: false,
+      last_commit_date: "2026-07-31 08:00:00 +0800".into(),
     };
     let json = serde_json::to_value(&info).unwrap();
     assert_eq!(json["name"], "main");
     assert_eq!(json["isCurrent"], true);
     assert_eq!(json["isRemote"], false);
+    assert_eq!(json["lastCommitDate"], "2026-07-31 08:00:00 +0800");
   }
 
   #[test]
@@ -122,11 +137,13 @@ mod tests {
       name: "origin/feature".into(),
       is_current: false,
       is_remote: true,
+      last_commit_date: String::new(),
     };
     let json = serde_json::to_value(&info).unwrap();
     assert_eq!(json["name"], "origin/feature");
     assert_eq!(json["isCurrent"], false);
     assert_eq!(json["isRemote"], true);
+    assert!(json.get("lastCommitDate").is_none());
   }
 
   #[test]

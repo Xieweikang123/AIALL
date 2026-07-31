@@ -15,6 +15,7 @@ export type PersistedGitPanelUi = {
   selectedFiles?: string[];
   expandedLogEntries?: string[];
   logSearchQuery?: string;
+  logAllBranches?: boolean;
 };
 
 export type PersistedWorkspaceUi = {
@@ -63,6 +64,7 @@ function slimGitPanelUi(raw: unknown): PersistedGitPanelUi | undefined {
   const expandedLogEntries = slimStringArray(src.expandedLogEntries);
   if (expandedLogEntries) git.expandedLogEntries = expandedLogEntries;
   if (typeof src.logSearchQuery === "string") git.logSearchQuery = src.logSearchQuery;
+  if (typeof src.logAllBranches === "boolean") git.logAllBranches = src.logAllBranches;
   return Object.keys(git).length ? git : undefined;
 }
 
