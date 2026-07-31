@@ -111,7 +111,25 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
   }
 
   function logFetchOptions() {
-    return { all: state.gitLogAllBranches.value };
+    const until = state.gitLogUntil.value.trim();
+    return {
+      all: state.gitLogAllBranches.value,
+      branch: state.gitLogBranchFilter.value,
+      author: state.gitLogAuthorFilter.value,
+      path: state.gitLogPathFilter.value,
+      since: state.gitLogSince.value,
+      // Git's --until date is inclusive only up to midnight; use the next day.
+      until: until ? `${until} 23:59:59` : "",
+    };
+  }
+
+  async function setGitLogFilters(filters: { author: string; path: string; since: string; until: string }) {
+    state.gitLogAuthorFilter.value = filters.author.trim();
+    state.gitLogPathFilter.value = filters.path.trim();
+    state.gitLogSince.value = filters.since;
+    state.gitLogUntil.value = filters.until;
+    state.gitLogCount.value = 30;
+    await refreshGitLogIfOpen();
   }
 
   async function refreshGitLogIfOpen(pathOverride?: string) {
@@ -185,8 +203,9 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
   }
 
   async function setGitLogAllBranches(all: boolean) {
-    if (state.gitLogAllBranches.value === all) return;
+    if (state.gitLogAllBranches.value === all && !state.gitLogBranchFilter.value) return;
     state.gitLogAllBranches.value = all;
+    state.gitLogBranchFilter.value = "";
     state.gitLogCount.value = 30;
     if (!state.gitLogOpen.value || !projectOpened() || !state.gitIsRepo.value) return;
 
@@ -212,6 +231,15 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
     }
   }
 
+  async function setGitLogBranchFilter(branch: string) {
+    const normalized = branch.trim();
+    if (state.gitLogBranchFilter.value === normalized) return;
+    state.gitLogBranchFilter.value = normalized;
+    if (normalized) state.gitLogAllBranches.value = false;
+    state.gitLogCount.value = 30;
+    await refreshGitLogIfOpen();
+  }
+
   return {
     resetGitPanelState,
     refreshGitStatus,
@@ -219,5 +247,7 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
     loadMoreGitLog,
     searchGitLog,
     setGitLogAllBranches,
+    setGitLogBranchFilter,
+    setGitLogFilters,
   };
 }

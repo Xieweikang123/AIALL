@@ -6,7 +6,8 @@ export interface GitLogEntryView {
   author: string;
   date: string;
   message: string;
-  files: Array<{ path: string; oldPath?: string; status: string }>;
+  parents?: string[];
+  files: Array<{ path: string; oldPath?: string; status: string; additions?: number; deletions?: number }>;
   refs?: Array<{ name: string; type: string }>;
 }
 

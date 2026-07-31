@@ -7,16 +7,28 @@ pub fn parse_git_virtual_path(input_path: &str) -> Option<GitVirtualPath> {
     if trimmed.is_empty() {
         return None;
     }
-    if let Some(rest) = trimmed.strip_prefix("git-index://").or_else(|| trimmed.strip_prefix("git-index:/")) {
+    if let Some(rest) = trimmed
+        .strip_prefix("git-index://")
+        .or_else(|| trimmed.strip_prefix("git-index:/"))
+    {
         let relative = rest.trim().replace('\\', "/");
         if !relative.is_empty() {
-            return Some(GitVirtualPath { kind: "index".into(), relative });
+            return Some(GitVirtualPath {
+                kind: "index".into(),
+                relative,
+            });
         }
     }
-    if let Some(rest) = trimmed.strip_prefix("git-history://").or_else(|| trimmed.strip_prefix("git-history:/")) {
+    if let Some(rest) = trimmed
+        .strip_prefix("git-history://")
+        .or_else(|| trimmed.strip_prefix("git-history:/"))
+    {
         let relative = rest.trim().replace('\\', "/");
         if !relative.is_empty() {
-            return Some(GitVirtualPath { kind: "history".into(), relative });
+            return Some(GitVirtualPath {
+                kind: "history".into(),
+                relative,
+            });
         }
     }
     None
@@ -41,7 +53,11 @@ fn status_label(file: &git::GitStatusFile) -> String {
     }
     let trimmed = code.trim();
     if trimmed.is_empty() {
-        file.status.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default()
+        file.status
+            .chars()
+            .next()
+            .map(|c| c.to_uppercase().to_string())
+            .unwrap_or_default()
     } else {
         trimmed.to_string()
     }
@@ -64,7 +80,10 @@ pub fn format_git_status_for_agent(status: &git::GitStatusResult) -> String {
         }
     ));
     if !status.head_commit.is_empty() {
-        lines.push(format!("HEAD：{}", &status.head_commit[..status.head_commit.len().min(12)]));
+        lines.push(format!(
+            "HEAD：{}",
+            &status.head_commit[..status.head_commit.len().min(12)]
+        ));
     }
     if status.files.is_empty() {
         lines.push("工作区干净，无待提交变更。".into());
@@ -77,8 +96,11 @@ pub fn format_git_status_for_agent(status: &git::GitStatusResult) -> String {
         .iter()
         .filter(|f| !f.staged && f.status != "untracked" && f.status != "ignored")
         .collect();
-    let untracked: Vec<&git::GitStatusFile> =
-        status.files.iter().filter(|f| f.status == "untracked").collect();
+    let untracked: Vec<&git::GitStatusFile> = status
+        .files
+        .iter()
+        .filter(|f| f.status == "untracked")
+        .collect();
 
     if !staged.is_empty() {
         lines.push(format!("已暂存（{}）：", staged.len()));
@@ -126,7 +148,11 @@ pub async fn run_git_diff_tool(
     file_path: Option<&str>,
     staged: bool,
 ) -> String {
-    let scope = if staged { "已暂存" } else { "未暂存/工作区" };
+    let scope = if staged {
+        "已暂存"
+    } else {
+        "未暂存/工作区"
+    };
     let result = git::git_diff(project_root, file_path, staged).await;
     if !result.ok {
         return format!(
@@ -135,11 +161,19 @@ pub async fn run_git_diff_tool(
         );
     }
     if let Some(fp) = file_path {
-        let stat = result.files.first().map(|f| format!("+{}/-{}", f.additions, f.deletions)).unwrap_or_default();
+        let stat = result
+            .files
+            .first()
+            .map(|f| format!("+{}/-{}", f.additions, f.deletions))
+            .unwrap_or_default();
         let header = vec![
             format!("文件：{fp}"),
             format!("范围：{scope}"),
-            if stat.is_empty() { String::new() } else { format!("统计：{stat}") },
+            if stat.is_empty() {
+                String::new()
+            } else {
+                format!("统计：{stat}")
+            },
         ]
         .into_iter()
         .filter(|s| !s.is_empty())
@@ -156,14 +190,11 @@ pub async fn run_git_diff_tool(
         .iter()
         .map(|f| format!("  {} | +{} -{}", f.path, f.additions, f.deletions))
         .collect();
-    let header = vec![
-        format!("范围：{scope}"),
-        "变更文件：".into(),
-    ]
-    .into_iter()
-    .chain(stat_lines.into_iter())
-    .collect::<Vec<_>>()
-    .join("\n");
+    let header = vec![format!("范围：{scope}"), "变更文件：".into()]
+        .into_iter()
+        .chain(stat_lines.into_iter())
+        .collect::<Vec<_>>()
+        .join("\n");
     format!("{header}\n\n{}", truncate_patch(&result.patch))
 }
 

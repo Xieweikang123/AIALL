@@ -35,6 +35,11 @@ export interface GitPanelState {
   gitLogSearchQuery: Ref<string>;
   /** When true, log uses `git log --all` (all branches/refs). */
   gitLogAllBranches: Ref<boolean>;
+  gitLogBranchFilter: Ref<string>;
+  gitLogAuthorFilter: Ref<string>;
+  gitLogPathFilter: Ref<string>;
+  gitLogSince: Ref<string>;
+  gitLogUntil: Ref<string>;
   gitLogLoadingMore: Ref<boolean>;
   gitLogSearchLoading: Ref<boolean>;
   hasMoreGitLog: ComputedRef<boolean>;
@@ -157,6 +162,11 @@ export function createGitPanelState(
   const gitLogCount = ref(30);
   const gitLogSearchQuery = ref("");
   const gitLogAllBranches = ref(false);
+  const gitLogBranchFilter = ref("");
+  const gitLogAuthorFilter = ref("");
+  const gitLogPathFilter = ref("");
+  const gitLogSince = ref("");
+  const gitLogUntil = ref("");
   const gitLogLoadingMore = ref(false);
   const gitLogSearchLoading = ref(false);
   const hasMoreGitLog = computed(() => {
@@ -221,6 +231,11 @@ export function createGitPanelState(
         gitLogLoadingMore.value = true;
         fetchGitLog(projectPath(), gitLogCount.value, openSearch, {
           all: gitLogAllBranches.value,
+          author: gitLogAuthorFilter.value,
+          path: gitLogPathFilter.value,
+          since: gitLogSince.value,
+          until: gitLogUntil.value,
+          branch: gitLogBranchFilter.value,
         })
           .then((logResult) => {
             if (logResult.ok) {
@@ -397,6 +412,11 @@ export function createGitPanelState(
     gitLogCount,
     gitLogSearchQuery,
     gitLogAllBranches,
+    gitLogBranchFilter,
+    gitLogAuthorFilter,
+    gitLogPathFilter,
+    gitLogSince,
+    gitLogUntil,
     gitLogLoadingMore,
     gitLogSearchLoading,
     hasMoreGitLog,

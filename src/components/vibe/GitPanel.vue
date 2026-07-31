@@ -156,12 +156,28 @@
           :git-log-search-query="gitLogSearchQuery"
           :git-log-search-loading="gitLogSearchLoading"
           :git-log-all-branches="gitLogAllBranches"
+          :git-log-branch-filter="gitLogBranchFilter"
+          :git-branches="gitBranches"
+          :git-branch="gitBranch"
+          :git-head-commit="gitHeadCommit"
+          :git-tracking-branch="gitTrackingBranch"
+          :git-ahead="gitAhead"
+          :git-behind="gitBehind"
+          :git-staged-count="gitStagedFiles.length"
+          :git-unstaged-count="gitUnstagedFiles.length"
+          :git-conflict-count="gitConflictedFiles.length"
+          :git-log-author-filter="gitLogAuthorFilter"
+          :git-log-path-filter="gitLogPathFilter"
+          :git-log-since="gitLogSince"
+          :git-log-until="gitLogUntil"
           :has-more-git-log="hasMoreGitLog"
           :git-log-loading-more="gitLogLoadingMore"
           :git-diff-loading-key="gitDiffLoadingKey"
           :expanded-git-log-entries="expandedGitLogEntries"
           @update:git-log-open="$emit('update:gitLogOpen', $event)"
           @update:git-log-all-branches="$emit('update:gitLogAllBranches', $event)"
+          @update:git-log-branch-filter="$emit('update:gitLogBranchFilter', $event)"
+          @update-git-log-filters="$emit('update-git-log-filters', $event)"
           @search-git-log="$emit('search-git-log', $event)"
           @load-more-git-log="$emit('load-more-git-log')"
           @toggle-git-log-entry="$emit('toggle-git-log-entry', $event)"
@@ -234,6 +250,7 @@ const props = defineProps<{
   gitLoading: boolean;
   gitIsRepo: boolean;
   gitStatusKnown: boolean;
+  gitHeadCommit: string;
   gitError: string;
   gitBranch: string;
   gitBranches: GitBranchInfo[];
@@ -241,6 +258,10 @@ const props = defineProps<{
   gitRemotes: GitRemoteInfo[];
   gitAhead: number;
   gitBehind: number;
+  gitLogAuthorFilter: string;
+  gitLogPathFilter: string;
+  gitLogSince: string;
+  gitLogUntil: string;
   gitStashes: GitStash[];
   gitStatus: unknown[];
   gitStagedFiles: GitFile[];
@@ -261,6 +282,7 @@ const props = defineProps<{
   gitLogEntries: GitLogEntry[];
   gitLogSearchQuery: string;
   gitLogAllBranches: boolean;
+  gitLogBranchFilter: string;
   selectedGitFiles: string[];
   gitDiffLoadingKey: string;
   gitRemoteAction: string;
@@ -317,6 +339,8 @@ const emit = defineEmits<{
   (e: "update:gitUntrackedOpen", value: boolean): void;
   (e: "update:gitLogOpen", value: boolean): void;
   (e: "update:gitLogAllBranches", value: boolean): void;
+  (e: "update:gitLogBranchFilter", value: string): void;
+  (e: "update-git-log-filters", value: { author: string; path: string; since: string; until: string }): void;
   (e: "update:gitAheadCommitsOpen", value: boolean): void;
   (e: "update:gitCommitMessage", value: string): void;
   (e: "update:gitStashMessage", value: string): void;

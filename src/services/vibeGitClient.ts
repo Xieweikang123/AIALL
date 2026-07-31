@@ -67,6 +67,7 @@ export interface GitLogEntry {
   author: string;
   date: string;
   message: string;
+  parents?: string[];
   files: GitLogFile[];
   refs?: GitRef[];
 }
@@ -75,6 +76,8 @@ export interface GitLogFile {
   path: string;
   status: string;
   oldPath?: string;
+  additions?: number;
+  deletions?: number;
 }
 
 export interface GitLogResult {
@@ -237,6 +240,11 @@ export async function commitGitChanges(projectPath: string, message: string): Pr
 export type FetchGitLogOptions = {
   /** Include commits reachable from any ref (`git log --all`). */
   all?: boolean;
+  author?: string;
+  path?: string;
+  since?: string;
+  until?: string;
+  branch?: string;
 };
 
 export async function fetchGitLog(
@@ -246,13 +254,23 @@ export async function fetchGitLog(
   options?: FetchGitLogOptions,
 ): Promise<GitLogResult> {
   const all = Boolean(options?.all);
+  const author = options?.author?.trim() || null;
+  const path = options?.path?.trim() || null;
+  const since = options?.since?.trim() || null;
+  const until = options?.until?.trim() || null;
+  const branch = options?.branch?.trim() || null;
   return invokeBackend<GitLogResult>(
     "git_log",
-    { path: projectPath, count, search: search?.trim() || null, all },
+    { path: projectPath, count, search: search?.trim() || null, author, filePath: path, since, until, all, branch },
     async () => {
       try {
         let url = backendUrl(`/backend/vibe/git/log?path=${encodeURIComponent(projectPath)}&count=${count}`);
         if (search?.trim()) url += `&search=${encodeURIComponent(search.trim())}`;
+        if (author) url += `&author=${encodeURIComponent(author)}`;
+        if (path) url += `&file=${encodeURIComponent(path)}`;
+        if (since) url += `&since=${encodeURIComponent(since)}`;
+        if (until) url += `&until=${encodeURIComponent(until)}`;
+        if (branch) url += `&branch=${encodeURIComponent(branch)}`;
         if (all) url += "&all=1";
         const response = await fetch(url);
         const data = await readJsonResponse<GitLogResult>(response);

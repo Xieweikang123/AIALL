@@ -516,7 +516,7 @@
 .git-log-section--open {
   flex: 1 1 0;
   min-height: 120px;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .git-log-section .git-log-list {
@@ -597,6 +597,90 @@
   color: #58a6ff;
   font-weight: 500;
 }
+.git-log-branch-select {
+  min-width: 140px;
+  max-width: 220px;
+  height: 26px;
+  padding: 0 7px;
+  border: 1px solid rgba(139, 148, 158, 0.24);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(201, 209, 217, 0.88);
+  font-size: 11px;
+}
+.git-log-branch-select:focus { outline: 1px solid rgba(88, 166, 255, 0.65); }
+
+.git-log-pointers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 0 8px 6px;
+}
+
+.git-log-pointer {
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 1.3;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(201, 209, 217, 0.8);
+}
+.git-log-pointer--head { color: #58a6ff; border-color: rgba(88, 166, 255, 0.28); }
+.git-log-pointer--remote { color: #7ee787; border-color: rgba(126, 231, 135, 0.25); }
+.git-log-pointer--ahead { color: #e3b341; border-color: rgba(227, 179, 65, 0.25); }
+.git-log-pointer--behind { color: #ff7b72; border-color: rgba(255, 123, 114, 0.25); }
+
+.git-log-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 25px;
+  padding: 5px 8px 0;
+}
+.git-log-filter-toggle {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(201, 209, 217, 0.8);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 8px;
+}
+.git-log-filter-toggle:hover,
+.git-log-filter-toggle.active { color: #58a6ff; border-color: rgba(88, 166, 255, 0.35); }
+.git-log-filter-badge { margin-left: 5px; color: #e3b341; font-size: 10px; }
+.git-log-filter-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(139, 148, 158, 0.65); font-size: 10px; }
+.git-log-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 5px 8px 2px;
+}
+.git-log-filter-input,
+.git-log-filter-date {
+  min-width: 0;
+  height: 25px;
+  box-sizing: border-box;
+  padding: 3px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  background: rgba(11, 18, 32, 0.72);
+  color: rgba(255, 255, 255, 0.82);
+  font: inherit;
+  font-size: 11px;
+}
+.git-log-filter-input { width: 78px; }
+.git-log-filter-path { flex: 1 1 110px; }
+.git-log-filter-date { width: 112px; color-scheme: dark; }
+.git-log-filter-clear {
+  border: 0;
+  background: none;
+  color: rgba(139, 148, 158, 0.85);
+  cursor: pointer;
+  font-size: 11px;
+}
+.git-log-filter-clear:hover { color: #58a6ff; }
 
 .git-log-empty {
   font-size: 12px;
@@ -609,16 +693,30 @@
 }
 
 .git-log-item {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
+  min-height: 44px;
+  padding-bottom: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.035);
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.git-log-item:hover {
+  background: rgba(255, 255, 255, 0.025);
+}
+.git-log-item--expanded {
+  background: rgba(88, 166, 255, 0.045);
+  border-bottom-color: rgba(88, 166, 255, 0.16);
 }
 
 .git-log-entry-head {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 0;
+  gap: 6px;
+  padding: 4px 0 2px;
   background: none;
   border: none;
   color: rgba(255, 255, 255, 0.8);
@@ -626,25 +724,91 @@
   font-size: 12px;
   text-align: left;
   width: 100%;
+  padding-left: 46px;
+  min-width: 0;
+}
+
+.git-log-graph {
+  position: absolute;
+  z-index: 0;
+  left: 0;
+  top: 0;
+  bottom: -2px;
+  width: 40px;
+  min-width: 40px;
+  height: auto;
+  display: block;
+  overflow: visible;
+  pointer-events: none;
+}
+.git-log-graph-line {
+  fill: none;
+  stroke-width: 1.5;
+  opacity: 0.48;
+}
+.git-log-graph--filtered .git-log-graph-line { stroke-dasharray: 3 3; opacity: 0.38; }
+.git-log-graph-dot {
+  fill: #161b22;
+  stroke-width: 1.5;
+}
+.git-log-graph-placeholder { display: inline-block; width: 16px; min-width: 16px; height: 24px; }
+.git-log-merge-badge {
+  flex-shrink: 0;
+  padding: 1px 4px;
+  border: 1px solid rgba(227, 179, 65, 0.25);
+  border-radius: 3px;
+  color: #e3b341;
+  font-size: 9px;
 }
 
 .git-log-entry-head:hover {
   color: rgba(255, 255, 255, 0.95);
 }
 
+.git-log-refs {
+  display: flex;
+  min-width: 0;
+  max-width: 44%;
+  overflow: hidden;
+  flex-shrink: 1;
+}
+.git-log-ref {
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-log-msg {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-log-entry-head .git-log-msg {
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 500;
+}
+
 .git-log-chevron {
   font-size: 10px;
   width: 10px;
   color: rgba(139, 148, 158, 0.6);
+  flex: 0 0 10px;
 }
 
 .git-log-meta-row {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding-left: 18px;
+  gap: 5px;
+  min-width: 0;
+  min-height: 17px;
+  padding-top: 1px;
+  padding-bottom: 3px;
+  padding-left: 46px;
   font-size: 11px;
   color: rgba(139, 148, 158, 0.55);
+  overflow: hidden;
 }
 
 .git-log-author {
@@ -652,7 +816,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 120px;
+  max-width: 96px;
 }
 
 .git-log-sep {
@@ -663,6 +827,8 @@
 .git-log-hash {
   font-family: monospace;
   color: rgba(88, 166, 255, 0.8);
+  font-size: 10px;
+  flex-shrink: 0;
 }
 
 .git-log-msg {
@@ -678,10 +844,13 @@
   padding: 1px 4px;
   background: rgba(255, 255, 255, 0.06);
   border-radius: 3px;
+  flex-shrink: 0;
 }
 
 .git-log-detail {
-  padding-left: 16px;
+  position: relative;
+  z-index: 1;
+  padding-left: 46px;
 }
 
 .git-log-full-msg {
@@ -712,6 +881,8 @@
   transition: background 120ms ease, color 120ms ease;
   width: 100%;
 }
+.git-log-file-path,
+.git-file-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .git-log-file:hover {
   background: rgba(255, 255, 255, 0.05);
@@ -721,6 +892,38 @@
 .git-log-file.loading {
   opacity: 0.6;
 }
+.git-log-file-stat { margin-left: auto; flex-shrink: 0; color: rgba(139, 148, 158, 0.65); font-size: 10px; }
+.git-log-stat-add { color: #7ee787; }
+.git-log-stat-delete { color: #ff7b72; }
+
+.git-log-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.58);
+}
+.git-log-preview {
+  width: min(460px, 100%);
+  box-sizing: border-box;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  background: #161b22;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+}
+.git-log-preview-title { font-size: 15px; font-weight: 600; color: rgba(255, 255, 255, 0.94); }
+.git-log-preview-action { margin-top: 10px; color: #e3b341; font-size: 12px; }
+.git-log-preview-commit { margin-top: 6px; color: rgba(255, 255, 255, 0.88); line-height: 1.45; }
+.git-log-preview-commit code { color: #58a6ff; margin-right: 5px; }
+.git-log-preview-meta { margin-top: 7px; color: rgba(139, 148, 158, 0.85); font-size: 11px; }
+.git-log-preview-risk { display: flex; flex-direction: column; gap: 3px; margin-top: 10px; padding: 8px; border-left: 3px solid #e3b341; background: rgba(227, 179, 65, 0.08); color: rgba(227, 179, 65, 0.95); font-size: 11px; line-height: 1.4; }
+.git-log-preview-risk--danger { border-left-color: #ff7b72; background: rgba(255, 123, 114, 0.1); color: #ffaaa3; }
+.git-log-preview-worktree { margin-top: 7px; color: rgba(139, 148, 158, 0.82); font-size: 11px; }
+.git-log-preview-files { display: flex; flex-direction: column; gap: 3px; max-height: 150px; overflow: auto; margin-top: 10px; padding: 8px; border-radius: 4px; background: rgba(255, 255, 255, 0.04); color: rgba(201, 209, 217, 0.8); font-size: 11px; }
+.git-log-preview-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 14px; }
 
 .git-panel-fetch-error {
   text-align: center;
@@ -1135,10 +1338,13 @@
 
 /* Git reference (branches/tags) badges */
 .git-log-refs {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 4px;
-  flex-shrink: 0;
+  min-width: 0;
+  max-width: 42%;
+  overflow: hidden;
+  flex-shrink: 1;
   margin-right: 2px;
 }
 
@@ -1152,6 +1358,9 @@
   border-radius: 4px;
   line-height: 1.2;
   white-space: nowrap;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   border: 1px solid transparent;
 }
 
@@ -1188,11 +1397,13 @@
   color: rgba(139, 148, 158, 0.55);
   white-space: nowrap;
   flex-shrink: 0;
+  margin-left: auto;
 }
 
 .git-log-meta-expanded {
   display: flex;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 4px 10px;
   font-size: 11px;
   color: rgba(139, 148, 158, 0.7);
   margin-bottom: 6px;
