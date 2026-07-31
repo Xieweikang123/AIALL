@@ -2,13 +2,13 @@
 //! Always-on accuracy hints stay mechanism-only (trace depth, evidence, verify); UI/topic playbooks belong in conditional product hints.
 
 pub fn build_file_access_path_hint() -> &'static str {
-  "read_file / list_dir：项目内用相对路径（如 src/main.ts）；\
+    "read_file / list_dir：项目内用相对路径（如 src/main.ts）；\
 读项目外或用户数据目录时，按 AGENTS.md、工具说明或用户消息中的逻辑路径前缀/绝对路径；\
 大文件用 offset/limit，勿用 run_command 读文件。"
 }
 
 pub fn build_probe_introspect_anti_pattern_hint() -> &'static str {
-  "25. 外部环境只读探测（通用）：\
+    "25. 外部环境只读探测（通用）：\
 临时 introspect、连接外部资源、拉取 schema/元数据时，禁止 patch 业务 Controller/路由/常驻服务；\
 必须优先 run_command 一次性 CLI，或在 `.aiall/probe/` 写跑完即删的独立脚本；\
 禁止 dotnet run / npm start + curl 调自身接口来做探测（除非用户明确要求新增 API）。\
@@ -16,12 +16,12 @@ pub fn build_probe_introspect_anti_pattern_hint() -> &'static str {
 }
 
 pub fn build_reply_accuracy_hint() -> String {
-  [
+    [
     "事实与准确度（通用）：",
-    "1. 行为类问题（做 X 时会不会 Y）：从用户操作入口向下 trace 调用链（入口 → 编排层 → 副作用/持久化），至少两层；禁止只读最底层同名函数即下结论。",
-    "2. 二元结论（会/不会、是/不是）：grep 命中后须 read 完整函数体及直接调用方，有完整代码路径证据再作答；禁止凭记忆或单层符号断言。",
+    "1. 机制事实结论（怎么工作、实际走哪条路径、是否会产生某结果）：先拆出定义、调用关系、输入、条件分支与结果；按代码实际结构追踪，不强制固定入口、层数或中间层；继续追到直接决定结论的最后证据，例如返回值、输出、异常、状态、事件、缓存结果或外部副作用；禁止把同名 API、类型字段或注释当成实际使用路径。",
+    "2. 二元结论（会/不会、是/不是）及因果解释：grep 命中后须 read 完整函数体、直接调用方和会决定结果的分支；确认所有相关结果路径及其前提，把实际执行路径与旁路 API 区分开；证据不足明确说不确定。",
     "3. 探索效率：先 grep 精确符号再定点 read；避免广搜 + 同一文件多段重叠 read；信息足够后立即回答或写入。",
-    "4. 多轮自洽：若新结论与本轮先前回复矛盾，须显式更正并引用新证据；用户现象与浅层结论不符时，自动加深一层调用链。",
+    "4. 多轮自洽：若新结论与本轮先前回复矛盾，须显式更正并引用新证据；用户现象与当前证据不符时，回到决定结论的分支或结果点继续核对。",
     "5. 修改收尾：patch/write 后 read 验证变更区域再宣告完成；运行中断恢复后必须 re-read 确认；有相关测试时跑测或说明应跑项。",
     "6. 表达约束：无用户证据时不写「你之前…/所以你看到…」；结论须附带适用前提（代码中的 if/guard 条件）；不确定时说「不确定」。",
     "7. 运行时入口：patch 前 grep import/引用确认目标文件被生产路径使用；存在同名或近似路径的未引用副本时只改被引用的那份。",
@@ -40,7 +40,7 @@ pub fn build_reply_accuracy_hint() -> String {
 }
 
 pub fn build_agent_suggestions_prompt_hint() -> &'static str {
-  "【可选·下一步建议】当本轮回复结束且需要用户决策或选择后续操作时，在正文全部输出完毕后追加（对用户不可见，客户端解析为输入框上方按钮）：\n\
+    "【可选·下一步建议】当本轮回复结束且需要用户决策或选择后续操作时，在正文全部输出完毕后追加（对用户不可见，客户端解析为输入框上方按钮）：\n\
 <!-- agent-suggestions -->\n\
 ```json\n\
 [{\"label\":\"短按钮文案\",\"action\":\"send\",\"text\":\"点击后发送给 agent 的完整消息\"}]\n\
@@ -52,20 +52,20 @@ implement：用户确认按上文方案改代码；execute_plan：Plan 模式方
 
 #[cfg(test)]
 mod tests {
-  use super::*;
+    use super::*;
 
-  #[test]
-  fn reply_accuracy_includes_probe_guard() {
-    let hint = build_reply_accuracy_hint();
-    assert!(hint.contains("外部环境只读探测"));
-    assert!(hint.contains("事实与准确度"));
-    assert!(!hint.contains("常见修复"));
-    assert!(!hint.contains("padding:0"));
-    assert!(!hint.contains("Execute→Service"));
-  }
+    #[test]
+    fn reply_accuracy_includes_probe_guard() {
+        let hint = build_reply_accuracy_hint();
+        assert!(hint.contains("外部环境只读探测"));
+        assert!(hint.contains("事实与准确度"));
+        assert!(!hint.contains("常见修复"));
+        assert!(!hint.contains("padding:0"));
+        assert!(!hint.contains("Execute→Service"));
+    }
 
-  #[test]
-  fn suggestions_hint_has_marker() {
-    assert!(build_agent_suggestions_prompt_hint().contains("agent-suggestions"));
-  }
+    #[test]
+    fn suggestions_hint_has_marker() {
+        assert!(build_agent_suggestions_prompt_hint().contains("agent-suggestions"));
+    }
 }

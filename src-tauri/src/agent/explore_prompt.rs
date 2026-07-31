@@ -4,7 +4,7 @@ pub const PROJECT_KNOWLEDGE_MARKER: &str = "<!-- project-knowledge -->";
 pub const PROJECT_KNOWLEDGE_TITLE: &str = "项目知识库";
 
 pub fn build_explore_report_format_hint() -> String {
-  [
+    [
     "知识库格式（必须严格遵守）：",
     &format!("1. 正文开头必须是标记行：{PROJECT_KNOWLEDGE_MARKER}"),
     &format!("2. 随后输出 # {PROJECT_KNOWLEDGE_TITLE} 及下列章节："),
@@ -24,26 +24,26 @@ pub fn build_explore_report_format_hint() -> String {
 }
 
 pub fn build_explore_continue_nudge() -> &'static str {
-  "【继续探索】用户希望扩大覆盖面、补充知识库遗漏部分。\n\
+    "【继续探索】用户希望扩大覆盖面、补充知识库遗漏部分。\n\
    须先 read_file .aiall/project-knowledge.md 阅读现有正文，再针对性 read/grep 代码。\n\
    禁止重头探索已覆盖内容；优先补缺口，再输出更新后的完整知识库正文（保留 project-knowledge 标记）。"
 }
 
 pub fn build_explore_section_fill_nudge() -> &'static str {
-  "【补全章节】用户指定了待补全的知识库章节。\n\
+    "【补全章节】用户指定了待补全的知识库章节。\n\
    须先 read_file .aiall/project-knowledge.md；再 read/grep 相关代码。\n\
    仅输出指定章节的 `## 标题` 及更新内容（标题勿带（未探索）（待验证）后缀，正文须有实质内容）。\n\
    勿输出完整知识库或 project-knowledge 标记。"
 }
 
 pub fn build_explore_changes_nudge() -> &'static str {
-  "【变更探索】用户希望根据自上次探索以来的代码变更更新知识库。\n\
+    "【变更探索】用户希望根据自上次探索以来的代码变更更新知识库。\n\
    须先 read_file .aiall/project-knowledge.md；系统已注入变更文件列表，优先 read/grep 这些路径。\n\
    只更新受影响的已有 `## 章节`；仅输出需修订的章节内容，勿输出完整知识库或 project-knowledge 标记。"
 }
 
 pub fn build_explore_follow_up_hint() -> &'static str {
-  "【追问】用户针对知识库某方面追问。\n\
+    "【追问】用户针对知识库某方面追问。\n\
    须先 read_file .aiall/project-knowledge.md 了解现有内容；再定向 read 1–3 个相关代码文件。\n\
    优先只输出需更新的已有 `## 章节`（例如目录/路径类→目录结构，模块职责→核心模块）；勿把可并入现有章节的内容堆到文末。\n\
    仅当确实无法归入任何章节时，才输出 `## 补充：{主题}`。\n\
@@ -51,15 +51,15 @@ pub fn build_explore_follow_up_hint() -> &'static str {
 }
 
 pub fn build_explore_quoted_follow_up_hint() -> &'static str {
-  "【引用追问】用户选中了知识库中的一段正文并提问。\n\
+    "【引用追问】用户选中了知识库中的一段正文并提问。\n\
    须先 read_file .aiall/project-knowledge.md，定位引用段落所属章节；再 read/grep 相关代码核实。\n\
    回答须落实到知识库：优先更新引用所在 `## 章节` 的正文；若不适合并入原节，输出 `## 补充：{主题}`。\n\
    仅输出需新增/修订的章节内容，勿重复输出整库；禁止修改任何文件。"
 }
 
 pub fn build_explore_exploration_hints(incremental: bool) -> String {
-  if incremental {
-    [
+    if incremental {
+        [
       "探索策略（增量更新知识库）：",
       "1. 系统已注入知识库索引（章节状态）与项目目录摘要；正文须 read_file .aiall/project-knowledge.md 获取。",
       "2. 优先补标题带（未探索）（待验证）后缀的章节；定位代码用 grep，search_files 仅按文件名。",
@@ -67,15 +67,15 @@ pub fn build_explore_exploration_hints(incremental: bool) -> String {
       "4. 信息足够后输出：继续探索→完整知识库正文；补全章节→仅输出目标 ## 章节（标题勿带后缀）；追问→## 补充 或单章节。",
     ]
     .join("\n")
-  } else {
-    [
+    } else {
+        [
       "探索策略（项目理解）：",
       "1. 系统已注入目录树与关键文件摘要，勿重复 read 已注入内容；在其基础上深化。",
       "2. 定位时优先 grep；search_files 仅按文件名匹配。",
       "3. read_file 单次约 200–400 行；每层目录抽样 1–2 个代表文件，禁止只深挖单一子系统。",
-      "4. 按顺序覆盖：入口链路 → 路由/模块划分 → 核心服务层 → 数据/配置。",
+      "4. 按项目实际结构覆盖相关入口、模块关系、关键实现以及数据或配置来源；不存在的层不要强行补齐。",
       "5. 信息足够后立即输出知识库正文；禁止无意义续读。",
     ]
     .join("\n")
-  }
+    }
 }

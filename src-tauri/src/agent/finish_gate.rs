@@ -1,7 +1,7 @@
-use std::sync::LazyLock;
 use regex::Regex;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FinishGateViolation {
@@ -51,9 +51,28 @@ static MODIFY_CONTEXT_RE: LazyLock<Regex> = LazyLock::new(|| {
 
 static GENERIC_ANCHOR_BLOCKLIST: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     [
-        "true", "false", "null", "undefined", "string", "number", "object", "function", "import",
-        "export", "return", "async", "await", "class", "interface", "type", "const", "let", "var",
-        "build", "plan", "ask",
+        "true",
+        "false",
+        "null",
+        "undefined",
+        "string",
+        "number",
+        "object",
+        "function",
+        "import",
+        "export",
+        "return",
+        "async",
+        "await",
+        "class",
+        "interface",
+        "type",
+        "const",
+        "let",
+        "var",
+        "build",
+        "plan",
+        "ask",
     ]
     .into_iter()
     .collect()
@@ -88,49 +107,42 @@ static WRITE_SUCCESS_CLAIM_RE: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
-static VISION_INTERNAL_MARKER_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\s*\[图已理解\]\s*").unwrap()
-});
+static VISION_INTERNAL_MARKER_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\s*\[图已理解\]\s*").unwrap());
 
 static CONSULTATIVE_OFFER_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\n*(?:需要我|要不要我|是否要我).{0,32}(?:吗|么)[？?]?\s*$").unwrap()
 });
 
-static EXPANDED_REMOVE_MARKER_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?m)^操作：remove\s*$").unwrap()
-});
+static EXPANDED_REMOVE_MARKER_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?m)^操作：remove\s*$").unwrap());
 
-static EXPANDED_SYMBOLS_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?m)^目标符号：(.+)$").unwrap()
-});
+static EXPANDED_SYMBOLS_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?m)^目标符号：(.+)$").unwrap());
 
-static QUOTED_LINE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^\s*>").unwrap()
-});
+static QUOTED_LINE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*>").unwrap());
 
 static REMOVE_AMEND_BODY_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(?:也|同样|一样)?(?:移除|去掉|删除|删掉|不要(?:这段|这个|上面)?|取消|撤销)\s*[。！!]?$").unwrap()
+    Regex::new(
+        r"^(?:也|同样|一样)?(?:移除|去掉|删除|删掉|不要(?:这段|这个|上面)?|取消|撤销)\s*[。！!]?$",
+    )
+    .unwrap()
 });
 
 static PATH_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)([\w./-]+\.(?:ts|tsx|js|jsx|vue|cs|json|md|yaml|yml|css|scss))").unwrap()
 });
 
-static CAMEL_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\b[A-Z][a-zA-Z0-9]{2,}(?:[A-Z][a-zA-Z0-9]+)+\b").unwrap()
-});
+static CAMEL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b[A-Z][a-zA-Z0-9]{2,}(?:[A-Z][a-zA-Z0-9]+)+\b").unwrap());
 
-static BACKTICK_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"`([^`]{2,80})`").unwrap()
-});
+static BACKTICK_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`([^`]{2,80})`").unwrap());
 
 static DURATION_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(\d+)\s*(?:分钟|min(?:ute)?s?|m|秒|sec(?:ond)?s?|s|毫秒|ms|小时|h)").unwrap()
 });
 
-static PATH_PATTERN_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^\.?/?[\w./-]+$").unwrap()
-});
+static PATH_PATTERN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\.?/?[\w./-]+$").unwrap());
 
 pub fn normalize_target_path(path: &str) -> String {
     path.replace('\\', "/").trim().to_string()
@@ -546,11 +558,12 @@ pub fn evaluate_finish_gate(input: &FinishGateInput) -> FinishGateResult {
 
     if !productive_writes.is_empty() {
         let summary_claims_modifications = claims_done
-            || MODIFY_CONTEXT_RE
-                .is_match(&sanitize_agent_user_visible_text(&input.raw_content));
+            || MODIFY_CONTEXT_RE.is_match(&sanitize_agent_user_visible_text(&input.raw_content));
         if summary_claims_modifications {
-            let written_set: HashSet<String> =
-                productive_writes.iter().map(|p| normalize_target_path(p)).collect();
+            let written_set: HashSet<String> = productive_writes
+                .iter()
+                .map(|p| normalize_target_path(p))
+                .collect();
             for claimed in extract_claimed_modified_paths(&input.raw_content) {
                 if written_set.contains(&claimed) {
                     continue;
@@ -578,12 +591,19 @@ pub fn evaluate_finish_gate(input: &FinishGateInput) -> FinishGateResult {
         }
     }
 
-    let task_prompt_text = input.task_prompt.as_deref().unwrap_or("").trim().to_string();
-    let (exclude_anchors, polarity_must_exclude) =
-        detect_task_anchor_polarity(&task_prompt_text);
+    let task_prompt_text = input
+        .task_prompt
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let (exclude_anchors, polarity_must_exclude) = detect_task_anchor_polarity(&task_prompt_text);
     let anchors = extract_task_contract_anchors(&task_prompt_text);
 
-    if claims_done && !productive_writes.is_empty() && !exclude_anchors.is_empty() && polarity_must_exclude
+    if claims_done
+        && !productive_writes.is_empty()
+        && !exclude_anchors.is_empty()
+        && polarity_must_exclude
     {
         let still_present: Vec<String> = exclude_anchors
             .iter()
@@ -602,10 +622,8 @@ pub fn evaluate_finish_gate(input: &FinishGateInput) -> FinishGateResult {
     }
 
     if claims_done && !productive_writes.is_empty() && !anchors.is_empty() {
-        let exclude_keys: HashSet<String> = exclude_anchors
-            .iter()
-            .map(|a| a.to_lowercase())
-            .collect();
+        let exclude_keys: HashSet<String> =
+            exclude_anchors.iter().map(|a| a.to_lowercase()).collect();
         let include_anchors: Vec<&String> = if polarity_must_exclude {
             anchors
                 .iter()
@@ -622,10 +640,7 @@ pub fn evaluate_finish_gate(input: &FinishGateInput) -> FinishGateResult {
         if !missing.is_empty() {
             violations.push(FinishGateViolation {
                 code: "task_anchor_miss".into(),
-                detail: format!(
-                    "任务契约锚点未出现在已写入内容中：{}",
-                    missing.join("、")
-                ),
+                detail: format!("任务契约锚点未出现在已写入内容中：{}", missing.join("、")),
             });
         }
     }
@@ -652,13 +667,14 @@ pub fn evaluate_finish_gate(input: &FinishGateInput) -> FinishGateResult {
     }
 
     if input.automated_bug_fix_run.unwrap_or(false)
-        && is_empty_or_insufficient_final_reply(
-            &sanitize_agent_user_visible_text(&input.raw_content),
-        )
+        && is_empty_or_insufficient_final_reply(&sanitize_agent_user_visible_text(
+            &input.raw_content,
+        ))
     {
         violations.push(FinishGateViolation {
             code: "empty_summary".into(),
-            detail: "扫描修复结束前须输出中文总结（已修复项 / 跳过项 / 复验结果）；禁止空回复结束".into(),
+            detail: "扫描修复结束前须输出中文总结（已修复项 / 跳过项 / 复验结果）；禁止空回复结束"
+                .into(),
         });
     }
 
@@ -743,7 +759,10 @@ mod tests {
             last_verify_run_succeeded: None,
         });
         assert!(result.blocked);
-        assert!(result.violations.iter().any(|v| v.code == "execute_plan_target_miss"));
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.code == "execute_plan_target_miss"));
     }
 
     #[test]
@@ -767,7 +786,10 @@ mod tests {
             last_verify_run_succeeded: None,
         });
         assert!(result.blocked);
-        assert!(result.violations.iter().any(|v| v.code == "phantom_file_claim"));
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.code == "phantom_file_claim"));
     }
 
     #[test]
@@ -791,7 +813,10 @@ mod tests {
             last_verify_run_succeeded: None,
         });
         assert!(result.blocked);
-        assert!(result.violations.iter().any(|v| v.code == "task_anchor_miss"));
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.code == "task_anchor_miss"));
     }
 
     #[test]
@@ -845,7 +870,10 @@ mod tests {
             last_verify_run_succeeded: None,
         });
         assert!(result.blocked);
-        assert!(result.violations.iter().any(|v| v.code == "task_anchor_still_present"));
+        assert!(result
+            .violations
+            .iter()
+            .any(|v| v.code == "task_anchor_still_present"));
     }
 
     #[test]
@@ -914,7 +942,10 @@ mod tests {
             verify_script_available: None,
             last_verify_run_succeeded: None,
         });
-        assert!(!result.violations.iter().any(|v| v.code == "task_anchor_miss"));
+        assert!(!result
+            .violations
+            .iter()
+            .any(|v| v.code == "task_anchor_miss"));
     }
 
     #[test]
@@ -949,10 +980,16 @@ mod tests {
 
     #[test]
     fn test_claims_premature_completion_positive() {
-        assert!(claims_premature_completion("检查完成，所有修改都正确无误 ✅"));
+        assert!(claims_premature_completion(
+            "检查完成，所有修改都正确无误 ✅"
+        ));
         assert!(claims_premature_completion("无需再改，链路完整"));
-        assert!(claims_premature_completion("结论：当前代码没有 bug，无需修改"));
-        assert!(claims_premature_completion("代码逻辑和 DOM 结构审查结果如下，应正常工作"));
+        assert!(claims_premature_completion(
+            "结论：当前代码没有 bug，无需修改"
+        ));
+        assert!(claims_premature_completion(
+            "代码逻辑和 DOM 结构审查结果如下，应正常工作"
+        ));
     }
 
     #[test]

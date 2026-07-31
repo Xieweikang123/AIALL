@@ -1,96 +1,125 @@
 /// tool_summary — 生成简洁的工具执行结果中文摘要
 pub fn tool_summary(name: &str, result: &str) -> String {
-  if result.starts_with("错误：") {
-    return result.trim_start_matches("错误：").trim().to_string();
-  }
+    if result.starts_with("错误：") {
+        return result.trim_start_matches("错误：").trim().to_string();
+    }
 
-  match name {
-    "list_dir" => {
-      if result == "（空目录）" { return "空目录".into(); }
-      let lines: Vec<&str> = result.lines().filter(|l| !l.is_empty()).collect();
-      let dirs = lines.iter().filter(|l| l.starts_with("[dir]")).count();
-      let files = lines.iter().filter(|l| l.starts_with("[file]")).count();
-      return format!("{} 个目录，{} 个文件", dirs, files);
+    match name {
+        "list_dir" => {
+            if result == "（空目录）" {
+                return "空目录".into();
+            }
+            let lines: Vec<&str> = result.lines().filter(|l| !l.is_empty()).collect();
+            let dirs = lines.iter().filter(|l| l.starts_with("[dir]")).count();
+            let files = lines.iter().filter(|l| l.starts_with("[file]")).count();
+            return format!("{} 个目录，{} 个文件", dirs, files);
+        }
+        "read_file" => {
+            let line_count = result.lines().count();
+            return format!("读取 {} 行内容", line_count);
+        }
+        "grep" => {
+            if result == "（无匹配）" {
+                return "未找到匹配".into();
+            }
+            let n = result.lines().filter(|l| !l.is_empty()).count();
+            return format!("找到 {} 处匹配", n);
+        }
+        "search_files" => {
+            let n = result.lines().filter(|l| !l.is_empty()).count();
+            if n == 0 {
+                return "未找到文件".into();
+            }
+            return format!("找到 {} 个文件", n);
+        }
+        "search_symbols" => {
+            if result == "（无匹配符号）" {
+                return "未找到符号".into();
+            }
+            let n = result.lines().filter(|l| !l.is_empty()).count();
+            return format!("找到 {} 个符号", n);
+        }
+        "write_file" => {
+            if let Some(pos) = result.find("（") {
+                return format!("已写入{}", &result[..pos]);
+            }
+            return result.to_string();
+        }
+        "patch_file" => {
+            let line = result.replace('\n', " ").trim().to_string();
+            if line.len() > 60 {
+                return format!("{}…", &line[..60]);
+            }
+            return line;
+        }
+        "delete_file" => {
+            if result.starts_with("已删除 ") {
+                return result.to_string();
+            }
+            return result.to_string();
+        }
+        "run_command" => {
+            if result.starts_with("错误：") || result.starts_with("命令执行失败") {
+                return "执行失败".into();
+            }
+            let one_line = result
+                .replace(|c: char| c.is_whitespace(), " ")
+                .trim()
+                .to_string();
+            if one_line.len() > 60 {
+                return format!("{}…", &one_line[..60]);
+            }
+            if one_line.is_empty() {
+                return "执行完成".into();
+            }
+            return one_line;
+        }
+        "git_status" => {
+            if result.contains("工作区干净") {
+                return "工作区干净".into();
+            }
+            return "已获取状态".into();
+        }
+        "git_diff" => {
+            if result.contains("无变更") {
+                return "无变更".into();
+            }
+            let n = result.lines().count();
+            if n > 0 {
+                return format!("{} 个文件有变更", n);
+            }
+            return "已获取 diff".into();
+        }
+        "web_search" => {
+            let n = result
+                .lines()
+                .filter(|l| l.starts_with(|c: char| c.is_ascii_digit()))
+                .count();
+            if n > 0 {
+                return format!("找到 {} 条结果", n);
+            }
+            return "搜索完成".into();
+        }
+        "web_extract" => {
+            if let Some(start) = result.find("标题：") {
+                let end = result[start + 3..]
+                    .find('\n')
+                    .unwrap_or(result[start + 3..].len().min(30));
+                return format!("抓取「{}」", &result[start + 3..start + 3 + end].trim());
+            }
+            return "抓取网页".into();
+        }
+        _ => {}
     }
-    "read_file" => {
-      let line_count = result.lines().count();
-      return format!("读取 {} 行内容", line_count);
-    }
-    "grep" => {
-      if result == "（无匹配）" { return "未找到匹配".into(); }
-      let n = result.lines().filter(|l| !l.is_empty()).count();
-      return format!("找到 {} 处匹配", n);
-    }
-    "search_files" => {
-      let n = result.lines().filter(|l| !l.is_empty()).count();
-      if n == 0 { return "未找到文件".into(); }
-      return format!("找到 {} 个文件", n);
-    }
-    "search_symbols" => {
-      if result == "（无匹配符号）" { return "未找到符号".into(); }
-      let n = result.lines().filter(|l| !l.is_empty()).count();
-      return format!("找到 {} 个符号", n);
-    }
-    "write_file" => {
-      if let Some(pos) = result.find("（") {
-        return format!("已写入{}", &result[..pos]);
-      }
-      return result.to_string();
-    }
-    "patch_file" => {
-      let line = result.replace('\n', " ").trim().to_string();
-      if line.len() > 60 {
-        return format!("{}…", &line[..60]);
-      }
-      return line;
-    }
-    "delete_file" => {
-      if result.starts_with("已删除 ") {
-        return result.to_string();
-      }
-      return result.to_string();
-    }
-    "run_command" => {
-      if result.starts_with("错误：") || result.starts_with("命令执行失败") {
-        return "执行失败".into();
-      }
-      let one_line = result.replace(|c: char| c.is_whitespace(), " ").trim().to_string();
-      if one_line.len() > 60 {
-        return format!("{}…", &one_line[..60]);
-      }
-      if one_line.is_empty() { return "执行完成".into(); }
-      return one_line;
-    }
-    "git_status" => {
-      if result.contains("工作区干净") { return "工作区干净".into(); }
-      return "已获取状态".into();
-    }
-    "git_diff" => {
-      if result.contains("无变更") { return "无变更".into(); }
-      let n = result.lines().count();
-      if n > 0 { return format!("{} 个文件有变更", n); }
-      return "已获取 diff".into();
-    }
-    "web_search" => {
-      let n = result.lines().filter(|l| l.starts_with(|c: char| c.is_ascii_digit())).count();
-      if n > 0 { return format!("找到 {} 条结果", n); }
-      return "搜索完成".into();
-    }
-    "web_extract" => {
-      if let Some(start) = result.find("标题：") {
-        let end = result[start+3..].find('\n').unwrap_or(result[start+3..].len().min(30));
-        return format!("抓取「{}」", &result[start+3..start+3+end].trim());
-      }
-      return "抓取网页".into();
-    }
-    _ => {}
-  }
 
-  let one_line = result.replace(|c: char| c.is_whitespace(), " ").trim().to_string();
-  if one_line.len() > 120 {
-    return format!("{}…", &one_line[..120]);
-  }
-  one_line
+    let one_line = result
+        .replace(|c: char| c.is_whitespace(), " ")
+        .trim()
+        .to_string();
+    if one_line.len() > 120 {
+        return format!("{}…", &one_line[..120]);
+    }
+    one_line
 }
 
 #[cfg(test)]
@@ -146,7 +175,10 @@ mod tests {
 
     #[test]
     fn test_tool_summary_grep_with_matches() {
-        assert_eq!(tool_summary("grep", "src/main.rs:1\nsrc/lib.rs:5"), "找到 2 处匹配");
+        assert_eq!(
+            tool_summary("grep", "src/main.rs:1\nsrc/lib.rs:5"),
+            "找到 2 处匹配"
+        );
     }
 
     #[test]
@@ -163,7 +195,10 @@ mod tests {
     // ── search_files ──
     #[test]
     fn test_tool_summary_search_files_found() {
-        assert_eq!(tool_summary("search_files", "src/main.rs\nsrc/lib.rs"), "找到 2 个文件");
+        assert_eq!(
+            tool_summary("search_files", "src/main.rs\nsrc/lib.rs"),
+            "找到 2 个文件"
+        );
     }
 
     #[test]
@@ -180,7 +215,10 @@ mod tests {
     #[test]
     fn test_tool_summary_write_file_with_size() {
         // Function prepends "已写入" again
-        assert_eq!(tool_summary("write_file", "已写入 1234 字节（main.rs）"), "已写入已写入 1234 字节");
+        assert_eq!(
+            tool_summary("write_file", "已写入 1234 字节（main.rs）"),
+            "已写入已写入 1234 字节"
+        );
     }
 
     #[test]
@@ -196,12 +234,15 @@ mod tests {
     // ── patch_file ──
     #[test]
     fn test_tool_summary_patch_file_short() {
-        assert_eq!(tool_summary("patch_file", "已替换 old → new"), "已替换 old → new");
+        assert_eq!(
+            tool_summary("patch_file", "已替换 old → new"),
+            "已替换 old → new"
+        );
     }
 
     #[test]
     fn test_tool_summary_patch_file_long_truncated() {
-        let r = "已替换 " .to_string() + &"x".repeat(60) + " 完成。";
+        let r = "已替换 ".to_string() + &"x".repeat(60) + " 完成。";
         let result = tool_summary("patch_file", &r);
         // 60 chars truncated + '…' = 61 chars = 63 bytes ('…' is 3 bytes)
         assert_eq!(result.len(), 63);
@@ -210,35 +251,53 @@ mod tests {
 
     #[test]
     fn test_tool_summary_patch_file_multiline() {
-        assert_eq!(tool_summary("patch_file", "已替换\nold\nnew"), "已替换 old new");
+        assert_eq!(
+            tool_summary("patch_file", "已替换\nold\nnew"),
+            "已替换 old new"
+        );
     }
 
     // ── delete_file ──
     #[test]
     fn test_tool_summary_delete_file() {
-        assert_eq!(tool_summary("delete_file", "已删除 src/old.rs"), "已删除 src/old.rs");
+        assert_eq!(
+            tool_summary("delete_file", "已删除 src/old.rs"),
+            "已删除 src/old.rs"
+        );
     }
 
     #[test]
     fn test_tool_summary_delete_file_other() {
-        assert_eq!(tool_summary("delete_file", "无法删除：文件不存在"), "无法删除：文件不存在");
+        assert_eq!(
+            tool_summary("delete_file", "无法删除：文件不存在"),
+            "无法删除：文件不存在"
+        );
     }
 
     // ── run_command ──
     #[test]
     fn test_tool_summary_run_command_success() {
-        assert_eq!(tool_summary("run_command", "Build completed successfully"), "Build completed successfully");
+        assert_eq!(
+            tool_summary("run_command", "Build completed successfully"),
+            "Build completed successfully"
+        );
     }
 
     #[test]
     fn test_tool_summary_run_command_error() {
         // Top-level handler strips "错误：" prefix before run_command arm is reached
-        assert_eq!(tool_summary("run_command", "错误：command not found"), "command not found");
+        assert_eq!(
+            tool_summary("run_command", "错误：command not found"),
+            "command not found"
+        );
     }
 
     #[test]
     fn test_tool_summary_run_command_failure_prefix() {
-        assert_eq!(tool_summary("run_command", "命令执行失败: timeout"), "执行失败");
+        assert_eq!(
+            tool_summary("run_command", "命令执行失败: timeout"),
+            "执行失败"
+        );
     }
 
     #[test]
@@ -285,13 +344,19 @@ mod tests {
 
     #[test]
     fn test_tool_summary_git_diff_internal_no_changes() {
-        assert_eq!(tool_summary("git_diff", "--- a/foo\n+++ b/foo\n@@ -0,0 +1 @@\n+new"), "4 个文件有变更");
+        assert_eq!(
+            tool_summary("git_diff", "--- a/foo\n+++ b/foo\n@@ -0,0 +1 @@\n+new"),
+            "4 个文件有变更"
+        );
     }
 
     // ── web_search ──
     #[test]
     fn test_tool_summary_web_search_with_results() {
-        assert_eq!(tool_summary("web_search", "1. Result A\n2. Result B"), "找到 2 条结果");
+        assert_eq!(
+            tool_summary("web_search", "1. Result A\n2. Result B"),
+            "找到 2 条结果"
+        );
     }
 
     #[test]
@@ -301,14 +366,20 @@ mod tests {
 
     #[test]
     fn test_tool_summary_web_search_non_digit_lines() {
-        assert_eq!(tool_summary("web_search", "一些描述\n- 无编号结果"), "搜索完成");
+        assert_eq!(
+            tool_summary("web_search", "一些描述\n- 无编号结果"),
+            "搜索完成"
+        );
     }
 
     // ── web_extract ──
     #[test]
     fn test_tool_summary_web_extract_with_title() {
         let result = "标题：AIALL 项目\n内容：...";
-        assert_eq!(tool_summary("web_extract", result), "抓取「题：AIALL 项目」");
+        assert_eq!(
+            tool_summary("web_extract", result),
+            "抓取「题：AIALL 项目」"
+        );
     }
 
     #[test]
@@ -343,7 +414,10 @@ mod tests {
     // ── error prefix ──
     #[test]
     fn test_tool_summary_error_prefix_stripped() {
-        assert_eq!(tool_summary("list_dir", "错误：Permission denied"), "Permission denied");
+        assert_eq!(
+            tool_summary("list_dir", "错误：Permission denied"),
+            "Permission denied"
+        );
     }
 
     #[test]
