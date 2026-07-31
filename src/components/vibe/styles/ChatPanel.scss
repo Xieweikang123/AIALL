@@ -2,7 +2,7 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  background: transparent;
+  background: #161b22;
   overflow-x: clip;
   overflow-y: visible;
   min-height: 0;
@@ -151,9 +151,9 @@
   justify-content: center;
   flex-shrink: 0;
   border-radius: 8px;
-  background: linear-gradient(135deg, rgba(31, 111, 235, 0.22), rgba(130, 80, 223, 0.18));
+  background: #21262d;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #91beff;
+  color: #c9d1d9;
 }
 
 .chat-head-text {
@@ -271,9 +271,9 @@
   align-items: center;
   justify-content: center;
   border-radius: 16px;
-  background: linear-gradient(135deg, rgba(31, 111, 235, 0.15), rgba(130, 80, 223, 0.12));
+  background: #21262d;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #91beff;
+  color: #8b949e;
   margin-bottom: 4px;
 }
 
@@ -534,6 +534,53 @@
   margin-bottom: 4px;
 }
 
+.chat-run-banner {
+  flex-shrink: 0;
+  margin: 0 12px 4px;
+  border: 1px solid rgba(88, 166, 255, 0.18);
+  border-radius: 8px;
+  background: rgba(88, 166, 255, 0.05);
+  overflow: hidden;
+}
+
+.chat-run-banner :deep(.agent-live-status--banner) {
+  margin: 0;
+  border: 0;
+  background: transparent;
+}
+
+.chat-run-controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 0 10px 7px;
+}
+
+.chat-run-control {
+  padding: 3px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(201, 209, 217, 0.85);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.chat-run-control:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.chat-run-control--pause {
+  color: rgba(255, 213, 79, 0.92);
+  border-color: rgba(255, 213, 79, 0.22);
+}
+
+.chat-run-control--stop {
+  color: rgba(248, 81, 73, 0.92);
+  border-color: rgba(248, 81, 73, 0.22);
+}
+
 .chat-running-status {
   display: inline-flex;
   align-items: center;
@@ -549,6 +596,14 @@
 
 .chat-running-status .status-pulse {
   flex-shrink: 0;
+}
+
+.chat-running-status--waiting {
+  color: rgba(255, 213, 79, 0.92);
+}
+
+.status-pulse--waiting {
+  background: rgba(255, 213, 79, 0.9);
 }
 
 .chat-error {
