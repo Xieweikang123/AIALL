@@ -24,15 +24,16 @@
         class="secondary small git-ai-batch-btn"
         :class="{ 'git-ai-batch-btn--loading': aiBatchGrouping }"
         :disabled="aiBatchGrouping || batchCommittingIndex !== null || !configReady"
-        :title="!configReady ? '请先配置 AI 模型' : 'AI 按功能模块智能分组'"
+        :title="!configReady ? '请先配置 AI 模型' : `分析 ${batchTotalFiles} 个未提交文件，按功能模块智能分组并生成提交说明`"
         @click="$emit('ai-batch-groups')"
       >
         <span v-if="aiBatchGrouping" class="panel-loading-spinner git-ai-batch-spinner" aria-hidden="true" />
-        {{ aiBatchGrouping ? (aiBatchGroupingStep || "分析中…") : "AI 划分" }}
+        {{ aiBatchGrouping ? displayGroupingStep : "AI 分析变更" }}
       </button>
     </div>
     <p v-if="!batchSectionOpen" class="git-batch-collapsed-hint">
-      {{ batchTotalFiles }} 个文件 · {{ batchReadyCount }}/{{ batchGroups.length }} 组已填写说明
+        {{ batchTotalFiles }} 个文件 · {{ batchGroups.length }} 组 · {{ batchReadyCount }}/{{ batchGroups.length }} 组已填写说明
+        <span v-if="ungroupedFileCount" class="git-batch-unassigned-hint"> · {{ ungroupedFileCount }} 个未分组</span>
     </p>
     <div v-if="batchSectionOpen" class="git-batch-body">
       <div v-if="aiBatchGrouping" class="git-batch-loading">
@@ -42,19 +43,20 @@
       <div class="git-batch-toolbar">
         <span class="git-batch-toolbar-hint">
           {{ batchTotalFiles }} 个文件 · {{ batchReadyCount }}/{{ batchGroups.length }} 组就绪
+          <span v-if="ungroupedFileCount" class="git-batch-unassigned-hint"> · {{ ungroupedFileCount }} 个未分组</span>
         </span>
         <button
           type="button"
           class="small git-batch-all-btn"
           :class="canCommitAllBatches ? 'primary' : 'secondary'"
-          :disabled="batchCommittingIndex !== null || !canCommitAllBatches"
-          :title="canCommitAllBatches ? '按顺序提交全部分组' : '请先为每组填写提交说明'"
+          :disabled="batchCommittingIndex !== null || !canCommitAllBatches || !batchGroupsFromAi"
+          :title="!batchGroupsFromAi ? '请先完成 AI 分析变更' : canCommitAllBatches ? '按照当前分组依次创建多个 Git commit' : '请先为每组填写提交说明'"
           @click="$emit('commit-all-batches', [...batchMessages])"
         >
           <template v-if="batchCommittingIndex !== null">
             提交中 {{ batchCommittingIndex + 1 }}/{{ batchGroups.length }}…
           </template>
-          <template v-else>全部提交</template>
+          <template v-else>按分组提交</template>
         </button>
       </div>
       <div
@@ -79,6 +81,7 @@
             'git-batch-group--busy': batchCommittingIndex === i,
             'git-batch-group--done': batchCommittingIndex !== null && batchCommittingIndex > i,
             'git-batch-group--ready': !!batchMessages[i]?.trim(),
+            'git-batch-group--unassigned': isUnassignedGroup(group),
           }"
           :style="{ '--batch-accent': batchGroupAccent(i) }"
         >
@@ -86,8 +89,9 @@
             <span class="git-batch-group-index">{{ i + 1 }}</span>
             <span class="git-batch-group-dir" :title="batchGroupTitle(group)">{{ batchGroupTitle(group) }}</span>
             <span class="git-batch-group-count">{{ group.files.length }} 文件</span>
+            <span v-if="isUnassignedGroup(group)" class="git-batch-group-status git-batch-group-status--warn">待归类</span>
             <span v-if="batchCommittingIndex === i" class="git-batch-group-status">提交中</span>
-            <span v-else-if="!batchMessages[i]?.trim()" class="git-batch-group-status git-batch-group-status--warn">待填写</span>
+            <span v-else-if="!isUnassignedGroup(group) && !batchMessages[i]?.trim()" class="git-batch-group-status git-batch-group-status--warn">待填写</span>
           </div>
           <div class="git-batch-group-files">
             <div
@@ -124,7 +128,8 @@
               type="button"
               class="small git-batch-commit-btn"
               :class="batchMessages[i]?.trim() ? 'primary' : 'secondary'"
-              :disabled="batchCommittingIndex !== null || !batchMessages[i]?.trim()"
+              :disabled="batchCommittingIndex !== null || !batchMessages[i]?.trim() || !batchGroupsFromAi"
+              :title="!batchGroupsFromAi ? '请先完成 AI 分析变更' : !batchMessages[i]?.trim() ? '请先填写提交说明' : '提交此分组'"
               @click="$emit('commit-batch-group', i, batchMessages[i] || '')"
             >
               {{ batchCommittingIndex === i ? "提交中…" : "提交" }}
@@ -181,6 +186,24 @@ const {
   visibleBatchFiles,
   onBatchMessageInput,
 } = batchUi;
+
+const unassignedGroupNames = new Set(["其他未分组变更", "正在分析其余变更"]);
+const isUnassignedGroup = (group: BatchGroup) => unassignedGroupNames.has(group.dir);
+const ungroupedFileCount = computed(() =>
+  (props.batchGroups || [])
+    .filter(isUnassignedGroup)
+    .reduce((sum, group) => sum + group.files.length, 0),
+);
+const displayGroupingStep = computed(() => {
+  const step = props.aiBatchGroupingStep.trim();
+  if (!step) return "分析中…";
+  if (step.includes("·") && step.includes("字")) return step;
+  if (step.includes("连接")) return "连接服务…";
+  if (step.includes("读取") || step.includes("摘要")) return "读取变更…";
+  if (step.includes("分组") || step.includes("分析")) return "分析分组…";
+  if (step.includes("提交") || step.includes("说明")) return "生成说明…";
+  return step;
+});
 </script>
 
 <style src="./styles/GitPanel.scss" scoped></style>

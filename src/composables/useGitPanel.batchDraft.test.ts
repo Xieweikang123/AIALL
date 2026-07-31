@@ -256,21 +256,25 @@ describe("useGitPanel batch draft", () => {
     expect(git.gitStatusKnown.value).toBe(false);
   });
 
-  it("clears draft when unstaged files become empty", async () => {
+  it("keeps persisted draft when working tree briefly becomes empty", async () => {
     fetchGitStatusMock
       .mockResolvedValueOnce(gitStatusResult("main", ["src/a.ts"]))
-      .mockResolvedValueOnce(gitStatusResult("main", []));
+      .mockResolvedValueOnce(gitStatusResult("main", []))
+      .mockResolvedValueOnce(gitStatusResult("main", ["src/a.ts"]));
 
     const git = createGitPanel();
     await git.refreshGitStatus();
-    git.batchMessages.value = ["to be cleared"];
+    git.batchMessages.value = ["to be kept"];
     git.flushBatchDraftPersist();
-    expect(readGitBatchDraft(PROJECT, "main")?.messages).toEqual(["to be cleared"]);
+    expect(readGitBatchDraft(PROJECT, "main")?.messages).toEqual(["to be kept"]);
 
     await git.refreshGitStatus();
-    expect(readGitBatchDraft(PROJECT, "main")).toBeNull();
+    expect(readGitBatchDraft(PROJECT, "main")?.messages).toEqual(["to be kept"]);
     expect(git.batchMessages.value).toEqual([]);
     expect(git.batchSectionOpen.value).toBe(false);
+
+    await git.refreshGitStatus();
+    expect(git.batchMessages.value).toEqual(["to be kept"]);
   });
 
   it("shows batch groups when all changes are staged", async () => {
@@ -284,11 +288,11 @@ describe("useGitPanel batch draft", () => {
     expect(git.batchSectionOpen.value).toBe(false);
   });
 
-  it("invalidates stale draft when unstaged paths change on same branch", async () => {
+  it("invalidates non-overlapping draft when paths share no files", async () => {
     writeGitBatchDraft(PROJECT, "main", {
-      unstagedPaths: ["pkg/a.ts"],
-      groups: null,
-      messages: ["old draft"],
+      unstagedPaths: ["old/a.ts"],
+      groups: [{ name: "old", files: ["old/a.ts"], message: "old change" }],
+      messages: ["old change"],
       sectionOpen: true,
     });
 
@@ -298,6 +302,7 @@ describe("useGitPanel batch draft", () => {
     await git.refreshGitStatus();
 
     expect(readGitBatchDraft(PROJECT, "main")).toBeNull();
+    expect(git.batchGroupsFromAi.value).toBe(false);
     expect(git.batchMessages.value).toEqual([
       "pkg: a.ts",
       "src: b.ts",
@@ -358,6 +363,61 @@ describe("useGitPanel batch draft", () => {
       expect(git.batchGroupsFromAi.value).toBe(false);
     });
 
+    it("persists interrupted partial groups without allowing commit", async () => {
+      aiBatchGroupsMock.mockResolvedValue({ ok: false, groups: AI_GROUPS, error: "JSON 截断" });
+
+      const git = createGitPanel(AI_CONFIG);
+      await git.refreshGitStatus();
+      await git.generateAiBatchGroups();
+
+      expect(git.batchGroupsFromAi.value).toBe(false);
+      expect(readGitBatchDraft(PROJECT, "main")).toMatchObject({
+        groups: AI_GROUPS,
+        analysisComplete: false,
+      });
+    });
+
+    it("keeps AI groups when a refresh briefly reports no files during analysis", async () => {
+      let resolveAi: ((value: { ok: boolean; groups: typeof AI_GROUPS }) => void) | undefined;
+      aiBatchGroupsMock.mockImplementation(() => new Promise((resolve) => {
+        resolveAi = resolve;
+      }));
+
+      const git = createGitPanel(AI_CONFIG);
+      await git.refreshGitStatus();
+      const run = git.generateAiBatchGroups();
+      await Promise.resolve();
+
+      fetchGitStatusMock.mockResolvedValueOnce(gitStatusResult("main", []));
+      await git.refreshGitStatus();
+      expect(git.aiBatchGrouping.value).toBe(true);
+
+      resolveAi?.({ ok: true, groups: AI_GROUPS });
+      await run;
+
+      expect(git.batchGroupsFromAi.value).toBe(true);
+      expect(git.batchGroups.value.map((group) => group.dir)).toEqual(["pkg", "src"]);
+    });
+
+    it("ignores an older AI result after the panel state is reset", async () => {
+      let resolveAi: ((value: { ok: boolean; groups: typeof AI_GROUPS }) => void) | undefined;
+      aiBatchGroupsMock.mockImplementation(() => new Promise((resolve) => {
+        resolveAi = resolve;
+      }));
+
+      const git = createGitPanel(AI_CONFIG);
+      await git.refreshGitStatus();
+      const run = git.generateAiBatchGroups();
+      await Promise.resolve();
+
+      git.resetGitPanelState();
+      resolveAi?.({ ok: true, groups: AI_GROUPS });
+      await run;
+
+      expect(git.batchGroupsFromAi.value).toBe(false);
+      expect(git.batchGroups.value).toEqual([]);
+    });
+
     it("does not call AI grouping without config", async () => {
       const git = createGitPanel();
       await git.refreshGitStatus();
@@ -365,6 +425,52 @@ describe("useGitPanel batch draft", () => {
 
       expect(aiBatchGroupsMock).not.toHaveBeenCalled();
       expect(readGitBatchDraft(PROJECT, "main")).toBeNull();
+    });
+
+    it("keeps AI result when empty status refresh happens after analysis completes", async () => {
+      const git = createGitPanel(AI_CONFIG);
+      await git.refreshGitStatus();
+      await runGenerateAiBatchGroups(git);
+      expect(git.batchGroupsFromAi.value).toBe(true);
+
+      fetchGitStatusMock.mockResolvedValueOnce(gitStatusResult("main", []));
+      await git.refreshGitStatus();
+      expect(git.batchGroupsFromAi.value).toBe(false);
+      expect(readGitBatchDraft(PROJECT, "main")?.groups).toEqual(AI_GROUPS);
+
+      fetchGitStatusMock.mockResolvedValueOnce(gitStatusResult("main", ["pkg/a.ts", "src/b.ts"]));
+      await git.refreshGitStatus();
+      expect(git.batchGroupsFromAi.value).toBe(true);
+      expect(git.batchGroups.value.map((g) => g.dir)).toEqual(["pkg", "src"]);
+    });
+
+    it("flush after reset must not wipe persisted AI draft", async () => {
+      const git = createGitPanel(AI_CONFIG);
+      await git.refreshGitStatus();
+      await runGenerateAiBatchGroups(git);
+      expect(readGitBatchDraft(PROJECT, "main")?.groups).toEqual(AI_GROUPS);
+
+      git.resetGitPanelState();
+      git.flushBatchDraftPersist();
+
+      expect(readGitBatchDraft(PROJECT, "main")?.groups).toEqual(AI_GROUPS);
+    });
+
+    it("keeps overlapping AI groups when paths drift after reload", async () => {
+      writeGitBatchDraft(PROJECT, "main", {
+        unstagedPaths: ["pkg/a.ts", "src/b.ts"],
+        groups: AI_GROUPS,
+        messages: ["feat(pkg): update a", "feat(src): update b"],
+        sectionOpen: true,
+      });
+      fetchGitStatusMock.mockResolvedValue(gitStatusResult("main", ["pkg/a.ts", "src/b.ts", "src/c.ts"]));
+
+      const git = createGitPanel();
+      await git.refreshGitStatus();
+
+      expect(git.batchGroupsFromAi.value).toBe(true);
+      expect(git.batchGroups.value.some((g) => g.dir === "pkg")).toBe(true);
+      expect(git.batchGroups.value.some((g) => g.dir === "其他未分组变更")).toBe(true);
     });
   });
 });

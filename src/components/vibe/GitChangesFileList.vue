@@ -3,7 +3,7 @@
     class="git-changes-wrap"
     :class="{ 'git-changes-wrap--compact': !hasExpandedFileList }"
   >
-    <div v-if="selectedGitFiles.length" class="git-selection-bar">
+    <div v-if="gitStatus.length && selectedGitFiles.length" class="git-selection-bar">
       <span class="git-selection-count">已选 {{ selectedGitFiles.length }}</span>
       <button v-if="selectedCanStage" type="button" class="ghost tiny" title="暂存选中" @click="$emit('stage-selected')">暂存</button>
       <button v-if="selectedCanUnstage" type="button" class="ghost tiny" title="取消暂存选中" @click="$emit('unstage-selected')">取消暂存</button>

@@ -139,6 +139,7 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
   } = options;
 
   const aiBatchGroupsResult = ref<AiBatchGroupItem[] | null>(null);
+  const aiBatchAnalysisComplete = ref(false);
   const aiBatchGrouping = ref(false);
   const aiBatchGroupingStep = ref("");
   const batchCommittingAll = ref(false);
@@ -150,6 +151,7 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
   const expandedBatchGroups = ref<Set<number>>(new Set());
 
   let batchDraftPersistTimer: ReturnType<typeof setTimeout> | null = null;
+  let aiBatchRunId = 0;
 
   const BATCH_FILES_PREVIEW = 4;
   const BATCH_GROUP_ACCENTS = ["#58a6ff", "#3fb950", "#d29922", "#bc8cff", "#f778ba", "#79c0ff"];
@@ -189,13 +191,16 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
     if (!projectPath().trim()) return;
     const { project, branch } = batchDraftScope();
     const paths = currentBatchPaths();
+    // Snapshot/path empty means "nothing to write", not "delete draft".
+    // Deletion must go through clearBatchDraftPersist / invalidate / commit finish.
+    // Otherwise beforeunload flush after reset (or a transient empty status) wipes AI 分析.
     if (!paths.length || !batchUnstagedSnapshot.value) {
-      removeGitBatchDraft(project, branch);
       return;
     }
     writeGitBatchDraft(project, branch, {
       unstagedPaths: paths,
       groups: aiBatchGroupsResult.value,
+      analysisComplete: aiBatchAnalysisComplete.value,
       messages: [...batchMessages.value],
       sectionOpen: batchSectionOpen.value,
     });
@@ -214,9 +219,12 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
   }
 
   function resetBatchDraftSessionState() {
+    aiBatchRunId += 1;
+    debugLog("[git-ai] reset analysis state", { runId: aiBatchRunId });
     batchUnstagedSnapshot.value = null;
     batchDraftBranch.value = null;
     aiBatchGroupsResult.value = null;
+    aiBatchAnalysisComplete.value = false;
     batchMessages.value = [];
     batchSectionOpen.value = false;
   }
@@ -227,10 +235,38 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
 
     const { project, branch } = batchDraftScope();
     const draft = readGitBatchDraft(project, branch);
-    if (draft && pathsEqual(draft.unstagedPaths, paths)) {
-      batchUnstagedSnapshot.value = paths;
-      batchDraftBranch.value = branch;
-      aiBatchGroupsResult.value = draft.groups?.length ? draft.groups : null;
+    batchUnstagedSnapshot.value = paths;
+    batchDraftBranch.value = branch;
+
+    if (!draft) {
+      syncBatchMessagesFromGroups();
+      return;
+    }
+
+    const pathSet = new Set(paths);
+    const restoredGroups = (draft.groups ?? [])
+      .map((g) => ({
+        ...g,
+        files: g.files.map((p) => p.replace(/\\/g, "/")).filter((p) => pathSet.has(p)),
+      }))
+      .filter((g) => g.files.length > 0);
+
+    const exactPaths = pathsEqual(draft.unstagedPaths, paths);
+
+    // Exact match, or overlapping AI groups after path drift (same policy as in-memory sync).
+    if (draft.groups?.length && (exactPaths || restoredGroups.length > 0)) {
+      aiBatchGroupsResult.value = exactPaths ? draft.groups : restoredGroups;
+      aiBatchAnalysisComplete.value = draft.analysisComplete !== false;
+      batchSectionOpen.value = draft.sectionOpen;
+      const groups = batchGroups.value;
+      batchMessages.value = groups.map((g, i) => draft.messages[i] ?? defaultBatchMessage(g));
+      if (!exactPaths) schedulePersistBatchDraft();
+      return;
+    }
+
+    if (!draft.groups?.length && exactPaths) {
+      aiBatchGroupsResult.value = null;
+      aiBatchAnalysisComplete.value = false;
       batchSectionOpen.value = draft.sectionOpen;
       const groups = batchGroups.value;
       batchMessages.value = draft.messages.length === groups.length
@@ -239,16 +275,15 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
       return;
     }
 
-    batchUnstagedSnapshot.value = paths;
-    batchDraftBranch.value = branch;
     syncBatchMessagesFromGroups();
-    if (draft && !pathsEqual(draft.unstagedPaths, paths)) {
-      removeGitBatchDraft(project, branch);
-    }
+    removeGitBatchDraft(project, branch);
   }
 
   function invalidateBatchDraft() {
+    aiBatchRunId += 1;
+    debugLog("[git-ai] invalidate analysis state", { runId: aiBatchRunId });
     aiBatchGroupsResult.value = null;
+    aiBatchAnalysisComplete.value = false;
     if (batchDraftPersistTimer) {
       clearTimeout(batchDraftPersistTimer);
       batchDraftPersistTimer = null;
@@ -300,7 +335,7 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
       .sort((a, b) => a.dir.localeCompare(b.dir));
   });
 
-  const batchGroupsFromAi = computed(() => Boolean(aiBatchGroupsResult.value?.length));
+  const batchGroupsFromAi = computed(() => aiBatchAnalysisComplete.value && Boolean(aiBatchGroupsResult.value?.length));
   const batchTotalFiles = computed(() =>
     (batchGroups.value ?? []).reduce((sum, g) => sum + g.files.length, 0),
   );
@@ -310,13 +345,23 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
 
   const canCommitAllBatches = computed(() => {
     const n = batchGroups.value?.length ?? 0;
-    if (!n || batchCommittingIndex.value !== null) return false;
+    if (!batchGroupsFromAi.value || !n || batchCommittingIndex.value !== null) return false;
     return batchMessages.value.length === n && batchMessages.value.every((m) => m?.trim());
   });
+
+  function requireAiBatchGroups(): boolean {
+    if (batchGroupsFromAi.value) return true;
+    gitError.value = "请先完成 AI 分析变更，再进行分组提交";
+    batchSectionOpen.value = true;
+    return false;
+  }
 
   function syncBatchStateWithSourceFiles() {
     if (!gitStatusKnown.value) return;
     if (batchCommittingAll.value) return;
+    // A status refresh can briefly report no files while the analysis request is
+    // still running. Keep the in-flight result until the request settles.
+    if (aiBatchGrouping.value) return;
 
     const branch = batchDraftScope().branch;
     if (batchDraftBranch.value !== null && batchDraftBranch.value !== branch) {
@@ -325,8 +370,10 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
 
     const current = currentBatchPaths();
     if (!current.length) {
+      // Status can briefly report zero files (watcher/refresh races). Clear the
+      // in-memory panel only; keep localStorage draft so AI 分析 can restore
+      // when the file list comes back. Explicit clear happens on commit finish.
       resetBatchDraftSessionState();
-      clearBatchDraftPersist();
       return;
     }
     if (!batchUnstagedSnapshot.value) {
@@ -366,6 +413,7 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
   }
 
   async function commitBatchGroup(index: number, message: string) {
+    if (!requireAiBatchGroups()) return;
     if (!projectPath().trim() || !message.trim()) return;
     const group = batchGroups.value[index];
     if (!group) return;
@@ -429,6 +477,7 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
   }
 
   async function commitAllBatches(messages: string[]) {
+    if (!requireAiBatchGroups()) return;
     const n = batchGroups.value?.length ?? 0;
     if (!n) return;
     if (messages.length !== n || messages.some((m) => !m?.trim())) {
@@ -501,9 +550,25 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
       gitError.value = "请先配置 AI 模型";
       return;
     }
+    const runId = ++aiBatchRunId;
+    const runProject = projectPath().trim();
+    const runBranch = batchDraftScope().branch;
+    const runPaths = currentBatchPaths();
+    debugLog("[git-ai] analysis start", {
+      runId,
+      project: runProject,
+      branch: runBranch,
+      paths: runPaths,
+      fileCount: runPaths.length,
+    });
     aiBatchGrouping.value = true;
     aiBatchGroupingStep.value = "连接服务…";
     gitError.value = "";
+    aiBatchAnalysisComplete.value = false;
+    // Anchor the result to the input set before streaming starts. This prevents
+    // a concurrent Git status refresh from treating the analysis as a new draft.
+    batchUnstagedSnapshot.value = runPaths;
+    batchDraftBranch.value = runBranch;
     let accumulatedJson = "";
     try {
       const result = await aiBatchGroupsApi(
@@ -512,8 +577,9 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
         cfg.apiKey.trim(),
         cfg.model.trim(),
         (delta) => {
-          if (!aiBatchGroupingStep.value.startsWith("AI")) {
-            aiBatchGroupingStep.value = "AI 分析中…";
+          if (runId !== aiBatchRunId) {
+            debugLog("[git-ai] stale delta ignored", { runId, activeRunId: aiBatchRunId, chars: delta.length });
+            return;
           }
           accumulatedJson += delta;
           const partial = parsePartialGroups(accumulatedJson);
@@ -522,17 +588,55 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
           }
         },
         (step) => {
+          if (runId !== aiBatchRunId) {
+            debugLog("[git-ai] stale progress ignored", { runId, activeRunId: aiBatchRunId, step });
+            return;
+          }
           aiBatchGroupingStep.value = step;
         },
       );
+      if (runId !== aiBatchRunId || projectPath().trim() !== runProject || batchDraftScope().branch !== runBranch) {
+        debugLog("[git-ai] stale result ignored", {
+          runId,
+          activeRunId: aiBatchRunId,
+          projectChanged: projectPath().trim() !== runProject,
+          branchChanged: batchDraftScope().branch !== runBranch,
+          ok: result.ok,
+          groupCount: result.groups?.length ?? 0,
+        });
+        return;
+      }
       if (!result.ok) {
+        debugLog("[git-ai] analysis failed", { runId, error: result.error, partialGroupCount: aiBatchGroupsResult.value?.length ?? 0 });
         gitError.value = result.error || "AI 分组失败";
-        aiBatchGroupsResult.value = null;
+        if (result.groups.length > 0) {
+          aiBatchGroupsResult.value = result.groups;
+          gitError.value += "；已保留已识别的部分分组";
+        } else if (aiBatchGroupsResult.value?.length) {
+          gitError.value += "；分析未完成，已保留已识别的部分分组";
+        } else {
+          aiBatchGroupsResult.value = null;
+        }
+        // Keep recoverable groups across reloads, but persist the incomplete
+        // flag so they remain non-committable until a full rerun succeeds.
+        if (aiBatchGroupsResult.value?.length) {
+          batchSectionOpen.value = true;
+          batchMessages.value = batchGroups.value.map((g) => defaultBatchMessage(g));
+          persistBatchDraft();
+          debugLog("[git-ai] partial analysis persisted", {
+            runId,
+            groupCount: aiBatchGroupsResult.value.length,
+            complete: false,
+          });
+        }
       } else if (result.groups.length === 0) {
+        debugLog("[git-ai] analysis returned no groups", { runId });
         gitError.value = "AI 未返回有效分组，请重试或手动按目录提交";
         aiBatchGroupsResult.value = null;
       } else {
+        debugLog("[git-ai] analysis success", { runId, groupCount: result.groups.length, paths: result.groups.flatMap((g) => g.files).length });
         aiBatchGroupsResult.value = result.groups;
+        aiBatchAnalysisComplete.value = true;
         batchUnstagedSnapshot.value = currentBatchPaths();
         batchSectionOpen.value = true;
         batchMessages.value = batchGroups.value.map((g) => defaultBatchMessage(g));
@@ -541,11 +645,23 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
         await new Promise((r) => setTimeout(r, 500));
       }
     } catch (e) {
+      if (runId !== aiBatchRunId) {
+        debugLog("[git-ai] stale error ignored", { runId, activeRunId: aiBatchRunId });
+        return;
+      }
+      debugLog("[git-ai] analysis exception", { runId, error: e instanceof Error ? e.message : String(e) });
       gitError.value = toErrorMessage(e, "AI 分组失败");
-      aiBatchGroupsResult.value = null;
+      if (aiBatchGroupsResult.value?.length) {
+        gitError.value += "；分析未完成，已保留已识别的部分分组";
+      } else {
+        aiBatchGroupsResult.value = null;
+      }
     } finally {
-      aiBatchGrouping.value = false;
-      aiBatchGroupingStep.value = "";
+      if (runId === aiBatchRunId) {
+        aiBatchGrouping.value = false;
+        aiBatchGroupingStep.value = "";
+        debugLog("[git-ai] analysis settled", { runId, complete: aiBatchAnalysisComplete.value });
+      }
     }
   }
 

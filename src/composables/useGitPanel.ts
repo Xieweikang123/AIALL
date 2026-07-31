@@ -29,6 +29,7 @@ export function useGitPanel(
 
   let batchReset: (() => void) | undefined;
   let batchSync: (() => void) | undefined;
+  let suggestBatchCommit: (() => void) | undefined;
 
   const statusRefresh = useGitStatusRefresh({
     projectPath,
@@ -81,6 +82,7 @@ export function useGitPanel(
     configReady,
     state,
     onRefreshTree,
+    onSuggestBatchCommit: () => suggestBatchCommit?.(),
     refreshGitStatus: statusRefresh.refreshGitStatus,
     refreshGitRemotes: remoteActions.refreshGitRemotes,
     refreshGitLogIfOpen: statusRefresh.refreshGitLogIfOpen,
@@ -111,6 +113,9 @@ export function useGitPanel(
 
   batchReset = batch.resetBatchDraftSessionState;
   batchSync = batch.syncBatchStateWithSourceFiles;
+  suggestBatchCommit = () => {
+    batch.batchSectionOpen.value = true;
+  };
 
   return {
     gitBranches: state.gitBranches,

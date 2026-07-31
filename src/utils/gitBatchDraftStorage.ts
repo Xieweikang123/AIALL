@@ -4,6 +4,8 @@ import { lsGetJson, lsRemove, lsSetJson } from "./localStorageSafe";
 export type GitBatchDraft = {
   unstagedPaths: string[];
   groups: AiBatchGroupItem[] | null;
+  /** False when groups are only a recoverable preview from an interrupted AI run. */
+  analysisComplete?: boolean;
   messages: string[];
   sectionOpen: boolean;
 };
@@ -36,6 +38,7 @@ export function readGitBatchDraft(projectPath: string, branch: string): GitBatch
   return {
     unstagedPaths: draft.unstagedPaths.map(normalizeGitPath),
     groups: draft.groups,
+    analysisComplete: draft.analysisComplete !== false,
     messages: draft.messages,
     sectionOpen: Boolean(draft.sectionOpen),
   };

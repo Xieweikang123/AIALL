@@ -1,5 +1,6 @@
 import { debugLog } from "../../utils/debugLog";
 import { toErrorMessage } from "../../utils/vibeHelpers";
+import { debugLog } from "../../utils/debugLog";
 import { fetchGitStatus, fetchGitLog } from "../../services/vibeGitClient";
 import type { GitPanelState } from "./createGitPanelState";
 
@@ -38,6 +39,7 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
     state.gitBranch.value = "";
     state.gitHeadCommit.value = "";
     state.gitStatus.value = [];
+    state.selectedGitFiles.value = [];
     state.gitBranches.value = [];
     state.gitLogEntries.value = [];
     state.gitLogCount.value = 30;
@@ -62,11 +64,15 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
     const showLoading = refreshOptions?.showLoading !== false;
     const pathAtStart = projectPath();
     const token = ++state.gitStatusRefreshToken.value;
+    debugLog("[git-status] refresh start", { token, path: pathAtStart, force: Boolean(refreshOptions?.force) });
     if (showLoading) state.gitLoading.value = true;
     if (showLoading) state.gitError.value = "";
     try {
       const result = await fetchGitStatus(pathAtStart);
-      if (token !== state.gitStatusRefreshToken.value || projectPath() !== pathAtStart) return;
+      if (token !== state.gitStatusRefreshToken.value || projectPath() !== pathAtStart) {
+        debugLog("[git-status] stale refresh ignored", { token, activeToken: state.gitStatusRefreshToken.value });
+        return;
+      }
       if (!result.ok) {
         state.gitError.value = result.error || "获取 Git 状态失败";
         return;
@@ -76,6 +82,7 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
       state.gitHeadCommit.value = result.headCommit?.trim() || "";
       state.gitStatus.value = result.files;
       state.gitStatusKnown.value = true;
+      debugLog("[git-status] refresh applied", { token, branch: result.branch, fileCount: result.files.length, stagedCount: result.stagedCount, unstagedCount: result.unstagedCount });
       syncBatchStateWithSourceFiles?.();
       if (showLoading) {
         state.gitError.value = "";
@@ -91,7 +98,10 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
         }
       }
     } catch (e) {
-      if (token !== state.gitStatusRefreshToken.value || projectPath() !== pathAtStart) return;
+      if (token !== state.gitStatusRefreshToken.value || projectPath() !== pathAtStart) {
+        debugLog("[git-status] stale refresh error ignored", { token, activeToken: state.gitStatusRefreshToken.value });
+        return;
+      }
       state.gitError.value = toErrorMessage(e, "获取 Git 状态失败");
     } finally {
       if (token === state.gitStatusRefreshToken.value && projectPath() === pathAtStart) {

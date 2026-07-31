@@ -134,6 +134,20 @@ export function parseGitFileSelectionKey(
   return null;
 }
 
+/** Drop selection keys that no longer match a file on that staged/unstaged side. */
+export function pruneGitFileSelection(
+  selected: string[],
+  files: Array<{ path: string; staged: boolean }>,
+): string[] {
+  if (!selected.length) return selected;
+  const valid = new Set(files.map((f) => gitFileSelectionKey(f.path, f.staged)));
+  return selected.filter((key) => {
+    const parsed = parseGitFileSelectionKey(key);
+    if (!parsed) return false;
+    return valid.has(gitFileSelectionKey(parsed.path, parsed.staged));
+  });
+}
+
 /** Parse new-side start line from a unified diff hunk header (`@@ -a,b +c,d @@`).
  * Falls back to old-side start when the hunk is a pure deletion (`+0,0`). */
 export function parseHunkNewStartLine(header: string): number {

@@ -93,6 +93,8 @@ export interface GitGenerateMessageResult {
   ok: boolean;
   message: string;
   error?: string;
+  /** Soft tip when staged changes likely span multiple features. */
+  warning?: string;
 }
 
 export interface AiBatchGroupItem {
@@ -470,6 +472,7 @@ export async function generateCommitMessage(
     const decoder = new TextDecoder("utf-8");
     let buffer = "";
     let finalMessage = "";
+    let finalWarning = "";
     let currentEvent = "";
 
     while (true) {
@@ -491,11 +494,12 @@ export async function generateCommitMessage(
           if (!raw || raw === "[DONE]") continue;
 
           try {
-            const parsed = JSON.parse(raw) as { text?: string; message?: string; error?: string };
+            const parsed = JSON.parse(raw) as { text?: string; message?: string; error?: string; warning?: string };
             if (currentEvent === "delta" && parsed.text) {
               onDelta(parsed.text);
             } else if (currentEvent === "done") {
               finalMessage = parsed.message || "";
+              finalWarning = parsed.warning || "";
             } else if (currentEvent === "error") {
               return { ok: false, message: "", error: parsed.error || "AI 请求失败" };
             }
@@ -507,7 +511,7 @@ export async function generateCommitMessage(
       }
     }
 
-    return { ok: true, message: finalMessage };
+    return { ok: true, message: finalMessage, warning: finalWarning || undefined };
   };
 
   if (!isTauriEnv()) {
@@ -515,14 +519,18 @@ export async function generateCommitMessage(
   }
 
   return new Promise<GitGenerateMessageResult>((resolve) => {
-    const channel = new Channel<{ type: string; data: { text?: string; message?: string; error?: string } }>();
+    const channel = new Channel<{ type: string; data: { text?: string; message?: string; error?: string; warning?: string } }>();
     channel.onmessage = (event) => {
       switch (event.type) {
         case "delta":
           if (event.data?.text) onDelta(event.data.text);
           break;
         case "done":
-          resolve({ ok: true, message: event.data?.message || "" });
+          resolve({
+            ok: true,
+            message: event.data?.message || "",
+            warning: event.data?.warning || undefined,
+          });
           break;
         case "error":
           resolve({ ok: false, message: "", error: event.data?.error || "AI 请求失败" });
@@ -582,7 +590,7 @@ export async function aiBatchGroups(
         });
       }, SUMMARY_STALL_MS);
 
-      const channel = new Channel<{ type: string; data: { text?: string; step?: string; groups?: AiBatchGroupItem[]; error?: string; message?: string } }>();
+      const channel = new Channel<{ type: string; data: { text?: string; step?: string; groups?: AiBatchGroupItem[]; partialGroups?: AiBatchGroupItem[]; error?: string; message?: string; chars?: number; elapsedMs?: number } }>();
       channel.onmessage = (event) => {
         switch (event.type) {
           case "progress":
@@ -611,7 +619,7 @@ export async function aiBatchGroups(
             settle({ ok: true, groups: event.data?.groups || [] });
             break;
           case "error":
-            settle({ ok: false, groups: [], error: event.data?.error || "AI 请求失败" });
+            settle({ ok: false, groups: event.data?.partialGroups || [], error: event.data?.error || "AI 请求失败" });
             break;
         }
       };
@@ -665,11 +673,11 @@ export async function aiBatchGroups(
           const raw = trimmed.slice(6).trim();
           if (!raw || raw === "[DONE]") continue;
           try {
-            const parsed = JSON.parse(raw) as { text?: string; step?: string; groups?: AiBatchGroupItem[]; error?: string; message?: string };
+            const parsed = JSON.parse(raw) as { text?: string; step?: string; groups?: AiBatchGroupItem[]; partialGroups?: AiBatchGroupItem[]; error?: string; message?: string; chars?: number; elapsedMs?: number };
             if (currentEvent === "progress" && parsed.step && onProgress) onProgress(parsed.step);
             else if (currentEvent === "delta" && parsed.text && onDelta) onDelta(parsed.text);
             else if (currentEvent === "done" && parsed.groups) finalGroups = parsed.groups;
-            else if (currentEvent === "error") return { ok: false, groups: [], error: parsed.error || parsed.message || "AI 请求失败" };
+            else if (currentEvent === "error") return { ok: false, groups: parsed.partialGroups || [], error: parsed.error || parsed.message || "AI 请求失败" };
           } catch {
             // skip malformed JSON lines from SSE stream
           }

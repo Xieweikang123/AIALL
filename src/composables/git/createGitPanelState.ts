@@ -1,7 +1,7 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from "vue";
 import { lsGet, lsSet } from "../../utils/localStorageSafe";
 import { sortedUnstagedPaths } from "../../utils/gitBatchDraftStorage";
-import { parseGitFileSelectionKey } from "../../utils/gitHelpers";
+import { parseGitFileSelectionKey, pruneGitFileSelection } from "../../utils/gitHelpers";
 import { fetchGitLog, type GitHunkInfo, type GitStatusFile } from "../../services/vibeGitClient";
 import type { GitFileDiff } from "./types";
 
@@ -233,6 +233,19 @@ export function createGitPanelState(
       }
     }
   });
+
+  // Keep multi-select bar in sync when status empties (commit/refresh),
+  // a file leaves a side, or persisted selection is restored against a clean tree.
+  watch(
+    [gitStatus, selectedGitFiles],
+    ([files, selected]) => {
+      if (!selected.length) return;
+      const pruned = pruneGitFileSelection(selected, files);
+      if (pruned.length !== selected.length || pruned.some((key, i) => key !== selected[i])) {
+        selectedGitFiles.value = pruned;
+      }
+    },
+  );
 
   const gitConflictedFiles = computed(() => {
     const seen = new Set<string>();

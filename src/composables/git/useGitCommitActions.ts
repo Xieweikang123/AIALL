@@ -13,6 +13,8 @@ export interface UseGitCommitActionsOptions {
   configReady: () => boolean;
   state: GitPanelState;
   onRefreshTree?: () => void;
+  /** Soft tip when generated message may span multiple features. */
+  onSuggestBatchCommit?: () => void;
   refreshGitStatus: (options?: { showLoading?: boolean; force?: boolean }) => Promise<void>;
   refreshGitRemotes: () => Promise<void>;
   refreshGitLogIfOpen: (pathOverride?: string) => Promise<void>;
@@ -27,6 +29,7 @@ export function useGitCommitActions(options: UseGitCommitActionsOptions) {
     configReady,
     state,
     onRefreshTree,
+    onSuggestBatchCommit,
     refreshGitStatus,
     refreshGitRemotes,
     refreshGitLogIfOpen,
@@ -99,6 +102,10 @@ export function useGitCommitActions(options: UseGitCommitActionsOptions) {
       }
       state.gitGenStep.value = "完成 ✓";
       state.gitCommitMessage.value = result.message;
+      if (result.warning) {
+        state.gitError.value = result.warning;
+        onSuggestBatchCommit?.();
+      }
       await new Promise((r) => setTimeout(r, 600));
     } catch (e) {
       state.gitError.value = toErrorMessage(e, "AI 生成提交信息失败");
