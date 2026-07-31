@@ -1,8 +1,9 @@
-﻿pub mod agent;
+pub mod agent;
 mod ai;
 mod automation;
 mod chat;
 mod commands;
+mod crash_log;
 mod error;
 mod fs;
 mod git;
@@ -13,8 +14,44 @@ mod web_fetch;
 use commands::dev_manage::DevServerState;
 use commands::fs::DirCache;
 use commands::watcher::WatcherState;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tauri::Manager;
 use tauri_plugin_notification::NotificationExt;
+use tauri_plugin_window_state::{AppHandleExt, StateFlags};
+
+/// Debounced disk flush for window geometry.
+///
+/// `tauri-plugin-window-state` only writes on clean `RunEvent::Exit`. Dev rebuilds
+/// kill the process without that event, so position/size would be lost unless we
+/// eagerly persist on move/resize/blur/close.
+struct WindowStateSaveGate {
+  last: Mutex<Option<Instant>>,
+}
+
+impl WindowStateSaveGate {
+  fn new() -> Self {
+    Self {
+      last: Mutex::new(None),
+    }
+  }
+
+  fn save(&self, app: &tauri::AppHandle, force: bool) {
+    const MIN_INTERVAL: Duration = Duration::from_millis(400);
+    let now = Instant::now();
+    if let Ok(mut last) = self.last.lock() {
+      if !force {
+        if let Some(prev) = *last {
+          if now.duration_since(prev) < MIN_INTERVAL {
+            return;
+          }
+        }
+      }
+      *last = Some(now);
+    }
+    let _ = app.save_window_state(StateFlags::all());
+  }
+}
 
 #[tauri::command]
 fn send_notification(app: tauri::AppHandle, title: String, body: String) -> Result<(), String> {
@@ -24,14 +61,18 @@ fn send_notification(app: tauri::AppHandle, title: String, body: String) -> Resu
     .title(&title)
     .body(&body)
     .show()
-    .map_err(|e| format!("鍙戦€侀€氱煡澶辫触: {e}"))
+    .map_err(|e| format!("发送通知失败: {e}"))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+  crash_log::install_panic_hook();
+  crash_log::log_lifecycle("boot");
+
   tauri::Builder::default()
     .plugin(tauri_plugin_shell::init())
     .plugin(tauri_plugin_opener::init())
+    .plugin(tauri_plugin_window_state::Builder::default().build())
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -44,9 +85,29 @@ pub fn run() {
       app.manage(WatcherState::default());
       app.manage(commands::agent::AgentRunState::default());
       app.manage(DevServerState::default());
+      app.manage(WindowStateSaveGate::new());
       app.handle().plugin(tauri_plugin_dialog::init())?;
       app.handle().plugin(tauri_plugin_notification::init())?;
+      crash_log::log_lifecycle("setup-ok");
       Ok(())
+    })
+    .on_window_event(|window, event| {
+      let force = matches!(
+        event,
+        tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Focused(false)
+      );
+      let should_save = force
+        || matches!(
+          event,
+          tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_)
+        );
+      if !should_save {
+        return;
+      }
+      let app = window.app_handle();
+      if let Some(gate) = app.try_state::<WindowStateSaveGate>() {
+        gate.save(app, force);
+      }
     })
     .invoke_handler(tauri::generate_handler![
       send_notification,
@@ -154,5 +215,18 @@ pub fn run() {
     ])
     .build(tauri::generate_context!())
     .expect("error while running tauri application")
-    .run(|_app, _event| {});
+    .run(|app, event| {
+      match event {
+        tauri::RunEvent::Ready => crash_log::log_lifecycle("ready"),
+        tauri::RunEvent::ExitRequested { .. } => {
+          crash_log::log_lifecycle("exit-requested");
+          if let Some(gate) = app.try_state::<WindowStateSaveGate>() {
+            gate.save(app, true);
+          }
+        }
+        tauri::RunEvent::Exit => crash_log::log_lifecycle("exit"),
+        tauri::RunEvent::Resumed => crash_log::log_lifecycle("resumed"),
+        _ => {}
+      }
+    });
 }

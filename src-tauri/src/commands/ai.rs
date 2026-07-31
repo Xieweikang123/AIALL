@@ -3,6 +3,30 @@ use futures_util::StreamExt;
 use serde_json::{json, Value};
 use tauri::ipc::Channel;
 
+fn stream_delta_text(parsed: &Value) -> Option<String> {
+  let content = parsed.pointer("/choices/0/delta/content")?;
+  if let Some(text) = content.as_str() {
+    return Some(text.to_string());
+  }
+  if let Some(parts) = content.as_array() {
+    let mut out = String::new();
+    for part in parts {
+      if let Some(text) = part.as_str() {
+        out.push_str(text);
+      } else if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
+        out.push_str(text);
+      }
+    }
+    if !out.is_empty() {
+      return Some(out);
+    }
+  }
+  parsed
+    .pointer("/choices/0/message/content")
+    .and_then(|v| v.as_str())
+    .map(str::to_string)
+}
+
 #[tauri::command]
 pub async fn ai_test(endpoint: String, api_key: Option<String>, body: Value) -> Value {
   match ai::chat_completion(&endpoint, api_key.as_deref(), body).await {
@@ -53,12 +77,9 @@ pub async fn ai_test_stream(
       let Ok(parsed) = serde_json::from_str::<Value>(data_str) else {
         continue;
       };
-      let content = parsed["choices"][0]["delta"]["content"]
-        .as_str()
-        .or_else(|| parsed["choices"][0]["message"]["content"].as_str());
-      if let Some(delta) = content.filter(|s| !s.is_empty()) {
-        full_text.push_str(delta);
-        let _ = on_chunk.send(delta.to_string());
+      if let Some(delta) = stream_delta_text(&parsed).filter(|s| !s.is_empty()) {
+        full_text.push_str(&delta);
+        let _ = on_chunk.send(delta);
       }
     }
   }

@@ -3,7 +3,7 @@ use crate::git;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::ipc::Channel;
 use tokio::time::timeout;
 
@@ -272,6 +272,216 @@ fn truncate_at_char_boundary(s: &str, max_chars: usize) -> &str {
   }
 }
 
+/// Topic key for multi-feature detection: first two path segments (or file name).
+fn change_topic_key(path: &str) -> String {
+  let p = path.replace('\\', "/");
+  let parts: Vec<&str> = p.split('/').filter(|s| !s.is_empty()).collect();
+  match parts.as_slice() {
+    [] => String::new(),
+    [only] => (*only).to_string(),
+    [a, b, ..] => format!("{a}/{b}"),
+  }
+}
+
+fn is_likely_multi_topic(paths: &[&str]) -> bool {
+  if paths.len() < 4 {
+    return false;
+  }
+  let mut keys = std::collections::BTreeSet::new();
+  for p in paths {
+    let key = change_topic_key(p);
+    if !key.is_empty() {
+      keys.insert(key);
+    }
+  }
+  keys.len() >= 3
+}
+
+fn looks_like_ident_start(c: char) -> bool {
+  c.is_ascii_alphabetic() || c == '_' || c == '$'
+}
+
+fn looks_like_ident_cont(c: char) -> bool {
+  c.is_ascii_alphanumeric() || c == '_' || c == '$'
+}
+
+fn take_ident(s: &str) -> Option<&str> {
+  let mut chars = s.char_indices();
+  let (start, first) = chars.next()?;
+  if !looks_like_ident_start(first) {
+    return None;
+  }
+  let mut end = start + first.len_utf8();
+  for (i, c) in chars {
+    if !looks_like_ident_cont(c) {
+      break;
+    }
+    end = i + c.len_utf8();
+  }
+  let ident = &s[..end];
+  if ident.len() < 2 {
+    return None;
+  }
+  Some(ident)
+}
+
+/// Pull declaration-like names from a source line (best-effort, multi-language).
+fn extract_decl_name(line: &str) -> Option<String> {
+  let trimmed = line.trim();
+  if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with('#') || trimmed.starts_with('*') {
+    return None;
+  }
+  const DECL_STARTERS: &[&str] = &[
+    "function", "fn", "def", "class", "interface", "type", "struct", "enum", "const", "let", "var",
+  ];
+  const SKIP: &[&str] = &[
+    "export", "async", "pub", "public", "private", "protected", "internal", "override", "virtual",
+    "readonly", "static", "default",
+  ];
+  let mut rest = trimmed;
+  let mut saw_decl = false;
+  for _ in 0..6 {
+    let Some(tok) = take_ident(rest) else { break };
+    if SKIP.iter().any(|k| *k == tok) {
+      rest = rest[tok.len()..].trim_start();
+      continue;
+    }
+    if DECL_STARTERS.iter().any(|k| *k == tok) {
+      saw_decl = true;
+      rest = rest[tok.len()..].trim_start();
+      // type Foo = / const Foo = — name follows
+      continue;
+    }
+    if saw_decl {
+      return Some(tok.to_string());
+    }
+    // Hunk context without keyword: accept first ident (e.g. `foo(bar) {`)
+    return Some(tok.to_string());
+  }
+  None
+}
+
+fn extract_symbols_from_patch(patch: &str, limit: usize) -> Vec<String> {
+  let mut out = Vec::new();
+  let mut seen = std::collections::HashSet::new();
+  const NOISE: &[&str] = &[
+    "return", "if", "else", "for", "while", "switch", "case", "break", "continue", "throw", "try",
+    "catch", "import", "from", "await", "yield", "new", "this", "super", "true", "false", "null",
+  ];
+  for line in patch.lines() {
+    if out.len() >= limit {
+      break;
+    }
+    if let Some(after) = line.strip_prefix("@@") {
+      if let Some(idx) = after.find("@@") {
+        let ctx = after[idx + 2..].trim();
+        if let Some(name) = extract_decl_name(ctx) {
+          if !NOISE.iter().any(|n| *n == name) && seen.insert(name.clone()) {
+            out.push(name);
+          }
+        }
+      }
+      continue;
+    }
+    if line.starts_with('+') && !line.starts_with("+++") {
+      let body = &line[1..];
+      let trimmed = body.trim_start();
+      let looks_decl = trimmed.starts_with("function ")
+        || trimmed.starts_with("async function ")
+        || trimmed.starts_with("export ")
+        || trimmed.starts_with("fn ")
+        || trimmed.starts_with("pub ")
+        || trimmed.starts_with("def ")
+        || trimmed.starts_with("class ")
+        || trimmed.starts_with("interface ")
+        || trimmed.starts_with("type ")
+        || trimmed.starts_with("struct ")
+        || trimmed.starts_with("enum ")
+        || trimmed.starts_with("const ")
+        || trimmed.starts_with("let ");
+      if !looks_decl {
+        continue;
+      }
+      if let Some(name) = extract_decl_name(body) {
+        if !NOISE.iter().any(|n| *n == name) && seen.insert(name.clone()) {
+          out.push(name);
+        }
+      }
+    }
+  }
+  out
+}
+
+fn symbols_for_file_patch(file_patch: &str, limit: usize) -> Vec<String> {
+  extract_symbols_from_patch(file_patch, limit)
+}
+
+fn split_patch_by_file(patch: &str) -> Vec<(String, String)> {
+  let mut files = Vec::new();
+  for section in patch.split("diff --git ") {
+    let section = section.trim();
+    if section.is_empty() {
+      continue;
+    }
+    let header = section.lines().next().unwrap_or("");
+    // header like: a/path b/path
+    let path = header
+      .split_whitespace()
+      .nth(1)
+      .map(|p| p.trim_start_matches("b/").replace('\\', "/"))
+      .filter(|p| !p.is_empty())
+      .unwrap_or_else(|| {
+        header
+          .split_whitespace()
+          .next()
+          .unwrap_or("")
+          .trim_start_matches("a/")
+          .replace('\\', "/")
+      });
+    if path.is_empty() {
+      continue;
+    }
+    files.push((path, format!("diff --git {section}")));
+  }
+  files
+}
+
+fn build_change_checklist(
+  staged_paths: &[&str],
+  numstat: &[git::GitNumstatEntry],
+  patch: &str,
+) -> String {
+  let mut numstat_map = std::collections::HashMap::<String, (u32, u32)>::new();
+  for e in numstat {
+    numstat_map.insert(e.path.replace('\\', "/"), (e.additions, e.deletions));
+  }
+  let file_patches = split_patch_by_file(patch);
+  let mut patch_map = std::collections::HashMap::<String, &str>::new();
+  for (p, body) in &file_patches {
+    patch_map.insert(p.clone(), body.as_str());
+  }
+
+  let mut lines = Vec::new();
+  for path in staged_paths {
+    let norm = path.replace('\\', "/");
+    let (add, del) = numstat_map.get(&norm).copied().unwrap_or((0, 0));
+    let symbols = patch_map
+      .get(&norm)
+      .map(|p| symbols_for_file_patch(p, 4))
+      .unwrap_or_default();
+    if symbols.is_empty() {
+      lines.push(format!("- {norm} (+{add}/-{del})"));
+    } else {
+      lines.push(format!("- {norm} (+{add}/-{del}) 符号: {}", symbols.join(", ")));
+    }
+  }
+  if lines.is_empty() {
+    String::new()
+  } else {
+    format!("改动清单：\n{}", lines.join("\n"))
+  }
+}
+
 fn preprocess_diff(patch: &str, max_chars_per_file: usize, total_max_chars: usize) -> String {
   if patch.is_empty() {
     return String::new();
@@ -402,6 +612,63 @@ fn resolve_ai_batch_path<'a>(raw: &str, known: &'a [String]) -> Option<&'a str> 
     .map(|p| p.as_str())
 }
 
+/// Recover only fully closed group objects from a truncated JSON response.
+/// This is diagnostic/preview data; callers must not treat it as complete AI output.
+fn extract_complete_ai_batch_groups(content: &str, known_paths: &[String]) -> Vec<AiBatchGroup> {
+  let Some(groups_start) = content.find('[') else { return Vec::new() };
+  let bytes = content.as_bytes();
+  let mut depth = 0usize;
+  let mut in_string = false;
+  let mut escaped = false;
+  let mut object_start = None;
+  let mut result = Vec::new();
+
+  for i in groups_start..bytes.len() {
+    let c = bytes[i] as char;
+    if escaped {
+      escaped = false;
+      continue;
+    }
+    if c == '\\' && in_string {
+      escaped = true;
+      continue;
+    }
+    if c == '"' {
+      in_string = !in_string;
+      continue;
+    }
+    if in_string { continue; }
+    match c {
+      '{' => {
+        if depth == 0 { object_start = Some(i); }
+        depth += 1;
+      }
+      '}' if depth > 0 => {
+        depth -= 1;
+        if depth == 0 {
+          if let Some(start) = object_start.take() {
+            if let Ok(value) = serde_json::from_slice::<Value>(&bytes[start..=i]) {
+              let name = value.get("name").and_then(Value::as_str).unwrap_or("").trim().to_string();
+              let message = value.get("message").and_then(Value::as_str).unwrap_or("").trim().to_string();
+              let Some(files_val) = value.get("files").and_then(Value::as_array) else { continue };
+              let files: Vec<String> = files_val.iter()
+                .filter_map(Value::as_str)
+                .filter_map(|raw| resolve_ai_batch_path(raw, known_paths).map(str::to_string))
+                .collect();
+              if !files.is_empty() {
+                result.push(AiBatchGroup { name, files, message });
+              }
+            }
+          }
+        }
+      }
+      ']' if depth == 0 => break,
+      _ => {}
+    }
+  }
+  result
+}
+
 fn parse_ai_batch_groups_json(content: &str, known_paths: &[String]) -> Result<Vec<AiBatchGroup>, String> {
   let cleaned = content.trim();
   let Some(start) = cleaned.find('{') else {
@@ -497,16 +764,34 @@ pub async fn git_generate_message(
     return;
   }
 
-  let diff_result = git::git_diff(&path, None, true).await;
+  let staged_paths: Vec<&str> = staged_files.iter().map(|f| f.path.as_str()).collect();
+  let multi_topic = is_likely_multi_topic(&staged_paths);
+
+  let path_for_diff = path.clone();
+  let (diff_result, numstat) = tokio::join!(
+    git::git_diff(&path_for_diff, None, true),
+    async {
+      git::git_diff_numstat(&path_for_diff, true)
+        .await
+        .unwrap_or_default()
+    }
+  );
+
   let (per_file_budget, total_budget) = if staged_files.len() <= 5 {
     (8000, 24000)
   } else {
     (3000, 12000)
   };
-  let diff_text = if diff_result.ok {
-    preprocess_diff(&diff_result.patch, per_file_budget, total_budget)
+  let raw_patch = if diff_result.ok {
+    diff_result.patch
   } else {
     String::new()
+  };
+  let checklist = build_change_checklist(&staged_paths, &numstat, &raw_patch);
+  let diff_text = if raw_patch.is_empty() {
+    String::new()
+  } else {
+    preprocess_diff(&raw_patch, per_file_budget, total_budget)
   };
 
   let file_list: Vec<String> = staged_files
@@ -515,50 +800,34 @@ pub async fn git_generate_message(
     .collect();
   let file_list_str = file_list.join("\n");
 
-  let recent_style = {
-    let log = git::git_log(&path, 8, None, false).await;
-    if log.ok && !log.entries.is_empty() {
-      let lines: Vec<String> = log
-        .entries
-        .iter()
-        .filter_map(|e| {
-          let subject = e.message.lines().next().unwrap_or("").trim();
-          if subject.is_empty() {
-            None
-          } else {
-            Some(format!("- {subject}"))
-          }
-        })
-        .collect();
-      if lines.is_empty() {
-        String::new()
-      } else {
-        format!(
-          "\n\n本仓库近期提交（只学语气与长度；禁止借用旧主题或措辞内容）：\n{}",
-          lines.join("\n")
-        )
-      }
-    } else {
-      String::new()
-    }
+  let multi_topic_hint = if multi_topic {
+    "\n- 暂存变更看起来跨多个功能/目录：只写覆盖面最大的主改动，或一句能概括共同主题的话；不要把无关功能硬拼进一条"
+  } else {
+    ""
+  };
+
+  let checklist_block = if checklist.is_empty() {
+    String::new()
+  } else {
+    format!("\n\n{checklist}")
   };
 
   let prompt = format!(
     "你是一个 Git 提交信息生成器。根据以下已暂存变更，生成一条中文提交信息。
 
 已暂存文件列表：
-{file_list_str}
+{file_list_str}{checklist_block}
 
 Diff 内容：
-{diff_text}{recent_style}
+{diff_text}
 
 输出格式（必须）：
 - 一句说完，结构为「[功能/模块] + [具体改了啥]」
+- 优先依据「改动清单」里的路径、+/- 与符号，再对照 Diff；禁止写清单/Diff 未出现的能力或原因
 - 功能/模块名只能从路径、符号、diff 上下文推断；推断不出就直接写更具体的改动，禁止瞎编功能名
-- 必须依据 Diff 里真实出现的改动写；禁止写 diff 未出现的能力、原因或效果
 - 中文口语即可（可用「修了」「加了」「改了」），但信息要准，不要空话
 - 默认一行、不超过72字；不要 feat:/fix: 前缀，不要引号或句号
-- 禁止「提升可维护性」「优化用户体验」等套话
+- 禁止「提升可维护性」「优化用户体验」等套话{multi_topic_hint}
 
 示例：
 登录态偶发丢失修好了
@@ -580,7 +849,11 @@ Git 面板 AI 注释改成按功能写清改动
   {
     Ok(content) => {
       let cleaned = content.trim().trim_matches('"').trim().to_string();
-      let _ = on_event.send(json!({ "type": "done", "data": { "message": cleaned } }));
+      let mut data = json!({ "message": cleaned });
+      if multi_topic {
+        data["warning"] = json!("变更可能跨多个功能，单条注释容易不准；建议用下方「AI 分批」拆开提交");
+      }
+      let _ = on_event.send(json!({ "type": "done", "data": data }));
     }
     Err(e) => {
       send_error(&format!("AI 请求失败: {e}"));
@@ -599,7 +872,7 @@ pub async fn git_ai_batch_groups(
   // Fail fast: do not wait for hung git child teardown (Windows can stall on drop).
   const DIFF_TIMEOUT: Duration = Duration::from_secs(8);
   // Abort if the model stream goes silent mid-response.
-  const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
+  const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(45);
   // Only sample file patches when the change set is small; otherwise paths+numstat are enough.
   const SAMPLE_PATCH_FILE_LIMIT: usize = 8;
   const SAMPLE_PATCH_MAX_FILES: usize = 4;
@@ -793,6 +1066,7 @@ Diff 内容：
 - 按功能模块或逻辑相关性分组，不要简单按目录分
 - 每组用简洁的中文名称命名（如「登录相关」「界面样式」）
 - 每组生成一条口语化 commit message：默认一行、不超过72字，像开发者随手备注（「修了」「加了」「改了」等）
+- 分组名称不超过20字，commit message 不超过72字；内容越短越好，避免解释过程
 - 避免公文腔和「提升可维护性」这类空泛套话；不要加 feat:/fix: 前缀
 - 每个文件只能出现在一个组中
 - 如果只有一个逻辑变更，分成一组即可
@@ -805,10 +1079,15 @@ Diff 内容：
 
   send_event("progress", json!({ "step": "请求模型…" }));
 
+  // File paths dominate the JSON response. A fixed 1200-token cap can cut the
+  // response in the middle of a files array for medium-sized change sets.
+  let max_tokens = (1200usize + source_files_len.saturating_mul(80)).min(4000);
   let body = json!({
     "model": model,
     "messages": [{ "role": "user", "content": prompt }],
-    "stream": true
+    "stream": true,
+    "temperature": 0,
+    "max_tokens": max_tokens
   });
 
   let resp = match ai::chat_completion_stream_raw(&endpoint, api_key.as_deref(), body).await {
@@ -825,6 +1104,9 @@ Diff 内容：
   let mut sse_buffer: Vec<u8> = Vec::new();
   let mut content = String::new();
   let mut got_delta = false;
+  let output_started_at = Instant::now();
+  let mut last_progress_at = Instant::now();
+  let mut last_progress_chars = 0usize;
 
   loop {
     let next = match timeout(STREAM_IDLE_TIMEOUT, stream.next()).await {
@@ -835,7 +1117,7 @@ Diff 内容：
         } else {
           format!("等待模型首包超时（{}s）", STREAM_IDLE_TIMEOUT.as_secs())
         };
-        send_event("error", json!({ "error": msg }));
+        send_event("error", json!({ "error": msg, "partialContent": content }));
         return;
       }
     };
@@ -843,7 +1125,7 @@ Diff 内容：
     let chunk = match chunk {
       Ok(c) => c,
       Err(e) => {
-        send_event("error", json!({ "error": e.to_string() }));
+        send_event("error", json!({ "error": e.to_string(), "partialContent": content }));
         return;
       }
     };
@@ -867,6 +1149,21 @@ Diff 内容：
           }
           content.push_str(delta);
           send_event("delta", json!({ "text": delta }));
+          if last_progress_at.elapsed() >= Duration::from_millis(500)
+            || content.chars().count().saturating_sub(last_progress_chars) >= 120
+          {
+            let chars = content.chars().count();
+            send_event(
+              "progress",
+              json!({
+                "step": format!("模型生成分组 · {} 字 · {}s", chars, output_started_at.elapsed().as_secs()),
+                "chars": chars,
+                "elapsedMs": output_started_at.elapsed().as_millis()
+              }),
+            );
+            last_progress_at = Instant::now();
+            last_progress_chars = chars;
+          }
         }
       }
     }
@@ -884,7 +1181,11 @@ Diff 内容：
       } else {
         format!("{err}。原文摘要：{preview}")
       };
-      send_event("error", json!({ "error": detail }));
+      send_event("error", json!({
+        "error": detail,
+        "partialContent": cleaned,
+        "partialGroups": extract_complete_ai_batch_groups(&cleaned, &known_paths)
+      }));
     }
   }
 }
@@ -917,5 +1218,68 @@ mod ai_batch_parse_tests {
     let known = vec!["src/a.ts".into()];
     let err = parse_ai_batch_groups_json("sorry I cannot", &known).unwrap_err();
     assert!(err.contains("JSON"));
+  }
+
+  #[test]
+  fn recovers_closed_groups_from_truncated_json() {
+    let known = vec!["src/a.ts".into(), "src/b.ts".into()];
+    let raw = r#"{"groups":[{"name":"src","files":["src/a.ts"],"message":"改了 a"},{"name":"src 2","files":["src/b.ts"#;
+    let groups = extract_complete_ai_batch_groups(raw, &known);
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].files, vec!["src/a.ts"]);
+  }
+}
+
+#[cfg(test)]
+mod commit_message_context_tests {
+  use super::*;
+
+  #[test]
+  fn topic_key_uses_first_two_segments() {
+    assert_eq!(change_topic_key("src/git/foo.ts"), "src/git");
+    assert_eq!(change_topic_key("README.md"), "README.md");
+  }
+
+  #[test]
+  fn multi_topic_needs_enough_distinct_dirs() {
+    let few = ["src/a/x.ts", "src/a/y.ts", "src/a/z.ts", "src/a/w.ts"];
+    assert!(!is_likely_multi_topic(&few));
+    let many = [
+      "src/git/a.ts",
+      "src/auth/b.ts",
+      "src/pay/c.ts",
+      "docs/readme.md",
+    ];
+    assert!(is_likely_multi_topic(&many));
+  }
+
+  #[test]
+  fn extracts_symbols_from_decl_and_hunk_context() {
+    let patch = r#"diff --git a/src/a.ts b/src/a.ts
+@@ -1,3 +1,5 @@ function oldName() {
++export function generateCommitMessage() {
++  return 1;
++}
+"#;
+    let symbols = extract_symbols_from_patch(patch, 8);
+    assert!(symbols.iter().any(|s| s == "generateCommitMessage"));
+    assert!(!symbols.iter().any(|s| s == "return"));
+  }
+
+  #[test]
+  fn checklist_includes_numstat_and_symbols() {
+    let paths = ["src/a.ts"];
+    let numstat = vec![git::GitNumstatEntry {
+      path: "src/a.ts".into(),
+      additions: 3,
+      deletions: 1,
+    }];
+    let patch = r#"diff --git a/src/a.ts b/src/a.ts
+@@ -1 +1 @@
++function helloWorld() {}
+"#;
+    let text = build_change_checklist(&paths, &numstat, patch);
+    assert!(text.contains("src/a.ts (+3/-1)"));
+    assert!(text.contains("helloWorld"));
   }
 }
