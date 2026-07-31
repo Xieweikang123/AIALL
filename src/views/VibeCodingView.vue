@@ -83,6 +83,7 @@
           :git-loading="gitLoading"
           :git-is-repo="gitIsRepo"
           :git-status-known="gitStatusKnown"
+          :git-head-commit="gitHeadCommit"
           :git-error="gitError"
           :git-secondary-hint="gitSecondaryHint"
           :git-branch="gitBranch"
@@ -92,6 +93,14 @@
           :git-selected-remote="gitSelectedRemote"
           :git-ahead="gitAhead"
           :git-behind="gitBehind"
+          :git-staged-count="gitStagedFiles.length"
+          :git-unstaged-count="gitUnstagedFiles.length"
+          :git-conflict-count="gitConflictedFiles.length"
+          :git-log-author-filter="gitLogAuthorFilter"
+          :git-log-branch-filter="gitLogBranchFilter"
+          :git-log-path-filter="gitLogPathFilter"
+          :git-log-since="gitLogSince"
+          :git-log-until="gitLogUntil"
           :git-stashes="gitStashes"
           :git-status="gitStatus"
           :git-staged-files="gitStagedFiles"
@@ -177,6 +186,8 @@
           @update:git-untracked-open="gitUntrackedOpen = $event"
           @update:git-log-open="gitLogOpen = $event"
           @update:git-log-all-branches="setGitLogAllBranches"
+          @update:git-log-branch-filter="setGitLogBranchFilter"
+          @update-git-log-filters="setGitLogFilters"
           @load-more-git-log="loadMoreGitLog"
           @search-git-log="searchGitLog"
           @update:git-ahead-commits-open="gitAheadCommitsOpen = $event"
@@ -542,6 +553,7 @@
           :git-loading="gitLoading"
           :git-is-repo="gitIsRepo"
           :git-status-known="gitStatusKnown"
+          :git-head-commit="gitHeadCommit"
           :git-error="gitError"
           :git-secondary-hint="gitSecondaryHint"
           :git-branch="gitBranch"
@@ -551,6 +563,14 @@
           :git-selected-remote="gitSelectedRemote"
           :git-ahead="gitAhead"
           :git-behind="gitBehind"
+          :git-staged-count="gitStagedFiles.length"
+          :git-unstaged-count="gitUnstagedFiles.length"
+          :git-conflict-count="gitConflictedFiles.length"
+          :git-log-author-filter="gitLogAuthorFilter"
+          :git-log-branch-filter="gitLogBranchFilter"
+          :git-log-path-filter="gitLogPathFilter"
+          :git-log-since="gitLogSince"
+          :git-log-until="gitLogUntil"
           :git-stashes="gitStashes"
           :git-status="gitStatus"
           :git-staged-files="gitStagedFiles"
@@ -636,6 +656,8 @@
           @update:git-untracked-open="gitUntrackedOpen = $event"
           @update:git-log-open="gitLogOpen = $event"
           @update:git-log-all-branches="setGitLogAllBranches"
+          @update:git-log-branch-filter="setGitLogBranchFilter"
+          @update-git-log-filters="setGitLogFilters"
           @load-more-git-log="loadMoreGitLog"
           @search-git-log="searchGitLog"
           @update:git-ahead-commits-open="gitAheadCommitsOpen = $event"
@@ -1287,7 +1309,7 @@ const openingProject = ref(false);
 function loadChatMode(): VibeChatMode {
   const saved = lsGet(CHAT_MODE_KEY);
   if (saved === "ask" || saved === "plan" || saved === "auto") return saved;
-  return "build";
+  return "auto";
 }
 
 const chatMode = ref<VibeChatMode>(loadChatMode());
@@ -1373,8 +1395,8 @@ const {
   gitPanelMode, projectPanelView, gitStatus, gitBranch, gitHeadCommit, gitIsRepo, gitStatusKnown, gitLoading, gitError,
   gitSecondaryHint,
   gitCommitMessage, gitCommitting, gitGenStep, gitLogEntries, gitLogOpen,
-  gitLogCount, gitLogSearchQuery, gitLogAllBranches, hasMoreGitLog, gitLogLoadingMore, gitLogSearchLoading, loadMoreGitLog,
-  searchGitLog, setGitLogAllBranches,
+  gitLogCount, gitLogSearchQuery, gitLogAllBranches, gitLogBranchFilter, gitLogAuthorFilter, gitLogPathFilter, gitLogSince, gitLogUntil, hasMoreGitLog, gitLogLoadingMore, gitLogSearchLoading, loadMoreGitLog,
+  searchGitLog, setGitLogAllBranches, setGitLogBranchFilter, setGitLogFilters,
   gitStagedOpen, gitUnstagedOpen, gitUntrackedOpen, expandedGitLogEntries, selectedGitFiles,
   gitStashSectionOpen, gitLocalChangesOpen,
   gitDiffLoadingKey, gitDiffContentCache, gitRemotes, gitSelectedRemote, gitTrackingBranch,
@@ -4080,6 +4102,7 @@ provide(vibeChatMessageContextKey, {
   resolveAgentResumeButtonLabel,
   isAssistantStalled,
   stopAgent,
+  pauseAgent,
   forceRecoverStalledRun,
   recoverableAgentErrorHint,
   agentAbortDisplayReason,

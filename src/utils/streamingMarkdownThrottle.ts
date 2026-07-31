@@ -71,7 +71,9 @@ export function createStreamingMarkdownThrottle(
       return;
     }
     if (timer) return;
-    const adaptiveMs = computeAdaptiveInterval(source);
+    // The caller-provided interval is the lower bound; complexity may only
+    // delay expensive parses further, never make a requested delay shorter.
+    const adaptiveMs = Math.max(intervalMs, computeAdaptiveInterval(source));
     timer = setTimeout(() => {
       timer = null;
       applyRenderText(pendingSource);

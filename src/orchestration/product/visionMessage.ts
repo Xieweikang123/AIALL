@@ -156,7 +156,7 @@ export function buildVisionUiLocateHint(anchorQuotes: string[]): string {
   return [
     "【截图 UI 定位·通用】",
     anchorHint,
-    "定位顺序：① grep 上述原文中最短可唯一识别的片段（≥4 字）或 grep kebab-case class（如 item-meta、panel-list）；② read_file 核对 template/DOM 是否与截图一致；③ 不一致则换下一个 grep 命中，勿猜组件文件名。",
+    "定位顺序：① grep 上述原文中最短可唯一识别的片段（≥4 字）或其他可定位的结构标识；② read_file 核对相关源码是否与截图一致；③ 不一致则换下一个 grep 命中，勿猜组件文件名。",
     "勿 grep 界面运行时拼接的数字（标签+计数在源码中不存在）；勿 grep 泛化状态符号（如 activeTab、selectedIndex）。",
     "search_files 仅按文件名匹配，中文 UI 文案须用 grep 搜内容；patch 的 old_string 必须来自 read_file 返回原文，禁止凭记忆构造 CSS/DOM。",
   ].join("");
@@ -206,7 +206,7 @@ export function buildVisionLocateSingleTurnRule(): string {
     "【附图·定位题·同轮读图定位】用户问截图中的控件/区域在代码哪里，未要求改代码。",
     "本轮允许 list_dir / read_file / grep / search_files。同轮须完成：",
     "① 查看附图，用一句点明截图对应哪块界面，并引用可见原文（用「」括起）；",
-    "② 立即 grep 该文案（≥2 字片段）或 kebab-case class；",
+    "② 立即 grep 该文案（≥2 字片段）或其他可定位的结构标识；",
     "③ 必要时 read_file 1 个相关文件核对 template/DOM 是否与截图一致；",
     "④ 给出最终中文答案：只答用户所指的控件/区域，勿展开未问及的整块面板；引用行号须来自 read_file 返回。",
     "若外框可见但内层像空白，须查 v-if/shimmer/透明文字后再作答，勿只断言显示某数字。",
@@ -221,7 +221,7 @@ export function buildVisionAccuracySingleTurnRule(): string {
     "本轮允许 list_dir / read_file / grep / search_files。同轮须完成：",
     "① 查看附图，用一句点明截图对应哪块界面，并引用可见原文（用「」括起）；",
     "② grep 可见文案或相关符号定位用户操作入口；",
-    "③ 沿调用链向下 trace：read 入口处理函数 → read API 客户端（若有）→ grep/read backend 路由或 middleware 中 prompt 构造处；",
+    "③ 沿实际调用关系 trace：read 相关处理函数、调用方/被调用方、条件分支与最终结果构造处；不要假设固定目录、框架或 backend/middleware 层；",
     "④ 基于已读代码给出最终中文答案，说明实际注入的上下文；禁止用「如果 prompt 包含…」猜测。",
     "禁止写「下一轮再确认」或「想让我深入看一下」；禁止输出 [图已理解] 暗号。",
   ].join("\n");
@@ -234,7 +234,7 @@ export function buildVisionStatePersistenceSingleTurnRule(): string {
     "本轮允许 list_dir / read_file / grep / search_files。同轮须完成：",
     "① 查看附图，引用可见 tab/标签原文（用「」括起）；",
     "② grep 该文案或 mode/composable 符号定位切换入口；",
-    "③ read 切换 handler，并 grep/read watch、collapse/expand 或 emit 副作用；",
+    "③ read 切换处理逻辑，并继续 grep/read 可能改变目标结果的条件、调用关系和状态/输出更新；watch、collapse/expand、emit 只是可能的实现形式；",
     "④ 基于已读代码给出最终中文答案，说明切换时是否主动改另一状态；禁止只断言两个 ref 独立。",
     "禁止写「下一轮再确认」；禁止在未 grep/read 的情况下引用路径或行号；禁止输出 [图已理解] 暗号。",
   ].join("\n");
@@ -378,7 +378,7 @@ export function buildVisionConsultativeLocateRetryHint(anchorQuotes: string[]): 
   const anchorHint =
     anchorQuotes.length > 0
       ? `读图已摘录：${anchorQuotes.slice(0, 3).map((q) => `「${q}」`).join("、")}。请 grep 其中 ≥4 字片段。`
-      : "请 grep 读图描述中的可见文案（≥4 字）或 kebab-case class。";
+      : "请 grep 读图描述中的可见文案（≥4 字）、结构标识或相关符号。";
   return [
     "【定位未完成】读图已完成，但尚未 grep/read 核对源码。",
     anchorHint,

@@ -220,8 +220,8 @@
 }
 
 .chat-panel {
-  background: #161b22;
-  border-left: 1px solid var(--border);
+  background: #111821;
+  border-left: 1px solid rgba(148, 163, 184, 0.14);
 }
 
 .resize-handle {
@@ -273,9 +273,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--border);
-  background: rgba(11, 18, 32, 0.82);
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  background: #101722;
   backdrop-filter: blur(12px);
   flex-shrink: 0;
   min-height: 48px;

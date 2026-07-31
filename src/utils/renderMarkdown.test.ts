@@ -37,6 +37,16 @@ describe("renderMarkdown", () => {
     expect(html.replace(/<[^>]+>/g, "")).toContain("const x = 1;");
   });
 
+  it("separates a fenced code block glued to a bold heading", () => {
+    const html = renderMarkdown(
+      "**第三阶段：数据转发（Bridge → 远程服务器） ```**\nBridgeEngine.SendToRemote()\n→ UdpRemote 直接发送给 192.168.1.100:44373\n```",
+    );
+    expect(html).toContain("<strong>第三阶段：数据转发（Bridge → 远程服务器）</strong>");
+    expect(html).toContain("<pre>");
+    expect(html).toContain("BridgeEngine.SendToRemote()");
+    expect(html).not.toContain("```**");
+  });
+
   it("does not add apply buttons to code blocks", () => {
     const html = renderMarkdown("```ts\nconst x = 1;\n```");
     expect(html).not.toContain("code-block-apply-btn");

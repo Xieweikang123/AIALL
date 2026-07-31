@@ -14,7 +14,7 @@
       </div>
       <h2 class="vibe-welcome-title">开始 Vibe Coding</h2>
       <p class="vibe-welcome-desc">
-        打开本地项目，让 Agent 探索代码、修改文件。支持 Ask / Plan / Build。
+        打开本地项目，让 Agent 自动理解需求、探索代码并完成修改。
       </p>
 
       <ol class="vibe-welcome-steps" aria-label="上手步骤">
@@ -36,7 +36,7 @@
           <span class="vibe-welcome-step-num">3</span>
           <div class="vibe-welcome-step-body">
             <strong>在助手中提问</strong>
-            <span>Ask 答疑 · Plan 方案 · Build 改码</span>
+            <span>Auto 自动选择合适的工作方式</span>
           </div>
         </li>
       </ol>

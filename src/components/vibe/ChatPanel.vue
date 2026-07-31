@@ -34,23 +34,6 @@
       @collapse-chat="$emit('collapse-chat')"
     />
 
-    <div v-if="chatSending && agentRunningStatus.trim()" class="chat-run-banner">
-      <AgentLiveStatusRail
-        :status-line="agentRunningStatus"
-        :stage-label="agentRunStageLabel"
-        :shimmer="true"
-        variant="banner"
-      />
-      <div class="chat-run-controls">
-        <button type="button" class="chat-run-control chat-run-control--pause" @click="$emit('pause-agent')">
-          暂停
-        </button>
-        <button type="button" class="chat-run-control chat-run-control--stop" @click="$emit('stop-agent')">
-          停止
-        </button>
-      </div>
-    </div>
-
     <div class="chat-scroll-wrap">
       <div ref="chatScrollRef" class="chat-scroll" @scroll="onScroll">
       <div v-if="switchingProject" class="chat-switching">
@@ -304,39 +287,6 @@
               >
                 Auto
               </button>
-              <button
-                type="button"
-                class="mode-btn"
-                :class="{ active: chatMode === 'ask' }"
-                :aria-pressed="chatMode === 'ask'"
-                :disabled="chatSending"
-                title="只读探索，自然语言答疑"
-                @click="$emit('update:chatMode', 'ask')"
-              >
-                Ask
-              </button>
-              <button
-                type="button"
-                class="mode-btn"
-                :class="{ active: chatMode === 'plan' }"
-                :aria-pressed="chatMode === 'plan'"
-                :disabled="chatSending"
-                title="先输出结构化修改方案，确认后再执行"
-                @click="$emit('update:chatMode', 'plan')"
-              >
-                Plan
-              </button>
-              <button
-                type="button"
-                class="mode-btn"
-                :class="{ active: chatMode === 'build' }"
-                :aria-pressed="chatMode === 'build'"
-                :disabled="chatSending"
-                title="直接探索并修改文件，无需先出方案"
-                @click="$emit('update:chatMode', 'build')"
-              >
-                Build
-              </button>
             </div>
             <button
               v-if="totalTokenUsage"
@@ -368,6 +318,10 @@
             </div>
           </div>
           <div class="chat-actions">
+            <template v-if="chatSending">
+              <button type="button" class="chat-run-control chat-run-control--pause" @click="$emit('pause-agent')">暂停</button>
+              <button type="button" class="chat-run-control chat-run-control--stop" @click="$emit('stop-agent')">停止</button>
+            </template>
             <button type="button" class="primary send-btn" :disabled="!canSendChat" @click="$emit('send-chat')">
               {{ chatSending ? "打断并发送" : "发送" }}
             </button>

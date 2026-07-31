@@ -8,6 +8,19 @@
   min-height: 0;
 }
 
+/* Keep the chat surface calm and layered: the conversation remains primary. */
+.chat-panel {
+  background: #111821;
+}
+
+.chat-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: rgba(30, 41, 59, 0.08);
+}
+
 .chat-panel.drag-over {
   box-shadow: inset 0 0 0 2px rgba(88, 166, 255, 0.45);
   background: rgba(31, 111, 235, 0.06);
@@ -151,9 +164,9 @@
   justify-content: center;
   flex-shrink: 0;
   border-radius: 8px;
-  background: #21262d;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #c9d1d9;
+  background: #1b2633;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  color: #a9c7e8;
 }
 
 .chat-head-text {
@@ -249,7 +262,7 @@
   overflow-y: auto;
   overflow-x: clip;
   scroll-padding-bottom: 12px;
-  padding: 20px 18px;
+  padding: 24px clamp(18px, 4vw, 56px) 32px;
   position: relative;
 }
 
@@ -396,7 +409,10 @@
 
 .chat-composer {
   flex-shrink: 0;
-  padding: 0 12px 12px;
+  padding: 10px clamp(14px, 3vw, 42px) 16px;
+  border-top: 1px solid rgba(148, 163, 184, 0.1);
+  background: rgba(15, 23, 33, 0.92);
+  box-shadow: 0 -12px 28px rgba(5, 10, 16, 0.18);
 }
 
 .pending-queue {
@@ -482,17 +498,18 @@
   align-items: stretch;
   gap: 8px;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  background: rgba(22, 27, 34, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  background: #17212d;
   backdrop-filter: blur(8px);
   transition: border-color 0.15s, background 0.15s;
   min-height: 56px;
 }
 
 .chat-input-box.focused {
-  border-color: rgba(88, 166, 255, 0.5);
-  background: rgba(22, 27, 34, 1);
+  border-color: rgba(96, 165, 250, 0.72);
+  background: #192534;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
 }
 
 .chat-bottom {
@@ -532,53 +549,6 @@
   min-height: 0;
   min-width: 0;
   margin-bottom: 4px;
-}
-
-.chat-run-banner {
-  flex-shrink: 0;
-  margin: 0 12px 4px;
-  border: 1px solid rgba(88, 166, 255, 0.18);
-  border-radius: 8px;
-  background: rgba(88, 166, 255, 0.05);
-  overflow: hidden;
-}
-
-.chat-run-banner :deep(.agent-live-status--banner) {
-  margin: 0;
-  border: 0;
-  background: transparent;
-}
-
-.chat-run-controls {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-  padding: 0 10px 7px;
-}
-
-.chat-run-control {
-  padding: 3px 9px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(201, 209, 217, 0.85);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.chat-run-control:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.95);
-}
-
-.chat-run-control--pause {
-  color: rgba(255, 213, 79, 0.92);
-  border-color: rgba(255, 213, 79, 0.22);
-}
-
-.chat-run-control--stop {
-  color: rgba(248, 81, 73, 0.92);
-  border-color: rgba(248, 81, 73, 0.22);
 }
 
 .chat-running-status {
@@ -685,6 +655,27 @@
 .chat-actions {
   display: flex;
   gap: 6px;
+}
+
+.chat-actions .chat-run-control {
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.chat-actions .chat-run-control:hover {
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.chat-actions .chat-run-control--pause {
+  color: rgba(216, 190, 142, 0.9);
+}
+
+.chat-actions .chat-run-control--stop {
+  color: rgba(208, 132, 132, 0.9);
 }
 
 .resume-bottom-btn {

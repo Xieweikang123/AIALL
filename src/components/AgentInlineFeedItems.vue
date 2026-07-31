@@ -3,7 +3,10 @@
     <div
       v-if="item.kind === 'text' && item.variant === 'narrative' && item.text.trim()"
       class="stream-narrative"
-      :class="{ 'stream-narrative--nested': nested }"
+      :class="{
+        'stream-narrative--nested': nested,
+        'stream-narrative--action-summary': isActionSummary(item.text),
+      }"
     >
       <ChatMarkdown
         class="inline-feed-markdown inline-feed-markdown--narrative"
@@ -286,6 +289,10 @@ function narrativeMarkdown(text: string) {
   return sanitizeFeedThoughtText(text);
 }
 
+function isActionSummary(text: string): boolean {
+  return text.trim().startsWith("行动摘要 ·");
+}
+
 function answerMarkdown(text: string) {
   return enrichPlanMarkdownForDisplay(text, {
     whileStreaming: Boolean(props.isRunning),
@@ -353,8 +360,22 @@ function toggleCollapsed(key: string) {
 }
 
 .stream-narrative {
-  padding: 0 0 4px;
+  padding: 0 0 6px;
   position: relative;
+}
+
+.stream-narrative--action-summary {
+  margin: 2px 0 4px 8px;
+  padding: 5px 9px;
+  border-left: 2px solid rgba(107, 181, 160, 0.55);
+  border-radius: 0 6px 6px 0;
+  background: rgba(107, 181, 160, 0.06);
+}
+
+.stream-narrative--action-summary .inline-feed-markdown--narrative :deep(.msg-markdown) {
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(183, 204, 198, 0.84);
 }
 
 .stream-process-collapsed-wrap {

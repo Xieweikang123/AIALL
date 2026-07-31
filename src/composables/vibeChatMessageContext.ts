@@ -49,6 +49,7 @@ export interface VibeChatMessageContext {
   resolveAgentResumeButtonLabel: (msg: VibeChatMessageItem) => string;
   isAssistantStalled: (msg: VibeChatMessageItem) => boolean;
   stopAgent: () => void;
+  pauseAgent: () => void;
   forceRecoverStalledRun: (messageId: string) => void;
   recoverableAgentErrorHint: (msg: VibeChatMessageItem, reason: string) => string;
   agentAbortDisplayReason: (msg: VibeChatMessageItem) => string;

@@ -174,6 +174,14 @@ export function normalizeGluedLatinCjkBoundary(source: string): string {
   return source.replace(/([A-Za-z0-9)])([:：])(?=[\u4e00-\u9fff])/g, "$1$2\n\n");
 }
 
+/** Separate a fenced code block accidentally glued to a bold heading. */
+export function normalizeGluedFencedCodeBlocks(source: string): string {
+  return source.replace(
+    /(\*\*[^`\n]+?)\s+(```[A-Za-z0-9_-]*)\s*\*\*/g,
+    "$1**\n\n$2",
+  );
+}
+
 /**
  * Strip trailing empty block-level elements (hr, empty h1-h6, empty p) that render as visible
  * but content-free regions. LLM output often ends with stylistic separators like `---` (→ &lt;hr&gt;)
@@ -203,6 +211,7 @@ function prepareMarkdownSource(text: string): string {
     );
   }
   source = normalizeGluedLatinCjkBoundary(source);
+  source = normalizeGluedFencedCodeBlocks(source);
   source = normalizeAtxHeadings(source);
   source = normalizeStrayLineEscapes(source);
   source = normalizeListBlockBreaks(source);

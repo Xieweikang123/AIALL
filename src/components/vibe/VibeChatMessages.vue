@@ -123,10 +123,11 @@
         </button>
       </div>
       <div
-        v-if="m.role === 'assistant' && ctx.isAgentRunning(m) && !ctx.hasAgentActivity(m)"
-        class="msg-live-status-wrap"
+        v-if="m.role === 'assistant' && ctx.isAgentRunning(m)"
+        class="msg-live-toolbar"
       >
         <AgentLiveStatusRail
+          v-if="!ctx.hasAgentActivity(m)"
           :status-line="agentRunningLabel(m)"
           :waiting-model="isMessageWaitingModel(m)"
           shimmer
@@ -552,3 +553,51 @@ function shortDiffPath(path: string): string {
   return parts.slice(-2).join("/");
 }
 </script>
+
+<style scoped>
+.msg-live-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  margin: 0 0 4px;
+  padding: 0 2px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.msg-live-toolbar :deep(.agent-live-status--banner) {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+}
+
+.msg-live-toolbar :deep(.agent-live-status-row) {
+  align-items: center;
+  padding: 4px 0;
+}
+
+.msg-live-toolbar :deep(.agent-live-status-dot) {
+  width: 6px;
+  height: 6px;
+  margin-top: 0;
+  background: #6bb5a0;
+  box-shadow: 0 0 6px rgba(107, 181, 160, 0.28);
+}
+
+.msg-live-toolbar :deep(.agent-live-status-line) {
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.msg-live-toolbar :deep(.agent-live-status-phase) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(203, 211, 220, 0.84);
+}
+
+</style>
