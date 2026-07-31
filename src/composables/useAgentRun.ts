@@ -758,6 +758,11 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     interruptAgentRun({ reason: "已手动停止" });
   }
 
+  function pauseAgent() {
+    debugLog(`[pause-agent] called`);
+    interruptAgentRun({ reason: "已暂停，可继续" });
+  }
+
   function tryResumeHmrInterruptedRun(): void {
     if (runManager.size() > 0 || chatSending.value) return;
     if (!configReady.value || !projectOpened.value) return;
@@ -1462,6 +1467,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     runAutoBugFixAgent,
     resumeAgentRun,
     stopAgent,
+    pauseAgent,
     interruptAgentRun,
     tryResumeHmrInterruptedRun,
     agentAbortDisplayReason,
