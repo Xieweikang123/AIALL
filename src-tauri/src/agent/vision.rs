@@ -10,123 +10,131 @@ pub const VISION_ANCHOR_PREFGREP_MAX_MATCHES: usize = 40;
 
 // ── Lazily compiled regex patterns ──
 static UI_IMAGE_QUESTION_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
-  Regex::new(r"(?i)截图|图片|界面|面板|哪块|哪里|看到的|发图|粘贴|screen|screenshot|ui").unwrap()
+    Regex::new(r"(?i)截图|图片|界面|面板|哪块|哪里|看到的|发图|粘贴|screen|screenshot|ui").unwrap()
 });
 
-pub static UI_CLICK_FOCUS_INTERACTION_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
-  Regex::new(r"(?i)任何位置|任意位置|点到哪|点哪里|点击.{0,8}(输入|聚焦|focus)|都能输入|都能聚焦|点.{0,6}空白|点不到|没反应|聚焦输入").unwrap()
-});
+pub static UI_CLICK_FOCUS_INTERACTION_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(
+    || {
+        Regex::new(r"(?i)任何位置|任意位置|点到哪|点哪里|点击.{0,8}(输入|聚焦|focus)|都能输入|都能聚焦|点.{0,6}空白|点不到|没反应|聚焦输入").unwrap()
+    },
+);
 
 pub static UI_REQUIREMENT_SPEC_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
-  Regex::new(r"(?i)我要的效果|我期望|期望效果|应该是|需要能|要能|得能|想要的效果").unwrap()
+    Regex::new(r"(?i)我要的效果|我期望|期望效果|应该是|需要能|要能|得能|想要的效果").unwrap()
 });
 
 static UI_LAYOUT_FEEDBACK_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
-  Regex::new(r"(?i)挤|贴|挨|重叠|太紧|间距|spacing|overlap|cramped|你看|看一下|一块|不好看|丑|效果|太小|太大|偏小|偏大|比例|不协调").unwrap()
+    Regex::new(r"(?i)挤|贴|挨|重叠|太紧|间距|spacing|overlap|cramped|你看|看一下|一块|不好看|丑|效果|太小|太大|偏小|偏大|比例|不协调").unwrap()
 });
 
 pub static UI_POSITIONING_BUG_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
-  Regex::new(r"(?i)跑(?:到|去|别的)|错位|位置不对|飘到|歪了|不在.{0,8}旁边|离.{0,8}远|跑到.{0,12}(底|顶|角)").unwrap()
+    Regex::new(r"(?i)跑(?:到|去|别的)|错位|位置不对|飘到|歪了|不在.{0,8}旁边|离.{0,8}远|跑到.{0,12}(底|顶|角)").unwrap()
 });
 
 static VISIBLE_ANCHOR_QUOTE_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
-  Regex::new(r#"[「『"']([^」』"']{3,})[」』"']|占位符[^，。；\n]{0,16}[「『"']([^」』"']{3,})[」』"']?|(?:标签|按钮|标题|Tab)[:：]?\s*[「『"']([^」』"']{3,})[」』"']?"#).unwrap()
+    Regex::new(r#"[「『"']([^」』"']{3,})[」』"']|占位符[^，。；\n]{0,16}[「『"']([^」』"']{3,})[」』"']?|(?:标签|按钮|标题|Tab)[:：]?\s*[「『"']([^」』"']{3,})[」』"']?"#).unwrap()
 });
 
-pub static VISION_INTERNAL_MARKER_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
-  Regex::new(r"\s*\[图已理解\]\s*").unwrap()
-});
+pub static VISION_INTERNAL_MARKER_RE: std::sync::LazyLock<Regex> =
+    std::sync::LazyLock::new(|| Regex::new(r"\s*\[图已理解\]\s*").unwrap());
 
 static ANCHOR_TO_REGION_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
-  Regex::new(r"(判断|可判断|可推断|据此|由此|说明|对应|属于|定位为|应是|这是|应该是|像是|表明|可定位)[^。\n]{0,48}(助手|聊天|输入框|面板|模块|区域|底栏|侧栏|编辑器|对话|占位|工具栏|列表)").unwrap()
+    Regex::new(r"(判断|可判断|可推断|据此|由此|说明|对应|属于|定位为|应是|这是|应该是|像是|表明|可定位)[^。\n]{0,48}(助手|聊天|输入框|面板|模块|区域|底栏|侧栏|编辑器|对话|占位|工具栏|列表)").unwrap()
 });
 
 static UI_REGION_STATEMENT_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
-  Regex::new(r"(这是|这个是|这里|这个区域|这块|这部分|这边|此区域|该区域|对应的是|呈现的是|该面板|该对话框|该弹出层|该窗口|该弹窗|该界面|此处)").unwrap()
+    Regex::new(r"(这是|这个是|这里|这个区域|这块|这部分|这边|此区域|该区域|对应的是|呈现的是|该面板|该对话框|该弹出层|该窗口|该弹窗|该界面|此处)").unwrap()
 });
 
 // ── Helper functions ──
 
 pub fn sanitize_image_data_urls(urls: &[String]) -> Vec<String> {
-  urls.iter().filter(|u| u.starts_with("data:image/")).cloned().collect()
+    urls.iter()
+        .filter(|u| u.starts_with("data:image/"))
+        .cloned()
+        .collect()
 }
 
 pub fn has_ui_image_keywords(text: &str) -> bool {
-  UI_IMAGE_QUESTION_RE.is_match(text)
+    UI_IMAGE_QUESTION_RE.is_match(text)
 }
 
 pub fn is_ui_positioning_bug_prompt(text: &str) -> bool {
-  UI_POSITIONING_BUG_RE.is_match(text)
+    UI_POSITIONING_BUG_RE.is_match(text)
 }
 
 pub fn suggests_embedded_layout_misread(text: &str) -> bool {
-  let has_layout = UI_LAYOUT_FEEDBACK_RE.is_match(text);
-  let is_positioning = UI_POSITIONING_BUG_RE.is_match(text);
-  let ambiguous = ANCHOR_TO_REGION_RE.is_match(text) || UI_REGION_STATEMENT_RE.is_match(text);
-  has_layout || is_positioning || ambiguous
+    let has_layout = UI_LAYOUT_FEEDBACK_RE.is_match(text);
+    let is_positioning = UI_POSITIONING_BUG_RE.is_match(text);
+    let ambiguous = ANCHOR_TO_REGION_RE.is_match(text) || UI_REGION_STATEMENT_RE.is_match(text);
+    has_layout || is_positioning || ambiguous
 }
 
 /// Extract quoted visible strings from a vision-first-turn description
 pub fn extract_visible_anchor_quotes(text: &str) -> Vec<String> {
-  let mut quotes: Vec<String> = Vec::new();
-  for cap in VISIBLE_ANCHOR_QUOTE_RE.captures_iter(text) {
-    for i in 1..=3 {
-      if let Some(q) = cap.get(i) {
-        let trimmed = q.as_str().trim().to_string();
-        if trimmed.len() >= 3 && !quotes.contains(&trimmed) {
-          quotes.push(trimmed);
+    let mut quotes: Vec<String> = Vec::new();
+    for cap in VISIBLE_ANCHOR_QUOTE_RE.captures_iter(text) {
+        for i in 1..=3 {
+            if let Some(q) = cap.get(i) {
+                let trimmed = q.as_str().trim().to_string();
+                if trimmed.len() >= 3 && !quotes.contains(&trimmed) {
+                    quotes.push(trimmed);
+                }
+            }
         }
-      }
     }
-  }
-  quotes
+    quotes
 }
 
 /// Build model identity hint
 pub fn build_model_identity_hint(model: &str) -> String {
-  let name = if model.trim().is_empty() { "（未指定）" } else { model.trim() };
-  format!(
-    "当前接入的 API 模型 ID：{name}。\
+    let name = if model.trim().is_empty() {
+        "（未指定）"
+    } else {
+        model.trim()
+    };
+    format!(
+        "当前接入的 API 模型 ID：{name}。\
     若用户问「你是什么模型/哪个模型」：如实回答上述模型 ID，不要自称 Claude、GPT、Gemini 等。\
     不要编造 Anthropic、OpenAI 等厂商或训练信息。"
-  )
+    )
 }
 
 /// Build click-to-focus interaction hint
 pub fn build_click_focus_interaction_hint() -> &'static str {
-  "附了截图询问点哪里能输入/聚焦：诊断（勿预设修法）——先识别图中可编辑区域，\
+    "附了截图询问点哪里能输入/聚焦：诊断（勿预设修法）——先识别图中可编辑区域，\
   核对父容器与内层可编辑节点的命中区是否一致；若用户说「任何位置」，通常指该可编辑区域内部，而非全屏任意坐标。"
 }
 
 /// Build floating control positioning hint
 pub fn build_floating_control_positioning_hint() -> &'static str {
-  "附了截图报告控件跑偏/错位：诊断（勿预设修法）——先区分「浮层/绝对定位错位」与「同容器流式布局拥挤」。\
+    "附了截图报告控件跑偏/错位：诊断（勿预设修法）——先区分「浮层/绝对定位错位」与「同容器流式布局拥挤」。\
   用结构线索检索（定位属性、portal/Teleport、浮层相关 class），并核对父级定位上下文与 overflow 裁剪；\
   证据不足时并列假设，勿只认单一修法。"
 }
 
 /// Build vision grep anchor hint — first turn
 pub fn build_vision_grep_anchor_hint() -> &'static str {
-  "附了截图但尚未进行任何 grep 或 read_file。\
+    "附了截图但尚未进行任何 grep 或 read_file。\
   先用 grep 确认截图定位：从用户描述中提取引用的可见文本（按钮/占位符/标签），\
   在源码中 grep 这些字符串以确定对应哪个组件/区域。"
 }
 
 /// Build vision UI locate hint
 pub fn build_vision_ui_locate_hint() -> &'static str {
-  "附了截图询问界面元素/控件位置。先用 grep 定位截图引用文本对应的 Vue 文件，\
+    "附了截图询问界面元素/控件位置。先用 grep 定位截图引用文本对应的 Vue 文件，\
   然后 read_file 理解布局结构。定位到后给出确切坐标。"
 }
 
 /// Build vision build continue hint
 pub fn build_vision_build_continue_hint() -> &'static str {
-  "附了截图要求实现/修改某界面：先用 read_file 理解相关组件，\
+    "附了截图要求实现/修改某界面：先用 read_file 理解相关组件，\
   确认涉及的文件和布局结构后再修改。"
 }
 
 /// Build vision first turn rule — must view image before tools (parity with TS).
 pub fn build_vision_first_turn_rule() -> &'static str {
-  "【附图·首轮必读图】你必须先仔细查看附带图片，用中文描述所见：\n\
+    "【附图·首轮必读图】你必须先仔细查看附带图片，用中文描述所见：\n\
 - 先说明截图对应应用中的哪一块（模块/面板/区域）；画面若只裁到局部，也要根据占位符、按钮、标签等可见文案推断归属；\n\
 - 须引用图中可辨识的占位符或标签原文（用「」括起），并写明「据此可判断这是 …」；\n\
 - 再补充控件类型、布局关系；若用户反馈拥挤/重叠/不好看，须点名哪两个（或哪组）元素及其关系；\n\
@@ -141,65 +149,68 @@ pub fn build_vision_first_turn_rule() -> &'static str {
 
 /// Check if text is an adequate vision first-turn description
 pub fn is_adequate_vision_first_turn_description(text: &str) -> bool {
-  let stripped = VISION_INTERNAL_MARKER_RE.replace_all(text, "");
-  stripped.trim().len() >= VISION_FIRST_TURN_MIN_DESCRIPTION_CHARS
+    let stripped = VISION_INTERNAL_MARKER_RE.replace_all(text, "");
+    stripped.trim().len() >= VISION_FIRST_TURN_MIN_DESCRIPTION_CHARS
 }
 
 /// Build vision task text combining prompt and image count
 pub fn build_vision_task_text(prompt: &str, image_count: usize) -> String {
-  if image_count == 0 {
-    return prompt.to_string();
-  }
-  format!("[用户附了 {image_count} 张截图]\n{}", prompt)
+    if image_count == 0 {
+        return prompt.to_string();
+    }
+    format!("[用户附了 {image_count} 张截图]\n{}", prompt)
 }
 
 /// Build OpenAI-compatible multimodal user content (string or parts array).
 pub fn build_vision_user_content(prompt: &str, image_data_urls: &[String]) -> serde_json::Value {
-  let urls = sanitize_image_data_urls(image_data_urls);
-  if urls.is_empty() {
-    return serde_json::Value::String(prompt.to_string());
-  }
-  let mut parts = vec![serde_json::json!({
-    "type": "text",
-    "text": build_vision_task_text(prompt, urls.len())
-  })];
-  for url in urls {
-    parts.push(serde_json::json!({
-      "type": "image_url",
-      "image_url": { "url": url }
-    }));
-  }
-  serde_json::Value::Array(parts)
+    let urls = sanitize_image_data_urls(image_data_urls);
+    if urls.is_empty() {
+        return serde_json::Value::String(prompt.to_string());
+    }
+    let mut parts = vec![serde_json::json!({
+      "type": "text",
+      "text": build_vision_task_text(prompt, urls.len())
+    })];
+    for url in urls {
+        parts.push(serde_json::json!({
+          "type": "image_url",
+          "image_url": { "url": url }
+        }));
+    }
+    serde_json::Value::Array(parts)
 }
 
 /// Select vision anchor grep patterns from quotes (delegates to vision_pregrep).
 pub fn select_vision_anchor_grep_patterns(anchor_quotes: &[String]) -> Vec<String> {
-  super::vision_pregrep::select_vision_anchor_grep_patterns(anchor_quotes)
+    super::vision_pregrep::select_vision_anchor_grep_patterns(anchor_quotes)
 }
 
 /// Filter runtime-visible text patterns (labels with dynamic suffixes) — aligned with Node visionAnchorPrefgrep.ts
 pub fn is_runtime_visible_text_grep_pattern(pattern: &str) -> bool {
-  let p = pattern.trim();
-  if p.is_empty() {
-    return false;
-  }
-  if Regex::new(r"^\d+$").map(|re| re.is_match(p)).unwrap_or(false) {
-    return true;
-  }
-  if Regex::new(r"^[A-Za-z][\w.-]*\s+\d+$")
-    .map(|re| re.is_match(p))
-    .unwrap_or(false)
-  {
-    return true;
-  }
-  Regex::new(r"^[\u{4e00}-\u{9fff}]+\s+\d+$")
-    .map(|re| re.is_match(p))
-    .unwrap_or(false)
+    let p = pattern.trim();
+    if p.is_empty() {
+        return false;
+    }
+    if Regex::new(r"^\d+$")
+        .map(|re| re.is_match(p))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    if Regex::new(r"^[A-Za-z][\w.-]*\s+\d+$")
+        .map(|re| re.is_match(p))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    Regex::new(r"^[\u{4e00}-\u{9fff}]+\s+\d+$")
+        .map(|re| re.is_match(p))
+        .unwrap_or(false)
 }
 
 /// Build vision locate single-turn rule
 pub fn build_vision_locate_single_turn_rule() -> &'static str {
-  "【定位报告格式】
+    "【定位报告格式】
   得出确切结论后，按以下格式输出：
   ```
   ## 定位结果
@@ -211,7 +222,7 @@ pub fn build_vision_locate_single_turn_rule() -> &'static str {
 
 /// Build vision accuracy single-turn rule
 pub fn build_vision_accuracy_single_turn_rule() -> &'static str {
-  "【准确度审查】附了截图要求判断准确度：
+    "【准确度审查】附了截图要求判断准确度：
   1. 先确认截图区域对应哪个组件/模块
   2. 再比对用户断言与代码实际逻辑
   3. 给出正反证据"
@@ -219,7 +230,7 @@ pub fn build_vision_accuracy_single_turn_rule() -> &'static str {
 
 /// Build consultative UI appearance hint
 pub fn build_consultative_ui_appearance_hint() -> &'static str {
-  "附了截图咨询 UI 外观/效果：
+    "附了截图咨询 UI 外观/效果：
   1. 先 grep 截图引文定位组件
   2. 再 read_file 读 vue/css/scss 确认实际样式
   3. 不要仅凭截图视觉印象回答，必须引用源码证据"
@@ -227,26 +238,27 @@ pub fn build_consultative_ui_appearance_hint() -> &'static str {
 
 /// Should bypass vision first turn
 pub fn should_bypass_vision_first_turn(text: &str) -> bool {
-  UI_POSITIONING_BUG_RE.is_match(text)
-    || UI_CLICK_FOCUS_INTERACTION_RE.is_match(text)
-    || UI_REQUIREMENT_SPEC_RE.is_match(text)
+    UI_POSITIONING_BUG_RE.is_match(text)
+        || UI_CLICK_FOCUS_INTERACTION_RE.is_match(text)
+        || UI_REQUIREMENT_SPEC_RE.is_match(text)
 }
 
 /// Mentions control proportion imbalance
 pub fn mentions_control_proportion_imbalance(text: &str) -> bool {
-  let inner = Regex::new(r"(?i)内边距|padding|内部|里面|内容区|内容区域|太小|太挤|太窄").unwrap();
-  let outer = Regex::new(r"(?i)外边距|margin|外部|外面|四周|边距|太大|太宽|太空").unwrap();
-  let container = Regex::new(r"(?i)整体|容器|外层|wrap|外面一圈|外圈|边框|border|背景色|底色").unwrap();
-  (inner.is_match(text) || outer.is_match(text)) && container.is_match(text)
+    let inner = Regex::new(r"(?i)内边距|padding|内部|里面|内容区|内容区域|太小|太挤|太窄").unwrap();
+    let outer = Regex::new(r"(?i)外边距|margin|外部|外面|四周|边距|太大|太宽|太空").unwrap();
+    let container =
+        Regex::new(r"(?i)整体|容器|外层|wrap|外面一圈|外圈|边框|border|背景色|底色").unwrap();
+    (inner.is_match(text) || outer.is_match(text)) && container.is_match(text)
 }
 
 /// Suggests visible shell empty inner (wrong element selected)
 pub fn suggests_visible_shell_empty_inner(text: &str) -> bool {
-  let trimmed = text.trim();
-  if trimmed.is_empty() {
-    return false;
-  }
-  if Regex::new(
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if Regex::new(
     r"(?i)(?:外框|圆|容器|按钮|徽标|徽章|圆角).{0,24}(?:可见|在渲染|出现).{0,24}(?:箭头|图标|文字|符号|内容|数字).{0,16}(?:不可见|看不到|空白|被裁|没有|无明显)|(?:箭头|图标|文字|符号|数字|内容).{0,16}(?:不可见|看不到|空白|没有|无明显).{0,24}(?:外框|圆|容器|按钮|徽标|徽章|圆角)",
   )
   .map(|re| re.is_match(trimmed))
@@ -254,7 +266,7 @@ pub fn suggests_visible_shell_empty_inner(text: &str) -> bool {
   {
     return true;
   }
-  Regex::new(
+    Regex::new(
     r"(?i)无明显(?:内容|文字)|无文字|像.{0,16}(?:空|占位|toggle|开关)|(?:空洞|空白).{0,12}(?:控件|圆角|矩形)",
   )
   .map(|re| re.is_match(trimmed))
@@ -263,14 +275,17 @@ pub fn suggests_visible_shell_empty_inner(text: &str) -> bool {
 
 /// Final answer claims display without reconciling vision-noted empty shell.
 pub fn is_unreconciled_empty_shell_answer(vision_text: &str, reply_text: &str) -> bool {
-  if !suggests_visible_shell_empty_inner(vision_text) {
-    return false;
-  }
-  let reply = VISION_INTERNAL_MARKER_RE.replace_all(reply_text, "").trim().to_string();
-  if reply.is_empty() {
-    return false;
-  }
-  if Regex::new(
+    if !suggests_visible_shell_empty_inner(vision_text) {
+        return false;
+    }
+    let reply = VISION_INTERNAL_MARKER_RE
+        .replace_all(reply_text, "")
+        .trim()
+        .to_string();
+    if reply.is_empty() {
+        return false;
+    }
+    if Regex::new(
     r"(?i)v-if|v-show|shimmer|透明|渐变|background-clip|text-fill|条件.{0,8}(?:不|未)|为\s*0|不渲染|看不见|观感",
   )
   .map(|re| re.is_match(&reply))
@@ -278,9 +293,9 @@ pub fn is_unreconciled_empty_shell_answer(vision_text: &str, reply_text: &str) -
   {
     return false;
   }
-  Regex::new(r"(?i)显示.{0,12}(?:数字|数量|条数|N|\d)|徽标|badge|用于显示")
-    .map(|re| re.is_match(&reply))
-    .unwrap_or(false)
+    Regex::new(r"(?i)显示.{0,12}(?:数字|数量|条数|N|\d)|徽标|badge|用于显示")
+        .map(|re| re.is_match(&reply))
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -727,12 +742,16 @@ mod tests {
     // ── mentions_control_proportion_imbalance ──
     #[test]
     fn test_mentions_control_proportion_imbalance_inner_outer() {
-        assert!(mentions_control_proportion_imbalance("内边距太小，整体太小"));
+        assert!(mentions_control_proportion_imbalance(
+            "内边距太小，整体太小"
+        ));
     }
 
     #[test]
     fn test_mentions_control_proportion_imbalance_margin() {
-        assert!(mentions_control_proportion_imbalance("外边距太大，容器太宽"));
+        assert!(mentions_control_proportion_imbalance(
+            "外边距太大，容器太宽"
+        ));
     }
 
     #[test]
@@ -747,7 +766,9 @@ mod tests {
 
     #[test]
     fn test_mentions_control_proportion_imbalance_padding_and_container() {
-        assert!(mentions_control_proportion_imbalance("padding 太大，整体太宽"));
+        assert!(mentions_control_proportion_imbalance(
+            "padding 太大，整体太宽"
+        ));
     }
 
     // ── suggests_visible_shell_empty_inner ──
