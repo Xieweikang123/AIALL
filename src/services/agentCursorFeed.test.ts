@@ -212,7 +212,7 @@ describe("agentCursorFeed", () => {
     expect(feed.some((item) => item.kind === "status")).toBe(false);
   });
 
-  it("shouldSuppressFeedPlanningStatus covers streaming, narrative and tool cases", () => {
+  it("shouldSuppressFeedPlanningStatus covers streaming and answer preview", () => {
     expect(
       shouldSuppressFeedPlanningStatus({
         agentPhase: "streaming_model",
@@ -222,24 +222,23 @@ describe("agentCursorFeed", () => {
     expect(
       shouldSuppressFeedPlanningStatus({
         agentPhase: "waiting_model",
-        narrativeText: "已有正文",
+        answerPreview: "已有正文",
         streaming: false,
       }),
     ).toBe(true);
     expect(
       shouldSuppressFeedPlanningStatus({
         agentPhase: "waiting_model",
-        narrativeText: "",
+        answerPreview: "",
         streaming: false,
       }),
     ).toBe(false);
     expect(
       shouldSuppressFeedPlanningStatus({
         agentPhase: "waiting_model",
-        hasToolCalls: true,
         streaming: false,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("appends answer to process timeline without mixing into scroll blocks", () => {
@@ -674,6 +673,26 @@ describe("agentCursorFeed", () => {
         agentPhase: "waiting_model",
       }),
     ).toBe("正在等待模型响应（第 35/24 轮）…");
+  });
+
+  it("buildAgentLiveFooterStatus keeps thinking status when intermediate narrative exists", () => {
+    expect(
+      buildAgentLiveFooterStatus({
+        currentStatus: "思考中 · 已生成 120 字",
+        isRunning: true,
+        hasAnswer: true,
+        agentPhase: "streaming_model",
+      }),
+    ).toBe("思考中 · 已生成 120 字");
+
+    expect(
+      buildAgentLiveFooterStatus({
+        currentStatus: "思考中…",
+        isRunning: true,
+        hasAnswer: true,
+        agentPhase: "planning_tools",
+      }),
+    ).toBe("思考中…");
   });
 
   it("splitAgentLiveStatusLine splits phase and meta chips", () => {

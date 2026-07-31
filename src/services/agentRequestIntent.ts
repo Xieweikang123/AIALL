@@ -59,6 +59,7 @@ export async function resolveAgentRequestUserIntentAsync(
 
   const skipAiClassifier = shouldSkipAiIntentClassifier(rulesIntent, input.prompt, {
     isAsk: isReadOnlyAgent,
+    mode: input.mode,
   });
   onStatus?.(
     "classifying_intent",

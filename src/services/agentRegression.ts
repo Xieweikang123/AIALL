@@ -209,7 +209,10 @@ export function resolveAgentRegressionCase(caseInput: AgentRegressionCase): Agen
   const runProfile = normalizeExecutePlanContext(clientProfile);
   const isExecutePlan = runProfile.kind === "execute_plan";
   const isPlanExplore = mode === "plan" && !isExecutePlan;
-  const skipAiClassifier = shouldSkipAiIntentClassifier(rulesIntent, prompt, { isAsk });
+  const skipAiClassifier = shouldSkipAiIntentClassifier(rulesIntent, prompt, {
+    isAsk,
+    mode: caseInput.mode === "auto" ? "auto" : profileModeValue,
+  });
 
   return {
     userIntent,

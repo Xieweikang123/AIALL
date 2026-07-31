@@ -108,15 +108,6 @@ export function buildCursorAgentFeedForMessage(input: AgentCompactStatusInput) {
   });
 }
 
-function resolveCompactHasAnswer(input: AgentCompactStatusInput): boolean {
-  if (input.answerPreview.trim()) return true;
-  return isAgentTimelineAnswerStreaming(
-    input.liveAgentSource,
-    input.isRunning,
-    input.hasRunningTool,
-  );
-}
-
 /** Single chronological feed for AgentMergedContent (thought → tool → answer). */
 export function buildUnifiedAgentTimeline(
   input: UnifiedAgentTimelineInput,
@@ -176,8 +167,14 @@ export function buildAgentLiveFooterStatus(input: {
     input.agentPhase === "waiting_model" ||
     input.agentPhase === "sending_request" ||
     input.agentPhase === "retrying_model";
+  const thinkingWithAnswer =
+    input.agentPhase === "streaming_model" ||
+    input.agentPhase === "planning_tools" ||
+    input.agentPhase === "summarizing_tools" ||
+    input.agentPhase === "compacting_context";
 
-  if (input.hasAnswer && !waitingModel) return null;
+  // 已有中间叙述时仍要露出等待/思考态，否则气泡像已结束。
+  if (input.hasAnswer && !waitingModel && !thinkingWithAnswer) return null;
 
   const status = input.currentStatus?.trim();
   if (!status) return null;
@@ -248,15 +245,10 @@ export function buildCursorCompactLiveStatus(input: AgentCompactStatusInput): st
   const { msg, live } = input;
   if (!live) return null;
   if (buildCursorCompactRunningAction(input)) return null;
-  if (
-    resolveCompactHasAnswer(input) &&
-    (live.phase === "streaming_model" || live.phase === "planning_tools")
-  ) {
-    return null;
-  }
 
   if (live.phase === "streaming_model" || live.phase === "planning_tools") {
     const chars = live.streamChars ?? msg.streamChars ?? 0;
+    // 中间叙述已上屏时仍显示思考态（叙述块本身不带流式光标）。
     return chars > 0 ? `思考中 · 已生成 ${chars} 字` : "思考中…";
   }
 

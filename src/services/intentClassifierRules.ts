@@ -189,10 +189,12 @@ export function resolveUserIntent(input: ResolveUserIntentInput): ResolvedUserIn
 export function shouldSkipAiIntentClassifier(
   rules: ResolvedUserIntent,
   prompt: string,
-  opts?: { isAsk?: boolean },
+  opts?: { isAsk?: boolean; mode?: ResolveUserIntentInput["mode"] },
 ): boolean {
   const text = prompt.trim();
   if (!text) return true;
+  // Auto：模式由意图决定，始终交给 AI 分类，不用规则短路。
+  if (opts?.mode === "auto") return false;
   if (isShortContextDependentFollowUp(text)) return true;
   if (rules.pendingPlanAmend || rules.pendingPlanClarify) return true;
   if (isQuotedAmendPrompt(text)) return true;

@@ -127,6 +127,27 @@ export function formatAiHttpError(status: number, rawText: string): string {
   return base;
 }
 
+function normalizeStreamContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (part && typeof part === "object") {
+          const record = part as { text?: string; content?: string };
+          return record.text || record.content || "";
+        }
+        return "";
+      })
+      .join("");
+  }
+  if (content && typeof content === "object") {
+    const record = content as { text?: string; content?: string };
+    return record.text || record.content || "";
+  }
+  return "";
+}
+
 function parseStreamContentFromLine(line: string): string {
   const cleanLine = line.trim();
   if (!cleanLine.startsWith("data:")) return "";
@@ -136,15 +157,29 @@ function parseStreamContentFromLine(line: string): string {
   try {
     const payload = JSON.parse(dataPart) as {
       choices?: Array<{
-        delta?: { content?: string };
-        message?: { content?: string };
+        delta?: { content?: unknown };
+        message?: { content?: unknown };
       }>;
     };
     const choice = payload.choices?.[0];
-    return choice?.delta?.content || choice?.message?.content || "";
+    return (
+      normalizeStreamContent(choice?.delta?.content)
+      || normalizeStreamContent(choice?.message?.content)
+    );
   } catch {
     return "";
   }
+}
+
+function normalizeChannelChunk(chunk: unknown): string {
+  if (typeof chunk === "string") return chunk;
+  if (chunk && typeof chunk === "object") {
+    const record = chunk as { text?: string; content?: string; data?: unknown };
+    if (typeof record.text === "string") return record.text;
+    if (typeof record.content === "string") return record.content;
+    return normalizeStreamContent(record.data);
+  }
+  return "";
 }
 
 async function readAiStreamResponse(
@@ -224,7 +259,8 @@ export async function testAiModel(request: AiTestRequest): Promise<AiTestResult>
       const payload = buildPayload(request.model, request.prompt, true, request.imageDataUrl);
       const channel = new Channel<string>();
       channel.onmessage = (chunk) => {
-        if (chunk) request.onStreamChunk?.(chunk);
+        const text = normalizeChannelChunk(chunk);
+        if (text) request.onStreamChunk?.(text);
       };
       const result = await tauriInvoke<{ ok: boolean; status?: number; rawText?: string; error?: string }>(
         "ai_test_stream",

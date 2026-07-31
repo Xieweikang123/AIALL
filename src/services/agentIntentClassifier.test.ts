@@ -130,6 +130,20 @@ describe("shouldSkipAiIntentClassifier", () => {
     });
     expect(shouldSkipAiIntentClassifier(rules, "这个组件怎么回事")).toBe(false);
   });
+
+  it("never skips AI when chat mode is auto", () => {
+    const prompt =
+      '我想做个单页，有一些按钮，能一键执行某些操作，比如替换 AlarmCenterProperties.xml 的某些内容';
+    const rules = classifyUserIntentFromRules({
+      prompt,
+      mode: "auto",
+      hasImage: false,
+      isAsk: false,
+    });
+    expect(rules.primary).toBe("implement");
+    expect(shouldSkipAiIntentClassifier(rules, prompt)).toBe(true);
+    expect(shouldSkipAiIntentClassifier(rules, prompt, { mode: "auto" })).toBe(false);
+  });
 });
 
 describe("resolveUserIntent", () => {

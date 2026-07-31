@@ -21,6 +21,62 @@ export type AgentRunLiveState = {
   retryError?: string;
 };
 
+export type AgentRunStage =
+  | "thinking"
+  | "retrieving"
+  | "modifying"
+  | "verifying"
+  | "waiting_confirmation"
+  | "recoverable";
+
+/** Coarse UI stage labels keep the run rail scannable while the detail remains phase-specific. */
+export function resolveAgentRunStage(
+  live: Pick<AgentRunLiveState, "phase" | "toolTitle" | "toolDetail">,
+): AgentRunStage {
+  const phase = live.phase.trim().toLowerCase();
+  if (phase === "aborted") return "recoverable";
+  if (phase === "pending_approval" || phase === "waiting_confirmation") {
+    return "waiting_confirmation";
+  }
+
+  const toolText = `${live.toolTitle || ""} ${live.toolDetail || ""}`.toLowerCase();
+  if (/(test|lint|check|verify|build|typecheck|测试|检查|验证|构建|编译)/i.test(toolText)) {
+    return "verifying";
+  }
+  if (/(write|edit|patch|create|delete|rename|apply|写入|修改|创建|删除|重命名|应用)/i.test(toolText)) {
+    return "modifying";
+  }
+
+  if (
+    phase === "building_context" ||
+    phase === "compacting_context" ||
+    phase.startsWith("vision_") ||
+    phase === "preparing" ||
+    phase === "starting"
+  ) {
+    return "retrieving";
+  }
+  if (phase === "executing_tool" || phase === "executing_tools") return "retrieving";
+  return "thinking";
+}
+
+export function agentRunStageLabel(stage: AgentRunStage): string {
+  switch (stage) {
+    case "retrieving":
+      return "检索中";
+    case "modifying":
+      return "修改中";
+    case "verifying":
+      return "验证中";
+    case "waiting_confirmation":
+      return "等待确认";
+    case "recoverable":
+      return "可恢复";
+    default:
+      return "思考中";
+  }
+}
+
 export function createInitialLiveState(phase = "preparing"): AgentRunLiveState {
   return { phase };
 }

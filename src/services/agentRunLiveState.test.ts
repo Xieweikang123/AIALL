@@ -5,8 +5,10 @@ import {
 } from "../utils/vibeHelpers";
 import {
   createInitialLiveState,
+  agentRunStageLabel,
   formatAgentLiveStatus,
   patchLiveFromStatusEvent,
+  resolveAgentRunStage,
   resolveModelWaitElapsedSeconds,
 } from "./agentRunLiveState";
 
@@ -68,5 +70,17 @@ describe("agentRunLiveState", () => {
       { chatMode: "build" },
     );
     expect(text).toBe("正在发送模型请求…");
+  });
+
+  it("maps live phases and tool details to coarse UI stages", () => {
+    expect(agentRunStageLabel(resolveAgentRunStage({ phase: "building_context" }))).toBe("检索中");
+    expect(
+      agentRunStageLabel(resolveAgentRunStage({ phase: "executing_tool", toolTitle: "写入文件" })),
+    ).toBe("修改中");
+    expect(
+      agentRunStageLabel(resolveAgentRunStage({ phase: "executing_tool", toolTitle: "运行测试" })),
+    ).toBe("验证中");
+    expect(agentRunStageLabel(resolveAgentRunStage({ phase: "waiting_model" }))).toBe("思考中");
+    expect(agentRunStageLabel(resolveAgentRunStage({ phase: "pending_approval" }))).toBe("等待确认");
   });
 });
