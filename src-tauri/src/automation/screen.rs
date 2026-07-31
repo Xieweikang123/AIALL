@@ -42,8 +42,8 @@ try {
 "#;
 
 fn make_click_ps1(x: i32, y: i32) -> String {
-  format!(
-    r#"$ErrorActionPreference = "Stop"
+    format!(
+        r#"$ErrorActionPreference = "Stop"
 $X = {x}
 $Y = {y}
 Add-Type @"
@@ -73,109 +73,117 @@ Start-Sleep -Milliseconds 60
 [WinMouse]::mouse_event([WinMouse]::MOUSEEVENTF_LEFTDOWN,0,0,0,[UIntPtr]::Zero)
 [WinMouse]::mouse_event([WinMouse]::MOUSEEVENTF_LEFTUP,0,0,0,[UIntPtr]::Zero)
 "#,
-    x = x,
-    y = y
-  )
+        x = x,
+        y = y
+    )
 }
 
 fn powershell_exe() -> String {
-  let root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into());
-  format!("{}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", root)
+    let root = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into());
+    format!(
+        "{}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        root
+    )
 }
 
 fn temp_script_path(prefix: &str) -> PathBuf {
-  let ts = SystemTime::now()
-    .duration_since(UNIX_EPOCH)
-    .unwrap_or_default()
-    .as_nanos();
-  std::env::temp_dir().join(format!("aiall-{}-{}.ps1", prefix, ts))
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    std::env::temp_dir().join(format!("aiall-{}-{}.ps1", prefix, ts))
 }
 
 fn run_powershell(script: &str) -> Result<String, String> {
-  let script_path = temp_script_path("script");
-  std::fs::write(&script_path, script).map_err(|e| format!("写入临时脚本失败: {e}"))?;
+    let script_path = temp_script_path("script");
+    std::fs::write(&script_path, script).map_err(|e| format!("写入临时脚本失败: {e}"))?;
 
-  let result = Command::new(powershell_exe())
-    .args([
-      "-NoProfile",
-      "-ExecutionPolicy",
-      "Bypass",
-      "-NonInteractive",
-      "-File",
-    ])
-    .arg(&script_path)
-    .output()
-    .map_err(|e| format!("执行 PowerShell 失败: {e}"));
+    let result = Command::new(powershell_exe())
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-NonInteractive",
+            "-File",
+        ])
+        .arg(&script_path)
+        .output()
+        .map_err(|e| format!("执行 PowerShell 失败: {e}"));
 
-  let _ = std::fs::remove_file(&script_path);
+    let _ = std::fs::remove_file(&script_path);
 
-  let output = result?;
-  let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-  let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let output = result?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
 
-  if !output.status.success() {
-    let msg = if !stderr.is_empty() { stderr } else { stdout.clone() };
-    return Err(format!("PowerShell 错误: {msg}"));
-  }
+    if !output.status.success() {
+        let msg = if !stderr.is_empty() {
+            stderr
+        } else {
+            stdout.clone()
+        };
+        return Err(format!("PowerShell 错误: {msg}"));
+    }
 
-  Ok(stdout)
+    Ok(stdout)
 }
 
 pub async fn capture_primary_screen_png() -> Result<Vec<u8>, String> {
-  let result = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, String> {
-    let stdout = run_powershell(SCREEN_CAPTURE_PS1)?;
-    let b64 = stdout.replace(char::is_whitespace, "");
-    if b64.is_empty() {
-      return Err("stdout 为空（未得到 Base64）。请确认在有图形会话的环境中运行。".into());
-    }
-    use base64::Engine;
-    base64::engine::general_purpose::STANDARD
-      .decode(&b64)
-      .map_err(|e| format!("Base64 解码失败: {e}"))
-  })
-  .await
-  .map_err(|e| format!("任务失败: {e}"))?;
-  result
+    let result = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, String> {
+        let stdout = run_powershell(SCREEN_CAPTURE_PS1)?;
+        let b64 = stdout.replace(char::is_whitespace, "");
+        if b64.is_empty() {
+            return Err("stdout 为空（未得到 Base64）。请确认在有图形会话的环境中运行。".into());
+        }
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD
+            .decode(&b64)
+            .map_err(|e| format!("Base64 解码失败: {e}"))
+    })
+    .await
+    .map_err(|e| format!("任务失败: {e}"))?;
+    result
 }
 
 pub async fn click_left_at_screen(x: i32, y: i32) -> Result<(), String> {
-  let result = tokio::task::spawn_blocking(move || -> Result<(), String> {
-    let script = make_click_ps1(x, y);
-    run_powershell(&script)?;
-    Ok(())
-  })
-  .await
-  .map_err(|e| format!("任务失败: {e}"))?;
-  result
+    let result = tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let script = make_click_ps1(x, y);
+        run_powershell(&script)?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("任务失败: {e}"))?;
+    result
 }
 
 #[cfg(test)]
 mod tests {
-  use super::*;
+    use super::*;
 
-  #[test]
-  fn powershell_exe_returns_valid_path() {
-    let path = powershell_exe();
-    assert!(path.contains("powershell.exe"));
-    assert!(path.contains("System32"));
-  }
+    #[test]
+    fn powershell_exe_returns_valid_path() {
+        let path = powershell_exe();
+        assert!(path.contains("powershell.exe"));
+        assert!(path.contains("System32"));
+    }
 
-  #[test]
-  fn make_click_ps1_contains_coordinates() {
-    let script = make_click_ps1(100, 200);
-    assert!(script.contains("$X = 100"));
-    assert!(script.contains("$Y = 200"));
-    assert!(script.contains("SetCursorPos"));
-    assert!(script.contains("mouse_event"));
-  }
+    #[test]
+    fn make_click_ps1_contains_coordinates() {
+        let script = make_click_ps1(100, 200);
+        assert!(script.contains("$X = 100"));
+        assert!(script.contains("$Y = 200"));
+        assert!(script.contains("SetCursorPos"));
+        assert!(script.contains("mouse_event"));
+    }
 
-  #[test]
-  fn temp_script_path_has_prefix_and_suffix() {
-    let path = temp_script_path("test");
-    let filename = path.file_name().unwrap().to_string_lossy();
-    assert!(filename.starts_with("aiall-test-"), "filename should start with prefix");
-    assert!(filename.ends_with(".ps1"), "filename should end with .ps1");
-  }
+    #[test]
+    fn temp_script_path_has_prefix_and_suffix() {
+        let path = temp_script_path("test");
+        let filename = path.file_name().unwrap().to_string_lossy();
+        assert!(
+            filename.starts_with("aiall-test-"),
+            "filename should start with prefix"
+        );
+        assert!(filename.ends_with(".ps1"), "filename should end with .ps1");
+    }
 }
-
-
