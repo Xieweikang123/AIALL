@@ -376,21 +376,6 @@
         @navigate-back="navigateBack"
         @navigate-forward="navigateForward"
         @new-scratch="() => void openScratchTab()"
-        @inline-ai="onEditorInlineAi"
-      />
-
-      <EditorInlineAiPanel
-        :open="editorInlineAi.open"
-        :instruction="editorInlineAi.instruction"
-        :loading="editorInlineAi.loading"
-        :preview="editorInlineAi.preview"
-        :error="editorInlineAi.error"
-        :anchor-top="editorInlineAi.anchorTop"
-        :anchor-left="editorInlineAi.anchorLeft"
-        @update:instruction="editorInlineAi.instruction = $event"
-        @close="editorInlineAi.closePanel()"
-        @submit="editorInlineAi.submitInstruction()"
-        @accept="editorInlineAi.acceptPreview()"
       />
 
       <section
@@ -717,6 +702,8 @@
         :chat-placeholder="chatPlaceholder"
         :recoverable-assistant-msg="recoverableAssistantMsg"
         :agent-running-status="agentRunningStatusText"
+        :agent-run-stage-label="agentRunStageLabelText"
+        :pending-approval="agentPendingApproval"
         :stalled-assistant-msg="stalledAssistantMsg"
         :auto-resume-seconds-left="autoResumeSecondsLeft"
         :pending-prompt-queue="pendingPromptQueue"
@@ -791,6 +778,7 @@
         @cancel-auto-resume="cancelAutoResume"
         @force-recover-stalled-run="forceRecoverStalledRun"
         @resume-agent-run="resumeAgentRun"
+        @pause-agent="pauseAgent"
         @stop-agent="stopAgent"
         @send-chat="sendChat"
         @update:show-token-detail="showTokenDetail = $event"
@@ -959,7 +947,6 @@ import ProjectCodeMapPanel from "../components/vibe/ProjectCodeMapPanel.vue";
 import CodeMapMainPanel from "../components/vibe/CodeMapMainPanel.vue";
 import PlanMainPanel from "../components/vibe/PlanMainPanel.vue";
 import EditorPanel from "../components/vibe/EditorPanel.vue";
-import EditorInlineAiPanel from "../components/vibe/EditorInlineAiPanel.vue";
 import ChatPanel from "../components/vibe/ChatPanel.vue";
 import VibeChatMessages from "../components/vibe/VibeChatMessages.vue";
 import VibeWorkspaceWelcome from "../components/vibe/VibeWorkspaceWelcome.vue";
@@ -971,7 +958,6 @@ import { usePanelLayout } from "../composables/usePanelLayout";
 import { useGitPanel, type GitFileDiff } from "../composables/useGitPanel";
 import { useInputPrompt } from "../composables/useInputPrompt";
 import { useEditorPanel } from "../composables/useEditorPanel";
-import { useEditorInlineAi } from "../composables/useEditorInlineAi";
 import { useSessionManager } from "../composables/useSessionManager";
 import { useChatSessionStore } from "../composables/useChatSessionStore";
 import { useVibeQuickSearch } from "../composables/useVibeQuickSearch";
@@ -991,6 +977,7 @@ import { restoreChatScrollPosition, useWorkspaceUiPersistence } from "../composa
 import { PROJECT_ARCHITECT_REVIEW_REL_PATH } from "../services/vibeProjectArchitectReviewClient";
 import { PROJECT_KNOWLEDGE_REL_PATH } from "../services/vibeProjectKnowledgeClient";
 import { isTauriEnv } from "../services/tauriInvoke";
+import { agentRunStageLabel, resolveAgentRunStage } from "../services/agentRunLiveState";
 import { distillExplorationRun } from "../services/explorationDistill";
 import {
   ensurePlanFileBeforeExecution,
@@ -1998,27 +1985,6 @@ const {
   autoRetryWithCountdown,
 });
 
-const editorInlineAi = useEditorInlineAi({
-  aiConfig,
-  configReady,
-  activeFilePath,
-  fileContent,
-  getSelectedText: () => editorPanelRef.value?.getSelectedText() ?? "",
-  replaceSelection: (text) => editorPanelRef.value?.replaceSelection(text) ?? false,
-});
-
-function onEditorInlineAi() {
-  const anchor = editorPanelRef.value?.getInlineAiAnchor();
-  editorInlineAi.openPanel(
-    anchor
-      ? {
-          top: Math.min(window.innerHeight - 280, Math.max(80, anchor.top + anchor.height + 12)),
-          left: Math.min(window.innerWidth - 540, Math.max(16, anchor.left)),
-        }
-      : undefined,
-  );
-}
-
 fileWatcherTreeRefresh.fn = refreshTree;
 
 const {
@@ -2564,6 +2530,7 @@ const {
   runAutoBugFixAgent,
   resumeAgentRun,
   stopAgent,
+  pauseAgent,
   interruptAgentRun,
   cancelAutoResume,
   isAgentRunning,
@@ -2865,11 +2832,36 @@ const agentRunningStatusText = computed(() => {
   for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
     const m = chatMessages.value[i];
     if (m?.role !== "assistant") continue;
-    // 运行状态已在消息气泡内展示，底部不再重复
-    if (isAgentRunning(m)) return "";
+    if (isAgentRunning(m)) return buildAgentRunningStatusTextForMsg(m);
     return buildAgentRunningStatusTextForMsg(m);
   }
   return "";
+});
+
+const agentRunStageLabelText = computed(() => {
+  for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
+    const m = chatMessages.value[i];
+    if (m?.role !== "assistant") continue;
+    if (isAgentRunning(m)) {
+      return agentRunStageLabel(
+        resolveAgentRunStage({ phase: m.agentPhase || "", toolTitle: m.status }),
+      );
+    }
+    if (m.pendingApproval) return "等待确认";
+    if (chatSending.value) return "思考中";
+    break;
+  }
+  return "";
+});
+
+const agentPendingApproval = computed(() => {
+  if (chatSending.value) return false;
+  for (let i = chatMessages.value.length - 1; i >= 0; i -= 1) {
+    const m = chatMessages.value[i];
+    if (m?.role !== "assistant") continue;
+    return Boolean(m.pendingApproval);
+  }
+  return false;
 });
 
 function findLastCompletedAssistantMessage(): VibeChatMessage | undefined {

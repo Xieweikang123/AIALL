@@ -32,6 +32,7 @@
           >
             {{ meta }}
           </span>
+          <span v-if="stageLabel" class="agent-live-status-stage">{{ stageLabel }}</span>
         </div>
       </div>
     </div>
@@ -45,6 +46,7 @@ import { splitAgentLiveStatusLine } from "../services/agentCompactStatus";
 const props = withDefaults(
   defineProps<{
     statusLine: string;
+    stageLabel?: string;
     waitingModel?: boolean;
     shimmer?: boolean;
     variant?: "rail" | "banner";
@@ -53,6 +55,7 @@ const props = withDefaults(
     waitingModel: false,
     shimmer: false,
     variant: "rail",
+    stageLabel: "",
   },
 );
 
@@ -174,6 +177,18 @@ const showProgress = computed(() => props.waitingModel && props.variant === "rai
   color: rgba(165, 205, 255, 0.82);
   background: rgba(88, 166, 255, 0.1);
   border: 1px solid rgba(88, 166, 255, 0.14);
+}
+
+.agent-live-status-stage {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.35;
+  font-weight: 600;
+  color: rgba(255, 213, 79, 0.92);
+  background: rgba(255, 213, 79, 0.1);
+  border: 1px solid rgba(255, 213, 79, 0.18);
 }
 
 @media (prefers-reduced-motion: reduce) {

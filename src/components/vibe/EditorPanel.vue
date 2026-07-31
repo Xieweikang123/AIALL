@@ -169,7 +169,6 @@
       @change="$emit('editor-change', $event)"
       @save="$emit('save-file')"
       @select="(text, anchor) => $emit('editor-select', text, anchor)"
-      @inline-ai="$emit('inline-ai')"
     />
   </section>
 </template>
@@ -241,7 +240,6 @@ const emit = defineEmits<{
   (e: "reorder-tabs", payload: { fromIndex: number; toIndex: number }): void;
   (e: "hunk-action", index: number): void;
   (e: "new-scratch"): void;
-  (e: "inline-ai"): void;
 }>();
 
 /* ---- 标签滚轮横向滚动 ---- */
@@ -497,27 +495,7 @@ async function revealLineInDiff(line: number, column = 1): Promise<boolean> {
   return diffEditorRef.value?.revealLineWhenReady(line, column) ?? false;
 }
 
-function getSelectedText(): string {
-  return editorRef.value?.getSelectedText() ?? "";
-}
-
-function replaceSelection(text: string): boolean {
-  return editorRef.value?.replaceSelection(text) ?? false;
-}
-
-function getInlineAiAnchor(): MonacoSelectionAnchor | null {
-  return editorRef.value?.getInlineAiAnchor() ?? null;
-}
-
-defineExpose({
-  editorRef,
-  diffEditorRef,
-  revealLineInEditor,
-  revealLineInDiff,
-  getSelectedText,
-  replaceSelection,
-  getInlineAiAnchor,
-});
+defineExpose({ editorRef, diffEditorRef, revealLineInEditor, revealLineInDiff });
 </script>
 
 <style scoped>
@@ -525,7 +503,7 @@ defineExpose({
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: rgba(2, 6, 23, 0.55);
+  background: #0d1117;
   overflow: hidden;
 }
 
@@ -536,7 +514,7 @@ defineExpose({
   padding: 0 8px;
   height: 38px;
   border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.1));
-  background: rgba(11, 18, 32, 0.5);
+  background: #161b22;
   backdrop-filter: blur(8px);
   flex-shrink: 0;
 }
@@ -791,9 +769,9 @@ defineExpose({
   align-items: center;
   justify-content: center;
   border-radius: 14px;
-  background: linear-gradient(135deg, rgba(31, 111, 235, 0.15), rgba(130, 80, 223, 0.12));
+  background: #21262d;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  color: rgba(145, 190, 255, 0.8);
+  color: #8b949e;
   margin-bottom: 4px;
 }
 

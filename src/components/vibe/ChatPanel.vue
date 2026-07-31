@@ -34,6 +34,23 @@
       @collapse-chat="$emit('collapse-chat')"
     />
 
+    <div v-if="chatSending && agentRunningStatus.trim()" class="chat-run-banner">
+      <AgentLiveStatusRail
+        :status-line="agentRunningStatus"
+        :stage-label="agentRunStageLabel"
+        :shimmer="true"
+        variant="banner"
+      />
+      <div class="chat-run-controls">
+        <button type="button" class="chat-run-control chat-run-control--pause" @click="$emit('pause-agent')">
+          暂停
+        </button>
+        <button type="button" class="chat-run-control chat-run-control--stop" @click="$emit('stop-agent')">
+          停止
+        </button>
+      </div>
+    </div>
+
     <div class="chat-scroll-wrap">
       <div ref="chatScrollRef" class="chat-scroll" @scroll="onScroll">
       <div v-if="switchingProject" class="chat-switching">
@@ -263,13 +280,10 @@
           </div>
         </div>
 
-        <div
-          v-if="chatSending && agentRunningStatus.trim()"
-          class="chat-status-row"
-        >
-          <span class="chat-running-status" aria-live="polite">
-            <span class="status-pulse" aria-hidden="true" />
-            {{ agentRunningStatus }}
+        <div v-else-if="pendingApproval" class="chat-status-row">
+          <span class="chat-running-status chat-running-status--waiting" aria-live="polite">
+            <span class="status-pulse status-pulse--waiting" aria-hidden="true" />
+            等待确认
           </span>
         </div>
         <div v-else-if="chatError && !showRecoveryBanner" class="chat-status-row">
@@ -354,7 +368,6 @@
             </div>
           </div>
           <div class="chat-actions">
-            <button v-if="chatSending" type="button" class="secondary" @click="$emit('stop-agent')">停止</button>
             <button type="button" class="primary send-btn" :disabled="!canSendChat" @click="$emit('send-chat')">
               {{ chatSending ? "打断并发送" : "发送" }}
             </button>
@@ -557,6 +570,7 @@ import { CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount, getEventValue } from "..
 import { scheduleScrollContainerToBottom, scrollContainerToBottom } from "../../utils/scrollViewport";
 import { resolveAgentResumeButtonLabel } from "../../services/agentRecovery";
 import { renderMarkdown } from "../../utils/renderMarkdown";
+import AgentLiveStatusRail from "../AgentLiveStatusRail.vue";
 
 interface ChatMessage {
   id: string;
@@ -605,6 +619,8 @@ interface Props {
   chatPlaceholder: string;
   recoverableAssistantMsg: ChatMessage | null;
   agentRunningStatus?: string;
+  agentRunStageLabel?: string;
+  pendingApproval?: boolean;
   stalledAssistantMsg: ChatMessage | null;
   autoResumeSecondsLeft: number;
   pendingPromptQueue: string[];
@@ -679,6 +695,8 @@ const props = withDefaults(defineProps<Props>(), {
   pendingMemoryProposals: () => [],
 	pendingSkillProposals: () => [],
 	agentRunningStatus: "",
+	agentRunStageLabel: "",
+	pendingApproval: false,
 	agentSuggestions: () => [],
 });
 
@@ -736,6 +754,7 @@ const explorationContentHtml = computed(() => {
 const emit = defineEmits<{
   (e: "send-chat"): void;
   (e: "stop-agent"): void;
+  (e: "pause-agent"): void;
   (e: "resume-agent-run", messageId: string): void;
   (e: "force-recover-stalled-run", messageId: string): void;
   (e: "cancel-auto-resume"): void;

@@ -69,7 +69,6 @@ const emit = defineEmits<{
   change: [value: string];
   save: [];
   select: [text: string, anchor: MonacoSelectionAnchor | null];
-  "inline-ai": [];
 }>();
 
 const containerRef = ref<HTMLElement | null>(null);
@@ -267,10 +266,6 @@ function createEditor() {
     emit("save");
   });
 
-  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK, () => {
-    emit("inline-ai");
-  });
-
   function emitSelectionChange() {
     if (!editor) return;
     const model = editor.getModel();
@@ -420,27 +415,7 @@ async function revealLineWhenReady(line: number, column = 1, maxAttempts = 24): 
   return false;
 }
 
-function replaceSelection(text: string): boolean {
-  if (!editor) return false;
-  const selection = editor.getSelection();
-  const model = editor.getModel();
-  if (!model || !selection) return false;
-  editor.executeEdits("inline-ai", [{
-    range: selection,
-    text,
-    forceMoveMarkers: true,
-  }]);
-  return true;
-}
-
-function getInlineAiAnchor(): MonacoSelectionAnchor | null {
-  if (!editor) return null;
-  const selection = editor.getSelection();
-  if (!selection) return null;
-  return getSelectionAnchorRect(selection);
-}
-
-defineExpose({ getSelectedText, revealLine, revealLineWhenReady, replaceSelection, getInlineAiAnchor });
+defineExpose({ getSelectedText, revealLine, revealLineWhenReady });
 </script>
 
 <style scoped>

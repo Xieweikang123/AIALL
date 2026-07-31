@@ -21,8 +21,8 @@
         @keydown.enter="$emit('open-project-by-input')"
       />
       <span v-else class="path-current" :title="projectPath">{{ currentFolderName }}</span>
-      <button type="button" class="primary compact" :disabled="pickingFolder || loadingTree" @click="$emit('handle-open-project')">
-        {{ pickingFolder ? "选择…" : loadingTree ? "" : projectOpened ? "切换项目" : "打开项目" }}<span v-if="loadingTree" class="shimmer-text--fast">加载中</span>
+      <button v-if="!projectOpened" type="button" class="primary compact" :disabled="pickingFolder || loadingTree" @click="$emit('handle-open-project')">
+        {{ pickingFolder ? "选择…" : loadingTree ? "" : "打开项目" }}<span v-if="loadingTree" class="shimmer-text--fast">加载中</span>
       </button>
       <button
         type="button"
@@ -55,13 +55,15 @@
           class="project-history-trigger"
           :class="{ open: projectHistoryOpen, active: projectOpened }"
           :disabled="loadingTree || pickingFolder"
-          :title="projectPath || '最近打开的项目'"
+          title="打开项目历史"
+          :aria-expanded="projectHistoryOpen"
+          aria-haspopup="menu"
           @click="toggleProjectHistory"
         >
           <svg class="project-history-trigger-icon" width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M2.5 4.8A1.3 1.3 0 0 1 3.8 3.5h3.2l1.2 1.3h4.5A1.3 1.3 0 0 1 14 6.1v6.4a1.3 1.3 0 0 1-1.3 1.3H3.8A1.3 1.3 0 0 1 2.5 12.5V4.8Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
           </svg>
-          <span class="project-history-trigger-label">{{ projectTriggerLabel }}</span>
+          <span class="project-history-trigger-label">项目历史</span>
           <span v-if="projectHistoryList.length > 1" class="project-history-badge">{{ projectHistoryList.length }}</span>
           <span class="project-history-chevron" aria-hidden="true">{{ projectHistoryOpen ? "▴" : "▾" }}</span>
         </button>
@@ -235,11 +237,6 @@ const currentFolderName = computed(() => {
   return parts[parts.length - 1] || trimmed;
 });
 
-const projectTriggerLabel = computed(() => {
-  if (props.projectOpened && props.projectPath.trim()) return currentFolderName.value;
-  return "最近项目";
-});
-
 function isCurrentProject(path: string): boolean {
   const current = props.projectPath.trim();
   if (!current || !path.trim()) return false;
@@ -284,9 +281,16 @@ function handleOutsideClick(e: MouseEvent) {
   }
 }
 
+function handleKeydown(e: KeyboardEvent) {
+  if (e.key === "Escape" && projectHistoryOpen.value) {
+    closeProjectHistory();
+  }
+}
+
 onMounted(() => {
   refreshProjectHistoryList();
   document.addEventListener("mousedown", handleOutsideClick, true);
+  document.addEventListener("keydown", handleKeydown);
 });
 
 watch(
@@ -298,6 +302,7 @@ watch(
 
 onBeforeUnmount(() => {
   document.removeEventListener("mousedown", handleOutsideClick, true);
+  document.removeEventListener("keydown", handleKeydown);
 });
 
 function openNewProject() {
@@ -363,11 +368,11 @@ function formatSessionTime(iso: string): string {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 16px;
-  background: rgba(11, 18, 32, 0.85);
+  padding: 0 14px;
+  background: rgba(13, 17, 23, 0.98);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
-  height: 44px;
+  min-height: 48px;
   flex-shrink: 0;
 }
 
@@ -385,9 +390,9 @@ function formatSessionTime(iso: string): string {
   align-items: center;
   justify-content: center;
   border-radius: 8px;
-  background: linear-gradient(135deg, rgba(31, 111, 235, 0.3), rgba(130, 80, 223, 0.25));
+  background: #21262d;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #91beff;
+  color: #c9d1d9;
 }
 
 .title {
@@ -412,7 +417,7 @@ function formatSessionTime(iso: string): string {
 .toolbar-project {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex: 1;
   min-width: 0;
 }
@@ -477,21 +482,23 @@ function formatSessionTime(iso: string): string {
 .toolbar-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 6px;
   margin-left: auto;
   flex-shrink: 0;
 }
 
 .project-history-wrap {
   position: relative;
+  min-width: 0;
 }
 
 .project-history-trigger {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: 180px;
-  height: 30px;
+  max-width: min(260px, 28vw);
+  min-width: 148px;
+  height: 32px;
   padding: 0 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
@@ -531,7 +538,7 @@ function formatSessionTime(iso: string): string {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .project-history-badge {
@@ -940,10 +947,24 @@ function formatSessionTime(iso: string): string {
   color: rgba(255, 255, 255, 0.92);
 }
 
+.toolbar-nav-btn:focus-visible,
+.project-history-trigger:focus-visible,
+.project-history-item-main:focus-visible,
+.project-history-delete:focus-visible,
+.project-history-open-new:focus-visible,
+.project-history-clear:focus-visible,
+.icon-btn:focus-visible,
+.primary:focus-visible,
+.path-input:focus-visible {
+  outline: 2px solid rgba(88, 166, 255, 0.9);
+  outline-offset: 2px;
+}
+
 .toolbar-nav-label {
   font-size: 11.5px;
   font-weight: 500;
   letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.68);
 }
 
 @media (max-width: 960px) {

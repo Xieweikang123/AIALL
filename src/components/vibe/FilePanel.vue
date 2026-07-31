@@ -608,7 +608,7 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: transparent;
+  background: #161b22;
   overflow: hidden;
   container-type: inline-size;
 }
@@ -708,7 +708,7 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
   align-items: center;
   padding: 8px 0;
   gap: 2px;
-  background: rgba(11, 18, 32, 0.55);
+  background: #161b22;
   border-right: 1px solid var(--border);
   height: 100%;
 }

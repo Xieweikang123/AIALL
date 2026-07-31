@@ -139,8 +139,9 @@ const isWaitingModel = computed(() =>
 
 const liveRailVisible = computed(() => {
   if (!props.isRunning) return false;
+  // 有工具在跑时由步骤行的 running 态表达；否则只要有状态文案就显示底栏，
+  // 避免「已有中间叙述正文」时整段看起来像说完了、底栏却仍在运行。
   if (props.hasRunningTool || liveTools.value.some((step) => step.running)) return false;
-  if (hasAnswerContent.value && props.agentPhase === "streaming_model") return false;
   return Boolean(liveRailPrimary.value.trim());
 });
 
