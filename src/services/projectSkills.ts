@@ -91,7 +91,7 @@ export const DEFAULT_PROJECT_SKILLS: Array<{ slug: string; frontmatter: SkillFro
     frontmatter: { kind: "heuristic", title: "附图 UI 定位顺序" },
     body: [
       "1. 从截图摘录可见原文（占位符、按钮 title、列表元信息格式）。",
-      "2. grep 原文 ≥4 字片段或 kebab-case class；search_files 仅匹配文件名，中文文案用 grep。",
+      "2. grep 原文 ≥4 字片段、结构标识或相关符号；search_files 仅匹配文件名，中文文案用 grep。",
       "3. read_file 核对 template 与截图一致；不一致则换下一个 grep 命中，勿猜组件文件名。",
       "4. patch 的 old_string 必须来自 read_file 返回原文。",
     ].join("\n"),

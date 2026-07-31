@@ -10,7 +10,6 @@ import {
   buildConsultativeBuildHint,
   buildUserOptionMismatchHint,
 } from "../orchestration/product/userIntentHints";
-import { isScheduledTaskConsultativePrompt, shouldNudgeScheduledJobRegistration, buildConsultativeTopicHints } from "./agentConsultativeTopics";
 import {
   CONSULTATIVE_BUILD_EXPLORE_TURN_BUDGET,
   buildConsultativeExploreBudgetNudge,
@@ -19,10 +18,7 @@ import {
 } from "../../shared/agentExplorationBudget";
 import {
   FIXTURE_CONTRADICTION_USER,
-  FIXTURE_FOO_BACKFILL_JOB,
-  FIXTURE_BACKFILL_SERVICE,
   FIXTURE_PRIOR_DENIAL,
-  FIXTURE_SCHEDULED_TASK_QUESTION,
 } from "./agentTestFixtures";
 
 /** Structural regression — generic fixtures only, no audited session binding. */
@@ -30,7 +26,7 @@ describe("agent audit regression fixtures", () => {
   it("treats list-sorting question as consultative read-only", () => {
     expect(isConsultativeUserPrompt("列表按啥字段排序的？")).toBe(true);
     const hint = buildConsultativeBuildHint();
-    expect(hint).toContain("直接调用方");
+    expect(hint).toContain("调用关系");
     expect(hint).toContain("禁止 patch_file");
   });
 
@@ -66,15 +62,5 @@ describe("agent audit regression fixtures", () => {
     expect(buildUserOptionMismatchHint()).not.toMatch(/minimap|Monaco|Vertical size/i);
     expect(buildConfigBindingTopicHint("doc_lookup")).toContain("web_extract");
     expect(buildConfigBindingTopicHint("doc_lookup")).not.toMatch(/minimap|slider|scale/i);
-  });
-
-  it("scheduled-task: nudge when Job read without registration trace", () => {
-    expect(isScheduledTaskConsultativePrompt(FIXTURE_SCHEDULED_TASK_QUESTION)).toBe(true);
-    expect(
-      buildConsultativeTopicHints(FIXTURE_SCHEDULED_TASK_QUESTION),
-    ).toContain("项目上下文");
-    expect(shouldNudgeScheduledJobRegistration([FIXTURE_FOO_BACKFILL_JOB], [FIXTURE_BACKFILL_SERVICE])).toBe(
-      true,
-    );
   });
 });

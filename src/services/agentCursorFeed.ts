@@ -195,6 +195,29 @@ export function getRecentFeedActions(
   return { recent: actions.slice(-maxVisible), hiddenCount };
 }
 
+/** Build a short, user-visible rationale when a turn starts with tools. */
+export function buildPublicToolActionSummary(tools: AgentRoundTool[]): string | null {
+  if (!tools.length) return null;
+
+  const names = new Set(tools.map((tool) => tool.name));
+  if (names.has("write_file") || names.has("patch_file") || names.has("delete_file")) {
+    return "行动摘要 · 我先定位相关内容并检查现状，再进行必要的修改。";
+  }
+  if (names.has("run_command")) {
+    return "行动摘要 · 我先运行相关检查，确认当前状态和可复现结果。";
+  }
+  if (names.has("grep") || names.has("search_files")) {
+    return "行动摘要 · 我先搜索相关实现，定位调用链和影响范围。";
+  }
+  if (names.has("read_file") || names.has("list_dir")) {
+    return "行动摘要 · 我先查看项目结构和关键文件，建立上下文。";
+  }
+  if (names.has("web_search") || names.has("web_extract")) {
+    return "行动摘要 · 我先查找相关资料，补充回答所需的上下文。";
+  }
+  return "行动摘要 · 我先执行必要的检查，确认下一步处理方向。";
+}
+
 export function layoutCursorFeedBlocks(
   items: CursorFeedItem[],
   options?: { keepVisible?: number; collapseAfter?: number; compactWhileRunning?: boolean },
@@ -407,12 +430,26 @@ export function buildCursorAgentFeed(input: {
   streaming?: boolean;
 }): CursorFeedItem[] {
   const items: CursorFeedItem[] = [];
+  let publicSummaryShown = false;
 
   for (const group of input.groups) {
     if (group.turn <= 0) continue;
 
     const narrativeText = group.narrative || group.response?.assistantText || "";
     const segments = buildNarrativeSegments(narrativeText, group.tools);
+    if (!narrativeText.trim() && group.tools.length) {
+      const summary = buildPublicToolActionSummary(group.tools);
+      if (summary && !publicSummaryShown) {
+        items.push({
+          kind: "thought",
+          key: `action-summary-${group.turn}`,
+          text: summary,
+        });
+        publicSummaryShown = true;
+      }
+    } else if (narrativeText.trim()) {
+      publicSummaryShown = false;
+    }
     for (const [index, segment] of segments.entries()) {
       const thoughtText = stripToolSummaryFromAssistantContent(
         stripTextToolCallMarkup(segment.text.trim()),

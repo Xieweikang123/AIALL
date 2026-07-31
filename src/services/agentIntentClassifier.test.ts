@@ -19,7 +19,6 @@ describe("parseIntentClassifierResponse", () => {
         codeReview: false,
         behaviorContradiction: false,
         behaviorPurpose: false,
-        scheduledTask: false,
         accuracyQuestion: false,
         implementationStatus: false,
         agentStepClarification: false,
@@ -34,7 +33,7 @@ describe("parseIntentClassifierResponse", () => {
 
   it("parses fenced JSON", () => {
     const payload = parseIntentClassifierResponse(
-      '```json\n{"primary":"implement","consultativeTopic":"none","implementFollowUp":true,"uiDefect":false,"codeReview":false,"behaviorContradiction":false,"behaviorPurpose":false,"scheduledTask":false,"accuracyQuestion":false,"implementationStatus":false,"agentStepClarification":false,"userErrorQuote":false,"uiAppearance":false,"configBindingTopic":null}\n```',
+      '```json\n{"primary":"implement","consultativeTopic":"none","implementFollowUp":true,"uiDefect":false,"codeReview":false,"behaviorContradiction":false,"behaviorPurpose":false,"accuracyQuestion":false,"implementationStatus":false,"agentStepClarification":false,"userErrorQuote":false,"uiAppearance":false,"configBindingTopic":null}\n```',
     );
     expect(payload?.primary).toBe("implement");
     expect(payload?.implementFollowUp).toBe(true);
@@ -51,7 +50,6 @@ describe("parseIntentClassifierResponse", () => {
           codeReview: false,
           behaviorContradiction: false,
           behaviorPurpose: false,
-          scheduledTask: false,
           accuracyQuestion: false,
           implementationStatus: false,
           agentStepClarification: false,
@@ -161,7 +159,6 @@ describe("resolveUserIntent", () => {
         codeReview: false,
         behaviorContradiction: false,
         behaviorPurpose: false,
-        scheduledTask: false,
         accuracyQuestion: false,
         implementationStatus: false,
         agentStepClarification: false,
@@ -189,7 +186,6 @@ describe("resolveUserIntent", () => {
         codeReview: false,
         behaviorContradiction: false,
         behaviorPurpose: false,
-        scheduledTask: false,
         accuracyQuestion: false,
         implementationStatus: false,
         agentStepClarification: false,
@@ -221,7 +217,6 @@ describe("resolveUserIntent", () => {
         codeReview: false,
         behaviorContradiction: false,
         behaviorPurpose: false,
-        scheduledTask: false,
         accuracyQuestion: false,
         implementationStatus: false,
         agentStepClarification: false,
@@ -254,7 +249,6 @@ describe("resolveUserIntent", () => {
         codeReview: false,
         behaviorContradiction: false,
         behaviorPurpose: false,
-        scheduledTask: false,
         accuracyQuestion: false,
         implementationStatus: false,
         agentStepClarification: false,
@@ -280,7 +274,6 @@ describe("formatIntentClassificationDetail", () => {
       codeReview: false,
       behaviorContradiction: false,
       behaviorPurpose: false,
-      scheduledTask: false,
       accuracyQuestion: false,
       implementationStatus: false,
       agentStepClarification: false,

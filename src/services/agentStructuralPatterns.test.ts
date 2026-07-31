@@ -6,7 +6,6 @@ import {
 import {
   FIXTURE_ENUM_LISTING,
   FIXTURE_LOCATE_EVIDENCE,
-  FIXTURE_SCHEDULED_TASK_QUESTION,
 } from "./agentTestFixtures";
 
 describe("agentStructuralPatterns", () => {
@@ -18,9 +17,5 @@ describe("agentStructuralPatterns", () => {
   it("detects generic code location evidence", () => {
     expect(assistantProvidedCodeLocationEvidence(FIXTURE_LOCATE_EVIDENCE)).toBe(true);
     expect(assistantProvidedCodeLocationEvidence("让我再看看。")).toBe(false);
-  });
-
-  it("scheduled topic pattern is structural", () => {
-    expect(FIXTURE_SCHEDULED_TASK_QUESTION).toMatch(/定时任务/);
   });
 });

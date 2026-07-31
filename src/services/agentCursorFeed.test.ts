@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAgentExplorationProgress,
+  buildPublicToolActionSummary,
   buildAgentExplorationTimeline,
   buildCursorAgentFeed,
   buildCursorAgentTimeline,
@@ -15,10 +16,10 @@ import {
   getRecentFeedActions,
   shouldUseCompactAgentFeed,
 } from "./agentCursorFeed";
-import { buildUnifiedAgentTimeline, buildAgentLiveFooterStatus, splitAgentLiveStatusLine, isAgentWaitingModelPhase, summarizeCursorProcessBlocks, buildFilteredCursorAgentFeedItems } from "./agentCompactStatus";
+import { buildUnifiedAgentTimeline, buildAgentLiveFooterStatus, buildCursorCompactLiveStatus, splitAgentLiveStatusLine, isAgentWaitingModelPhase, summarizeCursorProcessBlocks, buildFilteredCursorAgentFeedItems } from "./agentCompactStatus";
 import { formatToolMeta } from "../utils/vibeHelpers";
 import type { CursorFeedItem } from "./agentCursorFeed";
-import type { AgentRoundGroupView } from "./agentRoundGroups";
+import type { AgentRoundGroupView, AgentRoundTool } from "./agentRoundGroups";
 
 describe("agentCursorFeed", () => {
   it("formats web_search tool meta with query", () => {
@@ -168,6 +169,79 @@ describe("agentCursorFeed", () => {
     const feed = buildCursorAgentFeed({ groups, isRunning: false });
     expect(feed[0].kind).toBe("thought");
     expect(feed[1].kind).toBe("action");
+  });
+
+  it("adds a public action summary before tools when a turn has no narrative", () => {
+    const feed = buildCursorAgentFeed({
+      groups: [{
+        turn: 1,
+        modelSteps: [],
+        toolIds: ["t1", "t2"],
+        narrative: "",
+        tools: [
+          {
+            id: "t1",
+            turn: 1,
+            name: "list_dir",
+            icon: "folder",
+            title: "浏览目录",
+            detail: "src",
+            label: "浏览目录",
+            summary: "完成",
+            ok: true,
+            args: { path: "src" },
+          },
+          {
+            id: "t2",
+            turn: 1,
+            name: "read_file",
+            icon: "file",
+            title: "读取文件",
+            detail: "package.json",
+            label: "读取文件",
+            summary: "完成",
+            ok: true,
+            args: { path: "package.json" },
+          },
+        ],
+      }],
+      isRunning: false,
+    });
+
+    expect(feed[0]).toMatchObject({
+      kind: "thought",
+      text: "行动摘要 · 我先查看项目结构和关键文件，建立上下文。",
+    });
+    expect(feed[1]?.kind).toBe("action");
+    expect(buildPublicToolActionSummary([])).toBeNull();
+  });
+
+  it("does not repeat the same public summary across consecutive tool turns", () => {
+    const tool = (id: string, name: "read_file" | "list_dir"): AgentRoundTool => ({
+      id,
+      turn: 1,
+      name,
+      icon: "file",
+      title: name === "read_file" ? "读取文件" : "浏览目录",
+      detail: "src",
+      label: name,
+      summary: "完成",
+      ok: true,
+      args: { path: "src" },
+    });
+    const feed = buildCursorAgentFeed({
+      groups: [1, 2, 3].map((turn) => ({
+        turn,
+        modelSteps: [],
+        toolIds: [`t${turn}`],
+        narrative: "",
+        tools: [tool(`t${turn}`, turn === 2 ? "read_file" : "list_dir")],
+      })),
+      isRunning: true,
+    });
+
+    expect(feed.filter((item) => item.kind === "thought")).toHaveLength(1);
+    expect(feed.filter((item) => item.kind === "action")).toHaveLength(3);
   });
 
   it("suppresses thinking status while answer preview is streaming", () => {
@@ -662,6 +736,42 @@ describe("agentCursorFeed", () => {
         hasActionBlocks: true,
       }),
     ).toBe("等待模型响应… · 第 2/24 轮 · 已等待 0s");
+  });
+
+  it("shows model wait diagnostics instead of a bare waiting label", () => {
+    const status = buildCursorCompactLiveStatus({
+      msg: {
+        id: "assistant-1",
+        role: "assistant",
+        content: "",
+        contextChars: 72000,
+        agentTurn: 2,
+        agentPhase: "waiting_model",
+        roundGroups: [],
+        tools: [],
+      } as never,
+      isRunning: true,
+      live: {
+        phase: "waiting_model",
+        turn: 2,
+        maxTurns: 8,
+        model: "openai/gpt-5",
+        contextChars: 72000,
+        waitStartedAt: Date.now() - 52_000,
+      },
+      liveAgentSource: { agentPhase: "waiting_model", content: "" },
+      hasRunningTool: false,
+      isActivityDetailed: false,
+      roundGroupViews: [],
+      answerPreview: "",
+    });
+
+    expect(status).toContain("等待模型响应");
+    expect(status).toContain("第 2/8 轮");
+    expect(status).toContain("gpt-5");
+    expect(status).toMatch(/已等待 5[12]s/);
+    expect(status).toContain("上下文");
+    expect(status).toContain("响应较慢");
   });
 
   it("buildAgentLiveFooterStatus keeps wait status visible when answer slot is occupied", () => {

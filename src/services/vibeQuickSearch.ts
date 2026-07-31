@@ -231,15 +231,16 @@ export async function runQuickSearchRemote(input: QuickSearchRemoteInput): Promi
 export function groupQuickSearchItems(items: {
   files: QuickSearchItem[];
   content: QuickSearchItem[];
-  symbols: QuickSearchItem[];
+  symbols?: QuickSearchItem[];
   sessions: QuickSearchItem[];
 }): Array<{ label: string; items: QuickSearchItem[] }> {
   const groups: Array<{ label: string; items: QuickSearchItem[] }> = [];
+  const symbols = items.symbols ?? [];
   const sessionTitles = items.sessions.filter((i) => i.kind === "session-title");
   const sessionMessages = items.sessions.filter((i) => i.kind === "session-message");
   if (sessionTitles.length) groups.push({ label: "会话", items: sessionTitles });
   if (sessionMessages.length) groups.push({ label: "会话消息", items: sessionMessages });
-  if (items.symbols.length) groups.push({ label: "符号", items: items.symbols });
+  if (symbols.length) groups.push({ label: "符号", items: symbols });
   if (items.files.length) groups.push({ label: "文件", items: items.files });
   if (items.content.length) groups.push({ label: "代码", items: items.content });
   return groups;

@@ -6,10 +6,8 @@
 import type { ConsultativeTopicId } from "./intentClassifierTypes";
 import {
   PROJECT_OVERVIEW_TOPIC_RE,
-  SCHEDULED_TASK_TOPIC_RE,
   SESSION_AUDIT_TASK_RE,
   isGitWorkingTreeTopicPrompt,
-  shouldNudgeScheduledJobRegistration,
 } from "./agentStructuralPatterns";
 import {
   buildAgentStepClarificationHint,
@@ -39,18 +37,6 @@ export interface ConsultativeTopicModule {
   id: ConsultativeTopicId;
   isActive(prompt: string, history?: UserIntentHistoryMessage[]): boolean;
   buildSystemHint(prompt: string, history?: UserIntentHistoryMessage[]): string;
-}
-
-function scheduledTaskTopic(): ConsultativeTopicModule {
-  return {
-    id: "scheduled_task",
-    isActive(prompt, history) {
-      const text = prompt.trim();
-      if (!text || !SCHEDULED_TASK_TOPIC_RE.test(text)) return false;
-      return isConsultativeUserPrompt(text, history);
-    },
-    buildSystemHint: () => buildScheduledTaskConsultativeHint(),
-  };
 }
 
 function projectOverviewTopic(): ConsultativeTopicModule {
@@ -163,7 +149,6 @@ function gitWorkingTreeTopic(): ConsultativeTopicModule {
 
 const CONSULTATIVE_TOPICS: ConsultativeTopicModule[] = [
   sessionAuditTopic(),
-  scheduledTaskTopic(),
   projectOverviewTopic(),
   gitWorkingTreeTopic(),
   behaviorPurposeTopic(),
@@ -203,28 +188,6 @@ export function buildConsultativeTopicHints(
   return topicHints + uiStateHint;
 }
 
-export function isScheduledTaskTopicPrompt(prompt: string): boolean {
-  return SCHEDULED_TASK_TOPIC_RE.test(prompt.trim());
-}
-
-export function isScheduledTaskConsultativePrompt(
-  prompt: string,
-  history?: UserIntentHistoryMessage[],
-  aiTopic?: ConsultativeTopicId | null,
-): boolean {
-  return resolveActiveConsultativeTopics(prompt, history, aiTopic).some((t) => t.id === "scheduled_task");
-}
-
-export function buildScheduledTaskConsultativeHint(): string {
-  return [
-    "",
-    "【定时/调度类】用户问的是有无定时任务、何时触发、执行频率等。",
-    "read 到 job/task 实现后，须继续 trace 到调度注册/触发配置处并 read；符号与入口路径依上方【项目上下文】JSON 与 manifest 自行选用，勿凭记忆臆测。",
-    "禁止只读到 job/task 实现层即收工，须继续到调度注册/触发配置；答案须含触发时机/频率（代码中有则写明）。",
-    "探索时避免连续 list_dir 逐级下探超过 2 层，优先 grep/search_files 定位调度注册文件。",
-  ].join("\n");
-}
-
 export function buildProjectOverviewConsultativeHint(): string {
   return [
     "",
@@ -253,14 +216,3 @@ export function buildGitWorkingTreeConsultativeHint(): string {
     "禁止声称无法执行 Git 或要求用户粘贴 git status；禁止用 read_file 代替 diff 来猜测变更。",
   ].join("\n");
 }
-
-export function buildScheduledJobRegistrationNudge(jobClassNames: string[]): string {
-  const listed = jobClassNames.slice(0, 2).join("、");
-  return [
-    `【系统提示】你已 read Job 类（${listed}），但尚未 read/grep 调度注册处。`,
-    `下一轮 grep \`${jobClassNames[0]}\` 并 trace 到调度注册/触发配置（符号依【项目上下文】JSON）；read 注册入口后再作答。`,
-    "作答须含触发时机/频率（如 cron、启动即跑）；禁止只写 job 实现层业务逻辑即结束。",
-  ].join("\n");
-}
-
-export { shouldNudgeScheduledJobRegistration };

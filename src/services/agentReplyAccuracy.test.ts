@@ -4,8 +4,12 @@ import { buildReplyAccuracyHint } from "./agentReplyAccuracy";
 describe("buildReplyAccuracyHint", () => {
   it("covers trace, binary conclusions, tools, consistency, patch verify, and expression", () => {
     const hint = buildReplyAccuracyHint();
-    expect(hint).toContain("行为类问题");
-    expect(hint).toContain("至少两层");
+    expect(hint).toContain("机制事实结论");
+    expect(hint).toContain("直接决定结论的最后证据");
+    expect(hint).toContain("实际执行路径与旁路 API 区分开");
+    expect(hint).toContain("证据不足明确说不确定");
+    expect(hint).toContain("不强制固定入口、层数或中间层");
+    expect(hint).toContain("返回值、输出、异常、状态、事件、缓存结果或外部副作用");
     expect(hint).toContain("会/不会");
     expect(hint).toContain("grep 精确符号");
     expect(hint).toContain("显式更正");

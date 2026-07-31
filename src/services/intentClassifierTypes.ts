@@ -6,7 +6,6 @@ export type ConsultativeTopicId =
   | "none"
   | "general"
   | "project_overview"
-  | "scheduled_task"
   | "behavior_purpose"
   | "accuracy"
   | "ui_appearance"
@@ -22,7 +21,6 @@ export const CONSULTATIVE_TOPIC_IDS = new Set<ConsultativeTopicId>([
   "none",
   "general",
   "project_overview",
-  "scheduled_task",
   "behavior_purpose",
   "accuracy",
   "ui_appearance",
@@ -43,7 +41,6 @@ export interface UserIntentAiPayload {
   codeReview: boolean;
   behaviorContradiction: boolean;
   behaviorPurpose: boolean;
-  scheduledTask: boolean;
   accuracyQuestion: boolean;
   implementationStatus: boolean;
   agentStepClarification: boolean;

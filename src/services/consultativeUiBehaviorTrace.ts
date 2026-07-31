@@ -9,23 +9,8 @@ export const SPECULATIVE_CODE_ANALYSIS_RE =
 const SHALLOW_STATE_INDEPENDENCE_RE =
   /(?:两个独立|互不干扰|不会触动|只改\s*\w+|存储在不同)/;
 
-/** State/logic layer vs view/presentation layer — stack-agnostic path shapes. */
-const STATE_LAYER_PATH_RE =
-  /(?:^|\/)(?:composables|hooks|stores|state|services|models|lib|domain)(?:\/|$)/i;
-const VIEW_LAYER_PATH_RE =
-  /(?:^|\/)(?:views|pages|components|screens|ui|app|widgets)(?:\/|$)/i;
-
-function normalizeTracePath(filePath: string): string {
-  return filePath.replace(/\\/g, "/");
-}
-
-function pathInStateLayer(filePath: string): boolean {
-  return STATE_LAYER_PATH_RE.test(normalizeTracePath(filePath));
-}
-
-function pathInViewLayer(filePath: string): boolean {
-  return VIEW_LAYER_PATH_RE.test(normalizeTracePath(filePath));
-}
+const RESULT_EVIDENCE_RE =
+  /(?:if\s*\(|switch\s*\(|\b(?:return|throw|catch|case|when|unless)\b|==|!=|===|!==|条件|分支|调用|返回|抛出|异常|(?:状态|输出|结果).{0,8}(?:变化|更新|赋值|为|是)|(?:更新|修改|设置|触发).{0,8}(?:为|成|=))/i;
 
 const CITED_FILE_PATH_RE =
   /[`("']?((?:[\w.-]+\/)+[\w.-]+\.(?:vue|tsx?|jsx?|ts|cs|scss|css))[`)"']?/gi;
@@ -93,18 +78,18 @@ export function isShallowStateIndependenceClaim(
 ): boolean {
   const body = replyText.replace(/\s*\[图已理解\]\s*/g, "").trim();
   if (!SHALLOW_STATE_INDEPENDENCE_RE.test(body)) return false;
-  if (/watch\s*\(|\.value\s*=|collapse|expand|emit\s*\(/i.test(body)) return false;
+  if (RESULT_EVIDENCE_RE.test(body)) return false;
 
   const grepBlob = grepPatterns.join("\n");
-  if (/watch|collapse|expand/i.test(grepBlob)) return false;
+  if (RESULT_EVIDENCE_RE.test(grepBlob)) return false;
 
+  // A second read is evidence that exploration continued, regardless of the
+  // repository's directory naming. Do not infer architecture from path names.
   if (consultativeReadPaths.length >= 2) {
-    const hasStateLayer = consultativeReadPaths.some(pathInStateLayer);
-    const hasViewLayer = consultativeReadPaths.some(pathInViewLayer);
-    if (hasStateLayer && hasViewLayer) return false;
+    return false;
   }
 
-  if (consultativeReadPaths.length === 1 && pathInViewLayer(consultativeReadPaths[0]!)) {
+  if (consultativeReadPaths.length === 1) {
     return true;
   }
 
@@ -176,8 +161,8 @@ export function buildConsultativeUiBehaviorTraceHint(): string {
   return [
     "",
     "【UI 状态·行为题】用户问切换/返回后某面板或区域是否仍展开/可见/保持原状。",
-    "须 grep 可见 tab 文案或 mode/composable 符号 → read 切换 handler → 再 grep/read watch、collapse/expand 或 emit 副作用。",
-    "禁止只断言「两个 ref 独立、互不干扰」；mode 变更时可能有 watch 主动改另一状态。",
+    "须 grep 可见文案或相关符号 → read 切换处理逻辑 → 再核对可能改变目标结果的条件、调用关系和状态/输出更新。",
+    "禁止只断言「两个状态独立、互不干扰」；必须说明代码中的证据和适用前提。",
     "行号须来自 read_file；read 失败的路径禁止引用；勿沿用会话历史中已证伪的文件路径。",
   ].join("\n");
 }
@@ -193,10 +178,10 @@ export function buildConsultativeUiBehaviorTraceRetryHint(
       ? `read 失败路径：${failedPaths.slice(-3).join("、")}——禁止继续引用。`
       : "";
   return [
-    "【UI 状态·trace 未完成】你在未核对副作用的情况下给出了代码结论或「独立状态」断言。",
+    "【UI 状态·trace 未完成】你在未核对相关条件、调用关系或结果更新的情况下给出了代码结论或「独立状态」断言。",
     listed,
     failed,
-    "请继续：grep tab/mode 符号 → read 切换入口 → grep/read watch 或 collapse/expand 调用方，再输出最终答案。",
+    "请继续：grep 相关符号 → read 切换处理逻辑 → 核对可能改变目标结果的条件、调用关系和状态/输出更新，再输出最终答案。",
     "若与上轮结论矛盾，须显式更正；禁止凭记忆写行号或虚构路径。",
   ].join("");
 }

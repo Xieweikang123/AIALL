@@ -21,7 +21,6 @@ import {
 } from "../orchestration/generic/userIntentClassifiers";
 import { isConsultativeRootAction } from "../orchestration/generic/actionClassifier";
 import { isQuotedAmendPrompt } from "../orchestration/generic/quotedAmendIntent";
-import { isScheduledTaskTopicPrompt } from "./agentConsultativeTopics";
 import { PROJECT_OVERVIEW_TOPIC_RE } from "./agentStructuralPatterns";
 import {
   isPendingPlanAmendPrompt,
@@ -42,7 +41,6 @@ function inferConsultativeTopicFromRules(
 ): ConsultativeTopicId {
   const text = prompt.trim();
   if (isSessionAuditPrompt(text)) return "session_audit";
-  if (isScheduledTaskTopicPrompt(text)) return "scheduled_task";
   if (isBehaviorPurposePrompt(text, history)) return "behavior_purpose";
   if (isAccuracyConsultativePrompt(text)) return "accuracy";
   if (isCodeReviewPrompt(text)) return "code_review";
@@ -97,7 +95,6 @@ export function classifyUserIntentFromRules(input: ResolveUserIntentInput): Reso
     codeReview: isCodeReviewPrompt(text),
     behaviorContradiction: isBehaviorContradictionPrompt(text, history),
     behaviorPurpose: isBehaviorPurposePrompt(text, history),
-    scheduledTask: isScheduledTaskTopicPrompt(text),
     accuracyQuestion: isAccuracyConsultativePrompt(text),
     implementationStatus: isImplementationStatusPrompt(text),
     agentStepClarification: isAgentStepClarificationPrompt(text),
@@ -131,7 +128,6 @@ function buildResolvedFromAi(ai: UserIntentAiPayload, rules: ResolvedUserIntent)
     codeReview: ai.codeReview,
     behaviorContradiction: ai.behaviorContradiction,
     behaviorPurpose: ai.behaviorPurpose,
-    scheduledTask: ai.scheduledTask,
     accuracyQuestion: ai.accuracyQuestion,
     implementationStatus: ai.implementationStatus,
     agentStepClarification: ai.agentStepClarification,

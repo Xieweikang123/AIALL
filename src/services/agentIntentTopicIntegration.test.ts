@@ -4,7 +4,6 @@ import {
   classifyUserIntentFromRules,
 } from "./agentIntentClassifier";
 import { buildConsultativeTopicHints } from "./agentConsultativeTopics";
-import { FIXTURE_SCHEDULED_TASK_QUESTION } from "./agentTestFixtures";
 
 const FIXTURE_SESSION_AUDIT =
   "【任务】请自行排查以下 AIALL Vibe 会话中 Agent 回复的准确度问题。会话文件：aiall/vibe-chat-sessions/chat-123.json";
@@ -38,16 +37,5 @@ describe("intent + consultative topic integration", () => {
 
     expect(intent.consultativeTopic).toBe("session_audit");
     expect(hints).toContain("会话审计");
-  });
-
-  it("AI topic id routes to module even when prompt shape is generic", () => {
-    const hints = buildConsultativeTopicHints("随便问问", undefined, "scheduled_task");
-    expect(hints).toContain("项目上下文");
-    expect(hints).not.toContain("项目概览");
-  });
-
-  it("scheduled task still works via shape", () => {
-    const hints = buildConsultativeTopicHints(FIXTURE_SCHEDULED_TASK_QUESTION);
-    expect(hints).toContain("定时/调度");
   });
 });

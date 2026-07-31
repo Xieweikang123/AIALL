@@ -31,7 +31,7 @@ export function isEnumListingWithoutUsageReply(text: string): boolean {
   return !hasBehaviorUsageEvidenceInReply(body);
 }
 
-/** User-visible reply cites conditional usage (not just restating definitions). */
+/** User-visible reply cites runtime usage or another concrete result path. */
 export function hasBehaviorUsageEvidenceInReply(text: string): boolean {
   const body = text.replace(/\s*\[图已理解\]\s*/g, "").trim();
   if (!body) return false;
@@ -53,7 +53,7 @@ export function hasUnfulfilledExplorePreamble(text: string): boolean {
 export function buildBehaviorPurposeTraceHint(): string {
   return [
     "【行为·用途/作用】用户问字段/枚举/类型的实际用途，不是再要定义列表。",
-    "grep 符号命中后须 read 引用处（if/switch/分支逻辑、调用方 handler），说明「满足何条件 → 触发何副作用」。",
+    "grep 符号命中后须 read 引用处（条件分支、调用关系或结果构造），说明「满足何条件 → 得到什么结果」；结果可以是返回值、异常、状态、事件或外部影响。",
     "禁止只复述枚举值；禁止「可能…作为状态标识」「具体使用位置需要查看」等推给用户查。",
     "若已 read 到分支逻辑，须在答复中引用条件与结果（可写方法名与分支差异）。",
   ].join("");
@@ -65,7 +65,7 @@ export function buildBehaviorPurposeTraceRetryHint(readPaths: string[]): string 
       ? `已 read：${readPaths.slice(-4).join("、")}。`
       : "尚未 read 任何文件。";
   return [
-    "【行为·用途 trace 未完成】答复仍在猜测或重复枚举定义，未说明代码中的实际分支与副作用。",
+    "【行为·用途 trace 未完成】答复仍在猜测或重复枚举定义，未说明代码中的实际分支、调用关系或结果。",
     listed,
     "请继续：grep 枚举/字段符号 → read_file 引用处完整 if/else 或调用方 → 再输出最终答案。",
     "禁止写「可能需要查看引用」；禁止用「可能…流程中作为标识」代替已读逻辑。",

@@ -7,7 +7,6 @@ import {
 } from "../../shared/agentExplorationBudget";
 import { classifyUserIntentFromRules } from "./intentClassifierRules";
 import type { ResolvedUserIntent } from "./intentClassifierTypes";
-import { isScheduledTaskConsultativePrompt } from "./agentConsultativeTopics";
 import {
   detectUserFailureReport,
   historyRecentUserFailureReport,
@@ -52,7 +51,6 @@ export interface AgentRunPolicy {
   locateStatusFollowUpRun: boolean;
   readOnlyBuildRun: boolean;
   behaviorPurposeRun: boolean;
-  scheduledTaskConsultativeRun: boolean;
   accuracyConsultativeRun: boolean;
   consultativeVisionRun: boolean;
   consultativeUiAppearanceRun: boolean;
@@ -202,16 +200,6 @@ export function resolveAgentRunPolicy(input: ResolveAgentRunPolicyInput): AgentR
   const behaviorPurposeRun =
     !isPlanExplore && !isExecutePlan && !implementFollowUpRun && userIntent.behaviorPurpose;
 
-  const scheduledTaskConsultativeRun =
-    !isPlanExplore &&
-    !isExecutePlan &&
-    !implementFollowUpRun &&
-    isScheduledTaskConsultativePrompt(
-      stripQuotedReplyPrefix(effectiveTaskPrompt.trim()),
-      history,
-      userIntent.consultativeTopic,
-    );
-
   const accuracyConsultativeRun = readOnlyBuildRun && userIntent.accuracyQuestion;
 
   const consultativeVisionRun = hasImage && (isReadOnlyAgent || readOnlyBuildRun);
@@ -261,7 +249,6 @@ export function resolveAgentRunPolicy(input: ResolveAgentRunPolicyInput): AgentR
     locateStatusFollowUpRun,
     readOnlyBuildRun,
     behaviorPurposeRun,
-    scheduledTaskConsultativeRun,
     accuracyConsultativeRun,
     consultativeVisionRun,
     consultativeUiAppearanceRun,

@@ -21,6 +21,7 @@ import { resolveModelWaitElapsedSeconds, type AgentRunLiveState } from "./agentR
 import { isAgentConnectPhase } from "./agentRecovery";
 import type { AgentLogLineItem } from "../types/agentLog";
 import type { VibeChatMessage } from "../types/vibeChat";
+import { formatCharCount } from "../utils/vibeHelpers";
 
 export type AgentCompactStatusInput = {
   msg: VibeChatMessage;
@@ -265,11 +266,21 @@ export function buildCursorCompactLiveStatus(input: AgentCompactStatusInput): st
 
   const turn = live.turn ?? msg.agentTurn;
   if (turn) parts.push(`第 ${turn} 轮`);
+  if (live.maxTurns && turn && !parts.some((part) => part.includes("/"))) {
+    parts[parts.length - 1] = `第 ${turn}/${live.maxTurns} 轮`;
+  }
+  if (live.model) parts.push(live.model.split("/").pop() || live.model);
   if (waitingModel) {
     const elapsed = resolveModelWaitElapsedSeconds(live);
     if (elapsed !== null) {
       parts.push(`已等待 ${elapsed}s`);
-      if (elapsed > 45) parts.push("模型较慢，可取消后 @ 具体文件重试");
+      if (elapsed > 45) parts.push("响应较慢，可停止后重试");
+    }
+    const contextChars = live.contextChars ?? msg.contextChars ?? 0;
+    if (contextChars > 0) parts.push(`上下文 ${formatCharCount(contextChars)}`);
+    if (live.phase === "retrying_model" && live.retryAttempt) {
+      const maxRetry = live.retryMaxAttempts ? `/${live.retryMaxAttempts - 1}` : "";
+      parts.push(`重试 ${live.retryAttempt}${maxRetry}`);
     }
   } else if (live.detail?.trim()) {
     parts.push(live.detail.trim());

@@ -31,7 +31,6 @@ export interface AgentRegressionExpect {
   codeReviewRun?: boolean;
   sameIssueFollowUpRun?: boolean;
   behaviorContradictionRun?: boolean;
-  scheduledTaskConsultativeRun?: boolean;
   quotedAmendRun?: boolean;
   exploreHardCap?: number;
   maxContextChars?: number;
@@ -91,7 +90,6 @@ export const AGENT_REGRESSION_RUST_POLICY_FIELDS = new Set<string>([
   "codeReviewRun",
   "sameIssueFollowUpRun",
   "behaviorContradictionRun",
-  "scheduledTaskConsultativeRun",
   "quotedAmendRun",
   "exploreHardCap",
   "maxContextChars",
@@ -291,7 +289,6 @@ export function evaluateAgentRegressionCase(caseInput: AgentRegressionCase): Age
     codeReviewRun: policy.codeReviewRun,
     sameIssueFollowUpRun: policy.sameIssueFollowUpRun,
     behaviorContradictionRun: policy.behaviorContradictionRun,
-    scheduledTaskConsultativeRun: policy.scheduledTaskConsultativeRun,
     quotedAmendRun: policy.quotedAmendRun,
     exploreHardCap: policy.exploreHardCap,
     maxContextChars: policy.maxContextChars,

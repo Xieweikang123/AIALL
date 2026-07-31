@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   FIXTURE_CONTRADICTION_USER,
   FIXTURE_PRIOR_DENIAL,
-  FIXTURE_SCHEDULED_TASK_QUESTION,
 } from "./agentTestFixtures";
 import {
   CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS,
@@ -170,18 +169,5 @@ describe("agent-regression.json", () => {
       expect.fail(formatAgentRegressionReport(report));
     }
     expect(report.passRate).toBe(1);
-  });
-
-  it("evaluates individual scheduled-task fixture", () => {
-    const result = evaluateAgentRegressionCase({
-      id: "scheduled-task-spot",
-      prompt: FIXTURE_SCHEDULED_TASK_QUESTION,
-      mode: "build",
-      expect: {
-        scheduledTaskConsultativeRun: true,
-        readOnlyBuildRun: true,
-      },
-    });
-    expect(result.passed).toBe(true);
   });
 });

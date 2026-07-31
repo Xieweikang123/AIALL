@@ -12,8 +12,3 @@ export const FIXTURE_CONTRADICTION_USER =
 export const FIXTURE_LOCATE_EVIDENCE =
   "弹窗在 `src/components/foo/BarPanel.vue`，`.dropdown-panel { background: var(--bg-primary); }` 为实色。";
 
-export const FIXTURE_SCHEDULED_TASK_QUESTION = "有没有跑批数据的定时任务吗？";
-
-export const FIXTURE_FOO_BACKFILL_JOB = "src/module/Tasks/FooBackfillJob.cs";
-
-export const FIXTURE_BACKFILL_SERVICE = "ISomeBackfillService";

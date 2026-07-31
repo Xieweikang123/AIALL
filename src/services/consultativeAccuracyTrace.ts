@@ -4,37 +4,16 @@ export function normalizeConsultativeReadPath(filePath: string): string {
   return filePath.replace(/\\/g, "/").trim().toLowerCase();
 }
 
-/** Entry layer: composable, component, or view handling user action. */
-export function isConsultativeEntryLayerPath(filePath: string): boolean {
-  const p = normalizeConsultativeReadPath(filePath);
-  return /(?:^|\/)src\/(?:composables|components|views)\//.test(p);
-}
-
-/** Client API or service forwarding to backend. */
-export function isConsultativeClientLayerPath(filePath: string): boolean {
-  const p = normalizeConsultativeReadPath(filePath);
-  return /(?:^|\/)src\/services\//.test(p);
-}
-
-/** Backend / desktop runtime where prompt/data is assembled (Rust agent or remaining Node fixtures). */
-export function isConsultativeBackendLayerPath(filePath: string): boolean {
-  const p = normalizeConsultativeReadPath(filePath);
-  return (
-    /(?:^|\/)src-tauri\//.test(p) ||
-    /(?:^|\/)server\//.test(p) ||
-    /middleware/.test(p)
-  );
-}
-
 /**
- * Accuracy questions need entry + (client or backend) + backend/prompt layer evidence.
- * At least two distinct reads spanning entry and implementation/prompt construction.
+ * The guard cannot infer architectural layers from file names. A repository may use
+ * any directory layout, so it only rejects a single-file trace; call-graph evidence
+ * is established by the model's grep/read work and the final answer.
  */
 export function hasConsultativeAccuracyTraceDepth(readPaths: string[]): boolean {
-  if (readPaths.length < 2) return false;
-  const hasEntry = readPaths.some(isConsultativeEntryLayerPath);
-  const hasBackend = readPaths.some(isConsultativeBackendLayerPath);
-  return hasEntry && hasBackend;
+  const distinctPaths = new Set(
+    readPaths.map(normalizeConsultativeReadPath).filter(Boolean),
+  );
+  return distinctPaths.size >= 2;
 }
 
 export function isDeferredBehaviorAnswerReply(text: string): boolean {
@@ -60,8 +39,8 @@ export function isSpeculativeImplementationReply(text: string): boolean {
 
 export function buildConsultativeAccuracyTraceHint(): string {
   return [
-    "【准确度·须 trace 到 prompt 构造】用户问输出/行为是否准确，不是 UI 定位题。",
-    "grep 命中入口后须 read 并沿调用链向下：composable/组件 → API 客户端（若有）→ backend 路由/middleware 中 prompt 或数据处理处。",
+    "【准确度·须完成证据链】用户问输出/行为是否准确，不是 UI 定位题。",
+    "grep 命中相关符号后须按实际调用关系继续 read 定义、调用方/被调用方、条件分支与最终结果点；不要假设固定目录、框架或 backend/middleware 层。",
     "回答须基于已读代码说明实际注入的上下文与条件；禁止用「如果 prompt 包含…」猜测；禁止写「想让我深入看一下」或「基于已有信息直接回答」。",
   ].join("");
 }
@@ -72,9 +51,9 @@ export function buildConsultativeAccuracyTraceRetryHint(readPaths: string[]): st
       ? `已 read：${readPaths.slice(-4).join("、")}。`
       : "尚未 read 任何文件。";
   return [
-    "【准确度·trace 未完成】尚未读到 backend/middleware 的 prompt 或数据处理实现，不能结案。",
+    "【准确度·trace 未完成】当前只读到局部代码，尚未形成足以证明结论的证据链，不能结案。",
     listed,
-    "请继续：grep 客户端调用的 API 路径或 handler 符号 → read_file backend/middleware 中 prompt 构造处 → 再给出最终答案。",
+    "请继续：根据已读符号 grep 其调用方/被调用方 → read_file 决定结果的条件与最终结果点 → 再给出最终答案。",
     "禁止用条件句猜测；禁止反问用户要不要继续查。",
   ].join("");
 }
