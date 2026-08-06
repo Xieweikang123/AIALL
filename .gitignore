@@ -44,3 +44,7 @@ tmp/
 ## debug artifacts
 .debug/
 .vibe-chat-debug.json
+
+## local user data (icon templates screenshots etc.)
+data/icon-templates/images/*
+!data/icon-templates/images/.gitkeep
