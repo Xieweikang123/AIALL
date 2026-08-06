@@ -19,10 +19,7 @@ AIALL 是一个开源的 **Cursor 类通用编程助手** 桌面应用（Tauri 2
 
 ## 界面预览
 
-> 主 IDE（Vibe Coding）布局示意：文件树 + Monaco 编辑器 + AI 助手 + 终端。
-> 若需更逼真的展示，可自行补充真实界面截图到 `docs/screenshots/`。
-
-<img src="docs/ui-preview.svg" alt="AIALL 主界面示意" width="900">
+<img src="docs/screenshots/ui-preview.png" alt="AIALL 主界面" width="900">
 
 ## 环境要求
 
