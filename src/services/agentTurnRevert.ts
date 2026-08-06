@@ -1,9 +1,9 @@
-import type { FileDiff } from "../types/vibeChat";
+import type { TurnFileDiff } from "../types/vibeChat";
 import { createItem, deleteItem, readFile, writeFile } from "./vibeCodingClient";
 import { isDeleteNotFoundError } from "./vibeAgentTurnApply";
 
 export async function revertTurnFileDiffs(params: {
-  turnFileDiffs: Record<string, FileDiff>;
+  turnFileDiffs: Record<string, TurnFileDiff>;
   projectPath: string;
   resolveFullPathFromRel: (relPath: string) => string;
   removeOpenTabForPath: (fullPath: string) => void;
@@ -32,7 +32,7 @@ export async function revertTurnFileDiffs(params: {
 }
 
 export async function applyTurnFileDiffs(params: {
-  turnFileDiffs: Record<string, FileDiff>;
+  turnFileDiffs: Record<string, TurnFileDiff>;
   projectPath: string;
   resolveFullPathFromRel: (relPath: string) => string;
   removeOpenTabForPath: (fullPath: string) => void;

@@ -215,7 +215,7 @@ export async function runQuickSearchRemote(input: QuickSearchRemoteInput): Promi
     input.grepContent(input.projectPath.trim(), query),
     input.searchSymbols
       ? input.searchSymbols(input.projectPath.trim(), query)
-      : Promise.resolve({ ok: true, results: [] }),
+      : Promise.resolve({ ok: true, results: [], error: undefined }),
   ]);
 
   const errors = [fileResult.error, grepResult.error, symbolResult.error].filter(Boolean);

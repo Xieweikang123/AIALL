@@ -1,6 +1,5 @@
 import { debugLog } from "../../utils/debugLog";
 import { toErrorMessage } from "../../utils/vibeHelpers";
-import { debugLog } from "../../utils/debugLog";
 import { fetchGitStatus, fetchGitLog } from "../../services/vibeGitClient";
 import type { GitPanelState } from "./createGitPanelState";
 
