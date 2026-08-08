@@ -238,9 +238,6 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
         (indexEmpty && diskOk)
         || (activeId ? projectChatNeedsDiskRestore(project, activeId) : false)
         || (diskOk && diskChatStoreAheadOfLocalIndex(project, diskIndex.data.sessions));
-      // #region agent log — hydrateProjectChatFromDisk
-      fetch('http://127.0.0.1:7609/ingest/b47c6406-f957-4d1a-8fa6-a213745e4c76',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c47255'},body:JSON.stringify({sessionId:'c47255',runId:'switch',hypothesisId:'F',location:'useChatSessionStore.ts:225',message:'hydrateProjectChatFromDisk:check',data:{project:project,diskOk:diskOk,diskProjectPath:diskOk ? diskIndex.data.projectPath : undefined,diskSessionCount:diskOk ? diskIndex.data.sessions.length : undefined,indexEmpty:indexEmpty,activeId:activeId,needsDisk:needsDisk},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       if (!needsDisk) return false;
       if (indexEmpty) {
         await loadFullChatStoreFromDisk(project);
@@ -255,15 +252,9 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     activeSessionId: string;
     messages: PersistedChatMessage[];
   }> {
-    // #region agent log — loadProjectChatState entry
-    fetch('http://127.0.0.1:7609/ingest/b47c6406-f957-4d1a-8fa6-a213745e4c76',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c47255'},body:JSON.stringify({sessionId:'c47255',runId:'switch',hypothesisId:'E',location:'useChatSessionStore.ts:249',message:'loadProjectChatState:entry',data:{project:project},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     await hydrateProjectChatFromDisk(project);
     const activeId = resolveActiveVibeChatSessionId(project);
     const msgs = loadVibeChatHistory(project);
-    // #region agent log — loadProjectChatState result
-    fetch('http://127.0.0.1:7609/ingest/b47c6406-f957-4d1a-8fa6-a213745e4c76',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'c47255'},body:JSON.stringify({sessionId:'c47255',runId:'switch',hypothesisId:'E',location:'useChatSessionStore.ts:253',message:'loadProjectChatState:result',data:{project:project,activeId:activeId,msgCount:msgs.length,msgSample:msgs.slice(0,2).map(m=>({role:m.role,content:String(m.content).slice(0,80)}))},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     return { activeSessionId: activeId, messages: msgs };
   }
 

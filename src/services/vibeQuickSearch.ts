@@ -23,9 +23,13 @@ export interface QuickSearchLocalInput {
   sessionMessages: Map<string, PersistedChatMessage[]>;
 }
 
+export type QuickSearchScope = "all" | "files";
+
 export interface QuickSearchRemoteInput {
   projectPath: string;
   query: string;
+  /** Restrict search to file-name matches only (skips content/symbol/session search). */
+  scope?: QuickSearchScope;
   searchFiles: (dir: string, q: string) => Promise<{ ok: boolean; results: SearchResult[]; error?: string }>;
   grepContent: (dir: string, q: string) => Promise<{ ok: boolean; results: GrepMatch[]; error?: string }>;
   searchSymbols?: (dir: string, q: string) => Promise<{ ok: boolean; results: Array<{ name: string; kind: string; file: string; line: number }>; error?: string }>;
@@ -166,6 +170,22 @@ export async function runQuickSearchRemote(input: QuickSearchRemoteInput): Promi
     return { files: [], content: [], symbols: [], sessions: [] };
   }
 
+  if (input.scope === "files") {
+    const fileResult = await input.searchFiles(input.projectPath.trim(), query);
+    return {
+      files: fileResult.ok ? mapFileResults(fileResult.results) : [],
+      content: [],
+      symbols: [],
+      sessions: [],
+      error: fileResult.ok ? undefined : fileResult.error,
+    };
+  }
+
+  // Full-content scans (grep / symbol index) are expensive; a 1-char query
+  // rarely justifies a whole-project scan. File-name & in-memory session
+  // search still run for short queries.
+  const scanContent = query.length >= 2;
+
   const localSessions = searchSessionsLocally({
     query,
     sessions: input.sessions,
@@ -178,21 +198,33 @@ export async function runQuickSearchRemote(input: QuickSearchRemoteInput): Promi
     return !loaded?.length;
   }).slice(0, MAX_DISK_SESSION_FETCH);
 
+  const [fileResult, grepResult, symbolResult, diskFetched] = await Promise.all([
+    input.searchFiles(input.projectPath.trim(), query),
+    scanContent
+      ? input.grepContent(input.projectPath.trim(), query)
+      : Promise.resolve({ ok: true, results: [], error: undefined }),
+    scanContent && input.searchSymbols
+      ? input.searchSymbols(input.projectPath.trim(), query)
+      : Promise.resolve({ ok: true, results: [], error: undefined }),
+    (async () => {
+      if (!sessionsNeedingDisk.length) return [] as Array<readonly [string, PersistedChatMessage[]]>;
+      const fetched = await Promise.all(
+        sessionsNeedingDisk.map(async (s) => {
+          try {
+            const messages = await input.loadSessionMessages(s.id);
+            return [s.id, messages] as const;
+          } catch {
+            return [s.id, [] as PersistedChatMessage[]] as const;
+          }
+        }),
+      );
+      return fetched;
+    })(),
+  ]);
+
   const diskMessageMap = new Map(input.sessionMessages);
-  if (sessionsNeedingDisk.length) {
-    const fetched = await Promise.all(
-      sessionsNeedingDisk.map(async (s) => {
-        try {
-          const messages = await input.loadSessionMessages(s.id);
-          return [s.id, messages] as const;
-        } catch {
-          return [s.id, [] as PersistedChatMessage[]] as const;
-        }
-      }),
-    );
-    for (const [sessionId, messages] of fetched) {
-      if (messages.length) diskMessageMap.set(sessionId, messages);
-    }
+  for (const [sessionId, messages] of diskFetched) {
+    if (messages.length) diskMessageMap.set(sessionId, messages);
   }
 
   const mergedSessions = searchSessionsLocally({
@@ -209,14 +241,6 @@ export async function runQuickSearchRemote(input: QuickSearchRemoteInput): Promi
       sessions.push(item);
     }
   }
-
-  const [fileResult, grepResult, symbolResult] = await Promise.all([
-    input.searchFiles(input.projectPath.trim(), query),
-    input.grepContent(input.projectPath.trim(), query),
-    input.searchSymbols
-      ? input.searchSymbols(input.projectPath.trim(), query)
-      : Promise.resolve({ ok: true, results: [], error: undefined }),
-  ]);
 
   const errors = [fileResult.error, grepResult.error, symbolResult.error].filter(Boolean);
   return {

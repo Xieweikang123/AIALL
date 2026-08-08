@@ -261,10 +261,6 @@ export function buildInlineAgentFeed(input: InlineAgentFeedInput): InlineAgentFe
   const collapsed = collapseInlineFeedItems(inline, collapseOptions);
   const items = stripInlineStatusItems(collapsed, input.isRunning);
 
-  // #region agent log
-  fetch('http://127.0.0.1:7609/ingest/b47c6406-f957-4d1a-8fa6-a213745e4c76',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7a4ef6'},body:JSON.stringify({sessionId:'7a4ef6',location:'agentInlineFeed.ts:268',message:'buildInlineAgentFeed final',data:{itemKinds:items.map(i=>i.kind).join(','),firstKind:items[0]?.kind,firstText:items[0]?.kind==='text'?items[0].text.slice(0,80):'',itemCount:items.length,toolCount:countToolsInInlineFeed(items)},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
-
   return {
     items,
     hasAnswer: resolveInlineHasContent(items),

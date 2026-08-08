@@ -27,6 +27,26 @@
           <span v-if="loading" class="quick-search-spinner" aria-hidden="true" />
         </div>
 
+        <div class="quick-search-scope" role="group" aria-label="搜索范围">
+          <button
+            type="button"
+            class="quick-search-scope-btn"
+            :class="{ active: scope === 'all' }"
+            @click="setScope('all')"
+          >
+            全部
+          </button>
+          <button
+            type="button"
+            class="quick-search-scope-btn"
+            :class="{ active: scope === 'files' }"
+            :title="scope === 'files' ? '仅按文件名匹配，最快' : '仅搜索文件名'"
+            @click="setScope('files')"
+          >
+            仅文件
+          </button>
+        </div>
+
         <p v-if="error" class="quick-search-error" role="alert">{{ error }}</p>
 
         <div
@@ -88,7 +108,9 @@ import {
   normalizeSearchQuery,
   runQuickSearchRemote,
   type QuickSearchItem,
+  type QuickSearchScope,
 } from "../../services/vibeQuickSearch";
+import { lsGet, lsSet } from "../../utils/localStorageSafe";
 import type { PersistedChatMessage, VibeChatSessionMeta } from "../../services/vibeChatStorage";
 import { grepContent, searchFiles, searchSymbols, fetchSessionMessages } from "../../services/vibeCodingClient";
 import { peekVibeChatSessionMessages } from "../../services/vibeChatStorage";
@@ -113,6 +135,7 @@ const emit = defineEmits<{
 registerEscapeDismiss(() => props.open, () => emit("close"), ESCAPE_DISMISS_PRIORITY.MODAL);
 
 const query = ref("");
+const scope = ref<QuickSearchScope>(initialScope());
 const loading = ref(false);
 const error = ref("");
 const selectedIndex = ref(0);
@@ -123,7 +146,33 @@ const resultFiles = ref<QuickSearchItem[]>([]);
 const resultContent = ref<QuickSearchItem[]>([]);
 const resultSymbols = ref<QuickSearchItem[]>([]);
 const resultSessions = ref<QuickSearchItem[]>([]);
-const diskSessionCache = ref(new Map<string, PersistedChatMessage[]>());
+
+const QUICK_SEARCH_SCOPE_KEY = "vibe-quick-search-scope";
+const DISK_SESSION_CACHE_TTL = 60_000;
+const diskSessionCache = new Map<string, { fetchedAt: number; messages: PersistedChatMessage[] }>();
+
+function initialScope(): QuickSearchScope {
+  return lsGet(QUICK_SEARCH_SCOPE_KEY) === "files" ? "files" : "all";
+}
+
+function sessionCacheKey(projectPath: string, sessionId: string): string {
+  return `${projectPath}::${sessionId}`;
+}
+
+function readDiskSessionCache(projectPath: string, sessionId: string): PersistedChatMessage[] {
+  const key = sessionCacheKey(projectPath, sessionId);
+  const entry = diskSessionCache.get(key);
+  if (!entry) return [];
+  if (Date.now() - entry.fetchedAt > DISK_SESSION_CACHE_TTL) {
+    diskSessionCache.delete(key);
+    return [];
+  }
+  return entry.messages;
+}
+
+function writeDiskSessionCache(projectPath: string, sessionId: string, messages: PersistedChatMessage[]) {
+  diskSessionCache.set(sessionCacheKey(projectPath, sessionId), { fetchedAt: Date.now(), messages });
+}
 
 let searchToken = 0;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -155,7 +204,7 @@ function buildSessionMessagesMap(): Map<string, PersistedChatMessage[]> {
       map.set(session.id, live);
       continue;
     }
-    const cached = diskSessionCache.value.get(session.id);
+    const cached = readDiskSessionCache(props.projectPath, session.id);
     if (cached?.length) {
       map.set(session.id, cached);
       continue;
@@ -191,20 +240,25 @@ async function runSearch() {
   loading.value = true;
   error.value = "";
 
+  const filesOnly = scope.value === "files";
+  const sessions = filesOnly ? [] : props.sessionList;
+  const sessionMessages = filesOnly ? new Map() : buildSessionMessagesMap();
+
   try {
     const result = await runQuickSearchRemote({
       projectPath: props.projectPath,
       query: q,
-      sessions: props.sessionList,
-      sessionMessages: buildSessionMessagesMap(),
+      scope: scope.value,
+      sessions,
+      sessionMessages,
       searchFiles,
       grepContent,
       searchSymbols: (dir, queryText) => searchSymbols(dir, queryText),
       loadSessionMessages: async (sessionId) => {
-        const cached = diskSessionCache.value.get(sessionId);
-        if (cached?.length) return cached;
         const live = props.getLiveSessionMessages(sessionId);
         if (live?.length) return live;
+        const cached = readDiskSessionCache(props.projectPath, sessionId);
+        if (cached?.length) return cached;
         const peeked = peekVibeChatSessionMessages(props.projectPath, sessionId);
         if (peeked.length) return peeked;
         const remote = await fetchSessionMessages(props.projectPath, sessionId);
@@ -212,9 +266,7 @@ async function runSearch() {
           ? (remote.data.messages as PersistedChatMessage[])
           : [];
         if (messages.length) {
-          const next = new Map(diskSessionCache.value);
-          next.set(sessionId, messages);
-          diskSessionCache.value = next;
+          writeDiskSessionCache(props.projectPath, sessionId, messages);
         }
         return messages;
       },
@@ -237,6 +289,13 @@ function scheduleSearch() {
     debounceTimer = null;
     void runSearch();
   }, 180);
+}
+
+function setScope(next: QuickSearchScope) {
+  if (scope.value === next) return;
+  scope.value = next;
+  lsSet(QUICK_SEARCH_SCOPE_KEY, next);
+  scheduleSearch();
 }
 
 function iconForKind(kind: QuickSearchItem["kind"]): string {
@@ -314,7 +373,6 @@ watch(
       error.value = "";
       loading.value = false;
       selectedIndex.value = 0;
-      diskSessionCache.value = new Map();
       if (debounceTimer) {
         clearTimeout(debounceTimer);
         debounceTimer = null;
@@ -392,6 +450,34 @@ watch(query, () => {
   border-top-color: #58a6ff;
   border-radius: 50%;
   animation: quick-search-spin 0.75s linear infinite;
+}
+
+.quick-search-scope {
+  display: flex;
+  gap: 4px;
+  padding: 8px 16px 0;
+}
+
+.quick-search-scope-btn {
+  padding: 3px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(139, 148, 158, 0.85);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.quick-search-scope-btn:hover {
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.quick-search-scope-btn.active {
+  color: #58a6ff;
+  border-color: rgba(88, 166, 255, 0.45);
+  background: rgba(88, 166, 255, 0.12);
 }
 
 @keyframes quick-search-spin {
