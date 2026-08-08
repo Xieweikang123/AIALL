@@ -10,6 +10,7 @@ export type GitPanelUiRefs = {
   gitUntrackedOpen: Ref<boolean>;
   gitStashOpen: Ref<boolean>;
   gitAheadCommitsOpen: Ref<boolean>;
+  gitBehindCommitsOpen: Ref<boolean>;
   batchSectionOpen: Ref<boolean>;
   gitStashSectionOpen: Ref<boolean>;
   gitLocalChangesOpen: Ref<boolean>;
@@ -45,6 +46,7 @@ export function snapshotGitPanelUi(git: GitPanelUiRefs): PersistedGitPanelUi {
     untrackedOpen: git.gitUntrackedOpen.value,
     stashOpen: git.gitStashOpen.value,
     aheadCommitsOpen: git.gitAheadCommitsOpen.value,
+    behindCommitsOpen: git.gitBehindCommitsOpen.value,
     batchSectionOpen: git.batchSectionOpen.value,
     stashSectionOpen: git.gitStashSectionOpen.value,
     localChangesOpen: git.gitLocalChangesOpen.value,
@@ -62,6 +64,7 @@ export function applyGitPanelUi(git: GitPanelUiRefs, saved?: PersistedGitPanelUi
   if (typeof saved.untrackedOpen === "boolean") git.gitUntrackedOpen.value = saved.untrackedOpen;
   if (typeof saved.stashOpen === "boolean") git.gitStashOpen.value = saved.stashOpen;
   if (typeof saved.aheadCommitsOpen === "boolean") git.gitAheadCommitsOpen.value = saved.aheadCommitsOpen;
+  if (typeof saved.behindCommitsOpen === "boolean") git.gitBehindCommitsOpen.value = saved.behindCommitsOpen;
   if (typeof saved.batchSectionOpen === "boolean") git.batchSectionOpen.value = saved.batchSectionOpen;
   if (typeof saved.stashSectionOpen === "boolean") git.gitStashSectionOpen.value = saved.stashSectionOpen;
   if (typeof saved.localChangesOpen === "boolean") git.gitLocalChangesOpen.value = saved.localChangesOpen;
@@ -195,6 +198,7 @@ export function useWorkspaceUiPersistence(deps: WorkspaceUiPersistenceDeps) {
       deps.git.gitUntrackedOpen.value,
       deps.git.gitStashOpen.value,
       deps.git.gitAheadCommitsOpen.value,
+      deps.git.gitBehindCommitsOpen.value,
       deps.git.batchSectionOpen.value,
       deps.git.gitStashSectionOpen.value,
       deps.git.gitLocalChangesOpen.value,

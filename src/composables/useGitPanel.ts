@@ -200,6 +200,9 @@ export function useGitPanel(
     gitAheadCommits: state.gitAheadCommits,
     gitAheadCommitsOpen: state.gitAheadCommitsOpen,
     gitAheadCommitsLoading: state.gitAheadCommitsLoading,
+    gitBehindCommits: state.gitBehindCommits,
+    gitBehindCommitsOpen: state.gitBehindCommitsOpen,
+    gitBehindCommitsLoading: state.gitBehindCommitsLoading,
 
     gitStagedFiles: state.gitStagedFiles,
     gitUnstagedFiles: state.gitUnstagedFiles,
@@ -250,6 +253,7 @@ export function useGitPanel(
     aiCommitAndPush: commitActions.aiCommitAndPush,
     refreshGitRemotes: remoteActions.refreshGitRemotes,
     refreshGitAheadCommits: remoteActions.refreshGitAheadCommits,
+    refreshGitBehindCommits: remoteActions.refreshGitBehindCommits,
     doFetch: remoteActions.doFetch,
     doPull: remoteActions.doPull,
     doPush: remoteActions.doPush,

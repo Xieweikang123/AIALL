@@ -4,6 +4,7 @@ pub mod automation;
 pub mod chat;
 pub mod dev_manage;
 pub mod fs;
+pub mod npm_script;
 pub mod git;
 pub mod project;
 pub mod system;

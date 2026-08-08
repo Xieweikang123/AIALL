@@ -9,6 +9,7 @@ export type PersistedGitPanelUi = {
   untrackedOpen?: boolean;
   stashOpen?: boolean;
   aheadCommitsOpen?: boolean;
+  behindCommitsOpen?: boolean;
   batchSectionOpen?: boolean;
   stashSectionOpen?: boolean;
   localChangesOpen?: boolean;
@@ -56,6 +57,7 @@ function slimGitPanelUi(raw: unknown): PersistedGitPanelUi | undefined {
   if (typeof src.untrackedOpen === "boolean") git.untrackedOpen = src.untrackedOpen;
   if (typeof src.stashOpen === "boolean") git.stashOpen = src.stashOpen;
   if (typeof src.aheadCommitsOpen === "boolean") git.aheadCommitsOpen = src.aheadCommitsOpen;
+  if (typeof src.behindCommitsOpen === "boolean") git.behindCommitsOpen = src.behindCommitsOpen;
   if (typeof src.batchSectionOpen === "boolean") git.batchSectionOpen = src.batchSectionOpen;
   if (typeof src.stashSectionOpen === "boolean") git.stashSectionOpen = src.stashSectionOpen;
   if (typeof src.localChangesOpen === "boolean") git.localChangesOpen = src.localChangesOpen;

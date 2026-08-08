@@ -13,6 +13,7 @@ mod web_fetch;
 
 use commands::dev_manage::DevServerState;
 use commands::fs::DirCache;
+use commands::npm_script::NpmScriptState;
 use commands::watcher::WatcherState;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -84,6 +85,7 @@ pub fn run() {
             app.manage(WatcherState::default());
             app.manage(commands::agent::AgentRunState::default());
             app.manage(DevServerState::default());
+            app.manage(NpmScriptState::default());
             app.manage(WindowStateSaveGate::new());
             app.handle().plugin(tauri_plugin_dialog::init())?;
             app.handle().plugin(tauri_plugin_notification::init())?;
@@ -126,6 +128,7 @@ pub fn run() {
             commands::git::git_commit,
             commands::git::git_log,
             commands::git::git_ahead_commits,
+            commands::git::git_behind_commits,
             commands::git::git_add,
             commands::git::git_list_hunks,
             commands::git::git_stage_hunk,
@@ -211,6 +214,9 @@ pub fn run() {
             commands::dev_manage::dev_server_stop,
             commands::dev_manage::dev_server_status,
             commands::dev_manage::dev_build,
+            commands::npm_script::npm_script_run,
+            commands::npm_script::npm_script_stop,
+            commands::npm_script::npm_script_status,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

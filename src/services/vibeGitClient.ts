@@ -302,6 +302,26 @@ export async function fetchAheadCommits(projectPath: string, count = 20): Promis
   });
 }
 
+export interface GitBehindCommitsResult {
+  ok: boolean;
+  entries: GitLogEntry[];
+  trackingBranch: string;
+  error?: string;
+}
+
+export async function fetchBehindCommits(projectPath: string, count = 20): Promise<GitBehindCommitsResult> {
+  return invokeBackend<GitBehindCommitsResult>("git_behind_commits", { path: projectPath, count }, async () => {
+    try {
+      const url = backendUrl(`/backend/vibe/git/behind-commits?path=${encodeURIComponent(projectPath)}&count=${count}`);
+      const response = await fetch(url);
+      const data = await readJsonResponse<GitBehindCommitsResult>(response);
+      return { ...data, entries: data.entries?.map((entry) => ({ ...entry, files: entry.files || [] })) || [] };
+    } catch (error) {
+      return { ok: false, entries: [], trackingBranch: "", error: error instanceof Error ? error.message : "网络错误" };
+    }
+  });
+}
+
 export async function fetchGitCommitFileDiff(projectPath: string, hash: string, filePath: string, oldPath?: string): Promise<GitCommitFileDiffResult> {
   return invokeBackend<GitCommitFileDiffResult>("git_commit_file_diff", { path: projectPath, hash, file: filePath, oldFile: oldPath || null }, async () => {
     try {

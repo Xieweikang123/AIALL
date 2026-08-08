@@ -293,6 +293,59 @@ pub async fn git_ahead_commits(project_root: &str, count: u32) -> GitAheadCommit
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitBehindCommitsResult {
+    pub ok: bool,
+    pub entries: Vec<GitLogEntry>,
+    pub tracking_branch: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+pub async fn git_behind_commits(project_root: &str, count: u32) -> GitBehindCommitsResult {
+    let upstream = git_exec(project_root, &["rev-parse", "--abbrev-ref", "@{upstream}"])
+        .await
+        .map(|o| o.stdout.trim().to_string())
+        .unwrap_or_default();
+    if upstream.is_empty() {
+        return GitBehindCommitsResult {
+            ok: true,
+            entries: vec![],
+            tracking_branch: String::new(),
+            error: None,
+        };
+    }
+    let count_str = count.to_string();
+    let range = format!("HEAD..{upstream}");
+    let format_arg = format!("--format={GIT_LOG_FORMAT}");
+    match git_exec(
+        project_root,
+        &[
+            "log",
+            &format!("--max-count={count_str}"),
+            "--name-status",
+            &format_arg,
+            &range,
+        ],
+    )
+    .await
+    {
+        Ok(out) => GitBehindCommitsResult {
+            ok: true,
+            entries: parse_git_log(&out.stdout),
+            tracking_branch: upstream,
+            error: None,
+        },
+        Err(error) => GitBehindCommitsResult {
+            ok: false,
+            entries: vec![],
+            tracking_branch: upstream,
+            error: Some(error),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

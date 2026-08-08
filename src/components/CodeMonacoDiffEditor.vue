@@ -9,6 +9,7 @@
 import type * as Monaco from "monaco-editor";
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { languageFromFilePath } from "../utils/monacoLanguage";
+import { setupNpmScriptHover } from "../utils/monacoNpmScriptHover";
 import { parseHunkNewStartLine } from "../utils/gitHelpers";
 
 export type MonacoDiffSelectionAnchor = {
@@ -351,6 +352,7 @@ async function initMonaco() {
   await import("../utils/monacoSetup");
   await import("monaco-editor/min/vs/editor/editor.main.css");
   monaco = await import("monaco-editor");
+  setupNpmScriptHover(monaco);
   loading.value = false;
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
   createDiffEditor();

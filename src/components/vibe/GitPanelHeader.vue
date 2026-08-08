@@ -56,6 +56,13 @@
       :commits="gitAheadCommits"
       @update:open="$emit('update:gitAheadCommitsOpen', $event)"
     />
+    <GitBehindCommits
+      :behind="gitBehind"
+      :open="gitBehindCommitsOpen"
+      :loading="gitBehindCommitsLoading"
+      :commits="gitBehindCommits"
+      @update:open="$emit('update:gitBehindCommitsOpen', $event)"
+    />
   </div>
 </template>
 
@@ -64,6 +71,7 @@ import { computed } from "vue";
 import type { GitRemoteInfo, GitBranchInfo } from "../../services/vibeGitClient";
 import GitBranchSelector from "./GitBranchSelector.vue";
 import GitAheadCommits from "./GitAheadCommits.vue";
+import GitBehindCommits from "./GitBehindCommits.vue";
 
 interface GitRef {
   name: string;
@@ -78,6 +86,7 @@ interface GitLogFile {
 interface GitLogEntry {
   hash: string;
   shortHash: string;
+  author: string;
   date: string;
   message: string;
   files: GitLogFile[];
@@ -99,6 +108,9 @@ const props = defineProps<{
   gitAheadCommits: GitLogEntry[];
   gitAheadCommitsOpen: boolean;
   gitAheadCommitsLoading: boolean;
+  gitBehindCommits: GitLogEntry[];
+  gitBehindCommitsOpen: boolean;
+  gitBehindCommitsLoading: boolean;
   gitStashSectionOpen: boolean;
 }>();
 
@@ -111,6 +123,7 @@ defineEmits<{
   (e: "create-branch", branchName: string): void;
   (e: "delete-branch", branchName: string): void;
   (e: "update:gitAheadCommitsOpen", value: boolean): void;
+  (e: "update:gitBehindCommitsOpen", value: boolean): void;
   (e: "update:gitStashSectionOpen", value: boolean): void;
 }>();
 

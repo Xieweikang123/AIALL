@@ -10,6 +10,7 @@ import {
   gitStashDropRemote,
   gitStashPopRemote,
   fetchAheadCommits,
+  fetchBehindCommits,
 } from "../../services/vibeGitClient";
 import type { GitPanelState } from "./createGitPanelState";
 
@@ -51,6 +52,25 @@ export function useGitRemoteActions(options: UseGitRemoteActionsOptions) {
     }
   }
 
+  async function refreshGitBehindCommits(behindCount?: number) {
+    const behind = behindCount ?? state.gitBehind.value;
+    if (!projectOpened() || !state.gitIsRepo.value || behind === 0) {
+      state.gitBehindCommits.value = [];
+      return;
+    }
+    state.gitBehindCommitsLoading.value = true;
+    try {
+      const result = await fetchBehindCommits(projectPath(), 20);
+      if (result.ok) {
+        state.gitBehindCommits.value = result.entries;
+      }
+    } catch {
+      // ignore
+    } finally {
+      state.gitBehindCommitsLoading.value = false;
+    }
+  }
+
   async function refreshGitRemotes() {
     if (!projectOpened() || !state.gitIsRepo.value) return;
     state.gitRemoteLoading.value = true;
@@ -62,6 +82,7 @@ export function useGitRemoteActions(options: UseGitRemoteActionsOptions) {
         state.gitAhead.value = result.ahead;
         state.gitBehind.value = result.behind;
         void refreshGitAheadCommits(result.ahead);
+        void refreshGitBehindCommits(result.behind);
       }
     } catch {
       // ignore
@@ -235,6 +256,7 @@ export function useGitRemoteActions(options: UseGitRemoteActionsOptions) {
   return {
     refreshGitRemotes,
     refreshGitAheadCommits,
+    refreshGitBehindCommits,
     doFetch,
     doPull,
     doPush,

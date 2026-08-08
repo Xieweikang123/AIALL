@@ -170,6 +170,30 @@
       @save="$emit('save-file')"
       @select="(text, anchor) => $emit('editor-select', text, anchor)"
     />
+
+    <div v-if="npmScriptRunState.visible" class="npm-run-panel">
+      <div class="npm-run-header">
+        <span class="npm-run-title">
+          <span class="npm-run-status" :class="{ running: npmScriptRunState.running }" />
+          npm run {{ npmScriptRunState.script }}
+          <span v-if="npmScriptRunState.pid" class="npm-run-pid">PID {{ npmScriptRunState.pid }}</span>
+        </span>
+        <span v-if="npmScriptRunState.error" class="npm-run-error">{{ npmScriptRunState.error }}</span>
+        <span v-else-if="!npmScriptRunState.running && npmScriptRunState.exitCode !== null" class="npm-run-exit" :class="{ failed: npmScriptRunState.exitCode !== 0 }">
+          退出码 {{ npmScriptRunState.exitCode }}
+        </span>
+        <div class="npm-run-actions">
+          <button
+            v-if="npmScriptRunState.running"
+            type="button"
+            class="ghost tiny editor-action-btn"
+            @click="onStopScript"
+          >停止</button>
+          <button type="button" class="ghost tiny editor-action-btn" @click="closeNpmScriptPanel()">关闭</button>
+        </div>
+      </div>
+      <pre ref="npmOutputRef" class="npm-run-output">{{ npmScriptRunState.output || "(等待输出…)" }}</pre>
+    </div>
   </section>
 </template>
 
@@ -177,6 +201,7 @@
 import { ref, computed, watch, nextTick } from "vue";
 import CodeMonacoEditor, { type MonacoSelectionAnchor } from "../CodeMonacoEditor.vue";
 import CodeMonacoDiffEditor, { type MonacoDiffHunkAction } from "../CodeMonacoDiffEditor.vue";
+import { closeNpmScriptPanel, npmScriptRunState, stopNpmScript } from "../../services/npmScriptClient";
 import { renderMarkdown } from "../../utils/renderMarkdown";
 import DOMPurify from "dompurify";
 import {
@@ -420,6 +445,22 @@ onBeforeUnmount(() => {
 
 const editorRef = ref<InstanceType<typeof CodeMonacoEditor> | null>(null);
 const diffEditorRef = ref<InstanceType<typeof CodeMonacoDiffEditor> | null>(null);
+
+/* ---- npm script 运行面板（hover Run 触发） ---- */
+const npmOutputRef = ref<HTMLElement | null>(null);
+
+watch(
+  () => npmScriptRunState.output,
+  async () => {
+    await nextTick();
+    const el = npmOutputRef.value;
+    if (el) el.scrollTop = el.scrollHeight;
+  },
+);
+
+function onStopScript() {
+  void stopNpmScript();
+}
 
 const localContent = computed({
   get: () => props.fileContent,
@@ -791,6 +832,108 @@ defineExpose({ editorRef, diffEditorRef, revealLineInEditor, revealLineInDiff })
 .code-editor {
   flex: 1;
   min-height: 0;
+}
+
+/* ---- npm script 运行面板 ---- */
+.npm-run-panel {
+  flex-shrink: 0;
+  height: 40%;
+  max-height: 300px;
+  min-height: 90px;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: #0a0e14;
+}
+
+.npm-run-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 10px;
+  flex-shrink: 0;
+  background: #161b22;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+}
+
+.npm-run-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.npm-run-status {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #8b949e;
+  flex-shrink: 0;
+}
+
+.npm-run-status.running {
+  background: #3fb950;
+  box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.5);
+  animation: npm-run-pulse 1.4s infinite;
+}
+
+@keyframes npm-run-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.45); }
+  70% { box-shadow: 0 0 0 6px rgba(63, 185, 80, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0); }
+}
+
+.npm-run-pid {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  font-weight: 400;
+}
+
+.npm-run-error {
+  color: #f85149;
+  font-size: 12px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.npm-run-exit {
+  color: #3fb950;
+  font-size: 11px;
+  flex: 1;
+}
+
+.npm-run-exit.failed {
+  color: #f85149;
+}
+
+.npm-run-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.npm-run-output {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 8px 12px;
+  overflow: auto;
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.82);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* Markdown 预览 */

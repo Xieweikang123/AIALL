@@ -68,6 +68,9 @@ export interface GitPanelState {
   gitAheadCommits: Ref<import("../../services/vibeGitClient").GitLogEntry[]>;
   gitAheadCommitsOpen: Ref<boolean>;
   gitAheadCommitsLoading: Ref<boolean>;
+  gitBehindCommits: Ref<import("../../services/vibeGitClient").GitLogEntry[]>;
+  gitBehindCommitsOpen: Ref<boolean>;
+  gitBehindCommitsLoading: Ref<boolean>;
   gitBranches: Ref<import("../../services/vibeGitClient").GitBranchInfo[]>;
   gitSecondaryHint: Ref<string>;
   gitSelectedRemote: Ref<string>;
@@ -207,6 +210,9 @@ export function createGitPanelState(
   const gitAheadCommits = ref<import("../../services/vibeGitClient").GitLogEntry[]>([]);
   const gitAheadCommitsOpen = ref(false);
   const gitAheadCommitsLoading = ref(false);
+  const gitBehindCommits = ref<import("../../services/vibeGitClient").GitLogEntry[]>([]);
+  const gitBehindCommitsOpen = ref(false);
+  const gitBehindCommitsLoading = ref(false);
   const gitBranches = ref<import("../../services/vibeGitClient").GitBranchInfo[]>([]);
   const gitSecondaryHint = ref("");
   const gitSelectedRemote = ref("");
@@ -225,6 +231,7 @@ export function createGitPanelState(
       gitStagedOpen.value = false;
       gitUnstagedOpen.value = false;
       gitAheadCommitsOpen.value = false;
+      gitBehindCommitsOpen.value = false;
       gitStashOpen.value = false;
       if (projectOpened() && gitIsRepo.value) {
         const openSearch = gitLogSearchQuery.value || undefined;
@@ -445,6 +452,9 @@ export function createGitPanelState(
     gitAheadCommits,
     gitAheadCommitsOpen,
     gitAheadCommitsLoading,
+    gitBehindCommits,
+    gitBehindCommitsOpen,
+    gitBehindCommitsLoading,
     gitBranches,
     gitSecondaryHint,
     gitSelectedRemote,

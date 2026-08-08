@@ -142,6 +142,9 @@
           :git-ahead-commits="gitAheadCommits"
           :git-ahead-commits-open="gitAheadCommitsOpen"
           :git-ahead-commits-loading="gitAheadCommitsLoading"
+          :git-behind-commits="gitBehindCommits"
+          :git-behind-commits-open="gitBehindCommitsOpen"
+          :git-behind-commits-loading="gitBehindCommitsLoading"
           :git-stash-section-open="gitStashSectionOpen"
           :git-local-changes-open="gitLocalChangesOpen"
           :git-advanced-open="gitAdvancedOpen"
@@ -191,6 +194,7 @@
           @load-more-git-log="loadMoreGitLog"
           @search-git-log="searchGitLog"
           @update:git-ahead-commits-open="gitAheadCommitsOpen = $event"
+          @update:git-behind-commits-open="gitBehindCommitsOpen = $event"
           @update:git-stash-section-open="gitStashSectionOpen = $event"
           @update:git-local-changes-open="gitLocalChangesOpen = $event"
           @update:git-commit-message="gitCommitMessage = $event"
@@ -612,6 +616,9 @@
           :git-ahead-commits="gitAheadCommits"
           :git-ahead-commits-open="gitAheadCommitsOpen"
           :git-ahead-commits-loading="gitAheadCommitsLoading"
+          :git-behind-commits="gitBehindCommits"
+          :git-behind-commits-open="gitBehindCommitsOpen"
+          :git-behind-commits-loading="gitBehindCommitsLoading"
           :git-stash-section-open="gitStashSectionOpen"
           :git-local-changes-open="gitLocalChangesOpen"
           :git-advanced-open="gitAdvancedOpen"
@@ -661,6 +668,7 @@
           @load-more-git-log="loadMoreGitLog"
           @search-git-log="searchGitLog"
           @update:git-ahead-commits-open="gitAheadCommitsOpen = $event"
+          @update:git-behind-commits-open="gitBehindCommitsOpen = $event"
           @update:git-stash-section-open="gitStashSectionOpen = $event"
           @update:git-local-changes-open="gitLocalChangesOpen = $event"
           @update:git-commit-message="gitCommitMessage = $event"
@@ -1403,6 +1411,7 @@ const {
   gitAhead, gitBehind, gitRemoteLoading, gitRemoteAction, gitStashes, gitStashOpen,
   gitStashAction, gitStashMessage, gitAiPushStep,
   gitAheadCommits, gitAheadCommitsOpen, gitAheadCommitsLoading,
+  gitBehindCommits, gitBehindCommitsOpen, gitBehindCommitsLoading,
   gitMergeInProgress, gitRebaseInProgress, gitAdvancedOpen, gitAdvancedAction,
   gitTags, gitSubmodules, gitTagNameInput, gitMergeTarget, gitRebaseOnto,
   gitStagedFiles, gitUnstagedFiles, gitConflictedFiles, gitChangeCount, canGitCommit,
@@ -1415,7 +1424,7 @@ const {
   stageHunk,
   unstageHunk,
   stageSelectedFiles, unstageSelectedFiles, discardSelectedFiles, toggleGitFileSelection, clearGitSelection,
-  generateCommitMessage, aiCommitAndPush, refreshGitRemotes, refreshGitAheadCommits,
+  generateCommitMessage, aiCommitAndPush, refreshGitRemotes, refreshGitAheadCommits, refreshGitBehindCommits,
   doFetch, doPull, doPush,
   doResetCommit,
   refreshGitStashes, doStashSave, doStashApply, doStashPop, doStashDrop,
@@ -2734,6 +2743,7 @@ const workspaceUi = useWorkspaceUiPersistence({
     gitUntrackedOpen,
     gitStashOpen,
     gitAheadCommitsOpen,
+    gitBehindCommitsOpen,
     batchSectionOpen,
     gitStashSectionOpen,
     gitLocalChangesOpen,
@@ -3055,104 +3065,17 @@ async function openProjectByPath(dirPath: string) {
     }
     await reloadExpandedDirChildren();
 
-    // #region agent log — project switch session debug
-    fetch("http://127.0.0.1:7609/ingest/b47c6406-f957-4d1a-8fa6-a213745e4c76", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c47255" },
-      body: JSON.stringify({
-        sessionId: "c47255",
-        runId: "switch",
-        hypothesisId: "A",
-        location: "VibeCodingView.vue:2906",
-        message: "BEFORE resetUiForProjectSwitch",
-        data: {
-          activeSessionId: activeSessionId.value,
-          sessionListLen: sessionList.value.length,
-          sessionListIds: sessionList.value.map((s) => s.id),
-          chatMsgCount: chatMessages.value.length,
-          oldProjectPath: previousPathForPersist,
-          newProjectPath: normalized,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-
     // 切换项目时重置 UI 状态，清除旧项目的会话缓存
     resetUiForProjectSwitch(previousPathForPersist);
 
-    // #region agent log — after reset
-    fetch("http://127.0.0.1:7609/ingest/b47c6406-f957-4d1a-8fa6-a213745e4c76", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c47255" },
-      body: JSON.stringify({
-        sessionId: "c47255",
-        runId: "switch",
-        hypothesisId: "A",
-        location: "VibeCodingView.vue:2912",
-        message: "AFTER resetUiForProjectSwitch",
-        data: {
-          activeSessionId: activeSessionId.value,
-          sessionListLen: sessionList.value.length,
-          chatMsgCount: chatMessages.value.length,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
-
     const chatState = await loadProjectChatState(normalized);
     if (gen !== projectSwitchGeneration) return;
-
-    // #region agent log — after loadProjectChatState
-    fetch("http://127.0.0.1:7609/ingest/b47c6406-f957-4d1a-8fa6-a213745e4c76", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c47255" },
-      body: JSON.stringify({
-        sessionId: "c47255",
-        runId: "switch",
-        hypothesisId: "B",
-        location: "VibeCodingView.vue:2915",
-        message: "AFTER loadProjectChatState",
-        data: {
-          newActiveSessionId: chatState.activeSessionId,
-          newMsgCount: chatState.messages.length,
-          newMsgSample: chatState.messages.slice(0, 3).map((m) => ({ role: m.role, content: String(m.content).slice(0, 60) })),
-          projectPath: normalized,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
 
     activateSession(
       chatState.activeSessionId,
       normalizeChatMessages(chatState.messages, { stripTransientUi: true }),
     );
     refreshSessionList(normalized);
-
-    // #region agent log — after activateSession + refreshSessionList
-    fetch("http://127.0.0.1:7609/ingest/b47c6406-f957-4d1a-8fa6-a213745e4c76", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c47255" },
-      body: JSON.stringify({
-        sessionId: "c47255",
-        runId: "switch",
-        hypothesisId: "C",
-        location: "VibeCodingView.vue:2921",
-        message: "AFTER activateSession + refreshSessionList",
-        data: {
-          activeSessionId: activeSessionId.value,
-          sessionListLen: sessionList.value.length,
-          sessionListIds: sessionList.value.map((s) => s.id),
-          chatMsgCount: chatMessages.value.length,
-          chatMsgSample: chatMessages.value.slice(0, 3).map((m) => ({ role: m.role, content: String(m.content).slice(0, 60) })),
-          projectPath: normalized,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
 
     log(`chat-active(${chatState.activeSessionId}, ${chatState.messages.length}msgs)`);
 
@@ -3166,26 +3089,6 @@ async function openProjectByPath(dirPath: string) {
     maybeAutoResumeLastRecoverableAssistant();
     tryResumeHmrInterruptedRun();
 
-    // #region agent log — after autoResume
-    fetch("http://127.0.0.1:7609/ingest/b47c6406-f957-4d1a-8fa6-a213745e4c76", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "c47255" },
-      body: JSON.stringify({
-        sessionId: "c47255",
-        runId: "switch",
-        hypothesisId: "D",
-        location: "VibeCodingView.vue:2935",
-        message: "AFTER maybeAutoResume + tryResume",
-        data: {
-          activeSessionId: activeSessionId.value,
-          chatMsgCount: chatMessages.value.length,
-          chatMsgSample: chatMessages.value.slice(0, 3).map((m) => ({ role: m.role, content: String(m.content).slice(0, 60) })),
-          projectPath: normalized,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     log("final");
 
     flushLog(`total=${Math.round(performance.now() - t0)}ms | ${timings.join(" → ")}`);
@@ -4012,6 +3915,12 @@ watch(chatMode, (mode) => {
 watch(gitAheadCommitsOpen, (open) => {
   if (open && projectOpened.value && gitIsRepo.value && gitAhead.value > 0 && !gitAheadCommits.value.length) {
     void refreshGitAheadCommits();
+  }
+});
+
+watch(gitBehindCommitsOpen, (open) => {
+  if (open && projectOpened.value && gitIsRepo.value && gitBehind.value > 0 && !gitBehindCommits.value.length) {
+    void refreshGitBehindCommits();
   }
 });
 

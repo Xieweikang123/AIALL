@@ -82,6 +82,11 @@ pub async fn git_ahead_commits(path: String, count: Option<u32>) -> git::GitAhea
 }
 
 #[tauri::command]
+pub async fn git_behind_commits(path: String, count: Option<u32>) -> git::GitBehindCommitsResult {
+    git::git_behind_commits(&path, count.unwrap_or(20)).await
+}
+
+#[tauri::command]
 pub async fn git_add(path: String, files: Vec<String>) -> git::GitActionResult {
     git::git_add(&path, files).await
 }

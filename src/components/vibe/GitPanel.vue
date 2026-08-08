@@ -25,6 +25,9 @@
         :git-ahead-commits="gitAheadCommits"
         :git-ahead-commits-open="gitAheadCommitsOpen"
         :git-ahead-commits-loading="gitAheadCommitsLoading"
+        :git-behind-commits="gitBehindCommits"
+        :git-behind-commits-open="gitBehindCommitsOpen"
+        :git-behind-commits-loading="gitBehindCommitsLoading"
         :git-stash-section-open="gitStashSectionOpen"
         @refresh="$emit('refresh')"
         @do-fetch="$emit('do-fetch')"
@@ -34,6 +37,7 @@
         @create-branch="$emit('create-branch', $event)"
         @delete-branch="$emit('delete-branch', $event)"
         @update:git-ahead-commits-open="$emit('update:gitAheadCommitsOpen', $event)"
+        @update:git-behind-commits-open="$emit('update:gitBehindCommitsOpen', $event)"
         @update:git-stash-section-open="$emit('update:gitStashSectionOpen', $event)"
       />
 
@@ -300,6 +304,9 @@ const props = defineProps<{
   gitAheadCommits: GitLogEntry[];
   gitAheadCommitsOpen: boolean;
   gitAheadCommitsLoading: boolean;
+  gitBehindCommits: GitLogEntry[];
+  gitBehindCommitsOpen: boolean;
+  gitBehindCommitsLoading: boolean;
   hasMoreGitLog: boolean;
   gitLogLoadingMore: boolean;
   gitLogSearchLoading: boolean;
@@ -342,6 +349,7 @@ const emit = defineEmits<{
   (e: "update:gitLogBranchFilter", value: string): void;
   (e: "update-git-log-filters", value: { author: string; path: string; since: string; until: string }): void;
   (e: "update:gitAheadCommitsOpen", value: boolean): void;
+  (e: "update:gitBehindCommitsOpen", value: boolean): void;
   (e: "update:gitCommitMessage", value: string): void;
   (e: "update:gitStashMessage", value: string): void;
   (e: "toggle-git-log-entry", hash: string): void;
