@@ -1,5 +1,5 @@
 <template>
-  <div v-if="node.isDirectory" class="git-tree-dir">
+  <div v-if="node.isDirectory && !flat" class="git-tree-dir">
     <div
       class="git-tree-row git-tree-row--dir"
       :style="{ paddingLeft }"
@@ -79,7 +79,10 @@
   >
     <span class="git-tree-check-spacer" aria-hidden="true" />
     <span class="git-tree-file-icon" :class="fileTypeClass" aria-hidden="true">{{ fileTypeLabel }}</span>
-    <span class="git-tree-name" :title="node.path">{{ node.name }}</span>
+    <span class="git-tree-name" :class="{ 'git-tree-name--flat': flat }" :title="node.path">
+      <span v-if="flatDir" class="git-tree-dir-prefix">{{ flatDir }}/</span>
+      <span class="git-tree-basename">{{ flatBase }}</span>
+    </span>
     <span class="git-file-status" :class="gitStatusClass(node.file?.status ?? '')">
       {{ gitStatusIcon(node.file?.status ?? "") }}
     </span>
@@ -130,6 +133,7 @@ const props = defineProps<{
   expandedDirs: Set<string>;
   selectedGitFiles: string[];
   gitDiffLoadingKey: string;
+  flat?: boolean;
 }>();
 
 defineEmits<{
@@ -148,6 +152,18 @@ defineEmits<{
 const depth = computed(() => props.depth ?? 0);
 const paddingLeft = computed(() => `${8 + depth.value * 24}px`);
 const expanded = computed(() => props.expandedDirs.has(props.node.path));
+
+const flatDir = computed(() => {
+  if (!props.flat) return "";
+  const idx = props.node.path.lastIndexOf("/");
+  return idx > 0 ? props.node.path.slice(0, idx) : "";
+});
+
+const flatBase = computed(() => {
+  if (!props.flat) return props.node.name;
+  const idx = props.node.path.lastIndexOf("/");
+  return idx >= 0 ? props.node.path.slice(idx + 1) : props.node.path;
+});
 
 const FILE_KIND_BY_EXT: Record<string, string> = {
   vue: "vue",
@@ -292,6 +308,29 @@ function gitWorkingTreeDiffKey(path: string, isStaged: boolean): string {
 
 .git-tree-name {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-tree-name--flat {
+  display: flex;
+  align-items: baseline;
+}
+
+.git-tree-name--flat .git-tree-dir-prefix {
+  flex: 1 100 auto;
+  min-width: 24px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, 0.38);
+  font-size: 11px;
+}
+
+.git-tree-name--flat .git-tree-basename {
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

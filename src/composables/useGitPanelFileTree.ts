@@ -1,12 +1,17 @@
 import { ref, watch, computed, type Ref } from "vue";
 import { buildGitFileTree, collectGitFolderPaths } from "../utils/gitFileTree";
 import { parseGitFileSelectionKey } from "../utils/gitHelpers";
+import { lsGetJson, lsSetJson } from "../utils/localStorageSafe";
 
 export interface GitPanelFileInput {
   path: string;
   status: string;
   staged: boolean;
 }
+
+export type GitChangesViewMode = "tree" | "flat";
+
+const GIT_CHANGES_VIEW_MODE_KEY = "aiall-git-changes-view-mode";
 
 export function useGitPanelFileTree(
   gitStagedFiles: Ref<GitPanelFileInput[]>,
@@ -23,6 +28,15 @@ export function useGitPanelFileTree(
   const gitStagedKnownDirs = ref<Set<string>>(new Set());
   const gitModifiedKnownDirs = ref<Set<string>>(new Set());
   const gitUntrackedKnownDirs = ref<Set<string>>(new Set());
+
+  const gitChangesViewMode = ref<GitChangesViewMode>(
+    lsGetJson<GitChangesViewMode>(GIT_CHANGES_VIEW_MODE_KEY, "tree"),
+  );
+
+  function setGitChangesViewMode(mode: GitChangesViewMode) {
+    gitChangesViewMode.value = mode;
+    lsSetJson(GIT_CHANGES_VIEW_MODE_KEY, mode);
+  }
 
   const gitModifiedFiles = computed(() =>
     gitUnstagedFiles.value.filter((f) => f.status !== "untracked"),
@@ -128,5 +142,7 @@ export function useGitPanelFileTree(
     gitModifiedExpandedDirs,
     gitUntrackedExpandedDirs,
     toggleGitTreeDir,
+    gitChangesViewMode,
+    setGitChangesViewMode,
   };
 }

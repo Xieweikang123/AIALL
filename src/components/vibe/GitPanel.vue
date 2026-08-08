@@ -112,6 +112,8 @@
               :git-staged-expanded-dirs="gitStagedExpandedDirs"
               :git-modified-expanded-dirs="gitModifiedExpandedDirs"
               :git-untracked-expanded-dirs="gitUntrackedExpandedDirs"
+              :view-mode="gitChangesViewMode"
+              @update:view-mode="setGitChangesViewMode"
               @stage-selected="$emit('stage-selected')"
               @unstage-selected="$emit('unstage-selected')"
               @discard-selected="$emit('discard-selected', $event)"
@@ -405,6 +407,8 @@ const {
   gitModifiedExpandedDirs,
   gitUntrackedExpandedDirs,
   toggleGitTreeDir,
+  gitChangesViewMode,
+  setGitChangesViewMode,
 } = fileTree;
 
 watch(
