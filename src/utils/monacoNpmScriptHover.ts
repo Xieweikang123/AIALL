@@ -33,7 +33,6 @@ export function setupNpmScriptHover(monaco: typeof Monaco): void {
 
       const projectDir = projectDirFromUriPath(uriPath);
       const args = encodeURIComponent(JSON.stringify([projectDir, hit.name]));
-      const runLink = `command:${RUN_COMMAND_ID}?${args}`;
 
       const markdown = [
         `**npm run ${hit.name}**`,
