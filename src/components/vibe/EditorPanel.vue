@@ -171,28 +171,40 @@
       @select="(text, anchor) => $emit('editor-select', text, anchor)"
     />
 
-    <div v-if="npmScriptRunState.visible" class="npm-run-panel">
+    <div v-if="npmScriptRunState.visible" class="npm-run-panel" :class="{ running: npmScriptRunState.running }" :style="{ height: npmPanelHeight + 'px' }">
+      <div class="npm-run-resize" @pointerdown="onNpmResizeStart" />
       <div class="npm-run-header">
-        <span class="npm-run-title">
-          <span class="npm-run-status" :class="{ running: npmScriptRunState.running }" />
-          npm run {{ npmScriptRunState.script }}
+        <div class="npm-run-title">
+          <svg class="npm-run-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="2.5" y="4.5" width="19" height="15" rx="2" stroke="currentColor" stroke-width="1.5" />
+            <path d="m7 9 3 3-3 3M12.5 15H17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <span class="npm-run-name">{{ npmScriptRunState.script ? `npm run ${npmScriptRunState.script}` : "npm script" }}</span>
+          <span class="npm-run-status-chip" :class="runStatus.cls">
+            <span class="npm-run-status-dot" />
+            {{ runStatus.text }}
+          </span>
           <span v-if="npmScriptRunState.pid" class="npm-run-pid">PID {{ npmScriptRunState.pid }}</span>
-        </span>
-        <span v-if="npmScriptRunState.error" class="npm-run-error">{{ npmScriptRunState.error }}</span>
-        <span v-else-if="!npmScriptRunState.running && npmScriptRunState.exitCode !== null" class="npm-run-exit" :class="{ failed: npmScriptRunState.exitCode !== 0 }">
-          退出码 {{ npmScriptRunState.exitCode }}
-        </span>
+        </div>
         <div class="npm-run-actions">
-          <button
-            v-if="npmScriptRunState.running"
-            type="button"
-            class="ghost tiny editor-action-btn"
-            @click="onStopScript"
-          >停止</button>
-          <button type="button" class="ghost tiny editor-action-btn" @click="closeNpmScriptPanel()">关闭</button>
+          <span v-if="runElapsed > 0" class="npm-run-duration">{{ runElapsed }}s</span>
+          <button type="button" class="ghost tiny npm-run-btn" :disabled="npmScriptRunState.running" @click="clearNpmScriptOutput()">清空</button>
+          <button v-if="npmScriptRunState.running" type="button" class="ghost tiny npm-run-btn npm-run-btn--stop" @click="onStopScript">停止</button>
+          <button type="button" class="ghost tiny npm-run-btn" @click="closeNpmScriptPanel()">关闭</button>
         </div>
       </div>
-      <pre ref="npmOutputRef" class="npm-run-output">{{ npmScriptRunState.output || "(等待输出…)" }}</pre>
+      <div ref="npmOutputRef" class="npm-run-output">
+        <div
+          v-for="(line, index) in npmScriptRunState.lines"
+          :key="index"
+          class="npm-run-line"
+          :class="`npm-run-line--${line.kind}`"
+        >
+          <span class="npm-run-line-text">{{ line.text || " " }}</span>
+        </div>
+        <span v-if="npmScriptRunState.running" class="npm-run-cursor" aria-hidden="true">▍</span>
+        <div v-if="!npmScriptRunState.lines.length && !npmScriptRunState.running" class="npm-run-empty">暂无输出</div>
+      </div>
     </div>
   </section>
 </template>
@@ -201,7 +213,7 @@
 import { ref, computed, watch, nextTick } from "vue";
 import CodeMonacoEditor, { type MonacoSelectionAnchor } from "../CodeMonacoEditor.vue";
 import CodeMonacoDiffEditor, { type MonacoDiffHunkAction } from "../CodeMonacoDiffEditor.vue";
-import { closeNpmScriptPanel, npmScriptRunState, stopNpmScript } from "../../services/npmScriptClient";
+import { clearNpmScriptOutput, closeNpmScriptPanel, npmScriptRunState, stopNpmScript } from "../../services/npmScriptClient";
 import { renderMarkdown } from "../../utils/renderMarkdown";
 import DOMPurify from "dompurify";
 import {
@@ -448,9 +460,21 @@ const diffEditorRef = ref<InstanceType<typeof CodeMonacoDiffEditor> | null>(null
 
 /* ---- npm script 运行面板（hover Run 触发） ---- */
 const npmOutputRef = ref<HTMLElement | null>(null);
+const npmPanelHeight = ref(220);
+const npmResizePointerId = ref<number | null>(null);
+
+const runStatus = computed(() => {
+  const s = npmScriptRunState;
+  if (s.error) return { text: "错误", cls: "fail" };
+  if (s.running) return { text: "运行中", cls: "running" };
+  if (s.exitCode === null) return { text: "待运行", cls: "idle" };
+  return s.exitCode === 0
+    ? { text: "成功", cls: "ok" }
+    : { text: `失败 · 退出码 ${s.exitCode}`, cls: "fail" };
+});
 
 watch(
-  () => npmScriptRunState.output,
+  () => npmScriptRunState.lines.length,
   async () => {
     await nextTick();
     const el = npmOutputRef.value;
@@ -460,6 +484,62 @@ watch(
 
 function onStopScript() {
   void stopNpmScript();
+}
+
+const runNow = ref(Date.now());
+let runTimer: ReturnType<typeof setInterval> | null = null;
+
+watch(
+  () => npmScriptRunState.running,
+  (running) => {
+    if (running) {
+      if (!runTimer) {
+        runTimer = setInterval(() => {
+          runNow.value = Date.now();
+        }, 1000);
+      }
+    } else if (runTimer) {
+      clearInterval(runTimer);
+      runTimer = null;
+      runNow.value = Date.now();
+    }
+  },
+  { immediate: true },
+);
+
+const runElapsed = computed(() => {
+  const s = npmScriptRunState;
+  if (!s.startedAt) return 0;
+  const end = s.running ? runNow.value : s.finishedAt || runNow.value;
+  return Math.max(0, Math.round((end - s.startedAt) / 1000));
+});
+
+onBeforeUnmount(() => {
+  if (runTimer) {
+    clearInterval(runTimer);
+    runTimer = null;
+  }
+});
+
+function onNpmResizeStart(e: PointerEvent) {
+  if (npmResizePointerId.value !== null) return;
+  npmResizePointerId.value = e.pointerId;
+  const startY = e.clientY;
+  const startH = npmPanelHeight.value;
+  const onMove = (ev: PointerEvent) => {
+    if (ev.pointerId !== npmResizePointerId.value) return;
+    const delta = startY - ev.clientY;
+    const max = Math.max(120, Math.round(window.innerHeight * 0.6));
+    npmPanelHeight.value = Math.min(Math.max(startH + delta, 90), max);
+  };
+  const onUp = (ev: PointerEvent) => {
+    if (ev.pointerId !== npmResizePointerId.value) return;
+    npmResizePointerId.value = null;
+    window.removeEventListener("pointermove", onMove);
+    window.removeEventListener("pointerup", onUp);
+  };
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
 }
 
 const localContent = computed({
@@ -837,81 +917,127 @@ defineExpose({ editorRef, diffEditorRef, revealLineInEditor, revealLineInDiff })
 /* ---- npm script 运行面板 ---- */
 .npm-run-panel {
   flex-shrink: 0;
-  height: 40%;
-  max-height: 300px;
-  min-height: 90px;
+  height: 220px;
   display: flex;
   flex-direction: column;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
-  background: #0a0e14;
+  background: #0b0f16;
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.npm-run-resize {
+  height: 4px;
+  flex-shrink: 0;
+  cursor: ns-resize;
+  position: relative;
+  touch-action: none;
+}
+
+.npm-run-resize::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+.npm-run-panel.running .npm-run-resize::after {
+  background: linear-gradient(90deg, transparent, rgba(63, 185, 80, 0.6), transparent);
+}
+
+.npm-run-resize:hover::after {
+  background: rgba(88, 166, 255, 0.55);
 }
 
 .npm-run-header {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 4px 10px;
+  padding: 5px 10px 5px 8px;
   flex-shrink: 0;
-  background: #161b22;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: #131922;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
   font-size: 12px;
 }
 
 .npm-run-title {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  color: rgba(255, 255, 255, 0.85);
+  gap: 8px;
+  min-width: 0;
+}
+
+.npm-run-icon {
+  color: #58a6ff;
+  flex-shrink: 0;
+}
+
+.npm-run-name {
+  color: rgba(255, 255, 255, 0.9);
   font-weight: 600;
+  font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.npm-run-status {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #8b949e;
+.npm-run-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
   flex-shrink: 0;
 }
 
-.npm-run-status.running {
-  background: #3fb950;
-  box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.5);
+.npm-run-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.npm-run-status-chip.running {
+  color: #3fb950;
+  background: rgba(63, 185, 80, 0.14);
+}
+
+.npm-run-status-chip.running .npm-run-status-dot {
   animation: npm-run-pulse 1.4s infinite;
 }
 
+.npm-run-status-chip.ok {
+  color: #3fb950;
+  background: rgba(63, 185, 80, 0.12);
+}
+
+.npm-run-status-chip.fail {
+  color: #f85149;
+  background: rgba(248, 81, 73, 0.12);
+}
+
+.npm-run-status-chip.idle {
+  color: #8b949e;
+  background: rgba(139, 148, 158, 0.12);
+}
+
 @keyframes npm-run-pulse {
-  0% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.45); }
+  0% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.5); }
   70% { box-shadow: 0 0 0 6px rgba(63, 185, 80, 0); }
   100% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0); }
 }
 
 .npm-run-pid {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(255, 255, 255, 0.38);
   font-weight: 400;
-}
-
-.npm-run-error {
-  color: #f85149;
-  font-size: 12px;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.npm-run-exit {
-  color: #3fb950;
-  font-size: 11px;
-  flex: 1;
-}
-
-.npm-run-exit.failed {
-  color: #f85149;
+  font-variant-numeric: tabular-nums;
 }
 
 .npm-run-actions {
@@ -922,18 +1048,96 @@ defineExpose({ editorRef, diffEditorRef, revealLineInEditor, revealLineInDiff })
   flex-shrink: 0;
 }
 
+.npm-run-duration {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  font-variant-numeric: tabular-nums;
+  margin-right: 2px;
+}
+
+.npm-run-btn {
+  font-size: 11px;
+  padding: 2px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.npm-run-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.npm-run-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.npm-run-btn--stop {
+  color: #f85149;
+  border-color: rgba(248, 81, 73, 0.35);
+  background: rgba(248, 81, 73, 0.1);
+}
+
+.npm-run-btn--stop:hover:not(:disabled) {
+  background: rgba(248, 81, 73, 0.2);
+  color: #ff7b72;
+}
+
 .npm-run-output {
   flex: 1;
   min-height: 0;
-  margin: 0;
-  padding: 8px 12px;
   overflow: auto;
+  padding: 6px 0;
   font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
   font-size: 12px;
-  line-height: 1.5;
-  color: rgba(255, 255, 255, 0.82);
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.npm-run-line {
+  display: flex;
+  padding: 0 12px;
   white-space: pre-wrap;
-  word-break: break-word;
+  word-break: break-all;
+}
+
+.npm-run-line:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.npm-run-line--stdout .npm-run-line-text {
+  color: rgba(230, 237, 243, 0.88);
+}
+
+.npm-run-line--stderr .npm-run-line-text {
+  color: #ffa198;
+}
+
+.npm-run-line--system .npm-run-line-text {
+  color: rgba(88, 166, 255, 0.75);
+  font-style: italic;
+}
+
+.npm-run-cursor {
+  display: inline-block;
+  margin-left: 12px;
+  color: #3fb950;
+  animation: npm-run-blink 1s step-end infinite;
+}
+
+@keyframes npm-run-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.npm-run-empty {
+  padding: 14px 12px;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 12px;
 }
 
 /* Markdown 预览 */
