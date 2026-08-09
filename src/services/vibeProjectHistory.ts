@@ -9,7 +9,7 @@ export type ProjectHistoryEntry = {
 
 const STORAGE_KEY = "vibe-coding-project-history";
 const STORE_VERSION = 1;
-const MAX_ENTRIES = 12;
+const MAX_ENTRIES = 50;
 
 type ProjectHistoryStore = {
   version: typeof STORE_VERSION;

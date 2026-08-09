@@ -68,7 +68,12 @@
           <span class="project-history-chevron" aria-hidden="true">{{ projectHistoryOpen ? "▴" : "▾" }}</span>
         </button>
         <Teleport to="body">
-        <div v-if="projectHistoryOpen" class="project-history-dropdown" :style="{ position: 'fixed', top: dropdownTop + 'px', right: dropdownRight + 'px' }">
+        <div
+          v-if="projectHistoryOpen"
+          ref="projectHistoryDropdownRef"
+          class="project-history-dropdown"
+          :style="{ position: 'fixed', top: dropdownTop + 'px', right: dropdownRight + 'px' }"
+        >
           <div class="project-history-head">
             <div>
               <h3 class="project-history-title">{{ projectHistoryList.length > 1 ? "切换项目" : "最近打开的项目" }}</h3>
@@ -83,15 +88,47 @@
               清空
             </button>
           </div>
+          <div class="project-history-search">
+            <svg class="project-history-search-icon" width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.4"/>
+              <path d="m10.5 10.5 3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            </svg>
+            <input
+              ref="projectSearchInputRef"
+              v-model.trim="projectSearchQuery"
+              class="project-history-search-input"
+              type="text"
+              placeholder="搜索项目名或路径"
+              aria-label="搜索项目"
+              @keydown.esc="onSearchInputEscape"
+            />
+            <button
+              v-if="projectSearchQuery"
+              type="button"
+              class="project-history-search-clear"
+              title="清除搜索"
+              aria-label="清除搜索"
+              @click="projectSearchQuery = ''"
+            >
+              ×
+            </button>
+          </div>
           <div v-if="!projectHistoryList.length" class="project-history-empty">
             <svg class="project-history-empty-icon" width="32" height="32" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <path d="M2.5 4.8A1.3 1.3 0 0 1 3.8 3.5h3.2l1.2 1.3h4.5A1.3 1.3 0 0 1 14 6.1v6.4a1.3 1.3 0 0 1-1.3 1.3H3.8A1.3 1.3 0 0 1 2.5 12.5V4.8Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
             </svg>
             <p>还没有打开过项目</p>
           </div>
+          <div v-else-if="!filteredProjectHistoryList.length" class="project-history-empty">
+            <svg class="project-history-empty-icon" width="32" height="32" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.1"/>
+              <path d="m10.5 10.5 3 3" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>
+            </svg>
+            <p>没有找到匹配的项目</p>
+          </div>
           <ul v-else class="project-history-list">
             <li
-              v-for="item in projectHistoryList"
+              v-for="item in filteredProjectHistoryList"
               :key="item.path"
               class="project-history-item"
               :class="{ active: isCurrentProject(item.path) }"
@@ -190,7 +227,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { useRouter } from "vue-router";
-import { getEventValue } from "../../utils/vibeHelpers";
+import { getEventValue, formatSessionTime } from "../../utils/vibeHelpers";
 import {
   listProjectHistory,
   removeProjectFromHistory,
@@ -227,6 +264,32 @@ const router = useRouter();
 const projectHistoryOpen = ref(false);
 const projectHistoryList = ref<ProjectHistoryEntry[]>([]);
 const projectHistoryRef = ref<HTMLElement | null>(null);
+const projectHistoryDropdownRef = ref<HTMLElement | null>(null);
+const projectSearchInputRef = ref<HTMLInputElement | null>(null);
+const projectSearchQuery = ref("");
+
+const filteredProjectHistoryList = computed(() => {
+  const q = projectSearchQuery.value.trim().toLowerCase();
+  if (!q) return projectHistoryList.value;
+  return projectHistoryList.value.filter(
+    (item) =>
+      item.displayName.toLowerCase().includes(q) ||
+      item.path.toLowerCase().includes(q),
+  );
+});
+
+function projectKey(path: string): string {
+  const p = path.trim();
+  if (!p) return "";
+  return p.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
+}
+
+const currentPathKey = computed(() => projectKey(props.projectPath));
+
+function isCurrentProject(path: string): boolean {
+  const key = projectKey(path);
+  return Boolean(key && key === currentPathKey.value);
+}
 
 const currentFolderName = computed(() => {
   const current = projectHistoryList.value.find((item) => isCurrentProject(item.path));
@@ -236,13 +299,6 @@ const currentFolderName = computed(() => {
   const parts = trimmed.replace(/\\/g, "/").split("/");
   return parts[parts.length - 1] || trimmed;
 });
-
-function isCurrentProject(path: string): boolean {
-  const current = props.projectPath.trim();
-  if (!current || !path.trim()) return false;
-  const norm = (p: string) => p.trim().replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
-  return norm(current) === norm(path);
-}
 
 const dropdownTop = ref(0);
 const dropdownRight = ref(0);
@@ -255,10 +311,16 @@ function updateDropdownPosition() {
   }
 }
 
+/** 打开期间窗口缩放 / 页面滚动时保持下拉定位准确 */
+function handleViewportChange() {
+  if (projectHistoryOpen.value) updateDropdownPosition();
+}
+
 function toggleProjectHistory() {
   projectHistoryOpen.value = !projectHistoryOpen.value;
   if (projectHistoryOpen.value) {
     nextTick(updateDropdownPosition);
+    nextTick(() => projectSearchInputRef.value?.focus());
   }
   if (projectHistoryOpen.value) refreshProjectHistoryList();
 }
@@ -267,12 +329,20 @@ function closeProjectHistory() {
   projectHistoryOpen.value = false;
 }
 
+function onSearchInputEscape(e: KeyboardEvent) {
+  e.stopPropagation();
+  if (projectSearchQuery.value) {
+    projectSearchQuery.value = "";
+  } else {
+    closeProjectHistory();
+  }
+}
+
 /** 点击下拉面板外部时自动关闭 */
 function handleOutsideClick(e: MouseEvent) {
   if (!projectHistoryOpen.value) return;
   const wrap = projectHistoryRef.value;
-  // Teleport 后下拉菜单在 body 上，需同时检查 dropdown 自身
-  const dropdownEl = document.querySelector('.project-history-dropdown');
+  const dropdownEl = projectHistoryDropdownRef.value;
   const target = e.target as Node;
   const insideWrap = wrap && wrap.contains(target);
   const insideDropdown = dropdownEl && dropdownEl.contains(target);
@@ -286,6 +356,18 @@ function handleKeydown(e: KeyboardEvent) {
     closeProjectHistory();
   }
 }
+
+function onHistoryOpenChange(open: boolean) {
+  if (open) {
+    window.addEventListener("resize", handleViewportChange);
+    document.addEventListener("scroll", handleViewportChange, true);
+  } else {
+    window.removeEventListener("resize", handleViewportChange);
+    document.removeEventListener("scroll", handleViewportChange, true);
+  }
+}
+
+watch(projectHistoryOpen, onHistoryOpenChange);
 
 onMounted(() => {
   refreshProjectHistoryList();
@@ -303,6 +385,7 @@ watch(
 onBeforeUnmount(() => {
   document.removeEventListener("mousedown", handleOutsideClick, true);
   document.removeEventListener("keydown", handleKeydown);
+  onHistoryOpenChange(false);
 });
 
 function openNewProject() {
@@ -311,6 +394,11 @@ function openNewProject() {
 }
 
 function openRecentProject(path: string) {
+  // 点击"当前"项目不触发切换，只关闭下拉（避免父级弹"已在当前项目中"错误）
+  if (isCurrentProject(path)) {
+    closeProjectHistory();
+    return;
+  }
   closeProjectHistory();
   emit("open-recent-project", path);
 }
@@ -328,38 +416,6 @@ function clearRecentProjects() {
 
 function refreshProjectHistoryList() {
   projectHistoryList.value = listProjectHistory();
-}
-
-function formatSessionTime(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const now = new Date();
-  const sameDay =
-    d.getFullYear() === now.getFullYear() &&
-    d.getMonth() === now.getMonth() &&
-    d.getDate() === now.getDate();
-  
-  if (sameDay) {
-    return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-  }
-  
-  const sameYear = d.getFullYear() === now.getFullYear();
-  if (sameYear) {
-    return d.toLocaleString("zh-CN", {
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
-  
-  return d.toLocaleString("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 </script>
 
@@ -709,6 +765,67 @@ function formatSessionTime(iso: string): string {
   opacity: 0.8;
 }
 
+.project-history-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 10px 12px 6px;
+}
+
+.project-history-search-icon {
+  position: absolute;
+  left: 20px;
+  color: rgba(139, 148, 158, 0.7);
+  pointer-events: none;
+}
+
+.project-history-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 28px 0 30px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.project-history-search-input::placeholder {
+  color: rgba(201, 209, 217, 0.55);
+}
+
+.project-history-search-input:focus {
+  border-color: rgba(88, 166, 255, 0.55);
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.15);
+}
+
+.project-history-search-clear {
+  position: absolute;
+  right: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(201, 209, 217, 0.8);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.project-history-search-clear:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.95);
+}
+
 .project-history-list {
   list-style: none;
   padding: 6px;
@@ -949,6 +1066,7 @@ function formatSessionTime(iso: string): string {
 
 .toolbar-nav-btn:focus-visible,
 .project-history-trigger:focus-visible,
+.project-history-search-input:focus-visible,
 .project-history-item-main:focus-visible,
 .project-history-delete:focus-visible,
 .project-history-open-new:focus-visible,

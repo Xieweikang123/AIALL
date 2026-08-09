@@ -8,28 +8,22 @@
             :key="tab.path"
             :ref="(el) => setTabRef(tab.path, el as HTMLElement | null)"
             type="button"
-            draggable="true"
             class="editor-tab"
             :class="[
               {
                 active: tab.path === activeFilePath,
                 dirty: tab.dirty,
-                'editor-tab--dragging': dragState.tabIndex === index,
-                'editor-tab--drop-before': dragState.dropIndex === index && dragState.dropSide === 'before',
-                'editor-tab--drop-after': dragState.dropIndex === index && dragState.dropSide === 'after',
+                'editor-tab--dragging': tabDragState.active && tabDragState.fromIndex === index,
+                'editor-tab--drop-before': tabDragState.dropIndex === index && tabDragState.dropSide === 'before',
+                'editor-tab--drop-after': tabDragState.dropIndex === index && tabDragState.dropSide === 'after',
               },
               tabKindClass(tab),
             ]"
             :title="tabTitle(tab)"
-            @click="$emit('switch-tab', tab.path)"
+            @click="onTabClick(tab)"
             @mousedown.middle.prevent="$emit('close-tab', tab.path)"
             @contextmenu.prevent="onTabContextMenu($event, tab.path)"
-            @dragstart="onTabDragStart($event, index)"
-            @dragover="onTabDragOver($event, index)"
-            @dragenter="onTabDragEnter($event, index)"
-            @dragleave="onTabDragLeave($event, index)"
-            @drop="onTabDrop($event, index)"
-            @dragend="onTabDragEnd"
+            @pointerdown="onTabPointerDown($event, index)"
           >
             <span v-if="tabKindLabel(tab)" class="editor-tab-badge">{{ tabKindLabel(tab) }}</span>
             <span class="editor-tab-name">{{ tabDisplayName(tab.path) }}</span>
@@ -73,6 +67,14 @@
           <button type="button" :disabled="openTabs.length === 0" @click="ctxCloseAll">关闭全部</button>
         </div>
       </Teleport>
+
+      <!-- Tab 拖拽幽灵 -->
+      <Teleport to="body">
+        <div v-if="tabDragGhost" class="editor-tab-drag-ghost" :style="{ left: tabDragGhost.x + 'px', top: tabDragGhost.y + 'px' }">
+          <span class="editor-tab-drag-ghost-name">{{ tabDragGhost.name }}</span>
+        </div>
+      </Teleport>
+
       <div class="editor-header-actions">
         <button
           type="button"
@@ -95,6 +97,13 @@
           title="切换 Diff/编辑视图"
           @click="$emit('toggle-diff-mode')"
         >⇄ Diff</button>
+        <button
+          v-if="isGitVirtualTab"
+          type="button"
+          class="ghost tiny editor-action-btn source-jump-btn"
+          title="在编辑器中打开源文件"
+          @click="$emit('open-source-file', activeFilePath)"
+        >源文件</button>
         <button
           v-if="isMarkdownFile && !showDiffMode"
           type="button"
@@ -265,6 +274,7 @@ const emit = defineEmits<{
   (e: "close-right-tabs", path: string): void;
   (e: "close-all-tabs"): void;
   (e: "toggle-diff-mode"): void;
+  (e: "open-source-file", path: string): void;
   (e: "save-file"): void;
   (e: "reload-file"): void;
   (e: "collapse-editor"): void;
@@ -319,77 +329,150 @@ watch(() => props.activeFilePath, async (newPath) => {
   scrollTabIntoView(newPath);
 });
 
-/* ---- 标签拖拽排序 ---- */
-const dragState = ref<{
-  tabIndex: number;
+/* ---- 标签拖拽排序（Pointer 实现，兼容 WebView2，替代原生 HTML5 DnD） ---- */
+const DRAG_THRESHOLD_PX = 5;
+
+const tabDragState = ref<{
+  pointerId: number | null;
+  fromIndex: number;
+  startX: number;
+  startY: number;
+  active: boolean;
   dropIndex: number;
   dropSide: "before" | "after" | null;
-}>({ tabIndex: -1, dropIndex: -1, dropSide: null });
+}>({ pointerId: null, fromIndex: -1, startX: 0, startY: 0, active: false, dropIndex: -1, dropSide: null });
 
-function onTabDragStart(e: DragEvent, index: number) {
+const tabDragGhost = ref<{ x: number; y: number; name: string } | null>(null);
+let suppressTabClick = false;
+
+function onTabPointerDown(e: PointerEvent, index: number) {
+  if (e.button !== 0) return;
   if (index < 0 || index >= props.openTabs.length) return;
-  dragState.value = { tabIndex: index, dropIndex: -1, dropSide: null };
-  e.dataTransfer?.setData("text/plain", String(index));
-  e.dataTransfer!.effectAllowed = "move";
-  // Small delay so the "dragging" class takes effect visually
-  requestAnimationFrame(() => {
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-  });
+  if ((e.target as HTMLElement).closest(".editor-tab-close")) return;
+
+  tabDragState.value = {
+    pointerId: e.pointerId,
+    fromIndex: index,
+    startX: e.clientX,
+    startY: e.clientY,
+    active: false,
+    dropIndex: -1,
+    dropSide: null,
+  };
+  window.addEventListener("pointermove", onTabWindowPointerMove);
+  window.addEventListener("pointerup", onTabWindowPointerUp);
+  window.addEventListener("pointercancel", onTabWindowPointerCancel);
+  window.addEventListener("blur", onTabWindowBlur);
 }
 
-function onTabDragOver(e: DragEvent, index: number) {
-  e.preventDefault();
-  if (dragState.value.tabIndex < 0) return;
-  if (dragState.value.tabIndex === index) {
-    dragState.value.dropIndex = -1;
-    dragState.value.dropSide = null;
+function onTabWindowPointerMove(e: PointerEvent) {
+  const s = tabDragState.value;
+  if (s.pointerId !== e.pointerId) return;
+
+  if (!s.active) {
+    if (Math.hypot(e.clientX - s.startX, e.clientY - s.startY) < DRAG_THRESHOLD_PX) return;
+    s.active = true;
+    const tab = props.openTabs[s.fromIndex];
+    if (tab) {
+      tabDragGhost.value = { x: e.clientX + 12, y: e.clientY + 12, name: tabDisplayName(tab.path) };
+    }
+    document.body.classList.add("tab-dragging-active");
+  }
+
+  if (tabDragGhost.value) {
+    tabDragGhost.value = { ...tabDragGhost.value, x: e.clientX + 12, y: e.clientY + 12 };
+  }
+  updateTabDropTarget(e.clientX);
+  autoScrollTabs(e.clientX);
+}
+
+function onTabWindowPointerUp(e: PointerEvent) {
+  const s = tabDragState.value;
+  if (s.pointerId !== e.pointerId) return;
+  if (s.active) {
+    if (s.dropIndex >= 0 && s.dropSide) {
+      const fromIndex = s.fromIndex;
+      const toIndex = s.dropSide === "after" ? s.dropIndex + 1 : s.dropIndex;
+      emit("reorder-tabs", { fromIndex, toIndex });
+    }
+    // 拖拽结束会触发 click，用一次性的标记吞掉它，避免误切换 tab
+    suppressTabClick = true;
+    setTimeout(() => {
+      suppressTabClick = false;
+    }, 0);
+  }
+  clearTabDrag();
+}
+
+function onTabWindowPointerCancel(e: PointerEvent) {
+  if (tabDragState.value.pointerId !== e.pointerId) return;
+  clearTabDrag();
+}
+
+function onTabWindowBlur() {
+  if (tabDragState.value.pointerId === null) return;
+  clearTabDrag();
+}
+
+function clearTabDrag() {
+  window.removeEventListener("pointermove", onTabWindowPointerMove);
+  window.removeEventListener("pointerup", onTabWindowPointerUp);
+  window.removeEventListener("pointercancel", onTabWindowPointerCancel);
+  window.removeEventListener("blur", onTabWindowBlur);
+  tabDragState.value = {
+    pointerId: null,
+    fromIndex: -1,
+    startX: 0,
+    startY: 0,
+    active: false,
+    dropIndex: -1,
+    dropSide: null,
+  };
+  tabDragGhost.value = null;
+  document.body.classList.remove("tab-dragging-active");
+}
+
+function updateTabDropTarget(clientX: number) {
+  const s = tabDragState.value;
+  let target: { index: number; side: "before" | "after" } | null = null;
+
+  for (let i = 0; i < props.openTabs.length; i++) {
+    const el = tabElMap.get(props.openTabs[i].path);
+    if (!el) continue;
+    const rect = el.getBoundingClientRect();
+    if (clientX >= rect.left && clientX <= rect.right) {
+      target = { index: i, side: clientX < rect.left + rect.width / 2 ? "before" : "after" };
+      break;
+    }
+  }
+  if (!target && props.openTabs.length) {
+    const lastEl = tabElMap.get(props.openTabs[props.openTabs.length - 1].path);
+    if (lastEl) {
+      const rect = lastEl.getBoundingClientRect();
+      if (clientX > rect.right) target = { index: props.openTabs.length - 1, side: "after" };
+      else if (clientX < rect.left) target = { index: 0, side: "before" };
+    }
+  }
+
+  s.dropIndex = target?.index ?? -1;
+  s.dropSide = target?.side ?? null;
+}
+
+function autoScrollTabs(clientX: number) {
+  const container = tabsContainerRef.value;
+  if (!container) return;
+  const rect = container.getBoundingClientRect();
+  const EDGE = 40;
+  if (clientX < rect.left + EDGE) container.scrollLeft -= 8;
+  else if (clientX > rect.right - EDGE) container.scrollLeft += 8;
+}
+
+function onTabClick(tab: OpenTab) {
+  if (suppressTabClick) {
+    suppressTabClick = false;
     return;
   }
-  e.dataTransfer!.dropEffect = "move";
-}
-
-function onTabDragEnter(e: DragEvent, index: number) {
-  e.preventDefault();
-  if (dragState.value.tabIndex < 0) return;
-  if (dragState.value.tabIndex === index) {
-    dragState.value.dropIndex = -1;
-    dragState.value.dropSide = null;
-    return;
-  }
-  const tabEl = tabElMap.get(props.openTabs[index]?.path ?? "");
-  if (!tabEl) return;
-  const rect = tabEl.getBoundingClientRect();
-  const midX = rect.left + rect.width / 2;
-  const side = e.clientX < midX ? "before" : "after";
-  dragState.value = { ...dragState.value, dropIndex: index, dropSide: side };
-}
-
-function onTabDragLeave(e: DragEvent, index: number) {
-  // Only clear when the leave event is for the current target element
-  const target = e.currentTarget as HTMLElement;
-  const related = e.relatedTarget as Node | null;
-  if (related && target.contains(related)) return;
-  if (dragState.value.dropIndex === index) {
-    dragState.value.dropIndex = -1;
-    dragState.value.dropSide = null;
-  }
-}
-
-function onTabDrop(e: DragEvent, index: number) {
-  e.preventDefault();
-  const fromIndex = dragState.value.tabIndex;
-  const dropSide = dragState.value.dropSide;
-  dragState.value = { tabIndex: -1, dropIndex: -1, dropSide: null };
-  if (fromIndex < 0 || fromIndex === index) return;
-  // toIndex is the position in the original array where the tab should be inserted.
-  // "before" tab at i  → toIndex = i
-  // "after"  tab at i  → toIndex = i + 1  (can be length for "after last")
-  const toIndex = dropSide === "after" ? index + 1 : index;
-  emit("reorder-tabs", { fromIndex, toIndex });
-}
-
-function onTabDragEnd() {
-  dragState.value = { tabIndex: -1, dropIndex: -1, dropSide: null };
+  emit("switch-tab", tab.path);
 }
 
 /* ---- 右键菜单 ---- */
@@ -564,6 +647,12 @@ function savePreviewState(state: Record<string, boolean>) {
 const previewState = ref<Record<string, boolean>>(loadPreviewState());
 
 const isMarkdownFile = computed(() => /\.md$/i.test(props.activeFilePath));
+
+const isGitVirtualTab = computed(
+  () =>
+    props.activeFilePath.startsWith("git-index://") ||
+    props.activeFilePath.startsWith("git-history://"),
+);
 
 const showPreview = computed({
   get: () => previewState.value[props.activeFilePath] ?? false,
@@ -811,11 +900,40 @@ defineExpose({ editorRef, diffEditorRef, revealLineInEditor, revealLineInDiff })
   box-shadow: inset -2px 0 0 0 var(--accent-color, #58a6ff);
 }
 
-.editor-tab[draggable="true"] {
+.editor-tab {
   cursor: grab;
 }
 
-.editor-tab[draggable="true"]:active {
+.editor-tab:active {
+  cursor: grabbing;
+}
+
+/* 拖拽幽灵 */
+.editor-tab-drag-ghost {
+  position: fixed;
+  z-index: 10000;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: rgba(22, 27, 38, 0.95);
+  border: 1px solid rgba(88, 166, 255, 0.4);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(8px);
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.92);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.editor-tab-drag-ghost-name {
+  display: inline-block;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+:global(.tab-dragging-active) {
+  user-select: none;
   cursor: grabbing;
 }
 
@@ -855,6 +973,16 @@ defineExpose({ editorRef, diffEditorRef, revealLineInEditor, revealLineInDiff })
 .editor-action-btn.collapse-btn {
   border-color: transparent;
   background: rgba(255, 255, 255, 0.04);
+}
+
+.editor-action-btn.source-jump-btn {
+  color: #3fb950;
+  border-color: rgba(63, 185, 80, 0.3);
+}
+
+.editor-action-btn.source-jump-btn:hover {
+  background: rgba(63, 185, 80, 0.1);
+  border-color: #3fb950;
 }
 
 .editor-action-divider {
