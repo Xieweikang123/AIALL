@@ -477,6 +477,64 @@ export async function discardGitFiles(projectPath: string, files: string[]): Pro
   });
 }
 
+export interface GitIgnoreLocalResult {
+  ok: boolean;
+  ignored?: string[];
+  error?: string;
+}
+
+export async function ignoreLocalChanges(projectPath: string, files: string[]): Promise<GitIgnoreLocalResult> {
+  return invokeBackend<GitIgnoreLocalResult>(
+    "git_ignore_local_changes",
+    { path: projectPath, files },
+    async () => {
+      try {
+        const response = await fetch(backendUrl("/backend/vibe/git/ignore-local"), {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: projectPath, files }),
+        });
+        return await readJsonResponse<GitIgnoreLocalResult>(response);
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : "网络错误" };
+      }
+    },
+  );
+}
+
+export async function unignoreLocalChanges(projectPath: string, files: string[]): Promise<GitIgnoreLocalResult> {
+  return invokeBackend<GitIgnoreLocalResult>(
+    "git_unignore_local_changes",
+    { path: projectPath, files },
+    async () => {
+      try {
+        const response = await fetch(backendUrl("/backend/vibe/git/unignore-local"), {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: projectPath, files }),
+        });
+        return await readJsonResponse<GitIgnoreLocalResult>(response);
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : "网络错误" };
+      }
+    },
+  );
+}
+
+export async function listIgnoredLocalChanges(projectPath: string): Promise<GitIgnoreLocalResult> {
+  return invokeBackend<GitIgnoreLocalResult>(
+    "git_list_ignored_local_changes",
+    { path: projectPath },
+    async () => {
+      try {
+        const url = backendUrl(`/backend/vibe/git/ignored-local?path=${encodeURIComponent(projectPath)}`);
+        const response = await fetch(url);
+        return await readJsonResponse<GitIgnoreLocalResult>(response);
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : "网络错误" };
+      }
+    },
+  );
+}
+
 export async function generateCommitMessage(
   projectPath: string,
   endpoint: string,

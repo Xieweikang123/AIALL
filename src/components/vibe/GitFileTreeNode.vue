@@ -71,6 +71,7 @@
     :class="{
       active: selectedGitFiles.includes(gitFileSelectionKey(node.path, staged)),
       loading: gitDiffLoadingKey === gitWorkingTreeDiffKey(node.path, staged),
+      'batch-active': hasSelection,
     }"
     :style="{ paddingLeft }"
     @pointerdown="$emit('pointer-down', $event, node.path, listScope)"
@@ -91,22 +92,36 @@
         v-if="staged"
         type="button"
         class="git-file-btn"
-        title="取消暂存"
+        :class="{ 'git-file-btn--batch': hasSelection }"
+        :title="hasSelection ? `批量取消暂存（已选 ${selectedGitFiles.length} 个）` : '取消暂存'"
         @pointerdown.stop
         @click.stop="$emit('unstage-file', node.path)"
       >✓</button>
+      <template v-else-if="isIgnoredLocal">
+        <button
+          type="button"
+          class="git-file-btn"
+          title="恢复跟踪（重新显示在更改列表）"
+          @pointerdown.stop
+          @click.stop="$emit('unignore-file', node.path)"
+        >↺</button>
+      </template>
       <template v-else>
         <button
           type="button"
           class="git-file-btn"
-          title="暂存更改"
+          :class="{ 'git-file-btn--batch': hasSelection }"
+          :title="hasSelection ? `批量暂存（已选 ${selectedGitFiles.length} 个）` : '暂存更改'"
           @pointerdown.stop
           @click.stop="$emit('stage-file', node.path)"
         >+</button>
         <button
           type="button"
           class="git-file-btn danger"
-          :title="node.file?.status === 'untracked' ? '删除未跟踪文件' : '丢弃更改'"
+          :class="{ 'git-file-btn--batch': hasSelection }"
+          :title="hasSelection
+            ? `批量丢弃（已选 ${selectedGitFiles.length} 个）`
+            : node.file?.status === 'untracked' ? '删除未跟踪文件' : '丢弃更改'"
           @pointerdown.stop
           @click.stop="$emit('discard-file', node.path, $event)"
         >✕</button>
@@ -141,6 +156,7 @@ defineEmits<{
   "stage-file": [path: string];
   "unstage-file": [path: string];
   "discard-file": [path: string, event: MouseEvent];
+  "unignore-file": [path: string];
   "stage-dir": [path: string];
   "unstage-dir": [path: string];
   "discard-dir": [path: string, event: MouseEvent];
@@ -152,6 +168,8 @@ defineEmits<{
 const depth = computed(() => props.depth ?? 0);
 const paddingLeft = computed(() => `${8 + depth.value * 24}px`);
 const expanded = computed(() => props.expandedDirs.has(props.node.path));
+const hasSelection = computed(() => props.selectedGitFiles.length > 1);
+const isIgnoredLocal = computed(() => props.listScope === "ignored-local");
 
 const flatDir = computed(() => {
   if (!props.flat) return "";
@@ -390,6 +408,11 @@ function gitWorkingTreeDiffKey(path: string, isStaged: boolean): string {
   background: rgba(139, 148, 158, 0.12);
 }
 
+:deep(.git-status-ignored-local) {
+  color: #8b949e;
+  background: rgba(139, 148, 158, 0.12);
+}
+
 .git-file-actions {
   opacity: 0;
   display: flex;
@@ -399,8 +422,34 @@ function gitWorkingTreeDiffKey(path: string, isStaged: boolean): string {
 }
 
 .git-tree-row--file:hover .git-file-actions,
-.git-tree-row--dir:hover .git-file-actions {
+.git-tree-row--dir:hover .git-file-actions,
+.git-tree-row--file.batch-active .git-file-actions {
   opacity: 1;
+}
+
+/* 批量模式：按钮高亮，提示将作用于整个选中集合 */
+:deep(.git-file-btn--batch) {
+  background: rgba(88, 166, 255, 0.18);
+  border-color: rgba(88, 166, 255, 0.5);
+  color: #79c0ff;
+}
+
+:deep(.git-file-btn--batch:hover) {
+  background: rgba(88, 166, 255, 0.3);
+  border-color: rgba(88, 166, 255, 0.65);
+  color: #a5d6ff;
+}
+
+:deep(.git-file-btn--batch.danger) {
+  background: rgba(248, 81, 73, 0.16);
+  border-color: rgba(248, 81, 73, 0.5);
+  color: #ffa198;
+}
+
+:deep(.git-file-btn--batch.danger:hover) {
+  background: rgba(248, 81, 73, 0.28);
+  border-color: rgba(248, 81, 73, 0.7);
+  color: #ffb3ad;
 }
 
 :deep(.git-file-btn) {

@@ -139,6 +139,27 @@ pub async fn git_discard(path: String, files: Vec<String>) -> git::GitActionResu
 }
 
 #[tauri::command]
+pub async fn git_ignore_local_changes(
+    path: String,
+    files: Vec<String>,
+) -> git::GitIgnoreLocalResult {
+    git::git_ignore_local_changes(&path, files).await
+}
+
+#[tauri::command]
+pub async fn git_unignore_local_changes(
+    path: String,
+    files: Vec<String>,
+) -> git::GitIgnoreLocalResult {
+    git::git_unignore_local_changes(&path, files).await
+}
+
+#[tauri::command]
+pub async fn git_list_ignored_local_changes(path: String) -> git::GitIgnoreLocalResult {
+    git::git_list_ignored_local_changes(&path).await
+}
+
+#[tauri::command]
 pub async fn git_remotes(path: String) -> git::GitRemotesResult {
     git::git_remotes(&path).await
 }

@@ -49,6 +49,8 @@ export interface GitPanelState {
   expandedGitLogEntries: Ref<Set<string>>;
   gitStashSectionOpen: Ref<boolean>;
   gitLocalChangesOpen: Ref<boolean>;
+  gitIgnoredLocalFiles: Ref<string[]>;
+  gitIgnoredLocalOpen: Ref<boolean>;
   selectedGitFiles: Ref<string[]>;
   gitDiffLoadingKey: Ref<string>;
   gitDiffContentCache: Ref<Record<string, GitFileDiff>>;
@@ -181,6 +183,8 @@ export function createGitPanelState(
   const expandedGitLogEntries = ref<Set<string>>(new Set());
   const gitStashSectionOpen = ref(false);
   const gitLocalChangesOpen = ref(false);
+  const gitIgnoredLocalFiles = ref<string[]>([]);
+  const gitIgnoredLocalOpen = ref(false);
   const selectedGitFiles = ref<string[]>([]);
   const gitDiffLoadingKey = ref("");
   const gitDiffContentCache = ref<Record<string, GitFileDiff>>({});
@@ -259,10 +263,14 @@ export function createGitPanelState(
   // Keep multi-select bar in sync when status empties (commit/refresh),
   // a file leaves a side, or persisted selection is restored against a clean tree.
   watch(
-    [gitStatus, selectedGitFiles],
+    [gitStatus, selectedGitFiles, gitIgnoredLocalFiles],
     ([files, selected]) => {
       if (!selected.length) return;
-      const pruned = pruneGitFileSelection(selected, files);
+      const withIgnored: Array<{ path: string; staged: boolean }> = [
+        ...files,
+        ...gitIgnoredLocalFiles.value.map((p) => ({ path: p, staged: false })),
+      ];
+      const pruned = pruneGitFileSelection(selected, withIgnored);
       if (pruned.length !== selected.length || pruned.some((key, i) => key !== selected[i])) {
         selectedGitFiles.value = pruned;
       }
@@ -433,6 +441,8 @@ export function createGitPanelState(
     expandedGitLogEntries,
     gitStashSectionOpen,
     gitLocalChangesOpen,
+    gitIgnoredLocalFiles,
+    gitIgnoredLocalOpen,
     selectedGitFiles,
     gitDiffLoadingKey,
     gitDiffContentCache,

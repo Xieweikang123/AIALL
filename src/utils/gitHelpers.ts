@@ -17,6 +17,7 @@ export function gitStatusIcon(status: string): string {
     case "copied": return "C";
     case "untracked": return "U";
     case "conflicted": return "!";
+    case "ignoredLocal": return "≡";
     default: return "?";
   }
 }
@@ -36,6 +37,7 @@ export function gitStatusClass(status: string): string {
     case "copied": return "git-status-renamed";
     case "untracked": return "git-status-untracked";
     case "conflicted": return "git-status-conflicted";
+    case "ignoredLocal": return "git-status-ignored-local";
     default: return "git-status-unknown";
   }
 }
@@ -113,7 +115,7 @@ export function splitGitFilePath(filePath: string): { dir: string; name: string 
 export type GitSelectionScope = "staged" | "unstaged";
 
 /** Visible Git file list section (Shift 多选范围按分区，不跨区串选). */
-export type GitFileListScope = "staged" | "modified" | "untracked";
+export type GitFileListScope = "staged" | "modified" | "untracked" | "ignored-local";
 
 export function gitFileListScopeIsStaged(scope: GitFileListScope): boolean {
   return scope === "staged";

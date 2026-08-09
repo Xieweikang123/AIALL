@@ -9,7 +9,7 @@ import {
   gitFileListScopeIsStaged,
   type GitFileListScope,
 } from "../../utils/gitHelpers";
-import { unstageGitFiles, discardGitFiles } from "../../services/vibeGitClient";
+import { unstageGitFiles, discardGitFiles, ignoreLocalChanges, unignoreLocalChanges } from "../../services/vibeGitClient";
 import type { GitPanelState } from "./createGitPanelState";
 import { withGitStagingSession } from "./gitStagingSession";
 
@@ -34,16 +34,17 @@ export function useGitSelectionActions(options: UseGitSelectionActionsOptions) {
     runStageGitFiles,
   } = options;
 
-  async function stageSelectedFiles() {
+  async function stageSelectedFiles(extraPath?: string) {
     if (!projectOpened()) return;
-    if (!state.selectedGitFiles.value.length) return;
+    if (!state.selectedGitFiles.value.length && !extraPath) return;
     state.gitError.value = "";
     state.clearGitDiffCache();
-    const filesToStage = state.selectedGitFiles.value
-      .map((key) => parseGitFileSelectionKey(key))
-      .filter((x): x is { path: string; staged: boolean } => !!x && !x.staged)
-      .map((x) => x.path)
-      .filter((path) => state.gitUnstagedFiles.value.some((f) => f.path === path));
+    const filesToStage = batchPaths(
+      state.selectedGitFiles.value,
+      extraPath,
+      (x) => !x.staged,
+      (path) => state.gitUnstagedFiles.value.some((f) => f.path === path),
+    );
     if (!filesToStage.length) return;
     const { stageable } = filterStageableGitPaths(filesToStage);
     if (!stageable.length) {
@@ -65,16 +66,17 @@ export function useGitSelectionActions(options: UseGitSelectionActionsOptions) {
     });
   }
 
-  async function unstageSelectedFiles() {
+  async function unstageSelectedFiles(extraPath?: string) {
     if (!projectOpened()) return;
-    if (!state.selectedGitFiles.value.length) return;
+    if (!state.selectedGitFiles.value.length && !extraPath) return;
     state.gitError.value = "";
     state.clearGitDiffCache();
-    const filesToUnstage = state.selectedGitFiles.value
-      .map((key) => parseGitFileSelectionKey(key))
-      .filter((x): x is { path: string; staged: boolean } => !!x && x.staged)
-      .map((x) => x.path)
-      .filter((path) => state.gitStagedFiles.value.some((f) => f.path === path));
+    const filesToUnstage = batchPaths(
+      state.selectedGitFiles.value,
+      extraPath,
+      (x) => x.staged,
+      (path) => state.gitStagedFiles.value.some((f) => f.path === path),
+    );
     if (!filesToUnstage.length) return;
     state.gitStatus.value = state.gitStatus.value.map((f) =>
       filesToUnstage.includes(f.path) ? { ...f, staged: false } : f,
@@ -92,16 +94,33 @@ export function useGitSelectionActions(options: UseGitSelectionActionsOptions) {
     });
   }
 
-  async function discardSelectedFiles(event?: MouseEvent) {
+  async function discardSelectedFiles(extraPathOrEvent?: string | MouseEvent, event?: MouseEvent) {
+    let extraPath: string | undefined;
+    let ev: MouseEvent | undefined;
+    if (typeof extraPathOrEvent === "string") {
+      extraPath = extraPathOrEvent;
+      ev = event;
+    } else {
+      ev = extraPathOrEvent;
+    }
     if (!projectOpened()) return;
-    if (!state.selectedGitFiles.value.length) return;
-    const filesToDiscard = state.selectedGitFiles.value
-      .map((key) => parseGitFileSelectionKey(key))
-      .filter((x): x is { path: string; staged: boolean } => !!x && !x.staged)
-      .map((x) => x.path)
-      .filter((path) => state.gitUnstagedFiles.value.some((f) => f.path === path));
+    if (!state.selectedGitFiles.value.length && !extraPath) return;
+    const filesToDiscard = batchPaths(
+      state.selectedGitFiles.value,
+      extraPath,
+      (x) => !x.staged,
+      (path) => state.gitUnstagedFiles.value.some((f) => f.path === path),
+    );
     if (!filesToDiscard.length) return;
-    if (!(await confirm(`确定丢弃 ${filesToDiscard.length} 个文件的更改？`, event))) return;
+    const untrackedSet = new Set(state.gitUntrackedFiles.value.map((f) => f.path));
+    const allUntracked = filesToDiscard.every((p) => untrackedSet.has(p));
+    const label = filesToDiscard.length === 1 ? filesToDiscard[0] : `${filesToDiscard.length} 个文件`;
+    const confirmMsg = allUntracked
+      ? filesToDiscard.length === 1
+        ? `确定删除未跟踪文件 ${filesToDiscard[0]}？此操作不可恢复。`
+        : `确定删除 ${filesToDiscard.length} 个未跟踪文件？此操作不可恢复。`
+      : `确定丢弃 ${label} 的更改？`;
+    if (!(await confirm(confirmMsg, ev))) return;
     state.gitError.value = "";
     state.clearGitDiffCache();
     state.gitStatus.value = state.gitStatus.value.filter((f) => !filesToDiscard.includes(f.path));
@@ -120,6 +139,62 @@ export function useGitSelectionActions(options: UseGitSelectionActionsOptions) {
     });
   }
 
+  /** 选中集合 ∪ 额外点击的文件，再按动作方向过滤。 */
+  function batchPaths(
+    selectedKeys: string[],
+    extraPath: string | undefined,
+    sideFilter: (parsed: { path: string; staged: boolean }) => boolean,
+    exists: (path: string) => boolean,
+  ): string[] {
+    const fromSelection = selectedKeys
+      .map((key) => parseGitFileSelectionKey(key))
+      .filter((x): x is { path: string; staged: boolean } => !!x && sideFilter(x))
+      .map((x) => x.path);
+    return Array.from(new Set([...fromSelection, ...(extraPath ? [extraPath] : [])])).filter(exists);
+  }
+
+  /** 忽略本地改动：skip-worktree 后文件不再出现在 git status，避免误提交。 */
+  async function ignoreSelectedFiles(extraPath?: string) {
+    if (!projectOpened()) return;
+    if (!state.selectedGitFiles.value.length && !extraPath) return;
+    state.gitError.value = "";
+    state.clearGitDiffCache();
+    const files = batchPaths(
+      state.selectedGitFiles.value,
+      extraPath,
+      (x) => !x.staged,
+      (path) => state.gitModifiedFiles.value.some((f) => f.path === path),
+    );
+    if (!files.length) return;
+    const result = await ignoreLocalChanges(projectPath(), files);
+    if (!result.ok) {
+      state.gitError.value = result.error || "忽略本地改动失败";
+    }
+    state.selectedGitFiles.value = [];
+    await refreshGitStatus({ showLoading: false, force: true });
+  }
+
+  /** 恢复跟踪：去掉 skip-worktree，文件重新出现在 git status。 */
+  async function unignoreSelectedFiles(extraPath?: string) {
+    if (!projectOpened()) return;
+    if (!state.selectedGitFiles.value.length && !extraPath) return;
+    state.gitError.value = "";
+    state.clearGitDiffCache();
+    const files = batchPaths(
+      state.selectedGitFiles.value,
+      extraPath,
+      () => true,
+      (path) => state.gitIgnoredLocalFiles.value.includes(path),
+    );
+    if (!files.length) return;
+    const result = await unignoreLocalChanges(projectPath(), files);
+    if (!result.ok) {
+      state.gitError.value = result.error || "恢复跟踪失败";
+    }
+    state.selectedGitFiles.value = [];
+    await refreshGitStatus({ showLoading: false, force: true });
+  }
+
   function toggleGitFileSelection(
     path: string,
     shiftKey: boolean,
@@ -133,7 +208,9 @@ export function useGitSelectionActions(options: UseGitSelectionActionsOptions) {
         ? state.gitStagedFiles.value.map((f) => f.path)
         : listScope === "untracked"
           ? state.gitUntrackedFiles.value.map((f) => f.path)
-          : state.gitModifiedFiles.value.map((f) => f.path);
+          : listScope === "ignored-local"
+            ? state.gitIgnoredLocalFiles.value
+            : state.gitModifiedFiles.value.map((f) => f.path);
 
     if (shiftKey && state.selectedGitFiles.value.length > 0) {
       const last = parseGitFileSelectionKey(state.selectedGitFiles.value[state.selectedGitFiles.value.length - 1]);
@@ -184,6 +261,8 @@ export function useGitSelectionActions(options: UseGitSelectionActionsOptions) {
     stageSelectedFiles,
     unstageSelectedFiles,
     discardSelectedFiles,
+    ignoreSelectedFiles,
+    unignoreSelectedFiles,
     toggleGitFileSelection,
     clearGitSelection,
   };

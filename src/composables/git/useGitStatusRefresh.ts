@@ -1,6 +1,6 @@
 import { debugLog } from "../../utils/debugLog";
 import { toErrorMessage } from "../../utils/vibeHelpers";
-import { fetchGitStatus, fetchGitLog } from "../../services/vibeGitClient";
+import { fetchGitStatus, fetchGitLog, listIgnoredLocalChanges } from "../../services/vibeGitClient";
 import type { GitPanelState } from "./createGitPanelState";
 
 export interface AfterStatusRefreshCallbacks {
@@ -39,6 +39,7 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
     state.gitHeadCommit.value = "";
     state.gitStatus.value = [];
     state.selectedGitFiles.value = [];
+    state.gitIgnoredLocalFiles.value = [];
     state.gitBranches.value = [];
     state.gitLogEntries.value = [];
     state.gitLogCount.value = 30;
@@ -89,6 +90,7 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
       state.clearGitDiffCache();
 
       if (result.isRepo) {
+        void refreshIgnoredLocalFiles();
         void afterStatusRefresh.refreshGitRemotes();
         void afterStatusRefresh.refreshGitStashes();
         void afterStatusRefresh.refreshGitBranches();
@@ -120,6 +122,18 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
       // Git's --until date is inclusive only up to midnight; use the next day.
       until: until ? `${until} 23:59:59` : "",
     };
+  }
+
+  async function refreshIgnoredLocalFiles() {
+    if (!projectOpened() || !state.gitIsRepo.value) return;
+    try {
+      const result = await listIgnoredLocalChanges(projectPath());
+      if (result.ok) {
+        state.gitIgnoredLocalFiles.value = result.ignored ?? [];
+      }
+    } catch {
+      // ignore — status itself already surfaced errors
+    }
   }
 
   async function setGitLogFilters(filters: { author: string; path: string; since: string; until: string }) {
@@ -242,6 +256,7 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
   return {
     resetGitPanelState,
     refreshGitStatus,
+    refreshIgnoredLocalFiles,
     refreshGitLogIfOpen,
     loadMoreGitLog,
     searchGitLog,

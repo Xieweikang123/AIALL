@@ -147,6 +147,8 @@
           :git-behind-commits-loading="gitBehindCommitsLoading"
           :git-stash-section-open="gitStashSectionOpen"
           :git-local-changes-open="gitLocalChangesOpen"
+          :git-ignored-local-files="gitIgnoredLocalFiles"
+          :git-ignored-local-open="gitIgnoredLocalOpen"
           :git-advanced-open="gitAdvancedOpen"
           :git-advanced-action="gitAdvancedAction"
           :git-merge-in-progress="gitMergeInProgress"
@@ -174,9 +176,13 @@
           @stage-selected="stageSelectedFiles"
           @unstage-selected="unstageSelectedFiles"
           @discard-selected="discardSelectedFiles"
+          @stage-selected-with="stageSelectedWith"
+          @unstage-selected-with="unstageSelectedWith"
+          @discard-selected-with="discardSelectedWith"
           @clear-selection="clearGitSelection"
           @discard-file="discardFile"
           @discard-all="discardAll"
+          @unignore-file="unignoreSelectedFiles"
           @resolve-conflict="resolveConflict"
           @open-conflict-file="openConflictFile"
           @do-stash-save="doStashSave"
@@ -197,6 +203,7 @@
           @update:git-behind-commits-open="gitBehindCommitsOpen = $event"
           @update:git-stash-section-open="gitStashSectionOpen = $event"
           @update:git-local-changes-open="gitLocalChangesOpen = $event"
+          @update:git-ignored-local-open="gitIgnoredLocalOpen = $event"
           @update:git-commit-message="gitCommitMessage = $event"
           @update:git-stash-message="gitStashMessage = $event"
           @toggle-git-log-entry="toggleGitLogEntry"
@@ -377,6 +384,7 @@
         @switch-tab="switchTab"
         @close-tab="closeTab"
         @toggle-diff-mode="toggleDiffMode"
+        @open-source-file="onOpenSourceFile"
         @save-file="onSaveFile"
         @reload-file="reloadFile"
         @collapse-editor="collapseEditor"
@@ -621,6 +629,8 @@
           :git-behind-commits-loading="gitBehindCommitsLoading"
           :git-stash-section-open="gitStashSectionOpen"
           :git-local-changes-open="gitLocalChangesOpen"
+          :git-ignored-local-files="gitIgnoredLocalFiles"
+          :git-ignored-local-open="gitIgnoredLocalOpen"
           :git-advanced-open="gitAdvancedOpen"
           :git-advanced-action="gitAdvancedAction"
           :git-merge-in-progress="gitMergeInProgress"
@@ -648,9 +658,13 @@
           @stage-selected="stageSelectedFiles"
           @unstage-selected="unstageSelectedFiles"
           @discard-selected="discardSelectedFiles"
+          @stage-selected-with="stageSelectedWith"
+          @unstage-selected-with="unstageSelectedWith"
+          @discard-selected-with="discardSelectedWith"
           @clear-selection="clearGitSelection"
           @discard-file="discardFile"
           @discard-all="discardAll"
+          @unignore-file="unignoreSelectedFiles"
           @resolve-conflict="resolveConflict"
           @open-conflict-file="openConflictFile"
           @do-stash-save="doStashSave"
@@ -671,6 +685,7 @@
           @update:git-behind-commits-open="gitBehindCommitsOpen = $event"
           @update:git-stash-section-open="gitStashSectionOpen = $event"
           @update:git-local-changes-open="gitLocalChangesOpen = $event"
+          @update:git-ignored-local-open="gitIgnoredLocalOpen = $event"
           @update:git-commit-message="gitCommitMessage = $event"
           @update:git-stash-message="gitStashMessage = $event"
           @toggle-git-log-entry="toggleGitLogEntry"
@@ -916,7 +931,23 @@
           >
             丢弃更改
           </button>
-          <div v-if="gitFileCtxCanStage || gitFileCtxCanUnstage || gitFileCtxCanDiscard" class="ctx-sep" />
+          <button
+            v-if="gitFileCtxCanIgnore"
+            type="button"
+            class="ctx-item"
+            @click="gitFileCtxIgnore"
+          >
+            忽略本地改动
+          </button>
+          <button
+            v-if="gitFileCtxCanUnignore"
+            type="button"
+            class="ctx-item"
+            @click="gitFileCtxUnignore"
+          >
+            恢复跟踪
+          </button>
+          <div v-if="gitFileCtxCanStage || gitFileCtxCanUnstage || gitFileCtxCanDiscard || gitFileCtxCanIgnore || gitFileCtxCanUnignore" class="ctx-sep" />
           <button type="button" class="ctx-item" @click="gitFileOpenInEditor">打开文件</button>
           <button type="button" class="ctx-item" @click="gitFileRevealInFolder">在文件管理器中显示</button>
           <div class="ctx-sep" />
@@ -1406,7 +1437,7 @@ const {
   gitLogCount, gitLogSearchQuery, gitLogAllBranches, gitLogBranchFilter, gitLogAuthorFilter, gitLogPathFilter, gitLogSince, gitLogUntil, hasMoreGitLog, gitLogLoadingMore, gitLogSearchLoading, loadMoreGitLog,
   searchGitLog, setGitLogAllBranches, setGitLogBranchFilter, setGitLogFilters,
   gitStagedOpen, gitUnstagedOpen, gitUntrackedOpen, expandedGitLogEntries, selectedGitFiles,
-  gitStashSectionOpen, gitLocalChangesOpen,
+  gitStashSectionOpen, gitLocalChangesOpen, gitIgnoredLocalFiles, gitIgnoredLocalOpen,
   gitDiffLoadingKey, gitDiffContentCache, gitRemotes, gitSelectedRemote, gitTrackingBranch,
   gitAhead, gitBehind, gitRemoteLoading, gitRemoteAction, gitStashes, gitStashOpen,
   gitStashAction, gitStashMessage, gitAiPushStep,
@@ -1424,6 +1455,7 @@ const {
   stageHunk,
   unstageHunk,
   stageSelectedFiles, unstageSelectedFiles, discardSelectedFiles, toggleGitFileSelection, clearGitSelection,
+  ignoreSelectedFiles, unignoreSelectedFiles,
   generateCommitMessage, aiCommitAndPush, refreshGitRemotes, refreshGitAheadCommits, refreshGitBehindCommits,
   doFetch, doPull, doPush,
   doResetCommit,
@@ -1599,7 +1631,7 @@ const {
 });
 
 const contextMenu = ref({ show: false, x: 0, y: 0, path: "" });
-const gitFileContextMenu = ref({ show: false, x: 0, y: 0, path: "" });
+const gitFileContextMenu = ref({ show: false, x: 0, y: 0, path: "", scope: "modified" as GitFileListScope });
 
 const aiConfig = ref({ endpoint: "", apiKey: "", model: "", providerName: "" });
 
@@ -2051,6 +2083,23 @@ async function openFile(path: string, options?: Parameters<typeof openFileCore>[
   dismissPlanPanelForeground();
   dismissGitPanelForeground();
   return openFileCore(path, options);
+}
+
+function gitVirtualToRealPath(path: string): string {
+  if (path.startsWith("git-index://")) {
+    return resolveFullPathFromRel(path.slice("git-index://".length));
+  }
+  if (path.startsWith("git-history://")) {
+    const rest = path.slice("git-history://".length);
+    const slash = rest.indexOf("/");
+    const rel = slash >= 0 ? rest.slice(slash + 1) : rest;
+    return resolveFullPathFromRel(rel);
+  }
+  return path;
+}
+
+function onOpenSourceFile(path: string) {
+  void openFile(gitVirtualToRealPath(path));
 }
 
 async function showGitFileDiff(filePath: string, staged = false) {
@@ -3272,12 +3321,13 @@ function onGitFileContextMenu(e: MouseEvent, path: string, listScope: GitFileLis
   const itemCount =
     1
     + (selected.some((s) => !s.staged && gitUnstagedFiles.value.some((f) => f.path === s.path)) ? 2 : 0)
-    + (selected.some((s) => s.staged && gitStagedFiles.value.some((f) => f.path === s.path)) ? 1 : 0);
+    + (selected.some((s) => s.staged && gitStagedFiles.value.some((f) => f.path === s.path)) ? 1 : 0)
+    + (listScope === "ignored-local" ? 1 : 0);
   const menuW = 160;
   const menuH = Math.min(40 + itemCount * 32, 200);
   const clampedX = Math.min(e.clientX, window.innerWidth - menuW);
   const clampedY = Math.min(e.clientY, window.innerHeight - menuH);
-  gitFileContextMenu.value = { show: true, x: Math.max(0, clampedX), y: Math.max(0, clampedY), path };
+  gitFileContextMenu.value = { show: true, x: Math.max(0, clampedX), y: Math.max(0, clampedY), path, scope: listScope };
 }
 
 function hideGitFileContextMenu() {
@@ -3297,6 +3347,36 @@ const gitFileCtxCanUnstage = computed(() =>
   }),
 );
 const gitFileCtxCanDiscard = computed(() => gitFileCtxCanStage.value);
+const gitFileCtxCanIgnore = computed(() =>
+  gitFileContextMenu.value.scope === "ignored-local"
+    ? false
+    : selectedGitFiles.value.some((key) => {
+        const parsed = parseGitFileSelectionKey(key);
+        return (
+          !!parsed &&
+          !parsed.staged &&
+          gitModifiedFiles.value.some((f) => f.path === parsed.path)
+        );
+      }),
+);
+const gitFileCtxCanUnignore = computed(() =>
+  gitFileContextMenu.value.scope === "ignored-local"
+    ? gitIgnoredLocalFiles.value.some((p) => p === gitFileContextMenu.value.path)
+    : selectedGitFiles.value.some((key) => {
+        const parsed = parseGitFileSelectionKey(key);
+        return !!parsed && gitIgnoredLocalFiles.value.includes(parsed.path);
+      }),
+);
+
+async function gitFileCtxIgnore() {
+  hideGitFileContextMenu();
+  await ignoreSelectedFiles();
+}
+
+async function gitFileCtxUnignore() {
+  hideGitFileContextMenu();
+  await unignoreSelectedFiles();
+}
 
 function gitFileCopyName() {
   const path = gitFileContextMenu.value.path;
@@ -3342,6 +3422,19 @@ async function gitFileCtxUnstage() {
 async function gitFileCtxDiscard(event: MouseEvent) {
   hideGitFileContextMenu();
   await discardSelectedFiles(event);
+}
+
+// 多选时点击单个文件的操作按钮 → 批量处理（选中集合 ∪ 点击的文件）
+function stageSelectedWith(path: string) {
+  void stageSelectedFiles(path);
+}
+
+function unstageSelectedWith(path: string) {
+  void unstageSelectedFiles(path);
+}
+
+function discardSelectedWith(path: string, event: MouseEvent) {
+  void discardSelectedFiles(path, event);
 }
 
 async function onSaveFile() {

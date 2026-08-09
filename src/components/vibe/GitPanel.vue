@@ -112,15 +112,21 @@
               :git-staged-expanded-dirs="gitStagedExpandedDirs"
               :git-modified-expanded-dirs="gitModifiedExpandedDirs"
               :git-untracked-expanded-dirs="gitUntrackedExpandedDirs"
+              :git-ignored-local-files="gitIgnoredLocalFiles"
+              :git-ignored-local-open="gitIgnoredLocalOpen"
               :view-mode="gitChangesViewMode"
               @update:view-mode="setGitChangesViewMode"
               @stage-selected="$emit('stage-selected')"
               @unstage-selected="$emit('unstage-selected')"
               @discard-selected="$emit('discard-selected', $event)"
+              @stage-selected-with="$emit('stage-selected-with', $event)"
+              @unstage-selected-with="$emit('unstage-selected-with', $event)"
+              @discard-selected-with="(path, event) => $emit('discard-selected-with', path, event)"
               @clear-selection="$emit('clear-selection')"
               @update:git-staged-open="$emit('update:gitStagedOpen', $event)"
               @update:git-unstaged-open="$emit('update:gitUnstagedOpen', $event)"
               @update:git-untracked-open="$emit('update:gitUntrackedOpen', $event)"
+              @update:git-ignored-local-open="$emit('update:gitIgnoredLocalOpen', $event)"
               @unstage-all="$emit('unstage-all')"
               @stage-all="$emit('stage-all')"
               @stage-untracked="$emit('stage-untracked')"
@@ -128,6 +134,7 @@
               @stage-file="$emit('stage-file', $event)"
               @unstage-file="$emit('unstage-file', $event)"
               @discard-file="(path, event) => $emit('discard-file', path, event)"
+              @unignore-file="$emit('unignore-file', $event)"
               @stage-dir="(path, scope) => $emit('stage-dir', path, scope)"
               @unstage-dir="$emit('unstage-dir', $event)"
               @discard-dir="(path, scope, event) => $emit('discard-dir', path, scope, event)"
@@ -314,6 +321,8 @@ const props = defineProps<{
   gitLogSearchLoading: boolean;
   gitLocalChangesOpen: boolean;
   gitStashSectionOpen: boolean;
+  gitIgnoredLocalFiles: string[];
+  gitIgnoredLocalOpen: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -335,6 +344,9 @@ const emit = defineEmits<{
   (e: "stage-selected"): void;
   (e: "unstage-selected"): void;
   (e: "discard-selected", event: MouseEvent): void;
+  (e: "stage-selected-with", path: string): void;
+  (e: "unstage-selected-with", path: string): void;
+  (e: "discard-selected-with", path: string, event: MouseEvent): void;
   (e: "clear-selection"): void;
   (e: "discard-file", path: string, event: MouseEvent): void;
   (e: "discard-all", event: MouseEvent): void;
@@ -372,6 +384,8 @@ const emit = defineEmits<{
   (e: "update:batchSectionOpen", open: boolean): void;
   (e: "update:gitLocalChangesOpen", open: boolean): void;
   (e: "update:gitStashSectionOpen", open: boolean): void;
+  (e: "update:gitIgnoredLocalOpen", open: boolean): void;
+  (e: "unignore-file", path: string): void;
   (e: "load-more-git-log"): void;
   (e: "search-git-log", query: string): void;
   (e: "checkout-branch", branchName: string): void;

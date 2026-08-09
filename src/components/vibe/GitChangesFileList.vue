@@ -61,7 +61,7 @@
               :selected-git-files="selectedGitFiles"
               :git-diff-loading-key="gitDiffLoadingKey"
               @toggle-dir="(path) => $emit('toggle-tree-dir', path, 'staged')"
-              @unstage-file="$emit('unstage-file', $event)"
+              @unstage-file="onUnstageFile"
               @unstage-dir="$emit('unstage-dir', $event)"
               @pointer-down="(event, path, scope) => $emit('on-git-file-pointer-down', event, path, scope)"
               @contextmenu="(event, path, scope) => $emit('on-git-file-contextmenu', event, path, scope)"
@@ -79,7 +79,7 @@
               :expanded-dirs="gitStagedExpandedDirs"
               :selected-git-files="selectedGitFiles"
               :git-diff-loading-key="gitDiffLoadingKey"
-              @unstage-file="$emit('unstage-file', $event)"
+              @unstage-file="onUnstageFile"
               @pointer-down="(event, path, scope) => $emit('on-git-file-pointer-down', event, path, scope)"
               @contextmenu="(event, path, scope) => $emit('on-git-file-contextmenu', event, path, scope)"
               @open-file="(path) => $emit('open-file', path)"
@@ -110,8 +110,8 @@
               :selected-git-files="selectedGitFiles"
               :git-diff-loading-key="gitDiffLoadingKey"
               @toggle-dir="(path) => $emit('toggle-tree-dir', path, 'modified')"
-              @stage-file="$emit('stage-file', $event)"
-              @discard-file="(path, event) => $emit('discard-file', path, event)"
+              @stage-file="onStageFile"
+              @discard-file="onDiscardFile"
               @stage-dir="(path) => $emit('stage-dir', path, 'modified')"
               @discard-dir="(path, event) => $emit('discard-dir', path, 'modified', event)"
               @pointer-down="(event, path, scope) => $emit('on-git-file-pointer-down', event, path, scope)"
@@ -130,13 +130,38 @@
               :expanded-dirs="gitModifiedExpandedDirs"
               :selected-git-files="selectedGitFiles"
               :git-diff-loading-key="gitDiffLoadingKey"
-              @stage-file="$emit('stage-file', $event)"
-              @discard-file="(path, event) => $emit('discard-file', path, event)"
+              @stage-file="onStageFile"
+              @discard-file="onDiscardFile"
               @pointer-down="(event, path, scope) => $emit('on-git-file-pointer-down', event, path, scope)"
               @contextmenu="(event, path, scope) => $emit('on-git-file-contextmenu', event, path, scope)"
               @open-file="(path) => $emit('open-file', path)"
             />
           </template>
+        </div>
+      </div>
+      <div v-if="gitIgnoredLocalFiles.length" class="git-section">
+        <div class="git-section-head">
+          <button type="button" class="git-section-toggle" @click="$emit('update:gitIgnoredLocalOpen', !gitIgnoredLocalOpen)">
+            <span class="git-section-chevron">{{ gitIgnoredLocalOpen ? "▾" : "▸" }}</span>
+            <span class="git-section-title">已忽略本地改动 ({{ gitIgnoredLocalFiles.length }})</span>
+          </button>
+        </div>
+        <div v-if="gitIgnoredLocalOpen" class="git-file-list">
+          <GitFileTreeNode
+            v-for="file in gitIgnoredLocalFiles"
+            :key="`ignored:${file}`"
+            :node="flatNode({ path: file, status: 'ignoredLocal', staged: false })"
+            :staged="false"
+            flat
+            list-scope="ignored-local"
+            :expanded-dirs="gitModifiedExpandedDirs"
+            :selected-git-files="selectedGitFiles"
+            :git-diff-loading-key="gitDiffLoadingKey"
+            @unignore-file="$emit('unignore-file', $event)"
+            @pointer-down="(event, path, scope) => $emit('on-git-file-pointer-down', event, path, scope)"
+            @contextmenu="(event, path, scope) => $emit('on-git-file-contextmenu', event, path, scope)"
+            @open-file="(path) => $emit('open-file', path)"
+          />
         </div>
       </div>
       <div v-if="gitUntrackedFiles.length" class="git-section">
@@ -161,8 +186,8 @@
               :selected-git-files="selectedGitFiles"
               :git-diff-loading-key="gitDiffLoadingKey"
               @toggle-dir="(path) => $emit('toggle-tree-dir', path, 'untracked')"
-              @stage-file="$emit('stage-file', $event)"
-              @discard-file="(path, event) => $emit('discard-file', path, event)"
+              @stage-file="onStageFile"
+              @discard-file="onDiscardFile"
               @stage-dir="(path) => $emit('stage-dir', path, 'untracked')"
               @discard-dir="(path, event) => $emit('discard-dir', path, 'untracked', event)"
               @pointer-down="(event, path, scope) => $emit('on-git-file-pointer-down', event, path, scope)"
@@ -181,8 +206,8 @@
               :expanded-dirs="gitUntrackedExpandedDirs"
               :selected-git-files="selectedGitFiles"
               :git-diff-loading-key="gitDiffLoadingKey"
-              @stage-file="$emit('stage-file', $event)"
-              @discard-file="(path, event) => $emit('discard-file', path, event)"
+              @stage-file="onStageFile"
+              @discard-file="onDiscardFile"
               @pointer-down="(event, path, scope) => $emit('on-git-file-pointer-down', event, path, scope)"
               @contextmenu="(event, path, scope) => $emit('on-git-file-contextmenu', event, path, scope)"
               @open-file="(path) => $emit('open-file', path)"
@@ -201,7 +226,7 @@ import GitFileTreeNode from "./GitFileTreeNode.vue";
 import GitConflictList from "./GitConflictList.vue";
 import type { GitPanelFileInput, GitChangesViewMode } from "../../composables/useGitPanelFileTree";
 
-defineProps<{
+const props = defineProps<{
   gitStatus: unknown[];
   gitStagedFiles: GitPanelFileInput[];
   gitConflictedFiles: GitPanelFileInput[];
@@ -222,17 +247,23 @@ defineProps<{
   gitStagedExpandedDirs: Set<string>;
   gitModifiedExpandedDirs: Set<string>;
   gitUntrackedExpandedDirs: Set<string>;
+  gitIgnoredLocalFiles: string[];
+  gitIgnoredLocalOpen: boolean;
   viewMode: GitChangesViewMode;
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   (e: "stage-selected"): void;
   (e: "unstage-selected"): void;
   (e: "discard-selected", event: MouseEvent): void;
+  (e: "stage-selected-with", path: string): void;
+  (e: "unstage-selected-with", path: string): void;
+  (e: "discard-selected-with", path: string, event: MouseEvent): void;
   (e: "clear-selection"): void;
   (e: "update:gitStagedOpen", value: boolean): void;
   (e: "update:gitUnstagedOpen", value: boolean): void;
   (e: "update:gitUntrackedOpen", value: boolean): void;
+  (e: "update:gitIgnoredLocalOpen", value: boolean): void;
   (e: "update:viewMode", value: GitChangesViewMode): void;
   (e: "unstage-all"): void;
   (e: "stage-all"): void;
@@ -241,6 +272,7 @@ defineEmits<{
   (e: "stage-file", path: string): void;
   (e: "unstage-file", path: string): void;
   (e: "discard-file", path: string, event: MouseEvent): void;
+  (e: "unignore-file", path: string): void;
   (e: "stage-dir", path: string, scope: "modified" | "untracked"): void;
   (e: "unstage-dir", path: string): void;
   (e: "discard-dir", path: string, scope: "modified" | "untracked", event: MouseEvent): void;
@@ -253,6 +285,22 @@ defineEmits<{
 
 function flatNode(file: GitPanelFileInput): GitFileTreeNodeType {
   return { name: file.path, path: file.path, isDirectory: false, file };
+}
+
+/* 多选（≥2）时，单个文件的操作按钮视为批量操作（选中集合 ∪ 点击的文件） */
+function onStageFile(path: string) {
+  if (props.selectedGitFiles.length > 1) emit("stage-selected-with", path);
+  else emit("stage-file", path);
+}
+
+function onUnstageFile(path: string) {
+  if (props.selectedGitFiles.length > 1) emit("unstage-selected-with", path);
+  else emit("unstage-file", path);
+}
+
+function onDiscardFile(path: string, event: MouseEvent) {
+  if (props.selectedGitFiles.length > 1) emit("discard-selected-with", path, event);
+  else emit("discard-file", path, event);
 }
 </script>
 
