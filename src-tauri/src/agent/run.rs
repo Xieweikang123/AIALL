@@ -976,6 +976,26 @@ pub async fn agent_run(
                             .push(trimmed.to_string());
                     }
                 }
+            } else if name == "search_files" || name == "search_symbols" {
+                if let Some(query) = args
+                    .get("query")
+                    .or_else(|| args.get("q"))
+                    .and_then(|v| v.as_str())
+                {
+                    let trimmed = query.trim();
+                    if !trimmed.is_empty()
+                        && !run_state
+                            .consultative
+                            .search_queries
+                            .iter()
+                            .any(|q| q == trimmed)
+                    {
+                        run_state
+                            .consultative
+                            .search_queries
+                            .push(trimmed.to_string());
+                    }
+                }
             }
             if is_write {
                 turn_had_only_read_tools = false;
@@ -1019,6 +1039,7 @@ pub async fn agent_run(
                 consultative_read_paths: &run_state.consultative.read_paths,
                 turn_tool_outcomes: &turn_tool_outcomes,
                 consultative_grep_patterns: &run_state.consultative.grep_patterns,
+                consultative_search_queries: &run_state.consultative.search_queries,
                 is_read_only_run,
                 written_files: &run_state.written_files,
                 mode: effective_mode_str,

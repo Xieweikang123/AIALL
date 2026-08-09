@@ -144,6 +144,95 @@ describe("renderMarkdown", () => {
     expect(html.match(/<li/g)?.length).toBe(2);
   });
 
+  it("keeps code-comment numbered lines intact inside fenced code blocks", () => {
+    const html = renderMarkdown([
+      "### 三、怎么用？",
+      "",
+      "在组件中两步即可：",
+      "",
+      "```js",
+      "// 1. 引入",
+      'import syncProgressMixin from "./syncProgressMixin";',
+      "",
+      "// 2. 声明 mixins",
+      "export default {",
+      "  mixins: [syncProgressMixin],",
+      "  data() { return { /* ... */ } },",
+      "};",
+      "```",
+    ].join("\n"));
+    expect(html).toContain("<h3");
+    expect(html).toContain("<pre");
+    const code = html.match(/<pre[^>]*><code[^>]*>([\s\S]*?)<\/code><\/pre>/)?.[1] ?? "";
+    expect(code).toContain("// 1. 引入");
+    expect(code).toContain("// 2. 声明 mixins");
+    expect(code).not.toContain("//\n\n1.");
+  });
+
+  it("keeps code-comment numbered lines intact in lite streaming mode", () => {
+    const html = renderMarkdownLite("```js\n// 1. 引入\nimport foo from \"./foo\";\n```");
+    const code = html.match(/<pre[^>]*><code[^>]*>([\s\S]*?)<\/code><\/pre>/)?.[1] ?? "";
+    expect(code).toContain("// 1. 引入");
+    expect(code).not.toContain("//\n\n1.");
+  });
+
+  it("splits a code fence glued to the preceding paragraph", () => {
+    const html = renderMarkdown(
+      "### 三、怎么用？\n\n在组件中两步即可： ```js\n// 1. 引入\nimport foo from \"./foo\";\n```",
+    );
+    const codeRaw = html.match(/<pre[^>]*><code[^>]*>([\s\S]*?)<\/code><\/pre>/)?.[1] ?? "";
+    const code = codeRaw.replace(/<[^>]+>/g, "").replace(/&quot;/g, '"').replace(/&amp;/g, "&");
+    expect(html).toContain("<h3");
+    expect(html).not.toContain("<ol");
+    expect(html).not.toContain("```js");
+    expect(code).toContain("// 1. 引入");
+    expect(code).toContain("import foo from \"./foo\";");
+  });
+
+  it("splits a glued code fence in lite streaming mode and keeps following hr", () => {
+    const html = renderMarkdownLite(
+      "在组件中两步即可： ```js\n// 1. 引入\n```\n\n---\n\n引入后。",
+    );
+    const code = html.match(/<pre[^>]*><code[^>]*>([\s\S]*?)<\/code><\/pre>/)?.[1] ?? "";
+    expect(code).toContain("// 1. 引入");
+    expect(html).toContain("<hr");
+    expect(html).not.toContain("<ol");
+  });
+
+  it("drops a stray trailing code fence that would render as an empty box", () => {
+    const html = renderMarkdown("正文内容。\n\n```\n");
+    expect(html).toContain("正文内容");
+    expect(html).not.toContain("<pre");
+    expect(html).not.toContain("<code");
+  });
+
+  it("splits a closing fence glued to an hr separator into block + hr", () => {
+    const html = renderMarkdown([
+      "```js",
+      "// mixin",
+      "export default { a: 1 }",
+      "``` ---",
+      "",
+      "### 下一节",
+      "",
+      "```js",
+      "// 组件",
+      "export default { b: 2 }",
+      "```",
+    ].join("\n"));
+    expect(html.match(/<pre/g)?.length).toBe(2);
+    expect(html.match(/<hr/g)?.length).toBe(1);
+    expect(html).toContain("下一节");
+    expect(html).not.toContain("```");
+  });
+
+  it("splits a glued fence-hr in lite streaming mode", () => {
+    const html = renderMarkdownLite("```js\n// mixin\nexport default { a: 1 }\n``` ---\n\n### 下一节");
+    expect(html.match(/<pre/g)?.length).toBe(1);
+    expect(html.match(/<hr/g)?.length).toBe(1);
+    expect(html).not.toContain("```");
+  });
+
   it("renders partial streaming bold after inline close helper", () => {
     const html = renderMarkdownLite(
       prepareStreamingMarkdownForRender("对应 **Git 面板**（`src/components/vibe/GitPanel.vue`"),

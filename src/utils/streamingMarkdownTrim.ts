@@ -23,6 +23,14 @@ function hasGluedTableRows(line: string): boolean {
 function stabilizeIncompleteFencedCodeBlock(source: string): string {
   const fences = source.match(/^```/gm);
   if (!fences || fences.length % 2 === 0) return source;
+  // Streaming may deliver the opening fence before any code content has arrived;
+  // synthesizing a close at that moment renders an empty gray code box. Hold the
+  // block back until real content follows the fence.
+  const lastFence = source.lastIndexOf("```");
+  const tail = source.slice(lastFence + 3).replace(/^[^\n]*\n?/, "");
+  if (!tail.trim()) {
+    return source.slice(0, lastFence).trimEnd();
+  }
   return `${source}\n\`\`\``;
 }
 

@@ -27,6 +27,19 @@ use std::io::Write;
 
 const MAX_AUTO_BUG_FIX_WRITES: usize = 5;
 
+fn slice_content(content: &str, offset: usize, limit: usize) -> String {
+    if offset > 1 || limit < 800 {
+        content
+            .lines()
+            .skip(offset - 1)
+            .take(limit)
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        content.to_string()
+    }
+}
+
 fn append_tool_exec_log(project_path: &str, tool_name: &str, path: &str, ok: bool, error: &str) {
     let log_file = match resolve_debug_log_path("tool-exec.log", Some(project_path)) {
         Ok(p) => p,
@@ -249,21 +262,57 @@ async fn exec_read_file(ctx: &mut ToolExecContext<'_>, args: &Value) -> (bool, S
             let limit = limit_u32 as usize;
             let result = crate::fs::read_file_content(&resolved.to_string_lossy()).await;
             if !result.ok {
+                // Bare filename (e.g. `mixin.js`) resolves against project root and misses;
+                // fall back to exact-basename lookup across the project (ignore rules applied).
+                let is_not_found = result.error.as_deref() == Some("文件不存在");
+                let is_bare_name = !path.contains('/')
+                    && !path.contains('\\')
+                    && !std::path::Path::new(path).is_absolute();
+                if is_not_found && is_bare_name {
+                    match crate::fs::resolve_basename_candidate(ctx.project_path, path).await {
+                        Ok((abs, rel)) => {
+                            let r2 = crate::fs::read_file_content(&abs).await;
+                            if r2.ok {
+                                let content = slice_content(&r2.content, offset, limit);
+                                let resolved_key = rel.replace('\\', "/");
+                                record_read_range(
+                                    &resolved_key,
+                                    line_range,
+                                    &mut ctx.tool_guard.read_file_ranges,
+                                );
+                                ctx.tool_guard.read_paths.insert(resolved_key);
+                                append_tool_exec_log(
+                                    ctx.project_path,
+                                    "read_file",
+                                    &format!("{path}->{rel}"),
+                                    true,
+                                    "basename auto-resolved",
+                                );
+                                return (
+                                    true,
+                                    format!(
+                                        "✅ 裸文件名 `{path}` 已自动解析到 `{rel}`，后续请直接使用该完整相对路径。\n\n{content}"
+                                    ),
+                                );
+                            }
+                        }
+                        Err(candidate_err) => {
+                            append_tool_exec_log(
+                                ctx.project_path,
+                                "read_file",
+                                &file_key,
+                                false,
+                                &candidate_err,
+                            );
+                            return (false, candidate_err);
+                        }
+                    }
+                }
                 let err_msg = result.error.unwrap_or_else(|| "读取失败".into());
                 append_tool_exec_log(ctx.project_path, "read_file", &file_key, false, &err_msg);
                 return (false, err_msg);
             }
-            let content = if offset > 1 || limit < 800 {
-                let lines: Vec<&str> = result
-                    .content
-                    .lines()
-                    .skip(offset - 1)
-                    .take(limit)
-                    .collect();
-                lines.join("\n")
-            } else {
-                result.content.clone()
-            };
+            let content = slice_content(&result.content, offset, limit);
             if !patch_recovery {
                 record_read_range(&file_key, line_range, &mut ctx.tool_guard.read_file_ranges);
             }

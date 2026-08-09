@@ -8,6 +8,11 @@ export type NarrativeSegment = {
 /** Major boundaries only — paragraph breaks and markdown headers. */
 const SPLIT_PATTERNS = [/\n\n+/, /\n(?=#{1,3}\s+)/];
 
+/** A standalone horizontal-rule line (`---` / `***` / `___`). */
+function isHorizontalRuleSegment(text: string): boolean {
+  return /^[-*_]{3,}\s*$/.test(text.trim());
+}
+
 const MERGE_SHORT_SEGMENT_MAX_CHARS = 80;
 
 function extractLeadingHeader(text: string): string | null {
@@ -42,8 +47,10 @@ function mergeShortNarrativeSegments(segments: string[]): string[] {
     const segment = segments[index]!;
     const last = merged[merged.length - 1]!;
     const segmentIsHeader = /^#{1,3}\s/.test(segment);
+    const segmentIsHr = isHorizontalRuleSegment(segment);
     const canMerge =
       !segmentIsHeader &&
+      !segmentIsHr &&
       segment.length < MERGE_SHORT_SEGMENT_MAX_CHARS &&
       last.length < MERGE_SHORT_SEGMENT_MAX_CHARS;
     if (canMerge) {
@@ -65,6 +72,9 @@ export function splitAssistantNarrative(text: string): string[] {
       part.split(pattern).map((segment) => segment.trim()).filter(Boolean),
     );
   }
+  // Standalone horizontal-rule lines are structural separators, not narrative —
+  // dropping them keeps the process feed clean and avoids merging them into prose.
+  parts = parts.filter((part) => !isHorizontalRuleSegment(part));
 
   const merged = mergeShortNarrativeSegments(mergeDuplicateHeaderSegments(parts));
   return merged.length ? merged : [trimmed];

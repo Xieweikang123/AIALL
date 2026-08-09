@@ -10,7 +10,7 @@ pub fn agent_tool_definitions() -> Value {
           "parameters": {
             "type": "object",
             "properties": {
-              "path": { "type": "string", "description": "目录路径：''=项目根，相对=项目内，绝对=本机任意目录" }
+              "path": { "type": "string", "description": "目录路径：''=项目根，相对=项目内（优先用 search_files / list_dir 返回的完整相对路径），绝对=本机任意目录" }
             }
           }
         }
@@ -23,7 +23,7 @@ pub fn agent_tool_definitions() -> Value {
           "parameters": {
             "type": "object",
             "properties": {
-              "path": { "type": "string", "description": "文件路径：相对项目根，或本机绝对路径" },
+              "path": { "type": "string", "description": "文件路径：相对项目根，或本机绝对路径。优先使用 search_files / grep / list_dir 返回的完整相对路径（如 PC/src/views/x.vue）；仅传裸文件名（如 mixin.js）时系统会尝试按项目内唯一文件名解析，重名会失败" },
               "offset": { "type": "number", "description": "起始行号，从 1 开始，默认 1" },
               "limit": { "type": "number", "description": "读取行数，默认 500，最大 800" }
             },

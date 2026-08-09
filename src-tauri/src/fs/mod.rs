@@ -3,7 +3,7 @@ mod listing;
 mod read_write;
 
 pub use grep::*;
-pub use listing::{list_directory_impl, search_files_impl};
+pub use listing::{list_directory_impl, resolve_basename_candidate, search_files_impl};
 pub use read_write::*;
 
 use serde::Serialize;

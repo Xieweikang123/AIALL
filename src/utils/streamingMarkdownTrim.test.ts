@@ -46,6 +46,17 @@ describe("trimIncompleteStreamingMarkdown", () => {
     expect(trimIncompleteStreamingMarkdown(input)).toBe("说明\n\n```typescript\nconst x = 1\n```");
   });
 
+  it("holds back an empty code fence that just arrived", () => {
+    expect(trimIncompleteStreamingMarkdown("说明\n\n```js")).toBe("说明");
+    expect(trimIncompleteStreamingMarkdown("说明\n\n```js\n")).toBe("说明");
+    expect(trimIncompleteStreamingMarkdown("```js")).toBe("");
+  });
+
+  it("shows partial code once content follows the fence", () => {
+    const input = "```js\n// 1. 引入\nimport syncProgressMixin";
+    expect(trimIncompleteStreamingMarkdown(input)).toBe("```js\n// 1. 引入\nimport syncProgressMixin\n```");
+  });
+
   it("closes unclosed bold markers during streaming", () => {
     expect(closeStreamingInlineMarkdown("这是 **Git 面板")).toBe("这是 **Git 面板**");
     expect(closeStreamingInlineMarkdown("路径 `src/foo.ts")).toBe("路径 `src/foo.ts`");

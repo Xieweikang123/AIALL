@@ -38,6 +38,7 @@ pub(crate) struct ConsultativeTrackState {
     pub read_paths: Vec<String>,
     pub read_failed_paths: Vec<String>,
     pub grep_patterns: Vec<String>,
+    pub search_queries: Vec<String>,
     pub force_answer_pending: bool,
     pub last_explore_sig: Option<String>,
     pub explore_files_read: HashSet<String>,

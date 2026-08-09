@@ -45,6 +45,22 @@ describe("splitAssistantNarrative", () => {
     expect(parts).toHaveLength(1);
     expect(parts[0]).toContain("第二段");
   });
+
+  it("drops standalone hr separators instead of gluing them into prose", () => {
+    const text = [
+      "集成了 **微信支付、微信登录（OAuth）、分享、地图、推送** 等原生能力。",
+      "",
+      "---",
+      "",
+      "### 4. `Document/` — 项目文档",
+    ].join("\n");
+    const parts = splitAssistantNarrative(text);
+    for (const part of parts) {
+      expect(part).not.toMatch(/。 ---$/);
+      expect(part).not.toMatch(/： ---$/);
+    }
+    expect(parts.every((part) => !/^[-*_]{3,}\s*$/.test(part))).toBe(true);
+  });
 });
 
 describe("buildNarrativeSegments", () => {

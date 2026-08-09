@@ -29,6 +29,7 @@ pub(crate) struct PostToolNudgeParams<'a> {
     pub consultative_read_paths: &'a [String],
     pub turn_tool_outcomes: &'a [String],
     pub consultative_grep_patterns: &'a [String],
+    pub consultative_search_queries: &'a [String],
     pub is_read_only_run: bool,
     pub written_files: &'a [String],
     pub mode: &'a str,
@@ -129,6 +130,7 @@ pub(crate) fn apply_post_tool_turn(
         let sig = consultative_explore_signature(
             params.consultative_read_paths,
             params.consultative_grep_patterns,
+            params.consultative_search_queries,
         );
         if let Some(prev) = state.last_consultative_explore_sig.as_ref() {
             if prev == &sig && !sig.is_empty() {
@@ -168,7 +170,6 @@ fn apply_post_tool_explore_budget_nudges(
     }
 
     let is_explore = params.mode == "explore";
-    let is_ask = params.mode == "ask";
     let explore_turn_budget =
         resolve_explore_turn_budget(is_explore, params.is_execute_plan, params.is_plan_explore);
     let consecutive = state.consecutive_read_turns;
@@ -177,12 +178,6 @@ fn apply_post_tool_explore_budget_nudges(
         params.messages.push(json!({
           "role": "system",
           "content": build_explore_explore_budget_nudge(consecutive)
-        }));
-        state.consecutive_read_turns = 0;
-    } else if is_ask && consecutive >= 6 {
-        params.messages.push(json!({
-          "role": "system",
-          "content": super::exploration::build_ask_force_answer_nudge(consecutive)
         }));
         state.consecutive_read_turns = 0;
     } else if params.read_only_build_run && consecutive >= 5 {

@@ -150,6 +150,17 @@ AIALL 的 Vibe 会话文件**不在项目目录内**，存储在 AppData Roaming
 - **抑制机制要精准**——用时间戳（自包含）优于状态标记（易漏清）；压制范围越窄副作用越少（如区分 `event.detail` 单击/多击）
 - **先测 edge case**——triple-click、快速拖拽等非常规操作是第一个要验证的，修交互 bug 时把所有触发路径过一遍再提交
 
+## Markdown 显示问题排障准则
+
+处理"某段 markdown 渲染错乱"（字面 `---`、代码块裂开、灰框等）时：
+
+- **先确认显示面**——同一消息有多条渲染链路：主气泡（`renderMarkdown`/`ChatMarkdown`）与过程 feed（`agentNarrativeSegments` → `agentCursorFeed` 的叙事项）。改一个面不代表全好，先定位用户看到的是哪个面
+- **显示源 ≠ 存储源**——`msg.content` 只是其中一份源；roundGroups 分段、live 预览、merge 拼接都会生成**派生文本**，坏源常在这些派生路径上。验证前先确认实际渲染的是哪份
+- **日志优先，别反复推理**——拿干净存储内容验证会一直"假通过"。先给真实 App 加"渲染源快照"日志（dump 实际喂给渲染器的源与结果 HTML），一次定位，而不是归因到流式瞬态/旧构建
+- **标记粘接是拼接层问题**——`mergeShortNarrativeSegments` 用空格拼短段、`joinFinalStages` 用 `---` 连接、SSE 拼 delta 等 join/merge/slice 逻辑最易把 markdown 标记粘进正文；这种坏源改渲染器永远治不好，只能去上游拼它的地方修
+- **技术坑备忘**：闭合围栏不允许带 info string（` ``` --- ` 会被 marked 当块内内容吞掉）；`--`（2 个横线）既非 HR 也不被 strip 清理会字面显示；流式给未闭合围栏补假闭合会产生空灰框，开头围栏先到时应扣住不渲染；行内列表拆分等启发式必须 fence 感知，否则误拆代码注释（`// 1. 引入`）
+- **工具层**：模型把 search query 当文件路径传（`read_file mixin.js`）是常见行为，工具层做 basename 唯一消歧比改提示词可靠
+
 ## 文件膨胀约束
 
 `src/composables/useAgentRun.ts` 已拆出 `useAgentChainScroll.ts`、`useAgentStreamPatch.ts` 两个子 composable，主文件负责 Agent 运行编排与 SSE 事件分发。

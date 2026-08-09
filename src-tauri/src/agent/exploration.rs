@@ -12,8 +12,8 @@ pub const EXPLORE_EXPLORE_TURN_BUDGET: u32 = 6;
 // ── Soft/hard caps per mode ──
 pub const PLAN_MAX_TOTAL_EXPLORE_SOFT: u32 = 8;
 pub const PLAN_MAX_TOTAL_EXPLORE_HARD: u32 = 12;
-pub const ASK_MAX_TOTAL_EXPLORE_SOFT: u32 = 8;
-pub const ASK_MAX_TOTAL_EXPLORE_HARD: u32 = 12;
+pub const ASK_MAX_TOTAL_EXPLORE_SOFT: u32 = 12;
+pub const ASK_MAX_TOTAL_EXPLORE_HARD: u32 = 20;
 pub const EXPLORE_MAX_TOTAL_EXPLORE_SOFT: u32 = 10;
 pub const EXPLORE_MAX_TOTAL_EXPLORE_HARD: u32 = 14;
 

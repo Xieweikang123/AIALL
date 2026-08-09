@@ -129,9 +129,16 @@ function restoreCornerBrackets(html: string): string {
 
 /** LLM output often glues ordered lists inline: "如下：1. foo 2. bar". */
 export function normalizeInlineMarkdownBlocks(source: string): string {
+  let inFence = false;
   return source
     .split("\n")
     .map((line) => {
+      // 跳过 fenced code block 内容（如 `// 1. 引入` 会被误拆成 `//` + `1. 引入`）。
+      if (/^\s*```\s*[\w-]*\s*$/.test(line)) {
+        inFence = !inFence;
+        return line;
+      }
+      if (inFence) return line;
       // Skip ATX headings (`#### 2. Title`) — otherwise `#` + `2.` gets split into a bogus list.
       if (/^#{1,6}\s/.test(line)) return line;
       let result = line;
@@ -183,15 +190,45 @@ export function normalizeGluedFencedCodeBlocks(source: string): string {
 }
 
 /**
+ * Split a fenced-code opener glued to trailing text on the same line
+ * (`在组件中两步即可： ```js`) so marked opens a real code block instead of
+ * rendering the fence as literal inline code. Streaming/SSE chunk boundaries
+ * can leave the fence glued to the preceding paragraph.
+ */
+export function normalizeGluedCodeFenceOpen(source: string): string {
+  return source.replace(
+    /^(.*?[^\s`])\s+(```(?:[A-Za-z0-9_-]+)?)\s*$/gm,
+    "$1\n\n$2",
+  );
+}
+
+/**
+ * Split a closing fence glued to a horizontal rule on the same line
+ * (` ``` --- `). marked treats ` ``` --- ` as content inside an already-open
+ * code block (a closing fence cannot carry an info string), which swallows the
+ * separator and following sections into the code box. The model commonly emits
+ * ` ``` --- ` intending ` ``` ` + newline + ` --- `.
+ */
+export function normalizeGluedFenceWithHr(source: string): string {
+  return source.replace(
+    /^(```[A-Za-z0-9_-]*)[ \t]*([-*_]{3,})[ \t]*$/gm,
+    "$1\n\n$2",
+  );
+}
+
+/**
  * Strip trailing empty block-level elements (hr, empty h1-h6, empty p) that render as visible
  * but content-free regions. LLM output often ends with stylistic separators like `---` (→ &lt;hr&gt;)
  * or empty headings, and round-group aggregation via `\n\n---\n\n` can leave trailing artifacts.
+ *
+ * A stray lone ` ``` ` (e.g. a leaked closing fence) opens an empty `<pre><code>` box, so empty
+ * code blocks are stripped too.
  *
  * We operate at the HTML level so fenced code blocks are never affected.
  */
 function stripTrailingEmptyBlocks(html: string): string {
   return html.replace(
-    /(?:\s*<(?:hr\b[^>]*|h[1-6]\b[^>]*>\s*<\/h[1-6]>|p\b[^>]*>\s*<\/p>)\s*)+$/i,
+    /(?:\s*<(?:hr\b[^>]*|h[1-6]\b[^>]*>\s*<\/h[1-6]>|p\b[^>]*>\s*<\/p>|pre\b[^>]*>\s*<code[^>]*>\s*<\/code>\s*<\/pre>)\s*)+$/i,
     "",
   );
 }
@@ -202,6 +239,8 @@ const NEEDS_PREPARE_RE = /[\\*_\[`「」#\uFF0A]/;
 function prepareMarkdownSource(text: string): string {
   let source = String(text || "").trim();
   if (!source) return "";
+  source = normalizeGluedCodeFenceOpen(source);
+  source = normalizeGluedFenceWithHr(source);
   // 快速退出：不含需要 normalize 的特殊字符时跳过全部 5 步变换
   if (!NEEDS_NORMALIZE_RE.test(source)) {
     if (!NEEDS_PREPARE_RE.test(source)) return source;

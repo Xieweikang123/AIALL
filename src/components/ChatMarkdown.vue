@@ -13,6 +13,7 @@ import {
   IncrementalMarkdownRenderer,
 } from "../utils/incrementalMarkdownRenderer";
 import { patchDomWithHtml } from "../utils/domBlockPatcher";
+import { debugLog } from "../utils/debugLog";
 
 const props = withDefaults(
   defineProps<{
@@ -115,9 +116,76 @@ watch(
   },
 );
 
+/** Log markdown source fence structure for display bug diagnosis. */
+let lastLoggedFenceMap = "";
+function logSourceFences(tag: string, source: string): void {
+  const lines = (source || "").split("\n");
+  const fenceLines = lines
+    .map((l, i) => (/^```\s*\S*$/.test(l.trim()) ? i + 1 : 0))
+    .filter(Boolean);
+  const map = fenceLines.join(",");
+  if (map === lastLoggedFenceMap) return;
+  lastLoggedFenceMap = map;
+  debugLog(`[chatmd:${tag}]`, {
+    len: source.length,
+    streaming: props.streaming,
+    fenceCount: fenceLines.length,
+    fenceLines: map || "-",
+  });
+  if (fenceLines.length % 2 === 1) {
+    const last = fenceLines[fenceLines.length - 1] ?? 0;
+    debugLog(`[chatmd:${tag}:oddFences]`, {
+      window: JSON.stringify(lines.slice(Math.max(0, last - 6), last + 2)),
+    });
+  }
+  // `---`/`***`/`___` separators that are NOT blank-line-delimited will render
+  // as literal text or a bogus setext heading instead of an <hr>. Log them so a
+  // broken separator source can be captured.
+  const gluedHrs = lines
+    .map((l, i) => {
+      if (!/^[-*_]{3,}\s*$/.test(l.trim())) return 0;
+      if (i === 0) return 0;
+      const prev = lines[i - 1];
+      if (!prev.trim()) return 0;
+      return i + 1;
+    })
+    .filter(Boolean);
+  if (gluedHrs.length) {
+    debugLog(`[chatmd:${tag}:gluedHr]`, {
+      lines: JSON.stringify(
+        gluedHrs.slice(0, 5).map((ln) => lines.slice(Math.max(0, ln - 2), ln + 1)),
+      ),
+    });
+  }
+}
+
+/** Log rendered code-block summary on the final (non-streaming) render. */
+function logFinalRender(tag: string, html: string, source?: string): void {
+  const pres = html.match(/<pre[^>]*><code[^>]*>/g);
+  const targetInside = /来自组件/.test(
+    html.match(/<pre[^>]*><code[^>]*>[\s\S]*?<\/code><\/pre>/)?.[1] ?? "",
+  );
+  const literalHr = html.includes("---");
+  debugLog(`[chatmd:${tag}:finalRender]`, {
+    sourceLen: source?.length ?? -1,
+    htmlLen: html.length,
+    codeBlockCount: pres?.length ?? 0,
+    exampleSecondHalfInsideCode: targetInside,
+    literalHr,
+  });
+  if (literalHr) {
+    const i = html.indexOf("---");
+    debugLog(`[chatmd:${tag}:literalHr]`, {
+      htmlWindow: JSON.stringify(html.slice(Math.max(0, i - 80), i + 60)),
+      srcWindow: JSON.stringify((source || "").slice(Math.max(0, (source || "").length - 200))),
+    });
+  }
+}
+
 watch(
   () => props.content,
   (value, prev) => {
+    logSourceFences("content", value);
     if (!value.trim()) {
       cachedDisplayHtml.value = "";
       streamingHtmlCache.value = "";
@@ -280,6 +348,9 @@ watch(
   displayHtml,
   (value) => {
     if (value) cachedDisplayHtml.value = value;
+    if (!effectiveStreaming.value && value) {
+      logFinalRender("final", value, sanitizedMarkdown.value);
+    }
   },
   { immediate: true },
 );
