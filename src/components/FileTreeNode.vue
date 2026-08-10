@@ -284,7 +284,7 @@ const fileTypeLabel = computed(() => {
 }
 
 .file-item-draggable {
-  cursor: grab;
+  cursor: pointer;
 }
 
 .file-item-draggable:active {
