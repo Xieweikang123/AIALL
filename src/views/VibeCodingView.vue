@@ -162,6 +162,7 @@
           @do-fetch="doFetch"
           @do-pull="doPull"
           @do-push="doPush"
+          @open-remote="openGitRemote"
           @commit-git="commitGit"
           @generate-commit-message="generateCommitMessage"
           @ai-commit-and-push="aiCommitAndPush"
@@ -644,6 +645,7 @@
           @do-fetch="doFetch"
           @do-pull="doPull"
           @do-push="doPush"
+          @open-remote="openGitRemote"
           @commit-git="commitGit"
           @generate-commit-message="generateCommitMessage"
           @ai-commit-and-push="aiCommitAndPush"
@@ -1041,7 +1043,7 @@ import { useChatMention } from "../composables/useChatMention";
 import { restoreChatScrollPosition, useWorkspaceUiPersistence } from "../composables/useWorkspaceUiPersistence";
 import { PROJECT_ARCHITECT_REVIEW_REL_PATH } from "../services/vibeProjectArchitectReviewClient";
 import { PROJECT_KNOWLEDGE_REL_PATH } from "../services/vibeProjectKnowledgeClient";
-import { isTauriEnv } from "../services/tauriInvoke";
+import { isTauriEnv, tauriInvoke } from "../services/tauriInvoke";
 import { agentRunStageLabel, resolveAgentRunStage } from "../services/agentRunLiveState";
 import { distillExplorationRun } from "../services/explorationDistill";
 import {
@@ -1476,6 +1478,17 @@ function openProjectPanelView(view: "knowledge" | "health" | "map" | "fix") {
 function doCreateBranchAt(hash: string) {
   const name = globalThis.prompt("在此提交创建分支：");
   if (name) createBranch(name, hash);
+}
+
+function openGitRemote(url: string) {
+  if (!url) return;
+  if (isTauriEnv()) {
+    void tauriInvoke("system_open_url", { url }).catch(() => {
+      window.open(url, "_blank", "noopener,noreferrer");
+    });
+  } else {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
 }
 
 // Session manager composable

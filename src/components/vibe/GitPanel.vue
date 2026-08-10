@@ -33,6 +33,7 @@
         @do-fetch="$emit('do-fetch')"
         @do-pull="$emit('do-pull')"
         @do-push="$emit('do-push')"
+        @open-remote="$emit('open-remote', $event)"
         @checkout-branch="$emit('checkout-branch', $event)"
         @create-branch="$emit('create-branch', $event)"
         @delete-branch="$emit('delete-branch', $event)"
@@ -330,6 +331,7 @@ const emit = defineEmits<{
   (e: "do-fetch"): void;
   (e: "do-pull"): void;
   (e: "do-push"): void;
+  (e: "open-remote", url: string): void;
   (e: "commit-git"): void;
   (e: "generate-commit-message"): void;
   (e: "ai-commit-and-push"): void;

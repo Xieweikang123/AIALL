@@ -150,6 +150,35 @@ export function pruneGitFileSelection(
   });
 }
 
+/** Convert a git remote URL into a browser-openable https URL.
+ * Supports https/http, scp-like (`git@host:path/repo.git`) and ssh:///git:// forms.
+ * Returns "" for local paths or anything that can't map to a web URL. */
+export function toGitRemoteBrowserUrl(remoteUrl: string): string {
+  const raw = remoteUrl.trim();
+  if (!raw) return "";
+
+  const stripDotGit = (u: string) => u.replace(/\.git(?=\/|$)/, "");
+  const isHostname = (host: string) =>
+    host === "localhost" || /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i.test(host);
+
+  if (/^https?:\/\//i.test(raw)) return stripDotGit(raw);
+
+  // scp-like syntax: [user@]host:path/to/repo(.git) — but not scheme-prefixed or local paths
+  const scp = /^(?:[\w.-]+@)?([^:@/\s]+):(.+)$/.exec(raw);
+  if (scp && !raw.includes("://") && isHostname(scp[1]) && scp[2].includes("/")) {
+    return stripDotGit(`https://${scp[1]}/${scp[2]}`);
+  }
+
+  // ssh://git@host/path, git://host/path, or bare host/path
+  const bare = raw
+    .replace(/^(?:[\w.-]+@)?(?:ssh|git):\/\//, "")
+    .replace(/^(?:[\w.-]+@)?/, "");
+  const bareM = /^([^/]+)\/(.+)$/.exec(bare);
+  if (bareM && isHostname(bareM[1])) return stripDotGit(`https://${bare}`);
+
+  return "";
+}
+
 /** Parse new-side start + line count from a unified diff hunk header.
  * `count` is 0 for a pure-deletion hunk (`+0,0`). */
 export function parseHunkNewRange(header: string): { start: number; count: number } {

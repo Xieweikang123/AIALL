@@ -47,6 +47,15 @@
         <button type="button" class="git-remote-btn" :disabled="!!gitRemoteAction" @click="$emit('do-push')">
           {{ gitRemoteAction === 'push' ? '…' : 'Push' }}
         </button>
+        <button
+          type="button"
+          class="git-remote-btn"
+          :disabled="!remoteBrowserUrl"
+          title="在浏览器打开远程仓库"
+          @click="$emit('open-remote', remoteBrowserUrl)"
+        >
+          ↗ 仓库
+        </button>
       </div>
     </div>
     <GitAheadCommits
@@ -69,6 +78,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import type { GitRemoteInfo, GitBranchInfo } from "../../services/vibeGitClient";
+import { toGitRemoteBrowserUrl } from "../../utils/gitHelpers";
 import GitBranchSelector from "./GitBranchSelector.vue";
 import GitAheadCommits from "./GitAheadCommits.vue";
 import GitBehindCommits from "./GitBehindCommits.vue";
@@ -119,6 +129,7 @@ defineEmits<{
   (e: "do-fetch"): void;
   (e: "do-pull"): void;
   (e: "do-push"): void;
+  (e: "open-remote", url: string): void;
   (e: "checkout-branch", branchName: string): void;
   (e: "create-branch", branchName: string): void;
   (e: "delete-branch", branchName: string): void;
@@ -128,6 +139,11 @@ defineEmits<{
 }>();
 
 const stashSectionOpen = computed(() => props.gitStashSectionOpen);
+
+const remoteBrowserUrl = computed(() => {
+  const first = props.gitRemotes[0];
+  return first ? toGitRemoteBrowserUrl(first.url) : "";
+});
 </script>
 
 <style src="./styles/GitPanel.scss" scoped></style>
