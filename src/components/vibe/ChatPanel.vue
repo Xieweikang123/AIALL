@@ -317,19 +317,29 @@
                   v-if="providerPickerOpen"
                   ref="providerDropdownRef"
                   class="chat-provider-dropdown"
-                  :style="{ position: 'fixed', top: providerDropdownTop + 'px', left: providerDropdownLeft + 'px' }"
+                  :style="{ position: 'fixed', top: providerDropdownTop + 'px', right: providerDropdownRight + 'px' }"
                   role="menu"
                 >
                   <div class="chat-provider-dropdown-head">
                     <span>本会话使用模型</span>
-                    <button
-                      type="button"
-                      class="ghost small"
-                      :disabled="!activeSessionProviderId"
-                      @click="resetProviderToGlobal"
-                    >
-                      跟随全局
-                    </button>
+                    <div class="chat-provider-dropdown-head-actions">
+                      <button
+                        type="button"
+                        class="ghost small"
+                        :disabled="!activeSessionProviderId"
+                        @click="resetProviderToGlobal"
+                      >
+                        跟随全局
+                      </button>
+                      <button
+                        type="button"
+                        class="ghost small chat-provider-config-btn"
+                        title="管理供应商与模型"
+                        @click="goToAiConfig"
+                      >
+                        配置…
+                      </button>
+                    </div>
                   </div>
                   <button
                     type="button"
@@ -856,14 +866,27 @@ const providerPickerRef = ref<HTMLElement | null>(null);
 const providerDropdownRef = ref<HTMLElement | null>(null);
 const providerPickerOpen = ref(false);
 const providerDropdownTop = ref(0);
-const providerDropdownLeft = ref(0);
+const providerDropdownRight = ref(0);
 
 function updateProviderDropdownPosition() {
-  if (providerPickerRef.value) {
-    const rect = providerPickerRef.value.getBoundingClientRect();
-    providerDropdownTop.value = rect.bottom + 4;
-    providerDropdownLeft.value = rect.left;
-  }
+  if (!providerPickerRef.value) return;
+  const rect = providerPickerRef.value.getBoundingClientRect();
+  const dropdown = providerDropdownRef.value;
+  const dropdownHeight = dropdown?.offsetHeight ?? 0;
+  const gap = 4;
+  // 默认向下展开；下方空间不足时向上展开，避免超出视口被裁掉
+  const spaceBelow = window.innerHeight - rect.bottom - gap;
+  const spaceAbove = rect.top - gap;
+  const openUp = spaceBelow < dropdownHeight && spaceAbove > spaceBelow;
+  providerDropdownTop.value = openUp
+    ? Math.max(gap, rect.top - dropdownHeight - gap)
+    : rect.bottom + gap;
+  providerDropdownRight.value = window.innerWidth - rect.right;
+}
+
+/** 打开期间窗口缩放 / 页面滚动时保持下拉定位准确 */
+function handleProviderViewportChange() {
+  if (providerPickerOpen.value) updateProviderDropdownPosition();
 }
 
 function toggleProviderPicker() {
@@ -887,6 +910,11 @@ function resetProviderToGlobal() {
   emit("update:activeSessionProviderId", "");
 }
 
+function goToAiConfig() {
+  providerPickerOpen.value = false;
+  emit("open-ai-config");
+}
+
 /** 点击下拉外部时自动关闭 */
 function handleProviderPickerOutsideClick(e: MouseEvent) {
   if (!providerPickerOpen.value) return;
@@ -897,12 +925,25 @@ function handleProviderPickerOutsideClick(e: MouseEvent) {
   providerPickerOpen.value = false;
 }
 
+function onProviderPickerOpenChange(open: boolean) {
+  if (open) {
+    window.addEventListener("resize", handleProviderViewportChange);
+    document.addEventListener("scroll", handleProviderViewportChange, true);
+  } else {
+    window.removeEventListener("resize", handleProviderViewportChange);
+    document.removeEventListener("scroll", handleProviderViewportChange, true);
+  }
+}
+
+watch(providerPickerOpen, onProviderPickerOpenChange);
+
 onMounted(() => {
   document.addEventListener("mousedown", handleProviderPickerOutsideClick, true);
 });
 
 onUnmounted(() => {
   document.removeEventListener("mousedown", handleProviderPickerOutsideClick, true);
+  onProviderPickerOpenChange(false);
 });
 
 function checkScrollPosition() {

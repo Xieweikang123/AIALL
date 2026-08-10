@@ -689,7 +689,7 @@
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.2);
-  z-index: 1000;
+  z-index: 9999;
   animation: provider-dropdown-fade-in 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -714,9 +714,19 @@
   color: rgba(201, 209, 217, 0.7);
 }
 
+.chat-provider-dropdown-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .chat-provider-dropdown-head .ghost.small {
   padding: 3px 8px;
   font-size: 11px;
+}
+
+.chat-provider-config-btn:hover:not(:disabled) {
+  color: #79c0ff;
 }
 
 .chat-provider-option {
