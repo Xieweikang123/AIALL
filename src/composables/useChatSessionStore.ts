@@ -20,6 +20,7 @@ import {
   resolveActiveVibeChatSessionId,
   saveVibeChatHistory,
   sessionIdsWithDiskAheadMessageCounts,
+  setVibeChatSessionProvider,
   switchVibeChatSession,
   syncLocalIndexFromRecord,
   vibeProjectPathsMatch,
@@ -622,11 +623,28 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     refreshList(project);
   }
 
+  const activeSessionProviderId = computed(() => {
+    const id = activeSessionId.value.trim();
+    if (!id) return "";
+    return sessionList.value.find((s) => s.id === id)?.providerId?.trim() || "";
+  });
+
+  function setActiveSessionProvider(providerId: string) {
+    const project = projectPath().trim();
+    const id = activeSessionId.value.trim();
+    if (!project || !id) return;
+    setVibeChatSessionProvider(project, id, providerId);
+    refreshList(project);
+    schedulePersistChat();
+  }
+
   return {
     activeMessages,
     switchingSession,
     syncingChatStore,
     chatStoreSyncMessage,
+    activeSessionProviderId,
+    setActiveSessionProvider,
     activateSession,
     bindSessionMessages,
     getSessionMessages: sessionMessages.getSessionMessages,

@@ -656,7 +656,7 @@ function sanitizeMessages(
 
 function createSession(
   messages: PersistedChatMessage[] = [],
-  options?: { draft?: boolean },
+  options?: { draft?: boolean; providerId?: string },
 ): VibeChatSession {
   const now = new Date().toISOString();
   const sanitized = sanitizeMessages(messages);
@@ -667,6 +667,7 @@ function createSession(
     updatedAt: now,
     messages: sanitized,
     status: options?.draft ? "draft" : "active",
+    providerId: options?.providerId?.trim() || undefined,
   };
 }
 
@@ -711,6 +712,7 @@ function adoptSessionWithId(
     updatedAt: now,
     messages: sanitized,
     status: "active",
+    providerId: indexed?.providerId?.trim() || undefined,
   };
 }
 
@@ -753,6 +755,7 @@ function projectIndexFromRecord(
         createdAt: session.createdAt,
         updatedAt: session.updatedAt,
         messageCount,
+        providerId: session.providerId?.trim() || undefined,
       };
     }),
     ...(previousIndex?.deletedSessionIds?.length
@@ -993,6 +996,7 @@ export function getVibeChatProjectSnapshot(projectPath: string): VibeChatProject
           messageCount,
           messages: sanitizeMessages(s.messages, { forDisk: true }),
           status: s.status,
+          providerId: s.providerId?.trim() || undefined,
         };
       }) || [],
   };
@@ -1001,7 +1005,7 @@ export function getVibeChatProjectSnapshot(projectPath: string): VibeChatProject
 export function getActiveSessionSnapshot(
   projectPath: string,
   sessionId: string,
-): { id: string; title: string; createdAt: string; updatedAt: string; messages: PersistedChatMessage[] } | null {
+): { id: string; title: string; createdAt: string; updatedAt: string; messages: PersistedChatMessage[]; providerId?: string } | null {
   const key = normalizeProjectKey(projectPath);
   if (!key) return null;
   const record = getProjectRecord(key);
@@ -1021,6 +1025,7 @@ export function getActiveSessionSnapshot(
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     messages,
+    providerId: session.providerId?.trim() || undefined,
   };
 }
 
@@ -1046,7 +1051,7 @@ export function buildActiveSessionDiskSyncPayload(
   projectPath: string,
   sessionId: string,
   liveMessages: PersistedChatMessage[],
-): { id: string; title: string; createdAt: string; updatedAt: string; messages: PersistedChatMessage[] } | null {
+): { id: string; title: string; createdAt: string; updatedAt: string; messages: PersistedChatMessage[]; providerId?: string } | null {
   const key = normalizeProjectKey(projectPath);
   if (!key) return null;
   const record = getProjectRecord(key);
@@ -1058,6 +1063,7 @@ export function buildActiveSessionDiskSyncPayload(
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     messages: sanitizeMessages(liveMessages, { forDisk: true }),
+    providerId: session.providerId?.trim() || undefined,
   };
 }
 
@@ -1112,6 +1118,7 @@ export function listVibeChatSessions(projectPath: string): VibeChatSessionMeta[]
         updatedAt: s.updatedAt,
         messageCount: s.messages.length || indexed?.messageCount || 0,
         status: s.status,
+        providerId: s.providerId?.trim() || undefined,
       };
     });
   return result;
@@ -1231,20 +1238,25 @@ function snapshotSessionsToRecord(snapshot: VibeChatProjectSnapshot): VibeChatSe
     updatedAt: s.updatedAt || new Date().toISOString(),
     messages: sanitizeMessages(s.messages || [], { forDisk: true }),
     status: s.status || "active",
+    providerId: s.providerId?.trim() || undefined,
   }));
 }
 
 function pickMergedSession(local: VibeChatSession, disk: VibeChatSession): VibeChatSession {
   const localCount = local.messages.length;
   const diskCount = disk.messages.length;
+  const preferLocal = (merged: VibeChatSession): VibeChatSession => ({
+    ...merged,
+    providerId: local.providerId?.trim() || disk.providerId?.trim() || undefined,
+  });
   if (localCount === 0 && diskCount > 0) {
-    return { ...local, ...disk, messages: disk.messages };
+    return preferLocal({ ...local, ...disk, messages: disk.messages });
   }
   if (diskCount > localCount) {
-    return { ...local, ...disk, messages: disk.messages };
+    return preferLocal({ ...local, ...disk, messages: disk.messages });
   }
   if (diskCount > 0 && disk.updatedAt.localeCompare(local.updatedAt) > 0) {
-    return { ...local, ...disk, messages: disk.messages };
+    return preferLocal({ ...local, ...disk, messages: disk.messages });
   }
   return local;
 }
@@ -1349,6 +1361,7 @@ type DiskIndexMirrorInput = {
     updatedAt: string;
     messageCount: number;
     status?: string;
+    providerId?: string;
   }>;
 };
 
@@ -1377,6 +1390,7 @@ export function mirrorLocalIndexFromDiskMeta(projectPath: string, disk: DiskInde
     createdAt: s.createdAt || "",
     updatedAt: s.updatedAt || "",
     messageCount: s.messageCount ?? 0,
+    providerId: s.providerId?.trim() || undefined,
   }));
 
   for (const local of localMeta?.sessions || []) {
@@ -1390,6 +1404,7 @@ export function mirrorLocalIndexFromDiskMeta(projectPath: string, disk: DiskInde
       createdAt: local.createdAt || mem?.createdAt || "",
       updatedAt: local.updatedAt || mem?.updatedAt || "",
       messageCount: mem?.messages.length || local.messageCount || 0,
+      providerId: local.providerId?.trim() || mem?.providerId?.trim() || undefined,
     });
     diskIds.add(local.id);
   }
@@ -1403,6 +1418,7 @@ export function mirrorLocalIndexFromDiskMeta(projectPath: string, disk: DiskInde
       createdAt: mem.createdAt || "",
       updatedAt: mem.updatedAt || "",
       messageCount: mem.messages.length,
+      providerId: mem.providerId?.trim() || undefined,
     });
   }
 
@@ -1433,6 +1449,7 @@ export function mirrorLocalIndexFromDiskSnapshot(projectPath: string, snapshot: 
       updatedAt: s.updatedAt,
       messageCount: s.messageCount ?? s.messages?.length ?? 0,
       status: s.status,
+      providerId: s.providerId?.trim() || undefined,
     })),
   });
 }
@@ -1580,6 +1597,19 @@ export function switchVibeChatSession(projectPath: string, sessionId: string): v
   const id = sessionId.trim();
   if (!key || !id) return;
   persistActiveSessionId(key, id);
+}
+
+/** Set the AI provider pinned to a session (empty = follow global config). Persists index + record. */
+export function setVibeChatSessionProvider(projectPath: string, sessionId: string, providerId: string): boolean {
+  const key = normalizeProjectKey(projectPath);
+  const id = sessionId.trim();
+  if (!key || !id) return false;
+  const record = getProjectRecord(key);
+  const session = record?.sessions.find((s) => s.id === id);
+  if (!record || !session) return false;
+  session.providerId = providerId.trim() || undefined;
+  persistRecord(key, record);
+  return true;
 }
 
 /** Update draft session metadata when leaving with unsent composer content. */

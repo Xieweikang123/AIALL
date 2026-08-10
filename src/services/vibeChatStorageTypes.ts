@@ -122,6 +122,8 @@ export type VibeChatSessionMeta = {
   updatedAt: string;
   messageCount: number;
   status?: "draft" | "active" | "completed" | "failed" | "interrupted";
+  /** AI 供应商 id（aiLocalConfig providers[].id）；空 = 跟随全局配置。 */
+  providerId?: string;
 };
 
 export type VibeChatProjectSnapshot = {
@@ -139,6 +141,8 @@ type VibeChatSession = {
   updatedAt: string;
   messages: PersistedChatMessage[];
   status?: "draft" | "active" | "completed" | "failed" | "interrupted";
+  /** AI 供应商 id（aiLocalConfig providers[].id）；空 = 跟随全局配置。 */
+  providerId?: string;
 };
 
 type ProjectChatRecord = {
@@ -152,6 +156,8 @@ type SessionIndexEntry = {
   createdAt: string;
   updatedAt: string;
   messageCount: number;
+  /** AI 供应商 id；空 = 跟随全局配置。 */
+  providerId?: string;
 };
 
 type ProjectIndexRecord = {

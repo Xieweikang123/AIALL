@@ -143,6 +143,8 @@ export type UseAgentRunDeps = {
   projectOpened: Ref<boolean>;
   configReady: Ref<boolean>;
   aiConfig: Ref<{ endpoint: string; apiKey: string; model: string; providerName: string }>;
+  /** Resolve a session's pinned AI provider config; return null to fall back to global aiConfig. */
+  resolveSessionAiConfig?: (sessionId: string) => { endpoint: string; apiKey: string; model: string; providerName: string } | null;
   activeAssistantMsgId: ComputedRef<string>;
   activeSessionId: Ref<string>;
   activeFilePath: Ref<string>;
@@ -187,6 +189,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     projectOpened,
     configReady,
     aiConfig,
+    resolveSessionAiConfig,
     activeAssistantMsgId,
     activeSessionId,
     activeFilePath,
@@ -226,6 +229,16 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     chatMode,
     resolveUserMessageImages,
   });
+
+  /** Apply a session's pinned provider config onto aiConfig (falls back to global when not pinned). */
+  function applySessionAiConfig(sessionId: string) {
+    const cfg = resolveSessionAiConfig?.(sessionId);
+    if (!cfg) return;
+    if (cfg.endpoint) aiConfig.value.endpoint = cfg.endpoint;
+    if (cfg.apiKey) aiConfig.value.apiKey = cfg.apiKey;
+    if (cfg.model) aiConfig.value.model = cfg.model;
+    if (cfg.providerName) aiConfig.value.providerName = cfg.providerName;
+  }
 
   const {
     runManager,
@@ -861,6 +874,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     const savedApiKey = aiConfig.value.apiKey;
     const savedModel = aiConfig.value.model;
     reloadAiConfig();
+    applySessionAiConfig(sessionId);
     if (!aiConfig.value.endpoint) aiConfig.value.endpoint = savedEndpoint;
     if (!aiConfig.value.apiKey) aiConfig.value.apiKey = savedApiKey;
     if (!aiConfig.value.model) aiConfig.value.model = savedModel;
@@ -1027,6 +1041,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       chatError.value = "会话尚未就绪，请重新选择或新建会话";
       return false;
     }
+    applySessionAiConfig(sessionId);
     if (activeSessionId.value !== sessionId) {
       chatError.value = "会话已切换，发送已取消";
       return false;

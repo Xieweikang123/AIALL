@@ -274,7 +274,7 @@
         </div>
 
         <div class="chat-action-row">
-          <div class="composer-mode-row">
+            <div class="composer-mode-row">
             <div class="chat-mode-switch" role="group" aria-label="对话模式">
               <button
                 type="button"
@@ -287,6 +287,79 @@
               >
                 Auto
               </button>
+            </div>
+            <div
+              v-if="providerOptions.length"
+              ref="providerPickerRef"
+              class="chat-provider-picker"
+            >
+              <button
+                type="button"
+                class="chat-provider-trigger"
+                :class="{ open: providerPickerOpen }"
+                :disabled="chatSending || !projectOpened"
+                :title="providerPickerTitle"
+                :aria-expanded="providerPickerOpen"
+                aria-haspopup="menu"
+                @click="toggleProviderPicker"
+              >
+                <svg class="chat-provider-trigger-icon" width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.2"/>
+                  <path d="M6 5.5h4M6 8h4M6 10.5h2" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>
+                </svg>
+                <span class="chat-provider-trigger-label">{{ activeProviderLabel }}</span>
+                <svg class="chat-provider-trigger-chevron" width="9" height="9" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </button>
+              <Teleport to="body">
+                <div
+                  v-if="providerPickerOpen"
+                  ref="providerDropdownRef"
+                  class="chat-provider-dropdown"
+                  :style="{ position: 'fixed', top: providerDropdownTop + 'px', left: providerDropdownLeft + 'px' }"
+                  role="menu"
+                >
+                  <div class="chat-provider-dropdown-head">
+                    <span>本会话使用模型</span>
+                    <button
+                      type="button"
+                      class="ghost small"
+                      :disabled="!activeSessionProviderId"
+                      @click="resetProviderToGlobal"
+                    >
+                      跟随全局
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    class="chat-provider-option"
+                    :class="{ active: !activeSessionProviderId }"
+                    role="menuitemradio"
+                    :aria-checked="!activeSessionProviderId"
+                    @click="selectProvider('')"
+                  >
+                    <span class="chat-provider-option-name">跟随全局</span>
+                    <span class="chat-provider-option-model">{{ globalModelName || "未设置" }}</span>
+                    <span v-if="!activeSessionProviderId" class="chat-provider-option-check">✓</span>
+                  </button>
+                  <div v-if="providerOptions.length" class="chat-provider-option-sep" />
+                  <button
+                    v-for="p in providerOptions"
+                    :key="p.id"
+                    type="button"
+                    class="chat-provider-option"
+                    :class="{ active: activeSessionProviderId === p.id }"
+                    role="menuitemradio"
+                    :aria-checked="activeSessionProviderId === p.id"
+                    @click="selectProvider(p.id)"
+                  >
+                    <span class="chat-provider-option-name">{{ p.name }}</span>
+                    <span class="chat-provider-option-model">{{ p.model }}</span>
+                    <span v-if="activeSessionProviderId === p.id" class="chat-provider-option-check">✓</span>
+                  </button>
+                </div>
+              </Teleport>
             </div>
             <button
               v-if="totalTokenUsage"
@@ -617,6 +690,9 @@ interface Props {
   pendingMemoryProposals?: PendingMemoryProposal[];
   pendingSkillProposals?: PendingSkillProposal[];
   agentSuggestions?: AgentSuggestion[];
+  activeSessionProviderId: string;
+  providerOptions?: Array<{ id: string; name: string; model: string }>;
+  globalModelName: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -652,6 +728,9 @@ const props = withDefaults(defineProps<Props>(), {
 	agentRunStageLabel: "",
 	pendingApproval: false,
 	agentSuggestions: () => [],
+	activeSessionProviderId: "",
+	providerOptions: () => [],
+	globalModelName: "",
 });
 
 const panelStyle = computed(() => {
@@ -754,12 +833,77 @@ const emit = defineEmits<{
   (e: "confirm-skill-proposal", id: string): void;
   (e: "dismiss-skill-proposal", id: string): void;
   (e: "test-notification"): void;
+  (e: "update:activeSessionProviderId", providerId: string): void;
 }>();
 
 const chatScrollRef = ref<HTMLElement | null>(null);
 const chatDropZoneRef = ref<HTMLElement | null>(null);
 const isAtBottom = ref(true);
 const showScrollToBottom = computed(() => !isAtBottom.value && props.chatMessages.length > 0);
+
+const activeProviderLabel = computed(() => {
+  const id = props.activeSessionProviderId.trim();
+  if (!id) return "跟随全局";
+  return props.providerOptions?.find((p) => p.id === id)?.name || "自定义";
+});
+
+const providerPickerTitle = computed(() => {
+  if (props.activeSessionProviderId.trim()) return `会话模型：${activeProviderLabel.value}（在「AI 配置」可管理供应商）`;
+  return `会话模型：跟随全局配置（${props.globalModelName || "未设置"}）`;
+});
+
+const providerPickerRef = ref<HTMLElement | null>(null);
+const providerDropdownRef = ref<HTMLElement | null>(null);
+const providerPickerOpen = ref(false);
+const providerDropdownTop = ref(0);
+const providerDropdownLeft = ref(0);
+
+function updateProviderDropdownPosition() {
+  if (providerPickerRef.value) {
+    const rect = providerPickerRef.value.getBoundingClientRect();
+    providerDropdownTop.value = rect.bottom + 4;
+    providerDropdownLeft.value = rect.left;
+  }
+}
+
+function toggleProviderPicker() {
+  providerPickerOpen.value = !providerPickerOpen.value;
+  if (providerPickerOpen.value) {
+    nextTick(updateProviderDropdownPosition);
+  }
+}
+
+function closeProviderPicker() {
+  providerPickerOpen.value = false;
+}
+
+function selectProvider(providerId: string) {
+  providerPickerOpen.value = false;
+  emit("update:activeSessionProviderId", providerId);
+}
+
+function resetProviderToGlobal() {
+  providerPickerOpen.value = false;
+  emit("update:activeSessionProviderId", "");
+}
+
+/** 点击下拉外部时自动关闭 */
+function handleProviderPickerOutsideClick(e: MouseEvent) {
+  if (!providerPickerOpen.value) return;
+  const trigger = providerPickerRef.value;
+  const dropdown = providerDropdownRef.value;
+  const target = e.target as Node;
+  if (trigger?.contains(target) || dropdown?.contains(target)) return;
+  providerPickerOpen.value = false;
+}
+
+onMounted(() => {
+  document.addEventListener("mousedown", handleProviderPickerOutsideClick, true);
+});
+
+onUnmounted(() => {
+  document.removeEventListener("mousedown", handleProviderPickerOutsideClick, true);
+});
 
 function checkScrollPosition() {
   const el = chatScrollRef.value;

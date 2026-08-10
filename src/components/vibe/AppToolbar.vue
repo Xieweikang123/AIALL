@@ -100,6 +100,7 @@
               type="text"
               placeholder="搜索项目名或路径"
               aria-label="搜索项目"
+              @keydown.enter="onSearchInputEnter"
               @keydown.esc="onSearchInputEscape"
             />
             <button
@@ -336,6 +337,17 @@ function onSearchInputEscape(e: KeyboardEvent) {
   } else {
     closeProjectHistory();
   }
+}
+
+/** Enter：有匹配 → 打开首个匹配项；无匹配 → 把输入当作新路径尝试打开。 */
+function onSearchInputEnter() {
+  const query = projectSearchQuery.value.trim();
+  if (!query) return;
+  if (filteredProjectHistoryList.value.length > 0) {
+    openRecentProject(filteredProjectHistoryList.value[0].path);
+    return;
+  }
+  openRecentProject(query);
 }
 
 /** 点击下拉面板外部时自动关闭 */

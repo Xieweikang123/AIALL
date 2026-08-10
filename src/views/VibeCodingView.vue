@@ -794,6 +794,10 @@
         :pending-memory-proposals="pendingMemoryProposals"
         :pending-skill-proposals="pendingSkillProposals"
         :agent-suggestions="activeAgentSuggestions"
+        :active-session-provider-id="activeSessionProviderId"
+        :provider-options="providerOptions"
+        :global-model-name="aiConfig.model"
+        @update:activeSessionProviderId="setActiveSessionProvider"
         @on-chat-drag-enter="onChatDragEnter"
         @on-chat-drag-over="onChatDragOver"
         @on-chat-drag-leave="onChatDragLeave"
@@ -1093,7 +1097,7 @@ import {
   type PendingAgentRun,
 } from "../services/agentHmrRecovery";
 import { compressImageDataUrlsForAgent } from "../services/imageCompress";
-import { loadAiChatBaseFromStorage } from "../services/aiLocalConfig";
+import { loadAiChatBaseFromStorage, loadPersistedAiConfigFromStorage } from "../services/aiLocalConfig";
 import {
   buildAgentHistoryFromMessages,
   getSessionDiagSnapshot,
@@ -1533,6 +1537,8 @@ const {
   loadProjectChatState,
   resetUiForProjectSwitch,
   clearProjectChat,
+  activeSessionProviderId,
+  setActiveSessionProvider,
 } = chatSession;
 
 function persistAgentRunSession(sessionId: string) {
@@ -1634,6 +1640,7 @@ const contextMenu = ref({ show: false, x: 0, y: 0, path: "" });
 const gitFileContextMenu = ref({ show: false, x: 0, y: 0, path: "", scope: "modified" as GitFileListScope });
 
 const aiConfig = ref({ endpoint: "", apiKey: "", model: "", providerName: "" });
+const providerOptions = ref<Array<{ id: string; name: string; model: string }>>([]);
 
 const configReady = computed(() => Boolean(aiConfig.value.endpoint.trim()) && Boolean(aiConfig.value.model.trim()));
 const apiKeyReady = computed(() => Boolean(aiConfig.value.apiKey.trim()));
@@ -1645,6 +1652,10 @@ const modelNameForDisplay = computed(() => {
 const aiConfigStatusText = computed(() => {
   if (!configReady.value) return "未配置模型";
   if (!apiKeyReady.value) return `${modelNameForDisplay.value}（未保存 API Key）`;
+  if (activeSessionProviderId.value) {
+    const pinned = providerOptions.value.find((p) => p.id === activeSessionProviderId.value);
+    if (pinned) return `${pinned.name} / ${pinned.model}（本会话）`;
+  }
   return modelNameForDisplay.value;
 });
 const canSendChat = computed(
@@ -1947,9 +1958,31 @@ function reloadAiConfig() {
       model: cfg.model,
       providerName: cfg.providerName || "",
     };
-    return;
+  } else {
+    aiConfig.value = { endpoint: "", apiKey: "", model: "", providerName: "" };
   }
-  aiConfig.value = { endpoint: "", apiKey: "", model: "", providerName: "" };
+  const persisted = loadPersistedAiConfigFromStorage();
+  providerOptions.value = (persisted?.providers || [])
+    .filter((p) => p.model?.trim())
+    .map((p) => ({ id: p.id, name: p.name.trim() || "默认供应商", model: p.model.trim() }));
+}
+
+/** Resolve the AI provider pinned to a session; null = use global config. */
+function resolveSessionAiConfigForSession(sessionId: string) {
+  const sid = sessionId.trim();
+  if (!sid) return null;
+  const meta = sessionList.value.find((s) => s.id === sid);
+  const providerId = meta?.providerId?.trim();
+  if (!providerId) return null;
+  const persisted = loadPersistedAiConfigFromStorage();
+  const provider = persisted?.providers.find((p) => p.id === providerId);
+  if (!provider?.endpoint?.trim() || !provider?.model?.trim()) return null;
+  return {
+    endpoint: provider.endpoint.trim(),
+    apiKey: provider.apiKey,
+    model: provider.model.trim(),
+    providerName: provider.name.trim() || "默认供应商",
+  };
 }
 
 function loadSavedProject() {
@@ -2535,6 +2568,7 @@ const agent = useAgentRun({
   projectOpened,
   configReady,
   aiConfig,
+  resolveSessionAiConfig: resolveSessionAiConfigForSession,
   activeAssistantMsgId,
   activeSessionId,
   activeFilePath,

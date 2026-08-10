@@ -150,13 +150,16 @@ export function pruneGitFileSelection(
   });
 }
 
-/** Parse new-side start line from a unified diff hunk header (`@@ -a,b +c,d @@`).
- * Falls back to old-side start when the hunk is a pure deletion (`+0,0`). */
-export function parseHunkNewStartLine(header: string): number {
-  const m = /^@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)/.exec(header.trim());
-  if (!m) return 0;
+/** Parse new-side start + line count from a unified diff hunk header.
+ * `count` is 0 for a pure-deletion hunk (`+0,0`). */
+export function parseHunkNewRange(header: string): { start: number; count: number } {
+  const m = /^@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,(\d+))?/.exec(header.trim());
+  if (!m) return { start: 0, count: 0 };
   const neu = Number(m[2]);
-  if (Number.isFinite(neu) && neu > 0) return neu;
+  const count = m[3] === undefined ? 1 : Number(m[3]);
+  if (Number.isFinite(neu) && neu > 0) {
+    return { start: neu, count: Number.isFinite(count) && count > 0 ? count : 0 };
+  }
   const old = Number(m[1]);
-  return Number.isFinite(old) && old > 0 ? old : 0;
+  return { start: Number.isFinite(old) && old > 0 ? old : 0, count: 0 };
 }

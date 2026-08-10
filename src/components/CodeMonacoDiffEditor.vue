@@ -10,7 +10,7 @@ import type * as Monaco from "monaco-editor";
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { languageFromFilePath } from "../utils/monacoLanguage";
 import { setupNpmScriptHover } from "../utils/monacoNpmScriptHover";
-import { parseHunkNewStartLine } from "../utils/gitHelpers";
+import { parseHunkNewRange } from "../utils/gitHelpers";
 
 export type MonacoDiffSelectionAnchor = {
   left: number;
@@ -54,11 +54,14 @@ let diffEditor: Monaco.editor.IStandaloneDiffEditor | null = null;
 let originalModel: Monaco.editor.ITextModel | null = null;
 let modifiedModel: Monaco.editor.ITextModel | null = null;
 let resizeObserver: ResizeObserver | null = null;
-let hunkZoneIds: string[] = [];
+let hunkDecorationIds: string[] = [];
 let hunkOverlays: HunkOverlayEntry[] = [];
 let hunkZoneTimer = 0;
+let hoveredHunkIndex = -1;
 let scrollDisposable: Monaco.IDisposable | null = null;
 let layoutDisposable: Monaco.IDisposable | null = null;
+let hoverMoveDisposable: Monaco.IDisposable | null = null;
+let hoverLeaveDisposable: Monaco.IDisposable | null = null;
 
 function resolveLanguage(): string {
   if (props.language) return props.language;
@@ -135,21 +138,20 @@ function clearHunkOverlays() {
   hunkOverlays = [];
 }
 
-function clearHunkZones() {
+function clearHunkDecorations() {
   const editor = diffEditor?.getModifiedEditor();
-  if (!editor || !hunkZoneIds.length) {
-    hunkZoneIds = [];
+  if (!editor || !hunkDecorationIds.length) {
+    hunkDecorationIds = [];
     return;
   }
-  editor.changeViewZones((accessor) => {
-    for (const id of hunkZoneIds) accessor.removeZone(id);
-  });
-  hunkZoneIds = [];
+  editor.deltaDecorations(hunkDecorationIds, []);
+  hunkDecorationIds = [];
 }
 
 function clearHunkUi() {
   clearHunkOverlays();
-  clearHunkZones();
+  clearHunkDecorations();
+  hoveredHunkIndex = -1;
 }
 
 function scheduleHunkZones(delayMs = 80) {
@@ -173,6 +175,16 @@ function createHunkActionDom(hunk: MonacoDiffHunkAction) {
   btn.addEventListener("mousedown", (e) => {
     e.stopPropagation();
   });
+  btn.addEventListener("mouseenter", () => {
+    hoveredHunkIndex = hunk.index;
+    updateOverlayPositions();
+  });
+  btn.addEventListener("mouseleave", () => {
+    if (hoveredHunkIndex === hunk.index) {
+      hoveredHunkIndex = -1;
+      updateOverlayPositions();
+    }
+  });
   btn.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -191,31 +203,45 @@ function syncBusyState(btn: HTMLButtonElement, hunkIndex: number) {
   btn.disabled = busy != null;
 }
 
+function hunkLineRange(hunk: MonacoDiffHunkAction): { start: number; count: number } {
+  return parseHunkNewRange(hunk.header);
+}
+
+/** Should the button for `index` be visible? Hover over the hunk block OR busy state. */
+function hunkActionVisible(index: number): boolean {
+  if (props.hunkBusyIndex === index) return true;
+  return hoveredHunkIndex === index;
+}
+
 function updateOverlayPositions() {
   const editor = diffEditor?.getModifiedEditor();
   if (!editor || !hunkOverlays.length) return;
   const layout = editor.getLayoutInfo();
-  const zoneHeight = 28;
 
   for (const entry of hunkOverlays) {
+    const idx = Number(entry.dom.getAttribute("data-hunk-index"));
     const pos = editor.getScrolledVisiblePosition({
       lineNumber: entry.startLine,
       column: 1,
     });
-    if (!pos || pos.top < -40 || pos.top > layout.height + 40) {
+    const visible = hunkActionVisible(idx);
+    if (!pos || pos.top < -40 || pos.top > layout.height + 40 || !visible) {
+      entry.dom.style.opacity = "0";
       entry.dom.style.visibility = "hidden";
       continue;
     }
     entry.dom.style.visibility = "visible";
-    entry.dom.style.top = `${Math.max(0, pos.top - zoneHeight + 2)}px`;
+    entry.dom.style.opacity = "1";
+    entry.dom.style.top = `${Math.max(0, pos.top + 1)}px`;
     entry.dom.style.right = `${Math.max(8, layout.verticalScrollbarWidth + 10)}px`;
     entry.dom.style.left = "auto";
   }
 }
 
 /**
- * View zones only reserve space (not clickable — Monaco paints them under text).
- * Overlay widgets sit on top and receive real mouse events (VS Code-like).
+ * Hover-revealed hunk action buttons: no view-zone gaps (preserves line rhythm).
+ * The button floats at the hunk's first line and fades in when the pointer is over the block.
+ * Block grouping is drawn via whole-line decorations (background tint + left accent rail).
  */
 function mountHunkUi() {
   clearHunkUi();
@@ -226,25 +252,31 @@ function mountHunkUi() {
 
   const mode = props.hunkActionMode;
 
-  editor.changeViewZones((accessor) => {
-    for (const hunk of hunks) {
-      const startLine = parseHunkNewStartLine(hunk.header);
-      if (startLine < 1) continue;
-      const spacer = document.createElement("div");
-      spacer.className = "monaco-git-hunk-zone";
-      const id = accessor.addZone({
-        afterLineNumber: Math.max(0, startLine - 1),
-        heightInPx: 28,
-        domNode: spacer,
-      });
-      hunkZoneIds.push(id);
-    }
-  });
-
+  // 1) Decorations: tint + left rail over the hunk's new-side lines.
+  const decorations: Monaco.editor.IModelDeltaDecoration[] = [];
   for (const hunk of hunks) {
-    const startLine = parseHunkNewStartLine(hunk.header);
-    if (startLine < 1) continue;
+    const { start, count } = hunkLineRange(hunk);
+    if (count <= 0 || start < 1) continue;
+    const end = Math.max(start, start + count - 1);
+    decorations.push({
+      range: new monaco.Range(start, 1, end, 1),
+      options: {
+        isWholeLine: true,
+        className: "monaco-hunk-block-bg",
+        linesDecorationsClassName: "monaco-hunk-block-accent",
+      },
+    });
+  }
+  if (decorations.length) {
+    hunkDecorationIds = editor.deltaDecorations([], decorations);
+  }
+
+  // 2) Overlay widgets: hover-revealed buttons anchored at each hunk's first line.
+  for (const hunk of hunks) {
+    const { start } = hunkLineRange(hunk);
+    if (start < 1) continue;
     const dom = createHunkActionDom(hunk);
+    dom.style.visibility = "hidden";
     const widget: Monaco.editor.IOverlayWidget = {
       getId: () => `aiall-git-hunk-overlay-${mode}-${hunk.index}`,
       getDomNode: () => dom,
@@ -252,7 +284,7 @@ function mountHunkUi() {
       getPosition: () => null,
     };
     editor.addOverlayWidget(widget);
-    hunkOverlays.push({ widget, startLine, dom });
+    hunkOverlays.push({ widget, startLine: start, dom });
   }
 
   updateOverlayPositions();
@@ -315,6 +347,31 @@ function createDiffEditor() {
 
   scrollDisposable = modified.onDidScrollChange(() => updateOverlayPositions());
   layoutDisposable = modified.onDidLayoutChange(() => updateOverlayPositions());
+
+  hoverMoveDisposable = modified.onMouseMove((e) => {
+    if (!props.hunks?.length || props.hunkBusyIndex != null) return;
+    const line = e.target?.position?.lineNumber;
+    if (!line || line < 1) return;
+    let hovered = -1;
+    for (const h of props.hunks) {
+      const { start, count } = hunkLineRange(h);
+      if (count <= 0) continue;
+      if (line >= start && line <= start + count - 1) {
+        hovered = h.index;
+        break;
+      }
+    }
+    if (hovered !== hoveredHunkIndex) {
+      hoveredHunkIndex = hovered;
+      updateOverlayPositions();
+    }
+  });
+  hoverLeaveDisposable = modified.onMouseLeave(() => {
+    if (hoveredHunkIndex !== -1) {
+      hoveredHunkIndex = -1;
+      updateOverlayPositions();
+    }
+  });
 
   resizeObserver = new ResizeObserver(() => {
     diffEditor?.layout();
@@ -389,6 +446,7 @@ watch(
       if (!Number.isFinite(idx)) continue;
       syncBusyState(btn, idx);
     }
+    updateOverlayPositions();
   },
 );
 
@@ -400,8 +458,12 @@ onBeforeUnmount(() => {
   if (hunkZoneTimer) window.clearTimeout(hunkZoneTimer);
   scrollDisposable?.dispose();
   layoutDisposable?.dispose();
+  hoverMoveDisposable?.dispose();
+  hoverLeaveDisposable?.dispose();
   scrollDisposable = null;
   layoutDisposable = null;
+  hoverMoveDisposable = null;
+  hoverLeaveDisposable = null;
   clearHunkUi();
   resizeObserver?.disconnect();
   resizeObserver = null;
@@ -447,16 +509,20 @@ onBeforeUnmount(() => {
 </style>
 
 <style>
-.monaco-git-hunk-zone {
-  box-sizing: border-box;
-  width: 100%;
+/* Hunk block grouping: faint tint over the changed lines + left accent rail. */
+.monaco-hunk-block-bg {
   background: linear-gradient(
     90deg,
-    rgba(88, 166, 255, 0.02),
-    rgba(88, 166, 255, 0.1) 45%,
-    rgba(88, 166, 255, 0.14)
+    rgba(88, 166, 255, 0.05),
+    rgba(88, 166, 255, 0.1) 60%,
+    rgba(88, 166, 255, 0.05)
   );
-  border-bottom: 1px solid rgba(88, 166, 255, 0.2);
+  box-shadow: inset 0 0 0 1px rgba(88, 166, 255, 0.08);
+  border-radius: 2px;
+}
+
+.monaco-hunk-block-accent {
+  background: rgba(88, 166, 255, 0.35);
 }
 
 .monaco-git-hunk-widget {
@@ -466,6 +532,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  transition: opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .monaco-git-hunk-btn {

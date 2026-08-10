@@ -460,7 +460,8 @@ pub async fn chat_session_sync(
       "updatedAt": data.get("updatedAt").cloned().unwrap_or(json!(chrono::Utc::now().to_rfc3339())),
       "messageCount": messages_len,
       "file": format!("chat-{}.json", session_id.replace(|c: char| !c.is_ascii_alphanumeric() && c != '-' && c != '_', "_")),
-      "status": data.get("status").cloned().unwrap_or(json!("active"))
+      "status": data.get("status").cloned().unwrap_or(json!("active")),
+      "providerId": data.get("providerId").cloned().unwrap_or(Value::Null)
     });
     if let Some(sessions) = index.get_mut("sessions").and_then(|s| s.as_array_mut()) {
         if let Some(pos) = sessions

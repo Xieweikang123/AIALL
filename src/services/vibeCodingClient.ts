@@ -145,6 +145,7 @@ export interface ChatStoreSyncResult {
     updatedAt: string;
     messageCount: number;
     status?: string;
+    providerId?: string;
   }>;
   error?: string;
 }
@@ -162,6 +163,7 @@ export type ChatSessionDeleteResult =
         updatedAt: string;
         messageCount: number;
         status?: string;
+        providerId?: string;
       }>;
     }
   | { ok: false; error?: string };
