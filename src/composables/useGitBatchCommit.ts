@@ -631,7 +631,7 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
         }
       } else if (result.groups.length === 0) {
         debugLog("[git-ai] analysis returned no groups", { runId });
-        gitError.value = "AI 未返回有效分组，请重试或手动按目录提交";
+        gitError.value = "AI 未返回有效分组，请重试或手动按目录提交。若多次失败，可尝试在「AI 配置」更换模型。";
         aiBatchGroupsResult.value = null;
       } else {
         debugLog("[git-ai] analysis success", { runId, groupCount: result.groups.length, paths: result.groups.flatMap((g) => g.files).length });

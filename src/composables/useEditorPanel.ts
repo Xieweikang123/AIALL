@@ -1,4 +1,4 @@
-import { computed, ref, unref, watch, type Ref } from "vue";
+import { computed, nextTick, ref, unref, watch, type Ref } from "vue";
 import { type TreeNode } from "../components/FileTreeNode.vue";
 import EditorPanel from "../components/vibe/EditorPanel.vue";
 import {
@@ -525,6 +525,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
       if (!isVirtualSchemePath(filePath) && cached.kind !== "scratch") {
         cached.kind = "file";
       }
+      void revealInTree(filePath);
       return;
     }
 
@@ -574,6 +575,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
         tab.kind = "file";
       }
     }
+    void revealInTree(filePath);
   }
 
   async function reloadFile() {
@@ -958,6 +960,76 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     selectedTreePath.value = path;
   }
 
+  /**
+   * 展开目标文件的父目录链并在文件树中滚动定位。
+   * 目录可能尚未加载 children（懒加载），逐级展开 + 加载。
+   */
+  async function revealInTree(filePath: string) {
+    const target = filePath.trim();
+    if (!target || !projectPath.value.trim()) return;
+
+    const dirs = parentDirChain(target);
+    for (const dir of dirs) {
+      if (!expandedDirs.value.has(dir)) {
+        const expanded = expandedDirs.value;
+        expanded.add(dir);
+        expandedDirs.value = new Set(expanded);
+        const node = findNode(fileTree.value, dir);
+        if (node?.isDirectory && !node.loaded) {
+          try {
+            node.children = await loadDirChildren(dir);
+            node.loaded = true;
+          } catch {
+            node.children = [];
+          }
+        }
+      }
+    }
+
+    await nextTick();
+    scrollTreeNodeIntoView(target);
+  }
+
+  /** 目标文件的各级父目录（不含根），返回与文件树节点一致的路径分隔符 */
+  function parentDirChain(filePath: string): string[] {
+    const root = projectPath.value.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
+    const norm = filePath.replace(/\\/g, "/");
+    const slashIdx = norm.lastIndexOf("/");
+    const dir = slashIdx >= 0 ? norm.slice(0, slashIdx) : "";
+    const chain: string[] = [];
+    let cur = dir;
+    while (cur) {
+      const curLower = cur.toLowerCase();
+      if (curLower === root) break;
+      chain.unshift(cur);
+      const next = cur.includes("/") ? cur.slice(0, cur.lastIndexOf("/")) : "";
+      if (!next) break;
+      cur = next;
+    }
+    // 文件树 path 用反斜杠（Windows），转回原始分隔符
+    return chain.map((d) => (d.includes("/") ? d.replace(/\//g, "\\") : d));
+  }
+
+  /** 在文件树滚动容器内定位到节点（文件树当前仅在 files 面板渲染） */
+  function scrollTreeNodeIntoView(filePath: string) {
+    const container = document.querySelector(".file-tree") as HTMLElement | null;
+    if (!container) return;
+    const items = container.querySelectorAll(".file-item");
+    let found: HTMLElement | null = null;
+    for (const el of Array.from(items)) {
+      if (el.getAttribute("data-path") === filePath) {
+        found = el as HTMLElement;
+        break;
+      }
+    }
+    if (!found) return;
+    const cRect = container.getBoundingClientRect();
+    const nRect = found.getBoundingClientRect();
+    if (nRect.top < cRect.top || nRect.bottom > cRect.bottom) {
+      found.scrollIntoView({ block: "nearest" });
+    }
+  }
+
   function onEditorChange() {
     if (activeFileReadOnly.value) return;
     fileDirty.value = true;
@@ -1219,6 +1291,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     syncEditorPanelForOpenFiles,
     parentDirForCreate,
     selectTreeItem,
+    revealInTree,
     onEditorChange,
     activeFileRelativePath,
     syncEditorAfterAgentFileChange,

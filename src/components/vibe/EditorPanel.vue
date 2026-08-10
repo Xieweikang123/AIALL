@@ -632,19 +632,24 @@ const localContent = computed({
 
 const STORAGE_KEY = "editor-md-preview";
 
-function loadPreviewState(): Record<string, boolean> {
+/** 全局预览开关：预览模式下切换 md 仍保持预览；非 md 自动退出。 */
+function loadPreviewState(): boolean {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
+    return localStorage.getItem(STORAGE_KEY) === "true";
   } catch {
-    return {};
+    return false;
   }
 }
 
-function savePreviewState(state: Record<string, boolean>) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+function savePreviewState(state: boolean) {
+  try {
+    localStorage.setItem(STORAGE_KEY, String(state));
+  } catch {
+    // ignore quota / disabled storage
+  }
 }
 
-const previewState = ref<Record<string, boolean>>(loadPreviewState());
+const previewState = ref<boolean>(loadPreviewState());
 
 const isMarkdownFile = computed(() => /\.md$/i.test(props.activeFilePath));
 
@@ -655,11 +660,10 @@ const isGitVirtualTab = computed(
 );
 
 const showPreview = computed({
-  get: () => previewState.value[props.activeFilePath] ?? false,
+  get: () => previewState.value,
   set: (val) => {
-    if (val) previewState.value[props.activeFilePath] = val;
-    else delete previewState.value[props.activeFilePath];
-    savePreviewState(previewState.value);
+    previewState.value = val;
+    savePreviewState(val);
   },
 });
 

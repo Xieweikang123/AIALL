@@ -154,6 +154,41 @@ describe("useEditorPanel — 异步缺口修复", () => {
       expect(activeFilePath.value).toBe(`${PROJECT_PATH}/src/a.ts`);
       expect(readFileMock).not.toHaveBeenCalled();
     });
+
+    it("打开文件后 selectedTreePath 应同步为文件路径", async () => {
+      const params = makeParams();
+      const { openFile, selectedTreePath } =
+        (await import("./useEditorPanel")).useEditorPanel(params);
+
+      await openFile(`${PROJECT_PATH}/src/a.ts`);
+      expect(selectedTreePath.value).toBe(`${PROJECT_PATH}/src/a.ts`);
+
+      await openFile(`${PROJECT_PATH}/src/b.ts`);
+      expect(selectedTreePath.value).toBe(`${PROJECT_PATH}/src/b.ts`);
+    });
+
+    it("打开已缓存标签后 selectedTreePath 仍应同步（快速路径）", async () => {
+      const params = makeParams();
+      const { openFile, selectedTreePath } =
+        (await import("./useEditorPanel")).useEditorPanel(params);
+
+      await openFile(`${PROJECT_PATH}/src/a.ts`);
+      await openFile(`${PROJECT_PATH}/src/b.ts`);
+      // 回到已打开的 a
+      await openFile(`${PROJECT_PATH}/src/a.ts`);
+      expect(selectedTreePath.value).toBe(`${PROJECT_PATH}/src/a.ts`);
+    });
+
+    it("selectTreeItem 后紧跟 openFile（文件树点击事件）selectedTreePath 应为新文件", async () => {
+      const params = makeParams();
+      const { openFile, selectTreeItem, selectedTreePath } =
+        (await import("./useEditorPanel")).useEditorPanel(params);
+
+      // 模拟 FileTreeNode onFileTap: 先 emit select 再 emit open
+      selectTreeItem(`${PROJECT_PATH}/src/b.ts`);
+      await openFile(`${PROJECT_PATH}/src/b.ts`);
+      expect(selectedTreePath.value).toBe(`${PROJECT_PATH}/src/b.ts`);
+    });
   });
 
   // ─── 2. handleUnsavedTabChoice: 保存顺序 ──────────────

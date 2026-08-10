@@ -790,13 +790,33 @@ fn extract_complete_ai_batch_groups(content: &str, known_paths: &[String]) -> Ve
     result
 }
 
+/// Strip a wrapping markdown code fence (```json ... ```) so the JSON body
+/// can be located even when the model wraps the answer in a fenced block.
+fn strip_markdown_code_fence(input: &str) -> &str {
+    let trimmed = input.trim();
+    if !trimmed.starts_with("```") {
+        return trimmed;
+    }
+    let after_fence = match trimmed.find('\n') {
+        Some(idx) => &trimmed[idx + 1..],
+        None => return trimmed,
+    };
+    match after_fence.rfind("```") {
+        Some(end) => after_fence[..end].trim(),
+        None => after_fence.trim(),
+    }
+}
+
 fn parse_ai_batch_groups_json(
     content: &str,
     known_paths: &[String],
 ) -> Result<Vec<AiBatchGroup>, String> {
-    let cleaned = content.trim();
+    let cleaned = strip_markdown_code_fence(content);
     let Some(start) = cleaned.find('{') else {
-        return Err("模型未返回 JSON 分组".into());
+        if cleaned.trim().is_empty() {
+            return Err("模型未返回任何内容。请检查模型服务是否可用，或更换模型后重试".into());
+        }
+        return Err("模型未返回 JSON 分组（模型输出了文字而非 JSON，或模型不支持结构化输出）。可尝试更换模型后重试".into());
     };
     let Some(end_rel) = cleaned[start..].rfind('}') else {
         return Err("模型返回的 JSON 不完整".into());
@@ -1231,15 +1251,16 @@ Diff 内容：
 - 使用中文
 - 文件列表中的每个文件都必须出现在某一组中（即使抽样 diff 未覆盖该文件）
 
-请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 标记：
+请严格以 JSON 格式输出，不要包含任何其他文字或 markdown 标记（禁止 ``` 代码块、禁止开头寒暄、禁止结尾解释）：
 {{\"groups\":[{{\"name\":\"分组名称\",\"files\":[\"文件路径\"],\"message\":\"提交信息\"}}]}}"
   );
 
     send_event("progress", json!({ "step": "请求模型…" }));
 
-    // File paths dominate the JSON response. A fixed 1200-token cap can cut the
-    // response in the middle of a files array for medium-sized change sets.
-    let max_tokens = (1200usize + source_files_len.saturating_mul(80)).min(4000);
+    // File paths dominate the JSON response. Long paths (e.g. nested C# folders)
+    // can consume several tokens each, so budget generously and scale with the
+    // change-set size. Hard cap lifted to avoid mid-array truncation.
+    let max_tokens = (1600usize + source_files_len.saturating_mul(120)).min(12000);
     let body = json!({
       "model": model,
       "messages": [{ "role": "user", "content": prompt }],
@@ -1385,6 +1406,31 @@ mod ai_batch_parse_tests {
         let known = vec!["src/a.ts".into()];
         let err = parse_ai_batch_groups_json("sorry I cannot", &known).unwrap_err();
         assert!(err.contains("JSON"));
+    }
+
+    #[test]
+    fn empty_payload_gets_service_hint() {
+        let known = vec!["src/a.ts".into()];
+        let err = parse_ai_batch_groups_json("", &known).unwrap_err();
+        assert!(err.contains("模型未返回任何内容"), "got: {err}");
+        assert!(err.contains("模型服务"), "got: {err}");
+    }
+
+    #[test]
+    fn parses_json_inside_markdown_code_fence() {
+        let known = vec!["src/a.ts".into(), "pkg/b.ts".into()];
+        let raw = "```json\n{\"groups\":[{\"name\":\"src\",\"files\":[\"src/a.ts\"],\"message\":\"改了 a\"},{\"name\":\"pkg\",\"files\":[\"pkg/b.ts\"],\"message\":\"改了 b\"}]}\n```";
+        let groups = parse_ai_batch_groups_json(raw, &known).unwrap();
+        assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].name, "src");
+    }
+
+    #[test]
+    fn strips_fence_even_when_unclosed() {
+        let known = vec!["src/a.ts".into()];
+        let raw = "```json\n{\"groups\":[{\"name\":\"src\",\"files\":[\"src/a.ts\"],\"message\":\"m\"}]}";
+        let groups = parse_ai_batch_groups_json(raw, &known).unwrap();
+        assert_eq!(groups.len(), 1);
     }
 
     #[test]

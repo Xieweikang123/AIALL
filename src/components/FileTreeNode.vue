@@ -26,12 +26,6 @@
       <FileTreeNode
         v-for="child in node.children"
         :key="child.path"
-        v-memo="[
-          child.path === activePath,
-          child.path === selectedPath,
-          child.path === renamingPath,
-          expandedDirs.has(child.path),
-        ]"
         :node="child"
         :active-path="activePath"
         :selected-path="selectedPath"
@@ -57,6 +51,7 @@
     tabindex="0"
     class="file-item file-item-draggable"
     :class="{ active: node.path === activePath, selected: node.path === selectedPath }"
+    :data-path="node.path"
     :style="{ paddingLeft }"
     @keydown.enter="onFileTap"
     @keydown.space.prevent="onFileTap"
