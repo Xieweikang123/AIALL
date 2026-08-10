@@ -421,6 +421,10 @@ export function formatToolMeta(
     const detail = query ? `「${query}」` : "";
     return { name, icon: "🔎", title: "搜索文件", detail, label: detail ? `搜索文件 ${detail}` : "搜索文件" };
   }
+  if (name === "search_symbols") {
+    const detail = query ? `「${query}」` : "";
+    return { name, icon: "⚡", title: "搜索符号", detail, label: detail ? `搜索符号 ${detail}` : "搜索符号" };
+  }
   if (name === "web_search") {
     const searchQuery = query || String(args.q ?? "").trim();
     const engine = String(args.engine ?? "").trim();

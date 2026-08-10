@@ -8,6 +8,7 @@ export function getToolIcon(name: string): string {
   if (name === 'write_file' || name === 'patch_file') return '🔧';
   if (name === 'grep') return '🔍';
   if (name === 'search_files') return '🔎';
+  if (name === 'search_symbols') return '⚡';
   if (name === 'list_dir') return '📁';
   if (name === 'git_status' || name === 'git_diff') return '⎇';
   if (name === 'delete_file') return '🗑️';
@@ -19,7 +20,7 @@ export function getToolIcon(name: string): string {
 export function getToolIconClass(name: string): string {
   if (name === 'read_file') return 'read';
   if (name === 'write_file' || name === 'patch_file') return 'write';
-  if (name === 'grep' || name === 'search_files') return 'search';
+  if (name === 'grep' || name === 'search_files' || name === 'search_symbols') return 'search';
   return 'default';
 }
 
@@ -29,6 +30,7 @@ export function getToolLabel(name: string): string {
   if (name === 'patch_file') return '修改';
   if (name === 'grep') return '搜索';
   if (name === 'search_files') return '搜索文件';
+  if (name === 'search_symbols') return '搜索符号';
   if (name === 'list_dir') return '列出';
   if (name === 'git_status') return 'Git 状态';
   if (name === 'git_diff') return 'Git diff';
@@ -88,8 +90,18 @@ export function parseRunCommandOutputLines(
   return lines;
 }
 
-export function getToolPath(step: { args?: Record<string, unknown>; detail?: string }): string {
-  const path = String(step.args?.path ?? step.args?.pattern ?? step.args?.query ?? step.detail?.split(' · ')[0] ?? '').trim();
+export function getToolPath(step: {
+  name?: string;
+  args?: Record<string, unknown>;
+  detail?: string;
+}): string {
+  // query 是搜索关键词，不是文件路径（search_files / search_symbols / web_search）
+  if (step.name === "search_files" || step.name === "search_symbols" || step.name === "web_search") {
+    return "";
+  }
+  const path = String(
+    step.args?.path ?? step.args?.pattern ?? step.detail?.split(' · ')[0] ?? '',
+  ).trim();
   return path || '...';
 }
 

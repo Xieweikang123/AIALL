@@ -64,6 +64,7 @@
         @open-quick-search="openQuickSearch"
         @create-new-file="createNewFile"
         @create-new-folder="createNewFolder"
+        @collapse-all-dirs="collapseAllDirs"
         @expand-editor="expandEditor"
         @expand-chat="expandChat"
         @collapse-file-panel="collapseFilePanel"
@@ -2855,6 +2856,13 @@ const workspaceUi = useWorkspaceUiPersistence({
   quickSearchOpen,
   restoringRef: restoringWorkspaceUi,
 });
+
+/** 一键折叠文件树：仅保留项目根目录展开 */
+function collapseAllDirs() {
+  const normalized = projectPath.value.trim();
+  expandedDirs.value = new Set(normalized ? [normalized] : []);
+  workspaceUi.persistNow();
+}
 
 async function restoreWorkspaceLayoutAfterOpen(savedUiHint: Awaited<ReturnType<typeof workspaceUi.restoreLayoutState>> = null) {
   const normalized = projectPath.value.trim();

@@ -56,7 +56,7 @@
 import { computed, ref, watch } from "vue";
 import { cursorActionClass, formatCursorActionLabel } from "../services/agentCursorFeed";
 import type { AgentRoundTool } from "../services/agentRoundGroups";
-import { getToolPath } from "../utils/toolHelpers";
+import { getToolIcon, getToolLabel, getToolPath } from "../utils/toolHelpers";
 
 const props = withDefaults(
   defineProps<{
@@ -128,17 +128,33 @@ function extractMeta(step: AgentRoundTool): string {
 function buildRow(step: AgentRoundTool): StepRow {
   const path = getToolPath(step)?.trim() || "";
   const fullLabel = formatCursorActionLabel(step);
-  const verb = step.title?.trim() || step.label?.trim() || step.name;
-  let target = path ? shortPath(path) : (step.detail?.split(" · ")[0]?.trim() || fullLabel);
+  // 兼容旧数据：历史消息里 title/label 可能存的是工具名原样（旧兜底），渲染时映射成中文
+  const rawVerb = step.title?.trim() || step.label?.trim() || step.name;
+  const verb = rawVerb === step.name ? getToolLabel(step.name) : rawVerb;
+  const icon = step.icon && step.icon !== "⚙️" ? step.icon : getToolIcon(step.name);
 
-  if (!path && /^(Read|Edited|Searched|Explored|Deleted|Reading|Editing)\s/i.test(fullLabel)) {
-    const stripped = fullLabel.replace(/^(Read|Edited|Searched|Explored|Deleted|Reading|Editing)\s+/i, "");
-    target = stripped.split(" · ")[0]?.trim() || target;
+  // 搜索类工具：target 直接用搜索词（query/pattern），不要从 fullLabel 里剥出
+  // "symbols Ingress" 这类被前缀污染的结果。
+  const searchQuery = String(
+    step.args?.query ?? step.args?.pattern ?? step.args?.q ?? "",
+  ).trim();
+
+  let target: string;
+  if (searchQuery && (step.name === "grep" || step.name === "search_files" || step.name === "search_symbols")) {
+    target = searchQuery;
+  } else if (path) {
+    target = shortPath(path);
+  } else {
+    target = step.detail?.split(" · ")[0]?.trim() || fullLabel;
+    if (!path && /^(Read|Edited|Searched|Explored|Deleted|Reading|Editing)\s/i.test(fullLabel)) {
+      const stripped = fullLabel.replace(/^(Read|Edited|Searched|Explored|Deleted|Reading|Editing)\s+/i, "");
+      target = stripped.split(" · ")[0]?.trim() || target;
+    }
   }
 
   return {
     key: step.id,
-    icon: step.icon || "•",
+    icon,
     verb,
     target,
     meta: extractMeta(step),

@@ -10,7 +10,7 @@
     @click="onClick"
     @keydown.enter.prevent="onClick"
   >
-    <span class="inline-tool-card__icon" aria-hidden="true">{{ step.icon }}</span>
+    <span class="inline-tool-card__icon" aria-hidden="true">{{ icon }}</span>
     <span class="inline-tool-card__label" :title="tooltip">{{ label }}</span>
     <span v-if="step.running" class="inline-tool-card__spinner" aria-hidden="true" />
     <span v-else-if="isSkipped" class="inline-tool-card__skip" aria-hidden="true">−</span>
@@ -22,7 +22,7 @@
 import { computed } from "vue";
 import { cursorActionClass, formatCursorActionLabel } from "../services/agentCursorFeed";
 import type { AgentRoundTool } from "../services/agentRoundGroups";
-import { getToolPath } from "../utils/toolHelpers";
+import { getToolIcon, getToolPath } from "../utils/toolHelpers";
 
 const props = defineProps<{
   step: AgentRoundTool;
@@ -33,6 +33,12 @@ const emit = defineEmits<{
 }>();
 
 const label = computed(() => formatCursorActionLabel(props.step));
+
+// 兼容旧数据：历史消息里 icon 可能是旧兜底的 ⚙️，用当前图标映射兜底
+const icon = computed(() => {
+  if (props.step.icon && props.step.icon !== "⚙️") return props.step.icon;
+  return getToolIcon(props.step.name);
+});
 
 const tooltip = computed(() => {
   if (!props.step.ok && !props.step.running) {

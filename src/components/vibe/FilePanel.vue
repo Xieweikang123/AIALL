@@ -232,6 +232,12 @@
               <path d="M2.5 4.8A1.3 1.3 0 0 1 3.8 3.5h3.2l1.2 1.3h4.5A1.3 1.3 0 0 1 14 6.1v6.4a1.3 1.3 0 0 1-1.3 1.3H3.8A1.3 1.3 0 0 1 2.5 12.5V4.8Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
             </svg>
           </button>
+          <button type="button" class="icon file-toolbar-btn" title="全部折叠" aria-label="全部折叠" @click="$emit('collapse-all-dirs')">
+            <svg class="file-toolbar-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M3.5 3.5h9M3.5 8h9M3.5 12.5h9" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+              <path d="M6 5.5 4 8l2 2.5M10 5.5 12 8l-2 2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
           <template v-if="editorCollapsed">
             <span class="toolbar-sep" />
             <button
@@ -509,6 +515,7 @@ const emit = defineEmits<{
   (e: "open-quick-search"): void;
   (e: "create-new-file"): void;
   (e: "create-new-folder"): void;
+  (e: "collapse-all-dirs"): void;
   (e: "expand-editor"): void;
   (e: "expand-chat"): void;
   (e: "collapse-file-panel"): void;

@@ -350,6 +350,13 @@ export function formatCursorActionLabel(step: AgentRoundTool): string {
     return `Searched files ${target}`;
   }
 
+  if (step.name === "search_symbols") {
+    const target = query || step.detail || "symbols";
+    if (running) return `Searching symbols ${target}`;
+    if (failed) return `Symbol search failed ${target}`;
+    return `Searched symbols ${target}`;
+  }
+
   if (step.name === "list_dir") {
     const target = path || step.detail || ".";
     if (running) return `Exploring ${target}`;
