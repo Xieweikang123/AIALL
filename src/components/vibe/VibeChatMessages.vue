@@ -559,7 +559,6 @@ function shortDiffPath(path: string): string {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 30px;
   margin: 0 0 4px;
   padding: 0 2px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
