@@ -41,22 +41,22 @@
         <button type="button" class="git-remote-btn" :disabled="!!gitRemoteAction" @click="$emit('do-fetch')">
           {{ gitRemoteAction === 'fetch' ? '…' : 'Fetch' }}
         </button>
-        <button type="button" class="git-remote-btn" :disabled="!!gitRemoteAction" @click="$emit('do-pull')">
+        <button type="button" class="git-remote-btn git-remote-btn--pull" :disabled="!!gitRemoteAction" @click="$emit('do-pull')">
           {{ gitRemoteAction === 'pull' ? '…' : 'Pull' }}
         </button>
-        <button type="button" class="git-remote-btn" :disabled="!!gitRemoteAction" @click="$emit('do-push')">
+        <button type="button" class="git-remote-btn git-remote-btn--push" :disabled="!!gitRemoteAction" @click="$emit('do-push')">
           {{ gitRemoteAction === 'push' ? '…' : 'Push' }}
         </button>
-        <button
-          type="button"
-          class="git-remote-btn"
-          :disabled="!remoteBrowserUrl"
-          title="在浏览器打开远程仓库"
-          @click="$emit('open-remote', remoteBrowserUrl)"
-        >
-          ↗ 仓库
-        </button>
       </div>
+      <button
+        type="button"
+        class="git-remote-link"
+        :disabled="!remoteBrowserUrl"
+        title="在浏览器打开远程仓库"
+        @click="$emit('open-remote', remoteBrowserUrl)"
+      >
+        ↗ 仓库
+      </button>
     </div>
     <GitAheadCommits
       :ahead="gitAhead"

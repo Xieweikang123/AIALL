@@ -171,6 +171,7 @@ const editorRef = ref<HTMLDivElement | null>(null);
 const focused = ref(false);
 const isEmpty = ref(true);
 const pendingImages = ref<string[]>([]);
+const savedCursorOffset = ref<number | null>(null);
 
 watch(
   () => props.disabled,
@@ -193,6 +194,20 @@ function onFocus() {
 
 function onBlur() {
   focused.value = false;
+  const root = editorRef.value;
+  const sel = window.getSelection();
+  if (root && sel && sel.rangeCount > 0 && sel.anchorNode && root.contains(sel.anchorNode)) {
+    let container: Node = sel.anchorNode;
+    while (container !== root && container.parentNode) {
+      container = container.parentNode;
+    }
+    let index = 0;
+    for (const child of Array.from(root.childNodes)) {
+      if (child === container) break;
+      index++;
+    }
+    savedCursorOffset.value = index;
+  }
   emit("blur");
 }
 
@@ -211,7 +226,14 @@ function insertNodesAtCursor(nodes: Node[], addTrailingSpace = true) {
   if (!sel || sel.rangeCount === 0 || !root.contains(sel.anchorNode)) {
     range = document.createRange();
     range.selectNodeContents(root);
-    range.collapse(false);
+    if (savedCursorOffset.value != null) {
+      // Restore to the position where the cursor was before the editor lost focus
+      const offset = Math.min(savedCursorOffset.value, root.childNodes.length);
+      range.setStart(root, offset);
+      range.collapse(true);
+    } else {
+      range.collapse(false);
+    }
   } else {
     range = sel.getRangeAt(0);
     if (!root.contains(range.commonAncestorContainer)) {

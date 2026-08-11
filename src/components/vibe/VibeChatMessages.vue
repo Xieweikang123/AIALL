@@ -266,36 +266,12 @@
           m.role === 'assistant' &&
           !ctx.isAgentRunning(m) &&
           !m.streaming &&
-          (m.pendingApproval || m.writtenFiles?.length || m.reverted || m.rejected)
+          (m.writtenFiles?.length || m.reverted || m.rejected)
         "
         class="msg-actions"
       >
         <span
-          v-if="m.pendingApproval && m.turnFileDiffs"
-          class="pending-badge"
-        >
-          {{ ctx.formatPendingApprovalLabel(m.turnFileDiffs, m.agentAborted) }}
-        </span>
-        <div v-if="m.pendingApproval" class="turn-review-actions">
-          <button
-            type="button"
-            class="secondary compact"
-            :disabled="ctx.chatSending.value || !ctx.projectOpened.value || m.applying"
-            @click="ctx.acceptAgentTurn(m.id)"
-          >
-            {{ m.applying ? "确认中…" : "接受修改" }}
-          </button>
-          <button
-            type="button"
-            class="ghost compact"
-            :disabled="ctx.chatSending.value || !ctx.projectOpened.value || m.reverting"
-            @click="ctx.rejectAgentTurn(m.id, $event)"
-          >
-            {{ m.reverting ? "回滚中…" : "拒绝" }}
-          </button>
-        </div>
-        <span
-          v-else-if="m.writtenFiles?.length && !m.reverted && !m.rejected && (m.chatMode === 'build' || m.chatMode === 'auto' || m.chatMode === 'plan')"
+          v-if="m.writtenFiles?.length && !m.reverted && !m.rejected && (m.chatMode === 'build' || m.chatMode === 'auto' || m.chatMode === 'plan')"
           class="applied-badge"
         >
           已写入 {{ m.writtenFiles.length }} 个文件

@@ -77,6 +77,9 @@
 .git-sync-row {
   padding-top: 6px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
+  flex-wrap: nowrap;
+  overflow: hidden;
+  min-width: 0;
 }
 
 .git-sync-info {
@@ -111,30 +114,54 @@
 
 .git-remote-actions {
   display: flex;
-  gap: 4px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .git-remote-btn {
-  padding: 3px 9px;
+  padding: 4px 10px;
   font-size: 11px;
   font-weight: 500;
-  border-radius: 5px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.78);
+  border: none;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.65);
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  transition: background 0.15s, color 0.15s;
+  position: relative;
+}
+
+.git-remote-btn:last-child {
+  border-right: none;
 }
 
 .git-remote-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.95);
 }
 
 .git-remote-btn:disabled {
-  opacity: 0.45;
+  opacity: 0.4;
   cursor: not-allowed;
+}
+
+.git-remote-btn--pull {
+  color: rgba(88, 166, 255, 0.8);
+}
+
+.git-remote-btn--pull:hover:not(:disabled) {
+  background: rgba(88, 166, 255, 0.12);
+  color: #58a6ff;
+}
+
+.git-remote-btn--push {
+  color: rgba(63, 185, 80, 0.8);
+}
+
+.git-remote-btn--push:hover:not(:disabled) {
+  background: rgba(63, 185, 80, 0.12);
+  color: #3fb950;
 }
 
 .git-stash-btn-count {
@@ -634,6 +661,8 @@
   border-radius: 4px;
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .git-log-scope-btn:hover {
