@@ -57,6 +57,39 @@ fn append_tool_exec_log(project_path: &str, tool_name: &str, path: &str, ok: boo
     );
 }
 
+/// Serve an overlapping read from cache instead of hard-blocking it. The overlap guard
+/// assumes the requested content is still visible in the model's context; after context
+/// compaction / per-turn truncation that may no longer hold, so rejecting would deadlock
+/// the agent. When we still hold the full file content (or the exact slice), return it.
+/// Repetition is still capped via `read_slice_repeat_counts` to keep the guard's teeth.
+fn cached_overlap_slice(
+    guard: &mut ToolGuardState,
+    file_key: &str,
+    slice_key: &str,
+    offset: u32,
+    limit: u32,
+) -> Option<String> {
+    let content = guard
+        .read_slice_cache
+        .get(slice_key)
+        .cloned()
+        .or_else(|| {
+            guard
+                .read_cache
+                .get(file_key)
+                .map(|full| slice_content(full, offset as usize, limit as usize))
+        })?;
+    let repeats = guard
+        .read_slice_repeat_counts
+        .entry(slice_key.to_string())
+        .or_insert(0);
+    *repeats += 1;
+    if *repeats > super::exploration::MAX_READ_SLICE_REPEATS {
+        return None;
+    }
+    Some(content)
+}
+
 pub struct ToolExecContext<'a> {
     pub project_path: &'a str,
     pub mode: &'a str,
@@ -251,6 +284,29 @@ async fn exec_read_file(ctx: &mut ToolExecContext<'_>, args: &Value) -> (bool, S
             } else if let Some(err) =
                 check_overlapping_read(&file_key, line_range, &ctx.tool_guard.read_file_ranges)
             {
+                // Ghost-range escape hatch: the overlap guard still lists this file as
+                // already-read, but the model may have lost the content to context
+                // compaction / truncation. If the content is cached, serve it instead of
+                // rejecting, so the agent can actually move on.
+                if let Some(content) = cached_overlap_slice(
+                    ctx.tool_guard,
+                    &file_key,
+                    &slice_key,
+                    offset_u32,
+                    limit_u32,
+                ) {
+                    append_tool_exec_log(
+                        ctx.project_path,
+                        "read_file",
+                        &file_key,
+                        true,
+                        "served from cache (overlap)",
+                    );
+                    return (
+                        true,
+                        format!("{content}\n（命中已读缓存，已返回该区间内容）"),
+                    );
+                }
                 append_tool_exec_log(ctx.project_path, "read_file", &file_key, false, &err);
                 return (false, err);
             } else if let Some(cached) = ctx.tool_guard.read_slice_cache.get(&slice_key) {
@@ -889,7 +945,12 @@ async fn exec_search_sessions(ctx: &ToolExecContext<'_>, args: &Value) -> (bool,
 
 #[cfg(test)]
 mod tests {
-    use super::{block_write, exec_list_dir, is_dangerous_command};
+    use super::{
+        block_write, cached_overlap_slice, exec_list_dir, is_dangerous_command,
+    };
+    use super::{
+        check_overlapping_read, read_line_range_from_args, record_read_range, ToolGuardState,
+    };
     use serde_json::json;
 
     #[tokio::test]
@@ -941,6 +1002,51 @@ mod tests {
     #[test]
     fn block_write_build_returns_none() {
         assert!(block_write("build", "写文件").is_none());
+    }
+
+    #[test]
+    fn cached_overlap_slice_serves_content_when_guard_would_block() {
+        let mut guard = ToolGuardState::default();
+        // Two overlapping successful reads -> a third overlapping read would be blocked.
+        record_read_range(
+            "src/foo.ts",
+            read_line_range_from_args(1, 100),
+            &mut guard.read_file_ranges,
+        );
+        record_read_range(
+            "src/foo.ts",
+            read_line_range_from_args(100, 100),
+            &mut guard.read_file_ranges,
+        );
+        assert!(
+            check_overlapping_read(
+                "src/foo.ts",
+                read_line_range_from_args(50, 40),
+                &guard.read_file_ranges
+            )
+            .is_some(),
+            "precondition: overlap guard blocks this read"
+        );
+
+        let body = (1..=60).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n");
+        guard.read_cache.insert("src/foo.ts".into(), body);
+
+        let served = cached_overlap_slice(&mut guard, "src/foo.ts", "src/foo.ts:50:2", 50, 2);
+        let content = served.expect("should serve from cache instead of blocking");
+        assert!(content.contains("line50") && content.contains("line51"), "got: {content}");
+
+        // Repeated identical overlap slices are still capped to keep guard teeth.
+        let _ = cached_overlap_slice(&mut guard, "src/foo.ts", "src/foo.ts:50:2", 50, 2);
+        assert!(
+            cached_overlap_slice(&mut guard, "src/foo.ts", "src/foo.ts:50:2", 50, 2).is_none(),
+            "repetition cap should still block"
+        );
+
+        // Without any cache the overlap block stays intact.
+        assert!(
+            cached_overlap_slice(&mut guard, "src/bar.ts", "src/bar.ts:1:50", 1, 50).is_none(),
+            "no cache -> no fallback"
+        );
     }
 
     #[test]

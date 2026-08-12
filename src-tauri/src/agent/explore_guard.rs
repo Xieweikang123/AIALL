@@ -264,6 +264,19 @@ pub fn invalidate_file_read_state(guard: &mut ToolGuardState, file_key: &str) {
     guard.read_file_ranges.remove(file_key);
 }
 
+/// Clear read-overlap bookkeeping when the model's context was compacted or rebuilt
+/// (context compression mid-run, refresh/resume). The overlap ranges only make sense
+/// while the corresponding content is still visible to the model; once the context is
+/// compressed the model may have genuinely lost that content, so re-reading must be
+/// allowed again or the agent deadlocks against its own "ghost" ranges.
+/// `read_cache` (full file content) is intentionally kept: it still backs the cache
+/// fallback in `tool_exec::exec_read_file` and the patch old_string check.
+pub fn invalidate_read_overlap_state(guard: &mut ToolGuardState) {
+    guard.read_file_ranges.clear();
+    guard.read_slice_cache.clear();
+    guard.read_slice_repeat_counts.clear();
+}
+
 pub fn mark_patch_recovery_file(guard: &mut ToolGuardState, file_key: &str) {
     guard.patch_recovery_files.insert(file_key.to_string());
 }
@@ -761,6 +774,47 @@ mod tests {
             check_overlapping_read("src/foo.ts", read_line_range_from_args(1280, 40), &ranges);
         assert!(err.is_some());
         assert!(err.unwrap().contains("高度重叠"));
+    }
+
+    #[test]
+    fn invalidate_read_overlap_state_clears_ranges_and_caches() {
+        let mut guard = ToolGuardState::default();
+        record_read_range(
+            "src/foo.ts",
+            read_line_range_from_args(1, 100),
+            &mut guard.read_file_ranges,
+        );
+        record_read_range(
+            "src/foo.ts",
+            read_line_range_from_args(100, 100),
+            &mut guard.read_file_ranges,
+        );
+        guard
+            .read_slice_cache
+            .insert("src/foo.ts:1:100".into(), "body".into());
+        guard
+            .read_slice_repeat_counts
+            .insert("src/foo.ts:1:100".into(), 3);
+        guard
+            .read_cache
+            .insert("src/foo.ts".into(), "full body".into());
+        guard.read_paths.insert("src/foo.ts".into());
+
+        invalidate_read_overlap_state(&mut guard);
+
+        assert!(guard.read_file_ranges.is_empty());
+        assert!(guard.read_slice_cache.is_empty());
+        assert!(guard.read_slice_repeat_counts.is_empty());
+        // Full-content cache is intentionally kept (backs cache fallback + patch check).
+        assert_eq!(guard.read_cache.get("src/foo.ts").map(String::as_str), Some("full body"));
+        assert!(guard.read_paths.contains("src/foo.ts"));
+        // After invalidation the same overlapping read is no longer blocked.
+        let err = check_overlapping_read(
+            "src/foo.ts",
+            read_line_range_from_args(50, 40),
+            &guard.read_file_ranges,
+        );
+        assert!(err.is_none());
     }
 
     #[test]

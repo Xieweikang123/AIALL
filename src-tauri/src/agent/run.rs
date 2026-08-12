@@ -6,8 +6,8 @@ use tauri::ipc::Channel;
 
 use super::exploration::AUTO_BUG_FIX_WALL_CLOCK_MS;
 use super::explore_guard::{
-    build_english_planning_nudge, is_tool_result_failure, should_nudge_english_planning,
-    PatchFailureEntry, ToolGuardState,
+    build_english_planning_nudge, invalidate_read_overlap_state, is_tool_result_failure,
+    should_nudge_english_planning, PatchFailureEntry, ToolGuardState,
 };
 use super::probe_guard::is_ephemeral_probe_path;
 use super::run_compact::{compact_messages_for_model, messages_char_size};
@@ -529,6 +529,10 @@ pub async fn agent_run(
         let compacted_messages = compacted.messages;
         let context_chars = messages_char_size(&compacted_messages);
         if compacted.did_compact {
+            // Context was compressed for the model, so prior read ranges no longer
+            // reflect what the model can actually see. Drop the overlap bookkeeping to
+            // let it re-read what it lost instead of deadlocking on "ghost" ranges.
+            invalidate_read_overlap_state(&mut run_state.tool_guard);
             emit(
                 &channel,
                 json!({
