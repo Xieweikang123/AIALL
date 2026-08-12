@@ -677,6 +677,36 @@ function joinFinalStages(stages: (string | undefined | null)[]): string {
     .join("\n\n---\n\n");
 }
 
+/**
+ * Keep the longest text among final stages that duplicate each other.
+ * Retry / continuation runs can persist the same answer twice; joining both
+ * would show the identical explanation twice in one bubble.
+ */
+function dedupeFinalStageTexts(texts: string[]): string[] {
+  const byNormalized = new Map<string, string>();
+  for (const text of texts) {
+    const norm = normalizeComparableText(text);
+    if (!norm) continue;
+    const existing = byNormalized.get(norm);
+    if (!existing || text.length > existing.length) byNormalized.set(norm, text);
+  }
+  const norms = [...byNormalized.keys()].sort((a, b) => b.length - a.length);
+  const kept: string[] = [];
+  for (const norm of norms) {
+    if (!kept.some((k) => k.includes(norm) || norm.includes(k))) kept.push(norm);
+  }
+  return kept.map((norm) => byNormalized.get(norm)!);
+}
+
+/** True when text carries an unclosed markdown code span — a typical truncated-stream signature. */
+function hasUnclosedMarkdownCode(text: string): boolean {
+  const trimmed = (text || "").trim();
+  if (!trimmed) return false;
+  let backticks = 0;
+  for (const ch of trimmed) if (ch === "`") backticks += 1;
+  return backticks % 2 === 1;
+}
+
 /** Prefer isFinal round texts (including narrative); fall back to raw content when compacted or empty. */
 export function resolveCompletedAgentBubbleContent(msg: AssistantBubbleSource): string {
   const finalGroups = (msg.roundGroups ?? [])
@@ -685,7 +715,7 @@ export function resolveCompletedAgentBubbleContent(msg: AssistantBubbleSource): 
   const allFinalTexts = finalGroups.map((group) => normalizeBubbleText(group.response?.assistantText ?? "")).filter(Boolean);
   const finalNarratives = finalGroups.map((group) => normalizeBubbleText(group.narrative || "")).filter(Boolean);
 
-  const combined = joinFinalStages(allFinalTexts);
+  const combined = joinFinalStages(dedupeFinalStageTexts(allFinalTexts));
   const direct = normalizeBubbleText(msg.content || "");
 
   if (combined) {
@@ -768,6 +798,16 @@ export function finalizeAssistantBubbleContent(msg: FinalizeAssistantBubbleSourc
   const base = msg.roundGroups?.some((g) => g.response?.isFinal)
     ? resolveCompletedAgentBubbleContent(msg)
     : resolveAssistantBubbleContent(msg);
+  // Interrupted runs: a truncated "final" answer with an unclosed code span is a
+  // corrupted stream, not a real summary. Fall back to the partial-write summary
+  // (or an explicit interruption note) instead of surfacing the broken text.
+  if (msg.agentFailed && hasUnclosedMarkdownCode(base)) {
+    if (writtenFiles.length) return buildWrittenFilesSummary(writtenFiles, true);
+    const fallback = resolveExplorationThinkingPreview(msg);
+    if (fallback) return fallback;
+    const reason = msg.agentAbortReason?.trim() || "运行已中断";
+    return `运行已中断：${reason}`;
+  }
   if (msg.wasAborted && !base.trim() && !writtenFiles.length) {
     const reason = msg.agentAbortReason?.trim() || "运行已中断";
     return `运行已中断：${reason}`;

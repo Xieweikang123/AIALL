@@ -71,7 +71,7 @@ export type PersistedChatMessage = {
     detail?: string;
     label: string;
     summary: string;
-    ok: boolean;
+    ok?: boolean;
     turn?: number;
     fullResult?: string;
     args?: Record<string, unknown>;

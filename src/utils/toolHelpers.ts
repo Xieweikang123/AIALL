@@ -179,7 +179,7 @@ export type AgentToolStep = {
   detail: string;
   label: string;
   summary: string;
-  ok: boolean;
+  ok?: boolean;
   running?: boolean;
   turn?: number;
   lineDelta?: number;

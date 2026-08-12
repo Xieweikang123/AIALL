@@ -12,10 +12,10 @@ import {
 
 /** Explicit change / implementation intent — Build may write. */
 export const IMPLEMENT_INTENT_RE =
-  /(?:帮我|请|麻烦)?(?:改|修|修复|实现|添加|新增|删除|创建|优化|调整|更新|写入|落地|开发|执行|替换|重构|改成|改为|改一下|改下|写一[个份]?|做一[个份]?|fix|implement|add\b|create\b|update\b|refactor\b)/i;
+  /(?:帮我|请|麻烦)?(?:改|修|修复|实现|添加|新增|删除|创建|优化|调整|更新|写入|落地|开发|执行|替换|重构|改成|改为|改一下|改下|写一[个份]?|做一[个份]?|去掉|移除|删掉|删了|fix|implement|add\b|create\b|update\b|refactor\b)/i;
 
 const SHORT_IMPLEMENT_PROMPT_RE =
-  /^(?:请?)?(?:修复|改一下|改(?:吧|了|下)?|修|实现|动手|执行|应用|写入|落地|按(?:此|上面)?(?:方案|分析)?)(?:吧|了|下)?[。！!]?$/i;
+  /^(?:请?)?(?:修复|改一下|改(?:吧|了|下)?|修|实现|动手|执行|应用|写入|落地|删|删除|删掉|去掉|移除|按(?:此|上面)?(?:方案|分析)?)(?:吧|了|下)?[。！!]?$/i;
 
 export const ACCURACY_CONSULTATIVE_RE =
   /是否.{0,20}(?:准确|正确|总是|一直|可靠)|(?:准确|正确|可靠).{0,12}(?:吗|么)[？?]?$/i;
@@ -209,6 +209,24 @@ export function isUiDefectReportPrompt(prompt: string, hasImage = false): boolea
 
 export function isShortImplementPrompt(prompt: string): boolean {
   return SHORT_IMPLEMENT_PROMPT_RE.test(prompt.trim());
+}
+
+const EXPLICIT_TARGET_RE =
+  /(?:@[\w./-]+|(?:[\w@.-]+\/)+[\w.-]+\.\w{2,4}|这个|那个|这段|这些|那些|该|按钮|组件|页面|面板|文件|模块|接口|字段|路由|样式|功能|配置|代码|逻辑|函数|方法|字体|颜色|背景|文本)/;
+
+/**
+ * Message-shape signal for implement intent whose target object is not pinned
+ * down by the message itself (「去掉他」「改一下」) — the intent is clear but
+ * the agent should confirm the target before patching instead of guessing.
+ */
+export function isTargetAmbiguousImplementPrompt(prompt: string): boolean {
+  const text = prompt.trim();
+  if (!text || text.length > 24) return false;
+  if (/[？?]$/.test(text)) return false;
+  if (isShortContextDependentFollowUp(text)) return false;
+  if (CONSULTATIVE_MARKERS_RE.test(text)) return false;
+  if (!(isShortImplementPrompt(text) || IMPLEMENT_INTENT_RE.test(text))) return false;
+  return !EXPLICIT_TARGET_RE.test(text);
 }
 
 const ULTRA_SHORT_OPEN_TASK_MAX_LEN = 20;

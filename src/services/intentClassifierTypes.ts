@@ -47,6 +47,8 @@ export interface UserIntentAiPayload {
   userErrorQuote: boolean;
   uiAppearance: boolean;
   configBindingTopic: ConfigBindingTopic | null;
+  /** Implement intent whose target object is not pinned down by the message itself. */
+  needsClarification?: boolean;
 }
 
 export interface ResolvedUserIntent extends UserIntentAiPayload {

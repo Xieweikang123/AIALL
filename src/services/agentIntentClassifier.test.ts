@@ -33,10 +33,11 @@ describe("parseIntentClassifierResponse", () => {
 
   it("parses fenced JSON", () => {
     const payload = parseIntentClassifierResponse(
-      '```json\n{"primary":"implement","consultativeTopic":"none","implementFollowUp":true,"uiDefect":false,"codeReview":false,"behaviorContradiction":false,"behaviorPurpose":false,"accuracyQuestion":false,"implementationStatus":false,"agentStepClarification":false,"userErrorQuote":false,"uiAppearance":false,"configBindingTopic":null}\n```',
+      '```json\n{"primary":"implement","consultativeTopic":"none","implementFollowUp":true,"uiDefect":false,"codeReview":false,"behaviorContradiction":false,"behaviorPurpose":false,"accuracyQuestion":false,"implementationStatus":false,"agentStepClarification":false,"userErrorQuote":false,"uiAppearance":false,"configBindingTopic":null,"needsClarification":true}\n```',
     );
     expect(payload?.primary).toBe("implement");
     expect(payload?.implementFollowUp).toBe(true);
+    expect(payload?.needsClarification).toBe(true);
   });
 
   it("rejects invalid topic", () => {
@@ -95,6 +96,28 @@ describe("classifyUserIntentFromRules", () => {
     expect(result.primary).toBe("consultative");
     expect(result.consultative).toBe(true);
     expect(result.consultativeTopic).toBe("project_overview");
+  });
+
+  it("flags short imperative implement as target-ambiguous", () => {
+    const result = classifyUserIntentFromRules({
+      prompt: "去掉他",
+      mode: "auto",
+      hasImage: false,
+      isAsk: false,
+    });
+    expect(result.primary).toBe("implement");
+    expect(result.needsClarification).toBe(true);
+  });
+
+  it("does not flag implement with an explicit target", () => {
+    const result = classifyUserIntentFromRules({
+      prompt: "去掉这个按钮",
+      mode: "auto",
+      hasImage: false,
+      isAsk: false,
+    });
+    expect(result.primary).toBe("implement");
+    expect(result.needsClarification).toBe(false);
   });
 });
 
@@ -260,6 +283,85 @@ describe("resolveUserIntent", () => {
     expect(merged.consultative).toBe(true);
     expect(merged.primary).toBe("consultative");
     expect(merged.implementFollowUp).toBe(false);
+  });
+
+  it("keeps short imperative as implement when AI says consultative in auto mode", () => {
+    const merged = resolveUserIntent({
+      prompt: "去掉他",
+      mode: "auto",
+      hasImage: false,
+      isAsk: false,
+      ai: {
+        primary: "consultative",
+        consultativeTopic: "general",
+        implementFollowUp: false,
+        uiDefect: false,
+        codeReview: false,
+        behaviorContradiction: false,
+        behaviorPurpose: false,
+        accuracyQuestion: false,
+        implementationStatus: false,
+        agentStepClarification: false,
+        userErrorQuote: false,
+        uiAppearance: false,
+        configBindingTopic: null,
+      },
+    });
+    expect(merged.primary).toBe("implement");
+    expect(merged.consultative).toBe(false);
+    expect(merged.needsClarification).toBe(true);
+  });
+
+  it("keeps AI consultative for question-shaped prompts in auto mode", () => {
+    const merged = resolveUserIntent({
+      prompt: "怎么删掉这个组件？",
+      mode: "auto",
+      hasImage: false,
+      isAsk: false,
+      ai: {
+        primary: "consultative",
+        consultativeTopic: "general",
+        implementFollowUp: false,
+        uiDefect: false,
+        codeReview: false,
+        behaviorContradiction: false,
+        behaviorPurpose: false,
+        accuracyQuestion: false,
+        implementationStatus: false,
+        agentStepClarification: false,
+        userErrorQuote: false,
+        uiAppearance: false,
+        configBindingTopic: null,
+      },
+    });
+    expect(merged.primary).toBe("consultative");
+    expect(merged.consultative).toBe(true);
+  });
+
+  it("does not override AI consultative in explicit ask mode", () => {
+    const merged = resolveUserIntent({
+      prompt: "去掉他",
+      mode: "ask",
+      hasImage: false,
+      isAsk: true,
+      ai: {
+        primary: "consultative",
+        consultativeTopic: "general",
+        implementFollowUp: false,
+        uiDefect: false,
+        codeReview: false,
+        behaviorContradiction: false,
+        behaviorPurpose: false,
+        accuracyQuestion: false,
+        implementationStatus: false,
+        agentStepClarification: false,
+        userErrorQuote: false,
+        uiAppearance: false,
+        configBindingTopic: null,
+      },
+    });
+    expect(merged.primary).toBe("consultative");
+    expect(merged.consultative).toBe(true);
   });
 });
 

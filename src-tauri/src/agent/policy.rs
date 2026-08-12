@@ -30,6 +30,7 @@ pub struct AgentRunPolicy {
     pub ultra_short_open_task_run: bool,
     pub pending_plan_amend_run: bool,
     pub pending_plan_clarify_run: bool,
+    pub needs_clarification_run: bool,
     pub quoted_amend_run: bool,
     pub quoted_amend_intent: Option<super::quoted_amend::QuotedAmendIntent>,
     pub effective_task_prompt: String,
@@ -84,6 +85,7 @@ pub struct UserIntent {
     pub ultra_short_open_task: bool,
     pub pending_plan_amend: bool,
     pub pending_plan_clarify: bool,
+    pub needs_clarification: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -447,6 +449,13 @@ pub fn resolve_run_policy(input: ResolvePolicyInput) -> AgentRunPolicy {
     let pending_plan_amend_run = input.is_plan_explore && input.user_intent.pending_plan_amend;
     let pending_plan_clarify_run = input.is_plan_explore && input.user_intent.pending_plan_clarify;
 
+    let needs_clarification_run = !is_read_only_agent
+        && !input.is_plan_explore
+        && !input.is_execute_plan
+        && !read_only_build_run
+        && !implement_follow_up_run
+        && input.user_intent.needs_clarification;
+
     let quoted_amend_intent = if resume_original_task.is_some() {
         None
     } else {
@@ -502,6 +511,7 @@ pub fn resolve_run_policy(input: ResolvePolicyInput) -> AgentRunPolicy {
         ultra_short_open_task_run,
         pending_plan_amend_run,
         pending_plan_clarify_run,
+        needs_clarification_run,
         quoted_amend_run,
         quoted_amend_intent,
         effective_task_prompt,
@@ -882,6 +892,34 @@ mod tests {
         };
         let policy = resolve_run_policy(input);
         assert!(policy.agent_step_clarify_run);
+    }
+
+    #[test]
+    fn test_resolve_run_policy_needs_clarification() {
+        let input = ResolvePolicyInput {
+            mode: AgentMode::Build,
+            user_intent: UserIntent {
+                needs_clarification: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let policy = resolve_run_policy(input);
+        assert!(policy.needs_clarification_run);
+    }
+
+    #[test]
+    fn test_resolve_run_policy_needs_clarification_blocked_in_ask() {
+        let input = ResolvePolicyInput {
+            mode: AgentMode::Ask,
+            user_intent: UserIntent {
+                needs_clarification: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let policy = resolve_run_policy(input);
+        assert!(!policy.needs_clarification_run);
     }
 
     #[test]

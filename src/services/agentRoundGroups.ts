@@ -37,7 +37,7 @@ export type AgentRoundTool = {
   detail: string;
   label: string;
   summary: string;
-  ok: boolean;
+  ok?: boolean;
   running?: boolean;
   lineDelta?: number;
   fullResult?: string;

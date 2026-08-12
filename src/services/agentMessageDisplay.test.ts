@@ -321,6 +321,39 @@ describe("resolveCompletedAgentBubbleContent", () => {
       }),
     ).toBe(full);
   });
+
+  it("joins retry-duplicate final answers only once", () => {
+    const answer = "## 触发条件\n\n只有同时满足条件 A 和条件 B 时才显示。";
+    const result = resolveCompletedAgentBubbleContent({
+      content: "",
+      roundGroups: [
+        {
+          turn: 5,
+          modelSteps: [],
+          toolIds: [],
+          response: {
+            assistantText: answer,
+            toolCalls: [],
+            hasToolCalls: false,
+            isFinal: true,
+          },
+        },
+        {
+          turn: 7,
+          modelSteps: [],
+          toolIds: [],
+          response: {
+            assistantText: `${answer}\n\n（补充说明）`,
+            toolCalls: [],
+            hasToolCalls: false,
+            isFinal: true,
+          },
+        },
+      ],
+    });
+    expect(result).toContain("（补充说明）");
+    expect(result.split("---").length).toBe(1);
+  });
 });
 
 describe("finalizeAssistantBubbleContent", () => {
@@ -401,6 +434,56 @@ describe("finalizeAssistantBubbleContent", () => {
   it("builds aborted partial-write summary", () => {
     expect(buildWrittenFilesSummary(["a.ts"], true)).toContain("运行中断");
     expect(buildWrittenFilesSummary(["a.ts"], true)).toContain("点击下方");
+  });
+
+  it("replaces truncated corrupt final text with partial-write summary on failed runs", () => {
+    const corrupt =
+      "用户要移除 ChatPanel 底部状态栏里的 `**方案 A:**「等待确认」文字。直接删除块。";
+    const result = finalizeAssistantBubbleContent({
+      content: corrupt,
+      writtenFiles: ["src/components/vibe/ChatPanel.vue"],
+      agentFailed: true,
+      roundGroups: [
+        {
+          turn: 10,
+          modelSteps: [],
+          toolIds: [],
+          response: {
+            assistantText: corrupt,
+            toolCalls: [],
+            hasToolCalls: false,
+            isFinal: true,
+          },
+        },
+      ],
+    });
+    expect(result).not.toContain("方案 A");
+    expect(result).toContain("运行中断");
+    expect(result).toContain("ChatPanel.vue");
+  });
+
+  it("falls back to abort note when failed run has corrupt text but no writes", () => {
+    const corrupt = "继续执行（自动续跑 1/3）… `直接删除块";
+    const result = finalizeAssistantBubbleContent({
+      content: corrupt,
+      agentFailed: true,
+      agentAbortReason: "页面刷新或热更新导致运行中断",
+      roundGroups: [
+        {
+          turn: 2,
+          modelSteps: [],
+          toolIds: [],
+          response: {
+            assistantText: corrupt,
+            toolCalls: [],
+            hasToolCalls: false,
+            isFinal: true,
+          },
+        },
+      ],
+    });
+    expect(result).not.toContain("直接删除块");
+    expect(result).toContain("运行已中断");
   });
 
   it("does not flag short model answer plus appended written-files summary", () => {

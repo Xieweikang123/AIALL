@@ -13,6 +13,8 @@ import {
   isLocateStatusFollowUpPrompt,
   isSessionAuditPrompt,
   isShortContextDependentFollowUp,
+  isShortImplementPrompt,
+  isTargetAmbiguousImplementPrompt,
   isUiAppearanceQuestionPrompt,
   isUiDefectReportPrompt,
   isUserErrorQuotePrompt,
@@ -90,6 +92,8 @@ export function classifyUserIntentFromRules(input: ResolveUserIntentInput): Reso
     primary,
     consultative,
     consultativeTopic: topic,
+    needsClarification:
+      primary === "implement" && isTargetAmbiguousImplementPrompt(text),
     implementFollowUp,
     uiDefect,
     codeReview: isCodeReviewPrompt(text),
@@ -123,6 +127,7 @@ function buildResolvedFromAi(ai: UserIntentAiPayload, rules: ResolvedUserIntent)
     primary,
     consultative,
     consultativeTopic: ai.consultativeTopic,
+    needsClarification: Boolean(rules.needsClarification || ai.needsClarification),
     implementFollowUp,
     uiDefect: ai.uiDefect,
     codeReview: ai.codeReview,
@@ -161,6 +166,29 @@ function applyConsultativeActionOverride(
   return { ...resolved, primary: "consultative", consultative: true };
 }
 
+/**
+ * Symmetric guard to `applyConsultativeActionOverride`: a short, unambiguous
+ * imperative (「去掉他」「删掉」「改一下」) is a high-confidence implement signal
+ * from the rule baseline. In Auto mode a weak AI consultative verdict must not
+ * downgrade it into a read-only turn — that would leave the agent unable to act
+ * and telling the user to switch modes.
+ */
+function applyImplementActionOverride(
+  resolved: ResolvedUserIntent,
+  prompt: string,
+  rules: ResolvedUserIntent,
+  mode: ResolveUserIntentInput["mode"],
+): ResolvedUserIntent {
+  if (mode !== "auto") return resolved;
+  if (resolved.primary !== "consultative") return resolved;
+  if (rules.primary !== "implement") return resolved;
+  const text = prompt.trim();
+  if (!text || text.length > 24) return resolved;
+  if (/[？?]$/.test(text)) return resolved;
+  if (!(isShortImplementPrompt(text) || IMPLEMENT_INTENT_RE.test(text))) return resolved;
+  return { ...resolved, primary: "implement", consultative: false, consultativeTopic: "none" };
+}
+
 /** Merge AI classification with rule baseline; hard overrides win over AI. */
 export function resolveUserIntent(input: ResolveUserIntentInput): ResolvedUserIntent {
   const rules = classifyUserIntentFromRules(input);
@@ -178,6 +206,10 @@ export function resolveUserIntent(input: ResolveUserIntentInput): ResolvedUserIn
   const ai = input.ai;
   let resolved = ai ? buildResolvedFromAi(ai, rules) : rules;
   resolved = applyConsultativeActionOverride(resolved, input.prompt, rules);
+  resolved = applyImplementActionOverride(resolved, input.prompt, rules, input.mode);
+  if (resolved.primary !== "implement") {
+    resolved = { ...resolved, needsClarification: false };
+  }
   return resolved;
 }
 

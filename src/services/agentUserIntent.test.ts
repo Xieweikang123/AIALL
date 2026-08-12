@@ -24,6 +24,7 @@ import {
   isSameIssueFollowUpRun,
   isSessionAuditPrompt,
   isShortImplementPrompt,
+  isTargetAmbiguousImplementPrompt,
   isLocateStatusFollowUpPrompt,
   isUiAppearanceQuestionPrompt,
   isUiDefectReportPrompt,
@@ -589,5 +590,25 @@ describe("isUltraShortOpenTaskPrompt", () => {
     expect(isUltraShortOpenTaskPrompt("看看代码")).toBe(false);
     expect(isUltraShortOpenTaskPrompt("优化UI")).toBe(false);
     expect(isUltraShortOpenTaskPrompt("")).toBe(false);
+  });
+});
+
+describe("isTargetAmbiguousImplementPrompt", () => {
+  it("flags short action imperatives without an explicit target", () => {
+    expect(isTargetAmbiguousImplementPrompt("去掉他")).toBe(true);
+    expect(isTargetAmbiguousImplementPrompt("改一下")).toBe(true);
+    expect(isTargetAmbiguousImplementPrompt("删掉")).toBe(true);
+  });
+
+  it("does not flag requests that name the target", () => {
+    expect(isTargetAmbiguousImplementPrompt("去掉这个按钮")).toBe(false);
+    expect(isTargetAmbiguousImplementPrompt("修复 src/foo.ts")).toBe(false);
+    expect(isTargetAmbiguousImplementPrompt("把这个文件删掉")).toBe(false);
+  });
+
+  it("does not flag question-shaped or consultative prompts", () => {
+    expect(isTargetAmbiguousImplementPrompt("怎么去掉？")).toBe(false);
+    expect(isTargetAmbiguousImplementPrompt("需要优化吗")).toBe(false);
+    expect(isTargetAmbiguousImplementPrompt("要不要调整呢")).toBe(false);
   });
 });

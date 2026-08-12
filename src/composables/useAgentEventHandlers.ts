@@ -454,7 +454,6 @@ function handleToolStartEvent(event: EventOf<"tool_start">, assistantMsg: VibeCh
     ...meta,
     args: { ...event.data.args },
     summary: "",
-    ok: true,
     running: true,
     turn: toolTurn,
   };

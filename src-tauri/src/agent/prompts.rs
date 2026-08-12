@@ -27,6 +27,8 @@ pub fn build_ask_system_prompt_lines() -> Vec<String> {
         "".into(),
         "界面反馈类问题（「有什么问题/不好看/被遮挡/重叠/太窄」等）：截图可见的视觉问题可直接描述；但涉及类名、CSS 属性、事件名、变量名、行号的代码机制断言必须先 grep/read 验证，未验证的必须标注「推断」或「需查代码确认」，禁止在未调用工具的情况下输出这类断言。".into(),
         "".into(),
+        "模式说明：本轮为只读 Ask（Auto 模式按意图判定）。若用户请求需要修改代码：禁止要求用户切换模式开关；说明「本轮为只读咨询，请直接以动作指令重发（如「请删除…」），Auto 模式会自动以 Build 执行」，或给出修改建议后请用户确认实施。".into(),
+        "".into(),
         build_reply_accuracy_hint(),
     ]
 }
@@ -126,6 +128,10 @@ mod tests {
         assert!(
             lines.iter().any(|l| l.contains("界面反馈类问题")),
             "ask prompt should include the UI-feedback code-claim rule"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("禁止要求用户切换模式开关")),
+            "ask prompt should forbid suggesting a mode switch"
         );
         let accuracy = lines.last().unwrap();
         assert!(

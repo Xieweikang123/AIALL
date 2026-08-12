@@ -71,12 +71,14 @@ export function buildIntentClassifierSystemPrompt(): string {
     '  "userErrorQuote": boolean,',
     '  "uiAppearance": boolean,',
     '  "configBindingTopic": null | "reject" | "enumeration" | "doc_lookup"',
-    "}",
+    '}',
     "",
     "判定规则：",
+    "- intent 只由当前消息本身决定（是否有动作动词、是否问句形态）；近期上下文仅用于解析指代（他/它/这个）与确认上文提议，禁止因上文出现提问就把当前明确动作指令判成 consultative",
     "- consultative：仅提问、解释、审计、核对，未要求改代码",
-    "- implement：明确要求创建/修改/修复/优化/落地代码",
+    "- implement：明确要求创建/修改/修复/优化/落地代码（含短动作指令如「去掉他」「删掉」「改一下」）",
     "- automation：消息以【方案执行】等系统自动续跑标记开头",
+    "- needsClarification：primary 为 implement 但当前消息未指明具体目标对象/文件/范围时 true（如只说动作未说对象）",
     "- project_overview：问整个项目/仓库/应用做什么、用途、架构概览",
     "- behavior_purpose：问字段/枚举/配置项在运行时的作用",
     "- accuracy：问 Agent/回答是否准确、可靠",
@@ -88,11 +90,11 @@ export function buildIntentClassifierSystemPrompt(): string {
   ].join("\n");
 }
 
-export function summarizeIntentHistory(history?: UserIntentHistoryMessage[], maxMessages = 4): string {
+export function summarizeIntentHistory(history?: UserIntentHistoryMessage[], maxMessages = 2): string {
   if (!history?.length) return "";
   return history
     .slice(-maxMessages)
-    .map((m) => `${m.role === "user" ? "用户" : "助手"}：${m.content.trim().slice(0, 400)}`)
+    .map((m) => `${m.role === "user" ? "用户" : "助手"}：${m.content.trim().slice(0, 300)}`)
     .join("\n");
 }
 
@@ -106,7 +108,7 @@ export function buildIntentClassifierUserMessage(input: {
     `当前模式：${input.mode}`,
     `是否附图：${input.hasImage ? "是" : "否"}`,
     "",
-    "用户最新消息：",
+    "当前消息（以此为准判定 intent，勿让上下文覆盖）：",
     input.prompt.trim(),
   ];
   const text = input.prompt.trim();
@@ -114,13 +116,13 @@ export function buildIntentClassifierUserMessage(input: {
   if (isShortContextDependentFollowUp(text) && lastAssistant?.content?.trim()) {
     lines.push(
       "",
-      "上一条助手回复（节选，短追问须承接此话题）：",
+      "上一条助手回复（节选，仅用于解析指代/确认）：",
       lastAssistant.content.trim().slice(0, SHORT_FOLLOW_UP_ASSISTANT_CHARS),
     );
   } else {
     const historyBlock = summarizeIntentHistory(input.history);
     if (historyBlock) {
-      lines.push("", "近期对话（节选）：", historyBlock);
+      lines.push("", "近期上下文（仅用于解析指代/确认，禁止改变当前消息的 intent）：", historyBlock);
     }
   }
   return lines.join("\n");
@@ -185,6 +187,7 @@ export function parseIntentClassifierResponse(text: string): UserIntentAiPayload
     userErrorQuote: asBool(record.userErrorQuote),
     uiAppearance: asBool(record.uiAppearance),
     configBindingTopic: asConfigBindingTopic(record.configBindingTopic),
+    needsClarification: asBool(record.needsClarification),
   };
 }
 

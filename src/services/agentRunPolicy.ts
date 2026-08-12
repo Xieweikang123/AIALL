@@ -59,6 +59,7 @@ export interface AgentRunPolicy {
   ultraShortOpenTaskRun: boolean;
   pendingPlanAmendRun: boolean;
   pendingPlanClarifyRun: boolean;
+  needsClarificationRun: boolean;
   quotedAmendRun: boolean;
   quotedAmendIntent: QuotedAmendIntent | null;
   automatedBugFixRun: boolean;
@@ -227,6 +228,14 @@ export function resolveAgentRunPolicy(input: ResolveAgentRunPolicyInput): AgentR
   const pendingPlanAmendRun = isPlanExplore && userIntent.pendingPlanAmend;
   const pendingPlanClarifyRun = isPlanExplore && userIntent.pendingPlanClarify;
 
+  const needsClarificationRun =
+    !isReadOnlyAgent &&
+    !isPlanExplore &&
+    !isExecutePlan &&
+    !readOnlyBuildRun &&
+    !implementFollowUpRun &&
+    Boolean(userIntent.needsClarification);
+
   const maxContextChars = isExecutePlan
     ? EXECUTE_PLAN_MAX_CONTEXT_CHARS
     : isPlanExplore
@@ -257,6 +266,7 @@ export function resolveAgentRunPolicy(input: ResolveAgentRunPolicyInput): AgentR
     ultraShortOpenTaskRun,
     pendingPlanAmendRun,
     pendingPlanClarifyRun,
+    needsClarificationRun,
     quotedAmendRun,
     quotedAmendIntent,
     automatedBugFixRun,

@@ -19,6 +19,8 @@ pub struct ResolvedUserIntentPayload {
     pub locate_status_follow_up: bool,
     pub pending_plan_amend: bool,
     pub pending_plan_clarify: bool,
+    #[serde(default)]
+    pub needs_clarification: bool,
 }
 
 impl ResolvedUserIntentPayload {
@@ -39,6 +41,7 @@ impl ResolvedUserIntentPayload {
             ultra_short_open_task: self.ultra_short_open_task,
             pending_plan_amend: self.pending_plan_amend,
             pending_plan_clarify: self.pending_plan_clarify,
+            needs_clarification: self.needs_clarification,
         }
     }
 }

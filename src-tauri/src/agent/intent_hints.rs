@@ -112,9 +112,15 @@ pub fn build_pending_plan_amend_hint(plan_file_path: Option<&str>) -> String {
 
 pub fn build_pending_plan_clarification_hint() -> &'static str {
     "【Pending Plan·澄清】当前会话有尚未执行的方案，用户本条短指令含义不够明确。\n\
-   禁止输出 `[PLAN]` / `## 修改方案` / 新文件清单；用 2–4 句中文直接提问。\n\
-   须问清：用户希望把刚讨论的内容并入现有 Pending Plan，还是单独作为独立模块/子方案；可提示用户回复「合并」或「单独」。\n\
-   不要猜测后直接写方案。"
+    禁止输出 `[PLAN]` / `## 修改方案` / 新文件清单；用 2–4 句中文直接提问。\n\
+    须问清：用户希望把刚讨论的内容并入现有 Pending Plan，还是单独作为独立模块/子方案；可提示用户回复「合并」或「单独」。\n\
+    不要猜测后直接写方案。"
+}
+
+pub fn build_target_clarify_hint() -> &'static str {
+    "【目标澄清·须先问清】已识别为实施任务，但用户消息未指明具体目标对象/文件/范围。\n\
+    先提出 1 句澄清问题（列出上文已讨论的候选，或直接问「具体指哪个」），禁止猜测目标直接 patch。\n\
+    用户确认目标后再执行修改。"
 }
 
 /// Declarative registry for interactive Build-mode system hints.
@@ -156,6 +162,9 @@ pub fn build_interactive_build_hints(
     if policy.ultra_short_open_task_run {
         parts.push(build_ultra_short_open_task_hint().to_string());
     }
+    if policy.needs_clarification_run {
+        parts.push(build_target_clarify_hint().to_string());
+    }
     parts.join("\n")
 }
 
@@ -179,6 +188,16 @@ mod tests {
         };
         let hints = build_interactive_build_hints(&policy, false, None);
         assert!(hints.contains("UI 缺陷"));
+    }
+
+    #[test]
+    fn interactive_build_hints_includes_target_clarify() {
+        let policy = AgentRunPolicy {
+            needs_clarification_run: true,
+            ..Default::default()
+        };
+        let hints = build_interactive_build_hints(&policy, false, None);
+        assert!(hints.contains("目标澄清"));
     }
 
     #[test]

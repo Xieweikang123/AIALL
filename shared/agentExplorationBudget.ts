@@ -27,10 +27,10 @@ export const CONSULTATIVE_BUILD_EXPLORE_TURN_BUDGET = 4;
 export const MAX_CONSECUTIVE_RUNTIME_TOOL_FAILURE_TURNS = 3;
 
 /** Ask mode soft cap — strip wide-search tools, still allow read_file. */
-export const ASK_MAX_TOTAL_EXPLORE_SOFT = 8;
+export const ASK_MAX_TOTAL_EXPLORE_SOFT = 12;
 
 /** Ask mode hard cap — force text-only answer. */
-export const ASK_MAX_TOTAL_EXPLORE_HARD = 12;
+export const ASK_MAX_TOTAL_EXPLORE_HARD = 20;
 
 /** Consecutive read-only turns in explore mode before nudging to output report. */
 export const EXPLORE_EXPLORE_TURN_BUDGET = 6;
