@@ -16,9 +16,14 @@ import type { ExplorationDistillResult } from "../services/explorationDistill";
 import type { ExplorationIndexEntry, SkillIndexEntry, SkillKind } from "../services/projectSkills";
 import type { MemoryProposalPayload, PendingMemoryProposal } from "../services/projectMemoryProposal";
 import type { PendingSkillProposal, SkillProposalPayload } from "../services/projectSkillProposal";
+import {
+  deleteLongTermMemoryEntry as removeLongTermMemoryEntry,
+  fetchLongTermMemory,
+  type LongTermMemoryEntry,
+} from "../services/vibeLongTermMemoryClient";
 import { genId } from "../utils/vibeHelpers";
 
-export type ProjectMemoryTab = "memory" | "skills" | "exploration";
+export type ProjectMemoryTab = "memory" | "skills" | "exploration" | "longterm";
 
 export function useProjectMemory(projectPath: Ref<string>, projectOpened: Ref<boolean>) {
   const projectMemoryOpen = ref(false);
@@ -44,6 +49,9 @@ export function useProjectMemory(projectPath: Ref<string>, projectOpened: Ref<bo
   const selectedExplorationId = ref("");
   const explorationContent = ref("");
   const explorationDetailLoading = ref(false);
+
+  const longTermMemoryList = ref<LongTermMemoryEntry[]>([]);
+  const longTermMemoryLoading = ref(false);
 
   const memorySuggestSaving = ref(false);
   const pendingMemoryProposals = ref<PendingMemoryProposal[]>([]);
@@ -99,6 +107,39 @@ export function useProjectMemory(projectPath: Ref<string>, projectOpened: Ref<bo
     }
   }
 
+  async function loadLongTermMemory() {
+    const path = projectPath.value.trim();
+    if (!path || !projectOpened.value) return;
+    longTermMemoryLoading.value = true;
+    projectMemoryMessage.value = "";
+    try {
+      const result = await fetchLongTermMemory(path);
+      if (!result.ok) {
+        projectMemoryMessage.value = result.error || "读取长期记忆失败";
+        return;
+      }
+      longTermMemoryList.value = result.entries ?? [];
+    } finally {
+      longTermMemoryLoading.value = false;
+    }
+  }
+
+  async function deleteLongTermMemory(id: string) {
+    const path = projectPath.value.trim();
+    if (!path || !id) return;
+    const result = await removeLongTermMemoryEntry(path, id);
+    if (!result.ok) {
+      projectMemoryMessage.value = result.error || "删除长期记忆失败";
+      return;
+    }
+    if (result.deleted) {
+      longTermMemoryList.value = longTermMemoryList.value.filter((e) => e.id !== id);
+      projectMemoryMessage.value = "已删除该条记忆";
+    } else {
+      projectMemoryMessage.value = "未找到该条记忆";
+    }
+  }
+
   async function openProjectMemoryEditor() {
     if (!projectOpened.value || projectPath.value.trim() === "") return;
     projectMemoryOpen.value = true;
@@ -106,7 +147,7 @@ export function useProjectMemory(projectPath: Ref<string>, projectOpened: Ref<bo
     projectMemoryMessage.value = "";
     resetSkillDetail();
     resetExplorationDetail();
-    await Promise.all([loadProjectMemory(), loadProjectSkillsIndex()]);
+    await Promise.all([loadProjectMemory(), loadProjectSkillsIndex(), loadLongTermMemory()]);
     projectMemoryDraft.value = projectMemoryContent.value;
   }
 
@@ -121,6 +162,9 @@ export function useProjectMemory(projectPath: Ref<string>, projectOpened: Ref<bo
   function setProjectMemoryTab(tab: ProjectMemoryTab) {
     projectMemoryTab.value = tab;
     projectMemoryMessage.value = "";
+    if (tab === "longterm" && !longTermMemoryList.value.length) {
+      void loadLongTermMemory();
+    }
   }
 
   async function selectProjectSkill(slug: string) {
@@ -372,6 +416,7 @@ export function useProjectMemory(projectPath: Ref<string>, projectOpened: Ref<bo
       projectMemoryMessage.value = "";
       projectSkillsList.value = [];
       projectExplorationList.value = [];
+      longTermMemoryList.value = [];
       resetSkillDetail();
       resetExplorationDetail();
       pendingMemoryProposals.value = [];
@@ -404,11 +449,15 @@ export function useProjectMemory(projectPath: Ref<string>, projectOpened: Ref<bo
     selectedExplorationId,
     explorationContent,
     explorationDetailLoading,
+    longTermMemoryList,
+    longTermMemoryLoading,
     memorySuggestSaving,
     pendingMemoryProposals,
     pendingSkillProposals,
     loadProjectMemory,
     loadProjectSkillsIndex,
+    loadLongTermMemory,
+    deleteLongTermMemory,
     openProjectMemoryEditor,
     closeProjectMemoryEditor,
     setProjectMemoryTab,

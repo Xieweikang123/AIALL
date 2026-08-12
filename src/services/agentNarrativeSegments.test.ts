@@ -61,6 +61,63 @@ describe("splitAssistantNarrative", () => {
     }
     expect(parts.every((part) => !/^[-*_]{3,}\s*$/.test(part))).toBe(true);
   });
+
+  it("keeps a fenced code block whole when it contains blank lines", () => {
+    const text = [
+      "**2. 样式改动** — `GitPanel.scss`：",
+      "",
+      "```scss",
+      ".git-sync-row {",
+      "  display: flex;",
+      "}",
+      "",
+      ".git-sync-right {",
+      "  display: flex;",
+      "}",
+      "",
+      ".git-remote-link {",
+      "  flex-shrink: 0;",
+      "}",
+      "```",
+    ].join("\n");
+    const parts = splitAssistantNarrative(text);
+    const code = parts.find((part) => part.includes("```"));
+    expect(code).toBeDefined();
+    // The opening fence, the middle rule blocks and the closing fence stay together.
+    expect(code).toContain("```scss");
+    expect(code).toContain(".git-sync-row");
+    expect(code).toContain(".git-sync-right");
+    expect(code).toContain(".git-remote-link");
+    expect(code.trim().endsWith("```")).toBe(true);
+    // No fragment may end with a dangling lone closing fence.
+    for (const part of parts) {
+      expect(part.split("\n").filter((l) => /^\s*```/.test(l)).length % 2).toBe(0);
+    }
+  });
+
+  it("does not leave a lone closing-fence fragment behind", () => {
+    const text = [
+      "```scss",
+      ".git-remote-link {",
+      "  flex-shrink: 0;",
+      "}",
+      "```",
+    ].join("\n");
+    const parts = splitAssistantNarrative(text);
+    expect(parts).toHaveLength(1);
+    expect(parts[0].startsWith("```scss")).toBe(true);
+    expect(parts[0].trimEnd().endsWith("```")).toBe(true);
+  });
+
+  it("does not space-merge a fenced code segment into adjacent prose", () => {
+    const text = "说明：\n\n```js\ncode();\n```";
+    const parts = splitAssistantNarrative(text);
+    const code = parts.find((part) => part.includes("```"));
+    expect(code).toBeDefined();
+    expect(code).toContain("code();");
+    expect(code).not.toContain("说明");
+    expect(code.trimEnd().endsWith("```")).toBe(true);
+  });
 });
 
 describe("buildNarrativeSegments", () => {

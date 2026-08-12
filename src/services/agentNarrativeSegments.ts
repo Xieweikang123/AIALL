@@ -5,12 +5,58 @@ export type NarrativeSegment = {
   tools: AgentRoundTool[];
 };
 
-/** Major boundaries only — paragraph breaks and markdown headers. */
-const SPLIT_PATTERNS = [/\n\n+/, /\n(?=#{1,3}\s+)/];
-
 /** A standalone horizontal-rule line (`---` / `***` / `___`). */
 function isHorizontalRuleSegment(text: string): boolean {
   return /^[-*_]{3,}\s*$/.test(text.trim());
+}
+
+/** A line that opens or closes a fenced code block (``` optionally with a language). */
+function isFenceBoundaryLine(line: string): boolean {
+  return /^\s*```/.test(line);
+}
+
+/** Split at blank-line / heading boundaries but never inside fenced code blocks. */
+function splitFenceAware(
+  source: string,
+  isBoundary: (line: string) => boolean,
+): string[] {
+  const parts: string[] = [];
+  let current: string[] = [];
+  let inFence = false;
+
+  const flush = () => {
+    const part = current.join("\n").trim();
+    if (part) parts.push(part);
+    current = [];
+  };
+
+  for (const line of source.split("\n")) {
+    if (isFenceBoundaryLine(line)) inFence = !inFence;
+    if (!inFence && isBoundary(line)) {
+      flush();
+      // Heading boundary lines begin the next part; blank separators are dropped.
+      if (isHeadingLine(line)) current.push(line);
+    } else {
+      current.push(line);
+    }
+  }
+  flush();
+  return parts;
+}
+
+/** True when the segment carries any fenced code block — never space-merge such segments. */
+function hasFenceMarkers(text: string): boolean {
+  return /^\s*```/m.test(text);
+}
+
+/** Does the line begin a markdown heading (1-3 `#`)? */
+function isHeadingLine(line: string): boolean {
+  return /^#{1,3}\s+/.test(line.trim());
+}
+
+/** Is the line blank (paragraph separator)? */
+function isBlankLine(line: string): boolean {
+  return !line.trim();
 }
 
 const MERGE_SHORT_SEGMENT_MAX_CHARS = 80;
@@ -46,11 +92,13 @@ function mergeShortNarrativeSegments(segments: string[]): string[] {
   for (let index = 1; index < segments.length; index += 1) {
     const segment = segments[index]!;
     const last = merged[merged.length - 1]!;
-    const segmentIsHeader = /^#{1,3}\s/.test(segment);
+    const segmentIsHeader = isHeadingLine(segment);
     const segmentIsHr = isHorizontalRuleSegment(segment);
     const canMerge =
       !segmentIsHeader &&
       !segmentIsHr &&
+      !hasFenceMarkers(segment) &&
+      !hasFenceMarkers(last) &&
       segment.length < MERGE_SHORT_SEGMENT_MAX_CHARS &&
       last.length < MERGE_SHORT_SEGMENT_MAX_CHARS;
     if (canMerge) {
@@ -66,12 +114,11 @@ export function splitAssistantNarrative(text: string): string[] {
   const trimmed = text.trim();
   if (!trimmed) return [];
 
-  let parts = [trimmed];
-  for (const pattern of SPLIT_PATTERNS) {
-    parts = parts.flatMap((part) =>
-      part.split(pattern).map((segment) => segment.trim()).filter(Boolean),
-    );
-  }
+  // Split at paragraph / heading boundaries, but never inside fenced code blocks —
+  // code blocks contain blank lines (e.g. separate SCSS rules) and headings that
+  // must stay inside the fence, otherwise fragments render as plain text.
+  let parts = splitFenceAware(trimmed, isBlankLine);
+  parts = parts.flatMap((part) => splitFenceAware(part, isHeadingLine));
   // Standalone horizontal-rule lines are structural separators, not narrative —
   // dropping them keeps the process feed clean and avoids merging them into prose.
   parts = parts.filter((part) => !isHorizontalRuleSegment(part));
