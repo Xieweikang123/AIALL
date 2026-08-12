@@ -154,14 +154,8 @@ pub fn resolve_readable_path(
     }
     let normalized = trimmed.replace('\\', "/");
     if normalized.starts_with(AIALL_SESSION_LOGICAL_PREFIX) {
-        let tail = &normalized[AIALL_SESSION_LOGICAL_PREFIX.len()..];
-        if tail.is_empty() || tail.contains("..") {
-            return Err("非法会话路径".into());
-        }
-        let resolved =
-            resolve_aiall_session_data_dir().join(tail.replace('/', std::path::MAIN_SEPARATOR_STR));
-        let display = resolved.to_string_lossy().replace('\\', "/");
-        return Ok((resolved, display, true));
+        // 会话文件仅允许通过 search_sessions 工具访问，禁止 Agent 直接 read_file。
+        return Err("会话文件不可直接读取，请使用 search_sessions 工具搜索历史会话".into());
     }
     let (path, relative) = resolve_project_path(project_root, trimmed)?;
     Ok((path, relative, false))
@@ -323,11 +317,9 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_readable_path_session_prefix_valid() {
-        let (resolved, display, is_absolute) =
-            resolve_readable_path("/project", "aiall/vibe-chat-sessions/abc-123").unwrap();
-        assert!(is_absolute);
-        assert!(display.contains("aiall/vibe-chat-sessions/abc-123"));
+    fn test_resolve_readable_path_session_prefix_blocked() {
+        let result = resolve_readable_path("/project", "aiall/vibe-chat-sessions/abc-123");
+        assert!(result.is_err(), "session files must not be readable via read_file");
     }
 
     #[test]
@@ -392,13 +384,8 @@ mod tests {
 
     #[test]
     fn test_resolve_readable_path_session_prefix_backslash_normalized() {
-        let (resolved, display, is_absolute) =
-            resolve_readable_path("/project", "aiall/vibe-chat-sessions/session-1").unwrap();
-        assert!(is_absolute);
-        assert_eq!(
-            display.replace("\\", "/"),
-            resolved.to_string_lossy().replace('\\', "/")
-        );
+        let result = resolve_readable_path("/project", "aiall/vibe-chat-sessions/session-1");
+        assert!(result.is_err());
     }
 
     // ── project_debug_log_slug ──

@@ -32,6 +32,22 @@ pub async fn project_skills_save(project_path: String, slug: String, content: St
 }
 
 #[tauri::command]
+pub async fn memory_list(project_path: String) -> Value {
+    let index = crate::agent::memory_store::read_memory_index(&project_path).await;
+    let mut entries = index.entries;
+    entries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    serde_json::json!({ "ok": true, "entries": entries })
+}
+
+#[tauri::command]
+pub async fn memory_delete(project_path: String, id: String) -> Value {
+    match crate::agent::memory_store::delete_memory_entry(&project_path, &id).await {
+        Ok(deleted) => serde_json::json!({ "ok": true, "deleted": deleted }),
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
+    }
+}
+
+#[tauri::command]
 pub async fn project_architect_review_get(project_path: String) -> Value {
     project::read_text_file(&project_path, ".aiall/architect-review/latest.md").await
 }
