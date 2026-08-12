@@ -790,6 +790,8 @@
         :project-skills-list="projectSkillsList"
         :project-exploration-list="projectExplorationList"
         :project-skills-loading="projectSkillsLoading"
+        :long-term-memory-list="longTermMemoryList"
+        :long-term-memory-loading="longTermMemoryLoading"
         :selected-skill-slug="selectedSkillSlug"
         :skill-draft-title="skillDraftTitle"
         :skill-draft-kind="skillDraftKind"
@@ -845,6 +847,7 @@
         @update:project-memory-tab="setProjectMemoryTab"
         @select-project-skill="selectProjectSkill"
         @select-project-exploration="selectProjectExploration"
+        @delete-long-term-memory="deleteLongTermMemory"
         @save-project-memory="saveProjectMemoryDraft"
         @save-project-skill="saveProjectSkillDraft"
         @update:project-memory-draft="projectMemoryDraft = $event"
@@ -1290,6 +1293,8 @@ const {
   selectedExplorationId,
   explorationContent,
   explorationDetailLoading,
+  longTermMemoryList,
+  longTermMemoryLoading,
   memorySuggestSaving,
   pendingMemoryProposals,
   pendingSkillProposals,
@@ -1298,6 +1303,7 @@ const {
   setProjectMemoryTab,
   selectProjectSkill,
   selectProjectExploration,
+  deleteLongTermMemory,
   saveProjectMemoryDraft,
   saveProjectSkillDraft,
   applyExplorationDistillSilently,
