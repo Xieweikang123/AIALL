@@ -16,6 +16,8 @@ import {
   isAgentMaxTurnsExhausted,
   isAgentConnectPhase,
   isAgentConnectStalled,
+  isAgentClassifyPhase,
+  isAgentClassifyStalled,
   isAgentRunStalled,
   isRecoverableAgentError,
   isIncompleteAgentRunWithoutFinalAnswer,
@@ -955,6 +957,27 @@ describe("agent connect stall", () => {
     expect(agentConnectStallMessage(false, "web")).toContain("npm run dev");
     expect(agentConnectStallMessage(true, "tauri")).not.toContain("sidecar");
     expect(agentConnectStallMessage(false, "tauri")).toContain("重启应用");
+  });
+});
+
+describe("agent intent-classify stall", () => {
+  it("only matches the classifying_intent phase", () => {
+    expect(isAgentClassifyPhase("classifying_intent")).toBe(true);
+    expect(isAgentClassifyPhase("connecting_local")).toBe(false);
+    expect(isAgentClassifyPhase("intent_classified")).toBe(false);
+    expect(isAgentClassifyPhase(undefined)).toBe(false);
+  });
+
+  it("flags long intent-classify waits from run connect start", () => {
+    const now = 1_000_000;
+    expect(isAgentClassifyStalled(now - 60_000, "classifying_intent", true, now)).toBe(true);
+    expect(isAgentClassifyStalled(now - 10_000, "classifying_intent", true, now)).toBe(false);
+  });
+
+  it("ignores non-sending or zero-start baselines", () => {
+    const now = 1_000_000;
+    expect(isAgentClassifyStalled(0, "classifying_intent", true, now)).toBe(false);
+    expect(isAgentClassifyStalled(now - 60_000, "classifying_intent", false, now)).toBe(false);
   });
 });
 

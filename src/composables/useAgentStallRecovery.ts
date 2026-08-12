@@ -8,6 +8,7 @@ import {
   buildSilentContinueStatusLog,
   canResumeAgentRun,
   hasRecoverableAgentProgress,
+  isAgentClassifyStalled,
   isAgentConnectPhase,
   isAgentConnectStalled,
   isAgentRunStalled,
@@ -122,6 +123,11 @@ export function useAgentStallRecovery(deps: UseAgentStallRecoveryDeps) {
       isAgentConnectPhase(live.phase)
     ) {
       abortAgentConnectStall(sessionId, msg);
+      return;
+    }
+
+    if (isAgentClassifyStalled(run.connectStartedAt, live.phase, true)) {
+      recoverAgentRunFromStall(sessionId, msg, "意图分类请求长时间无响应（可能已卡住）");
       return;
     }
 

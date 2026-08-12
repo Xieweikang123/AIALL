@@ -94,6 +94,25 @@ export function isAgentConnectStalled(
   return now - connectStartedAt >= thresholdMs;
 }
 
+/** Stuck in the AI intent-classifier request for this long. */
+export const AGENT_CLASSIFY_STALL_MS = 50_000;
+
+export function isAgentClassifyPhase(phase?: string): boolean {
+  return phase === "classifying_intent";
+}
+
+export function isAgentClassifyStalled(
+  classifyStartedAt: number,
+  phase: string | undefined,
+  chatSending: boolean,
+  now = Date.now(),
+  thresholdMs = AGENT_CLASSIFY_STALL_MS,
+): boolean {
+  if (!chatSending || classifyStartedAt <= 0) return false;
+  if (!isAgentClassifyPhase(phase)) return false;
+  return now - classifyStartedAt >= thresholdMs;
+}
+
 
 export function buildAgentMaxTurnsExhaustedMessage(maxTurns: number): string {
   return `已达最大轮次（${maxTurns}），任务可能未完成。`;

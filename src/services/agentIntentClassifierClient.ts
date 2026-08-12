@@ -16,6 +16,32 @@ const INTENT_CACHE_TTL_MS = 60_000;
 
 const intentCache = new Map<string, { builtAt: number; payload: UserIntentAiPayload }>();
 
+function withFirstByteTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  onTimeout: () => T,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      try {
+        resolve(onTimeout());
+      } catch (error) {
+        reject(error);
+      }
+    }, timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 export interface ClassifyUserIntentWithAiClientParams {
   prompt: string;
   history?: UserIntentHistoryMessage[];
@@ -49,11 +75,15 @@ async function chatCompletionOnce(params: {
 
   if (isTauriEnv()) {
     try {
-      const result = await tauriInvoke<{ ok: boolean; data?: unknown; error?: string }>("ai_test", {
-        endpoint: params.endpoint,
-        apiKey: params.apiKey || null,
-        body,
-      });
+      const result = await withFirstByteTimeout(
+        tauriInvoke<{ ok: boolean; data?: unknown; error?: string }>("ai_test", {
+          endpoint: params.endpoint,
+          apiKey: params.apiKey || null,
+          body,
+        }),
+        INTENT_CLASSIFIER_FIRST_BYTE_MS,
+        () => ({ ok: false, error: `AI 分类请求超时（${INTENT_CLASSIFIER_FIRST_BYTE_MS / 1000}s）` }),
+      );
       if (!result.ok) {
         return { ok: false, error: result.error || "AI 分类失败" };
       }

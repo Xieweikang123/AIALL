@@ -28,7 +28,21 @@ pub async fn chat_completion(
     if let Some(key) = api_key.filter(|k| !k.is_empty()) {
         req = req.bearer_auth(key);
     }
-    let resp = req.send().await.map_err(|e| e.to_string())?;
+
+    let send_result = tokio::time::timeout(
+        std::time::Duration::from_millis(MODEL_FIRST_BYTE_TIMEOUT_MS),
+        req.send(),
+    )
+    .await;
+
+    let resp = match send_result {
+        Ok(Ok(resp)) => resp,
+        Ok(Err(err)) => return Err(err.to_string()),
+        Err(_) => {
+            let seconds = MODEL_FIRST_BYTE_TIMEOUT_MS.div_ceil(1000);
+            return Err(format!("模型响应超时（等待首包超过 {seconds}s）"));
+        }
+    };
     let status = resp.status();
     let text = resp.text().await.map_err(|e| e.to_string())?;
     if !status.is_success() {
