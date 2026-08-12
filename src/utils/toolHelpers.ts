@@ -14,6 +14,8 @@ export function getToolIcon(name: string): string {
   if (name === 'delete_file') return '🗑️';
   if (name === 'run_command') return '▶️';
   if (name === 'web_search' || name === 'web_extract') return '🌐';
+  if (name === 'memory_write') return '🧠';
+  if (name === 'search_sessions') return '🕘';
   return '⚡';
 }
 
@@ -38,6 +40,8 @@ export function getToolLabel(name: string): string {
   if (name === 'run_command') return '执行';
   if (name === 'web_search') return '联网搜索';
   if (name === 'web_extract') return '抓取网页';
+  if (name === 'memory_write') return '写入记忆';
+  if (name === 'search_sessions') return '搜索会话';
   return name;
 }
 
