@@ -30,7 +30,6 @@
         @execute-plan="emit('execute-plan')"
         @select-option="(option) => emit('select-option', option)"
         @toggle-debug="toggleActivityDetailed(msg)"
-        @toggle-process="onToggleProcess"
         @open-file="(path) => emit('open-file', path)"
         @open-plan-file="emit('open-plan-file')"
         @resume="emit('resume')"
@@ -45,15 +44,6 @@
       </AgentMergedContent>
 
       <button
-        v-if="!isAgentRunning(msg) && isActivityExpanded(msg) && hasProcessSteps(msg)"
-        type="button"
-        class="cursor-activity-collapse"
-        @click="collapseAgentActivity(msg)"
-      >
-        收起步骤
-      </button>
-
-      <button
         v-if="showJump"
         type="button"
         class="cursor-chain-jump"
@@ -62,16 +52,27 @@
       >
         ↓
       </button>
+
+      <button
+        v-if="canCopy"
+        type="button"
+        class="cursor-copy-btn"
+        :class="{ 'cursor-copy-btn--copied': copied }"
+        :title="copied ? '已复制' : '复制回复内容'"
+        @click="handleCopy"
+      >
+        {{ copied ? "已复制" : "复制" }}
+      </button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, toRef } from "vue";
+import { computed, inject, onBeforeUnmount, ref, toRef } from "vue";
 import AgentMergedContent from "./AgentMergedContent.vue";
 import AgentDebugPanel from "./AgentDebugPanel.vue";
 import { useAgentMessage, type AgentMessage } from "../composables/useAgentMessage";
-import { hasAgentProcessSteps } from "../utils/vibeHelpers";
+import { vibeChatMessageContextKey } from "../composables/vibeChatMessageContext";
 import type { AiOption } from "../utils/parseAiOptions";
 
 const props = defineProps<{
@@ -100,14 +101,40 @@ const emit = defineEmits<{
   resume: [];
 }>();
 
+const chatCtx = inject(vibeChatMessageContextKey, null);
+const copied = ref(false);
+let copyTimer: number | undefined;
+
+/** Copy affordance only makes sense for finished answers with real content. */
+const canCopy = computed(
+  () => !props.isAgentRunning(props.msg) && Boolean(props.messageDisplayContent(props.msg).trim()),
+);
+
+function handleCopy() {
+  const text = props.messageDisplayContent(props.msg).trim();
+  if (!text) return;
+  if (chatCtx?.copyText) {
+    void chatCtx.copyText(text);
+  } else {
+    void navigator.clipboard.writeText(text).catch(() => {});
+  }
+  copied.value = true;
+  if (copyTimer) window.clearTimeout(copyTimer);
+  copyTimer = window.setTimeout(() => {
+    copied.value = false;
+  }, 1600);
+}
+
+onBeforeUnmount(() => {
+  if (copyTimer) window.clearTimeout(copyTimer);
+});
+
 const {
   showDebug,
   isActivityExpanded,
   isActivityDetailed,
   agentRoundGroupViews,
-  collapseAgentActivity,
   toggleActivityDetailed,
-  toggleActivityExpanded,
   timelineAnswerDisplay,
   timelineAnswerStreamingDisplay,
   currentAgentStatus,
@@ -123,20 +150,6 @@ const {
     resolveLiveAgentSource: props.resolveLiveAgentSource,
   },
 );
-
-function hasProcessSteps(m: AgentMessage): boolean {
-  return hasAgentProcessSteps(m);
-}
-
-function onToggleProcess(expanded: boolean) {
-  const currently = isActivityExpanded(props.msg);
-  if (expanded === currently) return;
-  if (expanded) {
-    if (!currently) toggleActivityExpanded(props.msg);
-    return;
-  }
-  collapseAgentActivity(props.msg);
-}
 
 /** Prefer ephemeral run.live text (planning_tools / waiting_model); fall back to persisted msg fields. */
 function displayAgentStatus(m: AgentMessage): string {
@@ -176,28 +189,6 @@ function jumpToLatest() {
   padding: 4px 0;
 }
 
-.cursor-activity-collapse {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin: 4px 0 0;
-  padding: 3px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.03);
-  color: rgba(139, 148, 158, 0.72);
-  font-size: 11px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  align-self: flex-start;
-}
-
-.cursor-activity-collapse:hover {
-  color: rgba(230, 237, 243, 0.85);
-  background: rgba(88, 166, 255, 0.06);
-  border-color: rgba(88, 166, 255, 0.15);
-}
-
 .cursor-chain-jump {
   position: sticky;
   bottom: 10px;
@@ -225,5 +216,36 @@ function jumpToLatest() {
   background: rgba(14, 28, 48, 0.96);
   border-color: rgba(126, 182, 255, 0.65);
   transform: translateX(-50%) translateY(-1px);
+}
+
+.cursor-copy-btn {
+  position: sticky;
+  bottom: 10px;
+  align-self: flex-end;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(1, 8, 18, 0.92);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  color: rgba(205, 214, 244, 0.85);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.cursor-copy-btn:hover {
+  background: rgba(14, 28, 48, 0.96);
+  border-color: rgba(126, 182, 255, 0.5);
+  color: rgba(165, 214, 255, 0.95);
+}
+
+.cursor-copy-btn--copied {
+  border-color: rgba(63, 185, 80, 0.5);
+  color: #3fb950;
 }
 </style>

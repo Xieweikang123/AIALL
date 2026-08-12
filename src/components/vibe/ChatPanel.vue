@@ -477,6 +477,19 @@
               projectExplorationList.length
             }}</span>
           </button>
+          <button
+            type="button"
+            role="tab"
+            class="project-memory-tab"
+            :class="{ active: projectMemoryTab === 'longterm' }"
+            :aria-selected="projectMemoryTab === 'longterm'"
+            @click="$emit('update:projectMemoryTab', 'longterm')"
+          >
+            长期记忆
+            <span v-if="longTermMemoryList.length" class="project-memory-tab-count">{{
+              longTermMemoryList.length
+            }}</span>
+          </button>
         </div>
 
         <div v-if="projectMemoryTab === 'memory'" class="project-memory-pane">
@@ -526,7 +539,7 @@
           </template>
         </div>
 
-        <div v-else class="project-memory-split-pane">
+        <div v-else-if="projectMemoryTab === 'exploration'" class="project-memory-split-pane">
           <div v-if="projectSkillsLoading" class="project-memory-status shimmer-text--fast">加载中…</div>
           <template v-else>
             <ul v-if="projectExplorationList.length" class="project-memory-list">
@@ -555,6 +568,35 @@
               <div v-else class="project-memory-status">选择左侧快照查看内容</div>
             </div>
           </template>
+        </div>
+
+        <div v-else class="project-memory-pane project-memory-longterm">
+          <div v-if="longTermMemoryLoading" class="project-memory-status shimmer-text--fast">加载中…</div>
+          <ul v-else-if="longTermMemoryList.length" class="project-memory-longterm-list">
+            <li
+              v-for="entry in longTermMemoryList"
+              :key="entry.id"
+              class="project-memory-longterm-item"
+            >
+              <div class="project-memory-longterm-head">
+                <span class="project-memory-longterm-scope">{{ longTermMemoryScopeLabel(entry.scope) }}</span>
+                <span class="project-memory-list-meta">
+                  {{ formatMemoryTimestamp(entry.updatedAt) }}
+                  <template v-if="entry.source">· 来源 {{ entry.source }}</template>
+                </span>
+                <button
+                  type="button"
+                  class="project-memory-longterm-delete"
+                  title="删除该条记忆"
+                  @click="$emit('delete-long-term-memory', entry.id)"
+                >
+                  ×
+                </button>
+              </div>
+              <p class="project-memory-longterm-content">{{ entry.content }}</p>
+            </li>
+          </ul>
+          <div v-else class="project-memory-status">暂无长期记忆（Agent 在 Build 模式会自动沉淀有价值的决策）</div>
         </div>
 
         <div class="project-memory-foot">
@@ -601,6 +643,10 @@ import type { AgentSuggestion } from "../../services/agentSuggestions";
 import type { PendingMemoryProposal } from "../../services/projectMemoryProposal";
 import type { PendingSkillProposal } from "../../services/projectSkillProposal";
 import type { ExplorationIndexEntry, SkillIndexEntry, SkillKind } from "../../services/projectSkills";
+import {
+  longTermMemoryScopeLabel,
+  type LongTermMemoryEntry,
+} from "../../services/vibeLongTermMemoryClient";
 import type { ProjectMemoryTab } from "../../composables/useProjectMemory";
 import type { VibeChatSessionMeta } from "../../services/vibeChatStorage";
 import { CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount, getEventValue } from "../../utils/vibeHelpers";
@@ -687,6 +733,8 @@ interface Props {
   projectSkillsList?: SkillIndexEntry[];
   projectExplorationList?: ExplorationIndexEntry[];
   projectSkillsLoading?: boolean;
+  longTermMemoryList?: LongTermMemoryEntry[];
+  longTermMemoryLoading?: boolean;
   selectedSkillSlug?: string;
   skillDraftTitle?: string;
   skillDraftKind?: SkillKind;
@@ -722,6 +770,8 @@ const props = withDefaults(defineProps<Props>(), {
   projectSkillsList: () => [],
   projectExplorationList: () => [],
   projectSkillsLoading: false,
+  longTermMemoryList: () => [],
+  longTermMemoryLoading: false,
   selectedSkillSlug: "",
   skillDraftTitle: "",
   skillDraftKind: "heuristic",
@@ -789,6 +839,17 @@ function formatExplorationLabel(item: ExplorationIndexEntry): string {
   return timeLabel;
 }
 
+function formatMemoryTimestamp(raw?: string): string {
+  const stamp = raw?.trim();
+  if (!stamp || Number.isNaN(new Date(stamp).getTime())) return stamp || "";
+  return new Date(stamp).toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 const explorationContentHtml = computed(() => {
   if (!props.explorationContent) return "";
   return renderMarkdown(props.explorationContent);
@@ -836,6 +897,7 @@ const emit = defineEmits<{
   (e: "update:skillDraftBody", value: string): void;
   (e: "select-project-skill", slug: string): void;
   (e: "select-project-exploration", id: string): void;
+  (e: "delete-long-term-memory", id: string): void;
   (e: "save-project-memory"): void;
   (e: "save-project-skill"): void;
   (e: "confirm-memory-proposal", id: string): void;

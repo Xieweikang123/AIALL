@@ -81,6 +81,20 @@
           <path d="M8 6.5v3.2M8 11.4h.01" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/>
         </svg>
       </button>
+      <button
+        type="button"
+        class="config-status-btn memory-head-btn"
+        :class="{ active: projectMemoryHasContent }"
+        :disabled="!projectOpened"
+        :title="projectMemoryHasContent ? '项目 AI 数据（有内容）' : '项目 AI 数据（记忆 / 长期记忆 / Skills）'"
+        :aria-label="'项目 AI 数据'"
+        @click="$emit('open-project-memory')"
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M8 3.4C6.6 2.5 4.9 2.3 3.6 2.7v9.2c1.3-.4 3-.2 4.4.7 1.4-.9 3.1-1.1 4.4-.7V2.7C11.1 2.3 9.4 2.5 8 3.4Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+          <path d="M8 3.4v9.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+        </svg>
+      </button>
       <div ref="headMenuRef" class="panel-head-menu">
         <button
           type="button"
