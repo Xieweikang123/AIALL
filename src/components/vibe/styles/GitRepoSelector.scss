@@ -1,0 +1,113 @@
+.git-repo-selector {
+  position: relative;
+  width: 100%;
+  flex-shrink: 0;
+}
+
+.git-repo-info-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 6px;
+  color: var(--text-color, #c9d1d9);
+  padding: 5px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  min-width: 0;
+}
+
+.git-repo-info-btn:hover,
+.git-repo-info-btn--open {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.git-repo-icon {
+  font-size: 12px;
+  color: rgba(139, 148, 158, 0.6);
+  flex-shrink: 0;
+}
+
+.git-repo-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+.git-repo-chevron {
+  font-size: 10px;
+  color: rgba(139, 148, 158, 0.6);
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.git-repo-info-btn--open .git-repo-chevron {
+  transform: rotate(180deg);
+}
+
+.git-repo-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  margin-top: 4px;
+  background: #1e1e1e;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  border-radius: 6px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.git-repo-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #c9d1d9;
+  transition: background 0.12s ease;
+  white-space: nowrap;
+}
+
+.git-repo-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.git-repo-item.active {
+  background: rgba(88, 166, 255, 0.15);
+}
+
+.git-repo-item-name {
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.git-repo-item-path {
+  font-size: 11px;
+  color: rgba(139, 148, 158, 0.6);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.git-repo-item-check {
+  margin-left: auto;
+  color: #58a6ff;
+  flex-shrink: 0;
+}

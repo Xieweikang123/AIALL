@@ -10,6 +10,12 @@
       <p class="panel-empty-title">正在加载 Git 状态…</p>
     </div>
     <div v-else-if="gitIsRepo" class="git-panel-content">
+      <GitRepoSelector
+        v-if="gitRepos.length > 1"
+        :git-repos="gitRepos"
+        :git-active-repo-path="gitActiveRepoPath"
+        @switch-git-repo="$emit('switch-git-repo', $event)"
+      />
       <GitPanelHeader
         :git-branch="gitBranch"
         :git-branches="gitBranches"
@@ -209,6 +215,15 @@
       <p class="git-fetch-error-detail">{{ gitError }}</p>
       <button type="button" class="secondary small" @click="$emit('refresh')">重试</button>
     </div>
+    <div v-else-if="gitStatusKnown && gitRepos.length > 0" class="panel-empty git-repo-empty">
+      <p class="panel-empty-title">选择要查看的 Git 仓库</p>
+      <p class="panel-empty-hint">目录下检测到 {{ gitRepos.length }} 个仓库，请选择其中一个</p>
+      <GitRepoSelector
+        :git-repos="gitRepos"
+        :git-active-repo-path="gitActiveRepoPath"
+        @switch-git-repo="$emit('switch-git-repo', $event)"
+      />
+    </div>
     <div v-else-if="gitStatusKnown" class="panel-empty">当前目录不是 Git 仓库</div>
     <div v-else class="panel-empty shimmer-text--fast">加载中…</div>
   </div>
@@ -216,10 +231,11 @@
 
 <script setup lang="ts">
 import { computed, toRef, watch } from "vue";
-import type { GitRemoteInfo, GitBranchInfo } from "../../services/vibeGitClient";
+import type { GitRemoteInfo, GitBranchInfo, GitRepoInfo } from "../../services/vibeGitClient";
 import type { BatchGroup } from "../../composables/useGitPanel";
 import type { GitFileListScope } from "../../utils/gitHelpers";
 import { useGitPanelFileTree } from "../../composables/useGitPanelFileTree";
+import GitRepoSelector from "./GitRepoSelector.vue";
 import GitPanelHeader from "./GitPanelHeader.vue";
 import GitStashPanel from "./GitStashPanel.vue";
 import GitCommitBox from "./GitCommitBox.vue";
@@ -264,6 +280,8 @@ const props = defineProps<{
   gitLoading: boolean;
   gitIsRepo: boolean;
   gitStatusKnown: boolean;
+  gitRepos: GitRepoInfo[];
+  gitActiveRepoPath: string;
   gitHeadCommit: string;
   gitError: string;
   gitBranch: string;
@@ -328,6 +346,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "refresh"): void;
+  (e: "switch-git-repo", repoPath: string): void;
   (e: "do-fetch"): void;
   (e: "do-pull"): void;
   (e: "do-push"): void;

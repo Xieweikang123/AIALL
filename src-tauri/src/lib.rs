@@ -121,6 +121,7 @@ pub fn run() {
             commands::fs::fs_delete,
             commands::fs::fs_rename,
             commands::git::git_status,
+            commands::git::git_list_repos,
             commands::git::git_changed_since,
             commands::git::git_diff,
             commands::git::git_diff_content,

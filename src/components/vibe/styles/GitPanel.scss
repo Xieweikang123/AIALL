@@ -1662,3 +1662,12 @@
   border-width: 1.5px;
   flex-shrink: 0;
 }
+
+.git-repo-empty {
+  padding: 16px;
+}
+
+.git-repo-empty .git-repo-selector {
+  width: 100%;
+  max-width: 320px;
+}

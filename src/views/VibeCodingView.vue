@@ -84,6 +84,8 @@
           :git-loading="gitLoading"
           :git-is-repo="gitIsRepo"
           :git-status-known="gitStatusKnown"
+          :git-repos="gitRepos"
+          :git-active-repo-path="gitActiveRepoPath || projectPath"
           :git-head-commit="gitHeadCommit"
           :git-error="gitError"
           :git-secondary-hint="gitSecondaryHint"
@@ -160,6 +162,7 @@
           :git-tags="gitTags"
           :git-submodules="gitSubmodules"
           @refresh="refreshGitStatus()"
+          @switch-git-repo="switchGitRepo"
           @do-fetch="doFetch"
           @do-pull="doPull"
           @do-push="doPush"
@@ -567,6 +570,8 @@
           :git-loading="gitLoading"
           :git-is-repo="gitIsRepo"
           :git-status-known="gitStatusKnown"
+          :git-repos="gitRepos"
+          :git-active-repo-path="gitActiveRepoPath || projectPath"
           :git-head-commit="gitHeadCommit"
           :git-error="gitError"
           :git-secondary-hint="gitSecondaryHint"
@@ -643,6 +648,7 @@
           :git-tags="gitTags"
           :git-submodules="gitSubmodules"
           @refresh="refreshGitStatus()"
+          @switch-git-repo="switchGitRepo"
           @do-fetch="doFetch"
           @do-pull="doPull"
           @do-push="doPush"
@@ -1439,6 +1445,7 @@ const {
   doMerge, doMergeAbort, doRebase, doRebaseAbort, doCherryPick, doRevertCommit,
   doCreateTag, doDeleteTag, doSubmoduleUpdate,
   gitPanelMode, projectPanelView, gitStatus, gitBranch, gitHeadCommit, gitIsRepo, gitStatusKnown, gitLoading, gitError,
+  gitRepos, gitActiveRepoPath, refreshGitRepos, switchGitRepo,
   gitSecondaryHint,
   gitCommitMessage, gitCommitting, gitGenStep, gitLogEntries, gitLogOpen,
   gitLogCount, gitLogSearchQuery, gitLogAllBranches, gitLogBranchFilter, gitLogAuthorFilter, gitLogPathFilter, gitLogSince, gitLogUntil, hasMoreGitLog, gitLogLoadingMore, gitLogSearchLoading, loadMoreGitLog,
@@ -3127,6 +3134,7 @@ async function openProjectByPath(dirPath: string) {
   fileDirty.value = false;
   fileLoadError.value = "";
   showDiffMode.value = false;
+  resetGitPanelState();
   log("reset-state");
 
   try {
@@ -3185,6 +3193,7 @@ async function openProjectByPath(dirPath: string) {
 
     loadingTree.value = false;
     void refreshGitStatus();
+    void refreshGitRepos();
     log(`chat-done(${Math.round(performance.now() - tChat0)}ms)`);
 
     void startFileWatcherForProject(normalized, () => refreshGitStatus({ showLoading: false })).catch(() => {});

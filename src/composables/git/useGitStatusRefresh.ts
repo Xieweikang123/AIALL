@@ -1,6 +1,13 @@
 import { debugLog } from "../../utils/debugLog";
 import { toErrorMessage } from "../../utils/vibeHelpers";
-import { fetchGitStatus, fetchGitLog, listIgnoredLocalChanges } from "../../services/vibeGitClient";
+import { lsGet, lsSet } from "../../utils/localStorageSafe";
+import {
+  fetchGitStatus,
+  fetchGitLog,
+  fetchGitRepos,
+  listIgnoredLocalChanges,
+  type GitRepoInfo,
+} from "../../services/vibeGitClient";
 import type { GitPanelState } from "./createGitPanelState";
 
 export interface AfterStatusRefreshCallbacks {
@@ -11,7 +18,10 @@ export interface AfterStatusRefreshCallbacks {
 }
 
 export interface UseGitStatusRefreshOptions {
+  /** Repo-aware path getter: active repo root, falling back to the project root. */
   projectPath: () => string;
+  /** Raw project root (used for repo discovery and persisting the selection). */
+  projectRootPath: () => string;
   projectOpened: () => boolean;
   state: GitPanelState;
   afterStatusRefresh: AfterStatusRefreshCallbacks;
@@ -19,9 +29,31 @@ export interface UseGitStatusRefreshOptions {
   syncBatchStateWithSourceFiles?: () => void;
 }
 
+const ACTIVE_REPO_KEY_PREFIX = "vibe-coding-git-active-repo:";
+
+function normalizeGitPath(p: string): string {
+  return p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+}
+
+function activeRepoKey(projectRoot: string): string {
+  return `${ACTIVE_REPO_KEY_PREFIX}${projectRoot}`;
+}
+
+function resolveDefaultRepo(list: GitRepoInfo[]): string {
+  const rootRepo = list.find((r) => r.isRoot);
+  if (rootRepo) return rootRepo.path;
+  const nested = list.filter((r) => !r.isRoot);
+  if (!nested.length) return "";
+  const shallowest = [...nested].sort(
+    (a, b) => a.relPath.split("/").length - b.relPath.split("/").length,
+  )[0];
+  return shallowest.path;
+}
+
 export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
   const {
     projectPath,
+    projectRootPath,
     projectOpened,
     state,
     afterStatusRefresh,
@@ -38,6 +70,8 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
     state.gitBranch.value = "";
     state.gitHeadCommit.value = "";
     state.gitStatus.value = [];
+    state.gitRepos.value = [];
+    state.gitActiveRepoPath.value = "";
     state.selectedGitFiles.value = [];
     state.gitIgnoredLocalFiles.value = [];
     state.gitBranches.value = [];
@@ -53,6 +87,55 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
     state.gitStagedHunks.value = [];
     state.gitHunkStagingIndex.value = null;
     state.gitHunkUnstagingIndex.value = null;
+  }
+
+  /**
+   * Re-discover git repos under the project root and resolve the active repo:
+   * keep the current one when still valid, else restore the persisted selection,
+   * else fall back to the project-root repo / shallowest nested repo.
+   */
+  async function refreshGitRepos() {
+    if (!projectOpened()) return;
+    const root = projectRootPath().trim();
+    if (!root) return;
+    let result;
+    try {
+      result = await fetchGitRepos(root);
+    } catch {
+      return;
+    }
+    if (!result.ok) return;
+    state.gitRepos.value = result.repos;
+    const list = result.repos;
+    const isValid = (p: string) => !!p && list.some((r) => normalizeGitPath(r.path) === normalizeGitPath(p));
+    let active = state.gitActiveRepoPath.value;
+    if (!isValid(active)) {
+      const stored = lsGet(activeRepoKey(root));
+      active = isValid(stored ?? "") ? (stored as string) : resolveDefaultRepo(list);
+    }
+    if (normalizeGitPath(active) === normalizeGitPath(state.gitActiveRepoPath.value)) {
+      return;
+    }
+    state.gitActiveRepoPath.value = active;
+    lsSet(activeRepoKey(root), active);
+    debugLog("[git-repos] resolved active repo", { root, active, count: list.length });
+    // Status was refreshed against the project root already; only re-refresh
+    // when the resolved repo is a nested one (or an ancestor repo).
+    if (active && normalizeGitPath(active) !== normalizeGitPath(root)) {
+      await refreshGitStatus({ force: true });
+    }
+  }
+
+  function switchGitRepo(repoPath: string) {
+    if (!projectOpened() || !repoPath) return;
+    if (normalizeGitPath(repoPath) === normalizeGitPath(state.gitActiveRepoPath.value)) return;
+    state.gitActiveRepoPath.value = repoPath;
+    const root = projectRootPath().trim();
+    if (root) lsSet(activeRepoKey(root), repoPath);
+    state.clearGitDiffCache();
+    state.selectedGitFiles.value = [];
+    debugLog("[git-repos] switch active repo", { root, repoPath });
+    void refreshGitStatus({ force: true });
   }
 
   async function refreshGitStatus(refreshOptions?: { showLoading?: boolean; force?: boolean }) {
@@ -256,6 +339,8 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
   return {
     resetGitPanelState,
     refreshGitStatus,
+    refreshGitRepos,
+    switchGitRepo,
     refreshIgnoredLocalFiles,
     refreshGitLogIfOpen,
     loadMoreGitLog,

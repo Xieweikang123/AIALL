@@ -21,6 +21,10 @@ export interface GitPanelState {
   gitBranch: Ref<string>;
   gitHeadCommit: Ref<string>;
   gitIsRepo: Ref<boolean>;
+  /** Discovered git repos under the project root (project-root repo first). */
+  gitRepos: Ref<import("../../services/vibeGitClient").GitRepoInfo[]>;
+  /** Absolute path of the repo the Git panel currently operates on. */
+  gitActiveRepoPath: Ref<string>;
   gitStatusKnown: Ref<boolean>;
   gitLoading: Ref<boolean>;
   gitError: Ref<string>;
@@ -154,6 +158,8 @@ export function createGitPanelState(
   const gitBranch = ref("");
   const gitHeadCommit = ref("");
   const gitIsRepo = ref(false);
+  const gitRepos = ref<import("../../services/vibeGitClient").GitRepoInfo[]>([]);
+  const gitActiveRepoPath = ref("");
   const gitStatusKnown = ref(false);
   const gitLoading = ref(false);
   const gitError = ref("");
@@ -414,6 +420,8 @@ export function createGitPanelState(
     gitBranch,
     gitHeadCommit,
     gitIsRepo,
+    gitRepos,
+    gitActiveRepoPath,
     gitStatusKnown,
     gitLoading,
     gitError,

@@ -23,6 +23,23 @@ export interface GitStatusResult {
   error?: string;
 }
 
+export interface GitRepoInfo {
+  /** Absolute repo root path. */
+  path: string;
+  /** Directory name of the repo root (display name). */
+  name: string;
+  /** Path relative to the project root ("" for the project-root repo itself). */
+  relPath: string;
+  /** True when the project root itself belongs to this repo. */
+  isRoot?: boolean;
+}
+
+export interface GitReposResult {
+  ok: boolean;
+  repos: GitRepoInfo[];
+  error?: string;
+}
+
 export interface GitDiffFile {
   path: string;
   additions: number;
@@ -153,6 +170,14 @@ export async function fetchGitStatus(projectPath: string): Promise<GitStatusResu
       }
       return { ok: false, branch: "", files: [], stagedCount: 0, unstagedCount: 0, isRepo: false, error: error instanceof Error ? error.message : "网络错误" };
     }
+  });
+}
+
+export async function fetchGitRepos(projectPath: string): Promise<GitReposResult> {
+  return invokeBackend<GitReposResult>("git_list_repos", { path: projectPath }, async () => {
+    const parts = projectPath.split(/[\\/]/).filter(Boolean);
+    const name = parts[parts.length - 1] || projectPath;
+    return { ok: true, repos: [{ path: projectPath, name, relPath: "", isRoot: true }], error: undefined };
   });
 }
 

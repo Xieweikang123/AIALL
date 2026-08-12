@@ -13,6 +13,11 @@ pub async fn git_status(path: String) -> git::GitStatusResult {
 }
 
 #[tauri::command]
+pub async fn git_list_repos(path: String) -> git::GitReposResult {
+    git::git_list_repos(&path).await
+}
+
+#[tauri::command]
 pub async fn git_changed_since(path: String, since: String) -> serde_json::Value {
     git::git_changed_files_since(&path, &since).await
 }

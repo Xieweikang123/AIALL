@@ -18,7 +18,10 @@ export function useGitPanel(
   onRefreshTree?: () => void,
 ) {
   const hunkLoaderHolder: { load?: (filePath: string, staged?: boolean) => Promise<import("../services/vibeGitClient").GitHunkInfo[]> } = {};
-  const state = createGitPanelState(projectPath, projectOpened, hunkLoaderHolder);
+  // Repo-aware path: the Git panel operates on the active repo (project root by
+  // default, or a nested repo selected from the dropdown).
+  const gitPath = () => state.gitActiveRepoPath.value || projectPath();
+  const state = createGitPanelState(gitPath, projectOpened, hunkLoaderHolder);
 
   const afterStatusRefresh = {
     refreshGitRemotes: async () => {},
@@ -32,7 +35,8 @@ export function useGitPanel(
   let suggestBatchCommit: (() => void) | undefined;
 
   const statusRefresh = useGitStatusRefresh({
-    projectPath,
+    projectPath: gitPath,
+    projectRootPath: projectPath,
     projectOpened,
     state,
     afterStatusRefresh,
@@ -41,7 +45,7 @@ export function useGitPanel(
   });
 
   const remoteActions = useGitRemoteActions({
-    projectPath,
+    projectPath: gitPath,
     projectOpened,
     state,
     confirm,
@@ -54,7 +58,7 @@ export function useGitPanel(
   afterStatusRefresh.refreshGitLogIfOpen = statusRefresh.refreshGitLogIfOpen;
 
   const advancedActions = useGitAdvancedActions({
-    projectPath,
+    projectPath: gitPath,
     projectOpened,
     state,
     confirm,
@@ -65,7 +69,7 @@ export function useGitPanel(
   afterStatusRefresh.refreshGitBranches = advancedActions.refreshGitBranches;
 
   const stagingActions = useGitStagingActions({
-    projectPath,
+    projectPath: gitPath,
     projectOpened,
     state,
     confirm,
@@ -76,7 +80,7 @@ export function useGitPanel(
   hunkLoaderHolder.load = stagingActions.loadHunksForFile;
 
   const commitActions = useGitCommitActions({
-    projectPath,
+    projectPath: gitPath,
     projectOpened,
     aiConfig,
     configReady,
@@ -90,7 +94,7 @@ export function useGitPanel(
   });
 
   const batch = useGitBatchCommit({
-    projectPath,
+    projectPath: gitPath,
     gitStatus: state.gitStatus,
     gitError: state.gitError,
     gitBranch: state.gitBranch,
@@ -153,6 +157,10 @@ export function useGitPanel(
     gitBranch: state.gitBranch,
     gitHeadCommit: state.gitHeadCommit,
     gitIsRepo: state.gitIsRepo,
+    gitRepos: state.gitRepos,
+    gitActiveRepoPath: state.gitActiveRepoPath,
+    refreshGitRepos: statusRefresh.refreshGitRepos,
+    switchGitRepo: statusRefresh.switchGitRepo,
     gitStatusKnown: state.gitStatusKnown,
     gitLoading: state.gitLoading,
     gitError: state.gitError,
