@@ -68,8 +68,6 @@ export function agentRunStageLabel(stage: AgentRunStage): string {
       return "修改中";
     case "verifying":
       return "验证中";
-    case "waiting_confirmation":
-      return "等待确认";
     case "recoverable":
       return "可恢复";
     default:

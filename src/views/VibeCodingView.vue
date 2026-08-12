@@ -2996,7 +2996,6 @@ const agentRunStageLabelText = computed(() => {
         resolveAgentRunStage({ phase: m.agentPhase || "", toolTitle: m.status }),
       );
     }
-    if (m.pendingApproval) return "等待确认";
     if (chatSending.value) return "思考中";
     break;
   }

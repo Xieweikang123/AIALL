@@ -263,12 +263,6 @@
           </div>
         </div>
 
-        <div v-else-if="pendingApproval" class="chat-status-row">
-          <span class="chat-running-status chat-running-status--waiting" aria-live="polite">
-            <span class="status-pulse status-pulse--waiting" aria-hidden="true" />
-            等待确认
-          </span>
-        </div>
         <div v-else-if="chatError && !showRecoveryBanner" class="chat-status-row">
           <span class="chat-error">{{ chatError }}</span>
         </div>

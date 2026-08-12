@@ -81,6 +81,6 @@ describe("agentRunLiveState", () => {
       agentRunStageLabel(resolveAgentRunStage({ phase: "executing_tool", toolTitle: "运行测试" })),
     ).toBe("验证中");
     expect(agentRunStageLabel(resolveAgentRunStage({ phase: "waiting_model" }))).toBe("思考中");
-    expect(agentRunStageLabel(resolveAgentRunStage({ phase: "pending_approval" }))).toBe("等待确认");
+    expect(agentRunStageLabel(resolveAgentRunStage({ phase: "pending_approval" }))).toBe("思考中");
   });
 });
