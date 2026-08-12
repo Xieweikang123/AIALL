@@ -311,7 +311,7 @@ export function isUiLocateQuestionPrompt(prompt: string): boolean {
 }
 
 export const UI_APPEARANCE_QUESTION_RE =
-  /背景.{0,12}(?:透明|半透明|模糊|毛玻璃|虚化)|(?:透明|半透明|毛玻璃|blur|backdrop).{0,12}(?:吗|么|[？?]\s*$)|(?:opacity|rgba).{0,12}(?:吗|么|[？?]\s*$)/i;
+  /背景.{0,12}(?:透明|半透明|模糊|毛玻璃|虚化)|(?:透明|半透明|毛玻璃|blur|backdrop).{0,12}(?:吗|么|[？?]\s*$)|(?:opacity|rgba).{0,12}(?:吗|么|[？?]\s*$)|(?:遮挡|被挡|遮住|重叠|错位|挤压|拥挤|挤在一|对不齐|凌乱|杂乱|难看|丑|不好看|太挤|太宽|太窄|太紧|太松|太小|太大|偏小|偏大|不协调|别扭|怪怪|花哨|裁切|截断).{0,10}(?:吗|么|了|着|[？?])?|(?:显示|布局|界面|样式|按钮|排版).{0,8}(?:有问题|出问题|问题|有毛病|不对|异常|错乱)/i;
 
 export function isUiAppearanceQuestionPrompt(prompt: string): boolean {
   const text = prompt.trim();

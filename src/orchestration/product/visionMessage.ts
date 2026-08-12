@@ -425,6 +425,34 @@ export function isSpeculativeStyleAnswer(text: string): boolean {
   return SPECULATIVE_STYLE_ANSWER_RE.test(body) || BINARY_STYLE_CONCLUSION_RE.test(body);
 }
 
+/** CSS property value claims, template/event syntax — code mechanisms that need read evidence. */
+const SPECULATIVE_CODE_MECHANISM_RE =
+  /\$emit\s*\(|\{\{\s*[a-zA-Z_$][\w$]*\s*\}\}|`\.[a-zA-Z][\w-]*`|(?:margin|padding|flex|width|height|gap|overflow|letter-spacing|text-overflow|white-space|min-width|max-width|font-size)\s*:\s*[^;，。\n]{1,20}/i;
+
+/**
+ * Answer asserts code mechanisms (CSS props / event / template identifiers).
+ * Whether the relevant file was actually read is decided by the caller
+ * (consultativeNeedsGrepHitVueRead) — a proposed CSS block here is the claim, not evidence.
+ */
+export function isSpeculativeCodeMechanismAnswer(text: string): boolean {
+  const body = text.replace(/\s*\[图已理解\]\s*/g, "").trim();
+  if (!body) return false;
+  return SPECULATIVE_CODE_MECHANISM_RE.test(body);
+}
+
+export function buildConsultativeCodeMechanismRetryHint(vueFiles: string[]): string {
+  const fileHint =
+    vueFiles.length > 0
+      ? `请 read_file：${vueFiles.slice(0, 2).join("、")}（含 \`<style>\` 段）。`
+      : "请 read_file 相关组件与样式段。";
+  return [
+    "【代码机制未闭环】你在未 read/grep 的情况下断言了类名、CSS 属性、事件名或模板变量等代码细节。",
+    fileHint,
+    "从 read 返回引用实际属性/事件名/变量后再作答；未读到的一律标注「推断」或「不确定」。",
+    "若本轮工具结果中已有该文件片段，禁止再 grep/read 同一文件，直接基于已有内容作答。",
+  ].join("");
+}
+
 export function buildConsultativeUiAppearanceRetryHint(vueFiles: string[]): string {
   const fileHint =
     vueFiles.length > 0
@@ -523,7 +551,7 @@ export function shouldBlockConsultativeVisionLocateFinalize(params: {
 
   if (
     appearancePrompt &&
-    isSpeculativeStyleAnswer(params.replyText) &&
+    (isSpeculativeStyleAnswer(params.replyText) || isSpeculativeCodeMechanismAnswer(params.replyText)) &&
     consultativeNeedsGrepHitVueRead(params.grepHitVueFiles, params.consultativeReadPaths)
   ) {
     return true;

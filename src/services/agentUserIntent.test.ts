@@ -135,6 +135,20 @@ describe("isUiAppearanceQuestionPrompt", () => {
     expect(isUiAppearanceQuestionPrompt("这个面板是半透明的吗")).toBe(true);
     expect(isUiAppearanceQuestionPrompt("知道是哪儿的按钮吗？")).toBe(false);
   });
+
+  it("detects generic UI appearance feedback questions", () => {
+    expect(isUiAppearanceQuestionPrompt("显示有啥问题，你觉得")).toBe(true);
+    expect(isUiAppearanceQuestionPrompt("你没发现按钮丑丑的")).toBe(true);
+    expect(isUiAppearanceQuestionPrompt("比较窄的情况下，按钮被遮挡了")).toBe(true);
+    expect(isUiAppearanceQuestionPrompt("这个布局不好看，太挤了")).toBe(true);
+    expect(isUiAppearanceQuestionPrompt("按钮和状态点重叠了")).toBe(true);
+  });
+
+  it("does not flag implement-style or non-appearance prompts", () => {
+    expect(isUiAppearanceQuestionPrompt("把按钮间距调大点")).toBe(false);
+    expect(isUiAppearanceQuestionPrompt("知道是哪儿的按钮吗？")).toBe(false);
+    expect(isUiAppearanceQuestionPrompt("这个按钮点击没反应")).toBe(false);
+  });
 });
 
 describe("isLocateStatusFollowUpPrompt", () => {

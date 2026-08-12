@@ -16,7 +16,7 @@ static UI_LOCATE_QUESTION_RE: LazyLock<Regex> = LazyLock::new(|| {
 
 static UI_APPEARANCE_QUESTION_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-    r"(?i)背景.{0,12}(?:透明|半透明|模糊|毛玻璃|虚化)|(?:透明|半透明|毛玻璃|blur|backdrop).{0,12}(?:吗|么|[？?]\s*$)|(?:opacity|rgba).{0,12}(?:吗|么|[？?]\s*$)",
+    r"(?i)背景.{0,12}(?:透明|半透明|模糊|毛玻璃|虚化)|(?:透明|半透明|毛玻璃|blur|backdrop).{0,12}(?:吗|么|[？?]\s*$)|(?:opacity|rgba).{0,12}(?:吗|么|[？?]\s*$)|(?:遮挡|被挡|遮住|重叠|错位|挤压|拥挤|挤在一|对不齐|凌乱|杂乱|难看|丑|不好看|太挤|太宽|太窄|太紧|太松|太小|太大|偏小|偏大|不协调|别扭|怪怪|花哨|裁切|截断).{0,10}(?:吗|么|了|着|[？?])?|(?:显示|布局|界面|样式|按钮|排版).{0,8}(?:有问题|出问题|问题|有毛病|不对|异常|错乱)",
   )
   .unwrap()
 });
@@ -185,6 +185,44 @@ pub fn reply_has_css_read_evidence(text: &str) -> bool {
             .unwrap_or(false)
 }
 
+static SPECULATIVE_CODE_MECHANISM_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"(?i)\$emit\s*\(|\{\{\s*[a-zA-Z_$][\w$]*\s*\}\}|`\.[a-zA-Z][\w-]*`|(?:margin|padding|flex|width|height|gap|overflow|letter-spacing|text-overflow|white-space|min-width|max-width|font-size)\s*:\s*[^;，。\n]{1,20}"#,
+    )
+    .unwrap()
+});
+
+/// Answer asserts code mechanisms (CSS props / event / template identifiers).
+/// Whether the relevant file was actually read is decided by the caller
+/// (consultative_needs_grep_hit_vue_read) — a proposed CSS block here is the claim, not evidence.
+pub fn is_speculative_code_mechanism_answer(text: &str) -> bool {
+    let body = strip_vision_marker(text);
+    !body.is_empty() && SPECULATIVE_CODE_MECHANISM_RE.is_match(&body)
+}
+
+pub fn build_consultative_code_mechanism_retry_hint(vue_files: &[String]) -> String {
+    let file_hint = if vue_files.is_empty() {
+        "请 read_file 相关组件与样式段。".to_string()
+    } else {
+        format!(
+            "请 read_file：{}（含 `<style>` 段）。",
+            vue_files
+                .iter()
+                .take(2)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("、")
+        )
+    };
+    [
+        "【代码机制未闭环】你在未 read/grep 的情况下断言了类名、CSS 属性、事件名或模板变量等代码细节。",
+        &file_hint,
+        "从 read 返回引用实际属性/事件名/变量后再作答；未读到的一律标注「推断」或「不确定」。",
+        "若本轮工具结果中已有该文件片段，禁止再 grep/read 同一文件，直接基于已有内容作答。",
+    ]
+    .join("")
+}
+
 fn normalize_consultative_rel_path(p: &str) -> String {
     p.replace('\\', "/")
         .trim_start_matches("./")
@@ -276,7 +314,8 @@ pub fn should_block_consultative_vision_locate_finalize(
     }
 
     if appearance_prompt
-        && is_speculative_style_answer(params.reply_text)
+        && (is_speculative_style_answer(params.reply_text)
+            || is_speculative_code_mechanism_answer(params.reply_text))
         && consultative_needs_grep_hit_vue_read(
             params.grep_hit_vue_files,
             params.consultative_read_paths,
@@ -462,6 +501,52 @@ mod tests {
         assert!(reply_has_css_read_evidence(
             "`.project-history-dropdown { background: var(--bg-primary); }` 为实色，不透明。"
         ));
+    }
+
+    #[test]
+    fn detects_code_mechanism_assertions() {
+        assert!(is_speculative_code_mechanism_answer(
+            "`.git-remote-actions` 设有 `margin-left: auto`，窄面板下按钮组不肯缩小。",
+        ));
+        assert!(is_speculative_code_mechanism_answer(
+            "模板里应写成 `{{ ahead }}`，事件用 `$emit('fetch')`。",
+        ));
+        assert!(!is_speculative_code_mechanism_answer(
+            "从截图看，右侧按钮被蓝色区域遮挡，视觉上偏挤。",
+        ));
+    }
+
+    #[test]
+    fn blocks_code_mechanism_answer_without_vue_read() {
+        let input = ConsultativeVisionFinalizeInput {
+            consultative_vision_run: true,
+            vision_locate_active: true,
+            vision_locate_tools_used: true,
+            vision_locate_read_used: false,
+            prompt: "按钮被遮挡了",
+            reply_text: "`.git-remote-actions` 设有 `margin-left: auto`，导致与仓库按钮重叠。",
+            grep_hit_vue_files: &["src/components/vibe/GitPanelHeader.vue".to_string()],
+            consultative_read_paths: &[],
+            ..Default::default()
+        };
+        assert!(is_ui_appearance_question_prompt("按钮被遮挡了"));
+        assert!(is_speculative_code_mechanism_answer(
+            "`.git-remote-actions` 设有 `margin-left: auto`，导致与仓库按钮重叠。",
+        ));
+        assert!(consultative_needs_grep_hit_vue_read(
+            &["src/components/vibe/GitPanelHeader.vue".to_string()],
+            &[],
+        ));
+        assert!(should_block_consultative_vision_locate_finalize(&input));
+
+        let read_paths = vec!["src/components/vibe/GitPanelHeader.vue".to_string()];
+        let ok_input = ConsultativeVisionFinalizeInput {
+            vision_locate_read_used: true,
+            reply_text: "已 read GitPanelHeader.vue，`.git-sync-row` 无 margin-left。",
+            consultative_read_paths: &read_paths,
+            ..input
+        };
+        assert!(!should_block_consultative_vision_locate_finalize(&ok_input));
     }
 
     #[test]

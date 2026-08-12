@@ -47,10 +47,16 @@ pub async fn build_agent_system_prompt(
             system_prompt.push('\n');
         }
     } else {
-        let prompt_lines: Vec<&str> = match params.mode {
+        let prompt_lines: Vec<String> = match params.mode {
             "ask" => prompts::build_ask_system_prompt_lines(),
-            "plan" => prompts::build_plan_system_prompt_lines(),
-            _ => prompts::build_build_system_prompt_lines(),
+            "plan" => prompts::build_plan_system_prompt_lines()
+                .into_iter()
+                .map(String::from)
+                .collect(),
+            _ => prompts::build_build_system_prompt_lines()
+                .into_iter()
+                .map(String::from)
+                .collect(),
         };
         for line in &prompt_lines {
             system_prompt.push_str(line);

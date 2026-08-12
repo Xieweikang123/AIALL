@@ -26,14 +26,10 @@ export const GENERIC_CLASSIFIER_PATHS = [
   "src/services/agentExecutePlanContext.ts",
   "src/services/agentRunPolicy.ts",
   "shared/agentTurnBudget.ts",
-  "src/services/consultativeBehaviorTrace.ts",
-  "src/services/consultativeAccuracyTrace.ts",
 ] as const;
 
 /** Tier 2 — shared accuracy / consultative mechanism strings (not mode-specific prompts). */
 export const GENERIC_MECHANISM_PATHS = [
-  "src/services/agentReplyAccuracy.ts",
-  "src/services/agentConsultativeTopics.ts",
   "shared/agentProbeGuard.ts",
   "shared/agentExplorationBudget.ts",
 ] as const;
@@ -41,11 +37,8 @@ export const GENERIC_MECHANISM_PATHS = [
 /** Tier 3 — product orchestration: system prompts, vision, runtime hints. */
 export const PRODUCT_ORCHESTRATION_PATHS = [
   "src/orchestration/product/userIntentHints.ts",
-  "src/orchestration/product/agentAskPrompt.ts",
-  "src/orchestration/product/agentExplorePrompt.ts",
   "src/orchestration/product/agentTopicFollowUp.ts",
   "src/orchestration/product/visionMessage.ts",
-  "src/orchestration/product/agentPlanPrompt.ts",
 ] as const;
 
 /** All guarded paths (union). Used by CI guard tests. */

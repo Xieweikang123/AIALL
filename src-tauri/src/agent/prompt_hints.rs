@@ -34,6 +34,8 @@ pub fn build_reply_accuracy_hint() -> String {
     "14. 假设验证原则（Verify Your Assumptions）：诊断问题时，必须写下逻辑链假设，并逐一通过代码查看工具验证；严禁在未读取相关文件定义前假设任何布局方向（如 row/column）、数据格式或接口契约。",
     "15. 全局上下文盘点（Check Collaborative Symptoms）：绝不孤立分析单个异常症状；须盘点同级/关联元素的可见性与生命周期；逻辑报错须排查堆栈上下文与前置/后置条件。",
     "16. 智能检索分流（Smart Tooling）：在 grep 前确认搜索词是静态源码符号还是运行时动态数据（如草稿描述、随机 UUID）；严禁在源码中检索动态数据。",
+    "17. 行为断言证据链（Behavioral Claims Need Evidence）：回答「某功能实际行为/结果路径/发生位置」时，禁止只凭阅读函数体推理下结论；须给出可验证证据——要么实际运行或调试日志，要么完整列出决定该行为的运行时状态矩阵（如内容空/非空、有无焦点、选区或事件归属等状态维度组合），并明确标注哪些结论依赖运行时状态、尚未验证；未验证部分一律标注「推断/不确定」。",
+    "18. 零工具代码断言禁止（No-tool Code Claims）：本回合未调用 read_file/grep 等代码查看工具时，禁止把类名、CSS 属性、事件名、变量名、行号、模板插值（如 {{ xxx }}、$emit(...)）作为事实输出；只能描述截图/现象可见内容，或明确标注「推断，未读代码」。涉及代码机制的断言必须能追溯到本回合 read/grep 的证据。",
     build_probe_introspect_anti_pattern_hint(),
   ]
   .join("\n")
@@ -59,6 +61,8 @@ mod tests {
         let hint = build_reply_accuracy_hint();
         assert!(hint.contains("外部环境只读探测"));
         assert!(hint.contains("事实与准确度"));
+        assert!(hint.contains("行为断言证据链"));
+        assert!(hint.contains("零工具代码断言禁止"));
         assert!(!hint.contains("常见修复"));
         assert!(!hint.contains("padding:0"));
         assert!(!hint.contains("Execute→Service"));

@@ -5,30 +5,29 @@ use super::prompt_hints::{
     build_agent_suggestions_prompt_hint, build_file_access_path_hint, build_reply_accuracy_hint,
 };
 
-pub fn build_ask_system_prompt_lines() -> Vec<&'static str> {
+pub fn build_ask_system_prompt_lines() -> Vec<String> {
     vec![
-        "你是 AIALL 项目 Agent（Ask 模式）。只读问答，不修改任何文件。",
-        "",
-        "可用工具：list_dir、read_file、grep、search_files、search_symbols、git_status、git_diff。",
-        "",
-        "探索策略：",
-        "- 优先用 grep 而非 list_dir 遍历；",
-        "- 读大文件用 offset/limit 分段读取；",
-        "- 避免重复读取同一文件区域。",
-        "",
-        "回答结构：",
-        "- 直接结论优先；",
-        "- 多个入口/条件并列列出；",
-        "- 涉及「何时/什么条件下」的问题给出 AND 条件。",
-        "",
-        "截图处理：",
-        "- 若当前模型支持多模态且请求附带了图片，必须先查看图片再回答；",
-        "- 若模型不支持读图，明确说明并请用户描述界面细节或切换多模态模型。",
-        "",
-        "回复准确度：",
-        "- 不确定时明确说「不确定」；",
-        "- 对代码实现断言先用 grep 验证；",
-        "- 二元结论需完整正反证据。",
+        "你是 AIALL 项目 Agent（Ask 模式）。只读问答，不修改任何文件。".into(),
+        "".into(),
+        "可用工具：list_dir、read_file、grep、search_files、search_symbols、git_status、git_diff。".into(),
+        "".into(),
+        "探索策略：".into(),
+        "- 优先用 grep 而非 list_dir 遍历；".into(),
+        "- 读大文件用 offset/limit 分段读取；".into(),
+        "- 避免重复读取同一文件区域。".into(),
+        "".into(),
+        "回答结构：".into(),
+        "- 直接结论优先；".into(),
+        "- 多个入口/条件并列列出；".into(),
+        "- 涉及「何时/什么条件下」的问题给出 AND 条件。".into(),
+        "".into(),
+        "截图处理：".into(),
+        "- 若当前模型支持多模态且请求附带了图片，必须先查看图片再回答；".into(),
+        "- 若模型不支持读图，明确说明并请用户描述界面细节或切换多模态模型。".into(),
+        "".into(),
+        "界面反馈类问题（「有什么问题/不好看/被遮挡/重叠/太窄」等）：截图可见的视觉问题可直接描述；但涉及类名、CSS 属性、事件名、变量名、行号的代码机制断言必须先 grep/read 验证，未验证的必须标注「推断」或「需查代码确认」，禁止在未调用工具的情况下输出这类断言。".into(),
+        "".into(),
+        build_reply_accuracy_hint(),
     ]
 }
 
@@ -94,25 +93,26 @@ pub fn build_build_system_prompt_lines() -> Vec<&'static str> {
 mod tests {
     use super::*;
 
-    fn check_prompt_first_last(lines: &[&str], mode_keyword: &str, first: &str, last: &str) {
+    fn check_prompt_first_last<T: AsRef<str>>(lines: &[T], mode_keyword: &str, first: &str, last: &str) {
         assert!(
             !lines.is_empty(),
             "{} prompt should not be empty",
             mode_keyword
         );
         assert!(
-            lines[0].contains(mode_keyword),
+            lines[0].as_ref().contains(mode_keyword),
             "first line should contain '{}', got: {}",
             mode_keyword,
-            lines[0]
+            lines[0].as_ref()
         );
         assert_eq!(
-            lines[0], first,
+            lines[0].as_ref(),
+            first,
             "first line mismatch for {} mode",
             mode_keyword
         );
         assert_eq!(
-            lines[lines.len() - 1],
+            lines[lines.len() - 1].as_ref(),
             last,
             "last line mismatch for {} mode",
             mode_keyword
@@ -122,11 +122,19 @@ mod tests {
     #[test]
     fn test_build_ask_system_prompt_lines() {
         let lines = build_ask_system_prompt_lines();
-        check_prompt_first_last(
-            &lines,
-            "Ask",
-            "你是 AIALL 项目 Agent（Ask 模式）。只读问答，不修改任何文件。",
-            "- 二元结论需完整正反证据。",
+        assert_eq!(lines[0], "你是 AIALL 项目 Agent（Ask 模式）。只读问答，不修改任何文件。");
+        assert!(
+            lines.iter().any(|l| l.contains("界面反馈类问题")),
+            "ask prompt should include the UI-feedback code-claim rule"
+        );
+        let accuracy = lines.last().unwrap();
+        assert!(
+            accuracy.contains("行为断言证据链"),
+            "ask prompt should include rule 17, tail: {accuracy}"
+        );
+        assert!(
+            accuracy.contains("零工具代码断言禁止"),
+            "ask prompt should include rule 18, tail: {accuracy}"
         );
     }
 

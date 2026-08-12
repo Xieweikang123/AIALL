@@ -29,8 +29,9 @@ use super::policy::AgentRunPolicy;
 use super::probe_guard::{build_workspace_cleanup_nudge, ProbeArtifactTracker};
 use super::run_emit::emit;
 use super::vision_consultative::{
-    build_consultative_ui_appearance_retry_hint, build_vision_consultative_locate_retry_hint,
-    consultative_appearance_needs_vue_read, should_block_consultative_vision_locate_finalize,
+    build_consultative_code_mechanism_retry_hint, build_consultative_ui_appearance_retry_hint,
+    build_vision_consultative_locate_retry_hint, consultative_appearance_needs_vue_read,
+    is_speculative_code_mechanism_answer, should_block_consultative_vision_locate_finalize,
     ConsultativeVisionFinalizeInput,
 };
 use super::vision_pregrep::build_vision_consultative_read_after_prefgrep_hint;
@@ -192,7 +193,11 @@ pub(crate) fn handle_final_turn(
                 params.vision_locate_read_used,
             );
         let nudge = if appearance_needs_read {
-            build_consultative_ui_appearance_retry_hint(file_candidates)
+            if is_speculative_code_mechanism_answer(params.assistant_text) {
+                build_consultative_code_mechanism_retry_hint(file_candidates)
+            } else {
+                build_consultative_ui_appearance_retry_hint(file_candidates)
+            }
         } else if params.vision_auto_grep_had_matches && !params.vision_locate_read_used {
             build_vision_consultative_read_after_prefgrep_hint(file_candidates)
         } else {
