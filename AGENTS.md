@@ -41,7 +41,6 @@ AIALL 要做 **Cursor 类通用编程助手**：会查仓库、会改、会验�
 - `src/components/vibe/FilePanel.vue` — 文件面板
 - `src/components/vibe/EditorPanel.vue` — 编辑器
 - `src/components/vibe/ChatPanel.vue` — 聊天面板
-- `src/components/vibe/AppToolbar.vue` — 工具栏
 - `src/components/vibe/AppToolbar.vue` — 工具栏（含项目历史下拉 `project-history-*`）
 - `src/components/FileTreeNode.vue` — 文件树节点
 - `src/composables/useGitPanel.ts` — Git 状态管理
@@ -69,7 +68,15 @@ AIALL 要做 **Cursor 类通用编程助手**：会查仓库、会改、会验�
 | `npm run dev` | **默认**：Tauri 桌面版（Agent / Git / FS 全走 Rust） |
 | `npm run tauri:build` | 打包桌面应用 |
 | `npm run dev:web` | 浏览器 UI 预览（Agent/Git/FS 不可用，提示使用桌面版） |
-| `npm run test:rust-agent` | Rust Agent parity 单测 |
+| `npm test` | Vitest：契约 / 编排 / shared |
+| `npx vitest run <文件>` | 跑单个测试文件（覆盖 `src/**`、`server/**`、`shared/**`） |
+| `npm run test:rust-agent` | Rust Agent parity 单测（等价 `cargo test agent:: --quiet`，在 `src-tauri/`） |
+| `npm run agent:test-guards` | 完整防线：Rust parity + 编排 guard + 机制回归 |
+| `npm run agent:regression` | 先 Rust 回归向量，再 TS 分类器 / 报告 |
+| `npm run agent:smoke` | 无头桌面 Agent（`cargo run --bin agent-smoke` → `agent_run_headless`） |
+| `npm run lint` / `npm run typecheck` | 均为 `vue-tsc --noEmit`（无 ESLint） |
+
+`agent:smoke` 走 Rust 桌面 Agent，需要环境变量：`AIALL_ENDPOINT`、`AIALL_API_KEY`、`AIALL_MODEL`，可选 `AIALL_PROJECT`、`AIALL_TIMEOUT_MS`。
 
 Sidecar 已按策略 B 删除，见 [`SIDECAR_DELETION.md`](SIDECAR_DELETION.md)。桌面功能以 `src-tauri/` 为准；`server/` 仅 Vitest 契约 / parity（非 HTTP）。SSOT 见 [`AGENT_SSOT.md`](AGENT_SSOT.md)：Rust 跑行为、TS 测契约、shared 钉常量。
 
@@ -81,7 +88,7 @@ Sidecar 已按策略 B 删除，见 [`SIDECAR_DELETION.md`](SIDECAR_DELETION.md)
 |------|-----------|------------|
 | **通用分类器** | `src/orchestration/generic/`、`agentContinuation.ts`、`agentStructuralPatterns.ts`、`agentRunPolicy.ts` 等 | 仅消息**形态**（代码块、步骤结构、路径、句型）；禁止业务名词与静态个案修复话术 |
 | **通用机制** | `agentReplyAccuracy.ts`、`agentConsultativeTopics.ts`、`agentExplorationBudget.ts` 等 | 准确度/trace 契约；同分类器 guard |
-| **产品编排** | `src/orchestration/product/`、`visionMessage.ts`、`agentAskPrompt.ts`、`agentContextBuilder.ts`、`vibeAgent.ts` 等 | AIALL 模式（Ask/Build/Plan）、截图读图、会话审计；**可以**写产品语义，但仍禁止 `FilePanel` 等内部组件名 |
+| **产品编排** | `src/orchestration/product/`（`userIntentHints.ts`、`visionMessage.ts`、`agentAskPrompt.ts`、`agentExplorePrompt.ts`、`agentPlanPrompt.ts`、`agentTopicFollowUp.ts`） | AIALL 模式（Ask/Build/Plan）、截图读图、会话审计；**可以**写产品语义，但仍禁止 `FilePanel` 等内部组件名 |
 
 路径清单见 `src/orchestration/orchestrationTiers.ts`；`agentOrchestrationGuard.test.ts` 按层扫描。
 
@@ -103,7 +110,7 @@ Sidecar 已按策略 B 删除，见 [`SIDECAR_DELETION.md`](SIDECAR_DELETION.md)
 
 ## Agent 回复准确度（通用）
 
-修改 Agent **答疑/探索/修改** 相关 system prompt（如 `agentReplyAccuracy.ts`、`vibeAgent.ts`、`agentAskPrompt.ts`）时：
+修改 Agent **答疑/探索/修改** 相关 system prompt（如 `agentReplyAccuracy.ts`、`agentAskPrompt.ts`、`agentExplorePrompt.ts`）时：
 
 - **应使用**结构契约：行为问题 trace 调用链、二元结论需完整证据、patch 后验证、多轮自洽更正
 - **禁止**把具体功能名、字段名、个案 bug 边界写进全局提示
@@ -118,7 +125,7 @@ AIALL 的 Vibe 会话文件**不在项目目录内**，存储在 AppData Roaming
 - 会话索引：`%APPDATA%\aiall\vibe-chat-sessions\chat-store.json`
 - 调试日志：`%APPDATA%\aiall\debug-logs\`（打开项目时为 `debug-logs\<项目名_hash>\`，如 `debug.log`、`tab-perf.log`）
 
-**Agent 读取会话文件**：`read_file` / `list_dir` 支持读本机任意路径（绝对路径），也识别逻辑前缀 `aiall/vibe-chat-sessions/`（自动映射到上述 AppData 目录）。大 JSON 请用 `offset` / `limit` 分段读。`write_file` / `patch_file` / `delete_file` 仍仅限项目内相对路径。
+**Agent 读取会话文件**：会话文件（`chat-*.json`）**不允许**通过 `read_file` / `list_dir` 直接读取（`resolve_readable_path` 已拦截 `aiall/vibe-chat-sessions/` 前缀）。跨会话回忆请使用 **`search_sessions`** 工具：按关键词搜索所有历史会话，返回清洗过的片段与来源会话 id。`write_file` / `patch_file` / `delete_file` 仍仅限项目内相对路径。
 
 ## 开发约定
 
@@ -127,6 +134,8 @@ AIALL 的 Vibe 会话文件**不在项目目录内**，存储在 AppData Roaming
   - 桌面版（Tauri）：`%APPDATA%\aiall\debug-logs\`（有打开项目时为 `debug-logs\<项目名_hash>\`），如 `debug.log`、`tab-perf.log`
   - Node/Vitest 参考实现：仓库内 `.debug/debug.log`（已在 `.gitignore`）
   - 调试完成后可删除对应日志文件
+- **`.aiall/`（项目根目录，已 gitignore）**：Agent 的项目状态目录——`project-memory.md`、`project-knowledge.md`、`skills/`、`plans/`、`exploration/`、`probe/`、`memory/`（条目式长期记忆）。Git 面板禁止 stage `.aiall/` 路径；Agent 写工具（`write_file`/`patch_file`）禁止写 `.aiall/exploration/` 与 `.aiall/memory/`（长期记忆只能走 `memory_write` 工具，唯一入口）
+- **Rust 行为改动**：改 `src-tauri/` 后必须 `cargo check` 通过；行为真相源见 `AGENT_SSOT.md`（改行为只改 Rust，禁止在 `server/` 重写同名实现）
 
 ## Rust 化迁移
 
@@ -173,9 +182,9 @@ AIALL 的 Vibe 会话文件**不在项目目录内**，存储在 AppData Roaming
 
 ## 文件膨胀约束
 
-`src/composables/useAgentRun.ts` 已拆出 `useAgentChainScroll.ts`、`useAgentStreamPatch.ts` 两个子 composable，主文件负责 Agent 运行编排与 SSE 事件分发。
+`src/composables/useAgentRun.ts` 已拆出 `useAgentChainScroll.ts`、`useAgentStreamPatch.ts`、`useAgentEventHandlers.ts`、`useAgentSSEConnection.ts` 等子 composable，主文件负责 Agent 运行编排并委托分发。
 
-- **新增 SSE 事件 handler**：一律加入 `handleAgentEvent` 的 `agentEventHandlers` 分发表，handler 实现为独立函数；禁止往 `handleAgentEvent` 主体内塞 if-else 分支
+- **新增 SSE 事件 handler**：一律加入 `useAgentEventHandlers.ts` 中 `handleAgentEvent` 的 `agentEventHandlers` 分发表（Map），handler 实现为独立函数；禁止往 `handleAgentEvent` 主体内塞 if-else 分支
 - **新增流式/UI patch/滚动逻辑**：进对应的子 composable（`useAgentStreamPatch` / `useAgentChainScroll`），禁止内联回 `useAgentRun.ts`
 - **新增 stall/resume/autoResume 逻辑**：可与现有 `recoverAgentRunFromStall`、`trySilentContinue` 等 同处 `useAgentRun.ts`，但若该职责簇再增长，应抽新子 composable 而非继续堆叠
 - **修改前先确认层级**：纯展示/节流逻辑 → 子 composable；有状态编排（依赖 `runManager` + `assistantMsg` 双向变更）→ 主文件

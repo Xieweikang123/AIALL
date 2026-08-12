@@ -23,6 +23,7 @@
 |------|------|
 | Agent 主循环 | `src-tauri/src/agent/run*.rs` |
 | 工具执行 | `agent/tool_exec.rs` |
+| 长期记忆 / 会话检索 | `agent/memory_store.rs`（`memory_write` / `search_sessions` 工具） |
 | 策略 | `agent/policy.rs`（TS 契约侧：`src/services/agentRunPolicy.ts`） |
 | Finish / explore guard | `finish_gate.rs` / `explore_guard.rs` / `exploration.rs` |
 | FS / Git / AI / Web | `fs/` `git/` `ai/` `commands/web.rs` |
