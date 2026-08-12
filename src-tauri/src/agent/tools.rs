@@ -187,6 +187,37 @@ pub fn agent_tool_definitions() -> Value {
             "required": ["url"]
           }
         }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "memory_write",
+          "description": "写入项目长期记忆。适用于跨会话仍有价值的稳定事实、架构决策、用户偏好；禁止写入易腐烂信息（行号、临时状态、一次性分析、命令输出）。内容应为单句可核实的事实陈述。",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "content": { "type": "string", "description": "记忆内容：单句稳定事实/决策/偏好，禁止包含行号或代码片段位置" },
+              "scope": { "type": "string", "enum": ["architecture", "decision", "preference", "fact"], "description": "记忆类别：architecture=架构认知，decision=关键决策，preference=用户偏好，fact=通用事实" },
+              "source": { "type": "string", "description": "来源描述（可选，如会话 id 或任务名）" }
+            },
+            "required": ["content", "scope"]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "search_sessions",
+          "description": "搜索所有历史会话（跨会话记忆）。当你需要回忆之前会话讨论过的内容、决策或排查记录时使用；返回匹配的会话片段与来源会话 id。",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "query": { "type": "string", "description": "搜索关键词（可用空格分隔多个词）" },
+              "max_results": { "type": "number", "description": "最大结果数，默认 5，最大 10" }
+            },
+            "required": ["query"]
+          }
+        }
       }
     ])
 }
@@ -202,6 +233,7 @@ pub fn read_only_tool_names() -> Vec<&'static str> {
         "git_diff",
         "web_search",
         "web_extract",
+        "search_sessions",
     ]
 }
 
@@ -218,10 +250,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_agent_tool_definitions_returns_12_tools() {
+    fn test_agent_tool_definitions_returns_15_tools() {
         let defs = agent_tool_definitions();
         let arr = defs.as_array().unwrap();
-        assert_eq!(arr.len(), 13);
+        assert_eq!(arr.len(), 15);
     }
 
     #[test]
@@ -247,14 +279,16 @@ mod tests {
             "run_command",
             "web_search",
             "web_extract",
+            "memory_write",
+            "search_sessions",
         ] {
             assert!(names.contains(name), "missing tool: {}", name);
         }
     }
 
     #[test]
-    fn test_read_only_tool_names_returns_eight() {
-        assert_eq!(read_only_tool_names().len(), 9);
+    fn test_read_only_tool_names_returns_ten() {
+        assert_eq!(read_only_tool_names().len(), 10);
     }
 
     #[test]
@@ -270,10 +304,12 @@ mod tests {
             "git_diff",
             "web_search",
             "web_extract",
+            "search_sessions",
         ] {
             assert!(names.contains(name));
         }
         assert!(!names.contains(&"write_file"));
+        assert!(!names.contains(&"memory_write"));
     }
 
     #[test]

@@ -517,6 +517,14 @@ pub async fn build_context_blocks(input: ContextBuildInput<'_>) -> ContextBlocks
             }
         }
 
+        // 5b. 长期记忆 — 条目式全局记忆（.aiall/memory/index.json）
+        let memory_index = super::memory_store::read_memory_index(input.project_path).await;
+        let active_mem = super::memory_store::active_memory_entries(&memory_index);
+        let memory_block = super::memory_store::format_memory_block(&active_mem);
+        if !memory_block.is_empty() {
+            parts.push(format!("\n\n{}", memory_block));
+        }
+
         // 6. 知识库 — 已禁用（AI 自产自消的闭环𑁋行号过时问题），代码保留供后续启用
         if false {
             let knowledge =

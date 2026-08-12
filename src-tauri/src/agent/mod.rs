@@ -14,6 +14,7 @@ pub mod finish_gate;
 mod intent_hints;
 mod knowledge_explore;
 mod knowledge_manifest;
+pub mod memory_store;
 mod patch;
 mod plan_path;
 mod policy;

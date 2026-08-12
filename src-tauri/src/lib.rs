@@ -180,6 +180,8 @@ pub fn run() {
             commands::project::project_knowledge_save,
             commands::project::project_skills_list,
             commands::project::project_skills_save,
+            commands::project::memory_list,
+            commands::project::memory_delete,
             commands::project::project_architect_review_get,
             commands::project::project_architect_review_save,
             commands::project::project_architect_review_context,

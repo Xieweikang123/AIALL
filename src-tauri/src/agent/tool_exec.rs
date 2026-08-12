@@ -98,6 +98,13 @@ pub async fn execute_tool(
                     file_diff: None,
                 };
             }
+            if super::memory_store::is_memory_path(path) {
+                return ToolExecOutcome {
+                    ok: false,
+                    message: "错误：.aiall/memory/ 为长期记忆受控目录，请使用 memory_write 工具写入。".into(),
+                    file_diff: None,
+                };
+            }
         }
         if let Some(msg) = block_write(ctx.mode, name) {
             return ToolExecOutcome {
@@ -171,6 +178,14 @@ pub async fn execute_tool(
         }
         "web_extract" => {
             let (ok, msg) = exec_web_extract(args, ctx.web_proxy_url).await;
+            (ok, msg, None)
+        }
+        "memory_write" => {
+            let (ok, msg) = exec_memory_write(ctx, args).await;
+            (ok, msg, None)
+        }
+        "search_sessions" => {
+            let (ok, msg) = exec_search_sessions(ctx, args).await;
             (ok, msg, None)
         }
         _ => (false, format!("未知工具: {name}"), None),
@@ -802,6 +817,71 @@ async fn exec_web_extract(args: &Value, proxy_url: Option<&str>) -> (bool, Strin
     }
     let mode = args.get("mode").and_then(|v| v.as_str()).unwrap_or("auto");
     match crate::web_fetch::web_extract_auto(url, proxy_url, mode).await {
+        Ok(text) => (true, text),
+        Err(e) => (false, e),
+    }
+}
+
+const MEMORY_SCOPES: [&str; 4] = ["architecture", "decision", "preference", "fact"];
+
+async fn exec_memory_write(ctx: &ToolExecContext<'_>, args: &Value) -> (bool, String) {
+    if let Some(msg) = block_write(ctx.mode, "memory_write") {
+        return (false, msg);
+    }
+    let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
+    let scope = args.get("scope").and_then(|v| v.as_str()).unwrap_or("");
+    if content.trim().is_empty() {
+        return (false, "错误：缺少 content".into());
+    }
+    if !MEMORY_SCOPES.contains(&scope) {
+        return (
+            false,
+            format!("错误：scope 必须是 {} 之一", MEMORY_SCOPES.join(" / ")),
+        );
+    }
+    let source = args
+        .get("source")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim().to_string());
+    match super::memory_store::add_memory_entry(
+        ctx.project_path,
+        content,
+        scope,
+        source,
+        None,
+    )
+    .await
+    {
+        Ok(result) => {
+            let mut parts = vec![format!("已写入长期记忆 [{}]：{}", result.scope, content.trim())];
+            if !result.superseded.is_empty() {
+                parts.push(format!("（覆盖 {} 条旧记忆）", result.superseded.len()));
+            }
+            if !result.archived.is_empty() {
+                parts.push(format!(
+                    "（该类别达上限，归档 {} 条最旧记忆）",
+                    result.archived.len()
+                ));
+            }
+            parts.push(format!("当前活跃记忆 {} 条", result.total_active));
+            (true, parts.join(" "))
+        }
+        Err(e) => (false, e),
+    }
+}
+
+async fn exec_search_sessions(ctx: &ToolExecContext<'_>, args: &Value) -> (bool, String) {
+    let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
+    if query.trim().is_empty() {
+        return (false, "错误：缺少 query".into());
+    }
+    let max_results = args
+        .get("max_results")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(5)
+        .min(10) as usize;
+    match super::memory_store::search_sessions(query, max_results).await {
         Ok(text) => (true, text),
         Err(e) => (false, e),
     }
