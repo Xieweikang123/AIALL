@@ -233,20 +233,29 @@ function onLinkClick() {
 }
 
 const previewLines = computed((): string[] => {
-  if (props.step.name === "run_command") {
-    const raw = props.step.fullResult?.trim();
-    if (!raw) return [];
-    return parseRunCommandOutputLines(raw);
+  const lines: string[] = [];
+
+  const args = props.step.args;
+  if (args && Object.keys(args).length) {
+    try {
+      const json = JSON.stringify(args, null, 2);
+      lines.push(...json.split("\n"));
+    } catch {
+      lines.push(String(args));
+    }
   }
 
-  const raw = props.step.fullResult?.trim();
-  if (!raw || raw === "（无匹配）" || raw === "（无匹配文件）") return [];
-  return raw
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .slice(0, 6)
-    .map((line) => (line.length > 96 ? `${line.slice(0, 96)}…` : line));
+  if (props.step.name === "run_command") {
+    const raw = props.step.fullResult?.trim();
+    if (raw) lines.push(...parseRunCommandOutputLines(raw));
+  } else {
+    const raw = props.step.fullResult?.trim();
+    if (raw && raw !== "（无匹配）" && raw !== "（无匹配文件）") {
+      lines.push(...raw.split("\n"));
+    }
+  }
+
+  return lines;
 });
 
 const parsedStep = computed(() => {
@@ -675,9 +684,9 @@ const parsedStep = computed(() => {
   font-size: 10px;
   line-height: 1.35;
   color: rgba(148, 163, 184, 0.5);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 @keyframes pulse {

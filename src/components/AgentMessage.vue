@@ -12,6 +12,7 @@
         :activity-expanded="isActivityExpanded(msg)"
         :can-execute-plan="canExecutePlan"
         :chat-mode="msg.chatMode"
+        :intent-trace="msg.intentTrace"
         :tools="msg.tools"
         :agent-turn="activeAgentTurn(msg)"
         :agent-max-turns="msg.agentMaxTurns"

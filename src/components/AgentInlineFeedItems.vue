@@ -1,4 +1,8 @@
 <template>
+  <IntentTraceCard
+    v-if="intentTrace && !nested"
+    :trace="intentTrace"
+  />
   <template v-for="item in displayItems" :key="renderKey(item)">
     <div
       v-if="item.kind === 'text' && item.variant === 'narrative' && item.text.trim()"
@@ -121,6 +125,7 @@ import ChatMarkdown from "./ChatMarkdown.vue";
 import PlanDocumentBlock from "./PlanDocumentBlock.vue";
 import ProjectReportBlock from "./ProjectReportBlock.vue";
 import AgentProcessStepList from "./AgentProcessStepList.vue";
+import IntentTraceCard from "./IntentTraceCard.vue";
 import type { InlineFeedItem, InlineFeedProcessItem } from "../services/agentInlineFeed";
 import { sanitizeFeedThoughtText } from "../services/agentProgressMarker";
 import { enrichPlanMarkdownForDisplay } from "../services/planDocumentDisplay";
@@ -143,6 +148,16 @@ const props = withDefaults(
     isRunning: boolean;
     chatMode?: "ask" | "build" | "plan" | "explore" | "auto";
     canExecutePlan?: boolean;
+    intentTrace?: {
+      ruleResult?: string;
+      aiRawResponse?: string;
+      aiMessages?: Array<{ role: string; content: string }>;
+      finalResult?: string;
+      skippedAi?: boolean;
+      aiModel?: string;
+      elapsedMs?: number;
+      aiPrimary?: string;
+    };
     layoutEnhanceReady?: boolean;
     planFilePath?: string;
     messageId?: string;

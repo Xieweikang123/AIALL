@@ -135,13 +135,13 @@ type StepRow = {
   resultPreview: string;
 };
 
-const MAX_ARG_CHARS = 400;
-const MAX_RESULT_CHARS = 2000;
+const MAX_ARG_CHARS = 100000;
+const MAX_RESULT_CHARS = 200000;
 
 function formatArgs(tool: AgentRoundTool): string {
   if (!tool.args) return "";
   try {
-    return JSON.stringify(tool.args);
+    return JSON.stringify(tool.args, null, 2);
   } catch {
     return String(tool.args);
   }

@@ -11,6 +11,7 @@
         :is-running="isRunning"
         :chat-mode="chatMode"
         :can-execute-plan="canExecutePlan"
+        :intent-trace="intentTrace"
         :layout-enhance-ready="layoutEnhanceReady"
         :plan-file-path="planFilePath"
         :message-id="messageId"
@@ -54,6 +55,16 @@ const props = withDefaults(
     isRunning: boolean;
     chatMode?: "ask" | "build" | "plan" | "explore" | "auto";
     canExecutePlan?: boolean;
+    intentTrace?: {
+      ruleResult?: string;
+      aiRawResponse?: string;
+      aiMessages?: Array<{ role: string; content: string }>;
+      finalResult?: string;
+      skippedAi?: boolean;
+      aiModel?: string;
+      elapsedMs?: number;
+      aiPrimary?: string;
+    };
     layoutEnhanceReady?: boolean;
     planFilePath?: string;
     currentStatus?: string;
@@ -91,6 +102,9 @@ const toolCount = computed(() => liveTools.value.length);
 const hasAnswerContent = computed(() => props.inlineItems.some((item) => item.kind === "text" && item.text.trim()));
 
 const toolDefaultVisible = computed(() => {
+  // Running: keep every step visible for real-time feedback; completed messages fold
+  // excess steps behind the "展开全部" toggle (full content is one click away).
+  if (props.isRunning) return 999;
   if (props.activityDetailed) return 12;
   if (props.chatMode === "ask") return 3;
   if (props.chatMode === "build" || props.chatMode === "plan") return 5;

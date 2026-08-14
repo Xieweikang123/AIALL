@@ -6,6 +6,7 @@
       :is-running="isRunning"
       :chat-mode="chatMode"
       :can-execute-plan="canExecutePlan"
+      :intent-trace="intentTrace"
       :layout-enhance-ready="layoutEnhanceReady"
       :current-status="currentStatus"
       :has-running-tool="hasRunningTool"
@@ -48,6 +49,16 @@ const props = withDefaults(
     activityDetailed?: boolean;
     activityExpanded?: boolean;
     canExecutePlan?: boolean;
+    intentTrace?: {
+      ruleResult?: string;
+      aiRawResponse?: string;
+      aiMessages?: Array<{ role: string; content: string }>;
+      finalResult?: string;
+      skippedAi?: boolean;
+      aiModel?: string;
+      elapsedMs?: number;
+      aiPrimary?: string;
+    };
     chatMode?: "ask" | "build" | "plan" | "explore" | "auto";
     showProcess?: boolean;
     compactFeed?: boolean;
