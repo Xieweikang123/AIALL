@@ -5,11 +5,11 @@ use super::exploration::{
     build_exploration_archive_write_blocked_message, is_exploration_archive_path,
 };
 use super::explore_guard::{
-    build_blocked_grep_after_locate_message, build_blocked_grep_message,
+    build_blocked_grep_after_locate_message,
     build_low_signal_vision_locate_grep_message, build_overly_broad_vision_grep_message,
     build_search_files_content_query_message,
     check_patch_old_string_from_reads, consume_patch_recovery_read, invalidate_file_read_cache,
-    invalidate_file_read_state, is_blocked_grep_after_locate, is_blocked_grep_after_vision_misread,
+    invalidate_file_read_state, is_blocked_grep_after_locate,
     is_low_signal_vision_locate_grep, is_overly_broad_vision_grep, is_search_files_content_query,
     is_vision_grep_low_spread, mark_patch_recovery_file,
     record_grep_hit_vue_files, require_prior_read, ToolGuardState,
@@ -376,9 +376,6 @@ async fn exec_grep(ctx: &mut ToolExecContext<'_>, args: &Value) -> (bool, String
         .unwrap_or("");
     if pattern.is_empty() {
         return (false, "错误：缺少 pattern".into());
-    }
-    if is_blocked_grep_after_vision_misread(pattern, ctx.tool_guard.vision_misread_active) {
-        return (false, build_blocked_grep_message(pattern));
     }
     if ctx.tool_guard.vision_locate_active && !ctx.tool_guard.vision_anchor_quotes.is_empty() {
         let extra: Vec<&str> = ctx

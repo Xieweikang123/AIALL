@@ -2,7 +2,7 @@ use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
-use super::vision::{extract_visible_anchor_quotes, suggests_embedded_layout_misread};
+use super::vision::extract_visible_anchor_quotes;
 
 static AGENT_TOOL_GUARD_FAILURE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
@@ -79,13 +79,6 @@ pub fn consultative_explore_signature(
 
 // ── Grep / search guard ──
 
-static VISION_MISREAD_BLOCKED_GREP_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-    r"(?i)(?:[\w-]+-)?(?:bottom|footer|toolbar|status|action)(?:-(?:row|bar|area))?|(?:layout|container)-(?:bottom|footer)|transform\s*\|\s*will-change",
-  )
-  .unwrap()
-});
-
 static POST_LOCATE_BLOCKED_GREP_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
     r"(?i)(?:^|\|)transform(?:\s*\||$)|will-change|(?:[\w-]+-)?(?:bottom|footer|toolbar|status|action)(?:-(?:row|bar|area))?",
@@ -119,10 +112,6 @@ pub fn text_confirms_teleport_to_body(text: &str) -> bool {
         || (text.contains("<Teleport") && text.contains("to=\"body\""))
 }
 
-pub fn is_blocked_grep_after_vision_misread(pattern: &str, vision_misread_active: bool) -> bool {
-    vision_misread_active && VISION_MISREAD_BLOCKED_GREP_RE.is_match(pattern.trim())
-}
-
 pub fn is_blocked_grep_after_locate(
     pattern: &str,
     patch_anchor_located: bool,
@@ -139,13 +128,6 @@ pub fn is_blocked_grep_after_locate(
         && Regex::new(r"(?i)\btransform\b")
             .map(|re| re.is_match(p))
             .unwrap_or(false)
-}
-
-pub fn build_blocked_grep_message(pattern: &str) -> String {
-    format!(
-    "错误：读图已判定控件更可能是浮层/绝对定位错位，不应 grep「{pattern}」去查底栏/流式布局。\
-     请改用与浮层/定位相关的结构符号检索（如 position、portal/Teleport、浮层 class），再 read 核对后再改；勿预设具体修法。"
-  )
 }
 
 pub fn build_blocked_grep_after_locate_message(pattern: &str) -> String {
@@ -482,7 +464,6 @@ pub struct ToolGuardState {
     pub read_paths: HashSet<String>,
     pub grep_hit_vue_files: HashSet<String>,
     pub patch_recovery_files: HashSet<String>,
-    pub vision_misread_active: bool,
     pub patch_anchor_located: bool,
     pub teleport_body_confirmed: bool,
     pub vision_locate_active: bool,
@@ -499,9 +480,6 @@ impl ToolGuardState {
     }
 
     pub fn note_vision_assistant_text(&mut self, text: &str) {
-        if suggests_embedded_layout_misread(text) {
-            self.vision_misread_active = true;
-        }
         let quotes = extract_visible_anchor_quotes(text);
         if !quotes.is_empty() {
             self.vision_anchor_quotes = quotes;
@@ -703,29 +681,7 @@ mod tests {
     }
 
     #[test]
-    fn blocked_grep_after_vision_misread() {
-        assert!(is_blocked_grep_after_vision_misread(
-            "chat-action-row|chat-status-row",
-            true
-        ));
-        assert!(!is_blocked_grep_after_vision_misread(
-            "quote-floating",
-            true
-        ));
-        assert!(!is_blocked_grep_after_vision_misread(
-            "chat-action-row",
-            false
-        ));
-    }
-
-    #[test]
     fn blocked_grep_messages_block_direction_without_fix_recipe() {
-        let misread = build_blocked_grep_message("chat-action-row");
-        assert!(misread.contains("不应 grep"));
-        assert!(misread.contains("勿预设具体修法"));
-        assert!(!misread.contains("show*At"));
-        assert!(!misread.contains("请 patch"));
-
         let after_locate = build_blocked_grep_after_locate_message("transform");
         assert!(after_locate.contains("不应再 grep"));
         assert!(after_locate.contains("勿预设唯一修法路径"));
