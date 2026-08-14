@@ -7,12 +7,12 @@ use super::exploration::{
 use super::explore_guard::{
     build_blocked_grep_after_locate_message, build_blocked_grep_message,
     build_low_signal_vision_locate_grep_message, build_overly_broad_vision_grep_message,
-    build_search_files_content_query_message, check_overlapping_read,
+    build_search_files_content_query_message,
     check_patch_old_string_from_reads, consume_patch_recovery_read, invalidate_file_read_cache,
     invalidate_file_read_state, is_blocked_grep_after_locate, is_blocked_grep_after_vision_misread,
     is_low_signal_vision_locate_grep, is_overly_broad_vision_grep, is_search_files_content_query,
-    is_vision_grep_low_spread, mark_patch_recovery_file, read_line_range_from_args,
-    record_grep_hit_vue_files, record_read_range, require_prior_read, ToolGuardState,
+    is_vision_grep_low_spread, mark_patch_recovery_file,
+    record_grep_hit_vue_files, require_prior_read, ToolGuardState,
 };
 use super::plan_path::plan_document_build_mode_block;
 use super::probe_guard::{
@@ -55,39 +55,6 @@ fn append_tool_exec_log(project_path: &str, tool_name: &str, path: &str, ok: boo
         "{} path=\"{}\" status={} error=\"{}\"",
         tool_name, path, status, error
     );
-}
-
-/// Serve an overlapping read from cache instead of hard-blocking it. The overlap guard
-/// assumes the requested content is still visible in the model's context; after context
-/// compaction / per-turn truncation that may no longer hold, so rejecting would deadlock
-/// the agent. When we still hold the full file content (or the exact slice), return it.
-/// Repetition is still capped via `read_slice_repeat_counts` to keep the guard's teeth.
-fn cached_overlap_slice(
-    guard: &mut ToolGuardState,
-    file_key: &str,
-    slice_key: &str,
-    offset: u32,
-    limit: u32,
-) -> Option<String> {
-    let content = guard
-        .read_slice_cache
-        .get(slice_key)
-        .cloned()
-        .or_else(|| {
-            guard
-                .read_cache
-                .get(file_key)
-                .map(|full| slice_content(full, offset as usize, limit as usize))
-        })?;
-    let repeats = guard
-        .read_slice_repeat_counts
-        .entry(slice_key.to_string())
-        .or_insert(0);
-    *repeats += 1;
-    if *repeats > super::exploration::MAX_READ_SLICE_REPEATS {
-        return None;
-    }
-    Some(content)
 }
 
 pub struct ToolExecContext<'a> {
@@ -275,58 +242,36 @@ async fn exec_read_file(ctx: &mut ToolExecContext<'_>, args: &Value) -> (bool, S
                 .unwrap_or(500)
                 .min(800)
                 .max(1) as u32;
-            let line_range = read_line_range_from_args(offset_u32, limit_u32);
             let slice_key = format!("{file_key}:{offset_u32}:{limit_u32}");
             let patch_recovery = consume_patch_recovery_read(ctx.tool_guard, &file_key);
 
             if patch_recovery {
                 invalidate_file_read_state(ctx.tool_guard, &file_key);
-            } else if let Some(err) =
-                check_overlapping_read(&file_key, line_range, &ctx.tool_guard.read_file_ranges)
-            {
-                // Ghost-range escape hatch: the overlap guard still lists this file as
-                // already-read, but the model may have lost the content to context
-                // compaction / truncation. If the content is cached, serve it instead of
-                // rejecting, so the agent can actually move on.
-                if let Some(content) = cached_overlap_slice(
-                    ctx.tool_guard,
-                    &file_key,
-                    &slice_key,
-                    offset_u32,
-                    limit_u32,
-                ) {
-                    append_tool_exec_log(
-                        ctx.project_path,
-                        "read_file",
-                        &file_key,
-                        true,
-                        "served from cache (overlap)",
-                    );
-                    return (
-                        true,
-                        format!("{content}\n（命中已读缓存，已返回该区间内容）"),
-                    );
-                }
-                append_tool_exec_log(ctx.project_path, "read_file", &file_key, false, &err);
-                return (false, err);
             } else if let Some(cached) = ctx.tool_guard.read_slice_cache.get(&slice_key) {
-                let repeats = ctx
-                    .tool_guard
-                    .read_slice_repeat_counts
-                    .entry(slice_key.clone())
-                    .or_insert(0);
-                *repeats += 1;
-                if *repeats > super::exploration::MAX_READ_SLICE_REPEATS {
-                    let err_msg = format!(
-            "错误：已连续 {repeats} 次读取相同片段 {file_key}（offset {offset_u32} limit {limit_u32}），请基于已有内容继续分析或 patch_file，若需更多行请一次读更大范围（300-500 行），勿重复读相同片段。"
-          );
-                    append_tool_exec_log(ctx.project_path, "read_file", &file_key, false, &err_msg);
-                    return (false, err_msg);
-                }
-                return (
+                // Same slice re-read: serve cached content, never error.
+                append_tool_exec_log(
+                    ctx.project_path,
+                    "read_file",
+                    &file_key,
                     true,
-                    format!("{cached}\n（与上次 read_file 相同，已省略重复读取）"),
+                    "served from cache",
                 );
+                return (true, format!("{cached}\n（命中已读缓存，已返回该区间内容）"));
+            } else if let Some(full) = ctx.tool_guard.read_cache.get(&file_key) {
+                // Full file already read: serve the requested window from cache instead of
+                // re-reading (overlapping / shifted windows are cheap this way).
+                let content = slice_content(full, offset_u32 as usize, limit_u32 as usize);
+                ctx.tool_guard
+                    .read_slice_cache
+                    .insert(slice_key, content.clone());
+                append_tool_exec_log(
+                    ctx.project_path,
+                    "read_file",
+                    &file_key,
+                    true,
+                    "served from cache (full file)",
+                );
+                return (true, format!("{content}\n（命中已读缓存，已返回该区间内容）"));
             }
 
             let offset = offset_u32 as usize;
@@ -346,11 +291,6 @@ async fn exec_read_file(ctx: &mut ToolExecContext<'_>, args: &Value) -> (bool, S
                             if r2.ok {
                                 let content = slice_content(&r2.content, offset, limit);
                                 let resolved_key = rel.replace('\\', "/");
-                                record_read_range(
-                                    &resolved_key,
-                                    line_range,
-                                    &mut ctx.tool_guard.read_file_ranges,
-                                );
                                 ctx.tool_guard.read_paths.insert(resolved_key);
                                 append_tool_exec_log(
                                     ctx.project_path,
@@ -384,9 +324,6 @@ async fn exec_read_file(ctx: &mut ToolExecContext<'_>, args: &Value) -> (bool, S
                 return (false, err_msg);
             }
             let content = slice_content(&result.content, offset, limit);
-            if !patch_recovery {
-                record_read_range(&file_key, line_range, &mut ctx.tool_guard.read_file_ranges);
-            }
             ctx.tool_guard
                 .read_slice_cache
                 .insert(slice_key, content.clone());
@@ -945,12 +882,8 @@ async fn exec_search_sessions(ctx: &ToolExecContext<'_>, args: &Value) -> (bool,
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        block_write, cached_overlap_slice, exec_list_dir, is_dangerous_command,
-    };
-    use super::{
-        check_overlapping_read, read_line_range_from_args, record_read_range, ToolGuardState,
-    };
+    use super::{block_write, exec_list_dir, is_dangerous_command};
+    use super::{check_patch_old_string_from_reads, ToolGuardState};
     use serde_json::json;
 
     #[tokio::test]
@@ -1002,51 +935,6 @@ mod tests {
     #[test]
     fn block_write_build_returns_none() {
         assert!(block_write("build", "写文件").is_none());
-    }
-
-    #[test]
-    fn cached_overlap_slice_serves_content_when_guard_would_block() {
-        let mut guard = ToolGuardState::default();
-        // Two overlapping successful reads -> a third overlapping read would be blocked.
-        record_read_range(
-            "src/foo.ts",
-            read_line_range_from_args(1, 100),
-            &mut guard.read_file_ranges,
-        );
-        record_read_range(
-            "src/foo.ts",
-            read_line_range_from_args(100, 100),
-            &mut guard.read_file_ranges,
-        );
-        assert!(
-            check_overlapping_read(
-                "src/foo.ts",
-                read_line_range_from_args(50, 40),
-                &guard.read_file_ranges
-            )
-            .is_some(),
-            "precondition: overlap guard blocks this read"
-        );
-
-        let body = (1..=60).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n");
-        guard.read_cache.insert("src/foo.ts".into(), body);
-
-        let served = cached_overlap_slice(&mut guard, "src/foo.ts", "src/foo.ts:50:2", 50, 2);
-        let content = served.expect("should serve from cache instead of blocking");
-        assert!(content.contains("line50") && content.contains("line51"), "got: {content}");
-
-        // Repeated identical overlap slices are still capped to keep guard teeth.
-        let _ = cached_overlap_slice(&mut guard, "src/foo.ts", "src/foo.ts:50:2", 50, 2);
-        assert!(
-            cached_overlap_slice(&mut guard, "src/foo.ts", "src/foo.ts:50:2", 50, 2).is_none(),
-            "repetition cap should still block"
-        );
-
-        // Without any cache the overlap block stays intact.
-        assert!(
-            cached_overlap_slice(&mut guard, "src/bar.ts", "src/bar.ts:1:50", 1, 50).is_none(),
-            "no cache -> no fallback"
-        );
     }
 
     #[test]

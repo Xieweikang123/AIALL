@@ -20,7 +20,6 @@ pub const EXPLORE_MAX_TOTAL_EXPLORE_HARD: u32 = 14;
 // ── File read guards ──
 pub const BUILD_MAX_READ_FILE_REPEATS: u32 = 3;
 pub const MAX_UNIQUE_READ_FILES_BEFORE_NUDGE: u32 = 4;
-pub const MAX_READ_SLICE_REPEATS: u32 = 2;
 
 // ── Misc ──
 pub const MAX_CONSECUTIVE_RUNTIME_TOOL_FAILURE_TURNS: u32 = 3;
