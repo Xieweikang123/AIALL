@@ -244,7 +244,7 @@ describe("agentCursorFeed", () => {
     expect(feed.filter((item) => item.kind === "action")).toHaveLength(3);
   });
 
-  it("suppresses thinking status while answer preview is streaming", () => {
+  it("keeps thinking status visible while answer preview is streaming", () => {
     const feed = buildCursorAgentFeed({
       groups: [],
       isRunning: true,
@@ -252,7 +252,7 @@ describe("agentCursorFeed", () => {
       answerPreview: "正在输出的正文",
       streaming: true,
     });
-    expect(feed.some((item) => item.kind === "status")).toBe(false);
+    expect(feed.some((item) => item.kind === "status")).toBe(true);
   });
 
   it("keeps in-feed planning status while waiting without answer preview", () => {
@@ -269,7 +269,7 @@ describe("agentCursorFeed", () => {
     }
   });
 
-  it("suppresses in-feed planning status when narrative or tools exist", () => {
+  it("keeps in-feed planning status when narrative or tools exist", () => {
     const feed = buildCursorAgentFeed({
       groups: [{
         turn: 1,
@@ -283,23 +283,23 @@ describe("agentCursorFeed", () => {
       answerPreview: "## 截图描述\n正文",
       streaming: false,
     });
-    expect(feed.some((item) => item.kind === "status")).toBe(false);
+    expect(feed.some((item) => item.kind === "status")).toBe(true);
   });
 
-  it("shouldSuppressFeedPlanningStatus covers streaming and answer preview", () => {
+  it("shouldSuppressFeedPlanningStatus always returns false", () => {
     expect(
       shouldSuppressFeedPlanningStatus({
         agentPhase: "streaming_model",
         streaming: true,
       }),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       shouldSuppressFeedPlanningStatus({
         agentPhase: "waiting_model",
         answerPreview: "已有正文",
         streaming: false,
       }),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       shouldSuppressFeedPlanningStatus({
         agentPhase: "waiting_model",
@@ -824,7 +824,7 @@ describe("agentCursorFeed", () => {
     expect(isAgentWaitingModelPhase({ agentPhase: "streaming_model" })).toBe(false);
   });
 
-  it("keeps three recent actions visible while running without compact feed", () => {
+  it("keeps all actions visible while running without compact feed", () => {
     const groups: AgentRoundGroupView[] = [{
       turn: 1,
       modelSteps: [],
@@ -856,8 +856,8 @@ describe("agentCursorFeed", () => {
     const actions = timeline.processBlocks.find((block) => block.kind === "actions");
     expect(actions?.kind).toBe("actions");
     if (actions?.kind !== "actions") return;
-    expect(actions.visible).toHaveLength(3);
-    expect(actions.collapsed).toHaveLength(5);
+    expect(actions.visible).toHaveLength(8);
+    expect(actions.collapsed).toHaveLength(0);
   });
 
   it("summarizes cursor process blocks for completed details", () => {

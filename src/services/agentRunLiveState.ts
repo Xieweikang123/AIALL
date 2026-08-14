@@ -1,6 +1,6 @@
 import type { AgentStatusData } from "../types/vibeChat";
 import type { VibeChatMode } from "../../shared/agentTypes";
-import { appendStatusDetail } from "../utils/vibeHelpers";
+import { appendStatusDetail, formatContextChars } from "../utils/vibeHelpers";
 import { agentConnectingStatusText } from "./agentConnectCopy";
 
 /** Ephemeral Agent progress — lives on SessionAgentRun only, never persisted. */
@@ -11,6 +11,7 @@ export type AgentRunLiveState = {
   maxTurns?: number;
   model?: string;
   contextChars?: number;
+  contextMessages?: number;
   streamChars?: number;
   waitStartedAt?: number;
   elapsedMs?: number;
@@ -79,7 +80,7 @@ export function createInitialLiveState(phase = "preparing"): AgentRunLiveState {
   return { phase };
 }
 
-const MODEL_WAIT_PHASES = new Set(["waiting_model", "sending_request", "retrying_model"]);
+const MODEL_WAIT_PHASES = new Set(["waiting_model", "sending_request", "retrying_model", "classifying_intent"]);
 const WAIT_CLEAR_PHASES = new Set(["streaming_model", "planning_tools", "executing_tool"]);
 
 export function patchLiveFromStatusEvent(
@@ -95,6 +96,7 @@ export function patchLiveFromStatusEvent(
     maxTurns: extra?.maxTurns ?? prev.maxTurns,
     model: extra?.model ?? prev.model,
     contextChars: extra?.contextChars ?? prev.contextChars,
+    contextMessages: extra?.contextMessages ?? prev.contextMessages,
     streamChars: extra?.streamChars ?? prev.streamChars,
     elapsedMs:
       typeof extra?.elapsedMs === "number" && extra.elapsedMs > 0
@@ -142,7 +144,9 @@ export function formatAgentLiveStatus(
     return `正在重连${retryHint}…`;
   }
   if (phase === "classifying_intent") {
-    return appendStatusDetail("正在分析用户意图…", detail);
+    const elapsed = resolveModelWaitElapsedSeconds(live);
+    const timer = elapsed !== null && elapsed >= 1 ? ` · ${elapsed}s` : "";
+    return appendStatusDetail(`正在分析用户意图${timer}…`, detail);
   }
   if (phase === "clarify_continue") {
     return appendStatusDetail("步骤澄清后继续执行…", detail);
@@ -157,7 +161,11 @@ export function formatAgentLiveStatus(
     return appendStatusDetail("正在扫描项目上下文…", detail);
   }
   if (phase === "compacting_context") {
-    return appendStatusDetail("正在整理上下文…", detail);
+    const parts: string[] = [];
+    if (live.contextMessages) parts.push(`${live.contextMessages} 条消息`);
+    if (live.contextChars) parts.push(formatContextChars(live.contextChars));
+    const size = parts.length ? `（${parts.join(" · ")}）` : "";
+    return appendStatusDetail(`正在整理上下文${size}…`, detail);
   }
   if (phase === "vision_first_turn") {
     return appendStatusDetail("正在查看附图并描述所见…", detail);
@@ -221,7 +229,9 @@ export function formatAgentLiveStatus(
         ? `（第 ${turn}/${maxTurns} 轮${modelHint}）`
         : `（第 ${turn} 轮${modelHint}）`
       : modelHint;
-    return appendStatusDetail(`正在等待模型响应${turnHint}…`, detail);
+    const elapsed = resolveModelWaitElapsedSeconds(live);
+    const timer = elapsed !== null && elapsed >= 2 ? ` · ${elapsed}s` : "";
+    return appendStatusDetail(`正在等待模型响应${turnHint}${timer}…`, detail);
   }
   if (phase === "retrying_model") {
     const modelHint = model ? ` · ${model}` : "";
@@ -235,7 +245,9 @@ export function formatAgentLiveStatus(
         ? `，第 ${live.retryAttempt}/${live.retryMaxAttempts - 1} 次重试`
         : "";
     const reason = live.retryError ? `：${live.retryError}` : "";
-    return appendStatusDetail(`模型请求失败${reason}，正在重试${turnHint}${retryHint}…`, detail);
+    const elapsed = resolveModelWaitElapsedSeconds(live);
+    const timer = elapsed !== null && elapsed >= 2 ? ` · ${elapsed}s` : "";
+    return appendStatusDetail(`模型请求失败${reason}，正在重试${turnHint}${retryHint}${timer}…`, detail);
   }
   if (phase === "executing_tool") {
     return toolDetail ? `正在执行：${toolTitle}（${toolDetail}）` : `正在执行：${toolTitle}…`;

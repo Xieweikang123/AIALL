@@ -17,6 +17,8 @@ export type PendingAgentRun = {
   savedAt?: number;
   /** 会话 ID */
   sessionId?: string;
+  /** 原 assistant 消息 ID —— 恢复时复用同一气泡，避免新建空壳 */
+  assistantMsgId?: string;
 };
 
 /** 持久化当前 Agent 运行状态 */

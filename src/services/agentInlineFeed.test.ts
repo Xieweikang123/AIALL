@@ -110,7 +110,7 @@ describe("buildInlineAgentFeed", () => {
     expect(feed.items.at(-1)).toMatchObject({ kind: "tool" });
   });
 
-  it("collapses early tools when step count exceeds threshold", () => {
+  it("keeps all tool steps visible while running (no collapse)", () => {
     const tools = Array.from({ length: 8 }, (_, index) => ({
       ...readStep(`t${index}`),
       id: `t${index}`,
@@ -133,9 +133,9 @@ describe("buildInlineAgentFeed", () => {
       compactFeed: false,
     });
 
-    expect(feed.items[0]?.kind).toBe("collapsed");
+    expect(feed.items.some((item) => item.kind === "collapsed")).toBe(false);
     const visibleTools = feed.items.filter((item) => item.kind === "tool");
-    expect(visibleTools).toHaveLength(4);
+    expect(visibleTools).toHaveLength(8);
   });
 
   it("returns empty feed when showProcess is false", () => {

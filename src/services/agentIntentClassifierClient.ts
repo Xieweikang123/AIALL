@@ -42,6 +42,15 @@ function withFirstByteTimeout<T>(
   });
 }
 
+export interface ClassifyUserIntentWithAiClientResult {
+  payload: UserIntentAiPayload | null;
+  rawResponse?: string;
+  messages?: Array<{ role: string; content: string }>;
+  classifierModel?: string;
+}
+
+export type IntentClassifierStage = "sending" | "parsing" | "retrying";
+
 export interface ClassifyUserIntentWithAiClientParams {
   prompt: string;
   history?: UserIntentHistoryMessage[];
@@ -53,6 +62,7 @@ export interface ClassifyUserIntentWithAiClientParams {
   projectRoot?: string;
   skip?: boolean;
   signal?: AbortSignal;
+  onStage?: (stage: IntentClassifierStage) => void;
 }
 
 async function chatCompletionOnce(params: {
@@ -103,7 +113,7 @@ async function chatCompletionOnce(params: {
 
 export async function classifyUserIntentWithAiClient(
   params: ClassifyUserIntentWithAiClientParams,
-): Promise<UserIntentAiPayload | null> {
+): Promise<ClassifyUserIntentWithAiClientResult | null> {
   if (params.skip || !shouldUseAiIntentClassifier()) return null;
   const text = params.prompt.trim();
   if (!text) return null;
@@ -116,7 +126,7 @@ export async function classifyUserIntentWithAiClient(
   });
   const cached = intentCache.get(cacheKey);
   if (cached && Date.now() - cached.builtAt < INTENT_CACHE_TTL_MS) {
-    return cached.payload;
+    return { payload: cached.payload };
   }
 
   const classifierModel = resolveIntentClassifierModel(params.model);
@@ -136,6 +146,8 @@ export async function classifyUserIntentWithAiClient(
   let lastError = "AI 分类失败";
   for (let attempt = 0; attempt <= INTENT_CLASSIFIER_MAX_RETRIES; attempt += 1) {
     if (params.signal?.aborted) return null;
+    if (attempt > 0) params.onStage?.("retrying");
+    params.onStage?.("sending");
     const result = await chatCompletionOnce({
       endpoint: params.endpoint,
       apiKey: params.apiKey,
@@ -147,13 +159,14 @@ export async function classifyUserIntentWithAiClient(
       lastError = result.error || lastError;
       continue;
     }
+    params.onStage?.("parsing");
     const payload = parseIntentClassifierResponse(result.content);
     if (!payload) {
       lastError = "parse failed";
       continue;
     }
     intentCache.set(cacheKey, { builtAt: Date.now(), payload });
-    return payload;
+    return { payload, rawResponse: result.content, messages, classifierModel };
   }
 
   void lastError;

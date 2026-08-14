@@ -115,11 +115,10 @@ export function buildUnifiedAgentTimeline(
 ): CursorAgentTimeline {
   const items = buildFilteredCursorAgentFeedItems(input);
 
-  const detailed = input.activityDetailed;
-  const compact = input.compactFeed;
+  // Keep all steps expanded for live, real-time feedback (no collapse while running).
   const timeline = buildCursorAgentTimeline(items, input.answerPreview, {
-    keepVisible: compact ? 2 : detailed ? 8 : 3,
-    collapseAfter: compact ? 4 : detailed ? 10 : 3,
+    keepVisible: 99,
+    collapseAfter: 99,
     streaming: input.answerStreaming,
   });
 

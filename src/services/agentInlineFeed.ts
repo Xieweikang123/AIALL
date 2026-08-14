@@ -66,19 +66,8 @@ export type InlineAgentFeed = {
 export function resolveInlineFeedCollapseOptions(
   input: Pick<UnifiedAgentTimelineInput, "activityDetailed" | "compactFeed" | "isRunning" | "chatMode">,
 ): InlineFeedCollapseOptions {
-  if (input.activityDetailed) {
-    return { collapseAfter: 12, keepVisible: 8, disabled: true };
-  }
-  if (input.chatMode === "ask" && input.isRunning) {
-    return { collapseAfter: 2, keepVisible: 2, disabled: false };
-  }
-  if (input.compactFeed && input.isRunning) {
-    return { collapseAfter: 4, keepVisible: 3, disabled: false };
-  }
-  if (input.isRunning) {
-    return { collapseAfter: 5, keepVisible: 4, disabled: false };
-  }
-  // Completed messages: never collapse — keep all steps visible in linear order
+  // All messages (running or completed) stay fully expanded for live, real-time
+  // feedback — every tool step and status is visible as it happens.
   return { collapseAfter: 99, keepVisible: 99, disabled: true };
 }
 
@@ -207,9 +196,9 @@ export function summarizeInlineFeedProcess(
 
 function stripInlineStatusItems(items: InlineFeedItem[], isRunning: boolean): InlineFeedItem[] {
   if (!isRunning) return items;
+  // Keep status items visible while running for real-time feedback.
   const result: InlineFeedItem[] = [];
   for (const item of items) {
-    if (item.kind === "status") continue;
     if (item.kind === "collapsed") {
       result.push({
         ...item,

@@ -402,6 +402,8 @@ export function cursorPlanningLabel(phase?: string, detail?: string): string | n
   }
   if (phase === "streaming_model" || phase === "planning_tools") return "思考中…";
   if (phase === "summarizing_tools") return "整理工具结果…";
+  if (phase === "executing_tool" || phase === "executing_tools") return "执行中…";
+  if (phase === "compacting_context") return "压缩上下文…";
   if (phase === "connecting_local") {
     return detail?.trim() ? `连接本地服务 · ${detail.trim()}` : "连接本地服务…";
   }
@@ -412,19 +414,15 @@ export function cursorPlanningLabel(phase?: string, detail?: string): string | n
   if (phase === "preparing" || phase === "starting" || phase === "building_context") {
     return detail?.trim() ? `准备上下文 · ${detail.trim()}` : "准备上下文…";
   }
-  if (phase === "executing_tool" || phase === "executing_tools") return null;
-  if (phase === "compacting_context") return null;
   return null;
 }
 
-/** Hide idle planning rows once answer/thinking preview is visible or model is streaming. */
-export function shouldSuppressFeedPlanningStatus(input: {
+/** Never hide idle planning rows — keep all statuses visible for real-time feedback. */
+export function shouldSuppressFeedPlanningStatus(_input: {
   agentPhase?: string;
   answerPreview?: string;
   streaming?: boolean;
 }): boolean {
-  if (input.streaming) return true;
-  if (input.answerPreview?.trim()) return true;
   return false;
 }
 
