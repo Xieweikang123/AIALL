@@ -188,7 +188,7 @@ export function useAgentState(deps: UseAgentStateDeps) {
       live.phase === "retrying_model";
     if (waitingModel) {
       const elapsed = resolveModelWaitElapsedSeconds(live);
-      if (elapsed !== null && elapsed >= 15) {
+      if (elapsed !== null && elapsed >= 2) {
         statusText = `${statusText} · ${elapsed}s`;
       }
       if (elapsed !== null && elapsed > 45) {

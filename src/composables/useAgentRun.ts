@@ -500,11 +500,29 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         model: aiConfig.value.model,
         projectPath: projectPath.value.trim() || undefined,
       },
-      (phase, detail) => {
+      (phase, detail, trace) => {
         setAgentStatus(input.sessionId, input.assistantMsg, phase, {
           model: aiConfig.value.model,
           detail,
         });
+        if (trace) {
+          debugLog("[intent-classifier]", {
+            ...trace,
+            aiRawResponse: (trace.aiRawResponse ?? "").slice(0, 2000),
+          });
+          patchAssistantMsg(input.assistantMsg.id, {
+            intentTrace: {
+              ruleResult: trace.ruleResult,
+              aiRawResponse: trace.aiRawResponse,
+              aiMessages: trace.aiMessages,
+              finalResult: trace.finalResult,
+              skippedAi: trace.skippedAi,
+              aiModel: trace.aiModel,
+              elapsedMs: trace.elapsedMs,
+              aiPrimary: trace.aiPrimary,
+            },
+          });
+        }
       },
     );
   }
@@ -750,6 +768,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           },
           projectPath: projectPath.value.trim(),
           sessionId: sessionId || undefined,
+          assistantMsgId: running.id,
         });
       }
     }
@@ -801,6 +820,17 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       ? (pending.request.imageDataUrls as string[]).filter(Boolean)
       : [];
     if (!prompt && !storedImages.length) return;
+
+    // HMR 中断的续跑优先复用原 assistant 消息，避免新建空壳气泡
+    if (pending.assistantMsgId) {
+      const target = chatMessages.value.find((m) => m.id === pending.assistantMsgId);
+      if (target?.role === "assistant") {
+        clearPendingAgentRun();
+        chatError.value = "检测到之前因页面刷新中断的 Agent 运行，正在恢复…";
+        void resumeAgentRun(target.id, { silent: true });
+        return;
+      }
+    }
 
     chatError.value = "检测到之前因页面刷新中断的 Agent 运行，正在恢复…";
     void runAgentTurn(prompt || "请结合附带的图片回答。", {
@@ -1311,6 +1341,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         request: agentRequest as unknown as Record<string, unknown>,
         projectPath: projectPath.value.trim(),
         sessionId: sessionId || undefined,
+        assistantMsgId: assistantMsg.id,
       });
     }
     const handle = runVibeAgentSse(

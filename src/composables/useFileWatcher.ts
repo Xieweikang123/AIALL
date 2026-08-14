@@ -14,6 +14,23 @@ const TREE_STRUCTURAL_CHANGE_TYPES = new Set<FileChangeEvent["type"]>([
   "unlinkDir",
 ]);
 
+/**
+ * Git metadata files that change on branch switch / stash / amend without
+ * touching the working tree. Intentionally excludes `.git/index` — `git status`
+ * refreshes the index stat cache, so watching it would cause a self-triggering
+ * refresh loop.
+ */
+const GIT_METADATA_PATH_RE =
+  /(?:^|[/\\])\.git[/\\](?:HEAD|FETCH_HEAD|ORIG_HEAD|MERGE_HEAD|CHERRY_PICK_HEAD|refs[/\\]|logs[/\\]|packed-refs|rebase-merge|rebase-apply)/;
+
+/** True when a path change only reflects git internal bookkeeping. */
+function isGitMetadataPath(path: string): boolean {
+  return GIT_METADATA_PATH_RE.test(path);
+}
+
+/** Cooldown between git-metadata-triggered status refreshes (avoids rebase churn). */
+const GIT_META_REFRESH_COOLDOWN_MS = 1500;
+
 export interface UseFileWatcherOptions {
   onFileChanges?: (changes: FileChangeEvent[]) => void;
   refreshTree?: () => void | Promise<void>;
@@ -31,6 +48,7 @@ export function useFileWatcher(options: UseFileWatcherOptions) {
   const fileWatcherCleanup = ref<(() => void) | null>(null);
   let gitRefreshDebounceTimer: ReturnType<typeof setTimeout> | null = null;
   let treeRefreshDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastGitMetaRefreshAt = 0;
 
   function scheduleTreeRefreshFromWatcher() {
     if (!options.refreshTree) return;
@@ -41,13 +59,20 @@ export function useFileWatcher(options: UseFileWatcherOptions) {
     }, 300);
   }
 
-  function scheduleGitStatusRefreshFromWatcher(refreshGitStatus: () => void) {
+  function scheduleGitStatusRefreshFromWatcher(
+    refreshGitStatus: () => void,
+    opts?: { fromGitMetadata?: boolean },
+  ) {
     if (gitRefreshDebounceTimer) clearTimeout(gitRefreshDebounceTimer);
     gitRefreshDebounceTimer = setTimeout(() => {
       gitRefreshDebounceTimer = null;
       if (options.gitRefreshPaused?.()) return;
       if (options.gitStagingInProgress()) return;
       if (options.gitLastStagingAt() && Date.now() - options.gitLastStagingAt() < 1500) return;
+      if (opts?.fromGitMetadata) {
+        if (Date.now() - lastGitMetaRefreshAt < GIT_META_REFRESH_COOLDOWN_MS) return;
+        lastGitMetaRefreshAt = Date.now();
+      }
       refreshGitStatus();
     }, 300);
   }
@@ -66,9 +91,14 @@ export function useFileWatcher(options: UseFileWatcherOptions) {
             const guard2 = Date.now() - options.gitLastStagingAt() < 500;
             const guard3 = Boolean(options.gitRefreshPaused?.());
             if (guard1 || guard2 || guard3) return;
+            const gitMetadataChanges = changes.filter((change) => isGitMetadataPath(change.path));
             const relevantChanges = changes.filter(
-              (change) => !change.path.includes(".git") && !change.path.includes("node_modules"),
+              (change) =>
+                !change.path.includes(".git") && !change.path.includes("node_modules"),
             );
+            if (gitMetadataChanges.length > 0) {
+              scheduleGitStatusRefreshFromWatcher(refreshGitStatus, { fromGitMetadata: true });
+            }
             if (relevantChanges.length > 0) {
               scheduleGitStatusRefreshFromWatcher(refreshGitStatus);
               const treeChanges = relevantChanges.filter((change) =>

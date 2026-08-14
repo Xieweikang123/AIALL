@@ -26,6 +26,16 @@ export interface VibeChatMessageItem {
   agentFailed?: boolean;
   agentRecoverable?: boolean;
   agentMaxTurns?: number;
+  intentTrace?: {
+    ruleResult?: string;
+    aiRawResponse?: string;
+    aiMessages?: Array<{ role: string; content: string }>;
+    finalResult?: string;
+    skippedAi?: boolean;
+    aiModel?: string;
+    elapsedMs?: number;
+    aiPrimary?: string;
+  };
   agentContext?: import("../services/vibeChatStorage").PersistedAgentContext;
 }
 

@@ -177,6 +177,7 @@ export function useAgentStallRecovery(deps: UseAgentStallRecoveryDeps) {
         "reconnecting",
         "building_context",
         "compacting_context",
+        "classifying_intent",
         "waiting_model",
         "sending_request",
         "retrying_model",
