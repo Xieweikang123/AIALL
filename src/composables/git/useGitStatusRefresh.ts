@@ -1,4 +1,5 @@
-import { debugLog } from "../../utils/debugLog";
+import { watch } from "vue";
+import { appendDebugLogFile, debugLog } from "../../utils/debugLog";
 import { toErrorMessage } from "../../utils/vibeHelpers";
 import { lsGet, lsSet } from "../../utils/localStorageSafe";
 import {
@@ -35,6 +36,11 @@ function normalizeGitPath(p: string): string {
   return p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 }
 
+/** 路径是否指向同一目录（规范化比较，避免反斜杠/正斜杠差异误判） */
+function sameGitPath(a: string, b: string): boolean {
+  return normalizeGitPath(a) === normalizeGitPath(b);
+}
+
 function activeRepoKey(projectRoot: string): string {
   return `${ACTIVE_REPO_KEY_PREFIX}${projectRoot}`;
 }
@@ -60,6 +66,11 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
     onResetBatch,
     syncBatchStateWithSourceFiles,
   } = options;
+
+  // 「本地忽略」查询（git ls-files -v）全量列已跟踪文件，成本高；
+  // 节流到至少间隔这么久才在状态刷新路径里跑一次。
+  const IGNORED_FILES_MIN_REFRESH_MS = 30_000;
+  let lastIgnoredRefreshAt = 0;
 
   function resetGitPanelState() {
     state.gitStatusRefreshToken.value += 1;
@@ -138,26 +149,108 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
     void refreshGitStatus({ force: true });
   }
 
+  // 同一时间只跑一个状态刷新：文件 watcher 触发频繁时，若每次都新起一个，
+  // token 会不断被顶掉，导致 gitStatusKnown 永远不置位、「正在加载」卡死。
+  // 刷新进行中再来请求 → 标记一次补跑，等当前跑完后再跑。
+  let statusRefreshInFlight = false;
+  let statusRefreshQueued: { showLoading?: boolean; force?: boolean } | null = null;
+  let loadingWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // 首次状态加载（gitStatusKnown 仍为 false）超过该时长未完成 → 不再死等，
+  // 先让 UI 退出「正在加载…」，等慢请求回来再自动应用。
+  const GIT_STATUS_FIRST_LOAD_MAX_MS = 12_000;
+
+  // 诊断：loading 期间累计已等待秒数（界面上显示），+ git-status.log 计时明细
+  let loadingElapsedTimer: ReturnType<typeof setInterval> | null = null;
+  let gitStatusChurnCount = 0;
+
+  function stopLoadingElapsedTimer() {
+    if (loadingElapsedTimer) {
+      clearInterval(loadingElapsedTimer);
+      loadingElapsedTimer = null;
+    }
+  }
+
+  function startLoadingElapsedTimer() {
+    stopLoadingElapsedTimer();
+    state.gitLoadingElapsedMs.value = 0;
+    loadingElapsedTimer = setInterval(() => {
+      state.gitLoadingElapsedMs.value += 500;
+    }, 500);
+  }
+
+  function clearLoadingWatchdog() {
+    if (loadingWatchdogTimer) {
+      clearTimeout(loadingWatchdogTimer);
+      loadingWatchdogTimer = null;
+    }
+  }
+
   async function refreshGitStatus(refreshOptions?: { showLoading?: boolean; force?: boolean }) {
     if (!projectOpened()) return;
     if (!refreshOptions?.force) {
       if (state.gitStagingInProgress.value) return;
       if (state.gitLastStagingAt.value && Date.now() - state.gitLastStagingAt.value < 1000) return;
     }
-    const showLoading = refreshOptions?.showLoading !== false;
+    if (statusRefreshInFlight) {
+      statusRefreshQueued = refreshOptions ?? {};
+      return;
+    }
+    statusRefreshInFlight = true;
+    try {
+      do {
+        const runOptions = statusRefreshQueued ?? refreshOptions ?? {};
+        statusRefreshQueued = null;
+        await runRefreshGitStatus(runOptions);
+      } while (statusRefreshQueued);
+    } finally {
+      statusRefreshInFlight = false;
+      clearLoadingWatchdog();
+    }
+  }
+
+  async function runRefreshGitStatus(refreshOptions: { showLoading?: boolean; force?: boolean }) {
+    const showLoading = refreshOptions.showLoading !== false;
     const pathAtStart = projectPath();
     const token = ++state.gitStatusRefreshToken.value;
-    debugLog("[git-status] refresh start", { token, path: pathAtStart, force: Boolean(refreshOptions?.force) });
-    if (showLoading) state.gitLoading.value = true;
-    if (showLoading) state.gitError.value = "";
+    const startTs = Date.now();
+    debugLog("[git-status] refresh start", { token, path: pathAtStart, force: Boolean(refreshOptions.force) });
+    if (showLoading) {
+      state.gitLoading.value = true;
+      state.gitError.value = "";
+      startLoadingElapsedTimer();
+    }
+    clearLoadingWatchdog();
+    if (showLoading && !state.gitStatusKnown.value) {
+      loadingWatchdogTimer = setTimeout(() => {
+        loadingWatchdogTimer = null;
+        stopLoadingElapsedTimer();
+        appendDebugLogFile(
+          "git-status.log",
+          `[${token}] FIRST-LOAD TIMEOUT after ${GIT_STATUS_FIRST_LOAD_MAX_MS}ms (churn=${gitStatusChurnCount})`,
+          "git-status",
+        );
+        if (state.gitLoading.value && !state.gitStatusKnown.value) {
+          state.gitLoading.value = false;
+          state.gitError.value = "Git 状态加载较慢（仓库较大或 git 被占用），结果返回后会自动更新";
+        }
+      }, GIT_STATUS_FIRST_LOAD_MAX_MS);
+    }
     try {
       const result = await fetchGitStatus(pathAtStart);
-      if (token !== state.gitStatusRefreshToken.value || projectPath() !== pathAtStart) {
-        debugLog("[git-status] stale refresh ignored", { token, activeToken: state.gitStatusRefreshToken.value });
+      if (token !== state.gitStatusRefreshToken.value || !sameGitPath(projectPath(), pathAtStart)) {
+        gitStatusChurnCount += 1;
+        debugLog("[git-status] stale refresh ignored", { token, activeToken: state.gitStatusRefreshToken.value, pathAtStart, now: projectPath() });
+        appendDebugLogFile(
+          "git-status.log",
+          `[${token}] stale ignored (active=${state.gitStatusRefreshToken.value}, path ${pathAtStart} -> ${projectPath()}) after ${Date.now() - startTs}ms`,
+          "git-status",
+        );
         return;
       }
       if (!result.ok) {
         state.gitError.value = result.error || "获取 Git 状态失败";
+        appendDebugLogFile("git-status.log", `[${token}] error after ${Date.now() - startTs}ms: ${state.gitError.value}`, "git-status");
         return;
       }
       state.gitIsRepo.value = result.isRepo;
@@ -166,6 +259,11 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
       state.gitStatus.value = result.files;
       state.gitStatusKnown.value = true;
       debugLog("[git-status] refresh applied", { token, branch: result.branch, fileCount: result.files.length, stagedCount: result.stagedCount, unstagedCount: result.unstagedCount });
+      appendDebugLogFile(
+        "git-status.log",
+        `[${token}] applied ${result.files.length} files in ${Date.now() - startTs}ms (churn=${gitStatusChurnCount})`,
+        "git-status",
+      );
       syncBatchStateWithSourceFiles?.();
       if (showLoading) {
         state.gitError.value = "";
@@ -173,7 +271,7 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
       state.clearGitDiffCache();
 
       if (result.isRepo) {
-        void refreshIgnoredLocalFiles();
+        void refreshIgnoredLocalFiles(Boolean(refreshOptions.force));
         void afterStatusRefresh.refreshGitRemotes();
         void afterStatusRefresh.refreshGitStashes();
         void afterStatusRefresh.refreshGitBranches();
@@ -182,15 +280,20 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
         }
       }
     } catch (e) {
-      if (token !== state.gitStatusRefreshToken.value || projectPath() !== pathAtStart) {
+      if (token !== state.gitStatusRefreshToken.value || !sameGitPath(projectPath(), pathAtStart)) {
         debugLog("[git-status] stale refresh error ignored", { token, activeToken: state.gitStatusRefreshToken.value });
         return;
       }
       state.gitError.value = toErrorMessage(e, "获取 Git 状态失败");
+      appendDebugLogFile("git-status.log", `[${token}] exception after ${Date.now() - startTs}ms: ${state.gitError.value}`, "git-status");
     } finally {
-      if (token === state.gitStatusRefreshToken.value && projectPath() === pathAtStart) {
+      // loading 只属于发起它的那次刷新：只要 token 仍是当前（没有更新的刷新顶上），
+      // 就清掉 loading；路径表示法差异不应让它卡死。
+      if (token === state.gitStatusRefreshToken.value) {
         state.gitLoading.value = false;
       }
+      stopLoadingElapsedTimer();
+      clearLoadingWatchdog();
     }
   }
 
@@ -207,8 +310,14 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
     };
   }
 
-  async function refreshIgnoredLocalFiles() {
+  async function refreshIgnoredLocalFiles(force = false) {
     if (!projectOpened() || !state.gitIsRepo.value) return;
+    // `git ls-files -v` 要全量列已跟踪文件，很贵（实测 ~284ms）。状态刷新在每次
+    // 文件变动后都会触发，这里做最小间隔节流：平时最多每 30s 一次，
+    // 展开「已忽略本地改动」面板或执行忽略/恢复操作时 force 刷新。
+    const now = Date.now();
+    if (!force && now - lastIgnoredRefreshAt < IGNORED_FILES_MIN_REFRESH_MS) return;
+    lastIgnoredRefreshAt = now;
     try {
       const result = await listIgnoredLocalChanges(projectPath());
       if (result.ok) {
@@ -218,6 +327,14 @@ export function useGitStatusRefresh(options: UseGitStatusRefreshOptions) {
       // ignore — status itself already surfaced errors
     }
   }
+
+  // 展开「已忽略本地改动」面板时，强制拉取最新列表
+  watch(
+    () => state.gitIgnoredLocalOpen.value,
+    (open) => {
+      if (open) void refreshIgnoredLocalFiles(true);
+    },
+  );
 
   async function setGitLogFilters(filters: { author: string; path: string; since: string; until: string }) {
     state.gitLogAuthorFilter.value = filters.author.trim();

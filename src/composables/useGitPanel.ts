@@ -193,6 +193,7 @@ export function useGitPanel(
     gitLocalChangesOpen: state.gitLocalChangesOpen,
     gitIgnoredLocalFiles: state.gitIgnoredLocalFiles,
     gitIgnoredLocalOpen: state.gitIgnoredLocalOpen,
+    gitLoadingElapsedMs: state.gitLoadingElapsedMs,
     selectedGitFiles: state.selectedGitFiles,
     gitDiffLoadingKey: state.gitDiffLoadingKey,
     gitDiffContentCache: state.gitDiffContentCache,

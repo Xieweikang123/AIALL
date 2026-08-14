@@ -55,6 +55,8 @@ export interface GitPanelState {
   gitLocalChangesOpen: Ref<boolean>;
   gitIgnoredLocalFiles: Ref<string[]>;
   gitIgnoredLocalOpen: Ref<boolean>;
+  /** 距「正在加载 Git 状态…」开始已等待的毫秒数（诊断用，超时兜底后停止累加） */
+  gitLoadingElapsedMs: Ref<number>;
   selectedGitFiles: Ref<string[]>;
   gitDiffLoadingKey: Ref<string>;
   gitDiffContentCache: Ref<Record<string, GitFileDiff>>;
@@ -191,6 +193,7 @@ export function createGitPanelState(
   const gitLocalChangesOpen = ref(false);
   const gitIgnoredLocalFiles = ref<string[]>([]);
   const gitIgnoredLocalOpen = ref(false);
+  const gitLoadingElapsedMs = ref(0);
   const selectedGitFiles = ref<string[]>([]);
   const gitDiffLoadingKey = ref("");
   const gitDiffContentCache = ref<Record<string, GitFileDiff>>({});
@@ -451,6 +454,7 @@ export function createGitPanelState(
     gitLocalChangesOpen,
     gitIgnoredLocalFiles,
     gitIgnoredLocalOpen,
+    gitLoadingElapsedMs,
     selectedGitFiles,
     gitDiffLoadingKey,
     gitDiffContentCache,

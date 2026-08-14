@@ -8,6 +8,9 @@
     <div v-else-if="gitLoading && !gitStatusKnown" class="panel-empty">
       <span class="panel-loading-spinner panel-empty-spinner" aria-hidden="true" />
       <p class="panel-empty-title">正在加载 Git 状态…</p>
+      <p v-if="(gitLoadingElapsedMs ?? 0) > 1500" class="panel-empty-hint">
+        已等待 {{ Math.round((gitLoadingElapsedMs ?? 0) / 1000) }} 秒（仓库较大或 git 被占用）
+      </p>
     </div>
     <div v-else-if="gitIsRepo" class="git-panel-content">
       <GitRepoSelector
@@ -278,6 +281,7 @@ interface GitLogFile {
 const props = defineProps<{
   projectOpened: boolean;
   gitLoading: boolean;
+  gitLoadingElapsedMs?: number;
   gitIsRepo: boolean;
   gitStatusKnown: boolean;
   gitRepos: GitRepoInfo[];

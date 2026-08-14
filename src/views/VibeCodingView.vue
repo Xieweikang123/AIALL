@@ -151,6 +151,7 @@
           :git-stash-section-open="gitStashSectionOpen"
           :git-local-changes-open="gitLocalChangesOpen"
           :git-ignored-local-files="gitIgnoredLocalFiles"
+          :git-loading-elapsed-ms="gitLoadingElapsedMs"
           :git-ignored-local-open="gitIgnoredLocalOpen"
           :git-advanced-open="gitAdvancedOpen"
           :git-advanced-action="gitAdvancedAction"
@@ -637,6 +638,7 @@
           :git-stash-section-open="gitStashSectionOpen"
           :git-local-changes-open="gitLocalChangesOpen"
           :git-ignored-local-files="gitIgnoredLocalFiles"
+          :git-loading-elapsed-ms="gitLoadingElapsedMs"
           :git-ignored-local-open="gitIgnoredLocalOpen"
           :git-advanced-open="gitAdvancedOpen"
           :git-advanced-action="gitAdvancedAction"
@@ -1453,6 +1455,7 @@ const {
   searchGitLog, setGitLogAllBranches, setGitLogBranchFilter, setGitLogFilters,
   gitStagedOpen, gitUnstagedOpen, gitUntrackedOpen, expandedGitLogEntries, selectedGitFiles,
   gitStashSectionOpen, gitLocalChangesOpen, gitIgnoredLocalFiles, gitIgnoredLocalOpen,
+  gitLoadingElapsedMs,
   gitDiffLoadingKey, gitDiffContentCache, gitRemotes, gitSelectedRemote, gitTrackingBranch,
   gitAhead, gitBehind, gitRemoteLoading, gitRemoteAction, gitStashes, gitStashOpen,
   gitStashAction, gitStashMessage, gitAiPushStep,
