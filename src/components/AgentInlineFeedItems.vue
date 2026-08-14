@@ -61,6 +61,7 @@
       :is-running="isRunning"
       :default-visible="toolDefaultVisible"
       :compact="chatMode === 'ask'"
+      :show-detail="agentDebugEnabled"
       @open-file="(path) => emit('openFile', path)"
     />
 
@@ -125,6 +126,7 @@ import { sanitizeFeedThoughtText } from "../services/agentProgressMarker";
 import { enrichPlanMarkdownForDisplay } from "../services/planDocumentDisplay";
 import { shouldUsePlanExternalView } from "../services/planFile";
 import { vibeChatMessageContextKey } from "../composables/vibeChatMessageContext";
+import { agentDebugEnabled } from "../utils/agentDebugFlag";
 import type { AgentRoundTool } from "../services/agentRoundGroups";
 import type { AiOption } from "../utils/parseAiOptions";
 

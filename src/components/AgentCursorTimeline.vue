@@ -29,8 +29,6 @@
       :waiting-model="isWaitingModel"
       :shimmer="isWaitingModel || !hasAnswerContent"
     />
-
-    <slot v-if="debugExpanded" name="debug" />
   </div>
 </template>
 
@@ -58,8 +56,6 @@ const props = withDefaults(
     canExecutePlan?: boolean;
     layoutEnhanceReady?: boolean;
     planFilePath?: string;
-    showDebug?: boolean;
-    debugExpanded?: boolean;
     currentStatus?: string;
     hasRunningTool?: boolean;
     activityDetailed?: boolean;

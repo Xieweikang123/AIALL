@@ -83,6 +83,8 @@ pub struct AgentRunRequest {
     pub(crate) web_proxy_url: Option<String>,
     pub(crate) run_profile: Option<AgentRunProfile>,
     pub(crate) resolved_user_intent: Option<ResolvedUserIntentPayload>,
+    #[serde(default)]
+    pub(crate) debug: bool,
 }
 
 impl AgentRunRequest {
@@ -112,6 +114,7 @@ impl AgentRunRequest {
             web_proxy_url: None,
             run_profile: None,
             resolved_user_intent: None,
+            debug: false,
         }
     }
 }

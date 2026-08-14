@@ -255,19 +255,6 @@ export function truncateIncompleteTurnNarrative(
   return next;
 }
 
-function compactTurnRequestForMemory(detail: AgentTurnRequestDetail): AgentTurnRequestDetail {
-  if (!detail.messages || !detail.messages.length) return { ...detail, messages: [] };
-  return {
-    ...detail,
-    messages: [
-      {
-        role: "system",
-        content: `${detail.messages.length} 条消息，${detail.contextChars} 字符`,
-      },
-    ],
-  };
-}
-
 export function recordAgentRoundRequest(
   groups: AgentRoundGroup[] | undefined,
   turn: number,
@@ -277,7 +264,7 @@ export function recordAgentRoundRequest(
   if (turn <= 0) return groups ? cloneRoundGroups(groups) : [];
   const next = cloneRoundGroups(groups);
   const group = ensureGroup(next, turn);
-  group.request = compactTurnRequestForMemory(detail);
+  group.request = detail;
   if (maxTurns) group.maxTurns = maxTurns;
   return next;
 }

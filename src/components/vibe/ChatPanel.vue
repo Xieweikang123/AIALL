@@ -277,6 +277,15 @@
                 Auto
               </span>
             </div>
+            <button
+              type="button"
+              class="chat-debug-toggle"
+              :class="{ active: agentDebugEnabled }"
+              :title="agentDebugEnabled ? '调试详情已开启（显示请求/回复/工具全过程）' : '开启调试详情（显示请求/回复/工具全过程）'"
+              @click="setAgentDebugEnabled(!agentDebugEnabled)"
+            >
+              调试
+            </button>
             <div
               v-if="providerOptions.length"
               ref="providerPickerRef"
@@ -642,6 +651,7 @@ import { CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount, getEventValue } from "..
 import { scheduleScrollContainerToBottom, scrollContainerToBottom } from "../../utils/scrollViewport";
 import { resolveAgentResumeButtonLabel } from "../../services/agentRecovery";
 import { renderMarkdown } from "../../utils/renderMarkdown";
+import { agentDebugEnabled, setAgentDebugEnabled } from "../../utils/agentDebugFlag";
 import AgentLiveStatusRail from "../AgentLiveStatusRail.vue";
 
 interface ChatMessage {

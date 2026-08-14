@@ -12,8 +12,6 @@
         :activity-expanded="isActivityExpanded(msg)"
         :can-execute-plan="canExecutePlan"
         :chat-mode="msg.chatMode"
-        :show-debug="showDebug"
-        :debug-expanded="isActivityDetailed(msg)"
         :tools="msg.tools"
         :agent-turn="activeAgentTurn(msg)"
         :agent-max-turns="msg.agentMaxTurns"
@@ -34,13 +32,6 @@
         @open-plan-file="emit('open-plan-file')"
         @resume="emit('resume')"
       >
-        <template #debug>
-          <AgentDebugPanel
-            :groups="agentRoundGroupViews(msg)"
-            :agent-context="msg.agentContext"
-            :show-debug="showDebug"
-          />
-        </template>
       </AgentMergedContent>
 
       <button
@@ -70,7 +61,6 @@
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, ref, toRef } from "vue";
 import AgentMergedContent from "./AgentMergedContent.vue";
-import AgentDebugPanel from "./AgentDebugPanel.vue";
 import { useAgentMessage, type AgentMessage } from "../composables/useAgentMessage";
 import { vibeChatMessageContextKey } from "../composables/vibeChatMessageContext";
 import type { AiOption } from "../utils/parseAiOptions";
@@ -130,7 +120,6 @@ onBeforeUnmount(() => {
 });
 
 const {
-  showDebug,
   isActivityExpanded,
   isActivityDetailed,
   agentRoundGroupViews,

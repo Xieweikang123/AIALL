@@ -7,8 +7,6 @@
       :chat-mode="chatMode"
       :can-execute-plan="canExecutePlan"
       :layout-enhance-ready="layoutEnhanceReady"
-      :show-debug="showDebug"
-      :debug-expanded="debugExpanded"
       :current-status="currentStatus"
       :has-running-tool="hasRunningTool"
       :activity-detailed="activityDetailed"
@@ -27,9 +25,6 @@
       @open-file="(path) => emit('openFile', path)"
       @open-plan-file="emit('open-plan-file')"
     >
-      <template #debug>
-        <slot name="debug" />
-      </template>
     </AgentCursorTimeline>
   </div>
 </template>
@@ -54,8 +49,6 @@ const props = withDefaults(
     activityExpanded?: boolean;
     canExecutePlan?: boolean;
     chatMode?: "ask" | "build" | "plan" | "explore" | "auto";
-    showDebug?: boolean;
-    debugExpanded?: boolean;
     showProcess?: boolean;
     compactFeed?: boolean;
     tools?: AgentRoundTool[];

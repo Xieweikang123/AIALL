@@ -2,36 +2,63 @@
   <div
     v-if="rows.length"
     class="process-step-list"
-    :class="{ 'process-step-list--compact': compact, 'process-step-list--running': isRunning }"
+    :class="{ 'process-step-list--compact': compact, 'process-step-list--running': isRunning, 'process-step-list--debug': showDetail }"
     :style="{ '--rail-progress': `${railProgressPercent}%` }"
   >
     <div v-if="visibleRows.length > 1" class="process-step-rail-track" aria-hidden="true" />
     <div
       v-for="(row, index) in visibleRows"
       :key="row.key"
-      class="process-step"
-      :class="[
-        `process-step--${row.state}`,
-        {
-          'process-step--first': index === 0,
-          'process-step--last': index === visibleRows.length - 1,
-        },
-      ]"
-      :title="row.fullLabel"
+      class="process-step-wrap"
+      :class="{ 'process-step-wrap--open': isDetailOpen(row.key) }"
     >
-      <span class="process-step-node" aria-hidden="true" />
-      <span class="process-step-icon" aria-hidden="true">{{ row.icon }}</span>
-      <span class="process-step-verb">{{ row.verb }}</span>
-      <button
-        v-if="row.path"
-        type="button"
-        class="process-step-target"
-        @click="emit('open-file', row.path)"
+      <div
+        class="process-step"
+        :class="[
+          `process-step--${row.state}`,
+          {
+            'process-step--first': index === 0,
+            'process-step--last': index === visibleRows.length - 1,
+          },
+        ]"
+        :title="row.fullLabel"
+        @click="showDetail && row.state !== 'running' && toggleDetail(row.key)"
       >
-        {{ row.target }}
-      </button>
-      <span v-else class="process-step-target process-step-target--plain">{{ row.target }}</span>
-      <span v-if="row.meta" class="process-step-meta">{{ row.meta }}</span>
+        <span class="process-step-node" aria-hidden="true" />
+        <span class="process-step-icon" aria-hidden="true">{{ row.icon }}</span>
+        <span class="process-step-verb">{{ row.verb }}</span>
+        <button
+          v-if="row.path"
+          type="button"
+          class="process-step-target"
+          @click.stop="emit('open-file', row.path)"
+        >
+          {{ row.target }}
+        </button>
+        <span v-else class="process-step-target process-step-target--plain">{{ row.target }}</span>
+        <span v-if="row.meta" class="process-step-meta">{{ row.meta }}</span>
+        <span
+          v-if="showDetail"
+          class="process-step-chevron"
+          :class="{ 'process-step-chevron--open': isDetailOpen(row.key) }"
+          aria-hidden="true"
+        >
+          {{ isDetailOpen(row.key) ? "▾" : "▸" }}
+        </span>
+      </div>
+      <div
+        v-if="showDetail && isDetailOpen(row.key)"
+        class="process-step-detail"
+      >
+        <div v-if="row.argSummary" class="process-step-detail-block">
+          <span class="process-step-detail-label">参数</span>
+          <pre class="trace-pre compact">{{ row.argSummary }}</pre>
+        </div>
+        <div v-if="row.resultPreview" class="process-step-detail-block">
+          <span class="process-step-detail-label">结果</span>
+          <pre class="trace-pre">{{ row.resultPreview }}</pre>
+        </div>
+      </div>
     </div>
     <button
       v-if="!expanded && hiddenCount > 0"
@@ -64,8 +91,9 @@ const props = withDefaults(
     isRunning?: boolean;
     defaultVisible?: number;
     compact?: boolean;
+    showDetail?: boolean;
   }>(),
-  { isRunning: false, defaultVisible: 8, compact: false },
+  { isRunning: false, defaultVisible: 8, compact: false, showDetail: false },
 );
 
 const emit = defineEmits<{
@@ -73,13 +101,26 @@ const emit = defineEmits<{
 }>();
 
 const expanded = ref(false);
+const detailOpenKeys = ref<Set<string>>(new Set());
 
 watch(
   () => props.tools.length,
   () => {
     expanded.value = false;
+    detailOpenKeys.value = new Set();
   },
 );
+
+function isDetailOpen(key: string): boolean {
+  return detailOpenKeys.value.has(key);
+}
+
+function toggleDetail(key: string) {
+  const next = new Set(detailOpenKeys.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  detailOpenKeys.value = next;
+}
 
 type StepRow = {
   key: string;
@@ -90,7 +131,27 @@ type StepRow = {
   path?: string;
   state: string;
   fullLabel: string;
+  argSummary: string;
+  resultPreview: string;
 };
+
+const MAX_ARG_CHARS = 400;
+const MAX_RESULT_CHARS = 2000;
+
+function formatArgs(tool: AgentRoundTool): string {
+  if (!tool.args) return "";
+  try {
+    return JSON.stringify(tool.args);
+  } catch {
+    return String(tool.args);
+  }
+}
+
+function truncateForPreview(text: string, max: number): string {
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= max) return cleaned;
+  return `${cleaned.slice(0, max)}…`;
+}
 
 function shortPath(path: string): string {
   const normalized = path.replace(/\\/g, "/");
@@ -161,6 +222,8 @@ function buildRow(step: AgentRoundTool): StepRow {
     path: path || undefined,
     state: cursorActionClass(step),
     fullLabel,
+    argSummary: formatArgs(step) ? truncateForPreview(formatArgs(step), MAX_ARG_CHARS) : "",
+    resultPreview: step.fullResult ? truncateForPreview(step.fullResult, MAX_RESULT_CHARS) : "",
   };
 }
 
@@ -264,7 +327,7 @@ const railProgressPercent = computed(() => {
   min-height: 24px;
   padding: 2px 6px 2px 4px;
   font-size: 10px;
-  grid-template-columns: 12px 16px 44px minmax(0, 1fr) auto;
+  grid-template-columns: 12px 16px 44px minmax(0, 1fr) auto auto;
 }
 
 .process-step-list::-webkit-scrollbar {
@@ -280,7 +343,7 @@ const railProgressPercent = computed(() => {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: 14px 18px 52px minmax(0, 1fr) auto;
+  grid-template-columns: 14px 18px 52px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 6px;
   min-height: 28px;
@@ -288,6 +351,30 @@ const railProgressPercent = computed(() => {
   font-size: 11px;
   line-height: 1.35;
   color: rgba(186, 196, 208, 0.88);
+}
+
+.process-step-wrap--open > .process-step {
+  background: rgba(88, 166, 255, 0.05);
+}
+
+.process-step-chevron {
+  flex-shrink: 0;
+  font-size: 9px;
+  color: rgba(126, 182, 255, 0.7);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.process-step-chevron--open {
+  transform: rotate(90deg);
+}
+
+.process-step-list--debug .process-step-wrap > .process-step:not(.process-step--running) {
+  cursor: pointer;
+}
+
+.process-step-list--debug .process-step-wrap > .process-step:hover {
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .process-step-node {
@@ -328,10 +415,6 @@ const railProgressPercent = computed(() => {
 .process-step--skipped .process-step-node {
   border-color: rgba(210, 153, 34, 0.65);
   background: rgba(210, 153, 34, 0.38);
-}
-
-.process-step:hover {
-  background: rgba(255, 255, 255, 0.03);
 }
 
 .process-step--running {
@@ -407,6 +490,48 @@ button.process-step-target:hover {
   color: rgba(165, 214, 255, 0.98);
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+.process-step-detail {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px 8px 44px;
+}
+
+.process-step-detail-block {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.process-step-detail-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: rgba(139, 148, 158, 0.55);
+}
+
+.trace-pre {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: rgba(1, 4, 9, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  font-size: 10.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-width: 100%;
+  max-height: 140px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: rgba(139, 148, 158, 0.82);
 }
 
 @media (prefers-reduced-motion: reduce) {

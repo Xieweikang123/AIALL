@@ -29,6 +29,8 @@ export interface VibeAgentRunRequest {
   taskWrittenFiles?: string[];
   /** Merged rule + AI intent (Tauri desktop). */
   resolvedUserIntent?: ResolvedUserIntent;
+  /** Enable verbose debug payloads (real systemPrompt + per-turn messages). */
+  debug?: boolean;
 }
 
 export function shouldRetryAgentFetch(

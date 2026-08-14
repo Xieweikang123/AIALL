@@ -173,8 +173,3 @@ export function messagePreviewLength(content: string): string {
   if (len >= 1000) return `${(len / 1000).toFixed(1)}k 字符`;
   return `${len} 字符`;
 }
-
-export function shouldCollapseRequestMessage(role: string, content: string): boolean {
-  if (role === "system") return true;
-  return content.length > 600;
-}

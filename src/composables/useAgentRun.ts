@@ -78,6 +78,7 @@ import {
   type VibeChatMode,
 } from "../services/vibeAgentClient";
 import { resolveAgentRequestUserIntentAsync } from "../services/agentRequestIntent";
+import { agentDebugEnabled } from "../utils/agentDebugFlag";
 import { formatInvokeError } from "../services/tauriInvoke";
 import { formatAgentTransportErrorMessage } from "../services/agentRecovery";
 import {
@@ -1303,6 +1304,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       imageDataUrls: compressedImagesForRequest?.length ? compressedImagesForRequest : undefined,
       webProxyUrl: loadWebProxyUrlFromStorage() || undefined,
       resolvedUserIntent,
+      debug: agentDebugEnabled.value,
     };
     if (!options?.suppressHmrRecovery) {
       persistAgentRunForHmr({

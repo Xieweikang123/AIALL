@@ -194,7 +194,7 @@ pub async fn agent_run(
     let history_messages =
         context::build_history_messages(request.history.as_deref().unwrap_or(&[]));
     let user_content = crate::agent::build_vision_user_content(&request.prompt, &image_data_urls);
-    let mut messages = vec![json!({ "role": "system", "content": system_prompt })];
+    let mut messages = vec![json!({ "role": "system", "content": system_prompt.clone() })];
     messages.extend(history_messages);
     messages.push(json!({ "role": "user", "content": user_content }));
 
@@ -213,7 +213,8 @@ pub async fn agent_run(
         &channel,
         json!({
           "type": "agent_context", "data": {
-            "mode": effective_mode_str, "systemPrompt": "Rust agent backend",
+            "mode": effective_mode_str,
+            "systemPrompt": if request.debug { system_prompt.clone() } else { "Rust agent backend".to_string() },
             "history": context::history_for_display(request.history.as_deref().unwrap_or(&[])),
             "model": request.model,
             "maxTurns": max_turns,
@@ -557,6 +558,15 @@ pub async fn agent_run(
                 "maxTurns": run_state.segment.max_turns,
                 "contextMessages": compacted_messages.len(),
                 "contextChars": context_chars,
+                "messages": if request.debug {
+                    compacted_messages.iter().map(|m| {
+                        let role = m.get("role").and_then(|v| v.as_str()).unwrap_or("");
+                        let content = m.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        json!({ "role": role, "content": content })
+                    }).collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                }
               }
             }),
         );
