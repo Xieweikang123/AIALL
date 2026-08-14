@@ -68,8 +68,8 @@ const TRIVIAL_COMMAND_OUTPUT = new Set(["（命令执行完成，无输出）"])
 
 export function parseRunCommandOutputLines(
   raw: string,
-  maxLines = 6,
-  maxLen = 120,
+  maxLines = 200,
+  maxLen = 400,
 ): string[] {
   const text = raw.trim();
   if (!text || TRIVIAL_COMMAND_OUTPUT.has(text)) return [];

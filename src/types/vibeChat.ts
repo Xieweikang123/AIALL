@@ -8,6 +8,16 @@ import type { PersistedFileDiff } from "../services/vibeChatStorageTypes";
 export type VibeChatMessage = Omit<PersistedChatMessage, "tools" | "roundGroups"> & {
   tools?: AgentToolStep[];
   roundGroups?: AgentRoundGroup[];
+  intentTrace?: {
+    ruleResult?: string;
+    aiRawResponse?: string;
+    aiMessages?: Array<{ role: string; content: string }>;
+    finalResult?: string;
+    skippedAi?: boolean;
+    aiModel?: string;
+    elapsedMs?: number;
+    aiPrimary?: string;
+  };
   status?: string;
   agentPhase?: string;
   agentTurn?: number;
