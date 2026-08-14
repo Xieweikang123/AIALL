@@ -21,7 +21,7 @@
       </button>
       <button
         type="button"
-        class="secondary small git-ai-batch-btn"
+        class="git-ai-batch-btn"
         :class="{ 'git-ai-batch-btn--loading': aiBatchGrouping }"
         :disabled="aiBatchGrouping || batchCommittingIndex !== null || !configReady"
         :title="!configReady ? '请先配置 AI 模型' : `分析 ${batchTotalFiles} 个未提交文件，按功能模块智能分组并生成提交说明`"

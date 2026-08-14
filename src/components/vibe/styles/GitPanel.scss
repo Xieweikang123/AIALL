@@ -75,17 +75,22 @@
 }
 
 .git-sync-row {
-  padding-top: 6px;
+  padding-top: 8px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
-  flex-wrap: nowrap;
-  overflow: hidden;
+  flex-wrap: wrap;
+  overflow: visible;
   min-width: 0;
+  gap: 10px;
 }
 
 .git-sync-info {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  flex: 1 1 0;
+  min-width: 0;
+  flex: 1 1 0;
 }
 
 .git-sync-stat {
@@ -114,26 +119,23 @@
 
 .git-remote-actions {
   display: flex;
-  border-radius: 6px;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .git-remote-btn {
-  padding: 4px 10px;
+  padding: 5px 14px;
   font-size: 11px;
   font-weight: 500;
   border: none;
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
   background: rgba(255, 255, 255, 0.04);
   color: rgba(255, 255, 255, 0.65);
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
   position: relative;
-}
-
-.git-remote-btn:last-child {
-  border-right: none;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .git-remote-btn:hover:not(:disabled) {
@@ -162,6 +164,26 @@
 .git-remote-btn--push:hover:not(:disabled) {
   background: rgba(63, 185, 80, 0.12);
   color: #3fb950;
+}
+
+.git-remote-link {
+  background: transparent;
+  color: rgba(139, 148, 158, 0.7);
+  font-size: 12px;
+  padding: 3px 8px;
+  border: 1px solid rgba(139, 148, 158, 0.18);
+  border-radius: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+
+  &:hover:not(:disabled) {
+    background: rgba(139, 148, 158, 0.08);
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  &:disabled {
+    opacity: 0.35;
+  }
 }
 
 .git-stash-btn-count {
@@ -1142,8 +1164,37 @@
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   min-width: 76px;
+  background: rgba(139, 92, 246, 0.12);
+  color: rgba(180, 160, 230, 0.85);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: 999px;
+  padding: 4px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 1.4;
+  cursor: pointer;
+  box-shadow: none;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+
+  &:hover:not(:disabled) {
+    background: rgba(139, 92, 246, 0.22);
+    color: rgba(210, 190, 255, 0.95);
+    border-color: rgba(139, 92, 246, 0.35);
+  }
+
+  &:active:not(:disabled) {
+    transform: translateY(0);
+    box-shadow: 0 0 6px rgba(139, 92, 246, 0.2);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 }
 
 .git-ai-batch-btn--loading {

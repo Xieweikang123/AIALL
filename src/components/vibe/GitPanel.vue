@@ -68,9 +68,12 @@
 
       <div v-if="gitError" class="git-error">{{ gitError }}</div>
       <div class="git-work-area" :class="{ 'git-work-area--log-open': gitLogOpen }">
-        <div class="git-local-section" :class="{ 'git-local-section--collapsed': gitLogOpen && !localChangesOpen }">
+        <div
+          class="git-local-section"
+          :class="{ 'git-local-section--collapsed': gitLogOpen && !localChangesOpen && !batchSectionOpen }"
+        >
           <button
-            v-if="gitLogOpen"
+            v-if="gitLogOpen || batchSectionOpen"
             type="button"
             class="git-local-toggle"
             @click="emit('update:gitLocalChangesOpen', !localChangesOpen)"
@@ -81,11 +84,12 @@
           </button>
 
           <div
-            v-show="!gitLogOpen || localChangesOpen"
+            v-show="!gitLogOpen || localChangesOpen || batchSectionOpen"
             class="git-local-content"
             :class="{ 'git-local-content--batch-open': batchSectionOpen }"
           >
             <GitCommitBox
+              v-show="!batchSectionOpen"
               :message="gitCommitMessage"
               :committing="gitCommitting"
               :gen-step="gitGenStep"
@@ -102,6 +106,7 @@
             />
 
             <GitChangesFileList
+              v-show="!batchSectionOpen || localChangesOpen"
               :git-status="gitStatus"
               :git-staged-files="gitStagedFiles"
               :git-conflicted-files="gitConflictedFiles"
