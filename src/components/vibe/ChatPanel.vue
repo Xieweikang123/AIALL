@@ -270,17 +270,12 @@
         <div class="chat-action-row">
             <div class="composer-mode-row">
             <div class="chat-mode-switch" role="group" aria-label="对话模式">
-              <button
-                type="button"
-                class="mode-btn mode-btn-auto"
-                :class="{ active: chatMode === 'auto' }"
-                :aria-pressed="chatMode === 'auto'"
-                :disabled="chatSending"
+              <span
+                class="mode-btn mode-btn-auto active"
                 title="自动识别意图，智能切换模式"
-                @click="$emit('update:chatMode', 'auto')"
               >
                 Auto
-              </button>
+              </span>
             </div>
             <div
               v-if="providerOptions.length"
@@ -422,7 +417,7 @@
           <div>
             <h3 id="project-memory-title" class="project-memory-title">项目 AI 数据</h3>
             <p class="project-memory-desc">
-              记忆、Skills 与探索归档均存于 .aiall/；保存后 Ask / Plan / Build 会自动注入 Agent。
+              记忆、Skills 与探索归档均存于 .aiall/；保存后会自动注入 Agent。
             </p>
           </div>
           <button
@@ -632,7 +627,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, withDefaults, type CSSProperties } from "vue";
 import ChatPanelHeader from "./ChatPanelHeader.vue";
-import type { VibeChatMode } from "../../../shared/agentTypes";
+
 import type { AgentSuggestion } from "../../services/agentSuggestions";
 import type { PendingMemoryProposal } from "../../services/projectMemoryProposal";
 import type { PendingSkillProposal } from "../../services/projectSkillProposal";
@@ -687,7 +682,6 @@ interface Props {
   switchingSession?: boolean;
   switchingProject?: boolean;
   chatMessages: ChatMessage[];
-  chatMode: VibeChatMode;
   chatError: string;
   configReady: boolean;
   apiKeyReady: boolean;
@@ -881,7 +875,6 @@ const emit = defineEmits<{
   (e: "on-chat-drag-over", event: DragEvent): void;
   (e: "on-chat-drag-leave", event: DragEvent): void;
   (e: "on-chat-drop", event: DragEvent): void;
-  (e: "update:chatMode", mode: VibeChatMode): void;
   (e: "update:showTokenDetail", value: boolean): void;
   (e: "update:projectMemoryDraft", value: string): void;
   (e: "open-project-memory"): void;

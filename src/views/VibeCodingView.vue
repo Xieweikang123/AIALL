@@ -747,7 +747,6 @@
         :project-opened="projectOpened"
         :chat-sending="chatSending"
         :chat-messages="chatMessages"
-        :chat-mode="chatMode"
         :chat-error="chatError"
         :config-ready="configReady"
         :api-key-ready="apiKeyReady"
@@ -834,7 +833,6 @@
         @on-composer-field-keydown="onComposerFieldKeydown"
         @select-mention="selectMention"
         @on-chat-input-box-mousedown="onChatInputBoxMouseDown"
-        @update:chat-mode="chatMode = $event"
         @cancel-auto-resume="cancelAutoResume"
         @force-recover-stalled-run="forceRecoverStalledRun"
         @resume-agent-run="resumeAgentRun"
@@ -1205,7 +1203,6 @@ const fileDrag = useFileDrag(
 );
 
 const STORAGE_KEY = "vibe-coding-project";
-const CHAT_MODE_KEY = "vibe-coding-chat-mode";
 
 // 站内通知横幅已移除：仅使用 Tauri 原生通知（invoke('send_notification')）
 const PENDING_QUEUE_KEY = "vibe-coding-pending-queue";
@@ -1365,8 +1362,6 @@ async function autoRetryWithCountdown<T>(
 const openingProject = ref(false);
 
 function loadChatMode(): VibeChatMode {
-  const saved = lsGet(CHAT_MODE_KEY);
-  if (saved === "ask" || saved === "plan" || saved === "auto") return saved;
   return "auto";
 }
 
@@ -1900,13 +1895,7 @@ const composerDraftKey = computed(
 );
 
 const chatPlaceholder = computed(() =>
-  chatMode.value === "auto"
-    ? "自动识别意图，智能切换模式（Enter 发送，Shift+Enter 换行）"
-    : chatMode.value === "ask"
-    ? "提问、解释代码"
-    : chatMode.value === "plan"
-    ? "描述需求 → AI 输出方案 → 确认后执行（可点「执行方案」或回复「执行方案」）"
-    : "描述要改什么（Enter 发送，Shift+Enter 换行）",
+  "自动识别意图，智能切换模式（Enter 发送，Shift+Enter 换行）",
 );
 
 const showTokenDetail = ref(false);
@@ -4068,11 +4057,6 @@ function onBeforeUnload() {
   persistEditorWorkspace();
   autoBugFixLifecycle.persistNow();
 }
-
-watch(chatMode, (mode) => {
-  if (mode === "explore") return;
-  lsSet(CHAT_MODE_KEY, mode);
-});
 
 watch(gitAheadCommitsOpen, (open) => {
   if (open && projectOpened.value && gitIsRepo.value && gitAhead.value > 0 && !gitAheadCommits.value.length) {
