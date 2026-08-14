@@ -4052,6 +4052,7 @@ function onBeforeUnload() {
         },
         projectPath: projectPath.value.trim(),
         sessionId: activeSessionId.value || undefined,
+        assistantMsgId: activeAssistantMsgId.value || undefined,
       });
     }
   }
@@ -4253,6 +4254,7 @@ onMounted(() => {
           },
           projectPath: projectPath.value.trim(),
           sessionId: activeSessionId.value || undefined,
+          assistantMsgId: activeAssistantMsgId.value || undefined,
         });
       }
     }
