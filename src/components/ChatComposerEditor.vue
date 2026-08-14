@@ -48,7 +48,7 @@ export { COMPOSER_PENDING_DRAFT_KEY } from "../utils/composerDraftStorage";
 </script>
 
 <script setup lang="ts">
-import { nextTick, onMounted, ref, watch } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import {
   composerDraftStorageKey,
@@ -171,7 +171,13 @@ const editorRef = ref<HTMLDivElement | null>(null);
 const focused = ref(false);
 const isEmpty = ref(true);
 const pendingImages = ref<string[]>([]);
-const savedCursorOffset = ref<number | null>(null);
+interface SavedCaretPosition {
+  /** 从根节点到光标所在节点的子节点路径 */
+  path: number[];
+  /** 光标在目标节点内的字符/子节点偏移 */
+  offset: number;
+}
+const savedCaretPosition = ref<SavedCaretPosition | null>(null);
 
 watch(
   () => props.disabled,
@@ -197,16 +203,7 @@ function onBlur() {
   const root = editorRef.value;
   const sel = window.getSelection();
   if (root && sel && sel.rangeCount > 0 && sel.anchorNode && root.contains(sel.anchorNode)) {
-    let container: Node = sel.anchorNode;
-    while (container !== root && container.parentNode) {
-      container = container.parentNode;
-    }
-    let index = 0;
-    for (const child of Array.from(root.childNodes)) {
-      if (child === container) break;
-      index++;
-    }
-    savedCursorOffset.value = index;
+    savedCaretPosition.value = captureCaretFromNode(sel.anchorNode, sel.anchorOffset, root);
   }
   emit("blur");
 }
@@ -215,52 +212,140 @@ function isChip(el: Element | null): el is HTMLElement {
   return Boolean(el?.classList?.contains(CHIP));
 }
 
-function insertNodesAtCursor(nodes: Node[], addTrailingSpace = true) {
+function childIndexOf(node: Node, parent: Node): number {
+  let index = 0;
+  for (const child of Array.from(parent.childNodes)) {
+    if (child === node) return index;
+    index++;
+  }
+  return -1;
+}
+
+/** 记录光标的精确位置（根到目标节点的子节点路径 + 偏移），失焦后据此恢复 */
+function captureCaretFromNode(node: Node, offset: number, root: Node): SavedCaretPosition | null {
+  const path: number[] = [];
+  let current: Node | null = node;
+  while (current && current !== root) {
+    const parent: Node | null = current.parentNode;
+    if (!parent) return null;
+    const index = childIndexOf(current, parent);
+    if (index < 0) return null;
+    path.unshift(index);
+    current = parent;
+  }
+  if (current !== root) return null;
+  return { path, offset };
+}
+
+/** 按记录的路径恢复一个 collapse 的光标 Range；目标节点已不存在时返回 null */
+function restoreCaretFromSaved(saved: SavedCaretPosition): Range | null {
+  const root = editorRef.value;
+  if (!root) return null;
+  let node: Node = root;
+  for (const index of saved.path) {
+    const child = node.childNodes[index];
+    if (!child) return null;
+    node = child;
+  }
+  let offset = saved.offset;
+  if (node.nodeType === Node.TEXT_NODE) {
+    offset = Math.min(offset, (node.textContent ?? "").length);
+  } else {
+    offset = Math.min(offset, node.childNodes.length);
+  }
+  const range = document.createRange();
+  try {
+    range.setStart(node, offset);
+    range.collapse(true);
+  } catch {
+    return null;
+  }
+  return range;
+}
+
+/** composer 聚焦期间持续记录光标位置，避免失焦事件时序导致位置丢失 */
+function captureCaretWhileFocused() {
+  const root = editorRef.value;
+  if (!root || document.activeElement !== root) return;
+  const sel = window.getSelection();
+  const anchor = sel?.anchorNode;
+  if (!sel || sel.rangeCount === 0 || !anchor || !root.contains(anchor)) return;
+  savedCaretPosition.value = captureCaretFromNode(anchor, sel.anchorOffset, root);
+}
+
+function insertNodesAtCursor(nodes: Element[], addTrailingSpace = true) {
   const root = editorRef.value;
   if (!root) return;
+
+  // 是否在失焦（如去聊天消息里引用）后插入：浏览器会把 contenteditable 的
+  // caret 重置到开头，此时必须用失焦前记录的位置，而不能信任 getSelection()
+  const wasFocused = document.activeElement === root;
   root.focus();
 
   const sel = window.getSelection();
-  let range: Range;
+  let range: Range | null = null;
 
-  if (!sel || sel.rangeCount === 0 || !root.contains(sel.anchorNode)) {
+  if (wasFocused && sel && sel.rangeCount > 0 && root.contains(sel.anchorNode)) {
+    const current = sel.getRangeAt(0);
+    if (root.contains(current.commonAncestorContainer)) {
+      range = current.cloneRange();
+    }
+  }
+
+  if (!range && savedCaretPosition.value) {
+    range = restoreCaretFromSaved(savedCaretPosition.value);
+  }
+
+  if (!range) {
     range = document.createRange();
     range.selectNodeContents(root);
-    if (savedCursorOffset.value != null) {
-      // Restore to the position where the cursor was before the editor lost focus
-      const offset = Math.min(savedCursorOffset.value, root.childNodes.length);
-      range.setStart(root, offset);
-      range.collapse(true);
-    } else {
-      range.collapse(false);
-    }
-  } else {
-    range = sel.getRangeAt(0);
-    if (!root.contains(range.commonAncestorContainer)) {
-      range = document.createRange();
-      range.selectNodeContents(root);
-      range.collapse(false);
-    } else {
-      range = range.cloneRange();
-      range.deleteContents();
-    }
+    range.collapse(false);
   }
 
-  for (const node of nodes) {
-    range.insertNode(node);
-    range.setStartAfter(node);
-    range.collapse(true);
-  }
-
-  if (addTrailingSpace) {
-    const space = document.createTextNode("\u00A0");
-    range.insertNode(space);
-    range.setStartAfter(space);
-    range.collapse(true);
-  }
-
+  // 用 execCommand insertHTML 插入而非直接 insertNode：
+  // 编程式 DOM 变更不进浏览器 undo 栈，甚至会把 undo 栈整个搞坏；
+  // execCommand 插入可被 Ctrl+Z 一步撤销（与 onPaste 的 insertText 同理）
+  const existingImageChips = new Set(root.querySelectorAll(`.${CHIP_IMAGE}`));
   sel?.removeAllRanges();
   sel?.addRange(range);
+
+  const html = nodes.map((node) => node.outerHTML).join("") + (addTrailingSpace ? "\u00A0" : "");
+  let finalRange: Range;
+  if (document.execCommand("insertHTML", false, html)) {
+    finalRange = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : range;
+  } else {
+    // 极少见回退：直接 DOM 插入
+    const fallback = range;
+    fallback.deleteContents();
+    for (const node of nodes) {
+      fallback.insertNode(node);
+      fallback.setStartAfter(node);
+      fallback.collapse(true);
+    }
+    if (addTrailingSpace) {
+      const space = document.createTextNode("\u00A0");
+      fallback.insertNode(space);
+      fallback.setStartAfter(space);
+      fallback.collapse(true);
+    }
+    sel?.removeAllRanges();
+    sel?.addRange(fallback);
+    finalRange = fallback;
+  }
+
+  // execCommand 重解析后，新插入的图片 chip 需要重新绑定点击查看器
+  root.querySelectorAll(`.${CHIP_IMAGE}`).forEach((chip) => {
+    if (existingImageChips.has(chip)) return;
+    const img = chip.querySelector("img");
+    img?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openImageViewer((img as HTMLImageElement).src);
+    });
+  });
+
+  if (finalRange.startContainer && root.contains(finalRange.startContainer)) {
+    savedCaretPosition.value = captureCaretFromNode(finalRange.startContainer, finalRange.startOffset, root);
+  }
 }
 
 function createRefChip(file: ComposerReferencedFile): HTMLSpanElement {
@@ -454,6 +539,7 @@ function clear() {
   const root = editorRef.value;
   if (!root) return;
   root.innerHTML = "";
+  savedCaretPosition.value = null;
   syncEmpty();
   emitMentionChange();
   clearDraftStorage();
@@ -463,6 +549,7 @@ function setPlainText(text: string) {
   const root = editorRef.value;
   if (!root) return;
   root.innerHTML = "";
+  savedCaretPosition.value = null;
   if (text) {
     root.appendChild(document.createTextNode(text));
   }
@@ -746,6 +833,11 @@ watch(() => props.draftKey, (newKey, oldKey) => {
 // 组件挂载时恢复草稿
 onMounted(() => {
   restoreDraftFromStorage();
+  document.addEventListener("selectionchange", captureCaretWhileFocused);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("selectionchange", captureCaretWhileFocused);
 });
 </script>
 
