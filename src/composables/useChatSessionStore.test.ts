@@ -17,6 +17,7 @@ vi.mock("../services/vibeCodingClient", () => ({
   fetchSessionMessages: vi.fn(),
   syncChatSession: vi.fn(async () => ({ ok: true })),
   syncChatStore: vi.fn(),
+  deleteChatSessionFromDisk: vi.fn(async () => ({ ok: true, sessionCount: 0, activeSessionId: "" })),
 }));
 
 function installLocalStorageMock() {
@@ -358,5 +359,66 @@ describe("useChatSessionStore", () => {
     await new Promise((r) => setTimeout(r, 150));
 
     expect(listVibeChatSessions(projectPath).map((s) => s.id)).not.toContain(draftId);
+  });
+
+  it("removeSession with silent skips confirm and removes the session", async () => {
+    const projectPath = "D:/projects/remove-silent";
+    const { sessionId } = saveVibeChatHistory(projectPath, [
+      { id: "u1", role: "user", content: "a" },
+      { id: "a1", role: "assistant", content: "b" },
+    ]);
+
+    const confirmMock = vi.fn(async () => true);
+    const session = useSessionManager(() => projectPath);
+    session.setActiveSession(sessionId);
+    session.refreshSessionList();
+    const store = useChatSessionStore({
+      projectPath: () => projectPath,
+      chatError: ref(""),
+      chatSending: () => false,
+      session,
+      normalizeMessages: (msgs) => msgs,
+      confirm: confirmMock,
+    });
+    store.activateSession(sessionId, [
+      { id: "u1", role: "user", content: "a" },
+      { id: "a1", role: "assistant", content: "b" },
+    ]);
+
+    const { deleteChatSessionFromDisk } = await import("../services/vibeCodingClient");
+    vi.mocked(deleteChatSessionFromDisk).mockResolvedValue({ ok: true, sessionCount: 0, activeSessionId: "" });
+    await store.removeSession(sessionId, { silent: true });
+
+    expect(confirmMock).not.toHaveBeenCalled();
+    expect(listVibeChatSessions(projectPath).map((s) => s.id)).not.toContain(sessionId);
+    expect(deleteChatSessionFromDisk).toHaveBeenCalledWith(projectPath, sessionId, { activeSessionId: "" });
+  });
+
+  it("undo to empty removes the session so a refresh cannot resurrect it", async () => {
+    const projectPath = "D:/projects/undo-empty";
+    const { sessionId } = saveVibeChatHistory(projectPath, [
+      { id: "u1", role: "user", content: "a" },
+      { id: "a1", role: "assistant", content: "b" },
+    ]);
+
+    const { store, session, chatMessages } = createStore(projectPath);
+    session.setActiveSession(sessionId);
+    session.refreshSessionList();
+    store.activateSession(sessionId, [
+      { id: "u1", role: "user", content: "a" },
+      { id: "a1", role: "assistant", content: "b" },
+    ]);
+
+    const { deleteChatSessionFromDisk } = await import("../services/vibeCodingClient");
+    vi.mocked(deleteChatSessionFromDisk).mockResolvedValue({ ok: true, sessionCount: 0, activeSessionId: "" });
+
+    // 模拟 undoExchange 删空路径：splice 后长度归零 → 删除整个会话
+    store.spliceActiveMessages(0, 2);
+    expect(chatMessages.value.length).toBe(0);
+    await store.removeSession(sessionId, { silent: true });
+
+    expect(listVibeChatSessions(projectPath).map((s) => s.id)).not.toContain(sessionId);
+    expect(loadVibeChatHistory(projectPath)).toEqual([]);
+    expect(deleteChatSessionFromDisk).toHaveBeenCalledWith(projectPath, sessionId, { activeSessionId: "" });
   });
 });

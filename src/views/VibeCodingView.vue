@@ -1549,6 +1549,7 @@ const {
   bindSessionMessages,
   getSessionMessages,
   patchSessionMessage,
+  spliceActiveMessages,
   persistSessionNow,
   persistChatNow,
   schedulePersistChat,
@@ -3745,8 +3746,13 @@ function undoExchange(messageId: string, event?: MouseEvent) {
   const count = end - start + 1;
   void confirm(`确定要撤销这组对话吗？将删除其中 ${count} 条消息。`, event).then((ok) => {
     if (!ok) return;
-    chatMessages.value.splice(start, count);
+    spliceActiveMessages(start, count);
     chatError.value = "";
+    if (chatMessages.value.length === 0) {
+      // 消息已删空：直接删除整个会话，磁盘文件/索引一并清掉，避免刷新后从磁盘复活
+      void removeSession(activeSessionId.value.trim(), { silent: true });
+      return;
+    }
     persistChatNow();
     void scrollChatToBottom();
   }).catch((err: unknown) => {
@@ -3768,7 +3774,7 @@ async function editUserMessage(messageId: string) {
     : hydratedUrls;
 
   const { start, end } = findExchangeBounds(userIdx);
-  chatMessages.value.splice(start, end - start + 1);
+  spliceActiveMessages(start, end - start + 1);
 
   composerRef.value?.setPlainText(userText);
   for (const url of images) {
@@ -3810,7 +3816,7 @@ async function resendFromMessage(messageId: string) {
     : hydratedUrls;
   if (!userText && !imageDataUrls.length) return;
 
-  chatMessages.value.splice(userIdx);
+  spliceActiveMessages(userIdx);
   chatError.value = "";
   persistChatNow();
   await runAgentTurn(userText || "请结合附带的图片回答。", {

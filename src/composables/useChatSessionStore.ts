@@ -450,6 +450,26 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     persistSessionNow(sessionId, path, options);
   }
 
+  /**
+   * 删除当前会话消息区间。registry 数组本身非响应式，且 Vue 3.5 computed 在
+   * 返回值引用不变时不会触发订阅者（hasChanged 为 false），因此必须换新数组引用
+   * 并 bump，activeMessages computed 重新求值后才能驱动 UI 更新。
+   * deleteCount 省略 = 删除到数组末尾（对齐 Array#splice 的单参语义）。
+   */
+  function spliceActiveMessages(start: number, deleteCount?: number) {
+    const id = activeSessionId.value.trim();
+    const list = id ? sessionMessages.getSessionMessages(id) : orphanMessages;
+    if (!list) return;
+    const next = [...list];
+    next.splice(start, deleteCount ?? next.length - start);
+    if (id) {
+      sessionMessages.setSessionMessages(id, next);
+    } else {
+      orphanMessages = next;
+    }
+    bumpRegistryVersion();
+  }
+
   function ensureSessionForSend(): string {
     const project = projectPath().trim();
     if (!project) return "";
@@ -572,9 +592,11 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     hydrateSessionFromDiskAfterSwitch(project, id, gen);
   }
 
-  async function removeSession(sessionId: string) {
-    const ok = await confirm("确定删除此会话？");
-    if (!ok) return;
+  async function removeSession(sessionId: string, options?: { silent?: boolean }) {
+    if (!options?.silent) {
+      const ok = await confirm("确定删除此会话？");
+      if (!ok) return;
+    }
     const project = projectPath().trim();
     cancelPendingChatPersistence();
     sessionMessages.deleteSessionMessages(sessionId);
@@ -649,6 +671,7 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     bindSessionMessages,
     getSessionMessages: sessionMessages.getSessionMessages,
     patchSessionMessage: sessionMessages.patchSessionMessage,
+    spliceActiveMessages,
     persistSessionNow,
     persistChatNow,
     schedulePersistChat,
