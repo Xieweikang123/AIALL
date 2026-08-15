@@ -15,13 +15,13 @@
     },
     {
       "id": "ask-consultative-sort",
-      "description": "Ask 模式下同类咨询保持只读并跳过 AI 分类",
+      "description": "Ask 模式下同类咨询保持只读",
       "prompt": "列表按啥字段排序的？",
       "mode": "ask",
       "expect": {
         "consultative": true,
         "readOnlyTools": true,
-        "skipAiClassifier": true
+        "skipAiClassifier": false
       }
     },
     {
@@ -34,7 +34,7 @@
         "consultativeTopic": "project_overview",
         "readOnlyBuildRun": true,
         "runProfileKind": "interactive",
-        "skipAiClassifier": true
+        "skipAiClassifier": false
       }
     },
     {
@@ -146,7 +146,7 @@
     },
     {
       "id": "build-short-followup-ba",
-      "description": "短追问「还要吧」承接上文且规则短路",
+      "description": "短追问「还要吧」承接上文且只读",
       "prompt": "还要吧",
       "mode": "build",
       "history": [
@@ -154,7 +154,7 @@
       ],
       "expect": {
         "consultative": true,
-        "skipAiClassifier": true,
+        "skipAiClassifier": false,
         "readOnlyBuildRun": true,
         "runProfileKind": "interactive"
       }

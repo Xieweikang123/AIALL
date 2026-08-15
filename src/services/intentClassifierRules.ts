@@ -1,5 +1,4 @@
 import {
-  IMPLEMENT_INTENT_RE,
   isAccuracyConsultativePrompt,
   isAgentStepClarificationPrompt,
   isAutomationResumePrompt,
@@ -7,13 +6,10 @@ import {
   isBehaviorPurposePrompt,
   isCodeReviewPrompt,
   isConsultativeUserPrompt,
-  isEvaluativeOpinionPrompt,
   isImplementationStatusPrompt,
   isImplementFollowUpRun,
   isLocateStatusFollowUpPrompt,
   isSessionAuditPrompt,
-  isShortContextDependentFollowUp,
-  isShortImplementPrompt,
   isTargetAmbiguousImplementPrompt,
   isUiAppearanceQuestionPrompt,
   isUiDefectReportPrompt,
@@ -114,13 +110,8 @@ export function classifyUserIntentFromRules(input: ResolveUserIntentInput): Reso
 }
 
 function buildResolvedFromAi(ai: UserIntentAiPayload, rules: ResolvedUserIntent): ResolvedUserIntent {
-  const implementFollowUp =
-    rules.implementFollowUp || (ai.implementFollowUp && !rules.consultative);
-  const primary: UserIntentPrimary = implementFollowUp
-    ? "implement"
-    : ai.primary === "automation"
-      ? "automation"
-      : ai.primary;
+  const primary: UserIntentPrimary =
+    ai.primary === "automation" ? "automation" : ai.primary;
   const consultative = primary === "consultative";
 
   return {
@@ -128,7 +119,7 @@ function buildResolvedFromAi(ai: UserIntentAiPayload, rules: ResolvedUserIntent)
     consultative,
     consultativeTopic: ai.consultativeTopic,
     needsClarification: Boolean(rules.needsClarification || ai.needsClarification),
-    implementFollowUp,
+    implementFollowUp: ai.implementFollowUp,
     uiDefect: ai.uiDefect,
     codeReview: ai.codeReview,
     behaviorContradiction: ai.behaviorContradiction,
@@ -147,49 +138,6 @@ function buildResolvedFromAi(ai: UserIntentAiPayload, rules: ResolvedUserIntent)
   };
 }
 
-function applyConsultativeActionOverride(
-  resolved: ResolvedUserIntent,
-  prompt: string,
-  rules: ResolvedUserIntent,
-): ResolvedUserIntent {
-  if (
-    resolved.implementFollowUp ||
-    resolved.uiDefect ||
-    resolved.pendingPlanAmend ||
-    resolved.pendingPlanClarify ||
-    isAutomationResumePrompt(prompt) ||
-    !rules.consultative
-  ) {
-    return resolved;
-  }
-  if (resolved.primary === "consultative" && resolved.consultative) return resolved;
-  return { ...resolved, primary: "consultative", consultative: true };
-}
-
-/**
- * Symmetric guard to `applyConsultativeActionOverride`: a short, unambiguous
- * imperative (「去掉他」「删掉」「改一下」) is a high-confidence implement signal
- * from the rule baseline. In Auto mode a weak AI consultative verdict must not
- * downgrade it into a read-only turn — that would leave the agent unable to act
- * and telling the user to switch modes.
- */
-function applyImplementActionOverride(
-  resolved: ResolvedUserIntent,
-  prompt: string,
-  rules: ResolvedUserIntent,
-  mode: ResolveUserIntentInput["mode"],
-): ResolvedUserIntent {
-  if (mode !== "auto") return resolved;
-  if (resolved.primary !== "consultative") return resolved;
-  if (rules.primary !== "implement") return resolved;
-  const text = prompt.trim();
-  if (!text || text.length > 24) return resolved;
-  if (/[？?]$/.test(text)) return resolved;
-  if (!(isShortImplementPrompt(text) || IMPLEMENT_INTENT_RE.test(text))) return resolved;
-  return { ...resolved, primary: "implement", consultative: false, consultativeTopic: "none" };
-}
-
-/** Merge AI classification with rule baseline; hard overrides win over AI. */
 export function resolveUserIntent(input: ResolveUserIntentInput): ResolvedUserIntent {
   const rules = classifyUserIntentFromRules(input);
 
@@ -205,15 +153,13 @@ export function resolveUserIntent(input: ResolveUserIntentInput): ResolvedUserIn
 
   const ai = input.ai;
   let resolved = ai ? buildResolvedFromAi(ai, rules) : rules;
-  resolved = applyConsultativeActionOverride(resolved, input.prompt, rules);
-  resolved = applyImplementActionOverride(resolved, input.prompt, rules, input.mode);
   if (resolved.primary !== "implement") {
     resolved = { ...resolved, needsClarification: false };
   }
   return resolved;
 }
 
-/** High-confidence rule outcome — skip extra classifier model call. */
+/** Protocol-signal only — content/topic classification is delegated to the AI classifier. */
 export function shouldSkipAiIntentClassifier(
   rules: ResolvedUserIntent,
   prompt: string,
@@ -223,13 +169,8 @@ export function shouldSkipAiIntentClassifier(
   if (!text) return true;
   // Auto：模式由意图决定，始终交给 AI 分类，不用规则短路。
   if (opts?.mode === "auto") return false;
-  if (isShortContextDependentFollowUp(text)) return true;
   if (rules.pendingPlanAmend || rules.pendingPlanClarify) return true;
   if (isQuotedAmendPrompt(text)) return true;
-  if (rules.primary === "automation" || rules.uiDefect || rules.implementFollowUp) return true;
-  if (isEvaluativeOpinionPrompt(text)) return true;
-  if (rules.primary === "implement" && IMPLEMENT_INTENT_RE.test(text)) return true;
-  if (rules.consultativeTopic !== "none" && rules.consultativeTopic !== "general") return true;
-  if (opts?.isAsk && rules.consultative) return true;
+  if (rules.primary === "automation" || rules.uiDefect) return true;
   return false;
 }

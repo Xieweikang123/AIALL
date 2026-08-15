@@ -122,24 +122,24 @@ describe("classifyUserIntentFromRules", () => {
 });
 
 describe("shouldSkipAiIntentClassifier", () => {
-  it("skips AI for project overview rules match", () => {
+  it("skips AI only for protocol signals, not rule-detected topics", () => {
     const rules = classifyUserIntentFromRules({
       prompt: "解释这个项目是做什么的",
       mode: "build",
       hasImage: false,
       isAsk: false,
     });
-    expect(shouldSkipAiIntentClassifier(rules, "解释这个项目是做什么的")).toBe(true);
+    expect(shouldSkipAiIntentClassifier(rules, "解释这个项目是做什么的")).toBe(false);
   });
 
-  it("skips AI for explicit implement intent", () => {
+  it("calls AI for explicit implement intent", () => {
     const rules = classifyUserIntentFromRules({
       prompt: "帮我把输入框改成可聚焦",
       mode: "build",
       hasImage: false,
       isAsk: false,
     });
-    expect(shouldSkipAiIntentClassifier(rules, "帮我把输入框改成可聚焦")).toBe(true);
+    expect(shouldSkipAiIntentClassifier(rules, "帮我把输入框改成可聚焦")).toBe(false);
   });
 
   it("calls AI for ambiguous general consultative", () => {
@@ -162,7 +162,6 @@ describe("shouldSkipAiIntentClassifier", () => {
       isAsk: false,
     });
     expect(rules.primary).toBe("implement");
-    expect(shouldSkipAiIntentClassifier(rules, prompt)).toBe(true);
     expect(shouldSkipAiIntentClassifier(rules, prompt, { mode: "auto" })).toBe(false);
   });
 });
@@ -222,7 +221,7 @@ describe("resolveUserIntent", () => {
     expect(merged.classificationSource).toBe("rules");
   });
 
-  it("rules implementFollowUp wins over AI", () => {
+  it("adopts AI implementFollowUp as implement", () => {
     const merged = resolveUserIntent({
       prompt: "改吧",
       mode: "build",
@@ -233,9 +232,9 @@ describe("resolveUserIntent", () => {
         { role: "user", content: "先分析一下" },
       ],
       ai: {
-        primary: "consultative",
-        consultativeTopic: "general",
-        implementFollowUp: false,
+        primary: "implement",
+        consultativeTopic: "none",
+        implementFollowUp: true,
         uiDefect: false,
         codeReview: false,
         behaviorContradiction: false,
@@ -248,12 +247,11 @@ describe("resolveUserIntent", () => {
         configBindingTopic: null,
       },
     });
-    if (merged.implementFollowUp) {
-      expect(merged.primary).toBe("implement");
-    }
+    expect(merged.primary).toBe("implement");
+    expect(merged.implementFollowUp).toBe(true);
   });
 
-  it("rules consultative wins over AI implementFollowUp on evaluative prompts", () => {
+  it("keeps AI implementFollowUp verdict without rule interference", () => {
     const prompt = '"扫描与测试修复" 功能，你觉得如何？';
     const merged = resolveUserIntent({
       prompt,
@@ -280,12 +278,12 @@ describe("resolveUserIntent", () => {
         configBindingTopic: null,
       },
     });
-    expect(merged.consultative).toBe(true);
-    expect(merged.primary).toBe("consultative");
-    expect(merged.implementFollowUp).toBe(false);
+    expect(merged.consultative).toBe(false);
+    expect(merged.primary).toBe("implement");
+    expect(merged.implementFollowUp).toBe(true);
   });
 
-  it("keeps short imperative as implement when AI says consultative in auto mode", () => {
+  it("keeps AI consultative verdict for short imperatives in auto mode", () => {
     const merged = resolveUserIntent({
       prompt: "去掉他",
       mode: "auto",
@@ -307,9 +305,9 @@ describe("resolveUserIntent", () => {
         configBindingTopic: null,
       },
     });
-    expect(merged.primary).toBe("implement");
-    expect(merged.consultative).toBe(false);
-    expect(merged.needsClarification).toBe(true);
+    expect(merged.primary).toBe("consultative");
+    expect(merged.consultative).toBe(true);
+    expect(merged.needsClarification).toBe(false);
   });
 
   it("keeps AI consultative for question-shaped prompts in auto mode", () => {
