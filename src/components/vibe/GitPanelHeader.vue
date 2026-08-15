@@ -17,7 +17,10 @@
           title="贮藏工作区修改"
           @click="$emit('update:gitStashSectionOpen', !stashSectionOpen)"
         >
-          📦 贮藏<span v-if="gitStashes.length" class="git-stash-btn-count">{{ gitStashes.length }}</span>
+          <svg class="git-stash-icon" width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">
+            <path fill="currentColor" d="M3.5 1.5h9a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1Zm0 8h9a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1Z"/>
+          </svg>
+          贮藏<span v-if="gitStashes.length" class="git-stash-btn-count">{{ gitStashes.length }}</span>
         </button>
         <button type="button" class="ghost tiny" :disabled="gitLoading" @click="$emit('refresh')">刷新</button>
         <span
@@ -38,13 +41,13 @@
         </span>
       </div>
       <div class="git-remote-actions">
-        <button type="button" class="git-remote-btn" :disabled="!!gitRemoteAction" @click="$emit('do-fetch')">
+        <button type="button" class="git-remote-btn" :class="{ 'git-remote-btn--loading': gitRemoteAction === 'fetch' }" :disabled="!!gitRemoteAction" @click="$emit('do-fetch')">
           {{ gitRemoteAction === 'fetch' ? '…' : 'Fetch' }}
         </button>
-        <button type="button" class="git-remote-btn git-remote-btn--pull" :disabled="!!gitRemoteAction" @click="$emit('do-pull')">
+        <button type="button" class="git-remote-btn git-remote-btn--pull" :class="{ 'git-remote-btn--loading': gitRemoteAction === 'pull' }" :disabled="!!gitRemoteAction" @click="$emit('do-pull')">
           {{ gitRemoteAction === 'pull' ? '…' : 'Pull' }}
         </button>
-        <button type="button" class="git-remote-btn git-remote-btn--push" :disabled="!!gitRemoteAction" @click="$emit('do-push')">
+        <button type="button" class="git-remote-btn git-remote-btn--push" :class="{ 'git-remote-btn--loading': gitRemoteAction === 'push' }" :disabled="!!gitRemoteAction" @click="$emit('do-push')">
           {{ gitRemoteAction === 'push' ? '…' : 'Push' }}
         </button>
       </div>

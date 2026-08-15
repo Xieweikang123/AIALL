@@ -124,13 +124,16 @@ watch(
 .git-commit-btn { min-width: 72px; }
 .git-ai-push {
   font-size: 11px;
-  padding: 3px 8px;
-  border: 1px solid rgba(210, 153, 34, 0.35);
-  background: rgba(210, 153, 34, 0.08);
+  padding: 3px 10px;
+  border: none;
+  background: linear-gradient(135deg, #3a8dff 0%, #58a6ff 100%);
   border-radius: 4px;
-  color: #e3b341;
+  color: #ffffff;
+  font-weight: 600;
   cursor: pointer;
+  transition: filter 0.15s, opacity 0.15s;
 }
+.git-ai-push:hover:not(:disabled) { filter: brightness(1.12); }
 .git-ai-push:disabled { opacity: 0.4; cursor: default; }
 .git-commit-ai {
   font-size: 11px;
