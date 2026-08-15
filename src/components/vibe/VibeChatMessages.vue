@@ -157,6 +157,11 @@
         @open-plan-file="ctx.openPlanFileInEditor(m.planFilePath)"
         @resume="ctx.resumeAgentRun(m.id)"
       />
+      <AiOptionButtons
+        v-if="m.role === 'assistant' && !ctx.isAgentRunning(m) && m.suggestedOptions?.length"
+        :options="m.suggestedOptions"
+        @select="(option) => ctx.handleAiOptionSelect(option, m)"
+      />
       <div
         v-if="m.role === 'user' && ctx.userMessageImages(m).length"
         class="msg-user-images"
@@ -202,6 +207,7 @@
             :content="planMarkdownContent(ctx.messageDisplayContent(m), m.role === 'assistant' && ctx.isAgentRunning(m))"
             :streaming="m.role === 'assistant' && ctx.isAgentRunning(m)"
             :interactive="m.role === 'assistant' && !ctx.isAgentRunning(m)"
+            :suggested-options="m.suggestedOptions ?? null"
             @select-option="(option) => ctx.handleAiOptionSelect(option, m)"
           />
         </PlanDocumentBlock>
@@ -218,45 +224,29 @@
           v-for="relPath in Object.keys(m.turnFileDiffs)"
           :key="relPath"
           class="inline-diff-card"
-          :class="{ 'inline-diff-card--open': ctx.isDiffExpanded(m.id, relPath) }"
         >
           <div
             class="inline-diff-head"
             role="button"
             tabindex="0"
-            :aria-expanded="ctx.isDiffExpanded(m.id, relPath)"
-            @click="ctx.toggleExpandedDiff(m.id, relPath)"
-            @keydown.enter.prevent="ctx.toggleExpandedDiff(m.id, relPath)"
-            @keydown.space.prevent="ctx.toggleExpandedDiff(m.id, relPath)"
+            :title="`在编辑器中查看 ${shortDiffPath(relPath)} 的差异`"
+            @click="ctx.previewAgentFile(m.id, relPath)"
+            @keydown.enter.prevent="ctx.previewAgentFile(m.id, relPath)"
+            @keydown.space.prevent="ctx.previewAgentFile(m.id, relPath)"
           >
-            <span class="inline-diff-chevron" aria-hidden="true">
-              {{ ctx.isDiffExpanded(m.id, relPath) ? "▾" : "▸" }}
-            </span>
             <span class="inline-diff-path" :title="relPath">{{ shortDiffPath(relPath) }}</span>
             <span v-if="m.turnFileDiffs[relPath].deleted" class="inline-diff-tag delete">删除</span>
             <span v-else class="inline-diff-tag modify">修改</span>
-            <div class="inline-diff-actions" @click.stop>
+            <div class="inline-diff-actions">
               <button
                 type="button"
                 class="inline-diff-action"
                 :disabled="!ctx.projectOpened.value"
-                title="在编辑器中预览"
-                @click="ctx.previewAgentFile(m.id, relPath)"
+                title="在编辑器中查看差异"
+                @click.stop="ctx.previewAgentFile(m.id, relPath)"
               >
-                预览
+                查看差异
               </button>
-            </div>
-          </div>
-          <div class="inline-diff-wrap" :class="{ open: ctx.isDiffExpanded(m.id, relPath) }">
-            <div class="inline-diff-cols">
-              <div class="inline-diff-col">
-                <div class="inline-diff-label">修改前</div>
-                <pre class="trace-pre compact">{{ ctx.truncateDiffPreview(m.turnFileDiffs[relPath].before || "（空 / 新文件）") }}</pre>
-              </div>
-              <div class="inline-diff-col">
-                <div class="inline-diff-label">{{ m.turnFileDiffs[relPath].deleted ? "删除后" : "修改后" }}</div>
-                <pre class="trace-pre compact">{{ ctx.truncateDiffPreview(m.turnFileDiffs[relPath].deleted ? "（文件已删除）" : (m.turnFileDiffs[relPath].after || "")) }}</pre>
-              </div>
             </div>
           </div>
         </div>
@@ -377,6 +367,7 @@ import PlanDocumentBlock from "../PlanDocumentBlock.vue";
 import ProjectReportBlock from "../ProjectReportBlock.vue";
 import { enrichPlanMarkdownForDisplay } from "../../services/planDocumentDisplay";
 import { shouldUsePlanExternalView } from "../../services/planFile";
+import AiOptionButtons from "../AiOptionButtons.vue";
 import { vibeChatMessageContextKey, type VibeChatMessageItem } from "../../composables/vibeChatMessageContext";
 import { isAwaitingAssistantPlaceholder, isOrphanedUserReply } from "../../utils/vibeHelpers";
 
@@ -436,6 +427,7 @@ function messageMemoKey(m: VibeChatMessageItem): unknown[] {
     m.agentFailed,
     m.agentRecoverable,
     Object.keys(m.turnFileDiffs ?? {}).length,
+    m.suggestedOptions?.length ?? 0,
   ];
 }
 

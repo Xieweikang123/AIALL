@@ -807,55 +807,29 @@
 }
 
 .mode-btn {
-  padding: 5px 12px;
+  padding: 4px 10px;
   font-size: 12px;
   font-weight: 500;
   border: none;
   background: transparent;
-  color: rgba(139, 148, 158, 0.7);
+  color: rgba(148, 163, 184, 0.6);
   cursor: pointer;
   border-radius: 6px;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.chat-debug-toggle {
-  margin-left: 4px;
-  padding: 5px 10px;
-  font-size: 12px;
-  font-weight: 500;
-  border: 1px solid rgba(139, 148, 158, 0.25);
-  background: transparent;
-  color: rgba(139, 148, 158, 0.7);
-  cursor: pointer;
-  border-radius: 6px;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.chat-debug-toggle:hover:not(:disabled) {
-  color: rgba(255, 255, 255, 0.9);
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.chat-debug-toggle.active {
-  background: linear-gradient(135deg, rgba(88, 166, 255, 0.25), rgba(88, 166, 255, 0.15));
-  color: #58a6ff;
-  border-color: rgba(88, 166, 255, 0.45);
-  box-shadow: 0 1px 3px rgba(88, 166, 255, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  transition: color 0.15s, background 0.15s;
 }
 
 .mode-btn:hover:not(:disabled) {
-  color: rgba(255, 255, 255, 0.9);
-  background: rgba(255, 255, 255, 0.05);
+  color: rgba(226, 232, 240, 0.85);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .mode-btn.active {
-  background: linear-gradient(135deg, rgba(255, 213, 79, 0.25), rgba(255, 213, 79, 0.15));
-  color: #ffd54f;
-  box-shadow: 0 1px 3px rgba(255, 213, 79, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  color: rgba(226, 232, 240, 0.95);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .mode-btn:disabled {
-  opacity: 0.4;
+  opacity: 0.35;
   cursor: not-allowed;
 }
 
@@ -864,9 +838,31 @@
 }
 
 .mode-btn-auto.active {
-  background: linear-gradient(135deg, rgba(129, 199, 132, 0.25), rgba(129, 199, 132, 0.15));
-  color: #81c784;
-  box-shadow: 0 1px 3px rgba(129, 199, 132, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  color: rgba(226, 232, 240, 0.95);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.chat-debug-toggle {
+  margin-left: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  color: rgba(148, 163, 184, 0.6);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.chat-debug-toggle:hover:not(:disabled) {
+  color: rgba(226, 232, 240, 0.85);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.chat-debug-toggle.active {
+  color: rgba(226, 232, 240, 0.95);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .chat-actions {

@@ -3658,13 +3658,13 @@ async function rejectAgentTurn(messageId: string, event?: MouseEvent) {
   }
 }
 
-function previewAgentFile(messageId: string, relPath: string) {
+async function previewAgentFile(messageId: string, relPath: string) {
   const msg = chatMessages.value.find((m) => m.id === messageId);
   const diff = msg?.turnFileDiffs?.[relPath];
   if (!diff) return;
   const fullPath = resolveFullPathFromRel(relPath);
   setFileDiff(fullPath, diff);
-  void openFile(fullPath);
+  await openFile(fullPath);
   showDiffMode.value = true;
 }
 
