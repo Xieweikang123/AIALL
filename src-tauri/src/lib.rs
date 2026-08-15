@@ -7,6 +7,7 @@ mod crash_log;
 mod error;
 mod fs;
 mod git;
+pub mod http_routes;
 mod paths;
 mod project;
 mod web_fetch;

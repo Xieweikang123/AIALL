@@ -10,22 +10,30 @@ export function isTauriEnv(): boolean {
   return typeof window !== "undefined" && !!(window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
 }
 
-function allowHttpFallbackInNodeTests(): boolean {
-  return typeof process !== "undefined" && Boolean(process.env.VITEST);
+function allowHttpFallback(): boolean {
+  // VITEST 单测（Node 环境）直接走 httpFallback 测客户端契约
+  if (typeof process !== "undefined" && Boolean(process.env.VITEST)) {
+    return true;
+  }
+  // 浏览器 Web 模式：走 agent-server 的 /backend/vibe/* HTTP 接口
+  if (typeof window !== "undefined" && !isTauriEnv()) {
+    return true;
+  }
+  return false;
 }
 
 export function webRequiresTauriError(): Error {
   return new Error(WEB_REQUIRES_TAURI_MESSAGE);
 }
 
-/** Tauri 桌面版走 invoke；浏览器预览拒绝 sidecar；Vitest 仍可走 httpFallback 测客户端契约。 */
+/** Tauri 桌面版走 invoke；浏览器 Web 模式走 HTTP（agent-server）；Vitest 走 httpFallback 测契约。 */
 export async function invokeBackend<T>(
   cmd: string,
   args: Record<string, unknown>,
   httpFallback?: () => Promise<T>,
 ): Promise<T> {
   if (!isTauriEnv()) {
-    if (allowHttpFallbackInNodeTests() && httpFallback) {
+    if (allowHttpFallback() && httpFallback) {
       return httpFallback();
     }
     throw webRequiresTauriError();

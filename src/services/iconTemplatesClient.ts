@@ -2,8 +2,6 @@ import type { IconTemplateItem, IconTemplateListResponse } from "../types/iconTe
 import { backendUrl } from "./backendBase";
 import { invokeBackend, isTauriEnv, tauriInvoke } from "./tauriInvoke";
 
-const BASE = backendUrl("/backend/icon-templates");
-
 function mapTauriIconTemplates(templates: unknown[]): IconTemplateListResponse["items"] {
   return templates.map((raw) => {
     const t = raw as Record<string, unknown>;
@@ -22,30 +20,24 @@ function mapTauriIconTemplates(templates: unknown[]): IconTemplateListResponse["
 }
 
 export async function fetchIconTemplateList(): Promise<IconTemplateListResponse> {
-  if (isTauriEnv()) {
-    const result = await tauriInvoke<{
-      ok: boolean;
-      templates: unknown[];
-      storePath?: string;
-      imagesPath?: string;
-    }>("icon_templates_list");
-    if (!result.ok) {
-      throw new Error("获取模板列表失败");
-    }
-    return {
-      ok: true,
-      storePath: result.storePath ?? "",
-      imagesPath: result.imagesPath ?? "",
-      items: mapTauriIconTemplates(result.templates ?? []),
-    };
+  if (!isTauriEnv()) {
+    return { ok: false, error: "图标模板仅桌面版可用（模板存储与截图匹配需在本机运行 npm run dev）" };
   }
-
-  const res = await fetch(BASE, { method: "GET" });
-  const data = (await res.json()) as IconTemplateListResponse | { ok?: false; error?: string };
-  if (!res.ok || !("items" in data) || !data.ok) {
-    throw new Error((data as { error?: string }).error || `请求失败 HTTP ${res.status}`);
+  const result = await tauriInvoke<{
+    ok: boolean;
+    templates: unknown[];
+    storePath?: string;
+    imagesPath?: string;
+  }>("icon_templates_list");
+  if (!result.ok) {
+    throw new Error("获取模板列表失败");
   }
-  return data;
+  return {
+    ok: true,
+    storePath: result.storePath ?? "",
+    imagesPath: result.imagesPath ?? "",
+    items: mapTauriIconTemplates(result.templates ?? []),
+  };
 }
 
 export interface UpsertIconTemplatePayload {
@@ -60,42 +52,26 @@ export interface UpsertIconTemplatePayload {
 }
 
 export async function upsertIconTemplate(payload: UpsertIconTemplatePayload): Promise<{ ok: true; item: IconTemplateItem }> {
-  if (isTauriEnv()) {
-    const result = await tauriInvoke<{ ok: boolean; item?: IconTemplateItem; error?: string }>(
-      "icon_templates_save",
-      { ...payload },
-    );
-    if (!result.ok || !result.item) {
-      throw new Error(result.error || "保存失败");
-    }
-    return { ok: true, item: result.item };
+  if (!isTauriEnv()) {
+    throw new Error("图标模板仅桌面版可用（需在本机运行 npm run dev）");
   }
-
-  const res = await fetch(BASE, {
-    method: "POST",
-    headers: { "Content-Type": "application/json; charset=utf-8" },
-    body: JSON.stringify(payload),
-  });
-  const data = (await res.json()) as { ok?: boolean; error?: string; item?: IconTemplateItem };
-  if (!res.ok || !data.ok || !data.item) {
-    throw new Error(data.error || `保存失败 HTTP ${res.status}`);
+  const result = await tauriInvoke<{ ok: boolean; item?: IconTemplateItem; error?: string }>(
+    "icon_templates_save",
+    { ...payload },
+  );
+  if (!result.ok || !result.item) {
+    throw new Error(result.error || "保存失败");
   }
-  return { ok: true, item: data.item };
+  return { ok: true, item: result.item };
 }
 
 export async function deleteIconTemplate(id: string): Promise<void> {
-  if (isTauriEnv()) {
-    const result = await tauriInvoke<{ ok: boolean; error?: string }>("icon_templates_delete", { id });
-    if (!result.ok) {
-      throw new Error(result.error || "删除失败");
-    }
-    return;
+  if (!isTauriEnv()) {
+    throw new Error("图标模板仅桌面版可用（需在本机运行 npm run dev）");
   }
-
-  const res = await fetch(`${BASE}?id=${encodeURIComponent(id)}`, { method: "DELETE" });
-  const data = (await res.json()) as { ok?: boolean; error?: string };
-  if (!res.ok || !data.ok) {
-    throw new Error(data.error || `删除失败 HTTP ${res.status}`);
+  const result = await tauriInvoke<{ ok: boolean; error?: string }>("icon_templates_delete", { id });
+  if (!result.ok) {
+    throw new Error(result.error || "删除失败");
   }
 }
 
@@ -127,6 +103,9 @@ export type TestIconTemplateMatchResult =
 
 /** 不抛错：成功 / 失败均可能带整屏截屏 Base64，便于界面展示 */
 export async function testIconTemplateMatch(id: string): Promise<TestIconTemplateMatchResult> {
+  if (!isTauriEnv()) {
+    return { ok: false, error: "模板匹配仅桌面版可用（需在本机运行 npm run dev）" };
+  }
   try {
     const data = await invokeBackend<Record<string, unknown>>(
       "automation_test_icon_template",

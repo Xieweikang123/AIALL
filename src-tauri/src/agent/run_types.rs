@@ -88,6 +88,10 @@ pub struct AgentRunRequest {
 }
 
 impl AgentRunRequest {
+    pub fn project_path(&self) -> &str {
+        &self.project_path
+    }
+
     /// Headless / CLI smoke entry — no UI history or run profile.
     pub fn for_smoke(
         project_path: String,

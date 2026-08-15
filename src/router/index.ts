@@ -21,6 +21,11 @@ const routes: RouteRecordRaw[] = [
     component: () => import("../views/IconTemplatesView.vue"),
   },
   {
+    path: "/web-agent",
+    name: "WebAgent",
+    component: () => import("../views/WebAgentView.vue"),
+  },
+  {
     path: "/vibe-coding",
     name: "VibeCoding",
     component: () => import("../views/VibeCodingView.vue"),

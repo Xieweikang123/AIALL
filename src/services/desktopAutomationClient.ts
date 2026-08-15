@@ -59,6 +59,9 @@ export async function findTemplateTauri(screenPng: string, templatePng: string, 
 }
 
 export async function openAppByIconTemplateId(id: string): Promise<OpenByTemplateResult> {
+  if (!isTauriEnv()) {
+    throw new Error("桌面自动化仅桌面版可用（截图 / 模板匹配 / 点击需在本机运行 npm run dev）");
+  }
   const data = await invokeBackend<OpenByTemplateResult | { ok: false; error?: string }>(
     "automation_open_by_template",
     { templateId: id },

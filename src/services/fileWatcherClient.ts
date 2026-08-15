@@ -37,68 +37,47 @@ const FILE_CHANGE_TYPES = new Set<FileChangeEvent["type"]>([
   "unlinkDir",
 ]);
 
+/** 服务器无桌面文件系统事件源：文件监听仅桌面版可用。 */
+const FILE_WATCHER_WEB_DEGRADED: FileWatcherStartResult = {
+  ok: false,
+  message: "",
+  watchedPaths: [],
+  error: "文件监听仅桌面版可用",
+};
+
 export async function startFileWatcher(
   projectPath: string,
   watchPaths?: string[]
 ): Promise<FileWatcherStartResult> {
-  if (isTauriEnv()) {
-    const paths = watchPaths?.length ? watchPaths : [projectPath];
-    try {
-      const result = await tauriInvoke<{ ok?: boolean }>("file_watcher_start", { paths });
-      return { ok: result.ok !== false, message: "", watchedPaths: paths };
-    } catch (error) {
-      return {
-        ok: false,
-        message: "",
-        watchedPaths: [],
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
+  if (!isTauriEnv()) {
+    return { ...FILE_WATCHER_WEB_DEGRADED };
   }
+  const paths = watchPaths?.length ? watchPaths : [projectPath];
   try {
-    watchedProjectPath = projectPath;
-    const url = backendUrl("/backend/vibe/file-watcher/start");
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: projectPath, watchPaths }),
-    });
-    return await readJsonResponse<FileWatcherStartResult>(response);
+    const result = await tauriInvoke<{ ok?: boolean }>("file_watcher_start", { paths });
+    return { ok: result.ok !== false, message: "", watchedPaths: paths };
   } catch (error) {
     return {
       ok: false,
       message: "",
       watchedPaths: [],
-      error: error instanceof Error ? error.message : "启动文件监听失败",
+      error: error instanceof Error ? error.message : String(error),
     };
   }
 }
 
 export async function stopFileWatcher(): Promise<FileWatcherStopResult> {
-  if (isTauriEnv()) {
-    try {
-      await tauriInvoke("file_watcher_stop");
-      return { ok: true, message: "" };
-    } catch (error) {
-      return {
-        ok: false,
-        message: "",
-        error: error instanceof Error ? error.message : String(error),
-      };
-    }
+  if (!isTauriEnv()) {
+    return { ok: true, message: "已停止" };
   }
   try {
-    const url = backendUrl("/backend/vibe/file-watcher/stop");
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-    });
-    return await readJsonResponse<FileWatcherStopResult>(response);
+    await tauriInvoke("file_watcher_stop");
+    return { ok: true, message: "" };
   } catch (error) {
     return {
       ok: false,
       message: "",
-      error: error instanceof Error ? error.message : "停止文件监听失败",
+      error: error instanceof Error ? error.message : String(error),
     };
   }
 }
@@ -236,6 +215,13 @@ export function connectFileWatcherStream(
         statusCallback?.(false);
         errorCallback?.(error instanceof Error ? error.message : "文件监听连接失败");
       });
+    return () => {
+      disconnectFileWatcherStream();
+    };
+  }
+
+  if (!isTauriEnv()) {
+    statusCallback?.(false);
     return () => {
       disconnectFileWatcherStream();
     };

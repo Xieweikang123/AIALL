@@ -35,6 +35,45 @@ pub async fn fs_list(path: String, cache: State<'_, DirCache>) -> Result<ListRes
         false => path.clone(),
     };
 
+    if let Ok(guard) = cache.0.lock() {
+        if let Some((items, ts)) = guard.get(&resolved) {
+            if ts.elapsed() < CACHE_TTL {
+                return Ok(ListResult {
+                    ok: true,
+                    path: resolved,
+                    items: items.clone(),
+                    error: None,
+                });
+            }
+        }
+    }
+
+    let result = fs_list_core(resolved.clone()).await;
+    if let Ok(ok) = &result {
+        if ok.ok {
+            if let Ok(mut guard) = cache.0.lock() {
+                guard.insert(resolved.clone(), (ok.items.clone(), Instant::now()));
+            }
+        }
+    }
+    result
+}
+
+/// Directory listing without the Tauri `State` cache — shared by the desktop
+/// command and the HTTP server (see `http_routes`).
+pub async fn fs_list_core(path: String) -> Result<ListResult, String> {
+    let resolved = match path.trim().is_empty() {
+        true => {
+            return Ok(ListResult {
+                ok: false,
+                path,
+                items: vec![],
+                error: Some("缺少 path 参数".into()),
+            })
+        }
+        false => path.clone(),
+    };
+
     if let Ok(meta) = tokio::fs::metadata(&resolved).await {
         if !meta.is_dir() {
             return Ok(ListResult {
@@ -53,31 +92,13 @@ pub async fn fs_list(path: String, cache: State<'_, DirCache>) -> Result<ListRes
         });
     }
 
-    if let Ok(guard) = cache.0.lock() {
-        if let Some((items, ts)) = guard.get(&resolved) {
-            if ts.elapsed() < CACHE_TTL {
-                return Ok(ListResult {
-                    ok: true,
-                    path: resolved,
-                    items: items.clone(),
-                    error: None,
-                });
-            }
-        }
-    }
-
     match fs::list_directory(&resolved).await {
-        Ok(items) => {
-            if let Ok(mut guard) = cache.0.lock() {
-                guard.insert(resolved.clone(), (items.clone(), Instant::now()));
-            }
-            Ok(ListResult {
-                ok: true,
-                path: resolved,
-                items,
-                error: None,
-            })
-        }
+        Ok(items) => Ok(ListResult {
+            ok: true,
+            path: resolved,
+            items,
+            error: None,
+        }),
         Err(error) => Ok(ListResult {
             ok: false,
             path: resolved,

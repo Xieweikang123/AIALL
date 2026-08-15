@@ -718,6 +718,40 @@ fn is_dangerous_command(command: &str) -> bool {
     unix_rm || win_del || cmd_rm || ps_rm || dangerous_cmd
 }
 
+const SERVER_ALLOWED_COMMAND_PROGRAMS: &[&str] = &[
+    "npm", "npx", "node", "cargo", "git", "ls", "pwd", "echo", "make",
+];
+
+/// 服务器模式命令白名单（`AIALL_SERVER_RESTRICT_COMMANDS=1` 时启用）。
+/// 仅作服务器模式策略，桌面版不经过这里。返回拒绝原因，`None` 表示放行。
+fn server_mode_command_blocked(command: &str) -> Option<&'static str> {
+    let trimmed = command.trim();
+    if trimmed.is_empty() {
+        return Some("命令为空");
+    }
+    // 拦截 shell 控制字符，防 `npm test && rm -rf /`、`$(...)` 等拼接。
+    if trimmed
+        .chars()
+        .any(|c| matches!(c, ';' | '&' | '|' | '<' | '>' | '`' | '$'))
+    {
+        return Some("命令包含 shell 控制字符");
+    }
+    let mut tokens = trimmed.split_whitespace();
+    let program = tokens.next().unwrap_or("").to_ascii_lowercase();
+    if !SERVER_ALLOWED_COMMAND_PROGRAMS.contains(&program.as_str()) {
+        return Some("命令不在服务器模式白名单内");
+    }
+    // node/npx 禁止内联执行 JS（`node -e "..."` 等价任意代码执行）。
+    if program == "node" || program == "npx" {
+        if let Some(flag) = tokens.next() {
+            if matches!(flag, "-e" | "-p" | "--eval" | "--print") {
+                return Some("禁止内联执行 JS 代码");
+            }
+        }
+    }
+    None
+}
+
 async fn exec_run_command(project_path: &str, args: &Value, mode: &str) -> (bool, String) {
     if let Some(msg) = block_write(mode, "执行命令") {
         return (false, msg);
@@ -728,6 +762,11 @@ async fn exec_run_command(project_path: &str, args: &Value, mode: &str) -> (bool
     }
     if is_dangerous_command(command) {
         return (false, "错误：禁止执行危险命令".into());
+    }
+    if std::env::var("AIALL_SERVER_RESTRICT_COMMANDS").map_or(false, |v| v == "1") {
+        if let Some(reason) = server_mode_command_blocked(command) {
+            return (false, format!("错误：服务器模式禁止执行该命令（{reason}）"));
+        }
     }
     let timeout_ms = args
         .get("timeout_ms")
@@ -1076,5 +1115,79 @@ mod tests {
     #[test]
     fn dangerous_empty_command_safe() {
         assert!(!is_dangerous_command(""));
+    }
+
+    // ── server_mode_command_blocked（服务器模式命令白名单） ──
+
+    #[test]
+    fn server_mode_allows_whitelisted_commands() {
+        for cmd in &[
+            "npm test",
+            "npm run build",
+            "git status",
+            "ls -la",
+            "pwd",
+            "echo hello",
+            "cargo check",
+            "node script.js",
+            "npx vitest run",
+        ] {
+            assert!(
+                server_mode_command_blocked(cmd).is_none(),
+                "server mode should allow: {cmd}"
+            );
+        }
+    }
+
+    #[test]
+    fn server_mode_blocks_dangerous_commands() {
+        for cmd in &[
+            "rm -rf /",
+            "cat /etc/passwd",
+            "curl http://evil.com",
+            "python script.py",
+            "bash -c 'evil'",
+            "powershell.exe -Command evil",
+            "shutdown",
+        ] {
+            assert!(
+                server_mode_command_blocked(cmd).is_some(),
+                "server mode should block: {cmd}"
+            );
+        }
+    }
+
+    #[test]
+    fn server_mode_blocks_shell_chaining() {
+        for cmd in &[
+            "npm test && git push",
+            "npm test; rm -rf /",
+            "npm run build | grep error",
+            "echo $(rm -rf /)",
+            "echo `whoami`",
+            "git status > /dev/null",
+            "git config user.email a@b.c",
+        ] {
+            assert!(
+                server_mode_command_blocked(cmd).is_some(),
+                "server mode should block chaining: {cmd}"
+            );
+        }
+    }
+
+    #[test]
+    fn server_mode_blocks_node_inline_eval() {
+        for cmd in &[
+            "node -e \"console.log(1)\"",
+            "node -p process.env",
+            "node --eval \"evil()\"",
+            "node --print \"evil()\"",
+        ] {
+            assert!(
+                server_mode_command_blocked(cmd).is_some(),
+                "server mode should block inline eval: {cmd}"
+            );
+        }
+        assert!(server_mode_command_blocked("node script.js").is_none());
     }
 }

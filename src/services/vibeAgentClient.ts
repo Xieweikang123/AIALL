@@ -1,4 +1,6 @@
-import { isTauriEnv, runAgentChannel, WEB_REQUIRES_TAURI_MESSAGE } from "./tauriInvoke";
+import { isTauriEnv, runAgentChannel } from "./tauriInvoke";
+import { backendUrl } from "./backendBase";
+import { runAgentServerSse } from "./webAgentTransport";
 import type { ResolvedUserIntent } from "./intentClassifierTypes";
 import type { VibeAgentEvent, VibeChatMode, VibeChatHistoryMessage } from "../../shared/agentTypes";
 
@@ -64,8 +66,45 @@ export function runVibeAgentSse(request: VibeAgentRunRequest, onEvent: (event: V
   if (isTauriEnv()) {
     return runAgentChannel(request, onEvent);
   }
+  return runWebAgentSse(request, onEvent);
+}
 
-  onEvent({ type: "error", data: { message: WEB_REQUIRES_TAURI_MESSAGE } });
-  onEvent({ type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 0 } });
-  return { abort: () => {} };
+/**
+ * Web 模式：POST 到 agent-server 的 /api/agent/run，流式读 SSE 事件。
+ * Agent 在服务器上跑完整工具闭环（读写文件 / Git），浏览器只是遥控器。
+ */
+function runWebAgentSse(
+  request: VibeAgentRunRequest,
+  onEvent: (event: VibeAgentSseEvent) => void,
+): ReturnType<typeof runAgentChannel> {
+  const abortCtrl = new AbortController();
+  const url = backendUrl("/api/agent/run");
+  const promise = runAgentServerSse(
+    url,
+    {
+      prompt: request.prompt,
+      history: request.history,
+      projectPath: request.projectPath,
+      endpoint: request.endpoint,
+      apiKey: request.apiKey,
+      model: request.model,
+      mode: request.mode,
+      maxTurns: request.maxTurns,
+      imageDataUrls: request.imageDataUrls,
+      webProxyUrl: request.webProxyUrl,
+      taskWrittenFiles: request.taskWrittenFiles,
+    },
+    (ev) => onEvent(ev as VibeAgentSseEvent),
+    abortCtrl.signal,
+  ).catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    onEvent({ type: "error", data: { message } });
+  });
+  return {
+    promise,
+    abort: () => {
+      abortCtrl.abort();
+      void fetch(backendUrl("/api/agent/cancel"), { method: "POST" }).catch(() => {});
+    },
+  };
 }

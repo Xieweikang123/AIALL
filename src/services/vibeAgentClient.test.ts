@@ -1,11 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   runVibeAgentSse,
   shouldRetryAgentFetch,
   type VibeAgentRunRequest,
   type VibeAgentSseEvent,
 } from "./vibeAgentClient";
-import { WEB_REQUIRES_TAURI_MESSAGE } from "./tauriInvoke";
 
 const baseRequest: VibeAgentRunRequest = {
   prompt: "implement feature",
@@ -15,35 +14,58 @@ const baseRequest: VibeAgentRunRequest = {
   model: "test-model",
 };
 
-function waitForDone(events: VibeAgentSseEvent[]) {
-  return new Promise<void>((resolve) => {
-    const timer = setInterval(() => {
-      if (events.some((event) => event.type === "done")) {
-        clearInterval(timer);
-        resolve();
-      }
-    }, 0);
-  });
+function sseResponse(chunks: string[]): Response {
+  const encoder = new TextEncoder();
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+        controller.close();
+      },
+    }),
+    { status: 200 },
+  );
 }
 
-describe("runVibeAgentSse", () => {
-  it("emits desktop-only error in browser preview (no sidecar)", async () => {
-    const events: VibeAgentSseEvent[] = [];
-    runVibeAgentSse(baseRequest, (event) => events.push(event));
-    await waitForDone(events);
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
-    expect(events).toEqual([
-      { type: "error", data: { message: WEB_REQUIRES_TAURI_MESSAGE } },
-      { type: "done", data: { writtenFiles: [], pendingFiles: [], turns: 0 } },
-    ]);
+describe("runVibeAgentSse", () => {
+  it("web mode posts to agent-server and forwards streamed events", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse([
+        'data: {"type":"status","data":{"phase":"starting"}}\n\n',
+        'data: {"type":"message","data":{"text":"hi"}}\n\n',
+      ]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const events: VibeAgentSseEvent[] = [];
+    const run = runVibeAgentSse(baseRequest, (event) => events.push(event));
+    await run.promise;
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string | URL, RequestInit];
+    expect(String(url)).toContain("/api/agent/run");
+    const body = JSON.parse(String(init.body));
+    expect(body.prompt).toBe("implement feature");
+    expect(body.projectPath).toBe("D:/project/demo");
+    expect(events.map((e) => e.type)).toEqual(["status", "message"]);
   });
 
-  it("abort is a no-op in browser preview", async () => {
+  it("abort cancels the HTTP stream and posts cancel", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse([]));
+    vi.stubGlobal("fetch", fetchMock);
+
     const events: VibeAgentSseEvent[] = [];
     const run = runVibeAgentSse(baseRequest, (event) => events.push(event));
     run.abort();
-    await waitForDone(events);
-    expect(events).toHaveLength(2);
+    await run.promise;
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const cancelUrl = String(fetchMock.mock.calls[1][0]);
+    expect(cancelUrl).toContain("/api/agent/cancel");
   });
 });
 
