@@ -157,6 +157,9 @@ const props = withDefaults(
       aiModel?: string;
       elapsedMs?: number;
       aiPrimary?: string;
+      aiFailed?: boolean;
+      aiError?: string;
+      aiStage?: string;
     };
     layoutEnhanceReady?: boolean;
     planFilePath?: string;

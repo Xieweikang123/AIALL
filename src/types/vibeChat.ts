@@ -17,6 +17,9 @@ export type VibeChatMessage = Omit<PersistedChatMessage, "tools" | "roundGroups"
     aiModel?: string;
     elapsedMs?: number;
     aiPrimary?: string;
+    aiFailed?: boolean;
+    aiError?: string;
+    aiStage?: string;
   };
   status?: string;
   agentPhase?: string;

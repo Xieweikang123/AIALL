@@ -58,6 +58,9 @@ const props = withDefaults(
       aiModel?: string;
       elapsedMs?: number;
       aiPrimary?: string;
+      aiFailed?: boolean;
+      aiError?: string;
+      aiStage?: string;
     };
     chatMode?: "ask" | "build" | "plan" | "explore" | "auto";
     showProcess?: boolean;
