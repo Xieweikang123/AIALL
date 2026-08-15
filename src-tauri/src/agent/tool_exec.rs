@@ -12,7 +12,7 @@ use super::explore_guard::{
     invalidate_file_read_state, is_blocked_grep_after_locate,
     is_low_signal_vision_locate_grep, is_overly_broad_vision_grep, is_search_files_content_query,
     is_vision_grep_low_spread, mark_patch_recovery_file,
-    record_grep_hit_vue_files, require_prior_read, ToolGuardState,
+    record_grep_hit_vue_files, ToolGuardState,
 };
 use super::plan_path::plan_document_build_mode_block;
 use super::probe_guard::{
@@ -290,8 +290,6 @@ async fn exec_read_file(ctx: &mut ToolExecContext<'_>, args: &Value) -> (bool, S
                             let r2 = crate::fs::read_file_content(&abs).await;
                             if r2.ok {
                                 let content = slice_content(&r2.content, offset, limit);
-                                let resolved_key = rel.replace('\\', "/");
-                                ctx.tool_guard.read_paths.insert(resolved_key);
                                 append_tool_exec_log(
                                     ctx.project_path,
                                     "read_file",
@@ -330,7 +328,6 @@ async fn exec_read_file(ctx: &mut ToolExecContext<'_>, args: &Value) -> (bool, S
             ctx.tool_guard
                 .read_cache
                 .insert(file_key.clone(), result.content);
-            ctx.tool_guard.read_paths.insert(file_key);
             (true, content)
         }
         Err(e) => (false, e),
@@ -528,9 +525,6 @@ async fn exec_write_file(
                 .await
                 .map(|m| m.is_file())
                 .unwrap_or(false);
-            if let Some(err) = require_prior_read(&ctx.tool_guard.read_paths, &file_key, exists) {
-                return (false, err, None);
-            }
             let before = if exists {
                 let read_result = crate::fs::read_file_content(&resolved.to_string_lossy()).await;
                 if !read_result.ok {
@@ -601,13 +595,6 @@ async fn exec_patch_file(
             let file_key = relative.replace('\\', "/");
             if let Some(msg) = plan_document_build_mode_block(ctx.mode, &file_key, "patch_file") {
                 return (false, msg, None);
-            }
-            let exists = tokio::fs::metadata(&resolved)
-                .await
-                .map(|m| m.is_file())
-                .unwrap_or(false);
-            if let Some(err) = require_prior_read(&ctx.tool_guard.read_paths, &file_key, exists) {
-                return (false, err, None);
             }
             if let Some(err) = check_patch_old_string_from_reads(
                 &file_key,

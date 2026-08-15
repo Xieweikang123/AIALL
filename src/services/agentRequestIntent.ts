@@ -5,11 +5,12 @@ import {
 } from "./intentClassifierRules";
 import { formatIntentClassificationDetail } from "./intentClassifierAi";
 import { buildIntentClassifierUserMessage } from "./intentClassifierAi";
-import { classifyUserIntentWithAiClient } from "./agentIntentClassifierClient";
+import { classifyUserIntentWithAiClient, type IntentClassifierStage } from "./agentIntentClassifierClient";
 import type { ResolvedUserIntent } from "./intentClassifierTypes";
 import type { UserIntentHistoryMessage } from "../orchestration/agentIntentTypes";
 import type { VibeChatMode } from "../../shared/agentTypes";
 import { isTauriEnv } from "./tauriInvoke";
+import { debugLog } from "../utils/debugLog";
 
 export type ResolveAgentIntentStatusPhase = "classifying_intent" | "intent_classified";
 
@@ -23,6 +24,11 @@ export interface IntentClassifierTrace {
   aiModel?: string;
   elapsedMs?: number;
   aiPrimary?: string;
+  /** AI classifier invoked but produced no payload (timeout / parse / empty). */
+  aiFailed?: boolean;
+  aiError?: string;
+  /** Classifier stage while intent is being classified (sending/parsing/retrying). */
+  aiStage?: IntentClassifierStage;
 }
 
 function summarizeRulesIntent(intent: ResolvedUserIntent): string {
@@ -106,30 +112,43 @@ export async function resolveAgentRequestUserIntentAsync(
   );
 
   const classifyStartedAt = performance.now();
-  const aiResult = skipAiClassifier
-    ? null
-    : await classifyUserIntentWithAiClient({
-        prompt: input.prompt,
-        history: input.history,
-        mode: input.mode,
-        hasImage: input.hasImage,
-        endpoint: input.endpoint,
-        apiKey: input.apiKey,
-        model: input.model,
-        projectRoot: input.projectPath,
-        signal: input.signal,
-        onStage: (stage) => {
-          const detail =
-            stage === "sending"
-              ? "正在分析用户意图…"
-              : stage === "parsing"
-                ? "已收到响应，正在解析…"
-                : "分类失败，正在重试…";
-          onStatus?.("classifying_intent", detail);
+  let aiResult: Awaited<ReturnType<typeof classifyUserIntentWithAiClient>> | null = null;
+  try {
+    aiResult = skipAiClassifier
+      ? null
+      : await classifyUserIntentWithAiClient({
+          prompt: input.prompt,
+          history: input.history,
+          mode: input.mode,
+          hasImage: input.hasImage,
+          endpoint: input.endpoint,
+          apiKey: input.apiKey,
+          model: input.model,
+          projectRoot: input.projectPath,
+          signal: input.signal,
+          onStage: (stage) => {
+            const detail =
+              stage === "sending"
+                ? "正在分析用户意图…"
+                : stage === "parsing"
+                  ? "已收到响应，正在解析…"
+                  : "分类失败，正在重试…";
+            onStatus?.("classifying_intent", detail, {
+              prompt: input.prompt,
+              skippedAi: skipAiClassifier,
+              ruleResult: rulesTrace,
+              aiStage: stage,
+          });
         },
       });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    aiResult = { payload: null, error: `分类器异常：${message}` };
+    debugLog("[intent-classifier] classify threw:", error);
+  }
   const classifyElapsedMs = Math.round(performance.now() - classifyStartedAt);
   const aiPayload = aiResult?.payload ?? null;
+  const aiFailed = !skipAiClassifier && aiResult !== null && aiPayload === null;
 
   const resolved = resolveUserIntent({
     ...baseInput,
@@ -149,6 +168,8 @@ export async function resolveAgentRequestUserIntentAsync(
     aiModel: skipAiClassifier ? undefined : input.model,
     elapsedMs: classifyElapsedMs,
     aiPrimary: aiPayload?.primary,
+    aiFailed,
+    aiError: aiResult?.error,
   });
   return resolved;
 }

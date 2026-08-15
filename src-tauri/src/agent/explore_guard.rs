@@ -6,7 +6,7 @@ use super::vision::extract_visible_anchor_quotes;
 
 static AGENT_TOOL_GUARD_FAILURE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-    r"^错误：(缺少|不是(?:目录|文件)|路径|无效|未知工具|请先 read_file|已连续|grep「|读图|已确认|不允许|不支持|Ask 模式|Explore 模式|规划模式|咨询只读|扫描修复|一键修复)",
+    r"^错误：(缺少|不是(?:目录|文件)|路径|无效|未知工具|已连续|grep「|读图|已确认|不允许|不支持|Ask 模式|Explore 模式|规划模式|咨询只读|扫描修复|一键修复)",
   )
   .unwrap()
 });
@@ -439,29 +439,12 @@ pub fn unread_grep_hit_vue_files(guard: &ToolGuardState, read_paths: &[String]) 
         .collect()
 }
 
-pub fn require_prior_read(
-    read_paths: &HashSet<String>,
-    relative: &str,
-    exists_on_disk: bool,
-) -> Option<String> {
-    if !exists_on_disk {
-        return None;
-    }
-    if read_paths.contains(relative) {
-        return None;
-    }
-    Some(format!(
-        "错误：请先 read_file 核对 {relative} 的真实内容，再修改该文件"
-    ))
-}
-
 /// Mutable guard state carried across an agent run (mirrors Node ToolGuardContext subset).
 #[derive(Debug, Default)]
 pub struct ToolGuardState {
     pub read_slice_cache: HashMap<String, String>,
     pub read_cache: HashMap<String, String>,
     pub grep_cache: HashMap<String, String>,
-    pub read_paths: HashSet<String>,
     pub grep_hit_vue_files: HashSet<String>,
     pub patch_recovery_files: HashSet<String>,
     pub patch_anchor_located: bool,
@@ -670,14 +653,12 @@ mod tests {
         guard
             .read_cache
             .insert("src/foo.ts".into(), "full body".into());
-        guard.read_paths.insert("src/foo.ts".into());
 
         invalidate_read_overlap_state(&mut guard);
 
         assert!(guard.read_slice_cache.is_empty());
         // Full-content cache is intentionally kept (backs patch old_string check).
         assert_eq!(guard.read_cache.get("src/foo.ts").map(String::as_str), Some("full body"));
-        assert!(guard.read_paths.contains("src/foo.ts"));
     }
 
     #[test]
@@ -804,15 +785,6 @@ mod tests {
         assert!(is_low_signal_vision_locate_grep("selectedIndex"));
         assert!(!is_low_signal_vision_locate_grep("file-panel-tab"));
         assert!(!is_low_signal_vision_locate_grep("git-badge"));
-    }
-
-    #[test]
-    fn require_prior_read_guard() {
-        let mut paths = HashSet::new();
-        paths.insert("src/a.ts".to_string());
-        assert!(require_prior_read(&paths, "src/b.ts", true).is_some());
-        assert!(require_prior_read(&paths, "src/a.ts", true).is_none());
-        assert!(require_prior_read(&paths, "src/b.ts", false).is_none());
     }
 
     #[test]

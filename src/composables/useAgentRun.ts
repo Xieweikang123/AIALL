@@ -520,6 +520,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
               aiModel: trace.aiModel,
               elapsedMs: trace.elapsedMs,
               aiPrimary: trace.aiPrimary,
+              aiFailed: trace.aiFailed,
+              aiError: trace.aiError,
+              aiStage: trace.aiStage,
             },
           });
         }
@@ -734,6 +737,16 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       agentAborted: true,
       agentAbortReason: reason,
       statusLog: running.statusLog ? [...running.statusLog] : undefined,
+      ...(running.intentTrace && !running.intentTrace.finalResult
+        ? {
+            intentTrace: {
+              ...running.intentTrace,
+              aiStage: undefined,
+              aiFailed: true,
+              aiError: reason,
+            },
+          }
+        : {}),
     };
 
     if (hmrInterrupt) {

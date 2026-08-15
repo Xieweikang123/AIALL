@@ -3,12 +3,14 @@
     <div class="intent-trace-head">
       <span class="intent-trace-dot" aria-hidden="true" />
       <span class="intent-trace-label">意图判断</span>
-      <span class="intent-trace-source">{{ trace.skippedAi ? "规则" : "AI" }}</span>
+      <span class="intent-trace-source">{{ trace.aiFailed ? "规则兜底" : trace.skippedAi ? "规则" : "AI" }}</span>
     </div>
     <div class="intent-trace-body">
-      <span class="intent-trace-value">{{ displayValue }}</span>
+      <span class="intent-trace-value" :class="{ 'intent-trace-value--pending': isClassifying }">
+        {{ displayValue }}
+      </span>
       <span v-if="trace.ruleResult" class="intent-trace-rule">
-        规则基线：{{ trace.ruleResult }}
+        规则（兜底判定）：{{ trace.ruleResult }}
       </span>
       <button
         v-if="hasDetails"
@@ -20,6 +22,10 @@
       </button>
     </div>
 
+    <div v-if="trace.aiFailed" class="intent-trace-fallback">
+      ⚠ AI 意图分类失败{{ trace.aiError ? `（${trace.aiError}）` : "" }}，已用规则兜底
+    </div>
+
     <div v-if="!trace.skippedAi" class="intent-trace-meta">
       <span v-if="trace.aiModel" class="intent-trace-meta-item">
         分类模型：{{ trace.aiModel }}
@@ -28,7 +34,7 @@
         耗时：{{ formatElapsed(trace.elapsedMs) }}
       </span>
       <span v-if="isDiverged" class="intent-trace-meta-item intent-trace-meta-item--warn">
-        ⚠ 规则与 AI 分歧（规则：{{ rulePrimary }} / AI：{{ trace.aiPrimary }}）
+        ⚠ 规则与 AI 结论不同（规则：{{ rulePrimary }} / AI：{{ trace.aiPrimary }}）· 已采用 AI
       </span>
     </div>
 
@@ -65,6 +71,9 @@ const props = defineProps<{
     aiModel?: string;
     elapsedMs?: number;
     aiPrimary?: string;
+    aiFailed?: boolean;
+    aiError?: string;
+    aiStage?: string;
   };
 }>();
 
@@ -73,8 +82,20 @@ const expanded = ref(false);
 const displayValue = computed(() => {
   const raw = props.trace?.finalResult?.trim();
   if (raw) return raw.replace(/^意图：/, "");
+  if (props.trace?.aiFailed) {
+    const reason = props.trace.aiError?.trim();
+    return reason ? `分类未完成：${reason}` : "分类未完成";
+  }
+  const stage = props.trace?.aiStage;
+  if (stage === "sending") return "正在请求分类模型…";
+  if (stage === "parsing") return "已收到响应，正在解析…";
+  if (stage === "retrying") return "分类失败，正在重试…";
   return "识别中…";
 });
+
+const isClassifying = computed(
+  () => Boolean(props.trace?.aiStage) && !props.trace?.finalResult?.trim(),
+);
 
 const hasDetails = computed(
   () =>
@@ -158,6 +179,21 @@ function messageRoleLabel(role: string): string {
   font-weight: 500;
 }
 
+.intent-trace-value--pending {
+  color: rgba(88, 166, 255, 0.9);
+  animation: intent-trace-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes intent-trace-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
 .intent-trace-rule {
   color: rgba(139, 148, 158, 0.6);
   font-size: 10px;
@@ -196,6 +232,17 @@ function messageRoleLabel(role: string): string {
 .intent-trace-meta-item--warn {
   color: rgba(240, 185, 95, 0.9);
   font-weight: 500;
+}
+
+.intent-trace-fallback {
+  margin-top: 4px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(240, 185, 95, 0.35);
+  background: rgba(240, 185, 95, 0.1);
+  color: rgba(240, 185, 95, 0.95);
+  font-size: 10.5px;
+  line-height: 1.4;
 }
 
 .intent-trace-detail {
