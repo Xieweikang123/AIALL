@@ -5,6 +5,7 @@ import {
   parseCodeMapAnnotations,
 } from "../../shared/codeMapAnnotate";
 import type { CodeMapDocument } from "../../shared/codeMapTypes";
+import { streamChatHttp } from "./aiClient";
 import { isTauriEnv, tauriInvoke } from "./tauriInvoke";
 
 export async function annotateCodeMapDocument(params: {
@@ -17,7 +18,6 @@ export async function annotateCodeMapDocument(params: {
   force?: boolean;
 }): Promise<{ ok: boolean; document?: CodeMapDocument; error?: string; skipped?: boolean }> {
   if (params.signal?.aborted) return { ok: false, error: "已取消" };
-  if (!isTauriEnv()) return { ok: false, error: "需在桌面版中标注" };
   if (!params.endpoint.trim() || !params.model.trim()) {
     return { ok: false, error: "AI 配置不完整" };
   }
@@ -27,25 +27,37 @@ export async function annotateCodeMapDocument(params: {
     return { ok: true, document: params.document, skipped: true };
   }
 
-  const body = {
-    model: params.model,
-    messages: buildCodeMapAnnotateMessages(params.document, { force }),
-    stream: false,
-    temperature: 0.2,
-  };
+  const messages = buildCodeMapAnnotateMessages(params.document, { force });
 
   try {
-    const result = await tauriInvoke<{ ok: boolean; data?: unknown; error?: string }>("ai_test", {
-      endpoint: params.endpoint,
-      apiKey: params.apiKey || null,
-      body,
-    });
-    if (params.signal?.aborted) return { ok: false, error: "已取消" };
-    if (!result.ok) {
-      return { ok: false, error: result.error || "标注失败" };
+    let content: string | undefined;
+    if (isTauriEnv()) {
+      const result = await tauriInvoke<{ ok: boolean; data?: unknown; error?: string }>("ai_test", {
+        endpoint: params.endpoint,
+        apiKey: params.apiKey || null,
+        body: { model: params.model, messages, stream: false, temperature: 0.2 },
+      });
+      if (params.signal?.aborted) return { ok: false, error: "已取消" };
+      if (!result.ok) {
+        return { ok: false, error: result.error || "标注失败" };
+      }
+      const data = result.data as { choices?: Array<{ message?: { content?: string } }> } | undefined;
+      content = data?.choices?.[0]?.message?.content;
+    } else {
+      const result = await streamChatHttp({
+        endpoint: params.endpoint,
+        apiKey: params.apiKey,
+        model: params.model,
+        messages,
+        temperature: 0.2,
+        signal: params.signal,
+      });
+      if (params.signal?.aborted) return { ok: false, error: "已取消" };
+      if (!result.ok) {
+        return { ok: false, error: result.error || "标注失败" };
+      }
+      content = result.rawText;
     }
-    const data = result.data as { choices?: Array<{ message?: { content?: string } }> } | undefined;
-    const content = data?.choices?.[0]?.message?.content;
     if (typeof content !== "string" || !content.trim()) {
       return { ok: false, error: "模型返回为空" };
     }

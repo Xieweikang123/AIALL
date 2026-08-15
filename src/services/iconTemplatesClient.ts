@@ -21,7 +21,7 @@ function mapTauriIconTemplates(templates: unknown[]): IconTemplateListResponse["
 
 export async function fetchIconTemplateList(): Promise<IconTemplateListResponse> {
   if (!isTauriEnv()) {
-    return { ok: false, error: "图标模板仅桌面版可用（模板存储与截图匹配需在本机运行 npm run dev）" };
+    return { ok: false, error: "图标模板仅桌面版可用（模板存储与截图匹配需在本机运行 npm run dev）", items: [] };
   }
   const result = await tauriInvoke<{
     ok: boolean;

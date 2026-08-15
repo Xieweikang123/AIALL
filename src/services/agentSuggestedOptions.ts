@@ -1,5 +1,6 @@
 import { Channel } from "@tauri-apps/api/core";
 import type { AiOption } from "../utils/parseAiOptions";
+import { streamChatHttp } from "./aiClient";
 import { isTauriEnv, tauriInvoke } from "./tauriInvoke";
 
 const SUGGESTED_OPTIONS_FIRST_BYTE_MS = 60_000;
@@ -129,7 +130,14 @@ async function streamOnce(params: {
     });
   }
 
-  return { ok: false, error: "非 Tauri 环境" };
+  // Web（服务器）模式：走 /backend/ai/test（服务端注入 key）。
+  const result = await streamChatHttp({
+    endpoint: params.endpoint,
+    apiKey: params.apiKey,
+    model: params.model,
+    messages: params.messages,
+  });
+  return { ok: result.ok, content: result.rawText, error: result.error };
 }
 
 /**

@@ -4,21 +4,32 @@
 //! app), so Agent behavior has a single source of truth in Rust (see AGENT_SSOT.md).
 //!
 //! Endpoints:
-//!   GET  /healthz                → 200 text/plain "ok"
+//!   GET  /healthz                → 200 text/plain "ok" (anonymous)
+//!   POST /api/server/login       → exchange AIALL_SERVER_TOKEN for a session token
+//!   POST /api/server/logout      → revoke session token
+//!   GET  /api/server/ai-config   → server AI config (endpoint/model/proxy, NO key)
 //!   POST /api/agent/run          → SSE stream of VibeAgentEvent JSON
 //!   POST /api/agent/cancel       → cancel the in-flight run
+//!   /backend/vibe/*, /backend/web/*, /backend/ai/*, /backend/automation/* → HTTP fallback routes
 //!
 //! Env:
 //!   AIALL_SERVER_BIND             default 127.0.0.1
 //!   AIALL_SERVER_PORT             default 8787
-//!   AIALL_SERVER_TOKEN            optional bearer token (`Authorization: Bearer <token>`)
+//!   AIALL_SERVER_TOKEN            required for auth (`Authorization: Bearer <token>` or login)
 //!   AIALL_SERVER_ALLOWED_PROJECTS comma-separated allowed project roots (empty = allow all)
+//!   AIALL_SERVER_AI_ENDPOINT/KEY/MODEL/PROXY  server-side AI config (key never sent to browser)
+//!   AIALL_SERVER_RESTRICT_COMMANDS=1          whitelist Agent run_command in server mode
 
 use app_lib::agent::{agent_run_headless, AgentRunRequest};
-use app_lib::http_routes::{handle_backend_vibe, handle_other_route, HttpResponse};
+use app_lib::http_routes::{
+    handle_backend_vibe, handle_other_route, project_allowed, HttpResponse, ServerAiConfig,
+};
+use rand::RngCore;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{tcp::OwnedWriteHalf, TcpListener, TcpStream};
 
@@ -27,10 +38,43 @@ struct RunCancelState {
     cancel: Mutex<Option<Arc<AtomicBool>>>,
 }
 
+/// 登录会话：token → 过期时刻。
+#[derive(Default)]
+struct SessionStore {
+    sessions: Mutex<HashMap<String, Instant>>,
+}
+
+const SESSION_TTL: Duration = Duration::from_secs(12 * 3600);
+
+impl SessionStore {
+    fn issue(&self) -> String {
+        let mut bytes = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut bytes);
+        let token = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+        let mut guard = self.sessions.lock().unwrap();
+        guard.retain(|_, exp| *exp > Instant::now());
+        guard.insert(token.clone(), Instant::now() + SESSION_TTL);
+        token
+    }
+
+    fn valid(&self, token: &str) -> bool {
+        let mut guard = self.sessions.lock().unwrap();
+        guard.retain(|_, exp| *exp > Instant::now());
+        guard.contains_key(token)
+    }
+
+    fn revoke(&self, token: &str) {
+        if let Ok(mut guard) = self.sessions.lock() {
+            guard.remove(token);
+        }
+    }
+}
+
 #[derive(Clone)]
 struct ServerConfig {
     token: Option<String>,
     allowed_projects: Vec<String>,
+    ai: Option<ServerAiConfig>,
 }
 
 struct HttpRequest {
@@ -54,31 +98,86 @@ fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a s
         .map(|(_, v)| v.as_str())
 }
 
-fn authorized(headers: &[(String, String)], config: &ServerConfig) -> bool {
+/// 认证：静态 `AIALL_SERVER_TOKEN`（Bearer）或登录会话 token 任一中即可。
+/// 未配置任何凭证时（本地开发）默认放行。
+fn authorized(
+    headers: &[(String, String)],
+    config: &ServerConfig,
+    sessions: &SessionStore,
+) -> bool {
     let Some(token) = &config.token else {
         return true;
     };
     let bearer = format!("Bearer {token}");
-    header_value(headers, "authorization")
+    let static_ok = header_value(headers, "authorization")
         .map(|v| v.trim() == bearer)
         .unwrap_or(false)
         || header_value(headers, "x-aiall-token")
             .map(|v| v.trim() == token)
-            .unwrap_or(false)
-}
-
-fn project_allowed(project_path: &str, allowed: &[String]) -> bool {
-    if allowed.is_empty() {
+            .unwrap_or(false);
+    if static_ok {
         return true;
     }
-    let norm = |p: &str| p.replace('\\', "/").trim_end_matches('/').to_lowercase();
-    let target = std::fs::canonicalize(project_path)
-        .map(|c| norm(&c.to_string_lossy()))
-        .unwrap_or_else(|_| norm(project_path));
-    allowed
-        .iter()
-        .map(|a| norm(a))
-        .any(|a| target == a || target.starts_with(&format!("{a}/")))
+    if let Some(bearer) = header_value(headers, "authorization") {
+        if let Some(session) = bearer.trim().strip_prefix("Bearer ") {
+            if sessions.valid(session) {
+                return true;
+            }
+        }
+    }
+    if let Some(session) = header_value(headers, "x-aiall-token") {
+        if sessions.valid(session.trim()) {
+            return true;
+        }
+    }
+    false
+}
+
+/// 读取服务端 AI 配置：优先环境变量，回退 `~/.config/aiall/server-config.json`。
+fn load_server_ai_config() -> Option<ServerAiConfig> {
+    let read_env = |k: &str| {
+        std::env::var(k)
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+    };
+    let env_endpoint = read_env("AIALL_SERVER_AI_ENDPOINT");
+    let env_key = read_env("AIALL_SERVER_AI_KEY");
+    if let (Some(endpoint), Some(api_key)) = (env_endpoint, env_key) {
+        return Some(ServerAiConfig {
+            endpoint,
+            api_key,
+            model: read_env("AIALL_SERVER_AI_MODEL").unwrap_or_default(),
+            web_proxy_url: read_env("AIALL_SERVER_AI_PROXY"),
+        });
+    }
+    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).ok()?;
+    let cfg_path = std::path::Path::new(&home)
+        .join(".config")
+        .join("aiall")
+        .join("server-config.json");
+    let text = std::fs::read_to_string(cfg_path).ok()?;
+    let parsed: Value = serde_json::from_str(&text).ok()?;
+    let endpoint = parsed.get("endpoint").and_then(|v| v.as_str()).unwrap_or("");
+    let api_key = parsed.get("apiKey").and_then(|v| v.as_str()).unwrap_or("");
+    if endpoint.trim().is_empty() || api_key.trim().is_empty() {
+        return None;
+    }
+    Some(ServerAiConfig {
+        endpoint: endpoint.trim().to_string(),
+        api_key: api_key.trim().to_string(),
+        model: parsed
+            .get("model")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string(),
+        web_proxy_url: parsed
+            .get("webProxyUrl")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.trim().to_string()),
+    })
 }
 
 async fn write_headers(
@@ -183,9 +282,18 @@ async fn handle_agent_run(
     config: &ServerConfig,
     state: &RunCancelState,
 ) -> Result<(), String> {
-    let request: AgentRunRequest = serde_json::from_slice(&body)
+    let mut request: AgentRunRequest = serde_json::from_slice(&body)
         .map_err(|e| format!("JSON 解析失败: {e}"))?;
-    let project_path = request.project_path();
+    // 服务端模式：浏览器不传明文 key / endpoint / model 时，用服务端配置补齐。
+    if let Some(ai) = &config.ai {
+        request.apply_server_ai(
+            &ai.endpoint,
+            Some(&ai.api_key),
+            &ai.model,
+            ai.web_proxy_url.as_deref(),
+        );
+    }
+    let project_path = request.project_path().to_string();
     println!("[agent-server] run: project={project_path}");
     if project_path.trim().is_empty() {
         write_headers(w, "400 Bad Request", "text/plain", &[]).await?;
@@ -194,7 +302,7 @@ async fn handle_agent_run(
             .await
             .map_err(|e| e.to_string());
     }
-    if !project_allowed(project_path, &config.allowed_projects) {
+    if !project_allowed(&project_path, &config.allowed_projects) {
         write_headers(w, "403 Forbidden", "text/plain", &[]).await?;
         return w
             .write_all(b"project not allowed")
@@ -260,10 +368,72 @@ async fn handle_agent_run(
     Ok(())
 }
 
+async fn handle_login(
+    w: &mut OwnedWriteHalf,
+    body: Vec<u8>,
+    config: &ServerConfig,
+    sessions: &SessionStore,
+) -> Result<(), String> {
+    let parsed: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(_) => Value::Null,
+    };
+    let password = parsed
+        .get("password")
+        .or_else(|| parsed.get("token"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    let token_matches = config
+        .token
+        .as_deref()
+        .map(|t| t == password)
+        .unwrap_or(false);
+    if !token_matches {
+        write_headers(w, "401 Unauthorized", "text/plain", &[]).await?;
+        return w
+            .write_all(b"invalid credentials")
+            .await
+            .map_err(|e| e.to_string());
+    }
+    let session = sessions.issue();
+    let expires_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        + SESSION_TTL.as_secs();
+    let payload = serde_json::to_string(&json!({
+        "ok": true,
+        "token": session,
+        "expiresAt": expires_at,
+        "ttlSeconds": SESSION_TTL.as_secs(),
+    }))
+    .unwrap_or_else(|_| "{}".into());
+    write_headers(w, "200 OK", "application/json", &[]).await?;
+    w.write_all(payload.as_bytes()).await.map_err(|e| e.to_string())
+}
+
+async fn handle_logout(
+    w: &mut OwnedWriteHalf,
+    headers: &[(String, String)],
+    sessions: &SessionStore,
+) -> Result<(), String> {
+    let session = header_value(headers, "authorization")
+        .and_then(|v| v.trim().strip_prefix("Bearer "))
+        .map(|s| s.to_string())
+        .or_else(|| header_value(headers, "x-aiall-token").map(|s| s.trim().to_string()));
+    if let Some(token) = session {
+        sessions.revoke(&token);
+    }
+    write_headers(w, "200 OK", "text/plain", &[]).await?;
+    w.write_all(b"logged out").await.map_err(|e| e.to_string())
+}
+
 async fn handle_connection(
     stream: TcpStream,
     config: &ServerConfig,
     state: Arc<RunCancelState>,
+    sessions: Arc<SessionStore>,
 ) -> Result<(), String> {
     let (read_half, mut write_half) = stream.into_split();
     let request = read_request(read_half).await?;
@@ -271,36 +441,48 @@ async fn handle_connection(
     if request.path == "/healthz" && request.method == "GET" {
         return handle_healthz(&mut write_half).await;
     }
+    if request.path == "/api/server/login" && request.method == "POST" {
+        return handle_login(&mut write_half, request.body, config, &sessions).await;
+    }
+    if request.path == "/api/server/logout" && request.method == "POST" {
+        return handle_logout(&mut write_half, &request.headers, &sessions).await;
+    }
     if request.path == "/api/agent/cancel" && request.method == "POST" {
+        if !authorized(&request.headers, config, &sessions) {
+            return write_unauthorized(&mut write_half).await;
+        }
         return handle_cancel(&mut write_half, &state).await;
     }
     if request.path == "/api/agent/run" && request.method == "POST" {
-        if !authorized(&request.headers, config) {
-            write_headers(&mut write_half, "401 Unauthorized", "text/plain", &[]).await?;
-            return write_half
-                .write_all(b"unauthorized")
-                .await
-                .map_err(|e| e.to_string());
+        if !authorized(&request.headers, config, &sessions) {
+            return write_unauthorized(&mut write_half).await;
         }
         return handle_agent_run(&mut write_half, request.body, config, &state).await;
     }
     if request.path.starts_with("/backend/vibe/")
         || request.path.starts_with("/backend/web/")
-        || request.path.starts_with("/api/ai/")
+        || request.path.starts_with("/backend/ai/")
+        || request.path.starts_with("/backend/automation/")
+        || request.path.starts_with("/api/server/")
     {
-        if !authorized(&request.headers, config) {
-            write_headers(&mut write_half, "401 Unauthorized", "text/plain", &[]).await?;
-            return write_half
-                .write_all(b"unauthorized")
-                .await
-                .map_err(|e| e.to_string());
+        if !authorized(&request.headers, config, &sessions) {
+            return write_unauthorized(&mut write_half).await;
         }
         let (path, query) = match request.path.split_once('?') {
             Some((p, qs)) => (p.to_string(), qs.to_string()),
             None => (request.path.clone(), String::new()),
         };
         let resp: HttpResponse = if path.starts_with("/backend/vibe/") {
-            match handle_backend_vibe(&request.method, &path, &query, &request.body).await {
+            match handle_backend_vibe(
+                &request.method,
+                &path,
+                &query,
+                &request.body,
+                &config.allowed_projects,
+                config.ai.as_ref(),
+            )
+            .await
+            {
                 Ok(r) => r,
                 Err(e) => HttpResponse {
                     status: 400,
@@ -309,7 +491,16 @@ async fn handle_connection(
                 },
             }
         } else {
-            match handle_other_route(&request.method, &path, &query, &request.body).await {
+            match handle_other_route(
+                &request.method,
+                &path,
+                &query,
+                &request.body,
+                &config.allowed_projects,
+                config.ai.as_ref(),
+            )
+            .await
+            {
                 Ok(r) => r,
                 Err(e) => HttpResponse {
                     status: 400,
@@ -343,6 +534,11 @@ async fn handle_connection(
         .map_err(|e| e.to_string())
 }
 
+async fn write_unauthorized(w: &mut OwnedWriteHalf) -> Result<(), String> {
+    write_headers(w, "401 Unauthorized", "text/plain", &[]).await?;
+    w.write_all(b"unauthorized").await.map_err(|e| e.to_string())
+}
+
 #[tokio::main]
 async fn main() {
     let bind = read_env("AIALL_SERVER_BIND").unwrap_or_else(|| "127.0.0.1".into());
@@ -358,11 +554,14 @@ async fn main() {
                 .collect()
         })
         .unwrap_or_default();
+    let ai = load_server_ai_config();
     let config = ServerConfig {
         token,
         allowed_projects,
+        ai,
     };
     let state = Arc::new(RunCancelState::default());
+    let sessions = Arc::new(SessionStore::default());
 
     let listener = match TcpListener::bind((bind.as_str(), port)).await {
         Ok(l) => l,
@@ -381,7 +580,10 @@ async fn main() {
         );
     }
     if config.token.is_some() {
-        println!("[agent-server] token auth: enabled");
+        println!("[agent-server] token auth: enabled (POST /api/server/login)");
+    }
+    if config.ai.is_some() {
+        println!("[agent-server] server AI config: loaded (endpoint/model from server)");
     }
 
     loop {
@@ -389,8 +591,9 @@ async fn main() {
             Ok((stream, _)) => {
                 let cfg = config.clone();
                 let st = state.clone();
+                let ss = sessions.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_connection(stream, &cfg, st).await {
+                    if let Err(e) = handle_connection(stream, &cfg, st, ss).await {
                         eprintln!("[agent-server] 连接错误: {e}");
                     }
                 });

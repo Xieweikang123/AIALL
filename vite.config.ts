@@ -15,12 +15,16 @@ export default defineConfig({
       ignored: ["**/node_modules/**", "**/.git/**"],
     },
     proxy: {
-      // 浏览器 Web 模式：把 /backend/vibe/* 与 Agent SSE 代理到无头 agent-server
-      "/backend/vibe": {
+      // 浏览器 Web 模式：把 /backend/vibe|web|ai|automation 与 Agent SSE、服务端配置代理到无头 agent-server
+      "/backend": {
         target: "http://127.0.0.1:8787",
         changeOrigin: true,
       },
       "/api/agent": {
+        target: "http://127.0.0.1:8787",
+        changeOrigin: true,
+      },
+      "/api/server": {
         target: "http://127.0.0.1:8787",
         changeOrigin: true,
       },

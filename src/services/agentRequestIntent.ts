@@ -9,7 +9,6 @@ import { classifyUserIntentWithAiClient, type IntentClassifierStage } from "./ag
 import type { ResolvedUserIntent } from "./intentClassifierTypes";
 import type { UserIntentHistoryMessage } from "../orchestration/agentIntentTypes";
 import type { VibeChatMode } from "../../shared/agentTypes";
-import { isTauriEnv } from "./tauriInvoke";
 import { debugLog } from "../utils/debugLog";
 
 export type ResolveAgentIntentStatusPhase = "classifying_intent" | "intent_classified";
@@ -93,10 +92,8 @@ export async function resolveAgentRequestUserIntentAsync(
   const rulesIntent = classifyUserIntentFromRules(baseInput);
   const rulesTrace = summarizeRulesIntent(rulesIntent);
 
-  if (!isTauriEnv()) {
-    return rulesIntent;
-  }
-
+  // web（服务器）模式同样走 AI 分类：agent-server 已提供 /backend/ai/test 流式通道，
+  // 分类失败会回落到 rulesIntent（见下方 aiResult==null 分支），无需在此短路。
   const skipAiClassifier = shouldSkipAiIntentClassifier(rulesIntent, input.prompt, {
     isAsk: isReadOnlyAgent,
     mode: input.mode,

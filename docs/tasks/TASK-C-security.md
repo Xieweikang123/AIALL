@@ -6,8 +6,13 @@
 ## 认领状态
 
 - 认领 AI：opencode（deepseek-v4-flash，本次会话）
-- 状态：**已认领**（2026-08-15），与 TASK-B 同属 AI-A，**等 B 完成后串行开始**（总纲约束：B 未完成前不动 `http_routes.rs`）
-- 备注：B 进行中；若 B 完成时本任务开始，按验收标准逐条做。
+- 状态：✅ **已交付**（2026-08-15，与 TASK-B 串行完成）
+- 交付摘要：
+  - **认证**：`POST /api/server/login`（body `{password}` 匹配 `AIALL_SERVER_TOKEN`）→ 随机 32B session token（内存存储，12h）；`POST /api/server/logout` 吊销；`authorized()` 同时接受静态 Bearer 与 session；`/healthz` 匿名，其余全强制。
+  - **路径沙箱**：`project_allowed` 移入 `http_routes.rs`（`agent_server` 复用）；`enforce_path_sandbox` 对每个带绝对路径参数（path/projectPath/projectRoot/from/to）的 `/backend/vibe/*` 与 `/api/agent/run` 校验白名单 → 403。
+  - **命令白名单**：已有 `AIALL_SERVER_RESTRICT_COMMANDS=1` + `server_mode_command_blocked`（`tool_exec.rs`），桌面路径不受影响。
+  - **服务端 AI key**：`AIALL_SERVER_AI_ENDPOINT/MODEL/KEY/PROXY` 或 `~/.config/aiall/server-config.json`；`handle_agent_run` 调 `AgentRunRequest::apply_server_ai` 注入缺失 endpoint/key/model/proxy；`GET /api/server/ai-config` 返回 `{endpoint, model, webProxyUrl, hasServerKey}`（不含 key）。
+- 待办（前端配合，属任务 A）：登录 UI / 浏览器不传明文 key / 配置页展示服务端 endpoint。
 
 ## 威胁模型
 

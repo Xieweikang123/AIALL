@@ -29,9 +29,23 @@
    - `vite.config.ts`：dev 代理 `/backend/vibe` 与 `/api/agent` → `http://127.0.0.1:8787`（浏览器预览零跨域）。
 4. **测试**：`npm test` 1013 全过；`npm run typecheck` 通过；`cargo check --bin agent-server` 通过。本地已验证：文件树 / Git 状态 / 历史会话通过 HTTP 返回真实数据，Agent SSE 经 vite 代理正常流式。
 
+### ✅ 已交付（opencode 会话，2026-08-15）
+
+- **任务 B**：`/backend/ai/test` `/backend/ai/models` `/backend/ai/tts`（POST，对齐 `aiClient.ts`，`ok:false`→502，TTS 返回音频二进制）；`/backend/web/screenshot-page` 与 `/backend/automation/*` 降级；`/project-verify-run` 补 POST 分支（前端 `projectVerifyRunClient` 用 POST，原仅 GET）；vite 代理覆盖 `/backend/*`、`/api/agent`、`/api/server`。
+- **任务 C**：登录接口 `POST /api/server/login` + `POST /api/server/logout`（session 12h，内存）；所有受保护路由强制认证；`enforce_path_sandbox` 对全部带路径参数的 `/backend/vibe/*` 与 `/api/agent/run` 校验白名单；服务端 AI 配置注入（env 或 `~/.config/aiall/server-config.json`）+ `GET /api/server/ai-config`（不含 key）。
+
+### ✅ 已交付（opencode 会话，2026-08-15，续）
+
+- **任务 D**：`deploy/`（`agent-server.service`、`nginx.conf` 含 `proxy_buffering off`、`server.env.example`、`server-config.example.json`、`README.md`）；`scripts/`（`build-linux-agent-server.sh`、`build-linux-agent-server.yml` CI workflow、`deploy.sh`）。全部占位符、无真 key；部署/验证清单与「方案 A nginx 反代 / 方案 B 直连」二选一写清。
+- **前端安全配合（任务 A 子集，opencode 执行）**：
+  - `src/services/serverAuth.ts`：登录/登出/session 存储/`getAuthHeaders`/`authFetch`/`fetchServerAiConfig`。
+  - 全局 fetch 包装 `installServerAuthFetch`（`main.ts` web 模式启用）：所有 `/backend/*`、`/api/*` 请求自动附 `Authorization: Bearer <session>`。
+  - **key 不下发浏览器**：`runWebAgentSse`（agent run）与 `/backend/ai/*`、`git/generate-message`、`git/ai-batch-groups` 的 HTTP fallback 改传空 key，由服务端 `apply_server_ai` 注入。
+  - 登录 UI：`WebAgentView.vue`（登录/登出）、`AiConfigView.vue`（服务器模式状态条：服务端 endpoint/model/key 状态展示 + 登录/登出）。
+
 ### ⬜ 未完成（见「四、任务索引」）
 
-浏览器实测、增强路由、安全、部署物、生产构建。
+浏览器实测（真实起 agent-server + vite 验证）、生产构建（任务 E：`npm run build:tauri`、release 产物）。
 
 ## 三、接口契约（以 `/backend/vibe/*` 为准，改契约需先在此登记）
 
@@ -114,14 +128,29 @@
 
 响应：`text/event-stream`，每事件一行 `data: <VibeAgentEvent JSON>\n\n`。事件 type 含：`status` / `agent_context` / `turn_request` / `tool_start` / `tool_end` / `message`（data.text 为助手文本）/ `error` / `done`。流结束即 run 结束。
 
-### 3.3 前端仍调用、后端尚未实现的路径（= 任务 B 清单）
+### 3.3 前端调用路径（此前=任务 B 清单，现全部已实现）
 
-| 路径 | 前端 client | 说明 |
+| 路径 | 前端 client | 后端实现 |
 |---|---|---|
-| POST `/backend/vibe/git/generate-message` | `vibeGitClient.ts`（`gitGenerateMessage`，桌面版走 Channel 流式） | 需要给 `commands::git::git_generate_message` 抽一个非流式版本 |
-| POST `/backend/vibe/git/ai-batch-groups` | `vibeGitClient.ts`（`gitAiBatchGroups`） | 同上，抽非流式 |
-| GET `/backend/vibe/project-architect-review`（+ `/context` `/history`，POST `/history` 删除等 5 个变体） | `vibeProjectArchitectReviewClient.ts` | 对应 `project_architect_review_get/save/context/history/history_delete` |
-| `web_extract` / `web_screenshot_page` | `webExtractClient.ts` | 前端有 `tauriInvoke` 与 fallback 两路，Task A/B 协调 |
+| POST `/backend/vibe/git/generate-message` | `vibeGitClient.ts`（`gitGenerateMessage`） | `http_routes.rs` 用假 Channel 收集事件组 SSE（`collect_channel_events`），复用 `commands::git::git_generate_message`，零改动 commands |
+| POST `/backend/vibe/git/ai-batch-groups` | `vibeGitClient.ts`（`gitAiBatchGroups`） | 同上，组 SSE |
+| GET/POST `/backend/vibe/project-architect-review` + `/context` + `/history`（GET/POST/DELETE） | `vibeProjectArchitectReviewClient.ts` | 直接包装 `commands::project::*` |
+| POST `/backend/web/extract` | `webExtractClient.ts` | 包装 `commands::web::web_extract`，SSE（progress + result） |
+| POST `/backend/web/screenshot-page` | `pageScreenshotClient.ts` | **降级** `{ok:false, error:"服务器模式不支持页面截图"}`
+| POST `/backend/ai/test` / `/backend/ai/models` / `/backend/ai/tts` | `aiClient.ts` | 包装 `commands::ai::*`；`ok:false` → HTTP 502；`/tts` 直接返回音频二进制 |
+| POST `/backend/automation/open-by-template` / `/test-match` | `desktopAutomationClient.ts` / `iconTemplatesClient.ts` | **降级**（服务器无桌面环境） |
+
+### 3.5 任务 C 新增接口与开关
+
+| 项 | 说明 |
+|---|---|
+| POST `/api/server/login` | body `{password}` 匹配 `AIALL_SERVER_TOKEN` → 返回 `{ok, token, expiresAt, ttlSeconds}`；session 内存存储，12h 过期 |
+| POST `/api/server/logout` | 吊销当前 Bearer session token |
+| GET `/api/server/ai-config` | 返回 `{ok, endpoint, model, webProxyUrl, hasServerKey}`，**不含 key** |
+| 认证 | `AIALL_SERVER_TOKEN` 非空时，`/api/agent/*`、`/backend/*`、`/api/server/*` 全部强制 `Bearer`（静态 token 或 session）；`/healthz` 匿名 |
+| 路径沙箱 | `AIALL_SERVER_ALLOWED_PROJECTS` 非空时，`http_routes::enforce_path_sandbox` 对每个带绝对路径参数（path/projectPath/projectRoot/from/to）的 `/backend/vibe/*` 与 `/api/agent/run` 校验白名单 |
+| 命令白名单 | `AIALL_SERVER_RESTRICT_COMMANDS=1` 启用 `server_mode_command_blocked`（`tool_exec.rs`） |
+| 服务端 AI key | `AIALL_SERVER_AI_ENDPOINT/MODEL/KEY/PROXY` 或 `~/.config/aiall/server-config.json`；agent-run 与 `/backend/ai/*` 在请求体 apiKey 为空时由服务端注入 |
 
 ### 3.4 前端直接 `tauriInvoke`、无 HTTP fallback 的调用点（= 任务 A 清单）
 
@@ -140,10 +169,10 @@
 
 | 任务 | 负责方 | 文件域 | 依赖 | 文档 | 状态 |
 |---|---|---|---|---|---|
-| **A 前端实测 + 降级** | AI-B | `src/` | 无（现在就能做） | `docs/tasks/TASK-A-frontend.md` | 待认领 |
-| **B 后端增强路由** | AI-A | `src-tauri/src/http_routes.rs`、`src-tauri/src/commands/*.rs`、`src-tauri/src/bin/agent_server.rs` | 无（并行） | `docs/tasks/TASK-B-backend-routes.md` | **已认领（opencode）· 进行中** |
-| **C 安全** | AI-A | `src-tauri/` | 无（并行，但**勿与 B 同时改同一文件**，见下） | `docs/tasks/TASK-C-security.md` | **已认领（opencode）· 待 B 完成后开始** |
-| **D 部署物** | AI-C | 部署目录（`deploy/`、`scripts/`） | B、C 交付后 | `docs/tasks/TASK-D-deploy.md` | 待认领 |
+| **A 前端实测 + 降级** | AI-B | `src/` | 无（现在就能做） | `docs/tasks/TASK-A-frontend.md` | **部分交付**（opencode：登录/认证注入/key 不下发/AI 配置页服务端状态条）；浏览器实测待做 |
+| **B 后端增强路由** | AI-A | `src-tauri/src/http_routes.rs`、`src-tauri/src/commands/*.rs`、`src-tauri/src/bin/agent_server.rs` | 无（并行） | `docs/tasks/TASK-B-backend-routes.md` | ✅ **已交付**（`/backend/ai/*` 对齐、screenshot-page 降级、automation 降级、TTS 二进制、ai-config 状态码） |
+| **C 安全** | AI-A | `src-tauri/` | 无（并行，但**勿与 B 同时改同一文件**，见下） | `docs/tasks/TASK-C-security.md` | ✅ **已交付**（登录/session、统一路径沙箱、服务端 AI key、命令白名单已有） |
+| **D 部署物** | AI-C | 部署目录（`deploy/`、`scripts/`） | B、C 交付后 | `docs/tasks/TASK-D-deploy.md` | ✅ **已交付**（systemd / nginx(SSE off) / env 模板 / 部署 README / 交叉编译脚本 + CI workflow / deploy.sh，占位符无真 key） |
 | **E 生产构建** | AI-B | `package.json`、`dist/`、`src-tauri/Cargo.toml` | A 完成 | `docs/tasks/TASK-E-build.md` | 待认领 |
 
 依赖图：`A → E`；`B、C（串行给同一个 AI）→ D`。

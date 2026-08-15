@@ -1,0 +1,9 @@
+# AIALL 服务端 AI 配置模板（可选；与 systemd Environment 二选一）。
+# 放在 agent-server 的 HOME/.config/aiall/server-config.json（如 /opt/aiall/.config/aiall/server-config.json）。
+# 其中 apiKey 只存在于服务器，不会下发给浏览器。
+{
+  "endpoint": "https://__CHANGE_ME__/v1",
+  "model": "__CHANGE_ME__",
+  "apiKey": "__CHANGE_ME__",
+  "webProxyUrl": ""
+}

@@ -1,5 +1,6 @@
 import { invoke, Channel } from "@tauri-apps/api/core";
 import { backendUrl } from "./backendBase";
+import { getAuthHeaders } from "./serverAuth";
 import { invokeBackend, isTauriEnv } from "./tauriInvoke";
 import { readJsonResponse } from "./vibeCodingClient";
 
@@ -570,8 +571,8 @@ export async function generateCommitMessage(
   const httpFallback = async (): Promise<GitGenerateMessageResult> => {
     const response = await fetch(backendUrl("/backend/vibe/git/generate-message"), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: projectPath, endpoint, apiKey, model }),
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+      body: JSON.stringify({ path: projectPath, endpoint, apiKey: "", model }),
     });
 
     if (!response.ok) {
@@ -753,8 +754,8 @@ export async function aiBatchGroups(
   try {
     const response = await fetch(backendUrl("/backend/vibe/git/ai-batch-groups"), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: projectPath, endpoint, apiKey, model }),
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+      body: JSON.stringify({ path: projectPath, endpoint, apiKey: "", model }),
     });
 
     if (!response.ok) {

@@ -1,0 +1,57 @@
+# AIALL agent-server systemd 服务单元
+#
+# 安装说明：
+#   1. 把 release 二进制放到 /opt/aiall/agent-server（见 README.md / deploy.sh）
+#   2. 编辑下方 Environment= 占位值（AIALL_SERVER_TOKEN / AIALL_SERVER_ALLOWED_PROJECTS）
+#   3. 非 root 运行（推荐新建 aiall 用户）：
+#        sudo useradd -r -s /usr/sbin/nologin -d /opt/aiall aiall
+#        sudo chown -R aiall:aiall /opt/aiall
+#   4. 安装并启用：
+#        sudo cp deploy/agent-server.service /etc/systemd/system/
+#        sudo systemctl daemon-reload
+#        sudo systemctl enable --now agent-server
+#   5. 验证：
+#        curl http://127.0.0.1:8088/healthz   # → ok
+#
+# 注意：公网暴露前请务必配置 AIALL_SERVER_TOKEN（见 docs/TASK-C-security.md）。
+
+[Unit]
+Description=AIALL headless agent-server (Web/remote access)
+After=network.target
+
+[Service]
+Type=simple
+# 二进制由本地/CI 交叉编译后上传，勿在服务器上 cargo build（内存不足）。
+ExecStart=/opt/aiall/agent-server
+WorkingDirectory=/opt/aiall
+User=aiall
+Group=aiall
+Restart=always
+RestartSec=3
+
+# ── 必须按实际情况填 ──
+# 认证密码（>= 32 字节随机串；也是 POST /api/server/login 的 password）
+Environment=AIALL_SERVER_TOKEN=__CHANGE_ME__
+# 项目白名单（逗号分隔绝对路径；空 = 全放行，生产必填）
+Environment=AIALL_SERVER_ALLOWED_PROJECTS=/srv/aiall/projects
+# 服务器模式命令白名单
+Environment=AIALL_SERVER_RESTRICT_COMMANDS=1
+# 监听（nginx 反代时保持 127.0.0.1；直连公网才改 0.0.0.0）
+Environment=AIALL_SERVER_BIND=127.0.0.1
+Environment=AIALL_SERVER_PORT=8088
+
+# ── 可选：服务端 AI 配置（key 不下发浏览器）──
+# 也可改用 /opt/aiall/server-config.json：
+#   { "endpoint": "https://.../v1", "model": "...", "apiKey": "...", "webProxyUrl": "..." }
+# Environment=AIALL_SERVER_AI_ENDPOINT=
+# Environment=AIALL_SERVER_AI_MODEL=
+# Environment=AIALL_SERVER_AI_KEY=
+# Environment=AIALL_SERVER_AI_PROXY=
+
+# 日志交给 journald；如需落盘可自行加 StandardOutput=append:/var/log/aiall/agent-server.log
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aiall-agent-server
+
+[Install]
+WantedBy=multi-user.target

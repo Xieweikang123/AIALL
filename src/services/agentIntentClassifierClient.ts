@@ -10,6 +10,7 @@ import {
 } from "./intentClassifierAi";
 import { isTauriEnv, tauriInvoke } from "./tauriInvoke";
 import { Channel } from "@tauri-apps/api/core";
+import { streamChatHttp } from "./aiClient";
 
 const INTENT_CLASSIFIER_FIRST_BYTE_MS = 60_000;
 const INTENT_CLASSIFIER_TOTAL_TIMEOUT_MS = 90_000;
@@ -117,7 +118,15 @@ async function chatCompletionStreamOnce(params: {
     });
   }
 
-  return { ok: false, error: "非 Tauri 环境" };
+  // Web（服务器）模式：走 /backend/ai/test（服务端注入 key）。
+  const result = await streamChatHttp({
+    endpoint: params.endpoint,
+    apiKey: params.apiKey,
+    model: params.model,
+    messages: params.messages,
+    signal: params.signal,
+  });
+  return { ok: result.ok, content: result.rawText, error: result.error };
 }
 
 export async function classifyUserIntentWithAiClient(

@@ -1,0 +1,42 @@
+# 交叉编译 AIALL agent-server（Linux）到 GitHub Actions artifact。
+#
+# 用法：把本文件放到仓库 .github/workflows/ 下（任务 D 的 AI-C 也可直接引用 scripts/ 里这份）。
+# 产出：ubuntu-latest 上 `rustup target add x86_64-unknown-linux-musl` 后 cargo build，
+#       以 artifact `agent-server-linux` 供下载 → 上传到服务器。
+
+name: build-agent-server
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "src-tauri/**"
+
+env:
+  CARGO_TERM_COLOR: always
+  TARGET: x86_64-unknown-linux-musl
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 musl 工具链
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+
+      - name: 安装 Rust target
+        run: rustup target add ${TARGET}
+
+      - name: Build agent-server (release)
+        working-directory: src-tauri
+        run: cargo build --release --target ${TARGET} --bin agent-server
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-server-linux
+          path: src-tauri/target/${TARGET}/release/agent-server
+          retention-days: 7

@@ -2,6 +2,12 @@
 import { onMounted, ref } from "vue";
 import { runAgentServerSse, type WebAgentSseEvent } from "../services/webAgentTransport";
 import { loadAiChatBaseFromStorage } from "../services/aiLocalConfig";
+import {
+  getAuthHeaders,
+  isServerLoggedIn,
+  serverLogin,
+  serverLogout,
+} from "../services/serverAuth";
 
 const serverUrl = ref("http://127.0.0.1:8787");
 const projectPath = ref("");
@@ -14,9 +20,36 @@ const prompt = ref("");
 const running = ref(false);
 const answer = ref("");
 const logs = ref<WebAgentSseEvent[]>([]);
+const loginPassword = ref("");
+const loginError = ref("");
+const loggedIn = ref(false);
+const authBusy = ref(false);
 let abortCtrl: AbortController | null = null;
 
 const MODES = ["ask", "build", "plan", "explore"];
+
+function refreshLoginState() {
+  loggedIn.value = isServerLoggedIn();
+}
+
+async function doLogin() {
+  if (authBusy.value) return;
+  authBusy.value = true;
+  loginError.value = "";
+  const result = await serverLogin(loginPassword.value.trim());
+  authBusy.value = false;
+  if (result.ok) {
+    loginPassword.value = "";
+    refreshLoginState();
+  } else {
+    loginError.value = result.error || "登录失败";
+  }
+}
+
+async function doLogout() {
+  await serverLogout();
+  refreshLoginState();
+}
 
 onMounted(() => {
   const savedPath = localStorage.getItem("web-agent-project");
@@ -29,6 +62,7 @@ onMounted(() => {
     apiKey.value = cfg.apiKey;
     model.value = cfg.model;
   }
+  refreshLoginState();
 });
 
 function fmtData(data: Record<string, unknown> | undefined): string {
@@ -49,7 +83,8 @@ async function send() {
     prompt: prompt.value.trim(),
     projectPath: projectPath.value.trim(),
     endpoint: endpoint.value.trim(),
-    apiKey: apiKey.value.trim() || undefined,
+    // 服务器模式：key 由服务端配置注入（AIALL_SERVER_AI_KEY / server-config.json）
+    apiKey: undefined,
     model: model.value.trim(),
     mode: mode.value,
     maxTurns: Number(maxTurns.value) || 8,
@@ -71,7 +106,10 @@ async function send() {
 
 async function cancel() {
   try {
-    await fetch(`${serverUrl.value.trim().replace(/\/+$/, "")}/api/agent/cancel`, { method: "POST" });
+    await fetch(`${serverUrl.value.trim().replace(/\/+$/, "")}/api/agent/cancel`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+    });
   } catch {
     // ignore
   }
@@ -105,6 +143,23 @@ function evLabel(ev: WebAgentSseEvent): string {
       浏览器 → agent-server（服务器上无头跑 Agent 核心，可直接读写服务器文件/Git）。
       桌面版功能不在此页；此页仅验证「远程指挥 Agent 写代码」链路。
     </p>
+
+    <div class="auth" :class="{ ok: loggedIn }">
+      <template v-if="loggedIn">
+        <span class="auth-badge">已登录</span>
+        <button type="button" @click="doLogout">退出</button>
+      </template>
+      <template v-else>
+        <input
+          v-model="loginPassword"
+          type="password"
+          placeholder="服务器 AIALL_SERVER_TOKEN（登录）"
+          @keyup.enter="doLogin"
+        />
+        <button type="button" :disabled="authBusy" @click="doLogin">登录</button>
+        <span v-if="loginError" class="auth-error">{{ loginError }}</span>
+      </template>
+    </div>
 
     <div class="grid">
       <label>Server
@@ -170,6 +225,30 @@ h1 {
   color: #9aa;
   font-size: 13px;
   margin-bottom: 16px;
+}
+.auth {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border: 1px solid #333;
+  border-radius: 6px;
+  background: #1a1a1a;
+}
+.auth.ok {
+  border-color: #2a5;
+}
+.auth input {
+  flex: 1;
+}
+.auth-badge {
+  color: #4caf50;
+  font-size: 13px;
+}
+.auth-error {
+  color: #f66;
+  font-size: 12px;
 }
 .grid {
   display: grid;

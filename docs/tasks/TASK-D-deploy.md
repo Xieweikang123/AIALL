@@ -2,6 +2,11 @@
 
 > 先读 `docs/WEB_SERVER_MIGRATION.md`、`docs/DEPLOYMENT_REQUIREMENTS.md`。依赖任务 B、C 交付后执行。
 
+## 认领状态
+
+- 状态：✅ **已交付**（2026-08-15，opencode 会话执行）
+- 交付物清单见下，全部在 `deploy/` 与 `scripts/`，无真实 key/token（占位符 `__CHANGE_ME__`）。
+
 ## 服务器情况（摘自 DEPLOYMENT_REQUIREMENTS.md）
 
 - IP `<SERVER_IP>`，SSH `root@<SERVER_IP>`（密钥免密已通，端口 22）。

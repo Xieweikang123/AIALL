@@ -5,10 +5,15 @@
 ## 认领状态
 
 - 认领 AI：opencode（deepseek-v4-flash，本次会话）
-- 状态：**进行中**（2026-08-15）
-- 已确定的技术路线（改 `http_routes.rs` 时照此实现）：
-  - `git_generate_message` / `git_ai_batch_groups`：**零改动 `commands/git.rs`**，在 `http_routes.rs` 里用 `tauri::ipc::Channel::new` 造一个假 Channel（与 `agent/run.rs::agent_run_headless` 同法），把 `on_event.send` 转发到 mpsc，收集 `done`/`error` 后返回 JSON（前端 fallback 同时兼容 SSE 与 JSON，见 `vibeGitClient.ts:587` / `:770`）。
-  - 其余路由照 `project_memory_*` 的现有模式直接包装 `commands::*`。
+- 状态：✅ **已交付**（2026-08-15）
+- 交付内容：
+  - `git_generate_message` / `git_ai_batch_groups`：`http_routes.rs` 的 `collect_channel_events` 用假 `Channel` 收集事件组 SSE（零改动 `commands/git.rs`）。
+  - `project_architect_review*`（5 变体）、`project_memory_*` / `project_knowledge_*` / `project_skills_*`：直接包装 `commands::project::*`。
+  - `/backend/web/extract`：SSE（progress + result）；`/backend/web/screenshot-page`：降级。
+  - **`/backend/ai/test|models|tts`（POST）**：对齐 `aiClient.ts`（前端原调 `/backend/ai/*`，后端旧为 `/api/ai/*` GET → 已改）；`ok:false` → HTTP 502；`/tts` 直接返回音频二进制（`commands::ai::ai_tts_impl` 抽非流式底层，桌面 `ai_tts` 复用）。
+  - `/backend/automation/*`：降级（服务器无桌面）。
+  - vite 代理统一 `/backend` 前缀 + `/api/server`。
+- 备注：本任务在 `b3fd1c8` 时大部分路由已实现；本次补齐了 AI 配置页 / 截图 / 自动化契约与状态码语义。
 
 ## 目标
 

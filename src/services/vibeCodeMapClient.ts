@@ -7,7 +7,9 @@ import {
   type CodeMapDocument,
   type CodeMapLayoutFile,
 } from "../../shared/codeMapTypes";
-import { formatFetchError, readFile, writeFile } from "./vibeCodingClient";
+import { backendUrl } from "./backendBase";
+import { getAuthHeaders } from "./serverAuth";
+import { formatFetchError, readFile, readJsonResponse, writeFile } from "./vibeCodingClient";
 import { formatInvokeError, invokeBackend, isTauriEnv, WEB_REQUIRES_TAURI_MESSAGE } from "./tauriInvoke";
 
 function isMissingFileError(message?: string): boolean {
@@ -21,10 +23,19 @@ export async function buildCodeMap(
   const root = projectPath.trim();
   if (!root) return { ok: false, error: "未打开项目" };
   try {
-    const result = await invokeBackend<CodeMapBuildResult>("code_map_build", {
-      projectPath: root,
-      gitHead: gitHead || null,
-    });
+    const result = await invokeBackend<CodeMapBuildResult>(
+      "code_map_build",
+      { projectPath: root, gitHead: gitHead || null },
+      async () => {
+        const resp = await fetch(backendUrl("/backend/vibe/code-map"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+          body: JSON.stringify({ projectPath: root, gitHead: gitHead || null }),
+        });
+        const data = await readJsonResponse<CodeMapBuildResult>(resp);
+        return { ok: data.ok, document: data.document, error: data.error };
+      },
+    );
     if (!result?.ok || !isCodeMapDocument(result.document)) {
       return { ok: false, error: result?.error || "架构图生成失败" };
     }

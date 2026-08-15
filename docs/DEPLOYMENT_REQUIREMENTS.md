@@ -38,8 +38,10 @@ AIALL 是 Tauri 2 + Vue 3 桌面应用,核心功能(Agent 编程 / Git / 文件�
 
 ## 当前状态(2026-08-15)
 
-- [ ] 架构改造(HTTP 后端 + 前端切流)
-- [ ] 鉴权与沙箱
-- [ ] 服务端 AI Key 管理
-- [ ] 公网部署(HTTP :8088,暂不启用 HTTPS)
-- [ ] 公网访问验证(Agent / Git / 文件)
+- [x] 架构改造(HTTP 后端 + 前端切流)——`agent-server` + `/backend/vibe|web|ai|automation` + `/api/agent` SSE，前端 `invokeBackend` HTTP fallback
+- [x] 鉴权与沙箱——`POST /api/server/login`(session 12h)+ 静态 Bearer；`AIALL_SERVER_ALLOWED_PROJECTS` 统一路径沙箱；`AIALL_SERVER_RESTRICT_COMMANDS=1` 命令白名单
+- [x] 服务端 AI Key 管理——`AIALL_SERVER_AI_*` 或 `server-config.json`；`GET /api/server/ai-config`(不含 key)
+- [x] 部署物——`deploy/`(systemd / nginx / env 模板 / README)+ `scripts/`(交叉编译、CI workflow、deploy.sh)，见 `deploy/README.md`
+- [ ] 公网部署(HTTP :8088,暂不启用 HTTPS)——待执行 `deploy/README.md` 步骤(上传二进制 + 前端 dist → systemd → 验证)
+- [ ] 公网访问验证(Agent / Git / 文件)——部署后按 `deploy/README.md`「验证清单」跑
+- [ ] 前端配合(任务 A)：登录 UI / key 不下发浏览器 / ai-config 展示 / 浏览器实测

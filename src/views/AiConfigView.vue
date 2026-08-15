@@ -21,6 +21,40 @@
       </div>
     </div>
 
+    <section class="server-mode card">
+      <div class="server-mode-head">
+        <h2 class="card-title">服务器模式</h2>
+        <span v-if="serverLoggedIn" class="server-badge ok">已连接服务器</span>
+        <span v-else class="server-badge">未登录</span>
+      </div>
+
+      <template v-if="serverLoggedIn">
+        <p class="desc">
+          浏览器通过 agent-server 访问；API Key 由服务端持有，不会下发到浏览器。
+          服务端配置：endpoint
+          <code>{{ serverAiEndpoint || "（未配置）" }}</code>，model
+          <code>{{ serverAiModel || "（未配置）" }}</code>
+          <template v-if="serverAiProxy">，网页代理 <code>{{ serverAiProxy }}</code></template>。
+          {{ serverCfgNote }}
+        </p>
+        <button type="button" class="secondary" @click="handleServerLogout">退出服务器登录</button>
+      </template>
+      <template v-else>
+        <div class="server-login-row">
+          <input
+            v-model="serverLoginPassword"
+            type="password"
+            placeholder="输入服务器 AIALL_SERVER_TOKEN"
+            @keyup.enter="handleServerLogin"
+          />
+          <button type="button" class="primary" :disabled="serverAuthBusy" @click="handleServerLogin">
+            登录服务器
+          </button>
+          <span v-if="serverLoginError" class="server-login-error">{{ serverLoginError }}</span>
+        </div>
+      </template>
+    </section>
+
     <nav class="tabs" aria-label="AI 配置选项卡">
       <button type="button" class="tab" :class="{ active: activeTab === 'chat' }" @click="activeTab = 'chat'">
         模型/对话
@@ -370,6 +404,12 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { useRouter } from "vue-router";
 import { lsGet, lsRemove } from "../utils/localStorageSafe";
 import { fetchAvailableModels, testAiModel, testTtsModel } from "../services/aiClient";
+import {
+  isServerLoggedIn,
+  serverLogin,
+  serverLogout,
+  fetchServerAiConfig,
+} from "../services/serverAuth";
 import InputPrompt from "../components/InputPrompt.vue";
 import { useInputPrompt } from "../composables/useInputPrompt";
 import { requestPageScreenshot } from "../services/pageScreenshotClient";
@@ -406,6 +446,60 @@ const activeTab = ref<TabKey>("chat");
 const apiKeyVisible = ref(false);
 const saveHint = ref("");
 let saveHintTimer: number | undefined;
+
+// ── 服务器模式（web / agent-server）──
+const serverLoggedIn = ref(isServerLoggedIn());
+const serverLoginPassword = ref("");
+const serverLoginError = ref("");
+const serverAuthBusy = ref(false);
+const serverAiEndpoint = ref("");
+const serverAiModel = ref("");
+const serverAiProxy = ref("");
+const serverHasKey = ref(false);
+const serverCfgNote = ref("");
+
+async function refreshServerLoginState() {
+  serverLoggedIn.value = isServerLoggedIn();
+  if (serverLoggedIn.value) {
+    const cfg = await fetchServerAiConfig();
+    if (cfg.ok) {
+      serverAiEndpoint.value = cfg.endpoint;
+      serverAiModel.value = cfg.model;
+      serverAiProxy.value = cfg.webProxyUrl;
+      serverHasKey.value = cfg.hasServerKey;
+      serverCfgNote.value = serverHasKey.value
+        ? "服务端已配置 API Key，浏览器无需填写。"
+        : "服务端未配置 API Key。";
+    } else {
+      serverCfgNote.value = cfg.error || "无法获取服务端 AI 配置";
+    }
+  } else {
+    serverAiEndpoint.value = "";
+    serverAiModel.value = "";
+    serverAiProxy.value = "";
+    serverHasKey.value = false;
+    serverCfgNote.value = "";
+  }
+}
+
+async function handleServerLogin() {
+  if (serverAuthBusy.value) return;
+  serverAuthBusy.value = true;
+  serverLoginError.value = "";
+  const result = await serverLogin(serverLoginPassword.value.trim());
+  serverAuthBusy.value = false;
+  if (result.ok) {
+    serverLoginPassword.value = "";
+    await refreshServerLoginState();
+  } else {
+    serverLoginError.value = result.error || "登录失败";
+  }
+}
+
+async function handleServerLogout() {
+  await serverLogout();
+  await refreshServerLoginState();
+}
 
 const providers = ref<AiProvider[]>([createDefaultProvider()]);
 const activeProviderId = ref(providers.value[0].id);
@@ -1171,6 +1265,7 @@ async function handleTestTts() {
 
 onMounted(() => {
   loadConfig();
+  void refreshServerLoginState();
   window.addEventListener("paste", handlePaste);
   window.addEventListener("keydown", handleSaveShortcut);
 });
@@ -1203,6 +1298,48 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.server-mode {
+  border: 1px solid var(--border, rgba(17, 24, 39, 0.1));
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.server-mode-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.server-badge {
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.08);
+  color: var(--muted, rgba(17, 24, 39, 0.7));
+}
+.server-badge.ok {
+  background: rgba(34, 197, 94, 0.15);
+  color: #15803d;
+}
+.server-mode code {
+  background: rgba(17, 24, 39, 0.06);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.server-login-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.server-login-row input {
+  flex: 1;
+  max-width: 360px;
+}
+.server-login-error {
+  color: #dc2626;
+  font-size: 12px;
+}
 :global(html),
 :global(body) {
   margin: 0;

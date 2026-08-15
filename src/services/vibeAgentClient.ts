@@ -1,5 +1,6 @@
 import { isTauriEnv, runAgentChannel } from "./tauriInvoke";
 import { backendUrl } from "./backendBase";
+import { getAuthHeaders } from "./serverAuth";
 import { runAgentServerSse } from "./webAgentTransport";
 import type { ResolvedUserIntent } from "./intentClassifierTypes";
 import type { VibeAgentEvent, VibeChatMode, VibeChatHistoryMessage } from "../../shared/agentTypes";
@@ -79,6 +80,7 @@ function runWebAgentSse(
 ): ReturnType<typeof runAgentChannel> {
   const abortCtrl = new AbortController();
   const url = backendUrl("/api/agent/run");
+  // 服务器模式：key 由服务端配置注入（任务 C），浏览器不下发明文 key。
   const promise = runAgentServerSse(
     url,
     {
@@ -86,7 +88,7 @@ function runWebAgentSse(
       history: request.history,
       projectPath: request.projectPath,
       endpoint: request.endpoint,
-      apiKey: request.apiKey,
+      apiKey: undefined,
       model: request.model,
       mode: request.mode,
       maxTurns: request.maxTurns,
@@ -104,7 +106,10 @@ function runWebAgentSse(
     promise,
     abort: () => {
       abortCtrl.abort();
-      void fetch(backendUrl("/api/agent/cancel"), { method: "POST" }).catch(() => {});
+      void fetch(backendUrl("/api/agent/cancel"), {
+        method: "POST",
+        headers: getAuthHeaders(),
+      }).catch(() => {});
     },
   };
 }

@@ -18,9 +18,10 @@ export interface IconTemplateStoreFile {
 }
 
 export interface IconTemplateListResponse {
-  ok: true;
-  storePath: string;
-  imagesPath: string;
+  ok: boolean;
+  storePath?: string;
+  imagesPath?: string;
+  error?: string;
   items: Array<
     IconTemplateItem & {
       imageUrl: string | null;

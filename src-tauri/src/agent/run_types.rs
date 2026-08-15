@@ -92,6 +92,31 @@ impl AgentRunRequest {
         &self.project_path
     }
 
+    /// 服务端模式：用服务端配置补齐缺失的 endpoint / apiKey / model / webProxyUrl。
+    /// 浏览器侧不传明文 key 时，由 agent-server 在此注入服务端持有的 key。
+    pub fn apply_server_ai(
+        &mut self,
+        endpoint: &str,
+        api_key: Option<&str>,
+        model: &str,
+        web_proxy_url: Option<&str>,
+    ) {
+        if self.endpoint.trim().is_empty() && !endpoint.trim().is_empty() {
+            self.endpoint = endpoint.trim().to_string();
+        }
+        if self.api_key.as_deref().map(str::trim).unwrap_or("").is_empty() {
+            if let Some(k) = api_key.filter(|k| !k.trim().is_empty()) {
+                self.api_key = Some(k.trim().to_string());
+            }
+        }
+        if self.model.trim().is_empty() && !model.trim().is_empty() {
+            self.model = model.trim().to_string();
+        }
+        if self.web_proxy_url.is_none() && web_proxy_url.filter(|p| !p.trim().is_empty()).is_some() {
+            self.web_proxy_url = web_proxy_url.map(|p| p.trim().to_string());
+        }
+    }
+
     /// Headless / CLI smoke entry — no UI history or run profile.
     pub fn for_smoke(
         project_path: String,

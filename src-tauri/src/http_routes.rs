@@ -17,6 +17,63 @@ pub struct HttpResponse {
     pub body: Vec<u8>,
 }
 
+/// 服务端 AI 配置（不含浏览器下发 key 的明文回传）。key 仅服务端持有。
+#[derive(Debug, Clone, Default)]
+pub struct ServerAiConfig {
+    pub endpoint: String,
+    pub api_key: String,
+    pub model: String,
+    pub web_proxy_url: Option<String>,
+}
+
+fn forbidden(message: &str) -> HttpResponse {
+    error_response(403, message)
+}
+
+/// 判断 project_path 是否落在 allowed 白名单内（空白名单 = 全放行）。
+/// 同时被 `agent_server` 用于 `/api/agent/run` 校验。
+pub fn project_allowed(project_path: &str, allowed: &[String]) -> bool {
+    if allowed.is_empty() {
+        return true;
+    }
+    let norm = |p: &str| p.replace('\\', "/").trim_end_matches('/').to_lowercase();
+    let target = std::fs::canonicalize(project_path)
+        .map(|c| norm(&c.to_string_lossy()))
+        .unwrap_or_else(|_| norm(project_path));
+    allowed
+        .iter()
+        .map(|a| norm(a))
+        .any(|a| target == a || target.starts_with(&format!("{a}/")))
+}
+
+/// 从 query / body 抽取「路径类」参数（path / projectPath / projectRoot / from / to）。
+/// 对每个非空且为绝对路径的值做白名单校验；任一越界 → 403。
+/// 相对路径交由 `commands` 层 `resolve_*` 在项目根内解析，此处不拦（防误伤）。
+fn enforce_path_sandbox(
+    q: &HashMap<String, String>,
+    body: &Value,
+    allowed: &[String],
+) -> Result<(), HttpResponse> {
+    if allowed.is_empty() {
+        return Ok(());
+    }
+    let mut candidates: Vec<String> = Vec::new();
+    for key in ["path", "projectPath", "projectRoot", "from", "to"] {
+        if let Some(v) = q_get(q, key) {
+            candidates.push(v.clone());
+        }
+        if let Some(v) = body.get(key).and_then(|x| x.as_str()).filter(|s| !s.is_empty()) {
+            candidates.push(v.to_string());
+        }
+    }
+    for c in candidates {
+        if std::path::Path::new(&c).is_absolute() && !project_allowed(&c, allowed) {
+            return Err(forbidden("project not allowed"));
+        }
+    }
+    Ok(())
+}
+
 fn sse_http_response(events: &[(String, String)]) -> HttpResponse {
     let mut body = String::new();
     for (ty, data) in events {
@@ -34,6 +91,20 @@ fn ok_json(v: Value) -> HttpResponse {
         status: 200,
         content_type: "application/json".into(),
         body: serde_json::to_vec(&v).unwrap_or_default(),
+    }
+}
+
+/// AI 命令结果转 HTTP：`ok:false` → 502（前端依赖 HTTP 状态判断成败）。
+fn ai_result_response(v: Value) -> HttpResponse {
+    let failed = v.get("ok").and_then(|x| x.as_bool()) == Some(false);
+    if failed {
+        HttpResponse {
+            status: 502,
+            content_type: "application/json".into(),
+            body: serde_json::to_vec(&v).unwrap_or_default(),
+        }
+    } else {
+        ok_json(v)
     }
 }
 
@@ -174,8 +245,18 @@ pub async fn handle_backend_vibe(
     path: &str,
     query: &str,
     body: &[u8],
+    allowed: &[String],
+    server_ai: Option<&ServerAiConfig>,
 ) -> Result<HttpResponse, String> {
     let q = parse_query(query);
+    let body_value = parse_body_json(body).unwrap_or_else(|_| json!({}));
+    if let Err(resp) = enforce_path_sandbox(&q, &body_value, allowed) {
+        return Ok(resp);
+    }
+    // 服务端 AI key 兜底：浏览器不传明文 key 时，从服务端配置注入（任务 C）。
+    let server_key = server_ai
+        .filter(|c| !c.api_key.is_empty())
+        .map(|c| c.api_key.clone());
     let route = path.strip_prefix("/backend/vibe").unwrap_or(path);
     match (method, route) {
         // ── filesystem ──
@@ -611,7 +692,7 @@ pub async fn handle_backend_vibe(
             let body = parse_body_json(body)?;
             let path = body_str(&body, "path");
             let endpoint = body_str(&body, "endpoint");
-            let api_key = body_opt_str(&body, "apiKey");
+            let api_key = body_opt_str(&body, "apiKey").or_else(|| server_key.clone());
             let model = body_str(&body, "model");
             let events = collect_channel_events(move |channel| {
                 Box::pin(async move {
@@ -625,7 +706,7 @@ pub async fn handle_backend_vibe(
             let body = parse_body_json(body)?;
             let path = body_str(&body, "path");
             let endpoint = body_str(&body, "endpoint");
-            let api_key = body_opt_str(&body, "apiKey");
+            let api_key = body_opt_str(&body, "apiKey").or_else(|| server_key.clone());
             let model = body_str(&body, "model");
             let events = collect_channel_events(move |channel| {
                 Box::pin(async move {
@@ -727,7 +808,19 @@ pub async fn handle_backend_vibe(
             let project_path = q_get(&q, "projectPath").cloned().unwrap_or_default();
             return Ok(ok_json(commands::project::project_health_scan(project_path).await));
         }
+        ("POST", "/code-map") => {
+            let body = parse_body_json(body)?;
+            let project_path = body_str(&body, "projectPath");
+            let git_head = body_opt_str(&body, "gitHead");
+            return Ok(ok_json(
+                commands::project::code_map_build(project_path, git_head).await,
+            ));
+        }
         ("GET", "/project-verify-run") => {
+            let project_path = q_get(&q, "projectPath").cloned().unwrap_or_default();
+            return Ok(ok_json(commands::project::project_verify_run(project_path).await));
+        }
+        ("POST", "/project-verify-run") => {
             let project_path = q_get(&q, "projectPath").cloned().unwrap_or_default();
             return Ok(ok_json(commands::project::project_verify_run(project_path).await));
         }
@@ -744,14 +837,272 @@ pub async fn handle_backend_vibe(
     }
 }
 
-/// 处理不在 `/backend/vibe/` 前缀下的路由：网页抓取与 AI 配置页探测。
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn allowed(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn query(pairs: &[(&str, &str)]) -> String {
+        pairs
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+            .collect::<Vec<_>>()
+            .join("&")
+    }
+
+    #[test]
+    fn parse_query_decodes_and_splits() {
+        let map = parse_query("path=D%3A%2Fproj&flag=&q=hello%20world");
+        assert_eq!(map.get("path").unwrap(), "D:/proj");
+        assert_eq!(map.get("q").unwrap(), "hello world");
+        assert_eq!(map.get("flag").unwrap(), "");
+    }
+
+    #[test]
+    fn parse_body_json_empty_is_object() {
+        assert_eq!(parse_body_json(b"").unwrap(), json!({}));
+    }
+
+    #[test]
+    fn parse_body_json_invalid_is_err() {
+        assert!(parse_body_json(b"{not json").is_err());
+    }
+
+    #[test]
+    fn parse_body_json_valid() {
+        let value = parse_body_json(br#"{"path":"/x"}"#).unwrap();
+        assert_eq!(value["path"], "/x");
+    }
+
+    #[test]
+    fn project_allowed_empty_list_allows_all() {
+        assert!(project_allowed("/anything", &[]));
+    }
+
+    #[test]
+    fn project_allowed_matches_prefix() {
+        let tmp = std::env::temp_dir().join(format!("aiall-allow-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let inner = tmp.join("sub");
+        std::fs::create_dir_all(&inner).unwrap();
+
+        let list = allowed(&[tmp.to_str().unwrap()]);
+        assert!(project_allowed(tmp.to_str().unwrap(), &list));
+        assert!(project_allowed(inner.to_str().unwrap(), &list));
+        assert!(!project_allowed("/etc/passwd", &list));
+
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    #[test]
+    fn enforce_path_sandbox_rejects_absolute_outside() {
+        let q = query(&[("path", "D:/project/demo")]);
+        let map = parse_query(&q);
+        let body = json!({});
+        let err = enforce_path_sandbox(&map, &body, &allowed(&["D:/project/allowed"])).unwrap_err();
+        assert_eq!(err.status, 403);
+    }
+
+    #[test]
+    fn enforce_path_sandbox_checks_body_params() {
+        let map = HashMap::new();
+        let body = json!({ "projectPath": "/tmp/aiall-outside" });
+        let err = enforce_path_sandbox(&map, &body, &allowed(&["/tmp/aiall-inside"])).unwrap_err();
+        assert_eq!(err.status, 403);
+    }
+
+    #[test]
+    fn enforce_path_sandbox_allows_relative_paths() {
+        let map = parse_query("path=relative/x");
+        let body = json!({});
+        assert!(enforce_path_sandbox(&map, &body, &allowed(&["/only/absolute"])).is_ok());
+    }
+
+    #[test]
+    fn enforce_path_sandbox_empty_allowed_ok() {
+        let map = parse_query("path=/etc/passwd");
+        let body = json!({});
+        assert!(enforce_path_sandbox(&map, &body, &[]).is_ok());
+    }
+
+    #[test]
+    fn ai_result_response_failed_becomes_502() {
+        let resp = ai_result_response(json!({ "ok": false, "error": "boom" }));
+        assert_eq!(resp.status, 502);
+    }
+
+    #[test]
+    fn ai_result_response_ok_is_200_json() {
+        let resp = ai_result_response(json!({ "ok": true }));
+        assert_eq!(resp.status, 200);
+        assert_eq!(resp.content_type, "application/json");
+    }
+
+    #[test]
+    fn sse_http_response_formats_events() {
+        let resp = sse_http_response(&[("status".into(), "{}".into()), ("done".into(), "{\"ok\":true}".into())]);
+        assert_eq!(resp.content_type, "text/event-stream");
+        let text = String::from_utf8(resp.body).unwrap();
+        assert_eq!(text, "event: status\ndata: {}\n\nevent: done\ndata: {\"ok\":true}\n\n");
+    }
+
+    #[test]
+    fn ok_json_serializes() {
+        let resp = ok_json(json!({ "a": 1 }));
+        assert_eq!(resp.status, 200);
+        assert_eq!(String::from_utf8(resp.body).unwrap(), r#"{"a":1}"#);
+    }
+
+    #[test]
+    fn image_content_type_detects_extension() {
+        assert_eq!(image_content_type("img.png"), "image/png");
+        assert_eq!(image_content_type("img.JPG"), "image/jpeg");
+        assert_eq!(image_content_type("img.webp"), "image/webp");
+        assert_eq!(image_content_type("img.gif"), "image/gif");
+        assert_eq!(image_content_type("img.bin"), "image/png");
+    }
+
+    #[test]
+    fn handle_other_route_screenshot_page_degrades() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let resp = rt
+            .block_on(handle_other_route("POST", "/backend/web/screenshot-page", "", b"{}", &[], None))
+            .unwrap();
+        assert_eq!(resp.status, 200);
+        let body: Value = serde_json::from_slice(&resp.body).unwrap();
+        assert_eq!(body["ok"], false);
+        assert!(body["error"].as_str().unwrap().contains("不支持"));
+    }
+
+    #[test]
+    fn handle_other_route_automation_degrades() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        for path in ["/backend/automation/open-by-template", "/backend/automation/test-match"] {
+            let resp = rt
+                .block_on(handle_other_route("POST", path, "", b"{}", &[], None))
+                .unwrap();
+            let body: Value = serde_json::from_slice(&resp.body).unwrap();
+            assert_eq!(body["ok"], false);
+        }
+    }
+
+    #[test]
+    fn handle_other_route_ai_config_omits_key() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let server_ai = ServerAiConfig {
+            endpoint: "https://ai.example/v1".into(),
+            api_key: "secret-key".into(),
+            model: "gpt-4o".into(),
+            web_proxy_url: Some("http://proxy:8080".into()),
+        };
+        let resp = rt
+            .block_on(handle_other_route("GET", "/api/server/ai-config", "", b"", &[], Some(&server_ai)))
+            .unwrap();
+        let body: Value = serde_json::from_slice(&resp.body).unwrap();
+        assert_eq!(body["ok"], true);
+        assert_eq!(body["endpoint"], "https://ai.example/v1");
+        assert_eq!(body["model"], "gpt-4o");
+        assert_eq!(body["hasServerKey"], true);
+        assert!(body.get("apiKey").is_none());
+        assert!(body.get("key").is_none());
+    }
+
+    #[test]
+    fn handle_other_route_unknown_404() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let resp = rt
+            .block_on(handle_other_route("GET", "/nope", "", b"", &[], None))
+            .unwrap();
+        assert_eq!(resp.status, 404);
+    }
+
+    #[test]
+    fn handle_backend_vibe_open_folder_degrades() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let resp = rt
+            .block_on(handle_backend_vibe("POST", "/backend/vibe/open-folder", "", b"{}", &[], None))
+            .unwrap();
+        let body: Value = serde_json::from_slice(&resp.body).unwrap();
+        assert_eq!(body["ok"], false);
+    }
+
+    #[test]
+    fn handle_backend_vibe_pick_folder_cancelled() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let resp = rt
+            .block_on(handle_backend_vibe("POST", "/backend/vibe/pick-folder", "", b"{}", &[], None))
+            .unwrap();
+        let body: Value = serde_json::from_slice(&resp.body).unwrap();
+        assert_eq!(body["cancelled"], true);
+    }
+
+    #[test]
+    fn handle_backend_vibe_unknown_404() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let resp = rt
+            .block_on(handle_backend_vibe("GET", "/backend/vibe/does-not-exist", "", b"", &[], None))
+            .unwrap();
+        assert_eq!(resp.status, 404);
+    }
+
+    #[test]
+    fn handle_backend_vibe_sandbox_blocks_outside() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let q = query(&[("path", "/etc")]);
+        let resp = rt
+            .block_on(handle_backend_vibe("GET", "/backend/vibe/list", &q, b"", &allowed(&["/tmp/ok"]), None))
+            .unwrap();
+        assert_eq!(resp.status, 403);
+    }
+
+    #[test]
+    fn handle_backend_vibe_git_generate_message_uses_server_key() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        // 空 endpoint/model 时直接返回（Rust 侧不真正请求网络），但路径与沙箱校验正常
+        let body = br#"{"path":"/tmp/aiall-generate","endpoint":"","apiKey":"","model":""}"#;
+        let server_ai = ServerAiConfig {
+            endpoint: "https://ai.example/v1".into(),
+            api_key: "server-secret".into(),
+            model: "gpt-4o".into(),
+            web_proxy_url: None,
+        };
+        let resp = rt
+            .block_on(handle_backend_vibe("POST", "/backend/vibe/git/generate-message", "", body, &[], Some(&server_ai)))
+            .unwrap();
+        assert_eq!(resp.content_type, "text/event-stream");
+    }
+}
+
+
+/// 处理不在 `/backend/vibe/` 前缀下的路由：网页抓取 / 页面截图 / AI 配置页探测 / 服务端 AI 配置。
 pub async fn handle_other_route(
     method: &str,
     path: &str,
     query: &str,
     body: &[u8],
+    allowed: &[String],
+    server_ai: Option<&ServerAiConfig>,
 ) -> Result<HttpResponse, String> {
     let q = parse_query(query);
+    let body_value = parse_body_json(body).unwrap_or_else(|_| json!({}));
+    if let Err(resp) = enforce_path_sandbox(&q, &body_value, allowed) {
+        return Ok(resp);
+    }
+    // 服务端 AI key 兜底：浏览器侧不传明文 key 时，从服务端配置注入。
+    let resolve_key = |body_key: Option<&str>| -> Option<String> {
+        body_key
+            .filter(|k| !k.is_empty())
+            .map(|k| k.to_string())
+            .or_else(|| {
+                server_ai
+                    .filter(|c| !c.api_key.is_empty())
+                    .map(|c| c.api_key.clone())
+            })
+    };
     match (method, path) {
         ("POST", "/backend/web/extract") => {
             let body = parse_body_json(body)?;
@@ -769,24 +1120,77 @@ pub async fn handle_other_route(
                 ("result".to_string(), result_json),
             ]));
         }
-        ("POST", "/api/ai/test") => {
+        ("POST", "/backend/web/screenshot-page") => {
+            // 服务器无桌面 / 无头浏览器截图能力：明确降级。
+            return Ok(ok_json(json!({ "ok": false, "error": "服务器模式不支持页面截图（需桌面版）" })));
+        }
+        ("POST", "/backend/ai/test") => {
             let body = parse_body_json(body)?;
             let endpoint = body_str(&body, "endpoint");
-            let api_key = body_opt_str(&body, "apiKey");
-            let payload = body.get("body").cloned().unwrap_or(Value::Null);
-            return Ok(ok_json(commands::ai::ai_test(endpoint, api_key, payload).await));
+            let api_key = resolve_key(body_opt_str(&body, "apiKey").as_deref());
+            let mut payload = body.clone();
+            if let Some(obj) = payload.as_object_mut() {
+                obj.remove("endpoint");
+                obj.remove("apiKey");
+            }
+            return Ok(ai_result_response(commands::ai::ai_test(endpoint, api_key, payload).await));
         }
-        ("GET", "/api/ai/models") => {
-            let endpoint = q_get(&q, "endpoint").cloned().unwrap_or_default();
-            let api_key = q_get(&q, "apiKey").cloned();
-            return Ok(ok_json(commands::ai::ai_models(endpoint, api_key).await));
-        }
-        ("POST", "/api/ai/tts") => {
+        ("POST", "/backend/ai/models") => {
             let body = parse_body_json(body)?;
             let endpoint = body_str(&body, "endpoint");
-            let api_key = body_opt_str(&body, "apiKey");
-            let payload = body.get("body").cloned().unwrap_or(Value::Null);
-            return Ok(ok_json(commands::ai::ai_tts(endpoint, api_key, payload).await));
+            let api_key = resolve_key(body_opt_str(&body, "apiKey").as_deref());
+            return Ok(ai_result_response(commands::ai::ai_models(endpoint, api_key).await));
+        }
+        ("POST", "/backend/ai/tts") => {
+            let body = parse_body_json(body)?;
+            let endpoint = body_str(&body, "endpoint");
+            let api_key = resolve_key(body_opt_str(&body, "apiKey").as_deref());
+            let mut payload = body.clone();
+            if let Some(obj) = payload.as_object_mut() {
+                obj.remove("endpoint");
+                obj.remove("apiKey");
+            }
+            // 前端 fallback 期望直接返回音频二进制（blob）。
+            let result = commands::ai::ai_tts_impl(&endpoint, api_key.as_deref(), &payload).await;
+            if !result.ok {
+                return Ok(ai_result_response(json!({
+                    "ok": false,
+                    "error": result.error.unwrap_or_else(|| "TTS 请求失败".into()),
+                })));
+            }
+            let mime = result.mime.unwrap_or_else(|| "audio/mpeg".into());
+            return Ok(ok_bytes(
+                result.audio.unwrap_or_default(),
+                &mime,
+            ));
+        }
+        // ── 桌面自动化：服务器无桌面环境，降级 ──
+        ("POST", "/backend/automation/open-by-template") => Ok(ok_json(json!({
+            "ok": false,
+            "error": "桌面自动化仅桌面版可用（服务器无桌面环境）",
+        }))),
+        ("POST", "/backend/automation/test-match") => Ok(ok_json(json!({
+            "ok": false,
+            "error": "模板匹配仅桌面版可用（服务器无桌面环境）",
+        }))),
+        ("GET", "/api/server/ai-config") => {
+            // 返回 endpoint / model / 代理，**不含 key**（key 服务端私有）。
+            let (endpoint, model, proxy, has_key) = match server_ai {
+                Some(c) => (
+                    c.endpoint.clone(),
+                    c.model.clone(),
+                    c.web_proxy_url.clone().unwrap_or_default(),
+                    !c.api_key.is_empty(),
+                ),
+                None => (String::new(), String::new(), String::new(), false),
+            };
+            return Ok(ok_json(json!({
+                "ok": true,
+                "endpoint": endpoint,
+                "model": model,
+                "webProxyUrl": proxy,
+                "hasServerKey": has_key,
+            })));
         }
         _ => Ok(error_response(404, "not found")),
     }

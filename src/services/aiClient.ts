@@ -1,6 +1,7 @@
 import { backendUrl } from "./backendBase";
 import { Channel } from "@tauri-apps/api/core";
 import { isTauriEnv, tauriInvoke } from "./tauriInvoke";
+import { getAuthHeaders } from "./serverAuth";
 import { lsGet, lsSetJson } from "../utils/localStorageSafe";
 
 export interface AiTestRequest {
@@ -234,6 +235,45 @@ async function readAiStreamResponse(
   return { ok: true, status: response.status, rawText: fullText };
 }
 
+/**
+ * Web（服务器）模式通用模型流式调用：POST `/backend/ai/test`（带认证头），
+ * 服务端在 apiKey 为空时注入服务端 key。供意图分类 / 建议选项 / Code Map 标注等
+ * 需要自定义 messages 的调用复用。桌面环境请走 `testAiModel`。
+ */
+export async function streamChatHttp(params: {
+  endpoint: string;
+  apiKey?: string;
+  model: string;
+  messages: Array<{ role: string; content: string }>;
+  temperature?: number;
+  signal?: AbortSignal;
+  onStreamChunk?: (chunkText: string) => void;
+}): Promise<{ ok: boolean; rawText?: string; error?: string }> {
+  const payload = {
+    endpoint: params.endpoint,
+    apiKey: "",
+    model: params.model,
+    messages: params.messages,
+    stream: true,
+    temperature: params.temperature ?? 0,
+  };
+  try {
+    const response = await fetch(backendUrl("/backend/ai/test"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+      body: JSON.stringify(payload),
+      signal: params.signal,
+    });
+    const streamResult = await readAiStreamResponse(response, params.onStreamChunk);
+    if (!streamResult.ok) {
+      return { ok: false, error: streamResult.error };
+    }
+    return { ok: true, rawText: streamResult.rawText };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "网络错误" };
+  }
+}
+
 export async function testAiModel(request: AiTestRequest): Promise<AiTestResult> {
   // Tauri: only non-streaming case
   if (isTauriEnv() && !request.stream) {
@@ -296,6 +336,7 @@ export async function testAiModel(request: AiTestRequest): Promise<AiTestResult>
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        ...getAuthHeaders(),
       },
       body: JSON.stringify(payload),
     });
@@ -444,6 +485,7 @@ export async function fetchAvailableModels(request: AiModelsRequest): Promise<Ai
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        ...getAuthHeaders(),
       },
       body: JSON.stringify({
         endpoint: modelsEndpoint,
@@ -528,6 +570,7 @@ export async function testTtsModel(request: AiTtsRequest): Promise<AiTtsResult> 
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        ...getAuthHeaders(),
       },
       body: JSON.stringify({
         endpoint: ttsEndpoint,

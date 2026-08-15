@@ -5,6 +5,8 @@
  * SSE client against the agent-server binary. See src-tauri/src/bin/agent_server.rs.
  */
 
+import { getAuthHeaders } from "./serverAuth";
+
 export interface WebAgentSseEvent {
   type: string;
   data: Record<string, unknown>;
@@ -21,12 +23,15 @@ export async function runAgentServerSse(
 ): Promise<void> {
   const resp = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
     body: JSON.stringify(body),
     signal,
   });
   if (!resp.ok) {
     const text = await resp.text();
+    if (resp.status === 401) {
+      throw new Error("未登录或会话已过期，请先在「AI 配置」页登录服务器");
+    }
     throw new Error(`HTTP ${resp.status}: ${text}`);
   }
   if (!resp.body) {

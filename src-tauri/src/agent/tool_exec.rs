@@ -905,7 +905,7 @@ async fn exec_search_sessions(ctx: &ToolExecContext<'_>, args: &Value) -> (bool,
 
 #[cfg(test)]
 mod tests {
-    use super::{block_write, exec_list_dir, is_dangerous_command};
+    use super::{block_write, exec_list_dir, is_dangerous_command, server_mode_command_blocked};
     use super::{check_patch_old_string_from_reads, ToolGuardState};
     use serde_json::json;
 

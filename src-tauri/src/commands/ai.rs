@@ -120,15 +120,28 @@ fn resolve_speech_endpoint(endpoint: &str) -> String {
     format!("{}/audio/speech", input.trim_end_matches('/'))
 }
 
-#[tauri::command]
-pub async fn ai_tts(endpoint: String, api_key: Option<String>, body: Value) -> Value {
+/// TTS 请求结果：`audio` 为原始音频字节（非 base64），供 HTTP 服务端直接返回二进制。
+pub struct TtsAudioResult {
+    pub ok: bool,
+    pub mime: Option<String>,
+    pub audio: Option<Vec<u8>>,
+    pub error: Option<String>,
+}
+
+/// 非流式 TTS 底层实现（桌面 `ai_tts` 与 HTTP `/backend/ai/tts` 共用）。
+pub async fn ai_tts_impl(endpoint: &str, api_key: Option<&str>, body: &Value) -> TtsAudioResult {
     let model = body.get("model").and_then(|v| v.as_str()).unwrap_or("");
     let input = body.get("input").and_then(|v| v.as_str()).unwrap_or("");
     let voice = body.get("voice").and_then(|v| v.as_str()).unwrap_or("");
     let format = body.get("format").and_then(|v| v.as_str());
 
     if model.is_empty() || input.is_empty() || voice.is_empty() {
-        return json!({ "ok": false, "error": "请求参数不完整" });
+        return TtsAudioResult {
+            ok: false,
+            mime: None,
+            audio: None,
+            error: Some("请求参数不完整".into()),
+        };
     }
 
     let use_mimo_tts = model.to_lowercase().contains("tts")
@@ -139,11 +152,18 @@ pub async fn ai_tts(endpoint: String, api_key: Option<String>, body: Value) -> V
         .build()
     {
         Ok(c) => c,
-        Err(e) => return json!({ "ok": false, "error": format!("创建 HTTP 客户端失败: {e}") }),
+        Err(e) => {
+            return TtsAudioResult {
+                ok: false,
+                mime: None,
+                audio: None,
+                error: Some(format!("创建 HTTP 客户端失败: {e}")),
+            }
+        }
     };
 
     if use_mimo_tts {
-        let chat_endpoint = ai::resolve_chat_endpoint(&endpoint);
+        let chat_endpoint = ai::resolve_chat_endpoint(endpoint);
         let mut req = client.post(&chat_endpoint).json(&json!({
           "model": model,
           "messages": [
@@ -160,28 +180,62 @@ pub async fn ai_tts(endpoint: String, api_key: Option<String>, body: Value) -> V
         }
         let resp = match req.send().await {
             Ok(r) => r,
-            Err(e) => return json!({ "ok": false, "error": format!("TTS 请求失败: {e}") }),
+            Err(e) => {
+                return TtsAudioResult {
+                    ok: false,
+                    mime: None,
+                    audio: None,
+                    error: Some(format!("TTS 请求失败: {e}")),
+                }
+            }
         };
         let status = resp.status();
         let text = match resp.text().await {
             Ok(t) => t,
-            Err(e) => return json!({ "ok": false, "error": format!("读取响应失败: {e}") }),
+            Err(e) => {
+                return TtsAudioResult {
+                    ok: false,
+                    mime: None,
+                    audio: None,
+                    error: Some(format!("读取响应失败: {e}")),
+                }
+            }
         };
         if !status.is_success() {
-            return json!({ "ok": false, "error": format!("HTTP {status}: {text}") });
+            return TtsAudioResult {
+                ok: false,
+                mime: None,
+                audio: None,
+                error: Some(format!("HTTP {status}: {text}")),
+            };
         }
         if let Ok(parsed) = serde_json::from_str::<Value>(&text) {
             if let Some(audio_data) = parsed["choices"][0]["message"]["audio"]["data"].as_str() {
                 if !audio_data.is_empty() {
                     let mime = tts_format_to_mime(format);
-                    return json!({ "ok": true, "mime": mime, "data": audio_data });
+                    let bytes = base64::Engine::decode(
+                        &base64::engine::general_purpose::STANDARD,
+                        audio_data,
+                    )
+                    .unwrap_or_default();
+                    return TtsAudioResult {
+                        ok: true,
+                        mime: Some(mime.to_string()),
+                        audio: Some(bytes),
+                        error: None,
+                    };
                 }
             }
         }
-        return json!({ "ok": false, "error": "TTS 响应中未找到音频数据" });
+        return TtsAudioResult {
+            ok: false,
+            mime: None,
+            audio: None,
+            error: Some("TTS 响应中未找到音频数据".into()),
+        };
     }
 
-    let speech_endpoint = resolve_speech_endpoint(&endpoint);
+    let speech_endpoint = resolve_speech_endpoint(endpoint);
     let mut req = client.post(&speech_endpoint).json(&json!({
       "model": model,
       "input": input,
@@ -202,11 +256,40 @@ pub async fn ai_tts(endpoint: String, api_key: Option<String>, body: Value) -> V
                 .to_string();
             let bytes = match resp.bytes().await {
                 Ok(b) => b,
-                Err(e) => return json!({ "ok": false, "error": format!("读取音频数据失败: {e}") }),
+                Err(e) => {
+                    return TtsAudioResult {
+                        ok: false,
+                        mime: None,
+                        audio: None,
+                        error: Some(format!("读取音频数据失败: {e}")),
+                    }
+                }
             };
-            let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
-            json!({ "ok": status.is_success(), "mime": mime, "data": b64, "status": status.as_u16() })
+            TtsAudioResult {
+                ok: status.is_success(),
+                mime: Some(mime),
+                audio: Some(bytes.to_vec()),
+                error: None,
+            }
         }
-        Err(e) => json!({ "ok": false, "error": format!("TTS 请求失败: {e}") }),
+        Err(e) => TtsAudioResult {
+            ok: false,
+            mime: None,
+            audio: None,
+            error: Some(format!("TTS 请求失败: {e}")),
+        },
+    }
+}
+
+#[tauri::command]
+pub async fn ai_tts(endpoint: String, api_key: Option<String>, body: Value) -> Value {
+    let result = ai_tts_impl(&endpoint, api_key.as_deref(), &body).await;
+    match (result.ok, result.audio) {
+        (true, Some(bytes)) => {
+            let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+            json!({ "ok": true, "mime": result.mime.unwrap_or_else(|| "audio/mpeg".into()), "data": b64 })
+        }
+        (true, None) => json!({ "ok": false, "error": "TTS 响应为空" }),
+        (false, _) => json!({ "ok": false, "error": result.error.unwrap_or_else(|| "TTS 请求失败".into()) }),
     }
 }
