@@ -1012,6 +1012,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
 
   /** 在文件树滚动容器内定位到节点（文件树当前仅在 files 面板渲染） */
   function scrollTreeNodeIntoView(filePath: string) {
+    if (typeof document === "undefined") return;
     const container = document.querySelector(".file-tree") as HTMLElement | null;
     if (!container) return;
     const items = container.querySelectorAll(".file-item");
