@@ -49,11 +49,13 @@ const props = withDefaults(
     stageLabel?: string;
     waitingModel?: boolean;
     shimmer?: boolean;
+    progress?: boolean;
     variant?: "rail" | "banner";
   }>(),
   {
     waitingModel: false,
     shimmer: false,
+    progress: false,
     variant: "rail",
     stageLabel: "",
   },
@@ -61,7 +63,9 @@ const props = withDefaults(
 
 const parts = computed(() => splitAgentLiveStatusLine(props.statusLine));
 
-const showProgress = computed(() => props.waitingModel && props.variant === "rail");
+const showProgress = computed(
+  () => props.variant === "rail" && (props.waitingModel || props.progress),
+);
 </script>
 
 <style scoped>

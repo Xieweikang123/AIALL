@@ -80,7 +80,7 @@ export function createInitialLiveState(phase = "preparing"): AgentRunLiveState {
   return { phase };
 }
 
-const MODEL_WAIT_PHASES = new Set(["waiting_model", "sending_request", "retrying_model", "classifying_intent"]);
+const MODEL_WAIT_PHASES = new Set(["waiting_model", "sending_request", "retrying_model", "classifying_intent", "compacting_context"]);
 const WAIT_CLEAR_PHASES = new Set(["streaming_model", "planning_tools", "executing_tool"]);
 
 export function patchLiveFromStatusEvent(

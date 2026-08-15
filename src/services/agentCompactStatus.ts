@@ -257,9 +257,17 @@ export function buildCursorCompactLiveStatus(input: AgentCompactStatusInput): st
     live.phase === "waiting_model" ||
     live.phase === "sending_request" ||
     live.phase === "retrying_model";
-  if (live.phase === "compacting_context") parts.push("整理上下文…");
-  else if (live.phase === "summarizing_tools") parts.push("整理工具结果…");
-  else if (live.phase === "executing_tool" || live.phase === "executing_tools") return null;
+  if (live.phase === "compacting_context") {
+    const sizeParts: string[] = [];
+    if (live.contextMessages) sizeParts.push(`${live.contextMessages} 条消息`);
+    if (live.contextChars) sizeParts.push(formatCharCount(live.contextChars));
+    const size = sizeParts.length ? `（${sizeParts.join("，")}）` : "";
+    parts.push(`整理上下文${size}…`);
+    const elapsed = resolveModelWaitElapsedSeconds(live);
+    if (elapsed !== null && elapsed >= 1) parts.push(`已等待 ${elapsed}s`);
+  } else if (live.phase === "summarizing_tools") {
+    parts.push("整理工具结果…");
+  } else if (live.phase === "executing_tool" || live.phase === "executing_tools") return null;
   else if (waitingModel) parts.push("等待模型响应…");
   else parts.push("整合信息中…");
 

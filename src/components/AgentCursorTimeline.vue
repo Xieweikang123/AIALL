@@ -28,7 +28,8 @@
       v-if="liveRailVisible"
       :status-line="liveRailPrimary"
       :waiting-model="isWaitingModel"
-      :shimmer="isWaitingModel || !hasAnswerContent"
+      :progress="isWaitingModel || isPhaseProgressing"
+      :shimmer="isWaitingModel || isPhaseProgressing || !hasAnswerContent"
     />
   </div>
 </template>
@@ -145,6 +146,10 @@ const isWaitingModel = computed(() =>
     statusLine: liveRailPrimary.value,
     hasRunningTool: props.hasRunningTool,
   }),
+);
+
+const isPhaseProgressing = computed(() =>
+  props.agentPhase === "compacting_context" || props.agentPhase === "summarizing_tools",
 );
 
 const liveRailVisible = computed(() => {
