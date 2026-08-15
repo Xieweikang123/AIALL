@@ -103,6 +103,13 @@ export type PersistedChatMessage = {
     action?: "send" | "implement" | "execute_plan";
     text?: string;
   }>;
+  /** AI 提取的可点击选项按钮（用户点击后自动回复，无需打字）。 */
+  suggestedOptions?: Array<{
+    index: number;
+    label: string;
+    fullText: string;
+    showIndex?: boolean;
+  }>;
   /** Quote metadata for user messages that were sent with a quoted reply. */
   quotedRole?: "user" | "assistant";
   quotedText?: string;

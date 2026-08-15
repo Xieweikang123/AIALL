@@ -22,6 +22,8 @@ const props = withDefaults(
     streaming?: boolean;
     /** Enable interactive option detection for assistant messages. */
     interactive?: boolean;
+    /** AI 提取的可点击选项（优先于此，缺失时回退正则解析）。 */
+    suggestedOptions?: AiOption[] | null;
   }>(),
   { streaming: false, interactive: false },
 );
@@ -314,6 +316,9 @@ const activeSource = computed(() =>
 
 const parsedOptions = computed(() => {
   if (!props.interactive) return null;
+  if (props.suggestedOptions?.length) {
+    return { before: "", options: props.suggestedOptions, after: "" };
+  }
   const parsed = parseAiOptions(activeSource.value);
   if (!parsed?.options.length) return null;
   return parsed;

@@ -1,5 +1,6 @@
 import { ref, onBeforeUnmount, getCurrentInstance, type ComputedRef, type Ref } from "vue";
 import { debugLog } from "../utils/debugLog";
+import { extractSuggestedOptions } from "../services/agentSuggestedOptions";
 import {
   buildAgentPromptForProfile,
   enrichAgentUserPrompt,
@@ -297,6 +298,43 @@ export function useAgentRun(deps: UseAgentRunDeps) {
   function maybePersistChat(sessionId: string, options?: { flushStore?: boolean }) {
     if (isRunVisible(sessionId)) persistChatNow(undefined, options);
     else persistAgentRunSession(sessionId);
+  }
+
+  const requestedOptionMsgIds = new Set<string>();
+
+  /** 运行收尾后后台请求 AI 提取可点击选项，幂等、不阻塞。 */
+  function requestSuggestedOptions(assistantMsg: VibeChatMessage, sessionId: string) {
+    if (assistantMsg.role !== "assistant" || assistantMsg.agentFailed) return;
+    if (assistantMsg.suggestedOptions || requestedOptionMsgIds.has(assistantMsg.id)) return;
+    const content = assistantMsg.content?.trim();
+    if (!content) return;
+    requestedOptionMsgIds.add(assistantMsg.id);
+    void runSuggestedOptionsExtraction(assistantMsg, sessionId, content);
+  }
+
+  async function runSuggestedOptionsExtraction(
+    assistantMsg: VibeChatMessage,
+    sessionId: string,
+    content: string,
+  ) {
+    try {
+      const cfg = resolveSessionAiConfig?.(sessionId) ?? aiConfig.value;
+      const endpoint = cfg?.endpoint || aiConfig.value.endpoint;
+      const apiKey = cfg?.apiKey || aiConfig.value.apiKey;
+      const model = cfg?.model || aiConfig.value.model;
+      if (!endpoint || !model) return;
+      const options = await extractSuggestedOptions({
+        endpoint,
+        apiKey,
+        model,
+        assistantText: content,
+      });
+      if (options === null) return;
+      patchAssistantMsg(assistantMsg.id, { suggestedOptions: options }, sessionId);
+      maybePersistChat(sessionId);
+    } catch (error) {
+      debugLog("[suggested-options] extract failed:", error);
+    }
   }
 
   /** Agent 运行中：debounce 磁盘写入，后台 session 仍走 snapshot。 */
@@ -658,6 +696,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     resolveOriginalUserPrompt,
     maybePersistPlanFileToDisk,
     onAgentRunSettled,
+    requestSuggestedOptions,
     onMemoryProposal,
     onSkillProposal,
     storeFileDiff,

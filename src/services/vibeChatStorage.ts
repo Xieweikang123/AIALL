@@ -622,6 +622,9 @@ function sanitizeMessages(
         activityExpanded: m.activityExpanded || undefined,
         activityDetailed: m.activityDetailed || undefined,
         agentSuggestions: m.agentSuggestions?.length ? [...m.agentSuggestions] : undefined,
+        suggestedOptions: m.suggestedOptions?.length
+          ? m.suggestedOptions.map((o) => ({ ...o }))
+          : undefined,
         streamChars: m.streamChars || undefined,
         contextChars: m.contextChars || undefined,
         ...(options?.forDisk && m.role === "assistant"

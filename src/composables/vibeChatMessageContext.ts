@@ -35,8 +35,17 @@ export interface VibeChatMessageItem {
     aiModel?: string;
     elapsedMs?: number;
     aiPrimary?: string;
+    aiFailed?: boolean;
+    aiError?: string;
+    aiStage?: string;
   };
   agentContext?: import("../services/vibeChatStorage").PersistedAgentContext;
+  suggestedOptions?: Array<{
+    index: number;
+    label: string;
+    fullText: string;
+    showIndex?: boolean;
+  }>;
 }
 
 export interface VibeChatMessageContext {

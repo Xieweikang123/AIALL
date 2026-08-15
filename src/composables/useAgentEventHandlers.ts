@@ -106,6 +106,8 @@ export interface UseAgentEventHandlersDeps {
     options: { wasExecutePlanRun: boolean; wasAborted: boolean },
   ) => Promise<void>;
   onAgentRunSettled?: (msg: VibeChatMessage) => void;
+  /** 运行收尾后请求 AI 提取可点击选项（后台异步，幂等）。 */
+  requestSuggestedOptions?: (assistantMsg: VibeChatMessage, sessionId: string) => void;
   onMemoryProposal?: (msgId: string, proposal: import("../services/projectMemoryProposal").MemoryProposalPayload) => void;
   onSkillProposal?: (msgId: string, proposal: import("../services/projectSkillProposal").SkillProposalPayload) => void;
   storeFileDiff: (relPath: string, before: string, after: string, deleted?: boolean, created?: boolean) => void;
@@ -198,6 +200,7 @@ export function useAgentEventHandlers(deps: UseAgentEventHandlersDeps) {
     resolveOriginalUserPrompt,
     maybePersistPlanFileToDisk,
     onAgentRunSettled,
+    requestSuggestedOptions,
     onMemoryProposal,
     onSkillProposal,
     storeFileDiff,
@@ -669,6 +672,7 @@ function handleDoneEvent(event: EventOf<"done">, assistantMsg: VibeChatMessage, 
       persistChatNow(undefined, { flushStore: true, sessionId });
       void scrollChatToBottom();
       onAgentRunSettled?.(assistantMsg);
+      requestSuggestedOptions?.(assistantMsg, sessionId);
     }, 0);
     if (pendingPromptQueue.value.length) {
       dequeuePendingPromptAndRun();
@@ -874,6 +878,7 @@ function handleDoneEvent(event: EventOf<"done">, assistantMsg: VibeChatMessage, 
     void scrollChatToBottom();
     void maybePersistPlanFileToDisk(assistantMsg, msgId, { wasExecutePlanRun, wasAborted }).then(() => {
       onAgentRunSettled?.(assistantMsg);
+      requestSuggestedOptions?.(assistantMsg, sessionId);
     }).catch((err: unknown) => {
       debugLog("maybePersistPlanFileToDisk failed:", err);
     });
@@ -1001,6 +1006,7 @@ function handleDoneEvent(event: EventOf<"done">, assistantMsg: VibeChatMessage, 
   void maybePersistPlanFileToDisk(assistantMsg, msgId, { wasExecutePlanRun, wasAborted }).then(() => {
     void scrollChatToBottom();
     onAgentRunSettled?.(assistantMsg);
+    requestSuggestedOptions?.(assistantMsg, sessionId);
     if (pendingPromptQueue.value.length) {
       dequeuePendingPromptAndRun();
     }
