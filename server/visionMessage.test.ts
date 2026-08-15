@@ -12,7 +12,6 @@ import {
   contentCharSize,
   contentDisplayText,
   extractVisibleAnchorQuotes,
-  isAdequateVisionFirstTurnDescription,
   isDeferredLocateReply,
   isPrematureVisionCompletionClaim,
   isRepeatingVisionFirstTurnDescription,
@@ -30,7 +29,6 @@ import {
   suggestsVisibleShellEmptyInner,
   buildVisibleShellEmptyInnerHint,
   sanitizeImageDataUrls,
-  shouldRequireVisionFirstTurn,
   suggestsEmbeddedLayoutMisread,
 } from "../src/orchestration/product/visionMessage";
 
@@ -48,29 +46,23 @@ describe("visionMessage", () => {
   it("buildVisionUserContent builds multimodal parts with default text", () => {
     const content = buildVisionUserContent("", [PNG_DATA_URL]);
     expect(content).toEqual([
-      { type: "text", text: expect.stringContaining("首轮必读图") },
+      { type: "text", text: expect.stringContaining("请描述并分析附带的图片") },
       { type: "image_url", image_url: { url: PNG_DATA_URL } },
     ]);
   });
 
-  it("buildVisionTaskText requires vision-first for layout feedback with images", () => {
+  it("buildVisionTaskText keeps scope prefix for layout feedback with images", () => {
     const text = buildVisionTaskText("是好看了，但是你看挤一块了", 1);
-    expect(text).toContain("首轮必读图");
     expect(text).toContain("附图为本消息重点");
-    expect(text).toContain("禁止调用任何工具");
+    expect(text).not.toContain("首轮必读图");
+    expect(text).not.toContain("本轮禁止调用任何工具");
   });
 
-  it("buildVisionFirstTurnRule is required for any attached image", () => {
+  it("buildVisionTaskText keeps plain task text for non-UI questions with images", () => {
     const text = buildVisionTaskText("这段报错什么意思", 1);
-    expect(text).toContain("首轮必读图");
-    expect(text).toContain("禁止调用任何工具");
-  });
-
-  it("shouldRequireVisionFirstTurn respects vision fallback and locate bypass", () => {
-    expect(shouldRequireVisionFirstTurn(1, false)).toBe(true);
-    expect(shouldRequireVisionFirstTurn(1, true)).toBe(false);
-    expect(shouldRequireVisionFirstTurn(0, false)).toBe(false);
-    expect(shouldRequireVisionFirstTurn(1, false, true)).toBe(false);
+    expect(text).toContain("这段报错什么意思");
+    expect(text).not.toContain("首轮必读图");
+    expect(text).not.toContain("本轮禁止调用任何工具");
   });
 
   it("shouldBypassVisionFirstTurn applies to consultative screenshot locate questions", () => {
@@ -108,35 +100,6 @@ describe("visionMessage", () => {
     expect(text).toContain("同轮读图定位");
     expect(text).toContain("允许 list_dir / read_file / grep");
     expect(text).not.toContain("本轮禁止调用任何工具");
-  });
-
-  it("isAdequateVisionFirstTurnDescription requires [图已理解] and UI region", () => {
-    expect(
-      isAdequateVisionFirstTurnDescription(
-        "截图展示的是 Git 面板右侧部分，包含「AI 一键推送」按钮… [图已理解]",
-      ),
-    ).toBe(true);
-    expect(
-      isAdequateVisionFirstTurnDescription(
-        "占位符「描述要改什么」表明这是 Vibe 助手输入框。[图已理解]",
-      ),
-    ).toBe(true);
-    expect(isAdequateVisionFirstTurnDescription("看到了")).toBe(false);
-    expect(
-      isAdequateVisionFirstTurnDescription(
-        "截图显示深色圆角输入框，占位符为「描述要改什么」",
-      ),
-    ).toBe(false);
-    expect(
-      isAdequateVisionFirstTurnDescription(
-        "已修复 padding。[图已理解]",
-      ),
-    ).toBe(false);
-    expect(
-      isAdequateVisionFirstTurnDescription(
-        "深色圆角按钮，边框灰色。[图已理解]",
-      ),
-    ).toBe(false);
   });
 
   it("isUiLocateQuestionPrompt detects where-is-this UI questions", () => {
@@ -258,11 +221,10 @@ describe("visionMessage", () => {
     expect(hint).toContain("禁止重复首轮");
   });
 
-  it("buildVisionFirstTurnRule requires anchor-based region identification", () => {
+  it("buildVisionTaskText adds click-focus hint for interaction prompts", () => {
     const text = buildVisionTaskText("这个输入框，点哪里能聚焦？", 1);
-    expect(text).toContain("占位符");
-    expect(text).toContain("据此可判断");
-    expect(text).toContain("grep");
+    expect(text).toContain("点击/聚焦交互");
+    expect(text).not.toContain("本轮禁止调用任何工具");
   });
 
   it("buildVisionTaskText uses same-turn locate for which-region UI questions", () => {
@@ -333,11 +295,6 @@ describe("visionMessage", () => {
 
   it("isPrematureVisionCompletionClaim rejects done-state before tools", () => {
     expect(isPrematureVisionCompletionClaim("已做的修改：padding 改为 8px")).toBe(true);
-    expect(
-      isAdequateVisionFirstTurnDescription(
-        "占位符「描述要改什么」表明这是 Vibe 助手输入框。已修复 padding。",
-      ),
-    ).toBe(false);
   });
 
   it("buildModelIdentityHint uses configured model id", () => {
@@ -422,11 +379,6 @@ describe("visionMessage", () => {
     expect(text).toContain("控件内外比例");
     expect(text).toContain("内外比例失衡");
     expect(text).toContain("svg width/height");
-  });
-
-  it("buildVisionFirstTurnRule requires inner/outer proportion for composite controls", () => {
-    const text = buildVisionTaskText("这段报错什么意思", 1);
-    expect(text).toContain("内外比例失衡");
   });
 
   it("mentionsControlProportionImbalance detects proportion language in vision text", () => {

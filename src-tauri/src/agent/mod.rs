@@ -54,7 +54,7 @@ pub use run_types::AgentRunRequest;
 pub use vision::{
     build_click_focus_interaction_hint, build_consultative_ui_appearance_hint,
     build_floating_control_positioning_hint, build_model_identity_hint,
-    build_vision_build_continue_hint, build_vision_first_turn_rule, build_vision_grep_anchor_hint,
+    build_vision_build_continue_hint, build_vision_grep_anchor_hint,
     build_vision_ui_locate_hint, build_vision_user_content, has_ui_image_keywords,
     is_ui_positioning_bug_prompt, mentions_control_proportion_imbalance, sanitize_image_data_urls,
     UI_CLICK_FOCUS_INTERACTION_RE,

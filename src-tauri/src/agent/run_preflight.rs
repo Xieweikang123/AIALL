@@ -69,7 +69,6 @@ pub(crate) struct TurnPreflightParams<'a> {
     pub read_set: &'a HashSet<&'static str>,
     pub segment_max_turns: u32,
     pub turn: u32,
-    pub vision_first_turn_pending: bool,
     pub agent_step_clarify_pending: bool,
     pub ambiguous_term_clarification_pending: bool,
     pub nudge_mode: &'a str,
@@ -266,8 +265,7 @@ pub(crate) fn apply_turn_preflight(
         state.interim_diagnosis_nudge_sent = true;
     }
 
-    let active_tools = if params.vision_first_turn_pending
-        || force_text_output
+    let active_tools = if force_text_output
         || flags.consultative_force_answer_pending
         || params.agent_step_clarify_pending
         || params.ambiguous_term_clarification_pending
@@ -342,7 +340,6 @@ mod tests {
             read_set: &read_set(),
             segment_max_turns: 200,
             turn: 1,
-            vision_first_turn_pending: false,
             agent_step_clarify_pending: false,
             ambiguous_term_clarification_pending: false,
             nudge_mode: "build",
@@ -391,7 +388,6 @@ mod tests {
             read_set: &read_set(),
             segment_max_turns: 10,
             turn: 8, // >= 10 - 3 = 7, triggers low nudge
-            vision_first_turn_pending: false,
             agent_step_clarify_pending: false,
             ambiguous_term_clarification_pending: false,
             nudge_mode: "build",
@@ -438,7 +434,6 @@ mod tests {
             read_set: &read_set(),
             segment_max_turns: 10,
             turn: 8,
-            vision_first_turn_pending: false,
             agent_step_clarify_pending: false,
             ambiguous_term_clarification_pending: false,
             nudge_mode: "build",
@@ -463,7 +458,6 @@ mod tests {
             read_set: &read_set(),
             segment_max_turns: 10,
             turn: 9,
-            vision_first_turn_pending: false,
             agent_step_clarify_pending: false,
             ambiguous_term_clarification_pending: false,
             nudge_mode: "build",
@@ -507,7 +501,6 @@ mod tests {
             read_set: &read_set(),
             segment_max_turns: 10,
             turn: 8, // would trigger low nudge if not read_only
-            vision_first_turn_pending: false,
             agent_step_clarify_pending: false,
             ambiguous_term_clarification_pending: false,
             nudge_mode: "ask",
@@ -561,7 +554,6 @@ mod tests {
             read_set: &read_set(),
             segment_max_turns: 200,
             turn: 1,
-            vision_first_turn_pending: false,
             agent_step_clarify_pending: false,
             ambiguous_term_clarification_pending: false,
             nudge_mode: "build",
@@ -591,7 +583,6 @@ mod tests {
             read_set: &read_set(),
             segment_max_turns: 200,
             turn: 2,
-            vision_first_turn_pending: false,
             agent_step_clarify_pending: false,
             ambiguous_term_clarification_pending: false,
             nudge_mode: "build",
@@ -637,7 +628,6 @@ mod tests {
             read_set: &read_set(),
             segment_max_turns: 200,
             turn: 10,
-            vision_first_turn_pending: false,
             agent_step_clarify_pending: false,
             ambiguous_term_clarification_pending: false,
             nudge_mode: "build",
@@ -656,49 +646,6 @@ mod tests {
         assert!(active.contains(&"write_file"));
         assert!(active.contains(&"read_file"));
         assert!(flags.force_write_only_tools);
-    }
-
-    #[test]
-    fn preflight_vision_first_turn_empties_tools() {
-        let mut messages = Vec::new();
-        let mut state = TurnPreflightState::new();
-        let mut flags = TurnPreflightMut {
-            ui_defect_force_patch_nudge_sent: false,
-            build_explore_force_patch_nudge_sent: false,
-            patch_anchor_force_patch_nudge_sent: false,
-            patch_anchor_force_pending: false,
-            force_write_only_tools: false,
-            consultative_force_answer_pending: false,
-        };
-        let all_tools = json!([make_tool("read_file")]);
-        let mut params = TurnPreflightParams {
-            messages: &mut messages,
-            mode: "build",
-            prompt: "fix it",
-            is_read_only_run: false,
-            is_execute_plan: false,
-            is_plan_explore: false,
-            is_plan_text_only_follow_up: false,
-            run_policy: &default_policy(),
-            total_read_tool_calls: 0,
-            written_files: &[],
-            explore_files_read: &HashSet::new(),
-            tool_guard: &default_tool_guard(),
-            all_tools: &all_tools,
-            read_set: &read_set(),
-            segment_max_turns: 200,
-            turn: 1,
-            vision_first_turn_pending: true, // vision first turn → no tools
-            agent_step_clarify_pending: false,
-            ambiguous_term_clarification_pending: false,
-            nudge_mode: "build",
-        };
-        let outcome = apply_turn_preflight(&mut params, &mut state, &mut flags);
-        assert_eq!(
-            outcome.active_tools.as_array().unwrap().len(),
-            0,
-            "vision first turn should have no tools"
-        );
     }
 
     #[test]
@@ -732,7 +679,6 @@ mod tests {
             read_set: &read_set(),
             segment_max_turns: 200,
             turn: 5,
-            vision_first_turn_pending: false,
             agent_step_clarify_pending: false,
             ambiguous_term_clarification_pending: false,
             nudge_mode: "build",

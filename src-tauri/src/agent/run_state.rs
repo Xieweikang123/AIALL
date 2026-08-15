@@ -52,21 +52,17 @@ pub(crate) struct VisionRunState {
     pub auto_grep_had_matches: bool,
     pub pregrep_unique_files: Vec<String>,
     pub consultative_locate_retries: u32,
-    pub first_turn_pending: bool,
-    pub first_turn_retries: u32,
     pub pregrep_done: bool,
 }
 
 impl VisionRunState {
-    pub fn new(has_image: bool, vision_locate_single_turn_run: bool) -> Self {
+    pub fn new() -> Self {
         Self {
             locate_tools_used: false,
             locate_read_used: false,
             auto_grep_had_matches: false,
             pregrep_unique_files: Vec::new(),
             consultative_locate_retries: 0,
-            first_turn_pending: has_image && !vision_locate_single_turn_run,
-            first_turn_retries: 0,
             pregrep_done: false,
         }
     }

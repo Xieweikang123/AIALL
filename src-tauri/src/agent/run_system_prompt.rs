@@ -174,8 +174,6 @@ pub async fn build_agent_system_prompt(
 }
 
 fn append_vision_system_hints(system_prompt: &mut String, params: &SystemPromptBuildParams<'_>) {
-    system_prompt.push_str(crate::agent::build_vision_first_turn_rule());
-    system_prompt.push('\n');
     system_prompt.push_str(crate::agent::build_vision_grep_anchor_hint());
     system_prompt.push('\n');
     if crate::agent::UI_CLICK_FOCUS_INTERACTION_RE.is_match(&params.request.prompt) {

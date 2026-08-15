@@ -217,12 +217,6 @@ pub async fn run_vision_anchor_pgrep(
     }
 }
 
-pub fn build_vision_first_turn_retry_hint(retry: u32) -> String {
-    format!(
-    "【读图首轮·第 {retry} 次重试】请用中文描述截图中的可见控件、文案与布局，用引号标注可见文字（≥24 字），然后再 grep/read。禁止空回复或仅写「图已理解」。"
-  )
-}
-
 pub struct VisionAnchorPgrepTurnState {
     pub vision_pregrep_done: bool,
     pub vision_locate_tools_used: bool,

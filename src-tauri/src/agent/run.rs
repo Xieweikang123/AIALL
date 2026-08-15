@@ -28,9 +28,7 @@ use super::run_stream::consume_model_sse_stream;
 use super::run_system_prompt::{build_agent_system_prompt, SystemPromptBuildParams};
 use super::run_types::AgentRunRequest;
 use super::vision_consultative::{should_bypass_vision_first_turn, should_run_vision_anchor_pgrep};
-use super::vision_pregrep::{
-    apply_vision_anchor_pgrep_messages, build_vision_first_turn_retry_hint,
-};
+use super::vision_pregrep::apply_vision_anchor_pgrep_messages;
 use super::{context, intent_hints, policy, runtime_hint, tool_exec, tools};
 
 /// Run the desktop Agent without a WebView, forwarding events to `on_event`.
@@ -246,7 +244,7 @@ pub async fn agent_run(
             force_answer_pending: run_policy.locate_status_follow_up_run,
             ..ConsultativeTrackState::default()
         },
-        vision: VisionRunState::new(has_image, vision_locate_single_turn_run),
+        vision: VisionRunState::new(),
         patch: PatchNudgeState::default(),
         retries: RunRetryCounters::default(),
         nudge_flags: RunNudgeFlags {
@@ -490,7 +488,6 @@ pub async fn agent_run(
                 read_set: &read_set,
                 segment_max_turns: run_state.segment.max_turns,
                 turn,
-                vision_first_turn_pending: run_state.vision.first_turn_pending,
                 agent_step_clarify_pending: run_state.nudge_flags.agent_step_clarify_pending,
                 ambiguous_term_clarification_pending: run_state
                     .ambiguous_term_clarification_pending,
@@ -517,7 +514,7 @@ pub async fn agent_run(
             json!({
               "type": "status",
               "data": {
-                "phase": if run_state.vision.first_turn_pending { "vision_first_turn" } else { "waiting_model" },
+                "phase": "waiting_model",
                 "turn": turn,
                 "maxTurns": run_state.segment.max_turns,
                 "model": request.model
@@ -696,64 +693,6 @@ pub async fn agent_run(
                     }),
                 );
                 continue;
-            }
-        }
-
-        if run_state.vision.first_turn_pending {
-            if !tool_calls.is_empty() {
-                run_state.vision.first_turn_pending = false;
-            } else if !crate::agent::vision::is_adequate_vision_first_turn_description(
-                &assistant_text,
-            ) {
-                run_state.vision.first_turn_retries += 1;
-                if run_state.vision.first_turn_retries >= 2 {
-                    run_state.vision.first_turn_pending = false;
-                    run_state.messages.push(json!({
-                      "role": "system",
-                      "content": "首轮读图描述不充分，已跳过多轮读图重试，请直接根据已有信息继续。"
-                    }));
-                } else {
-                    run_state.messages.push(json!({
-            "role": "user",
-            "content": build_vision_first_turn_retry_hint(run_state.vision.first_turn_retries)
-          }));
-                    emit(
-                        &channel,
-                        json!({
-                          "type": "status",
-                          "data": { "phase": "vision_first_turn_retry", "turn": turn, "maxTurns": run_state.segment.max_turns }
-                        }),
-                    );
-                    continue;
-                }
-            } else if !run_state.vision.pregrep_done
-                && !run_state.tool_guard.vision_anchor_quotes.is_empty()
-            {
-                run_state.vision.first_turn_pending = false;
-                let pregrep_state = apply_vision_anchor_pgrep_messages(
-                    &mut run_state.messages,
-                    &request.project_path,
-                    &run_state.tool_guard.vision_anchor_quotes,
-                )
-                .await;
-                run_state.vision.pregrep_done = pregrep_state.vision_pregrep_done;
-                if pregrep_state.vision_locate_tools_used {
-                    run_state.vision.locate_tools_used = true;
-                }
-                if pregrep_state.vision_auto_grep_had_matches {
-                    run_state.vision.auto_grep_had_matches = true;
-                }
-                run_state.vision.pregrep_unique_files = pregrep_state.unique_files;
-                emit(
-                    &channel,
-                    json!({
-                      "type": "status",
-                      "data": { "phase": "vision_anchor_prefgrep", "turn": turn, "maxTurns": run_state.segment.max_turns }
-                    }),
-                );
-                continue;
-            } else {
-                run_state.vision.first_turn_pending = false;
             }
         }
 

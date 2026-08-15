@@ -4,7 +4,6 @@
 use regex::Regex;
 
 // ── Constants ──
-pub const VISION_FIRST_TURN_MIN_DESCRIPTION_CHARS: usize = 24;
 pub const VISION_ANCHOR_PREFGREP_MAX_PATTERNS: usize = 3;
 pub const VISION_ANCHOR_PREFGREP_MAX_MATCHES: usize = 40;
 
@@ -33,22 +32,6 @@ static VISIBLE_ANCHOR_QUOTE_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock
 
 pub static VISION_INTERNAL_MARKER_RE: std::sync::LazyLock<Regex> =
     std::sync::LazyLock::new(|| Regex::new(r"\s*\[图已理解\]\s*").unwrap());
-
-static ANCHOR_TO_REGION_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
-    Regex::new(r"(判断|可判断|可推断|据此|由此|说明|对应|属于|定位为|应是|这是|应该是|像是|表明|可定位)[^。\n]{0,48}(助手|聊天|输入框|面板|模块|区域|底栏|侧栏|编辑器|对话|占位|工具栏|列表)").unwrap()
-});
-
-static UI_REGION_STATEMENT_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
-    Regex::new(r"(这是|这个是|这里|这个区域|这块|这部分|这边|此区域|该区域|对应的是|呈现的是|该面板|该对话框|该弹出层|该窗口|该弹窗|该界面|此处)").unwrap()
-});
-
-static UI_MODULE_STATEMENT_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
-    Regex::new(r"这是[^。\n]{0,48}(助手|聊天|输入|面板|模块|区域|编辑器|底栏|侧栏|工具栏)").unwrap()
-});
-
-static PREMATURE_VISION_COMPLETION_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
-    Regex::new(r"已(?:经)?(?:修复|修改|添加|完成|写入|调整|做)|已做的修改|现在点击输入框任何位置").unwrap()
-});
 
 // ── Helper functions ──
 
@@ -127,66 +110,6 @@ pub fn build_vision_ui_locate_hint() -> &'static str {
 pub fn build_vision_build_continue_hint() -> &'static str {
     "附了截图要求实现/修改某界面：先用 read_file 理解相关组件，\
   确认涉及的文件和布局结构后再修改。"
-}
-
-/// Build vision first turn rule — must view image before tools (parity with TS).
-pub fn build_vision_first_turn_rule() -> &'static str {
-    "【附图·首轮必读图】你必须先仔细查看附带图片，用中文描述所见：\n\
-- 先说明截图对应应用中的哪一块（模块/面板/区域）；画面若只裁到局部，也要根据占位符、按钮、标签等可见文案推断归属；\n\
-- 须引用图中可辨识的占位符或标签原文（用「」括起），并写明「据此可判断这是 …」；\n\
-- 再补充控件类型、布局关系；若用户反馈拥挤/重叠/不好看，须点名哪两个（或哪组）元素及其关系；\n\
-- 若控件含图标、文字或徽章等内嵌内容，须描述外框与内层的相对大小；内外明显不匹配时须点明「内外比例失衡」及哪一层偏大/偏小，勿只罗列元素类型而不作比例判断。\n\
-本轮禁止调用任何工具；仅输出读图描述，下一轮可用 grep 图中摘录的文案定位源码。\n\
-读图首轮禁止写「已修改/已修复/已添加/已做」等完成时态，禁止描述尚未执行的 patch。\n\
-禁止在未 read template 前断言控件语义（如状态圆点、计数含义、占位/未实现）；须 grep/read 后再解释元素作用。\n\
-布局问题后续修改时：若同容器拥挤，查 flex/overflow/gap/min-width 等；若控件与选区/焦点在空间上分离，须同时验证「浮层/绝对定位」与「流式布局」两种假设，勿只认其一。\n\
-点击/聚焦问题另查 DOM 层级与 focus 转发，勿默认只改一层样式。\n\
-当你真正理解了截图内容后，在描述末尾加上暗号 [图已理解]。只有加上此暗号，才表示你已完成读图。"
-}
-
-/// Vision-first turn must not claim code changes before any tool runs.
-pub fn is_premature_vision_completion_claim(text: &str) -> bool {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    PREMATURE_VISION_COMPLETION_RE.is_match(trimmed)
-}
-
-fn has_visible_anchor_quote(text: &str) -> bool {
-    VISIBLE_ANCHOR_QUOTE_RE.is_match(text)
-}
-
-fn describes_screenshot_ui_region(text: &str) -> bool {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    if UI_REGION_STATEMENT_RE.is_match(trimmed) || UI_MODULE_STATEMENT_RE.is_match(trimmed) {
-        return true;
-    }
-    if has_visible_anchor_quote(trimmed) {
-        return ANCHOR_TO_REGION_RE.is_match(trimmed);
-    }
-    false
-}
-
-/// Check if text is an adequate vision first-turn description.
-/// Requires the `[图已理解]` marker, a region statement, and no premature
-/// completion claim — a bare "let me grep" planning text is NOT adequate.
-pub fn is_adequate_vision_first_turn_description(text: &str) -> bool {
-    if is_premature_vision_completion_claim(text) {
-        return false;
-    }
-    let trimmed = text.trim();
-    if !VISION_INTERNAL_MARKER_RE.is_match(trimmed) {
-        return false;
-    }
-    let stripped = VISION_INTERNAL_MARKER_RE.replace_all(trimmed, "");
-    if stripped.trim().len() < VISION_FIRST_TURN_MIN_DESCRIPTION_CHARS {
-        return false;
-    }
-    describes_screenshot_ui_region(trimmed)
 }
 
 /// Build vision task text combining prompt and image count
@@ -547,71 +470,6 @@ mod tests {
     fn test_build_vision_build_continue_hint() {
         let hint = build_vision_build_continue_hint();
         assert!(hint.contains("read_file"));
-    }
-
-    // ── build_vision_first_turn_rule ──
-    #[test]
-    fn test_build_vision_first_turn_rule() {
-        let hint = build_vision_first_turn_rule();
-        assert!(hint.contains("首轮必读图"));
-        assert!(hint.contains("禁止调用任何工具"));
-        assert!(hint.contains("[图已理解]"));
-    }
-
-    // ── is_adequate_vision_first_turn_description ──
-    #[test]
-    fn test_is_adequate_vision_first_turn_description_short() {
-        assert!(!is_adequate_vision_first_turn_description("短"));
-    }
-
-    #[test]
-    fn test_is_adequate_vision_first_turn_description_adequate() {
-        let desc = "这是应用主界面，截图里包含左侧工具栏和右侧编辑区域。[图已理解]";
-        assert!(is_adequate_vision_first_turn_description(desc));
-    }
-
-    #[test]
-    fn test_is_adequate_vision_first_turn_description_strips_marker() {
-        let desc = "[图已理解] 短";
-        assert!(!is_adequate_vision_first_turn_description(desc));
-    }
-
-    #[test]
-    fn test_is_adequate_vision_first_turn_description_exactly_at_threshold() {
-        let desc = format!("{} [图已理解]", "a".repeat(VISION_FIRST_TURN_MIN_DESCRIPTION_CHARS));
-        assert!(!is_adequate_vision_first_turn_description(&desc));
-    }
-
-    #[test]
-    fn test_is_adequate_vision_first_turn_description_one_short() {
-        let desc = format!("{} [图已理解]", "a".repeat(VISION_FIRST_TURN_MIN_DESCRIPTION_CHARS - 1));
-        assert!(!is_adequate_vision_first_turn_description(&desc));
-    }
-
-    #[test]
-    fn test_vision_first_turn_requires_marker() {
-        // Planning text without the marker is NOT an adequate description.
-        let planning = "我先读图：截图是 Git 面板顶部状态栏，包含多个按钮，它们确实挤在一行。接下来用 grep 定位。";
-        assert!(!is_adequate_vision_first_turn_description(planning));
-    }
-
-    #[test]
-    fn test_vision_first_turn_requires_region_statement() {
-        // Marker + length but no screenshot-region statement.
-        let desc = "a".repeat(60) + " [图已理解]";
-        assert!(!is_adequate_vision_first_turn_description(&desc));
-    }
-
-    #[test]
-    fn test_vision_first_turn_requires_no_premature_claim() {
-        let desc = "这是 Git 面板顶部状态栏，按钮挤在一起。[图已理解] 我已修复";
-        assert!(!is_adequate_vision_first_turn_description(desc));
-    }
-
-    #[test]
-    fn test_vision_first_turn_accepts_region_with_marker() {
-        let desc = "截图对应 Git 面板顶部，这是工具栏区域，Fetch/Pull/Push 按钮挤在一行。[图已理解]";
-        assert!(is_adequate_vision_first_turn_description(desc));
     }
 
     // ── build_vision_task_text ──

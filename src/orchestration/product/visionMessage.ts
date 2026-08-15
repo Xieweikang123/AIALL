@@ -53,14 +53,9 @@ export const UI_POSITIONING_BUG_RE =
 /** Color/button topics that should stay within the visible region the user points at. */
 const NARROW_UI_TOPIC_RE = /配色|颜色|按钮|badge|几种|太多|有点多|杂乱|花哨/i;
 
-export const VISION_FIRST_TURN_MIN_DESCRIPTION_CHARS = 24;
-
 /** Visible copy in screenshots (placeholder, label, tab title, button). */
 const VISIBLE_ANCHOR_QUOTE_RE =
   /[「『"']([^」』"']{3,})[」』"']|占位符[^，。；\n]{0,16}[「『"']([^」』"']{3,})[」』"']?|(?:标签|按钮|标题|Tab)[:：]?\s*[「『"']([^」』"']{3,})[」』"']?/g;
-
-const VISIBLE_ANCHOR_QUOTE_TEST_RE =
-  /[「『"']([^」』"']{3,})[」』"']|占位符[^，。；\n]{0,16}[「『"']([^」』"']{3,})[」』"']?|(?:标签|按钮|标题|Tab)[:：]?\s*[「『"']([^」』"']{3,})[」』"']?/;
 
 /** Extract quoted visible strings from a vision-first-turn description. */
 export function extractVisibleAnchorQuotes(text: string): string[] {
@@ -74,16 +69,7 @@ export function extractVisibleAnchorQuotes(text: string): string[] {
   return [...new Set(quotes)];
 }
 
-/** Links quoted / visible text to which UI region or module it belongs to. */
-const ANCHOR_TO_REGION_RE =
-  /(判断|可判断|可推断|据此|由此|说明|对应|属于|定位为|应是|这是|应该是|像是|表明|可定位)[^。\n]{0,48}(助手|聊天|输入框|面板|模块|区域|底栏|侧栏|编辑器|对话|占位|工具栏|列表)/i;
-
-/** Names the screenshot region without necessarily quoting anchor text. */
-const UI_REGION_STATEMENT_RE =
-  /(截图|图中|图里|从图|可见|画面)[^。\n]{0,72}(区域|模块|面板|输入|按钮|编辑器|侧栏|底|顶|助手|聊天|工具栏|列表)/i;
-
-const UI_MODULE_STATEMENT_RE =
-  /这是[^。\n]{0,48}(助手|聊天|输入|面板|模块|区域|编辑器|底栏|侧栏|工具栏)/i;
+/** Build click-to-focus interaction hint */
 
 export function buildClickFocusInteractionHint(): string {
   return [
@@ -163,8 +149,7 @@ export function buildVisionUiLocateHint(anchorQuotes: string[]): string {
 }
 
 export function buildVisionBuildContinueHint(visionDescription: string, userPrompt: string): string {
-  const parts = [buildVisionFirstTurnContinueHint()];
-  parts.push(buildVisionUiLocateHint(extractVisibleAnchorQuotes(visionDescription)));
+  const parts = [buildVisionUiLocateHint(extractVisibleAnchorQuotes(visionDescription))];
   if (mentionsControlProportionImbalance(visionDescription)) {
     parts.push(
       "【读图已指出内外比例问题】下一轮 read_file 须同时覆盖容器样式与内层 SVG/字体尺寸，patch 时两层一起调整，勿只改 width/height 或只改图标其一。",
@@ -184,23 +169,6 @@ export function buildVisionBuildContinueHint(visionDescription: string, userProm
   return parts.join("\n");
 }
 
-export function buildVisionFirstTurnRule(): string {
-  return [
-    "【附图·首轮必读图】你必须先仔细查看附带图片，用中文描述所见：",
-    "- 先说明截图对应应用中的哪一块（模块/面板/区域）；画面若只裁到局部，也要根据占位符、按钮、标签等可见文案推断归属；",
-    "- 须引用图中可辨识的占位符或标签原文（用「」括起），并写明「据此可判断这是 …」；",
-    "- 再补充控件类型、布局关系；若用户反馈拥挤/重叠/不好看，须点名哪两个（或哪组）元素及其关系；",
-    "- 若控件含图标、文字或徽章等内嵌内容，须描述外框与内层的相对大小；内外明显不匹配时须点明「内外比例失衡」及哪一层偏大/偏小，勿只罗列元素类型而不作比例判断。",
-    "本轮禁止调用任何工具；仅输出读图描述，下一轮可用 grep 图中摘录的文案定位源码。",
-    "读图首轮禁止写「已修改/已修复/已添加/已做」等完成时态，禁止描述尚未执行的 patch。",
-    "禁止在未 read template 前断言控件语义（如状态圆点、计数含义、占位/未实现）；须 grep/read 后再解释元素作用。",
-    "布局问题后续修改时：若同容器拥挤，查 flex/overflow/gap/min-width 等；若控件与选区/焦点在空间上分离，须同时验证「浮层/绝对定位」与「流式布局」两种假设，勿只认其一。",
-    "点击/聚焦问题另查 DOM 层级与 focus 转发，勿默认只改一层样式。",
-    "当你真正理解了截图内容后，在描述末尾加上暗号 [图已理解]。只有加上此暗号，才表示你已完成读图。",
-  ].join("\n");
-}
-
-/** Locate-only consultative prompt with screenshot — read image and grep in the same turn. */
 export function buildVisionLocateSingleTurnRule(): string {
   return [
     "【附图·定位题·同轮读图定位】用户问截图中的控件/区域在代码哪里，未要求改代码。",
@@ -308,17 +276,6 @@ export function isUnreconciledEmptyShellAnswer(visionText: string, replyText: st
     return false;
   }
   return /显示.{0,12}(?:数字|数量|条数|N|\d)|徽标|badge|用于显示/i.test(reply);
-}
-
-export function buildVisionFirstTurnContinueHint(): string {
-  return [
-    "【读图完成】已记录你对附图的理解。",
-    "下一轮请结合上述描述与用户需求调用工具；",
-    "若读图时摘录了占位符/按钮/标签等可见文案，优先 grep 该字符串（≥4 字片段）定位源码，再 read_file 核对 DOM 是否与截图一致；不一致则换下一个命中。",
-    "回答用户时先一句点明「截图对应哪块界面」，再讲操作或改代码。",
-    "注意：首轮截图描述已生效，后续轮次禁止重复输出同一张截图的描述；若仅需配合用户追问补充少量布局细节，也不要完整重写。",
-    "若本轮可产出最终回复（如用户仅提问/讨论，无需改代码），应直接回答并结束，不要无工具调用地空转多轮。",
-  ].join("");
 }
 
 /** After vision-first turn for ask / consultative prompts (no code changes requested). */
@@ -597,55 +554,6 @@ export function buildUnreconciledEmptyShellRetryHint(): string {
   ].join("");
 }
 
-export function buildVisionFirstTurnRetryHint(): string {
-  return [
-    "【附图首轮】读图描述不合格：过短，或只描述了外观却没有说明截图对应哪块界面。",
-    "请重新查看附图：引用占位符/标签原文，并写明据此判断属于哪个模块或区域；",
-    "若画面只裁到局部，也要根据可见文案推断，不要只复述颜色与边框；",
-    "复合控件（按钮/徽章等）还须说明外框与内层图标/文字的比例是否失衡。本轮仍不要调用工具。",
-    "真正理解截图后，在末尾加上暗号 [图已理解]。",
-  ].join("");
-}
-
-export function buildVisionFirstTurnPrematureCompletionRetryHint(): string {
-  return [
-    "【附图首轮·禁止抢答】你在尚未调用工具前写了「已修改/已修复/已添加/已做」等完成表述。",
-    "读图首轮只能描述截图所见与控件类型，不得声称已改代码。请重写读图描述，本轮仍不要调用工具。",
-    "真正理解截图后，在末尾加上暗号 [图已理解]。",
-  ].join("");
-}
-
-function hasVisibleAnchorQuote(text: string): boolean {
-  return VISIBLE_ANCHOR_QUOTE_TEST_RE.test(text);
-}
-
-function describesScreenshotUiRegion(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-  if (UI_REGION_STATEMENT_RE.test(trimmed) || UI_MODULE_STATEMENT_RE.test(trimmed)) return true;
-  if (hasVisibleAnchorQuote(trimmed)) {
-    return ANCHOR_TO_REGION_RE.test(trimmed);
-  }
-  return false;
-}
-
-export function isAdequateVisionFirstTurnDescription(text: string): boolean {
-  if (isPrematureVisionCompletionClaim(text)) return false;
-  const trimmed = text.trim();
-  if (!/\[图已理解\]/.test(trimmed)) return false;
-  if (trimmed.replace(/\s*\[图已理解\]\s*/g, "").trim().length < VISION_FIRST_TURN_MIN_DESCRIPTION_CHARS) return false;
-  return describesScreenshotUiRegion(trimmed);
-}
-
-export function shouldRequireVisionFirstTurn(
-  imageCount: number,
-  visionFallbackApplied: boolean,
-  bypassVisionFirstTurn = false,
-): boolean {
-  if (bypassVisionFirstTurn) return false;
-  return imageCount > 0 && !visionFallbackApplied;
-}
-
 /** User is confirming a feeling or asking a short question — not asking to implement yet. */
 const UI_OPINION_FOLLOWUP_RE =
   /有点多|太多了|是不是|对吗|是否|过多|杂乱|花哨|吗[？?]?\s*$|是不是.*多/i;
@@ -708,7 +616,6 @@ export function buildVisionTaskText(text: string, imageCount: number): string {
   if (isUiStatePersistenceQuestionPrompt(body) && !hasUiImplementationIntent(body)) {
     return `${buildVisionStatePersistenceSingleTurnRule()}\n\n${body}`;
   }
-  const firstTurnRule = buildVisionFirstTurnRule();
   const clickFocusHint = UI_CLICK_FOCUS_INTERACTION_RE.test(body)
     ? `\n\n${buildClickFocusInteractionHint()}`
     : "";
@@ -726,7 +633,7 @@ export function buildVisionTaskText(text: string, imageCount: number): string {
     isUiPositioningBugPrompt(body);
   const proportionHint = isUiQuestion ? `\n\n${buildControlInnerProportionHint()}` : "";
   if (!isUiQuestion) {
-    return `${firstTurnRule}${clickFocusHint}${positioningHint}\n\n${body}`;
+    return `${clickFocusHint}${positioningHint}\n\n${body}`;
   }
 
   const implementing = shortImageImplement || hasUiImplementationIntent(body);
@@ -740,7 +647,7 @@ export function buildVisionTaskText(text: string, imageCount: number): string {
     ? "读图描述须先根据占位符/标签说明截图是哪块界面，下一轮再 grep 该文案并在对应源码内修改；修改前先 read_file 父/子 DOM 层级，勿在未读代码前声称已改完。"
     : "读图须说明截图对应哪块界面（可据占位符/标签推断），并覆盖用户所指可见范围；不要跳过读图先去全盘 grep/search。";
   const prefix = `【附图为本消息重点】${scopeRule} ${toolHint} 定位须从截图可见原文或 grep 命中出发，勿猜组件文件名或固定目录。`;
-  return `${firstTurnRule}${clickFocusHint}${positioningHint}${proportionHint}\n\n${prefix}\n\n${body}`;
+  return `${clickFocusHint}${positioningHint}${proportionHint}\n\n${prefix}\n\n${body}`;
 }
 
 /**
