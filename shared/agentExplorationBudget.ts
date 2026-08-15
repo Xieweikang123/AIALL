@@ -110,9 +110,6 @@ export function buildAutomatedBugFixHint(verifyScript?: string, includeLogicRevi
   ].join("\n");
 }
 
-/** Identical read_file slice requests allowed after the first read before hard-blocking. */
-export const MAX_READ_SLICE_REPEATS = 2;
-
 /** Subset of runtime profile used for interaction-debug nudges. */
 export type ExploreRuntimeHintProfile = {
   webDevScript?: string;
