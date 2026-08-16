@@ -6,6 +6,7 @@ import {
   getServerSessionToken,
   installServerAuthFetch,
   isServerLoggedIn,
+  saveServerAiConfig,
   serverLogin,
   serverLogout,
   type ServerSession,
@@ -298,5 +299,37 @@ describe("fetchServerAiConfig", () => {
     const config = await fetchServerAiConfig();
     expect(config.ok).toBe(false);
     expect(config.error).toBeTruthy();
+  });
+});
+
+describe("saveServerAiConfig", () => {
+  it("POST 到 ai-config 并携带 endpoint/apiKey/model/proxy", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await saveServerAiConfig({
+      endpoint: "https://ai.example/v1",
+      apiKey: "sk-new",
+      model: "gpt-4o",
+      webProxyUrl: "http://proxy:8080",
+    });
+    expect(result.ok).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain("/api/server/ai-config");
+    expect((init as RequestInit).method).toBe("POST");
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.endpoint).toBe("https://ai.example/v1");
+    expect(body.apiKey).toBe("sk-new");
+    expect(body.model).toBe("gpt-4o");
+    expect(body.webProxyUrl).toBe("http://proxy:8080");
+  });
+
+  it("服务端拒绝时返回错误", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse({ ok: false, error: "endpoint 不能为空" }, 400)),
+    );
+    const result = await saveServerAiConfig({ endpoint: "", apiKey: "" });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("endpoint 不能为空");
   });
 });

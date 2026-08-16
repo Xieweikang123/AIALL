@@ -8,6 +8,7 @@
 use crate::commands;
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use tauri::ipc::{Channel, InvokeResponseBody};
 
@@ -24,6 +25,40 @@ pub struct ServerAiConfig {
     pub api_key: String,
     pub model: String,
     pub web_proxy_url: Option<String>,
+}
+
+/// 服务端 AI 配置文件路径：`~/.config/aiall/server-config.json`。
+pub fn server_ai_config_path() -> PathBuf {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map(|home| {
+            Path::new(&home)
+                .join(".config")
+                .join("aiall")
+                .join("server-config.json")
+        })
+        .unwrap_or_else(|_| PathBuf::from("server-config.json"))
+}
+
+/// 将服务端 AI 配置写入指定路径（JSON，与 `load_server_ai_config` 的读取格式一致）。
+pub fn save_server_ai_config_to(path: &Path, cfg: &ServerAiConfig) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建配置目录失败: {e}"))?;
+    }
+    let json = json!({
+        "endpoint": cfg.endpoint,
+        "apiKey": cfg.api_key,
+        "model": cfg.model,
+        "webProxyUrl": cfg.web_proxy_url,
+    });
+    let text =
+        serde_json::to_string_pretty(&json).map_err(|e| format!("序列化配置失败: {e}"))?;
+    std::fs::write(path, text).map_err(|e| format!("写入 {path:?} 失败: {e}"))
+}
+
+/// 将服务端 AI 配置写入默认路径 `~/.config/aiall/server-config.json`。
+pub fn save_server_ai_config(cfg: &ServerAiConfig) -> Result<(), String> {
+    save_server_ai_config_to(&server_ai_config_path(), cfg)
 }
 
 fn forbidden(message: &str) -> HttpResponse {
@@ -1009,6 +1044,33 @@ mod tests {
         assert_eq!(body["hasServerKey"], true);
         assert!(body.get("apiKey").is_none());
         assert!(body.get("key").is_none());
+    }
+
+    #[test]
+    fn save_server_ai_config_roundtrip() {
+        let dir = std::env::temp_dir().join(format!(
+            "aiall-srvcfg-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let path = dir.join("server-config.json");
+        let cfg = ServerAiConfig {
+            endpoint: "https://ai.example/v1".into(),
+            api_key: "sk-test".into(),
+            model: "mimo-v2.5-pro".into(),
+            web_proxy_url: Some("http://proxy:8080".into()),
+        };
+        save_server_ai_config_to(&path, &cfg).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let parsed: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(parsed["endpoint"], "https://ai.example/v1");
+        assert_eq!(parsed["apiKey"], "sk-test");
+        assert_eq!(parsed["model"], "mimo-v2.5-pro");
+        assert_eq!(parsed["webProxyUrl"], "http://proxy:8080");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -147,6 +147,7 @@
 | POST `/api/server/login` | body `{password}` 匹配 `AIALL_SERVER_TOKEN` → 返回 `{ok, token, expiresAt, ttlSeconds}`；session 内存存储，12h 过期 |
 | POST `/api/server/logout` | 吊销当前 Bearer session token |
 | GET `/api/server/ai-config` | 返回 `{ok, endpoint, model, webProxyUrl, hasServerKey}`，**不含 key** |
+| POST `/api/server/ai-config` | 受登录保护，body `{endpoint, apiKey, model?, webProxyUrl?}` 写服务端 `server-config.json` 并刷新内存；`apiKey` 留空则保留现有 key；服务端走 `AIALL_SERVER_AI_*` 环境变量时拒绝写入 |
 | 认证 | `AIALL_SERVER_TOKEN` 非空时，`/api/agent/*`、`/backend/*`、`/api/server/*` 全部强制 `Bearer`（静态 token 或 session）；`/healthz` 匿名 |
 | 路径沙箱 | `AIALL_SERVER_ALLOWED_PROJECTS` 非空时，`http_routes::enforce_path_sandbox` 对每个带绝对路径参数（path/projectPath/projectRoot/from/to）的 `/backend/vibe/*` 与 `/api/agent/run` 校验白名单 |
 | 命令白名单 | `AIALL_SERVER_RESTRICT_COMMANDS=1` 启用 `server_mode_command_blocked`（`tool_exec.rs`） |

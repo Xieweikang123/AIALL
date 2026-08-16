@@ -30,14 +30,43 @@
 
       <template v-if="serverLoggedIn">
         <p class="desc">
-          浏览器通过 agent-server 访问；API Key 由服务端持有，不会下发到浏览器。
-          服务端配置：endpoint
-          <code>{{ serverAiEndpoint || "（未配置）" }}</code>，model
-          <code>{{ serverAiModel || "（未配置）" }}</code>
-          <template v-if="serverAiProxy">，网页代理 <code>{{ serverAiProxy }}</code></template>。
-          {{ serverCfgNote }}
+          浏览器通过 agent-server 访问；API Key 由服务端持有，不会下发到浏览器。{{ serverCfgNote }}
         </p>
-        <button type="button" class="secondary" @click="handleServerLogout">退出服务器登录</button>
+        <div class="server-form">
+          <label class="server-field">
+            <span>endpoint</span>
+            <input v-model="serverAiForm.endpoint" type="text" placeholder="https://api.example.com/v1" />
+          </label>
+          <label class="server-field">
+            <span>model</span>
+            <input v-model="serverAiForm.model" type="text" placeholder="mimo-v2.5-pro" />
+          </label>
+          <label class="server-field">
+            <span>API Key</span>
+            <input
+              v-model="serverAiForm.apiKey"
+              type="password"
+              :placeholder="serverHasKey ? '留空则保留现有 Key' : '输入服务端 API Key'"
+            />
+          </label>
+          <label class="server-field">
+            <span>网页代理（可选）</span>
+            <input v-model="serverAiForm.webProxyUrl" type="text" placeholder="http://proxy:8080" />
+          </label>
+          <div class="server-form-actions">
+            <button
+              type="button"
+              class="primary"
+              :disabled="serverSaveBusy"
+              @click="handleServerSaveAiConfig"
+            >
+              保存服务端配置
+            </button>
+            <span v-if="serverSaveError" class="server-login-error">{{ serverSaveError }}</span>
+            <span v-if="serverSaveOk" class="server-save-ok">已保存</span>
+            <button type="button" class="secondary" @click="handleServerLogout">退出服务器登录</button>
+          </div>
+        </div>
       </template>
       <template v-else>
         <div class="server-login-row">
@@ -409,6 +438,7 @@ import {
   serverLogin,
   serverLogout,
   fetchServerAiConfig,
+  saveServerAiConfig,
 } from "../services/serverAuth";
 import InputPrompt from "../components/InputPrompt.vue";
 import { useInputPrompt } from "../composables/useInputPrompt";
@@ -452,20 +482,27 @@ const serverLoggedIn = ref(isServerLoggedIn());
 const serverLoginPassword = ref("");
 const serverLoginError = ref("");
 const serverAuthBusy = ref(false);
-const serverAiEndpoint = ref("");
-const serverAiModel = ref("");
-const serverAiProxy = ref("");
+const serverAiForm = reactive({
+  endpoint: "",
+  model: "",
+  apiKey: "",
+  webProxyUrl: "",
+});
 const serverHasKey = ref(false);
 const serverCfgNote = ref("");
+const serverSaveBusy = ref(false);
+const serverSaveError = ref("");
+const serverSaveOk = ref(false);
 
 async function refreshServerLoginState() {
   serverLoggedIn.value = isServerLoggedIn();
   if (serverLoggedIn.value) {
     const cfg = await fetchServerAiConfig();
     if (cfg.ok) {
-      serverAiEndpoint.value = cfg.endpoint;
-      serverAiModel.value = cfg.model;
-      serverAiProxy.value = cfg.webProxyUrl;
+      serverAiForm.endpoint = cfg.endpoint;
+      serverAiForm.model = cfg.model;
+      serverAiForm.webProxyUrl = cfg.webProxyUrl;
+      serverAiForm.apiKey = "";
       serverHasKey.value = cfg.hasServerKey;
       serverCfgNote.value = serverHasKey.value
         ? "服务端已配置 API Key，浏览器无需填写。"
@@ -474,11 +511,33 @@ async function refreshServerLoginState() {
       serverCfgNote.value = cfg.error || "无法获取服务端 AI 配置";
     }
   } else {
-    serverAiEndpoint.value = "";
-    serverAiModel.value = "";
-    serverAiProxy.value = "";
+    serverAiForm.endpoint = "";
+    serverAiForm.model = "";
+    serverAiForm.apiKey = "";
+    serverAiForm.webProxyUrl = "";
     serverHasKey.value = false;
     serverCfgNote.value = "";
+  }
+}
+
+async function handleServerSaveAiConfig() {
+  if (serverSaveBusy.value) return;
+  serverSaveBusy.value = true;
+  serverSaveError.value = "";
+  serverSaveOk.value = false;
+  const result = await saveServerAiConfig({
+    endpoint: serverAiForm.endpoint.trim(),
+    apiKey: serverAiForm.apiKey.trim(),
+    model: serverAiForm.model.trim(),
+    webProxyUrl: serverAiForm.webProxyUrl.trim(),
+  });
+  serverSaveBusy.value = false;
+  if (result.ok) {
+    serverAiForm.apiKey = "";
+    serverSaveOk.value = true;
+    await refreshServerLoginState();
+  } else {
+    serverSaveError.value = result.error || "保存失败";
   }
 }
 
@@ -1338,6 +1397,36 @@ onBeforeUnmount(() => {
 }
 .server-login-error {
   color: #dc2626;
+  font-size: 12px;
+}
+.server-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+.server-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted, rgba(17, 24, 39, 0.7));
+}
+.server-field input {
+  padding: 6px 8px;
+  border: 1px solid rgba(17, 24, 39, 0.15);
+  border-radius: 6px;
+  font-size: 13px;
+  background: #fff;
+}
+.server-form-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.server-save-ok {
+  color: #15803d;
   font-size: 12px;
 }
 :global(html),

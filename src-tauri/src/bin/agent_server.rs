@@ -8,6 +8,7 @@
 //!   POST /api/server/login       → exchange AIALL_SERVER_TOKEN for a session token
 //!   POST /api/server/logout      → revoke session token
 //!   GET  /api/server/ai-config   → server AI config (endpoint/model/proxy, NO key)
+//!   POST /api/server/ai-config   → update server AI config (writes server-config.json)
 //!   POST /api/agent/run          → SSE stream of VibeAgentEvent JSON
 //!   POST /api/agent/cancel       → cancel the in-flight run
 //!   /backend/vibe/*, /backend/web/*, /backend/ai/*, /backend/automation/* → HTTP fallback routes
@@ -22,7 +23,8 @@
 
 use app_lib::agent::{agent_run_headless, AgentRunRequest};
 use app_lib::http_routes::{
-    handle_backend_vibe, handle_other_route, project_allowed, HttpResponse, ServerAiConfig,
+    handle_backend_vibe, handle_other_route, project_allowed, save_server_ai_config,
+    server_ai_config_path, HttpResponse, ServerAiConfig,
 };
 use rand::RngCore;
 use serde_json::{json, Value};
@@ -32,6 +34,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{tcp::OwnedWriteHalf, TcpListener, TcpStream};
+use tokio::sync::RwLock;
 
 #[derive(Default)]
 struct RunCancelState {
@@ -74,7 +77,7 @@ impl SessionStore {
 struct ServerConfig {
     token: Option<String>,
     allowed_projects: Vec<String>,
-    ai: Option<ServerAiConfig>,
+    ai: Arc<RwLock<Option<ServerAiConfig>>>,
 }
 
 struct HttpRequest {
@@ -151,12 +154,8 @@ fn load_server_ai_config() -> Option<ServerAiConfig> {
             web_proxy_url: read_env("AIALL_SERVER_AI_PROXY"),
         });
     }
-    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).ok()?;
-    let cfg_path = std::path::Path::new(&home)
-        .join(".config")
-        .join("aiall")
-        .join("server-config.json");
-    let text = std::fs::read_to_string(cfg_path).ok()?;
+    let cfg_path = server_ai_config_path();
+    let text = std::fs::read_to_string(&cfg_path).ok()?;
     let parsed: Value = serde_json::from_str(&text).ok()?;
     let endpoint = parsed.get("endpoint").and_then(|v| v.as_str()).unwrap_or("");
     let api_key = parsed.get("apiKey").and_then(|v| v.as_str()).unwrap_or("");
@@ -285,7 +284,8 @@ async fn handle_agent_run(
     let mut request: AgentRunRequest = serde_json::from_slice(&body)
         .map_err(|e| format!("JSON 解析失败: {e}"))?;
     // 服务端模式：浏览器不传明文 key / endpoint / model 时，用服务端配置补齐。
-    if let Some(ai) = &config.ai {
+    let ai = config.ai.read().await.clone();
+    if let Some(ai) = ai.as_ref() {
         request.apply_server_ai(
             &ai.endpoint,
             Some(&ai.api_key),
@@ -429,6 +429,107 @@ async fn handle_logout(
     w.write_all(b"logged out").await.map_err(|e| e.to_string())
 }
 
+async fn write_server_json_error(
+    w: &mut OwnedWriteHalf,
+    status: u16,
+    message: &str,
+) -> Result<(), String> {
+    let status_line = match status {
+        400 => "400 Bad Request",
+        401 => "401 Unauthorized",
+        403 => "403 Forbidden",
+        409 => "409 Conflict",
+        _ => "500 Internal Server Error",
+    };
+    let payload = serde_json::to_string(&json!({ "ok": false, "error": message }))
+        .unwrap_or_else(|_| "{}".into());
+    write_headers(w, status_line, "application/json", &[]).await?;
+    w.write_all(payload.as_bytes()).await.map_err(|e| e.to_string())
+}
+
+/// 更新服务端 AI 配置：写入 `~/.config/aiall/server-config.json` 并刷新内存。
+/// body: `{ endpoint, apiKey, model?, webProxyUrl? }`
+/// - `endpoint` 必填；`apiKey` 留空则保留现有 key（服务端从未配置过则报错）。
+/// - 若服务端通过环境变量 `AIALL_SERVER_AI_*` 配置，则拒绝写入（env 优先）。
+async fn handle_update_server_ai_config(
+    w: &mut OwnedWriteHalf,
+    body: Vec<u8>,
+    config: &ServerConfig,
+) -> Result<(), String> {
+    let parsed: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(_) => Value::Null,
+    };
+    let endpoint = parsed
+        .get("endpoint")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if endpoint.is_empty() {
+        return write_server_json_error(w, 400, "endpoint 不能为空").await;
+    }
+    if read_env("AIALL_SERVER_AI_ENDPOINT").is_some() || read_env("AIALL_SERVER_AI_KEY").is_some() {
+        return write_server_json_error(
+            w,
+            409,
+            "服务端通过环境变量 AIALL_SERVER_AI_* 配置，请直接修改环境变量",
+        )
+        .await;
+    }
+    let api_key = parsed
+        .get("apiKey")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let model = parsed
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let web_proxy_url = parsed
+        .get("webProxyUrl")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let existing = config.ai.read().await.clone();
+    let existing_key = existing
+        .as_ref()
+        .map(|c| c.api_key.clone())
+        .unwrap_or_default();
+    let effective_key = if api_key.is_empty() {
+        if existing_key.is_empty() {
+            return write_server_json_error(
+                w,
+                400,
+                "apiKey 不能为空（服务端尚未配置过 key，无法保留）",
+            )
+            .await;
+        }
+        existing_key
+    } else {
+        api_key
+    };
+
+    let new_cfg = ServerAiConfig {
+        endpoint,
+        api_key: effective_key,
+        model,
+        web_proxy_url,
+    };
+    if let Err(e) = save_server_ai_config(&new_cfg) {
+        return write_server_json_error(w, 500, &e).await;
+    }
+    *config.ai.write().await = Some(new_cfg);
+    let payload = serde_json::to_string(&json!({ "ok": true }))
+        .unwrap_or_else(|_| "{}".into());
+    write_headers(w, "200 OK", "application/json", &[]).await?;
+    w.write_all(payload.as_bytes()).await.map_err(|e| e.to_string())
+}
+
 async fn handle_connection(
     stream: TcpStream,
     config: &ServerConfig,
@@ -446,6 +547,12 @@ async fn handle_connection(
     }
     if request.path == "/api/server/logout" && request.method == "POST" {
         return handle_logout(&mut write_half, &request.headers, &sessions).await;
+    }
+    if request.path == "/api/server/ai-config" && request.method == "POST" {
+        if !authorized(&request.headers, config, &sessions) {
+            return write_unauthorized(&mut write_half).await;
+        }
+        return handle_update_server_ai_config(&mut write_half, request.body, config).await;
     }
     if request.path == "/api/agent/cancel" && request.method == "POST" {
         if !authorized(&request.headers, config, &sessions) {
@@ -472,6 +579,8 @@ async fn handle_connection(
             Some((p, qs)) => (p.to_string(), qs.to_string()),
             None => (request.path.clone(), String::new()),
         };
+        let ai = config.ai.read().await.clone();
+        let ai_ref = ai.as_ref();
         let resp: HttpResponse = if path.starts_with("/backend/vibe/") {
             match handle_backend_vibe(
                 &request.method,
@@ -479,7 +588,7 @@ async fn handle_connection(
                 &query,
                 &request.body,
                 &config.allowed_projects,
-                config.ai.as_ref(),
+                ai_ref,
             )
             .await
             {
@@ -497,7 +606,7 @@ async fn handle_connection(
                 &query,
                 &request.body,
                 &config.allowed_projects,
-                config.ai.as_ref(),
+                ai_ref,
             )
             .await
             {
@@ -554,7 +663,7 @@ async fn main() {
                 .collect()
         })
         .unwrap_or_default();
-    let ai = load_server_ai_config();
+    let ai = Arc::new(RwLock::new(load_server_ai_config()));
     let config = ServerConfig {
         token,
         allowed_projects,
@@ -582,7 +691,8 @@ async fn main() {
     if config.token.is_some() {
         println!("[agent-server] token auth: enabled (POST /api/server/login)");
     }
-    if config.ai.is_some() {
+    let ai_loaded = config.ai.try_read().map(|g| g.is_some()).unwrap_or(false);
+    if ai_loaded {
         println!("[agent-server] server AI config: loaded (endpoint/model from server)");
     }
 

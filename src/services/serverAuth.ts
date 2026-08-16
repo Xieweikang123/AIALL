@@ -224,3 +224,42 @@ export async function fetchServerAiConfig(): Promise<ServerAiConfigInfo> {
     };
   }
 }
+
+/** 保存服务端 AI 配置（写服务端 `server-config.json`）。apiKey 留空表示保留现有 key。 */
+export async function saveServerAiConfig(input: {
+  endpoint: string;
+  apiKey: string;
+  model?: string;
+  webProxyUrl?: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const { response, unauthorized } = await authFetch(backendUrl("/api/server/ai-config"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        endpoint: input.endpoint,
+        apiKey: input.apiKey,
+        model: input.model || "",
+        webProxyUrl: input.webProxyUrl || "",
+      }),
+    });
+    const text = await response.text();
+    let parsed: { ok?: boolean; error?: string };
+    try {
+      parsed = JSON.parse(text) as typeof parsed;
+    } catch {
+      parsed = {};
+    }
+    if (!response.ok || parsed.ok === false) {
+      return {
+        ok: false,
+        error: unauthorized
+          ? "未登录或会话已过期"
+          : parsed.error || `保存服务端 AI 配置失败，HTTP ${response.status}`,
+      };
+    }
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "网络错误" };
+  }
+}

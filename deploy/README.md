@@ -95,6 +95,6 @@ sudo nginx -t && sudo systemctl reload nginx
 
 - `AIALL_SERVER_TOKEN` 是唯一认证凭证，务必设强随机值并保管好（不提交仓库）。
 - `AIALL_SERVER_ALLOWED_PROJECTS` 只放允许 agent 操作的项目目录。
-- key（`AIALL_SERVER_AI_KEY` / `server-config.json`）只存在于服务器，浏览器不下发。
+- key（`AIALL_SERVER_AI_KEY` / `server-config.json`）只存在于服务器，浏览器不下发；登录后可在 AI 配置页（web）通过 POST `/api/server/ai-config` 写入 `server-config.json`（env 优先，env 配置时界面写入会被拒）。
 - 内存 880M：不要同时开多个 Agent 长任务；必要时调低 Agent `maxTurns`。
 - 数据库/其它服务端口（5432 / 10086 / docker）未被本部署占用。

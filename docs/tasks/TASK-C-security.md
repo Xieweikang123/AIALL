@@ -48,7 +48,7 @@
 
 要求：
 - **Key 不下发浏览器**：浏览器侧改为传「Key 引用 / 空」；服务端从自己的配置（环境变量或 `~/.config/aiall/server-config.json`）读取 key 注入请求。
-- 至少做到：服务端提供 `GET /api/server/ai-config`（返回 endpoint/model，**不含 key**）供前端配置页展示；agent-run 时 key 从服务端配置取，请求体里的 `apiKey` 字段在服务器模式下忽略或仅作 fallback。
+- 至少做到：服务端提供 `GET /api/server/ai-config`（返回 endpoint/model，**不含 key**）供前端配置页展示；登录后经 `POST /api/server/ai-config` 可写入 `server-config.json`（env 配置存在时拒绝写入）；agent-run 时 key 从服务端配置取，请求体里的 `apiKey` 字段在服务器模式下忽略或仅作 fallback。
 - 前端配合部分由任务 A 的 AI-B 做（它改 `aiClient.ts` / `vibeAgentClient.ts`），你在本任务只做服务端能力 + 写清接口约定，两端通过 `docs/WEB_SERVER_MIGRATION.md` 对齐。
 
 ## 验收标准
