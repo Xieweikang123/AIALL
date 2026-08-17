@@ -49,6 +49,18 @@
           ×
         </button>
       </div>
+      <button
+        type="button"
+        class="icon-btn"
+        title="查看调试日志"
+        aria-label="查看调试日志"
+        @click="$emit('open-debug-logs')"
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h9A1.5 1.5 0 0 1 14 4.5v7A1.5 1.5 0 0 1 12.5 13h-9A1.5 1.5 0 0 1 2 11.5v-7Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+          <path d="M4.5 6h7M4.5 8h7M4.5 10h4" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>
+        </svg>
+      </button>
       <div ref="projectHistoryRef" class="project-history-wrap">
         <button
           type="button"
@@ -259,6 +271,7 @@ const emit = defineEmits<{
   (e: "open-recent-project", path: string): void;
   (e: "open-folder-in-explorer"): void;
   (e: "test-notification"): void;
+  (e: "open-debug-logs"): void;
 }>();
 
 const router = useRouter();

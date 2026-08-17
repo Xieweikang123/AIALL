@@ -31,7 +31,7 @@
         />
       </div>
     </div>
-    <div v-if="gitRemotes.length" class="git-header-row git-sync-row">
+    <div class="git-header-row git-sync-row">
       <div class="git-sync-info">
         <span class="git-sync-stat" :class="{ ahead: gitAhead > 0 }">
           <span class="git-sync-arrow">↑</span>{{ gitAhead }}
@@ -41,20 +41,20 @@
         </span>
       </div>
       <div class="git-remote-actions">
-        <button type="button" class="git-remote-btn" :class="{ 'git-remote-btn--loading': gitRemoteAction === 'fetch' }" :disabled="!!gitRemoteAction" @click="$emit('do-fetch')">
+        <button type="button" class="git-remote-btn" :class="{ 'git-remote-btn--loading': gitRemoteAction === 'fetch' }" :disabled="!!gitRemoteAction || !gitRemotes.length" @click="$emit('do-fetch')">
           {{ gitRemoteAction === 'fetch' ? '…' : 'Fetch' }}
         </button>
-        <button type="button" class="git-remote-btn git-remote-btn--pull" :class="{ 'git-remote-btn--loading': gitRemoteAction === 'pull' }" :disabled="!!gitRemoteAction" @click="$emit('do-pull')">
+        <button type="button" class="git-remote-btn git-remote-btn--pull" :class="{ 'git-remote-btn--loading': gitRemoteAction === 'pull' }" :disabled="!!gitRemoteAction || !gitRemotes.length" @click="$emit('do-pull')">
           {{ gitRemoteAction === 'pull' ? '…' : 'Pull' }}
         </button>
-        <button type="button" class="git-remote-btn git-remote-btn--push" :class="{ 'git-remote-btn--loading': gitRemoteAction === 'push' }" :disabled="!!gitRemoteAction" @click="$emit('do-push')">
+        <button type="button" class="git-remote-btn git-remote-btn--push" :class="{ 'git-remote-btn--loading': gitRemoteAction === 'push', 'git-remote-btn--push--loading': gitRemoteAction === 'push' }" :disabled="!!gitRemoteAction || !gitRemotes.length" @click="$emit('do-push')">
           {{ gitRemoteAction === 'push' ? '…' : 'Push' }}
         </button>
       </div>
       <button
         type="button"
         class="git-remote-link"
-        :disabled="!remoteBrowserUrl"
+        :disabled="!remoteBrowserUrl || !gitRemotes.length"
         title="在浏览器打开远程仓库"
         @click="$emit('open-remote', remoteBrowserUrl)"
       >

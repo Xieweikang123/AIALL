@@ -1,11 +1,11 @@
 <template>
-  <div v-if="ahead > 0" class="git-ahead-section">
+  <div v-show="ahead > 0" class="git-ahead-section">
     <button type="button" class="git-ahead-toggle" @click="$emit('update:open', !open)">
       <span class="git-section-chevron">{{ open ? "▾" : "▸" }}</span>
       <span class="git-ahead-title">待推送提交</span>
       <span class="git-ahead-count">{{ ahead }}</span>
     </button>
-    <div v-if="open" class="git-ahead-list">
+    <div v-show="open" class="git-ahead-list">
       <div v-if="loading" class="git-ahead-loading">加载中…</div>
       <div v-else-if="!commits.length" class="git-ahead-empty">无待推送提交</div>
       <div v-for="entry in commits" :key="entry.hash" class="git-ahead-item">
@@ -72,6 +72,9 @@ defineEmits<{
 <style scoped>
 .git-ahead-section {
   padding: 2px 0;
+}
+.git-ahead-section {
+  contain: layout style;
 }
 .git-ahead-toggle {
   display: flex;

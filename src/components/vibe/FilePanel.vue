@@ -1294,7 +1294,7 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
 }
 
 .session-item.active {
-  background: rgba(88, 166, 255, 0.08);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .session-item.active::before {
@@ -1445,8 +1445,8 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
   color: rgba(201, 224, 255, 0.95);
 }
 
-.session-item--syncing:not(.active) {
-  background: rgba(88, 166, 255, 0.04);
+.session-item--syncing {
+  background: rgba(88, 166, 255, 0.12);
 }
 
 .session-spinner {
