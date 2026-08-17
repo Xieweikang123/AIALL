@@ -19,6 +19,7 @@
       @open-recent-project="openProjectByPath"
       @open-folder-in-explorer="openCurrentFolderInExplorer"
       @test-notification="testNotification"
+      @open-debug-logs="debugLogsOpen = true"
     />
 
     <main
@@ -79,7 +80,7 @@
       >
 
         <GitPanel
-          v-if="gitPanelMode === 'git' && !gitPanelInForeground"
+          v-show="gitPanelMode === 'git' && !gitPanelInForeground"
           :project-opened="projectOpened"
           :git-loading="gitLoading"
           :git-is-repo="gitIsRepo"
@@ -899,6 +900,7 @@
     <Teleport to="body">
       <ConfirmPopup />
       <InputPrompt />
+      <DebugLogViewer :open="debugLogsOpen" @close="debugLogsOpen = false" />
       <div
         v-if="fileDragGhost"
         class="file-drag-ghost"
@@ -1028,6 +1030,7 @@ import ChatPanel from "../components/vibe/ChatPanel.vue";
 import VibeChatMessages from "../components/vibe/VibeChatMessages.vue";
 import VibeWorkspaceWelcome from "../components/vibe/VibeWorkspaceWelcome.vue";
 import QuickSearchModal from "../components/vibe/QuickSearchModal.vue";
+import DebugLogViewer from "../components/vibe/DebugLogViewer.vue";
 import { vibeChatMessageContextKey, type VibeChatMessageContext } from "../composables/vibeChatMessageContext";
 import { useConfirm } from "../composables/useConfirm";
 import { useFileDrag } from "../composables/useFileDrag";
@@ -1180,6 +1183,8 @@ const { confirm, confirmUnsaved, dismissPendingOverlay: dismissPendingConfirm, s
 const inputPrompt = useInputPrompt();
 const router = useRouter();
 const isDesktopRuntime = computed(() => isTauriEnv());
+
+const debugLogsOpen = ref(false);
 const serverBackendAvailable = ref(isServerBackendAvailable());
 if (!isDesktopRuntime.value && !serverBackendAvailable.value) {
   void getServerBackendProbe().then((probe) => {
