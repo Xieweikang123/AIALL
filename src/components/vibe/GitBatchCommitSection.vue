@@ -28,7 +28,7 @@
         @click="$emit('ai-batch-groups')"
       >
         <span v-if="aiBatchGrouping" class="panel-loading-spinner git-ai-batch-spinner" aria-hidden="true" />
-        {{ aiBatchGrouping ? displayGroupingStep : "AI 分析变更" }}
+        {{ aiBatchGrouping ? "分析中…" : "AI 分析变更" }}
       </button>
     </div>
     <p v-if="!batchSectionOpen" class="git-batch-collapsed-hint">
@@ -194,16 +194,6 @@ const ungroupedFileCount = computed(() =>
     .filter(isUnassignedGroup)
     .reduce((sum, group) => sum + group.files.length, 0),
 );
-const displayGroupingStep = computed(() => {
-  const step = props.aiBatchGroupingStep.trim();
-  if (!step) return "分析中…";
-  if (step.includes("·") && step.includes("字")) return step;
-  if (step.includes("连接")) return "连接服务…";
-  if (step.includes("读取") || step.includes("摘要")) return "读取变更…";
-  if (step.includes("分组") || step.includes("分析")) return "分析分组…";
-  if (step.includes("提交") || step.includes("说明")) return "生成说明…";
-  return step;
-});
 </script>
 
 <style src="./styles/GitPanel.scss" scoped></style>
