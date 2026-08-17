@@ -644,8 +644,9 @@ async fn handle_connection(
 }
 
 async fn write_unauthorized(w: &mut OwnedWriteHalf) -> Result<(), String> {
-    write_headers(w, "401 Unauthorized", "text/plain", &[]).await?;
-    w.write_all(b"unauthorized").await.map_err(|e| e.to_string())
+    let payload = r#"{"ok":false,"error":"unauthorized"}"#;
+    write_headers(w, "401 Unauthorized", "application/json", &[]).await?;
+    w.write_all(payload.as_bytes()).await.map_err(|e| e.to_string())
 }
 
 #[tokio::main]
