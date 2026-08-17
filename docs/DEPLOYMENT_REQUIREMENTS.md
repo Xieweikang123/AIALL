@@ -42,6 +42,6 @@ AIALL 是 Tauri 2 + Vue 3 桌面应用,核心功能(Agent 编程 / Git / 文件�
 - [x] 鉴权与沙箱——`POST /api/server/login`(session 12h)+ 静态 Bearer；`AIALL_SERVER_ALLOWED_PROJECTS` 统一路径沙箱；`AIALL_SERVER_RESTRICT_COMMANDS=1` 命令白名单
 - [x] 服务端 AI Key 管理——`AIALL_SERVER_AI_*` 或 `server-config.json`；`GET /api/server/ai-config`(不含 key)
 - [x] 部署物——`deploy/`(systemd / nginx / env 模板 / README)+ `scripts/`(交叉编译、CI workflow、deploy.sh)，见 `deploy/README.md`
-- [ ] 公网部署(HTTP :8088,暂不启用 HTTPS)——待执行 `deploy/README.md` 步骤(上传二进制 + 前端 dist → systemd → 验证)
-- [ ] 公网访问验证(Agent / Git / 文件)——部署后按 `deploy/README.md`「验证清单」跑
-- [ ] 前端配合(任务 A)：登录 UI / key 不下发浏览器 / ai-config 展示 / 浏览器实测
+- [x] 公网部署(HTTP :8088)——已完成:交叉编译(glibc≤2.32 + rustls 静态 TLS)→ 上传二进制 + 前端 dist → systemd(agent-server @ 127.0.0.1:8787)→ nginx 反代(公网 8088 → 8787),见 `deploy/README.md`
+- [x] 公网访问验证——healthz / 登录(session)/ 鉴权(未带 token 401 JSON)/ 路径沙箱(白名单外 403)/ SSE(`/api/agent/run`)均通;AI key 已通过界面保存到 `/opt/aiall/.config/aiall/server-config.json`(仅占位,需填真实值)
+- [x] 前端配合(任务 A)：登录 UI / key 不下发浏览器 / ai-config 展示与保存(3cd6b17)/ 浏览器实测 / 整站登录墙(LoginView + 路由守卫,未登录重定向 /login,后端 401 返回 JSON 供探测)

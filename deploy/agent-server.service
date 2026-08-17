@@ -38,7 +38,7 @@ Environment=AIALL_SERVER_ALLOWED_PROJECTS=/srv/aiall/projects
 Environment=AIALL_SERVER_RESTRICT_COMMANDS=1
 # 监听（nginx 反代时保持 127.0.0.1；直连公网才改 0.0.0.0）
 Environment=AIALL_SERVER_BIND=127.0.0.1
-Environment=AIALL_SERVER_PORT=8088
+Environment=AIALL_SERVER_PORT=8787
 
 # ── 可选：服务端 AI 配置（key 不下发浏览器）──
 # 也可改用 /opt/aiall/server-config.json：
