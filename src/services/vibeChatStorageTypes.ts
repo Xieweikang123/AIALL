@@ -131,6 +131,8 @@ export type VibeChatSessionMeta = {
   status?: "draft" | "active" | "completed" | "failed" | "interrupted";
   /** AI 供应商 id（aiLocalConfig providers[].id）；空 = 跟随全局配置。 */
   providerId?: string;
+  /** 磁盘会话文件名（如 chat-<id>.json）；由 id 派生，用于索引→文件映射。 */
+  file?: string;
 };
 
 export type VibeChatProjectSnapshot = {

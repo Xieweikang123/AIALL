@@ -617,8 +617,12 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     const path = projectPath().trim();
     if (!path || syncingChatStore.value) return;
     persistChatNow(path);
+    // 磁盘 chat-store.json 是唯一真相源：推送前若本地索引为空，先从磁盘补齐，
+    // 避免用"瘦身"的本地索引整体覆盖磁盘、把仅存在于磁盘的会话变成孤儿文件。
+    if (!getSessionDiagSnapshot(path).indexSessionIds.length) {
+      await loadFullChatStoreFromDisk(path);
+    }
     syncingChatStore.value = true;
-    chatError.value = "";
     chatStoreSyncMessage.value = "正在同步会话到本地...";
     try {
       const result = await syncChatStore(path, getVibeChatProjectSnapshot(path));

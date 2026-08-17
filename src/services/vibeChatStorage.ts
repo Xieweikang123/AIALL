@@ -689,6 +689,12 @@ function resolveSessionListTitle(session: VibeChatSession): string {
 }
 
 function pruneEmptyDraftSessions(record: ProjectChatRecord): void {
+  const droppedEmptyDraftIds = record.sessions
+    .filter((s) => isDisposableEmptyDraftSession(s))
+    .map((s) => s.id);
+  if (droppedEmptyDraftIds.length) {
+    sessionDiag("storage:prune-empty-drafts", { droppedEmptyDraftIds });
+  }
   record.sessions = record.sessions.filter((s) => !isDisposableEmptyDraftSession(s));
   if (
     record.activeSessionId
@@ -1000,6 +1006,7 @@ export function getVibeChatProjectSnapshot(projectPath: string): VibeChatProject
           messages: sanitizeMessages(s.messages, { forDisk: true }),
           status: s.status,
           providerId: s.providerId?.trim() || undefined,
+          file: `chat-${s.id}.json`,
         };
       }) || [],
   };
@@ -1485,6 +1492,12 @@ export function replaceChatStoreFromDiskSnapshot(
       ? snapshot.activeSessionId
       : diskSessions[0].id;
 
+  const diskIdSet = new Set(diskSessions.map((s) => s.id));
+  const memoryBeforeReplace = getProjectRecord(key);
+  const droppedMemorySessionIds = (memoryBeforeReplace?.sessions || [])
+    .map((s) => s.id)
+    .filter((id) => !diskIdSet.has(id));
+
   persistRecord(key, { activeSessionId, sessions: diskSessions });
   mirrorLocalIndexFromDiskSnapshot(expectedProjectPath || snapshot.projectPath, snapshot);
 
@@ -1492,6 +1505,7 @@ export function replaceChatStoreFromDiskSnapshot(
     projectPath: snapshot.projectPath,
     sessionIds: diskSessions.map((s) => s.id),
     activeSessionId,
+    droppedMemorySessionIds,
     localAfter: getSessionDiagSnapshot(expectedProjectPath || snapshot.projectPath),
   });
   return true;
@@ -1563,7 +1577,15 @@ export function saveVibeChatHistory(
   }
 
   if (record.sessions.length > MAX_SESSIONS_PER_PROJECT) {
+    const droppedSessionIds = record.sessions
+      .slice(MAX_SESSIONS_PER_PROJECT)
+      .map((s) => s.id);
     record.sessions = record.sessions.slice(0, MAX_SESSIONS_PER_PROJECT);
+    sessionDiag("storage:prune-over-limit", {
+      projectPath,
+      keptCount: MAX_SESSIONS_PER_PROJECT,
+      droppedSessionIds,
+    });
   }
   if (setActive) {
     record.activeSessionId = session.id;
@@ -1638,6 +1660,7 @@ export function abandonVibeChatDraftIfEmpty(projectPath: string, sessionId: stri
   const session = record.sessions.find((s) => s.id === sessionId);
   if (!session || !isDisposableEmptyDraftSession(session)) return;
 
+  sessionDiag("storage:abandon-empty-draft", { projectPath, sessionId });
   record.sessions = record.sessions.filter((s) => s.id !== sessionId);
   removeComposerDraft(sessionId);
   if (record.activeSessionId === sessionId) {
