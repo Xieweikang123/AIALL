@@ -48,3 +48,5 @@ tmp/
 ## local user data (icon templates screenshots etc.)
 data/icon-templates/images/*
 !data/icon-templates/images/.gitkeep
+
+src-tauri/target-docker/
