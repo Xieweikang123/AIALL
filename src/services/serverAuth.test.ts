@@ -6,6 +6,7 @@ import {
   getServerSessionToken,
   installServerAuthFetch,
   isServerLoggedIn,
+  probeServerBackend,
   saveServerAiConfig,
   serverLogin,
   serverLogout,
@@ -331,5 +332,38 @@ describe("saveServerAiConfig", () => {
     const result = await saveServerAiConfig({ endpoint: "", apiKey: "" });
     expect(result.ok).toBe(false);
     expect(result.error).toBe("endpoint 不能为空");
+  });
+});
+
+describe("probeServerBackend", () => {
+  it("200 JSON → ok（可用且未强制认证）", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ ok: true }, 200)));
+    expect(await probeServerBackend()).toBe("ok");
+  });
+
+  it("401 JSON → auth（需登录）", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse({ error: "unauthorized" }, 401)),
+    );
+    expect(await probeServerBackend()).toBe("auth");
+  });
+
+  it("非 JSON 响应（HTML/静态站）→ unreachable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response("<!doctype html><title>index</title>", {
+          status: 404,
+          headers: { "Content-Type": "text/html" },
+        }),
+      ),
+    );
+    expect(await probeServerBackend()).toBe("unreachable");
+  });
+
+  it("网络异常 → unreachable", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    expect(await probeServerBackend()).toBe("unreachable");
   });
 });

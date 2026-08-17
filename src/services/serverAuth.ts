@@ -263,3 +263,46 @@ export async function saveServerAiConfig(input: {
     return { ok: false, error: error instanceof Error ? error.message : "网络错误" };
   }
 }
+
+let serverBackendAvailable = false;
+
+/** 浏览器 Web 模式下 agent-server 后端当前是否可达（探测结果的缓存）。 */
+export function isServerBackendAvailable(): boolean {
+  return serverBackendAvailable;
+}
+
+/** 后端探测结果：ok=可用且未强制认证；auth=可用但要求登录；unreachable=不可达。 */
+export type ServerBackendProbe = "ok" | "auth" | "unreachable";
+
+/**
+ * 探测 agent-server 状态。
+ *
+ * 判定依据：请求 `/api/server/ai-config`（无认证），仅当响应是 JSON 时认为后端存在——
+ * - 200 JSON → 可用且未配置 token（或默认放行）
+ * - 401/403 JSON → 可用但配置了 token，需要登录
+ * - 其它（HTML / 404 / 502 / 网络异常）→ 不可达
+ */
+export async function probeServerBackend(): Promise<ServerBackendProbe> {
+  try {
+    const resp = await fetch(backendUrl("/api/server/ai-config"), { method: "GET" });
+    const ct = resp.headers.get("content-type") || "";
+    if (!ct.toLowerCase().includes("application/json")) return "unreachable";
+    if (resp.status === 401 || resp.status === 403) return "auth";
+    return resp.ok ? "ok" : "unreachable";
+  } catch {
+    return "unreachable";
+  }
+}
+
+let backendProbeCache: Promise<ServerBackendProbe> | null = null;
+
+/** 全局共享的后端探测：同一 SPA 生命周期只探测一次，并同步更新后端可用标志。 */
+export function getServerBackendProbe(): Promise<ServerBackendProbe> {
+  if (!backendProbeCache) {
+    backendProbeCache = probeServerBackend().then((r) => {
+      serverBackendAvailable = r !== "unreachable";
+      return r;
+    });
+  }
+  return backendProbeCache;
+}

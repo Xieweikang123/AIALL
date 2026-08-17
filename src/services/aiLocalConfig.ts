@@ -49,6 +49,25 @@ export interface PersistedAiConfig {
 const DEFAULT_ENDPOINT = "https://fufu.iqach.top/v1";
 const DEFAULT_MODEL = "mimo-v2.5-pro";
 
+/** 预设供应商：点选自动填充 endpoint / model（apiKey 始终留空）。 */
+export interface AiProviderPreset {
+  name: string;
+  endpoint: string;
+  model: string;
+}
+
+export const PROVIDER_PRESETS: AiProviderPreset[] = [
+  { name: "OpenCode Go（DeepSeek V4 Flash）", endpoint: "https://opencode.ai/zen/go/v1", model: "deepseek-v4-flash" },
+  { name: "OpenCode Go（DeepSeek V4 Pro）", endpoint: "https://opencode.ai/zen/go/v1", model: "deepseek-v4-pro" },
+  { name: "OpenCode Go（GLM-5.2）", endpoint: "https://opencode.ai/zen/go/v1", model: "glm-5.2" },
+  { name: "默认（fufu.iqach.top）", endpoint: "https://fufu.iqach.top/v1", model: "mimo-v2.5-pro" },
+  { name: "DeepSeek 官方", endpoint: "https://api.deepseek.com/v1", model: "deepseek-chat" },
+  { name: "DeepSeek Reasoner", endpoint: "https://api.deepseek.com/v1", model: "deepseek-reasoner" },
+  { name: "OpenAI", endpoint: "https://api.openai.com/v1", model: "gpt-4o" },
+  { name: "Moonshot Kimi", endpoint: "https://api.moonshot.cn/v1", model: "moonshot-v1-8k" },
+  { name: "本地 Ollama", endpoint: "http://127.0.0.1:11434/v1", model: "llama3.1" },
+];
+
 const DEFAULT_TTS: AiTtsConfig = {
   model: "mimo-v2.5-tts",
   voice: "mimo_default",

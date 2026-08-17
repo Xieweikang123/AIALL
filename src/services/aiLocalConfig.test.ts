@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  PROVIDER_PRESETS,
   getActiveProvider,
   migratePersistedAiConfig,
   normalizeWebProxyUrl,
@@ -109,5 +110,21 @@ describe("active provider resolution", () => {
     expect(normalizeWebProxyUrl("http://127.0.0.1:7890")).toBe("http://127.0.0.1:7890/");
     expect(normalizeWebProxyUrl("127.0.0.1:10809")).toBe("http://127.0.0.1:10809/");
     expect(normalizeWebProxyUrl("  ")).toBe("");
+  });
+});
+
+describe("PROVIDER_PRESETS", () => {
+  it("每条预设都有非空 name/endpoint/model", () => {
+    expect(PROVIDER_PRESETS.length).toBeGreaterThan(0);
+    for (const preset of PROVIDER_PRESETS) {
+      expect(preset.name.trim()).toBeTruthy();
+      expect(preset.endpoint.trim()).toBeTruthy();
+      expect(preset.model.trim()).toBeTruthy();
+    }
+  });
+
+  it("预设名称不重复", () => {
+    const names = PROVIDER_PRESETS.map((p) => p.name);
+    expect(new Set(names).size).toBe(names.length);
   });
 });
