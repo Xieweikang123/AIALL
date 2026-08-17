@@ -1,7 +1,7 @@
 <template>
   <div class="vibe-page">
-    <div v-if="!isDesktopRuntime" class="vibe-web-banner" role="status">
-      当前为浏览器预览：Agent / Git / 文件读写仅桌面版可用。请运行 <code>npm run dev</code> 启动 Tauri。
+    <div v-if="!isDesktopRuntime && !serverBackendAvailable" class="vibe-web-banner" role="status">
+      当前为浏览器预览且未检测到 agent-server 后端：Agent / Git / 文件读写不可用。请运行 <code>npm run dev</code> 启动 Tauri，或在部署后访问服务端地址。
     </div>
     <AppToolbar
       :project-path="projectPath"
@@ -1054,6 +1054,7 @@ import { restoreChatScrollPosition, useWorkspaceUiPersistence } from "../composa
 import { PROJECT_ARCHITECT_REVIEW_REL_PATH } from "../services/vibeProjectArchitectReviewClient";
 import { PROJECT_KNOWLEDGE_REL_PATH } from "../services/vibeProjectKnowledgeClient";
 import { isTauriEnv, tauriInvoke } from "../services/tauriInvoke";
+import { getServerBackendProbe, isServerBackendAvailable } from "../services/serverAuth";
 import { agentRunStageLabel, resolveAgentRunStage } from "../services/agentRunLiveState";
 import { distillExplorationRun } from "../services/explorationDistill";
 import {
@@ -1179,6 +1180,12 @@ const { confirm, confirmUnsaved, dismissPendingOverlay: dismissPendingConfirm, s
 const inputPrompt = useInputPrompt();
 const router = useRouter();
 const isDesktopRuntime = computed(() => isTauriEnv());
+const serverBackendAvailable = ref(isServerBackendAvailable());
+if (!isDesktopRuntime.value && !serverBackendAvailable.value) {
+  void getServerBackendProbe().then((probe) => {
+    serverBackendAvailable.value = probe !== "unreachable";
+  });
+}
 
 function openAiConfigPage() {
   void router.push("/ai-config");

@@ -113,6 +113,17 @@
           <span v-if="activeProviderId === provider.id" class="provider-default-badge">默认</span>
         </button>
         <button type="button" class="provider-add" @click="addProvider">+ 添加</button>
+        <select
+          v-model="presetSelected"
+          class="preset-select"
+          aria-label="用预设填充供应商"
+          @change="applyPreset(presetSelected)"
+        >
+          <option value="" disabled>用预设填充…</option>
+          <option v-for="p in providerPresets" :key="p.name" :value="p.name">
+            {{ p.name }}（{{ p.model }}）
+          </option>
+        </select>
       </div>
 
       <div class="provider-actions">
@@ -447,6 +458,7 @@ import { extractWebText } from "../services/webExtractClient";
 import {
   AI_CONFIG_VERSION,
   AI_LOCAL_CONFIG_KEY,
+  PROVIDER_PRESETS,
   type AiConfigTabKey,
   type AiProvider,
   type AiTtsConfig,
@@ -616,6 +628,24 @@ function addProvider() {
   syncProviderToForm(provider.id);
   availableModels.value = [];
   modelsStatusText.value = "已添加新供应商，请填写接口信息。";
+}
+
+const providerPresets = PROVIDER_PRESETS;
+const presetSelected = ref("");
+
+/** 用预设填充当前编辑的供应商（endpoint / model，apiKey 留空）。 */
+function applyPreset(presetName: string) {
+  const preset = providerPresets.find((p) => p.name === presetName);
+  presetSelected.value = "";
+  if (!preset) return;
+  syncFormToProvider(editingProviderId.value);
+  form.endpoint = preset.endpoint;
+  form.model = preset.model;
+  if (!form.name || form.name === "默认供应商") {
+    form.name = preset.name;
+  }
+  availableModels.value = [];
+  modelsStatusText.value = `已应用预设「${preset.name}」，请填写 API Key。`;
 }
 
 function setActiveProvider(providerId: string) {
@@ -1695,6 +1725,16 @@ button.primary {
   background: rgba(31, 111, 235, 0.06);
   transform: none;
   box-shadow: none;
+}
+
+.preset-select {
+  border: 1px solid var(--border-2, rgba(17, 24, 39, 0.15));
+  background: #fff;
+  color: var(--text, #111827);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 13px;
+  max-width: 260px;
 }
 
 .provider-actions {
