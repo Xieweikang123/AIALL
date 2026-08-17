@@ -198,6 +198,8 @@ pub fn run() {
             commands::system::system_open_folder,
             commands::system::system_pick_folder,
             commands::system::system_debug_log_append,
+            commands::system::system_debug_log_list,
+            commands::system::system_debug_log_read,
             commands::ai::ai_test,
             commands::ai::ai_test_stream,
             commands::ai::ai_models,

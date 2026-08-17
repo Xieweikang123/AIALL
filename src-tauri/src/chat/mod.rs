@@ -372,48 +372,124 @@ pub async fn chat_store_sync(_project_path: &str, data: Value) -> Value {
     let dir = chat_dir();
     let _ = tokio::fs::create_dir_all(&dir).await;
     let store_path = store_file();
-    let mut data = data;
-    if let Some(sessions) = data.get_mut("sessions").and_then(|s| s.as_array_mut()) {
-        for session in sessions.iter_mut() {
-            let id = session
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            if id.is_empty() {
-                continue;
+
+    // B (disk chat-store.json) is the durable source of truth. Always load the
+    // existing index first and MERGE into it — never overwrite wholesale, or we
+    // would drop sessions that live only on disk (orphaned files) and any
+    // client-supplied `file` linkage is untrusted.
+    let existing_raw = tokio::fs::read_to_string(&store_path).await.unwrap_or_default();
+    let mut existing: Value = if existing_raw.is_empty() {
+        json!({ "sessions": [] })
+    } else {
+        serde_json::from_str::<Value>(&existing_raw).unwrap_or(json!({ "sessions": [] }))
+    };
+    if existing.get("sessions").is_none() {
+        existing["sessions"] = json!([]);
+    }
+
+    // Process incoming sessions: derive `file` from `id` server-side, externalize
+    // images, write the individual chat-<id>.json, and collect for upsert.
+    let incoming = data
+        .get("sessions")
+        .and_then(|s| s.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mut incoming_by_id: std::collections::HashMap<String, Value> =
+        std::collections::HashMap::new();
+    for session in incoming {
+        let id = session
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if id.is_empty() {
+            // id-less entries cannot be a durable source of truth; ignore.
+            continue;
+        }
+        let mut session = session;
+        // Derive file linkage from id on the server; ignore any client value.
+        let file = session_file(&id);
+        let file_name = file
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if let Some(obj) = session.as_object_mut() {
+            obj.insert("file".into(), json!(file_name));
+            obj.insert("id".into(), json!(id.clone()));
+        }
+        let (externalized, _) = externalize_session_images(&id, session.clone()).await;
+        let session = externalized;
+        if should_skip_empty_session_overwrite(&file, &session).await {
+            incoming_by_id.insert(id.clone(), session.clone());
+            continue;
+        }
+        if let Err(e) = tokio::fs::write(
+            &file,
+            serde_json::to_string_pretty(&session).unwrap_or_default(),
+        )
+        .await
+        {
+            return json!({ "ok": false, "error": format!("写入会话文件失败：{}", e) });
+        }
+        incoming_by_id.insert(id.clone(), session.clone());
+    }
+
+    // Merge preserving stable order: keep existing order, replace with the
+    // incoming version when ids match, and append brand-new incoming sessions.
+    let mut merged: Vec<Value> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    if let Some(arr) = existing.get("sessions").and_then(|s| s.as_array()) {
+        for s in arr {
+            if let Some(id) = s.get("id").and_then(|v| v.as_str()) {
+                if let Some(inc) = incoming_by_id.get(id) {
+                    merged.push(inc.clone());
+                    seen.insert(id.to_string());
+                    continue;
+                }
             }
-            let (externalized, _) = externalize_session_images(&id, session.clone()).await;
-            *session = externalized;
-            let file = session_file(&id);
-            if should_skip_empty_session_overwrite(&file, session).await {
-                continue;
-            }
-            let _ = tokio::fs::write(
-                &file,
-                serde_json::to_string_pretty(session).unwrap_or_default(),
-            )
-            .await;
+            merged.push(s.clone());
         }
     }
+    for (id, s) in &incoming_by_id {
+        if !seen.contains(id) {
+            merged.push(s.clone());
+        }
+    }
+
+    let mut result = existing.clone();
+    result["sessions"] = json!(merged);
+    if let Some(active) = data.get("activeSessionId") {
+        if active.as_str().map(|s| !s.is_empty()).unwrap_or(false) {
+            result["activeSessionId"] = active.clone();
+        }
+    } else if result.get("activeSessionId").is_none() {
+        result["activeSessionId"] = json!("");
+    }
+    if result.get("version").is_none() {
+        if let Some(v) = data.get("version") {
+            result["version"] = v.clone();
+        }
+    }
+    if result.get("projectPath").is_none() {
+        if let Some(p) = data.get("projectPath") {
+            result["projectPath"] = p.clone();
+        }
+    }
+
     match tokio::fs::write(
         &store_path,
-        serde_json::to_string_pretty(&data).unwrap_or_default(),
+        serde_json::to_string_pretty(&result).unwrap_or_default(),
     )
     .await
     {
         Ok(_) => {
-            let count = data
-                .get("sessions")
-                .and_then(|s| s.as_array())
-                .map(|a| a.len())
-                .unwrap_or(0);
+            let count = merged.len();
             json!({
               "ok": true,
               "sessionCount": count,
-              "activeSessionId": data.get("activeSessionId").cloned().unwrap_or(json!("")),
+              "activeSessionId": result.get("activeSessionId").cloned().unwrap_or(json!("")),
               "syncedAt": chrono::Utc::now().to_rfc3339(),
-              "sessions": data.get("sessions").cloned().unwrap_or(json!([]))
+              "sessions": json!(merged)
             })
         }
         Err(e) => json!({ "ok": false, "error": e.to_string() }),
