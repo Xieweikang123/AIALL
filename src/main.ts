@@ -9,7 +9,7 @@ import {
   reportVueError,
 } from "./utils/debugLog";
 import { isTauriEnv } from "./services/tauriInvoke";
-import { installServerAuthFetch } from "./services/serverAuth";
+import { getServerBackendProbe, installServerAuthFetch } from "./services/serverAuth";
 
 installCrashHandlers();
 logAppLifecycle("frontend-boot");
@@ -18,6 +18,8 @@ logAppLifecycle("frontend-boot");
 // 桌面版走 Tauri invoke，不启用 HTTP 认证包装。
 if (!isTauriEnv()) {
   installServerAuthFetch();
+  // 启动时探测 agent-server 可达性，供界面区分「已连服务端 / 需登录 / 纯预览」。
+  void getServerBackendProbe();
 }
 
 const app = createApp(App);
