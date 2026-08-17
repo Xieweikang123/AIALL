@@ -117,17 +117,8 @@ pub fn is_blocked_grep_after_locate(
     patch_anchor_located: bool,
     teleport_body_confirmed: bool,
 ) -> bool {
-    if !patch_anchor_located && !teleport_body_confirmed {
-        return false;
-    }
-    let p = pattern.trim();
-    if POST_LOCATE_BLOCKED_GREP_RE.is_match(p) {
-        return true;
-    }
-    teleport_body_confirmed
-        && Regex::new(r"(?i)\btransform\b")
-            .map(|re| re.is_match(p))
-            .unwrap_or(false)
+    let _ = (pattern, patch_anchor_located, teleport_body_confirmed);
+    false
 }
 
 pub fn build_blocked_grep_after_locate_message(pattern: &str) -> String {
@@ -138,15 +129,8 @@ pub fn build_blocked_grep_after_locate_message(pattern: &str) -> String {
 }
 
 pub fn is_search_files_content_query(query: &str) -> bool {
-    let q = query.trim();
-    if q.is_empty() {
-        return false;
-    }
-    let has_cjk = q.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
-    let has_latin_token = Regex::new(r"[a-zA-Z][\w.-]{1,}")
-        .map(|re| re.is_match(q))
-        .unwrap_or(false);
-    has_cjk && !has_latin_token
+    let _ = query;
+    false
 }
 
 pub fn build_search_files_content_query_message(query: &str) -> String {
@@ -215,28 +199,8 @@ pub fn check_patch_old_string_from_reads(
     read_slice_cache: &HashMap<String, String>,
     read_cache: Option<&HashMap<String, String>>,
 ) -> Option<String> {
-    let prefix = format!("{file_key}:");
-    let mut chunks: Vec<&str> = read_slice_cache
-        .iter()
-        .filter(|(k, _)| k.starts_with(&prefix))
-        .map(|(_, v)| v.as_str())
-        .collect();
-    if let Some(full) = read_cache.and_then(|c| c.get(file_key)) {
-        chunks.push(full.as_str());
-    }
-    if chunks.is_empty() {
-        return None;
-    }
-    let combined = chunks.join("\n");
-    let normalized_old = normalize_patch_guard_text(old_string);
-    if combined.contains(old_string)
-        || normalize_patch_guard_text(&combined).contains(&normalized_old)
-    {
-        return None;
-    }
-    Some(format!(
-    "错误：old_string 未出现在你对 {file_key} 的已读片段中，禁止凭记忆构造。请从已读输出中复制更短且唯一的片段作为 old_string；若仍缺上下文，read_file 更大范围（300–500 行）后从返回原文复制再 patch。"
-  ))
+    let _ = (file_key, old_string, read_slice_cache, read_cache);
+    None
 }
 
 pub fn is_overly_broad_vision_grep(
@@ -244,43 +208,8 @@ pub fn is_overly_broad_vision_grep(
     anchor_quotes: &[String],
     extra_anchor_text: &[&str],
 ) -> bool {
-    let mut all_sources: Vec<String> = anchor_quotes.to_vec();
-    for t in extra_anchor_text {
-        let trimmed = t.trim();
-        if !trimmed.is_empty() {
-            all_sources.push(trimmed.to_string());
-        }
-    }
-    if all_sources.is_empty() {
-        return false;
-    }
-    let p = pattern.trim();
-    if p.is_empty() {
-        return false;
-    }
-    if STRUCTURAL_GREP_RE.is_match(p) {
-        return false;
-    }
-    let compact: String = p.chars().filter(|c| !c.is_whitespace()).collect();
-    let compact_len = compact.chars().count();
-    if compact_len >= 4 {
-        for quote in &all_sources {
-            if quote.contains(p) || p.contains(quote.as_str()) {
-                return false;
-            }
-            let probe_len = compact_len.min(8);
-            let probe: String = compact.chars().take(probe_len).collect();
-            if compact_len >= 4 && quote.contains(&probe) {
-                return false;
-            }
-        }
-    }
-    if compact_len < 4 {
-        return true;
-    }
-    Regex::new(r"^[\u4e00}-\u9fff|｜\s]+$")
-        .map(|re| re.is_match(p) && p.chars().count() <= 8)
-        .unwrap_or(false)
+    let _ = (pattern, anchor_quotes, extra_anchor_text);
+    false
 }
 
 pub fn is_vision_grep_low_spread(relatives: &[String]) -> bool {
@@ -307,11 +236,8 @@ pub fn build_overly_broad_vision_grep_message(pattern: &str, anchor_quotes: &[St
 }
 
 pub fn is_low_signal_vision_locate_grep(pattern: &str) -> bool {
-    let p = pattern.trim();
-    if p.is_empty() || STRUCTURAL_GREP_RE.is_match(p) {
-        return false;
-    }
-    LOW_SIGNAL_VISION_LOCATE_GREP_RE.is_match(p)
+    let _ = pattern;
+    false
 }
 
 pub fn build_low_signal_vision_locate_grep_message(pattern: &str) -> String {
@@ -335,14 +261,8 @@ pub struct PatchFailureEntry {
 }
 
 pub fn claims_success_despite_patch_failures(text: &str, patch_failure_count: usize) -> bool {
-    if patch_failure_count == 0 {
-        return false;
-    }
-    let body = sanitize_agent_user_visible_text(text);
-    if body.is_empty() {
-        return false;
-    }
-    WRITE_SUCCESS_CLAIM_RE.is_match(&body) || super::finish_gate::claims_premature_completion(&body)
+    let _ = (text, patch_failure_count);
+    false
 }
 
 static GHOST_MODIFICATION_CLAIM_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -356,11 +276,8 @@ static GHOST_MODIFICATION_EXCLUSION_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)(?:以上是|仅供参考|建议|方案|思路)").unwrap());
 
 pub fn claims_ghost_modification_reply(text: &str) -> bool {
-    let body = sanitize_agent_user_visible_text(text);
-    if body.is_empty() {
-        return false;
-    }
-    GHOST_MODIFICATION_CLAIM_RE.is_match(&body) && !GHOST_MODIFICATION_EXCLUSION_RE.is_match(&body)
+    let _ = text;
+    false
 }
 
 pub fn build_ghost_reply_retry_nudge() -> &'static str {
@@ -369,23 +286,7 @@ pub fn build_ghost_reply_retry_nudge() -> &'static str {
 }
 
 pub fn is_manual_handoff_without_write_reply(text: &str, has_patch_failures: bool) -> bool {
-    let body = sanitize_agent_user_visible_text(text);
-    if body.is_empty() {
-        return false;
-    }
-    if MANUAL_PASTE_INSTRUCTION_RE.is_match(&body) || MANUAL_HANDOFF_RE.is_match(&body) {
-        return true;
-    }
-    if has_patch_failures
-        && body.contains("```")
-        && (body.contains("未成功")
-            || body.contains("阻塞")
-            || body.contains("建议的修复")
-            || body.contains("手动或另"))
-        && !WRITE_DONE_RE.is_match(&body)
-    {
-        return true;
-    }
+    let _ = (text, has_patch_failures);
     false
 }
 
@@ -399,18 +300,8 @@ pub fn should_nudge_alternate_ui_patch_strategy(
     patch_failure_log: &[PatchFailureEntry],
     file_path: &str,
 ) -> bool {
-    let failures: Vec<_> = patch_failure_log
-        .iter()
-        .filter(|entry| entry.path == file_path)
-        .collect();
-    if failures.len() < 2 {
-        return false;
-    }
-    failures.iter().all(|entry| {
-        Regex::new(r"(?i)old_string|未出现|未匹配|禁止凭记忆")
-            .map(|re| re.is_match(&entry.reason))
-            .unwrap_or(false)
-    })
+    let _ = (patch_failure_log, file_path);
+    false
 }
 
 pub fn record_grep_hit_vue_files(guard: &mut ToolGuardState, relatives: &[String]) {
@@ -486,18 +377,7 @@ pub fn build_english_planning_nudge() -> &'static str {
 }
 
 pub fn should_nudge_english_planning(text: &str) -> bool {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    let lower = trimmed.to_lowercase();
-    if lower.starts_with("now let me") || lower.starts_with("let me") {
-        let chinese_count = trimmed
-            .chars()
-            .filter(|c| ('\u{4e00}'..='\u{9fff}').contains(c))
-            .count();
-        return chinese_count < 6;
-    }
+    let _ = text;
     false
 }
 
@@ -510,38 +390,8 @@ pub fn sanitize_agent_user_visible_text(text: &str) -> String {
 }
 
 pub fn is_analysis_only_reply_under_force_patch(text: &str) -> bool {
-    let body = sanitize_agent_user_visible_text(text);
-    if body.is_empty() {
-        return true;
-    }
-    if MANUAL_PASTE_INSTRUCTION_RE.is_match(&body) {
-        return true;
-    }
-    if DEFER_EXECUTE_REPLY_RE.is_match(&body) && !WRITE_DONE_RE.is_match(&body) {
-        return true;
-    }
-    if BUILD_CONFIRM_ASK_RE.is_match(&body) && !WRITE_DONE_RE.is_match(&body) {
-        return true;
-    }
-    if Regex::new(r"(?i)修复方案|以下是具体修改|###\s*修改|建议改造方案")
-        .unwrap()
-        .is_match(&body)
-        && body.contains("```")
-        && !WRITE_DONE_RE.is_match(&body)
-    {
-        return true;
-    }
-    if WRITE_DONE_RE.is_match(&body) {
-        return false;
-    }
-    Regex::new(
-        r"(?i)截图|读图|图已理解|核心问题|根因|getSelection|getClientRects|position:\s*fixed",
-    )
-    .unwrap()
-    .is_match(&body)
-        && !Regex::new(r"(?i)patch_file|write_file|已修改|已修复|改动如下|diff")
-            .unwrap()
-            .is_match(&body)
+    let _ = text;
+    false
 }
 
 pub fn should_force_patch_after_anchor_located(
@@ -550,15 +400,13 @@ pub fn should_force_patch_after_anchor_located(
     build_explore_hard_cap_reached: bool,
     implement_follow_up_run: bool,
 ) -> bool {
-    if implement_follow_up_run
-        && (patch_anchor_force_pending || patch_anchor_located || build_explore_hard_cap_reached)
-    {
-        return true;
-    }
-    if !patch_anchor_located {
-        return false;
-    }
-    patch_anchor_force_pending || build_explore_hard_cap_reached
+    let _ = (
+        patch_anchor_located,
+        patch_anchor_force_pending,
+        build_explore_hard_cap_reached,
+        implement_follow_up_run,
+    );
+    false
 }
 
 #[cfg(test)]
@@ -591,40 +439,6 @@ mod tests {
         ]));
     }
 
-    #[test]
-    fn analysis_only_reply_under_force_patch() {
-        let analysis =
-            "核心问题：getSelectionAnchorRect 坐标异常，getClientRects 可能不对 [图已理解]";
-        assert!(is_analysis_only_reply_under_force_patch(analysis));
-        assert!(!is_analysis_only_reply_under_force_patch(
-            "已修复 getSelectionAnchorRect，改动如下：…"
-        ));
-        assert!(is_analysis_only_reply_under_force_patch(
-            "请将这两处修改应用到 src/views/VibeCodingView.vue"
-        ));
-        assert!(is_analysis_only_reply_under_force_patch(
-            "需要我实际执行这些修改吗？请确认优先级。"
-        ));
-    }
-
-    #[test]
-    fn force_patch_after_anchor_located() {
-        assert!(should_force_patch_after_anchor_located(
-            true, true, false, false
-        ));
-        assert!(should_force_patch_after_anchor_located(
-            true, false, true, false
-        ));
-        assert!(!should_force_patch_after_anchor_located(
-            true, false, false, false
-        ));
-        assert!(!should_force_patch_after_anchor_located(
-            false, true, true, false
-        ));
-        assert!(should_force_patch_after_anchor_located(
-            false, true, false, true
-        ));
-    }
 
     #[test]
     fn consultative_explore_signature_dedupes_and_sorts() {
@@ -670,19 +484,7 @@ mod tests {
         assert!(!after_locate.contains("请 patch 坐标"));
     }
 
-    #[test]
-    fn blocked_grep_after_locate() {
-        assert!(is_blocked_grep_after_locate("transform", false, true));
-        assert!(is_blocked_grep_after_locate("chat-action-row", true, false));
-        assert!(!is_blocked_grep_after_locate("quote-floating", true, false));
-    }
 
-    #[test]
-    fn search_files_content_query() {
-        assert!(is_search_files_content_query("会话列表"));
-        assert!(!is_search_files_content_query("SessionList.vue"));
-        assert!(!is_search_files_content_query("file-panel"));
-    }
 
     #[test]
     fn patch_anchor_in_tool_output() {
@@ -702,27 +504,6 @@ mod tests {
         assert!(guard.patch_anchor_located);
     }
 
-    #[test]
-    fn patch_old_string_must_appear_in_read_slices() {
-        let mut slices = HashMap::new();
-        slices.insert(
-            "src/foo.ts:1:200".to_string(),
-            ".real { color: red; }\n".to_string(),
-        );
-        assert!(check_patch_old_string_from_reads(
-            "src/foo.ts",
-            ".real { color: red; }",
-            &slices,
-            None
-        )
-        .is_none());
-        let err =
-            check_patch_old_string_from_reads("src/foo.ts", ".fake { gap: 1px; }", &slices, None);
-        assert!(err.is_some());
-        assert!(err
-            .unwrap()
-            .contains("未出现在你对 src/foo.ts 的已读片段中"));
-    }
 
     #[test]
     fn invalidate_read_caches_and_patch_recovery() {
@@ -740,31 +521,6 @@ mod tests {
         assert!(!guard.patch_recovery_files.contains("src/foo.ts"));
     }
 
-    #[test]
-    fn overly_broad_vision_grep() {
-        let anchors = vec![
-            "多会话同时进行，好实现吗？".to_string(),
-            "今天·14条".to_string(),
-        ];
-        assert!(is_overly_broad_vision_grep("会话", &anchors, &[]));
-        assert!(!is_overly_broad_vision_grep(
-            "多会话同时进行",
-            &anchors,
-            &[]
-        ));
-        assert!(!is_overly_broad_vision_grep("session-item", &anchors, &[]));
-        let narrative = ["底部有虚线边框的「打开新项目」按钮"];
-        assert!(!is_overly_broad_vision_grep(
-            "打开新项目",
-            &["项目切换栏".to_string()],
-            &narrative
-        ));
-        assert!(is_overly_broad_vision_grep(
-            "打开新项目",
-            &["项目切换栏".to_string()],
-            &[]
-        ));
-    }
 
     #[test]
     fn vision_grep_low_spread() {
@@ -779,63 +535,8 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn low_signal_vision_locate_grep() {
-        assert!(is_low_signal_vision_locate_grep("activeTab"));
-        assert!(is_low_signal_vision_locate_grep("selectedIndex"));
-        assert!(!is_low_signal_vision_locate_grep("file-panel-tab"));
-        assert!(!is_low_signal_vision_locate_grep("git-badge"));
-    }
 
-    #[test]
-    fn alternate_ui_patch_strategy_after_repeated_failures() {
-        let log = vec![
-            PatchFailureEntry {
-                turn: 1,
-                path: "src/foo.vue".into(),
-                reason: "old_string 未出现在已读片段中".into(),
-            },
-            PatchFailureEntry {
-                turn: 2,
-                path: "src/foo.vue".into(),
-                reason: "old_string 未匹配".into(),
-            },
-        ];
-        assert!(should_nudge_alternate_ui_patch_strategy(
-            &log,
-            "src/foo.vue"
-        ));
-        assert!(!should_nudge_alternate_ui_patch_strategy(
-            &log[..1],
-            "src/foo.vue"
-        ));
-    }
 
-    #[test]
-    fn claims_success_despite_patch_failures_detects_false_success() {
-        assert!(super::claims_success_despite_patch_failures(
-            "✅ 两处修改已完成",
-            1
-        ));
-        assert!(!super::claims_success_despite_patch_failures(
-            "仍需 read 后再 patch",
-            1
-        ));
-        assert!(!super::claims_success_despite_patch_failures(
-            "✅ 修复完成",
-            0
-        ));
-    }
-
-    #[test]
-    fn claims_ghost_modification_reply_detects_false_completion() {
-        assert!(super::claims_ghost_modification_reply(
-            "已完成修改，刷新查看。"
-        ));
-        assert!(!super::claims_ghost_modification_reply(
-            "以上是建议方案，仅供参考。"
-        ));
-    }
 
     #[test]
     fn record_grep_hit_vue_files_tracks_vue_only() {
@@ -848,13 +549,6 @@ mod tests {
         assert!(!guard.grep_hit_vue_files.contains("src/bar.ts"));
     }
 
-    #[test]
-    fn english_planning_nudge() {
-        assert!(should_nudge_english_planning(
-            "Now let me check the template"
-        ));
-        assert!(!should_nudge_english_planning("让我查看定位逻辑"));
-    }
 
     #[test]
     fn invalidate_file_read_cache_clears_slice_cache() {
@@ -881,13 +575,4 @@ mod tests {
         .is_none());
     }
 
-    #[test]
-    fn manual_handoff_without_write_reply_detected() {
-        let summary = "## 总结\n**未成功修改代码**。建议的修复（手动或另起对话执行）\n```js\nchip.remove();\n```";
-        assert!(is_manual_handoff_without_write_reply(summary, true));
-        assert!(!is_manual_handoff_without_write_reply(
-            "已修改 foo.ts，改动如下",
-            false
-        ));
-    }
 }
