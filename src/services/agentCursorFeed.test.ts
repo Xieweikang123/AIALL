@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAgentExplorationProgress,
-  buildPublicToolActionSummary,
   buildAgentExplorationTimeline,
   buildCursorAgentFeed,
   buildCursorAgentTimeline,
@@ -171,7 +170,7 @@ describe("agentCursorFeed", () => {
     expect(feed[1].kind).toBe("action");
   });
 
-  it("adds a public action summary before tools when a turn has no narrative", () => {
+  it("omits any synthetic summary for tool-only turns without narrative", () => {
     const feed = buildCursorAgentFeed({
       groups: [{
         turn: 1,
@@ -208,15 +207,11 @@ describe("agentCursorFeed", () => {
       isRunning: false,
     });
 
-    expect(feed[0]).toMatchObject({
-      kind: "thought",
-      text: "行动摘要 · 我先查看项目结构和关键文件，建立上下文。",
-    });
-    expect(feed[1]?.kind).toBe("action");
-    expect(buildPublicToolActionSummary([])).toBeNull();
+    expect(feed.some((item) => item.kind === "thought")).toBe(false);
+    expect(feed.filter((item) => item.kind === "action")).toHaveLength(2);
   });
 
-  it("does not repeat the same public summary across consecutive tool turns", () => {
+  it("does not emit synthetic summaries across consecutive tool turns", () => {
     const tool = (id: string, name: "read_file" | "list_dir"): AgentRoundTool => ({
       id,
       turn: 1,
@@ -240,7 +235,7 @@ describe("agentCursorFeed", () => {
       isRunning: true,
     });
 
-    expect(feed.filter((item) => item.kind === "thought")).toHaveLength(1);
+    expect(feed.filter((item) => item.kind === "thought")).toHaveLength(0);
     expect(feed.filter((item) => item.kind === "action")).toHaveLength(3);
   });
 
