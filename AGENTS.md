@@ -87,6 +87,24 @@ AIALL 要做 **Cursor 类通用编程助手**：会查仓库、会改、会验�
 
 Sidecar 已按策略 B 删除，见 [`SIDECAR_DELETION.md`](SIDECAR_DELETION.md)。桌面功能以 `src-tauri/` 为准；`server/` 仅 Vitest 契约 / parity（非 HTTP）。SSOT 见 [`AGENT_SSOT.md`](AGENT_SSOT.md)：Rust 跑行为、TS 测契约、shared 钉常量。
 
+## Web 模式开发约定
+
+Web 模式（`npm run dev:web` / `start-web.bat`）是正式使用场景，用于远程写代码。浏览器在本地，agent-server 在远端机器。
+
+| 规则 | 说明 |
+|------|------|
+| **路径 = 全路径** | web 模式下项目路径一律用完整绝对路径（`D:\project\AIALL` 或 `/home/user/project`）。`showDirectoryPicker` 只返回文件夹短名（`handle.name`），不可靠，不用于路径持久化 |
+| **agent-server 是唯一真相源** | 所有文件读写、目录列表、Git 操作都走 HTTP 后端 → agent-server。浏览器 File System API 只是 Tauri 桌面模式的可选加速，web 模式不使用 |
+| **路径持久化存全路径** | localStorage 里存的必须是全路径。`showDirectoryPicker` 选完后如果拿不到全路径，不存 |
+| **刷新后恢复** | 页面 reload 时，存的路径含路径分隔符（`/` 或 `\`）才自动打开；纯文件夹名跳过，让用户手动输路径或重新选择 |
+| **agent-server 是前置条件** | `start-web.bat` 必须先启动 agent-server，web UI 才能工作。`webProjectHandle` 是内存变量，刷新即丢失 |
+
+**代码约束**：
+- `pickProjectFolder()` — web 模式返回 `cancelled: true`，不走 `showDirectoryPicker`
+- `listDirectory()` — web 模式始终走 HTTP 后端，跳过 `webProjectHandle` 分支
+- `openProjectByPath()` — web 模式始终走 agent-server 后端（`loadDirChildren`）
+- `loadSavedProject()` — web 模式下纯短名（无 `/` 或 `\`）跳过自动打开
+
 ## Agent 编排分层
 
 编排代码分三层，修改前先确认自己动的是哪一层：

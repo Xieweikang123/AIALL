@@ -23,11 +23,6 @@ const routes: RouteRecordRaw[] = [
     component: () => import("../views/AiConfigView.vue"),
   },
   {
-    path: "/icon-templates",
-    name: "IconTemplates",
-    component: () => import("../views/IconTemplatesView.vue"),
-  },
-  {
     path: "/web-agent",
     name: "WebAgent",
     component: () => import("../views/WebAgentView.vue"),

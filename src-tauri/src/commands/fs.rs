@@ -435,3 +435,73 @@ pub async fn fs_rename(from: String, to: String, project_root: Option<String>) -
         },
     }
 }
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct DriveInfo {
+    pub name: String,
+    pub path: String,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct DrivesResult {
+    pub ok: bool,
+    pub system: String,
+    pub drives: Vec<DriveInfo>,
+    pub current_dir: String,
+    pub home_dir: Option<String>,
+}
+
+#[tauri::command]
+pub async fn fs_drives() -> Result<DrivesResult, String> {
+    Ok(fs_drives_core())
+}
+
+pub fn fs_drives_core() -> DrivesResult {
+    let mut drives = Vec::new();
+    #[cfg(target_os = "windows")]
+    {
+        for letter in b'A'..=b'Z' {
+            let drive_str = format!("{}:\\", letter as char);
+            let path = std::path::Path::new(&drive_str);
+            if path.exists() {
+                drives.push(DriveInfo {
+                    name: format!("{}: 盘", letter as char),
+                    path: drive_str,
+                });
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        drives.push(DriveInfo {
+            name: "根目录 (/)".into(),
+            path: "/".into(),
+        });
+        if let Some(home) = std::env::var("HOME").ok().filter(|s| !s.is_empty()) {
+            drives.push(DriveInfo {
+                name: "用户主目录 (~/)".into(),
+                path: home,
+            });
+        }
+    }
+
+    let current_dir = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    let home_dir = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .ok()
+        .filter(|s| !s.is_empty());
+
+    DrivesResult {
+        ok: true,
+        system: std::env::consts::OS.to_string(),
+        drives,
+        current_dir,
+        home_dir,
+    }
+}
+

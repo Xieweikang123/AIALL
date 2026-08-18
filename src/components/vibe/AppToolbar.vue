@@ -204,15 +204,6 @@
           </svg>
           <span class="toolbar-nav-label">对话</span>
         </button>
-        <button type="button" class="toolbar-nav-btn" title="图标模板：供对话页桌面自动化匹配点击" @click="router.push('/icon-templates')">
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <rect x="2.5" y="2.5" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/>
-            <rect x="8.5" y="2.5" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/>
-            <rect x="2.5" y="8.5" width="5" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/>
-            <path d="M9.5 11h3M11 9.5v3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-          </svg>
-          <span class="toolbar-nav-label">模板</span>
-        </button>
         <button type="button" class="toolbar-nav-btn" title="AI 配置" @click="router.push('/ai-config')">
           <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.2"/>
@@ -241,6 +232,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { useRouter } from "vue-router";
 import { getEventValue, formatSessionTime } from "../../utils/vibeHelpers";
+import { isTauriEnv } from "../../services/tauriInvoke";
 import {
   listProjectHistory,
   removeProjectFromHistory,
@@ -440,7 +432,13 @@ function clearRecentProjects() {
 }
 
 function refreshProjectHistoryList() {
-  projectHistoryList.value = listProjectHistory();
+  const all = listProjectHistory();
+  // Web 模式：过滤掉不含路径分隔符的短名条目（来自 showDirectoryPicker，不可用）
+  if (!isTauriEnv()) {
+    projectHistoryList.value = all.filter((e) => /[\\\/]/.test(e.path));
+  } else {
+    projectHistoryList.value = all;
+  }
 }
 </script>
 
@@ -1117,6 +1115,25 @@ function refreshProjectHistoryList() {
 
   .toolbar-nav-btn {
     padding: 5px 7px;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-toolbar {
+    padding: 4px 8px;
+  }
+
+  .toolbar-brand .title {
+    display: none;
+  }
+
+  .toolbar-project .path-current {
+    max-width: 130px;
+  }
+
+  .project-history-popover {
+    width: min(calc(100vw - 20px), 320px);
+    right: -40px;
   }
 }
 

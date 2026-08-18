@@ -195,6 +195,9 @@
           {{ suggestion.label }}
         </button>
       </div>
+      <div v-if="composerDisabledHint" class="chat-composer-hint" role="status">
+        {{ composerDisabledHint }}
+      </div>
       <div class="chat-input-field" @keydown.capture="$emit('on-composer-field-keydown', $event)">
         <div v-if="mentionOpen && mentionResults.length" class="mention-dropdown">
           <button
@@ -698,6 +701,8 @@ interface Props {
   aiConfigStatusText: string;
   canSendChat: boolean;
   chatPlaceholder: string;
+  /** 输入框禁用时直接在界面上显示的原因文字 */
+  composerDisabledHint?: string;
   recoverableAssistantMsg: ChatMessage | null;
   agentRunningStatus?: string;
   agentRunStageLabel?: string;
@@ -782,6 +787,7 @@ const props = withDefaults(defineProps<Props>(), {
   memorySuggestSaving: false,
   pendingMemoryProposals: () => [],
 	pendingSkillProposals: () => [],
+	composerDisabledHint: "",
 	agentRunningStatus: "",
 	agentRunStageLabel: "",
 	pendingApproval: false,

@@ -11,14 +11,13 @@
           </span>
         </div>
         <p class="desc">
-          通用对话：<code class="inline-code">总结 + URL</code> 抓取总结；<code class="inline-code">打开 微信</code> 等桌面自动化（需「图标模板」）。
+          通用对话：输入 <code class="inline-code">总结 + URL</code> 抓取总结。
           项目内改码请用 <router-link class="inline-link" to="/vibe-coding">Vibe Coding</router-link>。
         </p>
       </div>
 
       <div class="head-actions">
         <router-link class="secondary link-btn" to="/vibe-coding">Vibe Coding</router-link>
-        <router-link class="secondary link-btn" to="/icon-templates">图标模板</router-link>
         <router-link class="secondary link-btn" to="/ai-config">去配置</router-link>
         <button type="button" class="secondary" :disabled="sending || !messages.length" @click="clearAll">清空</button>
       </div>

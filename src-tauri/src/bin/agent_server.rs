@@ -281,8 +281,22 @@ async fn handle_agent_run(
     config: &ServerConfig,
     state: &RunCancelState,
 ) -> Result<(), String> {
-    let mut request: AgentRunRequest = serde_json::from_slice(&body)
-        .map_err(|e| format!("JSON 解析失败: {e}"))?;
+    let mut request: AgentRunRequest = match serde_json::from_slice(&body) {
+        Ok(r) => r,
+        Err(e) => {
+            // 空/非法请求体：写回明确的 400，而不是把连接直接断开让客户端看到裸报错
+            let body_empty = body.is_empty() || body.iter().all(|b| b.is_ascii_whitespace());
+            let msg = if body_empty {
+                "empty request body: expected JSON { prompt, projectPath, endpoint, model, ... }"
+                    .to_string()
+            } else {
+                format!("JSON 解析失败: {e}")
+            };
+            write_headers(w, "400 Bad Request", "text/plain", &[]).await?;
+            w.write_all(msg.as_bytes()).await.map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+    };
     // 服务端模式：浏览器不传明文 key / endpoint / model 时，用服务端配置补齐。
     let ai = config.ai.read().await.clone();
     if let Some(ai) = ai.as_ref() {
@@ -625,6 +639,7 @@ async fn handle_connection(
             403 => "403 Forbidden",
             404 => "404 Not Found",
             409 => "409 Conflict",
+            502 => "502 Bad Gateway",
             _ => "500 Internal Server Error",
         };
         write_headers(&mut write_half, status_line, &resp.content_type, &[]).await?;

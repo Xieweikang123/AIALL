@@ -114,17 +114,24 @@ describe("active provider resolution", () => {
 });
 
 describe("PROVIDER_PRESETS", () => {
-  it("每条预设都有非空 name/endpoint/model", () => {
+  it("每条预设都有非空 name/endpoint；model 可为空（手动填或拉取模型列表）", () => {
     expect(PROVIDER_PRESETS.length).toBeGreaterThan(0);
     for (const preset of PROVIDER_PRESETS) {
       expect(preset.name.trim()).toBeTruthy();
       expect(preset.endpoint.trim()).toBeTruthy();
-      expect(preset.model.trim()).toBeTruthy();
+      expect(preset.model.trim()).toBeDefined();
     }
   });
 
   it("预设名称不重复", () => {
     const names = PROVIDER_PRESETS.map((p) => p.name);
     expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("OpenCode Go 合并为单条预设且模型留空", () => {
+    const openCodeGo = PROVIDER_PRESETS.filter((p) => p.name === "OpenCode Go");
+    expect(openCodeGo).toHaveLength(1);
+    expect(openCodeGo[0].endpoint).toBe("https://opencode.ai/zen/go/v1");
+    expect(openCodeGo[0].model).toBe("");
   });
 });

@@ -462,6 +462,20 @@
   overflow: auto;
 }
 
+.chat-composer-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(210, 153, 34, 0.35);
+  background: rgba(210, 153, 34, 0.08);
+  font-size: 11px;
+  line-height: 1.5;
+  color: #d29922;
+}
+
 .chat-input-field {
   position: relative;
 }

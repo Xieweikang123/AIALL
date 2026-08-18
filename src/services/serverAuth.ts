@@ -306,3 +306,9 @@ export function getServerBackendProbe(): Promise<ServerBackendProbe> {
   }
   return backendProbeCache;
 }
+
+/** 重置探活缓存并重新探测。 */
+export async function resetServerBackendProbe(): Promise<ServerBackendProbe> {
+  backendProbeCache = null;
+  return getServerBackendProbe();
+}

@@ -113,6 +113,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             send_notification,
+            commands::fs::fs_drives,
             commands::fs::fs_list,
             commands::fs::fs_read,
             commands::fs::fs_write,

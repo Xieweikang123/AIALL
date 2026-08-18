@@ -1,7 +1,8 @@
 <template>
   <div class="vibe-page">
     <div v-if="!isDesktopRuntime && !serverBackendAvailable" class="vibe-web-banner" role="status">
-      当前为浏览器预览且未检测到 agent-server 后端：Agent / Git / 文件读写不可用。请运行 <code>npm run dev</code> 启动 Tauri，或在部署后访问服务端地址。
+      <span>当前为浏览器预览且未检测到 agent-server 后端（端口 8787）：Agent / Git / 文件读写不可用。</span>
+      <button type="button" class="vibe-web-banner-recheck" @click="recheckBackendServer">🔄 重新检测后端</button>
     </div>
     <AppToolbar
       :project-path="projectPath"
@@ -31,16 +32,27 @@
         'chat-collapsed': chatCollapsed,
         'file-panel-collapsed': filePanelCollapsed,
         'git-foreground': gitPanelInForeground,
+        'mobile-mode': isMobileView,
+        'mobile-tab-chat': isMobileView && activeMobileTab === 'chat',
+        'mobile-tab-editor': isMobileView && activeMobileTab === 'editor',
+        'mobile-tab-files': isMobileView && activeMobileTab === 'files',
+        'mobile-tab-git': isMobileView && activeMobileTab === 'git',
       }"
     >
       <VibeWorkspaceWelcome
         :show="!projectOpened && !loadingTree"
         :loading-tree="loadingTree"
         :picking-folder="pickingFolder"
-        :config-ready="configReady"
-        :api-key-ready="apiKeyReady"
+        :config-ready="effectiveAiReady"
+        :api-key-ready="effectiveAiReady"
+        :tree-error="treeError"
+        :is-desktop-runtime="isDesktopRuntime"
+        :server-probe="serverProbeState"
+        :project-path="projectPath"
         @open-project="handleOpenProject"
         @open-ai-config="openAiConfigPage"
+        @recheck-server="recheckBackendServer"
+        @open-path="openProjectByPath"
       />
       <FilePanel
         :file-panel-width="filePanelWidth"
@@ -131,7 +143,7 @@
           :selected-git-files="selectedGitFiles"
           :git-diff-loading-key="gitDiffLoadingKey"
           :git-remote-action="gitRemoteAction"
-          :config-ready="configReady"
+          :config-ready="effectiveAiReady"
           :file-watcher-active="fileWatcherActive"
           :file-watcher-connected="fileWatcherConnected"
           :expanded-git-log-entries="expandedGitLogEntries"
@@ -278,8 +290,8 @@
           v-else-if="gitPanelMode === 'project' && projectPanelView === 'knowledge'"
           layout="sidebar"
           :project-opened="projectOpened"
-          :config-ready="configReady"
-          :api-key-ready="apiKeyReady"
+          :config-ready="effectiveAiReady"
+          :api-key-ready="effectiveAiReady"
           :has-knowledge="knowledgeHasContent"
           :knowledge-draft="knowledgeDraft"
           :knowledge-meta="knowledgeMeta"
@@ -311,7 +323,7 @@
         <ProjectArchitectReviewPanel
           v-else-if="gitPanelMode === 'project' && projectPanelView === 'health'"
           :project-opened="projectOpened"
-          :review-ready="configReady && apiKeyReady"
+          :review-ready="effectiveAiReady"
           :review-loading="reviewLoading"
           :review-message="reviewMessage"
           :has-review="reviewHasContent"
@@ -348,7 +360,7 @@
           :edge-count="codeMapDocument?.edges.length ?? 0"
           :truncated-count="codeMapDocument?.truncatedCount ?? 0"
           :annotate-enabled="codeMapAnnotateEnabled"
-          :annotate-ready="configReady && apiKeyReady"
+          :annotate-ready="effectiveAiReady"
           :is-stale="codeMapIsStale"
           @update:annotate-enabled="codeMapAnnotateEnabled = $event"
           @generate="() => void generateCodeMap()"
@@ -417,8 +429,8 @@
           layout="main"
           :chat-collapsed="chatCollapsed"
           :project-opened="projectOpened"
-          :config-ready="configReady"
-          :api-key-ready="apiKeyReady"
+          :config-ready="effectiveAiReady"
+          :api-key-ready="effectiveAiReady"
           :has-knowledge="knowledgeHasContent"
           :knowledge-draft="knowledgeDraft"
           :knowledge-meta="knowledgeMeta"
@@ -618,7 +630,7 @@
           :selected-git-files="selectedGitFiles"
           :git-diff-loading-key="gitDiffLoadingKey"
           :git-remote-action="gitRemoteAction"
-          :config-ready="configReady"
+          :config-ready="effectiveAiReady"
           :file-watcher-active="fileWatcherActive"
           :file-watcher-connected="fileWatcherConnected"
           :expanded-git-log-entries="expandedGitLogEntries"
@@ -751,11 +763,12 @@
         :chat-sending="chatSending"
         :chat-messages="chatMessages"
         :chat-error="chatError"
-        :config-ready="configReady"
-        :api-key-ready="apiKeyReady"
+        :config-ready="effectiveAiReady"
+        :api-key-ready="effectiveAiReady"
         :ai-config-status-text="aiConfigStatusText"
         :can-send-chat="canSendChat"
         :chat-placeholder="chatPlaceholder"
+        :composer-disabled-hint="composerDisabledHint"
         :recoverable-assistant-msg="recoverableAssistantMsg"
         :agent-running-status="agentRunningStatusText"
         :agent-run-stage-label="agentRunStageLabelText"
@@ -866,7 +879,8 @@
             ref="composerRef"
             class="chat-composer-editor"
             :placeholder="chatSending ? '输入新指令将打断当前任务…' : chatPlaceholder"
-            :disabled="!configReady || !apiKeyReady || !projectOpened || !isDesktopRuntime"
+            :disabled="!projectOpened || !agentRunReady"
+            :disabled-hint="composerDisabledHint"
             :draft-key="composerDraftKey"
             :project-path="projectPath"
             @mention-change="onComposerMentionChange"
@@ -896,6 +910,63 @@
         <span class="chat-expand-rail-label">AI 助手</span>
       </button>
     </main>
+
+    <!-- 移动端底部 Tab 导航条 (仅在移动端小屏且已打开项目时显示) -->
+    <nav v-if="isMobileView && projectOpened" class="mobile-nav-bar" role="navigation" aria-label="移动端工作区导航">
+      <button
+        type="button"
+        class="mobile-nav-item"
+        :class="{ active: activeMobileTab === 'chat' }"
+        @click="switchMobileTab('chat')"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+        <span>对话</span>
+        <span v-if="sendingSessionIdList.length" class="mobile-nav-badge running" title="运行中" />
+      </button>
+
+      <button
+        type="button"
+        class="mobile-nav-item"
+        :class="{ active: activeMobileTab === 'editor' }"
+        @click="switchMobileTab('editor')"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="16 18 22 12 16 6" />
+          <polyline points="8 6 2 12 8 18" />
+        </svg>
+        <span>代码</span>
+      </button>
+
+      <button
+        type="button"
+        class="mobile-nav-item"
+        :class="{ active: activeMobileTab === 'files' }"
+        @click="handleMobileFilesTabClick"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+        </svg>
+        <span>文件</span>
+      </button>
+
+      <button
+        type="button"
+        class="mobile-nav-item"
+        :class="{ active: activeMobileTab === 'git' }"
+        @click="handleMobileGitTabClick"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="6" cy="6" r="3" />
+          <circle cx="6" cy="18" r="3" />
+          <path d="M18 9a9 9 0 0 1-9 9" />
+          <polyline points="15 6 18 9 15 12" />
+        </svg>
+        <span>Git</span>
+        <span v-if="gitChangeCount > 0" class="mobile-nav-badge" :title="`${gitChangeCount} 处变更`" />
+      </button>
+    </nav>
 
     <Teleport to="body">
       <ConfirmPopup />
@@ -998,6 +1069,13 @@
       @open-file="onQuickSearchOpenFile"
       @open-session="onQuickSearchOpenSession"
     />
+
+    <DirectoryBrowser
+      :open="dirBrowserOpen"
+      :initial-path="projectPath.trim() || ''"
+      @close="dirBrowserOpen = false"
+      @select="onDirBrowserSelect"
+    />
   </div>
 </template>
 
@@ -1030,6 +1108,7 @@ import ChatPanel from "../components/vibe/ChatPanel.vue";
 import VibeChatMessages from "../components/vibe/VibeChatMessages.vue";
 import VibeWorkspaceWelcome from "../components/vibe/VibeWorkspaceWelcome.vue";
 import QuickSearchModal from "../components/vibe/QuickSearchModal.vue";
+import DirectoryBrowser from "../components/vibe/DirectoryBrowser.vue";
 import DebugLogViewer from "../components/vibe/DebugLogViewer.vue";
 import { vibeChatMessageContextKey, type VibeChatMessageContext } from "../composables/vibeChatMessageContext";
 import { useConfirm } from "../composables/useConfirm";
@@ -1057,7 +1136,15 @@ import { restoreChatScrollPosition, useWorkspaceUiPersistence } from "../composa
 import { PROJECT_ARCHITECT_REVIEW_REL_PATH } from "../services/vibeProjectArchitectReviewClient";
 import { PROJECT_KNOWLEDGE_REL_PATH } from "../services/vibeProjectKnowledgeClient";
 import { isTauriEnv, tauriInvoke } from "../services/tauriInvoke";
-import { getServerBackendProbe, isServerBackendAvailable } from "../services/serverAuth";
+import {
+  fetchServerAiConfig,
+  getServerBackendProbe,
+  isServerBackendAvailable,
+  isServerLoggedIn,
+  resetServerBackendProbe,
+  type ServerAiConfigInfo,
+  type ServerBackendProbe,
+} from "../services/serverAuth";
 import { agentRunStageLabel, resolveAgentRunStage } from "../services/agentRunLiveState";
 import { distillExplorationRun } from "../services/explorationDistill";
 import {
@@ -1162,6 +1249,9 @@ import {
   formatFetchError,
   writeFile,
   type FileEntry,
+  setWebProjectHandle,
+  getWebProjectHandle,
+  isWebProjectActive,
 } from "../services/vibeCodingClient";
 import {
   fetchGitDiffContent,
@@ -1185,11 +1275,24 @@ const router = useRouter();
 const isDesktopRuntime = computed(() => isTauriEnv());
 
 const debugLogsOpen = ref(false);
+const dirBrowserOpen = ref(false);
 const serverBackendAvailable = ref(isServerBackendAvailable());
-if (!isDesktopRuntime.value && !serverBackendAvailable.value) {
-  void getServerBackendProbe().then((probe) => {
-    serverBackendAvailable.value = probe !== "unreachable";
-  });
+const serverProbeState = ref<ServerBackendProbe>("unreachable");
+
+async function checkBackendServer(reset = false) {
+  if (isDesktopRuntime.value) return;
+  const probe = reset ? await resetServerBackendProbe() : await getServerBackendProbe();
+  serverProbeState.value = probe;
+  serverBackendAvailable.value = probe !== "unreachable";
+  void refreshServerAiConfig();
+}
+
+if (!isDesktopRuntime.value) {
+  void checkBackendServer(false);
+}
+
+function recheckBackendServer() {
+  void checkBackendServer(true);
 }
 
 function openAiConfigPage() {
@@ -1205,7 +1308,7 @@ const git = useGitPanel(
   () => projectPath.value.trim(),
   () => projectOpened.value,
   () => aiConfig.value,
-  () => configReady.value,
+  () => effectiveAiReady.value,
   confirm,
   () => void refreshTree(),
 );
@@ -1635,6 +1738,9 @@ function switchToAdjacentSession(delta: number) {
 function handleSwitchSession(sessionId: string) {
   expandChat();
   switchSession(sessionId);
+  if (isMobileView.value) {
+    switchMobileTab("chat");
+  }
 }
 
 function onChatDragEnter(e: DragEvent) {
@@ -1687,23 +1793,72 @@ const modelNameForDisplay = computed(() => {
   const provider = aiConfig.value.providerName.trim();
   return provider ? `${provider} / ${model}` : model;
 });
-const aiConfigStatusText = computed(() => {
-  if (!configReady.value) return "未配置模型";
-  if (!apiKeyReady.value) return `${modelNameForDisplay.value}（未保存 API Key）`;
-  if (activeSessionProviderId.value) {
-    const pinned = providerOptions.value.find((p) => p.id === activeSessionProviderId.value);
-    if (pinned) return `${pinned.name} / ${pinned.model}（本会话）`;
-  }
-  return modelNameForDisplay.value;
+/** 服务器模式（web + agent-server）下服务端持有的 AI 配置（不含 key） */
+const serverAiConfig = ref<ServerAiConfigInfo | null>(null);
+
+/** 服务端 AI 配置是否就绪：接口 + 模型 + 服务端已持有 key */
+const serverAiReady = computed(() => {
+  const c = serverAiConfig.value;
+  return Boolean(c?.ok && c.endpoint.trim() && c.model.trim() && c.hasServerKey);
 });
+
+/** Agent 对话是否可运行：桌面看本地配置；web 看 agent-server 可达 + 服务端配置就绪（需登录时已登录） */
+const agentRunReady = computed(() => {
+  if (isDesktopRuntime.value) return configReady.value && apiKeyReady.value;
+  if (serverProbeState.value === "unreachable") return false;
+  if (serverProbeState.value === "auth" && !isServerLoggedIn()) return false;
+  return serverAiReady.value;
+});
+
+/** 界面各处实际使用的模型配置就绪状态（web 模式以服务端配置为准） */
+const effectiveAiReady = computed(() => {
+  if (isDesktopRuntime.value) return configReady.value && apiKeyReady.value;
+  return agentRunReady.value;
+});
+
+const aiConfigStatusText = computed(() => {
+  if (isDesktopRuntime.value) {
+    if (!configReady.value) return "未配置模型";
+    if (!apiKeyReady.value) return `${modelNameForDisplay.value}（未保存 API Key）`;
+    if (activeSessionProviderId.value) {
+      const pinned = providerOptions.value.find((p) => p.id === activeSessionProviderId.value);
+      if (pinned) return `${pinned.name} / ${pinned.model}（本会话）`;
+    }
+    return modelNameForDisplay.value;
+  }
+  if (serverProbeState.value === "unreachable") return "后端不可用（需 agent-server）";
+  if (serverProbeState.value === "auth" && !isServerLoggedIn()) return "未登录服务器";
+  if (!serverAiReady.value) return "服务端未配置模型";
+  const c = serverAiConfig.value;
+  return `${c?.endpoint} / ${c?.model}（服务器）`;
+});
+
 const canSendChat = computed(
   () =>
     !composerEmpty.value
-    && configReady.value
-    && apiKeyReady.value
     && projectOpened.value
-    && isDesktopRuntime.value,
+    && agentRunReady.value,
 );
+
+/** 输入框禁用时直接显示在界面上的原因文字 */
+const composerDisabledHint = computed(() => {
+  if (!projectOpened.value) return "请先打开项目后再提问";
+  if (isDesktopRuntime.value) {
+    if (!configReady.value) return "请先前往 AI 配置填写接口与模型";
+    if (!apiKeyReady.value) return "模型已选，请先保存 API Key";
+    return "";
+  }
+  if (serverProbeState.value === "unreachable") {
+    return "当前为浏览器预览，未检测到 agent-server 后端（端口 8787），请先启动 agent-server";
+  }
+  if (serverProbeState.value === "auth" && !isServerLoggedIn()) {
+    return "需登录服务器：请先在「AI 配置」页输入服务器密码登录";
+  }
+  if (!serverAiReady.value) {
+    return "请先在「AI 配置」页配置服务端接口、模型与 API Key";
+  }
+  return "";
+});
 
 const {
   knowledgeBody,
@@ -1732,8 +1887,8 @@ const {
 } = useProjectKnowledge({
   projectPath,
   projectOpened,
-  configReady,
-  apiKeyReady,
+  configReady: effectiveAiReady,
+  apiKeyReady: effectiveAiReady,
   aiConfig,
   gitHead: gitHeadCommit,
 });
@@ -1766,8 +1921,8 @@ const {
 } = useProjectArchitectReview({
   projectPath,
   projectOpened,
-  configReady,
-  apiKeyReady,
+  configReady: effectiveAiReady,
+  apiKeyReady: effectiveAiReady,
   aiConfig,
   gitHead: gitHeadCommit,
   confirm,
@@ -1803,7 +1958,7 @@ const {
 } = useCodeMap({
   projectPath,
   gitHead: gitHeadCommit,
-  configReady,
+  configReady: effectiveAiReady,
   aiConfig: () => ({
     endpoint: aiConfig.value.endpoint,
     apiKey: aiConfig.value.apiKey,
@@ -1968,6 +2123,9 @@ const {
   editorCollapsed,
   chatCollapsed,
   filePanelCollapsed,
+  isMobileView,
+  activeMobileTab,
+  switchMobileTab,
   startResize,
   stopResize,
   onResizeKeydown,
@@ -1980,6 +2138,16 @@ const {
   getChatPanelMaxWidth,
   CHAT_MIN_WIDTH,
 } = usePanelLayout(workspaceRef);
+
+function handleMobileFilesTabClick() {
+  gitPanelMode.value = "files";
+  switchMobileTab("files");
+}
+
+function handleMobileGitTabClick() {
+  gitPanelMode.value = "git";
+  switchMobileTab("git");
+}
 
 function reloadAiConfig() {
   const cfg = loadAiChatBaseFromStorage();
@@ -1997,6 +2165,14 @@ function reloadAiConfig() {
   providerOptions.value = (persisted?.providers || [])
     .filter((p) => p.model?.trim())
     .map((p) => ({ id: p.id, name: p.name.trim() || "默认供应商", model: p.model.trim() }));
+  void refreshServerAiConfig();
+}
+
+/** web 模式拉取服务端 AI 配置（桌面模式跳过），刷新输入框可用状态 */
+async function refreshServerAiConfig() {
+  if (isDesktopRuntime.value) return;
+  const info = await fetchServerAiConfig();
+  serverAiConfig.value = info;
 }
 
 /** Resolve the AI provider pinned to a session; null = use global config. */
@@ -2022,6 +2198,11 @@ function loadSavedProject() {
   if (saved) {
     projectPath.value = saved;
     setDebugLogProjectRoot(saved);
+    // Web 模式下 showDirectoryPicker 只返回文件夹短名（无路径分隔符），
+    // 刷新后 webProjectHandle 丢失，短名发给后端找不到目录。
+    // 跳过自动打开，让用户手动输入完整路径或重新选择文件夹。
+    const isShortName = !isTauriEnv() && !/[\\\/]/.test(saved);
+    if (isShortName) return;
     void openProjectByPath(saved);
   }
 }
@@ -2095,7 +2276,7 @@ const {
   projectPath,
   projectOpened,
   aiConfig,
-  configReady,
+  configReady: effectiveAiReady,
   confirm,
   confirmUnsaved,
   inputPrompt,
@@ -2147,6 +2328,9 @@ function dismissPlanPanelForeground() {
 async function openFile(path: string, options?: Parameters<typeof openFileCore>[1]) {
   dismissPlanPanelForeground();
   dismissGitPanelForeground();
+  if (isMobileView.value) {
+    switchMobileTab("editor");
+  }
   return openFileCore(path, options);
 }
 
@@ -2170,6 +2354,9 @@ function onOpenSourceFile(path: string) {
 async function showGitFileDiff(filePath: string, staged = false) {
   dismissPlanPanelForeground();
   dismissGitPanelForeground();
+  if (isMobileView.value) {
+    switchMobileTab("editor");
+  }
   return showGitFileDiffCore(filePath, staged);
 }
 
@@ -2381,6 +2568,9 @@ registerEscapeDismiss(
 function handleStartNewSession() {
   expandChat();
   startNewSession();
+  if (isMobileView.value) {
+    switchMobileTab("chat");
+  }
   void nextTick(() => composerRef.value?.focus());
 }
 
@@ -2598,7 +2788,7 @@ const agent = useAgentRun({
   chatError,
   projectPath,
   projectOpened,
-  configReady,
+  configReady: effectiveAiReady,
   aiConfig,
   resolveSessionAiConfig: resolveSessionAiConfigForSession,
   activeAssistantMsgId,
@@ -3151,14 +3341,26 @@ async function openProjectByPath(dirPath: string) {
     // 串行执行，避免浏览器连接池阻塞
     const tDir0 = performance.now();
     log("dir-start");
-    const items = await autoRetryWithCountdown(
-      () => loadDirChildren(normalized),
-      {
-        onRetry: (remaining, attempt, max) => {
-          treeError.value = `打开项目失败，正在重试… ${remaining}s (${attempt}/${max})`;
+    // Web 模式始终走 agent-server 后端（showDirectoryPicker 短名不可靠）
+    // Tauri 桌面模式优先走浏览器 handle 加载文件树
+    let items: TreeNode[];
+    if (!isTauriEnv() || !isWebProjectActive()) {
+      items = await autoRetryWithCountdown(
+        () => loadDirChildren(normalized),
+        {
+          onRetry: (remaining, attempt, max) => {
+            treeError.value = `打开项目失败，正在重试… ${remaining}s (${attempt}/${max})`;
+          },
         },
-      },
-    );
+      );
+    } else {
+      const result = await listDirectory(normalized);
+      items = (result.ok ? result.items : []).map(entryToNode);
+      if (!result.ok) {
+        treeError.value = result.error || "加载文件夹失败";
+        return;
+      }
+    }
     log(`dir-done(${items.length}items, ${Math.round(performance.now() - tDir0)}ms)`);
     const dirs = items.filter(i => i.isDirectory).length;
     const files = items.filter(i => !i.isDirectory).length;
@@ -3233,13 +3435,19 @@ async function openProjectByPath(dirPath: string) {
 
 async function handleOpenProject() {
   if (openingProject.value) return;
-  openingProject.value = true;
-  pickingFolder.value = true;
   treeError.value = "";
 
+  // Web 模式：打开目录浏览器
+  if (!isTauriEnv()) {
+    dirBrowserOpen.value = true;
+    return;
+  }
+
+  // Tauri 桌面模式：使用原生文件夹选择器
+  openingProject.value = true;
+  pickingFolder.value = true;
   try {
     const currentPath = projectPath.value.trim();
-    // 切换项目时，打开父目录而不是当前项目目录，方便选择其他项目
     const initialDir = currentPath ? currentPath.replace(/[\\/][^\\/]+$/, "") : currentPath;
     const picked = await pickProjectFolder(initialDir);
     if (picked.cancelled) return;
@@ -3254,6 +3462,11 @@ async function handleOpenProject() {
     pickingFolder.value = false;
     openingProject.value = false;
   }
+}
+
+function onDirBrowserSelect(path: string) {
+  dirBrowserOpen.value = false;
+  void openProjectByPath(path);
 }
 
 async function openCurrentFolderInExplorer() {
@@ -3814,7 +4027,7 @@ function resolveUserMessageIndex(messageId: string): number {
 }
 
 async function resendFromMessage(messageId: string) {
-  if (chatSending.value || !configReady.value || !projectOpened.value) return;
+  if (chatSending.value || !agentRunReady.value || !projectOpened.value) return;
 
   const userIdx = resolveUserMessageIndex(messageId);
   if (userIdx < 0) return;
@@ -4163,7 +4376,7 @@ provide(vibeChatMessageContextKey, {
   chatMessages,
   chatSending,
   agentLiveRevision,
-  configReady,
+  configReady: effectiveAiReady,
   projectOpened,
   chainJumpVisible,
   expandedDiffs,

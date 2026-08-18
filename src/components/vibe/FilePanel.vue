@@ -336,7 +336,7 @@
                   v-for="s in group.items"
                   :key="s.id"
                   class="session-item"
-                  :class="{ active: s.id === activeSessionId, 'session-item--syncing': sessionSendingIds.includes(s.id) || s.status === 'active' }"
+                  :class="{ active: s.id === activeSessionId, 'session-item--syncing': sessionSendingIds.includes(s.id) }"
                 >
                   <button
                     type="button"
@@ -353,7 +353,7 @@
                     </span>
                     <span
                       class="session-item-title"
-                      :class="{ 'shimmer-text--fast': sessionSendingIds.includes(s.id) || s.status === 'active' }"
+                      :class="{ 'shimmer-text--fast': sessionSendingIds.includes(s.id) }"
                     >{{ s.title }}</span>
                   </button>
                   <div class="session-item-trailing">

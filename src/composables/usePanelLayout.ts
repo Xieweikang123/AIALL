@@ -12,8 +12,23 @@ const CHAT_MIN_WIDTH = 260;
 const CHAT_MAX_WIDTH = 1200;
 const EDITOR_MIN_WIDTH = 280;
 const RESIZE_HANDLES_WIDTH = 8;
+export const MOBILE_BREAKPOINT = 768;
+
+export type MobileTab = "chat" | "editor" | "files" | "git";
 
 export function usePanelLayout(workspaceRef: Ref<HTMLElement | null>) {
+  const isMobileView = ref(typeof window !== "undefined" ? window.innerWidth <= MOBILE_BREAKPOINT : false);
+  const activeMobileTab = ref<MobileTab>("chat");
+
+  function checkMobileView() {
+    if (typeof window === "undefined") return;
+    isMobileView.value = window.innerWidth <= MOBILE_BREAKPOINT;
+  }
+
+  function switchMobileTab(tab: MobileTab) {
+    activeMobileTab.value = tab;
+  }
+
   function loadPanelWidths(): { file: number; chat: number } {
     const parsed = lsGetJson<{ file?: number; chat?: number }>(PANEL_WIDTH_KEY);
     if (parsed && typeof parsed.file === "number" && typeof parsed.chat === "number") {
@@ -171,8 +186,12 @@ export function usePanelLayout(workspaceRef: Ref<HTMLElement | null>) {
     saveFilePanelCollapsed();
   }
 
-  if (getCurrentInstance()) {
+  if (typeof window !== "undefined" && getCurrentInstance()) {
+    window.addEventListener("resize", checkMobileView, { passive: true });
+    window.addEventListener("orientationchange", checkMobileView, { passive: true });
     onBeforeUnmount(() => {
+      window.removeEventListener("resize", checkMobileView);
+      window.removeEventListener("orientationchange", checkMobileView);
       document.removeEventListener("mousemove", onResize);
       document.removeEventListener("mouseup", stopResize);
     });
@@ -185,6 +204,10 @@ export function usePanelLayout(workspaceRef: Ref<HTMLElement | null>) {
     chatCollapsed,
     filePanelCollapsed,
     isResizing,
+    isMobileView,
+    activeMobileTab,
+    switchMobileTab,
+    checkMobileView,
     chatPanelStyle,
     startResize,
     stopResize,

@@ -35,7 +35,7 @@ export interface AiWebConfig {
   proxyUrl: string;
 }
 
-export type AiConfigTabKey = "chat" | "tts";
+export type AiConfigTabKey = "chat" | "tts" | "server" | "experimental";
 
 export interface PersistedAiConfig {
   version: typeof AI_CONFIG_VERSION;
@@ -57,9 +57,8 @@ export interface AiProviderPreset {
 }
 
 export const PROVIDER_PRESETS: AiProviderPreset[] = [
-  { name: "OpenCode Go（DeepSeek V4 Flash）", endpoint: "https://opencode.ai/zen/go/v1", model: "deepseek-v4-flash" },
-  { name: "OpenCode Go（DeepSeek V4 Pro）", endpoint: "https://opencode.ai/zen/go/v1", model: "deepseek-v4-pro" },
-  { name: "OpenCode Go（GLM-5.2）", endpoint: "https://opencode.ai/zen/go/v1", model: "glm-5.2" },
+  // 同一接口下有多个模型可选，model 留空由用户手动填或点「获取模型」拉取
+  { name: "OpenCode Go", endpoint: "https://opencode.ai/zen/go/v1", model: "" },
   { name: "默认（fufu.iqach.top）", endpoint: "https://fufu.iqach.top/v1", model: "mimo-v2.5-pro" },
   { name: "DeepSeek 官方", endpoint: "https://api.deepseek.com/v1", model: "deepseek-chat" },
   { name: "DeepSeek Reasoner", endpoint: "https://api.deepseek.com/v1", model: "deepseek-reasoner" },

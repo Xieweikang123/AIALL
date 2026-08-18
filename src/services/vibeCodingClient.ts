@@ -2,6 +2,85 @@ import { backendJsonParseErrorMessage } from "./agentConnectCopy";
 import { backendUrl } from "./backendBase";
 import { formatInvokeError, invokeBackend, isTauriEnv } from "./tauriInvoke";
 
+/** Web 模式下 showDirectoryPicker 选中的文件夹，后续文件操作直接在浏览器本地完成。 */
+let webProjectHandle: FileSystemDirectoryHandle | null = null;
+let webProjectRoot: string = "";
+
+/** 设置 Web 模式项目 handle（由 VibeCodingView 在选完文件夹后调用）。 */
+export function setWebProjectHandle(handle: FileSystemDirectoryHandle | null, root: string) {
+  webProjectHandle = handle;
+  webProjectRoot = root;
+}
+
+/** 获取当前 Web 模式项目 handle（供 VibeCodingView 在选完文件夹后使用）。 */
+export function getWebProjectHandle(): FileSystemDirectoryHandle | null {
+  return webProjectHandle;
+}
+
+/** 当前 Web 模式是否已选中文件夹。 */
+export function isWebProjectActive(): boolean {
+  return webProjectHandle !== null;
+}
+
+/** Rust fs/mod.rs 中的过滤逻辑，保持一致。 */
+const IGNORE_DIRS = new Set([
+  "node_modules", ".git", ".svn", ".hg", "__pycache__", ".cache",
+  "dist", "build", ".next", ".nuxt", "target",
+]);
+const HIDDEN_DOT_DIRS = new Set([".git", ".svn", ".hg", ".vs", ".idea", ".cache", ".next", ".nuxt"]);
+
+function shouldListEntry(name: string, isDirectory: boolean): boolean {
+  if (IGNORE_DIRS.has(name)) return false;
+  if (name.startsWith(".")) {
+    if (isDirectory) return !HIDDEN_DOT_DIRS.has(name);
+    return true;
+  }
+  return true;
+}
+
+function entryToBrowserFileEntry(handle: FileSystemHandle, path: string): FileEntry {
+  const isDir = handle.kind === "directory";
+  const name = handle.name;
+  const ext = isDir ? "" : name.includes(".") ? "." + name.split(".").pop()! : "";
+  return { name, path, isDirectory: isDir, isFile: !isDir, extension: ext };
+}
+
+async function listFromHandle(handle: FileSystemDirectoryHandle): Promise<FileEntry[]> {
+  const entries: FileEntry[] = [];
+  for await (const entry of (handle as any).values()) {
+    if (!shouldListEntry(entry.name, entry.kind === "directory")) continue;
+    entries.push(entryToBrowserFileEntry(entry, entry.name));
+  }
+  entries.sort((a, b) => {
+    if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  return entries;
+}
+
+async function readFromHandle(filePath: string): Promise<string> {
+  const parts = filePath.replace(/\\/g, "/").split("/");
+  let current: any = webProjectHandle!;
+  for (const part of parts.slice(0, -1)) {
+    current = await current.getFileHandle(part);
+  }
+  const fileHandle = await current.getFileHandle(parts[parts.length - 1]);
+  const file = await fileHandle.getFile();
+  return await file.text();
+}
+
+async function writeIntoHandle(filePath: string, content: string): Promise<void> {
+  const parts = filePath.replace(/\\/g, "/").split("/");
+  let current: any = webProjectHandle!;
+  for (const part of parts.slice(0, -1)) {
+    current = await current.getDirectoryHandle(part, { create: true });
+  }
+  const fileHandle = await current.getFileHandle(parts[parts.length - 1], { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(content);
+  await writable.close();
+}
+
 export function formatFetchError(error: unknown, fallback: string): string {
   const msg = error instanceof Error ? error.message : fallback;
   if (/unexpected end of json input/i.test(msg) || /failed to execute 'json'/i.test(msg)) {
@@ -431,6 +510,23 @@ export async function openProjectFolderInExplorer(folderPath: string): Promise<O
 }
 
 export async function pickProjectFolder(initialPath?: string): Promise<PickFolderResult> {
+  // Web 模式：不使用 showDirectoryPicker（只返回文件夹短名，刷新后丢失），
+  // 让用户在输入框输入完整路径，走 agent-server 后端。
+  if (!isTauriEnv()) {
+    return { ok: false, cancelled: true };
+  }
+  // Tauri 桌面模式：优先使用浏览器 File System Access API
+  if (typeof window !== "undefined" && typeof (window as any).showDirectoryPicker === "function") {
+    try {
+      const handle = await (window as any).showDirectoryPicker({ mode: "readwrite" });
+      webProjectHandle = handle;
+      webProjectRoot = handle.name;
+      return { ok: true, path: handle.name || "" };
+    } catch (e) {
+      if ((e as Error).name === "NotAllowedError") return { ok: false, cancelled: true };
+      return { ok: false, error: (e as Error).message };
+    }
+  }
   try {
     const result = await invokeBackend<PickFolderResult>(
       "system_pick_folder",
@@ -453,7 +549,62 @@ export async function pickProjectFolder(initialPath?: string): Promise<PickFolde
   }
 }
 
+export interface DriveInfo {
+  name: string;
+  path: string;
+}
+
+export interface DrivesResult {
+  ok: boolean;
+  system: string;
+  drives: DriveInfo[];
+  currentDir: string;
+  homeDir?: string;
+  error?: string;
+}
+
+export async function getSystemDrives(): Promise<DrivesResult> {
+  try {
+    return await invokeBackend<DrivesResult>(
+      "fs_drives",
+      {},
+      async () => {
+        const url = backendUrl("/backend/vibe/drives");
+        const response = await fetch(url);
+        return readJsonResponse<DrivesResult>(response);
+      },
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      system: "",
+      drives: [],
+      currentDir: "",
+      error: formatFetchError(error, "获取系统盘符失败"),
+    };
+  }
+}
+
 export async function listDirectory(dirPath: string): Promise<ListResult> {
+  // Web 模式始终走 agent-server 后端，不走浏览器 File System API
+  // （showDirectoryPicker 只返回短名，不可靠）
+  if (isTauriEnv() && webProjectHandle && dirPath) {
+    // Tauri 桌面模式：支持浏览器 handle 加载文件树
+    const relative = dirPath === webProjectRoot ? "" : dirPath.slice(webProjectRoot.length + 1);
+    try {
+      let target = webProjectHandle;
+      if (relative) {
+        const parts = relative.replace(/\\/g, "/").split("/").filter(Boolean);
+        for (const part of parts) {
+          target = await (target as any).getDirectoryHandle(part);
+        }
+      }
+      const items = await listFromHandle(target as any);
+      return { ok: true, path: dirPath, items };
+    } catch (error) {
+      return { ok: false, path: dirPath, items: [], error: (error as Error).message };
+    }
+  }
   try {
     return await invokeBackend<ListResult>(
       "fs_list",
@@ -470,6 +621,15 @@ export async function listDirectory(dirPath: string): Promise<ListResult> {
 }
 
 export async function readFile(filePath: string, projectRoot?: string): Promise<ReadResult> {
+  if (webProjectHandle && filePath && filePath !== webProjectRoot) {
+    const relative = filePath.slice(webProjectRoot.length + 1);
+    try {
+      const content = await readFromHandle(relative);
+      return { ok: true, content, path: filePath, size: content.length };
+    } catch (error) {
+      return { ok: false, content: "", path: filePath, size: 0, error: (error as Error).message };
+    }
+  }
   try {
     return await invokeBackend<ReadResult>(
       "fs_read",
@@ -489,6 +649,15 @@ export async function readFile(filePath: string, projectRoot?: string): Promise<
 }
 
 export async function writeFile(filePath: string, content: string, projectRoot?: string): Promise<WriteResult> {
+  if (webProjectHandle && filePath && filePath !== webProjectRoot) {
+    const relative = filePath.slice(webProjectRoot.length + 1);
+    try {
+      await writeIntoHandle(relative, content);
+      return { ok: true, path: filePath, size: content.length };
+    } catch (error) {
+      return { ok: false, path: filePath, size: 0, error: (error as Error).message };
+    }
+  }
   try {
     return await invokeBackend<WriteResult>(
       "fs_write",

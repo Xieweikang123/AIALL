@@ -6,6 +6,7 @@
     :data-placeholder="placeholder"
     contenteditable="true"
     :aria-disabled="disabled"
+    :title="disabled ? disabledHint || undefined : undefined"
     @input="onInput"
     @keydown="onKeydown"
     @paste="onPaste"
@@ -154,6 +155,8 @@ const CHIP_QUOTE = "composer-chip-quote";
 const props = defineProps<{
   placeholder?: string;
   disabled?: boolean;
+  /** 禁用时悬停提示（title），说明为什么当前不可输入 */
+  disabledHint?: string;
   draftKey?: string;
   projectPath?: string;
 }>();

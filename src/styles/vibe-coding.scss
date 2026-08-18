@@ -65,6 +65,7 @@
   --text-tertiary: rgba(255, 255, 255, 0.45);
 
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -72,6 +73,7 @@
   color: var(--text);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   overscroll-behavior: none;
+  padding-bottom: env(safe-area-inset-bottom, 0);
 }
 
 .vibe-web-banner {
@@ -82,6 +84,10 @@
   color: #f0e6c8;
   background: rgba(210, 153, 34, 0.18);
   border-bottom: 1px solid rgba(210, 153, 34, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .vibe-web-banner code {
@@ -90,6 +96,22 @@
   padding: 1px 5px;
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.25);
+}
+
+.vibe-web-banner-recheck {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 4px;
+  border: 1px solid rgba(210, 153, 34, 0.5);
+  background: rgba(210, 153, 34, 0.25);
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.vibe-web-banner-recheck:hover {
+  background: rgba(210, 153, 34, 0.4);
 }
 
 .workspace {
@@ -1814,16 +1836,171 @@ button.icon.tiny {
   color: rgba(200, 210, 220, 0.88);
 }
 
-// Responsive
-@media (max-width: 760px) {
+// Responsive & Mobile H5 Mode
+.mobile-nav-bar {
+  display: none;
+}
+
+@media (max-width: 768px) {
   .app-toolbar {
-    flex-wrap: wrap;
-    padding: 8px 12px;
-    gap: 8px;
+    flex-wrap: nowrap;
+    padding: 6px 10px;
+    gap: 6px;
+    min-height: 44px;
+
+    .toolbar-brand {
+      font-size: 13px;
+    }
+
+    .toolbar-project {
+      min-width: 0;
+      flex: 1;
+      order: unset;
+      width: auto;
+    }
+
+    .toolbar-actions {
+      gap: 4px;
+    }
   }
 
-  .toolbar-project {
-    order: 3;
-    width: 100%;
+  .workspace {
+    flex-direction: column;
+    overflow: hidden;
+
+    > .resize-handle {
+      display: none !important;
+    }
+
+    // 移动端单面板互斥全屏模式
+    &.mobile-mode {
+      > .file-panel,
+      > .editor-panel,
+      > .chat-panel,
+      > .git-foreground-panel {
+        display: none !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        min-width: 0 !important;
+        flex: 1 1 100% !important;
+        border-right: none !important;
+        border-left: none !important;
+      }
+
+      &.mobile-tab-chat > .chat-panel {
+        display: flex !important;
+      }
+
+      &.mobile-tab-editor > .editor-panel {
+        display: flex !important;
+      }
+
+      &.mobile-tab-files > .file-panel {
+        display: flex !important;
+      }
+
+      &.mobile-tab-git > .file-panel,
+      &.mobile-tab-git > .git-foreground-panel {
+        display: flex !important;
+      }
+
+      .chat-expand-rail {
+        display: none !important;
+      }
+    }
+  }
+
+  // 移动端底部导航栏
+  .mobile-nav-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    height: 52px;
+    background: #161b22;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    flex-shrink: 0;
+    z-index: 100;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+
+    .mobile-nav-item {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      flex: 1;
+      height: 100%;
+      background: transparent;
+      border: none;
+      color: rgba(255, 255, 255, 0.55);
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      padding: 4px 0;
+      transition: color 0.15s ease, background 0.15s ease;
+      touch-action: manipulation;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+
+      svg {
+        width: 18px;
+        height: 18px;
+        stroke: currentColor;
+      }
+
+      &:active {
+        background: rgba(255, 255, 255, 0.05);
+      }
+
+      &.active {
+        color: #58a6ff;
+        font-weight: 600;
+
+        svg {
+          stroke: #58a6ff;
+        }
+
+        &::after {
+          content: "";
+          position: absolute;
+          top: 0;
+          left: 50%;
+          transform: translateX(-50%);
+          width: 24px;
+          height: 2px;
+          background: #58a6ff;
+          border-radius: 0 0 2px 2px;
+        }
+      }
+
+      .mobile-nav-badge {
+        position: absolute;
+        top: 6px;
+        right: calc(50% - 14px);
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #3fb950;
+
+        &.running {
+          background: #58a6ff;
+          box-shadow: 0 0 6px #58a6ff;
+          animation: pulse 1.2s infinite;
+        }
+      }
+    }
+  }
+
+  // Monaco 编辑器在小屏下的适配
+  .editor-panel {
+    .editor-tabs-bar {
+      overflow-x: auto;
+      scrollbar-width: none;
+      &::-webkit-scrollbar {
+        display: none;
+      }
+    }
   }
 }
+

@@ -112,8 +112,17 @@ function cleanHtmlError(html: string): string {
 export function formatAiHttpError(status: number, rawText: string): string {
   let detail = "";
   try {
-    const parsed = JSON.parse(rawText) as { error?: { message?: string }; message?: string };
-    detail = String(parsed.error?.message || parsed.message || "").trim();
+    const parsed = JSON.parse(rawText) as {
+      error?: { message?: string } | string;
+      message?: string;
+    };
+    const err = parsed.error;
+    detail = String(
+      (typeof err === "object" && err !== null ? err.message : "")
+        || (typeof err === "string" ? err : "")
+        || parsed.message
+        || "",
+    ).trim();
   } catch {
     detail = cleanHtmlError(rawText);
   }
