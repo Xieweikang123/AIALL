@@ -40,6 +40,7 @@ tmp/
 
 ## local app state
 .aiall/
+.freebuff/
 
 ## debug artifacts
 .debug/
