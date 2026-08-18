@@ -1,103 +1,99 @@
 <template>
   <div class="ai-config-page">
     <div class="page-head">
-      <div>
-        <h1>AI 配置</h1>
-        <p class="desc">配置模型接口并测试连通性。快捷键：Ctrl/⌘ + S 保存。</p>
+      <div class="page-title-wrap">
+        <h1>AI 模型配置</h1>
+        <p class="desc">配置 OpenAI 兼容接口、模型参数与服务，支持快捷键 Ctrl/⌘ + S 保存</p>
       </div>
       <div class="head-actions">
         <div class="action-group nav-group">
-          <button type="button" class="secondary" @click="handleGoChat">去聊天</button>
-          <router-link class="secondary link-btn" to="/vibe-coding">Vibe Coding</router-link>
-          <router-link class="secondary link-btn" to="/icon-templates">图标模板</router-link>
+          <button type="button" class="secondary" @click="handleGoChat">💬 对话</button>
+          <router-link class="secondary link-btn" to="/vibe-coding">💻 Vibe Coding</router-link>
         </div>
         <div class="action-divider"></div>
         <div class="action-group">
-          <button type="button" class="secondary" @click="handleExportConfig">导出</button>
-          <button type="button" class="secondary" @click="handleImportConfig">导入</button>
-          <button type="button" class="secondary danger outline" @click="handleResetConfig">重置</button>
-          <button type="button" class="primary" @click="saveConfig">保存配置</button>
+          <button type="button" class="secondary" title="导出配置文件" @click="handleExportConfig">导出</button>
+          <button type="button" class="secondary" title="导入配置文件" @click="handleImportConfig">导入</button>
+          <button type="button" class="secondary danger outline" title="重置为默认配置" @click="handleResetConfig">重置</button>
+          <button type="button" class="primary save-btn" title="保存所有配置 (Ctrl+S)" @click="saveConfig">保存配置</button>
         </div>
       </div>
     </div>
 
-    <section class="server-mode card">
-      <div class="server-mode-head">
-        <h2 class="card-title">服务器模式</h2>
-        <span v-if="serverLoggedIn" class="server-badge ok">已连接服务器</span>
-        <span v-else class="server-badge">未登录</span>
+    <!-- 顶部 Tab 导航 -->
+    <nav class="tabs" aria-label="AI 配置选项卡">
+      <button
+        type="button"
+        class="tab"
+        :class="{ active: activeTab === 'chat' }"
+        @click="activeTab = 'chat'"
+      >
+        🤖 模型供应商
+      </button>
+      <button
+        type="button"
+        class="tab"
+        :class="{ active: activeTab === 'tts' }"
+        @click="activeTab = 'tts'"
+      >
+        🎙️ TTS 语音
+      </button>
+      <button
+        type="button"
+        class="tab"
+        :class="{ active: activeTab === 'experimental' }"
+        @click="activeTab = 'experimental'"
+      >
+        🧪 实验特性
+      </button>
+    </nav>
+
+    <!-- Tab 1: 模型供应商 -->
+    <section v-show="activeTab === 'chat'" class="card main-config-card">
+      <div class="card-header-row">
+        <div>
+          <h2 class="card-title">模型供应商</h2>
+          <p class="desc">配置多个 OpenAI 兼容接口，并选择其中一个作为全局默认供应商</p>
+        </div>
+        <div class="provider-quick-fill">
+          <select
+            v-model="presetSelected"
+            class="preset-select"
+            aria-label="用预设填充供应商"
+            @change="applyPreset(presetSelected)"
+          >
+            <option value="" disabled>✨ 用预设填充…</option>
+            <option v-for="p in providerPresets" :key="p.name" :value="p.name">
+              {{ p.name }}{{ p.model ? `（${p.model}）` : "" }}
+            </option>
+          </select>
+        </div>
       </div>
 
-      <template v-if="serverLoggedIn">
-        <p class="desc">
-          浏览器通过 agent-server 访问；API Key 由服务端持有，不会下发到浏览器。{{ serverCfgNote }}
-        </p>
-        <div class="server-form">
-          <label class="server-field">
-            <span>endpoint</span>
-            <input v-model="serverAiForm.endpoint" type="text" placeholder="https://api.example.com/v1" />
-          </label>
-          <label class="server-field">
-            <span>model</span>
-            <input v-model="serverAiForm.model" type="text" placeholder="mimo-v2.5-pro" />
-          </label>
-          <label class="server-field">
-            <span>API Key</span>
-            <input
-              v-model="serverAiForm.apiKey"
-              type="password"
-              :placeholder="serverHasKey ? '留空则保留现有 Key' : '输入服务端 API Key'"
-            />
-          </label>
-          <label class="server-field">
-            <span>网页代理（可选）</span>
-            <input v-model="serverAiForm.webProxyUrl" type="text" placeholder="http://proxy:8080" />
-          </label>
-          <div class="server-form-actions">
-            <button
-              type="button"
-              class="primary"
-              :disabled="serverSaveBusy"
-              @click="handleServerSaveAiConfig"
-            >
-              保存服务端配置
-            </button>
-            <span v-if="serverSaveError" class="server-login-error">{{ serverSaveError }}</span>
-            <span v-if="serverSaveOk" class="server-save-ok">已保存</span>
-            <button type="button" class="secondary" @click="handleServerLogout">退出服务器登录</button>
-          </div>
-        </div>
-      </template>
-      <template v-else>
-        <div class="server-login-row">
+      <!-- 服务器连接条：web/服务器模式下登录入口与状态（配置在下方表单，保存时同步到服务端） -->
+      <div v-if="!isDesktopRuntime" class="server-strip">
+        <template v-if="serverLoggedIn">
+          <span class="server-strip-status ok">🖥️ 已连接服务器</span>
+          <span class="server-strip-note">{{ serverCfgNote }}</span>
+          <button type="button" class="link" @click="handleServerLogout">退出登录</button>
+        </template>
+        <template v-else>
+          <span class="server-strip-label">🖥️ 服务器模式</span>
           <input
             v-model="serverLoginPassword"
             type="password"
+            class="server-strip-token"
             placeholder="输入服务器 AIALL_SERVER_TOKEN"
             @keyup.enter="handleServerLogin"
           />
-          <button type="button" class="primary" :disabled="serverAuthBusy" @click="handleServerLogin">
-            登录服务器
+          <button type="button" class="secondary" :disabled="serverAuthBusy" @click="handleServerLogin">
+            {{ serverAuthBusy ? "登录中..." : "登录服务器" }}
           </button>
-          <span v-if="serverLoginError" class="server-login-error">{{ serverLoginError }}</span>
-        </div>
-      </template>
-    </section>
+          <span v-if="serverLoginError" class="server-strip-error">{{ serverLoginError }}</span>
+        </template>
+      </div>
 
-    <nav class="tabs" aria-label="AI 配置选项卡">
-      <button type="button" class="tab" :class="{ active: activeTab === 'chat' }" @click="activeTab = 'chat'">
-        模型/对话
-      </button>
-      <button type="button" class="tab" :class="{ active: activeTab === 'tts' }" @click="activeTab = 'tts'">
-        TTS
-      </button>
-
-    </nav>
-
-    <section class="card">
-      <h2 class="card-title">模型供应商</h2>
-      <p class="desc">可配置多个 OpenAI 兼容接口，并选择其中一个作为聊天与其它功能的默认供应商。</p>
-
+      <!-- 供应商切换条 -->
       <div class="provider-bar" role="tablist" aria-label="模型供应商列表">
         <button
           v-for="provider in providers"
@@ -112,18 +108,7 @@
           <span class="provider-chip-name">{{ provider.name || "未命名" }}</span>
           <span v-if="activeProviderId === provider.id" class="provider-default-badge">默认</span>
         </button>
-        <button type="button" class="provider-add" @click="addProvider">+ 添加</button>
-        <select
-          v-model="presetSelected"
-          class="preset-select"
-          aria-label="用预设填充供应商"
-          @change="applyPreset(presetSelected)"
-        >
-          <option value="" disabled>用预设填充…</option>
-          <option v-for="p in providerPresets" :key="p.name" :value="p.name">
-            {{ p.name }}（{{ p.model }}）
-          </option>
-        </select>
+        <button type="button" class="provider-add" @click="addProvider">+ 添加供应商</button>
       </div>
 
       <div class="provider-actions">
@@ -133,7 +118,7 @@
           class="secondary"
           @click="setActiveProvider(editingProviderId)"
         >
-          设为默认供应商
+          ⭐ 设为默认供应商
         </button>
         <button
           type="button"
@@ -141,19 +126,19 @@
           :disabled="providers.length <= 1"
           @click="removeProvider(editingProviderId)"
         >
-          删除当前供应商
+          🗑️ 删除此供应商
         </button>
       </div>
 
       <div class="config-form grid-2">
         <label class="field span-2">
           <span>供应商名称</span>
-          <input v-model.trim="form.name" type="text" placeholder="例如：MiMo 官方 / 本地 Ollama" />
+          <input v-model.trim="form.name" type="text" placeholder="例如：MiMo 官方 / DeepSeek / 本地 Ollama" />
         </label>
 
         <label class="field span-2">
           <div class="field-row">
-            <span>接口地址</span>
+            <span>接口地址 (Base URL)</span>
             <div class="field-tools">
               <button v-if="canSimplifyEndpoint" type="button" class="link" @click="simplifyEndpoint">
                 简化为 Base URL
@@ -163,18 +148,10 @@
               </span>
             </div>
           </div>
-          <input v-model.trim="form.endpoint" type="text" placeholder="https://example.com/v1（或完整地址 .../v1/chat/completions）" />
+          <input v-model.trim="form.endpoint" type="text" placeholder="https://api.openai.com/v1" />
           <small v-if="endpointError" class="tips error">{{ endpointError }}</small>
           <small v-else class="tips">
-            支持填写 Base URL（如 <code class="inline-code">/v1</code>），系统会自动补全 <code class="inline-code">/chat/completions</code>；也可直接填写完整地址。
-          </small>
-          <small v-if="endpointReady" class="tips">
-            chat：<code class="inline-code">{{ derivedChatEndpoint }}</code>
-            &nbsp;|&nbsp;
-            models：<code class="inline-code">{{ derivedModelsEndpoint }}</code>
-          </small>
-          <small v-if="endpointReady" class="tips">
-            tts：<code class="inline-code">{{ derivedTtsEndpoint }}</code>
+            支持标准 Base URL（如 <code class="inline-code">https://api.example.com/v1</code>），系统会自动补全 <code class="inline-code">/chat/completions</code>。
           </small>
         </label>
 
@@ -202,6 +179,29 @@
 
         <label class="field">
           <div class="field-row">
+            <span>模型名称（Model）</span>
+            <div class="field-tools">
+              <button type="button" class="link" :disabled="modelsLoading || !endpointReady" @click="handleFetchModels">
+                {{ modelsLoading ? "获取中..." : "获取模型" }}
+              </button>
+              <button v-if="availableModels.length" type="button" class="link" :disabled="modelsLoading || !endpointReady" @click="handleRefreshModels">
+                刷新
+              </button>
+            </div>
+          </div>
+          <div class="model-row">
+            <select v-if="availableModels.length" v-model="form.model" class="model-select" aria-label="选择模型">
+              <option v-for="modelName in availableModels" :key="modelName" :value="modelName">
+                {{ modelName }}
+              </option>
+            </select>
+            <input v-model.trim="form.model" type="text" placeholder="例如：mimo-v2.5-pro / gpt-4o / deepseek-chat" />
+          </div>
+          <small v-if="modelsStatusText" class="tips">{{ modelsStatusText }}</small>
+        </label>
+
+        <label class="field span-2">
+          <div class="field-row">
             <span>网页抓取代理（HTTP，可选）</span>
             <div class="field-tools">
               <button
@@ -217,119 +217,94 @@
           </div>
           <input v-model.trim="web.proxyUrl" type="text" placeholder="例如：http://127.0.0.1:7890" />
           <small class="tips">
-            用于 Node 侧联网（聊天页抓取 URL、Vibe Agent 的 web_search / web_extract）。浏览器能打开不代表 Node 能直连，可点「测试」验证。
+            用于 Node 侧联网（聊天页抓取 URL、Vibe Agent 的 web_search / web_extract）。可点「测试」验证。
           </small>
           <p v-if="proxyTestHint" class="tips" :class="proxyTestOk ? 'ok' : 'error'">{{ proxyTestHint }}</p>
         </label>
       </div>
 
       <p v-if="saveHint" class="tips ok">{{ saveHint }}</p>
-    </section>
 
-    <section v-show="activeTab === 'chat'" class="card">
-      <h2 class="card-title">模型/对话测试</h2>
-
-      <form class="config-form" @submit.prevent="handleTest">
-        <label class="field">
-          <div class="field-row">
-            <span>模型名称</span>
-            <div class="field-tools">
-              <button type="button" class="link" :disabled="modelsLoading || !endpointReady" @click="handleFetchModels">
-                {{ modelsLoading ? "加载中..." : "获取模型" }}
-              </button>
-              <button type="button" class="link" :disabled="modelsLoading || !endpointReady" @click="handleRefreshModels">
-                刷新
-              </button>
-              <small class="tips">{{ modelsStatusText }}</small>
-            </div>
-          </div>
-          <div class="model-row">
-            <select v-if="availableModels.length" v-model="form.model" class="model-select">
-              <option v-for="modelName in availableModels" :key="modelName" :value="modelName">
-                {{ modelName }}
-              </option>
-            </select>
-            <input v-model.trim="form.model" type="text" placeholder="mimo-v2.5-pro" />
-          </div>
-        </label>
-
-        <label class="field">
-          <span>测试提示词</span>
-          <textarea v-model="form.prompt" rows="4" placeholder="你好，请返回一句自我介绍。" />
-        </label>
-
-        <div class="field">
-          <div class="field-row">
-            <span>输入图片（可选）</span>
-            <div class="field-tools">
-              <button type="button" class="link" @click="openImagePicker">选择图片</button>
-              <button type="button" class="link" :disabled="!imageDataUrl" @click="clearImage">清空</button>
-            </div>
-          </div>
-
-          <input
-            ref="imageInputRef"
-            type="file"
-            accept="image/*"
-            class="file-input"
-            @change="handleImageFileChange"
-          />
-
-          <div
-            class="drop-zone"
-            :class="{ active: isDraggingImage }"
-            @dragenter.prevent="isDraggingImage = true"
-            @dragover.prevent="isDraggingImage = true"
-            @dragleave.prevent="isDraggingImage = false"
-            @drop.prevent="handleImageDrop"
-          >
-            <div v-if="!imageDataUrl" class="drop-zone-text">
-              <div>拖拽图片到这里，或点击“选择图片”。</div>
-              <div class="tips">也支持直接粘贴截图（Ctrl+V）。</div>
-            </div>
-            <div v-else class="image-preview">
-              <img :src="imageDataUrl" alt="预览图片" />
-              <div class="tips">
-                <span v-if="imageMeta.name">文件：{{ imageMeta.name }}</span>
-                <span v-if="imageMeta.sizeText">（{{ imageMeta.sizeText }}）</span>
-              </div>
-            </div>
-          </div>
-
-          <small v-if="imageError" class="tips error">{{ imageError }}</small>
-          <small v-else class="tips">提示：可在此用当前聊天模型测试图片输入是否可用。</small>
+      <!-- 内置连通性快速测试 -->
+      <div class="inline-test-section">
+        <div class="inline-test-header">
+          <h3 class="inline-test-title">⚡ 接口连通性测试</h3>
+          <label class="checkbox stream-checkbox">
+            <input v-model="form.stream" type="checkbox" />
+            <span>开启 Stream</span>
+          </label>
         </div>
+        <form class="inline-test-form" @submit.prevent="handleTest">
+          <div class="inline-test-input-row">
+            <input v-model="form.prompt" type="text" class="inline-test-prompt" placeholder="输入测试提示词，例如：你好，请返回一句自我介绍。" />
+            <button type="submit" class="primary compact-test-btn" :disabled="loading || !canTest">
+              {{ loading ? "测试中..." : "发送测试" }}
+            </button>
+          </div>
+        </form>
 
-        <label class="checkbox">
-          <input v-model="form.stream" type="checkbox" />
-          <span>开启 stream</span>
-        </label>
-
-        <div class="actions">
-          <button type="submit" class="primary" :disabled="loading || !canTest">
-            {{ loading ? "测试中..." : "测试模型" }}
-          </button>
-          <button type="button" class="secondary" :disabled="loading || !result.text" @click="copyText(result.text)">
-            复制结果
-          </button>
-          <button type="button" class="secondary" :disabled="loading" @click="saveConfig">
-            保存当前配置
-          </button>
+        <div v-if="result.text || loading" class="result inline-test-result">
+          <div class="result-head-row">
+            <span class="status" :class="resultStatusClass">状态：{{ resultMessage }}</span>
+            <button v-if="result.text" type="button" class="link" @click="copyText(result.text)">复制结果</button>
+          </div>
+          <pre>{{ resultText }}</pre>
         </div>
-      </form>
-
-      <div class="result">
-        <h3 class="result-title">测试结果</h3>
-        <p class="status" :class="resultStatusClass">状态：{{ resultMessage }}</p>
-        <pre>{{ resultText }}</pre>
       </div>
     </section>
 
-    <section v-show="activeTab === 'chat'" class="card">
-      <h2 class="card-title">页面长图 + 视觉总结（MVP）</h2>
+    <!-- Tab 2: TTS 语音合成 -->
+    <section v-show="activeTab === 'tts'" class="card">
+      <h2 class="card-title">🎙️ TTS 语音合成测试</h2>
+      <p class="desc">MiMo TTS 使用 <code class="inline-code">/chat/completions</code> 接口，朗读文本会作为 assistant 消息发送。</p>
+
+      <div class="config-form grid-2">
+        <label class="field">
+          <span>TTS 模型</span>
+          <input v-model.trim="ttsForm.model" type="text" placeholder="mimo-v2.5-tts" />
+        </label>
+        <label class="field">
+          <span>音色（voice）</span>
+          <select v-model="ttsForm.voice">
+            <option v-for="voiceName in ttsVoiceOptions" :key="voiceName" :value="voiceName">
+              {{ voiceName }}
+            </option>
+          </select>
+        </label>
+        <label class="field">
+          <span>音频格式</span>
+          <select v-model="ttsForm.format">
+            <option value="mp3">mp3</option>
+            <option value="wav">wav</option>
+            <option value="opus">opus</option>
+          </select>
+        </label>
+        <label class="field span-2">
+          <span>朗读文本</span>
+          <textarea v-model="ttsForm.input" rows="3" placeholder="你好，这是一段 TTS 测试音频。" />
+        </label>
+
+        <div class="actions span-2">
+          <button type="button" class="primary" :disabled="ttsLoading || !canTestTts" @click="handleTestTts">
+            {{ ttsLoading ? "合成中..." : "测试合成 TTS" }}
+          </button>
+          <a v-if="ttsAudioUrl" class="secondary link-btn" :href="ttsAudioUrl" :download="`tts-output.${ttsForm.format}`">
+            下载音频
+          </a>
+        </div>
+
+        <div v-if="ttsResultMessage || ttsAudioUrl" class="span-2">
+          <p class="status" :class="ttsStatusClass">状态：{{ ttsResultMessage }}</p>
+          <audio v-if="ttsAudioUrl" class="audio-player" :src="ttsAudioUrl" controls />
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 4: 实验特性（网页视觉长图与总结） -->
+    <section v-show="activeTab === 'experimental'" class="card">
+      <h2 class="card-title">🧪 页面长图 + 视觉总结 (MVP)</h2>
       <p class="desc">
-        仅在<strong>本机</strong>运行 <code class="inline-code">npm run dev</code> 时有效：后端会启动 Playwright
-        Chromium。勾选「有头模式」后弹出真实窗口，可在下方等待时间内<strong>手动登录</strong>，再截取<strong>整页长图</strong>；随后用支持图片的<strong>多模态模型</strong>总结（与上方「输入图片」测试共用同一套接口）。
+        仅在<strong>本机桌面/开发环境</strong>有效：调用 Playwright 弹出 Chromium 浏览器窗口截取整页长图，并由多模态模型提取网页核心信息。
       </p>
 
       <div class="config-form">
@@ -340,18 +315,18 @@
 
         <label class="checkbox">
           <input v-model="visionMvp.headed" type="checkbox" />
-          <span>有头模式（弹出可操作的浏览器窗口；关闭则为无头，无法现场登录）</span>
+          <span>有头模式（弹出真实可操作的浏览器窗口，方便在目标页面手动登录）</span>
         </label>
 
         <label class="field">
-          <span>首屏加载后等待（秒）</span>
+          <span>首屏加载后等待时间（秒）</span>
           <input v-model.number="visionMvp.waitSeconds" type="number" min="0" max="300" step="5" />
-          <small class="tips">用于在窗口内完成登录。公开页可填 0；需要登录建议 60～120。</small>
+          <small class="tips">公开页填 0 即可；若需现场登录建议设置 60～120 秒。</small>
         </label>
 
         <div class="actions">
           <button type="button" class="primary" :disabled="visionMvpLoading || !visionMvpUrlOk" @click="handleVisionMvpScreenshot">
-            {{ visionMvpLoading ? "截图中（等待结束时会较久）..." : "截取整页长图" }}
+            {{ visionMvpLoading ? "截图中（较耗时）..." : "截取整页长图" }}
           </button>
           <button type="button" class="secondary" :disabled="!visionMvpDataUrl" @click="clearVisionMvpScreenshot">清除截图</button>
         </div>
@@ -388,53 +363,6 @@
       </div>
     </section>
 
-    <section v-show="activeTab === 'tts'" class="card">
-      <h2 class="card-title">TTS 测试</h2>
-      <p class="tips">MiMo TTS 使用 <code class="inline-code">/chat/completions</code> 接口（非 OpenAI 的 <code class="inline-code">/audio/speech</code>），朗读文本会作为 assistant 消息发送。</p>
-
-      <div class="config-form grid-2">
-        <label class="field">
-          <span>TTS 模型</span>
-          <input v-model.trim="ttsForm.model" type="text" placeholder="mimo-v2.5-tts" />
-        </label>
-        <label class="field">
-          <span>音色（voice）</span>
-          <select v-model="ttsForm.voice">
-            <option v-for="voiceName in ttsVoiceOptions" :key="voiceName" :value="voiceName">
-              {{ voiceName }}
-            </option>
-          </select>
-        </label>
-        <label class="field">
-          <span>音频格式</span>
-          <select v-model="ttsForm.format">
-            <option value="mp3">mp3</option>
-            <option value="wav">wav</option>
-            <option value="opus">opus</option>
-          </select>
-        </label>
-        <label class="field span-2">
-          <span>朗读文本</span>
-          <textarea v-model="ttsForm.input" rows="3" placeholder="你好，这是一段 TTS 测试音频。" />
-        </label>
-
-        <div class="actions">
-          <button type="button" class="primary" :disabled="ttsLoading || !canTestTts" @click="handleTestTts">
-            {{ ttsLoading ? "合成中..." : "测试 TTS" }}
-          </button>
-          <button type="button" class="secondary" :disabled="ttsLoading" @click="saveConfig">
-            保存当前配置
-          </button>
-          <a v-if="ttsAudioUrl" class="download-link" :href="ttsAudioUrl" :download="`tts-output.${ttsForm.format}`">
-            下载音频
-          </a>
-        </div>
-
-        <p class="status" :class="ttsStatusClass">状态：{{ ttsResultMessage }}</p>
-        <audio v-if="ttsAudioUrl" class="audio-player" :src="ttsAudioUrl" controls />
-      </div>
-    </section>
-
     <InputPrompt />
   </div>
 </template>
@@ -444,6 +372,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { useRouter } from "vue-router";
 import { lsGet, lsRemove } from "../utils/localStorageSafe";
 import { fetchAvailableModels, testAiModel, testTtsModel } from "../services/aiClient";
+import { isTauriEnv } from "../services/tauriInvoke";
 import {
   isServerLoggedIn,
   serverLogin,
@@ -490,66 +419,24 @@ const saveHint = ref("");
 let saveHintTimer: number | undefined;
 
 // ── 服务器模式（web / agent-server）──
+const isDesktopRuntime = isTauriEnv();
 const serverLoggedIn = ref(isServerLoggedIn());
 const serverLoginPassword = ref("");
 const serverLoginError = ref("");
 const serverAuthBusy = ref(false);
-const serverAiForm = reactive({
-  endpoint: "",
-  model: "",
-  apiKey: "",
-  webProxyUrl: "",
-});
-const serverHasKey = ref(false);
 const serverCfgNote = ref("");
-const serverSaveBusy = ref(false);
-const serverSaveError = ref("");
-const serverSaveOk = ref(false);
 
 async function refreshServerLoginState() {
   serverLoggedIn.value = isServerLoggedIn();
   if (serverLoggedIn.value) {
     const cfg = await fetchServerAiConfig();
-    if (cfg.ok) {
-      serverAiForm.endpoint = cfg.endpoint;
-      serverAiForm.model = cfg.model;
-      serverAiForm.webProxyUrl = cfg.webProxyUrl;
-      serverAiForm.apiKey = "";
-      serverHasKey.value = cfg.hasServerKey;
-      serverCfgNote.value = serverHasKey.value
-        ? "服务端已配置 API Key，浏览器无需填写。"
-        : "服务端未配置 API Key。";
-    } else {
-      serverCfgNote.value = cfg.error || "无法获取服务端 AI 配置";
-    }
+    serverCfgNote.value = cfg.ok
+      ? cfg.hasServerKey
+        ? "服务端已配置 API Key；本页「保存配置」会同步到服务端。"
+        : "服务端尚未配置 API Key，请在本页填写后点「保存配置」。"
+      : cfg.error || "无法获取服务端 AI 配置";
   } else {
-    serverAiForm.endpoint = "";
-    serverAiForm.model = "";
-    serverAiForm.apiKey = "";
-    serverAiForm.webProxyUrl = "";
-    serverHasKey.value = false;
     serverCfgNote.value = "";
-  }
-}
-
-async function handleServerSaveAiConfig() {
-  if (serverSaveBusy.value) return;
-  serverSaveBusy.value = true;
-  serverSaveError.value = "";
-  serverSaveOk.value = false;
-  const result = await saveServerAiConfig({
-    endpoint: serverAiForm.endpoint.trim(),
-    apiKey: serverAiForm.apiKey.trim(),
-    model: serverAiForm.model.trim(),
-    webProxyUrl: serverAiForm.webProxyUrl.trim(),
-  });
-  serverSaveBusy.value = false;
-  if (result.ok) {
-    serverAiForm.apiKey = "";
-    serverSaveOk.value = true;
-    await refreshServerLoginState();
-  } else {
-    serverSaveError.value = result.error || "保存失败";
   }
 }
 
@@ -645,7 +532,9 @@ function applyPreset(presetName: string) {
     form.name = preset.name;
   }
   availableModels.value = [];
-  modelsStatusText.value = `已应用预设「${preset.name}」，请填写 API Key。`;
+  modelsStatusText.value = preset.model
+    ? `已应用预设「${preset.name}」，请填写 API Key。`
+    : `已应用预设「${preset.name}」，请填写 API Key 后点「获取模型」选择模型。`;
 }
 
 function setActiveProvider(providerId: string) {
@@ -1105,6 +994,13 @@ function handleSaveShortcut(event: KeyboardEvent) {
   saveConfig();
 }
 
+function scheduleSaveHintClear() {
+  window.clearTimeout(saveHintTimer);
+  saveHintTimer = window.setTimeout(() => {
+    saveHint.value = "";
+  }, 2800);
+}
+
 function saveConfig() {
   syncFormToProvider(editingProviderId.value);
   const normalizedProxy = normalizeWebProxyUrl(web.proxyUrl);
@@ -1126,11 +1022,30 @@ function saveConfig() {
       format: ttsForm.format,
     },
   });
+
+  // 服务器模式（web）：主 tab 配置同步到服务端，Vibe 页才会使用；
+  // 无需再单独去「服务器模式」tab 填一遍（旧设计两处配置同一件事）。
+  if (serverLoggedIn.value) {
+    saveHint.value = "配置已保存，正在同步到服务端…";
+    void saveServerAiConfig({
+      endpoint: form.endpoint.trim(),
+      apiKey: form.apiKey.trim(),
+      model: form.model.trim(),
+      webProxyUrl: web.proxyUrl.trim() || undefined,
+    }).then((res) => {
+      if (res.ok) {
+        saveHint.value = "配置已保存，并已同步到服务端（Vibe 页即刻可用）。";
+        void refreshServerLoginState();
+      } else {
+        saveHint.value = `本地已保存；同步服务端失败：${res.error || "未知原因"}（服务端可能用环境变量 AIALL_SERVER_AI_* 接管了配置）`;
+      }
+      scheduleSaveHintClear();
+    });
+    return;
+  }
+
   saveHint.value = "配置已保存到本地 localStorage。";
-  window.clearTimeout(saveHintTimer);
-  saveHintTimer = window.setTimeout(() => {
-    saveHint.value = "";
-  }, 2000);
+  scheduleSaveHintClear();
 }
 
 function loadConfig() {
@@ -1388,7 +1303,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .server-mode {
-  border: 1px solid var(--border, rgba(17, 24, 39, 0.1));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  background: rgba(17, 24, 39, 0.5);
   border-radius: 12px;
   padding: 16px;
   margin-bottom: 16px;
@@ -1403,15 +1319,15 @@ onBeforeUnmount(() => {
   font-size: 12px;
   padding: 2px 10px;
   border-radius: 999px;
-  background: rgba(17, 24, 39, 0.08);
-  color: var(--muted, rgba(17, 24, 39, 0.7));
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted, rgba(255, 255, 255, 0.7));
 }
 .server-badge.ok {
   background: rgba(34, 197, 94, 0.15);
-  color: #15803d;
+  color: #3fb950;
 }
 .server-mode code {
-  background: rgba(17, 24, 39, 0.06);
+  background: rgba(0, 0, 0, 0.3);
   padding: 1px 6px;
   border-radius: 4px;
   font-size: 12px;
@@ -1426,8 +1342,46 @@ onBeforeUnmount(() => {
   max-width: 360px;
 }
 .server-login-error {
-  color: #dc2626;
+  color: #f85149;
   font-size: 12px;
+}
+.server-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  margin-bottom: 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(130, 80, 223, 0.25);
+  background: rgba(130, 80, 223, 0.08);
+  font-size: 12px;
+}
+.server-strip-status {
+  color: #3fb950;
+  font-weight: 500;
+}
+.server-strip-label {
+  color: #8250df;
+  font-weight: 500;
+}
+.server-strip-note {
+  color: var(--muted, rgba(255, 255, 255, 0.7));
+  flex: 1;
+  min-width: 160px;
+}
+.server-strip-token {
+  padding: 6px 10px;
+  border: 1px solid var(--border-2, rgba(255, 255, 255, 0.14));
+  border-radius: 6px;
+  background: rgba(2, 6, 23, 0.5);
+  color: var(--text, rgba(255, 255, 255, 0.92));
+  outline: none;
+  width: 260px;
+  font-size: 12px;
+}
+.server-strip-error {
+  color: #f85149;
 }
 .server-form {
   display: grid;
@@ -1440,14 +1394,21 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 4px;
   font-size: 12px;
-  color: var(--muted, rgba(17, 24, 39, 0.7));
+  color: var(--muted, rgba(255, 255, 255, 0.7));
 }
 .server-field input {
-  padding: 6px 8px;
-  border: 1px solid rgba(17, 24, 39, 0.15);
+  padding: 8px 10px;
+  border: 1px solid var(--border-2, rgba(255, 255, 255, 0.14));
   border-radius: 6px;
   font-size: 13px;
-  background: #fff;
+  background: rgba(2, 6, 23, 0.5);
+  color: var(--text, rgba(255, 255, 255, 0.92));
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.server-field input:focus {
+  border-color: var(--primary, #58a6ff);
+  background: rgba(2, 6, 23, 0.75);
 }
 .server-form-actions {
   grid-column: 1 / -1;
@@ -1456,7 +1417,7 @@ onBeforeUnmount(() => {
   gap: 10px;
 }
 .server-save-ok {
-  color: #15803d;
+  color: #3fb950;
   font-size: 12px;
 }
 :global(html),
@@ -1464,26 +1425,26 @@ onBeforeUnmount(() => {
   margin: 0;
   overflow: auto;
   overscroll-behavior: auto;
-  background: radial-gradient(900px 520px at 18% 8%, rgba(31, 111, 235, 0.09), transparent 56%),
-    radial-gradient(900px 560px at 90% 0%, rgba(130, 80, 223, 0.14), transparent 55%),
-    radial-gradient(900px 560px at 50% 100%, rgba(26, 127, 55, 0.12), transparent 50%),
-    #f6f8fa;
-  color: #111827;
+  background: radial-gradient(900px 520px at 18% 8%, rgba(31, 111, 235, 0.14), transparent 62%),
+    radial-gradient(900px 560px at 90% 0%, rgba(130, 80, 223, 0.18), transparent 60%),
+    radial-gradient(900px 560px at 50% 100%, rgba(26, 127, 55, 0.16), transparent 55%),
+    #0b1220;
+  color: rgba(255, 255, 255, 0.92);
 }
 
 .ai-config-page {
-  --bg: #ffffff;
-  --text: #111827;
-  --muted: rgba(17, 24, 39, 0.7);
-  --subtle: rgba(17, 24, 39, 0.55);
-  --border: rgba(17, 24, 39, 0.1);
-  --border-2: rgba(17, 24, 39, 0.16);
-  --ring: rgba(31, 111, 235, 0.2);
+  --bg: rgba(17, 24, 39, 0.78);
+  --text: rgba(255, 255, 255, 0.92);
+  --muted: rgba(255, 255, 255, 0.72);
+  --subtle: rgba(255, 255, 255, 0.6);
+  --border: rgba(255, 255, 255, 0.12);
+  --border-2: rgba(255, 255, 255, 0.18);
+  --ring: rgba(31, 111, 235, 0.28);
   --primary: #1f6feb;
   --danger: #cf222e;
   --ok: #1a7f37;
-  --card-shadow: 0 2px 8px rgba(15, 23, 42, 0.04), 0 1px 2px rgba(15, 23, 42, 0.06);
-  --card-shadow-hover: 0 4px 16px rgba(15, 23, 42, 0.06), 0 2px 4px rgba(15, 23, 42, 0.08);
+  --card-shadow: 0 4px 12px rgba(0, 0, 0, 0.25), 0 1px 3px rgba(0, 0, 0, 0.15);
+  --card-shadow-hover: 0 6px 20px rgba(0, 0, 0, 0.3), 0 2px 4px rgba(0, 0, 0, 0.2);
 
   max-width: 980px;
   margin: 0 auto;
@@ -1599,67 +1560,87 @@ button.primary {
 
 .tabs {
   display: flex;
-  gap: 4px;
+  gap: 6px;
   margin: 0 0 20px;
   padding: 4px;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.65);
+  background: rgba(17, 24, 39, 0.45);
   backdrop-filter: blur(8px);
 }
 
 .tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 1px solid transparent;
   background: transparent;
   color: var(--muted);
   border-radius: 8px;
   padding: 8px 16px;
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 500;
   cursor: pointer;
   transition: all 150ms ease;
 }
 
 .tab.active {
-  border-color: rgba(31, 111, 235, 0.3);
-  background: rgba(31, 111, 235, 0.08);
-  color: var(--primary);
+  border-color: rgba(88, 166, 255, 0.35);
+  background: rgba(31, 111, 235, 0.18);
+  color: rgba(100, 160, 255, 0.95);
   font-weight: 600;
 }
 
 .tab:hover:not(.active) {
-  background: rgba(17, 24, 39, 0.04);
-  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.85);
 }
 
 .tab:active:not(.disabled) {
   transform: scale(0.98);
 }
 
+.tab-badge {
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(35, 134, 54, 0.25);
+  color: #3fb950;
+  border: 1px solid rgba(63, 185, 80, 0.3);
+}
+
 .card {
-  border: 1px solid var(--border);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
   border-radius: 14px;
-  padding: 20px;
-  background: rgba(255, 255, 255, 0.82);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04), 0 1px 2px rgba(15, 23, 42, 0.06);
+  padding: 22px;
+  background: rgba(17, 24, 39, 0.65);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25), 0 1px 3px rgba(0, 0, 0, 0.15);
   margin-top: 16px;
   transition: box-shadow 200ms ease, border-color 200ms ease;
 }
 
 .card:hover {
-  border-color: var(--border-2);
-  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06), 0 2px 4px rgba(15, 23, 42, 0.08);
+  border-color: var(--border-2, rgba(255, 255, 255, 0.18));
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3), 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.card-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 
 .card-title {
-  margin: 0 0 14px;
-  font-size: 15px;
+  margin: 0;
+  font-size: 16px;
   font-weight: 600;
   letter-spacing: -0.1px;
   color: var(--text);
 }
-
 .provider-bar {
   display: flex;
   flex-wrap: wrap;
@@ -1672,7 +1653,7 @@ button.primary {
   align-items: center;
   gap: 6px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.06);
   color: var(--muted);
   border-radius: 999px;
   padding: 6px 12px;
@@ -1683,15 +1664,20 @@ button.primary {
   transition: all 150ms ease;
 }
 
+.provider-chip:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+}
+
 .provider-chip.active {
-  border-color: rgba(31, 111, 235, 0.35);
-  background: rgba(31, 111, 235, 0.1);
-  color: var(--primary);
+  border-color: rgba(88, 166, 255, 0.45);
+  background: rgba(31, 111, 235, 0.18);
+  color: #79c0ff;
   font-weight: 600;
 }
 
 .provider-chip.default:not(.active) {
-  border-color: rgba(26, 127, 55, 0.28);
+  border-color: rgba(63, 185, 80, 0.4);
 }
 
 .provider-chip-name {
@@ -1706,35 +1692,60 @@ button.primary {
   line-height: 1;
   padding: 2px 6px;
   border-radius: 999px;
-  background: rgba(26, 127, 55, 0.12);
-  color: var(--ok);
-  border: 1px solid rgba(26, 127, 55, 0.28);
+  background: rgba(35, 134, 54, 0.2);
+  color: #3fb950;
+  border: 1px solid rgba(63, 185, 80, 0.35);
 }
 
 .provider-add {
   border: 1px dashed var(--border-2);
   background: transparent;
-  color: var(--primary);
+  color: #58a6ff;
   border-radius: 999px;
   padding: 6px 12px;
   font-size: 13px;
   box-shadow: none;
+  cursor: pointer;
 }
 
 .provider-add:hover:not(:disabled) {
-  background: rgba(31, 111, 235, 0.06);
+  background: rgba(88, 166, 255, 0.1);
+  border-color: #58a6ff;
   transform: none;
   box-shadow: none;
 }
 
 .preset-select {
-  border: 1px solid var(--border-2, rgba(17, 24, 39, 0.15));
-  background: #fff;
-  color: var(--text, #111827);
+  border: 1px solid var(--border-2, rgba(255, 255, 255, 0.16));
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text, rgba(255, 255, 255, 0.9));
   border-radius: 999px;
-  padding: 6px 10px;
+  padding: 6px 28px 6px 12px;
   font-size: 13px;
   max-width: 260px;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6l4 4 4-4' stroke='rgba(255,255,255,0.7)' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  outline: none;
+  transition: all 150ms ease;
+}
+
+.preset-select:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.preset-select:focus {
+  border-color: #58a6ff;
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.25);
+}
+
+.preset-select option {
+  background: #161b22;
+  color: rgba(255, 255, 255, 0.92);
+  padding: 6px 10px;
 }
 
 .provider-actions {
@@ -1789,23 +1800,23 @@ button.primary {
   border-radius: 10px;
   padding: 10px 12px;
   font-size: 14px;
-  background: rgba(255, 255, 255, 0.95);
-  color: var(--text);
+  background: rgba(2, 6, 23, 0.5);
+  color: var(--text, rgba(255, 255, 255, 0.92));
   outline: none;
   transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
 }
 
 .field input::placeholder,
 .field textarea::placeholder {
-  color: rgba(17, 24, 39, 0.4);
+  color: rgba(255, 255, 255, 0.35);
 }
 
 .field input:focus,
 .field textarea:focus,
 .field select:focus {
-  border-color: rgba(31, 111, 235, 0.5);
+  border-color: rgba(88, 166, 255, 0.5);
   box-shadow: 0 0 0 3px var(--ring);
-  background: #fff;
+  background: rgba(2, 6, 23, 0.75);
 }
 
 .file-input {
@@ -1994,6 +2005,80 @@ button.danger:hover:not(:disabled) {
 .result-title {
   margin: 0 0 8px;
   font-size: 14px;
+}
+
+.inline-test-section {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+}
+
+.inline-test-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.inline-test-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.inline-test-input-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.inline-test-prompt {
+  flex: 1;
+  background: rgba(2, 6, 23, 0.5);
+  color: var(--text, rgba(255, 255, 255, 0.92));
+  border: 1px solid var(--border-2, rgba(255, 255, 255, 0.14));
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13.5px;
+  outline: none;
+}
+
+.inline-test-prompt:focus {
+  border-color: var(--primary, #58a6ff);
+  background: rgba(2, 6, 23, 0.75);
+}
+
+.compact-test-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.inline-test-result {
+  margin-top: 14px;
+  background: rgba(2, 6, 23, 0.4);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.result-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.inline-test-result pre {
+  margin: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: rgba(255, 255, 255, 0.88);
 }
 
 .tips {

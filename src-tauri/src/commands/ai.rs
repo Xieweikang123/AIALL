@@ -42,29 +42,40 @@ pub async fn ai_test_stream(
     body: Value,
     on_chunk: Channel<String>,
 ) -> Value {
+    match ai_test_stream_impl(&endpoint, api_key.as_deref(), body, |delta| {
+        let _ = on_chunk.send(delta);
+    })
+    .await
+    {
+        Ok(v) => v,
+        Err(error) => json!({ "ok": false, "error": error }),
+    }
+}
+
+/// 流式 chat 测试底层实现：请求服务商、逐行解析 SSE、把增量文本回调给 `on_delta`。
+/// 桌面命令（Channel）与 HTTP 路由（收集增量后组 SSE）共用，避免行为分叉。
+pub async fn ai_test_stream_impl<F>(
+    endpoint: &str,
+    api_key: Option<&str>,
+    body: Value,
+    mut on_delta: F,
+) -> Result<Value, String>
+where
+    F: FnMut(String),
+{
     let mut stream_body = body;
     if let Some(obj) = stream_body.as_object_mut() {
         obj.insert("stream".into(), json!(true));
     }
 
-    let resp =
-        match ai::chat_completion_stream_raw(&endpoint, api_key.as_deref(), stream_body).await {
-            Ok(r) => r,
-            Err(error) => return json!({ "ok": false, "error": error }),
-        };
-
+    let resp = ai::chat_completion_stream_raw(endpoint, api_key, stream_body).await?;
     let status = resp.status().as_u16();
     let mut byte_stream = resp.bytes_stream();
     let mut sse_buffer: Vec<u8> = Vec::new();
     let mut full_text = String::new();
 
     while let Some(chunk) = byte_stream.next().await {
-        let chunk = match chunk {
-            Ok(c) => c,
-            Err(error) => {
-                return json!({ "ok": false, "error": error.to_string(), "status": status })
-            }
-        };
+        let chunk = chunk.map_err(|e| format!("读取响应流失败（HTTP {status}）：{e}"))?;
         sse_buffer.extend_from_slice(&chunk);
 
         while let Some(pos) = sse_buffer.iter().position(|&b| b == b'\n') {
@@ -82,12 +93,12 @@ pub async fn ai_test_stream(
             };
             if let Some(delta) = stream_delta_text(&parsed).filter(|s| !s.is_empty()) {
                 full_text.push_str(&delta);
-                let _ = on_chunk.send(delta);
+                on_delta(delta);
             }
         }
     }
 
-    json!({ "ok": true, "status": status, "rawText": full_text })
+    Ok(json!({ "ok": true, "status": status, "rawText": full_text }))
 }
 
 #[tauri::command]

@@ -295,6 +295,9 @@ pub async fn handle_backend_vibe(
     let route = path.strip_prefix("/backend/vibe").unwrap_or(path);
     match (method, route) {
         // ── filesystem ──
+        ("GET", "/drives") => {
+            return Ok(ok_value(commands::fs::fs_drives_core()));
+        }
         ("GET", "/list") => {
             let path = q_get(&q, "path").cloned().unwrap_or_default();
             return Ok(ok_value(commands::fs::fs_list_core(path).await?));
@@ -1194,6 +1197,39 @@ pub async fn handle_other_route(
             if let Some(obj) = payload.as_object_mut() {
                 obj.remove("endpoint");
                 obj.remove("apiKey");
+            }
+            let stream = payload
+                .get("stream")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if stream {
+                // 流式：把增量文本组回 SSE（`data:` 行），前端按行解析。
+                let mut deltas: Vec<String> = Vec::new();
+                let result = commands::ai::ai_test_stream_impl(
+                    &endpoint,
+                    api_key.as_deref(),
+                    payload,
+                    |delta| deltas.push(delta),
+                )
+                .await;
+                return match result {
+                    Ok(_) => {
+                        let mut sse_body = String::new();
+                        for delta in deltas {
+                            let data = serde_json::json!({
+                                "choices": [{ "delta": { "content": delta } }]
+                            });
+                            sse_body.push_str(&format!("data: {data}\n\n"));
+                        }
+                        sse_body.push_str("data: [DONE]\n\n");
+                        Ok(HttpResponse {
+                            status: 200,
+                            content_type: "text/event-stream".into(),
+                            body: sse_body.into_bytes(),
+                        })
+                    }
+                    Err(error) => Ok(ai_result_response(json!({ "ok": false, "error": error }))),
+                };
             }
             return Ok(ai_result_response(commands::ai::ai_test(endpoint, api_key, payload).await));
         }
