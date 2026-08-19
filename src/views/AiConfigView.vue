@@ -73,17 +73,27 @@
       <!-- 服务器连接条：web/服务器模式下登录入口与状态（配置在下方表单，保存时同步到服务端） -->
       <div v-if="!isDesktopRuntime" class="server-strip">
         <template v-if="serverLoggedIn">
-          <span class="server-strip-status ok">🖥️ 已连接服务器</span>
+          <span class="server-strip-status ok">🖥️ 已连接服务器（admin）</span>
           <span class="server-strip-note">{{ serverCfgNote }}</span>
           <button type="button" class="link" @click="handleServerLogout">退出登录</button>
+          <button type="button" class="link" @click="showChangePassword = !showChangePassword">
+            {{ showChangePassword ? "取消改密" : "修改密码" }}
+          </button>
         </template>
         <template v-else>
           <span class="server-strip-label">🖥️ 服务器模式</span>
           <input
+            v-model="serverLoginUsername"
+            type="text"
+            class="server-strip-token"
+            style="width: 110px"
+            placeholder="账号"
+          />
+          <input
             v-model="serverLoginPassword"
             type="password"
             class="server-strip-token"
-            placeholder="输入服务器 AIALL_SERVER_TOKEN"
+            placeholder="密码"
             @keyup.enter="handleServerLogin"
           />
           <button type="button" class="secondary" :disabled="serverAuthBusy" @click="handleServerLogin">
@@ -91,6 +101,22 @@
           </button>
           <span v-if="serverLoginError" class="server-strip-error">{{ serverLoginError }}</span>
         </template>
+      </div>
+      <div v-if="!isDesktopRuntime && serverLoggedIn && showChangePassword" class="server-strip" style="margin-top: 8px">
+        <input v-model="changeOldPassword" type="password" class="server-strip-token" placeholder="旧密码" />
+        <input v-model="changeNewPassword" type="password" class="server-strip-token" placeholder="新密码（≥6位）" />
+        <input
+          v-model="changeConfirmPassword"
+          type="password"
+          class="server-strip-token"
+          placeholder="确认新密码"
+          @keyup.enter="handleChangePassword"
+        />
+        <button type="button" class="secondary" :disabled="changeBusy" @click="handleChangePassword">
+          {{ changeBusy ? "修改中..." : "确认修改" }}
+        </button>
+        <span v-if="changeError" class="server-strip-error">{{ changeError }}</span>
+        <span v-if="changeOk" class="server-strip-status ok">{{ changeOk }}</span>
       </div>
 
       <!-- 供应商切换条 -->
@@ -377,6 +403,7 @@ import {
   isServerLoggedIn,
   serverLogin,
   serverLogout,
+  serverChangePassword,
   fetchServerAiConfig,
   saveServerAiConfig,
 } from "../services/serverAuth";
@@ -421,10 +448,18 @@ let saveHintTimer: number | undefined;
 // ── 服务器模式（web / agent-server）──
 const isDesktopRuntime = isTauriEnv();
 const serverLoggedIn = ref(isServerLoggedIn());
+const serverLoginUsername = ref("admin");
 const serverLoginPassword = ref("");
 const serverLoginError = ref("");
 const serverAuthBusy = ref(false);
 const serverCfgNote = ref("");
+const showChangePassword = ref(false);
+const changeOldPassword = ref("");
+const changeNewPassword = ref("");
+const changeConfirmPassword = ref("");
+const changeError = ref("");
+const changeOk = ref("");
+const changeBusy = ref(false);
 
 async function refreshServerLoginState() {
   serverLoggedIn.value = isServerLoggedIn();
@@ -437,6 +472,7 @@ async function refreshServerLoginState() {
       : cfg.error || "无法获取服务端 AI 配置";
   } else {
     serverCfgNote.value = "";
+    showChangePassword.value = false;
   }
 }
 
@@ -444,7 +480,10 @@ async function handleServerLogin() {
   if (serverAuthBusy.value) return;
   serverAuthBusy.value = true;
   serverLoginError.value = "";
-  const result = await serverLogin(serverLoginPassword.value.trim());
+  const result = await serverLogin(
+    serverLoginPassword.value.trim(),
+    serverLoginUsername.value.trim() || "admin",
+  );
   serverAuthBusy.value = false;
   if (result.ok) {
     serverLoginPassword.value = "";
@@ -457,6 +496,32 @@ async function handleServerLogin() {
 async function handleServerLogout() {
   await serverLogout();
   await refreshServerLoginState();
+}
+
+async function handleChangePassword() {
+  if (changeBusy.value) return;
+  changeError.value = "";
+  changeOk.value = "";
+  if (!changeOldPassword.value.trim() || !changeNewPassword.value.trim()) {
+    changeError.value = "请填写旧密码和新密码";
+    return;
+  }
+  if (changeNewPassword.value !== changeConfirmPassword.value) {
+    changeError.value = "两次新密码不一致";
+    return;
+  }
+  changeBusy.value = true;
+  const result = await serverChangePassword(changeOldPassword.value.trim(), changeNewPassword.value.trim());
+  changeBusy.value = false;
+  if (result.ok) {
+    changeOk.value = "密码已修改，下次登录请用新密码";
+    changeOldPassword.value = "";
+    changeNewPassword.value = "";
+    changeConfirmPassword.value = "";
+    window.setTimeout(() => (changeOk.value = ""), 3000);
+  } else {
+    changeError.value = result.error || "修改失败";
+  }
 }
 
 const providers = ref<AiProvider[]>([createDefaultProvider()]);

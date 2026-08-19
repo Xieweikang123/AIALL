@@ -77,6 +77,7 @@ export interface UseEditorPanelParams {
   collapseEditor: () => void;
   expandEditor: () => void;
   autoRetryWithCountdown: <T>(fn: () => Promise<T>, options?: { onRetry?: (remaining: number, attempt: number, maxRetries: number) => void }) => Promise<T>;
+  gitActiveRepoPath?: Ref<string>;
 }
 
 export function useEditorPanel(params: UseEditorPanelParams) {
@@ -98,6 +99,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     collapseEditor,
     expandEditor,
     autoRetryWithCountdown,
+    gitActiveRepoPath,
   } = params;
 
   const fileTree = ref<TreeNode[]>([]);
@@ -359,7 +361,16 @@ export function useEditorPanel(params: UseEditorPanelParams) {
   }
 
   function gitWorkingTreePreviewPath(filePath: string, staged = false): string {
-    if (!staged) return resolveFullPathFromRel(filePath);
+    if (!staged) {
+      const base = gitActiveRepoPath?.value?.trim() || projectPath.value;
+      // 已是绝对路径（如多仓总览拼好的）直接返回，避免二次拼接
+      if (/^[a-zA-Z]:/.test(filePath.trim()) || filePath.startsWith("/")) {
+        const key = normalizePathKey(filePath);
+        const node = findNodeByKey(fileTree.value, key);
+        return node?.path || filePath;
+      }
+      return joinProjectPath(base, filePath);
+    }
     return `git-index://${filePath}`;
   }
 
@@ -474,7 +485,8 @@ export function useEditorPanel(params: UseEditorPanelParams) {
         gitDiffLoadingKey.value = cacheKey;
         const controller = new AbortController();
         diffAbortController = controller;
-        const result = await fetchGitDiffContent(projectPath.value.trim(), filePath, staged, controller.signal);
+        const effectiveRepo = gitActiveRepoPath?.value?.trim() || projectPath.value.trim();
+        const result = await fetchGitDiffContent(effectiveRepo, filePath, staged, controller.signal);
         if (controller.signal.aborted) return;
         if (!result.ok) {
           if (result.error !== "已取消") gitError.value = result.error || "获取 diff 失败";

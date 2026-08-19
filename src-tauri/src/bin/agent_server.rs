@@ -16,7 +16,8 @@
 //! Env:
 //!   AIALL_SERVER_BIND             default 127.0.0.1
 //!   AIALL_SERVER_PORT             default 8787
-//!   AIALL_SERVER_TOKEN            required for auth (`Authorization: Bearer <token>` or login)
+//!   AIALL_SERVER_TOKEN            legacy: password for admin (same as AIALL_SERVER_ADMIN_PASSWORD)
+//!   AIALL_SERVER_ADMIN_PASSWORD   password for admin (preferred)
 //!   AIALL_SERVER_ALLOWED_PROJECTS comma-separated allowed project roots (empty = allow all)
 //!   AIALL_SERVER_AI_ENDPOINT/KEY/MODEL/PROXY  server-side AI config (key never sent to browser)
 //!   AIALL_SERVER_RESTRICT_COMMANDS=1          whitelist Agent run_command in server mode
@@ -30,7 +31,7 @@ use rand::RngCore;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock as StdRwLock};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{tcp::OwnedWriteHalf, TcpListener, TcpStream};
@@ -73,9 +74,95 @@ impl SessionStore {
     }
 }
 
+#[derive(Debug, Clone)]
+struct ServerAuth {
+    username: String,
+    password: String,
+    /// true 表示密码来自环境变量，禁止通过 API 修改
+    from_env: bool,
+}
+
+fn server_auth_path() -> std::path::PathBuf {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map(|home| {
+            std::path::Path::new(&home)
+                .join(".config")
+                .join("aiall")
+                .join("server-auth.json")
+        })
+        .unwrap_or_else(|_| std::path::PathBuf::from("server-auth.json"))
+}
+
+fn generate_random_password(len: usize) -> String {
+    use rand::distributions::{Alphanumeric, DistString};
+    Alphanumeric.sample_string(&mut rand::thread_rng(), len)
+}
+
+fn load_server_auth() -> Option<ServerAuth> {
+    // 优先级：AIALL_SERVER_ADMIN_PASSWORD > AIALL_SERVER_TOKEN（兼容旧版）> 文件
+    if let Some(pw) = read_env("AIALL_SERVER_ADMIN_PASSWORD").or_else(|| read_env("AIALL_SERVER_TOKEN")) {
+        return Some(ServerAuth {
+            username: "admin".into(),
+            password: pw,
+            from_env: true,
+        });
+    }
+    let path = server_auth_path();
+    if let Ok(text) = std::fs::read_to_string(&path) {
+        if let Ok(v) = serde_json::from_str::<Value>(&text) {
+            let username = v.get("username").and_then(|x| x.as_str()).unwrap_or("admin").trim().to_string();
+            let password = v.get("password").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
+            if !password.is_empty() {
+                return Some(ServerAuth {
+                    username: if username.is_empty() { "admin".into() } else { username },
+                    password,
+                    from_env: false,
+                });
+            }
+        }
+    }
+    None
+}
+
+fn ensure_server_auth() -> ServerAuth {
+    if let Some(auth) = load_server_auth() {
+        return auth;
+    }
+    let password = generate_random_password(16);
+    let auth = ServerAuth {
+        username: "admin".into(),
+        password: password.clone(),
+        from_env: false,
+    };
+    let path = server_auth_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let json = json!({ "username": auth.username, "password": auth.password });
+    if let Ok(text) = serde_json::to_string_pretty(&json) {
+        let _ = std::fs::write(&path, text);
+        println!("[agent-server] 已生成初始账号 admin / 密码 {password}，已写入 {path:?}，请妥善保管");
+    }
+    auth
+}
+
+fn save_server_auth(auth: &ServerAuth) -> Result<(), String> {
+    if auth.from_env {
+        return Err("服务端通过环境变量配置了密码，请直接修改环境变量".into());
+    }
+    let path = server_auth_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建认证目录失败: {e}"))?;
+    }
+    let json = json!({ "username": auth.username, "password": auth.password });
+    let text = serde_json::to_string_pretty(&json).map_err(|e| format!("序列化认证配置失败: {e}"))?;
+    std::fs::write(&path, text).map_err(|e| format!("写入 {path:?} 失败: {e}"))
+}
+
 #[derive(Clone)]
 struct ServerConfig {
-    token: Option<String>,
+    auth: Arc<StdRwLock<Option<ServerAuth>>>,
     allowed_projects: Vec<String>,
     ai: Arc<RwLock<Option<ServerAiConfig>>>,
 }
@@ -101,22 +188,23 @@ fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a s
         .map(|(_, v)| v.as_str())
 }
 
-/// 认证：静态 `AIALL_SERVER_TOKEN`（Bearer）或登录会话 token 任一中即可。
+/// 认证：静态账号密码（Bearer <password>）或登录会话 token 任一中即可。
 /// 未配置任何凭证时（本地开发）默认放行。
 fn authorized(
     headers: &[(String, String)],
     config: &ServerConfig,
     sessions: &SessionStore,
 ) -> bool {
-    let Some(token) = &config.token else {
+    let auth_guard = config.auth.read().unwrap();
+    let Some(auth) = auth_guard.as_ref() else {
         return true;
     };
-    let bearer = format!("Bearer {token}");
+    let bearer = format!("Bearer {}", auth.password);
     let static_ok = header_value(headers, "authorization")
         .map(|v| v.trim() == bearer)
         .unwrap_or(false)
         || header_value(headers, "x-aiall-token")
-            .map(|v| v.trim() == token)
+            .map(|v| v.trim() == auth.password)
             .unwrap_or(false);
     if static_ok {
         return true;
@@ -392,18 +480,45 @@ async fn handle_login(
         Ok(v) => v,
         Err(_) => Value::Null,
     };
+    let username = parsed
+        .get("username")
+        .and_then(|v| v.as_str())
+        .unwrap_or("admin")
+        .trim()
+        .to_string();
     let password = parsed
         .get("password")
         .or_else(|| parsed.get("token"))
         .and_then(|v| v.as_str())
         .unwrap_or("")
-        .trim();
-    let token_matches = config
-        .token
-        .as_deref()
-        .map(|t| t == password)
-        .unwrap_or(false);
-    if !token_matches {
+        .trim()
+        .to_string();
+    let auth_opt = config.auth.read().unwrap().clone();
+    let auth = match auth_opt {
+        Some(a) => a,
+        None => {
+            // 未配置认证时直接放行，直接签发 session
+            let session = sessions.issue();
+            let expires_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+                + SESSION_TTL.as_secs();
+            let payload = serde_json::to_string(&json!({
+                "ok": true,
+                "token": session,
+                "expiresAt": expires_at,
+                "ttlSeconds": SESSION_TTL.as_secs(),
+            }))
+            .unwrap_or_else(|_| "{}".into());
+            write_headers(w, "200 OK", "application/json", &[]).await?;
+            return w.write_all(payload.as_bytes()).await.map_err(|e| e.to_string());
+        }
+    };
+    let ok = username == auth.username && password == auth.password;
+    // 兼容旧版：只传 password 且与存储密码一致时也放行（username 默认为 admin）
+    let legacy_ok = username == "admin" && password == auth.password;
+    if !ok && !legacy_ok {
         write_headers(w, "401 Unauthorized", "text/plain", &[]).await?;
         return w
             .write_all(b"invalid credentials")
@@ -544,6 +659,65 @@ async fn handle_update_server_ai_config(
     w.write_all(payload.as_bytes()).await.map_err(|e| e.to_string())
 }
 
+/// 修改服务端登录密码：`POST /api/server/change-password`
+/// body: `{ oldPassword, newPassword }`（username 固定 admin）
+async fn handle_change_password(
+    w: &mut OwnedWriteHalf,
+    body: Vec<u8>,
+    config: &ServerConfig,
+) -> Result<(), String> {
+    let parsed: Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(_) => Value::Null,
+    };
+    let old_password = parsed
+        .get("oldPassword")
+        .or_else(|| parsed.get("old_password"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let new_password = parsed
+        .get("newPassword")
+        .or_else(|| parsed.get("new_password"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if old_password.is_empty() || new_password.is_empty() {
+        return write_server_json_error(w, 400, "oldPassword 和 newPassword 均不能为空").await;
+    }
+    if new_password.len() < 6 {
+        return write_server_json_error(w, 400, "新密码长度至少 6 位").await;
+    }
+    let auth_opt = config.auth.read().unwrap().clone();
+    let Some(auth) = auth_opt else {
+        return write_server_json_error(w, 400, "当前未启用认证，无需修改密码").await;
+    };
+    if auth.from_env {
+        return write_server_json_error(w, 409, "服务端通过环境变量配置了密码，请直接修改环境变量").await;
+    }
+    if old_password != auth.password {
+        return write_server_json_error(w, 401, "旧密码不正确").await;
+    }
+    let new_auth = ServerAuth {
+        username: auth.username.clone(),
+        password: new_password.clone(),
+        from_env: false,
+    };
+    if let Err(e) = save_server_auth(&new_auth) {
+        return write_server_json_error(w, 500, &e).await;
+    }
+    // 热更新内存中的认证信息
+    if let Ok(mut guard) = config.auth.write() {
+        *guard = Some(new_auth);
+    }
+    let payload = serde_json::to_string(&json!({ "ok": true }))
+        .unwrap_or_else(|_| "{}".into());
+    write_headers(w, "200 OK", "application/json", &[]).await?;
+    w.write_all(payload.as_bytes()).await.map_err(|e| e.to_string())
+}
+
 async fn handle_connection(
     stream: TcpStream,
     config: &ServerConfig,
@@ -567,6 +741,12 @@ async fn handle_connection(
             return write_unauthorized(&mut write_half).await;
         }
         return handle_update_server_ai_config(&mut write_half, request.body, config).await;
+    }
+    if request.path == "/api/server/change-password" && request.method == "POST" {
+        if !authorized(&request.headers, config, &sessions) {
+            return write_unauthorized(&mut write_half).await;
+        }
+        return handle_change_password(&mut write_half, request.body, config).await;
     }
     if request.path == "/api/agent/cancel" && request.method == "POST" {
         if !authorized(&request.headers, config, &sessions) {
@@ -670,7 +850,10 @@ async fn main() {
     let port: u16 = read_env("AIALL_SERVER_PORT")
         .and_then(|v| v.parse().ok())
         .unwrap_or(8787);
-    let token = read_env("AIALL_SERVER_TOKEN");
+    // 账号密码：优先 env，否则读文件，不存在则随机生成 admin 密码并落盘
+    let auth_value = ensure_server_auth();
+    let auth_from_env = auth_value.from_env;
+    let auth = Arc::new(StdRwLock::new(Some(auth_value)));
     let allowed_projects: Vec<String> = read_env("AIALL_SERVER_ALLOWED_PROJECTS")
         .map(|v| {
             v.split(',')
@@ -681,7 +864,7 @@ async fn main() {
         .unwrap_or_default();
     let ai = Arc::new(RwLock::new(load_server_ai_config()));
     let config = ServerConfig {
-        token,
+        auth,
         allowed_projects,
         ai,
     };
@@ -704,8 +887,21 @@ async fn main() {
             config.allowed_projects.join(", ")
         );
     }
-    if config.token.is_some() {
-        println!("[agent-server] token auth: enabled (POST /api/server/login)");
+    {
+        let guard = config.auth.read().unwrap();
+        if let Some(a) = guard.as_ref() {
+            if a.from_env {
+                println!("[agent-server] auth: enabled (admin / env password, POST /api/server/login)");
+            } else {
+                println!("[agent-server] auth: enabled (admin / file password, POST /api/server/login)");
+            }
+        } else {
+            println!("[agent-server] auth: disabled (no password configured)");
+        }
+        if auth_from_env {
+            // 避免 unused 警告
+            let _ = auth_from_env;
+        }
     }
     let ai_loaded = config.ai.try_read().map(|g| g.is_some()).unwrap_or(false);
     if ai_loaded {

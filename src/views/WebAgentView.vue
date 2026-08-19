@@ -20,6 +20,7 @@ const prompt = ref("");
 const running = ref(false);
 const answer = ref("");
 const logs = ref<WebAgentSseEvent[]>([]);
+const loginUsername = ref("admin");
 const loginPassword = ref("");
 const loginError = ref("");
 const loggedIn = ref(false);
@@ -36,7 +37,7 @@ async function doLogin() {
   if (authBusy.value) return;
   authBusy.value = true;
   loginError.value = "";
-  const result = await serverLogin(loginPassword.value.trim());
+  const result = await serverLogin(loginPassword.value.trim(), loginUsername.value.trim() || "admin");
   authBusy.value = false;
   if (result.ok) {
     loginPassword.value = "";
@@ -150,10 +151,11 @@ function evLabel(ev: WebAgentSseEvent): string {
         <button type="button" @click="doLogout">退出</button>
       </template>
       <template v-else>
+        <input v-model="loginUsername" type="text" placeholder="账号" style="max-width: 110px" />
         <input
           v-model="loginPassword"
           type="password"
-          placeholder="服务器 AIALL_SERVER_TOKEN（登录）"
+          placeholder="密码"
           @keyup.enter="doLogin"
         />
         <button type="button" :disabled="authBusy" @click="doLogin">登录</button>

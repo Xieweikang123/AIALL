@@ -30,8 +30,10 @@ Restart=always
 RestartSec=3
 
 # ── 必须按实际情况填 ──
-# 认证密码（>= 32 字节随机串；也是 POST /api/server/login 的 password）
-Environment=AIALL_SERVER_TOKEN=__CHANGE_ME__
+# 认证：账号 admin，密码（>= 16 位随机）。优先用 AIALL_SERVER_ADMIN_PASSWORD，旧变量 AIALL_SERVER_TOKEN 仍兼容。
+# 若此处留空且未设 env，首次启动会自动在 ~/.config/aiall/server-auth.json 生成随机密码并打印到日志。
+# 登录：POST /api/server/login {username:"admin", password}；改密：POST /api/server/change-password
+Environment=AIALL_SERVER_ADMIN_PASSWORD=__CHANGE_ME__
 # 项目白名单（逗号分隔绝对路径；空 = 全放行，生产必填）
 Environment=AIALL_SERVER_ALLOWED_PROJECTS=/srv/aiall/projects
 # 服务器模式命令白名单

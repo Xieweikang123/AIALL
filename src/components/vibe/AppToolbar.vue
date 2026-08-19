@@ -198,6 +198,15 @@
       </div>
       <div class="toolbar-sep" />
       <nav class="toolbar-nav" aria-label="快捷导航">
+        <button type="button" class="toolbar-nav-btn" title="Git 总览：多仓分支与变更" @click="router.push('/git-overview')">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="6" cy="6" r="2.2" stroke="currentColor" stroke-width="1.2"/>
+            <circle cx="6" cy="13" r="1.6" stroke="currentColor" stroke-width="1.2"/>
+            <path d="M10 3.5a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z" stroke="currentColor" stroke-width="1.2"/>
+            <path d="M6 8.2v2.6M10 5.5c0 2.8-1.6 4.8-4 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+          </svg>
+          <span class="toolbar-nav-label">总览</span>
+        </button>
         <button type="button" class="toolbar-nav-btn" title="通用对话：网页总结 / 桌面自动化（非改码）" @click="router.push('/chat')">
           <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v5A1.5 1.5 0 0 1 12.5 10H8l-3 2.5V10H3.5A1.5 1.5 0 0 1 2 8.5v-5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>

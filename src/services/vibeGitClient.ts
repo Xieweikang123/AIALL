@@ -176,9 +176,13 @@ export async function fetchGitStatus(projectPath: string): Promise<GitStatusResu
 
 export async function fetchGitRepos(projectPath: string): Promise<GitReposResult> {
   return invokeBackend<GitReposResult>("git_list_repos", { path: projectPath }, async () => {
-    const parts = projectPath.split(/[\\/]/).filter(Boolean);
-    const name = parts[parts.length - 1] || projectPath;
-    return { ok: true, repos: [{ path: projectPath, name, relPath: "", isRoot: true }], error: undefined };
+    try {
+      const url = backendUrl(`/backend/vibe/git/repos?path=${encodeURIComponent(projectPath)}`);
+      const response = await fetch(url);
+      return await readJsonResponse<GitReposResult>(response);
+    } catch (error) {
+      return { ok: false, repos: [], error: error instanceof Error ? error.message : "网络错误" };
+    }
   });
 }
 

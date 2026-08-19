@@ -2,11 +2,18 @@
   <div class="login-page">
     <div class="login-card">
       <h1>AIALL 服务器登录</h1>
-      <p class="desc">该服务器已配置访问令牌。请输入 <code>AIALL_SERVER_TOKEN</code> 登录后使用。</p>
+      <p class="desc">请输入账号 <code>admin</code> 与密码登录。初始密码由服务器首次启动时随机生成并写入 <code>~/.config/aiall/server-auth.json</code>。</p>
+      <input
+        v-model="username"
+        type="text"
+        placeholder="账号"
+        autocomplete="username"
+        @keyup.enter="handleLogin"
+      />
       <input
         v-model="password"
         type="password"
-        placeholder="AIALL_SERVER_TOKEN"
+        placeholder="密码"
         autocomplete="current-password"
         @keyup.enter="handleLogin"
       />
@@ -23,6 +30,7 @@ import { serverLogin } from "../services/serverAuth";
 
 const route = useRoute();
 const router = useRouter();
+const username = ref("admin");
 const password = ref("");
 const busy = ref(false);
 const error = ref("");
@@ -31,7 +39,7 @@ async function handleLogin() {
   if (busy.value) return;
   busy.value = true;
   error.value = "";
-  const result = await serverLogin(password.value.trim());
+  const result = await serverLogin(password.value.trim(), username.value.trim() || "admin");
   busy.value = false;
   if (result.ok) {
     const redirect = typeof route.query.redirect === "string" ? route.query.redirect : "/";

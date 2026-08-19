@@ -66,13 +66,16 @@ export function getAuthHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-/** 用服务器 token（密码）登录，换取 session token。 */
-export async function serverLogin(password: string): Promise<{ ok: boolean; error?: string }> {
+/** 用服务器账号密码登录，换取 session token。username 固定 admin，兼容旧版只传 password。 */
+export async function serverLogin(
+  password: string,
+  username: string = "admin",
+): Promise<{ ok: boolean; error?: string }> {
   try {
     const resp = await fetch(backendUrl("/api/server/login"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password }),
+      body: JSON.stringify({ username, password }),
     });
     const text = await resp.text();
     let parsed: { ok?: boolean; token?: string; expiresAt?: number; error?: string };
@@ -84,9 +87,12 @@ export async function serverLogin(password: string): Promise<{ ok: boolean; erro
     if (!resp.ok || !parsed.ok || !parsed.token) {
       return { ok: false, error: parsed.error || `登录失败，HTTP ${resp.status}` };
     }
+    // 后端返回秒级时间戳（as_secs），前端用毫秒比较，需归一化
+    let expiresAt = parsed.expiresAt ?? Date.now() + 12 * 3600 * 1000;
+    if (expiresAt < 1e12) expiresAt *= 1000;
     writeSession({
       token: parsed.token,
-      expiresAt: parsed.expiresAt ?? Date.now() + 12 * 3600 * 1000,
+      expiresAt,
     });
     return { ok: true };
   } catch (error) {
@@ -108,6 +114,38 @@ export async function serverLogout(): Promise<void> {
     // 静默：本地清除为主
   }
   writeSession(null);
+}
+
+/** 修改服务端登录密码（需已登录，username 固定 admin）。 */
+export async function serverChangePassword(
+  oldPassword: string,
+  newPassword: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const { response, unauthorized } = await authFetch(backendUrl("/api/server/change-password"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ oldPassword, newPassword }),
+    });
+    const text = await response.text();
+    let parsed: { ok?: boolean; error?: string };
+    try {
+      parsed = JSON.parse(text) as typeof parsed;
+    } catch {
+      parsed = {};
+    }
+    if (!response.ok || parsed.ok === false) {
+      return {
+        ok: false,
+        error: unauthorized
+          ? "未登录或会话已过期"
+          : parsed.error || `修改失败，HTTP ${response.status}`,
+      };
+    }
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "网络错误" };
+  }
 }
 
 /**
@@ -146,32 +184,54 @@ export function installServerAuthFetch(): () => void {
   (window as unknown as { __aiallAuthFetchInstalled?: boolean }).__aiallAuthFetchInstalled = true;
 
   const wrapped: typeof fetch = (input, init) => {
+    let path = "";
+    let isBackend = false;
+    let isLogin = false;
     try {
       let url = "";
       if (typeof input === "string") url = input;
       else if (input instanceof URL) url = input.toString();
       else if (input instanceof Request) url = input.url;
-      if (!url) return original(input, init);
-
-      let path = "";
-      try {
-        path = new URL(url).pathname;
-      } catch {
-        path = url.split("?")[0];
-      }
-      const isBackend = path.startsWith("/backend/") || path.startsWith("/api/");
-      if (isBackend) {
-        const token = getServerSessionToken();
-        if (token) {
-          const headers = new Headers(init?.headers || {});
-          if (!headers.has("Authorization")) {
-            headers.set("Authorization", `Bearer ${token}`);
-            return original(input, { ...(init || {}), headers });
-          }
+      if (url) {
+        try {
+          path = new URL(url).pathname;
+        } catch {
+          path = url.split("?")[0];
         }
+        isBackend = path.startsWith("/backend/") || path.startsWith("/api/");
+        isLogin = path === "/api/server/login" || path === "/api/server/logout";
       }
     } catch {
-      // 包装失败不影响原始请求
+      // 解析失败不影响请求
+    }
+    let doFetch: Promise<Response>;
+    if (isBackend && !isLogin) {
+      const token = getServerSessionToken();
+      if (token) {
+        const headers = new Headers(init?.headers || {});
+        if (!headers.has("Authorization")) {
+          headers.set("Authorization", `Bearer ${token}`);
+          doFetch = original(input, { ...(init || {}), headers });
+        } else {
+          doFetch = original(input, init);
+        }
+      } else {
+        doFetch = original(input, init);
+      }
+      // 后端 401 自动跳登录（页内接口 unauthorized 也能跳，不靠路由守卫）
+      return doFetch.then((resp) => {
+        if (resp.status === 401 && isBackend && !isLogin) {
+          try {
+            // token 过期或未登录，清理后跳登录
+            if (resp.status === 401) localStorage.removeItem(SESSION_KEY);
+            if (!window.location.hash.includes("#/login")) {
+              const cur = window.location.hash.replace(/^#/, "") || "/";
+              window.location.hash = `#/login?redirect=${encodeURIComponent(cur)}`;
+            }
+          } catch {}
+        }
+        return resp;
+      });
     }
     return original(input, init);
   };

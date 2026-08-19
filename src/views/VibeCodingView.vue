@@ -2292,6 +2292,7 @@ const {
   collapseEditor,
   expandEditor,
   autoRetryWithCountdown,
+  gitActiveRepoPath: git.gitActiveRepoPath,
 });
 
 fileWatcherTreeRefresh.fn = refreshTree;

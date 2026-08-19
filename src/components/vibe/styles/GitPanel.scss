@@ -1795,3 +1795,41 @@
   width: 100%;
   max-width: 320px;
 }
+.git-overview-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.git-overview-toggle-group {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.git-overview-toggle .git-repo-selector {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.git-overview-btn {
+  padding: 4px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255,255,255,0.6);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.git-overview-btn.active {
+  background: rgba(88,166,255,0.18);
+  color: #58a6ff;
+  font-weight: 600;
+}

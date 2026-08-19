@@ -13,13 +13,54 @@
       </p>
     </div>
     <div v-else-if="gitIsRepo" class="git-panel-content">
-      <GitRepoSelector
-        v-if="gitRepos.length > 1"
-        :git-repos="gitRepos"
-        :git-active-repo-path="gitActiveRepoPath"
-        @switch-git-repo="$emit('switch-git-repo', $event)"
+      <div v-if="gitRepos.length > 1" class="git-overview-toggle">
+        <div class="git-overview-toggle-group">
+            <button
+              type="button"
+              class="git-overview-btn"
+              :class="{ active: isSingleMode }"
+              @click="setOverviewMode('single')"
+            >
+              单仓
+            </button>
+            <button
+              type="button"
+              class="git-overview-btn"
+              :class="{ active: isAllMode }"
+              @click="setOverviewMode('all')"
+            >
+              总览 · {{ gitRepos.length }}
+            </button>
+          </div>
+          <GitRepoSelector
+            v-if="isSingleMode"
+            :git-repos="gitRepos"
+            :git-active-repo-path="gitActiveRepoPath"
+            @switch-git-repo="$emit('switch-git-repo', $event)"
+          />
+        </div>
+      <GitMultiRepoOverview
+        v-if="isAllMode && gitRepos.length > 1"
+        :entries="multiOverview.entries.value"
+        :loading="multiOverview.overviewLoading.value"
+        :error="multiOverview.overviewError.value"
+        :expanded-keys="multiOverview.expandedRepos.value"
+        @refresh="multiOverview.refreshMultiRepoOverview()"
+        @refresh-single="multiOverview.refreshSingleRepo($event)"
+        @switch-git-repo="handleMultiSwitchRepo"
+        @open-repo-folder="handleOpenRepoFolder"
+        @open-file="handleMultiOpenFile"
+        @stage-file="handleMultiStageFile"
+        @unstage-file="handleMultiUnstageFile"
+        @discard-file="handleMultiDiscardFile"
+        @stage-all="handleMultiStageAll"
+        @unstage-all="handleMultiUnstageAll"
+        @pull="handleMultiPull"
+        @push="handleMultiPush"
+        @toggle-expanded="multiOverview.toggleExpanded($event)"
       />
-      <GitPanelHeader
+      <template v-if="isSingleMode">
+        <GitPanelHeader
         :git-branch="gitBranch"
         :git-branches="gitBranches"
         :git-tracking-branch="gitTrackingBranch"
@@ -153,7 +194,7 @@
               @stage-dir="(path, scope) => $emit('stage-dir', path, scope)"
               @unstage-dir="$emit('unstage-dir', $event)"
               @discard-dir="(path, scope, event) => $emit('discard-dir', path, scope, event)"
-              @open-file="$emit('open-file', $event)"
+              @open-file="(path) => $emit('open-file', gitActiveRepoPath ? joinRepoFile(gitActiveRepoPath, path) : path)"
               @resolve-conflict="(path, side) => $emit('resolve-conflict', path, side)"
               @toggle-tree-dir="(path, kind) => toggleGitTreeDir(path, kind)"
               @on-git-file-pointer-down="(event, path, scope) => $emit('on-git-file-pointer-down', event, path, scope)"
@@ -217,20 +258,56 @@
           @reset-to-commit="(hash, mode, shortHash) => $emit('reset-to-commit', hash, mode, shortHash)"
         />
       </div>
+        </template>
     </div>
     <div v-else-if="gitError" class="panel-empty git-panel-fetch-error">
       <p>获取 Git 状态失败</p>
       <p class="git-fetch-error-detail">{{ gitError }}</p>
       <button type="button" class="secondary small" @click="$emit('refresh')">重试</button>
     </div>
-    <div v-else-if="gitStatusKnown && gitRepos.length > 0" class="panel-empty git-repo-empty">
-      <p class="panel-empty-title">选择要查看的 Git 仓库</p>
-      <p class="panel-empty-hint">目录下检测到 {{ gitRepos.length }} 个仓库，请选择其中一个</p>
-      <GitRepoSelector
-        :git-repos="gitRepos"
-        :git-active-repo-path="gitActiveRepoPath"
-        @switch-git-repo="$emit('switch-git-repo', $event)"
-      />
+    <div v-else-if="gitStatusKnown && gitRepos.length > 0" :class="isAllMode ? 'git-panel-content' : 'panel-empty git-repo-empty'">
+      <template v-if="isAllMode">
+        <div class="git-overview-toggle">
+          <div class="git-overview-toggle-group">
+            <button type="button" class="git-overview-btn" :class="{ active: isSingleMode }" @click="setOverviewMode('single')">单仓</button>
+            <button type="button" class="git-overview-btn" :class="{ active: isAllMode }" @click="setOverviewMode('all')">总览 · {{ gitRepos.length }}</button>
+          </div>
+        </div>
+        <GitMultiRepoOverview
+          :entries="multiOverview.entries.value"
+          :loading="multiOverview.overviewLoading.value"
+          :error="multiOverview.overviewError.value"
+          :expanded-keys="multiOverview.expandedRepos.value"
+          @refresh="multiOverview.refreshMultiRepoOverview()"
+          @refresh-single="multiOverview.refreshSingleRepo($event)"
+          @switch-git-repo="handleMultiSwitchRepo"
+          @open-repo-folder="handleOpenRepoFolder"
+          @open-file="handleMultiOpenFile"
+          @stage-file="handleMultiStageFile"
+          @unstage-file="handleMultiUnstageFile"
+          @discard-file="handleMultiDiscardFile"
+          @stage-all="handleMultiStageAll"
+          @unstage-all="handleMultiUnstageAll"
+          @pull="handleMultiPull"
+          @push="handleMultiPush"
+          @toggle-expanded="multiOverview.toggleExpanded($event)"
+        />
+      </template>
+      <template v-else>
+        <p class="panel-empty-title">选择要查看的 Git 仓库</p>
+        <p class="panel-empty-hint">目录下检测到 {{ gitRepos.length }} 个仓库，请选择其中一个</p>
+        <div class="git-overview-toggle" style="margin: 8px 0">
+          <div class="git-overview-toggle-group">
+            <button type="button" class="git-overview-btn" :class="{ active: isSingleMode }" @click="setOverviewMode('single')">单仓</button>
+            <button type="button" class="git-overview-btn" :class="{ active: isAllMode }" @click="setOverviewMode('all')">总览 · {{ gitRepos.length }}</button>
+          </div>
+        </div>
+        <GitRepoSelector
+          :git-repos="gitRepos"
+          :git-active-repo-path="gitActiveRepoPath"
+          @switch-git-repo="$emit('switch-git-repo', $event)"
+        />
+      </template>
     </div>
     <div v-else-if="gitStatusKnown" class="panel-empty">当前目录不是 Git 仓库</div>
     <div v-else class="panel-empty shimmer-text--fast">加载中…</div>
@@ -238,11 +315,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, toRef, watch } from "vue";
+import { computed, ref, toRef, watch } from "vue";
 import type { GitRemoteInfo, GitBranchInfo, GitRepoInfo } from "../../services/vibeGitClient";
 import type { BatchGroup } from "../../composables/useGitPanel";
 import type { GitFileListScope } from "../../utils/gitHelpers";
 import { useGitPanelFileTree } from "../../composables/useGitPanelFileTree";
+import { useGitMultiRepoOverview } from "../../composables/git/useGitMultiRepoOverview";
+import { lsGet, lsSet } from "../../utils/localStorageSafe";
 import GitRepoSelector from "./GitRepoSelector.vue";
 import GitPanelHeader from "./GitPanelHeader.vue";
 import GitStashPanel from "./GitStashPanel.vue";
@@ -250,6 +329,7 @@ import GitCommitBox from "./GitCommitBox.vue";
 import GitChangesFileList from "./GitChangesFileList.vue";
 import GitBatchCommitSection from "./GitBatchCommitSection.vue";
 import GitLogSection from "./GitLogSection.vue";
+import GitMultiRepoOverview from "./GitMultiRepoOverview.vue";
 
 interface GitStash {
   index: number | string;
@@ -454,6 +534,90 @@ const {
   gitChangesViewMode,
   setGitChangesViewMode,
 } = fileTree;
+
+const OVERVIEW_MODE_KEY = "vibe-coding-git-overview-mode";
+const overviewMode = ref<"single" | "all">(
+  (lsGet(OVERVIEW_MODE_KEY) as "single" | "all") === "all" ? "all" : "single",
+);
+const isSingleMode = computed(() => overviewMode.value === "single");
+const isAllMode = computed(() => overviewMode.value === "all");
+function setOverviewMode(mode: "single" | "all") {
+  overviewMode.value = mode;
+  lsSet(OVERVIEW_MODE_KEY, mode);
+  if (mode === "all") void multiOverview.refreshMultiRepoOverview();
+}
+
+const multiOverview = useGitMultiRepoOverview({
+  gitRepos: () => props.gitRepos,
+  projectOpened: () => props.projectOpened,
+});
+
+watch(
+  () => props.gitRepos.length,
+  () => {
+    if (props.gitRepos.length <= 1 && overviewMode.value === "all") {
+      overviewMode.value = "single";
+      lsSet(OVERVIEW_MODE_KEY, "single");
+    }
+    if (overviewMode.value === "all" && props.gitRepos.length > 1) {
+      void multiOverview.refreshMultiRepoOverview();
+    }
+  },
+);
+
+watch(
+  () => overviewMode.value,
+  (m) => {
+    if (m === "all" && props.gitRepos.length > 1) void multiOverview.refreshMultiRepoOverview();
+  },
+);
+
+function handleMultiSwitchRepo(repoPath: string) {
+  setOverviewMode("single");
+  emit("switch-git-repo", repoPath);
+}
+function handleOpenRepoFolder(repoPath: string) {
+  handleMultiSwitchRepo(repoPath);
+}
+function joinRepoFile(repoPath: string, filePath: string): string {
+  const base = repoPath.replace(/\/+$/, "");
+  const rel = filePath.replace(/^\/+/, "");
+  return `${base}/${rel}`;
+}
+function handleMultiOpenFile(payload: { repoPath: string; filePath: string }) {
+  const full = joinRepoFile(payload.repoPath, payload.filePath);
+  emit("open-file", full);
+}
+async function handleMultiStageFile(payload: { repoPath: string; filePath: string }) {
+  await multiOverview.stageFile(payload.repoPath, payload.filePath);
+  emit("refresh");
+}
+async function handleMultiUnstageFile(payload: { repoPath: string; filePath: string }) {
+  await multiOverview.unstageFile(payload.repoPath, payload.filePath);
+  emit("refresh");
+}
+async function handleMultiDiscardFile(payload: { repoPath: string; filePath: string; event: MouseEvent }) {
+  const ok = window.confirm(`丢弃 ${payload.filePath} 的未暂存改动？`);
+  if (!ok) return;
+  await multiOverview.discardFile(payload.repoPath, payload.filePath);
+  emit("refresh");
+}
+async function handleMultiStageAll(repoPath: string) {
+  await multiOverview.stageAll(repoPath);
+  emit("refresh");
+}
+async function handleMultiUnstageAll(repoPath: string) {
+  await multiOverview.unstageAll(repoPath);
+  emit("refresh");
+}
+async function handleMultiPull(repoPath: string) {
+  await multiOverview.pullRepo(repoPath);
+  emit("refresh");
+}
+async function handleMultiPush(repoPath: string) {
+  await multiOverview.pushRepo(repoPath);
+  emit("refresh");
+}
 
 watch(
   () => props.gitLogOpen,

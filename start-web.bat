@@ -58,6 +58,15 @@ REM ---- Start backend agent-server (minimized background window) ----
 echo [3/4] Starting backend agent-server (127.0.0.1:8787) ...
 start "Agent-Server" /min "%AGENT_EXE%"
 
+REM ---- Optional: cargo watch auto-rebuild (fused) ----
+cargo watch --version >nul 2>&1
+if %errorlevel%==0 (
+  echo [3.5/4] cargo watch found, starting watcher ^(auto rebuild on Rust change^)...
+  start "Agent-Watcher" /min "%~dp0scripts\watch-agent.bat"
+) else (
+  echo [3.5/4] cargo watch not found, skipping auto-rebuild ^(install: cargo install cargo-watch^)
+)
+
 REM ---- Wait for backend to be ready ----
 echo [3/4] Waiting for backend ...
 timeout /t 2 /nobreak >nul

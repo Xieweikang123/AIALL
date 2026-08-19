@@ -81,6 +81,44 @@ pub fn project_allowed(project_path: &str, allowed: &[String]) -> bool {
         .any(|a| target == a || target.starts_with(&format!("{a}/")))
 }
 
+fn try_open_folder(path: &str) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("explorer 打开失败: {e}"))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("open 失败: {e}"))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // 优先 xdg-open，失败再试 gio
+        let xdg = std::process::Command::new("xdg-open").arg(path).spawn();
+        if xdg.is_ok() {
+            return Ok(());
+        }
+        std::process::Command::new("gio")
+            .arg("open")
+            .arg(path)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("xdg-open/gio 打开失败: {e}（服务器可能是无桌面环境）"))
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        let _ = path;
+        Err("当前平台不支持打开文件夹".into())
+    }
+}
+
 /// 从 query / body 抽取「路径类」参数（path / projectPath / projectRoot / from / to）。
 /// 对每个非空且为绝对路径的值做白名单校验；任一越界 → 403。
 /// 相对路径交由 `commands` 层 `resolve_*` 在项目根内解析，此处不拦（防误伤）。
@@ -867,8 +905,22 @@ pub async fn handle_backend_vibe(
             return Ok(ok_json(commands::project::memory_usage(body).await));
         }
 
-        // ── desktop-only stubs ──
-        ("POST", "/open-folder") => Ok(ok_json(json!({ "ok": false, "error": "服务器模式不支持在服务器上打开文件夹" }))),
+        // ── open-folder: 桌面端走 Tauri opener，服务器模式在宿主机上尝试打开（有桌面则弹资源管理器，无桌面返回错误）
+        ("POST", "/open-folder") => {
+            let body = parse_body_json(body)?;
+            let path = body_str(&body, "path");
+            if path.trim().is_empty() {
+                return Ok(ok_json(json!({ "ok": false, "error": "路径为空" })));
+            }
+            let p = std::path::Path::new(&path);
+            if !p.exists() {
+                return Ok(ok_json(json!({ "ok": false, "error": format!("路径不存在: {}", path) })));
+            }
+            match try_open_folder(&path) {
+                Ok(_) => Ok(ok_json(json!({ "ok": true, "path": path }))),
+                Err(e) => Ok(ok_json(json!({ "ok": false, "error": e }))),
+            }
+        }
         ("POST", "/pick-folder") => Ok(ok_json(json!({ "ok": false, "cancelled": true }))),
 
         _ => Ok(error_response(404, "not found")),
