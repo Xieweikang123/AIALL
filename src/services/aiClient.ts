@@ -73,7 +73,45 @@ type ChatMessage =
       >;
     };
 
-function buildPayload(model: string, prompt: string, stream: boolean, imageDataUrl?: string) {
+function isResponsesEndpoint(endpoint: string): boolean {
+  return endpoint.trim().endsWith("/responses");
+}
+
+function buildPayload(
+  model: string,
+  prompt: string,
+  stream: boolean,
+  imageDataUrl?: string,
+  endpoint?: string,
+) {
+  const isResponses = endpoint ? isResponsesEndpoint(endpoint) : false;
+  if (isResponses) {
+    if (imageDataUrl) {
+      return {
+        endpoint: "",
+        apiKey: "",
+        model,
+        input: [
+          {
+            role: "user",
+            content: [
+              { type: "input_text", text: prompt },
+              { type: "input_image", image_url: imageDataUrl },
+            ],
+          },
+        ],
+        stream,
+      };
+    }
+    return {
+      endpoint: "",
+      apiKey: "",
+      model,
+      input: prompt,
+      stream,
+    };
+  }
+
   const message: ChatMessage = imageDataUrl
     ? {
         role: "user",
@@ -91,6 +129,42 @@ function buildPayload(model: string, prompt: string, stream: boolean, imageDataU
     messages: [message],
     stream,
   };
+}
+
+function extractTextFromResponseData(data: unknown): string | null {
+  if (!data || typeof data !== "object") return null;
+  const obj = data as Record<string, unknown>;
+  // Chat: choices[0].message.content
+  const choices = obj["choices"] as Array<Record<string, unknown>> | undefined;
+  if (Array.isArray(choices) && choices[0]) {
+    const msg = (choices[0]["message"] as Record<string, unknown> | undefined)?.["content"];
+    const text = normalizeStreamContent(msg);
+    if (text) return text;
+    const deltaContent = normalizeStreamContent((choices[0]["delta"] as Record<string, unknown> | undefined)?.["content"]);
+    if (deltaContent) return deltaContent;
+  }
+  // Responses: output -> content -> text / output_text
+  const output = obj["output"] as unknown;
+  if (Array.isArray(output)) {
+    for (const item of output) {
+      if (!item || typeof item !== "object") continue;
+      const rec = item as Record<string, unknown>;
+      const content = rec["content"] as unknown;
+      if (Array.isArray(content)) {
+        for (const c of content) {
+          if (!c || typeof c !== "object") continue;
+          const cr = c as Record<string, unknown>;
+          if (typeof cr["text"] === "string" && (cr["text"] as string).trim()) return cr["text"] as string;
+        }
+      }
+      if (typeof rec["text"] === "string" && (rec["text"] as string).trim()) return rec["text"] as string;
+    }
+  }
+  if (typeof obj["output_text"] === "string" && (obj["output_text"] as string).trim()) {
+    return obj["output_text"] as string;
+  }
+  if (typeof obj["text"] === "string" && (obj["text"] as string).trim()) return obj["text"] as string;
+  return null;
 }
 
 function cleanHtmlError(html: string): string {
@@ -166,15 +240,41 @@ function parseStreamContentFromLine(line: string): string {
 
   try {
     const payload = JSON.parse(dataPart) as {
+      type?: string;
+      delta?: unknown;
+      text?: unknown;
+      output_text?: unknown;
       choices?: Array<{
         delta?: { content?: unknown };
         message?: { content?: unknown };
       }>;
     };
+    // Responses API: response.output_text.delta / response.completed etc.
+    if (typeof payload.type === "string" && payload.type.includes("output_text.delta")) {
+      if (typeof payload.delta === "string") return payload.delta;
+      return normalizeStreamContent(payload.delta);
+    }
+    if (typeof payload.type === "string" && payload.type.includes("text.delta")) {
+      if (typeof payload.delta === "string") return payload.delta;
+      return normalizeStreamContent(payload.delta);
+    }
+    if (typeof payload.delta === "string" && payload.type) {
+      return payload.delta;
+    }
+    if (typeof payload.output_text === "string") return payload.output_text;
+    if (typeof payload.text === "string" && payload.type) return payload.text;
+    // Anthropic messages delta
+    const anthropicDelta = (payload as unknown as { delta?: { text?: unknown } }).delta;
+    if (
+      anthropicDelta &&
+      typeof anthropicDelta === "object" &&
+      typeof (anthropicDelta as Record<string, unknown>)["text"] === "string"
+    ) {
+      return (anthropicDelta as Record<string, unknown>)["text"] as string;
+    }
     const choice = payload.choices?.[0];
     return (
-      normalizeStreamContent(choice?.delta?.content)
-      || normalizeStreamContent(choice?.message?.content)
+      normalizeStreamContent(choice?.delta?.content) || normalizeStreamContent(choice?.message?.content)
     );
   } catch {
     return "";
@@ -287,7 +387,13 @@ export async function testAiModel(request: AiTestRequest): Promise<AiTestResult>
   // Tauri: only non-streaming case
   if (isTauriEnv() && !request.stream) {
     try {
-      const payload = buildPayload(request.model, request.prompt, false, request.imageDataUrl);
+      const payload = buildPayload(
+        request.model,
+        request.prompt,
+        false,
+        request.imageDataUrl,
+        request.endpoint,
+      );
       const result = await tauriInvoke<{ ok: boolean; data?: any; error?: string }>("ai_test", {
         endpoint: request.endpoint,
         apiKey: request.apiKey || null,
@@ -296,7 +402,9 @@ export async function testAiModel(request: AiTestRequest): Promise<AiTestResult>
       if (!result.ok) {
         return { ok: false, status: 0, rawText: "", error: result.error || "AI 测试失败" };
       }
-      const rawText = JSON.stringify(result.data);
+      const rawTextJson = JSON.stringify(result.data);
+      const extracted = extractTextFromResponseData(result.data);
+      const rawText = extracted ?? rawTextJson;
       return { ok: true, status: 200, rawText, parsed: result.data };
     } catch (e: unknown) {
       return { ok: false, status: 0, rawText: "", error: e instanceof Error ? e.message : String(e) };
@@ -305,7 +413,13 @@ export async function testAiModel(request: AiTestRequest): Promise<AiTestResult>
 
   if (isTauriEnv() && request.stream) {
     try {
-      const payload = buildPayload(request.model, request.prompt, true, request.imageDataUrl);
+      const payload = buildPayload(
+        request.model,
+        request.prompt,
+        true,
+        request.imageDataUrl,
+        request.endpoint,
+      );
       const channel = new Channel<string>();
       channel.onmessage = (chunk) => {
         const text = normalizeChannelChunk(chunk);
@@ -337,9 +451,17 @@ export async function testAiModel(request: AiTestRequest): Promise<AiTestResult>
   }
 
   try {
-    const payload = buildPayload(request.model, request.prompt, request.stream, request.imageDataUrl);
-    payload.endpoint = request.endpoint;
-    payload.apiKey = request.apiKey || "";
+    const payload = buildPayload(
+      request.model,
+      request.prompt,
+      request.stream,
+      request.imageDataUrl,
+      request.endpoint,
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (payload as any).endpoint = request.endpoint;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (payload as any).apiKey = request.apiKey || "";
 
     const response = await fetch(backendUrl("/backend/ai/test"), {
       method: "POST",
@@ -367,6 +489,42 @@ export async function testAiModel(request: AiTestRequest): Promise<AiTestResult>
       parsed = JSON.parse(rawText);
     } catch {
       parsed = undefined;
+    }
+
+    // 后端包装：{ok:true,data:upstreamJson} 或 {ok:false,error}，尝试从 upstream 抽取可读文本
+    if (parsed && typeof parsed === "object") {
+      const wrapper = parsed as Record<string, unknown>;
+      if (wrapper["ok"] === false && typeof wrapper["error"] === "string") {
+        return {
+          ok: false,
+          status: response.status,
+          rawText,
+          parsed,
+          error: wrapper["error"] as string,
+        };
+      }
+      const data = (wrapper["data"] as unknown) ?? parsed;
+      const extracted = extractTextFromResponseData(data);
+      if (response.ok && extracted) {
+        return {
+          ok: true,
+          status: response.status,
+          rawText: extracted,
+          parsed,
+          error: undefined,
+        };
+      }
+      // 非包装的直接响应（如 TTS 以外场景）
+      const directExtracted = extractTextFromResponseData(parsed);
+      if (response.ok && directExtracted) {
+        return {
+          ok: true,
+          status: response.status,
+          rawText: directExtracted,
+          parsed,
+          error: undefined,
+        };
+      }
     }
 
     return {
@@ -400,6 +558,10 @@ function resolveModelsEndpoint(endpoint: string): string {
       url.pathname = path.replace(/\/chat\/completions$/, "/models");
       return url.toString();
     }
+    if (path.endsWith("/responses") || path.endsWith("/messages")) {
+      url.pathname = path.replace(/\/(responses|messages)$/, "/models");
+      return url.toString();
+    }
 
     if (path.endsWith("/models")) {
       return url.toString();
@@ -411,6 +573,9 @@ function resolveModelsEndpoint(endpoint: string): string {
   } catch {
     if (input.endsWith("/chat/completions")) {
       return input.replace(/\/chat\/completions$/, "/models");
+    }
+    if (input.endsWith("/responses") || input.endsWith("/messages")) {
+      return input.replace(/\/(responses|messages)$/, "/models");
     }
     if (input.endsWith("/models")) {
       return input;
@@ -478,8 +643,15 @@ export async function fetchAvailableModels(request: AiModelsRequest): Promise<Ai
         if (!result.ok) {
           return { ok: false, status: 0, models: [], rawText: "", error: result.error || "获取模型失败", fromCache: false };
         }
-        const source = result.data?.data || result.data?.models || [];
-        const modelNames = (Array.isArray(source) ? source : []).map((m: any) => m.id || "").filter(Boolean) as string[];
+        const rawData = result.data?.data ?? result.data?.models;
+        const source = Array.isArray(rawData)
+          ? rawData
+          : Array.isArray(rawData?.data)
+            ? rawData.data
+            : Array.isArray(rawData?.models)
+              ? rawData.models
+              : [];
+        const modelNames = source.map((m: any) => m.id || "").filter(Boolean) as string[];
         const rawText = JSON.stringify(result.data);
         if (modelNames.length) {
           writeModelsCache(cacheKey, { cachedAt: Date.now(), models: modelNames, rawText });
@@ -507,10 +679,19 @@ export async function fetchAvailableModels(request: AiModelsRequest): Promise<Ai
 
     try {
       const parsed = JSON.parse(rawText) as {
-        data?: Array<{ id?: string }>;
+        data?: Array<{ id?: string }> | { data?: Array<{ id?: string }>; models?: Array<{ id?: string }> };
         models?: Array<{ id?: string }>;
       };
-      const source = parsed.data || parsed.models || [];
+      const rawData = parsed.data;
+      const source = Array.isArray(rawData)
+        ? rawData
+        : Array.isArray(parsed.models)
+          ? parsed.models
+          : Array.isArray(rawData?.data)
+            ? rawData.data
+            : Array.isArray(rawData?.models)
+              ? rawData.models
+              : [];
       modelNames = source.map((item) => item.id || "").filter(Boolean);
     } catch {
       modelNames = [];

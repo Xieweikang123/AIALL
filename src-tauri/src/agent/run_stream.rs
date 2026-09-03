@@ -12,6 +12,46 @@ pub(crate) struct ModelTurnOutput {
     pub tool_calls: Vec<Value>,
     pub tool_calls_value: Value,
     pub is_final: bool,
+    /// Structured choice options the model emitted via `<ai_options>` block (stripped from assistant_text).
+    pub options: Vec<Value>,
+}
+
+const AI_OPTIONS_START: &str = "<ai_options>";
+const AI_OPTIONS_END: &str = "</ai_options>";
+
+/// Extract a trailing `<ai_options>["a","b"]</ai_options>` block from model text.
+/// Returns (clean_text_without_block, options). Options must be a JSON array of >=2 non-empty strings.
+fn extract_structured_options(text: &str) -> (String, Vec<Value>) {
+    let Some(start_idx) = text.find(AI_OPTIONS_START) else {
+        return (text.to_string(), Vec::new());
+    };
+    let after_start = &text[start_idx + AI_OPTIONS_START.len()..];
+    let Some(end_idx) = after_start.find(AI_OPTIONS_END) else {
+        return (text.to_string(), Vec::new());
+    };
+    let json_str = after_start[..end_idx].trim();
+    let clean = format!(
+        "{}{}",
+        text[..start_idx].trim_end(),
+        &after_start[end_idx + AI_OPTIONS_END.len()..]
+    );
+    let Ok(parsed) = serde_json::from_str::<Value>(json_str) else {
+        return (text.to_string(), Vec::new());
+    };
+    let Some(arr) = parsed.as_array() else {
+        return (text.to_string(), Vec::new());
+    };
+    let options: Vec<Value> = arr
+        .iter()
+        .filter_map(|v| v.as_str())
+        .map(|s| json!(s.trim()))
+        .filter(|v| !v.as_str().unwrap_or("").is_empty())
+        .collect();
+    if options.len() >= 2 {
+        (clean, options)
+    } else {
+        (text.to_string(), Vec::new())
+    }
 }
 
 /// Batch content deltas before sending via IPC to reduce per-character overhead.
@@ -68,6 +108,7 @@ pub(crate) async fn consume_model_sse_stream(
     let mut byte_stream = stream_resp.bytes_stream();
     let mut line_buf: Vec<u8> = Vec::new();
     let mut batcher = DeltaBatcher::new();
+    let mut suppress_stream = false;
 
     while let Some(chunk_result) = byte_stream.next().await {
         if is_cancelled(cancel) {
@@ -86,6 +127,7 @@ pub(crate) async fn consume_model_sse_stream(
                 &mut accumulated_tool_calls,
                 &mut batcher,
                 channel,
+                &mut suppress_stream,
             );
         }
     }
@@ -97,6 +139,7 @@ pub(crate) async fn consume_model_sse_stream(
             &mut accumulated_tool_calls,
             &mut batcher,
             channel,
+            &mut suppress_stream,
         );
     }
     batcher.flush(channel);
@@ -107,11 +150,13 @@ pub(crate) async fn consume_model_sse_stream(
         json!(accumulated_tool_calls)
     };
     let tool_calls = tool_calls_value.as_array().cloned().unwrap_or_default();
+    let (assistant_text, options) = extract_structured_options(&accumulated_content);
     Ok(Some(ModelTurnOutput {
-        assistant_text: accumulated_content,
+        assistant_text,
         tool_calls,
         tool_calls_value,
         is_final: accumulated_tool_calls.is_empty(),
+        options,
     }))
 }
 
@@ -121,6 +166,7 @@ fn parse_sse_line(
     accumulated_tool_calls: &mut Vec<Value>,
     batcher: &mut DeltaBatcher,
     channel: &Channel<Value>,
+    suppress_stream: &mut bool,
 ) {
     let line = line_buf.trim();
     if line.is_empty() || !line.starts_with("data: ") {
@@ -144,7 +190,17 @@ fn parse_sse_line(
     };
     if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
         accumulated_content.push_str(content);
-        batcher.push(content, channel);
+        if !*suppress_stream {
+            if let Some(start) = content.find(AI_OPTIONS_START) {
+                *suppress_stream = true;
+                let before = &content[..start];
+                if !before.is_empty() {
+                    batcher.push(before, channel);
+                }
+            } else {
+                batcher.push(content, channel);
+            }
+        }
     }
     if let Some(tcs) = delta.get("tool_calls").and_then(|t| t.as_array()) {
         for tc in tcs {
@@ -196,11 +252,23 @@ mod tests {
         DeltaBatcher::new()
     }
 
+    /// Test wrapper that supplies a fresh suppress flag (streaming not suppressed).
+    fn parse_line(
+        line_buf: &str,
+        content: &mut String,
+        calls: &mut Vec<Value>,
+        batcher: &mut DeltaBatcher,
+        channel: &Channel<Value>,
+    ) {
+        let mut suppress = false;
+        parse_sse_line(line_buf, content, calls, batcher, channel, &mut suppress);
+    }
+
     #[test]
     fn parse_sse_line_skips_empty_line() {
         let mut content = String::new();
         let mut calls = Vec::new();
-        parse_sse_line(
+        parse_line(
             "",
             &mut content,
             &mut calls,
@@ -215,7 +283,7 @@ mod tests {
     fn parse_sse_line_skips_non_data_line() {
         let mut content = String::new();
         let mut calls = Vec::new();
-        parse_sse_line(
+        parse_line(
             ": heartbeat",
             &mut content,
             &mut calls,
@@ -229,7 +297,7 @@ mod tests {
     fn parse_sse_line_skips_done_signal() {
         let mut content = String::new();
         let mut calls = Vec::new();
-        parse_sse_line(
+        parse_line(
             "data: [DONE]",
             &mut content,
             &mut calls,
@@ -243,7 +311,7 @@ mod tests {
     fn parse_sse_line_invalid_json() {
         let mut content = String::new();
         let mut calls = Vec::new();
-        parse_sse_line(
+        parse_line(
             "data: {invalid",
             &mut content,
             &mut calls,
@@ -257,7 +325,7 @@ mod tests {
     fn parse_sse_line_no_choices() {
         let mut content = String::new();
         let mut calls = Vec::new();
-        parse_sse_line(
+        parse_line(
             "data: {}",
             &mut content,
             &mut calls,
@@ -271,7 +339,7 @@ mod tests {
     fn parse_sse_line_empty_choices() {
         let mut content = String::new();
         let mut calls = Vec::new();
-        parse_sse_line(
+        parse_line(
             "data: {\"choices\":[]}",
             &mut content,
             &mut calls,
@@ -285,7 +353,7 @@ mod tests {
     fn parse_sse_line_content_delta() {
         let mut content = String::new();
         let mut calls = Vec::new();
-        parse_sse_line(
+        parse_line(
             "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}",
             &mut content,
             &mut calls,
@@ -300,14 +368,14 @@ mod tests {
     fn parse_sse_line_accumulates_content() {
         let mut content = String::new();
         let mut calls = Vec::new();
-        parse_sse_line(
+        parse_line(
             "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}",
             &mut content,
             &mut calls,
             &mut new_batcher(),
             &dummy_channel(),
         );
-        parse_sse_line(
+        parse_line(
             "data: {\"choices\":[{\"delta\":{\"content\":\" World\"}}]}",
             &mut content,
             &mut calls,
@@ -321,7 +389,7 @@ mod tests {
     fn parse_sse_line_tool_call_creates_entry() {
         let mut content = String::new();
         let mut calls = Vec::new();
-        parse_sse_line(
+        parse_line(
       "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"read_file\",\"arguments\":\"{}\"}}]}}]}",
       &mut content, &mut calls, &mut new_batcher(), &dummy_channel(),
     );
@@ -334,12 +402,12 @@ mod tests {
         let mut content = String::new();
         let mut calls = Vec::new();
         // First chunk: tool call starts
-        parse_sse_line(
+        parse_line(
       "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"read_file\",\"arguments\":\"{\\\"path\\\":\\\"\"}}]}}]}",
       &mut content, &mut calls, &mut new_batcher(), &dummy_channel(),
     );
         // Second chunk: argument continues
-        parse_sse_line(
+        parse_line(
       "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"src/foo.ts\\\"}\"}}]}}]}",
       &mut content, &mut calls, &mut new_batcher(), &dummy_channel(),
     );
@@ -353,7 +421,7 @@ mod tests {
     fn parse_sse_line_tool_call_with_id() {
         let mut content = String::new();
         let mut calls = Vec::new();
-        parse_sse_line(
+        parse_line(
       "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_abc123\",\"function\":{\"name\":\"grep\",\"arguments\":\"{}\"}}]}}]}",
       &mut content, &mut calls, &mut new_batcher(), &dummy_channel(),
     );
@@ -365,7 +433,7 @@ mod tests {
     fn parse_sse_line_multiple_tool_calls() {
         let mut content = String::new();
         let mut calls = Vec::new();
-        parse_sse_line(
+        parse_line(
       "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"read_file\",\"arguments\":\"{}\"}},{\"index\":1,\"function\":{\"name\":\"grep\",\"arguments\":\"{}\"}}]}}]}",
       &mut content, &mut calls, &mut new_batcher(), &dummy_channel(),
     );
@@ -378,8 +446,8 @@ mod tests {
     fn parse_sse_line_tool_call_fills_gaps() {
         let mut content = String::new();
         let mut calls = Vec::new();
-        // Index 2, but indices 0 and 1 don't exist yet — should fill with empty placeholders
-        parse_sse_line(
+        // Index 2, but indices 0 and 1 don't exist yet �?should fill with empty placeholders
+        parse_line(
       "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":2,\"function\":{\"name\":\"write_file\",\"arguments\":\"{}\"}}]}}]}",
       &mut content, &mut calls, &mut new_batcher(), &dummy_channel(),
     );
@@ -394,11 +462,11 @@ mod tests {
         let mut content = String::new();
         let mut calls = Vec::new();
         // Index 999 should be capped to 100, resulting in vec of 101 elements (0..=100)
-        parse_sse_line(
+        parse_line(
       "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":999,\"function\":{\"name\":\"x\",\"arguments\":\"{}\"}}]}}]}",
       &mut content, &mut calls, &mut new_batcher(), &dummy_channel(),
     );
-        assert_eq!(calls.len(), 101, "index 999 capped to 100 → vec len 101");
+        assert_eq!(calls.len(), 101, "index 999 capped to 100 �?vec len 101");
         assert_eq!(calls[100]["function"]["name"], "x");
     }
 
@@ -407,7 +475,7 @@ mod tests {
         let mut content = String::new();
         let mut calls = Vec::new();
         // First: text content
-        parse_sse_line(
+        parse_line(
             "data: {\"choices\":[{\"delta\":{\"content\":\"Let me check\"}}]}",
             &mut content,
             &mut calls,
@@ -415,7 +483,7 @@ mod tests {
             &dummy_channel(),
         );
         // Then: tool call
-        parse_sse_line(
+        parse_line(
       "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"read_file\",\"arguments\":\"{}\"}}]}}]}",
       &mut content, &mut calls, &mut new_batcher(), &dummy_channel(),
     );
@@ -427,7 +495,7 @@ mod tests {
     fn parse_sse_line_empty_name_skipped() {
         let mut content = String::new();
         let mut calls = Vec::new();
-        parse_sse_line(
+        parse_line(
       "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"\",\"arguments\":\"{}\"}}]}}]}",
       &mut content, &mut calls, &mut new_batcher(), &dummy_channel(),
     );
@@ -439,7 +507,7 @@ mod tests {
     fn parse_sse_line_empty_id_skipped() {
         let mut content = String::new();
         let mut calls = Vec::new();
-        parse_sse_line(
+        parse_line(
       "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"\",\"function\":{\"name\":\"foo\",\"arguments\":\"{}\"}}]}}]}",
       &mut content, &mut calls, &mut new_batcher(), &dummy_channel(),
     );
@@ -452,7 +520,7 @@ mod tests {
         let mut content = String::new();
         let mut calls = Vec::new();
         // choices is not an array
-        parse_sse_line(
+        parse_line(
             "data: {\"choices\":{\"delta\":{\"content\":\"x\"}}}",
             &mut content,
             &mut calls,
@@ -466,7 +534,7 @@ mod tests {
     fn parse_sse_line_no_delta_ignored() {
         let mut content = String::new();
         let mut calls = Vec::new();
-        parse_sse_line(
+        parse_line(
             "data: {\"choices\":[{}]}",
             &mut content,
             &mut calls,
@@ -480,7 +548,7 @@ mod tests {
     fn parse_sse_line_tool_call_without_function() {
         let mut content = String::new();
         let mut calls = Vec::new();
-        parse_sse_line(
+        parse_line(
             "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0}]}}]}",
             &mut content,
             &mut calls,
@@ -490,5 +558,39 @@ mod tests {
         assert_eq!(calls.len(), 1);
         // Should still have the placeholder entry
         assert!(calls[0]["function"]["name"].as_str().unwrap().is_empty());
+    }
+
+    #[test]
+    fn extract_structured_options_strips_block() {
+        let (clean, options) = extract_structured_options(
+            "要我继续吗？\n<ai_options>[\"好，继续\",\"换个方案\"]</ai_options>",
+        );
+        assert_eq!(clean, "要我继续吗？");
+        assert_eq!(options.len(), 2);
+        assert_eq!(options[0], json!("好，继续"));
+        assert_eq!(options[1], json!("换个方案"));
+    }
+
+    #[test]
+    fn extract_structured_options_no_block() {
+        let (clean, options) = extract_structured_options("普通回复，没有选项。");
+        assert_eq!(clean, "普通回复，没有选项。");
+        assert!(options.is_empty());
+    }
+
+    #[test]
+    fn extract_structured_options_single_option_rejected() {
+        let (clean, options) =
+            extract_structured_options("<ai_options>[\"只有一个\"]</ai_options>");
+        // Invalid (fewer than 2) → keep original text, no options.
+        assert_eq!(clean, "<ai_options>[\"只有一个\"]</ai_options>");
+        assert!(options.is_empty());
+    }
+
+    #[test]
+    fn extract_structured_options_invalid_json_keeps_text() {
+        let (clean, options) = extract_structured_options("<ai_options>not json</ai_options>");
+        assert_eq!(clean, "<ai_options>not json</ai_options>");
+        assert!(options.is_empty());
     }
 }

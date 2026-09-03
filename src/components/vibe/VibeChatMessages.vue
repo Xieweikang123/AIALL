@@ -408,6 +408,15 @@ const visibleMessages = computed(() => {
 });
 
 function messageMemoKey(m: VibeChatMessageItem): unknown[] {
+  const globalDeps = [
+    ctx.chatSending.value,
+    ctx.configReady.value,
+    ctx.projectOpened.value,
+    ctx.planPanelActive.value,
+    ctx.planPanelMessageId.value,
+    ctx.planWorkspaceOpen.value,
+    ctx.chainJumpVisible[m.id],
+  ];
   if (ctx.isAgentRunning(m)) {
     return [
       m.id,
@@ -416,6 +425,7 @@ function messageMemoKey(m: VibeChatMessageItem): unknown[] {
       m.streamChars ?? 0,
       m.agentPhase,
       m.content?.length ?? 0,
+      ...globalDeps,
     ];
   }
   return [
@@ -428,6 +438,7 @@ function messageMemoKey(m: VibeChatMessageItem): unknown[] {
     m.agentRecoverable,
     Object.keys(m.turnFileDiffs ?? {}).length,
     m.suggestedOptions?.length ?? 0,
+    ...globalDeps,
   ];
 }
 

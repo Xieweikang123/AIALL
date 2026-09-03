@@ -59,18 +59,12 @@ pub fn build_locate_status_follow_up_hint() -> &'static str {
 
 pub fn build_ui_defect_build_hint() -> &'static str {
     "\n【UI 缺陷·须修复】用户用截图反馈控件/布局/交互异常。\n\
-   须定位后 patch_file/write_file；禁止只分析并反问「要不要修」。\n\
-   诊断清单（按序核对，勿预设修法）：\n\
-   1. 读图：描述所见；判断是否本项目 UI（查 AGENTS.md / 已注入项目结构中的 UI 源码目录），勿默认外部 IDE。\n\
-   2. 定位：grep 图中可见原文最短片段（≥3 字）定位 template/组件，勿先猜 CSS class 或 SVG 路径。\n\
-   3. 范围：局部提问只改所指区域；用户明确「整页/全面板」时再扩大。\n\
-   4. 布局：控件与选区/焦点空间分离 → 查 fixed/absolute/portal 浮层；同容器拥挤 → 查 flex/overflow/gap/min-width。\n\
-   5. 交互：「点击没反应/不工作」→ 查事件 handler/绑定；注意 mouseup 与 getSelection 时序与异步回调。\n\
-   6. 样式：read 已定位组件 scoped `<style>`；chip/badge 查承载组件局部样式，勿臆断全局 theme。\n\
-   7. 可见性：外框有内层空 → 查 v-if/shimmer/显示条件与全局 element 选择器是否与组件尺寸互相裁切。\n\
-   8. class 重命名：grep 旧名全部出现再一次性 patch，改完 grep 验证零残留。\n\
-   同一组件在连续消息中每条独立排查，勿因上一条修了布局假设本条同因。\n\
-   附截图时首轮描述后，后续轮禁止重复描述同一张截图。"
+    须定位后 patch_file/write_file；禁止只分析并反问「要不要修」。\n\
+    定位方式：从截图可见文案/用户描述提取最短可检索片段，grep 定位 template/组件后 read 核对与截图是否一致，再依据实际源码结构修改。\n\
+    勿预设唯一修法路径：以工具证据为准，read 到决定当前行为的实际代码后再决定改哪；不臆断 CSS 属性或事件机制。\n\
+    范围：局部提问只改所指区域；用户明确「整页/全面板」时再扩大。\n\
+    同一组件在连续消息中每条独立排查，勿因上一条修了布局假设本条同因。\n\
+    附截图时首轮描述后，后续轮禁止重复描述同一张截图。"
 }
 
 pub fn build_agent_step_clarification_hint() -> &'static str {
@@ -80,8 +74,8 @@ pub fn build_agent_step_clarification_hint() -> &'static str {
 }
 
 pub fn build_agent_step_clarify_continue_hint() -> &'static str {
-    "【解释已完成】若上文已回答用户「啥意思」，且仍在修浮层/定位类 UI 缺陷：\
-   下一轮禁止重复解释或再读已定位的浮层/锚点代码；直接 patch 已 read 的定位逻辑，或至多 1 次 read 后立即 patch。"
+    "【解释已完成】若上文已回答用户「啥意思」，且仍在修 UI 缺陷：\
+    下一轮禁止重复解释或再读已定位的代码；直接 patch 已 read 的定位逻辑，或至多 1 次 read 后立即 patch。"
 }
 
 pub fn build_session_audit_hint() -> &'static str {

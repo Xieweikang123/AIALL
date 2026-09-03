@@ -88,7 +88,7 @@ describe("serverLogin", () => {
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(String(url)).toContain("/api/server/login");
-    expect(JSON.parse(String(init.body))).toEqual({ password: "secret" });
+    expect(JSON.parse(String(init.body))).toEqual({ username: "admin", password: "secret" });
   });
 
   it("无 expiresAt 时使用默认 12h", async () => {

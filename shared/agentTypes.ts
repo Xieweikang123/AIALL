@@ -78,6 +78,8 @@ export type VibeAgentEvent =
         toolCalls: Array<{ id: string; name: string; arguments: string }>;
         hasToolCalls: boolean;
         isFinal: boolean;
+        /** Structured choice options the model emitted via `<ai_options>` block. */
+        options?: string[];
       };
     }
   | { type: "error"; data: { message: string } }

@@ -14,6 +14,8 @@ export interface AiProvider {
   model: string;
   prompt: string;
   stream: boolean;
+  /** 该供应商可用的模型列表（配置页「获取模型」后缓存，供会话下拉按供应商选模型）。 */
+  availableModels?: string[];
 }
 
 export interface AiChatBaseConfig {
@@ -65,6 +67,7 @@ export const PROVIDER_PRESETS: AiProviderPreset[] = [
   { name: "OpenAI", endpoint: "https://api.openai.com/v1", model: "gpt-4o" },
   { name: "Moonshot Kimi", endpoint: "https://api.moonshot.cn/v1", model: "moonshot-v1-8k" },
   { name: "本地 Ollama", endpoint: "http://127.0.0.1:11434/v1", model: "llama3.1" },
+  { name: "Ollama Cloud (Pro)", endpoint: "https://ollama.com/v1", model: "" },
 ];
 
 const DEFAULT_TTS: AiTtsConfig = {
@@ -135,6 +138,9 @@ function normalizeProvider(raw: unknown, index: number): AiProvider | null {
     model: String(p.model || DEFAULT_MODEL).trim(),
     prompt: String(p.prompt || "你好"),
     stream: typeof p.stream === "boolean" ? p.stream : true,
+    ...(Array.isArray(p.availableModels) && p.availableModels.length
+      ? { availableModels: p.availableModels.map((m) => String(m).trim()).filter(Boolean) }
+      : {}),
   };
 }
 

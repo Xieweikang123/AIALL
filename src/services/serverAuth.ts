@@ -76,6 +76,7 @@ export async function serverLogin(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username, password }),
+      signal: AbortSignal.timeout(15000),
     });
     const text = await resp.text();
     let parsed: { ok?: boolean; token?: string; expiresAt?: number; error?: string };

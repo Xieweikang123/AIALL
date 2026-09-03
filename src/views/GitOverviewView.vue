@@ -8,7 +8,6 @@
       <div class="head-actions">
         <div class="action-group nav-group">
           <router-link class="secondary link-btn" to="/vibe-coding">💻 Vibe Coding</router-link>
-          <router-link class="secondary link-btn" to="/chat">💬 对话</router-link>
           <router-link class="secondary link-btn" to="/ai-config">⚙️ 配置</router-link>
         </div>
       </div>

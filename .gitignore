@@ -42,6 +42,9 @@ tmp/
 .aiall/
 .freebuff/
 
+## reference source (pi)
+pi-ref/
+
 ## debug artifacts
 .debug/
 .vibe-chat-debug.json

@@ -170,6 +170,9 @@ pub async fn build_agent_system_prompt(
         system_prompt.push('\n');
     }
 
+    system_prompt.push_str(super::prompt_hints::build_ai_options_prompt_hint());
+    system_prompt.push('\n');
+
     (system_prompt, context_blocks)
 }
 

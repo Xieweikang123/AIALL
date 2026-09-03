@@ -355,20 +355,34 @@
                     <span v-if="!activeSessionProviderId" class="chat-provider-option-check">✓</span>
                   </button>
                   <div v-if="providerOptions.length" class="chat-provider-option-sep" />
-                  <button
-                    v-for="p in providerOptions"
-                    :key="p.id"
-                    type="button"
-                    class="chat-provider-option"
-                    :class="{ active: activeSessionProviderId === p.id }"
-                    role="menuitemradio"
-                    :aria-checked="activeSessionProviderId === p.id"
-                    @click="selectProvider(p.id)"
-                  >
-                    <span class="chat-provider-option-name">{{ p.name }}</span>
-                    <span class="chat-provider-option-model">{{ p.model }}</span>
-                    <span v-if="activeSessionProviderId === p.id" class="chat-provider-option-check">✓</span>
-                  </button>
+                  <template v-for="p in providerOptions" :key="p.id">
+                    <div class="chat-provider-group-label">{{ p.name }}</div>
+                    <button
+                      type="button"
+                      class="chat-provider-option"
+                      :class="{ active: activeSessionProviderId === p.id && !activeSessionModelId }"
+                      role="menuitemradio"
+                      :aria-checked="activeSessionProviderId === p.id && !activeSessionModelId"
+                      @click="selectProvider(p.id)"
+                    >
+                      <span class="chat-provider-option-name">默认</span>
+                      <span class="chat-provider-option-model">{{ p.model }}</span>
+                      <span v-if="activeSessionProviderId === p.id && !activeSessionModelId" class="chat-provider-option-check">✓</span>
+                    </button>
+                    <button
+                      v-for="m in p.availableModels"
+                      :key="m"
+                      type="button"
+                      class="chat-provider-option"
+                      :class="{ active: activeSessionProviderId === p.id && activeSessionModelId === m }"
+                      role="menuitemradio"
+                      :aria-checked="activeSessionProviderId === p.id && activeSessionModelId === m"
+                      @click="selectModel(p.id, m)"
+                    >
+                      <span class="chat-provider-option-name">{{ m }}</span>
+                      <span v-if="activeSessionProviderId === p.id && activeSessionModelId === m" class="chat-provider-option-check">✓</span>
+                    </button>
+                  </template>
                 </div>
               </Teleport>
             </div>
@@ -752,7 +766,8 @@ interface Props {
   pendingSkillProposals?: PendingSkillProposal[];
   agentSuggestions?: AgentSuggestion[];
   activeSessionProviderId: string;
-  providerOptions?: Array<{ id: string; name: string; model: string }>;
+  activeSessionModelId?: string;
+  providerOptions?: Array<{ id: string; name: string; model: string; availableModels?: string[] }>;
   globalModelName: string;
 }
 
@@ -793,6 +808,7 @@ const props = withDefaults(defineProps<Props>(), {
 	pendingApproval: false,
 	agentSuggestions: () => [],
 	activeSessionProviderId: "",
+	activeSessionModelId: "",
 	providerOptions: () => [],
 	globalModelName: "",
 });
@@ -909,6 +925,7 @@ const emit = defineEmits<{
   (e: "dismiss-skill-proposal", id: string): void;
   (e: "test-notification"): void;
   (e: "update:activeSessionProviderId", providerId: string): void;
+  (e: "update:activeSessionModelId", modelId: string): void;
 }>();
 
 const chatScrollRef = ref<HTMLElement | null>(null);
@@ -919,7 +936,10 @@ const showScrollToBottom = computed(() => !isAtBottom.value && props.chatMessage
 const activeProviderLabel = computed(() => {
   const id = props.activeSessionProviderId.trim();
   if (!id) return "跟随全局";
-  return props.providerOptions?.find((p) => p.id === id)?.name || "自定义";
+  const provider = props.providerOptions?.find((p) => p.id === id);
+  if (!provider) return "自定义";
+  const model = props.activeSessionModelId?.trim() || provider.model;
+  return `${provider.name} / ${model}`;
 });
 
 const providerPickerTitle = computed(() => {
@@ -968,11 +988,19 @@ function closeProviderPicker() {
 function selectProvider(providerId: string) {
   providerPickerOpen.value = false;
   emit("update:activeSessionProviderId", providerId);
+  emit("update:activeSessionModelId", "");
+}
+
+function selectModel(providerId: string, modelId: string) {
+  providerPickerOpen.value = false;
+  emit("update:activeSessionProviderId", providerId);
+  emit("update:activeSessionModelId", modelId);
 }
 
 function resetProviderToGlobal() {
   providerPickerOpen.value = false;
   emit("update:activeSessionProviderId", "");
+  emit("update:activeSessionModelId", "");
 }
 
 function goToAiConfig() {

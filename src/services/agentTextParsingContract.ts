@@ -42,11 +42,6 @@ export const MODEL_TEXT_PARSING_SITES: TextParsingSite[] = [
     reason: "待迁移：回复澄清选项 → 按钮，应改为 choices SSE 事件（当前宽松嗅探）",
   },
   {
-    relPath: "src/services/agentSuggestedOptions.ts",
-    category: "behavior",
-    reason: "选项提取：模型被指令输出固定 schema（isChoice/options），围栏 + 首尾裁剪 + 严格 parse + 数量/去重校验",
-  },
-  {
     relPath: "src/utils/chatCompletionText.ts",
     category: "behavior",
     reason: "模型 JSON 契约提取：围栏 + 首尾对象裁剪 + 严格 parse（模型被指令输出 JSON）",
@@ -218,6 +213,11 @@ export const MODEL_TEXT_PARSING_SITES: TextParsingSite[] = [
     relPath: "src-tauri/src/agent/run_stream.rs",
     category: "deterministic",
     reason: "LLM API SSE 协议流解析（tool_calls JSON 段）",
+  },
+  {
+    relPath: "src/services/aiClient.ts",
+    category: "deterministic",
+    reason: "LLM API 响应结构提取（choices/output/output_text 等固定协议字段）",
   },
 ];
 

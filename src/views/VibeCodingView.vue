@@ -821,9 +821,11 @@
         :pending-skill-proposals="pendingSkillProposals"
         :agent-suggestions="activeAgentSuggestions"
         :active-session-provider-id="activeSessionProviderId"
+        :active-session-model-id="activeSessionModelId"
         :provider-options="providerOptions"
         :global-model-name="aiConfig.model"
         @update:activeSessionProviderId="setActiveSessionProvider"
+        @update:activeSessionModelId="setActiveSessionModel"
         @on-chat-drag-enter="onChatDragEnter"
         @on-chat-drag-over="onChatDragOver"
         @on-chat-drag-leave="onChatDragLeave"
@@ -1680,6 +1682,8 @@ const {
   clearProjectChat,
   activeSessionProviderId,
   setActiveSessionProvider,
+  activeSessionModelId,
+  setActiveSessionModel,
 } = chatSession;
 
 function persistAgentRunSession(sessionId: string) {
@@ -1784,7 +1788,7 @@ const contextMenu = ref({ show: false, x: 0, y: 0, path: "" });
 const gitFileContextMenu = ref({ show: false, x: 0, y: 0, path: "", scope: "modified" as GitFileListScope });
 
 const aiConfig = ref({ endpoint: "", apiKey: "", model: "", providerName: "" });
-const providerOptions = ref<Array<{ id: string; name: string; model: string }>>([]);
+const providerOptions = ref<Array<{ id: string; name: string; model: string; availableModels?: string[] }>>([]);
 
 const configReady = computed(() => Boolean(aiConfig.value.endpoint.trim()) && Boolean(aiConfig.value.model.trim()));
 const apiKeyReady = computed(() => Boolean(aiConfig.value.apiKey.trim()));
@@ -2164,7 +2168,12 @@ function reloadAiConfig() {
   const persisted = loadPersistedAiConfigFromStorage();
   providerOptions.value = (persisted?.providers || [])
     .filter((p) => p.model?.trim())
-    .map((p) => ({ id: p.id, name: p.name.trim() || "默认供应商", model: p.model.trim() }));
+    .map((p) => ({
+      id: p.id,
+      name: p.name.trim() || "默认供应商",
+      model: p.model.trim(),
+      ...(p.availableModels?.length ? { availableModels: [...p.availableModels] } : {}),
+    }));
   void refreshServerAiConfig();
 }
 
@@ -2185,10 +2194,12 @@ function resolveSessionAiConfigForSession(sessionId: string) {
   const persisted = loadPersistedAiConfigFromStorage();
   const provider = persisted?.providers.find((p) => p.id === providerId);
   if (!provider?.endpoint?.trim() || !provider?.model?.trim()) return null;
+  // 会话若固定了具体模型（modelId），用它覆盖供应商默认模型。
+  const model = meta?.modelId?.trim() || provider.model.trim();
   return {
     endpoint: provider.endpoint.trim(),
     apiKey: provider.apiKey,
-    model: provider.model.trim(),
+    model,
     providerName: provider.name.trim() || "默认供应商",
   };
 }

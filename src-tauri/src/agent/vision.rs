@@ -88,8 +88,8 @@ pub fn build_click_focus_interaction_hint() -> &'static str {
 
 /// Build floating control positioning hint
 pub fn build_floating_control_positioning_hint() -> &'static str {
-    "附了截图报告控件跑偏/错位：诊断（勿预设修法）——先区分「浮层/绝对定位错位」与「同容器流式布局拥挤」。\
-  用结构线索检索（定位属性、portal/Teleport、浮层相关 class），并核对父级定位上下文与 overflow 裁剪；\
+    "附了截图报告控件跑偏/错位：诊断（勿预设修法）——先读图区分「控件独立于其预期容器错位」与「同容器内布局拥挤」两类假设，\
+  用结构线索检索定位实际组件，read 核对父级与控件的关系及决定其位置的代码；\
   证据不足时并列假设，勿只认单一修法。"
 }
 

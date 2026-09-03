@@ -12,6 +12,8 @@ import {
   getActiveSessionSnapshot,
   getActiveVibeChatSessionId,
   getSessionDiagSnapshot,
+  getSessionModelId,
+  getSessionProviderId,
   getVibeChatProjectSnapshot,
   isSessionRecentlyDeletedLocally,
   loadVibeChatHistory,
@@ -21,6 +23,7 @@ import {
   saveVibeChatHistory,
   sessionIdsWithDiskAheadMessageCounts,
   setVibeChatSessionProvider,
+  setVibeChatSessionModel,
   switchVibeChatSession,
   syncLocalIndexFromRecord,
   vibeProjectPathsMatch,
@@ -652,14 +655,43 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
   const activeSessionProviderId = computed(() => {
     const id = activeSessionId.value.trim();
     if (!id) return "";
-    return sessionList.value.find((s) => s.id === id)?.providerId?.trim() || "";
+    // 依赖 sessionList 建立响应式（refreshList 后重算），但值从持久化记录读，
+    // 避免空草稿会话被 listVibeChatSessions 过滤后读不到。
+    void sessionList.value;
+    return getSessionProviderId(projectPath().trim(), id);
+  });
+
+  const activeSessionModelId = computed(() => {
+    const id = activeSessionId.value.trim();
+    if (!id) return "";
+    void sessionList.value;
+    return getSessionModelId(projectPath().trim(), id);
   });
 
   function setActiveSessionProvider(providerId: string) {
     const project = projectPath().trim();
-    const id = activeSessionId.value.trim();
-    if (!project || !id) return;
+    if (!project) return;
+    // 尚未创建会话时（如刚打开项目、还没发过消息），先建一个再绑定供应商，
+    // 否则下拉里点选供应商会静默失败。
+    let id = activeSessionId.value.trim();
+    if (!id) {
+      id = ensureSessionForSend();
+    }
+    if (!id) return;
     setVibeChatSessionProvider(project, id, providerId);
+    refreshList(project);
+    schedulePersistChat();
+  }
+
+  function setActiveSessionModel(modelId: string) {
+    const project = projectPath().trim();
+    if (!project) return;
+    let id = activeSessionId.value.trim();
+    if (!id) {
+      id = ensureSessionForSend();
+    }
+    if (!id) return;
+    setVibeChatSessionModel(project, id, modelId);
     refreshList(project);
     schedulePersistChat();
   }
@@ -671,6 +703,8 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     chatStoreSyncMessage,
     activeSessionProviderId,
     setActiveSessionProvider,
+    activeSessionModelId,
+    setActiveSessionModel,
     activateSession,
     bindSessionMessages,
     getSessionMessages: sessionMessages.getSessionMessages,

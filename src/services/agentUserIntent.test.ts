@@ -295,10 +295,11 @@ describe("buildBuildWriteBlockedHint", () => {
 });
 
 describe("buildUiDefectBuildHint", () => {
-  it("requires patch and mentions overlay positioning", () => {
+  it("requires patch and stays generic without fix recipe", () => {
     expect(buildUiDefectBuildHint()).toContain("patch_file");
-    expect(buildUiDefectBuildHint()).toContain("portal");
-    expect(buildUiDefectBuildHint()).toContain("getSelection");
+    expect(buildUiDefectBuildHint()).toContain("勿预设唯一修法路径");
+    expect(buildUiDefectBuildHint()).not.toContain("portal");
+    expect(buildUiDefectBuildHint()).not.toContain("flex");
   });
 });
 

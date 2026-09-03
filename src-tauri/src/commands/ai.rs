@@ -4,6 +4,41 @@ use serde_json::{json, Value};
 use tauri::ipc::Channel;
 
 fn stream_delta_text(parsed: &Value) -> Option<String> {
+    // Responses API 流式增量：{type:"response.output_text.delta", delta:"..."} / {type:"response.text.delta", delta:"..."}
+    if let Some(ty) = parsed.get("type").and_then(|v| v.as_str()) {
+        if ty.contains("output_text.delta") || ty.contains("text.delta") {
+            if let Some(delta) = parsed.get("delta").and_then(|v| v.as_str()) {
+                return Some(delta.to_string());
+            }
+            if let Some(delta) = parsed.get("delta") {
+                if let Some(text) = delta.get("text").and_then(|v| v.as_str()) {
+                    return Some(text.to_string());
+                }
+            }
+        }
+    }
+    if let Some(delta) = parsed.get("delta").and_then(|v| v.as_str()) {
+        if parsed.get("type").is_some() {
+            return Some(delta.to_string());
+        }
+    }
+    if let Some(text) = parsed.get("output_text").and_then(|v| v.as_str()) {
+        if parsed.get("type").is_some() {
+            return Some(text.to_string());
+        }
+    }
+    // Anthropic messages delta: {type:"content_block_delta", delta:{type:"text_delta", text:"..."}}
+    if let Some(text) = parsed
+        .pointer("/delta/text")
+        .and_then(|v| v.as_str())
+    {
+        return Some(text.to_string());
+    }
+    if let Some(text) = parsed.get("text").and_then(|v| v.as_str()) {
+        if parsed.get("type").is_some() && parsed.get("type").and_then(|v| v.as_str()).map(|t| t.contains("delta")).unwrap_or(false) {
+            return Some(text.to_string());
+        }
+    }
     let content = parsed.pointer("/choices/0/delta/content")?;
     if let Some(text) = content.as_str() {
         return Some(text.to_string());

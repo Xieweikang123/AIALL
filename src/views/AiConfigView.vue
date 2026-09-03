@@ -3,19 +3,36 @@
     <div class="page-head">
       <div class="page-title-wrap">
         <h1>AI 模型配置</h1>
-        <p class="desc">配置 OpenAI 兼容接口、模型参数与服务，支持快捷键 Ctrl/⌘ + S 保存</p>
+        <p class="desc">配置 OpenAI 兼容接口、模型参数与服务；改动自动保存到本地，Ctrl/⌘ + S 立即保存</p>
       </div>
       <div class="head-actions">
         <div class="action-group nav-group">
-          <button type="button" class="secondary" @click="handleGoChat">💬 对话</button>
           <router-link class="secondary link-btn" to="/vibe-coding">💻 Vibe Coding</router-link>
         </div>
         <div class="action-divider"></div>
         <div class="action-group">
-          <button type="button" class="secondary" title="导出配置文件" @click="handleExportConfig">导出</button>
-          <button type="button" class="secondary" title="导入配置文件" @click="handleImportConfig">导入</button>
+          <div ref="moreMenuWrapRef" class="more-menu-wrap">
+            <button type="button" class="secondary" title="更多操作" @click="moreMenuOpen = !moreMenuOpen">···</button>
+            <div v-if="moreMenuOpen" class="more-menu">
+              <button type="button" class="more-menu-item" @click="moreMenuOpen = false; handleExportConfig()">导出配置</button>
+              <button type="button" class="more-menu-item" @click="moreMenuOpen = false; handleImportConfig()">导入配置</button>
+            </div>
+          </div>
           <button type="button" class="secondary danger outline" title="重置为默认配置" @click="handleResetConfig">重置</button>
-          <button type="button" class="primary save-btn" title="保存所有配置 (Ctrl+S)" @click="saveConfig">保存配置</button>
+          <span v-if="autoSaveHint" class="autosave-hint" :class="{ syncing: autoSaveSyncing }">
+            <span class="autosave-dot"></span>{{ autoSaveHint }}
+          </span>
+          <button
+            v-if="serverLoggedIn && serverDirty"
+            type="button"
+            class="primary"
+            :disabled="serverSyncBusy"
+            title="把当前配置同步到服务端 (Ctrl+S)"
+            @click="saveConfig"
+          >
+            {{ serverSyncBusy ? "同步中..." : "同步到服务端" }}
+          </button>
+          <button type="button" class="primary save-btn" title="立即保存 (Ctrl+S)" @click="saveConfig">保存</button>
         </div>
       </div>
     </div>
@@ -56,13 +73,14 @@
           <p class="desc">配置多个 OpenAI 兼容接口，并选择其中一个作为全局默认供应商</p>
         </div>
         <div class="provider-quick-fill">
+          <span class="preset-label">快速填充</span>
           <select
             v-model="presetSelected"
             class="preset-select"
             aria-label="用预设填充供应商"
             @change="applyPreset(presetSelected)"
           >
-            <option value="" disabled>✨ 用预设填充…</option>
+            <option value="" disabled>✨ 选择预设供应商…</option>
             <option v-for="p in providerPresets" :key="p.name" :value="p.name">
               {{ p.name }}{{ p.model ? `（${p.model}）` : "" }}
             </option>
@@ -119,7 +137,7 @@
         <span v-if="changeOk" class="server-strip-status ok">{{ changeOk }}</span>
       </div>
 
-      <!-- 供应商切换条 -->
+      <!-- 供应商切换条：点击即编辑并设为默认（自动保存） -->
       <div class="provider-bar" role="tablist" aria-label="模型供应商列表">
         <button
           v-for="provider in providers"
@@ -138,14 +156,6 @@
       </div>
 
       <div class="provider-actions">
-        <button
-          v-if="editingProviderId && editingProviderId !== activeProviderId"
-          type="button"
-          class="secondary"
-          @click="setActiveProvider(editingProviderId)"
-        >
-          ⭐ 设为默认供应商
-        </button>
         <button
           type="button"
           class="secondary danger outline"
@@ -177,11 +187,13 @@
           <input v-model.trim="form.endpoint" type="text" placeholder="https://api.openai.com/v1" />
           <small v-if="endpointError" class="tips error">{{ endpointError }}</small>
           <small v-else class="tips">
-            支持标准 Base URL（如 <code class="inline-code">https://api.example.com/v1</code>），系统会自动补全 <code class="inline-code">/chat/completions</code>。
+            支持标准 Base URL（如 <code class="inline-code">https://api.example.com/v1</code>）自动补全 <code class="inline-code">/chat/completions</code>；若填完整路径 <code class="inline-code">/responses</code> / <code class="inline-code">/messages</code> 则原样请求（用于 Muse Spark、Claude 等）。
           </small>
         </label>
 
-        <label class="field">
+        <div class="form-divider with-label" aria-hidden="true"><span>认证与模型</span></div>
+
+        <label class="field span-2">
           <div class="field-row">
             <span>API Key（可选）</span>
             <div class="field-tools">
@@ -203,7 +215,7 @@
           />
         </label>
 
-        <label class="field">
+        <label class="field span-2">
           <div class="field-row">
             <span>模型名称（Model）</span>
             <div class="field-tools">
@@ -225,6 +237,8 @@
           </div>
           <small v-if="modelsStatusText" class="tips">{{ modelsStatusText }}</small>
         </label>
+
+        <div class="form-divider with-label" aria-hidden="true"><span>网络（可选）</span></div>
 
         <label class="field span-2">
           <div class="field-row">
@@ -444,6 +458,17 @@ const activeTab = ref<TabKey>("chat");
 const apiKeyVisible = ref(false);
 const saveHint = ref("");
 let saveHintTimer: number | undefined;
+const moreMenuOpen = ref(false);
+const moreMenuWrapRef = ref<HTMLElement | null>(null);
+
+// ── 自动保存（防抖写 localStorage）──
+const AUTO_SAVE_DELAY_MS = 800;
+const autoSaveHint = ref("");
+const autoSaveSyncing = ref(false);
+let autoSaveTimer: number | undefined;
+/** 最近一次「同步到服务端」时的表单快照，用于判断服务器模式是否需要重新同步 */
+let lastServerSyncSnapshot = "";
+const serverSyncBusy = ref(false);
 
 // ── 服务器模式（web / agent-server）──
 const isDesktopRuntime = isTauriEnv();
@@ -454,6 +479,10 @@ const serverLoginError = ref("");
 const serverAuthBusy = ref(false);
 const serverCfgNote = ref("");
 const showChangePassword = ref(false);
+const serverDirty = computed(() => {
+  if (isDesktopRuntime || !serverLoggedIn.value) return false;
+  return buildConfigSnapshot() !== lastServerSyncSnapshot;
+});
 const changeOldPassword = ref("");
 const changeNewPassword = ref("");
 const changeConfirmPassword = ref("");
@@ -467,8 +496,8 @@ async function refreshServerLoginState() {
     const cfg = await fetchServerAiConfig();
     serverCfgNote.value = cfg.ok
       ? cfg.hasServerKey
-        ? "服务端已配置 API Key；本页「保存配置」会同步到服务端。"
-        : "服务端尚未配置 API Key，请在本页填写后点「保存配置」。"
+        ? "服务端已配置 API Key；改动自动存本地，点「同步到服务端」推送。"
+        : "服务端尚未配置 API Key，请在本页填写后点「同步到服务端」。"
       : cfg.error || "无法获取服务端 AI 配置";
   } else {
     serverCfgNote.value = "";
@@ -528,10 +557,6 @@ const providers = ref<AiProvider[]>([createDefaultProvider()]);
 const activeProviderId = ref(providers.value[0].id);
 const editingProviderId = ref(providers.value[0].id);
 
-function handleGoChat() {
-  router.push({ path: "/chat" });
-}
-
 const form = reactive<AiConfigForm>({
   name: "默认供应商",
   endpoint: "https://fufu.iqach.top/v1",
@@ -564,12 +589,16 @@ function syncProviderToForm(providerId: string) {
 }
 
 function selectProvider(providerId: string) {
-  if (editingProviderId.value === providerId) return;
   syncFormToProvider(editingProviderId.value);
+  const switched = editingProviderId.value !== providerId;
   editingProviderId.value = providerId;
+  activeProviderId.value = providerId;
   syncProviderToForm(providerId);
-  availableModels.value = [];
-  modelsStatusText.value = "已切换供应商，可重新获取模型列表。";
+  if (switched) {
+    availableModels.value = [];
+    modelsStatusText.value = "已切换并设为默认供应商，可重新获取模型列表。";
+  }
+  scheduleAutoSave();
 }
 
 function addProvider() {
@@ -577,9 +606,10 @@ function addProvider() {
   const provider = createDefaultProvider(`供应商 ${providers.value.length + 1}`);
   providers.value.push(provider);
   editingProviderId.value = provider.id;
+  activeProviderId.value = provider.id;
   syncProviderToForm(provider.id);
   availableModels.value = [];
-  modelsStatusText.value = "已添加新供应商，请填写接口信息。";
+  modelsStatusText.value = "已添加并设为默认供应商，请填写接口信息。";
 }
 
 const providerPresets = PROVIDER_PRESETS;
@@ -600,16 +630,6 @@ function applyPreset(presetName: string) {
   modelsStatusText.value = preset.model
     ? `已应用预设「${preset.name}」，请填写 API Key。`
     : `已应用预设「${preset.name}」，请填写 API Key 后点「获取模型」选择模型。`;
-}
-
-function setActiveProvider(providerId: string) {
-  if (!providers.value.some((item) => item.id === providerId)) return;
-  activeProviderId.value = providerId;
-  saveHint.value = "已设为默认供应商，记得点击「保存配置」。";
-  window.clearTimeout(saveHintTimer);
-  saveHintTimer = window.setTimeout(() => {
-    saveHint.value = "";
-  }, 2000);
 }
 
 function removeProvider(providerId: string) {
@@ -965,10 +985,14 @@ function resolveModelsEndpointForDisplay(endpoint: string): string {
     const url = new URL(input);
     const path = url.pathname;
     if (path.endsWith("/chat/completions")) url.pathname = path.replace(/\/chat\/completions$/, "/models");
+    else if (path.endsWith("/responses") || path.endsWith("/messages"))
+      url.pathname = path.replace(/\/(responses|messages)$/, "/models");
     else if (!path.endsWith("/models")) url.pathname = (path.endsWith("/") ? path.slice(0, -1) : path) + "/models";
     return url.toString();
   } catch {
     if (input.endsWith("/chat/completions")) return input.replace(/\/chat\/completions$/, "/models");
+    if (input.endsWith("/responses") || input.endsWith("/messages"))
+      return input.replace(/\/(responses|messages)$/, "/models");
     if (input.endsWith("/models")) return input;
     return `${input.replace(/\/$/, "")}/models`;
   }
@@ -982,7 +1006,9 @@ function resolveChatEndpointForDisplay(endpoint: string): string {
   const input = endpoint.trim();
   if (!input) return "";
   if (input.endsWith("/chat/completions")) return input;
+  if (input.endsWith("/responses") || input.endsWith("/messages")) return input;
   if (input.endsWith("/completions")) return input.replace(/\/completions$/, "/chat/completions");
+  if (input.endsWith("/audio/speech")) return input.replace(/\/audio\/speech$/, "/chat/completions");
   return `${input.replace(/\/+$/, "")}/chat/completions`;
 }
 
@@ -1066,8 +1092,44 @@ function scheduleSaveHintClear() {
   }, 2800);
 }
 
-function saveConfig() {
-  syncFormToProvider(editingProviderId.value);
+/** 汇总当前表单为可比较的快照（纯函数，用于服务器模式脏检查与自动保存去重） */
+function buildConfigSnapshot(): string {
+  const providersSnapshot = providers.value.map((provider) =>
+    provider.id === editingProviderId.value
+      ? {
+          ...provider,
+          name: form.name,
+          endpoint: form.endpoint,
+          apiKey: form.apiKey,
+          model: form.model,
+          prompt: form.prompt,
+          stream: form.stream,
+        }
+      : provider,
+  );
+  return JSON.stringify({
+    activeProviderId: activeProviderId.value,
+    editingProviderId: editingProviderId.value,
+    providers: providersSnapshot,
+    web: { proxyUrl: normalizeWebProxyUrl(web.proxyUrl) || web.proxyUrl.trim() },
+    tts: { ...ttsForm },
+  });
+}
+
+/** 立即写 localStorage（不走防抖），返回是否真正写入了 */
+function persistConfigNow(): boolean {
+  const snapshot = buildConfigSnapshot();
+  const stored = loadPersistedAiConfigFromStorage();
+  const storedSnapshot = stored
+    ? JSON.stringify({
+        activeProviderId: stored.activeProviderId,
+        editingProviderId: stored.activeProviderId,
+        providers: stored.providers,
+        web: { proxyUrl: stored.web.proxyUrl },
+        tts: stored.tts,
+      })
+    : "";
+  if (snapshot === storedSnapshot) return false;
   const normalizedProxy = normalizeWebProxyUrl(web.proxyUrl);
   if (normalizedProxy) {
     web.proxyUrl = normalizedProxy;
@@ -1087,46 +1149,91 @@ function saveConfig() {
       format: ttsForm.format,
     },
   });
+  return true;
+}
+
+function showAutoSaveHint(text: string, syncing = false) {
+  autoSaveHint.value = text;
+  autoSaveSyncing.value = syncing;
+}
+
+function scheduleAutoSave() {
+  window.clearTimeout(autoSaveTimer);
+  showAutoSaveHint("改动中…", true);
+  autoSaveTimer = window.setTimeout(() => {
+    try {
+      persistConfigNow();
+      showAutoSaveHint("已自动保存");
+      window.clearTimeout(autoSaveTimer);
+      autoSaveTimer = window.setTimeout(() => {
+        showAutoSaveHint("");
+      }, 2000);
+    } catch {
+      showAutoSaveHint("自动保存失败");
+    }
+  }, AUTO_SAVE_DELAY_MS);
+}
+
+function saveConfig() {
+  window.clearTimeout(autoSaveTimer);
+  const saved = persistConfigNow();
 
   // 服务器模式（web）：主 tab 配置同步到服务端，Vibe 页才会使用；
   // 无需再单独去「服务器模式」tab 填一遍（旧设计两处配置同一件事）。
   if (serverLoggedIn.value) {
-    saveHint.value = "配置已保存，正在同步到服务端…";
+    if (serverSyncBusy.value) return;
+    serverSyncBusy.value = true;
+    showAutoSaveHint("同步到服务端中…", true);
+    saveHint.value = "正在同步到服务端…";
     void saveServerAiConfig({
       endpoint: form.endpoint.trim(),
       apiKey: form.apiKey.trim(),
       model: form.model.trim(),
       webProxyUrl: web.proxyUrl.trim() || undefined,
-    }).then((res) => {
-      if (res.ok) {
-        saveHint.value = "配置已保存，并已同步到服务端（Vibe 页即刻可用）。";
-        void refreshServerLoginState();
-      } else {
-        saveHint.value = `本地已保存；同步服务端失败：${res.error || "未知原因"}（服务端可能用环境变量 AIALL_SERVER_AI_* 接管了配置）`;
-      }
-      scheduleSaveHintClear();
-    });
+    })
+      .then((res) => {
+        if (res.ok) {
+          lastServerSyncSnapshot = buildConfigSnapshot();
+          saveHint.value = "已同步到服务端（Vibe 页即刻可用）。";
+          void refreshServerLoginState();
+        } else {
+          saveHint.value = `本地已保存；同步服务端失败：${res.error || "未知原因"}（服务端可能用环境变量 AIALL_SERVER_AI_* 接管了配置）`;
+        }
+        scheduleSaveHintClear();
+      })
+      .finally(() => {
+        serverSyncBusy.value = false;
+        showAutoSaveHint("");
+      });
     return;
   }
 
-  saveHint.value = "配置已保存到本地 localStorage。";
+  showAutoSaveHint("");
+  saveHint.value = saved ? "配置已保存到本地。" : "配置未变化，无需保存。";
   scheduleSaveHintClear();
 }
+
+let configLoaded = false;
 
 function loadConfig() {
   const stored = loadPersistedAiConfigFromStorage();
   if (!stored) {
     const raw = lsGet(AI_LOCAL_CONFIG_KEY);
-    if (!raw) return;
+    if (!raw) {
+      configLoaded = true;
+      return;
+    }
     try {
       const migrated = migratePersistedAiConfig(JSON.parse(raw) as unknown);
       applyPersistedConfig(migrated);
     } catch {
       // 忽略损坏的本地配置，保留默认值。
     }
+    configLoaded = true;
     return;
   }
   applyPersistedConfig(stored);
+  configLoaded = true;
 }
 
 function applyPersistedConfig(payload: ReturnType<typeof migratePersistedAiConfig>) {
@@ -1174,6 +1281,8 @@ async function handleImportConfig() {
     const migrated = migratePersistedAiConfig(parsed);
     savePersistedAiConfigToStorage(migrated);
     loadConfig();
+    lastServerSyncSnapshot = buildConfigSnapshot();
+    showAutoSaveHint("");
     saveHint.value = "已导入配置。";
   } catch {
     saveHint.value = "导入失败：不是合法 JSON。";
@@ -1219,6 +1328,11 @@ async function fetchModels(forceRefresh: boolean) {
 
     if (!availableModels.value.includes(form.model)) {
       form.model = availableModels.value[0];
+    }
+    // 缓存到当前供应商，供会话下拉按供应商选模型。
+    const provider = providers.value.find((item) => item.id === editingProviderId.value);
+    if (provider) {
+      provider.availableModels = [...availableModels.value];
     }
     const cacheHint = response.fromCache ? "（来自缓存）" : "";
     modelsStatusText.value = `已加载 ${availableModels.value.length} 个模型${cacheHint}。`;
@@ -1332,12 +1446,40 @@ async function handleTestTts() {
   }
 }
 
+function handleMoreMenuOutsideClick(e: MouseEvent) {
+  if (!moreMenuOpen.value) return;
+  const target = e.target as Node | null;
+  if (moreMenuWrapRef.value && target && !moreMenuWrapRef.value.contains(target)) {
+    moreMenuOpen.value = false;
+  }
+}
+
 onMounted(() => {
   loadConfig();
+  lastServerSyncSnapshot = buildConfigSnapshot();
   void refreshServerLoginState();
   window.addEventListener("paste", handlePaste);
   window.addEventListener("keydown", handleSaveShortcut);
+  window.addEventListener("click", handleMoreMenuOutsideClick);
 });
+
+// 表单任意变化 → 防抖自动保存（跳过初始加载与「改动中…」期间自身触发的变化）
+watch(
+  [
+    form,
+    () => providers.value.map((p) => ({ ...p })),
+    () => activeProviderId.value,
+    () => editingProviderId.value,
+    () => activeTab.value,
+    () => web.proxyUrl,
+    () => ({ ...ttsForm }),
+  ],
+  () => {
+    if (!configLoaded) return;
+    scheduleAutoSave();
+  },
+  { deep: true },
+);
 
 watch(
   () => [form.endpoint, form.apiKey, editingProviderId.value] as const,
@@ -1360,8 +1502,18 @@ onBeforeUnmount(() => {
   if (ttsAudioUrl.value) {
     URL.revokeObjectURL(ttsAudioUrl.value);
   }
+  // 卸载前把未落盘的改动立即写入，避免防抖期间离开页面丢配置
+  window.clearTimeout(autoSaveTimer);
+  if (configLoaded) {
+    try {
+      persistConfigNow();
+    } catch {
+      // localStorage 不可用时静默忽略
+    }
+  }
   window.removeEventListener("paste", handlePaste);
   window.removeEventListener("keydown", handleSaveShortcut);
+  window.removeEventListener("click", handleMoreMenuOutsideClick);
   window.clearTimeout(saveHintTimer);
 });
 </script>
@@ -1536,6 +1688,41 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 
+.autosave-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ok, #3fb950);
+  white-space: nowrap;
+}
+
+.autosave-hint.syncing {
+  color: var(--muted, rgba(255, 255, 255, 0.6));
+}
+
+.autosave-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.autosave-hint.syncing .autosave-dot {
+  animation: autosave-pulse 1s ease-in-out infinite;
+}
+
+@keyframes autosave-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
 .action-group {
   display: flex;
   align-items: center;
@@ -1580,6 +1767,38 @@ onBeforeUnmount(() => {
 .nav-group .secondary:active:not(:disabled),
 .nav-group .link-btn:active:not(:disabled) {
   background: rgba(130, 80, 223, 0.22);
+}
+
+.more-menu-wrap {
+  position: relative;
+}
+
+.more-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 132px;
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(22, 30, 48, 0.98);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 20;
+}
+
+.more-menu-item {
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.more-menu-item:hover {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 button.secondary {
@@ -1741,7 +1960,7 @@ button.primary {
   font-weight: 600;
 }
 
-.provider-chip.default:not(.active) {
+.provider-chip.default {
   border-color: rgba(63, 185, 80, 0.4);
 }
 
@@ -1781,25 +2000,38 @@ button.primary {
 }
 
 .preset-select {
-  border: 1px solid var(--border-2, rgba(255, 255, 255, 0.16));
-  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(88, 166, 255, 0.4);
+  background: rgba(88, 166, 255, 0.12);
   color: var(--text, rgba(255, 255, 255, 0.9));
   border-radius: 999px;
-  padding: 6px 28px 6px 12px;
+  padding: 7px 30px 7px 14px;
   font-size: 13px;
-  max-width: 260px;
+  font-weight: 500;
+  max-width: 280px;
   cursor: pointer;
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6l4 4 4-4' stroke='rgba(255,255,255,0.7)' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6l4 4 4-4' stroke='rgba(88,166,255,0.9)' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 10px center;
   outline: none;
   transition: all 150ms ease;
 }
 
+.preset-label {
+  font-size: 12px;
+  color: var(--muted, rgba(255, 255, 255, 0.6));
+  white-space: nowrap;
+}
+
+.provider-quick-fill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .preset-select:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.28);
+  background-color: rgba(88, 166, 255, 0.2);
+  border-color: rgba(88, 166, 255, 0.6);
 }
 
 .preset-select:focus {
@@ -1822,7 +2054,7 @@ button.primary {
 
 .config-form {
   display: grid;
-  gap: 14px;
+  gap: 16px;
 }
 
 .config-form.grid-2 {
@@ -1850,11 +2082,46 @@ button.primary {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .field-tools {
   display: inline-flex;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.form-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+.form-divider.with-label {
+  height: auto;
+  background: transparent;
+  border-top: 1px solid var(--border);
+  margin: 6px 0 2px;
+  padding-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--subtle);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+}
+
+.form-divider.with-label span {
+  white-space: nowrap;
+}
+
+.form-divider.with-label::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+  opacity: 0.6;
 }
 
 .field input,

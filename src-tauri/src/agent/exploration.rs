@@ -587,10 +587,9 @@ pub fn build_user_error_quote_hint() -> &'static str {
 }
 
 fn build_ui_symptom_diagnosis_hint() -> &'static str {
-    "【UI 分症状排查】禁止在同一文件反复微调同一组定位属性；按序核对（勿预设修法）：\
-   ① v-if/显示条件与 scroll/resize 事件是否更新；② 控件是否在 overflow 滚动子树内（浮层是否应作 sibling overlay）；\
-   ③ 外框可见但符号/文字空白：grep/read 全局 element 选择器与组件 scoped 样式，核对尺寸/padding/box-sizing 是否互相裁切，并查内层 text/SVG；勿只改单一装饰属性；\
-   ④ 给出用户可复现验证步骤（含当前 tab/模式前提）。"
+    "【UI 分症状排查】禁止在同一文件反复微调同一组属性；先定位决定当前行为的实际源码（template/样式/事件处理），read 核对后再决定改哪。\
+    勿预设唯一修法路径；依据工具证据与截图/描述核对。\
+    改完给出用户可复现验证步骤（含当前 tab/模式前提）。"
 }
 
 pub fn build_user_failure_report_nudge() -> String {

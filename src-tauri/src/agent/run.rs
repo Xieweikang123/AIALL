@@ -635,7 +635,8 @@ pub async fn agent_run(
               "type": "turn_response", "data": {
                 "turn": turn, "maxTurns": run_state.segment.max_turns,
                 "assistantText": assistant_text, "toolCalls": tool_calls,
-                "hasToolCalls": !is_final, "isFinal": is_final
+                "hasToolCalls": !is_final, "isFinal": is_final,
+                "options": turn_output.options
               }
             }),
         );

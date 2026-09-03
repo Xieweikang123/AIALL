@@ -221,7 +221,7 @@ pub fn history_suggests_quote_position_fix(
         return false;
     }
     static POSITION_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"定位|坐标|位置|浮层|fixed|absolute|Teleport|锚点|偏移").unwrap()
+        regex::Regex::new(r"定位|坐标|位置|在哪|哪里|哪儿|错位|偏移|出现在").unwrap()
     });
     static CONCLUSION_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
         regex::Regex::new(r"根因|原因|问题在于|分析|诊断|排查").unwrap()

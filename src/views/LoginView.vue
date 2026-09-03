@@ -17,7 +17,10 @@
         autocomplete="current-password"
         @keyup.enter="handleLogin"
       />
-      <button type="button" class="primary" :disabled="busy" @click="handleLogin">登录</button>
+      <button type="button" class="primary" :disabled="busy" @click="handleLogin">
+        <span v-if="busy" class="spinner" aria-hidden="true"></span>
+        {{ busy ? "登录中…" : "登录" }}
+      </button>
       <span v-if="error" class="login-error">{{ error }}</span>
     </div>
   </div>
@@ -110,6 +113,25 @@ async function handleLogin() {
 .login-card .primary:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+.login-card .primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .login-error {
   color: #dc2626;

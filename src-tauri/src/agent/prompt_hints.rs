@@ -52,6 +52,19 @@ pub fn build_agent_suggestions_prompt_hint() -> &'static str {
 implement：用户确认按上文方案改代码；execute_plan：Plan 模式方案已就绪待执行；send：普通续聊。"
 }
 
+/// Structured choice options rendered as buttons under the assistant message.
+/// The model appends a `<ai_options>["a","b"]</ai_options>` block when it asks the user
+/// a yes/no or finite-choice question. The block is stripped from the visible text and
+/// parsed into clickable buttons (no second AI call needed).
+pub fn build_ai_options_prompt_hint() -> &'static str {
+    "【可选·消息下方选项按钮】当本轮回复末尾在向用户提出「是/否」或有限几个选项的选择题时，在正文全部输出完毕后追加（对用户不可见，客户端解析为消息下方的可点击按钮）：\n\
+<ai_options>[\"选项1完整句子\",\"选项2完整句子\"]</ai_options>\n\
+要求：\n\
+- 仅当确实是选择题（如「要我继续吗？」「你选哪种方案？」）才输出；开放问题、陈述、已执行完修改——勿输出。\n\
+- 每项必须是可直接作为用户下一条消息发送的完整句子；第一项通常是默认接受的回答。\n\
+- 2~4 个选项，不要多余、不要重复。"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

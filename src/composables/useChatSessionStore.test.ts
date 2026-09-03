@@ -4,6 +4,7 @@ import { useSessionManager } from "./useSessionManager";
 import { useChatSessionStore } from "./useChatSessionStore";
 import {
   deleteVibeChatSession,
+  getActiveSessionSnapshot,
   listVibeChatSessions,
   loadVibeChatHistory,
   markSessionLocallyDeleted,
@@ -169,6 +170,39 @@ describe("useChatSessionStore", () => {
     const meta = listVibeChatSessions(projectPath).find((s) => s.id === sessionId)!;
     expect(meta.updatedAt).toBe("2026-06-23T10:00:00.000Z");
     vi.useRealTimers();
+  });
+
+  it("setActiveSessionProvider creates a session when none exists yet", () => {
+    const projectPath = "D:/projects/provider-no-session";
+    const { store, session } = createStore(projectPath);
+
+    expect(session.activeSessionId.value).toBe("");
+    store.setActiveSessionProvider("p-ollama");
+
+    const id = session.activeSessionId.value;
+    expect(id).toBeTruthy();
+    // 空草稿会话不在 sessionList 里，但 activeSessionProviderId 应能读到绑定的供应商。
+    expect(store.activeSessionProviderId.value).toBe("p-ollama");
+    const snapshot = getActiveSessionSnapshot(projectPath, id);
+    expect(snapshot?.providerId).toBe("p-ollama");
+  });
+
+  it("setActiveSessionProvider updates provider on an existing session", () => {
+    const projectPath = "D:/projects/provider-existing";
+    const { sessionId } = saveVibeChatHistory(projectPath, [
+      { id: "u1", role: "user", content: "hello" },
+      { id: "a1", role: "assistant", content: "hi" },
+    ]);
+    const { store, session } = createStore(projectPath);
+    session.setActiveSession(sessionId);
+    session.refreshSessionList();
+    store.activateSession(sessionId, [{ id: "u1", role: "user", content: "hello" }]);
+
+    store.setActiveSessionProvider("p-ollama");
+
+    expect(store.activeSessionProviderId.value).toBe("p-ollama");
+    const meta = listVibeChatSessions(projectPath).find((s) => s.id === sessionId);
+    expect(meta?.providerId).toBe("p-ollama");
   });
 
   it("schedulePersistDuringAgentRun skips mid-run persist (done handler persists)", async () => {
