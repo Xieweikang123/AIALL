@@ -227,6 +227,15 @@
           </svg>
         </button>
       </nav>
+      <div v-if="isWeb" class="toolbar-account">
+        <template v-if="accountLoggedIn">
+          <span class="toolbar-account-user" title="已登录服务器账号">🖥 admin</span>
+          <button type="button" class="ghost small" @click="handleAccountLogout">退出登录</button>
+        </template>
+        <template v-else>
+          <button type="button" class="ghost small" @click="router.push('/login')">登录</button>
+        </template>
+      </div>
     </div>
   </header>
 </template>
@@ -236,6 +245,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue"
 import { useRouter } from "vue-router";
 import { getEventValue, formatSessionTime } from "../../utils/vibeHelpers";
 import { isTauriEnv } from "../../services/tauriInvoke";
+import { isServerLoggedIn, serverLogout } from "../../services/serverAuth";
 import {
   listProjectHistory,
   removeProjectFromHistory,
@@ -255,6 +265,15 @@ interface Props {
 const props = defineProps<Props>();
 
 const isDev = import.meta.env.DEV;
+
+const isWeb = !isTauriEnv();
+const accountLoggedIn = ref(isServerLoggedIn());
+
+async function handleAccountLogout() {
+  await serverLogout();
+  accountLoggedIn.value = false;
+  router.push("/login");
+}
 
 const emit = defineEmits<{
   (e: "update:projectPath", value: string): void;
@@ -1109,6 +1128,23 @@ function refreshProjectHistoryList() {
   font-weight: 500;
   letter-spacing: 0.02em;
   color: rgba(255, 255, 255, 0.68);
+}
+
+.toolbar-account {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.toolbar-account-user {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.72);
+  white-space: nowrap;
 }
 
 @media (max-width: 960px) {
