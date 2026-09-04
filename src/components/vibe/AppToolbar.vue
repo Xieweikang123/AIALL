@@ -20,54 +20,22 @@
         @input="$emit('update:projectPath', getEventValue($event))"
         @keydown.enter="$emit('open-project-by-input')"
       />
-      <span v-else class="path-current" :title="projectPath">{{ currentFolderName }}</span>
-      <button v-if="!projectOpened" type="button" class="primary compact" :disabled="pickingFolder || loadingTree" @click="$emit('handle-open-project')">
+      <button
+        v-if="!projectOpened"
+        type="button"
+        class="primary compact"
+        :disabled="pickingFolder || loadingTree"
+        @click="$emit('handle-open-project')"
+      >
         {{ pickingFolder ? "选择…" : loadingTree ? "" : "打开项目" }}<span v-if="loadingTree" class="shimmer-text--fast">加载中</span>
       </button>
-      <button
-        type="button"
-        class="icon-btn"
-        :disabled="!projectOpened || !projectPath.trim()"
-        title="在文件管理器中打开"
-        @click="$emit('open-folder-in-explorer')"
-      >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path d="M2.5 4.8A1.3 1.3 0 0 1 3.8 3.5h3.2l1.2 1.3h4.5A1.3 1.3 0 0 1 14 6.1v6.4a1.3 1.3 0 0 1-1.3 1.3H3.8A1.3 1.3 0 0 1 2.5 12.5V4.8Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
-          <path d="M10.5 8.5 12 10l-3.5 3.5L6 11" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-      </button>
-      <button type="button" class="icon-btn" :disabled="!projectPath.trim()" @click="$emit('refresh-tree')" title="刷新文件树">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M13.65 2.35A7.96 7.96 0 0 0 8 0a8 8 0 1 0 8 8h-2A6 6 0 1 1 8 2c1.66 0 3.14.69 4.22 1.78L9 7h7V0l-2.35 2.35Z" fill="currentColor"/></svg>
-      </button>
-    </div>
-    <div class="toolbar-actions">
-      <div v-if="treeError || retryCountdown > 0" class="toolbar-error" role="alert">
-        <span v-if="retryCountdown > 0" class="toolbar-error-countdown">⟳</span>
-        <span class="toolbar-error-text" v-if="retryCountdown > 0">{{ treeError ? treeError.replace(/。?$/, ' ') : '无法连接后端服务，' }}<span class="shimmer-text--fast">正在重试… {{ retryCountdown }}s</span></span>
-        <span class="toolbar-error-text" v-else>{{ treeError }}</span>
-        <button type="button" class="toolbar-error-dismiss" aria-label="关闭提示" @click="$emit('clear-retry'); $emit('update:treeError', '')">
-          ×
-        </button>
-      </div>
-      <button
-        type="button"
-        class="icon-btn"
-        title="查看调试日志"
-        aria-label="查看调试日志"
-        @click="$emit('open-debug-logs')"
-      >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h9A1.5 1.5 0 0 1 14 4.5v7A1.5 1.5 0 0 1 12.5 13h-9A1.5 1.5 0 0 1 2 11.5v-7Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
-          <path d="M4.5 6h7M4.5 8h7M4.5 10h4" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>
-        </svg>
-      </button>
-      <div ref="projectHistoryRef" class="project-history-wrap">
+      <div v-else ref="projectHistoryRef" class="project-history-wrap">
         <button
           type="button"
           class="project-history-trigger"
           :class="{ open: projectHistoryOpen, active: projectOpened }"
           :disabled="loadingTree || pickingFolder"
-          title="打开项目历史"
+          :title="projectPath"
           :aria-expanded="projectHistoryOpen"
           aria-haspopup="menu"
           @click="toggleProjectHistory"
@@ -75,7 +43,7 @@
           <svg class="project-history-trigger-icon" width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M2.5 4.8A1.3 1.3 0 0 1 3.8 3.5h3.2l1.2 1.3h4.5A1.3 1.3 0 0 1 14 6.1v6.4a1.3 1.3 0 0 1-1.3 1.3H3.8A1.3 1.3 0 0 1 2.5 12.5V4.8Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
           </svg>
-          <span class="project-history-trigger-label">项目历史</span>
+          <span class="project-history-trigger-label">{{ currentFolderName }}</span>
           <span v-if="projectHistoryList.length > 1" class="project-history-badge">{{ projectHistoryList.length }}</span>
           <span class="project-history-chevron" aria-hidden="true">{{ projectHistoryOpen ? "▴" : "▾" }}</span>
         </button>
@@ -84,7 +52,7 @@
           v-if="projectHistoryOpen"
           ref="projectHistoryDropdownRef"
           class="project-history-dropdown"
-          :style="{ position: 'fixed', top: dropdownTop + 'px', right: dropdownRight + 'px' }"
+          :style="{ position: 'fixed', top: dropdownTop + 'px', left: dropdownLeft + 'px' }"
         >
           <div class="project-history-head">
             <div>
@@ -196,6 +164,45 @@
         </div>
         </Teleport>
       </div>
+      <button
+        v-if="projectOpened"
+        type="button"
+        class="icon-btn"
+        :disabled="!projectOpened || !projectPath.trim()"
+        title="在文件管理器中打开"
+        @click="$emit('open-folder-in-explorer')"
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M2.5 4.8A1.3 1.3 0 0 1 3.8 3.5h3.2l1.2 1.3h4.5A1.3 1.3 0 0 1 14 6.1v6.4a1.3 1.3 0 0 1-1.3 1.3H3.8A1.3 1.3 0 0 1 2.5 12.5V4.8Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+          <path d="M10.5 8.5 12 10l-3.5 3.5L6 11" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <button type="button" class="icon-btn" :disabled="!projectPath.trim()" @click="$emit('refresh-tree')" title="刷新文件树">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M13.65 2.35A7.96 7.96 0 0 0 8 0a8 8 0 1 0 8 8h-2A6 6 0 1 1 8 2c1.66 0 3.14.69 4.22 1.78L9 7h7V0l-2.35 2.35Z" fill="currentColor"/></svg>
+      </button>
+    </div>
+    <div class="toolbar-actions">
+      <div v-if="treeError || retryCountdown > 0" class="toolbar-error" role="alert">
+        <span v-if="retryCountdown > 0" class="toolbar-error-countdown">⟳</span>
+        <span class="toolbar-error-text" v-if="retryCountdown > 0">{{ treeError ? treeError.replace(/。?$/, ' ') : '无法连接后端服务，' }}<span class="shimmer-text--fast">正在重试… {{ retryCountdown }}s</span></span>
+        <span class="toolbar-error-text" v-else>{{ treeError }}</span>
+        <button type="button" class="toolbar-error-dismiss" aria-label="关闭提示" @click="$emit('clear-retry'); $emit('update:treeError', '')">
+          ×
+        </button>
+      </div>
+      <button
+        v-if="!isWeb"
+        type="button"
+        class="icon-btn"
+        title="查看调试日志"
+        aria-label="查看调试日志"
+        @click="$emit('open-debug-logs')"
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h9A1.5 1.5 0 0 1 14 4.5v7A1.5 1.5 0 0 1 12.5 13h-9A1.5 1.5 0 0 1 2 11.5v-7Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+          <path d="M4.5 6h7M4.5 8h7M4.5 10h4" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>
+        </svg>
+      </button>
       <div class="toolbar-sep" />
       <nav class="toolbar-nav" aria-label="快捷导航">
         <button type="button" class="toolbar-nav-btn" title="Git 总览：多仓分支与变更" @click="router.push('/git-overview')">
@@ -229,8 +236,46 @@
       </nav>
       <div v-if="isWeb" class="toolbar-account">
         <template v-if="accountLoggedIn">
-          <span class="toolbar-account-user" title="已登录服务器账号">🖥 admin</span>
-          <button type="button" class="ghost small" @click="handleAccountLogout">退出登录</button>
+          <div ref="accountRef" class="account-wrap">
+            <button
+              type="button"
+              class="account-trigger"
+              :class="{ open: accountOpen }"
+              :aria-expanded="accountOpen"
+              aria-haspopup="menu"
+              title="账号与登录状态"
+              @click="toggleAccount"
+            >
+              <span class="account-avatar">A</span>
+              <span class="account-user">admin</span>
+              <span class="account-chevron" aria-hidden="true">{{ accountOpen ? "▴" : "▾" }}</span>
+            </button>
+            <Teleport to="body">
+              <div
+                v-if="accountOpen"
+                class="account-dropdown"
+                :style="{ position: 'fixed', top: accountTop + 'px', right: accountRight + 'px' }"
+              >
+                <div class="account-head">
+                  <span class="account-head-name">admin</span>
+                  <span class="account-head-desc">已登录服务器账号</span>
+                </div>
+                <button type="button" class="account-item" @click="openAiConfig">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M1.5 8V4.8A1.3 1.3 0 0 1 2.8 3.5h10.4a1.3 1.3 0 0 1 1.3 1.3V8M1.5 8V11.2a1.3 1.3 0 0 0 1.3 1.3h10.4a1.3 1.3 0 0 0 1.3-1.3V8M1.5 8h13" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+                  </svg>
+                  <span>账号与配置</span>
+                </button>
+                <div class="account-sep" />
+                <button type="button" class="account-item account-item-danger" @click="handleAccountLogout">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M6 2.5H3.8A1.3 1.3 0 0 0 2.5 3.8v8.4a1.3 1.3 0 0 0 1.3 1.3H6M10.5 5.5 13 8l-2.5 2.5M13 8H6.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                  <span>退出登录</span>
+                </button>
+              </div>
+            </Teleport>
+          </div>
         </template>
         <template v-else>
           <button type="button" class="ghost small" @click="router.push('/login')">登录</button>
@@ -268,12 +313,49 @@ const isDev = import.meta.env.DEV;
 
 const isWeb = !isTauriEnv();
 const accountLoggedIn = ref(isServerLoggedIn());
+const accountOpen = ref(false);
+const accountRef = ref<HTMLElement | null>(null);
+const accountTop = ref(0);
+const accountRight = ref(0);
+
+function toggleAccount() {
+  accountOpen.value = !accountOpen.value;
+  if (accountOpen.value) nextTick(updateAccountPosition);
+}
+
+function updateAccountPosition() {
+  if (accountRef.value) {
+    const rect = accountRef.value.getBoundingClientRect();
+    accountTop.value = rect.bottom + 4;
+    accountRight.value = window.innerWidth - rect.right;
+  }
+}
+
+function handleAccountOutsideClick(e: MouseEvent) {
+  if (!accountOpen.value) return;
+  const el = accountRef.value;
+  if (el && !el.contains(e.target as Node)) accountOpen.value = false;
+}
+
+function openAiConfig() {
+  accountOpen.value = false;
+  router.push("/ai-config");
+}
 
 async function handleAccountLogout() {
+  accountOpen.value = false;
   await serverLogout();
   accountLoggedIn.value = false;
   router.push("/login");
 }
+
+watch(accountOpen, (open) => {
+  if (open) {
+    document.addEventListener("mousedown", handleAccountOutsideClick, true);
+  } else {
+    document.removeEventListener("mousedown", handleAccountOutsideClick, true);
+  }
+});
 
 const emit = defineEmits<{
   (e: "update:projectPath", value: string): void;
@@ -329,13 +411,13 @@ const currentFolderName = computed(() => {
 });
 
 const dropdownTop = ref(0);
-const dropdownRight = ref(0);
+const dropdownLeft = ref(0);
 
 function updateDropdownPosition() {
   if (projectHistoryRef.value) {
     const rect = projectHistoryRef.value.getBoundingClientRect();
     dropdownTop.value = rect.bottom + 4;
-    dropdownRight.value = window.innerWidth - rect.right;
+    dropdownLeft.value = rect.left;
   }
 }
 
@@ -597,8 +679,8 @@ function refreshProjectHistoryList() {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: min(260px, 28vw);
-  min-width: 148px;
+  max-width: min(340px, 34vw);
+  min-width: 0;
   height: 32px;
   padding: 0 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -661,18 +743,6 @@ function refreshProjectHistoryList() {
   font-size: 9px;
   color: rgba(255, 255, 255, 0.45);
   transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.path-current {
-  flex: 1;
-  min-width: 0;
-  max-width: 220px;
-  padding: 0 10px;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.72);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .project-history-footer {
@@ -1140,6 +1210,126 @@ function refreshProjectHistoryList() {
   flex-shrink: 0;
 }
 
+.account-wrap {
+  position: relative;
+}
+
+.account-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.account-trigger:hover:not(:disabled),
+.account-trigger.open {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.account-avatar {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: rgba(31, 111, 235, 0.22);
+  color: #79c0ff;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.account-user {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.account-chevron {
+  flex-shrink: 0;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.account-dropdown {
+  min-width: 200px;
+  background: rgba(22, 27, 40, 0.98);
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.2);
+  z-index: 1000;
+  margin-top: 4px;
+  padding: 6px;
+  animation: dropdown-fade-in 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.account-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.account-head-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.account-head-desc {
+  font-size: 11px;
+  color: rgba(201, 209, 217, 0.7);
+}
+
+.account-item {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.account-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.account-item-danger {
+  color: #ff9a9a;
+}
+
+.account-item-danger:hover {
+  background: rgba(248, 81, 73, 0.14);
+  color: #ff9a9a;
+}
+
+.account-sep {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.06);
+  margin: 4px 6px;
+}
+
 .toolbar-account-user {
   font-size: 12px;
   font-weight: 600;
@@ -1166,8 +1356,8 @@ function refreshProjectHistoryList() {
     display: none;
   }
 
-  .toolbar-project .path-current {
-    max-width: 130px;
+  .project-history-trigger {
+    max-width: 140px;
   }
 
   .project-history-popover {
