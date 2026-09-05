@@ -111,7 +111,9 @@ const isDiverged = computed(() => {
   if (props.trace?.skippedAi) return false;
   const rule = rulePrimary.value;
   const ai = props.trace?.aiPrimary;
-  return Boolean(rule && ai && rule !== ai);
+  if (!rule || !ai) return false;
+  if (ai === "automation") return false;
+  return rule !== ai;
 });
 
 function formatElapsed(ms: number): string {

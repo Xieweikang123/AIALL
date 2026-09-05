@@ -1,7 +1,6 @@
 import {
   isAccuracyConsultativePrompt,
   isAgentStepClarificationPrompt,
-  isAutomationResumePrompt,
   isBehaviorContradictionPrompt,
   isBehaviorPurposePrompt,
   isCodeReviewPrompt,
@@ -59,7 +58,6 @@ export function classifyUserIntentFromRules(input: ResolveUserIntentInput): Reso
   const text = input.prompt.trim();
   const history = input.history;
   const mode = input.mode;
-  const automation = isAutomationResumePrompt(text);
   const uiDefect = isUiDefectReportPrompt(text, input.hasImage);
   const implementFollowUp = isImplementFollowUpRun(text, history, { isAsk: input.isAsk });
   const pendingPlanClarify =
@@ -67,22 +65,20 @@ export function classifyUserIntentFromRules(input: ResolveUserIntentInput): Reso
   const pendingPlanAmend =
     mode === "plan" && !pendingPlanClarify && isPendingPlanAmendPrompt(text, history);
   const consultativeRootAction =
-    !automation && !uiDefect && !implementFollowUp && !pendingPlanAmend && isConsultativeRootAction(text);
+    !uiDefect && !implementFollowUp && !pendingPlanAmend && isConsultativeRootAction(text);
   const consultative =
     pendingPlanClarify ||
     consultativeRootAction ||
-    (!automation && !uiDefect && !implementFollowUp && !pendingPlanAmend && isConsultativeUserPrompt(text, history));
+    (!uiDefect && !implementFollowUp && !pendingPlanAmend && isConsultativeUserPrompt(text, history));
 
   const topic = inferConsultativeTopicFromRules(text, history);
 
   const forceConsultativePrimary = pendingPlanAmend || pendingPlanClarify;
-  const primary: UserIntentPrimary = automation
-    ? "automation"
-    : forceConsultativePrimary
-      ? "consultative"
-      : implementFollowUp || !consultative
-        ? "implement"
-        : "consultative";
+  const primary: UserIntentPrimary = forceConsultativePrimary
+    ? "consultative"
+    : implementFollowUp || !consultative
+      ? "implement"
+      : "consultative";
 
   return {
     primary,
@@ -141,12 +137,12 @@ function buildResolvedFromAi(ai: UserIntentAiPayload, rules: ResolvedUserIntent)
 export function resolveUserIntent(input: ResolveUserIntentInput): ResolvedUserIntent {
   const rules = classifyUserIntentFromRules(input);
 
-  if (isAutomationResumePrompt(input.prompt) || rules.uiDefect) {
+  if (rules.uiDefect) {
     return {
       ...rules,
-      primary: rules.uiDefect ? "implement" : rules.primary,
+      primary: "implement",
       consultative: false,
-      consultativeTopic: rules.uiDefect ? "none" : rules.consultativeTopic,
+      consultativeTopic: "none",
       classificationSource: "rules",
     };
   }
@@ -171,6 +167,6 @@ export function shouldSkipAiIntentClassifier(
   if (opts?.mode === "auto") return false;
   if (rules.pendingPlanAmend || rules.pendingPlanClarify) return true;
   if (isQuotedAmendPrompt(text)) return true;
-  if (rules.primary === "automation" || rules.uiDefect) return true;
+  if (rules.uiDefect) return true;
   return false;
 }

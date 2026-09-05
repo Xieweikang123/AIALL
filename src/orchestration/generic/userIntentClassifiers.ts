@@ -35,14 +35,6 @@ const BEHAVIOR_PURPOSE_PROMPT_RE =
 
 const PRIOR_ENUM_LISTING_RE = PRIOR_DEFINITION_LISTING_RE;
 
-/** System automation / resume markers — must not be classified as user consultative. */
-export const AUTOMATION_PROMPT_RE =
-  /^\s*(?:【|\[)(?:方案执行|精准修改|效率|系统自动续跑|读图完成)/;
-
-export function isAutomationResumePrompt(prompt: string): boolean {
-  return AUTOMATION_PROMPT_RE.test(prompt.trim());
-}
-
 /** Short follow-ups that depend on prior assistant context (e.g. 「需要吗」「还要吧」). */
 export function isShortContextDependentFollowUp(prompt: string): boolean {
   const text = prompt.trim();
@@ -241,7 +233,6 @@ export function isUltraShortOpenTaskPrompt(prompt: string): boolean {
   const text = stripQuotedReplyPrefix(prompt.trim());
   if (!text || text.length > ULTRA_SHORT_OPEN_TASK_MAX_LEN) return false;
   if (/[？?]$/.test(text)) return false;
-  if (AUTOMATION_PROMPT_RE.test(text)) return false;
   if (isCodeReviewPrompt(text)) return false;
   if (isShortImplementPrompt(text)) return false;
   if (FILE_PATH_IN_PROMPT_RE.test(text)) return false;
@@ -404,7 +395,6 @@ export function isBehaviorPurposePrompt(
 ): boolean {
   const text = stripQuotedReplyPrefix(prompt.trim());
   if (!text) return false;
-  if (AUTOMATION_PROMPT_RE.test(text)) return false;
   if (IMPLEMENT_INTENT_RE.test(text) && !BEHAVIOR_PURPOSE_PROMPT_RE.test(text)) return false;
   if (BEHAVIOR_PURPOSE_PROMPT_RE.test(text)) return true;
 
@@ -440,7 +430,6 @@ export function isConsultativeUserPrompt(
 ): boolean {
   const text = prompt.trim();
   if (!text) return false;
-  if (AUTOMATION_PROMPT_RE.test(text)) return false;
   if (isUiDefectReportPrompt(text)) return false;
   if (isAgentStepClarificationPrompt(text)) return false;
   if (isImplementationFailureReportPrompt(text)) return false;
