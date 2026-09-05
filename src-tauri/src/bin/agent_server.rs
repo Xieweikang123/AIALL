@@ -32,7 +32,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock as StdRwLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{tcp::OwnedWriteHalf, TcpListener, TcpStream};
 use tokio::sync::RwLock;
@@ -45,31 +45,90 @@ struct RunCancelState {
 /// 登录会话：token → 过期时刻。
 #[derive(Default)]
 struct SessionStore {
-    sessions: Mutex<HashMap<String, Instant>>,
+    sessions: Mutex<HashMap<String, u64>>,
 }
 
 const SESSION_TTL: Duration = Duration::from_secs(12 * 3600);
+
+fn server_sessions_path() -> std::path::PathBuf {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map(|home| {
+            std::path::Path::new(&home)
+                .join(".config")
+                .join("aiall")
+                .join("server-sessions.json")
+        })
+        .unwrap_or_else(|_| std::path::PathBuf::from("server-sessions.json"))
+}
+
+fn now_unix_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
 
 impl SessionStore {
     fn issue(&self) -> String {
         let mut bytes = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut bytes);
         let token = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+        let expires_at = now_unix_secs() + SESSION_TTL.as_secs();
         let mut guard = self.sessions.lock().unwrap();
-        guard.retain(|_, exp| *exp > Instant::now());
-        guard.insert(token.clone(), Instant::now() + SESSION_TTL);
+        guard.retain(|_, exp| *exp > now_unix_secs());
+        guard.insert(token.clone(), expires_at);
+        drop(guard);
+        self.persist();
         token
     }
 
     fn valid(&self, token: &str) -> bool {
         let mut guard = self.sessions.lock().unwrap();
-        guard.retain(|_, exp| *exp > Instant::now());
+        guard.retain(|_, exp| *exp > now_unix_secs());
         guard.contains_key(token)
     }
 
     fn revoke(&self, token: &str) {
         if let Ok(mut guard) = self.sessions.lock() {
             guard.remove(token);
+        }
+        self.persist();
+    }
+
+    /// 把当前 session 表写盘，重启后恢复。
+    fn persist(&self) {
+        let path = server_sessions_path();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let guard = self.sessions.lock().unwrap();
+        let map: std::collections::HashMap<String, u64> = guard
+            .iter()
+            .filter(|(_, exp)| **exp > now_unix_secs())
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
+        drop(guard);
+        if let Ok(text) = serde_json::to_string(&map) {
+            let _ = std::fs::write(&path, text);
+        }
+    }
+
+    /// 启动时从磁盘恢复未过期的 session。
+    fn load_from_disk(&self) {
+        let path = server_sessions_path();
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            return;
+        };
+        let Ok(map) = serde_json::from_str::<std::collections::HashMap<String, u64>>(&text) else {
+            return;
+        };
+        let now = now_unix_secs();
+        let mut guard = self.sessions.lock().unwrap();
+        for (token, exp) in map {
+            if exp > now {
+                guard.insert(token, exp);
+            }
         }
     }
 }
@@ -342,6 +401,11 @@ fn cancel_state_clear(state: &RunCancelState) {
     }
 }
 
+/// 日志用：请求最终生效的 endpoint（key 永不入日志）。
+fn request_effective_endpoint(request: &AgentRunRequest) -> &str {
+    request.effective_endpoint()
+}
+
 async fn handle_healthz(w: &mut OwnedWriteHalf) -> Result<(), String> {
     write_headers(w, "200 OK", "text/plain", &[]).await?;
     w.write_all(b"ok").await.map_err(|e| e.to_string())
@@ -385,7 +449,7 @@ async fn handle_agent_run(
             return Ok(());
         }
     };
-    // 服务端模式：浏览器不传明文 key / endpoint / model 时，用服务端配置补齐。
+    // 服务端模式：服务端配置为唯一真相源，覆盖浏览器传来的 endpoint / key / model。
     let ai = config.ai.read().await.clone();
     if let Some(ai) = ai.as_ref() {
         request.apply_server_ai(
@@ -396,7 +460,12 @@ async fn handle_agent_run(
         );
     }
     let project_path = request.project_path().to_string();
-    println!("[agent-server] run: project={project_path}");
+    println!(
+        "[agent-server] run: project={project_path} endpoint={} model={} model_source={}",
+        request_effective_endpoint(&request),
+        request.effective_model(),
+        if ai.is_some() { "server" } else { "request" },
+    );
     if project_path.trim().is_empty() {
         write_headers(w, "400 Bad Request", "text/plain", &[]).await?;
         return w
@@ -440,30 +509,38 @@ async fn handle_agent_run(
     };
 
     println!("[agent-server] calling agent_run_headless");
-    let run_result = agent_run_headless(request, on_event, cancel_flag.clone()).await;
-    println!("[agent-server] agent_run_headless done: {:?}", run_result.is_err());
-    if let Err(e) = &run_result {
-        let _ = tx.send(json!({ "type": "error", "data": { "message": e } }));
-    }
+    // Agent 在后台任务里跑，主 task 立即进入 SSE 写入循环：
+    // 事件边产生边推给浏览器，实现真正的流式实时回复。
+    let run_cancel = cancel_flag.clone();
+    let run_task = tokio::spawn(async move {
+        agent_run_headless(request, on_event, run_cancel).await
+    });
+    // 主 task 不再持有 sender，channel 由 run task 的闭包独占；
+    // run task 结束时闭包 drop，channel 关闭，下面的循环自然结束。
     drop(tx);
 
-    let mut failed = false;
     while let Some(event) = rx.recv().await {
         let line = serde_json::to_string(&event).map_err(|e| e.to_string())?;
         let payload = format!("data: {line}\n\n");
         if let Err(e) = w.write_all(payload.as_bytes()).await {
             cancel_flag.store(true, Ordering::Relaxed);
-            failed = true;
             return Err(format!("写 SSE 失败: {e}"));
         }
         if let Err(e) = w.flush().await {
             cancel_flag.store(true, Ordering::Relaxed);
-            failed = true;
             return Err(format!("刷 SSE 失败: {e}"));
         }
     }
 
-    if !failed {
+    // Agent 跑完，channel 关闭，循环结束；把运行错误（如有）作为最后一个事件写出。
+    let run_result = run_task.await.map_err(|e| format!("Agent 任务异常: {e}"))?;
+    if let Err(e) = &run_result {
+        let payload = format!(
+            "data: {}\n\n",
+            serde_json::to_string(&json!({ "type": "error", "data": { "message": e } }))
+                .unwrap_or_default()
+        );
+        let _ = w.write_all(payload.as_bytes()).await;
         let _ = w.flush().await;
     }
     cancel_state_clear(state);
@@ -870,6 +947,7 @@ async fn main() {
     };
     let state = Arc::new(RunCancelState::default());
     let sessions = Arc::new(SessionStore::default());
+    sessions.load_from_disk();
 
     let listener = match TcpListener::bind((bind.as_str(), port)).await {
         Ok(l) => l,

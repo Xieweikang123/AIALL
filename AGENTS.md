@@ -1,3 +1,8 @@
+# 当前讨论范围
+
+- 默认讨论 **Web 端**（`npm run dev:web` / `start-web.bat` 场景，agent-server 是唯一真相源）
+- 除非明确说"桌面版/Tauri"，否则都按 web 端理解
+
 # 产品北极星（最核心）
 
 AIALL 要做 **Cursor 类通用编程助手**：会查仓库、会改、会验——不是堆个案修法口令的专用脚本。
@@ -98,6 +103,7 @@ Web 模式（`npm run dev:web` / `start-web.bat`）是正式使用场景，用�
 | **路径持久化存全路径** | localStorage 里存的必须是全路径。`showDirectoryPicker` 选完后如果拿不到全路径，不存 |
 | **刷新后恢复** | 页面 reload 时，存的路径含路径分隔符（`/` 或 `\`）才自动打开；纯文件夹名跳过，让用户手动输路径或重新选择 |
 | **agent-server 是前置条件** | `start-web.bat` 必须先启动 agent-server，web UI 才能工作。`webProjectHandle` 是内存变量，刷新即丢失 |
+| **默认单用户** | web 模式默认只有一个用户（admin）。会话/项目状态（`chat-store`、`.aiall/`）按 `projectPath` 隔离即可，**不做用户维度隔离**。若未来 agent-server 被多人访问，再按用户分目录 |
 
 **代码约束**：
 - `pickProjectFolder()` — web 模式返回 `cancelled: true`，不走 `showDirectoryPicker`
@@ -173,6 +179,7 @@ AIALL 的 Vibe 会话文件**不在项目目录内**，存储在 AppData Roaming
 
 - 涉及代码实现的断言，必须先 read/grep 验证，禁止凭印象作答
 - 不确定时明确说"不确定"，不要用肯定语气包装猜测
+- **功能有无的断言，必须先搜前端组件层**：涉及"某功能是否已实现/可用"，不能只看服务层（`services/`、`http_routes.rs`）或后端降级信号（如 `pick-folder` → cancelled）。必须先 `glob`/`grep` 前端组件（`src/components/**`、`src/views/**`）确认有没有对应 UI，再下结论。后端降级 ≠ 前端没做替代实现。下结论前自问：**"如果这功能已做了，我搜的路径能搜到吗？"** 搜不到说明搜索面不够，不是功能不存在
 
 ## 事件竞态调试准则
 

@@ -170,3 +170,34 @@ pub async fn debug_log_write(label: String, data: Option<String>) -> Value {
         Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }),
     }
 }
+
+#[tauri::command]
+pub async fn project_history_list() -> Value {
+    let entries = crate::project_history::list_project_history();
+    let items: Vec<Value> = entries.iter().map(crate::project_history::entry_to_json).collect();
+    serde_json::json!({ "ok": true, "entries": items })
+}
+
+#[tauri::command]
+pub async fn project_history_add(path: String) -> Value {
+    match crate::project_history::add_project_to_history(&path) {
+        Ok(_) => serde_json::json!({ "ok": true }),
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
+    }
+}
+
+#[tauri::command]
+pub async fn project_history_remove(path: String) -> Value {
+    match crate::project_history::remove_project_from_history(&path) {
+        Ok(_) => serde_json::json!({ "ok": true }),
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
+    }
+}
+
+#[tauri::command]
+pub async fn project_history_clear() -> Value {
+    match crate::project_history::clear_project_history() {
+        Ok(_) => serde_json::json!({ "ok": true }),
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
+    }
+}

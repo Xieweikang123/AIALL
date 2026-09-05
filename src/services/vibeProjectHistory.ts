@@ -1,5 +1,5 @@
-import { lsGet, lsSetJson } from "../utils/localStorageSafe";
-import { normalizeProjectPath } from "../utils/normalizePath";
+import { backendUrl } from "./backendBase";
+import { invokeBackend } from "./tauriInvoke";
 
 export type ProjectHistoryEntry = {
   path: string;
@@ -7,93 +7,80 @@ export type ProjectHistoryEntry = {
   lastOpenedAt: string;
 };
 
-const STORAGE_KEY = "vibe-coding-project-history";
-const STORE_VERSION = 1;
-const MAX_ENTRIES = 50;
+type HistoryListPayload = { ok?: boolean; entries?: ProjectHistoryEntry[]; error?: string };
+type HistoryActionPayload = { ok?: boolean; error?: string };
 
-type ProjectHistoryStore = {
-  version: typeof STORE_VERSION;
-  entries: ProjectHistoryEntry[];
-};
-
-function normalizePathKey(path: string): string {
-  return normalizeProjectPath(path);
+/** 列出最近打开的项目（按最近打开时间排序）。桌面走 Tauri command，web 走 agent-server。 */
+export async function listProjectHistory(): Promise<ProjectHistoryEntry[]> {
+  const data = await invokeBackend<HistoryListPayload>(
+    "project_history_list",
+    {},
+    async () => {
+      const res = await fetch(backendUrl("/backend/vibe/project-history"), {
+        method: "GET",
+      });
+      return readJsonResponse<HistoryListPayload>(res);
+    },
+  );
+  if (data && Array.isArray(data.entries)) return data.entries;
+  if (data?.error) throw new Error(data.error);
+  return [];
 }
 
-function displayNameFromPath(path: string): string {
-  const normalized = path.trim().replace(/\\/g, "/").replace(/\/$/, "");
-  const parts = normalized.split("/");
-  return parts[parts.length - 1] || normalized;
-}
-
-function readStore(): ProjectHistoryStore {
-  const raw = lsGet(STORAGE_KEY);
-  if (!raw) return { version: STORE_VERSION, entries: [] };
-  try {
-    const parsed = JSON.parse(raw) as Partial<ProjectHistoryStore>;
-    if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.entries)) {
-      return { version: STORE_VERSION, entries: [] };
-    }
-    return {
-      version: STORE_VERSION,
-      entries: parsed.entries.filter(
-        (e): e is ProjectHistoryEntry =>
-          Boolean(e) &&
-          typeof e.path === "string" &&
-          e.path.trim().length > 0 &&
-          typeof e.lastOpenedAt === "string",
-      ),
-    };
-  } catch {
-    return { version: STORE_VERSION, entries: [] };
-  }
-}
-
-function writeStore(store: ProjectHistoryStore) {
-  lsSetJson(STORAGE_KEY, store);
-}
-
-export function listProjectHistory(): ProjectHistoryEntry[] {
-  return readStore().entries;
-}
-
-export function addProjectToHistory(path: string) {
+/** 打开项目时记录历史（去重并置顶）。 */
+export async function addProjectToHistory(path: string): Promise<void> {
   const trimmed = path.trim();
   if (!trimmed) return;
-
-  const key = normalizePathKey(trimmed);
-  if (!key) return;
-
-  const store = readStore();
-  const now = new Date().toISOString();
-  const displayName = displayNameFromPath(trimmed);
-  const existing = store.entries.find((e) => normalizePathKey(e.path) === key);
-
-  if (existing) {
-    existing.path = trimmed;
-    existing.displayName = displayName;
-    existing.lastOpenedAt = now;
-    store.entries = [existing, ...store.entries.filter((e) => normalizePathKey(e.path) !== key)];
-  } else {
-    store.entries.unshift({ path: trimmed, displayName, lastOpenedAt: now });
-  }
-
-  if (store.entries.length > MAX_ENTRIES) {
-    store.entries = store.entries.slice(0, MAX_ENTRIES);
-  }
-
-  writeStore(store);
+  await invokeBackend<HistoryActionPayload>(
+    "project_history_add",
+    { path: trimmed },
+    async () => {
+      const res = await fetch(backendUrl("/backend/vibe/project-history/add"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: trimmed }),
+      });
+      return readJsonResponse<HistoryActionPayload>(res);
+    },
+  );
 }
 
-export function removeProjectFromHistory(path: string) {
-  const key = normalizePathKey(path);
-  if (!key) return;
-
-  const store = readStore();
-  store.entries = store.entries.filter((e) => normalizePathKey(e.path) !== key);
-  writeStore(store);
+/** 从历史中移除单个项目。 */
+export async function removeProjectFromHistory(path: string): Promise<void> {
+  const trimmed = path.trim();
+  if (!trimmed) return;
+  await invokeBackend<HistoryActionPayload>(
+    "project_history_remove",
+    { path: trimmed },
+    async () => {
+      const res = await fetch(backendUrl("/backend/vibe/project-history/remove"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: trimmed }),
+      });
+      return readJsonResponse<HistoryActionPayload>(res);
+    },
+  );
 }
 
-export function clearProjectHistory() {
-  writeStore({ version: STORE_VERSION, entries: [] });
+/** 清空项目历史。 */
+export async function clearProjectHistory(): Promise<void> {
+  await invokeBackend<HistoryActionPayload>(
+    "project_history_clear",
+    {},
+    async () => {
+      const res = await fetch(backendUrl("/backend/vibe/project-history/clear"), {
+        method: "POST",
+      });
+      return readJsonResponse<HistoryActionPayload>(res);
+    },
+  );
+}
+
+async function readJsonResponse<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(text || `请求失败 (${response.status})`);
+  }
+  return (await response.json()) as T;
 }

@@ -820,6 +820,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       if (m.role !== "assistant") continue;
       const reason = m.agentFailureReason || m.agentAbortReason || "";
       if (!isHmrInterruptReason(reason) || !canResumeAgentRun(m)) continue;
+      if (!hasRecoverableAgentProgress(m)) continue;
       clearPendingAgentRun();
       void resumeAgentRun(m.id, { silent: true });
       return;
@@ -837,7 +838,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     // HMR 中断的续跑优先复用原 assistant 消息，避免新建空壳气泡
     if (pending.assistantMsgId) {
       const target = chatMessages.value.find((m) => m.id === pending.assistantMsgId);
-      if (target?.role === "assistant") {
+      if (target?.role === "assistant" && hasRecoverableAgentProgress(target)) {
         clearPendingAgentRun();
         chatError.value = "检测到之前因页面刷新中断的 Agent 运行，正在恢复…";
         void resumeAgentRun(target.id, { silent: true });

@@ -151,7 +151,7 @@
 | 认证 | `AIALL_SERVER_TOKEN` 非空时，`/api/agent/*`、`/backend/*`、`/api/server/*` 全部强制 `Bearer`（静态 token 或 session）；`/healthz` 匿名 |
 | 路径沙箱 | `AIALL_SERVER_ALLOWED_PROJECTS` 非空时，`http_routes::enforce_path_sandbox` 对每个带绝对路径参数（path/projectPath/projectRoot/from/to）的 `/backend/vibe/*` 与 `/api/agent/run` 校验白名单 |
 | 命令白名单 | `AIALL_SERVER_RESTRICT_COMMANDS=1` 启用 `server_mode_command_blocked`（`tool_exec.rs`） |
-| 服务端 AI key | `AIALL_SERVER_AI_ENDPOINT/MODEL/KEY/PROXY` 或 `~/.config/aiall/server-config.json`；agent-run 与 `/backend/ai/*` 在请求体 apiKey 为空时由服务端注入 |
+| 服务端 AI key | `AIALL_SERVER_AI_ENDPOINT/MODEL/KEY/PROXY` 或 `~/.config/aiall/server-config.json`；**服务端配置是唯一真相源**：agent-run 在服务端配置完整（endpoint+key 齐全）时整体覆盖浏览器传来的 endpoint/apiKey/model（`apply_server_ai`），配置不完整时不动请求；`/backend/ai/*`、`git/generate-message`、`git/ai-batch-groups` 在浏览器 endpoint 与服务端不一致且未带 key 时不注入 key（防串 key） |
 
 ### 3.4 前端直接 `tauriInvoke`、无 HTTP fallback 的调用点（= 任务 A 清单）
 

@@ -230,21 +230,14 @@ function sourceProcessItems(items: InlineFeedItem[]): InlineFeedItem[] {
 function mergeInlineToolBatches(source: Array<InlineFeedProcessItem | InlineFeedItem>): DisplayItem[] {
   const merged: DisplayItem[] = [];
   let toolBatch: AgentRoundTool[] = [];
-  let hasSeenText = false;
-  const deferred: DisplayItem[] = [];
 
   const flushTools = () => {
     if (!toolBatch.length) return;
-    const batch: DisplayItem = {
+    merged.push({
       kind: "tool-batch",
       key: `tools-${toolBatch[0]?.id}-${toolBatch.length}`,
       steps: toolBatch,
-    };
-    if (hasSeenText) {
-      merged.push(batch);
-    } else {
-      deferred.push(batch);
-    }
+    });
     toolBatch = [];
   };
 
@@ -258,19 +251,9 @@ function mergeInlineToolBatches(source: Array<InlineFeedProcessItem | InlineFeed
       merged.push({ kind: "collapsed", key: item.key, summary: item.summary, items: item.items });
       continue;
     }
-    // First text item — flush deferred tool batches AFTER it,
-    // so reading order is: text first, then supporting tool details.
-    if (!hasSeenText) {
-      hasSeenText = true;
-      merged.push(item, ...deferred);
-      deferred.length = 0;
-    } else {
-      merged.push(item);
-    }
+    merged.push(item);
   }
   flushTools();
-  // Remaining deferred batches (no text at all) go to end
-  merged.push(...deferred);
   return merged;
 }
 

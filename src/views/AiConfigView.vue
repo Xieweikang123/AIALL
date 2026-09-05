@@ -91,20 +91,23 @@
       <!-- 服务器连接条：web/服务器模式下登录入口与状态（配置在下方表单，保存时同步到服务端） -->
       <div v-if="!isDesktopRuntime" class="server-strip">
         <template v-if="serverLoggedIn">
-          <span class="server-strip-status ok">🖥️ 已连接服务器（admin）</span>
-          <span class="server-strip-note">{{ serverCfgNote }}</span>
-          <button type="button" class="link" @click="handleServerLogout">退出登录</button>
-          <button type="button" class="link" @click="showChangePassword = !showChangePassword">
-            {{ showChangePassword ? "取消改密" : "修改密码" }}
-          </button>
+          <div class="server-strip-main">
+            <span class="server-strip-status ok"><span class="status-dot"></span>已连接服务器（admin）</span>
+            <span class="server-strip-actions">
+              <button type="button" class="link" @click="handleServerLogout">退出登录</button>
+              <button type="button" class="link" @click="showChangePassword = !showChangePassword">
+                {{ showChangePassword ? "取消改密" : "修改密码" }}
+              </button>
+            </span>
+          </div>
+          <div class="server-strip-note">{{ serverCfgNote }}</div>
         </template>
         <template v-else>
           <span class="server-strip-label">🖥️ 服务器模式</span>
           <input
             v-model="serverLoginUsername"
             type="text"
-            class="server-strip-token"
-            style="width: 110px"
+            class="server-strip-token small"
             placeholder="账号"
           />
           <input
@@ -137,33 +140,36 @@
         <span v-if="changeOk" class="server-strip-status ok">{{ changeOk }}</span>
       </div>
 
-      <!-- 供应商切换条：点击即编辑并设为默认（自动保存） -->
-      <div class="provider-bar" role="tablist" aria-label="模型供应商列表">
-        <button
-          v-for="provider in providers"
-          :key="provider.id"
-          type="button"
-          class="provider-chip"
-          :class="{ active: editingProviderId === provider.id, default: activeProviderId === provider.id }"
-          role="tab"
-          :aria-selected="editingProviderId === provider.id"
-          @click="selectProvider(provider.id)"
-        >
-          <span class="provider-chip-name">{{ provider.name || "未命名" }}</span>
-          <span v-if="activeProviderId === provider.id" class="provider-default-badge">默认</span>
-        </button>
-        <button type="button" class="provider-add" @click="addProvider">+ 添加供应商</button>
-      </div>
-
-      <div class="provider-actions">
-        <button
-          type="button"
-          class="secondary danger outline"
-          :disabled="providers.length <= 1"
-          @click="removeProvider(editingProviderId)"
-        >
-          🗑️ 删除此供应商
-        </button>
+      <!-- 供应商切换：点击即编辑并设为默认（自动保存） -->
+      <div class="provider-section">
+        <div class="provider-section-head">
+          <span class="provider-section-label">当前供应商<em> · 点击切换并设为默认</em></span>
+          <button
+            type="button"
+            class="link danger-text"
+            :disabled="providers.length <= 1"
+            title="删除当前编辑的供应商"
+            @click="removeProvider(editingProviderId)"
+          >
+            删除此供应商
+          </button>
+        </div>
+        <div class="provider-bar" role="tablist" aria-label="模型供应商列表">
+          <button
+            v-for="provider in providers"
+            :key="provider.id"
+            type="button"
+            class="provider-chip"
+            :class="{ active: editingProviderId === provider.id, default: activeProviderId === provider.id }"
+            role="tab"
+            :aria-selected="editingProviderId === provider.id"
+            @click="selectProvider(provider.id)"
+          >
+            <span class="provider-chip-name">{{ provider.name || "未命名" }}</span>
+            <span v-if="activeProviderId === provider.id" class="provider-default-badge">默认</span>
+          </button>
+          <button type="button" class="provider-add" @click="addProvider">+ 添加供应商</button>
+        </div>
       </div>
 
       <div class="config-form grid-2">
@@ -1565,18 +1571,48 @@ onBeforeUnmount(() => {
 .server-strip {
   display: flex;
   align-items: center;
+  gap: 8px 10px;
+  row-gap: 6px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(130, 80, 223, 0.18);
+  background: rgba(130, 80, 223, 0.06);
+  font-size: 12px;
+  line-height: 1.6;
+  min-width: 0;
+}
+.server-strip-main {
+  display: flex;
+  align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  padding: 8px 12px;
-  margin-bottom: 14px;
-  border-radius: 8px;
-  border: 1px solid rgba(130, 80, 223, 0.25);
-  background: rgba(130, 80, 223, 0.08);
-  font-size: 12px;
+  flex: 1 1 100%;
+  width: 100%;
+  min-width: 0;
+}
+.server-strip-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
 }
 .server-strip-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   color: #3fb950;
-  font-weight: 500;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #3fb950;
+  box-shadow: 0 0 0 3px rgba(63, 185, 80, 0.18);
+  flex-shrink: 0;
 }
 .server-strip-label {
   color: #8250df;
@@ -1584,8 +1620,10 @@ onBeforeUnmount(() => {
 }
 .server-strip-note {
   color: var(--muted, rgba(255, 255, 255, 0.7));
-  flex: 1;
-  min-width: 160px;
+  flex: 1 1 100%;
+  width: 100%;
+  min-width: 0;
+  font-size: 12px;
 }
 .server-strip-token {
   padding: 6px 10px;
@@ -1594,8 +1632,16 @@ onBeforeUnmount(() => {
   background: rgba(2, 6, 23, 0.5);
   color: var(--text, rgba(255, 255, 255, 0.92));
   outline: none;
-  width: 260px;
+  flex: 1 1 160px;
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
   font-size: 12px;
+}
+.server-strip-token.small {
+  flex: 0 1 110px;
+  width: 110px;
+  min-width: 0;
 }
 .server-strip-error {
   color: #f85149;
@@ -1667,6 +1713,15 @@ onBeforeUnmount(() => {
   margin: 0 auto;
   padding: 22px 18px 40px;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+  min-width: 0;
+  overflow-x: clip;
+}
+
+.ai-config-page,
+.ai-config-page *,
+.ai-config-page *::before,
+.ai-config-page *::after {
+  box-sizing: border-box;
 }
 
 .page-head {
@@ -1851,12 +1906,16 @@ button.primary {
   border-radius: 12px;
   background: rgba(17, 24, 39, 0.45);
   backdrop-filter: blur(8px);
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .tab {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
   border: 1px solid transparent;
   background: transparent;
   color: var(--muted);
@@ -1897,6 +1956,7 @@ button.primary {
   border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
   border-radius: 14px;
   padding: 22px;
+  min-width: 0;
   background: rgba(17, 24, 39, 0.65);
   backdrop-filter: blur(12px);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25), 0 1px 3px rgba(0, 0, 0, 0.15);
@@ -1916,6 +1976,11 @@ button.primary {
   gap: 16px;
   margin-bottom: 16px;
   flex-wrap: wrap;
+  min-width: 0;
+}
+
+.card-header-row > div {
+  min-width: 0;
 }
 
 .card-title {
@@ -1929,7 +1994,42 @@ button.primary {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 12px;
+  margin-bottom: 0;
+}
+.provider-section {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 12px;
+  margin-bottom: 16px;
+  min-width: 0;
+}
+.provider-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.provider-section-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: var(--muted);
+}
+.provider-section-label em {
+  font-style: normal;
+  font-weight: 400;
+  color: var(--subtle);
+}
+.link.danger-text {
+  color: var(--danger, #f85149);
+  font-size: 12px;
+  text-decoration: none;
+}
+.link.danger-text:hover:not(:disabled) {
+  text-decoration: underline;
 }
 
 .provider-chip {
@@ -2007,7 +2107,10 @@ button.primary {
   padding: 7px 30px 7px 14px;
   font-size: 13px;
   font-weight: 500;
-  max-width: 280px;
+  width: auto;
+  max-width: 240px;
+  min-width: 200px;
+  flex: 0 1 auto;
   cursor: pointer;
   appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6l4 4 4-4' stroke='rgba(88,166,255,0.9)' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
@@ -2027,6 +2130,10 @@ button.primary {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  flex: 0 1 auto;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
 }
 
 .preset-select:hover {
@@ -2055,6 +2162,7 @@ button.primary {
 .config-form {
   display: grid;
   gap: 16px;
+  min-width: 0;
 }
 
 .config-form.grid-2 {
@@ -2069,6 +2177,7 @@ button.primary {
 .field {
   display: grid;
   gap: 6px;
+  min-width: 0;
 }
 
 .field > span {
@@ -2128,6 +2237,8 @@ button.primary {
 .field textarea,
 .field select {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 10px 12px;
@@ -2363,10 +2474,12 @@ button.danger:hover:not(:disabled) {
   display: flex;
   gap: 10px;
   align-items: center;
+  min-width: 0;
 }
 
 .inline-test-prompt {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
   background: rgba(2, 6, 23, 0.5);
   color: var(--text, rgba(255, 255, 255, 0.92));
   border: 1px solid var(--border-2, rgba(255, 255, 255, 0.14));
@@ -2500,6 +2613,47 @@ pre {
 @media (max-width: 640px) {
   .page-head {
     flex-direction: column;
+    align-items: stretch;
+  }
+
+  .head-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .card {
+    padding: 16px;
+  }
+
+  .provider-quick-fill {
+    width: 100%;
+    flex: 1 1 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .preset-select {
+    max-width: 100%;
+    min-width: 0;
+    width: 100%;
+    flex: 1 1 100%;
+  }
+
+  .server-strip-actions {
+    margin-left: 0;
+  }
+
+  .provider-section {
+    padding: 10px;
+  }
+
+  .inline-test-input-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .compact-test-btn {
+    width: 100%;
   }
 
   .config-form.grid-2 {

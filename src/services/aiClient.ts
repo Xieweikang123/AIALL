@@ -208,6 +208,9 @@ export function formatAiHttpError(status: number, rawText: string): string {
   if (status === 403) {
     return `${base}\n访问被拒绝：请检查 API Key 权限或模型是否可用。`;
   }
+  if (status === 502 || status === 503 || status === 504) {
+    return `${base}\n模型服务暂时不可用（网关错误），通常稍等片刻重试即可恢复。`;
+  }
   return base;
 }
 

@@ -432,7 +432,7 @@ function toggleProjectHistory() {
     nextTick(updateDropdownPosition);
     nextTick(() => projectSearchInputRef.value?.focus());
   }
-  if (projectHistoryOpen.value) refreshProjectHistoryList();
+  if (projectHistoryOpen.value) void refreshProjectHistoryList();
 }
 
 function closeProjectHistory() {
@@ -491,7 +491,7 @@ function onHistoryOpenChange(open: boolean) {
 watch(projectHistoryOpen, onHistoryOpenChange);
 
 onMounted(() => {
-  refreshProjectHistoryList();
+  void refreshProjectHistoryList();
   document.addEventListener("mousedown", handleOutsideClick, true);
   document.addEventListener("keydown", handleKeydown);
 });
@@ -499,7 +499,7 @@ onMounted(() => {
 watch(
   () => props.projectPath,
   () => {
-    refreshProjectHistoryList();
+    void refreshProjectHistoryList();
   },
 );
 
@@ -524,19 +524,24 @@ function openRecentProject(path: string) {
   emit("open-recent-project", path);
 }
 
-function removeRecentProject(path: string, event?: MouseEvent) {
+async function removeRecentProject(path: string, event?: MouseEvent) {
   event?.stopPropagation();
-  removeProjectFromHistory(path);
-  refreshProjectHistoryList();
+  await removeProjectFromHistory(path);
+  await refreshProjectHistoryList();
 }
 
-function clearRecentProjects() {
-  clearProjectHistory();
-  refreshProjectHistoryList();
+async function clearRecentProjects() {
+  await clearProjectHistory();
+  await refreshProjectHistoryList();
 }
 
-function refreshProjectHistoryList() {
-  const all = listProjectHistory();
+async function refreshProjectHistoryList() {
+  let all: Awaited<ReturnType<typeof listProjectHistory>> = [];
+  try {
+    all = await listProjectHistory();
+  } catch {
+    all = [];
+  }
   // Web 模式：过滤掉不含路径分隔符的短名条目（来自 showDirectoryPicker，不可用）
   if (!isTauriEnv()) {
     projectHistoryList.value = all.filter((e) => /[\\\/]/.test(e.path));

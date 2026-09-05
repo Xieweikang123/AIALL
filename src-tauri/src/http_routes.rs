@@ -27,6 +27,13 @@ pub struct ServerAiConfig {
     pub web_proxy_url: Option<String>,
 }
 
+impl ServerAiConfig {
+    /// 服务端配置是否完整（endpoint + key 齐全才算可用，与 agent-run 的注入门槛一致）。
+    pub fn is_complete(&self) -> bool {
+        !self.endpoint.trim().is_empty() && !self.api_key.trim().is_empty()
+    }
+}
+
 /// 服务端 AI 配置文件路径：`~/.config/aiall/server-config.json`。
 pub fn server_ai_config_path() -> PathBuf {
     std::env::var("HOME")
@@ -313,6 +320,32 @@ where
     events
 }
 
+/// 浏览器带 key（桌面直连场景）优先；否则仅当浏览器 endpoint 与服务端一致或为空时注入服务端 key，
+/// 防止把 A 家的 key 发给 B 家的 endpoint。
+fn resolve_vibe_server_key(
+    body_key: Option<&str>,
+    body_endpoint: &str,
+    server_key: Option<&str>,
+    server_endpoint: Option<&str>,
+) -> Option<String> {
+    if let Some(k) = body_key.filter(|k| !k.is_empty()) {
+        return Some(k.to_string());
+    }
+    let server_key = server_key?;
+    match server_endpoint {
+        Some(ep) if !ep.is_empty() => {
+            let body_ep = body_endpoint.trim();
+            if body_ep.is_empty() || body_ep == ep {
+                Some(server_key.to_string())
+            } else {
+                None
+            }
+        }
+        // 服务端没配 endpoint（仅 key）：维持旧行为兜底注入
+        _ => Some(server_key.to_string()),
+    }
+}
+
 pub async fn handle_backend_vibe(
     method: &str,
     path: &str,
@@ -326,10 +359,12 @@ pub async fn handle_backend_vibe(
     if let Err(resp) = enforce_path_sandbox(&q, &body_value, allowed) {
         return Ok(resp);
     }
-    // 服务端 AI key 兜底：浏览器不传明文 key 时，从服务端配置注入（任务 C）。
+    // 服务端 AI key 注入（agent-server 唯一真相源）：具体路由里校验
+    // 「浏览器传来的 endpoint 与服务端一致或为空」后才注入，防止把 A 家 key 发给 B 家。
     let server_key = server_ai
         .filter(|c| !c.api_key.is_empty())
         .map(|c| c.api_key.clone());
+    let server_endpoint = server_ai.map(|c| c.endpoint.trim().to_string());
     let route = path.strip_prefix("/backend/vibe").unwrap_or(path);
     match (method, route) {
         // ── filesystem ──
@@ -768,7 +803,12 @@ pub async fn handle_backend_vibe(
             let body = parse_body_json(body)?;
             let path = body_str(&body, "path");
             let endpoint = body_str(&body, "endpoint");
-            let api_key = body_opt_str(&body, "apiKey").or_else(|| server_key.clone());
+            let api_key = resolve_vibe_server_key(
+                body_opt_str(&body, "apiKey").as_deref(),
+                &endpoint,
+                server_key.as_deref(),
+                server_endpoint.as_deref(),
+            );
             let model = body_str(&body, "model");
             let events = collect_channel_events(move |channel| {
                 Box::pin(async move {
@@ -782,7 +822,12 @@ pub async fn handle_backend_vibe(
             let body = parse_body_json(body)?;
             let path = body_str(&body, "path");
             let endpoint = body_str(&body, "endpoint");
-            let api_key = body_opt_str(&body, "apiKey").or_else(|| server_key.clone());
+            let api_key = resolve_vibe_server_key(
+                body_opt_str(&body, "apiKey").as_deref(),
+                &endpoint,
+                server_key.as_deref(),
+                server_endpoint.as_deref(),
+            );
             let model = body_str(&body, "model");
             let events = collect_channel_events(move |channel| {
                 Box::pin(async move {
@@ -923,6 +968,36 @@ pub async fn handle_backend_vibe(
         }
         ("POST", "/pick-folder") => Ok(ok_json(json!({ "ok": false, "cancelled": true }))),
 
+        // ── project history: shared with desktop command, stored in aiall data dir ──
+        ("GET", "/project-history") => {
+            let entries = crate::project_history::list_project_history();
+            let items: Vec<Value> = entries
+                .iter()
+                .map(crate::project_history::entry_to_json)
+                .collect();
+            Ok(ok_json(json!({ "ok": true, "entries": items })))
+        }
+        ("POST", "/project-history/add") => {
+            let body = parse_body_json(body)?;
+            let path = body_str(&body, "path");
+            match crate::project_history::add_project_to_history(&path) {
+                Ok(_) => Ok(ok_json(json!({ "ok": true }))),
+                Err(e) => Ok(ok_json(json!({ "ok": false, "error": e }))),
+            }
+        }
+        ("POST", "/project-history/remove") => {
+            let body = parse_body_json(body)?;
+            let path = body_str(&body, "path");
+            match crate::project_history::remove_project_from_history(&path) {
+                Ok(_) => Ok(ok_json(json!({ "ok": true }))),
+                Err(e) => Ok(ok_json(json!({ "ok": false, "error": e }))),
+            }
+        }
+        ("POST", "/project-history/clear") => match crate::project_history::clear_project_history() {
+            Ok(_) => Ok(ok_json(json!({ "ok": true }))),
+            Err(e) => Ok(ok_json(json!({ "ok": false, "error": e }))),
+        },
+
         _ => Ok(error_response(404, "not found")),
     }
 }
@@ -1057,7 +1132,7 @@ mod tests {
     }
 
     #[test]
-    fn handle_other_route_screenshot_page_degrades() {
+    fn handle_other_route_screenshot_page_empty_url_errors() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let resp = rt
             .block_on(handle_other_route("POST", "/backend/web/screenshot-page", "", b"{}", &[], None))
@@ -1065,7 +1140,7 @@ mod tests {
         assert_eq!(resp.status, 200);
         let body: Value = serde_json::from_slice(&resp.body).unwrap();
         assert_eq!(body["ok"], false);
-        assert!(body["error"].as_str().unwrap().contains("不支持"));
+        assert!(body["error"].as_str().unwrap().contains("URL 为空"));
     }
 
     #[test]
@@ -1192,6 +1267,35 @@ mod tests {
             .unwrap();
         assert_eq!(resp.content_type, "text/event-stream");
     }
+
+    #[test]
+    fn resolve_vibe_server_key_matches_endpoint() {
+        // 浏览器 endpoint 与服务端一致 → 注入
+        assert_eq!(
+            resolve_vibe_server_key(None, "https://ai.example/v1", Some("sk-server"), Some("https://ai.example/v1")),
+            Some("sk-server".into())
+        );
+        // 浏览器没传 endpoint → 注入
+        assert_eq!(
+            resolve_vibe_server_key(None, "", Some("sk-server"), Some("https://ai.example/v1")),
+            Some("sk-server".into())
+        );
+        // 浏览器要打别家 endpoint 且没带 key → 不注入（防串 key）
+        assert_eq!(
+            resolve_vibe_server_key(None, "http://localhost:11434/v1", Some("sk-server"), Some("https://ai.example/v1")),
+            None
+        );
+        // 浏览器自带 key（桌面直连）→ 用浏览器的
+        assert_eq!(
+            resolve_vibe_server_key(Some("sk-local"), "http://other/v1", Some("sk-server"), Some("https://ai.example/v1")),
+            Some("sk-local".into())
+        );
+        // 服务端没配 endpoint → 维持兜底注入
+        assert_eq!(
+            resolve_vibe_server_key(None, "http://other/v1", Some("sk-server"), None),
+            Some("sk-server".into())
+        );
+    }
 }
 
 
@@ -1209,7 +1313,8 @@ pub async fn handle_other_route(
     if let Err(resp) = enforce_path_sandbox(&q, &body_value, allowed) {
         return Ok(resp);
     }
-    // 服务端 AI key 兜底：浏览器侧不传明文 key 时，从服务端配置注入。
+    // 服务端 AI 配置为唯一真相源（agent-server）：/backend/ai/* 用请求里的 endpoint 时
+    // 只在请求明确带了 key（本地桌面直连场景）才用请求值；否则一律以服务端配置为准，防止串 key。
     let resolve_key = |body_key: Option<&str>| -> Option<String> {
         body_key
             .filter(|k| !k.is_empty())
@@ -1219,6 +1324,16 @@ pub async fn handle_other_route(
                     .filter(|c| !c.api_key.is_empty())
                     .map(|c| c.api_key.clone())
             })
+    };
+    // 请求体 endpoint 与服务端不一致且未带 key → 用服务端配置整体替换（endpoint/model/key）。
+    let resolve_ai_params = |body_endpoint: &str, body_key: Option<&str>| -> (String, Option<String>) {
+        let body_key = body_key.filter(|k| !k.is_empty());
+        match server_ai {
+            Some(cfg) if cfg.is_complete() && !body_endpoint.trim().is_empty() && body_endpoint.trim() != cfg.endpoint.trim() && body_key.is_none() => {
+                (cfg.endpoint.clone(), Some(cfg.api_key.clone()))
+            }
+            _ => (body_endpoint.to_string(), body_key.map(|k| k.to_string()).or_else(|| resolve_key(None))),
+        }
     };
     match (method, path) {
         ("POST", "/backend/web/extract") => {
@@ -1238,15 +1353,55 @@ pub async fn handle_other_route(
             ]));
         }
         ("POST", "/backend/web/screenshot-page") => {
-            // 服务器无桌面 / 无头浏览器截图能力：明确降级。
-            return Ok(ok_json(json!({ "ok": false, "error": "服务器模式不支持页面截图（需桌面版）" })));
+            // 服务器模式用无头 Chromium 截图（headless_chrome），无需桌面环境。
+            let body = parse_body_json(body)?;
+            let url = body_str(&body, "url");
+            let proxy_url = body_opt_str(&body, "proxyUrl");
+            let headed = body.get("headed").and_then(|v| v.as_bool());
+            let wait_after_goto_ms = body.get("waitAfterGotoMs").and_then(|v| v.as_u64());
+            let navigation_timeout_ms = body.get("navigationTimeoutMs").and_then(|v| v.as_u64());
+            return Ok(ok_value(
+                commands::web::web_screenshot_page(
+                    url,
+                    proxy_url,
+                    headed,
+                    wait_after_goto_ms,
+                    navigation_timeout_ms,
+                )
+                .await,
+            ));
         }
         ("POST", "/backend/ai/test") => {
             let body = parse_body_json(body)?;
-            let endpoint = body_str(&body, "endpoint");
-            let api_key = resolve_key(body_opt_str(&body, "apiKey").as_deref());
+            let body_endpoint = body_str(&body, "endpoint");
+            let (endpoint, api_key) = resolve_ai_params(
+                &body_endpoint,
+                body_opt_str(&body, "apiKey").as_deref(),
+            );
+            // 浏览器只传了 endpoint 没带 key（web 模式常规路径）：model 也以服务端为准
             let mut payload = body.clone();
             if let Some(obj) = payload.as_object_mut() {
+                let uses_server_params = server_ai
+                    .filter(|c| c.is_complete())
+                    .map(|c| {
+                        !body_endpoint.trim().is_empty()
+                            && body_endpoint.trim() == c.endpoint.trim()
+                            && body_opt_str(&body, "apiKey").filter(|k| !k.is_empty()).is_none()
+                    })
+                    .unwrap_or(false);
+                if uses_server_params {
+                    let body_model = body_opt_str(&body, "model").unwrap_or_default();
+                    if let Some(cfg) = server_ai {
+                        if body_model.trim().is_empty() && !cfg.model.trim().is_empty() {
+                            obj.insert("model".into(), json!(cfg.model));
+                        }
+                        if cfg.web_proxy_url.is_some()
+                            && !obj.contains_key("webProxyUrl")
+                        {
+                            obj.insert("webProxyUrl".into(), json!(cfg.web_proxy_url));
+                        }
+                    }
+                }
                 obj.remove("endpoint");
                 obj.remove("apiKey");
             }
@@ -1287,14 +1442,18 @@ pub async fn handle_other_route(
         }
         ("POST", "/backend/ai/models") => {
             let body = parse_body_json(body)?;
-            let endpoint = body_str(&body, "endpoint");
-            let api_key = resolve_key(body_opt_str(&body, "apiKey").as_deref());
+            let (endpoint, api_key) = resolve_ai_params(
+                &body_str(&body, "endpoint"),
+                body_opt_str(&body, "apiKey").as_deref(),
+            );
             return Ok(ai_result_response(commands::ai::ai_models(endpoint, api_key).await));
         }
         ("POST", "/backend/ai/tts") => {
             let body = parse_body_json(body)?;
-            let endpoint = body_str(&body, "endpoint");
-            let api_key = resolve_key(body_opt_str(&body, "apiKey").as_deref());
+            let (endpoint, api_key) = resolve_ai_params(
+                &body_str(&body, "endpoint"),
+                body_opt_str(&body, "apiKey").as_deref(),
+            );
             let mut payload = body.clone();
             if let Some(obj) = payload.as_object_mut() {
                 obj.remove("endpoint");

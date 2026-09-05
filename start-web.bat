@@ -2,9 +2,25 @@
 chcp 65001 >nul
 title AIALL Web Service
 
+REM ---- LAN mode: start-web.bat --lan  (bind 0.0.0.0, accessible from other machines on the LAN) ----
+REM ---- LAN password: shown once by agent-server on first start, see %USERPROFILE%\.config\aiall\server-auth.json ----
+set "LAN_MODE=0"
+if /i "%~1"=="--lan" set "LAN_MODE=1"
+set "AIALL_SERVER_BIND=127.0.0.1"
+set "TAURI_DEV_HOST="
+if "%LAN_MODE%"=="1" (
+  set "AIALL_SERVER_BIND=0.0.0.0"
+  set "TAURI_DEV_HOST=0.0.0.0"
+)
+
 echo ========================================
 echo   AIALL Web Service Starting...
 echo ========================================
+if "%LAN_MODE%"=="1" (
+  echo   Mode: LAN - 0.0.0.0, other machines can access
+) else (
+  echo   Mode: local - 127.0.0.1 only
+)
 
 REM ---- Restart semantics: kill any existing agent-server (8787) / vite (5173) ----
 echo [1/4] Stopping existing agent-server / vite if running ...
@@ -30,7 +46,7 @@ if "%NEED_BUILD%"=="1" (
   goto :skip_build
 )
 
-echo [2/4] Source changed (or first run), building agent-server ...
+echo [2/4] Source changed or first run, building agent-server ...
 cd /d "%~dp0src-tauri"
 REM ---- Ensure cargo is on PATH (rustup installs to %USERPROFILE%\.cargo\bin) ----
 where cargo >nul 2>&1
@@ -54,17 +70,17 @@ cd /d "%~dp0"
 
 :skip_build
 
-REM ---- Start backend agent-server (minimized background window) ----
-echo [3/4] Starting backend agent-server (127.0.0.1:8787) ...
+REM ---- Start backend agent-server (minimized background window; start inherits AIALL_SERVER_BIND) ----
+echo [3/4] Starting backend agent-server on %AIALL_SERVER_BIND%:8787 ...
 start "Agent-Server" /min "%AGENT_EXE%"
 
 REM ---- Optional: cargo watch auto-rebuild (fused) ----
 cargo watch --version >nul 2>&1
 if %errorlevel%==0 (
-  echo [3.5/4] cargo watch found, starting watcher ^(auto rebuild on Rust change^)...
+  echo [3.5/4] cargo watch found, starting watcher - auto rebuild on Rust change
   start "Agent-Watcher" /min "%~dp0scripts\watch-agent.bat"
 ) else (
-  echo [3.5/4] cargo watch not found, skipping auto-rebuild ^(install: cargo install cargo-watch^)
+  echo [3.5/4] cargo watch not found, skipping auto-rebuild - install: cargo install cargo-watch
 )
 
 REM ---- Wait for backend to be ready ----
@@ -72,7 +88,11 @@ echo [3/4] Waiting for backend ...
 timeout /t 2 /nobreak >nul
 
 REM ---- Start frontend dev server ----
-echo [4/4] Starting frontend dev server (http://localhost:5173) ...
+if "%LAN_MODE%"=="1" (
+  echo [4/4] Starting frontend dev server - LAN: other machines use http://THIS_MACHINE_IP:5173
+) else (
+  echo [4/4] Starting frontend dev server - http://localhost:5173
+)
 cd /d "%~dp0"
 npm run dev:web
 

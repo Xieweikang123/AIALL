@@ -107,7 +107,7 @@ import { useGitMultiRepoOverview } from "../composables/git/useGitMultiRepoOverv
 import { fetchGitRepos, type GitRepoInfo } from "../services/vibeGitClient";
 import { openProjectFolderInExplorer } from "../services/vibeCodingClient";
 import { isTauriEnv } from "../services/tauriInvoke";
-import { listProjectHistory } from "../services/vibeProjectHistory";
+import { listProjectHistory, type ProjectHistoryEntry } from "../services/vibeProjectHistory";
 import { lsGet, lsSet } from "../utils/localStorageSafe";
 
 const STORAGE_KEY = "vibe-coding-project";
@@ -120,7 +120,7 @@ const projectPathInput = ref(projectPath.value);
 const gitRepos = ref<GitRepoInfo[]>([]);
 const loadingRepos = ref(false);
 const reposError = ref("");
-const projectHistory = ref(listProjectHistory());
+const projectHistory = ref<ProjectHistoryEntry[]>([]);
 
 const projectOpened = computed(() => Boolean(projectPath.value.trim()));
 
@@ -136,7 +136,13 @@ const behindCount = computed(() => overview.entries.value.filter((e) => e.behind
 const aheadCount = computed(() => overview.entries.value.filter((e) => e.ahead > 0).length);
 
 function refreshHistory() {
-  projectHistory.value = listProjectHistory();
+  void (async () => {
+    try {
+      projectHistory.value = await listProjectHistory();
+    } catch {
+      projectHistory.value = [];
+    }
+  })();
 }
 
 async function loadRepos() {

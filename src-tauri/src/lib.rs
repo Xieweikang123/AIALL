@@ -10,6 +10,7 @@ mod git;
 pub mod http_routes;
 mod paths;
 mod project;
+mod project_history;
 mod web_fetch;
 
 use commands::dev_manage::DevServerState;
@@ -195,6 +196,10 @@ pub fn run() {
             commands::project::code_map_build,
             commands::project::project_symbol_search,
             commands::project::memory_usage,
+            commands::project::project_history_list,
+            commands::project::project_history_add,
+            commands::project::project_history_remove,
+            commands::project::project_history_clear,
             commands::system::system_open_url,
             commands::system::system_open_folder,
             commands::system::system_pick_folder,

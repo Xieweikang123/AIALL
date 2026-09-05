@@ -170,6 +170,57 @@ describe("agentCursorFeed", () => {
     expect(feed[1].kind).toBe("action");
   });
 
+  it("interleaves tools at their recorded narrative offsets (chronological)", () => {
+    const narrative = "第一段叙述。"; // 6 chars
+    const tool = (id: string, detail: string): AgentRoundTool => ({
+      id,
+      turn: 1,
+      name: "grep",
+      icon: "🔍",
+      title: "搜索",
+      detail,
+      label: "搜索",
+      summary: "ok",
+      ok: true,
+      args: { pattern: detail },
+    });
+    const groups: AgentRoundGroupView[] = [{
+      turn: 1,
+      modelSteps: [],
+      toolIds: ["t1", "t2"],
+      narrative,
+      toolNarrativeOffsets: [
+        { toolId: "t1", narrativeChars: 6 },
+        { toolId: "t2", narrativeChars: 0 },
+      ],
+      tools: [tool("t1", "after"), tool("t2", "before")],
+    }];
+
+    const feed = buildCursorAgentFeed({ groups, isRunning: false });
+    const sequence = feed.map((item) => (item.kind === "action" ? item.step.detail : item.kind));
+    // t2 started before any narrative streamed; t1 started after the full narrative.
+    expect(sequence).toEqual(["before", "thought", "after"]);
+  });
+
+  it("falls back to legacy distribution when offsets are missing (older sessions)", () => {
+    const groups: AgentRoundGroupView[] = [{
+      turn: 1,
+      modelSteps: [],
+      toolIds: ["t1", "t2"],
+      narrative: "### 1. 先做 A\n### 2. 再做 B",
+      // No toolNarrativeOffsets — legacy data
+      tools: [
+        { id: "t1", turn: 1, name: "write_file", icon: "✏️", title: "写入", detail: "a.ts", label: "写入", summary: "ok", ok: true },
+        { id: "t2", turn: 1, name: "write_file", icon: "✏️", title: "写入", detail: "b.ts", label: "写入", summary: "ok", ok: true },
+      ],
+    }];
+
+    const feed = buildCursorAgentFeed({ groups, isRunning: false });
+    const sequence = feed.map((item) => (item.kind === "action" ? item.step.detail : item.kind));
+    // Legacy path: heading-boundary segments, each with its tool after it.
+    expect(sequence).toEqual(["thought", "a.ts", "thought", "b.ts"]);
+  });
+
   it("omits any synthetic summary for tool-only turns without narrative", () => {
     const feed = buildCursorAgentFeed({
       groups: [{

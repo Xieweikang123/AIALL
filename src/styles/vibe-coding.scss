@@ -577,6 +577,13 @@ button:hover:not(:disabled) {
   opacity: 0.9;
 }
 
+// 防线：flex 布局的图标按钮若同时定宽/定高又继承默认 padding，内容区可能被挤成 0，
+// svg 会被 flex 压缩到 0 宽导致图标"隐形"（历史 bug：SessionTabsBar 新建会话按钮加号消失）。
+// 图标不应参与 flex 收缩，统一禁止。
+button > svg {
+  flex-shrink: 0;
+}
+
 button.primary {
   background: var(--primary);
   color: #fff;

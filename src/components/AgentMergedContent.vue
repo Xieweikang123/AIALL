@@ -27,12 +27,19 @@
       @open-plan-file="emit('open-plan-file')"
     >
     </AgentCursorTimeline>
+
+    <AgentTracePanel
+      v-if="agentDebugEnabled"
+      :round-groups="roundGroups"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 import AgentCursorTimeline from "./AgentCursorTimeline.vue";
+import AgentTracePanel from "./AgentTracePanel.vue";
+import { agentDebugEnabled } from "../utils/agentDebugFlag";
 import { useStableAgentAnswer } from "../composables/useStableAgentAnswer";
 import { buildInlineAgentFeed } from "../services/agentInlineFeed";
 import type { AgentRoundGroupView, AgentRoundTool } from "../services/agentRoundGroups";

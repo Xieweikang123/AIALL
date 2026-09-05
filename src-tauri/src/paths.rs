@@ -4,6 +4,23 @@ use std::path::{Component, Path, PathBuf};
 
 pub const AIALL_SESSION_LOGICAL_PREFIX: &str = "aiall/vibe-chat-sessions/";
 
+/// App-private data root: `%APPDATA%/aiall` (Windows) or `~/.config/aiall`.
+pub fn resolve_aiall_data_dir() -> PathBuf {
+    if cfg!(windows) {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            return PathBuf::from(appdata).join("aiall");
+        }
+    }
+    dirs_home().join(".config").join("aiall")
+}
+
+/// Project history store: `%APPDATA%/aiall/project-history.json` (Windows)
+/// or `~/.config/aiall/project-history.json`. Shared by desktop Tauri command
+/// and agent-server so web / desktop see the same recent projects.
+pub fn resolve_project_history_path() -> PathBuf {
+    resolve_aiall_data_dir().join("project-history.json")
+}
+
 pub fn resolve_aiall_session_data_dir() -> PathBuf {
     if cfg!(windows) {
         if let Ok(appdata) = std::env::var("APPDATA") {

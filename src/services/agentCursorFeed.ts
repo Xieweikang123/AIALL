@@ -23,6 +23,86 @@ export type CursorFeedBlock =
 
 export type CursorFeedProcessBlock = Exclude<CursorFeedBlock, { kind: "answer" }>;
 
+/**
+ * Reconstruct true chronological interleave: narrative text before each tool's
+ * start goes first, then the tool. Falls back to the legacy distribute
+ * strategy when offsets were never recorded (older sessions / legacy data).
+ */
+function buildChronologicalNarrativeSegments(
+  narrativeText: string,
+  tools: AgentRoundTool[],
+  offsets?: Array<{ toolId: string; narrativeChars: number }>,
+): ReturnType<typeof buildNarrativeSegments> {
+  if (!offsets?.length || !tools.length) {
+    return buildNarrativeSegments(narrativeText, tools);
+  }
+
+  const toolById = new Map(tools.map((tool) => [tool.id, tool]));
+  const known = offsets.filter((entry) => toolById.has(entry.toolId));
+  if (known.length !== tools.length) {
+    return buildNarrativeSegments(narrativeText, tools);
+  }
+
+  const narrativeLen = narrativeText.length;
+  const bounds = [...known]
+    .sort((a, b) => a.narrativeChars - b.narrativeChars)
+    .map((entry) => ({
+      tool: toolById.get(entry.toolId)!,
+      pos: Math.min(Math.max(entry.narrativeChars, 0), narrativeLen),
+    }));
+
+  const segments: Array<{ text: string; tools: AgentRoundTool[] }> = [];
+  let cursor = 0;
+  for (const bound of bounds) {
+    const text = narrativeText.slice(cursor, bound.pos);
+    segments.push({ text, tools: [bound.tool] });
+    cursor = Math.max(cursor, bound.pos);
+  }
+  segments.push({ text: narrativeText.slice(cursor), tools: [] });
+
+  // Multiple tools starting at the same offset keep their original order.
+  const merged: Array<{ text: string; tools: AgentRoundTool[] }> = [];
+  for (const segment of segments) {
+    const last = merged[merged.length - 1];
+    if (last && last.text === segment.text && (last.text === "" || last.tools.length === 0) && segment.tools.length) {
+      last.tools.push(...segment.tools);
+      continue;
+    }
+    merged.push({ ...segment, tools: [...segment.tools] });
+  }
+
+  // Expand each slice through the same split/merge rules as legacy rendering.
+  const expanded: Array<{ text: string; tools: AgentRoundTool[] }> = [];
+  for (const segment of merged) {
+    if (!segment.tools.length || !segment.text.trim()) {
+      expanded.push(segment);
+      continue;
+    }
+    const parts = splitSegmentWithTools(segment.text, segment.tools);
+    expanded.push(...parts);
+  }
+  return expanded.length ? expanded : buildNarrativeSegments(narrativeText, tools);
+}
+
+/** Split one slice into paragraphs/headings, keeping tools pinned to the segment start. */
+function splitSegmentWithTools(
+  text: string,
+  tools: AgentRoundTool[],
+): Array<{ text: string; tools: AgentRoundTool[] }> {
+  const parts = splitAssistantNarrativeParts(text);
+  if (parts.length <= 1) return [{ text, tools }];
+  const result: Array<{ text: string; tools: AgentRoundTool[] }> = [];
+  for (const [index, part] of parts.entries()) {
+    result.push({ text: part, tools: index === 0 ? [...tools] : [] });
+  }
+  return result;
+}
+
+/** Local wrapper so the interleave helper stays decoupled from segment internals. */
+function splitAssistantNarrativeParts(text: string): string[] {
+  return buildNarrativeSegments(text, []).map((segment) => segment.text);
+}
+
 export type CursorAgentTimeline = {
   /** Chronological feed: thoughts, tools, status, then answer. */
   blocks: CursorFeedBlock[];
@@ -417,7 +497,7 @@ export function buildCursorAgentFeed(input: {
     if (group.turn <= 0) continue;
 
     const narrativeText = group.narrative || group.response?.assistantText || "";
-    const segments = buildNarrativeSegments(narrativeText, group.tools);
+    const segments = buildChronologicalNarrativeSegments(narrativeText, group.tools, group.toolNarrativeOffsets);
     for (const [index, segment] of segments.entries()) {
       const thoughtText = stripToolSummaryFromAssistantContent(
         stripTextToolCallMarkup(segment.text.trim()),

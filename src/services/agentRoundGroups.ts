@@ -24,6 +24,8 @@ export type AgentRoundGroup = {
   narrative?: string;
   modelSteps: AgentModelStep[];
   toolIds: string[];
+  /** Narrative stream length (chars) at the moment each tool started — enables chronological interleave. */
+  toolNarrativeOffsets?: Array<{ toolId: string; narrativeChars: number }>;
   request?: AgentTurnRequestDetail;
   response?: AgentTurnResponseDetail;
 };
@@ -154,6 +156,7 @@ export function recordAgentRoundNarrative(
     ...group,
     modelSteps: group.modelSteps.map((step) => ({ ...step })),
     toolIds: [...group.toolIds],
+    toolNarrativeOffsets: group.toolNarrativeOffsets?.map((entry) => ({ ...entry })),
     request: group.request ? { ...group.request, messages: (group.request.messages || []).map((m) => ({ ...m })) } : undefined,
     response: group.response
       ? { ...group.response, toolCalls: (group.response.toolCalls || []).map((call) => ({ ...call })) }
@@ -178,6 +181,7 @@ export function recordAgentRoundToolStart(
     ...group,
     modelSteps: group.modelSteps.map((step) => ({ ...step })),
     toolIds: [...group.toolIds],
+    toolNarrativeOffsets: group.toolNarrativeOffsets?.map((entry) => ({ ...entry })),
     request: group.request ? { ...group.request, messages: (group.request.messages || []).map((m) => ({ ...m })) } : undefined,
     response: group.response
       ? { ...group.response, toolCalls: (group.response.toolCalls || []).map((call) => ({ ...call })) }
@@ -185,7 +189,13 @@ export function recordAgentRoundToolStart(
   })) : [];
 
   const group = ensureGroup(next, resolvedTurn);
-  if (!group.toolIds.includes(toolId)) group.toolIds.push(toolId);
+  if (!group.toolIds.includes(toolId)) {
+    group.toolIds.push(toolId);
+    if (!group.toolNarrativeOffsets) group.toolNarrativeOffsets = [];
+    if (!group.toolNarrativeOffsets.some((entry) => entry.toolId === toolId)) {
+      group.toolNarrativeOffsets.push({ toolId, narrativeChars: group.narrative?.length ?? 0 });
+    }
+  }
   return next;
 }
 
@@ -195,6 +205,7 @@ function cloneRoundGroups(groups: AgentRoundGroup[] | undefined): AgentRoundGrou
         ...group,
         modelSteps: group.modelSteps.map((step) => ({ ...step })),
         toolIds: [...group.toolIds],
+        toolNarrativeOffsets: group.toolNarrativeOffsets?.map((entry) => ({ ...entry })),
         request: group.request
           ? {
               ...group.request,
