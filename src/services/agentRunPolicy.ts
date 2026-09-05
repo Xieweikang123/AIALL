@@ -5,14 +5,12 @@ import {
   SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE_SOFT,
   AUTO_BUG_FIX_EXPLORE_HARD_CAP,
 } from "../../shared/agentExplorationBudget";
-import { classifyUserIntentFromRules } from "./intentClassifierRules";
+import { resolveOriginalTaskFromResumePrompt } from "./agentRecovery";
 import type { ResolvedUserIntent } from "./intentClassifierTypes";
 import {
   detectUserFailureReport,
   historyRecentUserFailureReport,
-  stripQuotedReplyPrefix,
 } from "./agentContinuation";
-import { resolveOriginalTaskFromResumePrompt } from "./agentRecovery";
 import { isSameIssueFollowUpRun } from "../orchestration/generic/userIntentClassifiers";
 import type { UserIntentHistoryMessage } from "../orchestration/agentIntentTypes";
 import type { ExecutePlanContextInput } from "./agentExecutePlanContext";
@@ -47,7 +45,6 @@ export interface AgentRunPolicy {
   userFailureReportRun: boolean;
   sessionAuditRun: boolean;
   behaviorContradictionRun: boolean;
-  consultativeResumeRun: boolean;
   locateStatusFollowUpRun: boolean;
   readOnlyBuildRun: boolean;
   behaviorPurposeRun: boolean;
@@ -164,21 +161,6 @@ export function resolveAgentRunPolicy(input: ResolveAgentRunPolicyInput): AgentR
       ? expandQuotedAmendPrompt(prompt, quotedAmendIntent)
       : prompt);
 
-  const consultativeResumeRun =
-    !isReadOnlyAgent &&
-    !isPlanExplore &&
-    !isExecutePlan &&
-    Boolean(
-      resumeOriginalTask &&
-        classifyUserIntentFromRules({
-          prompt: resumeOriginalTask,
-          history,
-          mode,
-          hasImage,
-          isAsk: isAsk || isExplore,
-        }).consultative,
-    );
-
   const locateStatusFollowUpRun =
     !isReadOnlyAgent &&
     !isPlanExplore &&
@@ -192,7 +174,6 @@ export function resolveAgentRunPolicy(input: ResolveAgentRunPolicyInput): AgentR
     !isPlanExplore &&
     !isExecutePlan &&
     (userIntent.consultative ||
-      consultativeResumeRun ||
       codeReviewRun ||
       sessionAuditRun ||
       locateStatusFollowUpRun) &&
@@ -254,7 +235,6 @@ export function resolveAgentRunPolicy(input: ResolveAgentRunPolicyInput): AgentR
     userFailureReportRun,
     sessionAuditRun,
     behaviorContradictionRun,
-    consultativeResumeRun,
     locateStatusFollowUpRun,
     readOnlyBuildRun,
     behaviorPurposeRun,

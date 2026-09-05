@@ -130,8 +130,10 @@ export function appendDebugLogFile(path: string, content: string, label?: string
   void appendLine(path, line);
 }
 
-window.addEventListener("DOMContentLoaded", () => {
-  setTimeout(() => {
-    void flushPending();
-  }, 500);
-});
+if (typeof window !== "undefined") {
+  window.addEventListener("DOMContentLoaded", () => {
+    setTimeout(() => {
+      void flushPending();
+    }, 500);
+  });
+}

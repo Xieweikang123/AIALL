@@ -6,6 +6,21 @@
       "description": "Build 模式下字段排序咨询应为只读",
       "prompt": "列表按啥字段排序的？",
       "mode": "build",
+      "ai": {
+        "primary": "consultative",
+        "consultativeTopic": "general",
+        "implementFollowUp": false,
+        "uiDefect": false,
+        "codeReview": false,
+        "behaviorContradiction": false,
+        "behaviorPurpose": false,
+        "accuracyQuestion": false,
+        "implementationStatus": false,
+        "agentStepClarification": false,
+        "userErrorQuote": false,
+        "uiAppearance": false,
+        "configBindingTopic": null
+      },
       "expect": {
         "consultative": true,
         "readOnlyBuildRun": true,
@@ -29,6 +44,21 @@
       "description": "项目概览题识别为 project_overview 且只读",
       "prompt": "解释这个项目是做什么的",
       "mode": "build",
+      "ai": {
+        "primary": "consultative",
+        "consultativeTopic": "project_overview",
+        "implementFollowUp": false,
+        "uiDefect": false,
+        "codeReview": false,
+        "behaviorContradiction": false,
+        "behaviorPurpose": false,
+        "accuracyQuestion": false,
+        "implementationStatus": false,
+        "agentStepClarification": false,
+        "userErrorQuote": false,
+        "uiAppearance": false,
+        "configBindingTopic": null
+      },
       "expect": {
         "consultative": true,
         "consultativeTopic": "project_overview",
@@ -68,6 +98,21 @@
       "history": [
         { "role": "assistant", "content": "**不会。** 切换上下文不更新 `touchMark`。" }
       ],
+      "ai": {
+        "primary": "consultative",
+        "consultativeTopic": "behavior_contradiction",
+        "implementFollowUp": false,
+        "uiDefect": false,
+        "codeReview": false,
+        "behaviorContradiction": true,
+        "behaviorPurpose": false,
+        "accuracyQuestion": false,
+        "implementationStatus": false,
+        "agentStepClarification": false,
+        "userErrorQuote": false,
+        "uiAppearance": false,
+        "configBindingTopic": null
+      },
       "expect": {
         "behaviorContradictionRun": true,
         "consultative": true,
@@ -76,11 +121,11 @@
     },
     {
       "id": "build-ultra-short-task",
-      "description": "极短开放任务应注入澄清提示",
+      "description": "极短开放任务（规则独有信号已移除，不再注入澄清提示）",
       "prompt": "修一下",
       "mode": "build",
       "expect": {
-        "ultraShortOpenTaskRun": true,
+        "ultraShortOpenTaskRun": false,
         "readOnlyBuildRun": false,
         "runProfileKind": "interactive"
       }
@@ -91,6 +136,21 @@
       "prompt": "弹窗背景透明的？",
       "mode": "build",
       "hasImage": true,
+      "ai": {
+        "primary": "consultative",
+        "consultativeTopic": "ui_appearance",
+        "implementFollowUp": false,
+        "uiDefect": false,
+        "codeReview": false,
+        "behaviorContradiction": false,
+        "behaviorPurpose": false,
+        "accuracyQuestion": false,
+        "implementationStatus": false,
+        "agentStepClarification": false,
+        "userErrorQuote": false,
+        "uiAppearance": true,
+        "configBindingTopic": null
+      },
       "expect": {
         "consultativeUiAppearanceRun": true,
         "readOnlyBuildRun": true,
@@ -104,6 +164,21 @@
       "prompt": "按钮明显错位了，你瞧",
       "mode": "build",
       "hasImage": true,
+      "ai": {
+        "primary": "implement",
+        "consultativeTopic": "none",
+        "implementFollowUp": false,
+        "uiDefect": true,
+        "codeReview": false,
+        "behaviorContradiction": false,
+        "behaviorPurpose": false,
+        "accuracyQuestion": false,
+        "implementationStatus": false,
+        "agentStepClarification": false,
+        "userErrorQuote": false,
+        "uiAppearance": false,
+        "configBindingTopic": null
+      },
       "expect": {
         "uiDefectBuildRun": true,
         "readOnlyBuildRun": false,
@@ -138,6 +213,21 @@
       "description": "代码审查请求走咨询只读",
       "prompt": "检查一下代码",
       "mode": "build",
+      "ai": {
+        "primary": "consultative",
+        "consultativeTopic": "code_review",
+        "implementFollowUp": false,
+        "uiDefect": false,
+        "codeReview": true,
+        "behaviorContradiction": false,
+        "behaviorPurpose": false,
+        "accuracyQuestion": false,
+        "implementationStatus": false,
+        "agentStepClarification": false,
+        "userErrorQuote": false,
+        "uiAppearance": false,
+        "configBindingTopic": null
+      },
       "expect": {
         "codeReviewRun": true,
         "readOnlyBuildRun": true,
@@ -152,6 +242,21 @@
       "history": [
         { "role": "assistant", "content": "建议先用 grep 定位符号，再 read 核对片段。" }
       ],
+      "ai": {
+        "primary": "consultative",
+        "consultativeTopic": "general",
+        "implementFollowUp": false,
+        "uiDefect": false,
+        "codeReview": false,
+        "behaviorContradiction": false,
+        "behaviorPurpose": false,
+        "accuracyQuestion": false,
+        "implementationStatus": false,
+        "agentStepClarification": false,
+        "userErrorQuote": false,
+        "uiAppearance": false,
+        "configBindingTopic": null
+      },
       "expect": {
         "consultative": true,
         "skipAiClassifier": false,

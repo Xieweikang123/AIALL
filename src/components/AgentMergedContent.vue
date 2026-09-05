@@ -57,7 +57,6 @@ const props = withDefaults(
     activityExpanded?: boolean;
     canExecutePlan?: boolean;
     intentTrace?: {
-      ruleResult?: string;
       aiRawResponse?: string;
       aiMessages?: Array<{ role: string; content: string }>;
       finalResult?: string;

@@ -10,7 +10,8 @@ import {
   usesReadOnlyTools,
 } from "./agentRunPolicy";
 import { normalizeExecutePlanContext } from "./agentExecutePlanContext";
-import { classifyUserIntentFromRules, resolveUserIntent } from "./intentClassifierRules";
+import { resolveUserIntent } from "./intentClassifierRules";
+import type { UserIntentAiPayload } from "./intentClassifierTypes";
 import {
   evaluateAgentRegressionCase,
   formatAgentRegressionReport,
@@ -19,6 +20,25 @@ import {
   runAgentRegression,
 } from "./agentRegression";
 
+function aiPayload(overrides: Partial<UserIntentAiPayload> = {}): UserIntentAiPayload {
+  return {
+    primary: "implement",
+    consultativeTopic: "none",
+    implementFollowUp: false,
+    uiDefect: false,
+    codeReview: false,
+    behaviorContradiction: false,
+    behaviorPurpose: false,
+    accuracyQuestion: false,
+    implementationStatus: false,
+    agentStepClarification: false,
+    userErrorQuote: false,
+    uiAppearance: false,
+    configBindingTopic: null,
+    ...overrides,
+  };
+}
+
 describe("resolveAgentRunPolicy", () => {
   it("routes consultative build to read-only tools", () => {
     const userIntent = resolveUserIntent({
@@ -26,7 +46,7 @@ describe("resolveAgentRunPolicy", () => {
       mode: "build",
       hasImage: false,
       isAsk: false,
-      ai: null,
+      ai: aiPayload({ primary: "consultative", consultativeTopic: "general" }),
     });
     const policy = resolveAgentRunPolicy({
       prompt: "列表按啥字段排序的？",
@@ -50,7 +70,7 @@ describe("resolveAgentRunPolicy", () => {
       mode: "build",
       hasImage: false,
       isAsk: false,
-      ai: null,
+      ai: aiPayload({ primary: "consultative", consultativeTopic: "project_overview" }),
     });
     const policy = resolveAgentRunPolicy({
       prompt,
@@ -67,11 +87,12 @@ describe("resolveAgentRunPolicy", () => {
   });
 
   it("uses execute_plan context budget", () => {
-    const userIntent = classifyUserIntentFromRules({
+    const userIntent = resolveUserIntent({
       prompt: "改吧",
       mode: "build",
       hasImage: false,
       isAsk: false,
+      ai: aiPayload({ primary: "implement", implementFollowUp: true }),
     });
     const policy = resolveAgentRunPolicy({
       prompt: "改吧",
@@ -92,7 +113,7 @@ describe("resolveAgentRunPolicy", () => {
       mode: "build",
       hasImage: true,
       isAsk: false,
-      ai: null,
+      ai: aiPayload({ primary: "consultative", consultativeTopic: "ui_appearance", uiAppearance: true }),
     });
     const policy = resolveAgentRunPolicy({
       prompt: "弹窗背景透明的？",
@@ -115,7 +136,7 @@ describe("resolveAgentRunPolicy", () => {
       history,
       hasImage: false,
       isAsk: false,
-      ai: null,
+      ai: aiPayload({ primary: "consultative", consultativeTopic: "behavior_contradiction", behaviorContradiction: true }),
     });
     const policy = resolveAgentRunPolicy({
       prompt: FIXTURE_CONTRADICTION_USER,

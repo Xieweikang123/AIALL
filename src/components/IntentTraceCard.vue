@@ -9,9 +9,6 @@
       <span class="intent-trace-value" :class="{ 'intent-trace-value--pending': isClassifying }">
         {{ displayValue }}
       </span>
-      <span v-if="trace.ruleResult" class="intent-trace-rule">
-        规则（兜底判定）：{{ trace.ruleResult }}
-      </span>
       <button
         v-if="hasDetails"
         type="button"
@@ -23,7 +20,7 @@
     </div>
 
     <div v-if="trace.aiFailed" class="intent-trace-fallback">
-      ⚠ AI 意图分类失败{{ trace.aiError ? `（${trace.aiError}）` : "" }}，已用规则兜底
+      ⚠ AI 意图分类失败{{ trace.aiError ? `（${trace.aiError}）` : "" }}
     </div>
 
     <div v-if="!trace.skippedAi" class="intent-trace-meta">
@@ -32,9 +29,6 @@
       </span>
       <span v-if="trace.elapsedMs !== undefined" class="intent-trace-meta-item">
         耗时：{{ formatElapsed(trace.elapsedMs) }}
-      </span>
-      <span v-if="isDiverged" class="intent-trace-meta-item intent-trace-meta-item--warn">
-        ⚠ 规则与 AI 结论不同（规则：{{ rulePrimary }} / AI：{{ trace.aiPrimary }}）· 已采用 AI
       </span>
     </div>
 
@@ -63,7 +57,6 @@ import { computed, ref } from "vue";
 
 const props = defineProps<{
   trace?: {
-    ruleResult?: string;
     aiRawResponse?: string;
     aiMessages?: Array<{ role: string; content: string }>;
     finalResult?: string;
@@ -101,20 +94,6 @@ const hasDetails = computed(
   () =>
     Boolean(props.trace?.aiMessages?.length) || Boolean(props.trace?.aiRawResponse),
 );
-
-const rulePrimary = computed(() => {
-  const raw = props.trace?.ruleResult?.split("|")[0]?.trim() ?? "";
-  return raw || undefined;
-});
-
-const isDiverged = computed(() => {
-  if (props.trace?.skippedAi) return false;
-  const rule = rulePrimary.value;
-  const ai = props.trace?.aiPrimary;
-  if (!rule || !ai) return false;
-  if (ai === "automation") return false;
-  return rule !== ai;
-});
 
 function formatElapsed(ms: number): string {
   if (ms < 1000) return `${ms}ms`;

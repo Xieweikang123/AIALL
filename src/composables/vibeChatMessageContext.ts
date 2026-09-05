@@ -27,7 +27,6 @@ export interface VibeChatMessageItem {
   agentRecoverable?: boolean;
   agentMaxTurns?: number;
   intentTrace?: {
-    ruleResult?: string;
     aiRawResponse?: string;
     aiMessages?: Array<{ role: string; content: string }>;
     finalResult?: string;

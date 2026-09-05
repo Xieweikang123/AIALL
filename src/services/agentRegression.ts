@@ -2,13 +2,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveAgentRunProfile, resolveAskExecutionEscalation } from "./agentRunProfile";
-import {
-  classifyUserIntentFromRules,
-  resolveUserIntent,
-  shouldSkipAiIntentClassifier,
-} from "./intentClassifierRules";
+import { resolveUserIntent } from "./intentClassifierRules";
 import type { ConsultativeTopicId, UserIntentPrimary } from "./intentClassifierTypes";
 import type { ResolvedUserIntent } from "./intentClassifierTypes";
+import type { UserIntentAiPayload } from "./intentClassifierTypes";
 import type { UserIntentHistoryMessage } from "../orchestration/agentIntentTypes";
 import { normalizeExecutePlanContext } from "./agentExecutePlanContext";
 import { resolveAgentRunPolicy, usesReadOnlyTools } from "./agentRunPolicy";
@@ -46,6 +43,8 @@ export interface AgentRegressionCase {
   history?: UserIntentHistoryMessage[];
   lastAssistant?: string;
   hasImage?: boolean;
+  /** Explicit AI classifier result (offline regression has no live AI). */
+  ai?: UserIntentAiPayload | null;
   runProfile?: {
     kind?: "interactive" | "execute_plan";
     triggerSource?: "auto_bug_fix";
@@ -168,20 +167,13 @@ export function resolveAgentRegressionCase(caseInput: AgentRegressionCase): Agen
   const isExplore = mode === "explore";
   const isReadOnlyAgent = isAsk || isExplore;
 
-  const rulesIntent = classifyUserIntentFromRules({
-    prompt,
-    history,
-    mode,
-    hasImage,
-    isAsk,
-  });
   const userIntent = resolveUserIntent({
     prompt,
     history,
     mode,
     hasImage,
     isAsk,
-    ai: null,
+    ai: caseInput.ai ?? null,
   });
 
   const profileModeValue = profileMode(mode);
@@ -207,10 +199,7 @@ export function resolveAgentRegressionCase(caseInput: AgentRegressionCase): Agen
   const runProfile = normalizeExecutePlanContext(clientProfile);
   const isExecutePlan = runProfile.kind === "execute_plan";
   const isPlanExplore = mode === "plan" && !isExecutePlan;
-  const skipAiClassifier = shouldSkipAiIntentClassifier(rulesIntent, prompt, {
-    isAsk,
-    mode: caseInput.mode === "auto" ? "auto" : profileModeValue,
-  });
+  const skipAiClassifier = false;
 
   return {
     userIntent,

@@ -9,7 +9,6 @@ export type VibeChatMessage = Omit<PersistedChatMessage, "tools" | "roundGroups"
   tools?: AgentToolStep[];
   roundGroups?: AgentRoundGroup[];
   intentTrace?: {
-    ruleResult?: string;
     aiRawResponse?: string;
     aiMessages?: Array<{ role: string; content: string }>;
     finalResult?: string;

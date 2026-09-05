@@ -57,7 +57,6 @@ const props = withDefaults(
     chatMode?: "ask" | "build" | "plan" | "explore" | "auto";
     canExecutePlan?: boolean;
     intentTrace?: {
-      ruleResult?: string;
       aiRawResponse?: string;
       aiMessages?: Array<{ role: string; content: string }>;
       finalResult?: string;

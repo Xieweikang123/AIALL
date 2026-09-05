@@ -512,7 +512,6 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           });
           patchAssistantMsg(input.assistantMsg.id, {
             intentTrace: {
-              ruleResult: trace.ruleResult,
               aiRawResponse: trace.aiRawResponse,
               aiMessages: trace.aiMessages,
               finalResult: trace.finalResult,

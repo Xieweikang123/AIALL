@@ -13,11 +13,7 @@ export type {
   UserIntentPrimary,
 } from "./intentClassifierTypes";
 
-export {
-  classifyUserIntentFromRules,
-  resolveUserIntent,
-  shouldSkipAiIntentClassifier,
-} from "./intentClassifierRules";
+export { resolveUserIntent } from "./intentClassifierRules";
 
 export {
   buildIntentCacheKey,
