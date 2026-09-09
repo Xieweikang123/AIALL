@@ -69,6 +69,13 @@
     />
 
     <div
+      v-else-if="item.kind === 'status' && item.text.trim()"
+      class="stream-live-status"
+    >
+      <span class="shimmer-text--fast">{{ item.text }}</span>
+    </div>
+
+    <div
       v-else-if="item.kind === 'text' && item.variant === 'answer'"
       class="inline-feed-segment inline-feed-segment--answer"
     >
@@ -421,6 +428,14 @@ function toggleCollapsed(key: string) {
   font-size: 13px;
   line-height: 1.55;
   color: rgba(148, 163, 184, 0.82);
+}
+
+/* 运行中实时状态行（思考中/等待模型响应等）——数据层一直生成，渲染层此前缺分支导致被静默丢弃 */
+.stream-live-status {
+  padding: 2px 0 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(148, 163, 184, 0.78);
 }
 
 .inline-feed-markdown--narrative :deep(.msg-markdown) {
