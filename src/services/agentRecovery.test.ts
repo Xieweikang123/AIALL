@@ -481,13 +481,34 @@ describe("canResumeAgentRun", () => {
     ).toBe(true);
   });
 
-  it("allows resume after manual stop", () => {
+  it("allows resume after pause but not after manual stop", () => {
+    // 暂停（非停止）→ 可恢复
+    expect(
+      canResumeAgentRun({
+        agentFailed: true,
+        agentRecoverable: true,
+        agentAborted: true,
+        agentAbortReason: "已暂停，可继续",
+        tools: [{ running: false, label: "读取文件", summary: "ok", turn: 1 }],
+      }),
+    ).toBe(true);
+    // 用户显式停止 → 终止本回合，不可恢复
     expect(
       canResumeAgentRun({
         agentFailed: true,
         agentRecoverable: true,
         agentAborted: true,
         agentAbortReason: "已手动停止",
+        tools: [{ running: false, label: "读取文件", summary: "ok", turn: 1 }],
+      }),
+    ).toBe(false);
+    // 被新指令打断（非停止）→ 可恢复
+    expect(
+      canResumeAgentRun({
+        agentFailed: true,
+        agentRecoverable: true,
+        agentAborted: true,
+        agentAbortReason: "已被新指令打断",
         tools: [{ running: false, label: "读取文件", summary: "ok", turn: 1 }],
       }),
     ).toBe(true);

@@ -1109,9 +1109,10 @@ function passesAgentAbortResumeGate(
     const hmrReason = msg.agentAbortReason || msg.agentFailureReason || "";
     // 页面刷新/热更新中断 → 允许恢复（含尚未产生工具步骤的运行）
     if (isHmrInterruptReason(hmrReason)) return true;
-    // 非 HMR 中断（如手动停止）→ 始终允许恢复
-    if (!isHmrInterruptReason(hmrReason)) return true;
-    return false;
+    // 用户显式「停止」→ 终止本回合，不允许恢复
+    if (isUserStopReason(msg.agentAbortReason)) return false;
+    // 其他中断（如暂停/被新指令打断）→ 允许恢复
+    return true;
   }
   return true;
 }
