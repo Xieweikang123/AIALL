@@ -308,8 +308,8 @@
                 <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
             </div>
-            <p class="sessions-empty-title">暂无会话</p>
-            <p class="sessions-empty-hint">开始对话后，会话会显示在这里</p>
+            <p class="sessions-empty-title">还没有会话</p>
+            <p class="sessions-empty-hint">点上方「新建会话」，或直接在助手里提问</p>
           </div>
           <div v-else-if="!filteredGroupedSessions.length" class="sessions-empty">
             <p class="sessions-empty-hint">没有匹配的会话</p>
@@ -640,19 +640,19 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
 
 .file-panel-head {
   flex-shrink: 0;
-  background: rgba(0, 0, 0, 0.12);
+  background: rgba(0, 0, 0, 0.1);
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .file-panel-row {
   display: flex;
   align-items: center;
-  padding: 7px 10px;
-  gap: 8px;
+  padding: 6px 8px;
+  gap: 6px;
 }
 
 .file-panel-top-row {
-  padding-bottom: 3px;
+  padding-bottom: 2px;
   gap: 6px;
 }
 
@@ -1063,7 +1063,7 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 10px 6px;
+  padding: 8px 8px 4px;
   flex-shrink: 0;
 }
 
@@ -1073,15 +1073,15 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
   justify-content: center;
   gap: 6px;
   width: 100%;
-  padding: 7px 12px;
+  padding: 6px 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
-  background: rgba(88, 166, 255, 0.1);
+  background: rgba(88, 166, 255, 0.08);
   color: #79c0ff;
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .sessions-new-btn:hover {
@@ -1098,9 +1098,9 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 0 10px 6px;
+  margin: 0 8px 6px;
   padding: 0 8px;
-  height: 32px;
+  height: 30px;
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.2);
@@ -1175,7 +1175,7 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
-  padding: 2px 0;
+  padding: 0 0 8px;
 }
 
 .sessions-scroll:hover {
@@ -1200,8 +1200,8 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 40px 20px;
+  gap: 6px;
+  padding: 28px 16px;
   text-align: center;
 }
 
@@ -1239,7 +1239,7 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
   align-items: center;
   gap: 4px;
   width: 100%;
-  padding: 6px 10px 4px 10px;
+  padding: 8px 10px 3px 10px;
   border: none;
   background: none;
   cursor: pointer;
@@ -1313,7 +1313,7 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 6px 7px 10px;
+  padding: 6px 6px 6px 10px;
   border: none;
   background: none;
   color: var(--text-primary, #e6edf3);

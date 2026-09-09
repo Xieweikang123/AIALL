@@ -14,7 +14,7 @@
       </div>
       <h2 class="vibe-welcome-title">开始 Vibe Coding</h2>
       <p class="vibe-welcome-desc">
-        打开项目，让 Agent 自动理解需求、探索代码并完成修改。
+        打开项目后，在助手里提问、规划或改代码。Agent 会先读仓库，再动手。
       </p>
 
       <!-- Web 模式状态与调试信息 -->
@@ -82,7 +82,7 @@
           <span class="vibe-welcome-step-num">3</span>
           <div class="vibe-welcome-step-body">
             <strong>在助手中提问</strong>
-            <span>Auto 自动选择合适的工作方式</span>
+            <span>Auto 会按问题选择问答、规划或改代码</span>
           </div>
         </li>
       </ol>
@@ -120,7 +120,7 @@
         </button>
       </div>
       <p class="vibe-welcome-footnote">
-        改码用本页；网页总结 / 桌面自动化请用顶部「对话」与「图标模板」。
+        改代码用本页。网页总结和桌面自动化在顶部「对话」「模板」。
       </p>
     </div>
   </div>
@@ -206,11 +206,11 @@ const configStepHint = computed(() => {
 
 <style scoped>
 .vibe-welcome-server-box {
-  margin: 0 0 16px;
-  padding: 10px 14px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
   border-radius: 8px;
-  background: rgba(0, 0, 0, 0.25);
-  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.07);
   text-align: left;
   font-size: 12px;
 }
@@ -247,11 +247,11 @@ const configStepHint = computed(() => {
 }
 
 .server-recheck-btn {
-  padding: 2px 8px;
+  padding: 3px 8px;
   font-size: 11px;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
   color: var(--text-dim);
   cursor: pointer;
 }
