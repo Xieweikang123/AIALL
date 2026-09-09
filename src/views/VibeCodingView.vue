@@ -31,6 +31,7 @@
           @switch-session="handleSwitchSession"
           @start-new-session="handleStartNewSession"
           @remove-session="handleCloseSessionTab"
+          @reorder-sessions="handleReorderSessionTabs"
         />
       </template>
     </AppToolbar>
@@ -1684,26 +1685,27 @@ watch(sessionList, (list) => {
   const path = projectPath.value.trim();
   if (!path) return;
   const known = new Set(list.map((s) => s.id));
-  if (openedSessionIds.value.length === 0) {
-    try {
-      const raw = localStorage.getItem(SESSION_TABS_STORAGE_PREFIX + path);
-      const parsed: unknown = raw ? JSON.parse(raw) : null;
-      if (Array.isArray(parsed)) {
-        const restored = parsed
-          .filter((x): x is string => typeof x === "string")
-          .filter((id) => known.has(id));
-        const sid = (activeSessionId.value || "").trim();
-        if (sid && known.has(sid) && !restored.includes(sid)) restored.push(sid);
-        if (restored.length > 0) openedSessionIds.value = restored;
-      }
-    } catch {
-      /* 忽略恢复失败 */
+  // 合并式恢复：localStorage 持久化的 tab + 当前已打开 tab + 当前激活会话，去重并过滤已删除会话。
+  // 不依赖 openedSessionIds 是否为空，避免 activeSessionId 的 watch 先跑填非空导致恢复被跳过，
+  // 也避免 activeSessionId 值未变（重开项目同会话）时当前会话没有对应 tab。
+  let merged: string[] = [];
+  try {
+    const raw = localStorage.getItem(SESSION_TABS_STORAGE_PREFIX + path);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    if (Array.isArray(parsed)) {
+      merged = parsed.filter((x): x is string => typeof x === "string");
     }
+  } catch {
+    /* 忽略恢复失败 */
   }
-  if (openedSessionIds.value.some((id) => !known.has(id))) {
-    openedSessionIds.value = openedSessionIds.value.filter((id) => known.has(id));
-    persistOpenedSessionTabs();
+  for (const id of openedSessionIds.value) {
+    if (!merged.includes(id)) merged.push(id);
   }
+  const sid = (activeSessionId.value || "").trim();
+  if (sid && !merged.includes(sid)) merged.push(sid);
+  merged = merged.filter((id) => known.has(id));
+  openedSessionIds.value = merged;
+  persistOpenedSessionTabs();
 });
 
 function handleCloseSessionTab(sessionId: string) {
@@ -1722,6 +1724,19 @@ function handleCloseSessionTab(sessionId: string) {
       handleStartNewSession();
     }
   }
+}
+
+function handleReorderSessionTabs(fromIndex: number, toIndex: number) {
+  if (fromIndex === toIndex) return;
+  if (fromIndex < 0 || fromIndex >= openedSessionIds.value.length) return;
+  if (toIndex < 0 || toIndex > openedSessionIds.value.length) return;
+
+  const ids = [...openedSessionIds.value];
+  const [moved] = ids.splice(fromIndex, 1);
+  const adjustedTo = fromIndex < toIndex ? toIndex - 1 : toIndex;
+  ids.splice(adjustedTo, 0, moved);
+  openedSessionIds.value = ids;
+  persistOpenedSessionTabs();
 }
 
 const chatSessionHooks: {
