@@ -69,13 +69,6 @@
     />
 
     <div
-      v-else-if="item.kind === 'status' && item.text.trim()"
-      class="stream-live-status"
-    >
-      <span class="shimmer-text--fast">{{ item.text }}</span>
-    </div>
-
-    <div
       v-else-if="item.kind === 'text' && item.variant === 'answer'"
       class="inline-feed-segment inline-feed-segment--answer"
     >
