@@ -2154,7 +2154,11 @@ const tokenDetailData = computed(() => {
   let totalStreamChars = 0;
   let maxContextChars = 0;
   let assistantCount = 0;
-  
+  let toolCallCount = 0;
+  let writtenFilesSet: Set<string> | null = null;
+  let imageCount = 0;
+  let agentTurns = 0;
+
   for (const msg of chatMessages.value) {
     if (msg.role === "assistant") {
       assistantCount++;
@@ -2164,16 +2168,34 @@ const tokenDetailData = computed(() => {
       if (msg.contextChars && msg.contextChars > 0) {
         maxContextChars = Math.max(maxContextChars, msg.contextChars);
       }
+      if (msg.tools?.length) {
+        toolCallCount += msg.tools.length;
+      }
+      if (msg.writtenFiles?.length) {
+        for (const f of msg.writtenFiles) {
+          (writtenFilesSet ??= new Set<string>()).add(f);
+        }
+      }
+      if (msg.totalTurns && msg.totalTurns > agentTurns) {
+        agentTurns = msg.totalTurns;
+      }
+    }
+    if (msg.imageCount && msg.imageCount > 0) {
+      imageCount += msg.imageCount;
     }
   }
-  
+
   if (assistantCount === 0) return null;
-  
+
   return {
     assistantCount,
     totalStreamChars,
     maxContextChars,
     totalMessages: chatMessages.value.length,
+    toolCallCount,
+    writtenFilesCount: writtenFilesSet?.size ?? 0,
+    imageCount,
+    agentTurns,
   };
 });
 

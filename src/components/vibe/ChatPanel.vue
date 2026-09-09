@@ -330,7 +330,7 @@
                         :disabled="!activeSessionProviderId"
                         @click="resetProviderToGlobal"
                       >
-                        跟随全局
+                        重置为全局
                       </button>
                       <button
                         type="button"
@@ -350,7 +350,7 @@
                     :aria-checked="!activeSessionProviderId"
                     @click="selectProvider('')"
                   >
-                    <span class="chat-provider-option-name">跟随全局</span>
+                    <span class="chat-provider-option-name">使用全局配置</span>
                     <span class="chat-provider-option-model">{{ globalModelName || "未设置" }}</span>
                     <span v-if="!activeSessionProviderId" class="chat-provider-option-check">✓</span>
                   </button>
@@ -386,33 +386,59 @@
                 </div>
               </Teleport>
             </div>
-            <button
-              v-if="totalTokenUsage"
-              type="button"
-              class="token-usage-btn"
-              :class="{ open: showTokenDetail }"
-              :title="showTokenDetail ? '收起用量详情' : '查看用量详情'"
-              @click="$emit('update:showTokenDetail', !showTokenDetail)"
-            >
-              {{ totalTokenUsage }}
-            </button>
-            <div v-if="showTokenDetail && tokenDetailData" class="token-detail-popover">
-              <div class="token-detail-row">
-                <span>助手回复</span>
-                <span>{{ tokenDetailData.assistantCount }} 条</span>
-              </div>
-              <div v-if="tokenDetailData.totalStreamChars > 0" class="token-detail-row">
-                <span>累计输出</span>
-                <span>{{ formatCharCount(tokenDetailData.totalStreamChars) }}</span>
-              </div>
-              <div v-if="tokenDetailData.maxContextChars > 0" class="token-detail-row">
-                <span>最大上下文</span>
-                <span>{{ formatCharCount(tokenDetailData.maxContextChars) }}</span>
-              </div>
-              <div class="token-detail-row">
-                <span>消息总数</span>
-                <span>{{ tokenDetailData.totalMessages }}</span>
-              </div>
+            <div class="token-usage-wrap">
+              <button
+                ref="tokenBtnRef"
+                v-if="totalTokenUsage"
+                type="button"
+                class="token-usage-btn"
+                :class="{ open: showTokenDetail }"
+                :title="showTokenDetail ? '收起用量详情' : '查看用量详情'"
+                @click="$emit('update:showTokenDetail', !showTokenDetail)"
+              >
+                {{ totalTokenUsage }}
+              </button>
+              <Teleport to="body">
+                <div
+                  v-if="showTokenDetail && tokenDetailData"
+                  ref="tokenPopoverRef"
+                  class="token-detail-popover"
+                  :style="{ position: 'fixed', top: tokenPopoverTop + 'px', right: tokenPopoverRight + 'px' }"
+                >
+                  <div class="token-detail-row">
+                    <span>助手回复</span>
+                    <span>{{ tokenDetailData.assistantCount }} 条</span>
+                  </div>
+                  <div v-if="tokenDetailData.totalStreamChars > 0" class="token-detail-row">
+                    <span>累计输出</span>
+                    <span>{{ formatCharCount(tokenDetailData.totalStreamChars) }}</span>
+                  </div>
+                  <div v-if="tokenDetailData.maxContextChars > 0" class="token-detail-row">
+                    <span>最大上下文</span>
+                    <span>{{ formatCharCount(tokenDetailData.maxContextChars) }}</span>
+                  </div>
+                  <div v-if="tokenDetailData.toolCallCount > 0" class="token-detail-row">
+                    <span>工具调用</span>
+                    <span>{{ tokenDetailData.toolCallCount }} 次</span>
+                  </div>
+                  <div v-if="tokenDetailData.writtenFilesCount > 0" class="token-detail-row">
+                    <span>写入文件</span>
+                    <span>{{ tokenDetailData.writtenFilesCount }} 个</span>
+                  </div>
+                  <div v-if="tokenDetailData.imageCount > 0" class="token-detail-row">
+                    <span>图片</span>
+                    <span>{{ tokenDetailData.imageCount }} 张</span>
+                  </div>
+                  <div v-if="tokenDetailData.agentTurns > 0" class="token-detail-row">
+                    <span>Agent 轮次</span>
+                    <span>{{ tokenDetailData.agentTurns }}</span>
+                  </div>
+                  <div class="token-detail-row">
+                    <span>消息总数</span>
+                    <span>{{ tokenDetailData.totalMessages }}</span>
+                  </div>
+                </div>
+              </Teleport>
             </div>
           </div>
           <div class="chat-actions">
@@ -700,6 +726,10 @@ interface TokenDetailData {
   totalStreamChars: number;
   maxContextChars: number;
   totalMessages: number;
+  toolCallCount: number;
+  writtenFilesCount: number;
+  imageCount: number;
+  agentTurns: number;
 }
 
 interface Props {
@@ -935,16 +965,15 @@ const showScrollToBottom = computed(() => !isAtBottom.value && props.chatMessage
 
 const activeProviderLabel = computed(() => {
   const id = props.activeSessionProviderId.trim();
-  if (!id) return "跟随全局";
+  if (!id) return props.globalModelName.trim() || "未设置";
   const provider = props.providerOptions?.find((p) => p.id === id);
   if (!provider) return "自定义";
-  const model = props.activeSessionModelId?.trim() || provider.model;
-  return `${provider.name} / ${model}`;
+  return props.activeSessionModelId?.trim() || provider.model;
 });
 
 const providerPickerTitle = computed(() => {
   if (props.activeSessionProviderId.trim()) return `会话模型：${activeProviderLabel.value}（在「AI 配置」可管理供应商）`;
-  return `会话模型：跟随全局配置（${props.globalModelName || "未设置"}）`;
+  return `会话模型：使用全局配置（${props.globalModelName || "未设置"}）`;
 });
 
 const providerPickerRef = ref<HTMLElement | null>(null);
@@ -952,6 +981,58 @@ const providerDropdownRef = ref<HTMLElement | null>(null);
 const providerPickerOpen = ref(false);
 const providerDropdownTop = ref(0);
 const providerDropdownRight = ref(0);
+
+const tokenBtnRef = ref<HTMLElement | null>(null);
+const tokenPopoverRef = ref<HTMLElement | null>(null);
+const tokenPopoverTop = ref(0);
+const tokenPopoverRight = ref(0);
+
+function updateTokenPopoverPosition() {
+  const btn = tokenBtnRef.value;
+  if (!btn) return;
+  const rect = btn.getBoundingClientRect();
+  const pop = tokenPopoverRef.value;
+  const popHeight = pop?.offsetHeight ?? 0;
+  const gap = 6;
+  // 默认向上展开；上方空间不足时改为向下展开，避免被视口裁掉
+  const spaceAbove = rect.top - gap;
+  const spaceBelow = window.innerHeight - rect.bottom - gap;
+  const openDown = spaceAbove < popHeight && spaceBelow > spaceAbove;
+  tokenPopoverTop.value = openDown ? rect.bottom + gap : Math.max(gap, rect.top - popHeight - gap);
+  tokenPopoverRight.value = Math.max(8, window.innerWidth - rect.right);
+}
+
+/** 打开期间窗口缩放 / 页面滚动时保持弹窗定位准确 */
+function handleTokenViewportChange() {
+  if (props.showTokenDetail) updateTokenPopoverPosition();
+}
+
+watch(
+  () => props.showTokenDetail,
+  (open) => {
+    if (open) {
+      nextTick(updateTokenPopoverPosition);
+      window.addEventListener("resize", handleTokenViewportChange);
+      document.addEventListener("scroll", handleTokenViewportChange, true);
+    } else {
+      window.removeEventListener("resize", handleTokenViewportChange);
+      document.removeEventListener("scroll", handleTokenViewportChange, true);
+    }
+  },
+);
+
+onUnmounted(() => {
+  window.removeEventListener("resize", handleTokenViewportChange);
+  document.removeEventListener("scroll", handleTokenViewportChange, true);
+});
+
+/** 点击按钮/弹窗外部时自动关闭 */
+function handleTokenPopoverOutsideClick(e: MouseEvent) {
+  if (!props.showTokenDetail) return;
+  const target = e.target as Node;
+  if (tokenBtnRef.value?.contains(target) || tokenPopoverRef.value?.contains(target)) return;
+  emit("update:showTokenDetail", false);
+}
 
 function updateProviderDropdownPosition() {
   if (!providerPickerRef.value) return;
@@ -1032,10 +1113,12 @@ watch(providerPickerOpen, onProviderPickerOpenChange);
 
 onMounted(() => {
   document.addEventListener("mousedown", handleProviderPickerOutsideClick, true);
+  document.addEventListener("mousedown", handleTokenPopoverOutsideClick, true);
 });
 
 onUnmounted(() => {
   document.removeEventListener("mousedown", handleProviderPickerOutsideClick, true);
+  document.removeEventListener("mousedown", handleTokenPopoverOutsideClick, true);
   onProviderPickerOpenChange(false);
 });
 
