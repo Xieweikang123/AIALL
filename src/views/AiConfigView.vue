@@ -32,7 +32,6 @@
           >
             {{ serverSyncBusy ? "同步中..." : "同步到服务端" }}
           </button>
-          <button type="button" class="primary save-btn" title="立即保存 (Ctrl+S)" @click="saveConfig">保存</button>
         </div>
       </div>
     </div>
