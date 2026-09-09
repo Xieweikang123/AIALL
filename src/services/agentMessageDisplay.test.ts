@@ -1032,6 +1032,23 @@ describe("resolveAgentTimelineAnswer", () => {
       ),
     ).toBe(false);
   });
+
+  it("keeps streaming lock during tool gap once substantive answer exists", () => {
+    // 已有实质回答正文，但处于工具执行间隙（无 running tool、非 streaming_model）：
+    // 必须保持流式锁，避免 markdown 高度回缩导致聊天列表上下跳动。
+    expect(
+      isAgentTimelineAnswerStreaming(
+        {
+          agentTurn: 2,
+          agentPhase: "executing_tool",
+          content: "这是较长的实质回答内容，用于测试工具执行间隙仍应保持流式高度锁定以避免界面回缩跳动，这行文字足够长应该能够满足实质正文的长度阈值判断。",
+          roundGroups: [],
+        },
+        true,
+        false,
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("filterDuplicateFeedThoughts", () => {

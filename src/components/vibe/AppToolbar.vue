@@ -8,6 +8,7 @@
         </svg>
       </div>
       <h1 class="title">Vibe Coding</h1>
+      <span class="toolbar-version" :title="`AIALL v${APP_VERSION}`">v{{ APP_VERSION }}</span>
     </div>
     <div class="toolbar-sep" />
     <div class="toolbar-project">
@@ -181,6 +182,9 @@
       <button type="button" class="icon-btn" :disabled="!projectPath.trim()" @click="$emit('refresh-tree')" title="刷新文件树">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M13.65 2.35A7.96 7.96 0 0 0 8 0a8 8 0 1 0 8 8h-2A6 6 0 1 1 8 2c1.66 0 3.14.69 4.22 1.78L9 7h7V0l-2.35 2.35Z" fill="currentColor"/></svg>
       </button>
+      <div v-if="$slots['session-tabs']" class="toolbar-sessions">
+        <slot name="session-tabs" />
+      </div>
     </div>
     <div class="toolbar-actions">
       <div v-if="treeError || retryCountdown > 0" class="toolbar-error" role="alert">
@@ -311,6 +315,8 @@ interface Props {
 const props = defineProps<Props>();
 
 const isDev = import.meta.env.DEV;
+
+const APP_VERSION = "0.1.0";
 
 const isWeb = !isTauriEnv();
 const accountLoggedIn = ref(isServerLoggedIn());
@@ -600,6 +606,19 @@ async function refreshProjectHistoryList() {
   color: rgba(255, 255, 255, 0.72);
 }
 
+.toolbar-version {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: rgba(127, 127, 127, 0.15);
+  color: var(--text-secondary, #8b949e);
+  border: 1px solid rgba(127, 127, 127, 0.25);
+  white-space: nowrap;
+  cursor: default;
+}
+
 .toolbar-sep {
   width: 1px;
   height: 18px;
@@ -614,6 +633,15 @@ async function refreshProjectHistoryList() {
   gap: 6px;
   flex: 1;
   min-width: 0;
+}
+
+/* 会话标签栏挂载位：占据项目区剩余空间，标签多了横向滚动 */
+.toolbar-sessions {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .path-input {

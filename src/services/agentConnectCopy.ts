@@ -1,12 +1,10 @@
-import { isTauriEnv, WEB_REQUIRES_TAURI_MESSAGE } from "./tauriInvoke";
+import { isTauriEnv } from "./tauriInvoke";
 
 export type AgentConnectRuntime = "tauri" | "web";
 
 export function resolveAgentConnectRuntime(): AgentConnectRuntime {
   return isTauriEnv() ? "tauri" : "web";
 }
-
-const webDesktopOnlyMessage = WEB_REQUIRES_TAURI_MESSAGE;
 
 /** User-facing hint when Agent connect stalls. */
 export function agentConnectStallMessage(
@@ -20,7 +18,7 @@ export function agentConnectStallMessage(
     return "无法连接 Agent。请重启应用后重试。";
   }
   void hasImages;
-  return webDesktopOnlyMessage;
+  return "无法连接 agent-server。请确认已启动 agent-server（start-web.bat）且网络可达，然后重试。";
 }
 
 /** Live status while establishing Agent transport. */
@@ -30,7 +28,7 @@ export function agentConnectingStatusText(
   if (runtime === "tauri") {
     return "正在启动 Agent…";
   }
-  return "请使用 Tauri 桌面版（npm run dev）";
+  return "正在连接 agent-server…";
 }
 
 /** Timeout error when Agent transport aborts during connect. */
@@ -42,7 +40,7 @@ export function agentConnectTimeoutErrorMessage(
     return agentConnectStallMessage(hasImages, "tauri");
   }
   void hasImages;
-  return webDesktopOnlyMessage;
+  return "连接 agent-server 超时。请确认 agent-server 已启动且网络可达，然后重试。";
 }
 
 /** JSON parse failure when backend returns HTML (legacy web dev). */
@@ -52,5 +50,5 @@ export function backendJsonParseErrorMessage(
   if (runtime === "tauri") {
     return "后端返回 HTML 而非 JSON，请重启应用后重试。";
   }
-  return webDesktopOnlyMessage;
+  return "agent-server 返回了非预期内容（可能返回 HTML 而非 JSON）。请确认 agent-server 已正确启动，然后重试。";
 }

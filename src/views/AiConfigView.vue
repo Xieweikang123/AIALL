@@ -1123,6 +1123,9 @@ function buildConfigSnapshot(): string {
 
 /** 立即写 localStorage（不走防抖），返回是否真正写入了 */
 function persistConfigNow(): boolean {
+  // 表单是编辑中供应商的事实源，落盘前必须先合并回 providers，
+  // 否则只填不切换供应商时（如 API Key）永远不会被保存。
+  syncFormToProvider(editingProviderId.value);
   const snapshot = buildConfigSnapshot();
   const stored = loadPersistedAiConfigFromStorage();
   const storedSnapshot = stored

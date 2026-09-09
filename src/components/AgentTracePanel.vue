@@ -32,6 +32,7 @@
             <span class="agent-trace-row-chevron" aria-hidden="true">{{ isExpanded(entry.key) ? "▾" : "▸" }}</span>
             <span class="agent-trace-row-kind">{{ kindLabel(entry.kind) }}</span>
             <span class="agent-trace-row-label">{{ entry.label }}</span>
+            <span v-if="entry.elapsedMs !== undefined" class="agent-trace-row-time">{{ formatElapsed(entry.elapsedMs) }}</span>
           </button>
           <pre v-if="isExpanded(entry.key)" class="agent-trace-detail">{{ entry.detail }}</pre>
         </div>
@@ -80,6 +81,12 @@ function kindLabel(kind: AgentTraceEntry["kind"]): string {
 function formatChars(chars: number): string {
   if (chars >= 1000) return `${(chars / 1000).toFixed(1)}K 字符`;
   return `${chars} 字符`;
+}
+
+function formatElapsed(ms?: number): string {
+  if (ms === undefined || ms < 0) return "";
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
 }
 </script>
 
@@ -239,6 +246,15 @@ function formatChars(chars: number): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.agent-trace-row-time {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding-left: 8px;
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(148, 163, 184, 0.6);
 }
 
 .agent-trace-detail {

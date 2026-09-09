@@ -311,7 +311,7 @@ describe("agentCursorFeed", () => {
     });
     expect(feed.some((item) => item.kind === "status")).toBe(true);
     if (feed[0]?.kind === "status") {
-      expect(feed[0].text).toContain("整合信息中");
+      expect(feed[0].text).toContain("正在等待模型响应");
     }
   });
 

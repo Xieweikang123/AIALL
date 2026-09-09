@@ -245,6 +245,7 @@ function handleTurnRequestEvent(event: EventOf<"turn_request">, assistantMsg: Vi
       contextMessages: event.data.contextMessages,
       contextChars: event.data.contextChars,
       messages: event.data.messages,
+      ts: Date.now(),
     },
     event.data.maxTurns,
   );
@@ -285,6 +286,7 @@ function handleTurnResponseEvent(event: EventOf<"turn_response">, assistantMsg: 
       toolCalls: event.data.toolCalls,
       hasToolCalls: event.data.hasToolCalls,
       isFinal: event.data.isFinal,
+      ts: Date.now(),
     },
     event.data.maxTurns,
   );
@@ -464,6 +466,7 @@ function handleToolStartEvent(event: EventOf<"tool_start">, assistantMsg: VibeCh
     summary: "",
     running: true,
     turn: toolTurn,
+    startTs: Date.now(),
   };
   if (!assistantMsg.tools) assistantMsg.tools = [];
   assistantMsg.tools.push(toolStep);
@@ -516,6 +519,7 @@ function handleToolEndEvent(event: EventOf<"tool_end">, assistantMsg: VibeChatMe
     step.running = false;
     step.ok = event.data.ok;
     step.summary = event.data.summary;
+    step.endTs = Date.now();
     if (event.data.result) {
       const raw = event.data.result;
       step.fullResult =

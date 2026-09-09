@@ -21,17 +21,19 @@
       @open-folder-in-explorer="openCurrentFolderInExplorer"
       @test-notification="testNotification"
       @open-debug-logs="debugLogsOpen = true"
-    />
-
-    <SessionTabsBar
-      v-if="projectOpened"
-      :session-list="openedSessions"
-      :active-session-id="activeSessionId"
-      :session-sending-ids="sendingSessionIdList"
-      @switch-session="handleSwitchSession"
-      @start-new-session="handleStartNewSession"
-      @remove-session="handleCloseSessionTab"
-    />
+    >
+      <template #session-tabs>
+        <SessionTabsBar
+          v-if="projectOpened"
+          :session-list="openedSessions"
+          :active-session-id="activeSessionId"
+          :session-sending-ids="sendingSessionIdList"
+          @switch-session="handleSwitchSession"
+          @start-new-session="handleStartNewSession"
+          @remove-session="handleCloseSessionTab"
+        />
+      </template>
+    </AppToolbar>
 
     <main
       ref="workspaceRef"
@@ -1646,12 +1648,26 @@ const {
 // 已打开的会话 tab（按打开顺序），类似浏览器页签：打开一个算一个
 const openedSessionIds = ref<string[]>([]);
 
+// 会话 tab 持久化：按项目路径存 localStorage，刷新后恢复
+const SESSION_TABS_STORAGE_PREFIX = "aiall-opened-session-tabs:";
+
+function persistOpenedSessionTabs() {
+  const path = projectPath.value.trim();
+  if (!path) return;
+  try {
+    localStorage.setItem(SESSION_TABS_STORAGE_PREFIX + path, JSON.stringify(openedSessionIds.value));
+  } catch {
+    /* 忽略存储失败 */
+  }
+}
+
 // 切换会话时，恢复目标会话的发送状态到 chatSending，并把新会话加入已打开 tab
 watch(activeSessionId, (id) => {
   syncActiveChatSending();
   const sid = (id || "").trim();
   if (sid && !openedSessionIds.value.includes(sid)) {
     openedSessionIds.value = [...openedSessionIds.value, sid];
+    persistOpenedSessionTabs();
   }
 });
 
@@ -1663,8 +1679,36 @@ const openedSessions = computed(() => {
     .filter((s): s is NonNullable<typeof s> => Boolean(s));
 });
 
+// 刷新/切换项目后恢复 tab：sessionList 就绪且当前没有 tab 时，从 localStorage 还原；顺带清理已删除会话的 tab
+watch(sessionList, (list) => {
+  const path = projectPath.value.trim();
+  if (!path) return;
+  const known = new Set(list.map((s) => s.id));
+  if (openedSessionIds.value.length === 0) {
+    try {
+      const raw = localStorage.getItem(SESSION_TABS_STORAGE_PREFIX + path);
+      const parsed: unknown = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(parsed)) {
+        const restored = parsed
+          .filter((x): x is string => typeof x === "string")
+          .filter((id) => known.has(id));
+        const sid = (activeSessionId.value || "").trim();
+        if (sid && known.has(sid) && !restored.includes(sid)) restored.push(sid);
+        if (restored.length > 0) openedSessionIds.value = restored;
+      }
+    } catch {
+      /* 忽略恢复失败 */
+    }
+  }
+  if (openedSessionIds.value.some((id) => !known.has(id))) {
+    openedSessionIds.value = openedSessionIds.value.filter((id) => known.has(id));
+    persistOpenedSessionTabs();
+  }
+});
+
 function handleCloseSessionTab(sessionId: string) {
   openedSessionIds.value = openedSessionIds.value.filter((id) => id !== sessionId);
+  persistOpenedSessionTabs();
   void removeSession(sessionId);
 }
 
@@ -4477,195 +4521,6 @@ provide(vibeChatMessageContextKey, {
   focusPlanPanel,
 } as VibeChatMessageContext);
 
-// ── 临时布局抖动探测器（默认开启；跑完 agent 后由我移除）──
-let jitterProbeDispose: (() => void) | null = null;
-function installLayoutJitterProbe() {
-  const logFile = `${projectPath.value.trim().replace(/[\\/]+$/, "")}/.debug/layout-jitter.log`;
-  let buffer: string[] = [];
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const stamp = () => new Date().toISOString().slice(11, 23);
-
-  function push(line: string) {
-    buffer.push(`[${stamp()}] ${line}`);
-    if (buffer.length > 4000) buffer.splice(0, 2000);
-    if (!timer) {
-      timer = setTimeout(() => {
-        timer = null;
-        const chunk = buffer.splice(0, buffer.length);
-        if (!chunk.length) return;
-        void readFile(logFile).then((prev) => {
-          const existing = prev?.content?.trimEnd() ?? "";
-          const next = existing ? `${existing}\n${chunk.join("\n")}` : chunk.join("\n");
-          return writeFile(logFile, next, projectPath.value.trim());
-        }).catch(() => {});
-      }, 600);
-    }
-  }
-
-  let raf = 0;
-  const scrollEl = () => chatPanelRef.value?.chatScrollRef ?? null;
-  let lastScrollTop = -1;
-  let lastClientH = -1;
-  let lastScrollH = -1;
-  let lastHeldH = -1;
-
-  const heightByEl = new Map<Element, number>();
-
-  // 精细分类：单独记录 markdown / 叙述 / 工具步骤 各自的高度回缩
-  const mdByTag = new Map<Element, number>();
-  let mdTimer: ReturnType<typeof setTimeout> | null = null;
-  let mdEvents: Array<{ tag: string; delta: number }> = [];
-
-  const mdObserver = new ResizeObserver((entries) => {
-    for (const e of entries) {
-      const el = e.target;
-      const h = e.contentRect.height;
-      const prev = mdByTag.get(el);
-      if (prev === undefined) { mdByTag.set(el, h); continue; }
-      const delta = Math.round((h - prev) * 10) / 10;
-      mdByTag.set(el, h);
-      if (Math.abs(delta) < 1) continue;
-      let tag = el.tagName.toLowerCase();
-      const cls = el.className;
-      if (typeof cls === "string") {
-        if (cls.includes("msg-markdown")) tag = "msg-md";
-        else if (cls.includes("inline-feed-markdown--narrative")) tag = "narrative-md";
-        else if (cls.includes("inline-feed-markdown")) tag = "feed-md";
-        else if (cls.includes("process-step-list")) tag = "process-steps";
-        else if (cls.includes("stream-narrative")) tag = "narrative-wrap";
-        else if (cls.includes("process-step-wrap")) tag = "step-wrap";
-        else if (cls.includes("msg-answer")) tag = "answer-block";
-        else if (cls.includes("tool-summary")) tag = "tool-summary";
-      }
-      mdEvents.push({ tag, delta });
-      if (mdEvents.length > 40) mdEvents.splice(0, 20);
-      if (!mdTimer) {
-        mdTimer = setTimeout(() => {
-          mdTimer = null;
-          const evts = mdEvents.splice(0, mdEvents.length);
-          if (evts.length) {
-            push(`mdResize[${evts.length}]: ${evts.map((v) => `${v.tag}${v.delta > 0 ? "+" : ""}${v.delta}px`).join(", ")}`);
-          }
-        }, 80);
-      }
-    }
-  });
-  let resizeTimer: ReturnType<typeof setTimeout> | null = null;
-  let resizeEvents: Array<{ tag: string; delta: number }> = [];
-
-  function elTag(el: Element): string {
-    const cls = el.className;
-    if (typeof cls === "string") {
-      if (cls.includes("msg-list")) return "msg-list";
-      if (cls.includes("msg assistant")) return "msg-assistant";
-      if (cls.includes("msg user")) return "msg-user";
-      if (cls.includes("process-step-list")) return "process-steps";
-      if (cls.includes("stream-narrative")) return "narrative";
-      if (cls.includes("inline-feed-markdown")) return "feed-md";
-      if (cls.includes("msg-markdown")) return "msg-md";
-      if (cls.includes("agent-stream")) return "agent-stream";
-      if (cls.includes("chat-scroll")) return "chat-scroll";
-    }
-    return el.tagName.toLowerCase();
-  }
-
-  const ro = new ResizeObserver((entries) => {
-    for (const e of entries) {
-      const el = e.target;
-      const h = e.contentRect.height;
-      const prev = heightByEl.get(el);
-      if (prev === undefined) { heightByEl.set(el, h); continue; }
-      const delta = Math.round((h - prev) * 10) / 10;
-      heightByEl.set(el, h);
-      if (Math.abs(delta) < 1) continue;
-      resizeEvents.push({ tag: elTag(el), delta });
-      if (resizeEvents.length > 60) resizeEvents.splice(0, 30);
-      if (!resizeTimer) {
-        resizeTimer = setTimeout(() => {
-          resizeTimer = null;
-          const evts = resizeEvents.splice(0, resizeEvents.length);
-          if (evts.length) {
-            push(`resize[${evts.length}]: ${evts.map((v) => `${v.tag}${v.delta > 0 ? "+" : ""}${v.delta}px`).join(", ")}`);
-          }
-        }, 120);
-      }
-    }
-  });
-
-  function tick() {
-    const el = scrollEl();
-    if (el) {
-      if (lastScrollTop >= 0 && Math.abs(el.scrollTop - lastScrollTop) > 40) {
-        push(`scrollJump top ${lastScrollTop} → ${el.scrollTop}`);
-      }
-      if (lastClientH >= 0 && el.clientHeight !== lastClientH) {
-        push(`scroll.clientH ${lastClientH} → ${el.clientHeight}`);
-      }
-      if (lastScrollH >= 0 && Math.abs(el.scrollHeight - lastScrollH) > 24) {
-        push(`scroll.scrollH ${lastScrollH} → ${el.scrollHeight}`);
-      }
-      lastScrollTop = el.scrollTop;
-      lastClientH = el.clientHeight;
-      lastScrollH = el.scrollHeight;
-
-      const list = el.querySelector(".msg-list");
-      if (list) {
-        const h = list.getBoundingClientRect().height;
-        if (lastHeldH >= 0 && Math.abs(h - lastHeldH) > 24) {
-          push(`msg-list height ${lastHeldH} → ${Math.round(h)}`);
-        }
-        lastHeldH = Math.round(h);
-      }
-    }
-    raf = requestAnimationFrame(tick);
-  }
-
-  function startObserve() {
-    const el = scrollEl();
-    if (!el) { setTimeout(startObserve, 300); return; }
-    ro.observe(el);
-    el.querySelectorAll("*").forEach((n) => ro.observe(n));
-    push("probe start");
-    tick();
-    const mdWatch = () => {
-      const root = scrollEl();
-      if (!root) { setTimeout(mdWatch, 300); return; }
-      root.querySelectorAll(".msg-markdown, .inline-feed-markdown, .process-step-list, .process-step-wrap, .stream-narrative, .msg-answer, .tool-summary").forEach((n) => mdObserver.observe(n));
-      new MutationObserver((muts) => {
-        let added = false;
-        for (const m of muts) if (m.addedNodes.length) { added = true; break; }
-        if (added) {
-          root.querySelectorAll(".msg-markdown, .inline-feed-markdown, .process-step-list, .process-step-wrap, .stream-narrative, .msg-answer, .tool-summary").forEach((n) => mdObserver.observe(n));
-        }
-      }).observe(root, { childList: true, subtree: true });
-    };
-    mdWatch();
-  }
-
-  function dispose() {
-    jitterProbeDispose = null;
-    if (timer) clearTimeout(timer);
-    if (resizeTimer) clearTimeout(resizeTimer);
-    if (mdTimer) clearTimeout(mdTimer);
-    cancelAnimationFrame(raf);
-    ro.disconnect();
-    mdObserver.disconnect();
-    push("probe end");
-    if (buffer.length) {
-      const chunk = buffer.splice(0, buffer.length);
-      void readFile(logFile).then((prev) => {
-        const existing = prev?.content?.trimEnd() ?? "";
-        const next = existing ? `${existing}\n${chunk.join("\n")}` : chunk.join("\n");
-        return writeFile(logFile, next, projectPath.value.trim());
-      }).catch(() => {});
-    }
-  }
-
-  jitterProbeDispose = dispose;
-  push(`probe install (chatSending=${chatSending.value})`);
-  setTimeout(startObserve, 400);
-}
-
 function reconcileOrphanedAgentSendingState() {
   dismissBlockingOverlays("mount-reconcile");
   hideGitFileContextMenu();
@@ -4732,12 +4587,10 @@ onMounted(() => {
   nextTick(() => {
     restoreAutoBugFixPanelIfNeeded();
   });
-  installLayoutJitterProbe();
 });
 
 onBeforeUnmount(() => {
   fileDragGhost.value = null;
-  jitterProbeDispose?.();
   window.removeEventListener("focus", onWindowFocus);
   window.removeEventListener("beforeunload", onBeforeUnload);
   window.removeEventListener("dragend", onWindowDragEnd);

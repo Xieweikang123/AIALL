@@ -5,14 +5,16 @@ import {
   agentConnectTimeoutErrorMessage,
   backendJsonParseErrorMessage,
 } from "./agentConnectCopy";
-import { WEB_REQUIRES_TAURI_MESSAGE } from "./tauriInvoke";
 
 describe("agentConnectCopy", () => {
-  it("uses desktop-only hints on web runtime", () => {
-    expect(agentConnectingStatusText("web")).toContain("Tauri");
-    expect(agentConnectStallMessage(false, "web")).toBe(WEB_REQUIRES_TAURI_MESSAGE);
-    expect(agentConnectTimeoutErrorMessage(false, "web")).toBe(WEB_REQUIRES_TAURI_MESSAGE);
-    expect(backendJsonParseErrorMessage("web")).toBe(WEB_REQUIRES_TAURI_MESSAGE);
+  it("shows real connection-failure hints on web runtime", () => {
+    expect(agentConnectingStatusText("web")).toContain("agent-server");
+    expect(agentConnectStallMessage(false, "web")).toContain("agent-server");
+    expect(agentConnectStallMessage(false, "web")).not.toContain("Tauri");
+    expect(agentConnectTimeoutErrorMessage(false, "web")).toContain("agent-server");
+    expect(agentConnectTimeoutErrorMessage(false, "web")).not.toContain("Tauri");
+    expect(backendJsonParseErrorMessage("web")).toContain("agent-server");
+    expect(backendJsonParseErrorMessage("web")).not.toContain("Tauri");
   });
 
   it("uses desktop hints on tauri runtime", () => {

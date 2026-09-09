@@ -453,9 +453,14 @@ export function formatCursorActionLabel(step: AgentRoundTool): string {
 export function cursorPlanningLabel(phase?: string, detail?: string): string | null {
   if (!phase) return null;
 
-  if (phase === "waiting_model" || phase === "sending_request" || phase === "retrying_model") {
-    if (detail?.trim()) return `整合信息中 · ${detail.trim()}`;
-    return "整合信息中…";
+  if (phase === "sending_request") {
+    return detail?.trim() ? `正在发送模型请求 · ${detail.trim()}` : "正在发送模型请求…";
+  }
+  if (phase === "waiting_model") {
+    return detail?.trim() ? `正在等待模型响应 · ${detail.trim()}` : "正在等待模型响应…";
+  }
+  if (phase === "retrying_model") {
+    return detail?.trim() ? `正在重试模型请求 · ${detail.trim()}` : "正在重试模型请求…";
   }
   if (phase === "streaming_model" || phase === "planning_tools") return "思考中…";
   if (phase === "summarizing_tools") return "整理工具结果…";

@@ -2,15 +2,8 @@
   <div class="panel-head">
     <div class="panel-head-left">
       <div class="chat-head-brand">
-        <span class="chat-head-icon" aria-hidden="true">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-            <path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
-            <path d="M12 12 4 7.5m8 4.5 8-4.5M12 12v9" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
-          </svg>
-        </span>
-        <div class="chat-head-text">
-          <span class="panel-label">AI 助手</span>
-          <div class="session-picker-row">
+        <span class="panel-label">AI 助手</span>
+        <div class="session-picker-row">
             <button
               v-if="sessionList.length > 1"
               type="button"
@@ -53,7 +46,6 @@
                 <path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
             </button>
-          </div>
         </div>
       </div>
     </div>
