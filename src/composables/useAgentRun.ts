@@ -933,7 +933,13 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     assistantMsg.agentFailureDetail = undefined;
     assistantMsg.agentAborted = false;
     assistantMsg.agentAbortReason = undefined;
-    assistantMsg.agentContinueCount = undefined;
+    // 静默自动续跑必须保留 agentContinueCount：它驱动 trySilentContinue 的
+    // AGENT_SILENT_CONTINUE_MAX 上限判定。若这里清零，连接持续失败时会无限
+    // 「中断→续跑→清零→再中断」循环（statusLog 永远显示"第 1 次"）。
+    // 仅手动重试（非 silent）才清零计数，重新给一次完整的机会。
+    const isSilentContinue = options?.silent === true;
+    const resumeContinueCount = isSilentContinue ? (assistantMsg.agentContinueCount ?? 0) : undefined;
+    if (!isSilentContinue) assistantMsg.agentContinueCount = undefined;
     prepareAssistantForResume(assistantMsg);
     // Seed totalTurns with turns completed by the original run so the final
     // "完成（共 N 轮）" accumulates across segments instead of counting only
@@ -971,7 +977,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       content: assistantMsg.content,
       agentAborted: false,
       agentAbortReason: undefined,
-      agentContinueCount: undefined,
+      agentContinueCount: resumeContinueCount,
       activityExpanded: true,
       activityDetailed: false,
       statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,

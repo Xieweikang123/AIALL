@@ -56,6 +56,14 @@ export function isHmrInterruptReason(reason: string): boolean {
   return text === HMR_INTERRUPT_REASON || text.includes("热更新") || text.includes("页面刷新");
 }
 
+/** Reason used when the user explicitly stops a run — treated as a hard stop, not resumable. */
+export const AGENT_USER_STOP_REASON = "已手动停止";
+
+/** True for an explicit user stop; such runs are treated as terminated (not resumable). */
+export function isUserStopReason(reason: string | undefined): boolean {
+  return reason?.trim() === AGENT_USER_STOP_REASON;
+}
+
 /** No meaningful agent progress for this long → treat run as stalled (server heartbeats don't count). */
 export const AGENT_STALL_PROGRESS_MS = 120_000;
 
@@ -720,11 +728,16 @@ export function inferAgentRecoveryFlags(msg: AgentProgressSource & {
     };
   }
 
+  // 用户显式「停止」＝真正终止本回合，不标可恢复（与「暂停/被打断」区分）
+  if (msg.agentAborted && isUserStopReason(msg.agentAbortReason || "")) {
+    return null;
+  }
+
   if (msg.agentAborted && !isHmrInterruptReason(msg.agentAbortReason || "")) {
     return {
       agentFailed: true,
       agentRecoverable: true,
-      agentFailureReason: msg.agentAbortReason?.trim() || "已手动停止",
+      agentFailureReason: msg.agentAbortReason?.trim() || AGENT_USER_STOP_REASON,
     };
   }
 
