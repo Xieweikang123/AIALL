@@ -7,6 +7,46 @@ use tauri::ipc::Channel;
 
 use super::run_emit::{emit, emit_aborted_done, is_cancelled};
 
+/// Token usage reported by the provider for a single model turn.
+///
+/// Covers both OpenAI-style (`prompt_tokens_details.cached_tokens`) and
+/// Anthropic-style (`cache_read_input_tokens` / `cache_creation_input_tokens`)
+/// cache accounting. Fields are `None` when the provider did not report them.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct UsageStats {
+    /// Total input (prompt) tokens for the turn.
+    pub prompt_tokens: Option<u64>,
+    /// OpenAI-style: tokens served from the prompt cache.
+    pub cached_tokens: Option<u64>,
+    /// Anthropic-style: tokens read from the cache.
+    pub cache_read_tokens: Option<u64>,
+    /// Anthropic-style: tokens written into the cache.
+    pub cache_creation_tokens: Option<u64>,
+}
+
+impl UsageStats {
+    /// Best-effort cache-hit ratio in `[0.0, 1.0]`, or `None` when the provider
+    /// did not report enough data to compute it.
+    pub fn hit_ratio(&self) -> Option<f64> {
+        // OpenAI-style: cached / prompt.
+        if let (Some(cached), Some(prompt)) = (self.cached_tokens, self.prompt_tokens) {
+            if prompt > 0 {
+                return Some(cached as f64 / prompt as f64);
+            }
+        }
+        // Anthropic-style: cache_read / (cache_read + cache_creation + non-cached input).
+        if let Some(read) = self.cache_read_tokens {
+            let creation = self.cache_creation_tokens.unwrap_or(0);
+            let prompt = self.prompt_tokens.unwrap_or(0);
+            let denominator = read + creation + prompt;
+            if denominator > 0 {
+                return Some(read as f64 / denominator as f64);
+            }
+        }
+        None
+    }
+}
+
 pub(crate) struct ModelTurnOutput {
     pub assistant_text: String,
     pub tool_calls: Vec<Value>,
@@ -14,6 +54,8 @@ pub(crate) struct ModelTurnOutput {
     pub is_final: bool,
     /// Structured choice options the model emitted via `<ai_options>` block (stripped from assistant_text).
     pub options: Vec<Value>,
+    /// Token usage reported by the provider for this turn.
+    pub usage: UsageStats,
 }
 
 const AI_OPTIONS_START: &str = "<ai_options>";
@@ -105,6 +147,7 @@ pub(crate) async fn consume_model_sse_stream(
 ) -> Result<Option<ModelTurnOutput>, String> {
     let mut accumulated_content = String::new();
     let mut accumulated_tool_calls: Vec<Value> = Vec::new();
+    let mut usage = UsageStats::default();
     let mut byte_stream = stream_resp.bytes_stream();
     let mut line_buf: Vec<u8> = Vec::new();
     let mut batcher = DeltaBatcher::new();
@@ -125,6 +168,7 @@ pub(crate) async fn consume_model_sse_stream(
                 &line_str,
                 &mut accumulated_content,
                 &mut accumulated_tool_calls,
+                &mut usage,
                 &mut batcher,
                 channel,
                 &mut suppress_stream,
@@ -137,6 +181,7 @@ pub(crate) async fn consume_model_sse_stream(
             &line_str,
             &mut accumulated_content,
             &mut accumulated_tool_calls,
+            &mut usage,
             &mut batcher,
             channel,
             &mut suppress_stream,
@@ -157,6 +202,7 @@ pub(crate) async fn consume_model_sse_stream(
         tool_calls_value,
         is_final: accumulated_tool_calls.is_empty(),
         options,
+        usage,
     }))
 }
 
@@ -164,6 +210,7 @@ fn parse_sse_line(
     line_buf: &str,
     accumulated_content: &mut String,
     accumulated_tool_calls: &mut Vec<Value>,
+    usage: &mut UsageStats,
     batcher: &mut DeltaBatcher,
     channel: &Channel<Value>,
     suppress_stream: &mut bool,
@@ -179,6 +226,11 @@ fn parse_sse_line(
     let Ok(chunk_json) = serde_json::from_str::<Value>(data) else {
         return;
     };
+    // Usage may arrive on the final chunk (OpenAI) or on a dedicated event
+    // (Anthropic). Capture it whenever present.
+    if let Some(u) = chunk_json.get("usage") {
+        capture_usage(u, usage);
+    }
     let Some(choices) = chunk_json.get("choices").and_then(|c| c.as_array()) else {
         return;
     };
@@ -239,6 +291,38 @@ fn parse_sse_line(
     }
 }
 
+/// Extract cache/token usage from a provider `usage` object into `UsageStats`.
+///
+/// Handles both OpenAI-style (`prompt_tokens` + `prompt_tokens_details.cached_tokens`)
+/// and Anthropic-style (`input_tokens` + `cache_read_input_tokens` +
+/// `cache_creation_input_tokens`) shapes. Missing fields are left untouched so a
+/// later chunk can fill them in.
+fn capture_usage(usage_value: &Value, usage: &mut UsageStats) {
+    let as_u64 = |v: &Value| v.as_u64();
+
+    // OpenAI-style.
+    if let Some(prompt) = usage_value.get("prompt_tokens").and_then(as_u64) {
+        usage.prompt_tokens = Some(prompt);
+    }
+    if let Some(cached) = usage_value
+        .pointer("/prompt_tokens_details/cached_tokens")
+        .and_then(as_u64)
+    {
+        usage.cached_tokens = Some(cached);
+    }
+
+    // Anthropic-style.
+    if let Some(input) = usage_value.get("input_tokens").and_then(as_u64) {
+        usage.prompt_tokens = Some(input);
+    }
+    if let Some(read) = usage_value.get("cache_read_input_tokens").and_then(as_u64) {
+        usage.cache_read_tokens = Some(read);
+    }
+    if let Some(created) = usage_value.get("cache_creation_input_tokens").and_then(as_u64) {
+        usage.cache_creation_tokens = Some(created);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,7 +345,8 @@ mod tests {
         channel: &Channel<Value>,
     ) {
         let mut suppress = false;
-        parse_sse_line(line_buf, content, calls, batcher, channel, &mut suppress);
+        let mut usage = UsageStats::default();
+        parse_sse_line(line_buf, content, calls, &mut usage, batcher, channel, &mut suppress);
     }
 
     #[test]
@@ -592,5 +677,67 @@ mod tests {
         let (clean, options) = extract_structured_options("<ai_options>not json</ai_options>");
         assert_eq!(clean, "<ai_options>not json</ai_options>");
         assert!(options.is_empty());
+    }
+
+    #[test]
+    fn capture_usage_openai_style() {
+        let mut usage = UsageStats::default();
+        capture_usage(
+            &json!({
+                "prompt_tokens": 1000,
+                "completion_tokens": 50,
+                "prompt_tokens_details": { "cached_tokens": 400 }
+            }),
+            &mut usage,
+        );
+        assert_eq!(usage.prompt_tokens, Some(1000));
+        assert_eq!(usage.cached_tokens, Some(400));
+        assert_eq!(usage.cache_read_tokens, None);
+        assert_eq!(usage.cache_creation_tokens, None);
+        let ratio = usage.hit_ratio().unwrap();
+        assert!((ratio - 0.4).abs() < 1e-9);
+    }
+
+    #[test]
+    fn capture_usage_anthropic_style() {
+        let mut usage = UsageStats::default();
+        capture_usage(
+            &json!({
+                "input_tokens": 300,
+                "output_tokens": 20,
+                "cache_read_input_tokens": 200,
+                "cache_creation_input_tokens": 100
+            }),
+            &mut usage,
+        );
+        assert_eq!(usage.prompt_tokens, Some(300));
+        assert_eq!(usage.cache_read_tokens, Some(200));
+        assert_eq!(usage.cache_creation_tokens, Some(100));
+        // read / (read + creation + input) = 200 / (200 + 100 + 300) = 1/3
+        let ratio = usage.hit_ratio().unwrap();
+        assert!((ratio - 1.0 / 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn capture_usage_missing_fields_yields_no_ratio() {
+        let mut usage = UsageStats::default();
+        capture_usage(&json!({ "completion_tokens": 5 }), &mut usage);
+        assert!(usage.hit_ratio().is_none());
+    }
+
+    #[test]
+    fn capture_usage_accumulates_across_chunks() {
+        let mut usage = UsageStats::default();
+        // First chunk: OpenAI prompt_tokens only.
+        capture_usage(&json!({ "prompt_tokens": 1000 }), &mut usage);
+        // Later chunk: cached_tokens arrives.
+        capture_usage(
+            &json!({ "prompt_tokens_details": { "cached_tokens": 300 } }),
+            &mut usage,
+        );
+        assert_eq!(usage.prompt_tokens, Some(1000));
+        assert_eq!(usage.cached_tokens, Some(300));
+        let ratio = usage.hit_ratio().unwrap();
+        assert!((ratio - 0.3).abs() < 1e-9);
     }
 }

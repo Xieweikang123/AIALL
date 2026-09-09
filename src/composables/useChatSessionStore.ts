@@ -82,6 +82,8 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
   let saveChatTimer: ReturnType<typeof setTimeout> | null = null;
   let persistDelayTimer: ReturnType<typeof setTimeout> | null = null;
   let persistChatGeneration = 0;
+  /** 运行期防抖落盘 timer（Agent 边跑边写磁盘，不卡主线程）。 */
+  let agentRunPersistTimer: ReturnType<typeof setTimeout> | null = null;
   /** Messages typed before first session id exists (ensureSessionForSend). */
   let orphanMessages: T[] | null = null;
 
@@ -282,6 +284,10 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
       clearTimeout(persistDelayTimer);
       persistDelayTimer = null;
     }
+    if (agentRunPersistTimer) {
+      clearTimeout(agentRunPersistTimer);
+      agentRunPersistTimer = null;
+    }
   }
 
   function schedulePersistChat() {
@@ -300,9 +306,29 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     }, 400);
   }
 
-  /** Skip mid-run debounced writes — large sessions block the main thread; done handler persists. */
-  function schedulePersistDuringAgentRun(_options?: { sessionId?: string; flushStore?: boolean }) {
-    // no-op
+  /**
+   * 运行期落盘：Agent 边跑边把最新消息异步写到磁盘（走 syncChatSession，不卡主线程）。
+   * 防抖合并高频事件（message_delta / turn_trace / status），避免每次事件都发一次 HTTP。
+   * 收尾时 done/error handler 仍会走 persistChatNow 做最终落盘，这里只是兜底，保证
+   * 运行中断/页面刷新时磁盘上至少有一份接近实时的快照。
+   */
+  function schedulePersistDuringAgentRun(options?: { sessionId?: string; flushStore?: boolean }) {
+    const path = projectPath().trim();
+    const sessionId = (options?.sessionId || activeSessionId.value).trim();
+    if (!path || !sessionId) return;
+    if (switchingSession.value) return;
+    if (isSwitchingProject?.()) return;
+
+    if (agentRunPersistTimer) clearTimeout(agentRunPersistTimer);
+    agentRunPersistTimer = setTimeout(() => {
+      agentRunPersistTimer = null;
+      if (switchingSession.value) return;
+      if (isSwitchingProject?.()) return;
+      const messages = sessionMessages.getSessionMessages(sessionId);
+      if (!messages?.length) return;
+      const messagesForDiskSync = cloneChatMessagesForDiskSync(messages);
+      void runDelayedChatDiskSync(path, sessionId, messagesForDiskSync, options, undefined);
+    }, 800);
   }
 
   async function flushChatStoreToDisk(

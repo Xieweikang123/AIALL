@@ -38,26 +38,45 @@ function formatJson(value: unknown): string {
 function requestEntry(turn: AgentRoundGroupView): AgentTraceEntry[] {
   const request = turn.request;
   if (!request) return [];
-  const entries: AgentTraceEntry[] = [];
   const messages = request.messages || [];
-  for (const [index, message] of messages.entries()) {
-    const isLast = index === messages.length - 1;
-    const roleLabel = message.role === "user" ? "用户" : message.role === "assistant" ? "助手" : message.role;
-    const preview = message.content.replace(/\s+/g, " ").slice(0, 160);
+  if (!messages.length) return [];
+
+  const roleLabel = (role: string): string =>
+    role === "user" ? "用户" : role === "assistant" ? "助手" : role === "system" ? "系统" : role;
+  const preview = (content: string): string => content.replace(/\s+/g, " ").slice(0, 160);
+
+  const entries: AgentTraceEntry[] = [];
+
+  // 历史上下文合并为一行，展开可见每条内容，避免逐条刷屏
+  if (messages.length > 1) {
+    const history = messages.slice(0, -1);
+    const chars = history.reduce((sum, m) => sum + m.content.length, 0);
+    const charsLabel = chars >= 1000 ? `${(chars / 1000).toFixed(1)}K` : `${chars}`;
     entries.push({
-      key: `req-${turn.turn}-${index}`,
+      key: `req-${turn.turn}-ctx`,
       kind: "request",
-      label: `${isLast ? "发给模型" : "上下文"} · ${roleLabel}：${preview || "（空）"}`,
+      label: `上下文 · ${history.length} 条历史消息（${charsLabel} 字符）`,
       detail: truncateDetail(
-        formatJson({
-          role: message.role,
-          content: message.content,
-          ...(message.toolCalls ? { toolCalls: message.toolCalls } : {}),
-        }),
+        history.map((m, index) => `[${index + 1}] ${m.role}：${m.content}`).join("\n\n"),
       ),
       ok: true,
     });
   }
+
+  const last = messages[messages.length - 1];
+  entries.push({
+    key: `req-${turn.turn}-last`,
+    kind: "request",
+    label: `发给模型 · ${roleLabel(last.role)}：${preview(last.content) || "（空）"}`,
+    detail: truncateDetail(
+      formatJson({
+        role: last.role,
+        content: last.content,
+        ...(last.toolCalls ? { toolCalls: last.toolCalls } : {}),
+      }),
+    ),
+    ok: true,
+  });
   return entries;
 }
 
@@ -68,7 +87,7 @@ function responseEntry(turn: AgentRoundGroupView): AgentTraceEntry[] {
   const toolCalls = response.toolCalls || [];
   const label = response.isFinal
     ? `最终回复（${text.length} 字符）`
-    : `轮次回复（${text.length} 字符，将续跑）`;
+    : `轮次回复（${text.length} 字符）`;
 
   // 工具名兜底：优先取 call 自带字段，其次按 id 从 turn.tools（工具执行后的真实记录）匹配
   const toolName = (call: { id?: string; name?: string; function?: { name?: string } }): string => {
@@ -82,7 +101,7 @@ function responseEntry(turn: AgentRoundGroupView): AgentTraceEntry[] {
 
   // 正文为空时，模型实际回复的是「要调用哪些工具」——把工具调用内容露出来
   const toolSummary = toolCalls.length
-    ? `，调用 ${toolCalls.length} 个工具：${toolCalls.map(toolName).join("、")}`
+    ? `调用 ${toolCalls.length} 个工具：${toolCalls.map(toolName).join("、")}`
     : "";
 
   const elapsedMs =
@@ -110,7 +129,9 @@ function responseEntry(turn: AgentRoundGroupView): AgentTraceEntry[] {
       kind: "response",
       label: text
         ? `${label}：${text.replace(/\s+/g, " ").slice(0, 120)}`
-        : `${label}：（无正文${toolSummary}）`,
+        : toolSummary
+          ? `${label}（无正文）· ${toolSummary}`
+          : `${label}（无正文）`,
       detail: truncateDetail(detailParts.join("\n\n")),
       ok: true,
       elapsedMs,
@@ -140,14 +161,27 @@ function toolEntries(turn: AgentRoundGroupView): AgentTraceEntry[] {
   }));
 }
 
+/** Transient model-loop states — implied by the request/response/tool rows once a reply exists. */
+const TRANSIENT_LOOP_PHASES = new Set([
+  "compacting_context",
+  "sending_request",
+  "waiting_model",
+  "streaming_model",
+  "planning_tools",
+  "summarizing_tools",
+]);
+
 function phaseEntries(turn: AgentRoundGroupView): AgentTraceEntry[] {
-  return turn.modelSteps.map((step, index) => ({
-    key: `phase-${turn.turn}-${index}`,
-    kind: "phase" as const,
-    label: `⏳ ${step.text}`,
-    detail: step.text,
-    ok: true,
-  }));
+  const replied = turn.response != null;
+  return turn.modelSteps
+    .filter((step) => !(replied && TRANSIENT_LOOP_PHASES.has(step.phase)))
+    .map((step, index) => ({
+      key: `phase-${turn.turn}-${index}`,
+      kind: "phase" as const,
+      label: `⏳ ${step.text}`,
+      detail: step.text,
+      ok: true,
+    }));
 }
 
 /** Build the full data-flow trace (what was sent / replied / executed) per turn. */

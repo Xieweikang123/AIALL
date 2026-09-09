@@ -12,34 +12,48 @@
       <span class="agent-trace-meta">{{ totalEntries }} 条事件 · {{ turns.length }} 轮</span>
     </button>
     <div v-if="open || embedded" class="agent-trace-body">
-      <div v-for="turn in turns" :key="turn.turn" class="agent-trace-turn">
-        <div class="agent-trace-turn-head">
+      <div
+        v-for="turn in turns"
+        :key="turn.turn"
+        class="agent-trace-turn"
+        :class="{ 'agent-trace-turn--collapsed': !isTurnOpen(turn.turn) }"
+      >
+        <button
+          type="button"
+          class="agent-trace-turn-head"
+          :aria-expanded="isTurnOpen(turn.turn)"
+          @click="toggleTurn(turn.turn)"
+        >
+          <span class="agent-trace-turn-chevron" aria-hidden="true">{{ isTurnOpen(turn.turn) ? "▾" : "▸" }}</span>
           <span class="agent-trace-turn-label">第 {{ turn.turn }} 轮</span>
           <span v-if="turn.model" class="agent-trace-turn-model" :title="turn.model">{{ turn.model }}</span>
           <span v-if="turn.contextChars" class="agent-trace-turn-ctx">{{ formatChars(turn.contextChars) }}</span>
-        </div>
-        <div
-          v-for="entry in turn.entries"
-          :key="entry.key"
-          class="agent-trace-entry"
-          :class="[
-            `agent-trace-entry--${entry.kind}`,
-            { 'agent-trace-entry--fail': entry.ok === false, 'agent-trace-entry--expanded': isExpanded(entry.key) },
-          ]"
-        >
-          <button
-            type="button"
-            class="agent-trace-row"
-            :aria-expanded="isExpanded(entry.key)"
-            @click="toggleEntry(entry.key)"
+        </button>
+        <template v-if="isTurnOpen(turn.turn)">
+          <div
+            v-for="entry in turn.entries"
+            :key="entry.key"
+            class="agent-trace-entry"
+            :class="[
+              `agent-trace-entry--${entry.kind}`,
+              { 'agent-trace-entry--fail': entry.ok === false, 'agent-trace-entry--expanded': isExpanded(entry.key) },
+            ]"
           >
-            <span class="agent-trace-row-chevron" aria-hidden="true">{{ isExpanded(entry.key) ? "▾" : "▸" }}</span>
-            <span class="agent-trace-row-kind" :title="kindTitle(entry.kind)">{{ kindLabel(entry.kind) }}</span>
-            <span class="agent-trace-row-label">{{ entry.label }}</span>
-            <span v-if="entry.elapsedMs !== undefined" class="agent-trace-row-time">{{ formatElapsed(entry.elapsedMs) }}</span>
-          </button>
-          <pre v-if="isExpanded(entry.key)" class="agent-trace-detail">{{ entry.detail }}</pre>
-        </div>
+            <button
+              type="button"
+              class="agent-trace-row"
+              :aria-expanded="isExpanded(entry.key)"
+              @click="toggleEntry(entry.key)"
+            >
+              <span class="agent-trace-row-chevron" aria-hidden="true">{{ isExpanded(entry.key) ? "▾" : "▸" }}</span>
+              <span class="agent-trace-row-kind" :title="kindTitle(entry.kind)">{{ kindLabel(entry.kind) }}</span>
+              <span class="agent-trace-row-label">{{ entry.label }}</span>
+              <span v-if="entry.elapsedMs !== undefined" class="agent-trace-row-time">{{ formatElapsed(entry.elapsedMs) }}</span>
+            </button>
+            <pre v-if="isExpanded(entry.key)" class="agent-trace-detail">{{ entry.detail }}</pre>
+          </div>
+        </template>
+        <div v-else class="agent-trace-turn-summary">{{ turnSummary(turn) }}</div>
       </div>
     </div>
   </div>
@@ -49,6 +63,8 @@
 import { computed, ref, watch } from "vue";
 import { buildAgentTraceTurns, type AgentTraceEntry } from "../services/agentTraceTimeline";
 import type { AgentRoundGroupView } from "../services/agentRoundGroups";
+
+type TraceTurn = ReturnType<typeof buildAgentTraceTurns>[number];
 
 const props = withDefaults(
   defineProps<{
@@ -61,13 +77,54 @@ const props = withDefaults(
 
 const open = ref(false);
 const expandedKeys = ref<Set<string>>(new Set());
+/** 展开的轮次；默认只展开最新一轮，旧轮折叠成一行摘要 */
+const openTurns = ref<Set<number>>(new Set());
 
 const turns = computed(() => buildAgentTraceTurns(props.roundGroups));
 const totalEntries = computed(() => turns.value.reduce((sum, turn) => sum + turn.entries.length, 0));
 
-watch(turns, () => {
-  expandedKeys.value = new Set();
-});
+watch(
+  turns,
+  (next) => {
+    expandedKeys.value = new Set();
+    if (!next.length) {
+      openTurns.value = new Set();
+      return;
+    }
+    const known = new Set(next.map((t) => t.turn));
+    const stale = [...openTurns.value].some((t) => !known.has(t));
+    // 轮次集合变化说明换了新轨迹，重置为只展开最新一轮；否则自动展开新增轮次
+    if (stale) {
+      openTurns.value = new Set([next[next.length - 1].turn]);
+      return;
+    }
+    const last = next[next.length - 1].turn;
+    if (!openTurns.value.has(last)) {
+      openTurns.value = new Set([...openTurns.value, last]);
+    }
+  },
+  { immediate: true },
+);
+
+function isTurnOpen(turn: number): boolean {
+  return openTurns.value.has(turn);
+}
+
+function toggleTurn(turn: number) {
+  const next = new Set(openTurns.value);
+  if (next.has(turn)) next.delete(turn);
+  else next.add(turn);
+  openTurns.value = next;
+}
+
+function turnSummary(turn: TraceTurn): string {
+  const tools = turn.entries.filter((e) => e.kind === "tool").length;
+  const last = turn.entries[turn.entries.length - 1];
+  const parts: string[] = [];
+  if (tools) parts.push(`${tools} 个工具`);
+  if (last) parts.push(last.label);
+  return parts.join(" · ");
+}
 
 function isExpanded(key: string): boolean {
   return expandedKeys.value.has(key);
@@ -163,32 +220,6 @@ function formatElapsed(ms?: number): string {
 }
 
 .agent-trace-panel--embedded .agent-trace-body {
-  max-height: none;
-  margin-top: 0;
-  padding: 0;
-  border-radius: 0;
-  background: transparent;
-}
-
-.agent-trace-panel--embedded .agent-trace-body {
-  margin-top: 0;
-  max-height: none;
-  overflow: visible;
-  padding: 0;
-  border-radius: 0;
-  background: transparent;
-}
-
-.agent-trace-panel--embedded .agent-trace-body {
-  margin-top: 0;
-  max-height: none;
-  overflow: visible;
-  padding: 0;
-  border-radius: 0;
-  background: transparent;
-}
-
-.agent-trace-panel--embedded .agent-trace-body {
   margin-top: 0;
   max-height: none;
   overflow: visible;
@@ -216,10 +247,37 @@ function formatElapsed(ms?: number): string {
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
   margin-bottom: 4px;
-  padding: 2px 6px;
+  padding: 3px 6px;
+  border: none;
   border-radius: 4px;
   background: rgba(126, 182, 255, 0.06);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 100ms ease;
+}
+
+.agent-trace-turn-head:hover {
+  background: rgba(126, 182, 255, 0.14);
+}
+
+.agent-trace-turn-chevron {
+  font-size: 9px;
+  color: rgba(126, 182, 255, 0.55);
+  width: 10px;
+  flex-shrink: 0;
+}
+
+.agent-trace-turn-summary {
+  margin: -2px 0 2px 24px;
+  font-size: 10.5px;
+  color: rgba(139, 148, 158, 0.55);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .agent-trace-turn-label {

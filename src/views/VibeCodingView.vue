@@ -1707,9 +1707,21 @@ watch(sessionList, (list) => {
 });
 
 function handleCloseSessionTab(sessionId: string) {
+  // 方案 A：tab 的 × 只关闭 tab（从已打开列表移除），不删除会话、不弹确认框。
+  // 会话仍保留在侧边栏/文件面板，可重新打开。
+  const wasActive = sessionId === activeSessionId.value;
   openedSessionIds.value = openedSessionIds.value.filter((id) => id !== sessionId);
   persistOpenedSessionTabs();
-  void removeSession(sessionId);
+
+  // 关闭的是当前激活 tab：切到下一个已打开 tab，避免聊天区仍显示已关闭会话。
+  if (wasActive) {
+    const next = openedSessions.value[0];
+    if (next) {
+      handleSwitchSession(next.id);
+    } else {
+      handleStartNewSession();
+    }
+  }
 }
 
 const chatSessionHooks: {
@@ -2158,6 +2170,9 @@ const tokenDetailData = computed(() => {
   let writtenFilesSet: Set<string> | null = null;
   let imageCount = 0;
   let agentTurns = 0;
+  let cachePromptTokens = 0;
+  let cacheHitTokens = 0;
+  let cacheHitRatio: number | undefined;
 
   for (const msg of chatMessages.value) {
     if (msg.role === "assistant") {
@@ -2179,6 +2194,12 @@ const tokenDetailData = computed(() => {
       if (msg.totalTurns && msg.totalTurns > agentTurns) {
         agentTurns = msg.totalTurns;
       }
+      if (msg.cacheUsage) {
+        cachePromptTokens += msg.cacheUsage.promptTokens ?? 0;
+        cacheHitTokens +=
+          (msg.cacheUsage.cachedTokens ?? 0) + (msg.cacheUsage.cacheReadTokens ?? 0);
+        if (msg.cacheUsage.hitRatio !== undefined) cacheHitRatio = msg.cacheUsage.hitRatio;
+      }
     }
     if (msg.imageCount && msg.imageCount > 0) {
       imageCount += msg.imageCount;
@@ -2196,6 +2217,9 @@ const tokenDetailData = computed(() => {
     writtenFilesCount: writtenFilesSet?.size ?? 0,
     imageCount,
     agentTurns,
+    cachePromptTokens,
+    cacheHitTokens,
+    cacheHitRatio,
   };
 });
 

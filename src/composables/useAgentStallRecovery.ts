@@ -279,6 +279,7 @@ export function useAgentStallRecovery(deps: UseAgentStallRecoveryDeps) {
     const msg = chatMessages.value.find((m) => m.id === assistantMsgId);
     if (!msg || !canResumeAgentRun(msg)) return;
 
+    debugLog(`[stall-recover] startAutoResumeCountdown msgId=${assistantMsgId}, error=${errorMessage}`);
     autoResumeTargetId.value = assistantMsgId;
     autoResumeSecondsLeft.value = resolveAutoResumeSeconds(
       errorMessage || msg.agentFailureReason || "",
@@ -287,6 +288,7 @@ export function useAgentStallRecovery(deps: UseAgentStallRecoveryDeps) {
       if (autoResumeSecondsLeft.value <= 1) {
         const targetId = autoResumeTargetId.value;
         cancelAutoResume();
+        debugLog(`[stall-recover] autoResume countdown fired -> resumeAgentRun msgId=${targetId}`);
         if (targetId && !chatSending.value) void resumeAgentRun(targetId);
         return;
       }
@@ -298,6 +300,7 @@ export function useAgentStallRecovery(deps: UseAgentStallRecoveryDeps) {
     cancelAutoResume();
     if (!assistantMsgId || !configReady.value || !projectOpened.value) return;
 
+    debugLog(`[auto-resume] scheduleAutoResume msgId=${assistantMsgId}, error=${errorMessage}`);
     autoResumeSchedulePending = true;
 
     const run = () => {
@@ -400,6 +403,7 @@ export function useAgentStallRecovery(deps: UseAgentStallRecoveryDeps) {
   ) {
     const normalizedMessage = formatAgentTransportErrorMessage(message);
     const recoverable = isRecoverableAgentError(normalizedMessage);
+    debugLog(`[stall-recover] applyRecoverableAgentFailure msgId=${assistantMsg.id}, message=${normalizedMessage}, recoverable=${recoverable}, noAutoResume=${!!options?.noAutoResume}`);
     assistantMsg.agentFailed = true;
     assistantMsg.agentRecoverable = recoverable;
     assistantMsg.agentFailureReason = normalizedMessage;

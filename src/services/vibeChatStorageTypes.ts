@@ -116,6 +116,14 @@ export type PersistedChatMessage = {
   /** Token usage tracking */
   streamChars?: number;
   contextChars?: number;
+  /** Provider-reported cache usage for this run (aggregated across turns). */
+  cacheUsage?: {
+    promptTokens?: number;
+    cachedTokens?: number;
+    cacheReadTokens?: number;
+    cacheCreationTokens?: number;
+    hitRatio?: number;
+  };
   /** In-flight agent UI (persisted so background runs survive session switch). */
   agentPhase?: string;
   status?: string;

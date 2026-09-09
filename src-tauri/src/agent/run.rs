@@ -636,7 +636,14 @@ pub async fn agent_run(
                 "turn": turn, "maxTurns": run_state.segment.max_turns,
                 "assistantText": assistant_text, "toolCalls": tool_calls,
                 "hasToolCalls": !is_final, "isFinal": is_final,
-                "options": turn_output.options
+                "options": turn_output.options,
+                "usage": {
+                  "promptTokens": turn_output.usage.prompt_tokens,
+                  "cachedTokens": turn_output.usage.cached_tokens,
+                  "cacheReadTokens": turn_output.usage.cache_read_tokens,
+                  "cacheCreationTokens": turn_output.usage.cache_creation_tokens,
+                  "hitRatio": turn_output.usage.hit_ratio()
+                }
               }
             }),
         );

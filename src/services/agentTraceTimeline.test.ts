@@ -56,14 +56,14 @@ describe("buildAgentTraceTurns", () => {
     expect(turn.entries.map((entry) => entry.kind)).toEqual([
       "request",
       "request",
-      "request",
       "response",
       "tool",
     ]);
-    expect(turn.entries[0]?.label).toContain("帮我改这个文件");
-    expect(turn.entries[2]?.label).toContain("发给模型");
-    expect(turn.entries[3]?.label).toContain("好的，我来修改");
-    expect(turn.entries[4]?.label).toContain("src/a.ts");
+    expect(turn.entries[1]?.label).toContain("发给模型");
+    expect(turn.entries[1]?.label).toContain("最新的这条");
+    expect(turn.entries[0]?.label).toContain("2 条历史消息");
+    expect(turn.entries[2]?.label).toContain("好的，我来修改");
+    expect(turn.entries[3]?.label).toContain("src/a.ts");
   });
 
   it("marks failed tools and skips turns without any entries", () => {

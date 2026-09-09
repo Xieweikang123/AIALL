@@ -80,6 +80,15 @@ export type VibeAgentEvent =
         isFinal: boolean;
         /** Structured choice options the model emitted via `<ai_options>` block. */
         options?: string[];
+        /** Token usage reported by the provider for this turn (cache accounting). */
+        usage?: {
+          promptTokens?: number;
+          cachedTokens?: number;
+          cacheReadTokens?: number;
+          cacheCreationTokens?: number;
+          /** Best-effort cache-hit ratio in [0,1], when the provider reported enough data. */
+          hitRatio?: number;
+        };
       };
     }
   | { type: "error"; data: { message: string } }

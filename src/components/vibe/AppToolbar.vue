@@ -569,7 +569,7 @@ async function refreshProjectHistoryList() {
   align-items: center;
   gap: 10px;
   padding: 0 12px;
-  background: rgba(13, 17, 23, 0.98);
+  background: rgba(7, 7, 7, 0.98);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
   min-height: 44px;
@@ -590,7 +590,7 @@ async function refreshProjectHistoryList() {
   align-items: center;
   justify-content: center;
   border-radius: 6px;
-  background: #21262d;
+  background: #161616;
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: #c9d1d9;
 }

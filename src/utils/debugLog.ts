@@ -10,6 +10,12 @@ export function setDebugLogProjectRoot(root: string) {
   projectRoot = root;
 }
 
+/** Web 模式（浏览器 + agent-server）无 Tauri invoke，debugLog 写不进 AppData；
+ *  fallback 到浏览器 console，便于在 DevTools 里定位运行期触发源。 */
+function isTauriRuntime(): boolean {
+  return typeof window !== "undefined" && !!(window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+}
+
 type PendingLine = { path: string; line: string };
 let pendingLogs: PendingLine[] = [];
 let crashHandlersInstalled = false;
@@ -58,6 +64,16 @@ async function flushPending() {
 }
 
 export function debugLog(label: string, data?: unknown) {
+  // Web 模式无 Tauri invoke：直接打到浏览器 console，便于 DevTools 定位运行期触发源。
+  if (!isTauriRuntime()) {
+    const line =
+      data !== undefined
+        ? `${label}: ${typeof data === "string" ? data : JSON.stringify(data)}`
+        : label;
+    // eslint-disable-next-line no-console
+    console.log(`[debug] ${line}`);
+    return;
+  }
   void tryInvoke(LOG_FILE, label, data);
 }
 

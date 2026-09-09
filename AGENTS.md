@@ -212,6 +212,17 @@ AIALL 的 Vibe 会话文件**不在项目目录内**，存储在 AppData Roaming
 - **听用户的现象信号**——"新文件没高亮 + 旧文件残留"这类描述直接指向渲染层（值是新的、UI 没跟上），别绕回状态写入链
 - **修完反向验证**——修"不更新"时也要确认"能正常更新"的路径没被破坏（如点已打开文件、切回同一文件）
 
+## Agent 运行中断与内容丢失排障准则
+
+处理"Agent 回复变空泡 / 运行完回复内容丢了 / 该出的恢复条没出现"类问题时：
+
+- **先比对三层源，别急着改代码**——磁盘会话文件（`%APPDATA%\aiall\vibe-chat-sessions\chat-*.json`）、debug 日志里的流式 patch 记录（`patchAssistantMsg` / `flushPendingStreamDelta` 时间线）、内存显示内容。磁盘上只有发送瞬间的空壳（content 空、statusLog 只有第一行、tools/roundGroups 皆无）= 运行期从未落盘，不是"存了又丢"
+- **记住落盘契约**——`schedulePersistDuringAgentRun` 是 no-op（大会话边跑边写会卡主线程），运行期不落盘是有意设计；收尾落盘依赖前端收到 done/error 事件。前端丢失（整页刷新 / 页面关闭）→ 流式内容与收尾落盘一起随内存消失
+- **日志断点即中断点**——日志突然停在某 phase（只有周期性轮询、再无 done/error/新 delta）就是运行中断的位置；Agent 改自身源码触发整页刷新（HMR / index 变更）是典型诱因
+- **活干完了 ≠ 聊天文本能救回**——工具/补丁文件的落盘时间线可证明实现已完整；聊天回复文本只存在已丢失页面的内存里，无法恢复，别在这条上浪费时间
+- **零进度空壳不出恢复条是正常门控**——恢复判定（`agentRecovery.ts` 的 `hasRecoverableAgentProgress`）要求完成轮次 / roundGroups / 工具记录任一存在；空壳被当作可复用空槽，不标失败、不给续跑入口。看到空泡先查磁盘源，别先怀疑判定逻辑坏了
+- **改进方向对准单点依赖**——根因是收尾落盘单点依赖前端存活的 done 事件；应考虑运行时侧定期快照、页面重挂载后同步运行状态，而不是给空壳硬开恢复口
+
 ## 文件膨胀约束
 
 `src/composables/useAgentRun.ts` 已拆出 `useAgentChainScroll.ts`、`useAgentStreamPatch.ts`、`useAgentEventHandlers.ts`、`useAgentSSEConnection.ts` 等子 composable，主文件负责 Agent 运行编排并委托分发。

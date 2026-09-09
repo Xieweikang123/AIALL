@@ -311,6 +311,18 @@ function handleTurnResponseEvent(event: EventOf<"turn_response">, assistantMsg: 
       fullText: label,
     }));
   }
+  // Aggregate provider-reported cache usage across turns for this run.
+  if (event.data.usage) {
+    const u = event.data.usage;
+    const prev = assistantMsg.cacheUsage;
+    assistantMsg.cacheUsage = {
+      promptTokens: (prev?.promptTokens ?? 0) + (u.promptTokens ?? 0),
+      cachedTokens: (prev?.cachedTokens ?? 0) + (u.cachedTokens ?? 0),
+      cacheReadTokens: (prev?.cacheReadTokens ?? 0) + (u.cacheReadTokens ?? 0),
+      cacheCreationTokens: (prev?.cacheCreationTokens ?? 0) + (u.cacheCreationTokens ?? 0),
+      hitRatio: u.hitRatio,
+    };
+  }
   if (shouldMinimizeRunUiPatch(assistantMsg)) {
     scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
     return;
@@ -320,6 +332,7 @@ function handleTurnResponseEvent(event: EventOf<"turn_response">, assistantMsg: 
     content: assistantMsg.content,
     activityExpanded: assistantMsg.activityExpanded,
     suggestedOptions: assistantMsg.suggestedOptions,
+    cacheUsage: assistantMsg.cacheUsage,
   });
   if (isAgentRunning(assistantMsg)) scrollStatusLogToBottomInternal(msgId);
 }

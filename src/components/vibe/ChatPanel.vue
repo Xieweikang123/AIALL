@@ -433,6 +433,14 @@
                     <span>Agent 轮次</span>
                     <span>{{ tokenDetailData.agentTurns }}</span>
                   </div>
+                  <div v-if="tokenDetailData.cacheHitRatio !== undefined" class="token-detail-row">
+                    <span>缓存命中率</span>
+                    <span>{{ Math.round(tokenDetailData.cacheHitRatio * 100) }}%</span>
+                  </div>
+                  <div v-if="tokenDetailData.cacheHitTokens > 0" class="token-detail-row">
+                    <span>缓存命中 token</span>
+                    <span>{{ tokenDetailData.cacheHitTokens.toLocaleString() }}</span>
+                  </div>
                   <div class="token-detail-row">
                     <span>消息总数</span>
                     <span>{{ tokenDetailData.totalMessages }}</span>
@@ -733,6 +741,9 @@ interface TokenDetailData {
   writtenFilesCount: number;
   imageCount: number;
   agentTurns: number;
+  cachePromptTokens: number;
+  cacheHitTokens: number;
+  cacheHitRatio?: number;
 }
 
 interface Props {
