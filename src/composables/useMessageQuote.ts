@@ -144,6 +144,10 @@ export function useMessageQuote(options: UseMessageQuoteOptions) {
 
   function onDocumentClick(event: MouseEvent) {
     if (!showQuoteButton.value) return;
+    // Shift+点击是「扩展选区」意图，不是关闭按钮：不隐藏也不记 quoteHiddenAt，
+    // 否则随后的 mouseup 会被 shouldIgnoreQuoteSelectEvent 的 150ms 防抖拦掉，
+    // 导致 Shift 扩展出的长选区不再弹出引用按钮。
+    if (event.shiftKey) return;
     if (eventComposedPathIncludes(event, ".quote-floating")) return;
     if (quoteButtonSource.value === "editor" && eventComposedPathIncludes(event, ".monaco-editor")) return;
     hideQuoteButtonNow();
