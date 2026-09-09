@@ -297,8 +297,8 @@ function bindModels() {
   const uriBase = props.filePath?.replace(/\\/g, "/") || "untitled";
 
   clearHunkUi();
-  originalModel?.dispose();
-  modifiedModel?.dispose();
+  const prevOriginal = originalModel;
+  const prevModified = modifiedModel;
 
   originalModel = monaco.editor.createModel(
     props.original,
@@ -312,6 +312,9 @@ function bindModels() {
   );
 
   diffEditor.setModel({ original: originalModel, modified: modifiedModel });
+
+  prevOriginal?.dispose();
+  prevModified?.dispose();
 
   setTimeout(() => {
     if (!diffEditor) return;

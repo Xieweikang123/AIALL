@@ -953,8 +953,8 @@ describe("agent connect stall", () => {
   });
 
   it("builds helpful connect stall message", () => {
-    expect(agentConnectStallMessage(true, "web")).toContain("Tauri");
-    expect(agentConnectStallMessage(false, "web")).toContain("npm run dev");
+    expect(agentConnectStallMessage(true, "web")).toContain("agent-server");
+    expect(agentConnectStallMessage(false, "web")).toContain("agent-server");
     expect(agentConnectStallMessage(true, "tauri")).not.toContain("sidecar");
     expect(agentConnectStallMessage(false, "tauri")).toContain("重启应用");
   });

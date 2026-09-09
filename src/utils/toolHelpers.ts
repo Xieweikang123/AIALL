@@ -185,4 +185,8 @@ export type AgentToolStep = {
   lineDelta?: number;
   fullResult?: string;
   args?: Record<string, unknown>;
+  /** Epoch ms when the tool started. */
+  startTs?: number;
+  /** Epoch ms when the tool finished. */
+  endTs?: number;
 };

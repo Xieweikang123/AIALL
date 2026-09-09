@@ -1,5 +1,5 @@
 <template>
-  <div class="session-tabs-bar" :class="{ 'session-tabs-bar--empty': !sessionList.length }">
+  <div class="session-tabs-bar">
     <div class="session-tabs-scroll">
       <button
         v-for="s in sessionList"
@@ -13,28 +13,18 @@
         :title="sessionTabTitle(s)"
         @click="$emit('switch-session', s.id)"
       >
-        <span class="session-tab-status" aria-hidden="true">
+        <span v-if="tabStatus(s)" class="session-tab-status" aria-hidden="true">
           <span
-            v-if="s.status === 'completed' && !sessionSendingIds.includes(s.id)"
-            class="status-dot status-dot--completed"
-            title="已完成"
-          />
-          <span
-            v-else-if="s.status === 'failed' && !sessionSendingIds.includes(s.id)"
-            class="status-dot status-dot--failed"
-            title="失败"
-          />
-          <span
-            v-else-if="s.status === 'interrupted' && !sessionSendingIds.includes(s.id)"
-            class="status-dot status-dot--interrupted"
-            title="已中断"
-          />
-          <span
-            v-else-if="sessionSendingIds.includes(s.id)"
+            v-if="tabStatus(s) === 'running'"
             class="status-dot status-dot--running"
-            title="运行中"
+            :title="STATUS_TITLES.running"
           ><span class="session-spinner" /></span>
-          <span v-else class="status-dot" />
+          <span
+            v-else
+            class="status-dot"
+            :class="`status-dot--${tabStatus(s)}`"
+            :title="STATUS_TITLES[tabStatus(s)!]"
+          />
         </span>
         <span
           class="session-tab-title"
@@ -87,6 +77,23 @@ defineEmits<{
   (e: "remove-session", sessionId: string): void;
 }>();
 
+type TabStatus = "running" | "completed" | "failed" | "interrupted";
+
+const STATUS_TITLES: Record<TabStatus, string> = {
+  running: "运行中",
+  completed: "已完成",
+  failed: "失败",
+  interrupted: "已中断",
+};
+
+function tabStatus(s: VibeChatSessionMeta): TabStatus | null {
+  if (props.sessionSendingIds.includes(s.id)) return "running";
+  if (s.status === "completed" || s.status === "failed" || s.status === "interrupted") {
+    return s.status;
+  }
+  return null;
+}
+
 function sessionTabTitle(s: VibeChatSessionMeta): string {
   const base = s.title || "新会话";
   return s.messageCount ? `${base} · ${s.messageCount} 条消息` : base;
@@ -94,15 +101,14 @@ function sessionTabTitle(s: VibeChatSessionMeta): string {
 </script>
 
 <style scoped>
+/* 内嵌在顶部工具栏行内（AppToolbar 的 session-tabs 插槽），不占独立高度 */
 .session-tabs-bar {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-shrink: 0;
-  min-height: 38px;
-  padding: 5px 10px;
-  background: rgba(13, 17, 23, 0.98);
-  border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
 }
 
 .session-tabs-scroll {
@@ -120,24 +126,25 @@ function sessionTabTitle(s: VibeChatSessionMeta): string {
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
-  max-width: 220px;
-  padding: 5px 8px;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  background: transparent;
-  color: rgba(201, 209, 217, 0.8);
+  max-width: 200px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(201, 209, 217, 0.72);
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 
 .session-tab:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.92);
 }
 
 .session-tab.active {
-  background: rgba(88, 166, 255, 0.12);
-  border-color: rgba(88, 166, 255, 0.25);
+  background: rgba(88, 166, 255, 0.16);
+  border-color: rgba(88, 166, 255, 0.3);
   color: rgba(200, 225, 255, 0.98);
 }
 
@@ -157,7 +164,7 @@ function sessionTabTitle(s: VibeChatSessionMeta): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 500;
   line-height: 1.3;
 }
@@ -192,16 +199,16 @@ function sessionTabTitle(s: VibeChatSessionMeta): string {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  /* 全局 button 规则（vibe-coding.scss）带 padding: 8px 16px，会把 26px 定宽按钮的内容区挤成 0，图标消失 */
+  /* 全局 button 规则（vibe-coding.scss）带 padding: 8px 16px，会把 28px 定宽按钮的内容区挤成 0，图标消失 */
   padding: 0;
-  width: 26px;
-  height: 26px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 7px;
-  background: rgba(88, 166, 255, 0.1);
-  color: #79c0ff;
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.5);
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 
 .session-tabs-new svg {
@@ -210,8 +217,9 @@ function sessionTabTitle(s: VibeChatSessionMeta): string {
 }
 
 .session-tabs-new:hover {
-  background: rgba(88, 166, 255, 0.2);
-  color: #a5d0ff;
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .status-dot {

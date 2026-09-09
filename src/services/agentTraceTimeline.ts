@@ -8,6 +8,8 @@ export type AgentTraceEntry = {
   /** Extended body (JSON / full text) revealed when the row is expanded. */
   detail: string;
   ok?: boolean;
+  /** Elapsed ms for this entry, when a start/end timestamp pair is available. */
+  elapsedMs?: number;
 };
 
 export type AgentTraceTurn = {
@@ -66,6 +68,10 @@ function responseEntry(turn: AgentRoundGroupView): AgentTraceEntry[] {
   const label = response.isFinal
     ? `最终回复（${text.length} 字符）`
     : `轮次回复（${text.length} 字符，将续跑）`;
+  const elapsedMs =
+    response.ts !== undefined && turn.request?.ts !== undefined
+      ? response.ts - turn.request.ts
+      : undefined;
   return [
     {
       key: `resp-${turn.turn}`,
@@ -73,6 +79,7 @@ function responseEntry(turn: AgentRoundGroupView): AgentTraceEntry[] {
       label: text ? `${label}：${text.replace(/\s+/g, " ").slice(0, 120)}` : `${label}：（空，仅工具调用）`,
       detail: truncateDetail(text || "（本轮无正文，仅工具调用）"),
       ok: true,
+      elapsedMs,
     },
   ];
 }
@@ -92,6 +99,10 @@ function toolEntries(turn: AgentRoundGroupView): AgentTraceEntry[] {
         .join("\n\n"),
     ),
     ok: tool.ok,
+    elapsedMs:
+      tool.startTs !== undefined && tool.endTs !== undefined
+        ? tool.endTs - tool.startTs
+        : undefined,
   }));
 }
 

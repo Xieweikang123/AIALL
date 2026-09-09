@@ -611,9 +611,13 @@ export function isAgentTimelineAnswerStreaming(
 ): boolean {
   if (!isRunning) return false;
   if (msg.agentPhase === "streaming_model") return true;
-  // Live narrative preview during tool/wait phases is not model streaming — avoid
-  // ChatMarkdown minHeight lock that leaves a large blank gap above tool steps.
-  return hasRunningTool && Boolean(normalizeBubbleText(msg.content || ""));
+  const content = normalizeBubbleText(msg.content || "");
+  // Once a substantive answer exists during the run, keep the height lock held
+  // across tool↔stream phase switches. Releasing it on tool gaps makes the
+  // markdown collapse and the chat list jump up/down. Short live narrative
+  // previews still skip the lock to avoid a large blank gap above tool steps.
+  if (content.length >= SUBSTANTIVE_MIN_CHARS) return true;
+  return hasRunningTool && Boolean(content);
 }
 
 /** Resolve the text shown in the assistant chat bubble (with fallbacks for agent runs). */

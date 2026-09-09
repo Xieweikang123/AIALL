@@ -40,7 +40,7 @@
           class="msg-toolbar"
         >
           <button
-            v-if="(m.role === 'user' || (m.role === 'assistant' && !ctx.isAgentRunning(m)))"
+            v-if="(m.role === 'user' || (m.role === 'assistant' && !ctx.isAgentRunning(m) && !ctx.hasAgentActivity(m)))"
             type="button"
             class="ghost small"
             title="复制此消息"
@@ -73,16 +73,7 @@
           >
             重发
           </button>
-          <button
-            v-if="ctx.canResumeAgentRun(m) && !ctx.isPartialWrittenRunInterrupt(m) && !ctx.isAgentRunning(m)"
-            type="button"
-            class="ghost small resume-btn"
-            title="从断点继续运行，保留已完成步骤"
-            :disabled="!ctx.configReady.value || !ctx.projectOpened.value || ctx.chatSending.value"
-            @click="ctx.resumeAgentRun(m.id)"
-          >
-            {{ ctx.resolveAgentResumeButtonLabel(m) }}
-          </button>
+          <!-- 恢复运行统一由下方 agent-recovery-banner 提供（含失败原因说明），悬浮工具栏不再重复 -->
         </div>
       </div>
       <div

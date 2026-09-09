@@ -9,6 +9,8 @@ export type AgentTurnRequestDetail = {
   contextMessages: number;
   contextChars: number;
   messages: Array<{ role: string; content: string; toolCalls?: string }>;
+  /** Epoch ms when the request was sent to the model. */
+  ts?: number;
 };
 
 export type AgentTurnResponseDetail = {
@@ -16,6 +18,8 @@ export type AgentTurnResponseDetail = {
   toolCalls: Array<{ id: string; name: string; arguments: string }>;
   hasToolCalls: boolean;
   isFinal: boolean;
+  /** Epoch ms when the response arrived from the model. */
+  ts?: number;
 };
 
 export type AgentRoundGroup = {
@@ -44,6 +48,10 @@ export type AgentRoundTool = {
   lineDelta?: number;
   fullResult?: string;
   args?: Record<string, unknown>;
+  /** Epoch ms when the tool started. */
+  startTs?: number;
+  /** Epoch ms when the tool finished. */
+  endTs?: number;
 };
 
 export type AgentRoundGroupView = AgentRoundGroup & {
