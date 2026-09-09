@@ -3510,11 +3510,13 @@ async function openProjectByPath(dirPath: string) {
     const chatState = await loadProjectChatState(normalized);
     if (gen !== projectSwitchGeneration) return;
 
+    // 先填充 sessionList，让 watch(sessionList) 的 tab 恢复逻辑先跑（此时 openedSessionIds 仍为空），
+    // 再激活当前会话，避免 watch(activeSessionId) 抢先填非空导致 localStorage 里其他 tab 恢复被跳过。
+    refreshSessionList(normalized);
     activateSession(
       chatState.activeSessionId,
       normalizeChatMessages(chatState.messages, { stripTransientUi: true }),
     );
-    refreshSessionList(normalized);
 
     log(`chat-active(${chatState.activeSessionId}, ${chatState.messages.length}msgs)`);
 
