@@ -1529,7 +1529,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .server-mode {
   border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
-  background: rgba(17, 24, 39, 0.5);
+  background: rgba(10, 10, 10, 0.6);
   border-radius: 12px;
   padding: 16px;
   margin-bottom: 16px;
@@ -1631,7 +1631,7 @@ onBeforeUnmount(() => {
   padding: 6px 10px;
   border: 1px solid var(--border-2, rgba(255, 255, 255, 0.14));
   border-radius: 6px;
-  background: rgba(2, 6, 23, 0.5);
+  background: rgba(5, 5, 5, 0.6);
   color: var(--text, rgba(255, 255, 255, 0.92));
   outline: none;
   flex: 1 1 160px;
@@ -1666,14 +1666,14 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border-2, rgba(255, 255, 255, 0.14));
   border-radius: 6px;
   font-size: 13px;
-  background: rgba(2, 6, 23, 0.5);
+  background: rgba(5, 5, 5, 0.6);
   color: var(--text, rgba(255, 255, 255, 0.92));
   outline: none;
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 .server-field input:focus {
   border-color: var(--primary, #58a6ff);
-  background: rgba(2, 6, 23, 0.75);
+  background: rgba(5, 5, 5, 0.85);
 }
 .server-form-actions {
   grid-column: 1 / -1;
@@ -1690,15 +1690,15 @@ onBeforeUnmount(() => {
   margin: 0;
   overflow: auto;
   overscroll-behavior: auto;
-  background: radial-gradient(900px 520px at 18% 8%, rgba(31, 111, 235, 0.14), transparent 62%),
-    radial-gradient(900px 560px at 90% 0%, rgba(130, 80, 223, 0.18), transparent 60%),
-    radial-gradient(900px 560px at 50% 100%, rgba(26, 127, 55, 0.16), transparent 55%),
-    #0b1220;
+  background: radial-gradient(900px 520px at 18% 8%, rgba(31, 111, 235, 0.07), transparent 62%),
+    radial-gradient(900px 560px at 90% 0%, rgba(130, 80, 223, 0.09), transparent 60%),
+    radial-gradient(900px 560px at 50% 100%, rgba(26, 127, 55, 0.08), transparent 55%),
+    #000000;
   color: rgba(255, 255, 255, 0.92);
 }
 
 .ai-config-page {
-  --bg: rgba(17, 24, 39, 0.78);
+  --bg: rgba(10, 10, 10, 0.9);
   --text: rgba(255, 255, 255, 0.92);
   --muted: rgba(255, 255, 255, 0.72);
   --subtle: rgba(255, 255, 255, 0.6);
@@ -1838,7 +1838,7 @@ onBeforeUnmount(() => {
   padding: 4px;
   border-radius: 10px;
   border: 1px solid var(--border);
-  background: rgba(22, 30, 48, 0.98);
+  background: rgba(18, 18, 18, 0.98);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   display: flex;
   flex-direction: column;
@@ -1906,7 +1906,7 @@ button.primary {
   padding: 4px;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: rgba(17, 24, 39, 0.45);
+  background: rgba(10, 10, 10, 0.55);
   backdrop-filter: blur(8px);
   overflow-x: auto;
   scrollbar-width: thin;
@@ -1959,7 +1959,7 @@ button.primary {
   border-radius: 14px;
   padding: 22px;
   min-width: 0;
-  background: rgba(17, 24, 39, 0.65);
+  background: rgba(10, 10, 10, 0.72);
   backdrop-filter: blur(12px);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25), 0 1px 3px rgba(0, 0, 0, 0.15);
   margin-top: 16px;
@@ -2149,7 +2149,7 @@ button.primary {
 }
 
 .preset-select option {
-  background: #161b22;
+  background: #0a0a0a;
   color: rgba(255, 255, 255, 0.92);
   padding: 6px 10px;
 }
@@ -2245,7 +2245,7 @@ button.primary {
   border-radius: 10px;
   padding: 10px 12px;
   font-size: 14px;
-  background: rgba(2, 6, 23, 0.5);
+  background: rgba(5, 5, 5, 0.6);
   color: var(--text, rgba(255, 255, 255, 0.92));
   outline: none;
   transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
@@ -2261,7 +2261,7 @@ button.primary {
 .field select:focus {
   border-color: rgba(88, 166, 255, 0.5);
   box-shadow: 0 0 0 3px var(--ring);
-  background: rgba(2, 6, 23, 0.75);
+  background: rgba(5, 5, 5, 0.85);
 }
 
 .file-input {
@@ -2269,9 +2269,9 @@ button.primary {
 }
 
 .drop-zone {
-  border: 1px dashed rgba(17, 24, 39, 0.22);
+  border: 1px dashed rgba(255, 255, 255, 0.16);
   border-radius: 12px;
-  background: rgba(17, 24, 39, 0.02);
+  background: rgba(255, 255, 255, 0.03);
   padding: 16px;
   min-height: 88px;
   display: flex;
@@ -2288,7 +2288,7 @@ button.primary {
 
 .drop-zone-text {
   text-align: center;
-  color: rgba(17, 24, 39, 0.64);
+  color: rgba(255, 255, 255, 0.55);
   font-size: 13px;
 }
 
@@ -2389,17 +2389,17 @@ button.primary:active:not(:disabled) {
 }
 
 button.secondary {
-  background: rgba(17, 24, 39, 0.06);
+  background: rgba(255, 255, 255, 0.06);
   color: var(--text);
   border: 1px solid var(--border);
 }
 
 button.secondary:hover:not(:disabled) {
-  background: rgba(17, 24, 39, 0.1);
+  background: rgba(255, 255, 255, 0.1);
 }
 
 button.secondary:hover:not(:disabled) {
-  background: rgba(17, 24, 39, 0.1);
+  background: rgba(255, 255, 255, 0.1);
   box-shadow: none;
 }
 
@@ -2409,14 +2409,14 @@ a.secondary.link-btn {
   justify-content: center;
   text-decoration: none;
   box-sizing: border-box;
-  background: rgba(17, 24, 39, 0.06);
+  background: rgba(255, 255, 255, 0.06);
   color: var(--text);
   box-shadow: none;
   border: 1px solid var(--border);
 }
 
 a.secondary.link-btn:hover:not(:disabled) {
-  background: rgba(17, 24, 39, 0.1);
+  background: rgba(255, 255, 255, 0.1);
   box-shadow: none;
 }
 
@@ -2482,7 +2482,7 @@ button.danger:hover:not(:disabled) {
 .inline-test-prompt {
   flex: 1 1 auto;
   min-width: 0;
-  background: rgba(2, 6, 23, 0.5);
+  background: rgba(5, 5, 5, 0.6);
   color: var(--text, rgba(255, 255, 255, 0.92));
   border: 1px solid var(--border-2, rgba(255, 255, 255, 0.14));
   border-radius: 8px;
@@ -2493,7 +2493,7 @@ button.danger:hover:not(:disabled) {
 
 .inline-test-prompt:focus {
   border-color: var(--primary, #58a6ff);
-  background: rgba(2, 6, 23, 0.75);
+  background: rgba(5, 5, 5, 0.85);
 }
 
 .compact-test-btn {
@@ -2503,7 +2503,7 @@ button.danger:hover:not(:disabled) {
 
 .inline-test-result {
   margin-top: 14px;
-  background: rgba(2, 6, 23, 0.4);
+  background: rgba(5, 5, 5, 0.5);
   border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
   border-radius: 8px;
   padding: 12px;
@@ -2587,7 +2587,7 @@ button.danger:hover:not(:disabled) {
 }
 
 pre {
-  background: rgba(17, 24, 39, 0.03);
+  background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px;
@@ -2603,7 +2603,7 @@ pre {
   font-size: 12px;
   padding: 1px 5px;
   border-radius: 4px;
-  background: rgba(17, 24, 39, 0.05);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 
@@ -2670,15 +2670,15 @@ pre {
 @media (prefers-color-scheme: dark) {
   :global(html),
   :global(body) {
-    background: radial-gradient(900px 520px at 18% 8%, rgba(31, 111, 235, 0.14), transparent 62%),
-      radial-gradient(900px 560px at 90% 0%, rgba(130, 80, 223, 0.18), transparent 60%),
-      radial-gradient(900px 560px at 50% 100%, rgba(26, 127, 55, 0.16), transparent 55%),
-      #0b1220;
+    background: radial-gradient(900px 520px at 18% 8%, rgba(31, 111, 235, 0.07), transparent 62%),
+      radial-gradient(900px 560px at 90% 0%, rgba(130, 80, 223, 0.09), transparent 60%),
+      radial-gradient(900px 560px at 50% 100%, rgba(26, 127, 55, 0.08), transparent 55%),
+      #000000;
     color: rgba(255, 255, 255, 0.92);
   }
 
   .ai-config-page {
-    --bg: rgba(17, 24, 39, 0.78);
+    --bg: rgba(10, 10, 10, 0.9);
     --text: rgba(255, 255, 255, 0.92);
     --muted: rgba(255, 255, 255, 0.72);
     --subtle: rgba(255, 255, 255, 0.6);
@@ -2690,12 +2690,12 @@ pre {
   }
 
   .tabs {
-    background: rgba(17, 24, 39, 0.6);
+    background: rgba(10, 10, 10, 0.7);
     border-color: rgba(255, 255, 255, 0.1);
   }
 
   .card {
-    background: rgba(17, 24, 39, 0.65);
+    background: rgba(10, 10, 10, 0.72);
     border-color: rgba(255, 255, 255, 0.1);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.15);
   }
@@ -2720,7 +2720,7 @@ pre {
   }
 
   .provider-chip {
-    background: rgba(2, 6, 23, 0.35);
+    background: rgba(5, 5, 5, 0.45);
     border-color: rgba(255, 255, 255, 0.12);
     color: rgba(255, 255, 255, 0.72);
   }
@@ -2743,7 +2743,7 @@ pre {
   .field input,
   .field textarea,
   .field select {
-    background: rgba(2, 6, 23, 0.5);
+    background: rgba(5, 5, 5, 0.6);
     color: rgba(255, 255, 255, 0.92);
     border-color: rgba(255, 255, 255, 0.14);
   }
@@ -2756,7 +2756,7 @@ pre {
   .field input:focus,
   .field textarea:focus,
   .field select:focus {
-    background: rgba(2, 6, 23, 0.7);
+    background: rgba(5, 5, 5, 0.8);
     border-color: rgba(31, 111, 235, 0.5);
   }
 
@@ -2781,22 +2781,22 @@ pre {
   }
 
   pre {
-    background: rgba(2, 6, 23, 0.5);
+    background: rgba(5, 5, 5, 0.6);
     border-color: rgba(255, 255, 255, 0.1);
   }
 
   .badge {
-    background: rgba(2, 6, 23, 0.3);
+    background: rgba(5, 5, 5, 0.4);
     border-color: rgba(255, 255, 255, 0.1);
   }
 
   .drop-zone {
-    background: rgba(2, 6, 23, 0.3);
+    background: rgba(5, 5, 5, 0.4);
     border-color: rgba(255, 255, 255, 0.18);
   }
 
   .image-preview img {
-    background: rgba(2, 6, 23, 0.4);
+    background: rgba(5, 5, 5, 0.5);
   }
 
   .action-divider {

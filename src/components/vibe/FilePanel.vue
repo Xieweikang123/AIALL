@@ -615,7 +615,7 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: #161b22;
+  background: #0a0a0a;
   overflow: hidden;
   container-type: inline-size;
 }
@@ -715,7 +715,7 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
   align-items: center;
   padding: 8px 0;
   gap: 2px;
-  background: #161b22;
+  background: #0a0a0a;
   border-right: 1px solid var(--border);
   height: 100%;
 }
@@ -921,7 +921,7 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
 }
 
 .file-panel-project-select option {
-  background: #161b22;
+  background: #0a0a0a;
   color: #e6edf3;
 }
 

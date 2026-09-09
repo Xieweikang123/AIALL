@@ -203,7 +203,7 @@ function jumpToLatest() {
 }
 
 .cursor-chain-jump:hover {
-  background: rgba(14, 28, 48, 0.96);
+  background: rgba(5, 8, 12, 0.96);
   border-color: rgba(126, 182, 255, 0.65);
   transform: translateX(-50%) translateY(-1px);
 }
@@ -219,7 +219,7 @@ function jumpToLatest() {
   padding: 3px 8px;
   border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(16, 23, 34, 0.92);
+  background: rgba(7, 7, 7, 0.92);
   box-shadow: none;
   color: rgba(201, 209, 217, 0.72);
   font-size: 11px;

@@ -22,13 +22,13 @@ async function ensureMermaid(): Promise<typeof Mermaid> {
         securityLevel: "loose",
         themeVariables: {
           darkMode: true,
-          background: "#1e1e2e",
-          primaryColor: "#89b4fa",
-          primaryTextColor: "#cdd6f4",
-          primaryBorderColor: "#89b4fa",
+          background: "#0a0a0a",
+          primaryColor: "#262626",
+          primaryTextColor: "#e6e6e6",
+          primaryBorderColor: "#4d4d4d",
           lineColor: "#6c7086",
-          secondaryColor: "#313244",
-          tertiaryColor: "#45475a",
+          secondaryColor: "#1a1a1a",
+          tertiaryColor: "#222222",
           fontSize: "14px",
         },
         fontFamily: "inherit",
@@ -367,7 +367,7 @@ function buildFullscreenOverlay(): HTMLElement {
   const chartWrapper = document.createElement("div");
   chartWrapper.className = "mermaid-fs-chart-wrapper";
   Object.assign(chartWrapper.style, {
-    background: "#1e1e2e",
+    background: "#0a0a0a",
     borderRadius: "12px",
     padding: "24px",
     display: "inline-block",

@@ -837,7 +837,7 @@
   padding: 3px 6px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 3px;
-  background: rgba(11, 18, 32, 0.72);
+  background: rgba(0, 0, 0, 0.75);
   color: rgba(255, 255, 255, 0.82);
   font: inherit;
   font-size: 11px;
@@ -920,7 +920,7 @@
 }
 .git-log-graph--filtered .git-log-graph-line { stroke-dasharray: 3 3; opacity: 0.38; }
 .git-log-graph-dot {
-  fill: #161b22;
+  fill: #0a0a0a;
   stroke-width: 1.5;
 }
 .git-log-graph-placeholder { display: inline-block; width: 16px; min-width: 16px; height: 24px; }
@@ -1083,7 +1083,7 @@
   padding: 16px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 6px;
-  background: #161b22;
+  background: #0a0a0a;
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
 }
 .git-log-preview-title { font-size: 15px; font-weight: 600; color: rgba(255, 255, 255, 0.94); }

@@ -69,7 +69,7 @@ withDefaults(
   padding: 8px 10px;
   border-radius: 8px;
   border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
-  background: var(--bg-secondary, rgba(17, 24, 39, 0.85));
+  background: var(--bg-secondary, rgba(10, 10, 10, 0.85));
   color: var(--text, rgba(255, 255, 255, 0.92));
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
 }
@@ -81,7 +81,7 @@ withDefaults(
 
 .cm-node--root {
   border-color: color-mix(in srgb, var(--primary, #1f6feb) 55%, transparent);
-  background: color-mix(in srgb, var(--primary, #1f6feb) 12%, var(--bg-secondary, rgba(17, 24, 39, 0.85)));
+  background: color-mix(in srgb, var(--primary, #1f6feb) 12%, var(--bg-secondary, rgba(10, 10, 10, 0.85)));
 }
 
 .cm-node--entry {
@@ -95,7 +95,7 @@ withDefaults(
 .cm-node--external {
   border-color: color-mix(in srgb, var(--success-color, #3fb950) 35%, transparent);
   border-style: dashed;
-  background: var(--panel, rgba(17, 24, 39, 0.72));
+  background: var(--panel, rgba(10, 10, 10, 0.85));
 }
 
 .cm-node--truncated .cm-node-label {

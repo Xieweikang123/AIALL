@@ -220,7 +220,7 @@ function createEditor() {
   if (!container || !monaco) return;
 
   editor = monaco.editor.create(container, {
-    theme: "vs-dark",
+    theme: "aiall-black",
     automaticLayout: false,
     fontSize: 14,
     fontFamily: "Cascadia Code, Consolas, 'Courier New', monospace",
@@ -467,7 +467,7 @@ defineExpose({ getSelectedText, revealLine, revealLineWhenReady });
 .minimap-context-menu {
   position: fixed;
   width: 280px;
-  background: rgba(24, 28, 42, 0.95);
+  background: rgba(16, 16, 16, 0.95);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   backdrop-filter: blur(12px);
@@ -511,7 +511,7 @@ defineExpose({ getSelectedText, revealLine, revealLineWhenReady });
   min-width: 0;
   padding: 3px 6px;
   font-size: 12px;
-  background: rgba(30, 35, 50, 0.9);
+  background: rgba(22, 22, 22, 0.9);
   color: rgba(255, 255, 255, 0.8);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 4px;

@@ -78,7 +78,7 @@ const showProgress = computed(
   margin-top: 4px;
   border-radius: 8px;
   border: 1px solid rgba(88, 166, 255, 0.12);
-  background: rgba(11, 18, 32, 0.45);
+  background: rgba(0, 0, 0, 0.5);
 }
 
 .agent-live-status--banner {

@@ -496,17 +496,17 @@ onBeforeUnmount(() => {
 <style scoped>
 :global(body) {
   margin: 0;
-  background: radial-gradient(900px 520px at 18% 8%, rgba(31, 111, 235, 0.16), transparent 62%),
-    radial-gradient(900px 560px at 92% 0%, rgba(130, 80, 223, 0.18), transparent 60%),
-    radial-gradient(900px 560px at 50% 100%, rgba(26, 127, 55, 0.16), transparent 55%),
-    #0b1220;
+  background: radial-gradient(900px 520px at 18% 8%, rgba(31, 111, 235, 0.08), transparent 62%),
+    radial-gradient(900px 560px at 92% 0%, rgba(130, 80, 223, 0.08), transparent 60%),
+    radial-gradient(900px 560px at 50% 100%, rgba(26, 127, 55, 0.07), transparent 55%),
+    #000000;
   color: rgba(255, 255, 255, 0.92);
 }
 
 .chat-page {
-  --bg: #0b1220;
-  --panel: rgba(17, 24, 39, 0.72);
-  --panel-2: rgb(2, 6, 23);
+  --bg: #000000;
+  --panel: rgba(13, 13, 13, 0.92);
+  --panel-2: rgb(5, 5, 5);
   --text: rgba(255, 255, 255, 0.92);
   --muted: rgba(255, 255, 255, 0.72);
   --subtle: rgba(255, 255, 255, 0.6);
@@ -535,7 +535,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 12px;
   padding: 16px 18px 10px;
-  background: rgba(11, 18, 32, 0.72);
+  background: rgba(0, 0, 0, 0.75);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border);
 }
@@ -598,7 +598,7 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   font-size: 12px;
   border: 1px solid var(--border);
-  background: rgba(17, 24, 39, 0.62);
+  background: rgba(10, 10, 10, 0.66);
   color: var(--muted);
 }
 
@@ -809,7 +809,7 @@ button:disabled {
 }
 
 .msg.assistant .bubble {
-  background: linear-gradient(135deg, rgba(17, 24, 39, 0.75), rgba(17, 24, 39, 0.6));
+  background: linear-gradient(135deg, rgba(13, 13, 13, 0.88), rgba(13, 13, 13, 0.72));
 }
 
 .bubble-top {
@@ -868,7 +868,7 @@ button:disabled {
   z-index: 2;
   padding: 12px 18px 18px;
   border-top: 1px solid var(--border);
-  background: linear-gradient(to top, rgba(11, 18, 32, 0.92), rgba(11, 18, 32, 0.76));
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.94), rgba(0, 0, 0, 0.78));
   backdrop-filter: blur(12px);
 }
 
@@ -912,7 +912,7 @@ button:disabled {
 .composer-input:focus {
   border-color: rgba(31, 111, 235, 0.55);
   box-shadow: 0 0 0 3px var(--ring);
-  background: rgba(2, 6, 23, 0.7);
+  background: rgba(5, 5, 5, 0.75);
 }
 
 .composer-bottom {

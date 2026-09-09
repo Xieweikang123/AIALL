@@ -2,12 +2,12 @@
 // 从 VibeCodingView.vue 提取
 
 :global(html) {
-  background: #0d1117;
+  background: #000000;
 }
 
 :global(body) {
   margin: 0;
-  background: #0d1117;
+  background: #000000;
   color: rgba(255, 255, 255, 0.92);
 }
 
@@ -35,11 +35,11 @@
 }
 
 .vibe-page {
-  --bg: #0d1117;
-  --bg-primary: #0d1117;
-  --panel: #161b22;
-  --panel-2: #0d1117;
-  --surface: #161b22;
+  --bg: #000000;
+  --bg-primary: #000000;
+  --panel: #0a0a0a;
+  --panel-2: #000000;
+  --surface: #0a0a0a;
   --surface-hover: rgba(255, 255, 255, 0.06);
   --text: rgba(255, 255, 255, 0.92);
   --muted: rgba(255, 255, 255, 0.62);
@@ -57,9 +57,9 @@
   --radius-md: 10px;
   --radius-lg: 14px;
   --shadow-panel: 0 8px 32px rgba(0, 0, 0, 0.35);
-  --glass: #161b22;
-  --bg-secondary: #161b22;
-  --bg-tertiary: #21262d;
+  --glass: #0a0a0a;
+  --bg-secondary: #0a0a0a;
+  --bg-tertiary: #161616;
   --text-primary: rgba(255, 255, 255, 0.92);
   --text-secondary: rgba(255, 255, 255, 0.62);
   --text-tertiary: rgba(255, 255, 255, 0.45);
@@ -121,7 +121,7 @@
   display: flex;
   min-height: 0;
   overflow: hidden;
-  background: #0d1117;
+  background: #000000;
 }
 
 .workspace.no-project {
@@ -196,7 +196,7 @@
   padding: 12px 4px;
   border: none;
   border-left: 1px solid var(--border);
-  background: #161b22;
+  background: #0a0a0a;
   color: rgba(180, 190, 200, 0.92);
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
@@ -230,19 +230,19 @@
 }
 
 .file-panel {
-  background: #161b22;
+  background: #0a0a0a;
   border-right: 1px solid var(--border);
   overflow: hidden;
 }
 
 .editor-panel {
-  background: #0d1117;
+  background: #000000;
   flex: 1;
   min-width: 0;
 }
 
 .chat-panel {
-  background: #111821;
+  background: #050505;
   border-left: 1px solid rgba(148, 163, 184, 0.14);
 }
 
@@ -297,7 +297,7 @@
   gap: 8px;
   padding: 8px 14px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
-  background: #101722;
+  background: #0b0b0b;
   backdrop-filter: blur(12px);
   flex-shrink: 0;
   min-height: 42px;
@@ -388,7 +388,7 @@
   align-items: center;
   justify-content: center;
   gap: 10px;
-  background: rgba(11, 18, 32, 0.72);
+  background: rgba(0, 0, 0, 0.75);
   backdrop-filter: blur(4px);
   color: var(--muted);
   font-size: 12px;
@@ -426,7 +426,7 @@
   text-align: center;
   border-radius: var(--radius-lg);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: #161b22;
+  background: #0a0a0a;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
 }
 
@@ -438,7 +438,7 @@
   align-items: center;
   justify-content: center;
   border-radius: 14px;
-  background: #21262d;
+  background: #161616;
   border: 1px solid rgba(255, 255, 255, 0.12);
   color: #c9d1d9;
 }
@@ -1288,7 +1288,7 @@ button.icon.tiny {
   position: fixed;
   z-index: 10000;
   padding: 6px 12px;
-  background: rgba(17, 24, 39, 0.72);
+  background: rgba(10, 10, 10, 0.78);
   color: rgba(255, 255, 255, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 6px;
@@ -1423,7 +1423,7 @@ button.icon.tiny {
   right: 0;
   max-height: 200px;
   overflow-y: auto;
-  background: #161b22;
+  background: #0a0a0a;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.3);
@@ -1473,14 +1473,14 @@ button.icon.tiny {
   padding: 0;
   border: 1px solid rgba(148, 163, 184, 0.16);
   border-radius: 10px;
-  background: #17212d;
+  background: #0d0d0d;
   transition: border-color 0.15s, background 0.15s;
   min-height: 52px;
 }
 
 .chat-input-box.focused {
   border-color: rgba(96, 165, 250, 0.55);
-  background: #192534;
+  background: #101010;
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
@@ -1607,7 +1607,7 @@ button.icon.tiny {
 .ctx-menu {
   position: fixed;
   min-width: 160px;
-  background: #161b22;
+  background: #0a0a0a;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   padding: 4px;
@@ -1855,7 +1855,7 @@ button.icon.tiny {
   gap: 12px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
-  background: rgba(11, 18, 32, 0.45);
+  background: rgba(0, 0, 0, 0.5);
   flex-shrink: 0;
 }
 
@@ -1945,7 +1945,7 @@ button.icon.tiny {
     align-items: center;
     justify-content: space-around;
     height: 52px;
-    background: #161b22;
+    background: #0a0a0a;
     border-top: 1px solid rgba(255, 255, 255, 0.1);
     flex-shrink: 0;
     z-index: 100;

@@ -409,7 +409,7 @@ watch(query, () => {
   max-height: min(70vh, 640px);
   display: flex;
   flex-direction: column;
-  background: rgba(17, 24, 39, 0.96);
+  background: rgba(10, 10, 10, 0.97);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 14px;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);

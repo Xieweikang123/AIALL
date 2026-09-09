@@ -248,7 +248,7 @@ const railProgressPercent = computed(() => {
   let lastDone = -1;
   for (let i = list.length - 1; i >= 0; i -= 1) {
     const state = list[i]?.state;
-    if (state === "ok" || state === "fail" || state === "skipped") {
+    if (state === "done" || state === "fail" || state === "skipped" || state === "unknown") {
       lastDone = i;
       break;
     }
@@ -383,7 +383,7 @@ const railProgressPercent = computed(() => {
   height: 8px;
   border-radius: 50%;
   border: 2px solid rgba(148, 163, 184, 0.32);
-  background: rgba(12, 18, 28, 0.96);
+  background: rgba(3, 4, 6, 0.96);
   box-sizing: border-box;
   transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
 }
@@ -400,7 +400,7 @@ const railProgressPercent = computed(() => {
   50% { box-shadow: 0 0 0 5px rgba(88, 166, 255, 0.06); }
 }
 
-.process-step--ok .process-step-node,
+.process-step--done .process-step-node,
 .process-step--fail .process-step-node,
 .process-step--skipped .process-step-node {
   border-color: rgba(88, 166, 255, 0.62);
@@ -415,6 +415,16 @@ const railProgressPercent = computed(() => {
 .process-step--skipped .process-step-node {
   border-color: rgba(210, 153, 34, 0.65);
   background: rgba(210, 153, 34, 0.38);
+}
+
+/* 结果未回传（如连接中断）：中性空心点，不与真实失败的红点混同 */
+.process-step--unknown .process-step-node {
+  border-color: rgba(148, 163, 184, 0.55);
+  background: rgba(148, 163, 184, 0.16);
+}
+
+.process-step--unknown {
+  color: rgba(148, 163, 184, 0.72);
 }
 
 .process-step--running {

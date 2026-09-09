@@ -344,7 +344,7 @@ function shortId(id: string): string {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  background: color-mix(in srgb, var(--bg, #0b1220) 55%, transparent);
+  background: color-mix(in srgb, var(--bg, #000000) 55%, transparent);
   backdrop-filter: blur(2px);
   color: var(--text, rgba(255, 255, 255, 0.92));
   font-size: 13px;
@@ -356,7 +356,7 @@ function shortId(id: string): string {
 .code-map-side {
   border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
   border-radius: 8px;
-  background: var(--bg-secondary, rgba(17, 24, 39, 0.65));
+  background: var(--bg-secondary, rgba(10, 10, 10, 0.75));
   padding: 12px;
   overflow: auto;
 }

@@ -103,7 +103,7 @@ watch(
   font-size: 13px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 4px;
-  background: rgba(11, 18, 32, 0.72);
+  background: rgba(0, 0, 0, 0.75);
   color: rgba(255, 255, 255, 0.92);
   resize: none;
   font-family: inherit;

@@ -133,7 +133,7 @@ const annotateProxy = computed({
 .code-map-panel-card {
   border: 1px solid rgba(205, 214, 244, 0.1);
   border-radius: 8px;
-  background: #181825;
+  background: #0a0a0a;
   padding: 12px;
   display: flex;
   flex-direction: column;

@@ -36,6 +36,12 @@
   background: transparent;
 }
 
+/* 代码块背景对齐全站黑色主题（github-dark 高亮主题自带 #0d1117 蓝灰底） */
+pre code.hljs,
+code.hljs {
+  background: #050505;
+}
+
 /* Firefox */
 * {
   scrollbar-width: thin;

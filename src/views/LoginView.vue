@@ -1,58 +1,3 @@
-<template>
-  <div class="login-page">
-    <div class="login-card">
-      <h1>AIALL 服务器登录</h1>
-      <p class="desc">请输入账号 <code>admin</code> 与密码登录。初始密码由服务器首次启动时随机生成并写入 <code>~/.config/aiall/server-auth.json</code>。</p>
-      <input
-        v-model="username"
-        type="text"
-        placeholder="账号"
-        autocomplete="username"
-        @keyup.enter="handleLogin"
-      />
-      <input
-        v-model="password"
-        type="password"
-        placeholder="密码"
-        autocomplete="current-password"
-        @keyup.enter="handleLogin"
-      />
-      <button type="button" class="primary" :disabled="busy" @click="handleLogin">
-        <span v-if="busy" class="spinner" aria-hidden="true"></span>
-        {{ busy ? "登录中…" : "登录" }}
-      </button>
-      <span v-if="error" class="login-error">{{ error }}</span>
-    </div>
-  </div>
-</template>
-
-<script setup lang="ts">
-import { ref } from "vue";
-import { useRoute, useRouter } from "vue-router";
-import { serverLogin } from "../services/serverAuth";
-
-const route = useRoute();
-const router = useRouter();
-const username = ref("admin");
-const password = ref("");
-const busy = ref(false);
-const error = ref("");
-
-async function handleLogin() {
-  if (busy.value) return;
-  busy.value = true;
-  error.value = "";
-  const result = await serverLogin(password.value.trim(), username.value.trim() || "admin");
-  busy.value = false;
-  if (result.ok) {
-    const redirect = typeof route.query.redirect === "string" ? route.query.redirect : "/";
-    void router.replace(redirect);
-  } else {
-    error.value = result.error || "登录失败";
-  }
-}
-</script>
-
 <style scoped>
 .login-page {
   min-height: 100vh;
@@ -61,18 +6,21 @@ async function handleLogin() {
   justify-content: center;
   padding: 24px;
   box-sizing: border-box;
+  background: radial-gradient(700px 400px at 20% 10%, rgba(31, 111, 235, 0.1), transparent 60%),
+    #000000;
 }
 .login-card {
   width: 100%;
   max-width: 360px;
-  border: 1px solid rgba(17, 24, 39, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 12px;
   padding: 28px 24px;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  background: rgba(255, 255, 255, 0.86);
-  box-shadow: 0 10px 30px rgba(17, 24, 39, 0.08);
+  background: #0a0a0a;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+  color: rgba(255, 255, 255, 0.92);
 }
 .login-card h1 {
   margin: 0;
@@ -80,22 +28,28 @@ async function handleLogin() {
 }
 .login-card .desc {
   margin: 0;
-  color: var(--muted, rgba(17, 24, 39, 0.7));
+  color: rgba(255, 255, 255, 0.62);
   font-size: 13px;
   line-height: 1.6;
 }
 .login-card code {
-  background: rgba(17, 24, 39, 0.06);
+  background: rgba(255, 255, 255, 0.08);
   padding: 1px 6px;
   border-radius: 4px;
   font-size: 12px;
+  color: rgba(255, 255, 255, 0.85);
 }
 .login-card input {
   padding: 10px 12px;
-  border: 1px solid rgba(17, 24, 39, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 8px;
   font-size: 14px;
-  background: #fff;
+  background: #050505;
+  color: rgba(255, 255, 255, 0.92);
+  outline: none;
+}
+.login-card input:focus {
+  border-color: rgba(88, 166, 255, 0.6);
 }
 .login-card .primary {
   padding: 10px 12px;
@@ -103,7 +57,7 @@ async function handleLogin() {
   border-radius: 8px;
   font-size: 14px;
   cursor: pointer;
-  background: var(--primary, rgba(31, 111, 235, 0.9));
+  background: var(--primary, #1f6feb);
   color: #fff;
   font-weight: 600;
 }
@@ -134,7 +88,7 @@ async function handleLogin() {
   }
 }
 .login-error {
-  color: #dc2626;
+  color: #ff7b72;
   font-size: 12px;
 }
 </style>

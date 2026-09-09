@@ -323,7 +323,7 @@ function selectCurrent() {
   justify-content: center;
 }
 .dir-browser-panel {
-  background: var(--bg-secondary, #1e1e2e);
+  background: var(--bg-secondary, #0a0a0a);
   border: 1px solid var(--border-color, #333);
   border-radius: 10px;
   width: 520px;
@@ -418,7 +418,7 @@ function selectCurrent() {
 }
 .dir-browser-path-input {
   flex: 1;
-  background: var(--bg-primary, #12121a);
+  background: var(--bg-primary, #050505);
   border: 1px solid var(--border-color, #333);
   border-radius: 6px;
   padding: 7px 10px;

@@ -329,7 +329,7 @@ function createDiffEditor() {
   if (!container || !monaco) return;
 
   diffEditor = monaco.editor.createDiffEditor(container, {
-    theme: "vs-dark",
+    theme: "aiall-black",
     automaticLayout: true,
     fontSize: 14,
     fontFamily: "Cascadia Code, Consolas, 'Courier New', monospace",
@@ -542,7 +542,7 @@ onBeforeUnmount(() => {
   appearance: none;
   pointer-events: auto;
   border: 1px solid rgba(88, 166, 255, 0.55);
-  background: rgba(13, 17, 23, 0.96);
+  background: rgba(5, 5, 5, 0.96);
   color: #79c0ff;
   font-size: 11px;
   line-height: 1;

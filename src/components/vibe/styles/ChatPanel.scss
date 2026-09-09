@@ -2,7 +2,7 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  background: #161b22;
+  background: #0a0a0a;
   overflow-x: clip;
   overflow-y: visible;
   min-height: 0;
@@ -10,7 +10,7 @@
 
 /* Keep the chat surface calm and layered: the conversation remains primary. */
 .chat-panel {
-  background: #111821;
+  background: #050505;
 }
 
 .chat-panel::before {
@@ -18,7 +18,7 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: rgba(30, 41, 59, 0.08);
+  background: rgba(30, 30, 30, 0.08);
 }
 
 .chat-panel.drag-over {
@@ -105,7 +105,7 @@
   padding: 4px;
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: #161b22;
+  background: #0a0a0a;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   z-index: 9999;
 }
@@ -294,7 +294,7 @@
   align-items: center;
   justify-content: center;
   border-radius: 16px;
-  background: #21262d;
+  background: #161616;
   border: 1px solid rgba(255, 255, 255, 0.1);
   color: #8b949e;
   margin-bottom: 4px;
@@ -421,7 +421,7 @@
   flex-shrink: 0;
   padding: 8px clamp(12px, 2.6vw, 36px) 12px;
   border-top: 1px solid rgba(148, 163, 184, 0.1);
-  background: rgba(15, 23, 33, 0.94);
+  background: rgba(5, 5, 5, 0.94);
 }
 
 .pending-queue {
@@ -477,7 +477,7 @@
   right: 0;
   max-height: 200px;
   overflow-y: auto;
-  background: rgba(22, 27, 34, 0.95);
+  background: rgba(10, 10, 10, 0.95);
   backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
@@ -523,7 +523,7 @@
   padding: 0;
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 10px;
-  background: #17212d;
+  background: #0d0d0d;
   backdrop-filter: blur(8px);
   transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
   min-height: 52px;
@@ -531,7 +531,7 @@
 
 .chat-input-box.focused {
   border-color: rgba(96, 165, 250, 0.55);
-  background: #192534;
+  background: #101010;
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
@@ -951,6 +951,11 @@
   to { transform: rotate(360deg); }
 }
 
+.token-usage-wrap {
+  display: flex;
+  min-width: 0;
+}
+
 .token-usage-btn {
   border: none;
   background: transparent;
@@ -970,15 +975,13 @@
 }
 
 .token-detail-popover {
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + 6px);
-  z-index: 20;
+  position: fixed;
+  z-index: 9999;
   min-width: 180px;
   padding: 8px 10px;
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(15, 22, 35, 0.98);
+  background: rgba(7, 7, 7, 0.98);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
@@ -1019,7 +1022,7 @@
   padding: 18px 20px;
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(15, 22, 35, 0.98);
+  background: rgba(7, 7, 7, 0.98);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
   overflow: hidden;
 }
@@ -1462,7 +1465,7 @@
 }
 
 .scroll-to-bottom-btn:hover {
-  background: rgba(14, 28, 48, 0.92);
+  background: rgba(5, 8, 12, 0.92);
   border-color: rgba(100, 176, 255, 0.55);
   color: rgba(150, 200, 255, 1);
   box-shadow:

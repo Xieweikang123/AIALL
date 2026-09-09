@@ -717,7 +717,7 @@ defineExpose({ editorRef, diffEditorRef, revealLineInEditor, revealLineInDiff })
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: #0d1117;
+  background: #000000;
   overflow: hidden;
 }
 
@@ -728,7 +728,7 @@ defineExpose({ editorRef, diffEditorRef, revealLineInEditor, revealLineInDiff })
   padding: 0 8px;
   height: 38px;
   border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.1));
-  background: #161b22;
+  background: #0a0a0a;
   backdrop-filter: blur(8px);
   flex-shrink: 0;
 }
@@ -1022,7 +1022,7 @@ defineExpose({ editorRef, diffEditorRef, revealLineInEditor, revealLineInDiff })
   align-items: center;
   justify-content: center;
   border-radius: 14px;
-  background: #21262d;
+  background: #161616;
   border: 1px solid rgba(255, 255, 255, 0.1);
   color: #8b949e;
   margin-bottom: 4px;
@@ -1053,7 +1053,7 @@ defineExpose({ editorRef, diffEditorRef, revealLineInEditor, revealLineInDiff })
   display: flex;
   flex-direction: column;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
-  background: #0b0f16;
+  background: #030303;
   box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.35);
 }
 
@@ -1090,7 +1090,7 @@ defineExpose({ editorRef, diffEditorRef, revealLineInEditor, revealLineInDiff })
   gap: 10px;
   padding: 5px 10px 5px 8px;
   flex-shrink: 0;
-  background: #131922;
+  background: #080808;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
   font-size: 12px;
 }

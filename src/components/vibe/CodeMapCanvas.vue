@@ -242,7 +242,7 @@ function onNodeDragStop(ev: NodeMouseEvent) {
   width: 100%;
   height: 100%;
   min-height: 320px;
-  background: var(--bg, #0b1220);
+  background: var(--bg, #000000);
   border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
   border-radius: 8px;
   overflow: hidden;
@@ -264,14 +264,14 @@ function onNodeDragStop(ev: NodeMouseEvent) {
 }
 
 :deep(.vue-flow__controls-button) {
-  background: var(--bg-secondary, rgba(17, 24, 39, 0.65));
+  background: var(--bg-secondary, rgba(10, 10, 10, 0.75));
   border: none;
   border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.1));
   fill: var(--text, rgba(255, 255, 255, 0.92));
 }
 
 :deep(.vue-flow__minimap) {
-  background: var(--bg-secondary, rgba(17, 24, 39, 0.65));
+  background: var(--bg-secondary, rgba(10, 10, 10, 0.75));
   border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
   border-radius: 6px;
 }
@@ -282,6 +282,6 @@ function onNodeDragStop(ev: NodeMouseEvent) {
 }
 
 :deep(.vue-flow__edge-textbg) {
-  fill: var(--bg, #0b1220);
+  fill: var(--bg, #000000);
 }
 </style>

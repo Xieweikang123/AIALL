@@ -291,9 +291,9 @@ onMounted(() => {
 <style scoped>
 .git-overview-page {
   min-height: 100vh;
-  background: radial-gradient(900px 520px at 18% 8%, rgba(31, 111, 235, 0.12), transparent 62%),
-    radial-gradient(900px 560px at 90% 0%, rgba(130, 80, 223, 0.14), transparent 60%),
-    #0d1117;
+  background: radial-gradient(900px 520px at 18% 8%, rgba(31, 111, 235, 0.07), transparent 62%),
+    radial-gradient(900px 560px at 90% 0%, rgba(130, 80, 223, 0.08), transparent 60%),
+    #000000;
   color: rgba(255, 255, 255, 0.92);
   padding: 20px 20px 32px;
 }

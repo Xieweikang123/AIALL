@@ -124,7 +124,7 @@ const markdownContent = computed(() =>
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: rgba(13, 17, 23, 0.98);
+  background: rgba(7, 7, 7, 0.98);
 }
 
 .plan-main-head {

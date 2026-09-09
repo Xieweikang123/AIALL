@@ -145,7 +145,7 @@ const displayHtml = computed(() => {
   min-height: 0;
   height: 100%;
   overflow: hidden;
-  background: rgba(13, 17, 23, 0.55);
+  background: rgba(0, 0, 0, 0.55);
 }
 
 .architect-review-head {

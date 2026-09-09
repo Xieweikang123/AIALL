@@ -72,7 +72,7 @@ watch(
   box-sizing: border-box;
   padding: 20px;
   border-radius: 10px;
-  background: #1c2333;
+  background: #101010;
   border: 1px solid rgba(255, 255, 255, 0.15);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.06);
   z-index: 10000;
