@@ -1,6 +1,7 @@
 <template>
-  <div class="agent-trace-panel">
+  <div class="agent-trace-panel" :class="{ 'agent-trace-panel--embedded': embedded }">
     <button
+      v-if="!embedded"
       type="button"
       class="agent-trace-toggle"
       :aria-expanded="open"
@@ -10,18 +11,21 @@
       <span class="agent-trace-title">数据流轨迹</span>
       <span class="agent-trace-meta">{{ totalEntries }} 条事件 · {{ turns.length }} 轮</span>
     </button>
-    <div v-if="open" class="agent-trace-body">
+    <div v-if="open || embedded" class="agent-trace-body">
       <div v-for="turn in turns" :key="turn.turn" class="agent-trace-turn">
         <div class="agent-trace-turn-head">
           <span class="agent-trace-turn-label">第 {{ turn.turn }} 轮</span>
-          <span v-if="turn.model" class="agent-trace-turn-model">{{ turn.model }}</span>
+          <span v-if="turn.model" class="agent-trace-turn-model" :title="turn.model">{{ turn.model }}</span>
           <span v-if="turn.contextChars" class="agent-trace-turn-ctx">{{ formatChars(turn.contextChars) }}</span>
         </div>
         <div
           v-for="entry in turn.entries"
           :key="entry.key"
           class="agent-trace-entry"
-          :class="[`agent-trace-entry--${entry.kind}`, { 'agent-trace-entry--fail': entry.ok === false }]"
+          :class="[
+            `agent-trace-entry--${entry.kind}`,
+            { 'agent-trace-entry--fail': entry.ok === false, 'agent-trace-entry--expanded': isExpanded(entry.key) },
+          ]"
         >
           <button
             type="button"
@@ -30,7 +34,7 @@
             @click="toggleEntry(entry.key)"
           >
             <span class="agent-trace-row-chevron" aria-hidden="true">{{ isExpanded(entry.key) ? "▾" : "▸" }}</span>
-            <span class="agent-trace-row-kind">{{ kindLabel(entry.kind) }}</span>
+            <span class="agent-trace-row-kind" :title="kindTitle(entry.kind)">{{ kindLabel(entry.kind) }}</span>
             <span class="agent-trace-row-label">{{ entry.label }}</span>
             <span v-if="entry.elapsedMs !== undefined" class="agent-trace-row-time">{{ formatElapsed(entry.elapsedMs) }}</span>
           </button>
@@ -46,9 +50,14 @@ import { computed, ref, watch } from "vue";
 import { buildAgentTraceTurns, type AgentTraceEntry } from "../services/agentTraceTimeline";
 import type { AgentRoundGroupView } from "../services/agentRoundGroups";
 
-const props = defineProps<{
-  roundGroups: AgentRoundGroupView[];
-}>();
+const props = withDefaults(
+  defineProps<{
+    roundGroups: AgentRoundGroupView[];
+    /** 嵌入抽屉时隐藏折叠按钮，由外层容器负责滚动 */
+    embedded?: boolean;
+  }>(),
+  { embedded: false },
+);
 
 const open = ref(false);
 const expandedKeys = ref<Set<string>>(new Set());
@@ -78,6 +87,13 @@ function kindLabel(kind: AgentTraceEntry["kind"]): string {
   return "态";
 }
 
+function kindTitle(kind: AgentTraceEntry["kind"]): string {
+  if (kind === "request") return "请求（发给模型的消息）";
+  if (kind === "response") return "回复（模型返回）";
+  if (kind === "tool") return "工具调用";
+  return "阶段状态";
+}
+
 function formatChars(chars: number): string {
   if (chars >= 1000) return `${(chars / 1000).toFixed(1)}K 字符`;
   return `${chars} 字符`;
@@ -95,6 +111,12 @@ function formatElapsed(ms?: number): string {
   margin: 4px 0 0;
   border-top: 1px dashed rgba(255, 255, 255, 0.06);
   padding-top: 4px;
+}
+
+.agent-trace-panel--embedded {
+  margin: 0;
+  border-top: none;
+  padding-top: 0;
 }
 
 .agent-trace-toggle {
@@ -140,6 +162,41 @@ function formatElapsed(ms?: number): string {
   background: rgba(0, 0, 0, 0.14);
 }
 
+.agent-trace-panel--embedded .agent-trace-body {
+  max-height: none;
+  margin-top: 0;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.agent-trace-panel--embedded .agent-trace-body {
+  margin-top: 0;
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.agent-trace-panel--embedded .agent-trace-body {
+  margin-top: 0;
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.agent-trace-panel--embedded .agent-trace-body {
+  margin-top: 0;
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
 .agent-trace-body::-webkit-scrollbar {
   width: 4px;
 }
@@ -150,29 +207,42 @@ function formatElapsed(ms?: number): string {
 }
 
 .agent-trace-turn + .agent-trace-turn {
-  margin-top: 8px;
-  padding-top: 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .agent-trace-turn-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 3px;
+  margin-bottom: 4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(126, 182, 255, 0.06);
 }
 
 .agent-trace-turn-label {
   font-size: 10.5px;
   font-weight: 600;
-  color: rgba(126, 182, 255, 0.72);
+  color: rgba(126, 182, 255, 0.85);
 }
 
-.agent-trace-turn-model,
+.agent-trace-turn-model {
+  font-size: 10px;
+  color: rgba(139, 148, 158, 0.6);
+  font-variant-numeric: tabular-nums;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .agent-trace-turn-ctx {
   font-size: 10px;
   color: rgba(139, 148, 158, 0.5);
   font-variant-numeric: tabular-nums;
+  margin-left: auto;
 }
 
 .agent-trace-entry {
@@ -184,7 +254,7 @@ function formatElapsed(ms?: number): string {
   align-items: center;
   gap: 6px;
   width: 100%;
-  padding: 2px 4px;
+  padding: 3px 4px;
   border: none;
   border-radius: 4px;
   background: transparent;
@@ -193,10 +263,15 @@ function formatElapsed(ms?: number): string {
   line-height: 1.5;
   text-align: left;
   cursor: pointer;
+  transition: background 100ms ease;
 }
 
 .agent-trace-row:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.agent-trace-entry--expanded .agent-trace-row {
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .agent-trace-row-chevron {
@@ -263,6 +338,7 @@ function formatElapsed(ms?: number): string {
   border-radius: 4px;
   background: rgba(1, 4, 9, 0.4);
   border: 1px solid rgba(255, 255, 255, 0.04);
+  border-left: 2px solid rgba(126, 182, 255, 0.25);
   font-size: 10.5px;
   line-height: 1.45;
   white-space: pre-wrap;

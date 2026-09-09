@@ -673,6 +673,7 @@
         </div>
       </div>
     </div>
+    <AgentTraceDrawer />
   </aside>
 </template>
 
@@ -695,6 +696,8 @@ import { scheduleScrollContainerToBottom, scrollContainerToBottom } from "../../
 import { resolveAgentResumeButtonLabel } from "../../services/agentRecovery";
 import { renderMarkdown } from "../../utils/renderMarkdown";
 import { agentDebugEnabled, setAgentDebugEnabled } from "../../utils/agentDebugFlag";
+import AgentTraceDrawer from "../AgentTraceDrawer.vue";
+import { openLatestTraceDrawer } from "../../services/agentTraceDrawer";
 import AgentLiveStatusRail from "../AgentLiveStatusRail.vue";
 
 interface ChatMessage {

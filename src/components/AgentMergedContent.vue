@@ -28,18 +28,25 @@
     >
     </AgentCursorTimeline>
 
-    <AgentTracePanel
-      v-if="agentDebugEnabled"
-      :round-groups="roundGroups"
-    />
+    <button
+      v-if="agentDebugEnabled && roundGroups.length"
+      type="button"
+      class="agent-trace-entry"
+      title="在右侧抽屉中查看数据流轨迹"
+      @click="openTraceDrawer(messageId ?? null, roundGroups)"
+    >
+      <span class="agent-trace-entry-icon">⟲</span>
+      <span>数据流轨迹</span>
+      <span class="agent-trace-entry-meta">{{ roundGroups.length }} 轮</span>
+    </button>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 import AgentCursorTimeline from "./AgentCursorTimeline.vue";
-import AgentTracePanel from "./AgentTracePanel.vue";
 import { agentDebugEnabled } from "../utils/agentDebugFlag";
+import { openTraceDrawer, registerLatestTrace } from "../services/agentTraceDrawer";
 import { useStableAgentAnswer } from "../composables/useStableAgentAnswer";
 import { buildInlineAgentFeed } from "../services/agentInlineFeed";
 import type { AgentRoundGroupView, AgentRoundTool } from "../services/agentRoundGroups";
@@ -154,6 +161,18 @@ const inlineFeed = computed(() =>
 const showTimeline = computed(
   () => props.isRunning || inlineFeed.value.items.length > 0,
 );
+
+let traceSeq = 0;
+
+// 注册为「最新一条」轨迹，供调试按钮直开抽屉时展示
+watch(
+  () => [props.messageId, props.roundGroups, props.isRunning] as const,
+  ([messageId, groups, running]) => {
+    if (running) return;
+    registerLatestTrace(messageId ?? `trace-${traceSeq++}`, groups);
+  },
+  { immediate: true, deep: false },
+);
 </script>
 
 <style scoped>
@@ -164,5 +183,40 @@ const showTimeline = computed(
   padding: 0;
   min-width: 0;
   overflow: hidden;
+}
+
+.agent-trace-entry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  margin: 6px 0 2px;
+  padding: 4px 10px;
+  border: 1px solid rgba(126, 182, 255, 0.22);
+  border-radius: 6px;
+  background: rgba(88, 166, 255, 0.08);
+  color: rgba(165, 214, 255, 0.92);
+  font-size: 11px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.agent-trace-entry:hover {
+  background: rgba(88, 166, 255, 0.16);
+  border-color: rgba(126, 182, 255, 0.4);
+  color: rgba(190, 225, 255, 1);
+}
+
+.agent-trace-entry-icon {
+  font-size: 12px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.agent-trace-entry-meta {
+  color: rgba(126, 182, 255, 0.6);
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
 }
 </style>

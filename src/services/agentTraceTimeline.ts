@@ -65,19 +65,53 @@ function responseEntry(turn: AgentRoundGroupView): AgentTraceEntry[] {
   const response = turn.response;
   if (!response) return [];
   const text = response.assistantText?.trim() ?? "";
+  const toolCalls = response.toolCalls || [];
   const label = response.isFinal
     ? `最终回复（${text.length} 字符）`
     : `轮次回复（${text.length} 字符，将续跑）`;
+
+  // 工具名兜底：优先取 call 自带字段，其次按 id 从 turn.tools（工具执行后的真实记录）匹配
+  const toolName = (call: { id?: string; name?: string; function?: { name?: string } }): string => {
+    if (call.name) return call.name;
+    if (call.function?.name) return call.function.name;
+    const matched = turn.tools.find((tool) => tool.id === call.id);
+    return matched?.name || "未知工具";
+  };
+  const toolArgs = (call: { arguments?: string; function?: { arguments?: string } }): string =>
+    (call.arguments ?? call.function?.arguments ?? "").trim();
+
+  // 正文为空时，模型实际回复的是「要调用哪些工具」——把工具调用内容露出来
+  const toolSummary = toolCalls.length
+    ? `，调用 ${toolCalls.length} 个工具：${toolCalls.map(toolName).join("、")}`
+    : "";
+
   const elapsedMs =
     response.ts !== undefined && turn.request?.ts !== undefined
       ? response.ts - turn.request.ts
       : undefined;
+
+  const detailParts: string[] = [];
+  if (text) detailParts.push(text);
+  if (toolCalls.length) {
+    detailParts.push(
+      toolCalls
+        .map((call) => {
+          const args = toolArgs(call);
+          return `工具调用：${toolName(call)}${args ? `\n参数：\n${args}` : ""}`;
+        })
+        .join("\n\n"),
+    );
+  }
+  if (!detailParts.length) detailParts.push("（本轮无正文，也无工具调用）");
+
   return [
     {
       key: `resp-${turn.turn}`,
       kind: "response",
-      label: text ? `${label}：${text.replace(/\s+/g, " ").slice(0, 120)}` : `${label}：（空，仅工具调用）`,
-      detail: truncateDetail(text || "（本轮无正文，仅工具调用）"),
+      label: text
+        ? `${label}：${text.replace(/\s+/g, " ").slice(0, 120)}`
+        : `${label}：（无正文${toolSummary}）`,
+      detail: truncateDetail(detailParts.join("\n\n")),
       ok: true,
       elapsedMs,
     },
