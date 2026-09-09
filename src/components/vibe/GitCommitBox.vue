@@ -18,7 +18,7 @@
         :disabled="committing || !!genStep || !!aiPushStep || !stagedCount || !configReady"
         :title="!configReady ? '请先配置 AI 模型' : 'AI 生成提交信息'"
         @click="$emit('generateMessage')"
-      >{{ genStep || "✦ AI" }}</button>
+      >{{ genStep || "✦ AI 生成" }}</button>
       <button
         type="button" class="small git-commit-btn"
         :class="canCommit ? 'primary' : 'secondary'"
@@ -99,10 +99,10 @@ watch(
   box-sizing: border-box;
   min-height: 36px;
   max-height: 160px;
-  padding: 6px 8px;
+  padding: 6px 10px;
   font-size: 13px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 4px;
+  border-radius: 6px;
   background: rgba(0, 0, 0, 0.75);
   color: rgba(255, 255, 255, 0.92);
   resize: none;
@@ -110,24 +110,35 @@ watch(
   line-height: 1.5;
   overflow-y: hidden;
   field-sizing: content;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.git-commit-input::placeholder {
+  color: rgba(255, 255, 255, 0.28);
 }
 .git-commit-input:focus {
   outline: none;
-  border-color: rgba(88, 166, 255, 0.5);
+  border-color: rgba(88, 166, 255, 0.55);
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.15);
 }
 .git-commit-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex-wrap: wrap;
 }
-.git-commit-btn { min-width: 72px; }
+.git-commit-btn {
+  min-width: 72px;
+  height: 28px;
+  font-size: 12px;
+  border-radius: 6px;
+}
 .git-ai-push {
-  font-size: 11px;
-  padding: 3px 10px;
+  font-size: 12px;
+  height: 28px;
+  padding: 0 12px;
   border: none;
   background: linear-gradient(135deg, #3a8dff 0%, #58a6ff 100%);
-  border-radius: 4px;
+  border-radius: 6px;
   color: #ffffff;
   font-weight: 600;
   cursor: pointer;
@@ -136,13 +147,19 @@ watch(
 .git-ai-push:hover:not(:disabled) { filter: brightness(1.12); }
 .git-ai-push:disabled { opacity: 0.4; cursor: default; }
 .git-commit-ai {
-  font-size: 11px;
-  padding: 3px 8px;
+  font-size: 12px;
+  height: 28px;
+  padding: 0 10px;
   border: 1px solid rgba(88, 166, 255, 0.25);
   background: rgba(88, 166, 255, 0.1);
-  border-radius: 4px;
+  border-radius: 6px;
   color: #58a6ff;
   cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.git-commit-ai:hover:not(:disabled) {
+  background: rgba(88, 166, 255, 0.18);
+  border-color: rgba(88, 166, 255, 0.45);
 }
 .git-commit-ai:disabled { opacity: 0.4; cursor: default; }
 </style>
