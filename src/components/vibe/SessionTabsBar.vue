@@ -99,8 +99,8 @@ function sessionTabTitle(s: VibeChatSessionMeta): string {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
-  min-height: 38px;
-  padding: 5px 10px;
+  min-height: 34px;
+  padding: 4px 10px;
   background: rgba(13, 17, 23, 0.98);
   border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
 }

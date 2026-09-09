@@ -63,7 +63,7 @@
         </template>
         <template v-else>
           <p class="chat-empty-title">描述你要改什么</p>
-          <p class="chat-empty-desc">直接输入需求即可。可用 <code>@</code> 引用文件。</p>
+          <p class="chat-empty-desc">直接输入需求即可。用 <code>@</code> 引用文件，Auto 会按问题选择问答、规划或改代码。</p>
           <div class="chips">
             <button type="button" class="chip" :disabled="chatSending" @click="$emit('apply-example', '解释这个项目是做什么的')">
               解释项目
@@ -275,7 +275,7 @@
             <div class="chat-mode-switch" role="group" aria-label="对话模式">
               <span
                 class="mode-btn mode-btn-auto active"
-                title="自动识别意图，智能切换模式"
+                title="自动识别意图并选择 Ask / Plan / Build"
               >
                 Auto
               </span>

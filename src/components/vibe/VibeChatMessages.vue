@@ -42,7 +42,7 @@
           <button
             v-if="(m.role === 'user' || (m.role === 'assistant' && !ctx.isAgentRunning(m)))"
             type="button"
-            class="ghost small"
+            class="ghost small msg-action-btn"
             title="复制此消息"
             @click="ctx.copyText(ctx.messageDisplayContent(m))"
           >
@@ -51,22 +51,22 @@
           <button
             v-if="ctx.canExecutePlanMessage(m)"
             type="button"
-            class="ghost small plan-exec-btn"
+            class="ghost small msg-action-btn plan-exec-btn"
             title="按此方案开始改代码"
             @click="ctx.executePlanFromMessage(m.id)"
           >
             执行方案
           </button>
-          <button v-if="m.role === 'user'" type="button" class="ghost small" title="编辑此消息" @click="ctx.editUserMessage(m.id)">
+          <button v-if="m.role === 'user'" type="button" class="ghost small msg-action-btn" title="编辑此消息" @click="ctx.editUserMessage(m.id)">
             编辑
           </button>
-          <button v-if="m.role === 'user'" type="button" class="ghost small" title="删除本条问答" @click="ctx.undoExchange(m.id, $event)">
+          <button v-if="m.role === 'user'" type="button" class="ghost small msg-action-btn" title="删除本条问答" @click="ctx.undoExchange(m.id, $event)">
             撤销
           </button>
           <button
             v-if="m.role === 'user'"
             type="button"
-            class="ghost small"
+            class="ghost small msg-action-btn"
             title="从此问题重新生成"
             :disabled="!ctx.configReady.value || !ctx.projectOpened.value"
             @click="ctx.resendFromMessage(m.id)"
@@ -76,7 +76,7 @@
           <button
             v-if="ctx.canResumeAgentRun(m) && !ctx.isPartialWrittenRunInterrupt(m) && !ctx.isAgentRunning(m)"
             type="button"
-            class="ghost small resume-btn"
+            class="ghost small msg-action-btn resume-btn"
             title="从断点继续运行，保留已完成步骤"
             :disabled="!ctx.configReady.value || !ctx.projectOpened.value || ctx.chatSending.value"
             @click="ctx.resumeAgentRun(m.id)"

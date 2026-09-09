@@ -216,22 +216,23 @@ function jumpToLatest() {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(1, 8, 18, 0.92);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
-  color: rgba(205, 214, 244, 0.85);
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(16, 23, 34, 0.92);
+  box-shadow: none;
+  color: rgba(201, 209, 217, 0.72);
   font-size: 11px;
+  font-weight: 500;
   line-height: 1;
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
 .cursor-copy-btn:hover {
-  background: rgba(14, 28, 48, 0.96);
-  border-color: rgba(126, 182, 255, 0.5);
-  color: rgba(165, 214, 255, 0.95);
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: rgba(230, 237, 243, 0.95);
 }
 
 .cursor-copy-btn--copied {

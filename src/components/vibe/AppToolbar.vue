@@ -36,6 +36,7 @@
           :class="{ open: projectHistoryOpen, active: projectOpened }"
           :disabled="loadingTree || pickingFolder"
           :title="projectPath"
+          :aria-label="projectSwitchAriaLabel"
           :aria-expanded="projectHistoryOpen"
           aria-haspopup="menu"
           @click="toggleProjectHistory"
@@ -410,6 +411,11 @@ const currentFolderName = computed(() => {
   return parts[parts.length - 1] || trimmed;
 });
 
+const projectSwitchAriaLabel = computed(() => {
+  const name = currentFolderName.value;
+  return name && name !== "未选择项目" ? `当前项目 ${name}，点击切换` : "选择或切换项目";
+});
+
 const dropdownTop = ref(0);
 const dropdownLeft = ref(0);
 
@@ -555,12 +561,12 @@ async function refreshProjectHistoryList() {
 .app-toolbar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 0 14px;
+  gap: 10px;
+  padding: 0 12px;
   background: rgba(13, 17, 23, 0.98);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
-  min-height: 48px;
+  min-height: 44px;
   flex-shrink: 0;
 }
 
@@ -572,26 +578,26 @@ async function refreshProjectHistoryList() {
 }
 
 .toolbar-logo {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: 6px;
   background: #21262d;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   color: #c9d1d9;
 }
 
 .title {
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 12.5px;
+  font-weight: 650;
   margin: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  letter-spacing: -0.3px;
-  color: var(--text-primary);
+  letter-spacing: -0.2px;
+  color: rgba(255, 255, 255, 0.72);
 }
 
 .toolbar-sep {
@@ -605,7 +611,7 @@ async function refreshProjectHistoryList() {
 .toolbar-project {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex: 1;
   min-width: 0;
 }
@@ -637,29 +643,26 @@ async function refreshProjectHistoryList() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.5);
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.42);
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
   flex-shrink: 0;
 }
 
 .icon-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.9);
-  border-color: rgba(255, 255, 255, 0.15);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.82);
+  border-color: rgba(255, 255, 255, 0.08);
 }
 
 .icon-btn:active:not(:disabled) {
-  transform: translateY(0);
-  box-shadow: none;
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .icon-btn:disabled {
@@ -677,38 +680,39 @@ async function refreshProjectHistoryList() {
 
 .project-history-wrap {
   position: relative;
+  flex: 1 1 auto;
   min-width: 0;
+  max-width: min(520px, 56vw);
 }
 
 .project-history-trigger {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: min(340px, 34vw);
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
-  height: 32px;
-  padding: 0 10px;
+  height: 30px;
+  padding: 0 8px 0 9px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(255, 255, 255, 0.78);
   font-size: 12px;
   cursor: pointer;
-  transition: background 0.15s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.15s ease, color 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .project-history-trigger:hover:not(:disabled),
 .project-history-trigger.open {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.07);
   border-color: rgba(255, 255, 255, 0.14);
-  color: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+  color: rgba(255, 255, 255, 0.94);
 }
 
 .project-history-trigger.active {
-  border-color: rgba(31, 111, 235, 0.32);
-  background: rgba(31, 111, 235, 0.12);
-  box-shadow: 0 0 0 1px rgba(31, 111, 235, 0.1);
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .project-history-trigger:disabled {
@@ -731,16 +735,16 @@ async function refreshProjectHistoryList() {
 
 .project-history-badge {
   flex-shrink: 0;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 5px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.65);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.52);
   font-size: 10px;
   font-weight: 600;
-  line-height: 16px;
-  letter-spacing: 0.3px;
+  line-height: 15px;
+  letter-spacing: 0.2px;
 }
 
 .project-history-chevron {
@@ -1170,11 +1174,11 @@ async function refreshProjectHistoryList() {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 5px 8px;
+  padding: 4px 7px;
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: rgba(255, 255, 255, 0.55);
+  color: rgba(255, 255, 255, 0.48);
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
 }
@@ -1342,13 +1346,27 @@ async function refreshProjectHistoryList() {
   white-space: nowrap;
 }
 
+@media (max-width: 1100px) {
+  .toolbar-nav-label {
+    display: none;
+  }
+
+  .toolbar-nav-btn {
+    padding: 4px 6px;
+  }
+}
+
 @media (max-width: 960px) {
   .toolbar-nav-label {
     display: none;
   }
 
   .toolbar-nav-btn {
-    padding: 5px 7px;
+    padding: 4px 6px;
+  }
+
+  .project-history-wrap {
+    max-width: min(360px, 48vw);
   }
 }
 
@@ -1361,8 +1379,12 @@ async function refreshProjectHistoryList() {
     display: none;
   }
 
+  .project-history-wrap {
+    max-width: min(220px, 52vw);
+  }
+
   .project-history-trigger {
-    max-width: 140px;
+    max-width: 100%;
   }
 
   .project-history-popover {
