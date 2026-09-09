@@ -3,6 +3,7 @@
     v-if="intentTrace && !nested"
     :trace="intentTrace"
   />
+  <!-- kind=status 项的实时状态由时间线底栏 AgentLiveStatusRail 统一展示，这里刻意不渲染，避免同屏双重状态行 -->
   <template v-for="item in displayItems" :key="renderKey(item)">
     <div
       v-if="item.kind === 'text' && item.variant === 'narrative' && item.text.trim()"
@@ -421,14 +422,6 @@ function toggleCollapsed(key: string) {
   font-size: 13px;
   line-height: 1.55;
   color: rgba(148, 163, 184, 0.82);
-}
-
-/* 运行中实时状态行（思考中/等待模型响应等）——数据层一直生成，渲染层此前缺分支导致被静默丢弃 */
-.stream-live-status {
-  padding: 2px 0 6px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: rgba(148, 163, 184, 0.78);
 }
 
 .inline-feed-markdown--narrative :deep(.msg-markdown) {
