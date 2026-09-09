@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AIALL Vibe Coding — 界面优化原型</title>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --bg-2: #0f131b;
+    --panel: #11151e;
+    --panel-2: #161b26;
+    --surface: #1a202c;
+    --surface-2: #202838;
+    --border: #232b3a;
+    --border-soft: #1c2330;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --dim: #5c6672;
+    --accent: #58a6ff;
+    --accent-2: #1f6feb;
+    --green: #3fb950;
+    --orange: #d29922;
+    --red: #f85149;
+    --purple: #b392f0;
+    --radius: 10px;
+    --radius-sm: 7px;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #05070c; color: var(--text); font-size: 13px; line-height: 1.5; }
+
+  .app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background: var(--bg);
+    overflow: hidden;
+  }
+
+  /* ===== 顶部 ===== */
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 12px;
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--border-soft);
+    flex-shrink: 0;
+  }
+  .brand { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .logo {
+    width: 26px; height: 26px; border-radius: 7px;
+    background: linear-gradient(135deg, #1f6feb, #58a6ff);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 800; font-size: 13px;
+    box-shadow: 0 2px 8px rgba(31,111,235,.4);
+  }
+  .brand-name { font-weight: 700; font-size: 13px; letter-spacing: -.2px; }
+  .brand-ver { font-size: 10px; color: var(--dim); background: var(--surface); padding: 1px 6px; border-radius: 4px; border: 1px solid var(--border); }
+
+  .project-pill {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 10px; border-radius: 8px;
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); font-size: 12px; font-weight: 600;
+    cursor: pointer; flex-shrink: 0;
+  }
+  .project-pill .chev { color: var(--dim); font-size: 9px; }
+
+  .tabs {
+    display: flex; align-items: center; gap: 4px;
+    flex: 1; min-width: 0; overflow-x: auto;
+    padding: 0 4px;
+  }
+  .tab {
+    display: flex; align-items: center; gap: 6px;
+    flex-shrink: 0; max-width: 190px;
+    height: 28px; padding: 0 10px;
+    border-radius: 8px; border: 1px solid transparent;
+    background: transparent; color: var(--muted);
+    font-size: 12px; cursor: pointer; white-space: nowrap;
+  }
+  .tab:hover { background: var(--surface); color: var(--text); }
+  .tab.active { background: var(--surface-2); border-color: var(--border); color: var(--text); }
+  .tab .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .tab .dot.running { background: var(--accent); box-shadow: 0 0 6px rgba(88,166,255,.6); }
+  .tab .dot.interrupted { background: var(--orange); }
+  .tab .close { color: var(--dim); font-size: 13px; opacity: 0; }
+  .tab:hover .close, .tab.active .close { opacity: 1; }
+  .tab-new {
+    width: 28px; height: 28px; flex-shrink: 0;
+    border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--muted);
+    font-size: 16px; cursor: pointer;
+  }
+  .tab-new:hover { color: var(--text); background: var(--surface-2); }
+
+  .top-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+  .icon-btn {
+    width: 30px; height: 30px; border-radius: 7px;
+    border: none; background: transparent; color: var(--muted);
+    font-size: 15px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+  .icon-btn:hover { background: var(--surface); color: var(--text); }
+  .avatar {
+    width: 28px; height: 28px; border-radius: 7px;
+    background: rgba(31,111,235,.25); color: var(--accent);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 12px; cursor: pointer;
+  }
+
+  /* ===== 主体 ===== */
+  .main { display: flex; flex: 1; min-height: 0; }
+
+  /* 左侧图标栏 */
+  .rail {
+    width: 46px; flex-shrink: 0;
+    display: flex; flex-direction: column; align-items: center;
+    gap: 4px; padding: 8px 0;
+    background: var(--bg-2); border-right: 1px solid var(--border-soft);
+  }
+  .rail-btn {
+    width: 34px; height: 34px; border-radius: 8px;
+    border: none; background: transparent; color: var(--dim);
+    font-size: 16px; cursor: pointer; position: relative;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .rail-btn:hover { background: var(--surface); color: var(--text); }
+  .rail-btn.active { background: var(--surface-2); color: var(--accent); }
+  .rail-btn .badge {
+    position: absolute; top: 2px; right: 2px;
+    min-width: 14px; height: 14px; padding: 0 3px;
+    border-radius: 999px; background: var(--accent); color: #fff;
+    font-size: 9px; font-weight: 700; line-height: 14px; text-align: center;
+  }
+  .rail-btn .badge.warn { background: var(--orange); }
+  .rail-spacer { flex: 1; }
+
+  /* 左侧面板 */
+  .sidebar {
+    width: 250px; flex-shrink: 0;
+    display: flex; flex-direction: column;
+    background: var(--panel); border-right: 1px solid var(--border-soft);
+    min-height: 0;
+  }
+  .side-head {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 10px; border-bottom: 1px solid var(--border-soft);
+  }
+  .side-title { font-size: 12px; font-weight: 700; color: var(--text); flex: 1; }
+  .side-sub { font-size: 10px; color: var(--dim); }
+  .side-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px; }
+
+  .search-box {
+    display: flex; align-items: center; gap: 6px;
+    padding: 0 9px; height: 30px;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--bg-2); color: var(--dim); font-size: 12px;
+    margin-bottom: 8px;
+  }
+  .search-box kbd { font-size: 10px; color: var(--dim); margin-left: auto; }
+
+  .tree-item {
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 8px; border-radius: 6px;
+    color: var(--muted); font-size: 12.5px; cursor: pointer;
+  }
+  .tree-item:hover { background: var(--surface); color: var(--text); }
+  .tree-item.active { background: rgba(31,111,235,.15); color: var(--accent); }
+  .tree-item .icon { width: 16px; text-align: center; flex-shrink: 0; }
+  .tree-item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tree-item .chev { font-size: 9px; color: var(--dim); }
+  .tree-item.indent-1 { padding-left: 22px; }
+  .tree-item.indent-2 { padding-left: 36px; }
+
+  /* 中间编辑器 */
+  .editor {
+    flex: 1; min-width: 0;
+    display: flex; flex-direction: column;
+    background: var(--bg); border-right: 1px solid var(--border-soft);
+  }
+  .editor-tabs {
+    display: flex; align-items: center; gap: 2px;
+    padding: 4px 8px 0; background: var(--bg-2);
+    border-bottom: 1px solid var(--border-soft); flex-shrink: 0;
+  }
+  .etab {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 10px; border-radius: 8px 8px 0 0;
+    background: transparent; color: var(--muted);
+    font-size: 12px; cursor: pointer; border: none;
+  }
+  .etab.active { background: var(--bg); color: var(--text); }
+  .etab .close { color: var(--dim); font-size: 12px; opacity: 0; }
+  .etab:hover .close { opacity: 1; }
+  .editor-body { flex: 1; min-height: 0; padding: 12px 16px; overflow: auto; }
+  .code-line { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); white-space: pre; }
+  .code-line .k { color: var(--purple); }
+  .code-line .s { color: var(--green); }
+  .code-line .f { color: var(--accent); }
+  .code-line .c { color: var(--dim); font-style: italic; }
+  .code-line .n { color: var(--orange); }
+
+  /* 右侧聊天 */
+  .chat {
+    width: 380px; flex-shrink: 0;
+    display: flex; flex-direction: column;
+    background: var(--panel); border-left: 1px solid var(--border-soft);
+    min-height: 0;
+  }
+  .chat-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; border-bottom: 1px solid var(--border-soft);
+    flex-shrink: 0;
+  }
+  .chat-head .title { font-size: 12px; font-weight: 700; flex: 1; }
+  .chat-head .model {
+    font-size: 11px; color: var(--muted);
+    background: var(--surface); border: 1px solid var(--border);
+    padding: 2px 8px; border-radius: 999px;
+  }
+  .chat-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+
+  .msg { display: flex; gap: 8px; }
+  .msg.user { flex-direction: row-reverse; }
+  .msg-avatar {
+    width: 26px; height: 26px; border-radius: 7px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700;
+  }
+  .msg.assistant .msg-avatar { background: var(--surface-2); color: var(--purple); border: 1px solid var(--border); }
+  .msg.user .msg-avatar { background: rgba(31,111,235,.2); color: var(--accent); border: 1px solid rgba(31,111,235,.3); }
+
+  .bubble {
+    flex: 1; min-width: 0;
+    border: 1px solid var(--border-soft); border-radius: var(--radius);
+    padding: 10px 12px; background: var(--surface);
+  }
+  .msg.user .bubble { flex: 0 1 auto; max-width: 85%; background: var(--surface-2); }
+  .bubble-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+  .bubble-head .role { font-size: 11px; font-weight: 700; color: var(--muted); }
+  .bubble-head .auto {
+    font-size: 9px; color: var(--green);
+    background: rgba(63,185,80,.12); border: 1px solid rgba(63,185,80,.25);
+    padding: 1px 6px; border-radius: 999px;
+  }
+  .bubble-head .spacer { flex: 1; }
+  .bubble-head .copy { font-size: 11px; color: var(--dim); cursor: pointer; }
+  .bubble-body { font-size: 13px; color: var(--text); line-height: 1.6; }
+  .bubble-body strong { color: var(--text); }
+  .bubble-body .hl { color: var(--accent); font-weight: 600; }
+
+  .status-line {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; color: var(--muted);
+    background: var(--bg-2); border: 1px solid var(--border-soft);
+    border-radius: 8px; padding: 6px 10px; margin-top: 8px;
+  }
+  .status-line .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--orange); }
+  .status-line .resume {
+    margin-left: auto; font-size: 11px; color: var(--accent);
+    background: rgba(88,166,255,.12); border: 1px solid rgba(88,166,255,.3);
+    padding: 2px 10px; border-radius: 999px; cursor: pointer;
+  }
+
+  .intent-line {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; color: var(--muted); margin-top: 8px;
+  }
+  .intent-line .gdot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+  .intent-line .detail { margin-left: auto; color: var(--dim); cursor: pointer; }
+
+  .tool-steps { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+  .tool-step {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; color: var(--muted);
+    font-family: ui-monospace, monospace;
+    padding: 4px 8px; border-radius: 6px; background: var(--bg-2);
+  }
+  .tool-step .tick { color: var(--green); flex-shrink: 0; }
+  .tool-step .cmd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tool-more { font-size: 11px; color: var(--accent); cursor: pointer; margin-top: 4px; }
+
+  .suggestions { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+  .sug {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--bg-2);
+    color: var(--text); font-size: 12px; cursor: pointer; text-align: left;
+  }
+  .sug:hover { border-color: var(--accent); background: rgba(88,166,255,.08); }
+  .sug .num {
+    width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0;
+    background: var(--surface-2); color: var(--accent);
+    font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  }
+
+  /* 底部输入 */
+  .chat-composer { flex-shrink: 0; padding: 10px 12px; border-top: 1px solid var(--border-soft); background: var(--panel); }
+  .composer-box {
+    display: flex; align-items: center; gap: 8px;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--bg-2); padding: 8px 10px;
+  }
+  .composer-box.focused { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(88,166,255,.12); }
+  .composer-box .ph { flex: 1; color: var(--dim); font-size: 12.5px; }
+  .composer-box .send {
+    background: linear-gradient(135deg, var(--accent-2), var(--accent));
+    color: #fff; border: none; border-radius: 8px;
+    padding: 6px 16px; font-size: 12.5px; font-weight: 600; cursor: pointer;
+  }
+  .composer-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .mode-switch { display: flex; gap: 2px; background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
+  .mode-btn { padding: 3px 10px; font-size: 11px; font-weight: 600; border: none; background: transparent; color: var(--muted); border-radius: 6px; cursor: pointer; }
+  .mode-btn.active { background: rgba(88,166,255,.15); color: var(--accent); }
+  .composer-row .debug { font-size: 11px; color: var(--muted); cursor: pointer; }
+  .composer-row .stats { font-size: 10.5px; color: var(--dim); margin-left: auto; }
+
+  .recovery-bar {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; color: var(--accent);
+    background: rgba(88,166,255,.08); border: 1px solid rgba(88,166,255,.2);
+    border-radius: 8px; padding: 6px 10px; margin-bottom: 8px;
+  }
+  .recovery-bar .resume { margin-left: auto; color: var(--accent); background: rgba(88,166,255,.15); border: 1px solid rgba(88,166,255,.3); padding: 2px 10px; border-radius: 999px; cursor: pointer; }
+
+  .divider { height: 1px; background: var(--border-soft); margin: 8px 0; }
+  .label { font-size: 10px; font-weight: 700; color: var(--dim); letter-spacing: .04em; text-transform: uppercase; margin: 10px 0 6px; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ===== 顶部 ===== -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="logo">A</div>
+      <span class="brand-name">Vibe Coding</span>
+      <span class="brand-ver">v0.1.0</span>
+    </div>
+
+    <div class="project-pill">
+      <span>📁</span> AIALL <span class="chev">▾</span>
+    </div>
+
+    <div class="tabs">
+      <button class="tab"><span class="dot"></span>数据流迹是啥</button>
+      <button class="tab"><span class="dot"></span>当前软件agent 如果鼠标拖选回…</button>
+      <button class="tab active"><span class="dot interrupted"></span>模型返回的 JSON 不完整…<span class="close">×</span></button>
+      <button class="tab"><span class="dot"></span>这快能优化下吗</button>
+      <button class="tab-new">+</button>
+    </div>
+
+    <div class="top-actions">
+      <button class="icon-btn">🔍</button>
+      <button class="icon-btn">⚙</button>
+      <button class="icon-btn">⋯</button>
+      <div class="avatar">A</div>
+    </div>
+  </header>
+
+  <!-- ===== 主体 ===== -->
+  <div class="main">
+
+    <!-- 左侧图标栏 -->
+    <nav class="rail">
+      <button class="rail-btn active" title="文件">📄</button>
+      <button class="rail-btn" title="Git">⑂<span class="badge">1</span></button>
+      <button class="rail-btn" title="会话">💬</button>
+      <button class="rail-btn" title="项目">◈</button>
+      <div class="rail-spacer"></div>
+      <button class="rail-btn" title="折叠">◀</button>
+    </nav>
+
+    <!-- 左侧面板 -->
+    <aside class="sidebar">
+      <div class="side-head">
+        <span class="side-title">文件</span>
+        <span class="side-sub">AIALL</span>
+      </div>
+      <div class="side-body">
+        <div class="search-box">🔍 搜索文件… <kbd>Ctrl+P</kbd></div>
+        <div class="tree-item active"><span class="chev">▾</span><span class="icon">📁</span><span class="name">src</span></div>
+        <div class="tree-item indent-1"><span class="chev">▸</span><span class="icon">📁</span><span class="name">components</span></div>
+        <div class="tree-item indent-1"><span class="icon">📄</span><span class="name">views</span></div>
+        <div class="tree-item indent-2"><span class="icon">📄</span><span class="name">VibeCodingView.vue</span></div>
+        <div class="tree-item indent-2"><span class="icon">📄</span><span class="name">ChatView.vue</span></div>
+        <div class="tree-item"><span class="chev">▸</span><span class="icon">📁</span><span class="name">styles</span></div>
+        <div class="tree-item"><span class="icon">📄</span><span class="name">package.json</span></div>
+      </div>
+    </aside>
+
+    <!-- 中间编辑器 -->
+    <section class="editor">
+      <div class="editor-tabs">
+        <button class="etab active">VibeCodingView.vue <span class="close">×</span></button>
+        <button class="etab">ChatPanel.vue <span class="close">×</span></button>
+      </div>
+      <div class="editor-body">
+        <div class="code-line"><span class="c">// 当前文件：src/views/VibeCodingView.vue</span></div>
+        <div class="code-line"><span class="k">import</span> { computed, ref } <span class="k">from</span> <span class="s">"vue"</span>;</div>
+        <div class="code-line"><span class="k">import</span> AppToolbar <span class="k">from</span> <span class="s">"../components/vibe/AppToolbar.vue"</span>;</div>
+        <div class="code-line"> </div>
+        <div class="code-line"><span class="k">const</span> <span class="f">projectPath</span> = ref(<span class="s">"D:\\project\\AIALL"</span>);</div>
+        <div class="code-line"><span class="k">const</span> <span class="f">gitChangeCount</span> = ref(<span class="n">1</span>);</div>
+        <div class="code-line"> </div>
+        <div class="code-line"><span class="k">function</span> <span class="f">handleOpenProject</span>() {</div>
+        <div class="code-line">  <span class="c">// 打开项目逻辑</span></div>
+        <div class="code-line">}</div>
+      </div>
+    </section>
+
+    <!-- 右侧聊天 -->
+    <aside class="chat">
+      <div class="chat-head">
+        <span class="title">AI 助手</span>
+        <span class="model">glm-5.3-flash</span>
+      </div>
+
+      <div class="chat-scroll">
+        <!-- AI 消息 -->
+        <div class="msg assistant">
+          <div class="msg-avatar">AI</div>
+          <div class="bubble">
+            <div class="bubble-head">
+              <span class="role">Agent</span>
+              <span class="auto">自动</span>
+              <span class="spacer"></span>
+              <span class="copy">复制</span>
+            </div>
+            <div class="bubble-body">
+              这样用户视角是：<span class="hl">[AI 得分组扣分，分不了就按目录/整提，任务永远能完成]</span>。报错消失，是因为错误被消化成降级结果了，而不是被消灭了。
+              <br><br>
+              <strong>核心原则</strong>：凡是依赖外部服务的功能，想「保证不报错」，唯一可靠的办法就是给<span class="hl">一条不依赖它的退路</span>。
+            </div>
+            <div class="status-line">
+              <span class="pulse"></span>
+              <span>Agent 自动续跑后仍未能完成（已完成 1 轮，25 个工具/步骤）：已手动停止</span>
+              <span class="resume">恢复运行</span>
+            </div>
+            <div class="intent-line">
+              <span class="gdot"></span>
+              <span>意图 自动化 AI · 2.5s</span>
+              <span class="detail">详情</span>
+            </div>
+            <div class="tool-steps">
+              <div class="tool-step"><span class="tick">✓</span><span class="cmd">git show --stat --format="%h %s" HEAD | Select-Object -First 30</span></div>
+              <div class="tool-step"><span class="tick">✓</span><span class="cmd">git log origin/main..HEAD...</span></div>
+              <div class="tool-step"><span class="tick">✓</span><span class="cmd">git log --oneline -5</span></div>
+            </div>
+            <div class="tool-more">展开全部 25 步（另有 21 步）</div>
+            <div class="suggestions">
+              <button class="sug"><span class="num">1</span>请给 AI 批量提交分组加按目录机械分组的回退</button>
+              <button class="sug"><span class="num">2</span>先做第 1、2 层：压缩输出+截断重试</button>
+              <button class="sug"><span class="num">3</span>回退和重试都做</button>
+              <button class="sug"><span class="num">4</span>暂不改，先了解</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 用户消息 -->
+        <div class="msg user">
+          <div class="msg-avatar">你</div>
+          <div class="bubble">
+            <div class="bubble-body">这样吧，你看看本地有啥改动，你规划提交以下，但是别推送</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 底部输入 -->
+      <div class="chat-composer">
+        <div class="recovery-bar">
+          <span>Agent 已中断，可恢复</span>
+          <span class="resume">恢复运行</span>
+        </div>
+        <div class="composer-box focused">
+          <span class="ph">自动识别意图，智能切换模式（Enter 发送，Shift+Enter 换行）</span>
+          <button class="send">发送</button>
+        </div>
+        <div class="composer-row">
+          <div class="mode-switch">
+            <button class="mode-btn active">Auto</button>
+            <button class="mode-btn">调试</button>
+          </div>
+          <span class="debug">模型：glm-5.3-flash</span>
+          <span class="stats">4.4K 输出 · 35.0K 峰值上下文</span>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+</body>
+</html>
