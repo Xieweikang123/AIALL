@@ -1036,6 +1036,46 @@ const agentEventHandlers = new Map<string, AgentEventFn>([
   ["done", handleDoneEvent as AgentEventFn],
 ]);
 
+/**
+ * Resume connections number turns from 1 (server counts per connection), but
+ * roundGroups slots must stay unique within one assistant message. Shift
+ * turn-bearing events by the run's turnOffset so resumed rounds append after
+ * the original rounds. Two deliberate exclusions:
+ * - maxTurns stays per-connection: it is the current connection's budget, and
+ *   resume decisions compare it against completed turns — shifting it would
+ *   corrupt that comparison;
+ * - done.turns already accumulates via resolveCompletedTurns.
+ */
+function applyTurnOffsetToEvent(event: VibeAgentSseEvent, sessionId: string): VibeAgentSseEvent {
+  const offset = runManager.get(sessionId)?.turnOffset ?? 0;
+  if (!offset) return event;
+  if (event.type === "status" && event.data.turn) {
+    return {
+      type: "status",
+      data: { ...event.data, turn: offset + event.data.turn },
+    };
+  }
+  if (event.type === "turn_request" && event.data.turn) {
+    return {
+      type: "turn_request",
+      data: { ...event.data, turn: offset + event.data.turn },
+    };
+  }
+  if (event.type === "turn_response" && event.data.turn) {
+    return {
+      type: "turn_response",
+      data: { ...event.data, turn: offset + event.data.turn },
+    };
+  }
+  if (event.type === "turn_trace" && event.data.turn) {
+    return {
+      type: "turn_trace",
+      data: { ...event.data, turn: offset + event.data.turn },
+    };
+  }
+  return event;
+}
+
 function handleAgentEvent(
   event: VibeAgentSseEvent,
   assistantMsg: VibeChatMessage,
@@ -1054,8 +1094,9 @@ function handleAgentEvent(
   }
   const msgId = assistantMsg.id;
   if (isAgentSseProgressEvent(event.type)) stallRecovery.touchAgentProgress(sessionId);
-  const handler = agentEventHandlers.get(event.type);
-  if (handler) handler(event, assistantMsg, sessionId, msgId);
+  const offsetEvent = applyTurnOffsetToEvent(event, sessionId);
+  const handler = agentEventHandlers.get(offsetEvent.type);
+  if (handler) handler(offsetEvent, assistantMsg, sessionId, msgId);
 }
   return { handleAgentEvent };
 }

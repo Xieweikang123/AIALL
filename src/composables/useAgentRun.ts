@@ -87,6 +87,7 @@ import {
   recordAgentRoundResponse,
   recordAgentRoundStatus,
   recordAgentRoundToolStart,
+  resolveResumeTurnOffset,
 } from "../services/agentRoundGroups";
 import { computeLineDelta } from "../services/agentCursorFeed";
 import type { AgentStatusData, TurnFileDiff, VibeChatMessage } from "../types/vibeChat";
@@ -934,11 +935,20 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     assistantMsg.agentAbortReason = undefined;
     assistantMsg.agentContinueCount = undefined;
     prepareAssistantForResume(assistantMsg);
+    // Seed totalTurns with turns completed by the original run so the final
+    // "完成（共 N 轮）" accumulates across segments instead of counting only
+    // the resumed connection's turns.
+    if (!assistantMsg.totalTurns) {
+      assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
+    }
     assistantMsg.activityExpanded = true;
     assistantMsg.activityDetailed = false;
 
     beginAgentRunSession(sessionId);
-    const runGen = runManager.start(sessionId, assistantMsg.id, assistantMsg, false, "connecting_local");
+    // 续跑连接的 turn 从 1 重数（服务端按连接计数）；roundGroups 槽位必须全消息唯一，
+    // 因此偏移取原运行已占用的最大轮槽，让续跑轮次接在原轮次之后显示。
+    const resumeTurnOffset = resolveResumeTurnOffset(assistantMsg);
+    const runGen = runManager.start(sessionId, assistantMsg.id, assistantMsg, false, "connecting_local", resumeTurnOffset);
     stallRecovery.startAgentUiTick();
     const run = runManager.get(sessionId);
     const connectStatus = formatLiveStatus(run?.live ?? { phase: "connecting_local" });

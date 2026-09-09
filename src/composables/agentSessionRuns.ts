@@ -22,6 +22,14 @@ export type SessionAgentRun<TMsg = unknown> = {
   connectHasImages: boolean;
   /** Ephemeral UI / progress — cleared when run slot is removed. */
   live: AgentRunLiveState;
+  /**
+   * Display-layer turn numbering offset for resumed runs. The server numbers turns
+   * per connection (restarts at 1 on resume); roundGroups slots must stay unique
+   * within one assistant message, so resumed connections shift turns by this offset
+   * (= turn slots already occupied by the original run). Pure display concern —
+   * server semantics (per-connection budget) are untouched.
+   */
+  turnOffset: number;
   /** Non-reactive capture while run UI is minimized (avoids Vue re-render storms). */
   deferredCapture?: AgentRunDeferredCapture;
 };
@@ -36,6 +44,7 @@ export function createAgentSessionRunManager<TMsg = unknown>() {
     assistantMsg: TMsg,
     connectHasImages: boolean,
     initialPhase = "preparing",
+    turnOffset = 0,
   ): number {
     globalGeneration += 1;
     runs.set(sessionId, {
@@ -47,6 +56,7 @@ export function createAgentSessionRunManager<TMsg = unknown>() {
       lastProgressAt: Date.now(),
       connectStartedAt: Date.now(),
       connectHasImages,
+      turnOffset,
       live: createInitialLiveState(initialPhase),
     });
     return globalGeneration;

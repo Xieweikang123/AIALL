@@ -364,7 +364,8 @@ export function formatCursorActionLabel(step: AgentRoundTool): string {
   const query = String(step.args?.query ?? "").trim();
   const content = typeof step.args?.content === "string" ? step.args.content : "";
   const running = Boolean(step.running);
-  const failed = !step.ok && !step.running;
+  // ok 缺失 = 结果未回传（如连接中断），不能当失败渲染「failed」文案
+  const failed = step.ok === false && !running;
 
   if (step.name === "read_file") {
     const target = path || step.detail || "file";
@@ -537,8 +538,13 @@ export function buildCursorAgentFeed(input: {
   return items;
 }
 
-export function cursorActionClass(step: AgentRoundTool): string {
+export type AgentActionState = "running" | "unknown" | "skipped" | "fail" | "done";
+
+export function cursorActionClass(step: AgentRoundTool): AgentActionState {
   if (step.running) return "running";
+  // tool_end 到达时必写 ok（成功/失败都写）；非 running 且 ok 缺失 = 结果未回传（如连接中断），
+  // 用中性 unknown 表示，不能与真实失败（ok: false）混同画红。
+  if (step.ok === undefined) return "unknown";
   if (!step.ok) {
     return step.name === "read_file" && isReadFilePolicyBlock(step.summary) ? "skipped" : "fail";
   }

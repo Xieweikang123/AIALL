@@ -233,7 +233,7 @@ export function buildCompactLogItems(input: AgentCompactStatusInput): AgentLogLi
   return buildCursorCompactRecentActions(input).map((item) => ({
     key: item.key,
     label: formatCursorActionLabel(item.step),
-    state: cursorActionClass(item.step) as AgentLogLineItem["state"],
+    state: cursorActionClass(item.step),
   }));
 }
 

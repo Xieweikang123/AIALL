@@ -67,6 +67,43 @@ describe("agentCursorFeed", () => {
     })).toBe("skipped");
   });
 
+  it("treats missing ok as unknown state, not fail", () => {
+    // 连接中断等场景：tool_end 未到达，ok 缺失 → 中性 unknown，不画红
+    expect(cursorActionClass({
+      id: "1",
+      name: "run_command",
+      icon: "▶️",
+      title: "执行命令",
+      detail: "git commit",
+      label: "$ git commit",
+      summary: "",
+      args: { command: "git commit" },
+    })).toBe("unknown");
+    // 真实失败（ok: false）仍是 fail
+    expect(cursorActionClass({
+      id: "2",
+      name: "run_command",
+      icon: "▶️",
+      title: "执行命令",
+      detail: "git push",
+      label: "$ git push",
+      summary: "rejected",
+      ok: false,
+      args: { command: "git push" },
+    })).toBe("fail");
+    // ok 缺失时标签不渲染「失败」字样
+    expect(formatCursorActionLabel({
+      id: "3",
+      name: "run_command",
+      icon: "▶️",
+      title: "run_command",
+      detail: "",
+      label: "run_command",
+      summary: "",
+      args: { command: "git commit" },
+    })).toBe("$ git commit");
+  });
+
   it("formats missing-file read_file as failed", () => {
     expect(formatCursorActionLabel({
       id: "1",

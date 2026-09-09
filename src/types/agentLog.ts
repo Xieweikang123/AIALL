@@ -1,5 +1,7 @@
+export type AgentLogLineState = "done" | "running" | "fail" | "skipped" | "unknown";
+
 export type AgentLogLineItem = {
   key: string;
   label: string;
-  state: "done" | "running" | "fail";
+  state: AgentLogLineState;
 };

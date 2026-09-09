@@ -8,6 +8,7 @@ import {
   recordAgentRoundStatus,
   recordAgentRoundToolStart,
   resetAgentRoundGroupIds,
+  resolveResumeTurnOffset,
 } from "./agentRoundGroups";
 
 describe("agentRoundGroups", () => {
@@ -121,5 +122,48 @@ describe("agentRoundGroups", () => {
       24,
     );
     expect(groups[0].narrative).toBe(clean);
+  });
+
+  it("resumes appended after original rounds (no slot collision)", () => {
+    resetAgentRoundGroupIds();
+    // Original run occupied turns 1-2 (turn 2 interrupted without isFinal).
+    let groups = recordAgentRoundResponse(undefined, 1, {
+      assistantText: "第一轮完成",
+      toolCalls: [],
+      hasToolCalls: false,
+      isFinal: true,
+    }, 24);
+    groups = recordAgentRoundResponse(groups, 2, {
+      assistantText: "",
+      toolCalls: [{ id: "c1", name: "run_command", arguments: "{}" }],
+      hasToolCalls: true,
+      isFinal: false,
+    }, 24);
+
+    // Resume: same narrative recorded under per-connection turn 1, offset by 2.
+    const offset = resolveResumeTurnOffset({ roundGroups: groups, agentTurn: 2 });
+    expect(offset).toBe(2);
+    groups = recordAgentRoundResponse(groups, offset + 1, {
+      assistantText: "已提交",
+      toolCalls: [],
+      hasToolCalls: false,
+      isFinal: true,
+    }, 24);
+
+    // Three distinct slots in original order; resumed final lands on turn 3.
+    expect(groups.map((group) => group.turn)).toEqual([1, 2, 3]);
+    expect(groups[2].response?.assistantText).toBe("已提交");
+    expect(groups[2].response?.isFinal).toBe(true);
+    // Original rounds are untouched — no overwrite of the interrupted turn 2.
+    expect(groups[1].response?.isFinal).toBe(false);
+  });
+
+  it("resolveResumeTurnOffset falls back to agentTurn when groups are missing", () => {
+    expect(resolveResumeTurnOffset({ roundGroups: [], agentTurn: 5 })).toBe(4);
+    expect(resolveResumeTurnOffset({ roundGroups: undefined, agentTurn: undefined })).toBe(0);
+    expect(resolveResumeTurnOffset({
+      roundGroups: [{ turn: 7, modelSteps: [], toolIds: [] }],
+      agentTurn: 3,
+    })).toBe(7);
   });
 });

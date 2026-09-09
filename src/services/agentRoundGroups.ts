@@ -260,6 +260,24 @@ export function resolveIncompleteStreamTurn(msg: {
   return incomplete[0]?.turn;
 }
 
+/**
+ * Highest turn slot occupied by an assistant message's original run — the offset
+ * a resumed connection shifts its per-connection turns by, so roundGroups slots
+ * stay unique and resumed rounds append after the original ones.
+ */
+export function resolveResumeTurnOffset(msg: {
+  roundGroups?: AgentRoundGroup[];
+  agentTurn?: number;
+}): number {
+  const fromGroups = (msg.roundGroups ?? []).reduce(
+    (max, group) => (group.turn > max ? group.turn : max),
+    0,
+  );
+  // agentTurn is the in-flight turn; slots below it are already occupied.
+  const fromActive = msg.agentTurn && msg.agentTurn > 0 ? msg.agentTurn - 1 : 0;
+  return Math.max(fromGroups, fromActive, 0);
+}
+
 /** Drop streamed narrative on an incomplete turn; keep tools / request / steps. */
 export function truncateIncompleteTurnNarrative(
   groups: AgentRoundGroup[] | undefined,
