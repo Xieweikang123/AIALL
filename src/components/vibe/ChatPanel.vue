@@ -35,7 +35,14 @@
     />
 
     <div class="chat-scroll-wrap">
-      <div ref="chatScrollRef" class="chat-scroll" @scroll="onScroll">
+      <div
+        ref="chatScrollRef"
+        class="chat-scroll"
+        @scroll="onScroll"
+        @wheel.passive="onUserScrollIntent"
+        @touchmove.passive="onUserScrollIntent"
+        @mousedown="onScrollbarMouseDown"
+      >
       <div v-if="switchingProject" class="chat-switching">
         <span class="chat-switching-spinner" aria-hidden="true">⟳</span>
         <span class="shimmer-text--fast">正在加载项目…</span>
@@ -1143,6 +1150,10 @@ function checkScrollPosition() {
 }
 
 function onScroll() {
+  // During eased follow the scroll writes are programmatic — keep the pin and
+  // bottom state untouched so a single frame's remaining distance (a large block
+  // landing at once) can't be mistaken for the user scrolling away.
+  if (followActive) return;
   checkScrollPosition();
   emit("on-chat-scroll");
 }
@@ -1150,14 +1161,69 @@ function onScroll() {
 function scrollToBottom() {
   const el = chatScrollRef.value;
   if (!el) return;
+  stopFollow();
   scrollContainerToBottom(el);
   isAtBottom.value = true;
   emit("on-chat-scroll");
   emit("scroll-to-bottom");
 }
 
+const FOLLOW_EASING = 0.3;
+let followRaf = 0;
+let followActive = false;
+
+function stopFollow() {
+  if (followRaf) cancelAnimationFrame(followRaf);
+  followRaf = 0;
+  followActive = false;
+}
+
+/** Exponential glide toward the bottom; chases live scrollHeight each frame. */
+function stepFollow() {
+  followRaf = 0;
+  const el = chatScrollRef.value;
+  if (!el || !followActive) return;
+  const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+  if (distance <= 1) {
+    el.scrollTop = el.scrollHeight;
+    followActive = false;
+    isAtBottom.value = true;
+    emit("on-chat-scroll");
+    return;
+  }
+  el.scrollTop += distance * FOLLOW_EASING;
+  followRaf = requestAnimationFrame(stepFollow);
+}
+
+/** Eased follow used while a run streams — no hard jump, coalesced per frame. */
+function followToBottom() {
+  if (!chatScrollRef.value) return;
+  isAtBottom.value = true;
+  if (followActive) return;
+  followActive = true;
+  followRaf = requestAnimationFrame(stepFollow);
+}
+
+function onUserScrollIntent() {
+  stopFollow();
+  checkScrollPosition();
+}
+
+/** Scrollbar drag lands on the scroll element itself; text selection does not. */
+function onScrollbarMouseDown(e: MouseEvent) {
+  if (e.target !== chatScrollRef.value) return;
+  stopFollow();
+}
+
+const FOLLOW_KEYS = new Set(["PageUp", "PageDown", "ArrowUp", "ArrowDown", "Home", "End", " "]);
+
+function onFollowKeydown(e: KeyboardEvent) {
+  if (FOLLOW_KEYS.has(e.key)) stopFollow();
+}
+
 function scheduleSessionScrollToBottom() {
   if (props.switchingSession || !props.chatMessages.length) return;
+  stopFollow();
   sessionScrollPending = true;
   if (sessionScrollClearTimer) { clearTimeout(sessionScrollClearTimer); sessionScrollClearTimer = null; }
   sessionScrollClearTimer = window.setTimeout(() => {
@@ -1199,14 +1265,18 @@ let sessionScrollPending = false;
 let sessionScrollClearTimer: number | null = null;
 
 onMounted(() => {
+  window.addEventListener("keydown", onFollowKeydown, true);
   void nextTick(() => {
     checkScrollPosition();
     const scrollEl = chatScrollRef.value;
     if (!scrollEl || typeof ResizeObserver === "undefined") return;
     const contentEl = scrollEl.querySelector(".msg-list") ?? scrollEl;
     scrollResizeObserver = new ResizeObserver(() => {
+      // Eased follow locally while a live run grows the content, instead of
+      // emitting `scroll-to-bottom` (the parent's force path schedules repeated
+      // timed hard jumps → visible stutter).
       if (sessionScrollPending || (props.chatSending && isAtBottom.value)) {
-        scrollToBottom();
+        followToBottom();
         return;
       }
       checkScrollPosition();
@@ -1218,10 +1288,12 @@ onMounted(() => {
 onUnmounted(() => {
   scrollResizeObserver?.disconnect();
   scrollResizeObserver = null;
+  stopFollow();
   if (sessionScrollClearTimer) { clearTimeout(sessionScrollClearTimer); sessionScrollClearTimer = null; }
+  window.removeEventListener("keydown", onFollowKeydown, true);
 });
 
-defineExpose({ chatScrollRef, chatDropZoneRef });
+defineExpose({ chatScrollRef, chatDropZoneRef, followToBottom, scrollToBottom });
 </script>
 
 <style src="./styles/ChatPanel.scss" scoped></style>

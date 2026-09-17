@@ -2381,24 +2381,22 @@ async function scrollChatToBottom(force = false) {
   } else if (!chatPinnedToBottom) {
     return;
   }
-  await nextTick();
-  if (scrollChatRaf) cancelAnimationFrame(scrollChatRaf);
-  scrollChatRaf = requestAnimationFrame(() => {
-    scrollChatRaf = requestAnimationFrame(() => {
-      const el = chatPanelRef.value?.chatScrollRef;
-      if (!el) {
-        scrollChatRaf = 0;
-        return;
-      }
 
-      if (force) {
-        scheduleScrollContainerToBottom(() => chatPanelRef.value?.chatScrollRef ?? null, { behavior: "auto" });
-      } else {
-        scrollContainerToBottom(el, "auto");
-      }
+  if (force) {
+    await nextTick();
+    if (scrollChatRaf) cancelAnimationFrame(scrollChatRaf);
+    scrollChatRaf = requestAnimationFrame(() => {
       scrollChatRaf = 0;
+      const el = chatPanelRef.value?.chatScrollRef;
+      if (el) scrollContainerToBottom(el, "auto");
+      scheduleScrollContainerToBottom(() => chatPanelRef.value?.chatScrollRef ?? null, { behavior: "auto" });
     });
-  });
+    return;
+  }
+
+  // Streaming follow: hand off to ChatPanel's eased glide (coalesced per frame).
+  // The hard jump stays for force paths (jump-to-latest / session switch).
+  chatPanelRef.value?.followToBottom();
 }
 
 const {
