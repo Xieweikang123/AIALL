@@ -1105,6 +1105,7 @@ import { lsGet, lsGetJson, lsSet, lsSetJson, lsRemove } from "../utils/localStor
 import { dismissBlockingOverlays, registerOverlayDismissDeps, scanDomBlockingOverlays } from "../utils/dismissBlockingOverlays";
 import { sessionDiag } from "../utils/sessionDiagLog";
 import { normalizePath, normalizeProjectPath as normalizeProjectPathUtil } from "../utils/normalizePath";
+import { decideSessionTabsRestore, readSessionTabs, writeSessionTabs } from "../utils/sessionTabs";
 import ChatComposerEditor, { COMPOSER_PENDING_DRAFT_KEY } from "../components/ChatComposerEditor.vue";
 import ConfirmPopup from "../components/ConfirmPopup.vue";
 import InputPrompt from "../components/InputPrompt.vue";
@@ -1650,16 +1651,8 @@ const {
 const openedSessionIds = ref<string[]>([]);
 
 // 会话 tab 持久化：按项目路径存 localStorage，刷新后恢复
-const SESSION_TABS_STORAGE_PREFIX = "aiall-opened-session-tabs:";
-
 function persistOpenedSessionTabs() {
-  const path = projectPath.value.trim();
-  if (!path) return;
-  try {
-    localStorage.setItem(SESSION_TABS_STORAGE_PREFIX + path, JSON.stringify(openedSessionIds.value));
-  } catch {
-    /* 忽略存储失败 */
-  }
+  writeSessionTabs(projectPath.value, openedSessionIds.value);
 }
 
 // 切换会话时，恢复目标会话的发送状态到 chatSending，并把新会话加入已打开 tab
@@ -1680,32 +1673,21 @@ const openedSessions = computed(() => {
     .filter((s): s is NonNullable<typeof s> => Boolean(s));
 });
 
-// 刷新/切换项目后恢复 tab：sessionList 就绪且当前没有 tab 时，从 localStorage 还原；顺带清理已删除会话的 tab
+// 刷新/切换项目后恢复 tab：sessionList 就绪后从 localStorage 还原；顺带清理已删除会话的 tab。
+// 恢复判定抽到 decideSessionTabsRestore（含回归测试），空索引一律跳过、不写回，
+// 避免把存档当场清空——这是「刷新后 tab 丢失」复发两次的坑，改动前先看 sessionTabs.ts 头注释。
 watch(sessionList, (list) => {
   const path = projectPath.value.trim();
   if (!path) return;
-  const known = new Set(list.map((s) => s.id));
-  // 合并式恢复：localStorage 持久化的 tab + 当前已打开 tab + 当前激活会话，去重并过滤已删除会话。
-  // 不依赖 openedSessionIds 是否为空，避免 activeSessionId 的 watch 先跑填非空导致恢复被跳过，
-  // 也避免 activeSessionId 值未变（重开项目同会话）时当前会话没有对应 tab。
-  let merged: string[] = [];
-  try {
-    const raw = localStorage.getItem(SESSION_TABS_STORAGE_PREFIX + path);
-    const parsed: unknown = raw ? JSON.parse(raw) : null;
-    if (Array.isArray(parsed)) {
-      merged = parsed.filter((x): x is string => typeof x === "string");
-    }
-  } catch {
-    /* 忽略恢复失败 */
-  }
-  for (const id of openedSessionIds.value) {
-    if (!merged.includes(id)) merged.push(id);
-  }
-  const sid = (activeSessionId.value || "").trim();
-  if (sid && !merged.includes(sid)) merged.push(sid);
-  merged = merged.filter((id) => known.has(id));
-  openedSessionIds.value = merged;
-  persistOpenedSessionTabs();
+  const decision = decideSessionTabsRestore({
+    persisted: readSessionTabs(path),
+    current: openedSessionIds.value,
+    activeId: activeSessionId.value,
+    knownIds: list.map((s) => s.id),
+  });
+  if (decision.next === null) return;
+  openedSessionIds.value = decision.next;
+  if (decision.persist) persistOpenedSessionTabs();
 });
 
 function handleCloseSessionTab(sessionId: string) {

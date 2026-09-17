@@ -223,6 +223,16 @@ AIALL 的 Vibe 会话文件**不在项目目录内**，存储在 AppData Roaming
 - **零进度空壳不出恢复条是正常门控**——恢复判定（`agentRecovery.ts` 的 `hasRecoverableAgentProgress`）要求完成轮次 / roundGroups / 工具记录任一存在；空壳被当作可复用空槽，不标失败、不给续跑入口。看到空泡先查磁盘源，别先怀疑判定逻辑坏了
 - **改进方向对准单点依赖**——根因是收尾落盘单点依赖前端存活的 done 事件；应考虑运行时侧定期快照、页面重挂载后同步运行状态，而不是给空壳硬开恢复口
 
+## 前端持久化状态恢复排障准则
+
+处理"刷新/切项目后 tab、面板状态、恢复项丢了"类问题时：
+
+- **先分清"没存"还是"存了被覆盖"**——浏览器 devtools 看 localStorage 键值。存档还在 = 恢复逻辑读错；存档是空/缺失 = 被某次 watch 无条件写回覆盖了。后者才是此类问题的高发形态
+- **警惕"数据源未就绪时触发 watch"**——切项目/刷新普遍是"先清空再异步填充"（如 `resetUiForProjectSwitch` 清 `sessionList`，之后 `refreshSessionList` 才填）。清空那一刻 watch 会被**空集合**触发，若此时拿空集合去过滤并存回，就把存档当场清了
+- **持久化记录绝不无条件写回**——只在"结果与已存记录不同"时才写；数据源为空时一律跳过（跳过也**不要** persist）。历史两次"刷新后会话 tab 丢失"都源于此：`VibeCodingView.vue` 的 `watch(sessionList)` 曾用空 `known` 过滤后无条件 `persistOpenedSessionTabs()`
+- **同一 bug 复发 = 缺可测边界**——修第二遍时把判定抽成纯函数（如 `src/utils/sessionTabs.ts` 的 `decideSessionTabsRestore`）+ 回归测试（`sessionTabs.test.ts` 覆盖"空索引不得清存档"），别只加注释靠人记
+- **改动前先确认存储 key 是否被沿用**——部分存档按原始路径（trim）而非规范化路径写入，改成 `normalizeProjectPath` 会读不到旧数据，需保留兼容
+
 ## 文件膨胀约束
 
 `src/composables/useAgentRun.ts` 已拆出 `useAgentChainScroll.ts`、`useAgentStreamPatch.ts`、`useAgentEventHandlers.ts`、`useAgentSSEConnection.ts` 等子 composable，主文件负责 Agent 运行编排并委托分发。
