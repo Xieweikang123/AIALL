@@ -15,7 +15,9 @@
           'session-tab--drop-after': tabDragState.dropIndex === index && tabDragState.dropSide === 'after',
         }"
         :title="sessionTabTitle(s)"
-        @click="$emit('switch-session', s.id)"
+        @click="onTabClick(s.id)"
+        @mousedown.middle.prevent="$emit('remove-session', s.id)"
+        @contextmenu.prevent="onTabContextMenu($event, s.id)"
         @pointerdown="onTabPointerDown($event, index)"
       >
         <span v-if="tabStatus(s)" class="session-tab-status" aria-hidden="true">
@@ -36,7 +38,6 @@
           :class="{ 'shimmer-text--fast': sessionSendingIds.includes(s.id) }"
         >{{ s.title || "新会话" }}</span>
         <span
-          v-if="s.id === activeSessionId"
           class="session-tab-close"
           role="button"
           tabindex="0"
@@ -63,6 +64,20 @@
       </button>
     </div>
     <Teleport to="body">
+      <div
+        v-if="contextMenu.visible"
+        class="session-tab-context-menu"
+        :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+        @click.stop
+      >
+        <button type="button" @click="ctxClose">关闭</button>
+        <button type="button" :disabled="sessionList.length <= 1" @click="ctxCloseOthers">关闭其它</button>
+        <button type="button" :disabled="!hasTabsToRight" @click="ctxCloseRight">关闭右侧</button>
+        <div class="ctx-sep" />
+        <button type="button" :disabled="sessionList.length === 0" @click="ctxCloseAll">关闭全部</button>
+      </div>
+    </Teleport>
+    <Teleport to="body">
       <div v-if="tabDragGhost" class="session-tab-drag-ghost" :style="{ left: tabDragGhost.x + 'px', top: tabDragGhost.y + 'px' }">
         <span class="session-tab-drag-ghost-name">{{ tabDragGhost.name }}</span>
       </div>
@@ -71,7 +86,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import type { VibeChatSessionMeta } from "../../services/vibeChatStorage";
 
 const props = withDefaults(defineProps<{
@@ -86,6 +101,9 @@ const emit = defineEmits<{
   (e: "switch-session", sessionId: string): void;
   (e: "start-new-session"): void;
   (e: "remove-session", sessionId: string): void;
+  (e: "close-other-sessions", sessionId: string): void;
+  (e: "close-right-sessions", sessionId: string): void;
+  (e: "close-all-sessions"): void;
   (e: "reorder-sessions", fromIndex: number, toIndex: number): void;
 }>();
 
@@ -110,6 +128,71 @@ function sessionTabTitle(s: VibeChatSessionMeta): string {
   const base = s.title || "新会话";
   return s.messageCount ? `${base} · ${s.messageCount} 条消息` : base;
 }
+
+function onTabClick(sessionId: string) {
+  if (suppressTabClick) {
+    suppressTabClick = false;
+    return;
+  }
+  emit("switch-session", sessionId);
+}
+
+/* ---- 右键菜单 ---- */
+const contextMenu = ref({ visible: false, x: 0, y: 0, sessionId: "" });
+
+function onTabContextMenu(e: MouseEvent, sessionId: string) {
+  contextMenu.value = { visible: true, x: e.clientX, y: e.clientY, sessionId };
+}
+
+const hasTabsToRight = computed(() => {
+  const idx = props.sessionList.findIndex((s) => s.id === contextMenu.value.sessionId);
+  return idx >= 0 && idx < props.sessionList.length - 1;
+});
+
+function hideCtx() {
+  contextMenu.value.visible = false;
+}
+
+function ctxClose() {
+  const id = contextMenu.value.sessionId;
+  hideCtx();
+  if (id) emit("remove-session", id);
+}
+
+function ctxCloseOthers() {
+  const id = contextMenu.value.sessionId;
+  hideCtx();
+  if (id) emit("close-other-sessions", id);
+}
+
+function ctxCloseRight() {
+  const id = contextMenu.value.sessionId;
+  hideCtx();
+  if (id) emit("close-right-sessions", id);
+}
+
+function ctxCloseAll() {
+  hideCtx();
+  emit("close-all-sessions");
+}
+
+function onGlobalClick() {
+  hideCtx();
+}
+
+function onGlobalKeydown(e: KeyboardEvent) {
+  if (e.key === "Escape") hideCtx();
+}
+
+onMounted(() => {
+  document.addEventListener("click", onGlobalClick, true);
+  document.addEventListener("keydown", onGlobalKeydown, true);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("click", onGlobalClick, true);
+  document.removeEventListener("keydown", onGlobalKeydown, true);
+});
 
 /* ---- 会话标签拖拽排序（Pointer 实现，兼容 WebView2） ---- */
 const DRAG_THRESHOLD_PX = 5;
@@ -444,5 +527,46 @@ function updateTabDropTarget(clientX: number) {
 
 @keyframes session-spin {
   to { transform: rotate(360deg); }
+}
+
+.session-tab-context-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 140px;
+  background: rgba(22, 27, 38, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 4px 0;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(12px);
+}
+
+.session-tab-context-menu button {
+  display: block;
+  width: 100%;
+  padding: 5px 14px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.82);
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.session-tab-context-menu button:hover:not(:disabled) {
+  background: rgba(88, 166, 255, 0.18);
+  color: #fff;
+}
+
+.session-tab-context-menu button:disabled {
+  color: rgba(255, 255, 255, 0.25);
+  cursor: default;
+}
+
+.ctx-sep {
+  height: 1px;
+  margin: 3px 8px;
+  background: rgba(255, 255, 255, 0.08);
 }
 </style>

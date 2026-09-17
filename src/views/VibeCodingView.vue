@@ -43,6 +43,9 @@
           @switch-session="handleSwitchSession"
           @start-new-session="handleStartNewSession"
           @remove-session="handleCloseSessionTab"
+          @close-other-sessions="handleCloseOtherSessionTabs"
+          @close-right-sessions="handleCloseRightSessionTabs"
+          @close-all-sessions="handleCloseAllSessionTabs"
           @reorder-sessions="handleReorderSessionTabs"
         />
       </template>
@@ -1100,7 +1103,7 @@ import { lsGet, lsGetJson, lsSet, lsSetJson, lsRemove } from "../utils/localStor
 import { dismissBlockingOverlays, registerOverlayDismissDeps, scanDomBlockingOverlays } from "../utils/dismissBlockingOverlays";
 import { sessionDiag } from "../utils/sessionDiagLog";
 import { normalizePath, normalizeProjectPath as normalizeProjectPathUtil } from "../utils/normalizePath";
-import { decideSessionTabsRestore, readSessionTabs, writeSessionTabs } from "../utils/sessionTabs";
+import { buildOpenedSessionTabs, decideSessionTabsRestore, readSessionTabs, writeSessionTabs } from "../utils/sessionTabs";
 import ChatComposerEditor, { COMPOSER_PENDING_DRAFT_KEY } from "../components/ChatComposerEditor.vue";
 import ConfirmPopup from "../components/ConfirmPopup.vue";
 import InputPrompt from "../components/InputPrompt.vue";
@@ -1655,13 +1658,11 @@ watch(activeSessionId, (id) => {
   }
 });
 
-// 已打开会话的元数据（按打开顺序），供顶部 tab 栏渲染
-const openedSessions = computed(() => {
-  const byId = new Map(sessionList.value.map((s) => [s.id, s]));
-  return openedSessionIds.value
-    .map((id) => byId.get(id))
-    .filter((s): s is NonNullable<typeof s> => Boolean(s));
-});
+// 已打开会话的元数据（按打开顺序），供顶部 tab 栏渲染。
+// 草稿会话（点 + 刚建、未发送）不在 sessionList 里，由 buildOpenedSessionTabs 补「新会话」占位 tab。
+const openedSessions = computed(() =>
+  buildOpenedSessionTabs(openedSessionIds.value, sessionList.value, activeSessionId.value),
+);
 
 // 刷新/切换项目后恢复 tab：sessionList 就绪后从 localStorage 还原；顺带清理已删除会话的 tab。
 // 恢复判定抽到 decideSessionTabsRestore（含回归测试），空索引一律跳过、不写回，
@@ -1696,6 +1697,42 @@ function handleCloseSessionTab(sessionId: string) {
       handleStartNewSession();
     }
   }
+}
+
+function ensureActiveSessionAfterTabClose() {
+  const active = activeSessionId.value.trim();
+  if (active && openedSessionIds.value.includes(active)) return;
+  const next = openedSessions.value[0];
+  if (next) {
+    handleSwitchSession(next.id);
+  } else {
+    handleStartNewSession();
+  }
+}
+
+function handleCloseOtherSessionTabs(sessionId: string) {
+  const keep = sessionId.trim();
+  if (!keep || !openedSessionIds.value.includes(keep)) return;
+  openedSessionIds.value = [keep];
+  persistOpenedSessionTabs();
+  if (activeSessionId.value !== keep) {
+    handleSwitchSession(keep);
+  }
+}
+
+function handleCloseRightSessionTabs(sessionId: string) {
+  const target = sessionId.trim();
+  const idx = openedSessionIds.value.indexOf(target);
+  if (idx < 0) return;
+  openedSessionIds.value = openedSessionIds.value.slice(0, idx + 1);
+  persistOpenedSessionTabs();
+  ensureActiveSessionAfterTabClose();
+}
+
+function handleCloseAllSessionTabs() {
+  openedSessionIds.value = [];
+  persistOpenedSessionTabs();
+  handleStartNewSession();
 }
 
 function handleReorderSessionTabs(fromIndex: number, toIndex: number) {

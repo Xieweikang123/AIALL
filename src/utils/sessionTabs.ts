@@ -1,4 +1,5 @@
 import { lsGetJson, lsRemove, lsSetJson } from "./localStorageSafe";
+import type { VibeChatSessionMeta } from "../services/vibeChatStorage";
 
 /**
  * 会话 tab（顶部标签栏）的持久化与恢复。
@@ -84,6 +85,10 @@ function sameOrder(a: readonly string[], b: readonly string[]): boolean {
  * 合并来源：持久化 tab + 当前已打开 tab + 当前激活会话（去重），
  * 再过滤掉已删除/未知会话。顺序保留「持久化在前、内存新增在后」。
  *
+ * 当前激活会话**不受 known 过滤**：草稿会话不在 `sessionList` 里，
+ * 但它是激活会话，必须保留 tab（占位渲染见 `buildOpenedSessionTabs`）。
+ * 会话删除时会先切走激活指针，因此这里不会给已删除会话留 tab。
+ *
  * 注意：`knownIds` 为空时返回跳过，**这是刻意的**——空列表分不清是
  * 「项目确实没有会话」还是「索引还在加载」，此时销毁存档的代价远大于
  * 晚一点恢复的代价。详见文件头注释。
@@ -101,6 +106,44 @@ export function decideSessionTabsRestore(
   const active = input.activeId.trim();
   if (active && !merged.includes(active)) merged.push(active);
 
-  const filtered = merged.filter((id) => known.has(id));
+  const filtered = merged.filter((id) => id === active || known.has(id));
   return { next: filtered, persist: !sameOrder(filtered, input.persisted) };
+}
+
+/**
+ * 会话 tab 的渲染投影。
+ *
+ * 草稿会话（点「+」刚建、还没发过消息）不在 `sessionList` 里（见
+ * `sessionHasListableContent`），但它仍是当前激活会话，必须显示成一个
+ * 「新会话」占位 tab，否则点 + 看起来毫无反应。发送后草稿转正、由真实元数据接管；
+ * 切走时草稿被丢弃（`finalizeDraftSessionOnLeave`）→ 对应 tab 自然消失。
+ *
+ * 仅当 `openedIds` 里**没有**该 id 的元数据、且它就是当前激活会话时才补占位，
+ * 避免给已删除会话或非激活的未知 id 凭空造 tab。
+ */
+export function buildOpenedSessionTabs(
+  openedIds: readonly string[],
+  sessionList: readonly VibeChatSessionMeta[],
+  activeId: string,
+): VibeChatSessionMeta[] {
+  const byId = new Map(sessionList.map((s) => [s.id, s]));
+  const active = activeId.trim();
+  const tabs: VibeChatSessionMeta[] = [];
+  for (const id of dedupe(openedIds)) {
+    const meta = byId.get(id);
+    if (meta) {
+      tabs.push(meta);
+      continue;
+    }
+    if (id !== active) continue;
+    tabs.push({
+      id,
+      title: "",
+      createdAt: "",
+      updatedAt: "",
+      messageCount: 0,
+      status: "draft",
+    });
+  }
+  return tabs;
 }

@@ -1,10 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  buildOpenedSessionTabs,
   decideSessionTabsRestore,
   readSessionTabs,
   sessionTabsStorageKey,
   writeSessionTabs,
 } from "./sessionTabs";
+import type { VibeChatSessionMeta } from "../services/vibeChatStorage";
+
+function meta(id: string, overrides: Partial<VibeChatSessionMeta> = {}): VibeChatSessionMeta {
+  return {
+    id,
+    title: `会话 ${id}`,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    messageCount: 2,
+    ...overrides,
+  };
+}
 
 function installLocalStorageMock() {
   const storage: Record<string, string> = {};
@@ -137,6 +150,62 @@ describe("sessionTabs", () => {
       });
       expect(decision.next).toEqual(["s1"]);
       expect(decision.persist).toBe(true);
+    });
+
+    it("激活的草稿会话不在索引里也要保留 tab（点 + 立刻可见）", () => {
+      const decision = decideSessionTabsRestore({
+        persisted: ["s1"],
+        current: ["s1", "draft1"],
+        activeId: "draft1",
+        knownIds: ["s1"],
+      });
+      expect(decision.next).toEqual(["s1", "draft1"]);
+    });
+
+    it("非激活的未知 id 仍被过滤（不给已删除会话留 tab）", () => {
+      const decision = decideSessionTabsRestore({
+        persisted: ["s1", "gone"],
+        current: [],
+        activeId: "s1",
+        knownIds: ["s1"],
+      });
+      expect(decision.next).toEqual(["s1"]);
+    });
+  });
+
+  describe("buildOpenedSessionTabs — 草稿占位 tab", () => {
+    it("草稿会话渲染成「新会话」占位 tab，标题为空", () => {
+      const tabs = buildOpenedSessionTabs(["s1", "draft1"], [meta("s1")], "draft1");
+      expect(tabs.map((t) => t.id)).toEqual(["s1", "draft1"]);
+      expect(tabs[1].title).toBe("");
+      expect(tabs[1].messageCount).toBe(0);
+      expect(tabs[1].status).toBe("draft");
+    });
+
+    it("草稿转正后由真实元数据接管（标题/消息数来自 sessionList）", () => {
+      const tabs = buildOpenedSessionTabs(
+        ["draft1"],
+        [meta("draft1", { title: "第一条消息", messageCount: 2 })],
+        "draft1",
+      );
+      expect(tabs).toHaveLength(1);
+      expect(tabs[0].title).toBe("第一条消息");
+      expect(tabs[0].messageCount).toBe(2);
+    });
+
+    it("切走后草稿 tab 消失（id 不在 openedIds 里）", () => {
+      const tabs = buildOpenedSessionTabs(["s1"], [meta("s1")], "s1");
+      expect(tabs.map((t) => t.id)).toEqual(["s1"]);
+    });
+
+    it("只给激活的未知 id 补占位，非激活未知 id 丢弃", () => {
+      const tabs = buildOpenedSessionTabs(["s1", "ghost"], [meta("s1")], "s1");
+      expect(tabs.map((t) => t.id)).toEqual(["s1"]);
+    });
+
+    it("激活会话不在 openedIds 时不凭空造 tab", () => {
+      const tabs = buildOpenedSessionTabs([], [meta("s1")], "s1");
+      expect(tabs).toEqual([]);
     });
   });
 
