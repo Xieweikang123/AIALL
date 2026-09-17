@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildInlineAgentFeed,
   collapseInlineFeedItems,
+  resolveActiveReasoningKey,
   summarizeInlineFeedProcess,
 } from "./agentInlineFeed";
 import type { AgentRoundGroupView } from "./agentRoundGroups";
@@ -240,5 +241,57 @@ describe("summarizeInlineFeedProcess", () => {
     expect(summarizeInlineFeedProcess([
       { kind: "text", key: "n1", text: "hello", variant: "narrative" },
     ], 0, false)).toBe("1 段分析");
+  });
+});
+
+describe("resolveActiveReasoningKey", () => {
+  const reasoning = (text = "正在思考"): InlineFeedItem => ({
+    kind: "reasoning",
+    key: "reasoning-1",
+    text,
+  });
+
+  it("marks reasoning active while it is the newest emission", () => {
+    expect(resolveActiveReasoningKey([reasoning()], true)).toBe("reasoning-1");
+  });
+
+  it("stays active across trailing status rows", () => {
+    const items: InlineFeedItem[] = [
+      reasoning(),
+      { kind: "status", key: "planning-current", text: "思考中…" },
+    ];
+    expect(resolveActiveReasoningKey(items, true)).toBe("reasoning-1");
+  });
+
+  it("collapses once a tool call follows the reasoning", () => {
+    const items: InlineFeedItem[] = [
+      reasoning(),
+      { kind: "tool", key: "t1", step: readStep("t1") },
+    ];
+    expect(resolveActiveReasoningKey(items, true)).toBeNull();
+  });
+
+  it("collapses once narrative text follows the reasoning", () => {
+    const items: InlineFeedItem[] = [
+      reasoning(),
+      { kind: "text", key: "n1", text: "开始回答", variant: "narrative" },
+    ];
+    expect(resolveActiveReasoningKey(items, true)).toBeNull();
+  });
+
+  it("treats an empty text placeholder as no content", () => {
+    const items: InlineFeedItem[] = [
+      reasoning(),
+      { kind: "text", key: "n1", text: "   ", variant: "answer" },
+    ];
+    expect(resolveActiveReasoningKey(items, true)).toBe("reasoning-1");
+  });
+
+  it("never activates for a finished run", () => {
+    expect(resolveActiveReasoningKey([reasoning()], false)).toBeNull();
+  });
+
+  it("ignores empty reasoning placeholders", () => {
+    expect(resolveActiveReasoningKey([reasoning("  ")], true)).toBeNull();
   });
 });

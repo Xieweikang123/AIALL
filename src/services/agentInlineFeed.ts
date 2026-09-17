@@ -221,6 +221,29 @@ function stripInlineStatusItems(items: InlineFeedItem[], isRunning: boolean): In
   return result;
 }
 
+/**
+ * Key of the reasoning stream currently being produced, or null.
+ *
+ * The reasoning block auto-expands while it is the newest thing the model is
+ * emitting, then auto-collapses once real content lands after it (a tool call,
+ * or streamed answer/narrative text). Status rows are ignored — they are
+ * transient rails, not content that ends thinking.
+ */
+export function resolveActiveReasoningKey(
+  items: InlineFeedItem[],
+  isRunning: boolean,
+): string | null {
+  if (!isRunning) return null;
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (!item || item.kind === "status") continue;
+    if (item.kind === "reasoning") return item.text.trim() ? item.key : null;
+    if (item.kind === "text" && !item.text.trim()) continue;
+    return null;
+  }
+  return null;
+}
+
 /** Single linear narrative+tools feed — no separate answer block. */
 export function buildInlineAgentFeed(input: InlineAgentFeedInput): InlineAgentFeed {
   debugLog("[inlineFeed] buildInlineAgentFeed", {

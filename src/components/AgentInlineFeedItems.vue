@@ -28,25 +28,38 @@
       <button
         type="button"
         class="stream-reasoning-btn"
+        :class="{ 'stream-reasoning-btn--active': isReasoningActive(item.key) }"
         :aria-expanded="isReasoningExpanded(item.key)"
         @click="toggleReasoning(item.key)"
       >
-        <span class="stream-reasoning-chevron" aria-hidden="true">
-          {{ isReasoningExpanded(item.key) ? "▾" : "▸" }}
-        </span>
-        <span class="stream-reasoning-label">{{ item.text.trim() ? "思考过程" : "思考中…" }}</span>
-      </button>
-      <div
-        v-if="isReasoningExpanded(item.key)"
-        class="stream-reasoning-body"
-      >
-        <ChatMarkdown
-          class="inline-feed-markdown inline-feed-markdown--reasoning"
-          :content="reasoningMarkdown(item.text)"
-          :streaming="false"
-          :interactive="false"
+        <span
+          class="stream-reasoning-chevron"
+          :class="{ 'stream-reasoning-chevron--open': isReasoningExpanded(item.key) }"
+          aria-hidden="true"
+        >▸</span>
+        <span
+          v-if="isReasoningActive(item.key)"
+          class="stream-reasoning-dot"
+          aria-hidden="true"
         />
-      </div>
+        <span
+          class="stream-reasoning-label"
+          :class="{ 'shimmer-text--fast': isReasoningActive(item.key) }"
+        >{{ reasoningLabel(item.key) }}</span>
+      </button>
+      <Transition name="stream-reasoning-reveal">
+        <div
+          v-if="isReasoningExpanded(item.key)"
+          class="stream-reasoning-body"
+        >
+          <ChatMarkdown
+            class="inline-feed-markdown inline-feed-markdown--reasoning"
+            :content="reasoningMarkdown(item.text)"
+            :streaming="isReasoningActive(item.key)"
+            :interactive="false"
+          />
+        </div>
+      </Transition>
     </div>
 
     <div
@@ -156,6 +169,7 @@ import ProjectReportBlock from "./ProjectReportBlock.vue";
 import AgentProcessStepList from "./AgentProcessStepList.vue";
 import IntentTraceCard from "./IntentTraceCard.vue";
 import type { InlineFeedItem, InlineFeedProcessItem } from "../services/agentInlineFeed";
+import { resolveActiveReasoningKey } from "../services/agentInlineFeed";
 import { sanitizeFeedThoughtText } from "../services/agentProgressMarker";
 import { enrichPlanMarkdownForDisplay } from "../services/planDocumentDisplay";
 import { shouldUsePlanExternalView } from "../services/planFile";
@@ -331,7 +345,14 @@ function answerMarkdown(text: string) {
 }
 
 const expandedCollapsedKeys = ref<Set<string>>(new Set());
-const expandedReasoningKeys = ref<Set<string>>(new Set());
+/** Explicit user toggles win over the auto expand-while-thinking behavior. */
+const reasoningOverrides = ref<Map<string, boolean>>(new Map());
+
+/**
+ * Key of the reasoning stream currently being produced. The block auto-expands
+ * while it is the newest emission and auto-collapses once real content follows.
+ */
+const activeReasoningKey = computed(() => resolveActiveReasoningKey(props.items, props.isRunning));
 
 watch(
   () => props.items.map((item) => (item.kind === "collapsed" ? item.key : "")).join("|"),
@@ -351,15 +372,24 @@ function toggleCollapsed(key: string) {
   expandedCollapsedKeys.value = next;
 }
 
+function isReasoningActive(key: string): boolean {
+  return activeReasoningKey.value === key;
+}
+
+function reasoningLabel(key: string): string {
+  return isReasoningActive(key) ? "思考中…" : "思考过程";
+}
+
 function isReasoningExpanded(key: string): boolean {
-  return expandedReasoningKeys.value.has(key);
+  const override = reasoningOverrides.value.get(key);
+  if (override !== undefined) return override;
+  return isReasoningActive(key);
 }
 
 function toggleReasoning(key: string) {
-  const next = new Set(expandedReasoningKeys.value);
-  if (next.has(key)) next.delete(key);
-  else next.add(key);
-  expandedReasoningKeys.value = next;
+  const next = new Map(reasoningOverrides.value);
+  next.set(key, !isReasoningExpanded(key));
+  reasoningOverrides.value = next;
 }
 
 </script>
@@ -443,10 +473,30 @@ function toggleReasoning(key: string) {
   border-color: rgba(88, 166, 255, 0.14);
 }
 
+.stream-reasoning-btn--active {
+  color: rgba(165, 214, 255, 0.92);
+  border-color: rgba(88, 166, 255, 0.18);
+  background: rgba(88, 166, 255, 0.07);
+}
+
+.stream-reasoning-dot {
+  flex-shrink: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(126, 182, 255, 0.95);
+  animation: reasoning-dot-breathe 1.6s ease-in-out infinite;
+}
+
 .stream-reasoning-chevron {
   flex-shrink: 0;
   font-size: 9px;
   opacity: 0.7;
+  transition: transform 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.stream-reasoning-chevron--open {
+  transform: rotate(90deg);
 }
 
 .stream-reasoning-label {
@@ -462,11 +512,39 @@ function toggleReasoning(key: string) {
   border-left: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+/* Reveal via transform/opacity only — no height measurement, no layout thrash. */
+.stream-reasoning-reveal-enter-active,
+.stream-reasoning-reveal-leave-active {
+  transition: opacity 200ms ease, transform 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.stream-reasoning-reveal-enter-from,
+.stream-reasoning-reveal-leave-to {
+  opacity: 0;
+  transform: translateY(-3px);
+}
+
+@keyframes reasoning-dot-breathe {
+  0%, 100% { opacity: 0.45; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
 .inline-feed-markdown--reasoning :deep(.msg-markdown) {
   font-size: 12px;
   line-height: 1.55;
   color: rgba(148, 163, 184, 0.74);
   font-style: italic;
+}
+
+.inline-feed-markdown--reasoning :deep(.msg-markdown--streaming p:last-child::after) {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.12em;
+  background: rgba(148, 163, 184, 0.7);
+  animation: stream-caret-blink 1s step-end infinite;
 }
 
 .stream-process-collapsed-wrap {
@@ -554,5 +632,21 @@ function toggleReasoning(key: string) {
   font-size: 12px;
   line-height: 1.5;
   color: rgba(148, 163, 184, 0.78);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stream-reasoning-dot {
+    animation: none;
+    opacity: 0.9;
+  }
+
+  .stream-reasoning-chevron {
+    transition: none;
+  }
+
+  .stream-reasoning-reveal-enter-active,
+  .stream-reasoning-reveal-leave-active {
+    transition: none;
+  }
 }
 </style>
