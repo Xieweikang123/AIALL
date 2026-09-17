@@ -28,8 +28,8 @@
       v-if="liveRailVisible"
       :status-line="liveRailPrimary"
       :waiting-model="isWaitingModel"
-      :progress="isWaitingModel || isPhaseProgressing"
-      :shimmer="isWaitingModel || isPhaseProgressing || !hasAnswerContent"
+      :progress="isWaitingModel || isPhaseProgressing || hasActiveTool"
+      :shimmer="isWaitingModel || isPhaseProgressing || hasActiveTool || !hasAnswerContent"
     />
   </div>
 </template>
@@ -102,6 +102,9 @@ const processItems = computed(() => props.inlineItems);
 
 const liveTools = computed(() => collectToolsFromInlineFeed(processItems.value));
 const toolCount = computed(() => liveTools.value.length);
+const hasActiveTool = computed(
+  () => Boolean(props.hasRunningTool || liveTools.value.some((step) => step.running)),
+);
 const hasAnswerContent = computed(() => props.inlineItems.some((item) => item.kind === "text" && item.text.trim()));
 
 const toolDefaultVisible = computed(() => {
@@ -117,15 +120,11 @@ const toolDefaultVisible = computed(() => {
 const liveRailPrimary = computed((): string => {
   if (!props.isRunning) return "";
 
-  if (props.hasRunningTool || liveTools.value.some((step) => step.running)) {
-    return "";
-  }
-
   const footer = buildAgentLiveFooterStatus({
     currentStatus: props.currentStatus,
     isRunning: true,
     hasAnswer: hasAnswerContent.value,
-    hasRunningTool: props.hasRunningTool,
+    hasRunningTool: hasActiveTool.value,
     hasActionBlocks: toolCount.value > 0,
     agentPhase: props.agentPhase,
   });
@@ -133,6 +132,8 @@ const liveRailPrimary = computed((): string => {
 
   const status = props.currentStatus?.trim();
   if (status && !/^探索代码库 ·/.test(status)) return status;
+
+  if (hasActiveTool.value) return "执行工具中…";
 
   if (toolCount.value > 0) {
     const stats = computeExplorationStats(liveTools.value);
@@ -146,7 +147,7 @@ const isWaitingModel = computed(() =>
   isAgentWaitingModelPhase({
     agentPhase: props.agentPhase,
     statusLine: liveRailPrimary.value,
-    hasRunningTool: props.hasRunningTool,
+    hasRunningTool: hasActiveTool.value,
   }),
 );
 
@@ -156,9 +157,7 @@ const isPhaseProgressing = computed(() =>
 
 const liveRailVisible = computed(() => {
   if (!props.isRunning) return false;
-  // 有工具在跑时由步骤行的 running 态表达；否则只要有状态文案就显示底栏，
-  // 避免「已有中间叙述正文」时整段看起来像说完了、底栏却仍在运行。
-  if (props.hasRunningTool || liveTools.value.some((step) => step.running)) return false;
+  // 运行中只要有状态文案就显示底栏（含工具执行弱提示），避免气泡像已结束。
   return Boolean(liveRailPrimary.value.trim());
 });
 

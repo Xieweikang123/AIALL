@@ -165,6 +165,14 @@ export function buildAgentLiveFooterStatus(input: {
 }): string | null {
   if (!input.isRunning) return null;
 
+  const status = input.currentStatus?.trim() ?? "";
+  const turnOnly = status.match(/第 \d+(?:\/\d+)? 轮(?:\s*·\s*已等待 \d+s)?/);
+
+  // 工具执行中仍留弱底栏，避免只靠步骤小蓝点、气泡像已结束。
+  if (input.hasRunningTool) {
+    return turnOnly ? `执行工具中… · ${turnOnly[0]}` : "执行工具中…";
+  }
+
   const waitingModel =
     input.agentPhase === "waiting_model" ||
     input.agentPhase === "sending_request" ||
@@ -178,14 +186,8 @@ export function buildAgentLiveFooterStatus(input: {
   // 已有中间叙述时仍要露出等待/思考态，否则气泡像已结束。
   if (input.hasAnswer && !waitingModel && !thinkingWithAnswer) return null;
 
-  const status = input.currentStatus?.trim();
   if (!status) return null;
   if (/^探索代码库 ·/.test(status)) return null;
-
-  if (input.hasRunningTool) {
-    const turnOnly = status.match(/第 \d+(?:\/\d+)? 轮(?:\s*·\s*已等待 \d+s)?/);
-    return turnOnly?.[0] ?? null;
-  }
 
   return status;
 }

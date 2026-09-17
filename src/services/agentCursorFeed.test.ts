@@ -821,6 +821,28 @@ describe("agentCursorFeed", () => {
     ).toBe("等待模型响应… · 第 2/24 轮 · 已等待 0s");
   });
 
+  it("buildAgentLiveFooterStatus keeps a weak rail while tools are running", () => {
+    expect(
+      buildAgentLiveFooterStatus({
+        currentStatus: "Run · git diff…",
+        isRunning: true,
+        hasAnswer: true,
+        hasRunningTool: true,
+        agentPhase: "executing_tools",
+      }),
+    ).toBe("执行工具中…");
+
+    expect(
+      buildAgentLiveFooterStatus({
+        currentStatus: "执行工具… · 第 3/24 轮",
+        isRunning: true,
+        hasAnswer: false,
+        hasRunningTool: true,
+        agentPhase: "executing_tool",
+      }),
+    ).toBe("执行工具中… · 第 3/24 轮");
+  });
+
   it("shows model wait diagnostics instead of a bare waiting label", () => {
     const status = buildCursorCompactLiveStatus({
       msg: {
