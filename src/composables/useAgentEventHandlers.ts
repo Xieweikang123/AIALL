@@ -25,6 +25,7 @@ import {
 } from "../services/agentMessageDisplay";
 import {
   recordAgentRoundNarrative,
+  recordAgentRoundReasoningSnapshot,
   recordAgentRoundRequest,
   recordAgentRoundResponse,
   recordAgentRoundStatus,
@@ -73,6 +74,7 @@ export interface UseAgentEventHandlersDeps {
   buildRunUiFullPatch: (msg: VibeChatMessage) => Partial<VibeChatMessage>;
   clearStreamDeltaBuffer: () => void;
   enqueueStreamDelta: (msgId: string, msg: VibeChatMessage, delta: string) => void;
+  enqueueReasoningDelta: (msgId: string, msg: VibeChatMessage, delta: string) => void;
   formatLiveStatus: (live: AgentRunLiveState) => string;
   setAgentStatus: (
     sessionId: string,
@@ -178,6 +180,7 @@ export function useAgentEventHandlers(deps: UseAgentEventHandlersDeps) {
     buildRunUiFullPatch,
     clearStreamDeltaBuffer,
     enqueueStreamDelta,
+    enqueueReasoningDelta,
     formatLiveStatus,
     setAgentStatus,
     isAgentRunning,
@@ -291,6 +294,14 @@ function handleTurnResponseEvent(event: EventOf<"turn_response">, assistantMsg: 
     event.data.maxTurns,
   );
   const turnText = strippedAssistantText;
+  if (event.data.reasoningText?.trim()) {
+    assistantMsg.roundGroups = recordAgentRoundReasoningSnapshot(
+      assistantMsg.roundGroups,
+      event.data.turn,
+      event.data.reasoningText,
+      event.data.maxTurns,
+    );
+  }
   if (turnText && event.data.isFinal) {
     // Prefer authoritative turn_response over a divergent/corrupt stream prefix.
     assistantMsg.content = mergeAssistantTurnText(
@@ -586,6 +597,25 @@ function handleMessageDeltaEvent(event: EventOf<"message_delta">, assistantMsg: 
     }
   }
   enqueueStreamDelta(msgId, assistantMsg, delta);
+}
+
+/**
+ * Reasoning/thinking channel deltas. They accumulate onto `roundGroups[].reasoning`
+ * and render as a collapsed disclosure; answer char accounting is untouched.
+ */
+function handleReasoningDeltaEvent(event: EventOf<"reasoning_delta">, assistantMsg: VibeChatMessage, sessionId: string, msgId: string) {
+  const delta = event.data.delta || "";
+  if (!delta) return;
+  const run = runManager.get(sessionId);
+  const waitPhases = new Set(["waiting_model", "sending_request", "retrying_model"]);
+  if (run && waitPhases.has(run.live.phase)) {
+    setAgentStatus(sessionId, assistantMsg, "streaming_model", {
+      turn: assistantMsg.agentTurn,
+      maxTurns: assistantMsg.agentMaxTurns,
+      model: assistantMsg.agentModel,
+    });
+  }
+  enqueueReasoningDelta(msgId, assistantMsg, delta);
 }
 
 function handleMessageEvent(event: EventOf<"message">, assistantMsg: VibeChatMessage, sessionId: string, msgId: string) {
@@ -1044,6 +1074,7 @@ const agentEventHandlers = new Map<string, AgentEventFn>([
   ["file_diff", handleFileDiffEvent as AgentEventFn],
   ["tool_end", handleToolEndEvent as AgentEventFn],
   ["message_delta", handleMessageDeltaEvent as AgentEventFn],
+  ["reasoning_delta", handleReasoningDeltaEvent as AgentEventFn],
   ["message", handleMessageEvent as AgentEventFn],
   ["error", handleErrorEvent as AgentEventFn],
   ["done", handleDoneEvent as AgentEventFn],

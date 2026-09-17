@@ -111,6 +111,8 @@ function responseEntry(turn: AgentRoundGroupView): AgentTraceEntry[] {
 
   const detailParts: string[] = [];
   if (text) detailParts.push(text);
+  const reasoning = turn.reasoning?.trim();
+  if (reasoning) detailParts.push(`【思考过程】\n${reasoning}`);
   if (toolCalls.length) {
     detailParts.push(
       toolCalls

@@ -26,6 +26,8 @@ export type AgentRoundGroup = {
   turn: number;
   maxTurns?: number;
   narrative?: string;
+  /** Provider reasoning/thinking channel for this turn — separate from the answer narrative. */
+  reasoning?: string;
   modelSteps: AgentModelStep[];
   toolIds: string[];
   /** Narrative stream length (chars) at the moment each tool started — enables chronological interleave. */
@@ -344,6 +346,37 @@ export function recordAgentRoundStreamDelta(
   return next;
 }
 
+/** Accumulate the provider reasoning/thinking channel — kept apart from `narrative`. */
+export function recordAgentRoundReasoningDelta(
+  groups: AgentRoundGroup[] | undefined,
+  turn: number,
+  delta: string,
+  maxTurns?: number,
+): AgentRoundGroup[] {
+  if (!delta || turn <= 0) return groups ? cloneRoundGroups(groups) : [];
+  const next = cloneRoundGroups(groups);
+  const group = ensureGroup(next, turn);
+  group.reasoning = `${group.reasoning || ""}${delta}`;
+  if (maxTurns) group.maxTurns = maxTurns;
+  return next;
+}
+
+/** Replace the streamed reasoning with the authoritative server snapshot for the turn. */
+export function recordAgentRoundReasoningSnapshot(
+  groups: AgentRoundGroup[] | undefined,
+  turn: number,
+  reasoning: string | undefined,
+  maxTurns?: number,
+): AgentRoundGroup[] {
+  const text = (reasoning ?? "").trim();
+  if (!text || turn <= 0) return groups ? cloneRoundGroups(groups) : [];
+  const next = cloneRoundGroups(groups);
+  const group = ensureGroup(next, turn);
+  group.reasoning = text;
+  if (maxTurns) group.maxTurns = maxTurns;
+  return next;
+}
+
 export function buildRoundGroupsFromLegacy(input: {
   turnTraces?: Array<{ turn: number; maxTurns?: number; assistantText: string }>;
   statusLog?: string[];
@@ -412,6 +445,7 @@ export function buildAgentRoundGroupViews(input: {
     .filter((group) =>
       group.turn === 0 ||
       group.narrative ||
+      group.reasoning ||
       group.modelSteps.length ||
       group.tools.length ||
       group.request ||

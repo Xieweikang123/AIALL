@@ -4,11 +4,13 @@ import type { AgentRunLiveState } from "../services/agentRunLiveState";
 import type { SessionAgentRun } from "./agentSessionRuns";
 import { TextToolCallStreamFilter } from "../services/textToolCallMarkup";
 import { appendAssistantStreamDelta } from "../services/agentMessageDisplay";
-import { recordAgentRoundStreamDelta } from "../services/agentRoundGroups";
+import {
+  recordAgentRoundReasoningDelta,
+  recordAgentRoundStreamDelta,
+} from "../services/agentRoundGroups";
 import { syncRoundGroupsPatch } from "../utils/vibeHelpers";
 import { debugLog } from "../utils/debugLog";
 
-const STREAM_SCROLL_THROTTLE_MS = 120;
 const RUN_UI_PATCH_MIN_MS = 200;
 const RUN_UI_STREAM_PATCH_MIN_MS = 48;
 
@@ -34,6 +36,7 @@ export type UseAgentStreamPatch = {
   scheduleMinimizedRunUiPatch: (sessionId: string, msgId: string, kind?: RunUiPatchKind) => void;
   flushMinimizedRunUiPatch: (sessionId: string, msgId: string, assistantMsg: VibeChatMessage) => void;
   enqueueStreamDelta: (msgId: string, assistantMsg: VibeChatMessage, delta: string) => void;
+  enqueueReasoningDelta: (msgId: string, assistantMsg: VibeChatMessage, delta: string) => void;
   clearStreamDeltaBuffer: (options?: { discard?: boolean; msgId?: string }) => void;
   scheduleStreamScroll: () => void;
   buildRunUiFullPatch: (assistantMsg: VibeChatMessage) => Partial<VibeChatMessage>;
@@ -42,6 +45,7 @@ export type UseAgentStreamPatch = {
 
 type PendingRunUiPatch = { sessionId: string; msgId: string; kind: RunUiPatchKind };
 type PendingStreamDelta = { msgId: string; assistantMsg: VibeChatMessage; pending: string };
+type PendingReasoningDelta = { msgId: string; assistantMsg: VibeChatMessage; pending: string };
 
 export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStreamPatch {
   const {
@@ -60,8 +64,9 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
   } = deps;
 
   let streamDeltaRaf: number | null = null;
-  let streamScrollTimer: ReturnType<typeof setTimeout> | null = null;
+  let streamScrollRaf: number | null = null;
   let pendingStreamDelta: PendingStreamDelta | null = null;
+  let pendingReasoningDelta: PendingReasoningDelta | null = null;
 
   let pendingRunUiPatch: PendingRunUiPatch | null = null;
   let runUiPatchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -79,11 +84,20 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
 
   function scheduleStreamScroll() {
     if (!chatSending.value || !isChatPinnedToBottom()) return;
-    if (streamScrollTimer) return;
-    streamScrollTimer = setTimeout(() => {
-      streamScrollTimer = null;
+    if (streamScrollRaf !== null) return;
+    streamScrollRaf = requestAnimationFrame(() => {
+      streamScrollRaf = null;
       void scrollChatToBottom();
-    }, STREAM_SCROLL_THROTTLE_MS);
+    });
+  }
+
+  function scheduleStreamDeltaFlush() {
+    if (streamDeltaRaf !== null) return;
+    streamDeltaRaf = requestAnimationFrame(() => {
+      streamDeltaRaf = null;
+      flushPendingStreamDelta();
+      flushPendingReasoningDelta();
+    });
   }
 
   function shouldMinimizeRunUiPatch(msg: VibeChatMessage): boolean {
@@ -184,10 +198,6 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
   }
 
   function flushPendingStreamDelta() {
-    if (streamDeltaRaf !== null) {
-      cancelAnimationFrame(streamDeltaRaf);
-      streamDeltaRaf = null;
-    }
     if (!pendingStreamDelta?.pending) return;
 
     const { msgId, assistantMsg } = pendingStreamDelta;
@@ -252,11 +262,43 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
       pendingStreamDelta = { msgId, assistantMsg, pending: "" };
     }
     pendingStreamDelta.pending += delta;
-    if (streamDeltaRaf !== null) return;
-    streamDeltaRaf = requestAnimationFrame(() => {
-      streamDeltaRaf = null;
-      flushPendingStreamDelta();
-    });
+    scheduleStreamDeltaFlush();
+  }
+
+  /**
+   * Reasoning/thinking deltas ride their own buffer: they land on
+   * `roundGroups[].reasoning` and never touch `content`.
+   */
+  function flushPendingReasoningDelta() {
+    if (!pendingReasoningDelta?.pending) return;
+    const { msgId, assistantMsg, pending } = pendingReasoningDelta;
+    pendingReasoningDelta.pending = "";
+    const run = findRunForMsg(assistantMsg);
+    const turn = assistantMsg.agentTurn ?? run?.live.turn ?? 1;
+    assistantMsg.roundGroups = recordAgentRoundReasoningDelta(
+      assistantMsg.roundGroups,
+      turn,
+      pending,
+      assistantMsg.agentMaxTurns ?? run?.live.maxTurns,
+    );
+    if (shouldMinimizeRunUiPatch(assistantMsg)) {
+      if (run) scheduleMinimizedRunUiPatch(run.sessionId, msgId, "light");
+      bumpLiveRevision();
+      return;
+    }
+    patchAssistantMsg(msgId, syncRoundGroupsPatch(assistantMsg));
+    scheduleStreamScroll();
+    bumpLiveRevision();
+  }
+
+  function enqueueReasoningDelta(msgId: string, assistantMsg: VibeChatMessage, delta: string) {
+    if (!delta) return;
+    if (!pendingReasoningDelta || pendingReasoningDelta.msgId !== msgId) {
+      flushPendingReasoningDelta();
+      pendingReasoningDelta = { msgId, assistantMsg, pending: "" };
+    }
+    pendingReasoningDelta.pending += delta;
+    scheduleStreamDeltaFlush();
   }
 
   function clearStreamDeltaBuffer(options?: { discard?: boolean; msgId?: string }) {
@@ -268,9 +310,11 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
       const id = options.msgId ?? pendingStreamDelta?.msgId;
       if (id) streamToolFilters.delete(id);
       pendingStreamDelta = null;
+      pendingReasoningDelta = null;
       return;
     }
     flushPendingStreamDelta();
+    flushPendingReasoningDelta();
     if (pendingStreamDelta) {
       const { msgId, assistantMsg } = pendingStreamDelta;
       const filter = streamToolFilters.get(msgId);
@@ -280,6 +324,7 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
       }
     }
     pendingStreamDelta = null;
+    pendingReasoningDelta = null;
   }
 
   function cleanupTimers() {
@@ -287,9 +332,9 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
       cancelAnimationFrame(streamDeltaRaf);
       streamDeltaRaf = null;
     }
-    if (streamScrollTimer) {
-      clearTimeout(streamScrollTimer);
-      streamScrollTimer = null;
+    if (streamScrollRaf !== null) {
+      cancelAnimationFrame(streamScrollRaf);
+      streamScrollRaf = null;
     }
     if (runUiPatchTimer) {
       clearTimeout(runUiPatchTimer);
@@ -302,6 +347,7 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
     scheduleMinimizedRunUiPatch,
     flushMinimizedRunUiPatch,
     enqueueStreamDelta,
+    enqueueReasoningDelta,
     clearStreamDeltaBuffer,
     scheduleStreamScroll,
     buildRunUiFullPatch,

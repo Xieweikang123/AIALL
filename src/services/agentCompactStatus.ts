@@ -145,7 +145,9 @@ export function summarizeCursorProcessBlocks(
     if (isRunning) return body;
     return count > 0 ? `${count} 步 · ${body}` : body;
   }
-  const thoughtCount = blocks.filter((block) => block.kind === "thought").length;
+  const thoughtCount = blocks.filter(
+    (block) => block.kind === "thought" || block.kind === "reasoning",
+  ).length;
   if (thoughtCount) {
     return isRunning ? "思考中…" : `${thoughtCount} 段推理`;
   }

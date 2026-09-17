@@ -21,6 +21,35 @@
     </div>
 
     <div
+      v-else-if="item.kind === 'reasoning'"
+      class="stream-reasoning-wrap"
+      :class="{ 'stream-reasoning-wrap--nested': nested }"
+    >
+      <button
+        type="button"
+        class="stream-reasoning-btn"
+        :aria-expanded="isReasoningExpanded(item.key)"
+        @click="toggleReasoning(item.key)"
+      >
+        <span class="stream-reasoning-chevron" aria-hidden="true">
+          {{ isReasoningExpanded(item.key) ? "▾" : "▸" }}
+        </span>
+        <span class="stream-reasoning-label">{{ item.text.trim() ? "思考过程" : "思考中…" }}</span>
+      </button>
+      <div
+        v-if="isReasoningExpanded(item.key)"
+        class="stream-reasoning-body"
+      >
+        <ChatMarkdown
+          class="inline-feed-markdown inline-feed-markdown--reasoning"
+          :content="reasoningMarkdown(item.text)"
+          :streaming="false"
+          :interactive="false"
+        />
+      </div>
+    </div>
+
+    <div
       v-else-if="item.kind === 'collapsed'"
       class="stream-process-collapsed-wrap"
       :class="{ 'stream-process-collapsed-wrap--nested': nested }"
@@ -291,6 +320,10 @@ function narrativeMarkdown(text: string) {
   return sanitizeFeedThoughtText(text);
 }
 
+function reasoningMarkdown(text: string) {
+  return sanitizeFeedThoughtText(text);
+}
+
 function answerMarkdown(text: string) {
   return enrichPlanMarkdownForDisplay(text, {
     whileStreaming: Boolean(props.isRunning),
@@ -298,6 +331,7 @@ function answerMarkdown(text: string) {
 }
 
 const expandedCollapsedKeys = ref<Set<string>>(new Set());
+const expandedReasoningKeys = ref<Set<string>>(new Set());
 
 watch(
   () => props.items.map((item) => (item.kind === "collapsed" ? item.key : "")).join("|"),
@@ -315,6 +349,17 @@ function toggleCollapsed(key: string) {
   if (next.has(key)) next.delete(key);
   else next.add(key);
   expandedCollapsedKeys.value = next;
+}
+
+function isReasoningExpanded(key: string): boolean {
+  return expandedReasoningKeys.value.has(key);
+}
+
+function toggleReasoning(key: string) {
+  const next = new Set(expandedReasoningKeys.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  expandedReasoningKeys.value = next;
 }
 
 </script>
@@ -360,6 +405,68 @@ function toggleCollapsed(key: string) {
 .stream-narrative {
   padding: 0 0 6px;
   position: relative;
+}
+
+.stream-reasoning-wrap {
+  padding: 0 0 6px;
+  position: relative;
+}
+
+.stream-reasoning-wrap--nested {
+  padding-left: 4px;
+}
+
+.stream-reasoning-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 3px 8px 3px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(148, 163, 184, 0.72);
+  font-size: 11px;
+  line-height: 1.35;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.stream-reasoning-wrap--nested .stream-reasoning-btn {
+  font-size: 10px;
+  padding: 2px 7px 2px 5px;
+}
+
+.stream-reasoning-btn:hover {
+  color: rgba(165, 214, 255, 0.92);
+  background: rgba(88, 166, 255, 0.06);
+  border-color: rgba(88, 166, 255, 0.14);
+}
+
+.stream-reasoning-chevron {
+  flex-shrink: 0;
+  font-size: 9px;
+  opacity: 0.7;
+}
+
+.stream-reasoning-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stream-reasoning-body {
+  margin: 4px 0 2px 6px;
+  padding-left: 8px;
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.inline-feed-markdown--reasoning :deep(.msg-markdown) {
+  font-size: 12px;
+  line-height: 1.55;
+  color: rgba(148, 163, 184, 0.74);
+  font-style: italic;
 }
 
 .stream-process-collapsed-wrap {

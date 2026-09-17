@@ -7,11 +7,13 @@ import { formatRunCommandLabel } from "../utils/toolHelpers";
 
 export type CursorFeedItem =
   | { kind: "thought"; key: string; text: string }
+  | { kind: "reasoning"; key: string; text: string }
   | { kind: "action"; key: string; step: AgentRoundTool }
   | { kind: "status"; key: string; text: string; active: boolean };
 
 export type CursorFeedBlock =
   | { kind: "thought"; key: string; text: string }
+  | { kind: "reasoning"; key: string; text: string }
   | {
       kind: "actions";
       key: string;
@@ -308,6 +310,8 @@ export function layoutCursorFeedBlocks(
     flushActions();
     if (item.kind === "thought") {
       blocks.push({ kind: "thought", key: item.key, text: item.text });
+    } else if (item.kind === "reasoning") {
+      blocks.push({ kind: "reasoning", key: item.key, text: item.text });
     } else if (item.kind === "status") {
       blocks.push({ kind: "status", key: item.key, text: item.text, active: item.active });
     }
@@ -501,6 +505,15 @@ export function buildCursorAgentFeed(input: {
 
   for (const group of input.groups) {
     if (group.turn <= 0) continue;
+
+    const reasoningText = (group.reasoning || "").trim();
+    if (reasoningText) {
+      items.push({
+        kind: "reasoning",
+        key: `reasoning-${group.turn}`,
+        text: reasoningText,
+      });
+    }
 
     const narrativeText = group.narrative || group.response?.assistantText || "";
     const segments = buildChronologicalNarrativeSegments(narrativeText, group.tools, group.toolNarrativeOffsets);

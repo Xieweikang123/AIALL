@@ -64,6 +64,7 @@ const MAX_STATUS_LOG_LINES = 32;
 const MAX_TURN_TRACES = 24;
 const MAX_NARRATIVE_CHARS = 800;
 const MAX_PROGRESS_NARRATIVE_CHARS = 2400;
+const MAX_REASONING_CHARS = 4000;
 const MAX_MODEL_STEP_CHARS = 500;
 const MAX_TOOL_CALL_ARGS_CHARS = 240;
 const MAX_TOOL_ARGS_DISK_CHARS = 400;
@@ -480,6 +481,9 @@ function compactRoundGroupsForStorage(
         : group.narrative
           ? truncateNarrativeForStorage(group.narrative)
           : undefined,
+      reasoning: group.reasoning
+        ? truncateText(group.reasoning, MAX_REASONING_CHARS)
+        : undefined,
       modelSteps: (group.modelSteps || []).map((step) => ({
         id: step.id,
         phase: step.phase,

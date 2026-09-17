@@ -37,6 +37,8 @@ export type PersistedAgentRoundGroup = {
   turn: number;
   maxTurns?: number;
   narrative?: string;
+  /** Provider reasoning/thinking channel for this turn (separate from the answer narrative). */
+  reasoning?: string;
   modelSteps: PersistedAgentModelStep[];
   toolIds: string[];
   request?: {

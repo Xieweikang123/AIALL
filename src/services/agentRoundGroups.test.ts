@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildAgentRoundGroupViews,
   recordAgentRoundNarrative,
+  recordAgentRoundReasoningDelta,
+  recordAgentRoundReasoningSnapshot,
   recordAgentRoundRequest,
   recordAgentRoundResponse,
   recordAgentRoundStreamDelta,
@@ -165,5 +167,36 @@ describe("agentRoundGroups", () => {
       roundGroups: [{ turn: 7, modelSteps: [], toolIds: [] }],
       agentTurn: 3,
     })).toBe(7);
+  });
+
+  it("accumulates reasoning deltas without touching narrative", () => {
+    resetAgentRoundGroupIds();
+    let groups = recordAgentRoundReasoningDelta(undefined, 1, "先看看", 20);
+    groups = recordAgentRoundReasoningDelta(groups, 1, "目录结构", 20);
+    groups = recordAgentRoundStreamDelta(groups, 1, "答案正文", 20);
+
+    expect(groups[0].reasoning).toBe("先看看目录结构");
+    expect(groups[0].narrative).toBe("答案正文");
+  });
+
+  it("ignores empty reasoning deltas", () => {
+    let groups = recordAgentRoundReasoningDelta(undefined, 1, "", 20);
+    expect(groups).toHaveLength(0);
+    groups = recordAgentRoundReasoningDelta(undefined, 0, "思考", 20);
+    expect(groups).toHaveLength(0);
+  });
+
+  it("replaces streamed reasoning with the authoritative snapshot", () => {
+    let groups = recordAgentRoundReasoningDelta(undefined, 2, "流式片段", 20);
+    groups = recordAgentRoundReasoningSnapshot(groups, 2, "  服务端完整思考  ", 20);
+    expect(groups[0].reasoning).toBe("服务端完整思考");
+  });
+
+  it("keeps a reasoning-only turn visible in round group views", () => {
+    resetAgentRoundGroupIds();
+    const groups = recordAgentRoundReasoningDelta(undefined, 4, "仅思考没有正文", 20);
+    const views = buildAgentRoundGroupViews({ roundGroups: groups });
+    expect(views).toHaveLength(1);
+    expect(views[0].reasoning).toBe("仅思考没有正文");
   });
 });

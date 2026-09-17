@@ -10,6 +10,7 @@ export const AGENT_SSE_PROGRESS_EVENT_TYPES = [
   "tool_end",
   "file_diff",
   "message_delta",
+  "reasoning_delta",
   "message",
   "agent_context",
   "error",

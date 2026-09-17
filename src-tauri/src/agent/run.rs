@@ -637,6 +637,7 @@ pub async fn agent_run(
                 "assistantText": assistant_text, "toolCalls": tool_calls,
                 "hasToolCalls": !is_final, "isFinal": is_final,
                 "options": turn_output.options,
+                "reasoningText": turn_output.reasoning_text,
                 "usage": {
                   "promptTokens": turn_output.usage.prompt_tokens,
                   "cachedTokens": turn_output.usage.cached_tokens,

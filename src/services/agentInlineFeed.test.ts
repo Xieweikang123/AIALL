@@ -69,6 +69,57 @@ describe("buildInlineAgentFeed", () => {
     expect(feed.items[0]).toMatchObject({ kind: "text", variant: "narrative", text: "直接回答。" });
   });
 
+  it("surfaces the reasoning channel as its own item, ahead of narrative and tools", () => {
+    const feed = buildInlineAgentFeed({
+      roundGroups: [{
+        turn: 1,
+        modelSteps: [],
+        toolIds: ["t1"],
+        reasoning: "先定位组件，再看模板。",
+        narrative: "我先读文件。",
+        tools: [readStep("t1")],
+      }],
+      answerPreview: "",
+      answerStreaming: false,
+      isRunning: false,
+      activityDetailed: false,
+      compactFeed: false,
+    });
+
+    const kinds = feed.items.map((item) => item.kind);
+    expect(kinds).toEqual(["reasoning", "text", "tool"]);
+    expect(feed.items[0]).toMatchObject({
+      kind: "reasoning",
+      key: "reasoning-1",
+      text: "先定位组件，再看模板。",
+    });
+  });
+
+  it("keeps reasoning separate from the narrative text item", () => {
+    const feed = buildInlineAgentFeed({
+      roundGroups: [{
+        turn: 2,
+        modelSteps: [],
+        toolIds: [],
+        reasoning: "这是思维链。",
+        narrative: "这是回复正文。",
+        tools: [],
+      }],
+      answerPreview: "这是回复正文。",
+      answerStreaming: false,
+      isRunning: false,
+      activityDetailed: false,
+      compactFeed: false,
+    });
+
+    const reasoning = feed.items.filter((item) => item.kind === "reasoning");
+    const narrative = feed.items.filter((item) => item.kind === "text");
+    expect(reasoning).toHaveLength(1);
+    expect(narrative).toHaveLength(1);
+    expect(reasoning[0]).toMatchObject({ text: "这是思维链。" });
+    expect(narrative[0]).toMatchObject({ text: "这是回复正文。" });
+  });
+
   it("keeps tools before next narrative across multiple turns", () => {
     const groups: AgentRoundGroupView[] = [
       {

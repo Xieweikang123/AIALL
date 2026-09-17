@@ -34,6 +34,7 @@ export type VibeAgentEvent =
   | { type: "tool_end"; data: { id: string; name: string; ok: boolean; summary: string; result?: string } }
   | { type: "message"; data: { text: string } }
   | { type: "message_delta"; data: { delta: string } }
+  | { type: "reasoning_delta"; data: { delta: string } }
   | { type: "file_diff"; data: { path: string; before: string; after: string; deleted?: boolean; created?: boolean } }
   | {
       type: "agent_context";
@@ -80,6 +81,8 @@ export type VibeAgentEvent =
         isFinal: boolean;
         /** Structured choice options the model emitted via `<ai_options>` block. */
         options?: string[];
+        /** Provider reasoning/thinking channel text for this turn (absent when unsupported). */
+        reasoningText?: string;
         /** Token usage reported by the provider for this turn (cache accounting). */
         usage?: {
           promptTokens?: number;

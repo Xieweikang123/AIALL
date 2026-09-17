@@ -26,6 +26,13 @@ export type InlineFeedToolItem = {
   step: AgentRoundTool;
 };
 
+/** Provider reasoning/thinking channel — rendered as a collapsed disclosure, never as answer text. */
+export type InlineFeedReasoningItem = {
+  kind: "reasoning";
+  key: string;
+  text: string;
+};
+
 export type InlineFeedStatusItem = {
   kind: "status";
   key: string;
@@ -42,6 +49,7 @@ export type InlineFeedCollapsedItem = {
 export type InlineFeedProcessItem =
   | InlineFeedTextItem
   | InlineFeedToolItem
+  | InlineFeedReasoningItem
   | InlineFeedStatusItem;
 
 export type InlineFeedItem = InlineFeedProcessItem | InlineFeedCollapsedItem;
@@ -145,6 +153,8 @@ function cursorItemsToInline(items: CursorFeedItem[]): InlineFeedItem[] {
   for (const item of items) {
     if (item.kind === "thought") {
       inline.push({ kind: "text", key: item.key, text: item.text, variant: "narrative" });
+    } else if (item.kind === "reasoning") {
+      inline.push({ kind: "reasoning", key: item.key, text: item.text });
     } else if (item.kind === "action") {
       inline.push({ kind: "tool", key: item.key, step: item.step });
     } else if (item.kind === "status") {

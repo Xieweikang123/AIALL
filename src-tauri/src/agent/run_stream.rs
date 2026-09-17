@@ -56,6 +56,36 @@ pub(crate) struct ModelTurnOutput {
     pub options: Vec<Value>,
     /// Token usage reported by the provider for this turn.
     pub usage: UsageStats,
+    /// Provider reasoning/thinking channel text for this turn (empty when unsupported).
+    pub reasoning_text: String,
+}
+
+/// Extract a reasoning/thinking delta from an OpenAI-compatible `delta` object.
+///
+/// Providers expose the reasoning channel under different keys
+/// (`reasoning_content`, `reasoning`, `reasoning_text`, `thinking`, `reasoning_details`).
+/// Returns the text fragment for whichever key carries a string payload.
+fn reasoning_delta_text(delta: &Value) -> Option<String> {
+    for key in ["reasoning_content", "reasoning", "reasoning_text", "thinking"] {
+        if let Some(text) = delta.get(key).and_then(|v| v.as_str()) {
+            if !text.is_empty() {
+                return Some(text.to_string());
+            }
+        }
+    }
+    // OpenRouter-style structured reasoning parts: [{ type: "reasoning.text", text }].
+    if let Some(parts) = delta.get("reasoning_details").and_then(|v| v.as_array()) {
+        let mut out = String::new();
+        for part in parts {
+            if let Some(text) = part.get("text").and_then(|v| v.as_str()) {
+                out.push_str(text);
+            }
+        }
+        if !out.is_empty() {
+            return Some(out);
+        }
+    }
+    None
 }
 
 const AI_OPTIONS_START: &str = "<ai_options>";
@@ -101,16 +131,18 @@ fn extract_structured_options(text: &str) -> (String, Vec<Value>) {
 struct DeltaBatcher {
     buffer: String,
     last_flush: Instant,
+    event_type: &'static str,
 }
 
 const DELTA_BATCH_MAX_CHARS: usize = 80;
 const DELTA_BATCH_MAX_MS: u128 = 8;
 
 impl DeltaBatcher {
-    fn new() -> Self {
+    fn new(event_type: &'static str) -> Self {
         Self {
             buffer: String::with_capacity(256),
             last_flush: Instant::now(),
+            event_type,
         }
     }
 
@@ -132,7 +164,7 @@ impl DeltaBatcher {
         self.last_flush = Instant::now();
         emit(
             channel,
-            json!({ "type": "message_delta", "data": { "delta": batched } }),
+            json!({ "type": self.event_type, "data": { "delta": batched } }),
         );
     }
 }
@@ -146,16 +178,19 @@ pub(crate) async fn consume_model_sse_stream(
     actual_turns: u32,
 ) -> Result<Option<ModelTurnOutput>, String> {
     let mut accumulated_content = String::new();
+    let mut accumulated_reasoning = String::new();
     let mut accumulated_tool_calls: Vec<Value> = Vec::new();
     let mut usage = UsageStats::default();
     let mut byte_stream = stream_resp.bytes_stream();
     let mut line_buf: Vec<u8> = Vec::new();
-    let mut batcher = DeltaBatcher::new();
+    let mut batcher = DeltaBatcher::new("message_delta");
+    let mut reasoning_batcher = DeltaBatcher::new("reasoning_delta");
     let mut suppress_stream = false;
 
     while let Some(chunk_result) = byte_stream.next().await {
         if is_cancelled(cancel) {
             batcher.flush(channel);
+            reasoning_batcher.flush(channel);
             emit_aborted_done(channel, written_files, actual_turns);
             return Ok(None);
         }
@@ -167,9 +202,11 @@ pub(crate) async fn consume_model_sse_stream(
             parse_sse_line(
                 &line_str,
                 &mut accumulated_content,
+                &mut accumulated_reasoning,
                 &mut accumulated_tool_calls,
                 &mut usage,
                 &mut batcher,
+                &mut reasoning_batcher,
                 channel,
                 &mut suppress_stream,
             );
@@ -180,14 +217,17 @@ pub(crate) async fn consume_model_sse_stream(
         parse_sse_line(
             &line_str,
             &mut accumulated_content,
+            &mut accumulated_reasoning,
             &mut accumulated_tool_calls,
             &mut usage,
             &mut batcher,
+            &mut reasoning_batcher,
             channel,
             &mut suppress_stream,
         );
     }
     batcher.flush(channel);
+    reasoning_batcher.flush(channel);
 
     let tool_calls_value = if accumulated_tool_calls.is_empty() {
         json!([])
@@ -203,15 +243,18 @@ pub(crate) async fn consume_model_sse_stream(
         is_final: accumulated_tool_calls.is_empty(),
         options,
         usage,
+        reasoning_text: accumulated_reasoning,
     }))
 }
 
 fn parse_sse_line(
     line_buf: &str,
     accumulated_content: &mut String,
+    accumulated_reasoning: &mut String,
     accumulated_tool_calls: &mut Vec<Value>,
     usage: &mut UsageStats,
     batcher: &mut DeltaBatcher,
+    reasoning_batcher: &mut DeltaBatcher,
     channel: &Channel<Value>,
     suppress_stream: &mut bool,
 ) {
@@ -240,6 +283,11 @@ fn parse_sse_line(
     let Some(delta) = choice.get("delta") else {
         return;
     };
+    // Reasoning/thinking channel — streamed separately, never mixed into content.
+    if let Some(reasoning) = reasoning_delta_text(delta) {
+        accumulated_reasoning.push_str(&reasoning);
+        reasoning_batcher.push(&reasoning, channel);
+    }
     if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
         accumulated_content.push_str(content);
         if !*suppress_stream {
@@ -333,7 +381,7 @@ mod tests {
     }
 
     fn new_batcher() -> DeltaBatcher {
-        DeltaBatcher::new()
+        DeltaBatcher::new("message_delta")
     }
 
     /// Test wrapper that supplies a fresh suppress flag (streaming not suppressed).
@@ -346,7 +394,43 @@ mod tests {
     ) {
         let mut suppress = false;
         let mut usage = UsageStats::default();
-        parse_sse_line(line_buf, content, calls, &mut usage, batcher, channel, &mut suppress);
+        let mut reasoning = String::new();
+        let mut reasoning_batcher = DeltaBatcher::new("reasoning_delta");
+        parse_sse_line(
+            line_buf,
+            content,
+            &mut reasoning,
+            calls,
+            &mut usage,
+            batcher,
+            &mut reasoning_batcher,
+            channel,
+            &mut suppress,
+        );
+    }
+
+    /// Test wrapper capturing the accumulated reasoning channel text.
+    fn parse_line_reasoning(
+        line_buf: &str,
+        content: &mut String,
+        reasoning: &mut String,
+    ) {
+        let mut suppress = false;
+        let mut usage = UsageStats::default();
+        let mut calls = Vec::new();
+        let mut batcher = new_batcher();
+        let mut reasoning_batcher = DeltaBatcher::new("reasoning_delta");
+        parse_sse_line(
+            line_buf,
+            content,
+            reasoning,
+            &mut calls,
+            &mut usage,
+            &mut batcher,
+            &mut reasoning_batcher,
+            &dummy_channel(),
+            &mut suppress,
+        );
     }
 
     #[test]
@@ -677,6 +761,77 @@ mod tests {
         let (clean, options) = extract_structured_options("<ai_options>not json</ai_options>");
         assert_eq!(clean, "<ai_options>not json</ai_options>");
         assert!(options.is_empty());
+    }
+
+    #[test]
+    fn parse_sse_line_accumulates_reasoning_content() {
+        let mut content = String::new();
+        let mut reasoning = String::new();
+        parse_line_reasoning(
+            "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"让我想\"}}]}",
+            &mut content,
+            &mut reasoning,
+        );
+        parse_line_reasoning(
+            "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"一下\"}}]}",
+            &mut content,
+            &mut reasoning,
+        );
+        assert_eq!(reasoning, "让我想一下");
+        assert!(content.is_empty(), "reasoning must not leak into content");
+    }
+
+    #[test]
+    fn parse_sse_line_accepts_alternate_reasoning_keys() {
+        for key in ["reasoning", "reasoning_text", "thinking"] {
+            let mut content = String::new();
+            let mut reasoning = String::new();
+            parse_line_reasoning(
+                &format!("data: {{\"choices\":[{{\"delta\":{{\"{key}\":\"思考\"}}}}]}}"),
+                &mut content,
+                &mut reasoning,
+            );
+            assert_eq!(reasoning, "思考", "key {key} should feed the reasoning channel");
+            assert!(content.is_empty());
+        }
+    }
+
+    #[test]
+    fn parse_sse_line_accepts_openrouter_reasoning_details() {
+        let mut content = String::new();
+        let mut reasoning = String::new();
+        parse_line_reasoning(
+            "data: {\"choices\":[{\"delta\":{\"reasoning_details\":[{\"type\":\"reasoning.text\",\"text\":\"分\"},{\"text\":\"析\"}]}}]}",
+            &mut content,
+            &mut reasoning,
+        );
+        assert_eq!(reasoning, "分析");
+    }
+
+    #[test]
+    fn parse_sse_line_keeps_reasoning_and_content_separate() {
+        let mut content = String::new();
+        let mut reasoning = String::new();
+        parse_line_reasoning(
+            "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"先想\",\"content\":\"答案\"}}]}",
+            &mut content,
+            &mut reasoning,
+        );
+        assert_eq!(reasoning, "先想");
+        assert_eq!(content, "答案");
+    }
+
+    #[test]
+    fn parse_sse_line_reasoning_ignored_when_absent() {
+        let mut content = String::new();
+        let mut reasoning = String::new();
+        parse_line_reasoning(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"普通回复\"}}]}",
+            &mut content,
+            &mut reasoning,
+        );
+        assert_eq!(content, "普通回复");
+        assert!(reasoning.is_empty());
     }
 
     #[test]
