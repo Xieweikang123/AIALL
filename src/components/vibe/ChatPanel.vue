@@ -29,10 +29,8 @@
       </div>
       <div v-else-if="!chatMessages.length" class="chat-empty">
         <div class="chat-empty-visual" aria-hidden="true">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.2" opacity="0.35" />
-            <path d="M8 10h8M8 14h5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.5" />
-          </svg>
+          <span class="chat-empty-prompt">&gt;</span>
+          <span class="chat-empty-caret" />
         </div>
         <template v-if="!projectOpened">
           <p class="chat-empty-title">先打开项目</p>
@@ -49,16 +47,20 @@
           <p class="chat-empty-desc">直接输入需求即可。用 <code>@</code> 引用文件，Auto 会按问题选择问答、规划或改代码。</p>
           <div class="chips">
             <button type="button" class="chip" :disabled="chatSending" @click="$emit('apply-example', '解释这个项目是做什么的')">
-              解释项目
+              <span class="chip-cmd">/explain</span>
+              <span class="chip-label">解释项目</span>
             </button>
             <button type="button" class="chip" :disabled="chatSending" @click="$emit('apply-example', '解释这段代码在做什么')">
-              解释代码
+              <span class="chip-cmd">/read</span>
+              <span class="chip-label">解释代码</span>
             </button>
             <button type="button" class="chip" :disabled="chatSending" @click="$emit('apply-example', '帮我优化这段代码，并给出修改后的完整代码')">
-              优化代码
+              <span class="chip-cmd">/optimize</span>
+              <span class="chip-label">优化代码</span>
             </button>
             <button type="button" class="chip" :disabled="chatSending" @click="$emit('apply-example', '找出潜在 bug 并修复')">
-              修复 bug
+              <span class="chip-cmd">/fix</span>
+              <span class="chip-label">修复 bug</span>
             </button>
           </div>
         </template>
@@ -240,14 +242,6 @@
 
         <div class="chat-action-row">
             <div class="composer-mode-row">
-            <div class="chat-mode-switch" role="group" aria-label="对话模式">
-              <span
-                class="mode-btn mode-btn-auto active"
-                title="自动识别意图并选择 Ask / Plan / Build"
-              >
-                Auto
-              </span>
-            </div>
             <button
               type="button"
               class="chat-debug-toggle"
@@ -290,7 +284,7 @@
                   role="menu"
                 >
                   <div class="chat-provider-dropdown-head">
-                    <span>本会话使用模型</span>
+                    <span class="chat-provider-dropdown-title">本会话使用模型</span>
                     <div class="chat-provider-dropdown-head-actions">
                       <button
                         type="button"
@@ -310,47 +304,82 @@
                       </button>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    class="chat-provider-option"
-                    :class="{ active: !activeSessionProviderId }"
-                    role="menuitemradio"
-                    :aria-checked="!activeSessionProviderId"
-                    @click="selectProvider('')"
-                  >
-                    <span class="chat-provider-option-name">使用全局配置</span>
-                    <span class="chat-provider-option-model">{{ globalModelName || "未设置" }}</span>
-                    <span v-if="!activeSessionProviderId" class="chat-provider-option-check">✓</span>
-                  </button>
-                  <div v-if="providerOptions.length" class="chat-provider-option-sep" />
-                  <template v-for="p in providerOptions" :key="p.id">
-                    <div class="chat-provider-group-label">{{ p.name }}</div>
+                  <div v-if="showProviderFilter" class="chat-provider-search">
+                    <svg class="chat-provider-search-icon" width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <circle cx="7" cy="7" r="4.2" stroke="currentColor" stroke-width="1.3" />
+                      <path d="M10.3 10.3L13.5 13.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+                    </svg>
+                    <input
+                      ref="providerSearchInputRef"
+                      v-model="providerFilterKeyword"
+                      class="chat-provider-search-input"
+                      type="text"
+                      placeholder="搜索模型"
+                      spellcheck="false"
+                      autocomplete="off"
+                      @keydown.escape.prevent="providerFilterKeyword = ''"
+                    />
                     <button
+                      v-if="providerFilterKeyword"
+                      type="button"
+                      class="chat-provider-search-clear"
+                      title="清空搜索"
+                      @click="providerFilterKeyword = ''"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div class="chat-provider-dropdown-body">
+                    <button
+                      v-if="showGlobalProviderOption"
                       type="button"
                       class="chat-provider-option"
-                      :class="{ active: activeSessionProviderId === p.id && !activeSessionModelId }"
+                      :class="{ active: !activeSessionProviderId }"
                       role="menuitemradio"
-                      :aria-checked="activeSessionProviderId === p.id && !activeSessionModelId"
-                      @click="selectProvider(p.id)"
+                      :aria-checked="!activeSessionProviderId"
+                      @click="selectProvider('')"
                     >
-                      <span class="chat-provider-option-name">默认</span>
-                      <span class="chat-provider-option-model">{{ p.model }}</span>
-                      <span v-if="activeSessionProviderId === p.id && !activeSessionModelId" class="chat-provider-option-check">✓</span>
+                      <span class="chat-provider-option-name">使用全局配置</span>
+                      <span class="chat-provider-option-model">{{ globalModelName || "未设置" }}</span>
+                      <span v-if="!activeSessionProviderId" class="chat-provider-option-check">✓</span>
                     </button>
-                    <button
-                      v-for="m in p.availableModels"
-                      :key="m"
-                      type="button"
-                      class="chat-provider-option"
-                      :class="{ active: activeSessionProviderId === p.id && activeSessionModelId === m }"
-                      role="menuitemradio"
-                      :aria-checked="activeSessionProviderId === p.id && activeSessionModelId === m"
-                      @click="selectModel(p.id, m)"
-                    >
-                      <span class="chat-provider-option-name">{{ m }}</span>
-                      <span v-if="activeSessionProviderId === p.id && activeSessionModelId === m" class="chat-provider-option-check">✓</span>
-                    </button>
-                  </template>
+                    <div v-if="showGlobalProviderOption && filteredProviderOptions.length" class="chat-provider-option-sep" />
+                    <template v-for="p in filteredProviderOptions" :key="p.id">
+                      <div class="chat-provider-group">
+                        <span class="chat-provider-group-label" :title="p.name">{{ p.name }}</span>
+                        <span class="chat-provider-group-count">{{ p.models.length + (p.showDefaultModel ? 1 : 0) }}</span>
+                      </div>
+                      <button
+                        v-if="p.showDefaultModel"
+                        type="button"
+                        class="chat-provider-option"
+                        :class="{ active: activeSessionProviderId === p.id && !activeSessionModelId }"
+                        role="menuitemradio"
+                        :aria-checked="activeSessionProviderId === p.id && !activeSessionModelId"
+                        @click="selectProvider(p.id)"
+                      >
+                        <span class="chat-provider-option-name">默认</span>
+                        <span class="chat-provider-option-model">{{ p.model }}</span>
+                        <span v-if="activeSessionProviderId === p.id && !activeSessionModelId" class="chat-provider-option-check">✓</span>
+                      </button>
+                      <button
+                        v-for="m in p.models"
+                        :key="m"
+                        type="button"
+                        class="chat-provider-option"
+                        :class="{ active: activeSessionProviderId === p.id && activeSessionModelId === m }"
+                        role="menuitemradio"
+                        :aria-checked="activeSessionProviderId === p.id && activeSessionModelId === m"
+                        @click="selectModel(p.id, m)"
+                      >
+                        <span class="chat-provider-option-name">{{ m }}</span>
+                        <span v-if="activeSessionProviderId === p.id && activeSessionModelId === m" class="chat-provider-option-check">✓</span>
+                      </button>
+                    </template>
+                    <p v-if="!showGlobalProviderOption && !filteredProviderOptions.length" class="chat-provider-empty">
+                      没有匹配的模型
+                    </p>
+                  </div>
                 </div>
               </Teleport>
             </div>
@@ -935,6 +964,54 @@ const providerPickerTitle = computed(() => {
   return `会话模型：使用全局配置（${props.globalModelName || "未设置"}）`;
 });
 
+const providerFilterKeyword = ref("");
+const providerSearchInputRef = ref<HTMLInputElement | null>(null);
+
+/** 选项多时才需要搜索框，少选项直接列出来更快 */
+const showProviderFilter = computed(() => providerOptionCount.value >= 8);
+
+const providerOptionCount = computed(() =>
+  (props.providerOptions ?? []).reduce((total, p) => total + 1 + (p.availableModels?.length ?? 0), 0),
+);
+
+const normalizedProviderKeyword = computed(() => providerFilterKeyword.value.trim().toLowerCase());
+
+const showGlobalProviderOption = computed(() => {
+  const keyword = normalizedProviderKeyword.value;
+  if (!keyword) return true;
+  return "使用全局配置".includes(keyword) || (props.globalModelName || "").toLowerCase().includes(keyword);
+});
+
+/** 按关键词过滤：命中供应商名则整组保留，否则只保留命中的模型 */
+const filteredProviderOptions = computed(() => {
+  const keyword = normalizedProviderKeyword.value;
+  const options = props.providerOptions ?? [];
+  if (!keyword) {
+    return options.map((p) => ({
+      id: p.id,
+      name: p.name,
+      model: p.model,
+      models: p.availableModels ?? [],
+      showDefaultModel: true,
+    }));
+  }
+  const filtered: Array<{ id: string; name: string; model: string; models: string[]; showDefaultModel: boolean }> = [];
+  for (const p of options) {
+    const nameHit = p.name.toLowerCase().includes(keyword);
+    const defaultHit = p.model.toLowerCase().includes(keyword);
+    const models = nameHit
+      ? [...(p.availableModels ?? [])]
+      : (p.availableModels ?? []).filter((m) => m.toLowerCase().includes(keyword));
+    if (!nameHit && !defaultHit && !models.length) continue;
+    filtered.push({ id: p.id, name: p.name, model: p.model, models, showDefaultModel: nameHit || defaultHit });
+  }
+  return filtered;
+});
+
+function resetProviderFilter() {
+  providerFilterKeyword.value = "";
+}
+
 const providerPickerRef = ref<HTMLElement | null>(null);
 const providerDropdownRef = ref<HTMLElement | null>(null);
 const providerPickerOpen = ref(false);
@@ -1014,10 +1091,20 @@ function handleProviderViewportChange() {
   if (providerPickerOpen.value) updateProviderDropdownPosition();
 }
 
+// 过滤后列表变短，弹窗高度跟着变：重新定位，否则向上展开会与触发按钮脱开
+watch(providerFilterKeyword, () => {
+  if (!providerPickerOpen.value) return;
+  nextTick(updateProviderDropdownPosition);
+});
+
 function toggleProviderPicker() {
   providerPickerOpen.value = !providerPickerOpen.value;
   if (providerPickerOpen.value) {
-    nextTick(updateProviderDropdownPosition);
+    providerFilterKeyword.value = "";
+    nextTick(() => {
+      updateProviderDropdownPosition();
+      if (showProviderFilter.value) providerSearchInputRef.value?.focus();
+    });
   }
 }
 
