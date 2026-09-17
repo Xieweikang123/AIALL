@@ -1,8 +1,7 @@
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const MEMORY_REL_DIR: &str = ".aiall/memory";
@@ -272,13 +271,43 @@ pub fn format_memory_block(entries: &[MemoryEntry]) -> String {
 /// Search the AppData session store for conversation fragments matching `query`.
 /// Returns a markdown-ish text listing session id + matched user/assistant lines.
 pub async fn search_sessions(query: &str, max_results: usize) -> Result<String, String> {
-    let dir = crate::paths::resolve_aiall_session_data_dir();
-    search_sessions_in_dir(&dir, query, max_results).await
+    let roots = session_search_dirs();
+    search_sessions_in_dirs(&roots, query, max_results).await
+}
+
+/// Every dir that can hold session files: each per-project bucket, the legacy
+/// root (pre-partitioning files), and the unassigned pool. Search covers all of
+/// them so a session never becomes unreachable just because it lost its index entry.
+fn session_search_dirs() -> Vec<PathBuf> {
+    let root = crate::paths::chat_store_root();
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name == "images" {
+                    continue;
+                }
+                dirs.push(path);
+            }
+        }
+    }
+    dirs.push(root);
+    dirs
 }
 
 /// Core implementation, directory-parameterized for tests.
 async fn search_sessions_in_dir(
     dir: &Path,
+    query: &str,
+    max_results: usize,
+) -> Result<String, String> {
+    search_sessions_in_dirs(std::slice::from_ref(&dir.to_path_buf()), query, max_results).await
+}
+
+async fn search_sessions_in_dirs(
+    dirs: &[PathBuf],
     query: &str,
     max_results: usize,
 ) -> Result<String, String> {
@@ -290,33 +319,32 @@ async fn search_sessions_in_dir(
     if tokens.is_empty() {
         return Err("缺少有效搜索关键词".into());
     }
-    let mut files: Vec<std::path::PathBuf> = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        let mut entries: Vec<_> = entries.flatten().collect();
-        entries.sort_by_key(|e| {
-            e.metadata()
-                .and_then(|m| m.modified())
-                .ok()
-                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                .map(|d| d.as_millis())
-                .unwrap_or(0)
-        });
-        for entry in entries.into_iter().rev() {
+    let mut files: Vec<(std::time::SystemTime, std::path::PathBuf)> = Vec::new();
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with("chat-") && name.ends_with(".json") {
-                files.push(entry.path());
+            if !name.starts_with("chat-") || !name.ends_with(".json") || name.starts_with("chat-store")
+            {
+                continue;
             }
-            if files.len() >= 50 {
-                break;
-            }
+            let modified = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(UNIX_EPOCH);
+            files.push((modified, entry.path()));
         }
     }
+    // Newest first, but no cap: cross-project recall must not silently miss sessions.
+    files.sort_by(|a, b| b.0.cmp(&a.0));
     if files.is_empty() {
         return Ok("（没有可检索的历史会话）".into());
     }
 
     let mut hits: Vec<String> = Vec::new();
-    for path in files {
+    for (_, path) in files {
         let Ok(raw) = tokio::fs::read_to_string(&path).await else {
             continue;
         };

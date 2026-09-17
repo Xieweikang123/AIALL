@@ -57,7 +57,9 @@
   --radius-md: 5px;
   --radius-lg: 7px;
   --font-mono: "JetBrains Mono", "Cascadia Code", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --font-sans: var(--font-mono);
+  /* Prose / chat body — not mono. Mono Chinese + dense inline code is what makes replies feel “眼花”. */
+  --font-sans: "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei",
+    ui-sans-serif, system-ui, -apple-system, sans-serif;
   --shadow-panel: 0 8px 32px rgba(0, 0, 0, 0.35);
   --glass: #0a0a0a;
   --bg-secondary: #0a0a0a;
@@ -868,10 +870,13 @@ button.icon.tiny {
 }
 
 .msg-answer {
+  font-family: var(--font-sans);
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.7;
   color: var(--text);
   word-break: break-word;
+  font-feature-settings: normal;
+  font-variant-ligatures: normal;
 }
 
 .msg-answer--streaming {
@@ -1228,7 +1233,7 @@ button.icon.tiny {
 .trace-pre {
   margin: 0;
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: 3px;
   background: rgba(0, 0, 0, 0.28);
   border: 1px solid rgba(255, 255, 255, 0.08);
   font-size: 11px;
@@ -1240,7 +1245,7 @@ button.icon.tiny {
   max-height: 280px;
   overflow-x: auto;
   overflow-y: auto;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   color: rgba(255, 255, 255, 0.86);
 }
 

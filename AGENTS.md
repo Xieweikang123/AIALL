@@ -47,7 +47,8 @@ AIALL 要做 **Cursor 类通用编程助手**：会查仓库、会改、会验�
 
 - `src/views/VibeCodingView.vue` — AI 助手主页面（vibe coding）：项目内 Agent、文件/Git/编辑器/聊天面板
 - `src/views/ChatView.vue` — 独立对话页：URL 抓取总结、图标模板驱动的桌面自动化（如「打开某应用」）
-- `src/views/IconTemplatesView.vue` — 图标模板库：屏幕截图模板，供 Chat 页在主显示器画面内匹配点击
+- `src/views/WebAgentView.vue` — 无头 Web Agent 试跑页（直连 agent-server SSE，调试用）
+- `src/views/GitOverviewView.vue` — 多仓 Git 总览页
 - `src/views/AiConfigView.vue` — AI 模型与 API 配置
 - `src/components/vibe/GitPanel.vue` — Git 面板
 - `src/components/vibe/FilePanel.vue` — 文件面板
@@ -70,16 +71,20 @@ AIALL 要做 **Cursor 类通用编程助手**：会查仓库、会改、会验�
 |------|------|
 | `/vibe-coding` | 主 IDE：打开项目后的 Agent、文件树、Git、Monaco 编辑器、会话聊天 |
 | `/chat` | 通用对话：网页 URL 总结、结合图标模板的桌面 UI 自动化 |
-| `/icon-templates` | 录入任务栏/桌面截图模板，供 Chat 自动化匹配点击 |
 | `/ai-config` | 配置 API Key、模型、网页抓取代理等 |
+| `/web-agent` | 无头 Web Agent 试跑（调试用） |
+| `/git-overview` | 多仓 Git 总览 |
+| `/login` | 整站登录墙（仅 web 模式；Tauri 桌面版不拦截） |
+
+图标模板目前**没有独立页面**：模板录入/管理走桌面端 Tauri 命令（`iconTemplatesClient.ts`），Chat 页只做匹配调用。
 
 ## 开发与运行
 
 | 命令 | 用途 |
 |------|------|
-| `npm run dev` | **默认**：Tauri 桌面版（Agent / Git / FS 全走 Rust） |
+| `npm run dev` | Tauri 桌面版（Agent / Git / FS 全走 Rust invoke） |
 | `npm run tauri:build` | 打包桌面应用 |
-| `npm run dev:web` | 浏览器 UI 预览（Agent/Git/FS 不可用，提示使用桌面版） |
+| `npm run dev:web` | 浏览器 web 模式（前端 + agent-server 后端；`start-web.bat` 会编译并拉起 agent-server） |
 | `npm test` | Vitest：契约 / 编排 / shared |
 | `npx vitest run <文件>` | 跑单个测试文件（覆盖 `src/**`、`server/**`、`shared/**`） |
 | `npm run test:rust-agent` | Rust Agent parity 单测（等价 `cargo test agent:: --quiet`，在 `src-tauri/`） |
@@ -118,14 +123,32 @@ Web 模式（`npm run dev:web` / `start-web.bat`）是正式使用场景，用�
 | 层级 | 目录/文件 | 允许写什么 |
 |------|-----------|------------|
 | **通用分类器** | `src/orchestration/generic/`、`agentContinuation.ts`、`agentStructuralPatterns.ts`、`agentRunPolicy.ts` 等 | 仅消息**形态**（代码块、步骤结构、路径、句型）；禁止业务名词与静态个案修复话术 |
-| **通用机制** | `agentReplyAccuracy.ts`、`agentConsultativeTopics.ts`、`agentExplorationBudget.ts` 等 | 准确度/trace 契约；同分类器 guard |
-| **产品编排** | `src/orchestration/product/`（`userIntentHints.ts`、`visionMessage.ts`、`agentAskPrompt.ts`、`agentExplorePrompt.ts`、`agentPlanPrompt.ts`、`agentTopicFollowUp.ts`） | AIALL 模式（Ask/Build/Plan）、截图读图、会话审计；**可以**写产品语义，但仍禁止 `FilePanel` 等内部组件名 |
+| **通用机制** | `shared/agentProbeGuard.ts`、`shared/agentExplorationBudget.ts` 等 | 准确度/trace 契约；同分类器 guard |
+| **产品编排** | `src/orchestration/product/`（`userIntentHints.ts`、`visionMessage.ts`、`agentTopicFollowUp.ts`） | AIALL 模式（Ask/Build/Plan）、截图读图、会话审计；**可以**写产品语义，但仍禁止 `FilePanel` 等内部组件名 |
+
+Ask/Build/Plan/Explore 的 system prompt 文本已是 Rust 真相源（`agent/prompts.rs`、`explore_prompt.rs`、`consultative_topics.rs`）；TS 侧只留 hint 组装与契约。
 
 路径清单见 `src/orchestration/orchestrationTiers.ts`；`agentOrchestrationGuard.test.ts` 按层扫描。
 
 **设计原则**：编排侧优先 **Context Retrieval + 模型泛化**，不用 Prompt Engineering 堆 Bug Playbook。always-on 只放机制契约；栈/症状相关事实走 Profile、knowledge、条件 hint 或工具校验。产品总纲见文首「产品北极星」与 `.cursor/rules/product-north-star.mdc`；编排细则见 `.cursor/rules/agent-orchestration.mdc`「设计原则」节。
 
 用户意图已拆分：`userIntentClassifiers.ts`（分类） vs `userIntentHints.ts`（注入 prompt 的 hint）。
+
+### 快速定位（索引，不是行为快照）
+
+**真相源分工**：行为在 Rust `src-tauri/src/agent/`；TS `src/orchestration/` + `src/services/agent*.ts` 只做契约/分类/hint；跨运行时常量在 `shared/`。改行为只改 Rust 并补 Rust 测。
+
+| 职责 | Rust（`src-tauri/src/agent/`） |
+|------|-------------------------------|
+| 主循环 / 事件流 / 收尾 | `run.rs` + `run_types` / `run_emit` / `run_stream` / `run_finalize` / `run_post_tools` / `run_preflight` / `run_startup_hints` |
+| 策略与门禁 | `policy.rs` / `finish_gate.rs` / `explore_guard.rs` / `exploration.rs` / `probe_guard.rs` |
+| 分类 / 续跑 / 引用修正 | `classifier.rs` / `continuation.rs` / `quoted_amend.rs` / `ambiguous_term.rs` |
+| prompt / hint 组装 | `prompts.rs` / `prompt_hints.rs` / `intent_hints.rs` / `runtime_hint.rs` / `run_system_prompt.rs` |
+| 工具与执行 | `tools.rs` / `tool_exec.rs` / `agent_git_tools.rs` |
+| 记忆 / 知识 | `memory_store.rs` / `knowledge_explore.rs` / `knowledge_manifest.rs` |
+| 视觉 / 截图 | `vision.rs` / `vision_consultative.rs` / `vision_pregrep.rs` |
+
+守门命令：`npm run agent:test-guards`（Rust parity + 编排 guard + 机制回归）；仅跑编排 guard 用 `npx vitest run src/services/agentOrchestrationGuard.test.ts`。
 
 ## Agent 编排与提示词（通用性）
 
@@ -141,7 +164,7 @@ Web 模式（`npm run dev:web` / `start-web.bat`）是正式使用场景，用�
 
 ## Agent 回复准确度（通用）
 
-修改 Agent **答疑/探索/修改** 相关 system prompt（如 `agentReplyAccuracy.ts`、`agentAskPrompt.ts`、`agentExplorePrompt.ts`）时：
+修改 Agent **答疑/探索/修改** 相关 system prompt（Rust 侧 `agent/prompts.rs`、`consultative_topics.rs`、`explore_prompt.rs`）时：
 
 - **应使用**结构契约：行为问题 trace 调用链、二元结论需完整证据、patch 后验证、多轮自洽更正
 - **禁止**把具体功能名、字段名、个案 bug 边界写进全局提示
@@ -163,17 +186,15 @@ AIALL 的 Vibe 会话文件**不在项目目录内**，存储在 AppData Roaming
 - **禁止** 在代码中添加 `console.log` 用于调试
 - **应使用** 写入临时文件的日志（勿写进用户项目根目录）：
   - 桌面版（Tauri）：`%APPDATA%\aiall\debug-logs\`（有打开项目时为 `debug-logs\<项目名_hash>\`），如 `debug.log`、`tab-perf.log`
-  - Node/Vitest 参考实现：仓库内 `.debug/debug.log`（已在 `.gitignore`）
+  - Vitest / 脚本：写入临时文件，勿写进用户项目根目录
   - 调试完成后可删除对应日志文件
 - **`.aiall/`（项目根目录，已 gitignore）**：Agent 的项目状态目录——`project-memory.md`、`project-knowledge.md`、`skills/`、`plans/`、`exploration/`、`probe/`、`memory/`（条目式长期记忆）。Git 面板禁止 stage `.aiall/` 路径；Agent 写工具（`write_file`/`patch_file`）禁止写 `.aiall/exploration/` 与 `.aiall/memory/`（长期记忆只能走 `memory_write` 工具，唯一入口）
 - **Rust 行为改动**：改 `src-tauri/` 后必须 `cargo check` 通过；行为真相源见 `AGENT_SSOT.md`（改行为只改 Rust，禁止在 `server/` 重写同名实现）
 
 ## Rust 化迁移
 
-迁移规划记录在 `RUST_MIGRATION.md`，所有 AI 实例在开始迁移前必须先查阅该文档：
-1. 找到待迁移模块，将状态改为 `[~]`，责任人写自己的 ID
-2. 完成迁移后改为 `[x]`，清除责任人
-3. 同一函数不允许两个 AI 同时修改
+主体迁移已完成（清单 79 项 `[x]`，无 `[ ]` / `[~]` 待认领项），历史规划与接口写法参考 `RUST_MIGRATION.md`。
+新增 Rust 化模块时才需按该文档流程认领（状态改 `[~]` + 写责任人），同一函数不允许两个 AI 同时改。
 
 ## 事实核查
 

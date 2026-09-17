@@ -353,6 +353,56 @@ export async function deleteChatSessionFromDisk(
   }
 }
 
+export type UnassignedSessionResult =
+  | { ok: true; sessions: Array<{ id: string; title: string; updatedAt: string; messageCount: number }> }
+  | { ok: false; error: string };
+
+/** Sessions left over from the legacy global store whose project is unknown. */
+export async function fetchUnassignedSessions(): Promise<UnassignedSessionResult> {
+  try {
+    return await invokeBackend<UnassignedSessionResult>(
+      "chat_unassigned_list",
+      {},
+      async () => {
+        const response = await fetch(backendUrl("/backend/vibe/chat-unassigned-list"));
+        if (!response.ok) {
+          return { ok: false, error: `HTTP ${response.status}` };
+        }
+        return readJsonResponse<UnassignedSessionResult>(response);
+      },
+    );
+  } catch (error) {
+    return { ok: false, error: formatFetchError(error, "读取未认领会话失败") };
+  }
+}
+
+/** Adopt an unassigned session into the current project. */
+export async function importUnassignedSession(
+  projectPath: string,
+  sessionId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const body = await invokeBackend<{ ok?: boolean; error?: string }>(
+      "chat_unassigned_import",
+      { projectPath, sessionId },
+      async () => {
+        const response = await fetch(backendUrl("/backend/vibe/chat-unassigned-import"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectPath, sessionId }),
+        });
+        if (!response.ok) {
+          return { ok: false, error: `HTTP ${response.status}` };
+        }
+        return readJsonResponse<{ ok?: boolean; error?: string }>(response);
+      },
+    );
+    return body.ok ? { ok: true } : { ok: false, error: body.error || "导入会话失败" };
+  } catch (error) {
+    return { ok: false, error: formatFetchError(error, "导入会话失败") };
+  }
+}
+
 export function buildChatImageFileUrl(projectPath: string, refPath: string): string {
   const qs = new URLSearchParams({
     projectPath,

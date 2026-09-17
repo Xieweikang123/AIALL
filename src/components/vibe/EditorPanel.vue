@@ -136,10 +136,10 @@
 
     <div v-if="!activeFilePath" class="editor-empty">
       <div class="editor-empty-visual" aria-hidden="true">
-        <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Z" stroke="currentColor" stroke-width="1.2" />
-          <path d="M14 2v6h6M10 13h4M10 17h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
-        </svg>
+        <span class="editor-empty-bracket">[</span>
+        <span class="editor-empty-prompt">$</span>
+        <span class="editor-empty-caret" />
+        <span class="editor-empty-bracket">]</span>
       </div>
       <p class="editor-empty-title">从左侧选择文件开始编辑</p>
       <p class="editor-empty-hint">支持多标签 · Diff 对比 · Ctrl+S 保存</p>
@@ -1016,16 +1016,59 @@ defineExpose({ editorRef, diffEditorRef, revealLineInEditor, revealLineInDiff })
 }
 
 .editor-empty-visual {
-  width: 56px;
-  height: 56px;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  border-radius: 14px;
-  background: #161616;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  gap: 9px;
+  height: 52px;
+  padding: 0 20px;
+  border-radius: 3px;
+  background: #0b0b0b;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 0 28px rgba(88, 166, 255, 0.06);
   color: #8b949e;
   margin-bottom: 4px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+}
+
+.editor-empty-bracket {
+  font-size: 20px;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.22);
+}
+
+.editor-empty-prompt {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  color: #58a6ff;
+  text-shadow: 0 0 14px rgba(88, 166, 255, 0.5);
+}
+
+.editor-empty-caret {
+  width: 9px;
+  height: 17px;
+  background: #58a6ff;
+  box-shadow: 0 0 12px rgba(88, 166, 255, 0.5);
+  animation: editor-empty-blink 1.05s steps(1, end) infinite;
+}
+
+@keyframes editor-empty-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor-empty-caret {
+    animation: none;
+  }
 }
 
 .editor-empty-title {

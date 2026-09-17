@@ -78,6 +78,8 @@ import {
   type VibeChatMode,
 } from "../services/vibeAgentClient";
 import { resolveAgentRequestUserIntentAsync } from "../services/agentRequestIntent";
+import { IntentClassifierUnavailableError } from "../services/agentRequestIntent";
+import type { ResolvedUserIntent } from "../services/intentClassifierTypes";
 import { agentDebugEnabled } from "../utils/agentDebugFlag";
 import { formatInvokeError } from "../services/tauriInvoke";
 import { formatAgentTransportErrorMessage } from "../services/agentRecovery";
@@ -458,6 +460,55 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     return Boolean(sid && runManager.has(sid));
   }
 
+  /**
+   * AI 意图分类是硬门禁（无兜底）：分类不可用即终止本轮，把 assistant 空壳标为失败并保留用户气泡。
+   * 新起一轮标记为不可恢复（重发同一条消息拿不到不同结果，须先修模型配置）；
+   * 续跑一轮保留可恢复态（运行进度真实存在，配置修好后仍应能继续）。
+   */
+  function failAgentRunForIntentClassification(
+    sessionId: string,
+    assistantMsg: VibeChatMessage,
+    message: string,
+    detail: string,
+    options?: { preserveProgress?: boolean },
+  ) {
+    const messageId = assistantMsg.id;
+    const keepProgress = Boolean(options?.preserveProgress);
+    runManager.abort(sessionId);
+    runManager.setAbortHandle(sessionId, null);
+    runManager.invalidate(sessionId);
+
+    assistantMsg.agentFailed = true;
+    assistantMsg.agentRecoverable = keepProgress;
+    assistantMsg.agentFailureReason = message;
+    assistantMsg.agentFailureDetail = detail;
+    assistantMsg.agentRecoveryDismissed = !keepProgress;
+    if (!keepProgress) assistantMsg.content = message;
+    assistantMsg.activityExpanded = true;
+    assistantMsg.totalTurns = resolveAgentCompletedTurns(assistantMsg);
+    appendStatusLog(assistantMsg, `意图识别失败：${detail}`);
+
+    patchAssistantMsg(messageId, {
+      agentFailed: true,
+      agentRecoverable: keepProgress,
+      agentFailureReason: message,
+      agentFailureDetail: detail,
+      agentRecoveryDismissed: !keepProgress,
+      ...(keepProgress ? {} : { content: assistantMsg.content }),
+      activityExpanded: true,
+      totalTurns: assistantMsg.totalTurns,
+      statusLog: assistantMsg.statusLog ? [...assistantMsg.statusLog] : undefined,
+      ...syncRoundGroupsPatch(assistantMsg),
+      ...assistantTransientUiClearPatch(),
+    }, sessionId);
+
+    finishRunSession(sessionId, true);
+    if (projectPath.value.trim()) updateAgentRunSessionStatus(sessionId, "failed");
+    if (isRunVisible(sessionId)) chatError.value = message;
+    persistChatNow(undefined, { flushStore: true });
+    void scrollChatToBottom(true);
+  }
+
   function setAgentStatus(
     sessionId: string,
     msg: VibeChatMessage,
@@ -490,45 +541,63 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     hasImage: boolean;
     sessionId: string;
     assistantMsg: VibeChatMessage;
-  }) {
-    return resolveAgentRequestUserIntentAsync(
-      {
-        prompt: input.prompt,
-        history: input.history,
-        mode: input.mode,
-        hasImage: input.hasImage,
-        endpoint: aiConfig.value.endpoint,
-        apiKey: aiConfig.value.apiKey,
-        model: aiConfig.value.model,
-        projectPath: projectPath.value.trim() || undefined,
-      },
-      (phase, detail, trace) => {
-        setAgentStatus(input.sessionId, input.assistantMsg, phase, {
+    /** 续跑一轮：失败时保留可恢复态，不销毁已有运行进度。 */
+    preserveProgressOnFailure?: boolean;
+  }): Promise<ResolvedUserIntent | null> {
+    try {
+      return await resolveAgentRequestUserIntentAsync(
+        {
+          prompt: input.prompt,
+          history: input.history,
+          mode: input.mode,
+          hasImage: input.hasImage,
+          endpoint: aiConfig.value.endpoint,
+          apiKey: aiConfig.value.apiKey,
           model: aiConfig.value.model,
-          detail,
-        });
-        if (trace) {
-          debugLog("[intent-classifier]", {
-            ...trace,
-            aiRawResponse: (trace.aiRawResponse ?? "").slice(0, 2000),
+          projectPath: projectPath.value.trim() || undefined,
+        },
+        (phase, detail, trace) => {
+          setAgentStatus(input.sessionId, input.assistantMsg, phase, {
+            model: aiConfig.value.model,
+            detail,
           });
-          patchAssistantMsg(input.assistantMsg.id, {
-            intentTrace: {
-              aiRawResponse: trace.aiRawResponse,
-              aiMessages: trace.aiMessages,
-              finalResult: trace.finalResult,
-              skippedAi: trace.skippedAi,
-              aiModel: trace.aiModel,
-              elapsedMs: trace.elapsedMs,
-              aiPrimary: trace.aiPrimary,
-              aiFailed: trace.aiFailed,
-              aiError: trace.aiError,
-              aiStage: trace.aiStage,
-            },
-          });
-        }
-      },
-    );
+          if (trace) {
+            debugLog("[intent-classifier]", {
+              ...trace,
+              aiRawResponse: (trace.aiRawResponse ?? "").slice(0, 2000),
+            });
+            patchAssistantMsg(input.assistantMsg.id, {
+              intentTrace: {
+                aiRawResponse: trace.aiRawResponse,
+                aiMessages: trace.aiMessages,
+                finalResult: trace.finalResult,
+                skippedAi: trace.skippedAi,
+                aiModel: trace.aiModel,
+                elapsedMs: trace.elapsedMs,
+                aiPrimary: trace.aiPrimary,
+                aiFailed: trace.aiFailed,
+                aiError: trace.aiError,
+                aiStage: trace.aiStage,
+              },
+            });
+          }
+        },
+      );
+    } catch (error) {
+      if (!(error instanceof IntentClassifierUnavailableError)) throw error;
+      debugLog("[intent-classifier] hard fail (no fallback)", {
+        detail: error.detail,
+        message: error.message,
+      });
+      failAgentRunForIntentClassification(
+        input.sessionId,
+        input.assistantMsg,
+        error.message,
+        error.detail,
+        { preserveProgress: input.preserveProgressOnFailure },
+      );
+      return null;
+    }
   }
 
   function findLastAssistantContent(): string | undefined {
@@ -1010,8 +1079,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       hasImage: resumeHasImage,
       sessionId,
       assistantMsg,
+      preserveProgressOnFailure: true,
     });
-    // 意图分类硬门禁失败：空壳已标失败并收尾，不再发起续跑请求
+    // 意图分类硬门禁失败：已标失败并收尾，不再发起续跑请求（进度保留，可再次恢复）
     if (!resolvedUserIntent) {
       return;
     }
@@ -1353,6 +1423,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     });
     // await 期间如果 interruptSessionRun 被调用，run 已被移除，不要起 SSE 连接
     if (!runManager.isValid(sessionId, runGen)) {
+      return false;
+    }
+    // 意图分类硬门禁失败：空壳已标失败并收尾，不再发起 Agent 请求
+    if (!resolvedUserIntent) {
       return false;
     }
     const agentRequest = {

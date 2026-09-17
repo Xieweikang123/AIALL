@@ -193,10 +193,11 @@ watch(
   margin: 6px 0 2px;
   padding: 4px 10px;
   border: 1px solid rgba(126, 182, 255, 0.22);
-  border-radius: 6px;
+  border-radius: 3px;
   background: rgba(88, 166, 255, 0.08);
   color: rgba(165, 214, 255, 0.92);
   font-size: 11px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   line-height: 1.4;
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;

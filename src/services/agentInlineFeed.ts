@@ -26,7 +26,7 @@ export type InlineFeedToolItem = {
   step: AgentRoundTool;
 };
 
-/** Provider reasoning/thinking channel — rendered as a collapsed disclosure, never as answer text. */
+/** Provider reasoning/thinking channel — shown as a labeled thought block, never as answer text. */
 export type InlineFeedReasoningItem = {
   kind: "reasoning";
   key: string;
@@ -224,10 +224,10 @@ function stripInlineStatusItems(items: InlineFeedItem[], isRunning: boolean): In
 /**
  * Key of the reasoning stream currently being produced, or null.
  *
- * The reasoning block auto-expands while it is the newest thing the model is
- * emitting, then auto-collapses once real content lands after it (a tool call,
- * or streamed answer/narrative text). Status rows are ignored — they are
- * transient rails, not content that ends thinking.
+ * While this key is active the UI keeps the thought body unclamped. Once a tool
+ * call or streamed answer/narrative follows, overflow (>3 lines) clamps to a
+ * preview; shorter thoughts stay fully visible. Status rows are ignored — they
+ * are transient rails, not content that ends thinking.
  */
 export function resolveActiveReasoningKey(
   items: InlineFeedItem[],

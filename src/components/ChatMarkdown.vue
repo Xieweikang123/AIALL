@@ -457,11 +457,14 @@ watch([displayHtml, effectiveStreaming], () => {
 .msg-markdown {
   min-width: 0;
   max-width: 100%;
-  font-size: 13px;
-  line-height: 1.65;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.7;
   overflow-wrap: anywhere;
   word-break: break-word;
   color: rgba(255, 255, 255, 0.92);
+  font-feature-settings: normal;
+  font-variant-ligatures: normal;
   transition: min-height 0.2s ease;
 }
 
@@ -530,15 +533,22 @@ watch([displayHtml, effectiveStreaming], () => {
   color: rgba(255, 255, 255, 0.78);
 }
 
-.msg-markdown :deep(code) {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.92em;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
-  padding: 0.1em 0.35em;
+/* Inline code: quiet tint, no pill chrome — dense `code` in agent replies shouldn't strobe the line. */
+.msg-markdown :deep(:not(pre) > code) {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  font-weight: 500;
+  color: #b6d0ef;
+  background: rgba(145, 190, 255, 0.07);
+  border: none;
+  border-radius: 3px;
+  padding: 0 0.2em;
+  line-height: inherit;
+  vertical-align: baseline;
   overflow-wrap: anywhere;
-  word-break: break-all;
+  word-break: break-word;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 .msg-markdown :deep(pre) {

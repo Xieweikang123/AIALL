@@ -45,6 +45,26 @@ export function getToolLabel(name: string): string {
   return name;
 }
 
+/** 工具名 → 终端风格小写命令，用于命令流展示（图标/动词列）。 */
+export function getToolCommand(name: string): string {
+  if (name === 'read_file') return 'read';
+  if (name === 'write_file') return 'write';
+  if (name === 'patch_file') return 'patch';
+  if (name === 'grep') return 'grep';
+  if (name === 'search_files') return 'find';
+  if (name === 'search_symbols') return 'sym';
+  if (name === 'list_dir') return 'ls';
+  if (name === 'git_status') return 'git status';
+  if (name === 'git_diff') return 'git diff';
+  if (name === 'delete_file') return 'rm';
+  if (name === 'run_command') return 'exec';
+  if (name === 'web_search') return 'web';
+  if (name === 'web_extract') return 'fetch';
+  if (name === 'memory_write') return 'mem';
+  if (name === 'search_sessions') return 'hist';
+  return name;
+}
+
 export function getRunCommandText(args?: Record<string, unknown>): string {
   return String(args?.command ?? "").trim().replace(/\s+/g, " ");
 }

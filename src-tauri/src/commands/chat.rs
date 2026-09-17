@@ -52,6 +52,16 @@ pub async fn chat_image_file(project_path: String, path: String) -> Result<Vec<u
 }
 
 #[tauri::command]
+pub async fn chat_unassigned_list() -> Value {
+    chat::chat_unassigned_list().await
+}
+
+#[tauri::command]
+pub async fn chat_unassigned_import(project_path: String, session_id: String) -> Value {
+    chat::chat_unassigned_import(&project_path, &session_id).await
+}
+
+#[tauri::command]
 pub async fn chat_run_checkpoint_load(project_path: String, session_id: String) -> Value {
     crate::agent::load_run_checkpoint(&project_path, &session_id).await
 }

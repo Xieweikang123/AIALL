@@ -1,6 +1,7 @@
 import { resolveUserIntent } from "./intentClassifierRules";
 import { formatIntentClassificationDetail } from "./intentClassifierAi";
 import { buildIntentClassifierUserMessage } from "./intentClassifierAi";
+import { shouldUseAiIntentClassifier } from "./intentClassifierAi";
 import { classifyUserIntentWithAiClient, type IntentClassifierStage } from "./agentIntentClassifierClient";
 import type { ResolvedUserIntent } from "./intentClassifierTypes";
 import type { UserIntentHistoryMessage } from "../orchestration/agentIntentTypes";
@@ -8,6 +9,20 @@ import type { VibeChatMode } from "../../shared/agentTypes";
 import { debugLog } from "../utils/debugLog";
 
 export type ResolveAgentIntentStatusPhase = "classifying_intent" | "intent_classified";
+
+/**
+ * AI 意图分类是硬门禁：拿不到可用结果时不允许按模式默认值猜读/写，
+ * 调用方须终止本轮运行并报错（见 useAgentRun.failAgentRunForIntentClassification）。
+ */
+export class IntentClassifierUnavailableError extends Error {
+  readonly detail: string;
+
+  constructor(message: string, detail: string) {
+    super(message);
+    this.name = "IntentClassifierUnavailableError";
+    this.detail = detail;
+  }
+}
 
 export interface IntentClassifierTrace {
   prompt: string;
@@ -25,7 +40,7 @@ export interface IntentClassifierTrace {
   aiStage?: IntentClassifierStage;
 }
 
-/** Tauri desktop: AI classifier with minimal fallback. Browser preview has no Agent backend. */
+/** Tauri desktop: AI classifier gate — no payload means the run is aborted with an error. */
 export async function resolveAgentRequestUserIntentAsync(
   input: {
     prompt: string;
@@ -53,14 +68,13 @@ export async function resolveAgentRequestUserIntentAsync(
     isAsk: isReadOnlyAgent,
   };
 
-  // web（服务器）模式同样走 AI 分类：agent-server 已提供 /backend/ai/test 流式通道，
-  // 分类失败会回落到默认意图（见下方 aiResult==null 分支）。
+  // web（服务器）模式同样走 AI 分类：agent-server 已提供 /backend/ai/test 流式通道。
+  // 分类不可用一律抛 IntentClassifierUnavailableError，不回落模式默认意图。
+  const classifyStartedAt = performance.now();
   onStatus?.("classifying_intent", "正在识别用户意图…", {
     prompt: input.prompt,
     skippedAi: false,
   });
-
-  const classifyStartedAt = performance.now();
   let aiResult: Awaited<ReturnType<typeof classifyUserIntentWithAiClient>> | null = null;
   try {
     aiResult = await classifyUserIntentWithAiClient({
@@ -96,6 +110,32 @@ export async function resolveAgentRequestUserIntentAsync(
   const aiPayload = aiResult?.payload ?? null;
   const aiFailed = aiResult !== null && aiPayload === null;
 
+  if (!aiPayload) {
+    const blocked = !shouldUseAiIntentClassifier();
+    const reason = blocked
+      ? "AI 意图分类已被 AIALL_INTENT_CLASSIFIER 关闭"
+      : aiResult?.error || "分类器未返回可用结果";
+    const detail = formatIntentClassificationDetail(
+      resolveUserIntent({ ...baseInput, ai: null }),
+    );
+    onStatus?.("intent_classified", detail, {
+      prompt: input.prompt,
+      skippedAi: blocked,
+      aiMessages: aiResult?.messages,
+      aiRawResponse: aiResult?.rawResponse,
+      finalResult: detail,
+      aiModel: input.model,
+      elapsedMs: classifyElapsedMs,
+      aiPrimary: undefined,
+      aiFailed: true,
+      aiError: reason,
+    });
+    throw new IntentClassifierUnavailableError(
+      `意图识别失败：${reason}。请检查 AI 模型配置后重试。`,
+      reason,
+    );
+  }
+
   const resolved = resolveUserIntent({
     ...baseInput,
     ai: aiPayload,
@@ -109,7 +149,7 @@ export async function resolveAgentRequestUserIntentAsync(
     finalResult: detail,
     aiModel: input.model,
     elapsedMs: classifyElapsedMs,
-    aiPrimary: aiPayload?.primary,
+    aiPrimary: aiPayload.primary,
     aiFailed,
     aiError: aiResult?.error,
   });

@@ -111,25 +111,13 @@ fn parse_args(argv: &[String]) -> SmokeOptions {
     out
 }
 
-fn sessions_dir() -> PathBuf {
-    if let Ok(appdata) = env::var("APPDATA") {
-        return PathBuf::from(appdata)
-            .join("aiall")
-            .join("vibe-chat-sessions");
-    }
-    env::var("HOME")
-        .or_else(|_| env::var("USERPROFILE"))
-        .map(|h| {
-            PathBuf::from(h)
-                .join(".config")
-                .join("aiall")
-                .join("vibe-chat-sessions")
-        })
-        .unwrap_or_else(|_| PathBuf::from(".").join("aiall").join("vibe-chat-sessions"))
+fn sessions_dir(project_root: &str) -> PathBuf {
+    app_lib::paths::project_chat_store_dir(project_root)
 }
 
 fn safe_session_id(id: &str) -> String {
-    id.chars()
+    let sanitized: String = id
+        .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
                 c
@@ -137,14 +125,25 @@ fn safe_session_id(id: &str) -> String {
                 '_'
             }
         })
-        .collect()
+        .collect();
+    if sanitized.chars().all(|c| c == '_') && !id.is_empty() {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        id.hash(&mut hasher);
+        format!("session_{:016x}", hasher.finish())
+    } else {
+        sanitized
+    }
 }
 
 fn load_session_user_turn(
+    project_root: &str,
     session_id: &str,
     no_image: bool,
 ) -> Result<(String, Option<Vec<String>>, Option<String>), String> {
-    let file = sessions_dir().join(format!("chat-{}.json", safe_session_id(session_id)));
+    let dir = sessions_dir(project_root);
+    let file = dir.join(format!("chat-{}.json", safe_session_id(session_id)));
     if !file.exists() {
         return Err(format!("Session file not found: {}", file.display()));
     }
@@ -191,7 +190,7 @@ fn load_session_user_turn(
                         continue;
                     }
                     let img_path =
-                        sessions_dir().join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+                        dir.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
                     if !img_path.exists() {
                         continue;
                     }
@@ -328,8 +327,21 @@ async fn main() -> ExitCode {
     let mut image_data_urls: Option<Vec<String>> = None;
     let mut mode = raw.mode.unwrap_or_else(|| "build".into());
 
+    let project_root = raw
+        .project_root
+        .or_else(|| env::var("AIALL_PROJECT").ok())
+        .unwrap_or_else(|| {
+            env::current_dir()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| ".".into())
+        });
+    let project_root = Path::new(&project_root)
+        .canonicalize()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or(project_root);
+
     if let Some(session_id) = &raw.session_id {
-        match load_session_user_turn(session_id, raw.no_image) {
+        match load_session_user_turn(&project_root, session_id, raw.no_image) {
             Ok((p, imgs, chat_mode)) => {
                 if prompt.is_empty() {
                     prompt = p;
@@ -357,19 +369,6 @@ async fn main() -> ExitCode {
         eprintln!("Provide --prompt or --session with a user message.");
         return ExitCode::from(1);
     }
-
-    let project_root = raw
-        .project_root
-        .or_else(|| env::var("AIALL_PROJECT").ok())
-        .unwrap_or_else(|| {
-            env::current_dir()
-                .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_else(|_| ".".into())
-        });
-    let project_root = Path::new(&project_root)
-        .canonicalize()
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or(project_root);
 
     let max_turns = raw.max_turns.filter(|n| *n > 0).unwrap_or(6);
     let timeout_ms = raw

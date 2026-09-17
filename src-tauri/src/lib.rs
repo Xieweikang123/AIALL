@@ -8,7 +8,7 @@ mod error;
 mod fs;
 mod git;
 pub mod http_routes;
-mod paths;
+pub mod paths;
 mod project;
 mod project_history;
 mod web_fetch;
@@ -177,6 +177,8 @@ pub fn run() {
             commands::chat::chat_session_delete,
             commands::chat::chat_image,
             commands::chat::chat_image_file,
+            commands::chat::chat_unassigned_list,
+            commands::chat::chat_unassigned_import,
             commands::chat::chat_run_checkpoint_load,
             commands::chat::chat_run_checkpoint_clear,
             commands::project::project_memory_get,

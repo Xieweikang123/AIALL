@@ -117,7 +117,7 @@ const parsedResult = computed(() => {
 });
 
 const sourceLabel = computed(() => {
-  if (props.trace?.aiFailed) return "规则兜底";
+  if (props.trace?.aiFailed) return "分类失败";
   const raw = parsedResult.value?.source ?? "";
   if (!raw) return "";
   // source 形如「ai」「ai·规则短路」「ai·pending_amend」，取首段做映射
@@ -128,7 +128,7 @@ const sourceLabel = computed(() => {
 const displayValue = computed(() => {
   if (props.trace?.aiFailed) {
     const reason = props.trace.aiError?.trim();
-    return reason ? `分类未完成：${reason}` : "分类未完成";
+    return reason ? `分类失败：${reason}` : "分类失败";
   }
   const parsed = parsedResult.value;
   if (parsed) return parsed.value;
@@ -178,13 +178,15 @@ function messageRoleLabel(role: string): string {
   align-items: center;
   gap: 6px;
   min-width: 0;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
 }
 
 .intent-trace-dot {
   width: 6px;
   height: 6px;
-  border-radius: 50%;
-  background: rgba(88, 166, 255, 0.85);
+  border-radius: 1px;
+  background: rgba(88, 166, 255, 0.9);
+  box-shadow: 0 0 8px rgba(88, 166, 255, 0.45);
   flex-shrink: 0;
 }
 
@@ -203,7 +205,7 @@ function messageRoleLabel(role: string): string {
   font-size: 9px;
   font-weight: 600;
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: 2px;
   color: rgba(88, 166, 255, 0.9);
   background: rgba(88, 166, 255, 0.12);
 }
@@ -222,10 +224,11 @@ function messageRoleLabel(role: string): string {
   flex-shrink: 0;
   padding: 1px 8px;
   border: 1px solid rgba(88, 166, 255, 0.25);
-  border-radius: 4px;
+  border-radius: 2px;
   background: transparent;
   color: rgba(88, 166, 255, 0.85);
   font-size: 10px;
+  font-family: inherit;
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -271,7 +274,7 @@ function messageRoleLabel(role: string): string {
 .intent-trace-fallback {
   margin-top: 4px;
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: 2px;
   border: 1px solid rgba(240, 185, 95, 0.35);
   background: rgba(240, 185, 95, 0.1);
   color: rgba(240, 185, 95, 0.95);
@@ -318,7 +321,7 @@ function messageRoleLabel(role: string): string {
 .trace-pre {
   margin: 0;
   padding: 6px 8px;
-  border-radius: 4px;
+  border-radius: 2px;
   background: rgba(1, 4, 9, 0.4);
   border: 1px solid rgba(255, 255, 255, 0.04);
   font-size: 10.5px;
@@ -330,7 +333,7 @@ function messageRoleLabel(role: string): string {
   max-height: 200px;
   overflow-x: hidden;
   overflow-y: auto;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   color: rgba(139, 148, 158, 0.82);
 }
 </style>

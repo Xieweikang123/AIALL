@@ -3,7 +3,7 @@ name: audit-over-narrow-orchestration
 description: >-
   Reviews agent orchestration, prompts, classifiers, test fixtures, and session-audit
   recommendations for case-specific boundaries that should stay generic. Use when
-  editing vibeAgent, agentRunProfile, reply-accuracy prompts, PRs touching routing
+  editing agentRunProfile, Rust agent prompts, PRs touching routing
   regexes, or when the user asks whether a rule, fix, or audit suggestion is too narrow.
 disable-model-invocation: true
 ---
@@ -16,7 +16,7 @@ disable-model-invocation: true
 
 ## 何时使用
 
-- 改 `*RunProfile*`、`*Signal*`、`*Continuation*`、`*ReplyAccuracy*`、`*ExplorationHint*`、system prompt 分支
+- 改 `*RunProfile*`、`*Signal*`、`*Continuation*`、`*ReplyAccuracy*`、`*ExplorationHint*`、system prompt 分支（Rust `src-tauri/src/agent/`）
 - 改分类正则、路由 if、咨询/Build 探索 nudge 文案
 - 写或审 **Agent 会话准确度审计** 的「改进建议」段
 - 用户问：「这样写是不是太窄」「会不会绑死本次需求」
@@ -32,7 +32,7 @@ disable-model-invocation: true
 
 | 类型 | 典型位置 | 「过窄」指什么 |
 |------|----------|----------------|
-| **编排 / 提示** | `server/vibeAgent.ts`、`server/agentRunProfile.ts`、`src/services/agentRunProfile.ts`、`agentReplyAccuracy.ts`、`agentAskPrompt.ts` | 正则/分支/prompt 绑具体功能、页面、字段、用户原话 |
+| **编排 / 提示** | `src/services/agentRunProfile.ts`、`src/orchestration/**`、Rust `src-tauri/src/agent/prompts.rs` / `consultative_topics.rs` / `explore_prompt.rs` | 正则/分支/prompt 绑具体功能、页面、字段、用户原话 |
 | **测试 fixture** | `*RunProfile*.test.ts`、分类器/continuation 测试 | 用真实需求文案断言分类行为 |
 | **复盘 / 审计输出** | 会话审计、postmortem、「改进建议」 | 个案处方（读某文件、搜某 pattern）写成全局规则 |
 | **业务实现**（可选） | 产品代码 | 单点硬编码、不可复用特例；仅当用户点名审实现时展开 |
@@ -44,16 +44,18 @@ disable-model-invocation: true
 ```
 .cursor/rules/agent-orchestration.mdc
 .cursor/rules/agent-reply-accuracy.mdc
-server/vibeAgent.ts
-server/agentRunProfile.ts
-server/agentAskPrompt.ts
-server/agentExplorationBudget.ts
+src/orchestration/orchestrationTiers.ts
+src/orchestration/generic/**
+src/orchestration/product/**
 src/services/agentRunProfile.ts
 src/services/agentContinuation.ts
-src/services/agentReplyAccuracy.ts
-src/services/agentUserIntent.ts
+src/services/agentStructuralPatterns.ts
+shared/agentProbeGuard.ts
+shared/agentExplorationBudget.ts
+src-tauri/src/agent/prompts.rs
+src-tauri/src/agent/consultative_topics.rs
+src-tauri/src/agent/explore_prompt.rs
 **/*RunProfile*.ts
-**/*ReplyAccuracy*.ts
 **/*Signal*.ts
 **/*Continuation*.ts
 ```

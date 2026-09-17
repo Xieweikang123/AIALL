@@ -79,7 +79,7 @@
               v-model.trim="projectSearchQuery"
               class="project-history-search-input"
               type="text"
-              placeholder="搜索项目名或路径"
+              placeholder="搜索项目名，或粘贴完整路径后回车打开"
               aria-label="搜索项目"
               @keydown.enter="onSearchInputEnter"
               @keydown.esc="onSearchInputEscape"
@@ -95,18 +95,33 @@
               ×
             </button>
           </div>
-          <div v-if="!projectHistoryList.length" class="project-history-empty">
+          <div v-if="!projectHistoryList.length && !projectSearchQuery" class="project-history-empty">
             <svg class="project-history-empty-icon" width="32" height="32" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <path d="M2.5 4.8A1.3 1.3 0 0 1 3.8 3.5h3.2l1.2 1.3h4.5A1.3 1.3 0 0 1 14 6.1v6.4a1.3 1.3 0 0 1-1.3 1.3H3.8A1.3 1.3 0 0 1 2.5 12.5V4.8Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
             </svg>
             <p>还没有打开过项目</p>
+            <p class="project-history-empty-hint">粘贴完整路径到上方搜索框，回车即可打开</p>
           </div>
           <div v-else-if="!filteredProjectHistoryList.length" class="project-history-empty">
             <svg class="project-history-empty-icon" width="32" height="32" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.1"/>
               <path d="m10.5 10.5 3 3" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>
             </svg>
-            <p>没有找到匹配的项目</p>
+            <p>没有匹配的历史项目</p>
+            <button
+              type="button"
+              class="project-history-open-path"
+              :disabled="loadingTree || pickingFolder"
+              :title="`打开项目路径 ${projectSearchQuery}`"
+              @click="openSearchQueryAsPath"
+            >
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M2.5 4.8A1.3 1.3 0 0 1 3.8 3.5h3.2l1.2 1.3h4.5A1.3 1.3 0 0 1 14 6.1v6.4a1.3 1.3 0 0 1-1.3 1.3H3.8A1.3 1.3 0 0 1 2.5 12.5V4.8Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+              </svg>
+              直接打开此路径
+              <span class="project-history-open-path-value">{{ projectSearchQuery }}</span>
+            </button>
+            <p class="project-history-empty-hint">按回车也可以直接打开</p>
           </div>
           <ul v-else class="project-history-list">
             <li
@@ -606,6 +621,13 @@ function onSearchInputEnter() {
     openRecentProject(filteredProjectHistoryList.value[0].path);
     return;
   }
+  openSearchQueryAsPath();
+}
+
+/** 无匹配时：把搜索框里的输入当作项目路径直接打开。 */
+function openSearchQueryAsPath() {
+  const query = projectSearchQuery.value.trim();
+  if (!query) return;
   openRecentProject(query);
 }
 
@@ -1117,6 +1139,45 @@ async function refreshProjectHistoryList() {
 
 .project-history-empty p {
   margin: 0;
+}
+
+.project-history-empty-hint {
+  color: rgba(139, 148, 158, 0.65);
+  font-size: 11px;
+}
+
+.project-history-open-path {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 7px 12px;
+  border: 1px solid rgba(88, 166, 255, 0.45);
+  border-radius: 8px;
+  background: rgba(88, 166, 255, 0.12);
+  color: rgba(121, 192, 255, 0.95);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.project-history-open-path:hover:not(:disabled) {
+  background: rgba(88, 166, 255, 0.22);
+  border-color: rgba(88, 166, 255, 0.7);
+}
+
+.project-history-open-path:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.project-history-open-path-value {
+  max-width: 230px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: rgba(255, 255, 255, 0.85);
 }
 
 .project-history-empty-icon {

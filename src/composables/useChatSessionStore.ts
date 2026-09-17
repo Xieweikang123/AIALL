@@ -5,7 +5,6 @@ import {
   buildActiveSessionDiskSyncPayload,
   chatMessagesHavePendingImageBase64,
   clearProjectMemoryCache,
-  clearProjectSessionIndex,
   clearVibeChatHistory,
   cloneChatMessagesForDiskSync,
   diskChatStoreAheadOfLocalIndex,
@@ -238,10 +237,9 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
         && diskIndex.data.sessions.length > 0
         && vibeProjectPathsMatch(project, diskIndex.data.projectPath);
       const indexEmpty = !getSessionDiagSnapshot(project).indexSessionIds.length;
-      // 检测：磁盘拒绝此项目（projectPath 不匹配）但 localStorage 有数据 → 数据已污染
-      if (!diskOk && !indexEmpty && "error" in diskIndex && diskIndex.error === "会话属于其他项目，已忽略") {
-        clearProjectSessionIndex(project);
-      }
+      // 历史上有过「磁盘 projectPath 不匹配 → 直接清空本地索引」的分支，导致切项目后
+      // 会话列表当场变空且无从恢复。现在磁盘按项目分目录，后端不会再返回跨项目错误；
+      // 真出错也只降级为「这次不从磁盘补」，绝不动本地已有数据。
       const activeId = getActiveVibeChatSessionId(project);
       const needsDisk =
         (indexEmpty && diskOk)

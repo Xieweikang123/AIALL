@@ -9,9 +9,8 @@ alwaysApply: true
 
 ## 适用范围
 
-- `src/services/agentReplyAccuracy.ts`、`src/services/agentUserIntent.ts`（含 `isBehaviorContradictionPrompt`）
-- `server/vibeAgent.ts`、`server/agentAskPrompt.ts` 中的 system prompt 片段
-- 以及任何 `*ReplyAccuracy*`、`*ExplorationHint*`、`*AnswerStructure*` 类逻辑
+- Rust `src-tauri/src/agent/`：`prompts.rs`、`consultative_topics.rs`、`explore_prompt.rs`（真实行为真相源）
+- TS 侧 `src/services/`、`src/orchestration/`：`*ReplyAccuracy*`、`*ExplorationHint*`、`*AnswerStructure*` 类 hint 组装与契约
 
 ## 机制事实结论
 

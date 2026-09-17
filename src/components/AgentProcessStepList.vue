@@ -25,8 +25,8 @@
         @click="showDetail && row.state !== 'running' && toggleDetail(row.key)"
       >
         <span class="process-step-node" aria-hidden="true" />
-        <span class="process-step-icon" aria-hidden="true">{{ row.icon }}</span>
-        <span class="process-step-verb">{{ row.verb }}</span>
+        <span class="process-step-prompt" aria-hidden="true">&gt;</span>
+        <span class="process-step-verb">{{ row.command }}</span>
         <button
           v-if="row.path"
           type="button"
@@ -83,7 +83,7 @@
 import { computed, ref, watch } from "vue";
 import { cursorActionClass, formatCursorActionLabel } from "../services/agentCursorFeed";
 import type { AgentRoundTool } from "../services/agentRoundGroups";
-import { getToolIcon, getToolLabel, getToolPath } from "../utils/toolHelpers";
+import { getToolCommand, getToolPath } from "../utils/toolHelpers";
 
 const props = withDefaults(
   defineProps<{
@@ -124,8 +124,7 @@ function toggleDetail(key: string) {
 
 type StepRow = {
   key: string;
-  icon: string;
-  verb: string;
+  command: string;
   target: string;
   meta: string;
   path?: string;
@@ -189,10 +188,7 @@ function extractMeta(step: AgentRoundTool): string {
 function buildRow(step: AgentRoundTool): StepRow {
   const path = getToolPath(step)?.trim() || "";
   const fullLabel = formatCursorActionLabel(step);
-  // 兼容旧数据：历史消息里 title/label 可能存的是工具名原样（旧兜底），渲染时映射成中文
-  const rawVerb = step.title?.trim() || step.label?.trim() || step.name;
-  const verb = rawVerb === step.name ? getToolLabel(step.name) : rawVerb;
-  const icon = step.icon && step.icon !== "⚙️" ? step.icon : getToolIcon(step.name);
+  const command = getToolCommand(step.name);
 
   // 搜索类工具：target 直接用搜索词（query/pattern），不要从 fullLabel 里剥出
   // "symbols Ingress" 这类被前缀污染的结果。
@@ -215,8 +211,7 @@ function buildRow(step: AgentRoundTool): StepRow {
 
   return {
     key: step.id,
-    icon,
-    verb,
+    command,
     target,
     meta: extractMeta(step),
     path: path || undefined,
@@ -268,8 +263,9 @@ const railProgressPercent = computed(() => {
   max-height: 240px;
   overflow-y: auto;
   padding: 4px 0 4px 4px;
-  border-radius: 6px;
+  border-radius: 3px;
   background: rgba(0, 0, 0, 0.12);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
 }
 
 .process-step-list--running {
@@ -280,7 +276,7 @@ const railProgressPercent = computed(() => {
 .process-step-list--compact {
   max-height: 160px;
   background: rgba(0, 0, 0, 0.06);
-  border-radius: 4px;
+  border-radius: 3px;
   --step-rail-x: 12px;
 }
 
@@ -327,7 +323,7 @@ const railProgressPercent = computed(() => {
   min-height: 24px;
   padding: 2px 6px 2px 4px;
   font-size: 10px;
-  grid-template-columns: 12px 16px 44px minmax(0, 1fr) auto auto;
+  grid-template-columns: 12px 8px minmax(0, 62px) minmax(0, 1fr) auto auto;
 }
 
 .process-step-list::-webkit-scrollbar {
@@ -343,7 +339,7 @@ const railProgressPercent = computed(() => {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: 14px 18px 52px minmax(0, 1fr) auto auto;
+  grid-template-columns: 14px 8px minmax(0, 68px) minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 6px;
   min-height: 28px;
@@ -379,10 +375,10 @@ const railProgressPercent = computed(() => {
 
 .process-step-node {
   justify-self: center;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  border: 2px solid rgba(148, 163, 184, 0.32);
+  width: 7px;
+  height: 7px;
+  border-radius: 1px;
+  border: 1px solid rgba(148, 163, 184, 0.36);
   background: rgba(3, 4, 6, 0.96);
   box-sizing: border-box;
   transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
@@ -404,17 +400,17 @@ const railProgressPercent = computed(() => {
 .process-step--fail .process-step-node,
 .process-step--skipped .process-step-node {
   border-color: rgba(88, 166, 255, 0.62);
-  background: rgba(88, 166, 255, 0.48);
+  background: rgba(88, 166, 255, 0.5);
 }
 
 .process-step--fail .process-step-node {
   border-color: rgba(255, 123, 114, 0.75);
-  background: rgba(255, 123, 114, 0.42);
+  background: rgba(255, 123, 114, 0.45);
 }
 
 .process-step--skipped .process-step-node {
   border-color: rgba(210, 153, 34, 0.65);
-  background: rgba(210, 153, 34, 0.38);
+  background: rgba(210, 153, 34, 0.4);
 }
 
 /* 结果未回传（如连接中断）：中性空心点，不与真实失败的红点混同 */
@@ -440,16 +436,23 @@ const railProgressPercent = computed(() => {
   color: rgba(210, 180, 120, 0.88);
 }
 
-.process-step-icon {
+.process-step-prompt {
+  flex-shrink: 0;
   font-size: 11px;
-  opacity: 0.85;
+  font-weight: 700;
+  line-height: 1;
+  color: rgba(88, 166, 255, 0.85);
   text-align: center;
+  user-select: none;
 }
 
 .process-step-verb {
   flex-shrink: 0;
-  color: rgba(148, 163, 184, 0.72);
-  font-weight: 500;
+  color: rgba(126, 182, 255, 0.92);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .process-step-target {
@@ -457,7 +460,7 @@ const railProgressPercent = computed(() => {
   padding: 0;
   border: none;
   background: transparent;
-  color: rgba(165, 214, 255, 0.9);
+  color: rgba(201, 209, 217, 0.9);
   font: inherit;
   text-align: left;
   overflow: hidden;
@@ -528,7 +531,7 @@ button.process-step-target:hover {
 .trace-pre {
   margin: 0;
   padding: 6px 8px;
-  border-radius: 4px;
+  border-radius: 2px;
   background: rgba(1, 4, 9, 0.4);
   border: 1px solid rgba(255, 255, 255, 0.04);
   font-size: 10.5px;
@@ -540,7 +543,7 @@ button.process-step-target:hover {
   max-height: 140px;
   overflow-x: hidden;
   overflow-y: auto;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
   color: rgba(139, 148, 158, 0.82);
 }
 

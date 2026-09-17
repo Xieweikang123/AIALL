@@ -500,6 +500,9 @@ pub async fn handle_backend_vibe(
                 Err(e) => Ok(error_response(404, &e)),
             };
         }
+        ("GET", "/chat-unassigned-list") => {
+            return Ok(ok_json(commands::chat::chat_unassigned_list().await));
+        }
         ("GET", "/chat-run-checkpoint") => {
             let project_path = q_get(&q, "projectPath").cloned().unwrap_or_default();
             let session_id = q_get(&q, "sessionId").cloned().unwrap_or_default();
@@ -513,6 +516,14 @@ pub async fn handle_backend_vibe(
             let session_id = body_str(&body, "sessionId");
             return Ok(ok_json(
                 commands::chat::chat_run_checkpoint_clear(project_path, session_id).await,
+            ));
+        }
+        ("POST", "/chat-unassigned-import") => {
+            let body = parse_body_json(body)?;
+            let project_path = body_str(&body, "projectPath");
+            let session_id = body_str(&body, "sessionId");
+            return Ok(ok_json(
+                commands::chat::chat_unassigned_import(project_path, session_id).await,
             ));
         }
 

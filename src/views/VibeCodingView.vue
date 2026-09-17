@@ -100,6 +100,8 @@
         :session-sending-ids="sendingSessionIdList"
         :syncing-chat-store="syncingChatStore"
         :chat-store-sync-message="chatStoreSyncMessage"
+        :unassigned-sessions="unassignedSessions"
+        :unassigned-importing="unassignedImporting"
         @update:git-panel-mode="gitPanelMode = $event"
         @update:project-panel-view="projectPanelView = $event"
         @open-quick-search="openQuickSearch"
@@ -117,6 +119,7 @@
         @copy-session-info="copySessionInfo"
         @copy-session-name-path="copySessionNamePath"
         @sync-chat-store-to-disk="syncChatStoreToDisk"
+        @import-unassigned-session="handleImportUnassignedSession"
       >
 
         <GitPanel
@@ -1269,6 +1272,8 @@ import {
   setWebProjectHandle,
   getWebProjectHandle,
   isWebProjectActive,
+  fetchUnassignedSessions,
+  importUnassignedSession,
 } from "../services/vibeCodingClient";
 import {
   fetchGitDiffContent,
@@ -1736,7 +1741,6 @@ function handleCloseAllSessionTabs() {
   persistOpenedSessionTabs();
   handleStartNewSession();
 }
-
 function handleReorderSessionTabs(fromIndex: number, toIndex: number) {
   if (fromIndex === toIndex) return;
   if (fromIndex < 0 || fromIndex >= openedSessionIds.value.length) return;
@@ -1748,6 +1752,38 @@ function handleReorderSessionTabs(fromIndex: number, toIndex: number) {
   ids.splice(adjustedTo, 0, moved);
   openedSessionIds.value = ids;
   persistOpenedSessionTabs();
+}
+
+// 未认领会话：旧版全局存档里没登记归属的历史会话，可一键导入当前项目。
+// 会话文件本身一直没丢，这个入口是让用户把它们领回来，而不是只能靠 Agent 搜索。
+const unassignedSessions = ref<Array<{ id: string; title: string; updatedAt: string; messageCount: number }>>([]);
+const unassignedImporting = ref("");
+
+async function refreshUnassignedSessions() {
+  if (!projectOpened.value) {
+    unassignedSessions.value = [];
+    return;
+  }
+  const result = await fetchUnassignedSessions();
+  unassignedSessions.value = result.ok ? result.sessions : [];
+}
+
+async function handleImportUnassignedSession(sessionId: string) {
+  const project = projectPath.value.trim();
+  const id = sessionId.trim();
+  if (!project || !id || unassignedImporting.value) return;
+  unassignedImporting.value = id;
+  try {
+    const result = await importUnassignedSession(project, id);
+    if (!result.ok) {
+      chatError.value = result.error || "导入会话失败";
+      return;
+    }
+    refreshSessionList(project);
+    await refreshUnassignedSessions();
+  } finally {
+    unassignedImporting.value = "";
+  }
 }
 
 const chatSessionHooks: {
@@ -3565,6 +3601,7 @@ async function openProjectByPath(dirPath: string) {
       chatState.activeSessionId,
       normalizeChatMessages(chatState.messages, { stripTransientUi: true }),
     );
+    void refreshUnassignedSessions();
 
     log(`chat-active(${chatState.activeSessionId}, ${chatState.messages.length}msgs)`);
 

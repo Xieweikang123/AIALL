@@ -21,7 +21,52 @@ pub fn resolve_project_history_path() -> PathBuf {
     resolve_aiall_data_dir().join("project-history.json")
 }
 
+/// Env var that redirects the session store root. Production callers can point it
+/// at another location; tests use the thread-scoped override below instead.
+pub const SESSION_DATA_DIR_ENV: &str = "AIALL_SESSION_DATA_DIR";
+
+#[cfg(test)]
+thread_local! {
+    /// Per-test-thread override. Thread-local (not global) so one test can never
+    /// redirect another test's view of the store — a global/env override made
+    /// stray test buckets land in the real `%APPDATA%` store.
+    static SESSION_ROOT_OVERRIDE: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Point the session store at `root` for the current test thread until dropped.
+#[cfg(test)]
+pub fn set_session_root_override(root: PathBuf) -> SessionRootOverrideGuard {
+    SESSION_ROOT_OVERRIDE.with(|slot| SessionRootOverrideGuard {
+        previous: slot.replace(Some(root)),
+    })
+}
+
+#[cfg(test)]
+pub struct SessionRootOverrideGuard {
+    previous: Option<PathBuf>,
+}
+
+#[cfg(test)]
+impl Drop for SessionRootOverrideGuard {
+    fn drop(&mut self) {
+        SESSION_ROOT_OVERRIDE.with(|slot| {
+            slot.replace(self.previous.take());
+        });
+    }
+}
+
 pub fn resolve_aiall_session_data_dir() -> PathBuf {
+    #[cfg(test)]
+    if let Some(root) = SESSION_ROOT_OVERRIDE.with(|slot| slot.borrow().clone()) {
+        return root;
+    }
+    if let Ok(custom) = std::env::var(SESSION_DATA_DIR_ENV) {
+        let trimmed = custom.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
     if cfg!(windows) {
         if let Ok(appdata) = std::env::var("APPDATA") {
             return PathBuf::from(appdata)
@@ -214,8 +259,65 @@ fn path_relative(base: &Path, path: &Path) -> String {
     out.to_string_lossy().into_owned()
 }
 
-pub fn project_chat_store_dir(_project_path: &str) -> PathBuf {
+/// Normalized key used to bucket sessions by project: lowercase, forward slashes,
+/// no trailing slash. Keeps `D:\proj` and `d:/proj/` in the same bucket.
+pub fn normalize_project_key(project_path: &str) -> String {
+    project_path
+        .trim()
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_lowercase()
+}
+
+/// Directory name for a project's chat store: `<safe-folder-name>_<hash16>`.
+/// The hash is over the normalized full path so renaming the folder on disk
+/// (same path) stays stable, and two projects with the same folder name differ.
+pub fn project_chat_slug(project_path: &str) -> String {
+    let normalized = normalize_project_key(project_path);
+    let base = normalized
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or("project");
+    let safe_base: String = base
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let safe_base = if safe_base.is_empty() {
+        "project".to_string()
+    } else {
+        safe_base
+    };
+    let mut hasher = DefaultHasher::new();
+    normalized.hash(&mut hasher);
+    format!("{}_{:016x}", safe_base, hasher.finish())
+}
+
+/// Per-project chat store dir: `<session-data-dir>/<slug>/`.
+/// Sessions, images and the per-project index all live under here.
+pub fn project_chat_store_dir(project_path: &str) -> PathBuf {
+    let key = normalize_project_key(project_path);
+    let root = resolve_aiall_session_data_dir();
+    if key.is_empty() {
+        return root;
+    }
+    root.join(project_chat_slug(&key))
+}
+
+/// Root that holds all per-project chat dirs and the legacy un-partitioned files.
+pub fn chat_store_root() -> PathBuf {
     resolve_aiall_session_data_dir()
+}
+
+/// Marker file holding the original (non-normalized) project path for a bucket.
+pub fn project_chat_meta_file(project_path: &str) -> PathBuf {
+    project_chat_store_dir(project_path).join("project.json")
 }
 
 #[cfg(test)]
@@ -259,10 +361,31 @@ mod tests {
     }
 
     #[test]
-    fn test_project_chat_store_dir_ends_with_aiall() {
-        let path = project_chat_store_dir("/some/project");
-        let s = path.to_string_lossy().replace('\\', "/");
-        assert!(s.ends_with("aiall/vibe-chat-sessions"), "got: {s}");
+    fn test_project_chat_store_dir_is_per_project() {
+        let a = project_chat_store_dir("/some/project");
+        let b = project_chat_store_dir("/other/project");
+        assert_ne!(a, b, "different projects must not share a chat dir");
+        let s = a.to_string_lossy().replace('\\', "/");
+        assert!(s.starts_with(
+            &chat_store_root().to_string_lossy().replace('\\', "/")
+        ));
+        assert!(s.contains("/project_"), "got: {s}");
+    }
+
+    #[test]
+    fn test_project_chat_slug_stable_across_path_spellings() {
+        assert_eq!(
+            project_chat_slug(r"D:\Work\MyApp"),
+            project_chat_slug("d:/work/myapp/")
+        );
+    }
+
+    #[test]
+    fn test_project_chat_slug_differs_by_folder_name() {
+        assert_ne!(
+            project_chat_slug("D:/a/api"),
+            project_chat_slug("D:/b/api")
+        );
     }
 
     #[test]

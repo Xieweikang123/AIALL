@@ -76,8 +76,8 @@ const showProgress = computed(
 
 .agent-live-status--rail {
   margin-top: 4px;
-  border-radius: 8px;
-  border: 1px solid rgba(88, 166, 255, 0.12);
+  border-radius: 3px;
+  border: 1px solid rgba(88, 166, 255, 0.14);
   background: rgba(0, 0, 0, 0.5);
 }
 
@@ -85,8 +85,8 @@ const showProgress = computed(
   display: flex;
   flex-direction: column;
   margin: 2px 0 8px;
-  border-radius: 8px;
-  border: 1px solid rgba(88, 166, 255, 0.12);
+  border-radius: 3px;
+  border: 1px solid rgba(88, 166, 255, 0.14);
   background: rgba(88, 166, 255, 0.06);
 }
 
@@ -130,12 +130,12 @@ const showProgress = computed(
 }
 
 .agent-live-status-dot {
-  width: 7px;
-  height: 7px;
-  margin-top: 4px;
-  border-radius: 50%;
-  background: rgba(88, 166, 255, 0.85);
-  box-shadow: 0 0 8px rgba(88, 166, 255, 0.4);
+  width: 6px;
+  height: 6px;
+  margin-top: 5px;
+  border-radius: 1px;
+  background: rgba(88, 166, 255, 0.9);
+  box-shadow: 0 0 8px rgba(88, 166, 255, 0.45);
   flex-shrink: 0;
   animation: agent-live-status-pulse 1.4s ease-in-out infinite;
 }
@@ -173,8 +173,8 @@ const showProgress = computed(
 
 .agent-live-status-chip {
   flex-shrink: 0;
-  padding: 1px 7px;
-  border-radius: 999px;
+  padding: 1px 6px;
+  border-radius: 2px;
   font-size: 10px;
   line-height: 1.35;
   font-weight: 500;
@@ -185,8 +185,8 @@ const showProgress = computed(
 
 .agent-live-status-stage {
   flex-shrink: 0;
-  padding: 1px 7px;
-  border-radius: 999px;
+  padding: 1px 6px;
+  border-radius: 2px;
   font-size: 10px;
   line-height: 1.35;
   font-weight: 600;

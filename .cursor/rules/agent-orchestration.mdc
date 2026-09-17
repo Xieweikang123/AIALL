@@ -15,7 +15,7 @@ alwaysApply: true
 
 - **分类器** → `src/orchestration/generic/`（如 `userIntentClassifiers.ts`）
 - **产品 hint** → `src/orchestration/product/`（如 `userIntentHints.ts`）
-- `src/services/agentUserIntent.ts` 仅为兼容 barrel，新代码请按 tier 直接 import
+- **Ask/Build/Plan/Explore prompt 文本** → Rust `src-tauri/src/agent/`（`prompts.rs` / `explore_prompt.rs` / `consultative_topics.rs`）；TS 侧只留 hint 组装与契约
 
 ## 设计原则：上下文检索优先于 Bug Playbook
 
@@ -47,7 +47,7 @@ Agent 能力应主要来自 **高精度上下文检索（Context Retrieval）** 
 
 - `src/orchestration/generic/*`
 - `src/services/agentContinuation.ts`、`agentStructuralPatterns.ts`、`agentRunProfile.ts`（路由部分）
-- `server/agentRunPolicy.ts`、`server/agentTurnBudget.ts`
+- `src/services/agentRunPolicy.ts`、`shared/agentTurnBudget.ts`
 - 任何 `*Signal*`、`*Continuation*`、`*RunProfile*` 路由逻辑
 
 ### 禁止
