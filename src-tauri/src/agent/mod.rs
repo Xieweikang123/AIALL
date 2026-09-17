@@ -1,6 +1,7 @@
 mod agent_git_tools;
 mod agent_regression;
 mod ambiguous_term;
+mod checkpoint;
 mod classifier;
 mod consultative_topics;
 mod consultative_trace;
@@ -40,6 +41,7 @@ mod vision;
 mod vision_consultative;
 mod vision_pregrep;
 
+pub use checkpoint::{clear_run_checkpoint, load_run_checkpoint};
 pub use classifier::tool_summary;
 pub use consultative_trace::is_ui_state_behavior_question;
 pub use exploration::{

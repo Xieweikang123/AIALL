@@ -1,5 +1,6 @@
 import type { Ref } from "vue";
 import { clearPendingAgentRun } from "../services/agentHmrRecovery";
+import { clearRunCheckpoint } from "../services/vibeCodingClient";
 import {
   AGENT_SILENT_CONTINUE_MAX,
   buildAgentMaxTurnsExhaustedMessage,
@@ -661,6 +662,10 @@ function handleDoneEvent(event: EventOf<"done">, assistantMsg: VibeChatMessage, 
   planExecutionActive.value = false;
   runManager.setAbortHandle(sessionId, null);
   clearPendingAgentRun();
+  const project = projectPath.value.trim();
+  if (project && sessionId) {
+    void clearRunCheckpoint(project, sessionId);
+  }
   flushMinimizedRunUiPatch(sessionId, msgId, assistantMsg);
 
   if (assistantMsg.agentFailed) {

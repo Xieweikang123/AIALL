@@ -462,6 +462,66 @@ export async function fetchSessionMessages(projectPath: string, sessionId: strin
   }
 }
 
+export type ChatRunCheckpointResult = {
+  ok?: boolean;
+  checkpoint?: import("./agentRecovery").AgentRunCheckpoint | null;
+  path?: string;
+  error?: string;
+  cleared?: boolean;
+};
+
+/** Load server-side agent run checkpoint for a session (reload / HMR recovery). */
+export async function fetchRunCheckpoint(
+  projectPath: string,
+  sessionId: string,
+): Promise<ChatRunCheckpointResult> {
+  try {
+    return await invokeBackend<ChatRunCheckpointResult>(
+      "chat_run_checkpoint_load",
+      { projectPath, sessionId },
+      async () => {
+        const response = await fetch(
+          backendUrl(
+            `/backend/vibe/chat-run-checkpoint?projectPath=${encodeURIComponent(projectPath)}&sessionId=${encodeURIComponent(sessionId)}`,
+          ),
+        );
+        if (!response.ok) {
+          return { ok: false, error: `读取运行快照失败：HTTP ${response.status}` };
+        }
+        return readJsonResponse<ChatRunCheckpointResult>(response);
+      },
+    );
+  } catch (error) {
+    return { ok: false, error: formatFetchError(error, "读取运行快照失败") };
+  }
+}
+
+/** Clear server-side run checkpoint after client merged/persisted it. */
+export async function clearRunCheckpoint(
+  projectPath: string,
+  sessionId: string,
+): Promise<ChatRunCheckpointResult> {
+  try {
+    return await invokeBackend<ChatRunCheckpointResult>(
+      "chat_run_checkpoint_clear",
+      { projectPath, sessionId },
+      async () => {
+        const response = await fetch(backendUrl("/backend/vibe/chat-run-checkpoint-clear"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectPath, sessionId }),
+        });
+        if (!response.ok) {
+          return { ok: false, error: `清除运行快照失败：HTTP ${response.status}` };
+        }
+        return readJsonResponse<ChatRunCheckpointResult>(response);
+      },
+    );
+  } catch (error) {
+    return { ok: false, error: formatFetchError(error, "清除运行快照失败") };
+  }
+}
+
 export async function syncChatStore(projectPath: string, data: unknown): Promise<ChatStoreSyncResult> {
   try {
     return await invokeBackend<ChatStoreSyncResult>(

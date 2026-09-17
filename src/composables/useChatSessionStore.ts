@@ -35,9 +35,12 @@ import {
   enqueueChatStoreOp,
   flushChatStoreOnDisk,
 } from "../services/chatStoreCoordinator";
+import { applyRunCheckpointToMessages } from "../services/agentRecovery";
 import {
   fetchChatStoreFromDisk,
   fetchSessionMessages,
+  fetchRunCheckpoint,
+  clearRunCheckpoint,
   syncChatSession,
   syncChatStore,
   type ChatStoreSyncResult,
@@ -260,8 +263,41 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
   }> {
     await hydrateProjectChatFromDisk(project);
     const activeId = resolveActiveVibeChatSessionId(project);
-    const msgs = loadVibeChatHistory(project);
-    return { activeSessionId: activeId, messages: msgs };
+    let msgs = loadVibeChatHistory(project) as T[];
+    if (activeId) {
+      msgs = await mergeServerRunCheckpoint(project, activeId, msgs);
+    }
+    return { activeSessionId: activeId, messages: msgs as PersistedChatMessage[] };
+  }
+
+  /**
+   * Merge Rust/agent-server run checkpoint into session messages after reload.
+   * Persists merged progress and clears the sidecar when appropriate.
+   */
+  async function mergeServerRunCheckpoint(project: string, sessionId: string, messages: T[]): Promise<T[]> {
+    const path = project.trim();
+    const id = sessionId.trim();
+    if (!path || !id) return messages;
+    try {
+      const result = await fetchRunCheckpoint(path, id);
+      if (!result.ok || !result.checkpoint) return messages;
+      const merged = applyRunCheckpointToMessages(messages, result.checkpoint);
+      if (!merged.applied) {
+        if (merged.clearCheckpoint) {
+          void clearRunCheckpoint(path, id);
+        }
+        return messages;
+      }
+      saveVibeChatHistory(path, merged.messages as PersistedChatMessage[], id, {
+        touchTimestamp: false,
+      });
+      if (merged.clearCheckpoint) {
+        void clearRunCheckpoint(path, id);
+      }
+      return merged.messages;
+    } catch {
+      return messages;
+    }
   }
 
   function resetUiForProjectSwitch(oldProjectPath?: string) {
@@ -540,6 +576,13 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     chatError.value = "";
     refreshList(project);
     onAfterSwitch?.();
+    void (async () => {
+      const merged = await mergeServerRunCheckpoint(project, id, resolved as T[]);
+      if (activeSessionId.value.trim() !== id) return;
+      if (merged === resolved) return;
+      activateSession(id, merged);
+      onAfterSwitch?.();
+    })();
   }
 
   function hydrateSessionFromDiskAfterSwitch(project: string, sessionId: string, gen: number) {
@@ -554,9 +597,16 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
         if (stillActive) {
           const cachedLen = cached?.length ?? 0;
           if (diskMessages.length && cachedLen < diskMessages.length) {
-            bindSessionMessages(id, resolveMessagesForSession(id, diskMessages));
+            const resolved = resolveMessagesForSession(id, diskMessages);
+            const merged = await mergeServerRunCheckpoint(project, id, resolved as T[]);
+            bindSessionMessages(id, merged);
             registryDirty = true;
           } else if (diskMessages.length) {
+            const current = (cached ?? resolveMessagesForSession(id, diskMessages)) as T[];
+            const merged = await mergeServerRunCheckpoint(project, id, current);
+            if (merged !== current) {
+              bindSessionMessages(id, merged);
+            }
             bumpRegistryVersion();
             registryDirty = true;
           }

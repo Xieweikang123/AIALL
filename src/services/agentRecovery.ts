@@ -1238,3 +1238,154 @@ export function recoverableAgentErrorHint(
   }
   return `Agent 自动续跑后仍未能完成${progress}：${errorMessage.trim()}。可点击「恢复运行」重试。`;
 }
+
+/** Server-side agent run checkpoint (Rust `agent/checkpoint.rs`). */
+export type AgentRunCheckpoint = {
+  version?: number;
+  runId?: string;
+  sessionId?: string;
+  assistantMsgId?: string;
+  projectPath?: string;
+  updatedAt?: string;
+  phase?: "running" | "done" | "error" | "aborted" | string;
+  turn?: number;
+  maxTurns?: number;
+  totalTurns?: number;
+  content?: string;
+  statusLog?: string[];
+  tools?: AgentProgressTool[];
+  writtenFiles?: string[];
+  agentFailed?: boolean;
+  agentRecoverable?: boolean;
+  agentFailureReason?: string;
+  agentAborted?: boolean;
+  agentAbortReason?: string;
+};
+
+export type CheckpointMergeMessage = AgentProgressSource & {
+  id?: string;
+  role?: string;
+  content?: string;
+  statusLog?: string[];
+  agentFailed?: boolean;
+  agentRecoverable?: boolean;
+  agentFailureReason?: string;
+  agentAborted?: boolean;
+  agentAbortReason?: string;
+  agentRecoveryDismissed?: boolean;
+  streaming?: boolean;
+};
+
+function checkpointHasProgress(cp: AgentRunCheckpoint): boolean {
+  return hasRecoverableAgentProgress({
+    content: cp.content,
+    tools: cp.tools,
+    totalTurns: cp.totalTurns ?? cp.turn,
+    writtenFiles: cp.writtenFiles,
+  });
+}
+
+/**
+ * Merge a server run checkpoint into in-memory session messages after reload.
+ * Returns whether a merge happened (caller should persist + clear checkpoint).
+ */
+export function applyRunCheckpointToMessages<T extends CheckpointMergeMessage>(
+  messages: T[],
+  checkpoint: AgentRunCheckpoint | null | undefined,
+): { messages: T[]; applied: boolean; clearCheckpoint: boolean } {
+  if (!checkpoint || typeof checkpoint !== "object") {
+    return { messages, applied: false, clearCheckpoint: false };
+  }
+  const phase = String(checkpoint.phase || "").trim();
+  if (!phase) {
+    return { messages, applied: false, clearCheckpoint: false };
+  }
+  if (!checkpointHasProgress(checkpoint) && phase === "done") {
+    return { messages, applied: false, clearCheckpoint: true };
+  }
+  if (!checkpointHasProgress(checkpoint) && phase === "running") {
+    return { messages, applied: false, clearCheckpoint: false };
+  }
+
+  const assistantMsgId = String(checkpoint.assistantMsgId || "").trim();
+  const next = messages.map((m) => ({ ...m }));
+  let targetIdx = assistantMsgId
+    ? next.findIndex((m) => m.id === assistantMsgId && m.role === "assistant")
+    : -1;
+  if (targetIdx < 0) {
+    for (let i = next.length - 1; i >= 0; i -= 1) {
+      if (next[i]?.role === "assistant") {
+        targetIdx = i;
+        break;
+      }
+    }
+  }
+  if (targetIdx < 0) {
+    return { messages, applied: false, clearCheckpoint: phase === "done" };
+  }
+
+  const target = next[targetIdx]!;
+  const existingProgress = hasRecoverableAgentProgress(target);
+  const existingContent = (target.content || "").trim();
+  const checkpointContent = (checkpoint.content || "").trim();
+
+  // Successful done + client already has progress → just clear the sidecar.
+  if (phase === "done" && existingProgress && existingContent.length >= checkpointContent.length) {
+    return { messages, applied: false, clearCheckpoint: true };
+  }
+
+  const patched: T = {
+    ...target,
+    content: checkpointContent.length > existingContent.length ? checkpointContent : target.content,
+    tools:
+      (checkpoint.tools?.length ?? 0) > (target.tools?.length ?? 0)
+        ? checkpoint.tools!.map((t) => ({ ...t, running: false }))
+        : target.tools,
+    writtenFiles:
+      (checkpoint.writtenFiles?.length ?? 0) > (target.writtenFiles?.length ?? 0)
+        ? [...(checkpoint.writtenFiles || [])]
+        : target.writtenFiles,
+    totalTurns: Math.max(
+      target.totalTurns ?? 0,
+      checkpoint.totalTurns ?? 0,
+      checkpoint.turn ?? 0,
+    ) || target.totalTurns,
+    statusLog:
+      (checkpoint.statusLog?.length ?? 0) > (target.statusLog?.length ?? 0)
+        ? [...(checkpoint.statusLog || [])]
+        : target.statusLog,
+    streaming: false,
+  };
+
+  if (phase === "running" || phase === "aborted" || phase === "error") {
+    patched.agentFailed = true;
+    patched.agentRecoverable = true;
+    patched.agentRecoveryDismissed = false;
+    const reason =
+      checkpoint.agentFailureReason?.trim() ||
+      checkpoint.agentAbortReason?.trim() ||
+      (phase === "error" ? "Agent 运行出错" : HMR_INTERRUPT_REASON);
+    patched.agentFailureReason = reason;
+    if (phase === "aborted" || phase === "running") {
+      patched.agentAborted = true;
+      patched.agentAbortReason = reason;
+    }
+  } else if (phase === "done") {
+    // Restore completed bubble text; leave recovery flags alone unless empty shell.
+    if (!existingProgress) {
+      patched.agentFailed = false;
+      patched.agentRecoverable = false;
+      patched.agentFailureReason = undefined;
+      patched.agentAborted = false;
+      patched.agentAbortReason = undefined;
+    }
+  }
+
+  next[targetIdx] = patched;
+  return {
+    messages: next,
+    applied: true,
+    clearCheckpoint: phase === "done" || phase === "aborted" || phase === "error" || phase === "running",
+  };
+}
+

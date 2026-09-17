@@ -11,6 +11,7 @@
 //!   POST /api/server/ai-config   → update server AI config (writes server-config.json)
 //!   POST /api/agent/run          → SSE stream of VibeAgentEvent JSON
 //!   POST /api/agent/cancel       → cancel the in-flight run
+//!   GET  /api/agent/active       → whether a run is in flight (for orphan reclaim)
 //!   /backend/vibe/*, /backend/web/*, /backend/ai/*, /backend/automation/* → HTTP fallback routes
 //!
 //! Env:
@@ -37,9 +38,26 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{tcp::OwnedWriteHalf, TcpListener, TcpStream};
 use tokio::sync::RwLock;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
+struct ActiveRunInfo {
+    project_path: String,
+    session_id: Option<String>,
+    assistant_msg_id: Option<String>,
+    run_id: Option<String>,
+}
+
 struct RunCancelState {
     cancel: Mutex<Option<Arc<AtomicBool>>>,
+    active: Mutex<Option<ActiveRunInfo>>,
+}
+
+impl Default for RunCancelState {
+    fn default() -> Self {
+        Self {
+            cancel: Mutex::new(None),
+            active: Mutex::new(None),
+        }
+    }
 }
 
 /// 登录会话：token → 过期时刻。
@@ -399,6 +417,38 @@ fn cancel_state_clear(state: &RunCancelState) {
     if let Ok(mut guard) = state.cancel.lock() {
         *guard = None;
     }
+    if let Ok(mut guard) = state.active.lock() {
+        *guard = None;
+    }
+}
+
+fn cancel_state_set_active(state: &RunCancelState, info: ActiveRunInfo, flag: Arc<AtomicBool>) -> Result<(), String> {
+    let mut cancel_guard = state
+        .cancel
+        .lock()
+        .map_err(|_| "Agent 状态锁失败".to_string())?;
+    let mut active_guard = state
+        .active
+        .lock()
+        .map_err(|_| "Agent 状态锁失败".to_string())?;
+    *cancel_guard = Some(flag);
+    *active_guard = Some(info);
+    Ok(())
+}
+
+/// Client gone / explicit cancel: stop the run task so it cannot keep writing the repo.
+async fn force_stop_run_task(
+    cancel_flag: &Arc<AtomicBool>,
+    mut run_task: tokio::task::JoinHandle<Result<(), String>>,
+) {
+    cancel_flag.store(true, Ordering::Relaxed);
+    tokio::select! {
+        _ = &mut run_task => {}
+        _ = tokio::time::sleep(Duration::from_secs(15)) => {
+            run_task.abort();
+            let _ = run_task.await;
+        }
+    }
 }
 
 /// 日志用：请求最终生效的 endpoint（key 永不入日志）。
@@ -425,6 +475,31 @@ async fn handle_cancel(w: &mut OwnedWriteHalf, state: &RunCancelState) -> Result
         write_headers(w, "409 Conflict", "text/plain", &[]).await?;
         w.write_all(b"no run in flight").await.map_err(|e| e.to_string())
     }
+}
+
+async fn handle_agent_active(w: &mut OwnedWriteHalf, state: &RunCancelState) -> Result<(), String> {
+    let active = state
+        .active
+        .lock()
+        .map_err(|_| "Agent 状态锁失败".to_string())?
+        .clone();
+    let body = if let Some(info) = active {
+        json!({
+            "ok": true,
+            "active": true,
+            "projectPath": info.project_path,
+            "sessionId": info.session_id,
+            "assistantMsgId": info.assistant_msg_id,
+            "runId": info.run_id,
+        })
+    } else {
+        json!({ "ok": true, "active": false })
+    };
+    let payload = serde_json::to_string(&body).unwrap_or_else(|_| r#"{"ok":false}"#.into());
+    write_headers(w, "200 OK", "application/json", &[]).await?;
+    w.write_all(payload.as_bytes())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 async fn handle_agent_run(
@@ -482,10 +557,16 @@ async fn handle_agent_run(
     }
 
     let cancel_flag = Arc::new(AtomicBool::new(false));
-    {
-        let mut guard = state.cancel.lock().map_err(|_| "Agent 状态锁失败".to_string())?;
-        *guard = Some(cancel_flag.clone());
-    }
+    cancel_state_set_active(
+        state,
+        ActiveRunInfo {
+            project_path: project_path.clone(),
+            session_id: request.session_id().map(str::to_string),
+            assistant_msg_id: request.assistant_msg_id().map(str::to_string),
+            run_id: request.run_id().map(str::to_string),
+        },
+        cancel_flag.clone(),
+    )?;
 
     write_headers(
         w,
@@ -496,6 +577,7 @@ async fn handle_agent_run(
     .await
     .map_err(|e| {
         println!("[agent-server] write_headers err: {e}");
+        cancel_state_clear(state);
         e
     })?;
     println!("[agent-server] headers sent, starting run");
@@ -519,17 +601,27 @@ async fn handle_agent_run(
     // run task 结束时闭包 drop，channel 关闭，下面的循环自然结束。
     drop(tx);
 
+    let mut client_gone = false;
     while let Some(event) = rx.recv().await {
         let line = serde_json::to_string(&event).map_err(|e| e.to_string())?;
         let payload = format!("data: {line}\n\n");
         if let Err(e) = w.write_all(payload.as_bytes()).await {
-            cancel_flag.store(true, Ordering::Relaxed);
-            return Err(format!("写 SSE 失败: {e}"));
+            println!("[agent-server] SSE write failed (client gone?): {e}");
+            client_gone = true;
+            break;
         }
         if let Err(e) = w.flush().await {
-            cancel_flag.store(true, Ordering::Relaxed);
-            return Err(format!("刷 SSE 失败: {e}"));
+            println!("[agent-server] SSE flush failed (client gone?): {e}");
+            client_gone = true;
+            break;
         }
+    }
+
+    if client_gone {
+        // 页面刷新 / 关页 / 断网：立刻取消，避免孤儿 run 继续改仓库。
+        force_stop_run_task(&cancel_flag, run_task).await;
+        cancel_state_clear(state);
+        return Ok(());
     }
 
     // Agent 跑完，channel 关闭，循环结束；把运行错误（如有）作为最后一个事件写出。
@@ -830,6 +922,12 @@ async fn handle_connection(
             return write_unauthorized(&mut write_half).await;
         }
         return handle_cancel(&mut write_half, &state).await;
+    }
+    if request.path == "/api/agent/active" && request.method == "GET" {
+        if !authorized(&request.headers, config, &sessions) {
+            return write_unauthorized(&mut write_half).await;
+        }
+        return handle_agent_active(&mut write_half, &state).await;
     }
     if request.path == "/api/agent/run" && request.method == "POST" {
         if !authorized(&request.headers, config, &sessions) {

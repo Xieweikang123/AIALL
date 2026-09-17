@@ -1243,6 +1243,8 @@ import { revertTurnFileDiffs } from "../services/agentTurnRevert";
 import {
   type VibeChatHistoryMessage,
   type VibeChatMode,
+  cancelAgentRunBestEffort,
+  reclaimOrphanServerAgentRun,
 } from "../services/vibeAgentClient";
 
 
@@ -3574,6 +3576,7 @@ async function openProjectByPath(dirPath: string) {
     void startFileWatcherForProject(normalized, () => refreshGitStatus({ showLoading: false })).catch(() => {});
 
     await restoreWorkspaceLayoutAfterOpen(savedUi);
+    await reclaimOrphanServerRunOnRemount();
     maybeAutoResumeLastRecoverableAssistant();
     tryResumeHmrInterruptedRun();
 
@@ -4434,6 +4437,10 @@ function onWindowFocus() {
 }
 
 function onBeforeUnload() {
+  // Hard refresh / close tab: stop server-side orphan run (keepalive). Checkpoint covers recovery UI.
+  if (chatSending.value || hasActiveAgentRun()) {
+    cancelAgentRunBestEffort();
+  }
   if (chatSending.value && getAgentAbortHandle()) {
     const lastUser = findLastUserMessage();
     if (lastUser) {
@@ -4603,6 +4610,17 @@ function reconcileOrphanedAgentSendingState() {
   }
 }
 
+/** Remount: kill server runs that outlived this page (no local SSE). */
+async function reclaimOrphanServerRunOnRemount() {
+  try {
+    await reclaimOrphanServerAgentRun({
+      hasLocalActiveRun: hasActiveAgentRun(),
+    });
+  } catch {
+    // ignore — best effort
+  }
+}
+
 onMounted(() => {
   registerOverlayDismissDeps({
     dismissConfirm: dismissPendingConfirm,
@@ -4615,6 +4633,7 @@ onMounted(() => {
     },
   });
   reconcileOrphanedAgentSendingState();
+  void reclaimOrphanServerRunOnRemount();
   reloadAiConfig();
   refreshProjectHistoryList();
   const savedQueue = lsGetJson<string[]>(PENDING_QUEUE_KEY);
@@ -4625,6 +4644,7 @@ onMounted(() => {
   chatPanelWidth.value = Math.min(chatPanelWidth.value, getChatPanelMaxWidth());
   window.addEventListener("focus", onWindowFocus);
   window.addEventListener("beforeunload", onBeforeUnload);
+  window.addEventListener("pagehide", onBeforeUnload);
   window.addEventListener("dragend", onWindowDragEnd);
   document.addEventListener("dragover", onDocumentDragOverCapture, true);
   document.addEventListener("drop", onDocumentDropCapture, true);
@@ -4634,8 +4654,10 @@ onMounted(() => {
 
   // --- HMR 恢复：注册 Vite 重载前钩子 + 检查待恢复运行 ---
   registerHmrPreReloadHook(() => {
-    // 在 Vite full reload 前，如果 Agent 正在运行且尚未持久化，补充保存
-    // （runAgentTurn 已在启动时持久化完整请求，此处作为兜底）
+    // Vite full reload: stop orphan server run, keep HMR pending for resume UI.
+    if (chatSending.value || hasActiveAgentRun()) {
+      cancelAgentRunBestEffort();
+    }
     if (chatSending.value && getAgentAbortHandle()) {
       const lastUser = findLastUserMessage();
       if (lastUser) {
@@ -4663,6 +4685,7 @@ onBeforeUnmount(() => {
   fileDragGhost.value = null;
   window.removeEventListener("focus", onWindowFocus);
   window.removeEventListener("beforeunload", onBeforeUnload);
+  window.removeEventListener("pagehide", onBeforeUnload);
   window.removeEventListener("dragend", onWindowDragEnd);
   document.removeEventListener("dragover", onDocumentDragOverCapture, true);
   document.removeEventListener("drop", onDocumentDropCapture, true);

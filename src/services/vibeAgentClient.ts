@@ -34,6 +34,12 @@ export interface VibeAgentRunRequest {
   resolvedUserIntent?: ResolvedUserIntent;
   /** Enable verbose debug payloads (real systemPrompt + per-turn messages). */
   debug?: boolean;
+  /** Chat session id — enables server-side run checkpoints. */
+  sessionId?: string;
+  /** Assistant bubble id for checkpoint merge on reload. */
+  assistantMsgId?: string;
+  /** Per-invocation run id (uuid). */
+  runId?: string;
 }
 
 export function shouldRetryAgentFetch(
@@ -95,6 +101,12 @@ function runWebAgentSse(
       imageDataUrls: request.imageDataUrls,
       webProxyUrl: request.webProxyUrl,
       taskWrittenFiles: request.taskWrittenFiles,
+      sessionId: request.sessionId,
+      assistantMsgId: request.assistantMsgId,
+      runId: request.runId,
+      runProfile: request.runProfile,
+      resolvedUserIntent: request.resolvedUserIntent,
+      debug: request.debug,
     },
     (ev) => onEvent(ev as VibeAgentSseEvent),
     abortCtrl.signal,
@@ -106,10 +118,87 @@ function runWebAgentSse(
     promise,
     abort: () => {
       abortCtrl.abort();
-      void fetch(backendUrl("/api/agent/cancel"), {
-        method: "POST",
-        headers: getAuthHeaders(),
-      }).catch(() => {});
+      void cancelAgentRunBestEffort();
     },
   };
+}
+
+export type AgentActiveRunInfo = {
+  ok?: boolean;
+  active?: boolean;
+  projectPath?: string;
+  sessionId?: string;
+  assistantMsgId?: string;
+  runId?: string;
+  error?: string;
+};
+
+/** Best-effort cancel for unload / disconnect — uses keepalive so the request can outlive the page. */
+export function cancelAgentRunBestEffort(): void {
+  if (isTauriEnv()) {
+    void import("./tauriInvoke")
+      .then(({ tauriInvoke }) => tauriInvoke("agent_cancel"))
+      .catch(() => {});
+    return;
+  }
+  try {
+    void fetch(backendUrl("/api/agent/cancel"), {
+      method: "POST",
+      headers: getAuthHeaders(),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    // ignore
+  }
+}
+
+/** Whether agent-server / desktop currently has an in-flight run. */
+export async function fetchAgentActiveRun(): Promise<AgentActiveRunInfo> {
+  if (isTauriEnv()) {
+    try {
+      const { tauriInvoke } = await import("./tauriInvoke");
+      return await tauriInvoke<AgentActiveRunInfo>("agent_active_run");
+    } catch (error) {
+      return {
+        ok: false,
+        active: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+  try {
+    const response = await fetch(backendUrl("/api/agent/active"), {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) {
+      return { ok: false, active: false, error: `HTTP ${response.status}` };
+    }
+    return (await response.json()) as AgentActiveRunInfo;
+  } catch (error) {
+    return {
+      ok: false,
+      active: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Page remount / open project: if the server still has a run but this UI has no live SSE,
+ * cancel it so it cannot keep writing the repo. Checkpoint merge handles recovery UI.
+ */
+export async function reclaimOrphanServerAgentRun(options?: {
+  hasLocalActiveRun?: boolean;
+}): Promise<{ cancelled: boolean; active?: AgentActiveRunInfo }> {
+  if (options?.hasLocalActiveRun) {
+    return { cancelled: false };
+  }
+  const active = await fetchAgentActiveRun();
+  if (!active.ok || !active.active) {
+    return { cancelled: false, active };
+  }
+  cancelAgentRunBestEffort();
+  // Give the server a brief moment to observe cancel (non-blocking for callers that await).
+  await new Promise((r) => setTimeout(r, 50));
+  return { cancelled: true, active };
 }

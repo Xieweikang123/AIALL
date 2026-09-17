@@ -85,11 +85,35 @@ pub struct AgentRunRequest {
     pub(crate) resolved_user_intent: Option<ResolvedUserIntentPayload>,
     #[serde(default)]
     pub(crate) debug: bool,
+    /// Frontend chat session id — enables server-side run checkpoints.
+    #[serde(default)]
+    pub(crate) session_id: Option<String>,
+    /// Target assistant bubble id for checkpoint merge on reload.
+    #[serde(default)]
+    pub(crate) assistant_msg_id: Option<String>,
+    /// Client- or server-issued run id (uuid). Generated server-side if omitted.
+    #[serde(default)]
+    pub(crate) run_id: Option<String>,
 }
 
 impl AgentRunRequest {
     pub fn project_path(&self) -> &str {
         &self.project_path
+    }
+
+    pub fn session_id(&self) -> Option<&str> {
+        self.session_id.as_deref().map(str::trim).filter(|s| !s.is_empty())
+    }
+
+    pub fn assistant_msg_id(&self) -> Option<&str> {
+        self.assistant_msg_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    }
+
+    pub fn run_id(&self) -> Option<&str> {
+        self.run_id.as_deref().map(str::trim).filter(|s| !s.is_empty())
     }
 
     /// 日志用：最终生效的模型（key 永不入日志）。
@@ -159,6 +183,9 @@ impl AgentRunRequest {
             run_profile: None,
             resolved_user_intent: None,
             debug: false,
+            session_id: None,
+            assistant_msg_id: None,
+            run_id: None,
         }
     }
 }

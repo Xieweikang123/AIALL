@@ -1013,3 +1013,51 @@ describe("resolveModelWaitStallMs", () => {
     expect(resolveModelWaitStallMs(500_000, 0)).toBe(AGENT_MODEL_WAIT_STALL_MS);
   });
 });
+
+describe("applyRunCheckpointToMessages", () => {
+  it("merges interrupted checkpoint into empty assistant shell and marks recoverable", async () => {
+    const { applyRunCheckpointToMessages, hasRecoverableAgentProgress, HMR_INTERRUPT_REASON } =
+      await import("./agentRecovery");
+    const messages = [
+      { id: "u1", role: "user", content: "fix it" },
+      { id: "a1", role: "assistant", content: "", statusLog: ["连接中…"] },
+    ];
+    const result = applyRunCheckpointToMessages(messages, {
+      phase: "aborted",
+      assistantMsgId: "a1",
+      content: "已定位到路由层",
+      tools: [{ name: "read_file", summary: "ok", running: false }],
+      totalTurns: 2,
+      agentFailureReason: HMR_INTERRUPT_REASON,
+    });
+    expect(result.applied).toBe(true);
+    expect(result.clearCheckpoint).toBe(true);
+    const assistant = result.messages[1]!;
+    expect(assistant.content).toContain("路由层");
+    expect(assistant.agentRecoverable).toBe(true);
+    expect(assistant.agentFailed).toBe(true);
+    expect(hasRecoverableAgentProgress(assistant)).toBe(true);
+  });
+
+  it("skips merge when done checkpoint is weaker than existing message", async () => {
+    const { applyRunCheckpointToMessages } = await import("./agentRecovery");
+    const messages = [
+      {
+        id: "a1",
+        role: "assistant",
+        content: "完整总结已经在会话里了",
+        tools: [{ name: "patch_file", summary: "ok", running: false }],
+        totalTurns: 3,
+      },
+    ];
+    const result = applyRunCheckpointToMessages(messages, {
+      phase: "done",
+      assistantMsgId: "a1",
+      content: "短",
+      tools: [{ name: "read_file", summary: "ok", running: false }],
+      totalTurns: 1,
+    });
+    expect(result.applied).toBe(false);
+    expect(result.clearCheckpoint).toBe(true);
+  });
+});

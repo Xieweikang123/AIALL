@@ -66,6 +66,35 @@ describe("runVibeAgentSse", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const cancelUrl = String(fetchMock.mock.calls[1][0]);
     expect(cancelUrl).toContain("/api/agent/cancel");
+    const cancelInit = fetchMock.mock.calls[1][1] as RequestInit;
+    expect(cancelInit.keepalive).toBe(true);
+  });
+});
+
+describe("reclaimOrphanServerAgentRun", () => {
+  it("skips cancel when local run is active", async () => {
+    const { reclaimOrphanServerAgentRun } = await import("./vibeAgentClient");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await reclaimOrphanServerAgentRun({ hasLocalActiveRun: true });
+    expect(result.cancelled).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("cancels when server reports an active orphan run", async () => {
+    const { reclaimOrphanServerAgentRun } = await import("./vibeAgentClient");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ok: true, active: true, sessionId: "s1" }),
+      })
+      .mockResolvedValueOnce({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await reclaimOrphanServerAgentRun({ hasLocalActiveRun: false });
+    expect(result.cancelled).toBe(true);
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/api/agent/active");
+    expect(String(fetchMock.mock.calls[1][0])).toContain("/api/agent/cancel");
   });
 });
 

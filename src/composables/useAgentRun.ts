@@ -1011,6 +1011,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       sessionId,
       assistantMsg,
     });
+    // 意图分类硬门禁失败：空壳已标失败并收尾，不再发起续跑请求
+    if (!resolvedUserIntent) {
+      return;
+    }
 
     const handle = runVibeAgentSse(
       {
@@ -1366,6 +1370,12 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       webProxyUrl: loadWebProxyUrlFromStorage() || undefined,
       resolvedUserIntent,
       debug: agentDebugEnabled.value,
+      sessionId,
+      assistantMsgId: assistantMsg.id,
+      runId:
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
     };
     if (!options?.suppressHmrRecovery) {
       persistAgentRunForHmr({

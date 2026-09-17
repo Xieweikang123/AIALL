@@ -50,3 +50,13 @@ pub async fn chat_image(project_path: String, path: String) -> Value {
 pub async fn chat_image_file(project_path: String, path: String) -> Result<Vec<u8>, String> {
     chat::chat_image_file_bytes(&project_path, &path).await
 }
+
+#[tauri::command]
+pub async fn chat_run_checkpoint_load(project_path: String, session_id: String) -> Value {
+    crate::agent::load_run_checkpoint(&project_path, &session_id).await
+}
+
+#[tauri::command]
+pub async fn chat_run_checkpoint_clear(project_path: String, session_id: String) -> Value {
+    crate::agent::clear_run_checkpoint(&project_path, &session_id).await
+}

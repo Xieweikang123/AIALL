@@ -26,6 +26,7 @@ use super::run_state::{
 };
 use super::run_stream::consume_model_sse_stream;
 use super::run_system_prompt::{build_agent_system_prompt, SystemPromptBuildParams};
+use super::checkpoint::RunCheckpoint;
 use super::run_types::AgentRunRequest;
 use super::vision_consultative::{should_bypass_vision_first_turn, should_run_vision_anchor_pgrep};
 use super::vision_pregrep::apply_vision_anchor_pgrep_messages;
@@ -67,6 +68,13 @@ pub async fn agent_run(
 
     let max_turns = request.max_turns.unwrap_or(12).min(40);
     let segment_budget = max_turns;
+    let mut checkpoint = RunCheckpoint::from_request(
+        &request.project_path,
+        request.session_id.as_deref(),
+        request.assistant_msg_id.as_deref(),
+        request.run_id.as_deref(),
+        max_turns,
+    );
     let requested_mode = request.mode.as_deref().unwrap_or("build");
     let mut agent_mode = AgentMode::from_str(requested_mode);
 
@@ -221,6 +229,8 @@ pub async fn agent_run(
           }
         }),
     );
+    checkpoint.push_status("已建立 Agent 上下文");
+    checkpoint.flush_running().await;
 
     let mut written_files: Vec<String> = Vec::new();
     if let Some(prior) = &request.task_written_files {
@@ -276,17 +286,20 @@ pub async fn agent_run(
     let effective_read_only_build = run_policy.read_only_build_run
         || crate::agent::is_ui_state_behavior_question(&request.prompt);
     let run_started_at = std::time::Instant::now();
+    let mut ended_with_error: Option<String> = None;
 
     loop {
         if run_state.segment.actual_turns >= run_state.segment.max_turns {
             if run_state.segment.actual_turns >= AGENT_SAFETY_MAX_TURNS {
+                let msg = format!("已达安全上限（{AGENT_SAFETY_MAX_TURNS} 轮），任务可能未完成。");
                 emit(
                     &channel,
                     json!({
                       "type": "error",
-                      "data": { "message": format!("已达安全上限（{AGENT_SAFETY_MAX_TURNS} 轮），任务可能未完成。") }
+                      "data": { "message": msg.clone() }
                     }),
                 );
+                ended_with_error = Some(msg);
                 break;
             }
 
@@ -380,13 +393,15 @@ pub async fn agent_run(
                     }),
                 );
             } else if run_policy.disable_segment_auto_extend {
+                let msg = build_turn_cap_exhausted_message(run_state.segment.actual_turns);
                 emit(
                     &channel,
                     json!({
                       "type": "error",
-                      "data": { "message": build_turn_cap_exhausted_message(run_state.segment.actual_turns) }
+                      "data": { "message": msg.clone() }
                     }),
                 );
+                ended_with_error = Some(msg);
                 break;
             } else {
                 run_state.segment.index += 1;
@@ -438,6 +453,13 @@ pub async fn agent_run(
                   }
                 }),
             );
+            checkpoint
+                .finish_error(
+                    "扫描修复已达时间上限（10 分钟），任务可能未完成。",
+                    &run_state.written_files,
+                    run_state.segment.actual_turns,
+                )
+                .await;
             return Ok(());
         }
         if is_cancelled(&cancel) {
@@ -460,10 +482,14 @@ pub async fn agent_run(
                     }),
                 );
             } else {
+                let turns = run_state.segment.actual_turns.saturating_sub(1).max(1);
+                checkpoint
+                    .finish_aborted(&run_state.written_files, turns)
+                    .await;
                 emit_aborted_done(
                     &channel,
                     &run_state.written_files,
-                    run_state.segment.actual_turns.saturating_sub(1).max(1),
+                    turns,
                 );
                 return Ok(());
             }
@@ -611,6 +637,12 @@ pub async fn agent_run(
         )
         .await?
         else {
+            checkpoint
+                .finish_aborted(
+                    &run_state.written_files,
+                    run_state.segment.actual_turns.saturating_sub(1).max(1),
+                )
+                .await;
             return Ok(());
         };
 
@@ -648,6 +680,9 @@ pub async fn agent_run(
               }
             }),
         );
+        checkpoint.note_turn(turn, run_state.segment.max_turns, &assistant_text);
+        checkpoint.set_written_files(&run_state.written_files);
+        checkpoint.flush_running().await;
 
         run_state.messages.push(json!({
           "role": "assistant",
@@ -806,10 +841,14 @@ pub async fn agent_run(
         };
         for call in tool_calls {
             if is_cancelled(&cancel) {
+                let turns = run_state.segment.actual_turns;
+                checkpoint
+                    .finish_aborted(&run_state.written_files, turns)
+                    .await;
                 emit_aborted_done(
                     &channel,
                     &run_state.written_files,
-                    run_state.segment.actual_turns,
+                    turns,
                 );
                 return Ok(());
             }
@@ -978,11 +1017,15 @@ pub async fn agent_run(
                   }
                 }),
             );
+            checkpoint.note_tool(id, name, ok, &summary, turn);
 
             run_state
                 .messages
                 .push(json!({ "role": "tool", "tool_call_id": id, "content": result }));
         }
+
+        checkpoint.set_written_files(&run_state.written_files);
+        checkpoint.flush_running().await;
 
         let mut post_tool_mut = run_state.post_tool_mut();
         apply_post_tool_turn(
@@ -1015,6 +1058,22 @@ pub async fn agent_run(
         run_state.apply_post_tool_mut(post_tool_mut);
     }
 
+    if let Some(msg) = ended_with_error {
+        checkpoint
+            .finish_error(
+                &msg,
+                &run_state.written_files,
+                run_state.segment.actual_turns,
+            )
+            .await;
+    } else {
+        checkpoint
+            .finish_done(
+                &run_state.written_files,
+                run_state.segment.actual_turns,
+            )
+            .await;
+    }
     emit(
         &channel,
         json!({
