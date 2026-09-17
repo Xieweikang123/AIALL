@@ -10,30 +10,6 @@
     @drop="$emit('on-chat-drop', $event)"
     :style="panelStyle"
   >
-    <ChatPanelHeader
-      :session-list="sessionList"
-      :active-session-id="activeSessionId"
-      :active-session-title="activeSessionTitle"
-      :chat-store-sync-message="chatStoreSyncMessage"
-      :config-ready="configReady"
-      :api-key-ready="apiKeyReady"
-      :ai-config-status-text="aiConfigStatusText"
-      :project-opened="projectOpened"
-      :can-switch-to-newer-session="canSwitchToNewerSession"
-      :can-switch-to-older-session="canSwitchToOlderSession"
-      :project-memory-has-content="projectMemoryHasContent"
-      :chat-messages="chatMessages"
-      :chat-sending="chatSending"
-      @switch-to-adjacent-session="$emit('switch-to-adjacent-session', $event)"
-      @open-session-list="$emit('open-session-list')"
-      @copy-session-name-path="$emit('copy-session-name-path', $event)"
-      @open-ai-config="$emit('open-ai-config')"
-      @open-project-memory="$emit('open-project-memory')"
-      @start-new-session="$emit('start-new-session')"
-      @clear-chat="$emit('clear-chat')"
-      @collapse-chat="$emit('collapse-chat')"
-    />
-
     <div class="chat-scroll-wrap">
       <div
         ref="chatScrollRef"
@@ -83,21 +59,6 @@
             </button>
             <button type="button" class="chip" :disabled="chatSending" @click="$emit('apply-example', '找出潜在 bug 并修复')">
               修复 bug
-            </button>
-          </div>
-          <p class="chat-empty-project-label">项目能力</p>
-          <div class="chips">
-            <button type="button" class="chip chip--ghost" :disabled="chatSending" @click="$emit('open-project-view', 'knowledge')">
-              构建知识库
-            </button>
-            <button type="button" class="chip chip--ghost" :disabled="chatSending" @click="$emit('open-project-view', 'health')">
-              跑架构评审
-            </button>
-            <button type="button" class="chip chip--ghost" :disabled="chatSending" @click="$emit('open-project-view', 'map')">
-              生成架构图
-            </button>
-            <button type="button" class="chip chip--ghost" :disabled="chatSending" @click="$emit('open-project-view', 'fix')">
-              扫描并修复
             </button>
           </div>
         </template>
@@ -694,7 +655,6 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, withDefaults, type CSSProperties } from "vue";
-import ChatPanelHeader from "./ChatPanelHeader.vue";
 
 import type { AgentSuggestion } from "../../services/agentSuggestions";
 import type { PendingMemoryProposal } from "../../services/projectMemoryProposal";
@@ -705,7 +665,6 @@ import {
   type LongTermMemoryEntry,
 } from "../../services/vibeLongTermMemoryClient";
 import type { ProjectMemoryTab } from "../../composables/useProjectMemory";
-import type { VibeChatSessionMeta } from "../../services/vibeChatStorage";
 import { CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount, getEventValue } from "../../utils/vibeHelpers";
 import { scheduleScrollContainerToBottom, scrollContainerToBottom } from "../../utils/scrollViewport";
 import { resolveAgentResumeButtonLabel } from "../../services/agentRecovery";
@@ -763,7 +722,6 @@ interface Props {
   chatError: string;
   configReady: boolean;
   apiKeyReady: boolean;
-  aiConfigStatusText: string;
   canSendChat: boolean;
   chatPlaceholder: string;
   /** 输入框禁用时直接在界面上显示的原因文字 */
@@ -775,18 +733,13 @@ interface Props {
   stalledAssistantMsg: ChatMessage | null;
   autoResumeSecondsLeft: number;
   pendingPromptQueue: string[];
-  sessionList: VibeChatSessionMeta[];
   activeSessionId: string;
-  activeSessionTitle: string;
-  chatStoreSyncMessage: string;
   isDragging: boolean;
   editorCollapsed: boolean;
   mentionOpen: boolean;
   mentionResults: MentionItem[];
   mentionActiveIndex: number;
   chatInputFocused: boolean;
-  canSwitchToNewerSession: boolean;
-  canSwitchToOlderSession: boolean;
   totalTokenUsage?: string;
   showTokenDetail?: boolean;
   tokenDetailData?: TokenDetailData | null;
@@ -797,7 +750,6 @@ interface Props {
   projectMemorySaving?: boolean;
   projectMemoryMessage?: string;
   projectMemoryMaxChars?: number;
-  projectMemoryHasContent?: boolean;
   projectSkillsList?: SkillIndexEntry[];
   projectExplorationList?: ExplorationIndexEntry[];
   projectSkillsLoading?: boolean;
@@ -835,7 +787,6 @@ const props = withDefaults(defineProps<Props>(), {
   projectMemorySaving: false,
   projectMemoryMessage: "",
   projectMemoryMaxChars: 3500,
-  projectMemoryHasContent: false,
   projectSkillsList: () => [],
   projectExplorationList: () => [],
   projectSkillsLoading: false,
@@ -933,22 +884,11 @@ const emit = defineEmits<{
   (e: "resume-agent-run", messageId: string): void;
   (e: "force-recover-stalled-run", messageId: string): void;
   (e: "cancel-auto-resume"): void;
-  (e: "start-new-session"): void;
-  (e: "expand-editor"): void;
-  (e: "collapse-chat"): void;
-  (e: "switch-session", sessionId: string): void;
-  (e: "open-session-list"): void;
-  (e: "remove-session", sessionId: string): void;
-  (e: "switch-to-adjacent-session", delta: number): void;
   (e: "clear-pending-queue"): void;
   (e: "apply-example", text: string): void;
   (e: "open-project"): void;
   (e: "open-ai-config"): void;
-  (e: "open-project-view", view: "knowledge" | "health" | "map" | "fix"): void;
   (e: "apply-suggestion", suggestion: AgentSuggestion): void;
-  (e: "copy-session-info", session: VibeChatSessionMeta): void;
-  (e: "copy-session-name-path", session: VibeChatSessionMeta): void;
-  (e: "clear-chat"): void;
   (e: "on-composer-field-keydown", event: KeyboardEvent): void;
   (e: "on-chat-input-box-mousedown"): void;
   (e: "select-mention", item: MentionItem): void;
@@ -960,7 +900,6 @@ const emit = defineEmits<{
   (e: "on-chat-drop", event: DragEvent): void;
   (e: "update:showTokenDetail", value: boolean): void;
   (e: "update:projectMemoryDraft", value: string): void;
-  (e: "open-project-memory"): void;
   (e: "close-project-memory"): void;
   (e: "update:projectMemoryTab", value: ProjectMemoryTab): void;
   (e: "update:projectMemoryDraft", value: string): void;
@@ -974,7 +913,6 @@ const emit = defineEmits<{
   (e: "dismiss-memory-proposal", id: string): void;
   (e: "confirm-skill-proposal", id: string): void;
   (e: "dismiss-skill-proposal", id: string): void;
-  (e: "test-notification"): void;
   (e: "update:activeSessionProviderId", providerId: string): void;
   (e: "update:activeSessionModelId", modelId: string): void;
 }>();

@@ -1,14 +1,13 @@
 <template>
   <header class="app-toolbar">
     <div class="toolbar-brand">
-      <div class="toolbar-logo" aria-hidden="true">
+      <div class="toolbar-logo" :title="`AIALL v${APP_VERSION}`" aria-hidden="true">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
           <path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
           <path d="M12 12 3 7m9-5 9 5M12 12v10" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
         </svg>
       </div>
       <h1 class="title">Vibe Coding</h1>
-      <span class="toolbar-version" :title="`AIALL v${APP_VERSION}`">v{{ APP_VERSION }}</span>
     </div>
     <div class="toolbar-sep" />
     <div class="toolbar-project">
@@ -167,10 +166,10 @@
         </Teleport>
       </div>
       <button
-        v-if="projectOpened"
+        v-if="projectOpened && !isWeb"
         type="button"
         class="icon-btn"
-        :disabled="!projectOpened || !projectPath.trim()"
+        :disabled="!projectPath.trim()"
         title="在文件管理器中打开"
         @click="$emit('open-folder-in-explorer')"
       >
@@ -178,9 +177,6 @@
           <path d="M2.5 4.8A1.3 1.3 0 0 1 3.8 3.5h3.2l1.2 1.3h4.5A1.3 1.3 0 0 1 14 6.1v6.4a1.3 1.3 0 0 1-1.3 1.3H3.8A1.3 1.3 0 0 1 2.5 12.5V4.8Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
           <path d="M10.5 8.5 12 10l-3.5 3.5L6 11" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-      </button>
-      <button type="button" class="icon-btn" :disabled="!projectPath.trim()" @click="$emit('refresh-tree')" title="刷新文件树">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M13.65 2.35A7.96 7.96 0 0 0 8 0a8 8 0 1 0 8 8h-2A6 6 0 1 1 8 2c1.66 0 3.14.69 4.22 1.78L9 7h7V0l-2.35 2.35Z" fill="currentColor"/></svg>
       </button>
       <div v-if="$slots['session-tabs']" class="toolbar-sessions">
         <slot name="session-tabs" />
@@ -195,50 +191,114 @@
           ×
         </button>
       </div>
+      <span
+        v-if="chatStoreSyncMessage"
+        class="toolbar-copy-hint"
+        role="status"
+        aria-live="polite"
+      >{{ chatStoreSyncMessage }}</span>
       <button
-        v-if="!isWeb"
+        v-if="projectOpened"
         type="button"
         class="icon-btn"
-        title="查看调试日志"
-        aria-label="查看调试日志"
-        @click="$emit('open-debug-logs')"
+        :class="{ 'icon-btn--warn': !configReady || !apiKeyReady }"
+        :title="aiConfigStatusText"
+        :aria-label="aiConfigStatusText"
+        @click="$emit('open-ai-config')"
       >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h9A1.5 1.5 0 0 1 14 4.5v7A1.5 1.5 0 0 1 12.5 13h-9A1.5 1.5 0 0 1 2 11.5v-7Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
-          <path d="M4.5 6h7M4.5 8h7M4.5 10h4" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>
+        <svg v-if="configReady && apiKeyReady" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.3"/>
+          <path d="M5.5 8.2 7.2 9.8 10.6 6" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <svg v-else width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M8 2.8 14 13.2H2L8 2.8Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+          <path d="M8 6.5v3.2M8 11.4h.01" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/>
         </svg>
       </button>
-      <div class="toolbar-sep" />
-      <nav class="toolbar-nav" aria-label="快捷导航">
-        <button type="button" class="toolbar-nav-btn" title="Git 总览：多仓分支与变更" @click="router.push('/git-overview')">
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <circle cx="6" cy="6" r="2.2" stroke="currentColor" stroke-width="1.2"/>
-            <circle cx="6" cy="13" r="1.6" stroke="currentColor" stroke-width="1.2"/>
-            <path d="M10 3.5a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z" stroke="currentColor" stroke-width="1.2"/>
-            <path d="M6 8.2v2.6M10 5.5c0 2.8-1.6 4.8-4 6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-          </svg>
-          <span class="toolbar-nav-label">总览</span>
-        </button>
-        <button type="button" class="toolbar-nav-btn" title="AI 配置" @click="router.push('/ai-config')">
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.2"/>
-            <path d="M8 1.5v1.2M8 13.3v1.2M1.5 8h1.2M13.3 8h1.2M3.4 3.4l.85.85M11.75 11.75l.85.85M3.4 12.6l.85-.85M11.75 4.25l.85-.85" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-          </svg>
-          <span class="toolbar-nav-label">配置</span>
-        </button>
+      <button
+        v-if="projectOpened"
+        type="button"
+        class="icon-btn"
+        :class="{ 'icon-btn--active': projectMemoryHasContent }"
+        :title="projectMemoryHasContent ? '项目 AI 数据（有内容）' : '项目 AI 数据（记忆 / 长期记忆 / Skills）'"
+        aria-label="项目 AI 数据"
+        @click="$emit('open-project-memory')"
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M8 3.4C6.6 2.5 4.9 2.3 3.6 2.7v9.2c1.3-.4 3-.2 4.4.7 1.4-.9 3.1-1.1 4.4-.7V2.7C11.1 2.3 9.4 2.5 8 3.4Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+          <path d="M8 3.4v9.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <div ref="moreMenuRef" class="toolbar-more">
         <button
-          v-if="isDev"
           type="button"
-          class="toolbar-nav-btn"
-          title="通知测试"
-          @click="$emit('test-notification')"
+          class="icon-btn"
+          :class="{ 'icon-btn--open': moreMenuOpen }"
+          aria-label="更多操作"
+          title="更多操作"
+          aria-haspopup="menu"
+          :aria-expanded="moreMenuOpen"
+          @click="toggleMoreMenu"
         >
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-            <path d="M8 1.8c-2.2 0-3.5 1.8-3.5 4v2.2L3.2 10.5h9.6L11.5 8V5.8c0-2.2-1.3-4-3.5-4Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
-            <path d="M6.5 12.5a1.5 1.5 0 0 0 3 0" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="3.5" cy="8" r="1.2" fill="currentColor"/>
+            <circle cx="8" cy="8" r="1.2" fill="currentColor"/>
+            <circle cx="12.5" cy="8" r="1.2" fill="currentColor"/>
           </svg>
         </button>
-      </nav>
+        <Teleport to="body">
+          <div
+            v-if="moreMenuOpen"
+            class="toolbar-more-dropdown"
+            role="menu"
+            :style="{ position: 'fixed', top: moreMenuTop + 'px', right: moreMenuRight + 'px' }"
+          >
+            <button type="button" class="toolbar-more-item" role="menuitem" @click="onMoreAction('git-overview')">
+              Git 总览
+            </button>
+            <button type="button" class="toolbar-more-item" role="menuitem" @click="onMoreAction('ai-config')">
+              AI 配置
+            </button>
+            <button
+              type="button"
+              class="toolbar-more-item"
+              role="menuitem"
+              :disabled="!projectPath.trim()"
+              @click="onMoreAction('refresh-tree')"
+            >
+              刷新文件树
+            </button>
+            <button
+              v-if="!isWeb"
+              type="button"
+              class="toolbar-more-item"
+              role="menuitem"
+              @click="onMoreAction('debug-logs')"
+            >
+              查看调试日志
+            </button>
+            <button
+              v-if="projectOpened && chatMessagesLength > 0"
+              type="button"
+              class="toolbar-more-item toolbar-more-item--danger"
+              role="menuitem"
+              :disabled="chatSending"
+              @click="onMoreAction('clear-chat')"
+            >
+              清空会话
+            </button>
+            <button
+              v-if="isDev"
+              type="button"
+              class="toolbar-more-item"
+              role="menuitem"
+              @click="onMoreAction('test-notification')"
+            >
+              通知测试
+            </button>
+          </div>
+        </Teleport>
+      </div>
       <div v-if="isWeb" class="toolbar-account">
         <template v-if="accountLoggedIn">
           <div ref="accountRef" class="account-wrap">
@@ -252,7 +312,6 @@
               @click="toggleAccount"
             >
               <span class="account-avatar">A</span>
-              <span class="account-user">admin</span>
               <span class="account-chevron" aria-hidden="true">{{ accountOpen ? "▴" : "▾" }}</span>
             </button>
             <Teleport to="body">
@@ -286,6 +345,24 @@
           <button type="button" class="ghost small" @click="router.push('/login')">登录</button>
         </template>
       </div>
+      <button
+        v-if="projectOpened && !chatCollapsed"
+        type="button"
+        class="icon-btn toolbar-collapse-chat"
+        aria-label="收起 AI 助手"
+        title="收起 AI 助手"
+        @click="$emit('collapse-chat')"
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path
+            d="M5.5 3.5 10 8l-4.5 4.5M8.5 3.5 13 8l-4.5 4.5"
+            stroke="currentColor"
+            stroke-width="1.35"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </button>
     </div>
   </header>
 </template>
@@ -310,6 +387,14 @@ interface Props {
   treeError: string;
   retryCountdown: number;
   projectOpened: boolean;
+  configReady: boolean;
+  apiKeyReady: boolean;
+  aiConfigStatusText: string;
+  projectMemoryHasContent: boolean;
+  chatStoreSyncMessage: string;
+  chatMessagesLength: number;
+  chatSending: boolean;
+  chatCollapsed: boolean;
 }
 
 const props = defineProps<Props>();
@@ -349,6 +434,55 @@ function openAiConfig() {
   router.push("/ai-config");
 }
 
+const moreMenuRef = ref<HTMLElement | null>(null);
+const moreMenuOpen = ref(false);
+const moreMenuTop = ref(0);
+const moreMenuRight = ref(0);
+
+function toggleMoreMenu() {
+  moreMenuOpen.value = !moreMenuOpen.value;
+  if (moreMenuOpen.value) nextTick(updateMoreMenuPosition);
+}
+
+function updateMoreMenuPosition() {
+  if (moreMenuRef.value) {
+    const rect = moreMenuRef.value.getBoundingClientRect();
+    moreMenuTop.value = rect.bottom + 6;
+    moreMenuRight.value = window.innerWidth - rect.right;
+  }
+}
+
+function handleMoreMenuOutsideClick(e: MouseEvent) {
+  if (!moreMenuOpen.value) return;
+  const el = moreMenuRef.value;
+  const target = e.target as Node | null;
+  const inside = el && el.contains(target);
+  const insideDropdown = target instanceof HTMLElement && Boolean(target.closest(".toolbar-more-dropdown"));
+  if (!inside && !insideDropdown) moreMenuOpen.value = false;
+}
+
+type MoreAction = "git-overview" | "ai-config" | "refresh-tree" | "debug-logs" | "clear-chat" | "test-notification";
+
+function onMoreAction(action: MoreAction) {
+  moreMenuOpen.value = false;
+  if (action === "git-overview") router.push("/git-overview");
+  else if (action === "ai-config") router.push("/ai-config");
+  else if (action === "refresh-tree") emit("refresh-tree");
+  else if (action === "debug-logs") emit("open-debug-logs");
+  else if (action === "clear-chat") emit("clear-chat");
+  else emit("test-notification");
+}
+
+watch(moreMenuOpen, (open) => {
+  if (open) {
+    document.addEventListener("mousedown", handleMoreMenuOutsideClick, true);
+    window.addEventListener("resize", updateMoreMenuPosition);
+  } else {
+    document.removeEventListener("mousedown", handleMoreMenuOutsideClick, true);
+    window.removeEventListener("resize", updateMoreMenuPosition);
+  }
+});
+
 async function handleAccountLogout() {
   accountOpen.value = false;
   await serverLogout();
@@ -375,6 +509,10 @@ const emit = defineEmits<{
   (e: "open-folder-in-explorer"): void;
   (e: "test-notification"): void;
   (e: "open-debug-logs"): void;
+  (e: "open-ai-config"): void;
+  (e: "open-project-memory"): void;
+  (e: "collapse-chat"): void;
+  (e: "clear-chat"): void;
 }>();
 
 const router = useRouter();
@@ -606,18 +744,6 @@ async function refreshProjectHistoryList() {
   color: rgba(255, 255, 255, 0.72);
 }
 
-.toolbar-version {
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 1;
-  padding: 2px 5px;
-  border-radius: 4px;
-  background: rgba(127, 127, 127, 0.15);
-  color: var(--text-secondary, #8b949e);
-  border: 1px solid rgba(127, 127, 127, 0.25);
-  white-space: nowrap;
-  cursor: default;
-}
 
 .toolbar-sep {
   width: 1px;
@@ -635,7 +761,7 @@ async function refreshProjectHistoryList() {
   min-width: 0;
 }
 
-/* 会话标签栏挂载位：占据项目区剩余空间，标签多了横向滚动 */
+/* 会话标签栏挂载位：工具栏主角，项目区剩余空间全给它 */
 .toolbar-sessions {
   display: flex;
   align-items: center;
@@ -698,6 +824,87 @@ async function refreshProjectHistoryList() {
   cursor: not-allowed;
 }
 
+.icon-btn--warn {
+  color: #e0af68;
+}
+
+.icon-btn--active {
+  color: rgba(140, 190, 255, 0.98);
+  background: rgba(88, 166, 255, 0.12);
+}
+
+.icon-btn--open {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.toolbar-copy-hint {
+  max-width: 200px;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: #d29922;
+  background: rgba(210, 153, 34, 0.12);
+  border-radius: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.toolbar-more {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.toolbar-more-dropdown {
+  min-width: 172px;
+  padding: 5px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(22, 27, 40, 0.98);
+  backdrop-filter: blur(24px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.2);
+  z-index: 9999;
+  animation: dropdown-fade-in 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.toolbar-more-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: rgba(230, 237, 243, 0.85);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.toolbar-more-item:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.96);
+}
+
+.toolbar-more-item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.toolbar-more-item--danger {
+  color: #ff9a9a;
+}
+
+.toolbar-more-item--danger:hover:not(:disabled) {
+  background: rgba(248, 81, 73, 0.14);
+  color: #ff9a9a;
+}
+
+.toolbar-collapse-chat {
+  color: rgba(140, 190, 255, 0.72);
+}
+
 .toolbar-actions {
   display: flex;
   align-items: center;
@@ -708,9 +915,9 @@ async function refreshProjectHistoryList() {
 
 .project-history-wrap {
   position: relative;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
-  max-width: min(520px, 56vw);
+  max-width: min(280px, 30vw);
 }
 
 .project-history-trigger {
@@ -1192,31 +1399,7 @@ async function refreshProjectHistoryList() {
   line-height: 1;
 }
 
-.toolbar-nav {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.toolbar-nav-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 7px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.48);
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-
-.toolbar-nav-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.92);
-}
-
-.toolbar-nav-btn:focus-visible,
+.toolbar-more-item:focus-visible,
 .project-history-trigger:focus-visible,
 .project-history-search-input:focus-visible,
 .project-history-item-main:focus-visible,
@@ -1224,17 +1407,11 @@ async function refreshProjectHistoryList() {
 .project-history-open-new:focus-visible,
 .project-history-clear:focus-visible,
 .icon-btn:focus-visible,
+.account-trigger:focus-visible,
 .primary:focus-visible,
 .path-input:focus-visible {
   outline: 2px solid rgba(88, 166, 255, 0.9);
   outline-offset: 2px;
-}
-
-.toolbar-nav-label {
-  font-size: 11.5px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  color: rgba(255, 255, 255, 0.68);
 }
 
 .toolbar-account {
@@ -1287,10 +1464,6 @@ async function refreshProjectHistoryList() {
   flex-shrink: 0;
 }
 
-.account-user {
-  font-weight: 600;
-  white-space: nowrap;
-}
 
 .account-chevron {
   flex-shrink: 0;
@@ -1367,32 +1540,7 @@ async function refreshProjectHistoryList() {
   margin: 4px 6px;
 }
 
-.toolbar-account-user {
-  font-size: 12px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.72);
-  white-space: nowrap;
-}
-
-@media (max-width: 1100px) {
-  .toolbar-nav-label {
-    display: none;
-  }
-
-  .toolbar-nav-btn {
-    padding: 4px 6px;
-  }
-}
-
 @media (max-width: 960px) {
-  .toolbar-nav-label {
-    display: none;
-  }
-
-  .toolbar-nav-btn {
-    padding: 4px 6px;
-  }
-
   .project-history-wrap {
     max-width: min(360px, 48vw);
   }

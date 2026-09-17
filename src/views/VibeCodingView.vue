@@ -11,6 +11,14 @@
       :tree-error="treeError"
       :retry-countdown="retryCountdown"
       :project-opened="projectOpened"
+      :config-ready="effectiveAiReady"
+      :api-key-ready="effectiveAiReady"
+      :ai-config-status-text="aiConfigStatusText"
+      :project-memory-has-content="projectMemoryHasContent"
+      :chat-store-sync-message="chatStoreSyncMessage"
+      :chat-messages-length="chatMessages.length"
+      :chat-sending="chatSending"
+      :chat-collapsed="chatCollapsed"
       @update:project-path="projectPath = $event"
       @open-project-by-input="openProjectByInput"
       @handle-open-project="handleOpenProject"
@@ -21,6 +29,10 @@
       @open-folder-in-explorer="openCurrentFolderInExplorer"
       @test-notification="testNotification"
       @open-debug-logs="debugLogsOpen = true"
+      @open-ai-config="openAiConfigPage"
+      @open-project-memory="openProjectMemoryEditor"
+      @collapse-chat="collapseChat"
+      @clear-chat="clearChat"
     >
       <template #session-tabs>
         <SessionTabsBar
@@ -789,18 +801,13 @@
         :stalled-assistant-msg="stalledAssistantMsg"
         :auto-resume-seconds-left="autoResumeSecondsLeft"
         :pending-prompt-queue="pendingPromptQueue"
-        :session-list="sessionList"
         :active-session-id="activeSessionId"
-        :active-session-title="activeSessionTitle"
-        :chat-store-sync-message="chatStoreSyncMessage"
         :is-dragging="isDragging"
         :editor-collapsed="editorCollapsed"
         :mention-open="mentionOpen"
         :mention-results="mentionResults"
         :mention-active-index="mentionActiveIndex"
         :chat-input-focused="chatInputFocused"
-        :can-switch-to-newer-session="canSwitchToNewerSession"
-        :can-switch-to-older-session="canSwitchToOlderSession"
         :switching-session="switchingSession"
         :switching-project="switchingProject"
         :chat-panel-style="chatPanelStyle"
@@ -843,20 +850,9 @@
         @on-chat-drag-over="onChatDragOver"
         @on-chat-drag-leave="onChatDragLeave"
         @on-chat-drop="onChatDrop"
-        @switch-to-adjacent-session="switchToAdjacentSession"
-        @start-new-session="handleStartNewSession"
-        @expand-editor="expandEditor"
-        @collapse-chat="collapseChat"
-        @switch-session="handleSwitchSession"
-        @open-session-list="gitPanelMode = 'sessions'"
-        @copy-session-info="copySessionInfo"
-        @copy-session-name-path="copySessionNamePath"
-        @remove-session="removeSession"
-        @clear-chat="clearChat"
         @apply-example="applyExample"
         @open-project="handleOpenProject"
         @open-ai-config="openAiConfigPage"
-        @open-project-view="openProjectPanelView"
         @apply-suggestion="handleAgentSuggestion"
         @on-chat-scroll="onChatScroll"
         @scroll-to-bottom="scrollChatToBottom(true)"
@@ -871,7 +867,6 @@
         @stop-agent="stopAgent"
         @send-chat="sendChat"
         @update:show-token-detail="showTokenDetail = $event"
-        @open-project-memory="openProjectMemoryEditor"
         @close-project-memory="closeProjectMemoryEditor"
         @update:project-memory-tab="setProjectMemoryTab"
         @select-project-skill="selectProjectSkill"
@@ -1613,11 +1608,6 @@ const {
   batchGroups, batchGroupsFromAi, batchMessages, batchSectionOpen, batchCommittingIndex, commitBatchGroup, commitAllBatches,
   aiBatchGrouping, aiBatchGroupingStep, generateAiBatchGroups, flushBatchDraftPersist,
 } = git;
-
-function openProjectPanelView(view: "knowledge" | "health" | "map" | "fix") {
-  gitPanelMode.value = "project";
-  projectPanelView.value = view;
-}
 
 function doCreateBranchAt(hash: string) {
   const name = globalThis.prompt("在此提交创建分支：");

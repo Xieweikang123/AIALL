@@ -261,7 +261,7 @@ function updateTabDropTarget(clientX: number) {
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   overflow-x: auto;
   scrollbar-width: thin;
 }
@@ -269,13 +269,13 @@ function updateTabDropTarget(clientX: number) {
 .session-tab {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   flex-shrink: 0;
-  max-width: 200px;
-  height: 28px;
-  padding: 0 8px;
+  max-width: 240px;
+  height: 32px;
+  padding: 0 11px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: 9px;
   background: rgba(255, 255, 255, 0.04);
   color: rgba(201, 209, 217, 0.72);
   cursor: pointer;
@@ -288,9 +288,14 @@ function updateTabDropTarget(clientX: number) {
 }
 
 .session-tab.active {
-  background: rgba(88, 166, 255, 0.16);
-  border-color: rgba(88, 166, 255, 0.3);
-  color: rgba(200, 225, 255, 0.98);
+  background: rgba(88, 166, 255, 0.2);
+  border-color: rgba(88, 166, 255, 0.45);
+  color: #e6f0ff;
+  box-shadow: 0 1px 10px rgba(88, 166, 255, 0.22), inset 0 0 0 1px rgba(88, 166, 255, 0.12);
+}
+
+.session-tab.active .session-tab-title {
+  font-weight: 650;
 }
 
 .session-tab--syncing {
@@ -341,8 +346,8 @@ function updateTabDropTarget(clientX: number) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: 12.5px;
+  font-weight: 550;
   line-height: 1.3;
 }
 
@@ -376,12 +381,12 @@ function updateTabDropTarget(clientX: number) {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  /* 全局 button 规则（vibe-coding.scss）带 padding: 8px 16px，会把 28px 定宽按钮的内容区挤成 0，图标消失 */
+  /* 全局 button 规则（vibe-coding.scss）带 padding: 8px 16px，会把定宽按钮的内容区挤成 0，图标消失 */
   padding: 0;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: 9px;
   background: rgba(255, 255, 255, 0.04);
   color: rgba(255, 255, 255, 0.5);
   cursor: pointer;
