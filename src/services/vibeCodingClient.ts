@@ -523,7 +523,9 @@ export async function pickProjectFolder(initialPath?: string): Promise<PickFolde
       webProjectRoot = handle.name;
       return { ok: true, path: handle.name || "" };
     } catch (e) {
-      if ((e as Error).name === "NotAllowedError") return { ok: false, cancelled: true };
+      // 用户点「取消」抛的是 AbortError；部分浏览器返回 NotAllowedError。两者都算主动取消，不报错。
+      const name = (e as Error).name;
+      if (name === "NotAllowedError" || name === "AbortError") return { ok: false, cancelled: true };
       return { ok: false, error: (e as Error).message };
     }
   }
