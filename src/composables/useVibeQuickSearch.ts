@@ -87,5 +87,6 @@ export function useVibeQuickSearch(options: UseVibeQuickSearchOptions) {
     getLiveSessionMessagesForSearch,
     onQuickSearchOpenFile,
     onQuickSearchOpenSession,
+    scrollChatToMessage,
   };
 }

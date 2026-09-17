@@ -242,6 +242,52 @@
 
         <div class="chat-action-row">
             <div class="composer-mode-row">
+            <div
+              v-if="sessionOutline.length"
+              ref="outlineWrapRef"
+              class="session-outline-wrap"
+            >
+              <button
+                type="button"
+                class="chat-debug-toggle"
+                :class="{ active: outlineOpen }"
+                :title="outlineOpen ? '收起会话大纲' : '会话大纲：本会话问过的问题'"
+                :aria-expanded="outlineOpen"
+                aria-haspopup="dialog"
+                @click="toggleOutline"
+              >
+                大纲
+                <span v-if="sessionOutline.length" class="session-outline-count">{{ sessionOutline.length }}</span>
+              </button>
+              <Teleport to="body">
+                <div
+                  v-if="outlineOpen"
+                  ref="outlinePopoverRef"
+                  class="session-outline-popover"
+                  :style="{ position: 'fixed', top: outlinePopoverTop + 'px', right: outlinePopoverRight + 'px' }"
+                  role="dialog"
+                  aria-label="会话大纲"
+                >
+                  <div class="session-outline-head">
+                    <span class="session-outline-title">本会话问题</span>
+                    <span class="session-outline-meta">{{ sessionOutline.length }} 条</span>
+                  </div>
+                  <ol class="session-outline-list">
+                    <li v-for="item in sessionOutline" :key="item.id">
+                      <button
+                        type="button"
+                        class="session-outline-item"
+                        :title="item.preview"
+                        @click="jumpToOutlineItem(item.id)"
+                      >
+                        <span class="session-outline-index">{{ item.index }}</span>
+                        <span class="session-outline-preview">{{ item.preview }}</span>
+                      </button>
+                    </li>
+                  </ol>
+                </div>
+              </Teleport>
+            </div>
             <button
               type="button"
               class="chat-debug-toggle"
@@ -699,6 +745,7 @@ import { scheduleScrollContainerToBottom, scrollContainerToBottom } from "../../
 import { resolveAgentResumeButtonLabel } from "../../services/agentRecovery";
 import { renderMarkdown } from "../../utils/renderMarkdown";
 import { agentDebugEnabled, setAgentDebugEnabled } from "../../utils/agentDebugFlag";
+import { buildSessionOutline } from "../../utils/sessionOutline";
 import AgentTraceDrawer from "../AgentTraceDrawer.vue";
 import { openLatestTraceDrawer } from "../../services/agentTraceDrawer";
 import AgentLiveStatusRail from "../AgentLiveStatusRail.vue";
@@ -944,6 +991,7 @@ const emit = defineEmits<{
   (e: "dismiss-skill-proposal", id: string): void;
   (e: "update:activeSessionProviderId", providerId: string): void;
   (e: "update:activeSessionModelId", modelId: string): void;
+  (e: "jump-to-message", messageId: string): void;
 }>();
 
 const chatScrollRef = ref<HTMLElement | null>(null);
@@ -1023,6 +1071,70 @@ const tokenPopoverRef = ref<HTMLElement | null>(null);
 const tokenPopoverTop = ref(0);
 const tokenPopoverRight = ref(0);
 
+const outlineOpen = ref(false);
+const outlineWrapRef = ref<HTMLElement | null>(null);
+const outlinePopoverRef = ref<HTMLElement | null>(null);
+const outlinePopoverTop = ref(0);
+const outlinePopoverRight = ref(0);
+
+const sessionOutline = computed(() => buildSessionOutline(props.chatMessages));
+
+function updateOutlinePopoverPosition() {
+  const wrap = outlineWrapRef.value;
+  if (!wrap) return;
+  const rect = wrap.getBoundingClientRect();
+  const pop = outlinePopoverRef.value;
+  const popHeight = pop?.offsetHeight ?? 0;
+  const gap = 6;
+  const spaceAbove = rect.top - gap;
+  const spaceBelow = window.innerHeight - rect.bottom - gap;
+  const openDown = spaceAbove < popHeight && spaceBelow > spaceAbove;
+  outlinePopoverTop.value = openDown ? rect.bottom + gap : Math.max(gap, rect.top - popHeight - gap);
+  outlinePopoverRight.value = Math.max(8, window.innerWidth - rect.right);
+}
+
+function handleOutlineViewportChange() {
+  if (outlineOpen.value) updateOutlinePopoverPosition();
+}
+
+function toggleOutline() {
+  outlineOpen.value = !outlineOpen.value;
+  if (outlineOpen.value) nextTick(updateOutlinePopoverPosition);
+}
+
+function jumpToOutlineItem(messageId: string) {
+  outlineOpen.value = false;
+  emit("jump-to-message", messageId);
+}
+
+function handleOutlineOutsideClick(e: MouseEvent) {
+  if (!outlineOpen.value) return;
+  const target = e.target as Node;
+  if (outlineWrapRef.value?.contains(target) || outlinePopoverRef.value?.contains(target)) return;
+  outlineOpen.value = false;
+}
+
+watch(outlineOpen, (open) => {
+  if (open) {
+    window.addEventListener("resize", handleOutlineViewportChange);
+    document.addEventListener("scroll", handleOutlineViewportChange, true);
+  } else {
+    window.removeEventListener("resize", handleOutlineViewportChange);
+    document.removeEventListener("scroll", handleOutlineViewportChange, true);
+  }
+});
+
+watch(
+  () => props.activeSessionId,
+  () => {
+    outlineOpen.value = false;
+  },
+);
+
+watch(sessionOutline, (items) => {
+  if (!items.length) outlineOpen.value = false;
+});
+
 function updateTokenPopoverPosition() {
   const btn = tokenBtnRef.value;
   if (!btn) return;
@@ -1060,6 +1172,8 @@ watch(
 onUnmounted(() => {
   window.removeEventListener("resize", handleTokenViewportChange);
   document.removeEventListener("scroll", handleTokenViewportChange, true);
+  window.removeEventListener("resize", handleOutlineViewportChange);
+  document.removeEventListener("scroll", handleOutlineViewportChange, true);
 });
 
 /** 点击按钮/弹窗外部时自动关闭 */
@@ -1160,11 +1274,13 @@ watch(providerPickerOpen, onProviderPickerOpenChange);
 onMounted(() => {
   document.addEventListener("mousedown", handleProviderPickerOutsideClick, true);
   document.addEventListener("mousedown", handleTokenPopoverOutsideClick, true);
+  document.addEventListener("mousedown", handleOutlineOutsideClick, true);
 });
 
 onUnmounted(() => {
   document.removeEventListener("mousedown", handleProviderPickerOutsideClick, true);
   document.removeEventListener("mousedown", handleTokenPopoverOutsideClick, true);
+  document.removeEventListener("mousedown", handleOutlineOutsideClick, true);
   onProviderPickerOpenChange(false);
 });
 

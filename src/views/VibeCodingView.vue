@@ -886,9 +886,10 @@
         @dismiss-memory-proposal="dismissPendingMemoryProposal"
         @confirm-skill-proposal="confirmPendingSkillProposal"
         @dismiss-skill-proposal="dismissPendingSkillProposal"
+        @jump-to-message="jumpToChatMessage"
       >
         <template #messages>
-          <VibeChatMessages />
+          <VibeChatMessages ref="vibeChatMessagesRef" />
         </template>
         <template #composer>
           <ChatComposerEditor
@@ -1558,6 +1559,7 @@ let chatPinnedToBottom = true;
 let chatScrollPersistTimer = 0;
 const restoringWorkspaceUi = ref(false);
 const chatPanelRef = ref<InstanceType<typeof ChatPanel> | null>(null);
+const vibeChatMessagesRef = ref<InstanceType<typeof VibeChatMessages> | null>(null);
 const pendingPromptQueue = ref<string[]>([]);
 function persistPendingQueue() {
   if (pendingPromptQueue.value.length) {
@@ -2679,6 +2681,7 @@ const {
   getLiveSessionMessagesForSearch,
   onQuickSearchOpenFile,
   onQuickSearchOpenSession,
+  scrollChatToMessage,
 } = useVibeQuickSearch({
   activeSessionId,
   chatMessages,
@@ -2690,6 +2693,12 @@ const {
   chatPanelRef,
   editorPanelRef,
 });
+
+async function jumpToChatMessage(messageId: string) {
+  if (!messageId.trim()) return;
+  vibeChatMessagesRef.value?.revealAllMessages?.();
+  await scrollChatToMessage(messageId);
+}
 
 useVibeGlobalShortcuts({
   openQuickSearch,

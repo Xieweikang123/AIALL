@@ -335,11 +335,13 @@ function gitWorkingTreeDiffKey(path: string, isStaged: boolean): string {
 .git-tree-name--flat {
   display: flex;
   align-items: baseline;
+  gap: 6px;
+  min-width: 0;
 }
 
 .git-tree-name--flat .git-tree-dir-prefix {
-  flex: 1 100 auto;
-  min-width: 24px;
+  flex: 1 1 0;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -349,7 +351,7 @@ function gitWorkingTreeDiffKey(path: string, isStaged: boolean): string {
 
 .git-tree-name--flat .git-tree-basename {
   flex: 0 1 auto;
-  min-width: 0;
+  min-width: 2ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -414,17 +416,24 @@ function gitWorkingTreeDiffKey(path: string, isStaged: boolean): string {
 }
 
 .git-file-actions {
-  opacity: 0;
   display: flex;
   gap: 2px;
-  margin-left: auto;
   flex-shrink: 0;
+  opacity: 0;
+  max-width: 0;
+  overflow: hidden;
+  margin-left: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
 }
 
 .git-tree-row--file:hover .git-file-actions,
 .git-tree-row--dir:hover .git-file-actions,
 .git-tree-row--file.batch-active .git-file-actions {
   opacity: 1;
+  max-width: 72px;
+  margin-left: 4px;
+  pointer-events: auto;
 }
 
 /* 批量模式：按钮高亮，提示将作用于整个选中集合 */
@@ -465,6 +474,7 @@ function gitWorkingTreeDiffKey(path: string, isStaged: boolean): string {
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.6);
+  opacity: 1;
   transition: all 0.15s ease;
   cursor: pointer;
   line-height: 1;

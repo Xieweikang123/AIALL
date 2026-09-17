@@ -679,7 +679,7 @@ function toggleReasoning(key: string) {
 .inline-feed-markdown--reasoning :deep(.msg-markdown) {
   font-size: 12px;
   line-height: 1.55;
-  color: rgba(148, 163, 184, 0.74);
+  color: rgba(148, 163, 184, 0.38);
   font-style: italic;
 }
 
@@ -690,7 +690,7 @@ function toggleReasoning(key: string) {
   height: 1em;
   margin-left: 2px;
   vertical-align: -0.12em;
-  background: rgba(148, 163, 184, 0.7);
+  background: rgba(148, 163, 184, 0.34);
   animation: stream-caret-blink 1s step-end infinite;
 }
 

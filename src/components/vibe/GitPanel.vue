@@ -90,6 +90,7 @@
         @update:git-ahead-commits-open="$emit('update:gitAheadCommitsOpen', $event)"
         @update:git-behind-commits-open="$emit('update:gitBehindCommitsOpen', $event)"
         @update:git-stash-section-open="$emit('update:gitStashSectionOpen', $event)"
+        @open-git-log-file="(entry, file) => $emit('open-git-log-file', entry, file)"
       />
 
       <GitStashPanel

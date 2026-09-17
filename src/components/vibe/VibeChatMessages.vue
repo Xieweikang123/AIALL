@@ -371,6 +371,12 @@ const ctx = injectedCtx;
 const MESSAGE_WINDOW = 80;
 const showAllMessages = ref(true);
 
+function revealAllMessages() {
+  showAllMessages.value = true;
+}
+
+defineExpose({ revealAllMessages });
+
 watch(
   () => ctx.chatMessages.value[0]?.id ?? "",
   () => {

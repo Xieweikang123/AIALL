@@ -9,7 +9,13 @@
       <div v-if="loading" class="git-ahead-loading">加载中…</div>
       <div v-else-if="!commits.length" class="git-ahead-empty">无待推送提交</div>
       <div v-for="entry in commits" :key="entry.hash" class="git-ahead-item">
-        <div class="git-ahead-entry-head">
+        <button
+          type="button"
+          class="git-ahead-entry-head"
+          :title="entry.message"
+          @click="toggleCommit(entry.hash)"
+        >
+          <span class="git-ahead-chevron">{{ expandedHash === entry.hash ? "▾" : "▸" }}</span>
           <span class="git-ahead-hash">{{ entry.shortHash }}</span>
           <span v-if="entry.refs && entry.refs.length" class="git-log-refs">
             <span
@@ -24,11 +30,27 @@
               {{ ref.name }}
             </span>
           </span>
-          <span class="git-ahead-msg" :title="entry.message">{{ entry.message }}</span>
-        </div>
+          <span class="git-ahead-msg">{{ entry.message }}</span>
+        </button>
         <div class="git-ahead-meta">
           <span class="git-ahead-date">{{ formatDate(entry.date) }}</span>
           <span class="git-ahead-files">{{ entry.files.length }} 文件</span>
+        </div>
+        <div v-if="expandedHash === entry.hash" class="git-ahead-detail">
+          <div v-if="!entry.files.length" class="git-ahead-empty">无文件变更</div>
+          <button
+            v-for="file in entry.files"
+            :key="file.path"
+            type="button"
+            class="git-ahead-file"
+            :title="file.path"
+            @click.stop="$emit('open-git-log-file', entry, file)"
+          >
+            <span class="git-ahead-file-status" :data-status="file.status">
+              {{ statusLabel(file.status) }}
+            </span>
+            <span class="git-ahead-file-path">{{ file.path }}</span>
+          </button>
         </div>
       </div>
     </div>
@@ -36,6 +58,7 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from "vue";
 import { formatDate } from "../../utils/gitHelpers";
 
 interface GitRef {
@@ -51,6 +74,7 @@ interface GitLogFile {
 interface GitLogEntry {
   hash: string;
   shortHash: string;
+  author: string;
   date: string;
   message: string;
   files: GitLogFile[];
@@ -66,14 +90,31 @@ defineProps<{
 
 defineEmits<{
   "update:open": [value: boolean];
+  "open-git-log-file": [entry: GitLogEntry, file: GitLogFile];
 }>();
+
+const expandedHash = ref<string>("");
+
+function toggleCommit(hash: string): void {
+  expandedHash.value = expandedHash.value === hash ? "" : hash;
+}
+
+function statusLabel(status: string): string {
+  const map: Record<string, string> = {
+    added: "A",
+    modified: "M",
+    deleted: "D",
+    renamed: "R",
+    copied: "C",
+    untracked: "?",
+  };
+  return map[status] ?? status.slice(0, 1).toUpperCase();
+}
 </script>
 
 <style scoped>
 .git-ahead-section {
   padding: 2px 0;
-}
-.git-ahead-section {
   contain: layout style;
 }
 .git-ahead-toggle {
@@ -127,6 +168,20 @@ defineEmits<{
   align-items: center;
   gap: 6px;
   min-width: 0;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.git-ahead-chevron {
+  font-size: 10px;
+  color: rgba(139, 148, 158, 0.5);
+  flex-shrink: 0;
+  width: 12px;
 }
 .git-ahead-hash {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
@@ -161,5 +216,45 @@ defineEmits<{
   font-size: 11px;
   color: rgba(139, 148, 158, 0.5);
   padding-left: 0;
+}
+.git-ahead-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 3px;
+  padding-left: 18px;
+}
+.git-ahead-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 4px;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.git-ahead-file:hover { background: rgba(255, 255, 255, 0.06); }
+.git-ahead-file-status {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 10px;
+  width: 12px;
+  text-align: center;
+  color: #8b949e;
+  flex-shrink: 0;
+}
+.git-ahead-file-status[data-status="added"] { color: #7ee787; }
+.git-ahead-file-status[data-status="modified"] { color: #d29922; }
+.git-ahead-file-status[data-status="deleted"] { color: #f85149; }
+.git-ahead-file-status[data-status="renamed"] { color: #58a6ff; }
+.git-ahead-file-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

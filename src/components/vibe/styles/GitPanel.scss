@@ -666,7 +666,8 @@
   }
 }
 
-.git-file-btn {
+/* 仅旧版扁平 .git-file-item 列表用；树形行由 GitFileTreeNode 自己管显隐，避免透明按钮仍占宽 */
+.git-file-item .git-file-btn {
   opacity: 0;
   transition: opacity 0.15s;
 }

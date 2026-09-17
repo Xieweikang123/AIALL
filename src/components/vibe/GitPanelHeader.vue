@@ -67,6 +67,7 @@
       :loading="gitAheadCommitsLoading"
       :commits="gitAheadCommits"
       @update:open="$emit('update:gitAheadCommitsOpen', $event)"
+      @open-git-log-file="(entry, file) => $emit('open-git-log-file', entry, file)"
     />
     <GitBehindCommits
       :behind="gitBehind"
@@ -139,6 +140,7 @@ defineEmits<{
   (e: "update:gitAheadCommitsOpen", value: boolean): void;
   (e: "update:gitBehindCommitsOpen", value: boolean): void;
   (e: "update:gitStashSectionOpen", value: boolean): void;
+  (e: "open-git-log-file", entry: GitLogEntry, file: GitLogFile): void;
 }>();
 
 const stashSectionOpen = computed(() => props.gitStashSectionOpen);
