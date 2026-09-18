@@ -93,4 +93,14 @@ describe("computeScrollFollowStep", () => {
     const step = computeScrollFollowStep(790, 1000, 200, 4000, 1 / 60);
     expect(step.nextScrollTop).toBeLessThanOrEqual(800);
   });
+
+  it("softer stiffness glides less per frame than the default", () => {
+    const soft = computeScrollFollowStep(0, 1200, 200, 0, 1 / 60, {
+      stiffness: 62,
+      damping: 16.2,
+    });
+    const firm = computeScrollFollowStep(0, 1200, 200, 0, 1 / 60);
+    expect(soft.nextScrollTop).toBeLessThan(firm.nextScrollTop);
+    expect(soft.velocity).toBeLessThan(firm.velocity);
+  });
 });

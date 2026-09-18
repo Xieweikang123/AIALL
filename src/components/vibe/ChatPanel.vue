@@ -87,9 +87,42 @@
       </div>
     </div>
 
-    <div v-if="sessionGoal" class="session-goal-bar" role="status">
-      <span class="session-goal-label">当前目标</span>
-      <span class="session-goal-text">{{ sessionGoal }}</span>
+    <div
+      v-if="sessionGoal"
+      class="session-goal-bar"
+      :class="{
+        'session-goal-bar--expanded': sessionGoalExpanded,
+        'session-goal-bar--expandable': sessionGoalExpandable,
+      }"
+      role="status"
+    >
+      <button
+        type="button"
+        class="session-goal-head"
+        :disabled="!sessionGoalExpandable"
+        :aria-expanded="sessionGoalExpandable ? sessionGoalExpanded : undefined"
+        :title="sessionGoalExpandTitle"
+        @click="toggleSessionGoal"
+      >
+        <span
+          v-if="sessionGoalExpandable"
+          class="session-goal-chevron"
+          aria-hidden="true"
+        >{{ sessionGoalExpanded ? "▾" : "▸" }}</span>
+        <span class="session-goal-label">模型理解</span>
+        <span
+          v-if="!sessionGoalExpanded"
+          class="session-goal-preview"
+        >{{ sessionGoal }}</span>
+        <span
+          v-else
+          class="session-goal-hint"
+        >点击收起</span>
+      </button>
+      <div
+        v-show="sessionGoalExpanded"
+        class="session-goal-body"
+      >{{ sessionGoal }}</div>
     </div>
 
     <div v-if="pendingMemoryProposals.length || pendingSkillProposals.length" class="memory-proposal-banner">
@@ -855,7 +888,7 @@ interface Props {
   agentSuggestions?: AgentSuggestion[];
   activeSessionProviderId: string;
   activeSessionModelId?: string;
-  /** Sticky read-only session goal (auto-derived; no confirm UI). */
+  /** Sticky read-only model understanding of the user demand (from intent classifier). */
   sessionGoal?: string;
   providerOptions?: Array<{ id: string; name: string; model: string; availableModels?: string[] }>;
   globalModelName: string;
@@ -1010,6 +1043,30 @@ const chatScrollRef = ref<HTMLElement | null>(null);
 const chatDropZoneRef = ref<HTMLElement | null>(null);
 const isAtBottom = ref(true);
 const showScrollToBottom = computed(() => !isAtBottom.value && props.chatMessages.length > 0);
+
+/** Sticky goal: collapse to one line; expand when the demand is longer than a glance. */
+const SESSION_GOAL_COLLAPSE_CHARS = 36;
+const sessionGoalExpanded = ref(false);
+const sessionGoalExpandable = computed(() => {
+  const goal = props.sessionGoal?.trim() || "";
+  return goal.length > SESSION_GOAL_COLLAPSE_CHARS || goal.includes("\n");
+});
+const sessionGoalExpandTitle = computed(() => {
+  if (!sessionGoalExpandable.value) return "模型对用户意图的理解";
+  return sessionGoalExpanded.value ? "收起理解" : "展开完整理解";
+});
+
+function toggleSessionGoal() {
+  if (!sessionGoalExpandable.value) return;
+  sessionGoalExpanded.value = !sessionGoalExpanded.value;
+}
+
+watch(
+  () => props.sessionGoal,
+  () => {
+    sessionGoalExpanded.value = false;
+  },
+);
 
 const activeProviderLabel = computed(() => {
   const id = props.activeSessionProviderId.trim();
@@ -1442,6 +1499,7 @@ function scheduleSessionScrollToBottom() {
 watch(
   () => props.activeSessionId,
   () => {
+    sessionGoalExpanded.value = false;
     scheduleSessionScrollToBottom();
   },
 );

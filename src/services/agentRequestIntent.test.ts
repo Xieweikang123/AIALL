@@ -26,6 +26,7 @@ function payload(overrides: Record<string, unknown> = {}) {
     userErrorQuote: false,
     uiAppearance: false,
     configBindingTopic: null,
+    understanding: "按用户要求修改代码",
     ...overrides,
   };
 }

@@ -8,6 +8,7 @@ import {
   type UserIntentPrimary,
 } from "./intentClassifierTypes";
 import type { ConfigBindingTopic } from "../orchestration/agentIntentTypes";
+import { SESSION_GOAL_MAX_CHARS } from "./sessionGoal";
 
 const SHORT_FOLLOW_UP_ASSISTANT_CHARS = 2_000;
 
@@ -70,8 +71,15 @@ export function buildIntentClassifierSystemPrompt(): string {
     '  "agentStepClarification": boolean,',
     '  "userErrorQuote": boolean,',
     '  "uiAppearance": boolean,',
-    '  "configBindingTopic": null | "reject" | "enumeration" | "doc_lookup"',
+    '  "configBindingTopic": null | "reject" | "enumeration" | "doc_lookup",',
+    '  "needsClarification": boolean,',
+    '  "understanding": string',
     '}',
+    "",
+    "understanding（给用户核对的一句话）：",
+    "- 用自己的话复述「你认为用户想达成什么」，一句中文，不超过约 240 字",
+    "- 禁止照抄用户原话；枚举/长列表可压缩成「补充状态枚举含义」这类概括",
+    "- needsClarification 为 true 时写成「意图不清：…（缺什么）」",
     "",
     "判定规则：",
     "- intent 只由当前消息本身决定（是否有动作动词、是否问句形态）；近期上下文仅用于解析指代（他/它/这个）与确认上文提议，禁止因上文出现提问就把当前明确动作指令判成 consultative",
@@ -147,6 +155,16 @@ function asConfigBindingTopic(value: unknown): ConfigBindingTopic | null {
   return null;
 }
 
+/** Normalize understanding for the sticky strip; empty → invalid. */
+export function normalizeIntentUnderstanding(value: unknown, maxChars = SESSION_GOAL_MAX_CHARS): string | null {
+  if (typeof value !== "string") return null;
+  const cleaned = value.replace(/\s+/g, " ").trim();
+  if (!cleaned) return null;
+  if (cleaned.length <= maxChars) return cleaned;
+  const sliced = cleaned.slice(0, maxChars - 1).trimEnd();
+  return `${sliced}…`;
+}
+
 export function parseIntentClassifierResponse(text: string): UserIntentAiPayload | null {
   const trimmed = text.trim();
   if (!trimmed) return null;
@@ -171,7 +189,8 @@ export function parseIntentClassifierResponse(text: string): UserIntentAiPayload
   const record = parsed as Record<string, unknown>;
   const primary = asPrimary(record.primary);
   const consultativeTopic = asConsultativeTopic(record.consultativeTopic);
-  if (!primary || !consultativeTopic) return null;
+  const understanding = normalizeIntentUnderstanding(record.understanding);
+  if (!primary || !consultativeTopic || !understanding) return null;
 
   return {
     primary,
@@ -188,6 +207,7 @@ export function parseIntentClassifierResponse(text: string): UserIntentAiPayload
     uiAppearance: asBool(record.uiAppearance),
     configBindingTopic: asConfigBindingTopic(record.configBindingTopic),
     needsClarification: asBool(record.needsClarification),
+    understanding,
   };
 }
 

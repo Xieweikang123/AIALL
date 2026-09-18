@@ -250,12 +250,13 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (cfg.providerName) aiConfig.value.providerName = cfg.providerName;
   }
 
-  /** Auto-refresh sticky session goal when the demand is clear; clarification stays in chat. */
+  /** Auto-refresh sticky session goal from classifier understanding when the demand is clear. */
   function syncSessionGoalForTurn(input: {
     sessionId: string;
     prompt: string;
     needsClarification?: boolean;
     runKind?: "interactive" | "execute_plan";
+    understanding?: string;
   }): string | undefined {
     const project = projectPath.value.trim();
     const sid = input.sessionId.trim();
@@ -266,6 +267,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       existingGoal: existing,
       needsClarification: input.needsClarification,
       runKind: input.runKind,
+      understanding: input.understanding,
     });
     if (next) {
       setVibeChatSessionGoal(project, sid, next);
@@ -1118,12 +1120,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       return;
     }
 
-    const resumeSessionGoal = syncSessionGoalForTurn({
-      sessionId,
-      prompt: resumePrompt,
-      needsClarification: resolvedUserIntent.needsClarification,
-      runKind: runProfile.kind,
-    });
+    // Resume prompts are system text (【自动续跑】…); never derive sticky goal from them.
+    const resumeSessionGoal =
+      getSessionGoal(projectPath.value.trim(), sessionId).trim() || undefined;
 
     const handle = runVibeAgentSse(
       {
@@ -1476,6 +1475,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       prompt,
       needsClarification: resolvedUserIntent.needsClarification,
       runKind: runProfile.kind,
+      understanding: resolvedUserIntent.understanding,
     });
     const agentRequest = {
       prompt,

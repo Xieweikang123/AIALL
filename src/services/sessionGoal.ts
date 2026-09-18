@@ -1,8 +1,11 @@
 import { isExecutionContinuation, stripQuotedReplyPrefix } from "./agentContinuation";
 import { EXPLORE_CONTINUE_PRESET_PROMPT, isExploreContinuePrompt } from "./agentExplore";
 
-/** Soft cap for the sticky session-goal strip (display + prompt injection). */
-export const SESSION_GOAL_MAX_CHARS = 80;
+/**
+ * Soft cap for the sticky session-goal strip (display + prompt injection).
+ * Holds the intent-classifier understanding line (or a rare prompt-compress fallback).
+ */
+export const SESSION_GOAL_MAX_CHARS = 240;
 
 export type ResolveSessionGoalInput = {
   prompt: string;
@@ -10,11 +13,28 @@ export type ResolveSessionGoalInput = {
   needsClarification?: boolean;
   /** Skip refresh for scoped execute-plan continuations that already have a goal. */
   runKind?: "interactive" | "execute_plan";
+  /**
+   * Model paraphrase from the intent classifier. Preferred source for the sticky
+   * strip — not a verbatim copy of the user prompt.
+   */
+  understanding?: string;
 };
 
+const RESUME_PROMPT_HEAD_RE = /^【自动续跑】|^【方案执行】/;
+const RESUME_INTERRUPT_HINT_RE = /上次运行因连接中断而暂停/;
+
+/** System resume / automation prompts must never become the sticky goal. */
+export function isSystemResumeOrAutomationPrompt(prompt: string): boolean {
+  const body = stripQuotedReplyPrefix(prompt).trim();
+  if (!body) return false;
+  if (RESUME_PROMPT_HEAD_RE.test(body)) return true;
+  // Consultative resume headers omit 【自动续跑】 but still carry this interrupt line.
+  return RESUME_INTERRUPT_HINT_RE.test(body.slice(0, 240));
+}
+
 /**
- * Compress a user demand into one short goal line (no extra model call).
- * Clarification stays in chat; this only mirrors a clear demand on the session strip.
+ * Fallback compress when the classifier did not return understanding.
+ * Prefer resolveSessionGoalUpdate with `understanding` in the normal path.
  */
 export function compressSessionGoal(prompt: string, maxChars = SESSION_GOAL_MAX_CHARS): string {
   const body = stripQuotedReplyPrefix(prompt).replace(/\s+/g, " ").trim();
@@ -29,11 +49,49 @@ export function compressSessionGoal(prompt: string, maxChars = SESSION_GOAL_MAX_
   return `${clipped}…`;
 }
 
+export function isTruncatedSessionGoal(goal: string): boolean {
+  return /…$/.test(goal.trim());
+}
+
+function clampSessionGoal(text: string, maxChars = SESSION_GOAL_MAX_CHARS): string {
+  const cleaned = text.replace(/\s+/g, " ").trim();
+  if (!cleaned) return "";
+  if (cleaned.length <= maxChars) return cleaned;
+  return `${cleaned.slice(0, maxChars - 1).trimEnd()}…`;
+}
+
+/**
+ * Rebuild a goal that was clipped under an older, shorter cap from the latest
+ * clear user demand in the transcript. Returns undefined when nothing to repair.
+ */
+export function repairTruncatedSessionGoal(input: {
+  existingGoal: string;
+  userPrompts: string[];
+}): string | undefined {
+  const existing = input.existingGoal.trim();
+  if (!isTruncatedSessionGoal(existing)) return undefined;
+  const stem = existing.replace(/…$/, "").trim();
+
+  for (let i = input.userPrompts.length - 1; i >= 0; i -= 1) {
+    const prompt = input.userPrompts[i] ?? "";
+    if (!shouldRefreshSessionGoal({ prompt, existingGoal: existing })) continue;
+    const next = compressSessionGoal(prompt);
+    if (!next || next === existing) continue;
+    // Same demand only — stem must be a prefix of the rebuilt goal.
+    if (stem.length >= 4 && !next.startsWith(stem)) continue;
+    return next;
+  }
+  return undefined;
+}
+
 /** Whether this turn should rewrite the sticky session goal. */
 export function shouldRefreshSessionGoal(input: ResolveSessionGoalInput): boolean {
   const body = stripQuotedReplyPrefix(input.prompt).trim();
   if (!body) return false;
-  if (input.needsClarification) return false;
+  if (isSystemResumeOrAutomationPrompt(body)) return false;
+  // Ambiguous demand: only refresh when the classifier produced an understanding
+  // line (e.g. 「意图不清：…」) so the user can verify the misread.
+  if (input.needsClarification && !input.understanding?.trim()) return false;
   if (isExecutionContinuation(body)) return false;
   if (isExploreContinuePrompt(body) || body === EXPLORE_CONTINUE_PRESET_PROMPT.trim()) return false;
   if (input.runKind === "execute_plan" && input.existingGoal?.trim()) return false;
@@ -42,8 +100,9 @@ export function shouldRefreshSessionGoal(input: ResolveSessionGoalInput): boolea
 
 /**
  * Resolve the goal to persist for this turn.
- * - Unclear demand → keep existing (do not invent); chat asks for clarification.
- * - Clear demand → compress prompt into one line.
+ * - Prefer classifier `understanding` (model paraphrase for the sticky strip).
+ * - Fall back to prompt compress only when understanding is missing.
+ * - Continuations / resume / unclear-without-understanding → keep existing.
  * Returns undefined when nothing should change.
  */
 export function resolveSessionGoalUpdate(input: ResolveSessionGoalInput): string | undefined {
@@ -51,7 +110,8 @@ export function resolveSessionGoalUpdate(input: ResolveSessionGoalInput): string
   if (!shouldRefreshSessionGoal(input)) {
     return undefined;
   }
-  const next = compressSessionGoal(input.prompt);
+  const fromUnderstanding = clampSessionGoal(input.understanding?.trim() || "");
+  const next = fromUnderstanding || compressSessionGoal(input.prompt);
   if (!next || next === existing) return undefined;
   return next;
 }

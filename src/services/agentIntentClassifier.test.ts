@@ -22,6 +22,7 @@ function aiPayload(overrides: Partial<UserIntentAiPayload> = {}): UserIntentAiPa
     userErrorQuote: false,
     uiAppearance: false,
     configBindingTopic: null,
+    understanding: "修复相关问题",
     ...overrides,
   };
 }
@@ -43,19 +44,44 @@ describe("parseIntentClassifierResponse", () => {
         userErrorQuote: false,
         uiAppearance: false,
         configBindingTopic: null,
+        understanding: "了解整个项目的用途与架构",
       }),
     );
     expect(payload?.primary).toBe("consultative");
     expect(payload?.consultativeTopic).toBe("project_overview");
+    expect(payload?.understanding).toBe("了解整个项目的用途与架构");
   });
 
   it("parses fenced JSON", () => {
     const payload = parseIntentClassifierResponse(
-      '```json\n{"primary":"implement","consultativeTopic":"none","implementFollowUp":true,"uiDefect":false,"codeReview":false,"behaviorContradiction":false,"behaviorPurpose":false,"accuracyQuestion":false,"implementationStatus":false,"agentStepClarification":false,"userErrorQuote":false,"uiAppearance":false,"configBindingTopic":null,"needsClarification":true}\n```',
+      '```json\n{"primary":"implement","consultativeTopic":"none","implementFollowUp":true,"uiDefect":false,"codeReview":false,"behaviorContradiction":false,"behaviorPurpose":false,"accuracyQuestion":false,"implementationStatus":false,"agentStepClarification":false,"userErrorQuote":false,"uiAppearance":false,"configBindingTopic":null,"needsClarification":true,"understanding":"意图不清：未指明修改对象"}\n```',
     );
     expect(payload?.primary).toBe("implement");
     expect(payload?.implementFollowUp).toBe(true);
     expect(payload?.needsClarification).toBe(true);
+    expect(payload?.understanding).toBe("意图不清：未指明修改对象");
+  });
+
+  it("rejects missing understanding", () => {
+    expect(
+      parseIntentClassifierResponse(
+        JSON.stringify({
+          primary: "implement",
+          consultativeTopic: "none",
+          implementFollowUp: false,
+          uiDefect: false,
+          codeReview: false,
+          behaviorContradiction: false,
+          behaviorPurpose: false,
+          accuracyQuestion: false,
+          implementationStatus: false,
+          agentStepClarification: false,
+          userErrorQuote: false,
+          uiAppearance: false,
+          configBindingTopic: null,
+        }),
+      ),
+    ).toBeNull();
   });
 
   it("rejects invalid topic", () => {
@@ -75,6 +101,7 @@ describe("parseIntentClassifierResponse", () => {
           userErrorQuote: false,
           uiAppearance: false,
           configBindingTopic: null,
+          understanding: "随便",
         }),
       ),
     ).toBeNull();
@@ -166,6 +193,7 @@ describe("formatIntentClassificationDetail", () => {
       userErrorQuote: false,
       uiAppearance: false,
       configBindingTopic: null,
+      understanding: "了解整个项目的用途与架构",
       ultraShortOpenTask: false,
       locateStatusFollowUp: false,
       pendingPlanAmend: false,
@@ -178,9 +206,11 @@ describe("formatIntentClassificationDetail", () => {
 });
 
 describe("buildIntentClassifierSystemPrompt", () => {
-  it("stays generic without business nouns", () => {
+  it("stays generic without business nouns and requires understanding", () => {
     const prompt = buildIntentClassifierSystemPrompt();
     expect(prompt).toContain("project_overview");
+    expect(prompt).toContain("understanding");
+    expect(prompt).toContain("禁止照抄");
     expect(prompt).not.toMatch(/ChatView|vibe-coding|粘贴图片/i);
   });
 });

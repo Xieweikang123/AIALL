@@ -35,6 +35,7 @@ function aiPayload(overrides: Partial<UserIntentAiPayload> = {}): UserIntentAiPa
     userErrorQuote: false,
     uiAppearance: false,
     configBindingTopic: null,
+    understanding: "修复相关问题",
     ...overrides,
   };
 }

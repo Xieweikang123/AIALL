@@ -49,6 +49,11 @@ export interface UserIntentAiPayload {
   configBindingTopic: ConfigBindingTopic | null;
   /** Implement intent whose target object is not pinned down by the message itself. */
   needsClarification?: boolean;
+  /**
+   * One-sentence paraphrase of what the model believes the user wants
+   * (sticky strip + sessionGoal). Must not be a verbatim copy of the prompt.
+   */
+  understanding: string;
 }
 
 export interface ResolvedUserIntent extends UserIntentAiPayload {

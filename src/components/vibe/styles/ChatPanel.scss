@@ -1375,32 +1375,116 @@
 
 .session-goal-bar {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  flex-direction: column;
+  gap: 0;
   margin: 0 10px 8px;
-  padding: 7px 10px;
+  padding: 0;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  pointer-events: none;
-  user-select: text;
+  overflow: hidden;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease;
+}
+
+.session-goal-bar--expandable {
+  cursor: pointer;
+}
+
+.session-goal-bar--expandable:hover,
+.session-goal-bar--expandable:focus-within {
+  background: rgba(255, 255, 255, 0.055);
+  border-color: rgba(88, 166, 255, 0.28);
+}
+
+.session-goal-bar--expanded {
+  background: rgba(88, 166, 255, 0.07);
+  border-color: rgba(88, 166, 255, 0.26);
+}
+
+.session-goal-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: inherit;
+}
+
+.session-goal-head:disabled {
+  cursor: default;
+  opacity: 1;
+  color: inherit;
+}
+
+.session-goal-head:focus-visible {
+  outline: 1px solid rgba(88, 166, 255, 0.55);
+  outline-offset: -1px;
+}
+
+.session-goal-chevron {
+  flex-shrink: 0;
+  width: 10px;
+  font-size: 10px;
+  line-height: 1;
+  color: rgba(165, 214, 255, 0.85);
 }
 
 .session-goal-label {
   flex-shrink: 0;
   font-size: 11px;
-  line-height: 1.45;
+  line-height: 1.35;
   color: rgba(255, 255, 255, 0.45);
   letter-spacing: 0.02em;
 }
 
-.session-goal-text {
+.session-goal-preview {
   flex: 1;
   min-width: 0;
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.35;
   color: rgba(255, 255, 255, 0.82);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-goal-hint {
+  flex-shrink: 0;
+  margin-left: auto;
+  font-size: 10px;
+  line-height: 1.35;
+  color: rgba(165, 214, 255, 0.7);
+}
+
+.session-goal-body {
+  margin: 0;
+  padding: 0 10px 8px 26px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(240, 245, 250, 0.92);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
+  max-height: calc(1.5em * 10);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  user-select: text;
+}
+
+.session-goal-bar:not(.session-goal-bar--expandable) .session-goal-preview {
+  // Short goals show in full on the head row (no ellipsis chrome).
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
 }
 
 .memory-proposal-item {

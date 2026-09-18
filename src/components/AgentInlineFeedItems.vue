@@ -184,6 +184,10 @@ import { enrichPlanMarkdownForDisplay } from "../services/planDocumentDisplay";
 import { shouldUsePlanExternalView } from "../services/planFile";
 import { vibeChatMessageContextKey } from "../composables/vibeChatMessageContext";
 import { agentDebugEnabled } from "../utils/agentDebugFlag";
+import {
+  computeScrollFollowStep,
+  prefersReducedMotion,
+} from "../utils/scrollViewport";
 import type { AgentRoundTool } from "../services/agentRoundGroups";
 import type { AiOption } from "../utils/parseAiOptions";
 
@@ -365,11 +369,26 @@ const REASONING_FALLBACK_MAX_PX = Math.round(12.5 * 1.55 * REASONING_COLLAPSED_L
 
 let reasoningMeasureObserver: ResizeObserver | null = null;
 const reasoningBodyEls = new Map<string, HTMLElement>();
-/** Throttle smooth stick-to-bottom so consecutive deltas don't cancel each other. */
-const reasoningPinAt = new Map<string, number>();
+
+/**
+ * Softer than chat follow — the ~3-line teleprompter only moves a few dozen
+ * px at a time; lower stiffness keeps those micro-chases from feeling snappy.
+ */
+const REASONING_FOLLOW_STIFFNESS = 62;
+const REASONING_FOLLOW_DAMPING = 16.2;
+
+type ReasoningFollowState = {
+  raf: number;
+  velocity: number;
+  lastTs: number;
+};
+
+/** Per-key spring stick-to-bottom while thinking (replaces native smooth/auto). */
+const reasoningFollow = new Map<string, ReasoningFollowState>();
 
 function measureReasoningBody(key: string, el: HTMLElement | null) {
   if (!el) {
+    stopReasoningFollow(key);
     reasoningBodyEls.delete(key);
     return;
   }
@@ -392,27 +411,90 @@ function measureReasoningBody(key: string, el: HTMLElement | null) {
   pinReasoningScroll(key, el);
 }
 
-/** While thinking inside the 3-line viewport, keep the newest lines in view. */
+function stopReasoningFollow(key: string) {
+  const state = reasoningFollow.get(key);
+  if (!state) return;
+  if (state.raf) cancelAnimationFrame(state.raf);
+  reasoningFollow.delete(key);
+}
+
+function stopAllReasoningFollows() {
+  for (const key of [...reasoningFollow.keys()]) stopReasoningFollow(key);
+}
+
+/**
+ * While thinking inside the 3-line viewport, spring-chase the newest lines.
+ * Keep the RAF warm for the whole live window so content growth never pays a
+ * restart gap (the old smooth/auto hybrid stuttered on burst deltas).
+ */
 function pinReasoningScroll(key: string, el?: HTMLElement | null) {
-  if (!isReasoningLivePinned(key)) return;
+  if (!isReasoningLivePinned(key)) {
+    stopReasoningFollow(key);
+    return;
+  }
   const target = el ?? reasoningBodyEls.get(key);
   if (!target) return;
   const maxScroll = target.scrollHeight - target.clientHeight;
-  if (maxScroll <= 1) return;
-
-  const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-  const last = reasoningPinAt.get(key) ?? 0;
-  const gap = now - last;
-  reasoningPinAt.set(key, now);
-
-  // Smooth when deltas are spaced out; snap when they arrive in a burst so we
-  // don't queue competing smooth scrolls.
-  const behavior: ScrollBehavior = gap >= 90 ? "smooth" : "auto";
-  if (typeof target.scrollTo === "function") {
-    target.scrollTo({ top: maxScroll, behavior });
-  } else {
-    target.scrollTop = maxScroll;
+  if (maxScroll <= 1) {
+    stopReasoningFollow(key);
+    return;
   }
+
+  if (prefersReducedMotion()) {
+    target.scrollTop = maxScroll;
+    stopReasoningFollow(key);
+    return;
+  }
+
+  let state = reasoningFollow.get(key);
+  if (!state) {
+    state = { raf: 0, velocity: 0, lastTs: 0 };
+    reasoningFollow.set(key, state);
+  }
+  if (state.raf) return;
+  state.raf = requestAnimationFrame((ts) => stepReasoningFollow(key, ts));
+}
+
+function stepReasoningFollow(key: string, ts: number) {
+  const state = reasoningFollow.get(key);
+  if (!state) return;
+  state.raf = 0;
+
+  const el = reasoningBodyEls.get(key);
+  if (!el || !isReasoningLivePinned(key)) {
+    stopReasoningFollow(key);
+    return;
+  }
+
+  if (prefersReducedMotion()) {
+    el.scrollTop = el.scrollHeight;
+    stopReasoningFollow(key);
+    return;
+  }
+
+  const last = state.lastTs || ts;
+  const dt = Math.min(0.064, Math.max(0.001, (ts - last) / 1000));
+  state.lastTs = ts;
+
+  const { nextScrollTop, velocity } = computeScrollFollowStep(
+    el.scrollTop,
+    el.scrollHeight,
+    el.clientHeight,
+    state.velocity,
+    dt,
+    {
+      stiffness: REASONING_FOLLOW_STIFFNESS,
+      damping: REASONING_FOLLOW_DAMPING,
+    },
+  );
+  state.velocity = velocity;
+  if (nextScrollTop !== el.scrollTop) {
+    el.scrollTop = nextScrollTop;
+  }
+
+  // Keep warm for the whole live window so the next line growth is chased
+  // without a restart gap (isReasoningLivePinned is re-checked each frame).
+  state.raf = requestAnimationFrame((nextTs) => stepReasoningFollow(key, nextTs));
 }
 
 let reasoningMeasureRaf = 0;
@@ -433,10 +515,13 @@ function bindReasoningBody(key: string, el: unknown) {
   const target = el instanceof HTMLElement ? el : null;
   if (previous && previous !== target) {
     reasoningMeasureObserver?.unobserve(previous);
+    stopReasoningFollow(key);
     reasoningBodyEls.delete(key);
-    reasoningPinAt.delete(key);
   }
-  if (!target) return;
+  if (!target) {
+    stopReasoningFollow(key);
+    return;
+  }
   reasoningBodyEls.set(key, target);
   if (typeof ResizeObserver !== "undefined") {
     reasoningMeasureObserver ??= new ResizeObserver(() => scheduleReasoningMeasure());
@@ -493,9 +578,9 @@ onBeforeUnmount(() => {
     cancelAnimationFrame(reasoningMeasureRaf);
     reasoningMeasureRaf = 0;
   }
+  stopAllReasoningFollows();
   reasoningBodyEls.clear();
   reasoningBodyRefFns.clear();
-  reasoningPinAt.clear();
 });
 
 onMounted(() => scheduleReasoningMeasure());
@@ -726,9 +811,12 @@ function toggleReasoning(key: string) {
 /*
  * Live thinking: stick newest lines at the bottom; fade older text out the top
  * so the viewport feels like a rising teleprompter instead of a hard crop.
+ * scroll-behavior stays auto — stick-to-bottom is driven by the spring RAF loop,
+ * not native smooth scroll (which cancels itself on burst deltas).
  */
 .stream-reasoning-body--clamped.stream-reasoning-body--live {
   scroll-behavior: auto;
+  transition: none;
   mask-image: linear-gradient(
     180deg,
     transparent 0%,

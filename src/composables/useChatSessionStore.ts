@@ -14,6 +14,7 @@ import {
   getSessionModelId,
   getSessionProviderId,
   getSessionGoal,
+  setVibeChatSessionGoal,
   getVibeChatProjectSnapshot,
   isSessionRecentlyDeletedLocally,
   loadVibeChatHistory,
@@ -47,6 +48,7 @@ import {
 } from "../services/vibeCodingClient";
 import { stampImageRefsAfterSync, applySyncedImageRefs } from "../services/vibeChatImageStore";
 import { sessionDiag } from "../utils/sessionDiagLog";
+import { repairTruncatedSessionGoal } from "../services/sessionGoal";
 import type { useSessionManager } from "./useSessionManager";
 import { useSessionMessageRegistry } from "./useSessionMessageRegistry";
 
@@ -149,6 +151,28 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     setActiveSession(id);
     orphanMessages = null;
     bumpRegistryVersion();
+    repairActiveSessionGoalIfTruncated(id, bound);
+  }
+
+  /**
+   * Goals clipped under the old 80-char cap end with "…". Rebuild from the latest
+   * clear user demand so the sticky strip can show the full line after refresh.
+   */
+  function repairActiveSessionGoalIfTruncated(sessionId: string, messages: T[]) {
+    const project = projectPath().trim();
+    const id = sessionId.trim();
+    if (!project || !id) return;
+    const existing = getSessionGoal(project, id);
+    if (!existing) return;
+    const userPrompts = messages
+      .filter((m) => m.role === "user")
+      .map((m) => (typeof m.content === "string" ? m.content : ""))
+      .filter(Boolean);
+    const repaired = repairTruncatedSessionGoal({ existingGoal: existing, userPrompts });
+    if (!repaired) return;
+    setVibeChatSessionGoal(project, id, repaired);
+    refreshSessionList(project);
+    schedulePersistChat();
   }
 
   function bindSessionMessages(sessionId: string, messages: T[]) {
