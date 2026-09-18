@@ -416,7 +416,7 @@ fn meta_from_file(id: &str, path: &Path, previous: Option<&Value>) -> Option<Val
         if let Some(status) = status {
             obj.insert("status".into(), json!(status));
         }
-        for key in ["providerId", "modelId"] {
+        for key in ["providerId", "modelId", "sessionGoal"] {
             let value = data
                 .get(key)
                 .and_then(|v| v.as_str())

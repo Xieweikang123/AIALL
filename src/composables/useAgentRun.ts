@@ -57,7 +57,10 @@ import {
   stripReferenceAttachments,
   stripToolSummaryFromAssistantContent,
   updateVibeChatSessionStatus,
+  getSessionGoal,
+  setVibeChatSessionGoal,
 } from "../services/vibeChatStorage";
+import { resolveSessionGoalUpdate } from "../services/sessionGoal";
 import {
   isAssistantExecutionBrief,
   looksLikeModificationPlan,
@@ -181,6 +184,8 @@ export type UseAgentRunDeps = {
   onPlanFileReady?: (relPath: string, messageId: string) => void;
   onMemoryProposal?: (msgId: string, proposal: import("../services/projectMemoryProposal").MemoryProposalPayload) => void;
   onSkillProposal?: (msgId: string, proposal: import("../services/projectSkillProposal").SkillProposalPayload) => void;
+  /** Refresh session list/meta after sticky fields (e.g. sessionGoal) change. */
+  refreshSessionList?: (path?: string) => void;
 };
 
 export function useAgentRun(deps: UseAgentRunDeps) {
@@ -225,6 +230,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     onPlanFileReady,
     onMemoryProposal,
     onSkillProposal,
+    refreshSessionList,
   } = deps;
 
   const state = useAgentState({
@@ -242,6 +248,32 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (cfg.apiKey) aiConfig.value.apiKey = cfg.apiKey;
     if (cfg.model) aiConfig.value.model = cfg.model;
     if (cfg.providerName) aiConfig.value.providerName = cfg.providerName;
+  }
+
+  /** Auto-refresh sticky session goal when the demand is clear; clarification stays in chat. */
+  function syncSessionGoalForTurn(input: {
+    sessionId: string;
+    prompt: string;
+    needsClarification?: boolean;
+    runKind?: "interactive" | "execute_plan";
+  }): string | undefined {
+    const project = projectPath.value.trim();
+    const sid = input.sessionId.trim();
+    if (!project || !sid) return undefined;
+    const existing = getSessionGoal(project, sid);
+    const next = resolveSessionGoalUpdate({
+      prompt: input.prompt,
+      existingGoal: existing,
+      needsClarification: input.needsClarification,
+      runKind: input.runKind,
+    });
+    if (next) {
+      setVibeChatSessionGoal(project, sid, next);
+      refreshSessionList?.(project);
+      schedulePersistChat();
+      return next;
+    }
+    return existing || undefined;
   }
 
   const {
@@ -1086,6 +1118,13 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       return;
     }
 
+    const resumeSessionGoal = syncSessionGoalForTurn({
+      sessionId,
+      prompt: resumePrompt,
+      needsClarification: resolvedUserIntent.needsClarification,
+      runKind: runProfile.kind,
+    });
+
     const handle = runVibeAgentSse(
       {
         prompt: resumePrompt,
@@ -1110,6 +1149,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         }),
         resolvedUserIntent,
         imageDataUrls: resumeImagesForRequest,
+        sessionId,
+        sessionGoal: resumeSessionGoal,
+        assistantMsgId: assistantMsg.id,
       },
       (event) => enqueueAgentEvent(event, assistantMsg, runGen, sessionId),
     );
@@ -1429,6 +1471,12 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (!resolvedUserIntent) {
       return false;
     }
+    const sessionGoal = syncSessionGoalForTurn({
+      sessionId,
+      prompt,
+      needsClarification: resolvedUserIntent.needsClarification,
+      runKind: runProfile.kind,
+    });
     const agentRequest = {
       prompt,
       history,
@@ -1445,6 +1493,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       resolvedUserIntent,
       debug: agentDebugEnabled.value,
       sessionId,
+      sessionGoal,
       assistantMsgId: assistantMsg.id,
       runId:
         typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"

@@ -36,6 +36,8 @@ export interface VibeAgentRunRequest {
   debug?: boolean;
   /** Chat session id — enables server-side run checkpoints. */
   sessionId?: string;
+  /** Sticky one-line session goal injected into the agent system prompt. */
+  sessionGoal?: string;
   /** Assistant bubble id for checkpoint merge on reload. */
   assistantMsgId?: string;
   /** Per-invocation run id (uuid). */
@@ -102,6 +104,7 @@ function runWebAgentSse(
       webProxyUrl: request.webProxyUrl,
       taskWrittenFiles: request.taskWrittenFiles,
       sessionId: request.sessionId,
+      sessionGoal: request.sessionGoal,
       assistantMsgId: request.assistantMsgId,
       runId: request.runId,
       runProfile: request.runProfile,

@@ -728,6 +728,7 @@ function adoptSessionWithId(
     status: "active",
     providerId: indexed?.providerId?.trim() || undefined,
     modelId: indexed?.modelId?.trim() || undefined,
+    sessionGoal: indexed?.sessionGoal?.trim() || undefined,
   };
 }
 
@@ -772,6 +773,7 @@ function projectIndexFromRecord(
         messageCount,
         providerId: session.providerId?.trim() || undefined,
         modelId: session.modelId?.trim() || undefined,
+        sessionGoal: session.sessionGoal?.trim() || undefined,
       };
     }),
     ...(previousIndex?.deletedSessionIds?.length
@@ -910,6 +912,7 @@ function getProjectRecord(key: string): ProjectChatRecord | undefined {
       messages: [],
       providerId: entry.providerId?.trim() || undefined,
       modelId: entry.modelId?.trim() || undefined,
+      sessionGoal: entry.sessionGoal?.trim() || undefined,
     })),
   };
   const activeExists = record.sessions.some((s) => s.id === record.activeSessionId);
@@ -1016,6 +1019,7 @@ export function getVibeChatProjectSnapshot(projectPath: string): VibeChatProject
           status: s.status,
           providerId: s.providerId?.trim() || undefined,
           modelId: s.modelId?.trim() || undefined,
+          sessionGoal: s.sessionGoal?.trim() || undefined,
           file: `chat-${s.id}.json`,
         };
       }) || [],
@@ -1025,7 +1029,7 @@ export function getVibeChatProjectSnapshot(projectPath: string): VibeChatProject
 export function getActiveSessionSnapshot(
   projectPath: string,
   sessionId: string,
-): { id: string; title: string; createdAt: string; updatedAt: string; messages: PersistedChatMessage[]; providerId?: string; modelId?: string } | null {
+): { id: string; title: string; createdAt: string; updatedAt: string; messages: PersistedChatMessage[]; providerId?: string; modelId?: string; sessionGoal?: string } | null {
   const key = normalizeProjectKey(projectPath);
   if (!key) return null;
   const record = getProjectRecord(key);
@@ -1047,6 +1051,7 @@ export function getActiveSessionSnapshot(
     messages,
     providerId: session.providerId?.trim() || undefined,
     modelId: session.modelId?.trim() || undefined,
+    sessionGoal: session.sessionGoal?.trim() || undefined,
   };
 }
 
@@ -1072,7 +1077,7 @@ export function buildActiveSessionDiskSyncPayload(
   projectPath: string,
   sessionId: string,
   liveMessages: PersistedChatMessage[],
-): { id: string; title: string; createdAt: string; updatedAt: string; messages: PersistedChatMessage[]; providerId?: string; modelId?: string } | null {
+): { id: string; title: string; createdAt: string; updatedAt: string; messages: PersistedChatMessage[]; providerId?: string; modelId?: string; sessionGoal?: string } | null {
   const key = normalizeProjectKey(projectPath);
   if (!key) return null;
   const record = getProjectRecord(key);
@@ -1086,6 +1091,7 @@ export function buildActiveSessionDiskSyncPayload(
     messages: sanitizeMessages(liveMessages, { forDisk: true }),
     providerId: session.providerId?.trim() || undefined,
     modelId: session.modelId?.trim() || undefined,
+    sessionGoal: session.sessionGoal?.trim() || undefined,
   };
 }
 
@@ -1142,6 +1148,7 @@ export function listVibeChatSessions(projectPath: string): VibeChatSessionMeta[]
         status: s.status,
         providerId: s.providerId?.trim() || undefined,
         modelId: s.modelId?.trim() || undefined,
+        sessionGoal: s.sessionGoal?.trim() || undefined,
       };
     });
   return result;
@@ -1168,6 +1175,14 @@ export function getSessionModelId(projectPath: string, sessionId: string): strin
   if (!key) return "";
   const record = getProjectRecord(key);
   return record?.sessions.find((s) => s.id === sessionId)?.modelId?.trim() || "";
+}
+
+/** Read a session's sticky goal directly from the record (not filtered by listability). */
+export function getSessionGoal(projectPath: string, sessionId: string): string {
+  const key = normalizeProjectKey(projectPath);
+  if (!key) return "";
+  const record = getProjectRecord(key);
+  return record?.sessions.find((s) => s.id === sessionId)?.sessionGoal?.trim() || "";
 }
 
 export function getActiveVibeChatSessionId(projectPath: string): string {
@@ -1279,6 +1294,7 @@ function snapshotSessionsToRecord(snapshot: VibeChatProjectSnapshot): VibeChatSe
     status: s.status || "active",
     providerId: s.providerId?.trim() || undefined,
     modelId: s.modelId?.trim() || undefined,
+    sessionGoal: s.sessionGoal?.trim() || undefined,
   }));
 }
 
@@ -1289,6 +1305,7 @@ function pickMergedSession(local: VibeChatSession, disk: VibeChatSession): VibeC
     ...merged,
     providerId: local.providerId?.trim() || disk.providerId?.trim() || undefined,
     modelId: local.modelId?.trim() || disk.modelId?.trim() || undefined,
+    sessionGoal: local.sessionGoal?.trim() || disk.sessionGoal?.trim() || undefined,
   });
   if (localCount === 0 && diskCount > 0) {
     return preferLocal({ ...local, ...disk, messages: disk.messages });
@@ -1404,6 +1421,7 @@ type DiskIndexMirrorInput = {
     status?: string;
     providerId?: string;
     modelId?: string;
+    sessionGoal?: string;
   }>;
 };
 
@@ -1434,6 +1452,7 @@ export function mirrorLocalIndexFromDiskMeta(projectPath: string, disk: DiskInde
     messageCount: s.messageCount ?? 0,
     providerId: s.providerId?.trim() || undefined,
     modelId: s.modelId?.trim() || undefined,
+    sessionGoal: s.sessionGoal?.trim() || undefined,
   }));
 
   for (const local of localMeta?.sessions || []) {
@@ -1449,6 +1468,7 @@ export function mirrorLocalIndexFromDiskMeta(projectPath: string, disk: DiskInde
       messageCount: mem?.messages.length || local.messageCount || 0,
       providerId: local.providerId?.trim() || mem?.providerId?.trim() || undefined,
       modelId: local.modelId?.trim() || mem?.modelId?.trim() || undefined,
+      sessionGoal: local.sessionGoal?.trim() || mem?.sessionGoal?.trim() || undefined,
     });
     diskIds.add(local.id);
   }
@@ -1464,6 +1484,7 @@ export function mirrorLocalIndexFromDiskMeta(projectPath: string, disk: DiskInde
       messageCount: mem.messages.length,
       providerId: mem.providerId?.trim() || undefined,
       modelId: mem.modelId?.trim() || undefined,
+      sessionGoal: mem.sessionGoal?.trim() || undefined,
     });
   }
 
@@ -1496,6 +1517,7 @@ export function mirrorLocalIndexFromDiskSnapshot(projectPath: string, snapshot: 
       status: s.status,
       providerId: s.providerId?.trim() || undefined,
       modelId: s.modelId?.trim() || undefined,
+      sessionGoal: s.sessionGoal?.trim() || undefined,
     })),
   });
 }
@@ -1684,6 +1706,19 @@ export function setVibeChatSessionModel(projectPath: string, sessionId: string, 
   const session = record?.sessions.find((s) => s.id === id);
   if (!record || !session) return false;
   session.modelId = modelId.trim() || undefined;
+  persistRecord(key, record);
+  return true;
+}
+
+/** Set the sticky session goal (empty clears). Persists index + record. */
+export function setVibeChatSessionGoal(projectPath: string, sessionId: string, sessionGoal: string): boolean {
+  const key = normalizeProjectKey(projectPath);
+  const id = sessionId.trim();
+  if (!key || !id) return false;
+  const record = getProjectRecord(key);
+  const session = record?.sessions.find((s) => s.id === id);
+  if (!record || !session) return false;
+  session.sessionGoal = sessionGoal.trim() || undefined;
   persistRecord(key, record);
   return true;
 }

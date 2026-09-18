@@ -1373,6 +1373,36 @@
   border: 1px solid rgba(88, 166, 255, 0.22);
 }
 
+.session-goal-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 10px 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+  user-select: text;
+}
+
+.session-goal-label {
+  flex-shrink: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.45);
+  letter-spacing: 0.02em;
+}
+
+.session-goal-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.82);
+  word-break: break-word;
+}
+
 .memory-proposal-item {
   display: flex;
   align-items: flex-start;

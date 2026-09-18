@@ -35,6 +35,15 @@ pub async fn build_agent_system_prompt(
 
     let mut system_prompt = format!("项目根：{}\n", params.request.project_path);
     system_prompt.push_str(&format!("模式：{}\n", params.mode));
+    if let Some(goal) = params
+        .request
+        .session_goal
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        system_prompt.push_str(&format!("当前会话目标：{}\n", goal));
+    }
     system_prompt.push_str(&format!("可用工具：{}\n", params.tool_names));
     system_prompt.push_str(&format!(
         "{}\n",

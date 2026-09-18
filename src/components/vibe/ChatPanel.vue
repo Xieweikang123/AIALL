@@ -44,7 +44,6 @@
         </template>
         <template v-else>
           <p class="chat-empty-title">描述你要改什么</p>
-          <p class="chat-empty-desc">直接输入需求即可。用 <code>@</code> 引用文件，Auto 会按问题选择问答、规划或改代码。</p>
           <div class="chips">
             <button type="button" class="chip" :disabled="chatSending" @click="$emit('apply-example', '解释这个项目是做什么的')">
               <span class="chip-cmd">/explain</span>
@@ -86,6 +85,11 @@
           </button>
         </transition>
       </div>
+    </div>
+
+    <div v-if="sessionGoal" class="session-goal-bar" role="status">
+      <span class="session-goal-label">当前目标</span>
+      <span class="session-goal-text">{{ sessionGoal }}</span>
     </div>
 
     <div v-if="pendingMemoryProposals.length || pendingSkillProposals.length" class="memory-proposal-banner">
@@ -851,6 +855,8 @@ interface Props {
   agentSuggestions?: AgentSuggestion[];
   activeSessionProviderId: string;
   activeSessionModelId?: string;
+  /** Sticky read-only session goal (auto-derived; no confirm UI). */
+  sessionGoal?: string;
   providerOptions?: Array<{ id: string; name: string; model: string; availableModels?: string[] }>;
   globalModelName: string;
 }
@@ -892,6 +898,7 @@ const props = withDefaults(defineProps<Props>(), {
 	agentSuggestions: () => [],
 	activeSessionProviderId: "",
 	activeSessionModelId: "",
+	sessionGoal: "",
 	providerOptions: () => [],
 	globalModelName: "",
 });

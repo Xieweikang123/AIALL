@@ -848,6 +848,7 @@
         :agent-suggestions="activeAgentSuggestions"
         :active-session-provider-id="activeSessionProviderId"
         :active-session-model-id="activeSessionModelId"
+        :session-goal="activeSessionGoal"
         :provider-options="providerOptions"
         :global-model-name="aiConfig.model"
         @update:activeSessionProviderId="setActiveSessionProvider"
@@ -1845,6 +1846,7 @@ const {
   setActiveSessionProvider,
   activeSessionModelId,
   setActiveSessionModel,
+  activeSessionGoal,
 } = chatSession;
 
 function persistAgentRunSession(sessionId: string) {
@@ -3037,6 +3039,7 @@ const agent = useAgentRun({
   endAgentRunSession,
   persistAgentRunSession,
   snapshotAgentRunSession,
+  refreshSessionList,
   onAgentRunSettled: (msg) => {
     refreshSessionList();
     autoBugFixLifecycle.onAgentSettled(msg);

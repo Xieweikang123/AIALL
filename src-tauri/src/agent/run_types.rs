@@ -88,6 +88,9 @@ pub struct AgentRunRequest {
     /// Frontend chat session id — enables server-side run checkpoints.
     #[serde(default)]
     pub(crate) session_id: Option<String>,
+    /// Sticky one-line session goal (display + prompt fact).
+    #[serde(default)]
+    pub(crate) session_goal: Option<String>,
     /// Target assistant bubble id for checkpoint merge on reload.
     #[serde(default)]
     pub(crate) assistant_msg_id: Option<String>,
@@ -184,6 +187,7 @@ impl AgentRunRequest {
             resolved_user_intent: None,
             debug: false,
             session_id: None,
+            session_goal: None,
             assistant_msg_id: None,
             run_id: None,
         }

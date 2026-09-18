@@ -13,6 +13,7 @@ import {
   getSessionDiagSnapshot,
   getSessionModelId,
   getSessionProviderId,
+  getSessionGoal,
   getVibeChatProjectSnapshot,
   isSessionRecentlyDeletedLocally,
   loadVibeChatHistory,
@@ -742,6 +743,13 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     return getSessionModelId(projectPath().trim(), id);
   });
 
+  const activeSessionGoal = computed(() => {
+    const id = activeSessionId.value.trim();
+    if (!id) return "";
+    void sessionList.value;
+    return getSessionGoal(projectPath().trim(), id);
+  });
+
   function setActiveSessionProvider(providerId: string) {
     const project = projectPath().trim();
     if (!project) return;
@@ -779,6 +787,7 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     setActiveSessionProvider,
     activeSessionModelId,
     setActiveSessionModel,
+    activeSessionGoal,
     activateSession,
     bindSessionMessages,
     getSessionMessages: sessionMessages.getSessionMessages,

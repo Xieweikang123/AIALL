@@ -143,6 +143,8 @@ export type VibeChatSessionMeta = {
   providerId?: string;
   /** 会话固定的具体模型名（aiLocalConfig providers[].availableModels 之一）；空 = 用供应商默认模型。 */
   modelId?: string;
+  /** Sticky one-line session goal (auto-derived from clear user demand). */
+  sessionGoal?: string;
   /** 磁盘会话文件名（如 chat-<id>.json）；由 id 派生，用于索引→文件映射。 */
   file?: string;
 };
@@ -166,6 +168,8 @@ type VibeChatSession = {
   providerId?: string;
   /** 会话固定的具体模型名；空 = 用供应商默认模型。 */
   modelId?: string;
+  /** Sticky one-line session goal (auto-derived from clear user demand). */
+  sessionGoal?: string;
 };
 
 type ProjectChatRecord = {
@@ -183,6 +187,8 @@ type SessionIndexEntry = {
   providerId?: string;
   /** 会话固定的具体模型名；空 = 用供应商默认模型。 */
   modelId?: string;
+  /** Sticky one-line session goal. */
+  sessionGoal?: string;
 };
 
 type ProjectIndexRecord = {

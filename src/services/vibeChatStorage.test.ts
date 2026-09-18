@@ -39,6 +39,8 @@ import {
   saveVibeChatHistory,
   shouldPersistAssistantMessage,
   switchVibeChatSession,
+  setVibeChatSessionGoal,
+  getSessionGoal,
   type PersistedChatMessage,
   STORE_VERSION,
   stripReferenceAttachments,
@@ -82,6 +84,29 @@ describe("formatSessionTitle", () => {
   it("truncates long titles", () => {
     const raw = "a".repeat(40);
     expect(formatSessionTitle(raw)).toBe(`${"a".repeat(36)}…`);
+  });
+});
+
+describe("sessionGoal persistence", () => {
+  beforeEach(() => {
+    installLocalStorageMock();
+  });
+
+  it("stores and lists sticky session goal", () => {
+    const projectPath = "D:/projects/session-goal";
+    const { sessionId } = saveVibeChatHistory(projectPath, [
+      { id: "u1", role: "user", content: "修复粘贴图片上传" },
+    ]);
+    expect(setVibeChatSessionGoal(projectPath, sessionId, "修复粘贴图片上传")).toBe(true);
+    expect(getSessionGoal(projectPath, sessionId)).toBe("修复粘贴图片上传");
+    const listed = listVibeChatSessions(projectPath).find((s) => s.id === sessionId);
+    expect(listed?.sessionGoal).toBe("修复粘贴图片上传");
+    const snapshot = getVibeChatProjectSnapshot(projectPath);
+    expect(snapshot.sessions.find((s) => s.id === sessionId)?.sessionGoal).toBe("修复粘贴图片上传");
+    const diskPayload = buildActiveSessionDiskSyncPayload(projectPath, sessionId, [
+      { id: "u1", role: "user", content: "修复粘贴图片上传" },
+    ]);
+    expect(diskPayload?.sessionGoal).toBe("修复粘贴图片上传");
   });
 });
 
