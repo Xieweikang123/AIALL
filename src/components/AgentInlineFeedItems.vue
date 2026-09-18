@@ -3,7 +3,7 @@
     v-if="intentTrace && !nested"
     :trace="intentTrace"
   />
-  <!-- kind=status 项的实时状态由时间线底栏 AgentLiveStatusRail 统一展示，这里刻意不渲染，避免同屏双重状态行 -->
+  <!-- kind=status 由时间线底栏统一展示；有工具在跑时底栏会收起，活态落在步骤行上 -->
   <template v-for="item in displayItems" :key="renderKey(item)">
     <div
       v-if="item.kind === 'text' && item.variant === 'narrative' && item.text.trim()"
@@ -55,7 +55,10 @@
         <div
           :ref="reasoningBodyRef(item.key)"
           class="stream-reasoning-body"
-          :class="{ 'stream-reasoning-body--clamped': isReasoningClamped(item.key) }"
+          :class="{
+            'stream-reasoning-body--clamped': isReasoningClamped(item.key),
+            'stream-reasoning-body--live': isReasoningLivePinned(item.key),
+          }"
           :style="reasoningBodyStyle(item.key)"
         >
           <ChatMarkdown
@@ -351,15 +354,19 @@ function answerMarkdown(text: string) {
 }
 
 const expandedCollapsedKeys = ref<Set<string>>(new Set());
-/** Explicit user toggles win over the auto expand-while-thinking behavior. */
+/** Explicit user toggles only — thinking never auto-expands (avoids layout jump). */
 const reasoningOverrides = ref<Map<string, boolean>>(new Map());
 /** Measured full/max heights per reasoning key — drives the 3-line preview clamp. */
 const reasoningHeights = ref<Map<string, { full: number; max: number }>>(new Map());
 
 const REASONING_COLLAPSED_LINES = 3;
+/** Fallback ~3 lines before first measure (12.5px × 1.55 ≈ reasoning markdown). */
+const REASONING_FALLBACK_MAX_PX = Math.round(12.5 * 1.55 * REASONING_COLLAPSED_LINES);
 
 let reasoningMeasureObserver: ResizeObserver | null = null;
 const reasoningBodyEls = new Map<string, HTMLElement>();
+/** Throttle smooth stick-to-bottom so consecutive deltas don't cancel each other. */
+const reasoningPinAt = new Map<string, number>();
 
 function measureReasoningBody(key: string, el: HTMLElement | null) {
   if (!el) {
@@ -375,10 +382,37 @@ function measureReasoningBody(key: string, el: HTMLElement | null) {
   // scrollHeight ignores max-height, so this stays the true full height even while clamped.
   const full = markdown.scrollHeight;
   const prev = reasoningHeights.value.get(key);
-  if (prev && prev.full === full && prev.max === max) return;
+  if (prev && prev.full === full && prev.max === max) {
+    pinReasoningScroll(key, el);
+    return;
+  }
   const next = new Map(reasoningHeights.value);
   next.set(key, { full, max });
   reasoningHeights.value = next;
+  pinReasoningScroll(key, el);
+}
+
+/** While thinking inside the 3-line viewport, keep the newest lines in view. */
+function pinReasoningScroll(key: string, el?: HTMLElement | null) {
+  if (!isReasoningLivePinned(key)) return;
+  const target = el ?? reasoningBodyEls.get(key);
+  if (!target) return;
+  const maxScroll = target.scrollHeight - target.clientHeight;
+  if (maxScroll <= 1) return;
+
+  const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+  const last = reasoningPinAt.get(key) ?? 0;
+  const gap = now - last;
+  reasoningPinAt.set(key, now);
+
+  // Smooth when deltas are spaced out; snap when they arrive in a burst so we
+  // don't queue competing smooth scrolls.
+  const behavior: ScrollBehavior = gap >= 90 ? "smooth" : "auto";
+  if (typeof target.scrollTo === "function") {
+    target.scrollTo({ top: maxScroll, behavior });
+  } else {
+    target.scrollTop = maxScroll;
+  }
 }
 
 let reasoningMeasureRaf = 0;
@@ -400,6 +434,7 @@ function bindReasoningBody(key: string, el: unknown) {
   if (previous && previous !== target) {
     reasoningMeasureObserver?.unobserve(previous);
     reasoningBodyEls.delete(key);
+    reasoningPinAt.delete(key);
   }
   if (!target) return;
   reasoningBodyEls.set(key, target);
@@ -434,15 +469,21 @@ function isReasoningClamped(key: string): boolean {
   return hasReasoningOverflow(key);
 }
 
+/** Live teleprompter: only when thinking and the viewport is actually overflowing. */
+function isReasoningLivePinned(key: string): boolean {
+  return isReasoningActive(key) && isReasoningClamped(key);
+}
+
 function reasoningBodyStyle(key: string): Record<string, string> | undefined {
   const heights = reasoningHeights.value.get(key);
   if (isReasoningExpanded(key)) {
-    // While streaming the text grows continuously — capping it would lag the reveal.
-    if (isReasoningActive(key)) return undefined;
-    return heights ? { maxHeight: `${heights.full}px` } : undefined;
+    if (!heights || heights.full <= 0) return undefined;
+    return { maxHeight: `${heights.full}px` };
   }
-  if (!heights || !hasReasoningOverflow(key)) return undefined;
-  return { maxHeight: `${heights.max}px` };
+  // Cap while thinking (even before overflow) so the box never grows past ~3 lines.
+  if (!isReasoningActive(key) && !hasReasoningOverflow(key)) return undefined;
+  const max = heights && heights.max > 0 ? heights.max : REASONING_FALLBACK_MAX_PX;
+  return { maxHeight: `${Math.max(max, 1)}px` };
 }
 
 onBeforeUnmount(() => {
@@ -454,14 +495,14 @@ onBeforeUnmount(() => {
   }
   reasoningBodyEls.clear();
   reasoningBodyRefFns.clear();
+  reasoningPinAt.clear();
 });
 
 onMounted(() => scheduleReasoningMeasure());
 
 /**
- * Key of the reasoning stream currently being produced. While active the body
- * stays unclamped; once real content follows, overflow (>3 lines) clamps to a
- * preview and shorter thoughts stay fully visible.
+ * Key of the reasoning stream currently being produced. Drives the live label /
+ * pulse; the body stays clamped unless the user expands it.
  */
 const activeReasoningKey = computed(() => resolveActiveReasoningKey(props.items, props.isRunning));
 
@@ -470,6 +511,15 @@ watch(
   () => {
     expandedCollapsedKeys.value = new Set();
   },
+);
+
+watch(
+  () =>
+    props.items
+      .filter((item): item is Extract<InlineFeedItem, { kind: "reasoning" }> => item.kind === "reasoning")
+      .map((item) => `${item.key}:${item.text.length}`)
+      .join("|"),
+  () => scheduleReasoningMeasure(),
 );
 
 function isCollapsedExpanded(key: string): boolean {
@@ -492,13 +542,12 @@ function reasoningLabel(key: string): string {
 }
 
 function isReasoningExpanded(key: string): boolean {
-  const override = reasoningOverrides.value.get(key);
-  if (override !== undefined) return override;
-  return isReasoningActive(key);
+  // Default collapsed preview — never auto-expand while thinking (that caused the jump).
+  return reasoningOverrides.value.get(key) === true;
 }
 
 function toggleReasoning(key: string) {
-  if (!hasReasoningOverflow(key)) return;
+  if (!hasReasoningOverflow(key) && !isReasoningExpanded(key)) return;
   const next = new Map(reasoningOverrides.value);
   next.set(key, !isReasoningExpanded(key));
   reasoningOverrides.value = next;
@@ -512,7 +561,15 @@ function toggleReasoning(key: string) {
 }
 
 .inline-feed-segment--answer {
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.inline-feed-segment--answer:first-child {
   margin-top: 0;
+  padding-top: 0;
+  border-top: none;
 }
 
 .inline-feed-markdown {
@@ -546,12 +603,12 @@ function toggleReasoning(key: string) {
 }
 
 .stream-narrative {
-  padding: 0 0 6px;
+  padding: 2px 0 8px;
   position: relative;
 }
 
 .stream-reasoning-wrap {
-  padding: 0 0 4px;
+  padding: 0 0 6px;
   position: relative;
 }
 
@@ -560,49 +617,49 @@ function toggleReasoning(key: string) {
 }
 
 /*
- * Idle keeps the label quiet (faint, no chrome). Body stays visible: ≤3 lines
- * show in full; longer thoughts clamp to a 3-line preview until expanded.
- * Chrome appears on hover/focus or while the model is streaming.
+ * Idle keeps the label secondary. Body stays in a ~3-line viewport by default
+ * (including while streaming) so tools arriving later do not jump the layout.
+ * Overflow gets a chevron; live thinking pins newest lines to the bottom.
  */
 .stream-reasoning-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   max-width: 100%;
-  padding: 2px 8px 2px 6px;
+  padding: 1px 4px 1px 2px;
   border: 1px solid transparent;
-  border-radius: 3px;
+  border-radius: 0;
   background: transparent;
-  color: rgba(148, 163, 184, 0.34);
+  color: rgba(165, 184, 204, 0.72);
   font-size: 11px;
   font-family: inherit;
   line-height: 1.35;
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  transition: color 120ms ease;
 }
 
 .stream-reasoning-wrap--nested .stream-reasoning-btn {
   font-size: 10px;
-  padding: 2px 7px 2px 5px;
+  padding: 1px 4px 1px 2px;
 }
 
 .stream-reasoning-wrap:hover .stream-reasoning-btn,
 .stream-reasoning-btn:focus-visible {
-  color: rgba(148, 163, 184, 0.8);
-  background: rgba(255, 255, 255, 0.035);
-  border-color: rgba(255, 255, 255, 0.08);
+  color: rgba(190, 210, 230, 0.92);
+  background: transparent;
+  border-color: transparent;
 }
 
 .stream-reasoning-btn:hover {
-  color: rgba(165, 214, 255, 0.92);
-  background: rgba(88, 166, 255, 0.06);
-  border-color: rgba(88, 166, 255, 0.14);
+  color: rgba(165, 214, 255, 0.95);
+  background: transparent;
+  border-color: transparent;
 }
 
 .stream-reasoning-btn--active {
-  color: rgba(165, 214, 255, 0.92);
-  border-color: rgba(88, 166, 255, 0.18);
-  background: rgba(88, 166, 255, 0.07);
+  color: rgba(165, 214, 255, 0.95);
+  border-color: transparent;
+  background: transparent;
 }
 
 .stream-reasoning-dot {
@@ -626,7 +683,7 @@ function toggleReasoning(key: string) {
   font-size: 11px;
   font-weight: 700;
   line-height: 1;
-  color: rgba(88, 166, 255, 0.8);
+  color: rgba(88, 166, 255, 0.85);
   user-select: none;
 }
 
@@ -637,28 +694,61 @@ function toggleReasoning(key: string) {
   white-space: nowrap;
 }
 
-/* Body is always visible; height animation lives on max-height clamp instead. */
+/* Avoid grid 1fr + min-height:0 collapse inside flex timelines. */
 .stream-reasoning-reveal {
-  display: grid;
-  grid-template-rows: 1fr;
-  opacity: 1;
-  overflow: hidden;
+  display: block;
+  overflow: visible;
 }
 
-/* Clamp/reveal is driven by the measured max-height — no layout thrash, no reflow jump. */
 .stream-reasoning-body {
-  min-height: 0;
-  margin: 4px 0 2px 6px;
+  margin: 4px 0 4px 7px;
   padding-left: 10px;
-  border-left: 2px solid rgba(88, 166, 255, 0.2);
+  border-left: 2px solid rgba(88, 166, 255, 0.28);
   overflow: hidden;
-  transition: max-height 220ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: max-height 180ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* Idle overflow preview: show the start, fade the cut at the bottom. */
 .stream-reasoning-body--clamped {
   position: relative;
-  mask-image: linear-gradient(180deg, #000 calc(100% - 18px), transparent 100%);
-  -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 18px), transparent 100%);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  mask-image: linear-gradient(180deg, #000 calc(100% - 16px), transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 16px), transparent 100%);
+}
+
+.stream-reasoning-body--clamped::-webkit-scrollbar {
+  display: none;
+}
+
+/*
+ * Live thinking: stick newest lines at the bottom; fade older text out the top
+ * so the viewport feels like a rising teleprompter instead of a hard crop.
+ */
+.stream-reasoning-body--clamped.stream-reasoning-body--live {
+  scroll-behavior: auto;
+  mask-image: linear-gradient(
+    180deg,
+    transparent 0%,
+    #000 14px,
+    #000 calc(100% - 4px),
+    #000 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    180deg,
+    transparent 0%,
+    #000 14px,
+    #000 calc(100% - 4px),
+    #000 100%
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stream-reasoning-body {
+    transition: none;
+  }
 }
 
 .stream-reasoning-btn--static {
@@ -666,7 +756,7 @@ function toggleReasoning(key: string) {
 }
 
 .stream-reasoning-btn--static:hover {
-  color: rgba(148, 163, 184, 0.34);
+  color: rgba(165, 184, 204, 0.72);
   background: transparent;
   border-color: transparent;
 }
@@ -677,9 +767,9 @@ function toggleReasoning(key: string) {
 }
 
 .inline-feed-markdown--reasoning :deep(.msg-markdown) {
-  font-size: 12px;
+  font-size: 12.5px;
   line-height: 1.55;
-  color: rgba(148, 163, 184, 0.38);
+  color: rgba(186, 196, 208, 0.78);
   font-style: italic;
 }
 
@@ -690,7 +780,7 @@ function toggleReasoning(key: string) {
   height: 1em;
   margin-left: 2px;
   vertical-align: -0.12em;
-  background: rgba(148, 163, 184, 0.34);
+  background: rgba(148, 163, 184, 0.45);
   animation: stream-caret-blink 1s step-end infinite;
 }
 
@@ -708,27 +798,27 @@ function toggleReasoning(key: string) {
   align-items: center;
   gap: 6px;
   max-width: 100%;
-  padding: 2px 8px 2px 6px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 3px;
-  background: rgba(255, 255, 255, 0.025);
+  padding: 2px 4px 2px 2px;
+  border: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
   color: rgba(148, 163, 184, 0.72);
   font-size: 11px;
   font-family: inherit;
   line-height: 1.35;
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  transition: color 120ms ease;
 }
 
 .stream-process-collapsed-wrap--nested .stream-process-collapsed-btn {
   font-size: 10px;
-  padding: 2px 7px 2px 5px;
+  padding: 2px 4px 2px 2px;
 }
 
 .stream-process-collapsed-btn:hover {
   color: rgba(165, 214, 255, 0.92);
-  background: rgba(88, 166, 255, 0.06);
-  border-color: rgba(88, 166, 255, 0.14);
+  background: transparent;
+  border-color: transparent;
 }
 
 .stream-process-collapsed-chevron {
@@ -745,9 +835,9 @@ function toggleReasoning(key: string) {
 }
 
 .stream-process-collapsed-body {
-  margin: 4px 0 2px 6px;
+  margin: 4px 0 2px 7px;
   padding-left: 10px;
-  border-left: 2px solid rgba(88, 166, 255, 0.16);
+  border-left: 1.5px solid rgba(88, 166, 255, 0.14);
 }
 
 .stream-progress-hint {
@@ -787,10 +877,6 @@ function toggleReasoning(key: string) {
   .stream-reasoning-dot {
     animation: none;
     opacity: 0.9;
-  }
-
-  .stream-reasoning-reveal {
-    transition: none;
   }
 
   .stream-reasoning-body {

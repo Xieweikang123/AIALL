@@ -10,7 +10,10 @@
       v-for="(row, index) in visibleRows"
       :key="row.key"
       class="process-step-wrap"
-      :class="{ 'process-step-wrap--open': isDetailOpen(row.key) }"
+      :class="{
+        'process-step-wrap--open': isDetailOpen(row.key),
+        'process-step-wrap--running': row.state === 'running',
+      }"
     >
       <div
         class="process-step"
@@ -47,6 +50,13 @@
         </span>
       </div>
       <div
+        v-if="row.state === 'running'"
+        class="process-step-live-progress"
+        aria-hidden="true"
+      >
+        <div class="process-step-live-progress-bar" />
+      </div>
+      <div
         v-if="showDetail && isDetailOpen(row.key)"
         class="process-step-detail"
       >
@@ -80,8 +90,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { cursorActionClass, formatCursorActionLabel } from "../services/agentCursorFeed";
+import { computed, onUnmounted, ref, watch } from "vue";
+import {
+  cursorActionClass,
+  formatCursorActionLabel,
+  formatRunningToolElapsedLabel,
+} from "../services/agentCursorFeed";
 import type { AgentRoundTool } from "../services/agentRoundGroups";
 import { getToolCommand, getToolPath } from "../utils/toolHelpers";
 
@@ -102,6 +116,37 @@ const emit = defineEmits<{
 
 const expanded = ref(false);
 const detailOpenKeys = ref<Set<string>>(new Set());
+/** 1s clock for running-tool elapsed labels; only ticks while a row is running. */
+const nowMs = ref(Date.now());
+let elapsedTickTimer: ReturnType<typeof setInterval> | null = null;
+
+const hasRunningTool = computed(() => props.tools.some((tool) => tool.running));
+
+function stopElapsedTick() {
+  if (elapsedTickTimer) {
+    clearInterval(elapsedTickTimer);
+    elapsedTickTimer = null;
+  }
+}
+
+function startElapsedTick() {
+  if (elapsedTickTimer) return;
+  nowMs.value = Date.now();
+  elapsedTickTimer = setInterval(() => {
+    nowMs.value = Date.now();
+  }, 1000);
+}
+
+watch(
+  hasRunningTool,
+  (running) => {
+    if (running) startElapsedTick();
+    else stopElapsedTick();
+  },
+  { immediate: true },
+);
+
+onUnmounted(stopElapsedTick);
 
 watch(
   () => props.tools.length,
@@ -160,7 +205,20 @@ function shortPath(path: string): string {
 }
 
 function extractMeta(step: AgentRoundTool): string {
+  if (step.running) {
+    // Depend on nowMs so only this list re-renders on the 1s tick.
+    void nowMs.value;
+    return formatRunningToolElapsedLabel({
+      name: step.name,
+      args: step.args,
+      startTs: step.startTs,
+      now: nowMs.value,
+    });
+  }
+
   const summary = step.summary?.trim() ?? "";
+  if (step.ok === false && /超时/.test(summary)) return summary;
+
   const lineMatch = summary.match(/(\d+)\s*行/);
   if (lineMatch) return `${lineMatch[1]} 行`;
 
@@ -181,6 +239,8 @@ function extractMeta(step: AgentRoundTool): string {
     const hitMatch = summary.match(/(\d+)/);
     if (hitMatch) return `${hitMatch[1]} 命中`;
   }
+
+  if (step.ok === false && /命令超时/.test(step.fullResult ?? "")) return "超时";
 
   return "";
 }
@@ -262,26 +322,19 @@ const railProgressPercent = computed(() => {
   gap: 0;
   max-height: 240px;
   overflow-y: auto;
-  padding: 4px 0 4px 4px;
-  border-radius: 3px;
-  background: rgba(0, 0, 0, 0.12);
+  padding: 2px 0 2px 2px;
+  border-radius: 0;
+  background: transparent;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
 }
 
 .process-step-list--running {
   max-height: none;
-  background: transparent;
 }
 
 .process-step-list--compact {
   max-height: 160px;
-  background: rgba(0, 0, 0, 0.06);
-  border-radius: 3px;
   --step-rail-x: 12px;
-}
-
-.process-step-list--compact.process-step-list--running {
-  background: transparent;
 }
 
 .process-step-rail-track {
@@ -342,15 +395,20 @@ const railProgressPercent = computed(() => {
   grid-template-columns: 14px 8px minmax(0, 68px) minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 6px;
-  min-height: 28px;
-  padding: 4px 8px 4px 4px;
-  font-size: 11px;
+  min-height: 26px;
+  padding: 3px 6px 3px 4px;
+  font-size: 11.5px;
   line-height: 1.35;
-  color: rgba(186, 196, 208, 0.88);
+  color: rgba(148, 163, 184, 0.72);
+  transition: color 160ms ease;
 }
 
 .process-step-wrap--open > .process-step {
-  background: rgba(88, 166, 255, 0.05);
+  background: transparent;
+}
+
+.process-step-wrap--running {
+  margin: 1px 0 2px;
 }
 
 .process-step-chevron {
@@ -423,9 +481,73 @@ const railProgressPercent = computed(() => {
   color: rgba(148, 163, 184, 0.72);
 }
 
+/* 运行中：字阶抬高 + 行下进度；已完成步骤压暗，形成主次 */
 .process-step--running {
-  background: rgba(88, 166, 255, 0.06);
-  color: rgba(190, 218, 255, 0.92);
+  background: transparent;
+  color: rgba(220, 232, 245, 0.96);
+}
+
+.process-step--running .process-step-verb {
+  color: rgba(165, 214, 255, 1);
+}
+
+.process-step--running .process-step-target,
+.process-step--running .process-step-target--plain {
+  color: rgba(230, 237, 243, 0.95);
+}
+
+.process-step--running .process-step-prompt {
+  color: rgba(126, 182, 255, 1);
+}
+
+.process-step--done {
+  color: rgba(148, 163, 184, 0.52);
+}
+
+.process-step--done .process-step-verb {
+  color: rgba(126, 182, 255, 0.48);
+  font-weight: 500;
+}
+
+.process-step--done .process-step-target,
+.process-step--done .process-step-target--plain {
+  color: rgba(148, 163, 184, 0.58);
+}
+
+.process-step--done .process-step-prompt {
+  color: rgba(88, 166, 255, 0.4);
+}
+
+.process-step-live-progress {
+  position: relative;
+  z-index: 1;
+  height: 1.5px;
+  margin: 0 4px 3px 28px;
+  overflow: hidden;
+  border-radius: 1px;
+  background: rgba(88, 166, 255, 0.12);
+}
+
+.process-step-live-progress-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 38%;
+  background: linear-gradient(
+    90deg,
+    rgba(31, 111, 235, 0),
+    rgba(31, 111, 235, 0.85),
+    rgba(88, 166, 255, 0.95),
+    rgba(31, 111, 235, 0.85),
+    rgba(31, 111, 235, 0)
+  );
+  animation: process-step-live-progress 1.35s ease-in-out infinite;
+}
+
+@keyframes process-step-live-progress {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(320%); }
 }
 
 .process-step--fail {
@@ -448,7 +570,7 @@ const railProgressPercent = computed(() => {
 
 .process-step-verb {
   flex-shrink: 0;
-  color: rgba(126, 182, 255, 0.92);
+  color: rgba(126, 182, 255, 0.78);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -460,7 +582,7 @@ const railProgressPercent = computed(() => {
   padding: 0;
   border: none;
   background: transparent;
-  color: rgba(201, 209, 217, 0.9);
+  color: rgba(186, 196, 208, 0.82);
   font: inherit;
   text-align: left;
   overflow: hidden;
@@ -469,7 +591,7 @@ const railProgressPercent = computed(() => {
 }
 
 .process-step-target--plain {
-  color: rgba(201, 209, 217, 0.88);
+  color: rgba(186, 196, 208, 0.78);
 }
 
 button.process-step-target {
@@ -486,6 +608,10 @@ button.process-step-target:hover {
   flex-shrink: 0;
   color: rgba(148, 163, 184, 0.55);
   font-variant-numeric: tabular-nums;
+}
+
+.process-step--running .process-step-meta {
+  color: rgba(126, 182, 255, 0.78);
 }
 
 .process-step-more {
@@ -554,6 +680,12 @@ button.process-step-target:hover {
 
   .process-step-rail-track::after {
     transition: none;
+  }
+
+  .process-step-live-progress-bar {
+    animation: none;
+    width: 100%;
+    background: linear-gradient(90deg, rgba(31, 111, 235, 0.85), rgba(88, 166, 255, 0.95));
   }
 }
 </style>

@@ -10,10 +10,13 @@ import {
   formatExplorationSummary,
   cursorActionClass,
   cursorPlanningLabel,
+  formatRunningToolElapsedLabel,
+  resolveToolTimeoutMs,
   shouldSuppressFeedPlanningStatus,
   layoutCursorFeedBlocks,
   getRecentFeedActions,
   shouldUseCompactAgentFeed,
+  RUN_COMMAND_DEFAULT_TIMEOUT_MS,
 } from "./agentCursorFeed";
 import { buildUnifiedAgentTimeline, buildAgentLiveFooterStatus, buildCursorCompactLiveStatus, splitAgentLiveStatusLine, isAgentWaitingModelPhase, summarizeCursorProcessBlocks, buildFilteredCursorAgentFeedItems } from "./agentCompactStatus";
 import { formatToolMeta } from "../utils/vibeHelpers";
@@ -180,6 +183,53 @@ describe("agentCursorFeed", () => {
     expect(cursorPlanningLabel("connecting_local")).toBe("连接本地服务…");
     expect(cursorPlanningLabel("connected", "读取项目上下文")).toContain("启动 Agent");
     expect(cursorPlanningLabel("building_context")).toBe("准备上下文…");
+  });
+
+  it("formats running tool elapsed with run_command timeout budget", () => {
+    const startTs = 1_000_000;
+    expect(
+      formatRunningToolElapsedLabel({
+        name: "read_file",
+        startTs,
+        now: startTs + 12_400,
+      }),
+    ).toBe("执行中 · 12s");
+
+    expect(
+      formatRunningToolElapsedLabel({
+        name: "run_command",
+        args: { command: "npm test" },
+        startTs,
+        now: startTs + 12_400,
+      }),
+    ).toBe(`执行中 · 12s / ${RUN_COMMAND_DEFAULT_TIMEOUT_MS / 1000}s`);
+
+    expect(
+      formatRunningToolElapsedLabel({
+        name: "run_command",
+        args: { command: "sleep", timeout_ms: 60_000 },
+        startTs,
+        now: startTs + 5_000,
+      }),
+    ).toBe("执行中 · 5s / 60s");
+
+    expect(resolveToolTimeoutMs("run_command", { timeout_ms: 1_000 })).toBe(5_000);
+    expect(resolveToolTimeoutMs("run_command", { timeout_ms: 200_000 })).toBe(120_000);
+    expect(resolveToolTimeoutMs("grep", {})).toBeNull();
+  });
+
+  it("marks run_command timeout failures distinctly", () => {
+    expect(formatCursorActionLabel({
+      id: "1",
+      name: "run_command",
+      icon: "▶️",
+      title: "执行命令",
+      detail: "npm test",
+      label: "$ npm test",
+      summary: "超时",
+      ok: false,
+      args: { command: "npm test" },
+    })).toBe("$ npm test · 超时");
   });
 
   it("builds thought then action sequence", () => {

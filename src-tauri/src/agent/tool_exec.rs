@@ -207,6 +207,68 @@ pub async fn execute_tool(
     }
 }
 
+/// 不依赖共享可变状态的工具入口，供同轮并行调度使用。
+pub async fn execute_parallelizable_tool(
+    project_path: &str,
+    mode: &str,
+    web_proxy_url: Option<&str>,
+    name: &str,
+    args: &Value,
+) -> ToolExecOutcome {
+    if !tools::is_parallelizable_tool(name) {
+        return ToolExecOutcome {
+            ok: false,
+            message: format!("错误：工具 {name} 不支持并行执行"),
+            file_diff: None,
+        };
+    }
+    let (ok, message) = match name {
+        "list_dir" | "list_directory" => exec_list_dir(project_path, args).await,
+        "git_status" => {
+            let text = super::agent_git_tools::run_git_status_tool(project_path).await;
+            (!text.starts_with("错误："), text)
+        }
+        "git_diff" => {
+            let file_path = args
+                .get("path")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty());
+            let staged = args
+                .get("staged")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let text =
+                super::agent_git_tools::run_git_diff_tool(project_path, file_path, staged).await;
+            (!text.starts_with("错误："), text)
+        }
+        "run_command" => exec_run_command(project_path, args, mode).await,
+        "web_search" => exec_web_search(args, web_proxy_url).await,
+        "web_extract" => exec_web_extract(args, web_proxy_url).await,
+        "search_sessions" => {
+            let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
+            if query.trim().is_empty() {
+                (false, "错误：缺少 query".into())
+            } else {
+                let max_results = args
+                    .get("max_results")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(5)
+                    .min(10) as usize;
+                match super::memory_store::search_sessions(query, max_results).await {
+                    Ok(text) => (true, text),
+                    Err(e) => (false, e),
+                }
+            }
+        }
+        _ => (false, format!("未知工具: {name}")),
+    };
+    ToolExecOutcome {
+        ok,
+        message,
+        file_diff: None,
+    }
+}
+
 pub fn block_write(mode: &str, tool: &str) -> Option<String> {
     if mode == "ask" {
         return Some(format!("Ask 模式下不支持 {tool}。"));
@@ -787,6 +849,10 @@ async fn exec_run_command(project_path: &str, args: &Value, mode: &str) -> (bool
     let cmd = tokio::process::Command::new(shell)
         .args([flag, command])
         .current_dir(project_path)
+        .env("GIT_PAGER", "cat")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("PAGER", "cat")
+        .kill_on_drop(true)
         .output();
     let result = tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), cmd).await;
     match result {

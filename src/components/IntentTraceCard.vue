@@ -163,13 +163,13 @@ function messageRoleLabel(role: string): string {
 </script>
 
 <style scoped>
-/* 单行元信息条：无卡片边框/底色，降低与 rail 的视觉层级冲突 */
+/* 单行元信息条：弱于思考/工具，只作时间线脚注 */
 .intent-trace-card {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 2px 0 6px;
-  margin: 0;
+  gap: 4px;
+  padding: 0 0 2px;
+  margin: 0 0 2px;
   font-size: 11px;
 }
 
@@ -182,21 +182,23 @@ function messageRoleLabel(role: string): string {
 }
 
 .intent-trace-dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 1px;
-  background: rgba(88, 166, 255, 0.9);
-  box-shadow: 0 0 8px rgba(88, 166, 255, 0.45);
+  background: rgba(148, 163, 184, 0.55);
+  box-shadow: none;
   flex-shrink: 0;
 }
 
 .intent-trace-dot--pending {
+  background: rgba(88, 166, 255, 0.9);
+  box-shadow: 0 0 8px rgba(88, 166, 255, 0.45);
   animation: intent-trace-pulse 1.2s ease-in-out infinite;
 }
 
 .intent-trace-label {
   font-weight: 600;
-  color: rgba(139, 148, 158, 0.85);
+  color: rgba(139, 148, 158, 0.55);
   flex-shrink: 0;
 }
 
@@ -204,10 +206,10 @@ function messageRoleLabel(role: string): string {
   flex-shrink: 0;
   font-size: 9px;
   font-weight: 600;
-  padding: 1px 5px;
+  padding: 0 4px;
   border-radius: 2px;
-  color: rgba(88, 166, 255, 0.9);
-  background: rgba(88, 166, 255, 0.12);
+  color: rgba(126, 182, 255, 0.7);
+  background: rgba(88, 166, 255, 0.08);
 }
 
 .intent-trace-value {
@@ -215,26 +217,27 @@ function messageRoleLabel(role: string): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgba(230, 237, 243, 0.92);
+  color: rgba(186, 196, 208, 0.72);
   font-weight: 500;
 }
 
 .intent-trace-toggle {
   margin-left: auto;
   flex-shrink: 0;
-  padding: 1px 8px;
-  border: 1px solid rgba(88, 166, 255, 0.25);
-  border-radius: 2px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
   background: transparent;
-  color: rgba(88, 166, 255, 0.85);
+  color: rgba(139, 148, 158, 0.55);
   font-size: 10px;
   font-family: inherit;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: color 0.15s ease;
 }
 
 .intent-trace-toggle:hover {
-  background: rgba(88, 166, 255, 0.1);
+  background: transparent;
+  color: rgba(165, 214, 255, 0.9);
 }
 
 .intent-trace-value--pending {

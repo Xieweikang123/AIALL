@@ -31,6 +31,7 @@ use super::run_types::AgentRunRequest;
 use super::vision_consultative::{should_bypass_vision_first_turn, should_run_vision_anchor_pgrep};
 use super::vision_pregrep::apply_vision_anchor_pgrep_messages;
 use super::{context, intent_hints, policy, runtime_hint, tool_exec, tools};
+use futures_util::future::join_all;
 
 /// Run the desktop Agent without a WebView, forwarding events to `on_event`.
 /// Used by `agent-smoke` CLI — same loop as Tauri `agent_run`.
@@ -839,35 +840,99 @@ pub async fn agent_run(
             written_files: &mut run_state.written_files,
             tool_guard: &mut run_state.tool_guard,
         };
-        for call in tool_calls {
+
+        #[derive(Clone)]
+        struct ParsedToolCall {
+            id: String,
+            name: String,
+            args: Value,
+        }
+
+        let parsed_calls: Vec<ParsedToolCall> = tool_calls
+            .iter()
+            .map(|call| {
+                let id = call
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let function = call.get("function").cloned().unwrap_or(json!({}));
+                let name = function
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let args_raw = function
+                    .get("arguments")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("{}");
+                let args: Value = serde_json::from_str(args_raw).unwrap_or(json!({}));
+                ParsedToolCall { id, name, args }
+            })
+            .collect();
+        let call_names: Vec<&str> = parsed_calls.iter().map(|c| c.name.as_str()).collect();
+        let batches = tools::partition_tool_batches(&call_names);
+
+        for (parallel_batch, indices) in batches {
             if is_cancelled(&cancel) {
                 let turns = run_state.segment.actual_turns;
                 checkpoint
                     .finish_aborted(&run_state.written_files, turns)
                     .await;
-                emit_aborted_done(
-                    &channel,
-                    &run_state.written_files,
-                    turns,
-                );
+                emit_aborted_done(&channel, &run_state.written_files, turns);
                 return Ok(());
             }
-            let id = call.get("id").and_then(|v| v.as_str()).unwrap_or("");
-            let function = call.get("function").cloned().unwrap_or(json!({}));
-            let name = function.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            let args_raw = function
-                .get("arguments")
-                .and_then(|v| v.as_str())
-                .unwrap_or("{}");
-            let args: Value = serde_json::from_str(args_raw).unwrap_or(json!({}));
 
-            emit(
-                &channel,
-                json!({ "type": "tool_start", "data": { "id": id, "name": name, "args": args } }),
-            );
+            for &index in &indices {
+                let call = &parsed_calls[index];
+                emit(
+                    &channel,
+                    json!({
+                      "type": "tool_start",
+                      "data": { "id": call.id, "name": call.name, "args": call.args }
+                    }),
+                );
+            }
 
-            let (ok, result) = {
-                let outcome = tool_exec::execute_tool(&mut tool_ctx, name, &args).await;
+            let outcomes: Vec<tool_exec::ToolExecOutcome> =
+                if parallel_batch && indices.len() > 1 {
+                    let project = request.project_path.clone();
+                    let mode = effective_mode_str.to_string();
+                    let proxy = web_proxy_url.map(|s| s.to_string());
+                    let jobs = indices.iter().map(|&index| {
+                        let call = parsed_calls[index].clone();
+                        let project = project.clone();
+                        let mode = mode.clone();
+                        let proxy = proxy.clone();
+                        async move {
+                            tool_exec::execute_parallelizable_tool(
+                                &project,
+                                &mode,
+                                proxy.as_deref(),
+                                &call.name,
+                                &call.args,
+                            )
+                            .await
+                        }
+                    });
+                    join_all(jobs).await
+                } else {
+                    let mut serial = Vec::with_capacity(indices.len());
+                    for &index in &indices {
+                        let call = &parsed_calls[index];
+                        serial.push(
+                            tool_exec::execute_tool(&mut tool_ctx, &call.name, &call.args).await,
+                        );
+                    }
+                    serial
+                };
+
+            for (&index, outcome) in indices.iter().zip(outcomes.into_iter()) {
+                let call = &parsed_calls[index];
+                let id = call.id.as_str();
+                let name = call.name.as_str();
+                let args = &call.args;
+
                 if let Some(diff) = outcome.file_diff {
                     emit(
                         &channel,
@@ -883,68 +948,82 @@ pub async fn agent_run(
                         }),
                     );
                 }
-                (outcome.ok, outcome.message)
-            };
-            if !is_tool_result_failure(&result) {
-                tool_ctx.tool_guard.note_tool_output(&result);
-            }
-            turn_tool_outcomes.push(result.clone());
-            if !is_read_only_run
-                && effective_mode_str != "plan"
-                && !run_policy.read_only_build_run
-                && ok
-            {
-                if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
-                    if name == "write_file" && is_ephemeral_probe_path(path) {
-                        run_state.probe_tracker.track_write(path);
-                    } else if name == "delete_file" && is_ephemeral_probe_path(path) {
-                        run_state.probe_tracker.track_delete(path);
+                let ok = outcome.ok;
+                let result = outcome.message;
+
+                if !is_tool_result_failure(&result) {
+                    tool_ctx.tool_guard.note_tool_output(&result);
+                }
+                turn_tool_outcomes.push(result.clone());
+                if !is_read_only_run
+                    && effective_mode_str != "plan"
+                    && !run_policy.read_only_build_run
+                    && ok
+                {
+                    if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
+                        if name == "write_file" && is_ephemeral_probe_path(path) {
+                            run_state.probe_tracker.track_write(path);
+                        } else if name == "delete_file" && is_ephemeral_probe_path(path) {
+                            run_state.probe_tracker.track_delete(path);
+                        }
                     }
                 }
-            }
-            if name == "patch_file" && !ok {
-                if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
-                    let norm = path.replace('\\', "/");
-                    let entry = PatchFailureEntry {
-                        turn,
-                        path: norm.clone(),
-                        reason: result.clone(),
-                    };
-                    run_state.patch.failure_log.push(entry.clone());
-                    turn_patch_failures.push(entry);
+                if name == "patch_file" && !ok {
+                    if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
+                        let norm = path.replace('\\', "/");
+                        let entry = PatchFailureEntry {
+                            turn,
+                            path: norm.clone(),
+                            reason: result.clone(),
+                        };
+                        run_state.patch.failure_log.push(entry.clone());
+                        turn_patch_failures.push(entry);
+                    }
+                } else if name == "grep" {
+                    turn_had_grep = true;
                 }
-            } else if name == "grep" {
-                turn_had_grep = true;
-            }
-            let is_write = tools::is_write_tool(name);
-            if name == "read_file" {
-                if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
-                    let norm = path.replace('\\', "/");
-                    if ok {
-                        if !run_state.consultative.read_paths.contains(&norm) {
-                            run_state.consultative.read_paths.push(norm.clone());
+                let is_write = tools::is_write_tool(name);
+                if name == "read_file" {
+                    if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
+                        let norm = path.replace('\\', "/");
+                        if ok {
+                            if !run_state.consultative.read_paths.contains(&norm) {
+                                run_state.consultative.read_paths.push(norm.clone());
+                            }
+                            run_state.consultative.explore_files_read.insert(norm);
+                            if has_image {
+                                run_state.vision.locate_tools_used = true;
+                            }
+                            if run_policy.consultative_vision_run
+                                && tool_ctx.tool_guard.vision_locate_active
+                            {
+                                run_state.vision.locate_read_used = true;
+                            }
+                        } else if !run_state.consultative.read_failed_paths.contains(&norm) {
+                            run_state.consultative.read_failed_paths.push(norm.clone());
+                            if !turn_read_failed_paths.contains(&norm) {
+                                turn_read_failed_paths.push(norm);
+                            }
                         }
-                        run_state.consultative.explore_files_read.insert(norm);
-                        if has_image {
-                            run_state.vision.locate_tools_used = true;
-                        }
-                        if run_policy.consultative_vision_run
-                            && tool_ctx.tool_guard.vision_locate_active
+                    }
+                } else if name == "grep" {
+                    if ok && has_image {
+                        run_state.vision.locate_tools_used = true;
+                    }
+                    if ok && result.contains("（无匹配）") {
+                        if let Some(pattern) = args
+                            .get("pattern")
+                            .or_else(|| args.get("q"))
+                            .and_then(|v| v.as_str())
                         {
-                            run_state.vision.locate_read_used = true;
-                        }
-                    } else if !run_state.consultative.read_failed_paths.contains(&norm) {
-                        run_state.consultative.read_failed_paths.push(norm.clone());
-                        if !turn_read_failed_paths.contains(&norm) {
-                            turn_read_failed_paths.push(norm);
+                            let trimmed = pattern.trim();
+                            if !trimmed.is_empty()
+                                && !turn_grep_empty_patterns.iter().any(|p| p == trimmed)
+                            {
+                                turn_grep_empty_patterns.push(trimmed.to_string());
+                            }
                         }
                     }
-                }
-            } else if name == "grep" {
-                if ok && has_image {
-                    run_state.vision.locate_tools_used = true;
-                }
-                if ok && result.contains("（无匹配）") {
                     if let Some(pattern) = args
                         .get("pattern")
                         .or_else(|| args.get("q"))
@@ -952,76 +1031,66 @@ pub async fn agent_run(
                     {
                         let trimmed = pattern.trim();
                         if !trimmed.is_empty()
-                            && !turn_grep_empty_patterns.iter().any(|p| p == trimmed)
+                            && !run_state
+                                .consultative
+                                .grep_patterns
+                                .iter()
+                                .any(|p| p == trimmed)
                         {
-                            turn_grep_empty_patterns.push(trimmed.to_string());
+                            run_state
+                                .consultative
+                                .grep_patterns
+                                .push(trimmed.to_string());
+                        }
+                    }
+                } else if name == "search_files" || name == "search_symbols" {
+                    if let Some(query) = args
+                        .get("query")
+                        .or_else(|| args.get("q"))
+                        .and_then(|v| v.as_str())
+                    {
+                        let trimmed = query.trim();
+                        if !trimmed.is_empty()
+                            && !run_state
+                                .consultative
+                                .search_queries
+                                .iter()
+                                .any(|q| q == trimmed)
+                        {
+                            run_state
+                                .consultative
+                                .search_queries
+                                .push(trimmed.to_string());
                         }
                     }
                 }
-                if let Some(pattern) = args
-                    .get("pattern")
-                    .or_else(|| args.get("q"))
-                    .and_then(|v| v.as_str())
-                {
-                    let trimmed = pattern.trim();
-                    if !trimmed.is_empty()
-                        && !run_state
-                            .consultative
-                            .grep_patterns
-                            .iter()
-                            .any(|p| p == trimmed)
-                    {
-                        run_state
-                            .consultative
-                            .grep_patterns
-                            .push(trimmed.to_string());
-                    }
+                if is_write {
+                    turn_had_only_read_tools = false;
                 }
-            } else if name == "search_files" || name == "search_symbols" {
-                if let Some(query) = args
-                    .get("query")
-                    .or_else(|| args.get("q"))
-                    .and_then(|v| v.as_str())
-                {
-                    let trimmed = query.trim();
-                    if !trimmed.is_empty()
-                        && !run_state
-                            .consultative
-                            .search_queries
-                            .iter()
-                            .any(|q| q == trimmed)
-                    {
-                        run_state
-                            .consultative
-                            .search_queries
-                            .push(trimmed.to_string());
-                    }
-                }
-            }
-            if is_write {
-                turn_had_only_read_tools = false;
-            }
 
-            let summary = if ok {
-                crate::agent::tool_summary(name, &result)
-            } else {
-                "failed".to_string()
-            };
-            emit(
-                &channel,
-                json!({
-                  "type": "tool_end", "data": {
-                    "id": id, "name": name, "ok": ok,
-                    "summary": summary,
-                    "result": result.chars().take(4000).collect::<String>()
-                  }
-                }),
-            );
-            checkpoint.note_tool(id, name, ok, &summary, turn);
+                let summary = if ok {
+                    crate::agent::tool_summary(name, &result)
+                } else if result.contains("命令超时") {
+                    "超时".to_string()
+                } else {
+                    "failed".to_string()
+                };
+                emit(
+                    &channel,
+                    json!({
+                      "type": "tool_end", "data": {
+                        "id": id, "name": name, "ok": ok,
+                        "summary": summary,
+                        "result": result.chars().take(4000).collect::<String>()
+                      }
+                    }),
+                );
+                checkpoint.note_tool(id, name, ok, &summary, turn);
 
-            run_state
-                .messages
-                .push(json!({ "role": "tool", "tool_call_id": id, "content": result }));
+                run_state
+                    .messages
+                    .push(json!({ "role": "tool", "tool_call_id": id, "content": result }));
+            }
         }
 
         checkpoint.set_written_files(&run_state.written_files);

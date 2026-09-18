@@ -294,4 +294,10 @@ describe("resolveActiveReasoningKey", () => {
   it("ignores empty reasoning placeholders", () => {
     expect(resolveActiveReasoningKey([reasoning("  ")], true)).toBeNull();
   });
+
+  it("documents that active only drives the live label, not auto-expand", () => {
+    // Body clamp/expand lives in AgentInlineFeedItems; active key must stay
+    // truthy while reasoning is the newest emission so the label can pulse.
+    expect(resolveActiveReasoningKey([reasoning("长文思考…")], true)).toBe("reasoning-1");
+  });
 });

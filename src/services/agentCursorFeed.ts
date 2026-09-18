@@ -445,7 +445,11 @@ export function formatCursorActionLabel(step: AgentRoundTool): string {
     const { preview } = formatRunCommandLabel(step.args, step.detail);
     const display = `$ ${preview}`;
     if (running) return display;
-    if (failed) return `${display} · 失败`;
+    if (failed) {
+      const timedOut =
+        /超时/.test(step.summary?.trim() ?? "") || /命令超时/.test(step.fullResult ?? "");
+      return timedOut ? `${display} · 超时` : `${display} · 失败`;
+    }
     return display;
   }
 
@@ -453,6 +457,55 @@ export function formatCursorActionLabel(step: AgentRoundTool): string {
   if (running) return fallback;
   if (failed) return `${fallback} failed`;
   return fallback;
+}
+
+/** Matches Rust `exec_run_command` timeout clamp (tool_exec.rs). */
+export const RUN_COMMAND_DEFAULT_TIMEOUT_MS = 30_000;
+export const RUN_COMMAND_MIN_TIMEOUT_MS = 5_000;
+export const RUN_COMMAND_MAX_TIMEOUT_MS = 120_000;
+
+/** Known timeout budget in ms for tools that have one; null if unknown. */
+export function resolveToolTimeoutMs(
+  name: string,
+  args?: Record<string, unknown>,
+): number | null {
+  if (name !== "run_command") return null;
+  const raw = args?.timeout_ms;
+  const parsed =
+    typeof raw === "number"
+      ? raw
+      : typeof raw === "string" && raw.trim()
+        ? Number(raw)
+        : NaN;
+  const ms = Number.isFinite(parsed) && parsed > 0 ? parsed : RUN_COMMAND_DEFAULT_TIMEOUT_MS;
+  return Math.min(
+    RUN_COMMAND_MAX_TIMEOUT_MS,
+    Math.max(RUN_COMMAND_MIN_TIMEOUT_MS, Math.floor(ms)),
+  );
+}
+
+/**
+ * Live status on a running tool row: `执行中 · 12s` or `执行中 · 12s / 30s`
+ * when the tool has a known timeout budget (currently run_command).
+ */
+export function formatRunningToolElapsedLabel(input: {
+  name: string;
+  args?: Record<string, unknown>;
+  startTs?: number;
+  now?: number;
+}): string {
+  const now = input.now ?? Date.now();
+  const start = input.startTs;
+  const elapsedSec =
+    typeof start === "number" && start > 0
+      ? Math.max(0, Math.floor((now - start) / 1000))
+      : 0;
+  const timeoutMs = resolveToolTimeoutMs(input.name, input.args);
+  if (timeoutMs != null) {
+    const budgetSec = Math.max(1, Math.round(timeoutMs / 1000));
+    return `执行中 · ${elapsedSec}s / ${budgetSec}s`;
+  }
+  return `执行中 · ${elapsedSec}s`;
 }
 
 export function cursorPlanningLabel(phase?: string, detail?: string): string | null {

@@ -74,25 +74,27 @@ const showProgress = computed(
   overflow: hidden;
 }
 
+/* 时间线底栏：无卡片边框，顶部细分割线承接上方步骤流 */
 .agent-live-status--rail {
-  margin-top: 4px;
-  border-radius: 3px;
-  border: 1px solid rgba(88, 166, 255, 0.14);
-  background: rgba(0, 0, 0, 0.5);
+  margin-top: 2px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  border-top: 1px solid rgba(148, 163, 184, 0.1);
 }
 
 .agent-live-status--banner {
   display: flex;
   flex-direction: column;
   margin: 2px 0 8px;
-  border-radius: 3px;
-  border: 1px solid rgba(88, 166, 255, 0.14);
-  background: rgba(88, 166, 255, 0.06);
+  border-radius: 0;
+  border: none;
+  background: transparent;
 }
 
 .agent-live-status-progress {
-  height: 2px;
-  background: rgba(88, 166, 255, 0.1);
+  height: 1px;
+  background: rgba(88, 166, 255, 0.08);
 }
 
 .agent-live-status-progress--indeterminate {
@@ -126,6 +128,10 @@ const showProgress = computed(
   display: flex;
   align-items: flex-start;
   gap: 8px;
+  padding: 6px 2px 4px;
+}
+
+.agent-live-status--banner .agent-live-status-row {
   padding: 6px 10px;
 }
 
@@ -161,10 +167,10 @@ const showProgress = computed(
 .agent-live-status-phase {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 12px;
+  font-size: 11.5px;
   line-height: 1.45;
-  font-weight: 600;
-  color: rgba(190, 218, 255, 0.96);
+  font-weight: 500;
+  color: rgba(186, 208, 232, 0.88);
 }
 
 .agent-live-status--banner .agent-live-status-phase {

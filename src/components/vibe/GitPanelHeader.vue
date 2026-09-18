@@ -75,6 +75,7 @@
       :loading="gitBehindCommitsLoading"
       :commits="gitBehindCommits"
       @update:open="$emit('update:gitBehindCommitsOpen', $event)"
+      @open-git-log-file="(entry, file) => $emit('open-git-log-file', entry, file)"
     />
   </div>
 </template>

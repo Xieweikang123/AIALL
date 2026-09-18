@@ -157,7 +157,10 @@ const isPhaseProgressing = computed(() =>
 
 const liveRailVisible = computed(() => {
   if (!props.isRunning) return false;
-  // 运行中只要有状态文案就显示底栏（含工具执行弱提示），避免气泡像已结束。
+  // 有工具在跑时，当前步骤行本身就是活态（节点脉冲 + 行内进度），
+  // 不再叠一条「执行工具中…」空栏，避免框套框打断时间线。
+  if (hasActiveTool.value) return false;
+  // 等模型 / 规划 / 阶段推进时仍用底栏，避免气泡看起来像已结束。
   return Boolean(liveRailPrimary.value.trim());
 });
 
@@ -190,7 +193,7 @@ watch(timelineRoot, (el) => bindScrollEl(el));
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
   padding: 0;
 }

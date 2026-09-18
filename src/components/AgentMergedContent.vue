@@ -185,28 +185,28 @@ watch(
   overflow: hidden;
 }
 
+/* 轨迹入口做成时间线脚注，不做独立按钮卡片 */
 .agent-trace-entry {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   align-self: flex-start;
-  margin: 6px 0 2px;
-  padding: 4px 10px;
-  border: 1px solid rgba(126, 182, 255, 0.22);
-  border-radius: 3px;
-  background: rgba(88, 166, 255, 0.08);
-  color: rgba(165, 214, 255, 0.92);
+  margin: 8px 0 2px;
+  padding: 2px 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(148, 163, 184, 0.52);
   font-size: 11px;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   line-height: 1.4;
   cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  transition: color 120ms ease;
 }
 
 .agent-trace-entry:hover {
-  background: rgba(88, 166, 255, 0.16);
-  border-color: rgba(126, 182, 255, 0.4);
-  color: rgba(190, 225, 255, 1);
+  background: transparent;
+  color: rgba(165, 214, 255, 0.92);
 }
 
 .agent-trace-entry-icon {

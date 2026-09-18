@@ -224,10 +224,10 @@ function stripInlineStatusItems(items: InlineFeedItem[], isRunning: boolean): In
 /**
  * Key of the reasoning stream currently being produced, or null.
  *
- * While this key is active the UI keeps the thought body unclamped. Once a tool
- * call or streamed answer/narrative follows, overflow (>3 lines) clamps to a
- * preview; shorter thoughts stay fully visible. Status rows are ignored — they
- * are transient rails, not content that ends thinking.
+ * Drives the "思考中…" label / pulse. The body itself stays height-clamped to a
+ * ~3-line preview unless the user explicitly expands it — including while this
+ * key is active — so later tools do not cause a layout jump. Status rows are
+ * ignored: they are transient rails, not content that ends thinking.
  */
 export function resolveActiveReasoningKey(
   items: InlineFeedItem[],

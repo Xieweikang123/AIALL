@@ -245,6 +245,42 @@ pub fn is_write_tool(name: &str) -> bool {
     matches!(name, "write_file" | "patch_file" | "delete_file")
 }
 
+/// 同轮可并行执行的工具（不依赖共享可变 tool_guard / 写集）。
+/// `read_file` / `grep` 等仍串行，避免缓存竞态；写工具与 `memory_write` 也串行。
+pub fn is_parallelizable_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "list_dir"
+            | "list_directory"
+            | "git_status"
+            | "git_diff"
+            | "run_command"
+            | "web_search"
+            | "web_extract"
+            | "search_sessions"
+    )
+}
+
+/// 把同轮 tool_calls 切成「连续可并行批」与「必须串行的单工具批」。
+pub fn partition_tool_batches(names: &[&str]) -> Vec<(bool, Vec<usize>)> {
+    let mut batches: Vec<(bool, Vec<usize>)> = Vec::new();
+    for (index, name) in names.iter().enumerate() {
+        let parallel = is_parallelizable_tool(name);
+        if parallel {
+            if let Some(last) = batches.last_mut() {
+                if last.0 {
+                    last.1.push(index);
+                    continue;
+                }
+            }
+            batches.push((true, vec![index]));
+        } else {
+            batches.push((false, vec![index]));
+        }
+    }
+    batches
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -345,5 +381,42 @@ mod tests {
         assert!(!is_write_tool("web_extract"));
         assert!(!is_write_tool(""));
         assert!(!is_write_tool("unknown"));
+    }
+
+    #[test]
+    fn test_is_parallelizable_tool() {
+        assert!(is_parallelizable_tool("run_command"));
+        assert!(is_parallelizable_tool("git_status"));
+        assert!(is_parallelizable_tool("git_diff"));
+        assert!(is_parallelizable_tool("list_dir"));
+        assert!(is_parallelizable_tool("web_search"));
+        assert!(is_parallelizable_tool("search_sessions"));
+        assert!(!is_parallelizable_tool("read_file"));
+        assert!(!is_parallelizable_tool("grep"));
+        assert!(!is_parallelizable_tool("write_file"));
+        assert!(!is_parallelizable_tool("memory_write"));
+    }
+
+    #[test]
+    fn test_partition_tool_batches_merges_parallel_runs() {
+        let names = [
+            "git_status",
+            "run_command",
+            "read_file",
+            "run_command",
+            "write_file",
+            "git_diff",
+        ];
+        let batches = partition_tool_batches(&names);
+        assert_eq!(
+            batches,
+            vec![
+                (true, vec![0, 1]),
+                (false, vec![2]),
+                (true, vec![3]),
+                (false, vec![4]),
+                (true, vec![5]),
+            ]
+        );
     }
 }
