@@ -10,6 +10,7 @@ import {
   recordAgentRoundStatus,
   recordAgentRoundToolStart,
   resetAgentRoundGroupIds,
+  resolveAgentStreamTurn,
   resolveResumeTurnOffset,
 } from "./agentRoundGroups";
 
@@ -198,5 +199,12 @@ describe("agentRoundGroups", () => {
     const views = buildAgentRoundGroupViews({ roundGroups: groups });
     expect(views).toHaveLength(1);
     expect(views[0].reasoning).toBe("仅思考没有正文");
+  });
+
+  it("resolveAgentStreamTurn never returns ≤0", () => {
+    expect(resolveAgentStreamTurn({})).toBe(1);
+    expect(resolveAgentStreamTurn({ agentTurn: 0, liveTurn: 0 })).toBe(1);
+    expect(resolveAgentStreamTurn({ agentTurn: 0, liveTurn: 2 })).toBe(2);
+    expect(resolveAgentStreamTurn({ agentTurn: 3, liveTurn: 1 })).toBe(3);
   });
 });

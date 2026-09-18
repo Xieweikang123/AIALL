@@ -7,6 +7,7 @@ import { appendAssistantStreamDelta } from "../services/agentMessageDisplay";
 import {
   recordAgentRoundReasoningDelta,
   recordAgentRoundStreamDelta,
+  resolveAgentStreamTurn,
 } from "../services/agentRoundGroups";
 import { syncRoundGroupsPatch } from "../utils/vibeHelpers";
 import { debugLog } from "../utils/debugLog";
@@ -223,7 +224,7 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
       const nextStreamChars = (assistantMsg.streamChars || run?.live.streamChars || 0) + delta.length;
       assistantMsg.streamChars = nextStreamChars;
       if (run) run.live.streamChars = nextStreamChars;
-      const turn = assistantMsg.agentTurn ?? run?.live.turn ?? 1;
+      const turn = resolveStreamTurn(assistantMsg);
       assistantMsg.roundGroups = recordAgentRoundStreamDelta(
         assistantMsg.roundGroups,
         turn,
@@ -239,7 +240,7 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
     assistantMsg.streamChars = (assistantMsg.streamChars || 0) + delta.length;
     if (run) run.live.streamChars = assistantMsg.streamChars;
 
-    const turn = assistantMsg.agentTurn ?? 1;
+    const turn = resolveStreamTurn(assistantMsg);
     assistantMsg.roundGroups = recordAgentRoundStreamDelta(
       assistantMsg.roundGroups,
       turn,
@@ -269,12 +270,20 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
    * Reasoning/thinking deltas ride their own buffer: they land on
    * `roundGroups[].reasoning` and never touch `content`.
    */
+  function resolveStreamTurn(assistantMsg: VibeChatMessage): number {
+    const run = findRunForMsg(assistantMsg);
+    return resolveAgentStreamTurn({
+      agentTurn: assistantMsg.agentTurn,
+      liveTurn: run?.live.turn,
+    });
+  }
+
   function flushPendingReasoningDelta() {
     if (!pendingReasoningDelta?.pending) return;
     const { msgId, assistantMsg, pending } = pendingReasoningDelta;
     pendingReasoningDelta.pending = "";
     const run = findRunForMsg(assistantMsg);
-    const turn = assistantMsg.agentTurn ?? run?.live.turn ?? 1;
+    const turn = resolveStreamTurn(assistantMsg);
     assistantMsg.roundGroups = recordAgentRoundReasoningDelta(
       assistantMsg.roundGroups,
       turn,

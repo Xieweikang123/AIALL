@@ -31,6 +31,7 @@ import {
   recordAgentRoundResponse,
   recordAgentRoundStatus,
   recordAgentRoundToolStart,
+  resolveAgentStreamTurn,
 } from "../services/agentRoundGroups";
 import { parseMemoryProposalToolResult } from "../services/projectMemoryProposal";
 import { parseSkillProposalToolResult } from "../services/projectSkillProposal";
@@ -482,8 +483,14 @@ function handleStatusEvent(event: EventOf<"status">, assistantMsg: VibeChatMessa
 }
 
 function handleToolStartEvent(event: EventOf<"tool_start">, assistantMsg: VibeChatMessage, sessionId: string, msgId: string) {
+  // Commit any buffered reasoning/content before the tool row appears, so the
+  // thought block is not still sitting in the rAF queue when tools take over.
+  clearStreamDeltaBuffer();
   const meta = formatToolMeta(event.data.name, event.data.args);
-  const toolTurn = assistantMsg.agentTurn ?? runManager.get(sessionId)?.live.turn ?? 1;
+  const toolTurn = resolveAgentStreamTurn({
+    agentTurn: assistantMsg.agentTurn,
+    liveTurn: runManager.get(sessionId)?.live.turn,
+  });
   const toolStep = {
     id: event.data.id,
     ...meta,
@@ -692,9 +699,9 @@ function handleDoneEvent(event: EventOf<"done">, assistantMsg: VibeChatMessage, 
 
   if ((assistantMsg.chatMode === "ask" || assistantMsg.chatMode === "explore") && !wasAborted) {
     assistantMsg.totalTurns = completedTurns;
-    if (projectPath.value.trim()) {
-      updateAgentRunSessionStatus(sessionId, "completed");
-    }
+    // Same as Build: commit streamed content as isFinal so canResume / infer
+    // do not treat a finished Ask/Explore turn as「未生成最终回复」.
+    commitAgentFinalAnswerIfMissing(assistantMsg, completedTurns, assistantMsg.agentMaxTurns);
     assistantMsg.writtenFiles = resolveAgentDoneFileAction({
       chatMode: assistantMsg.chatMode ?? "ask",
       wasAborted: false,
@@ -713,6 +720,40 @@ function handleDoneEvent(event: EventOf<"done">, assistantMsg: VibeChatMessage, 
         agentFailed: false,
       }),
     );
+
+    if (hasRecoverableAgentProgress(assistantMsg) && !hasAgentFinalAnswer(assistantMsg)) {
+      stallRecovery.handleRecoverableInterruption(sessionId, assistantMsg, "运行中断（未生成最终回复）", {
+        logStatus: true,
+      });
+      assistantMsg.content = resolveAgentFailureBubbleContent(assistantMsg);
+      finishRunSession(sessionId);
+      patchAssistantMsg(msgId, {
+        ...buildRunUiFullPatch(assistantMsg),
+        content: assistantMsg.content,
+        agentFailed: assistantMsg.agentFailed,
+        agentRecoverable: assistantMsg.agentRecoverable,
+        agentFailureReason: assistantMsg.agentFailureReason,
+        agentFailureDetail: assistantMsg.agentFailureDetail,
+        agentRecoveryDismissed: assistantMsg.agentRecoveryDismissed,
+        totalTurns: assistantMsg.totalTurns,
+        writtenFiles: assistantMsg.writtenFiles,
+        activityExpanded: true,
+        ...syncRoundGroupsPatch(assistantMsg),
+      });
+      persistChatNow(undefined, { flushStore: true });
+      void scrollChatToBottom();
+      return;
+    }
+
+    if (projectPath.value.trim()) {
+      updateAgentRunSessionStatus(sessionId, "completed");
+    }
+    assistantMsg.agentFailed = false;
+    assistantMsg.agentRecoverable = false;
+    assistantMsg.agentFailureReason = undefined;
+    assistantMsg.agentFailureDetail = undefined;
+    assistantMsg.agentRecoveryDismissed = true;
+    assistantMsg.agentContinueCount = undefined;
     assistantMsg.activityExpanded = false;
     stallRecovery.stopAgentUiTick();
     clearPendingAgentEvents();
@@ -723,6 +764,13 @@ function handleDoneEvent(event: EventOf<"done">, assistantMsg: VibeChatMessage, 
       content: assistantMsg.content,
       totalTurns: assistantMsg.totalTurns,
       writtenFiles: assistantMsg.writtenFiles,
+      agentFailed: undefined,
+      agentRecoverable: undefined,
+      agentFailureReason: undefined,
+      agentFailureDetail: undefined,
+      agentRecoveryDismissed: true,
+      agentContinueCount: undefined,
+      ...syncRoundGroupsPatch(assistantMsg),
     });
     pendingSettleTimerRef.current = window.setTimeout(() => {
       pendingSettleTimerRef.current = null;

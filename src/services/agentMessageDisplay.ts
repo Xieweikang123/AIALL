@@ -760,6 +760,11 @@ export function hasSubstantiveAgentSummary(msg: AssistantBubbleSource): boolean 
     const fallback = resolveExplorationThinkingPreview(msg);
     if (fallback.length >= SUBSTANTIVE_MIN_CHARS) return true;
     if (COMPLETION_SUMMARY_RE.test(fallback)) return true;
+    // Streamed answer may sit on `content` without isFinal (Ask/Explore done path,
+    // or minimized turn_response). Treat non-narration body as a real summary.
+    const direct = normalizeBubbleText(msg.content || "");
+    if (direct.length >= SUBSTANTIVE_MIN_CHARS && !isAgentToolTurnNarration(direct)) return true;
+    if (COMPLETION_SUMMARY_RE.test(direct)) return true;
     return false;
   }
   const finalFromRound = resolveFinalAssistantText(msg);

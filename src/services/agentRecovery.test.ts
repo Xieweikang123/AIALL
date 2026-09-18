@@ -446,6 +446,66 @@ describe("canResumeAgentRun", () => {
     );
   });
 
+  it("does not show resume after a finished run with substantive answer and stale statusLog", () => {
+    expect(
+      canResumeAgentRun({
+        role: "assistant",
+        content:
+          "根因是 Ask 完成时未提交 isFinal，且 statusLog 里残留了中途连接中断记录。已在 done 路径提交最终答复并清除恢复标记。",
+        tools: [{ running: false, label: "读取文件", summary: "ok", turn: 1 }],
+        roundGroups: [{ turn: 1, maxTurns: 40, modelSteps: [], toolIds: ["t1"] }],
+        statusLog: [
+          "连接中断：Failed to fetch（可恢复运行）",
+          "完成（共 3 轮）",
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps resume closed after successful settle even without isFinal", () => {
+    expect(
+      canResumeAgentRun({
+        role: "assistant",
+        content: "短答复",
+        agentRecoveryDismissed: true,
+        agentFailed: false,
+        agentRecoverable: false,
+        tools: [{ running: false, summary: "ok", turn: 1 }],
+        roundGroups: [{ turn: 1, maxTurns: 24, modelSteps: [], toolIds: ["t1"] }],
+      }),
+    ).toBe(false);
+  });
+
+  it("does not show resume after a finished run with substantive answer and stale statusLog", () => {
+    expect(
+      canResumeAgentRun({
+        role: "assistant",
+        content:
+          "根因是 Ask 完成时未提交 isFinal，且 statusLog 里残留了中途连接中断记录。已在 done 路径提交最终答复并清除恢复标记。",
+        tools: [{ running: false, label: "读取文件", summary: "ok", turn: 1 }],
+        roundGroups: [{ turn: 1, maxTurns: 40, modelSteps: [], toolIds: ["t1"] }],
+        statusLog: [
+          "连接中断：Failed to fetch（可恢复运行）",
+          "完成（共 3 轮）",
+        ],
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps resume closed after successful settle even without isFinal", () => {
+    expect(
+      canResumeAgentRun({
+        role: "assistant",
+        content: "短答复",
+        agentRecoveryDismissed: true,
+        agentFailed: false,
+        agentRecoverable: false,
+        tools: [{ running: false, summary: "ok", turn: 1 }],
+        roundGroups: [{ turn: 1, maxTurns: 24, modelSteps: [], toolIds: ["t1"] }],
+      }),
+    ).toBe(false);
+  });
+
   it("allows resume after user stop when partial files were written", () => {
     expect(
       canResumeAgentRun({
@@ -689,6 +749,17 @@ describe("isIncompleteAgentRunWithoutFinalAnswer", () => {
             response: { assistantText: "A".repeat(80), hasToolCalls: false, isFinal: true, toolCalls: [] },
           },
         ],
+      }),
+    ).toBe(false);
+  });
+
+  it("returns false when bubble already has a substantive non-narration answer without isFinal", () => {
+    expect(
+      isIncompleteAgentRunWithoutFinalAnswer({
+        tools: [{ running: false, summary: "ok", turn: 1 }],
+        content:
+          "结论：恢复条是因为完成时未提交 isFinal，且 statusLog 残留中断记录被再次推断为可恢复。",
+        roundGroups: [{ turn: 1, maxTurns: 24, modelSteps: [], toolIds: ["t1"] }],
       }),
     ).toBe(false);
   });
@@ -1059,5 +1130,99 @@ describe("applyRunCheckpointToMessages", () => {
     });
     expect(result.applied).toBe(false);
     expect(result.clearCheckpoint).toBe(true);
+  });
+
+  it("clears stale running checkpoint when client already has a final answer", async () => {
+    const { applyRunCheckpointToMessages, canResumeAgentRun } = await import("./agentRecovery");
+    const messages = [
+      {
+        id: "a1",
+        role: "assistant",
+        content: "已经给出完整结论，任务结束。",
+        agentRecoveryDismissed: true,
+        agentFailed: false,
+        agentRecoverable: false,
+        tools: [{ name: "read_file", summary: "ok", running: false, turn: 1 }],
+        roundGroups: [
+          {
+            turn: 1,
+            maxTurns: 24,
+            modelSteps: [],
+            toolIds: [],
+            response: {
+              assistantText: "已经给出完整结论，任务结束。",
+              toolCalls: [],
+              hasToolCalls: false,
+              isFinal: true,
+            },
+          },
+        ],
+      },
+    ];
+    const result = applyRunCheckpointToMessages(messages, {
+      phase: "running",
+      assistantMsgId: "a1",
+      content: "中途快照",
+      tools: [{ name: "read_file", summary: "ok", running: false }],
+      totalTurns: 1,
+    });
+    expect(result.applied).toBe(false);
+    expect(result.clearCheckpoint).toBe(true);
+    expect(canResumeAgentRun(result.messages[0]!)).toBe(false);
+  });
+
+  it("clears stale running checkpoint when recovery was settled on done", async () => {
+    const { applyRunCheckpointToMessages } = await import("./agentRecovery");
+    const messages = [
+      {
+        id: "a1",
+        role: "assistant",
+        content: "已完成修改说明。",
+        agentRecoveryDismissed: true,
+        agentFailed: false,
+        agentRecoverable: false,
+        tools: [{ name: "patch_file", summary: "ok", running: false, turn: 2 }],
+        totalTurns: 2,
+        roundGroups: [{ turn: 2, maxTurns: 40, modelSteps: [], toolIds: ["t1"] }],
+      },
+    ];
+    const result = applyRunCheckpointToMessages(messages, {
+      phase: "running",
+      assistantMsgId: "a1",
+      content: "旧快照",
+      tools: [{ name: "patch_file", summary: "ok", running: false }],
+      totalTurns: 2,
+    });
+    expect(result.applied).toBe(false);
+    expect(result.clearCheckpoint).toBe(true);
+    // Must not reopen recovery flags from a stale running snapshot.
+    expect(result.messages[0]!.agentFailed).toBe(false);
+    expect(result.messages[0]!.agentRecoverable).toBe(false);
+    expect(result.messages[0]!.agentRecoveryDismissed).toBe(true);
+  });
+
+  it("marks done-phase merge as settled (no resume banner)", async () => {
+    const { applyRunCheckpointToMessages, canResumeAgentRun } = await import("./agentRecovery");
+    const messages = [
+      {
+        id: "a1",
+        role: "assistant",
+        content: "",
+        tools: [],
+      },
+    ];
+    const result = applyRunCheckpointToMessages(messages, {
+      phase: "done",
+      assistantMsgId: "a1",
+      content: "服务端补回的完整答复文本，长度足够。",
+      tools: [{ name: "read_file", summary: "ok", running: false, turn: 1 }],
+      totalTurns: 1,
+    });
+    expect(result.applied).toBe(true);
+    expect(result.clearCheckpoint).toBe(true);
+    expect(result.messages[0]!.agentRecoveryDismissed).toBe(true);
+    expect(result.messages[0]!.agentFailed).toBe(false);
+    expect(result.messages[0]!.agentRecoverable).toBe(false);
+    expect(canResumeAgentRun(result.messages[0]!)).toBe(false);
   });
 });

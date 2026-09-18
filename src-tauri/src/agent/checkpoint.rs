@@ -122,6 +122,11 @@ impl RunCheckpoint {
         if !self.enabled {
             return;
         }
+        // Never overwrite a terminal snapshot (done/aborted/error) with a stale
+        // "running" file — that reopens the client resume banner after finish.
+        if self.phase != "running" {
+            return;
+        }
         let _ = write_checkpoint_file(&self.path(), &self.to_value("running")).await;
     }
 
@@ -344,6 +349,26 @@ mod tests {
         assert_eq!(cleared["ok"], true);
         let loaded = load_run_checkpoint(&project, "sess-1").await;
         assert!(loaded["checkpoint"].is_null());
+    }
+
+    #[tokio::test]
+    async fn flush_running_does_not_overwrite_done() {
+        let (project, _guard) = temp_project();
+        let mut ck = RunCheckpoint::from_request(
+            &project,
+            Some("sess-done"),
+            Some("asst-done"),
+            Some("run-done"),
+            12,
+        );
+        ck.note_turn(1, 12, "done text");
+        ck.finish_done(&[], 1).await;
+        ck.flush_running().await; // must be a no-op after terminal phase
+
+        let loaded = load_run_checkpoint(&project, "sess-done").await;
+        assert_eq!(loaded["ok"], true);
+        assert_eq!(loaded["checkpoint"]["phase"], "done");
+        assert_eq!(loaded["checkpoint"]["agentRecoverable"], false);
     }
 
     #[test]

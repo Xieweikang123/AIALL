@@ -414,6 +414,8 @@ function messageMemoKey(m: VibeChatMessageItem): unknown[] {
     ctx.planWorkspaceOpen.value,
     ctx.chainJumpVisible[m.id],
   ];
+  const reasoningChars =
+    m.roundGroups?.reduce((sum, group) => sum + (group.reasoning?.length ?? 0), 0) ?? 0;
   if (ctx.isAgentRunning(m)) {
     return [
       m.id,
@@ -422,6 +424,8 @@ function messageMemoKey(m: VibeChatMessageItem): unknown[] {
       m.streamChars ?? 0,
       m.agentPhase,
       m.content?.length ?? 0,
+      m.tools?.length ?? 0,
+      reasoningChars,
       ...globalDeps,
     ];
   }
@@ -435,6 +439,10 @@ function messageMemoKey(m: VibeChatMessageItem): unknown[] {
     m.agentRecoverable,
     Object.keys(m.turnFileDiffs ?? {}).length,
     m.suggestedOptions?.length ?? 0,
+    m.tools?.length ?? 0,
+    m.roundGroups?.length ?? 0,
+    reasoningChars,
+    m.activityExpanded,
     ...globalDeps,
   ];
 }

@@ -456,3 +456,13 @@ export function buildAgentRoundGroupViews(input: {
 export function isModelLoopPhase(phase?: string): boolean {
   return Boolean(phase && MODEL_LOOP_PHASES.has(phase));
 }
+
+/** Resolve the turn slot for streamed deltas. Never returns ≤0 (those slots are skipped by the feed). */
+export function resolveAgentStreamTurn(input: {
+  agentTurn?: number;
+  liveTurn?: number;
+}): number {
+  if (input.agentTurn && input.agentTurn > 0) return input.agentTurn;
+  if (input.liveTurn && input.liveTurn > 0) return input.liveTurn;
+  return 1;
+}

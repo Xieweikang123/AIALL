@@ -680,7 +680,10 @@ export function isIncompleteAgentRunWithoutFinalAnswer(
   if (msg.agentAborted) return false;
   if (!hasRecoverableAgentProgress(msg)) return false;
   if (!msg.roundGroups?.some((group) => group.turn > 0)) return false;
-  return !hasAgentFinalAnswer(msg);
+  if (hasAgentFinalAnswer(msg)) return false;
+  // Long non-narration bubble already shown — not an incomplete "no answer" case.
+  if (hasSubstantiveAgentSummary(msg)) return false;
+  return true;
 }
 
 /** Infer recovery flags for legacy sessions or incomplete error handling. */
@@ -775,6 +778,10 @@ export function inferAgentRecoveryFlags(msg: AgentProgressSource & {
       agentFailureReason: msg.agentFailureReason?.trim() || "连接中断",
     };
   }
+
+  // Finished answer already on the bubble — do not reopen resume from stale
+  // mid-run statusLog lines like「连接中断：Failed to fetch（可恢复运行）」.
+  if (hasAgentFinalAnswer(msg) || hasSubstantiveAgentSummary(msg)) return null;
 
   const completedTools = msg.tools?.filter((t) => !t.running) ?? [];
   const hasProgress =
@@ -1152,9 +1159,22 @@ export function canResumeAgentRun(msg: AgentProgressSource & {
   agentAbortReason?: string;
   agentFailureReason?: string;
   agentRecoveryDismissed?: boolean;
+  agentContinueCount?: number;
   streaming?: boolean;
 }): boolean {
   if (msg.streaming) return false;
+
+  // Successful done clears failed/recoverable and sets dismissed. Do not let
+  // incomplete-without-isFinal (or stale statusLog) reopen the resume banner.
+  // Incomplete silent-continue cases keep agentContinueCount > 0 and still infer.
+  if (
+    msg.agentRecoveryDismissed &&
+    msg.agentFailed !== true &&
+    msg.agentRecoverable !== true &&
+    !(typeof msg.agentContinueCount === "number" && msg.agentContinueCount > 0)
+  ) {
+    return false;
+  }
 
   const inferred = inferAgentRecoveryFlags(msg);
   if (inferred?.agentRecoverable && passesAgentAbortResumeGate(msg)) return true;
@@ -1328,9 +1348,24 @@ export function applyRunCheckpointToMessages<T extends CheckpointMergeMessage>(
   const existingProgress = hasRecoverableAgentProgress(target);
   const existingContent = (target.content || "").trim();
   const checkpointContent = (checkpoint.content || "").trim();
+  const clientAlreadySettled =
+    hasAgentFinalAnswer(target) ||
+    (target.agentRecoveryDismissed === true &&
+      target.agentFailed !== true &&
+      target.agentRecoverable !== true &&
+      existingProgress);
 
   // Successful done + client already has progress → just clear the sidecar.
   if (phase === "done" && existingProgress && existingContent.length >= checkpointContent.length) {
+    return { messages, applied: false, clearCheckpoint: true };
+  }
+
+  // Stale running/aborted/error snapshot after the client already finished the
+  // turn (isFinal committed, or recovery flags cleared on done) — clear only.
+  if (
+    (phase === "running" || phase === "aborted" || phase === "error") &&
+    clientAlreadySettled
+  ) {
     return { messages, applied: false, clearCheckpoint: true };
   }
 
@@ -1371,14 +1406,14 @@ export function applyRunCheckpointToMessages<T extends CheckpointMergeMessage>(
       patched.agentAbortReason = reason;
     }
   } else if (phase === "done") {
-    // Restore completed bubble text; leave recovery flags alone unless empty shell.
-    if (!existingProgress) {
-      patched.agentFailed = false;
-      patched.agentRecoverable = false;
-      patched.agentFailureReason = undefined;
-      patched.agentAborted = false;
-      patched.agentAbortReason = undefined;
-    }
+    // Restore completed bubble text; clear recovery flags so a finished run
+    // never keeps the interrupt / resume banner.
+    patched.agentFailed = false;
+    patched.agentRecoverable = false;
+    patched.agentFailureReason = undefined;
+    patched.agentAborted = false;
+    patched.agentAbortReason = undefined;
+    patched.agentRecoveryDismissed = true;
   }
 
   next[targetIdx] = patched;
