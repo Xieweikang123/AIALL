@@ -861,7 +861,7 @@
         @open-ai-config="openAiConfigPage"
         @apply-suggestion="handleAgentSuggestion"
         @on-chat-scroll="onChatScroll"
-        @scroll-to-bottom="scrollChatToBottom(true)"
+        @scroll-to-bottom="resetChatScrollPin"
         @clear-pending-queue="clearPendingPromptQueue"
         @on-composer-field-keydown="onComposerFieldKeydown"
         @select-mention="selectMention"
@@ -1244,6 +1244,7 @@ import {
   formatPendingApprovalLabel,
 } from "../services/vibeAgentTurnApply";
 import { revertTurnFileDiffs } from "../services/agentTurnRevert";
+import { setTraceDumpContext } from "../services/agentTraceDrawer";
 import {
   type VibeChatHistoryMessage,
   type VibeChatMode,
@@ -1666,6 +1667,15 @@ watch(activeSessionId, (id) => {
     persistOpenedSessionTabs();
   }
 });
+
+// 轨迹抽屉「复制路径」需要当前项目 / 会话上下文
+watch(
+  [projectPath, activeSessionId],
+  ([path, sid]) => {
+    setTraceDumpContext(path || "", (sid || "").trim() || null);
+  },
+  { immediate: true },
+);
 
 // 已打开会话的元数据（按打开顺序），供顶部 tab 栏渲染。
 // 草稿会话（点 + 刚建、未发送）不在 sessionList 里，由 buildOpenedSessionTabs 补「新会话」占位 tab。

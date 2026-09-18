@@ -741,7 +741,12 @@ import {
 } from "../../services/vibeLongTermMemoryClient";
 import type { ProjectMemoryTab } from "../../composables/useProjectMemory";
 import { CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount, getEventValue } from "../../utils/vibeHelpers";
-import { scheduleScrollContainerToBottom, scrollContainerToBottom } from "../../utils/scrollViewport";
+import {
+  computeScrollFollowStep,
+  prefersReducedMotion,
+  scheduleScrollContainerToBottom,
+  scrollContainerToBottom,
+} from "../../utils/scrollViewport";
 import { resolveAgentResumeButtonLabel } from "../../services/agentRecovery";
 import { renderMarkdown } from "../../utils/renderMarkdown";
 import { agentDebugEnabled, setAgentDebugEnabled } from "../../utils/agentDebugFlag";
@@ -1303,45 +1308,95 @@ function scrollToBottom() {
   const el = chatScrollRef.value;
   if (!el) return;
   stopFollow();
-  scrollContainerToBottom(el);
   isAtBottom.value = true;
-  emit("on-chat-scroll");
+  // Parent only re-pins; animation stays in this component so a hard jump
+  // cannot cancel the spring / smooth glide.
   emit("scroll-to-bottom");
+  if (prefersReducedMotion()) {
+    scrollContainerToBottom(el);
+    emit("on-chat-scroll");
+    return;
+  }
+  followActive = true;
+  followVelocity = 0;
+  followLastTs = 0;
+  followRaf = requestAnimationFrame(stepFollow);
 }
 
-const FOLLOW_EASING = 0.3;
 let followRaf = 0;
 let followActive = false;
+let followVelocity = 0;
+let followLastTs = 0;
 
 function stopFollow() {
   if (followRaf) cancelAnimationFrame(followRaf);
   followRaf = 0;
   followActive = false;
+  followVelocity = 0;
+  followLastTs = 0;
 }
 
-/** Exponential glide toward the bottom; chases live scrollHeight each frame. */
-function stepFollow() {
+/**
+ * Spring glide toward bottom. While a run streams, keep the loop warm even at
+ * bottom so the next content growth is chased without a restart gap.
+ */
+function stepFollow(ts: number) {
   followRaf = 0;
   const el = chatScrollRef.value;
   if (!el || !followActive) return;
-  const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-  if (distance <= 1) {
+
+  if (prefersReducedMotion()) {
     el.scrollTop = el.scrollHeight;
+    followVelocity = 0;
+    if (!props.chatSending) {
+      followActive = false;
+      followLastTs = 0;
+      isAtBottom.value = true;
+      emit("on-chat-scroll");
+      return;
+    }
+    followLastTs = ts;
+    followRaf = requestAnimationFrame(stepFollow);
+    return;
+  }
+
+  const last = followLastTs || ts;
+  const dt = Math.min(0.064, Math.max(0.001, (ts - last) / 1000));
+  followLastTs = ts;
+
+  const { nextScrollTop, velocity, atBottom, settled } = computeScrollFollowStep(
+    el.scrollTop,
+    el.scrollHeight,
+    el.clientHeight,
+    followVelocity,
+    dt,
+  );
+  followVelocity = velocity;
+  if (nextScrollTop !== el.scrollTop) {
+    el.scrollTop = nextScrollTop;
+  }
+
+  if (settled && !props.chatSending) {
     followActive = false;
+    followVelocity = 0;
+    followLastTs = 0;
     isAtBottom.value = true;
     emit("on-chat-scroll");
     return;
   }
-  el.scrollTop += distance * FOLLOW_EASING;
+
+  isAtBottom.value = atBottom || isAtBottom.value;
   followRaf = requestAnimationFrame(stepFollow);
 }
 
-/** Eased follow used while a run streams — no hard jump, coalesced per frame. */
+/** Animated follow used while a run streams — spring glide, coalesced per frame. */
 function followToBottom() {
   if (!chatScrollRef.value) return;
   isAtBottom.value = true;
   if (followActive) return;
   followActive = true;
+  followVelocity = 0;
+  followLastTs = 0;
   followRaf = requestAnimationFrame(stepFollow);
 }
 

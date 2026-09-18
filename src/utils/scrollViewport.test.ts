@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { isScrollNearBottom, scrollContainerToBottom, scrollElementToBottom } from "./scrollViewport";
+import {
+  computeScrollFollowStep,
+  isScrollNearBottom,
+  scrollContainerToBottom,
+  scrollElementToBottom,
+} from "./scrollViewport";
 
 function mockScrollElement(input: {
   scrollHeight: number;
@@ -49,5 +54,43 @@ describe("scrollContainerToBottom", () => {
     const el = mockScrollElement({ scrollHeight: 1200, clientHeight: 400, scrollTop: 0 });
     scrollContainerToBottom(el);
     expect(el.scrollTop).toBe(1200);
+  });
+});
+
+describe("computeScrollFollowStep", () => {
+  it("settles when already on the bottom with no velocity", () => {
+    const step = computeScrollFollowStep(800, 1000, 200, 0, 1 / 60);
+    expect(step.nextScrollTop).toBe(800);
+    expect(step.velocity).toBe(0);
+    expect(step.atBottom).toBe(true);
+    expect(step.settled).toBe(true);
+  });
+
+  it("glides a large gap without jumping most of the way in one frame", () => {
+    const step = computeScrollFollowStep(0, 1200, 200, 0, 1 / 60);
+    // maxScroll=1000; one 16ms spring frame should move, but stay well under a hard cut
+    expect(step.nextScrollTop).toBeGreaterThan(0);
+    expect(step.nextScrollTop).toBeLessThan(80);
+    expect(step.velocity).toBeGreaterThan(0);
+    expect(step.settled).toBe(false);
+  });
+
+  it("approaches the bottom over several frames", () => {
+    let top = 0;
+    let vel = 0;
+    for (let i = 0; i < 90; i++) {
+      const step = computeScrollFollowStep(top, 1200, 200, vel, 1 / 60);
+      top = step.nextScrollTop;
+      vel = step.velocity;
+      if (step.settled) break;
+    }
+    expect(top).toBe(1000);
+    expect(vel).toBe(0);
+  });
+
+  it("does not overshoot past the bottom", () => {
+    // High velocity toward bottom should clamp, not bounce past maxScroll
+    const step = computeScrollFollowStep(790, 1000, 200, 4000, 1 / 60);
+    expect(step.nextScrollTop).toBeLessThanOrEqual(800);
   });
 });

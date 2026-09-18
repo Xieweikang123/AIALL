@@ -663,9 +663,9 @@ button.icon.tiny {
 }
 
 .msg.assistant.msg--live .msg-body {
-  border-color: rgba(88, 166, 255, 0.22);
-  background: rgba(88, 166, 255, 0.04);
-  box-shadow: 0 0 0 1px rgba(88, 166, 255, 0.06);
+  border-color: rgba(88, 166, 255, 0.16);
+  background: rgba(88, 166, 255, 0.025);
+  box-shadow: none;
 }
 
 .msg.assistant.msg--live.msg--live-waiting .msg-body {
@@ -731,9 +731,14 @@ button.icon.tiny {
 }
 
 .msg.assistant .msg-avatar {
-  background: rgba(255, 255, 255, 0.08);
-  color: #c9d1d9;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(88, 166, 255, 0.1);
+  color: rgba(165, 214, 255, 0.92);
+  border: 1px solid rgba(88, 166, 255, 0.18);
+}
+
+.msg.assistant.msg--live .msg-avatar {
+  border-color: rgba(88, 166, 255, 0.36);
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.08);
 }
 
 .msg-body {
@@ -765,7 +770,7 @@ button.icon.tiny {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 .msg-head-left {
@@ -778,49 +783,50 @@ button.icon.tiny {
 .msg-mode-badge {
   display: inline-flex;
   align-items: center;
-  padding: 1px 7px;
+  padding: 0 6px;
   border-radius: 999px;
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  color: rgba(179, 146, 240, 0.92);
-  background: rgba(179, 146, 240, 0.12);
-  border: 1px solid rgba(179, 146, 240, 0.18);
+  color: rgba(179, 146, 240, 0.78);
+  background: rgba(179, 146, 240, 0.08);
+  border: 1px solid rgba(179, 146, 240, 0.12);
 }
 
 .msg-mode-badge--ask {
-  color: rgba(165, 214, 255, 0.92);
-  background: rgba(88, 166, 255, 0.1);
-  border-color: rgba(88, 166, 255, 0.18);
+  color: rgba(165, 214, 255, 0.82);
+  background: rgba(88, 166, 255, 0.08);
+  border-color: rgba(88, 166, 255, 0.14);
 }
 
 .msg-mode-badge--plan {
-  color: rgba(255, 210, 130, 0.92);
-  background: rgba(210, 153, 34, 0.12);
-  border-color: rgba(210, 153, 34, 0.22);
+  color: rgba(255, 210, 130, 0.82);
+  background: rgba(210, 153, 34, 0.09);
+  border-color: rgba(210, 153, 34, 0.16);
 }
 
 .msg-mode-badge--build {
-  color: rgba(179, 146, 240, 0.92);
-  background: rgba(179, 146, 240, 0.12);
-  border-color: rgba(179, 146, 240, 0.18);
+  color: rgba(179, 146, 240, 0.82);
+  background: rgba(179, 146, 240, 0.08);
+  border-color: rgba(179, 146, 240, 0.14);
 }
 
 .msg-mode-badge--explore {
-  color: rgba(126, 210, 185, 0.92);
-  background: rgba(46, 160, 130, 0.12);
-  border-color: rgba(46, 160, 130, 0.2);
+  color: rgba(126, 210, 185, 0.82);
+  background: rgba(46, 160, 130, 0.09);
+  border-color: rgba(46, 160, 130, 0.16);
 }
 
 .msg-mode-badge--auto {
-  color: rgba(129, 199, 132, 0.92);
-  background: rgba(129, 199, 132, 0.12);
-  border-color: rgba(129, 199, 132, 0.2);
+  color: rgba(129, 199, 132, 0.82);
+  background: rgba(129, 199, 132, 0.09);
+  border-color: rgba(129, 199, 132, 0.16);
 }
 
 .msg-role {
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
   color: var(--muted);
 }
 
@@ -829,7 +835,11 @@ button.icon.tiny {
 }
 
 .msg.assistant .msg-role {
-  color: #b392f0;
+  color: rgba(201, 209, 217, 0.88);
+}
+
+.msg.assistant.msg--live .msg-role {
+  color: rgba(190, 218, 255, 0.95);
 }
 
 .msg-toolbar {
