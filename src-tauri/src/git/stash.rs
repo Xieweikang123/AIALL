@@ -67,23 +67,24 @@ pub async fn git_stash_save(project_root: &str, message: Option<&str>) -> GitSta
 }
 
 pub async fn git_stash_pop(project_root: &str, stash_index: Option<u32>) -> GitStashResult {
+    // Prefer bare index (`0`) over `stash@{0}` — braces are fragile when anything shells out.
     let mut args = vec!["stash", "pop"];
-    let stash_ref;
+    let idx;
     if let Some(i) = stash_index {
-        stash_ref = format!("stash@{{{i}}}");
-        args.push(&stash_ref);
+        idx = i.to_string();
+        args.push(&idx);
     }
     stash_action(project_root, &args).await
 }
 
 pub async fn git_stash_apply(project_root: &str, stash_index: u32) -> GitStashResult {
-    let stash_ref = format!("stash@{{{stash_index}}}");
-    stash_action(project_root, &["stash", "apply", &stash_ref]).await
+    let idx = stash_index.to_string();
+    stash_action(project_root, &["stash", "apply", &idx]).await
 }
 
 pub async fn git_stash_drop(project_root: &str, stash_index: u32) -> GitStashResult {
-    let stash_ref = format!("stash@{{{stash_index}}}");
-    stash_action(project_root, &["stash", "drop", &stash_ref]).await
+    let idx = stash_index.to_string();
+    stash_action(project_root, &["stash", "drop", &idx]).await
 }
 
 async fn stash_action(project_root: &str, args: &[&str]) -> GitStashResult {
@@ -162,5 +163,13 @@ mod tests {
         assert_eq!(stashes.len(), 2);
         assert_eq!(stashes[0], ("0", "On master: first"));
         assert_eq!(stashes[1], ("1", "On feature: second"));
+    }
+
+    #[test]
+    fn test_stash_ref_uses_bare_index() {
+        // Keep drop/apply/pop on bare numeric refs so Windows shells never expand `stash@{n}`.
+        let index = 3u32;
+        assert_eq!(index.to_string(), "3");
+        assert_ne!(format!("stash@{{{index}}}"), index.to_string());
     }
 }

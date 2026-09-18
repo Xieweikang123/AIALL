@@ -14,7 +14,11 @@ export function useGitPanel(
   projectOpened: () => boolean,
   aiConfig: () => { endpoint: string; apiKey: string; model: string },
   configReady: () => boolean,
-  confirm: (msg: string, event?: MouseEvent) => Promise<boolean>,
+  confirm: (
+    msg: string,
+    event?: MouseEvent,
+    options?: { confirmText?: string; cancelText?: string },
+  ) => Promise<boolean>,
   onRefreshTree?: () => void,
 ) {
   const hunkLoaderHolder: { load?: (filePath: string, staged?: boolean) => Promise<import("../services/vibeGitClient").GitHunkInfo[]> } = {};

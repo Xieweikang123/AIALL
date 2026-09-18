@@ -917,7 +917,7 @@ export async function gitStashSaveRemote(projectPath: string, message?: string):
 }
 
 export async function gitStashPopRemote(projectPath: string, stashIndex?: number): Promise<GitStashResult> {
-  return invokeBackend<GitStashResult>("git_stash_pop", { path: projectPath, stash_index: stashIndex }, async () => {
+  return invokeBackend<GitStashResult>("git_stash_pop", { path: projectPath, stashIndex }, async () => {
     try {
       const response = await fetch(backendUrl("/backend/vibe/git/stash-pop"), {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -931,7 +931,7 @@ export async function gitStashPopRemote(projectPath: string, stashIndex?: number
 }
 
 export async function gitStashApplyRemote(projectPath: string, stashIndex: number): Promise<GitStashResult> {
-  return invokeBackend<GitStashResult>("git_stash_apply", { path: projectPath, stash_index: stashIndex }, async () => {
+  return invokeBackend<GitStashResult>("git_stash_apply", { path: projectPath, stashIndex }, async () => {
     try {
       const response = await fetch(backendUrl("/backend/vibe/git/stash-apply"), {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -945,7 +945,7 @@ export async function gitStashApplyRemote(projectPath: string, stashIndex: numbe
 }
 
 export async function gitStashDropRemote(projectPath: string, stashIndex: number): Promise<GitStashResult> {
-  return invokeBackend<GitStashResult>("git_stash_drop", { path: projectPath, stash_index: stashIndex }, async () => {
+  return invokeBackend<GitStashResult>("git_stash_drop", { path: projectPath, stashIndex }, async () => {
     try {
       const response = await fetch(backendUrl("/backend/vibe/git/stash-drop"), {
         method: "POST", headers: { "Content-Type": "application/json" },

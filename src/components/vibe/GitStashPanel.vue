@@ -33,30 +33,50 @@
           <span class="git-section-chevron">{{ listOpen ? "▾" : "▸" }}</span>
           <span class="git-stash-list-title">贮藏列表</span>
         </button>
+        <span class="git-stash-list-hint">点选一条再操作</span>
       </div>
       <div v-if="listOpen" class="git-stash-list-content">
-        <div v-for="stash in stashes" :key="stash.index" class="git-stash-item">
-          <span class="git-stash-label">{{ 'stash@{' + stash.index + '}' }}</span>
-          <span class="git-stash-msg">{{ stash.message }}</span>
-          <div class="git-stash-actions">
+        <div
+          v-for="stash in stashes"
+          :key="stash.index"
+          class="git-stash-item"
+          :class="{
+            active: selectedIndex === String(stash.index),
+            busy: !!stashAction && stashAction.endsWith('-' + stash.index),
+          }"
+        >
+          <button
+            type="button"
+            class="git-stash-row"
+            :title="stash.message || ('stash@{' + stash.index + '}')"
+            :disabled="!!stashAction"
+            @click="toggleSelect(String(stash.index))"
+          >
+            <span class="git-stash-label">{{ 'stash@{' + stash.index + '}' }}</span>
+            <span class="git-stash-msg">{{ stash.message || '（无说明）' }}</span>
+          </button>
+          <div v-if="selectedIndex === String(stash.index)" class="git-stash-actions">
             <button
-              type="button" class="ghost tiny"
+              type="button"
+              class="ghost tiny"
               :disabled="!!stashAction"
-              @click="$emit('apply', stash.index)"
-              title="应用贮藏（保留贮藏）"
-            >{{ stashAction === 'apply-' + stash.index ? '…' : 'Apply' }}</button>
+              title="应用贮藏（保留条目）"
+              @click.stop="onAction('apply', stash.index, $event)"
+            >{{ stashAction === 'apply-' + stash.index ? '…' : '应用' }}</button>
             <button
-              type="button" class="ghost tiny"
+              type="button"
+              class="ghost tiny"
               :disabled="!!stashAction"
-              @click="$emit('pop', stash.index)"
-              title="弹出贮藏（应用并删除）"
-            >{{ stashAction === 'pop-' + stash.index ? '…' : 'Pop' }}</button>
+              title="应用并删除此贮藏"
+              @click.stop="onAction('pop', stash.index, $event)"
+            >{{ stashAction === 'pop-' + stash.index ? '…' : '弹出' }}</button>
             <button
-              type="button" class="ghost tiny danger"
+              type="button"
+              class="ghost tiny danger"
               :disabled="!!stashAction"
-              @click="$emit('drop', stash.index)"
-              title="移除此贮藏（不应用）"
-            >{{ stashAction === 'drop-' + stash.index ? '…' : 'Drop' }}</button>
+              title="仅删除，不应用改动"
+              @click.stop="onAction('drop', stash.index, $event)"
+            >{{ stashAction === 'drop-' + stash.index ? '…' : '删除' }}</button>
           </div>
         </div>
       </div>
@@ -67,13 +87,14 @@
 </template>
 
 <script setup lang="ts">
-import { getEventValue } from "../../utils/vibeHelpers";
+import { ref, watch } from "vue";
+
 interface GitStash {
   index: number | string;
   message: string;
 }
 
-defineProps<{
+const props = defineProps<{
   sectionOpen: boolean;
   stashes: GitStash[];
   stashMessage: string;
@@ -81,15 +102,38 @@ defineProps<{
   listOpen: boolean;
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   "update:sectionOpen": [value: boolean];
   "update:listOpen": [value: boolean];
   "update:stashMessage": [value: string];
   save: [];
-  apply: [index: number | string];
-  pop: [index: number | string];
-  drop: [index: number | string];
+  apply: [index: number | string, event: MouseEvent];
+  pop: [index: number | string, event: MouseEvent];
+  drop: [index: number | string, event: MouseEvent];
 }>();
+
+const selectedIndex = ref<string | null>(null);
+
+watch(
+  () => props.stashes.map((s) => String(s.index)).join(","),
+  () => {
+    if (selectedIndex.value == null) return;
+    if (!props.stashes.some((s) => String(s.index) === selectedIndex.value)) {
+      selectedIndex.value = null;
+    }
+  },
+);
+
+function toggleSelect(index: string) {
+  selectedIndex.value = selectedIndex.value === index ? null : index;
+}
+
+function onAction(kind: "apply" | "pop" | "drop", index: number | string, event: MouseEvent) {
+  selectedIndex.value = String(index);
+  if (kind === "apply") emit("apply", index, event);
+  else if (kind === "pop") emit("pop", index, event);
+  else emit("drop", index, event);
+}
 </script>
 
 <style scoped>
@@ -128,6 +172,7 @@ defineEmits<{
 .git-stash-save-row { display: flex; gap: 6px; align-items: center; }
 .git-stash-msg-input {
   flex: 1;
+  min-width: 0;
   padding: 5px 8px;
   font-size: 12px;
   border-radius: 4px;
@@ -137,7 +182,16 @@ defineEmits<{
 }
 .stash-save-btn { flex-shrink: 0; }
 .git-stash-list { padding: 0 12px 8px; display: flex; flex-direction: column; gap: 6px; }
-.git-stash-list-header { display: flex; align-items: center; }
+.git-stash-list-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.git-stash-list-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: rgba(139, 148, 158, 0.55);
+}
 .git-section-toggle {
   display: flex;
   align-items: center;
@@ -152,15 +206,59 @@ defineEmits<{
 .git-stash-list-content { display: flex; flex-direction: column; gap: 4px; }
 .git-stash-item {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   padding: 6px 8px;
-  border-radius: 4px;
+  border-radius: 6px;
   background: rgba(255,255,255,0.03);
+  border: 1px solid transparent;
   font-size: 12px;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
-.git-stash-label { font-family: monospace; color: rgba(139,148,158,0.7); flex-shrink: 0; font-size: 11px; }
-.git-stash-msg { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.git-stash-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.git-stash-item:hover { background: rgba(255,255,255,0.05); }
+.git-stash-item.active {
+  background: rgba(56, 139, 253, 0.08);
+  border-color: rgba(56, 139, 253, 0.28);
+}
+.git-stash-item.busy { opacity: 0.75; }
+.git-stash-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.git-stash-row:disabled { cursor: not-allowed; opacity: 0.7; }
+.git-stash-label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: rgba(139,148,158,0.75);
+  font-size: 11px;
+}
+.git-stash-msg {
+  width: 100%;
+  color: #c9d1d9;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+.git-stash-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 2px;
+}
+.git-stash-actions .danger {
+  margin-left: auto;
+  color: #ff9a9a;
+}
 .git-stash-empty { font-size: 12px; color: rgba(139,148,158,0.7); padding: 4px 12px 8px; }
 </style>

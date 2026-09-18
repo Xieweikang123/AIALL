@@ -103,12 +103,33 @@
         @update:list-open="$emit('update:gitStashOpen', $event)"
         @update:stash-message="$emit('update:gitStashMessage', $event)"
         @save="$emit('do-stash-save')"
-        @apply="(index) => $emit('do-stash-apply', index)"
-        @pop="(index) => $emit('do-stash-pop', index)"
-        @drop="(index) => $emit('do-stash-drop', index)"
+        @apply="(index, event) => $emit('do-stash-apply', index, event)"
+        @pop="(index, event) => $emit('do-stash-pop', index, event)"
+        @drop="(index, event) => $emit('do-stash-drop', index, event)"
       />
 
-      <div v-if="gitError" class="git-error">{{ gitError }}</div>
+      <div v-if="gitSecondaryHint" class="git-hint" role="status">
+        <span class="git-hint-text">{{ gitSecondaryHint }}</span>
+        <button
+          type="button"
+          class="git-hint-dismiss"
+          aria-label="关闭提示"
+          @click="$emit('update:gitSecondaryHint', '')"
+        >
+          ×
+        </button>
+      </div>
+      <div v-if="gitError" class="git-error" role="alert">
+        <span class="git-error-text">{{ gitError }}</span>
+        <button
+          type="button"
+          class="git-error-dismiss"
+          aria-label="关闭错误"
+          @click="$emit('update:gitError', '')"
+        >
+          ×
+        </button>
+      </div>
       <div class="git-work-area" :class="{ 'git-work-area--log-open': gitLogOpen }">
         <div
           class="git-local-section"
@@ -374,6 +395,7 @@ const props = defineProps<{
   gitActiveRepoPath: string;
   gitHeadCommit: string;
   gitError: string;
+  gitSecondaryHint?: string;
   gitBranch: string;
   gitBranches: GitBranchInfo[];
   gitTrackingBranch: string;
@@ -436,6 +458,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: "refresh"): void;
+  (e: "update:gitError", value: string): void;
+  (e: "update:gitSecondaryHint", value: string): void;
   (e: "switch-git-repo", repoPath: string): void;
   (e: "do-fetch"): void;
   (e: "do-pull"): void;
@@ -462,9 +486,9 @@ const emit = defineEmits<{
   (e: "discard-file", path: string, event: MouseEvent): void;
   (e: "discard-all", event: MouseEvent): void;
   (e: "do-stash-save"): void;
-  (e: "do-stash-apply", index: number): void;
-  (e: "do-stash-pop", index: number | string): void;
-  (e: "do-stash-drop", index: number): void;
+  (e: "do-stash-apply", index: number | string, event?: MouseEvent): void;
+  (e: "do-stash-pop", index: number | string, event?: MouseEvent): void;
+  (e: "do-stash-drop", index: number | string, event?: MouseEvent): void;
   (e: "update:gitStashOpen", value: boolean): void;
   (e: "update:gitStagedOpen", value: boolean): void;
   (e: "update:gitUnstagedOpen", value: boolean): void;

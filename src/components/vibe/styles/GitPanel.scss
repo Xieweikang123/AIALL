@@ -293,13 +293,53 @@
   font-weight: 500;
 }
 
-.git-error {
+.git-error,
+.git-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   padding: 8px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.git-error {
   background: rgba(248, 81, 73, 0.1);
   border: 1px solid rgba(248, 81, 73, 0.3);
-  border-radius: 4px;
   color: #ff9a9a;
-  font-size: 12px;
+}
+
+.git-hint {
+  background: rgba(210, 153, 34, 0.12);
+  border: 1px solid rgba(210, 153, 34, 0.35);
+  color: #e3b341;
+}
+
+.git-error-text,
+.git-hint-text {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.git-error-dismiss,
+.git-hint-dismiss {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.75;
+}
+
+.git-error-dismiss:hover,
+.git-hint-dismiss:hover {
+  opacity: 1;
 }
 
 .git-changes-empty {

@@ -476,5 +476,7 @@ export function getEventValue(e: Event): string {
 
 /** 标准化错误信息提取，替代散落的 `e instanceof Error ? e.message : String(e)` 模式。 */
 export function toErrorMessage(e: unknown, fallback = "操作失败"): string {
-  return e instanceof Error ? e.message : fallback;
+  if (typeof e === "string") return e.trim() || fallback;
+  if (e instanceof Error) return e.message.trim() || fallback;
+  return fallback;
 }

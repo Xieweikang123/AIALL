@@ -14,11 +14,27 @@ import {
 } from "../../services/vibeGitClient";
 import type { GitPanelState } from "./createGitPanelState";
 
+type ConfirmFn = (
+  msg: string,
+  event?: MouseEvent,
+  options?: { confirmText?: string; cancelText?: string },
+) => Promise<boolean>;
+
+function parseStashIndex(raw: string | number): number | null {
+  const n = typeof raw === "number" ? raw : Number.parseInt(String(raw).trim(), 10);
+  return Number.isInteger(n) && n >= 0 ? n : null;
+}
+
+function formatStashFailure(fallback: string, error?: string, output?: string): string {
+  const detail = (error || output || "").trim();
+  return detail ? `${fallback}：${detail}` : fallback;
+}
+
 export interface UseGitRemoteActionsOptions {
   projectPath: () => string;
   projectOpened: () => boolean;
   state: GitPanelState;
-  confirm: (msg: string, event?: MouseEvent) => Promise<boolean>;
+  confirm: ConfirmFn;
   refreshGitStatus: (options?: { showLoading?: boolean; force?: boolean }) => Promise<void>;
   refreshGitLogIfOpen: (pathOverride?: string) => Promise<void>;
 }
@@ -179,7 +195,7 @@ export function useGitRemoteActions(options: UseGitRemoteActionsOptions) {
     try {
       const result = await gitStashSaveRemote(projectPath(), state.gitStashMessage.value.trim() || undefined);
       if (!result.ok) {
-        state.gitError.value = result.error || "贮藏失败";
+        state.gitError.value = formatStashFailure("贮藏失败", result.error, result.output);
         return;
       }
       state.gitStashMessage.value = "";
@@ -192,62 +208,85 @@ export function useGitRemoteActions(options: UseGitRemoteActionsOptions) {
     }
   }
 
-  async function doStashApply(stashIndex: string) {
+  async function doStashApply(stashIndex: string | number, event?: MouseEvent) {
     if (!projectOpened()) return;
-    if (!(await confirm(`确定应用 stash@{${stashIndex}}？可能产生冲突。`))) return;
-    state.gitStashAction.value = `apply-${stashIndex}`;
+    const index = parseStashIndex(stashIndex);
+    if (index == null) {
+      state.gitError.value = "应用贮藏失败：无效的贮藏编号";
+      return;
+    }
+    if (!(await confirm(`确定应用 stash@{${index}}？可能产生冲突。`, event))) return;
+    state.gitStashAction.value = `apply-${index}`;
     state.gitError.value = "";
     try {
-      const result = await gitStashApplyRemote(projectPath(), Number(stashIndex));
+      const result = await gitStashApplyRemote(projectPath(), index);
       if (!result.ok) {
-        state.gitError.value = result.error || "应用贮藏失败";
+        state.gitError.value = formatStashFailure("应用贮藏失败", result.error, result.output);
+        await refreshGitStashes();
         return;
       }
       await refreshGitStashes();
       await refreshGitStatus({ showLoading: false });
     } catch (e) {
       state.gitError.value = toErrorMessage(e, "应用贮藏失败");
+      await refreshGitStashes();
     } finally {
       state.gitStashAction.value = "";
     }
   }
 
-  async function doStashDrop(stashIndex: string) {
+  async function doStashDrop(stashIndex: string | number, event?: MouseEvent) {
     if (!projectOpened()) return;
-    const ok = await confirm(`确定要删除 stash@{${stashIndex}} 吗？此操作不可撤销。`);
+    const index = parseStashIndex(stashIndex);
+    if (index == null) {
+      state.gitError.value = "删除贮藏失败：无效的贮藏编号";
+      return;
+    }
+    const ok = await confirm(`确定删除 stash@{${index}}？此操作不可撤销。`, event, {
+      confirmText: "删除",
+    });
     if (!ok) return;
-    state.gitStashAction.value = `drop-${stashIndex}`;
+    state.gitStashAction.value = `drop-${index}`;
     state.gitError.value = "";
     try {
-      const result = await gitStashDropRemote(projectPath(), Number(stashIndex));
+      const result = await gitStashDropRemote(projectPath(), index);
       if (!result.ok) {
-        state.gitError.value = result.error || "删除贮藏失败";
+        state.gitError.value = formatStashFailure("删除贮藏失败", result.error, result.output);
+        await refreshGitStashes();
         return;
       }
       await refreshGitStashes();
     } catch (e) {
       state.gitError.value = toErrorMessage(e, "删除贮藏失败");
+      await refreshGitStashes();
     } finally {
       state.gitStashAction.value = "";
     }
   }
 
-  async function doStashPop(stashIndex: string, event?: MouseEvent) {
+  async function doStashPop(stashIndex: string | number, event?: MouseEvent) {
     if (!projectOpened()) return;
-    const ok = await confirm(`确定弹出 stash@{${stashIndex}}？`, event);
+    const index = parseStashIndex(stashIndex);
+    if (index == null) {
+      state.gitError.value = "弹出贮藏失败：无效的贮藏编号";
+      return;
+    }
+    const ok = await confirm(`确定弹出 stash@{${index}}？（应用并删除）`, event);
     if (!ok) return;
-    state.gitStashAction.value = `pop-${stashIndex}`;
+    state.gitStashAction.value = `pop-${index}`;
     state.gitError.value = "";
     try {
-      const result = await gitStashPopRemote(projectPath(), Number(stashIndex));
+      const result = await gitStashPopRemote(projectPath(), index);
       if (!result.ok) {
-        state.gitError.value = result.error || "弹出贮藏失败";
+        state.gitError.value = formatStashFailure("弹出贮藏失败", result.error, result.output);
+        await refreshGitStashes();
         return;
       }
       await refreshGitStashes();
       await refreshGitStatus({ showLoading: false });
     } catch (e) {
       state.gitError.value = toErrorMessage(e, "弹出贮藏失败");
+      await refreshGitStashes();
     } finally {
       state.gitStashAction.value = "";
     }

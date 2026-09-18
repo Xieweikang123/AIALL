@@ -261,7 +261,11 @@ fn body_opt_bool(v: &Value, name: &str) -> Option<bool> {
 }
 
 fn body_u32(v: &Value, name: &str) -> Option<u32> {
-    v.get(name).and_then(|x| x.as_u64()).map(|x| x as u32)
+    v.get(name).and_then(|x| match x {
+        Value::Number(n) => n.as_u64().map(|n| n as u32),
+        Value::String(s) => s.trim().parse::<u32>().ok(),
+        _ => None,
+    })
 }
 
 fn q_get<'a>(q: &'a HashMap<String, String>, name: &str) -> Option<&'a String> {
@@ -711,22 +715,28 @@ pub async fn handle_backend_vibe(
         }
         ("POST", "/git/stash-apply") => {
             let body = parse_body_json(body)?;
+            let Some(stash_index) = body_u32(&body, "stashIndex") else {
+                return Ok(ok_json(json!({
+                    "ok": false,
+                    "output": "",
+                    "error": "缺少 stashIndex"
+                })));
+            };
             return Ok(ok_value(
-                commands::git::git_stash_apply(
-                    body_str(&body, "path"),
-                    body_u32(&body, "stashIndex").unwrap_or(0),
-                )
-                .await,
+                commands::git::git_stash_apply(body_str(&body, "path"), stash_index).await,
             ));
         }
         ("POST", "/git/stash-drop") => {
             let body = parse_body_json(body)?;
+            let Some(stash_index) = body_u32(&body, "stashIndex") else {
+                return Ok(ok_json(json!({
+                    "ok": false,
+                    "output": "",
+                    "error": "缺少 stashIndex"
+                })));
+            };
             return Ok(ok_value(
-                commands::git::git_stash_drop(
-                    body_str(&body, "path"),
-                    body_u32(&body, "stashIndex").unwrap_or(0),
-                )
-                .await,
+                commands::git::git_stash_drop(body_str(&body, "path"), stash_index).await,
             ));
         }
         ("GET", "/git/branches") => {
@@ -1146,6 +1156,16 @@ mod tests {
         let resp = ok_json(json!({ "a": 1 }));
         assert_eq!(resp.status, 200);
         assert_eq!(String::from_utf8(resp.body).unwrap(), r#"{"a":1}"#);
+    }
+
+    #[test]
+    fn body_u32_accepts_number_and_numeric_string() {
+        assert_eq!(body_u32(&json!({ "stashIndex": 3 }), "stashIndex"), Some(3));
+        assert_eq!(body_u32(&json!({ "stashIndex": 0 }), "stashIndex"), Some(0));
+        assert_eq!(body_u32(&json!({ "stashIndex": "5" }), "stashIndex"), Some(5));
+        assert_eq!(body_u32(&json!({ "stashIndex": " 2 " }), "stashIndex"), Some(2));
+        assert_eq!(body_u32(&json!({ "stashIndex": "x" }), "stashIndex"), None);
+        assert_eq!(body_u32(&json!({}), "stashIndex"), None);
     }
 
     #[test]
