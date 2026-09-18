@@ -6,6 +6,10 @@ interface AgentTraceDrawerState {
   messageId: string | null;
   title: string;
   roundGroups: AgentRoundGroupView[];
+  /** 当前项目路径，用于导出轨迹文件 */
+  projectPath: string;
+  /** 当前会话 id，导出时附带会话磁盘路径 */
+  sessionId: string | null;
 }
 
 const state = reactive<AgentTraceDrawerState>({
@@ -13,9 +17,17 @@ const state = reactive<AgentTraceDrawerState>({
   messageId: null,
   title: "数据流轨迹",
   roundGroups: [],
+  projectPath: "",
+  sessionId: null,
 });
 
 let latest: { messageId: string; roundGroups: AgentRoundGroupView[] } | null = null;
+
+/** 由主视图同步当前项目 / 会话，供导出轨迹文件使用 */
+export function setTraceDumpContext(projectPath: string, sessionId: string | null): void {
+  state.projectPath = projectPath.trim();
+  state.sessionId = sessionId?.trim() || null;
+}
 
 /** 每条 Agent 消息渲染时注册自己的轨迹，最后注册的视为最新一条 */
 export function registerLatestTrace(messageId: string, roundGroups: AgentRoundGroupView[]): void {

@@ -15,6 +15,16 @@
               {{ state.roundGroups.length }} 轮
             </span>
             <button
+              v-if="state.roundGroups.length"
+              type="button"
+              class="agent-trace-drawer-copy"
+              :disabled="copying"
+              :title="copyHint || '导出完整轨迹到 .aiall/agent-traces/ 并复制绝对路径'"
+              @click="copyTracePath"
+            >
+              {{ copyLabel }}
+            </button>
+            <button
               type="button"
               class="agent-trace-drawer-close"
               title="关闭轨迹抽屉（Esc）"
@@ -40,14 +50,65 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import AgentTracePanel from "./AgentTracePanel.vue";
 import {
   closeTraceDrawer,
   useAgentTraceDrawerState,
 } from "../services/agentTraceDrawer";
+import { dumpAgentTraceToFile } from "../services/agentTraceDump";
 
 const state = useAgentTraceDrawerState();
+const copying = ref(false);
+const copyStatus = ref<"idle" | "ok" | "err">("idle");
+const copyHint = ref("");
+let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
+
+const copyLabel = computed(() => {
+  if (copying.value) return "导出中…";
+  if (copyStatus.value === "ok") return "已复制";
+  if (copyStatus.value === "err") return "失败";
+  return "复制路径";
+});
+
+async function copyTracePath(): Promise<void> {
+  if (copying.value || !state.roundGroups.length) return;
+  copying.value = true;
+  copyStatus.value = "idle";
+  copyHint.value = "";
+  try {
+    const result = await dumpAgentTraceToFile({
+      projectPath: state.projectPath,
+      sessionId: state.sessionId,
+      messageId: state.messageId,
+      roundGroups: state.roundGroups,
+    });
+    if (!result.ok) {
+      copyStatus.value = "err";
+      copyHint.value = result.error;
+      return;
+    }
+    if (!navigator.clipboard?.writeText) {
+      copyStatus.value = "err";
+      copyHint.value = `已写入但剪贴板不可用：${result.absolutePath}`;
+      return;
+    }
+    await navigator.clipboard.writeText(result.clipboardText);
+    copyStatus.value = "ok";
+    copyHint.value = result.absolutePath;
+  } catch (error) {
+    copyStatus.value = "err";
+    copyHint.value = error instanceof Error ? error.message : "复制失败";
+  } finally {
+    copying.value = false;
+    if (copyResetTimer) clearTimeout(copyResetTimer);
+    copyResetTimer = setTimeout(() => {
+      copyStatus.value = "idle";
+      copyHint.value = "";
+      copyResetTimer = null;
+    }, 3200);
+  }
+}
 
 function onKeydown(event: KeyboardEvent): void {
   if (event.key === "Escape" && state.open) {
@@ -56,7 +117,10 @@ function onKeydown(event: KeyboardEvent): void {
 }
 
 onMounted(() => window.addEventListener("keydown", onKeydown));
-onUnmounted(() => window.removeEventListener("keydown", onKeydown));
+onUnmounted(() => {
+  window.removeEventListener("keydown", onKeydown);
+  if (copyResetTimer) clearTimeout(copyResetTimer);
+});
 </script>
 
 <style scoped>
@@ -110,6 +174,29 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   background: rgba(88, 166, 255, 0.12);
 }
 
+.agent-trace-drawer-copy {
+  margin-left: auto;
+  padding: 3px 9px;
+  border: 1px solid rgba(126, 182, 255, 0.28);
+  border-radius: 6px;
+  background: rgba(88, 166, 255, 0.1);
+  color: rgba(165, 214, 255, 0.92);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.agent-trace-drawer-copy:hover:not(:disabled) {
+  background: rgba(88, 166, 255, 0.18);
+  border-color: rgba(126, 182, 255, 0.45);
+}
+
+.agent-trace-drawer-copy:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
 .agent-trace-drawer-close {
   margin-left: auto;
   width: 26px;
@@ -124,6 +211,10 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
   cursor: pointer;
   font-size: 13px;
   transition: background 0.15s ease, color 0.15s ease;
+}
+
+.agent-trace-drawer-copy + .agent-trace-drawer-close {
+  margin-left: 6px;
 }
 
 .agent-trace-drawer-close:hover {
