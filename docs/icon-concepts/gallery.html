@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>AIALL 图标方案</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin:0; background:#05070a; color:#e6edf3; font-family:'Segoe UI', system-ui, -apple-system, sans-serif; }
+  .wrap { padding: 30px 38px; }
+  h1 { font-size: 27px; margin:0; letter-spacing:.5px; }
+  .accent { color:#58a6ff; }
+  .sub { color:#7d8590; font-size:13px; margin:6px 0 22px; }
+  .grid { display:grid; grid-template-columns:repeat(4,1fr); gap:18px; }
+  .card { background:linear-gradient(180deg,#0e141b,#090d12); border:1px solid #1c2430; border-radius:18px; padding:16px 16px 14px; }
+  .big { height:198px; display:flex; align-items:center; justify-content:center; }
+  .big svg { width:196px; height:196px; }
+  .meta { margin-top:12px; display:flex; align-items:center; }
+  .num { background:#1f6feb; color:#fff; border-radius:7px; font-size:12px; padding:2px 9px; font-weight:700; }
+  .name { font-size:15px; font-weight:600; margin-left:9px; }
+  .desc { color:#8b949e; font-size:12px; margin-top:7px; line-height:1.55; min-height:56px; }
+  .mini { display:flex; gap:12px; align-items:flex-end; margin-top:10px; padding-top:11px; border-top:1px solid #1c2430; }
+  .mini span { display:block; }
+  .mini .lbl { color:#5b6470; font-size:10px; margin-top:4px; text-align:center; }
+  .cell { text-align:center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>AIALL <span class="accent">图标方案</span></h1>
+  <div class="sub">候选 8 款 · 深色底 + Cursor 蓝 (#1f6feb / #58a6ff) · 底部小尺寸为 48 / 32 / 16px 可读性参考</div>
+  <div class="grid">
+
+    <!-- 1 -->
+    <div class="card">
+      <div class="big">
+        <svg viewBox="0 0 512 512">
+          <defs>
+            <linearGradient id="c1bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#161d27"/><stop offset="1" stop-color="#04060a"/></linearGradient>
+            <linearGradient id="c1a" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9ad4ff"/><stop offset="1" stop-color="#1f6feb"/></linearGradient>
+            <filter id="c1g" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="16" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          </defs>
+          <rect width="512" height="512" rx="112" fill="url(#c1bg)"/>
+          <rect x="6" y="6" width="500" height="500" rx="107" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="2"/>
+          <text x="232" y="356" text-anchor="middle" font-family="'Segoe UI', Inter, system-ui, sans-serif" font-size="330" font-weight="800" fill="url(#c1a)" filter="url(#c1g)">A</text>
+          <rect x="368" y="156" width="38" height="200" rx="13" fill="#9ad4ff" filter="url(#c1g)"/>
+        </svg>
+      </div>
+      <div class="meta"><span class="num">01</span><span class="name">A + 光标</span></div>
+      <div class="desc">字母 A 直接当品牌符号，右侧一根竖光标 = 正在改写代码。最直白、辨识度最高。</div>
+      <div class="mini">
+        <span class="cell"><svg width="48" height="48" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="url(#c1bg)"/><text x="232" y="356" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="330" font-weight="800" fill="url(#c1a)">A</text><rect x="368" y="156" width="38" height="200" rx="13" fill="#9ad4ff"/></svg><span class="lbl">48</span></span>
+        <span class="cell"><svg width="32" height="32" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="url(#c1bg)"/><text x="232" y="356" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="330" font-weight="800" fill="url(#c1a)">A</text><rect x="368" y="156" width="38" height="200" rx="13" fill="#9ad4ff"/></svg><span class="lbl">32</span></span>
+        <span class="cell"><svg width="16" height="16" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="url(#c1bg)"/><text x="232" y="356" text-anchor="middle" font-family="'Segoe UI',sans-serif" font-size="330" font-weight="800" fill="url(#c1a)">A</text><rect x="368" y="156" width="38" height="200" rx="13" fill="#9ad4ff"/></svg><span class="lbl">16</span></span>
+      </div>
+    </div>
+
+    <!-- 2 -->
+    <div class="card">
+      <div class="big">
+        <svg viewBox="0 0 512 512">
+          <defs>
+            <linearGradient id="c2bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#161d27"/><stop offset="1" stop-color="#04060a"/></linearGradient>
+            <linearGradient id="c2a" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9ad4ff"/><stop offset="1" stop-color="#1f6feb"/></linearGradient>
+            <filter id="c2g" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="14" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          </defs>
+          <rect width="512" height="512" rx="112" fill="url(#c2bg)"/>
+          <rect x="6" y="6" width="500" height="500" rx="107" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="2"/>
+          <path d="M186 170 L98 256 L186 342" fill="none" stroke="url(#c2a)" stroke-width="46" stroke-linecap="round" stroke-linejoin="round" filter="url(#c2g)"/>
+          <path d="M326 170 L414 256 L326 342" fill="none" stroke="url(#c2a)" stroke-width="46" stroke-linecap="round" stroke-linejoin="round" filter="url(#c2g)"/>
+          <path d="M256 203 C263 239 273 249 309 256 C273 263 263 273 256 309 C249 273 239 263 203 256 C239 249 249 239 256 203 Z" fill="#dcecff" filter="url(#c2g)"/>
+        </svg>
+      </div>
+      <div class="meta"><span class="num">02</span><span class="name">尖括号 + 火花</span></div>
+      <div class="desc">代码尖括号里嵌一颗 AI 火花。最通用、最像开发工具的经典组合。</div>
+      <div class="mini">
+        <span class="cell"><svg width="48" height="48" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="url(#c2bg)"/><path d="M186 170 L98 256 L186 342" fill="none" stroke="url(#c2a)" stroke-width="46" stroke-linecap="round" stroke-linejoin="round"/><path d="M326 170 L414 256 L326 342" fill="none" stroke="url(#c2a)" stroke-width="46" stroke-linecap="round" stroke-linejoin="round"/><path d="M256 203 C263 239 273 249 309 256 C273 263 263 273 256 309 C249 273 239 263 203 256 C239 249 249 239 256 203 Z" fill="#dcecff"/></svg><span class="lbl">48</span></span>
+        <span class="cell"><svg width="32" height="32" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="url(#c2bg)"/><path d="M186 170 L98 256 L186 342" fill="none" stroke="url(#c2a)" stroke-width="46" stroke-linecap="round" stroke-linejoin="round"/><path d="M326 170 L414 256 L326 342" fill="none" stroke="url(#c2a)" stroke-width="46" stroke-linecap="round" stroke-linejoin="round"/><path d="M256 203 C263 239 273 249 309 256 C273 263 263 273 256 309 C249 273 239 263 203 256 C239 249 249 239 256 203 Z" fill="#dcecff"/></svg><span class="lbl">32</span></span>
+        <span class="cell"><svg width="16" height="16" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="url(#c2bg)"/><path d="M186 170 L98 256 L186 342" fill="none" stroke="url(#c2a)" stroke-width="46" stroke-linecap="round" stroke-linejoin="round"/><path d="M326 170 L414 256 L326 342" fill="none" stroke="url(#c2a)" stroke-width="46" stroke-linecap="round" stroke-linejoin="round"/><path d="M256 203 C263 239 273 249 309 256 C273 263 263 273 256 309 C249 273 239 263 203 256 C239 249 249 239 256 203 Z" fill="#dcecff"/></svg><span class="lbl">16</span></span>
+      </div>
+    </div>
+
+    <!-- 3 -->
+    <div class="card">
+      <div class="big">
+        <svg viewBox="0 0 512 512">
+          <defs>
+            <linearGradient id="c3bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#161d27"/><stop offset="1" stop-color="#04060a"/></linearGradient>
+            <filter id="c3g" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="12" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          </defs>
+          <rect width="512" height="512" rx="112" fill="url(#c3bg)"/>
+          <rect x="6" y="6" width="500" height="500" rx="107" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="2"/>
+          <rect x="74" y="104" width="364" height="304" rx="46" fill="#0b1017" stroke="rgba(88,166,255,.32)" stroke-width="4"/>
+          <line x1="74" y1="180" x2="438" y2="180" stroke="rgba(255,255,255,.10)" stroke-width="4"/>
+          <circle cx="124" cy="142" r="12" fill="#ff5f57"/>
+          <circle cx="164" cy="142" r="12" fill="#febc2e"/>
+          <circle cx="204" cy="142" r="12" fill="#28c840"/>
+          <path d="M128 240 L182 290 L128 340" fill="none" stroke="#58a6ff" stroke-width="26" stroke-linecap="round" stroke-linejoin="round" filter="url(#c3g)"/>
+          <rect x="208" y="322" width="130" height="20" rx="10" fill="#9ad4ff" filter="url(#c3g)"/>
+        </svg>
+      </div>
+      <div class="meta"><span class="num">03</span><span class="name">终端窗口</span></div>
+      <div class="desc">命令行窗口 + 提示符光标，强调「Agent 在跑命令、改工程」的执行感。</div>
+      <div class="mini">
+        <span class="cell"><svg width="48" height="48" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="url(#c3bg)"/><rect x="74" y="104" width="364" height="304" rx="46" fill="#0b1017" stroke="rgba(88,166,255,.32)" stroke-width="4"/><line x1="74" y1="180" x2="438" y2="180" stroke="rgba(255,255,255,.10)" stroke-width="4"/><circle cx="124" cy="142" r="12" fill="#ff5f57"/><circle cx="164" cy="142" r="12" fill="#febc2e"/><circle cx="204" cy="142" r="12" fill="#28c840"/><path d="M128 240 L182 290 L128 340" fill="none" stroke="#58a6ff" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/><rect x="208" y="322" width="130" height="20" rx="10" fill="#9ad4ff"/></svg><span class="lbl">48</span></span>
+        <span class="cell"><svg width="32" height="32" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="url(#c3bg)"/><rect x="74" y="104" width="364" height="304" rx="46" fill="#0b1017" stroke="rgba(88,166,255,.32)" stroke-width="4"/><line x1="74" y1="180" x2="438" y2="180" stroke="rgba(255,255,255,.10)" stroke-width="4"/><circle cx="124" cy="142" r="12" fill="#ff5f57"/><circle cx="164" cy="142" r="12" fill="#febc2e"/><circle cx="204" cy="142" r="12" fill="#28c840"/><path d="M128 240 L182 290 L128 340" fill="none" stroke="#58a6ff" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/><rect x="208" y="322" width="130" height="20" rx="10" fill="#9ad4ff"/></svg><span class="lbl">32</span></span>
+        <span class="cell"><svg width="16" height="16" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="url(#c3bg)"/><rect x="74" y="104" width="364" height="304" rx="46" fill="#0b1017" stroke="rgba(88,166,255,.32)" stroke-width="4"/><line x1="74" y1="180" x2="438" y2="180" stroke="rgba(255,255,255,.10)" stroke-width="4"/><circle cx="124" cy="142" r="12" fill="#ff5f57"/><circle cx="164" cy="142" r="12" fill="#febc2e"/><circle cx="204" cy="142" r="12" fill="#28c840"/><path d="M128 240 L182 290 L128 340" fill="none" stroke="#58a6ff" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/><rect x="208" y="322" width="130" height="20" rx="10" fill="#9ad4ff"/></svg><span class="lbl">16</span></span>
+      </div>
+    </div>
+
+    <!-- 4 -->
+    <div class="card">
+      <div class="big">
+        <svg viewBox="0 0 512 512">
+          <defs>
+            <linearGradient id="c4bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#161d27"/><stop offset="1" stop-color="#04060a"/></linearGradient>
+            <linearGradient id="c4a" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9ad4ff"/><stop offset="1" stop-color="#1f6feb"/></linearGradient>
+            <filter id="c4g" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="14" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          </defs>
+          <rect width="512" height="512" rx="112" fill="url(#c4bg)"/>
+          <rect x="6" y="6" width="500" height="500" rx="107" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="2"/>
+          <rect x="80" y="146" width="180" height="28" rx="14" fill="rgba(88,166,255,.85)"/>
+          <rect x="80" y="212" width="250" height="28" rx="14" fill="rgba(255,255,255,.20)"/>
+          <rect x="80" y="278" width="140" height="28" rx="14" fill="rgba(255,255,255,.20)"/>
+          <path d="M300 230 L300 412 L350 370 L380 441 L413 427 L383 357 L445 357 Z" fill="url(#c4a)" stroke="#dcecff" stroke-width="8" stroke-linejoin="round" filter="url(#c4g)"/>
+        </svg>
+      </div>
+      <div class="meta"><span class="num">04</span><span class="name">光标改代码</span></div>
+      <div class="desc">鼠标指针压着几行代码，直接表达「会改」这个核心动作。最贴产品定位。</div>
+      <div class="mini">
+        <span class="cell"><svg width="48" height="48" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="url(#c4bg)"/><rect x="80" y="146" width="180" height="28" rx="14" fill="rgba(88,166,255,.85)"/><rect x="80" y="212" width="250" height="28" rx="14" fill="rgba(255,255,255,.20)"/><rect x="80" y="278" width="140" height="28" rx="14" fill="rgba(255,255,255,.20)"/><path d="M300 230 L300 412 L350 370 L380 441 L413 427 L383 357 L445 357 Z" fill="url(#c4a)"/></svg><span class="lbl">48</span></span>
+        <span class="cell"><svg width="32" height="32" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="url(#c4bg)"/><rect x="80" y="146" width="180" height="28" rx="14" fill="rgba(88,166,255,.85)"/><rect x="80" y="212" width="250" height="28" rx="14" fill="rgba(255,255,255,.20)"/><rect x="80" y="278" width="140" height="28" rx="14" fill="rgba(255,255,255,.20)"/><path d="M300 230 L300 412 L350 370 L380 441 L413 427 L383 357 L445 357 Z" fill="url(#c4a)"/></svg><span class="lbl">32</span></span>
+        <span class="cell"><svg width="16" height="16" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="url(#c4bg)"/><rect x="80" y="146" width="180" height="28" rx="14" fill="rgba(88,166,255,.85)"/><rect x="80" y="212" width="250" height="28" rx="14" fill="rgba(255,255,255,.20)"/><rect x="80" y="278" width="140" height="28" rx="14" fill="rgba(255,255,255,.20)"/><path d="M300 230 L300 412 L350 370 L380 441 L413 427 L383 357 L445 357 Z" fill="url(#c4a)"/></svg><span class="lbl">16</span></span>
+      </div>
+    </div>
+
+    <!-- 5 -->
+    <div class="card">
+      <div class="big">
+        <svg viewBox="0 0 512 512">
+          <defs>
+            <linearGradient id="c5bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#161d27"/><stop offset="1" stop-color="#04060a"/></linearGradient>
+            <clipPath id="c5clip"><rect x="72" y="72" width="368" height="368" rx="70"/></clipPath>
+            <filter id="c5g" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="14" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          </defs>
+          <rect width="512" height="512" rx="112" fill="url(#c5bg)"/>
+          <rect x="6" y="6" width="500" height="500" rx="107" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="2"/>
+          <rect x="72" y="72" width="368" height="368" rx="70" fill="#0b1017"/>
+          <g clip-path="url(#c5clip)" stroke="rgba(88,166,255,.20)" stroke-width="2">
+            <line x1="140" y1="72" x2="140" y2="440"/><line x1="208" y1="72" x2="208" y2="440"/><line x1="276" y1="72" x2="276" y2="440"/><line x1="344" y1="72" x2="344" y2="440"/><line x1="412" y1="72" x2="412" y2="440"/>
+            <line x1="72" y1="140" x2="440" y2="140"/><line x1="72" y1="208" x2="440" y2="208"/><line x1="72" y1="276" x2="440" y2="276"/><line x1="72" y1="344" x2="440" y2="344"/><line x1="72" y1="412" x2="440" y2="412"/>
+          </g>
+          <rect x="72" y="72" width="368" height="368" rx="70" fill="none" stroke="rgba(255,255,255,.10)" stroke-width="3"/>
+          <circle cx="228" cy="224" r="92" fill="rgba(88,166,255,.10)" stroke="#58a6ff" stroke-width="30" filter="url(#c5g)"/>
+          <line x1="296" y1="292" x2="394" y2="390" stroke="#58a6ff" stroke-width="36" stroke-linecap="round" filter="url(#c5g)"/>
+        </svg>
+      </div>
+      <div class="meta"><span class="num">05</span><span class="name">代码地图 + 放大镜</span></div>
+      <div class="desc">网格化的工程底图 + 放大镜，对应「会查仓库、Code to Map」。信息感强。</div>
+      <div class="mini">
+        <span class="cell"><svg width="48" height="48" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="url(#c5bg)"/><rect x="72" y="72" width="368" height="368" rx="70" fill="#0b1017"/><g clip-path="url(#c5clip)" stroke="rgba(88,166,255,.20)" stroke-width="2"><line x1="140" y1="72" x2="140" y2="440"/><line x1="208" y1="72" x2="208" y2="440"/><line x1="276" y1="72" x2="276" y2="440"/><line x1="344" y1="72" x2="344" y2="440"/><line x1="412" y1="72" x2="412" y2="440"/><line x1="72" y1="140" x2="440" y2="140"/><line x1="72" y1="208" x2="440" y2="208"/><line x1="72" y1="276" x2="440" y2="276"/><line x1="72" y1="344" x2="440" y2="344"/><line x1="72" y1="412" x2="440" y2="412"/></g><circle cx="228" cy="224" r="92" fill="rgba(88,166,255,.10)" stroke="#58a6ff" stroke-width="30"/><line x1="296" y1="292" x2="394" y2="390" stroke="#58a6ff" stroke-width="36" stroke-linecap="round"/></svg><span class="lbl">48</span></span>
+        <span class="cell"><svg width="32" height="32" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="url(#c5bg)"/><rect x="72" y="72" width="368" height="368" rx="70" fill="#0b1017"/><g clip-path="url(#c5clip)" stroke="rgba(88,166,255,.20)" stroke-width="2"><line x1="140" y1="72" x2="140" y2="440"/><line x1="208" y1="72" x2="208" y2="440"/><line x1="276" y1="72" x2="276" y2="440"/><line x1="344" y1="72" x2="344" y2="440"/><line x1="412" y1="72" x2="412" y2="440"/><line x1="72" y1="140" x2="440" y2="140"/><line x1="72" y1="208" x2="440" y2="208"/><line x1="72" y1="276" x2="440" y2="276"/><line x1="72" y1="344" x2="440" y2="344"/><line x1="72" y1="412" x2="440" y2="412"/></g><circle cx="228" cy="224" r="92" fill="rgba(88,166,255,.10)" stroke="#58a6ff" stroke-width="30"/><line x1="296" y1="292" x2="394" y2="390" stroke="#58a6ff" stroke-width="36" stroke-linecap="round"/></svg><span class="lbl">32</span></span>
+        <span class="cell"><svg width="16" height="16" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="url(#c5bg)"/><rect x="72" y="72" width="368" height="368" rx="70" fill="#0b1017"/><g clip-path="url(#c5clip)" stroke="rgba(88,166,255,.20)" stroke-width="2"><line x1="140" y1="72" x2="140" y2="440"/><line x1="208" y1="72" x2="208" y2="440"/><line x1="276" y1="72" x2="276" y2="440"/><line x1="344" y1="72" x2="344" y2="440"/><line x1="412" y1="72" x2="412" y2="440"/><line x1="72" y1="140" x2="440" y2="140"/><line x1="72" y1="208" x2="440" y2="208"/><line x1="72" y1="276" x2="440" y2="276"/><line x1="72" y1="344" x2="440" y2="344"/><line x1="72" y1="412" x2="440" y2="412"/></g><circle cx="228" cy="224" r="92" fill="rgba(88,166,255,.10)" stroke="#58a6ff" stroke-width="30"/><line x1="296" y1="292" x2="394" y2="390" stroke="#58a6ff" stroke-width="36" stroke-linecap="round"/></svg><span class="lbl">16</span></span>
+      </div>
+    </div>
+
+    <!-- 6 -->
+    <div class="card">
+      <div class="big">
+        <svg viewBox="0 0 512 512">
+          <defs>
+            <linearGradient id="c6bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#161d27"/><stop offset="1" stop-color="#04060a"/></linearGradient>
+            <linearGradient id="c6a" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9ad4ff"/><stop offset="1" stop-color="#1f6feb"/></linearGradient>
+            <filter id="c6g" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="14" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          </defs>
+          <rect width="512" height="512" rx="112" fill="url(#c6bg)"/>
+          <rect x="6" y="6" width="500" height="500" rx="107" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="2"/>
+          <path d="M295 111 A150 150 0 1 1 217 111" fill="none" stroke="url(#c6a)" stroke-width="42" stroke-linecap="round" filter="url(#c6g)"/>
+          <path d="M232 111 L176 69 L176 153 Z" fill="#9ad4ff" filter="url(#c6g)"/>
+          <path d="M190 258 L240 310 L342 198" fill="none" stroke="#eaf4ff" stroke-width="38" stroke-linecap="round" stroke-linejoin="round" filter="url(#c6g)"/>
+        </svg>
+      </div>
+      <div class="meta"><span class="num">06</span><span class="name">闭环 + 勾</span></div>
+      <div class="desc">带箭头的循环 + 对勾，对应「改完自己验证」。传达可靠、跑得通。</div>
+      <div class="mini">
+        <span class="cell"><svg width="48" height="48" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="url(#c6bg)"/><path d="M295 111 A150 150 0 1 1 217 111" fill="none" stroke="url(#c6a)" stroke-width="42" stroke-linecap="round"/><path d="M232 111 L176 69 L176 153 Z" fill="#9ad4ff"/><path d="M190 258 L240 310 L342 198" fill="none" stroke="#eaf4ff" stroke-width="38" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl">48</span></span>
+        <span class="cell"><svg width="32" height="32" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="url(#c6bg)"/><path d="M295 111 A150 150 0 1 1 217 111" fill="none" stroke="url(#c6a)" stroke-width="42" stroke-linecap="round"/><path d="M232 111 L176 69 L176 153 Z" fill="#9ad4ff"/><path d="M190 258 L240 310 L342 198" fill="none" stroke="#eaf4ff" stroke-width="38" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl">32</span></span>
+        <span class="cell"><svg width="16" height="16" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="url(#c6bg)"/><path d="M295 111 A150 150 0 1 1 217 111" fill="none" stroke="url(#c6a)" stroke-width="42" stroke-linecap="round"/><path d="M232 111 L176 69 L176 153 Z" fill="#9ad4ff"/><path d="M190 258 L240 310 L342 198" fill="none" stroke="#eaf4ff" stroke-width="38" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lbl">16</span></span>
+      </div>
+    </div>
+
+    <!-- 7 -->
+    <div class="card">
+      <div class="big">
+        <svg viewBox="0 0 512 512">
+          <defs>
+            <linearGradient id="c7bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#161d27"/><stop offset="1" stop-color="#04060a"/></linearGradient>
+            <linearGradient id="c7a" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9ad4ff"/><stop offset="1" stop-color="#1f6feb"/></linearGradient>
+            <filter id="c7g" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="16" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          </defs>
+          <rect width="512" height="512" rx="112" fill="url(#c7bg)"/>
+          <rect x="6" y="6" width="500" height="500" rx="107" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="2"/>
+          <path d="M256 108 L148 404" fill="none" stroke="url(#c7a)" stroke-width="58" stroke-linecap="round" filter="url(#c7g)"/>
+          <path d="M256 108 L364 404" fill="none" stroke="url(#c7a)" stroke-width="58" stroke-linecap="round" filter="url(#c7g)"/>
+          <rect x="186" y="286" width="140" height="44" rx="22" fill="#eaf4ff" filter="url(#c7g)"/>
+        </svg>
+      </div>
+      <div class="meta"><span class="num">07</span><span class="name">几何 A 字标</span></div>
+      <div class="desc">纯线条拼的 A，不用字体、缩到 16px 也不糊。最耐看、最适合当 favicon。</div>
+      <div class="mini">
+        <span class="cell"><svg width="48" height="48" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="url(#c7bg)"/><path d="M256 108 L148 404" fill="none" stroke="url(#c7a)" stroke-width="58" stroke-linecap="round"/><path d="M256 108 L364 404" fill="none" stroke="url(#c7a)" stroke-width="58" stroke-linecap="round"/><path d="M198 306 L314 306" fill="none" stroke="#eaf4ff" stroke-width="52" stroke-linecap="round"/></svg><span class="lbl">48</span></span>
+        <span class="cell"><svg width="32" height="32" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="url(#c7bg)"/><path d="M256 108 L148 404" fill="none" stroke="url(#c7a)" stroke-width="58" stroke-linecap="round"/><path d="M256 108 L364 404" fill="none" stroke="url(#c7a)" stroke-width="58" stroke-linecap="round"/><path d="M198 306 L314 306" fill="none" stroke="#eaf4ff" stroke-width="52" stroke-linecap="round"/></svg><span class="lbl">32</span></span>
+        <span class="cell"><svg width="16" height="16" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="url(#c7bg)"/><path d="M256 108 L148 404" fill="none" stroke="url(#c7a)" stroke-width="58" stroke-linecap="round"/><path d="M256 108 L364 404" fill="none" stroke="url(#c7a)" stroke-width="58" stroke-linecap="round"/><path d="M198 306 L314 306" fill="none" stroke="#eaf4ff" stroke-width="52" stroke-linecap="round"/></svg><span class="lbl">16</span></span>
+      </div>
+    </div>
+
+    <!-- 8 -->
+    <div class="card">
+      <div class="big">
+        <svg viewBox="0 0 512 512">
+          <defs>
+            <linearGradient id="c8bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#161d27"/><stop offset="1" stop-color="#04060a"/></linearGradient>
+            <linearGradient id="c8a" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#dcecff"/><stop offset="1" stop-color="#3b82f6"/></linearGradient>
+            <filter id="c8g" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="15" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+          </defs>
+          <rect width="512" height="512" rx="112" fill="url(#c8bg)"/>
+          <rect x="6" y="6" width="500" height="500" rx="107" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="2"/>
+          <circle cx="256" cy="256" r="182" fill="none" stroke="rgba(88,166,255,.22)" stroke-width="8"/>
+          <ellipse cx="256" cy="256" rx="182" ry="64" fill="none" stroke="rgba(88,166,255,.55)" stroke-width="9" transform="rotate(-26 256 256)" filter="url(#c8g)"/>
+          <path d="M256 144 C266 208 288 232 352 256 C288 280 266 304 256 368 C246 304 224 280 160 256 C224 232 246 208 256 144 Z" fill="url(#c8a)" filter="url(#c8g)"/>
+          <circle cx="404" cy="180" r="13" fill="#9ad4ff" filter="url(#c8g)"/>
+        </svg>
+      </div>
+      <div class="meta"><span class="num">08</span><span class="name">AI 核 + 星轨</span></div>
+      <div class="desc">中央 AI 火花 + 环绕轨道，气质偏「智能体内核」，科技感最强。</div>
+      <div class="mini">
+        <span class="cell"><svg width="48" height="48" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="url(#c8bg)"/><circle cx="256" cy="256" r="182" fill="none" stroke="rgba(88,166,255,.22)" stroke-width="8"/><ellipse cx="256" cy="256" rx="182" ry="64" fill="none" stroke="rgba(88,166,255,.55)" stroke-width="9" transform="rotate(-26 256 256)"/><path d="M256 144 C266 208 288 232 352 256 C288 280 266 304 256 368 C246 304 224 280 160 256 C224 232 246 208 256 144 Z" fill="url(#c8a)"/></svg><span class="lbl">48</span></span>
+        <span class="cell"><svg width="32" height="32" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="url(#c8bg)"/><circle cx="256" cy="256" r="182" fill="none" stroke="rgba(88,166,255,.22)" stroke-width="8"/><ellipse cx="256" cy="256" rx="182" ry="64" fill="none" stroke="rgba(88,166,255,.55)" stroke-width="9" transform="rotate(-26 256 256)"/><path d="M256 144 C266 208 288 232 352 256 C288 280 266 304 256 368 C246 304 224 280 160 256 C224 232 246 208 256 144 Z" fill="url(#c8a)"/></svg><span class="lbl">32</span></span>
+        <span class="cell"><svg width="16" height="16" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="url(#c8bg)"/><circle cx="256" cy="256" r="182" fill="none" stroke="rgba(88,166,255,.22)" stroke-width="8"/><ellipse cx="256" cy="256" rx="182" ry="64" fill="none" stroke="rgba(88,166,255,.55)" stroke-width="9" transform="rotate(-26 256 256)"/><path d="M256 144 C266 208 288 232 352 256 C288 280 266 304 256 368 C246 304 224 280 160 256 C224 232 246 208 256 144 Z" fill="url(#c8a)"/></svg><span class="lbl">16</span></span>
+      </div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>
