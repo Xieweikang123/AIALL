@@ -287,12 +287,15 @@ export async function fetchServerAiConfig(): Promise<ServerAiConfigInfo> {
 }
 
 /** 保存服务端 AI 配置（写服务端 `server-config.json`）。apiKey 留空表示保留现有 key。 */
-export async function saveServerAiConfig(input: {
-  endpoint: string;
-  apiKey: string;
-  model?: string;
-  webProxyUrl?: string;
-}): Promise<{ ok: boolean; error?: string }> {
+export async function saveServerAiConfig(
+  input: {
+    endpoint: string;
+    apiKey: string;
+    model?: string;
+    webProxyUrl?: string;
+  },
+  options?: { keepalive?: boolean },
+): Promise<{ ok: boolean; error?: string }> {
   try {
     const { response, unauthorized } = await authFetch(backendUrl("/api/server/ai-config"), {
       method: "POST",
@@ -303,6 +306,7 @@ export async function saveServerAiConfig(input: {
         model: input.model || "",
         webProxyUrl: input.webProxyUrl || "",
       }),
+      ...(options?.keepalive ? { keepalive: true } : {}),
     });
     const text = await response.text();
     let parsed: { ok?: boolean; error?: string };

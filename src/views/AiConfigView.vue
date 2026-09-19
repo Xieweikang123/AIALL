@@ -501,8 +501,8 @@ async function refreshServerLoginState() {
     const cfg = await fetchServerAiConfig();
     serverCfgNote.value = cfg.ok
       ? cfg.hasServerKey
-        ? "服务端已配置 API Key；改动自动存本地，点「同步到服务端」推送。"
-        : "服务端尚未配置 API Key，请在本页填写后点「同步到服务端」。"
+        ? "服务端已配置 API Key；改动会自动存本地并同步到服务端。"
+        : "服务端尚未配置 API Key，请在本页填写；保存后会自动同步到服务端。"
       : cfg.error || "无法获取服务端 AI 配置";
   } else {
     serverCfgNote.value = "";
@@ -1171,15 +1171,70 @@ function scheduleAutoSave() {
   autoSaveTimer = window.setTimeout(() => {
     try {
       persistConfigNow();
-      showAutoSaveHint("已自动保存");
-      window.clearTimeout(autoSaveTimer);
-      autoSaveTimer = window.setTimeout(() => {
-        showAutoSaveHint("");
-      }, 2000);
+      // web：本地存完后若相对服务端有脏改动，顺带推服务端，避免进 Vibe 仍用旧模型。
+      if (serverLoggedIn.value && !isDesktopRuntime && serverDirty.value) {
+        void syncCurrentFormToServer({ quiet: true });
+      } else {
+        showAutoSaveHint("已自动保存");
+        window.clearTimeout(autoSaveTimer);
+        autoSaveTimer = window.setTimeout(() => {
+          showAutoSaveHint("");
+        }, 2000);
+      }
     } catch {
       showAutoSaveHint("自动保存失败");
     }
   }, AUTO_SAVE_DELAY_MS);
+}
+
+async function syncCurrentFormToServer(options?: { quiet?: boolean }): Promise<boolean> {
+  if (!serverLoggedIn.value || isDesktopRuntime) return false;
+  if (serverSyncBusy.value) return false;
+  syncFormToProvider(editingProviderId.value);
+  serverSyncBusy.value = true;
+  if (!options?.quiet) {
+    showAutoSaveHint("同步到服务端中…", true);
+    saveHint.value = "正在同步到服务端…";
+  } else {
+    showAutoSaveHint("同步到服务端中…", true);
+  }
+  try {
+    const res = await saveServerAiConfig({
+      endpoint: form.endpoint.trim(),
+      apiKey: form.apiKey.trim(),
+      model: form.model.trim(),
+      webProxyUrl: web.proxyUrl.trim() || undefined,
+    });
+    if (res.ok) {
+      lastServerSyncSnapshot = buildConfigSnapshot();
+      if (!options?.quiet) {
+        saveHint.value = "已同步到服务端（Vibe 页即刻可用）。";
+        scheduleSaveHintClear();
+      } else {
+        showAutoSaveHint("已同步到服务端");
+        window.clearTimeout(autoSaveTimer);
+        autoSaveTimer = window.setTimeout(() => {
+          showAutoSaveHint("");
+        }, 2000);
+      }
+      void refreshServerLoginState();
+      return true;
+    }
+    if (!options?.quiet) {
+      saveHint.value = `本地已保存；同步服务端失败：${res.error || "未知原因"}（服务端可能用环境变量 AIALL_SERVER_AI_* 接管了配置）`;
+      scheduleSaveHintClear();
+    } else {
+      showAutoSaveHint("本地已保存；服务端同步失败");
+      window.clearTimeout(autoSaveTimer);
+      autoSaveTimer = window.setTimeout(() => {
+        showAutoSaveHint("");
+      }, 3000);
+    }
+    return false;
+  } finally {
+    serverSyncBusy.value = false;
+    if (!options?.quiet) showAutoSaveHint("");
+  }
 }
 
 function saveConfig() {
@@ -1189,30 +1244,7 @@ function saveConfig() {
   // 服务器模式（web）：主 tab 配置同步到服务端，Vibe 页才会使用；
   // 无需再单独去「服务器模式」tab 填一遍（旧设计两处配置同一件事）。
   if (serverLoggedIn.value) {
-    if (serverSyncBusy.value) return;
-    serverSyncBusy.value = true;
-    showAutoSaveHint("同步到服务端中…", true);
-    saveHint.value = "正在同步到服务端…";
-    void saveServerAiConfig({
-      endpoint: form.endpoint.trim(),
-      apiKey: form.apiKey.trim(),
-      model: form.model.trim(),
-      webProxyUrl: web.proxyUrl.trim() || undefined,
-    })
-      .then((res) => {
-        if (res.ok) {
-          lastServerSyncSnapshot = buildConfigSnapshot();
-          saveHint.value = "已同步到服务端（Vibe 页即刻可用）。";
-          void refreshServerLoginState();
-        } else {
-          saveHint.value = `本地已保存；同步服务端失败：${res.error || "未知原因"}（服务端可能用环境变量 AIALL_SERVER_AI_* 接管了配置）`;
-        }
-        scheduleSaveHintClear();
-      })
-      .finally(() => {
-        serverSyncBusy.value = false;
-        showAutoSaveHint("");
-      });
+    void syncCurrentFormToServer({ quiet: false });
     return;
   }
 
@@ -1517,6 +1549,18 @@ onBeforeUnmount(() => {
       persistConfigNow();
     } catch {
       // localStorage 不可用时静默忽略
+    }
+    // 离开配置页时尽量把脏配置推到服务端（keepalive），否则 Vibe 仍读旧服务端模型。
+    if (serverLoggedIn.value && !isDesktopRuntime && serverDirty.value) {
+      void saveServerAiConfig(
+        {
+          endpoint: form.endpoint.trim(),
+          apiKey: form.apiKey.trim(),
+          model: form.model.trim(),
+          webProxyUrl: web.proxyUrl.trim() || undefined,
+        },
+        { keepalive: true },
+      );
     }
   }
   window.removeEventListener("paste", handlePaste);

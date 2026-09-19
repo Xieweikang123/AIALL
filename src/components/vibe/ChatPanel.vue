@@ -1068,12 +1068,21 @@ watch(
   },
 );
 
+/** 「供应商 / 模型」展示；只改模型名、供应商不变时也能看出换了默认源。 */
+function formatProviderModelLabel(providerName: string, model: string): string {
+  const name = providerName.trim();
+  const modelName = model.trim();
+  if (name && modelName) return `${name} / ${modelName}`;
+  return modelName || name || "未设置";
+}
+
 const activeProviderLabel = computed(() => {
   const id = props.activeSessionProviderId.trim();
   if (!id) return props.globalModelName.trim() || "未设置";
   const provider = props.providerOptions?.find((p) => p.id === id);
   if (!provider) return "自定义";
-  return props.activeSessionModelId?.trim() || provider.model;
+  const model = props.activeSessionModelId?.trim() || provider.model;
+  return formatProviderModelLabel(provider.name, model);
 });
 
 const providerPickerTitle = computed(() => {

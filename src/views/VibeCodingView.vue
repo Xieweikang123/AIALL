@@ -850,7 +850,7 @@
         :active-session-model-id="activeSessionModelId"
         :session-goal="activeSessionGoal"
         :provider-options="providerOptions"
-        :global-model-name="aiConfig.model"
+        :global-model-name="globalModelLabel"
         @update:activeSessionProviderId="setActiveSessionProvider"
         @update:activeSessionModelId="setActiveSessionModel"
         @on-chat-drag-enter="onChatDragEnter"
@@ -1220,7 +1220,11 @@ import {
   type PendingAgentRun,
 } from "../services/agentHmrRecovery";
 import { compressImageDataUrlsForAgent } from "../services/imageCompress";
-import { loadAiChatBaseFromStorage, loadPersistedAiConfigFromStorage } from "../services/aiLocalConfig";
+import {
+  getActiveProvider,
+  loadAiChatBaseFromStorage,
+  loadPersistedAiConfigFromStorage,
+} from "../services/aiLocalConfig";
 import {
   buildAgentHistoryFromMessages,
   getSessionDiagSnapshot,
@@ -1952,6 +1956,8 @@ const gitFileContextMenu = ref({ show: false, x: 0, y: 0, path: "", scope: "modi
 
 const aiConfig = ref({ endpoint: "", apiKey: "", model: "", providerName: "" });
 const providerOptions = ref<Array<{ id: string; name: string; model: string; availableModels?: string[] }>>([]);
+/** 全局默认展示用（不跟 applySessionAiConfig 跑时覆盖走）；含「供应商 / 模型」。 */
+const globalModelLabel = ref("");
 
 const configReady = computed(() => Boolean(aiConfig.value.endpoint.trim()) && Boolean(aiConfig.value.model.trim()));
 const apiKeyReady = computed(() => Boolean(aiConfig.value.apiKey.trim()));
@@ -1962,6 +1968,23 @@ const modelNameForDisplay = computed(() => {
 });
 /** 服务器模式（web + agent-server）下服务端持有的 AI 配置（不含 key） */
 const serverAiConfig = ref<ServerAiConfigInfo | null>(null);
+
+function formatGlobalModelLabel(providerName: string, model: string): string {
+  const name = providerName.trim();
+  const modelName = model.trim();
+  if (name && modelName) return `${name} / ${modelName}`;
+  return modelName || name || "";
+}
+
+function refreshGlobalModelLabelFromLocal() {
+  const persisted = loadPersistedAiConfigFromStorage();
+  const active = persisted ? getActiveProvider(persisted) : null;
+  if (active) {
+    globalModelLabel.value = formatGlobalModelLabel(active.name, active.model);
+    return;
+  }
+  globalModelLabel.value = formatGlobalModelLabel(aiConfig.value.providerName, aiConfig.value.model);
+}
 
 /** 服务端 AI 配置是否就绪：接口 + 模型 + 服务端已持有 key */
 const serverAiReady = computed(() => {
@@ -1989,9 +2012,12 @@ const aiConfigStatusText = computed(() => {
     if (!apiKeyReady.value) return `${modelNameForDisplay.value}（未保存 API Key）`;
     if (activeSessionProviderId.value) {
       const pinned = providerOptions.value.find((p) => p.id === activeSessionProviderId.value);
-      if (pinned) return `${pinned.name} / ${pinned.model}（本会话）`;
+      if (pinned) {
+        const model = activeSessionModelId.value.trim() || pinned.model;
+        return `${pinned.name} / ${model}（本会话）`;
+      }
     }
-    return modelNameForDisplay.value;
+    return globalModelLabel.value || modelNameForDisplay.value;
   }
   if (serverProbeState.value === "unreachable") return "后端不可用（需 agent-server）";
   if (serverProbeState.value === "auth" && !isServerLoggedIn()) return "未登录服务器";
@@ -2371,6 +2397,7 @@ function reloadAiConfig() {
       model: p.model.trim(),
       ...(p.availableModels?.length ? { availableModels: [...p.availableModels] } : {}),
     }));
+  refreshGlobalModelLabelFromLocal();
   void refreshServerAiConfig();
 }
 
@@ -2379,6 +2406,14 @@ async function refreshServerAiConfig() {
   if (isDesktopRuntime.value) return;
   const info = await fetchServerAiConfig();
   serverAiConfig.value = info;
+  // web：实际跑 Agent 以服务端配置为准，全局展示跟服务端对齐。
+  if (info.ok && info.model.trim()) {
+    const persisted = loadPersistedAiConfigFromStorage();
+    const localName =
+      (persisted ? getActiveProvider(persisted)?.name?.trim() : "") ||
+      aiConfig.value.providerName.trim();
+    globalModelLabel.value = formatGlobalModelLabel(localName, info.model);
+  }
 }
 
 /** Resolve the AI provider pinned to a session; null = use global config. */
