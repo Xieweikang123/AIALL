@@ -20,7 +20,7 @@ pub fn build_reply_accuracy_hint() -> String {
     "事实与准确度（通用）：",
     "1. 机制事实结论（怎么工作、实际走哪条路径、是否会产生某结果）：先拆出定义、调用关系、输入、条件分支与结果；按代码实际结构追踪，不强制固定入口、层数或中间层；继续追到直接决定结论的最后证据，例如返回值、输出、异常、状态、事件、缓存结果或外部副作用；禁止把同名 API、类型字段或注释当成实际使用路径。",
     "2. 二元结论（会/不会、是/不是）及因果解释：grep 命中后须 read 完整函数体、直接调用方和会决定结果的分支；确认所有相关结果路径及其前提，把实际执行路径与旁路 API 区分开；证据不足明确说不确定。",
-    "3. 探索效率：先 grep 精确符号再定点 read；避免广搜 + 同一文件多段重叠 read；信息足够后立即回答或写入。",
+    "3. 探索效率：先 grep 精确符号再定点 read；避免广搜 + 同一文件多段重叠 read；信息足够且无阻塞决策时立即回答或写入；若仍有会实质改变产出的互斥决策且仓库证据无法消解，先问用户再写。",
     "4. 多轮自洽：若新结论与本轮先前回复矛盾，须显式更正并引用新证据；用户现象与当前证据不符时，回到决定结论的分支或结果点继续核对。",
     "5. 修改收尾：patch/write 后 read 验证变更区域再宣告完成；运行中断恢复后必须 re-read 确认；有相关测试时跑测或说明应跑项。",
     "6. 表达约束：无用户证据时不写「你之前…/所以你看到…」；结论须附带适用前提（代码中的 if/guard 条件）；不确定时说「不确定」。",
@@ -36,9 +36,20 @@ pub fn build_reply_accuracy_hint() -> String {
     "16. 智能检索分流（Smart Tooling）：在 grep 前确认搜索词是静态源码符号还是运行时动态数据（如草稿描述、随机 UUID）；严禁在源码中检索动态数据。",
     "17. 行为断言证据链（Behavioral Claims Need Evidence）：回答「某功能实际行为/结果路径/发生位置」时，禁止只凭阅读函数体推理下结论；须给出可验证证据——要么实际运行或调试日志，要么完整列出决定该行为的运行时状态矩阵（如内容空/非空、有无焦点、选区或事件归属等状态维度组合），并明确标注哪些结论依赖运行时状态、尚未验证；未验证部分一律标注「推断/不确定」。",
     "18. 零工具代码断言禁止（No-tool Code Claims）：本回合未调用 read_file/grep 等代码查看工具时，禁止把类名、CSS 属性、事件名、变量名、行号、模板插值（如 {{ xxx }}、$emit(...)）作为事实输出；只能描述截图/现象可见内容，或明确标注「推断，未读代码」。涉及代码机制的断言必须能追溯到本回合 read/grep 的证据。",
+    build_blocking_decision_clarify_hint(),
     build_probe_introspect_anti_pattern_hint(),
   ]
   .join("\n")
+}
+
+/// Cross-mode: ask before committing when mutually exclusive decisions are unresolved.
+/// Mechanism-only — no topic/feature names.
+pub fn build_blocking_decision_clarify_hint() -> &'static str {
+    "19. 阻塞决策须先问（Ask Before Blocking Commit）：与 Ask/Build/Plan/Explore 模式无关。\
+若继续产出（写文档、方案、大段代码或选定实现路径）需要在互斥方案间二选一，且仓库证据无法消解该选择，\
+则本轮先向用户提出 1–3 个澄清问题并附选项按钮，禁止默认选一案后把「待确认」埋进长文再交付。\
+可从仓库直接读出的事实不要问；只有会实质改变结构、范围、数据来源或验收标准的决策才问。\
+用户已明确授权「按你的推荐直接做」时可采纳推荐方案并显式标注假设前提。"
 }
 
 pub fn build_agent_suggestions_prompt_hint() -> &'static str {
@@ -76,9 +87,20 @@ mod tests {
         assert!(hint.contains("事实与准确度"));
         assert!(hint.contains("行为断言证据链"));
         assert!(hint.contains("零工具代码断言禁止"));
+        assert!(hint.contains("阻塞决策须先问"));
+        assert!(hint.contains("禁止默认选一案"));
         assert!(!hint.contains("常见修复"));
         assert!(!hint.contains("padding:0"));
         assert!(!hint.contains("Execute→Service"));
+    }
+
+    #[test]
+    fn blocking_decision_clarify_is_mode_agnostic() {
+        let hint = build_blocking_decision_clarify_hint();
+        assert!(hint.contains("Ask/Build/Plan/Explore"));
+        assert!(hint.contains("先向用户提出"));
+        assert!(!hint.contains("结算"));
+        assert!(!hint.contains("patch 某某"));
     }
 
     #[test]

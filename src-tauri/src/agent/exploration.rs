@@ -83,18 +83,22 @@ pub fn is_productive_write_path(file_path: &str) -> bool {
 /// Build nudge when consecutive explore-only turns exceed budget (Node `buildExploreBudgetNudge`).
 pub fn build_explore_budget_nudge(consecutive_turns: u32, mode: &str) -> String {
     let action_hint = if mode == "plan" {
-        "请立即输出结构化修改方案（文件清单 + 代码块 + 改动说明），不要再继续读文件。"
+        "下一轮必须产生有效产出：输出结构化修改方案（文件清单 + 代码块 + 改动说明），\
+或向用户提出阻塞决策澄清问题（附选项）；不要再继续只读文件。\n\
+若存在仓库无法消解、且会实质改变方案形态的互斥决策：先问再写方案，禁止默认选一案后把「待确认」埋进方案。"
     } else if mode == "build" {
-        "下一轮必须调用 patch_file 或 write_file；若目标文件已 read 过，直接改，不要再 grep/read。\n\
-     若仍缺路径：最多 1 次 grep/search，然后立即修改。\n\
+        "下一轮必须产生有效产出：调用 patch_file/write_file，或向用户提出阻塞决策澄清（附选项）；禁止继续只读探索。\n\
+     若目标文件已 read 过且无阻塞决策：直接改，不要再 grep/read。\n\
+     若仍缺路径：最多 1 次 grep/search，然后立即修改或提问。\n\
      禁止重复 read 同一文件相同片段；禁止用英文写长分析。\n\
-     先用 1–2 句中文写根因假设，然后直接改代码。\n\n\
-     ⚠️ Build 模式下分析不是产出，patch 才是产出。"
+     先用 1–2 句中文写根因假设或待决问题，然后改代码或提问。\n\n\
+     ⚠️ Build 模式：长时间纯分析不是产出；patch/write 或澄清提问才是产出。"
     } else {
-        "下一轮必须调用 patch_file 或 write_file；若目标文件已 read 过，直接改，不要再 grep/read。\n\
-     若仍缺路径：最多 1 次 grep/search，然后立即修改。\n\
+        "下一轮必须产生有效产出：调用 patch_file/write_file，或向用户提出阻塞决策澄清（附选项）；禁止继续只读探索。\n\
+     若目标文件已 read 过且无阻塞决策：直接改，不要再 grep/read。\n\
+     若仍缺路径：最多 1 次 grep/search，然后立即修改或提问。\n\
      禁止重复 read 同一文件相同片段；禁止用英文写长分析。\n\
-     先用 2–4 句中文写可见进度（根因假设 + 下一步），再调用工具。\n\n\
+     先用 2–4 句中文写可见进度（根因假设 + 下一步，或待决问题），再调用工具或提问。\n\n\
      💡 提示：如果问题表现为「点击没反应」「按钮不工作」等前端交互异常，\
      优先请用户打开浏览器 DevTools Console 查看报错信息——这比读代码更快定位根因。"
     };
@@ -826,12 +830,15 @@ mod tests {
         let msg = build_explore_budget_nudge(2, "build");
         assert!(msg.contains("已连续 2 轮"));
         assert!(msg.contains("patch_file"));
+        assert!(msg.contains("阻塞决策澄清"));
+        assert!(msg.contains("澄清提问才是产出"));
     }
 
     #[test]
     fn test_build_explore_budget_nudge_plan_mode() {
         let msg = build_explore_budget_nudge(3, "plan");
         assert!(msg.contains("结构化修改方案"));
+        assert!(msg.contains("阻塞决策澄清"));
         assert!(!msg.contains("项目理解报告"));
     }
 

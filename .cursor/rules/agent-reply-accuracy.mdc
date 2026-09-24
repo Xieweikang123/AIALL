@@ -41,6 +41,12 @@ alwaysApply: true
 - 咨询只读连续探索：`CONSULTATIVE_BUILD_EXPLORE_TURN_BUDGET`（默认 4 轮）后注入 `buildConsultativeExploreBudgetNudge`
 - grep 零命中：当轮注入 `buildGrepEmptyRecoveryNudge`，提示换符号/搜调用方
 
+## 阻塞决策须先问（跨模式）
+
+与 Ask/Build/Plan/Explore **无关**：若继续产出（写文档、方案、大段代码或选定实现路径）需要在互斥方案间二选一，且仓库证据无法消解，则**先向用户澄清**（附选项），禁止默认选一案后把「待确认」埋进长文再交付。可从仓库读出的事实不要问；用户已授权「按推荐直接做」时可默认并标注假设。探索预算 nudge 须把「澄清提问」视为有效产出，不得只强制 patch/write。
+
+真相源：`prompt_hints::build_blocking_decision_clarify_hint`、`exploration::build_explore_budget_nudge`。
+
 ## 修改收尾
 
 - patch/write 后 **read 验证**变更区域，再宣告完成

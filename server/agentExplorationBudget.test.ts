@@ -50,7 +50,10 @@ describe("agentExplorationBudget", () => {
     expect(PLAN_EXPLORE_TURN_BUDGET).toBe(3);
     expect(buildExploreBudgetNudge(2)).toContain("已连续 2 轮");
     expect(buildExploreBudgetNudge(2)).toContain("patch_file");
+    expect(buildExploreBudgetNudge(2, "build")).toContain("阻塞决策澄清");
+    expect(buildExploreBudgetNudge(2, "build")).toContain("澄清提问才是产出");
     expect(buildExploreBudgetNudge(3, "plan")).toContain("结构化修改方案");
+    expect(buildExploreBudgetNudge(3, "plan")).toContain("阻塞决策澄清");
     expect(buildExploreBudgetNudge(3, "plan")).not.toContain("项目理解报告");
   });
 

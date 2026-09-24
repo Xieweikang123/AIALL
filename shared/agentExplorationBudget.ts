@@ -134,10 +134,10 @@ export function buildExploreBudgetNudge(
 ): string {
   const interactionHint = buildInteractionFailureDebugHint(runtime);
   const actionHint = mode === "plan"
-    ? "请立即输出结构化修改方案（文件清单 + 代码块 + 改动说明），不要再继续读文件。"
+    ? "下一轮必须产生有效产出：输出结构化修改方案（文件清单 + 代码块 + 改动说明），或向用户提出阻塞决策澄清问题（附选项）；不要再继续只读文件。\n若存在仓库无法消解、且会实质改变方案形态的互斥决策：先问再写方案，禁止默认选一案后把「待确认」埋进方案。"
     : mode === "build"
-    ? "下一轮必须调用 patch_file 或 write_file；若目标文件已 read 过，直接改，不要再 grep/read。\n若仍缺路径：最多 1 次 grep/search，然后立即修改。\n禁止重复 read 同一文件相同片段；禁止用英文写长分析。\n先用 1–2 句中文写根因假设，然后直接改代码。\n\n⚠️ Build 模式下分析不是产出，patch 才是产出。"
-    : `下一轮必须调用 patch_file 或 write_file；若目标文件已 read 过，直接改，不要再 grep/read。\n若仍缺路径：最多 1 次 grep/search，然后立即修改。\n禁止重复 read 同一文件相同片段；禁止用英文写长分析。\n先用 2–4 句中文写可见进度（根因假设 + 下一步），再调用工具。${interactionHint}`;
+    ? "下一轮必须产生有效产出：调用 patch_file/write_file，或向用户提出阻塞决策澄清（附选项）；禁止继续只读探索。\n若目标文件已 read 过且无阻塞决策：直接改，不要再 grep/read。\n若仍缺路径：最多 1 次 grep/search，然后立即修改或提问。\n禁止重复 read 同一文件相同片段；禁止用英文写长分析。\n先用 1–2 句中文写根因假设或待决问题，然后改代码或提问。\n\n⚠️ Build 模式：长时间纯分析不是产出；patch/write 或澄清提问才是产出。"
+    : `下一轮必须产生有效产出：调用 patch_file/write_file，或向用户提出阻塞决策澄清（附选项）；禁止继续只读探索。\n若目标文件已 read 过且无阻塞决策：直接改，不要再 grep/read。\n若仍缺路径：最多 1 次 grep/search，然后立即修改或提问。\n禁止重复 read 同一文件相同片段；禁止用英文写长分析。\n先用 2–4 句中文写可见进度（根因假设 + 下一步，或待决问题），再调用工具或提问。${interactionHint}`;
   return [
     `【系统提示】已连续 ${consecutiveExploreTurns} 轮仅探索、尚未修改。`,
     actionHint,

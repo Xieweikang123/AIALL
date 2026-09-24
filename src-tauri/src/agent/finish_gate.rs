@@ -497,12 +497,20 @@ pub fn is_empty_or_insufficient_final_reply(text: &str) -> bool {
     false
 }
 
+/// Kill switch: finish gate caused endless finalize loops by treating every path
+/// mentioned in a successful summary (including deferred / build-command paths)
+/// as a phantom write claim. Pure helpers remain for potential re-enable.
+pub const FINISH_GATE_ENABLED: bool = false;
+
 pub fn should_run_finish_gate(
     is_read_only_agent: bool,
     is_plan_explore: bool,
     read_only_build_run: bool,
     write_stage: &Option<WriteStage>,
 ) -> bool {
+    if !FINISH_GATE_ENABLED {
+        return false;
+    }
     if is_read_only_agent || is_plan_explore || read_only_build_run {
         return false;
     }
@@ -758,11 +766,15 @@ mod tests {
             verify_script_available: None,
             last_verify_run_succeeded: None,
         });
-        assert!(result.blocked);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.code == "execute_plan_target_miss"));
+        if FINISH_GATE_ENABLED {
+            assert!(result.blocked);
+            assert!(result
+                .violations
+                .iter()
+                .any(|v| v.code == "execute_plan_target_miss"));
+        } else {
+            assert!(!result.blocked);
+        }
     }
 
     #[test]
@@ -785,11 +797,15 @@ mod tests {
             verify_script_available: None,
             last_verify_run_succeeded: None,
         });
-        assert!(result.blocked);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.code == "phantom_file_claim"));
+        if FINISH_GATE_ENABLED {
+            assert!(result.blocked);
+            assert!(result
+                .violations
+                .iter()
+                .any(|v| v.code == "phantom_file_claim"));
+        } else {
+            assert!(!result.blocked);
+        }
     }
 
     #[test]
@@ -812,11 +828,15 @@ mod tests {
             verify_script_available: None,
             last_verify_run_succeeded: None,
         });
-        assert!(result.blocked);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.code == "task_anchor_miss"));
+        if FINISH_GATE_ENABLED {
+            assert!(result.blocked);
+            assert!(result
+                .violations
+                .iter()
+                .any(|v| v.code == "task_anchor_miss"));
+        } else {
+            assert!(!result.blocked);
+        }
     }
 
     #[test]
@@ -869,11 +889,15 @@ mod tests {
             verify_script_available: None,
             last_verify_run_succeeded: None,
         });
-        assert!(result.blocked);
-        assert!(result
-            .violations
-            .iter()
-            .any(|v| v.code == "task_anchor_still_present"));
+        if FINISH_GATE_ENABLED {
+            assert!(result.blocked);
+            assert!(result
+                .violations
+                .iter()
+                .any(|v| v.code == "task_anchor_still_present"));
+        } else {
+            assert!(!result.blocked);
+        }
     }
 
     #[test]
@@ -917,8 +941,26 @@ mod tests {
             verify_script_available: None,
             last_verify_run_succeeded: None,
         });
-        assert!(result.blocked);
-        assert!(result.violations.iter().any(|v| v.code == "empty_summary"));
+        if FINISH_GATE_ENABLED {
+            assert!(result.blocked);
+            assert!(result.violations.iter().any(|v| v.code == "empty_summary"));
+        } else {
+            assert!(!result.blocked);
+        }
+    }
+
+    #[test]
+    fn test_finish_gate_kill_switch_disables_should_run() {
+        assert!(!FINISH_GATE_ENABLED);
+        assert!(!should_run_finish_gate(
+            false,
+            false,
+            false,
+            &Some(WriteStage {
+                files: std::collections::HashMap::new(),
+                written_list: vec!["src/a.ts".into()],
+            }),
+        ));
     }
 
     #[test]

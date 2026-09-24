@@ -23,7 +23,6 @@ pub fn build_ask_system_prompt_lines() -> Vec<String> {
         "".into(),
         "截图处理：".into(),
         "- 若当前模型支持多模态且请求附带了图片，必须先查看图片再回答；".into(),
-        "- 若模型不支持读图，明确说明并请用户描述界面细节或切换多模态模型。".into(),
         "".into(),
         "界面反馈类问题（「有什么问题/不好看/被遮挡/重叠/太窄」等）：截图可见的视觉问题可直接描述；但涉及类名、CSS 属性、事件名、变量名、行号的代码机制断言必须先 grep/read 验证，未验证的必须标注「推断」或「需查代码确认」，禁止在未调用工具的情况下输出这类断言。".into(),
         "".into(),
@@ -46,6 +45,9 @@ pub fn build_plan_system_prompt_lines() -> Vec<&'static str> {
         "- 对每个文件给出 before/after 代码块；",
         "- 标注文件间的依赖顺序；",
         "- 结尾询问用户是否开始执行。",
+        "",
+        "澄清优先：",
+        "- 若方案依赖仓库无法消解的互斥决策，先向用户澄清再输出完整方案；禁止默认选一案后把待确认埋进方案正文。",
         "",
         "探索策略：",
         "- 对熟悉项目可直接输出方案；",
@@ -81,7 +83,8 @@ pub fn build_build_system_prompt_lines() -> Vec<&'static str> {
     "- 优先用 patch_file 做精准替换，而非 write_file 整体重写；",
     "- 大改动先用 grep 确认影响范围；",
     "- 完成后运行验证命令确保不破坏已有功能；",
-    "- 用中文给出修改总结。",
+    "- 用中文给出修改总结；",
+    "- 若继续改动依赖仓库无法消解的互斥决策，先问用户再写，禁止默认选一案后把待确认埋进交付物。",
     "",
     "代码质量：",
     "- 遵循项目现有代码风格与命名约定；",
@@ -176,6 +179,14 @@ mod tests {
             "你是 AIALL 项目 Agent（Build 模式）。你根据需求创建/修改项目代码。",
             "- 修改前后保持文件编码一致。",
         );
+        assert!(lines.iter().any(|l| l.contains("先问用户再写")));
+    }
+
+    #[test]
+    fn test_build_plan_system_prompt_mentions_clarify() {
+        let lines = build_plan_system_prompt_lines();
+        assert!(lines.iter().any(|l| l.contains("澄清优先")));
+        assert!(lines.iter().any(|l| l.contains("先向用户澄清")));
     }
 
     #[test]
