@@ -139,6 +139,13 @@ export function formatCharCount(chars: number): string {
   return `${chars}`;
 }
 
+/** Token 数展示：与 formatCharCount 同形态，但语义是 token。 */
+export function formatTokenCount(tokens: number): string {
+  if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`;
+  if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}K`;
+  return `${Math.round(tokens)}`;
+}
+
 export function formatContextChars(chars: number): string {
   if (chars >= 10_000) return `${(chars / 10_000).toFixed(1)} 万字符`;
   if (chars >= 1000) return `${(chars / 1000).toFixed(1)}k 字符`;

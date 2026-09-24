@@ -73,17 +73,35 @@
         </div>
         <div class="provider-quick-fill">
           <span class="preset-label">快速填充</span>
-          <select
-            v-model="presetSelected"
-            class="preset-select"
-            aria-label="用预设填充供应商"
-            @change="applyPreset(presetSelected)"
-          >
-            <option value="" disabled>✨ 选择预设供应商…</option>
-            <option v-for="p in providerPresets" :key="p.name" :value="p.name">
-              {{ p.name }}{{ p.model ? `（${p.model}）` : "" }}
-            </option>
-          </select>
+          <div ref="presetWrapRef" class="preset-wrap">
+            <button
+              type="button"
+              class="preset-select"
+              :class="{ open: presetOpen }"
+              aria-haspopup="listbox"
+              :aria-expanded="presetOpen"
+              aria-label="用预设填充供应商"
+              @click="presetOpen = !presetOpen"
+            >
+              <span class="preset-select-text">✨ 选择预设供应商…</span>
+              <svg class="preset-select-chevron" width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </button>
+            <div v-if="presetOpen" class="preset-menu" role="listbox" aria-label="预设供应商">
+              <button
+                v-for="p in providerPresets"
+                :key="p.name"
+                type="button"
+                class="preset-menu-item"
+                role="option"
+                @click="applyPreset(p.name)"
+              >
+                <span class="preset-menu-name">{{ p.name }}</span>
+                <span v-if="p.model" class="preset-menu-model">{{ p.model }}</span>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -241,6 +259,31 @@
             <input v-model.trim="form.model" type="text" placeholder="例如：mimo-v2.5-pro / gpt-4o / deepseek-chat" />
           </div>
           <small v-if="modelsStatusText" class="tips">{{ modelsStatusText }}</small>
+        </label>
+
+        <label class="field span-2">
+          <div class="field-row">
+            <span>上下文窗口（可选）</span>
+            <div class="field-tools">
+              <button
+                v-if="contextWindowInput"
+                type="button"
+                class="link"
+                @click="contextWindowInput = ''"
+              >
+                清除
+              </button>
+            </div>
+          </div>
+          <input
+            v-model.trim="contextWindowInput"
+            type="text"
+            placeholder="留空自动识别；可填 1000000 / 1m / 128k"
+          />
+          <small v-if="contextWindowError" class="tips error">{{ contextWindowError }}</small>
+          <small v-else class="tips">
+            按模型名保存在本供应商。手填值优先于接口返回与内置表，用于中转站不返回窗口时手动指定（如 1m）。
+          </small>
         </label>
 
         <div class="form-divider with-label" aria-hidden="true"><span>网络（可选）</span></div>
@@ -417,6 +460,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { useRouter } from "vue-router";
 import { lsGet, lsRemove } from "../utils/localStorageSafe";
 import { fetchAvailableModels, testAiModel, testTtsModel } from "../services/aiClient";
+import { parseContextWindowInput } from "../services/modelContextWindow";
 import { isTauriEnv } from "../services/tauriInvoke";
 import {
   isServerLoggedIn,
@@ -591,6 +635,9 @@ function syncProviderToForm(providerId: string) {
   form.model = provider.model;
   form.prompt = provider.prompt;
   form.stream = provider.stream;
+  contextWindowInput.value = provider.modelWindowOverrides?.[provider.model] != null
+    ? String(provider.modelWindowOverrides[provider.model])
+    : "";
 }
 
 function selectProvider(providerId: string) {
@@ -618,12 +665,13 @@ function addProvider() {
 }
 
 const providerPresets = PROVIDER_PRESETS;
-const presetSelected = ref("");
+const presetOpen = ref(false);
+const presetWrapRef = ref<HTMLElement | null>(null);
 
 /** 用预设填充当前编辑的供应商（endpoint / model，apiKey 留空）。 */
 function applyPreset(presetName: string) {
   const preset = providerPresets.find((p) => p.name === presetName);
-  presetSelected.value = "";
+  presetOpen.value = false;
   if (!preset) return;
   syncFormToProvider(editingProviderId.value);
   form.endpoint = preset.endpoint;
@@ -710,6 +758,13 @@ const loading = ref(false);
 const modelsLoading = ref(false);
 const availableModels = ref<string[]>([]);
 const modelsStatusText = ref("可点击“获取可用模型”自动读取列表。");
+/** 手填的上下文窗口输入框（支持 1m / 128k / 1000000 简写）。 */
+const contextWindowInput = ref("");
+const contextWindowError = computed(() => {
+  const raw = contextWindowInput.value.trim();
+  if (!raw) return "";
+  return parseContextWindowInput(raw) ? "" : "格式无效，示例：1000000、1m、128k";
+});
 const result = reactive({
   phase: "idle" as TestPhase,
   status: 0,
@@ -1373,6 +1428,9 @@ async function fetchModels(forceRefresh: boolean) {
     const provider = providers.value.find((item) => item.id === editingProviderId.value);
     if (provider) {
       provider.availableModels = [...availableModels.value];
+      if (response.modelWindows && Object.keys(response.modelWindows).length) {
+        provider.modelWindows = { ...response.modelWindows };
+      }
     }
     const cacheHint = response.fromCache ? "（来自缓存）" : "";
     modelsStatusText.value = `已加载 ${availableModels.value.length} 个模型${cacheHint}。`;
@@ -1487,11 +1545,17 @@ async function handleTestTts() {
 }
 
 function handleMoreMenuOutsideClick(e: MouseEvent) {
-  if (!moreMenuOpen.value) return;
   const target = e.target as Node | null;
-  if (moreMenuWrapRef.value && target && !moreMenuWrapRef.value.contains(target)) {
+  if (moreMenuOpen.value && moreMenuWrapRef.value && target && !moreMenuWrapRef.value.contains(target)) {
     moreMenuOpen.value = false;
   }
+  if (presetOpen.value && presetWrapRef.value && target && !presetWrapRef.value.contains(target)) {
+    presetOpen.value = false;
+  }
+}
+
+function handleGlobalKeydown(e: KeyboardEvent) {
+  if (e.key === "Escape") presetOpen.value = false;
 }
 
 onMounted(() => {
@@ -1500,6 +1564,7 @@ onMounted(() => {
   void refreshServerLoginState();
   window.addEventListener("paste", handlePaste);
   window.addEventListener("keydown", handleSaveShortcut);
+  window.addEventListener("keydown", handleGlobalKeydown);
   window.addEventListener("click", handleMoreMenuOutsideClick);
 });
 
@@ -1538,6 +1603,31 @@ watch(
   },
 );
 
+// 手填上下文窗口：写入当前供应商的 modelWindowOverrides（按模型名存）。
+watch(contextWindowInput, (raw) => {
+  const provider = providers.value.find((item) => item.id === editingProviderId.value);
+  if (!provider || !form.model.trim()) return;
+  const parsed = parseContextWindowInput(raw);
+  const overrides = { ...(provider.modelWindowOverrides ?? {}) };
+  if (parsed) {
+    overrides[form.model.trim()] = parsed;
+  } else {
+    delete overrides[form.model.trim()];
+  }
+  provider.modelWindowOverrides = Object.keys(overrides).length ? overrides : undefined;
+});
+
+// 切换模型时，把该模型已有的手填窗口回填到输入框。
+watch(
+  () => form.model,
+  (model) => {
+    const provider = providers.value.find((item) => item.id === editingProviderId.value);
+    const stored = provider?.modelWindowOverrides?.[model.trim()];
+    const next = stored != null ? String(stored) : "";
+    if (contextWindowInput.value !== next) contextWindowInput.value = next;
+  },
+);
+
 onBeforeUnmount(() => {
   if (ttsAudioUrl.value) {
     URL.revokeObjectURL(ttsAudioUrl.value);
@@ -1565,6 +1655,7 @@ onBeforeUnmount(() => {
   }
   window.removeEventListener("paste", handlePaste);
   window.removeEventListener("keydown", handleSaveShortcut);
+  window.removeEventListener("keydown", handleGlobalKeydown);
   window.removeEventListener("click", handleMoreMenuOutsideClick);
   window.clearTimeout(saveHintTimer);
 });
@@ -2145,12 +2236,21 @@ button.primary {
   box-shadow: none;
 }
 
+.preset-wrap {
+  position: relative;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
 .preset-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   border: 1px solid rgba(88, 166, 255, 0.4);
   background: rgba(88, 166, 255, 0.12);
   color: var(--text, rgba(255, 255, 255, 0.9));
   border-radius: 999px;
-  padding: 7px 30px 7px 14px;
+  padding: 7px 14px;
   font-size: 13px;
   font-weight: 500;
   width: auto;
@@ -2158,12 +2258,26 @@ button.primary {
   min-width: 200px;
   flex: 0 1 auto;
   cursor: pointer;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6l4 4 4-4' stroke='rgba(88,166,255,0.9)' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
   outline: none;
-  transition: all 150ms ease;
+  transition: background 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.preset-select-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preset-select-chevron {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: rgba(88, 166, 255, 0.9);
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.preset-select.open .preset-select-chevron {
+  transform: rotate(180deg);
 }
 
 .preset-label {
@@ -2182,20 +2296,82 @@ button.primary {
   flex-wrap: nowrap;
 }
 
-.preset-select:hover {
+.preset-select:hover,
+.preset-select.open {
   background-color: rgba(88, 166, 255, 0.2);
   border-color: rgba(88, 166, 255, 0.6);
 }
 
-.preset-select:focus {
+.preset-select:focus-visible {
   border-color: #58a6ff;
   box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.25);
 }
 
-.preset-select option {
-  background: #0a0a0a;
-  color: rgba(255, 255, 255, 0.92);
-  padding: 6px 10px;
+.preset-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 240px;
+  max-width: min(360px, calc(100vw - 24px));
+  max-height: min(420px, 60vh);
+  overflow-y: auto;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(20, 22, 28, 0.98);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(20px);
+  animation: preset-menu-fade-in 0.14s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes preset-menu-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.preset-menu-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.preset-menu-item:hover {
+  background: rgba(88, 166, 255, 0.16);
+  color: #fff;
+}
+
+.preset-menu-name {
+  font-weight: 500;
+}
+
+.preset-menu-model {
+  font-size: 12px;
+  color: rgba(201, 209, 217, 0.6);
+}
+
+.preset-menu-item:hover .preset-menu-model {
+  color: rgba(201, 209, 217, 0.85);
 }
 
 .provider-actions {
@@ -2678,11 +2854,24 @@ pre {
     flex-wrap: wrap;
   }
 
+  .preset-wrap {
+    width: 100%;
+    flex: 1 1 100%;
+  }
+
   .preset-select {
     max-width: 100%;
     min-width: 0;
     width: 100%;
     flex: 1 1 100%;
+  }
+
+  .preset-menu {
+    left: 0;
+    right: auto;
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
   }
 
   .server-strip-actions {

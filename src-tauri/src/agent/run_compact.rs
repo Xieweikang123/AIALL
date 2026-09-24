@@ -192,8 +192,9 @@ mod tests {
         ];
         let compacted = compact_messages_for_model(&messages, MAX_AGENT_CONTEXT_CHARS);
         let tool_content = compacted.messages[2]["content"].as_str().unwrap();
-        assert!(tool_content.chars().count() < 20_000);
+        assert!(tool_content.chars().count() < long.chars().count());
         assert!(tool_content.contains("截断"));
+        assert!(tool_content.chars().count() <= MAX_TOOL_RESULT_MODEL_CHARS + 80);
     }
 
     #[test]
@@ -233,27 +234,27 @@ mod tests {
     }
 
     #[test]
-    fn uses_lower_context_ceiling_for_execute_plan_runs() {
+    fn compacts_when_over_shared_context_ceiling() {
         let messages = vec![
-            json!({ "role": "system", "content": "s".repeat(40_000) }),
-            json!({ "role": "user", "content": "u".repeat(40_000) }),
+            json!({ "role": "system", "content": "s".repeat(90_000) }),
+            json!({ "role": "user", "content": "u".repeat(90_000) }),
             json!({
               "role": "tool",
               "tool_call_id": "1",
-              "content": format!("lines 1-100\n{}", "a".repeat(30_000))
+              "content": format!("lines 1-100\n{}", "a".repeat(40_000))
             }),
             json!({
               "role": "tool",
               "tool_call_id": "2",
-              "content": format!("lines 101-200\n{}", "b".repeat(30_000))
+              "content": format!("lines 101-200\n{}", "b".repeat(40_000))
             }),
             json!({
               "role": "tool",
               "tool_call_id": "3",
-              "content": format!("lines 201-300\n{}", "c".repeat(30_000))
+              "content": format!("lines 201-300\n{}", "c".repeat(40_000))
             }),
         ];
-        assert_eq!(EXECUTE_PLAN_MAX_CONTEXT_CHARS, 100_000);
+        assert_eq!(EXECUTE_PLAN_MAX_CONTEXT_CHARS, 256_000);
         assert!(
             compact_messages_for_model(&messages, MAX_AGENT_CONTEXT_CHARS).messages[2]["content"]
                 .as_str()
@@ -272,25 +273,25 @@ mod tests {
     #[test]
     fn soft_compacts_older_tool_outputs_before_hard_context_ceiling() {
         let messages = vec![
-            json!({ "role": "system", "content": "s".repeat(8_000) }),
-            json!({ "role": "user", "content": "u".repeat(8_000) }),
+            json!({ "role": "system", "content": "s".repeat(80_000) }),
+            json!({ "role": "user", "content": "u".repeat(80_000) }),
             json!({
               "role": "tool",
               "tool_call_id": "1",
-              "content": format!("lines 1-100\n{}", "a".repeat(12_000))
+              "content": format!("lines 1-100\n{}", "a".repeat(40_000))
             }),
             json!({
               "role": "tool",
               "tool_call_id": "2",
-              "content": format!("lines 101-200\n{}", "b".repeat(12_000))
+              "content": format!("lines 101-200\n{}", "b".repeat(40_000))
             }),
             json!({
               "role": "tool",
               "tool_call_id": "3",
-              "content": format!("lines 201-300\n{}", "c".repeat(12_000))
+              "content": format!("lines 201-300\n{}", "c".repeat(40_000))
             }),
         ];
-        assert_eq!(SOFT_COMPACT_CONTEXT_CHARS, 36_000);
+        assert_eq!(SOFT_COMPACT_CONTEXT_CHARS, 256_000);
         let total_before: usize = messages
             .iter()
             .map(|m| m["content"].as_str().unwrap_or("").chars().count())
@@ -309,15 +310,15 @@ mod tests {
 
     #[test]
     fn compresses_older_tool_messages_when_over_soft_cap() {
-        let mut messages = vec![json!({ "role": "system", "content": "s".repeat(40_000) })];
+        let mut messages = vec![json!({ "role": "system", "content": "s".repeat(200_000) })];
         for i in 0..4 {
             messages.push(json!({
               "role": "tool",
               "tool_call_id": format!("t{i}"),
-              "content": "y".repeat(8_000)
+              "content": "y".repeat(20_000)
             }));
         }
-        let compacted = compact_messages_for_model(&messages, 200_000);
+        let compacted = compact_messages_for_model(&messages, 256_000);
         let first_tool = compacted.messages[1]["content"].as_str().unwrap();
         assert!(first_tool.contains("已压缩"));
     }

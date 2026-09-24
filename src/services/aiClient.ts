@@ -32,6 +32,8 @@ export interface AiModelsResult {
   ok: boolean;
   status: number;
   models: string[];
+  /** model id → real context window (tokens), when the provider reports it. */
+  modelWindows: Record<string, number>;
   rawText: string;
   error?: string;
   fromCache?: boolean;
@@ -40,7 +42,51 @@ export interface AiModelsResult {
 interface CachedModelsPayload {
   cachedAt: number;
   models: string[];
+  modelWindows?: Record<string, number>;
   rawText: string;
+}
+
+/**
+ * Pull a model's context window out of an OpenAI-compatible `/models` item.
+ * Different gateways use different field names; return the first positive one.
+ */
+function extractModelWindow(item: Record<string, unknown>): number | undefined {
+  const candidates = [
+    "context_length",
+    "context_window",
+    "max_context_length",
+    "max_model_len",
+    "max_input_tokens",
+    "input_token_limit",
+  ];
+  for (const key of candidates) {
+    const value = item[key];
+    if (typeof value === "number" && value > 0) return Math.round(value);
+    if (typeof value === "string" && value.trim() && Number.isFinite(Number(value)) && Number(value) > 0) {
+      return Math.round(Number(value));
+    }
+  }
+  // Nested shapes, e.g. { top_provider: { context_length } } or { meta: { ... } }.
+  for (const nestedKey of ["top_provider", "meta", "metadata", "limits"]) {
+    const nested = item[nestedKey];
+    if (nested && typeof nested === "object") {
+      const found = extractModelWindow(nested as Record<string, unknown>);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
+/** Build `{ modelId: windowTokens }` from a raw `/models` array. */
+function extractModelWindows(source: Array<Record<string, unknown>>): Record<string, number> {
+  const windows: Record<string, number> = {};
+  for (const item of source) {
+    const id = typeof item.id === "string" ? item.id.trim() : "";
+    if (!id) continue;
+    const window = extractModelWindow(item);
+    if (window) windows[id] = window;
+  }
+  return windows;
 }
 
 const MODELS_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -630,6 +676,7 @@ export async function fetchAvailableModels(request: AiModelsRequest): Promise<Ai
           ok: true,
           status: 200,
           models: cached.models,
+          modelWindows: cached.modelWindows ?? {},
           rawText: cached.rawText,
           fromCache: true,
         };
@@ -644,10 +691,10 @@ export async function fetchAvailableModels(request: AiModelsRequest): Promise<Ai
           apiKey: request.apiKey || null,
         });
         if (!result.ok) {
-          return { ok: false, status: 0, models: [], rawText: "", error: result.error || "获取模型失败", fromCache: false };
+          return { ok: false, status: 0, models: [], modelWindows: {}, rawText: "", error: result.error || "获取模型失败", fromCache: false };
         }
         const rawData = result.data?.data ?? result.data?.models;
-        const source = Array.isArray(rawData)
+        const source: Array<Record<string, unknown>> = Array.isArray(rawData)
           ? rawData
           : Array.isArray(rawData?.data)
             ? rawData.data
@@ -655,13 +702,14 @@ export async function fetchAvailableModels(request: AiModelsRequest): Promise<Ai
               ? rawData.models
               : [];
         const modelNames = source.map((m: any) => m.id || "").filter(Boolean) as string[];
+        const modelWindows = extractModelWindows(source);
         const rawText = JSON.stringify(result.data);
         if (modelNames.length) {
-          writeModelsCache(cacheKey, { cachedAt: Date.now(), models: modelNames, rawText });
+          writeModelsCache(cacheKey, { cachedAt: Date.now(), models: modelNames, modelWindows, rawText });
         }
-        return { ok: true, status: 200, models: modelNames, rawText, fromCache: false };
+        return { ok: true, status: 200, models: modelNames, modelWindows, rawText, fromCache: false };
       } catch (e: unknown) {
-        return { ok: false, status: 0, models: [], rawText: "", error: e instanceof Error ? e.message : String(e), fromCache: false };
+        return { ok: false, status: 0, models: [], modelWindows: {}, rawText: "", error: e instanceof Error ? e.message : String(e), fromCache: false };
       }
     }
 
@@ -679,6 +727,7 @@ export async function fetchAvailableModels(request: AiModelsRequest): Promise<Ai
 
     const rawText = await response.text();
     let modelNames: string[] = [];
+    let modelWindows: Record<string, number> = {};
 
     try {
       const parsed = JSON.parse(rawText) as {
@@ -686,24 +735,29 @@ export async function fetchAvailableModels(request: AiModelsRequest): Promise<Ai
         models?: Array<{ id?: string }>;
       };
       const rawData = parsed.data;
-      const source = Array.isArray(rawData)
-        ? rawData
-        : Array.isArray(parsed.models)
-          ? parsed.models
-          : Array.isArray(rawData?.data)
-            ? rawData.data
-            : Array.isArray(rawData?.models)
-              ? rawData.models
-              : [];
-      modelNames = source.map((item) => item.id || "").filter(Boolean);
+      const source: Array<Record<string, unknown>> = (
+        Array.isArray(rawData)
+          ? rawData
+          : Array.isArray(parsed.models)
+            ? parsed.models
+            : Array.isArray(rawData?.data)
+              ? rawData.data
+              : Array.isArray(rawData?.models)
+                ? rawData.models
+                : []
+      ) as Array<Record<string, unknown>>;
+      modelNames = source.map((item) => (typeof item.id === "string" ? item.id : "")).filter(Boolean);
+      modelWindows = extractModelWindows(source);
     } catch {
       modelNames = [];
+      modelWindows = {};
     }
 
     if (response.ok && modelNames.length) {
       writeModelsCache(cacheKey, {
         cachedAt: Date.now(),
         models: modelNames,
+        modelWindows,
         rawText,
       });
     }
@@ -712,6 +766,7 @@ export async function fetchAvailableModels(request: AiModelsRequest): Promise<Ai
       ok: response.ok,
       status: response.status,
       models: modelNames,
+      modelWindows,
       rawText,
       error: response.ok ? undefined : `获取模型失败，HTTP ${response.status}`,
       fromCache: false,
@@ -722,6 +777,7 @@ export async function fetchAvailableModels(request: AiModelsRequest): Promise<Ai
       ok: false,
       status: 0,
       models: [],
+      modelWindows: {},
       rawText: "",
       error: `${errorMessage}\n请检查接口地址与网络连通性。`,
       fromCache: false,

@@ -28,6 +28,8 @@ export type VibeChatMessage = Omit<PersistedChatMessage, "tools" | "roundGroups"
   agentDetail?: string;
   streamChars?: number;
   contextChars?: number;
+  contextTokens?: number;
+  peakContextTokens?: number;
   agentWaitStartedAt?: number;
   streaming?: boolean;
   reverting?: boolean;

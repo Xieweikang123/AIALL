@@ -16,6 +16,10 @@ export interface AiProvider {
   stream: boolean;
   /** 该供应商可用的模型列表（配置页「获取模型」后缓存，供会话下拉按供应商选模型）。 */
   availableModels?: string[];
+  /** 每个模型的真实上下文窗口（token 数），来自 `/models` 响应；缺省时按模型名静态表兜底。 */
+  modelWindows?: Record<string, number>;
+  /** 用户手填的上下文窗口覆盖（token 数），按模型名存；优先级高于 /models 与静态表。 */
+  modelWindowOverrides?: Record<string, number>;
 }
 
 export interface AiChatBaseConfig {
@@ -140,6 +144,24 @@ function normalizeProvider(raw: unknown, index: number): AiProvider | null {
     stream: typeof p.stream === "boolean" ? p.stream : true,
     ...(Array.isArray(p.availableModels) && p.availableModels.length
       ? { availableModels: p.availableModels.map((m) => String(m).trim()).filter(Boolean) }
+      : {}),
+    ...(p.modelWindows && typeof p.modelWindows === "object"
+      ? {
+          modelWindows: Object.fromEntries(
+            Object.entries(p.modelWindows)
+              .map(([k, v]) => [String(k).trim(), Number(v)] as const)
+              .filter(([k, v]) => k && Number.isFinite(v) && v > 0),
+          ),
+        }
+      : {}),
+    ...(p.modelWindowOverrides && typeof p.modelWindowOverrides === "object"
+      ? {
+          modelWindowOverrides: Object.fromEntries(
+            Object.entries(p.modelWindowOverrides)
+              .map(([k, v]) => [String(k).trim(), Number(v)] as const)
+              .filter(([k, v]) => k && Number.isFinite(v) && v > 0),
+          ),
+        }
       : {}),
   };
 }

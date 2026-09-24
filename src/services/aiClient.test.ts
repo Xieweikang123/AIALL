@@ -180,6 +180,28 @@ describe("fetchAvailableModels", () => {
     expect(body.endpoint).toContain("/models");
   });
 
+  it("解析 /models 里上报的上下文窗口字段", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        data: [
+          { id: "gpt-4o", context_length: 128000 },
+          { id: "deepseek-chat", top_provider: { context_length: 65536 } },
+          { id: "no-window-model" },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchAvailableModels({
+      endpoint: "https://ai.example/v1",
+      forceRefresh: true,
+    });
+
+    expect(result.modelWindows["gpt-4o"]).toBe(128000);
+    expect(result.modelWindows["deepseek-chat"]).toBe(65536);
+    expect(result.modelWindows["no-window-model"]).toBeUndefined();
+  });
+
   it("HTTP 非 2xx 返回错误", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ error: "boom" }, 502)));
     const result = await fetchAvailableModels({
