@@ -45,8 +45,15 @@ export type UseAgentStreamPatch = {
 };
 
 type PendingRunUiPatch = { sessionId: string; msgId: string; kind: RunUiPatchKind };
-type PendingStreamDelta = { msgId: string; assistantMsg: VibeChatMessage; pending: string };
-type PendingReasoningDelta = { msgId: string; assistantMsg: VibeChatMessage; pending: string };
+/**
+ * `turn` is captured when the delta is enqueued (delivery time), never re-resolved
+ * at flush time. Turn-bearing events (`turn_request` / `turn_response`) flush on a
+ * separate rAF from stream deltas, so reading `assistantMsg.agentTurn` when the
+ * buffer flushes can attribute a previous turn's tail tokens to the next turn and
+ * interleave them into the wrong round group.
+ */
+type PendingStreamDelta = { msgId: string; assistantMsg: VibeChatMessage; pending: string; turn: number };
+type PendingReasoningDelta = { msgId: string; assistantMsg: VibeChatMessage; pending: string; turn: number };
 
 export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStreamPatch {
   const {
@@ -201,7 +208,7 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
   function flushPendingStreamDelta() {
     if (!pendingStreamDelta?.pending) return;
 
-    const { msgId, assistantMsg } = pendingStreamDelta;
+    const { msgId, assistantMsg, turn } = pendingStreamDelta;
     const delta = pendingStreamDelta.pending;
     pendingStreamDelta.pending = "";
     const cleanDelta = getStreamToolFilter(msgId).push(delta);
@@ -213,6 +220,8 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
       cleanDelta: cleanDelta?.slice(0, 50),
       existingContentLen: (assistantMsg.content || "").length,
       agentTurn: assistantMsg.agentTurn,
+      bufferedTurn: turn,
+      turnStale: turn !== assistantMsg.agentTurn,
     });
 
     const run = findRunForMsg(assistantMsg);
@@ -224,7 +233,6 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
       const nextStreamChars = (assistantMsg.streamChars || run?.live.streamChars || 0) + delta.length;
       assistantMsg.streamChars = nextStreamChars;
       if (run) run.live.streamChars = nextStreamChars;
-      const turn = resolveStreamTurn(assistantMsg);
       assistantMsg.roundGroups = recordAgentRoundStreamDelta(
         assistantMsg.roundGroups,
         turn,
@@ -240,7 +248,6 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
     assistantMsg.streamChars = (assistantMsg.streamChars || 0) + delta.length;
     if (run) run.live.streamChars = assistantMsg.streamChars;
 
-    const turn = resolveStreamTurn(assistantMsg);
     assistantMsg.roundGroups = recordAgentRoundStreamDelta(
       assistantMsg.roundGroups,
       turn,
@@ -258,9 +265,14 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
   }
 
   function enqueueStreamDelta(msgId: string, assistantMsg: VibeChatMessage, delta: string) {
-    if (!pendingStreamDelta || pendingStreamDelta.msgId !== msgId) {
+    const turn = resolveStreamTurn(assistantMsg);
+    // A new turn starts while the previous turn's tail is still buffered: flush it
+    // under its own (stamped) turn before this turn's deltas share the buffer.
+    if (pendingStreamDelta && (pendingStreamDelta.msgId !== msgId || pendingStreamDelta.turn !== turn)) {
       flushPendingStreamDelta();
-      pendingStreamDelta = { msgId, assistantMsg, pending: "" };
+    }
+    if (!pendingStreamDelta?.pending) {
+      pendingStreamDelta = { msgId, assistantMsg, pending: "", turn };
     }
     pendingStreamDelta.pending += delta;
     scheduleStreamDeltaFlush();
@@ -280,10 +292,9 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
 
   function flushPendingReasoningDelta() {
     if (!pendingReasoningDelta?.pending) return;
-    const { msgId, assistantMsg, pending } = pendingReasoningDelta;
+    const { msgId, assistantMsg, pending, turn } = pendingReasoningDelta;
     pendingReasoningDelta.pending = "";
     const run = findRunForMsg(assistantMsg);
-    const turn = resolveStreamTurn(assistantMsg);
     assistantMsg.roundGroups = recordAgentRoundReasoningDelta(
       assistantMsg.roundGroups,
       turn,
@@ -302,9 +313,12 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
 
   function enqueueReasoningDelta(msgId: string, assistantMsg: VibeChatMessage, delta: string) {
     if (!delta) return;
-    if (!pendingReasoningDelta || pendingReasoningDelta.msgId !== msgId) {
+    const turn = resolveStreamTurn(assistantMsg);
+    if (pendingReasoningDelta && (pendingReasoningDelta.msgId !== msgId || pendingReasoningDelta.turn !== turn)) {
       flushPendingReasoningDelta();
-      pendingReasoningDelta = { msgId, assistantMsg, pending: "" };
+    }
+    if (!pendingReasoningDelta?.pending) {
+      pendingReasoningDelta = { msgId, assistantMsg, pending: "", turn };
     }
     pendingReasoningDelta.pending += delta;
     scheduleStreamDeltaFlush();
