@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.0"
+version = "0.1.1"
 description = "AIALL desktop agent"
 authors = ["AIALL"]
 license = "MIT"
@@ -50,3 +50,4 @@ image = "0.25"
 rand = "0.8"
 urlencoding = "2"
 headless_chrome = "1.0"
+ignore = "0.4"

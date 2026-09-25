@@ -369,6 +369,17 @@ fn capture_usage(usage_value: &Value, usage: &mut UsageStats) {
     if let Some(created) = usage_value.get("cache_creation_input_tokens").and_then(as_u64) {
         usage.cache_creation_tokens = Some(created);
     }
+
+    // DeepSeek / many OpenAI-compatible relays: top-level hit/miss token counts.
+    // `prompt_cache_hit_tokens` maps to cached, miss + hit reconstructs the prompt.
+    if let Some(hit) = usage_value.get("prompt_cache_hit_tokens").and_then(as_u64) {
+        usage.cached_tokens = Some(hit);
+        if usage.prompt_tokens.is_none() {
+            if let Some(miss) = usage_value.get("prompt_cache_miss_tokens").and_then(as_u64) {
+                usage.prompt_tokens = Some(hit + miss);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -888,6 +899,36 @@ mod tests {
         // Later chunk: cached_tokens arrives.
         capture_usage(
             &json!({ "prompt_tokens_details": { "cached_tokens": 300 } }),
+            &mut usage,
+        );
+        assert_eq!(usage.prompt_tokens, Some(1000));
+        assert_eq!(usage.cached_tokens, Some(300));
+        let ratio = usage.hit_ratio().unwrap();
+        assert!((ratio - 0.3).abs() < 1e-9);
+    }
+
+    #[test]
+    fn capture_usage_deepseek_style_hit_miss() {
+        let mut usage = UsageStats::default();
+        capture_usage(
+            &json!({
+                "prompt_tokens": 1000,
+                "prompt_cache_hit_tokens": 600,
+                "prompt_cache_miss_tokens": 400
+            }),
+            &mut usage,
+        );
+        assert_eq!(usage.prompt_tokens, Some(1000));
+        assert_eq!(usage.cached_tokens, Some(600));
+        let ratio = usage.hit_ratio().unwrap();
+        assert!((ratio - 0.6).abs() < 1e-9);
+    }
+
+    #[test]
+    fn capture_usage_deepseek_reconstructs_prompt_when_absent() {
+        let mut usage = UsageStats::default();
+        capture_usage(
+            &json!({ "prompt_cache_hit_tokens": 300, "prompt_cache_miss_tokens": 700 }),
             &mut usage,
         );
         assert_eq!(usage.prompt_tokens, Some(1000));

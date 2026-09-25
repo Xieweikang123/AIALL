@@ -21,10 +21,7 @@ use super::explore_guard::{
     is_analysis_only_reply_under_force_patch, is_manual_handoff_without_write_reply,
     PatchFailureEntry, ToolGuardState,
 };
-use super::finish_gate::{
-    build_finish_gate_retry_nudge, evaluate_finish_gate, is_empty_or_insufficient_final_reply,
-    FinishGateInput, WriteStage,
-};
+use super::finish_gate::is_empty_or_insufficient_final_reply;
 use super::policy::AgentRunPolicy;
 use super::probe_guard::{build_workspace_cleanup_nudge, ProbeArtifactTracker};
 use super::run_emit::emit;
@@ -35,6 +32,12 @@ use super::vision_consultative::{
     ConsultativeVisionFinalizeInput,
 };
 use super::vision_pregrep::build_vision_consultative_read_after_prefgrep_hint;
+
+/// Temporarily off: this gate fired on all read-only consultative finals (not only
+/// UI-state questions) via `reply_claims_code_without_tool_evidence`, causing
+/// forced re-reads and duplicated near-identical final answers after restart /
+/// grep-only segments. Flip back on only after narrowing to true UI-state prompts.
+const UI_BEHAVIOR_FINALIZE_GATE_ENABLED: bool = false;
 
 pub(crate) struct FinalizeTurnParams<'a> {
     pub messages: &'a mut Vec<Value>,
@@ -131,32 +134,9 @@ pub(crate) fn handle_final_turn(
         }
     }
 
-    let stage = WriteStage {
-        files: std::collections::HashMap::new(),
-        written_list: params.written_files.to_vec(),
-    };
-    let gate_input = FinishGateInput {
-        raw_content: params.assistant_text.to_string(),
-        write_stage: Some(stage),
-        is_read_only_agent: params.is_read_only_run,
-        is_plan_explore: params.mode == "plan",
-        read_only_build_run: params.run_policy.read_only_build_run,
-        is_execute_plan: params.is_execute_plan,
-        implement_follow_up_run: params.run_policy.implement_follow_up_run,
-        target_files: params.target_files.clone(),
-        task_prompt: Some(params.task_prompt.to_string()),
-        automated_bug_fix_run: Some(params.run_policy.automated_bug_fix_run),
-        verify_script_available: Some(params.verify_script_available),
-        last_verify_run_succeeded: Some(None),
-    };
-    let gate_result = evaluate_finish_gate(&gate_input);
-    if gate_result.blocked {
-        let nudge = build_finish_gate_retry_nudge(&gate_result);
-        params
-            .messages
-            .push(json!({ "role": "user", "content": nudge }));
-        return FinalizeTurnOutcome::Continue;
-    }
+    // Finish gate removed from finalize loop: phantom path claims in honest
+    // "deferred frontend" summaries previously forced endless rewrite loops.
+    // Logic remains in finish_gate.rs behind FINISH_GATE_ENABLED=false.
 
     let grep_hit_vue_files: Vec<String> = params
         .tool_guard
@@ -254,7 +234,8 @@ pub(crate) fn handle_final_turn(
         consultative_nudge = Some(build_behavior_purpose_trace_retry_hint(
             params.consultative_read_paths,
         ));
-    } else if params.effective_read_only_build
+    } else if UI_BEHAVIOR_FINALIZE_GATE_ENABLED
+        && params.effective_read_only_build
         && !state.consultative_force_answer_pending
         && state.ui_behavior_retries < 2
         && should_block_consultative_ui_behavior_finalize(
@@ -267,6 +248,8 @@ pub(crate) fn handle_final_turn(
             params.consultative_grep_patterns,
         )
     {
+        // Disabled while gate is too broad (all read-only consultative finals).
+        // Re-enable only after scoping to true UI-state prompts.
         state.ui_behavior_retries += 1;
         consultative_nudge = Some(build_consultative_ui_behavior_trace_retry_hint(
             params.consultative_read_paths,
@@ -838,5 +821,127 @@ mod tests {
         // Non-empty, substantive reply should break even if retries exhausted
         let result = handle_final_turn(&mut params, &mut state);
         assert_eq!(result, FinalizeTurnOutcome::Break);
+    }
+
+    #[test]
+    fn finalize_does_not_retry_on_finish_gate_phantom_claims() {
+        let mut messages = Vec::new();
+        let mut state = FinalizeTurnMut {
+            consultative_force_answer_pending: false,
+            vision_consultative_locate_retries: 0,
+            accuracy_retries: 0,
+            behavior_purpose_retries: 0,
+            ui_behavior_retries: 0,
+            modification_audit_sent: false,
+            patch_required_retries: 0,
+            patch_failure_completion_retries: 0,
+            manual_handoff_retries: 0,
+            premature_completion_retries: 0,
+            empty_reply_retries: 0,
+            workspace_cleanup_nudge_sent: false,
+            ambiguous_term_clarification_pending: false,
+            ambiguous_term_clarification_retries: 0,
+        };
+        let written = vec![
+            "Mall.API/1.API/Admin.Api/Controllers/WorkOrderController.cs".to_string(),
+        ];
+        let mut params = FinalizeTurnParams {
+            messages: &mut messages,
+            assistant_text: "修改已落地。\n\n**文件**：`Mall.API/1.API/Admin.Api/Controllers/WorkOrderController.cs`\n\n## 遗留风险（本轮未改）\n1. `PC/src/constants/workorder.js`\n2. `PC/src/views/workorder/listColumn.vue`\n\n```\ndotnet build Admin.Api.csproj\n```",
+            written_files: &written,
+            tool_guard: &ToolGuardState::default(),
+            run_policy: &AgentRunPolicy::default(),
+            mode: "build",
+            is_read_only_run: false,
+            is_execute_plan: false,
+            verify_script_available: false,
+            task_prompt: "先只改后端筛选逻辑，前端状态列和导出我稍后再定",
+            target_files: None,
+            pregrep_unique_files: &[],
+            consultative_read_paths: &[],
+            consultative_read_failed_paths: &[],
+            consultative_grep_patterns: &[],
+            vision_locate_tools_used: false,
+            vision_auto_grep_had_matches: false,
+            vision_locate_read_used: false,
+            effective_read_only_build: false,
+            patch_failure_log: &[],
+            probe_tracker: &ProbeArtifactTracker::default(),
+            build_explore_force_patch_sent: false,
+            patch_anchor_force_pending: false,
+            turn: 5,
+            segment_max_turns: 40,
+            channel: &dummy_channel(),
+            ambiguous_term_clarification_pending: false,
+            ambiguous_term_clarification_terms: &[],
+        };
+        let result = handle_final_turn(&mut params, &mut state);
+        assert_eq!(result, FinalizeTurnOutcome::Break);
+        assert!(
+            !messages.iter().any(|m| {
+                m.get("content")
+                    .and_then(|c| c.as_str())
+                    .is_some_and(|s| s.contains("收尾门禁"))
+            }),
+            "finish gate must not inject 红军驳回 retries"
+        );
+    }
+
+    #[test]
+    fn finalize_does_not_block_on_ui_behavior_gate_when_disabled() {
+        let mut messages = Vec::new();
+        let mut state = FinalizeTurnMut {
+            consultative_force_answer_pending: false,
+            vision_consultative_locate_retries: 0,
+            accuracy_retries: 0,
+            behavior_purpose_retries: 0,
+            ui_behavior_retries: 0,
+            modification_audit_sent: false,
+            patch_required_retries: 0,
+            patch_failure_completion_retries: 0,
+            manual_handoff_retries: 0,
+            premature_completion_retries: 0,
+            empty_reply_retries: 0,
+            workspace_cleanup_nudge_sent: false,
+            ambiguous_term_clarification_pending: false,
+            ambiguous_term_clarification_retries: 0,
+        };
+        let mut policy = AgentRunPolicy::default();
+        policy.read_only_build_run = true;
+        let mut params = FinalizeTurnParams {
+            messages: &mut messages,
+            assistant_text: "## 结论：方便做\n在 `WorkOrderController.cs` 第 300 行改 status 筛选即可。\n另见 `listColumn.vue`。",
+            written_files: &[],
+            tool_guard: &ToolGuardState::default(),
+            run_policy: &policy,
+            mode: "build",
+            is_read_only_run: true,
+            is_execute_plan: false,
+            verify_script_available: false,
+            task_prompt: "GetWorkOrderPageList 筛选 status:6 时把 6 和 11 都返回，方便做吗？",
+            target_files: None,
+            pregrep_unique_files: &[],
+            consultative_read_paths: &[],
+            consultative_read_failed_paths: &[],
+            consultative_grep_patterns: &[],
+            vision_locate_tools_used: false,
+            vision_auto_grep_had_matches: false,
+            vision_locate_read_used: false,
+            effective_read_only_build: true,
+            patch_failure_log: &[],
+            probe_tracker: &ProbeArtifactTracker::default(),
+            build_explore_force_patch_sent: false,
+            patch_anchor_force_pending: false,
+            turn: 9,
+            segment_max_turns: 40,
+            channel: &dummy_channel(),
+            ambiguous_term_clarification_pending: false,
+            ambiguous_term_clarification_terms: &[],
+        };
+        let result = handle_final_turn(&mut params, &mut state);
+        assert_eq!(result, FinalizeTurnOutcome::Break);
+        assert_eq!(state.ui_behavior_retries, 0);
+        assert!(messages.is_empty());
+        assert!(!UI_BEHAVIOR_FINALIZE_GATE_ENABLED);
     }
 }

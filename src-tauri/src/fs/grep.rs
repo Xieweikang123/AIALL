@@ -1,23 +1,58 @@
-use super::{is_text_extension, should_list_directory_entry};
+use super::is_text_extension;
+use ignore::WalkBuilder;
 use regex::Regex;
 use serde::Serialize;
 use std::path::Path;
 use std::sync::LazyLock;
 
-static RG_LINE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(.+?):(\d+):(.*)$").unwrap());
+/// Hard safety net when `.gitignore` is missing or incomplete.
+/// Prefer project ignore rules; do not treat this list as stack-specific playbooks.
+/// Note: do not skip every `bin/` — Rust `src/bin` is source. Only skip common build outputs.
 static SKIP_GREP_PATH_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"node_modules|(^|/)dist/|(^|/)\.git/|(^|/)build/|(^|/)coverage/").unwrap()
+    Regex::new(
+        r"(?x)
+        node_modules
+        | (^|/)dist/
+        | (^|/)\.git/
+        | (^|/)build/
+        | (^|/)coverage/
+        | (^|/)target/
+        | (^|/)obj/
+        | (^|/)vendor/
+        | (^|/)__pycache__/
+        | (^|/)\.venv/
+        | (^|/)venv/
+        | (^|/)\.next/
+        | (^|/)\.nuxt/
+        | (^|/)\.cache/
+        | (^|/)bin/(Debug|Release|x64|x86|AnyCPU)/
+        | \.log$
+        ",
+    )
+    .unwrap()
 });
 
-const RG_SKIP_GLOBS: &[&str] = &[
-    "!node_modules/**",
-    "!dist/**",
-    "!.git/**",
-    "!build/**",
-    "!coverage/**",
+/// Directory names pruned early while walking (unambiguous junk / VCS).
+const SKIP_DIR_NAMES: &[&str] = &[
+    "node_modules",
+    ".git",
+    ".svn",
+    ".hg",
+    "dist",
+    "build",
+    "coverage",
+    "target",
+    "obj",
+    "vendor",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".next",
+    ".nuxt",
+    ".cache",
 ];
-use tokio::fs;
-use tokio::process::Command;
+
+const MAX_GREP_FILE_BYTES: u64 = 512 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct GrepMatch {
@@ -28,7 +63,12 @@ pub struct GrepMatch {
 }
 
 pub(crate) fn should_skip_grep_relative(relative: &str) -> bool {
-    SKIP_GREP_PATH_RE.is_match(relative)
+    let normalized = relative.replace('\\', "/");
+    SKIP_GREP_PATH_RE.is_match(&normalized)
+}
+
+fn should_prune_dir_name(name: &str) -> bool {
+    SKIP_DIR_NAMES.contains(&name)
 }
 
 pub async fn grep_in_project(
@@ -36,79 +76,18 @@ pub async fn grep_in_project(
     pattern: &str,
     max_matches: usize,
 ) -> Result<Vec<GrepMatch>, String> {
-    let query = pattern.trim();
+    let query = pattern.trim().to_string();
     if query.is_empty() {
         return Err("搜索内容不能为空".into());
     }
-    let max_count = max_matches.to_string();
-    let mut rg_args = vec!["-n", "--max-count", max_count.as_str()];
-    for glob in RG_SKIP_GLOBS {
-        rg_args.push("--glob");
-        rg_args.push(glob);
-    }
-    rg_args.push(query);
-    rg_args.push(project_root);
-
-    let output = Command::new("rg").args(rg_args).output().await;
-
-    match output {
-        Ok(out) if out.status.success() || out.status.code() == Some(1) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            Ok(parse_rg_output(&stdout, project_root, max_matches))
-        }
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            if !stdout.trim().is_empty() {
-                return Ok(parse_rg_output(&stdout, project_root, max_matches));
-            }
-            grep_in_project_node(project_root, query, max_matches).await
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            grep_in_project_node(project_root, query, max_matches).await
-        }
-        Err(e) => Err(format!("grep 失败: {e}")),
-    }
+    let root = project_root.to_string();
+    let max_matches = max_matches.max(1);
+    tokio::task::spawn_blocking(move || grep_in_project_sync(&root, &query, max_matches))
+        .await
+        .map_err(|e| format!("grep 任务失败: {e}"))?
 }
 
-pub(crate) fn parse_rg_output(output: &str, root: &str, max_matches: usize) -> Vec<GrepMatch> {
-    let root_path = Path::new(root);
-    let mut matches = Vec::new();
-    for line in output.lines() {
-        if matches.len() >= max_matches {
-            break;
-        }
-        if let Some(caps) = RG_LINE_RE.captures(line) {
-            let file = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-            let relative = Path::new(file)
-                .strip_prefix(root_path)
-                .unwrap_or(Path::new(file))
-                .to_string_lossy()
-                .replace('\\', "/");
-            if should_skip_grep_relative(&relative) {
-                continue;
-            }
-            matches.push(GrepMatch {
-                file: file.to_string(),
-                relative,
-                line: caps
-                    .get(2)
-                    .and_then(|m| m.as_str().parse().ok())
-                    .unwrap_or(0),
-                text: caps
-                    .get(3)
-                    .map(|m| m.as_str())
-                    .unwrap_or("")
-                    .trim()
-                    .chars()
-                    .take(200)
-                    .collect(),
-            });
-        }
-    }
-    matches
-}
-
-async fn grep_in_project_node(
+fn grep_in_project_sync(
     root: &str,
     pattern: &str,
     max_matches: usize,
@@ -116,78 +95,72 @@ async fn grep_in_project_node(
     let regex = Regex::new(pattern)
         .or_else(|_| Regex::new(&regex::escape(pattern)))
         .map_err(|e| e.to_string())?;
-    let mut matches = Vec::new();
-    walk_grep(
-        Path::new(root),
-        Path::new(root),
-        &regex,
-        0,
-        max_matches,
-        &mut matches,
-    )
-    .await;
-    Ok(matches)
-}
-
-async fn walk_grep(
-    root: &Path,
-    current: &Path,
-    regex: &Regex,
-    depth: usize,
-    max_matches: usize,
-    matches: &mut Vec<GrepMatch>,
-) {
-    if depth > 8 || matches.len() >= max_matches {
-        return;
+    let root_path = Path::new(root);
+    if !root_path.is_dir() {
+        return Err(format!("项目目录不存在: {root}"));
     }
-    let mut entries = match fs::read_dir(current).await {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-    while let Ok(Some(entry)) = entries.next_entry().await {
+
+    let mut matches = Vec::new();
+    let walker = WalkBuilder::new(root_path)
+        // Allow searching files like `.env` / `.gitignore`; `.git` is still pruned below.
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .ignore(true)
+        .parents(true)
+        .filter_entry(|entry| {
+            let name = entry.file_name().to_string_lossy();
+            if entry.depth() > 0 && entry.file_type().is_some_and(|t| t.is_dir()) {
+                return !should_prune_dir_name(name.as_ref());
+            }
+            true
+        })
+        .build();
+
+    for dent in walker {
         if matches.len() >= max_matches {
             break;
         }
-        let Ok(meta) = entry.metadata().await else {
+        let Ok(dent) = dent else {
             continue;
         };
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let is_directory = meta.is_dir();
-        if !should_list_directory_entry(&name, is_directory) {
+        let ft = match dent.file_type() {
+            Some(t) => t,
+            None => continue,
+        };
+        if !ft.is_file() {
             continue;
         }
-        let full = entry.path();
-        if is_directory {
-            Box::pin(walk_grep(
-                root,
-                &full,
-                regex,
-                depth + 1,
-                max_matches,
-                matches,
-            ))
-            .await;
-            continue;
-        }
+        let full = dent.path();
         let relative = full
-            .strip_prefix(root)
-            .unwrap_or(&full)
+            .strip_prefix(root_path)
+            .unwrap_or(full)
             .to_string_lossy()
             .replace('\\', "/");
         if should_skip_grep_relative(&relative) {
             continue;
         }
-        let ext = Path::new(&name)
+        let name = dent.file_name().to_string_lossy();
+        let ext = Path::new(name.as_ref())
             .extension()
             .map(|e| format!(".{}", e.to_string_lossy().to_lowercase()))
             .unwrap_or_default();
-        if !is_text_extension(&ext) {
+        // Extensionless text-ish configs (e.g. Dockerfile) are skipped; keep prior text-ext gate.
+        if !ext.is_empty() && !is_text_extension(&ext) {
             continue;
         }
-        if meta.len() > 512 * 1024 {
+        if ext.is_empty() {
             continue;
         }
-        let Ok(content) = fs::read_to_string(&full).await else {
+        let meta = match dent.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if meta.len() > MAX_GREP_FILE_BYTES {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(full) else {
             continue;
         };
         for (i, line) in content.lines().enumerate() {
@@ -197,90 +170,115 @@ async fn walk_grep(
             if regex.is_match(line) {
                 matches.push(GrepMatch {
                     file: full.to_string_lossy().into_owned(),
-                    relative: full
-                        .strip_prefix(root)
-                        .unwrap_or(&full)
-                        .to_string_lossy()
-                        .replace('\\', "/"),
+                    relative: relative.clone(),
                     line: (i + 1) as u32,
                     text: line.trim().chars().take(200).collect(),
                 });
             }
         }
     }
+
+    Ok(matches)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_project(name: &str) -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("aiall-grep-{name}-{nanos}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
 
     #[test]
     fn test_should_skip_grep_relative() {
         assert!(should_skip_grep_relative("node_modules/pkg/index.js"));
         assert!(should_skip_grep_relative("dist/bundle.js"));
         assert!(should_skip_grep_relative("src/.git/config"));
+        assert!(should_skip_grep_relative(
+            "Mall.API/1.API/Admin.Api/bin/Debug/netcoreapp3.1/logs/request_audit.txt"
+        ));
+        assert!(should_skip_grep_relative("Api/obj/Debug/foo.cs"));
+        assert!(should_skip_grep_relative("target/debug/build/out"));
+        assert!(should_skip_grep_relative("server/app.log"));
+        // Rust binary sources must remain searchable.
+        assert!(!should_skip_grep_relative("src/bin/agent_server.rs"));
         assert!(!should_skip_grep_relative("src/main.rs"));
     }
 
     #[test]
-    fn test_parse_rg_output_empty() {
-        let result = parse_rg_output("", "/project", 100);
-        assert!(result.is_empty());
+    fn grep_respects_gitignore_and_finds_source() {
+        let root = temp_project("gitignore");
+        fs::write(root.join(".gitignore"), "bin/\nobj/\n*.log\n").unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::create_dir_all(root.join("bin/Debug/logs")).unwrap();
+        fs::write(
+            root.join("src/WorkOrderController.cs"),
+            "public async Task<object> GetWorkOrderPageList() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("bin/Debug/logs/request_audit.txt"),
+            "POST /api/WorkOrder/GetWorkOrderPageList | 200\n",
+        )
+        .unwrap();
+
+        let hits = grep_in_project_sync(root.to_str().unwrap(), "GetWorkOrderPageList", 40).unwrap();
+        assert_eq!(hits.len(), 1, "hits={hits:?}");
+        assert!(hits[0].relative.contains("WorkOrderController.cs"));
+        assert!(!hits.iter().any(|h| h.relative.contains("bin/")));
+
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn test_parse_rg_output_standard_format() {
-        let output = "src/main.rs:42:fn main() {\nsrc/lib.rs:10:pub fn hello()\n";
-        let result = parse_rg_output(output, "/project", 100);
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0].file, "src/main.rs");
-        assert_eq!(result[0].line, 42);
-        assert_eq!(result[0].text, "fn main() {");
-        assert_eq!(result[1].file, "src/lib.rs");
-        assert_eq!(result[1].line, 10);
-        assert_eq!(result[1].text, "pub fn hello()");
+    fn grep_safety_net_skips_dotnet_bin_without_gitignore() {
+        let root = temp_project("nogi");
+        fs::create_dir_all(root.join("Controllers")).unwrap();
+        fs::create_dir_all(root.join("bin/Debug/logs")).unwrap();
+        fs::write(
+            root.join("Controllers/WorkOrderController.cs"),
+            "public void GetWorkOrderPageList() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("bin/Debug/logs/request_audit.txt"),
+            "GetWorkOrderPageList in audit log\n",
+        )
+        .unwrap();
+
+        let hits = grep_in_project_sync(root.to_str().unwrap(), "GetWorkOrderPageList", 40).unwrap();
+        assert_eq!(hits.len(), 1, "hits={hits:?}");
+        assert!(hits[0].relative.replace('\\', "/").contains("Controllers/"));
+
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn test_parse_rg_output_max_matches() {
-        let output = "a:1:x\na:2:y\na:3:z\n";
-        let result = parse_rg_output(output, "/project", 2);
-        assert_eq!(result.len(), 2);
+    fn grep_max_matches_caps_results() {
+        let root = temp_project("cap");
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/a.rs"), "HIT\nHIT\nHIT\n").unwrap();
+        let hits = grep_in_project_sync(root.to_str().unwrap(), "HIT", 2).unwrap();
+        assert_eq!(hits.len(), 2);
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn test_parse_rg_output_long_text_truncated() {
-        let long = "x".repeat(250);
-        let output = format!("f:1:{long}\n");
-        let result = parse_rg_output(&output, "/project", 100);
-        assert_eq!(result[0].text.len(), 200);
-    }
-
-    #[test]
-    fn test_parse_rg_output_malformed_lines() {
-        let output = "no_colon_or_line\n:2:only_file_empty\nfile::3:double_colon\n";
-        let result = parse_rg_output(output, "/project", 100);
-        assert!(result.len() <= 3);
-    }
-
-    #[test]
-    fn test_parse_rg_output_relative_paths() {
-        let output = "/home/user/project/src/main.rs:5:code\n";
-        let result = parse_rg_output(output, "/home/user/project", 100);
-        assert_eq!(result[0].relative, "src/main.rs");
-    }
-
-    #[test]
-    fn test_parse_rg_output_windows_path_in_relative() {
-        let output = "C:\\Users\\me\\project\\src\\main.rs:10:code\n";
-        let result = parse_rg_output(output, "C:\\Users\\me\\project", 100);
-        assert_eq!(result[0].relative, "src/main.rs");
-    }
-
-    #[test]
-    fn test_parse_rg_output_special_chars_in_text() {
-        let output = "file.rs:1:let x = \"hello world\" & 'foo';\n";
-        let result = parse_rg_output(output, "/project", 100);
-        assert_eq!(result[0].text, "let x = \"hello world\" & 'foo';");
+    fn grep_literal_fallback_for_invalid_regex() {
+        let root = temp_project("lit");
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/a.rs"), "foo(bar\n").unwrap();
+        let hits = grep_in_project_sync(root.to_str().unwrap(), "foo(bar", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        let _ = fs::remove_dir_all(&root);
     }
 }

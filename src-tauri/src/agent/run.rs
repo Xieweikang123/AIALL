@@ -599,8 +599,61 @@ pub async fn agent_run(
           "messages": compacted_messages,
           "tools": run_state.active_tools,
           "tool_choice": "auto",
-          "stream": true
+          "stream": true,
+          // Ask OpenAI-compatible providers to emit a final usage chunk so cache
+          // accounting works; providers that don't support it ignore the field.
+          "stream_options": { "include_usage": true }
         });
+
+        {
+            use std::io::Write;
+            if let Ok(log_path) = crate::paths::resolve_debug_log_path(
+                "agent-request.log",
+                Some(&request.project_path),
+            ) {
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&log_path)
+                {
+                    let msg_desc: Vec<String> = body["messages"]
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .map(|m| {
+                                    let role =
+                                        m.get("role").and_then(|v| v.as_str()).unwrap_or("?");
+                                    let kind = match m.get("content") {
+                                        Some(Value::String(s)) => format!("string({})", s.chars().count()),
+                                        Some(Value::Array(parts)) => {
+                                            let types: Vec<&str> = parts
+                                                .iter()
+                                                .map(|p| {
+                                                    p.get("type")
+                                                        .and_then(|v| v.as_str())
+                                                        .unwrap_or("?")
+                                                })
+                                                .collect();
+                                            format!("array[{}]", types.join(","))
+                                        }
+                                        _ => "none".into(),
+                                    };
+                                    format!("{role}:{kind}")
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let _ = writeln!(
+                        f,
+                        "[turn {}] endpoint={} model={} messages=[{}]",
+                        turn,
+                        request.endpoint,
+                        request.model,
+                        msg_desc.join("; ")
+                    );
+                }
+            }
+        }
 
         let stream_resp = ai::chat_completion_stream_with_retry(
             &request.endpoint,

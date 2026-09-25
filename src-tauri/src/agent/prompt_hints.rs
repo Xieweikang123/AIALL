@@ -73,6 +73,7 @@ pub fn build_ai_options_prompt_hint() -> &'static str {
 要求：\n\
 - 仅当确实是选择题（如「要我继续吗？」「你选哪种方案？」）才输出；开放问题、陈述、已执行完修改——勿输出。\n\
 - 每项必须是可直接作为用户下一条消息发送的完整句子；第一项通常是默认接受的回答。\n\
+- 视角必须是用户一侧（点按钮 = 该句以用户身份发出）：用「请…」「按你的建议…」这类用户会说的话；禁止沿用助手自身的第一人称动作（如「我先…」「我来…」）。若方案本由助手提出，改写为对该方案的确认，而非照抄助手原句。\n\
 - 2~4 个选项，不要多余、不要重复。"
 }
 
@@ -106,5 +107,14 @@ mod tests {
     #[test]
     fn suggestions_hint_has_marker() {
         assert!(build_agent_suggestions_prompt_hint().contains("agent-suggestions"));
+    }
+
+    #[test]
+    fn ai_options_hint_requires_user_perspective() {
+        let hint = build_ai_options_prompt_hint();
+        assert!(hint.contains("ai_options"));
+        // 选项作为用户消息发出，必须站用户视角，禁止复用助手第一人称。
+        assert!(hint.contains("视角必须是用户一侧"));
+        assert!(hint.contains("禁止沿用助手自身的第一人称"));
     }
 }

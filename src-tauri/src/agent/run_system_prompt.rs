@@ -179,6 +179,11 @@ pub async fn build_agent_system_prompt(
         system_prompt.push('\n');
     }
 
+    // Build/Plan do not include reply_accuracy (Ask/Explore do); inject cross-mode clarify rule here.
+    if params.mode == "build" || params.mode == "plan" {
+        system_prompt.push_str(super::prompt_hints::build_blocking_decision_clarify_hint());
+        system_prompt.push('\n');
+    }
     system_prompt.push_str(super::prompt_hints::build_ai_options_prompt_hint());
     system_prompt.push('\n');
 

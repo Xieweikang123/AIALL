@@ -28,16 +28,14 @@ use std::io::Write;
 const MAX_AUTO_BUG_FIX_WRITES: usize = 5;
 
 fn slice_content(content: &str, offset: usize, limit: usize) -> String {
-    if offset > 1 || limit < 800 {
-        content
-            .lines()
-            .skip(offset - 1)
-            .take(limit)
-            .collect::<Vec<_>>()
-            .join("\n")
-    } else {
-        content.to_string()
-    }
+    let start = offset.max(1).saturating_sub(1);
+    let take = limit.max(1);
+    content
+        .lines()
+        .skip(start)
+        .take(take)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn append_tool_exec_log(project_path: &str, tool_name: &str, path: &str, ok: bool, error: &str) {
@@ -814,6 +812,45 @@ fn server_mode_command_blocked(command: &str) -> Option<&'static str> {
     None
 }
 
+/// Kill the shell and its descendants so hung pipelines (e.g. `| tail`) do not
+/// leave orphans that keep stdout pipes open past the timeout.
+fn kill_command_process_tree(pid: u32) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .status();
+    }
+    #[cfg(unix)]
+    {
+        // Negative PID = process group (spawned with process_group(0)).
+        let _ = std::process::Command::new("kill")
+            .args(["-9", &format!("-{pid}")])
+            .status();
+        let _ = std::process::Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .status();
+    }
+}
+
+fn format_command_output(stdout: &[u8], stderr: &[u8]) -> (bool, String) {
+    let out = String::from_utf8_lossy(stdout).trim().to_string();
+    let err = String::from_utf8_lossy(stderr).trim().to_string();
+    if out.is_empty() && err.is_empty() {
+        return (true, "（命令执行完成，无输出）".into());
+    }
+    let mut parts = Vec::new();
+    if !out.is_empty() {
+        parts.push(format!("stdout:\n{out}"));
+    }
+    if !err.is_empty() {
+        parts.push(format!("stderr:\n{err}"));
+    }
+    (true, parts.join("\n\n"))
+}
+
 async fn exec_run_command(project_path: &str, args: &Value, mode: &str) -> (bool, String) {
     if let Some(msg) = block_write(mode, "执行命令") {
         return (false, msg);
@@ -846,33 +883,79 @@ async fn exec_run_command(project_path: &str, args: &Value, mode: &str) -> (bool
     } else {
         "-c"
     };
-    let cmd = tokio::process::Command::new(shell)
-        .args([flag, command])
+    let mut cmd = tokio::process::Command::new(shell);
+    cmd.args([flag, command])
         .current_dir(project_path)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
         .env("GIT_PAGER", "cat")
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("PAGER", "cat")
-        .kill_on_drop(true)
-        .output();
-    let result = tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), cmd).await;
-    match result {
-        Ok(Ok(output)) => {
-            let out = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            if out.is_empty() && err.is_empty() {
-                return (true, "（命令执行完成，无输出）".into());
-            }
-            let mut parts = Vec::new();
-            if !out.is_empty() {
-                parts.push(format!("stdout:\n{out}"));
-            }
-            if !err.is_empty() {
-                parts.push(format!("stderr:\n{err}"));
-            }
-            (true, parts.join("\n\n"))
+        .kill_on_drop(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    #[cfg(unix)]
+    {
+        cmd.process_group(0);
+    }
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => return (false, format!("命令执行失败: {e}")),
+    };
+    let pid = child.id();
+    // Read pipes on side tasks so Drop/timeout does not block on pipe EOF from orphans.
+    let stdout_pipe = child.stdout.take();
+    let stderr_pipe = child.stderr.take();
+    let stdout_task = tokio::spawn(async move {
+        use tokio::io::AsyncReadExt;
+        let mut buf = Vec::new();
+        if let Some(mut pipe) = stdout_pipe {
+            let _ = pipe.read_to_end(&mut buf).await;
         }
-        Ok(Err(e)) => (false, format!("命令执行失败: {e}")),
-        Err(_) => (false, format!("错误：命令超时（{timeout_ms}ms）")),
+        buf
+    });
+    let stderr_task = tokio::spawn(async move {
+        use tokio::io::AsyncReadExt;
+        let mut buf = Vec::new();
+        if let Some(mut pipe) = stderr_pipe {
+            let _ = pipe.read_to_end(&mut buf).await;
+        }
+        buf
+    });
+
+    match tokio::time::timeout(
+        std::time::Duration::from_millis(timeout_ms),
+        child.wait(),
+    )
+    .await
+    {
+        Ok(Ok(_status)) => {
+            let stdout = stdout_task.await.unwrap_or_default();
+            let stderr = stderr_task.await.unwrap_or_default();
+            format_command_output(&stdout, &stderr)
+        }
+        Ok(Err(e)) => {
+            stdout_task.abort();
+            stderr_task.abort();
+            (false, format!("命令执行失败: {e}"))
+        }
+        Err(_) => {
+            if let Some(pid) = pid {
+                kill_command_process_tree(pid);
+            }
+            let _ = child.kill().await;
+            let _ = tokio::time::timeout(
+                std::time::Duration::from_millis(500),
+                child.wait(),
+            )
+            .await;
+            stdout_task.abort();
+            stderr_task.abort();
+            (false, format!("错误：命令超时（{timeout_ms}ms）"))
+        }
     }
 }
 
@@ -971,9 +1054,27 @@ async fn exec_search_sessions(ctx: &ToolExecContext<'_>, args: &Value) -> (bool,
 
 #[cfg(test)]
 mod tests {
-    use super::{block_write, exec_list_dir, is_dangerous_command, server_mode_command_blocked};
-    use super::{check_patch_old_string_from_reads, ToolGuardState};
+    use super::{block_write, exec_list_dir, exec_run_command, is_dangerous_command, server_mode_command_blocked};
+    use super::{check_patch_old_string_from_reads, slice_content, ToolGuardState};
     use serde_json::json;
+
+    #[test]
+    fn slice_content_respects_limit_even_at_max_window() {
+        let lines: Vec<String> = (1..=1200).map(|i| format!("line-{i}")).collect();
+        let content = lines.join("\n");
+        let sliced = slice_content(&content, 1, 800);
+        let out_lines: Vec<&str> = sliced.lines().collect();
+        assert_eq!(out_lines.len(), 800);
+        assert_eq!(out_lines[0], "line-1");
+        assert_eq!(out_lines[799], "line-800");
+        assert!(!sliced.contains("line-801"));
+    }
+
+    #[test]
+    fn slice_content_applies_offset_and_limit() {
+        let content = "a\nb\nc\nd\ne";
+        assert_eq!(slice_content(content, 2, 2), "b\nc");
+    }
 
     #[tokio::test]
     async fn exec_list_dir_resolves_relative_path() {
@@ -1255,5 +1356,38 @@ mod tests {
             );
         }
         assert!(server_mode_command_blocked("node script.js").is_none());
+    }
+
+    #[tokio::test]
+    async fn exec_run_command_times_out_within_budget() {
+        let tmp = std::env::temp_dir().join(format!(
+            "aiall-run-cmd-timeout-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&tmp);
+        let sleep_cmd = if cfg!(windows) {
+            "Start-Sleep -Seconds 60"
+        } else {
+            "sleep 60"
+        };
+        let args = json!({ "command": sleep_cmd, "timeout_ms": 5000 });
+        let started = std::time::Instant::now();
+        let (ok, out) = exec_run_command(tmp.to_str().unwrap(), &args, "build").await;
+        let elapsed = started.elapsed();
+        assert!(!ok, "expected timeout failure, got ok with: {out}");
+        assert!(
+            out.contains("超时"),
+            "expected timeout message, got: {out}"
+        );
+        // Must return near the 5s budget, not hang for the full sleep.
+        assert!(
+            elapsed.as_millis() < 15_000,
+            "timeout reclaim took too long: {elapsed:?}"
+        );
+        assert!(
+            elapsed.as_millis() >= 4_000,
+            "returned too early (before timeout): {elapsed:?}"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

@@ -125,7 +125,7 @@ pub fn agent_tool_definitions() -> Value {
         "type": "function",
         "function": {
           "name": "git_status",
-          "description": "获取当前 Git 仓库工作区状态：分支、已暂存/未暂存/未跟踪文件列表。",
+          "description": "获取当前 Git 仓库工作区状态：分支、已暂存/未暂存/未跟踪文件列表。若项目根下有多个子仓库，会自动分别列出（路径带相对前缀）。",
           "parameters": { "type": "object", "properties": {} }
         }
       },
@@ -133,11 +133,11 @@ pub fn agent_tool_definitions() -> Value {
         "type": "function",
         "function": {
           "name": "git_diff",
-          "description": "查看 Git diff。可查看全部变更或单个文件。",
+          "description": "查看 Git diff。可查看全部变更或单个文件。多仓工作区会自动覆盖子仓库；path 可用「子仓相对前缀/文件」形式。",
           "parameters": {
             "type": "object",
             "properties": {
-              "path": { "type": "string", "description": "可选，相对项目根的文件路径" },
+              "path": { "type": "string", "description": "可选，相对项目根的文件路径（多仓时可含子仓前缀）" },
               "staged": { "type": "boolean", "description": "true=已暂存区，false=未暂存/工作区，默认 false" }
             }
           }
