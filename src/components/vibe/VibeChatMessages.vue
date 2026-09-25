@@ -125,8 +125,13 @@
           variant="banner"
         />
       </div>
-      <AgentMessage
+      <DeferRender
         v-if="m.role === 'assistant' && ctx.hasAgentActivity(m)"
+        :placeholder-label="feedPlaceholderLabel(m)"
+        :estimated-height="FEED_PLACEHOLDER_HEIGHT"
+        :eager="ctx.isAgentRunning(m)"
+      >
+      <AgentMessage
         :msg="m"
         :is-agent-running="ctx.isAgentRunning"
         :agent-status-display="ctx.agentStatusDisplay"
@@ -148,6 +153,7 @@
         @open-plan-file="ctx.openPlanFileInEditor(m.planFilePath)"
         @resume="ctx.resumeAgentRun(m.id)"
       />
+      </DeferRender>
       <AiOptionButtons
         v-if="m.role === 'assistant' && !ctx.isAgentRunning(m) && m.suggestedOptions?.length"
         :options="m.suggestedOptions"
@@ -351,6 +357,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, ref, watch } from "vue";
 import AgentMessage from "../AgentMessage.vue";
+import DeferRender from "./DeferRender.vue";
 import AgentLiveStatusRail from "../AgentLiveStatusRail.vue";
 import ChatMarkdown from "../ChatMarkdown.vue";
 import { isAgentWaitingModelPhase } from "../../services/agentCompactStatus";
@@ -361,6 +368,27 @@ import { shouldUsePlanExternalView } from "../../services/planFile";
 import AiOptionButtons from "../AiOptionButtons.vue";
 import { vibeChatMessageContextKey, type VibeChatMessageItem } from "../../composables/vibeChatMessageContext";
 import { isAwaitingAssistantPlaceholder, isOrphanedUserReply } from "../../utils/vibeHelpers";
+
+/** 首次离屏时过程 feed 的预估高度（px）——撑开占位，避免滚动条猛跳。 */
+const FEED_PLACEHOLDER_HEIGHT = 96;
+
+/**
+ * 离屏过程 feed 的占位文案。
+ *
+ * 只对「不在跑」的消息做离屏占位：正在跑的那条必须实时渲染，
+ * 否则用户看不到步骤推进。运行中的消息由 AgentCursorTimeline 自己保证在视口附近，
+ * 这里再给文案只是为了让用户知道内容还在（不是丢了）。
+ */
+function feedPlaceholderLabel(m: VibeChatMessageItem): string {
+  if (ctx.isAgentRunning(m)) return "";
+  const rounds = m.roundGroups?.length ?? 0;
+  const steps = m.tools?.length ?? 0;
+  if (!rounds && !steps) return "";
+  const parts: string[] = [];
+  if (rounds) parts.push(`${rounds} 轮`);
+  if (steps) parts.push(`${steps} 步`);
+  return `过程记录（${parts.join(" · ")}）已折叠，滚动到可见时自动展开`;
+}
 
 const injectedCtx = inject(vibeChatMessageContextKey);
 if (!injectedCtx) {

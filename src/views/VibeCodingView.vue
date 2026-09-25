@@ -1114,7 +1114,7 @@ import { lsGet, lsGetJson, lsSet, lsSetJson, lsRemove } from "../utils/localStor
 import { dismissBlockingOverlays, registerOverlayDismissDeps, scanDomBlockingOverlays } from "../utils/dismissBlockingOverlays";
 import { sessionDiag } from "../utils/sessionDiagLog";
 import { normalizePath, normalizeProjectPath as normalizeProjectPathUtil } from "../utils/normalizePath";
-import { buildOpenedSessionTabs, decideSessionTabsRestore, readSessionTabs, writeSessionTabs } from "../utils/sessionTabs";
+import { buildOpenedSessionTabs, decideSessionTabsRestore, pickSessionTabAfterClose, readSessionTabs, writeSessionTabs } from "../utils/sessionTabs";
 import ChatComposerEditor, { COMPOSER_PENDING_DRAFT_KEY } from "../components/ChatComposerEditor.vue";
 import ConfirmPopup from "../components/ConfirmPopup.vue";
 import InputPrompt from "../components/InputPrompt.vue";
@@ -1667,6 +1667,27 @@ const {
 // 已打开的会话 tab（按打开顺序），类似浏览器页签：打开一个算一个
 const openedSessionIds = ref<string[]>([]);
 
+// 会话 tab 的最近访问顺序（最近的在前），只用于「关闭当前 tab 后回到哪」。
+// 刻意不持久化：刷新/切项目后没有可信的历史，退回列表顺序兜底即可。
+const sessionTabMru = ref<string[]>([]);
+
+function rememberSessionTabVisit(sessionId: string) {
+  const sid = (sessionId || "").trim();
+  if (!sid) return;
+  sessionTabMru.value = [sid, ...sessionTabMru.value.filter((id) => id !== sid)];
+}
+
+/** 关闭 tab 后应切到哪个会话；空串 = 没有可回的 tab，由调用方新建。 */
+function pickNextSessionAfterClose(excludeId?: string): string {
+  const excluded = (excludeId || "").trim();
+  return pickSessionTabAfterClose({
+    openedIds: excluded
+      ? openedSessionIds.value.filter((id) => id !== excluded)
+      : openedSessionIds.value,
+    mru: sessionTabMru.value.filter((id) => id !== excluded),
+  });
+}
+
 // 会话 tab 持久化：按项目路径存 localStorage，刷新后恢复
 function persistOpenedSessionTabs() {
   writeSessionTabs(projectPath.value, openedSessionIds.value);
@@ -1676,7 +1697,9 @@ function persistOpenedSessionTabs() {
 watch(activeSessionId, (id) => {
   syncActiveChatSending();
   const sid = (id || "").trim();
-  if (sid && !openedSessionIds.value.includes(sid)) {
+  if (!sid) return;
+  rememberSessionTabVisit(sid);
+  if (!openedSessionIds.value.includes(sid)) {
     openedSessionIds.value = [...openedSessionIds.value, sid];
     persistOpenedSessionTabs();
   }
@@ -1718,14 +1741,15 @@ function handleCloseSessionTab(sessionId: string) {
   // 方案 A：tab 的 × 只关闭 tab（从已打开列表移除），不删除会话、不弹确认框。
   // 会话仍保留在侧边栏/文件面板，可重新打开。
   const wasActive = sessionId === activeSessionId.value;
+  // 目标必须在移除之前算：pickNextSessionAfterClose 会按 excludeId 过滤。
+  const nextId = wasActive ? pickNextSessionAfterClose(sessionId) : "";
   openedSessionIds.value = openedSessionIds.value.filter((id) => id !== sessionId);
   persistOpenedSessionTabs();
 
-  // 关闭的是当前激活 tab：切到下一个已打开 tab，避免聊天区仍显示已关闭会话。
+  // 关闭的是当前激活 tab：回到上一次待过的 tab（MRU），而不是列表最左边那个。
   if (wasActive) {
-    const next = openedSessions.value[0];
-    if (next) {
-      handleSwitchSession(next.id);
+    if (nextId) {
+      handleSwitchSession(nextId);
     } else {
       handleStartNewSession();
     }
@@ -1735,9 +1759,9 @@ function handleCloseSessionTab(sessionId: string) {
 function ensureActiveSessionAfterTabClose() {
   const active = activeSessionId.value.trim();
   if (active && openedSessionIds.value.includes(active)) return;
-  const next = openedSessions.value[0];
+  const next = pickNextSessionAfterClose();
   if (next) {
-    handleSwitchSession(next.id);
+    handleSwitchSession(next);
   } else {
     handleStartNewSession();
   }
@@ -1764,6 +1788,7 @@ function handleCloseRightSessionTabs(sessionId: string) {
 
 function handleCloseAllSessionTabs() {
   openedSessionIds.value = [];
+  sessionTabMru.value = [];
   persistOpenedSessionTabs();
   handleStartNewSession();
 }
@@ -3751,6 +3776,8 @@ async function openProjectByPath(dirPath: string) {
     // 切换项目时重置 UI 状态，清除旧项目的会话缓存
     resetUiForProjectSwitch(previousPathForPersist);
     openedSessionIds.value = [];
+    // 切项目后旧会话的访问历史无意义，清掉避免回退到别的项目的会话
+    sessionTabMru.value = [];
 
     const chatState = await loadProjectChatState(normalized);
     if (gen !== projectSwitchGeneration) return;

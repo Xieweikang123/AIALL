@@ -10,7 +10,8 @@
     @drop="$emit('on-chat-drop', $event)"
     :style="panelStyle"
   >
-    <div class="chat-scroll-wrap">
+    <div class="chat-panel-main">
+      <div class="chat-scroll-wrap">
       <div
         ref="chatScrollRef"
         class="chat-scroll"
@@ -333,6 +334,15 @@
               @click="setAgentDebugEnabled(!agentDebugEnabled)"
             >
               调试
+            </button>
+            <button
+              type="button"
+              class="chat-debug-toggle"
+              :class="{ active: reasoningDrawerState.autoEnabled }"
+              :title="reasoningAutoTitle"
+              @click="toggleReasoningAuto"
+            >
+              思考
             </button>
             <div
               v-if="providerOptions.length"
@@ -775,7 +785,9 @@
         </div>
       </div>
     </div>
+    </div>
     <AgentTraceDrawer />
+    <ReasoningDrawer />
   </aside>
 </template>
 
@@ -796,6 +808,7 @@ import { chatScrollProbe, readScrollGeometry } from "../../utils/chatScrollProbe
 import {
   decideFollowAfterContentGrowth,
   decideFollowAfterUserInput,
+  shouldRecoverFollowOnScroll,
 } from "../../utils/chatFollowScroll";
 import {
   computeScrollFollowStep,
@@ -809,6 +822,11 @@ import { renderMarkdown } from "../../utils/renderMarkdown";
 import { agentDebugEnabled, setAgentDebugEnabled } from "../../utils/agentDebugFlag";
 import { buildSessionOutline } from "../../utils/sessionOutline";
 import AgentTraceDrawer from "../AgentTraceDrawer.vue";
+import ReasoningDrawer from "../ReasoningDrawer.vue";
+import {
+  setReasoningAutoEnabled,
+  useReasoningDrawerState,
+} from "../../services/agentReasoningDrawer";
 import { openLatestTraceDrawer } from "../../services/agentTraceDrawer";
 import AgentLiveStatusRail from "../AgentLiveStatusRail.vue";
 
@@ -1206,6 +1224,19 @@ const outlinePopoverRight = ref(0);
 
 const sessionOutline = computed(() => buildSessionOutline(props.chatMessages));
 
+/** 思考过程面板：Agent 思考时自动在聊天区右侧展开，不改变聊天区既有表现 */
+const reasoningDrawerState = useReasoningDrawerState();
+
+const reasoningAutoTitle = computed(() =>
+  reasoningDrawerState.autoEnabled
+    ? "思考过程自动显示已开启（Agent 思考时右侧自动展开），点击关闭"
+    : "思考过程自动显示已关闭，点击开启",
+);
+
+function toggleReasoningAuto() {
+  setReasoningAutoEnabled(!reasoningDrawerState.autoEnabled);
+}
+
 function updateOutlinePopoverPosition() {
   const wrap = outlineWrapRef.value;
   if (!wrap) return;
@@ -1419,14 +1450,32 @@ function checkScrollPosition() {
 }
 
 function onScroll() {
-  // scroll 事件**只**驱动「回到底部」按钮的显隐（视觉状态，30px 容差）。
-  // 它不参与「是否跟随」判定 —— 跟随中程序自己写 scrollTop、内容一次长高都会触发
-  // 本事件，此时 remaining 是弹簧的瞬时落后（内容长 35px / 弹簧一帧只追 3px），
-  // 若据此解除跟随，回复一开始就会永久断跟（历史 bug 根因）。
-  // 跟随状态只由用户输入事件与「内容增长后恢复」两处驱动。
+  const el = chatScrollRef.value;
+
+  // 1) 按钮显隐（视觉状态，30px 容差）—— 每次都更新。
   checkScrollPosition();
+
+  // 2) 「触底恢复跟随」—— 仅在不跟随时才可能为 true。
+  //    未跟随时检测触底是必需的：用户滚到底后往往不再产生新的 wheel 事件，
+  //    只靠用户输入事件判定会漏掉最后一次，表现为「滚回底部却不再跟随」。
+  //    已跟随时该判定恒 false —— 跟随中的 scroll 来自程序自身写 scrollTop 或内容增长，
+  //    此时 remaining 是弹簧瞬时落后，据此改状态会导致永久断跟（历史 bug 根因）。
+  if (el) {
+    const recovered = shouldRecoverFollowOnScroll({
+      scrollTop: el.scrollTop,
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+      isFollowing: isAtBottom.value,
+    });
+    if (recovered) {
+      chatScrollProbe("onScroll:recover-follow", { geo: readScrollGeometry(el) });
+      isAtBottom.value = true;
+      emit("on-chat-scroll");
+    }
+  }
+
   chatScrollProbe("onScroll", {
-    geo: readScrollGeometry(chatScrollRef.value),
+    geo: readScrollGeometry(el),
     isAtBottom: isAtBottom.value,
     isVisuallyAtBottom: isVisuallyAtBottom.value,
     followActive,

@@ -1,11 +1,25 @@
 .chat-panel {
   position: relative;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   background: #0a0a0a;
   overflow-x: clip;
   overflow-y: visible;
   min-height: 0;
+}
+
+/*
+ * 聊天主体（滚动区 + 输入框 + 浮层）占满剩余宽度。
+ * 「思考过程」面板作为兄弟节点并排显示，从聊天区里让出宽度 —— 不改变
+ * chat-panel 自身的外部宽度，因此面板宽度拖拽 / 折叠逻辑完全不受影响。
+ */
+.chat-panel-main {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Keep the chat surface calm and layered: the conversation remains primary. */
