@@ -385,8 +385,12 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
       if (isSwitchingProject?.()) return;
       const messages = sessionMessages.getSessionMessages(sessionId);
       if (!messages?.length) return;
+      // Capture generation at fire time so a later persistChatNow (++gen) can
+      // invalidate this mid-run write and avoid clobbering fresher disk state
+      // (e.g. dropping roundGroups.reasoning that arrived after this clone).
+      const genAtFire = persistChatGeneration;
       const messagesForDiskSync = cloneChatMessagesForDiskSync(messages);
-      void runDelayedChatDiskSync(path, sessionId, messagesForDiskSync, options, undefined);
+      void runDelayedChatDiskSync(path, sessionId, messagesForDiskSync, options, genAtFire);
     }, 800);
   }
 
@@ -416,6 +420,32 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     }
   }
 
+  function isPersistGenerationStale(persistGen?: number): boolean {
+    return persistGen !== undefined && persistGen !== persistChatGeneration;
+  }
+
+  /**
+   * Prefer live registry messages at sync time (keeps late reasoning / tools),
+   * but reuse the scheduled clone's imageDataUrls when live already dropped them.
+   */
+  function resolveMessagesForDiskSync(
+    sessionId: string,
+    clonedAtSchedule: PersistedChatMessage[],
+  ): PersistedChatMessage[] {
+    const latest = sessionMessages.getSessionMessages(sessionId);
+    if (!latest?.length) return clonedAtSchedule;
+    const clonedById = new Map(clonedAtSchedule.map((m) => [m.id, m]));
+    return latest.map((live) => {
+      const cloned = clonedById.get((live as { id?: string }).id || "");
+      const liveUrls = (live as PersistedChatMessage).imageDataUrls;
+      const clonedUrls = cloned?.imageDataUrls;
+      if ((!liveUrls || !liveUrls.length) && clonedUrls?.length) {
+        return { ...(live as PersistedChatMessage), imageDataUrls: [...clonedUrls] };
+      }
+      return live as PersistedChatMessage;
+    });
+  }
+
   async function runDelayedChatDiskSync(
     path: string,
     sessionId: string,
@@ -423,24 +453,30 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
     options?: { flushStore?: boolean },
     persistGen?: number,
   ) {
-    if (persistGen !== undefined && persistGen !== persistChatGeneration) return;
+    if (isPersistGenerationStale(persistGen)) return;
     if (isSessionRecentlyDeletedLocally(path, sessionId)) return;
+
+    // Re-read live messages right before write so an older in-flight sync cannot
+    // clobber newer roundGroups.reasoning / tools that arrived after schedule.
+    const messagesToSync = resolveMessagesForDiskSync(sessionId, messagesForDiskSync);
+    if (isPersistGenerationStale(persistGen)) return;
 
     const sameActiveSession =
       activeSessionId.value === sessionId && projectPath().trim() === path;
     const snapshot =
-      buildActiveSessionDiskSyncPayload(path, sessionId, messagesForDiskSync) ??
+      buildActiveSessionDiskSyncPayload(path, sessionId, messagesToSync) ??
       getActiveSessionSnapshot(path, sessionId);
     let syncOk = false;
     let syncResult: Awaited<ReturnType<typeof syncChatSession>> | undefined;
     if (snapshot) {
+      if (isPersistGenerationStale(persistGen)) return;
       syncResult = await syncChatSession(path, sessionId, snapshot, {
         activeSessionId: activeSessionId.value || sessionId,
       });
       syncOk = syncResult.ok;
       if (
         !syncOk
-        && chatMessagesHavePendingImageBase64(messagesForDiskSync)
+        && chatMessagesHavePendingImageBase64(messagesToSync)
         && sameActiveSession
       ) {
         chatError.value = ("error" in syncResult && syncResult.error)
@@ -448,14 +484,30 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
           : "附图未能写入本地，刷新后可能丢失";
       }
     }
+    // Stale after await: this write may have overwritten a newer session file —
+    // immediately correct disk from the latest live registry (no gen bump).
+    if (isPersistGenerationStale(persistGen)) {
+      if (isSessionRecentlyDeletedLocally(path, sessionId)) return;
+      const fresh = sessionMessages.getSessionMessages(sessionId);
+      if (fresh?.length) {
+        const corrective =
+          buildActiveSessionDiskSyncPayload(path, sessionId, cloneChatMessagesForDiskSync(fresh)) ??
+          getActiveSessionSnapshot(path, sessionId);
+        if (corrective) {
+          await syncChatSession(path, sessionId, corrective, {
+            activeSessionId: activeSessionId.value || sessionId,
+          });
+        }
+      }
+      return;
+    }
     if (syncOk) {
-      if (persistGen !== undefined && persistGen !== persistChatGeneration) return;
       if (isSessionRecentlyDeletedLocally(path, sessionId)) return;
 
       const syncedRefs = syncResult?.ok ? syncResult.imageRefsByMessageId : undefined;
       const stamped = syncedRefs && Object.keys(syncedRefs).length
-        ? applySyncedImageRefs(messagesForDiskSync, syncedRefs)
-        : stampImageRefsAfterSync(sessionId, messagesForDiskSync);
+        ? applySyncedImageRefs(messagesToSync, syncedRefs)
+        : stampImageRefsAfterSync(sessionId, messagesToSync);
       saveVibeChatHistory(path, stamped, sessionId, { setActive: sameActiveSession, touchTimestamp: false });
       const live = sessionMessages.getSessionMessages(sessionId);
       if (live?.length) {
@@ -472,7 +524,8 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
       refreshList(path);
     }
     if (options?.flushStore) {
-      const pendingImages = chatMessagesHavePendingImageBase64(messagesForDiskSync);
+      if (isPersistGenerationStale(persistGen)) return;
+      const pendingImages = chatMessagesHavePendingImageBase64(messagesToSync);
       if (!pendingImages || syncOk) {
         await flushChatStoreToDisk(path, { quiet: true });
       }

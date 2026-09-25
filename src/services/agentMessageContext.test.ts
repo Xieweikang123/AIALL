@@ -22,13 +22,14 @@ describe("MODEL_FIRST_BYTE_TIMEOUT_MS", () => {
 
 describe("compactMessagesForModel", () => {
   it("truncates oversized tool results", () => {
+    const long = "x".repeat(50_000 + 100);
     const messages: ChatCompletionMessage[] = [
       { role: "system", content: "sys" },
       { role: "user", content: "hi" },
-      { role: "tool", tool_call_id: "1", content: "x".repeat(20_000) },
+      { role: "tool", tool_call_id: "1", content: long },
     ];
     const compacted = compactMessagesForModel(messages);
-    expect(compacted[2].content?.length || 0).toBeLessThan(20_000);
+    expect(compacted[2].content?.length || 0).toBeLessThan(long.length);
     expect(compacted[2].content).toContain("截断");
   });
 
@@ -46,28 +47,28 @@ describe("compactMessagesForModel", () => {
     expect(compacted[4].content).toContain("lines 401-600");
   });
 
-  it("uses a lower context ceiling for execute_plan runs", () => {
+  it("compacts when over the shared context ceiling", () => {
     const messages: ChatCompletionMessage[] = [
-      { role: "system", content: "s".repeat(40_000) },
-      { role: "user", content: "u".repeat(40_000) },
-      { role: "tool", tool_call_id: "1", content: `lines 1-100\n${"a".repeat(30_000)}` },
-      { role: "tool", tool_call_id: "2", content: `lines 101-200\n${"b".repeat(30_000)}` },
-      { role: "tool", tool_call_id: "3", content: `lines 201-300\n${"c".repeat(30_000)}` },
+      { role: "system", content: "s".repeat(90_000) },
+      { role: "user", content: "u".repeat(90_000) },
+      { role: "tool", tool_call_id: "1", content: `lines 1-100\n${"a".repeat(40_000)}` },
+      { role: "tool", tool_call_id: "2", content: `lines 101-200\n${"b".repeat(40_000)}` },
+      { role: "tool", tool_call_id: "3", content: `lines 201-300\n${"c".repeat(40_000)}` },
     ];
-    expect(EXECUTE_PLAN_MAX_CONTEXT_CHARS).toBe(100_000);
+    expect(EXECUTE_PLAN_MAX_CONTEXT_CHARS).toBe(256_000);
     expect(compactMessagesForModel(messages)[2].content).toContain("已压缩");
     expect(compactMessagesForModel(messages, EXECUTE_PLAN_MAX_CONTEXT_CHARS)[2].content).toContain("已压缩");
   });
 
   it("soft-compacts older tool outputs before hitting hard context ceiling", () => {
     const messages: ChatCompletionMessage[] = [
-      { role: "system", content: "s".repeat(8_000) },
-      { role: "user", content: "u".repeat(8_000) },
-      { role: "tool", tool_call_id: "1", content: `lines 1-100\n${"a".repeat(12_000)}` },
-      { role: "tool", tool_call_id: "2", content: `lines 101-200\n${"b".repeat(12_000)}` },
-      { role: "tool", tool_call_id: "3", content: `lines 201-300\n${"c".repeat(12_000)}` },
+      { role: "system", content: "s".repeat(80_000) },
+      { role: "user", content: "u".repeat(80_000) },
+      { role: "tool", tool_call_id: "1", content: `lines 1-100\n${"a".repeat(40_000)}` },
+      { role: "tool", tool_call_id: "2", content: `lines 101-200\n${"b".repeat(40_000)}` },
+      { role: "tool", tool_call_id: "3", content: `lines 201-300\n${"c".repeat(40_000)}` },
     ];
-    expect(SOFT_COMPACT_CONTEXT_CHARS).toBe(36_000);
+    expect(SOFT_COMPACT_CONTEXT_CHARS).toBe(256_000);
     const totalBefore = messages.reduce((sum, m) => sum + String(m.content || "").length, 0);
     expect(totalBefore).toBeGreaterThan(SOFT_COMPACT_CONTEXT_CHARS);
     const compacted = compactMessagesForModel(messages);

@@ -41,6 +41,8 @@ export type PersistedAgentRoundGroup = {
   reasoning?: string;
   modelSteps: PersistedAgentModelStep[];
   toolIds: string[];
+  /** Narrative stream length (chars) at the moment each tool started — enables chronological interleave. */
+  toolNarrativeOffsets?: Array<{ toolId: string; narrativeChars: number }>;
   request?: {
     model?: string;
     contextMessages: number;
@@ -118,6 +120,10 @@ export type PersistedChatMessage = {
   /** Token usage tracking */
   streamChars?: number;
   contextChars?: number;
+  /** 最近一轮真实 prompt token 数（供应商 usage 上报），比 contextChars 准。 */
+  contextTokens?: number;
+  /** 会话内真实 prompt token 峰值。 */
+  peakContextTokens?: number;
   /** Provider-reported cache usage for this run (aggregated across turns). */
   cacheUsage?: {
     promptTokens?: number;

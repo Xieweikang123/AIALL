@@ -1,4 +1,6 @@
 import type { InjectionKey, Reactive, Ref } from "vue";
+import type { AgentRoundGroup } from "../services/agentRoundGroups";
+import type { AgentToolStep } from "../utils/toolHelpers";
 
 export interface VibeChatMessageItem {
   id: string;
@@ -10,6 +12,8 @@ export interface VibeChatMessageItem {
   chatMode?: "ask" | "build" | "plan" | "explore" | "auto";
   streamChars?: number;
   contextChars?: number;
+  contextTokens?: number;
+  peakContextTokens?: number;
   writtenFiles?: string[];
   planFilePath?: string;
   reverted?: boolean;
@@ -45,6 +49,9 @@ export interface VibeChatMessageItem {
     fullText: string;
     showIndex?: boolean;
   }>;
+  tools?: AgentToolStep[];
+  roundGroups?: AgentRoundGroup[];
+  activityExpanded?: boolean;
 }
 
 export interface VibeChatMessageContext {

@@ -631,6 +631,8 @@ function sanitizeMessages(
           : undefined,
         streamChars: m.streamChars || undefined,
         contextChars: m.contextChars || undefined,
+        contextTokens: m.contextTokens || undefined,
+        peakContextTokens: m.peakContextTokens || undefined,
         ...(options?.forDisk && m.role === "assistant"
           ? {}
           : {
@@ -1055,12 +1057,34 @@ export function getActiveSessionSnapshot(
   };
 }
 
-/** Shallow-clone messages at persist time so delayed disk sync keeps attached base64. */
+/** Clone messages at persist time so delayed disk sync keeps attached base64 + roundGroups.reasoning. */
 export function cloneChatMessagesForDiskSync(messages: PersistedChatMessage[]): PersistedChatMessage[] {
   return messages.map((m) => ({
     ...m,
     ...(m.imageDataUrls?.length ? { imageDataUrls: [...m.imageDataUrls] } : {}),
     ...(m.imageRefs?.length ? { imageRefs: m.imageRefs.map((r) => ({ path: r.path })) } : {}),
+    ...(m.roundGroups?.length
+      ? {
+          roundGroups: m.roundGroups.map((group) => ({
+            ...group,
+            modelSteps: (group.modelSteps || []).map((step) => ({ ...step })),
+            toolIds: group.toolIds ? [...group.toolIds] : [],
+            toolNarrativeOffsets: group.toolNarrativeOffsets?.map((entry) => ({ ...entry })),
+            request: group.request
+              ? {
+                  ...group.request,
+                  messages: (group.request.messages || []).map((message) => ({ ...message })),
+                }
+              : undefined,
+            response: group.response
+              ? {
+                  ...group.response,
+                  toolCalls: (group.response.toolCalls || []).map((call) => ({ ...call })),
+                }
+              : undefined,
+          })),
+        }
+      : {}),
   }));
 }
 

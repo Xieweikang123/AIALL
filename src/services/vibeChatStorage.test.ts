@@ -496,6 +496,53 @@ describe("sanitizePersistedChatMessages", () => {
     expect(stored.length).toBeLessThanOrEqual(801);
   });
 
+  it("keeps provider reasoning on roundGroups through sanitize + disk clone", () => {
+    const reasoning = "先 grep 精确符号，再 read 定义与调用方。";
+    const sanitized = sanitizePersistedChatMessages([
+      {
+        id: "a1",
+        role: "assistant",
+        content: "## 结论\n不是业务条件。",
+        roundGroups: [
+          {
+            turn: 1,
+            modelSteps: [],
+            toolIds: ["t1"],
+            reasoning,
+            response: {
+              assistantText: "",
+              hasToolCalls: true,
+              isFinal: false,
+              toolCalls: [{ id: "t1", name: "grep", arguments: "{}" }],
+            },
+          },
+          {
+            turn: 2,
+            modelSteps: [],
+            toolIds: [],
+            reasoning: `${reasoning} 给出最终答案。`,
+            response: {
+              assistantText: "## 结论\n不是业务条件。",
+              hasToolCalls: false,
+              isFinal: true,
+              toolCalls: [],
+            },
+          },
+        ],
+      },
+    ]);
+    expect(sanitized[0].roundGroups?.[0]?.reasoning).toBe(reasoning);
+    expect(sanitized[0].roundGroups?.[1]?.reasoning).toContain("给出最终答案");
+
+    const cloned = cloneChatMessagesForDiskSync(sanitized);
+    expect(cloned[0].roundGroups?.[0]?.reasoning).toBe(reasoning);
+    // Deep clone: mutating live must not change the disk snapshot.
+    if (sanitized[0].roundGroups?.[0]) {
+      sanitized[0].roundGroups[0].reasoning = "mutated";
+    }
+    expect(cloned[0].roundGroups?.[0]?.reasoning).toBe(reasoning);
+  });
+
   it("strips heavy agent debug payloads before persistence", () => {
     const huge = "x".repeat(20_000);
     const sanitized = sanitizePersistedChatMessages([
