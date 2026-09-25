@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildOpenedSessionTabs,
   decideSessionTabsRestore,
+  pickSessionTabAfterClose,
   readSessionTabs,
   sessionTabsStorageKey,
   writeSessionTabs,
@@ -206,6 +207,49 @@ describe("sessionTabs", () => {
     it("激活会话不在 openedIds 时不凭空造 tab", () => {
       const tabs = buildOpenedSessionTabs([], [meta("s1")], "s1");
       expect(tabs).toEqual([]);
+    });
+  });
+
+  describe("pickSessionTabAfterClose — 回到上次待过的 tab", () => {
+    it("回归：tab1 在左、tab2 在右，新建 tab 后关掉要回 tab2（不是 tab1）", () => {
+      // opened 顺序 [1,2,new]，MRU 最近是 new、其前是 2；new 已从 opened 移除
+      expect(
+        pickSessionTabAfterClose({ openedIds: ["1", "2"], mru: ["2", "1"] }),
+      ).toBe("2");
+    });
+
+    it("MRU 栈里的陈旧 id（已关闭/已删除）被跳过", () => {
+      expect(
+        pickSessionTabAfterClose({ openedIds: ["1", "3"], mru: ["gone", "1", "3"] }),
+      ).toBe("1");
+    });
+
+    it("MRU 全部失效时退回 fallbackIndex 处的 tab", () => {
+      expect(
+        pickSessionTabAfterClose({ openedIds: ["1", "2", "3"], mru: ["x", "y"], fallbackIndex: 0 }),
+      ).toBe("1");
+      expect(
+        pickSessionTabAfterClose({ openedIds: ["1", "2", "3"], mru: [], fallbackIndex: 1 }),
+      ).toBe("2");
+    });
+
+    it("fallbackIndex 越界时收敛到合法范围", () => {
+      expect(
+        pickSessionTabAfterClose({ openedIds: ["1", "2"], mru: [], fallbackIndex: 99 }),
+      ).toBe("2");
+      expect(
+        pickSessionTabAfterClose({ openedIds: ["1", "2"], mru: [], fallbackIndex: -5 }),
+      ).toBe("1");
+    });
+
+    it("没有已打开 tab 时返回空串（交由调用方新建会话）", () => {
+      expect(pickSessionTabAfterClose({ openedIds: [], mru: ["1"] })).toBe("");
+    });
+
+    it("MRU 顺序优先于列表顺序：最近访问在最后的 tab 时选它", () => {
+      expect(
+        pickSessionTabAfterClose({ openedIds: ["1", "2", "3"], mru: ["3", "2", "1"] }),
+      ).toBe("3");
     });
   });
 

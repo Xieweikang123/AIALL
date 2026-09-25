@@ -111,6 +111,43 @@ export function decideSessionTabsRestore(
 }
 
 /**
+ * 关闭 tab 后的回退目标。
+ *
+ * 语义是「回到上一次待过的那个 tab」（浏览器 MRU 风格），而不是按位置取邻居：
+ * 关闭当前 tab 时，用户期望回到**刚离开的地方**，而不是列表最左边那个。
+ * 历史实现固定取 `openedIds[0]`，导致「在 tab2 新建 tab 再关掉」会跳到 tab1。
+ *
+ * 选取规则：
+ *   1. 从 MRU 栈顶往下找第一个仍在 `openedIds` 里的 id（最近访问且还开着）；
+ *   2. 都没有时退回 `fallbackIndex` 处的 tab（默认取最左，保持旧行为兜底）；
+ *   3. 列表为空返回空串，调用方自行决定新建会话。
+ *
+ * `mru` 传入的是「最近访问在前」的 id 序列，允许包含已关闭/已删除的陈旧 id，
+ * 由本函数过滤——调用方无需维护栈的精确性。
+ */
+export function pickSessionTabAfterClose(input: {
+  /** 当前已打开的 tab（决定渲染顺序与兜底位置）。 */
+  openedIds: readonly string[];
+  /** 最近访问顺序，最近的在前；允许含陈旧 id。 */
+  mru: readonly string[];
+  /** 兜底位置；越界时收敛到合法范围。 */
+  fallbackIndex?: number;
+}): string {
+  const opened = dedupe(input.openedIds);
+  if (!opened.length) return "";
+
+  const openSet = new Set(opened);
+  for (const id of input.mru) {
+    const candidate = typeof id === "string" ? id.trim() : "";
+    if (candidate && openSet.has(candidate)) return candidate;
+  }
+
+  const index = input.fallbackIndex ?? 0;
+  const clamped = Math.min(Math.max(index, 0), opened.length - 1);
+  return opened[clamped];
+}
+
+/**
  * 会话 tab 的渲染投影。
  *
  * 草稿会话（点「+」刚建、还没发过消息）不在 `sessionList` 里（见
