@@ -143,6 +143,21 @@ const displayFinalAnswer = computed(() => {
 
 const hasRunningTool = computed(() => Boolean(props.tools?.some((tool) => tool.running)));
 
+/**
+ * 过程 feed 的构建与渲染。
+ *
+ * 二分实测（`tab-ablation.log`，见 tab2 = 12 条消息 / 每条 8~13 个 roundGroup）：
+ *   baseline 首帧 ~320ms ｜ 关掉整个 AgentMessage 子树 → 7~26ms（降幅 ~95%）
+ *   只把 ChatMarkdown 换成纯文本 → 仍 300ms+（说明不是 markdown 解析的锅）
+ *   只渲染最后 5 条 → 90ms（与条数相关，但不是主因）
+ *
+ * 结论：瓶颈是**这棵过程 feed 树本身**（每轮 reasoning 文本 + 工具步骤行的构建与渲染）。
+ *
+ * 为什么还保持原样：过程 feed 是常驻可见的（没有折叠开关 —— `toggle-process`
+ * 事件无人监听，`activityExpanded` 控制详细度而非可见性），
+ * 直接不建会把功能删掉。真正的优化应从「限制单条消息构建的轮数/步骤数」或
+ * 「虚拟化过程 feed」入手，需要单独确认方案后再动，不宜在此顺手改。
+ */
 const inlineFeed = computed(() =>
   buildInlineAgentFeed({
     roundGroups: props.showProcess === false ? [] : props.roundGroups,

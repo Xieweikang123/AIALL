@@ -2,7 +2,7 @@
   <div
     v-if="rows.length"
     class="process-step-list"
-    :class="{ 'process-step-list--compact': compact, 'process-step-list--running': isRunning, 'process-step-list--debug': showDetail }"
+    :class="{ 'process-step-list--compact': compact, 'process-step-list--running': isRunning, 'process-step-list--debug': showDetail, 'process-step-list--expanded': expanded }"
     :style="{ '--rail-progress': `${railProgressPercent}%` }"
   >
     <div v-if="visibleRows.length > 1" class="process-step-rail-track" aria-hidden="true" />
@@ -28,7 +28,11 @@
         @click="showDetail && row.state !== 'running' && toggleDetail(row.key)"
       >
         <span class="process-step-node" aria-hidden="true" />
-        <span class="process-step-prompt" aria-hidden="true">&gt;</span>
+        <span
+          class="process-step-prompt"
+          :class="{ 'process-step-prompt--open': expanded || isDetailOpen(row.key) }"
+          aria-hidden="true"
+        >&gt;</span>
         <span class="process-step-verb">{{ row.command }}</span>
         <button
           v-if="row.path"
@@ -76,15 +80,15 @@
       class="process-step-more"
       @click="expanded = true"
     >
-      展开全部 {{ rows.length }} 步（另有 {{ hiddenCount }} 步）
+      展开全部 {{ rows.length }} 步
     </button>
     <button
-      v-else-if="expanded && rows.length > defaultVisible"
+      v-else-if="expanded && hiddenCount > 0"
       type="button"
       class="process-step-more"
       @click="expanded = false"
     >
-      收起较早步骤
+      收起
     </button>
   </div>
 </template>
@@ -103,11 +107,10 @@ const props = withDefaults(
   defineProps<{
     tools: AgentRoundTool[];
     isRunning?: boolean;
-    defaultVisible?: number;
     compact?: boolean;
     showDetail?: boolean;
   }>(),
-  { isRunning: false, defaultVisible: 8, compact: false, showDetail: false },
+  { isRunning: false, compact: false, showDetail: false },
 );
 
 const emit = defineEmits<{
@@ -284,11 +287,19 @@ function buildRow(step: AgentRoundTool): StepRow {
 
 const rows = computed(() => props.tools.map(buildRow));
 
-const hiddenCount = computed(() => Math.max(0, rows.value.length - props.defaultVisible));
+/**
+ * 折叠态固定只显示 **1 行**（最新一步）。展开态显示全部。
+ *
+ * 高度不再靠 `max-height` + 内部滚动条实现，而是靠「少渲染几行」——
+ * 这样思考过程不会变成滚轮陷阱（鼠标落在上面时吃掉外层对话的滚轮）。
+ */
+const COLLAPSED_ROWS = 1;
+
+const hiddenCount = computed(() => Math.max(0, rows.value.length - COLLAPSED_ROWS));
 
 const visibleRows = computed(() => {
-  if (expanded.value || hiddenCount.value === 0) return rows.value;
-  return rows.value.slice(-props.defaultVisible);
+  if (expanded.value) return rows.value;
+  return rows.value.slice(-COLLAPSED_ROWS);
 });
 
 const railProgressPercent = computed(() => {
@@ -320,20 +331,25 @@ const railProgressPercent = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 0;
-  max-height: 240px;
-  overflow-y: auto;
+  /*
+   * 无内部滚动窗口：可见行数由 JS（visibleRows）控制，高度自然撑开。
+   * 曾经这里是 `max-height: 240px; overflow-y: auto`，会变成一个滚轮陷阱——
+   * 鼠标落在思考过程上时滚轮被它吃掉，用户没法继续滚整个对话。
+   */
   padding: 2px 0 2px 2px;
   border-radius: 0;
   background: transparent;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  transition: background-color 180ms ease, padding 180ms ease;
 }
 
-.process-step-list--running {
-  max-height: none;
+.process-step-list--expanded {
+  padding: 4px 6px 4px 4px;
+  border-radius: 8px;
+  background: rgba(88, 166, 255, 0.06);
 }
 
 .process-step-list--compact {
-  max-height: 160px;
   --step-rail-x: 12px;
 }
 
@@ -404,7 +420,9 @@ const railProgressPercent = computed(() => {
 }
 
 .process-step-wrap--open > .process-step {
-  background: transparent;
+  background: rgba(88, 166, 255, 0.08);
+  border-radius: 6px;
+  box-shadow: inset 2px 0 0 rgba(88, 166, 255, 0.55);
 }
 
 .process-step-wrap--running {
@@ -518,6 +536,16 @@ const railProgressPercent = computed(() => {
   color: rgba(88, 166, 255, 0.4);
 }
 
+/* 折叠态：行首 > 右向；展开态：整块列表展开时行首字符由模板切为 ↓，这里只提亮一档 */
+.process-step-list--expanded .process-step-prompt {
+  color: rgba(126, 182, 255, 0.95);
+}
+
+/* 展开态：被点开的那一行行首切为 ↓ 并进一步提亮，呼应左侧高亮竖条 */
+.process-step-wrap--open > .process-step .process-step-prompt {
+  color: rgba(165, 214, 255, 1);
+}
+
 .process-step-live-progress {
   position: relative;
   z-index: 1;
@@ -559,6 +587,7 @@ const railProgressPercent = computed(() => {
 }
 
 .process-step-prompt {
+  display: inline-block;
   flex-shrink: 0;
   font-size: 11px;
   font-weight: 700;
@@ -566,6 +595,12 @@ const railProgressPercent = computed(() => {
   color: rgba(88, 166, 255, 0.85);
   text-align: center;
   user-select: none;
+  transition: color 160ms ease, opacity 160ms ease;
+}
+
+/* 展开态：行首 > 由右向（折叠）旋转 90° 转为朝下（展开） */
+.process-step-prompt--open {
+  transform: rotate(90deg);
 }
 
 .process-step-verb {
@@ -654,6 +689,10 @@ button.process-step-target:hover {
   color: rgba(139, 148, 158, 0.55);
 }
 
+/*
+ * 保留限高：仅调试模式（showDetail）下「用户主动点开某一步」时出现，
+ * 是显式的取证动作，不属于「鼠标滑过思考过程被吃掉滚轮」的场景。
+ */
 .trace-pre {
   margin: 0;
   padding: 6px 8px;

@@ -31,6 +31,8 @@
         :class="{
           'stream-reasoning-btn--active': isReasoningActive(item.key),
           'stream-reasoning-btn--static': !hasReasoningOverflow(item.key),
+          'stream-reasoning-btn--expanded':
+            hasReasoningOverflow(item.key) && isReasoningExpanded(item.key),
         }"
         :aria-expanded="hasReasoningOverflow(item.key) ? isReasoningExpanded(item.key) : undefined"
         @click="toggleReasoning(item.key)"
@@ -45,7 +47,6 @@
           class="stream-reasoning-dot"
           aria-hidden="true"
         />
-        <span class="stream-reasoning-prompt" aria-hidden="true">&gt;</span>
         <span
           class="stream-reasoning-label"
           :class="{ 'shimmer-text--fast': isReasoningActive(item.key) }"
@@ -61,7 +62,26 @@
           }"
           :style="reasoningBodyStyle(item.key)"
         >
+          <!--
+            惰性渲染：已经结束的 reasoning，折叠态只放纯文本预览，展开后才挂 ChatMarkdown。
+
+            长会话（几十条 reasoning，每条上千字）切进来时，若每条都无条件渲染
+            ChatMarkdown，会一次性构建上百份 Markdown→HTML（还各自触发
+            sanitize + 高亮 + 行内代码），主线程被塞满，表现为「切到这个 tab 就卡」。
+            历史 reasoning 折叠态本来就被 CSS 裁成一行，渲染完整 markdown 是纯浪费。
+
+            正在思考的那条仍走 ChatMarkdown：它的 1 行窗口靠内部滚动做「提词器」
+            （isReasoningLivePinned + pinReasoningScroll），纯文本没有滚动容器会破坏该效果。
+
+            注意必须保留一个可测量的 DOM：折叠态高度由 measureReasoningBody 量出，
+            hasReasoningOverflow 依赖它决定显不显示展开箭头（见该函数里的双选择器回退）。
+          -->
+          <div
+            v-if="!isReasoningExpanded(item.key) && !isReasoningActive(item.key)"
+            class="stream-reasoning-plain"
+          >{{ reasoningPreviewText(item.text) }}</div>
           <ChatMarkdown
+            v-else
             class="inline-feed-markdown inline-feed-markdown--reasoning"
             :content="reasoningMarkdown(item.text)"
             :streaming="isReasoningActive(item.key)"
@@ -114,7 +134,6 @@
       v-else-if="item.kind === 'tool-batch'"
       :tools="item.steps"
       :is-running="isRunning"
-      :default-visible="toolDefaultVisible"
       :compact="chatMode === 'ask'"
       :show-detail="agentDebugEnabled"
       @open-file="(path) => emit('openFile', path)"
@@ -179,6 +198,7 @@ import AgentProcessStepList from "./AgentProcessStepList.vue";
 import IntentTraceCard from "./IntentTraceCard.vue";
 import type { InlineFeedItem, InlineFeedProcessItem } from "../services/agentInlineFeed";
 import { resolveActiveReasoningKey } from "../services/agentInlineFeed";
+import { registerReasoningEntry } from "../services/agentReasoningDrawer";
 import { sanitizeFeedThoughtText } from "../services/agentProgressMarker";
 import { enrichPlanMarkdownForDisplay } from "../services/planDocumentDisplay";
 import { shouldUsePlanExternalView } from "../services/planFile";
@@ -352,6 +372,30 @@ function reasoningMarkdown(text: string) {
   return sanitizeFeedThoughtText(text);
 }
 
+/**
+ * 折叠态的纯文本预览。
+ *
+ * 只做「去标记 + 压空白」，不做 Markdown 解析 —— 折叠态被 CSS 裁成一行，
+ * 渲染完整 markdown 没有意义，却要为每条 reasoning 付一次解析/净化成本。
+ * 文本仍经 sanitizeFeedThoughtText，保证与展开态显示的内容一致（不漏掉清洗规则）。
+ */
+function reasoningPreviewText(text: string) {
+  const cleaned = sanitizeFeedThoughtText(text || "");
+  if (!cleaned) return "";
+  return cleaned
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s{0,3}>\s?/gm, "")
+    .replace(/^\s{0,3}[-*+]\s+/gm, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/[*_~]/g, "")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function answerMarkdown(text: string) {
   return enrichPlanMarkdownForDisplay(text, {
     whileStreaming: Boolean(props.isRunning),
@@ -364,8 +408,12 @@ const reasoningOverrides = ref<Map<string, boolean>>(new Map());
 /** Measured full/max heights per reasoning key — drives the 3-line preview clamp. */
 const reasoningHeights = ref<Map<string, { full: number; max: number }>>(new Map());
 
-const REASONING_COLLAPSED_LINES = 3;
-/** Fallback ~3 lines before first measure (12.5px × 1.55 ≈ reasoning markdown). */
+/**
+ * 折叠态显示 1 行：思考过程默认只占一行，想看全文手动展开。
+ * 高度靠「裁切」而非「内部滚动窗口」实现 —— 见下方 .stream-reasoning-body--clamped。
+ */
+const REASONING_COLLAPSED_LINES = 1;
+/** Fallback ~1 line before first measure (12.5px × 1.55 ≈ reasoning markdown). */
 const REASONING_FALLBACK_MAX_PX = Math.round(12.5 * 1.55 * REASONING_COLLAPSED_LINES);
 
 let reasoningMeasureObserver: ResizeObserver | null = null;
@@ -394,7 +442,12 @@ function measureReasoningBody(key: string, el: HTMLElement | null) {
     return;
   }
   reasoningBodyEls.set(key, el);
-  const markdown = el.querySelector<HTMLElement>(".msg-markdown");
+  // 折叠态用纯文本预览、展开态用 ChatMarkdown，两者都要能量出高度：
+  // 优先取 markdown 根，取不到就回退到预览节点（否则折叠态量不到高度，
+  // hasReasoningOverflow 恒为 false，展开箭头会消失）。
+  const markdown =
+    el.querySelector<HTMLElement>(".msg-markdown")
+    ?? el.querySelector<HTMLElement>(".stream-reasoning-plain");
   if (!markdown) return;
   const styles = window.getComputedStyle(markdown);
   const lineHeight = Number.parseFloat(styles.lineHeight) || 16;
@@ -431,6 +484,9 @@ function stopAllReasoningFollows() {
 function pinReasoningScroll(key: string, el?: HTMLElement | null) {
   if (!isReasoningLivePinned(key)) {
     stopReasoningFollow(key);
+    // 折叠态不再依赖滚动：把可能的残留 scrollTop 归零，保证稳定显示第 1 行。
+    const settled = el ?? reasoningBodyEls.get(key);
+    if (settled) settled.scrollTop = 0;
     return;
   }
   const target = el ?? reasoningBodyEls.get(key);
@@ -615,6 +671,38 @@ watch(
   () => scheduleReasoningMeasure(),
 );
 
+/**
+ * 把 reasoning 全文登记到「思考全文」抽屉的数据源。
+ * 只登记、不改这里的任何渲染/交互 —— 消息内仍是一行折叠 + 提词器。
+ * 嵌套（collapsed 内部）不登记，避免同一条推理被注册两次。
+ */
+watch(
+  () => [
+    props.nested,
+    props.messageId ?? "",
+    activeReasoningKey.value ?? "",
+    props.isRunning,
+    props.items
+      .filter((item): item is Extract<InlineFeedItem, { kind: "reasoning" }> => item.kind === "reasoning")
+      .map((item) => item.text)
+      .join("\u0000"),
+  ],
+  () => {
+    if (props.nested) return;
+    for (const item of props.items) {
+      if (item.kind !== "reasoning") continue;
+      if (!item.text.trim()) continue;
+      registerReasoningEntry({
+        messageId: props.messageId ?? null,
+        key: item.key,
+        text: item.text,
+        active: isReasoningActive(item.key),
+      });
+    }
+  },
+  { immediate: true },
+);
+
 function isCollapsedExpanded(key: string): boolean {
   return expandedCollapsedKeys.value.has(key);
 }
@@ -642,8 +730,12 @@ function isReasoningExpanded(key: string): boolean {
 function toggleReasoning(key: string) {
   if (!hasReasoningOverflow(key) && !isReasoningExpanded(key)) return;
   const next = new Map(reasoningOverrides.value);
-  next.set(key, !isReasoningExpanded(key));
+  const willExpand = !isReasoningExpanded(key);
+  next.set(key, willExpand);
   reasoningOverrides.value = next;
+  // 展开/收起都回到顶部，避免残留的 scrollTop 让「第 1 行」看起来没露头。
+  const el = reasoningBodyEls.get(key);
+  if (el) el.scrollTop = 0;
 }
 
 </script>
@@ -717,7 +809,10 @@ function toggleReasoning(key: string) {
   font-family: inherit;
   line-height: 1.35;
   cursor: pointer;
-  transition: color 120ms ease;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease,
+    border-color 120ms ease;
 }
 
 .stream-reasoning-wrap--nested .stream-reasoning-btn {
@@ -744,6 +839,24 @@ function toggleReasoning(key: string) {
   background: transparent;
 }
 
+/*
+ * 展开态：让折叠条在「收起 → 展开」时看得见变化。
+ * 仅当内容溢出且已展开时挂上，收起 / 静态无溢出一律透明。
+ * 底色与左侧引用竖线同色系（rgba(88, 166, 255, ...)），保持过程流视觉统一。
+ */
+.stream-reasoning-btn--expanded {
+  color: rgba(190, 216, 240, 0.96);
+  border-color: rgba(88, 166, 255, 0.32);
+  background: rgba(88, 166, 255, 0.12);
+  border-radius: 6px;
+}
+
+.stream-reasoning-btn--expanded:hover {
+  color: rgba(210, 230, 250, 0.98);
+  border-color: rgba(88, 166, 255, 0.46);
+  background: rgba(88, 166, 255, 0.18);
+}
+
 .stream-reasoning-dot {
   flex-shrink: 0;
   width: 6px;
@@ -758,15 +871,6 @@ function toggleReasoning(key: string) {
   flex-shrink: 0;
   font-size: 9px;
   opacity: 0.7;
-}
-
-.stream-reasoning-prompt {
-  flex-shrink: 0;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 1;
-  color: rgba(88, 166, 255, 0.85);
-  user-select: none;
 }
 
 .stream-reasoning-label {
@@ -790,26 +894,40 @@ function toggleReasoning(key: string) {
   transition: max-height 180ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Idle overflow preview: show the start, fade the cut at the bottom. */
+/*
+ * 折叠预览：只露出开头 N 行，底部渐隐提示「还有内容」。
+ *
+ * 刻意 **不是** 滚动容器（不用 overflow-y: auto）——否则鼠标落在思考过程上时
+ * 滚轮会被它吃掉，用户没法继续滚整个对话，也收不到「回到底部」。
+ * 想看全文走展开按钮（isReasoningExpanded），展开后随外层对话一起滚。
+ */
 .stream-reasoning-body--clamped {
   position: relative;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
+  overflow: hidden;
   mask-image: linear-gradient(180deg, #000 calc(100% - 16px), transparent 100%);
   -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 16px), transparent 100%);
 }
 
-.stream-reasoning-body--clamped::-webkit-scrollbar {
-  display: none;
+/*
+ * 折叠态的纯文本预览。字号/行高/颜色/斜体刻意与
+ * `.inline-feed-markdown--reasoning :deep(.msg-markdown)` 保持一致 ——
+ * measureReasoningBody 用 getComputedStyle 读 lineHeight 来算一行高度，
+ * 不一致会导致折叠态被裁得高低不对、或与展开态视觉跳变。
+ */
+.stream-reasoning-plain {
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: rgba(186, 196, 208, 0.78);
+  font-style: italic;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /*
- * Live thinking: stick newest lines at the bottom; fade older text out the top
- * so the viewport feels like a rising teleprompter instead of a hard crop.
- * scroll-behavior stays auto — stick-to-bottom is driven by a settle-and-sleep
- * spring RAF (re-woken on content growth), not native smooth scroll.
+ * 思考中：程序把内容滚到最新一行（scrollTop 由测量逻辑写，用户滚不动这容器），
+ * 两端渐隐让新文本像「浮上来」而不是硬裁。用户看不到滚动条，也不会被它吃掉滚轮。
  */
 .stream-reasoning-body--clamped.stream-reasoning-body--live {
   scroll-behavior: auto;

@@ -544,14 +544,6 @@ export function resolveAgentTimelineAnswer(
   isRunning: boolean,
   hasRunningTool = false,
 ): string {
-  debugLog("[msgDisplay] resolveAgentTimelineAnswer", {
-    isRunning,
-    hasRunningTool,
-    agentPhase: msg.agentPhase,
-    agentTurn: msg.agentTurn,
-    completedContent: completedContent.slice(0, 80),
-  });
-
   if (!isRunning) return completedContent;
   if (hasAgentFinalAnswer(msg) && !isActiveTurnAfterFinalAnswer(msg)) {
     const finalized = resolveCompletedAgentBubbleContent(msg);
