@@ -13,8 +13,6 @@ export interface UseGitCommitActionsOptions {
   configReady: () => boolean;
   state: GitPanelState;
   onRefreshTree?: () => void;
-  /** Soft tip when generated message may span multiple features. */
-  onSuggestBatchCommit?: () => void;
   refreshGitStatus: (options?: { showLoading?: boolean; force?: boolean }) => Promise<void>;
   refreshGitRemotes: () => Promise<void>;
   refreshGitLogIfOpen: (pathOverride?: string) => Promise<void>;
@@ -29,7 +27,6 @@ export function useGitCommitActions(options: UseGitCommitActionsOptions) {
     configReady,
     state,
     onRefreshTree,
-    onSuggestBatchCommit,
     refreshGitStatus,
     refreshGitRemotes,
     refreshGitLogIfOpen,
@@ -44,6 +41,7 @@ export function useGitCommitActions(options: UseGitCommitActionsOptions) {
     }
     state.gitCommitting.value = true;
     state.gitError.value = "";
+    state.gitSecondaryHint.value = "";
     state.clearGitDiffCache();
     const commitMessage = state.gitCommitMessage.value.trim();
     state.gitStatus.value = state.gitStatus.value.filter((f) => !f.staged);
@@ -75,6 +73,7 @@ export function useGitCommitActions(options: UseGitCommitActionsOptions) {
       return;
     }
     state.gitError.value = "";
+    state.gitSecondaryHint.value = "";
     try {
       state.gitGenStep.value = "获取变更…";
       await new Promise((r) => setTimeout(r, 100));
@@ -103,8 +102,8 @@ export function useGitCommitActions(options: UseGitCommitActionsOptions) {
       state.gitGenStep.value = "完成 ✓";
       state.gitCommitMessage.value = result.message;
       if (result.warning) {
-        state.gitError.value = result.warning;
-        onSuggestBatchCommit?.();
+        // Soft advisory only — not a hard error; shown as dismissible hint.
+        state.gitSecondaryHint.value = result.warning;
       }
       await new Promise((r) => setTimeout(r, 600));
     } catch (e) {
@@ -121,6 +120,7 @@ export function useGitCommitActions(options: UseGitCommitActionsOptions) {
       return;
     }
     state.gitError.value = "";
+    state.gitSecondaryHint.value = "";
     try {
       state.gitAiPushStep.value = "生成中…";
       await new Promise((r) => setTimeout(r, 100));

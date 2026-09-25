@@ -625,20 +625,8 @@ export async function pickProjectFolder(initialPath?: string): Promise<PickFolde
   if (!isTauriEnv()) {
     return { ok: false, cancelled: true };
   }
-  // Tauri 桌面模式：优先使用浏览器 File System Access API
-  if (typeof window !== "undefined" && typeof (window as any).showDirectoryPicker === "function") {
-    try {
-      const handle = await (window as any).showDirectoryPicker({ mode: "readwrite" });
-      webProjectHandle = handle;
-      webProjectRoot = handle.name;
-      return { ok: true, path: handle.name || "" };
-    } catch (e) {
-      // 用户点「取消」抛的是 AbortError；部分浏览器返回 NotAllowedError。两者都算主动取消，不报错。
-      const name = (e as Error).name;
-      if (name === "NotAllowedError" || name === "AbortError") return { ok: false, cancelled: true };
-      return { ok: false, error: (e as Error).message };
-    }
-  }
+  // Tauri 桌面模式：一律走原生选目录，返回完整绝对路径。
+  // 禁止 showDirectoryPicker——它只能拿到文件夹短名，会导致后续「打开资源管理器」等失败。
   try {
     const result = await invokeBackend<PickFolderResult>(
       "system_pick_folder",
