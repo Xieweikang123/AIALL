@@ -792,6 +792,7 @@ import {
 } from "../../services/vibeLongTermMemoryClient";
 import type { ProjectMemoryTab } from "../../composables/useProjectMemory";
 import { CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount, formatTokenCount, getEventValue } from "../../utils/vibeHelpers";
+import { chatScrollProbe, readScrollGeometry } from "../../utils/chatScrollProbe";
 import {
   computeScrollFollowStep,
   prefersReducedMotion,
@@ -1410,7 +1411,11 @@ function onScroll() {
   // During eased follow the scroll writes are programmatic — keep the pin and
   // bottom state untouched so a single frame's remaining distance (a large block
   // landing at once) can't be mistaken for the user scrolling away.
-  if (followActive) return;
+  if (followActive) {
+    chatScrollProbe("onScroll:ignored-while-following", { geo: readScrollGeometry(chatScrollRef.value) });
+    return;
+  }
+  chatScrollProbe("onScroll:user", { geo: readScrollGeometry(chatScrollRef.value), wasAtBottom: isAtBottom.value });
   checkScrollPosition();
   emit("on-chat-scroll");
 }
@@ -1498,19 +1503,32 @@ function stepFollow(ts: number) {
 /** Animated follow used while a run streams — spring glide, coalesced per frame. */
 function followToBottom() {
   const el = chatScrollRef.value;
-  if (!el) return;
+  if (!el) {
+    chatScrollProbe("followToBottom:no-el");
+    return;
+  }
   isAtBottom.value = true;
-  if (followActive) return;
+  if (followActive) {
+    chatScrollProbe("followToBottom:already-active");
+    return;
+  }
   if (prefersReducedMotion()) {
+    chatScrollProbe("followToBottom:reduced-motion");
     scrollContainerToBottom(el);
     return;
   }
   const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
   // Already pinned — snap without starting a spring frame.
   if (maxScroll - el.scrollTop <= SCROLL_FOLLOW_SNAP_PX) {
+    chatScrollProbe("followToBottom:snap", { maxScroll, scrollTop: el.scrollTop });
     el.scrollTop = maxScroll;
     return;
   }
+  chatScrollProbe("followToBottom:start-spring", {
+    maxScroll,
+    scrollTop: el.scrollTop,
+    gap: Math.round(maxScroll - el.scrollTop),
+  });
   followActive = true;
   followVelocity = 0;
   followLastTs = 0;
@@ -1589,6 +1607,13 @@ onMounted(() => {
       // Eased follow locally while a live run grows the content, instead of
       // emitting `scroll-to-bottom` (the parent's force path schedules repeated
       // timed hard jumps → visible stutter).
+      chatScrollProbe("resizeObserver", {
+        sessionScrollPending,
+        chatSending: props.chatSending,
+        isAtBottom: isAtBottom.value,
+        followActive,
+        geo: readScrollGeometry(scrollEl),
+      });
       if (sessionScrollPending || (props.chatSending && isAtBottom.value)) {
         followToBottom();
         return;

@@ -1109,6 +1109,7 @@ import { MAX_AGENT_CONTEXT_CHARS } from "../../shared/agentContextLimits";
 import { appendStatusDetail, assistantTransientUiClearPatch, truncateDiffPreview, cleanStatusLogText, CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount, formatTokenCount, isNetworkError, fileName, genId, hasAgentProcessSteps, entryToNode, formatToolMeta, syncRoundGroupsPatch, inferEditorTabKind, displayFilePath } from "../utils/vibeHelpers";
 import { gitFileSelectionKey, parseGitFileSelectionKey, gitFileListScopeIsStaged, type GitFileListScope } from "../utils/gitHelpers";
 import { appendDebugLogFile, debugLog, setDebugLogProjectRoot } from "../utils/debugLog";
+import { chatScrollProbe, readScrollGeometry } from "../utils/chatScrollProbe";
 import { lsGet, lsGetJson, lsSet, lsSetJson, lsRemove } from "../utils/localStorageSafe";
 import { dismissBlockingOverlays, registerOverlayDismissDeps, scanDomBlockingOverlays } from "../utils/dismissBlockingOverlays";
 import { sessionDiag } from "../utils/sessionDiagLog";
@@ -2521,8 +2522,15 @@ function loadSavedProject() {
 
 function isChatNearBottom(): boolean {
   const el = chatPanelRef.value?.chatScrollRef;
-  if (!el) return true;
-  return el.scrollHeight - el.scrollTop - el.clientHeight <= CHAT_SCROLL_BOTTOM_THRESHOLD;
+  if (!el) {
+    chatScrollProbe("isChatNearBottom:no-el", { sent: chatSending.value, pin: chatPinnedToBottom });
+    return true;
+  }
+  const geo = readScrollGeometry(el);
+  const remaining = geo ? geo.remaining : 0;
+  const near = remaining <= CHAT_SCROLL_BOTTOM_THRESHOLD;
+  chatScrollProbe("isChatNearBottom", { geo, near, threshold: CHAT_SCROLL_BOTTOM_THRESHOLD });
+  return near;
 }
 
 function onChatScroll() {
@@ -2539,15 +2547,19 @@ function resetChatScrollPin() {
 }
 
 async function scrollChatToBottom(force = false) {
+  const probeGeo = () => readScrollGeometry(chatPanelRef.value?.chatScrollRef);
   if (force) {
     resetChatScrollPin();
   } else if (!chatSending.value) {
+    chatScrollProbe("scrollChatToBottom:early-return", { reason: "not-sending", geo: probeGeo() });
     return;
   } else if (!chatPinnedToBottom) {
+    chatScrollProbe("scrollChatToBottom:early-return", { reason: "pin-false", geo: probeGeo() });
     return;
   }
 
   if (force) {
+    chatScrollProbe("scrollChatToBottom:force", { geo: probeGeo() });
     await nextTick();
     if (scrollChatRaf) cancelAnimationFrame(scrollChatRaf);
     scrollChatRaf = requestAnimationFrame(() => {
@@ -2561,6 +2573,7 @@ async function scrollChatToBottom(force = false) {
 
   // Streaming follow: hand off to ChatPanel's eased glide (coalesced per frame).
   // The hard jump stays for force paths (jump-to-latest / session switch).
+  chatScrollProbe("scrollChatToBottom:follow", { geo: probeGeo() });
   chatPanelRef.value?.followToBottom();
 }
 

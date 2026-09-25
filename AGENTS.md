@@ -1,7 +1,8 @@
 # 当前讨论范围
 
-- 默认讨论 **Web 端**（`npm run dev:web` / `start-web.bat` 场景，agent-server 是唯一真相源）
-- 除非明确说"桌面版/Tauri"，否则都按 web 端理解
+- 默认讨论 **桌面版**（`npm run dev` / Tauri 场景，Rust `src-tauri/` 是行为真相源）
+- 除非明确说"Web 端"，否则都按桌面版理解
+- Web 端（`npm run dev:web` / `start-web.bat`，agent-server 是唯一真相源）仍受支持，细则见下文「Web 模式开发约定」
 
 # 产品北极星（最核心）
 
@@ -33,7 +34,8 @@ AIALL 要做 **Cursor 类通用编程助手**：会查仓库、会改、会验�
 |--------|--------|
 | AI 助手 | `src/views/VibeCodingView.vue` 及相关 vibe coding 模块 |
 | vibe coding | `src/views/VibeCodingView.vue` 页面 |
-| 聊天页面 | `src/views/ChatView.vue` |
+| 聊天页面 | `src/views/ChatView.vue`（独立对话页，别和「会话」混） |
+| 会话 | **Vibe Coding（`/vibe-coding`）的聊天会话**：存储 `%APPDATA%\aiall\vibe-chat-sessions\chat-<id>.json` + `chat-store.json`；界面为会话 tab（`VibeCodingView.vue` 的 `sessionList`、`src/utils/sessionTabs.ts`）；Agent 跨会话回忆走 `search_sessions`，不得 `read_file` |
 | Git 面板 | `src/components/vibe/GitPanel.vue` |
 | 文件面板 | `src/components/vibe/FilePanel.vue` |
 | 编辑器 | `src/components/vibe/EditorPanel.vue` |
@@ -188,6 +190,14 @@ AIALL 的 Vibe 会话文件**不在项目目录内**，存储在 AppData Roaming
   - 桌面版（Tauri）：`%APPDATA%\aiall\debug-logs\`（有打开项目时为 `debug-logs\<项目名_hash>\`），如 `debug.log`、`tab-perf.log`
   - Vitest / 脚本：写入临时文件，勿写进用户项目根目录
   - 调试完成后可删除对应日志文件
+- **日志必须写到 Agent 可读的位置**（Agent 能 `read` / `glob` 到，才能自己定位问题，不要靠用户手动复制）：
+  - 唯一通道：`%APPDATA%\aiall\debug-logs\`（`debugLog` / `appendDebugLogFile`），该目录 Agent 可直接读取
+  - **禁止**写进用户项目根目录、`node_modules`、系统临时目录等 Agent 读不到或会污染仓库的位置
+  - Web 模式下 `debugLog` 无 Tauri invoke，会退化到浏览器 console；需要 Agent 直接读时改用桌面版复现
+- **调试日志不允许加开关**：直接写日志就完事，**禁止**引入 `localStorage` 开关、环境变量开关、`if (DEBUG)` 之类的条件门控
+  - 理由：门控意味着用户还得先去开启，多数情况下没开 → 日志空白 → 白折腾一轮（已踩过）
+  - 代价可接受：日志文件大一点无所谓，独立文件（如 `scroll-probe.log`）足以隔离；排查完删文件/删探针即可
+  - 只在**极高频率**（每帧 / 每次滚动事件）的探针上才考虑采样或单独文件，不是为了省事再加开关
 - **`.aiall/`（项目根目录，已 gitignore）**：Agent 的项目状态目录——`project-memory.md`、`project-knowledge.md`、`skills/`、`plans/`、`exploration/`、`probe/`、`memory/`（条目式长期记忆）。Git 面板禁止 stage `.aiall/` 路径；Agent 写工具（`write_file`/`patch_file`）禁止写 `.aiall/exploration/` 与 `.aiall/memory/`（长期记忆只能走 `memory_write` 工具，唯一入口）
 - **Rust 行为改动**：改 `src-tauri/` 后必须 `cargo check` 通过；行为真相源见 `AGENT_SSOT.md`（改行为只改 Rust，禁止在 `server/` 重写同名实现）
 

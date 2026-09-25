@@ -11,6 +11,7 @@ import {
 } from "../services/agentRoundGroups";
 import { syncRoundGroupsPatch } from "../utils/vibeHelpers";
 import { debugLog } from "../utils/debugLog";
+import { chatScrollProbe } from "../utils/chatScrollProbe";
 
 const RUN_UI_PATCH_MIN_MS = 200;
 const RUN_UI_STREAM_PATCH_MIN_MS = 48;
@@ -91,8 +92,19 @@ export function useAgentStreamPatch(deps: UseAgentStreamPatchDeps): UseAgentStre
   }
 
   function scheduleStreamScroll() {
-    if (!chatSending.value || !isChatPinnedToBottom()) return;
-    if (streamScrollRaf !== null) return;
+    if (!chatSending.value) {
+      chatScrollProbe("scheduleStreamScroll:skip", { reason: "not-sending" });
+      return;
+    }
+    if (!isChatPinnedToBottom()) {
+      chatScrollProbe("scheduleStreamScroll:skip", { reason: "not-pinned" });
+      return;
+    }
+    if (streamScrollRaf !== null) {
+      chatScrollProbe("scheduleStreamScroll:skip", { reason: "raf-pending" });
+      return;
+    }
+    chatScrollProbe("scheduleStreamScroll:fire");
     streamScrollRaf = requestAnimationFrame(() => {
       streamScrollRaf = null;
       void scrollChatToBottom();
