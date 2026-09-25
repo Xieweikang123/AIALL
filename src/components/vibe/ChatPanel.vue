@@ -794,6 +794,10 @@ import type { ProjectMemoryTab } from "../../composables/useProjectMemory";
 import { CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount, formatTokenCount, getEventValue } from "../../utils/vibeHelpers";
 import { chatScrollProbe, readScrollGeometry } from "../../utils/chatScrollProbe";
 import {
+  decideFollowAfterContentGrowth,
+  decideFollowAfterUserInput,
+} from "../../utils/chatFollowScroll";
+import {
   computeScrollFollowStep,
   prefersReducedMotion,
   scheduleScrollContainerToBottom,
@@ -1070,8 +1074,14 @@ const emit = defineEmits<{
 
 const chatScrollRef = ref<HTMLElement | null>(null);
 const chatDropZoneRef = ref<HTMLElement | null>(null);
+/**
+ * 是否处于「跟随到底部」状态（决定内容增长时要不要自动滚）。
+ * 只在两个时刻更新：用户输入事件、内容增长后的恢复判定。**绝不由 scroll 事件驱动。**
+ */
 const isAtBottom = ref(true);
-const showScrollToBottom = computed(() => !isAtBottom.value && props.chatMessages.length > 0);
+/** 视觉上是否贴近底部（决定「回到底部」按钮显隐），容差 30px。与跟随状态相互独立。 */
+const isVisuallyAtBottom = ref(true);
+const showScrollToBottom = computed(() => !isVisuallyAtBottom.value && props.chatMessages.length > 0);
 
 /** Sticky goal: collapse to one line; expand when the demand is longer than a glance. */
 const SESSION_GOAL_COLLAPSE_CHARS = 36;
@@ -1401,23 +1411,26 @@ onUnmounted(() => {
   onProviderPickerOpenChange(false);
 });
 
+/** 只更新「回到底部」按钮的显隐，不触碰跟随状态。 */
 function checkScrollPosition() {
   const el = chatScrollRef.value;
-  if (!el) { isAtBottom.value = true; return; }
-  isAtBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight <= CHAT_SCROLL_BOTTOM_THRESHOLD;
+  if (!el) { isVisuallyAtBottom.value = true; return; }
+  isVisuallyAtBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight <= CHAT_SCROLL_BOTTOM_THRESHOLD;
 }
 
 function onScroll() {
-  // During eased follow the scroll writes are programmatic — keep the pin and
-  // bottom state untouched so a single frame's remaining distance (a large block
-  // landing at once) can't be mistaken for the user scrolling away.
-  if (followActive) {
-    chatScrollProbe("onScroll:ignored-while-following", { geo: readScrollGeometry(chatScrollRef.value) });
-    return;
-  }
-  chatScrollProbe("onScroll:user", { geo: readScrollGeometry(chatScrollRef.value), wasAtBottom: isAtBottom.value });
+  // scroll 事件**只**驱动「回到底部」按钮的显隐（视觉状态，30px 容差）。
+  // 它不参与「是否跟随」判定 —— 跟随中程序自己写 scrollTop、内容一次长高都会触发
+  // 本事件，此时 remaining 是弹簧的瞬时落后（内容长 35px / 弹簧一帧只追 3px），
+  // 若据此解除跟随，回复一开始就会永久断跟（历史 bug 根因）。
+  // 跟随状态只由用户输入事件与「内容增长后恢复」两处驱动。
   checkScrollPosition();
-  emit("on-chat-scroll");
+  chatScrollProbe("onScroll", {
+    geo: readScrollGeometry(chatScrollRef.value),
+    isAtBottom: isAtBottom.value,
+    isVisuallyAtBottom: isVisuallyAtBottom.value,
+    followActive,
+  });
 }
 
 function scrollToBottom() {
@@ -1425,12 +1438,14 @@ function scrollToBottom() {
   if (!el) return;
   stopFollow();
   isAtBottom.value = true;
+  isVisuallyAtBottom.value = true;
   // Parent only re-pins; animation stays in this component so a hard jump
   // cannot cancel the spring / smooth glide.
   emit("scroll-to-bottom");
+  // 回到最新 = 恢复跟随，需同步给父组件（否则父组件仍以为未跟随）。
+  emit("on-chat-scroll");
   if (prefersReducedMotion()) {
     scrollContainerToBottom(el);
-    emit("on-chat-scroll");
     return;
   }
   followActive = true;
@@ -1467,6 +1482,7 @@ function stepFollow(ts: number) {
     followVelocity = 0;
     followLastTs = 0;
     isAtBottom.value = true;
+    isVisuallyAtBottom.value = true;
     emit("on-chat-scroll");
     return;
   }
@@ -1475,7 +1491,7 @@ function stepFollow(ts: number) {
   const dt = Math.min(0.064, Math.max(0.001, (ts - last) / 1000));
   followLastTs = ts;
 
-  const { nextScrollTop, velocity, atBottom, settled } = computeScrollFollowStep(
+  const { nextScrollTop, velocity, settled } = computeScrollFollowStep(
     el.scrollTop,
     el.scrollHeight,
     el.clientHeight,
@@ -1492,11 +1508,11 @@ function stepFollow(ts: number) {
     followVelocity = 0;
     followLastTs = 0;
     isAtBottom.value = true;
-    emit("on-chat-scroll");
+    isVisuallyAtBottom.value = true;
     return;
   }
 
-  isAtBottom.value = atBottom || isAtBottom.value;
+  // 跟随中不改 isAtBottom 的「是否跟随」语义（本函数只在跟随状态下运行）。
   followRaf = requestAnimationFrame(stepFollow);
 }
 
@@ -1508,6 +1524,7 @@ function followToBottom() {
     return;
   }
   isAtBottom.value = true;
+  isVisuallyAtBottom.value = true;
   if (followActive) {
     chatScrollProbe("followToBottom:already-active");
     return;
@@ -1535,21 +1552,56 @@ function followToBottom() {
   followRaf = requestAnimationFrame(stepFollow);
 }
 
+/**
+ * 用户产生滚动意图（滚轮 / 触摸 / 滚条 / 键盘）——**唯一**的「取消跟随」入口。
+ *
+ * 触底判定只在此刻做：用户往上翻 → 不触底 → 停手；翻回底部 → 触底 → 恢复跟随。
+ * 容器滚不动时不算离开底部（内容不足一屏时滚轮无效，否则回复长起来后就不再跟随）。
+ *
+ * 注意异步：`wheel`/`keydown` 触发时 `scrollTop` **尚未**改变，同步读到的仍是滚动前
+ * 的位置。因此判定推迟到下一帧（滚动已应用）执行，否则「往上翻」会被误判成「仍触底」。
+ */
+function applyUserFollowDecision() {
+  if (userDecisionRaf) cancelAnimationFrame(userDecisionRaf);
+  userDecisionRaf = requestAnimationFrame(() => {
+    userDecisionRaf = 0;
+    const el = chatScrollRef.value;
+    if (!el) return;
+    const next = decideFollowAfterUserInput({
+      scrollTop: el.scrollTop,
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+      wasFollowing: isAtBottom.value,
+    });
+    chatScrollProbe("userFollowDecision", {
+      geo: readScrollGeometry(el),
+      wasFollowing: isAtBottom.value,
+      next,
+    });
+    isAtBottom.value = next;
+    // 顺带刷新按钮显隐：此刻读到的已是滚动后的位置，不必等下一个 scroll 事件。
+    checkScrollPosition();
+    if (!next) stopFollow();
+    emit("on-chat-scroll");
+  });
+}
+
+let userDecisionRaf = 0;
+
 function onUserScrollIntent() {
-  stopFollow();
-  checkScrollPosition();
+  applyUserFollowDecision();
 }
 
 /** Scrollbar drag lands on the scroll element itself; text selection does not. */
 function onScrollbarMouseDown(e: MouseEvent) {
   if (e.target !== chatScrollRef.value) return;
-  stopFollow();
+  applyUserFollowDecision();
 }
 
 const FOLLOW_KEYS = new Set(["PageUp", "PageDown", "ArrowUp", "ArrowDown", "Home", "End", " "]);
 
 function onFollowKeydown(e: KeyboardEvent) {
-  if (FOLLOW_KEYS.has(e.key)) stopFollow();
+  if (FOLLOW_KEYS.has(e.key)) applyUserFollowDecision();
 }
 
 function scheduleSessionScrollToBottom() {
@@ -1604,17 +1656,26 @@ onMounted(() => {
     if (!scrollEl || typeof ResizeObserver === "undefined") return;
     const contentEl = scrollEl.querySelector(".msg-list") ?? scrollEl;
     scrollResizeObserver = new ResizeObserver(() => {
-      // Eased follow locally while a live run grows the content, instead of
-      // emitting `scroll-to-bottom` (the parent's force path schedules repeated
-      // timed hard jumps → visible stutter).
+      // 内容长高：跟随中 → 继续跟；未跟随 → 仅在「用户已滚回真触底」时恢复跟随。
+      // 注意不在这里做「解除跟随」判定 —— 内容增长导致的 remaining 跳变是弹簧落后，不是用户意图。
+      const el = scrollEl;
+      const next = decideFollowAfterContentGrowth({
+        scrollTop: el.scrollTop,
+        scrollHeight: el.scrollHeight,
+        clientHeight: el.clientHeight,
+        wasFollowing: isAtBottom.value,
+      });
       chatScrollProbe("resizeObserver", {
         sessionScrollPending,
         chatSending: props.chatSending,
         isAtBottom: isAtBottom.value,
         followActive,
-        geo: readScrollGeometry(scrollEl),
+        next,
+        geo: readScrollGeometry(el),
       });
-      if (sessionScrollPending || (props.chatSending && isAtBottom.value)) {
+      isAtBottom.value = next;
+
+      if (sessionScrollPending || (props.chatSending && next)) {
         followToBottom();
         return;
       }
@@ -1628,11 +1689,19 @@ onUnmounted(() => {
   scrollResizeObserver?.disconnect();
   scrollResizeObserver = null;
   stopFollow();
+  if (userDecisionRaf) { cancelAnimationFrame(userDecisionRaf); userDecisionRaf = 0; }
   if (sessionScrollClearTimer) { clearTimeout(sessionScrollClearTimer); sessionScrollClearTimer = null; }
   window.removeEventListener("keydown", onFollowKeydown, true);
 });
 
-defineExpose({ chatScrollRef, chatDropZoneRef, followToBottom, scrollToBottom });
+defineExpose({
+  chatScrollRef,
+  chatDropZoneRef,
+  followToBottom,
+  scrollToBottom,
+  /** 当前是否处于「跟随到底部」状态（父组件据此同步 pin）。 */
+  isFollowingBottom: () => isAtBottom.value,
+});
 </script>
 
 <style src="./styles/ChatPanel.scss" scoped></style>

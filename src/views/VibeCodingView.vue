@@ -1106,7 +1106,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref,
 import { useRouter } from "vue-router";
 import "../styles/vibe-coding.scss";
 import { MAX_AGENT_CONTEXT_CHARS } from "../../shared/agentContextLimits";
-import { appendStatusDetail, assistantTransientUiClearPatch, truncateDiffPreview, cleanStatusLogText, CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount, formatTokenCount, isNetworkError, fileName, genId, hasAgentProcessSteps, entryToNode, formatToolMeta, syncRoundGroupsPatch, inferEditorTabKind, displayFilePath } from "../utils/vibeHelpers";
+import { appendStatusDetail, assistantTransientUiClearPatch, truncateDiffPreview, cleanStatusLogText, formatCharCount, formatTokenCount, isNetworkError, fileName, genId, hasAgentProcessSteps, entryToNode, formatToolMeta, syncRoundGroupsPatch, inferEditorTabKind, displayFilePath } from "../utils/vibeHelpers";
 import { gitFileSelectionKey, parseGitFileSelectionKey, gitFileListScopeIsStaged, type GitFileListScope } from "../utils/gitHelpers";
 import { appendDebugLogFile, debugLog, setDebugLogProjectRoot } from "../utils/debugLog";
 import { chatScrollProbe, readScrollGeometry } from "../utils/chatScrollProbe";
@@ -2520,21 +2520,24 @@ function loadSavedProject() {
   }
 }
 
+/**
+ * 父组件侧的「是否跟随到底部」。
+ *
+ * 判定权在 ChatPanel（它才知道用户输入与内容变化），父组件只接收结果：
+ * 面板通过 `on-chat-scroll` 事件把决定同步过来。父组件**不再**自己用
+ * `onScroll` + 几何量算 pin —— 那样会把「跟随中程序写 scrollTop / 内容一次长高
+ * 导致的弹簧瞬时落后」误判成「用户离开底部」，从而永久断跟（历史 bug 根因）。
+ */
 function isChatNearBottom(): boolean {
-  const el = chatPanelRef.value?.chatScrollRef;
-  if (!el) {
-    chatScrollProbe("isChatNearBottom:no-el", { sent: chatSending.value, pin: chatPinnedToBottom });
-    return true;
-  }
-  const geo = readScrollGeometry(el);
-  const remaining = geo ? geo.remaining : 0;
-  const near = remaining <= CHAT_SCROLL_BOTTOM_THRESHOLD;
-  chatScrollProbe("isChatNearBottom", { geo, near, threshold: CHAT_SCROLL_BOTTOM_THRESHOLD });
-  return near;
+  return chatPinnedToBottom;
 }
 
 function onChatScroll() {
-  chatPinnedToBottom = isChatNearBottom();
+  const el = chatPanelRef.value?.chatScrollRef;
+  const geo = readScrollGeometry(el);
+  const next = chatPanelRef.value?.isFollowingBottom?.() ?? chatPinnedToBottom;
+  chatPinnedToBottom = next;
+  chatScrollProbe("onChatScroll:sync", { geo, pin: next, sending: chatSending.value });
   if (chatScrollPersistTimer) window.clearTimeout(chatScrollPersistTimer);
   chatScrollPersistTimer = window.setTimeout(() => {
     chatScrollPersistTimer = 0;
