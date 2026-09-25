@@ -78,7 +78,8 @@ export async function renderMermaidInContainer(el: HTMLElement): Promise<void> {
       node.setAttribute("data-zoom", "100");
       // 添加 touch-action 防止浏览器默认缩放
       node.style.touchAction = "none";
-      // 绑定缩放事件
+      // 绑定缩放事件（标记已绑定，供缓存 HTML 还原时幂等补绑）
+      node.dataset.zoomBound = "1";
       bindZoomEvents(node);
     } catch (err) {
       console.debug("[mermaid] render failed:", err);
@@ -417,6 +418,27 @@ function setupWheelDelegation() {
 
 interface GestureEventLike extends Event {
   scale?: number;
+}
+
+/**
+ * 为「已渲染但监听丢失」的 mermaid 节点重新绑定缩放事件。
+ *
+ * 场景：`ChatMarkdown` 把装饰后的 HTML 缓存起来，切回会话时直接写回 innerHTML
+ * （见 `markdownPostProcessCache`）。重新解析出来的节点不带原来的事件监听，
+ * 而 `renderMermaidInContainer` 的选择器会跳过 `[data-mermaid-rendered]`，
+ * 不会补绑 —— 不调这个函数就会出现「图表在、但滚轮/捏合缩放失效」。
+ *
+ * 用 `data-zoom-bound` 标记保证幂等（重复调用不会重复 addEventListener）。
+ */
+export function rebindMermaidZoom(container: HTMLElement): void {
+  const nodes = container.querySelectorAll<HTMLElement>(
+    "div.mermaid-render[data-mermaid-rendered='true']",
+  );
+  nodes.forEach((node) => {
+    if (node.dataset.zoomBound === "1") return;
+    node.dataset.zoomBound = "1";
+    bindZoomEvents(node);
+  });
 }
 
 function bindZoomEvents(node: HTMLElement) {

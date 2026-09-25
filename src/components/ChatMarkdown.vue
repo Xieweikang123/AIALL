@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { renderMarkdown } from "../utils/renderMarkdown";
-import { disposeMermaidRenderer, renderMermaidInContainer } from "../utils/mermaidRenderer";
+import { markdownPostProcessCache } from "../utils/markdownRenderCache";
+import { disposeMermaidRenderer, rebindMermaidZoom, renderMermaidInContainer } from "../utils/mermaidRenderer";
 import { parseAiOptions, type AiOption } from "../utils/parseAiOptions";
 import { parseClarificationChoices } from "../utils/parseClarificationChoices";
 import { looksLikeClarificationQuestion } from "../orchestration/generic/ambiguousTermTriggers";
@@ -257,7 +258,11 @@ function resetCodeCopyButton(btn: HTMLButtonElement) {
 function attachCodeCopyButtons(el: HTMLElement) {
   el.querySelectorAll("pre").forEach((pre) => {
     if (pre.closest(".mermaid-render") || pre.closest(".tool-summary-content")) return;
-    if (pre.parentElement?.classList.contains("code-block-shell")) return;
+    if (pre.parentElement?.classList.contains("code-block-shell")) {
+      // 已包裹过（可能是从缓存 HTML 还原的）：按钮本身没有事件监听，需要重新绑定。
+      rebindCodeCopyButton(pre);
+      return;
+    }
 
     const shell = document.createElement("div");
     shell.className = "code-block-shell";
@@ -269,27 +274,47 @@ function attachCodeCopyButtons(el: HTMLElement) {
     btn.className = "code-copy-btn";
     btn.title = "复制代码";
     resetCodeCopyButton(btn);
-    btn.addEventListener("click", () => {
-      const code = pre.querySelector("code")?.textContent ?? pre.textContent ?? "";
-      void copyPlainText(code).then((ok) => {
-        resetCodeCopyButton(btn);
-        if (ok) {
-          btn.textContent = "已复制";
-          btn.classList.add("code-copy-btn--copied");
-        } else {
-          btn.textContent = "复制失败";
-          btn.classList.add("code-copy-btn--failed");
-        }
-        window.setTimeout(() => resetCodeCopyButton(btn), 1600);
-      });
-    });
+    bindCodeCopyClick(btn, pre);
     shell.appendChild(btn);
   });
+}
+
+/**
+ * 给已有的复制按钮绑定点击行为。
+ *
+ * 从缓存 HTML（`innerHTML`）还原时，按钮元素是重新解析出来的，
+ * **不会带上原来 addEventListener 的监听**——不重绑就是"看得见点不动"的死按钮。
+ * 用 `dataset` 标记避免同一元素重复绑定。
+ */
+function bindCodeCopyClick(btn: HTMLButtonElement, pre: Element) {
+  if (btn.dataset.copyBound === "1") return;
+  btn.dataset.copyBound = "1";
+  btn.addEventListener("click", () => {
+    const code = pre.querySelector("code")?.textContent ?? pre.textContent ?? "";
+    void copyPlainText(code).then((ok) => {
+      resetCodeCopyButton(btn);
+      if (ok) {
+        btn.textContent = "已复制";
+        btn.classList.add("code-copy-btn--copied");
+      } else {
+        btn.textContent = "复制失败";
+        btn.classList.add("code-copy-btn--failed");
+      }
+      window.setTimeout(() => resetCodeCopyButton(btn), 1600);
+    });
+  });
+}
+
+function rebindCodeCopyButton(pre: Element) {
+  const btn = pre.parentElement?.querySelector<HTMLButtonElement>(":scope > .code-copy-btn");
+  if (btn) bindCodeCopyClick(btn, pre);
 }
 
 /** Wrap tool summary blocks (h3[工具摘要] + following ul) into collapsible cards. */
 function wrapToolSummaryBlocks(el: HTMLElement) {
   if (!el.textContent?.includes("工具摘要")) return;
+  // 从缓存 HTML 还原的折叠卡：结构已在，只缺点击监听，重新绑定即可。
+  el.querySelectorAll<HTMLElement>(".tool-summary-block").forEach(rebindToolSummaryToggle);
   const h3s = el.querySelectorAll("h3:not(.tool-summary-content h3)");
   h3s.forEach((h3) => {
     if (!h3.textContent?.includes("工具摘要")) return;
@@ -362,11 +387,28 @@ function wrapToolSummaryBlocks(el: HTMLElement) {
     }
 
     // Toggle click
-    header.addEventListener("click", () => {
-      const collapsed = wrapper.getAttribute("data-collapsed") === "true";
-      wrapper.setAttribute("data-collapsed", String(!collapsed));
-    });
+    bindToolSummaryToggle(header, wrapper);
   });
+}
+
+/**
+ * 绑定工具摘要折叠卡的展开/收起。
+ *
+ * 同 `bindCodeCopyClick`：缓存 HTML 还原出来的 header 没有监听，必须重绑，
+ * 否则折叠卡"点不动"。用 dataset 标记防重复绑定。
+ */
+function bindToolSummaryToggle(header: HTMLElement, wrapper: HTMLElement) {
+  if (header.dataset.toggleBound === "1") return;
+  header.dataset.toggleBound = "1";
+  header.addEventListener("click", () => {
+    const collapsed = wrapper.getAttribute("data-collapsed") === "true";
+    wrapper.setAttribute("data-collapsed", String(!collapsed));
+  });
+}
+
+function rebindToolSummaryToggle(wrapper: HTMLElement) {
+  const header = wrapper.querySelector<HTMLElement>(":scope > .tool-summary-header");
+  if (header) bindToolSummaryToggle(header, wrapper);
 }
 
 // Parse options from content (including during streaming once the block is complete)
@@ -466,6 +508,20 @@ function handleClarificationSelect(payload: { question: string; option: AiOption
   });
 }
 
+/**
+ * 后处理结果缓存：源码 → 已装饰好的 innerHTML。
+ *
+ * 为什么需要：DOM 上的守卫（`code-block-shell` / `tool-summary-block` /
+ * `data-mermaid-rendered`）只在**同一份 DOM 存活期间**有效。切会话时
+ * `VibeChatMessages` 的 v-memo 因 `m.content` 变化而全部失效 → 整块 DOM 被
+ * v-html 重新替换 → 守卫连同装饰一起被冲掉，于是每次切会话都要把所有消息的
+ * 代码块包裹、工具摘要折叠、mermaid 图表全部重做一遍（每条消息还各占一个 rAF），
+ * 主线程被塞满 —— 表现为「切到某个 tab 就卡」。
+ *
+ * 这里以**渲染源文本**为 key（装饰结果是源码的纯函数），跨 DOM 替换复用：
+ * 同一段内容第二次出现时直接写回缓存 HTML，跳过全部 DOM 手术。
+ * LRU 实现复用 markdownRenderCache，避免再手搓一份。
+ */
 // After render, wrap tool summary blocks (skip while streaming for perf)
 function schedulePostProcess() {
   if (effectiveStreaming.value || postProcessRaf) return;
@@ -473,9 +529,44 @@ function schedulePostProcess() {
     postProcessRaf = 0;
     nextTick(() => {
       if (effectiveStreaming.value || !markdownRef.value) return;
-      wrapToolSummaryBlocks(markdownRef.value);
-      attachCodeCopyButtons(markdownRef.value);
-      renderMermaidInContainer(markdownRef.value);
+      const root = markdownRef.value;
+
+      // 缓存命中：直接把装饰好的 HTML 写回，跳过 wrap/按钮/mermaid 三趟 DOM 手术。
+      //
+      // 判定「当前 DOM 需要（重新）装饰」的依据，是比较 innerHTML 是否还等于
+      // v-html 刚写进去的裸渲染结果：
+      //   - 相等 → 这份 DOM 从未被装饰（切会话后 v-html 重置的典型状态）→ 可走缓存
+      //   - 不等 → 已经有装饰（工具摘要被包裹、mermaid 注入了 SVG）→ 不能覆盖，
+      //            否则会把已有的事件监听冲掉，出现「点了没反应」
+      // 不用 data 标记，因为 v-html 换内容时 div 会被复用、标记会残留导致误判。
+      const cacheKey = sanitizedMarkdown.value;
+      const body = root.querySelector<HTMLElement>(".msg-markdown-body");
+      const rawHtml = displayHtml.value;
+      const isUndecorated = Boolean(body) && rawHtml !== "" && body!.innerHTML === rawHtml;
+      if (body && isUndecorated) {
+        const cachedHtml = markdownPostProcessCache.get(cacheKey);
+        if (cachedHtml !== undefined) {
+          body.innerHTML = cachedHtml;
+          // innerHTML 还原不会带回事件监听：补绑复制按钮、折叠卡、mermaid 缩放。
+          // 漏掉任何一处都会变成「看着正常、点了没反应」。
+          attachCodeCopyButtons(body);
+          wrapToolSummaryBlocks(body);
+          rebindMermaidZoom(body);
+          return;
+        }
+      }
+
+      wrapToolSummaryBlocks(root);
+      attachCodeCopyButtons(root);
+
+      // mermaid 是异步注入 SVG 的：渲染完再快照，否则缓存里会缺图表。
+      // 无 mermaid 块时 renderMermaidInContainer 立即 resolve，快照即为最终态。
+      const snapshotHost = body;
+      void renderMermaidInContainer(root).then(() => {
+        if (snapshotHost?.isConnected && cacheKey) {
+          markdownPostProcessCache.set(cacheKey, snapshotHost.innerHTML);
+        }
+      });
     });
   });
 }
@@ -500,7 +591,7 @@ watch([displayHtml, effectiveStreaming], () => {
     <!-- Streaming: DOM is patched incrementally via applyStreamingDomPatch() -->
     <div ref="streamingContentRef" class="msg-markdown-stream-body" v-show="effectiveStreaming" />
     <!-- Final render: full v-html replace (only when streaming is done) -->
-    <div v-if="!effectiveStreaming && safeDisplayHtml" v-html="safeDisplayHtml" />
+    <div v-if="!effectiveStreaming && safeDisplayHtml" class="msg-markdown-body" v-html="safeDisplayHtml" />
     <AiOptionButtons
       v-if="parsedOptions?.options.length"
       :options="parsedOptions.options"
