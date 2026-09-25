@@ -353,7 +353,7 @@
                   <rect x="2" y="2" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.2"/>
                   <path d="M6 5.5h4M6 8h4M6 10.5h2" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/>
                 </svg>
-                <span class="chat-provider-trigger-label">{{ activeProviderLabel }}</span>
+                <span class="chat-provider-trigger-label">{{ activeProviderModel }}</span>
                 <svg class="chat-provider-trigger-chevron" width="9" height="9" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                   <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
@@ -413,20 +413,6 @@
                     </button>
                   </div>
                   <div class="chat-provider-dropdown-body">
-                    <button
-                      v-if="showGlobalProviderOption"
-                      type="button"
-                      class="chat-provider-option"
-                      :class="{ active: !activeSessionProviderId }"
-                      role="menuitemradio"
-                      :aria-checked="!activeSessionProviderId"
-                      @click="selectProvider('')"
-                    >
-                      <span class="chat-provider-option-name">使用全局配置</span>
-                      <span class="chat-provider-option-model">{{ globalModelName || "未设置" }}</span>
-                      <span v-if="!activeSessionProviderId" class="chat-provider-option-check">✓</span>
-                    </button>
-                    <div v-if="showGlobalProviderOption && filteredProviderOptions.length" class="chat-provider-option-sep" />
                     <template v-for="p in filteredProviderOptions" :key="p.id">
                       <div class="chat-provider-group">
                         <span class="chat-provider-group-label" :title="p.name">{{ p.name }}</span>
@@ -459,7 +445,7 @@
                         <span v-if="activeSessionProviderId === p.id && activeSessionModelId === m" class="chat-provider-option-check">✓</span>
                       </button>
                     </template>
-                    <p v-if="!showGlobalProviderOption && !filteredProviderOptions.length" class="chat-provider-empty">
+                    <p v-if="!filteredProviderOptions.length" class="chat-provider-empty">
                       没有匹配的模型
                     </p>
                   </div>
@@ -493,10 +479,38 @@
                     <span>累计输出</span>
                     <span>{{ formatCharCount(tokenDetailData.totalStreamChars) }}</span>
                   </div>
-                  <div v-if="tokenDetailData.maxContextChars > 0" class="token-detail-row">
-                    <span>最大上下文</span>
-                    <span>{{ formatCharCount(tokenDetailData.maxContextChars) }}</span>
+                  <div v-if="tokenDetailData.usesTokenContext" class="token-detail-row">
+                    <span>已用上下文</span>
+                    <span>{{ formatTokenCount(tokenDetailData.usedContextTokens) }} token</span>
                   </div>
+                  <div v-if="tokenDetailData.usesTokenContext" class="token-detail-row">
+                    <span>总上下文长度</span>
+                    <span>{{ formatTokenCount(tokenDetailData.contextLimitTokens) }} token</span>
+                  </div>
+                  <div
+                    v-if="tokenDetailData.peakContextTokens > 0 && tokenDetailData.peakContextTokens !== tokenDetailData.usedContextTokens"
+                    class="token-detail-row"
+                  >
+                    <span>峰值上下文</span>
+                    <span>{{ formatTokenCount(tokenDetailData.peakContextTokens) }} token</span>
+                  </div>
+                  <template v-if="!tokenDetailData.usesTokenContext">
+                    <div v-if="tokenDetailData.usedContextChars > 0" class="token-detail-row">
+                      <span>已用上下文</span>
+                      <span>{{ formatCharCount(tokenDetailData.usedContextChars) }} 字符</span>
+                    </div>
+                    <div v-if="tokenDetailData.contextLimitChars > 0" class="token-detail-row">
+                      <span>总上下文长度</span>
+                      <span>{{ formatCharCount(tokenDetailData.contextLimitChars) }} 字符</span>
+                    </div>
+                    <div
+                      v-if="tokenDetailData.maxContextChars > 0 && tokenDetailData.maxContextChars !== tokenDetailData.usedContextChars"
+                      class="token-detail-row"
+                    >
+                      <span>峰值上下文</span>
+                      <span>{{ formatCharCount(tokenDetailData.maxContextChars) }} 字符</span>
+                    </div>
+                  </template>
                   <div v-if="tokenDetailData.toolCallCount > 0" class="token-detail-row">
                     <span>工具调用</span>
                     <span>{{ tokenDetailData.toolCallCount }} 次</span>
@@ -777,12 +791,13 @@ import {
   type LongTermMemoryEntry,
 } from "../../services/vibeLongTermMemoryClient";
 import type { ProjectMemoryTab } from "../../composables/useProjectMemory";
-import { CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount, getEventValue } from "../../utils/vibeHelpers";
+import { CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount, formatTokenCount, getEventValue } from "../../utils/vibeHelpers";
 import {
   computeScrollFollowStep,
   prefersReducedMotion,
   scheduleScrollContainerToBottom,
   scrollContainerToBottom,
+  SCROLL_FOLLOW_SNAP_PX,
 } from "../../utils/scrollViewport";
 import { resolveAgentResumeButtonLabel } from "../../services/agentRecovery";
 import { renderMarkdown } from "../../utils/renderMarkdown";
@@ -819,7 +834,20 @@ interface MentionItem {
 interface TokenDetailData {
   assistantCount: number;
   totalStreamChars: number;
+  /** 当前/最近一轮实际占用的上下文字符数 */
+  usedContextChars: number;
+  /** 会话内峰值占用 */
   maxContextChars: number;
+  /** Agent 上下文预算上限（字符） */
+  contextLimitChars: number;
+  /** 真实 token 口径：最近一轮 prompt token 数 */
+  usedContextTokens: number;
+  /** 真实 token 口径：会话内峰值 prompt token 数 */
+  peakContextTokens: number;
+  /** 当前模型真实上下文窗口（token 数） */
+  contextLimitTokens: number;
+  /** 是否有 token 口径数据（供应商上报了 usage） */
+  usesTokenContext: boolean;
   totalMessages: number;
   toolCallCount: number;
   writtenFilesCount: number;
@@ -890,7 +918,7 @@ interface Props {
   activeSessionModelId?: string;
   /** Sticky read-only model understanding of the user demand (from intent classifier). */
   sessionGoal?: string;
-  providerOptions?: Array<{ id: string; name: string; model: string; availableModels?: string[] }>;
+  providerOptions?: Array<{ id: string; name: string; model: string; availableModels?: string[]; modelWindows?: Record<string, number> }>;
   globalModelName: string;
 }
 
@@ -1076,6 +1104,22 @@ function formatProviderModelLabel(providerName: string, model: string): string {
   return modelName || name || "未设置";
 }
 
+/** 全局标签形如「供应商 / 模型」，触发器只要模型段。 */
+function modelSegmentOf(label: string): string {
+  const text = label.trim();
+  const sep = text.lastIndexOf(" / ");
+  return sep >= 0 ? text.slice(sep + 3).trim() || text : text;
+}
+
+/** 触发器只显示模型名（供应商名太长会挤掉它）；供应商信息放 tooltip。 */
+const activeProviderModel = computed(() => {
+  const id = props.activeSessionProviderId.trim();
+  if (!id) return modelSegmentOf(props.globalModelName) || "未设置";
+  const provider = props.providerOptions?.find((p) => p.id === id);
+  if (!provider) return "自定义";
+  return props.activeSessionModelId?.trim() || provider.model || provider.name || "未设置";
+});
+
 const activeProviderLabel = computed(() => {
   const id = props.activeSessionProviderId.trim();
   if (!id) return props.globalModelName.trim() || "未设置";
@@ -1101,12 +1145,6 @@ const providerOptionCount = computed(() =>
 );
 
 const normalizedProviderKeyword = computed(() => providerFilterKeyword.value.trim().toLowerCase());
-
-const showGlobalProviderOption = computed(() => {
-  const keyword = normalizedProviderKeyword.value;
-  if (!keyword) return true;
-  return "使用全局配置".includes(keyword) || (props.globalModelName || "").toLowerCase().includes(keyword);
-});
 
 /** 按关键词过滤：命中供应商名则整组保留，否则只保留命中的模型 */
 const filteredProviderOptions = computed(() => {
@@ -1410,8 +1448,8 @@ function stopFollow() {
 }
 
 /**
- * Spring glide toward bottom. While a run streams, keep the loop warm even at
- * bottom so the next content growth is chased without a restart gap.
+ * Spring glide toward bottom. Settled frames sleep the RAF; content growth
+ * re-wakes via ResizeObserver → followToBottom (no warm idle spin while pinned).
  */
 function stepFollow(ts: number) {
   followRaf = 0;
@@ -1420,16 +1458,11 @@ function stepFollow(ts: number) {
 
   if (prefersReducedMotion()) {
     el.scrollTop = el.scrollHeight;
+    followActive = false;
     followVelocity = 0;
-    if (!props.chatSending) {
-      followActive = false;
-      followLastTs = 0;
-      isAtBottom.value = true;
-      emit("on-chat-scroll");
-      return;
-    }
-    followLastTs = ts;
-    followRaf = requestAnimationFrame(stepFollow);
+    followLastTs = 0;
+    isAtBottom.value = true;
+    emit("on-chat-scroll");
     return;
   }
 
@@ -1449,7 +1482,7 @@ function stepFollow(ts: number) {
     el.scrollTop = nextScrollTop;
   }
 
-  if (settled && !props.chatSending) {
+  if (settled) {
     followActive = false;
     followVelocity = 0;
     followLastTs = 0;
@@ -1464,9 +1497,20 @@ function stepFollow(ts: number) {
 
 /** Animated follow used while a run streams — spring glide, coalesced per frame. */
 function followToBottom() {
-  if (!chatScrollRef.value) return;
+  const el = chatScrollRef.value;
+  if (!el) return;
   isAtBottom.value = true;
   if (followActive) return;
+  if (prefersReducedMotion()) {
+    scrollContainerToBottom(el);
+    return;
+  }
+  const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+  // Already pinned — snap without starting a spring frame.
+  if (maxScroll - el.scrollTop <= SCROLL_FOLLOW_SNAP_PX) {
+    el.scrollTop = maxScroll;
+    return;
+  }
   followActive = true;
   followVelocity = 0;
   followLastTs = 0;

@@ -227,6 +227,66 @@ onBeforeUnmount(() => {
   disposeMermaidRenderer();
 });
 
+async function copyPlainText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // fall through to legacy path
+  }
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+function resetCodeCopyButton(btn: HTMLButtonElement) {
+  btn.textContent = "复制";
+  btn.classList.remove("code-copy-btn--copied", "code-copy-btn--failed");
+}
+
+/** Add a one-click copy button to every fenced code block. */
+function attachCodeCopyButtons(el: HTMLElement) {
+  el.querySelectorAll("pre").forEach((pre) => {
+    if (pre.closest(".mermaid-render") || pre.closest(".tool-summary-content")) return;
+    if (pre.parentElement?.classList.contains("code-block-shell")) return;
+
+    const shell = document.createElement("div");
+    shell.className = "code-block-shell";
+    pre.parentNode?.insertBefore(shell, pre);
+    shell.appendChild(pre);
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "code-copy-btn";
+    btn.title = "复制代码";
+    resetCodeCopyButton(btn);
+    btn.addEventListener("click", () => {
+      const code = pre.querySelector("code")?.textContent ?? pre.textContent ?? "";
+      void copyPlainText(code).then((ok) => {
+        resetCodeCopyButton(btn);
+        if (ok) {
+          btn.textContent = "已复制";
+          btn.classList.add("code-copy-btn--copied");
+        } else {
+          btn.textContent = "复制失败";
+          btn.classList.add("code-copy-btn--failed");
+        }
+        window.setTimeout(() => resetCodeCopyButton(btn), 1600);
+      });
+    });
+    shell.appendChild(btn);
+  });
+}
+
 /** Wrap tool summary blocks (h3[工具摘要] + following ul) into collapsible cards. */
 function wrapToolSummaryBlocks(el: HTMLElement) {
   if (!el.textContent?.includes("工具摘要")) return;
@@ -414,6 +474,7 @@ function schedulePostProcess() {
     nextTick(() => {
       if (effectiveStreaming.value || !markdownRef.value) return;
       wrapToolSummaryBlocks(markdownRef.value);
+      attachCodeCopyButtons(markdownRef.value);
       renderMermaidInContainer(markdownRef.value);
     });
   });
@@ -437,7 +498,7 @@ watch([displayHtml, effectiveStreaming], () => {
     :style="effectiveStreaming && streamingMinHeight ? { minHeight: `${streamingMinHeight}px` } : undefined"
   >
     <!-- Streaming: DOM is patched incrementally via applyStreamingDomPatch() -->
-    <div ref="streamingContentRef" v-show="effectiveStreaming" />
+    <div ref="streamingContentRef" class="msg-markdown-stream-body" v-show="effectiveStreaming" />
     <!-- Final render: full v-html replace (only when streaming is done) -->
     <div v-if="!effectiveStreaming && safeDisplayHtml" v-html="safeDisplayHtml" />
     <AiOptionButtons
@@ -470,6 +531,43 @@ watch([displayHtml, effectiveStreaming], () => {
 
 .msg-markdown--streaming {
   opacity: 0.98;
+}
+
+/*
+ * Streaming caret hangs off the whole stream container (not p:last-child) so it
+ * still shows when the newest block is a code block / list / table / quote.
+ * :deep is required — the streamed children are injected via innerHTML patch.
+ */
+.msg-markdown--streaming :deep(.msg-markdown-stream-body > :last-child::after) {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.12em;
+  border-radius: 1px;
+  background: rgba(88, 166, 255, 0.85);
+  animation: stream-caret-breathe 1.15s ease-in-out infinite;
+}
+
+/* Code blocks end on their own line: put the caret below the box, left-aligned. */
+.msg-markdown--streaming :deep(.msg-markdown-stream-body > pre:last-child::after),
+.msg-markdown--streaming :deep(.msg-markdown-stream-body > .mermaid-render:last-child::after) {
+  display: block;
+  margin: 4px 0 0;
+  vertical-align: baseline;
+}
+
+@keyframes stream-caret-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.15; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .msg-markdown--streaming :deep(.msg-markdown-stream-body > :last-child::after) {
+    animation: none;
+    opacity: 1;
+  }
 }
 
 .msg-markdown :deep(p) {
@@ -549,6 +647,55 @@ watch([displayHtml, effectiveStreaming], () => {
   word-break: break-word;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
+}
+
+/* ─── 代码块一键复制 ──────────────────────────────── */
+.msg-markdown :deep(.code-block-shell) {
+  position: relative;
+}
+
+.msg-markdown :deep(.code-block-shell > pre) {
+  margin: 0.75em 0;
+}
+
+.msg-markdown :deep(.code-copy-btn) {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 1;
+  padding: 2px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 5px;
+  background: rgba(30, 34, 42, 0.85);
+  color: rgba(201, 209, 217, 0.78);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 1.4;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.msg-markdown :deep(.code-block-shell:hover .code-copy-btn),
+.msg-markdown :deep(.code-copy-btn:focus-visible) {
+  opacity: 1;
+}
+
+.msg-markdown :deep(.code-copy-btn:hover) {
+  background: rgba(48, 54, 64, 0.95);
+  color: #fff;
+}
+
+.msg-markdown :deep(.code-copy-btn--copied) {
+  border-color: rgba(63, 185, 80, 0.55);
+  color: #3fb950;
+  opacity: 1;
+}
+
+.msg-markdown :deep(.code-copy-btn--failed) {
+  border-color: rgba(248, 81, 73, 0.55);
+  color: #f85149;
+  opacity: 1;
 }
 
 .msg-markdown :deep(pre) {

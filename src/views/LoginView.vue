@@ -1,3 +1,61 @@
+<template>
+  <div class="login-page">
+    <div class="login-card">
+      <h1>AIALL 服务器登录</h1>
+      <p class="desc">
+        请输入账号 <code>admin</code> 与密码登录。初始密码由服务器首次启动时随机生成并写入
+        <code>~/.config/aiall/server-auth.json</code>。
+      </p>
+      <input
+        v-model="username"
+        type="text"
+        placeholder="账号"
+        autocomplete="username"
+        @keyup.enter="handleLogin"
+      />
+      <input
+        v-model="password"
+        type="password"
+        placeholder="密码"
+        autocomplete="current-password"
+        @keyup.enter="handleLogin"
+      />
+      <button type="button" class="primary" :disabled="busy" @click="handleLogin">
+        <span v-if="busy" class="spinner" aria-hidden="true"></span>
+        {{ busy ? "登录中…" : "登录" }}
+      </button>
+      <span v-if="error" class="login-error">{{ error }}</span>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { serverLogin } from "../services/serverAuth";
+
+const route = useRoute();
+const router = useRouter();
+const username = ref("admin");
+const password = ref("");
+const busy = ref(false);
+const error = ref("");
+
+async function handleLogin() {
+  if (busy.value) return;
+  busy.value = true;
+  error.value = "";
+  const result = await serverLogin(password.value.trim(), username.value.trim() || "admin");
+  busy.value = false;
+  if (result.ok) {
+    const redirect = typeof route.query.redirect === "string" ? route.query.redirect : "/";
+    void router.replace(redirect);
+  } else {
+    error.value = result.error || "登录失败";
+  }
+}
+</script>
+
 <style scoped>
 .login-page {
   min-height: 100vh;

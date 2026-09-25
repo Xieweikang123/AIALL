@@ -132,7 +132,9 @@
           :git-active-repo-path="gitActiveRepoPath || projectPath"
           :git-head-commit="gitHeadCommit"
           :git-error="gitError"
+          @update:git-error="gitError = $event"
           :git-secondary-hint="gitSecondaryHint"
+          @update:git-secondary-hint="gitSecondaryHint = $event"
           :git-branch="gitBranch"
           :git-branches="gitBranches"
           :git-tracking-branch="gitTrackingBranch"
@@ -619,7 +621,9 @@
           :git-active-repo-path="gitActiveRepoPath || projectPath"
           :git-head-commit="gitHeadCommit"
           :git-error="gitError"
+          @update:git-error="gitError = $event"
           :git-secondary-hint="gitSecondaryHint"
+          @update:git-secondary-hint="gitSecondaryHint = $event"
           :git-branch="gitBranch"
           :git-branches="gitBranches"
           :git-tracking-branch="gitTrackingBranch"
@@ -1101,7 +1105,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import "../styles/vibe-coding.scss";
-import { appendStatusDetail, assistantTransientUiClearPatch, truncateDiffPreview, cleanStatusLogText, CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount, isNetworkError, fileName, genId, hasAgentProcessSteps, entryToNode, formatToolMeta, syncRoundGroupsPatch, inferEditorTabKind, displayFilePath } from "../utils/vibeHelpers";
+import { MAX_AGENT_CONTEXT_CHARS } from "../../shared/agentContextLimits";
+import { appendStatusDetail, assistantTransientUiClearPatch, truncateDiffPreview, cleanStatusLogText, CHAT_SCROLL_BOTTOM_THRESHOLD, formatCharCount, formatTokenCount, isNetworkError, fileName, genId, hasAgentProcessSteps, entryToNode, formatToolMeta, syncRoundGroupsPatch, inferEditorTabKind, displayFilePath } from "../utils/vibeHelpers";
 import { gitFileSelectionKey, parseGitFileSelectionKey, gitFileListScopeIsStaged, type GitFileListScope } from "../utils/gitHelpers";
 import { appendDebugLogFile, debugLog, setDebugLogProjectRoot } from "../utils/debugLog";
 import { lsGet, lsGetJson, lsSet, lsSetJson, lsRemove } from "../utils/localStorageSafe";
@@ -1225,6 +1230,7 @@ import {
   loadAiChatBaseFromStorage,
   loadPersistedAiConfigFromStorage,
 } from "../services/aiLocalConfig";
+import { resolveContextWindowTokens } from "../services/modelContextWindow";
 import {
   buildAgentHistoryFromMessages,
   getSessionDiagSnapshot,
@@ -1383,8 +1389,10 @@ function normalizeChatMessages(
         turn: group.turn,
         maxTurns: group.maxTurns,
         narrative: group.narrative,
+        reasoning: group.reasoning,
         modelSteps: group.modelSteps.map((step) => ({ ...step })),
         toolIds: [...group.toolIds],
+        toolNarrativeOffsets: group.toolNarrativeOffsets?.map((entry) => ({ ...entry })),
         request: group.request
           ? { ...group.request, messages: group.request.messages.map((message) => ({ ...message })) }
           : undefined,
@@ -1955,9 +1963,29 @@ const contextMenu = ref({ show: false, x: 0, y: 0, path: "" });
 const gitFileContextMenu = ref({ show: false, x: 0, y: 0, path: "", scope: "modified" as GitFileListScope });
 
 const aiConfig = ref({ endpoint: "", apiKey: "", model: "", providerName: "" });
-const providerOptions = ref<Array<{ id: string; name: string; model: string; availableModels?: string[] }>>([]);
+const providerOptions = ref<Array<{ id: string; name: string; model: string; availableModels?: string[]; modelWindows?: Record<string, number>; modelWindowOverrides?: Record<string, number> }>>([]);
 /** 全局默认展示用（不跟 applySessionAiConfig 跑时覆盖走）；含「供应商 / 模型」。 */
 const globalModelLabel = ref("");
+
+/** 当前生效模型从 `/models` 拿到的真实上下文窗口（token）；无则 undefined，由静态表兜底。 */
+const modelWindowForLabel = computed<number | undefined>(() => {
+  const model = activeSessionModelId.value.trim() || aiConfig.value.model.trim();
+  if (!model) return undefined;
+  const providerId = activeSessionProviderId.value.trim();
+  if (providerId) {
+    const provider = providerOptions.value.find((p) => p.id === providerId);
+    return provider?.modelWindowOverrides?.[model] ?? provider?.modelWindows?.[model];
+  }
+  for (const provider of providerOptions.value) {
+    const override = provider.modelWindowOverrides?.[model];
+    if (override) return override;
+  }
+  for (const provider of providerOptions.value) {
+    const window = provider.modelWindows?.[model];
+    if (window) return window;
+  }
+  return undefined;
+});
 
 const configReady = computed(() => Boolean(aiConfig.value.endpoint.trim()) && Boolean(aiConfig.value.model.trim()));
 const apiKeyReady = computed(() => Boolean(aiConfig.value.apiKey.trim()));
@@ -2267,6 +2295,9 @@ const showTokenDetail = ref(false);
 const tokenDetailData = computed(() => {
   let totalStreamChars = 0;
   let maxContextChars = 0;
+  let usedContextChars = 0;
+  let peakContextTokens = 0;
+  let usedContextTokens = 0;
   let assistantCount = 0;
   let toolCallCount = 0;
   let writtenFilesSet: Set<string> | null = null;
@@ -2276,6 +2307,9 @@ const tokenDetailData = computed(() => {
   let cacheHitTokens = 0;
   let cacheHitRatio: number | undefined;
 
+  // 依赖 live revision，运行中上下文变化时刷新「已用」
+  void agentLiveRevision.value;
+
   for (const msg of chatMessages.value) {
     if (msg.role === "assistant") {
       assistantCount++;
@@ -2284,6 +2318,13 @@ const tokenDetailData = computed(() => {
       }
       if (msg.contextChars && msg.contextChars > 0) {
         maxContextChars = Math.max(maxContextChars, msg.contextChars);
+        usedContextChars = msg.contextChars;
+      }
+      if (msg.peakContextTokens && msg.peakContextTokens > 0) {
+        peakContextTokens = Math.max(peakContextTokens, msg.peakContextTokens);
+      }
+      if (msg.contextTokens && msg.contextTokens > 0) {
+        usedContextTokens = msg.contextTokens;
       }
       if (msg.tools?.length) {
         toolCallCount += msg.tools.length;
@@ -2310,10 +2351,32 @@ const tokenDetailData = computed(() => {
 
   if (assistantCount === 0) return null;
 
+  const liveContextChars = chatSending.value ? getActiveLiveContextChars() : 0;
+  if (liveContextChars > 0) {
+    usedContextChars = liveContextChars;
+    maxContextChars = Math.max(maxContextChars, liveContextChars);
+  }
+
+  // 真实 token 视角优先：模型窗口按当前模型解析，已用/峰值取供应商 usage。
+  const modelForWindow =
+    activeSessionModelId.value.trim() || aiConfig.value.model.trim();
+  const { tokens: contextLimitTokens } = resolveContextWindowTokens(
+    modelForWindow,
+    modelWindowForLabel.value,
+  );
+  const peakTokens = Math.max(peakContextTokens, usedContextTokens);
+
   return {
     assistantCount,
     totalStreamChars,
+    usedContextChars,
     maxContextChars,
+    contextLimitChars: MAX_AGENT_CONTEXT_CHARS,
+    // token 口径（真实）
+    usedContextTokens,
+    peakContextTokens: peakTokens,
+    contextLimitTokens,
+    usesTokenContext: usedContextTokens > 0,
     totalMessages: chatMessages.value.length,
     toolCallCount,
     writtenFilesCount: writtenFilesSet?.size ?? 0,
@@ -2396,6 +2459,12 @@ function reloadAiConfig() {
       name: p.name.trim() || "默认供应商",
       model: p.model.trim(),
       ...(p.availableModels?.length ? { availableModels: [...p.availableModels] } : {}),
+      ...(p.modelWindows && Object.keys(p.modelWindows).length
+        ? { modelWindows: { ...p.modelWindows } }
+        : {}),
+      ...(p.modelWindowOverrides && Object.keys(p.modelWindowOverrides).length
+        ? { modelWindowOverrides: { ...p.modelWindowOverrides } }
+        : {}),
     }));
   refreshGlobalModelLabelFromLocal();
   void refreshServerAiConfig();
@@ -3392,6 +3461,7 @@ watch(
 const totalTokenUsage = computed(() => {
   let totalStreamChars = 0;
   let maxContextChars = 0;
+  let maxContextTokens = 0;
   let hasTokenData = false;
 
   for (const msg of chatMessages.value) {
@@ -3403,6 +3473,9 @@ const totalTokenUsage = computed(() => {
       if (msg.contextChars && msg.contextChars > 0) {
         maxContextChars = Math.max(maxContextChars, msg.contextChars);
         hasTokenData = true;
+      }
+      if (msg.peakContextTokens && msg.peakContextTokens > 0) {
+        maxContextTokens = Math.max(maxContextTokens, msg.peakContextTokens);
       }
     }
   }
@@ -3416,11 +3489,26 @@ const totalTokenUsage = computed(() => {
   if (totalStreamChars > 0) {
     parts.push(`${formatCharCount(totalStreamChars)} 输出`);
   }
-  const contextChars = chatSending.value && currentRunContextChars > 0
-    ? currentRunContextChars
-    : maxContextChars;
-  if (contextChars > 0) {
-    parts.push(`${formatCharCount(contextChars)} ${chatSending.value ? "本轮上下文" : "峰值上下文"}`);
+  // 有真实 token 时展示 token 口径（已用 / 模型窗口），否则退回字符口径。
+  if (maxContextTokens > 0) {
+    const model = activeSessionModelId.value.trim() || aiConfig.value.model.trim();
+    const { tokens: limit } = resolveContextWindowTokens(model, modelWindowForLabel.value);
+    parts.push(
+      `${formatTokenCount(maxContextTokens)} / ${formatTokenCount(limit)} ${
+        chatSending.value ? "本轮上下文" : "上下文"
+      }`,
+    );
+  } else {
+    const contextChars = chatSending.value && currentRunContextChars > 0
+      ? currentRunContextChars
+      : maxContextChars;
+    if (contextChars > 0) {
+      parts.push(
+        `${formatCharCount(contextChars)} / ${formatCharCount(MAX_AGENT_CONTEXT_CHARS)} ${
+          chatSending.value ? "本轮上下文" : "上下文"
+        }`,
+      );
+    }
   }
   return parts.join(" · ");
 });
@@ -3598,8 +3686,8 @@ async function openProjectByPath(dirPath: string) {
     // 串行执行，避免浏览器连接池阻塞
     const tDir0 = performance.now();
     log("dir-start");
-    // Web 模式始终走 agent-server 后端（showDirectoryPicker 短名不可靠）
-    // Tauri 桌面模式优先走浏览器 handle 加载文件树
+    // Web / 桌面均走后端列目录；桌面选目录已改为 system_pick_folder（完整路径）。
+    // isWebProjectActive 仅保留兼容：若仍有浏览器 handle，可走本地树。
     let items: TreeNode[];
     if (!isTauriEnv() || !isWebProjectActive()) {
       items = await autoRetryWithCountdown(

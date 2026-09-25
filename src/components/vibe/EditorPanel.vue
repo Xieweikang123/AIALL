@@ -149,9 +149,11 @@
     <div v-else-if="fileLoadError" class="editor-empty error">{{ fileLoadError }}</div>
 
     <div
-      v-else-if="showPreview && isMarkdownFile"
+      v-else-if="showPreview && isMarkdownFile && !showDiffMode"
       class="code-editor markdown-preview"
       v-html="previewHtml"
+      @mouseup="onPreviewSelection($event)"
+      @dblclick="onPreviewSelection($event)"
     />
 
     <CodeMonacoDiffEditor
@@ -679,6 +681,35 @@ const previewHtml = computed(() => {
 watch(isMarkdownFile, (val) => {
   if (!val) showPreview.value = false;
 });
+
+/** 预览是 v-html 的普通 DOM，无 Monaco 的 select 事件，需自行把选区转成引用锚点。 */
+function resolvePreviewSelectionAnchor(): MonacoSelectionAnchor | null {
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+  const range = selection.getRangeAt(0);
+  const rects = Array.from(range.getClientRects()).filter((r) => r.width > 0 || r.height > 0);
+  const rect = rects[0] ?? range.getBoundingClientRect();
+  if (!rect || (rect.width === 0 && rect.height === 0)) return null;
+  return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+}
+
+function emitPreviewSelection() {
+  const text = window.getSelection()?.toString().trim();
+  if (!text) return;
+  const anchor = resolvePreviewSelectionAnchor();
+  if (!anchor) return;
+  emit("editor-select", text, anchor);
+}
+
+function onPreviewSelection(event: MouseEvent) {
+  if (event.target instanceof Element && event.target.closest("a, img")) return;
+  // 双击时 mouseup 阶段选区尚未就绪，推迟到 microtask（dblclick 会再触发一次）
+  if (event.detail >= 2) {
+    queueMicrotask(emitPreviewSelection);
+    return;
+  }
+  emitPreviewSelection();
+}
 
 function resolveTabKind(tab: OpenTab): EditorTabKind {
   return tab.kind ?? inferEditorTabKind(tab.path);

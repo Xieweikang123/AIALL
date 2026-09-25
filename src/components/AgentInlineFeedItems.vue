@@ -187,6 +187,7 @@ import { agentDebugEnabled } from "../utils/agentDebugFlag";
 import {
   computeScrollFollowStep,
   prefersReducedMotion,
+  SCROLL_FOLLOW_SNAP_PX,
 } from "../utils/scrollViewport";
 import type { AgentRoundTool } from "../services/agentRoundGroups";
 import type { AiOption } from "../utils/parseAiOptions";
@@ -424,8 +425,8 @@ function stopAllReasoningFollows() {
 
 /**
  * While thinking inside the 3-line viewport, spring-chase the newest lines.
- * Keep the RAF warm for the whole live window so content growth never pays a
- * restart gap (the old smooth/auto hybrid stuttered on burst deltas).
+ * Settled frames sleep the RAF; text growth / ResizeObserver re-wakes via
+ * measureReasoningBody → pinReasoningScroll (no warm idle spin while pinned).
  */
 function pinReasoningScroll(key: string, el?: HTMLElement | null) {
   if (!isReasoningLivePinned(key)) {
@@ -446,12 +447,17 @@ function pinReasoningScroll(key: string, el?: HTMLElement | null) {
     return;
   }
 
-  let state = reasoningFollow.get(key);
-  if (!state) {
-    state = { raf: 0, velocity: 0, lastTs: 0 };
-    reasoningFollow.set(key, state);
+  const existing = reasoningFollow.get(key);
+  // Already chasing, or already pinned — avoid a no-op spring tick.
+  if (existing?.raf) return;
+  if (maxScroll - target.scrollTop <= SCROLL_FOLLOW_SNAP_PX) {
+    target.scrollTop = maxScroll;
+    if (existing) stopReasoningFollow(key);
+    return;
   }
-  if (state.raf) return;
+
+  const state = existing ?? { raf: 0, velocity: 0, lastTs: 0 };
+  if (!existing) reasoningFollow.set(key, state);
   state.raf = requestAnimationFrame((ts) => stepReasoningFollow(key, ts));
 }
 
@@ -476,7 +482,7 @@ function stepReasoningFollow(key: string, ts: number) {
   const dt = Math.min(0.064, Math.max(0.001, (ts - last) / 1000));
   state.lastTs = ts;
 
-  const { nextScrollTop, velocity } = computeScrollFollowStep(
+  const { nextScrollTop, velocity, settled } = computeScrollFollowStep(
     el.scrollTop,
     el.scrollHeight,
     el.clientHeight,
@@ -492,8 +498,10 @@ function stepReasoningFollow(key: string, ts: number) {
     el.scrollTop = nextScrollTop;
   }
 
-  // Keep warm for the whole live window so the next line growth is chased
-  // without a restart gap (isReasoningLivePinned is re-checked each frame).
+  if (settled) {
+    stopReasoningFollow(key);
+    return;
+  }
   state.raf = requestAnimationFrame((nextTs) => stepReasoningFollow(key, nextTs));
 }
 
@@ -671,17 +679,6 @@ function toggleReasoning(key: string) {
   color: rgba(240, 245, 250, 0.96);
 }
 
-.inline-feed-markdown--answer :deep(.msg-markdown--streaming p:last-child::after) {
-  content: "";
-  display: inline-block;
-  width: 2px;
-  height: 1em;
-  margin-left: 2px;
-  vertical-align: -0.12em;
-  background: rgba(88, 166, 255, 0.85);
-  animation: stream-caret-blink 1s step-end infinite;
-}
-
 @keyframes stream-caret-blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0; }
@@ -811,8 +808,8 @@ function toggleReasoning(key: string) {
 /*
  * Live thinking: stick newest lines at the bottom; fade older text out the top
  * so the viewport feels like a rising teleprompter instead of a hard crop.
- * scroll-behavior stays auto — stick-to-bottom is driven by the spring RAF loop,
- * not native smooth scroll (which cancels itself on burst deltas).
+ * scroll-behavior stays auto — stick-to-bottom is driven by a settle-and-sleep
+ * spring RAF (re-woken on content growth), not native smooth scroll.
  */
 .stream-reasoning-body--clamped.stream-reasoning-body--live {
   scroll-behavior: auto;
