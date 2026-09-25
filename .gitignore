@@ -48,6 +48,7 @@ pi-ref/
 ## debug artifacts
 .debug/
 .vibe-chat-debug.json
+scripts/tmp-*
 
 ## local user data (icon templates screenshots etc.)
 data/icon-templates/images/*
