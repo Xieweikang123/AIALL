@@ -5,6 +5,7 @@ import {
   decideFollowAfterContentGrowth,
   decideFollowAfterUserInput,
   isTrulyAtBottom,
+  shouldRecoverFollowOnScroll,
 } from "./chatFollowScroll";
 
 /** 视口高度（真实日志里是 688）。 */
@@ -85,6 +86,45 @@ describe("decideFollowAfterContentGrowth", () => {
   it("未跟随时内容增长且已触底 → 恢复跟随", () => {
     const s = atBottomState(1200);
     expect(decideFollowAfterContentGrowth({ ...s, wasFollowing: false })).toBe(true);
+  });
+});
+
+describe("shouldRecoverFollowOnScroll", () => {
+  it("已跟随时恒不恢复（防止程序滚动/内容增长干扰跟随）", () => {
+    // 无论几何量如何，跟随时都不能被 scroll 事件改变状态。
+    expect(
+      shouldRecoverFollowOnScroll({ scrollTop: 0, scrollHeight: 1200, clientHeight: VIEW, isFollowing: true }),
+    ).toBe(false);
+    expect(
+      shouldRecoverFollowOnScroll({ scrollTop: 512, scrollHeight: 1200, clientHeight: VIEW, isFollowing: true }),
+    ).toBe(false);
+  });
+
+  it("未跟随时滚到真触底 → 恢复跟随", () => {
+    const s = atBottomState(1200);
+    expect(shouldRecoverFollowOnScroll({ ...s, isFollowing: false })).toBe(true);
+  });
+
+  it("未跟随时仍未触底 → 保持不跟随", () => {
+    const s = atBottomState(1200, 100);
+    expect(shouldRecoverFollowOnScroll({ ...s, isFollowing: false })).toBe(false);
+  });
+
+  it("回归：用户上翻后滚回底部应恢复（滚到底后无新 wheel 事件）", () => {
+    // 用户上翻 → 停止跟随
+    expect(
+      decideFollowAfterUserInput({
+        scrollTop: 100,
+        scrollHeight: 1200,
+        clientHeight: VIEW,
+        wasFollowing: true,
+      }),
+    ).toBe(false);
+
+    // 用户滚回底部：最后那个 wheel 事件的 rAF 可能还差几像素 → 判定不触底，
+    // 但随后的 scroll 事件会带他到真触底位置，这里必须能恢复。
+    const bottom = atBottomState(1200);
+    expect(shouldRecoverFollowOnScroll({ ...bottom, isFollowing: false })).toBe(true);
   });
 });
 

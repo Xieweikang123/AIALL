@@ -66,3 +66,25 @@ export function decideFollowAfterContentGrowth(input: {
   if (wasFollowing) return true;
   return isTrulyAtBottom(scrollTop, scrollHeight, clientHeight, tolerance);
 }
+
+/**
+ * 滚动事件中「是否应恢复跟随」的判定。
+ *
+ * 返回 true 仅当：当前**未跟随** 且 已真触底。
+ * 未跟随时检测触底是必需的 —— 用户滚到底后往往不再产生新的 wheel 事件，
+ * 只靠用户输入事件判定会漏掉最后一次，表现为「滚回底部却不再跟随」。
+ *
+ * 已跟随时恒返回 false：滚动事件在跟随中由程序自身触发（写 scrollTop）或内容增长触发，
+ * 此时的 remaining 是弹簧瞬时落后，绝不能据此改变跟随状态（历史 bug 根因）。
+ */
+export function shouldRecoverFollowOnScroll(input: {
+  scrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
+  isFollowing: boolean;
+  tolerance?: number;
+}): boolean {
+  const { scrollTop, scrollHeight, clientHeight, isFollowing, tolerance } = input;
+  if (isFollowing) return false;
+  return isTrulyAtBottom(scrollTop, scrollHeight, clientHeight, tolerance);
+}
