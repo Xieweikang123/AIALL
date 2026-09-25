@@ -328,13 +328,33 @@ function handleTurnResponseEvent(event: EventOf<"turn_response">, assistantMsg: 
   if (event.data.usage) {
     const u = event.data.usage;
     const prev = assistantMsg.cacheUsage;
+    const promptTokens = (prev?.promptTokens ?? 0) + (u.promptTokens ?? 0);
+    const cachedTokens = (prev?.cachedTokens ?? 0) + (u.cachedTokens ?? 0);
+    const cacheReadTokens = (prev?.cacheReadTokens ?? 0) + (u.cacheReadTokens ?? 0);
+    const cacheCreationTokens = (prev?.cacheCreationTokens ?? 0) + (u.cacheCreationTokens ?? 0);
+    // Cumulative ratio over the run, matching the summed token counts. The two
+    // provider styles use different denominators (Anthropic reports non-cached
+    // input separately), so pick the style based on which fields were reported.
+    const hitRatio = cacheReadTokens > 0
+      ? (() => {
+          const denom = cacheReadTokens + cacheCreationTokens + promptTokens;
+          return denom > 0 ? cacheReadTokens / denom : u.hitRatio;
+        })()
+      : promptTokens > 0
+        ? cachedTokens / promptTokens
+        : u.hitRatio;
     assistantMsg.cacheUsage = {
-      promptTokens: (prev?.promptTokens ?? 0) + (u.promptTokens ?? 0),
-      cachedTokens: (prev?.cachedTokens ?? 0) + (u.cachedTokens ?? 0),
-      cacheReadTokens: (prev?.cacheReadTokens ?? 0) + (u.cacheReadTokens ?? 0),
-      cacheCreationTokens: (prev?.cacheCreationTokens ?? 0) + (u.cacheCreationTokens ?? 0),
-      hitRatio: u.hitRatio,
+      promptTokens,
+      cachedTokens,
+      cacheReadTokens,
+      cacheCreationTokens,
+      hitRatio,
     };
+    // Real context occupancy for this turn = the prompt tokens the provider saw.
+    if (u.promptTokens && u.promptTokens > 0) {
+      assistantMsg.contextTokens = u.promptTokens;
+      assistantMsg.peakContextTokens = Math.max(assistantMsg.peakContextTokens ?? 0, u.promptTokens);
+    }
   }
   if (shouldMinimizeRunUiPatch(assistantMsg)) {
     scheduleMinimizedRunUiPatch(sessionId, msgId, "full");

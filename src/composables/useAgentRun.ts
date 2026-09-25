@@ -357,6 +357,10 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (run?.assistantMsg.role === "assistant") {
       applyInferredAgentRecovery(run.assistantMsg);
       Object.assign(run.assistantMsg, assistantTransientUiClearPatch());
+      // 收尾时兜底清掉仍 running 的工具行：后端 panic / 断连时 tool_end 永不到达，
+      // 不清理会留下永久「执行中 · Ns」僵尸卡片（且会随落盘固化）。
+      // 必须在 patchAssistantMsg 之前，否则 patch 带的是旧状态。
+      stallRecovery.settleRunningTools(run.assistantMsg);
       patchAssistantMsg(
         run.assistantMsg.id,
         {
@@ -366,6 +370,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
           agentRecoveryDismissed: run.assistantMsg.agentRecoveryDismissed,
           content: run.assistantMsg.content,
           activityExpanded: run.assistantMsg.activityExpanded,
+          tools: run.assistantMsg.tools ? [...run.assistantMsg.tools] : undefined,
           ...assistantTransientUiClearPatch(),
           ...syncRoundGroupsPatch(run.assistantMsg),
         },

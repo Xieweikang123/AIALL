@@ -47,6 +47,29 @@ export type AgentProgressSource = {
   writtenFiles?: string[];
 };
 
+/**
+ * 把仍标记为 `running` 的工具行就地收尾，返回被收尾的条数。
+ *
+ * 只置 `running = false`、**不写 `ok`**：`cursorActionClass` 会把
+ * 「非 running 且 ok 缺失」判为中性 unknown（结果未回传），语义正确；
+ * 若写 `ok: false` 会被误画成真实失败。
+ *
+ * 场景：run 收尾时后端已 panic / SSE 已断连，`tool_end` 永远不会到达，
+ * 不清理会留下永久「执行中 · Ns」的僵尸卡片（且随会话落盘固化）。
+ */
+export function settleRunningTools(
+  msg: Pick<AgentProgressSource, "tools">,
+): number {
+  let settled = 0;
+  for (const tool of msg.tools ?? []) {
+    if (tool.running) {
+      tool.running = false;
+      settled += 1;
+    }
+  }
+  return settled;
+}
+
 /** Reason persisted when Vite HMR or page unload interrupts an in-flight agent run. */
 export const HMR_INTERRUPT_REASON = "页面刷新或热更新导致运行中断";
 

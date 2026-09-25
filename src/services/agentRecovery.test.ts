@@ -51,7 +51,55 @@ import {
   resolveOriginalTaskFromResumePrompt,
   resolveResumeOriginalUserPrompt,
   summarizeAgentProgress,
+  settleRunningTools,
 } from "./agentRecovery";
+
+describe("settleRunningTools", () => {
+  it("clears running flags without writing ok", () => {
+    // 回归：后端 panic / 断连时 tool_end 永不到达，run 收尾必须清掉 running，
+    // 否则留下永久「执行中 · Ns」僵尸卡片。
+    const msg = {
+      tools: [
+        { id: "1", name: "run_command", running: true },
+        { id: "2", name: "read_file", running: false, ok: true, summary: "ok" },
+        { id: "3", name: "grep", running: true, summary: "" },
+      ],
+    };
+    const settled = settleRunningTools(msg as never);
+    expect(settled).toBe(2);
+    expect(msg.tools[0]!.running).toBe(false);
+    expect(msg.tools[2]!.running).toBe(false);
+    // 不得写入 ok —— 缺失 ok 才会被渲染层判为中性 unknown（结果未回传），
+    // 写 ok:false 会被误画成真实失败。
+    expect(msg.tools[0]!.ok).toBeUndefined();
+    expect(msg.tools[2]!.ok).toBeUndefined();
+    // 已完成的行保持原样
+    expect(msg.tools[1]!.ok).toBe(true);
+    expect(msg.tools[1]!.running).toBe(false);
+  });
+
+  it("returns 0 and is safe when nothing is running", () => {
+    const msg = { tools: [{ id: "1", running: false, ok: true }] };
+    expect(settleRunningTools(msg as never)).toBe(0);
+  });
+
+  it("handles missing or empty tools", () => {
+    expect(settleRunningTools({} as never)).toBe(0);
+    expect(settleRunningTools({ tools: [] } as never)).toBe(0);
+    expect(settleRunningTools({ tools: undefined } as never)).toBe(0);
+  });
+
+  it("clears all running rows when every tool is still running", () => {
+    const msg = {
+      tools: [
+        { id: "1", running: true },
+        { id: "2", running: true },
+      ],
+    };
+    expect(settleRunningTools(msg as never)).toBe(2);
+    expect(msg.tools.every((t) => !t.running)).toBe(true);
+  });
+});
 
 describe("isRecoverableAgentError", () => {
   it("detects common fetch / network failures", () => {

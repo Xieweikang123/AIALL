@@ -23,6 +23,7 @@ import {
   resolveModelWaitStallMs,
   shouldSilentAutoContinue,
   formatAgentTransportErrorMessage,
+  settleRunningTools as settleRunningToolsCore,
 } from "../services/agentRecovery";
 import { clearPendingAgentRun } from "../services/agentHmrRecovery";
 import { syncRoundGroupsPatch } from "../utils/vibeHelpers";
@@ -338,10 +339,16 @@ export function useAgentStallRecovery(deps: UseAgentStallRecoveryDeps) {
     }
   }
 
+  /**
+   * 把仍标记为 running 的工具行收尾（委托纯函数，便于单测）。
+   * 只置 `running = false`、不写 `ok`，让渲染层走中性 unknown。
+   */
+  function settleRunningTools(assistantMsg: VibeChatMessage) {
+    settleRunningToolsCore(assistantMsg);
+  }
+
   function prepareAssistantForSilentContinue(assistantMsg: VibeChatMessage) {
-    for (const tool of assistantMsg.tools || []) {
-      if (tool.running) tool.running = false;
-    }
+    settleRunningTools(assistantMsg);
   }
 
   function trySilentContinue(sessionId: string, assistantMsg: VibeChatMessage, reason: string): boolean {
@@ -523,6 +530,7 @@ export function useAgentStallRecovery(deps: UseAgentStallRecoveryDeps) {
     scheduleAutoResume,
     maybeAutoResumeLastRecoverableAssistant,
     prepareAssistantForSilentContinue,
+    settleRunningTools,
     trySilentContinue,
     handleRecoverableInterruption,
     applyRecoverableAgentFailure,
