@@ -42,13 +42,13 @@
       </div>
       <div class="git-remote-actions">
         <button type="button" class="git-remote-btn" :class="{ 'git-remote-btn--loading': gitRemoteAction === 'fetch' }" :disabled="!!gitRemoteAction || !gitRemotes.length" @click="$emit('do-fetch')">
-          {{ gitRemoteAction === 'fetch' ? '…' : 'Fetch' }}
+          Fetch
         </button>
         <button type="button" class="git-remote-btn git-remote-btn--pull" :class="{ 'git-remote-btn--loading': gitRemoteAction === 'pull' }" :disabled="!!gitRemoteAction || !gitRemotes.length" @click="$emit('do-pull')">
-          {{ gitRemoteAction === 'pull' ? '…' : 'Pull' }}
+          Pull
         </button>
         <button type="button" class="git-remote-btn git-remote-btn--push" :class="{ 'git-remote-btn--loading': gitRemoteAction === 'push', 'git-remote-btn--push--loading': gitRemoteAction === 'push' }" :disabled="!!gitRemoteAction || !gitRemotes.length" @click="$emit('do-push')">
-          {{ gitRemoteAction === 'push' ? '…' : 'Push' }}
+          Push
         </button>
       </div>
       <button
