@@ -1,3 +1,29 @@
+/// 按【字符数】截断，超出部分以「…」结尾。
+///
+/// 不能用 `&s[..n]`：那按字节切，中文等多字节字符会被劈成两半并触发
+/// `byte index N is not a char boundary` panic（见 classifier.rs 历史 panic）。
+pub(crate) fn truncate_chars(s: &str, max_chars: usize) -> String {
+    let mut out = String::with_capacity(s.len().min(max_chars * 4));
+    for (idx, ch) in s.chars().enumerate() {
+        if idx == max_chars {
+            out.push('…');
+            return out;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// 按【字符数】截断，仅当发生截断时才追加「…」后缀（后缀可自定义）。
+pub(crate) fn truncate_chars_suffix(s: &str, max_chars: usize, suffix: &str) -> String {
+    if s.chars().count() <= max_chars {
+        return s.to_string();
+    }
+    let mut out: String = s.chars().take(max_chars).collect();
+    out.push_str(suffix);
+    out
+}
+
 /// tool_summary — 生成简洁的工具执行结果中文摘要
 pub fn tool_summary(name: &str, result: &str) -> String {
     if result.starts_with("错误：") {
@@ -47,10 +73,7 @@ pub fn tool_summary(name: &str, result: &str) -> String {
         }
         "patch_file" => {
             let line = result.replace('\n', " ").trim().to_string();
-            if line.len() > 60 {
-                return format!("{}…", &line[..60]);
-            }
-            return line;
+            return truncate_chars(&line, 60);
         }
         "delete_file" => {
             if result.starts_with("已删除 ") {
@@ -66,8 +89,8 @@ pub fn tool_summary(name: &str, result: &str) -> String {
                 .replace(|c: char| c.is_whitespace(), " ")
                 .trim()
                 .to_string();
-            if one_line.len() > 60 {
-                return format!("{}…", &one_line[..60]);
+            if one_line.chars().count() > 60 {
+                return truncate_chars(&one_line, 60);
             }
             if one_line.is_empty() {
                 return "执行完成".into();
@@ -116,15 +139,114 @@ pub fn tool_summary(name: &str, result: &str) -> String {
         .replace(|c: char| c.is_whitespace(), " ")
         .trim()
         .to_string();
-    if one_line.len() > 120 {
-        return format!("{}…", &one_line[..120]);
-    }
-    one_line
+    truncate_chars(&one_line, 120)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── truncate_chars / 多字节边界（回归：曾因 &s[..n] 按字节切而 panic） ──
+    /// 构造一个「第 60 字节落在多字节字符中间」的串，复现历史 panic。
+    /// 59 个 ASCII 字节 + 中文「为」(3 字节) → 字节 59..61，切点在字符内部。
+    fn multibyte_boundary_string() -> String {
+        format!("{}为xyz", "a".repeat(59))
+    }
+
+    #[test]
+    fn test_truncate_chars_does_not_panic_on_multibyte_boundary() {
+        let s = multibyte_boundary_string();
+        assert!(s.len() > 60, "前置条件：字节数需超过 60");
+        assert!(!s.is_char_boundary(60), "前置条件：第 60 字节必须落在字符内部");
+        // 旧实现 &s[..60] 会在这里 panic；新实现必须安全返回。
+        let out = truncate_chars(&s, 60);
+        assert!(out.ends_with('…'));
+        assert_eq!(out.chars().count(), 61); // 60 字符 + 省略号
+        assert!(out.starts_with(&"a".repeat(59)));
+    }
+
+    #[test]
+    fn test_truncate_chars_keeps_short_string_intact() {
+        assert_eq!(truncate_chars("短", 60), "短");
+        assert_eq!(truncate_chars("", 60), "");
+        assert_eq!(truncate_chars("abc", 3), "abc");
+    }
+
+    #[test]
+    fn test_truncate_chars_counts_chars_not_bytes() {
+        // 60 个中文 = 180 字节；按字节切会全被截掉，按字符切应完整保留。
+        let s = "中".repeat(60);
+        assert_eq!(s.len(), 180);
+        assert_eq!(truncate_chars(&s, 60), s);
+        let out = truncate_chars(&s, 59);
+        assert_eq!(out.chars().count(), 60);
+    }
+
+    #[test]
+    fn test_truncate_chars_suffix_only_when_truncated() {
+        let s = multibyte_boundary_string();
+        assert_eq!(truncate_chars_suffix("short", 60, "…"), "short");
+        let out = truncate_chars_suffix(&s, 60, "…");
+        assert!(out.ends_with('…'));
+        assert_eq!(out.chars().count(), 61);
+    }
+
+    // ── run_command 摘要（panic 现场） ──
+    #[test]
+    fn test_tool_summary_run_command_multibyte_boundary_no_panic() {
+        // 回归：真实 panic 场景 —— run_command 输出含中文且越过 60 字节切点。
+        let git_log = "a1b2c3d 修复了工具卡片卡在执行中的问题\n".repeat(6);
+        let out = tool_summary("run_command", &git_log);
+        assert!(!out.is_empty());
+        assert!(out.chars().count() <= 61, "应截断到 60 字符 + 省略号");
+    }
+
+    #[test]
+    fn test_tool_summary_run_command_multibyte_exact_boundary() {
+        let out = tool_summary("run_command", &multibyte_boundary_string());
+        assert!(out.ends_with('…'));
+        assert_eq!(out.chars().count(), 61);
+    }
+
+    #[test]
+    fn test_tool_summary_run_command_short_unchanged() {
+        assert_eq!(tool_summary("run_command", "abc"), "abc");
+        // 空输出走兜底文案（见 run_command 分支末尾）。
+        assert_eq!(tool_summary("run_command", ""), "执行完成");
+        // 纯空白同理被 trim 成空 → 兜底文案。
+        assert_eq!(tool_summary("run_command", "   \n\t "), "执行完成");
+    }
+
+    #[test]
+    fn test_tool_summary_run_command_flattens_newlines_to_single_space() {
+        // 每个空白字符各自替换为空格（不塌缩连续空白）。
+        assert_eq!(tool_summary("run_command", "a\n\nb\tc"), "a  b c");
+        assert_eq!(tool_summary("run_command", "a\nb"), "a b");
+    }
+
+    // ── patch_file 摘要（同类雷） ──
+    #[test]
+    fn test_tool_summary_patch_file_multibyte_boundary_no_panic() {
+        let out = tool_summary("patch_file", &multibyte_boundary_string());
+        assert!(out.ends_with('…'));
+        assert_eq!(out.chars().count(), 61);
+    }
+
+    #[test]
+    fn test_tool_summary_patch_file_short_unchanged() {
+        assert_eq!(tool_summary("patch_file", "已修改 a.ts"), "已修改 a.ts");
+    }
+
+    // ── 兜底分支 120 字符（panic 现场） ──
+    #[test]
+    fn test_tool_summary_fallback_120_multibyte_boundary_no_panic() {
+        // 119 字节 ASCII + 中文 → 第 120 字节落在字符内部（历史 panic: index 120）。
+        let s = format!("{}为xyz", "a".repeat(119));
+        assert!(!s.is_char_boundary(120));
+        let out = tool_summary("unknown_tool", &s);
+        assert!(out.ends_with('…'));
+        assert_eq!(out.chars().count(), 121);
+    }
 
     // ── list_dir ──
     #[test]
@@ -244,9 +366,21 @@ mod tests {
     fn test_tool_summary_patch_file_long_truncated() {
         let r = "已替换 ".to_string() + &"x".repeat(60) + " 完成。";
         let result = tool_summary("patch_file", &r);
-        // 60 chars truncated + '…' = 61 chars = 63 bytes ('…' is 3 bytes)
-        assert_eq!(result.len(), 63);
+        // 按【字符】截断：60 字符 + '…' = 61 字符。
+        // （旧实现按 60 字节切，此处恰好未落在字符内部所以没 panic，但语义是错的。）
+        assert_eq!(result.chars().count(), 61);
         assert!(result.ends_with('…'));
+        assert!(result.starts_with("已替换 "));
+    }
+
+    #[test]
+    fn test_tool_summary_patch_file_multibyte_never_panics() {
+        // 回归：中文 diff 摘要越过 60 字节切点，旧实现 &line[..60] 会 panic。
+        for filler in [55usize, 56, 57, 58, 59, 60, 61] {
+            let r = format!("已替换 {}{}", "x".repeat(filler), "完成");
+            let out = tool_summary("patch_file", &r);
+            assert!(!out.is_empty());
+        }
     }
 
     #[test]
