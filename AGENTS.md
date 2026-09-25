@@ -275,6 +275,27 @@ AIALL 的 Vibe 会话文件**不在项目目录内**，存储在 AppData Roaming
 - **同一 bug 复发 = 缺可测边界**——修第二遍时把判定抽成纯函数（如 `src/utils/sessionTabs.ts` 的 `decideSessionTabsRestore`）+ 回归测试（`sessionTabs.test.ts` 覆盖"空索引不得清存档"），别只加注释靠人记
 - **改动前先确认存储 key 是否被沿用**——部分存档按原始路径（trim）而非规范化路径写入，改成 `normalizeProjectPath` 会读不到旧数据，需保留兼容
 
+## 渲染卡顿 / 性能排障准则
+
+处理"切会话/打开某页面卡一下""渲染慢"类问题时：
+
+- **先建对照，再谈定位**——最重要的一步是让用户做一个**对照实验**（如"切 tab1 卡不卡"）。一次对照能顶掉多轮静态推理：本项目切 tab 卡顿排查中，用户一句"切 tab1 不卡"直接锁定"与目标会话内容量相关"，此前 4 轮读代码猜的瓶颈（归一化 / hydrate / DOM 后处理 / Markdown 解析）**全部猜错**
+- **禁止无测量就改代码**——本项目该问题连续 4 轮"读代码 → 推断瓶颈 → 改 → 用户说没用"。**每次改动前必须先有一个能证伪的测量**；没有测量就别动行为代码
+- **二分消融是收敛利器**——按开销层级逐层关闭渲染，看哪一层让耗时回落。本项目据此一次定位：
+  | 层 | 关掉什么 | 首帧耗时 |
+  |---|---|---|
+  | baseline | 全渲染 | ~320ms |
+  | L2 | `AgentMessage` 子树 | **7~26ms** |
+  | L3 | ChatMarkdown → 纯文本 | 285~355ms（**没用**，排除 Markdown 解析） |
+  | L4 | 只渲染最后 5 条 | 89~98ms |
+  结论：瓶颈是**过程 feed 树本身**（roundGroups 的 reasoning + 工具步骤行）
+- **探针本身要可信，否则带偏**——用 `requestAnimationFrame` 量"空闲帧间隔"会被浏览器在窗口失焦/遮挡时**节流到 1~2fps**（实测 427~573ms），把它当成"应用常态卡顿"会连着推导出错误结论。改用**同一会话跨消融层对比**（都是相对值）才可靠
+- **消融机制必须用户零操作**——让用户手敲 `localStorage.setItem` 不可接受。正确做法：切会话时自动量一次并切到下一层，用户只需点几次 tab，结果写 `debug-logs/<项目>/tab-ablation.log` 由 Agent 读
+- **改前先确认"关掉它是不是等于删功能"**——本项目一度打算"折叠就不渲染过程 feed"，动手时才发现 `toggle-process` 事件**全项目无人监听**、`activityExpanded` 控制的是详细度而非可见性 → 那样改等于删功能。**性能优化不能拿功能换**
+- **持久化标志不能当渲染门**——长会话的 `activityExpanded` 常被写成 `true` 存进会话文件，用它当"折叠就不建"的门等于没门
+- **跨层级滚动用 IntersectionObserver**——消息列表共用上层 `.chat-scroll` 单个滚动容器（`.agent-stream` 自身无 `overflow`），子组件拿不到自己在滚动容器里的位置；IO 天然跨层级。离屏占位要**按上次量到的高度**撑开，用估算值会让滚动条跳动
+- **活态内容必须 `eager`**——离屏延迟渲染时，Agent 正在跑的消息必须无条件渲染，否则用户看不到步骤推进
+
 ## 文件膨胀约束
 
 `src/composables/useAgentRun.ts` 已拆出 `useAgentChainScroll.ts`、`useAgentStreamPatch.ts`、`useAgentEventHandlers.ts`、`useAgentSSEConnection.ts` 等子 composable，主文件负责 Agent 运行编排并委托分发。
