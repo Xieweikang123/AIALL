@@ -1,68 +1,213 @@
 <template>
-  <Teleport to="body">
-    <Transition name="agent-trace-drawer">
-      <div v-if="state.open" class="agent-trace-drawer-layer">
-        <div class="agent-trace-drawer-mask" @click="closeTraceDrawer"></div>
-        <aside
-          class="agent-trace-drawer"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Agent 数据流轨迹"
+  <Transition name="agent-trace-drawer">
+    <div v-if="state.open" class="agent-trace-drawer-layer">
+      <aside
+        class="agent-trace-drawer"
+        role="dialog"
+        aria-label="Agent 数据流轨迹"
+      >
+        <header class="agent-trace-drawer-head">
+          <span class="agent-trace-drawer-title">{{ state.title }}</span>
+          <span v-if="groups.length" class="agent-trace-drawer-sub">
+            {{ groups.length }} 轮
+          </span>
+          <button
+            v-if="groups.length"
+            type="button"
+            class="agent-trace-drawer-copy"
+            :disabled="copying"
+            :title="copyHint || '导出完整轨迹到 .aiall/agent-traces/ 并复制绝对路径'"
+            @click="copyTracePath"
+          >
+            {{ copyLabel }}
+          </button>
+          <button
+            type="button"
+            class="agent-trace-drawer-close"
+            title="关闭轨迹抽屉（Esc）"
+            @click="closeTraceDrawer"
+          >
+            ✕
+          </button>
+        </header>
+        <div
+          ref="bodyEl"
+          class="agent-trace-drawer-body"
+          @scroll="onBodyScroll"
+          @wheel="markUserIntent"
+          @touchstart="markUserIntent"
+          @mousedown="markUserIntent"
         >
-          <header class="agent-trace-drawer-head">
-            <span class="agent-trace-drawer-title">{{ state.title }}</span>
-            <span v-if="state.roundGroups.length" class="agent-trace-drawer-sub">
-              {{ state.roundGroups.length }} 轮
-            </span>
-            <button
-              v-if="state.roundGroups.length"
-              type="button"
-              class="agent-trace-drawer-copy"
-              :disabled="copying"
-              :title="copyHint || '导出完整轨迹到 .aiall/agent-traces/ 并复制绝对路径'"
-              @click="copyTracePath"
-            >
-              {{ copyLabel }}
-            </button>
-            <button
-              type="button"
-              class="agent-trace-drawer-close"
-              title="关闭轨迹抽屉（Esc）"
-              @click="closeTraceDrawer"
-            >
-              ✕
-            </button>
-          </header>
-          <div class="agent-trace-drawer-body">
-            <AgentTracePanel
-              v-if="state.roundGroups.length"
-              :round-groups="state.roundGroups"
-              embedded
-            />
-            <div v-else class="agent-trace-drawer-empty">
-              暂无轨迹数据。点击 Agent 回复内的「数据流轨迹」入口查看对应轮次的执行记录。
-            </div>
+          <AgentTracePanel
+            v-if="groups.length"
+            :round-groups="groups"
+            :tools="tools"
+            :detail="state.detail"
+            :running="running"
+            embedded
+            @update:detail="setTraceDetail"
+          />
+          <div v-else class="agent-trace-drawer-empty">
+            {{ emptyHint }}
           </div>
-        </aside>
-      </div>
-    </Transition>
-  </Teleport>
+        </div>
+        <button
+          v-if="!follow && groups.length"
+          type="button"
+          class="agent-trace-drawer-follow"
+          title="回到底部并恢复自动跟随"
+          @click="resumeFollow"
+        >
+          跟随最新 ↓
+        </button>
+      </aside>
+    </div>
+  </Transition>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import AgentTracePanel from "./AgentTracePanel.vue";
+import { buildAgentRoundGroupViews } from "../services/agentRoundGroups";
 import {
+  AGENT_TRACE_PANEL_WIDTH,
   closeTraceDrawer,
+  resolveTraceRoundGroups,
+  resolveTraceRunning,
+  resolveTraceTools,
+  setTraceDetail,
   useAgentTraceDrawerState,
 } from "../services/agentTraceDrawer";
 import { dumpAgentTraceToFile } from "../services/agentTraceDump";
+import {
+  isScrollNearBottom,
+  scheduleScrollContainerToBottom,
+  scrollContainerToBottom,
+} from "../utils/scrollViewport";
 
 const state = useAgentTraceDrawerState();
+/** 宽度与 `usePanelLayout` 共用同一常量（CSS 侧 `v-bind` 读它），避免两处数字漂移。 */
+const tracePanelWidth = ref(`${AGENT_TRACE_PANEL_WIDTH}px`);
 const copying = ref(false);
 const copyStatus = ref<"idle" | "ok" | "err">("idle");
 const copyHint = ref("");
 let copyResetTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * 实时解析当前消息的 roundGroups（而非打开时的快照）——
+ * 运行中面板也要跟着长，见 `agentTraceDrawer.ts` 顶部说明。
+ * 这两个 getter 只查表，视图组装放在面板的 rAF 节流之后。
+ */
+const groups = computed(() => resolveTraceRoundGroups());
+const tools = computed(() => resolveTraceTools());
+
+/** 导出用：把原始轮次组装成视图（含每轮 tools）。只在这一个动作上付组装成本。 */
+const views = computed(() =>
+  groups.value.length
+    ? buildAgentRoundGroupViews({ roundGroups: groups.value, tools: tools.value })
+    : [],
+);
+
+/**
+ * 整轮是否仍在跑。**不能**只看 `!last.response?.isFinal` —— 运行中断/异常结束时
+ * 有些轮次永远拿不到 `isFinal`，那样「思考中…」会一直挂着不收（实测踩过）。
+ * 用运行时注入的真实信号（见 `setTraceRunningResolver`），拿不到才退回结构判断。
+ */
+const running = computed(() => {
+  const fromRuntime = resolveTraceRunning();
+  if (fromRuntime !== null) return fromRuntime;
+  const list = groups.value;
+  const last = list[list.length - 1];
+  return Boolean(last && !last.response?.isFinal);
+});
+
+/**
+ * 抽屉整体的自动吸底跟随。
+ *
+ * 之前完全没有：面板内容一直在增长，但滚动位置不动，用户得不停手动往下拖 ——
+ * 对一个「实时看运行过程」的面板来说等于没法看。
+ *
+ * 规则与聊天流 / 旧思考抽屉一致：默认跟随；用户自己滚动就暂停；回到底部自动恢复。
+ */
+const bodyEl = ref<HTMLElement | null>(null);
+const follow = ref(true);
+/** 用户主动操作过（滚轮/触摸/按下）—— 避免把程序滚动误判成用户意图。 */
+let userIntent = false;
+let followRaf = 0;
+
+function atBottom(): boolean {
+  const el = bodyEl.value;
+  if (!el) return true;
+  return isScrollNearBottom(el, 24);
+}
+
+function onBodyScroll(): void {
+  follow.value = atBottom();
+}
+
+function markUserIntent(): void {
+  userIntent = true;
+}
+
+function scrollToBottom(): void {
+  const el = bodyEl.value;
+  if (!el) return;
+  scrollContainerToBottom(el, "auto");
+}
+
+function resumeFollow(): void {
+  follow.value = true;
+  scrollToBottom();
+}
+
+/**
+ * 内容增长时贴到最新一行。用 rAF 合并 —— 流式期间数据每帧都在变，
+ * 直接跟随会每帧多次布局读取。
+ */
+watch(
+  () => [
+    groups.value.length,
+    groups.value[groups.value.length - 1]?.reasoning?.length ?? 0,
+    groups.value[groups.value.length - 1]?.narrative?.length ?? 0,
+    groups.value[groups.value.length - 1]?.modelSteps.length ?? 0,
+    groups.value[groups.value.length - 1]?.toolIds.length ?? 0,
+  ],
+  () => {
+    if (!follow.value) return;
+    if (userIntent) {
+      userIntent = false;
+      return;
+    }
+    if (followRaf) return;
+    followRaf = requestAnimationFrame(() => {
+      followRaf = 0;
+      scrollToBottom();
+    });
+  },
+  { flush: "post" },
+);
+
+/** 打开抽屉时直接落到最新，否则进来看到的是顶部旧内容。 */
+watch(
+  () => state.open,
+  (open) => {
+    if (!open) return;
+    follow.value = true;
+    // 内容渲染后可能二次撑高（长文本换行），多次重试落底
+    scheduleScrollContainerToBottom(() => bodyEl.value, { delaysMs: [0, 60, 200] });
+  },
+);
+
+onUnmounted(() => {
+  if (followRaf) cancelAnimationFrame(followRaf);
+  followRaf = 0;
+});
+
+const emptyHint = computed(() =>
+  running.value
+    ? "等待 Agent 产出…"
+    : "暂无轨迹数据。点击 Agent 回复内的「数据流轨迹」入口查看对应轮次的执行记录。",
+);
 
 const copyLabel = computed(() => {
   if (copying.value) return "导出中…";
@@ -72,7 +217,7 @@ const copyLabel = computed(() => {
 });
 
 async function copyTracePath(): Promise<void> {
-  if (copying.value || !state.roundGroups.length) return;
+  if (copying.value || !groups.value.length) return;
   copying.value = true;
   copyStatus.value = "idle";
   copyHint.value = "";
@@ -81,7 +226,8 @@ async function copyTracePath(): Promise<void> {
       projectPath: state.projectPath,
       sessionId: state.sessionId,
       messageId: state.messageId,
-      roundGroups: state.roundGroups,
+      roundGroups: views.value,
+      detail: state.detail,
     });
     if (!result.ok) {
       copyStatus.value = "err";
@@ -124,30 +270,52 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+/*
+ * 工作区最右侧的一列：进布局流的普通 flex item，不是 fixed 浮层，
+ * 所以不会盖住会话面板 —— 两边真正并排，编辑器（flex:1）自动让出宽度。
+ * 收起靠 Esc / ✕ / 工具栏「轨迹」按钮。
+ *
+ * 历史形态（都别改回去）：
+ * - modal：全屏遮罩 + aria-modal，工具栏和聊天输入全被吞掉；
+ * - fixed 浮层：非模态了，但仍压在会话面板上面。
+ */
 .agent-trace-drawer-layer {
-  position: fixed;
-  inset: 0;
-  z-index: 1200;
-}
-
-.agent-trace-drawer-mask {
-  position: absolute;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(1px);
+  display: flex;
+  flex-direction: column;
+  width: min(v-bind(tracePanelWidth), 42vw);
+  flex-shrink: 1;
+  min-width: 0;
+  min-height: 0;
+  /* 收起时把面板裁掉：宽度归零时不留 1px 边框/阴影的残影 */
+  overflow: hidden;
+  box-shadow: -16px 0 40px rgba(0, 0, 0, 0.5);
 }
 
 .agent-trace-drawer {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: min(460px, 92vw);
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  /* 「跟随最新」按钮的定位上下文 */
+  position: relative;
   background: #0d0f14;
   border-left: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: -16px 0 40px rgba(0, 0, 0, 0.5);
+}
+
+/*
+ * 窄屏（含移动端）装不下第三列：退化成铺满工作区的接管式面板，
+ * `.workspace` 是 position: relative，这里 absolute 正好盖住工作区、底部导航不受影响。
+ */
+@media (max-width: 768px) {
+  .agent-trace-drawer-layer {
+    position: absolute;
+    inset: 0;
+    width: 100% !important;
+    z-index: 5;
+    border-left: none;
+    box-shadow: none;
+  }
 }
 
 .agent-trace-drawer-head {
@@ -225,35 +393,73 @@ onUnmounted(() => {
 .agent-trace-drawer-body {
   flex: 1;
   overflow-y: auto;
-  padding: 10px 14px 20px;
+  padding: 0 0 20px;
   min-height: 0;
+}
+
+/* 「跟随最新」浮在内容右下角：暂停跟随后给一个一键回到底部的入口 */
+.agent-trace-drawer-follow {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  padding: 4px 12px;
+  border: 1px solid rgba(126, 182, 255, 0.35);
+  border-radius: 14px;
+  background: rgba(30, 41, 59, 0.95);
+  color: rgba(165, 214, 255, 0.95);
+  font-size: 11px;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.agent-trace-drawer-follow:hover {
+  background: rgba(51, 65, 85, 0.98);
+  border-color: rgba(126, 182, 255, 0.6);
 }
 
 .agent-trace-drawer-empty {
   font-size: 12px;
   color: rgba(139, 148, 158, 0.7);
-  padding: 16px 4px;
+  padding: 16px 18px;
   line-height: 1.6;
 }
 
-/* 进入 / 退出动画 */
+/*
+ * 进入 / 退出动画：**宽度**从 0 展开到整列，编辑器（flex:1）和折叠态下的会话面板
+ * 随自由空间连续变化，不再是「淡出完最后一帧硬弹」。
+ * 动画期间把内层面板钉死在最终宽度（`width: 100%` 会跟着逐帧挤压正文、造成二次抖动），
+ * 靠外层 `overflow: hidden` 裁切，观感就是面板向右滑出。
+ */
 .agent-trace-drawer-enter-active,
 .agent-trace-drawer-leave-active {
-  transition: opacity 0.18s ease;
+  transition: width 0.2s ease, opacity 0.18s ease;
 }
-
 .agent-trace-drawer-enter-active .agent-trace-drawer,
 .agent-trace-drawer-leave-active .agent-trace-drawer {
-  transition: transform 0.18s ease;
+  width: min(v-bind(tracePanelWidth), 42vw);
+  transition: transform 0.2s ease;
 }
 
-.agent-trace-drawer-enter-from,
-.agent-trace-drawer-leave-to {
+/* 带上前缀提高特异性，不靠「声明顺序在后」压过基础规则 */
+.agent-trace-drawer-layer.agent-trace-drawer-enter-from,
+.agent-trace-drawer-layer.agent-trace-drawer-leave-to {
   opacity: 0;
+  width: 0;
 }
 
 .agent-trace-drawer-enter-from .agent-trace-drawer,
 .agent-trace-drawer-leave-to .agent-trace-drawer {
   transform: translateX(24px);
+}
+
+/* 尊重系统的「减少动态效果」：宽度直接跳，不做 0.2s 的连续重排 */
+@media (prefers-reduced-motion: reduce) {
+  .agent-trace-drawer-enter-active,
+  .agent-trace-drawer-leave-active,
+  .agent-trace-drawer-enter-active .agent-trace-drawer,
+  .agent-trace-drawer-leave-active .agent-trace-drawer {
+    transition: none;
+  }
 }
 </style>

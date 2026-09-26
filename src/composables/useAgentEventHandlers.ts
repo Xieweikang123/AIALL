@@ -14,6 +14,7 @@ import {
   shouldOfferPartialRunResume,
 } from "../services/agentRecovery";
 import { isAgentSseProgressEvent } from "../services/agentSseEventHandlers";
+import { notifyTraceRunStarted } from "../services/agentTraceDrawer";
 import { debugLog } from "../utils/debugLog";
 import { parseAgentSuggestions } from "../services/agentSuggestions";
 import { computeLineDelta } from "../services/agentCursorFeed";
@@ -630,10 +631,12 @@ function handleMessageDeltaEvent(event: EventOf<"message_delta">, assistantMsg: 
 /**
  * Reasoning/thinking channel deltas. They accumulate onto `roundGroups[].reasoning`
  * and render as a collapsed disclosure; answer char accounting is untouched.
+ * 思考一开始就自动弹出轨迹抽屉（工具栏「轨迹」按钮可关）—— 轨迹是唯一查看面。
  */
 function handleReasoningDeltaEvent(event: EventOf<"reasoning_delta">, assistantMsg: VibeChatMessage, sessionId: string, msgId: string) {
   const delta = event.data.delta || "";
   if (!delta) return;
+  notifyTraceRunStarted(msgId);
   const run = runManager.get(sessionId);
   const waitPhases = new Set(["waiting_model", "sending_request", "retrying_model"]);
   if (run && waitPhases.has(run.live.phase)) {

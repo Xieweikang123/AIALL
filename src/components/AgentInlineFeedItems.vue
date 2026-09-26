@@ -198,7 +198,6 @@ import AgentProcessStepList from "./AgentProcessStepList.vue";
 import IntentTraceCard from "./IntentTraceCard.vue";
 import type { InlineFeedItem, InlineFeedProcessItem } from "../services/agentInlineFeed";
 import { resolveActiveReasoningKey } from "../services/agentInlineFeed";
-import { notifyReasoningRunFinished, registerReasoningEntry } from "../services/agentReasoningDrawer";
 import { sanitizeFeedThoughtText } from "../services/agentProgressMarker";
 import { enrichPlanMarkdownForDisplay } from "../services/planDocumentDisplay";
 import { shouldUsePlanExternalView } from "../services/planFile";
@@ -669,52 +668,6 @@ watch(
       .map((item) => `${item.key}:${item.text.length}`)
       .join("|"),
   () => scheduleReasoningMeasure(),
-);
-
-/**
- * 把 reasoning 全文登记到「思考全文」抽屉的数据源。
- * 只登记、不改这里的任何渲染/交互 —— 消息内仍是一行折叠 + 提词器。
- * 嵌套（collapsed 内部）不登记，避免同一条推理被注册两次。
- */
-watch(
-  () => [
-    props.nested,
-    props.messageId ?? "",
-    activeReasoningKey.value ?? "",
-    props.isRunning,
-    props.items
-      .filter((item): item is Extract<InlineFeedItem, { kind: "reasoning" }> => item.kind === "reasoning")
-      .map((item) => item.text)
-      .join("\u0000"),
-  ],
-  () => {
-    if (props.nested) return;
-    for (const item of props.items) {
-      if (item.kind !== "reasoning") continue;
-      if (!item.text.trim()) continue;
-      registerReasoningEntry({
-        messageId: props.messageId ?? null,
-        key: item.key,
-        text: item.text,
-        active: isReasoningActive(item.key),
-      });
-    }
-  },
-  { immediate: true },
-);
-
-/**
- * 整轮 Agent 跑完（isRunning 真→假）时通知抽屉：自动弹出的这下才收起。
- * 段落中途结束不再收，避免快思考「还没来得及看就被收走」。
- */
-watch(
-  () => props.isRunning,
-  (running, wasRunning) => {
-    if (props.nested) return;
-    if (wasRunning && !running) {
-      notifyReasoningRunFinished(props.messageId ?? null);
-    }
-  },
 );
 
 function isCollapsedExpanded(key: string): boolean {

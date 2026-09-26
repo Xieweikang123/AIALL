@@ -1,6 +1,7 @@
 import { writeFile } from "./vibeCodingClient";
 import { vibeChatSessionDiskFilePath } from "./vibeChatStorage";
 import { buildAgentTraceTurns } from "./agentTraceTimeline";
+import { DEFAULT_AGENT_TRACE_DETAIL, type AgentTraceDetailLevel } from "./agentTraceDetail";
 import type { AgentRoundGroupView } from "./agentRoundGroups";
 
 const TRACE_DIR_REL = ".aiall/agent-traces";
@@ -10,6 +11,8 @@ export type AgentTraceDumpInput = {
   sessionId?: string | null;
   messageId?: string | null;
   roundGroups: AgentRoundGroupView[];
+  /** 面板当前档位，仅用于 `turns` 预览；`roundGroups` 始终全量落盘。 */
+  detail?: AgentTraceDetailLevel;
 };
 
 export type AgentTraceDumpResult =
@@ -54,7 +57,9 @@ export async function dumpAgentTraceToFile(input: AgentTraceDumpInput): Promise<
     sessionDiskPath,
     messageId: input.messageId ?? null,
     roundGroupCount: input.roundGroups.length,
-    turns: buildAgentTraceTurns(input.roundGroups),
+    detail: input.detail ?? DEFAULT_AGENT_TRACE_DETAIL,
+    turns: buildAgentTraceTurns(input.roundGroups, input.detail ?? DEFAULT_AGENT_TRACE_DETAIL),
+    // 原始数据始终全量落盘：排查时不该因为面板档位丢掉细节
     roundGroups: input.roundGroups,
   };
 

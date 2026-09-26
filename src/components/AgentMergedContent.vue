@@ -29,10 +29,10 @@
     </AgentCursorTimeline>
 
     <button
-      v-if="agentDebugEnabled && roundGroups.length"
+      v-if="roundGroups.length"
       type="button"
       class="agent-trace-entry"
-      title="在右侧抽屉中查看数据流轨迹"
+      title="在右侧抽屉中查看数据流轨迹（含思考过程）"
       @click="openTraceDrawer(messageId ?? null, roundGroups)"
     >
       <span class="agent-trace-entry-icon">⟲</span>
@@ -45,7 +45,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 import AgentCursorTimeline from "./AgentCursorTimeline.vue";
-import { agentDebugEnabled } from "../utils/agentDebugFlag";
 import { openTraceDrawer, registerLatestTrace } from "../services/agentTraceDrawer";
 import { useStableAgentAnswer } from "../composables/useStableAgentAnswer";
 import { buildInlineAgentFeed } from "../services/agentInlineFeed";
@@ -179,11 +178,12 @@ const showTimeline = computed(
 
 let traceSeq = 0;
 
-// 注册为「最新一条」轨迹，供调试按钮直开抽屉时展示
+// 注册为「最新一条」轨迹，供工具栏/调试入口直开抽屉时展示。
+// 运行中也注册 —— 抽屉现在是实时视图，运行中打开要有内容可看。
 watch(
   () => [props.messageId, props.roundGroups, props.isRunning] as const,
-  ([messageId, groups, running]) => {
-    if (running) return;
+  ([messageId, groups]) => {
+    if (!groups.length) return;
     registerLatestTrace(messageId ?? `trace-${traceSeq++}`, groups);
   },
   { immediate: true, deep: false },
