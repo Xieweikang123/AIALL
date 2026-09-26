@@ -2,18 +2,24 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   __resetAgentTraceDrawerForTest,
   closeTraceDrawer,
+  collapseTraceForEditor,
   notifyTraceRunStarted,
   openLatestTraceDrawer,
   openTraceDrawer,
   registerLatestTrace,
   resolveTraceRoundGroups,
   resolveTraceTools,
+  restoreTraceAfterEditor,
   setTraceAutoEnabled,
-  setTraceDetail,
+  setTraceEditorSpaceResolver,
   setTraceGroupResolver,
+  setTraceMessageExistsResolver,
   setTraceToolsResolver,
+  setTraceView,
+  syncTraceScopeToActiveSession,
   useAgentTraceDrawerState,
 } from "./agentTraceDrawer";
+import { createDefaultAgentTraceView, withTraceExpand } from "./agentTraceView";
 import type { AgentRoundGroup } from "./agentRoundGroups";
 
 function group(turn: number, narrative: string): AgentRoundGroup {
@@ -25,10 +31,12 @@ describe("agentTraceDrawer", () => {
     __resetAgentTraceDrawerForTest();
   });
 
-  it("默认不打开，详细度为标准档，自动展开开启", () => {
+  it("默认不打开，显示配置为默认档（只展开思考），自动展开开启", () => {
     const state = useAgentTraceDrawerState();
     expect(state.open).toBe(false);
-    expect(state.detail).toBe("standard");
+    expect(state.view).toEqual(createDefaultAgentTraceView());
+    expect(state.view.expand.reasoning).toBe(true);
+    expect(state.view.expand.tool).toBe(false);
     expect(state.autoEnabled).toBe(true);
   });
 
@@ -90,12 +98,74 @@ describe("agentTraceDrawer", () => {
     expect(useAgentTraceDrawerState().messageId).toBe("m-old");
   });
 
-  it("切换详细度会归一化非法值", () => {
-    setTraceDetail("detailed");
-    expect(useAgentTraceDrawerState().detail).toBe("detailed");
+  it("面板还开着时，新一轮开始要跟过去（回归：不跟就永远停在上一轮）", () => {
+    // 抽屉跑完一轮不自动收起（设计如此）。上一轮锁着 m1，新一轮跑起来时
+    // 若不换锁，m1 仍能解析出数据 → 不回退 → 面板永远显示上一轮轨迹
+    setTraceGroupResolver((id) =>
+      id === "m1" ? [group(1, "上一轮")] : id === "m2" ? [group(1, "新一轮")] : [],
+    );
 
-    setTraceDetail("bogus" as never);
-    expect(useAgentTraceDrawerState().detail).toBe("standard");
+    notifyTraceRunStarted("m1");
+    expect(resolveTraceRoundGroups().map((g) => g.narrative)).toEqual(["上一轮"]);
+
+    notifyTraceRunStarted("m2");
+
+    expect(useAgentTraceDrawerState().open).toBe(true);
+    expect(useAgentTraceDrawerState().messageId).toBe("m2");
+    expect(resolveTraceRoundGroups().map((g) => g.narrative)).toEqual(["新一轮"]);
+  });
+
+  it("用户点消息入口锁定的那条，新一轮也不抢（锁定语义）", () => {
+    setTraceGroupResolver((id) =>
+      id === "m-old" ? [group(1, "用户在看的老轨迹")] : id === "m-new" ? [group(1, "新轨迹")] : [],
+    );
+
+    openTraceDrawer("m-old", [group(1, "用户在看的老轨迹")]);
+    notifyTraceRunStarted("m-new");
+
+    expect(resolveTraceRoundGroups().map((g) => g.narrative)).toEqual(["用户在看的老轨迹"]);
+  });
+
+  it("锁定消息失效后不再挡着新一轮的跟随", () => {
+    setTraceGroupResolver((id) => (id === "m-new" ? [group(1, "新轨迹")] : []));
+    openTraceDrawer("m-dead", []);
+    registerLatestTrace("m-new", [group(1, "新轨迹")]);
+
+    // 失效锁在同会话内回退到最新一条
+    expect(resolveTraceRoundGroups()).toHaveLength(1);
+
+    // 失效的**显式锁定**不再挡着新一轮跟随；`notifyTraceRunStarted` 会识别出
+    // 那条锁定已经查不到数据、自动作废它，然后把锁跟到新 id。
+    notifyTraceRunStarted("m-new");
+    expect(useAgentTraceDrawerState().messageId).toBe("m-new");
+  });
+
+  it("openLatestTraceDrawer 是跟随语义，不算显式锁定", () => {
+    setTraceGroupResolver((id) => (id === "m1" ? [group(1, "老轨迹")] : []));
+    openTraceDrawer("m1", [group(1, "老轨迹")]);
+
+    openLatestTraceDrawer();
+    notifyTraceRunStarted("m2");
+
+    expect(useAgentTraceDrawerState().messageId).toBe("m2");
+  });
+
+  it("改显示配置会归一化脏值（外部传旧档位字符串也不能把面板搞坏）", () => {
+    // 正交开关：只动工具，其余类型不受影响
+    setTraceView(withTraceExpand(createDefaultAgentTraceView(), "tool", true));
+    const view = useAgentTraceDrawerState().view;
+    expect(view.expand.tool).toBe(true);
+    expect(view.expand.reasoning).toBe(true);
+    expect(view.expand.request).toBe(false);
+
+    // 旧档位字符串仍被接住（映射到同名预设）
+    setTraceView("detailed" as never);
+    expect(useAgentTraceDrawerState().view.expand.tool).toBe(true);
+    expect(useAgentTraceDrawerState().view.transientPhases).toBe(true);
+
+    // 完全非法的值回落默认配置
+    setTraceView("bogus" as never);
+    expect(useAgentTraceDrawerState().view).toEqual(createDefaultAgentTraceView());
   });
 
   it("openLatestTraceDrawer 在无注册消息时给出空轨迹而不抛错", () => {
@@ -109,6 +179,8 @@ describe("agentTraceDrawer", () => {
     // 复现日志里的形态：抽屉锁着一个已不存在的旧 id，真正的最新消息在别处
     setTraceGroupResolver((id) => (id === "new-msg" ? [group(1, "真实轨迹")] : []));
     setTraceToolsResolver((id) => (id === "new-msg" ? [{ id: "t1" } as never] : []));
+    // 「stale-msg 已不在消息表里」—— 失效必须由存在性查询明说，不能靠"没数据"推断
+    setTraceMessageExistsResolver((id) => id === "new-msg");
 
     // 旧 id 先被锁定（比如之前点过那条消息）
     openTraceDrawer("stale-msg", []);
@@ -136,6 +208,7 @@ describe("agentTraceDrawer", () => {
       seen.push(id);
       return id === "new-msg" ? [group(1, "真实轨迹")] : [];
     });
+    setTraceMessageExistsResolver((id) => id === "new-msg");
     openTraceDrawer("stale-msg", []);
     registerLatestTrace("new-msg", []);
 
@@ -145,5 +218,252 @@ describe("agentTraceDrawer", () => {
 
     // 第二次只应该查有效 id，不再碰失效的那个
     expect(seen).toEqual(["new-msg"]);
+  });
+});
+
+describe("agentTraceDrawer 编辑器让位", () => {
+  beforeEach(() => {
+    __resetAgentTraceDrawerForTest();
+    setTraceGroupResolver((id) => (id === "msg-1" ? [group(1, "轨迹")] : []));
+    registerLatestTrace("msg-1", []);
+  });
+
+  it("打开文件时收起面板，编辑器让开后自动恢复", () => {
+    openLatestTraceDrawer();
+    expect(useAgentTraceDrawerState().open).toBe(true);
+
+    collapseTraceForEditor();
+    expect(useAgentTraceDrawerState().open).toBe(false);
+
+    restoreTraceAfterEditor();
+    expect(useAgentTraceDrawerState().open).toBe(true);
+  });
+
+  it("让位只收面板，不丢消息锁（恢复后还是原来那条）", () => {
+    openTraceDrawer("msg-1", []);
+    collapseTraceForEditor();
+    restoreTraceAfterEditor();
+
+    // 锁还在，所以解析得到原来那条的轨迹，而不是回退到"最新"
+    expect(resolveTraceRoundGroups()).toEqual([group(1, "轨迹")]);
+  });
+
+  it("用户主动关闭的，编辑器让开也不该自动弹回来", () => {
+    openLatestTraceDrawer();
+    closeTraceDrawer();
+
+    restoreTraceAfterEditor();
+    expect(useAgentTraceDrawerState().open).toBe(false);
+  });
+
+  it("面板本来就关着时不算让位，也不该被恢复弹开", () => {
+    expect(useAgentTraceDrawerState().open).toBe(false);
+
+    expect(collapseTraceForEditor()).toBe(false);
+
+    restoreTraceAfterEditor();
+    expect(useAgentTraceDrawerState().open).toBe(false);
+  });
+
+  it("让位期间用户自己又把面板打开了，恢复时不重复处理", () => {
+    openLatestTraceDrawer();
+    collapseTraceForEditor();
+    // 让位期间用户从工具栏重新打开
+    openLatestTraceDrawer();
+
+    restoreTraceAfterEditor();
+    expect(useAgentTraceDrawerState().open).toBe(true);
+  });
+
+  it("编辑器占位时 Agent 开跑不弹面板，但锁已指向新一轮", () => {
+    setTraceEditorSpaceResolver(() => true);
+    registerLatestTrace("msg-2", []);
+    setTraceGroupResolver((id) => (id === "msg-2" ? [group(2, "新一轮")] : []));
+
+    notifyTraceRunStarted("msg-2");
+
+    // 没弹出来抢编辑器宽度
+    expect(useAgentTraceDrawerState().open).toBe(false);
+    // 但编辑器让开后恢复的是**这一轮**，不是旧的
+    restoreTraceAfterEditor();
+    expect(useAgentTraceDrawerState().open).toBe(true);
+    expect(resolveTraceRoundGroups()).toEqual([group(2, "新一轮")]);
+  });
+
+  it("编辑器没占位时自动弹出照常", () => {
+    setTraceEditorSpaceResolver(() => false);
+    notifyTraceRunStarted("msg-1");
+    expect(useAgentTraceDrawerState().open).toBe(true);
+  });
+
+  it("用户主动关掉后，Agent 开跑不弹回来（无视用户指令是 bug）", () => {
+    setTraceEditorSpaceResolver(() => false);
+    openLatestTraceDrawer();
+    closeTraceDrawer();
+
+    notifyTraceRunStarted("msg-1");
+
+    expect(useAgentTraceDrawerState().open).toBe(false);
+  });
+
+  it("用户重新点开面板后，自动弹出恢复（撤销别再烦我）", () => {
+    openLatestTraceDrawer();
+    closeTraceDrawer();
+    // 用户反悔了，自己点开消息入口
+    openTraceDrawer("msg-1", []);
+    closeTraceDrawer();
+
+    // 注意：最后一步又关了，所以仍处于"别再烦我"
+    expect(useAgentTraceDrawerState().userDismissedAuto).toBe(true);
+
+    // 再来一次：点开 → 不关 → 下一轮应该能自动弹
+    openTraceDrawer("msg-1", []);
+    expect(useAgentTraceDrawerState().userDismissedAuto).toBe(false);
+  });
+});
+
+/**
+ * 两个会话同时跑的回归组。
+ *
+ * bug 现象：轨迹面板闪烁（内容在两个会话之间来回跳）。
+ * 根因：抽屉是全应用单例，而"最新消息 id"曾是**单个全局变量**、解析又只查
+ * 当前激活会话 —— 两个会话交替注册/解析就互相覆盖，`find` 反复失败再回退。
+ * 修复后：目标带会话维度，且回退限定在**同一会话内**，跨会话不再串台。
+ */
+describe("agentTraceDrawer 双会话隔离（闪烁回归）", () => {
+  beforeEach(() => {
+    __resetAgentTraceDrawerForTest();
+  });
+
+  /** 模拟主视图：按会话 id 去对应会话的消息表里查。 */
+  function installTwoSessions() {
+    const byId: Record<string, Array<{ id: string; groups: AgentRoundGroup[] }>> = {
+      A: [{ id: "a-1", groups: [group(1, "A 的轨迹")] }],
+      B: [{ id: "b-1", groups: [group(1, "B 的轨迹")] }],
+    };
+    const seen: Array<[string | null, string | null]> = [];
+    setTraceGroupResolver((id, sid) => {
+      seen.push([id, sid ?? null]);
+      if (!id) return [];
+      const list = byId[sid ?? ""] ?? [];
+      return list.find((m) => m.id === id)?.groups ?? [];
+    });
+    return { seen, byId };
+  }
+
+  it("解析只查所属会话，不会跨会话串台", () => {
+    installTwoSessions();
+
+    // 两个会话各跑一轮
+    notifyTraceRunStarted("a-1", "A");
+    notifyTraceRunStarted("b-1", "B");
+    // 用户在 A 会话里看
+    syncTraceScopeToActiveSession("A");
+
+    expect(resolveTraceRoundGroups().map((g) => g.narrative)).toEqual(["A 的轨迹"]);
+  });
+
+  it("B 会话跑来事件，不会把 A 的轨迹抢走（不闪烁）", () => {
+    installTwoSessions();
+    syncTraceScopeToActiveSession("A");
+    notifyTraceRunStarted("a-1", "A");
+    openTraceDrawer("a-1", [group(1, "A 的轨迹")], undefined, "A");
+
+    const before = resolveTraceRoundGroups().map((g) => g.narrative);
+    // B 会话（后台运行）开了新一轮 —— 以前这会把锁抢到 b-1，面板内容突变
+    notifyTraceRunStarted("b-1", "B");
+
+    expect(useAgentTraceDrawerState().messageId).toBe("a-1");
+    expect(resolveTraceRoundGroups().map((g) => g.narrative)).toEqual(before);
+  });
+
+  it("反复切换会话时，两个会话的轨迹各自稳定、互不残留", () => {
+    installTwoSessions();
+
+    notifyTraceRunStarted("a-1", "A");
+    notifyTraceRunStarted("b-1", "B");
+
+    // 连续来回切 —— 每一步都必须稳定解析出自会话的轨迹
+    const expectMap: Array<[string, string]> = [
+      ["A", "A 的轨迹"],
+      ["B", "B 的轨迹"],
+      ["A", "A 的轨迹"],
+      ["B", "B 的轨迹"],
+    ];
+    for (const [sid, narrative] of expectMap) {
+      syncTraceScopeToActiveSession(sid);
+      expect(resolveTraceRoundGroups().map((g) => g.narrative)).toEqual([narrative]);
+    }
+  });
+
+  it("用户显式锁定的跨会话轨迹不被会话切换抢走", () => {
+    installTwoSessions();
+    // 用户在 A 里点开某条历史消息（显式锁定）
+    openTraceDrawer("a-1", [group(1, "A 的轨迹")], undefined, "A");
+
+    // 切到 B 会话：显式锁定优先，面板保持用户看的那条
+    syncTraceScopeToActiveSession("B");
+
+    expect(useAgentTraceDrawerState().messageId).toBe("a-1");
+    expect(resolveTraceRoundGroups().map((g) => g.narrative)).toEqual(["A 的轨迹"]);
+  });
+});
+
+/**
+ * 「第一轮自动弹出 → 面板一直空」回归组。
+ *
+ * 实测形态：一轮刚开跑时 `notifyTraceRunStarted` 就弹了面板，但那一刻这条 assistant
+ * 消息**还没有任何 roundGroups**（第一个 `status` / `turn_request` 事件还没到）。
+ * 于是：
+ *
+ * 1. `resolveTraceRoundGroups` 拿锁去查 → 查到 0 轮 → 把锁记进 `deadLock*` 缓存
+ *    （"已确认失效"）；
+ * 2. 随后数据真的长出来了，但缓存命中直接**跳过 resolver**，不再回头看这条消息；
+ * 3. 回退走 `getLatestMessageId`，而"最新 id"要靠 `registerLatestTrace`
+ *    （渲染树里的 watch，要求 `groups.length > 0`）或 `notifyTraceRunStarted` 注册 ——
+ *    前者此时同样因为 0 轮而不注册，后者这一轮已经注册过同一个 id，
+ *    回退分支又显式排除了 `fallbackId === locked`；
+ * 4. 结果：面板恒为空，直到用户手动点某条消息的入口（那是另一条锁路径）。
+ *
+ * 根因是「空数据」被误判成「失效 id」并永久缓存。空 ≠ 死：消息存在但还没产出内容，
+ * 下一帧就会长出数据，不能进失效缓存。
+ */
+describe("agentTraceDrawer 第一轮自动弹出（空轨迹回归）", () => {
+  beforeEach(() => {
+    __resetAgentTraceDrawerForTest();
+  });
+
+  it("自动弹出时还没有数据，随后产出必须能显示出来", () => {
+    // 消息此刻存在、roundGroups 为空（真实运行刚开始的形态）
+    const msg = { id: "m1", roundGroups: [] as AgentRoundGroup[] };
+    setTraceGroupResolver((id) => (id === "m1" ? msg.roundGroups : []));
+
+    // Agent 开跑：面板自动弹出并锁到这条消息
+    notifyTraceRunStarted("m1");
+    expect(useAgentTraceDrawerState().open).toBe(true);
+
+    // 弹窗那一刻没有数据 —— 空态是对的，但**不能**把这条消息判成失效
+    expect(resolveTraceRoundGroups()).toEqual([]);
+
+    // 第一个事件到达，roundGroups 长出来了
+    msg.roundGroups = [group(1, "第一轮推理")];
+
+    // 面板必须显示出来（锁就是这条消息本身，不该被回退逻辑绕过）
+    expect(resolveTraceRoundGroups().map((g) => g.narrative)).toEqual(["第一轮推理"]);
+  });
+
+  it("空数据不写进失效缓存，后续工具表也能解析到", () => {
+    const msg = { id: "m1", roundGroups: [] as AgentRoundGroup[] };
+    setTraceGroupResolver((id) => (id === "m1" ? msg.roundGroups : []));
+    setTraceToolsResolver((id) => (id === "m1" ? [{ id: "t1" } as never] : []));
+
+    notifyTraceRunStarted("m1");
+    resolveTraceRoundGroups();
+    resolveTraceRoundGroups();
+
+    msg.roundGroups = [group(1, "内容")];
+
+    expect(resolveTraceRoundGroups()).toHaveLength(1);
+    expect(resolveTraceTools()).toHaveLength(1);
   });
 });

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { buildAgentTraceTurns, pickTurnHeadlineEntry } from "./agentTraceTimeline";
+import {
+  applyAgentTraceViewPreset,
+  createDefaultAgentTraceView,
+  withTraceTransientPhases,
+} from "./agentTraceView";
 import type { AgentRoundGroupView } from "./agentRoundGroups";
 
 function group(overrides: Partial<AgentRoundGroupView>): AgentRoundGroupView {
@@ -140,7 +145,7 @@ describe("buildAgentTraceTurns", () => {
   });
 
   it("运行中、本轮未定稿时思考条目标记为流式中", () => {
-    const turns = buildAgentTraceTurns([group({ turn: 1, reasoning: "还在想" })], "standard", true);
+    const turns = buildAgentTraceTurns([group({ turn: 1, reasoning: "还在想" })], undefined, true);
 
     const reasoning = turns[0]?.entries[0];
     expect(reasoning?.kind).toBe("reasoning");
@@ -150,7 +155,7 @@ describe("buildAgentTraceTurns", () => {
 
   it("整轮结束后思考条目不再标「思考中」（中断时永远拿不到 isFinal 也不能挂着）", () => {
     // 运行中断的典型形态：有 reasoning、没有 response、isFinal 永远不会来
-    const turns = buildAgentTraceTurns([group({ turn: 1, reasoning: "想了一半就断了" })], "standard", false);
+    const turns = buildAgentTraceTurns([group({ turn: 1, reasoning: "想了一半就断了" })], undefined, false);
 
     const reasoning = turns[0]?.entries[0];
     expect(reasoning?.kind).toBe("reasoning");
@@ -159,7 +164,7 @@ describe("buildAgentTraceTurns", () => {
     expect(reasoning?.label).not.toContain("思考中");
   });
 
-  it("简略档不默认展开任何条目，但条目仍然构建（点开还能看）", () => {
+  it("全折叠的预设下不默认展开任何条目，但条目仍然构建（点开还能看）", () => {
     const turns = buildAgentTraceTurns(
       [
         group({
@@ -186,18 +191,18 @@ describe("buildAgentTraceTurns", () => {
           ],
         }),
       ],
-      "brief",
+      applyAgentTraceViewPreset("brief"),
     );
 
     const entries = turns[0]?.entries ?? [];
-    // 档位只管展开程度，不再让条目消失
+    // 配置只管展开程度，不让条目消失
     expect(entries.every((entry) => !entry.expandedByDefault)).toBe(true);
     expect(entries.map((entry) => entry.kind)).toEqual(["reasoning", "response", "tool"]);
     // 折叠不等于没有内容
     expect(entries.every((entry) => entry.detail.trim().length > 0)).toBe(true);
   });
 
-  it("详细档保留已回复轮次里的瞬态 loop 阶段，标准档过滤掉", () => {
+  it("瞬态阶段开关打开后保留已回复轮次里的 loop 阶段，默认关掉", () => {
     const groups = [
       group({
         turn: 1,
@@ -213,14 +218,14 @@ describe("buildAgentTraceTurns", () => {
       }),
     ];
 
-    const standard = buildAgentTraceTurns(groups, "standard");
+    const standard = buildAgentTraceTurns(groups);
     expect(standard[0]?.entries.some((entry) => entry.kind === "phase")).toBe(false);
 
-    const detailed = buildAgentTraceTurns(groups, "detailed");
-    expect(detailed[0]?.entries.some((entry) => entry.kind === "phase")).toBe(true);
+    const noisy = buildAgentTraceTurns(groups, withTraceTransientPhases(createDefaultAgentTraceView(), true));
+    expect(noisy[0]?.entries.some((entry) => entry.kind === "phase")).toBe(true);
   });
 
-  it("未回复的轮次在任何档位都保留瞬态阶段（卡在哪一步的线索）", () => {
+  it("未回复的轮次在任何配置下都保留瞬态阶段（卡在哪一步的线索）", () => {
     const turns = buildAgentTraceTurns(
       [
         group({
@@ -230,7 +235,7 @@ describe("buildAgentTraceTurns", () => {
           ],
         }),
       ],
-      "standard",
+      applyAgentTraceViewPreset("brief"),
     );
 
     expect(turns[0]?.entries.some((entry) => entry.kind === "phase")).toBe(true);
@@ -265,7 +270,7 @@ describe("pickTurnHeadlineEntry", () => {
           },
         }),
       ],
-      "detailed",
+      undefined,
     );
 
     const headline = pickTurnHeadlineEntry(turn!);
@@ -301,7 +306,7 @@ describe("pickTurnHeadlineEntry", () => {
           ],
         }),
       ],
-      "detailed",
+      undefined,
     );
 
     const headline = pickTurnHeadlineEntry(turn!);
@@ -310,7 +315,7 @@ describe("pickTurnHeadlineEntry", () => {
   });
 
   it("整轮只有等待态时才用 phase（此时它确实是当前状态）", () => {
-    const [turn] = buildAgentTraceTurns([group({ turn: 1, modelSteps: [waitStep("s1")] })], "detailed");
+    const [turn] = buildAgentTraceTurns([group({ turn: 1, modelSteps: [waitStep("s1")] })]);
 
     const headline = pickTurnHeadlineEntry(turn!);
     expect(headline?.kind).toBe("phase");
