@@ -5,6 +5,7 @@
       :key="opt.index"
       type="button"
       class="ai-option-btn"
+      :disabled="disabled"
       @mousedown.stop
       @mouseup.stop
       @click.stop.prevent="selectOption(opt)"
@@ -19,15 +20,20 @@
 <script setup lang="ts">
 import type { AiOption } from "../utils/parseAiOptions";
 
-defineProps<{
-  options: AiOption[];
-}>();
+const props = withDefaults(
+  defineProps<{
+    options: AiOption[];
+    disabled?: boolean;
+  }>(),
+  { disabled: false },
+);
 
 const emit = defineEmits<{
   select: [option: AiOption];
 }>();
 
 function selectOption(option: AiOption) {
+  if (props.disabled) return;
   emit("select", option);
 }
 </script>
@@ -57,14 +63,19 @@ function selectOption(option: AiOption) {
   text-align: left;
 }
 
-.ai-option-btn:hover {
+.ai-option-btn:hover:not(:disabled) {
   background: rgba(31, 111, 235, 0.18);
   border-color: rgba(31, 111, 235, 0.55);
   box-shadow: 0 2px 8px rgba(31, 111, 235, 0.15);
 }
 
-.ai-option-btn:active {
+.ai-option-btn:active:not(:disabled) {
   transform: scale(0.98);
+}
+
+.ai-option-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .ai-option-index {

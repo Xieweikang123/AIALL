@@ -157,6 +157,7 @@
       <AiOptionButtons
         v-if="m.role === 'assistant' && !ctx.isAgentRunning(m) && m.suggestedOptions?.length"
         :options="m.suggestedOptions"
+        :disabled="m.id !== lastAgentMessageId"
         @select="(option) => ctx.handleAiOptionSelect(option, m)"
       />
       <div
@@ -430,6 +431,15 @@ const visibleMessages = computed(() => {
   const messages = ctx.chatMessages.value;
   if (showAllMessages.value || messages.length <= MESSAGE_WINDOW) return messages;
   return messages.slice(messages.length - MESSAGE_WINDOW);
+});
+
+// 只有最后一条 Agent（assistant）消息的选项按钮可点；更早的历史消息一律禁用
+const lastAgentMessageId = computed(() => {
+  const messages = ctx.chatMessages.value;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i].role === "assistant") return messages[i].id;
+  }
+  return "";
 });
 
 function messageMemoKey(m: VibeChatMessageItem): unknown[] {
