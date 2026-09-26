@@ -202,7 +202,7 @@ describe("agentTraceDrawer", () => {
     expect(resolveTraceRoundGroups().map((g) => g.narrative)).toEqual(["旧轨迹"]);
   });
 
-  it("回退后不再反复查询失效 id（避免每帧白查）", () => {
+  it("失效 id 只回退，不会把同会话最新消息也带偏", () => {
     const seen: Array<string | null> = [];
     setTraceGroupResolver((id) => {
       seen.push(id);
@@ -212,12 +212,36 @@ describe("agentTraceDrawer", () => {
     openTraceDrawer("stale-msg", []);
     registerLatestTrace("new-msg", []);
 
-    resolveTraceRoundGroups();
+    expect(resolveTraceRoundGroups().map((g) => g.narrative)).toEqual(["真实轨迹"]);
+    expect(seen).toContain("stale-msg");
+    expect(seen).toContain("new-msg");
+
+    // 反复求值结果稳定 —— 失效判定是实时重算的，不会"第二次就变了"
     seen.length = 0;
+    expect(resolveTraceRoundGroups().map((g) => g.narrative)).toEqual(["真实轨迹"]);
+    expect(seen).toContain("new-msg");
+  });
+
+  /**
+   * 反面契约：**瞬时假阴性不能锁死面板**。
+   *
+   * 曾经的 `deadLock*` 缓存把一次"查不到"永久记住，从此不再回头查 —— 存在性查询只要
+   * 给一次假阴性（会话消息表尚未 hydrate 很常见），正在看的轨迹就被判死且永不恢复，
+   * 而回退分支又排除 `fallbackId === locked`，结果是 groups / tools 双双为空。
+   * 现在失效判定每次实时重算，所以"一次说不在、随后又在"必须能自动恢复。
+   */
+  it("存在性查询一次假阴性后恢复，面板必须能自动跟上", () => {
+    let exists = false; // 先假装消息不在（瞬时误判）
+    setTraceGroupResolver((id) => (id === "m1" ? [group(1, "轨迹")] : []));
+    setTraceMessageExistsResolver((id) => (id === "m1" ? exists : false));
+
+    notifyTraceRunStarted("m1");
+    // 误判期间可能暂时回退/为空，这不重要 —— 重要的是不能永久卡住
     resolveTraceRoundGroups();
 
-    // 第二次只应该查有效 id，不再碰失效的那个
-    expect(seen).toEqual(["new-msg"]);
+    // 消息其实一直在（比如消息表刚 hydrate 完）→ 必须重新显示出来
+    exists = true;
+    expect(resolveTraceRoundGroups().map((g) => g.narrative)).toEqual(["轨迹"]);
   });
 });
 
@@ -437,12 +461,17 @@ describe("agentTraceDrawer 第一轮自动弹出（空轨迹回归）", () => {
     // 消息此刻存在、roundGroups 为空（真实运行刚开始的形态）
     const msg = { id: "m1", roundGroups: [] as AgentRoundGroup[] };
     setTraceGroupResolver((id) => (id === "m1" ? msg.roundGroups : []));
+    // 消息确实在表里 —— 这是"空 ≠ 死"的关键前提，必须显式声明
+    setTraceMessageExistsResolver((id) => id === "m1");
 
     // Agent 开跑：面板自动弹出并锁到这条消息
     notifyTraceRunStarted("m1");
     expect(useAgentTraceDrawerState().open).toBe(true);
 
-    // 弹窗那一刻没有数据 —— 空态是对的，但**不能**把这条消息判成失效
+    // 弹窗那一刻没有数据 —— 空态是对的，但**不能**把这条消息判成失效。
+    // 求值两次：真实渲染里 computed 会被反复求值，旧实现在第二次就把它记进失效缓存
+    // （这正是「第一轮自动弹出后一直空」的触发条件，只求值一次反而复现不出来）。
+    expect(resolveTraceRoundGroups()).toEqual([]);
     expect(resolveTraceRoundGroups()).toEqual([]);
 
     // 第一个事件到达，roundGroups 长出来了
@@ -455,11 +484,14 @@ describe("agentTraceDrawer 第一轮自动弹出（空轨迹回归）", () => {
   it("空数据不写进失效缓存，后续工具表也能解析到", () => {
     const msg = { id: "m1", roundGroups: [] as AgentRoundGroup[] };
     setTraceGroupResolver((id) => (id === "m1" ? msg.roundGroups : []));
+    setTraceMessageExistsResolver((id) => id === "m1");
     setTraceToolsResolver((id) => (id === "m1" ? [{ id: "t1" } as never] : []));
 
     notifyTraceRunStarted("m1");
+    // 多求值几次，确保没有任何"第二次就改判"的缓存行为
     resolveTraceRoundGroups();
     resolveTraceRoundGroups();
+    expect(resolveTraceTools()).toHaveLength(1);
 
     msg.roundGroups = [group(1, "内容")];
 

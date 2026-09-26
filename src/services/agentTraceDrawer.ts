@@ -360,24 +360,21 @@ export function resolveTraceTools(): AgentRoundTool[] {
 /**
  * 当前"有效"的轨迹消息 id —— groups 与 tools 两侧共用，避免求值顺序影响结果。
  *
- * 与 `resolveTraceRoundGroups` 同一套规则：锁失效则回退同会话最新一条。
+ * 与 `resolveTraceRoundGroups` 同一套规则：消息**确实不在了**才回退同会话最新一条。
  *
  * ⚠️ 这里**同样**必须先问"消息还在不在"再决定回退。旧实现只看
  * `safeResolve(...).length > 0`：消息在表里但这一轮还没产出数据时，会被判成回退，
  * 而回退目标 `fallbackId` 往往就是同一个 id（或为 null），于是 panels 恒空 ——
- * 与 `resolveTraceRoundGroups` 里那个失效缓存是同一个 bug 的两面。
+ * 与 `resolveTraceRoundGroups` 里那个（已删除的）失效缓存是同一个 bug 的两面。
  * 修一面不修另一面，会出现"某一路径有数据、另一路没有"的不一致。
  */
 function effectiveTraceMessageId(): { id: string | null; sessionId: string | null } {
   const locked = state.messageId;
   const sessionId = state.messageSessionId;
   if (locked) {
-    const knownDead = locked === deadLockId && sessionId === deadLockSessionId;
-    if (!knownDead) {
-      // 消息还在表里 → 就用它，哪怕此刻还没有数据（数据随后会长出来）
-      if (!isLockedMessageGone(locked, sessionId)) return { id: locked, sessionId };
-      // 消息确定不在了 → 才考虑回退
-    }
+    // 消息还在表里 → 就用它，哪怕此刻还没有数据（数据随后会长出来）
+    if (!isLockedMessageGone(locked, sessionId)) return { id: locked, sessionId };
+    // 消息确定不在了 → 才考虑回退
     const fallbackId = getLatestMessageId(sessionId);
     return { id: fallbackId && fallbackId !== locked ? fallbackId : null, sessionId };
   }
@@ -624,8 +621,6 @@ export function __resetAgentTraceDrawerForTest(): void {
   state.collapsedForEditor = false;
   state.userDismissedAuto = false;
   latestMessageIdBySession.clear();
-  deadLockId = null;
-  deadLockSessionId = null;
   resolveGroups = () => [];
   resolveTools = () => [];
   resolveMessageExists = () => null;
