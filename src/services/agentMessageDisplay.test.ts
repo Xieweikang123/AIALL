@@ -357,29 +357,56 @@ describe("resolveCompletedAgentBubbleContent", () => {
 });
 
 describe("finalizeAssistantBubbleContent", () => {
-  it("promotes answer-like narrative when run ends without isFinal and no file writes", () => {
+  it("does not promote exploration narrative to the bubble when an interrupted run has no final answer", () => {
     const narrative =
       "## 根因判断\n\n`chatCollapsed` 由父组件独立管理，切换左侧 Tab 不会改它，因此回到 Chat 时面板状态应保持不变。";
+    const result = finalizeAssistantBubbleContent({
+      content: "",
+      agentFailed: true,
+      agentAbortReason: "模型未在超时前返回",
+      roundGroups: [
+        {
+          turn: 3,
+          narrative,
+          modelSteps: [],
+          toolIds: ["t1"],
+          response: {
+            assistantText: narrative,
+            toolCalls: [{ id: "t1", name: "grep", arguments: "{}" }],
+            hasToolCalls: true,
+            isFinal: false,
+          },
+        },
+      ],
+      tools: [{ running: false, turn: 3 }],
+    });
+    expect(result).not.toBe(narrative);
+    expect(result).not.toContain("chatCollapsed");
+    expect(result).toBe("运行已中断：模型未在超时前返回");
+  });
+
+  it("keeps an empty bubble for structured runs that ended without a final answer and without an abort", () => {
+    const narrative = "我先看看这个组件的实现，再决定改哪里。";
     expect(
       finalizeAssistantBubbleContent({
         content: "",
         roundGroups: [
           {
-            turn: 3,
+            turn: 2,
             narrative,
             modelSteps: [],
             toolIds: ["t1"],
             response: {
               assistantText: narrative,
-              toolCalls: [{ id: "t1", name: "grep", arguments: "{}" }],
+              toolCalls: [{ id: "t1", name: "read_file", arguments: "{}" }],
               hasToolCalls: true,
               isFinal: false,
             },
           },
         ],
-        tools: [{ running: false, turn: 3 }],
+        tools: [{ running: false, turn: 2 }],
       }),
-    ).toBe(narrative);
+    ).toBe("");
   });
 
   it("shows written-files summary when run ends without a final answer", () => {

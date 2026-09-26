@@ -791,8 +791,12 @@ export function finalizeAssistantBubbleContent(msg: FinalizeAssistantBubbleSourc
     if (writtenFiles.length) {
       return buildWrittenFilesSummary(writtenFiles, Boolean(msg.wasAborted));
     }
-    const fallback = resolveExplorationThinkingPreview(msg);
-    if (fallback) return fallback;
+    // 运行结构存在但无最终回答：这是"没跑完"，不是"回答就是这个"。
+    // 过程旁白（探索阶段的 narrative）只属于过程 feed，不得提升为正文气泡，
+    // 否则中断后用户会看到半截叙述被当成回复。中断即明确告知中断。
+    if (msg.agentFailed || msg.wasAborted) {
+      return `运行已中断：${msg.agentAbortReason?.trim() || "运行已中断"}`;
+    }
     return "";
   }
 
