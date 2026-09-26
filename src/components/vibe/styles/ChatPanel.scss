@@ -778,17 +778,25 @@
   opacity: 0.7;
 }
 
+/*
+ * 贴聊天面板内壁的浮层：钉在工具栏行（.chat-action-row，position: relative）上沿，
+ * 左右跟着聊天列的内边距走 —— 宽度自适应，不写死 px，也不需要 JS 算 fixed 坐标。
+ * max-height 用 vh 是有意的：聊天列被用户拖宽时列表跟着变宽，但高度上限跟窗口走。
+ */
 .session-outline-popover {
-  z-index: 1200;
-  width: min(320px, calc(100vw - 24px));
-  max-height: min(360px, calc(100vh - 24px));
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 30;
+  max-height: min(340px, 46vh);
   display: flex;
   flex-direction: column;
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 10px;
-  background: rgba(12, 18, 28, 0.96);
-  backdrop-filter: blur(14px);
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+  /* 实色：下面就是消息列表，半透明 + backdrop-filter 在滚动时糊成一团 */
+  background: #0c121c;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
   overflow: hidden;
 }
 
@@ -837,6 +845,21 @@
 
 .session-outline-item:hover {
   background: rgba(88, 166, 255, 0.12);
+}
+
+/* 当前项：键盘移动 / 刚跳转过的那条。outlineActiveId 只有一个来源，样式不会打架 */
+.session-outline-item.active {
+  background: rgba(88, 166, 255, 0.18);
+  color: rgba(240, 247, 255, 0.98);
+}
+
+.session-outline-item.active .session-outline-index {
+  color: rgba(165, 214, 255, 0.95);
+}
+
+.session-outline-item:focus-visible {
+  outline: 1px solid rgba(126, 182, 255, 0.65);
+  outline-offset: -1px;
 }
 
 .session-outline-index {

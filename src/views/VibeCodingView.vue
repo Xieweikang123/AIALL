@@ -931,6 +931,9 @@
         </span>
         <span class="chat-expand-rail-label">AI 助手</span>
       </button>
+
+      <!-- 数据流轨迹：工作区最右一列，与会话面板并排（不再浮层盖住它） -->
+      <AgentTraceDrawer />
     </main>
 
     <!-- 移动端底部 Tab 导航条 (仅在移动端小屏且已打开项目时显示) -->
@@ -1131,6 +1134,7 @@ import CodeMapMainPanel from "../components/vibe/CodeMapMainPanel.vue";
 import PlanMainPanel from "../components/vibe/PlanMainPanel.vue";
 import EditorPanel from "../components/vibe/EditorPanel.vue";
 import ChatPanel from "../components/vibe/ChatPanel.vue";
+import AgentTraceDrawer from "../components/AgentTraceDrawer.vue";
 import VibeChatMessages from "../components/vibe/VibeChatMessages.vue";
 import VibeWorkspaceWelcome from "../components/vibe/VibeWorkspaceWelcome.vue";
 import QuickSearchModal from "../components/vibe/QuickSearchModal.vue";
@@ -1256,7 +1260,14 @@ import {
   formatPendingApprovalLabel,
 } from "../services/vibeAgentTurnApply";
 import { revertTurnFileDiffs } from "../services/agentTurnRevert";
-import { setTraceDumpContext } from "../services/agentTraceDrawer";
+import { buildAgentRoundGroupViews } from "../services/agentRoundGroups";
+import {
+  setTraceDumpContext,
+  setTraceGroupResolver,
+  setTraceRunningResolver,
+  setTraceToolsResolver,
+  useAgentTraceDrawerState,
+} from "../services/agentTraceDrawer";
 import {
   type VibeChatHistoryMessage,
   type VibeChatMode,
@@ -2455,6 +2466,20 @@ const {
   CHAT_MIN_WIDTH,
 } = usePanelLayout(workspaceRef);
 
+/**
+ * 轨迹面板是工作区最右一列，开/关都会改变会话面板的可用宽度。
+ * 打开的瞬间重算一次上限，否则「之前调宽的会话面板 + 新增的轨迹列」会把编辑器挤没。
+ * 不落盘：用户手调的宽度原样留在 localStorage，下次进来会再夹一次。
+ */
+const traceDrawerState = useAgentTraceDrawerState();
+watch(
+  () => traceDrawerState.open,
+  (open) => {
+    if (!open) return;
+    chatPanelWidth.value = Math.min(chatPanelWidth.value, getChatPanelMaxWidth());
+  },
+);
+
 function handleMobileFilesTabClick() {
   gitPanelMode.value = "files";
   switchMobileTab("files");
@@ -3227,8 +3252,7 @@ const {
   agentLiveRevision,
   chainJumpVisible,
   stalledAssistantMsg,
-  autoResumeSecondsLeft,
-  autoResumeTargetId,
+  autoResumeSecondsLeft,  autoResumeTargetId,
   runAgentTurn,
   runAutoBugFixAgent,
   resumeAgentRun,
@@ -3262,6 +3286,53 @@ const {
   stopAgentUiTick,
   hasActiveAgentRun,
 } = agent;
+
+/**
+ * 轨迹抽屉的数据源：按 messageId 从**当前** chatMessages 取 roundGroups 原始数组。
+ *
+ * 只做「找消息 + 登记依赖」两件事，**不**在这里构建 `AgentRoundGroupView` —— 这个
+ * 函数每次响应式读取都会被调用（流式期间每帧多次），在里面做 map/filter/展开会把
+ * 面板的 rAF 节流完全架空。视图组装交给面板节流后再做一次。
+ *
+ * ⚠️ 必须显式读 `agentLiveRevision`（以及消息字段）：`patchAssistantMsg` 是
+ * `Object.assign` **原地改**消息对象，且 `chatMessages` 底层是非响应式 Map
+ * （见 `useChatSessionStore` 的 registry），数组身份不变。只读 `msg.roundGroups`
+ * 在流式期不足以让抽屉的 computed 重新求值 —— 这是「面板不实时」的根因。
+ * 聊天树同样靠这个 revision（见 `useAgentMessage.trackLiveMessageDeps`）。
+ *
+ * 注册点必须在这之后（`agentLiveRevision` 刚从 `agent` 解构出来）。
+ */
+setTraceGroupResolver((messageId) => {
+  void agentLiveRevision.value;
+  if (!messageId) return [];
+  const msg = chatMessages.value.find((m) => m.id === messageId);
+  if (!msg) return [];
+  void msg.roundGroups;
+  void msg.tools?.length;
+  void msg.agentTurn;
+  void msg.agentPhase;
+  return msg.roundGroups ?? [];
+});
+
+/** 轨迹抽屉需要的工具表（供视图层补齐每轮步骤行）。 */
+setTraceToolsResolver((messageId) => {
+  void agentLiveRevision.value;
+  if (!messageId) return [];
+  const msg = chatMessages.value.find((m) => m.id === messageId);
+  void msg?.tools?.length;
+  return msg?.tools ?? [];
+});
+
+/**
+ * 轨迹抽屉的「是否仍在跑」信号 —— 必须来自真实运行态。
+ * 用结构判断（最后一轮没有 isFinal）在运行中断时会永远为真，
+ * 导致轨迹里「思考中…」一直挂着不收。
+ */
+setTraceRunningResolver(() => {
+  void chatSending.value;
+  void agentLiveRevision.value;
+  return chatSending.value;
+});
 
 const autoBugFix = useAutoBugFix(projectPath, projectOpened, activeSessionId, {
   startAgent: (params) => runAutoBugFixAgent(params),

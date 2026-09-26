@@ -286,45 +286,19 @@
               class="session-outline-wrap"
             >
               <button
+                ref="outlineButtonRef"
                 type="button"
                 class="chat-debug-toggle"
                 :class="{ active: outlineOpen }"
-                :title="outlineOpen ? '收起会话大纲' : '会话大纲：本会话问过的问题'"
+                :title="outlineOpen ? '收起会话大纲' : '会话大纲：本会话问过的问题（↑↓ 选择，回车跳转）'"
                 :aria-expanded="outlineOpen"
                 aria-haspopup="dialog"
                 @click="toggleOutline"
+                @keydown="onOutlineButtonKeydown"
               >
                 大纲
                 <span v-if="sessionOutline.length" class="session-outline-count">{{ sessionOutline.length }}</span>
               </button>
-              <Teleport to="body">
-                <div
-                  v-if="outlineOpen"
-                  ref="outlinePopoverRef"
-                  class="session-outline-popover"
-                  :style="{ position: 'fixed', top: outlinePopoverTop + 'px', right: outlinePopoverRight + 'px' }"
-                  role="dialog"
-                  aria-label="会话大纲"
-                >
-                  <div class="session-outline-head">
-                    <span class="session-outline-title">本会话问题</span>
-                    <span class="session-outline-meta">{{ sessionOutline.length }} 条</span>
-                  </div>
-                  <ol class="session-outline-list">
-                    <li v-for="item in sessionOutline" :key="item.id">
-                      <button
-                        type="button"
-                        class="session-outline-item"
-                        :title="item.preview"
-                        @click="jumpToOutlineItem(item.id)"
-                      >
-                        <span class="session-outline-index">{{ item.index }}</span>
-                        <span class="session-outline-preview">{{ item.preview }}</span>
-                      </button>
-                    </li>
-                  </ol>
-                </div>
-              </Teleport>
             </div>
             <button
               type="button"
@@ -338,11 +312,11 @@
             <button
               type="button"
               class="chat-debug-toggle"
-              :class="{ active: reasoningDrawerState.autoEnabled }"
-              :title="reasoningAutoTitle"
-              @click="toggleReasoningAuto"
+              :class="{ active: traceDrawerState.open }"
+              :title="traceButtonTitle"
+              @click="onTraceButton"
             >
-              思考
+              轨迹
             </button>
             <div
               v-if="providerOptions.length"
@@ -561,6 +535,50 @@
             <button type="button" class="primary send-btn" :disabled="!canSendChat" @click="$emit('send-chat')">
               {{ chatSending ? "打断并发送" : "发送" }}
             </button>
+          </div>
+
+          <!--
+            会话大纲：贴聊天面板内壁的浮层，钉在这行工具栏的上沿。
+            刻意不用 Teleport + fixed + JS 手算坐标：那样宽度得写死、
+            还得靠 resize/scroll 监听不停重算位置；这里交给 CSS，
+            宽度自动跟随聊天列，滚消息/改窗口/折叠面板都不用重算。
+          -->
+          <div
+            v-if="outlineOpen"
+            ref="outlinePopoverRef"
+            class="session-outline-popover"
+            role="dialog"
+            aria-label="会话大纲"
+          >
+            <div class="session-outline-head">
+              <span class="session-outline-title">本会话问题</span>
+              <span class="session-outline-meta">{{ sessionOutline.length }} 条</span>
+            </div>
+            <ol
+              class="session-outline-list"
+              role="listbox"
+              aria-label="本会话问题"
+              @keydown="onOutlineListKeydown"
+            >
+              <li v-for="item in sessionOutline" :key="item.id" role="none">
+                <button
+                  :id="`outline-item-${item.index}`"
+                  type="button"
+                  role="option"
+                  class="session-outline-item"
+                  :class="{ active: item.id === outlineActiveId }"
+                  :tabindex="item.id === outlineActiveId ? 0 : -1"
+                  :aria-selected="item.id === outlineActiveId"
+                  :data-outline-index="item.index"
+                  :title="item.preview"
+                  @click="jumpToOutlineItem(item.id)"
+                  @mouseenter="outlineActiveId = item.id"
+                >
+                  <span class="session-outline-index">{{ item.index }}</span>
+                  <span class="session-outline-preview">{{ item.preview }}</span>
+                </button>
+              </li>
+            </ol>
           </div>
         </div>
       </div>
@@ -786,8 +804,6 @@
       </div>
     </div>
     </div>
-    <AgentTraceDrawer />
-    <ReasoningDrawer />
   </aside>
 </template>
 
@@ -821,13 +837,7 @@ import { resolveAgentResumeButtonLabel } from "../../services/agentRecovery";
 import { renderMarkdown } from "../../utils/renderMarkdown";
 import { agentDebugEnabled, setAgentDebugEnabled } from "../../utils/agentDebugFlag";
 import { buildSessionOutline } from "../../utils/sessionOutline";
-import AgentTraceDrawer from "../AgentTraceDrawer.vue";
-import ReasoningDrawer from "../ReasoningDrawer.vue";
-import {
-  setReasoningAutoEnabled,
-  useReasoningDrawerState,
-} from "../../services/agentReasoningDrawer";
-import { openLatestTraceDrawer } from "../../services/agentTraceDrawer";
+import { closeTraceDrawer, openLatestTraceDrawer, useAgentTraceDrawerState } from "../../services/agentTraceDrawer";
 import AgentLiveStatusRail from "../AgentLiveStatusRail.vue";
 
 interface ChatMessage {
@@ -1218,50 +1228,140 @@ const tokenPopoverRight = ref(0);
 
 const outlineOpen = ref(false);
 const outlineWrapRef = ref<HTMLElement | null>(null);
+const outlineButtonRef = ref<HTMLButtonElement | null>(null);
 const outlinePopoverRef = ref<HTMLElement | null>(null);
-const outlinePopoverTop = ref(0);
-const outlinePopoverRight = ref(0);
+/** 当前高亮的问题 id。键盘移动 / 鼠标悬停 / 刚跳转过的那条都会更新它。 */
+const outlineActiveId = ref<string | null>(null);
 
 const sessionOutline = computed(() => buildSessionOutline(props.chatMessages));
 
-/** 思考过程面板：Agent 思考时自动在聊天区右侧展开，不改变聊天区既有表现 */
-const reasoningDrawerState = useReasoningDrawerState();
+/**
+ * 数据流轨迹：Agent 思考/执行时自动在右侧展开，也是查看思考过程的唯一面板。
+ * 按钮点击在「打开 / 收起」间切换；自动展开开关见 `agentTraceDrawer.autoEnabled`。
+ */
+const traceDrawerState = useAgentTraceDrawerState();
 
-const reasoningAutoTitle = computed(() =>
-  reasoningDrawerState.autoEnabled
-    ? "思考过程自动显示已开启（Agent 思考时右侧自动展开），点击关闭"
-    : "思考过程自动显示已关闭，点击开启",
+const traceButtonTitle = computed(() =>
+  traceDrawerState.open
+    ? "收起数据流轨迹（含思考过程）"
+    : traceDrawerState.autoEnabled
+      ? "查看数据流轨迹（含思考过程）；Agent 思考时会自动展开"
+      : "查看数据流轨迹（含思考过程）；自动展开已关闭",
 );
 
-function toggleReasoningAuto() {
-  setReasoningAutoEnabled(!reasoningDrawerState.autoEnabled);
+function onTraceButton() {
+  if (traceDrawerState.open) {
+    closeTraceDrawer();
+    return;
+  }
+  openLatestTraceDrawer();
 }
 
-function updateOutlinePopoverPosition() {
-  const wrap = outlineWrapRef.value;
-  if (!wrap) return;
-  const rect = wrap.getBoundingClientRect();
-  const pop = outlinePopoverRef.value;
-  const popHeight = pop?.offsetHeight ?? 0;
-  const gap = 6;
-  const spaceAbove = rect.top - gap;
-  const spaceBelow = window.innerHeight - rect.bottom - gap;
-  const openDown = spaceAbove < popHeight && spaceBelow > spaceAbove;
-  outlinePopoverTop.value = openDown ? rect.bottom + gap : Math.max(gap, rect.top - popHeight - gap);
-  outlinePopoverRight.value = Math.max(8, window.innerWidth - rect.right);
-}
-
-function handleOutlineViewportChange() {
-  if (outlineOpen.value) updateOutlinePopoverPosition();
+/**
+ * 会话大纲浮层的位置完全由 CSS 负责（贴 `.chat-action-row` 上沿），
+ * 所以这里不再有「量按钮位置 → 手算 fixed top/right → 监听 resize/scroll 重算」那套。
+ */
+function setOutlineActiveByIndex(index: number, focus = false): void {
+  const items = sessionOutline.value;
+  if (!items.length) return;
+  const clamped = Math.min(Math.max(index, 0), items.length - 1);
+  const item = items[clamped];
+  if (!item) return;
+  outlineActiveId.value = item.id;
+  if (!focus) return;
+  nextTick(() => {
+    const el = outlinePopoverRef.value?.querySelector<HTMLElement>(
+      `[data-outline-index="${item.index}"]`,
+    );
+    el?.focus();
+    el?.scrollIntoView({ block: "nearest" });
+  });
 }
 
 function toggleOutline() {
-  outlineOpen.value = !outlineOpen.value;
-  if (outlineOpen.value) nextTick(updateOutlinePopoverPosition);
+  if (outlineOpen.value) {
+    outlineOpen.value = false;
+    return;
+  }
+  outlineOpen.value = true;
+  // 默认停在最后一条（也就是当前视野里最新的那个问题）
+  setOutlineActiveByIndex(sessionOutline.value.length - 1);
 }
 
-function jumpToOutlineItem(messageId: string) {
+/** 键盘打开：顺便把焦点交给列表，才能直接按 ↑↓ */
+function openOutlineAndFocus(): void {
+  if (outlineOpen.value) return;
+  outlineOpen.value = true;
+  setOutlineActiveByIndex(sessionOutline.value.length - 1, true);
+}
+
+function closeOutline(): void {
   outlineOpen.value = false;
+  nextTick(() => outlineButtonRef.value?.focus());
+}
+
+/**
+ * 按钮上的键盘操作。Enter/Space 除了 toggle 还要把焦点交给列表，
+ * 否则键盘打开后焦点还留在按钮上，↑↓ 走不到列表里。
+ * （keydown 上 preventDefault 顺便挡掉回车提交 / 空格滚页。）
+ */
+function onOutlineButtonKeydown(e: KeyboardEvent): void {
+  if (e.key === "ArrowDown") {
+    e.preventDefault();
+    openOutlineAndFocus();
+    return;
+  }
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    if (outlineOpen.value) {
+      closeOutline();
+      return;
+    }
+    openOutlineAndFocus();
+  }
+}
+
+function onOutlineListKeydown(e: KeyboardEvent): void {
+  const items = sessionOutline.value;
+  if (!items.length) return;
+  const current = items.findIndex((item) => item.id === outlineActiveId.value);
+  switch (e.key) {
+    case "ArrowDown":
+      e.preventDefault();
+      setOutlineActiveByIndex(current < 0 ? 0 : current + 1, true);
+      break;
+    case "ArrowUp":
+      e.preventDefault();
+      setOutlineActiveByIndex(current < 0 ? items.length - 1 : current - 1, true);
+      break;
+    case "Home":
+      e.preventDefault();
+      setOutlineActiveByIndex(0, true);
+      break;
+    case "End":
+      e.preventDefault();
+      setOutlineActiveByIndex(items.length - 1, true);
+      break;
+    case "Enter":
+    case " ": {
+      const item = current >= 0 ? items[current] : undefined;
+      if (!item) return;
+      e.preventDefault();
+      jumpToOutlineItem(item.id);
+      break;
+    }
+    case "Escape":
+      e.preventDefault();
+      closeOutline();
+      break;
+    default:
+      break;
+  }
+}
+
+/** 跳转后**不关**浮层：连着看/跳好几条时不用反复点开（这是旧版最难受的地方） */
+function jumpToOutlineItem(messageId: string) {
+  outlineActiveId.value = messageId;
   emit("jump-to-message", messageId);
 }
 
@@ -1272,25 +1372,26 @@ function handleOutlineOutsideClick(e: MouseEvent) {
   outlineOpen.value = false;
 }
 
-watch(outlineOpen, (open) => {
-  if (open) {
-    window.addEventListener("resize", handleOutlineViewportChange);
-    document.addEventListener("scroll", handleOutlineViewportChange, true);
-  } else {
-    window.removeEventListener("resize", handleOutlineViewportChange);
-    document.removeEventListener("scroll", handleOutlineViewportChange, true);
-  }
-});
-
 watch(
   () => props.activeSessionId,
   () => {
     outlineOpen.value = false;
+    outlineActiveId.value = null;
   },
 );
 
 watch(sessionOutline, (items) => {
-  if (!items.length) outlineOpen.value = false;
+  // 只在浮层开着时兜底：流式期间这个 computed 每次消息 patch 都会重建，
+  // 面板没开时没必要为「高亮项还在不在」白扫一遍。
+  if (!outlineOpen.value) return;
+  if (!items.length) {
+    outlineOpen.value = false;
+    return;
+  }
+  // 当前高亮的那条不在了（切了内容等），回退到最后一条
+  if (outlineActiveId.value && !items.some((item) => item.id === outlineActiveId.value)) {
+    outlineActiveId.value = items[items.length - 1]?.id ?? null;
+  }
 });
 
 function updateTokenPopoverPosition() {
@@ -1330,8 +1431,6 @@ watch(
 onUnmounted(() => {
   window.removeEventListener("resize", handleTokenViewportChange);
   document.removeEventListener("scroll", handleTokenViewportChange, true);
-  window.removeEventListener("resize", handleOutlineViewportChange);
-  document.removeEventListener("scroll", handleOutlineViewportChange, true);
 });
 
 /** 点击按钮/弹窗外部时自动关闭 */

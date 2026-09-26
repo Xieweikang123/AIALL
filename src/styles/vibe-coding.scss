@@ -138,7 +138,8 @@
 .workspace.no-project > .file-panel,
 .workspace.no-project > .resize-handle,
 .workspace.no-project > .chat-panel,
-.workspace.no-project > .chat-expand-rail {
+.workspace.no-project > .chat-expand-rail,
+.workspace.no-project > .agent-trace-drawer-layer {
   visibility: hidden;
   pointer-events: none;
 }

@@ -1,5 +1,6 @@
 import { ref, computed, onBeforeUnmount, getCurrentInstance, type Ref } from "vue";
 import { lsGet, lsSet, lsGetJson, lsSetJson } from "../utils/localStorageSafe";
+import { AGENT_TRACE_PANEL_WIDTH, useAgentTraceDrawerState } from "../services/agentTraceDrawer";
 
 const PANEL_WIDTH_KEY = "vibe-coding-panel-widths";
 const EDITOR_COLLAPSED_KEY = "vibe-coding-editor-collapsed";
@@ -88,13 +89,22 @@ export function usePanelLayout(workspaceRef: Ref<HTMLElement | null>) {
     return workspaceRef.value?.clientWidth || window.innerWidth;
   }
 
+  /**
+   * 轨迹面板开着时会占掉工作区最右一列，会话面板的最大宽度得把它让出来，
+   * 否则「用户手调过的宽度 + 轨迹列」会把编辑器压到 EDITOR_MIN_WIDTH 以下。
+   */
+  function getTracePanelReserve(): number {
+    return useAgentTraceDrawerState().open ? AGENT_TRACE_PANEL_WIDTH : 0;
+  }
+
   function getChatPanelMaxWidth(): number {
     const workspace = getWorkspaceWidth();
+    const traceReserve = getTracePanelReserve();
     if (editorCollapsed.value) {
-      return Math.max(CHAT_MIN_WIDTH, workspace - filePanelWidth.value - RESIZE_HANDLES_WIDTH - 24);
+      return Math.max(CHAT_MIN_WIDTH, workspace - filePanelWidth.value - RESIZE_HANDLES_WIDTH - traceReserve - 24);
     }
     const byRatio = Math.floor(workspace * 0.78);
-    const byEditor = workspace - filePanelWidth.value - EDITOR_MIN_WIDTH - RESIZE_HANDLES_WIDTH;
+    const byEditor = workspace - filePanelWidth.value - EDITOR_MIN_WIDTH - RESIZE_HANDLES_WIDTH - traceReserve;
     return Math.max(CHAT_MIN_WIDTH, Math.min(CHAT_MAX_WIDTH, byRatio, byEditor));
   }
 
