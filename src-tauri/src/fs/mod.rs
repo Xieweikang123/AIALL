@@ -1,10 +1,12 @@
 mod grep;
 mod listing;
 mod read_write;
+mod text_decode;
 
 pub use grep::*;
 pub use listing::{list_directory_impl, resolve_basename_candidate, search_files_impl};
 pub use read_write::*;
+pub use text_decode::decode_text_bytes;
 
 use serde::Serialize;
 use std::path::Path;

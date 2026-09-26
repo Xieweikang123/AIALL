@@ -1,7 +1,6 @@
-use super::{is_text_extension, TEXT_EXTENSIONS};
+use super::decode_text_bytes;
 use std::path::Path;
 use tokio::fs;
-use tokio::io::AsyncReadExt;
 
 const MAX_READ_BYTES: u64 = 2 * 1024 * 1024;
 
@@ -33,46 +32,29 @@ pub async fn read_file_content(file_path: &str) -> ReadFileResult {
             error: Some("文件过大（超过 2MB）".into()),
         };
     }
-    let ext = path
-        .extension()
-        .map(|e| format!(".{}", e.to_string_lossy().to_lowercase()))
-        .unwrap_or_default();
-    if !TEXT_EXTENSIONS.contains(&ext.as_str()) && meta.len() > 0 {
-        let mut file = match fs::File::open(path).await {
-            Ok(f) => f,
-            Err(e) => {
-                return ReadFileResult {
-                    ok: false,
-                    content: String::new(),
-                    size: meta.len(),
-                    error: Some(e.to_string()),
-                };
-            }
-        };
-        let mut buf = vec![0u8; 512.min(meta.len() as usize)];
-        if let Ok(n) = file.read(&mut buf).await {
-            if buf[..n].contains(&0) {
-                return ReadFileResult {
-                    ok: false,
-                    content: String::new(),
-                    size: meta.len(),
-                    error: Some("二进制文件，无法读取".into()),
-                };
-            }
+    let bytes = match fs::read(path).await {
+        Ok(b) => b,
+        Err(e) => {
+            return ReadFileResult {
+                ok: false,
+                content: String::new(),
+                size: meta.len(),
+                error: Some(e.to_string()),
+            };
         }
-    }
-    match fs::read_to_string(path).await {
-        Ok(content) => ReadFileResult {
+    };
+    match decode_text_bytes(&bytes) {
+        Some(content) => ReadFileResult {
             ok: true,
             content,
             size: meta.len(),
             error: None,
         },
-        Err(e) => ReadFileResult {
+        None => ReadFileResult {
             ok: false,
             content: String::new(),
             size: meta.len(),
-            error: Some(e.to_string()),
+            error: Some("二进制文件，无法读取".into()),
         },
     }
 }
@@ -142,6 +124,16 @@ pub async fn rename_item_impl(from: &str, to: &str) -> Result<(String, String), 
 mod tests {
     use super::*;
 
+    fn temp_dir(name: &str) -> std::path::PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("aiall-fs-{name}-{nanos}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     #[test]
     fn test_read_file_result_success() {
         let result = ReadFileResult {
@@ -167,10 +159,46 @@ mod tests {
         assert_eq!(result.error, Some("file not found".to_string()));
     }
 
+    /// PowerShell 5.1 `> out.txt` 的产物（UTF-16LE + BOM）必须能读出来。
     #[test]
-    fn test_text_extensions_import_works() {
-        assert!(TEXT_EXTENSIONS.contains(&".rs"));
-        assert!(is_text_extension(".rs"));
-        assert!(!is_text_extension(".exe"));
+    fn test_read_file_decodes_utf16_txt_instead_of_binary() {
+        let dir = temp_dir("utf16");
+        let path = dir.join("out.txt");
+        let mut bytes = vec![0xFFu8, 0xFE];
+        for unit in "hello\nworld\n".encode_utf16() {
+            bytes.extend_from_slice(&unit.to_le_bytes());
+        }
+        std::fs::write(&path, &bytes).unwrap();
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let result = runtime.block_on(read_file_content(&path.to_string_lossy()));
+
+        assert!(result.ok, "utf16 txt 不该被判二进制: {:?}", result.error);
+        assert_eq!(result.content, "hello\nworld\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_read_file_reports_binary_for_png_bytes() {
+        let dir = temp_dir("binary");
+        let path = dir.join("fake.txt");
+        let png = [
+            0x89u8, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52,
+        ];
+        std::fs::write(&path, png).unwrap();
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let result = runtime.block_on(read_file_content(&path.to_string_lossy()));
+
+        assert!(!result.ok);
+        assert_eq!(result.error.as_deref(), Some("二进制文件，无法读取"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
