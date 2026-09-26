@@ -266,6 +266,15 @@
             <span>上下文窗口（可选）</span>
             <div class="field-tools">
               <button
+                type="button"
+                class="link"
+                :disabled="contextWindowFetching || !endpointReady || !form.model.trim()"
+                title="向接口的 /models 要这个模型真实的上下文窗口（比内置表准）"
+                @click="handleFetchContextWindow"
+              >
+                {{ contextWindowFetching ? "获取中..." : "获取" }}
+              </button>
+              <button
                 v-if="contextWindowInput"
                 type="button"
                 class="link"
@@ -281,6 +290,10 @@
             placeholder="留空自动识别；可填 1000000 / 1m / 128k"
           />
           <small v-if="contextWindowError" class="tips error">{{ contextWindowError }}</small>
+          <small v-else-if="contextWindowStatus" class="tips">{{ contextWindowStatus }}</small>
+          <small v-else-if="contextWindowEffectiveText" class="tips">
+            当前生效：{{ contextWindowEffectiveText }}
+          </small>
           <small v-else class="tips">
             按模型名保存在本供应商。手填值优先于接口返回与内置表，用于中转站不返回窗口时手动指定（如 1m）。
           </small>
@@ -1485,6 +1498,62 @@ async function handleRefreshModels() {
   await fetchModels(true);
 }
 
+/**
+ * 拉取**当前模型**的真实上下文窗口（走 `/models` 里报的 `context_length` 之类字段）。
+ *
+ * 为什么不复用 `fetchModels`：那个函数会顺带覆盖 `availableModels`，并且在当前模型
+ * 不在返回列表里时把 `form.model` 改成第一个。用户手打的模型名（代理别名、路由前缀）
+ * 常常就不在列表里，点一下「获取窗口」把模型换掉属于误伤。这里只取窗口，
+ * 不碰模型列表、不改模型选择。
+ *
+ * 写入 `modelWindows`（接口报告的原始值）而**不是** `modelWindowOverrides`：
+ * 后者语义是「用户手填」，自动抓的值塞进去会让真值和手填混为一谈，页面上也就
+ * 分不清"我填的"和"它报的"。`modelWindows` 由 providers 的 deep watch 自动落盘。
+ */
+async function handleFetchContextWindow() {
+  if (!endpointReady.value) {
+    contextWindowStatus.value = endpointError.value || "请先填写接口地址。";
+    return;
+  }
+  const model = form.model.trim();
+  if (!model) {
+    contextWindowStatus.value = "请先填写模型名。";
+    return;
+  }
+  const provider = providers.value.find((item) => item.id === editingProviderId.value);
+  if (!provider) return;
+
+  contextWindowFetching.value = true;
+  contextWindowStatus.value = "正在获取...";
+  try {
+    // forceRefresh：模型列表的缓存可能来自很久以前，窗口字段要现拉的才算数。
+    const response = await fetchAvailableModels({
+      endpoint: form.endpoint,
+      apiKey: form.apiKey,
+      forceRefresh: true,
+    });
+    if (!response.ok) {
+      contextWindowStatus.value = response.error || "获取失败。";
+      return;
+    }
+    const reported = lookupReportedModelWindow(response.modelWindows, model);
+    if (!reported) {
+      contextWindowStatus.value =
+        "该接口没返回这个模型的窗口（/models 里没有 context_length 一类字段），请手填。";
+      return;
+    }
+    // 按**表单里的模型名**存：下游 VibeCodingView 的 modelWindowForLabel 是拿
+    // aiConfig.model 去查的。存 /models 的原始 id 可能因大小写或 provider/ 前缀
+    // 对不上，导致"抓到了却没生效"。
+    provider.modelWindows = { ...(provider.modelWindows ?? {}), [model]: reported };
+    contextWindowStatus.value = `已获取：${reported} token，已保存。`;
+  } catch (error) {
+    contextWindowStatus.value = `获取失败：${error instanceof Error ? error.message : "未知错误"}`;
+  } finally {
+    contextWindowFetching.value = false;
+  }
+}
+
 async function handleTest() {
   if (!canTest.value) {
     result.phase = "fail";
@@ -1659,6 +1728,8 @@ watch(
     const stored = provider?.modelWindowOverrides?.[model.trim()];
     const next = stored != null ? String(stored) : "";
     if (contextWindowInput.value !== next) contextWindowInput.value = next;
+    // 上一次「获取」的结果是上一个模型的，留着会让人以为当前模型已经取到过。
+    contextWindowStatus.value = "";
   },
 );
 
