@@ -12,24 +12,12 @@
       <span class="agent-trace-meta">{{ totalEntries }} 条事件 · {{ turns.length }} 轮</span>
     </button>
 
-    <div v-if="embedded" class="agent-trace-detail-bar">
-      <span class="agent-trace-detail-caption">详细度</span>
-      <button
-        v-for="level in detailLevels"
-        :key="level"
-        type="button"
-        class="agent-trace-detail-btn"
-        :class="{ 'agent-trace-detail-btn--on': level === detail, 'agent-trace-detail-btn--live': level === detail && live }"
-        :title="specOf(level).hint"
-        @click="onPickDetail(level)"
-      >
-        {{ specOf(level).label }}
-      </button>
-      <span v-if="live" class="agent-trace-live">
-        <span class="agent-trace-live-dot" aria-hidden="true" />
-        实时
-      </span>
-    </div>
+    <AgentTraceViewBar
+      v-if="embedded"
+      :view="view"
+      :live="live"
+      @update:view="onPickView"
+    />
 
     <div v-if="open || embedded" class="agent-trace-body">
       <div
@@ -66,14 +54,14 @@
               @click="toggleEntry(entry.key)"
             >
               <span class="agent-trace-row-chevron" aria-hidden="true">{{ isEntryOpen(entry) ? "▾" : "▸" }}</span>
-              <span class="agent-trace-row-kind" :title="kindTitle(entry.kind)">{{ kindLabel(entry.kind) }}</span>
+              <span class="agent-trace-row-kind" :title="kindUi[entry.kind].title">{{ kindUi[entry.kind].label }}</span>
               <span v-if="entry.kind === 'reasoning' && entry.streaming" class="agent-trace-row-dot" aria-hidden="true" />
               <span class="agent-trace-row-label">{{ entryLabel(entry) }}</span>
               <span v-if="entry.elapsedMs !== undefined" class="agent-trace-row-time">{{ formatElapsed(entry.elapsedMs) }}</span>
             </button>
             <!--
-              展开程度由详细度档位决定（entry.expandedByDefault），用户点箭头可临时覆盖。
-              思考在标准档起就默认展开 —— 它是「过程」，要能边跑边看。
+              展开程度由显示配置决定（entry.expandedByDefault），用户点箭头可临时覆盖。
+              思考默认展开 —— 它是「过程」，要能边跑边看。
             -->
             <div
               v-if="isEntryOpen(entry)"
@@ -96,17 +84,18 @@
 
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from "vue";
+import AgentTraceViewBar from "./AgentTraceViewBar.vue";
 import {
   buildAgentTraceTurns,
   pickTurnHeadlineEntry,
   type AgentTraceEntry,
 } from "../services/agentTraceTimeline";
 import {
-  AGENT_TRACE_DETAIL_LEVELS,
-  normalizeAgentTraceDetail,
-  resolveAgentTraceDetailSpec,
-  type AgentTraceDetailLevel,
-} from "../services/agentTraceDetail";
+  AGENT_TRACE_KIND_UI,
+  createDefaultAgentTraceView,
+  normalizeAgentTraceView,
+  type AgentTraceViewConfig,
+} from "../services/agentTraceView";
 import {
   buildAgentRoundGroupViews,
   type AgentRoundGroup,
@@ -124,29 +113,29 @@ const props = withDefaults(
     tools?: AgentRoundTool[];
     /** 嵌入抽屉时隐藏折叠按钮，由外层容器负责滚动 */
     embedded?: boolean;
-    /** 详细度档位（由抽屉头部控制） */
-    detail?: AgentTraceDetailLevel;
+    /** 显示配置（由抽屉头部控制） */
+    view?: AgentTraceViewConfig;
     /** 该轮是否仍在运行 —— 用于实时徽标与思考条目流式标记 */
     running?: boolean;
   }>(),
   { embedded: false, running: false, tools: () => [] },
 );
 
-const emit = defineEmits<{ (event: "update:detail", level: AgentTraceDetailLevel): void }>();
+const emit = defineEmits<{ (event: "update:view", view: AgentTraceViewConfig): void }>();
 
 const open = ref(false);
 /**
- * 用户对「展开/折叠」的显式覆盖。空 = 全部跟随详细度档位的默认值。
- * 用 Map 而非 Set：override 要能表达"把档位默认展开的关掉"。
+ * 用户对「展开/折叠」的显式覆盖。空 = 全部跟随显示配置的默认值。
+ * 用 Map 而非 Set：override 要能表达"把默认展开的关掉"。
  */
 const expandedKeys = ref<Map<string, boolean>>(new Map());
 /** 展开的轮次；默认只展开最新一轮，旧轮折叠成一行摘要 */
 const openTurns = ref<Set<number>>(new Set());
 
-const detailLevels = AGENT_TRACE_DETAIL_LEVELS;
-const detail = computed(() => normalizeAgentTraceDetail(props.detail));
+const kindUi = AGENT_TRACE_KIND_UI;
+/** 归一化脏值：外部传进来的是旧档位字符串或半截对象时也不能把面板搞坏 */
+const view = computed(() => normalizeAgentTraceView(props.view));
 const live = computed(() => props.running);
-const specOf = (level: AgentTraceDetailLevel) => resolveAgentTraceDetailSpec(level);
 
 /**
  * 流式节流：reasoning_delta 是逐 token 追加的，直接跟随会让每帧都全量重建
@@ -192,17 +181,15 @@ onUnmounted(() => {
   rafId = 0;
 });
 
-const turns = computed(() =>
-  buildAgentTraceTurns(throttledGroups.value, detail.value, live.value),
-);
+const turns = computed(() => buildAgentTraceTurns(throttledGroups.value, view.value, live.value));
 const totalEntries = computed(() => turns.value.reduce((sum, turn) => sum + turn.entries.length, 0));
 
 const emptyHint = computed(() =>
   live.value ? "等待 Agent 产出…" : "本轮没有可展示的轨迹事件。",
 );
 
-function onPickDetail(level: AgentTraceDetailLevel) {
-  emit("update:detail", level);
+function onPickView(next: AgentTraceViewConfig) {
+  emit("update:view", next);
 }
 
 /**
@@ -237,10 +224,10 @@ watch(
 );
 
 /**
- * 切档位时清掉用户覆盖 —— 档位本身现在就是"展开程度"，
- * 残留的旧 override 会盖住新档位的默认展开态，让人以为切档没生效。
+ * 改显示配置时清掉用户覆盖 —— 配置本身现在就是"哪几类默认展开"，
+ * 残留的旧 override 会盖住新配置的默认展开态，让人以为改了没生效。
  */
-watch(detail, () => {
+watch(view, () => {
   expandedKeys.value = new Map();
 });
 
@@ -270,7 +257,7 @@ function turnSummary(turn: TraceTurn): string {
 /**
  * 条目正文是否展开。
  *
- * 默认值来自**详细度档位**（`entry.expandedByDefault`），用户在行上点箭头可临时覆盖。
+ * 默认值来自**显示配置**（`entry.expandedByDefault`），用户在行上点箭头可临时覆盖。
  * override 用 `Map<key, boolean>` 而不是 `Set` —— 因为 override 要能表达"把默认展开的
  * 关掉"，`Set` 只能表达"把默认折叠的打开"。
  */
@@ -342,22 +329,6 @@ function entryLabel(entry: AgentTraceEntry): string {
   return entry.label;
 }
 
-function kindLabel(kind: AgentTraceEntry["kind"]): string {
-  if (kind === "request") return "发";
-  if (kind === "response") return "回";
-  if (kind === "reasoning") return "思";
-  if (kind === "tool") return "具";
-  return "态";
-}
-
-function kindTitle(kind: AgentTraceEntry["kind"]): string {
-  if (kind === "request") return "请求（发给模型的消息）";
-  if (kind === "response") return "回复（模型返回）";
-  if (kind === "reasoning") return "思考过程（模型的推理通道）";
-  if (kind === "tool") return "工具调用";
-  return "阶段状态";
-}
-
 function formatChars(chars: number): string {
   if (chars >= 1000) return `${(chars / 1000).toFixed(1)}K 字符`;
   return `${chars} 字符`;
@@ -417,65 +388,7 @@ function formatElapsed(ms?: number): string {
   font-variant-numeric: tabular-nums;
 }
 
-/* 详细度切换条：抽屉头部下方一行 */
-.agent-trace-detail-bar {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 14px 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  flex-wrap: wrap;
-}
-
-.agent-trace-detail-caption {
-  font-size: 10.5px;
-  color: rgba(148, 163, 184, 0.6);
-  margin-right: 2px;
-}
-
-.agent-trace-detail-btn {
-  padding: 2px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
-  background: transparent;
-  color: rgba(148, 163, 184, 0.8);
-  font-size: 10.5px;
-  cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
-}
-
-.agent-trace-detail-btn:hover {
-  color: rgba(200, 214, 232, 0.95);
-  border-color: rgba(126, 182, 255, 0.35);
-}
-
-.agent-trace-detail-btn--on {
-  background: rgba(88, 166, 255, 0.16);
-  border-color: rgba(126, 182, 255, 0.45);
-  color: rgba(165, 214, 255, 0.95);
-}
-
-.agent-trace-live {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: auto;
-  font-size: 10px;
-  color: rgba(120, 210, 140, 0.85);
-}
-
-.agent-trace-live-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: currentColor;
-  animation: agent-trace-breathe 1.6s ease-in-out infinite;
-}
-
-@keyframes agent-trace-breathe {
-  0%, 100% { opacity: 0.35; }
-  50% { opacity: 1; }
-}
+/* 显示配置条在 AgentTraceViewBar 里自带样式（chip 与行内 kind 标签共用配色） */
 
 .agent-trace-body {
   margin-top: 4px;
@@ -688,6 +601,11 @@ function formatElapsed(ms?: number): string {
   border-radius: 50%;
   background: rgba(196, 160, 255, 0.95);
   animation: agent-trace-breathe 1.6s ease-in-out infinite;
+}
+
+@keyframes agent-trace-breathe {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
 }
 
 .agent-trace-row-label {

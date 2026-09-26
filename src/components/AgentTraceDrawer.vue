@@ -42,10 +42,10 @@
             v-if="groups.length"
             :round-groups="groups"
             :tools="tools"
-            :detail="state.detail"
+            :view="state.view"
             :running="running"
             embedded
-            @update:detail="setTraceDetail"
+            @update:view="setTraceView"
           />
           <div v-else class="agent-trace-drawer-empty">
             {{ emptyHint }}
@@ -75,7 +75,7 @@ import {
   resolveTraceRoundGroups,
   resolveTraceRunning,
   resolveTraceTools,
-  setTraceDetail,
+  setTraceView,
   useAgentTraceDrawerState,
 } from "../services/agentTraceDrawer";
 import { dumpAgentTraceToFile } from "../services/agentTraceDump";
@@ -227,7 +227,7 @@ async function copyTracePath(): Promise<void> {
       sessionId: state.sessionId,
       messageId: state.messageId,
       roundGroups: views.value,
-      detail: state.detail,
+      view: state.view,
     });
     if (!result.ok) {
       copyStatus.value = "err";

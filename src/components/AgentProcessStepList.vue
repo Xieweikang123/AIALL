@@ -44,14 +44,6 @@
         </button>
         <span v-else class="process-step-target process-step-target--plain">{{ row.target }}</span>
         <span v-if="row.meta" class="process-step-meta">{{ row.meta }}</span>
-        <span
-          v-if="showDetail"
-          class="process-step-chevron"
-          :class="{ 'process-step-chevron--open': isDetailOpen(row.key) }"
-          aria-hidden="true"
-        >
-          {{ isDetailOpen(row.key) ? "▾" : "▸" }}
-        </span>
       </div>
       <div
         v-if="row.state === 'running'"
@@ -80,6 +72,7 @@
       class="process-step-more"
       @click="expanded = true"
     >
+      <span class="process-step-more-chevron" aria-hidden="true">▸</span>
       展开全部 {{ rows.length }} 步
     </button>
     <button
@@ -88,6 +81,7 @@
       class="process-step-more"
       @click="expanded = false"
     >
+      <span class="process-step-more-chevron" aria-hidden="true">▾</span>
       收起
     </button>
   </div>
@@ -339,14 +333,20 @@ const railProgressPercent = computed(() => {
   padding: 2px 0 2px 2px;
   border-radius: 0;
   background: transparent;
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  /* 中文按钮 / 标签走无衬线；等宽只留给 verb / target / meta 这些命令与路径。 */
+  font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif);
+  /* 收敛后的文字阶梯：避免同一列里各值 alpha 只差 0.1、看不出主次。 */
+  --agent-text-1: rgba(230, 237, 243, 0.93);
+  --agent-text-2: rgba(203, 213, 225, 0.8);
+  --agent-text-3: rgba(148, 163, 184, 0.62);
   transition: background-color 180ms ease, padding 180ms ease;
 }
 
 .process-step-list--expanded {
-  padding: 4px 6px 4px 4px;
+  padding: 5px 7px 5px 5px;
   border-radius: 8px;
-  background: rgba(88, 166, 255, 0.06);
+  border: 1px solid rgba(88, 166, 255, 0.16);
+  background: rgba(88, 166, 255, 0.07);
 }
 
 .process-step-list--compact {
@@ -358,9 +358,9 @@ const railProgressPercent = computed(() => {
   left: var(--step-rail-x);
   top: 20px;
   bottom: 20px;
-  width: 2px;
+  width: 1.5px;
   border-radius: 1px;
-  background: rgba(148, 163, 184, 0.14);
+  background: rgba(148, 163, 184, 0.16);
   transform: translateX(-50%);
   pointer-events: none;
   z-index: 0;
@@ -392,7 +392,7 @@ const railProgressPercent = computed(() => {
   min-height: 24px;
   padding: 2px 6px 2px 4px;
   font-size: 10px;
-  grid-template-columns: 12px 8px minmax(0, 62px) minmax(0, 1fr) auto auto;
+  grid-template-columns: 12px 8px minmax(0, 62px) minmax(0, 1fr) auto;
 }
 
 .process-step-list::-webkit-scrollbar {
@@ -408,14 +408,14 @@ const railProgressPercent = computed(() => {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: 14px 8px minmax(0, 68px) minmax(0, 1fr) auto auto;
+  grid-template-columns: 14px 8px minmax(0, 84px) minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   min-height: 26px;
   padding: 3px 6px 3px 4px;
   font-size: 11.5px;
-  line-height: 1.35;
-  color: rgba(148, 163, 184, 0.72);
+  line-height: 1.4;
+  color: var(--agent-text-2, rgba(203, 213, 225, 0.8));
   transition: color 160ms ease;
 }
 
@@ -429,18 +429,6 @@ const railProgressPercent = computed(() => {
   margin: 1px 0 2px;
 }
 
-.process-step-chevron {
-  flex-shrink: 0;
-  font-size: 9px;
-  color: rgba(126, 182, 255, 0.7);
-  cursor: pointer;
-  transition: transform 0.15s ease;
-}
-
-.process-step-chevron--open {
-  transform: rotate(90deg);
-}
-
 .process-step-list--debug .process-step-wrap > .process-step:not(.process-step--running) {
   cursor: pointer;
 }
@@ -449,21 +437,23 @@ const railProgressPercent = computed(() => {
   background: rgba(255, 255, 255, 0.03);
 }
 
+/* 圆点骑在 1.5px 轨道上（原 7px 方块比线宽 3.5 倍，悬空感强）。 */
 .process-step-node {
   justify-self: center;
   width: 7px;
   height: 7px;
-  border-radius: 1px;
-  border: 1px solid rgba(148, 163, 184, 0.36);
+  border-radius: 50%;
+  border: 1.5px solid rgba(148, 163, 184, 0.4);
   background: rgba(3, 4, 6, 0.96);
   box-sizing: border-box;
   transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
 }
 
+/* 运行中：空心蓝环 + 光晕（靠「填充与否」与已完成的实心蓝点静态区分）。 */
 .process-step--running .process-step-node {
-  border-color: rgba(88, 166, 255, 0.95);
-  background: rgba(88, 166, 255, 0.28);
-  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.12);
+  border-color: rgba(96, 175, 255, 1);
+  background: rgba(12, 20, 32, 0.95);
+  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.16);
   animation: process-step-node-pulse 1.2s ease-in-out infinite;
 }
 
@@ -472,27 +462,29 @@ const railProgressPercent = computed(() => {
   50% { box-shadow: 0 0 0 5px rgba(88, 166, 255, 0.06); }
 }
 
-.process-step--done .process-step-node,
-.process-step--fail .process-step-node,
-.process-step--skipped .process-step-node {
-  border-color: rgba(88, 166, 255, 0.62);
-  background: rgba(88, 166, 255, 0.5);
+/* 已完成：实心蓝点（与运行中的空心蓝环形成静/动两态）。 */
+.process-step--done .process-step-node {
+  border-color: rgba(96, 175, 255, 0.75);
+  background: rgba(96, 175, 255, 0.9);
+  box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.1);
 }
 
 .process-step--fail .process-step-node {
-  border-color: rgba(255, 123, 114, 0.75);
-  background: rgba(255, 123, 114, 0.45);
+  border-color: rgba(255, 123, 114, 0.85);
+  background: rgba(255, 123, 114, 0.55);
 }
 
+/* 跳过：空心琥珀环。 */
 .process-step--skipped .process-step-node {
-  border-color: rgba(210, 153, 34, 0.65);
-  background: rgba(210, 153, 34, 0.4);
+  border-color: rgba(210, 153, 34, 0.72);
+  background: rgba(3, 4, 6, 0.96);
 }
 
-/* 结果未回传（如连接中断）：中性空心点，不与真实失败的红点混同 */
+/* 结果未回传（如连接中断）：中性虚线空心环，不与真实失败的红点混同 */
 .process-step--unknown .process-step-node {
-  border-color: rgba(148, 163, 184, 0.55);
-  background: rgba(148, 163, 184, 0.16);
+  border-color: rgba(148, 163, 184, 0.5);
+  border-style: dashed;
+  background: transparent;
 }
 
 .process-step--unknown {
@@ -519,21 +511,21 @@ const railProgressPercent = computed(() => {
 }
 
 .process-step--done {
-  color: rgba(148, 163, 184, 0.52);
+  color: var(--agent-text-3, rgba(148, 163, 184, 0.62));
 }
 
 .process-step--done .process-step-verb {
-  color: rgba(126, 182, 255, 0.48);
+  color: rgba(148, 163, 184, 0.72);
   font-weight: 500;
 }
 
 .process-step--done .process-step-target,
 .process-step--done .process-step-target--plain {
-  color: rgba(148, 163, 184, 0.58);
+  color: rgba(203, 213, 225, 0.72);
 }
 
 .process-step--done .process-step-prompt {
-  color: rgba(88, 166, 255, 0.4);
+  color: rgba(88, 166, 255, 0.5);
 }
 
 /* 折叠态：行首 > 右向；展开态：整块列表展开时行首字符由模板切为 ↓，这里只提亮一档 */
@@ -605,8 +597,10 @@ const railProgressPercent = computed(() => {
 
 .process-step-verb {
   flex-shrink: 0;
-  color: rgba(126, 182, 255, 0.78);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  color: rgba(140, 190, 255, 0.92);
   font-weight: 600;
+  letter-spacing: -0.01em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -617,8 +611,9 @@ const railProgressPercent = computed(() => {
   padding: 0;
   border: none;
   background: transparent;
-  color: rgba(186, 196, 208, 0.82);
-  font: inherit;
+  color: var(--agent-text-1, rgba(230, 237, 243, 0.93));
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 11.5px;
   text-align: left;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -626,7 +621,7 @@ const railProgressPercent = computed(() => {
 }
 
 .process-step-target--plain {
-  color: rgba(186, 196, 208, 0.78);
+  color: var(--agent-text-2, rgba(203, 213, 225, 0.8));
 }
 
 button.process-step-target {
@@ -641,7 +636,11 @@ button.process-step-target:hover {
 
 .process-step-meta {
   flex-shrink: 0;
-  color: rgba(148, 163, 184, 0.55);
+  min-width: 3.6em;
+  text-align: right;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 11px;
+  color: var(--agent-text-3, rgba(148, 163, 184, 0.62));
   font-variant-numeric: tabular-nums;
 }
 
@@ -651,19 +650,31 @@ button.process-step-target:hover {
 
 .process-step-more {
   align-self: flex-start;
-  margin: 4px 8px 2px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: rgba(126, 182, 255, 0.82);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 6px 8px 4px 40px;
+  padding: 3px 10px 3px 8px;
+  border: 1px solid rgba(88, 166, 255, 0.2);
+  border-radius: 999px;
+  background: rgba(88, 166, 255, 0.06);
+  color: rgba(165, 214, 255, 0.9);
   font-size: 11px;
+  line-height: 1.4;
   cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.process-step-more-chevron {
+  flex-shrink: 0;
+  font-size: 9px;
+  opacity: 0.85;
 }
 
 .process-step-more:hover {
-  color: rgba(165, 214, 255, 0.98);
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  color: rgba(210, 230, 250, 1);
+  border-color: rgba(88, 166, 255, 0.42);
+  background: rgba(88, 166, 255, 0.12);
 }
 
 .process-step-detail {

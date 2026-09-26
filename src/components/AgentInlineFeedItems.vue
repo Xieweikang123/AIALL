@@ -412,8 +412,8 @@ const reasoningHeights = ref<Map<string, { full: number; max: number }>>(new Map
  * 高度靠「裁切」而非「内部滚动窗口」实现 —— 见下方 .stream-reasoning-body--clamped。
  */
 const REASONING_COLLAPSED_LINES = 1;
-/** Fallback ~1 line before first measure (12.5px × 1.55 ≈ reasoning markdown). */
-const REASONING_FALLBACK_MAX_PX = Math.round(12.5 * 1.55 * REASONING_COLLAPSED_LINES);
+/** Fallback ~1 line before first measure (12px × 1.6 = reasoning markdown). */
+const REASONING_FALLBACK_MAX_PX = Math.round(12 * 1.6 * REASONING_COLLAPSED_LINES);
 
 let reasoningMeasureObserver: ResizeObserver | null = null;
 const reasoningBodyEls = new Map<string, HTMLElement>();
@@ -883,10 +883,9 @@ function toggleReasoning(key: string) {
  */
 .stream-reasoning-plain {
   font-family: var(--font-sans);
-  font-size: 12.5px;
-  line-height: 1.55;
-  color: rgba(186, 196, 208, 0.78);
-  font-style: italic;
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(203, 213, 225, 0.86);
   white-space: normal;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -937,10 +936,10 @@ function toggleReasoning(key: string) {
 }
 
 .inline-feed-markdown--reasoning :deep(.msg-markdown) {
-  font-size: 12.5px;
-  line-height: 1.55;
-  color: rgba(186, 196, 208, 0.78);
-  font-style: italic;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(203, 213, 225, 0.86);
 }
 
 .inline-feed-markdown--reasoning :deep(.msg-markdown--streaming p:last-child::after) {

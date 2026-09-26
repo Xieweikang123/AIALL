@@ -636,7 +636,7 @@ function handleMessageDeltaEvent(event: EventOf<"message_delta">, assistantMsg: 
 function handleReasoningDeltaEvent(event: EventOf<"reasoning_delta">, assistantMsg: VibeChatMessage, sessionId: string, msgId: string) {
   const delta = event.data.delta || "";
   if (!delta) return;
-  notifyTraceRunStarted(msgId);
+  notifyTraceRunStarted(msgId, sessionId);
   const run = runManager.get(sessionId);
   const waitPhases = new Set(["waiting_model", "sending_request", "retrying_model"]);
   if (run && waitPhases.has(run.live.phase)) {

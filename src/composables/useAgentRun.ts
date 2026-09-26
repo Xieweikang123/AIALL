@@ -95,6 +95,7 @@ import {
   resolveResumeTurnOffset,
 } from "../services/agentRoundGroups";
 import { computeLineDelta } from "../services/agentCursorFeed";
+import { notifyTraceRunStarted } from "../services/agentTraceDrawer";
 import type { AgentStatusData, TurnFileDiff, VibeChatMessage } from "../types/vibeChat";
 import {
   finalizeAssistantBubbleContent,
@@ -1169,6 +1170,9 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     connectHasImages: boolean,
     detail?: string,
   ): number {
+    // 轨迹面板跟到这一轮上。**不能**只靠 reasoning_delta 通知：模型不吐思考
+    // （不少模型默认关思考）时那条路一次都不会触发，面板就会一直停在上一轮。
+    notifyTraceRunStarted(assistantMsg.id, sessionId);
     if (assistantMsg.activityDetailed) {
       assistantMsg.activityDetailed = false;
       patchAssistantMsg(assistantMsg.id, { activityDetailed: false }, sessionId);
@@ -1299,7 +1303,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         activityExpanded: true,
         activityDetailed: false,
       };
-      chatMessages.value.push(created);
+      chatMessages.value = [...chatMessages.value, created];
       return created;
     }
 
@@ -1328,12 +1332,19 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         resetChatScrollPin();
 
         if (!options?.skipUserBubble) {
-          chatMessages.value.push({
-            id: genId(),
-            role: "user",
-            content: options?.userBubbleContent ?? stripReferenceAttachments(rawPrompt),
-            imageDataUrls: options?.imageDataUrls?.length ? [...options.imageDataUrls] : undefined,
-          });
+          // 赋「新数组引用」而非原地 push：activeMessages 是 computed，同一引用下 push
+          // 不会让依赖该引用的大纲等派生 computed 重算（对齐 useChatSessionStore 里
+          // spliceActiveMessages 的换引用 + bump 约定）。否则 sessionOutline 永远为空，
+          // 导致「大纲」按钮不渲染。
+          chatMessages.value = [
+            ...chatMessages.value,
+            {
+              id: genId(),
+              role: "user",
+              content: options?.userBubbleContent ?? stripReferenceAttachments(rawPrompt),
+              imageDataUrls: options?.imageDataUrls?.length ? [...options.imageDataUrls] : undefined,
+            },
+          ];
         }
 
         assistantMsg = takeOrCreateAssistantSlot();
@@ -1382,12 +1393,16 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         resetChatScrollPin();
 
         if (!options?.skipUserBubble) {
-          chatMessages.value.push({
-            id: genId(),
-            role: "user",
-            content: options?.userBubbleContent ?? stripReferenceAttachments(rawPrompt),
-            imageDataUrls: compressedImagesForRequest?.length ? [...compressedImagesForRequest] : undefined,
-          });
+          // 同上：换新数组引用，保证依赖 props.chatMessages 引用的大纲等 computed 重算。
+          chatMessages.value = [
+            ...chatMessages.value,
+            {
+              id: genId(),
+              role: "user",
+              content: options?.userBubbleContent ?? stripReferenceAttachments(rawPrompt),
+              imageDataUrls: compressedImagesForRequest?.length ? [...compressedImagesForRequest] : undefined,
+            },
+          ];
         }
         assistantMsg = takeOrCreateAssistantSlot();
         beginAssistantRunSlot(
