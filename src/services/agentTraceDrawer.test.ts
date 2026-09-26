@@ -128,6 +128,8 @@ describe("agentTraceDrawer", () => {
 
   it("锁定消息失效后不再挡着新一轮的跟随", () => {
     setTraceGroupResolver((id) => (id === "m-new" ? [group(1, "新轨迹")] : []));
+    // "m-dead 已不在消息表里" —— 失效必须由存在性查询明说，不能靠"没数据"推断
+    setTraceMessageExistsResolver((id) => id === "m-new");
     openTraceDrawer("m-dead", []);
     registerLatestTrace("m-new", [group(1, "新轨迹")]);
 
@@ -135,7 +137,7 @@ describe("agentTraceDrawer", () => {
     expect(resolveTraceRoundGroups()).toHaveLength(1);
 
     // 失效的**显式锁定**不再挡着新一轮跟随；`notifyTraceRunStarted` 会识别出
-    // 那条锁定已经查不到数据、自动作废它，然后把锁跟到新 id。
+    // 那条锁定**已不在消息表里**（存在性查询说 false）→ 自动作废它，然后把锁跟到新 id。
     notifyTraceRunStarted("m-new");
     expect(useAgentTraceDrawerState().messageId).toBe("m-new");
   });
@@ -229,18 +231,43 @@ describe("agentTraceDrawer", () => {
    * 给一次假阴性（会话消息表尚未 hydrate 很常见），正在看的轨迹就被判死且永不恢复，
    * 而回退分支又排除 `fallbackId === locked`，结果是 groups / tools 双双为空。
    * 现在失效判定每次实时重算，所以"一次说不在、随后又在"必须能自动恢复。
+   *
+   * 关键：假阴性期间分组数据必须是**空**的，否则会走"有数据就直接返回"的短路分支，
+   * 根本测不到存在性判定这条路（那样这条用例就是废的）。
    */
   it("存在性查询一次假阴性后恢复，面板必须能自动跟上", () => {
-    let exists = false; // 先假装消息不在（瞬时误判）
+    let exists = false;   // 先假装消息不在（瞬时误判）
+    let hasData = false;  // 且此时确实还没有数据 —— 必须走存在性判定
+    setTraceGroupResolver((id) => (id === "m1" && hasData ? [group(1, "轨迹")] : []));
+    setTraceMessageExistsResolver((id) => (id === "m1" ? exists : false));
+
+    notifyTraceRunStarted("m1");
+    // 误判期间为空，这不重要 —— 重要的是不能永久卡住。
+    // 多求值几次：旧实现会在这一刻把 m1 记进失效缓存。
+    expect(resolveTraceRoundGroups()).toEqual([]);
+    expect(resolveTraceRoundGroups()).toEqual([]);
+
+    // 消息其实一直在（会话消息表 hydrate 完），而且数据也长出来了 → 必须重新显示
+    exists = true;
+    hasData = true;
+    expect(resolveTraceRoundGroups().map((g) => g.narrative)).toEqual(["轨迹"]);
+  });
+
+  /**
+   * 假阴性只影响**那一帧**：即便缓存曾把 id 判死，消息回来后也必须能重新解析出它，
+   * 而不是像旧实现那样"第二次起跳过 resolver、永不回头"。
+   */
+  it("假阴性期间也不该把锁永久判死（恢复后仍是同一条消息）", () => {
+    let exists = false;
     setTraceGroupResolver((id) => (id === "m1" ? [group(1, "轨迹")] : []));
     setTraceMessageExistsResolver((id) => (id === "m1" ? exists : false));
 
     notifyTraceRunStarted("m1");
-    // 误判期间可能暂时回退/为空，这不重要 —— 重要的是不能永久卡住
     resolveTraceRoundGroups();
 
-    // 消息其实一直在（比如消息表刚 hydrate 完）→ 必须重新显示出来
     exists = true;
+    // 数据一直在，只是存在性查询一度说谎 —— 锁不该被换掉
+    expect(useAgentTraceDrawerState().messageId).toBe("m1");
     expect(resolveTraceRoundGroups().map((g) => g.narrative)).toEqual(["轨迹"]);
   });
 });

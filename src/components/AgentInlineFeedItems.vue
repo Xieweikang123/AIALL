@@ -38,8 +38,8 @@
         @click="toggleReasoning(item.key)"
       >
         <span
-          v-if="hasReasoningOverflow(item.key)"
           class="stream-reasoning-chevron"
+          :class="{ 'stream-reasoning-chevron--hidden': !hasReasoningOverflow(item.key) }"
           aria-hidden="true"
         >{{ isReasoningExpanded(item.key) ? "▾" : "▸" }}</span>
         <span
@@ -408,11 +408,11 @@ const reasoningOverrides = ref<Map<string, boolean>>(new Map());
 const reasoningHeights = ref<Map<string, { full: number; max: number }>>(new Map());
 
 /**
- * 折叠态显示 1 行：思考过程默认只占一行，想看全文手动展开。
+ * 折叠态显示 2 行：思考过程默认露出开头两行 + 底部渐隐提示仍有内容，想看全文手动展开。
  * 高度靠「裁切」而非「内部滚动窗口」实现 —— 见下方 .stream-reasoning-body--clamped。
  */
-const REASONING_COLLAPSED_LINES = 1;
-/** Fallback ~1 line before first measure (12px × 1.6 = reasoning markdown). */
+const REASONING_COLLAPSED_LINES = 2;
+/** Fallback ~2 lines before first measure (12px × 1.6 = reasoning markdown). */
 const REASONING_FALLBACK_MAX_PX = Math.round(12 * 1.6 * REASONING_COLLAPSED_LINES);
 
 let reasoningMeasureObserver: ResizeObserver | null = null;
@@ -749,7 +749,7 @@ function toggleReasoning(key: string) {
 }
 
 .stream-reasoning-wrap {
-  padding: 0 0 6px;
+  padding: 0 0 8px;
   position: relative;
 }
 
@@ -771,8 +771,8 @@ function toggleReasoning(key: string) {
   border: 1px solid transparent;
   border-radius: 0;
   background: transparent;
-  color: rgba(165, 184, 204, 0.72);
-  font-size: 11px;
+  color: rgba(190, 210, 230, 0.9);
+  font-size: 12px;
   font-family: inherit;
   line-height: 1.35;
   cursor: pointer;
@@ -836,8 +836,17 @@ function toggleReasoning(key: string) {
 
 .stream-reasoning-chevron {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 9px;
   font-size: 9px;
   opacity: 0.7;
+}
+
+/* 无溢出：箭头仍占位，保证有/无溢出的折叠条左边缘对齐（不再一屏两形态）。 */
+.stream-reasoning-chevron--hidden {
+  visibility: hidden;
 }
 
 .stream-reasoning-label {
@@ -854,9 +863,10 @@ function toggleReasoning(key: string) {
 }
 
 .stream-reasoning-body {
-  margin: 4px 0 4px 7px;
-  padding-left: 10px;
-  border-left: 2px solid rgba(88, 166, 255, 0.28);
+  /* 竖线左缘与上方 ▸ 箭头对齐：箭头位于按钮 padding-left(2px) 处，这里 margin-left 归零。 */
+  margin: 4px 0 4px 0;
+  padding-left: 9px;
+  border-left: 2px solid rgba(88, 166, 255, 0.22);
   overflow: hidden;
   transition: max-height 180ms cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -871,8 +881,8 @@ function toggleReasoning(key: string) {
 .stream-reasoning-body--clamped {
   position: relative;
   overflow: hidden;
-  mask-image: linear-gradient(180deg, #000 calc(100% - 16px), transparent 100%);
-  -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 16px), transparent 100%);
+  mask-image: linear-gradient(180deg, #000 calc(100% - 6px), transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 6px), transparent 100%);
 }
 
 /*

@@ -9,9 +9,9 @@
  * 鼠标落在这些区域时，滚轮被内层容器优先吃掉（它先把自己滚到底），
  * 外层对话的跟随 /「回到底部」逻辑收不到 wheel，用户没法顺畅滚动查看上下文。
  *
- * 修法：折叠态「一行显示 + 手动展开」，高度靠裁切而非固定高度 + 内部滚动条。
- *   - 步骤列表：只渲染 1 行（`COLLAPSED_ROWS`），展开渲染全部
- *   - 推理文本：`REASONING_COLLAPSED_LINES = 1`，容器 `overflow: hidden` 纯裁切
+ * 修法：高度靠裁切而非固定高度 + 内部滚动条。
+ *   - 步骤列表：不再折叠，全部步骤恒量渲染（`visibleRows = rows.value`）
+ *   - 推理文本：`REASONING_COLLAPSED_LINES = 2`，容器 `overflow: hidden` 纯裁切
  *
  * 本测试不依赖 DOM（vitest 环境为 node），直接对源码文本做结构断言。
  */
@@ -76,18 +76,15 @@ describe("思考过程 · 步骤列表：无内部滚动容器", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("折叠态常量为 1 行", () => {
-    expect(stepListSrc).toMatch(/const COLLAPSED_ROWS\s*=\s*1\s*;/);
+  it("不再折叠：全部步骤恒量渲染", () => {
+    expect(stepListSrc).not.toMatch(/const COLLAPSED_ROWS/);
+    expect(stepListSrc).not.toMatch(/rows\.value\.slice\(-COLLAPSED_ROWS\)/);
+    expect(stepListSrc).toMatch(/const visibleRows = computed\(\(\) => rows\.value\);/);
   });
 
-  it("折叠态渲染最后 N 行，展开态渲染全部", () => {
-    expect(stepListSrc).toMatch(/rows\.value\.slice\(-COLLAPSED_ROWS\)/);
-    expect(stepListSrc).toMatch(/if \(expanded\.value\) return rows\.value;/);
-  });
-
-  it("保留了手动展开 / 收起入口", () => {
-    expect(stepListSrc).toMatch(/展开全部/);
-    expect(stepListSrc).toMatch(/收起/);
+  it("不再有手动展开 / 收起入口", () => {
+    expect(stepListSrc).not.toMatch(/展开全部/);
+    expect(stepListSrc).not.toMatch(/收起/);
   });
 
   it("不再有临时探针残留", () => {
@@ -121,7 +118,7 @@ describe("思考过程 · 推理文本：无内部滚动容器", () => {
   });
 
   it("折叠行数为 1 行", () => {
-    expect(feedSrc).toMatch(/const REASONING_COLLAPSED_LINES\s*=\s*1\s*;/);
+    expect(feedSrc).toMatch(/const REASONING_COLLAPSED_LINES\s*=\s*2\s*;/);
   });
 
   it("展开 / 收起时把 scrollTop 归零（保证露出第 1 行）", () => {

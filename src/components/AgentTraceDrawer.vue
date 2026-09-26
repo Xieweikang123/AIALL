@@ -12,6 +12,22 @@
             {{ groups.length }} 轮
           </span>
           <button
+            type="button"
+            class="agent-trace-drawer-auto"
+            :class="{ active: state.autoEnabled }"
+            role="switch"
+            :aria-checked="state.autoEnabled ? 'true' : 'false'"
+            :title="
+              state.autoEnabled
+                ? '自动打开已开启：Agent 思考时自动展开本面板，点击关闭'
+                : '自动打开已关闭：Agent 思考时不再自动展开本面板，点击开启'
+            "
+            @click="setTraceAutoEnabled(!state.autoEnabled)"
+          >
+            <span class="agent-trace-drawer-auto-dot" aria-hidden="true" />
+            自动打开
+          </button>
+          <button
             v-if="groups.length"
             type="button"
             class="agent-trace-drawer-copy"
@@ -75,6 +91,7 @@ import {
   resolveTraceRoundGroups,
   resolveTraceRunning,
   resolveTraceTools,
+  setTraceAutoEnabled,
   setTraceView,
   useAgentTraceDrawerState,
 } from "../services/agentTraceDrawer";
@@ -340,6 +357,55 @@ onUnmounted(() => {
   padding: 1px 7px;
   border-radius: 4px;
   background: rgba(88, 166, 255, 0.12);
+}
+
+/*
+ * 「自动打开」开关：面板自己的持久化配置入口。
+ * 开着 → Agent 一跑自动展开本面板；关掉只影响自动行为，手动「轨迹」入口照旧。
+ */
+.agent-trace-drawer-auto {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px 3px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(201, 209, 217, 0.6);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.agent-trace-drawer-auto:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(226, 232, 240, 0.9);
+}
+
+.agent-trace-drawer-auto-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(139, 148, 158, 0.55);
+  flex-shrink: 0;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.agent-trace-drawer-auto.active {
+  color: rgba(165, 214, 255, 0.95);
+  border-color: rgba(88, 166, 255, 0.45);
+  background: rgba(88, 166, 255, 0.14);
+}
+
+.agent-trace-drawer-auto.active .agent-trace-drawer-auto-dot {
+  background: #58a6ff;
+  box-shadow: 0 0 6px rgba(88, 166, 255, 0.7);
+}
+
+.agent-trace-drawer-auto.active:hover {
+  background: rgba(88, 166, 255, 0.2);
+  color: #a5d6ff;
 }
 
 .agent-trace-drawer-copy {

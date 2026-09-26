@@ -726,6 +726,7 @@ pub async fn agent_run(
                 "reasoningText": turn_output.reasoning_text,
                 "usage": {
                   "promptTokens": turn_output.usage.prompt_tokens,
+                  "completionTokens": turn_output.usage.completion_tokens,
                   "cachedTokens": turn_output.usage.cached_tokens,
                   "cacheReadTokens": turn_output.usage.cache_read_tokens,
                   "cacheCreationTokens": turn_output.usage.cache_creation_tokens,

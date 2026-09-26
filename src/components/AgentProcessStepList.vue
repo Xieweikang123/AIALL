@@ -2,7 +2,7 @@
   <div
     v-if="rows.length"
     class="process-step-list"
-    :class="{ 'process-step-list--compact': compact, 'process-step-list--running': isRunning, 'process-step-list--debug': showDetail, 'process-step-list--expanded': expanded }"
+    :class="{ 'process-step-list--compact': compact, 'process-step-list--running': isRunning, 'process-step-list--debug': showDetail }"
     :style="{ '--rail-progress': `${railProgressPercent}%` }"
   >
     <div v-if="visibleRows.length > 1" class="process-step-rail-track" aria-hidden="true" />
@@ -30,7 +30,7 @@
         <span class="process-step-node" aria-hidden="true" />
         <span
           class="process-step-prompt"
-          :class="{ 'process-step-prompt--open': expanded || isDetailOpen(row.key) }"
+          :class="{ 'process-step-prompt--open': isDetailOpen(row.key) }"
           aria-hidden="true"
         >&gt;</span>
         <span class="process-step-verb">{{ row.command }}</span>
@@ -66,24 +66,6 @@
         </div>
       </div>
     </div>
-    <button
-      v-if="!expanded && hiddenCount > 0"
-      type="button"
-      class="process-step-more"
-      @click="expanded = true"
-    >
-      <span class="process-step-more-chevron" aria-hidden="true">▸</span>
-      展开全部 {{ rows.length }} 步
-    </button>
-    <button
-      v-else-if="expanded && hiddenCount > 0"
-      type="button"
-      class="process-step-more"
-      @click="expanded = false"
-    >
-      <span class="process-step-more-chevron" aria-hidden="true">▾</span>
-      收起
-    </button>
   </div>
 </template>
 
@@ -111,7 +93,6 @@ const emit = defineEmits<{
   "open-file": [path: string];
 }>();
 
-const expanded = ref(false);
 const detailOpenKeys = ref<Set<string>>(new Set());
 /** 1s clock for running-tool elapsed labels; only ticks while a row is running. */
 const nowMs = ref(Date.now());
@@ -148,7 +129,6 @@ onUnmounted(stopElapsedTick);
 watch(
   () => props.tools.length,
   () => {
-    expanded.value = false;
     detailOpenKeys.value = new Set();
   },
 );
@@ -282,19 +262,12 @@ function buildRow(step: AgentRoundTool): StepRow {
 const rows = computed(() => props.tools.map(buildRow));
 
 /**
- * 折叠态固定只显示 **1 行**（最新一步）。展开态显示全部。
+ * 不再折叠：所有步骤一律全部展开显示。
  *
- * 高度不再靠 `max-height` + 内部滚动条实现，而是靠「少渲染几行」——
+ * 高度仍不靠 `max-height` + 内部滚动条实现，而是自然撑开——
  * 这样思考过程不会变成滚轮陷阱（鼠标落在上面时吃掉外层对话的滚轮）。
  */
-const COLLAPSED_ROWS = 1;
-
-const hiddenCount = computed(() => Math.max(0, rows.value.length - COLLAPSED_ROWS));
-
-const visibleRows = computed(() => {
-  if (expanded.value) return rows.value;
-  return rows.value.slice(-COLLAPSED_ROWS);
-});
+const visibleRows = computed(() => rows.value);
 
 const railProgressPercent = computed(() => {
   const list = visibleRows.value;
@@ -342,13 +315,6 @@ const railProgressPercent = computed(() => {
   transition: background-color 180ms ease, padding 180ms ease;
 }
 
-.process-step-list--expanded {
-  padding: 5px 7px 5px 5px;
-  border-radius: 8px;
-  border: 1px solid rgba(88, 166, 255, 0.16);
-  background: rgba(88, 166, 255, 0.07);
-}
-
 .process-step-list--compact {
   --step-rail-x: 12px;
 }
@@ -358,9 +324,9 @@ const railProgressPercent = computed(() => {
   left: var(--step-rail-x);
   top: 20px;
   bottom: 20px;
-  width: 1.5px;
+  width: 2px;
   border-radius: 1px;
-  background: rgba(148, 163, 184, 0.16);
+  background: rgba(148, 163, 184, 0.26);
   transform: translateX(-50%);
   pointer-events: none;
   z-index: 0;
@@ -392,7 +358,7 @@ const railProgressPercent = computed(() => {
   min-height: 24px;
   padding: 2px 6px 2px 4px;
   font-size: 10px;
-  grid-template-columns: 12px 8px minmax(0, 62px) minmax(0, 1fr) auto;
+  grid-template-columns: 12px 8px auto minmax(0, 1fr) auto;
 }
 
 .process-step-list::-webkit-scrollbar {
@@ -408,11 +374,11 @@ const railProgressPercent = computed(() => {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: 14px 8px minmax(0, 84px) minmax(0, 1fr) auto;
+  grid-template-columns: 14px 8px auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 7px;
-  min-height: 26px;
-  padding: 3px 6px 3px 4px;
+  gap: 6px;
+  min-height: 24px;
+  padding: 2px 6px 2px 4px;
   font-size: 11.5px;
   line-height: 1.4;
   color: var(--agent-text-2, rgba(203, 213, 225, 0.8));
@@ -528,12 +494,7 @@ const railProgressPercent = computed(() => {
   color: rgba(88, 166, 255, 0.5);
 }
 
-/* 折叠态：行首 > 右向；展开态：整块列表展开时行首字符由模板切为 ↓，这里只提亮一档 */
-.process-step-list--expanded .process-step-prompt {
-  color: rgba(126, 182, 255, 0.95);
-}
-
-/* 展开态：被点开的那一行行首切为 ↓ 并进一步提亮，呼应左侧高亮竖条 */
+/* 行首 > ：默认右向；被点开的那一行（详情展开）旋转 90° 转为朝下并提亮 */
 .process-step-wrap--open > .process-step .process-step-prompt {
   color: rgba(165, 214, 255, 1);
 }
@@ -590,7 +551,7 @@ const railProgressPercent = computed(() => {
   transition: color 160ms ease, opacity 160ms ease;
 }
 
-/* 展开态：行首 > 由右向（折叠）旋转 90° 转为朝下（展开） */
+/* 展开态：行首 > 旋转 90° 转为朝下（详情展开） */
 .process-step-prompt--open {
   transform: rotate(90deg);
 }
@@ -640,41 +601,17 @@ button.process-step-target:hover {
   text-align: right;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   font-size: 11px;
-  color: var(--agent-text-3, rgba(148, 163, 184, 0.62));
+  color: var(--agent-text-2, rgba(203, 213, 225, 0.8));
   font-variant-numeric: tabular-nums;
+}
+
+/* 已完成步骤整体压暗，meta 随之回落到最弱一档，维持主次。 */
+.process-step--done .process-step-meta {
+  color: var(--agent-text-3, rgba(148, 163, 184, 0.62));
 }
 
 .process-step--running .process-step-meta {
   color: rgba(126, 182, 255, 0.78);
-}
-
-.process-step-more {
-  align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  margin: 6px 8px 4px 40px;
-  padding: 3px 10px 3px 8px;
-  border: 1px solid rgba(88, 166, 255, 0.2);
-  border-radius: 999px;
-  background: rgba(88, 166, 255, 0.06);
-  color: rgba(165, 214, 255, 0.9);
-  font-size: 11px;
-  line-height: 1.4;
-  cursor: pointer;
-  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-}
-
-.process-step-more-chevron {
-  flex-shrink: 0;
-  font-size: 9px;
-  opacity: 0.85;
-}
-
-.process-step-more:hover {
-  color: rgba(210, 230, 250, 1);
-  border-color: rgba(88, 166, 255, 0.42);
-  background: rgba(88, 166, 255, 0.12);
 }
 
 .process-step-detail {

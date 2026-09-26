@@ -1,5 +1,9 @@
 import type { Ref } from "vue";
 import { clearPendingAgentRun } from "../services/agentHmrRecovery";
+import {
+  describeLearnedContextWindow,
+  learnContextWindowFromError,
+} from "../services/contextWindowLearner";
 import { clearRunCheckpoint } from "../services/vibeCodingClient";
 import {
   AGENT_SILENT_CONTINUE_MAX,
@@ -356,6 +360,11 @@ function handleTurnResponseEvent(event: EventOf<"turn_response">, assistantMsg: 
       assistantMsg.contextTokens = u.promptTokens;
       assistantMsg.peakContextTokens = Math.max(assistantMsg.peakContextTokens ?? 0, u.promptTokens);
     }
+    // Provider-reported output tokens, summed across turns so the figure covers
+    // the whole run. Stays undefined when the provider never reports it.
+    if (u.completionTokens && u.completionTokens > 0) {
+      assistantMsg.completionTokens = (assistantMsg.completionTokens ?? 0) + u.completionTokens;
+    }
   }
   if (shouldMinimizeRunUiPatch(assistantMsg)) {
     scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
@@ -671,6 +680,20 @@ function handleMessageEvent(event: EventOf<"message">, assistantMsg: VibeChatMes
 function handleErrorEvent(event: EventOf<"error">, assistantMsg: VibeChatMessage, sessionId: string, _msgId: string) {
   if (isRunVisible(sessionId)) clearStreamDeltaBuffer();
   planExecutionActive.value = false;
+  // 官方接口的 /models 不报上下文窗口，只能靠超窗报错里 provider 亲口说的数字
+  // 反推。学到就写回配置，下次显示的分母就是真值而不是内置表猜的。
+  // 失败/学不到都不影响错误流程本身，静默即可。
+  try {
+    const learned = learnContextWindowFromError({
+      errorText: event.data.message,
+      model: assistantMsg.agentModel,
+    });
+    if (learned) {
+      event.data.message = `${event.data.message}\n${describeLearnedContextWindow(learned)}`;
+    }
+  } catch {
+    // 学习是附带能力，不能让它把原本的错误处理带崩
+  }
   if (stallRecovery.trySilentContinue(sessionId, assistantMsg, event.data.message)) {
     runManager.setAbortHandle(sessionId, null);
     return;

@@ -16,6 +16,14 @@ use super::run_emit::{emit, emit_aborted_done, is_cancelled};
 pub(crate) struct UsageStats {
     /// Total input (prompt) tokens for the turn.
     pub prompt_tokens: Option<u64>,
+    /// Total output (completion) tokens for the turn. OpenAI-compatible
+    /// providers report this as `completion_tokens`; Anthropic as `output_tokens`.
+    ///
+    /// This is the provider's own count, so it beats the frontend's character
+    /// tally (`streamChars`) as a "how much did the model actually generate"
+    /// figure. It normally **includes** reasoning/thinking tokens, while
+    /// `streamChars` counts answer text only — the two are not interchangeable.
+    pub completion_tokens: Option<u64>,
     /// OpenAI-style: tokens served from the prompt cache.
     pub cached_tokens: Option<u64>,
     /// Anthropic-style: tokens read from the cache.
@@ -352,6 +360,9 @@ fn capture_usage(usage_value: &Value, usage: &mut UsageStats) {
     if let Some(prompt) = usage_value.get("prompt_tokens").and_then(as_u64) {
         usage.prompt_tokens = Some(prompt);
     }
+    if let Some(completion) = usage_value.get("completion_tokens").and_then(as_u64) {
+        usage.completion_tokens = Some(completion);
+    }
     if let Some(cached) = usage_value
         .pointer("/prompt_tokens_details/cached_tokens")
         .and_then(as_u64)
@@ -362,6 +373,9 @@ fn capture_usage(usage_value: &Value, usage: &mut UsageStats) {
     // Anthropic-style.
     if let Some(input) = usage_value.get("input_tokens").and_then(as_u64) {
         usage.prompt_tokens = Some(input);
+    }
+    if let Some(output) = usage_value.get("output_tokens").and_then(as_u64) {
+        usage.completion_tokens = Some(output);
     }
     if let Some(read) = usage_value.get("cache_read_input_tokens").and_then(as_u64) {
         usage.cache_read_tokens = Some(read);
@@ -864,6 +878,26 @@ mod tests {
         assert!((ratio - 0.4).abs() < 1e-9);
     }
 
+    /// The provider's `completion_tokens` must survive parsing — it is the only
+    /// real "output tokens" figure available (the frontend otherwise falls back
+    /// to counting answer characters).
+    #[test]
+    fn capture_usage_openai_style_captures_completion_tokens() {
+        let mut usage = UsageStats::default();
+        capture_usage(
+            &json!({
+                "prompt_tokens": 1000,
+                "completion_tokens": 50,
+                "prompt_tokens_details": { "cached_tokens": 400 }
+            }),
+            &mut usage,
+        );
+        assert_eq!(usage.completion_tokens, Some(50));
+        // Output tokens must not leak into the cache-hit ratio denominator.
+        let ratio = usage.hit_ratio().unwrap();
+        assert!((ratio - 0.4).abs() < 1e-9);
+    }
+
     #[test]
     fn capture_usage_anthropic_style() {
         let mut usage = UsageStats::default();
@@ -877,6 +911,7 @@ mod tests {
             &mut usage,
         );
         assert_eq!(usage.prompt_tokens, Some(300));
+        assert_eq!(usage.completion_tokens, Some(20));
         assert_eq!(usage.cache_read_tokens, Some(200));
         assert_eq!(usage.cache_creation_tokens, Some(100));
         // read / (read + creation + input) = 200 / (200 + 100 + 300) = 1/3
@@ -884,11 +919,51 @@ mod tests {
         assert!((ratio - 1.0 / 3.0).abs() < 1e-9);
     }
 
+    /// A chunk carrying only output tokens still fills `completion_tokens`
+    /// while leaving the cache ratio uncomputable — the two are independent.
     #[test]
     fn capture_usage_missing_fields_yields_no_ratio() {
         let mut usage = UsageStats::default();
         capture_usage(&json!({ "completion_tokens": 5 }), &mut usage);
+        assert_eq!(usage.completion_tokens, Some(5));
+        assert_eq!(usage.prompt_tokens, None);
         assert!(usage.hit_ratio().is_none());
+    }
+
+    /// A later chunk without output tokens must not erase an earlier value.
+    #[test]
+    fn capture_usage_completion_tokens_survives_later_chunks() {
+        let mut usage = UsageStats::default();
+        capture_usage(
+            &json!({ "prompt_tokens": 1000, "completion_tokens": 50 }),
+            &mut usage,
+        );
+        capture_usage(
+            &json!({ "prompt_tokens_details": { "cached_tokens": 300 } }),
+            &mut usage,
+        );
+        assert_eq!(usage.completion_tokens, Some(50));
+        assert_eq!(usage.prompt_tokens, Some(1000));
+        assert_eq!(usage.cached_tokens, Some(300));
+    }
+
+    /// DeepSeek's hit/miss shape reports output tokens alongside the cache
+    /// fields; both must land.
+    #[test]
+    fn capture_usage_deepseek_style_keeps_completion_tokens() {
+        let mut usage = UsageStats::default();
+        capture_usage(
+            &json!({
+                "prompt_tokens": 1000,
+                "completion_tokens": 77,
+                "prompt_cache_hit_tokens": 600,
+                "prompt_cache_miss_tokens": 400
+            }),
+            &mut usage,
+        );
+        assert_eq!(usage.prompt_tokens, Some(1000));
+        assert_eq!(usage.cached_tokens, Some(600));
+        assert_eq!(usage.completion_tokens, Some(77));
     }
 
     #[test]

@@ -86,6 +86,10 @@ export type VibeAgentEvent =
         /** Token usage reported by the provider for this turn (cache accounting). */
         usage?: {
           promptTokens?: number;
+          /** Provider-reported output tokens for this turn (`completion_tokens` /
+           *  `output_tokens`). Includes reasoning tokens when the provider counts
+           *  them, so it is not comparable to the frontend's `streamChars` tally. */
+          completionTokens?: number;
           cachedTokens?: number;
           cacheReadTokens?: number;
           cacheCreationTokens?: number;

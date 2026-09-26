@@ -1,4 +1,5 @@
 import { reactive } from "vue";
+import { lsGet, lsRemove, lsSet } from "../utils/localStorageSafe";
 import type { AgentRoundGroup, AgentRoundGroupView, AgentRoundTool } from "./agentRoundGroups";
 import {
   createDefaultAgentTraceView,
@@ -92,6 +93,19 @@ interface AgentTraceDrawerState {
   userDismissedAuto: boolean;
 }
 
+/**
+ * 「自动打开」偏好的持久化 key。
+ *
+ * 关掉自动展开是**跨会话、跨重启**都该记住的用户偏好，所以落 localStorage。
+ * 读取失败 / 未设置时回默认 `true` —— 保持升级前的行为不变。
+ */
+const TRACE_AUTO_ENABLED_STORAGE_KEY = "vibe-coding-trace-auto-open";
+
+/** 读取持久化的「自动打开」偏好；只有明确存过 `"false"` 才算关闭，其余一律默认开启。 */
+function loadTraceAutoEnabled(): boolean {
+  return lsGet(TRACE_AUTO_ENABLED_STORAGE_KEY) !== "false";
+}
+
 const state = reactive<AgentTraceDrawerState>({
   open: false,
   messageId: null,
@@ -100,7 +114,7 @@ const state = reactive<AgentTraceDrawerState>({
   pinnedSessionId: null,
   title: "数据流轨迹",
   view: createDefaultAgentTraceView(),
-  autoEnabled: true,
+  autoEnabled: loadTraceAutoEnabled(),
   projectPath: "",
   sessionId: null,
   collapsedForEditor: false,
@@ -194,9 +208,13 @@ export function setTraceGroupResolver(resolver: TraceGroupResolver | null): void
  * 主视图注入「这条消息还在不在消息表里」。
  *
  * 与 `setTraceGroupResolver` 配套，但语义不同：**空数据不等于消息失效**。
- * 只有"消息查不到"才允许进失效缓存（见 `TraceMessageExistsResolver` 说明）。
- * 不注入（测试 / 未接线）时返回 `null` = 未知，此时一律不做失效缓存，
+ * 只有这里明确说"消息查不到"才允许判定失效并回退（见 `isLockedMessageGone`）。
+ * 不注入（测试 / 未接线）或返回 `null` = 未知，此时**一律不判死**，
  * 宁可多查几次也不能把正在跑的轨迹判死 —— 那正是「第一轮面板一直空」的根因。
+ *
+ * ⚠️ 这是个"能判人死刑"的注入点，实现时必须对不确定的情况返回 `null`
+ * 而不是 `false`（例：指定的会话消息表尚未就绪）。给错 `false` 的后果是
+ * 用户正在看的轨迹被回退掉。视图层实现见 `VibeCodingView.vue`。
  */
 export function setTraceMessageExistsResolver(resolver: TraceMessageExistsResolver | null): void {
   resolveMessageExists = resolver ?? (() => null);
@@ -490,6 +508,7 @@ export function notifyTraceRunStarted(
 /** 工具栏开关：关掉时立刻收起面板 */
 export function setTraceAutoEnabled(enabled: boolean): void {
   state.autoEnabled = enabled;
+  lsSet(TRACE_AUTO_ENABLED_STORAGE_KEY, enabled ? "true" : "false");
   if (enabled) {
     state.userDismissedAuto = false;
     return;
@@ -616,6 +635,7 @@ export function __resetAgentTraceDrawerForTest(): void {
   state.title = "数据流轨迹";
   state.view = createDefaultAgentTraceView();
   state.autoEnabled = true;
+  lsRemove(TRACE_AUTO_ENABLED_STORAGE_KEY);
   state.projectPath = "";
   state.sessionId = null;
   state.collapsedForEditor = false;
