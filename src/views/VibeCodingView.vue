@@ -1262,10 +1262,16 @@ import {
 import { revertTurnFileDiffs } from "../services/agentTurnRevert";
 import { buildAgentRoundGroupViews } from "../services/agentRoundGroups";
 import {
+  collapseTraceForEditor,
+  restoreTraceAfterEditor,
   setTraceDumpContext,
+  setTraceEditorSpaceResolver,
   setTraceGroupResolver,
+  setTraceMessageExistsResolver,
   setTraceRunningResolver,
+  setTraceActiveSessionResolver,
   setTraceToolsResolver,
+  syncTraceScopeToActiveSession,
   useAgentTraceDrawerState,
 } from "../services/agentTraceDrawer";
 import {
@@ -1721,6 +1727,9 @@ watch(
   [projectPath, activeSessionId],
   ([path, sid]) => {
     setTraceDumpContext(path || "", (sid || "").trim() || null);
+    // 轨迹锁跟着用户正在看的会话走。两个会话同时跑时，缺了这一步锁会停在旧会话，
+    // 而另一个会话的事件反复改全局"最新消息"，面板就在两者之间横跳（闪烁）。
+    syncTraceScopeToActiveSession((sid || "").trim() || null);
   },
   { immediate: true },
 );
@@ -1870,6 +1879,7 @@ const chatSession = useChatSessionStore({
 
 const {
   activeMessages: chatMessages,
+  registryVersion,
   switchingSession,
   syncingChatStore,
   chatStoreSyncMessage,
@@ -3302,10 +3312,15 @@ const {
  *
  * 注册点必须在这之后（`agentLiveRevision` 刚从 `agent` 解构出来）。
  */
-setTraceGroupResolver((messageId) => {
+setTraceGroupResolver((messageId, sessionId) => {
   void agentLiveRevision.value;
   if (!messageId) return [];
-  const msg = chatMessages.value.find((m) => m.id === messageId);
+  // 按**消息所属会话**查，而不是只查当前激活会话：两个会话同时跑时，
+  // 只查当前会话会让另一个会话的 id 恒查不到，触发跨会话回退 → 面板闪烁。
+  const scoped = sessionId?.trim() ? getSessionMessages(sessionId) : undefined;
+  const list = scoped ?? chatMessages.value;
+  void registryVersion.value;
+  const msg = list.find((m) => m.id === messageId);
   if (!msg) return [];
   void msg.roundGroups;
   void msg.tools?.length;
@@ -3315,12 +3330,49 @@ setTraceGroupResolver((messageId) => {
 });
 
 /** 轨迹抽屉需要的工具表（供视图层补齐每轮步骤行）。 */
-setTraceToolsResolver((messageId) => {
+setTraceToolsResolver((messageId, sessionId) => {
   void agentLiveRevision.value;
   if (!messageId) return [];
-  const msg = chatMessages.value.find((m) => m.id === messageId);
+  const scoped = sessionId?.trim() ? getSessionMessages(sessionId) : undefined;
+  const list = scoped ?? chatMessages.value;
+  void registryVersion.value;
+  const msg = list.find((m) => m.id === messageId);
   void msg?.tools?.length;
   return msg?.tools ?? [];
+});
+
+/**
+ * 轨迹抽屉的「这条消息还在不在」判定 —— 供服务层区分「空数据」和「失效 id」。
+ *
+ * 必须有它：面板在一轮刚开始时自动弹出，那一刻消息已在表里但 `roundGroups` 还是空的。
+ * 只看有没有数据会把**正在跑的这一轮**判成失效 id（服务层随即缓存并跳过它），
+ * 之后数据长出来也永远不再查 —— 表现就是「第一轮自动弹出的面板一直是空的」。
+ *
+ * ⚠️ 返回 `null`（未知）和返回 `false`（确定不在）**后果完全不同**：
+ * 服务层把 `false` 当作"这条锁死了"并**永久缓存**，之后不再回头查它。
+ * 所以只要有一点不确定就必须给 `null`：
+ * - 指定了会话但该会话的消息表还没在 registry 里就绪（`getSessionMessages` 返回
+ *   `undefined`，常见于切会话/切项目后尚未 hydrate）→ `null`。
+ *   这里**绝不能** `?? chatMessages.value` 兜底：那等于拿**当前激活会话**的消息表
+ *   去回答"另一个会话里这条消息在不在"，查不到就报"不在" —— 会把用户正在看的
+ *   轨迹判死（这正是本次要修的那类错误）。
+ * - 没有会话信息时才是真正可以按当前激活会话回答的场景。
+ *
+ * 同样要读 `registryVersion` / `agentLiveRevision`：registry 是非响应式 Map，
+ * 会话切换后消息表换了，不登记依赖会拿到过期的"存在/不存在"结论。
+ */
+setTraceMessageExistsResolver((messageId, sessionId) => {
+  void registryVersion.value;
+  void agentLiveRevision.value;
+  if (!messageId) return false;
+  const scopedId = sessionId?.trim();
+  if (scopedId) {
+    const list = getSessionMessages(scopedId);
+    // 该会话的消息表尚未就绪 → 未知。宁可不判死（多查几次）也不能误杀。
+    if (!list) return null;
+    return list.some((m) => m.id === messageId);
+  }
+  return chatMessages.value.some((m) => m.id === messageId);
 });
 
 /**
@@ -3333,6 +3385,51 @@ setTraceRunningResolver(() => {
   void agentLiveRevision.value;
   return chatSending.value;
 });
+
+/**
+ * 注入"当前激活会话"给轨迹服务。
+ *
+ * 渲染树深处的消息组件（`AgentMergedContent`）调 `registerLatestTrace` 时拿不到
+ * sessionId，按当前激活会话归属即可（它们渲染的就是当前会话的消息）。
+ * 缺了它，注册会落进全局桶被两个会话互相覆盖 —— 轨迹闪烁的根因之一。
+ */
+setTraceActiveSessionResolver(() => activeSessionId.value.trim() || null);
+
+/**
+ * 编辑器占位时让轨迹面板收起，编辑器让开后自动恢复。
+ *
+ * 为什么在这里收口、而不是塞进 `expandEditor()`：判定要看「编辑器是否**真的**占着
+ * 宽度」，而 `editorCollapsed === false` 不等于占位 —— 没有打开任何文件时编辑器是
+ * 个空壳，轨迹没必要让。`noActiveEditor` 是视图层 computed（还要看 plan / git
+ * 前台态），composable 拿不到它，所以判定只能在视图层做。
+ *
+ * 用 watch 而不是在各 `openFile` 入口逐个插：打开编辑器的路径有 4 条
+ * （`useEditorPanel` 的 `openFile` / `openDiffPreview` / `openScratchTab`，
+ * 以及 `previewAgentFile`），逐个插必漏。这里盯的是**最终状态**，入口再多都覆盖。
+ *
+ * 全程没有「Agent 自动打开文件」的路径，所以不会打断用户正在看的实时轨迹。
+ * 收起只让位、不丢消息锁，编辑器让开即恢复（见 `collapseTraceForEditor`）。
+ */
+const editorTakesSpace = computed(() => !editorCollapsed.value && !noActiveEditor.value);
+
+/**
+ * 把「编辑器是否占位」注入轨迹服务 —— 供 `notifyTraceRunStarted` 判断该不该自动弹出。
+ * 必须注入：服务层不认识视图层，而这判定依赖 `noActiveEditor`。
+ */
+setTraceEditorSpaceResolver(() => {
+  void editorCollapsed.value;
+  void noActiveEditor.value;
+  return editorTakesSpace.value;
+});
+
+watch(
+  editorTakesSpace,
+  (takesSpace) => {
+    if (takesSpace) collapseTraceForEditor();
+    else restoreTraceAfterEditor();
+  },
+  { immediate: true },
+);
 
 const autoBugFix = useAutoBugFix(projectPath, projectOpened, activeSessionId, {
   startAgent: (params) => runAutoBugFixAgent(params),
@@ -4572,11 +4669,14 @@ function handleAgentSuggestion(suggestion: AgentSuggestion) {
 
   if (chatSending.value) {
     ensureSessionForSend();
-    chatMessages.value.push({
-      id: genId(),
-      role: "user",
-      content: runOptions.userBubbleContent,
-    });
+    chatMessages.value = [
+      ...chatMessages.value,
+      {
+        id: genId(),
+        role: "user",
+        content: runOptions.userBubbleContent,
+      },
+    ];
     interruptAgentRun();
     persistChatNow();
     void scrollChatToBottom(true);
@@ -4604,11 +4704,14 @@ function handleAiOptionSelect(
 
   if (chatSending.value) {
     ensureSessionForSend();
-    chatMessages.value.push({
-      id: genId(),
-      role: "user",
-      content: runOptions.userBubbleContent,
-    });
+    chatMessages.value = [
+      ...chatMessages.value,
+      {
+        id: genId(),
+        role: "user",
+        content: runOptions.userBubbleContent,
+      },
+    ];
     interruptAgentRun();
     persistChatNow();
     void scrollChatToBottom(true);
@@ -4702,12 +4805,15 @@ async function sendChat() {
 
     let started = false;
     if (chatSending.value) {
-      chatMessages.value.push({
-        id: genId(),
-        role: "user",
-        content: bubbleText || (imageDataUrls.length ? "（附图）" : ""),
-        imageDataUrls: imageDataUrls.length ? [...imageDataUrls] : undefined,
-      });
+      chatMessages.value = [
+        ...chatMessages.value,
+        {
+          id: genId(),
+          role: "user",
+          content: bubbleText || (imageDataUrls.length ? "（附图）" : ""),
+          imageDataUrls: imageDataUrls.length ? [...imageDataUrls] : undefined,
+        },
+      ];
       interruptAgentRun();
       persistChatNow(undefined, { sessionId: sendSessionId });
       void scrollChatToBottom(true);

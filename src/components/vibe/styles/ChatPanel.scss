@@ -158,6 +158,10 @@
   flex-wrap: nowrap;
   min-width: 0;
   flex: 1;
+  /* 兜底：面板被拖到很窄时，左侧内容一律截断，绝不允许画到右侧「发送」按钮上。
+     这里的子元素都没有需要外溢的浮层（模型下拉 / 用量详情都 Teleport 到 body，
+     会话大纲浮层是 .chat-action-row 的直接子元素），所以裁剪是安全的。 */
+  overflow: hidden;
 }
 
 .chips {
@@ -441,9 +445,11 @@
   position: relative;
   display: inline-flex;
   align-items: center;
-  min-width: 0;
+  min-width: 56px;
   max-width: 180px;
-  flex-shrink: 0;
+  /* 允许收缩：窄面板时模型名先省略（trigger-label 已有 ellipsis），
+     留 56px 兜底保住图标 + 箭头。原 flex-shrink: 0 会把空间全推给别的元素。 */
+  flex: 0 1 auto;
 }
 
 .chat-provider-trigger {
@@ -753,6 +759,9 @@
   cursor: pointer;
   border-radius: 6px;
   transition: color 0.15s, background 0.15s;
+  /* 两个字的小按钮不参与压缩也不换行：窄面板下曾被压成「调/试」「轨/迹」竖排 */
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .chat-debug-toggle:hover:not(:disabled) {
@@ -894,6 +903,8 @@
   background: transparent;
   font-size: 11px;
   cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .chat-actions .chat-run-control:hover {
@@ -927,6 +938,8 @@
   min-width: 72px;
   padding: 6px 14px;
   font-size: 12.5px;
+  /* 「打断并发送」5 个字 ≈ 90px，超过 min-width；窄面板下会竖排成两行 */
+  white-space: nowrap;
   transition: background 180ms ease, box-shadow 180ms ease;
 }
 
@@ -957,6 +970,8 @@
 .token-usage-wrap {
   display: flex;
   min-width: 0;
+  /* 用量文字是纯信息，放不下就该整段截断，不能溢出到「发送」按钮上面 */
+  overflow: hidden;
 }
 
 .token-usage-btn {
@@ -968,6 +983,11 @@
   font-size: 11px;
   cursor: pointer;
   white-space: nowrap;
+  /* min-width: 0 + ellipsis：否则 flex 项的 min-width:auto 会顶住内容宽度，
+     外层 wrap 缩了、文字却照旧画出去（截图中「上下文」压在发送按钮上）。 */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   transition: color 0.15s, background 0.15s;
 }
 

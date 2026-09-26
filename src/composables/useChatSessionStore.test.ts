@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useSessionManager } from "./useSessionManager";
 import { useChatSessionStore } from "./useChatSessionStore";
 import {
@@ -140,6 +140,34 @@ describe("useChatSessionStore", () => {
     expect(session.activeSessionId.value).toBe(id);
     expect(chatMessages.value).toEqual([{ id: "u1", role: "user", content: "draft text" }]);
     expect(listVibeChatSessions(projectPath)).toHaveLength(0);
+  });
+
+  // 回归：ChatPanel.sessionOutline 这类派生 computed 只对 activeMessages 的「引用」敏感。
+  // 注册表是普通数组，原地 push 不改变引用、也不 bump registryVersion，派生 computed 不会
+  // 重算 → 大纲按钮不渲染。必须换新数组引用（走 setter bump）才能让派生值失效。
+  it("replacing activeMessages reference invalidates derived computeds (session outline regression)", () => {
+    const projectPath = "D:/projects/outline-reactive";
+    const { store, chatMessages } = createStore(projectPath);
+    store.startNewSession();
+
+    let recomputeCount = 0;
+    const derived = computed(() => {
+      recomputeCount += 1;
+      return chatMessages.value.filter((m) => m.role === "user");
+    });
+    expect(derived.value).toEqual([]);
+    const afterFirstRead = recomputeCount;
+
+    // 原地 push：同一引用 → 读派生 computed 仍是缓存的 []（不重算）
+    chatMessages.value.push({ id: "u1", role: "user", content: "hi" });
+    expect(derived.value).toEqual([]);
+    expect(recomputeCount).toBe(afterFirstRead);
+
+    // 换新引用：setter bump → 读派生 computed 触发重算并看到新消息
+    // （computed 惰性：必须先读 derived.value 才会重算，再断言计数）
+    chatMessages.value = [...chatMessages.value, { id: "u2", role: "user", content: "again" }];
+    expect(derived.value.map((m) => m.id)).toEqual(["u1", "u2"]);
+    expect(recomputeCount).toBeGreaterThan(afterFirstRead);
   });
 
   it("persistChatNow promotes draft to listable session", () => {

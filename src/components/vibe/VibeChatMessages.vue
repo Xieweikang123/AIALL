@@ -157,7 +157,7 @@
       <AiOptionButtons
         v-if="m.role === 'assistant' && !ctx.isAgentRunning(m) && m.suggestedOptions?.length"
         :options="m.suggestedOptions"
-        :disabled="m.id !== lastAgentMessageId"
+        :disabled="!optionSelectable(m)"
         @select="(option) => ctx.handleAiOptionSelect(option, m)"
       />
       <div
@@ -367,6 +367,7 @@ import ProjectReportBlock from "../ProjectReportBlock.vue";
 import { enrichPlanMarkdownForDisplay } from "../../services/planDocumentDisplay";
 import { shouldUsePlanExternalView } from "../../services/planFile";
 import AiOptionButtons from "../AiOptionButtons.vue";
+import { isAgentOptionSelectable } from "../../services/agentOptionSelectability";
 import { vibeChatMessageContextKey, type VibeChatMessageItem } from "../../composables/vibeChatMessageContext";
 import { isAwaitingAssistantPlaceholder, isOrphanedUserReply } from "../../utils/vibeHelpers";
 
@@ -433,14 +434,19 @@ const visibleMessages = computed(() => {
   return messages.slice(messages.length - MESSAGE_WINDOW);
 });
 
-// 只有最后一条 Agent（assistant）消息的选项按钮可点；更早的历史消息一律禁用
-const lastAgentMessageId = computed(() => {
-  const messages = ctx.chatMessages.value;
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (messages[i].role === "assistant") return messages[i].id;
-  }
-  return "";
-});
+/**
+ * 这条消息的选项按钮能不能点：**有轮次在跑就禁用，其余一律可点**。
+ *
+ * 原来这里判的是 `m.id !== lastAgentMessageId`（只有最后一条 Agent 消息能点），
+ * 于是用户翻回刚读完的那一轮、想选它给的选项时，按钮是灰的 —— 规则连坐，
+ * 详见 `agentOptionSelectability.ts` 顶部。
+ */
+function optionSelectable(m: VibeChatMessageItem): boolean {
+  return isAgentOptionSelectable({
+    messageRunning: ctx.isAgentRunning(m),
+    sending: ctx.chatSending.value,
+  });
+}
 
 function messageMemoKey(m: VibeChatMessageItem): unknown[] {
   const globalDeps = [

@@ -443,7 +443,7 @@
                 type="button"
                 class="token-usage-btn"
                 :class="{ open: showTokenDetail }"
-                :title="showTokenDetail ? '收起用量详情' : '查看用量详情'"
+                :title="`${showTokenDetail ? '收起用量详情' : '查看用量详情'}：${totalTokenUsage}`"
                 @click="$emit('update:showTokenDetail', !showTokenDetail)"
               >
                 {{ totalTokenUsage }}

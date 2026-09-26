@@ -857,6 +857,12 @@ export function useChatSessionStore<T extends PersistedChatMessage = PersistedCh
 
   return {
     activeMessages,
+    /**
+     * Registry 变更计数：会话消息数组本身非响应式（底层是 Map），
+     * 跨会话读取（如轨迹面板按 sessionId 查另一个会话的消息）必须显式读它
+     * 才能建立依赖，否则面板不会重算。
+     */
+    registryVersion,
     switchingSession,
     syncingChatStore,
     chatStoreSyncMessage,
