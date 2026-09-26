@@ -288,6 +288,50 @@ describe("useGitPanel batch draft", () => {
     expect(git.batchSectionOpen.value).toBe(false);
   });
 
+  // Regression: the batch source used to be "unstaged else staged", so a single
+  // unstaged change dropped every staged file from the batch section. The panel
+  // counted 已暂存/更改/未跟踪 independently while the batch total came out short.
+  it("includes staged files alongside unstaged ones in the batch source", async () => {
+    fetchGitStatusMock.mockResolvedValue({
+      ok: true,
+      branch: "main",
+      headCommit: "abc123",
+      isRepo: true,
+      stagedCount: 1,
+      unstagedCount: 2,
+      files: [stagedFile("staged/c.ts"), unstagedFile("pkg/a.ts"), unstagedFile("src/b.ts")],
+    });
+
+    const git = createGitPanel();
+    await git.refreshGitStatus();
+
+    expect(git.gitStagedFiles.value.map((f) => f.path)).toEqual(["staged/c.ts"]);
+    expect(git.batchGroups.value.map((g) => g.dir)).toEqual(["pkg", "src", "staged"]);
+    expect(git.batchGroups.value.flatMap((g) => g.files.map((f) => f.path))).toEqual([
+      "pkg/a.ts",
+      "src/b.ts",
+      "staged/c.ts",
+    ]);
+  });
+
+  it("dedupes a file that is both staged and modified without losing it", async () => {
+    fetchGitStatusMock.mockResolvedValue({
+      ok: true,
+      branch: "main",
+      headCommit: "abc123",
+      isRepo: true,
+      stagedCount: 1,
+      unstagedCount: 1,
+      files: [stagedFile("src/both.ts"), unstagedFile("src/both.ts")],
+    });
+
+    const git = createGitPanel();
+    await git.refreshGitStatus();
+
+    expect(git.batchGroups.value).toHaveLength(1);
+    expect(git.batchGroups.value[0]?.files.map((f) => f.path)).toEqual(["src/both.ts"]);
+  });
+
   it("invalidates non-overlapping draft when paths share no files", async () => {
     writeGitBatchDraft(PROJECT, "main", {
       unstagedPaths: ["old/a.ts"],

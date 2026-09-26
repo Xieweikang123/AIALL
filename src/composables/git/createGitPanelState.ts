@@ -1,6 +1,6 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from "vue";
 import { lsGet, lsSet } from "../../utils/localStorageSafe";
-import { sortedUnstagedPaths } from "../../utils/gitBatchDraftStorage";
+import { normalizeGitPath, sortedUnstagedPaths } from "../../utils/gitBatchDraftStorage";
 import { parseGitFileSelectionKey, pruneGitFileSelection } from "../../utils/gitHelpers";
 import { fetchGitLog, type GitHunkInfo, type GitStatusFile } from "../../services/vibeGitClient";
 import type { GitFileDiff } from "./types";
@@ -329,9 +329,18 @@ export function createGitPanelState(
   const gitHunkUnstagingIndex = ref<number | null>(null);
   const hunkLoadToken = { current: 0 };
 
+  // Batch commit works on the union of staged + unstaged, deduped by path.
+  // Picking one side (the old "unstaged else staged" fallback) dropped every
+  // already-staged file as soon as a single unstaged change existed, so the
+  // panel counted 已暂存/更改/未跟踪 separately while the batch section showed
+  // a smaller total, and staged-only files could not be committed at all.
+  // Commit itself unstages everything first, so a union stays safe to stage.
   const gitBatchSourceFiles = computed(() => {
-    if (gitUnstagedFiles.value.length > 0) return gitUnstagedFiles.value;
-    return gitStagedFiles.value;
+    const byPath = new Map<string, GitStatusFile>();
+    for (const f of gitStagedFiles.value) byPath.set(normalizeGitPath(f.path), f);
+    // Unstaged wins on conflict: it carries the worktree status/side.
+    for (const f of gitUnstagedFiles.value) byPath.set(normalizeGitPath(f.path), f);
+    return sortedUnstagedPaths([...byPath.keys()]).map((p) => byPath.get(p)!);
   });
   const gitChangeCount = computed(() => {
     const paths = new Set<string>();
