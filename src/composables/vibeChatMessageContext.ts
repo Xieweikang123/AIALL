@@ -14,6 +14,8 @@ export interface VibeChatMessageItem {
   contextChars?: number;
   contextTokens?: number;
   peakContextTokens?: number;
+  /** 供应商上报的输出 token 总量（跨 turn 累加）；缺省时回退字符口径 streamChars。 */
+  completionTokens?: number;
   writtenFiles?: string[];
   planFilePath?: string;
   reverted?: boolean;

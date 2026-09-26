@@ -124,6 +124,15 @@ export type PersistedChatMessage = {
   contextTokens?: number;
   /** 会话内真实 prompt token 峰值。 */
   peakContextTokens?: number;
+  /**
+   * 本轮运行供应商上报的输出 token 总量（跨 turn 累加）。
+   *
+   * 与 `streamChars` 的区别：`streamChars` 只数**正文**字符（推理通道不计），
+   * 而供应商的 `completion_tokens` 通常**含**推理 token，所以两者不可换算。
+   * 供应商不报 usage 时（部分中转忽略 `include_usage`）为 undefined，
+   * 此时界面回退到 `streamChars` 字符口径。
+   */
+  completionTokens?: number;
   /** Provider-reported cache usage for this run (aggregated across turns). */
   cacheUsage?: {
     promptTokens?: number;

@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div
     ref="editorRef"
     class="composer-editor"
@@ -57,6 +57,13 @@ import {
 } from "../utils/composerDraftStorage";
 import DOMPurify from "dompurify";
 import { lsGet, lsSet, lsSetJson, lsRemove, lsGetJson } from "../utils/localStorageSafe";
+import {
+  createDraftImageId,
+  deleteDraftImagesForDraft,
+  getDraftImages,
+  pruneDraftImages,
+  putDraftImage,
+} from "../utils/draftImageStore";
 import {
   deleteVibeChatSession,
   peekVibeChatSessionMessages,
@@ -152,6 +159,11 @@ const CHIP_DROP = "composer-chip-drop";
 const CHIP_IMAGE = "composer-chip-image";
 const CHIP_QUOTE = "composer-chip-quote";
 
+/** 内存缓存：data-image-id → dataUrl。图片本体已移出 localStorage，
+ *  恢复时从 IndexedDB 取回；缓存避免每次读图都走一次异步查询，
+ *  也保证「刚插入就发送」时 extractPayload 一定能拿到图。 */
+const draftImageCache = new Map<string, string>();
+
 const props = defineProps<{
   placeholder?: string;
   disabled?: boolean;
@@ -166,6 +178,7 @@ const emit = defineEmits<{
   "enter-send": [];
   "update:empty": [empty: boolean];
   "image-error": [message: string];
+  "draft-save-error": [message: string];
   focus: [];
   blur: [];
 }>();
@@ -377,7 +390,10 @@ function createImageChip(dataUrl: string): HTMLSpanElement {
   const chip = document.createElement("span");
   chip.className = `${CHIP} ${CHIP_IMAGE}`;
   chip.contentEditable = "false";
+  const imageId = createDraftImageId();
+  chip.dataset.imageId = imageId;
   chip.dataset.imageUrl = dataUrl;
+  draftImageCache.set(imageId, dataUrl);
   const img = document.createElement("img");
   img.src = dataUrl;
   img.className = "composer-image-preview";
@@ -395,17 +411,29 @@ function insertFileRef(file: ComposerReferencedFile) {
   removeMentionQueryBeforeCursor();
   insertNodesAtCursor([createRefChip(file)]);
   syncEmpty();
+  saveDraftToStorage();
   emitMentionChange();
 }
 
 function insertDroppedFile(file: ComposerDroppedFile) {
   insertNodesAtCursor([createDropChip(file)]);
   syncEmpty();
+  saveDraftToStorage();
 }
 
 function insertImage(dataUrl: string) {
-  insertNodesAtCursor([createImageChip(dataUrl)]);
+  const chip = createImageChip(dataUrl);
+  insertNodesAtCursor([chip]);
   syncEmpty();
+  // 图片本体存入 IndexedDB，草稿 HTML 里只留 data-image-id 引用，
+  // 避免完整 base64 撑爆 localStorage 配额（详见 draftImageStore.ts）。
+  const id = chip.dataset.imageId;
+  if (id) {
+    void putDraftImage(id, props.draftKey || "__global", dataUrl);
+  }
+  // execCommand 插入不保证触发 input 事件；必须显式落盘草稿，
+  // 否则「只插图、没再打字」时刷新会丢图。
+  saveDraftToStorage();
 }
 
 function createQuoteChip(text: string, filePath?: string): HTMLSpanElement {
@@ -427,6 +455,7 @@ function insertQuote(text: string, filePath?: string) {
   insertNodesAtCursor([createQuoteChip(text, filePath)]);
   syncEmpty();
   emitMentionChange();
+  saveDraftToStorage();
 }
 
 function getPlainTextBeforeCursor(): string {
@@ -497,7 +526,8 @@ function extractPayload(): ComposerPayload {
     }
 
     if (el.classList.contains(CHIP_IMAGE)) {
-      const url = el.dataset.imageUrl ?? "";
+      const id = el.dataset.imageId ?? "";
+      const url = el.dataset.imageUrl || (id ? draftImageCache.get(id) ?? "" : "");
       if (url) {
         imageDataUrls.push(url);
       }
@@ -553,6 +583,9 @@ function setPlainText(text: string) {
   if (!root) return;
   root.innerHTML = "";
   savedCaretPosition.value = null;
+  // 纯文本替换后不再有图片 chip，清掉图片缓存与索引，避免残留孤儿数据
+  draftImageCache.clear();
+  void deleteDraftImagesForDraft(imageDraftKeyFromStorageKey(getDraftStorageKey()));
   if (text) {
     root.appendChild(document.createTextNode(text));
   }
@@ -605,6 +638,51 @@ function bindImageChipClickHandlers(root: HTMLElement) {
   });
 }
 
+/** 恢复草稿后补回图片预览：新增图片本体在 IndexedDB，按 chip 上的
+ *  data-image-id 取回，回填 img.src 与 data-image-url（发送 / 查看器要用）。
+ *  兼容旧草稿：若 HTML 里还带内联 data-image-url 但缺 id，补发 id 并迁移入库，
+ *  下次保存即可剥掉内联 base64。 */
+async function hydrateDraftImagePreviews(root: HTMLElement) {
+  const chips = Array.from(root.querySelectorAll(`.${CHIP_IMAGE}`)) as HTMLElement[];
+  const toPersist: { id: string; url: string }[] = [];
+  const needFetch: string[] = [];
+
+  for (const chip of chips) {
+    let id = chip.dataset.imageId ?? "";
+    const inlineUrl = chip.dataset.imageUrl ?? "";
+    if (!id && inlineUrl) {
+      id = createDraftImageId();
+      chip.dataset.imageId = id;
+      draftImageCache.set(id, inlineUrl);
+      toPersist.push({ id, url: inlineUrl });
+    }
+    if (id && !chip.dataset.imageUrl && !draftImageCache.has(id)) {
+      needFetch.push(id);
+    }
+  }
+
+  if (needFetch.length) {
+    const map = await getDraftImages(needFetch);
+    map.forEach((url, id) => draftImageCache.set(id, url));
+  }
+
+  const draftKey = props.draftKey || "__global";
+  for (const { id, url } of toPersist) {
+    void putDraftImage(id, draftKey, url);
+  }
+
+  for (const chip of chips) {
+    const id = chip.dataset.imageId ?? "";
+    const url = chip.dataset.imageUrl || (id ? draftImageCache.get(id) : "") || "";
+    if (!url) continue;
+    chip.dataset.imageUrl = url;
+    const img = chip.querySelector("img");
+    if (img && !img.getAttribute("src")) {
+      img.setAttribute("src", url);
+    }
+  }
+}
+
 function moveCaretToEnd(root: HTMLElement) {
   const range = document.createRange();
   range.selectNodeContents(root);
@@ -618,10 +696,23 @@ function isPlaceholderEditorHtml(html: string): boolean {
   return isPlaceholderComposerHtml(html);
 }
 
-function applySavedDraft(root: HTMLElement, saved: string) {
+async function applySavedDraft(root: HTMLElement, saved: string) {
   const looksLikeHtml = /<[a-z][\s\S]*>/i.test(saved);
   if (looksLikeHtml) {
-    root.innerHTML = DOMPurify.sanitize(saved);
+    // 草稿里含图片 chip（<img src="data:...">）。显式放开 data: URI 与 chip 的 data-* 属性，
+    // 避免默认 sanitize 把整张图过滤掉（表现为刷新后图片丢失，文字仍在）。
+    root.innerHTML = DOMPurify.sanitize(saved, {
+      // 只给 <img> 放开 data: URI（DOMPurify 默认即允许，这里显式声明防配置漂移）。
+      // 不要整体替换 ALLOWED_URI_REGEXP —— 那会把 data: 一并放开给 a[href] 等，
+      // 平白扩大 XSS 面，且默认配置本就不剥 img 的 data URL。
+      ADD_DATA_URI_TAGS: ["img"],
+      // chip 需保留 contenteditable=false（否则恢复后光标能钻进 chip 内部被误编辑）；
+      // 各 data-* 属性是发送时的数据来源（extractPayload 全读 dataset），
+      // 丢失即等于内容丢失，靠 ALLOW_DATA_ATTR 整体保留。
+      ADD_ATTR: ["contenteditable", "draggable"],
+      ALLOW_DATA_ATTR: true,
+    });
+    await hydrateDraftImagePreviews(root);
     bindImageChipClickHandlers(root);
   } else {
     root.innerHTML = "";
@@ -632,31 +723,73 @@ function applySavedDraft(root: HTMLElement, saved: string) {
   moveCaretToEnd(root);
 }
 
-/** 将当前输入框完整 HTML（含图片 chip）保存到 localStorage，不写 chat-store */
-function saveDraftToKey(storageKey: string) {
-  const root = editorRef.value;
-  if (!root || !props.draftKey) return;
-
-  if (!hasContent()) {
-    lsRemove(storageKey);
-    return;
-  }
-
-  const html = root.innerHTML;
-  if (isPlaceholderEditorHtml(html)) {
-    lsRemove(storageKey);
-    return;
-  }
-  lsSet(storageKey, html);
+/** 序列化为草稿 HTML：剥掉图片的全部 base64 ——<img src> 预览与 chip 上的
+ *  data-image-url 都去掉，只保留 data-image-id 引用（图片本体在 IndexedDB）。
+ *  这样草稿 HTML 体积与图片大小无关，彻底避免撑爆 localStorage；
+ *  恢复时按 id 从 IndexedDB 取回并回填。 */
+function serializeDraftHtml(root: HTMLElement): string {
+  const clone = root.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll(`.${CHIP_IMAGE}`).forEach((chip) => {
+    (chip as HTMLElement).removeAttribute("data-image-url");
+    chip.querySelector("img")?.removeAttribute("src");
+  });
+  return clone.innerHTML;
 }
 
-/** 将当前输入框完整 HTML（含图片 chip）保存到 localStorage */
+/** 从草稿存储 key 反推图片所属的 draftKey（与插入时 putDraftImage 用的 key 一致）。 */
+function imageDraftKeyFromStorageKey(storageKey: string): string {
+  return storageKey.replace(/^vibe-coding-input-draft-/, "") || "__global";
+}
+
+/** 将当前输入框完整 HTML（含图片 chip 引用）保存到 localStorage，不写 chat-store。
+ *  返回 false 表示写入失败（多为其它键占用配额导致）。 */
+function saveDraftToKey(storageKey: string): boolean {
+  const root = editorRef.value;
+  if (!root || !props.draftKey) return true;
+
+  const imageDraftKey = imageDraftKeyFromStorageKey(storageKey);
+
+  // 仅插图 / 仅 @ 引用时没有纯文本，不能只按 hasContent() 判定为空，
+  // 否则图片草稿会被当成空草稿删掉。
+  const hasChip = !!root.querySelector(`.${CHIP_IMAGE}, .${CHIP_REF}, .${CHIP_DROP}, .${CHIP_QUOTE}`);
+  if (!hasContent() && !hasChip) {
+    lsRemove(storageKey);
+    void deleteDraftImagesForDraft(imageDraftKey);
+    return true;
+  }
+
+  const html = serializeDraftHtml(root);
+  if (isPlaceholderEditorHtml(html)) {
+    lsRemove(storageKey);
+    void deleteDraftImagesForDraft(imageDraftKey);
+    return true;
+  }
+  const ok = lsSet(storageKey, html);
+  if (ok) {
+    // 清理已被用户删除的图片：只保留当前 DOM 里仍存在的 id。
+    const keep = new Set<string>();
+    root.querySelectorAll(`.${CHIP_IMAGE}`).forEach((chip) => {
+      const id = (chip as HTMLElement).dataset.imageId;
+      if (id) keep.add(id);
+    });
+    void pruneDraftImages(imageDraftKey, keep);
+  }
+  return ok;
+}
+
+/** 将当前输入框完整 HTML（含图片 chip 引用）保存到 localStorage */
 function saveDraftToStorage() {
-  saveDraftToKey(getDraftStorageKey());
+  const ok = saveDraftToKey(getDraftStorageKey());
+  if (!ok) {
+    emit(
+      "draft-save-error",
+      "草稿保存失败：浏览器本地存储（localStorage）写入被拒绝，刷新后可能丢失，请先发送或清理空间。",
+    );
+  }
 }
 
 /** 从 localStorage 恢复输入框内容（含图片 chip）；无草稿时清空输入框 */
-function restoreDraftFromStorage() {
+async function restoreDraftFromStorage() {
   try {
     const root = editorRef.value;
     if (!root) return;
@@ -671,7 +804,7 @@ function restoreDraftFromStorage() {
     }
 
     if (saved) {
-      applySavedDraft(root, saved);
+      await applySavedDraft(root, saved);
     } else {
       root.innerHTML = "";
     }
@@ -685,6 +818,8 @@ function restoreDraftFromStorage() {
 /** 清除已保存的草稿（发送消息后调用） */
 function clearDraftStorage() {
   lsRemove(getDraftStorageKey());
+  draftImageCache.clear();
+  void deleteDraftImagesForDraft(imageDraftKeyFromStorageKey(getDraftStorageKey()));
   if (props.draftKey && props.projectPath) {
     purgeLegacyDraftSession(props.draftKey, props.projectPath);
   }
@@ -755,6 +890,8 @@ async function onPaste(e: ClipboardEvent) {
   document.execCommand("insertText", false, text);
   syncEmpty();
   emitMentionChange();
+  // execCommand 插入同样不保证触发 input 事件，显式落盘，避免粘贴后刷新丢失
+  saveDraftToStorage();
 }
 
 function removeChipBeforeCursor(): boolean {
@@ -798,6 +935,9 @@ function onKeydown(e: KeyboardEvent) {
   if (e.key === "Backspace") {
     if (removeChipBeforeCursor()) {
       e.preventDefault();
+      // 删除 chip 后同步草稿：否则旧草稿仍引用已删图片，刷新后图片会「复活」；
+      // saveDraftToKey 同时 prune 掉 IndexedDB 里的孤儿图片。
+      saveDraftToStorage();
     }
     return;
   }

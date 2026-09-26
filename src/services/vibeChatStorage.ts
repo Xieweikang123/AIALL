@@ -633,6 +633,7 @@ function sanitizeMessages(
         contextChars: m.contextChars || undefined,
         contextTokens: m.contextTokens || undefined,
         peakContextTokens: m.peakContextTokens || undefined,
+        completionTokens: m.completionTokens || undefined,
         ...(options?.forDisk && m.role === "assistant"
           ? {}
           : {

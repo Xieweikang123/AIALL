@@ -303,15 +303,6 @@
             <button
               type="button"
               class="chat-debug-toggle"
-              :class="{ active: agentDebugEnabled }"
-              :title="agentDebugEnabled ? '调试详情已开启（显示请求/回复/工具全过程）' : '开启调试详情（显示请求/回复/工具全过程）'"
-              @click="setAgentDebugEnabled(!agentDebugEnabled)"
-            >
-              调试
-            </button>
-            <button
-              type="button"
-              class="chat-debug-toggle"
               :class="{ active: traceDrawerState.open }"
               :title="traceButtonTitle"
               @click="onTraceButton"
@@ -459,8 +450,12 @@
                     <span>助手回复</span>
                     <span>{{ tokenDetailData.assistantCount }} 条</span>
                   </div>
-                  <div v-if="tokenDetailData.totalStreamChars > 0" class="token-detail-row">
+                  <div v-if="tokenDetailData.totalCompletionTokens > 0" class="token-detail-row">
                     <span>累计输出</span>
+                    <span>{{ formatTokenCount(tokenDetailData.totalCompletionTokens) }} token</span>
+                  </div>
+                  <div v-if="tokenDetailData.totalStreamChars > 0" class="token-detail-row">
+                    <span>累计正文字符</span>
                     <span>{{ formatCharCount(tokenDetailData.totalStreamChars) }}</span>
                   </div>
                   <div v-if="tokenDetailData.usesTokenContext" class="token-detail-row">
@@ -835,7 +830,6 @@ import {
 } from "../../utils/scrollViewport";
 import { resolveAgentResumeButtonLabel } from "../../services/agentRecovery";
 import { renderMarkdown } from "../../utils/renderMarkdown";
-import { agentDebugEnabled, setAgentDebugEnabled } from "../../utils/agentDebugFlag";
 import { buildSessionOutline } from "../../utils/sessionOutline";
 import { closeTraceDrawer, openLatestTraceDrawer, useAgentTraceDrawerState } from "../../services/agentTraceDrawer";
 import AgentLiveStatusRail from "../AgentLiveStatusRail.vue";
@@ -877,6 +871,8 @@ interface TokenDetailData {
   usedContextTokens: number;
   /** 真实 token 口径：会话内峰值 prompt token 数 */
   peakContextTokens: number;
+  /** 真实 token 口径：供应商上报的输出 token 总量（跨 turn 累加，缺省为 0） */
+  totalCompletionTokens: number;
   /** 当前模型真实上下文窗口（token 数） */
   contextLimitTokens: number;
   /** 是否有 token 口径数据（供应商上报了 usage） */

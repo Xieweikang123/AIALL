@@ -2,6 +2,7 @@
 export const COMPOSER_PENDING_DRAFT_KEY = "__composer-pending__";
 
 import { lsGet, lsRemove } from "./localStorageSafe";
+import { deleteDraftImagesForDraft } from "./draftImageStore";
 
 export function composerDraftStorageKey(draftKey: string): string {
   return `vibe-coding-input-draft-${draftKey || "__global"}`;
@@ -39,4 +40,6 @@ export function composerDraftPreviewText(draftKey: string, maxLen = 48): string 
 
 export function removeComposerDraft(draftKey: string): void {
   lsRemove(composerDraftStorageKey(draftKey));
+  // 草稿被删除时同步清掉其图片（IndexedDB），避免残留孤儿数据
+  void deleteDraftImagesForDraft(draftKey || "__global");
 }

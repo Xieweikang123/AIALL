@@ -909,6 +909,7 @@
             @enter-send="sendChat"
             @update:empty="composerEmpty = $event"
             @image-error="onComposerImageError"
+            @draft-save-error="onComposerDraftSaveError"
             @focus="chatInputFocused = true"
             @blur="chatInputFocused = false"
           />
@@ -1235,7 +1236,10 @@ import {
   loadAiChatBaseFromStorage,
   loadPersistedAiConfigFromStorage,
 } from "../services/aiLocalConfig";
-import { resolveContextWindowTokens } from "../services/modelContextWindow";
+import {
+  lookupReportedModelWindow,
+  resolveContextWindowTokens,
+} from "../services/modelContextWindow";
 import {
   buildAgentHistoryFromMessages,
   getSessionDiagSnapshot,
@@ -2018,17 +2022,23 @@ const globalModelLabel = ref("");
 const modelWindowForLabel = computed<number | undefined>(() => {
   const model = activeSessionModelId.value.trim() || aiConfig.value.model.trim();
   if (!model) return undefined;
+  // 查表统一走 `lookupReportedModelWindow`（精确 → 归一化大小写 / provider/ 前缀）。
+  // 之前是纯 `?.[model]` 精确取值：/models 返回的原始 id 带 `provider/` 前缀或大小写
+  // 与用户填的不同时，明明抓到了却查不到 → 悄悄退回内置表估算，当分母显示。
   const providerId = activeSessionProviderId.value.trim();
   if (providerId) {
     const provider = providerOptions.value.find((p) => p.id === providerId);
-    return provider?.modelWindowOverrides?.[model] ?? provider?.modelWindows?.[model];
+    return (
+      provider?.modelWindowOverrides?.[model] ??
+      lookupReportedModelWindow(provider?.modelWindows, model)
+    );
   }
   for (const provider of providerOptions.value) {
     const override = provider.modelWindowOverrides?.[model];
     if (override) return override;
   }
   for (const provider of providerOptions.value) {
-    const window = provider.modelWindows?.[model];
+    const window = lookupReportedModelWindow(provider.modelWindows, model);
     if (window) return window;
   }
   return undefined;
@@ -2341,6 +2351,7 @@ const showTokenDetail = ref(false);
 
 const tokenDetailData = computed(() => {
   let totalStreamChars = 0;
+  let totalCompletionTokens = 0;
   let maxContextChars = 0;
   let usedContextChars = 0;
   let peakContextTokens = 0;
@@ -2362,6 +2373,9 @@ const tokenDetailData = computed(() => {
       assistantCount++;
       if (msg.streamChars && msg.streamChars > 0) {
         totalStreamChars += msg.streamChars;
+      }
+      if (msg.completionTokens && msg.completionTokens > 0) {
+        totalCompletionTokens += msg.completionTokens;
       }
       if (msg.contextChars && msg.contextChars > 0) {
         maxContextChars = Math.max(maxContextChars, msg.contextChars);
@@ -2416,6 +2430,7 @@ const tokenDetailData = computed(() => {
   return {
     assistantCount,
     totalStreamChars,
+    totalCompletionTokens,
     usedContextChars,
     maxContextChars,
     contextLimitChars: MAX_AGENT_CONTEXT_CHARS,
@@ -3669,6 +3684,7 @@ watch(
 
 const totalTokenUsage = computed(() => {
   let totalStreamChars = 0;
+  let totalCompletionTokens = 0;
   let maxContextChars = 0;
   let maxContextTokens = 0;
   let hasTokenData = false;
@@ -3678,6 +3694,9 @@ const totalTokenUsage = computed(() => {
       if (msg.streamChars && msg.streamChars > 0) {
         totalStreamChars += msg.streamChars;
         hasTokenData = true;
+      }
+      if (msg.completionTokens && msg.completionTokens > 0) {
+        totalCompletionTokens += msg.completionTokens;
       }
       if (msg.contextChars && msg.contextChars > 0) {
         maxContextChars = Math.max(maxContextChars, msg.contextChars);
@@ -3695,18 +3714,21 @@ const totalTokenUsage = computed(() => {
   if (!hasTokenData && !currentRunContextChars) return "";
 
   const parts: string[] = [];
-  if (totalStreamChars > 0) {
-    parts.push(`${formatCharCount(totalStreamChars)} 输出`);
+  // 输出口径：优先供应商上报的真实 output token；没有就退回字符数（并标明是字符，
+  // 避免和右侧 token 口径的数字混为一谈）。
+  if (totalCompletionTokens > 0) {
+    parts.push(`${formatTokenCount(totalCompletionTokens)} 输出`);
+  } else if (totalStreamChars > 0) {
+    parts.push(`${formatCharCount(totalStreamChars)} 字符输出`);
   }
   // 有真实 token 时展示 token 口径（已用 / 模型窗口），否则退回字符口径。
   if (maxContextTokens > 0) {
     const model = activeSessionModelId.value.trim() || aiConfig.value.model.trim();
     const { tokens: limit } = resolveContextWindowTokens(model, modelWindowForLabel.value);
-    parts.push(
-      `${formatTokenCount(maxContextTokens)} / ${formatTokenCount(limit)} ${
-        chatSending.value ? "本轮上下文" : "上下文"
-      }`,
-    );
+    // 分子取的是**整个会话**的 prompt token 峰值，不是"此刻的上下文"——
+    // 跑完一轮后若只写「上下文」，容易被读成当前占用，故显式标注「峰值」。
+    const contextLabel = chatSending.value ? "本轮上下文" : "上下文峰值";
+    parts.push(`${formatTokenCount(maxContextTokens)} / ${formatTokenCount(limit)} ${contextLabel}`);
   } else {
     const contextChars = chatSending.value && currentRunContextChars > 0
       ? currentRunContextChars
@@ -4128,6 +4150,10 @@ function applyExample(text: string) {
 }
 
 function onComposerImageError(message: string) {
+  chatError.value = message;
+}
+
+function onComposerDraftSaveError(message: string) {
   chatError.value = message;
 }
 
