@@ -249,21 +249,20 @@ async fn read_worktree_file(project_root: &str, file_path: &str) -> Result<Strin
         return Err(format!("{file_path} 过大，无法预览"));
     }
     let bytes = tokio::fs::read(&full).await.map_err(|e| e.to_string())?;
-    if bytes.contains(&0) {
-        return Err(format!("{file_path} 是二进制文件，无法预览"));
-    }
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+    // Decode instead of "contains NUL ⇒ binary": PowerShell-written UTF-16
+    // `.txt` is full of NUL padding but is perfectly previewable.
+    crate::fs::decode_text_bytes(&bytes)
+        .ok_or_else(|| format!("{file_path} 是二进制文件，无法预览"))
 }
 
 async fn git_show_blob(project_root: &str, spec: &str) -> Result<String, String> {
-    let out = git_exec(project_root, &["show", "--textconv", spec]).await?;
-    if out.stdout.as_bytes().contains(&0) {
-        return Err(format!("{spec} 是二进制内容，无法预览"));
-    }
+    // Raw bytes: `git_exec` would lossy-convert and destroy the UTF-16 BOM.
+    let out = super::exec::git_exec_raw(project_root, &["show", "--textconv", spec]).await?;
     if out.stdout.len() > MAX_DIFF {
         return Err(format!("{spec} 过大，无法预览"));
     }
-    Ok(out.stdout)
+    crate::fs::decode_text_bytes(&out.stdout)
+        .ok_or_else(|| format!("{spec} 是二进制内容，无法预览"))
 }
 
 fn truncate_diff_text(text: String) -> String {
@@ -346,22 +345,24 @@ pub async fn git_commit_file_diff(
         .map(|p| format!("{p}:{}", old_path.unwrap_or(file_path)));
     let after_ref = format!("{hash}:{file_path}");
     let before = if let Some(ref b) = before_ref {
-        git_exec(project_root, &["show", b])
-            .await
-            .map(|o| o.stdout)
-            .unwrap_or_default()
+        show_blob_text(project_root, b).await
     } else {
         String::new()
     };
-    let after = git_exec(project_root, &["show", &after_ref])
-        .await
-        .map(|o| o.stdout)
-        .unwrap_or_default();
+    let after = show_blob_text(project_root, &after_ref).await;
     GitDiffContentResult {
         ok: true,
         before,
         after,
         error: None,
+    }
+}
+
+/// `git show <ref>` → 预览文本；二进制（含解码不了的）给空串，不往前端塞乱码。
+async fn show_blob_text(project_root: &str, spec: &str) -> String {
+    match super::exec::git_exec_raw(project_root, &["show", spec]).await {
+        Ok(out) => crate::fs::decode_text_bytes(&out.stdout).unwrap_or_default(),
+        Err(_) => String::new(),
     }
 }
 

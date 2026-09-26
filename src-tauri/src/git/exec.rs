@@ -14,8 +14,24 @@ pub struct GitOutput {
     pub stderr: String,
 }
 
+/// `git show` 之类需要看原始字节的调用方用：stdout 不做 lossy 转换，
+/// 否则 UTF-16 blob 的 BOM 会被替换成 U+FFFD，编码就丢了。
+#[derive(Debug)]
+pub struct GitRawOutput {
+    pub stdout: Vec<u8>,
+    pub stderr: String,
+}
+
 pub async fn git_exec(project_root: &str, args: &[&str]) -> Result<GitOutput, String> {
-    git_exec_with_timeout(project_root, args, GIT_TIMEOUT_LOCAL).await
+    let raw = git_exec_raw(project_root, args).await?;
+    Ok(GitOutput {
+        stdout: String::from_utf8_lossy(&raw.stdout).into_owned(),
+        stderr: raw.stderr,
+    })
+}
+
+pub async fn git_exec_raw(project_root: &str, args: &[&str]) -> Result<GitRawOutput, String> {
+    git_exec_raw_with_timeout(project_root, args, GIT_TIMEOUT_LOCAL).await
 }
 
 /// Short-budget local ops (AI batch numstat / sampled diffs).
@@ -33,6 +49,18 @@ async fn git_exec_with_timeout(
     args: &[&str],
     limit: Duration,
 ) -> Result<GitOutput, String> {
+    let raw = git_exec_raw_with_timeout(project_root, args, limit).await?;
+    Ok(GitOutput {
+        stdout: String::from_utf8_lossy(&raw.stdout).into_owned(),
+        stderr: raw.stderr,
+    })
+}
+
+async fn git_exec_raw_with_timeout(
+    project_root: &str,
+    args: &[&str],
+    limit: Duration,
+) -> Result<GitRawOutput, String> {
     let mut cmd = Command::new("git");
     cmd.args(args)
         .current_dir(project_root)
@@ -61,9 +89,19 @@ async fn git_exec_with_timeout(
         .await
         .map_err(|_| format!("Git 命令超时（{secs}s）"))?
         .map_err(|e| e.to_string())?;
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-    map_git_error_output(&stdout, &stderr, output.status.success())
+    if !output.status.success() {
+        // Only pay the lossy stdout copy on the (small) failure path, and keep
+        // the shared mapping so error text reads exactly as before.
+        let lossy_stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        return Err(map_git_error_output(&lossy_stdout, &stderr, false)
+            .err()
+            .unwrap_or_else(|| "Git 命令执行失败".to_string()));
+    }
+    Ok(GitRawOutput {
+        stdout: output.stdout,
+        stderr,
+    })
 }
 
 fn map_git_error_output(stdout: &str, stderr: &str, success: bool) -> Result<GitOutput, String> {
