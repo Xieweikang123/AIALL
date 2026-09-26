@@ -3,6 +3,7 @@ import {
   __resetReasoningDrawerForTest,
   closeReasoningDrawer,
   listReasoningEntries,
+  notifyReasoningRunFinished,
   openLatestReasoningDrawer,
   openReasoningDrawer,
   registerReasoningEntry,
@@ -25,13 +26,32 @@ describe("agentReasoningDrawer", () => {
     expect(resolveReasoningDrawerEntry()?.text).toBe("先看目录结构");
   });
 
-  it("这段思考结束后自动收起", () => {
+  it("这段思考段落结束后抽屉保持打开，不再中途收起", () => {
     registerReasoningEntry({ messageId: "m1", key: "r1", text: "思考中", active: true });
     expect(useReasoningDrawerState().open).toBe(true);
 
     registerReasoningEntry({ messageId: "m1", key: "r1", text: "思考完了", active: false });
 
+    expect(useReasoningDrawerState().open).toBe(true);
+  });
+
+  it("整轮结束时才收起自动弹出的抽屉", () => {
+    registerReasoningEntry({ messageId: "m1", key: "r1", text: "思考中", active: true });
+    registerReasoningEntry({ messageId: "m1", key: "r1", text: "思考完了", active: false });
+    expect(useReasoningDrawerState().open).toBe(true);
+
+    notifyReasoningRunFinished("m1");
+
     expect(useReasoningDrawerState().open).toBe(false);
+  });
+
+  it("整轮结束时若抽屉展示的是另一条消息，则保持打开", () => {
+    registerReasoningEntry({ messageId: "m1", key: "r1", text: "消息一思考", active: true });
+    expect(useReasoningDrawerState().open).toBe(true);
+
+    notifyReasoningRunFinished("m2");
+
+    expect(useReasoningDrawerState().open).toBe(true);
   });
 
   it("未开始思考时不展开", () => {

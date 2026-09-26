@@ -86,15 +86,19 @@ export function registerReasoningEntry(input: {
     return;
   }
 
-  // 思考结束：自动模式且非手动锁定时收起（手动点开的保持开着，等用户自己关）。
-  maybeAutoClose();
+  // 段落结束不再自动收起：自动弹出的抽屉保持打开，等「整轮结束」或用户手动关，
+  // 避免快思考「还没来得及看就被收走」。
 }
 
-/** 思考段结束后是否该自动收起 —— 手动锁定的不参与 */
-function maybeAutoClose(): void {
+/**
+ * 一整轮 Agent 跑完时由消息层通知（isRunning 真→假）。
+ * 自动弹出且未手动锁定的抽屉此时才收起；只收当前展示的那条消息 ——
+ * 若抽屉正显示别的仍在活跃的消息，则保持打开。
+ */
+export function notifyReasoningRunFinished(messageId: string | null): void {
   if (!state.autoEnabled || state.pinned) return;
   const current = state.key ? entries.get(state.key) : null;
-  if (current && current.active) return;
+  if (current && current.messageId !== messageId) return;
   state.open = false;
 }
 

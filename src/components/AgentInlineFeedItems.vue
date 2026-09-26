@@ -198,7 +198,7 @@ import AgentProcessStepList from "./AgentProcessStepList.vue";
 import IntentTraceCard from "./IntentTraceCard.vue";
 import type { InlineFeedItem, InlineFeedProcessItem } from "../services/agentInlineFeed";
 import { resolveActiveReasoningKey } from "../services/agentInlineFeed";
-import { registerReasoningEntry } from "../services/agentReasoningDrawer";
+import { notifyReasoningRunFinished, registerReasoningEntry } from "../services/agentReasoningDrawer";
 import { sanitizeFeedThoughtText } from "../services/agentProgressMarker";
 import { enrichPlanMarkdownForDisplay } from "../services/planDocumentDisplay";
 import { shouldUsePlanExternalView } from "../services/planFile";
@@ -701,6 +701,20 @@ watch(
     }
   },
   { immediate: true },
+);
+
+/**
+ * 整轮 Agent 跑完（isRunning 真→假）时通知抽屉：自动弹出的这下才收起。
+ * 段落中途结束不再收，避免快思考「还没来得及看就被收走」。
+ */
+watch(
+  () => props.isRunning,
+  (running, wasRunning) => {
+    if (props.nested) return;
+    if (wasRunning && !running) {
+      notifyReasoningRunFinished(props.messageId ?? null);
+    }
+  },
 );
 
 function isCollapsedExpanded(key: string): boolean {
