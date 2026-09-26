@@ -460,7 +460,12 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue"
 import { useRouter } from "vue-router";
 import { lsGet, lsRemove } from "../utils/localStorageSafe";
 import { fetchAvailableModels, testAiModel, testTtsModel } from "../services/aiClient";
-import { parseContextWindowInput } from "../services/modelContextWindow";
+import {
+  lookupReportedModelWindow,
+  parseContextWindowInput,
+  resolveContextWindowTokens,
+} from "../services/modelContextWindow";
+import { formatTokenCount } from "../utils/vibeHelpers";
 import { isTauriEnv } from "../services/tauriInvoke";
 import {
   isServerLoggedIn,
@@ -764,6 +769,35 @@ const contextWindowError = computed(() => {
   const raw = contextWindowInput.value.trim();
   if (!raw) return "";
   return parseContextWindowInput(raw) ? "" : "格式无效，示例：1000000、1m、128k";
+});
+/** 「获取上下文窗口」按钮的进行中标志。与 modelsLoading 分开：它不碰模型列表。 */
+const contextWindowFetching = ref(false);
+/** 上一次获取的结果 / 失败原因。切模型即清空 —— 那是上一个模型的结果，留着会误导。 */
+const contextWindowStatus = ref("");
+
+/**
+ * 当前**实际生效**的窗口值 + 来源。
+ *
+ * 这一栏以前只有一个空输入框，保存下来的接口值（`provider.modelWindows`）在页面上
+ * 完全看不见。用户看到输入框是空的，就以为"没值"，其实后台一直在拿内置表的猜测值
+ * 当分母显示（见 `modelContextWindow.ts`）—— 分母是猜的，界面却长得像真值。
+ *
+ * 把生效值和它的来源摊开，才能分清「接口报的 / 我填的 / 内置表猜的」。
+ */
+const contextWindowEffectiveText = computed(() => {
+  const model = form.model.trim();
+  if (!model) return "";
+  const provider = providers.value.find((item) => item.id === editingProviderId.value);
+  const { tokens, source } = resolveContextWindowTokens(
+    model,
+    lookupReportedModelWindow(provider?.modelWindows, model),
+  );
+  const label =
+    source === "override" ? "你填的"
+    : source === "reported" ? "接口报告"
+    : source === "static" ? "内置表估算"
+    : "兜底估算";
+  return `${formatTokenCount(tokens)} token（${label}）`;
 });
 const result = reactive({
   phase: "idle" as TestPhase,

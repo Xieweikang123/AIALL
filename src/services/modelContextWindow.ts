@@ -55,7 +55,7 @@ const STATIC_CONTEXT_WINDOWS: Array<[prefix: string, tokens: number]> = [
 ];
 
 /** Normalize a model id: lowercase, strip a leading `provider/` routing prefix. */
-function normalizeModelId(model: string): string {
+export function normalizeModelId(model: string): string {
   const lower = model.trim().toLowerCase();
   const slash = lower.lastIndexOf("/");
   return slash >= 0 ? lower.slice(slash + 1) : lower;
@@ -66,6 +66,32 @@ export function staticContextWindowForModel(model: string): number | undefined {
   if (!id) return undefined;
   for (const [prefix, tokens] of STATIC_CONTEXT_WINDOWS) {
     if (id.startsWith(prefix)) return tokens;
+  }
+  return undefined;
+}
+
+/**
+ * 从「provider 报告的窗口表」里取某个模型的值。
+ *
+ * 表的 key 是 `/models` 返回的**原始 id**，用户手上填的可能是 `openai/gpt-4o`
+ * 这种带路由前缀的，也可能大小写不同。必须按 `normalizeModelId` 归一化后再比 ——
+ * 和 `resolveContextWindowTokens` 内部静态表用的是同一套规则，两边不一致会出现
+ * 「明明抓到了，界面上却还是回退到内置表」这种查到了却不生效的情况。
+ *
+ * 顺序：精确命中优先（避免归一化把两个不同模型误并成一个），再退回归一化匹配。
+ */
+export function lookupReportedModelWindow(
+  windows: Record<string, number> | undefined,
+  model: string,
+): number | undefined {
+  if (!windows || !model.trim()) return undefined;
+  const direct = windows[model.trim()];
+  if (typeof direct === "number" && direct > 0) return direct;
+  const target = normalizeModelId(model);
+  for (const [key, value] of Object.entries(windows)) {
+    if (typeof value === "number" && value > 0 && normalizeModelId(key) === target) {
+      return value;
+    }
   }
   return undefined;
 }
