@@ -1273,4 +1273,40 @@ describe("applyRunCheckpointToMessages", () => {
     expect(result.messages[0]!.agentRecoverable).toBe(false);
     expect(canResumeAgentRun(result.messages[0]!)).toBe(false);
   });
+
+  it("does not revive a user-stopped run from a stale aborted checkpoint", async () => {
+    const { applyRunCheckpointToMessages, canResumeAgentRun, HMR_INTERRUPT_REASON } =
+      await import("./agentRecovery");
+    const messages = [
+      { id: "u1", role: "user", content: "fix it" },
+      {
+        id: "a1",
+        role: "assistant",
+        content: "运行已中断",
+        agentAborted: true,
+        agentAbortReason: "已手动停止",
+        tools: [{ name: "read_file", summary: "ok", running: false, turn: 1 }],
+      },
+    ];
+    const result = applyRunCheckpointToMessages(messages, {
+      phase: "aborted",
+      assistantMsgId: "a1",
+      content: "进度快照",
+      tools: [
+        { name: "read_file", summary: "ok", running: false, turn: 1 },
+        { name: "grep", summary: "ok", running: false, turn: 2 },
+      ],
+      totalTurns: 2,
+      agentFailureReason: HMR_INTERRUPT_REASON,
+    });
+    expect(result.applied).toBe(true);
+    expect(result.clearCheckpoint).toBe(true);
+    const assistant = result.messages[1]!;
+    // 进度合并进来，但用户的停止原因不被 HMR 覆盖
+    expect(assistant.tools?.length).toBe(2);
+    expect(assistant.agentAbortReason).toBe("已手动停止");
+    expect(assistant.agentFailureReason).toBeUndefined();
+    expect(assistant.agentRecoverable).toBeUndefined();
+    expect(canResumeAgentRun(assistant)).toBe(false);
+  });
 });

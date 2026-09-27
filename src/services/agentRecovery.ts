@@ -1371,6 +1371,12 @@ export function applyRunCheckpointToMessages<T extends CheckpointMergeMessage>(
   const existingProgress = hasRecoverableAgentProgress(target);
   const existingContent = (target.content || "").trim();
   const checkpointContent = (checkpoint.content || "").trim();
+  // 用户显式「停止」＝本回合已终止。服务端 checkpoint 无法区分「用户停止」与
+  // 「页面刷新」，一律把 aborted 失败原因写成 HMR；若照单全收会把用户的主动停止
+  // 复原成可恢复中断并触发自动续跑。此时只合并进度（正文/工具/落盘），不覆盖
+  // 用户的停止状态，只清快照。
+  const targetUserStopped =
+    target.agentAborted === true && isUserStopReason(target.agentAbortReason);
   const clientAlreadySettled =
     hasAgentFinalAnswer(target) ||
     (target.agentRecoveryDismissed === true &&
@@ -1416,6 +1422,11 @@ export function applyRunCheckpointToMessages<T extends CheckpointMergeMessage>(
   };
 
   if (phase === "running" || phase === "aborted" || phase === "error") {
+    if (targetUserStopped) {
+      // 保留用户停止态（agentAborted / agentAbortReason 原样），进度字段照常合并。
+      next[targetIdx] = { ...patched, streaming: false };
+      return { messages: next, applied: true, clearCheckpoint: true };
+    }
     patched.agentFailed = true;
     patched.agentRecoverable = true;
     patched.agentRecoveryDismissed = false;
