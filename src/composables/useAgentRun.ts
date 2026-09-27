@@ -37,6 +37,7 @@ import {
   applyInferredAgentRecovery,
   diagnoseMissingFinalAnswer,
   isHmrInterruptReason,
+  isUserStopReason,
   PARTIAL_RUN_RESUME_REASON,
   recoverableAgentErrorHint,
   resolveAgentCompletedTurns,
@@ -85,6 +86,7 @@ import { IntentClassifierUnavailableError } from "../services/agentRequestIntent
 import type { ResolvedUserIntent } from "../services/intentClassifierTypes";
 import { agentDebugEnabled } from "../utils/agentDebugFlag";
 import { formatInvokeError } from "../services/tauriInvoke";
+import { clearRunCheckpoint } from "../services/vibeCodingClient";
 import { formatAgentTransportErrorMessage } from "../services/agentRecovery";
 import {
   recordAgentRoundNarrative,
@@ -822,6 +824,14 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     stallRecovery.cancelAutoResume();
     const reason = options?.reason?.trim() || "已被新指令打断";
     const hmrInterrupt = isHmrInterruptReason(reason);
+    // 用户显式「停止」＝终止本回合：连同服务端 run checkpoint 一起清掉。
+    // 否则切到别的 tab 再切回来时，会话恢复会合并这份 aborted 快照（服务端把
+    // 失败原因硬编码成「页面刷新或热更新导致运行中断」），把这次主动停止误判成
+    // 可恢复中断，进而静默自动续跑。
+    if (isUserStopReason(reason)) {
+      const project = projectPath.value.trim();
+      if (project && sessionId) void clearRunCheckpoint(project, sessionId);
+    }
     if (!hmrInterrupt) {
       clearPendingAgentRun();
     }

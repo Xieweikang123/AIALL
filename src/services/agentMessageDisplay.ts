@@ -10,7 +10,6 @@ import {
   hasAgentProgressMarker,
   stripAgentProgressMarker,
 } from "./agentProgressMarker";
-import { debugLog } from "../utils/debugLog";
 
 export { AGENT_PROGRESS_MARKER, AGENT_PROGRESS_MARKER_RE, hasAgentProgressMarker, stripAgentProgressMarker };
 
@@ -102,13 +101,6 @@ export function appendAssistantStreamDelta(existing: string, delta: string): str
   const base = existing || "";
   const shouldBreak = base && delta && shouldBreakLatinCjkStreamBoundary(base, delta);
 
-  debugLog("[msgDisplay] appendAssistantStreamDelta", {
-    existingLen: existing.length,
-    deltaLen: delta.length,
-    delta: delta.slice(0, 50),
-    shouldBreak,
-  });
-
   if (shouldBreak) {
     return `${base}\n\n${delta}`;
   }
@@ -132,14 +124,6 @@ export function mergeAssistantTurnText(
 ): string {
   const prev = normalizeBubbleText(existing);
   const next = normalizeBubbleText(incoming);
-
-  debugLog("[msgDisplay] mergeAssistantTurnText", {
-    existingLen: existing.length,
-    incomingLen: incoming.length,
-    prev: prev.slice(0, 80),
-    next: next.slice(0, 80),
-    preferIncoming: Boolean(options?.preferIncoming),
-  });
 
   if (isEnglishToolNarration(next)) return prev;
   if (isAgentToolTurnNarration(next)) return prev;
@@ -439,23 +423,11 @@ export function resolveAllAgentAnswerNarratives(
     result.push({ turn: group.turn, text });
   }
 
-  debugLog("[msgDisplay] resolveAllAgentAnswerNarratives", {
-    groupsCount: groups.length,
-    resultCount: result.length,
-    narratives: result.map((r) => ({ turn: r.turn, text: r.text.slice(0, 60) })),
-  });
-
   return result;
 }
 
 /** Direct model answer on the active turn — excludes progress-narrative fallback. */
 export function resolveLiveAgentAnswerText(msg: LiveAgentAnswerSource): string {
-  debugLog("[msgDisplay] resolveLiveAgentAnswerText", {
-    agentPhase: msg.agentPhase,
-    agentTurn: msg.agentTurn,
-    content: (msg.content || "").slice(0, 80),
-  });
-
   if (msg.agentPhase && AGENT_LIVE_PREVIEW_PREP_PHASES.has(msg.agentPhase)) return "";
 
   const contentFallback = normalizeBubbleText(msg.content || "");
@@ -465,9 +437,6 @@ export function resolveLiveAgentAnswerText(msg: LiveAgentAnswerSource): string {
 
   if (msg.agentPhase === "streaming_model") {
     if (contentFallback) {
-      debugLog("[msgDisplay] returning contentFallback (streaming_model)", {
-        contentFallback: contentFallback.slice(0, 80),
-      });
       return contentFallback;
     }
   }
@@ -475,9 +444,6 @@ export function resolveLiveAgentAnswerText(msg: LiveAgentAnswerSource): string {
   if (preStream && hasAgentFinalAnswer(msg) && !isActiveTurnAfterFinalAnswer(msg)) {
     const finalText = normalizeBubbleText(resolveFinalAssistantText(msg));
     if (finalText && !isAgentToolTurnNarration(finalText)) {
-      debugLog("[msgDisplay] returning finalText (preStream)", {
-        finalText: finalText.slice(0, 80),
-      });
       return finalText;
     }
   }
@@ -498,14 +464,6 @@ export function resolveLiveAgentAnswerText(msg: LiveAgentAnswerSource): string {
       groupAnswers.push(text);
     }
     picked = pickLongestSubstantiveAnswer(...groupAnswers, contentFallback) || "";
-
-    debugLog("[msgDisplay] resolved from group", {
-      groupTurn: group.turn,
-      narrative: (group.narrative || "").slice(0, 80),
-      responseAssistantText: (group.response?.assistantText || "").slice(0, 80),
-      groupAnswersCount: groupAnswers.length,
-      picked: picked.slice(0, 80),
-    });
   } else {
     picked = contentFallback;
   }
@@ -514,10 +472,6 @@ export function resolveLiveAgentAnswerText(msg: LiveAgentAnswerSource): string {
     if (isStaleStreamTailFragment(picked)) return "";
     if (!hasAgentFinalAnswer(msg) && isOrphanedPriorTurnPreview(group, picked)) return "";
   }
-
-  debugLog("[msgDisplay] resolveLiveAgentAnswerText result", {
-    picked: picked.slice(0, 80),
-  });
 
   return picked;
 }
@@ -549,20 +503,11 @@ export function resolveAgentTimelineAnswer(
     const finalized = resolveCompletedAgentBubbleContent(msg);
     const live = resolveLiveAgentAnswerText(msg);
     const merged = pickLongestSubstantiveAnswer(finalized, live, msg.content || "");
-    debugLog("[msgDisplay] using finalized answer", {
-      finalized: finalized.slice(0, 80),
-      live: live.slice(0, 80),
-      merged: merged.slice(0, 80),
-    });
     if (merged) return merged;
   }
   if (msg.agentPhase === "streaming_model") {
     const live = resolveLiveAgentAnswerText(msg);
     const result = live || normalizeBubbleText(msg.content || "") || "";
-    debugLog("[msgDisplay] streaming_model answer", {
-      live: live.slice(0, 80),
-      result: result.slice(0, 80),
-    });
     return result;
   }
   const preStream = Boolean(

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isRetryableAiError, MODEL_FIRST_BYTE_TIMEOUT_MS } from "../../shared/aiRetry";
-import { compactMessagesForModel, SOFT_COMPACT_CONTEXT_CHARS } from "../../shared/agentMessageCompact";
+import { compactMessagesForModel, SOFT_COMPACT_CONTEXT_CHARS, toolsCharSize } from "../../shared/agentMessageCompact";
 import { EXECUTE_PLAN_MAX_CONTEXT_CHARS } from "../../shared/agentContextLimits";
 import type { ChatCompletionMessage } from "../../shared/chatCompletionTypes";
 
@@ -57,7 +57,7 @@ describe("compactMessagesForModel", () => {
     ];
     expect(EXECUTE_PLAN_MAX_CONTEXT_CHARS).toBe(256_000);
     expect(compactMessagesForModel(messages)[2].content).toContain("已压缩");
-    expect(compactMessagesForModel(messages, EXECUTE_PLAN_MAX_CONTEXT_CHARS)[2].content).toContain("已压缩");
+    expect(compactMessagesForModel(messages, [], EXECUTE_PLAN_MAX_CONTEXT_CHARS)[2].content).toContain("已压缩");
   });
 
   it("soft-compacts older tool outputs before hitting hard context ceiling", () => {
@@ -74,5 +74,27 @@ describe("compactMessagesForModel", () => {
     const compacted = compactMessagesForModel(messages);
     expect(compacted[2].content).toContain("已压缩");
     expect(compacted[4].content).toContain("lines 201-300");
+  });
+
+  it("counts tools toward context size", () => {
+    const messages: ChatCompletionMessage[] = [
+      { role: "system", content: "s".repeat(60_000) },
+      { role: "user", content: "u".repeat(60_000) },
+      { role: "tool", tool_call_id: "1", content: "a".repeat(30_000) },
+      { role: "tool", tool_call_id: "2", content: "b".repeat(30_000) },
+      { role: "tool", tool_call_id: "3", content: "c".repeat(30_000) },
+    ];
+    const tools = [{ type: "function", function: { name: "read_file", description: "d".repeat(50_000) } }];
+    // Messages alone stay under the ceiling …
+    expect(compactMessagesForModel(messages, [])[2].content).not.toContain("已压缩");
+    // … but adding the tool schemas pushes the real request over it.
+    expect(compactMessagesForModel(messages, tools)[2].content).toContain("已压缩");
+  });
+
+  it("toolsCharSize is zero for empty / null and positive for schemas", () => {
+    expect(toolsCharSize([])).toBe(0);
+    expect(toolsCharSize(null)).toBe(0);
+    expect(toolsCharSize(undefined)).toBe(0);
+    expect(toolsCharSize([{ function: { name: "x" } }])).toBeGreaterThan(0);
   });
 });
