@@ -69,7 +69,29 @@ pub fn messages_char_size(messages: &[Value]) -> usize {
     messages.iter().map(message_char_size).sum()
 }
 
-pub fn compact_messages_for_model(messages: &[Value], max_context_chars: usize) -> CompactResult {
+/// Size of the `tools` array as serialized into the request body.
+///
+/// Tool schemas ride along with **every** model call but live outside the
+/// message list, so measuring only messages under-counts the real payload: a
+/// request can look "under the ceiling" while the model actually receives far
+/// more. They are a fixed per-turn overhead that still has to fit the window.
+pub fn tools_char_size(tools: &Value) -> usize {
+    if tools.as_array().map_or(true, |a| a.is_empty()) {
+        return 0;
+    }
+    tools.to_string().chars().count()
+}
+
+/// Messages + tool definitions: the true size of what the model receives.
+pub fn request_char_size(messages: &[Value], tools: &Value) -> usize {
+    messages_char_size(messages) + tools_char_size(tools)
+}
+
+pub fn compact_messages_for_model(
+    messages: &[Value],
+    tools: &Value,
+    max_context_chars: usize,
+) -> CompactResult {
     let mut result: Vec<Value> = messages
         .iter()
         .map(|message| {
@@ -91,7 +113,10 @@ pub fn compact_messages_for_model(messages: &[Value], max_context_chars: usize) 
         })
         .collect();
 
-    let mut total: usize = result.iter().map(message_char_size).sum();
+    // Tool definitions ride along on every call and never get compressed, so
+    // they are a constant overhead baked into the total from the start.
+    let tools_size = tools_char_size(tools);
+    let mut total: usize = result.iter().map(message_char_size).sum::<usize>() + tools_size;
     let needs_hard_compact = total > max_context_chars;
     let needs_soft_compact = total > SOFT_COMPACT_CONTEXT_CHARS;
     if !needs_hard_compact && !needs_soft_compact {
@@ -190,7 +215,7 @@ mod tests {
             json!({ "role": "user", "content": "hi" }),
             json!({ "role": "tool", "tool_call_id": "1", "content": long }),
         ];
-        let compacted = compact_messages_for_model(&messages, MAX_AGENT_CONTEXT_CHARS);
+        let compacted = compact_messages_for_model(&messages, &json!([]), MAX_AGENT_CONTEXT_CHARS);
         let tool_content = compacted.messages[2]["content"].as_str().unwrap();
         assert!(tool_content.chars().count() < long.chars().count());
         assert!(tool_content.contains("截断"));
@@ -218,7 +243,7 @@ mod tests {
               "content": format!("// lines 401-600 of 9000\n{}", "c".repeat(60_000))
             }),
         ];
-        let compacted = compact_messages_for_model(&messages, MAX_AGENT_CONTEXT_CHARS);
+        let compacted = compact_messages_for_model(&messages, &json!([]), MAX_AGENT_CONTEXT_CHARS);
         assert!(compacted.messages[2]["content"]
             .as_str()
             .unwrap()
@@ -256,13 +281,13 @@ mod tests {
         ];
         assert_eq!(EXECUTE_PLAN_MAX_CONTEXT_CHARS, 256_000);
         assert!(
-            compact_messages_for_model(&messages, MAX_AGENT_CONTEXT_CHARS).messages[2]["content"]
+            compact_messages_for_model(&messages, &json!([]), MAX_AGENT_CONTEXT_CHARS).messages[2]["content"]
                 .as_str()
                 .unwrap()
                 .contains("已压缩")
         );
         assert!(
-            compact_messages_for_model(&messages, EXECUTE_PLAN_MAX_CONTEXT_CHARS).messages[2]
+            compact_messages_for_model(&messages, &json!([]), EXECUTE_PLAN_MAX_CONTEXT_CHARS).messages[2]
                 ["content"]
                 .as_str()
                 .unwrap()
@@ -297,7 +322,7 @@ mod tests {
             .map(|m| m["content"].as_str().unwrap_or("").chars().count())
             .sum();
         assert!(total_before > SOFT_COMPACT_CONTEXT_CHARS);
-        let compacted = compact_messages_for_model(&messages, MAX_AGENT_CONTEXT_CHARS);
+        let compacted = compact_messages_for_model(&messages, &json!([]), MAX_AGENT_CONTEXT_CHARS);
         assert!(compacted.messages[2]["content"]
             .as_str()
             .unwrap()
@@ -318,8 +343,42 @@ mod tests {
               "content": "y".repeat(20_000)
             }));
         }
-        let compacted = compact_messages_for_model(&messages, 256_000);
+        let compacted = compact_messages_for_model(&messages, &json!([]), 256_000);
         let first_tool = compacted.messages[1]["content"].as_str().unwrap();
         assert!(first_tool.contains("已压缩"));
+    }
+
+    /// Tool schemas ride along on every call; a request that is only "just
+    /// under" the ceiling in message terms must still compact once the tools
+    /// overhead is counted.
+    #[test]
+    fn counts_tools_toward_context_size() {
+        let tools = json!([{ "type": "function", "function": { "name": "read_file", "description": "d".repeat(50_000) } }]);
+        // Messages alone ≈ 210k chars (under 256k); +50k of tool schemas tips it over.
+        let messages = vec![
+            json!({ "role": "system", "content": "s".repeat(60_000) }),
+            json!({ "role": "user", "content": "u".repeat(60_000) }),
+            json!({ "role": "tool", "tool_call_id": "1", "content": "a".repeat(30_000) }),
+            json!({ "role": "tool", "tool_call_id": "2", "content": "b".repeat(30_000) }),
+            json!({ "role": "tool", "tool_call_id": "3", "content": "c".repeat(30_000) }),
+        ];
+        // Without tools the messages alone stay under the ceiling …
+        let without_tools =
+            compact_messages_for_model(&messages, &json!([]), MAX_AGENT_CONTEXT_CHARS);
+        assert!(!without_tools.did_compact);
+        // … but the real request (messages + tools) is over it, so it must compact.
+        let with_tools = compact_messages_for_model(&messages, &tools, MAX_AGENT_CONTEXT_CHARS);
+        assert!(with_tools.did_compact);
+        assert!(with_tools.messages[2]["content"]
+            .as_str()
+            .unwrap()
+            .contains("已压缩"));
+    }
+
+    #[test]
+    fn tools_char_size_is_zero_for_empty_or_missing() {
+        assert_eq!(tools_char_size(&json!([])), 0);
+        assert_eq!(tools_char_size(&Value::Null), 0);
+        assert!(tools_char_size(&json!([{ "function": { "name": "x" } }])) > 0);
     }
 }

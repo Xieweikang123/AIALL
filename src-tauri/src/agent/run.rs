@@ -10,7 +10,7 @@ use super::explore_guard::{
     should_nudge_english_planning, PatchFailureEntry, ToolGuardState,
 };
 use super::probe_guard::is_ephemeral_probe_path;
-use super::run_compact::{compact_messages_for_model, messages_char_size};
+use super::run_compact::{messages_char_size, tools_char_size};
 use super::run_emit::{
     build_segment_continue_nudge, build_turn_cap_exhausted_message, emit, emit_aborted_done,
     extend_segment_max_turns, is_cancelled, AGENT_SAFETY_MAX_TURNS,
@@ -549,30 +549,13 @@ pub async fn agent_run(
             }),
         );
 
-        let compacted =
-            compact_messages_for_model(&run_state.messages, run_policy.max_context_chars);
-        let compacted_messages = compacted.messages;
-        let context_chars = messages_char_size(&compacted_messages);
-        if compacted.did_compact {
-            // Context was compressed for the model, so prior read ranges no longer
-            // reflect what the model can actually see. Drop the overlap bookkeeping to
-            // let it re-read what it lost instead of deadlocking on "ghost" ranges.
-            invalidate_read_overlap_state(&mut run_state.tool_guard);
-            emit(
-                &channel,
-                json!({
-                  "type": "status",
-                  "data": {
-                    "phase": "compacting_context",
-                    "turn": turn,
-                    "maxTurns": run_state.segment.max_turns,
-                    "model": request.model,
-                    "contextMessages": compacted_messages.len(),
-                    "contextChars": context_chars,
-                  }
-                }),
-            );
-        }
+        // No auto-compression: messages are sent to the model as-is. Only the
+        // read-overlap bookkeeping is refreshed so "ghost" read ranges from a
+        // rebuilt context don't deadlock re-reads.
+        invalidate_read_overlap_state(&mut run_state.tool_guard);
+        let send_messages = run_state.messages.clone();
+        let context_chars =
+            messages_char_size(&send_messages) + tools_char_size(&run_state.active_tools);
         emit(
             &channel,
             json!({
@@ -580,10 +563,10 @@ pub async fn agent_run(
               "data": {
                 "turn": turn,
                 "maxTurns": run_state.segment.max_turns,
-                "contextMessages": compacted_messages.len(),
+                "contextMessages": send_messages.len(),
                 "contextChars": context_chars,
                 "messages": if request.debug {
-                    compacted_messages.iter().map(|m| {
+                    send_messages.iter().map(|m| {
                         let role = m.get("role").and_then(|v| v.as_str()).unwrap_or("");
                         let content = m.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
                         json!({ "role": role, "content": content })
@@ -596,7 +579,7 @@ pub async fn agent_run(
         );
         let body = json!({
           "model": request.model,
-          "messages": compacted_messages,
+          "messages": send_messages,
           "tools": run_state.active_tools,
           "tool_choice": "auto",
           "stream": true,

@@ -1,10 +1,61 @@
 use crate::paths::{resolve_aiall_debug_log_dir, resolve_debug_log_path};
 use serde_json::json;
 use std::path::Path;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::OnceLock;
 use tauri::AppHandle;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use tokio::io::AsyncWriteExt;
+use tokio::sync::Mutex;
+
+/// Max size of a single debug log before it is rotated to `<name>.1`. Keeps long
+/// sessions / hot-path probes from growing a log into the hundreds of MB.
+const DEBUG_LOG_MAX_BYTES: u64 = 20 * 1024 * 1024;
+
+/// Serializes rotation so concurrent appends can't race the rename.
+fn debug_log_rotate_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+/// Only stat the log every N appends — the append path is hot (hundreds of lines/sec),
+/// and a `metadata()` syscall per line is wasteful. A few thousand lines of overshoot
+/// past the cap is irrelevant.
+const DEBUG_LOG_STAT_EVERY: u32 = 512;
+static DEBUG_LOG_APPEND_COUNT: AtomicU32 = AtomicU32::new(0);
+
+/// Rotate `resolved` to `<name>.1` once it reaches `DEBUG_LOG_MAX_BYTES` (single backup,
+/// previous backup overwritten). Best-effort: rotation failures never block the append.
+async fn rotate_debug_log_if_needed(resolved: &Path) {
+    let n = DEBUG_LOG_APPEND_COUNT.fetch_add(1, Ordering::Relaxed);
+    if n % DEBUG_LOG_STAT_EVERY != 0 {
+        return;
+    }
+    let too_big = match tokio::fs::metadata(resolved).await {
+        Ok(meta) => meta.len() >= DEBUG_LOG_MAX_BYTES,
+        Err(_) => false,
+    };
+    if !too_big {
+        return;
+    }
+    let Some(name) = resolved.file_name().and_then(|s| s.to_str()) else {
+        return;
+    };
+    let _guard = debug_log_rotate_lock().lock().await;
+    // Re-check under the lock: another task may have rotated already.
+    let too_big = match tokio::fs::metadata(resolved).await {
+        Ok(meta) => meta.len() >= DEBUG_LOG_MAX_BYTES,
+        Err(_) => return,
+    };
+    if !too_big {
+        return;
+    }
+    let backup = resolved.with_file_name(format!("{name}.1"));
+    // Windows rename fails if the destination exists — drop the old backup first.
+    let _ = tokio::fs::remove_file(&backup).await;
+    let _ = tokio::fs::rename(resolved, &backup).await;
+}
 
 #[tauri::command]
 pub async fn system_open_url(app: AppHandle, url: String) -> Result<(), String> {
@@ -37,6 +88,7 @@ pub async fn system_debug_log_append(
                 .map_err(|e| e.to_string())?;
         }
     }
+    rotate_debug_log_if_needed(&resolved).await;
     let mut file = tokio::fs::OpenOptions::new()
         .create(true)
         .append(true)

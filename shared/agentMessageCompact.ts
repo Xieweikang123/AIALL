@@ -47,8 +47,27 @@ export function messageCharSize(message: ChatCompletionMessage): number {
   return size;
 }
 
+/**
+ * Size of the `tools` array as serialized into the request body.
+ *
+ * Tool schemas are sent with **every** model call but sit outside the message
+ * list, so measuring messages alone under-counts the real payload. `unknown`
+ * rather than a concrete type keeps this usable from callers that only have a
+ * parsed JSON value.
+ */
+export function toolsCharSize(tools: unknown): number {
+  if (tools === null || tools === undefined) return 0;
+  if (Array.isArray(tools) && tools.length === 0) return 0;
+  try {
+    return JSON.stringify(tools).length;
+  } catch {
+    return 0;
+  }
+}
+
 export function compactMessagesForModel(
   messages: ChatCompletionMessage[],
+  tools: unknown = [],
   maxContextChars = MAX_AGENT_CONTEXT_CHARS,
 ): ChatCompletionMessage[] {
   const result = messages.map((message) => {
@@ -56,7 +75,10 @@ export function compactMessagesForModel(
     return { ...message, content: truncateToolResultForModel(String(message.content)) };
   });
 
-  let total = result.reduce((sum, message) => sum + messageCharSize(message), 0);
+  // Tool definitions ride along on every call and are never compressed, so they
+  // are a constant overhead baked into the total from the start.
+  const toolsSize = toolsCharSize(tools);
+  let total = result.reduce((sum, message) => sum + messageCharSize(message), 0) + toolsSize;
   const needsHardCompact = total > maxContextChars;
   const needsSoftCompact = total > SOFT_COMPACT_CONTEXT_CHARS;
   if (!needsHardCompact && !needsSoftCompact) return result;
