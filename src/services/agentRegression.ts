@@ -30,7 +30,6 @@ export interface AgentRegressionExpect {
   behaviorContradictionRun?: boolean;
   quotedAmendRun?: boolean;
   exploreHardCap?: number;
-  maxContextChars?: number;
   automatedBugFixRun?: boolean;
   disableSegmentAutoExtend?: boolean;
 }
@@ -91,7 +90,6 @@ export const AGENT_REGRESSION_RUST_POLICY_FIELDS = new Set<string>([
   "behaviorContradictionRun",
   "quotedAmendRun",
   "exploreHardCap",
-  "maxContextChars",
   "automatedBugFixRun",
   "disableSegmentAutoExtend",
 ]);
@@ -280,7 +278,6 @@ export function evaluateAgentRegressionCase(caseInput: AgentRegressionCase): Age
     behaviorContradictionRun: policy.behaviorContradictionRun,
     quotedAmendRun: policy.quotedAmendRun,
     exploreHardCap: policy.exploreHardCap,
-    maxContextChars: policy.maxContextChars,
     automatedBugFixRun: policy.automatedBugFixRun,
     disableSegmentAutoExtend: policy.disableSegmentAutoExtend,
   };

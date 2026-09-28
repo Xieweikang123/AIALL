@@ -89,7 +89,6 @@ fn evaluate_rust_policy_actual(input: &RustRegressionPolicyInput) -> HashMap<Str
     );
     actual.insert("quotedAmendRun".into(), json!(policy.quoted_amend_run));
     actual.insert("exploreHardCap".into(), json!(policy.explore_hard_cap));
-    actual.insert("maxContextChars".into(), json!(policy.max_context_chars));
     actual.insert(
         "automatedBugFixRun".into(),
         json!(policy.automated_bug_fix_run),

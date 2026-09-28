@@ -33,14 +33,10 @@ import {
   SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE_SOFT,
 } from "./agentExplorationBudget";
 import {
-  ASK_MAX_CONTEXT_CHARS,
-  CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS,
-  EXECUTE_PLAN_MAX_CONTEXT_CHARS,
   MAX_AGENT_CONTEXT_CHARS,
   MAX_HISTORY_CHARS,
   MAX_HISTORY_MESSAGES,
   MAX_TOOL_RESULT_MODEL_CHARS,
-  PLAN_MAX_CONTEXT_CHARS,
   SOFT_COMPACT_CONTEXT_CHARS,
 } from "./agentContextLimits";
 
@@ -67,12 +63,6 @@ describe("agent constants TS/Rust parity", () => {
 
   it("context limit constants match Rust context_limits.rs", () => {
     expect(MAX_AGENT_CONTEXT_CHARS).toBe(contextLimits.MAX_AGENT_CONTEXT_CHARS);
-    expect(EXECUTE_PLAN_MAX_CONTEXT_CHARS).toBe(contextLimits.EXECUTE_PLAN_MAX_CONTEXT_CHARS);
-    expect(ASK_MAX_CONTEXT_CHARS).toBe(contextLimits.ASK_MAX_CONTEXT_CHARS);
-    expect(CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS).toBe(
-      contextLimits.CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS,
-    );
-    expect(PLAN_MAX_CONTEXT_CHARS).toBe(contextLimits.PLAN_MAX_CONTEXT_CHARS);
   });
 
   it("compact/history constants match Rust context_limits.rs", () => {

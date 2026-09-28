@@ -204,8 +204,12 @@ pub fn compact_messages_for_model(
 
 #[cfg(test)]
 mod tests {
-    use super::super::policy::{EXECUTE_PLAN_MAX_CONTEXT_CHARS, MAX_AGENT_CONTEXT_CHARS};
     use super::*;
+
+    /// Default hard ceiling for compact tests — the historical
+    /// `TEST_MAX_CONTEXT_CHARS` (256k). Kept local because the per-mode
+    /// budget constants were removed; tests only need a representative value.
+    const TEST_MAX_CONTEXT_CHARS: usize = 256_000;
 
     #[test]
     fn truncates_long_tool_results() {
@@ -215,7 +219,7 @@ mod tests {
             json!({ "role": "user", "content": "hi" }),
             json!({ "role": "tool", "tool_call_id": "1", "content": long }),
         ];
-        let compacted = compact_messages_for_model(&messages, &json!([]), MAX_AGENT_CONTEXT_CHARS);
+        let compacted = compact_messages_for_model(&messages, &json!([]), TEST_MAX_CONTEXT_CHARS);
         let tool_content = compacted.messages[2]["content"].as_str().unwrap();
         assert!(tool_content.chars().count() < long.chars().count());
         assert!(tool_content.contains("截断"));
@@ -243,7 +247,7 @@ mod tests {
               "content": format!("// lines 401-600 of 9000\n{}", "c".repeat(60_000))
             }),
         ];
-        let compacted = compact_messages_for_model(&messages, &json!([]), MAX_AGENT_CONTEXT_CHARS);
+        let compacted = compact_messages_for_model(&messages, &json!([]), TEST_MAX_CONTEXT_CHARS);
         assert!(compacted.messages[2]["content"]
             .as_str()
             .unwrap()
@@ -279,16 +283,8 @@ mod tests {
               "content": format!("lines 201-300\n{}", "c".repeat(40_000))
             }),
         ];
-        assert_eq!(EXECUTE_PLAN_MAX_CONTEXT_CHARS, 256_000);
         assert!(
-            compact_messages_for_model(&messages, &json!([]), MAX_AGENT_CONTEXT_CHARS).messages[2]["content"]
-                .as_str()
-                .unwrap()
-                .contains("已压缩")
-        );
-        assert!(
-            compact_messages_for_model(&messages, &json!([]), EXECUTE_PLAN_MAX_CONTEXT_CHARS).messages[2]
-                ["content"]
+            compact_messages_for_model(&messages, &json!([]), TEST_MAX_CONTEXT_CHARS).messages[2]["content"]
                 .as_str()
                 .unwrap()
                 .contains("已压缩")
@@ -322,7 +318,7 @@ mod tests {
             .map(|m| m["content"].as_str().unwrap_or("").chars().count())
             .sum();
         assert!(total_before > SOFT_COMPACT_CONTEXT_CHARS);
-        let compacted = compact_messages_for_model(&messages, &json!([]), MAX_AGENT_CONTEXT_CHARS);
+        let compacted = compact_messages_for_model(&messages, &json!([]), TEST_MAX_CONTEXT_CHARS);
         assert!(compacted.messages[2]["content"]
             .as_str()
             .unwrap()
@@ -364,10 +360,10 @@ mod tests {
         ];
         // Without tools the messages alone stay under the ceiling …
         let without_tools =
-            compact_messages_for_model(&messages, &json!([]), MAX_AGENT_CONTEXT_CHARS);
+            compact_messages_for_model(&messages, &json!([]), TEST_MAX_CONTEXT_CHARS);
         assert!(!without_tools.did_compact);
         // … but the real request (messages + tools) is over it, so it must compact.
-        let with_tools = compact_messages_for_model(&messages, &tools, MAX_AGENT_CONTEXT_CHARS);
+        let with_tools = compact_messages_for_model(&messages, &tools, TEST_MAX_CONTEXT_CHARS);
         assert!(with_tools.did_compact);
         assert!(with_tools.messages[2]["content"]
             .as_str()

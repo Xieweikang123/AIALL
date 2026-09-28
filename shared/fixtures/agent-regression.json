@@ -154,8 +154,7 @@
       "expect": {
         "consultativeUiAppearanceRun": true,
         "readOnlyBuildRun": true,
-        "readOnlyTools": true,
-        "maxContextChars": 48000
+        "readOnlyTools": true
       }
     },
     {

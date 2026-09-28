@@ -3,12 +3,7 @@ import {
   FIXTURE_CONTRADICTION_USER,
   FIXTURE_PRIOR_DENIAL,
 } from "./agentTestFixtures";
-import {
-  CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS,
-  EXECUTE_PLAN_MAX_CONTEXT_CHARS,
-  resolveAgentRunPolicy,
-  usesReadOnlyTools,
-} from "./agentRunPolicy";
+import { resolveAgentRunPolicy, usesReadOnlyTools } from "./agentRunPolicy";
 import { normalizeExecutePlanContext } from "./agentExecutePlanContext";
 import { resolveUserIntent } from "./intentClassifierRules";
 import type { UserIntentAiPayload } from "./intentClassifierTypes";
@@ -87,7 +82,7 @@ describe("resolveAgentRunPolicy", () => {
     expect(policy.readOnlyBuildRun).toBe(true);
   });
 
-  it("uses execute_plan context budget", () => {
+  it("routes execute_plan to write tools", () => {
     const userIntent = resolveUserIntent({
       prompt: "改吧",
       mode: "build",
@@ -104,11 +99,10 @@ describe("resolveAgentRunPolicy", () => {
       isExecutePlan: true,
       isPlanExplore: false,
     });
-    expect(policy.maxContextChars).toBe(EXECUTE_PLAN_MAX_CONTEXT_CHARS);
     expect(policy.readOnlyBuildRun).toBe(false);
   });
 
-  it("shrinks context for consultative UI appearance screenshot", () => {
+  it("routes consultative UI appearance screenshot to read-only", () => {
     const userIntent = resolveUserIntent({
       prompt: "弹窗背景透明的？",
       mode: "build",
@@ -126,7 +120,7 @@ describe("resolveAgentRunPolicy", () => {
       isPlanExplore: false,
     });
     expect(policy.consultativeUiAppearanceRun).toBe(true);
-    expect(policy.maxContextChars).toBe(CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS);
+    expect(policy.readOnlyBuildRun).toBe(true);
   });
 
   it("detects behavior contradiction follow-up", () => {

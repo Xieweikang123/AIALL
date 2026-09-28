@@ -1,6 +1,5 @@
 import type { ChatCompletionMessage, ChatContentPart } from "./chatCompletionTypes";
 import {
-  MAX_AGENT_CONTEXT_CHARS,
   MAX_TOOL_RESULT_MODEL_CHARS,
   SOFT_COMPACT_CONTEXT_CHARS,
 } from "./agentContextLimits";
@@ -68,7 +67,7 @@ export function toolsCharSize(tools: unknown): number {
 export function compactMessagesForModel(
   messages: ChatCompletionMessage[],
   tools: unknown = [],
-  maxContextChars = MAX_AGENT_CONTEXT_CHARS,
+  maxContextChars = SOFT_COMPACT_CONTEXT_CHARS,
 ): ChatCompletionMessage[] {
   const result = messages.map((message) => {
     if (message.role !== "tool" || !message.content) return { ...message };

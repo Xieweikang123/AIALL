@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isRetryableAiError, MODEL_FIRST_BYTE_TIMEOUT_MS } from "../../shared/aiRetry";
 import { compactMessagesForModel, SOFT_COMPACT_CONTEXT_CHARS, toolsCharSize } from "../../shared/agentMessageCompact";
-import { EXECUTE_PLAN_MAX_CONTEXT_CHARS } from "../../shared/agentContextLimits";
 import type { ChatCompletionMessage } from "../../shared/chatCompletionTypes";
 
 describe("isRetryableAiError", () => {
@@ -55,9 +54,7 @@ describe("compactMessagesForModel", () => {
       { role: "tool", tool_call_id: "2", content: `lines 101-200\n${"b".repeat(40_000)}` },
       { role: "tool", tool_call_id: "3", content: `lines 201-300\n${"c".repeat(40_000)}` },
     ];
-    expect(EXECUTE_PLAN_MAX_CONTEXT_CHARS).toBe(256_000);
     expect(compactMessagesForModel(messages)[2].content).toContain("已压缩");
-    expect(compactMessagesForModel(messages, [], EXECUTE_PLAN_MAX_CONTEXT_CHARS)[2].content).toContain("已压缩");
   });
 
   it("soft-compacts older tool outputs before hitting hard context ceiling", () => {

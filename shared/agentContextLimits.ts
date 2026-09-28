@@ -1,8 +1,4 @@
 export const MAX_AGENT_CONTEXT_CHARS = 256_000;
-export const EXECUTE_PLAN_MAX_CONTEXT_CHARS = 256_000;
-export const ASK_MAX_CONTEXT_CHARS = 256_000;
-export const CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS = 256_000;
-export const PLAN_MAX_CONTEXT_CHARS = 256_000;
 
 /** Compact/history limits — keep in sync with `src-tauri/src/agent/context_limits.rs`. */
 export const SOFT_COMPACT_CONTEXT_CHARS = 256_000;
