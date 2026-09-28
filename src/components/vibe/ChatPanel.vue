@@ -11,6 +11,75 @@
     :style="panelStyle"
   >
     <div class="chat-panel-main">
+      <!--
+        会话头：当前会话标题 + 「大纲」入口。
+        大纲原先挤在输入框下方的操作行里，离消息远、点开还要往上顶消息；
+        挪到消息列表上方，打开后向下展开、就近跳转。
+      -->
+      <div v-if="projectOpened" class="chat-session-head">
+        <span class="chat-session-title" :title="activeSessionTitle || '新会话'">
+          {{ activeSessionTitle || "新会话" }}
+        </span>
+        <div
+          v-if="sessionOutline.length"
+          ref="outlineWrapRef"
+          class="session-outline-wrap"
+        >
+          <button
+            ref="outlineButtonRef"
+            type="button"
+            class="chat-debug-toggle"
+            :class="{ active: outlineOpen }"
+            :title="outlineOpen ? '收起会话大纲' : '会话大纲：本会话问过的问题（↑↓ 选择，回车跳转）'"
+            :aria-expanded="outlineOpen"
+            aria-haspopup="dialog"
+            @click="toggleOutline"
+            @keydown="onOutlineButtonKeydown"
+          >
+            大纲
+            <span class="session-outline-count">{{ sessionOutline.length }}</span>
+          </button>
+        </div>
+
+        <div
+          v-if="outlineOpen"
+          ref="outlinePopoverRef"
+          class="session-outline-popover"
+          role="dialog"
+          aria-label="会话大纲"
+        >
+          <div class="session-outline-head">
+            <span class="session-outline-title">本会话问题</span>
+            <span class="session-outline-meta">{{ sessionOutline.length }} 条</span>
+          </div>
+          <ol
+            class="session-outline-list"
+            role="listbox"
+            aria-label="本会话问题"
+            @keydown="onOutlineListKeydown"
+          >
+            <li v-for="item in sessionOutline" :key="item.id" role="none">
+              <button
+                :id="`outline-item-${item.index}`"
+                type="button"
+                role="option"
+                class="session-outline-item"
+                :class="{ active: item.id === outlineActiveId }"
+                :tabindex="item.id === outlineActiveId ? 0 : -1"
+                :aria-selected="item.id === outlineActiveId"
+                :data-outline-index="item.index"
+                :title="item.preview"
+                @click="jumpToOutlineItem(item.id)"
+                @mouseenter="outlineActiveId = item.id"
+              >
+                <span class="session-outline-index">{{ item.index }}</span>
+                <span class="session-outline-preview">{{ item.preview }}</span>
+              </button>
+            </li>
+          </ol>
+        </div>
+      </div>
+
       <div class="chat-scroll-wrap">
       <div
         ref="chatScrollRef"
@@ -280,26 +349,6 @@
 
         <div class="chat-action-row">
             <div class="composer-mode-row">
-            <div
-              v-if="sessionOutline.length"
-              ref="outlineWrapRef"
-              class="session-outline-wrap"
-            >
-              <button
-                ref="outlineButtonRef"
-                type="button"
-                class="chat-debug-toggle"
-                :class="{ active: outlineOpen }"
-                :title="outlineOpen ? '收起会话大纲' : '会话大纲：本会话问过的问题（↑↓ 选择，回车跳转）'"
-                :aria-expanded="outlineOpen"
-                aria-haspopup="dialog"
-                @click="toggleOutline"
-                @keydown="onOutlineButtonKeydown"
-              >
-                大纲
-                <span v-if="sessionOutline.length" class="session-outline-count">{{ sessionOutline.length }}</span>
-              </button>
-            </div>
             <button
               type="button"
               class="chat-debug-toggle"
@@ -530,50 +579,6 @@
             <button type="button" class="primary send-btn" :disabled="!canSendChat" @click="$emit('send-chat')">
               {{ chatSending ? "打断并发送" : "发送" }}
             </button>
-          </div>
-
-          <!--
-            会话大纲：贴聊天面板内壁的浮层，钉在这行工具栏的上沿。
-            刻意不用 Teleport + fixed + JS 手算坐标：那样宽度得写死、
-            还得靠 resize/scroll 监听不停重算位置；这里交给 CSS，
-            宽度自动跟随聊天列，滚消息/改窗口/折叠面板都不用重算。
-          -->
-          <div
-            v-if="outlineOpen"
-            ref="outlinePopoverRef"
-            class="session-outline-popover"
-            role="dialog"
-            aria-label="会话大纲"
-          >
-            <div class="session-outline-head">
-              <span class="session-outline-title">本会话问题</span>
-              <span class="session-outline-meta">{{ sessionOutline.length }} 条</span>
-            </div>
-            <ol
-              class="session-outline-list"
-              role="listbox"
-              aria-label="本会话问题"
-              @keydown="onOutlineListKeydown"
-            >
-              <li v-for="item in sessionOutline" :key="item.id" role="none">
-                <button
-                  :id="`outline-item-${item.index}`"
-                  type="button"
-                  role="option"
-                  class="session-outline-item"
-                  :class="{ active: item.id === outlineActiveId }"
-                  :tabindex="item.id === outlineActiveId ? 0 : -1"
-                  :aria-selected="item.id === outlineActiveId"
-                  :data-outline-index="item.index"
-                  :title="item.preview"
-                  @click="jumpToOutlineItem(item.id)"
-                  @mouseenter="outlineActiveId = item.id"
-                >
-                  <span class="session-outline-index">{{ item.index }}</span>
-                  <span class="session-outline-preview">{{ item.preview }}</span>
-                </button>
-              </li>
-            </ol>
           </div>
         </div>
       </div>
@@ -909,6 +914,8 @@ interface Props {
   autoResumeSecondsLeft: number;
   pendingPromptQueue: string[];
   activeSessionId: string;
+  /** 当前会话标题，显示在聊天面板顶部会话头。 */
+  activeSessionTitle?: string;
   isDragging: boolean;
   editorCollapsed: boolean;
   mentionOpen: boolean;
@@ -988,6 +995,7 @@ const props = withDefaults(defineProps<Props>(), {
 	agentSuggestions: () => [],
 	activeSessionProviderId: "",
 	activeSessionModelId: "",
+	activeSessionTitle: "",
 	sessionGoal: "",
 	providerOptions: () => [],
 	globalModelName: "",
@@ -1254,7 +1262,7 @@ function onTraceButton() {
 }
 
 /**
- * 会话大纲浮层的位置完全由 CSS 负责（贴 `.chat-action-row` 上沿），
+ * 会话大纲浮层的位置完全由 CSS 负责（从顶部会话头的「大纲」按钮向下展开），
  * 所以这里不再有「量按钮位置 → 手算 fixed top/right → 监听 resize/scroll 重算」那套。
  */
 function setOutlineActiveByIndex(index: number, focus = false): void {

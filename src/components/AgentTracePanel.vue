@@ -54,18 +54,28 @@
               { 'agent-trace-entry--fail': entry.ok === false, 'agent-trace-entry--expanded': isEntryOpen(entry) },
             ]"
           >
-            <button
-              type="button"
-              class="agent-trace-row"
-              :aria-expanded="isEntryOpen(entry)"
-              @click="toggleEntry(entry.key)"
-            >
-              <span class="agent-trace-row-chevron" aria-hidden="true">{{ isEntryOpen(entry) ? "▾" : "▸" }}</span>
-              <span class="agent-trace-row-kind" :title="kindUi[entry.kind].title">{{ kindUi[entry.kind].label }}</span>
-              <span v-if="entry.kind === 'reasoning' && entry.streaming" class="agent-trace-row-dot" aria-hidden="true" />
-              <span class="agent-trace-row-label">{{ entryLabel(entry) }}</span>
-              <span v-if="entry.elapsedMs !== undefined" class="agent-trace-row-time">{{ formatElapsed(entry.elapsedMs) }}</span>
-            </button>
+            <div class="agent-trace-row-wrap">
+              <button
+                type="button"
+                class="agent-trace-row"
+                :aria-expanded="isEntryOpen(entry)"
+                @click="toggleEntry(entry.key)"
+              >
+                <span class="agent-trace-row-chevron" aria-hidden="true">{{ isEntryOpen(entry) ? "▾" : "▸" }}</span>
+                <span class="agent-trace-row-kind" :title="kindUi[entry.kind].title">{{ kindUi[entry.kind].label }}</span>
+                <span v-if="entry.kind === 'reasoning' && entry.streaming" class="agent-trace-row-dot" aria-hidden="true" />
+                <span class="agent-trace-row-label">{{ entryLabel(entry) }}</span>
+                <span v-if="entry.elapsedMs !== undefined" class="agent-trace-row-time">{{ formatElapsed(entry.elapsedMs) }}</span>
+              </button>
+              <!-- 抽屉里正文框只有 180px 高，长提示词/日志不便阅读；这条一键全屏 -->
+              <button
+                type="button"
+                class="agent-trace-row-fs"
+                title="全屏查看这条内容"
+                aria-label="全屏查看"
+                @click.stop="openEntryFullscreen(entry)"
+              >⤢</button>
+            </div>
             <!--
               展开程度由显示配置决定（entry.expandedByDefault），用户点箭头可临时覆盖。
               思考默认展开 —— 它是「过程」，要能边跑边看。
@@ -102,11 +112,46 @@
         {{ emptyHint }}
       </div>
     </div>
+
+    <!--
+      条目全屏查看：抽屉里的正文框限高 180px，长 system prompt / 日志要滚着读。
+      挂到 body，铺满窗口，整段可读。Esc 或点遮罩关闭。
+    -->
+    <Teleport to="body">
+      <div
+        v-if="fullscreenEntry"
+        class="agent-trace-fs-overlay"
+        @mousedown.self="closeEntryFullscreen"
+      >
+        <div class="agent-trace-fs-panel" role="dialog" aria-label="全屏查看轨迹条目">
+          <header class="agent-trace-fs-head">
+            <span class="agent-trace-fs-kind">{{ kindUi[fullscreenEntry.kind].label }}</span>
+            <span class="agent-trace-fs-label">{{ fullscreenEntry.label }}</span>
+            <button
+              type="button"
+              class="agent-trace-fs-close"
+              title="关闭（Esc）"
+              @click="closeEntryFullscreen"
+            >✕</button>
+          </header>
+          <div class="agent-trace-fs-body">
+            <ChatMarkdown
+              v-if="fullscreenEntry.kind === 'reasoning'"
+              class="agent-trace-fs-markdown"
+              :content="reasoningMarkdown(fullscreenEntry.detail)"
+              :streaming="fullscreenEntry.streaming === true"
+              :interactive="false"
+            />
+            <pre v-else class="agent-trace-fs-pre">{{ fullscreenEntry.detail }}</pre>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import AgentTraceViewBar from "./AgentTraceViewBar.vue";
 import ChatMarkdown from "./ChatMarkdown.vue";
 import {
@@ -127,6 +172,11 @@ import {
   type AgentRoundGroupView,
   type AgentRoundTool,
 } from "../services/agentRoundGroups";
+import {
+  currentTraceExpandKey,
+  loadTraceExpandSnapshot,
+  saveTraceExpandSnapshot,
+} from "../services/agentTraceDrawer";
 
 type TraceTurn = ReturnType<typeof buildAgentTraceTurns>[number];
 
@@ -162,10 +212,21 @@ const open = ref(false);
 /**
  * 用户对「展开/折叠」的显式覆盖。空 = 全部跟随显示配置的默认值。
  * 用 Map 而非 Set：override 要能表达"把默认展开的关掉"。
+ *
+ * 初值从模块级单例（`agentTraceDrawer`）恢复：面板会随抽屉关闭 / 切列宽 / 切会话
+ * 卸载，组件内 ref 会丢，用户展开意图必须跨卸载保留（否则重开回到初始态）。
  */
-const expandedKeys = ref<Map<string, boolean>>(new Map());
-/** 展开的轮次；默认只展开最新一轮，旧轮折叠成一行摘要 */
-const openTurns = ref<Set<number>>(new Set());
+const restoredSnapshot = loadTraceExpandSnapshot(currentTraceExpandKey());
+const expandedKeys = ref<Map<string, boolean>>(new Map(restoredSnapshot?.expandedKeys ?? []));
+/** 展开的轮次；默认只展开最新一轮，旧轮折叠成一行摘要。同样跨卸载恢复。 */
+const openTurns = ref<Set<number>>(new Set(restoredSnapshot?.openTurns ?? []));
+/**
+ * 有存档时，挂载的**首次** turns watcher 必须跳过「自动展开最新一轮」。
+ *
+ * 否则用户「把最新一轮折叠了」的意图会在重挂时被这条自动逻辑当场覆盖 ——
+ * 表现就是「重开不是之前那个样子」。只在首次跳过，之后（运行中冒出新一轮）照常自动展开。
+ */
+let skipAutoOpenLatestOnce = Boolean(restoredSnapshot);
 
 const kindUi = AGENT_TRACE_KIND_UI;
 /** 归一化脏值：外部传进来的是旧档位字符串或半截对象时也不能把面板搞坏 */
@@ -252,6 +313,11 @@ watch(
       openTurns.value = new Set([next[next.length - 1].turn]);
       return;
     }
+    // 有存档时，首次 watcher 不覆盖用户已恢复的展开态（见 skipAutoOpenLatestOnce）
+    if (skipAutoOpenLatestOnce) {
+      skipAutoOpenLatestOnce = false;
+      return;
+    }
     const last = next[next.length - 1].turn;
     if (!openTurns.value.has(last)) {
       openTurns.value = new Set([...openTurns.value, last]);
@@ -267,6 +333,21 @@ watch(
 watch(view, () => {
   expandedKeys.value = new Map();
 });
+
+/**
+ * 持久化展开态到模块级单例：任何展开变化立即落盘（不靠 unmount 钩子 ——
+ * 卸载路径多，钩子容易漏；watch 覆盖所有写入点）。
+ */
+watch(
+  [openTurns, expandedKeys],
+  () => {
+    saveTraceExpandSnapshot(currentTraceExpandKey(), {
+      openTurns: [...openTurns.value],
+      expandedKeys: [...expandedKeys.value.entries()],
+    });
+  },
+  { deep: true },
+);
 
 function isTurnOpen(turn: number): boolean {
   return openTurns.value.has(turn);
@@ -381,6 +462,37 @@ function formatElapsed(ms?: number): string {
   if (ms < 1000) return `${ms}ms`;
   return `${(ms / 1000).toFixed(1)}s`;
 }
+
+/**
+ * 全屏查看某条条目。用 `fullscreenEntry` 存整条（而不是 key）——面板跑实时会把
+ * 条目对象整批重建，存 key 的话全屏打开期间新 delta 一到就找不到旧的、内容反而卡住。
+ * 存对象快照则在打开的这一刻定格内容，适合「读一段已产出的提示词/日志」。
+ */
+const fullscreenEntry = ref<AgentTraceEntry | null>(null);
+
+function openEntryFullscreen(entry: AgentTraceEntry): void {
+  fullscreenEntry.value = entry;
+}
+
+function closeEntryFullscreen(): void {
+  fullscreenEntry.value = null;
+}
+
+function onFullscreenKeydown(event: KeyboardEvent): void {
+  if (event.key !== "Escape" || !fullscreenEntry.value) return;
+  // 捕获阶段拦下：轨迹抽屉自己也监听 window 的 Esc（关抽屉）。全屏层开着时，
+  // Esc 只该关全屏这一层；不阻断的话事件继续走到抽屉的监听，会把整个数据流轨迹
+  // 一起关掉 —— 连带把面板里「展开了哪几轮/哪几条」的状态也随卸载丢掉。
+  // 用 stopImmediatePropagation（而非 stopPropagation）：明确阻断同目标(window)上
+  // 其它监听，不依赖 capture/bubble 阶段的传播次序语义。
+  event.stopImmediatePropagation();
+  closeEntryFullscreen();
+}
+
+// 捕获阶段注册（第三参 true）：window 上的捕获监听先于抽屉的冒泡监听执行，
+// 才能在抽屉之前决定这次 Esc 归谁。
+onMounted(() => window.addEventListener("keydown", onFullscreenKeydown, true));
+onUnmounted(() => window.removeEventListener("keydown", onFullscreenKeydown, true));
 </script>
 
 <style scoped>
@@ -539,7 +651,8 @@ function formatElapsed(ms?: number): string {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   padding: 3px 4px;
   border: none;
   border-radius: 4px;
@@ -550,6 +663,41 @@ function formatElapsed(ms?: number): string {
   text-align: left;
   cursor: pointer;
   transition: background 100ms ease;
+}
+
+/* 行 + 全屏按钮同排：行占满剩余宽度，按钮只在悬停/已展开时现身 */
+.agent-trace-row-wrap {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.agent-trace-row-fs {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(139, 148, 158, 0.55);
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 100ms ease, background 100ms ease, color 100ms ease;
+}
+
+.agent-trace-row-wrap:hover .agent-trace-row-fs,
+.agent-trace-entry--expanded .agent-trace-row-fs {
+  opacity: 1;
+}
+
+.agent-trace-row-fs:hover {
+  background: rgba(88, 166, 255, 0.16);
+  color: rgba(165, 214, 255, 0.95);
 }
 
 .agent-trace-row:hover {
@@ -755,6 +903,110 @@ function formatElapsed(ms?: number): string {
   font-size: 9.5px;
   font-variant-numeric: tabular-nums;
   color: rgba(148, 163, 184, 0.6);
+}
+
+/* ── 条目全屏查看（Teleport 到 body；scope id 编译期已打在元素上，scoped 可命中） ── */
+.agent-trace-fs-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(2px);
+}
+
+.agent-trace-fs-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(1100px, 94vw);
+  height: min(88vh, 900px);
+  min-height: 0;
+  background: #0d0f14;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+
+.agent-trace-fs-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+
+.agent-trace-fs-kind {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  background: rgba(88, 166, 255, 0.14);
+  color: rgba(126, 182, 255, 0.9);
+}
+
+.agent-trace-fs-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: rgba(226, 232, 240, 0.9);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-trace-fs-close {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(139, 148, 158, 0.8);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.agent-trace-fs-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.agent-trace-fs-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 18px;
+}
+
+.agent-trace-fs-pre {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  color: rgba(201, 209, 217, 0.92);
+}
+
+.agent-trace-fs-markdown :deep(.msg-markdown) {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: rgba(214, 222, 234, 0.94);
 }
 
 </style>

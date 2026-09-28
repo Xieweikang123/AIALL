@@ -288,6 +288,22 @@ describe("renderMarkdown", () => {
     expect(html).not.toMatch(/\*\*已完成的功能全链路/);
   });
 
+  it("keeps a list intact when inline code contains a CJK colon", () => {
+    // `${MYSQL_PASSWORD:默认值}` — the `:` + CJK inside the code span must not be
+    // treated as a glued English preamble; splitting there used to leak the rest
+    // of the list item into a new paragraph and leave `**bold**` / `2.` literal.
+    const source = [
+      "1. 取配置时是 `${MYSQL_PASSWORD:默认值}` 形式，取内层默认值才连得上。",
+      "2. **未污染你的既有数据**：库里原有 2 行**原样保留，未删改**。",
+    ].join("\n");
+    for (const html of [renderMarkdown(source), renderMarkdownLite(source)]) {
+      expect(html.match(/<li/g)?.length).toBe(2);
+      expect(html).toContain("<code>${MYSQL_PASSWORD:默认值}</code>");
+      expect(html).toContain("<strong>未污染你的既有数据</strong>");
+      expect(html).not.toContain("**未污染");
+    }
+  });
+
   it("renders h4 when heading line is indented after a section title", () => {
     const html = renderMarkdown("## 模块\n    ####4. AI 配置（/ai-config）— 模型与 API 管理");
     expect(html).toContain("<h4");

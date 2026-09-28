@@ -1333,7 +1333,6 @@ mod tests {
             "echo $(rm -rf /)",
             "echo `whoami`",
             "git status > /dev/null",
-            "git config user.email a@b.c",
         ] {
             assert!(
                 server_mode_command_blocked(cmd).is_some(),

@@ -176,9 +176,52 @@ export function normalizeListBlockBreaks(source: string): string {
   return source.replace(/([^\n|*+\-])\n([*+\-]\s+)/g, "$1\n\n$2");
 }
 
-/** SSE may glue English tool preamble to Chinese answer (`data:全部验证`). */
+const GLUED_LATIN_CJK_RE = /([A-Za-z0-9)])([:：])(?=[\u4e00-\u9fff])/g;
+
+/**
+ * SSE may glue English tool preamble to Chinese answer (`data:全部验证`).
+ *
+ * Must stay fence- and inline-code-aware: a `:` immediately followed by CJK
+ * inside code (`${MYSQL_PASSWORD:默认值}`) is not a glued preamble. Splitting
+ * there injects a blank line inside the code span, which leaks the rest of the
+ * list item into a separate paragraph and leaves the following `**bold**` and
+ * `2.` markers literal.
+ */
 export function normalizeGluedLatinCjkBoundary(source: string): string {
-  return source.replace(/([A-Za-z0-9)])([:：])(?=[\u4e00-\u9fff])/g, "$1$2\n\n");
+  const lines = source.split("\n");
+  const out: string[] = [];
+  let inFence = false;
+  for (const line of lines) {
+    if (/^\s*```/.test(line)) {
+      inFence = !inFence;
+      out.push(line);
+      continue;
+    }
+    if (inFence) {
+      out.push(line);
+      continue;
+    }
+    if (!line.includes("`")) {
+      out.push(line.replace(GLUED_LATIN_CJK_RE, "$1$2\n\n"));
+      continue;
+    }
+    // Alternate non-tick / tick runs; only transform text outside code spans.
+    // Inline code cannot span lines, so each line starts outside a span.
+    const parts = line.split(/(`+)/);
+    let inside = false;
+    let result = "";
+    for (let index = 0; index < parts.length; index += 1) {
+      const part = parts[index]!;
+      if (index % 2 === 1) {
+        inside = !inside;
+        result += part;
+      } else {
+        result += inside ? part : part.replace(GLUED_LATIN_CJK_RE, "$1$2\n\n");
+      }
+    }
+    out.push(result);
+  }
+  return out.join("\n");
 }
 
 /** Separate a fenced code block accidentally glued to a bold heading. */

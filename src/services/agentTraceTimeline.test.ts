@@ -58,17 +58,52 @@ describe("buildAgentTraceTurns", () => {
     const [turn] = turns;
     expect(turn.turn).toBe(1);
     expect(turn.model).toBe("test-model");
+    // 逐条线性：3 条请求消息 → 3 个请求条目，保持原始顺序
     expect(turn.entries.map((entry) => entry.kind)).toEqual([
+      "request",
       "request",
       "request",
       "response",
       "tool",
     ]);
-    expect(turn.entries[1]?.label).toContain("发给模型");
-    expect(turn.entries[1]?.label).toContain("最新的这条");
-    expect(turn.entries[0]?.label).toContain("2 条历史消息");
-    expect(turn.entries[2]?.label).toContain("好的，我来修改");
-    expect(turn.entries[3]?.label).toContain("src/a.ts");
+    expect(turn.entries[0]?.label).toContain("帮我改这个文件");
+    expect(turn.entries[1]?.label).toContain("上一轮回复");
+    expect(turn.entries[2]?.label).toContain("发给模型");
+    expect(turn.entries[2]?.label).toContain("最新的这条");
+    expect(turn.entries[3]?.label).toContain("好的，我来修改");
+    expect(turn.entries[4]?.label).toContain("src/a.ts");
+  });
+
+  it("系统提示词单独成条，不混进历史消息，且保持线性顺序", () => {
+    const turns = buildAgentTraceTurns([
+      group({
+        turn: 1,
+        request: {
+          contextMessages: 3,
+          contextChars: 900,
+          messages: [
+            { role: "system", content: "你是 AIALL 项目 Agent……" },
+            { role: "user", content: "上一句" },
+            { role: "user", content: "本轮这句" },
+          ],
+        },
+      }),
+    ]);
+
+    const requests = turns[0]?.entries.filter((entry) => entry.kind === "request") ?? [];
+    // 每条消息一个条目，顺序与 messages 一致（system 在最前）
+    expect(requests).toHaveLength(3);
+    expect(requests[0]?.label).toContain("系统提示词");
+    expect(requests[0]?.detail).toContain("你是 AIALL 项目 Agent");
+    // 历史不再把 system 算进去
+    expect(requests[1]?.label).toContain("发给模型");
+    expect(requests[1]?.label).not.toContain("系统提示词");
+    expect(requests[2]?.label).toContain("本轮这句");
+    expect(requests.map((entry) => entry.key)).toEqual([
+      "req-1-0-system",
+      "req-1-1-user",
+      "req-1-2-user",
+    ]);
   });
 
   it("marks failed tools and skips turns without any entries", () => {
@@ -189,6 +224,37 @@ describe("buildAgentTraceTurns", () => {
     expect(reasoning?.streaming).toBe(false);
     expect(reasoning?.label).toContain("思考过程");
     expect(reasoning?.label).not.toContain("思考中");
+  });
+
+  it("运行中只有最新一轮标「思考中」，调过工具的老轮次不再挂着", () => {
+    // 回归：后端 isFinal = 「本轮没有工具调用」，所以调过工具的轮次 isFinal 恒为 false。
+    // 曾用 `isRunning && !response.isFinal` 判定，导致第 1、2 轮早跑完了还永远显示「思考中」。
+    const turns = buildAgentTraceTurns(
+      [
+        group({
+          turn: 1,
+          reasoning: "第一轮想了一下",
+          response: { assistantText: "", toolCalls: [{ id: "t1", name: "grep", arguments: "{}" }], hasToolCalls: true, isFinal: false },
+        }),
+        group({
+          turn: 2,
+          reasoning: "第二轮还在想",
+          response: { assistantText: "先读配置", toolCalls: [], hasToolCalls: false, isFinal: false },
+        }),
+      ],
+      undefined,
+      true,
+    );
+
+    const first = turns[0]?.entries.find((e) => e.kind === "reasoning");
+    const second = turns[1]?.entries.find((e) => e.kind === "reasoning");
+    // 老轮次：跑完了，不该再标流式
+    expect(first?.streaming).toBe(false);
+    expect(first?.label).toContain("思考过程");
+    expect(first?.label).not.toContain("思考中");
+    // 最新一轮：仍在产出，标流式
+    expect(second?.streaming).toBe(true);
+    expect(second?.label).toContain("思考中");
   });
 
   it("全折叠的预设下不默认展开任何条目，但条目仍然构建（点开还能看）", () => {

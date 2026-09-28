@@ -664,6 +664,66 @@ export function useAgentTraceDrawerState(): AgentTraceDrawerState {
   return state;
 }
 
+/* --------------------- 轨迹面板的展开态（跨卸载保留） --------------------- */
+
+/**
+ * 面板里「展开了哪几轮 / 哪几条」的用户意图。
+ *
+ * 为什么放在**模块级单例**而不是面板组件内：抽屉是单例、面板却是它的子组件，
+ * 关闭抽屉（✕ / Esc / 工具栏）/ 切列宽 / 切会话都会让面板**卸载**，组件内的
+ * `openTurns` / `expandedKeys` 随之丢失 —— 重开就是初始态（用户报的「再次打开
+ * 不是之前那个样子」）。存这里后，卸载不丢，重挂即恢复。
+ *
+ * 按**消息 id** 分桶：不同消息的轨迹各自记各的展开态，互不串。
+ * `messageId` 为空（跟随最新、无显式锁）时落 `LATEST_TRACE_EXPAND_KEY` 桶。
+ */
+export interface TraceExpandSnapshot {
+  openTurns: number[];
+  expandedKeys: Array<[string, boolean]>;
+}
+
+const LATEST_TRACE_EXPAND_KEY = "__latest__";
+const expandByMessage = new Map<string, TraceExpandSnapshot>();
+
+/** 当前轨迹内容对应的展开态分桶键（与面板实际展示的消息一致）。 */
+export function currentTraceExpandKey(): string {
+  return state.messageId?.trim() || LATEST_TRACE_EXPAND_KEY;
+}
+
+export function loadTraceExpandSnapshot(key: string): TraceExpandSnapshot | undefined {
+  return expandByMessage.get(key);
+}
+
+export function saveTraceExpandSnapshot(key: string, snapshot: TraceExpandSnapshot): void {
+  expandByMessage.set(key, {
+    openTurns: [...snapshot.openTurns],
+    expandedKeys: snapshot.expandedKeys.map(([k, v]) => [k, v] as [string, boolean]),
+  });
+}
+
+/**
+ * 抽屉正文的滚动位置（跨卸载保留）。
+ *
+ * 面板内容不卸载时浏览器自然保住滚动位置；但抽屉关闭/切列宽/切会话会让
+ * `.agent-trace-drawer-body` 随组件卸载重建，位置回到顶部/底部。这里按消息 id
+ * 记住用户读到哪，重开时恢复，而不是每次强制滚到底。
+ */
+export interface TraceScrollSnapshot {
+  top: number;
+  /** 用户此前是否处于「跟随最新」状态（在底部）。 */
+  follow: boolean;
+}
+
+const scrollByMessage = new Map<string, TraceScrollSnapshot>();
+
+export function loadTraceScrollSnapshot(key: string): TraceScrollSnapshot | undefined {
+  return scrollByMessage.get(key);
+}
+
+export function saveTraceScrollSnapshot(key: string, snapshot: TraceScrollSnapshot): void {
+  scrollByMessage.set(key, { top: snapshot.top, follow: snapshot.follow });
+}
+
 /** 仅测试用：重置模块级状态（生产代码不调用） */
 export function __resetAgentTraceDrawerForTest(): void {
   state.open = false;
@@ -682,6 +742,8 @@ export function __resetAgentTraceDrawerForTest(): void {
   state.collapsedForEditor = false;
   state.userDismissedAuto = false;
   latestMessageIdBySession.clear();
+  expandByMessage.clear();
+  scrollByMessage.clear();
   resolveGroups = () => [];
   resolveTools = () => [];
   resolveMessageExists = () => null;

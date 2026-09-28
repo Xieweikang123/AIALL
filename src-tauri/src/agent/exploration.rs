@@ -98,9 +98,7 @@ pub fn build_explore_budget_nudge(consecutive_turns: u32, mode: &str) -> String 
      若目标文件已 read 过且无阻塞决策：直接改，不要再 grep/read。\n\
      若仍缺路径：最多 1 次 grep/search，然后立即修改或提问。\n\
      禁止重复 read 同一文件相同片段；禁止用英文写长分析。\n\
-     先用 2–4 句中文写可见进度（根因假设 + 下一步，或待决问题），再调用工具或提问。\n\n\
-     💡 提示：如果问题表现为「点击没反应」「按钮不工作」等前端交互异常，\
-     优先请用户打开浏览器 DevTools Console 查看报错信息——这比读代码更快定位根因。"
+     先用 2–4 句中文写可见进度（根因假设 + 下一步，或待决问题），再调用工具或提问。"
     };
     format!("【系统提示】已连续 {consecutive_turns} 轮仅探索、尚未修改。\n{action_hint}")
 }
@@ -186,9 +184,7 @@ pub fn build_file_breadth_nudge(unique_read_files: &[String], mode: &str) -> Str
         "请基于以上已读文件立即输出结构化方案，不要再读新文件。"
     } else {
         "请基于以上已读文件确定下一步操作。如果需要修改，请直接 patch；\
-     如果还需要信息，请在已读文件中搜索而非打开新文件。\n\n\
-     💡 如果任务是一类前端交互问题（点击没反应 / 样式异常），\
-     优先怀疑 JS 运行时错误（Console 报错）或最近一次改动引入的副作用，而非大范围探索代码。"
+     如果还需要信息，请在已读文件中搜索而非打开新文件。"
     };
     format!(
         "【系统提示】已探索 {} 个不同文件（{file_list} 等）。\n\
@@ -422,12 +418,6 @@ pub fn build_runtime_tool_failure_recovery_nudge(
     }
 }
 
-pub fn build_consultative_duplicate_explore_nudge() -> &'static str {
-    "【系统提示】你已重复执行相同的 grep/read 组合，且工具结果未变。\
-   禁止再调用工具；请基于已有 read/grep 输出立即给出最终中文答案。\
-   若 CSS 已在工具结果中，直接引用 background / var(--*) 作答，勿重复读同一文件。"
-}
-
 pub fn build_exploration_archive_write_blocked_message() -> &'static str {
     "错误：探索归档路径（.aiall/exploration/）禁止写入；请写入项目源码或输出文字总结。"
 }
@@ -549,11 +539,6 @@ pub fn build_premature_completion_retry_nudge(user_reported_failure: bool) -> St
 /// Build nudge when agent claims completion without writing anything
 pub fn build_empty_reply_retry_nudge() -> &'static str {
     "【系统强制】你的回复为空或仅包含确认语句。请根据用户需求输出有效内容，禁止空回复结束。"
-}
-
-/// Build nudge for premature completion (rubber-stamping)
-pub fn build_premature_completion_retry_nudge_simple() -> &'static str {
-    "你似乎过早地确认了完成。请检查是否所有需求都已满足，必要时继续修改。"
 }
 
 pub fn build_ui_defect_force_patch_nudge(total_explore_turns: u32) -> String {
@@ -912,22 +897,6 @@ mod tests {
         assert_eq!(msg, build_empty_reply_retry_nudge());
     }
 
-    // ── build_premature_completion_retry_nudge ──
-    #[test]
-    fn test_build_premature_completion_retry_nudge() {
-        let msg = build_premature_completion_retry_nudge_simple();
-        assert!(!msg.is_empty());
-        assert!(msg.contains("过早"));
-    }
-
-    #[test]
-    fn test_build_premature_completion_retry_nudge_consistent() {
-        assert_eq!(
-            build_premature_completion_retry_nudge_simple(),
-            build_premature_completion_retry_nudge_simple()
-        );
-    }
-
     // ── claims_premature_completion ──
     #[test]
     fn test_claims_premature_completion_positive_chinese_complete() {
@@ -1051,11 +1020,9 @@ mod tests {
     }
 
     #[test]
-    fn test_build_consultative_segment_and_duplicate_nudges() {
+    fn test_build_consultative_segment_cap_nudge() {
         let cap = build_consultative_segment_cap_nudge(5, 8);
         assert!(cap.contains("咨询只读"));
         assert!(cap.contains("下一轮再确认"));
-        assert!(build_consultative_duplicate_explore_nudge().contains("重复执行"));
-        assert!(build_consultative_duplicate_explore_nudge().contains("禁止再调用工具"));
     }
 }

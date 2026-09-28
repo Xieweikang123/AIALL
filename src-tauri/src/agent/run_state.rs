@@ -38,9 +38,7 @@ pub(crate) struct ConsultativeTrackState {
     pub read_paths: Vec<String>,
     pub read_failed_paths: Vec<String>,
     pub grep_patterns: Vec<String>,
-    pub search_queries: Vec<String>,
     pub force_answer_pending: bool,
-    pub last_explore_sig: Option<String>,
     pub explore_files_read: HashSet<String>,
 }
 
@@ -182,7 +180,6 @@ impl AgentRunState {
             consecutive_runtime_tool_failure_turns: self
                 .nudge_flags
                 .consecutive_runtime_tool_failure_turns,
-            last_consultative_explore_sig: self.consultative.last_explore_sig.clone(),
             consecutive_read_turns: self.consultative.consecutive_read_turns,
             total_read_tool_calls: self.consultative.total_read_tool_calls,
             build_explore_force_patch_sent: self.patch.build_explore_force_patch_sent,
@@ -195,7 +192,6 @@ impl AgentRunState {
     pub fn apply_post_tool_mut(&mut self, m: PostToolTurnMut) {
         self.nudge_flags.consecutive_runtime_tool_failure_turns =
             m.consecutive_runtime_tool_failure_turns;
-        self.consultative.last_explore_sig = m.last_consultative_explore_sig;
         self.consultative.consecutive_read_turns = m.consecutive_read_turns;
         self.consultative.total_read_tool_calls = m.total_read_tool_calls;
         self.patch.build_explore_force_patch_sent = m.build_explore_force_patch_sent;

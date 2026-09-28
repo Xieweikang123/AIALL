@@ -809,6 +809,7 @@
         :auto-resume-seconds-left="autoResumeSecondsLeft"
         :pending-prompt-queue="pendingPromptQueue"
         :active-session-id="activeSessionId"
+        :active-session-title="activeSessionTitle"
         :is-dragging="isDragging"
         :editor-collapsed="editorCollapsed"
         :mention-open="mentionOpen"

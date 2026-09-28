@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   buildControlInnerProportionHint,
-  buildModelIdentityHint,
   buildUiScopeFollowUpHint,
   buildVisionBuildContinueHint,
   buildVisionConsultativeContinueHint,
@@ -295,11 +294,6 @@ describe("visionMessage", () => {
 
   it("isPrematureVisionCompletionClaim rejects done-state before tools", () => {
     expect(isPrematureVisionCompletionClaim("已做的修改：padding 改为 8px")).toBe(true);
-  });
-
-  it("buildModelIdentityHint uses configured model id", () => {
-    expect(buildModelIdentityHint("mimo-v2.5-pro")).toContain("mimo-v2.5-pro");
-    expect(buildModelIdentityHint("mimo-v2.5-pro")).toContain("不要自称 Claude");
   });
 
   it("contentDisplayText hides base64 and shows image count", () => {

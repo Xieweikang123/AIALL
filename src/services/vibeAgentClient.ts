@@ -32,7 +32,10 @@ export interface VibeAgentRunRequest {
   taskWrittenFiles?: string[];
   /** Merged rule + AI intent (Tauri desktop). */
   resolvedUserIntent?: ResolvedUserIntent;
-  /** Enable verbose debug payloads (real systemPrompt + per-turn messages). */
+  /**
+   * 遗留调试标志。真实 systemPrompt 与每轮 messages 现在**恒常下发**（轨迹抽屉
+   * 是注入提示词的唯一查看面），后端不再据此门控；字段保留只为兼容旧调用方。
+   */
   debug?: boolean;
   /** Chat session id — enables server-side run checkpoints. */
   sessionId?: string;

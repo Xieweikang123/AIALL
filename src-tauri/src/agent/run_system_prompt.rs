@@ -45,10 +45,6 @@ pub async fn build_agent_system_prompt(
         system_prompt.push_str(&format!("当前会话目标：{}\n", goal));
     }
     system_prompt.push_str(&format!("可用工具：{}\n", params.tool_names));
-    system_prompt.push_str(&format!(
-        "{}\n",
-        crate::agent::build_model_identity_hint(&params.request.model)
-    ));
 
     if params.mode == "explore" {
         for line in prompts::build_explore_system_prompt_lines(explore_incremental) {

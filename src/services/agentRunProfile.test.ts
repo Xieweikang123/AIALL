@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAgentPromptForProfile,
+  dropCurrentTurnUserMessage,
   enrichAgentUserPrompt,
   resolveAgentMaxTurns,
   resolveAgentResumeRunProfile,
@@ -302,5 +303,70 @@ describe("enrichAgentUserPrompt execution continuation", () => {
     });
     expect(hint).toContain("【续跑确认】");
     expect(hint).toContain("禁止写「看到截图");
+  });
+});
+
+describe("dropCurrentTurnUserMessage", () => {
+  const PROMPT = "vpp 数据库，你知道怎么连接吗？";
+
+  it("removes the trailing user message that repeats the current prompt", () => {
+    const history = [
+      { role: "user" as const, content: "上一轮的问题" },
+      { role: "assistant" as const, content: "上一轮的回答" },
+      { role: "user" as const, content: PROMPT },
+    ];
+    const trimmed = dropCurrentTurnUserMessage(history, [PROMPT]);
+    expect(trimmed).toEqual([
+      { role: "user", content: "上一轮的问题" },
+      { role: "assistant", content: "上一轮的回答" },
+    ]);
+  });
+
+  it("matches on the rendered bubble content as well as the raw prompt", () => {
+    const history = [
+      { role: "assistant" as const, content: "执行方案：" },
+      { role: "user" as const, content: "执行方案" },
+    ];
+    expect(dropCurrentTurnUserMessage(history, ["改吧", "执行方案"])).toEqual([
+      { role: "assistant", content: "执行方案：" },
+    ]);
+  });
+
+  it("strips the current bubble even when skipUserBubble reuses an existing one", () => {
+    const history = [{ role: "user" as const, content: PROMPT }];
+    expect(dropCurrentTurnUserMessage(history, [PROMPT])).toEqual([]);
+  });
+
+  it("keeps history untouched when nothing matches (e.g. ref-stripped bubble)", () => {
+    const history = [
+      { role: "user" as const, content: "上一轮的问题" },
+      { role: "assistant" as const, content: "上一轮的回答" },
+    ];
+    expect(dropCurrentTurnUserMessage(history, [PROMPT])).toEqual(history);
+  });
+
+  it("never strips an earlier repeat mid-conversation", () => {
+    const history = [
+      { role: "user" as const, content: PROMPT },
+      { role: "assistant" as const, content: "先聊过一轮" },
+      { role: "user" as const, content: "这次聊别的" },
+    ];
+    expect(dropCurrentTurnUserMessage(history, [PROMPT])).toEqual(history);
+  });
+
+  it("ignores whitespace-only differences when matching the tail", () => {
+    const history = [{ role: "user" as const, content: `  ${PROMPT}\n` }];
+    expect(dropCurrentTurnUserMessage(history, [PROMPT])).toEqual([]);
+  });
+
+  it("keeps a trailing assistant message even if it matches the prompt text", () => {
+    const history = [{ role: "assistant" as const, content: PROMPT }];
+    expect(dropCurrentTurnUserMessage(history, [PROMPT])).toEqual(history);
+  });
+
+  it("ignores undefined candidate texts", () => {
+    const history = [{ role: "user" as const, content: PROMPT }];
+    expect(dropCurrentTurnUserMessage(history, [undefined])).toEqual(history);
+    expect(dropCurrentTurnUserMessage(history, [undefined, PROMPT])).toEqual([]);
   });
 });

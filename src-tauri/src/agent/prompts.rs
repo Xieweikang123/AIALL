@@ -9,8 +9,6 @@ pub fn build_ask_system_prompt_lines() -> Vec<String> {
     vec![
         "你是 AIALL 项目 Agent（Ask 模式）。只读问答，不修改任何文件。".into(),
         "".into(),
-        "可用工具：list_dir、read_file、grep、search_files、search_symbols、git_status、git_diff。".into(),
-        "".into(),
         "探索策略：".into(),
         "- 优先用 grep 而非 list_dir 遍历；".into(),
         "- 读大文件用 offset/limit 分段读取；".into(),
@@ -36,7 +34,6 @@ pub fn build_plan_system_prompt_lines() -> Vec<&'static str> {
     vec![
         "你是 AIALL 项目架构师（Plan 模式）。你分析项目并输出结构化的修改方案。",
         "",
-        "可用工具（只读）：list_dir、read_file、grep、search_files、search_symbols、git_status。",
         "禁止使用：write_file、patch_file、delete_file、run_command。",
         "",
         "输出格式要求：",
@@ -63,7 +60,7 @@ pub fn build_explore_system_prompt_lines(incremental: bool) -> Vec<String> {
     vec![
     "你是项目知识库构建助手（Explore·只读）。".into(),
     "回答请使用中文。".into(),
-    "你只能使用 list_dir、read_file、grep、search_files、search_symbols、web_search、web_extract 探索项目，禁止修改任何文件。".into(),
+    "你只能探索（读取/搜索）项目，禁止修改任何文件。".into(),
     build_file_access_path_hint().into(),
     build_explore_exploration_hints(incremental),
     build_explore_report_format_hint(),
@@ -75,8 +72,6 @@ pub fn build_explore_system_prompt_lines(incremental: bool) -> Vec<String> {
 pub fn build_build_system_prompt_lines() -> Vec<&'static str> {
     vec![
     "你是 AIALL 项目 Agent（Build 模式）。你根据需求创建/修改项目代码。",
-    "",
-    "可用工具：list_dir、read_file、grep、search_files、search_symbols、write_file、patch_file、delete_file、run_command、git_status、git_diff。",
     "",
     "核心规则：",
     "- 修改前先用 read_file 了解现有代码；",
@@ -190,18 +185,20 @@ mod tests {
     }
 
     #[test]
-    fn test_all_prompts_contain_tool_sections() {
-        assert!(build_ask_system_prompt_lines()
+    fn test_mode_prompts_omit_hardcoded_tool_lists() {
+        // Tool availability is provided by the native `tools` schema and the dynamic
+        // "可用工具" line; mode prompts must not hand-copy a tool-name list.
+        assert!(!build_ask_system_prompt_lines()
             .iter()
-            .any(|l| l.contains("list_dir")));
-        assert!(build_plan_system_prompt_lines()
+            .any(|l| l.contains("可用工具")));
+        assert!(!build_plan_system_prompt_lines()
             .iter()
-            .any(|l| l.contains("list_dir")));
-        assert!(build_explore_system_prompt_lines(false)
+            .any(|l| l.contains("可用工具")));
+        assert!(!build_explore_system_prompt_lines(false)
             .iter()
-            .any(|l| l.contains("web_search")));
-        assert!(build_build_system_prompt_lines()
+            .any(|l| l.contains("你只能使用")));
+        assert!(!build_build_system_prompt_lines()
             .iter()
-            .any(|l| l.contains("write_file")));
+            .any(|l| l.contains("可用工具")));
     }
 }

@@ -102,9 +102,12 @@ import { buildAgentRoundGroupViews } from "../services/agentRoundGroups";
 import {
   AGENT_TRACE_PANEL_WIDTH,
   closeTraceDrawer,
+  currentTraceExpandKey,
+  loadTraceScrollSnapshot,
   resolveTraceRoundGroups,
   resolveTraceRunning,
   resolveTraceTools,
+  saveTraceScrollSnapshot,
   setTraceAutoEnabled,
   setTraceMaximized,
   setTraceView,
@@ -165,7 +168,15 @@ const fillBody = computed(() => running.value && state.view.fillThinking === tru
  * 规则与聊天流 / 旧思考抽屉一致：默认跟随；用户自己滚动就暂停；回到底部自动恢复。
  */
 const bodyEl = ref<HTMLElement | null>(null);
-const follow = ref(true);
+/**
+ * `follow` 初值：有存档则用它，否则默认跟随最新（旧行为）。
+ *
+ * 抽屉会随关闭 / 切列宽 / 切会话重建 `.agent-trace-drawer-body`，用户读到一半的
+ * 位置会被「贴到底部」覆盖。所以滚动位置与跟随态一起进单例
+ * （见 `agentTraceDrawer.loadTraceScrollSnapshot`），每次打开都重新读。
+ */
+const restoredScroll = loadTraceScrollSnapshot(currentTraceExpandKey());
+const follow = ref(restoredScroll ? restoredScroll.follow : true);
 /** 用户主动操作过（滚轮/触摸/按下）—— 避免把程序滚动误判成用户意图。 */
 let userIntent = false;
 let followRaf = 0;
@@ -178,6 +189,10 @@ function atBottom(): boolean {
 
 function onBodyScroll(): void {
   follow.value = atBottom();
+  const el = bodyEl.value;
+  if (el) {
+    saveTraceScrollSnapshot(currentTraceExpandKey(), { top: el.scrollTop, follow: follow.value });
+  }
 }
 
 function markUserIntent(): void {
@@ -188,6 +203,7 @@ function scrollToBottom(): void {
   const el = bodyEl.value;
   if (!el) return;
   scrollContainerToBottom(el, "auto");
+  saveTraceScrollSnapshot(currentTraceExpandKey(), { top: el.scrollTop, follow: true });
 }
 
 function resumeFollow(): void {
@@ -196,7 +212,30 @@ function resumeFollow(): void {
 }
 
 /**
- * 内容增长时贴到最新一行。用 rAF 合并 —— 流式期间数据每帧都在变，
+ * 恢复上次滚动位置。内容（Markdown / 长文本换行）渲染后高度会变，一次设置可能偏，
+ * 所以按延迟多试几次。只在**非跟随态**（用户此前停在半空）时恢复 —— 跟随态直接落底。
+ *
+ * 每次打开/重建都重新读存档（`.agent-trace-drawer-body` 随开关重建，位置会丢）。
+ */
+function restoreScrollPosition(): void {
+  const snapshot = loadTraceScrollSnapshot(currentTraceExpandKey());
+  if (!snapshot || snapshot.follow) return;
+  const target = snapshot.top;
+  const apply = () => {
+    const el = bodyEl.value;
+    if (!el) return;
+    // 高度尚未定型时先不消费，等下一次重试
+    if (el.scrollHeight <= el.clientHeight) return;
+    el.scrollTop = target;
+  };
+  for (const delay of [0, 60, 200]) {
+    if (delay === 0) requestAnimationFrame(() => requestAnimationFrame(apply));
+    else window.setTimeout(apply, delay);
+  }
+}
+
+/**
+ * 内容增长时贴到最新一行（仅在跟随态）。用 rAF 合并 —— 流式期间数据每帧都在变，
  * 直接跟随会每帧多次布局读取。
  */
 watch(
@@ -222,16 +261,33 @@ watch(
   { flush: "post" },
 );
 
-/** 打开抽屉时直接落到最新，否则进来看到的是顶部旧内容。 */
+/**
+ * 打开抽屉：非跟随态恢复上次位置，否则落到底（看到最新）。
+ * `bodyEl` 随 `v-if` 重建，所以每次打开都从存档重读跟随态。
+ */
 watch(
   () => state.open,
   (open) => {
     if (!open) return;
+    const snapshot = loadTraceScrollSnapshot(currentTraceExpandKey());
+    if (snapshot && !snapshot.follow) {
+      follow.value = false;
+      restoreScrollPosition();
+      return;
+    }
     follow.value = true;
     // 内容渲染后可能二次撑高（长文本换行），多次重试落底
     scheduleScrollContainerToBottom(() => bodyEl.value, { delaysMs: [0, 60, 200] });
   },
 );
+
+/**
+ * 面板首次挂载（抽屉一直开着、切列宽/切会话重建）时也要恢复位置 ——
+ * `state.open` 没变，上面的 watcher 不会触发。
+ */
+onMounted(() => {
+  if (bodyEl.value) restoreScrollPosition();
+});
 
 onUnmounted(() => {
   if (followRaf) cancelAnimationFrame(followRaf);

@@ -83,7 +83,12 @@ pub struct AgentRunRequest {
     pub(crate) web_proxy_url: Option<String>,
     pub(crate) run_profile: Option<AgentRunProfile>,
     pub(crate) resolved_user_intent: Option<ResolvedUserIntentPayload>,
+    /// 前端传入的调试标志。
+    ///
+    /// 曾用于门控「是否下发真实 systemPrompt / 每轮 messages」；现已**恒常下发**（轨迹
+    /// 抽屉是注入提示词的唯一查看面），字段保留仅为不打破前端请求契约。
     #[serde(default)]
+    #[allow(dead_code)]
     pub(crate) debug: bool,
     /// Frontend chat session id — enables server-side run checkpoints.
     #[serde(default)]

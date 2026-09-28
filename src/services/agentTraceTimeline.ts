@@ -67,21 +67,34 @@ function requestEntry(turn: AgentRoundGroupView, view: AgentTraceViewConfig): Ag
     role === "user" ? "用户" : role === "assistant" ? "助手" : role === "system" ? "系统" : role;
   const preview = (content: string): string => collapseTracePreview(content, view);
 
+  // 逐条线性列出，**保持 messages 原始顺序**（system → 历史 → 本轮 user）。
+  // 早先按「历史合并一行 + 最后一条单独一行」分组，会把 system 算进「历史」，
+  // 首轮就显示成「1 条历史消息」，与实际不符；system 也可能不在首位。
+  // 现在每条一个条目：system 单独可见，历史不再与 system 混计。
   const entries: AgentTraceEntry[] = [];
+  const withChars = (content: string): string => {
+    const count = content.length;
+    return count >= 1000 ? `${(count / 1000).toFixed(1)}K 字符` : `${count} 字符`;
+  };
 
-  // 历史上下文合并为一行，展开可见每条内容，避免逐条刷屏
-  if (messages.length > 1) {
-    const history = messages.slice(0, -1);
-    const chars = history.reduce((sum, m) => sum + m.content.length, 0);
-    const charsLabel = chars >= 1000 ? `${(chars / 1000).toFixed(1)}K` : `${chars}`;
+  messages.forEach((message, index) => {
+    const isSystem = message.role === "system";
+    const chars = withChars(message.content);
+    const body = preview(message.content) || "（空）";
     entries.push(
       withDetail(
         {
-          key: `req-${turn.turn}-ctx`,
+          key: `req-${turn.turn}-${index}-${message.role}`,
           kind: "request",
-          label: `上下文 · ${history.length} 条历史消息（${charsLabel} 字符）`,
+          label: isSystem
+            ? `系统提示词（${chars}）：${body}`
+            : `发给模型 · ${roleLabel(message.role)}（${chars}）：${body}`,
           detail: truncateTraceDetail(
-            history.map((m, index) => `[${index + 1}] ${m.role}：${m.content}`).join("\n\n"),
+            formatJson({
+              role: message.role,
+              content: message.content,
+              ...(message.toolCalls ? { toolCalls: message.toolCalls } : {}),
+            }),
             view,
           ),
           ok: true,
@@ -89,28 +102,7 @@ function requestEntry(turn: AgentRoundGroupView, view: AgentTraceViewConfig): Ag
         view,
       ),
     );
-  }
-
-  const last = messages[messages.length - 1];
-  entries.push(
-    withDetail(
-      {
-        key: `req-${turn.turn}-last`,
-        kind: "request",
-        label: `发给模型 · ${roleLabel(last.role)}：${preview(last.content) || "（空）"}`,
-        detail: truncateTraceDetail(
-          formatJson({
-            role: last.role,
-            content: last.content,
-            ...(last.toolCalls ? { toolCalls: last.toolCalls } : {}),
-          }),
-          view,
-        ),
-        ok: true,
-      },
-      view,
-    ),
-  );
+  });
   return entries;
 }
 
@@ -118,8 +110,13 @@ function requestEntry(turn: AgentRoundGroupView, view: AgentTraceViewConfig): Ag
  * 思考（provider reasoning channel）作为**独立条目**。
  *
  * 展开与否由显示配置决定（默认就是展开的）——思考是「过程」，要能边跑边看。
- * 运行态由调用方传入：**不能**只用 `!turn.response?.isFinal` 判断，中断时
- * 某些轮次永远拿不到 `isFinal`，「思考中…」会一直挂着不收。
+ *
+ * 运行态由调用方传入，且**只在最新一轮**为真（见 `buildAgentTraceTurns` 的
+ * `activeTurn`）。这里**绝不能**再退回 `isRunning && !turn.response?.isFinal`：
+ * 后端的 `isFinal` 语义是「本轮没有工具调用」（`run_stream.rs`：
+ * `is_final = accumulated_tool_calls.is_empty()`），于是**任何调过工具的轮次
+ * 其 `isFinal` 恒为 false**。用它当运行判据，会让每一轮的思考条目在整个运行期间
+ * 永远挂着「思考中…」——用户看到的正是「第 1、2 轮早跑完了还显示思考中」。
  */
 function reasoningEntry(
   turn: AgentRoundGroupView,
@@ -128,7 +125,7 @@ function reasoningEntry(
 ): AgentTraceEntry[] {
   const text = turn.reasoning?.trim() ?? "";
   if (!text) return [];
-  const streaming = isRunning && !turn.response?.isFinal;
+  const streaming = isRunning;
   const label = streaming
     ? `思考中…（${text.length} 字符）`
     : `思考过程（${text.length} 字符）`;
@@ -312,12 +309,21 @@ export function buildAgentTraceTurns(
   view: AgentTraceViewConfig = DEFAULT_AGENT_TRACE_VIEW,
   isRunning = false,
 ): AgentTraceTurn[] {
+  /**
+   * 「思考中」只属于**最新开跑的那一轮**。
+   *
+   * `isRunning` 说的是"整个运行还在跑"，不能直接套到每一轮上——跑完的老轮次
+   * 也满足它。这里取轮次号最大的那条作为当前轮：它还没产出时才是真的在思考，
+   * 老轮次照常显示「思考过程」。
+   */
+  const activeTurn = groups.reduce((max, group) => (group.turn > max ? group.turn : max), 0);
+
   const turns: AgentTraceTurn[] = [];
   for (const group of groups) {
     if (group.turn <= 0) continue;
     const entries = [
       ...requestEntry(group, view),
-      ...reasoningEntry(group, view, isRunning),
+      ...reasoningEntry(group, view, isRunning && group.turn === activeTurn),
       ...responseEntry(group, view),
       ...toolEntries(group, view),
       ...phaseEntries(group, view),

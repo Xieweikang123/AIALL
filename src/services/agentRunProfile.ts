@@ -13,7 +13,7 @@ import {
 import { resolveAgentCompletedTurns, type AgentProgressSource, type AgentProgressTool } from "./agentRecovery";
 import { isConsultativeUserPrompt, isUltraShortOpenTaskPrompt } from "../orchestration/generic/userIntentClassifiers";
 import type { UserIntentHistoryMessage } from "../orchestration/agentIntentTypes";
-import type { VibeChatMode } from "../../shared/agentTypes";
+import type { VibeChatHistoryMessage, VibeChatMode } from "../../shared/agentTypes";
 
 export type AgentRunKind = "interactive" | "execute_plan";
 
@@ -183,6 +183,39 @@ export function shapeAgentHistoryForProfile(
 ): Array<{ role: "user" | "assistant"; content: string }> {
   if (profile.kind !== "execute_plan") return history;
   return compressHistoryForExecution(history, currentPrompt);
+}
+
+/**
+ * Drop the current turn's own user message from history.
+ *
+ * The user bubble for this turn is pushed into `chatMessages` **before** history is
+ * built (`runAgentTurn` does the push first so the bubble shows immediately), and the
+ * server appends the same `prompt` again as the turn's user message
+ * (`run.rs` — `messages` = system + history + prompt). Without this trim the model
+ * receives the current message twice (historically it showed up in the trace drawer
+ * as two identical `发给模型 · 用户` rows).
+ *
+ * `currentTurnTexts` lists the texts that identify this turn's user bubble — the raw
+ * prompt and the bubble content actually rendered (`userBubbleContent` may differ, e.g.
+ * "执行方案", and the stored bubble strips `## 📎` reference blocks). Only a trailing
+ * user message matching one of them is removed, so a mid-conversation repeat is never
+ * touched. `skipUserBubble` runs reuse an existing bubble: the raw prompt still matches
+ * it and the duplicate is removed, while a history without a matching tail is returned
+ * untouched.
+ */
+export function dropCurrentTurnUserMessage(
+  history: VibeChatHistoryMessage[],
+  currentTurnTexts: ReadonlyArray<string | undefined>,
+): VibeChatHistoryMessage[] {
+  const last = history[history.length - 1];
+  if (!last || last.role !== "user") return history;
+  const normalize = (text: string): string => text.trim().replace(/\s+/g, " ");
+  const tail = normalize(last.content);
+  if (!tail) return history;
+  const matches = currentTurnTexts.some(
+    (text) => typeof text === "string" && normalize(text) === tail,
+  );
+  return matches ? history.slice(0, -1) : history;
 }
 
 function summarizeIntent(content: string): string {

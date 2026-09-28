@@ -66,20 +66,6 @@ pub fn extract_visible_anchor_quotes(text: &str) -> Vec<String> {
     quotes
 }
 
-/// Build model identity hint
-pub fn build_model_identity_hint(model: &str) -> String {
-    let name = if model.trim().is_empty() {
-        "（未指定）"
-    } else {
-        model.trim()
-    };
-    format!(
-        "当前接入的 API 模型 ID：{name}。\
-    若用户问「你是什么模型/哪个模型」：如实回答上述模型 ID，不要自称 Claude、GPT、Gemini 等。\
-    不要编造 Anthropic、OpenAI 等厂商或训练信息。"
-    )
-}
-
 /// Build click-to-focus interaction hint
 pub fn build_click_focus_interaction_hint() -> &'static str {
     "附了截图询问点哪里能输入/聚焦：诊断（勿预设修法）——先识别图中可编辑区域，\
@@ -404,33 +390,6 @@ mod tests {
     fn test_extract_visible_anchor_quotes_no_duplicates() {
         let result = extract_visible_anchor_quotes("「提交表单」「提交表单」按钮");
         assert_eq!(result.len(), 1);
-    }
-
-    // ── build_model_identity_hint ──
-    #[test]
-    fn test_build_model_identity_hint_empty() {
-        let hint = build_model_identity_hint("");
-        assert!(hint.contains("未指定"));
-    }
-
-    #[test]
-    fn test_build_model_identity_hint_whitespace() {
-        let hint = build_model_identity_hint("  ");
-        assert!(hint.contains("未指定"));
-    }
-
-    #[test]
-    fn test_build_model_identity_hint_with_model() {
-        let hint = build_model_identity_hint("gpt-4");
-        assert!(hint.contains("gpt-4"));
-    }
-
-    #[test]
-    fn test_build_model_identity_hint_contains_deny_self_claim() {
-        let hint = build_model_identity_hint("claude-3");
-        assert!(hint.contains("claude-3"));
-        // The instruction text itself mentions "Claude" as a prohibited name
-        assert!(hint.contains("Claude"));
     }
 
     // ── build_click_focus_interaction_hint ──

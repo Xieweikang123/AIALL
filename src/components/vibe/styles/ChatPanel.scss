@@ -159,8 +159,8 @@
   min-width: 0;
   flex: 1;
   /* 兜底：面板被拖到很窄时，左侧内容一律截断，绝不允许画到右侧「发送」按钮上。
-     这里的子元素都没有需要外溢的浮层（模型下拉 / 用量详情都 Teleport 到 body，
-     会话大纲浮层是 .chat-action-row 的直接子元素），所以裁剪是安全的。 */
+     这里的子元素都没有需要外溢的浮层（模型下拉 / 用量详情都 Teleport 到 body），
+     所以裁剪是安全的。（会话大纲浮层已挪到顶部会话头，不在这里。） */
   overflow: hidden;
 }
 
@@ -781,6 +781,60 @@
   flex-shrink: 0;
 }
 
+/*
+ * 聊天面板顶部会话头：当前会话标题 + 大纲入口。
+ * 消息列表上方一条固定高度，不占滚动区；大纲浮层从这里向下弹。
+ */
+.chat-session-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  /* 横向内边距跟消息区一致，标题与消息左边对齐 */
+  padding: 7px clamp(14px, 3vw, 40px);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+  background: rgba(5, 5, 5, 0.6);
+}
+
+.chat-session-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: rgba(226, 232, 240, 0.82);
+}
+
+/* 头部的大纲入口做成清晰的胶囊按钮（底部操作行那套淡色样式在这里不够显眼） */
+.chat-session-head .session-outline-wrap {
+  /* 定位锚点交给会话头，浮层就能按整个面板宽度算 min()，窄面板也不会溢出 */
+  position: static;
+}
+
+.chat-session-head .chat-debug-toggle {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.chat-session-head .chat-debug-toggle:hover:not(:disabled) {
+  border-color: rgba(88, 166, 255, 0.4);
+  background: rgba(88, 166, 255, 0.1);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.chat-session-head .chat-debug-toggle.active {
+  border-color: rgba(88, 166, 255, 0.5);
+  background: rgba(88, 166, 255, 0.16);
+  color: #e6f0ff;
+}
+
 .session-outline-count {
   margin-left: 4px;
   font-variant-numeric: tabular-nums;
@@ -788,16 +842,15 @@
 }
 
 /*
- * 贴聊天面板内壁的浮层：钉在工具栏行（.chat-action-row，position: relative）上沿，
- * 左右跟着聊天列的内边距走 —— 宽度自适应，不写死 px，也不需要 JS 算 fixed 坐标。
- * max-height 用 vh 是有意的：聊天列被用户拖宽时列表跟着变宽，但高度上限跟窗口走。
+ * 会话大纲浮层：从顶部会话头的「大纲」按钮向下展开，右对齐贴着按钮。
+ * 宽度取 min(340px, 面板宽 - 内边距)，窄面板时不会溢出；高度上限跟窗口走。
  */
 .session-outline-popover {
   position: absolute;
-  left: 0;
   right: 0;
-  bottom: calc(100% + 6px);
+  top: calc(100% + 6px);
   z-index: 30;
+  width: min(340px, calc(100% - 28px));
   max-height: min(340px, 46vh);
   display: flex;
   flex-direction: column;

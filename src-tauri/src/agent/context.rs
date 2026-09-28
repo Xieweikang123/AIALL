@@ -20,7 +20,6 @@ const MAX_MEMORY_CHARS: usize = 8_000;
 const MAX_KNOWLEDGE_CHARS: usize = 8_000;
 const MAX_SKILLS_PROMPT_CHARS: usize = 4_000;
 const MAX_OPEN_FILE_CHARS: usize = 12_000;
-const MAX_AGENTS_GUIDE_CHARS: usize = 6_000;
 const EXPLORATION_ARCHIVE_PROMPT_MAX_CHARS: usize = 1_500;
 const MAX_RELEVANT_ARCHIVES: usize = 3;
 
@@ -488,13 +487,11 @@ pub async fn build_context_blocks(input: ContextBuildInput<'_>) -> ContextBlocks
         }
 
         // 3. AGENTS.md — Node: agentsGuideBlock
+        // 不截断：AGENTS.md 是项目级稳定约定，截断会让 Agent 看不到后半部分守则。
         let agents_path = Path::new(input.project_path).join("AGENTS.md");
         if let Ok(content) = tokio::fs::read_to_string(&agents_path).await {
             if !content.trim().is_empty() {
-                parts.push(format!(
-                    "\n\n【AGENTS.md】\n{}",
-                    truncate_chars(&content, MAX_AGENTS_GUIDE_CHARS)
-                ));
+                parts.push(format!("\n\n【AGENTS.md】\n{content}"));
             }
         }
 
@@ -702,6 +699,44 @@ mod tests {
         assert!(!blocks.system_suffix.contains("【项目记忆】"));
         assert!(!blocks.system_suffix.contains("【AGENTS.md】"));
         assert!(!blocks.system_suffix.contains("项目 Skills"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn agents_guide_is_not_truncated() {
+        let root = std::env::temp_dir().join(format!(
+            "aiall-ctx-agents-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("package.json"),
+            r#"{"dependencies":{"vue":"^3.0.0"}}"#,
+        )
+        .unwrap();
+        // 远超旧的 6_000 字符上限；含中文以覆盖多字节截断历史坑。
+        let long_guide = format!("# guide\n{}", "项目约定。".repeat(2_000));
+        fs::write(root.join("AGENTS.md"), &long_guide).unwrap();
+
+        let root_str = root.to_string_lossy().to_string();
+        let blocks = build_context_blocks(ContextBuildInput {
+            project_path: &root_str,
+            task_context: Some("hello"),
+            mode: "build",
+            is_plan_explore: false,
+            is_execute_plan: false,
+            consultative_ui_appearance_run: false,
+            target_files: None,
+        })
+        .await;
+
+        let suffix = &blocks.system_suffix;
+        assert!(suffix.contains("【AGENTS.md】"));
+        assert!(suffix.contains(long_guide.as_str()));
+        assert!(!suffix.contains("已截断"));
         let _ = fs::remove_dir_all(&root);
     }
 

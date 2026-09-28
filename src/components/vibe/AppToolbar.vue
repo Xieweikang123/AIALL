@@ -7,7 +7,6 @@
           <path d="M12 12 3 7m9-5 9 5M12 12v10" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" />
         </svg>
       </div>
-      <h1 class="title">Vibe Coding</h1>
     </div>
     <div class="toolbar-sep" />
     <div class="toolbar-project">
@@ -760,18 +759,6 @@ async function refreshProjectHistoryList() {
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: #c9d1d9;
 }
-
-.title {
-  font-size: 12.5px;
-  font-weight: 650;
-  margin: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  letter-spacing: -0.2px;
-  color: rgba(255, 255, 255, 0.72);
-}
-
 
 .toolbar-sep {
   width: 1px;
@@ -1616,10 +1603,6 @@ async function refreshProjectHistoryList() {
 @media (max-width: 640px) {
   .app-toolbar {
     padding: 4px 8px;
-  }
-
-  .toolbar-brand .title {
-    display: none;
   }
 
   .project-history-wrap {

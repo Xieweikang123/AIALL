@@ -22,15 +22,6 @@ export function sanitizeImageDataUrls(urls?: string[]): string[] {
   return urls.filter((url) => typeof url === "string" && url.startsWith("data:image/"));
 }
 
-export function buildModelIdentityHint(model: string): string {
-  const name = model.trim() || "（未指定）";
-  return [
-    `当前接入的 API 模型 ID：${name}。`,
-    "若用户问「你是什么模型/哪个模型」：如实回答上述模型 ID，不要自称 Claude、GPT、Gemini 等，除非模型 ID 本身含有该名称。",
-    "不要编造 Anthropic、OpenAI 等厂商或训练信息。",
-  ].join("");
-}
-
 const UI_IMAGE_QUESTION_RE =
   /截图|图片|界面|面板|哪块|哪里|看到的|发图|粘贴|screen|screenshot|ui/i;
 

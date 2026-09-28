@@ -64,19 +64,6 @@ pub fn is_runtime_explore_failure_turn(outcomes: &[String]) -> bool {
     outcomes.iter().any(|r| is_system_runtime_tool_failure(r))
 }
 
-pub fn consultative_explore_signature(
-    read_paths: &[String],
-    grep_patterns: &[String],
-    search_queries: &[String],
-) -> String {
-    let mut parts: Vec<String> = read_paths.iter().cloned().collect();
-    parts.extend(grep_patterns.iter().cloned());
-    parts.extend(search_queries.iter().cloned());
-    parts.sort();
-    parts.dedup();
-    parts.join("|")
-}
-
 // ── Grep / search guard ──
 
 static POST_LOCATE_BLOCKED_GREP_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -439,24 +426,6 @@ mod tests {
         ]));
     }
 
-
-    #[test]
-    fn consultative_explore_signature_dedupes_and_sorts() {
-        let sig = consultative_explore_signature(
-            &["b.ts".into(), "a.ts".into(), "b.ts".into()],
-            &["foo".into()],
-            &["syncProgress".into()],
-        );
-        assert_eq!(sig, "a.ts|b.ts|foo|syncProgress");
-    }
-
-    #[test]
-    fn consultative_explore_signature_catches_repeated_search_queries() {
-        let a = consultative_explore_signature(&[], &[], &["syncProgressMixin".into()]);
-        let b = consultative_explore_signature(&[], &[], &["syncProgressMixin".into()]);
-        assert_eq!(a, b);
-        assert!(!a.is_empty());
-    }
 
     #[test]
     fn invalidate_read_overlap_state_clears_slice_caches() {

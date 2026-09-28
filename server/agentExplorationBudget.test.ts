@@ -5,7 +5,6 @@ import {
   buildAskForceAnswerNudge,
   buildBuildExploreForcePatchNudge,
   buildConsultativeExploreBudgetNudge,
-  buildConsultativeDuplicateExploreNudge,
   buildConsultativeSegmentCapNudge,
   buildExploreBudgetNudge,
   buildExploreInterimDiagnosisNudge,
@@ -157,8 +156,6 @@ describe("agentExplorationBudget", () => {
     expect(buildGrepHitVueReadNudge(["src/Foo.vue"])).toContain("<style>");
     expect(buildConsultativeSegmentCapNudge(5, 8)).toContain("咨询只读");
     expect(buildConsultativeSegmentCapNudge(5, 8)).toContain("下一轮再确认");
-    expect(buildConsultativeDuplicateExploreNudge()).toContain("重复执行");
-    expect(buildConsultativeDuplicateExploreNudge()).toContain("禁止再调用工具");
   });
 
   it("treats exploration archive paths as non-productive writes", () => {

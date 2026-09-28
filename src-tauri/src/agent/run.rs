@@ -221,7 +221,9 @@ pub async fn agent_run(
         json!({
           "type": "agent_context", "data": {
             "mode": effective_mode_str,
-            "systemPrompt": if request.debug { system_prompt.clone() } else { "Rust agent backend".to_string() },
+            // 真实 systemPrompt 恒常下发：轨迹抽屉是「注入的提示词」的唯一查看面，
+            // 不能依赖前端 debug 开关才有内容（关着时轨迹里看不到注入）。
+            "systemPrompt": system_prompt.clone(),
             "history": context::history_for_display(request.history.as_deref().unwrap_or(&[])),
             "model": request.model,
             "maxTurns": max_turns,
@@ -565,15 +567,13 @@ pub async fn agent_run(
                 "maxTurns": run_state.segment.max_turns,
                 "contextMessages": send_messages.len(),
                 "contextChars": context_chars,
-                "messages": if request.debug {
-                    send_messages.iter().map(|m| {
-                        let role = m.get("role").and_then(|v| v.as_str()).unwrap_or("");
-                        let content = m.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                        json!({ "role": role, "content": content })
-                    }).collect::<Vec<_>>()
-                } else {
-                    Vec::new()
-                }
+                // 每轮完整 messages 恒常下发（system + 历史 + 工具结果），
+                // 供轨迹抽屉展示"发给模型"的请求内容；不再受 debug 开关门控。
+                "messages": send_messages.iter().map(|m| {
+                    let role = m.get("role").and_then(|v| v.as_str()).unwrap_or("");
+                    let content = m.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    json!({ "role": role, "content": content })
+                }).collect::<Vec<_>>()
               }
             }),
         );
@@ -1080,26 +1080,6 @@ pub async fn agent_run(
                                 .push(trimmed.to_string());
                         }
                     }
-                } else if name == "search_files" || name == "search_symbols" {
-                    if let Some(query) = args
-                        .get("query")
-                        .or_else(|| args.get("q"))
-                        .and_then(|v| v.as_str())
-                    {
-                        let trimmed = query.trim();
-                        if !trimmed.is_empty()
-                            && !run_state
-                                .consultative
-                                .search_queries
-                                .iter()
-                                .any(|q| q == trimmed)
-                        {
-                            run_state
-                                .consultative
-                                .search_queries
-                                .push(trimmed.to_string());
-                        }
-                    }
                 }
                 if is_write {
                     turn_had_only_read_tools = false;
@@ -1149,8 +1129,6 @@ pub async fn agent_run(
                 tool_guard: &run_state.tool_guard,
                 consultative_read_paths: &run_state.consultative.read_paths,
                 turn_tool_outcomes: &turn_tool_outcomes,
-                consultative_grep_patterns: &run_state.consultative.grep_patterns,
-                consultative_search_queries: &run_state.consultative.search_queries,
                 is_read_only_run,
                 written_files: &run_state.written_files,
                 mode: effective_mode_str,

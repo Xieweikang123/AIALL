@@ -10,7 +10,6 @@ import type {
   VibeChatSession,
   VibeChatSessionMeta,
 } from "./vibeChatStorageTypes";
-import { hasAgentProgressMarker } from "./agentProgressMarker";
 import { sanitizeUserVisibleAssistantText } from "./agentVisibleText";
 import { MAX_AGENT_IMAGE_BYTES } from "./imageCompress";
 import { resolveChatMessageImageUrls } from "./vibeChatImageStore";
@@ -62,12 +61,6 @@ const MAX_MESSAGES_PER_SESSION = 120;
 const MAX_SESSIONS_PER_PROJECT = 40;
 const MAX_STATUS_LOG_LINES = 32;
 const MAX_TURN_TRACES = 24;
-const MAX_NARRATIVE_CHARS = 800;
-const MAX_PROGRESS_NARRATIVE_CHARS = 2400;
-const MAX_REASONING_CHARS = 4000;
-const MAX_MODEL_STEP_CHARS = 500;
-const MAX_TOOL_CALL_ARGS_CHARS = 240;
-const MAX_TOOL_ARGS_DISK_CHARS = 400;
 const MAX_PERSISTED_IMAGES = 4;
 /** Align with agent compress cap so memory previews match what session-sync can externalize. */
 const MAX_PERSISTED_IMAGE_CHARS = MAX_AGENT_IMAGE_BYTES;
@@ -453,20 +446,6 @@ export function compactProjectSessionRecord(projectPath: string): boolean {
   return true;
 }
 
-function truncateText(text: string | undefined | null, max: number): string {
-  if (text == null) return "";
-  const str = String(text);
-  if (str.length <= max) return str;
-  return `${str.slice(0, max)}…`;
-}
-
-function truncateNarrativeForStorage(text: string | undefined | null): string {
-  if (text == null) return "";
-  const cleaned = stripToolSummaryFromAssistantContent(text);
-  const max = hasAgentProgressMarker(text) ? MAX_PROGRESS_NARRATIVE_CHARS : MAX_NARRATIVE_CHARS;
-  return truncateText(cleaned, max);
-}
-
 function compactRoundGroupsForStorage(
   groups: PersistedAgentRoundGroup[] | undefined,
 ): PersistedAgentRoundGroup[] | undefined {
@@ -479,38 +458,39 @@ function compactRoundGroupsForStorage(
       narrative: isFinalWithText
         ? undefined
         : group.narrative
-          ? truncateNarrativeForStorage(group.narrative)
+          ? stripToolSummaryFromAssistantContent(group.narrative)
           : undefined,
-      reasoning: group.reasoning
-        ? truncateText(group.reasoning, MAX_REASONING_CHARS)
-        : undefined,
+      // 思考链原样落盘：截断会永久丢掉用户回看过程所需的推理链，压缩收益有限。
+      reasoning: group.reasoning || undefined,
       modelSteps: (group.modelSteps || []).map((step) => ({
         id: step.id,
         phase: step.phase,
-        text: truncateText(step.text, MAX_MODEL_STEP_CHARS),
+        text: step.text,
       })),
       toolIds: group.toolIds ? [...group.toolIds] : [],
+      toolNarrativeOffsets: group.toolNarrativeOffsets?.map((entry) => ({ ...entry })),
       request: group.request
         ? {
             model: group.request.model,
             contextMessages: group.request.contextMessages,
             contextChars: group.request.contextChars,
-            messages: group.request.messages.length
-              ? [{ role: "system", content: `${group.request.messages.length} 条消息，${group.request.contextChars} 字符` }]
-              : [],
+            // 每轮真实 messages 原样落盘：刷新后轨迹抽屉仍能看到发给模型的完整请求。
+            messages: (group.request.messages || []).map((message) => ({
+              role: message.role,
+              content: message.content,
+              ...(message.toolCalls ? { toolCalls: message.toolCalls } : {}),
+            })),
           }
         : undefined,
       response: group.response
         ? {
-            assistantText: group.response.isFinal
-              ? stripToolSummaryFromAssistantContent(group.response.assistantText)
-              : truncateNarrativeForStorage(group.response.assistantText),
+            assistantText: stripToolSummaryFromAssistantContent(group.response.assistantText),
             hasToolCalls: group.response.hasToolCalls,
             isFinal: group.response.isFinal,
             toolCalls: (group.response.toolCalls || []).map((call) => ({
               id: call.id,
               name: call.name,
-              arguments: truncateText(call.arguments, MAX_TOOL_CALL_ARGS_CHARS),
+              arguments: call.arguments,
             })),
           }
         : undefined,
@@ -544,18 +524,6 @@ export function sanitizePersistedChatMessages(
 }
 
 /** Truncate string values inside a tool args object to prevent file bloat. */
-function truncateToolArgs(
-  args: Record<string, unknown> | undefined,
-  maxChars: number,
-): Record<string, unknown> | undefined {
-  if (!args || typeof args !== "object") return args;
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(args)) {
-    out[k] = typeof v === "string" && v.length > maxChars ? `${v.slice(0, maxChars)}…` : v;
-  }
-  return out;
-}
-
 function sanitizeMessages(
   messages: PersistedChatMessage[],
   options?: { forDisk?: boolean },
@@ -595,14 +563,14 @@ function sanitizeMessages(
           summary: t.summary,
           ok: t.ok,
           turn: t.turn,
-          args: options?.forDisk ? truncateToolArgs(t.args, MAX_TOOL_ARGS_DISK_CHARS) : t.args,
+          args: t.args,
         })),
         statusLog: m.statusLog?.length ? m.statusLog.slice(-MAX_STATUS_LOG_LINES) : undefined,
         turnTraces: m.turnTraces?.length
           ? m.turnTraces.slice(-MAX_TURN_TRACES).map((t) => ({
               ...t,
               assistantText: t.assistantText
-                ? truncateText(stripToolSummaryFromAssistantContent(t.assistantText), MAX_NARRATIVE_CHARS)
+                ? stripToolSummaryFromAssistantContent(t.assistantText)
                 : t.assistantText,
             }))
           : undefined,

@@ -467,7 +467,7 @@ describe("sanitizePersistedChatMessages", () => {
     expect(stored.length).toBeGreaterThan(800);
   });
 
-  it("truncates ordinary round narratives at the default cap", () => {
+  it("keeps ordinary round narratives intact instead of truncating", () => {
     const longNarrative = "普通探索说明。".repeat(200);
     expect(longNarrative.length).toBeGreaterThan(800);
     const sanitized = sanitizePersistedChatMessages([
@@ -492,8 +492,23 @@ describe("sanitizePersistedChatMessages", () => {
       },
     ]);
     const stored = sanitized[0].roundGroups?.[0]?.narrative ?? "";
-    expect(stored.endsWith("…")).toBe(true);
-    expect(stored.length).toBeLessThanOrEqual(801);
+    expect(stored).toBe(longNarrative);
+    expect(stored.endsWith("…")).toBe(false);
+  });
+
+  it("keeps turn trace assistant text intact instead of truncating", () => {
+    const long = "轨迹正文内容。".repeat(200);
+    expect(long.length).toBeGreaterThan(800);
+    const sanitized = sanitizePersistedChatMessages([
+      {
+        id: "a1",
+        role: "assistant",
+        content: "done",
+        turnTraces: [{ turn: 1, assistantText: long, hasToolCalls: true }],
+      },
+    ]);
+    expect(sanitized[0].turnTraces?.[0]?.assistantText).toBe(long);
+    expect(sanitized[0].turnTraces?.[0]?.assistantText.endsWith("…")).toBe(false);
   });
 
   it("keeps provider reasoning on roundGroups through sanitize + disk clone", () => {
@@ -543,7 +558,7 @@ describe("sanitizePersistedChatMessages", () => {
     expect(cloned[0].roundGroups?.[0]?.reasoning).toBe(reasoning);
   });
 
-  it("strips heavy agent debug payloads before persistence", () => {
+  it("keeps per-turn request messages intact and strips agentContext", () => {
     const huge = "x".repeat(20_000);
     const sanitized = sanitizePersistedChatMessages([
       {
@@ -577,10 +592,10 @@ describe("sanitizePersistedChatMessages", () => {
     ]);
     const msg = sanitized[0];
     expect(msg.agentContext).toBeUndefined();
-    expect(msg.roundGroups?.[0]?.request?.messages).toEqual([
-      { role: "system", content: "1 条消息，999 字符" },
-    ]);
-    expect(JSON.stringify(sanitized).length).toBeLessThan(5000);
+    expect(msg.roundGroups?.[0]?.request?.messages[0].role).toBe("user");
+    // 请求 messages 原样保留真实内容，不再截断
+    expect(msg.roundGroups?.[0]?.request?.messages[0].content).toBe(huge);
+    expect(msg.roundGroups?.[0]?.response?.toolCalls[0].arguments).toBe(huge);
   });
 
   it("keeps compact user image previews for chat reload", () => {

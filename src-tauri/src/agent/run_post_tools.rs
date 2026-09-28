@@ -2,14 +2,14 @@ use serde_json::{json, Value};
 
 use super::exploration::{
     build_alternate_ui_patch_strategy_nudge, build_ask_explore_budget_nudge,
-    build_consultative_duplicate_explore_nudge, build_explore_budget_nudge,
-    build_explore_explore_budget_nudge, build_grep_empty_recovery_nudge,
-    build_grep_hit_vue_read_nudge, build_read_file_failed_recovery_nudge,
-    build_runtime_tool_failure_recovery_nudge, build_turn_patch_failure_nudge,
-    resolve_explore_turn_budget, MAX_CONSECUTIVE_RUNTIME_TOOL_FAILURE_TURNS,
+    build_explore_budget_nudge, build_explore_explore_budget_nudge,
+    build_grep_empty_recovery_nudge, build_grep_hit_vue_read_nudge,
+    build_read_file_failed_recovery_nudge, build_runtime_tool_failure_recovery_nudge,
+    build_turn_patch_failure_nudge, resolve_explore_turn_budget,
+    MAX_CONSECUTIVE_RUNTIME_TOOL_FAILURE_TURNS,
 };
 use super::explore_guard::{
-    consultative_explore_signature, is_runtime_explore_failure_turn,
+    is_runtime_explore_failure_turn,
     should_nudge_alternate_ui_patch_strategy, unread_grep_hit_vue_files, PatchFailureEntry,
     ToolGuardState,
 };
@@ -28,8 +28,6 @@ pub(crate) struct PostToolNudgeParams<'a> {
     pub tool_guard: &'a ToolGuardState,
     pub consultative_read_paths: &'a [String],
     pub turn_tool_outcomes: &'a [String],
-    pub consultative_grep_patterns: &'a [String],
-    pub consultative_search_queries: &'a [String],
     pub is_read_only_run: bool,
     pub written_files: &'a [String],
     pub mode: &'a str,
@@ -41,7 +39,6 @@ pub(crate) struct PostToolNudgeParams<'a> {
 
 pub(crate) struct PostToolTurnMut {
     pub consecutive_runtime_tool_failure_turns: u32,
-    pub last_consultative_explore_sig: Option<String>,
     pub consecutive_read_turns: u32,
     pub total_read_tool_calls: u32,
     pub build_explore_force_patch_sent: bool,
@@ -126,25 +123,6 @@ pub(crate) fn apply_post_tool_turn(
         state.consecutive_runtime_tool_failure_turns = 0;
     }
 
-    if params.effective_read_only_build || params.is_read_only_run {
-        let sig = consultative_explore_signature(
-            params.consultative_read_paths,
-            params.consultative_grep_patterns,
-            params.consultative_search_queries,
-        );
-        if let Some(prev) = state.last_consultative_explore_sig.as_ref() {
-            if prev == &sig && !sig.is_empty() {
-                params.messages.push(json!({
-                  "role": "system",
-                  "content": build_consultative_duplicate_explore_nudge()
-                }));
-            }
-        }
-        if !sig.is_empty() {
-            state.last_consultative_explore_sig = Some(sig);
-        }
-    }
-
     if params.turn_had_only_read_tools && !runtime_failure_turn {
         state.consecutive_read_turns += 1;
         state.total_read_tool_calls += 1;
@@ -178,12 +156,6 @@ fn apply_post_tool_explore_budget_nudges(
         params.messages.push(json!({
           "role": "system",
           "content": build_explore_explore_budget_nudge(consecutive)
-        }));
-        state.consecutive_read_turns = 0;
-    } else if params.read_only_build_run && consecutive >= 5 {
-        params.messages.push(json!({
-          "role": "system",
-          "content": build_consultative_duplicate_explore_nudge()
         }));
         state.consecutive_read_turns = 0;
     } else if params.is_plan_explore

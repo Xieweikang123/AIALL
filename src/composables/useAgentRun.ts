@@ -2,6 +2,7 @@ import { ref, onBeforeUnmount, getCurrentInstance, type ComputedRef, type Ref } 
 import { debugLog } from "../utils/debugLog";
 import {
   buildAgentPromptForProfile,
+  dropCurrentTurnUserMessage,
   enrichAgentUserPrompt,
   resolveAgentMaxTurns,
   resolveAgentResumeRunProfile,
@@ -1460,7 +1461,12 @@ export function useAgentRun(deps: UseAgentRunDeps) {
       runProfile,
     );
 
-    const history = buildAgentHistory(rawPrompt, runProfile);
+    // 当前这句用户气泡已经在上面 push 进 chatMessages，服务端还会把 prompt 再当本轮
+    // 用户消息追加一次；history 必须剔除尾部这条当前轮用户消息，否则模型收到两遍同一句。
+    const history = dropCurrentTurnUserMessage(
+      buildAgentHistory(rawPrompt, runProfile),
+      [rawPrompt, options?.userBubbleContent],
+    );
 
     const exploreDepth = options?.exploreDepth ?? "standard";
     const maxTurns =

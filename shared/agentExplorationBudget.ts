@@ -178,15 +178,6 @@ export function buildConsultativeSegmentCapNudge(turn: number, totalExploreTurns
   ].join("");
 }
 
-/** Same grep/read batch repeated — stop exploring and answer from existing tool results. */
-export function buildConsultativeDuplicateExploreNudge(): string {
-  return [
-    "【系统提示】你已重复执行相同的 grep/read 组合，且工具结果未变。",
-    "禁止再调用工具；请基于已有 read/grep 输出立即给出最终中文答案。",
-    "若 CSS 已在工具结果中，直接引用 background / var(--*) 作答，勿重复读同一文件。",
-  ].join("");
-}
-
 /** Injected when tools fail due to environment/runtime errors — turn not counted toward explore budget. */
 export function buildRuntimeToolFailureRecoveryNudge(
   consecutiveSkipped: number,

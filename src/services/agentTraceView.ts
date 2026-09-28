@@ -350,7 +350,7 @@ export const AGENT_TRACE_KIND_UI: Record<
     chipTitle: "思考过程是否默认展开",
   },
   tool: { label: "具", title: "工具调用", chipTitle: "工具调用是否默认展开" },
-  request: { label: "发", title: "请求（发给模型的消息）", chipTitle: "发给模型的请求是否默认展开" },
+  request: { label: "发", title: "请求（发给模型的每条消息，含系统提示词）", chipTitle: "发给模型的请求是否默认展开" },
   response: { label: "回", title: "回复（模型返回）", chipTitle: "模型回复是否默认展开" },
   phase: { label: "态", title: "阶段状态", chipTitle: "阶段状态是否默认展开" },
 };
