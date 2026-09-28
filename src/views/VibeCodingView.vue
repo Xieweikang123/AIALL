@@ -815,6 +815,11 @@
         :mention-open="mentionOpen"
         :mention-results="mentionResults"
         :mention-active-index="mentionActiveIndex"
+        :preset-open="presetOpen"
+        :preset-results="presetResults"
+        :preset-active-index="presetActiveIndex"
+        :preset-manager-open="presetManagerOpen"
+        :presets="presets"
         :chat-input-focused="chatInputFocused"
         :switching-session="switchingSession"
         :switching-project="switchingProject"
@@ -822,6 +827,7 @@
         :show-token-detail="showTokenDetail"
         :token-detail-data="tokenDetailData"
         :total-token-usage="totalTokenUsage"
+        :status-metrics="chatStatusMetrics"
         :project-memory-open="projectMemoryOpen"
         :project-memory-tab="projectMemoryTab"
         :project-memory-draft="projectMemoryDraft"
@@ -866,16 +872,23 @@
         @on-chat-scroll="onChatScroll"
         @scroll-to-bottom="resetChatScrollPin"
         @clear-pending-queue="clearPendingPromptQueue"
-        @on-composer-field-keydown="onComposerFieldKeydown"
+        @on-composer-field-keydown="handleComposerFieldKeydown"
         @select-mention="selectMention"
+        @select-preset="selectPreset"
+        @open-preset-manager="openPresetManager"
+        @close-preset-manager="closePresetManager"
+        @add-preset="addPreset"
+        @update-preset="updatePreset"
+        @remove-preset="removePreset"
+        @reset-presets="resetPresetsToDefault"
         @on-chat-input-box-mousedown="onChatInputBoxMouseDown"
         @cancel-auto-resume="cancelAutoResume"
         @force-recover-stalled-run="forceRecoverStalledRun"
         @resume-agent-run="resumeAgentRun"
-        @pause-agent="pauseAgent"
         @stop-agent="stopAgent"
         @send-chat="sendChat"
         @update:show-token-detail="showTokenDetail = $event"
+        @update:status-metrics="chatStatusMetrics = $event"
         @close-project-memory="closeProjectMemoryEditor"
         @update:project-memory-tab="setProjectMemoryTab"
         @select-project-skill="selectProjectSkill"
@@ -904,6 +917,7 @@
             :draft-key="composerDraftKey"
             :project-path="projectPath"
             @mention-change="onComposerMentionChange"
+            @preset-change="onComposerPresetChange"
             @enter-send="sendChat"
             @update:empty="composerEmpty = $event"
             @image-error="onComposerImageError"
@@ -1108,7 +1122,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref,
 import { useRouter } from "vue-router";
 import "../styles/vibe-coding.scss";
 import { appendStatusDetail, assistantTransientUiClearPatch, truncateDiffPreview, cleanStatusLogText, formatCharCount, formatTokenCount, isNetworkError, fileName, genId, hasAgentProcessSteps, entryToNode, formatToolMeta, syncRoundGroupsPatch, inferEditorTabKind, displayFilePath } from "../utils/vibeHelpers";
-import { gitFileSelectionKey, parseGitFileSelectionKey, gitFileListScopeIsStaged, type GitFileListScope } from "../utils/gitHelpers";
+import { gitFileSelectionKey, parseGitFileSelectionKey, gitFileListScopeIsStaged, resolveRepoFilePath, type GitFileListScope } from "../utils/gitHelpers";
 import { appendDebugLogFile, debugLog, setDebugLogProjectRoot } from "../utils/debugLog";
 import { chatScrollProbe, readScrollGeometry } from "../utils/chatScrollProbe";
 import { lsGet, lsGetJson, lsSet, lsSetJson, lsRemove } from "../utils/localStorageSafe";
@@ -1160,6 +1174,7 @@ import AutoBugFixPanel from "../components/vibe/AutoBugFixPanel.vue";
 import { usePlanPanel } from "../composables/usePlanPanel";
 import { useMessageQuote } from "../composables/useMessageQuote";
 import { useChatMention } from "../composables/useChatMention";
+import { useChatPresets } from "../composables/useChatPresets";
 import { restoreChatScrollPosition, useWorkspaceUiPersistence } from "../composables/useWorkspaceUiPersistence";
 import { PROJECT_ARCHITECT_REVIEW_REL_PATH } from "../services/vibeProjectArchitectReviewClient";
 import { PROJECT_KNOWLEDGE_REL_PATH } from "../services/vibeProjectKnowledgeClient";
@@ -1237,11 +1252,19 @@ import {
   lookupReportedModelWindow,
   resolveContextWindowTokens,
 } from "../services/modelContextWindow";
+import { aggregateCacheUsage, type CacheUsageEntry } from "../utils/cacheUsage";
+import { collectOutputSpeed, type OutputSpeedProbe } from "../utils/runStats";
+import {
+  loadChatStatusMetrics,
+  saveChatStatusMetrics,
+  type ChatStatusMetricId,
+} from "../utils/chatStatusBarPreference";
 import {
   buildAgentHistoryFromMessages,
   getSessionDiagSnapshot,
   getSessionTitle,
   onStorageError,
+  reclaimLocalStorageForProjectOpen,
   saveVibeChatHistory,
   stripReferenceAttachments,
   stripToolSummaryFromAssistantContent,
@@ -2312,6 +2335,10 @@ const chatPlaceholder = computed(() =>
 
 const showTokenDetail = ref(false);
 
+/** 底部栏指标显示偏好（全局 localStorage）。 */
+const chatStatusMetrics = ref<ChatStatusMetricId[]>(loadChatStatusMetrics());
+watch(chatStatusMetrics, (ids) => saveChatStatusMetrics(ids), { deep: true });
+
 const tokenDetailData = computed(() => {
   let totalStreamChars = 0;
   let totalCompletionTokens = 0;
@@ -2324,9 +2351,12 @@ const tokenDetailData = computed(() => {
   let writtenFilesSet: Set<string> | null = null;
   let imageCount = 0;
   let agentTurns = 0;
+  let ttftMs: number | undefined;
+  const speedProbes: OutputSpeedProbe[] = [];
   let cachePromptTokens = 0;
   let cacheHitTokens = 0;
   let cacheHitRatio: number | undefined;
+  const cacheUsageEntries: CacheUsageEntry[] = [];
 
   // 依赖 live revision，运行中上下文变化时刷新「已用」
   void agentLiveRevision.value;
@@ -2362,11 +2392,12 @@ const tokenDetailData = computed(() => {
         agentTurns = msg.totalTurns;
       }
       if (msg.cacheUsage) {
-        cachePromptTokens += msg.cacheUsage.promptTokens ?? 0;
-        cacheHitTokens +=
-          (msg.cacheUsage.cachedTokens ?? 0) + (msg.cacheUsage.cacheReadTokens ?? 0);
-        if (msg.cacheUsage.hitRatio !== undefined) cacheHitRatio = msg.cacheUsage.hitRatio;
+        cacheUsageEntries.push(msg.cacheUsage);
       }
+      // 速度探针：TTFT 取最近一轮（延迟，不累加）；token 与解码窗口按轮配对后汇总，
+      // 只有同一轮同时有 token 和 genMs 才计入，避免分子分母跨轮错位。
+      if (msg.ttftMs !== undefined) ttftMs = msg.ttftMs;
+      speedProbes.push({ completionTokens: msg.completionTokens, genMs: msg.genMs });
     }
     if (msg.imageCount && msg.imageCount > 0) {
       imageCount += msg.imageCount;
@@ -2374,6 +2405,10 @@ const tokenDetailData = computed(() => {
   }
 
   if (assistantCount === 0) return null;
+
+  // 缓存口径统一成「整会话累计」：输入 / 命中 / 命中率三者用同一套计数，能互相验算。
+  ({ inputTokens: cachePromptTokens, hitTokens: cacheHitTokens, hitRatio: cacheHitRatio } =
+    aggregateCacheUsage(cacheUsageEntries));
 
   const liveContextChars = chatSending.value ? getActiveLiveContextChars() : 0;
   if (liveContextChars > 0) {
@@ -2384,11 +2419,14 @@ const tokenDetailData = computed(() => {
   // 真实 token 视角优先：模型窗口按当前模型解析，已用/峰值取供应商 usage。
   const modelForWindow =
     activeSessionModelId.value.trim() || aiConfig.value.model.trim();
-  const { tokens: contextLimitTokens } = resolveContextWindowTokens(
+  const { tokens: contextLimitTokens, source: contextLimitSource } = resolveContextWindowTokens(
     modelForWindow,
     modelWindowForLabel.value,
   );
   const peakTokens = Math.max(peakContextTokens, usedContextTokens);
+
+  // 输出速度只在配对样本上算；未配对轮次不进分子也不进分母。
+  const speedSummary = collectOutputSpeed(speedProbes);
 
   return {
     assistantCount,
@@ -2400,6 +2438,7 @@ const tokenDetailData = computed(() => {
     usedContextTokens,
     peakContextTokens: peakTokens,
     contextLimitTokens,
+    contextLimitSource,
     usesTokenContext: usedContextTokens > 0,
     totalMessages: chatMessages.value.length,
     toolCallCount,
@@ -2409,6 +2448,11 @@ const tokenDetailData = computed(() => {
     cachePromptTokens,
     cacheHitTokens,
     cacheHitRatio,
+    ttftMs,
+    // 仅当分母来自同一批配对轮次时速度才成立，故不再直接暴露 genMs 做除法。
+    outputTokensPerSecond: speedSummary.tokensPerSecond,
+    speedSampleTurns: speedSummary.pairedTurns,
+    speedTokenTurns: speedSummary.tokenTurns,
   };
 });
 
@@ -2688,6 +2732,40 @@ const {
   },
 });
 
+const {
+  presets,
+  presetOpen,
+  presetActiveIndex,
+  presetResults,
+  presetManagerOpen,
+  onComposerPresetChange,
+  onPresetKeydown,
+  selectPreset,
+  openPresetManager,
+  closePresetManager,
+  addPreset,
+  updatePreset,
+  removePreset,
+  resetPresetsToDefault,
+} = useChatPresets({
+  insertPreset: (content) => {
+    composerRef.value?.insertPreset(content);
+  },
+  focusComposer: () => {
+    composerRef.value?.focus();
+  },
+});
+
+/**
+ * composer 字段 keydown 统一入口：先给 `/` 预设下拉，未消费再交给 `@` 引用。
+ * 两条链路互斥（光标前 token 不可能同时匹配 @ 与 /），各自命中时都会
+ * preventDefault + stopPropagation，避免误触发发送。
+ */
+function handleComposerFieldKeydown(e: KeyboardEvent) {
+  if (onPresetKeydown(e)) return;
+  onComposerFieldKeydown(e);
+}
+
 const planWorkspaceOpen = ref(false);
 const planPanelInForeground = ref(false);
 let planPanelApi: ReturnType<typeof import("../composables/usePlanPanel").usePlanPanel> | null = null;
@@ -2870,11 +2948,13 @@ const {
   openFile,
   chatPanelRef,
   editorPanelRef,
+  revealAllMessages: () => vibeChatMessagesRef.value?.revealAllMessages?.(),
 });
 
 async function jumpToChatMessage(messageId: string) {
   if (!messageId.trim()) return;
-  vibeChatMessagesRef.value?.revealAllMessages?.();
+  // 目标可能被「显示较早消息」窗口挡住：scrollChatToMessage 内部会先展开全量再定位，
+  // 并会先解除跟随（避免运行中内容长高把视口拽回底部）。
   await scrollChatToMessage(messageId);
 }
 
@@ -3253,7 +3333,6 @@ const {
   runAutoBugFixAgent,
   resumeAgentRun,
   stopAgent,
-  pauseAgent,
   interruptAgentRun,
   cancelAutoResume,
   isAgentRunning,
@@ -3922,6 +4001,12 @@ async function openProjectByPath(dirPath: string) {
     projectPath.value = normalized;
     setDebugLogProjectRoot(normalized);
     lsSet(STORAGE_KEY, normalized);
+    // 打开项目时按项目 LRU 检查 localStorage 水位，超限先淘汰可重建缓存，
+    // 避免会话索引写入时才发现配额已满。最近打开的项目优先保留。
+    reclaimLocalStorageForProjectOpen(
+      normalized,
+      projectHistoryList.value.map((entry) => entry.path),
+    );
     void addProjectToHistory(normalized).then(() => refreshProjectHistoryList());
     log("set-state");
     const savedUi = await workspaceUi.restoreLayoutState();
@@ -4142,7 +4227,7 @@ function onGitFilePointerDown(e: PointerEvent, relativePath: string, listScope: 
   toggleGitFileSelection(relativePath, shiftKey, ctrlKey, listScope);
   
   if (!shiftKey && !ctrlKey) {
-    const fullPath = resolveFullPathFromRel(relativePath);
+    const fullPath = resolveGitFullPath(relativePath);
     startPathDrag(fullPath, fileName(relativePath), e, () => {
       void showGitFileDiff(relativePath, staged);
     }, getChatDropZoneEl());
@@ -4225,27 +4310,38 @@ function gitFileCopyName() {
   hideGitFileContextMenu();
 }
 
+/**
+ * Git 面板里的文件路径是相对「当前激活仓库」的（如子仓 vpp-java 返回 `docs/x.md`），
+ * 而文件树/编辑器以项目根为基准。解析 Git 文件绝对路径必须先拼激活仓库根，
+ * 否则会拼到项目根上——多仓项目下会指向不存在的路径，opener 又静默吞错，表现为「没反应」。
+ */
+function resolveGitFullPath(relPath: string): string {
+  const repoRoot = gitActiveRepoPath.value.trim() || projectPath.value.trim();
+  return resolveRepoFilePath(repoRoot, relPath);
+}
+
 function gitFileCopyFullPath() {
   const relPath = gitFileContextMenu.value.path;
-  const fullPath = resolveFullPathFromRel(relPath);
+  const fullPath = resolveGitFullPath(relPath);
   void copyText(fullPath);
   hideGitFileContextMenu();
 }
 
 function gitFileRevealInFolder() {
   const relPath = gitFileContextMenu.value.path;
-  const fullPath = resolveFullPathFromRel(relPath);
+  const fullPath = resolveGitFullPath(relPath);
   hideGitFileContextMenu();
-  if (fullPath) {
-    import("@tauri-apps/plugin-opener").then(({ revealItemInDir }) =>
-      revealItemInDir(fullPath).catch(() => {}),
-    );
-  }
+  if (!fullPath) return;
+  import("@tauri-apps/plugin-opener")
+    .then(({ revealItemInDir }) => revealItemInDir(fullPath))
+    .catch((error) => {
+      gitError.value = formatFetchError(error, `无法在文件管理器中显示：${fullPath}`);
+    });
 }
 
 function gitFileOpenInEditor() {
   const relPath = gitFileContextMenu.value.path;
-  const fullPath = resolveFullPathFromRel(relPath);
+  const fullPath = resolveGitFullPath(relPath);
   hideGitFileContextMenu();
   if (fullPath) void openFile(fullPath);
 }
@@ -4683,39 +4779,28 @@ function handleAgentSuggestion(suggestion: AgentSuggestion) {
   void runAgentTurn(userText, runOptions);
 }
 
+/**
+ * 点选项按钮 → 把选项原文填进输入框，**不直接发送**。
+ *
+ * 选项常是几条并列方案，用户往往不想照单全收、只想在某条上改两个字。
+ * 所以这里统一改成"填入 + 聚焦"，让用户改完再按回车；代价是原来的一键直发
+ * 变成两步（多按一次回车）。Ask 模式下这条文案仍是"请实现…"，
+ * 回车发送后由 `resolveAskExecutionEscalation` 照常升级为 Build/execute_plan。
+ */
 function handleAiOptionSelect(
   option: { index: number; label: string; fullText: string; action?: "implement" },
-  msg?: VibeChatMessage,
+  _msg?: VibeChatMessage,
 ) {
-  const userText = option.fullText;
+  const userText = option.fullText?.trim();
   if (!userText) return;
-  const runOptions =
-    option.action === "implement" && msg?.role === "assistant"
-      ? {
-          userBubbleContent: option.label,
-          planAssistantContent: messageDisplayContent(msg),
-        }
-      : { userBubbleContent: userText };
 
-  if (chatSending.value) {
-    ensureSessionForSend();
-    chatMessages.value = [
-      ...chatMessages.value,
-      {
-        id: genId(),
-        role: "user",
-        content: runOptions.userBubbleContent,
-      },
-    ];
-    interruptAgentRun();
-    persistChatNow();
-    void scrollChatToBottom(true);
-    void runAgentTurn(userText, { ...runOptions, skipUserBubble: true });
-    return;
-  }
+  const composer = composerRef.value;
+  if (!composer) return;
 
-  ensureSessionForSend();
-  void runAgentTurn(userText, runOptions);
+  chatError.value = "";
+  expandChat();
+  composer.setPlainText(userText);
+  void nextTick(() => composer.focus());
 }
 
 function restoreComposerPayload(
@@ -4959,7 +5044,6 @@ provide(vibeChatMessageContextKey, {
   resolveAgentResumeButtonLabel,
   isAssistantStalled,
   stopAgent,
-  pauseAgent,
   forceRecoverStalledRun,
   recoverableAgentErrorHint,
   agentAbortDisplayReason,
