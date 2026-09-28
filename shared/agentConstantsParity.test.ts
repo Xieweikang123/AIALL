@@ -33,11 +33,8 @@ import {
   SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE_SOFT,
 } from "./agentExplorationBudget";
 import {
-  MAX_AGENT_CONTEXT_CHARS,
   MAX_HISTORY_CHARS,
   MAX_HISTORY_MESSAGES,
-  MAX_TOOL_RESULT_MODEL_CHARS,
-  SOFT_COMPACT_CONTEXT_CHARS,
 } from "./agentContextLimits";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -61,13 +58,7 @@ describe("agent constants TS/Rust parity", () => {
   const policy = parseRustNumericConsts(path.join(root, "src-tauri/src/agent/policy.rs"));
   const exploration = parseRustNumericConsts(path.join(root, "src-tauri/src/agent/exploration.rs"));
 
-  it("context limit constants match Rust context_limits.rs", () => {
-    expect(MAX_AGENT_CONTEXT_CHARS).toBe(contextLimits.MAX_AGENT_CONTEXT_CHARS);
-  });
-
-  it("compact/history constants match Rust context_limits.rs", () => {
-    expect(SOFT_COMPACT_CONTEXT_CHARS).toBe(contextLimits.SOFT_COMPACT_CONTEXT_CHARS);
-    expect(MAX_TOOL_RESULT_MODEL_CHARS).toBe(contextLimits.MAX_TOOL_RESULT_MODEL_CHARS);
+  it("history constants match Rust context_limits.rs", () => {
     expect(MAX_HISTORY_MESSAGES).toBe(contextLimits.MAX_HISTORY_MESSAGES);
     expect(MAX_HISTORY_CHARS).toBe(contextLimits.MAX_HISTORY_CHARS);
   });

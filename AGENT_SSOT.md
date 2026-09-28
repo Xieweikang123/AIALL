@@ -45,7 +45,7 @@
 
 | 能力 | 路径 |
 |------|------|
-| 探索预算 / 上下文上限 / compact / AI retry | `shared/*` ↔ Rust 常量 parity |
+| 探索预算 / 历史窗口上限 / AI retry | `shared/*` ↔ Rust 常量 parity（消息 compact 已删，仅剩体积测量） |
 
 ## 删除队列
 

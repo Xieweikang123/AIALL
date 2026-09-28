@@ -133,8 +133,8 @@
 
 | 模块 | TS 源 | Rust 目标 | 状态 | 说明 |
 |------|-------|-----------|------|------|
-| 上下文上限常量 | `shared/agentContextLimits.ts` | `src-tauri/src/agent/context_limits.rs` | `[x]` | policy / compact / history 共用；`shared/agentConstantsParity.test.ts` 校验 |
-| 消息 compact | `shared/agentMessageCompact.ts` | `src-tauri/src/agent/run_compact.rs` | `[x]` | `run.rs` 每轮 model call 前 compact；Vitest + Rust 单测 |
+| 上下文上限常量 | `shared/agentContextLimits.ts` | `src-tauri/src/agent/context_limits.rs` | `[x]` | 现仅存 history 窗口常量 + TS 侧 UI 阈值；`shared/agentConstantsParity.test.ts` 校验 |
+| 消息 compact | `shared/agentMessageCompact.ts` | `src-tauri/src/agent/run_compact.rs` | `[x]` | **已删压缩逻辑**（`run.rs` 改为原样发送）；两文件仅保留请求体积测量函数 |
 | AI 重试 | `shared/aiRetry.ts` | `src-tauri/src/ai/retry.rs` | `[x]` | 首包超时、429/5xx、空回复；`AGENT_AI_MAX_RETRIES` |
 | 消息 normalize | `shared/chatMessageNormalize.ts` | `src-tauri/src/ai/normalize.rs` | `[x]` | assistant tool_calls / tool content 规范化 |
 | Chat 消息类型 | `shared/chatCompletionTypes.ts` | — | `[x]` | TS 编排与 Vitest 共用；Rust 用 `serde_json::Value` |

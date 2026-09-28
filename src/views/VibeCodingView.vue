@@ -1107,7 +1107,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import "../styles/vibe-coding.scss";
-import { MAX_AGENT_CONTEXT_CHARS } from "../../shared/agentContextLimits";
 import { appendStatusDetail, assistantTransientUiClearPatch, truncateDiffPreview, cleanStatusLogText, formatCharCount, formatTokenCount, isNetworkError, fileName, genId, hasAgentProcessSteps, entryToNode, formatToolMeta, syncRoundGroupsPatch, inferEditorTabKind, displayFilePath } from "../utils/vibeHelpers";
 import { gitFileSelectionKey, parseGitFileSelectionKey, gitFileListScopeIsStaged, type GitFileListScope } from "../utils/gitHelpers";
 import { appendDebugLogFile, debugLog, setDebugLogProjectRoot } from "../utils/debugLog";
@@ -2397,7 +2396,6 @@ const tokenDetailData = computed(() => {
     totalCompletionTokens,
     usedContextChars,
     maxContextChars,
-    contextLimitChars: MAX_AGENT_CONTEXT_CHARS,
     // token 口径（真实）
     usedContextTokens,
     peakContextTokens: peakTokens,
@@ -3707,11 +3705,10 @@ const totalTokenUsage = computed(() => {
       ? currentRunContextChars
       : maxContextChars;
     if (contextChars > 0) {
-      parts.push(
-        `${formatCharCount(contextChars)} / ${formatCharCount(MAX_AGENT_CONTEXT_CHARS)} ${
-          chatSending.value ? "本轮上下文" : "上下文"
-        }`,
-      );
+      // 无 token usage 时只有字符口径。这里不再编造"总上限"（旧的 256k 字符
+      // 分母与实际模型窗口无关），只报已用。
+      const contextLabel = chatSending.value ? "本轮上下文" : "上下文";
+      parts.push(`${contextLabel} ${formatCharCount(contextChars)} 字符`);
     }
   }
   return parts.join(" · ");

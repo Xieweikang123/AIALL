@@ -34,7 +34,7 @@ import {
   syncRoundGroupsPatch,
 } from "../utils/vibeHelpers";
 import { createAgentSessionRunManager, type SessionAgentRun } from "./agentSessionRuns";
-import { SOFT_COMPACT_CONTEXT_CHARS } from "../../shared/agentContextLimits";
+import { AGENT_LARGE_CONTEXT_HINT_CHARS } from "../../shared/agentContextLimits";
 
 export interface UseAgentStateDeps {
   activeSessionId: Ref<string>;
@@ -198,7 +198,7 @@ export function useAgentState(deps: UseAgentStateDeps) {
     }
 
     const contextChars = live.contextChars ?? msg.contextChars ?? 0;
-    if (waitingModel && contextChars > SOFT_COMPACT_CONTEXT_CHARS) {
+    if (waitingModel && contextChars > AGENT_LARGE_CONTEXT_HINT_CHARS) {
       statusText += " · 上下文较大";
     }
 

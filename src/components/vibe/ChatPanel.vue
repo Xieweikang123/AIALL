@@ -527,10 +527,6 @@
                       <span>已用上下文</span>
                       <span>{{ formatCharCount(tokenDetailData.usedContextChars) }} 字符</span>
                     </div>
-                    <div v-if="tokenDetailData.contextLimitChars > 0" class="token-detail-row">
-                      <span>总上下文长度</span>
-                      <span>{{ formatCharCount(tokenDetailData.contextLimitChars) }} 字符</span>
-                    </div>
                     <div
                       v-if="tokenDetailData.maxContextChars > 0 && tokenDetailData.maxContextChars !== tokenDetailData.usedContextChars"
                       class="token-detail-row"
@@ -870,8 +866,6 @@ interface TokenDetailData {
   usedContextChars: number;
   /** 会话内峰值占用 */
   maxContextChars: number;
-  /** Agent 上下文预算上限（字符） */
-  contextLimitChars: number;
   /** 真实 token 口径：最近一轮 prompt token 数 */
   usedContextTokens: number;
   /** 真实 token 口径：会话内峰值 prompt token 数 */
