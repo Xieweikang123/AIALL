@@ -60,6 +60,7 @@
         <div
           ref="bodyEl"
           class="agent-trace-drawer-body"
+          :class="{ 'agent-trace-drawer-body--fill': fillBody }"
           @scroll="onBodyScroll"
           @wheel="markUserIntent"
           @touchstart="markUserIntent"
@@ -72,6 +73,7 @@
             :view="state.view"
             :running="running"
             :roomy="state.maximized"
+            :fill-thinking="state.view.fillThinking"
             embedded
             @update:view="setTraceView"
           />
@@ -150,6 +152,9 @@ const running = computed(() => {
   const last = list[list.length - 1];
   return Boolean(last && !last.response?.isFinal);
 });
+
+/** 「思考中撑满轨迹窗口」：开关打开且 Agent 在跑时给正文区切到纵向 flex。 */
+const fillBody = computed(() => running.value && state.view.fillThinking === true);
 
 /**
  * 抽屉整体的自动吸底跟随。
@@ -529,6 +534,21 @@ onUnmounted(() => {
   flex: 1;
   overflow-y: auto;
   padding: 0 0 20px;
+  min-height: 0;
+}
+
+/*
+ * 「思考中撑满」开关打开且 Agent 在跑：正文区改成纵向 flex，
+ * 让内层轨迹面板拿到确定高度（`flex: 1`），思考正文才能铺满整个轨迹窗口。
+ * 思考内容超长时仍由本容器滚动，不会把抽屉顶破。
+ */
+.agent-trace-drawer-body--fill {
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-trace-drawer-body--fill > .agent-trace-panel {
+  flex: 1 1 auto;
   min-height: 0;
 }
 

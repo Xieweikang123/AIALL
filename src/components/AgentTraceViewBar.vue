@@ -1,22 +1,24 @@
 <template>
   <div class="trace-view-bar">
-    <span class="trace-view-caption" :title="captionHint">默认展开</span>
+    <div class="trace-view-group">
+      <span class="trace-view-caption" :title="captionHint">默认展开</span>
 
-    <button
-      v-for="kind in kinds"
-      :key="kind"
-      type="button"
-      class="trace-view-chip"
-      :class="{
-        'trace-view-chip--on': view.expand[kind],
-        [`trace-view-chip--${kind}`]: true,
-      }"
-      :aria-pressed="view.expand[kind]"
-      :title="kindUi[kind].chipTitle"
-      @click="toggleExpand(kind)"
-    >
-      {{ kindUi[kind].label }}
-    </button>
+      <button
+        v-for="kind in kinds"
+        :key="kind"
+        type="button"
+        class="trace-view-chip"
+        :class="{
+          'trace-view-chip--on': view.expand[kind],
+          [`trace-view-chip--${kind}`]: true,
+        }"
+        :aria-pressed="view.expand[kind]"
+        :title="kindUi[kind].chipTitle"
+        @click="toggleExpand(kind)"
+      >
+        {{ kindUi[kind].label }}
+      </button>
+    </div>
 
     <div ref="popoverWrapEl" class="trace-view-more">
       <button
@@ -27,7 +29,23 @@
         title="正文长度、瞬态阶段、快捷预设"
         @click="popoverOpen = !popoverOpen"
       >
-        ⚙
+        <svg
+          class="trace-view-gear-icon"
+          viewBox="0 0 16 16"
+          width="13"
+          height="13"
+          aria-hidden="true"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.4"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <circle cx="8" cy="8" r="2.2" />
+          <path
+            d="M8 1.6v1.8M8 12.6v1.8M1.6 8h1.8M12.6 8h1.8M3.5 3.5l1.3 1.3M11.2 11.2l1.3 1.3M12.5 3.5l-1.3 1.3M4.8 11.2l-1.3 1.3"
+          />
+        </svg>
       </button>
 
       <div v-if="popoverOpen" class="trace-view-popover" @click.stop>
@@ -69,6 +87,21 @@
             class="trace-view-check"
             :checked="view.autoMaximize"
             @change="pickAutoMaximize(($event.target as HTMLInputElement).checked)"
+          />
+        </label>
+
+        <label class="trace-view-row">
+          <span
+            class="trace-view-row-label"
+            title="Agent 思考中时，让「思考过程」正文撑满整个数据流轨迹窗口；跑完自动恢复常规高度"
+          >
+            思考中撑满窗口
+          </span>
+          <input
+            type="checkbox"
+            class="trace-view-check"
+            :checked="view.fillThinking"
+            @change="pickFillThinking(($event.target as HTMLInputElement).checked)"
           />
         </label>
 
@@ -116,6 +149,7 @@ import {
   withTraceExpand,
   withTraceTransientPhases,
   withTraceAutoMaximize,
+  withTraceFillThinking,
   type AgentTraceBodyLength,
   type AgentTraceEntryKind,
   type AgentTraceViewConfig,
@@ -177,6 +211,10 @@ function pickAutoMaximize(on: boolean) {
   emit("update:view", withTraceAutoMaximize(props.view, on));
 }
 
+function pickFillThinking(on: boolean) {
+  emit("update:view", withTraceFillThinking(props.view, on));
+}
+
 function pickPreset(id: AgentTraceViewPreset) {
   emit("update:view", applyAgentTraceViewPreset(id));
 }
@@ -235,16 +273,33 @@ onBeforeUnmount(() => {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px 14px 8px;
+  gap: 10px;
+  padding: 9px 14px 10px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.018), rgba(255, 255, 255, 0));
   flex-wrap: wrap;
 }
 
+/*
+ * 「默认展开」标签 + 五个 chip 收进一个浅底小容器，
+ * 明确表达「这是一组开关」，跟右侧齿轮拉开层次。
+ */
+.trace-view-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
 .trace-view-caption {
-  font-size: 10.5px;
-  color: rgba(148, 163, 184, 0.6);
-  margin-right: 2px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: rgba(163, 176, 194, 0.85);
+  margin-right: 3px;
   white-space: nowrap;
 }
 
@@ -254,22 +309,30 @@ onBeforeUnmount(() => {
  * 用户看到同一个字就知道指的是同一类事件。
  */
 .trace-view-chip {
-  width: 24px;
-  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 24px;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 5px;
-  background: transparent;
-  color: rgba(148, 163, 184, 0.55);
-  font-size: 10.5px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(210, 220, 234, 0.82);
+  font-size: 12px;
   font-weight: 600;
+  line-height: 1;
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease,
+    box-shadow 120ms ease;
 }
 
 .trace-view-chip:hover {
-  border-color: rgba(126, 182, 255, 0.35);
-  color: rgba(200, 214, 232, 0.95);
+  border-color: rgba(126, 182, 255, 0.42);
+  background: rgba(126, 182, 255, 0.12);
+  color: rgba(232, 240, 250, 1);
 }
 
 /*
@@ -277,26 +340,48 @@ onBeforeUnmount(() => {
  * 类型靠字区分、不靠色相 —— 和 AgentTracePanel 的单主色保持一致（改一处别忘另一处）。
  */
 .trace-view-chip--on {
-  background: rgba(88, 166, 255, 0.2);
-  border-color: rgba(88, 166, 255, 0.5);
-  color: rgba(126, 182, 255, 0.95);
+  background: rgba(88, 166, 255, 0.24);
+  border-color: rgba(88, 166, 255, 0.6);
+  color: rgba(150, 197, 255, 1);
+  box-shadow: 0 0 0 1px rgba(88, 166, 255, 0.15), 0 2px 8px rgba(56, 139, 253, 0.22);
 }
 
 .trace-view-more {
   position: relative;
-  margin-left: 2px;
+  margin-left: auto;
+  flex: 0 0 auto;
 }
 
+/*
+ * 全局 button 带 padding:8px 16px，会把这枚小方钮撑成宽盒子、图标被挤到角落；
+ * 这里清 padding + 固定宽高 + box-sizing:border-box + flex:0 0 auto，锁死成正方形小钮。
+ */
 .trace-view-gear {
-  width: 22px;
-  height: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 5px;
-  background: transparent;
-  color: rgba(148, 163, 184, 0.7);
-  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 24px;
+  min-width: 28px;
+  max-width: 28px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(210, 220, 234, 0.78);
+  line-height: 1;
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.trace-view-gear-icon {
+  display: block;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }
 
 .trace-view-gear:hover,
@@ -306,12 +391,20 @@ onBeforeUnmount(() => {
   color: rgba(165, 214, 255, 0.95);
 }
 
+/*
+ * 齿轮在工具条最右端，弹层必须从它**向左**展开（right:0），
+ * 否则 `left:0` 的 236px 会被抽屉层 overflow:hidden 从右侧裁掉、显示不全。
+ * 宽度 / 高度都做视口兜底，窄面板或矮窗口下也不溢出被裁。
+ */
 .trace-view-popover {
   position: absolute;
   top: calc(100% + 6px);
-  left: 0;
+  right: 0;
+  left: auto;
   z-index: 6;
-  width: 236px;
+  width: min(236px, calc(100vw - 24px));
+  max-height: min(70vh, calc(100vh - 24px));
+  overflow-y: auto;
   padding: 10px 12px;
   border: 1px solid rgba(126, 182, 255, 0.22);
   border-radius: 8px;

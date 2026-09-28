@@ -48,6 +48,14 @@ export type AgentTraceViewConfig = {
    * 关掉只影响「自动」，头部的手动放大按钮照旧可用。
    */
   autoMaximize: boolean;
+  /**
+   * Agent 思考中时，是否让「思考过程」正文撑满整个「数据流轨迹」窗口。
+   *
+   * 与 `autoMaximize` 正交：`autoMaximize` 是把整个抽屉放大盖住工作区，
+   * 这一项不动抽屉尺寸，只让轨迹窗口**内部**的思考正文铺满可用高度
+   * （其余条目让位，跑完恢复常规高度）。关掉只影响运行中的自动撑满。
+   */
+  fillThinking: boolean;
 };
 
 /**
@@ -65,6 +73,7 @@ export const DEFAULT_AGENT_TRACE_VIEW: Readonly<AgentTraceViewConfig> = Object.f
   bodyLength: "long",
   transientPhases: false,
   autoMaximize: false,
+  fillThinking: false,
 });
 
 export interface AgentTraceBodySpec {
@@ -119,6 +128,7 @@ export const AGENT_TRACE_VIEW_PRESETS: readonly AgentTraceViewPresetSpec[] = [
       bodyLength: "short",
       transientPhases: false,
       autoMaximize: false,
+      fillThinking: false,
     },
   },
   {
@@ -136,6 +146,7 @@ export const AGENT_TRACE_VIEW_PRESETS: readonly AgentTraceViewPresetSpec[] = [
       bodyLength: "long",
       transientPhases: true,
       autoMaximize: false,
+      fillThinking: false,
     },
   },
   {
@@ -147,6 +158,7 @@ export const AGENT_TRACE_VIEW_PRESETS: readonly AgentTraceViewPresetSpec[] = [
       bodyLength: "full",
       transientPhases: true,
       autoMaximize: false,
+      fillThinking: false,
     },
   },
 ];
@@ -201,6 +213,7 @@ export function normalizeAgentTraceView(value: unknown): AgentTraceViewConfig {
     bodyLength: normalizeAgentTraceBodyLength(raw.bodyLength),
     transientPhases: raw.transientPhases === true,
     autoMaximize: raw.autoMaximize === true,
+    fillThinking: raw.fillThinking === true,
   };
 }
 
@@ -210,6 +223,7 @@ export function createDefaultAgentTraceView(): AgentTraceViewConfig {
     bodyLength: DEFAULT_AGENT_TRACE_VIEW.bodyLength,
     transientPhases: DEFAULT_AGENT_TRACE_VIEW.transientPhases,
     autoMaximize: DEFAULT_AGENT_TRACE_VIEW.autoMaximize,
+    fillThinking: DEFAULT_AGENT_TRACE_VIEW.fillThinking,
   };
 }
 
@@ -245,6 +259,14 @@ export function withTraceAutoMaximize(
   autoMaximize: boolean,
 ): AgentTraceViewConfig {
   return { ...view, autoMaximize: autoMaximize === true };
+}
+
+/** 开关「思考中撑满轨迹窗口」，其余配置原样保留（返回新对象）。 */
+export function withTraceFillThinking(
+  view: AgentTraceViewConfig,
+  fillThinking: boolean,
+): AgentTraceViewConfig {
+  return { ...view, fillThinking: fillThinking === true };
 }
 
 /* ------------------------------ 查询 ------------------------------ */

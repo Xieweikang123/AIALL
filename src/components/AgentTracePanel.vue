@@ -1,7 +1,11 @@
 <template>
   <div
     class="agent-trace-panel"
-    :class="{ 'agent-trace-panel--embedded': embedded, 'agent-trace-panel--roomy': roomy }"
+    :class="{
+      'agent-trace-panel--embedded': embedded,
+      'agent-trace-panel--roomy': roomy,
+      'agent-trace-panel--fill-thinking': fillThinkingActive,
+    }"
   >
     <button
       v-if="!embedded"
@@ -143,8 +147,13 @@ const props = withDefaults(
      * 思考正文不再受 220px 上限约束，整段摊开由外层滚动 —— 这就是"放大到窗口全部观看"。
      */
     roomy?: boolean;
+    /**
+     * 「思考中撑满轨迹窗口」开关。为 true 且面板正在跑时，
+     * 思考正文铺满整个轨迹窗口（不再被 220px 小框卡住），其余条目让位。
+     */
+    fillThinking?: boolean;
   }>(),
-  { embedded: false, running: false, tools: () => [], roomy: false },
+  { embedded: false, running: false, tools: () => [], roomy: false, fillThinking: false },
 );
 
 const emit = defineEmits<{ (event: "update:view", view: AgentTraceViewConfig): void }>();
@@ -162,6 +171,8 @@ const kindUi = AGENT_TRACE_KIND_UI;
 /** 归一化脏值：外部传进来的是旧档位字符串或半截对象时也不能把面板搞坏 */
 const view = computed(() => normalizeAgentTraceView(props.view));
 const live = computed(() => props.running);
+/** 「思考中撑满轨迹窗口」只在运行时生效；跑完自动恢复常规高度。 */
+const fillThinkingActive = computed(() => props.fillThinking === true && live.value);
 
 /**
  * 流式节流：reasoning_delta 是逐 token 追加的，直接跟随会让每帧都全量重建
@@ -622,6 +633,49 @@ function formatElapsed(ms?: number): string {
 .agent-trace-panel--roomy .agent-trace-detail--md {
   max-height: none;
   overflow: visible;
+}
+
+/*
+ * 「思考中撑满轨迹窗口」：面板变成纵向 flex，思考条目（含其正文框）一路铺到
+ * 容器底部，正文框内部滚动承载超长思考。
+ * 只在运行时生效（见 fillThinkingActive），跑完自动回到常规高度。
+ */
+.agent-trace-panel--fill-thinking {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 正文区（条目宿主）也要吃满剩余高度，否则 flex 链断在这里、思考框撑不高 */
+.agent-trace-panel--fill-thinking .agent-trace-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* 条目与轮次都要能往下传高度：链上任意一环 min-height:0 缺失，flex 子项就撑不出滚动区 */
+.agent-trace-panel--fill-thinking .agent-trace-entry,
+.agent-trace-panel--fill-thinking .agent-trace-turn {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/*
+ * 思考条目独占剩余高度。`:has` 让「只有这一轮有思考」的常见情形也生效；
+ * 未命中（如展开中的请求/回复更长）时靠 `flex: 1 1 auto` 仍会分到空余空间。
+ */
+.agent-trace-panel--fill-thinking .agent-trace-entry--reasoning {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.agent-trace-panel--fill-thinking .agent-trace-entry--reasoning .agent-trace-detail--md {
+  flex: 1 1 auto;
+  max-height: none;
+  min-height: 120px;
+  overflow: auto;
 }
 
 /*
