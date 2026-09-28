@@ -1,6 +1,10 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from "vue";
 import { lsGet, lsSet } from "../../utils/localStorageSafe";
 import { normalizeGitPath, sortedUnstagedPaths } from "../../utils/gitBatchDraftStorage";
+import {
+  readGitCommitDraft,
+  writeGitCommitDraft,
+} from "../../utils/gitCommitDraftStorage";
 import { parseGitFileSelectionKey, pruneGitFileSelection } from "../../utils/gitHelpers";
 import { fetchGitLog, type GitHunkInfo, type GitStatusFile } from "../../services/vibeGitClient";
 import type { GitFileDiff } from "./types";
@@ -354,6 +358,35 @@ export function createGitPanelState(
       !gitCommitting.value &&
       !!gitCommitMessage.value.trim() &&
       gitStagedFiles.value.length > 0,
+  );
+
+  /**
+   * 提交信息草稿作用域：`projectPath` 参数即「活跃仓库路径，无仓库时回退项目根」
+   * （见 useGitPanel 的 gitPath），按此隔离，切项目/切仓库不串味。
+   */
+  const commitDraftScopePath = () => projectPath().trim();
+
+  function persistCommitMessageDraft() {
+    const scope = commitDraftScopePath();
+    if (!scope) return;
+    writeGitCommitDraft(scope, gitCommitMessage.value);
+  }
+
+  // 提交信息变化即落盘（含手打与 AI 流式生成）；提交成功清空时自动删 key。
+  watch(gitCommitMessage, () => {
+    persistCommitMessageDraft();
+  });
+
+  // 仓库就绪 / 切换活跃仓库后恢复草稿：作用域变化时以目标作用域草稿为准，
+  // 避免旧项目的提交信息泄漏到新项目。
+  watch(
+    [() => gitIsRepo.value, () => gitActiveRepoPath.value],
+    () => {
+      if (!gitIsRepo.value) return;
+      const scope = commitDraftScopePath();
+      if (!scope) return;
+      gitCommitMessage.value = readGitCommitDraft(scope);
+    },
   );
 
   function clearGitDiffCache() {

@@ -112,6 +112,27 @@ export function splitGitFilePath(filePath: string): { dir: string; name: string 
   return { dir: normalized.slice(0, slash), name: normalized.slice(slash + 1) };
 }
 
+/**
+ * Resolve a Git-panel file path (relative to the active repo root) into an absolute path.
+ * The repository root must be supplied explicitly: in multi-repo projects the panel's
+ * active repo can be a nested repo (e.g. `vpp-java`), so joining to the project root
+ * would point at a non-existent path.
+ *
+ * Absolute paths (Windows drive, POSIX root, or UNC) are returned unchanged.
+ * A blank input returns "".
+ */
+export function resolveRepoFilePath(repoRoot: string, filePath: string): string {
+  const trimmed = filePath.trim();
+  if (!trimmed) return "";
+  if (/^[a-zA-Z]:[\\/]/.test(trimmed)) return trimmed;
+  if (trimmed.startsWith("/") || trimmed.startsWith("\\\\")) return trimmed;
+  const rel = trimmed.replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!rel) return "";
+  const base = repoRoot.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  if (!base) return rel;
+  return `${base}/${rel}`;
+}
+
 export type GitSelectionScope = "staged" | "unstaged";
 
 /** Visible Git file list section (Shift 多选范围按分区，不跨区串选). */

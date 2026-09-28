@@ -340,7 +340,7 @@
 import { computed, ref, toRef, watch } from "vue";
 import type { GitRemoteInfo, GitBranchInfo, GitRepoInfo } from "../../services/vibeGitClient";
 import type { BatchGroup } from "../../composables/useGitPanel";
-import type { GitFileListScope } from "../../utils/gitHelpers";
+import { resolveRepoFilePath, type GitFileListScope } from "../../utils/gitHelpers";
 import { useGitPanelFileTree } from "../../composables/useGitPanelFileTree";
 import { useGitMultiRepoOverview } from "../../composables/git/useGitMultiRepoOverview";
 import { lsGet, lsSet } from "../../utils/localStorageSafe";
@@ -605,9 +605,7 @@ function handleOpenRepoFolder(repoPath: string) {
   handleMultiSwitchRepo(repoPath);
 }
 function joinRepoFile(repoPath: string, filePath: string): string {
-  const base = repoPath.replace(/\/+$/, "");
-  const rel = filePath.replace(/^\/+/, "");
-  return `${base}/${rel}`;
+  return resolveRepoFilePath(repoPath, filePath);
 }
 function handleMultiOpenFile(payload: { repoPath: string; filePath: string }) {
   const full = joinRepoFile(payload.repoPath, payload.filePath);

@@ -160,6 +160,27 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
     return sortedUnstagedPaths(gitBatchSourceFiles.value.map((f) => f.path));
   }
 
+  // 按当前 git 状态剔除 AI 分组里已消失的路径（被忽略 / 删除 / 已提交）。
+  // 返回是否发生了剔除，供调用方决定要不要重算提交说明与落盘。
+  function pruneAiBatchGroupsToPaths(paths: string[]): boolean {
+    const current = aiBatchGroupsResult.value;
+    if (!current) return false;
+    const pathSet = new Set(paths.map((p) => p.replace(/\\/g, "/")));
+    const next = current
+      .map((g) => ({
+        ...g,
+        files: g.files.filter((p) => pathSet.has(p.replace(/\\/g, "/"))),
+      }))
+      .filter((g) => g.files.length > 0);
+    const changed =
+      next.length !== current.length ||
+      next.some((g, i) => g.files.length !== current[i].files.length);
+    if (changed) {
+      aiBatchGroupsResult.value = next.length > 0 ? next : null;
+    }
+    return changed;
+  }
+
   function batchDraftScope() {
     return {
       project: projectPath(),
@@ -243,7 +264,7 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
       return;
     }
 
-    const pathSet = new Set(paths);
+    const pathSet = new Set(paths.map((p) => p.replace(/\\/g, "/")));
     const restoredGroups = (draft.groups ?? [])
       .map((g) => ({
         ...g,
@@ -255,12 +276,22 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
 
     // Exact match, or overlapping AI groups after path drift (same policy as in-memory sync).
     if (draft.groups?.length && (exactPaths || restoredGroups.length > 0)) {
-      aiBatchGroupsResult.value = exactPaths ? draft.groups : restoredGroups;
-      aiBatchAnalysisComplete.value = draft.analysisComplete !== false;
+      // 草稿里的文件可能已从 git 状态消失（被忽略 / 删除 / 已提交）：即使 unstagedPaths
+      // 完全一致也按当前路径剔除，避免过期路径回流面板、也避免兜底状态假报 M。
+      aiBatchGroupsResult.value = draft.groups;
+      const groupsBeforePrune = draft.groups.length;
+      const pruned = pruneAiBatchGroupsToPaths(paths);
+      const groupsAfterPrune = aiBatchGroupsResult.value?.length ?? 0;
+      aiBatchAnalysisComplete.value =
+        Boolean(groupsAfterPrune) && draft.analysisComplete !== false;
       batchSectionOpen.value = draft.sectionOpen;
       const groups = batchGroups.value;
-      batchMessages.value = groups.map((g, i) => draft.messages[i] ?? defaultBatchMessage(g));
-      if (!exactPaths) schedulePersistBatchDraft();
+      // 剔除整组会让组索引错位：此时按新分组重算说明，避免用户已写说明串到别的组。
+      batchMessages.value =
+        groupsAfterPrune === groupsBeforePrune
+          ? groups.map((g, i) => draft.messages[i] ?? defaultBatchMessage(g))
+          : groups.map((g) => defaultBatchMessage(g));
+      if (!exactPaths || pruned) schedulePersistBatchDraft();
       return;
     }
 
@@ -275,6 +306,9 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
       return;
     }
 
+    // 草稿与当前路径完全对不上：清掉残留分组，避免渲染过期文件。
+    aiBatchGroupsResult.value = null;
+    aiBatchAnalysisComplete.value = false;
     syncBatchMessagesFromGroups();
     removeGitBatchDraft(project, branch);
   }
@@ -303,18 +337,28 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
   const batchGroups = computed<BatchGroup[]>(() => {
     const sourceFiles = gitBatchSourceFiles.value;
     if (aiBatchGroupsResult.value) {
-      const groups = aiBatchGroupsResult.value.map((g) => ({
-        dir: g.name,
-        files: g.files.map((p) => {
-          const orig = sourceFiles.find((uf) => uf.path === p);
-          return { path: p, status: orig?.status || "modified" };
-        }),
-        message: g.message,
-      }));
+      const sourcePathSet = new Set(sourceFiles.map((f) => f.path.replace(/\\/g, "/")));
+      const groups = aiBatchGroupsResult.value
+        .map((g) => ({
+          dir: g.name,
+          files: g.files
+            // 丢弃已从 git 状态消失的路径，避免渲染过期文件、也避免兜底状态假报 M；
+            // 比较用正斜杠归一化，输出优先用 git 原始 path，保证下游 stage / 提交匹配一致。
+            .map((p) => ({ raw: p, norm: p.replace(/\\/g, "/") }))
+            .filter(({ norm }) => sourcePathSet.has(norm))
+            .map(({ raw, norm }) => {
+              const orig = sourceFiles.find((uf) => uf.path.replace(/\\/g, "/") === norm);
+              return { path: orig?.path ?? raw, status: orig?.status || "modified" };
+            }),
+          message: g.message,
+        }))
+        .filter((g) => g.files.length > 0);
 
       // Find any batch source files that haven't been grouped yet
-      const groupedPaths = new Set(aiBatchGroupsResult.value.flatMap((g) => g.files));
-      const remaining = sourceFiles.filter((f) => !groupedPaths.has(f.path));
+      const groupedPaths = new Set(
+        aiBatchGroupsResult.value.flatMap((g) => g.files).map((p) => p.replace(/\\/g, "/")),
+      );
+      const remaining = sourceFiles.filter((f) => !groupedPaths.has(f.path.replace(/\\/g, "/")));
       if (remaining.length > 0) {
         groups.push({
           dir: aiBatchGrouping.value ? "正在分析其余变更" : "其他未分组变更",
@@ -381,8 +425,20 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
       return;
     }
     if (pathsEqual(current, batchUnstagedSnapshot.value)) return;
-    // 文件列表变了但保留已有 AI 分组，batchGroups computed 会自动把新文件追加到"其他未分组变更"组
+    // 文件列表变了：按新状态剔除已消失的文件（被忽略 / 删除 / 已提交），
+    // batchGroups computed 会把新文件追加到"其他未分组变更"组。剔除后同步提交说明。
+    const pruned = pruneAiBatchGroupsToPaths(current);
     batchUnstagedSnapshot.value = current;
+    if (pruned) {
+      // 组数不变 = 只是某些组内文件被剔除（索引对应仍成立，保留用户已写说明）；
+      // 组数变化 = 有整组被移除（索引会错位，按新分组重算说明，避免串位）。
+      const prevMessages = batchMessages.value;
+      const nextGroups = batchGroups.value;
+      batchMessages.value =
+        prevMessages.length === nextGroups.length
+          ? nextGroups.map((g, i) => prevMessages[i] ?? defaultBatchMessage(g))
+          : nextGroups.map((g) => defaultBatchMessage(g));
+    }
     schedulePersistBatchDraft();
   }
 
@@ -451,12 +507,12 @@ export function useGitBatchCommit(options: UseGitBatchCommitOptions) {
   }
 
   function pruneAiBatchGroupsAfterCommit(committedPaths: string[]) {
-    const committed = new Set(committedPaths);
+    const committed = new Set(committedPaths.map((p) => p.replace(/\\/g, "/")));
     if (aiBatchGroupsResult.value) {
       const next = aiBatchGroupsResult.value
         .map((g) => ({
           ...g,
-          files: g.files.filter((p) => !committed.has(p)),
+          files: g.files.filter((p) => !committed.has(p.replace(/\\/g, "/"))),
         }))
         .filter((g) => g.files.length > 0);
       aiBatchGroupsResult.value = next.length > 0 ? next : null;
