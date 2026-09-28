@@ -3,12 +3,15 @@
     <button
       type="button"
       class="file-item dir"
-      :class="{ selected: node.path === selectedPath, expanded }"
+      :class="{ selected: node.path === selectedPath, expanded: chainExpanded }"
       :style="{ paddingLeft }"
       @contextmenu.prevent="onContextMenu"
       @pointerdown="onDirPointerDown"
     >
-      <span class="tree-chevron" aria-hidden="true">{{ expanded ? "▾" : "▸" }}</span>
+      <span class="tree-guides" aria-hidden="true">
+        <span v-for="x in guideXs" :key="x" class="tree-guide" :style="{ left: `${x}px` }" />
+      </span>
+      <span class="tree-chevron" aria-hidden="true">{{ chainExpanded ? "▾" : "▸" }}</span>
       <span class="file-type-icon file-type-icon--dir" aria-hidden="true" />
       <input
         v-if="node.path === renamingPath"
@@ -20,11 +23,14 @@
         @blur="commitRename($event)"
         @click.stop
       />
-      <span v-else class="file-name dir-name">{{ node.name }}</span>
+      <span v-else class="file-name dir-name" :title="displayNode.name">{{ displayNode.name }}</span>
     </button>
-    <div v-if="expanded && node.children?.length" class="tree-children">
+    <div
+      v-if="chainExpanded && displayNode.tail.children?.length"
+      class="tree-children"
+    >
       <FileTreeNode
-        v-for="child in node.children"
+        v-for="child in displayNode.tail.children"
         :key="child.path"
         :node="child"
         :active-path="activePath"
@@ -32,7 +38,8 @@
         :renaming-path="renamingPath"
         :expanded-dirs="expandedDirs"
         :project-path="projectPath"
-        :depth="depth + 1"
+        :depth="childDepth"
+        :guide-xs="[...guideXs, childGuideX]"
         @toggle="$emit('toggle', $event)"
         @open="$emit('open', $event)"
         @select="$emit('select', $event)"
@@ -58,6 +65,9 @@
     @contextmenu.prevent="onContextMenu"
     @pointerdown="onFilePointerDown"
   >
+    <span class="tree-guides" aria-hidden="true">
+      <span v-for="x in guideXs" :key="x" class="tree-guide" :style="{ left: `${x}px` }" />
+    </span>
     <span class="tree-chevron tree-chevron--spacer" aria-hidden="true" />
     <span class="file-type-icon" :class="fileTypeClass" aria-hidden="true">{{ fileTypeLabel }}</span>
     <input
@@ -78,6 +88,13 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 import type { FileEntry } from "../services/vibeCodingClient";
+import {
+  collapseTreeNode,
+  isChainExpanded,
+  treeIndentCss,
+  treeIndentPx,
+  type TreeDisplayNode,
+} from "../utils/treeDisplay";
 
 export interface TreeNode extends FileEntry {
   children?: TreeNode[];
@@ -94,6 +111,12 @@ const props = defineProps<{
   expandedDirs: Set<string>;
   depth?: number;
   projectPath: string;
+  /**
+   * 需要在本行绘制的导引线 x（相对行左缘），每层祖先一条。
+   * 由父目录递归时追加「本行到子行的缩进 x」，本行原样绘制 → 竖线每行连满、多层自然续接。
+   * 与 VS Code `.indent-guide`（每行为每个祖先画一条 1px 线）同一模型。
+   */
+  guideXs?: number[];
 }>();
 
 const emit = defineEmits<{
@@ -138,7 +161,9 @@ function commitRename(e: Event) {
 
 function onDirClick() {
   emit("select", props.node.path);
-  emit("toggle", props.node.path);
+  // 合并行只 toggle 链尾：展开态由链尾是否在 expandedDirs 决定，toggle 一次即可翻转。
+  // toggleDir 会在展开时顺着单子链把后续层加载并展开到底。
+  emit("toggle", displayNode.value.tail.path);
 }
 
 function onFileTap() {
@@ -203,8 +228,29 @@ function onFilePointerDown(e: PointerEvent) {
 }
 
 const depth = computed(() => props.depth ?? 0);
-const paddingLeft = computed(() => `${6 + depth.value * 14}px`);
-const expanded = computed(() => props.expandedDirs.has(props.node.path));
+const paddingLeft = computed(() => treeIndentCss(depth.value));
+
+/** 单子目录链合并后的显示节点：显示名可能是 `a/b/c`，path 仍为链起点。 */
+const displayNode = computed<TreeDisplayNode<TreeNode>>(() => collapseTreeNode(props.node));
+
+/** 链尾展开即视为展开（中间段只表示曾展开到过这里）。 */
+const chainExpanded = computed(() => isChainExpanded(displayNode.value, props.expandedDirs));
+
+/** 子节点缩进按「链尾实际层级」计，避免合并后缩进跳变。 */
+const childDepth = computed(() => depth.value + displayNode.value.chainPaths.length);
+
+/**
+ * 本行要绘制的导引线 x（相对行左缘），每层祖先一条，由父目录递归传入。
+ * 与 VS Code 的 `.indent-guide` 同模型：行自己画满整行高度，同一层 x 相同 → 竖线逐行续接。
+ */
+const guideXs = computed(() => props.guideXs ?? []);
+
+/**
+ * 本目录到其子行的缩进 x（子行内容左缘 = 行左缘 + 子级缩进），
+ * 作为追加项传给子节点，让子行在最内层画出这条线。子级缩进按链尾层级 `childDepth` 算，
+ * 合并行（`java/com/vpp/auxiliary`）也一致。
+ */
+const childGuideX = computed(() => treeIndentPx(childDepth.value));
 
 const FILE_KIND_BY_EXT: Record<string, string> = {
   vue: "vue",
@@ -391,9 +437,29 @@ const fileTypeLabel = computed(() => {
 
 .tree-children {
   position: relative;
-  margin-left: 10px;
-  padding-left: 6px;
-  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  margin-left: 0;
+  padding-left: 0;
+  border-left: none;
+}
+
+/**
+ * 行内导引线（VS Code `.indent-guide` 模型）：每行为每一层祖先各画一条 1px 竖线，
+ * 逐行连满整行高度；同一层 x 相同，于是叠成连续的竖线。
+ * 放在 `.file-item` 内层、不占布局（absolute、z-index 0），避免撑宽行。
+ */
+.tree-guides {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.tree-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .rename-input {

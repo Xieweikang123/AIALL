@@ -4,15 +4,18 @@
       class="git-tree-row git-tree-row--dir"
       :style="{ paddingLeft }"
     >
+      <span class="git-tree-guides" aria-hidden="true">
+        <span v-for="x in guideXs" :key="x" class="git-tree-guide" :style="{ left: `${x}px` }" />
+      </span>
       <button
         type="button"
         class="git-tree-dir-toggle"
-        @click="$emit('toggle-dir', node.path)"
+        @click="onDirToggle"
       >
         <span class="git-tree-check-spacer" aria-hidden="true" />
-        <span class="git-tree-chevron" aria-hidden="true">{{ expanded ? "▾" : "▸" }}</span>
+        <span class="git-tree-chevron" aria-hidden="true">{{ chainExpanded ? "▾" : "▸" }}</span>
         <span class="git-tree-folder-icon" aria-hidden="true" />
-        <span class="git-tree-name">{{ node.name }}</span>
+        <span class="git-tree-name" :title="displayNode.name">{{ displayNode.name }}</span>
       </button>
       <div class="git-file-actions">
         <button
@@ -41,12 +44,16 @@
         </template>
       </div>
     </div>
-    <div v-if="expanded && node.children?.length" class="git-tree-children">
+    <div
+      v-if="chainExpanded && displayNode.tail.children?.length"
+      class="git-tree-children"
+    >
       <GitFileTreeNode
-        v-for="child in node.children"
+        v-for="child in displayNode.tail.children"
         :key="child.path"
         :node="child"
-        :depth="depth + 1"
+        :depth="childDepth"
+        :guide-xs="[...guideXs, childGuideX]"
         :staged="staged"
         :list-scope="listScope"
         :expanded-dirs="expandedDirs"
@@ -78,7 +85,11 @@
     @contextmenu.prevent="$emit('contextmenu', $event, node.path, listScope)"
     @dblclick="$emit('open-file', node.path)"
   >
+    <span class="git-tree-guides" aria-hidden="true">
+      <span v-for="x in guideXs" :key="x" class="git-tree-guide" :style="{ left: `${x}px` }" />
+    </span>
     <span class="git-tree-check-spacer" aria-hidden="true" />
+    <span v-if="!flat" class="git-tree-chevron git-tree-chevron--spacer" aria-hidden="true" />
     <span class="git-tree-file-icon" :class="fileTypeClass" aria-hidden="true">{{ fileTypeLabel }}</span>
     <span class="git-tree-name" :class="{ 'git-tree-name--flat': flat }" :title="node.path">
       <span v-if="flatDir" class="git-tree-dir-prefix">{{ flatDir }}/</span>
@@ -134,6 +145,13 @@
 import { computed } from "vue";
 import type { GitFileTreeNode } from "../../utils/gitFileTree";
 import {
+  collapseTreeNode,
+  isChainExpanded,
+  treeIndentCss,
+  treeIndentPx,
+  type TreeDisplayNode,
+} from "../../utils/treeDisplay";
+import {
   gitStatusIcon,
   gitStatusClass,
   gitFileSelectionKey,
@@ -149,9 +167,15 @@ const props = defineProps<{
   selectedGitFiles: string[];
   gitDiffLoadingKey: string;
   flat?: boolean;
+  /**
+   * 需要在本行绘制的导引线 x（相对行左缘），每层祖先一条。
+   * 由父目录递归时追加「本行到子行的缩进 x」，本行原样绘制 → 竖线每行连满、多层自然续接。
+   * 与 VS Code `.indent-guide`（每行为每个祖先画一条 1px 线）同一模型。
+   */
+  guideXs?: number[];
 }>();
 
-defineEmits<{
+const emit = defineEmits<{
   "toggle-dir": [path: string];
   "stage-file": [path: string];
   "unstage-file": [path: string];
@@ -166,8 +190,45 @@ defineEmits<{
 }>();
 
 const depth = computed(() => props.depth ?? 0);
-const paddingLeft = computed(() => `${8 + depth.value * 24}px`);
-const expanded = computed(() => props.expandedDirs.has(props.node.path));
+const paddingLeft = computed(() => treeIndentCss(depth.value));
+
+/**
+ * Git 行前导占位宽度：`.git-tree-check-spacer`（20px）+ 行 gap（4px）。
+ * 所有行（目录/文件、含扁平模式）都以此为内容起点，导引线需加上它才对得齐子项 chevron。
+ */
+const GIT_ROW_LEADING = 24;
+
+/** 单子目录链合并后的显示节点（与文件面板共用同一套规则）。 */
+const displayNode = computed<TreeDisplayNode<GitFileTreeNode>>(() => collapseTreeNode(props.node));
+
+/** 链上任意一段展开即视为展开（以链尾为准）。 */
+const chainExpanded = computed(() => isChainExpanded(displayNode.value, props.expandedDirs));
+
+/** 子节点缩进按链尾实际层级计。 */
+const childDepth = computed(() => depth.value + displayNode.value.chainPaths.length);
+
+/**
+ * 本行要绘制的导引线 x（相对行左缘），每层祖先一条，由父目录递归传入。
+ * 与 VS Code 的 `.indent-guide` 同模型：行自己画满整行高度，同一层 x 相同 → 竖线逐行续接。
+ */
+const guideXs = computed(() => props.guideXs ?? []);
+
+/**
+ * 本目录到其子行的缩进 x（子行内容左缘 = 行左缘 + 子级缩进），作为追加项传给子节点。
+ * 子级缩进按链尾层级 `childDepth` 算，合并行（`java/com/vpp/auxiliary`）也一致。
+ * Git 行开头有 20px 的 check-spacer + 4px gap，真正的 chevron/图标在其后，
+ * 故对齐子项 chevron 需再补 `GIT_ROW_LEADING`（否则线会飘在图标左侧 24px 的空白里）。
+ */
+const childGuideX = computed(() => treeIndentPx(childDepth.value) + GIT_ROW_LEADING);
+
+/**
+ * 合并行只 toggle 链尾：展开态由链尾是否在 expandedDirs 决定，toggle 一次即可翻转。
+ * 文件树 toggleDir 会在展开时顺着单子链把后续层加载并展开到底。
+ */
+function onDirToggle() {
+  emit("toggle-dir", displayNode.value.tail.path);
+}
+
 const hasSelection = computed(() => props.selectedGitFiles.length > 1);
 const isIgnoredLocal = computed(() => props.listScope === "ignored-local");
 
@@ -228,6 +289,7 @@ function gitWorkingTreeDiffKey(path: string, isStaged: boolean): string {
   border-radius: 5px;
   color: rgba(255, 255, 255, 0.88);
   transition: background 120ms ease;
+  position: relative;
 }
 
 .git-tree-row--dir {
@@ -236,6 +298,26 @@ function gitWorkingTreeDiffKey(path: string, isStaged: boolean): string {
   cursor: default;
   text-align: left;
   gap: 0;
+}
+
+/**
+ * 行内导引线（VS Code `.indent-guide` 模型）：每行为每一层祖先各画一条 1px 竖线，
+ * 逐行连满整行高度；同一层 x 相同，于是叠成连续的竖线。
+ * 放在行内层、不占布局（absolute、z-index 0），避免撑宽行。
+ */
+.git-tree-guides {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.git-tree-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .git-tree-dir-toggle {
@@ -274,12 +356,21 @@ function gitWorkingTreeDiffKey(path: string, isStaged: boolean): string {
   flex-shrink: 0;
 }
 
+.git-tree-children {
+  position: relative;
+}
+
 .git-tree-chevron {
   width: 12px;
   flex-shrink: 0;
   font-size: 10px;
   color: rgba(139, 148, 158, 0.85);
   text-align: center;
+}
+
+/* 文件行补上与目录行 chevron 等宽的占位，使所有行内容左缘一致（对齐根因修复） */
+.git-tree-chevron--spacer {
+  visibility: hidden;
 }
 
 .git-tree-folder-icon {
