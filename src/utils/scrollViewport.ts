@@ -85,6 +85,47 @@ export function computeScrollFollowStep(
   };
 }
 
+/** 跳转到某条消息时，目标块顶落在视口这个比例处（留出下方上下文）。 */
+export const MESSAGE_JUMP_ALIGN_RATIO = 0.28;
+/** 跳转后目标块与视口上/下边缘至少留这么多留白（px）。 */
+export const MESSAGE_JUMP_PAD_PX = 16;
+
+export type ScrollToMessageInput = {
+  scrollTop: number;
+  clientHeight: number;
+  scrollHeight: number;
+  /** 目标块在滚动内容坐标系里的顶部（与 scrollTop 同一坐标系）。 */
+  elementTop: number;
+  elementHeight: number;
+  alignRatio?: number;
+  padPx?: number;
+};
+
+/**
+ * 计算「把目标消息定位到视口靠上位置」所需的 scrollTop。
+ *
+ * 不用 `scrollIntoView({ block: "center" })` 的两个原因：
+ * 1) 居中会把长回复对半切在视口中间，用户看不到问题后紧跟的答案开头；
+ * 2) 它不保证目标块整体落在视口内 —— 高块会被夹在上下留白里，落到哪全看块高。
+ *
+ * 规则：目标块顶对齐到视口 `alignRatio` 处；高块优先露顶部；
+ * 短块则保证底部也在视口内（留 `padPx`）。最后夹到可滚动范围内。
+ */
+export function scrollToMessageWithin(input: ScrollToMessageInput): number {
+  const maxScroll = Math.max(0, input.scrollHeight - input.clientHeight);
+  if (maxScroll <= 0) return 0;
+  const ratio = Math.min(1, Math.max(0, input.alignRatio ?? MESSAGE_JUMP_ALIGN_RATIO));
+  const pad = Math.max(0, input.padPx ?? MESSAGE_JUMP_PAD_PX);
+  let top = input.elementTop - input.clientHeight * ratio;
+  // 块顶不滑出视口上方（长块优先露顶部）
+  top = Math.min(top, input.elementTop - pad);
+  // 块能整块塞进视口时，保证块底也在视口内（留 pad）
+  if (input.elementHeight + pad * 2 <= input.clientHeight) {
+    top = Math.max(top, input.elementTop + input.elementHeight + pad - input.clientHeight);
+  }
+  return Math.min(Math.max(top, 0), maxScroll);
+}
+
 export function prefersReducedMotion(): boolean {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;

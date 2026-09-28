@@ -4,6 +4,7 @@ import {
   isScrollNearBottom,
   scrollContainerToBottom,
   scrollElementToBottom,
+  scrollToMessageWithin,
 } from "./scrollViewport";
 
 function mockScrollElement(input: {
@@ -102,5 +103,82 @@ describe("computeScrollFollowStep", () => {
     const firm = computeScrollFollowStep(0, 1200, 200, 0, 1 / 60);
     expect(soft.nextScrollTop).toBeLessThan(firm.nextScrollTop);
     expect(soft.velocity).toBeLessThan(firm.velocity);
+  });
+});
+
+describe("scrollToMessageWithin", () => {
+  it("puts the target top near the upper part of the viewport", () => {
+    const top = scrollToMessageWithin({
+      scrollTop: 0,
+      clientHeight: 600,
+      scrollHeight: 4000,
+      elementTop: 1500,
+      elementHeight: 200,
+    });
+    // 600 * 0.28 = 168 → 1500 - 168
+    expect(top).toBe(1332);
+  });
+
+  it("keeps the whole block visible when it fits in the viewport", () => {
+    const clientHeight = 600;
+    const elementTop = 800;
+    const elementHeight = 120;
+    const top = scrollToMessageWithin({
+      scrollTop: 0,
+      clientHeight,
+      scrollHeight: 4000,
+      elementTop,
+      elementHeight,
+    });
+    // 块底 + pad 必须在视口内：top >= elementTop + height + pad - clientHeight
+    expect(top + clientHeight).toBeGreaterThanOrEqual(elementTop + elementHeight);
+    expect(top).toBeGreaterThanOrEqual(elementTop + elementHeight + 16 - clientHeight);
+  });
+
+  it("never scrolls above zero", () => {
+    const top = scrollToMessageWithin({
+      scrollTop: 0,
+      clientHeight: 600,
+      scrollHeight: 4000,
+      elementTop: 40,
+      elementHeight: 100,
+    });
+    expect(top).toBe(0);
+  });
+
+  it("clamps to the maximum scrollable offset", () => {
+    const top = scrollToMessageWithin({
+      scrollTop: 0,
+      clientHeight: 600,
+      scrollHeight: 1000,
+      elementTop: 990,
+      elementHeight: 100,
+    });
+    expect(top).toBe(400);
+  });
+
+  it("returns zero when the container cannot scroll", () => {
+    expect(
+      scrollToMessageWithin({
+        scrollTop: 0,
+        clientHeight: 600,
+        scrollHeight: 600,
+        elementTop: 300,
+        elementHeight: 80,
+      }),
+    ).toBe(0);
+  });
+
+  it("does not cut the block top out of view for a very tall block", () => {
+    const elementTop = 2000;
+    const top = scrollToMessageWithin({
+      scrollTop: 0,
+      clientHeight: 600,
+      scrollHeight: 6000,
+      elementTop,
+      elementHeight: 1600,
+    });
+    // 高块优先露顶部：块顶在视口内的位置至少留 pad（elementTop - top >= pad）
+    expect(elementTop - top).toBeGreaterThanOrEqual(16);
   });
 });
