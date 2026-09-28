@@ -49,6 +49,7 @@
           <span class="git-ahead-meta-hint">{{ expandedHash === entry.hash ? "收起" : "查看变更" }}</span>
         </button>
         <div v-if="expandedHash === entry.hash" class="git-ahead-detail">
+          <div v-if="entry.message" class="git-ahead-detail-msg">{{ entry.message }}</div>
           <div v-if="!entry.files.length" class="git-ahead-empty">无文件变更</div>
           <button
             v-for="file in entry.files"
@@ -219,6 +220,16 @@ function toggleCommit(hash: string): void {
   min-width: 0;
   flex: 1;
 }
+/* 展开时标题行完整换行显示，不再单行省略 */
+.git-ahead-item--open .git-ahead-msg {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+.git-ahead-item--open .git-ahead-entry-head {
+  align-items: flex-start;
+}
 .git-log-refs {
   display: flex;
   gap: 3px;
@@ -279,6 +290,16 @@ function toggleCommit(hash: string): void {
   padding: 4px 0 2px 10px;
   border-left: 1px solid rgba(255, 255, 255, 0.08);
   margin-left: 5px;
+}
+.git-ahead-detail-msg {
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(230, 237, 243, 0.92);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 2px 6px 6px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 .git-ahead-file {
   display: flex;

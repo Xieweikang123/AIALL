@@ -92,9 +92,13 @@ export function usePanelLayout(workspaceRef: Ref<HTMLElement | null>) {
   /**
    * 轨迹面板开着时会占掉工作区最右一列，会话面板的最大宽度得把它让出来，
    * 否则「用户手调过的宽度 + 轨迹列」会把编辑器压到 EDITOR_MIN_WIDTH 以下。
+   *
+   * 放大态铺满工作区（absolute 覆盖，不占布局流），**不**预留列宽 ——
+   * 否则会白发地把会话面板算窄，放大还原后也不会还回来。
    */
   function getTracePanelReserve(): number {
-    return useAgentTraceDrawerState().open ? AGENT_TRACE_PANEL_WIDTH : 0;
+    const trace = useAgentTraceDrawerState();
+    return trace.open && !trace.maximized ? AGENT_TRACE_PANEL_WIDTH : 0;
   }
 
   function getChatPanelMaxWidth(): number {

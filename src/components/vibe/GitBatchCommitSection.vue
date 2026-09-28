@@ -46,6 +46,7 @@
           <span v-if="ungroupedFileCount" class="git-batch-unassigned-hint"> · {{ ungroupedFileCount }} 个未分组</span>
         </span>
         <button
+          v-if="batchGroups.length > 1"
           type="button"
           class="small git-batch-all-btn"
           :class="canCommitAllBatches ? 'primary' : 'secondary'"
@@ -82,6 +83,7 @@
             'git-batch-group--done': batchCommittingIndex !== null && batchCommittingIndex > i,
             'git-batch-group--ready': !!batchMessages[i]?.trim(),
             'git-batch-group--unassigned': isUnassignedGroup(group),
+            'git-batch-group--single': batchGroups.length === 1,
           }"
           :style="{ '--batch-accent': batchGroupAccent(i) }"
         >

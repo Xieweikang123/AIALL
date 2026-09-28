@@ -302,44 +302,7 @@
           {{ chatStoreSyncMessage }}
         </p>
         <div class="sessions-scroll">
-          <div v-if="unassignedSessions.length" class="sessions-unassigned">
-            <button
-              type="button"
-              class="sessions-unassigned-header"
-              @click="unassignedOpen = !unassignedOpen"
-            >
-              <svg
-                class="session-group-chevron"
-                :class="{ collapsed: !unassignedOpen }"
-                width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"
-              >
-                <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              <span>未认领会话</span>
-              <span class="session-group-count">{{ unassignedSessions.length }}</span>
-            </button>
-            <p class="sessions-unassigned-hint">来自旧版全局存档、无法确定归属的历史会话。导入后会出现在当前项目的会话列表。</p>
-            <ul v-if="unassignedOpen" class="session-group-list">
-              <li
-                v-for="u in unassignedSessions"
-                :key="u.id"
-                class="session-item"
-              >
-                <span class="session-item-title" :title="u.title">{{ u.title }}</span>
-                <div class="session-item-trailing">
-                  <button
-                    type="button"
-                    class="sessions-unassigned-import"
-                    :disabled="unassignedImporting === u.id"
-                    @click="$emit('import-unassigned-session', u.id)"
-                  >
-                    {{ unassignedImporting === u.id ? "导入中…" : "导入" }}
-                  </button>
-                </div>
-              </li>
-            </ul>
-          </div>
-          <div v-if="!sessionList.length && !unassignedSessions.length" class="sessions-empty">
+          <div v-if="!sessionList.length" class="sessions-empty">
             <div class="sessions-empty-icon" aria-hidden="true">
               <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
                 <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -536,8 +499,6 @@ interface Props {
   sessionSendingIds?: string[];
   syncingChatStore?: boolean;
   chatStoreSyncMessage?: string;
-  unassignedSessions?: Array<{ id: string; title: string; updatedAt: string; messageCount: number }>;
-  unassignedImporting?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -546,11 +507,7 @@ const props = withDefaults(defineProps<Props>(), {
   sessionSendingIds: () => [],
   syncingChatStore: false,
   chatStoreSyncMessage: "",
-  unassignedSessions: () => [],
-  unassignedImporting: "",
 });
-
-const unassignedOpen = ref(false);
 
 const emit = defineEmits<{
   (e: "update:gitPanelMode", mode: "files" | "git" | "sessions" | "project"): void;
@@ -570,7 +527,6 @@ const emit = defineEmits<{
   (e: "copy-session-info", session: VibeChatSessionMeta): void;
   (e: "copy-session-name-path", session: VibeChatSessionMeta): void;
   (e: "sync-chat-store-to-disk"): void;
-  (e: "import-unassigned-session", sessionId: string): void;
   (e: "toggle-favorite", sessionId: string): void;
   (e: "rename-session", sessionId: string, newTitle: string): void;
 }>();
@@ -1240,58 +1196,6 @@ const filteredGroupedSessions = computed<SessionGroup[]>(() => {
 
 .sessions-scroll:hover::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.1);
-}
-
-.sessions-unassigned {
-  margin: 0 8px 8px;
-  padding: 8px;
-  border-radius: 6px;
-  border: 1px dashed rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.02);
-}
-
-.sessions-unassigned-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 0;
-  border: none;
-  background: none;
-  color: rgba(255, 255, 255, 0.75);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  text-align: left;
-}
-
-.sessions-unassigned-hint {
-  margin: 6px 0 4px;
-  font-size: 11px;
-  line-height: 1.5;
-  color: rgba(139, 148, 158, 0.65);
-}
-
-.sessions-unassigned-import {
-  flex-shrink: 0;
-  padding: 2px 8px;
-  border-radius: 4px;
-  border: 1px solid rgba(88, 166, 255, 0.35);
-  background: rgba(88, 166, 255, 0.12);
-  color: rgba(88, 166, 255, 0.95);
-  font-size: 11px;
-  cursor: pointer;
-  transition: background 0.12s, border-color 0.12s;
-}
-
-.sessions-unassigned-import:hover:not(:disabled) {
-  background: rgba(88, 166, 255, 0.22);
-  border-color: rgba(88, 166, 255, 0.5);
-}
-
-.sessions-unassigned-import:disabled {
-  opacity: 0.55;
-  cursor: default;
 }
 
 .sessions-empty {

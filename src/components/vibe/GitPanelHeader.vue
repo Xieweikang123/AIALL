@@ -12,6 +12,15 @@
       <div class="git-header-actions">
         <button
           type="button"
+          class="git-remote-link"
+          :disabled="!remoteBrowserUrl || !gitRemotes.length"
+          title="在浏览器打开远程仓库"
+          @click="$emit('open-remote', remoteBrowserUrl)"
+        >
+          ↗ 仓库
+        </button>
+        <button
+          type="button"
           class="ghost tiny"
           :class="{ active: stashSectionOpen }"
           title="贮藏工作区修改"
@@ -44,22 +53,13 @@
         <button type="button" class="git-remote-btn" :class="{ 'git-remote-btn--loading': gitRemoteAction === 'fetch' }" :disabled="!!gitRemoteAction || !gitRemotes.length" @click="$emit('do-fetch')">
           Fetch
         </button>
-        <button type="button" class="git-remote-btn git-remote-btn--pull" :class="{ 'git-remote-btn--loading': gitRemoteAction === 'pull' }" :disabled="!!gitRemoteAction || !gitRemotes.length" @click="$emit('do-pull')">
+        <button type="button" class="git-remote-btn" :class="{ 'git-remote-btn--loading': gitRemoteAction === 'pull' }" :disabled="!!gitRemoteAction || !gitRemotes.length" @click="$emit('do-pull')">
           Pull
         </button>
         <button type="button" class="git-remote-btn git-remote-btn--push" :class="{ 'git-remote-btn--loading': gitRemoteAction === 'push', 'git-remote-btn--push--loading': gitRemoteAction === 'push' }" :disabled="!!gitRemoteAction || !gitRemotes.length" @click="$emit('do-push')">
           Push
         </button>
       </div>
-      <button
-        type="button"
-        class="git-remote-link"
-        :disabled="!remoteBrowserUrl || !gitRemotes.length"
-        title="在浏览器打开远程仓库"
-        @click="$emit('open-remote', remoteBrowserUrl)"
-      >
-        ↗ 仓库
-      </button>
     </div>
     <GitAheadCommits
       :ahead="gitAhead"
