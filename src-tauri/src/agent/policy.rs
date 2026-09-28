@@ -1,8 +1,3 @@
-pub use super::context_limits::{
-    ASK_MAX_CONTEXT_CHARS, CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS,
-    EXECUTE_PLAN_MAX_CONTEXT_CHARS, MAX_AGENT_CONTEXT_CHARS, PLAN_MAX_CONTEXT_CHARS,
-};
-
 pub const MAX_TOTAL_EXPLORE_TURNS: u32 = 30;
 pub const MAX_TOTAL_EXPLORE_TURNS_SOFT: u32 = 25;
 pub const SAME_ISSUE_FOLLOWUP_MAX_TOTAL_EXPLORE: u32 = 20;
@@ -38,7 +33,6 @@ pub struct AgentRunPolicy {
     pub disable_segment_auto_extend: bool,
     pub explore_hard_cap: u32,
     pub explore_soft_cap: u32,
-    pub max_context_chars: usize,
     pub user_recently_reported_failure: bool,
 }
 
@@ -479,18 +473,6 @@ pub fn resolve_run_policy(input: ResolvePolicyInput) -> AgentRunPolicy {
         }
     });
 
-    let max_context_chars = if input.is_execute_plan {
-        EXECUTE_PLAN_MAX_CONTEXT_CHARS
-    } else if input.is_plan_explore {
-        PLAN_MAX_CONTEXT_CHARS
-    } else if consultative_ui_appearance_run {
-        CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS
-    } else if is_read_only_agent {
-        ASK_MAX_CONTEXT_CHARS
-    } else {
-        MAX_AGENT_CONTEXT_CHARS
-    };
-
     AgentRunPolicy {
         implement_follow_up_run,
         same_issue_follow_up_run,
@@ -519,7 +501,6 @@ pub fn resolve_run_policy(input: ResolvePolicyInput) -> AgentRunPolicy {
         disable_segment_auto_extend: automated_bug_fix_run,
         explore_hard_cap,
         explore_soft_cap,
-        max_context_chars,
         user_recently_reported_failure,
     }
 }
@@ -738,7 +719,6 @@ mod tests {
         assert!(!policy.consultative_vision_run);
         assert!(!policy.automated_bug_fix_run);
         assert!(!policy.consultative_ui_appearance_run);
-        assert_eq!(policy.max_context_chars, ASK_MAX_CONTEXT_CHARS);
         assert_eq!(policy.explore_hard_cap, MAX_TOTAL_EXPLORE_TURNS);
         assert_eq!(policy.explore_soft_cap, MAX_TOTAL_EXPLORE_TURNS_SOFT);
     }
@@ -753,29 +733,6 @@ mod tests {
         assert!(!policy.implement_follow_up_run);
         assert!(!policy.read_only_build_run);
         assert!(!policy.consultative_vision_run);
-        assert_eq!(policy.max_context_chars, MAX_AGENT_CONTEXT_CHARS);
-    }
-
-    #[test]
-    fn test_resolve_run_policy_execute_plan() {
-        let input = ResolvePolicyInput {
-            mode: AgentMode::Build,
-            is_execute_plan: true,
-            ..Default::default()
-        };
-        let policy = resolve_run_policy(input);
-        assert_eq!(policy.max_context_chars, EXECUTE_PLAN_MAX_CONTEXT_CHARS);
-    }
-
-    #[test]
-    fn test_resolve_run_policy_plan_explore() {
-        let input = ResolvePolicyInput {
-            mode: AgentMode::Plan,
-            is_plan_explore: true,
-            ..Default::default()
-        };
-        let policy = resolve_run_policy(input);
-        assert_eq!(policy.max_context_chars, PLAN_MAX_CONTEXT_CHARS);
     }
 
     #[test]
@@ -874,10 +831,6 @@ mod tests {
         assert!(policy.read_only_build_run);
         assert!(policy.consultative_vision_run);
         assert!(policy.consultative_ui_appearance_run);
-        assert_eq!(
-            policy.max_context_chars,
-            CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS
-        );
     }
 
     #[test]
@@ -989,7 +942,6 @@ mod tests {
         let policy = resolve_run_policy(input);
         assert!(!policy.implement_follow_up_run);
         assert!(!policy.read_only_build_run);
-        assert_eq!(policy.max_context_chars, ASK_MAX_CONTEXT_CHARS);
     }
 
     #[test]

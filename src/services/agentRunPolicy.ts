@@ -20,22 +20,6 @@ import {
   type QuotedAmendIntent,
 } from "../orchestration/generic/quotedAmendIntent";
 
-import {
-  ASK_MAX_CONTEXT_CHARS,
-  CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS,
-  EXECUTE_PLAN_MAX_CONTEXT_CHARS,
-  MAX_AGENT_CONTEXT_CHARS,
-  PLAN_MAX_CONTEXT_CHARS,
-} from "../../shared/agentContextLimits";
-
-export {
-  ASK_MAX_CONTEXT_CHARS,
-  CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS,
-  EXECUTE_PLAN_MAX_CONTEXT_CHARS,
-  MAX_AGENT_CONTEXT_CHARS,
-  PLAN_MAX_CONTEXT_CHARS,
-};
-
 /** Consolidated routing flags — single source for vibeAgent turn loop. */
 export interface AgentRunPolicy {
   implementFollowUpRun: boolean;
@@ -63,7 +47,6 @@ export interface AgentRunPolicy {
   disableSegmentAutoExtend: boolean;
   exploreHardCap: number;
   exploreSoftCap: number;
-  maxContextChars: number;
   effectiveTaskPrompt: string;
   resumeOriginalTask: string | null;
   userRecentlyReportedFailure: boolean;
@@ -217,16 +200,6 @@ export function resolveAgentRunPolicy(input: ResolveAgentRunPolicyInput): AgentR
     !implementFollowUpRun &&
     Boolean(userIntent.needsClarification);
 
-  const maxContextChars = isExecutePlan
-    ? EXECUTE_PLAN_MAX_CONTEXT_CHARS
-    : isPlanExplore
-      ? PLAN_MAX_CONTEXT_CHARS
-      : consultativeUiAppearanceRun
-        ? CONSULTATIVE_UI_APPEARANCE_MAX_CONTEXT_CHARS
-        : isReadOnlyAgent
-          ? ASK_MAX_CONTEXT_CHARS
-          : MAX_AGENT_CONTEXT_CHARS;
-
   return {
     implementFollowUpRun,
     sameIssueFollowUpRun,
@@ -253,7 +226,6 @@ export function resolveAgentRunPolicy(input: ResolveAgentRunPolicyInput): AgentR
     disableSegmentAutoExtend: automatedBugFixRun,
     exploreHardCap,
     exploreSoftCap,
-    maxContextChars,
     effectiveTaskPrompt,
     resumeOriginalTask,
     userRecentlyReportedFailure,

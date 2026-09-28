@@ -622,9 +622,8 @@ async fn should_skip_empty_session_overwrite(file: &Path, incoming: &Value) -> b
 
 /// One-time migration of the pre-per-project layout: the root dir held a single
 /// `chat-store.json` naming one project. Move exactly the sessions that index
-/// listed into that project's bucket. Everything else in the root is of unknown
-/// ownership (the old global store mixed projects), so it goes to `_unassigned`
-/// where the user can import it instead of being lost.
+/// listed into that project's bucket. Files the index never claimed stay put in
+/// the root.
 async fn migrate_legacy_root_store(project_path: &str) {
     if project_path.trim().is_empty() || normalize_project_key(project_path).is_empty() {
         return;
@@ -679,7 +678,7 @@ async fn migrate_legacy_root_store_at(project_path: &str, root: &Path, target: &
         let _ = tokio::fs::rename(&from, &to).await;
     }
     // Images are keyed by session id, so only the owned sessions' image folders
-    // travel with the project. The rest follow their session to `_unassigned`.
+    // travel with the project.
     let legacy_images = root.join("images");
     if tokio::fs::try_exists(&legacy_images).await.unwrap_or(false) {
         let target_images = target.join("images");
@@ -713,29 +712,6 @@ async fn migrate_legacy_root_store_at(project_path: &str, root: &Path, target: &
     let index = build_index_at(target, project_path, previous.as_ref(), &tombstones);
     let _ = write_json_atomic(&store_file_in(target), &index).await;
 
-    // Unclaimed files have unknown ownership: park them in the import pool.
-    // Their image folders ride along so the images stay reachable after import.
-    let leftover: Vec<(String, PathBuf)> = scan_session_files_sync(&root);
-    if !leftover.is_empty() {
-        let unassigned = root.join("_unassigned");
-        let _ = tokio::fs::create_dir_all(&unassigned).await;
-        let unassigned_images = unassigned.join("images");
-        let _ = tokio::fs::create_dir_all(&unassigned_images).await;
-        for (id, path) in leftover {
-            let _ = tokio::fs::rename(path, unassigned.join(session_file_name(&id))).await;
-            let from = root.join("images").join(safe_file_part(&id));
-            if tokio::fs::try_exists(&from).await.unwrap_or(false) {
-                let to = unassigned_images.join(safe_file_part(&id));
-                let _ = tokio::fs::create_dir_all(&to).await;
-                if let Ok(mut rd) = tokio::fs::read_dir(&from).await {
-                    while let Ok(Some(entry)) = rd.next_entry().await {
-                        let name = entry.file_name();
-                        let _ = tokio::fs::rename(entry.path(), to.join(name)).await;
-                    }
-                }
-            }
-        }
-    }
     let done = root.join("chat-store.migrated.json");
     let _ = tokio::fs::rename(&legacy_store, done).await;
 }
@@ -988,83 +964,6 @@ pub async fn chat_image_file_bytes(project_path: &str, ref_path: &str) -> Result
     let full = image_ref_abs(&chat_dir(project_path), ref_path)
         .ok_or_else(|| "invalid image ref path".to_string())?;
     tokio::fs::read(&full).await.map_err(|e| e.to_string())
-}
-
-fn unassigned_dir() -> PathBuf {
-    chat_store_root().join("_unassigned")
-}
-
-/// Sessions whose owning project could not be determined during migration.
-pub async fn chat_unassigned_list() -> Value {
-    json!({ "ok": true, "sessions": list_unassigned_in(&unassigned_dir()) })
-}
-
-fn list_unassigned_in(dir: &Path) -> Vec<Value> {
-    let mut sessions: Vec<Value> = Vec::new();
-    for (id, path) in scan_session_files_sync(dir) {
-        if let Some(meta) = meta_from_file(&id, &path, None) {
-            sessions.push(meta);
-        }
-    }
-    sessions.sort_by(|a, b| {
-        let au = a.get("updatedAt").and_then(|v| v.as_str()).unwrap_or("");
-        let bu = b.get("updatedAt").and_then(|v| v.as_str()).unwrap_or("");
-        bu.cmp(au)
-    });
-    sessions
-}
-
-/// Adopt an unassigned session into `project_path`, moving its file and images.
-pub async fn chat_unassigned_import(project_path: &str, session_id: &str) -> Value {
-    let id = session_id.trim();
-    if id.is_empty() {
-        return json!({ "ok": false, "error": "缺少会话 id" });
-    }
-    if normalize_project_key(project_path).is_empty() {
-        return json!({ "ok": false, "error": "缺少项目路径" });
-    }
-    let from = unassigned_dir().join(session_file_name(id));
-    if !tokio::fs::try_exists(&from).await.unwrap_or(false) {
-        return json!({ "ok": false, "error": "未认领会话不存在" });
-    }
-    ensure_project_bucket(project_path).await;
-    let result = import_unassigned_into(&unassigned_dir(), &chat_dir(project_path), id).await;
-    if !result.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
-        return result;
-    }
-    let store_path = store_file(project_path);
-    let previous = read_json_file_sync(&store_path);
-    let index = build_index_from_disk(project_path, previous.as_ref());
-    let _ = write_json_atomic(&store_path, &index).await;
-    json!({ "ok": true, "sessionCount": index.get("sessions").and_then(|s| s.as_array()).map(|a| a.len()).unwrap_or(0) })
-}
-
-async fn import_unassigned_into(from_dir: &Path, target: &Path, id: &str) -> Value {
-    let from = from_dir.join(session_file_name(id));
-    if !tokio::fs::try_exists(&from).await.unwrap_or(false) {
-        return json!({ "ok": false, "error": "未认领会话不存在" });
-    }
-    let _ = tokio::fs::create_dir_all(target).await;
-    let to = target.join(session_file_name(id));
-    if tokio::fs::try_exists(&to).await.unwrap_or(false) {
-        return json!({ "ok": false, "error": "当前项目已有同 id 会话" });
-    }
-    if let Err(e) = tokio::fs::rename(&from, &to).await {
-        return json!({ "ok": false, "error": e.to_string() });
-    }
-    // Session ids are unique, so the image folder is unambiguous.
-    let images_from = from_dir.join("images").join(safe_file_part(id));
-    if tokio::fs::try_exists(&images_from).await.unwrap_or(false) {
-        let images_to = target.join("images").join(safe_file_part(id));
-        let _ = tokio::fs::create_dir_all(&images_to).await;
-        if let Ok(mut rd) = tokio::fs::read_dir(&images_from).await {
-            while let Ok(Some(entry)) = rd.next_entry().await {
-                let name = entry.file_name();
-                let _ = tokio::fs::rename(entry.path(), images_to.join(name)).await;
-            }
-        }
-    }
-    json!({ "ok": true })
 }
 
 #[cfg(test)]
@@ -1469,8 +1368,8 @@ mod tests {
         assert_eq!(message_array_len(&stored), 3, "stored history preserved");
     }
 
-    /// A fake "AppData root" with its own project dirs, so migration/unassigned
-    /// flows can be exercised without touching the real AppData store.
+    /// A fake "AppData root" with its own project dirs, so migration flows can
+    /// be exercised without touching the real AppData store.
     struct TempRoot(PathBuf);
 
     impl TempRoot {
@@ -1505,7 +1404,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn migration_moves_owned_sessions_and_parks_the_rest() {
+    async fn migration_moves_owned_sessions_and_leaves_the_rest() {
         let root = TempRoot::new("migrate").await;
         let project = "D:/projects/migrate-me".to_string();
         let target = root.0.join("bucket");
@@ -1529,8 +1428,8 @@ mod tests {
         assert!(target.join(session_file_name("owned")).exists(), "owned moved in");
         assert!(!root.0.join(session_file_name("owned")).exists(), "owned left root");
         assert!(
-            root.0.join("_unassigned").join(session_file_name("other")).exists(),
-            "unknown ownership parked for import"
+            root.0.join(session_file_name("other")).exists(),
+            "unclaimed sessions stay in the root, never parked"
         );
         assert!(
             root.0.join("chat-store.migrated.json").exists(),
@@ -1558,46 +1457,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unassigned_list_and_import_roundtrip() {
-        let root = TempRoot::new("unassigned").await;
-        let from = root.0.join("_unassigned");
-        let target = root.0.join("bucket");
-        write_session(&from, "lost", "recover me").await;
-        let img_dir = from.join("images").join(safe_file_part("lost"));
-        tokio::fs::create_dir_all(&img_dir).await.unwrap();
-        tokio::fs::write(img_dir.join("m-0.png"), b"png").await.unwrap();
-
-        let listed = list_unassigned_in(&from);
-        assert_eq!(listed.len(), 1);
-        assert_eq!(
-            listed[0].get("id").and_then(|v| v.as_str()),
-            Some("lost"),
-            "list exposes the session id for import"
-        );
-
-        let imported = import_unassigned_into(&from, &target, "lost").await;
-        assert_eq!(imported.get("ok"), Some(&json!(true)));
-        assert!(target.join(session_file_name("lost")).exists());
-        assert!(
-            target
-                .join("images")
-                .join(safe_file_part("lost"))
-                .join("m-0.png")
-                .exists(),
-            "images follow the session on import"
-        );
-        assert!(list_unassigned_in(&from).is_empty(), "imported session leaves the pool");
-        // Re-importing the same id must fail rather than overwrite.
-        let again = import_unassigned_into(&from, &target, "lost").await;
-        assert_eq!(again.get("ok"), Some(&json!(false)));
-    }
-
-    #[tokio::test]
     async fn migration_recovers_orphans_for_the_owning_project() {
         // Mirrors the real-world state: the legacy index named one project but the
         // root held far more files than it listed. Listed ones move in (and the new
-        // index rebuilds from them); unlisted ones wait in `_unassigned` instead of
-        // silently disappearing from the UI.
+        // index rebuilds from them); unlisted ones stay in the root untouched.
         let root = TempRoot::new("migrate-orphans").await;
         let project = "D:/projects/aiall".to_string();
         let target = root.0.join("bucket");
@@ -1641,17 +1504,12 @@ mod tests {
         owned.sort();
         assert_eq!(owned, vec!["listed-a".to_string(), "listed-b".to_string()]);
 
-        let unassigned = list_unassigned_in(&root.0.join("_unassigned"));
-        let mut unassigned_ids: Vec<String> = unassigned
-            .iter()
-            .filter_map(|s| s.get("id").and_then(|v| v.as_str()).map(str::to_string))
-            .collect();
-        unassigned_ids.sort();
-        assert_eq!(
-            unassigned_ids,
-            vec!["orphan-1".to_string(), "orphan-2".to_string(), "orphan-3".to_string()],
-            "orphans must stay recoverable, not vanish"
-        );
+        for id in ["orphan-1", "orphan-2", "orphan-3"] {
+            assert!(
+                root.0.join(session_file_name(id)).exists(),
+                "unclaimed session {id} stays in the root"
+            );
+        }
     }
 
     #[tokio::test]
