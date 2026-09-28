@@ -764,7 +764,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     maybePersistChat,
     maybeScrollChat,
     dequeuePendingPromptAndRun,
-    clearPendingAgentEvents: () => sseConnection.clearPendingAgentEvents(),
+    clearPendingAgentEvents: (sessionId?: string) => sseConnection.clearPendingAgentEvents(sessionId),
     isRunVisible,
     mergeDeferredCaptureIntoMsg,
     appendStatusLog,
@@ -783,6 +783,8 @@ export function useAgentRun(deps: UseAgentRunDeps) {
 
   const sseConnection = useAgentSSEConnection({ handleAgentEvent });
   const { clearPendingAgentEvents, enqueueAgentEvent } = sseConnection;
+  /** Session teardown / unmount: drop every session's queued events. */
+  const clearAllPendingAgentEvents = () => clearPendingAgentEvents();
 
   function bindAgentRunInvoke(
     sessionId: string,
@@ -814,9 +816,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
         pendingSettleTimerRef.current = null;
       }
       cleanupStreamPatchTimers();
-      if (sseConnection.agentEventFlushRaf) {
-        cancelAnimationFrame(sseConnection.agentEventFlushRaf);
-      }
+      clearAllPendingAgentEvents();
     });
   }
   function interruptSessionRun(sessionId: string, options?: { logStatus?: boolean; reason?: string }) {
@@ -835,7 +835,7 @@ export function useAgentRun(deps: UseAgentRunDeps) {
     if (!hmrInterrupt) {
       clearPendingAgentRun();
     }
-    clearPendingAgentEvents();
+    clearPendingAgentEvents(sessionId);
 
     const run = runManager.get(sessionId);
     if (!run) {

@@ -80,6 +80,11 @@ export interface UseAgentEventHandlersDeps {
   flushMinimizedRunUiPatch: (sessionId: string, msgId: string, msg: VibeChatMessage) => void;
   buildRunUiFullPatch: (msg: VibeChatMessage) => Partial<VibeChatMessage>;
   clearStreamDeltaBuffer: () => void;
+  /**
+   * Drop queued SSE events. Pass a `sessionId` to scope it to one run (done /
+   * interrupt); omit to clear every session (teardown).
+   */
+  clearPendingAgentEvents: (sessionId?: string) => void;
   enqueueStreamDelta: (msgId: string, msg: VibeChatMessage, delta: string) => void;
   enqueueReasoningDelta: (msgId: string, msg: VibeChatMessage, delta: string) => void;
   formatLiveStatus: (live: AgentRunLiveState) => string;
@@ -104,7 +109,6 @@ export interface UseAgentEventHandlersDeps {
   maybePersistChat: (sessionId: string) => void;
   maybeScrollChat: (sessionId: string) => void;
   dequeuePendingPromptAndRun: () => void;
-  clearPendingAgentEvents: () => void;
   isRunVisible: (sessionId: string) => boolean;
   mergeDeferredCaptureIntoMsg: (sessionId: string, msg: VibeChatMessage) => void;
   appendStatusLog: (msg: VibeChatMessage, line: string) => void;
@@ -802,7 +806,7 @@ function handleDoneEvent(event: EventOf<"done">, assistantMsg: VibeChatMessage, 
     assistantMsg.agentContinueCount = undefined;
     assistantMsg.activityExpanded = false;
     stallRecovery.stopAgentUiTick();
-    clearPendingAgentEvents();
+    clearPendingAgentEvents(sessionId);
     finishRunSession(sessionId);
     patchAssistantMsg(msgId, {
       ...assistantTransientUiClearPatch(),
