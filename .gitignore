@@ -47,6 +47,7 @@ pi-ref/
 
 ## debug artifacts
 .debug/
+.tmp-trace/
 .vibe-chat-debug.json
 scripts/tmp-*
 
