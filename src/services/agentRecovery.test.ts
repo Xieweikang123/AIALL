@@ -589,8 +589,8 @@ describe("canResumeAgentRun", () => {
     ).toBe(true);
   });
 
-  it("allows resume after pause but not after manual stop", () => {
-    // 暂停（非停止）→ 可恢复
+  it("allows resume for soft-interrupt reasons but not after manual stop", () => {
+    // 非停止的软中断（如历史「已暂停，可继续」）→ 可恢复
     expect(
       canResumeAgentRun({
         agentFailed: true,

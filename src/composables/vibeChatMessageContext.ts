@@ -16,6 +16,10 @@ export interface VibeChatMessageItem {
   peakContextTokens?: number;
   /** 供应商上报的输出 token 总量（跨 turn 累加）；缺省时回退字符口径 streamChars。 */
   completionTokens?: number;
+  /** 最近一轮首字延迟（ms）。 */
+  ttftMs?: number;
+  /** 本次运行中可测得的解码窗口之和（ms）：与 completionTokens 同源配对才可用于输出速度。 */
+  genMs?: number;
   writtenFiles?: string[];
   planFilePath?: string;
   reverted?: boolean;
@@ -76,7 +80,6 @@ export interface VibeChatMessageContext {
   resolveAgentResumeButtonLabel: (msg: VibeChatMessageItem) => string;
   isAssistantStalled: (msg: VibeChatMessageItem) => boolean;
   stopAgent: () => void;
-  pauseAgent: () => void;
   forceRecoverStalledRun: (messageId: string) => void;
   recoverableAgentErrorHint: (msg: VibeChatMessageItem, reason: string) => string;
   agentAbortDisplayReason: (msg: VibeChatMessageItem) => string;

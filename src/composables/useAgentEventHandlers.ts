@@ -369,6 +369,15 @@ function handleTurnResponseEvent(event: EventOf<"turn_response">, assistantMsg: 
     if (u.completionTokens && u.completionTokens > 0) {
       assistantMsg.completionTokens = (assistantMsg.completionTokens ?? 0) + u.completionTokens;
     }
+    // Speed probes: latest turn's TTFT (a latency, not cumulative) and the summed
+    // decode window. Consumers must pair token+window per turn (collectOutputSpeed),
+    // so summing here would break the pairing if a turn reports only one of the two.
+    if (u.ttftMs !== undefined) assistantMsg.ttftMs = u.ttftMs;
+    // A turn without a measurable decode window (single-burst output) reports 0/undefined;
+    // keep the first real window instead of accumulating a meaningless 0.
+    if (u.genMs !== undefined && u.genMs > 0) {
+      assistantMsg.genMs = (assistantMsg.genMs ?? 0) + u.genMs;
+    }
   }
   if (shouldMinimizeRunUiPatch(assistantMsg)) {
     scheduleMinimizedRunUiPatch(sessionId, msgId, "full");
