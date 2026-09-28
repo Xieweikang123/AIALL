@@ -95,6 +95,10 @@ export type VibeAgentEvent =
           cacheCreationTokens?: number;
           /** Best-effort cache-hit ratio in [0,1], when the provider reported enough data. */
           hitRatio?: number;
+          /** Time-to-first-token in ms (request sent → first output delta). */
+          ttftMs?: number;
+          /** Decode window in ms (first output delta → stream end); denominator for output speed. */
+          genMs?: number;
         };
       };
     }

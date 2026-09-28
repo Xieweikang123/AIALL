@@ -638,6 +638,10 @@ pub async fn agent_run(
             }
         }
 
+        // Anchor TTFT before dispatching the request so connect / queue / first-byte
+        // wait are included — capturing it inside the stream reader would only measure
+        // the gap after response headers, which is near zero for most providers.
+        let stream_started_at = std::time::Instant::now();
         let stream_resp = ai::chat_completion_stream_with_retry(
             &request.endpoint,
             request.api_key.as_deref(),
@@ -671,6 +675,7 @@ pub async fn agent_run(
             &cancel,
             &run_state.written_files,
             run_state.segment.actual_turns,
+            stream_started_at,
         )
         .await?
         else {
@@ -713,7 +718,9 @@ pub async fn agent_run(
                   "cachedTokens": turn_output.usage.cached_tokens,
                   "cacheReadTokens": turn_output.usage.cache_read_tokens,
                   "cacheCreationTokens": turn_output.usage.cache_creation_tokens,
-                  "hitRatio": turn_output.usage.hit_ratio()
+                  "hitRatio": turn_output.usage.hit_ratio(),
+                  "ttftMs": turn_output.ttft_ms,
+                  "genMs": turn_output.gen_ms
                 }
               }
             }),

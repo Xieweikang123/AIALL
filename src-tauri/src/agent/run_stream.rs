@@ -66,6 +66,15 @@ pub(crate) struct ModelTurnOutput {
     pub usage: UsageStats,
     /// Provider reasoning/thinking channel text for this turn (empty when unsupported).
     pub reasoning_text: String,
+    /// Time-to-first-token in ms: request sent → first output delta (content / reasoning /
+    /// tool-call args). `None` when the stream produced no output token.
+    pub ttft_ms: Option<u64>,
+    /// Decode window in ms: first output delta → stream end. This is the denominator for
+    /// output speed (`completion_tokens / gen_ms`), so it stays separate from `ttft_ms`.
+    /// `None`/`0` when output arrived as a single burst (first and last delta coincide),
+    /// i.e. no measurable window — consumers must only pair it with a turn whose
+    /// `completion_tokens` was reported in the same turn.
+    pub gen_ms: Option<u64>,
 }
 
 /// Extract a reasoning/thinking delta from an OpenAI-compatible `delta` object.
@@ -136,6 +145,9 @@ fn extract_structured_options(text: &str) -> (String, Vec<Value>) {
 
 /// Batch content deltas before sending via IPC to reduce per-character overhead.
 /// Flushes when: buffer >= 80 chars, 8ms elapsed, newline encountered, or stream ends.
+///
+/// Output-speed timing lives in `StreamTiming`, probed at parse time, so the 8ms /
+/// 80-char batching here does not inflate TTFT or the decode window.
 struct DeltaBatcher {
     buffer: String,
     last_flush: Instant,
@@ -177,13 +189,71 @@ impl DeltaBatcher {
     }
 }
 
+/// First / last output-delta timestamps for a single model stream.
+///
+/// We probe at parse time (every content / reasoning / tool-call chunk) rather than at
+/// IPC flush time, so TTFT is not inflated by the `DeltaBatcher`'s 8ms / 80-char batching.
+#[derive(Default)]
+struct StreamTiming {
+    /// Stream start: when the HTTP request was dispatched, captured by the caller
+    /// before connection setup. This is the reference for TTFT, so a slow connect or
+    /// first-byte wait counts toward it.
+    started_at: Option<Instant>,
+    /// First output delta of any channel.
+    first_token_at: Option<Instant>,
+    /// Most recent output delta of any channel.
+    last_delta_at: Option<Instant>,
+}
+
+impl StreamTiming {
+    /// `started_at` is the moment the HTTP request was dispatched (captured by the
+    /// caller before connection setup), so TTFT is the full network wait, not just the
+    /// interval after response headers arrived.
+    fn start(started_at: Instant) -> Self {
+        Self {
+            started_at: Some(started_at),
+            ..Default::default()
+        }
+    }
+
+    /// Mark that the model produced output. First call sets TTFT; every call advances
+    /// the decode-window end. `reasoning` is included because reasoning token chunks are
+    /// a valid speed signal too (for providers that stream them).
+    fn note_output(&mut self) {
+        let now = Instant::now();
+        if self.first_token_at.is_none() {
+            self.first_token_at = Some(now);
+        }
+        self.last_delta_at = Some(now);
+    }
+
+    fn ttft_ms(&self) -> Option<u64> {
+        match (self.started_at, self.first_token_at) {
+            (Some(start), Some(first)) => Some(first.duration_since(start).as_millis() as u64),
+            _ => None,
+        }
+    }
+
+    fn gen_ms(&self) -> Option<u64> {
+        match (self.first_token_at, self.last_delta_at) {
+            (Some(first), Some(last)) => Some(last.duration_since(first).as_millis() as u64),
+            _ => None,
+        }
+    }
+}
+
 /// Returns `None` when the run was cancelled mid-stream.
+///
+/// `stream_started_at` must be captured **before** the HTTP request is dispatched (i.e.
+/// before connection setup), so TTFT covers connect + queue + first-byte wait instead of
+/// only the gap after response headers arrived.
 pub(crate) async fn consume_model_sse_stream(
     stream_resp: Response,
     channel: &Channel<Value>,
     cancel: &AtomicBool,
     written_files: &[String],
     actual_turns: u32,
+    stream_started_at: Instant,
 ) -> Result<Option<ModelTurnOutput>, String> {
     let mut accumulated_content = String::new();
     let mut accumulated_reasoning = String::new();
@@ -194,6 +264,7 @@ pub(crate) async fn consume_model_sse_stream(
     let mut batcher = DeltaBatcher::new("message_delta");
     let mut reasoning_batcher = DeltaBatcher::new("reasoning_delta");
     let mut suppress_stream = false;
+    let mut timing = StreamTiming::start(stream_started_at);
 
     while let Some(chunk_result) = byte_stream.next().await {
         if is_cancelled(cancel) {
@@ -215,8 +286,9 @@ pub(crate) async fn consume_model_sse_stream(
                 &mut usage,
                 &mut batcher,
                 &mut reasoning_batcher,
-                channel,
                 &mut suppress_stream,
+                &mut timing,
+                channel,
             );
         }
     }
@@ -230,8 +302,9 @@ pub(crate) async fn consume_model_sse_stream(
             &mut usage,
             &mut batcher,
             &mut reasoning_batcher,
-            channel,
             &mut suppress_stream,
+            &mut timing,
+            channel,
         );
     }
     batcher.flush(channel);
@@ -252,6 +325,8 @@ pub(crate) async fn consume_model_sse_stream(
         options,
         usage,
         reasoning_text: accumulated_reasoning,
+        ttft_ms: timing.ttft_ms(),
+        gen_ms: timing.gen_ms(),
     }))
 }
 
@@ -263,8 +338,9 @@ fn parse_sse_line(
     usage: &mut UsageStats,
     batcher: &mut DeltaBatcher,
     reasoning_batcher: &mut DeltaBatcher,
-    channel: &Channel<Value>,
     suppress_stream: &mut bool,
+    timing: &mut StreamTiming,
+    channel: &Channel<Value>,
 ) {
     let line = line_buf.trim();
     if line.is_empty() || !line.starts_with("data: ") {
@@ -295,9 +371,13 @@ fn parse_sse_line(
     if let Some(reasoning) = reasoning_delta_text(delta) {
         accumulated_reasoning.push_str(&reasoning);
         reasoning_batcher.push(&reasoning, channel);
+        timing.note_output();
     }
     if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
         accumulated_content.push_str(content);
+        if !content.is_empty() {
+            timing.note_output();
+        }
         if !*suppress_stream {
             if let Some(start) = content.find(AI_OPTIONS_START) {
                 *suppress_stream = true;
@@ -311,6 +391,10 @@ fn parse_sse_line(
         }
     }
     if let Some(tcs) = delta.get("tool_calls").and_then(|t| t.as_array()) {
+        if !tcs.is_empty() {
+            // Tool-call arguments are streamed output tokens too — count them for speed.
+            timing.note_output();
+        }
         for tc in tcs {
             let idx = tc
                 .get("index")
@@ -421,6 +505,7 @@ mod tests {
         let mut usage = UsageStats::default();
         let mut reasoning = String::new();
         let mut reasoning_batcher = DeltaBatcher::new("reasoning_delta");
+        let mut timing = StreamTiming::default();
         parse_sse_line(
             line_buf,
             content,
@@ -429,8 +514,9 @@ mod tests {
             &mut usage,
             batcher,
             &mut reasoning_batcher,
-            channel,
             &mut suppress,
+            &mut timing,
+            channel,
         );
     }
 
@@ -445,6 +531,7 @@ mod tests {
         let mut calls = Vec::new();
         let mut batcher = new_batcher();
         let mut reasoning_batcher = DeltaBatcher::new("reasoning_delta");
+        let mut timing = StreamTiming::default();
         parse_sse_line(
             line_buf,
             content,
@@ -453,9 +540,44 @@ mod tests {
             &mut usage,
             &mut batcher,
             &mut reasoning_batcher,
-            &dummy_channel(),
             &mut suppress,
+            &mut timing,
+            &dummy_channel(),
         );
+    }
+
+    #[test]
+    fn stream_timing_without_output_has_no_probes() {
+        let timing = StreamTiming::start(Instant::now());
+        assert!(timing.ttft_ms().is_none());
+        assert!(timing.gen_ms().is_none());
+    }
+
+    #[test]
+    fn stream_timing_measures_ttft_and_decode_window() {
+        let mut timing = StreamTiming::start(Instant::now());
+        // No output yet → still no probes.
+        assert!(timing.ttft_ms().is_none());
+        timing.note_output();
+        let ttft_after_first = timing.ttft_ms().expect("ttft set after first output");
+        // First output also sets decode-window start, so gen_ms == 0 at that instant.
+        assert_eq!(timing.gen_ms(), Some(0));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        timing.note_output();
+        // TTFT is anchored on the first delta and must not move on later deltas.
+        assert_eq!(timing.ttft_ms(), Some(ttft_after_first));
+        assert!(timing.gen_ms().expect("gen window") >= 5);
+    }
+
+    #[test]
+    fn stream_timing_ttft_uses_caller_anchor_not_stream_read_start() {
+        // The caller captures `started_at` before dispatching the request, so a slow
+        // connect / first-byte wait is included in TTFT even if stream reading begins later.
+        let mut timing = StreamTiming::start(Instant::now());
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        timing.note_output();
+        assert!(timing.ttft_ms().expect("ttft") >= 5);
+        assert_eq!(timing.gen_ms(), Some(0));
     }
 
     #[test]
