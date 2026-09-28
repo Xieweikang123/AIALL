@@ -592,16 +592,21 @@ function handleViewportChange() {
 }
 
 function toggleProjectHistory() {
-  projectHistoryOpen.value = !projectHistoryOpen.value;
   if (projectHistoryOpen.value) {
-    nextTick(updateDropdownPosition);
-    nextTick(() => projectSearchInputRef.value?.focus());
+    closeProjectHistory();
+    return;
   }
-  if (projectHistoryOpen.value) void refreshProjectHistoryList();
+  // 每次重新打开都是干净状态：清掉上次遗留的搜索词，避免列表被旧筛选"看起来少了项目"
+  projectSearchQuery.value = "";
+  projectHistoryOpen.value = true;
+  nextTick(updateDropdownPosition);
+  nextTick(() => projectSearchInputRef.value?.focus());
+  void refreshProjectHistoryList();
 }
 
 function closeProjectHistory() {
   projectHistoryOpen.value = false;
+  projectSearchQuery.value = "";
 }
 
 function onSearchInputEscape(e: KeyboardEvent) {
@@ -704,6 +709,7 @@ async function removeRecentProject(path: string, event?: MouseEvent) {
 
 async function clearRecentProjects() {
   await clearProjectHistory();
+  projectSearchQuery.value = "";
   await refreshProjectHistoryList();
 }
 

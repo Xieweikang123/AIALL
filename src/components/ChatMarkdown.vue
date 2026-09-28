@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, onUpdated, ref, watch } from "vue";
 import { renderMarkdown } from "../utils/renderMarkdown";
 import { markdownPostProcessCache } from "../utils/markdownRenderCache";
 import { disposeMermaidRenderer, rebindMermaidZoom, renderMermaidInContainer } from "../utils/mermaidRenderer";
@@ -480,6 +480,26 @@ watch(
     }
   },
 );
+
+/**
+ * 流式正文补画：内容在**挂载前**就已就绪（或流式体中途重新出现）时，
+ * 上面的 watch 看不到"变化"，`streamingContentRef` 一旦为空就再也不会被写。
+ *
+ * 触发场景：轨迹抽屉里新轮次的思考条目首次出现（面板已开着）——
+ * `ChatMarkdown` 刚挂载，`streamingHtmlCache` 里已有节流后的 HTML，
+ * 但那时 `streamingContentRef` 还是 null，patch 被丢弃，之后再无变化可触发，
+ * 于是正文长文本就在空白框里（框被 `--live` 的 `max-height` 撑开）。
+ *
+ * 契约：patch 是幂等的（`lastStreamPatchHtml` 去重 + `patchDomWithHtml` 比对），
+ * 补画只补"还没画过"的那一次，不会重复渲染。
+ */
+function paintStreamingBody() {
+  if (!effectiveStreaming.value) return;
+  const html = streamingHtmlCache.value;
+  if (html) applyStreamingDomPatch(html);
+}
+onMounted(paintStreamingBody);
+onUpdated(paintStreamingBody);
 
 /** Reset last patch marker when streaming ends so final render always applies. */
 watch(effectiveStreaming, (streaming, wasStreaming) => {

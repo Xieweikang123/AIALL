@@ -153,16 +153,34 @@ function toggleCommit(hash: string): void {
   color: rgba(139, 148, 158, 0.7);
 }
 .git-ahead-list {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding: 4px 0 4px 8px;
 }
-.git-ahead-loading,
 .git-ahead-empty {
   font-size: 12px;
   color: rgba(139, 148, 158, 0.6);
   padding: 4px 0;
+}
+/*
+ * 加载占位脱离文档流：绝对定位浮在列表上层，出现 / 消失都不再推挤下面的提交项。
+ * min-height 兜底：commits 为空（首次加载）时列表本身高度为 0，占位仍能撑出一条可见高度。
+ */
+.git-ahead-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  font-size: 12px;
+  color: rgba(139, 148, 158, 0.85);
+  background: rgba(13, 17, 23, 0.55);
+  border-radius: 6px;
+  pointer-events: none;
 }
 .git-ahead-item {
   padding: 6px 8px;
