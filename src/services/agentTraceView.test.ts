@@ -9,12 +9,14 @@ import {
   collapseTracePreview,
   createDefaultAgentTraceView,
   normalizeAgentTraceView,
+  prepareTraceReasoningMarkdown,
   resolveAgentTraceBodySpec,
   shouldExpandTraceKind,
   truncateTraceDetail,
   withTraceBodyLength,
   withTraceExpand,
   withTraceTransientPhases,
+  withTraceAutoMaximize,
   type AgentTraceViewConfig,
 } from "./agentTraceView";
 
@@ -30,6 +32,8 @@ describe("agentTraceView 默认配置", () => {
     }
     expect(DEFAULT_AGENT_TRACE_VIEW.bodyLength).toBe("long");
     expect(DEFAULT_AGENT_TRACE_VIEW.transientPhases).toBe(false);
+    // 默认不自动放大：升级后默认体验与旧版一致，放大要用户主动开
+    expect(DEFAULT_AGENT_TRACE_VIEW.autoMaximize).toBe(false);
   });
 
   it("createDefaultAgentTraceView 每次给新对象（别把默认值交出去被改脏）", () => {
@@ -55,6 +59,7 @@ describe("agentTraceView 正交性（这是拆掉「详细度档位」的全部�
     // 正文截断档也不该被动
     expect(withTool.bodyLength).toBe(base.bodyLength);
     expect(withTool.transientPhases).toBe(base.transientPhases);
+    expect(withTool.autoMaximize).toBe(base.autoMaximize);
   });
 
   it("单独关掉思考，不牵动工具（旧的链式档位做不到这件事）", () => {
@@ -84,8 +89,19 @@ describe("agentTraceView 正交性（这是拆掉「详细度档位」的全部�
     withTraceExpand(base, "tool", true);
     withTraceBodyLength(base, "full");
     withTraceTransientPhases(base, true);
+    withTraceAutoMaximize(base, true);
 
     expect(base).toEqual(createDefaultAgentTraceView());
+  });
+
+  it("思考放大开关只动 autoMaximize，不牵动展开 / 正文 / 瞬态阶段", () => {
+    const base = withTraceExpand(view(), "tool", true);
+    const on = withTraceAutoMaximize(base, true);
+
+    expect(on.autoMaximize).toBe(true);
+    expect(on.expand).toEqual(base.expand);
+    expect(on.bodyLength).toBe(base.bodyLength);
+    expect(on.transientPhases).toBe(base.transientPhases);
   });
 });
 
@@ -108,6 +124,10 @@ describe("agentTraceView 快捷预设（= 旧四档，行为与数值都照搬�
     expect(applyAgentTraceViewPreset("detailed").bodyLength).toBe("long");
     expect(applyAgentTraceViewPreset("full").bodyLength).toBe("full");
     expect(applyAgentTraceViewPreset("full").transientPhases).toBe(true);
+    // 预设不碰「自动放大」—— 它不属于旧的详细度档位语义
+    for (const id of ["brief", "standard", "detailed", "full"] as const) {
+      expect(applyAgentTraceViewPreset(id).autoMaximize).toBe(false);
+    }
   });
 
   it("每个预设 id 唯一且都有中文标签与说明", () => {
@@ -212,6 +232,48 @@ describe("agentTraceView 正文截断与预览", () => {
   it("非法正文档回落到默认档（面板不会拿到 undefined 的截断参数）", () => {
     expect(resolveAgentTraceBodySpec("huge").maxDetailChars).toBe(20_000);
     expect(resolveAgentTraceBodySpec(undefined).label).toBe("长");
+  });
+});
+
+describe("prepareTraceReasoningMarkdown", () => {
+  it("无截断标记时原样返回（完整思考交给 ChatMarkdown 的流式兜底）", () => {
+    const text = "先看目录\n\n```ts\nconst x = 1;";
+    expect(prepareTraceReasoningMarkdown(text)).toBe(text);
+  });
+
+  it("去掉截断提示 —— 它对 Markdown 是噪音", () => {
+    const detail = truncateTraceDetail("普通思考".repeat(200), view({ bodyLength: "short" }));
+    expect(detail).toContain("已截断");
+    const out = prepareTraceReasoningMarkdown(detail);
+    expect(out).not.toContain("已截断");
+    expect(out).not.toContain("字符）");
+  });
+
+  it("截断点落在代码围栏内时补上结束围栏（否则整块被吞成代码块）", () => {
+    // 构造：截断位置切在未闭合围栏内部
+    const text = `说明文字\n\n\`\`\`ts\nconst a = 1;\n${"x".repeat(500)}`;
+    const detail = truncateTraceDetail(text, view({ bodyLength: "short" }));
+    expect((detail.match(/^```/gm) ?? []).length % 2).toBe(1);
+
+    const out = prepareTraceReasoningMarkdown(detail);
+    expect((out.match(/^```/gm) ?? []).length % 2).toBe(0);
+    expect(out.endsWith("```")).toBe(true);
+  });
+
+  it("截断点落在围栏外时不补围栏（成对围栏原样保留）", () => {
+    const text = `\`\`\`ts\nconst a = 1;\n\`\`\`\n\n${"x".repeat(500)}`;
+    const detail = truncateTraceDetail(text, view({ bodyLength: "short" }));
+    expect((detail.match(/^```/gm) ?? []).length % 2).toBe(0);
+
+    const out = prepareTraceReasoningMarkdown(detail);
+    expect(out).not.toContain("已截断");
+    expect((out.match(/^```/gm) ?? []).length % 2).toBe(0);
+    expect(out.endsWith("```")).toBe(false);
+  });
+
+  it("纯截断提示 / 空文本返回空串（不渲染空块）", () => {
+    expect(prepareTraceReasoningMarkdown("")).toBe("");
+    expect(prepareTraceReasoningMarkdown("…（已截断，共 5 字符）")).toBe("");
   });
 });
 

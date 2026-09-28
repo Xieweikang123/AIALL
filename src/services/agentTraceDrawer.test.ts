@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { computed } from "vue";
 import {
   __resetAgentTraceDrawerForTest,
   closeTraceDrawer,
@@ -10,16 +11,18 @@ import {
   resolveTraceRoundGroups,
   resolveTraceTools,
   restoreTraceAfterEditor,
+  setTraceActiveSessionResolver,
   setTraceAutoEnabled,
   setTraceEditorSpaceResolver,
   setTraceGroupResolver,
+  setTraceMaximized,
   setTraceMessageExistsResolver,
   setTraceToolsResolver,
   setTraceView,
   syncTraceScopeToActiveSession,
   useAgentTraceDrawerState,
 } from "./agentTraceDrawer";
-import { createDefaultAgentTraceView, withTraceExpand } from "./agentTraceView";
+import { createDefaultAgentTraceView, withTraceAutoMaximize, withTraceExpand } from "./agentTraceView";
 import type { AgentRoundGroup } from "./agentRoundGroups";
 
 function group(turn: number, narrative: string): AgentRoundGroup {
@@ -172,9 +175,48 @@ describe("agentTraceDrawer", () => {
 
   it("openLatestTraceDrawer 在无注册消息时给出空轨迹而不抛错", () => {
     openLatestTraceDrawer();
-
     expect(useAgentTraceDrawerState().open).toBe(true);
     expect(resolveTraceRoundGroups()).toEqual([]);
+  });
+
+  it("手动放大 / 还原只改尺寸，不动开合与消息锁", () => {
+    setTraceGroupResolver((id) => (id === "m1" ? [group(1, "轨迹")] : []));
+    openTraceDrawer("m1", [group(1, "轨迹")]);
+
+    setTraceMaximized(true);
+    expect(useAgentTraceDrawerState().maximized).toBe(true);
+    expect(useAgentTraceDrawerState().open).toBe(true);
+    expect(useAgentTraceDrawerState().messageId).toBe("m1");
+
+    setTraceMaximized(false);
+    expect(useAgentTraceDrawerState().maximized).toBe(false);
+    expect(useAgentTraceDrawerState().open).toBe(true);
+    expect(useAgentTraceDrawerState().messageId).toBe("m1");
+  });
+
+  it("开启「思考时自动放大」后，跑起来自动放大；默认不放大", () => {
+    setTraceGroupResolver((id) => (id === "m1" ? [group(1, "轨迹")] : []));
+
+    // 默认配置：自动弹出但不放大
+    notifyTraceRunStarted("m1");
+    expect(useAgentTraceDrawerState().open).toBe(true);
+    expect(useAgentTraceDrawerState().maximized).toBe(false);
+
+    closeTraceDrawer();
+    setTraceView(withTraceAutoMaximize(createDefaultAgentTraceView(), true));
+    notifyTraceRunStarted("m2");
+
+    expect(useAgentTraceDrawerState().maximized).toBe(true);
+  });
+
+  it("关掉「自动打开」时不做自动放大（面板都不弹，更不需要放大）", () => {
+    setTraceView(withTraceAutoMaximize(createDefaultAgentTraceView(), true));
+    setTraceAutoEnabled(false);
+
+    notifyTraceRunStarted("m1");
+
+    expect(useAgentTraceDrawerState().open).toBe(false);
+    expect(useAgentTraceDrawerState().maximized).toBe(false);
   });
 
   it("锁定的消息已失效时回退到最新消息（实测踩过的空轨迹根因）", () => {
@@ -457,6 +499,41 @@ describe("agentTraceDrawer 双会话隔离（闪烁回归）", () => {
 
     expect(useAgentTraceDrawerState().messageId).toBe("a-1");
     expect(resolveTraceRoundGroups().map((g) => g.narrative)).toEqual(["A 的轨迹"]);
+  });
+
+  /**
+   * 「首次切回会话，数据流轨迹没内容；第二次再切回来就显示了」回归。
+   *
+   * 根因：`latestMessageIdBySession` 曾是普通 `Map`（非响应式）。
+   * 首次切到一个**没访问过**的会话时，该会话桶里还没有最新消息 id，
+   * `syncTraceScopeToActiveSession` 把锁置空 → 面板 computed 算出空态**并缓存**；
+   * 紧接着该会话的消息挂载、`registerLatestTrace` 把 id 写进 Map —— 普通 Map 的
+   * 这次写入不发响应式信号，compute 不重算，面板就一直空着。
+   * 第二次切回来时锁已在桶里，直接解析成功，于是"第二次才显示"。
+   */
+  it("首次切到未访问过的会话，消息挂载后面板必须能显示（响应式最新 id）", () => {
+    setTraceGroupResolver((id) =>
+      id === "a-1" ? [group(1, "A 的轨迹")] : id === "b-1" ? [group(1, "B 的轨迹")] : [],
+    );
+    setTraceMessageExistsResolver((id) => id === "a-1" || id === "b-1");
+    let active = "A";
+    setTraceActiveSessionResolver(() => active);
+
+    // A 会话跑过一轮：最新 id 已落进 A 桶，面板 computed 先算一次并缓存
+    notifyTraceRunStarted("a-1", "A");
+    const traced = computed(() => resolveTraceRoundGroups());
+    expect(traced.value.map((g) => g.narrative)).toEqual(["A 的轨迹"]);
+
+    // 首次切到 B：B 桶还没有 id → 锁置空，面板当场算出空态
+    active = "B";
+    syncTraceScopeToActiveSession("B");
+    expect(traced.value).toEqual([]);
+
+    // B 的消息挂载，注册最新 id（只有响应式 Map 才能唤醒上面那个 computed）
+    registerLatestTrace("b-1", [group(1, "B 的轨迹")]);
+
+    expect(useAgentTraceDrawerState().messageSessionId).toBe("B");
+    expect(traced.value.map((g) => g.narrative)).toEqual(["B 的轨迹"]);
   });
 });
 

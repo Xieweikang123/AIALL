@@ -60,6 +60,18 @@
           />
         </label>
 
+        <label class="trace-view-row">
+          <span class="trace-view-row-label" title="Agent 跑起来时自动把整个面板放大占满工作区，思考正文全宽观看">
+            思考时自动放大
+          </span>
+          <input
+            type="checkbox"
+            class="trace-view-check"
+            :checked="view.autoMaximize"
+            @change="pickAutoMaximize(($event.target as HTMLInputElement).checked)"
+          />
+        </label>
+
         <div class="trace-view-row">
           <span class="trace-view-row-label" title="一键套用一组配置">快捷预设</span>
           <div class="trace-view-seg">
@@ -103,6 +115,7 @@ import {
   withTraceBodyLength,
   withTraceExpand,
   withTraceTransientPhases,
+  withTraceAutoMaximize,
   type AgentTraceBodyLength,
   type AgentTraceEntryKind,
   type AgentTraceViewConfig,
@@ -158,6 +171,10 @@ function pickBodyLength(length: AgentTraceBodyLength) {
 
 function pickTransientPhases(on: boolean) {
   emit("update:view", withTraceTransientPhases(props.view, on));
+}
+
+function pickAutoMaximize(on: boolean) {
+  emit("update:view", withTraceAutoMaximize(props.view, on));
 }
 
 function pickPreset(id: AgentTraceViewPreset) {
@@ -255,35 +272,14 @@ onBeforeUnmount(() => {
   color: rgba(200, 214, 232, 0.95);
 }
 
-/* 开 = 默认展开：给实心底 + 该类型自己的色，跟行内 kind 标签对得上 */
-.trace-view-chip--on.trace-view-chip--reasoning {
-  background: rgba(163, 113, 247, 0.22);
-  border-color: rgba(163, 113, 247, 0.5);
-  color: rgba(196, 160, 255, 0.95);
-}
-
-.trace-view-chip--on.trace-view-chip--tool {
-  background: rgba(210, 153, 34, 0.2);
-  border-color: rgba(210, 153, 34, 0.5);
-  color: rgba(230, 190, 110, 0.95);
-}
-
-.trace-view-chip--on.trace-view-chip--request {
+/*
+ * chip 与下方条目行的「思/具/发/回/态」字标共用同一套配色：统一蓝色。
+ * 类型靠字区分、不靠色相 —— 和 AgentTracePanel 的单主色保持一致（改一处别忘另一处）。
+ */
+.trace-view-chip--on {
   background: rgba(88, 166, 255, 0.2);
   border-color: rgba(88, 166, 255, 0.5);
   color: rgba(126, 182, 255, 0.95);
-}
-
-.trace-view-chip--on.trace-view-chip--response {
-  background: rgba(63, 185, 80, 0.2);
-  border-color: rgba(63, 185, 80, 0.5);
-  color: rgba(120, 210, 140, 0.95);
-}
-
-.trace-view-chip--on.trace-view-chip--phase {
-  background: rgba(148, 163, 184, 0.22);
-  border-color: rgba(148, 163, 184, 0.5);
-  color: rgba(203, 213, 225, 0.95);
 }
 
 .trace-view-more {

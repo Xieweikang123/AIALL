@@ -40,6 +40,14 @@ export type AgentTraceViewConfig = {
   bodyLength: AgentTraceBodyLength;
   /** 是否显示已回复轮次里的瞬态 loop 阶段（不是"存不存在"，是噪音开关） */
   transientPhases: boolean;
+  /**
+   * Agent 跑起来时是否自动把整个轨迹面板放大占满工作区。
+   *
+   * 与 `expand.reasoning` 配套：思考默认展开，但被 220px 的正文框压着；打开这项后
+   * 面板会在运行时铺满工作区，思考正文跟着全宽、能完整观看（不截断仍受 `bodyLength` 管）。
+   * 关掉只影响「自动」，头部的手动放大按钮照旧可用。
+   */
+  autoMaximize: boolean;
 };
 
 /**
@@ -56,6 +64,7 @@ export const DEFAULT_AGENT_TRACE_VIEW: Readonly<AgentTraceViewConfig> = Object.f
   }) as AgentTraceExpandFlags,
   bodyLength: "long",
   transientPhases: false,
+  autoMaximize: false,
 });
 
 export interface AgentTraceBodySpec {
@@ -109,6 +118,7 @@ export const AGENT_TRACE_VIEW_PRESETS: readonly AgentTraceViewPresetSpec[] = [
       expand: { request: false, response: false, reasoning: false, tool: false, phase: false },
       bodyLength: "short",
       transientPhases: false,
+      autoMaximize: false,
     },
   },
   {
@@ -125,6 +135,7 @@ export const AGENT_TRACE_VIEW_PRESETS: readonly AgentTraceViewPresetSpec[] = [
       expand: { request: false, response: false, reasoning: true, tool: true, phase: false },
       bodyLength: "long",
       transientPhases: true,
+      autoMaximize: false,
     },
   },
   {
@@ -135,6 +146,7 @@ export const AGENT_TRACE_VIEW_PRESETS: readonly AgentTraceViewPresetSpec[] = [
       expand: { request: true, response: true, reasoning: true, tool: true, phase: true },
       bodyLength: "full",
       transientPhases: true,
+      autoMaximize: false,
     },
   },
 ];
@@ -188,6 +200,7 @@ export function normalizeAgentTraceView(value: unknown): AgentTraceViewConfig {
     },
     bodyLength: normalizeAgentTraceBodyLength(raw.bodyLength),
     transientPhases: raw.transientPhases === true,
+    autoMaximize: raw.autoMaximize === true,
   };
 }
 
@@ -196,6 +209,7 @@ export function createDefaultAgentTraceView(): AgentTraceViewConfig {
     expand: { ...DEFAULT_AGENT_TRACE_VIEW.expand },
     bodyLength: DEFAULT_AGENT_TRACE_VIEW.bodyLength,
     transientPhases: DEFAULT_AGENT_TRACE_VIEW.transientPhases,
+    autoMaximize: DEFAULT_AGENT_TRACE_VIEW.autoMaximize,
   };
 }
 
@@ -225,6 +239,14 @@ export function withTraceTransientPhases(
   return { ...view, transientPhases };
 }
 
+/** 开关「运行时自动放大面板」，其余配置原样保留（返回新对象）。 */
+export function withTraceAutoMaximize(
+  view: AgentTraceViewConfig,
+  autoMaximize: boolean,
+): AgentTraceViewConfig {
+  return { ...view, autoMaximize: autoMaximize === true };
+}
+
 /* ------------------------------ 查询 ------------------------------ */
 
 /** 该类型的条目在当前配置下是否默认展开。 */
@@ -234,6 +256,13 @@ export function shouldExpandTraceKind(
 ): boolean {
   return view.expand[kind] === true;
 }
+
+/**
+ * 截断标记的正则。**必须**与 `truncateTraceDetail` 产出的文案同步
+ * （改一处别忘另一处；`agentTraceView.test.ts` 里有对照断言）。
+ * 前导换行写可选：真实正文里一定有，但单独一段标记也要能认出来。
+ */
+export const AGENT_TRACE_TRUNCATION_RE = /\n?…（已截断，共 \d+ 字符）\s*$/;
 
 /** 按配置截断正文；「不截断」档原样返回。 */
 export function truncateTraceDetail(
@@ -245,6 +274,33 @@ export function truncateTraceDetail(
   if (spec.maxDetailChars === null) return trimmed;
   if (trimmed.length <= spec.maxDetailChars) return trimmed;
   return `${trimmed.slice(0, spec.maxDetailChars)}\n…（已截断，共 ${trimmed.length} 字符）`;
+}
+
+/**
+ * 轨迹里「思考」条目的正文在喂给 Markdown 渲染器前，先做两步整理（纯函数，可测）。
+ *
+ * 思考正文现在走 ChatMarkdown 渲染（与聊天气泡内过程 feed 的思考保持一致），
+ * 但轨迹正文可能被档位截断（`truncateTraceDetail`）。截断会把未闭合的代码围栏
+ * 切断 —— 直接喂 Markdown，marked 会把围栏之后的全部内容当代码块吞掉，整块裂开。
+ *
+ *   1. `…（已截断，共 N 字符）` 是给人看纯文本的提示，对 Markdown 是噪音 → 去掉；
+ *   2. 去掉后若代码围栏数为**奇数**（截断点落在围栏内）→ 补一个结束围栏。
+ *
+ * 只在**确有截断标记**时才动围栏：完整思考里模型自己写了未闭合围栏，交给
+ * ChatMarkdown 的流式兜底（`stabilizeIncompleteFencedCodeBlock`）处理，
+ * 这里再补一个反而可能改变其语义。
+ */
+export function prepareTraceReasoningMarkdown(detail: string): string {
+  const source = String(detail ?? "").trim();
+  if (!source) return "";
+  if (!AGENT_TRACE_TRUNCATION_RE.test(source)) return source;
+  const body = source.replace(AGENT_TRACE_TRUNCATION_RE, "").trimEnd();
+  if (!body) return "";
+  const fences = body.match(/^```/gm);
+  if (fences && fences.length % 2 === 1) {
+    return `${body}\n\`\`\``;
+  }
+  return body;
 }
 
 /** 折叠行的单行预览。 */

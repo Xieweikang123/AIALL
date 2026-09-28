@@ -71,6 +71,14 @@ interface AgentTraceDrawerState {
   view: AgentTraceViewConfig;
   /** Agent 开始产出时是否自动展开面板（工具栏「轨迹」按钮控制） */
   autoEnabled: boolean;
+  /**
+   * 面板是否放大占满整个工作区。
+   *
+   * 与 `autoEnabled`（开不开面板）正交：这是"开多大"。放大后抽屉脱离右侧窄列，
+   * 铺满工作区，思考正文跟着全宽，便于完整观看。手动切换走 `setTraceMaximized`，
+   * 也可由 `view.autoMaximize` 在运行时自动触发。
+   */
+  maximized: boolean;
   /** 当前项目路径，用于导出轨迹文件 */
   projectPath: string;
   /** 当前会话 id，导出时附带会话磁盘路径 */
@@ -106,6 +114,14 @@ function loadTraceAutoEnabled(): boolean {
   return lsGet(TRACE_AUTO_ENABLED_STORAGE_KEY) !== "false";
 }
 
+/** 「放大占满工作区」的持久化 key —— 与「自动打开」同属跨会话的用户偏好。 */
+const TRACE_MAXIMIZED_STORAGE_KEY = "vibe-coding-trace-maximized";
+
+/** 读取持久化的「放大」偏好；只有明确存过 `"true"` 才算开启，其余默认关闭。 */
+function loadTraceMaximized(): boolean {
+  return lsGet(TRACE_MAXIMIZED_STORAGE_KEY) === "true";
+}
+
 const state = reactive<AgentTraceDrawerState>({
   open: false,
   messageId: null,
@@ -115,6 +131,7 @@ const state = reactive<AgentTraceDrawerState>({
   title: "数据流轨迹",
   view: createDefaultAgentTraceView(),
   autoEnabled: loadTraceAutoEnabled(),
+  maximized: loadTraceMaximized(),
   projectPath: "",
   sessionId: null,
   collapsedForEditor: false,
@@ -174,8 +191,14 @@ let resolveEditorTakesSpace: (() => boolean) | null = null;
  *
  * 以前这里是单个全局 `latestMessageId`：两个会话同时跑时被轮流覆盖，轨迹解析
  * 跟着跳，面板就闪。按会话分桶后，"当前会话的最新一条"不再被别的会话污染。
+ *
+ * ⚠️ 必须是**响应式** Map：切到没访问过的会话时，`syncTraceScopeToActiveSession`
+ * 把锁置空（该会话桶里还没有 id），面板 computed 当场算出空态并缓存；随后该会话的
+ * 消息挂载、`registerLatestTrace` 写入这里 —— 若这是个普通 Map，这次写入不发任何
+ * 响应式信号，compute 不会重算，面板就一直停在"空"。
+ * 表现正是「首次切换回会话，数据流轨迹没内容；第二次再切回来（锁已在桶里）就显示了」。
  */
-const latestMessageIdBySession = new Map<string, string>();
+const latestMessageIdBySession = reactive(new Map<string, string>());
 /** 无会话信息的注册（测试 / 未注入）落在这个桶，保持旧行为。 */
 const UNSCOPED_SESSION_KEY = "";
 
@@ -449,6 +472,11 @@ export function notifyTraceRunStarted(
   if (messageId) setLatestMessageId(sessionId, messageId);
   const target = messageId || getLatestMessageId(sessionId);
   if (!target) return;
+  /**
+   * 配置了「运行时自动放大」就跟着开跑放开面板 —— 与自动打开无关，只决定"开多大"。
+   * 放在 `autoEnabled` 提前返回之后：用户连面板都不想自动开，更不需要自动放大。
+   */
+  if (state.view.autoMaximize) state.maximized = true;
   const targetSession = messageId ? traceScopeKey(sessionId) || null : state.messageSessionId;
   /**
    * 面板已开时换锁 —— 但**只在没被用户显式锁定，或锁就在这个会话里**时换。
@@ -616,6 +644,17 @@ export function restoreTraceAfterEditor(): void {
   state.open = true;
 }
 
+/**
+ * 放大 / 还原面板（手动按钮 & 自动触发的唯一入口）。
+ *
+ * 只是"开多大"，不改变面板开合与消息锁。落 localStorage —— 与「自动打开」一样，
+ * 是跨会话记的用户偏好。关闭自动打开时不动它：下一次手动打开仍按用户上次选择的大小。
+ */
+export function setTraceMaximized(maximized: boolean): void {
+  state.maximized = maximized === true;
+  lsSet(TRACE_MAXIMIZED_STORAGE_KEY, state.maximized ? "true" : "false");
+}
+
 /** 显示配置变更：只影响构建期过滤与展开默认值，不重开面板。 */
 export function setTraceView(view: AgentTraceViewConfig): void {
   state.view = normalizeAgentTraceView(view);
@@ -636,6 +675,8 @@ export function __resetAgentTraceDrawerForTest(): void {
   state.view = createDefaultAgentTraceView();
   state.autoEnabled = true;
   lsRemove(TRACE_AUTO_ENABLED_STORAGE_KEY);
+  state.maximized = false;
+  lsRemove(TRACE_MAXIMIZED_STORAGE_KEY);
   state.projectPath = "";
   state.sessionId = null;
   state.collapsedForEditor = false;

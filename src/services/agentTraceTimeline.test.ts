@@ -97,6 +97,33 @@ describe("buildAgentTraceTurns", () => {
     expect(turns[0]?.entries[0]?.ok).toBe(false);
   });
 
+  it("无正文的回复标签不再重复报「0 字符」，并给重复工具名去重计次", () => {
+    const turns = buildAgentTraceTurns([
+      group({
+        turn: 1,
+        response: {
+          assistantText: "   ",
+          toolCalls: [
+            { id: "t1", name: "grep", arguments: "{}" },
+            { id: "t2", name: "grep", arguments: "{}" },
+            { id: "t3", name: "read_file", arguments: "{}" },
+          ],
+          hasToolCalls: true,
+          isFinal: false,
+        },
+      }),
+    ]);
+
+    const label = turns[0]?.entries.find((entry) => entry.kind === "response")?.label ?? "";
+    // 无正文时不出现「0 字符」与「（无正文）」叠在一起
+    expect(label).not.toContain("0 字符");
+    expect(label).toContain("（无正文）");
+    // 同名工具合并成「×N」，不同名照常列出
+    expect(label).toContain("grep ×2");
+    expect(label).toContain("read_file");
+    expect(label).not.toContain("grep、grep");
+  });
+
   it("truncates oversized detail bodies", () => {
     const huge = "x".repeat(30_000);
     const turns = buildAgentTraceTurns([

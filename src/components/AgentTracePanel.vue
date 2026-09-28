@@ -1,5 +1,8 @@
 <template>
-  <div class="agent-trace-panel" :class="{ 'agent-trace-panel--embedded': embedded }">
+  <div
+    class="agent-trace-panel"
+    :class="{ 'agent-trace-panel--embedded': embedded, 'agent-trace-panel--roomy': roomy }"
+  >
     <button
       v-if="!embedded"
       type="button"
@@ -62,15 +65,31 @@
             <!--
               展开程度由显示配置决定（entry.expandedByDefault），用户点箭头可临时覆盖。
               思考默认展开 —— 它是「过程」，要能边跑边看。
+
+              思考正文走 Markdown（与聊天气泡内过程 feed 的思考同一渲染面）；
+              请求/回复/工具是 JSON / 日志，保持等宽纯文本 —— 渲染 Markdown 会
+              把缩进与换行吃掉。
             -->
             <div
               v-if="isEntryOpen(entry)"
               :ref="(el) => bindReasoningBody(entry.key, el)"
               class="agent-trace-detail"
-              :class="{ 'agent-trace-detail--live': entry.streaming }"
+              :class="{
+                'agent-trace-detail--live': entry.streaming,
+                'agent-trace-detail--md': entry.kind === 'reasoning',
+              }"
               @scroll="onReasoningBodyScroll(entry.key)"
               @wheel="userScrolledKeys.add(entry.key)"
-            >{{ entry.detail }}</div>
+            >
+              <ChatMarkdown
+                v-if="entry.kind === 'reasoning'"
+                class="agent-trace-markdown"
+                :content="reasoningMarkdown(entry.detail)"
+                :streaming="entry.streaming === true"
+                :interactive="false"
+              />
+              <template v-else>{{ entry.detail }}</template>
+            </div>
           </div>
         </template>
         <div v-else class="agent-trace-turn-summary">{{ turnSummary(turn) }}</div>
@@ -85,6 +104,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from "vue";
 import AgentTraceViewBar from "./AgentTraceViewBar.vue";
+import ChatMarkdown from "./ChatMarkdown.vue";
 import {
   buildAgentTraceTurns,
   pickTurnHeadlineEntry,
@@ -94,6 +114,7 @@ import {
   AGENT_TRACE_KIND_UI,
   createDefaultAgentTraceView,
   normalizeAgentTraceView,
+  prepareTraceReasoningMarkdown,
   type AgentTraceViewConfig,
 } from "../services/agentTraceView";
 import {
@@ -117,8 +138,13 @@ const props = withDefaults(
     view?: AgentTraceViewConfig;
     /** 该轮是否仍在运行 —— 用于实时徽标与思考条目流式标记 */
     running?: boolean;
+    /**
+     * 宽松模式：面板放大占满工作区时打开。
+     * 思考正文不再受 220px 上限约束，整段摊开由外层滚动 —— 这就是"放大到窗口全部观看"。
+     */
+    roomy?: boolean;
   }>(),
-  { embedded: false, running: false, tools: () => [] },
+  { embedded: false, running: false, tools: () => [], roomy: false },
 );
 
 const emit = defineEmits<{ (event: "update:view", view: AgentTraceViewConfig): void }>();
@@ -329,6 +355,11 @@ function entryLabel(entry: AgentTraceEntry): string {
   return entry.label;
 }
 
+/** 思考正文 → Markdown 源（去掉截断提示、补齐截断处裂开的代码围栏）。 */
+function reasoningMarkdown(detail: string): string {
+  return prepareTraceReasoningMarkdown(detail);
+}
+
 function formatChars(chars: number): string {
   if (chars >= 1000) return `${(chars / 1000).toFixed(1)}K 字符`;
   return `${chars} 字符`;
@@ -483,8 +514,8 @@ function formatElapsed(ms?: number): string {
 }
 
 .agent-trace-turn-ctx {
-  font-size: 10px;
-  color: rgba(139, 148, 158, 0.5);
+  font-size: 9.5px;
+  color: rgba(139, 148, 158, 0.4);
   font-variant-numeric: tabular-nums;
   margin-left: auto;
 }
@@ -524,6 +555,11 @@ function formatElapsed(ms?: number): string {
   flex-shrink: 0;
 }
 
+/*
+ * 条目类型的字标（思/具/发/回/态）统一用同一个蓝色底 —— 类型靠**字**区分，
+ * 不靠色相。此前五类各一个颜色（蓝/绿/紫/琥珀/灰），一个列表里六种色挤在
+ * 一起显花；改单主色后整块安静下来，强调位只留轮次头与箭头。
+ */
 .agent-trace-row-kind {
   flex-shrink: 0;
   display: inline-flex;
@@ -534,41 +570,58 @@ function formatElapsed(ms?: number): string {
   border-radius: 3px;
   font-size: 9.5px;
   font-weight: 600;
-}
-
-.agent-trace-entry--request .agent-trace-row-kind {
-  background: rgba(88, 166, 255, 0.16);
+  background: rgba(88, 166, 255, 0.14);
   color: rgba(126, 182, 255, 0.9);
-}
-
-.agent-trace-entry--response .agent-trace-row-kind {
-  background: rgba(63, 185, 80, 0.16);
-  color: rgba(120, 210, 140, 0.9);
-}
-
-.agent-trace-entry--reasoning .agent-trace-row-kind {
-  background: rgba(163, 113, 247, 0.18);
-  color: rgba(196, 160, 255, 0.92);
-}
-
-.agent-trace-entry--tool .agent-trace-row-kind {
-  background: rgba(210, 153, 34, 0.16);
-  color: rgba(230, 190, 110, 0.9);
-}
-
-.agent-trace-entry--phase .agent-trace-row-kind {
-  background: rgba(148, 163, 184, 0.14);
-  color: rgba(148, 163, 184, 0.7);
 }
 
 .agent-trace-entry--fail .agent-trace-row {
   color: rgba(255, 180, 171, 0.9);
 }
 
-/** 思考条目正文：保持可读的思考色，与请求/回复区分开 */
+/*
+ * 条目正文基础样式。
+ * 必须排在 `.agent-trace-detail--live` **之前** —— 两者特异性相同（单个 class），
+ * 谁在后谁赢。此前基础块写在了 --live 之后，把思考块的 `font-family: inherit` /
+ * `font-size: 11px` / `max-height: 220px` 全部盖成了等宽 10.5px/180px。
+ */
+.agent-trace-detail {
+  /* 右边距不能为 0：嵌入抽屉时 body padding 被清掉，正文框（含自带滚动条）会顶到面板最右 */
+  margin: 2px 8px 4px 26px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: rgba(1, 4, 9, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-left: 2px solid rgba(126, 182, 255, 0.25);
+  font-size: 10.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-height: 180px;
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: rgba(139, 148, 158, 0.85);
+}
+
+/*
+ * 思考条目正文：不再上紫色，改回与其它条目一致的中性灰 —— 单主色下只靠
+ * 左侧竖线的蓝调区分「思考」，正文本身不染色，避免整块发灰紫、对比度偏低。
+ */
 .agent-trace-entry--reasoning .agent-trace-detail {
-  border-left-color: rgba(163, 113, 247, 0.35);
-  color: rgba(203, 190, 226, 0.9);
+  border-left-color: rgba(126, 182, 255, 0.3);
+  color: rgba(186, 196, 208, 0.9);
+}
+
+/*
+ * 放大占满工作区时，思考正文不再被 220px 小框卡住 —— 整段摊开，滚动交给外层
+ * `.agent-trace-drawer-body`。这就是「放大到窗口全部观看」的落点。
+ *
+ * 只放开思考（--md）：请求 / 回复 / 工具的 JSON 仍是小框 + 内部滚动，
+ * 避免超长日志在放大态下把整块撑到几屏高。
+ */
+.agent-trace-panel--roomy .agent-trace-detail--md {
+  max-height: none;
+  overflow: visible;
 }
 
 /*
@@ -582,7 +635,33 @@ function formatElapsed(ms?: number): string {
   font-size: 11px;
   line-height: 1.55;
   white-space: pre-wrap;
-  color: rgba(210, 200, 232, 0.92);
+  color: rgba(208, 216, 228, 0.94);
+}
+
+/*
+ * 思考正文改走 Markdown 后的容器：白名单恢复排版 ——
+ * 基础块是 `white-space: pre-wrap` + 等宽字体（给 JSON/日志用），
+ * Markdown 的 <pre> 会继承 pre-wrap 造成代码块双重换行，字体也会被吃掉。
+ */
+.agent-trace-detail--md {
+  white-space: normal;
+  font-family: inherit;
+}
+
+/* Markdown 正文在 11px 轨迹里跟着缩一号，行高与正文一致 */
+.agent-trace-markdown :deep(.msg-markdown) {
+  font-size: 11px;
+  line-height: 1.55;
+  color: rgba(208, 216, 228, 0.94);
+}
+
+.agent-trace-detail--md::-webkit-scrollbar {
+  width: 4px;
+}
+
+.agent-trace-detail--md::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 2px;
 }
 
 .agent-trace-detail--live::-webkit-scrollbar {
@@ -624,21 +703,4 @@ function formatElapsed(ms?: number): string {
   color: rgba(148, 163, 184, 0.6);
 }
 
-.agent-trace-detail {
-  margin: 2px 0 4px 26px;
-  padding: 6px 8px;
-  border-radius: 4px;
-  background: rgba(1, 4, 9, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.04);
-  border-left: 2px solid rgba(126, 182, 255, 0.25);
-  font-size: 10.5px;
-  line-height: 1.45;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-  max-height: 180px;
-  overflow-y: auto;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  color: rgba(139, 148, 158, 0.85);
-}
 </style>

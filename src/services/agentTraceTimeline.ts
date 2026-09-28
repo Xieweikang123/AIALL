@@ -153,9 +153,9 @@ function responseEntry(turn: AgentRoundGroupView, view: AgentTraceViewConfig): A
   if (!response) return [];
   const text = response.assistantText?.trim() ?? "";
   const toolCalls = response.toolCalls || [];
-  const label = response.isFinal
-    ? `最终回复（${text.length} 字符）`
-    : `轮次回复（${text.length} 字符）`;
+  const baseLabel = response.isFinal ? "最终回复" : "轮次回复";
+  // 无正文时不再报「0 字符」——下面会补「（无正文）」，两个括号挨着读着别扭
+  const label = text ? `${baseLabel}（${text.length} 字符）` : baseLabel;
 
   // 工具名兜底：优先取 call 自带字段，其次按 id 从 turn.tools（工具执行后的真实记录）匹配
   const toolName = (call: { id?: string; name?: string; function?: { name?: string } }): string => {
@@ -167,8 +167,16 @@ function responseEntry(turn: AgentRoundGroupView, view: AgentTraceViewConfig): A
   const toolArgs = (call: { arguments?: string; function?: { arguments?: string } }): string =>
     (call.arguments ?? call.function?.arguments ?? "").trim();
 
+  // 同名工具连续调用很常见（grep、grep），去重计次比原样罗列清爽
+  const toolCounts = new Map<string, number>();
+  for (const call of toolCalls) {
+    const name = toolName(call);
+    toolCounts.set(name, (toolCounts.get(name) ?? 0) + 1);
+  }
   const toolSummary = toolCalls.length
-    ? `调用 ${toolCalls.length} 个工具：${toolCalls.map(toolName).join("、")}`
+    ? `调用 ${toolCalls.length} 个工具：${[...toolCounts]
+        .map(([name, count]) => (count > 1 ? `${name} ×${count}` : name))
+        .join("、")}`
     : "";
 
   const elapsedMs =

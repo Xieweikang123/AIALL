@@ -1,6 +1,6 @@
 <template>
   <Transition name="agent-trace-drawer">
-    <div v-if="state.open" class="agent-trace-drawer-layer">
+    <div v-if="state.open" class="agent-trace-drawer-layer" :class="{ 'agent-trace-drawer-layer--max': state.maximized }">
       <aside
         class="agent-trace-drawer"
         role="dialog"
@@ -11,6 +11,17 @@
           <span v-if="groups.length" class="agent-trace-drawer-sub">
             {{ groups.length }} 轮
           </span>
+          <button
+            type="button"
+            class="agent-trace-drawer-max"
+            :class="{ active: state.maximized }"
+            role="switch"
+            :aria-checked="state.maximized ? 'true' : 'false'"
+            :title="state.maximized ? '还原为右侧窄列，点击收起' : '放大占满工作区观看，点击展开'"
+            @click="setTraceMaximized(!state.maximized)"
+          >
+            {{ state.maximized ? "⤡ 还原" : "⤢ 放大" }}
+          </button>
           <button
             type="button"
             class="agent-trace-drawer-auto"
@@ -60,6 +71,7 @@
             :tools="tools"
             :view="state.view"
             :running="running"
+            :roomy="state.maximized"
             embedded
             @update:view="setTraceView"
           />
@@ -92,6 +104,7 @@ import {
   resolveTraceRunning,
   resolveTraceTools,
   setTraceAutoEnabled,
+  setTraceMaximized,
   setTraceView,
   useAgentTraceDrawerState,
 } from "../services/agentTraceDrawer";
@@ -321,6 +334,25 @@ onUnmounted(() => {
 }
 
 /*
+ * 放大态：脱离右侧窄列，铺满整个工作区（覆盖在会话/编辑器之上）。
+ *
+ * `.workspace` 是 position: relative，抽屉作为它的 flex 子项 absolute 铺满即可 ——
+ * 与窄屏媒体查询同一套接管式做法。不占布局流，所以不会把编辑器挤到最小宽度。
+ * 靠内层 overflow: hidden 裁住旧宽度，宽度过渡由 0.2s 动画完成（见下）。
+ */
+.agent-trace-drawer-layer--max {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  z-index: 6;
+  box-shadow: none;
+}
+
+.agent-trace-drawer-layer--max .agent-trace-drawer {
+  border-left: none;
+}
+
+/*
  * 窄屏（含移动端）装不下第三列：退化成铺满工作区的接管式面板，
  * `.workspace` 是 position: relative，这里 absolute 正好盖住工作区、底部导航不受影响。
  */
@@ -339,6 +371,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
   padding: 12px 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   flex-shrink: 0;
@@ -357,6 +390,42 @@ onUnmounted(() => {
   padding: 1px 7px;
   border-radius: 4px;
   background: rgba(88, 166, 255, 0.12);
+}
+
+/*
+ * 「放大 / 还原」按钮：切面板尺寸，不改开合与消息锁。
+ * 与「自动打开」同为面板头部控件，样式共用一套底色，避免两个按钮观感割裂。
+ */
+.agent-trace-drawer-max {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(201, 209, 217, 0.6);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.agent-trace-drawer-max:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(226, 232, 240, 0.9);
+}
+
+.agent-trace-drawer-max.active {
+  color: rgba(165, 214, 255, 0.95);
+  border-color: rgba(88, 166, 255, 0.45);
+  background: rgba(88, 166, 255, 0.14);
+}
+
+.agent-trace-drawer-max.active:hover {
+  background: rgba(88, 166, 255, 0.2);
+  color: #a5d6ff;
 }
 
 /*
@@ -512,6 +581,24 @@ onUnmounted(() => {
 .agent-trace-drawer-layer.agent-trace-drawer-leave-to {
   opacity: 0;
   width: 0;
+}
+
+/*
+ * 放大态下，进场/退场动画里的「钉死窄宽」和「从 0 宽滑出」都不适用 ——
+ * 放大后是铺满工作区，若还钉 420px 会在动画期间露一条缝、结束后硬跳。
+ * 特异性带上前缀，压过上面的基础动画规则（不靠声明顺序）。
+ */
+.agent-trace-drawer-layer--max.agent-trace-drawer-enter-active,
+.agent-trace-drawer-layer--max.agent-trace-drawer-leave-active {
+  width: 100% !important;
+}
+.agent-trace-drawer-layer--max.agent-trace-drawer-enter-active .agent-trace-drawer,
+.agent-trace-drawer-layer--max.agent-trace-drawer-leave-active .agent-trace-drawer {
+  width: 100%;
+}
+.agent-trace-drawer-layer--max.agent-trace-drawer-enter-from,
+.agent-trace-drawer-layer--max.agent-trace-drawer-leave-to {
+  width: 100%;
 }
 
 .agent-trace-drawer-enter-from .agent-trace-drawer,
