@@ -19,6 +19,12 @@ import {
   removeComposerDraft,
 } from "../utils/composerDraftStorage";
 import { sessionDiag } from "../utils/sessionDiagLog";
+import { debugLog } from "../utils/debugLog";
+import {
+  estimateLocalStorageUsage,
+  reclaimLocalStorageBudget,
+  setActiveProjectForBudget,
+} from "../utils/localStorageBudget";
 import { lsGet, lsSetJson } from "../utils/localStorageSafe";
 
 export type {
@@ -32,6 +38,29 @@ export type {
   VibeChatProjectSnapshot,
   VibeChatSessionMeta,
 } from "./vibeChatStorageTypes";
+
+/**
+ * 项目打开/切换时的 localStorage 水位闸门：超水位就按项目 LRU 淘汰可重建缓存。
+ * 只淘汰 `localStorageBudget` 白名单内的前缀，绝不碰会话索引 / AI 配置 / API Key。
+ *
+ * @param activeProjectPath 当前项目，永不淘汰。
+ * @param recentProjectRanks 最近打开的项目（最近的在前），用于 LRU 判序。
+ */
+export function reclaimLocalStorageForProjectOpen(
+  activeProjectPath: string,
+  recentProjectRanks: readonly string[] = [],
+): void {
+  setActiveProjectForBudget(activeProjectPath);
+  const result = reclaimLocalStorageBudget({ activeProjectPath, recentProjectRanks });
+  if (result.ran) {
+    debugLog("vibe-chat-storage:reclaim-on-project-open", {
+      before: result.usageBefore,
+      after: result.usageAfter,
+      freedBytes: result.freedBytes,
+      evictedProjects: result.evictedProjects.length,
+    });
+  }
+}
 
 /** Whether an assistant row should be kept despite empty final content. */
 export function shouldPersistAssistantMessage(m: PersistedChatMessage): boolean {
@@ -602,6 +631,9 @@ function sanitizeMessages(
         contextTokens: m.contextTokens || undefined,
         peakContextTokens: m.peakContextTokens || undefined,
         completionTokens: m.completionTokens || undefined,
+        // ttftMs 可能是合法的 0（首 token 极快），不能用 `||` 被 falsy 抹掉。
+        ttftMs: m.ttftMs !== undefined ? m.ttftMs : undefined,
+        genMs: m.genMs || undefined,
         ...(options?.forDisk && m.role === "assistant"
           ? {}
           : {
@@ -818,7 +850,43 @@ export function onStorageError(cb: (msg: string) => void) {
 
 function writeIndex(index: ChatStoreIndex): boolean {
   if (!lsSetJson(CHAT_STORAGE_KEY, index)) {
-    console.debug("[vibeChatStorage] localStorage index write failed");
+    // 带真实错误/用量，便于事后在 debug 日志里定位（历史上只 console.debug 查不到）。
+    let reason = "unknown";
+    let usageBytes = 0;
+    try {
+      // 直接重试一次以拿到真实异常名（lsSetJson 把异常吞掉了）。
+      localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(index));
+      // 极少见的瞬态成功：按成功处理，避免缓存与磁盘不一致。
+      indexCache = index;
+      indexCacheRaw = JSON.stringify(index);
+      return true;
+    } catch (err) {
+      reason = err instanceof Error ? err.name || err.message : String(err);
+    }
+    // 配额被吃满：按项目 LRU 淘汰可重建缓存后重试一次，尽量保住索引。
+    const reclaim = reclaimLocalStorageBudget();
+    if (reclaim.ran) {
+      try {
+        localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(index));
+        indexCache = index;
+        indexCacheRaw = JSON.stringify(index);
+        debugLog("vibe-chat-storage:index-write-reclaimed", {
+          freedBytes: reclaim.freedBytes,
+          evictedProjects: reclaim.evictedProjects.length,
+          evictedKeys: reclaim.evictedKeys.length,
+        });
+        return true;
+      } catch (retryErr) {
+        reason = retryErr instanceof Error ? retryErr.name || retryErr.message : String(retryErr);
+      }
+    }
+    try {
+      const usage = estimateLocalStorageUsage();
+      usageBytes = usage.usageBytes;
+    } catch {
+      // ignore usage probe failure
+    }
+    debugLog("vibe-chat-storage:index-write-failed", { reason, usageBytes });
     storageErrorCallback?.("浏览器索引写入失败，会话已保存到项目目录。");
     return false;
   }
@@ -828,6 +896,8 @@ function writeIndex(index: ChatStoreIndex): boolean {
 }
 
 function persistRecord(key: string, record: ProjectChatRecord, options?: { preferredSessionIds?: string[] }): boolean {
+  // 记录「当前项目」：writeIndex 写失败触发 LRU 淘汰时，永不淘汰它。
+  setActiveProjectForBudget(key);
   const normalized = normalizeProjectRecordSessions(record, options?.preferredSessionIds);
   memoryByProject.set(key, cloneRecord(normalized));
   const index = readIndex();

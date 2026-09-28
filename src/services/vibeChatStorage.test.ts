@@ -41,6 +41,7 @@ import {
   switchVibeChatSession,
   setVibeChatSessionGoal,
   getSessionGoal,
+  reclaimLocalStorageForProjectOpen,
   type PersistedChatMessage,
   STORE_VERSION,
   stripReferenceAttachments,
@@ -51,6 +52,7 @@ import {
   VIBE_CHAT_SESSIONS_LOGICAL_DIR,
 } from "./vibeChatStorage";
 import { AGENT_PROGRESS_MARKER } from "./agentProgressMarker";
+import { setActiveProjectForBudget } from "../utils/localStorageBudget";
 
 const CHAT_STORAGE_KEY = "vibe-coding-chat";
 
@@ -1487,6 +1489,29 @@ describe("v3 chat storage (index + memory)", () => {
         },
       ]),
     ).toBe(false);
+  });
+});
+
+describe("reclaimLocalStorageForProjectOpen", () => {
+  let storage: Record<string, string>;
+  beforeEach(() => {
+    storage = installLocalStorageMock();
+    setActiveProjectForBudget("");
+  });
+
+  it("does nothing when usage is within the default budget", () => {
+    storage["vibe-coding-workspace-ui-d:/keep"] = "x".repeat(100);
+    reclaimLocalStorageForProjectOpen("D:/keep", ["D:/keep"]);
+    expect(storage["vibe-coding-workspace-ui-d:/keep"]).toBeDefined();
+  });
+
+  it("evicts stale project caches over budget but keeps the session index", () => {
+    // 超过默认水位（3.5MB）才触发淘汰；这里直接塞一个更大的陈旧项目缓存。
+    storage["vibe-coding-workspace-ui-d:/stale"] = "x".repeat(3_600_000);
+    storage["vibe-coding-chat"] = "index-payload";
+    reclaimLocalStorageForProjectOpen("D:/current", ["D:/current"]);
+    expect(storage["vibe-coding-workspace-ui-d:/stale"]).toBeUndefined();
+    expect(storage["vibe-coding-chat"]).toBe("index-payload");
   });
 });
 

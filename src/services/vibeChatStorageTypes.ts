@@ -133,6 +133,10 @@ export type PersistedChatMessage = {
    * 此时界面回退到 `streamChars` 字符口径。
    */
   completionTokens?: number;
+  /** 最近一轮的首字延迟（ms）：请求发出 → 首个输出 delta。由 Rust 流式层测量。 */
+  ttftMs?: number;
+  /** 该次运行中可测得的解码窗口之和（ms）；仅在 token 与窗口配对的样本上参与输出速度。 */
+  genMs?: number;
   /** Provider-reported cache usage for this run (aggregated across turns). */
   cacheUsage?: {
     promptTokens?: number;
