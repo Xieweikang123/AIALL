@@ -1,7 +1,7 @@
 import { isTauriEnv, runAgentChannel } from "./tauriInvoke";
 import { backendUrl } from "./backendBase";
 import { getAuthHeaders } from "./serverAuth";
-import { runAgentServerSse } from "./webAgentTransport";
+import { runAgentServerSse, type WebAgentSseEvent } from "./webAgentTransport";
 import type { ResolvedUserIntent } from "./intentClassifierTypes";
 import type { VibeAgentEvent, VibeChatMode, VibeChatHistoryMessage } from "../../shared/agentTypes";
 
@@ -78,9 +78,18 @@ export function runVibeAgentSse(request: VibeAgentRunRequest, onEvent: (event: V
   return runWebAgentSse(request, onEvent);
 }
 
+const SSE_STREAM_ENDED_NO_SIGNAL = "连接中断（流已结束但未收到完成信号）";
+
 /**
  * Web 模式：POST 到 agent-server 的 /api/agent/run，流式读 SSE 事件。
  * Agent 在服务器上跑完整工具闭环（读写文件 / Git），浏览器只是遥控器。
+ *
+ * 终止守卫：SSE 流正常结束（读循环 break）不等于服务端发了 `done`/`error`。
+ * 连接被中途掐断、代理超时、服务端进程被杀时，promise 会**正常 resolve 但没有
+ * 任何终止事件**。若不兜底，前端 runManager 里的槽永远不被移除：界面一直显示
+ * 「思考中」、恢复横幅不出现、chatSending 卡住。这里在流 resolve 后若一次
+ * 终止事件都没见过，就补发一条可恢复的 error，让既有恢复链路接管。
+ * （桌面版 Tauri channel 由 Rust 保证每个出口都发终止事件，无此缺口。）
  */
 function runWebAgentSse(
   request: VibeAgentRunRequest,
@@ -89,6 +98,14 @@ function runWebAgentSse(
   const abortCtrl = new AbortController();
   const url = backendUrl("/api/agent/run");
   // 服务器模式：key 由服务端配置注入（任务 C），浏览器不下发明文 key。
+  let sawTerminalEvent = false;
+  const guardedOnEvent = (ev: WebAgentSseEvent) => {
+    const type = ev?.type;
+    if (type === "done" || type === "error" || type === "aborted") {
+      sawTerminalEvent = true;
+    }
+    onEvent(ev as VibeAgentSseEvent);
+  };
   const promise = runAgentServerSse(
     url,
     {
@@ -111,11 +128,17 @@ function runWebAgentSse(
       resolvedUserIntent: request.resolvedUserIntent,
       debug: request.debug,
     },
-    (ev) => onEvent(ev as VibeAgentSseEvent),
+    guardedOnEvent,
     abortCtrl.signal,
   ).catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
+    sawTerminalEvent = true;
     onEvent({ type: "error", data: { message } });
+  }).then(() => {
+    // 流已结束却没见过 done/error → 收尾缺口，补发终止信号。
+    if (!sawTerminalEvent && !abortCtrl.signal.aborted) {
+      onEvent({ type: "error", data: { message: SSE_STREAM_ENDED_NO_SIGNAL } });
+    }
   });
   return {
     promise,

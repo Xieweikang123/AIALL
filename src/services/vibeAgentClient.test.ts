@@ -37,6 +37,7 @@ describe("runVibeAgentSse", () => {
       sseResponse([
         'data: {"type":"status","data":{"phase":"starting"}}\n\n',
         'data: {"type":"message","data":{"text":"hi"}}\n\n',
+        'data: {"type":"done","data":{"turns":1}}\n\n',
       ]),
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -51,7 +52,44 @@ describe("runVibeAgentSse", () => {
     const body = JSON.parse(String(init.body));
     expect(body.prompt).toBe("implement feature");
     expect(body.projectPath).toBe("D:/project/demo");
-    expect(events.map((e) => e.type)).toEqual(["status", "message"]);
+    // A terminal `done` already arrived → no synthetic error appended.
+    expect(events.map((e) => e.type)).toEqual(["status", "message", "done"]);
+  });
+
+  it("synthesizes a resumable error when the stream ends without a terminal event", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse([
+        'data: {"type":"status","data":{"phase":"waiting_model"}}\n\n',
+        'data: {"type":"message_delta","data":{"delta":"partial"}}\n\n',
+      ]),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const events: VibeAgentSseEvent[] = [];
+    const run = runVibeAgentSse(baseRequest, (event) => events.push(event));
+    await run.promise;
+
+    // Stream closed (reader done) with no done/error → the UI must still be told
+    // the run ended, otherwise the run slot leaks and the bubble hangs「思考中」.
+    const terminal = events.at(-1);
+    expect(terminal?.type).toBe("error");
+    expect(String((terminal as { data: { message: string } }).data.message)).toContain(
+      "未收到完成信号",
+    );
+  });
+
+  it("does not synthesize an error when the run was explicitly aborted", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse([]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const events: VibeAgentSseEvent[] = [];
+    const run = runVibeAgentSse(baseRequest, (event) => events.push(event));
+    run.abort();
+    await run.promise;
+
+    // Abort is a deliberate stop, not a dropped stream — the abort path already
+    // clears UI state; appending a synthetic resume-error would be wrong.
+    expect(events.some((e) => e.type === "error")).toBe(false);
   });
 
   it("abort cancels the HTTP stream and posts cancel", async () => {
