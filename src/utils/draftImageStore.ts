@@ -10,9 +10,8 @@
  * 调用方自行降级回内联 data URL。
  */
 
-const DB_NAME = "aiall-composer-drafts";
-const DB_VERSION = 1;
-const STORE_IMAGES = "images";
+import { awaitTransaction, openDraftDb, STORE_IMAGES } from "./draftDb";
+
 const ID_PREFIX = "img-";
 
 export interface DraftImageRecord {
@@ -22,40 +21,8 @@ export interface DraftImageRecord {
   updatedAt: number;
 }
 
-let dbPromise: Promise<IDBDatabase | null> | null = null;
-
 function openDb(): Promise<IDBDatabase | null> {
-  if (dbPromise) return dbPromise;
-  dbPromise = new Promise<IDBDatabase | null>((resolve) => {
-    try {
-      if (typeof indexedDB === "undefined") {
-        resolve(null);
-        return;
-      }
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
-      request.onupgradeneeded = () => {
-        const db = request.result;
-        if (!db.objectStoreNames.contains(STORE_IMAGES)) {
-          const store = db.createObjectStore(STORE_IMAGES, { keyPath: "id" });
-          store.createIndex("draftKey", "draftKey", { unique: false });
-        }
-      };
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => resolve(null);
-      request.onblocked = () => resolve(null);
-    } catch {
-      resolve(null);
-    }
-  });
-  return dbPromise;
-}
-
-function awaitTransaction(tx: IDBTransaction): Promise<void> {
-  return new Promise((resolve, reject) => {
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error ?? new Error("indexeddb transaction failed"));
-    tx.onabort = () => reject(tx.error ?? new Error("indexeddb transaction aborted"));
-  });
+  return openDraftDb();
 }
 
 /** 生成稳定且几乎不重复的图片记录 id（chip 上的 data-image-ref 用它）。 */

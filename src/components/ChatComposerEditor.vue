@@ -53,10 +53,17 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import {
   composerDraftStorageKey,
+  extractDropContents,
+  inlineDropContents,
   isPlaceholderComposerHtml,
+  persistComposerDraft,
+  previewTextFromHtml,
+  readComposerDraft,
+  removeComposerDraft,
 } from "../utils/composerDraftStorage";
 import DOMPurify from "dompurify";
-import { lsGet, lsSet, lsSetJson, lsRemove, lsGetJson } from "../utils/localStorageSafe";
+import { matchMentionTrigger, matchPresetTrigger, triggerDeleteCount } from "../utils/composerTrigger";
+import { lsGetJson, lsSetJson } from "../utils/localStorageSafe";
 import {
   createDraftImageId,
   deleteDraftImagesForDraft,
@@ -159,6 +166,11 @@ const CHIP_DROP = "composer-chip-drop";
 const CHIP_IMAGE = "composer-chip-image";
 const CHIP_QUOTE = "composer-chip-quote";
 
+/** 本地编辑版本号：每次用户/程序化写入输入框 +1。
+ *  异步恢复（读 IndexedDB）回来时若版本已变，说明用户已开始输入，
+ *  不能拿旧草稿覆盖当前内容。 */
+let localEditRevision = 0;
+
 /** 内存缓存：data-image-id → dataUrl。图片本体已移出 localStorage，
  *  恢复时从 IndexedDB 取回；缓存避免每次读图都走一次异步查询，
  *  也保证「刚插入就发送」时 extractPayload 一定能拿到图。 */
@@ -175,6 +187,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   "mention-change": [payload: { open: boolean; query: string }];
+  "preset-change": [payload: { open: boolean; query: string }];
   "enter-send": [];
   "update:empty": [empty: boolean];
   "image-error": [message: string];
@@ -290,6 +303,12 @@ function captureCaretWhileFocused() {
 }
 
 function insertNodesAtCursor(nodes: Element[], addTrailingSpace = true) {
+  const html = nodes.map((node) => node.outerHTML).join("") + (addTrailingSpace ? "\u00A0" : "");
+  insertHtmlAtCursor(html);
+}
+
+/** 在光标处插入一段 HTML（插入后用 `root.querySelectorAll` 处理新节点绑定）。 */
+function insertHtmlAtCursor(html: string) {
   const root = editorRef.value;
   if (!root) return;
 
@@ -325,7 +344,6 @@ function insertNodesAtCursor(nodes: Element[], addTrailingSpace = true) {
   sel?.removeAllRanges();
   sel?.addRange(range);
 
-  const html = nodes.map((node) => node.outerHTML).join("") + (addTrailingSpace ? "\u00A0" : "");
   let finalRange: Range;
   if (document.execCommand("insertHTML", false, html)) {
     finalRange = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : range;
@@ -333,15 +351,11 @@ function insertNodesAtCursor(nodes: Element[], addTrailingSpace = true) {
     // 极少见回退：直接 DOM 插入
     const fallback = range;
     fallback.deleteContents();
-    for (const node of nodes) {
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    for (const node of Array.from(template.content.childNodes)) {
       fallback.insertNode(node);
       fallback.setStartAfter(node);
-      fallback.collapse(true);
-    }
-    if (addTrailingSpace) {
-      const space = document.createTextNode("\u00A0");
-      fallback.insertNode(space);
-      fallback.setStartAfter(space);
       fallback.collapse(true);
     }
     sel?.removeAllRanges();
@@ -413,6 +427,7 @@ function insertFileRef(file: ComposerReferencedFile) {
   syncEmpty();
   saveDraftToStorage();
   emitMentionChange();
+  emitPresetChange();
 }
 
 function insertDroppedFile(file: ComposerDroppedFile) {
@@ -455,6 +470,7 @@ function insertQuote(text: string, filePath?: string) {
   insertNodesAtCursor([createQuoteChip(text, filePath)]);
   syncEmpty();
   emitMentionChange();
+  emitPresetChange();
   saveDraftToStorage();
 }
 
@@ -468,21 +484,62 @@ function getPlainTextBeforeCursor(): string {
   pre.setEnd(range.endContainer, range.endOffset);
   return pre.toString();
 }
-function removeMentionQueryBeforeCursor(): boolean {
+/** 失焦（如下拉点击）后先把光标恢复到失焦前位置，避免基于空 selection 做删除/插入。 */
+function restoreCaretIfBlurred() {
+  const root = editorRef.value;
+  if (!root || document.activeElement === root) return;
+  root.focus();
+  const saved = savedCaretPosition.value;
+  if (!saved) return;
+  const range = restoreCaretFromSaved(saved);
+  if (!range) return;
+  const sel = window.getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(range);
+}
+
+/**
+ * 删除光标前最后一个触发 token（`@文件` 或 `/预设` 关键词）。
+ * 命中 `keywordPattern` 的最后一个捕获组后，连同触发符号一起回删。
+ */
+/** 触发词连同触发符号一起回删（`@文件` / `/预设`）。 */
+function removeTriggerQueryBeforeCursor(matcher: (text: string) => string | null): boolean {
+  restoreCaretIfBlurred();
   const before = getPlainTextBeforeCursor();
-  const match = /(^|\s)@([^\s@]*)$/.exec(before);
-  if (!match) return false;
+  const query = matcher(before);
+  if (query === null) return false;
 
   const sel = window.getSelection();
   if (!sel || !sel.rangeCount) return false;
 
-  const deleteCount = match[2].length + 1;
+  const deleteCount = triggerDeleteCount(query);
   for (let i = 0; i < deleteCount; i++) {
     sel.modify("extend", "backward", "character");
   }
   sel.deleteFromDocument();
   sel.collapseToEnd();
   return true;
+}
+
+function removeMentionQueryBeforeCursor(): boolean {
+  return removeTriggerQueryBeforeCursor(matchMentionTrigger);
+}
+
+/** 预设正文按纯文本插入：转义 HTML 后把换行转成 `<br>`（extractPayload 还原成 `\n`）。 */
+function escapePresetText(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** 把一条预设正文填进输入框（清掉 `/关键词`），不发送，交给用户手动回车。 */
+function insertPreset(text: string) {
+  if (!text) return;
+  removeTriggerQueryBeforeCursor(matchPresetTrigger);
+  const html = escapePresetText(text).replace(/\r\n|\r|\n/g, "<br>");
+  insertHtmlAtCursor(html);
+  syncEmpty();
+  emitMentionChange();
+  emitPresetChange();
+  saveDraftToStorage();
 }
 
 function extractPayload(): ComposerPayload {
@@ -575,6 +632,7 @@ function clear() {
   savedCaretPosition.value = null;
   syncEmpty();
   emitMentionChange();
+  emitPresetChange();
   clearDraftStorage();
 }
 
@@ -585,12 +643,16 @@ function setPlainText(text: string) {
   savedCaretPosition.value = null;
   // 纯文本替换后不再有图片 chip，清掉图片缓存与索引，避免残留孤儿数据
   draftImageCache.clear();
-  void deleteDraftImagesForDraft(imageDraftKeyFromStorageKey(getDraftStorageKey()));
+  void deleteDraftImagesForDraft(draftKeyFromStorageKey(getDraftStorageKey()));
   if (text) {
     root.appendChild(document.createTextNode(text));
   }
   syncEmpty();
   emitMentionChange();
+  emitPresetChange();
+  // 程序化写入同样要落盘：否则「点选项/示例填入 → 不输入直接刷新」会丢内容，
+  // 因为 input 事件不会触发，草稿仍是旧值（多为空）。
+  saveDraftToStorage();
 }
 
 function hasContent(): boolean {
@@ -614,18 +676,32 @@ function syncEmpty() {
 }
 
 function emitMentionChange() {
-  const before = getPlainTextBeforeCursor();
-  const match = /(^|\s)@([^\s@]*)$/.exec(before);
-  if (match) {
-    emit("mention-change", { open: true, query: match[2] });
+  const query = matchMentionTrigger(getPlainTextBeforeCursor());
+  if (query !== null) {
+    emit("mention-change", { open: true, query });
     return;
   }
   emit("mention-change", { open: false, query: "" });
 }
 
+/**
+ * `/` 预设触发：与 `@` 引用同一套「光标前 token」判定。
+ * 只认行首或空白后的 `/`，避免 URL / 路径里的斜杠误触发。
+ */
+function emitPresetChange() {
+  const query = matchPresetTrigger(getPlainTextBeforeCursor());
+  if (query !== null) {
+    emit("preset-change", { open: true, query });
+    return;
+  }
+  emit("preset-change", { open: false, query: "" });
+}
+
 function onInput() {
+  localEditRevision++;
   syncEmpty();
   emitMentionChange();
+  emitPresetChange();
   saveDraftToStorage();
 }
 
@@ -725,8 +801,7 @@ async function applySavedDraft(root: HTMLElement, saved: string) {
 
 /** 序列化为草稿 HTML：剥掉图片的全部 base64 ——<img src> 预览与 chip 上的
  *  data-image-url 都去掉，只保留 data-image-id 引用（图片本体在 IndexedDB）。
- *  这样草稿 HTML 体积与图片大小无关，彻底避免撑爆 localStorage；
- *  恢复时按 id 从 IndexedDB 取回并回填。 */
+ *  这样草稿 HTML 体积与图片大小无关；恢复时按 id 从 IndexedDB 取回并回填。 */
 function serializeDraftHtml(root: HTMLElement): string {
   const clone = root.cloneNode(true) as HTMLElement;
   clone.querySelectorAll(`.${CHIP_IMAGE}`).forEach((chip) => {
@@ -736,80 +811,99 @@ function serializeDraftHtml(root: HTMLElement): string {
   return clone.innerHTML;
 }
 
-/** 从草稿存储 key 反推图片所属的 draftKey（与插入时 putDraftImage 用的 key 一致）。 */
-function imageDraftKeyFromStorageKey(storageKey: string): string {
+/** 从草稿存储 key 反推 draftKey（与存图片 / 正文用的 key 一致）。 */
+function draftKeyFromStorageKey(storageKey: string): string {
   return storageKey.replace(/^vibe-coding-input-draft-/, "") || "__global";
 }
 
-/** 将当前输入框完整 HTML（含图片 chip 引用）保存到 localStorage，不写 chat-store。
- *  返回 false 表示写入失败（多为其它键占用配额导致）。 */
-function saveDraftToKey(storageKey: string): boolean {
+/**
+ * 把当前输入框完整内容落盘到草稿存储。
+ *
+ * - 图片本体、拖入文件全文都不进 HTML / localStorage（分别存 IndexedDB）；
+ * - 正文 HTML + 摘要走 IndexedDB（见 draftContentStore / composerDraftStorage）；
+ * - IndexedDB 不可用时由 persistComposerDraft 自动降级回整块写 localStorage，
+ *   此时把被剥出的文件正文内联回去，保证刷新后不丢。
+ */
+function saveDraftToKey(storageKey: string): void {
   const root = editorRef.value;
-  if (!root || !props.draftKey) return true;
+  if (!root || !props.draftKey) return;
 
-  const imageDraftKey = imageDraftKeyFromStorageKey(storageKey);
+  const draftKey = draftKeyFromStorageKey(storageKey);
 
   // 仅插图 / 仅 @ 引用时没有纯文本，不能只按 hasContent() 判定为空，
   // 否则图片草稿会被当成空草稿删掉。
   const hasChip = !!root.querySelector(`.${CHIP_IMAGE}, .${CHIP_REF}, .${CHIP_DROP}, .${CHIP_QUOTE}`);
-  if (!hasContent() && !hasChip) {
-    lsRemove(storageKey);
-    void deleteDraftImagesForDraft(imageDraftKey);
-    return true;
+  const rawHtml = serializeDraftHtml(root);
+  if ((!hasContent() && !hasChip) || isPlaceholderEditorHtml(rawHtml)) {
+    void clearDraftFor(draftKey);
+    return;
   }
 
-  const html = serializeDraftHtml(root);
-  if (isPlaceholderEditorHtml(html)) {
-    lsRemove(storageKey);
-    void deleteDraftImagesForDraft(imageDraftKey);
-    return true;
-  }
-  const ok = lsSet(storageKey, html);
-  if (ok) {
-    // 清理已被用户删除的图片：只保留当前 DOM 里仍存在的 id。
-    const keep = new Set<string>();
-    root.querySelectorAll(`.${CHIP_IMAGE}`).forEach((chip) => {
-      const id = (chip as HTMLElement).dataset.imageId;
-      if (id) keep.add(id);
-    });
-    void pruneDraftImages(imageDraftKey, keep);
-  }
-  return ok;
+  const { html: strippedHtml, contents } = extractDropContents(rawHtml);
+  const preview = previewTextFromHtml(rawHtml) ?? "";
+
+  const keep = new Set<string>();
+  root.querySelectorAll(`.${CHIP_IMAGE}`).forEach((chip) => {
+    const id = (chip as HTMLElement).dataset.imageId;
+    if (id) keep.add(id);
+  });
+
+  void persistComposerDraft(draftKey, {
+    html: strippedHtml,
+    preview,
+    // 降级路径用：IDB 不可用时把文件正文内联回 HTML
+    inlineDropContents: contents,
+  }).then((ok) => {
+    if (ok) {
+      // 清理已被用户删除的图片：只保留当前 DOM 里仍存在的 id。
+      void pruneDraftImages(draftKey, keep);
+    } else {
+      emit(
+        "draft-save-error",
+        "草稿保存失败：浏览器本地存储（localStorage）写入被拒绝，刷新后可能丢失，请先发送或清理空间。",
+      );
+    }
+  });
 }
 
-/** 将当前输入框完整 HTML（含图片 chip 引用）保存到 localStorage */
+/** 将当前输入框完整内容保存到草稿存储 */
 function saveDraftToStorage() {
-  const ok = saveDraftToKey(getDraftStorageKey());
-  if (!ok) {
-    emit(
-      "draft-save-error",
-      "草稿保存失败：浏览器本地存储（localStorage）写入被拒绝，刷新后可能丢失，请先发送或清理空间。",
-    );
-  }
+  void saveDraftToKey(getDraftStorageKey());
 }
 
-/** 从 localStorage 恢复输入框内容（含图片 chip）；无草稿时清空输入框 */
+/** 从草稿存储恢复输入框内容（含图片 chip）；无草稿时清空输入框 */
 async function restoreDraftFromStorage() {
   try {
     const root = editorRef.value;
     if (!root) return;
 
-    let saved = lsGet(getDraftStorageKey());
+    const draftKey = props.draftKey || "__global";
+    const revisionAtStart = localEditRevision;
+    let stored = await readComposerDraft(draftKey);
 
-    if (!saved && props.draftKey && props.projectPath) {
-      saved = readLegacyDraftText(props.projectPath, props.draftKey);
+    if (!stored && props.draftKey && props.projectPath) {
+      const legacyText = readLegacyDraftText(props.projectPath, props.draftKey);
+      if (legacyText) stored = { html: legacyText, preview: legacyText };
     }
     if (props.draftKey && props.projectPath) {
       purgeLegacyDraftSession(props.draftKey, props.projectPath);
     }
 
-    if (saved) {
-      await applySavedDraft(root, saved);
+    // 恢复期间若已切走（快速切会话），丢弃本次结果
+    if ((props.draftKey || "__global") !== draftKey) return;
+
+    if (stored) {
+      // 用户已开始输入时丢弃恢复结果，避免异步回来的旧草稿覆盖新内容
+      if (localEditRevision !== revisionAtStart) return;
+      const html = inlineDropContents(stored.html, stored.inlineDropContents);
+      await applySavedDraft(root, html);
     } else {
+      if (localEditRevision !== revisionAtStart) return;
       root.innerHTML = "";
     }
     syncEmpty();
     emitMentionChange();
+    emitPresetChange();
   } catch {
     // ignore storage errors
   }
@@ -817,12 +911,16 @@ async function restoreDraftFromStorage() {
 
 /** 清除已保存的草稿（发送消息后调用） */
 function clearDraftStorage() {
-  lsRemove(getDraftStorageKey());
   draftImageCache.clear();
-  void deleteDraftImagesForDraft(imageDraftKeyFromStorageKey(getDraftStorageKey()));
+  void clearDraftFor(draftKeyFromStorageKey(getDraftStorageKey()));
   if (props.draftKey && props.projectPath) {
     purgeLegacyDraftSession(props.draftKey, props.projectPath);
   }
+}
+
+/** 彻底清除某个 draftKey 的草稿：正文 + 标记 + 图片。 */
+function clearDraftFor(draftKey: string): Promise<void> {
+  return removeComposerDraft(draftKey);
 }
 
 function onMouseDown(e: MouseEvent) {
@@ -890,6 +988,7 @@ async function onPaste(e: ClipboardEvent) {
   document.execCommand("insertText", false, text);
   syncEmpty();
   emitMentionChange();
+  emitPresetChange();
   // execCommand 插入同样不保证触发 input 事件，显式落盘，避免粘贴后刷新丢失
   saveDraftToStorage();
 }
@@ -926,6 +1025,7 @@ function removeChipBeforeCursor(): boolean {
   chip.remove();
   syncEmpty();
   emitMentionChange();
+  emitPresetChange();
   return true;
 }
 
@@ -954,6 +1054,7 @@ defineExpose({
   insertDroppedFile,
   insertImage,
   insertQuote,
+  insertPreset,
   extractPayload,
   clear,
   setPlainText,
