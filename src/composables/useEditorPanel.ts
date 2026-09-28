@@ -25,7 +25,17 @@ import {
   isScratchPath,
   scratchDisplayName,
 } from "../utils/vibeHelpers";
-import { readEditorWorkspace, writeEditorWorkspace, type PersistedEditorTab } from "../utils/editorWorkspaceStorage";
+import {
+  isMarkdownPath,
+  loadMarkdownPreviewEnabled,
+} from "../utils/markdownPreviewPreference";
+import {
+  readEditorWorkspace,
+  writeEditorWorkspace,
+  type PersistedEditorGitMeta,
+  type PersistedEditorTab,
+} from "../utils/editorWorkspaceStorage";
+import { nextUnloadedSingleChainDir } from "../utils/treeDisplay";
 
 type FileDiff = {
   before: string;
@@ -115,6 +125,8 @@ export function useEditorPanel(params: UseEditorPanelParams) {
   const showDiffMode = ref(false);
   const renamingPath = ref("");
   let scratchSeq = 0;
+  /** git 类 tab 的还原引用（path -> meta），localStorage 只存这些元数据，内容按需回拉。 */
+  const gitTabMeta = new Map<string, PersistedEditorGitMeta>();
 
   /* ---- 导航历史（浏览器式后退/前进） ---- */
   interface NavEntry {
@@ -409,7 +421,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
   async function openDiffPreview(
     path: string,
     diff: FileDiff,
-    options?: { readOnly?: boolean; tabKind?: EditorTabKind },
+    options?: { readOnly?: boolean; tabKind?: EditorTabKind; gitMeta?: PersistedEditorGitMeta },
   ) {
     if (!(await ensureCanLeaveCurrentTab())) return;
     syncActiveTabToCache();
@@ -419,6 +431,11 @@ export function useEditorPanel(params: UseEditorPanelParams) {
       readOnlyFileKeys.value = nextReadOnly;
     }
     const tabKind = resolveGitTabKind(path, options?.tabKind);
+    if (options?.gitMeta) {
+      gitTabMeta.set(path, options.gitMeta);
+    } else {
+      gitTabMeta.delete(path);
+    }
     expandEditor();
     setFileDiff(path, diff);
     selectedTreePath.value = options?.readOnly ? "" : path;
@@ -426,7 +443,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     fileContent.value = diff.after;
     fileDirty.value = false;
     fileLoadError.value = "";
-    showDiffMode.value = true;
+    showDiffMode.value = !(isMarkdownPath(path) && loadMarkdownPreviewEnabled());
 
     const cached = findOpenTab(path);
     if (cached) {
@@ -462,7 +479,14 @@ export function useEditorPanel(params: UseEditorPanelParams) {
       const nextReadOnly = new Set(readOnlyFileKeys.value);
       nextReadOnly.add(normalizePathKey(previewPath));
       readOnlyFileKeys.value = nextReadOnly;
-      await openDiffPreview(previewPath, diff, { readOnly: true });
+      await openDiffPreview(previewPath, diff, {
+        readOnly: true,
+        gitMeta: {
+          hash: entry.hash,
+          filePath: file.path,
+          ...(file.oldPath ? { oldPath: file.oldPath } : {}),
+        },
+      });
     } catch (e) {
       gitError.value = e instanceof Error ? e.message : "获取提交文件 diff 失败";
     } finally {
@@ -499,6 +523,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
       await openDiffPreview(previewPath, diff, {
         readOnly: staged,
         tabKind: staged ? "git-staged" : "git-change",
+        ...(staged ? { gitMeta: { filePath } } : {}),
       });
     } catch (e) {
       if (!(e instanceof DOMException && e.name === "AbortError")) {
@@ -717,6 +742,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     const idx = openTabs.value.findIndex((item) => item.path === path);
     if (idx < 0) return;
     openTabs.value.splice(idx, 1);
+    gitTabMeta.delete(path);
     if (readOnlyFileKeys.value.has(normalizePathKey(path))) {
       const nextReadOnly = new Set(readOnlyFileKeys.value);
       nextReadOnly.delete(normalizePathKey(path));
@@ -957,14 +983,34 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     expandedDirs.value = new Set(expanded);
 
     const node = findNode(fileTree.value, dirPath);
-    if (node && node.isDirectory && !node.loaded) {
-      try {
-        node.children = await loadDirChildren(dirPath);
-        node.loaded = true;
-      } catch (e) {
-        node.children = [];
-        treeError.value = e instanceof Error ? e.message : "加载目录失败";
+    if (!node || !node.isDirectory) return;
+
+    // 展开时顺带把「单子目录链」加载到底并展开，合并行一次点击即可露出内容。
+    try {
+      await loadSingleChain(node);
+    } catch (e) {
+      if (!node.loaded) node.children = [];
+      treeError.value = e instanceof Error ? e.message : "加载目录失败";
+    }
+  }
+
+  /**
+   * 从目录节点出发逐层加载：先补齐「单子目录链」上未加载的目录，直到出现文件或分叉；
+   * 沿途各段一并标记为展开（这些行会被合并成一行，展开判据取链尾）。
+   */
+  async function loadSingleChain(node: TreeNode) {
+    let current: TreeNode | null = node;
+    while (current) {
+      if (!current.loaded) {
+        current.children = await loadDirChildren(current.path);
+        current.loaded = true;
       }
+      if (!expandedDirs.value.has(current.path)) {
+        const expanded = expandedDirs.value;
+        expanded.add(current.path);
+        expandedDirs.value = new Set(expanded);
+      }
+      current = nextUnloadedSingleChainDir(current, (n) => n.loaded === true);
     }
   }
 
@@ -1003,8 +1049,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
   }
 
   /** 目标文件的各级父目录（不含根），返回与文件树节点一致的路径分隔符 */
-  function parentDirChain(filePath: string): string[] {
-    const root = projectPath.value.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
+  function parentDirChain(filePath: string): string[] {    const root = projectPath.value.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase();
     const norm = filePath.replace(/\\/g, "/");
     const slashIdx = norm.lastIndexOf("/");
     const dir = slashIdx >= 0 ? norm.slice(0, slashIdx) : "";
@@ -1080,6 +1125,7 @@ export function useEditorPanel(params: UseEditorPanelParams) {
   function removeOpenTabForPath(path: string) {
     const idx = openTabs.value.findIndex((tab) => tab.path === path);
     if (idx >= 0) openTabs.value.splice(idx, 1);
+    gitTabMeta.delete(path);
     if (activeFilePath.value === path) {
       const nextTab = openTabs.value[idx] || openTabs.value[idx - 1];
       if (nextTab) {
@@ -1133,9 +1179,9 @@ export function useEditorPanel(params: UseEditorPanelParams) {
         base.dirty = tab.dirty;
         base.content = tab.content;
       } else {
-        base.content = tab.content;
-        const diff = getFileDiff(tab.path);
-        if (diff) base.diff = diff;
+        // git 类 tab：内容可重新拉取，只存还原所需的最小元数据（不再存整份 content/diff）。
+        const meta = gitTabMeta.get(tab.path);
+        if (meta) base.git = meta;
         if (readOnlyFileKeys.value.has(normalizePathKey(tab.path))) {
           base.readOnly = true;
         }
@@ -1154,6 +1200,67 @@ export function useEditorPanel(params: UseEditorPanelParams) {
       persistWorkspaceTimer = 0;
       persistEditorWorkspace();
     }, 250);
+  }
+
+  /** 重建一个 git 类 tab：优先用遗留 diff（兼容），否则按元数据回拉；都拿不到则降级/丢弃。 */
+  async function restoreGitTab(
+    item: PersistedEditorTab,
+    kind: EditorTabKind,
+  ): Promise<{ tab: OpenTab; diff?: FileDiff } | null> {
+    const path = item.path.trim();
+
+    if (item.diff) {
+      // 旧版本曾把整份 diff 存进 localStorage；读到时直接用，省一次拉取。
+      if (item.git) gitTabMeta.set(path, item.git);
+      return { tab: { path, content: item.diff.after, dirty: false, kind }, diff: item.diff };
+    }
+
+    const meta = item.git;
+    try {
+      if (kind === "git-history" && meta?.hash) {
+        const result = await fetchGitCommitFileDiff(
+          projectPath.value.trim(),
+          meta.hash,
+          meta.filePath,
+          meta.oldPath,
+        );
+        if (result.ok) {
+          const diff: FileDiff = { before: result.before, after: result.after };
+          gitTabMeta.set(path, meta);
+          return { tab: { path, content: diff.after, dirty: false, kind }, diff };
+        }
+      } else if (kind === "git-staged" && meta?.filePath) {
+        // 已暂存的 diff 无法反解（原预览路径是 git-index:// 相对路径），降级为普通文件 tab。
+        const abs = resolveFullPathFromRel(meta.filePath);
+        const result = await readFile(abs);
+        if (result.ok) {
+          return { tab: { path: abs, content: result.content, dirty: false, kind: "file" } };
+        }
+      } else if (kind === "git-change" && meta?.filePath) {
+        const controller = new AbortController();
+        const effectiveRepo = gitActiveRepoPath?.value?.trim() || projectPath.value.trim();
+        const result = await fetchGitDiffContent(effectiveRepo, meta.filePath, false, controller.signal);
+        if (result.ok) {
+          const diff: FileDiff = { before: result.before, after: result.after };
+          gitTabMeta.set(path, meta);
+          return { tab: { path, content: diff.after, dirty: false, kind }, diff };
+        }
+        // diff 拉不到（文件已提交/还原）：降级为磁盘当前内容。
+        const fallback = await readFile(path);
+        if (fallback.ok) {
+          return { tab: { path, content: fallback.content, dirty: false, kind: "file" } };
+        }
+      } else if (kind === "git-change") {
+        // 旧版 diff 未迁移且无元数据：尽力从磁盘读当前内容，否则丢弃该 tab。
+        const result = await readFile(path);
+        if (result.ok) {
+          return { tab: { path, content: result.content, dirty: false, kind: "file" } };
+        }
+      }
+    } catch {
+      // 忽略还原失败（文件已提交/切分支/被删）
+    }
+    return null;
   }
 
   async function restoreEditorWorkspace() {
@@ -1197,15 +1304,15 @@ export function useEditorPanel(params: UseEditorPanelParams) {
         if (result.ok) {
           restored.push({ path, content: result.content, dirty: false, kind: "file" });
         }
-      } else {
-        restored.push({ path, content: item.content ?? "", dirty: false, kind });
-        if (item.diff) {
-          nextDiffs[normalizePathKey(path)] = item.diff;
-        }
-        if (item.readOnly) {
-          nextReadOnly.add(normalizePathKey(path));
-        }
+        continue;
       }
+
+      // git 类 tab：优先用旧版遗留的 diff（兼容），否则按元数据重新拉取；拉不到就降级/丢弃。
+      const gitResult = await restoreGitTab(item, kind);
+      if (!gitResult) continue;
+      restored.push(gitResult.tab);
+      if (gitResult.diff) nextDiffs[normalizePathKey(path)] = gitResult.diff;
+      if (item.readOnly) nextReadOnly.add(normalizePathKey(path));
     }
     if (!restored.length) return;
 
@@ -1224,11 +1331,22 @@ export function useEditorPanel(params: UseEditorPanelParams) {
     fileDirty.value = active.dirty;
     selectedTreePath.value = active.kind === "file" ? active.path : "";
     fileLoadError.value = "";
-    showDiffMode.value = active.kind !== "file" && active.kind !== "scratch" && Boolean(nextDiffs[normalizePathKey(active.path)]);
+    showDiffMode.value =
+      active.kind !== "file" &&
+      active.kind !== "scratch" &&
+      Boolean(nextDiffs[normalizePathKey(active.path)]) &&
+      !(isMarkdownPath(active.path) && loadMarkdownPreviewEnabled());
+  }
+
+  /** 路径层级深度（按分隔符计数），用于恢复展开态时按浅到深加载。 */
+  function pathDepth(path: string): number {
+    return path.replace(/\\/g, "/").split("/").filter(Boolean).length;
   }
 
   async function reloadExpandedDirChildren() {
-    for (const dirPath of expandedDirs.value) {
+    // 按层级从浅到深加载，保证父目录先就位、findNode 才能定位到深层目录。
+    const dirs = [...expandedDirs.value].sort((a, b) => pathDepth(a) - pathDepth(b));
+    for (const dirPath of dirs) {
       const node = findNode(fileTree.value, dirPath);
       if (node?.isDirectory && !node.loaded) {
         try {

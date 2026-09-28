@@ -381,4 +381,143 @@ describe("useEditorPanel — 异步缺口修复", () => {
       expect(openTabs.value.map((t) => t.path)).toHaveLength(4);
     });
   });
+
+  // ─── 5. 编辑器工作区：不落整份 content/diff ─────────────
+  describe("编辑器工作区序列化", () => {
+    const gitChangePath = `${PROJECT_PATH}/src/a.ts`;
+
+    it("git 类 tab 不落 content/diff，只落 git 元数据", async () => {
+      const params = makeParams();
+      const editor = (await import("./useEditorPanel")).useEditorPanel(params);
+
+      await editor.openDiffPreview(
+        `${PROJECT_PATH}/src/a.ts`,
+        { before: "BEFORE", after: "AFTER" },
+        { tabKind: "git-change", gitMeta: { filePath: "src/a.ts" } },
+      );
+      editor.persistEditorWorkspace();
+
+      expect(writeEditorWorkspaceMock).toHaveBeenCalledTimes(1);
+      const [, workspace] = writeEditorWorkspaceMock.mock.calls[0];
+      const tab = workspace.tabs.find((t: { path: string }) => t.path === gitChangePath);
+      expect(tab).toBeDefined();
+      expect(tab.content).toBeUndefined();
+      expect(tab.diff).toBeUndefined();
+      expect(tab.git).toEqual({ filePath: "src/a.ts" });
+    });
+
+    it("restore 时按 git 元数据回拉 diff，而不是读取本地存的 content", async () => {
+      fetchGitDiffContentMock.mockResolvedValue({ ok: true, before: "OLD", after: "NEW" });
+      readEditorWorkspaceMock.mockReturnValue({
+        tabs: [{ path: gitChangePath, kind: "git-change", readOnly: true, git: { filePath: "src/a.ts" } }],
+        activePath: gitChangePath,
+      });
+
+      const params = makeParams();
+      const editor = (await import("./useEditorPanel")).useEditorPanel(params);
+      await editor.restoreEditorWorkspace();
+
+      expect(fetchGitDiffContentMock).toHaveBeenCalledWith(
+        PROJECT_PATH,
+        "src/a.ts",
+        false,
+        expect.any(AbortSignal),
+      );
+      expect(editor.openTabs.value.some((t) => t.path === gitChangePath)).toBe(true);
+      expect(editor.getFileDiff(gitChangePath)).toEqual({ before: "OLD", after: "NEW" });
+    });
+
+    it("restore 优先用旧版遗留 diff，不再重复拉取", async () => {
+      const legacyDiff = { before: "L_BEFORE", after: "L_AFTER" };
+      readEditorWorkspaceMock.mockReturnValue({
+        tabs: [{ path: gitChangePath, kind: "git-change", diff: legacyDiff }],
+        activePath: gitChangePath,
+      });
+
+      const params = makeParams();
+      const editor = (await import("./useEditorPanel")).useEditorPanel(params);
+      await editor.restoreEditorWorkspace();
+
+      expect(fetchGitDiffContentMock).not.toHaveBeenCalled();
+      expect(editor.getFileDiff(gitChangePath)).toEqual(legacyDiff);
+    });
+
+    it("restore 时 diff 拉取失败则丢弃该 tab，不影响其他 tab", async () => {
+      fetchGitDiffContentMock.mockResolvedValue({ ok: false, error: "gone" });
+      const normalPath = `${PROJECT_PATH}/src/keep.ts`;
+      readEditorWorkspaceMock.mockReturnValue({
+        tabs: [
+          { path: gitChangePath, kind: "git-change", git: { filePath: "src/a.ts" } },
+          { path: normalPath, kind: "file" },
+        ],
+        activePath: normalPath,
+      });
+      // 磁盘也读不到（文件已删除）→ git tab 只能丢弃
+      readFileMock.mockImplementation(async (p: string) =>
+        p === normalPath ? { ok: true, content: "keep" } : { ok: false, error: "missing" },
+      );
+
+      const params = makeParams();
+      const editor = (await import("./useEditorPanel")).useEditorPanel(params);
+      await editor.restoreEditorWorkspace();
+
+      expect(editor.openTabs.value.map((t) => t.path)).toEqual([normalPath]);
+      expect(editor.activeFilePath.value).toBe(normalPath);
+    });
+
+    it("restore 时 diff 拉取失败但文件仍在，则降级为普通文件 tab", async () => {
+      fetchGitDiffContentMock.mockResolvedValue({ ok: false, error: "gone" });
+      readEditorWorkspaceMock.mockReturnValue({
+        tabs: [{ path: gitChangePath, kind: "git-change", git: { filePath: "src/a.ts" } }],
+        activePath: gitChangePath,
+      });
+      readFileMock.mockResolvedValue({ ok: true, content: "on disk" });
+
+      const params = makeParams();
+      const editor = (await import("./useEditorPanel")).useEditorPanel(params);
+      await editor.restoreEditorWorkspace();
+
+      const tab = editor.openTabs.value.find((t) => t.path === gitChangePath);
+      expect(tab?.kind).toBe("file");
+      expect(tab?.content).toBe("on disk");
+    });
+  });
+
+  // ─── 6. openDiffPreview: md 尊重预览记忆 ────────────────
+  describe("openDiffPreview — markdown 预览记忆", () => {
+    const mdPath = `${PROJECT_PATH}/docs/note.md`;
+    const tsPath = `${PROJECT_PATH}/src/a.ts`;
+
+    function stubPreviewPreference(enabled: boolean | null) {
+      const store = new Map<string, string>();
+      if (enabled !== null) store.set("editor-md-preview", String(enabled));
+      vi.stubGlobal("localStorage", {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, value),
+        removeItem: (key: string) => void store.delete(key),
+      });
+    }
+
+    it("md 变更文件在预览偏好开启时进预览，不进 diff", async () => {
+      stubPreviewPreference(true);
+      const editor = (await import("./useEditorPanel")).useEditorPanel(makeParams());
+      await editor.openDiffPreview(mdPath, { before: "B", after: "A" }, { tabKind: "git-change" });
+      expect(editor.showDiffMode.value).toBe(false);
+      expect(editor.activeFileDiff.value).toEqual({ before: "B", after: "A" });
+    });
+
+    it("md 变更文件在预览偏好关闭时仍进 diff", async () => {
+      stubPreviewPreference(false);
+      const editor = (await import("./useEditorPanel")).useEditorPanel(makeParams());
+      await editor.openDiffPreview(mdPath, { before: "B", after: "A" }, { tabKind: "git-change" });
+      expect(editor.showDiffMode.value).toBe(true);
+    });
+
+    it("非 md 变更文件不受预览偏好影响，始终进 diff", async () => {
+      stubPreviewPreference(true);
+      const editor = (await import("./useEditorPanel")).useEditorPanel(makeParams());
+      await editor.openDiffPreview(tsPath, { before: "B", after: "A" }, { tabKind: "git-change" });
+      expect(editor.showDiffMode.value).toBe(true);
+    });
+  });
 });

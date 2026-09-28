@@ -90,13 +90,36 @@
           title="前进 (导航历史)"
           @click="$emit('navigate-forward')"
         >→</button>
-        <button
-          v-if="showDiffMode"
-          type="button"
-          class="ghost tiny editor-action-btn diff-toggle-btn"
-          title="切换 Diff/编辑视图"
-          @click="$emit('toggle-diff-mode')"
-        >⇄ Diff</button>
+        <div
+          v-if="isMarkdownFile || activeFileDiff"
+          class="editor-view-toggle"
+          role="group"
+          aria-label="编辑器视图切换"
+        >
+          <button
+            v-if="isMarkdownFile"
+            type="button"
+            class="editor-view-toggle-btn"
+            :class="{ active: viewMode === 'preview' }"
+            title="Markdown 预览"
+            @click="setViewMode('preview')"
+          >预览</button>
+          <button
+            type="button"
+            class="editor-view-toggle-btn"
+            :class="{ active: viewMode === 'edit' }"
+            title="编辑源码"
+            @click="setViewMode('edit')"
+          >编辑</button>
+          <button
+            v-if="activeFileDiff"
+            type="button"
+            class="editor-view-toggle-btn"
+            :class="{ active: viewMode === 'diff' }"
+            title="与 Git 的差异"
+            @click="setViewMode('diff')"
+          >Diff</button>
+        </div>
         <button
           v-if="isGitVirtualTab"
           type="button"
@@ -104,14 +127,6 @@
           title="在编辑器中打开源文件"
           @click="$emit('open-source-file', activeFilePath)"
         >源文件</button>
-        <button
-          v-if="isMarkdownFile && !showDiffMode"
-          type="button"
-          class="ghost tiny editor-action-btn"
-          :class="{ active: showPreview }"
-          :title="showPreview ? '切换到编辑' : '预览 Markdown'"
-          @click="showPreview = !showPreview"
-        >{{ showPreview ? '编辑' : '预览' }}</button>
         <span v-if="fileDirty && !showDiffMode" class="dirty-badge" title="文件已修改">● 未保存</span>
         <span class="editor-action-divider" />
         <button
@@ -234,6 +249,12 @@ import {
   editorTabTitle,
   inferEditorTabKind,
 } from "../../utils/vibeHelpers";
+import {
+  isMarkdownPath,
+  loadMarkdownPreviewEnabled,
+  saveMarkdownPreviewEnabled,
+} from "../../utils/markdownPreviewPreference";
+import { resolveEditorViewMode, type EditorViewMode } from "../../utils/editorViewMode";
 
 interface FileDiff {
   before: string;
@@ -632,28 +653,9 @@ const localContent = computed({
   set: (value) => emit("update:fileContent", value),
 });
 
-const STORAGE_KEY = "editor-md-preview";
+const previewState = ref<boolean>(loadMarkdownPreviewEnabled());
 
-/** 全局预览开关：预览模式下切换 md 仍保持预览；非 md 自动退出。 */
-function loadPreviewState(): boolean {
-  try {
-    return localStorage.getItem(STORAGE_KEY) === "true";
-  } catch {
-    return false;
-  }
-}
-
-function savePreviewState(state: boolean) {
-  try {
-    localStorage.setItem(STORAGE_KEY, String(state));
-  } catch {
-    // ignore quota / disabled storage
-  }
-}
-
-const previewState = ref<boolean>(loadPreviewState());
-
-const isMarkdownFile = computed(() => /\.md$/i.test(props.activeFilePath));
+const isMarkdownFile = computed(() => isMarkdownPath(props.activeFilePath));
 
 const isGitVirtualTab = computed(
   () =>
@@ -665,9 +667,28 @@ const showPreview = computed({
   get: () => previewState.value,
   set: (val) => {
     previewState.value = val;
-    savePreviewState(val);
+    saveMarkdownPreviewEnabled(val);
   },
 });
+
+/** 当前视图：Diff 优先，其次 md 预览，否则编辑（源码）。三者互斥，供分段控件高亮。 */
+const viewMode = computed<EditorViewMode>(() =>
+  resolveEditorViewMode({
+    path: props.activeFilePath,
+    showDiffMode: props.showDiffMode,
+    previewEnabled: previewState.value,
+  }),
+);
+
+function setViewMode(mode: "preview" | "edit" | "diff") {
+  if (mode === "diff") {
+    if (!props.showDiffMode) emit("toggle-diff-mode");
+    return;
+  }
+  if (props.showDiffMode) emit("toggle-diff-mode");
+  // 只有 md 才动预览偏好；非 md 点「编辑」不应顺带关掉其它 md 的预览记忆
+  if (isMarkdownFile.value) showPreview.value = mode === "preview";
+}
 
 const previewHtml = computed(() => {
   if (!isMarkdownFile.value) return "";
@@ -1447,6 +1468,44 @@ defineExpose({ editorRef, diffEditorRef, revealLineInEditor, revealLineInDiff })
   background: rgba(88, 166, 255, 0.15);
   color: #58a6ff;
   border-color: rgba(88, 166, 255, 0.4);
+}
+
+/* Markdown 预览 / 编辑 / Diff 分段切换 */
+.editor-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  flex-shrink: 0;
+}
+
+.editor-view-toggle-btn {
+  height: 22px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.editor-view-toggle-btn:hover {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.editor-view-toggle-btn.active {
+  background: rgba(88, 166, 255, 0.22);
+  color: #58a6ff;
 }
 
 /* 右键菜单 */
